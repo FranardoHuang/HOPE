@@ -1,0 +1,37 @@
+hope_world:
+  frames:
+    world: world
+    table_rigid_body: PPT
+    p1_mocap: P1
+    p1_base_link: P1_base_link
+    p2_mocap: P2
+    p2_base_link: P2_base_link
+    table_center: table_center
+    p1_half_center: p1_half_center
+    p2_half_center: p2_half_center
+    net_center: net_center
+    floor_origin: floor_origin
+    virtual_hit_plane: virtual_hit_plane
+
+  table_m:
+    length: 2.74
+    width: 1.525
+    surface_height: 0.76
+    net_height: 0.1525
+
+  landmarks_m:
+    table_center: [1.37, -0.7625, 0.0]
+    p1_half_center: [0.685, -0.7625, 0.0]
+    p2_half_center: [2.055, -0.7625, 0.0]
+    net_center: [1.37, -0.7625, 0.0]
+    floor_origin: [0.0, 0.0, -0.76]
+
+  planner:
+    x_hit: 0.0
+
+  mocap_to_base_link:
+    # Replace these with the measured marker-cluster-to-URDF offsets for your robot.
+    p1_xyz: [0.0, 0.0, 0.0]
+    p1_rpy: [0.0, 0.0, 0.0]
+    p2_xyz: [0.0, 0.0, 0.0]
+    p2_rpy: [0.0, 0.0, 0.0]

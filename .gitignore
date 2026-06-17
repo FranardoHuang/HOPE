@@ -1,1 +1,4 @@
 .DS_Store
+hope_ws/build/
+hope_ws/install/
+hope_ws/log/

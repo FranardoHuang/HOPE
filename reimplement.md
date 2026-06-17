@@ -42,8 +42,9 @@ Before writing code, read these documents in this order:
    - Understand the competition constraints.
    - Pay special attention to robot requirements, communication requirements, safety rules, and the no-racket-tracking rule.
 
-3. `HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md`
+3. `mocap/HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md`
    - Understand the world frame, tracked objects, table setup, and ROS 2 mocap interface.
+   - The Chinese version is `mocap/HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup_ZH.md`.
 
 4. `HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md`
    - This is your planner specification.
@@ -55,21 +56,22 @@ Before writing code, read these documents in this order:
 
 6. `HOPE_Hardware_Deployment_Reference_Setup.md`
    - This is your deployment specification.
-   - It explains ROS 2 node graph, launch order, G1 deployment, A3 deployment, and safety workflow.
+   - It explains the ROS 2 node graph, launch order, vendor-specific deployment examples, and safety workflow.
 
 Verification gate:
 
 - You can explain why the racket is never tracked by motion capture.
 - You can draw the data flow from motion capture to planner to WBC to robot.
-- You know whether you are targeting Unitree G1, G1 EDU, Agibot A3, or another humanoid.
+- You know the exact AGI robot model, SDK, robot description files, and safety interface you are targeting.
 
 ## 2. Decide Your Target Platform
 
 Do this before creating software packages.
 
 1. Choose the robot.
-   - Recommended first target: Unitree G1.
-   - Alternative target: Agibot A3, if you have access to its robot model, SDK, joint names, and low-level control API.
+   - Target brand for this reimplementation: AGI.
+   - Treat AGI as a custom humanoid until you confirm the exact model, SDK, joint names, robot description files, and low-level control API.
+   - Use vendor-specific examples in the reference documents only as patterns. Do not copy package names, joint orders, network settings, or safety controls without checking the AGI documentation.
 
 2. Record the robot facts you will need.
    - Robot model.
@@ -84,15 +86,16 @@ Do this before creating software packages.
    - Joint limits.
    - Default PD gains.
    - Control interface.
-   - Middleware: ROS 2, AimRT, vendor SDK, or bridge.
+   - Middleware: ROS 2, AGI SDK, vendor middleware, or bridge.
 
 3. Choose the simulation backend.
-   - For Unitree G1: use Isaac Lab plus PhysX and USD assets.
-   - For Agibot A3 or robots with MJCF assets: use mjlab plus MuJoCo Warp.
+   - If AGI provides Isaac-compatible USD assets and actuator parameters: use Isaac Lab plus PhysX.
+   - If AGI provides MJCF or URDF assets: use mjlab plus MuJoCo Warp, or convert the model carefully and verify inertial and actuator parameters.
 
 4. Choose the deployment path.
-   - For Unitree G1: use `motion_tracking_controller`, `legged_control2`, and `unitree_bringup`.
-   - For Agibot A3: use AimRT with a ROS 2 bridge first, then consider native AimRT only after the ROS 2 path works.
+   - Keep the HOPE planner and WBC interface in ROS 2 first.
+   - Add an AGI hardware bridge or `agi_bringup` package that maps HOPE joint commands to the AGI low-level API.
+   - Consider a native AGI middleware path only after the ROS 2 bridge is working and safe.
 
 Verification gate:
 
@@ -107,7 +110,7 @@ Use separate repositories or folders for each major subsystem. Do not mix extern
 Recommended layout:
 
 ```text
-~/hope_ws/
+~/workspace/HOPE/hope_ws/
   src/
     hope_msgs/
     hope_planner/
@@ -115,13 +118,13 @@ Recommended layout:
     hope_monitoring/
     motion_capture_tracking/        # installed by apt or cloned if needed
     motion_tracking_controller/      # for WBC deployment
-    unitree_bringup/                 # G1 only
+    agi_bringup/                     # AGI ROS 2 bridge or vendor adapter
 
-~/hope_training/
+~/workspace/HOPE/hope_training/
   GVHMR/
   GMR/
   whole_body_tracking/
-  mjlab/                             # A3 or MJCF path only
+  mjlab/                             # AGI MJCF or custom backend path only
   motions/
     raw_video/
     smplx/
@@ -139,12 +142,149 @@ sudo apt install git curl build-essential cmake python3-pip python3-venv
 
 Install ROS 2:
 
-- Use ROS 2 Jazzy on Ubuntu 24.04 if possible.
+- HOPE's reference environment is Ubuntu 24.04 LTS plus ROS 2 Jazzy.
+- If your host is Ubuntu 26.04, use Distrobox or Docker for the HOPE ROS 2 workspace instead of mixing 24.04/Jazzy apt packages into the host OS.
+- Use a native install only when the machine itself is Ubuntu 24.04.
 - ROS 2 Humble on Ubuntu 22.04 is allowed by the rules for external communication, but the reference docs use Jazzy.
+
+Distrobox path for an Ubuntu 26.04 host:
+
+Use this path for day-to-day development because it feels close to a normal host shell while keeping ROS 2 Jazzy inside an Ubuntu 24.04 container.
+
+This machine has a suitable Distrobox named `hope`. It is Ubuntu 24.04 and has ROS 2 Jazzy available. Copy and paste this whole block into your host terminal:
+
+```bash
+cd ~/workspace/HOPE
+
+mkdir -p \
+  ~/workspace/HOPE/hope_ws/src/hope_planner \
+  ~/workspace/HOPE/hope_ws/src/hope_bringup \
+  ~/workspace/HOPE/hope_ws/src/hope_monitoring \
+  ~/workspace/HOPE/hope_ws/src/agi_bringup \
+  ~/workspace/HOPE/hope_training/GVHMR \
+  ~/workspace/HOPE/hope_training/GMR \
+  ~/workspace/HOPE/hope_training/whole_body_tracking \
+  ~/workspace/HOPE/hope_training/mjlab \
+  ~/workspace/HOPE/hope_training/motions/raw_video \
+  ~/workspace/HOPE/hope_training/motions/smplx \
+  ~/workspace/HOPE/hope_training/motions/retargeted \
+  ~/workspace/HOPE/hope_training/motions/preprocessed \
+  ~/workspace/HOPE/hope_training/policies
+
+HOPE_ROS_BOX=hope
+
+if ! distrobox list | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}' | grep -qx "$HOPE_ROS_BOX"; then
+  sudo apt update
+  sudo apt install -y distrobox podman
+  distrobox create --yes \
+    --name "$HOPE_ROS_BOX" \
+    --image docker.io/osrf/ros:jazzy-desktop-full
+fi
+
+distrobox enter "$HOPE_ROS_BOX" -- bash -lc '
+set -e
+
+if [ ! -f /opt/ros/jazzy/setup.bash ]; then
+  echo "ERROR: /opt/ros/jazzy/setup.bash was not found in this Distrobox."
+  echo "Use an Ubuntu 24.04 ROS 2 Jazzy Distrobox, or delete/recreate the box with docker.io/osrf/ros:jazzy-desktop-full."
+  exit 1
+fi
+
+sudo apt update
+sudo apt install -y \
+  build-essential \
+  cmake \
+  curl \
+  git \
+  python3-colcon-common-extensions \
+  python3-pip \
+  python3-rosdep \
+  python3-venv
+rosdep update || true
+grep -qxF "source /opt/ros/jazzy/setup.bash" ~/.bashrc || echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc
+source /opt/ros/jazzy/setup.bash
+cd ~/workspace/HOPE
+echo "ROS_DISTRO=$ROS_DISTRO"
+ros2 --help >/dev/null
+echo "ros2-ok"
+exec bash -l
+'
+```
+
+After entering the Distrobox shell, `~/workspace/HOPE`, `~/workspace/HOPE/hope_ws`, and `~/workspace/HOPE/hope_training` are the same host folders, so files you edit inside the container remain visible on the host. Later, enter the environment with `distrobox enter hope`.
+
+Docker path for an Ubuntu 26.04 host:
+
+Use this path if you want an explicit Docker image, need to debug low-level Docker run flags, or need a more conventional container setup for hardware integration.
+
+Copy and paste this whole block into your host terminal:
+
+```bash
+cd ~/workspace/HOPE
+
+sudo apt update
+sudo apt install -y docker.io
+sudo systemctl enable --now docker
+
+DOCKER_CMD="docker"
+if ! docker info >/dev/null 2>&1; then
+  DOCKER_CMD="sudo docker"
+fi
+
+cat > Dockerfile.hope-ros2-jazzy <<'EOF'
+FROM osrf/ros:jazzy-desktop-full
+
+SHELL ["/bin/bash", "-c"]
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    curl \
+    git \
+    python3-colcon-common-extensions \
+    python3-pip \
+    python3-rosdep \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN rosdep update || true
+
+WORKDIR /root/workspace/HOPE
+RUN echo "source /opt/ros/jazzy/setup.bash" >> /root/.bashrc
+EOF
+
+$DOCKER_CMD build -t hope-ros2-jazzy -f Dockerfile.hope-ros2-jazzy .
+mkdir -p \
+  ~/workspace/HOPE/hope_ws/src/hope_planner \
+  ~/workspace/HOPE/hope_ws/src/hope_bringup \
+  ~/workspace/HOPE/hope_ws/src/hope_monitoring \
+  ~/workspace/HOPE/hope_ws/src/agi_bringup \
+  ~/workspace/HOPE/hope_training/GVHMR \
+  ~/workspace/HOPE/hope_training/GMR \
+  ~/workspace/HOPE/hope_training/whole_body_tracking \
+  ~/workspace/HOPE/hope_training/mjlab \
+  ~/workspace/HOPE/hope_training/motions/raw_video \
+  ~/workspace/HOPE/hope_training/motions/smplx \
+  ~/workspace/HOPE/hope_training/motions/retargeted \
+  ~/workspace/HOPE/hope_training/motions/preprocessed \
+  ~/workspace/HOPE/hope_training/policies
+
+$DOCKER_CMD run --rm -it \
+  --net=host \
+  --ipc=host \
+  --privileged \
+  -v "$PWD":/root/workspace/HOPE \
+  -w /root/workspace/HOPE \
+  hope-ros2-jazzy
+```
+
+This block creates `Dockerfile.hope-ros2-jazzy`, builds the `hope-ros2-jazzy` image, creates your host workspace folders inside `~/workspace/HOPE`, and opens a shell inside the ROS 2 Jazzy container with that same repository mounted at `~/workspace/HOPE`.
+
+For GPU simulation or training, install NVIDIA Container Toolkit on the host and add `--gpus all` to the `docker run` command. For real hardware, keep `--net=host` so ROS 2 DDS discovery and the AGI robot network are visible inside the container.
 
 Verification gate:
 
-- `ros2 --version` works.
+- `ros2 --help` works inside the Ubuntu 24.04/Jazzy environment and `echo "$ROS_DISTRO"` prints `jazzy`.
 - You can create and build an empty colcon workspace.
 - You can source your workspace with `source install/setup.bash`.
 
@@ -153,8 +293,9 @@ Verification gate:
 Create a package:
 
 ```bash
-cd ~/hope_ws/src
+cd ~/workspace/HOPE/hope_ws/src
 ros2 pkg create hope_msgs --build-type ament_cmake
+mkdir -p hope_msgs/msg
 ```
 
 Create `msg/RacketCommand.msg`:
@@ -199,7 +340,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 Build:
 
 ```bash
-cd ~/hope_ws
+cd ~/workspace/HOPE/hope_ws
 colcon build --symlink-install --packages-select hope_msgs
 source install/setup.bash
 ros2 interface show hope_msgs/msg/RacketCommand
@@ -240,11 +381,59 @@ Implementation rules:
 4. Do not silently convert to table-center coordinates.
 5. If you must support another frame internally, write explicit conversion functions and unit tests.
 
+Implement the world frame in a bringup package:
+
+```bash
+cd ~/workspace/HOPE/hope_ws/src
+ros2 pkg create hope_bringup --build-type ament_cmake
+mkdir -p hope_bringup/config hope_bringup/launch
+```
+
+Create `hope_bringup/config/hope_world_frame.yaml` with:
+
+- Frame names for `world`, `PPT`, `P1`, `P2`, `P1_base_link`, `P2_base_link`, and the landmark helper frames.
+- Table dimensions and HOPE landmarks in meters.
+- `planner.x_hit`.
+- `mocap_to_base_link` offsets for P1 and P2.
+
+Create `hope_bringup/launch/hope_world.launch.py` so it publishes:
+
+- `world -> table_center`
+- `world -> p1_half_center`
+- `world -> p2_half_center`
+- `world -> net_center`
+- `world -> floor_origin`
+- `world -> virtual_hit_plane`
+- `P1 -> P1_base_link`
+- `P2 -> P2_base_link`
+
+The default `mocap_to_base_link` offsets may start at zero, but they are placeholders. Replace them after measuring the real marker-cluster-to-URDF offsets for your robot.
+
+Build and verify:
+
+```bash
+cd ~/workspace/HOPE/hope_ws
+colcon build --symlink-install --packages-select hope_msgs hope_bringup
+source install/setup.bash
+ros2 launch hope_bringup hope_world.launch.py
+```
+
+In another terminal:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+source ~/workspace/HOPE/hope_ws/install/setup.bash
+ros2 run tf2_ros tf2_echo world table_center
+'
+```
+
 Verification gate:
 
 - A table corner marker at the origin reports approximately `[0, 0, 0]`.
 - A point at the opponent half center reports approximately `[2.055, -0.7625, 0]`.
 - The ball height above the table is positive.
+- `ros2 run tf2_ros tf2_echo world table_center` reports approximately `[1.37, -0.7625, 0.0]`.
 
 ## 6. Set Up Motion Capture
 
@@ -284,7 +473,8 @@ Create robot base_link rigid bodies:
 2. Name the P1 robot rigid body `P1`.
 3. Name the P2 robot rigid body `P2`.
 4. Measure the static transform from the marker cluster frame to the robot URDF base_link.
-5. Publish that transform with `static_transform_publisher`.
+5. Put those offsets into `hope_bringup/config/hope_world_frame.yaml`.
+6. Launch `ros2 launch hope_bringup hope_world.launch.py` to publish the `P1 -> P1_base_link` and `P2 -> P2_base_link` transforms.
 
 Prepare the ball:
 
@@ -343,7 +533,7 @@ Verification gate:
 Create the package:
 
 ```bash
-cd ~/hope_ws/src
+cd ~/workspace/HOPE/hope_ws/src
 ros2 pkg create hope_planner --build-type ament_python \
   --dependencies rclpy geometry_msgs std_msgs diagnostic_msgs hope_msgs
 ```
@@ -519,7 +709,7 @@ hope_planner:
 Verification commands:
 
 ```bash
-cd ~/hope_ws
+cd ~/workspace/HOPE/hope_ws
 colcon build --symlink-install --packages-select hope_msgs hope_planner
 source install/setup.bash
 ros2 launch hope_planner hope_planner.launch.py
@@ -596,7 +786,7 @@ Do not:
 Install GVHMR:
 
 ```bash
-cd ~/hope_training
+cd ~/workspace/HOPE/hope_training
 git clone https://github.com/zju3dv/GVHMR.git
 cd GVHMR
 # Follow the GVHMR repository installation instructions.
@@ -627,7 +817,7 @@ Verification gate:
 Install GMR:
 
 ```bash
-cd ~/hope_training
+cd ~/workspace/HOPE/hope_training
 git clone https://github.com/YanjieZe/GMR.git
 cd GMR
 pip install -e .
@@ -651,10 +841,10 @@ SMPLX_FEMALE.pkl
 SMPLX_MALE.pkl
 ```
 
-For Unitree G1:
+For the AGI robot:
 
-1. Use GMR's `unitree_g1` target if available.
-2. Confirm the output joint order matches BeyondMimic's G1 order.
+1. Create or obtain a GMR target named for the exact AGI model, for example `agi_<model>`.
+2. Confirm the output joint order matches the AGI controller joint order.
 3. Retarget forehand.
 4. Retarget backhand.
 5. Export to CSV or PKL as expected by the preprocessing script.
@@ -712,10 +902,10 @@ Verification gate:
 
 ## 12. Preprocess Motions For BeyondMimic
 
-For the G1 Isaac Lab path, install BeyondMimic:
+For the AGI Isaac Lab or mjlab path, install BeyondMimic:
 
 ```bash
-cd ~/hope_training
+cd ~/workspace/HOPE/hope_training
 git clone https://github.com/HybridRobotics/whole_body_tracking.git
 cd whole_body_tracking
 ```
@@ -727,17 +917,23 @@ Install Isaac Sim and Isaac Lab:
 3. Use Python 3.10.
 4. Prefer a machine with an NVIDIA RTX 4090 or better.
 
-Download the G1 assets used by BeyondMimic:
+Add the AGI robot assets used by training:
 
 ```bash
-curl -L -o unitree_description.tar.gz \
-  https://storage.googleapis.com/qiayuanl_robot_descriptions/unitree_description.tar.gz
+mkdir -p source/whole_body_tracking/whole_body_tracking/assets/agi
 
-tar -xzf unitree_description.tar.gz \
-  -C source/whole_body_tracking/whole_body_tracking/assets/
-
-rm unitree_description.tar.gz
+# Copy the AGI USD, MJCF, or URDF assets supplied by AGI or your hardware team.
+# Keep meshes, actuator parameters, joint limits, and inertial values together.
+cp -r /path/to/agi_robot_assets/* \
+  source/whole_body_tracking/whole_body_tracking/assets/agi/
 ```
+
+After copying the AGI assets:
+
+1. Register the AGI robot asset path in the training config.
+2. Verify joint names and order against the real AGI controller.
+3. Verify inertial values, actuator limits, and default PD gains.
+4. Add the fixed racket mount link or fixed joint used by `T_mount`.
 
 Install the training package:
 
@@ -760,13 +956,13 @@ Convert retargeted motions:
 
 ```bash
 python scripts/csv_to_npz.py \
-  --input_file ~/hope_training/motions/retargeted/forehand_swing.csv \
+  --input_file ~/workspace/HOPE/hope_training/motions/retargeted/forehand_swing.csv \
   --input_fps 30 \
   --output_name hope_forehand \
   --headless
 
 python scripts/csv_to_npz.py \
-  --input_file ~/hope_training/motions/retargeted/backhand_swing.csv \
+  --input_file ~/workspace/HOPE/hope_training/motions/retargeted/backhand_swing.csv \
   --input_fps 30 \
   --output_name hope_backhand \
   --headless
@@ -784,7 +980,7 @@ python scripts/replay_npz.py \
 
 Verification gate:
 
-- The G1 model replays each motion.
+- The AGI model replays each motion.
 - The wrist and racket mount follow a plausible stroke.
 - Feet, pelvis, torso, and arms do not jitter badly.
 - WandB artifacts are registered and accessible.
@@ -862,7 +1058,7 @@ Baseline motion tracking command:
 
 ```bash
 python scripts/rsl_rl/train.py \
-  --task=Tracking-Flat-G1-v0 \
+  --task=Tracking-Flat-AGI-v0 \
   --registry_name your-org-org/wandb-registry-motions/hope_forehand \
   --headless \
   --logger wandb \
@@ -874,7 +1070,7 @@ HOPE target-tracking command:
 
 ```bash
 python scripts/rsl_rl/train.py \
-  --task=HOPE-PingPong-G1-v0 \
+  --task=HOPE-PingPong-AGI-v0 \
   --registry_name your-org-org/wandb-registry-motions/hope_forehand \
   --headless \
   --logger wandb \
@@ -903,14 +1099,14 @@ Parallel environments: around 4096
 Check the current upstream config before training:
 
 ```bash
-cat source/whole_body_tracking/whole_body_tracking/tasks/tracking/config/g1/agents/rsl_rl_ppo_cfg.py
+cat source/whole_body_tracking/whole_body_tracking/tasks/tracking/config/agi/agents/rsl_rl_ppo_cfg.py
 ```
 
 Evaluate:
 
 ```bash
 python scripts/rsl_rl/play.py \
-  --task=HOPE-PingPong-G1-v0 \
+  --task=HOPE-PingPong-AGI-v0 \
   --num_envs=2 \
   --wandb_path=your-org/hope_wbc/run_id
 ```
@@ -937,17 +1133,17 @@ Verification gate:
 Clone deployment code:
 
 ```bash
-cd ~/hope_ws/src
+cd ~/workspace/HOPE/hope_ws/src
 git clone https://github.com/HybridRobotics/motion_tracking_controller.git
 ```
 
 Export ONNX:
 
 ```bash
-cd ~/hope_ws/src/motion_tracking_controller
+cd ~/workspace/HOPE/hope_ws/src/motion_tracking_controller
 python scripts/export_onnx.py \
   --wandb_path=your-org/hope_wbc/run_id \
-  --output_path=~/hope_training/policies/hope_forehand_policy.onnx
+  --output_path=~/workspace/HOPE/hope_training/policies/hope_forehand_policy.onnx
 ```
 
 Export both policies:
@@ -955,11 +1151,11 @@ Export both policies:
 ```bash
 python scripts/export_onnx.py \
   --wandb_path=your-org/hope_wbc/forehand_run_id \
-  --output_path=~/hope_training/policies/hope_forehand_policy.onnx
+  --output_path=~/workspace/HOPE/hope_training/policies/hope_forehand_policy.onnx
 
 python scripts/export_onnx.py \
   --wandb_path=your-org/hope_wbc/backhand_run_id \
-  --output_path=~/hope_training/policies/hope_backhand_policy.onnx
+  --output_path=~/workspace/HOPE/hope_training/policies/hope_backhand_policy.onnx
 ```
 
 The ONNX should include:
@@ -984,14 +1180,14 @@ Before touching hardware, verify the ONNX policy in simulation.
 
 ```bash
 ros2 launch motion_tracking_controller mujoco.launch.py \
-  policy_path:=~/hope_training/policies/hope_forehand_policy.onnx
+  policy_path:=~/workspace/HOPE/hope_training/policies/hope_forehand_policy.onnx
 ```
 
 Then test backhand:
 
 ```bash
 ros2 launch motion_tracking_controller mujoco.launch.py \
-  policy_path:=~/hope_training/policies/hope_backhand_policy.onnx
+  policy_path:=~/workspace/HOPE/hope_training/policies/hope_backhand_policy.onnx
 ```
 
 Check:
@@ -1037,131 +1233,122 @@ Verification gate:
 - A target on the backhand side selects the backhand model.
 - Switching does not cause a discontinuous joint command spike.
 
-## 18. Deploy On Unitree G1
+## 18. Deploy On AGI Robot
 
-Install G1 deployment dependencies:
+Use this path for the AGI robot. Keep the HOPE ROS 2 interfaces stable and put all AGI-specific logic behind a bridge or bringup package.
 
-```bash
-# Install ROS 2 Jazzy first.
-
-echo "deb [trusted=yes] https://github.com/qiayuanl/unitree_buildfarm/raw/noble-jazzy-amd64/ ./" \
-  | sudo tee /etc/apt/sources.list.d/qiayuanl_unitree_buildfarm.list
-
-echo "yaml https://github.com/qiayuanl/unitree_buildfarm/raw/noble-jazzy-amd64/local.yaml jazzy" \
-  | sudo tee /etc/ros/rosdep/sources.list.d/1-qiayuanl_unitree_buildfarm.list
-
-sudo apt-get update
-sudo apt-get install ros-jazzy-unitree-description
-sudo apt-get install ros-jazzy-unitree-systems
-```
-
-Clone packages:
+Create or add AGI deployment packages:
 
 ```bash
-cd ~/hope_ws/src
-git clone https://github.com/qiayuanl/unitree_bringup.git
+cd ~/workspace/HOPE/hope_ws/src
+
+# If AGI provides a ROS 2 bridge or SDK wrapper, clone it here.
+# Otherwise create a thin bridge package and keep the low-level API isolated.
+ros2 pkg create agi_hardware_bridge --build-type ament_cmake
+ros2 pkg create agi_bringup --build-type ament_python
+
 git clone https://github.com/HybridRobotics/motion_tracking_controller.git
 ```
+
+The AGI bridge must provide:
+
+1. Joint encoder feedback as `sensor_msgs/msg/JointState`.
+2. A safe command path from policy action to AGI joint position targets.
+3. The AGI joint name list and joint order used by the ONNX policy.
+4. PD gains or impedance settings for each controlled joint.
+5. A hard stop, soft stop, and standby mode.
+6. Network setup for the AGI controller.
+7. Launch files that start the bridge, safety monitor, and WBC controller in a predictable order.
 
 Install dependencies and build:
 
 ```bash
-cd ~/hope_ws
+cd ~/workspace/HOPE/hope_ws
 rosdep install --from-paths src --ignore-src -r -y
 
 colcon build --symlink-install \
   --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  --packages-up-to unitree_bringup
-
-colcon build --symlink-install \
-  --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  --packages-up-to motion_tracking_controller
+  --packages-up-to agi_hardware_bridge agi_bringup motion_tracking_controller
 
 source install/setup.bash
 ```
 
-Connect to G1:
+Connect to the AGI robot:
 
-1. Connect PC to G1 via Ethernet.
-2. Set PC static IP to `192.168.123.11`.
-3. Find network interface:
+1. Connect the control PC to the AGI robot network using the AGI hardware guide.
+2. Set the static IP, subnet, and firewall rules required by the AGI SDK.
+3. Identify the network interface:
 
 ```bash
-ifconfig
+ip addr
 ```
 
-4. Ping robot:
+4. Confirm that the AGI controller is reachable:
 
 ```bash
-ping 192.168.123.1
+ping <AGI_ROBOT_IP>
 ```
 
-Run real controller only after sim-to-sim passes:
+Run real control only after sim-to-sim passes:
 
 ```bash
+ros2 launch agi_bringup agi_robot.launch.py \
+  robot_ip:=<AGI_ROBOT_IP> \
+  network_interface:=<AGI_NETWORK_INTERFACE>
+
 ros2 launch motion_tracking_controller real.launch.py \
-  network_interface:=enp3s0 \
-  policy_path:=~/hope_training/policies/hope_forehand_policy.onnx
+  policy_path:=~/workspace/HOPE/hope_training/policies/hope_forehand_policy.onnx
 ```
 
-G1 joystick controls from the reference doc:
+Record the AGI safety controls before any active swing test:
 
 ```text
-L1 + A: standby controller
-R1 + A: activate motion tracking controller
-B: emergency stop
+Standby:
+Activate WBC:
+Soft stop:
+Hard E-stop:
+Power cut:
+Recovery procedure:
 ```
 
 Verification gate:
 
-- The robot enters standby safely.
-- The emergency stop works.
-- Joint states are streaming.
+- The AGI robot enters standby safely.
+- The AGI emergency stop works from hardware and software.
+- Joint states are streaming with the expected names and order.
+- The bridge rejects commands outside joint, velocity, torque, and workspace limits.
 - The policy can be activated in a controlled, no-ball test.
 
-## 19. Deploy On Agibot A3
+## 19. Port To Another Humanoid
 
-Use this path only if you have access to A3 hardware, robot model, SDK, and control interface.
+Use this path only after the AGI deployment path works or if the target robot changes.
 
 Recommended path:
 
-1. Use ROS 2 bridge through AimRT.
-2. Keep the HOPE planner in ROS 2.
-3. Bridge `/racket/command`, `/P1/pose`, and joint feedback into AimRT.
-4. Run ONNX inference in a controller adapted to A3 joint names and joint order.
-5. Send joint position commands through the A3 actuator bus.
+1. Keep the HOPE planner in ROS 2.
+2. Bridge `/racket/command`, `/P1/pose`, and joint feedback into the vendor middleware.
+3. Run ONNX inference in a controller adapted to the target joint names and joint order.
+4. Send joint position commands through the target robot's actuator bus.
+5. Keep safety interlocks outside the learned policy.
 
-Install AimRT:
+Porting tasks:
 
-```bash
-cd ~/hope_ws/src
-git clone https://github.com/AimRT/aimrt.git
-cd aimrt
-mkdir build
-cd build
-cmake .. -DAIMRT_BUILD_WITH_ROS2=ON
-make -j$(nproc)
-sudo make install
-```
-
-A3-specific implementation tasks:
-
-1. Confirm base_link convention.
-2. Convert or obtain the robot MJCF/URDF.
-3. Add A3 to GMR.
-4. Add A3 to mjlab if training there.
-5. Define A3 joint names and order.
-6. Define A3 PD gains.
-7. Define A3 `T_mount`.
+1. Confirm `base_link` convention.
+2. Convert or obtain the robot MJCF, URDF, or USD model.
+3. Add the robot to GMR.
+4. Add the robot to the chosen simulation backend.
+5. Define joint names and order.
+6. Define PD gains or impedance settings.
+7. Define `T_mount`.
 8. Adapt the ONNX observation builder.
 9. Adapt the action-to-joint-command mapping.
-10. Add AimRT or ROS 2 bridge launch files.
+10. Add vendor middleware or ROS 2 bridge launch files.
 
 Verification gate:
 
-- A3 sim policy works before real hardware.
-- AimRT bridge passes timestamps and frame IDs correctly.
-- E-stop works through the A3 safety stack.
+- The new robot sim policy works before real hardware.
+- Bridge latency is measured.
+- E-stop works through the target robot safety stack.
 
 ## 20. Integrate The Full ROS 2 Pipeline
 
@@ -1177,8 +1364,8 @@ ros2 launch hope_planner hope_planner.launch.py
 
 # Terminal 3: WBC controller
 ros2 launch motion_tracking_controller real.launch.py \
-  network_interface:=enp3s0 \
-  policy_path:=~/hope_training/policies/hope_forehand_policy.onnx
+  network_interface:=<AGI_NETWORK_INTERFACE> \
+  policy_path:=~/workspace/HOPE/hope_training/policies/hope_forehand_policy.onnx
 
 # Terminal 4: monitoring
 ros2 topic hz /poses /tf /racket/command /joint_states
@@ -1472,8 +1659,8 @@ Use this as the master checklist:
 3. Do not mix table-center and HOPE corner-origin coordinates without explicit transforms.
 4. Do not deploy to hardware before sim-to-sim verification.
 5. Do not activate full-speed swings before E-stop testing.
-6. Do not assume G1 USD assets from different sources are interchangeable.
-7. Do not assume A3 details until you confirm them from Agibot documentation or hardware.
+6. Do not assume AGI robot assets from different sources are interchangeable.
+7. Do not assume any vendor-specific details until you confirm them from AGI documentation or hardware.
 8. Do not change observation or joint ordering after ONNX export.
 9. Do not use Reliable QoS for high-rate real-time mocap topics unless you have measured that latency remains acceptable.
 10. Do not tune multiple sim-to-real variables at once.
@@ -1482,8 +1669,7 @@ Use this as the master checklist:
 
 - `README.md`
 - `HOPE_AI_Challenge_2026_Rules_EN.docx`
-- `HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md`
+- `mocap/HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md`
 - `HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md`
 - `HOPE_WBC_Simulation_Training_Reference_Setup.md`
 - `HOPE_Hardware_Deployment_Reference_Setup.md`
-
