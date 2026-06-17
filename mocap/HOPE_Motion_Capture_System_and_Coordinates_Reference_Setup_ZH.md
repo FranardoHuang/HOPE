@@ -370,25 +370,27 @@ OptiTrack 与 Vicon 均不直接以 ROS 2 消息格式发布跟踪数据。需�
 
 ### 6.5  将青瞳（Chingmu）动作捕捉数据转换为 ROS 2
 
-青瞳服务器通过 **VRPN** 进行流式传输，其开源 ROS 集成（`ChingMuVrpnRos`，https://github.com/ChingMuVisionTech/ChingMuVrpnRos）印证了这一行为：**来自青瞳服务器的单一 VRPN 数据流可一次性承载 HOPE 全部三类被跟踪物体**：
+青瞳服务器通过 **VRPN** 进行流式传输，可在同一连接上承载 HOPE 全部三类被跟踪物体——但它对这三类采用**两种不同的寻址方式**，而这一差异决定了应选用哪个 ROS 2 客户端：
 
-| 被跟踪物体 | 驱动发布的内容 | VRPN 表示 |
+| 被跟踪物体 | 读取的内容 | VRPN 寻址方式 |
 |----------------|---------------------------|---------------------|
-| **PPT**（球台） | 6 自由度位姿（位置 + 姿态） | 刚体 |
-| **P1、P2**（`base_link`） | 6 自由度位姿（位置 + 姿态） | 刚体 |
-| **Ball**（球） | 3 自由度位置 `[x, y, z]`；姿态为单位四元数，忽略 | 单一标记点（marker） |
+| **PPT**（球台） | 6 自由度位姿（位置 + 姿态） | 拥有**自己的 VRPN 发送方名称（sender name）**（如 `PPT`） |
+| **P1、P2**（`base_link`） | 6 自由度位姿（位置 + 姿态） | 各自拥有**自己的 VRPN 发送方名称** |
+| **Ball**（球） | 3 自由度位置 `[x, y, z]`；姿态为单位四元数，忽略 | 是某个共享发送方下的**一个 marker = 传感器 ID（sensor ID）**（没有自己专属的发送方名称） |
 
-这纠正了一个常见的误解——即 VRPN 只能承载已标记的刚体：青瞳的 VRPN 服务器（`MCServer`）还会流式传输各个独立标记点，每个由一个 ID 寻址，因此球体与刚体经由**同一连接**到达，**无需**单独的点云 SDK 路径。所有物体均发布到同一世界坐标系，所得话题映射到第 6.4 节的 `/poses` + `/tf` 接口。
+青瞳确认：每个刚体（PPT、P1、P2）都可被分配一个独立的 VRPN **发送方名称**；但球体是 **marker（标记点）** 而非刚体，因此它以**传感器 ID** 的形式传输，没有自己专属的发送方名称。**无需**单独的点云 SDK——所有数据都在这一条 VRPN 连接上——但 ROS 2 客户端必须能够解析**传感器 ID**，而不仅仅是发送方名称。
 
-### 6.5.1  ROS 2 VRPN 客户端——刚体与话题
+> **客户端选择。** 使用 **`vrpn_mocap`** 并设置 `multi_sensor: true`：它会为每个传感器 ID 发布一个话题，从而同时暴露具名刚体与球体 marker。**请勿**在此使用 `motion_capture_tracking` 的 VRPN 后端（libmotioncapture）——它仅按发送方名称索引 tracker、丢弃传感器 ID，因此无法区分出球体 marker。青瞳自有的 `ChingMuVrpnRos` 能正确解析该数据流，但面向 ROS 1；此处仅作验证参考，不用于 HOPE 的 ROS 2 技术栈。
 
-在 ROS 2 Jazzy 主机上，运行原生 ROS 2 VRPN 客户端 `vrpn_mocap`（`ros-jazzy-vrpn-mocap`），并将其指向青瞳服务器（运行 CMTracker / `MCServer` 的 PC）。它使用与青瞳服务器完全相同的 VRPN 协议，因此所有刚体*以及*球体标记点都经由同一连接传入。以服务器地址与青瞳 VRPN 端口启动：
+### 6.5.1  ROS 2 VRPN 客户端——`vrpn_mocap`
+
+在 ROS 2 Jazzy 主机上，运行原生 ROS 2 VRPN 客户端 `vrpn_mocap`，将其指向青瞳服务器（运行 CMTracker / `MCServer` 的 PC），并设置 `multi_sensor: true`，使每个 marker 的传感器 ID 各得一个话题：
 
 ```bash
 ros2 launch vrpn_mocap client.launch.yaml server:=CHINGMU_SERVER_IP port:=3883
 ```
 
-或通过参数文件：
+配合参数文件：
 
 ```yaml
 /vrpn_mocap_client:
@@ -396,26 +398,39 @@ ros2 launch vrpn_mocap client.launch.yaml server:=CHINGMU_SERVER_IP port:=3883
     server: "CHINGMU_SERVER_IP"   # CMTracker / MCServer PC
     port: 3883                    # 青瞳 VRPN 端口
     frame_id: "world"
+    multi_sensor: true            # 每个传感器 ID 一个话题——球体 marker 必需
     update_freq: 100.0
     refresh_freq: 1.0
 ```
 
-该客户端为每个物体创建一个 tracker，在 `/vrpn_mocap` 命名空间下以物体在青瞳服务器中的名称/ID 为键发布 `geometry_msgs/PoseStamped`，并在 `/tf` 上以父坐标系 `world` 广播：
+`vrpn_mocap` 会发现每一个 VRPN 发送方，为每个发送方发布一个 `geometry_msgs/PoseStamped`；当 `multi_sensor: true` 时，再为每个传感器索引各发布一个，统一位于 `/vrpn_mocap` 命名空间下：
 
 ```
-/vrpn_mocap/<object>/pose      geometry_msgs/PoseStamped
-# 用 `ros2 topic list` 确认确切的物体名称
+/vrpn_mocap/<sender>/pose<sensor_id>      geometry_msgs/PoseStamped
 ```
 
-物体 ID 与青瞳服务器中配置的刚体/标记点 ID **一一对应**（刚体 ID 取值范围 0–300）。请在 CMTracker 中为 PPT、P1、P2 与球体分配固定 ID 并记录下来，以便规划器与 WBC 订阅正确的话题。对于每个刚体（PPT、P1、P2），其 `PoseStamped` 同时携带 `pose.position`（x, y, z）与 `pose.orientation`（四元数姿态）——即完整的 6 自由度测量。
+请在 CMTracker 中为 **PPT**、**P1**、**P2** 分配并记录固定的 VRPN **发送方名称**，以便规划器与 WBC 订阅正确的话题。每个刚体都是单传感器发送方，因此显示为 `pose0`，携带完整的 `pose.position` + `pose.orientation`（即 6 自由度测量）：
 
-增加一个小的 ROS 2 中继节点，将这些按物体的位姿合并到单一的 `/poses` `PoseArray` 中，并在 `/tf` 上（重新）广播 `world → PPT`、`world → P1`、`world → P2`，使其与第 6.4 节完全一致。
+```
+/vrpn_mocap/PPT/pose0
+/vrpn_mocap/P1/pose0
+/vrpn_mocap/P2/pose0
+```
+
+增加一个小的 ROS 2 中继节点，将这些位姿合并到单一的 `/poses` `PoseArray` 中，并在 `/tf` 上（重新）广播 `world → PPT`、`world → P1`、`world → P2`，使其与第 6.4 节完全一致。
 
 ### 6.5.2  作为 3 自由度标记点的乒乓球
 
-在青瞳服务器中将球体定义为一个带有独立 ID 的被跟踪**标记点**（单点）。第 6.5.1 节的 ROS 2 VRPN 客户端会在 `/vrpn_mocap/<object>/pose` 上将其发布为 `geometry_msgs/PoseStamped`，其 `pose.position` 保存有效的球体位置 `[x, y, z]`，而 `pose.orientation` 为应被忽略的单位四元数。这正是青瞳 VRPN 数据流在 6 自由度刚体之外另行提供的 3 自由度标记点，从而**无需**任何原生 SDK / 点云桥接。
+球体是 **marker（标记点）** 而非刚体，因此青瞳将其作为**某个共享 marker 发送方下的一个传感器 ID** 传输——它没有专属的发送方名称。当 `multi_sensor: true` 时（第 6.5.1 节），`vrpn_mocap` 会将其暴露为一个按传感器索引的话题：
 
-对于规划器，订阅球体话题并仅使用其位置字段即可。一个简单的中继可将其重新发布为 `/ball/point` 上的 `geometry_msgs/PointStamped`（或在偏好单话题接口时插入共享的 `/poses` 数组）：
+```
+/vrpn_mocap/<marker_sender>/pose<ball_sensor_id>   geometry_msgs/PoseStamped
+# pose.position 为有效的球体位置 [x, y, z]；pose.orientation 为单位四元数，忽略
+```
+
+请向青瞳确认该 marker 发送方名称及球体的传感器索引，并用 `ros2 topic list` 核实。球体必须是第 5 节所要求的**唯一**未标记 marker——游离 marker 会与之共用同一 marker 发送方，使传感器索引产生歧义。
+
+对于规划器，订阅该话题并仅使用其位置字段即可。一个简单的中继可将其重新发布为 `/ball/point` 上的 `geometry_msgs/PointStamped`（或在偏好单话题接口时插入共享的 `/poses` 数组）：
 
 ```python
 # ball_pose_to_point.py  （ROS 2，示意）
@@ -428,7 +443,7 @@ class BallRelay(Node):
         super().__init__('ball_pose_to_point')
         self.pub = self.create_publisher(PointStamped, '/ball/point', 10)
         self.create_subscription(
-            PoseStamped, '/vrpn_mocap/<ball>/pose', self.cb, 10)
+            PoseStamped, '/vrpn_mocap/<marker_sender>/pose<ball_sensor_id>', self.cb, 10)
 
     def cb(self, msg: PoseStamped):
         out = PointStamped()
@@ -458,13 +473,14 @@ z_ros =  y_mocap
 |---------|---------------|-------|
 | VRPN 流式 | ✅ 启用 | 单一数据流同时承载刚体**与**标记点 |
 | VRPN 端口 | 3883（默认） | 需与 ROS 2 客户端的 `port` 参数匹配 |
-| 服务器 / tracker 名 | 以 CMTracker 显示为准（如 `MCServer`） | 出现在 `/vrpn_mocap/<object>` 话题/TF 路径中 |
-| 刚体 ID（PPT、P1、P2） | 0–300，每个刚体唯一 | 各自 → 各自的 `/vrpn_mocap/<object>/pose`（6 自由度） |
-| 球体标记点 ID | 唯一并记录 | → 各自的 `/vrpn_mocap/<object>/pose`（位置有效，姿态为单位四元数） |
+| ROS 2 客户端 | `vrpn_mocap`，`multi_sensor: true` | libmotioncapture 的 VRPN 后端不适用——它会丢弃传感器 ID |
+| 刚体（PPT、P1、P2） | 各自一个独立的 VRPN **发送方名称** | 各自 → `/vrpn_mocap/<name>/pose0`（6 自由度） |
+| 球体 | 某共享发送方下的一个 **marker = 传感器 ID** | → `/vrpn_mocap/<marker_sender>/pose<id>`（位置有效，姿态为单位四元数） |
+| 仅单个 marker | 跟踪体积内无游离 marker | 多余 marker 会使球体的传感器索引产生歧义 |
 | 向上轴（Up axis） | **Z** | 与 ROS 2 Z 轴向上对齐；否则按 6.5.3 转换 |
 | 服务器 / Linux 主机子网 | 同一 LAN 子网 | 纯 UDP，如第 6.1 节 |
 
-ROS 2 客户端运行后，`ros2 topic list` 会为每个物体显示一个 `/vrpn_mocap/<object>/pose`（可按需中继为第 6.4 节的 `/poses` + `/tf` 及 `/ball/point`），且规划器与 WBC 无需任何厂商专属改动。
+ROS 2 客户端运行后，`ros2 topic list` 会为每个物体显示一个 `/vrpn_mocap/<sender>/pose<id>`（可按需中继为第 6.4 节的 `/poses` + `/tf` 及 `/ball/point`），且规划器与 WBC 无需任何厂商专属改动。
 
 ---
 

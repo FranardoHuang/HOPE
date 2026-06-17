@@ -370,25 +370,27 @@ The planner subscribes to the ball position from `/poses` or `/tf` and produces 
 
 ### 6.5  Converting 青瞳 (Chingmu) Motion Capture Data to ROS 2
 
-The Chingmu server streams over **VRPN**, and Chingmu's open-source ROS integration (`ChingMuVrpnRos`, https://github.com/ChingMuVisionTech/ChingMuVrpnRos) confirms its behavior: **a single VRPN stream from the Chingmu server carries all three HOPE tracked categories at once**:
+The Chingmu server streams over **VRPN**, carrying all three HOPE tracked categories on one connection — but it addresses them in two different ways, and that difference dictates which ROS 2 client to use:
 
-| Tracked object | What the driver publishes | VRPN representation |
-|----------------|---------------------------|---------------------|
-| **PPT** (table) | 6-DOF pose (position + orientation) | rigid body |
-| **P1, P2** (`base_link`) | 6-DOF pose (position + orientation) | rigid body |
-| **Ball** | 3-DOF position `[x, y, z]`; orientation is identity and ignored | single marker |
+| Tracked object | What you read | How VRPN addresses it |
+|----------------|---------------|-----------------------|
+| **PPT** (table) | 6-DOF pose (position + orientation) | its **own VRPN sender name** (e.g. `PPT`) |
+| **P1, P2** (`base_link`) | 6-DOF pose (position + orientation) | each its **own VRPN sender name** |
+| **Ball** | 3-DOF position `[x, y, z]`; orientation is identity and ignored | a **marker = sensor ID** under a shared sender (no dedicated sender name) |
 
-This corrects a common assumption that VRPN can only carry labeled rigid bodies: Chingmu's VRPN server (`MCServer`) additionally streams individual markers, each addressed by an ID, so the ball arrives over the **same connection** as the rigid bodies. No separate point-cloud SDK path is required. All objects publish into the same world frame, and the resulting topics map onto the `/poses` + `/tf` interface of Section 6.4.
+Chingmu confirms that each rigid body (PPT, P1, P2) can be assigned a distinct VRPN **sender name**, but the ball is a **marker**, not a rigid body, so it is delivered as a **sensor ID** with no sender name of its own. No separate point-cloud SDK is required — everything is on the one VRPN connection — but the ROS 2 client must be able to resolve **sensor IDs**, not just sender names.
 
-### 6.5.1  ROS 2 VRPN Client — Rigid Bodies and Topics
+> **Driver choice.** Use **`vrpn_mocap`** with `multi_sensor: true`: it publishes one topic per sensor ID and so exposes both the named rigid bodies and the ball marker. Do **not** use `motion_capture_tracking`'s VRPN backend (libmotioncapture) here — it keys trackers by sender name only and discards the sensor ID, so it cannot separate the ball marker. Chingmu's own `ChingMuVrpnRos` parses the stream correctly but targets ROS 1; it is referenced only for validation, not used in HOPE's ROS 2 stack.
 
-On the ROS 2 Jazzy host, run `vrpn_mocap` (`ros-jazzy-vrpn-mocap`), a native ROS 2 VRPN client, pointed at the Chingmu server (the CMTracker / `MCServer` PC). It speaks the same VRPN protocol the Chingmu server uses, so every rigid body *and* the ball marker arrive over one connection. Launch it with the server address and Chingmu VRPN port:
+### 6.5.1  ROS 2 VRPN Client — `vrpn_mocap`
+
+On the ROS 2 Jazzy host, run `vrpn_mocap`, a native ROS 2 VRPN client, pointed at the Chingmu server (the CMTracker / `MCServer` PC), with `multi_sensor: true` so that each marker sensor ID gets its own topic:
 
 ```bash
 ros2 launch vrpn_mocap client.launch.yaml server:=CHINGMU_SERVER_IP port:=3883
 ```
 
-or via a parameter file:
+with a parameter file:
 
 ```yaml
 /vrpn_mocap_client:
@@ -396,26 +398,39 @@ or via a parameter file:
     server: "CHINGMU_SERVER_IP"   # CMTracker / MCServer PC
     port: 3883                    # Chingmu VRPN port
     frame_id: "world"
+    multi_sensor: true            # one topic per sensor ID — required for the ball marker
     update_freq: 100.0
     refresh_freq: 1.0
 ```
 
-The client creates one tracker per object and publishes a `geometry_msgs/PoseStamped` under the `/vrpn_mocap` namespace, keyed by the object's name/ID in the Chingmu server, and broadcasts each on `/tf` under parent `world`:
+`vrpn_mocap` discovers every VRPN sender and publishes a `geometry_msgs/PoseStamped` per sender, and — with `multi_sensor: true` — per sensor index, under the `/vrpn_mocap` namespace:
 
 ```
-/vrpn_mocap/<object>/pose      geometry_msgs/PoseStamped
-# confirm exact object names with `ros2 topic list`
+/vrpn_mocap/<sender>/pose<sensor_id>      geometry_msgs/PoseStamped
 ```
 
-The object ID maps **one-to-one** to the rigid-body / marker IDs configured in the Chingmu server (rigid-body IDs occupy 0–300). Assign fixed IDs to PPT, P1, P2, and the ball in CMTracker and record them so the planner and WBC subscribe to the correct topics. For each rigid body (PPT, P1, P2) the `PoseStamped` carries both `pose.position` (x, y, z) and `pose.orientation` (the quaternion attitude) — a full 6-DOF measurement.
+Assign and record fixed VRPN **sender names** for **PPT**, **P1**, **P2** in CMTracker so the planner and WBC subscribe to the right topics. Each rigid body is a single-sensor sender, so it appears as `pose0` carrying full `pose.position` + `pose.orientation` (a 6-DOF measurement):
 
-Add a small ROS 2 relay node to merge these per-object poses into the single `/poses` `PoseArray` and to (re)broadcast `world → PPT`, `world → P1`, `world → P2` on `/tf`, matching Section 6.4 exactly.
+```
+/vrpn_mocap/PPT/pose0
+/vrpn_mocap/P1/pose0
+/vrpn_mocap/P2/pose0
+```
+
+Add a small ROS 2 relay node to merge these into the single `/poses` `PoseArray` and to (re)broadcast `world → PPT`, `world → P1`, `world → P2` on `/tf`, matching Section 6.4 exactly.
 
 ### 6.5.2  The Ping-Pong Ball as a 3-DOF Marker
 
-Define the ball as a tracked **marker** (single point) with its own ID in the Chingmu server. The ROS 2 VRPN client of Section 6.5.1 publishes it on `/vrpn_mocap/<ball>/pose` as a `geometry_msgs/PoseStamped` whose `pose.position` holds the valid ball position `[x, y, z]` and whose `pose.orientation` is an identity quaternion to be ignored. This is the 3-DOF marker that the Chingmu VRPN stream provides alongside the 6-DOF rigid bodies, and it removes the need for any native-SDK / point-cloud bridge.
+The ball is a **marker**, not a rigid body, so Chingmu delivers it as a **sensor ID under a shared marker sender** — it has no dedicated sender name. With `multi_sensor: true` (Section 6.5.1), `vrpn_mocap` exposes it as a per-sensor topic:
 
-For the planner, subscribe to the ball topic and use only the position fields. A trivial relay republishes it as `geometry_msgs/PointStamped` on `/ball/point` (or inserts it into the shared `/poses` array if a single-topic interface is preferred):
+```
+/vrpn_mocap/<marker_sender>/pose<ball_sensor_id>   geometry_msgs/PoseStamped
+# pose.position is the valid ball position [x, y, z]; pose.orientation is identity and ignored
+```
+
+Confirm the marker sender name and the ball's sensor index with Chingmu, and verify with `ros2 topic list`. The ball must be the **single** unlabeled marker required by Section 5 — stray markers would share the marker sender and make the sensor index ambiguous.
+
+For the planner, subscribe to that topic and use only the position fields. A trivial relay republishes it as `geometry_msgs/PointStamped` on `/ball/point` (or inserts it into the shared `/poses` array if a single-topic interface is preferred):
 
 ```python
 # ball_pose_to_point.py  (ROS 2, sketch)
@@ -428,7 +443,7 @@ class BallRelay(Node):
         super().__init__('ball_pose_to_point')
         self.pub = self.create_publisher(PointStamped, '/ball/point', 10)
         self.create_subscription(
-            PoseStamped, '/vrpn_mocap/<ball>/pose', self.cb, 10)
+            PoseStamped, '/vrpn_mocap/<marker_sender>/pose<ball_sensor_id>', self.cb, 10)
 
     def cb(self, msg: PoseStamped):
         out = PointStamped()
@@ -458,13 +473,14 @@ Verify the handedness of the source frame empirically before trusting any conver
 |---------|---------------|-------|
 | VRPN streaming | ✅ Enabled | Single stream carries rigid bodies **and** markers |
 | VRPN port | 3883 (default) | Match the `port` param of the ROS 2 client |
-| Server / tracker name | As shown in CMTracker (e.g. `MCServer`) | Appears in the `/vrpn_mocap/<object>` topic/TF path |
-| Rigid-body IDs (PPT, P1, P2) | 0–300, unique per body | Each → its own `/vrpn_mocap/<object>/pose` (6-DOF) |
-| Ball marker ID | Unique, recorded | → its own `/vrpn_mocap/<object>/pose` (position valid, orientation identity) |
+| ROS 2 client | `vrpn_mocap`, `multi_sensor: true` | libmotioncapture VRPN backend is unsuitable — it drops sensor IDs |
+| Rigid bodies (PPT, P1, P2) | Each a distinct VRPN **sender name** | Each → `/vrpn_mocap/<name>/pose0` (6-DOF) |
+| Ball | A **marker = sensor ID** under a shared sender | → `/vrpn_mocap/<marker_sender>/pose<id>` (position valid, orientation identity) |
+| Single marker only | No stray markers in volume | Extra markers make the ball's sensor index ambiguous |
 | Up axis | **Z** | Aligns with ROS 2 Z-up; else convert per 6.5.3 |
 | Server / Linux host subnet | Same LAN subnet | Plain UDP, as in Section 6.1 |
 
-Once the ROS 2 client is running, `ros2 topic list` shows one `/vrpn_mocap/<object>/pose` per object (relay into `/poses` + `/tf` and `/ball/point` as desired, per Section 6.4), and the planner and WBC require no vendor-specific changes.
+Once the ROS 2 client is running, `ros2 topic list` shows a `/vrpn_mocap/<sender>/pose<id>` per object (relay into `/poses` + `/tf` and `/ball/point` as desired, per Section 6.4), and the planner and WBC require no vendor-specific changes.
 
 ---
 
