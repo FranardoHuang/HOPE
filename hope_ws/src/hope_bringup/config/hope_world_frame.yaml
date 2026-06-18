@@ -30,8 +30,15 @@ hope_world:
     x_hit: 0.0
 
   mocap_to_base_link:
-    # Replace these with the measured marker-cluster-to-URDF offsets for your robot.
-    p1_xyz: [0.0, 0.0, 0.0]
-    p1_rpy: [0.0, 0.0, 0.0]
-    p2_xyz: [0.0, 0.0, 0.0]
-    p2_rpy: [0.0, 0.0, 0.0]
+    # TODO(measure): static transform from each robot's mocap marker-cluster frame
+    # (the P1/P2 rigid body the mocap reports) to the robot URDF base_link.
+    # HOW TO GET: rigidly mount the marker plate, then measure the translation
+    # (xyz, metres) and orientation (rpy, radians) from the marker-cluster origin
+    # to base_link with a CAD model or a tape-measure + level; refine by comparing
+    # FK-predicted base_link against the mocap reading while the robot stands still.
+    # Until measured, [0,0,0] means "marker cluster == base_link" (only correct if
+    # the markers are exactly at base_link).
+    p1_xyz: [0.0, 0.0, 0.0]   # TODO: measured P1 marker-cluster -> base_link translation (m)
+    p1_rpy: [0.0, 0.0, 0.0]   # TODO: measured P1 marker-cluster -> base_link rotation (rad)
+    p2_xyz: [0.0, 0.0, 0.0]   # TODO: measured P2 marker-cluster -> base_link translation (m)
+    p2_rpy: [0.0, 0.0, 0.0]   # TODO: measured P2 marker-cluster -> base_link rotation (rad)

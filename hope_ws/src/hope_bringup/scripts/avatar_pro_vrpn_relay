@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""Relay Avatar-Pro/CMAvatar VRPN topics into the HOPE ROS 2 mocap interface."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import rclpy
+from geometry_msgs.msg import PointStamped, Pose, PoseArray, PoseStamped, TransformStamped
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+from tf2_ros import TransformBroadcaster
+
+
+@dataclass(frozen=True)
+class ObjectMapping:
+    key: str
+    object_name: str
+    output_topic: str | None
+
+
+class AvatarProVrpnRelay(Node):
+    """Convert Avatar-Pro VRPN PoseStamped topics into HOPE-standard topics."""
+
+    def __init__(self) -> None:
+        super().__init__("avatar_pro_vrpn_relay")
+
+        self.declare_parameter("vrpn_namespace", "/vrpn_mocap")
+        self.declare_parameter("ppt_object", "PPT")
+        self.declare_parameter("p1_object", "P1")
+        self.declare_parameter("p2_object", "P2")
+        self.declare_parameter("ball_object", "ball")
+        self.declare_parameter("world_frame", "world")
+        self.declare_parameter("table_pose_topic", "/table/pose")
+        self.declare_parameter("p1_pose_topic", "/P1/pose")
+        self.declare_parameter("p2_pose_topic", "/P2/pose")
+        self.declare_parameter("ball_point_topic", "/ball/point")
+        self.declare_parameter("poses_topic", "/poses")
+        self.declare_parameter("pose_array_order", ["ball", "PPT", "P1", "P2"])
+        self.declare_parameter("publish_tf", True)
+        self.declare_parameter("publish_pose_array", True)
+
+        self._world_frame = str(self.get_parameter("world_frame").value)
+        self._publish_tf = bool(self.get_parameter("publish_tf").value)
+        self._publish_pose_array = bool(self.get_parameter("publish_pose_array").value)
+        self._pose_array_order = [str(item) for item in self.get_parameter("pose_array_order").value]
+
+        sensor_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+
+        self._latest: dict[str, PoseStamped] = {}
+        self._tf_broadcaster = TransformBroadcaster(self)
+        self._pose_array_pub = self.create_publisher(
+            PoseArray, str(self.get_parameter("poses_topic").value), sensor_qos
+        )
+        self._ball_pub = self.create_publisher(
+            PointStamped, str(self.get_parameter("ball_point_topic").value), sensor_qos
+        )
+
+        self._pose_publishers = {
+            "PPT": self.create_publisher(
+                PoseStamped, str(self.get_parameter("table_pose_topic").value), sensor_qos
+            ),
+            "P1": self.create_publisher(
+                PoseStamped, str(self.get_parameter("p1_pose_topic").value), sensor_qos
+            ),
+            "P2": self.create_publisher(
+                PoseStamped, str(self.get_parameter("p2_pose_topic").value), sensor_qos
+            ),
+        }
+
+        self._mappings = [
+            ObjectMapping("PPT", str(self.get_parameter("ppt_object").value), "/table/pose"),
+            ObjectMapping("P1", str(self.get_parameter("p1_object").value), "/P1/pose"),
+            ObjectMapping("P2", str(self.get_parameter("p2_object").value), "/P2/pose"),
+            ObjectMapping("ball", str(self.get_parameter("ball_object").value), "/ball/point"),
+        ]
+
+        vrpn_namespace = str(self.get_parameter("vrpn_namespace").value).rstrip("/")
+        for mapping in self._mappings:
+            if not mapping.object_name:
+                continue
+            topic = f"{vrpn_namespace}/{mapping.object_name}/pose"
+            self.create_subscription(
+                PoseStamped,
+                topic,
+                lambda msg, object_key=mapping.key: self._pose_cb(object_key, msg),
+                sensor_qos,
+            )
+            self.get_logger().info(f"subscribed {topic} -> {mapping.output_topic}")
+
+    def _pose_cb(self, object_key: str, msg: PoseStamped) -> None:
+        normalized = PoseStamped()
+        normalized.header = msg.header
+        if not normalized.header.frame_id:
+            normalized.header.frame_id = self._world_frame
+        normalized.pose = msg.pose
+
+        self._latest[object_key] = normalized
+
+        if object_key == "ball":
+            self._publish_ball_point(normalized)
+        elif object_key in self._pose_publishers:
+            self._pose_publishers[object_key].publish(normalized)
+
+        if self._publish_tf:
+            self._broadcast_tf(object_key, normalized)
+        # Publish /poses synchronized to the BALL update only. The ball is the
+        # planner's input; firing on every object would re-emit a stale ball
+        # position at PPT/P1/P2 timestamps and corrupt the velocity polyfit.
+        if self._publish_pose_array and object_key == "ball":
+            self._publish_poses(normalized.header.stamp)
+
+    def _publish_ball_point(self, msg: PoseStamped) -> None:
+        out = PointStamped()
+        out.header = msg.header
+        out.point = msg.pose.position
+        self._ball_pub.publish(out)
+
+    def _broadcast_tf(self, object_key: str, msg: PoseStamped) -> None:
+        tf_msg = TransformStamped()
+        tf_msg.header = msg.header
+        tf_msg.header.frame_id = msg.header.frame_id or self._world_frame
+        tf_msg.child_frame_id = object_key
+        tf_msg.transform.translation.x = msg.pose.position.x
+        tf_msg.transform.translation.y = msg.pose.position.y
+        tf_msg.transform.translation.z = msg.pose.position.z
+        tf_msg.transform.rotation = msg.pose.orientation
+        self._tf_broadcaster.sendTransform(tf_msg)
+
+    def _publish_poses(self, stamp) -> None:
+        if "ball" not in self._latest:
+            return
+
+        msg = PoseArray()
+        msg.header.stamp = stamp
+        msg.header.frame_id = self._world_frame
+        msg.poses = [
+            self._latest[key].pose
+            for key in self._pose_array_order
+            if key in self._latest and isinstance(self._latest[key].pose, Pose)
+        ]
+        self._pose_array_pub.publish(msg)
+
+
+def main(args=None) -> None:
+    rclpy.init(args=args)
+    node = AvatarProVrpnRelay()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

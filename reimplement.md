@@ -4,6 +4,36 @@ This guide explains how to reimplement the HOPE reference system from the docume
 
 Read this file from top to bottom. Do not skip the verification gates. Each later phase assumes the earlier phase is already working.
 
+## How To Read Placeholders And Terms
+
+This guide uses two kinds of values:
+
+1. **Fixed values**: numbers defined by the HOPE table frame or the rules, for example table length `2.74 m` or table height `0.76 m`. Use these directly unless the official competition setup tells you otherwise.
+2. **PLACEHOLDER values**: values that depend on your robot, your network, your motion-capture PC, or your training run. Do not copy these blindly. Every placeholder is marked with a name such as `PLACEHOLDER_A3_ROBOT_IP`, `PLACEHOLDER_WANDB_ENTITY`, `PLACEHOLDER_A3_ASSET_DIR`, or `AVATAR_PRO_PC_IP`.
+
+Placeholder rule:
+
+1. If a value comes from Agibot, the mocap vendor, WandB, or your local hardware, this guide must say where to get it.
+2. If a value comes from measurement, this guide must say what to measure, what units to use, and where to write the result.
+3. If a value cannot be known from public documentation, it is marked as an external blocker. Do not invent it.
+4. After replacing a placeholder, run the verification command in that section before moving on.
+
+Plain terminology:
+
+- **Frame**: a coordinate system. Example: `world` is the table coordinate system.
+- **Pose**: position plus orientation. Position is `x, y, z`; orientation is usually quaternion `qx, qy, qz, qw`.
+- **Transform**: the pose of one frame relative to another frame. Example: `P1 -> P1_base_link`.
+- **Rigid body**: a tracked object made from several mocap markers that move together, such as the table or robot torso marker plate.
+- **base_link**: the main robot body frame used by the robot model. It is usually near the pelvis or torso, but the exact location must come from the robot URDF or SDK.
+- **URDF / MJCF / USD**: robot model file formats. URDF is common in ROS, MJCF is common in MuJoCo, and USD is common in Isaac Sim / Isaac Lab.
+- **Joint order**: the exact order of robot joints in an array. This must be identical in training, ONNX export, and hardware control.
+- **PD gains**: controller stiffness/damping numbers. `Kp` pulls a joint toward a target; `Kd` damps motion so it does not oscillate.
+- **FK, forward kinematics**: computing a link or racket pose from robot joint angles.
+- **WBC, whole-body controller**: the learned controller that moves the robot body and arm together.
+- **ONNX**: the exported neural-network policy file used at deployment time.
+- **QoS**: ROS 2 message delivery settings. High-rate mocap topics should usually use Best Effort and small queue depth to reduce latency.
+- **AimRT / AimDK**: Agibot's runtime and robot development kit. Public X1/X2 examples exist, but A3-specific files and APIs must come from Agibot.
+
 ## 0. What You Are Reimplementing
 
 HOPE is a humanoid robot table-tennis system with four major parts:
@@ -62,46 +92,74 @@ Verification gate:
 
 - You can explain why the racket is never tracked by motion capture.
 - You can draw the data flow from motion capture to planner to WBC to robot.
-- You know the exact AGI robot model, SDK, robot description files, and safety interface you are targeting.
+- You know the target robot is the Agibot Expedition A3, and you know which of its model files, SDK (AimDK/AimRT), robot description files, and safety interface you already have versus must still request from Agibot.
 
 ## 2. Decide Your Target Platform
 
 Do this before creating software packages.
 
-1. Choose the robot.
-   - Target brand for this reimplementation: AGI.
-   - Treat AGI as a custom humanoid until you confirm the exact model, SDK, joint names, robot description files, and low-level control API.
-   - Use vendor-specific examples in the reference documents only as patterns. Do not copy package names, joint orders, network settings, or safety controls without checking the AGI documentation.
+The target robot for this reimplementation is the **Agibot (Zhiyuan / 智元) Expedition A3** (远征 A3).
 
-2. Record the robot facts you will need.
-   - Robot model.
-   - Total controlled DOF.
-   - Arm DOF.
-   - Waist DOF.
-   - Exact URDF or MJCF file.
-   - Exact base_link name.
-   - Physical location of base_link.
-   - Standing base_link height.
-   - Joint names and joint order.
-   - Joint limits.
-   - Default PD gains.
-   - Control interface.
-   - Middleware: ROS 2, AGI SDK, vendor middleware, or bridge.
+### 2.0 Confirmed Agibot Expedition A3 facts
 
-3. Choose the simulation backend.
-   - If AGI provides Isaac-compatible USD assets and actuator parameters: use Isaac Lab plus PhysX.
-   - If AGI provides MJCF or URDF assets: use mjlab plus MuJoCo Warp, or convert the model carefully and verify inertial and actuator parameters.
+These were verified against Agibot's official announcement and corroborating sources (June 2026). Treat any number not in this list as unconfirmed until Agibot's own documentation states it.
 
-4. Choose the deployment path.
-   - Keep the HOPE planner and WBC interface in ROS 2 first.
-   - Add an AGI hardware bridge or `agi_bringup` package that maps HOPE joint commands to the AGI low-level API.
-   - Consider a native AGI middleware path only after the ROS 2 bridge is working and safe.
+- Manufacturer: Agibot / Zhiyuan Robotics (智元机器人). English brand "AgiBot".
+- Height: 1.73 m (1730 mm). Mass: 55 kg. Both comfortably satisfy the HOPE rule (humanoid, 1.0–1.9 m, ≤80 kg) with large margin.
+- Active DOF (excluding hands): **31** — neck 2, each arm 7, waist 3, each leg 6 (`2 + 7×2 + 3 + 6×2 = 31`). The 7-DOF arms plus a 3-DOF flexible waist give the orientation redundancy and torso rotation a table-tennis swing needs.
+- Arm end payload ~3 kg; advertised TCP end speed up to 2 m/s; daily walking speed up to ~1.8 m/s. No published wrist-flick speed, end-effector acceleration, or control-loop rate, so adequacy for a fast rally is plausible but **not proven** from public data.
+- Optional dexterous hand (Agibot OmniHand O10: 10 active / 16 total DOF). For HOPE the hand is largely irrelevant — the racket is on a fixed mount (see step 11), so a fixed paddle bracket or the silicone-fist configuration is simpler than a dexterous hand.
+- The A3 is a real, shipping commercial product (unveiled Feb 2026, first customer deliveries Apr 2026), positioned for entertainment/retail/exhibition use rather than as an open developer platform.
+
+### 2.1 What you MUST obtain from Agibot (not public)
+
+This is the single biggest dependency in the whole project. **No A3 URDF/MJCF/USD, joint name list, joint order, actuator parameters, PD gains, collision meshes, or SDK is published anywhere public** (verified across agibot.com, the AgibotTech GitHub org, and the AimDK docs site). The only fully open-source Agibot humanoid is the **X1** (a different 29-DOF robot), and the documented developer SDK is **AimDK_X2** for the X2 (whose URDF is obtained by contacting Agibot after-sales support). Request from Agibot, under whatever developer/partner channel applies to your A3:
+
+- Robot model: URDF (most likely), and MJCF or USD if available.
+- Exact `base_link` name, its physical location, and standing `base_link` height.
+- Full joint name list and joint order (the order your controller and the exported ONNX policy must agree on).
+- Joint limits, gear ratios, link inertial parameters, and collision meshes.
+- Default PD gains / impedance settings and the joint command interface.
+- The A3 control SDK / AimDK / ROS 2 interface, low-level joint command API, and safety (E-stop/standby) interface.
+- Redistribution terms for any of the above (this affects whether you can publish a build guide that references them).
+
+Until these arrive, develop against the **X1 open model as a stand-in** (see steps 10–16) and keep everything A3-specific behind the bridge package so swapping in the real A3 model is a config change, not a rewrite.
+
+How to get and verify the A3 placeholders:
+
+| Placeholder | How to get it | How to verify it |
+| --- | --- | --- |
+| `A3_URDF`, `A3_MJCF`, or `A3_USD` | Request from Agibot support, the A3 partner portal, or the hardware vendor contact. Ask for meshes, inertial values, joint limits, and actuator parameters in the same package. | Open the model in ROS/Isaac/MuJoCo and confirm the robot height is about `1.73 m` and the joint count matches the A3 documentation. |
+| `base_link` name | Read the root or pelvis frame name in the A3 URDF, or ask Agibot for the official control-frame name. | Run `ros2 topic echo /joint_states --once` and confirm the SDK documentation uses the same body frame in its examples. |
+| `base_link` height | Put the robot in the official standing calibration pose on level ground. Measure from the floor to the `base_link` origin if the origin is physically marked. If it is not marked, compute it from the robot model by FK in the standing pose. | In simulation, publish `world -> base_link`; the Z value should match the measured standing height within a few centimeters. |
+| Joint names and joint order | Get the ordered joint list from the A3 SDK/API or from the A3 URDF plus SDK command message definition. | Compare the order in four places: `/joint_states`, the training config, ONNX metadata, and the hardware command message. They must match exactly. |
+| PD gains / impedance | Get default safe gains from Agibot. Do not copy X1/X2 gains onto A3 unless Agibot says they are valid. | In low-gain standby, command tiny joint motions and confirm there is no buzzing, overshoot, or unexpected motion. |
+| E-stop and standby API | Get the exact hardware E-stop wiring, software stop service/topic, and standby command from the A3 manual. | Time a stop test with logs or high-speed video. The required upper-body and gait stop time is below `200 ms`. |
+
+If one of these values is missing, write it into your local `A3_BLOCKERS.md` and do not proceed to hardware deployment for that item. Public X1/X2 files are useful only for building the software path; they are not proof that the A3 hardware path is correct.
+
+### 2.2 Middleware: AimRT + AimDK
+
+- Agibot's robots run on **AimRT**, Agibot's open-source C++20 runtime framework. AimRT interoperates with ROS 2 (and HTTP/gRPC/MQTT/Zenoh), so a ROS-2-native HOPE stack can coexist with it.
+- **AimDK** is Agibot's robot development kit; `AimDK_X2` (docs at `x2-aimdk.agibot.com`) is the published example and exposes ROS 2 interfaces. Assume the A3 has an analogous SDK and confirm it.
+- Distro caveat: Agibot's published X1 deployment stack (`agibot_x1_infer`) is **ROS 2 Humble + AimRT (C++)**, while HOPE's reference is **ROS 2 Jazzy**. Verify AimRT/AimDK compatibility with your chosen ROS 2 distro early — this can force a distro decision.
+
+### 2.3 Simulation backend
+
+- Agibot precedent: the open X1 locomotion stack trains in **Isaac Gym (Preview 4)** and validates in **MuJoCo (sim2sim)**; Agibot's newer flagship simulator `genie_sim` is **Isaac Sim 5.1 / Isaac Lab / PhysX**. HOPE's WBC reference (BeyondMimic / `whole_body_tracking`) is also Isaac Lab based.
+- Recommendation: use **Isaac Lab + PhysX** as the primary training backend (aligns with BeyondMimic and `genie_sim`), and **MuJoCo** for sim-to-sim verification (aligns with the X1 stack). If Agibot ships only a URDF, both Isaac Lab (URDF→USD) and MuJoCo (URDF→MJCF) are viable; either way the actuator params, PD gains, and collision meshes must come from Agibot.
+
+### 2.4 Deployment path
+
+- Keep the HOPE planner and WBC interface in **plain ROS 2 first**.
+- Add an Agibot bridge (`agibot_hardware_bridge` / `agibot_bringup`) that maps HOPE joint commands to the A3 low-level API via AimDK/AimRT. Mirror the X1 deployment pattern: ONNX Runtime inference, subscribe `/joint_states`, publish `/joint_cmd`, with a ~1 kHz PD loop. Note HOPE's WBC policy runs at **50 Hz** (vs the X1 walking policy's 100 Hz).
+- Consider a native AimRT-only path only after the ROS 2 bridge is working and safe.
 
 Verification gate:
 
-- You have a robot model file and know the joint order expected by your controller.
-- You know how to send joint position commands safely to the robot.
-- You know how to stop the robot immediately.
+- You have (or have formally requested) the A3 robot model file and know the joint order expected by your controller.
+- You know how to send joint position commands safely to the robot through AimDK/AimRT.
+- You know how to stop the robot immediately (hardware E-stop and software soft-stop).
 
 ## 3. Create A Workspace Layout
 
@@ -116,15 +174,16 @@ Recommended layout:
     hope_planner/
     hope_bringup/
     hope_monitoring/
-    motion_capture_tracking/        # installed by apt or cloned if needed
+    # mocap: ros-jazzy-vrpn-mocap (apt) + the avatar_pro relay in hope_bringup
     motion_tracking_controller/      # for WBC deployment
-    agi_bringup/                     # AGI ROS 2 bridge or vendor adapter
+    agibot_bringup/                  # Agibot A3 launch/bringup (AimDK adapter)
+    agibot_hardware_bridge/          # Agibot A3 low-level bridge (AimRT/AimDK)
 
 ~/workspace/HOPE/hope_training/
   GVHMR/
   GMR/
   whole_body_tracking/
-  mjlab/                             # AGI MJCF or custom backend path only
+  mjlab/                             # MuJoCo backend / sim2sim path only
   motions/
     raw_video/
     smplx/
@@ -151,7 +210,7 @@ Distrobox path for an Ubuntu 26.04 host:
 
 Use this path for day-to-day development because it feels close to a normal host shell while keeping ROS 2 Jazzy inside an Ubuntu 24.04 container.
 
-This machine has a suitable Distrobox named `hope`. It is Ubuntu 24.04 and has ROS 2 Jazzy available. Copy and paste this whole block into your host terminal:
+This machine has a suitable Distrobox named `hope`. It is Ubuntu 24.04; the block below verifies or installs the ROS 2 Jazzy desktop stack inside it. Copy and paste this whole block into your host terminal:
 
 ```bash
 cd ~/workspace/HOPE
@@ -160,7 +219,8 @@ mkdir -p \
   ~/workspace/HOPE/hope_ws/src/hope_planner \
   ~/workspace/HOPE/hope_ws/src/hope_bringup \
   ~/workspace/HOPE/hope_ws/src/hope_monitoring \
-  ~/workspace/HOPE/hope_ws/src/agi_bringup \
+  ~/workspace/HOPE/hope_ws/src/agibot_bringup \
+  ~/workspace/HOPE/hope_ws/src/agibot_hardware_bridge \
   ~/workspace/HOPE/hope_training/GVHMR \
   ~/workspace/HOPE/hope_training/GMR \
   ~/workspace/HOPE/hope_training/whole_body_tracking \
@@ -184,28 +244,40 @@ fi
 distrobox enter "$HOPE_ROS_BOX" -- bash -lc '
 set -e
 
-if [ ! -f /opt/ros/jazzy/setup.bash ]; then
-  echo "ERROR: /opt/ros/jazzy/setup.bash was not found in this Distrobox."
-  echo "Use an Ubuntu 24.04 ROS 2 Jazzy Distrobox, or delete/recreate the box with docker.io/osrf/ros:jazzy-desktop-full."
-  exit 1
-fi
-
-sudo apt update
-sudo apt install -y \
+sudo apt-get update
+sudo apt-get install -y \
   build-essential \
   cmake \
   curl \
   git \
+  ros-jazzy-desktop-full \
+  ros-jazzy-vrpn-mocap \
   python3-colcon-common-extensions \
   python3-pip \
   python3-rosdep \
+  python3-vcstool \
   python3-venv
+if [ ! -f /opt/ros/jazzy/setup.bash ]; then
+  echo "ERROR: ROS 2 Jazzy did not install correctly; /opt/ros/jazzy/setup.bash is missing."
+  exit 1
+fi
 rosdep update || true
-grep -qxF "source /opt/ros/jazzy/setup.bash" ~/.bashrc || echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc
+if ! grep -q "HOPE ROS 2 Jazzy environment" ~/.bashrc; then
+  {
+    printf "\n# HOPE ROS 2 Jazzy environment.\n"
+    printf "if [ -f /opt/ros/jazzy/setup.bash ]; then\n"
+    printf "    source /opt/ros/jazzy/setup.bash\n"
+    printf "fi\n\n"
+    printf "if [ -f \"\\$HOME/workspace/HOPE/hope_ws/install/setup.bash\" ]; then\n"
+    printf "    source \"\\$HOME/workspace/HOPE/hope_ws/install/setup.bash\"\n"
+    printf "fi\n"
+  } >> ~/.bashrc
+fi
 source /opt/ros/jazzy/setup.bash
 cd ~/workspace/HOPE
 echo "ROS_DISTRO=$ROS_DISTRO"
 ros2 --help >/dev/null
+rviz2 --help >/dev/null
 echo "ros2-ok"
 exec bash -l
 '
@@ -258,7 +330,8 @@ mkdir -p \
   ~/workspace/HOPE/hope_ws/src/hope_planner \
   ~/workspace/HOPE/hope_ws/src/hope_bringup \
   ~/workspace/HOPE/hope_ws/src/hope_monitoring \
-  ~/workspace/HOPE/hope_ws/src/agi_bringup \
+  ~/workspace/HOPE/hope_ws/src/agibot_bringup \
+  ~/workspace/HOPE/hope_ws/src/agibot_hardware_bridge \
   ~/workspace/HOPE/hope_training/GVHMR \
   ~/workspace/HOPE/hope_training/GMR \
   ~/workspace/HOPE/hope_training/whole_body_tracking \
@@ -280,7 +353,7 @@ $DOCKER_CMD run --rm -it \
 
 This block creates `Dockerfile.hope-ros2-jazzy`, builds the `hope-ros2-jazzy` image, creates your host workspace folders inside `~/workspace/HOPE`, and opens a shell inside the ROS 2 Jazzy container with that same repository mounted at `~/workspace/HOPE`.
 
-For GPU simulation or training, install NVIDIA Container Toolkit on the host and add `--gpus all` to the `docker run` command. For real hardware, keep `--net=host` so ROS 2 DDS discovery and the AGI robot network are visible inside the container.
+For GPU simulation or training, install NVIDIA Container Toolkit on the host and add `--gpus all` to the `docker run` command. For real hardware, keep `--net=host` so ROS 2 DDS discovery and the Agibot A3 robot network (AimRT/AimDK) are visible inside the container.
 
 Verification gate:
 
@@ -373,6 +446,14 @@ P2 half center:      [2.055,-0.7625,  0.0]
 Virtual hit plane:   x ~= 0.0
 ```
 
+How these numbers are calculated:
+
+1. Standard table length is `2.74 m`; the net is halfway along the length, so `net_x = 2.74 / 2 = 1.37`.
+2. Standard table width is `1.525 m`; the center line in the HOPE Y convention is `center_y = -1.525 / 2 = -0.7625`.
+3. P1 half center is halfway between the P1 edge and the net: `x = 1.37 / 2 = 0.685`, `y = -0.7625`, `z = 0`.
+4. P2 half center is halfway between the net and the far edge: `x = 1.37 + 0.685 = 2.055`, `y = -0.7625`, `z = 0`.
+5. Table surface is defined as `z = 0`. The floor is about `z = -0.76` because a standard table is `0.76 m` tall.
+
 Implementation rules:
 
 1. Use meters.
@@ -407,7 +488,35 @@ Create `hope_bringup/launch/hope_world.launch.py` so it publishes:
 - `P1 -> P1_base_link`
 - `P2 -> P2_base_link`
 
-The default `mocap_to_base_link` offsets may start at zero, but they are placeholders. Replace them after measuring the real marker-cluster-to-URDF offsets for your robot.
+`mocap_to_base_link` is a required measured transform, not a guess.
+
+What it means:
+
+```text
+P1 frame          = the rigid-body frame reported by motion capture for the P1 marker plate
+P1_base_link     = the robot model's base_link frame
+mocap_to_base_link.p1_xyz = translation from P1 marker frame to P1_base_link, in meters
+mocap_to_base_link.p1_rpy = roll, pitch, yaw from P1 marker frame to P1_base_link, in radians
+```
+
+How to get `mocap_to_base_link`:
+
+1. Best method: define the mocap rigid-body pivot and axes directly at the robot `base_link`. If Avatar-Pro lets you set a pivot and local axes, set `P1` to match `P1_base_link`. Then the offset is `[0, 0, 0]` and `[0, 0, 0]`.
+2. Physical measurement method: mount the mocap marker plate rigidly on the torso or pelvis. Mark the marker-frame origin on the plate. Measure the vector from that origin to the robot `base_link` origin with a ruler, calipers, or a laser measure. Write the result in meters in the marker frame axes. Example: `12 cm forward, 3 cm left, 8 cm up` becomes `[0.12, 0.03, 0.08]` if the marker frame axes use forward/left/up.
+3. Orientation method: align the marker plate axes with the robot base axes during mounting. If the plate is aligned, `p1_rpy` starts as `[0, 0, 0]`. If it is rotated, measure roll/pitch/yaw with a digital level/protractor or solve it by comparing a known standing pose in mocap and in the robot model.
+4. ROS check method: publish both `world -> P1` from mocap and `world -> P1_base_link` from the robot/model. The transform `P1 -> P1_base_link` is the offset to put in `hope_world_frame.yaml`.
+
+Write the values here:
+
+```yaml
+mocap_to_base_link:
+  p1_xyz: [PLACEHOLDER_MEASURED_X_M, PLACEHOLDER_MEASURED_Y_M, PLACEHOLDER_MEASURED_Z_M]
+  p1_rpy: [PLACEHOLDER_MEASURED_ROLL_RAD, PLACEHOLDER_MEASURED_PITCH_RAD, PLACEHOLDER_MEASURED_YAW_RAD]
+  p2_xyz: [PLACEHOLDER_MEASURED_X_M, PLACEHOLDER_MEASURED_Y_M, PLACEHOLDER_MEASURED_Z_M]
+  p2_rpy: [PLACEHOLDER_MEASURED_ROLL_RAD, PLACEHOLDER_MEASURED_PITCH_RAD, PLACEHOLDER_MEASURED_YAW_RAD]
+```
+
+Zero is allowed only when you intentionally made the mocap rigid-body frame equal to `base_link`. Otherwise zero is a temporary placeholder and must be replaced before hardware tests.
 
 Build and verify:
 
@@ -434,8 +543,16 @@ Verification gate:
 - A point at the opponent half center reports approximately `[2.055, -0.7625, 0]`.
 - The ball height above the table is positive.
 - `ros2 run tf2_ros tf2_echo world table_center` reports approximately `[1.37, -0.7625, 0.0]`.
+- `ros2 run tf2_ros tf2_echo P1 P1_base_link` reports the measured `p1_xyz` and `p1_rpy`, not an accidental zero offset.
 
-## 6. Set Up Motion Capture
+## 6. Set Up Motion Capture (Avatar Pro / Chingmu VRPN)
+
+HOPE on the Agibot Expedition A3 uses a single motion-capture path: **Avatar Pro**
+(Chingmu / 青瞳) streamed over **VRPN** into ROS 2. The OptiTrack / Vicon /
+`motion_capture_tracking` alternatives from the reference documents are out of
+scope for this build; their per-vendor details remain in
+`mocap/HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md` if you ever
+need them.
 
 Hardware requirements:
 
@@ -444,19 +561,6 @@ Hardware requirements:
 3. Use at least 120 Hz.
 4. Prefer 240-360 Hz for fast ball tracking.
 5. Cover the full table plus at least 1.5 m margin on each player's side.
-
-For OptiTrack Motive:
-
-1. Open Motive.
-2. Go to Data Streaming or Edit -> Settings -> Streaming.
-3. Enable NatNet.
-4. Set transmission to unicast if possible.
-5. Set Up Axis to `Z Axis`.
-6. Enable rigid bodies.
-7. Enable unlabeled markers.
-8. Disable labeled markers unless you need them.
-9. Disable skeletons.
-10. Confirm command port 1510 and data port 1511.
 
 Create the table rigid body:
 
@@ -467,6 +571,15 @@ Create the table rigid body:
 5. Align the PPT local frame with the HOPE world frame.
 6. Confirm the stationary PPT pose is approximately identity.
 
+How to set the table pivot and axes:
+
+1. Put a small temporary mark on the near-side left table-surface corner from P1's perspective. This is the HOPE origin.
+2. In the mocap software, set the rigid-body pivot/origin of `PPT` to that corner. If the software cannot set the pivot exactly, record the offset from the software pivot to that corner and apply it in the bridge.
+3. Align the `PPT` local X axis along the table length toward P2.
+4. Align the `PPT` local Y axis across the table width so table points have negative Y values inside the table, matching this guide.
+5. Align Z upward.
+6. Test with a marker or calibration wand: the origin corner should read close to `[0, 0, 0]`; the far-right/far-left signs should match the Y convention before you continue.
+
 Create robot base_link rigid bodies:
 
 1. Add at least 4 asymmetric markers to a rigid torso or pelvis plate.
@@ -476,6 +589,14 @@ Create robot base_link rigid bodies:
 5. Put those offsets into `hope_bringup/config/hope_world_frame.yaml`.
 6. Launch `ros2 launch hope_bringup hope_world.launch.py` to publish the `P1 -> P1_base_link` and `P2 -> P2_base_link` transforms.
 
+How to check the robot rigid body:
+
+1. The marker plate must not flex. If the plate flexes, the rigid-body pose will jump even when the robot is still.
+2. The markers must be asymmetric. If the pattern is symmetric, mocap can rotate the body by 180 degrees without warning.
+3. Stand the robot in the official zero or calibration pose. Record `world -> P1` for 10 seconds.
+4. The position noise should be small compared with the ball radius. If it drifts centimeters while the robot is still, fix the marker placement or camera calibration before using the data.
+5. Measure `P1 -> P1_base_link` using the `mocap_to_base_link` recipe in Step 5.
+
 Prepare the ball:
 
 1. Use an official 40+ table-tennis ball.
@@ -484,32 +605,153 @@ Prepare the ball:
 4. Do not use multiple ball markers.
 5. Track it as a single unlabeled marker.
 
-Install the recommended ROS 2 bridge:
+The mocap hardware steps above (cameras, calibration, rigid bodies, ball coating)
+require the physical Avatar Pro / Chingmu rig and are done in the arena, not on a
+development laptop.
+
+Stream, do not export animation. Avatar Pro can emit several formats; for live
+HOPE control use the real-time stream, not an animation export. Prefer, in order:
+
+1. Real-time `VRPN` stream, preferred.
+2. Real-time `LiveStream`, SDK stream, or ROS-compatible stream, acceptable if a bridge can convert it.
+3. `C3D`, `TRC`, `TS`, or CSV-like marker/rigid-body export for offline debugging only.
+4. `FBX` or `BVH` only for human reference motion/training clips, not for live ball/table/robot tracking.
+
+Avatar-Pro setup for this project:
+
+In Avatar-Pro:
+
+1. Use rigid-body / marker tracking, not only avatar skeleton solving.
+2. Set the streaming coordinate frame to Z-up if the software exposes that option.
+3. Calibrate the world origin at the P1 near-side left table corner.
+4. Align +X toward P2 along the table length.
+5. Create or rename tracked objects exactly as `PPT`, `P1`, `P2`, and `ball`.
+6. Track `PPT`, `P1`, and `P2` as 6-DOF rigid bodies.
+7. Track `ball` as one 3-DOF marker; use a fully coated reflective ball if possible.
+8. Enable VRPN streaming, usually on port `3883`.
+9. Record the Avatar-Pro PC IP address.
+
+How to get the Avatar-Pro IP address:
+
+1. On the Avatar-Pro Windows PC, open PowerShell.
+2. Run `ipconfig`.
+3. Use the IPv4 address of the wired adapter connected to the robot/ROS network.
+4. Confirm from the ROS machine:
 
 ```bash
-sudo apt install ros-jazzy-motion-capture-tracking
+ping AVATAR_PRO_PC_IP
 ```
 
-Configure `motion_capture_tracking`:
+If the object names in Avatar-Pro are not exactly `PPT`, `P1`, `P2`, and `ball`, either rename them in Avatar-Pro or edit `hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml`. The ROS relay uses names, not marker IDs, so spelling and capitalization matter.
 
-```yaml
-type: "optitrack"
-hostname: "MOTIVE_PC_IP"
+On the ROS 2 machine, install the VRPN client and rebuild the HOPE bringup package:
 
-robot_types:
-  ball:
-    motion_capture:
-      tracking: "librigidbodytracker"
-      initial_position: [1.37, -0.7625, 0.2]
-      dynamics:
-        max_velocity: 10.0
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+sudo apt-get update
+sudo apt-get install -y ros-jazzy-vrpn-mocap
+cd ~/workspace/HOPE/hope_ws
+colcon build --symlink-install --packages-select hope_bringup
+source install/setup.bash
+'
 ```
 
-Expected topics:
+Start the whole mocap bringup with one command. `avatar_pro_hope_bridge.launch.py`
+starts the VRPN client, the relay, and the static HOPE world frame together.
+Replace `192.168.1.100` with the IP found by `ipconfig` on the Avatar-Pro PC:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+source ~/workspace/HOPE/hope_ws/install/setup.bash
+ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
+  server:=192.168.1.100 \
+  port:=3883 \
+  update_freq:=360.0
+'
+```
+
+This launches three things:
+
+1. `vrpn_mocap client_node` — Avatar-Pro VRPN -> `/vrpn_mocap/<object>/pose`.
+2. `avatar_pro_vrpn_relay` — `/vrpn_mocap/*` -> HOPE `/poses`, `/tf`, `/ball/point`, `/{table,P1,P2}/pose`.
+3. `hope_world.launch.py` — the static world-frame landmarks and `P -> P_base_link` offsets.
+
+Set `update_freq` to your camera rate (≥240–360 Hz for the ball). The default
+`vrpn_mocap` poll rate is only 100 Hz, which is too slow for fast ball tracking.
+
+Alternative: if you already run the VRPN client elsewhere (or want to share it with
+other tools), start it yourself and tell the bridge to skip its own client:
+
+```bash
+# Terminal 1: the VRPN client
+ros2 launch vrpn_mocap client.launch.yaml server:=192.168.1.100 port:=3883
+# Terminal 2: relay + world frame only
+ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py start_vrpn_client:=false
+```
+
+Verify that HOPE sees the Avatar-Pro data:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+source ~/workspace/HOPE/hope_ws/install/setup.bash
+ros2 topic list | grep -E "ball|P1|P2|table|poses"
+ros2 topic echo /ball/point --once
+ros2 topic hz /poses
+ros2 run tf2_ros tf2_echo world P1
+'
+```
+
+The relay subscribes to:
 
 ```text
-/poses    geometry_msgs/PoseArray    120-360 Hz
-/tf       tf2_msgs/TFMessage         120-360 Hz
+/vrpn_mocap/PPT/pose
+/vrpn_mocap/P1/pose
+/vrpn_mocap/P2/pose
+/vrpn_mocap/ball/pose
+```
+
+and publishes:
+
+```text
+/table/pose
+/P1/pose
+/P2/pose
+/ball/point
+/poses
+/tf
+```
+
+If Avatar-Pro uses different object names, edit `hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml` and rebuild `hope_bringup`.
+
+Required object names:
+
+1. `PPT`: table rigid body, 6-DOF pose, near-side left table corner as pivot.
+2. `P1`: player-one robot mocap rigid body, 6-DOF pose.
+3. `P2`: optional opponent robot mocap rigid body, 6-DOF pose.
+4. `ball`: ping-pong ball, 3-DOF position only; orientation may be identity and should be ignored.
+
+Required coordinate convention:
+
+1. Units are meters.
+2. Parent frame is `world`.
+3. Use REP 103 Z-up.
+4. Origin is the P1 near-side left corner of the table surface.
+5. X points toward P2 along table length.
+6. Y follows the HOPE table-width convention, with table points in `[-1.525, 0]`.
+7. Z is table height, so the table surface is `z = 0` and the floor is about `z = -0.76`.
+
+Recommended live ROS 2 mapping:
+
+```text
+/ball/point    geometry_msgs/PointStamped    ball center in world frame
+/P1/pose       geometry_msgs/PoseStamped     P1 mocap rigid body in world frame
+/P2/pose       geometry_msgs/PoseStamped     P2 mocap rigid body in world frame
+/table/pose    geometry_msgs/PoseStamped     PPT pose in world frame
+/poses         geometry_msgs/PoseArray       combined tracked objects
+/tf            tf2_msgs/TFMessage            world -> PPT/P1/P2/ball
 ```
 
 Verification commands:
@@ -530,6 +772,14 @@ Verification gate:
 
 ## 7. Implement The Planner Package
 
+> Reference-implementation status: this package is already implemented in this
+> repository under `hope_ws/src/hope_planner`, built with `colcon`, and verified
+> in the `hope` distrobox (17 unit tests pass; the node publishes valid
+> `hope_msgs/RacketCommand` for a simulated incoming ball). The algorithm code is
+> taken verbatim from `HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md`
+> with two corrections, noted at the end of this section. Use the steps below to
+> understand or rebuild it.
+
 Create the package:
 
 ```bash
@@ -538,18 +788,20 @@ ros2 pkg create hope_planner --build-type ament_python \
   --dependencies rclpy geometry_msgs std_msgs diagnostic_msgs hope_msgs
 ```
 
-Recommended files:
+Files (as implemented):
 
 ```text
 hope_planner/
   hope_planner/
     __init__.py
-    constants.py
-    ball_state_estimator.py
-    ball_trajectory_predictor.py
-    racket_target_planner.py
-    quaternion_utils.py
-    node.py
+    constants.py                 # TableParams, BallPhysics, PlannerConfig
+    ball_state_estimator.py      # Stage 1
+    ball_trajectory_predictor.py # Stage 2 (+ StrikeTarget)
+    racket_target_planner.py     # Stage 3 (+ RacketCommand dataclass)
+    planner.py                   # HOPEPlanner pipeline (Stages 1-3)
+    quaternion_utils.py          # normal_to_quaternion
+    calibration.py               # calibrate_ball_physics + hope_calibrate CLI (step 8)
+    node.py                      # ROS 2 node -> publishes hope_msgs/RacketCommand
   config/
     hope_planner.yaml
   launch/
@@ -558,6 +810,8 @@ hope_planner/
     test_ball_state_estimator.py
     test_ball_trajectory_predictor.py
     test_racket_target_planner.py
+    test_quaternion_utils.py
+    test_calibration.py
 ```
 
 Implement constants:
@@ -690,12 +944,13 @@ Implement the ROS 2 node:
 5. Publish diagnostics at 10 Hz.
 6. Use Best Effort QoS with depth 1 for high-rate mocap topics.
 
-Example config:
+Config (`config/hope_planner.yaml`, as implemented):
 
 ```yaml
 hope_planner:
   ros__parameters:
     ball_rigid_body_name: "pingpong_ball"
+    ball_pose_index: 0          # which slot in /poses PoseArray is the ball
     x_hit: 0.0
     target_land_x: 2.055
     target_land_y: -0.7625
@@ -712,6 +967,7 @@ Verification commands:
 cd ~/workspace/HOPE/hope_ws
 colcon build --symlink-install --packages-select hope_msgs hope_planner
 source install/setup.bash
+colcon test --packages-select hope_planner   # or: python3 -m pytest src/hope_planner/test
 ros2 launch hope_planner hope_planner.launch.py
 ros2 topic hz /racket/command
 ros2 topic echo /racket/command --once
@@ -723,6 +979,20 @@ Verification gate:
 - A ball moving away from P1 produces no valid strike command.
 - `time_to_strike` is positive and decreases as the ball approaches.
 - Planner runtime is below 5 ms per update.
+
+Two corrections vs. the reference-doc skeleton (already applied in this repo):
+
+1. The node publishes the full `hope_msgs/RacketCommand` (position, velocity,
+   normal, strike_time, time_to_strike, ball_velocity_outgoing, valid, clears_net,
+   bypasses_net_posts, predicted_bounces). The skeleton in the planner reference
+   doc published a `geometry_msgs/PoseStamped`, which dropped most fields.
+2. `time_to_strike` is the time *remaining* (`t_strike - latest_sample_time`),
+   so it is positive and decreases as required. The skeleton's `time_to_strike`
+   property returned the absolute strike time.
+
+The `/poses` `PoseArray` carries no names, so `ball_pose_index` selects the
+ball's slot; for a name-keyed setup, replace the `/poses` subscription with a
+`/tf` lookup on `ball_rigid_body_name`.
 
 ## 8. Calibrate Ball Physics
 
@@ -751,6 +1021,50 @@ C_v = median(|v_z_after| / |v_z_before|)
 
 7. Store calibrated values in `hope_planner.yaml`.
 8. Re-run planner tests with calibrated values.
+
+Plain meaning of the fitted values:
+
+- `drag_k`: how strongly air drag slows the ball. Larger values make predicted flight shorter.
+- `restitution_h`: how much horizontal speed remains after a table bounce.
+- `restitution_v`: how much vertical speed remains after a table bounce.
+
+This fitter is implemented as `hope_planner/calibration.py` (`calibrate_ball_physics`,
+taken from the planner reference doc) with a CLI. Record the ball with the mocap
+system, export each trajectory to a CSV with columns `t,x,y,z` in the HOPE frame
+(e.g. from a `ros2 bag` of `/poses` or `/ball/point`), then:
+
+```bash
+ros2 run hope_planner hope_calibrate traj1.csv traj2.csv ... traj15.csv
+```
+
+How to create each calibration CSV:
+
+1. Start mocap and the Avatar-Pro bridge.
+2. Record one toss at a time. Each file should contain one continuous ball flight, not a whole practice session.
+3. Save the ball center position in the HOPE `world` frame. Units must be seconds and meters.
+4. Use this header:
+
+```text
+t,x,y,z
+```
+
+5. Example rows:
+
+```text
+t,x,y,z
+0.000000,1.850000,-0.650000,0.420000
+0.002778,1.846100,-0.650400,0.418700
+0.005556,1.842200,-0.650800,0.417200
+```
+
+6. Keep at least 20 percent of the recorded throws as held-out test trajectories. Do not use those files for fitting; use them only to check prediction error.
+
+If you record `/ball/point` with `ros2 bag`, export the bag to CSV with any ROS bag tool you prefer, but keep only these four columns: timestamp seconds, `point.x`, `point.y`, and `point.z`. Rename them to `t,x,y,z` before running `hope_calibrate`.
+
+It prints fitted `drag_k`, `restitution_h`, `restitution_v` ready to paste into
+`config/hope_planner.yaml`. Note the three-sample bounce detector is phase-
+sensitive: record at the full mocap rate (≥240–360 Hz) so each bounce yields a
+clean descend→contact→rise pattern.
 
 Verification gate:
 
@@ -841,13 +1155,30 @@ SMPLX_FEMALE.pkl
 SMPLX_MALE.pkl
 ```
 
-For the AGI robot:
+For the Agibot Expedition A3 robot:
 
-1. Create or obtain a GMR target named for the exact AGI model, for example `agi_<model>`.
-2. Confirm the output joint order matches the AGI controller joint order.
+1. Create or obtain a GMR target for the A3, for example `agibot_a3`. If you do not yet have the A3 URDF/MJCF from Agibot, retarget against the open Agibot X1 model (`agibot_x1`) as a stand-in and re-run once the A3 model arrives.
+2. Confirm the output joint order matches the A3 controller joint order (the same order the exported ONNX policy will use). Until Agibot provides it, mark the joint order as `PLACEHOLDER_EXTERNAL_A3_JOINT_ORDER` and keep it in one shared config.
 3. Retarget forehand.
 4. Retarget backhand.
 5. Export to CSV or PKL as expected by the preprocessing script.
+
+How to create or verify the GMR target:
+
+1. Locate the robot model file. For A3, this is `PLACEHOLDER_A3_URDF_OR_MJCF` from Agibot. For the temporary stand-in, use the X1 model from `agibot_x1_train/resources/robots/x1`.
+2. List the robot joints from the model. For URDF, use `grep '<joint' robot.urdf` or a URDF parser. For MJCF, list the `<joint>` elements.
+3. Remove fixed joints from the controllable joint list. Keep only joints that the controller can command.
+4. Create one shared file such as `hope_training/config/joint_order_agibot_a3.yaml` with the exact order.
+5. Use the same file for GMR retargeting, Isaac/MuJoCo training, ONNX metadata, and the hardware bridge.
+6. If the A3 SDK publishes `/joint_states`, compare the topic order and names with the YAML file:
+
+```bash
+ros2 topic echo /joint_states --once
+```
+
+If the names or order differ, fix the YAML and rebuild/re-export before training. Do not fix joint-order mismatch in only one script.
+
+`PLACEHOLDER_EXTERNAL_A3_JOINT_ORDER` means an external blocker, not an optional cleanup. Replace it only after Agibot provides the A3 joint order or after you verify it from the real SDK.
 
 For a custom robot:
 
@@ -894,6 +1225,26 @@ This step is mandatory. Do not approximate it by tracking the racket externally.
    - handle or blade roll convention.
 6. Write a small FK test that computes racket pose from known joint angles.
 
+How to measure `T_mount`:
+
+1. Print or assemble the racket bracket.
+2. Identify the robot wrist link frame from the URDF. If the wrist frame is not physically obvious, ask Agibot or inspect the URDF link/joint origin.
+3. Mark the racket frame:
+   - origin: center of the racket face,
+   - +X or normal axis: choose the direction the planner uses as the racket face normal,
+   - another axis: along the handle or blade top edge, so roll is not ambiguous.
+4. Measure translation from wrist frame origin to racket-face center in meters. Use calipers for short offsets or a ruler/tape for larger offsets.
+5. Measure orientation:
+   - easiest: design the bracket so the racket normal is aligned with a known wrist-link axis, then orientation is a simple 0/90/180 degree rotation;
+   - otherwise measure the three angles with a digital angle gauge, or solve the transform by touching known points on the racket with a tracked calibration pointer.
+6. Add this as a fixed joint in URDF/MJCF/USD, and also put the same transform in any FK code used by deployment.
+
+Minimum check:
+
+```text
+Known robot standing pose + measured T_mount -> computed racket center should match the real racket center within 1-2 cm.
+```
+
 Verification gate:
 
 - The simulated racket frame matches the physical mount.
@@ -902,7 +1253,7 @@ Verification gate:
 
 ## 12. Preprocess Motions For BeyondMimic
 
-For the AGI Isaac Lab or mjlab path, install BeyondMimic:
+For the Agibot Expedition A3 Isaac Lab path (with MuJoCo for sim-to-sim), install BeyondMimic:
 
 ```bash
 cd ~/workspace/HOPE/hope_training
@@ -917,21 +1268,46 @@ Install Isaac Sim and Isaac Lab:
 3. Use Python 3.10.
 4. Prefer a machine with an NVIDIA RTX 4090 or better.
 
-Add the AGI robot assets used by training:
+Add the Agibot A3 robot assets used by training:
 
 ```bash
-mkdir -p source/whole_body_tracking/whole_body_tracking/assets/agi
+mkdir -p source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
 
-# Copy the AGI USD, MJCF, or URDF assets supplied by AGI or your hardware team.
-# Keep meshes, actuator parameters, joint limits, and inertial values together.
-cp -r /path/to/agi_robot_assets/* \
-  source/whole_body_tracking/whole_body_tracking/assets/agi/
+# PLACEHOLDER_A3_ASSET_DIR is the folder containing the robot model and meshes.
+# For real A3 hardware, this folder must come from Agibot.
+# For temporary software bringup, use the open X1 asset folder instead.
+PLACEHOLDER_A3_ASSET_DIR=/absolute/path/to/agibot_a3_assets
+
+cp -r "$PLACEHOLDER_A3_ASSET_DIR"/* \
+  source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/
 ```
 
-After copying the AGI assets:
+Reminder: there is **no public A3 robot description**. Agibot's only open humanoid model is the X1
+(`github.com/AgibotTech/agibot_x1_train`, which ships URDF + MJCF + meshes under `resources/robots/x1/`).
+Use X1 to build and debug the pipeline, then swap in the real A3 assets from Agibot.
 
-1. Register the AGI robot asset path in the training config.
-2. Verify joint names and order against the real AGI controller.
+How to fill `PLACEHOLDER_A3_ASSET_DIR`:
+
+1. If Agibot gave you a zip/tar package, extract it under `~/workspace/HOPE/hope_training/vendor_assets/agibot_a3`.
+2. The folder should contain at least one robot model file (`.urdf`, `.mjcf`, `.xml`, or `.usd`) and mesh files (`.stl`, `.dae`, `.obj`, or `.usd`).
+3. Use an absolute path, for example:
+
+```bash
+PLACEHOLDER_A3_ASSET_DIR=$HOME/workspace/HOPE/hope_training/vendor_assets/agibot_a3
+```
+
+4. Verify the folder before copying:
+
+```bash
+find "$PLACEHOLDER_A3_ASSET_DIR" -maxdepth 3 -type f | sed -n '1,40p'
+```
+
+If the folder has only meshes but no robot model, or only a robot model but no meshes, it is incomplete. Ask Agibot for the complete asset package.
+
+After copying the assets:
+
+1. Register the robot asset path in the training config.
+2. Verify joint names and order against the real A3 controller joint order (the same order used for ONNX export and deployment).
 3. Verify inertial values, actuator limits, and default PD gains.
 4. Add the fixed racket mount link or fixed joint used by `T_mount`.
 
@@ -949,8 +1325,22 @@ Set up WandB:
 4. Set the entity:
 
 ```bash
-export WANDB_ENTITY=your-org-name
+export WANDB_ENTITY=PLACEHOLDER_WANDB_ENTITY
 ```
+
+How to get `PLACEHOLDER_WANDB_ENTITY`:
+
+1. Open WandB in the browser.
+2. Look at the workspace URL. In `https://wandb.ai/my-lab-name/...`, the entity is `my-lab-name`.
+3. Put that exact value into `WANDB_ENTITY`.
+4. Confirm login:
+
+```bash
+wandb login
+wandb whoami
+```
+
+Some BeyondMimic/WandB registry paths include `-org` after the entity. Use the exact registry name shown by the WandB UI after upload. In the examples below, replace `PLACEHOLDER_WANDB_ENTITY-org` with that registry owner string.
 
 Convert retargeted motions:
 
@@ -972,15 +1362,15 @@ Replay preprocessed motions:
 
 ```bash
 python scripts/replay_npz.py \
-  --registry_name=your-org-name-org/wandb-registry-motions/hope_forehand
+  --registry_name=PLACEHOLDER_WANDB_ENTITY-org/wandb-registry-motions/hope_forehand
 
 python scripts/replay_npz.py \
-  --registry_name=your-org-name-org/wandb-registry-motions/hope_backhand
+  --registry_name=PLACEHOLDER_WANDB_ENTITY-org/wandb-registry-motions/hope_backhand
 ```
 
 Verification gate:
 
-- The AGI model replays each motion.
+- The Agibot A3 (or X1 stand-in) model replays each motion.
 - The wrist and racket mount follow a plausible stroke.
 - Feet, pelvis, torso, and arms do not jitter badly.
 - WandB artifacts are registered and accessible.
@@ -1044,6 +1434,22 @@ Episode design:
 9. Continue briefly after strike for balance recovery.
 10. Reset on fall or episode end.
 
+How to define "reachable racket target":
+
+1. Start with the real or simulated robot in the ready stance.
+2. Sample candidate racket positions near the expected hit plane, for example around `x = 0.0` in the HOPE world frame.
+3. Use inverse kinematics or dense FK sampling to check whether the racket center can reach the candidate without violating joint limits.
+4. Reject targets that require foot penetration, self-collision, table collision, or a racket normal outside the wrist range.
+5. Save the accepted target bounds in the training config, for example:
+
+```text
+racket_target_x_range: [PLACEHOLDER_MIN_REACHABLE_X, PLACEHOLDER_MAX_REACHABLE_X]
+racket_target_y_range: [PLACEHOLDER_MIN_REACHABLE_Y, PLACEHOLDER_MAX_REACHABLE_Y]
+racket_target_z_range: [PLACEHOLDER_MIN_REACHABLE_Z, PLACEHOLDER_MAX_REACHABLE_Z]
+```
+
+Measure these ranges in simulation first. Confirm slowly on hardware only after the no-ball dry test passes.
+
 Verification gate:
 
 - The environment runs headless.
@@ -1058,8 +1464,8 @@ Baseline motion tracking command:
 
 ```bash
 python scripts/rsl_rl/train.py \
-  --task=Tracking-Flat-AGI-v0 \
-  --registry_name your-org-org/wandb-registry-motions/hope_forehand \
+  --task=PLACEHOLDER_TRACKING_TASK_NAME \
+  --registry_name PLACEHOLDER_WANDB_ENTITY-org/wandb-registry-motions/hope_forehand \
   --headless \
   --logger wandb \
   --log_project_name hope_wbc \
@@ -1070,8 +1476,8 @@ HOPE target-tracking command:
 
 ```bash
 python scripts/rsl_rl/train.py \
-  --task=HOPE-PingPong-AGI-v0 \
-  --registry_name your-org-org/wandb-registry-motions/hope_forehand \
+  --task=PLACEHOLDER_HOPE_TASK_NAME \
+  --registry_name PLACEHOLDER_WANDB_ENTITY-org/wandb-registry-motions/hope_forehand \
   --headless \
   --logger wandb \
   --log_project_name hope_wbc \
@@ -1099,17 +1505,31 @@ Parallel environments: around 4096
 Check the current upstream config before training:
 
 ```bash
-cat source/whole_body_tracking/whole_body_tracking/tasks/tracking/config/agi/agents/rsl_rl_ppo_cfg.py
+cat source/whole_body_tracking/whole_body_tracking/tasks/tracking/config/agibot_a3/agents/rsl_rl_ppo_cfg.py
 ```
+
+How to fill the training placeholders:
+
+1. `PLACEHOLDER_TRACKING_TASK_NAME` is the task name registered for plain motion tracking. If you follow the naming in this guide, it will be `Tracking-Flat-AgibotA3-v0`, but it only works after you register that task in the training code.
+2. `PLACEHOLDER_HOPE_TASK_NAME` is the task name registered for the HOPE racket-target environment. If you follow this guide, use `HOPE-PingPong-AgibotA3-v0`.
+3. To find registered task names, search the training repo:
+
+```bash
+rg -n "AgibotA3|HOPE-PingPong|Tracking-Flat|gym.register|register" source scripts
+```
+
+4. `PLACEHOLDER_WANDB_ENTITY-org/wandb-registry-motions/hope_forehand` must match the registry path printed by the upload command or shown in the WandB UI.
 
 Evaluate:
 
 ```bash
 python scripts/rsl_rl/play.py \
-  --task=HOPE-PingPong-AGI-v0 \
+  --task=PLACEHOLDER_HOPE_TASK_NAME \
   --num_envs=2 \
-  --wandb_path=your-org/hope_wbc/run_id
+  --wandb_path=PLACEHOLDER_WANDB_ENTITY/hope_wbc/PLACEHOLDER_RUN_ID
 ```
+
+`PLACEHOLDER_RUN_ID` is the run ID from the WandB run URL. Example: in `https://wandb.ai/my-lab/hope_wbc/runs/abc123`, the run ID is `abc123`.
 
 Target metrics:
 
@@ -1142,7 +1562,7 @@ Export ONNX:
 ```bash
 cd ~/workspace/HOPE/hope_ws/src/motion_tracking_controller
 python scripts/export_onnx.py \
-  --wandb_path=your-org/hope_wbc/run_id \
+  --wandb_path=PLACEHOLDER_WANDB_ENTITY/hope_wbc/PLACEHOLDER_RUN_ID \
   --output_path=~/workspace/HOPE/hope_training/policies/hope_forehand_policy.onnx
 ```
 
@@ -1150,13 +1570,20 @@ Export both policies:
 
 ```bash
 python scripts/export_onnx.py \
-  --wandb_path=your-org/hope_wbc/forehand_run_id \
+  --wandb_path=PLACEHOLDER_WANDB_ENTITY/hope_wbc/PLACEHOLDER_FOREHAND_RUN_ID \
   --output_path=~/workspace/HOPE/hope_training/policies/hope_forehand_policy.onnx
 
 python scripts/export_onnx.py \
-  --wandb_path=your-org/hope_wbc/backhand_run_id \
+  --wandb_path=PLACEHOLDER_WANDB_ENTITY/hope_wbc/PLACEHOLDER_BACKHAND_RUN_ID \
   --output_path=~/workspace/HOPE/hope_training/policies/hope_backhand_policy.onnx
 ```
+
+Run ID lookup:
+
+1. Open the successful training run in WandB.
+2. Copy the run ID from the URL or from the run overview page.
+3. Use the forehand run ID for `hope_forehand_policy.onnx` and the backhand run ID for `hope_backhand_policy.onnx`.
+4. After export, keep the ONNX file and the exact joint-order YAML together. They are a matched pair.
 
 The ONNX should include:
 
@@ -1221,6 +1648,24 @@ Implement:
 7. Publish joint position commands.
 8. Keep policy switching deterministic and logged.
 
+How to compute the side for switching:
+
+1. Use the same sign convention used during training.
+2. In the HOPE world frame, get the commanded racket target Y from `/racket/command.position.y`.
+3. Get the robot center Y from `P1_base_link` or the base pose used by training.
+4. Compute:
+
+```text
+relative_y = racket_command.position.y - p1_base_link_world_y
+```
+
+5. If your training labels positive `relative_y` as forehand, use that. If your training labels it as backhand, invert the rule. The important part is consistency, not the sign name.
+6. Log the values on every switch:
+
+```text
+relative_y, selected_policy, command_time, time_to_strike
+```
+
 Important:
 
 - Do not change observation ordering after export.
@@ -1233,32 +1678,50 @@ Verification gate:
 - A target on the backhand side selects the backhand model.
 - Switching does not cause a discontinuous joint command spike.
 
-## 18. Deploy On AGI Robot
+## 18. Deploy On The Agibot Expedition A3
 
-Use this path for the AGI robot. Keep the HOPE ROS 2 interfaces stable and put all AGI-specific logic behind a bridge or bringup package.
+Use this path for the A3. Keep the HOPE ROS 2 interfaces stable and put all Agibot-specific logic (AimDK/AimRT) behind a bridge package so the rest of the stack does not depend on the vendor API.
 
-Create or add AGI deployment packages:
+Study Agibot's own deployment pattern first. Agibot's open X1 inference stack is the closest public reference for how an Agibot humanoid runs a learned policy:
+
+- `github.com/AgibotTech/agibot_x1_infer` — C++ deployment node built on **AimRT** middleware, **ROS 2 Humble**, running the policy via **ONNX Runtime**. It subscribes `/joint_states`, publishes `/joint_cmd`, runs the **PD loop at ~1 kHz** and the **policy at ~100 Hz** (decimation 10), and is driven by a state machine (`pd_idle`, `pd_stand`, `rl_walk_*`, ...). HOPE's WBC policy runs at **50 Hz**, so adjust the decimation accordingly.
+- `github.com/AgibotTech/agibot_x1_train` — the matching training repo (Isaac Gym + MuJoCo sim2sim; PT→ONNX/JIT export).
+- `x2-aimdk.agibot.com` — the published **AimDK_X2** developer SDK docs (ROS 2 interfaces, robot specs). Assume the A3 has an analogous SDK and confirm with Agibot.
+
+Caveat: the X1 stack is **locomotion-only** and uses **ROS 2 Humble**, while HOPE targets ROS 2 Jazzy and needs whole-body motion tracking. Reuse its **plumbing** (AimRT + ONNX Runtime, `/joint_states`/`/joint_cmd`, the 1 kHz-PD/decimated-policy split, the state machine), not its walking algorithm.
+
+Create or add Agibot deployment packages:
 
 ```bash
 cd ~/workspace/HOPE/hope_ws/src
 
-# If AGI provides a ROS 2 bridge or SDK wrapper, clone it here.
-# Otherwise create a thin bridge package and keep the low-level API isolated.
-ros2 pkg create agi_hardware_bridge --build-type ament_cmake
-ros2 pkg create agi_bringup --build-type ament_python
+# If Agibot provides an A3 ROS 2 / AimDK bridge or SDK wrapper, clone it here.
+# Otherwise create a thin bridge package and keep the AimDK/AimRT low-level API isolated.
+ros2 pkg create agibot_hardware_bridge --build-type ament_cmake
+ros2 pkg create agibot_bringup --build-type ament_python
 
 git clone https://github.com/HybridRobotics/motion_tracking_controller.git
 ```
 
-The AGI bridge must provide:
+The Agibot A3 bridge must provide:
 
-1. Joint encoder feedback as `sensor_msgs/msg/JointState`.
-2. A safe command path from policy action to AGI joint position targets.
-3. The AGI joint name list and joint order used by the ONNX policy.
+1. Joint encoder feedback as `sensor_msgs/msg/JointState` (mapped from the AimDK/AimRT joint feedback).
+2. A safe command path from policy action to A3 joint position targets (HOPE action → `/joint_cmd` via AimDK).
+3. The A3 joint name list and joint order used by the ONNX policy (obtain from Agibot — see step 2.1).
 4. PD gains or impedance settings for each controlled joint.
-5. A hard stop, soft stop, and standby mode.
-6. Network setup for the AGI controller.
+5. A hard stop, soft stop, and standby mode (wired to the A3 hardware E-stop and AimDK soft-stop).
+6. Network setup for the A3 controller (AimRT/DDS discovery).
 7. Launch files that start the bridge, safety monitor, and WBC controller in a predictable order.
+
+Bridge placeholders and how to replace them:
+
+| Placeholder | Meaning | How to get it |
+| --- | --- | --- |
+| `PLACEHOLDER_A3_ROBOT_IP` | The robot controller IPv4 address. | Read the Agibot network setup page or the robot controller UI. If DHCP is used, ask the router or run `arp -a` after connecting the robot. |
+| `PLACEHOLDER_A3_NETWORK_INTERFACE` | The Linux network device connected to the robot, such as `enp4s0` or `eth0`. | Run `ip -br addr` on the control PC and choose the wired interface on the robot subnet. |
+| `PLACEHOLDER_A3_JOINT_ORDER_FILE` | YAML file listing commandable joints in controller order. | Create it from the A3 SDK/URDF and verify against `/joint_states`. |
+| `PLACEHOLDER_A3_PD_GAINS_FILE` | Safe startup PD or impedance values. | Get defaults from Agibot, then tune only after no-ball tests. |
+| `PLACEHOLDER_A3_STOP_SERVICE_OR_TOPIC` | Software stop command. | Read the A3 SDK/AimDK docs or Agibot manual; verify with the robot supported off the ground or in low-power mode. |
 
 Install dependencies and build:
 
@@ -1268,60 +1731,78 @@ rosdep install --from-paths src --ignore-src -r -y
 
 colcon build --symlink-install \
   --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  --packages-up-to agi_hardware_bridge agi_bringup motion_tracking_controller
+  --packages-up-to agibot_hardware_bridge agibot_bringup motion_tracking_controller
 
 source install/setup.bash
 ```
 
-Connect to the AGI robot:
+Connect to the Agibot A3:
 
-1. Connect the control PC to the AGI robot network using the AGI hardware guide.
-2. Set the static IP, subnet, and firewall rules required by the AGI SDK.
+1. Connect the control PC to the A3 robot network using the Agibot hardware guide.
+2. Set the static IP, subnet, and firewall rules required by the AimDK SDK.
 3. Identify the network interface:
 
 ```bash
-ip addr
+ip -br addr
 ```
 
-4. Confirm that the AGI controller is reachable:
+4. Find or set the robot IP:
 
 ```bash
-ping <AGI_ROBOT_IP>
+# Show neighbors on the local Ethernet network after the robot is connected.
+ip neigh
+
+# Or, if your network uses ARP tools:
+arp -a
+```
+
+5. Confirm that the A3 controller is reachable:
+
+```bash
+ping PLACEHOLDER_A3_ROBOT_IP
 ```
 
 Run real control only after sim-to-sim passes:
 
 ```bash
-ros2 launch agi_bringup agi_robot.launch.py \
-  robot_ip:=<AGI_ROBOT_IP> \
-  network_interface:=<AGI_NETWORK_INTERFACE>
+ros2 launch agibot_bringup agibot_a3.launch.py \
+  robot_ip:=PLACEHOLDER_A3_ROBOT_IP \
+  network_interface:=PLACEHOLDER_A3_NETWORK_INTERFACE
 
 ros2 launch motion_tracking_controller real.launch.py \
   policy_path:=~/workspace/HOPE/hope_training/policies/hope_forehand_policy.onnx
 ```
 
-Record the AGI safety controls before any active swing test:
+Record the A3 safety controls before any active swing test. Fill every line from the Agibot manual or SDK docs; do not leave a line blank:
 
 ```text
-Standby:
-Activate WBC:
-Soft stop:
-Hard E-stop:
-Power cut:
-Recovery procedure:
+Standby command or button: PLACEHOLDER_A3_STANDBY_METHOD
+Activate WBC command: PLACEHOLDER_A3_WBC_ACTIVATE_METHOD
+Soft stop service/topic/button: PLACEHOLDER_A3_SOFT_STOP_METHOD
+Hard E-stop physical button location: PLACEHOLDER_A3_ESTOP_LOCATION
+Power cut method: PLACEHOLDER_A3_POWER_CUT_METHOD
+Recovery procedure after stop: PLACEHOLDER_A3_RECOVERY_STEPS
 ```
+
+How to measure E-stop response:
+
+1. Start logging joint states and the stop command timestamp.
+2. Record video at 120 fps or faster if available.
+3. Trigger the E-stop while the robot is moving slowly in a safe test.
+4. Measure time from the stop trigger to the time upper-body and gait motion stops.
+5. The competition requirement is below `200 ms`; if your measured value is higher, fix the safety path before continuing.
 
 Verification gate:
 
-- The AGI robot enters standby safely.
-- The AGI emergency stop works from hardware and software.
+- The A3 enters standby safely.
+- The A3 emergency stop works from hardware and software, and stops upper-body and gait motion within 200 ms (competition requirement).
 - Joint states are streaming with the expected names and order.
 - The bridge rejects commands outside joint, velocity, torque, and workspace limits.
 - The policy can be activated in a controlled, no-ball test.
 
 ## 19. Port To Another Humanoid
 
-Use this path only after the AGI deployment path works or if the target robot changes.
+Use this path only after the Agibot A3 deployment path works or if the target robot changes.
 
 Recommended path:
 
@@ -1355,21 +1836,26 @@ Verification gate:
 Launch order:
 
 ```bash
-# Terminal 1: motion capture bridge
-ros2 launch motion_capture_tracking optitrack.launch.py \
-  server_ip:=192.168.1.100
+# Terminal 1: motion capture bringup (Avatar Pro VRPN client + relay + world frame)
+ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
+  server:=PLACEHOLDER_AVATAR_PRO_PC_IP port:=3883 update_freq:=360.0
 
 # Terminal 2: planner
 ros2 launch hope_planner hope_planner.launch.py
 
 # Terminal 3: WBC controller
 ros2 launch motion_tracking_controller real.launch.py \
-  network_interface:=<AGI_NETWORK_INTERFACE> \
+  network_interface:=PLACEHOLDER_A3_NETWORK_INTERFACE \
   policy_path:=~/workspace/HOPE/hope_training/policies/hope_forehand_policy.onnx
 
 # Terminal 4: monitoring
-ros2 topic hz /poses /tf /racket/command /joint_states
+ros2 topic hz /poses
+ros2 topic hz /tf
+ros2 topic hz /racket/command
+ros2 topic hz /joint_states
 ```
+
+Use `PLACEHOLDER_AVATAR_PRO_PC_IP` from Step 6 (the Avatar Pro / CMTracker PC IP). Use `PLACEHOLDER_A3_NETWORK_INTERFACE` from Step 18.
 
 Expected topic map:
 
@@ -1403,6 +1889,14 @@ Verification gate:
 - WBC receives base_link, joint states, and racket commands.
 - Total perception-to-actuation latency is below 20 ms.
 
+How to measure total latency:
+
+1. Time-stamp the incoming ball message with the mocap timestamp.
+2. Time-stamp the outgoing joint command right before it is sent to the robot bridge.
+3. Subtract: `latency = joint_command_send_time - mocap_sample_time`.
+4. Log at least 200 samples during soft tosses and report median and 95th percentile.
+5. If 95th percentile is above `20 ms`, check network, CPU load, ROS QoS, and whether any node is using Reliable QoS on high-rate mocap data.
+
 ## 21. Add Monitoring And Safety Nodes
 
 Implement `hope_monitoring` with:
@@ -1427,6 +1921,27 @@ Implement `hope_monitoring` with:
 
 6. Diagnostics publisher.
    - Publish `diagnostic_msgs/DiagnosticArray`.
+
+Suggested starting thresholds:
+
+```text
+mocap_min_rate_hz: 120
+mocap_preferred_rate_hz: 240
+ball_missing_warn_frames: 3
+table_translation_drift_warn_m: 0.01
+table_rotation_drift_warn_rad: 0.02
+base_allowed_x_min_m: -1.5
+base_allowed_x_max_m: 1.37
+racket_speed_exhibition_limit_mps: 6.0
+estop_required_stop_time_s: 0.200
+```
+
+How to tune thresholds:
+
+1. Record 30 seconds with the table and robot completely still.
+2. Compute normal noise for `PPT`, `P1`, and ball position.
+3. Set warning thresholds at least 3 times larger than normal still-scene noise.
+4. Keep the E-stop threshold fixed at `0.200 s`; that comes from the competition rule, not from tuning.
 
 Verification gate:
 
@@ -1659,8 +2174,8 @@ Use this as the master checklist:
 3. Do not mix table-center and HOPE corner-origin coordinates without explicit transforms.
 4. Do not deploy to hardware before sim-to-sim verification.
 5. Do not activate full-speed swings before E-stop testing.
-6. Do not assume AGI robot assets from different sources are interchangeable.
-7. Do not assume any vendor-specific details until you confirm them from AGI documentation or hardware.
+6. Do not assume Agibot robot assets from different sources are interchangeable (the X1 model is NOT the A3 model).
+7. Do not assume any A3-specific detail (joint order, DOF, PD gains, control API, ROS 2 distro) until you confirm it from Agibot documentation or hardware. The public sources cover X1/X2, not the A3.
 8. Do not change observation or joint ordering after ONNX export.
 9. Do not use Reliable QoS for high-rate real-time mocap topics unless you have measured that latency remains acceptable.
 10. Do not tune multiple sim-to-real variables at once.
@@ -1673,3 +2188,68 @@ Use this as the master checklist:
 - `HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md`
 - `HOPE_WBC_Simulation_Training_Reference_Setup.md`
 - `HOPE_Hardware_Deployment_Reference_Setup.md`
+
+External Agibot / Expedition A3 references (verified June 2026):
+
+- Agibot Expedition A3 product page: `https://www.agibot.com/` (product announcement; 1.73 m, 55 kg).
+- AimRT middleware (Agibot's open-source C++20 runtime, ROS 2 interop): `https://github.com/AimRT/AimRT`.
+- AimDK_X2 developer SDK docs (closest published Agibot humanoid SDK; ROS 2 interfaces, robot specs): `https://x2-aimdk.agibot.com/en/latest/`.
+- Agibot X1 training stack (only open Agibot humanoid model; URDF/MJCF/meshes, Isaac Gym + MuJoCo, PPO, ONNX export): `https://github.com/AgibotTech/agibot_x1_train`.
+- Agibot X1 inference/deployment stack (AimRT + ROS 2 Humble + ONNX Runtime; `/joint_states` → `/joint_cmd`, 1 kHz PD / 100 Hz policy): `https://github.com/AgibotTech/agibot_x1_infer`.
+- Agibot OmniHand O10 dexterous hand (optional; SDK `github.com/AgibotTech/agillink_omnihand_sdk`).
+- Third-party ROS 2 robot_description packaging template (Unitree G1 + Agibot X2 URDF/MJCF; not the A3): `https://github.com/ioai-tech/robot_description`.
+
+Note: at the time of writing there is **no public robot description, SDK, or joint specification for the Expedition A3 itself**. The A3-specific URDF/MJCF, joint order, actuator parameters, PD gains, and control/safety API must be obtained directly from Agibot (see step 2.1).
+
+## 30. Values You Must Fill In (TODO) And How To Get Them
+
+Everything below is a placeholder in the committed code/config. Each row says
+where the value lives, what is there now, and exactly how to obtain the real one.
+Search the repo for `TODO` to find these inline. Nothing here can be guessed from
+a laptop — each value comes from the arena network, a physical measurement, a
+calibration run, or Agibot.
+
+### 30.1 Mocap network and stream (do at the arena)
+
+| Value | Where | Now | How to get it |
+|-------|-------|-----|---------------|
+| Avatar Pro server IP | `avatar_pro_hope_bridge.launch.py` arg `server` | `192.168.1.100` | Run `ipconfig` on the Avatar-Pro / CMTracker PC; use the wired-adapter IPv4 on the robot LAN. Confirm with `ping <ip>` from the ROS host. |
+| VRPN port | launch arg `port` | `3883` | Chingmu/Avatar-Pro default is 3883; confirm in the CMTracker streaming settings. |
+| Camera / poll rate | launch arg `update_freq` | `360.0` | Set to the mocap system's frame rate (≥240–360 Hz for the ball). |
+| Object names | `avatar_pro_vrpn.yaml` (`ppt_object`, `p1_object`, `p2_object`, `ball_object`) | `PPT`/`P1`/`P2`/`ball` | Must match the rigid-body/marker labels in CMTracker exactly. Read them in CMTracker, or `ros2 topic list \| grep vrpn_mocap` once the client is up. |
+| Stream frame is REP-103 Z-up | mocap software | assumed | Set the mocap Up Axis to Z and calibrate the origin at the P1 near-side left corner. If it can only stream Y-up, add the fixed rotation in the relay (mocap doc §6.5.3). |
+
+### 30.2 World frame ↔ robot (physical measurement)
+
+| Value | Where | Now | How to get it |
+|-------|-------|-----|---------------|
+| `mocap_to_base_link` P1/P2 `xyz` (m), `rpy` (rad) | `hope_bringup/config/hope_world_frame.yaml` | all `0.0` | Measure the rigid transform from each robot's marker-cluster frame to its URDF `base_link` (CAD or tape-measure + level). Verify: stand the robot still and compare FK-predicted `base_link` to the mocap reading; adjust until they agree. |
+
+### 30.3 Ball physics (calibration run)
+
+| Value | Where | Now | How to get it |
+|-------|-------|-----|---------------|
+| `drag_k`, `restitution_h`, `restitution_v`, `restitution_racket` | `hope_planner/config/hope_planner.yaml` | HITTER defaults | Record ≥15 ball trajectories with the mocap, export each to CSV (`t,x,y,z`), run `ros2 run hope_planner hope_calibrate traj*.csv`, paste the printed values (Section 8). `restitution_racket` is fitted from ball-in / ball-out speeds across the paddle. |
+| `ball_pose_index` | `hope_planner/config/hope_planner.yaml` | `0` | With the avatar_pro relay it is 0 (ball is first in `pose_array_order`). Confirm with `ros2 topic echo /poses --once` and count the ball's slot. |
+| `x_hit`, `delta_t_flight` | `hope_planner/config/hope_planner.yaml` | `0.0`, `0.5` | Tune to your robot's reach and preferred return arc; start with the defaults and adjust during soft-toss tests (Section 23). |
+
+### 30.4 Agibot Expedition A3 robot (request from Agibot — see step 2.1)
+
+| Value | Where it will be used | How to get it |
+|-------|----------------------|---------------|
+| A3 URDF/MJCF/USD + meshes | GMR retarget, sim training, FK | Request from Agibot (no public A3 model). Develop against the open X1 model meanwhile. |
+| Joint name list + joint order | planner→WBC, ONNX export, bridge | From the A3 SDK/URDF. Must be identical everywhere (training, export, deploy). |
+| Joint limits, link inertials, gear ratios | sim fidelity, safety limits | From Agibot datasheet/URDF. |
+| Default PD gains / impedance | WBC training + `agibot_hardware_bridge` | From Agibot; start hardware at ~70% of sim gains (Section 24). |
+| `base_link` name + standing height | world-frame FK chain | From the A3 URDF. |
+| Control SDK / AimDK / ROS 2 API, joint command + feedback topics | `agibot_hardware_bridge` | From Agibot (analogous to AimDK_X2). Confirm ROS 2 distro (X1 uses Humble; HOPE targets Jazzy). |
+| E-stop / soft-stop / standby interface | safety, `agibot_bringup` | From the Agibot manual; verify the 200 ms stop requirement. |
+
+### 30.5 Racket mount and WBC/deploy (later phases)
+
+| Value | Where | How to get it |
+|-------|-------|---------------|
+| `T_mount` (wrist→racket fixed transform) | robot model + FK + reward (step 11) | Physically measure the 3D-printed bracket (translation to racket center, face-normal orientation, blade roll); add as a fixed joint. |
+| WandB entity / run ids | training + ONNX export (steps 12–15) | Your own WandB org/run after training. |
+| ONNX policy paths | sim2sim + deploy (steps 16–18) | Output of `export_onnx.py` after a successful training run. |
+| Robot IP + network interface | deploy (step 18) | From the Agibot network setup; `ip addr` on the control PC. |

@@ -1,0 +1,28 @@
+avatar_pro_vrpn_relay:
+  ros__parameters:
+    # NOTE: the VRPN server IP/port and poll rate are launch args of
+    # avatar_pro_hope_bridge.launch.py (server / port / update_freq), NOT here.
+    #
+    # TODO(confirm): these must EXACTLY match the rigid-body / marker labels
+    # configured in the Avatar-Pro / CMTracker (MCServer) object list. HOW TO GET:
+    # open CMTracker, read the object names (or run `ros2 topic list | grep vrpn_mocap`
+    # after the client is up) and copy them verbatim. A mismatch = no data relayed.
+    vrpn_namespace: "/vrpn_mocap"
+    ppt_object: "PPT"      # TODO: confirm table rigid-body name in CMTracker
+    p1_object: "P1"        # TODO: confirm P1 robot rigid-body name
+    p2_object: "P2"        # TODO: confirm P2 robot rigid-body name
+    ball_object: "ball"    # TODO: confirm ball marker name
+
+    world_frame: "world"
+
+    # Published HOPE-standard topics.
+    table_pose_topic: "/table/pose"
+    p1_pose_topic: "/P1/pose"
+    p2_pose_topic: "/P2/pose"
+    ball_point_topic: "/ball/point"
+    poses_topic: "/poses"
+
+    # Keep ball first so hope_planner's default ball_pose_index=0 works.
+    pose_array_order: ["ball", "PPT", "P1", "P2"]
+    publish_tf: true
+    publish_pose_array: true
