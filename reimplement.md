@@ -913,6 +913,17 @@ Verification gate:
 > with two corrections, noted at the end of this section. Use the steps below to
 > understand or rebuild it.
 
+Practical execution order note:
+
+- The section numbers here describe the build-up of the system, not the only valid day-to-day working order.
+- For a real beginner doing live bringup, the most practical order is usually:
+  1. Step 6: make sure mocap topics are real and stable.
+  2. Step 7 quick smoke test: confirm the planner node starts and can read `/poses`.
+  3. Step 8: record ball trajectories and calibrate `drag_k`, `restitution_h`, and `restitution_v`.
+  4. Step 7 real validation again: re-run the planner with the calibrated values.
+- So yes: if your goal is "get accurate physics first", then Step 6 -> Step 8 -> Step 7 is a reasonable path.
+- The only reason to touch Step 7 before Step 8 is to do a quick health check with the default values and make sure the whole data path is alive.
+
 Create the package:
 
 ```bash
@@ -1185,6 +1196,47 @@ system, export each trajectory to a CSV with columns `t,x,y,z` in the HOPE frame
 ```bash
 ros2 run hope_planner hope_calibrate traj1.csv traj2.csv ... traj15.csv
 ```
+
+Important for this repository version:
+
+- The current `hope_calibrate` command fits only:
+  - `drag_k`
+  - `restitution_h`
+  - `restitution_v`
+- It does NOT fit `restitution_racket`.
+- `restitution_racket` still needs a separate ball-vs-racket test later, or a temporary default such as `0.88`.
+
+Practical recording flow for this repository version:
+
+1. Record one toss per bag from `/ball/point`.
+2. Before recording, confirm `/ball/point` is really publishing and changes when the real ball moves.
+2. Convert each bag to one CSV with:
+
+```bash
+ros2 run hope_planner hope_bag_to_csv \
+  --bag traj01 \
+  --topic /ball/point \
+  --output traj01.csv
+```
+
+3. Then run:
+
+```bash
+ros2 run hope_planner hope_calibrate traj01.csv traj02.csv ... traj15.csv
+```
+
+Recommended bag-record command:
+
+```bash
+ros2 topic echo /ball/point --once
+ros2 bag record -s mcap /ball/point -o traj01
+```
+
+Important:
+
+- Start the recording only after `/ball/point` is alive.
+- After one toss, stop with `Ctrl+C` and wait for rosbag to finish writing metadata.
+- If the bag folder contains a `0-byte` `.mcap` file or no `metadata.yaml`, the recording is incomplete; delete that folder and record again.
 
 How to create each calibration CSV:
 

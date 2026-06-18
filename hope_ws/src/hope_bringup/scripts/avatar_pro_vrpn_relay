@@ -8,11 +8,12 @@ version:
    MCServer cannot give it an asset name like "ball" the way it does for the
    PPT/P1/P2 rigid bodies, so over VRPN it shows up either as its own sender
    addressed by an opaque numeric id, or as one sensor channel of a sender. With
-   the client run as ``multi_sensor:=true`` every object becomes
-   ``/vrpn_mocap/<sender>/<sensor_index>/pose`` (an extra path segment) instead
-   of ``/vrpn_mocap/<sender>/pose``. So we DISCOVER pose topics at runtime and
-   match each on its VRPN *sender name* (the first path segment), which makes an
-   extra sensor-index segment harmless.
+   the client run as ``multi_sensor:=true`` every sensor becomes
+   ``/vrpn_mocap/<sender>/pose<sensor_index>`` (the index is a SUFFIX on
+   ``pose`` -- e.g. ``/vrpn_mocap/MCAvatar/pose31664``) instead of
+   ``/vrpn_mocap/<sender>/pose``. So we DISCOVER pose topics at runtime and
+   match each on its VRPN *sender name* (the first path segment), which makes
+   the trailing sensor-index harmless.
 
 2. Because the marker usually carries no usable name, the ball is found by
    MOTION: among every discovered pose topic that is not one of the named rigid
@@ -142,15 +143,26 @@ class AvatarProVrpnRelay(Node):
     def _topic_to_sender(self, topic: str) -> str | None:
         """Return the VRPN sender name (first path segment) of a pose topic.
 
-        ``/vrpn_mocap/PPT/pose`` and ``/vrpn_mocap/PPT/0/pose`` both -> ``PPT``.
+        vrpn_mocap names the pose topic differently depending on multi_sensor:
+          * single sensor: ``/vrpn_mocap/PPT/pose``
+          * multi_sensor:  ``/vrpn_mocap/PPT/pose0`` (sensor index is a SUFFIX
+            on ``pose`` -- e.g. ``pose0``, ``pose31664``)
+        Some builds instead nest the index as its own segment
+        (``/vrpn_mocap/PPT/0/pose``). All three -> sender ``PPT``. The type
+        filter in _discover_and_select already drops the twist*/accel* topics,
+        so here we only need to recognise a pose topic and read its sender.
         """
         prefix = self._vrpn_ns + "/"
-        if not topic.startswith(prefix) or not topic.endswith("/pose"):
+        if not topic.startswith(prefix):
             return None
-        body = topic[len(prefix):-len("/pose")]
-        if not body:
+        segments = topic[len(prefix):].split("/")
+        if len(segments) < 2:
             return None
-        return body.split("/", 1)[0]
+        last = segments[-1]
+        # "pose" (single/nested layouts) or "pose<sensor_index>" (multi_sensor).
+        if last != "pose" and not (last.startswith("pose") and last[4:].isdigit()):
+            return None
+        return segments[0]
 
     def _classify(self, sender: str) -> str | None:
         if sender == self._ppt_object:
