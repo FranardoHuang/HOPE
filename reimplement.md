@@ -625,11 +625,29 @@ In Avatar-Pro:
 2. Set the streaming coordinate frame to Z-up if the software exposes that option.
 3. Calibrate the world origin at the P1 near-side left table corner.
 4. Align +X toward P2 along the table length.
-5. Create or rename tracked objects exactly as `PPT`, `P1`, `P2`, and `ball`.
-6. Track `PPT`, `P1`, and `P2` as 6-DOF rigid bodies.
-7. Track `ball` as one 3-DOF marker; use a fully coated reflective ball if possible.
-8. Enable VRPN streaming, usually on port `3883`.
-9. Record the Avatar-Pro PC IP address.
+5. Create the rigid bodies and name them exactly `PPT`, `P1`, and `P2`. Track
+   each as a 6-DOF rigid body. These names DO appear in the topic path, so
+   spelling and capitalization matter.
+6. The ball is different, and this is the part that most often goes wrong. A
+   ping-pong ball carries one marker and cannot form a rigid body (a rigid body
+   needs >=3 markers), so CMTracker cannot give it an asset name like `ball` the
+   way it does for the rigid bodies. You only get whatever the VRPN stream emits
+   for that single point. So:
+   - Make the single ball marker a tracked point with a unique, recorded id. A
+     free/unlabeled marker is usually NOT streamed at all, so it must be defined
+     as a tracked object/marker, not just a stray reflection on the table.
+   - Enable individual-marker (single-point) output in the VRPN/stream settings,
+     not only rigid-body output, or the point never enters the stream.
+   - Use a fully coated reflective ball if possible (one bright blob at the true
+     ball center; see the mocap reference doc section 5.4).
+7. Enable VRPN streaming, usually on port `3883`.
+8. Record the Avatar-Pro PC IP address.
+
+Because the ball usually arrives under an opaque marker id (not the name
+`ball`), the HOPE relay does NOT rely on a ball name. It auto-detects the ball by
+motion: among every streamed object that is not `PPT`/`P1`/`P2`, the ball is the
+one whose position actually moves. So you do not have to discover and hard-code
+the ball's id before you can run — wave the ball and the relay locks onto it.
 
 How to get the Avatar-Pro IP address:
 
@@ -642,7 +660,13 @@ How to get the Avatar-Pro IP address:
 ping AVATAR_PRO_PC_IP
 ```
 
-If the object names in Avatar-Pro are not exactly `PPT`, `P1`, `P2`, and `ball`, either rename them in Avatar-Pro or edit `hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml`. The ROS relay uses names, not marker IDs, so spelling and capitalization matter.
+If the rigid-body names in Avatar-Pro are not exactly `PPT`, `P1`, `P2`, either
+rename them in Avatar-Pro or edit `ppt_object`/`p1_object`/`p2_object` in
+`hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml` and rebuild `hope_bringup`.
+The relay matches rigid bodies by their VRPN sender name, so spelling and
+capitalization matter for those three. The ball is matched by motion, not name,
+so `ball_object` is left empty (auto). Only set `ball_object` to a concrete id if
+you have confirmed it and want to pin it instead of auto-detecting.
 
 On the ROS 2 machine, install the VRPN client and rebuild the HOPE bringup package:
 
@@ -656,6 +680,55 @@ colcon build --symlink-install --packages-select hope_bringup
 source install/setup.bash
 '
 ```
+
+Hands-on quick path for this code version:
+
+1. Open `hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml`.
+2. Check only these 4 lines first:
+   - `ppt_object: "PPT"`
+   - `p1_object: "P1"`
+   - `p2_object: "P2"`
+   - `ball_object: ""`
+3. Important:
+   - `PPT`, `P1`, and `P2` must match CMTracker exactly.
+   - `ball_object` should normally stay empty. This code auto-detects the ball by motion.
+4. Before starting, stop old ROS nodes from previous tests:
+
+```bash
+distrobox enter hope -- bash -lc '
+pkill -f avatar_pro_vrpn_relay || true
+pkill -f client_node || true
+pkill -f static_transform_publisher || true
+ros2 daemon stop || true
+ros2 daemon start
+'
+```
+
+5. Start the full bridge:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+source ~/workspace/HOPE/hope_ws/install/setup.bash
+ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
+  server:=192.168.1.100 \
+  port:=3883 \
+  update_freq:=360.0
+'
+```
+
+6. What you should see in that launch terminal:
+   - one line saying the relay is in auto mode, similar to:
+     `ball auto-detect: will lock onto the moving non-rigid marker`
+   - several discovery lines, similar to:
+     `discovered /vrpn_mocap/PPT/.../pose -> PPT`
+     `discovered /vrpn_mocap/P1/.../pose -> P1`
+   - after you move the real ball by hand, one lock line, similar to:
+     `ball -> /vrpn_mocap/.../pose (moving marker ...)`
+7. Very important:
+   - `/ball/point` and `/poses` are not expected to publish before the relay locks onto the ball.
+   - In this code version, `/poses` is published on BALL updates only, not on table/P1/P2 updates.
+   - So if the ball is standing still, `/poses` may appear quiet even though the relay is healthy.
 
 Start the whole mocap bringup with one command. `avatar_pro_hope_bridge.launch.py`
 starts the VRPN client, the relay, and the static HOPE world frame together.
@@ -674,8 +747,15 @@ ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
 
 This launches three things:
 
-1. `vrpn_mocap client_node` — Avatar-Pro VRPN -> `/vrpn_mocap/<object>/pose`.
-2. `avatar_pro_vrpn_relay` — `/vrpn_mocap/*` -> HOPE `/poses`, `/tf`, `/ball/point`, `/{table,P1,P2}/pose`.
+1. `vrpn_mocap client_node` — Avatar-Pro VRPN -> `/vrpn_mocap/<sender>/<sensor>/pose`.
+   The bridge runs it with `multi_sensor:=true`, so every VRPN sensor channel
+   gets its own topic. This matters because the ball is a single marker, not a
+   nameable rigid body, so it usually shows up only as a sensor channel (an extra
+   `/<sensor>` path segment), never as a tidy `/vrpn_mocap/ball/pose`.
+2. `avatar_pro_vrpn_relay` — discovers `/vrpn_mocap/*` pose topics at runtime,
+   matches `PPT`/`P1`/`P2` by sender name (the extra sensor-index segment is
+   ignored), auto-detects the ball as the moving non-rigid marker, and republishes
+   HOPE `/poses`, `/tf`, `/ball/point`, `/{table,P1,P2}/pose`.
 3. `hope_world.launch.py` — the static world-frame landmarks and `P -> P_base_link` offsets.
 
 Set `update_freq` to your camera rate (≥240–360 Hz for the ball). The default
@@ -704,13 +784,30 @@ ros2 run tf2_ros tf2_echo world P1
 '
 ```
 
-The relay subscribes to:
+What to expect from those checks:
+
+1. `ros2 topic list | grep -E "ball|P1|P2|table|poses"`:
+   - you should at least see `/P1/pose`, `/table/pose`, `/ball/point`, `/poses`
+   - topic names can exist before data is flowing, so this command alone is not enough
+2. `ros2 run tf2_ros tf2_echo world P1`:
+   - should print numbers if P1 is being tracked
+3. `ros2 topic echo /ball/point --once`:
+   - may wait until you move the real ball
+   - if it waits forever, do not panic yet; first physically wave the ball in front of the cameras
+4. `ros2 topic hz /poses`:
+   - only becomes non-zero after the ball has been locked and starts updating
+   - this is expected for this code version
+
+The relay discovers `/vrpn_mocap/*` pose topics at runtime (it does not assume
+fixed names). It matches each on the VRPN sender name — so both
+`/vrpn_mocap/PPT/pose` and `/vrpn_mocap/PPT/0/pose` map to `PPT` — and treats any
+non-rigid-body marker as a ball candidate:
 
 ```text
-/vrpn_mocap/PPT/pose
-/vrpn_mocap/P1/pose
-/vrpn_mocap/P2/pose
-/vrpn_mocap/ball/pose
+/vrpn_mocap/PPT/<sensor>/pose    -> PPT   (rigid body, by name)
+/vrpn_mocap/P1/<sensor>/pose     -> P1    (rigid body, by name)
+/vrpn_mocap/P2/<sensor>/pose     -> P2    (rigid body, by name)
+/vrpn_mocap/<anything else>/pose -> ball candidate -> the moving one is the ball
 ```
 
 and publishes:
@@ -724,14 +821,48 @@ and publishes:
 /tf
 ```
 
-If Avatar-Pro uses different object names, edit `hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml` and rebuild `hope_bringup`.
+When the relay locks onto the ball it logs a line like `ball -> /vrpn_mocap/7/pose
+(moving marker ...)`. If it never logs that, the ball marker is not reaching ROS
+— see "If you cannot find the ball topic" below.
 
 Required object names:
 
 1. `PPT`: table rigid body, 6-DOF pose, near-side left table corner as pivot.
 2. `P1`: player-one robot mocap rigid body, 6-DOF pose.
 3. `P2`: optional opponent robot mocap rigid body, 6-DOF pose.
-4. `ball`: ping-pong ball, 3-DOF position only; orientation may be identity and should be ignored.
+4. `ball`: ping-pong ball, single marker, 3-DOF position only; orientation may be
+   identity and should be ignored. It is NOT a rigid body and is NOT matched by
+   name — the relay auto-detects it by motion.
+
+If you cannot find the ball topic:
+
+The ball marker is upstream of the relay, so first check what the stock VRPN
+client actually publishes, with the ball physically moving:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+# 1) list every object the VRPN server is streaming
+ros2 topic list | grep vrpn_mocap
+# 2) wave the ball by hand and watch which topic position changes
+ros2 topic echo /vrpn_mocap/<suspect>/pose --field pose.position
+'
+```
+
+Three outcomes:
+
+1. Nothing under `/vrpn_mocap/` at all -> the client is not connected: wrong
+   server IP/port, different subnet, firewall, or VRPN streaming is off in
+   Avatar-Pro. Fix the connection first.
+2. You see `PPT`/`P1`/`P2` but no extra moving object -> the ball is an
+   Avatar-Pro problem: the single marker is not defined as a tracked marker, or
+   individual-marker streaming is off. Set it up per step 6 above.
+3. You see an extra topic whose position tracks the ball -> good. The relay's
+   auto-detect will lock onto it; you do not need to copy its id anywhere. (If
+   you prefer to pin it, put that sender name/id in `ball_object`.)
+4. You see an extra moving topic, but the relay still does not lock -> lower
+   `ball_lock_speed_mps` a little in `avatar_pro_vrpn.yaml`, rebuild
+   `hope_bringup`, relaunch, and try again.
 
 Required coordinate convention:
 
@@ -767,6 +898,8 @@ Verification gate:
 
 - `/poses` or `/tf` is publishing at the camera rate.
 - `PPT`, `P1`, `P2`, and the ball are visible.
+- The relay logged `ball -> /vrpn_mocap/<id>/pose` and `/ball/point` moves only
+  when the real ball moves (not when a robot or the table moves).
 - The ball is not confused with table or robot markers.
 - No racket, wrist, hand, or paddle marker exists.
 
@@ -834,6 +967,22 @@ Planner integration dt: 0.001 s
 Mocap rate: 360 Hz
 Polynomial fit window: 31 samples
 ```
+
+Plain-language note about `restitution_racket`:
+
+- This is not the racket pose.
+- This is not tracked by motion capture.
+- It is just one number that says how strongly the ball bounces off the racket face.
+- Bigger number: the ball keeps more speed after the hit.
+- Smaller number: the ball loses more speed after the hit.
+- If you do not have the robot yet, keep `0.88` for now and calibrate later.
+- Easy first calibration: hold the racket still, measure ball speed just before and just after impact, then use:
+
+```text
+restitution_racket ~= rebound_speed / incoming_speed
+```
+
+This simple formula is for a still racket and should use the speed component normal to the racket face.
 
 Implement Stage 1, ball state estimation:
 
@@ -1210,6 +1359,30 @@ Verification gate:
 ## 11. Model The Fixed Racket Mount
 
 This step is mandatory. Do not approximate it by tracking the racket externally.
+
+Before you start, prepare these things:
+
+1. A robot model file for simulation:
+   - URDF, MJCF, or USD.
+   - If the real A3 model is not available yet, use the open Agibot X1 model as a temporary stand-in.
+2. The wrist link name in that model:
+   - this is the link the racket will attach to.
+3. A simple racket model:
+   - at minimum, a paddle-face center,
+   - a face-normal direction,
+   - a radius or width/height,
+   - and a simple collision shape.
+4. A mounting idea:
+   - where the racket center should sit relative to the wrist,
+   - and which way the racket face should point.
+5. A place to record `T_mount`:
+   - translation `x y z` from wrist to racket center,
+   - rotation `roll pitch yaw` from wrist axes to racket axes.
+6. A first contact guess for simulation:
+   - `restitution_racket` for how strong the rebound is,
+   - friction if your simulator requires it.
+
+If you do not have the real robot or final bracket yet, that is okay. Start with a temporary racket mount in simulation, make the planner and training pipeline work, then replace `T_mount` with measured values later.
 
 1. Design or obtain the 3D-printed bracket that attaches the racket to the robot wrist.
 2. Define a fixed transform `T_mount` from the robot wrist link to the racket frame.
@@ -2216,7 +2389,7 @@ calibration run, or Agibot.
 | Avatar Pro server IP | `avatar_pro_hope_bridge.launch.py` arg `server` | `192.168.1.100` | Run `ipconfig` on the Avatar-Pro / CMTracker PC; use the wired-adapter IPv4 on the robot LAN. Confirm with `ping <ip>` from the ROS host. |
 | VRPN port | launch arg `port` | `3883` | Chingmu/Avatar-Pro default is 3883; confirm in the CMTracker streaming settings. |
 | Camera / poll rate | launch arg `update_freq` | `360.0` | Set to the mocap system's frame rate (≥240–360 Hz for the ball). |
-| Object names | `avatar_pro_vrpn.yaml` (`ppt_object`, `p1_object`, `p2_object`, `ball_object`) | `PPT`/`P1`/`P2`/`ball` | Must match the rigid-body/marker labels in CMTracker exactly. Read them in CMTracker, or `ros2 topic list \| grep vrpn_mocap` once the client is up. |
+| Object names | `avatar_pro_vrpn.yaml` (`ppt_object`, `p1_object`, `p2_object`, `ball_object`) | `PPT`/`P1`/`P2`/`ball_object=""` | `PPT`/`P1`/`P2` must match the rigid-body labels in CMTracker exactly. Leave `ball_object` empty unless you want to pin the ball to one confirmed VRPN sender id instead of using auto-detect. |
 | Stream frame is REP-103 Z-up | mocap software | assumed | Set the mocap Up Axis to Z and calibrate the origin at the P1 near-side left corner. If it can only stream Y-up, add the fixed rotation in the relay (mocap doc §6.5.3). |
 
 ### 30.2 World frame ↔ robot (physical measurement)
@@ -2229,7 +2402,7 @@ calibration run, or Agibot.
 
 | Value | Where | Now | How to get it |
 |-------|-------|-----|---------------|
-| `drag_k`, `restitution_h`, `restitution_v`, `restitution_racket` | `hope_planner/config/hope_planner.yaml` | HITTER defaults | Record ≥15 ball trajectories with the mocap, export each to CSV (`t,x,y,z`), run `ros2 run hope_planner hope_calibrate traj*.csv`, paste the printed values (Section 8). `restitution_racket` is fitted from ball-in / ball-out speeds across the paddle. |
+| `drag_k`, `restitution_h`, `restitution_v`, `restitution_racket` | `hope_planner/config/hope_planner.yaml` | HITTER defaults | Record ≥15 ball trajectories with the mocap, export each to CSV (`t,x,y,z`), run `ros2 run hope_planner hope_calibrate traj*.csv`, paste the printed values (Section 8). `restitution_racket` is not a pose and not a marker-tracking result. It is the bounce-strength number for ball vs racket contact. Easiest first measurement: keep the racket still, measure ball speed before and after impact, and estimate `restitution_racket ~= rebound_speed / incoming_speed`. |
 | `ball_pose_index` | `hope_planner/config/hope_planner.yaml` | `0` | With the avatar_pro relay it is 0 (ball is first in `pose_array_order`). Confirm with `ros2 topic echo /poses --once` and count the ball's slot. |
 | `x_hit`, `delta_t_flight` | `hope_planner/config/hope_planner.yaml` | `0.0`, `0.5` | Tune to your robot's reach and preferred return arc; start with the defaults and adjust during soft-toss tests (Section 23). |
 

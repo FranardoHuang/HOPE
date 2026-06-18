@@ -66,7 +66,13 @@ def generate_launch_description():
                 "port": ParameterValue(port, value_type=int),
                 "frame_id": "world",
                 "update_freq": ParameterValue(update_freq, value_type=float),
-                "multi_sensor": False,
+                # multi_sensor:=true exposes EVERY VRPN sensor channel as its own
+                # topic (/vrpn_mocap/<sender>/<sensor>/pose). The ball is a single
+                # marker, not a nameable rigid body, so it usually only appears as
+                # a sensor channel rather than a named /vrpn_mocap/ball/pose. The
+                # relay matches objects on the sender name, so the extra
+                # sensor-index segment is harmless for PPT/P1/P2.
+                "multi_sensor": True,
             }],
         ),
 

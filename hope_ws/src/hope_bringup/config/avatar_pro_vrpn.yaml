@@ -11,9 +11,20 @@ avatar_pro_vrpn_relay:
     ppt_object: "PPT"      # TODO: confirm table rigid-body name in CMTracker
     p1_object: "P1"        # TODO: confirm P1 robot rigid-body name
     p2_object: "P2"        # TODO: confirm P2 robot rigid-body name
-    ball_object: "ball"    # TODO: confirm ball marker name
+    # The ball is a single marker, not a nameable rigid body, so CMTracker
+    # usually exposes it under an opaque numeric id, not "ball". Leave this
+    # EMPTY (or "auto") to auto-detect the ball by motion: the relay locks onto
+    # the moving non-rigid marker. Only set a concrete sender name/id here if you
+    # have confirmed it via `ros2 topic list` and want to pin it.
+    ball_object: ""        # "" / "auto" = detect ball by motion
 
     world_frame: "world"
+
+    # Ball auto-detection tuning (used only when ball_object is empty/"auto").
+    discovery_period_s: 0.5     # how often to scan for new /vrpn_mocap topics
+    ball_lock_speed_mps: 0.2    # smoothed speed above which a marker counts as "moving"
+    ball_switch_ratio: 2.0      # a rival marker must be this much faster to steal the lock
+    ball_stale_s: 2.0           # release the lock after this long with no messages
 
     # Published HOPE-standard topics.
     table_pose_topic: "/table/pose"

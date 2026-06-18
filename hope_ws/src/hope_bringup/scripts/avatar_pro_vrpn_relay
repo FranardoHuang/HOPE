@@ -1,5 +1,25 @@
 #!/usr/bin/env python3
-"""Relay Avatar-Pro/CMAvatar VRPN topics into the HOPE ROS 2 mocap interface."""
+"""Relay Avatar-Pro/CMAvatar VRPN topics into the HOPE ROS 2 mocap interface.
+
+This relay copes with two VRPN realities that broke the previous fixed-name
+version:
+
+1. The ball is a single marker, NOT a nameable 6-DOF rigid body. CMTracker /
+   MCServer cannot give it an asset name like "ball" the way it does for the
+   PPT/P1/P2 rigid bodies, so over VRPN it shows up either as its own sender
+   addressed by an opaque numeric id, or as one sensor channel of a sender. With
+   the client run as ``multi_sensor:=true`` every object becomes
+   ``/vrpn_mocap/<sender>/<sensor_index>/pose`` (an extra path segment) instead
+   of ``/vrpn_mocap/<sender>/pose``. So we DISCOVER pose topics at runtime and
+   match each on its VRPN *sender name* (the first path segment), which makes an
+   extra sensor-index segment harmless.
+
+2. Because the marker usually carries no usable name, the ball is found by
+   MOTION: among every discovered pose topic that is not one of the named rigid
+   bodies (PPT/P1/P2), the ball is the one whose position actually moves. Leave
+   ``ball_object`` empty (or "auto") to auto-detect; set it to a concrete
+   sender name / id to pin it.
+"""
 
 from __future__ import annotations
 
@@ -11,12 +31,16 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from tf2_ros import TransformBroadcaster
 
+_POSE_TYPE = "geometry_msgs/msg/PoseStamped"
 
-@dataclass(frozen=True)
-class ObjectMapping:
-    key: str
-    object_name: str
-    output_topic: str | None
+
+@dataclass
+class CandidateMotion:
+    """Per-topic motion bookkeeping used to auto-detect the ball."""
+
+    last_pos: tuple[float, float, float] | None = None
+    last_rx: float = 0.0
+    speed_ema: float = 0.0
 
 
 class AvatarProVrpnRelay(Node):
@@ -29,7 +53,9 @@ class AvatarProVrpnRelay(Node):
         self.declare_parameter("ppt_object", "PPT")
         self.declare_parameter("p1_object", "P1")
         self.declare_parameter("p2_object", "P2")
-        self.declare_parameter("ball_object", "ball")
+        # "" or "auto" -> detect the ball by motion; otherwise pin to this
+        # VRPN sender name / id.
+        self.declare_parameter("ball_object", "")
         self.declare_parameter("world_frame", "world")
         self.declare_parameter("table_pose_topic", "/table/pose")
         self.declare_parameter("p1_pose_topic", "/P1/pose")
@@ -39,11 +65,31 @@ class AvatarProVrpnRelay(Node):
         self.declare_parameter("pose_array_order", ["ball", "PPT", "P1", "P2"])
         self.declare_parameter("publish_tf", True)
         self.declare_parameter("publish_pose_array", True)
+        # Runtime topic discovery + ball auto-detection tuning.
+        self.declare_parameter("discovery_period_s", 0.5)
+        self.declare_parameter("ball_motion_ema_alpha", 0.8)
+        # Smoothed speed (m/s) above which a candidate is considered "moving".
+        self.declare_parameter("ball_lock_speed_mps", 0.2)
+        # A non-locked candidate must beat the locked one by this speed ratio
+        # to steal the lock (hysteresis against flapping between markers).
+        self.declare_parameter("ball_switch_ratio", 2.0)
+        # Drop a candidate / release the lock after this long without messages.
+        self.declare_parameter("ball_stale_s", 2.0)
 
+        self._vrpn_ns = str(self.get_parameter("vrpn_namespace").value).rstrip("/")
+        self._ppt_object = str(self.get_parameter("ppt_object").value)
+        self._p1_object = str(self.get_parameter("p1_object").value)
+        self._p2_object = str(self.get_parameter("p2_object").value)
+        ball_object = str(self.get_parameter("ball_object").value).strip()
+        self._ball_name = "" if ball_object.lower() in ("", "auto") else ball_object
         self._world_frame = str(self.get_parameter("world_frame").value)
         self._publish_tf = bool(self.get_parameter("publish_tf").value)
         self._publish_pose_array = bool(self.get_parameter("publish_pose_array").value)
         self._pose_array_order = [str(item) for item in self.get_parameter("pose_array_order").value]
+        self._ema_alpha = float(self.get_parameter("ball_motion_ema_alpha").value)
+        self._lock_speed = float(self.get_parameter("ball_lock_speed_mps").value)
+        self._switch_ratio = float(self.get_parameter("ball_switch_ratio").value)
+        self._stale_s = float(self.get_parameter("ball_stale_s").value)
 
         sensor_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -51,6 +97,7 @@ class AvatarProVrpnRelay(Node):
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
         )
+        self._sensor_qos = sensor_qos
 
         self._latest: dict[str, PoseStamped] = {}
         self._tf_broadcaster = TransformBroadcaster(self)
@@ -60,7 +107,6 @@ class AvatarProVrpnRelay(Node):
         self._ball_pub = self.create_publisher(
             PointStamped, str(self.get_parameter("ball_point_topic").value), sensor_qos
         )
-
         self._pose_publishers = {
             "PPT": self.create_publisher(
                 PoseStamped, str(self.get_parameter("table_pose_topic").value), sensor_qos
@@ -73,53 +119,177 @@ class AvatarProVrpnRelay(Node):
             ),
         }
 
-        self._mappings = [
-            ObjectMapping("PPT", str(self.get_parameter("ppt_object").value), "/table/pose"),
-            ObjectMapping("P1", str(self.get_parameter("p1_object").value), "/P1/pose"),
-            ObjectMapping("P2", str(self.get_parameter("p2_object").value), "/P2/pose"),
-            ObjectMapping("ball", str(self.get_parameter("ball_object").value), "/ball/point"),
-        ]
+        # topic -> ("PPT"|"P1"|"P2"|"ball"|"ball_candidate")
+        self._subs: dict[str, object] = {}
+        self._topic_key: dict[str, str] = {}
+        self._motion: dict[str, CandidateMotion] = {}
+        # The concrete topic currently treated as the ball (auto mode only).
+        self._ball_topic: str | None = None
 
-        vrpn_namespace = str(self.get_parameter("vrpn_namespace").value).rstrip("/")
-        for mapping in self._mappings:
-            if not mapping.object_name:
+        self._discovery_timer = self.create_timer(
+            float(self.get_parameter("discovery_period_s").value), self._discover_and_select
+        )
+        if self._ball_name:
+            self.get_logger().info(f"ball pinned to VRPN sender '{self._ball_name}'")
+        else:
+            self.get_logger().info("ball auto-detect: will lock onto the moving non-rigid marker")
+
+    # ---- discovery -------------------------------------------------------
+
+    def _now(self) -> float:
+        return self.get_clock().now().nanoseconds * 1e-9
+
+    def _topic_to_sender(self, topic: str) -> str | None:
+        """Return the VRPN sender name (first path segment) of a pose topic.
+
+        ``/vrpn_mocap/PPT/pose`` and ``/vrpn_mocap/PPT/0/pose`` both -> ``PPT``.
+        """
+        prefix = self._vrpn_ns + "/"
+        if not topic.startswith(prefix) or not topic.endswith("/pose"):
+            return None
+        body = topic[len(prefix):-len("/pose")]
+        if not body:
+            return None
+        return body.split("/", 1)[0]
+
+    def _classify(self, sender: str) -> str | None:
+        if sender == self._ppt_object:
+            return "PPT"
+        if sender == self._p1_object:
+            return "P1"
+        if sender == self._p2_object:
+            return "P2"
+        if self._ball_name:
+            return "ball" if sender == self._ball_name else None
+        return "ball_candidate"
+
+    def _discover_and_select(self) -> None:
+        for topic, types in self.get_topic_names_and_types():
+            if topic in self._subs or _POSE_TYPE not in types:
                 continue
-            topic = f"{vrpn_namespace}/{mapping.object_name}/pose"
-            self.create_subscription(
+            sender = self._topic_to_sender(topic)
+            if sender is None:
+                continue
+            key = self._classify(sender)
+            if key is None:
+                continue
+            self._subs[topic] = self.create_subscription(
                 PoseStamped,
                 topic,
-                lambda msg, object_key=mapping.key: self._pose_cb(object_key, msg),
-                sensor_qos,
+                lambda msg, t=topic, k=key: self._on_pose(t, k, msg),
+                self._sensor_qos,
             )
-            self.get_logger().info(f"subscribed {topic} -> {mapping.output_topic}")
+            self._topic_key[topic] = key
+            if key == "ball_candidate":
+                self._motion[topic] = CandidateMotion()
+            self.get_logger().info(f"discovered {topic} -> {key}")
 
-    def _pose_cb(self, object_key: str, msg: PoseStamped) -> None:
+        if not self._ball_name:
+            self._select_ball()
+
+    def _select_ball(self) -> None:
+        now = self._now()
+        live = {
+            t: m
+            for t, m in self._motion.items()
+            if m.last_pos is not None and (now - m.last_rx) <= self._stale_s
+        }
+        if not live:
+            if self._ball_topic is not None:
+                self.get_logger().warn("ball lost: no live marker candidates")
+                self._ball_topic = None
+            return
+
+        if len(live) == 1:
+            only = next(iter(live))
+            self._set_ball_topic(only, reason="sole marker candidate")
+            return
+
+        ranked = sorted(live.items(), key=lambda kv: kv[1].speed_ema, reverse=True)
+        best_topic, best = ranked[0]
+        runner_speed = ranked[1][1].speed_ema if len(ranked) > 1 else 0.0
+
+        # Hold the current lock if it is still live and not clearly beaten.
+        if self._ball_topic in live:
+            if best_topic == self._ball_topic:
+                return
+            if best.speed_ema < self._lock_speed:
+                return
+            if best.speed_ema < live[self._ball_topic].speed_ema * self._switch_ratio:
+                return
+            self._set_ball_topic(best_topic, reason=f"faster marker ({best.speed_ema:.2f} m/s)")
+            return
+
+        # No live lock: take the fastest mover above threshold; if nothing is
+        # really moving yet, do not guess between several static markers.
+        if best.speed_ema >= self._lock_speed and best.speed_ema >= runner_speed * self._switch_ratio:
+            self._set_ball_topic(best_topic, reason=f"moving marker ({best.speed_ema:.2f} m/s)")
+
+    def _set_ball_topic(self, topic: str, reason: str) -> None:
+        if topic == self._ball_topic:
+            return
+        self._ball_topic = topic
+        self.get_logger().info(f"ball -> {topic} ({reason})")
+
+    # ---- message handling ------------------------------------------------
+
+    def _on_pose(self, topic: str, key: str, msg: PoseStamped) -> None:
+        if key in self._pose_publishers:  # PPT / P1 / P2
+            normalized = self._normalize(msg)
+            self._latest[key] = normalized
+            self._pose_publishers[key].publish(normalized)
+            if self._publish_tf:
+                self._broadcast_tf(key, normalized)
+            return
+
+        if key == "ball_candidate":
+            self._update_motion(topic, msg)
+            if topic != self._ball_topic:
+                return
+        # key == "ball" (pinned) or this candidate is the selected ball.
+        self._emit_ball(self._normalize(msg))
+
+    def _update_motion(self, topic: str, msg: PoseStamped) -> None:
+        m = self._motion.get(topic)
+        if m is None:
+            m = CandidateMotion()
+            self._motion[topic] = m
+        now = self._now()
+        pos = (msg.pose.position.x, msg.pose.position.y, msg.pose.position.z)
+        if m.last_pos is not None:
+            dt = now - m.last_rx
+            if dt > 1e-4:
+                dist = (
+                    (pos[0] - m.last_pos[0]) ** 2
+                    + (pos[1] - m.last_pos[1]) ** 2
+                    + (pos[2] - m.last_pos[2]) ** 2
+                ) ** 0.5
+                speed = dist / dt
+                m.speed_ema = self._ema_alpha * m.speed_ema + (1.0 - self._ema_alpha) * speed
+        m.last_pos = pos
+        m.last_rx = now
+
+    def _emit_ball(self, normalized: PoseStamped) -> None:
+        self._latest["ball"] = normalized
+        out = PointStamped()
+        out.header = normalized.header
+        out.point = normalized.pose.position
+        self._ball_pub.publish(out)
+        if self._publish_tf:
+            self._broadcast_tf("ball", normalized)
+        # Publish /poses synchronized to the BALL update only. The ball is the
+        # planner's input; firing on every object would re-emit a stale ball
+        # position at PPT/P1/P2 timestamps and corrupt the velocity polyfit.
+        if self._publish_pose_array:
+            self._publish_poses(normalized.header.stamp)
+
+    def _normalize(self, msg: PoseStamped) -> PoseStamped:
         normalized = PoseStamped()
         normalized.header = msg.header
         if not normalized.header.frame_id:
             normalized.header.frame_id = self._world_frame
         normalized.pose = msg.pose
-
-        self._latest[object_key] = normalized
-
-        if object_key == "ball":
-            self._publish_ball_point(normalized)
-        elif object_key in self._pose_publishers:
-            self._pose_publishers[object_key].publish(normalized)
-
-        if self._publish_tf:
-            self._broadcast_tf(object_key, normalized)
-        # Publish /poses synchronized to the BALL update only. The ball is the
-        # planner's input; firing on every object would re-emit a stale ball
-        # position at PPT/P1/P2 timestamps and corrupt the velocity polyfit.
-        if self._publish_pose_array and object_key == "ball":
-            self._publish_poses(normalized.header.stamp)
-
-    def _publish_ball_point(self, msg: PoseStamped) -> None:
-        out = PointStamped()
-        out.header = msg.header
-        out.point = msg.pose.position
-        self._ball_pub.publish(out)
+        return normalized
 
     def _broadcast_tf(self, object_key: str, msg: PoseStamped) -> None:
         tf_msg = TransformStamped()
