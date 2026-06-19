@@ -4,6 +4,19 @@ This guide explains how to reimplement the HOPE reference system from the docume
 
 Read this file from top to bottom. Do not skip the verification gates. Each later phase assumes the earlier phase is already working.
 
+## Guide Structure By Phase
+
+Use the steps in order, but think of them as eight larger workstreams:
+
+1. **Phase 1 — Scope, Platform, and Workspace Foundation**: steps `0-5`
+2. **Phase 2 — Motion Capture and Planner Bringup**: steps `6-8`
+3. **Phase 3 — Human Motion Data and Retargeting**: steps `9-11`
+4. **Phase 4 — WBC Training Pipeline**: steps `12-16`
+5. **Phase 5 — Runtime Policy and Hardware Deployment**: steps `17-18`
+6. **Phase 6 — Portability and Full-System Integration**: steps `19-21`
+7. **Phase 7 — Testing, Safety, and Competition Readiness**: steps `22-26`
+8. **Phase 8 — Summaries, Constraints, References, and Open Values**: steps `27-30`
+
 ## How To Read Placeholders And Terms
 
 This guide uses two kinds of values:
@@ -33,6 +46,8 @@ Plain terminology:
 - **ONNX**: the exported neural-network policy file used at deployment time.
 - **QoS**: ROS 2 message delivery settings. High-rate mocap topics should usually use Best Effort and small queue depth to reduce latency.
 - **AimRT / AimDK**: Agibot's runtime and robot development kit. Public X1/X2 examples exist, but A3-specific files and APIs must come from Agibot.
+
+## Phase 1 — Scope, Platform, and Workspace Foundation
 
 ## 0. What You Are Reimplementing
 
@@ -545,6 +560,8 @@ Verification gate:
 - `ros2 run tf2_ros tf2_echo world table_center` reports approximately `[1.37, -0.7625, 0.0]`.
 - `ros2 run tf2_ros tf2_echo P1 P1_base_link` reports the measured `p1_xyz` and `p1_rpy`, not an accidental zero offset.
 
+## Phase 2 — Motion Capture and Planner Bringup
+
 ## 6. Set Up Motion Capture (Avatar Pro / Chingmu VRPN)
 
 HOPE on the Agibot Expedition A3 uses a single motion-capture path: **Avatar Pro**
@@ -677,39 +694,72 @@ sudo apt-get update
 sudo apt-get install -y ros-jazzy-vrpn-mocap
 cd ~/workspace/HOPE/hope_ws
 colcon build --symlink-install --packages-select hope_bringup
-source install/setup.bash
+source install/local_setup.bash
 '
 ```
 
-Hands-on quick path for this code version:
+### 6.1 Step-By-Step Commands
 
-1. Open `hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml`.
-2. Check only these 4 lines first:
+Use this exact flow for the current repository version.
+
+1. Check the relay config first:
+
+```bash
+distrobox enter hope -- bash -lc '
+sed -n "1,80p" ~/workspace/HOPE/hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml
+'
+```
+
+2. Confirm these four lines:
    - `ppt_object: "PPT"`
    - `p1_object: "P1"`
    - `p2_object: "P2"`
    - `ball_object: ""`
-3. Important:
-   - `PPT`, `P1`, and `P2` must match CMTracker exactly.
-   - `ball_object` should normally stay empty. This code auto-detects the ball by motion.
-4. Before starting, stop old ROS nodes from previous tests:
+
+3. If the rigid-body names in CMTracker are different, edit the file:
+
+```bash
+distrobox enter hope -- bash -lc '
+nano ~/workspace/HOPE/hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml
+'
+```
+
+Important:
+
+- `PPT`, `P1`, and `P2` must match CMTracker exactly.
+- `ball_object` should normally stay empty. This code auto-detects the ball by motion.
+- If `P1` and `P2` do not exist yet, Step 6 is still useful for `PPT` plus the ball. In that case, skip the `/P1/pose` and `/P2/pose` checks later.
+
+4. Rebuild `hope_bringup` after any config change:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+cd ~/workspace/HOPE/hope_ws
+colcon build --symlink-install --packages-select hope_bringup
+'
+```
+
+5. Before starting, stop old ROS nodes from previous tests:
 
 ```bash
 distrobox enter hope -- bash -lc '
 pkill -f avatar_pro_vrpn_relay || true
 pkill -f client_node || true
 pkill -f static_transform_publisher || true
+source /opt/ros/jazzy/setup.bash
 ros2 daemon stop || true
 ros2 daemon start
 '
 ```
 
-5. Start the full bridge:
+6. Open Terminal A and start the full bridge. Replace `192.168.1.100` with the
+   IP found by `ipconfig` on the Avatar-Pro PC:
 
 ```bash
 distrobox enter hope -- bash -lc '
 source /opt/ros/jazzy/setup.bash
-source ~/workspace/HOPE/hope_ws/install/setup.bash
+source ~/workspace/HOPE/hope_ws/install/local_setup.bash
 ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
   server:=192.168.1.100 \
   port:=3883 \
@@ -717,152 +767,109 @@ ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
 '
 ```
 
-6. What you should see in that launch terminal:
-   - one line saying the relay is in auto mode, similar to:
-     `ball auto-detect: will lock onto the moving non-rigid marker`
-   - several discovery lines, similar to:
-     `discovered /vrpn_mocap/PPT/.../pose -> PPT`
-     `discovered /vrpn_mocap/P1/.../pose -> P1`
-   - after you move the real ball by hand, one lock line, similar to:
-     `ball -> /vrpn_mocap/.../pose (moving marker ...)`
-7. Very important:
-   - `/ball/point` and `/poses` are not expected to publish before the relay locks onto the ball.
-   - In this code version, `/poses` is published on BALL updates only, not on table/P1/P2 updates.
-   - So if the ball is standing still, `/poses` may appear quiet even though the relay is healthy.
+Keep Terminal A open.
 
-Start the whole mocap bringup with one command. `avatar_pro_hope_bridge.launch.py`
-starts the VRPN client, the relay, and the static HOPE world frame together.
-Replace `192.168.1.100` with the IP found by `ipconfig` on the Avatar-Pro PC:
-
-```bash
-distrobox enter hope -- bash -lc '
-source /opt/ros/jazzy/setup.bash
-source ~/workspace/HOPE/hope_ws/install/setup.bash
-ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
-  server:=192.168.1.100 \
-  port:=3883 \
-  update_freq:=360.0
-'
-```
-
-This launches three things:
+What that launch starts:
 
 1. `vrpn_mocap client_node` — Avatar-Pro VRPN -> `/vrpn_mocap/<sender>/<sensor>/pose`.
-   The bridge runs it with `multi_sensor:=true`, so every VRPN sensor channel
-   gets its own topic. This matters because the ball is a single marker, not a
-   nameable rigid body, so it usually shows up only as a sensor channel (an extra
-   `/<sensor>` path segment), never as a tidy `/vrpn_mocap/ball/pose`.
-2. `avatar_pro_vrpn_relay` — discovers `/vrpn_mocap/*` pose topics at runtime,
-   matches `PPT`/`P1`/`P2` by sender name (the extra sensor-index segment is
-   ignored), auto-detects the ball as the moving non-rigid marker, and republishes
-   HOPE `/poses`, `/tf`, `/ball/point`, `/{table,P1,P2}/pose`.
+2. `avatar_pro_vrpn_relay` — discovers `/vrpn_mocap/*` topics, matches `PPT`/`P1`/`P2` by sender name, auto-detects the ball as the moving non-rigid marker, and republishes HOPE topics.
 3. `hope_world.launch.py` — the static world-frame landmarks and `P -> P_base_link` offsets.
 
-Set `update_freq` to your camera rate (≥240–360 Hz for the ball). The default
-`vrpn_mocap` poll rate is only 100 Hz, which is too slow for fast ball tracking.
+What you should see in Terminal A:
 
-Alternative: if you already run the VRPN client elsewhere (or want to share it with
-other tools), start it yourself and tell the bridge to skip its own client:
+- one line like `ball auto-detect: will lock onto the moving non-rigid marker`
+- discovery lines like `discovered /vrpn_mocap/PPT/.../pose -> PPT`
+- after you move the real ball by hand, one lock line like `ball -> /vrpn_mocap/.../pose (moving marker ...)`
 
-```bash
-# Terminal 1: the VRPN client
-ros2 launch vrpn_mocap client.launch.yaml server:=192.168.1.100 port:=3883
-# Terminal 2: relay + world frame only
-ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py start_vrpn_client:=false
-```
+Very important:
 
-Verify that HOPE sees the Avatar-Pro data:
+- `/ball/point` and `/poses` are not expected to publish before the relay locks onto the ball.
+- In this code version, `/poses` is published on ball updates only, not on table/P1/P2 updates.
+- So if the ball is standing still, `/poses` may appear quiet even though the relay is healthy.
+
+7. Open Terminal B and check that the topic names exist:
 
 ```bash
 distrobox enter hope -- bash -lc '
 source /opt/ros/jazzy/setup.bash
-source ~/workspace/HOPE/hope_ws/install/setup.bash
-ros2 topic list | grep -E "ball|P1|P2|table|poses"
-ros2 topic echo /ball/point --once
-ros2 topic hz /poses
-ros2 run tf2_ros tf2_echo world P1
+source ~/workspace/HOPE/hope_ws/install/local_setup.bash
+ros2 topic list | grep -E "vrpn_mocap|ball|P1|P2|table|poses"
 '
 ```
 
-What to expect from those checks:
-
-1. `ros2 topic list | grep -E "ball|P1|P2|table|poses"`:
-   - you should at least see `/P1/pose`, `/table/pose`, `/ball/point`, `/poses`
-   - topic names can exist before data is flowing, so this command alone is not enough
-2. `ros2 run tf2_ros tf2_echo world P1`:
-   - should print numbers if P1 is being tracked
-3. `ros2 topic echo /ball/point --once`:
-   - may wait until you move the real ball
-   - if it waits forever, do not panic yet; first physically wave the ball in front of the cameras
-4. `ros2 topic hz /poses`:
-   - only becomes non-zero after the ball has been locked and starts updating
-   - this is expected for this code version
-
-The relay discovers `/vrpn_mocap/*` pose topics at runtime (it does not assume
-fixed names). It matches each on the VRPN sender name — so both
-`/vrpn_mocap/PPT/pose` and `/vrpn_mocap/PPT/0/pose` map to `PPT` — and treats any
-non-rigid-body marker as a ball candidate:
+You should at least see some names like:
 
 ```text
-/vrpn_mocap/PPT/<sensor>/pose    -> PPT   (rigid body, by name)
-/vrpn_mocap/P1/<sensor>/pose     -> P1    (rigid body, by name)
-/vrpn_mocap/P2/<sensor>/pose     -> P2    (rigid body, by name)
-/vrpn_mocap/<anything else>/pose -> ball candidate -> the moving one is the ball
-```
-
-and publishes:
-
-```text
+/vrpn_mocap/...
 /table/pose
 /P1/pose
-/P2/pose
 /ball/point
 /poses
-/tf
 ```
 
-When the relay locks onto the ball it logs a line like `ball -> /vrpn_mocap/7/pose
-(moving marker ...)`. If it never logs that, the ball marker is not reaching ROS
-— see "If you cannot find the ball topic" below.
-
-Required object names:
-
-1. `PPT`: table rigid body, 6-DOF pose, near-side left table corner as pivot.
-2. `P1`: player-one robot mocap rigid body, 6-DOF pose.
-3. `P2`: optional opponent robot mocap rigid body, 6-DOF pose.
-4. `ball`: ping-pong ball, single marker, 3-DOF position only; orientation may be
-   identity and should be ignored. It is NOT a rigid body and is NOT matched by
-   name — the relay auto-detects it by motion.
-
-If you cannot find the ball topic:
-
-The ball marker is upstream of the relay, so first check what the stock VRPN
-client actually publishes, with the ball physically moving:
+8. Still in Terminal B, check the table and optional P1 rigid body:
 
 ```bash
 distrobox enter hope -- bash -lc '
 source /opt/ros/jazzy/setup.bash
-# 1) list every object the VRPN server is streaming
-ros2 topic list | grep vrpn_mocap
-# 2) wave the ball by hand and watch which topic position changes
-ros2 topic echo /vrpn_mocap/<suspect>/pose --field pose.position
+source ~/workspace/HOPE/hope_ws/install/local_setup.bash
+ros2 topic echo /table/pose --once
+ros2 topic echo /P1/pose --once
 '
 ```
 
-Three outcomes:
+If `P1` is not set up yet, skip the second command. If `position` and
+`orientation` print for `/table/pose`, the VRPN -> ROS path is already partly working.
 
-1. Nothing under `/vrpn_mocap/` at all -> the client is not connected: wrong
-   server IP/port, different subnet, firewall, or VRPN streaming is off in
-   Avatar-Pro. Fix the connection first.
-2. You see `PPT`/`P1`/`P2` but no extra moving object -> the ball is an
-   Avatar-Pro problem: the single marker is not defined as a tracked marker, or
-   individual-marker streaming is off. Set it up per step 6 above.
-3. You see an extra topic whose position tracks the ball -> good. The relay's
-   auto-detect will lock onto it; you do not need to copy its id anywhere. (If
-   you prefer to pin it, put that sender name/id in `ball_object`.)
-4. You see an extra moving topic, but the relay still does not lock -> lower
-   `ball_lock_speed_mps` a little in `avatar_pro_vrpn.yaml`, rebuild
-   `hope_bringup`, relaunch, and try again.
+9. Move the real ball in front of the cameras, then check the ball topic:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+source ~/workspace/HOPE/hope_ws/install/local_setup.bash
+ros2 topic echo /ball/point --once
+'
+```
+
+If it works, you should see:
+
+```text
+point:
+  x: ...
+  y: ...
+  z: ...
+```
+
+10. Check `/poses`:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+source ~/workspace/HOPE/hope_ws/install/local_setup.bash
+ros2 topic hz /poses
+'
+```
+
+Remember: `/poses` only becomes active after the ball has been locked and starts updating.
+
+11. If the ball never appears, inspect the raw VRPN topics directly:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+ros2 topic list | grep vrpn_mocap
+'
+```
+
+If you see many `/vrpn_mocap/...` topics but no `/ball/point`, go back to Terminal A
+and look for a line like `ball -> /vrpn_mocap/.../pose`.
+
+If you still cannot find the ball topic, interpret the result like this:
+
+1. Nothing under `/vrpn_mocap/` at all -> the client is not connected: wrong server IP/port, different subnet, firewall, or VRPN streaming is off in Avatar-Pro.
+2. You see `PPT`/`P1`/`P2` but no extra moving object -> the ball is an Avatar-Pro problem: the single marker is not defined as a tracked marker, or individual-marker streaming is off.
+3. You see an extra topic whose position tracks the ball -> good. The relay auto-detect will lock onto it; you do not need to copy its id anywhere. If you prefer to pin it, put that sender name/id in `ball_object`.
+4. You see an extra moving topic, but the relay still does not lock -> lower `ball_lock_speed_mps` a little in `avatar_pro_vrpn.yaml`, rebuild `hope_bringup`, relaunch, and try again.
 
 Required coordinate convention:
 
@@ -1206,61 +1213,235 @@ Important for this repository version:
 - It does NOT fit `restitution_racket`.
 - `restitution_racket` still needs a separate ball-vs-racket test later, or a temporary default such as `0.88`.
 
-Practical recording flow for this repository version:
+### 8.1 Step-By-Step Commands
 
-1. Record one toss per bag from `/ball/point`.
-2. Before recording, confirm `/ball/point` is really publishing and changes when the real ball moves.
-2. Convert each bag to one CSV with:
+Use this exact flow for the current repository version.
+
+1. Step 8 requires Step 6 to stay alive. Keep the Step 6 launch terminal open while recording.
+
+2. Build the planner tools first:
 
 ```bash
-ros2 run hope_planner hope_bag_to_csv \
-  --bag traj01 \
-  --topic /ball/point \
-  --output traj01.csv
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+cd ~/workspace/HOPE/hope_ws
+colcon build --symlink-install --packages-select hope_planner
+source ~/workspace/HOPE/hope_ws/install/local_setup.bash
+ros2 pkg executables hope_planner
+'
 ```
 
-3. Then run:
+You should see at least:
 
-```bash
-ros2 run hope_planner hope_calibrate traj01.csv traj02.csv ... traj15.csv
+```text
+hope_planner hope_bag_to_csv
+hope_planner hope_calibrate
+hope_planner hope_planner_node
 ```
 
-Recommended bag-record command:
+3. Create the working folders:
 
 ```bash
+mkdir -p ~/workspace/HOPE/calib_bags
+mkdir -p ~/workspace/HOPE/calib_csv
+```
+
+4. Before recording anything, confirm `/ball/point` is alive:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+source ~/workspace/HOPE/hope_ws/install/local_setup.bash
 ros2 topic echo /ball/point --once
+'
+```
+
+If this waits forever, stop and fix Step 6 first.
+
+5. Record the first trajectory. If an old bad folder exists, delete it first:
+
+```bash
+rm -rf ~/workspace/HOPE/calib_bags/traj01
+```
+
+Then record:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+source ~/workspace/HOPE/hope_ws/install/local_setup.bash
+cd ~/workspace/HOPE/calib_bags
 ros2 bag record -s mcap /ball/point -o traj01
+'
 ```
 
-Important:
+During recording:
 
-- Start the recording only after `/ball/point` is alive.
-- After one toss, stop with `Ctrl+C` and wait for rosbag to finish writing metadata.
-- If the bag folder contains a `0-byte` `.mcap` file or no `metadata.yaml`, the recording is incomplete; delete that folder and record again.
+- keep the recorder running
+- toss the ball once
+- try to include one clean free-flight arc
+- ideally include one table bounce
+- press `Ctrl+C` after that one toss
+- wait for rosbag to finish writing metadata before closing the terminal
 
-How to create each calibration CSV:
+6. Check that the bag was written correctly:
 
-1. Start mocap and the Avatar-Pro bridge.
-2. Record one toss at a time. Each file should contain one continuous ball flight, not a whole practice session.
-3. Save the ball center position in the HOPE `world` frame. Units must be seconds and meters.
-4. Use this header:
+```bash
+distrobox enter hope -- bash -lc '
+cd ~/workspace/HOPE
+ls -lah calib_bags/traj01
+'
+```
+
+You want:
+
+- `metadata.yaml`
+- `traj01_0.mcap`
+- the `.mcap` file must not be `0 bytes`
+
+If the `.mcap` file is `0 bytes` or `metadata.yaml` is missing, delete the folder and record again:
+
+```bash
+rm -rf ~/workspace/HOPE/calib_bags/traj01
+```
+
+7. Convert that first bag to CSV:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+source ~/workspace/HOPE/hope_ws/install/local_setup.bash
+cd ~/workspace/HOPE
+ros2 run hope_planner hope_bag_to_csv \
+  --bag calib_bags/traj01 \
+  --topic /ball/point \
+  --output calib_csv/traj01.csv
+'
+```
+
+You should see something like:
+
+```text
+Wrote 123 rows to calib_csv/traj01.csv
+```
+
+8. Check that the CSV looks right:
+
+```bash
+head ~/workspace/HOPE/calib_csv/traj01.csv
+```
+
+You should see the header:
 
 ```text
 t,x,y,z
 ```
 
-5. Example rows:
+Each calibration CSV must contain one continuous ball trajectory in the HOPE
+`world` frame, with time in seconds and position in meters.
 
-```text
-t,x,y,z
-0.000000,1.850000,-0.650000,0.420000
-0.002778,1.846100,-0.650400,0.418700
-0.005556,1.842200,-0.650800,0.417200
+9. Repeat the same flow for `traj02` through `traj15`. One toss per bag, one CSV per bag.
+
+Example for `traj02`:
+
+```bash
+rm -rf ~/workspace/HOPE/calib_bags/traj02
+
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+source ~/workspace/HOPE/hope_ws/install/local_setup.bash
+cd ~/workspace/HOPE/calib_bags
+ros2 bag record -s mcap /ball/point -o traj02
+'
 ```
 
-6. Keep at least 20 percent of the recorded throws as held-out test trajectories. Do not use those files for fitting; use them only to check prediction error.
+Then convert it:
 
-If you record `/ball/point` with `ros2 bag`, export the bag to CSV with any ROS bag tool you prefer, but keep only these four columns: timestamp seconds, `point.x`, `point.y`, and `point.z`. Rename them to `t,x,y,z` before running `hope_calibrate`.
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+source ~/workspace/HOPE/hope_ws/install/local_setup.bash
+cd ~/workspace/HOPE
+ros2 run hope_planner hope_bag_to_csv \
+  --bag calib_bags/traj02 \
+  --topic /ball/point \
+  --output calib_csv/traj02.csv
+'
+```
+
+10. If all `traj01` to `traj15` bags already exist and look healthy, you can batch-convert them:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+source ~/workspace/HOPE/hope_ws/install/local_setup.bash
+cd ~/workspace/HOPE
+for i in $(seq -w 1 15); do
+  ros2 run hope_planner hope_bag_to_csv \
+    --bag calib_bags/traj$i \
+    --topic /ball/point \
+    --output calib_csv/traj$i.csv
+done
+'
+```
+
+11. Run the calibration:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+source ~/workspace/HOPE/hope_ws/install/local_setup.bash
+cd ~/workspace/HOPE
+ros2 run hope_planner hope_calibrate calib_csv/traj*.csv
+'
+```
+
+You should get values like:
+
+```text
+drag_k = ...
+restitution_h = ...
+restitution_v = ...
+```
+
+12. Paste those values into:
+
+```bash
+distrobox enter hope -- bash -lc '
+nano ~/workspace/HOPE/hope_ws/src/hope_planner/config/hope_planner.yaml
+'
+```
+
+Update:
+
+```yaml
+drag_k: ...
+restitution_h: ...
+restitution_v: ...
+```
+
+Do not change this yet:
+
+```yaml
+restitution_racket: 0.88
+```
+
+13. Rebuild `hope_planner`:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+cd ~/workspace/HOPE/hope_ws
+colcon build --symlink-install --packages-select hope_planner
+'
+```
+
+Recording notes:
+
+- start recording only after `/ball/point` is alive
+- one toss per bag is best; do not mix a whole practice session into one file
+- keep at least 20 percent of the throws as held-out test trajectories for later validation
+- if values in the CSV are obviously not table-scale numbers, stop and fix the upstream units before fitting
 
 It prints fitted `drag_k`, `restitution_h`, `restitution_v` ready to paste into
 `config/hope_planner.yaml`. Note the three-sample bounce detector is phase-
@@ -1272,6 +1453,8 @@ Verification gate:
 - Predicted hit-plane crossing is close to measured crossing on held-out trajectories.
 - Predicted bounce count matches observed bounce count.
 - Net-clearance checks match visual inspection or high-speed video.
+
+## Phase 3 — Human Motion Data and Retargeting
 
 ## 9. Acquire Human Swing Motions
 
@@ -1298,13 +1481,33 @@ Do not:
 3. Include multiple people unless you crop or choose the correct tracked person.
 4. Use copyrighted broadcast footage without checking the license for your use case.
 
+Create a dedicated Python environment for the motion-processing tools before installing
+GVHMR or GMR. Do not use the host system `pip`; on Ubuntu 24.04/26.04 it can fail with
+the PEP 668 `externally-managed-environment` error, and Ubuntu 26.04's default
+Python 3.14 is newer than the Python 3.10 stack these repos target.
+
+Preferred setup:
+
+```bash
+# Install Miniforge or another conda-compatible Python distribution first if needed.
+conda create -n hope-motion-py310 python=3.10 -y
+conda activate hope-motion-py310
+
+python --version
+python -m pip install --upgrade pip setuptools wheel
+```
+
+If you already have a Python 3.10 virtual environment for GVHMR, reuse it for GMR instead
+of creating a new one.
+
 Install GVHMR:
 
 ```bash
 cd ~/workspace/HOPE/hope_training
 git clone https://github.com/zju3dv/GVHMR.git
 cd GVHMR
-# Follow the GVHMR repository installation instructions.
+# Follow the GVHMR repository installation instructions inside the active
+# `hope-motion-py310` environment.
 ```
 
 Run GVHMR:
@@ -1335,14 +1538,21 @@ Install GMR:
 cd ~/workspace/HOPE/hope_training
 git clone https://github.com/YanjieZe/GMR.git
 cd GMR
-pip install -e .
+python -m pip install -e .
 ```
+
+If `python -m pip install -e .` still prints `externally-managed-environment`, the conda
+or virtual environment is not active yet. Do not use `--break-system-packages` here.
 
 Download SMPL-X body models:
 
 1. Go to `https://smpl-x.is.tue.mpg.de/`.
-2. Download the required model files.
-3. Put them under:
+2. Register or sign in, because the downloads page is license-gated.
+3. Download the main **SMPL-X model** bundle from the downloads page.
+   Do not download the Blender add-on, Unity package, UV maps, or segmentation map for this step.
+4. Extract the archive and locate the `smplx/` model files inside it.
+   The official `smplx` loader supports a folder that contains both `.npz` and `.pkl` variants.
+5. Put them under:
 
 ```text
 GMR/assets/body_models/smplx/
@@ -1354,6 +1564,23 @@ Required files:
 SMPLX_NEUTRAL.pkl
 SMPLX_FEMALE.pkl
 SMPLX_MALE.pkl
+```
+
+You may also see matching `.npz` files in the extracted archive:
+
+```text
+SMPLX_NEUTRAL.npz
+SMPLX_FEMALE.npz
+SMPLX_MALE.npz
+```
+
+That is normal. If the archive contains both `.pkl` and `.npz`, keep both in
+`GMR/assets/body_models/smplx/`.
+
+Quick check:
+
+```bash
+find ~/workspace/HOPE/hope_training/GMR/assets/body_models/smplx -maxdepth 1 -type f | sort
 ```
 
 For the Agibot Expedition A3 robot:
@@ -1476,6 +1703,8 @@ Verification gate:
 - FK from base_link and joint states returns the expected racket center.
 - Racket normal direction is consistent with the planner normal.
 
+## Phase 4 — WBC Training Pipeline
+
 ## 12. Preprocess Motions For BeyondMimic
 
 For the Agibot Expedition A3 Isaac Lab path (with MuJoCo for sim-to-sim), install BeyondMimic:
@@ -1541,6 +1770,9 @@ Install the training package:
 ```bash
 python -m pip install -e source/whole_body_tracking
 ```
+
+Run that command from the Isaac Lab Python 3.10 environment, not the host system Python.
+If you see `externally-managed-environment` again, the Isaac Lab environment is not active.
 
 Set up WandB:
 
@@ -1826,6 +2058,8 @@ Verification gate:
 - The ONNX model loads in ONNX Runtime.
 - Metadata contains the expected joint order.
 
+## Phase 5 — Runtime Policy and Hardware Deployment
+
 ## 16. Run Sim-To-Sim Verification
 
 Before touching hardware, verify the ONNX policy in simulation.
@@ -2025,6 +2259,8 @@ Verification gate:
 - The bridge rejects commands outside joint, velocity, torque, and workspace limits.
 - The policy can be activated in a controlled, no-ball test.
 
+## Phase 6 — Portability and Full-System Integration
+
 ## 19. Port To Another Humanoid
 
 Use this path only after the Agibot A3 deployment path works or if the target robot changes.
@@ -2174,6 +2410,8 @@ Verification gate:
 - Moving PPT causes a table drift warning.
 - Crossing the safety wall triggers the intended safety response.
 - E-stop behavior is measured, not assumed.
+
+## Phase 7 — Testing, Safety, and Competition Readiness
 
 ## 22. Run A No-Ball Dry Test
 
@@ -2339,6 +2577,8 @@ Racket reaches commanded strike region.
 E-stop works.
 No racket markers are used.
 ```
+
+## Phase 8 — Summaries, Constraints, References, and Open Values
 
 ## 27. Suggested Implementation Order Summary
 

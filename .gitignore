@@ -8,3 +8,14 @@ log/
 hope_ws/build/
 hope_ws/install/
 hope_ws/log/
+
+# Step 9-10: external motion-training repos and local Python envs
+hope_training/.venv-motion*/
+hope_training/GVHMR/
+hope_training/GMR/
+
+# Step 9-10: downloaded or generated motion assets
+hope_training/motions/raw_video/
+hope_training/motions/smplx/
+hope_training/motions/retargeted/
+hope_training/motions/preprocessed/
