@@ -19,3 +19,7 @@ hope_training/motions/raw_video/
 hope_training/motions/smplx/
 hope_training/motions/retargeted/
 hope_training/motions/preprocessed/
+
+
+hope_training/wandb/
+*.log

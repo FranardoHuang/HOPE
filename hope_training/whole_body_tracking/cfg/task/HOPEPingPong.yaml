@@ -1,0 +1,55 @@
+# =============================================================================
+# HOPE ping-pong WBC task (Agibot A3) — racket-target tracking.
+#
+# Selected with `task=HOPEPingPong`. Composes the shared env/sim/randomization
+# bases (cfg/base/*) and overrides the HOPE-specific knobs below. A key present
+# here overrides the code default; a missing key keeps the code default (106B style).
+# =============================================================================
+
+name: HOPEPingPong
+gym_task: HOPE-PingPong-AgibotA3-v0
+experiment_name: agibot_a3_hope
+
+# wandb motion registry for the reference clip (override on the CLI with
+# registry_name=...; run once per swing style with the forehand/backhand clip).
+registry_name: ${oc.env:WANDB_ENTITY,BerkeleyPingPong}/wandb-registry-motions/hope_forehand
+
+defaults:
+  - /base/env_base@_here_
+  - /base/sim_base@_here_
+  - /base/randomization_base@_here_
+  - _self_
+
+# env / sim / domain_rand are inherited from the base files above; override here, e.g.:
+# env:
+#   num_envs: 2048
+
+# ---- reward weights / kernel std (EDIT) ----------------------------------
+rewards:
+  racket_position_weight: 4.0
+  racket_position_std: 0.075      # m   (target < 7.5 cm)
+  racket_velocity_weight: 2.0
+  racket_velocity_std: 0.5        # m/s (target < 0.5)
+  racket_normal_weight: 2.0
+  racket_normal_std: 0.262        # rad (target < 15 deg)
+  base_position_weight: 1.0
+  base_position_std: 0.3
+  joint_torques_weight: -0.00001
+
+# ---- racket target sampling (EDIT) ---------------------------------------
+# PLACEHOLDER ranges — set the pos/vel ranges from the A3 arm IK reachability.
+racket:
+  strike_phase: 0.46              # fraction of the clip where the paddle meets the ball
+  strike_window_s: 0.1            # half-window (+/-) for the racket-state reward
+  pos_x_range: [0.25, 0.55]
+  pos_y_range: [-0.45, 0.45]      # straddle the robot center -> forehand + backhand
+  pos_z_range: [0.70, 1.15]
+  vel_x_range: [1.5, 4.0]
+  vel_y_range: [-1.0, 1.0]
+  vel_z_range: [0.0, 1.5]
+  base_target_x_range: [-0.10, 0.10]
+  base_target_y_range: [-0.35, 0.35]
+  normal_mode: velocity           # "velocity" (n = v/|v|) or "sampled"
+  forehand_on_negative_y: true    # right arm holds the paddle
+  mount_normal_axis: 2            # racket-local +Z is the face normal (confirm vs the paddle mesh)
+  mount_normal_sign: 1.0
