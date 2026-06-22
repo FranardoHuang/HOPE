@@ -15,7 +15,7 @@ hope_planner:
     # mocap, export to CSV (t,x,y,z), then run
     #   ros2 run hope_planner hope_calibrate traj1.csv ... traj15.csv
     # and paste the printed values here (see reimplement.md Section 8).
-    drag_k: 0.5            # TODO: calibrate
-    restitution_h: 0.75    # TODO: calibrate (horizontal table restitution)
-    restitution_v: 0.85    # TODO: calibrate (vertical table restitution)
+    drag_k: 0.8781         # Calibrated from salvaged traj01 split into 15 toss chunks.
+    restitution_h: 0.8527  # Calibrated from salvaged traj01 split into 15 toss chunks.
+    restitution_v: 0.8518  # Calibrated from salvaged traj01 split into 15 toss chunks.
     restitution_racket: 0.88  # TODO: calibrate (ball-racket restitution)
