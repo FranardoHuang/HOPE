@@ -9,6 +9,7 @@
 
 import argparse
 import sys
+import pickle
 
 from isaaclab.app import AppLauncher
 
@@ -58,7 +59,7 @@ from isaaclab.envs import (
     multi_agent_to_single_agent,
 )
 from isaaclab.utils.dict import print_dict
-from isaaclab.utils.io import dump_pickle, dump_yaml
+from isaaclab.utils.io import dump_yaml
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
@@ -71,6 +72,15 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.benchmark = False
+
+
+def dump_pickle(filename: str, data):
+    """Compatibility helper for IsaacLab builds that no longer expose dump_pickle."""
+    if not filename.endswith("pkl"):
+        filename += ".pkl"
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
+    with open(filename, "wb") as f:
+        pickle.dump(data, f)
 
 
 @hydra_task_config(args_cli.task, "rsl_rl_cfg_entry_point")

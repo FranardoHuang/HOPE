@@ -147,7 +147,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     export_motion_policy_as_onnx(
         env.unwrapped,
         ppo_runner.alg.policy,
-        normalizer=ppo_runner.obs_normalizer,
+        normalizer=getattr(ppo_runner.alg.policy, "actor_obs_normalizer", None),
         path=export_model_dir,
         filename="policy.onnx",
     )

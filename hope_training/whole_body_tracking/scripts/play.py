@@ -106,7 +106,8 @@ def _run_play(cfg, simulation_app):
     # export the policy to ONNX next to the checkpoint (step 15)
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
     export_motion_policy_as_onnx(
-        env.unwrapped, ppo_runner.alg.policy, normalizer=ppo_runner.obs_normalizer,
+        env.unwrapped, ppo_runner.alg.policy,
+        normalizer=getattr(ppo_runner.alg.policy, "actor_obs_normalizer", None),
         path=export_model_dir, filename="policy.onnx",
     )
     attach_onnx_metadata(env.unwrapped, str(wandb_path) if wandb_path else "none", export_model_dir)

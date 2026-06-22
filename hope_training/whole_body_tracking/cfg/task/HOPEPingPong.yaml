@@ -12,7 +12,9 @@ experiment_name: agibot_a3_hope
 
 # wandb motion registry for the reference clip (override on the CLI with
 # registry_name=...; run once per swing style with the forehand/backhand clip).
-registry_name: ${oc.env:WANDB_ENTITY,BerkeleyPingPong}/wandb-registry-motions/hope_forehand
+# NOTE: the prefix is the wandb ORG (WANDB_REGISTRY_ORG), NOT the team (WANDB_ENTITY) — registries
+# are org-scoped, so a team name fails with "Unable to find organization for entity ...".
+registry_name: ${oc.env:WANDB_REGISTRY_ORG,BerkeleyPingPong}/wandb-registry-motions/hope_forehand
 
 defaults:
   - /base/env_base@_here_
@@ -51,5 +53,5 @@ racket:
   base_target_y_range: [-0.35, 0.35]
   normal_mode: velocity           # "velocity" (n = v/|v|) or "sampled"
   forehand_on_negative_y: true    # right arm holds the paddle
-  mount_normal_axis: 2            # racket-local +Z is the face normal (confirm vs the paddle mesh)
-  mount_normal_sign: 1.0
+  mount_normal_axis: 1            # racket-local +Y is the face normal (red/hitting face; confirmed in Step 11)
+  mount_normal_sign: 1.0          # +1 = red/forehand face; use -1 for the black face (backhand-only policy)

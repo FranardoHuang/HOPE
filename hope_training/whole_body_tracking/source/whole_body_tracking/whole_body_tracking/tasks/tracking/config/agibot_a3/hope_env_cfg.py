@@ -44,6 +44,14 @@ class HOPECommandsCfg(CommandsCfg):
         asset_name="robot",
         motion_command_name="motion",
         debug_vis=False,
+        # Paddle face normal = racket-local +Y (blade is thin along Y; +Y is the red/hitting face).
+        # Confirmed from the std-pingpang URDF + blade STL in reimplement.md Step 11 (the cfg default
+        # of axis 2/+Z was a placeholder guess). sign=+1 -> red (forehand) face; use -1 for the
+        # black face if you train a backhand-only policy.
+        # NOTE: cfg/task/HOPEPingPong.yaml also sets mount_normal_axis and (via train.py) overrides
+        # this for the Hydra path — keep the two in sync.
+        mount_normal_axis=1,
+        mount_normal_sign=1.0,
     )
 
 

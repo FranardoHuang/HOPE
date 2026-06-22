@@ -296,8 +296,8 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # for the A3 ping-pong URDF (all mount joints are rpy=0). Set non-identity if the mount tilts the
     # paddle relative to the wrist frame.
     mount_quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
-    mount_normal_axis: int = 2  # racket-local +Z is the face normal (CONFIRM against the A3 paddle mesh)
-    mount_normal_sign: float = 1.0
+    mount_normal_axis: int = 1  # racket-local +Y is the face normal (red/hitting face; confirmed in Step 11)
+    mount_normal_sign: float = 1.0  # +1 = red/forehand face; -1 = black/backhand face
 
     # --- strike timing (fraction of the reference clip where the paddle meets the ball) ---
     strike_phase: float = 0.46  # HITTER clip: strike at frame 43/94 ≈ 0.46

@@ -19,6 +19,18 @@ import hydra
 from omegaconf import OmegaConf
 
 
+def dump_pickle(filename: str, data):
+    """Compatibility helper for IsaacLab builds that no longer expose dump_pickle."""
+    import os
+    import pickle
+
+    if not filename.endswith("pkl"):
+        filename += ".pkl"
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
+    with open(filename, "wb") as f:
+        pickle.dump(data, f)
+
+
 # --------------------------------------------------------------------------- #
 # Task YAML -> Isaac Lab env cfg overrides (only keys present in the YAML are applied).
 # --------------------------------------------------------------------------- #
@@ -128,7 +140,7 @@ def _run(cfg):
     import gymnasium as gym
     import torch
 
-    from isaaclab.utils.io import dump_pickle, dump_yaml
+    from isaaclab.utils.io import dump_yaml
     from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
     from isaaclab_tasks.utils import parse_env_cfg
 
@@ -223,10 +235,23 @@ def main(cfg):
         headless=bool(cfg.headless), device=str(cfg.device), enable_cameras=bool(cfg.video)
     )
     simulation_app = app_launcher.app
+    # Print the traceback BEFORE closing the app: Isaac's simulation_app.close() hard-exits the
+    # process (os._exit), which otherwise swallows any exception from _run and makes a real failure
+    # look like a clean "exit 0" with the log truncated at startup.
+    failed = False
     try:
         _run(cfg)
+    except Exception:
+        import traceback
+        print("\n[train.py] ERROR during run:", flush=True)
+        traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        failed = True
     finally:
         simulation_app.close()
+    if failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

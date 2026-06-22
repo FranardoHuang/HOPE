@@ -135,7 +135,12 @@ AGIBOT_A3_CFG = ArticulationCfg(
             max_depenetration_velocity=1.0,
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-            enabled_self_collisions=True, solver_position_iteration_count=8, solver_velocity_iteration_count=4
+            # Self-collision is OFF: the merged wrist body carries 4 overlapping collision meshes
+            # (wrist + hand_pingpang + red/black blades, all coincident) with thin blade hulls, which
+            # corrupts PhysX at sim start ("free(): corrupted unsorted chunks" -> Aborted) on this
+            # placeholder asset. WBC imitation does not need self-collision; re-enable once a validated
+            # A3 asset with clean collision geometry is dropped in (reimplement.md step 2.1).
+            enabled_self_collisions=False, solver_position_iteration_count=8, solver_velocity_iteration_count=4
         ),
         joint_drive=sim_utils.UrdfConverterCfg.JointDriveCfg(
             gains=sim_utils.UrdfConverterCfg.JointDriveCfg.PDGainsCfg(stiffness=0, damping=0)

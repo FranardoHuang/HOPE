@@ -14,13 +14,15 @@ hope_training/.venv-motion*/
 hope_training/GVHMR/
 hope_training/GMR/
 
-# Step 9-10: downloaded or generated motion assets
-hope_training/motions/raw_video/
-hope_training/motions/smplx/
-hope_training/motions/retargeted/
-hope_training/motions/preprocessed/
+# Step 9-12: downloaded or generated motion assets
+hope_training/motions/
 
+# Step 12-15: training artifacts
+hope_training/whole_body_tracking/logs/
+hope_training/whole_body_tracking/outputs/
+hope_training/whole_body_tracking/artifacts/
 
 hope_training/wandb/
+hope_training/whole_body_tracking/wandb/
 *.log
 .codex-env-snapshots

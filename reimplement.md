@@ -792,7 +792,7 @@ source ~/workspace/HOPE/hope_ws/install/local_setup.bash
 ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
   server:=192.168.1.100 \
   port:=3883 \
-  update_freq:=360.0
+  update_freq:=180.0
 '
 ```
 
@@ -1487,6 +1487,100 @@ Verification gate:
 
 ## 9. Acquire Human Swing Motions
 
+### 9.0 New-Video Pipeline: Step 9 -> Step 11
+
+For the current repo, the simplest way to process a newly recorded clip is:
+
+1. Put the new clip under `~/workspace/HOPE/hope_training/motions/raw_video/`.
+2. Rename it to either `forehand_swing.mp4` or `backhand_swing.mp4`.
+3. Re-run the same Step 9 -> Step 11 commands below.
+
+Current limitation:
+
+- `assets/agibot_a3/postprocess_ground.py` currently assumes the motion names `forehand_swing` and `backhand_swing`.
+- `assets/agibot_a3/render_inspect.py` currently assumes the same names.
+- Under the current helper scripts, keep both motion files present:
+  `forehand_swing.pkl` and `backhand_swing.pkl`.
+  If you only replace one clip, leave the other one in place or update the helper scripts first.
+
+Use this command-and-output flowchart for one new forehand clip. For a backhand clip,
+replace every `forehand_swing` token with `backhand_swing`.
+
+```text
+new video
+  ~/workspace/HOPE/hope_training/motions/raw_video/forehand_swing.mp4
+    |
+    | Step 9: GVHMR
+    | command:
+    |   cd ~/workspace/HOPE/hope_training/GVHMR
+    |   source ~/workspace/HOPE/hope_training/.venv-motion/bin/activate
+    |   python tools/demo/demo.py --video=../motions/raw_video/forehand_swing.mp4 -s
+    | writes:
+    |   GVHMR/outputs/demo/forehand_swing/hmr4d_results.pt
+    v
+human motion in SMPL-X form
+  GVHMR/outputs/demo/forehand_swing/hmr4d_results.pt
+    |
+    | Step 10: GMR retarget
+    | command:
+    |   cd ~/workspace/HOPE/hope_training/GMR
+    |   source ~/workspace/HOPE/hope_training/.venv-motion/bin/activate
+    |   python scripts/gvhmr_to_robot.py \
+    |     --gvhmr_pred_file ../GVHMR/outputs/demo/forehand_swing/hmr4d_results.pt \
+    |     --robot agibot_a3 \
+    |     --save_path ../motions/a3_gmr/forehand_swing.pkl
+    | writes:
+    |   motions/a3_gmr/forehand_swing.pkl
+    v
+robot joint motion
+  motions/a3_gmr/forehand_swing.pkl
+    |
+    | Step 10: ground the feet
+    | command:
+    |   python assets/agibot_a3/postprocess_ground.py
+    | writes:
+    |   motions/a3_gmr/forehand_swing.pkl
+    |   motions/a3_gmr/forehand_swing_raw.pkl
+    v
+grounded robot joint motion
+  motions/a3_gmr/forehand_swing.pkl
+    |
+    | Step 10: inspect the body motion
+    | command:
+    |   PYTHONPATH=. /home/dongc1/workspace/HOPE/hope_training/.venv-motion/bin/python \
+    |     scripts/vis_robot_motion.py \
+    |     --robot agibot_a3 \
+    |     --robot_motion_path ../motions/a3_gmr/forehand_swing.pkl
+    | writes:
+    |   no new files
+    v
+checked robot body motion
+    |
+    | Step 11: build the fixed racket model
+    | command:
+    |   python assets/agibot_a3/build_racket_xml.py
+    | writes:
+    |   assets/agibot_a3/a3_racket.xml
+    v
+robot + fixed racket model
+  assets/agibot_a3/a3_racket.xml
+    |
+    | Step 11: validate FK
+    | command:
+    |   MUJOCO_GL=egl python assets/agibot_a3/racket_fk.py
+    | writes:
+    |   no new files
+    |
+    | Step 11: render inspection PNGs
+    | command:
+    |   python assets/agibot_a3/render_inspect.py
+    | writes:
+    |   motions/a3_gmr/forehand_swing_contact.png
+    |   motions/a3_gmr/racket_pose.png
+    v
+checked robot + racket motion
+```
+
 You need at least two reference motions:
 
 1. Forehand.
@@ -1739,125 +1833,391 @@ Quick check:
 find ~/workspace/HOPE/hope_training/GMR/assets/body_models/smplx -maxdepth 1 -type f | sort
 ```
 
-For the Agibot Expedition A3 robot:
+Step 10 result:
 
-1. Create or obtain a GMR target for the A3, for example `agibot_a3`. If you do not yet have the A3 URDF/MJCF from Agibot, retarget against the open Agibot X1 model (`agibot_x1`) as a stand-in and re-run once the A3 model arrives.
-2. Confirm the output joint order matches the A3 controller joint order (the same order the exported ONNX policy will use). Until Agibot provides it, mark the joint order as `PLACEHOLDER_EXTERNAL_A3_JOINT_ORDER` and keep it in one shared config.
-3. Retarget forehand.
-4. Retarget backhand.
-5. Export to CSV or PKL as expected by the preprocessing script.
+- `assets/agibot_a3/a3_mocap.xml`
+- `general_motion_retargeting/ik_configs/smplx_to_a3.json`
+- GMR registration for `agibot_a3`
+- `hope_training/motions/a3_gmr/forehand_swing.pkl`
+- `hope_training/motions/a3_gmr/backhand_swing.pkl`
+- `hope_training/config/joint_order_agibot_a3.yaml`
 
-How to create or verify the GMR target:
+Step 10 primary outputs are PKL motion files. PNG inspection images are generated
+later by `assets/agibot_a3/render_inspect.py` after Step 11 builds
+`assets/agibot_a3/a3_racket.xml`.
 
-1. Locate the robot model file. For A3, this is `PLACEHOLDER_A3_URDF_OR_MJCF` from Agibot. For the temporary stand-in, use the X1 model from `agibot_x1_train/resources/robots/x1`.
-2. List the robot joints from the model. For URDF, use `grep '<joint' robot.urdf` or a URDF parser. For MJCF, list the `<joint>` elements.
-3. Remove fixed joints from the controllable joint list. Keep only joints that the controller can command.
-4. Create one shared file such as `hope_training/config/joint_order_agibot_a3.yaml` with the exact order.
-5. Use the same file for GMR retargeting, Isaac/MuJoCo training, ONNX metadata, and the hardware bridge.
-6. If the A3 SDK publishes `/joint_states`, compare the topic order and names with the YAML file:
+Run every command in this step from:
 
 ```bash
-ros2 topic echo /joint_states --once
+cd ~/workspace/HOPE/hope_training/GMR
+source ~/workspace/HOPE/hope_training/.venv-motion/bin/activate
 ```
 
-If the names or order differ, fix the YAML and rebuild/re-export before training. Do not fix joint-order mismatch in only one script.
+### 10.1 Inputs
 
-`PLACEHOLDER_EXTERNAL_A3_JOINT_ORDER` means an external blocker, not an optional cleanup. Replace it only after Agibot provides the A3 joint order or after you verify it from the real SDK.
+1. Use `agi/URDF/a3_t2d5/` as the robot body model for retargeting.
+2. Do **not** use `agi/URDF/A3T2.5-URDF-std-pingpang/` in Step 10. That model is only for Step 11 because it includes the fixed racket links.
+3. Use the Step 9 GVHMR outputs:
+   - `../GVHMR/outputs/demo/forehand_swing/hmr4d_results.pt`
+   - `../GVHMR/outputs/demo/backhand_swing/hmr4d_results.pt`
 
-For a custom robot:
+Quick check:
 
-1. Add the robot URDF or MJCF.
-2. Define the robot joint list.
-3. Define key body matching from SMPL-X joints to robot links.
-4. Define joint limits.
-5. Define collision or self-contact constraints if supported.
-6. Run retargeting.
-7. Inspect the output visually.
+```bash
+test -f /home/dongc1/workspace/HOPE/agi/URDF/a3_t2d5/urdf/model.urdf
+test -f ../GVHMR/outputs/demo/forehand_swing/hmr4d_results.pt
+test -f ../GVHMR/outputs/demo/backhand_swing/hmr4d_results.pt
+```
 
-Important racket note:
+### 10.2 Create and update the A3 target in GMR
 
-- SMPL-X hand pose is not the racket pose.
-- The HOPE system uses a fixed physical racket mount.
-- The robot racket pose is computed by forward kinematics:
+Create these files once:
+
+- `assets/agibot_a3/convert_urdf_to_mjcf.py`
+- `assets/agibot_a3/postprocess_ground.py`
+- `assets/agibot_a3/render_inspect.py`
+- `general_motion_retargeting/ik_configs/smplx_to_a3.json`
+- `hope_training/config/joint_order_agibot_a3.yaml`
+
+Update these files once:
+
+- `general_motion_retargeting/params.py`
+- `scripts/gvhmr_to_robot.py`
+
+Required code changes:
+
+1. `convert_urdf_to_mjcf.py` must read `agi/URDF/a3_t2d5/urdf/model.urdf`, add a free joint to `pelvis_link`, and write `assets/agibot_a3/a3_mocap.xml`.
+2. `smplx_to_a3.json` must map SMPL-X joints onto A3 links. Start from `smplx_to_g1.json` and rename the robot links to A3.
+3. `params.py` must register `agibot_a3` in:
+   - `ROBOT_XML_DICT`
+   - `IK_CONFIG_DICT["smplx"]`
+   - `ROBOT_BASE_DICT`
+   - `VIEWER_CAM_DISTANCE_DICT`
+4. `gvhmr_to_robot.py` must accept `--robot agibot_a3`.
+5. `joint_order_agibot_a3.yaml` must store the 31 hinge-joint order from `a3_mocap.xml`. Reuse this same order for training, ONNX export, and the hardware bridge.
+
+Sanity check:
+
+```bash
+python -c "from general_motion_retargeting import ROBOT_XML_DICT, IK_CONFIG_DICT; print('agibot_a3' in ROBOT_XML_DICT, 'agibot_a3' in IK_CONFIG_DICT['smplx'])"
+# expected: True True
+```
+
+### 10.3 Clean old outputs before a fresh rerun
+
+Skip this if you want to keep the previous outputs.
+
+```bash
+rm -f ../motions/a3_gmr/forehand_swing.pkl \
+      ../motions/a3_gmr/backhand_swing.pkl \
+      ../motions/a3_gmr/forehand_swing_raw.pkl \
+      ../motions/a3_gmr/backhand_swing_raw.pkl
+```
+
+### 10.4 Run Step 10
+
+1. Build the MuJoCo model:
+
+```bash
+python assets/agibot_a3/convert_urdf_to_mjcf.py
+```
+
+Writes:
 
 ```text
-world -> base_link -> waist -> shoulder -> elbow -> wrist -> T_mount -> racket
+assets/agibot_a3/a3_mocap.xml
 ```
 
-Verification gate:
+Expected output:
 
-- Retargeted forehand and backhand play back without impossible joint angles.
-- The right wrist trajectory roughly matches the human hitting motion.
-- The robot remains balanced in the reference motion.
-- Joint limits are not violated.
+```text
+nbody=33  njnt=32  nq=38  nv=37
+has free joint: True
+root body: pelvis_link
+actuated (hinge) joints: 31
+```
+
+2. Retarget forehand:
+
+```bash
+python scripts/gvhmr_to_robot.py \
+  --gvhmr_pred_file ../GVHMR/outputs/demo/forehand_swing/hmr4d_results.pt \
+  --robot agibot_a3 \
+  --save_path ../motions/a3_gmr/forehand_swing.pkl
+```
+
+Writes:
+
+```text
+../motions/a3_gmr/forehand_swing.pkl
+```
+
+3. Retarget backhand:
+
+```bash
+python scripts/gvhmr_to_robot.py \
+  --gvhmr_pred_file ../GVHMR/outputs/demo/backhand_swing/hmr4d_results.pt \
+  --robot agibot_a3 \
+  --save_path ../motions/a3_gmr/backhand_swing.pkl
+```
+
+Writes:
+
+```text
+../motions/a3_gmr/backhand_swing.pkl
+```
+
+4. Ground the feet:
+
+```bash
+python assets/agibot_a3/postprocess_ground.py
+```
+
+Writes:
+
+```text
+../motions/a3_gmr/forehand_swing.pkl       # overwritten with grounded root_pos
+../motions/a3_gmr/backhand_swing.pkl       # overwritten with grounded root_pos
+../motions/a3_gmr/forehand_swing_raw.pkl   # one-time backup of the pre-ground PKL
+../motions/a3_gmr/backhand_swing_raw.pkl   # one-time backup of the pre-ground PKL
+```
+
+Expected output pattern:
+
+```text
+forehand_swing: ... AFTER min=0.0000 max=0.0000
+backhand_swing: ... AFTER min=0.0000 max=0.0000
+```
+
+At this point you have the Step 10 PKL outputs only. Do not expect PNGs yet.
+
+### 10.5 Check Step 10 outputs
+
+Required output files:
+
+```text
+assets/agibot_a3/a3_mocap.xml
+../motions/a3_gmr/forehand_swing.pkl
+../motions/a3_gmr/backhand_swing.pkl
+../motions/a3_gmr/forehand_swing_raw.pkl
+../motions/a3_gmr/backhand_swing_raw.pkl
+```
+
+Check them:
+
+```bash
+find assets/agibot_a3 -maxdepth 1 -name 'a3_mocap.xml'
+find ../motions/a3_gmr -maxdepth 1 \( -name 'forehand_swing*.pkl' -o -name 'backhand_swing*.pkl' \) | sort
+```
+
+Visual check with a viewer:
+
+```bash
+PYTHONPATH=. /home/dongc1/workspace/HOPE/hope_training/.venv-motion/bin/python \
+  scripts/vis_robot_motion.py \
+  --robot agibot_a3 \
+  --robot_motion_path ../motions/a3_gmr/forehand_swing.pkl
+```
+
+Writes:
+
+```text
+no new files
+```
+
+Headless check with rendered PNGs:
+
+```bash
+# run this only after Step 11 creates assets/agibot_a3/a3_racket.xml
+python assets/agibot_a3/render_inspect.py
+```
+
+Step 10 passes when:
+
+- no impossible joint angles and no joint-limit violations,
+- the right wrist follows the swing,
+- both feet stay on the ground after grounding,
+- the torso stays upright and the robot remains balanced.
+
+### 10.6 If Step 10 needs edits
+
+1. If GMR cannot find the robot, fix `params.py` and `gvhmr_to_robot.py`.
+2. If the model fails to compile, fix `convert_urdf_to_mjcf.py` or the source URDF path.
+3. If a limb is twisted, edit the quaternion offset in `smplx_to_a3.json`, then rerun 10.4 and 10.5.
+4. If joint order later mismatches the SDK, update only `hope_training/config/joint_order_agibot_a3.yaml` and propagate that one shared order everywhere else.
+
+### 10.7 Handoff to Step 11
+
+Do not treat the retargeted hand pose as the racket pose. The racket pose must be:
+
+```text
+world -> pelvis_link -> waist -> torso -> shoulder -> elbow -> wrist -> T_mount -> racket
+```
+
+Step 11 result:
+
+- `assets/agibot_a3/a3_racket.xml`
+- a reusable wrist-to-racket transform `T_mount`
+- a reusable FK helper for racket center and normal
+- `hope_training/motions/a3_gmr/forehand_swing_contact.png`
+- `hope_training/motions/a3_gmr/backhand_swing_contact.png`
+- `hope_training/motions/a3_gmr/racket_pose.png`
 
 ## 11. Model The Fixed Racket Mount
 
-This step is mandatory. Do not approximate it by tracking the racket externally.
+Run every command in this step from:
 
-Before you start, prepare these things:
-
-1. A robot model file for simulation:
-   - URDF, MJCF, or USD.
-   - If the real A3 model is not available yet, use the open Agibot X1 model as a temporary stand-in.
-2. The wrist link name in that model:
-   - this is the link the racket will attach to.
-3. A simple racket model:
-   - at minimum, a paddle-face center,
-   - a face-normal direction,
-   - a radius or width/height,
-   - and a simple collision shape.
-4. A mounting idea:
-   - where the racket center should sit relative to the wrist,
-   - and which way the racket face should point.
-5. A place to record `T_mount`:
-   - translation `x y z` from wrist to racket center,
-   - rotation `roll pitch yaw` from wrist axes to racket axes.
-6. A first contact guess for simulation:
-   - `restitution_racket` for how strong the rebound is,
-   - friction if your simulator requires it.
-
-If you do not have the real robot or final bracket yet, that is okay. Start with a temporary racket mount in simulation, make the planner and training pipeline work, then replace `T_mount` with measured values later.
-
-1. Design or obtain the 3D-printed bracket that attaches the racket to the robot wrist.
-2. Define a fixed transform `T_mount` from the robot wrist link to the racket frame.
-3. Add `T_mount` to the robot model as a fixed joint.
-4. Use the same `T_mount` in:
-   - simulation,
-   - training reward computation,
-   - deployment forward kinematics,
-   - hardware calibration.
-5. Physically measure the mount:
-   - translation from wrist frame to racket center,
-   - orientation of racket face normal,
-   - handle or blade roll convention.
-6. Write a small FK test that computes racket pose from known joint angles.
-
-How to measure `T_mount`:
-
-1. Print or assemble the racket bracket.
-2. Identify the robot wrist link frame from the URDF. If the wrist frame is not physically obvious, ask Agibot or inspect the URDF link/joint origin.
-3. Mark the racket frame:
-   - origin: center of the racket face,
-   - +X or normal axis: choose the direction the planner uses as the racket face normal,
-   - another axis: along the handle or blade top edge, so roll is not ambiguous.
-4. Measure translation from wrist frame origin to racket-face center in meters. Use calipers for short offsets or a ruler/tape for larger offsets.
-5. Measure orientation:
-   - easiest: design the bracket so the racket normal is aligned with a known wrist-link axis, then orientation is a simple 0/90/180 degree rotation;
-   - otherwise measure the three angles with a digital angle gauge, or solve the transform by touching known points on the racket with a tracked calibration pointer.
-6. Add this as a fixed joint in URDF/MJCF/USD, and also put the same transform in any FK code used by deployment.
-
-Minimum check:
-
-```text
-Known robot standing pose + measured T_mount -> computed racket center should match the real racket center within 1-2 cm.
+```bash
+cd ~/workspace/HOPE/hope_training/GMR
+source ~/workspace/HOPE/hope_training/.venv-motion/bin/activate
 ```
 
-Verification gate:
+### 11.1 Inputs
 
-- The simulated racket frame matches the physical mount.
-- FK from base_link and joint states returns the expected racket center.
-- Racket normal direction is consistent with the planner normal.
+Use the `std-pingpang` URDF only in this step:
+
+- `agi/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf`
+
+Copy the three real paddle meshes from that URDF's `meshes/` into the A3 asset
+mesh dir once, so the racket model can render the actual hand+paddle (not a
+synthetic disk):
+
+```bash
+cp ../../agi/URDF/A3T2.5-URDF-std-pingpang/meshes/{pingpang_red_Link,pingpang_black_Link,right_hand_pingpang_Link}.STL \
+   assets/agibot_a3/meshes/
+```
+
+Use these mount constants:
+
+- `T_mount = [0.21021, 0.032078, 0.032036]` m
+- rotation = identity
+- racket face normal = `+Y`
+- blade diameter `≈ 160 mm`
+- blade center in the racket link frame `≈ [-0.004, -0.0015, -0.004]`
+
+### 11.2 Create and update the fixed-racket files
+
+Create these files once:
+
+- `assets/agibot_a3/build_racket_xml.py`
+- `assets/agibot_a3/racket_fk.py`
+
+Required code behavior:
+
+1. `build_racket_xml.py` must read `a3_mocap.xml`, attach a fixed `racket_root` body to `right_wrist_yaw_Link` at `T_mount`, and write `a3_racket.xml`.
+2. The new model must:
+   - mount the real paddle meshes at their `std-pingpang` transforms — the fist+handle (`right_hand_pingpang_Link`) on the wrist at offset 0, and the red/black blade faces (`pingpang_red_Link`/`pingpang_black_Link`) on `racket_root` — so the racket is held on the handle and visually matches the real robot,
+   - hide a3's open `right_hand_Link` geoms (transparent, no collision) so they do not poke through the paddle,
+   - add a `racket_center` site at the blade center (use this for the reward / ball-contact target) and a `racket_normal` site marking the `+Y` face normal.
+3. `racket_fk.py` must expose FK for racket center and face normal, and it must validate against the original `std-pingpang` URDF.
+
+Sanity-check the placement against the real model by rendering the A3 racket next
+to the `std-pingpang` URDF (same pose, zoomed on the right hand); the fist, handle,
+and blade should coincide.
+
+### 11.3 Clean old output before a fresh rerun
+
+Skip this if you want to keep the previous result.
+
+```bash
+rm -f assets/agibot_a3/a3_racket.xml
+```
+
+### 11.4 Run Step 11
+
+1. Build the racket model:
+
+```bash
+python assets/agibot_a3/build_racket_xml.py
+```
+
+Writes:
+
+```text
+assets/agibot_a3/a3_racket.xml
+```
+
+Expected output:
+
+```text
+nq=38 nv=37 hinge_dof=31
+racket_root body present: True
+sites present: racket_center=True racket_normal=True
+```
+
+2. Validate FK:
+
+```bash
+MUJOCO_GL=egl python assets/agibot_a3/racket_fk.py
+```
+
+Writes:
+
+```text
+no new files
+```
+
+Expected output pattern:
+
+```text
+max racket-center residual a3 vs pingpang   : 0.0005 mm
+VALIDATION PASS (<1 mm)
+```
+
+3. Render the inspection PNGs from the existing PKLs:
+
+```bash
+python assets/agibot_a3/render_inspect.py
+```
+
+Writes:
+
+```text
+../motions/a3_gmr/forehand_swing_contact.png
+../motions/a3_gmr/backhand_swing_contact.png
+../motions/a3_gmr/racket_pose.png
+```
+
+Expected output pattern:
+
+```text
+wrote .../forehand_swing_contact.png
+wrote .../backhand_swing_contact.png
+wrote .../racket_pose.png
+```
+
+### 11.5 Check Step 11 outputs
+
+Required output files:
+
+```text
+assets/agibot_a3/a3_racket.xml
+assets/agibot_a3/build_racket_xml.py
+assets/agibot_a3/racket_fk.py
+../motions/a3_gmr/forehand_swing_contact.png
+../motions/a3_gmr/backhand_swing_contact.png
+../motions/a3_gmr/racket_pose.png
+```
+
+Check them:
+
+```bash
+find assets/agibot_a3 -maxdepth 1 \( -name 'a3_racket.xml' -o -name 'build_racket_xml.py' -o -name 'racket_fk.py' \) | sort
+find ../motions/a3_gmr -maxdepth 1 \( -name 'forehand_swing_contact.png' -o -name 'backhand_swing_contact.png' -o -name 'racket_pose.png' \) | sort
+```
+
+Step 11 passes when:
+
+- `a3_racket.xml` builds with unchanged DOF,
+- the racket is held on the handle on the right wrist (matches the `std-pingpang` model, no overlap with the open hand),
+- `racket_fk.py` passes with sub-mm residual,
+- the planner and simulator both use the same `+Y` racket-normal convention.
+
+### 11.6 If Step 11 needs edits
+
+1. If the racket is misplaced, update the constants in `build_racket_xml.py`.
+2. If FK fails against the URDF, fix the same constants in one place and rerun 11.4.
+3. If the real printed bracket differs from the URDF, update `T_mount`, rebuild `a3_racket.xml`, rerun `racket_fk.py`, and then reuse the new constants everywhere else.
 
 ## Phase 4 — WBC Training Pipeline
 
@@ -1869,84 +2229,215 @@ Execution scope for Phase 4:
 - **GPU distrobox**: run every command in steps `12-15` inside `grasping` or another NVIDIA-enabled Isaac distrobox.
 - **ROS distrobox `hope`**: do not install Isaac Sim, Isaac Lab, or BeyondMimic here.
 
-Recommended entry sequence:
+If you already finished steps `10` and `11`, then step `12` on this repo means:
+
+1. Turn the final GMR `.pkl` motions into retargeted `.csv`.
+2. Enter the GPU / Isaac environment.
+3. Install `whole_body_tracking` and set up WandB.
+4. Copy the A3 ping-pong URDF assets into the training repo.
+5. Turn each retargeted `.csv` into a BeyondMimic `.npz` and upload it to the WandB `motions` registry.
+6. Replay the uploaded motions to verify the robot and joint order are correct.
+
+Do the following **in order**. Do not skip ahead.
+
+### 12.1 Check that step 10 / 11 outputs exist
+
+From any shell:
 
 ```bash
-# host terminal
+cd ~/workspace/HOPE/hope_training
+ls -lh motions/a3_gmr/forehand_swing.pkl
+ls -lh motions/a3_gmr/backhand_swing.pkl
+ls -lh motions/a3_gmr/forehand_swing_contact.png
+ls -lh motions/a3_gmr/backhand_swing_contact.png
+```
+
+You should already have:
+
+- `motions/a3_gmr/forehand_swing.pkl`
+- `motions/a3_gmr/backhand_swing.pkl`
+- the corresponding inspection `.png` files from step `11`
+
+If either `.pkl` file is missing, go back to step `10` first.
+
+### 12.2 Convert the final GMR `.pkl` files into retargeted `.csv`
+
+Run this in the same motion environment you used for steps `9-11`:
+
+```bash
+cd ~/workspace/HOPE/hope_training/GMR
+source ~/workspace/HOPE/hope_training/.venv-motion/bin/activate
+python scripts/batch_gmr_pkl_to_csv.py --folder ../motions/a3_gmr
+```
+
+This writes CSV files to:
+
+```text
+~/workspace/HOPE/hope_training/motions/a3_gmr/csv/
+```
+
+Now copy only the **final** motions into the retargeted folder used by step `12`:
+
+```bash
+mkdir -p ~/workspace/HOPE/hope_training/motions/retargeted
+cp ~/workspace/HOPE/hope_training/motions/a3_gmr/csv/forehand_swing.csv \
+  ~/workspace/HOPE/hope_training/motions/retargeted/
+cp ~/workspace/HOPE/hope_training/motions/a3_gmr/csv/backhand_swing.csv \
+  ~/workspace/HOPE/hope_training/motions/retargeted/
+ls -lh ~/workspace/HOPE/hope_training/motions/retargeted
+```
+
+Expected files:
+
+- `motions/retargeted/forehand_swing.csv`
+- `motions/retargeted/backhand_swing.csv`
+
+Note: `batch_gmr_pkl_to_csv.py` also converts `*_raw.pkl` if those files are in the folder. That is normal. Ignore the `*_raw.csv` files for training.
+
+### 12.3 Enter the GPU / Isaac distrobox
+
+Open a host terminal and enter `grasping`:
+
+```bash
 distrobox enter grasping
-
-# now inside the GPU / Isaac distrobox
-cd ~/workspace/HOPE/hope_training
 ```
 
-For the Agibot Expedition A3 Isaac Lab path (with MuJoCo for sim-to-sim), install BeyondMimic:
+Now inside `grasping`, activate the Isaac / training Python:
 
 ```bash
-# inside the GPU / Isaac distrobox
-cd ~/workspace/HOPE/hope_training
-git clone https://github.com/HybridRobotics/whole_body_tracking.git
-cd whole_body_tracking
-```
-
-Install Isaac Sim and Isaac Lab:
-
-1. Install Isaac Sim 4.5.0.
-2. Install Isaac Lab 2.1.0.
-3. Use Python 3.10.
-4. Prefer a machine with an NVIDIA RTX 4090 or better.
-
-If this machine's existing `grasping` box already contains a different Isaac stack,
-do not overwrite it casually. Use a separate GPU distrobox when you need exact
-versions such as `Isaac Sim 4.5.0` plus `Isaac Lab 2.1.0`.
-
-You can complete the next setup block **now**, even if the Agibot A3 assets have
-not arrived yet. On this machine, use the existing Isaac Python environment in
-`grasping`:
-
-```bash
-# inside the GPU / Isaac distrobox on this machine
 source /opt/drone_venv/bin/activate
 cd ~/workspace/HOPE/hope_training/whole_body_tracking
+python -c "import sys; print(sys.executable)"
 ```
 
 Important on this machine:
 
-- `wandb` and the Isaac training dependencies are available in `/opt/drone_venv`.
-- Plain `/usr/bin/python3` in `grasping` does **not** include `wandb`, so do not
-  use the system Python for the training commands in this phase.
+- `wandb` and the Isaac training dependencies are expected to come from `/opt/drone_venv`.
+- Do **not** use plain `/usr/bin/python3` for the training commands in this phase.
 
-Install the training package:
+### 12.4 Install `whole_body_tracking`
 
 ```bash
-# inside the GPU / Isaac distrobox, with /opt/drone_venv active
 python -m pip install -e source/whole_body_tracking
+python -m pip show whole_body_tracking
 ```
 
-Run that command from the Isaac Lab Python environment, not the host system
-Python. If you see `externally-managed-environment` again, the Isaac Lab
-environment is not active.
+If `pip show` cannot find `whole_body_tracking`, the editable install did not land.
+The actual runtime check for this machine is the `hope_isaac_py ...` check below,
+not plain `python -c "import whole_body_tracking"`.
 
-Set up WandB now, before the robot assets arrive:
+If `python -m pip install -e source/whole_body_tracking` fails with a permission
+error like:
 
-1. In the browser, make sure your WandB user is a member of the team at
-   `https://wandb.ai/BerkeleyPingPong`.
-2. In WandB, open `User Settings -> API Keys` and create a new API key.
-3. Back in the `grasping` distrobox, log in:
+```text
+Permission denied: '/opt/drone_venv/lib/python3.11/site-packages/...'
+```
+
+then do **not** stop here. On this machine, `/opt/drone_venv` may be owned by
+`root`, so editable install can fail even though the runtime itself is usable.
+Use this no-install fallback for the rest of steps `12-15`:
 
 ```bash
-# inside the GPU / Isaac distrobox, with /opt/drone_venv active
+cd ~/workspace/HOPE/hope_training/whole_body_tracking
+
+export HOPE_WBT_PYTHONPATH=/opt/drone_venv/lib/python3.11/site-packages:$PWD/source/whole_body_tracking:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_tasks:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_assets:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_rl
+
+hope_isaac_py () {
+  PYTHONPATH="$HOPE_WBT_PYTHONPATH" /workspace/isaacsim/python.sh "$@"
+}
+```
+
+From this point on, on **this machine**, use `hope_isaac_py` for every Isaac /
+Isaac Lab command in steps `12-15`. Do **not** use plain `python scripts/...`
+for `csv_to_npz.py`, `replay_npz.py`, `train.py`, or `play.py`.
+
+Quick check:
+
+```bash
+hope_isaac_py scripts/csv_to_npz.py --help
+hope_isaac_py scripts/replay_npz.py --help
+```
+
+Expected behavior:
+
+- both commands print their usage text,
+- they may still end with `There was an error running python` because `--help`
+  exits through Isaac Sim's wrapper; that is fine,
+- this confirms the fallback launcher is wired correctly.
+
+If Isaac / Kit startup prints many lines like:
+
+```text
+Failed to create change watch ... errno=28/No space left on device
+```
+
+that usually means the Linux `inotify` watch limit is too low, **not** that the
+disk is full. On this machine, increase the kernel limits from the host shell:
+
+```bash
+sudo sysctl -w fs.inotify.max_user_watches=524288
+sudo sysctl -w fs.inotify.max_user_instances=1024
+sudo sysctl -w fs.inotify.max_queued_events=32768
+```
+
+To make that persistent:
+
+```bash
+cat <<'EOF' | sudo tee /etc/sysctl.d/99-isaac-inotify.conf
+fs.inotify.max_user_watches=524288
+fs.inotify.max_user_instances=1024
+fs.inotify.max_queued_events=32768
+EOF
+
+sudo sysctl --system
+```
+
+Then restart Isaac / replay processes and rerun the command:
+
+```bash
+pkill -f isaacsim || true
+pkill -f 'replay_npz.py' || true
+```
+
+### 12.5 Configure WandB
+
+WandB has **two different scopes** that you must not confuse — getting this wrong
+is the most common Step-12 failure:
+
+- **Runs** (training, smoke tests, checkpoints) are logged under an **entity** —
+  your personal entity or a **team** (e.g. `BerkeleyPingPong`). This is `WANDB_ENTITY`.
+- The **motions registry** is owned by an **organization**, not a team. Registry
+  artifact paths must start with the **org** name (e.g.
+  `dongc_1-university-of-california-berkeley-org`). Passing a *team* name there
+  fails with `CommError: Unable to find organization for entity '<team>'`. This is
+  `WANDB_REGISTRY_ORG`.
+
+A team usually lives inside an org, so the two values differ. Find your org name at
+`https://wandb.ai/registry/` (it appears in the URL / org switcher), or query it:
+
+```bash
+curl -s --netrc https://api.wandb.ai/graphql -H "Content-Type: application/json" \
+  -d '{"query":"query { viewer { organizations { orgEntity { name } } } }"}'
+```
+
+In the browser, open `User Settings -> API Keys` and create or copy an API key.
+
+Back in `grasping`:
+
+```bash
 wandb login --relogin --verify
 wandb whoami
 ```
 
-4. Persist the team settings for this workspace:
+Persist the defaults for this workspace (replace the two names with your own team
+and org):
 
 ```bash
-# inside the GPU / Isaac distrobox, with /opt/drone_venv active
 cat >> ~/.bashrc <<'EOF'
 
 # HOPE / BeyondMimic WandB defaults
-export WANDB_ENTITY=BerkeleyPingPong
+export WANDB_ENTITY=BerkeleyPingPong                                     # runs/checkpoints -> your team/entity
+export WANDB_REGISTRY_ORG=dongc_1-university-of-california-berkeley-org  # motions registry -> your ORG (not the team)
 export WANDB_PROJECT=hope_wbc
 export WANDB_DIR=$HOME/workspace/HOPE/hope_training/wandb
 EOF
@@ -1954,6 +2445,7 @@ EOF
 source ~/.bashrc
 mkdir -p "$WANDB_DIR"
 echo "$WANDB_ENTITY"
+echo "$WANDB_REGISTRY_ORG"
 echo "$WANDB_PROJECT"
 ```
 
@@ -1961,22 +2453,21 @@ Expected output:
 
 ```text
 BerkeleyPingPong
+dongc_1-university-of-california-berkeley-org
 hope_wbc
 ```
 
-5. Create the WandB registry in the browser:
-   - Open `https://wandb.ai/registry/`.
-   - Create a registry named `motions`.
-   - Use team / organization visibility appropriate for `BerkeleyPingPong`.
-   - `whole_body_tracking` links artifacts to `wandb-registry-motions/...`, so the
-     registry name must be exactly `motions`.
-   - You do **not** need to pre-create each motion collection. The upload step can
-     create collections such as `hope_forehand` or `hope_backhand` automatically.
+### 12.6 Create and smoke-test the WandB `motions` registry
 
-6. Run a smoke-test run under the team:
+In the browser:
+
+1. Open `https://wandb.ai/registry/`.
+2. Create a registry named `motions`.
+3. Do not rename it. The code expects the registry name to be exactly `motions`.
+
+Run a smoke-test WandB run:
 
 ```bash
-# inside the GPU / Isaac distrobox, with /opt/drone_venv active
 python - <<'PY'
 import os
 import wandb
@@ -1992,10 +2483,9 @@ run.finish()
 PY
 ```
 
-7. Run a smoke-test artifact upload to the `motions` registry:
+Run a smoke-test artifact upload:
 
 ```bash
-# inside the GPU / Isaac distrobox, with /opt/drone_venv active
 python - <<'PY'
 import os
 import numpy as np
@@ -2013,92 +2503,190 @@ with wandb.init(entity=entity, project=project, name=collection) as run:
     run.link_artifact(artifact=art, target_path=f"wandb-registry-motions/{collection}")
     print("Run URL:", run.url)
 
-print(f"Expected registry path: {entity}/wandb-registry-motions/{collection}:latest")
+org = os.environ.get("WANDB_REGISTRY_ORG", entity)  # registry is org-scoped, not team-scoped
+print(f"Expected registry path: {org}/wandb-registry-motions/{collection}:latest")
 PY
 ```
 
-If the smoke-test run and the smoke-test artifact both succeed, WandB is ready.
-You can stop here and wait for the A3 assets, or continue with the X1 stand-in.
+If both smoke tests succeed, WandB is ready.
 
-When the Agibot A3 assets arrive, add them to the training repo:
+### 12.7 Copy the A3 ping-pong URDF assets into the training repo
+
+On this repo, use the existing A3 ping-pong URDF package here:
+
+```text
+~/workspace/HOPE/agi/URDF/A3T2.5-URDF-std-pingpang
+```
+
+Create the training asset folder and copy the files:
 
 ```bash
-# inside the GPU / Isaac distrobox, with /opt/drone_venv active
-mkdir -p source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
+mkdir -p source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/urdf
+mkdir -p source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/meshes
+mkdir -p source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/config
 
-# PLACEHOLDER_A3_ASSET_DIR is the folder containing the robot model and meshes.
-# For real A3 hardware, this folder must come from Agibot.
-# For temporary software bringup, use the open X1 asset folder instead.
-PLACEHOLDER_A3_ASSET_DIR=/absolute/path/to/agibot_a3_assets
-
-cp -r "$PLACEHOLDER_A3_ASSET_DIR"/* \
+cp ~/workspace/HOPE/agi/URDF/A3T2.5-URDF-std-pingpang/package.xml \
   source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/
+cp -r ~/workspace/HOPE/agi/URDF/A3T2.5-URDF-std-pingpang/meshes/. \
+  source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/meshes/
+cp -r ~/workspace/HOPE/agi/URDF/A3T2.5-URDF-std-pingpang/config/. \
+  source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/config/
+cp ~/workspace/HOPE/agi/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf \
+  source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/urdf/model.urdf
 ```
 
-Reminder: there is **no public A3 robot description**. Agibot's only open humanoid model is the X1
-(`github.com/AgibotTech/agibot_x1_train`, which ships URDF + MJCF + meshes under `resources/robots/x1/`).
-Use X1 to build and debug the pipeline, then swap in the real A3 assets from Agibot.
-
-How to fill `PLACEHOLDER_A3_ASSET_DIR`:
-
-1. If Agibot gave you a zip/tar package, extract it under `~/workspace/HOPE/hope_training/vendor_assets/agibot_a3`.
-2. The folder should contain at least one robot model file (`.urdf`, `.mjcf`, `.xml`, or `.usd`) and mesh files (`.stl`, `.dae`, `.obj`, or `.usd`).
-3. Use an absolute path, for example:
+The copied URDF still points at meshes using `package://0000014503_A3T2.5-URDF-std-pingpang-0409/...`.
+Rewrite those mesh paths to local relative paths so Isaac Lab can find them from
+`assets/agibot_a3/urdf/model.urdf`:
 
 ```bash
-PLACEHOLDER_A3_ASSET_DIR=$HOME/workspace/HOPE/hope_training/vendor_assets/agibot_a3
+sed -i 's#package://0000014503_A3T2.5-URDF-std-pingpang-0409/meshes/#../meshes/#g' \
+  source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/urdf/model.urdf
 ```
 
-4. Verify the folder before copying:
+Remove the glued ball link. The std-pingpang URDF carries a fixed, massless
+`pingbang_ball_Link` rigidly attached to the racket's +Y (red) face — a CAD decoration,
+not a target. It has a 40 mm **collision** sphere that gets merged into the racket body and
+would interfere with the real dynamic ball you spawn later (and it confusingly sits on the
+"back" of the paddle during a backhand). Strip the link and its fixed joint (keep the
+red/black blades — those are the hitting surface):
 
 ```bash
-# inside the GPU / Isaac distrobox, with /opt/drone_venv active
-find "$PLACEHOLDER_A3_ASSET_DIR" -maxdepth 3 -type f | sed -n '1,40p'
+python - <<'PY'
+import xml.etree.ElementTree as ET
+p = "source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/urdf/model.urdf"
+t = ET.parse(p); r = t.getroot()
+for tag, name in (("joint","pingbang_ball_joint"), ("link","pingbang_ball_Link")):
+    e = r.find(f"{tag}[@name='{name}']")
+    if e is not None: r.remove(e)
+t.write(p)
+print("removed glued ball link+joint")
+PY
 ```
 
-If the folder has only meshes but no robot model, or only a robot model but no meshes, it is incomplete. Ask Agibot for the complete asset package.
+This does **not** change the 31 DOF or the 32 tracked bodies (the ball was a massless
+merged link), so any motions you already converted/uploaded stay valid — no need to redo
+Steps 12.8–12.9.
 
-After copying the assets:
-
-1. Register the robot asset path in the training config.
-2. Verify joint names and order against the real A3 controller joint order (the same order used for ONNX export and deployment).
-3. Verify inertial values, actuator limits, and default PD gains.
-4. Add the fixed racket mount link or fixed joint used by `T_mount`.
-
-Convert retargeted motions. `scripts/csv_to_npz.py` and `scripts/replay_npz.py` now take a
-`--robot {g1,agibot_a3}` flag (default `g1`); pass `--robot agibot_a3` for the A3. The A3 DOF
-column order is `AGIBOT_A3_JOINT_NAMES` in `robots/agibot_a3.py` — it must match the column order
-your GMR A3 retargeting writes into the CSV, or reorder that constant to match.
+Verify the copied training asset:
 
 ```bash
-# inside the GPU / Isaac distrobox, with /opt/drone_venv active
-python scripts/csv_to_npz.py \
+ls -lh source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/urdf/model.urdf
+ls -lh source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/meshes/pingpang_red_Link.STL
+find source/whole_body_tracking/whole_body_tracking/assets/agibot_a3 -maxdepth 2 -type f | sort | sed -n '1,40p'
+```
+
+### 12.8 Convert the retargeted `.csv` files into BeyondMimic `.npz`
+
+`scripts/csv_to_npz.py` takes:
+
+- one retargeted CSV
+- the robot name `agibot_a3`
+- an output collection name such as `hope_forehand`
+
+It does **two** things:
+
+1. It writes a temporary local file to `/tmp/motion.npz`.
+2. It uploads that file to the WandB `motions` registry.
+
+Prepare the local folder for keeping a copy of each generated `.npz`:
+
+```bash
+mkdir -p ~/workspace/HOPE/hope_training/motions/preprocessed
+```
+
+Convert the forehand motion:
+
+```bash
+hope_isaac_py scripts/csv_to_npz.py \
   --robot agibot_a3 \
   --input_file ~/workspace/HOPE/hope_training/motions/retargeted/forehand_swing.csv \
   --input_fps 30 \
   --output_name hope_forehand \
   --headless
 
-python scripts/csv_to_npz.py \
+cp /tmp/motion.npz ~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand.npz
+ls -lh ~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand.npz
+```
+
+Success marker:
+
+```text
+[INFO]: Motion saved to wandb registry: motions/hope_forehand
+```
+
+On the current repo version, the script exits automatically after this line.
+If you are running an older copy of the script and it keeps rendering after this
+success line, `Ctrl+C` is safe after the upload has completed.
+
+Convert the backhand motion:
+
+```bash
+hope_isaac_py scripts/csv_to_npz.py \
   --robot agibot_a3 \
   --input_file ~/workspace/HOPE/hope_training/motions/retargeted/backhand_swing.csv \
   --input_fps 30 \
   --output_name hope_backhand \
   --headless
+
+cp /tmp/motion.npz ~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand.npz
+ls -lh ~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand.npz
 ```
 
-Replay preprocessed motions:
+Success marker:
+
+```text
+[INFO]: Motion saved to wandb registry: motions/hope_backhand
+```
+
+Expected local files:
+
+- `motions/preprocessed/hope_forehand.npz`
+- `motions/preprocessed/hope_backhand.npz`
+
+Expected WandB registry entries:
+
+- `$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand:latest`
+- `$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_backhand:latest`
+
+If the robot pose looks scrambled during conversion, check `AGIBOT_A3_JOINT_NAMES` in
+`source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py`. That list must match
+the DOF column order written by your GMR A3 retargeting CSV.
+
+### 12.9 Replay the uploaded motions
+
+Replay forehand:
 
 ```bash
-# inside the GPU / Isaac distrobox, with /opt/drone_venv active
-python scripts/replay_npz.py \
+hope_isaac_py scripts/replay_npz.py \
   --robot agibot_a3 \
-  --registry_name="$WANDB_ENTITY/wandb-registry-motions/hope_forehand"
-
-python scripts/replay_npz.py \
-  --robot agibot_a3 \
-  --registry_name="$WANDB_ENTITY/wandb-registry-motions/hope_backhand"
+  --registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand"
 ```
+
+Replay backhand:
+
+```bash
+hope_isaac_py scripts/replay_npz.py \
+  --robot agibot_a3 \
+  --registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_backhand"
+```
+
+If you instead see `CommError: Unable to find organization for entity '<name>'`,
+you passed a **team** (or the wrong name) where the registry expects your **org** —
+set `WANDB_REGISTRY_ORG` to the org name from 12.5 and rerun. The registry prefix
+is always the org, never the team. (The `Could not parse xyz string '0.0' / xyz not
+specified for axis` lines from the URDF importer are harmless and unrelated.)
+
+### 12.10 Step-12 done checklist
+
+Step `12` is complete only if all of the following are true:
+
+- `motions/retargeted/forehand_swing.csv` exists.
+- `motions/retargeted/backhand_swing.csv` exists.
+- `motions/preprocessed/hope_forehand.npz` exists.
+- `motions/preprocessed/hope_backhand.npz` exists.
+- WandB registry contains `hope_forehand` and `hope_backhand`.
+- `replay_npz.py` shows the A3 replaying both motions without obviously broken joint order.
 
 Backend note: this build trains the A3 on the **Isaac Lab + URDF** path (reimplement.md step 2.3 /
 step 12). The `README.md` and WBC reference doc Section 4A also describe an alternative **mjlab +
@@ -2192,120 +2780,162 @@ Important paper-alignment note:
 - HITTER states PD gains are fixed / heuristic, not randomized.
 - If you want to match that behavior more closely, set `task.domain_rand.pd_gain_range=null`.
 
-What you still need to do personally once the A3 asset path is final:
+Fixes already applied (verified end-to-end — the env builds headless on 16 envs and steps with finite
+rewards):
 
-1. Point the A3 robot config at the real loadable asset and meshes.
+1. **Racket face normal = +Y** (not the placeholder +Z). Step 11 confirmed the blade is thin along Y,
+   so `mount_normal_axis=1` is set in `hope_commands.py`, `hope_env_cfg.py`, and
+   `cfg/task/HOPEPingPong.yaml` (the YAML is what `train.py` applies). This resolves the old
+   "confirm the face-normal axis" TODO; `sign=+1` is the red/forehand face.
+2. **Self-collision OFF** (`enabled_self_collisions=False` in `robots/agibot_a3.py`). With it on, PhysX
+   aborted at sim start (`free(): corrupted unsorted chunks`) because the merged wrist body carries
+   overlapping collision meshes (wrist + hand + red/black blades) on the placeholder asset. Re-enable
+   once a validated A3 asset with clean collision geometry arrives.
+
+What you still need to do personally once the validated A3 asset arrives:
+
+1. Point the A3 robot config at the real loadable asset and meshes (and re-enable self-collision).
 2. Replace placeholder PD gains and any standing-pose constants with Agibot-validated values.
-3. Confirm the racket face-normal axis/sign.
-4. Measure realistic reachable racket target ranges and write them into `cfg/task/HOPEPingPong.yaml`.
-5. Verify joint-order consistency across preprocessing, training, ONNX export, and deployment.
+3. Measure realistic reachable racket target ranges and write them into `cfg/task/HOPEPingPong.yaml`.
+4. Verify joint-order consistency across preprocessing, training, ONNX export, and deployment.
 
 Verification gate:
 
-- `python -c "import whole_body_tracking"` works.
-- The Agibot A3 tasks register before launch.
-- Once the asset is present, the env launches headless, rewards are finite, and sampled targets are reachable.
+- `hope_isaac_py -c "import whole_body_tracking"` works. ✅
+- The Agibot A3 tasks register before launch. ✅
+- The env launches headless, rewards are finite, and sampled targets are reachable. ✅ (verified with the
+  copied placeholder asset; quality still depends on the validated asset + tuning.)
 
 ## 14. Train The WBC Policy
 
-> Reference-implementation status: the two Agibot A3 tasks are already registered, and the
-> preferred training interface is now the Hydra `scripts/train.py` entrypoint. The legacy
-> `scripts/rsl_rl/train.py` path is still available, but use it only when you specifically want the
-> old CLI style.
+Training uses the Hydra entrypoint `scripts/train.py` (`task=` selects the env, `algo=ppo` selects
+the PPO config). Run everything inside the GPU distrobox (`grasping`), same Python environment as
+Step 12. The commands below are copy-paste: 14.1 sets up the shell, 14.2 is a ~1-minute smoke test,
+14.3–14.4 are the real runs, 14.5 evaluates. (Verified end-to-end on 2026-06-22 — see the status
+note at the end of this step.)
 
-Execution scope:
-
-- Stay inside the same GPU distrobox and the same Isaac Lab Python environment used in Step 12.
-- Do not run the training commands below from the host shell or from `hope`.
-
-Use this workflow:
-
-1. Activate the `grasping` training environment from step 12.
-2. Train the plain tracking baseline first.
-3. Train the HOPE racket-target task only after the baseline is stable.
-4. Tune **task knobs** in `cfg/task/HOPEPingPong.yaml`.
-5. Tune **PPO knobs** in `cfg/algo/ppo.yaml`.
-
-Preferred interface — Hydra `scripts/train.py`:
+### 14.1 Set up the training shell (run once per terminal)
 
 ```bash
-# inside the GPU / Isaac distrobox
+# from the host:
+distrobox enter grasping
 
-# baseline plain motion tracking on the A3
-python scripts/train.py task=TrackingFlat algo=ppo headless=true \
-  registry_name="$WANDB_ENTITY/wandb-registry-motions/hope_forehand" \
-  run_name=forehand_tracking
+# inside grasping:
+cd ~/workspace/HOPE/hope_training/whole_body_tracking
 
-# HOPE racket-target tracking
-python scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-  registry_name="$WANDB_ENTITY/wandb-registry-motions/hope_forehand" \
-  run_name=hope_forehand_racket_tracking
+# Training PYTHONPATH MUST include isaaclab_rl (replay / csv_to_npz did not need it):
+export HOPE_WBT_PYTHONPATH=/opt/drone_venv/lib/python3.11/site-packages:$PWD/source/whole_body_tracking:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_tasks:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_assets:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_rl
+hope_isaac_py () { PYTHONPATH="$HOPE_WBT_PYTHONPATH" /workspace/isaacsim/python.sh "$@"; }
 
-# example overrides: fewer envs, shorter run, tweak one task knob and one DR knob
-python scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-  registry_name="$WANDB_ENTITY/wandb-registry-motions/hope_forehand" \
-  num_envs=2048 max_iterations=20000 \
-  task.sim.decimation=4 task.domain_rand.pd_gain_range=null \
-  task.rewards.racket_position_weight=5.0 task.racket.pos_x_range=[0.3,0.6]
+# wandb: runs log to your TEAM; the motion registry is read from your ORG (Step 12.5).
+# These two are DIFFERENT — using the team for the registry fails ("Unable to find organization").
+export WANDB_ENTITY=BerkeleyPingPong                                      # your team (run logging)
+export WANDB_REGISTRY_ORG=dongc_1-university-of-california-berkeley-org   # your org (motion registry)
+export WANDB_PROJECT=hope_wbc
 ```
 
-Where to tune what:
+### 14.2 Smoke test (~1 min) — confirm the whole pipeline runs
 
-1. `cfg/task/TrackingFlat.yaml`
-   - baseline plain motion tracking task selection
-2. `cfg/task/HOPEPingPong.yaml`
-   - HOPE reward weights/stds
-   - racket target ranges
-   - strike timing
-3. `cfg/base/{env_base,sim_base,randomization_base}.yaml`
-   - shared env count, 50 Hz timing, shared DR defaults
-4. `cfg/algo/ppo.yaml`
-   - PPO rollout length, learning rate, entropy, mini-batches, epochs, network sizes
+```bash
+hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
+  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
+  num_envs=32 max_iterations=3 logger=tensorboard run_name=smoke
+```
 
-Global CLI overrides are:
+Success = the env builds on 32 envs, then PPO iterates with finite rewards:
 
 ```text
-num_envs
-max_iterations
-registry_name
-run_name
-seed
-logger
-log_project_name
+[INFO] Task: Tracking-Flat-AgibotA3-v0 | experiment: agibot_a3_flat | log: .../logs/rsl_rl/...
+...
+                        Learning iteration 0/3
+                       Mean reward: -0.62
+...
+                        Learning iteration 2/3
 ```
 
-Everything else is overridden as `task.<group>.<key>` or `algo.<group>.<key>`.
+If it instead drops back to the shell with no `Learning iteration` lines, go to 14.7.
 
-The legacy argparse entry still works and reads the same PPO YAML:
+### 14.3 Train the baseline (plain motion tracking)
+
+Train the plain tracker first — it is easier and confirms the robot/asset before adding the racket
+objective. Omitting `num_envs`/`max_iterations` uses the config defaults; logs to wandb by default.
 
 ```bash
-python scripts/rsl_rl/train.py --task=HOPE-PingPong-AgibotA3-v0 \
-  --registry_name "$WANDB_ENTITY/wandb-registry-motions/hope_forehand" \
-  --headless --logger wandb --log_project_name hope_wbc --run_name hope_forehand_racket_tracking
+hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
+  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
+  run_name=forehand_tracking
 ```
 
-Train separate policies first:
+### 14.4 Train the HOPE racket task (one policy per swing)
 
-1. Train forehand with the forehand motion registry item.
-2. Evaluate forehand.
-3. Train backhand with the backhand motion registry item.
-4. Evaluate backhand.
-5. Add runtime switching later.
-
-Evaluate with the matching Hydra play script:
+Train forehand and backhand as separate policies (the HOPE default), each from its own clip:
 
 ```bash
-# inside the GPU / Isaac distrobox
-python scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
-  wandb_path=PLACEHOLDER_WANDB_ENTITY/hope_wbc/PLACEHOLDER_RUN_ID
+# forehand
+hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
+  run_name=hope_forehand
+
+# backhand
+hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_backhand" \
+  run_name=hope_backhand
 ```
 
-`PLACEHOLDER_RUN_ID` is the run ID from the WandB run URL. Example: in
-`https://wandb.ai/my-lab/hope_wbc/runs/abc123`, the run ID is `abc123`.
+Useful overrides (append to any command): `num_envs=4096 max_iterations=20000 seed=1`,
+`task.rewards.racket_position_weight=5.0`, `task.racket.pos_x_range=[0.3,0.6]`,
+`task.domain_rand.pd_gain_range=null`. **Record the wandb run ID of each good run** — Step 15 needs it.
 
-The legacy `scripts/rsl_rl/play.py` still works, but the Hydra path above is the preferred one.
+### 14.5 Evaluate a trained policy
 
-Target metrics:
+```bash
+# from a wandb run (entity = your TEAM, where runs are logged):
+hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+  wandb_path="$WANDB_ENTITY/hope_wbc/<RUN_ID>"
+
+# or from the latest LOCAL checkpoint (no wandb run needed; uses the newest run in logs/rsl_rl/):
+hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand"
+```
+
+`<RUN_ID>` is the last segment of the run URL (`wandb.ai/<team>/hope_wbc/runs/<RUN_ID>`). `play.py`
+also exports `policy.onnx` next to the checkpoint (that is Step 15) — verified working.
+
+### 14.6 Where to tune
+
+| File | What |
+| --- | --- |
+| `cfg/task/HOPEPingPong.yaml` | HOPE reward weights/stds, racket target ranges, strike timing |
+| `cfg/task/TrackingFlat.yaml` | baseline plain-tracking task |
+| `cfg/base/{env_base,sim_base,randomization_base}.yaml` | shared env count, 50 Hz timing, DR defaults |
+| `cfg/algo/ppo.yaml` | rollout length, learning rate, entropy, mini-batches, epochs, network sizes |
+
+Global CLI overrides: `num_envs max_iterations registry_name run_name seed logger log_project_name`.
+Everything else is `task.<group>.<key>` or `algo.<group>.<key>` (e.g. `task.rewards.racket_position_weight=5.0`).
+The legacy `scripts/rsl_rl/train.py --task=HOPE-PingPong-AgibotA3-v0 --registry_name … --headless`
+entrypoint still works if you prefer argparse over Hydra.
+
+### 14.7 Troubleshooting
+
+- **`train.py` returns to the shell with no error, log stops right after Isaac startup.** Isaac's
+  `simulation_app.close()` hard-exits the process and used to swallow the exception, making a real
+  failure look like a clean exit. `scripts/train.py` now prints the traceback (flushed) before
+  closing and exits non-zero, so just re-run and read the error. The usual cause is the next item.
+- **`CommError: Unable to find organization for entity '<name>'`.** The `registry_name` prefix must
+  be your wandb **org** (`$WANDB_REGISTRY_ORG`), never your **team** (`$WANDB_ENTITY`) — registries
+  are org-scoped (Step 12.5). The `cfg/task/*.yaml` `registry_name` defaults now read
+  `WANDB_REGISTRY_ORG`, so you may also omit `registry_name=...` entirely.
+- **`free(): corrupted unsorted chunks` / Aborted at "Starting the simulation."** PhysX heap
+  corruption from the placeholder asset's overlapping wrist collision meshes (wrist + hand + red/black
+  blades). `robots/agibot_a3.py` sets `enabled_self_collisions=False` to avoid it; re-enable once a
+  validated A3 asset with clean collision geometry is dropped in (Step 13).
+- **`AttributeError: '…OnPolicyRunner' object has no attribute 'obs_normalizer'`** (at the first
+  checkpoint save, only with `logger=wandb` — `logger=tensorboard` skips the ONNX export and hides it).
+  This rsl_rl version moved obs normalization onto the policy; `my_on_policy_runner.py` and `play.py`
+  now read `policy.actor_obs_normalizer` (fixed). If you re-clone the upstream BeyondMimic code and
+  hit this, apply the same change.
+
+Target metrics (a fully trained policy should reach):
 
 ```text
 Tracking success rate: > 90 percent
@@ -2317,18 +2947,23 @@ Base repositioning time: < 0.8 s
 
 Verification gate:
 
-- Policy does not fall during evaluation.
-- Racket reaches the target near strike time.
-- Forehand and backhand policies both work.
-- Recovery after swing is stable.
+- **Pipeline gate.** The env builds, PPO iterates, rewards are finite, checkpoints save, and the ONNX
+  export runs. ✅ Verified 2026-06-22 — `TrackingFlat` and `HOPEPingPong` (forehand) train end-to-end
+  on the placeholder A3 asset, including the **default `logger=wandb` path** (checkpoint save +
+  `policy.onnx` export) after the `actor_obs_normalizer` fix.
+- **Trained-policy gate (after a full run).** Policy does not fall, the racket reaches the target near
+  strike time, forehand and backhand both work, recovery after the swing is stable.
 
-What you must do personally (before this step can run):
+Status / what still needs the validated asset:
 
-1. **Supply the validated Agibot A3 asset** and the official PD gains / standing height. Without the asset the env will not instantiate.
-2. **Produce and upload the retargeted forehand and backhand reference clips** (steps 9–12) to the `motions` registry, so `--registry_name .../hope_forehand` and `.../hope_backhand` resolve.
-3. **Train forehand and backhand as separate policies** (run the HOPE command twice, once per clip, with different `--run_name`).
-4. **Set the reachable-target and reward-tuning values** in `cfg/task/HOPEPingPong.yaml` and re-train until the target metrics are met.
-5. **Record the WandB run IDs** of the good forehand and backhand runs — step 15 needs them for ONNX export.
+1. Training **runs today** on the placeholder A3 (the copied std-pingpang URDF with self-collision
+   off — Step 13). Reaching the target metrics needs the validated Agibot A3 asset + official PD
+   gains / standing height; re-enable self-collision once that asset is in.
+2. The forehand and backhand reference clips must be in the `motions` registry (Steps 9–12) so
+   `registry_name=.../hope_forehand` and `.../hope_backhand` resolve.
+3. Set the reachable-target and reward-tuning values in `cfg/task/HOPEPingPong.yaml` and re-train
+   until the target metrics are met.
+4. Record the wandb run IDs of the good forehand and backhand runs — Step 15 needs them.
 
 ## 15. Export The Policy To ONNX
 
@@ -2344,7 +2979,7 @@ Export and evaluate:
 
 ```bash
 # inside the GPU / Isaac distrobox
-python scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
   wandb_path=$WANDB_ENTITY/hope_wbc/PLACEHOLDER_RUN_ID
 ```
 
