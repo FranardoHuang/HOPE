@@ -58,11 +58,11 @@ This guide uses three execution scopes. Do not mix them casually.
 2. **ROS distrobox: `hope`**
    - Use this box for the ROS 2 Jazzy workspace in `~/workspace/HOPE/hope_ws`.
    - Run all `ros2`, `colcon`, `rosdep`, mocap, planner, monitoring, and deployment commands here unless a later step explicitly says otherwise.
-   - Practical rule: steps `4-11` and `16-21` are ROS-box work.
+   - Practical rule: steps `4-8` and `16-21` are ROS-box work.
 
 3. **GPU / Isaac distrobox: `grasping` or another NVIDIA-enabled box**
    - Use this box for Isaac Sim, Isaac Lab, BeyondMimic, WandB motion preprocessing, policy training, evaluation, and ONNX export.
-   - Practical rule: steps `12-15` are GPU-box work.
+   - Practical rule: steps `9-15` are GPU-box work. In particular, Step 9 (GVHMR) and Step 10 (GMR) are Python/ML toolchain work and are usually easier in `grasping` than in `hope`.
    - Do not install Isaac Sim or Isaac Lab into `hope`; keep the ROS box and the training box separate.
 
 Shared-path rule:
@@ -1510,6 +1510,32 @@ Do not:
 3. Include multiple people unless you crop or choose the correct tracked person.
 4. Use copyrighted broadcast footage without checking the license for your use case.
 
+Execution shell for this step:
+
+1. Enter the GPU distrobox first:
+
+```bash
+distrobox enter grasping
+```
+
+2. Run the rest of Step 9 inside `grasping`, not inside the ROS box `hope`.
+   The videos live under `~/workspace/HOPE`, which is shared with the host and the other distroboxes.
+
+Organize the recorded videos:
+
+1. Put the raw clips here:
+
+```text
+~/workspace/HOPE/hope_training/motions/raw_video/
+```
+
+2. Use these filenames:
+
+```text
+forehand_swing.mp4
+backhand_swing.mp4
+```
+
 Create a dedicated Python environment for the motion-processing tools before installing
 GVHMR or GMR. Do not use the host system `pip`; on Ubuntu 24.04/26.04 it can fail with
 the PEP 668 `externally-managed-environment` error, and Ubuntu 26.04's default
@@ -1519,6 +1545,7 @@ Preferred setup:
 
 ```bash
 # Install Miniforge or another conda-compatible Python distribution first if needed.
+source /opt/conda/etc/profile.d/conda.sh
 conda create -n hope-motion-py310 python=3.10 -y
 conda activate hope-motion-py310
 
@@ -1528,6 +1555,20 @@ python -m pip install --upgrade pip setuptools wheel
 
 If you already have a Python 3.10 virtual environment for GVHMR, reuse it for GMR instead
 of creating a new one.
+
+If `grasping` already has a reusable Python 3.10 environment for motion tools, activate it
+instead of creating another one. The important requirements are:
+
+1. Python `3.10.x`
+2. GPU-visible PyTorch support
+3. The same environment stays active for both GVHMR and GMR
+
+Create the GVHMR working folders if they do not already exist:
+
+```bash
+cd ~/workspace/HOPE/hope_training/GVHMR
+mkdir -p inputs outputs inputs/checkpoints
+```
 
 Install GVHMR:
 
@@ -1539,18 +1580,98 @@ cd GVHMR
 # `hope-motion-py310` environment.
 ```
 
-Run GVHMR:
+Minimum install commands:
 
 ```bash
+cd ~/workspace/HOPE/hope_training/GVHMR
+python -m pip install -r requirements.txt
+python -m pip install -e .
+```
+
+If `python -m pip install -r requirements.txt` fails while building `chumpy` with an error like
+`ModuleNotFoundError: No module named 'pip'`, install `chumpy` once without build isolation and then rerun
+the requirements command:
+
+```bash
+cd ~/workspace/HOPE/hope_training/GVHMR
+python -m pip install --no-build-isolation chumpy
+python -m pip install -r requirements.txt
+```
+
+This is a packaging quirk in `chumpy`, not evidence that the Python 3.10 environment itself is broken.
+
+Download the GVHMR prerequisites before running the demo:
+
+1. Download SMPL and SMPL-X body models from their official sites:
+   - `https://smpl.is.tue.mpg.de/`
+   - `https://smpl-x.is.tue.mpg.de/`
+2. Download the other pretrained checkpoints referenced by `GVHMR/docs/INSTALL.md`.
+3. Arrange the files under:
+   For the current HOPE Step 9 demo path, use the neutral body models.
+   You do not need male/female here unless you are extending GVHMR beyond this demo flow.
+```text
+GVHMR/inputs/checkpoints/
+  body_models/smplx/SMPLX_NEUTRAL.npz
+  body_models/smpl/SMPL_NEUTRAL.pkl
+  dpvo/dpvo.pth
+  gvhmr/gvhmr_siga24_release.ckpt
+  hmr2/epoch=10-step=25000.ckpt
+  vitpose/vitpose-h-multi-coco.pth
+  yolo/yolov8x.pt
+```
+
+4. If your camera was not static, also prepare:
+
+```text
+GVHMR/inputs/checkpoints/dpvo/dpvo.pth
+```
+
+Do not download the GVHMR training and evaluation support archives for Step 9 demo inference:
+
+```text
+AMASS_hmr4d_support.tar.gz
+BEDLAM_hmr4d_support.tar.gz
+H36M_hmr4d_support.tar.gz
+3DPW_hmr4d_support.tar.gz
+EMDB_hmr4d_support.tar.gz
+RICH_hmr4d_support.tar.gz
+```
+
+Those archives are for GVHMR dataset preparation, training, and benchmark evaluation, not for running
+`tools/demo/demo.py` on your own forehand and backhand videos.
+
+Run GVHMR:
+ two clips one at a time in this order:
+
+1. Forehand:
+
+```bash
+cd ~/workspace/HOPE/hope_training/GVHMR
 python tools/demo/demo.py --video=../motions/raw_video/forehand_swing.mp4 -s
+```
+
+2. Backhand:
+
+```bash
 python tools/demo/demo.py --video=../motions/raw_video/backhand_swing.mp4 -s
 ```
+
+Use `-s` only when the camera is static, for example on a tripod or fixed mount.
+If the camera moved during recording, omit `-s` and install the optional DPVO dependency
+plus its checkpoint first.
 
 Expected output:
 
 ```text
 GVHMR/outputs/demo/forehand_swing/hmr4d_results.pt
 GVHMR/outputs/demo/backhand_swing/hmr4d_results.pt
+```
+
+Quick check:
+
+```bash
+find ~/workspace/HOPE/hope_training/GVHMR/outputs/demo/forehand_swing -maxdepth 2 -type f | sort
+find ~/workspace/HOPE/hope_training/GVHMR/outputs/demo/backhand_swing -maxdepth 2 -type f | sort
 ```
 
 Verification gate:
@@ -1594,6 +1715,12 @@ SMPLX_NEUTRAL.pkl
 SMPLX_FEMALE.pkl
 SMPLX_MALE.pkl
 ```
+
+Why GMR asks for three genders while GVHMR Step 9 only uses neutral:
+
+- The current `GVHMR -> GMR` path in this project feeds GVHMR output into GMR using the neutral body model, so GVHMR Step 9 only needs `SMPLX_NEUTRAL.npz` and `SMPL_NEUTRAL.pkl`.
+- GMR's standalone SMPL-X loading utilities are more general and can read motion files labeled as `male`, `female`, or `neutral`, so its documentation asks you to prepare all three `.pkl` files.
+- For the current HOPE reimplementation flow, GVHMR using neutral does not hurt the later GMR step.
 
 You may also see matching `.npz` files in the extracted archive:
 
