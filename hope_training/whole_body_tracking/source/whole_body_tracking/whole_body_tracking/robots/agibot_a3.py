@@ -1,10 +1,12 @@
 """Agibot (Zhiyuan) Expedition A3 — ping-pong configuration for BeyondMimic / HOPE WBC.
 
-This file is written against the A3 ping-pong URDF that already ships in the HOPE repo at
-``agi/0000014503_A3T2.5-URDF-std-pingpang-0519/`` (joint/link names and effort/velocity
-limits are taken verbatim from its ``urdf/joints.txt``). The *names* are real; what is still
-a PLACEHOLDER is the validated simulation asset (USD/MJCF), the verified link inertials, and
-the official PD gains — all of which must come from Agibot (see reimplement.md step 2.1).
+This file is written against the OFFICIAL Agibot A3 ping-pong assets shipped in the HOPE repo under
+``agi/`` (the URDF ``agi/URDF/A3T2.5-URDF-std-pingpang/`` and the MuJoCo MJCF
+``agi/A3_MuJoCo_Sim/.../a3_pingpong/a3_pingpong.xml`` — both are Agibot-provided, not stand-ins).
+Names, link inertials (urdf mass.txt), effort/velocity limits (joints.txt), joint armature, and the
+standing pose (MJCF stand keyframe) are all taken verbatim from those files. The one thing NOT in the
+official assets is the PD control gains (Kp/Kd) — the MJCF uses torque actuators + per-command gains —
+so those still need Agibot's controller config; head 40/2 is the deploy default (A3 deploy example.md).
 
 Nothing here touches the filesystem at import time: ``ArticulationCfg`` only stores the asset
 path string, so the A3 task registers and imports fine *without* the asset present. The path is
@@ -22,15 +24,12 @@ from isaaclab.assets.articulation import ArticulationCfg
 from whole_body_tracking.assets import ASSET_DIR
 
 ##
-# Asset path (PLACEHOLDER until the validated Agibot A3 asset is dropped in).
-#
-# reimplement.md step 12 copies the A3 model into
-# ``source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/``. Point this at the
-# robot model file once it exists. Isaac Lab can spawn a URDF directly (as the G1 config does
-# with ``UrdfFileCfg``); for the MuJoCo/mjlab path use the MJCF instead.
+# Asset path — the OFFICIAL Agibot A3 ping-pong URDF (copied from agi/URDF/A3T2.5-URDF-std-pingpang/
+# into assets/agibot_a3/, reimplement.md step 12). Isaac Lab spawns the URDF directly (as the G1
+# config does with ``UrdfFileCfg``); for the MuJoCo/mjlab path use the official a3_pingpong.xml MJCF.
 ##
 AGIBOT_A3_ASSET_ROOT = f"{ASSET_DIR}/agibot_a3"
-AGIBOT_A3_URDF_PATH = f"{AGIBOT_A3_ASSET_ROOT}/urdf/model.urdf"  # TODO(asset): set to the real A3 ping-pong URDF/USD
+AGIBOT_A3_URDF_PATH = f"{AGIBOT_A3_ASSET_ROOT}/urdf/model.urdf"  # official Agibot A3 ping-pong URDF
 
 ##
 # Body / joint name constants (real names from the A3 ping-pong URDF). The rest of the HOPE
@@ -115,9 +114,10 @@ A3_MOUNT_OFFSET = (0.210211399202899, 0.0320784994676765, 0.0320358706296689)
 
 
 ##
-# Heuristic PD gains. THESE ARE PLACEHOLDERS — Agibot must confirm the real impedance settings
-# (reimplement.md step 2.1). Effort/velocity limits below ARE the real values from joints.txt.
-# Stiffness/damping are reasonable starting points for a ~55 kg humanoid and should be replaced.
+# Effort/velocity limits and joint armature below ARE real (joints.txt + the a3_pingpong.xml MJCF).
+# Head stiffness/damping (40/2) is the deploy default (A3 deploy example.md, ExpandToBackend). The
+# waist/arm/leg stiffness/damping are still HEURISTIC PLACEHOLDERS — Agibot must confirm the official
+# PD control gains (Kp/Kd); the MJCF uses torque actuators + per-command gains, so it does not contain them.
 ##
 AGIBOT_A3_CFG = ArticulationCfg(
     spawn=sim_utils.UrdfFileCfg(
@@ -135,11 +135,12 @@ AGIBOT_A3_CFG = ArticulationCfg(
             max_depenetration_velocity=1.0,
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-            # Self-collision is OFF: the merged wrist body carries 4 overlapping collision meshes
-            # (wrist + hand_pingpang + red/black blades, all coincident) with thin blade hulls, which
-            # corrupts PhysX at sim start ("free(): corrupted unsorted chunks" -> Aborted) on this
-            # placeholder asset. WBC imitation does not need self-collision; re-enable once a validated
-            # A3 asset with clean collision geometry is dropped in (reimplement.md step 2.1).
+            # Self-collision is OFF: in the official URDF the merged wrist body carries 4 overlapping
+            # collision meshes (wrist + hand_pingpang + red/black blades, all coincident) with thin blade
+            # hulls, which corrupts PhysX at sim start ("free(): corrupted unsorted chunks" -> Aborted).
+            # WBC imitation does not need self-collision. NOTE: the official MJCF a3_pingpong.xml already
+            # ships a clean collision setup (convex hulls + primitive racket/hand geoms + adjacent-body
+            # <contact><exclude> list) — port that into the URDF to re-enable; it is NOT an Agibot blocker.
             enabled_self_collisions=False, solver_position_iteration_count=8, solver_velocity_iteration_count=4
         ),
         joint_drive=sim_utils.UrdfConverterCfg.JointDriveCfg(
@@ -147,20 +148,21 @@ AGIBOT_A3_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        # TODO(asset): verify standing pelvis height against the real A3 model (≈0.93 m for a 1.73 m robot).
-        pos=(0.0, 0.0, 0.93),
+        # Standing pelvis height + leg/arm pose from the official "stand" keyframe in the A3 MuJoCo
+        # asset (a3_pingpong.xml, qpos). Near-zero joints (waist, head, hip roll/yaw, ankle roll,
+        # shoulder yaw, wrists) stay at their default 0. This stance is more upright than the earlier
+        # guessed crouch, and pelvis Z is 1.0684 m (not the old 0.93 m guess).
+        pos=(0.0, 0.0, 1.0684),
         joint_pos={
-            # legs — slight crouch ready stance
-            ".*_hip_pitch_joint": -0.30,
-            ".*_knee_joint": 0.60,
-            ".*_ankle_pitch_joint": -0.30,
+            # legs — official stand keyframe
+            ".*_hip_pitch_joint": -0.1315,
+            ".*_knee_joint": 0.2516,
+            ".*_ankle_pitch_joint": -0.1293,
             # arms — paddle-ready stance (right arm holds the racket)
-            "left_shoulder_pitch_joint": 0.25,
-            "left_shoulder_roll_joint": 0.20,
-            "left_elbow_joint": 0.80,
-            "right_shoulder_pitch_joint": 0.25,
-            "right_shoulder_roll_joint": -0.20,
-            "right_elbow_joint": 0.80,
+            ".*_shoulder_pitch_joint": 0.2953,
+            "left_shoulder_roll_joint": 0.1121,
+            "right_shoulder_roll_joint": -0.1121,
+            ".*_elbow_joint": 0.8073,
         },
         joint_vel={".*": 0.0},
     ),
@@ -192,13 +194,20 @@ AGIBOT_A3_CFG = ArticulationCfg(
                 ".*_hip_pitch_joint": 5.0,
                 ".*_knee_joint": 5.0,
             },
+            armature={  # MJCF a3_pingpong.xml
+                ".*_hip_yaw_joint": 0.06646569891,
+                ".*_hip_roll_joint": 0.06646569891,
+                ".*_hip_pitch_joint": 0.06646569891,
+                ".*_knee_joint": 0.1203404,
+            },
         ),
         "feet": ImplicitActuatorCfg(
             joint_names_expr=[".*_ankle_pitch_joint", ".*_ankle_roll_joint"],
-            effort_limit_sim={".*_ankle_pitch_joint": 118.0, ".*_ankle_roll_joint": 54.0},
+            effort_limit_sim={".*_ankle_pitch_joint": 118.2, ".*_ankle_roll_joint": 54.75},
             velocity_limit_sim={".*_ankle_pitch_joint": 10.8, ".*_ankle_roll_joint": 19.3},
             stiffness=40.0,
             damping=2.0,
+            armature={".*_ankle_pitch_joint": 0.06444060531, ".*_ankle_roll_joint": 0.02012630058},
         ),
         "waist": ImplicitActuatorCfg(
             joint_names_expr=["waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint"],
@@ -206,13 +215,16 @@ AGIBOT_A3_CFG = ArticulationCfg(
             velocity_limit_sim={"waist_yaw_joint": 12.0, "waist_roll_joint": 22.7, "waist_pitch_joint": 9.2},
             stiffness=200.0,
             damping=5.0,
+            armature={"waist_yaw_joint": 0.06646569891, "waist_roll_joint": 0.01462087613, "waist_pitch_joint": 0.08820859156},
         ),
         "head": ImplicitActuatorCfg(
             joint_names_expr=["head_yaw_joint", "head_pitch_joint"],
             effort_limit_sim=6.0,
             velocity_limit_sim=12.7,
-            stiffness=10.0,
-            damping=0.5,
+            # neck/head kp=40, kd=2 from the deploy default (ExpandToBackend, A3 deploy example.md)
+            stiffness=40.0,
+            damping=2.0,
+            armature={"head_yaw_joint": 0.0008100893338, "head_pitch_joint": 0.0008100893338},
         ),
         "arms": ImplicitActuatorCfg(
             joint_names_expr=[
@@ -259,6 +271,15 @@ AGIBOT_A3_CFG = ArticulationCfg(
                 ".*_wrist_roll_joint": 1.0,
                 ".*_wrist_pitch_joint": 1.0,
                 ".*_wrist_yaw_joint": 1.0,
+            },
+            armature={  # MJCF a3_pingpong.xml
+                ".*_shoulder_pitch_joint": 0.01208336871,
+                ".*_shoulder_roll_joint": 0.01208336871,
+                ".*_shoulder_yaw_joint": 0.004967351303,
+                ".*_elbow_joint": 0.004967351303,
+                ".*_wrist_roll_joint": 0.004967351303,
+                ".*_wrist_pitch_joint": 0.0008100893338,
+                ".*_wrist_yaw_joint": 0.0008100893338,
             },
         ),
     },
