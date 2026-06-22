@@ -101,6 +101,7 @@ def _apply_task_overrides(env_cfg, task):
         C = env_cfg.commands.racket_target
         _set_attr(C, "strike_phase", _get(rk, "strike_phase"), float)
         _set_attr(C, "strike_window_s", _get(rk, "strike_window_s"), float)
+        _set_attr(C, "strike_success_pos_thresh", _get(rk, "strike_success_pos_thresh"), float)
         _set_range(C, "racket_pos_x_range", _get(rk, "pos_x_range"))
         _set_range(C, "racket_pos_y_range", _get(rk, "pos_y_range"))
         _set_range(C, "racket_pos_z_range", _get(rk, "pos_z_range"))

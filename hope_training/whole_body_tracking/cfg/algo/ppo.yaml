@@ -17,9 +17,9 @@ name: ppo
 runner:
   # ---- training schedule (EDIT) -------------------------------------------
   num_steps_per_env: 24        # rollout length per env before each PPO update
-  max_iterations: 30000000        # total PPO iterations
+  max_iterations: 300000000000        # total PPO iterations
   # -------------------------------------------------------------------------
-  save_interval: 50           # checkpoint every N iterations
+  save_interval: 500           # checkpoint every N iterations
   empirical_normalization: true
 
 policy:

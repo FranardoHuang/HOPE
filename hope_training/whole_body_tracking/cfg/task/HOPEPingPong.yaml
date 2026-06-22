@@ -43,6 +43,7 @@ rewards:
 racket:
   strike_phase: 0.46              # fraction of the clip where the paddle meets the ball
   strike_window_s: 0.1            # half-window (+/-) for the racket-state reward
+  strike_success_pos_thresh: 0.075  # m; wandb "strike_success" = fraction of strikes with racket pos error below this
   pos_x_range: [0.25, 0.55]
   pos_y_range: [-0.45, 0.45]      # straddle the robot center -> forehand + backhand
   pos_z_range: [0.70, 1.15]

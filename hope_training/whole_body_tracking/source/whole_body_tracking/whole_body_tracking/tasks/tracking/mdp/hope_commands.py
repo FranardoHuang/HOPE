@@ -115,10 +115,47 @@ class RacketTargetCommand(CommandTerm):
         self.pre_strike = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
         self.strike_window = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
+        # Episode-wide tracking errors (instantaneous; averaged over terminating envs at reset).
         self.metrics["racket_pos_error"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["racket_vel_error"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["racket_normal_error_deg"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["base_pos_error"] = torch.zeros(self.num_envs, device=self.device)
+        # Strike-window metrics: hold the value from the MOST RECENT strike — these map directly to
+        # the acceptance criteria (racket pos < 7.5 cm, vel < 0.5 m/s, normal < 15 deg AT strike) and
+        # are the real "is the policy learning to hit" signal (the episode-wide ones above are diluted
+        # by the long non-strike portion of each swing).
+        self.metrics["racket_pos_error_at_strike"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["racket_vel_error_at_strike"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["racket_normal_error_deg_at_strike"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["strike_success"] = torch.zeros(self.num_envs, device=self.device)
+        # Base-position error while the base target is active (pre-strike), held at its last value.
+        self.metrics["base_pos_error_pre_strike"] = torch.zeros(self.num_envs, device=self.device)
+        # Swing-quality detail at the most recent strike: actual paddle speed, per-axis position error,
+        # and success at tighter/looser thresholds (5 cm / 10 cm) for a fuller accuracy distribution.
+        self.metrics["racket_speed_at_strike"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["racket_target_speed_at_strike"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["racket_pos_error_x_at_strike"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["racket_pos_error_y_at_strike"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["racket_pos_error_z_at_strike"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["strike_success_5cm"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["strike_success_10cm"] = torch.zeros(self.num_envs, device=self.device)
+        # Robot-health diagnostics (episode-wide, instantaneous) — logged here because this term already
+        # holds ``self.robot``. Useful for sim2real: standing height, peak joint speed, actuator effort.
+        self.metrics["base_height"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["base_upright"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["joint_vel_abs_max"] = torch.zeros(self.num_envs, device=self.device)
+        self._has_jpos_limits = hasattr(self.robot.data, "soft_joint_pos_limits") or hasattr(
+            self.robot.data, "joint_pos_limits"
+        )
+        if self._has_jpos_limits:
+            self.metrics["joint_pos_near_limit_frac"] = torch.zeros(self.num_envs, device=self.device)
+        self._has_torque = hasattr(self.robot.data, "applied_torque")
+        if self._has_torque:
+            self.metrics["joint_torque_abs_mean"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics["joint_torque_abs_max"] = torch.zeros(self.num_envs, device=self.device)
+        # Policy action magnitude (saturation check for sim2real).
+        self.metrics["action_abs_mean"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["action_abs_max"] = torch.zeros(self.num_envs, device=self.device)
 
     # ------------------------------------------------------------------ #
     # CommandTerm API
@@ -246,11 +283,87 @@ class RacketTargetCommand(CommandTerm):
         # actual racket FK here (once per step) — metrics, rewards, and observations then all read
         # the same fresh buffers (rewards/obs read them after the full command_manager.compute()).
         self._compute_racket_state()
-        self.metrics["racket_pos_error"] = torch.norm(self.racket_pos_w - self.racket_target_pos_w, dim=-1)
-        self.metrics["racket_vel_error"] = torch.norm(self.racket_lin_vel_w - self.racket_target_vel_w, dim=-1)
+        pos_err = torch.norm(self.racket_pos_w - self.racket_target_pos_w, dim=-1)
+        vel_err = torch.norm(self.racket_lin_vel_w - self.racket_target_vel_w, dim=-1)
         cos_ang = torch.sum(self.racket_normal_w * self.racket_target_normal_w, dim=-1).clamp(-1.0, 1.0)
-        self.metrics["racket_normal_error_deg"] = torch.acos(cos_ang) * (180.0 / math.pi)
-        self.metrics["base_pos_error"] = torch.norm(self.base_pos_w[:, :2] - self.base_target_pos_w, dim=-1)
+        normal_err_deg = torch.acos(cos_ang) * (180.0 / math.pi)
+        base_err = torch.norm(self.base_pos_w[:, :2] - self.base_target_pos_w, dim=-1)
+
+        # Episode-wide (instantaneous) errors.
+        self.metrics["racket_pos_error"] = pos_err
+        self.metrics["racket_vel_error"] = vel_err
+        self.metrics["racket_normal_error_deg"] = normal_err_deg
+        self.metrics["base_pos_error"] = base_err
+
+        # Strike-window-gated: hold the value sampled during the most recent strike window. The gating
+        # masks come from the previous _update_command (<=1-step / 20 ms lag at 50 Hz — negligible vs
+        # the ±strike_window_s window). Between strikes the held value carries to the next reset.
+        in_win = self.strike_window
+        self.metrics["racket_pos_error_at_strike"] = torch.where(
+            in_win, pos_err, self.metrics["racket_pos_error_at_strike"]
+        )
+        self.metrics["racket_vel_error_at_strike"] = torch.where(
+            in_win, vel_err, self.metrics["racket_vel_error_at_strike"]
+        )
+        self.metrics["racket_normal_error_deg_at_strike"] = torch.where(
+            in_win, normal_err_deg, self.metrics["racket_normal_error_deg_at_strike"]
+        )
+        self.metrics["strike_success"] = torch.where(
+            in_win, (pos_err < self.cfg.strike_success_pos_thresh).float(), self.metrics["strike_success"]
+        )
+        # Base target is tracked before the strike, so log that error during the pre-strike phase.
+        self.metrics["base_pos_error_pre_strike"] = torch.where(
+            self.pre_strike, base_err, self.metrics["base_pos_error_pre_strike"]
+        )
+
+        # Swing-quality detail held at the most recent strike: actual/target paddle speed and the
+        # per-axis position error (which direction is the miss?).
+        racket_speed = torch.norm(self.racket_lin_vel_w, dim=-1)
+        target_speed = torch.norm(self.racket_target_vel_w, dim=-1)
+        axis_err = torch.abs(self.racket_pos_w - self.racket_target_pos_w)
+        self.metrics["racket_speed_at_strike"] = torch.where(
+            in_win, racket_speed, self.metrics["racket_speed_at_strike"]
+        )
+        self.metrics["racket_target_speed_at_strike"] = torch.where(
+            in_win, target_speed, self.metrics["racket_target_speed_at_strike"]
+        )
+        self.metrics["racket_pos_error_x_at_strike"] = torch.where(
+            in_win, axis_err[:, 0], self.metrics["racket_pos_error_x_at_strike"]
+        )
+        self.metrics["racket_pos_error_y_at_strike"] = torch.where(
+            in_win, axis_err[:, 1], self.metrics["racket_pos_error_y_at_strike"]
+        )
+        self.metrics["racket_pos_error_z_at_strike"] = torch.where(
+            in_win, axis_err[:, 2], self.metrics["racket_pos_error_z_at_strike"]
+        )
+        self.metrics["strike_success_5cm"] = torch.where(
+            in_win, (pos_err < 0.05).float(), self.metrics["strike_success_5cm"]
+        )
+        self.metrics["strike_success_10cm"] = torch.where(
+            in_win, (pos_err < 0.10).float(), self.metrics["strike_success_10cm"]
+        )
+
+        # Robot-health diagnostics (episode-wide, instantaneous).
+        data = self.robot.data
+        self.metrics["base_height"] = data.root_pos_w[:, 2]
+        self.metrics["base_upright"] = matrix_from_quat(self.base_quat_w)[:, 2, 2]  # 1.0 = perfectly upright
+        self.metrics["joint_vel_abs_max"] = torch.max(torch.abs(data.joint_vel), dim=-1).values
+        if self._has_jpos_limits:
+            limits = getattr(data, "soft_joint_pos_limits", None)
+            if limits is None:
+                limits = data.joint_pos_limits
+            half_span = ((limits[..., 1] - limits[..., 0]) * 0.5).clamp(min=1e-6)
+            dist = torch.minimum(data.joint_pos - limits[..., 0], limits[..., 1] - data.joint_pos).clamp(min=0.0)
+            self.metrics["joint_pos_near_limit_frac"] = ((dist / half_span) < 0.1).float().mean(dim=-1)
+        if self._has_torque:
+            tau_abs = torch.abs(data.applied_torque)
+            self.metrics["joint_torque_abs_mean"] = torch.mean(tau_abs, dim=-1)
+            self.metrics["joint_torque_abs_max"] = torch.max(tau_abs, dim=-1).values
+        act = getattr(self._env.action_manager, "action", None)
+        if act is not None:
+            a_abs = torch.abs(act)
+            self.metrics["action_abs_mean"] = torch.mean(a_abs, dim=-1)
+            self.metrics["action_abs_max"] = torch.max(a_abs, dim=-1).values
 
     # ------------------------------------------------------------------ #
     # Observation helpers (base-relative quantities)
@@ -302,6 +415,7 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # --- strike timing (fraction of the reference clip where the paddle meets the ball) ---
     strike_phase: float = 0.46  # HITTER clip: strike at frame 43/94 ≈ 0.46
     strike_window_s: float = 0.1  # half-window; goal-racket reward active within ±strike_window_s
+    strike_success_pos_thresh: float = 0.075  # m; "strike_success" metric = fraction of strikes with racket pos error below this
 
     # --- nominal stance (offset of the base from the env origin) ---
     base_nominal_offset: tuple[float, float, float] = (0.0, 0.0, 0.93)
