@@ -26,3 +26,6 @@ hope_training/wandb/
 hope_training/whole_body_tracking/wandb/
 *.log
 .codex-env-snapshots
+
+# Agibot A3 deploy example package (vendor-provided, ~1.7 GB — too large for git)
+agi/a3_deploy_example/
