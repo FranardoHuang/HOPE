@@ -5,6 +5,7 @@ Use this file for short project-state updates that future humans and agents need
 ## 2026-06-23
 
 - Pulled `origin/jiayi` updates through `42489cd`, which added A3 Isaac/BeyondMimic training progress: working joint-order YAML, updated A3 robot config, deploy-transcribed PD/action-scale values, HOPEPingPong task updates, train/play fixes, `setup_train_env.sh`, richer WandB/live metrics, and in-container ONNX export support.
+- Added `scripts/sync_external_repos.sh` so TTRL remains an auto-synced ignored reference instead of a pinned dependency; docs now require recording the TTRL source commit when material is extracted from it.
 
 ## 2026-06-22
 

@@ -85,6 +85,7 @@ Do not hide project state in chat history. If a future contributor or agent need
 
 - Environment setup is task-specific. Start from the operation doc for your task; use [operations/setup_environments.md](operations/setup_environments.md) only as a reference matrix.
 - Ignored/local assets that must be copied manually are summarized in [operations/setup_local_sync.md](operations/setup_local_sync.md), but each operation doc should list the assets it needs locally.
+- Auto-sync ignored external references before using them: `scripts/sync_external_repos.sh`.
 - Planner tests: see [operations/build_and_test.md](operations/build_and_test.md).
 - Mocap bringup: see [operations/run_mocap.md](operations/run_mocap.md).
 - Planner runtime: see [operations/run_planner.md](operations/run_planner.md).
@@ -96,4 +97,4 @@ Do not hide project state in chat history. If a future contributor or agent need
 
 - `colcon` is not available in the current macOS shell, so ROS workspace build verification must be done inside the ROS environment.
 - Agibot runtime assets under `vendor_assets/` are local and ignored by git.
-- TTRL is currently available as an ignored local reference under `external_repos/`; decide later whether to pin it as a submodule or fork.
+- TTRL is an ignored auto-synced reference under `external_repos/`, updated through `scripts/sync_external_repos.sh`; it is intentionally not pinned unless a future gate promotes it to a dependency.

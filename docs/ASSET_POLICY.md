@@ -50,13 +50,23 @@ If a command depends on a file inside `vendor_assets/`, the operation doc must s
 
 ## External Repos
 
-External repos start in `external_repos/` while they are only references. Promote them when they become real dependencies:
+External repos start in `external_repos/` while they are only references. Reference repos may auto-update because their contents are used for reading and extraction, not direct runtime imports.
+
+Use:
+
+```bash
+scripts/sync_external_repos.sh
+```
+
+to clone or fast-forward the local TTRL reference clone.
+
+Promote external repos when they become real dependencies:
 
 - Use a submodule for pinned upstream code.
 - Use a fork plus submodule for code we need to modify.
 - Use Git LFS only after the team agrees to track heavy binary artifacts.
 
-TTRL is currently a reference clone. Its future state should be decided during G05/G08 planning.
+TTRL is currently an auto-synced reference clone, not a pinned dependency. If code, config, or an experiment result is extracted from TTRL, record the upstream commit in the relevant gate doc or operation doc. Its future dependency state should be decided during G05/G08 planning.
 
 ## Local Sync Rule
 
@@ -68,3 +78,5 @@ If a local-only asset is required to reproduce a result:
 4. Never rely on a private chat message as the only description of the asset.
 
 A fresh clone is not complete for deployment or training-result reproduction until the required ignored assets have been manually restored or linked from the agreed external artifact system.
+
+For TTRL-only reference work, a fresh clone becomes current after `scripts/sync_external_repos.sh`; reproducible extracted work still needs the source commit recorded.

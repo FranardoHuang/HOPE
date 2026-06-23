@@ -33,6 +33,7 @@ This gate is about project structure, support materials, documentation, ignored 
 - `hope_training/`
 - `vendor_assets/`
 - `external_repos/`
+- `scripts/sync_external_repos.sh`
 
 ## Operation Docs
 
@@ -55,23 +56,24 @@ Done:
 - ChingMu VRPN package is in `hope_ws/src/vrpn_mocap`.
 - Agibot deploy source/config subset is in `agi/code_deployment/a3_deploy_example`.
 - Full Agibot deploy payload is preserved locally in `vendor_assets/agibot/a3_deploy_example_full`.
-- TTRL is available as an ignored local reference in `external_repos/TTRL-ICRA2026`.
+- TTRL is available as an ignored auto-synced local reference in `external_repos/TTRL-ICRA2026`.
+- `scripts/sync_external_repos.sh` clones or fast-forwards the TTRL reference clone before G05/G08 use.
 - `tmp/` has been cleared.
 - Planner package tests pass when run from `hope_ws/src/hope_planner`.
 
 Not done:
 
 - ROS workspace build has not been verified because `colcon` is not available in the current shell.
-- TTRL has not been promoted to a pinned submodule or fork.
+- TTRL has not been promoted to a pinned submodule or fork because it is currently reference-only.
 - Git LFS policy has not been decided.
 
 ## Risks
 
 - Local-only assets can become invisible to future contributors if operation docs are not updated.
-- External repos can drift if they stay as ignored clones instead of pinned dependencies.
+- Auto-synced external references can drift by design; extracted work must record the source commit.
 
 ## Next Steps
 
 1. Verify ROS workspace in the intended ROS environment.
-2. Decide whether TTRL becomes a submodule, fork, or stays local-only.
+2. Record TTRL source commits whenever code, config, or experiment ideas are extracted from it.
 3. Decide whether heavyweight model artifacts should remain local-only or move to Git LFS later.

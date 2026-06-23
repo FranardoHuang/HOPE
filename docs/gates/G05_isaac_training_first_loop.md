@@ -29,10 +29,12 @@ This gate should prove that the training stack can consume A3 assets and produce
 - `docs/interfaces/policy_observation_action.md`
 - `docs/operations/run_training.md`
 - `vendor_assets/` for generated heavy policy artifacts if needed
+- `external_repos/TTRL-ICRA2026` as an auto-synced reference if first-loop failures need comparison
 
 ## Operation Docs
 
 - [../operations/run_training.md](../operations/run_training.md)
+- [../operations/setup_local_sync.md](../operations/setup_local_sync.md)
 
 ## Acceptance Criteria
 
@@ -64,10 +66,11 @@ Not done:
 - Training may fail before policy quality can be evaluated because of asset, observation, or reset issues.
 - A weak first policy is still useful, but only if metrics and failure modes are recorded.
 - Copying HITTER reward assumptions blindly may hide A3-specific limitations.
+- TTRL can change upstream; record the source commit if it informs a training change.
 
 ## Next Steps
 
 1. Record exact wandb run IDs, checkpoint paths, and ONNX export paths for the first successful runs.
 2. Set measurable acceptance metrics for first usable baseline: fall rate, racket error at strike, recovery, and command latency assumptions.
 3. Train and evaluate both forehand and backhand references.
-4. Decide whether TTRL becomes an implementation reference or dependency after comparing first-loop failure modes.
+4. Run `scripts/sync_external_repos.sh` before using TTRL for comparison, and record the source commit for any extracted idea or config.

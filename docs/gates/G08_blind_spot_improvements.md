@@ -58,7 +58,7 @@ Each blind-spot track needs its own mini-spec before implementation:
 Done:
 
 - HITTER paper limitations have been identified: fixed hitting plane, external mocap dependency, ignored spin, limited stroke repertoire, no autonomous serving, no explicit multi-agent/opponent adaptation.
-- TTRL is locally available as a reference.
+- TTRL is locally available as an auto-synced reference through `scripts/sync_external_repos.sh`.
 
 Not done:
 
@@ -69,9 +69,11 @@ Not done:
 
 - Starting this gate before the baseline works can scatter effort.
 - The highest-impact blind spot may depend on first real/RL results.
+- TTRL may drift with upstream; blind-spot mini-specs must record the TTRL commit when they extract ideas, configs, or code.
 
 ## Next Steps
 
 1. Wait for first RL loop and baseline failure modes.
 2. Pick one blind spot with high match impact and low integration risk.
 3. Write a mini-spec before code changes.
+4. Run `scripts/sync_external_repos.sh` before using TTRL as a reference.

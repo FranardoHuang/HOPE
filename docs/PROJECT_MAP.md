@@ -9,13 +9,14 @@ This file describes stable repository zones. Gates describe work over time; fold
 | `docs/` | Living project map, gates, interfaces, and operations | tracked |
 | `papers/` | Source papers used as technical ground truth | tracked when license allows |
 | `mocap/` | Motion-capture setup, coordinates, and vendor notes | tracked |
+| `scripts/` | Repo maintenance helpers for local sync and project hygiene | tracked |
 | `calib_bags/` | Small reference raw calibration recordings | tracked only for curated samples |
 | `calib_csv/` | Processed calibration CSVs, chunks, and plots | tracked only for curated samples |
 | `hope_ws/` | ROS 2 integration workspace | tracked source, ignored build/install/log |
 | `hope_training/` | Isaac/BeyondMimic training scaffold | tracked source, ignored generated motions and logs |
 | `agi/` | Agibot URDF, MuJoCo, deployment docs, and source support | tracked source and small runtime configs |
 | `vendor_assets/` | Full local vendor/runtime payloads: models, sysroots, binaries | ignored |
-| `external_repos/` | Local reference clones not yet promoted to formal dependencies | ignored |
+| `external_repos/` | Auto-synced local reference clones not yet promoted to formal dependencies | ignored |
 
 ## ROS Workspace
 
@@ -51,7 +52,13 @@ Additional training config:
 
 ## External Reference Zone
 
-`external_repos/TTRL-ICRA2026` is currently an ignored local clone. If it becomes a stable dependency, promote it to one of these:
+`external_repos/TTRL-ICRA2026` is currently an ignored auto-synced local clone. Keep it current with:
+
+```bash
+scripts/sync_external_repos.sh
+```
+
+It is allowed to drift with upstream while it is only used as reading material. If it becomes a stable dependency, promote it to one of these:
 
 1. Git submodule pinned to upstream if we only read it.
 2. Fork plus submodule if we need to patch it.

@@ -31,6 +31,8 @@ Do not delete local-only assets unless they have been moved, backed up, or expli
 
 If a task requires an ignored file or folder, update `docs/operations/setup_local_sync.md` with the manual restore path and update the relevant gate doc with the dependency. Do not assume ignored files exist on another machine.
 
+Ignored external reference repos are not pinned dependencies. When a task needs TTRL as a reference, run `scripts/sync_external_repos.sh` first, then record the TTRL source commit in the relevant gate doc if any idea, code, config, or result is extracted from it.
+
 ## Safety
 
 Do not run real robot command tests unless the relevant gate and operation docs say the dry-run, joint order, command scaling, and safe halt checks have passed.

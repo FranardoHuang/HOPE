@@ -98,7 +98,7 @@ Use [setup_local_sync.md](setup_local_sync.md) for ignored assets such as:
 - `vendor_assets/agibot/a3_deploy_example_full/`
 - `external_repos/TTRL-ICRA2026/`
 
-These ignored paths are not restored by `git clone` or `git pull`. If a command depends on them, copy or clone them manually before running that gate.
+These ignored paths are not fully restored by `git clone` or `git pull`. If a command depends on vendor payloads, copy them manually before running that gate. If a task uses TTRL as a reference, run `scripts/sync_external_repos.sh` first.
 
 ## Update Rule
 
