@@ -2888,18 +2888,53 @@ Useful overrides (append to any command): `num_envs=4096 max_iterations=20000 se
 
 ### 14.5 Evaluate a trained policy
 
-```bash
-# from a wandb run (entity = your TEAM, where runs are logged):
-hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
-  wandb_path="$WANDB_ENTITY/hope_wbc/<RUN_ID>"
+Run all of these **from inside `~/workspace/HOPE/hope_training/whole_body_tracking`** — the
+`checkpoint=`, `motion_file=`, and `logs/` paths are relative to that directory. `play.py` always
+exports `policy.onnx` next to the checkpoint (that is Step 15).
 
-# or from the latest LOCAL checkpoint (no wandb run needed; uses the newest run in logs/rsl_rl/):
+Pick the checkpoint source (in precedence order): `checkpoint=<local .pt>` > `wandb_path=<run>` >
+newest local run. Pick the reference motion: `motion_file=<.npz>` (fully offline) > `registry_name=`
+(downloads from wandb) > the task default. The local motion clips that training downloaded are cached
+at `artifacts/hope_forehand:v0/motion.npz` and `artifacts/hope_backhand:v0/motion.npz`.
+
+**Watch live in the Isaac Sim window** (needs a local display; the window stays open until you close it):
+
+```bash
 hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
-  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand"
+  checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
+  motion_file="artifacts/hope_forehand:v0/motion.npz" \
+  headless=false
 ```
 
-`<RUN_ID>` is the last segment of the run URL (`wandb.ai/<team>/hope_wbc/runs/<RUN_ID>`). `play.py`
-also exports `policy.onnx` next to the checkpoint (that is Step 15) — verified working.
+**Record a video instead** (headless, no display needed; writes
+`logs/rsl_rl/agibot_a3_hope/<RUN>/videos/play/play.mp4` via imageio — the terminal prints
+`captured N frames` then `wrote video -> …`):
+
+```bash
+hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+  checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
+  motion_file="artifacts/hope_forehand:v0/motion.npz" \
+  headless=true video=true        # video_length frames; tune in cfg/play.yaml
+```
+
+**From a wandb run** (instead of a local checkpoint; entity = your TEAM where runs are logged):
+
+```bash
+hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+  wandb_path="$WANDB_ENTITY/hope_wbc/<RUN_ID>" headless=false
+```
+
+`<RUN>` is the run folder under `logs/rsl_rl/agibot_a3_hope/` and `<N>` the checkpoint number
+(e.g. `model_16000.pt`). `<RUN_ID>` is the last segment of the run URL
+(`wandb.ai/<team>/hope_wbc/runs/<RUN_ID>`).
+
+Two `play.py` gotchas already fixed in this repo (re-apply if you re-clone upstream BeyondMimic):
+this rsl_rl/IsaacLab returns a **TensorDict** from `get_observations()` (not an `(obs, extras)`
+tuple), so the rollout loop uses `obs = env.get_observations()` + `env.step(actions.to(env.device))`
+(the old `obs, _ = …` unpack silently produced a 1-D action → `IndexError` in `process_action`); and
+video uses a manual `env.render()` + `imageio` capture rather than `gym.wrappers.RecordVideo` (which
+needs `moviepy` and was masked by Isaac's hard-exit). If video errors with `ModuleNotFoundError`, run
+`hope_isaac_py -m pip install imageio imageio-ffmpeg`.
 
 ### 14.6 Where to tune
 
@@ -2964,6 +2999,48 @@ Status / what still needs the validated asset:
 3. Set the reachable-target and reward-tuning values in `cfg/task/HOPEPingPong.yaml` and re-train
    until the target metrics are met.
 4. Record the wandb run IDs of the good forehand and backhand runs — Step 15 needs them.
+
+### 14.8 Disk usage and cleanup
+
+Each training run is large — the bulk is checkpoints and the tensorboard event file:
+
+| Item | Size | Note |
+| --- | --- | --- |
+| `logs/rsl_rl/<exp>/<run>/` | **~300 MB/run** | the big consumer |
+| └ `model_*.pt` | ~7 MB each (~224 MB at `save_interval=500`, 16k iters) | most of it |
+| └ `events.out.tfevents.*` | ~75 MB | grows with iterations |
+| └ `*.onnx` | ~2 MB | the exported policy |
+| `hope_training/wandb/` | ~230 MB | local cache, already synced to the wandb cloud |
+| `motions/`, `artifacts/`, `outputs/` | ~4 MB / ~0.5 MB / <1 MB | small |
+
+**If a run went badly, these are safe to delete** (run from `~/workspace/HOPE/hope_training/whole_body_tracking`):
+
+```bash
+# 1) drop the whole failed run (you are re-training from scratch) — frees ~300 MB
+rm -rf logs/rsl_rl/agibot_a3_hope/<RUN>
+
+# 2) wandb local cache — frees ~230 MB; safe because runs are synced to the wandb cloud
+rm -rf wandb/run-* ../wandb/run-*
+
+# 3) Hydra job logs — a few hundred KB, optional
+rm -rf outputs/*
+```
+
+**If instead you want to warm-start the next run from a good checkpoint**, keep that one `.pt` and
+delete only the redundant checkpoints + the event file:
+
+```bash
+RUN=logs/rsl_rl/agibot_a3_hope/<RUN>
+find "$RUN" -maxdepth 1 -name 'model_*.pt' ! -name 'model_<N>.pt' -delete   # keep model_<N>.pt
+rm -f "$RUN"/events.out.tfevents.*
+```
+
+**Never delete** `motions/` (the Step 9–12 retargeting products) or `artifacts/hope_*:v0/motion.npz`
+(the reference clips) — small, but expensive to regenerate / re-download. All of `logs/`, `outputs/`,
+`wandb/`, `artifacts/`, `motions/` are gitignored, so deleting them never affects git.
+
+To produce fewer files in the first place, raise `save_interval` in `cfg/algo/ppo.yaml`
+(`500 → 2000` cuts the checkpoints ~4×; the final policy is unaffected).
 
 ## 15. Export The Policy To ONNX
 

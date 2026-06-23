@@ -49,7 +49,8 @@ def _run_play(cfg, simulation_app):
 
     # resolve the checkpoint + reference motion
     wandb_path = cfg.wandb_path
-    if wandb_path:
+    checkpoint = cfg.get("checkpoint", None)
+    if wandb_path and not checkpoint:
         import wandb
 
         wandb_path = str(wandb_path)
@@ -72,7 +73,10 @@ def _run_play(cfg, simulation_app):
             else:
                 print("[WARN] No motion artifact in the run; pass motion_file=... if replay fails.")
     else:
-        resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
+        if checkpoint:
+            resume_path = str(checkpoint)
+        else:
+            resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
         print(f"[INFO] Loading model checkpoint from: {resume_path}")
         reg = cfg.registry_name if cfg.registry_name is not None else cfg.task.get("registry_name")
         if cfg.motion_file is not None:
@@ -89,14 +93,6 @@ def _run_play(cfg, simulation_app):
     render_mode = "rgb_array" if cfg.video else None
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)
     log_dir = os.path.dirname(resume_path)
-    if cfg.video:
-        env = gym.wrappers.RecordVideo(
-            env,
-            video_folder=os.path.join(log_dir, "videos", "play"),
-            step_trigger=lambda step: step == 0,
-            video_length=int(cfg.video_length),
-            disable_logger=True,
-        )
     env = RslRlVecEnvWrapper(env)
 
     ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
@@ -113,16 +109,47 @@ def _run_play(cfg, simulation_app):
     attach_onnx_metadata(env.unwrapped, str(wandb_path) if wandb_path else "none", export_model_dir)
     print(f"[INFO] Exported ONNX policy to: {export_model_dir}")
 
-    obs, _ = env.get_observations()
+    # Manual video capture: grab env.render() each step and encode to mp4 with imageio
+    # (imageio-ffmpeg). Avoids gym RecordVideo's vec-env / flush quirks and reports exactly
+    # how many frames were captured so a black/empty render is obvious instead of silent.
+    frames = []
+    # This rsl_rl/IsaacLab version returns a TensorDict from get_observations() (NOT an (obs, extras)
+    # tuple) and the inference policy consumes the whole TensorDict — mirror the runner's rollout loop.
+    obs = env.get_observations().to(agent_cfg.device)
     timestep = 0
     while simulation_app.is_running():
         with torch.inference_mode():
             actions = policy(obs)
-            obs, _, _, _ = env.step(actions)
+            obs, _, _, _ = env.step(actions.to(env.unwrapped.device))
         if cfg.video:
+            frame = env.unwrapped.render()
+            if frame is not None:
+                frames.append(frame)
             timestep += 1
-            if timestep == int(cfg.video_length):
+            if timestep >= int(cfg.video_length):
                 break
+        # non-video: keep stepping until the Isaac Sim window is closed (live viewing)
+
+    if cfg.video:
+        import numpy as np
+
+        video_dir = os.path.join(log_dir, "videos", "play")
+        os.makedirs(video_dir, exist_ok=True)
+        video_path = os.path.join(video_dir, "play.mp4")
+        valid = [np.asarray(f) for f in frames if f is not None and getattr(f, "size", 0) > 0]
+        print(f"[INFO] captured {len(frames)} frames ({len(valid)} non-empty)", flush=True)
+        if valid:
+            import imageio
+
+            imageio.mimsave(video_path, valid, fps=30)
+            print(f"[INFO] wrote video -> {video_path}", flush=True)
+        else:
+            print(
+                "[ERROR] env.render() returned no usable frames. Check that AppLauncher got "
+                "enable_cameras=True (it ties to video) and render_mode='rgb_array'.",
+                flush=True,
+            )
+
     env.close()
 
 
@@ -140,6 +167,12 @@ def main(cfg):
     simulation_app = app_launcher.app
     try:
         _run_play(cfg, simulation_app)
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+        sys.stderr.flush()
+        sys.stdout.flush()
     finally:
         simulation_app.close()
 
