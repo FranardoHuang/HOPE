@@ -2340,11 +2340,12 @@ Use this no-install fallback for the rest of steps `12-15`:
 ```bash
 cd ~/workspace/HOPE/hope_training/whole_body_tracking
 
-export HOPE_WBT_PYTHONPATH=/opt/drone_venv/lib/python3.11/site-packages:$PWD/source/whole_body_tracking:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_tasks:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_assets:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_rl
-
-hope_isaac_py () {
-  PYTHONPATH="$HOPE_WBT_PYTHONPATH" /workspace/isaacsim/python.sh "$@"
-}
+# Source the training env (once per terminal). It sets HOPE_WBT_PYTHONPATH so Isaac's bundled python
+# can see hydra/omegaconf (in /opt/drone_venv) + isaaclab_rl, defines the `hope_isaac_py` launcher,
+# and exports the wandb team/org/project. The script header documents each piece. It MUST be SOURCED
+# (not `./setup_train_env.sh`, which would set everything in a subshell that exits). Re-source every
+# new terminal. (Equivalent to exporting HOPE_WBT_PYTHONPATH + defining hope_isaac_py by hand.)
+source setup_train_env.sh
 ```
 
 From this point on, on **this machine**, use `hope_isaac_py` for every Isaac /
@@ -2823,16 +2824,19 @@ distrobox enter grasping
 # inside grasping:
 cd ~/workspace/HOPE/hope_training/whole_body_tracking
 
-# Training PYTHONPATH MUST include isaaclab_rl (replay / csv_to_npz did not need it):
-export HOPE_WBT_PYTHONPATH=/opt/drone_venv/lib/python3.11/site-packages:$PWD/source/whole_body_tracking:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_tasks:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_assets:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_rl
-hope_isaac_py () { PYTHONPATH="$HOPE_WBT_PYTHONPATH" /workspace/isaacsim/python.sh "$@"; }
-
-# wandb: runs log to your TEAM; the motion registry is read from your ORG (Step 12.5).
-# These two are DIFFERENT — using the team for the registry fails ("Unable to find organization").
-export WANDB_ENTITY=BerkeleyPingPong                                      # your team (run logging)
-export WANDB_REGISTRY_ORG=dongc_1-university-of-california-berkeley-org   # your org (motion registry)
-export WANDB_PROJECT=hope_wbc
+# Source the training env. This sets HOPE_WBT_PYTHONPATH (so Isaac's bundled python sees
+# hydra/omegaconf in /opt/drone_venv + isaaclab/isaaclab_rl), defines the `hope_isaac_py` launcher,
+# and exports the wandb team/org/project (WANDB_ENTITY / WANDB_REGISTRY_ORG / WANDB_PROJECT — the
+# team and org are DIFFERENT; using the team for the registry fails, see Step 12.5).
+source setup_train_env.sh
 ```
+
+It MUST be **sourced**, not executed (`./setup_train_env.sh` runs in a subshell that exits, leaving
+your shell unchanged), and re-sourced in every new terminal. On success it prints `[hope] training
+env ready`. The script (`setup_train_env.sh`, in this directory) is the single source of truth for
+the training env — edit it there, not inline. If you prefer not to source a file, its three pieces
+(the `HOPE_WBT_PYTHONPATH` export, the `hope_isaac_py` function, and the three wandb exports) can
+still be pasted by hand; the function falls back to a built-in PYTHONPATH if the export is missing.
 
 ### 14.2 Smoke test (~1 min) — confirm the whole pipeline runs
 
@@ -2960,6 +2964,14 @@ entrypoint still works if you prefer argparse over Hydra.
   be your wandb **org** (`$WANDB_REGISTRY_ORG`), never your **team** (`$WANDB_ENTITY`) — registries
   are org-scoped (Step 12.5). The `cfg/task/*.yaml` `registry_name` defaults now read
   `WANDB_REGISTRY_ORG`, so you may also omit `registry_name=...` entirely.
+- **`ModuleNotFoundError: No module named 'hydra'`** (at `import hydra` near the top of `train.py` /
+  `play.py`, run via `hope_isaac_py`). Your shell's `HOPE_WBT_PYTHONPATH` was empty, so `hope_isaac_py`
+  launched Isaac's bundled python with an **empty `PYTHONPATH`**. hydra/omegaconf live in
+  `/opt/drone_venv` and are visible only through that PYTHONPATH (Isaac's python has neither). Usually
+  you opened a new terminal and never sourced the env in it. Fix: `source setup_train_env.sh` (14.1)
+  in *this* terminal — it must be re-sourced per terminal. Check with `echo "$HOPE_WBT_PYTHONPATH"`
+  (blank = not sourced). (Sanity check: `hope_isaac_py -c "import hydra, omegaconf;
+  print(hydra.__version__)"` should print `1.3.2`.)
 - **`free(): corrupted unsorted chunks` / Aborted at "Starting the simulation."** PhysX heap
   corruption from the placeholder asset's overlapping wrist collision meshes (wrist + hand + red/black
   blades). `robots/agibot_a3.py` sets `enabled_self_collisions=False` to avoid it; re-enable once a
