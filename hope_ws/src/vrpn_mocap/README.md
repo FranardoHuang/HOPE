@@ -1,109 +1,65 @@
-# ChingMu VRPN ROS2 插件安装步骤
-## 1.安装vrpn库
-ros2版本foxy下安装
+# vrpn_mocap (HOPE)
+
+VRPN client for ROS 2 that publishes ChingMu/VRPN motion-capture poses. This
+package originates from the ChingMu VRPN ROS 2 plugin and is vendored into
+`hope_ws` for the HOPE motion-capture pipeline.
+
+Tested target: Linux + ROS 2 Jazzy.
+
+## Install
+
+Install the distro package, then let `rosdep` resolve the remaining
+dependencies during the workspace build:
+
 ```
-sudo apt install ros-foxy-vrpn-mocap
-```
-ros2版本humble下安装
-```
-sudo apt install ros-humble-vrpn-mocap
-```
-依赖
-```
-rosdep install --from-paths src -y --ignore-src
+sudo apt install ros-jazzy-vrpn-mocap
 ```
 
-## 2.创建工作空间
-```
-mkdir -p ~/chingmu_ws/src 
-cd ~/chingmu_ws/
-```
-`catkin_ws` 工作空间的名称，可以自定义  
-`mkdir -p ~/catkin_ws/src`  递归创建目录  
-`colcon build`  ros2下的编译指令  
+## Build (inside hope_ws)
 
-## 3.拷贝程序代码，编译
-拷贝<a href="https://github.com/ChingMuVisionTech/ChingMuVrpnROS2/blob/main/vrpn_mocap.zip">vrpn_mocap</a>至前一步创建的src文件夹下
-在chingmu_ws目录下使用colcon编译工程
+From the `hope_ws` workspace root:
+
 ```
-colcon build
-```
-## 4.刷新环境变量
-```
+rosdep install --from-paths src --ignore-src -r -y
+colcon build --symlink-install
 source install/setup.bash
 ```
 
-## 5.运行代码
+## Run
+
 ```
-ros2 launch ./src/vrpn_mocap/launch/client.launch.yaml server:=<server ip> port:=<port>
-```
-例如：
-```
-ros2 launch ./src/vrpn_mocap/launch/client.launch.yaml server:=192.168.0.4 port:=3883
+ros2 launch vrpn_mocap client.launch.yaml server:=<MOCAP_SERVER_IP> port:=3883
 ```
 
-## 6.查看接收到的数据
-`ros2 topic list`
-```
-cszecsz-virtual-machine:-/Desktop$ ros2 topic lis 
-/parameter_events
-/rosout
-/vrpn_mocap/MCServer/accel_id_0
-/vrpn_mocap/MCServer/pose_td_0
-/vrpn_mocap/MCServer/velocity_id_0
-```
+`client.launch.yaml` arguments:
 
-`ros2 topic echo /vrpn_mocap/MCServer/pose_id_0`
+- `server` -- VRPN server IP/hostname (default: `localhost`)
+- `port` -- VRPN server port (default: `3883`)
+
+`config/client.yaml` parameters:
+
+- `update_freq` (double) -- frequency of the motion-capture data publisher (default: `100.`)
+- `refresh_freq` (double) -- frequency of dynamically adding newly tracked objects (default: `1.`)
+- `sensor_data_qos` (bool) -- use best-effort QoS for the VRPN data stream; set to `false` for the reliable system-default QoS (default: `true`)
+- `multi_sensor` (bool) -- set to `true` if more than one sensor (frame) reports on the same object (default: `false`)
+
+## Inspect the data stream
+
 ```
-cszecsz-virtual-machine:~/Desktop$ ros2 topic echo /vrpon_mocap/MCServer/pose
-header:
-  stamp:
-    sec: 1699596837
-    nanosec: 155918202
-  frame id: world
-pose
-  position:
-    X:188.65660095214844
-    y:4.012427806854248
-    z:571.76123046875
-  orientation:
-    x: 0.07953430712223053
-    y:-0.23086997866630554
-    z:0.9400380849838257
-    w: -0.2381211668252945
+ros2 topic list
+ros2 topic echo /vrpn_mocap/<server>/pose_<id> --once
 ```
 
-## 参数
-client.launch.yaml文件
-```
-launch:
+Raw topics live under the `/vrpn_mocap` namespace (e.g.
+`/vrpn_mocap/MCServer/pose_0`). In HOPE these raw topics are mapped by a relay
+to the `/P1`, `/P2`, `/ball`, and `/poses` topics; see
+[../../../docs/interfaces/ros_topics.md](../../../docs/interfaces/ros_topics.md).
 
-- arg:
-    name: "server"
-    default: "localhost"
-- arg:
-    name: "port"
-    default: "3883"
+## Runtime documentation
 
-- node:
-    pkg: "vrpn_mocap"
-    namespace: "vrpn_mocap"
-    exec: "client_node"
-    name: "vrpn_mocap_client_node"
-    param:
-    -
-      from: "$(find-pkg-share vrpn_mocap)/config/client.yaml"
-    -
-      name: "server"
-      value: "$(var server)"
-    -
-      name: "port"
-      value: "$(var port)"
-```
-- update_freq (double) -- frequency of the motion capture data publisher (default: 100.)
-- refresh_freq (double) -- frequency of dynamic adding new tracked objects (default: 1.)
-- sensor_data_qos -- use best effort QoS for VRPN data stream, set to false to use system default QoS which is reliable (default: true)
-- multi_sensor (bool) -- set to true if there are more than one sensor (frame) reporting on the same object (default: false)
+The authoritative runtime procedure for bringing up motion capture is
+[../../../docs/operations/run_mocap.md](../../../docs/operations/run_mocap.md).
 
+## License
 
-
+See [LICENSE](LICENSE).

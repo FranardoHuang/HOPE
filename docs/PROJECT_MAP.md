@@ -43,7 +43,7 @@ Future packages should be added here when they are runtime ROS packages, for exa
 
 ## Training Zone
 
-`hope_training/whole_body_tracking` is the current Isaac/BeyondMimic training entry. Latest `jiayi` updates record that the A3 `TrackingFlat` and `HOPEPingPong` forehand pipeline can train and export ONNX on the copied A3 URDF asset. Treat this as pipeline viability, not as an accepted quality baseline; use [gates/G05_isaac_training_first_loop.md](gates/G05_isaac_training_first_loop.md) for acceptance status.
+`hope_training/whole_body_tracking` is the current Isaac/BeyondMimic training entry. The A3 `TrackingFlat` and `HOPEPingPong` forehand pipeline can train and export ONNX on the copied A3 URDF asset. Treat this as pipeline viability, not as an accepted quality baseline; use [gates/G05_isaac_training_first_loop.md](gates/G05_isaac_training_first_loop.md) for acceptance status.
 
 Additional training config:
 

@@ -50,9 +50,9 @@ Done:
 
 - Training scaffold is present under `hope_training/whole_body_tracking`.
 - Existing docs describe BeyondMimic-style training assumptions.
-- Latest `jiayi` updates add Hydra training/eval entrypoints, HOPEPingPong task config, racket-target command logic, and A3-specific robot config.
+- The branch adds Hydra training/eval entrypoints, HOPEPingPong task config, racket-target command logic, and A3-specific robot config.
 - `reimplement.md` records that `TrackingFlat` and `HOPEPingPong` forehand training have run end-to-end on the copied A3 URDF asset, including wandb logging, checkpoint save, and `policy.onnx` export.
-- `origin/jiayi` through `42489cd` adds `setup_train_env.sh`, richer WandB/live metrics, and in-container ONNX export support.
+- Commit `42489cd` adds `setup_train_env.sh`, richer WandB/live metrics, and in-container ONNX export support.
 
 Not done:
 

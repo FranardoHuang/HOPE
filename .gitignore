@@ -30,6 +30,10 @@ hope_training/whole_body_tracking/wandb/
 *.log
 .codex-env-snapshots
 
+# Local, machine-specific training env override (Isaac paths + wandb identity).
+# Sourced by setup_train_env.sh if present; keep real paths/identity out of git.
+hope_training/whole_body_tracking/setup_train_env.local.sh
+
 # Agibot A3 deploy example package (vendor-provided, ~1.7 GB - too large for git)
 agi/a3_deploy_example/
 

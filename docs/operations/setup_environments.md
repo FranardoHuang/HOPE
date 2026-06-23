@@ -53,9 +53,9 @@ colcon build --symlink-install
 source install/setup.bash
 ```
 
-Current Codex shell limitation:
+Build and verify inside the ROS environment:
 
-- `colcon` is not installed in the current macOS shell, so ROS workspace build verification must happen inside the ROS environment.
+- `colcon` and `ros2` come from `ros-jazzy-desktop-full` and are only available inside the ROS 2 Jazzy box. Run `colcon build --symlink-install` and `source install/setup.bash` there; do not attempt ROS workspace builds from the host terminal.
 
 ## GPU / Isaac Environment
 
@@ -75,15 +75,17 @@ cd ~/workspace/HOPE/hope_training/whole_body_tracking
 source setup_train_env.sh
 ```
 
-`setup_train_env.sh` is the source of truth for:
+`setup_train_env.sh` is the source of truth for the `hope_isaac_py` launcher and the WandB exports, and must be sourced in every new terminal. The script has been scrubbed of site-specific paths; it now reads overridable env vars (with placeholder defaults) and auto-sources an optional git-ignored local override:
 
-- `HOPE_WBT_PYTHONPATH`
-- `hope_isaac_py`
-- `WANDB_ENTITY`
-- `WANDB_REGISTRY_ORG`
+- `HOPE_ISAAC_PYTHON` — path to the Isaac Lab Python interpreter (`hope_isaac_py` wraps it)
+- `HOPE_ISAACLAB_ROOT` — Isaac Lab install root
+- `HOPE_ISAAC_VENV_SITE` — extra `site-packages` to inject (e.g. so `hydra`/`omegaconf` import in the Isaac Lab Python; they are not in the package `install_requires`)
+- `WANDB_ENTITY` — your run-logging team (`your-wandb-team`)
+- `WANDB_REGISTRY_ORG` — your motion-registry org (`your-wandb-org`); it must differ from `WANDB_ENTITY` or registry reads fail with "Unable to find organization for entity ..."
 - `WANDB_PROJECT`
+- `setup_train_env.local.sh` — git-ignored local override, auto-sourced if present; put your real machine paths and WandB identities here instead of editing the tracked script
 
-It must be sourced in every new terminal.
+Replace the placeholders with your own values (never commit a private WandB identity to this public branch).
 
 Quick check:
 
@@ -99,6 +101,65 @@ Use [setup_local_sync.md](setup_local_sync.md) for ignored assets such as:
 - `external_repos/TTRL-ICRA2026/`
 
 These ignored paths are not fully restored by `git clone` or `git pull`. If a command depends on vendor payloads, copy them manually before running that gate. If a task uses TTRL as a reference, run `scripts/sync_external_repos.sh` first.
+
+## Creating the environments
+
+The sections above describe how to *enter* the environments. This section covers how to *create* them on a fresh machine. `hope` and `grasping` are the maintainer's example distrobox names — substitute your own local names throughout.
+
+### ROS box
+
+Linux + ROS 2 Jazzy. Two ways to build it:
+
+- distrobox: the full `distrobox-create` recipe lives in `reimplement.md`.
+- container: build from the reference recipe [Dockerfile.hope-ros2-jazzy](../../Dockerfile.hope-ros2-jazzy), which is based on `docker.io/osrf/ros:jazzy-desktop-full` and now includes `ros-jazzy-vrpn-mocap` and `python3-vcstool`.
+
+Apt packages to install in the box:
+
+- `build-essential`, `cmake`, `curl`, `git`
+- `ros-jazzy-desktop-full`
+- `ros-jazzy-vrpn-mocap`
+- `python3-colcon-common-extensions`, `python3-pip`, `python3-rosdep`, `python3-vcstool`, `python3-venv`
+
+Then build the workspace:
+
+```bash
+rosdep install --from-paths src --ignore-src -r -y
+colcon build --symlink-install
+source install/setup.bash
+```
+
+### GPU / Isaac (grasping) box
+
+This is currently the biggest reproducibility gap. The box is assumed to be **pre-provisioned** with:
+
+- Isaac Sim 4.5.0
+- Isaac Lab 2.1.0
+- Python 3.10
+- an NVIDIA CUDA GPU
+
+A from-scratch Isaac install is **not yet documented here** — follow the official [Isaac Lab installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html) to provision the GPU box, then point `setup_train_env.sh` at it.
+
+`source setup_train_env.sh` provides the `hope_isaac_py` launcher and the `WANDB_*` exports. The scrubbed script reads the overridable `HOPE_ISAAC_PYTHON` / `HOPE_ISAACLAB_ROOT` / `HOPE_ISAAC_VENV_SITE` env vars (or your git-ignored `setup_train_env.local.sh`) — see [GPU / Isaac Environment](#gpu--isaac-environment) above. `hydra` and `omegaconf` are not in the package `install_requires`; they must be importable in the Isaac Lab Python (inject them via `HOPE_ISAAC_VENV_SITE` if needed). Sanity check:
+
+```bash
+hope_isaac_py -c "import hydra, omegaconf; print(hydra.__version__)"
+```
+
+### Motion retargeting (GMR + GVHMR)
+
+The motion pipeline uses two separate conda envs (`python=3.10`). Both are git-ignored clones and are absent on a fresh clone. The full procedure is in `reimplement.md` steps 9-11.
+
+- **GMR** ([YanjieZe/GMR](https://github.com/YanjieZe/GMR.git), local pin `bb1bbe4`): `pip install -e .`. Needs license-gated SMPL-X body models (`SMPLX_NEUTRAL/MALE/FEMALE.pkl` from [smpl-x.is.tue.mpg.de](https://smpl-x.is.tue.mpg.de)).
+- **GVHMR** ([zju3dv/GVHMR](https://github.com/zju3dv/GVHMR.git), local pin `6ec3ca3`):
+
+  ```bash
+  conda create -y -n gvhmr python=3.10
+  conda activate gvhmr
+  pip install -r requirements.txt
+  pip install -e .
+  ```
+
+  Optional DPVO needs CUDA 12.1; the `cu121` pins fix `torch==2.3.0` and `pytorch3d 0.7.6 py310_cu121_pyt230`. Blackwell (sm_120) GPUs are incompatible with the `cu121` pins — see `hope_training/GVHMR/.hope-motion-py310-freeze-before-blackwell-fix.txt`. GVHMR also needs license-gated checkpoints into `inputs/checkpoints/`.
 
 ## Update Rule
 

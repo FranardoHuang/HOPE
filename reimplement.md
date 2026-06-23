@@ -1554,7 +1554,7 @@ grounded robot joint motion
     |
     | Step 10: inspect the body motion
     | command:
-    |   PYTHONPATH=. /home/dongc1/workspace/HOPE/hope_training/.venv-motion/bin/python \
+    |   PYTHONPATH=. ~/workspace/HOPE/hope_training/.venv-motion/bin/python \
     |     scripts/vis_robot_motion.py \
     |     --robot agibot_a3 \
     |     --robot_motion_path ../motions/a3_gmr/forehand_swing.pkl
@@ -1871,7 +1871,7 @@ source ~/workspace/HOPE/hope_training/.venv-motion/bin/activate
 Quick check:
 
 ```bash
-test -f /home/dongc1/workspace/HOPE/agi/URDF/a3_t2d5/urdf/model.urdf
+test -f ~/workspace/HOPE/agi/URDF/a3_t2d5/urdf/model.urdf
 test -f ../GVHMR/outputs/demo/forehand_swing/hmr4d_results.pt
 test -f ../GVHMR/outputs/demo/backhand_swing/hmr4d_results.pt
 ```
@@ -2020,7 +2020,7 @@ find ../motions/a3_gmr -maxdepth 1 \( -name 'forehand_swing*.pkl' -o -name 'back
 Visual check with a viewer:
 
 ```bash
-PYTHONPATH=. /home/dongc1/workspace/HOPE/hope_training/.venv-motion/bin/python \
+PYTHONPATH=. ~/workspace/HOPE/hope_training/.venv-motion/bin/python \
   scripts/vis_robot_motion.py \
   --robot agibot_a3 \
   --robot_motion_path ../motions/a3_gmr/forehand_swing.pkl
@@ -2413,10 +2413,10 @@ WandB has **two different scopes** that you must not confuse — getting this wr
 is the most common Step-12 failure:
 
 - **Runs** (training, smoke tests, checkpoints) are logged under an **entity** —
-  your personal entity or a **team** (e.g. `BerkeleyPingPong`). This is `WANDB_ENTITY`.
+  your personal entity or a **team** (e.g. `your-wandb-team`). This is `WANDB_ENTITY`.
 - The **motions registry** is owned by an **organization**, not a team. Registry
   artifact paths must start with the **org** name (e.g.
-  `dongc_1-university-of-california-berkeley-org`). Passing a *team* name there
+  `your-wandb-org`). Passing a *team* name there
   fails with `CommError: Unable to find organization for entity '<team>'`. This is
   `WANDB_REGISTRY_ORG`.
 
@@ -2444,8 +2444,8 @@ and org):
 cat >> ~/.bashrc <<'EOF'
 
 # HOPE / BeyondMimic WandB defaults
-export WANDB_ENTITY=BerkeleyPingPong                                     # runs/checkpoints -> your team/entity
-export WANDB_REGISTRY_ORG=dongc_1-university-of-california-berkeley-org  # motions registry -> your ORG (not the team)
+export WANDB_ENTITY=your-wandb-team                                     # runs/checkpoints -> your team/entity
+export WANDB_REGISTRY_ORG=your-wandb-org  # motions registry -> your ORG (not the team)
 export WANDB_PROJECT=hope_wbc
 export WANDB_DIR=$HOME/workspace/HOPE/hope_training/wandb
 EOF
@@ -2460,8 +2460,8 @@ echo "$WANDB_PROJECT"
 Expected output:
 
 ```text
-BerkeleyPingPong
-dongc_1-university-of-california-berkeley-org
+your-wandb-team
+your-wandb-org
 hope_wbc
 ```
 

@@ -9,7 +9,7 @@ gym_task: Tracking-Flat-AgibotA3-v0
 experiment_name: agibot_a3_flat
 
 # prefix is the wandb ORG (WANDB_REGISTRY_ORG), not the team — registries are org-scoped.
-registry_name: ${oc.env:WANDB_REGISTRY_ORG,BerkeleyPingPong}/wandb-registry-motions/hope_forehand
+registry_name: ${oc.env:WANDB_REGISTRY_ORG,your-wandb-org}/wandb-registry-motions/hope_forehand
 
 defaults:
   - /base/env_base@_here_

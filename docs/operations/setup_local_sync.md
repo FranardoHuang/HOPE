@@ -10,10 +10,15 @@ These files and folders are not provided by `git clone`, `git pull`, or normal b
 
 ## Current Local Assets
 
-| Path | Purpose | Required By |
-| --- | --- | --- |
-| `vendor_assets/agibot/a3_deploy_example_full/` | Complete Agibot deploy payload, including heavy runtime assets | G07 |
-| `external_repos/TTRL-ICRA2026/` | Auto-synced local TTRL reference clone | G05, G08 |
+| Path | Purpose | Source | Required By |
+| --- | --- | --- | --- |
+| `vendor_assets/agibot/a3_deploy_example_full/` | Complete Agibot deploy payload, including heavy runtime assets | Private/vendor-gated: Agibot handoff (~1.7 GB, no public URL) | G07 |
+| `external_repos/TTRL-ICRA2026/` | Auto-synced local TTRL reference clone | Public but may be access-gated: [purdue-tracelab/TTRL-ICRA2026](https://github.com/purdue-tracelab/TTRL-ICRA2026.git) | G05, G08 |
+| `hope_training/GMR/` | Motion retargeting (SMPL-X -> robot) clone | Public: [YanjieZe/GMR](https://github.com/YanjieZe/GMR.git) (observed pin `bb1bbe4`) | Motion pipeline |
+| `hope_training/GVHMR/` | Video -> SMPL-X motion recovery clone | Public: [zju3dv/GVHMR](https://github.com/zju3dv/GVHMR.git) (observed pin `6ec3ca3`) | Motion pipeline |
+| GMR body-models dir (`SMPLX_NEUTRAL/MALE/FEMALE.pkl`) | SMPL-X body models for retargeting | License-gated: [smpl-x.is.tue.mpg.de](https://smpl-x.is.tue.mpg.de) | Motion pipeline |
+| `hope_training/GVHMR/inputs/checkpoints/` | GVHMR model checkpoints | License-gated: per GVHMR instructions | Motion pipeline |
+| WandB motion registry (`hope_forehand`/`hope_backhand` `.npz`) | Reference swing clips for `task=HOPEPingPong` | Private/org-scoped WandB registry (not redistributable) | Training (HOPEPingPong) |
 
 ## Manual Restore Checklist
 
@@ -56,7 +61,40 @@ The script clones TTRL if absent, then fetches and fast-forwards the local refer
 
 If a result depends on TTRL, record the source commit hash printed by the script in the relevant gate doc. If TTRL becomes a stable dependency, promote it to a submodule or fork instead of relying on an ignored clone.
 
-4. Keep generated training artifacts out of git:
+4. Restore the motion-retargeting clones (both git-ignored, absent on a fresh clone) when working on the motion pipeline:
+
+```bash
+# Video -> SMPL-X (observed pin 6ec3ca3)
+git clone https://github.com/zju3dv/GVHMR.git hope_training/GVHMR
+# SMPL-X -> robot (observed pin bb1bbe4)
+git clone https://github.com/YanjieZe/GMR.git hope_training/GMR
+# Each installs into its own conda env (python=3.10):
+#   pip install -e .
+```
+
+See [reimplement.md](../../reimplement.md) steps 9-11 for the full per-env install procedure and pins.
+
+5. Add the license-gated model assets the clones depend on (you must accept each license yourself; not redistributable):
+
+```text
+# SMPL-X body models from smpl-x.is.tue.mpg.de into the GMR body-models dir:
+SMPLX_NEUTRAL.pkl  SMPLX_MALE.pkl  SMPLX_FEMALE.pkl
+
+# GVHMR checkpoints into hope_training/GVHMR/inputs/checkpoints/:
+gvhmr_siga24_release.ckpt
+hmr2/epoch=10-step=25000.ckpt
+vitpose-h-multi-coco.pth
+yolov8x.pt
+dpvo.pth            # optional, only for the DPVO path
+```
+
+6. Provide the reference swing clips for `task=HOPEPingPong`:
+
+The maintainer `hope_forehand`/`hope_backhand` `.npz` live in a private, org-scoped WandB "Motions" registry and cannot be redistributed. External users should make their own instead (see below) and point `registry_name` at their own registry collection.
+
+> Make your own motions instead: run GVHMR (video -> SMPL-X) -> GMR (`--robot agibot_a3`) -> `scripts/csv_to_npz.py --robot agibot_a3`, then upload the resulting `.npz` to your own WandB Motions registry. This unblocks training without any private artifact. Full steps: [reimplement.md](../../reimplement.md) steps 9-11 and [run_training.md](run_training.md).
+
+7. Keep generated training artifacts out of git:
 
 ```text
 hope_training/whole_body_tracking/logs/

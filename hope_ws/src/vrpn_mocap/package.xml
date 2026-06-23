@@ -4,7 +4,7 @@
   <name>vrpn_mocap</name>
   <version>0.0.0</version>
   <description>ROS 2 VRPN motion-capture client package from ChingMuVisionTech/ChingMuVrpnROS2.</description>
-  <maintainer email="dongc_1@yahoo.com">dongc1</maintainer>
+  <maintainer email="maintainer@example.com">HOPE Maintainers</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

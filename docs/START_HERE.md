@@ -83,6 +83,7 @@ Do not hide project state in chat history. If a future contributor or agent need
 
 ## Fast Entry Points
 
+- End-to-end, machine-specific runbook (environment creation, GMR/GVHMR motion pipeline, A3 asset prep, training, deploy): [reimplement.md](../reimplement.md). The `operations/*` docs are the curated per-task views; `reimplement.md` is the long-form narrative source they defer to (e.g. "Step 12.7").
 - Environment setup is task-specific. Start from the operation doc for your task; use [operations/setup_environments.md](operations/setup_environments.md) only as a reference matrix.
 - Ignored/local assets that must be copied manually are summarized in [operations/setup_local_sync.md](operations/setup_local_sync.md), but each operation doc should list the assets it needs locally.
 - Auto-sync ignored external references before using them: `scripts/sync_external_repos.sh`.
@@ -95,6 +96,7 @@ Do not hide project state in chat history. If a future contributor or agent need
 
 ## Current Known Environment Limits
 
-- `colcon` is not available in the current macOS shell, so ROS workspace build verification must be done inside the ROS environment.
-- Agibot runtime assets under `vendor_assets/` are local and ignored by git.
+- The project runs on Linux with ROS 2 Jazzy. The `hope_ws` `colcon` build has not yet been independently verified in this harness shell, so run and verify it inside the ROS environment ([operations/build_and_test.md](operations/build_and_test.md)).
+- A fresh `git clone` is intentionally **not** self-contained: `external_repos/` and `vendor_assets/` do not exist after checkout, and the `hope_training/GMR` / `hope_training/GVHMR` clones, reference motions, and binary model artifacts are git-ignored. Recreate them on demand — `scripts/sync_external_repos.sh` for TTRL, and the manual restore steps in [operations/setup_local_sync.md](operations/setup_local_sync.md) for everything else.
+- Agibot runtime assets under `vendor_assets/` are local and ignored by git (the full A3 deploy payload is a private ~1.7 GB vendor handoff).
 - TTRL is an ignored auto-synced reference under `external_repos/`, updated through `scripts/sync_external_repos.sh`; it is intentionally not pinned unless a future gate promotes it to a dependency.

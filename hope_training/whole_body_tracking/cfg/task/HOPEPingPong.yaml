@@ -14,7 +14,7 @@ experiment_name: agibot_a3_hope
 # registry_name=...; run once per swing style with the forehand/backhand clip).
 # NOTE: the prefix is the wandb ORG (WANDB_REGISTRY_ORG), NOT the team (WANDB_ENTITY) — registries
 # are org-scoped, so a team name fails with "Unable to find organization for entity ...".
-registry_name: ${oc.env:WANDB_REGISTRY_ORG,BerkeleyPingPong}/wandb-registry-motions/hope_forehand
+registry_name: ${oc.env:WANDB_REGISTRY_ORG,your-wandb-org}/wandb-registry-motions/hope_forehand
 
 defaults:
   - /base/env_base@_here_

@@ -4,7 +4,9 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-06-23
 
-- Pulled `origin/jiayi` updates through `42489cd`, which added A3 Isaac/BeyondMimic training progress: working joint-order YAML, updated A3 robot config, deploy-transcribed PD/action-scale values, HOPEPingPong task updates, train/play fixes, `setup_train_env.sh`, richer WandB/live metrics, and in-container ONNX export support.
+- Open-source documentation pass for this branch: rewrote `README.md` (About-this-branch, Repository Layout, Quickstart, Assumptions & Limitations; corrected A3 31/29-DOF and ChingMu/VRPN framing), indexed `reimplement.md` from `START_HERE`, and filled env-setup gaps across `docs/operations/*` (environment creation, GMR/GVHMR + SMPL-X/checkpoint restore, WandB team-vs-org + offline `logger=tensorboard`, the `Live/...` telemetry and the reward-std `strike_success=0` fix) and `docs/interfaces/*` (31-DOF list, 31-vs-29 deploy, real actor/critic observations + action dims, world-Z frame, RacketCommand fields).
+- Scrubbed maintainer-private values for public release: `setup_train_env.sh` now reads overridable `HOPE_ISAAC_*` paths and placeholder WandB identity (real values via a git-ignored `setup_train_env.local.sh`); added `ros-jazzy-vrpn-mocap` + `python3-vcstool` to `Dockerfile.hope-ros2-jazzy`.
+- Integrated A3 Isaac/BeyondMimic training updates (through commit `42489cd`): working joint-order YAML, updated A3 robot config, deploy-transcribed PD/action-scale values, HOPEPingPong task updates, train/play fixes, `setup_train_env.sh`, richer WandB/live metrics, and in-container ONNX export support.
 - Added `scripts/sync_external_repos.sh` so TTRL remains an auto-synced ignored reference instead of a pinned dependency; docs now require recording the TTRL source commit when material is extracted from it.
 
 ## 2026-06-22
