@@ -73,6 +73,7 @@ class HOPEObservationsCfg(ObservationsCfg):
             noise=Unoise(n_min=-0.02, n_max=0.02),
         )
         racket_target_vel_w = ObsTerm(func=mdp.racket_target_vel_w, params={"command_name": "racket_target"})
+        racket_target_normal_w = ObsTerm(func=mdp.racket_target_normal_w, params={"command_name": "racket_target"})
         time_to_strike = ObsTerm(func=mdp.time_to_strike, params={"command_name": "racket_target"})
         # swing_type omitted by default (constant per forehand/backhand policy). Enable for a unified policy:
         # swing_type = ObsTerm(func=mdp.swing_type, params={"command_name": "racket_target"})

@@ -121,6 +121,10 @@ class RacketTargetCommand(CommandTerm):
         self._ref_racket_vel_w = torch.zeros(3, device=self.device)
         self._ref_racket_normal_w = torch.zeros(3, device=self.device)
 
+        # Success-gated curriculum: running perturbation scale, advanced only when the smoothed
+        # exact-strike composite success clears the threshold (see _perturb_scale / _update_metrics).
+        self._curr_perturb_scale = float(cfg.ref_perturb_curriculum_start)
+
         # Strike timing / gating.
         self.time_to_strike = torch.zeros(self.num_envs, device=self.device)
         self.pre_strike = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
@@ -139,6 +143,15 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["racket_vel_error_at_strike"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["racket_normal_error_deg_at_strike"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["strike_success"] = torch.zeros(self.num_envs, device=self.device)
+        # Exact-strike metrics: sampled only on the nearest control frame to the configured strike
+        # step. These avoid the "within-window" dilution from the +/- strike reward window.
+        self.metrics["racket_pos_error_exact_strike"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["racket_vel_error_exact_strike"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["racket_normal_error_deg_exact_strike"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["strike_composite_success_exact"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["exact_strike_hit_rate"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["exact_strike_sample_count"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["strike_window_hit_rate"] = torch.zeros(self.num_envs, device=self.device)
         # Base-position error while the base target is active (pre-strike), held at its last value.
         self.metrics["base_pos_error_pre_strike"] = torch.zeros(self.num_envs, device=self.device)
         # Swing-quality detail at the most recent strike: actual paddle speed, per-axis position error,
@@ -270,12 +283,22 @@ class RacketTargetCommand(CommandTerm):
         )
 
     def _perturb_scale(self) -> float:
-        """Curriculum factor in [start, 1.0] that widens the reference perturbation over training."""
-        steps = float(getattr(self._env, "common_step_counter", 0))
-        c = float(self.cfg.ref_perturb_curriculum_steps)
-        frac = 1.0 if c <= 0.0 else min(1.0, steps / c)
+        """Curriculum factor in [start, 1.0] that widens the reference perturbation over training.
+
+        Success-gated mode (default): return the running ``_curr_perturb_scale``, which advances only
+        when the policy demonstrates exact-strike success (see :meth:`_update_metrics`). Otherwise fall
+        back to the legacy open-loop ramp keyed to ``env.common_step_counter``. The returned scale is
+        clamped to ``[ref_perturb_curriculum_start, 1.0]``.
+        """
         start = float(self.cfg.ref_perturb_curriculum_start)
-        return start + (1.0 - start) * frac
+        if self.cfg.target_mode == "reference_perturbed" and self.cfg.ref_perturb_success_gated:
+            scale = self._curr_perturb_scale
+        else:
+            steps = float(getattr(self._env, "common_step_counter", 0))
+            c = float(self.cfg.ref_perturb_curriculum_steps)
+            frac = 1.0 if c <= 0.0 else min(1.0, steps / c)
+            scale = start + (1.0 - start) * frac
+        return min(1.0, max(start, scale))
 
     def _sample_targets_uniform(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
         """Independent box sampling (legacy mode). Ranges are PLACEHOLDERS not tied to the swing."""
@@ -423,7 +446,12 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["time_to_strike_s"] = self.time_to_strike
         self.metrics["pre_strike_flag"] = self.pre_strike.float()
         self.metrics["strike_window_flag"] = self.strike_window.float()
+        self.metrics["strike_window_hit_rate"] = self.strike_window.float()
         self.metrics["swing_sign_cmd"] = self.swing_sign
+        if self.cfg.target_mode == "reference_perturbed":
+            self.metrics["ref_perturb_scale"] = torch.full_like(pos_err, self._perturb_scale())
+        else:
+            self.metrics["ref_perturb_scale"].zero_()
         self.metrics["racket_speed"] = torch.norm(self.racket_lin_vel_w, dim=-1)
         self.metrics["racket_target_speed"] = torch.norm(self.racket_target_vel_w, dim=-1)
         self.metrics["racket_normal_cos"] = cos_ang
@@ -445,6 +473,35 @@ class RacketTargetCommand(CommandTerm):
         # masks come from the previous _update_command (<=1-step / 20 ms lag at 50 Hz — negligible vs
         # the ±strike_window_s window). Between strikes the held value carries to the next reset.
         in_win = self.strike_window
+        exact_strike = torch.abs(self.time_to_strike) <= (0.5 * self._env.step_dt + 1e-6)
+        self.metrics["exact_strike_hit_rate"] = exact_strike.float()
+        self.metrics["exact_strike_sample_count"] = torch.sum(exact_strike.float()).expand_as(pos_err)
+        self.metrics["racket_pos_error_exact_strike"] = torch.where(
+            exact_strike, pos_err, self.metrics["racket_pos_error_exact_strike"]
+        )
+        self.metrics["racket_vel_error_exact_strike"] = torch.where(
+            exact_strike, vel_err, self.metrics["racket_vel_error_exact_strike"]
+        )
+        self.metrics["racket_normal_error_deg_exact_strike"] = torch.where(
+            exact_strike, normal_err_deg, self.metrics["racket_normal_error_deg_exact_strike"]
+        )
+        composite_success = (
+            (pos_err < self.cfg.strike_success_pos_thresh) & (vel_err < 0.5) & (normal_err_deg < 15.0)
+        ).float()
+        self.metrics["strike_composite_success_exact"] = torch.where(
+            exact_strike, composite_success, self.metrics["strike_composite_success_exact"]
+        )
+        # Success-gated curriculum: widen the perturbation only once the smoothed exact-strike composite
+        # success (held metric => averaged over recent strikes across envs) clears the threshold.
+        if self.cfg.target_mode == "reference_perturbed" and self.cfg.ref_perturb_success_gated:
+            if (
+                self._curr_perturb_scale < 1.0
+                and float(self.metrics["strike_composite_success_exact"].mean())
+                > self.cfg.ref_perturb_advance_threshold
+            ):
+                self._curr_perturb_scale = min(
+                    1.0, self._curr_perturb_scale + float(self.cfg.ref_perturb_advance_rate)
+                )
         self.metrics["racket_pos_error_at_strike"] = torch.where(
             in_win, pos_err, self.metrics["racket_pos_error_at_strike"]
         )
@@ -586,10 +643,18 @@ class RacketTargetCommandCfg(CommandTermCfg):
     ref_perturb_pos: tuple[float, float, float] = (0.15, 0.20, 0.15)  # m, per-axis half-range
     ref_perturb_vel: tuple[float, float, float] = (1.0, 1.0, 0.8)  # m/s, per-axis half-range
     ref_perturb_normal: float = 0.30  # face-normal jitter magnitude (added then renormalized)
-    # Curriculum: perturbation half-extents ramp from `start`*final to 1.0*final over this many
-    # control steps (env.common_step_counter). Set steps<=0 to disable the ramp (always full).
+    # Curriculum: perturbation half-extents ramp from `start`*final to 1.0*final.
+    # Success-gated mode (default): `_curr_perturb_scale` starts at `ref_perturb_curriculum_start` and
+    # only advances (by `ref_perturb_advance_rate` per control step) once the smoothed exact-strike
+    # composite success exceeds `ref_perturb_advance_threshold` — keeps the strike error inside the
+    # racket reward kernel's responsive band until the policy demonstrably hits, then widens.
+    # Open-loop fallback (success_gated=False): ramp over `ref_perturb_curriculum_steps` control steps
+    # (env.common_step_counter); set steps<=0 to disable the ramp (always full).
     ref_perturb_curriculum_steps: int = 30000
-    ref_perturb_curriculum_start: float = 0.15
+    ref_perturb_curriculum_start: float = 0.05
+    ref_perturb_success_gated: bool = True
+    ref_perturb_advance_threshold: float = 0.30  # widen once smoothed exact-strike composite success > this
+    ref_perturb_advance_rate: float = 1.0e-5  # scale increment per control step while above threshold
 
     # --- reachable racket-target workspace (offsets from the env origin, world frame, meters) ---
     # Used only by target_mode="uniform". PLACEHOLDER ranges (not the reference strike point).
