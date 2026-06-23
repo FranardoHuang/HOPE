@@ -54,15 +54,32 @@ racket:
   strike_phase: 0.46              # fraction of the clip where the paddle meets the ball
   strike_window_s: 0.1            # half-window (+/-) for the racket-state reward
   strike_success_pos_thresh: 0.075  # m; wandb "strike_success" = fraction of strikes with racket pos error below this
+
+  # --- rank 5: reference-coupled target sampling (the strike_success=0 fix) ----------------------
+  # The previous "uniform" box was sampled INDEPENDENTLY of the imitated swing, and the forehand
+  # clip's racket at the strike frame is at x~0.72 y~-0.90 z~0.72 (env-origin rel) -- OUTSIDE the old
+  # box (x[0.25,0.55] y[-0.45,0.45]). So the swing could not reach the target and training traded the
+  # racket goal away (racket_pos_error_at_strike grew 0.16->0.78, strike_success stuck at 0).
+  # reference_perturbed sets target = reference racket state @ strike (pos/vel/normal, same FK as the
+  # actual racket) + a curriculum-scaled perturbation: reachable by construction, widening over time.
+  target_mode: reference_perturbed
+  ref_perturb_pos: [0.15, 0.20, 0.15]   # m, final per-axis half-range around the reference strike pos
+  ref_perturb_vel: [1.0, 1.0, 0.8]      # m/s, final per-axis half-range around the reference strike vel
+  ref_perturb_normal: 0.30              # final face-normal jitter (added then renormalized)
+  ref_perturb_curriculum_steps: 30000   # control steps to ramp perturbation start->full (~1250 iters)
+  ref_perturb_curriculum_start: 0.15    # fraction of the final perturbation at step 0
+
+  # --- legacy "uniform" box (ignored when target_mode=reference_perturbed) -----------------------
   pos_x_range: [0.25, 0.55]
-  pos_y_range: [-0.45, 0.45]      # straddle the robot center -> forehand + backhand
+  pos_y_range: [-0.45, 0.45]
   pos_z_range: [0.70, 1.15]
   vel_x_range: [1.5, 4.0]
   vel_y_range: [-1.0, 1.0]
   vel_z_range: [0.0, 1.5]
+
   base_target_x_range: [-0.10, 0.10]
   base_target_y_range: [-0.35, 0.35]
-  normal_mode: velocity           # "velocity" (n = v/|v|) or "sampled"
+  normal_mode: velocity           # "velocity" (n = v/|v|) or "sampled"  (uniform mode only)
   forehand_on_negative_y: true    # right arm holds the paddle
   mount_normal_axis: 1            # racket-local +Y is the face normal (red/hitting face; confirmed in Step 11)
   mount_normal_sign: 1.0          # +1 = red/forehand face; use -1 for the black face (backhand-only policy)

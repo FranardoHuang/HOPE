@@ -110,6 +110,17 @@ class RacketTargetCommand(CommandTerm):
         self.racket_normal_w = torch.zeros(self.num_envs, 3, device=self.device)
         self.racket_normal_w[:, 2] = 1.0
 
+        # Reference racket state at the strike frame (CONSTANT per clip): pos (env-origin relative),
+        # world linear velocity, and face normal, computed by the SAME FK as the actual racket
+        # (_compute_racket_state) but fed the reference MOTION's body poses. Used by the
+        # "reference_perturbed" target mode so a sampled target is one the imitated swing can actually
+        # reach (a perfect imitator hits it exactly). Cached lazily on first resample, after the motion
+        # term is resolved and its motion_file is loaded.
+        self._ref_strike_cached = False
+        self._ref_racket_pos_rel = torch.zeros(3, device=self.device)
+        self._ref_racket_vel_w = torch.zeros(3, device=self.device)
+        self._ref_racket_normal_w = torch.zeros(3, device=self.device)
+
         # Strike timing / gating.
         self.time_to_strike = torch.zeros(self.num_envs, device=self.device)
         self.pre_strike = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
@@ -148,6 +159,9 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["pre_strike_flag"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["strike_window_flag"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["swing_sign_cmd"] = torch.zeros(self.num_envs, device=self.device)
+        # Curriculum perturbation scale (reference_perturbed mode): 0 at start ramping to 1; lets you
+        # watch the reachable target ball widen in wandb. Stays 0 in "uniform" mode.
+        self.metrics["ref_perturb_scale"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["racket_speed"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["racket_target_speed"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["racket_normal_cos"] = torch.zeros(self.num_envs, device=self.device)
@@ -210,29 +224,73 @@ class RacketTargetCommand(CommandTerm):
             self._motion_term = self._env.command_manager.get_term(self.cfg.motion_command_name)
         return self._motion_term
 
-    def _resample_command(self, env_ids: Sequence[int]):
-        if len(env_ids) == 0:
-            return
-        n = len(env_ids)
-        origins = self._env.scene.env_origins[env_ids]
+    def _ensure_reference_strike_state(self):
+        """Cache the reference racket state at the strike frame (once, after the motion is loaded).
 
-        # Desired racket position (world): a reachable offset from the per-env nominal stance.
-        # NOTE: ranges are PLACEHOLDERS — set them from the A3 arm IK reachability at the nominal
-        # stance (reimplement.md step 13, "reachable racket target").
+        Uses the SAME FK as :meth:`_compute_racket_state` (racket body, or wrist+mount offset) but
+        reads the reference MOTION's body poses instead of the live robot, so that a robot perfectly
+        tracking the clip would land its racket exactly on this state. The motion's raw body arrays
+        are indexed in live-articulation order (``MotionLoader`` selects tracked bodies from them via
+        the live ``body_indexes``), so the live ``_racket_body_index`` / ``_wrist_body_index`` index
+        them directly. Positions are env-origin relative (as the motion stores them).
+        """
+        if self._ref_strike_cached:
+            return
+        motion = self._motion().motion  # MotionLoader
+        total = max(int(motion.time_step_total), 1)
+        strike_step = round(self.cfg.strike_phase * (total - 1))
+        if self._racket_mode == "body":
+            idx = self._racket_body_index
+            pos = motion._body_pos_w[strike_step, idx]
+            quat = motion._body_quat_w[strike_step, idx]
+            lin = motion._body_lin_vel_w[strike_step, idx]
+        else:
+            widx = self._wrist_body_index
+            wpos = motion._body_pos_w[strike_step, widx]
+            wquat = motion._body_quat_w[strike_step, widx]
+            wlin = motion._body_lin_vel_w[strike_step, widx]
+            wang = motion._body_ang_vel_w[strike_step, widx]
+            offset_w = quat_apply(wquat.unsqueeze(0), self._mount_offset[0:1]).squeeze(0)
+            pos = wpos + offset_w
+            lin = wlin + torch.cross(wang, offset_w, dim=-1)
+            quat = quat_mul(wquat.unsqueeze(0), self._mount_quat[0:1]).squeeze(0)
+        normal = matrix_from_quat(quat.unsqueeze(0))[0, :, self.cfg.mount_normal_axis] * self.cfg.mount_normal_sign
+        self._ref_racket_pos_rel = pos.detach().clone()
+        self._ref_racket_vel_w = lin.detach().clone()
+        self._ref_racket_normal_w = (normal / (torch.norm(normal) + 1e-6)).detach().clone()
+        self._ref_strike_cached = True
+        p, v, nrm = self._ref_racket_pos_rel, self._ref_racket_vel_w, self._ref_racket_normal_w
+        print(
+            f"[RacketTargetCommand] reference_perturbed: strike frame {strike_step}/{total - 1} "
+            f"(phase {self.cfg.strike_phase}); reference racket @ strike (env-origin rel): "
+            f"pos=({p[0]:.3f},{p[1]:.3f},{p[2]:.3f}) "
+            f"vel=({v[0]:.3f},{v[1]:.3f},{v[2]:.3f}) |v|={float(torch.norm(v)):.2f} "
+            f"normal=({nrm[0]:.3f},{nrm[1]:.3f},{nrm[2]:.3f})",
+            flush=True,
+        )
+
+    def _perturb_scale(self) -> float:
+        """Curriculum factor in [start, 1.0] that widens the reference perturbation over training."""
+        steps = float(getattr(self._env, "common_step_counter", 0))
+        c = float(self.cfg.ref_perturb_curriculum_steps)
+        frac = 1.0 if c <= 0.0 else min(1.0, steps / c)
+        start = float(self.cfg.ref_perturb_curriculum_start)
+        return start + (1.0 - start) * frac
+
+    def _sample_targets_uniform(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
+        """Independent box sampling (legacy mode). Ranges are PLACEHOLDERS not tied to the swing."""
         pos = origins.clone()
         pos[:, 0] += sample_uniform(*self.cfg.racket_pos_x_range, (n,), self.device)
         pos[:, 1] += sample_uniform(*self.cfg.racket_pos_y_range, (n,), self.device)
         pos[:, 2] += sample_uniform(*self.cfg.racket_pos_z_range, (n,), self.device)
         self.racket_target_pos_w[env_ids] = pos
 
-        # Desired racket velocity (world): biased toward the opponent (+X) with lateral/vertical spread.
         vel = torch.empty(n, 3, device=self.device)
         vel[:, 0] = sample_uniform(*self.cfg.racket_vel_x_range, (n,), self.device)
         vel[:, 1] = sample_uniform(*self.cfg.racket_vel_y_range, (n,), self.device)
         vel[:, 2] = sample_uniform(*self.cfg.racket_vel_z_range, (n,), self.device)
         self.racket_target_vel_w[env_ids] = vel
 
-        # Desired racket face normal (world).
         if self.cfg.normal_mode == "velocity":
             normal = vel / (torch.norm(vel, dim=-1, keepdim=True) + 1e-6)
         else:  # "sampled"
@@ -243,6 +301,44 @@ class RacketTargetCommand(CommandTerm):
             normal = normal / (torch.norm(normal, dim=-1, keepdim=True) + 1e-6)
         self.racket_target_normal_w[env_ids] = normal
 
+    def _sample_targets_reference_perturbed(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
+        """Target = reference racket state @ strike + curriculum-scaled uniform perturbation.
+
+        Guarantees the target is reachable by the imitated swing (a perfect imitator scores exactly),
+        with the perturbation ball widening over training (``_perturb_scale``) for generalization.
+        """
+        self._ensure_reference_strike_state()
+        scale = self._perturb_scale()
+        dev = self.device
+        pos_h = torch.tensor(self.cfg.ref_perturb_pos, device=dev) * scale
+        vel_h = torch.tensor(self.cfg.ref_perturb_vel, device=dev) * scale
+        nrm_h = float(self.cfg.ref_perturb_normal) * scale
+
+        dpos = (torch.rand(n, 3, device=dev) * 2.0 - 1.0) * pos_h
+        self.racket_target_pos_w[env_ids] = origins + self._ref_racket_pos_rel.unsqueeze(0) + dpos
+
+        dvel = (torch.rand(n, 3, device=dev) * 2.0 - 1.0) * vel_h
+        self.racket_target_vel_w[env_ids] = self._ref_racket_vel_w.unsqueeze(0) + dvel
+
+        dnrm = (torch.rand(n, 3, device=dev) * 2.0 - 1.0) * nrm_h
+        normal = self._ref_racket_normal_w.unsqueeze(0) + dnrm
+        self.racket_target_normal_w[env_ids] = normal / (torch.norm(normal, dim=-1, keepdim=True) + 1e-6)
+
+        self.metrics["ref_perturb_scale"][env_ids] = scale
+
+    def _resample_command(self, env_ids: Sequence[int]):
+        if len(env_ids) == 0:
+            return
+        n = len(env_ids)
+        origins = self._env.scene.env_origins[env_ids]
+
+        # Desired racket pos/vel/normal — either independent box sampling (legacy) or coupled to the
+        # reference swing's strike state (reachable-by-construction; reimplement.md step 13 / rank 5).
+        if self.cfg.target_mode == "reference_perturbed":
+            self._sample_targets_reference_perturbed(env_ids, origins, n)
+        else:
+            self._sample_targets_uniform(env_ids, origins, n)
+
         # Desired base XY (world): where the feet should step to before the strike.
         base_xy = origins[:, :2].clone()
         base_xy[:, 0] += sample_uniform(*self.cfg.base_target_x_range, (n,), self.device)
@@ -251,7 +347,7 @@ class RacketTargetCommand(CommandTerm):
 
         # Swing type from target Y relative to the nominal base Y (right arm holds the paddle).
         base_y_nom = origins[:, 1] + self.cfg.base_nominal_offset[1]
-        dy = pos[:, 1] - base_y_nom
+        dy = self.racket_target_pos_w[env_ids][:, 1] - base_y_nom
         if self.cfg.forehand_on_negative_y:
             self.swing_sign[env_ids] = torch.where(dy <= 0.0, 1.0, -1.0)
         else:
@@ -478,8 +574,25 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # --- nominal stance (offset of the base from the env origin) ---
     base_nominal_offset: tuple[float, float, float] = (0.0, 0.0, 0.93)
 
+    # --- target generation mode ---
+    # "uniform": independent box sampling from the *_range fields below (legacy; the boxes are
+    #   PLACEHOLDERS not tied to the swing, so the imitated swing's racket may never pass through them).
+    # "reference_perturbed": target = the reference swing's racket state AT the strike frame (pos/vel/
+    #   normal, computed by the same FK as the actual racket) + a curriculum-scaled uniform perturbation.
+    #   Reachable by construction (a perfect imitator scores exactly); the *_range fields are ignored.
+    target_mode: str = "reference_perturbed"
+
+    # reference_perturbed perturbation (final half-extents; scaled 0->1 by the curriculum below).
+    ref_perturb_pos: tuple[float, float, float] = (0.15, 0.20, 0.15)  # m, per-axis half-range
+    ref_perturb_vel: tuple[float, float, float] = (1.0, 1.0, 0.8)  # m/s, per-axis half-range
+    ref_perturb_normal: float = 0.30  # face-normal jitter magnitude (added then renormalized)
+    # Curriculum: perturbation half-extents ramp from `start`*final to 1.0*final over this many
+    # control steps (env.common_step_counter). Set steps<=0 to disable the ramp (always full).
+    ref_perturb_curriculum_steps: int = 30000
+    ref_perturb_curriculum_start: float = 0.15
+
     # --- reachable racket-target workspace (offsets from the env origin, world frame, meters) ---
-    # PLACEHOLDER ranges — measure from A3 arm IK reachability at the nominal stance.
+    # Used only by target_mode="uniform". PLACEHOLDER ranges (not the reference strike point).
     racket_pos_x_range: tuple[float, float] = (0.25, 0.55)
     racket_pos_y_range: tuple[float, float] = (-0.45, 0.45)
     racket_pos_z_range: tuple[float, float] = (0.70, 1.15)

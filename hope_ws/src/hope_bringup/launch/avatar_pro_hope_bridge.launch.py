@@ -33,6 +33,8 @@ def generate_launch_description():
     update_freq = LaunchConfiguration("update_freq")
     start_vrpn_client = LaunchConfiguration("start_vrpn_client")
     start_world = LaunchConfiguration("start_world")
+    ball_tracking_mode = LaunchConfiguration("ball_tracking_mode")
+    ball_object = LaunchConfiguration("ball_object")
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -41,11 +43,21 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("port", default_value="3883", description="Chingmu VRPN port."),
         DeclareLaunchArgument(
-            "update_freq", default_value="360.0",
+            "update_freq", default_value="180.0",
             description="VRPN client poll rate (Hz); match the mocap camera rate.",
         ),
         DeclareLaunchArgument("start_vrpn_client", default_value="true"),
         DeclareLaunchArgument("start_world", default_value="true"),
+        DeclareLaunchArgument(
+            "ball_tracking_mode", default_value="auto",
+            description="How to track the ball: 'auto' (motion-based detection, fallback) or "
+                        "'rigid_body' (use the named rigid body in ball_object).",
+        ),
+        DeclareLaunchArgument(
+            "ball_object", default_value="",
+            description="Ball rigid-body name in CMTracker (e.g. 'Ball'); used only when "
+                        "ball_tracking_mode:=rigid_body. Ignored in 'auto' mode.",
+        ),
 
         # Static HOPE world frame: table landmarks + mocap->base_link offsets.
         IncludeLaunchDescription(
@@ -76,12 +88,20 @@ def generate_launch_description():
             }],
         ),
 
-        # Relay: /vrpn_mocap/* -> HOPE-standard topics.
+        # Relay: /vrpn_mocap/* -> HOPE-standard topics. The two ball launch args
+        # override the matching keys in the yaml (later entries win), so the ball
+        # tracking method can be chosen on the command line without editing config.
         Node(
             package="hope_bringup",
             executable="avatar_pro_vrpn_relay",
             name="avatar_pro_vrpn_relay",
             output="screen",
-            parameters=[str(config_path)],
+            parameters=[
+                str(config_path),
+                {
+                    "ball_tracking_mode": ball_tracking_mode,
+                    "ball_object": ball_object,
+                },
+            ],
         ),
     ])

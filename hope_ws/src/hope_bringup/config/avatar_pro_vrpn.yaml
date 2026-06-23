@@ -11,16 +11,21 @@ avatar_pro_vrpn_relay:
     ppt_object: "PPT"      # TODO: confirm table rigid-body name in CMTracker
     p1_object: "P1"        # TODO: confirm P1 robot rigid-body name
     p2_object: "P2"        # TODO: confirm P2 robot rigid-body name
-    # The ball is a single marker, not a nameable rigid body, so CMTracker
-    # usually exposes it under an opaque numeric id, not "ball". Leave this
-    # EMPTY (or "auto") to auto-detect the ball by motion: the relay locks onto
-    # the moving non-rigid marker. Only set a concrete sender name/id here if you
-    # have confirmed it via `ros2 topic list` and want to pin it.
-    ball_object: ""        # "" / "auto" = detect ball by motion
+    # Ball tracking method. NOTE: both of these are also launch args of
+    # avatar_pro_hope_bridge.launch.py (ball_tracking_mode / ball_object) and the
+    # launch args OVERRIDE the values here, so you normally pick the method on the
+    # command line, e.g. `ball_tracking_mode:=rigid_body ball_object:=Ball`.
+    #   * "rigid_body" -> the ball is a named rigid body in CMTracker; set
+    #     ball_object to that name (e.g. "Ball"). The relay reads
+    #     /vrpn_mocap/<ball_object>/pose and publishes it to /ball/point. Preferred.
+    #   * "auto"       -> motion-based fallback: the ball has no usable name, so the
+    #     relay locks onto the moving non-rigid marker. ball_object is ignored.
+    ball_tracking_mode: "auto"
+    ball_object: ""        # rigid_body name (e.g. "Ball"); ignored in "auto" mode
 
     world_frame: "world"
 
-    # Ball auto-detection tuning (used only when ball_object is empty/"auto").
+    # Ball auto-detection tuning (used only when ball_tracking_mode is "auto").
     discovery_period_s: 0.5     # how often to scan for new /vrpn_mocap topics
     ball_lock_speed_mps: 0.2    # smoothed speed above which a marker counts as "moving"
     ball_switch_ratio: 2.0      # a rival marker must be this much faster to steal the lock
