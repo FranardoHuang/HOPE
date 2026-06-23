@@ -4,9 +4,11 @@ This file is written against the OFFICIAL Agibot A3 ping-pong assets shipped in 
 ``agi/`` (the URDF ``agi/URDF/A3T2.5-URDF-std-pingpang/`` and the MuJoCo MJCF
 ``agi/A3_MuJoCo_Sim/.../a3_pingpong/a3_pingpong.xml`` — both are Agibot-provided, not stand-ins).
 Names, link inertials (urdf mass.txt), effort/velocity limits (joints.txt), joint armature, and the
-standing pose (MJCF stand keyframe) are all taken verbatim from those files. The one thing NOT in the
-official assets is the PD control gains (Kp/Kd) — the MJCF uses torque actuators + per-command gains —
-so those still need Agibot's controller config; head 40/2 is the deploy default (A3 deploy example.md).
+standing pose are all taken verbatim from those files. The PD control gains (Kp/Kd = stiffness/damping
+below) and the standing pose are the OFFICIAL Agibot values transcribed from the A3 deploy package
+(``a3_deploy_onnx_ref/include/a3_policy_parameters.hpp`` — ``a3_kps`` / ``a3_kds`` / ``a3_default_angles``,
+"a direct transcription of a3.py"). Head 40/2 is the deploy neck/head default (ExpandToBackend); the
+2-DOF neck is not in the 29-DOF policy view.
 
 Nothing here touches the filesystem at import time: ``ArticulationCfg`` only stores the asset
 path string, so the A3 task registers and imports fine *without* the asset present. The path is
@@ -114,10 +116,12 @@ A3_MOUNT_OFFSET = (0.210211399202899, 0.0320784994676765, 0.0320358706296689)
 
 
 ##
-# Effort/velocity limits and joint armature below ARE real (joints.txt + the a3_pingpong.xml MJCF).
-# Head stiffness/damping (40/2) is the deploy default (A3 deploy example.md, ExpandToBackend). The
-# waist/arm/leg stiffness/damping are still HEURISTIC PLACEHOLDERS — Agibot must confirm the official
-# PD control gains (Kp/Kd); the MJCF uses torque actuators + per-command gains, so it does not contain them.
+# Effort/velocity limits + joint armature are real (joints.txt + a3_pingpong.xml MJCF). The PD control
+# gains (stiffness=Kp, damping=Kd) are the OFFICIAL Agibot values — transcribed from the A3 deploy
+# package (a3_deploy_onnx_ref/include/a3_policy_parameters.hpp: a3_kps / a3_kds, "a direct transcription
+# of a3.py"; the deploy sends these via ExpandToBackend). With the real effort limits, the resulting
+# action scale 0.25*effort/stiffness EXACTLY matches the deploy's a3_action_scale, so training and
+# deployment stay consistent (target = action*action_scale + default_angle). Head 40/2 = deploy default.
 ##
 AGIBOT_A3_CFG = ArticulationCfg(
     spawn=sim_utils.UrdfFileCfg(
@@ -148,21 +152,27 @@ AGIBOT_A3_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        # Standing pelvis height + leg/arm pose from the official "stand" keyframe in the A3 MuJoCo
-        # asset (a3_pingpong.xml, qpos). Near-zero joints (waist, head, hip roll/yaw, ankle roll,
-        # shoulder yaw, wrists) stay at their default 0. This stance is more upright than the earlier
-        # guessed crouch, and pelvis Z is 1.0684 m (not the old 0.93 m guess).
+        # Standing pose = a3.py ``default_angles`` (OFFICIAL Agibot deploy config,
+        # a3_policy_parameters.hpp). This is used BOTH as the reset pose AND the action offset
+        # (use_default_offset=True), so it must match the deploy action decoder exactly. Pelvis Z
+        # 1.0684 m is the A3 MuJoCo stand-keyframe height for this (near-identical) leg pose; waist,
+        # neck, shoulder_yaw and the wrists stay at 0.
         pos=(0.0, 0.0, 1.0684),
         joint_pos={
-            # legs — official stand keyframe
-            ".*_hip_pitch_joint": -0.1315,
-            ".*_knee_joint": 0.2516,
-            ".*_ankle_pitch_joint": -0.1293,
+            ".*_hip_pitch_joint": -0.1311,
+            ".*_knee_joint": 0.2468,
+            ".*_ankle_pitch_joint": -0.1204,
+            "left_hip_roll_joint": 0.0056,
+            "right_hip_roll_joint": -0.0056,
+            "left_hip_yaw_joint": -0.0348,
+            "right_hip_yaw_joint": 0.0348,
+            "left_ankle_roll_joint": -0.0078,
+            "right_ankle_roll_joint": 0.0078,
             # arms — paddle-ready stance (right arm holds the racket)
-            ".*_shoulder_pitch_joint": 0.2953,
-            "left_shoulder_roll_joint": 0.1121,
-            "right_shoulder_roll_joint": -0.1121,
-            ".*_elbow_joint": 0.8073,
+            ".*_shoulder_pitch_joint": 0.3,
+            "left_shoulder_roll_joint": 0.12,
+            "right_shoulder_roll_joint": -0.12,
+            ".*_elbow_joint": 0.8,
         },
         joint_vel={".*": 0.0},
     ),
@@ -182,17 +192,17 @@ AGIBOT_A3_CFG = ArticulationCfg(
                 ".*_hip_pitch_joint": 12.0,
                 ".*_knee_joint": 14.6,
             },
-            stiffness={
-                ".*_hip_yaw_joint": 150.0,
-                ".*_hip_roll_joint": 150.0,
-                ".*_hip_pitch_joint": 200.0,
-                ".*_knee_joint": 200.0,
+            stiffness={  # a3.py / deploy a3_kps
+                ".*_hip_yaw_joint": 80.0,
+                ".*_hip_roll_joint": 120.0,
+                ".*_hip_pitch_joint": 80.0,
+                ".*_knee_joint": 250.0,
             },
-            damping={
-                ".*_hip_yaw_joint": 5.0,
-                ".*_hip_roll_joint": 5.0,
-                ".*_hip_pitch_joint": 5.0,
-                ".*_knee_joint": 5.0,
+            damping={  # a3.py / deploy a3_kds
+                ".*_hip_yaw_joint": 3.0,
+                ".*_hip_roll_joint": 4.0,
+                ".*_hip_pitch_joint": 3.0,
+                ".*_knee_joint": 8.0,
             },
             armature={  # MJCF a3_pingpong.xml
                 ".*_hip_yaw_joint": 0.06646569891,
@@ -205,16 +215,16 @@ AGIBOT_A3_CFG = ArticulationCfg(
             joint_names_expr=[".*_ankle_pitch_joint", ".*_ankle_roll_joint"],
             effort_limit_sim={".*_ankle_pitch_joint": 118.2, ".*_ankle_roll_joint": 54.75},
             velocity_limit_sim={".*_ankle_pitch_joint": 10.8, ".*_ankle_roll_joint": 19.3},
-            stiffness=40.0,
-            damping=2.0,
+            stiffness=50.0,  # a3.py / deploy a3_kps (ankle)
+            damping=2.0,     # a3.py / deploy a3_kds (ankle)
             armature={".*_ankle_pitch_joint": 0.06444060531, ".*_ankle_roll_joint": 0.02012630058},
         ),
         "waist": ImplicitActuatorCfg(
             joint_names_expr=["waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint"],
             effort_limit_sim={"waist_yaw_joint": 220.0, "waist_roll_joint": 46.0, "waist_pitch_joint": 118.0},
             velocity_limit_sim={"waist_yaw_joint": 12.0, "waist_roll_joint": 22.7, "waist_pitch_joint": 9.2},
-            stiffness=200.0,
-            damping=5.0,
+            stiffness={"waist_yaw_joint": 85.0, "waist_roll_joint": 50.0, "waist_pitch_joint": 50.0},  # a3_kps
+            damping={"waist_yaw_joint": 3.0, "waist_roll_joint": 2.0, "waist_pitch_joint": 2.0},        # a3_kds
             armature={"waist_yaw_joint": 0.06646569891, "waist_roll_joint": 0.01462087613, "waist_pitch_joint": 0.08820859156},
         ),
         "head": ImplicitActuatorCfg(
@@ -254,23 +264,23 @@ AGIBOT_A3_CFG = ArticulationCfg(
                 ".*_wrist_pitch_joint": 12.7,
                 ".*_wrist_yaw_joint": 12.7,
             },
-            stiffness={
-                ".*_shoulder_pitch_joint": 60.0,
-                ".*_shoulder_roll_joint": 60.0,
-                ".*_shoulder_yaw_joint": 40.0,
-                ".*_elbow_joint": 40.0,
-                ".*_wrist_roll_joint": 20.0,
+            stiffness={  # a3.py / deploy a3_kps
+                ".*_shoulder_pitch_joint": 40.0,
+                ".*_shoulder_roll_joint": 40.0,
+                ".*_shoulder_yaw_joint": 30.0,
+                ".*_elbow_joint": 30.0,
+                ".*_wrist_roll_joint": 30.0,
                 ".*_wrist_pitch_joint": 20.0,
                 ".*_wrist_yaw_joint": 20.0,
             },
-            damping={
-                ".*_shoulder_pitch_joint": 2.0,
-                ".*_shoulder_roll_joint": 2.0,
+            damping={  # a3.py / deploy a3_kds
+                ".*_shoulder_pitch_joint": 3.0,
+                ".*_shoulder_roll_joint": 3.0,
                 ".*_shoulder_yaw_joint": 2.0,
                 ".*_elbow_joint": 2.0,
-                ".*_wrist_roll_joint": 1.0,
-                ".*_wrist_pitch_joint": 1.0,
-                ".*_wrist_yaw_joint": 1.0,
+                ".*_wrist_roll_joint": 2.0,
+                ".*_wrist_pitch_joint": 2.0,
+                ".*_wrist_yaw_joint": 2.0,
             },
             armature={  # MJCF a3_pingpong.xml
                 ".*_shoulder_pitch_joint": 0.01208336871,
