@@ -149,32 +149,39 @@ These were verified against Agibot's official announcement and corroborating sou
 - Optional dexterous hand (Agibot OmniHand O10: 10 active / 16 total DOF). For HOPE the hand is largely irrelevant — the racket is on a fixed mount (see step 11), so a fixed paddle bracket or the silicone-fist configuration is simpler than a dexterous hand.
 - The A3 is a real, shipping commercial product (unveiled Feb 2026, first customer deliveries Apr 2026), positioned for entertainment/retail/exhibition use rather than as an open developer platform.
 
-### 2.1 What you MUST obtain from Agibot (not public)
+### 2.1 A3 materials now available, and what still must be verified
 
-This is the single biggest dependency in the whole project. **No A3 URDF/MJCF/USD, joint name list, joint order, actuator parameters, PD gains, collision meshes, or SDK is published anywhere public** (verified across agibot.com, the AgibotTech GitHub org, and the AimDK docs site). The only fully open-source Agibot humanoid is the **X1** (a different 29-DOF robot), and the documented developer SDK is **AimDK_X2** for the X2 (whose URDF is obtained by contacting Agibot after-sales support). Request from Agibot, under whatever developer/partner channel applies to your A3:
+The project originally treated A3-specific assets as the largest external blocker because they were not public. That blocker is now partially resolved by Agibot-provided materials already placed in this repo or local asset area. Treat these as the current project source of truth, not as X1 stand-ins:
 
-- Robot model: URDF (most likely), and MJCF or USD if available.
-- Exact `base_link` name, its physical location, and standing `base_link` height.
-- Full joint name list and joint order (the order your controller and the exported ONNX policy must agree on).
-- Joint limits, gear ratios, link inertial parameters, and collision meshes.
-- Default PD gains / impedance settings and the joint command interface.
-- The A3 control SDK / AimDK / ROS 2 interface, low-level joint command API, and safety (E-stop/standby) interface.
-- Redistribution terms for any of the above (this affects whether you can publish a build guide that references them).
+- A3 URDF and meshes: `agi/URDF/`.
+- A3 MuJoCo/AimRT simulation materials: `agi/A3_MuJoCo_Sim/`.
+- A3 deploy documentation and source: `agi/code_deployment/` and `agi/code_deployment/a3_deploy_example/`.
+- Full local deploy payload, including heavy runtime assets: `vendor_assets/agibot/a3_deploy_example_full/`.
+- Current working joint order for training/export alignment: `hope_training/config/joint_order_agibot_a3.yaml`.
+- Isaac/BeyondMimic A3 robot config and deploy-transcribed PD/action-scale values: `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py`.
 
-Until these arrive, develop against the **X1 open model as a stand-in** (see steps 10–16) and keep everything A3-specific behind the bridge package so swapping in the real A3 model is a config change, not a rewrite.
+What remains blocked is not "do we have any A3 model"; it is hardware and cross-runtime verification:
+
+- Exact `base_link` physical interpretation and measured mocap-marker to `base_link` transform.
+- Confirmation that the hardware SDK joint-state and joint-command order matches the project YAML.
+- A3 control SDK / AimDK / ROS 2 runtime behavior on the actual robot.
+- Hardware E-stop, soft-stop, standby, and recovery procedure.
+- Safe low-gain command path from exported policy targets to A3 joint commands.
+
+Keep all A3-specific assumptions behind explicit config files and bridge packages. If hardware verification changes an order, frame, gain, or runtime topic, update the single source of truth first, then propagate from there.
 
 How to get and verify the A3 placeholders:
 
 | Placeholder | How to get it | How to verify it |
 | --- | --- | --- |
-| `A3_URDF`, `A3_MJCF`, or `A3_USD` | Request from Agibot support, the A3 partner portal, or the hardware vendor contact. Ask for meshes, inertial values, joint limits, and actuator parameters in the same package. | Open the model in ROS/Isaac/MuJoCo and confirm the robot height is about `1.73 m` and the joint count matches the A3 documentation. |
+| `A3_URDF`, `A3_MJCF`, or `A3_USD` | Current project source: `agi/URDF/` and `agi/A3_MuJoCo_Sim/`; request updates from Agibot if these change. | Open the model in ROS/Isaac/MuJoCo and confirm the robot height is about `1.73 m` and the joint count matches the A3 documentation. |
 | `base_link` name | Read the root or pelvis frame name in the A3 URDF, or ask Agibot for the official control-frame name. | Run `ros2 topic echo /joint_states --once` and confirm the SDK documentation uses the same body frame in its examples. |
 | `base_link` height | Put the robot in the official standing calibration pose on level ground. Measure from the floor to the `base_link` origin if the origin is physically marked. If it is not marked, compute it from the robot model by FK in the standing pose. | In simulation, publish `world -> base_link`; the Z value should match the measured standing height within a few centimeters. |
-| Joint names and joint order | Get the ordered joint list from the A3 SDK/API or from the A3 URDF plus SDK command message definition. | Compare the order in four places: `/joint_states`, the training config, ONNX metadata, and the hardware command message. They must match exactly. |
-| PD gains / impedance | Get default safe gains from Agibot. Do not copy X1/X2 gains onto A3 unless Agibot says they are valid. | In low-gain standby, command tiny joint motions and confirm there is no buzzing, overshoot, or unexpected motion. |
+| Joint names and joint order | Current working order: `hope_training/config/joint_order_agibot_a3.yaml`; verify against SDK/API before hardware. | Compare the order in four places: `/joint_states`, the training config, ONNX metadata, and the hardware command message. They must match exactly. |
+| PD gains / impedance | Current training values are transcribed from Agibot deploy materials in `robots/agibot_a3.py`; still verify safe hardware startup behavior. | In low-gain standby, command tiny joint motions and confirm there is no buzzing, overshoot, or unexpected motion. |
 | E-stop and standby API | Get the exact hardware E-stop wiring, software stop service/topic, and standby command from the A3 manual. | Time a stop test with logs or high-speed video. The required upper-body and gait stop time is below `200 ms`. |
 
-If one of these values is missing, write it into your local `A3_BLOCKERS.md` and do not proceed to hardware deployment for that item. Public X1/X2 files are useful only for building the software path; they are not proof that the A3 hardware path is correct.
+If one of the hardware-verification values is missing, write it into your local `A3_BLOCKERS.md` and do not proceed to real hardware deployment for that item.
 
 ### 2.2 Middleware: AimRT + AimDK
 
@@ -2790,13 +2797,13 @@ rewards):
    "confirm the face-normal axis" TODO; `sign=+1` is the red/forehand face.
 2. **Self-collision OFF** (`enabled_self_collisions=False` in `robots/agibot_a3.py`). With it on, PhysX
    aborted at sim start (`free(): corrupted unsorted chunks`) because the merged wrist body carries
-   overlapping collision meshes (wrist + hand + red/black blades) on the placeholder asset. Re-enable
-   once a validated A3 asset with clean collision geometry arrives.
+   overlapping collision meshes (wrist + hand + red/black blades) on the copied A3 ping-pong URDF
+   asset. Re-enable only after the Isaac collision geometry is cleaned or replaced.
 
-What you still need to do personally once the validated A3 asset arrives:
+What you still need to do:
 
-1. Point the A3 robot config at the real loadable asset and meshes (and re-enable self-collision).
-2. Replace placeholder PD gains and any standing-pose constants with Agibot-validated values.
+1. Produce or receive a clean Isaac collision asset if self-collision should be re-enabled.
+2. Verify the current Agibot-transcribed PD gains, standing pose, action scale, and joint order against the real SDK/hardware.
 3. Measure realistic reachable racket target ranges and write them into `cfg/task/HOPEPingPong.yaml`.
 4. Verify joint-order consistency across preprocessing, training, ONNX export, and deployment.
 
@@ -2805,7 +2812,7 @@ Verification gate:
 - `hope_isaac_py -c "import whole_body_tracking"` works. ✅
 - The Agibot A3 tasks register before launch. ✅
 - The env launches headless, rewards are finite, and sampled targets are reachable. ✅ (verified with the
-  copied placeholder asset; quality still depends on the validated asset + tuning.)
+  copied A3 ping-pong URDF asset; policy quality still depends on collision cleanup, hardware validation, and tuning.)
 
 ## 14. Train The WBC Policy
 
@@ -2973,9 +2980,9 @@ entrypoint still works if you prefer argparse over Hydra.
   (blank = not sourced). (Sanity check: `hope_isaac_py -c "import hydra, omegaconf;
   print(hydra.__version__)"` should print `1.3.2`.)
 - **`free(): corrupted unsorted chunks` / Aborted at "Starting the simulation."** PhysX heap
-  corruption from the placeholder asset's overlapping wrist collision meshes (wrist + hand + red/black
-  blades). `robots/agibot_a3.py` sets `enabled_self_collisions=False` to avoid it; re-enable once a
-  validated A3 asset with clean collision geometry is dropped in (Step 13).
+  corruption from the copied A3 ping-pong URDF asset's overlapping wrist collision meshes
+  (wrist + hand + red/black blades). `robots/agibot_a3.py` sets `enabled_self_collisions=False`
+  to avoid it; re-enable only after the Isaac collision geometry is cleaned or replaced (Step 13).
 - **`AttributeError: '…OnPolicyRunner' object has no attribute 'obs_normalizer'`** (at the first
   checkpoint save, only with `logger=wandb` — `logger=tensorboard` skips the ONNX export and hides it).
   This rsl_rl version moved obs normalization onto the policy; `my_on_policy_runner.py` and `play.py`
@@ -2996,16 +3003,16 @@ Verification gate:
 
 - **Pipeline gate.** The env builds, PPO iterates, rewards are finite, checkpoints save, and the ONNX
   export runs. ✅ Verified 2026-06-22 — `TrackingFlat` and `HOPEPingPong` (forehand) train end-to-end
-  on the placeholder A3 asset, including the **default `logger=wandb` path** (checkpoint save +
+  on the copied A3 ping-pong URDF asset, including the **default `logger=wandb` path** (checkpoint save +
   `policy.onnx` export) after the `actor_obs_normalizer` fix.
 - **Trained-policy gate (after a full run).** Policy does not fall, the racket reaches the target near
   strike time, forehand and backhand both work, recovery after the swing is stable.
 
-Status / what still needs the validated asset:
+Status / what still needs validation:
 
-1. Training **runs today** on the placeholder A3 (the copied std-pingpang URDF with self-collision
-   off — Step 13). Reaching the target metrics needs the validated Agibot A3 asset + official PD
-   gains / standing height; re-enable self-collision once that asset is in.
+1. Training **runs today** on the copied A3 std-pingpong URDF with self-collision off (Step 13).
+   Reaching target metrics still needs collision cleanup, measured reachable target ranges, and
+   hardware validation of PD gains / standing height / action scale.
 2. The forehand and backhand reference clips must be in the `motions` registry (Steps 9–12) so
    `registry_name=.../hope_forehand` and `.../hope_backhand` resolve.
 3. Set the reachable-target and reward-tuning values in `cfg/task/HOPEPingPong.yaml` and re-train
@@ -3769,15 +3776,15 @@ calibration run, or Agibot.
 | `ball_pose_index` | `hope_planner/config/hope_planner.yaml` | `0` | With the avatar_pro relay it is 0 (ball is first in `pose_array_order`). Confirm with `ros2 topic echo /poses --once` and count the ball's slot. |
 | `x_hit`, `delta_t_flight` | `hope_planner/config/hope_planner.yaml` | `0.0`, `0.5` | Tune to your robot's reach and preferred return arc; start with the defaults and adjust during soft-toss tests (Section 23). |
 
-### 30.4 Agibot Expedition A3 robot (request from Agibot — see step 2.1)
+### 30.4 Agibot Expedition A3 robot (current sources and remaining verification)
 
 | Value | Where it will be used | How to get it |
 |-------|----------------------|---------------|
-| A3 URDF/MJCF/USD + meshes | GMR retarget, sim training, FK | Request from Agibot (no public A3 model). Develop against the open X1 model meanwhile. |
-| Joint name list + joint order | planner→WBC, ONNX export, bridge | From the A3 SDK/URDF. Must be identical everywhere (training, export, deploy). |
-| Joint limits, link inertials, gear ratios | sim fidelity, safety limits | From Agibot datasheet/URDF. |
-| Default PD gains / impedance | WBC training + `agibot_hardware_bridge` | From Agibot; start hardware at ~70% of sim gains (Section 24). |
-| `base_link` name + standing height | world-frame FK chain | From the A3 URDF. |
+| A3 URDF/MJCF/USD + meshes | GMR retarget, sim training, FK | Current source: `agi/URDF/` and `agi/A3_MuJoCo_Sim/`; request updated assets from Agibot when they change. |
+| Joint name list + joint order | planner->WBC, ONNX export, bridge | Current working source: `hope_training/config/joint_order_agibot_a3.yaml`; verify against hardware SDK before real commands. |
+| Joint limits, link inertials, gear ratios | sim fidelity, safety limits | Current source: Agibot URDF/MJCF materials; verify when model revisions arrive. |
+| Default PD gains / impedance | WBC training + `agibot_hardware_bridge` | Current training source: Agibot deploy transcription in `robots/agibot_a3.py`; verify on hardware before increasing gains. |
+| `base_link` name + standing height | world-frame FK chain | Current sim source: A3 URDF and `robots/agibot_a3.py`; still measure/verify against the real robot. |
 | Control SDK / AimDK / ROS 2 API, joint command + feedback topics | `agibot_hardware_bridge` | From Agibot (analogous to AimDK_X2). Confirm ROS 2 distro (X1 uses Humble; HOPE targets Jazzy). |
 | E-stop / soft-stop / standby interface | safety, `agibot_bringup` | From the Agibot manual; verify the 200 ms stop requirement. |
 
