@@ -144,6 +144,13 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["base_height"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["base_upright"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["joint_vel_abs_max"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["time_to_strike_s"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["pre_strike_flag"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["strike_window_flag"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["swing_sign_cmd"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["racket_speed"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["racket_target_speed"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["racket_normal_cos"] = torch.zeros(self.num_envs, device=self.device)
         self._has_jpos_limits = hasattr(self.robot.data, "soft_joint_pos_limits") or hasattr(
             self.robot.data, "joint_pos_limits"
         )
@@ -156,6 +163,21 @@ class RacketTargetCommand(CommandTerm):
         # Policy action magnitude (saturation check for sim2real).
         self.metrics["action_abs_mean"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["action_abs_max"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["action_delta_abs_mean"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["action_delta_abs_max"] = torch.zeros(self.num_envs, device=self.device)
+        for axis in ("x", "y"):
+            self.metrics[f"base_pos_{axis}"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[f"base_target_pos_{axis}"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[f"base_pos_error_{axis}"] = torch.zeros(self.num_envs, device=self.device)
+        for axis in ("x", "y", "z"):
+            self.metrics[f"racket_pos_{axis}"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[f"racket_target_pos_{axis}"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[f"racket_pos_error_{axis}"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[f"racket_vel_{axis}"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[f"racket_target_vel_{axis}"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[f"racket_vel_error_{axis}"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[f"racket_normal_{axis}"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[f"racket_target_normal_{axis}"] = torch.zeros(self.num_envs, device=self.device)
 
     # ------------------------------------------------------------------ #
     # CommandTerm API
@@ -283,17 +305,45 @@ class RacketTargetCommand(CommandTerm):
         # actual racket FK here (once per step) — metrics, rewards, and observations then all read
         # the same fresh buffers (rewards/obs read them after the full command_manager.compute()).
         self._compute_racket_state()
+        origins = self._env.scene.env_origins
         pos_err = torch.norm(self.racket_pos_w - self.racket_target_pos_w, dim=-1)
         vel_err = torch.norm(self.racket_lin_vel_w - self.racket_target_vel_w, dim=-1)
         cos_ang = torch.sum(self.racket_normal_w * self.racket_target_normal_w, dim=-1).clamp(-1.0, 1.0)
         normal_err_deg = torch.acos(cos_ang) * (180.0 / math.pi)
         base_err = torch.norm(self.base_pos_w[:, :2] - self.base_target_pos_w, dim=-1)
+        base_pos_rel = self.base_pos_w[:, :2] - origins[:, :2]
+        base_target_pos_rel = self.base_target_pos_w - origins[:, :2]
+        base_err_xy = self.base_pos_w[:, :2] - self.base_target_pos_w
+        racket_pos_rel = self.racket_pos_w - origins
+        racket_target_pos_rel = self.racket_target_pos_w - origins
+        racket_pos_err_vec = self.racket_pos_w - self.racket_target_pos_w
+        racket_vel_err_vec = self.racket_lin_vel_w - self.racket_target_vel_w
 
         # Episode-wide (instantaneous) errors.
         self.metrics["racket_pos_error"] = pos_err
         self.metrics["racket_vel_error"] = vel_err
         self.metrics["racket_normal_error_deg"] = normal_err_deg
         self.metrics["base_pos_error"] = base_err
+        self.metrics["time_to_strike_s"] = self.time_to_strike
+        self.metrics["pre_strike_flag"] = self.pre_strike.float()
+        self.metrics["strike_window_flag"] = self.strike_window.float()
+        self.metrics["swing_sign_cmd"] = self.swing_sign
+        self.metrics["racket_speed"] = torch.norm(self.racket_lin_vel_w, dim=-1)
+        self.metrics["racket_target_speed"] = torch.norm(self.racket_target_vel_w, dim=-1)
+        self.metrics["racket_normal_cos"] = cos_ang
+        for axis_idx, axis in enumerate(("x", "y")):
+            self.metrics[f"base_pos_{axis}"] = base_pos_rel[:, axis_idx]
+            self.metrics[f"base_target_pos_{axis}"] = base_target_pos_rel[:, axis_idx]
+            self.metrics[f"base_pos_error_{axis}"] = base_err_xy[:, axis_idx]
+        for axis_idx, axis in enumerate(("x", "y", "z")):
+            self.metrics[f"racket_pos_{axis}"] = racket_pos_rel[:, axis_idx]
+            self.metrics[f"racket_target_pos_{axis}"] = racket_target_pos_rel[:, axis_idx]
+            self.metrics[f"racket_pos_error_{axis}"] = racket_pos_err_vec[:, axis_idx]
+            self.metrics[f"racket_vel_{axis}"] = self.racket_lin_vel_w[:, axis_idx]
+            self.metrics[f"racket_target_vel_{axis}"] = self.racket_target_vel_w[:, axis_idx]
+            self.metrics[f"racket_vel_error_{axis}"] = racket_vel_err_vec[:, axis_idx]
+            self.metrics[f"racket_normal_{axis}"] = self.racket_normal_w[:, axis_idx]
+            self.metrics[f"racket_target_normal_{axis}"] = self.racket_target_normal_w[:, axis_idx]
 
         # Strike-window-gated: hold the value sampled during the most recent strike window. The gating
         # masks come from the previous _update_command (<=1-step / 20 ms lag at 50 Hz — negligible vs
@@ -364,6 +414,14 @@ class RacketTargetCommand(CommandTerm):
             a_abs = torch.abs(act)
             self.metrics["action_abs_mean"] = torch.mean(a_abs, dim=-1)
             self.metrics["action_abs_max"] = torch.max(a_abs, dim=-1).values
+            prev_act = getattr(self._env.action_manager, "prev_action", None)
+            if prev_act is not None:
+                delta_abs = torch.abs(act - prev_act)
+                self.metrics["action_delta_abs_mean"] = torch.mean(delta_abs, dim=-1)
+                self.metrics["action_delta_abs_max"] = torch.max(delta_abs, dim=-1).values
+            else:
+                self.metrics["action_delta_abs_mean"].zero_()
+                self.metrics["action_delta_abs_max"].zero_()
 
     # ------------------------------------------------------------------ #
     # Observation helpers (base-relative quantities)

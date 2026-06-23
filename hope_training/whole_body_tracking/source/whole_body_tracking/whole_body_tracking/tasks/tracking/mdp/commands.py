@@ -96,6 +96,19 @@ class MotionCommand(CommandTerm):
         self.metrics["sampling_entropy"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["sampling_top1_prob"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["sampling_top1_bin"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["motion_phase"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["error_anchor_rot_deg"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["error_joint_pos_mean_abs"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["error_joint_pos_max_abs"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["error_joint_vel_mean_abs"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["error_joint_vel_max_abs"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["reference_anchor_speed"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["robot_anchor_speed"] = torch.zeros(self.num_envs, device=self.device)
+        for axis in ("x", "y", "z"):
+            self.metrics[f"reference_anchor_pos_{axis}"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[f"robot_anchor_pos_{axis}"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[f"reference_anchor_lin_vel_{axis}"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[f"robot_anchor_lin_vel_{axis}"] = torch.zeros(self.num_envs, device=self.device)
 
     @property
     def command(self) -> torch.Tensor:  # TODO Consider again if this is the best observation
@@ -182,10 +195,16 @@ class MotionCommand(CommandTerm):
         return self.robot.data.body_ang_vel_w[:, self.robot_anchor_body_index]
 
     def _update_metrics(self):
-        self.metrics["error_anchor_pos"] = torch.norm(self.anchor_pos_w - self.robot_anchor_pos_w, dim=-1)
-        self.metrics["error_anchor_rot"] = quat_error_magnitude(self.anchor_quat_w, self.robot_anchor_quat_w)
-        self.metrics["error_anchor_lin_vel"] = torch.norm(self.anchor_lin_vel_w - self.robot_anchor_lin_vel_w, dim=-1)
-        self.metrics["error_anchor_ang_vel"] = torch.norm(self.anchor_ang_vel_w - self.robot_anchor_ang_vel_w, dim=-1)
+        anchor_pos_err = self.anchor_pos_w - self.robot_anchor_pos_w
+        anchor_rot_err = quat_error_magnitude(self.anchor_quat_w, self.robot_anchor_quat_w)
+        anchor_lin_vel_err = self.anchor_lin_vel_w - self.robot_anchor_lin_vel_w
+        anchor_ang_vel_err = self.anchor_ang_vel_w - self.robot_anchor_ang_vel_w
+
+        self.metrics["error_anchor_pos"] = torch.norm(anchor_pos_err, dim=-1)
+        self.metrics["error_anchor_rot"] = anchor_rot_err
+        self.metrics["error_anchor_lin_vel"] = torch.norm(anchor_lin_vel_err, dim=-1)
+        self.metrics["error_anchor_ang_vel"] = torch.norm(anchor_ang_vel_err, dim=-1)
+        self.metrics["error_anchor_rot_deg"] = anchor_rot_err * (180.0 / math.pi)
 
         self.metrics["error_body_pos"] = torch.norm(self.body_pos_relative_w - self.robot_body_pos_w, dim=-1).mean(
             dim=-1
@@ -201,8 +220,27 @@ class MotionCommand(CommandTerm):
             dim=-1
         )
 
-        self.metrics["error_joint_pos"] = torch.norm(self.joint_pos - self.robot_joint_pos, dim=-1)
-        self.metrics["error_joint_vel"] = torch.norm(self.joint_vel - self.robot_joint_vel, dim=-1)
+        joint_pos_err = self.joint_pos - self.robot_joint_pos
+        joint_vel_err = self.joint_vel - self.robot_joint_vel
+        self.metrics["error_joint_pos"] = torch.norm(joint_pos_err, dim=-1)
+        self.metrics["error_joint_vel"] = torch.norm(joint_vel_err, dim=-1)
+        self.metrics["error_joint_pos_mean_abs"] = torch.mean(torch.abs(joint_pos_err), dim=-1)
+        self.metrics["error_joint_pos_max_abs"] = torch.max(torch.abs(joint_pos_err), dim=-1).values
+        self.metrics["error_joint_vel_mean_abs"] = torch.mean(torch.abs(joint_vel_err), dim=-1)
+        self.metrics["error_joint_vel_max_abs"] = torch.max(torch.abs(joint_vel_err), dim=-1).values
+
+        # Log anchor states in an env-origin-relative frame so cross-env averages remain meaningful.
+        anchor_ref_rel = self.anchor_pos_w - self._env.scene.env_origins
+        anchor_robot_rel = self.robot_anchor_pos_w - self._env.scene.env_origins
+        for axis_idx, axis in enumerate(("x", "y", "z")):
+            self.metrics[f"reference_anchor_pos_{axis}"] = anchor_ref_rel[:, axis_idx]
+            self.metrics[f"robot_anchor_pos_{axis}"] = anchor_robot_rel[:, axis_idx]
+            self.metrics[f"reference_anchor_lin_vel_{axis}"] = self.anchor_lin_vel_w[:, axis_idx]
+            self.metrics[f"robot_anchor_lin_vel_{axis}"] = self.robot_anchor_lin_vel_w[:, axis_idx]
+
+        self.metrics["reference_anchor_speed"] = torch.norm(self.anchor_lin_vel_w, dim=-1)
+        self.metrics["robot_anchor_speed"] = torch.norm(self.robot_anchor_lin_vel_w, dim=-1)
+        self.metrics["motion_phase"] = self.time_steps.float() / max(self.motion.time_step_total - 1, 1)
 
     def _adaptive_sampling(self, env_ids: Sequence[int]):
         episode_failed = self._env.termination_manager.terminated[env_ids]

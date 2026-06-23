@@ -27,19 +27,29 @@ defaults:
 #   num_envs: 2048
 
 # ---- reward weights / kernel std (EDIT) ----------------------------------
+# WIDE kernel std (the strike_success=0 fix). The reward kernel is exp(-||err||^2 / std^2); with std
+# at the final acceptance tolerance the reward is ~0 for any early-training error (e.g. 50 cm pos
+# error -> exp(-44) ~ 0), so there is no gradient and strike_success never leaves 0. These wide stds
+# give a smooth gradient from tens-of-cm out. The std is DECOUPLED from strike_success_pos_thresh
+# (0.075, below) — that metric still reports the true <7.5 cm success rate, so you can watch real
+# accuracy climb. Optional later precision pass: once strike_success is high, tighten the std toward
+# the acceptance tolerances (the commented values) and resume from the checkpoint.
 rewards:
   racket_position_weight: 4.0
-  racket_position_std: 0.075      # m   (target < 7.5 cm)
+  racket_position_std: 0.35       # m   tighten later -> 0.075 (acceptance < 7.5 cm)
   racket_velocity_weight: 2.0
-  racket_velocity_std: 0.5        # m/s (target < 0.5)
+  racket_velocity_std: 1.2        # m/s tighten later -> 0.5   (acceptance < 0.5)
   racket_normal_weight: 2.0
-  racket_normal_std: 0.262        # rad (target < 15 deg)
+  racket_normal_std: 0.5          # rad tighten later -> 0.262 (acceptance < 15 deg)
   base_position_weight: 1.0
   base_position_std: 0.3
   joint_torques_weight: -0.00001
 
 # ---- racket target sampling (EDIT) ---------------------------------------
-# PLACEHOLDER ranges — set the pos/vel ranges from the A3 arm IK reachability.
+# Full forehand workspace (no curriculum / no warmup narrowing). These are still PLACEHOLDER ranges —
+# validate them against the A3 right-arm IK reachability before the final run. If a sampled target is
+# outside the arm's reach the policy physically cannot hit it, so keep the ranges inside the real
+# workspace. pos_y straddles the robot center (forehand on -Y, see forehand_on_negative_y).
 racket:
   strike_phase: 0.46              # fraction of the clip where the paddle meets the ball
   strike_window_s: 0.1            # half-window (+/-) for the racket-state reward

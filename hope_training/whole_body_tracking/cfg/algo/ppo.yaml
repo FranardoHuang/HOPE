@@ -19,7 +19,7 @@ runner:
   num_steps_per_env: 24        # rollout length per env before each PPO update
   max_iterations: 300000000000        # total PPO iterations
   # -------------------------------------------------------------------------
-  save_interval: 500           # checkpoint every N iterations
+  save_interval: 100           # checkpoint every N iterations
   empirical_normalization: true
 
 policy:
@@ -35,7 +35,7 @@ algorithm:
   learning_rate: 0.001         # initial LR
   schedule: adaptive           # "adaptive" (KL-based) or "fixed"
   desired_kl: 0.01             # target KL for the adaptive schedule
-  entropy_coef: 0.005          # exploration bonus
+  entropy_coef: 0.004          # exploration bonus
   num_learning_epochs: 5       # gradient epochs per update
   num_mini_batches: 4          # minibatches per epoch
   # -------------------------------------------------------------------------
