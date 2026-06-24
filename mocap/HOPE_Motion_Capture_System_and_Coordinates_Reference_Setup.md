@@ -6,9 +6,9 @@
 
 ## 1  Compatible Motion Capture Systems
 
-The original setup in the Berkeley HITTER system (Su et al., arXiv:2508.21043v2) utilized an OptiTrack system. This reference design document creates a reference system compatible with several mainstream motion capture brands — principally **OptiTrack**, **Vicon**, and **青瞳视觉 (CHINGMU)** — and is expected to extend to the other marker-based brands supported by the `motion_capture_tracking` library, including Qualisys, NOKOV, VRPN, FZMotion, and Motion Analysis. These systems differ in their cameras and vendor software — OptiTrack pairs Motive with the NatNet protocol, Vicon uses Vicon Tracker, and Chingmu uses CMTracker/CMAvatar streaming over VRPN, TrackD, DTrack, OpenVR, and its native LiveStream, each shipping C/C++, Python, and ROS SDKs — but this design unifies them under a single ROS 2 REP 103 coordinate frame and `/poses` + `/tf` topic interface. How each system's data is converted into ROS 2 messages is covered in Section 6 (the Chingmu path is in Section 6.5).
+The original reference setup used an OptiTrack system. This reference design document creates a reference system compatible with several mainstream motion capture brands — principally **OptiTrack**, **Vicon**, and **青瞳视觉 (CHINGMU)** — and is expected to extend to the other marker-based brands supported by the `motion_capture_tracking` library, including Qualisys, NOKOV, VRPN, FZMotion, and Motion Analysis. These systems differ in their cameras and vendor software — OptiTrack pairs Motive with the NatNet protocol, Vicon uses Vicon Tracker, and Chingmu uses CMTracker/CMAvatar streaming over VRPN, TrackD, DTrack, OpenVR, and its native LiveStream, each shipping C/C++, Python, and ROS SDKs — but this design unifies them under a single ROS 2 REP 103 coordinate frame and `/poses` + `/tf` topic interface. How each system's data is converted into ROS 2 messages is covered in Section 6 (the Chingmu path is in Section 6.5).
 
-Specifically, the Berkeley HITTER system installed:
+Specifically, that original setup installed:
 
 - OptiTrack **Motive v3.4** (camera management and tracking software)
 - **NatNet SDK v4.4** (streaming protocol for delivering tracking data over the network)
@@ -88,13 +88,13 @@ The motion capture system tracks exactly **three categories** of objects. The ra
 
 ### 3.1  Racket Exclusion Policy — Paddle Is NOT Tracked by Motion Capture
 
-**The motion capture system must not track the ping-pong racket (paddle).** No reflective markers or tracking assets should be placed on or attached to the racket. This is a deliberate architectural decision aligned with the HITTER framework and the HOPE competition design:
+**The motion capture system must not track the ping-pong racket (paddle).** No reflective markers or tracking assets should be placed on or attached to the racket. This is a deliberate architectural decision aligned with the HOPE competition design:
 
 **Rationale:**
 
 1. **Forward kinematics inference.** The humanoid must infer its paddle's 6-DOF pose (position and orientation) from its own proprioceptive state — joint encoder readings plus the tracked `base_link` position — using forward kinematics through its arm kinematic chain. This tests the robot's internal body model accuracy, which is a core competency for any real-world manipulation task.
 
-2. **No external sensing of end-effector.** In the HITTER paper, the whole-body controller (WBC) receives a desired racket state `(p_intercept, v_racket, n_racket, t_strike)` from the planner and uses its RL policy to drive the 7-DOF arm to achieve that state. The controller never receives measured racket pose from the motion capture system. The racket's actual position is an emergent property of the robot's joint configuration, not an externally measured quantity.
+2. **No external sensing of end-effector.** In this architecture, the whole-body controller (WBC) receives a desired racket state `(p_intercept, v_racket, n_racket, t_strike)` from the planner and uses its RL policy to drive the 7-DOF arm to achieve that state. The controller never receives measured racket pose from the motion capture system. The racket's actual position is an emergent property of the robot's joint configuration, not an externally measured quantity.
 
 3. **Competition fairness.** Tracking the racket externally would provide closed-loop feedback that bypasses the robot's control challenge. The HOPE competition requires each team's humanoid to demonstrate autonomous paddle control through its own kinematic model.
 
@@ -138,7 +138,7 @@ This means the complete FK chain is: `world → base_link (from mocap) → waist
 
 ### 4.2  Unitree G1
 
-The Unitree G1 is the humanoid used in the original HITTER system and the primary reference platform for HOPE.
+The Unitree G1 is the primary reference platform for HOPE.
 
 | Property | Value |
 |----------|-------|
@@ -322,7 +322,7 @@ The 青瞳 (Chingmu) system follows the same physical topology — a Windows PC 
 
 ### 6.2  Recommended ROS 2 Driver
 
-The Berkeley HITTER system used `mocap4ros2_optitrack` (MOCAP4ROS2 Project). However, that package has limitations for this reference design:
+The `mocap4ros2_optitrack` driver (MOCAP4ROS2 Project) is a common OptiTrack-only option. However, that package has limitations for this reference design:
 
 - It only supports OptiTrack (no Vicon compatibility).
 - It does **not** perform coordinate frame conversion (passes through NatNet data as-is).

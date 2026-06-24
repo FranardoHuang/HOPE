@@ -12,16 +12,18 @@ The deployment architecture is a ROS 2 Jazzy graph running on the robot's onboar
 
 ---
 
-## 0  Prologue — Differences from the HITTER Paper
+## 0  Prologue — Scope and Implementation Notes
 
-| # | Aspect | HITTER paper | This HOPE reference setup | Rationale |
-|---|--------|-------------|---------------------------|-----------|
-| 1 | **Inference framework** | Not named; paper states "built upon" BeyondMimic and "deployed zero-shot" | BeyondMimic `motion_tracking_controller` (C++ ONNX, `legged_control2`) for G1; AimRT native ONNX or ROS 2 bridged for A3 | HITTER does not name the deployment software. We infer `motion_tracking_controller` from shared authorship (Qiayuan Liao) and BeyondMimic attribution. |
-| 2 | **Target platforms** | Unitree G1 only | G1 (via `legged_control2` + `unitree_bringup`) and Agibot A3 (via AimRT with ROS 2 protocol bridge) | HOPE multi-platform support. |
-| 3 | **Safety system** | Not described | E-stop via Unitree joystick (G1) or AimRT safety node (A3); mandatory pre-flight checklist documented | Physical safety is critical for fast-moving arm swings near humans. |
-| 4 | **PD gain tuning** | "Joint PD gains are set heuristically following [BeyondMimic]"; "deployed zero-shot" (no real-world RL training) | Same heuristic gains from BeyondMimic, embedded in ONNX metadata; sim-to-real gain adjustment procedure documented for cases where hardware response differs | "Zero-shot" means no additional RL training on real hardware; it does not preclude hardware-level gain tuning, which HITTER does not discuss. |
-| 5 | **Network architecture** | Not described | Full ROS 2 node graph with topic names, QoS profiles, and latency budget (HOPE analysis) | HITTER omits ROS 2 details. Latency numbers are HOPE's engineering analysis, not HITTER's published data. |
-| 6 | **Forehand/backhand switching** | "We trigger a forehand strike when the ball's y position is negative and a backhand strike when positive"; single sentence, no deployment mechanism | Two-ONNX-model runtime switching documented; controller must load both forehand and backhand ONNX sessions and select per ball Y-position | BeyondMimic embeds one reference motion per ONNX file. HITTER does not describe how the runtime switch between two models is implemented. |
+This reference setup documents the following design and implementation choices:
+
+| # | Aspect | This HOPE reference setup |
+|---|--------|---------------------------|
+| 1 | **Inference framework** | BeyondMimic `motion_tracking_controller` (C++ ONNX, `legged_control2`) for G1; AimRT native ONNX or ROS 2 bridged for A3 |
+| 2 | **Target platforms** | G1 (via `legged_control2` + `unitree_bringup`) and Agibot A3 (via AimRT with ROS 2 protocol bridge) |
+| 3 | **Safety system** | E-stop via Unitree joystick (G1) or AimRT safety node (A3); mandatory pre-flight checklist documented. Physical safety is critical for fast-moving arm swings near humans. |
+| 4 | **PD gain tuning** | Heuristic gains from BeyondMimic, embedded in ONNX metadata; sim-to-real gain adjustment procedure documented for cases where hardware response differs. No additional RL training is performed on real hardware, but hardware-level gain tuning is supported. |
+| 5 | **Network architecture** | Full ROS 2 node graph with topic names, QoS profiles, and latency budget (HOPE engineering analysis) |
+| 6 | **Forehand/backhand switching** | Two-ONNX-model runtime switching documented; the controller loads both forehand and backhand ONNX sessions and selects per ball Y-position. BeyondMimic embeds one reference motion per ONNX file. |
 
 ---
 
@@ -81,7 +83,7 @@ The deployment runs as a ROS 2 Jazzy graph. All nodes run on a single machine (t
 
 ### 1.2  Latency Budget
 
-The total perception-to-actuation latency must be under 20 ms for competitive play. The HITTER paper does not publish end-to-end latency numbers but states the system achieves "sub-second reaction times" (measured from the opponent's hit to the robot's return, which includes ball flight time). The latency budget below is HOPE's engineering analysis of the pipeline components:
+The total perception-to-actuation latency must be under 20 ms for competitive play. The latency budget below is HOPE's engineering analysis of the pipeline components:
 
 | Stage | Budget | Actual (typical) |
 |-------|--------|------------------|
@@ -97,7 +99,7 @@ The total perception-to-actuation latency must be under 20 ms for competitive pl
 
 ## 2  Path A — Unitree G1 Deployment
 
-The G1 deployment uses the BeyondMimic `motion_tracking_controller` package, which provides a production-ready C++ ONNX inference node built on the `legged_control2` framework. The HITTER paper does not explicitly name its deployment framework, but states it was "built upon" BeyondMimic, and Qiayuan Liao (the `legged_control2` and `motion_tracking_controller` author) is a co-author on the HITTER paper. The `motion_tracking_controller` repository is the official BeyondMimic deployment code and is the canonical path for deploying BeyondMimic-trained policies on Unitree hardware.
+The G1 deployment uses the BeyondMimic `motion_tracking_controller` package, which provides a production-ready C++ ONNX inference node built on the `legged_control2` framework. The `motion_tracking_controller` repository is the official BeyondMimic deployment code and is the canonical path for deploying BeyondMimic-trained policies on Unitree hardware.
 
 ### 2.1  Prerequisites
 
@@ -257,7 +259,7 @@ motion_tracking_controller/
 └── package.xml
 ```
 
-The `MotionTrackingController` class constructs the observation vector at each control step (50 Hz), matching the observation structure from the Isaac Lab / mjlab training environment and HITTER Table I. It reads:
+The `MotionTrackingController` class constructs the observation vector at each control step (50 Hz), matching the observation structure from the Isaac Lab / mjlab training environment. It reads:
 
 - Joint positions and velocities (from robot encoders via `unitree_systems`)
 - Base angular velocity and projected gravity (from onboard IMU)
@@ -270,7 +272,7 @@ The observation vector is passed to `MotionOnnxPolicy`, which runs the ONNX acto
 
 ### 2.7  PD Gain Tuning
 
-The simulation trains with specific PD gains (stiffness `Kp` and damping `Kd`) per joint. The HITTER paper states that joint PD gains are "set heuristically following [BeyondMimic]" — meaning they are hand-tuned values (not learned), following the conventions in the BeyondMimic codebase. These gains are embedded in the ONNX model metadata by BeyondMimic's exporter and applied by `motion_tracking_controller` automatically at deployment. However, the real actuators may have different dynamic responses than the simulated ones, requiring gain adjustment.
+The simulation trains with specific PD gains (stiffness `Kp` and damping `Kd`) per joint. Joint PD gains are set heuristically following BeyondMimic — they are hand-tuned values (not learned), following the conventions in the BeyondMimic codebase. These gains are embedded in the ONNX model metadata by BeyondMimic's exporter and applied by `motion_tracking_controller` automatically at deployment. However, the real actuators may have different dynamic responses than the simulated ones, requiring gain adjustment.
 
 **Signs that gains need tuning:**
 
@@ -466,11 +468,11 @@ A typical HOPE competition match follows this sequence:
 
 ## 7  Known Limitations
 
-1. **Zero-shot transfer is not guaranteed in the strict hardware sense.** The HITTER paper states the policy is "deployed zero-shot to the real robot," meaning no additional real-world reinforcement learning or fine-tuning is performed — the simulation-trained policy runs directly on hardware. However, "zero-shot" in this context does not mean zero hardware configuration. PD gain adjustment, `T_mount` verification, and mocap calibration are infrastructure setup steps that HITTER presumably performed but does not describe. Teams should expect that the first deployment on new hardware requires these adjustments even if the policy itself is unchanged.
+1. **Zero-shot transfer is not guaranteed in the strict hardware sense.** The policy is deployed zero-shot to the real robot, meaning no additional real-world reinforcement learning or fine-tuning is performed — the simulation-trained policy runs directly on hardware. However, "zero-shot" in this context does not mean zero hardware configuration. PD gain adjustment, `T_mount` verification, and mocap calibration are infrastructure setup steps that the first deployment on new hardware requires even if the policy itself is unchanged.
 
 2. **No online adaptation.** The deployed ONNX policy is a frozen neural network. It does not learn or adapt during play. Performance degradation due to actuator wear, temperature changes, or loose racket mounts must be addressed offline.
 
-3. **Forehand/backhand switching requires two ONNX models.** BeyondMimic's ONNX exporter embeds a single reference motion per file. Since HITTER uses two reference motions (forehand and backhand), deployment requires two ONNX models. The HITTER paper triggers forehand when the ball's Y position is negative (robot's right side) and backhand when positive (left side). The runtime switching logic — loading both ONNX sessions and selecting which to query each control step based on the planner's swing type signal — must be implemented in the controller node. This is not provided by `motion_tracking_controller` out of the box, which loads a single ONNX file. A multi-skill policy trained with BeyondMimic's diffusion distillation (future work) would eliminate this dual-model requirement.
+3. **Forehand/backhand switching requires two ONNX models.** BeyondMimic's ONNX exporter embeds a single reference motion per file. Since the policy uses two reference motions (forehand and backhand), deployment requires two ONNX models. Forehand is triggered when the ball's Y position is negative (robot's right side) and backhand when positive (left side). The runtime switching logic — loading both ONNX sessions and selecting which to query each control step based on the planner's swing type signal — must be implemented in the controller node. This is not provided by `motion_tracking_controller` out of the box, which loads a single ONNX file. A multi-skill policy trained with BeyondMimic's diffusion distillation (future work) would eliminate this dual-model requirement.
 
 4. **A3 deployment is experimental.** The Agibot A3 deployment path is based on AimRT patterns from the X1/X2 platforms. The A3 (Expedition series) is pre-production and its exact joint-level control API may differ.
 
@@ -480,6 +482,7 @@ A typical HOPE competition match follows this sequence:
 
 ## References
 
+- Su, Z., Zhang, B., Rahmanian, N., Gao, Y., Liao, Q., Regan, C., Sreenath, K., & Sastry, S. S. (2025). HITTER: A HumanoId Table TEnnis Robot via Hierarchical Planning and Learning. *arXiv:2508.21043v2*.
 - BeyondMimic deployment code: https://github.com/HybridRobotics/motion_tracking_controller
 - `legged_control2` documentation: https://qiayuanl.github.io/legged_control2_doc/
 - `unitree_bringup`: https://github.com/qiayuanl/unitree_bringup

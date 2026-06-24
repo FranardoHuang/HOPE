@@ -13,7 +13,7 @@ This repository contains the **reference design documents** for the HOPE system 
 | [WBC Simulation Training Reference Setup](HOPE_WBC_Simulation_Training_Reference_Setup.md) | SMPL-X motion acquisition, GMR retargeting, BeyondMimic RL training pipeline for whole-body control (Stage 4), with dual-backend support for Isaac Lab and mjlab | v0.5 |
 | [Hardware Deployment Reference Setup](HOPE_Hardware_Deployment_Reference_Setup.md) | Real-robot deployment via `legged_control2` (G1) or AimRT (A3): ONNX inference, ROS 2 node graph, PD gain tuning, safety procedures, and competition workflow | v0.1 |
 
-Each document contains a **Section 0 prologue** listing all implementation differences from the original HITTER paper (Su et al., arXiv:2508.21043v2).
+Each document contains a **Section 0 prologue** listing all implementation differences from the original HITTER work (see References).
 
 ## System Architecture
 
@@ -121,11 +121,21 @@ The reference documents assume familiarity with:
 ## References
 
 - Su, Z., Zhang, B., Rahmanian, N., Gao, Y., Liao, Q., Regan, C., Sreenath, K., & Sastry, S. S. (2025). HITTER: A HumanoId Table TEnnis Robot via Hierarchical Planning and Learning. *arXiv:2508.21043v2*. [Project page](https://humanoid-table-tennis.github.io/)
+- SMASH: Mastering Scalable Whole-Body Skills for Humanoid Ping-Pong with Egocentric Vision (University of Hong Kong). *arXiv:2604.01158*. [Paper](https://arxiv.org/abs/2604.01158)
+- Hu, M., Chen, W., Li, W., Mandali, F., He, Z., Zhang, R., Krisna, P., Christian, K., Benaharon, L., Ma, D., et al. (2025). PACE: Physics Augmentation for Coordinated End-to-end Reinforcement Learning toward Versatile Humanoid Table Tennis (Purdue TRACE Lab, ICRA 2026). *arXiv:2509.21690*. [Code](https://github.com/purdue-tracelab/PACE-ICRA2026)
 - Liao, Q., et al. (2025). BeyondMimic: From Motion Tracking to Versatile Humanoid Control via Guided Diffusion. *arXiv:2508.08241v4*. [Project page](https://beyondmimic.github.io/)
 - Araújo, J. P., Ze, Y., Xu, P., Wu, J., & Liu, C. K. (2025). Retargeting Matters: General Motion Retargeting for Humanoid Motion Tracking. *arXiv:2510.02252*.
 - Ze, Y., et al. (2025). LATENT: Learning Athletic Humanoid Tennis Skills from Imperfect Human Motion Data. *arXiv:2603.12686*.
 - mjlab: A Lightweight Framework for GPU-Accelerated Robot Learning. *arXiv:2601.22074*.
 - Peng, X. B., et al. (2024). SMPLOlympics: Sports Environments for Physically Simulated Humanoids. *arXiv:2407.00187*.
+
+## Technical Sponsors
+
+The HOPE open platform is developed with the support of our technical sponsors, whose humanoid and motion-capture hardware make the reference design possible:
+
+- **AgiBot (Zhiyuan Robotics)** — humanoid robot platforms (Expedition A3 and related hardware). [agibot.com](https://www.agibot.com)
+- **ChingMu (青瞳视觉)** — CHINGMU optical motion-capture systems (CMTracker / CMAvatar). [chingmu.com](https://www.chingmu.com)
+- **OptiTrack — Leyard (NaturalPoint, Inc., a Leyard company)** — OptiTrack optical motion-capture cameras and Motive software. [optitrack.com](https://www.optitrack.com)
 
 ## License
 
@@ -136,11 +146,3 @@ The reference documents in this repository describe system architectures and tra
 ## Contact
 
 **Allen Yang**, Co-founder and CTO, Hitch Interactive (Intelligent Racing Inc.); Chair, AI Racing ROAR Platform, UC Berkeley; Founding Executive Director, VIVE AR Center, UC Berkeley
-
-### HITTER Authors (UC Berkeley)
-
-The HOPE reference design is adapted from the HITTER framework. The original HITTER authors are:
-
-Zhi Su, Boren Zhang, Navid Rahmanian, Yuchen Gao, Qiayuan Liao, Colin Regan, Koushil Sreenath, S. Shankar Sastry
-
-Hybrid Robotics Group and ROAR Platform, University of California, Berkeley

@@ -6,9 +6,9 @@
 
 ## 1  兼容的动作捕捉系统
 
-伯克利 HITTER 系统（Su 等人，arXiv:2508.21043v2）的原始方案采用了 OptiTrack 系统。本参考设计文档构建了一套兼容多种主流动作捕捉系统的参考方案，重点覆盖 **OptiTrack**、**Vicon** 与 **青瞳视觉（CHINGMU）** 三大常用品牌，并预期可进一步兼容 `motion_capture_tracking` 库所支持的其他基于标记点（marker）的动捕品牌，包括 Qualisys、NOKOV、VRPN、FZMotion 以及 Motion Analysis。各品牌的相机硬件与厂商软件不尽相同——例如 OptiTrack 配合 Motive 与 NatNet 协议、Vicon 配合 Vicon Tracker、青瞳配合 CMTracker/CMAvatar 并支持 VRPN、TrackD、DTrack、OpenVR 及原生 LiveStream 等协议，且各家均提供 C/C++、Python、ROS 等 SDK——但本设计将它们统一到同一套 ROS 2 REP 103 坐标系与 `/poses` + `/tf` 话题接口之下。各系统将数据转换为 ROS 2 消息的具体流程见第 6 节（青瞳路径见第 6.5 节）。
+原始参考方案采用了 OptiTrack 系统。本参考设计文档构建了一套兼容多种主流动作捕捉系统的参考方案，重点覆盖 **OptiTrack**、**Vicon** 与 **青瞳视觉（CHINGMU）** 三大常用品牌，并预期可进一步兼容 `motion_capture_tracking` 库所支持的其他基于标记点（marker）的动捕品牌，包括 Qualisys、NOKOV、VRPN、FZMotion 以及 Motion Analysis。各品牌的相机硬件与厂商软件不尽相同——例如 OptiTrack 配合 Motive 与 NatNet 协议、Vicon 配合 Vicon Tracker、青瞳配合 CMTracker/CMAvatar 并支持 VRPN、TrackD、DTrack、OpenVR 及原生 LiveStream 等协议，且各家均提供 C/C++、Python、ROS 等 SDK——但本设计将它们统一到同一套 ROS 2 REP 103 坐标系与 `/poses` + `/tf` 话题接口之下。各系统将数据转换为 ROS 2 消息的具体流程见第 6 节（青瞳路径见第 6.5 节）。
 
-具体而言，伯克利 HITTER 系统安装了：
+具体而言，该原始方案安装了：
 
 - OptiTrack **Motive v3.4**（相机管理与跟踪软件）
 - **NatNet SDK v4.4**（用于通过网络传输跟踪数据的流式协议）
@@ -88,13 +88,13 @@ PPT 刚体具有两个用途：
 
 ### 3.1  球拍排除策略——球拍不由动作捕捉系统跟踪
 
-**动作捕捉系统不得跟踪乒乓球拍（paddle）。** 不应在球拍上放置或贴附任何反光标记点或跟踪资产。这是一项与 HITTER 框架及 HOPE 竞赛设计相一致的、刻意的架构性决策：
+**动作捕捉系统不得跟踪乒乓球拍（paddle）。** 不应在球拍上放置或贴附任何反光标记点或跟踪资产。这是一项与 HOPE 竞赛设计相一致的、刻意的架构性决策：
 
 **理由：**
 
 1. **正运动学推断。** 人形机器人必须依据自身的本体感受状态（关节编码器读数加上被跟踪的 `base_link` 位置），通过其手臂运动链的正运动学来推断球拍的 6 自由度位姿（位置与姿态）。这考验机器人内部身体模型的精度，而这是任何现实世界操作任务的核心能力。
 
-2. **末端执行器无外部传感。** 在 HITTER 论文中，全身控制器（WBC）从规划器接收期望的球拍状态 `(p_intercept, v_racket, n_racket, t_strike)`，并使用其 RL 策略驱动 7 自由度手臂达到该状态。控制器从不接收来自动捕系统的实测球拍位姿。球拍的实际位置是机器人关节构型的涌现属性，而非外部测量量。
+2. **末端执行器无外部传感。** 在本架构中，全身控制器（WBC）从规划器接收期望的球拍状态 `(p_intercept, v_racket, n_racket, t_strike)`，并使用其 RL 策略驱动 7 自由度手臂达到该状态。控制器从不接收来自动捕系统的实测球拍位姿。球拍的实际位置是机器人关节构型的涌现属性，而非外部测量量。
 
 3. **竞赛公平性。** 外部跟踪球拍会提供绕过机器人控制挑战的闭环反馈。HOPE 竞赛要求每支队伍的人形机器人通过自身的运动学模型来展示自主的球拍控制。
 
@@ -138,7 +138,7 @@ PPT 刚体具有两个用途：
 
 ### 4.2  Unitree G1
 
-Unitree G1 是原始 HITTER 系统所使用的人形机器人，也是 HOPE 的主要参考平台。
+Unitree G1 是 HOPE 的主要参考平台。
 
 | 属性 | 取值 |
 |----------|-------|
@@ -322,7 +322,7 @@ OptiTrack 与 Vicon 均不直接以 ROS 2 消息格式发布跟踪数据。需�
 
 ### 6.2  推荐的 ROS 2 驱动
 
-伯克利 HITTER 系统使用了 `mocap4ros2_optitrack`（MOCAP4ROS2 项目）。然而，对于本参考设计，该软件包存在以下限制：
+`mocap4ros2_optitrack`（MOCAP4ROS2 项目）是常见的仅支持 OptiTrack 的驱动。然而，对于本参考设计，该软件包存在以下限制：
 
 - 仅支持 OptiTrack（不兼容 Vicon）。
 - **不**执行坐标系转换（按原样透传 NatNet 数据）。
