@@ -14,7 +14,12 @@ Configured in `hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml`:
 | `/ball/point` | Ball position as point |
 | `/poses` | PoseArray ordered as `["ball", "PPT", "P1", "P2"]` |
 
-The mocap object names `PPT`/`P1`/`P2` and the auto-detected `ball` are TODO(confirm) placeholders per [avatar_pro_vrpn.yaml](../../hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml).
+The mocap object names `PPT`/`P1`/`P2` are TODO(confirm) placeholders per [avatar_pro_vrpn.yaml](../../hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml).
+
+Ball tracking is selected by the relay/launch parameter `ball_tracking_mode`:
+
+- `rigid_body`: `ball_object` names a CMTracker rigid body such as `Ball`; the relay publishes `/vrpn_mocap/<ball_object>/pose` position to `/ball/point`.
+- `auto`: `ball_object` is ignored and the relay locks onto the moving non-rigid marker. Use this fallback only when the ball cannot be exposed as a named rigid body.
 
 VRPN client namespace:
 

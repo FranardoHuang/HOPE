@@ -717,9 +717,10 @@ If the rigid-body names in Avatar-Pro are not exactly `PPT`, `P1`, `P2`, either
 rename them in Avatar-Pro or edit `ppt_object`/`p1_object`/`p2_object` in
 `hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml` and rebuild `hope_bringup`.
 The relay matches rigid bodies by their VRPN sender name, so spelling and
-capitalization matter for those three. The ball is matched by motion, not name,
-so `ball_object` is left empty (auto). Only set `ball_object` to a concrete id if
-you have confirmed it and want to pin it instead of auto-detecting.
+capitalization matter for those three. The ball has two tracking modes (chosen with
+the `ball_tracking_mode` launch arg): `rigid_body` reads the named ball rigid body
+given in `ball_object` (e.g. `Ball`) — preferred; `auto` matches the ball by motion
+(no name needed) and is the fallback for when the ball cannot be a rigid body.
 
 On the ROS 2 machine, install the VRPN client and rebuild the HOPE bringup package:
 
@@ -746,11 +747,12 @@ sed -n "1,80p" ~/workspace/HOPE/hope_ws/src/hope_bringup/config/avatar_pro_vrpn.
 '
 ```
 
-2. Confirm these four lines:
+2. Confirm these lines:
    - `ppt_object: "PPT"`
    - `p1_object: "P1"`
    - `p2_object: "P2"`
-   - `ball_object: ""`
+   - `ball_tracking_mode: "auto"` (yaml default; override on the launch command line)
+   - `ball_object: ""` (set to the ball rigid-body name, e.g. `"Ball"`, for rigid_body mode)
 
 3. If the rigid-body names in CMTracker are different, edit the file:
 
@@ -763,7 +765,7 @@ nano ~/workspace/HOPE/hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml
 Important:
 
 - `PPT`, `P1`, and `P2` must match CMTracker exactly.
-- `ball_object` should normally stay empty. This code auto-detects the ball by motion.
+- For the ball, prefer `ball_tracking_mode:=rigid_body ball_object:=Ball` (the ball rigid-body name in CMTracker). If the ball is not a rigid body, use `ball_tracking_mode:=auto` (the default), which detects it by motion and ignores `ball_object`.
 - If `P1` and `P2` do not exist yet, Step 6 is still useful for `PPT` plus the ball. In that case, skip the `/P1/pose` and `/P2/pose` checks later.
 
 4. Rebuild `hope_bringup` after any config change:
@@ -793,22 +795,35 @@ ros2 daemon start
    IP found by `ipconfig` on the Avatar-Pro PC:
 
 ```bash
+# Preferred: the ball is a named rigid body "Ball" in CMTracker.
 distrobox enter hope -- bash -lc '
 source /opt/ros/jazzy/setup.bash
 source ~/workspace/HOPE/hope_ws/install/local_setup.bash
 ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
   server:=192.168.1.100 \
   port:=3883 \
-  update_freq:=180.0
+  update_freq:=180.0 \
+  ball_tracking_mode:=rigid_body \
+  ball_object:=Ball
 '
 ```
+
+`ball_tracking_mode` picks how the ball is tracked (the two launch args override the
+`avatar_pro_vrpn.yaml` defaults):
+
+* `ball_tracking_mode:=rigid_body ball_object:=Ball` — reads the named rigid body
+  `/vrpn_mocap/Ball/pose` and publishes it to `/ball/point`. Use this whenever the ball
+  is a rigid body in CMTracker; it is the most reliable method.
+* `ball_tracking_mode:=auto` (the default; `ball_object` is ignored) — motion-based
+  fallback: the relay locks onto the moving non-rigid marker. Use this only when the ball
+  cannot be made a rigid body.
 
 Keep Terminal A open.
 
 What that launch starts:
 
 1. `vrpn_mocap client_node` — Avatar-Pro VRPN -> `/vrpn_mocap/<sender>/<sensor>/pose`.
-2. `avatar_pro_vrpn_relay` — discovers `/vrpn_mocap/*` topics, matches `PPT`/`P1`/`P2` by sender name, auto-detects the ball as the moving non-rigid marker, and republishes HOPE topics.
+2. `avatar_pro_vrpn_relay` — discovers `/vrpn_mocap/*` topics, matches `PPT`/`P1`/`P2` by sender name, tracks the ball per `ball_tracking_mode` (named rigid body, or the moving marker in `auto`), and republishes HOPE topics.
 3. `hope_world.launch.py` — the static world-frame landmarks and `P -> P_base_link` offsets.
 
 What you should see in Terminal A:
@@ -904,8 +919,8 @@ If you still cannot find the ball topic, interpret the result like this:
 
 1. Nothing under `/vrpn_mocap/` at all -> the client is not connected: wrong server IP/port, different subnet, firewall, or VRPN streaming is off in Avatar-Pro.
 2. You see `PPT`/`P1`/`P2` but no extra moving object -> the ball is an Avatar-Pro problem: the single marker is not defined as a tracked marker, or individual-marker streaming is off.
-3. You see an extra topic whose position tracks the ball -> good. The relay auto-detect will lock onto it; you do not need to copy its id anywhere. If you prefer to pin it, put that sender name/id in `ball_object`.
-4. You see an extra moving topic, but the relay still does not lock -> lower `ball_lock_speed_mps` a little in `avatar_pro_vrpn.yaml`, rebuild `hope_bringup`, relaunch, and try again.
+3. You see an extra topic whose position tracks the ball -> good. In `auto` mode the relay locks onto it by motion; you do not need to copy its id anywhere. (If you have since made the ball a named rigid body, switch to `ball_tracking_mode:=rigid_body ball_object:=<name>` and it reads that topic directly.)
+4. You see an extra moving topic, but the relay still does not lock (`auto` mode) -> lower `ball_lock_speed_mps` a little in `avatar_pro_vrpn.yaml`, rebuild `hope_bringup`, relaunch, and try again.
 
 Required coordinate convention:
 
@@ -3376,8 +3391,11 @@ Launch order:
 
 ```bash
 # Terminal 1: motion capture bringup (Avatar Pro VRPN client + relay + world frame)
+# ball_tracking_mode:=rigid_body uses the named ball rigid body; drop both ball args
+# (or use ball_tracking_mode:=auto) to fall back to motion-based ball detection.
 ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
-  server:=PLACEHOLDER_AVATAR_PRO_PC_IP port:=3883 update_freq:=360.0
+  server:=PLACEHOLDER_AVATAR_PRO_PC_IP port:=3883 update_freq:=360.0 \
+  ball_tracking_mode:=rigid_body ball_object:=Ball
 
 # Terminal 2: planner
 ros2 launch hope_planner hope_planner.launch.py
@@ -3759,7 +3777,8 @@ calibration run, or Agibot.
 | Avatar Pro server IP | `avatar_pro_hope_bridge.launch.py` arg `server` | `192.168.1.100` | Run `ipconfig` on the Avatar-Pro / CMTracker PC; use the wired-adapter IPv4 on the robot LAN. Confirm with `ping <ip>` from the ROS host. |
 | VRPN port | launch arg `port` | `3883` | Chingmu/Avatar-Pro default is 3883; confirm in the CMTracker streaming settings. |
 | Camera / poll rate | launch arg `update_freq` | `360.0` | Set to the mocap system's frame rate (≥240–360 Hz for the ball). |
-| Object names | `avatar_pro_vrpn.yaml` (`ppt_object`, `p1_object`, `p2_object`, `ball_object`) | `PPT`/`P1`/`P2`/`ball_object=""` | `PPT`/`P1`/`P2` must match the rigid-body labels in CMTracker exactly. Leave `ball_object` empty unless you want to pin the ball to one confirmed VRPN sender id instead of using auto-detect. |
+| Object names | `avatar_pro_vrpn.yaml` (`ppt_object`, `p1_object`, `p2_object`, `ball_object`) | `PPT`/`P1`/`P2`/`ball_object=""` | `PPT`/`P1`/`P2` must match the rigid-body labels in CMTracker exactly. |
+| Ball tracking method | `avatar_pro_hope_bridge.launch.py` args `ball_tracking_mode` / `ball_object` | `auto` / `""` | `rigid_body` + `ball_object:=Ball` reads the named ball rigid body (preferred). `auto` detects the ball by motion (fallback; `ball_object` ignored). |
 | Stream frame is REP-103 Z-up | mocap software | assumed | Set the mocap Up Axis to Z and calibrate the origin at the P1 near-side left corner. If it can only stream Y-up, add the fixed rotation in the relay (mocap doc §6.5.3). |
 
 ### 30.2 World frame ↔ robot (physical measurement)

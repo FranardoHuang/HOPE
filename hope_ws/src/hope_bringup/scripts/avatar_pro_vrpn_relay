@@ -1,25 +1,29 @@
 #!/usr/bin/env python3
 """Relay Avatar-Pro/CMAvatar VRPN topics into the HOPE ROS 2 mocap interface.
 
-This relay copes with two VRPN realities that broke the previous fixed-name
-version:
+The relay supports two ways to track the ping-pong ball, chosen with the
+``ball_tracking_mode`` parameter:
 
-1. The ball is a single marker, NOT a nameable 6-DOF rigid body. CMTracker /
-   MCServer cannot give it an asset name like "ball" the way it does for the
-   PPT/P1/P2 rigid bodies, so over VRPN it shows up either as its own sender
-   addressed by an opaque numeric id, or as one sensor channel of a sender. With
-   the client run as ``multi_sensor:=true`` every sensor becomes
-   ``/vrpn_mocap/<sender>/pose<sensor_index>`` (the index is a SUFFIX on
-   ``pose`` -- e.g. ``/vrpn_mocap/MCAvatar/pose31664``) instead of
-   ``/vrpn_mocap/<sender>/pose``. So we DISCOVER pose topics at runtime and
-   match each on its VRPN *sender name* (the first path segment), which makes
-   the trailing sensor-index harmless.
+* ``rigid_body`` -- the ball is published as a named 6-DOF rigid body in
+  CMTracker / MCServer. Set ``ball_object`` to that rigid-body name (e.g.
+  ``Ball``); the relay subscribes to ``/vrpn_mocap/<ball_object>/pose`` and
+  publishes its position straight to ``/ball/point``. Use this whenever a ball
+  rigid body exists -- it is the most reliable method.
 
-2. Because the marker usually carries no usable name, the ball is found by
-   MOTION: among every discovered pose topic that is not one of the named rigid
-   bodies (PPT/P1/P2), the ball is the one whose position actually moves. Leave
-   ``ball_object`` empty (or "auto") to auto-detect; set it to a concrete
-   sender name / id to pin it.
+* ``auto`` (default, motion-based fallback) -- for setups where the ball cannot
+  be made a rigid body and shows up only as an unnamed marker. The marker
+  appears either as its own sender addressed by an opaque numeric id, or as one
+  sensor channel of a sender; with ``multi_sensor:=true`` every sensor becomes
+  ``/vrpn_mocap/<sender>/pose<sensor_index>`` (the index is a SUFFIX on
+  ``pose`` -- e.g. ``/vrpn_mocap/MCAvatar/pose31664``). So we DISCOVER pose
+  topics at runtime, match each on its VRPN *sender name* (the first path
+  segment, making the trailing sensor-index harmless), and among the discovered
+  topics that are not the named rigid bodies (PPT/P1/P2) pick the ball by
+  MOTION: the one whose position actually moves.
+
+Both modes share the same runtime topic discovery and ``/vrpn_mocap/<sender>/
+pose`` sender-name matching; the only difference is whether the ball is pinned
+to a known sender name (``rigid_body``) or selected by motion (``auto``).
 """
 
 from __future__ import annotations
@@ -54,8 +58,11 @@ class AvatarProVrpnRelay(Node):
         self.declare_parameter("ppt_object", "PPT")
         self.declare_parameter("p1_object", "P1")
         self.declare_parameter("p2_object", "P2")
-        # "" or "auto" -> detect the ball by motion; otherwise pin to this
-        # VRPN sender name / id.
+        # How to track the ball: "auto" = motion-based detection (fallback),
+        # "rigid_body" = pin to the named rigid body in ball_object.
+        self.declare_parameter("ball_tracking_mode", "auto")
+        # In rigid_body mode: the ball rigid-body name in CMTracker (e.g. "Ball").
+        # In auto mode: ignored (the ball is found by motion).
         self.declare_parameter("ball_object", "")
         self.declare_parameter("world_frame", "world")
         self.declare_parameter("table_pose_topic", "/table/pose")
@@ -81,8 +88,36 @@ class AvatarProVrpnRelay(Node):
         self._ppt_object = str(self.get_parameter("ppt_object").value)
         self._p1_object = str(self.get_parameter("p1_object").value)
         self._p2_object = str(self.get_parameter("p2_object").value)
+        # Resolve the ball tracking mode. `self._ball_name` non-empty => pin to
+        # that VRPN sender (rigid_body); empty => motion-based auto-detect. The
+        # rest of the relay keys off `self._ball_name`, so the mode only needs to
+        # decide its value here.
         ball_object = str(self.get_parameter("ball_object").value).strip()
-        self._ball_name = "" if ball_object.lower() in ("", "auto") else ball_object
+        mode = str(self.get_parameter("ball_tracking_mode").value).strip().lower()
+        if mode not in ("auto", "rigid_body"):
+            self.get_logger().error(
+                f"unknown ball_tracking_mode '{mode}'; expected 'auto' or 'rigid_body'. "
+                "Falling back to 'auto' (motion-based detection)."
+            )
+            mode = "auto"
+        if mode == "rigid_body":
+            if not ball_object or ball_object.lower() == "auto":
+                self.get_logger().error(
+                    "ball_tracking_mode='rigid_body' needs a ball_object rigid-body name "
+                    "(e.g. ball_object:=Ball); none was given. Falling back to 'auto' detection."
+                )
+                mode = "auto"
+                self._ball_name = ""
+            else:
+                self._ball_name = ball_object
+        else:  # auto
+            if ball_object and ball_object.lower() != "auto":
+                self.get_logger().warn(
+                    f"ball_tracking_mode='auto' ignores ball_object='{ball_object}'. "
+                    "Use ball_tracking_mode:=rigid_body to track it as a named rigid body."
+                )
+            self._ball_name = ""
+        self._mode = mode
         self._world_frame = str(self.get_parameter("world_frame").value)
         self._publish_tf = bool(self.get_parameter("publish_tf").value)
         self._publish_pose_array = bool(self.get_parameter("publish_pose_array").value)
@@ -130,10 +165,17 @@ class AvatarProVrpnRelay(Node):
         self._discovery_timer = self.create_timer(
             float(self.get_parameter("discovery_period_s").value), self._discover_and_select
         )
+        ball_point_topic = str(self.get_parameter("ball_point_topic").value)
         if self._ball_name:
-            self.get_logger().info(f"ball pinned to VRPN sender '{self._ball_name}'")
+            self.get_logger().info(
+                f"ball_tracking_mode=rigid_body: tracking named rigid body "
+                f"'{self._ball_name}' -> {ball_point_topic}"
+            )
         else:
-            self.get_logger().info("ball auto-detect: will lock onto the moving non-rigid marker")
+            self.get_logger().info(
+                f"ball_tracking_mode=auto: locking onto the moving non-rigid marker "
+                f"-> {ball_point_topic}"
+            )
 
     # ---- discovery -------------------------------------------------------
 

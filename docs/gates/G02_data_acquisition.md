@@ -47,12 +47,14 @@ Done:
 - `calib_bags/traj01/` contains a sample `.mcap` and metadata.
 - `calib_csv/` contains processed CSVs, chunks, manifests, and overview plots.
 - Planner package includes bag-to-CSV and split utilities.
+- The Avatar-Pro relay can now track the ball either as a named rigid body (`ball_tracking_mode:=rigid_body ball_object:=Ball`) or by motion-based auto-detection (`ball_tracking_mode:=auto`).
 
 Not done:
 
 - General recording protocol is not yet finalized.
 - Dataset naming and metadata schema are not yet enforced.
 - Large evolving mocap datasets are not yet assigned a local sync path.
+- Live arena confirmation is still needed for the real `PPT`/`P1`/`P2` labels and whether the ball is best exposed as a named rigid body or auto-detected marker.
 
 ## Risks
 
@@ -64,4 +66,4 @@ Not done:
 
 1. Define a metadata template for new recordings.
 2. Add a local-only path for large raw recordings if needed.
-3. Record one fresh ChingMu dataset after G01 live stream verification.
+3. Record one fresh ChingMu dataset after G01 live stream verification, including the chosen `ball_tracking_mode` and `ball_object` in metadata.

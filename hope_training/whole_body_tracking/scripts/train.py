@@ -57,6 +57,11 @@ def _set_range(obj, attr, val):
         setattr(obj, attr, (float(val[0]), float(val[1])))
 
 
+def _set_vec3(obj, attr, val):
+    if val is not None:
+        setattr(obj, attr, (float(val[0]), float(val[1]), float(val[2])))
+
+
 def _set_reward(rewards, name, weight, std):
     if not hasattr(rewards, name):
         return
@@ -114,6 +119,13 @@ def _apply_task_overrides(env_cfg, task):
         _set_attr(C, "forehand_on_negative_y", _get(rk, "forehand_on_negative_y"), _as_bool)
         _set_attr(C, "mount_normal_axis", _get(rk, "mount_normal_axis"), int)
         _set_attr(C, "mount_normal_sign", _get(rk, "mount_normal_sign"), float)
+        # reference_perturbed target sampling (rank 5): couple targets to the reference swing.
+        _set_attr(C, "target_mode", _get(rk, "target_mode"), str)
+        _set_vec3(C, "ref_perturb_pos", _get(rk, "ref_perturb_pos"))
+        _set_vec3(C, "ref_perturb_vel", _get(rk, "ref_perturb_vel"))
+        _set_attr(C, "ref_perturb_normal", _get(rk, "ref_perturb_normal"), float)
+        _set_attr(C, "ref_perturb_curriculum_steps", _get(rk, "ref_perturb_curriculum_steps"), int)
+        _set_attr(C, "ref_perturb_curriculum_start", _get(rk, "ref_perturb_curriculum_start"), float)
 
     dr = _get(task, "domain_rand")
     if dr is not None and hasattr(env_cfg, "events"):

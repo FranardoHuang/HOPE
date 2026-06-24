@@ -37,7 +37,9 @@ A from-scratch Isaac Sim/Lab install is out of scope here — follow the upstrea
   "Motions" registry collection. `csv_to_npz.py` writes `/tmp/motion.npz` (edit if `/tmp` is inaccessible).
 - WandB identities must differ: `WANDB_ENTITY` (team, run logging) vs `WANDB_REGISTRY_ORG` (org, motion
   registry) — if they match, registry reads fail. Use placeholders `your-wandb-team` / `your-wandb-org`.
-- The racket target-sampling ranges in the task config are **placeholders** and must be IK-validated
+- `HOPEPingPong.yaml` defaults to `target_mode: reference_perturbed`: the racket target is sampled
+  around the reference motion's strike-frame racket state with a widening perturbation curriculum.
+  The legacy uniform target ranges are still placeholders and should only be used after IK validation
   against A3 right-arm reachability; an unreachable target caps `strike_success` regardless of reward tuning.
 - `max_iterations` defaults to a train-forever sentinel — pass `max_iterations=` on the CLI and stop
   manually when `strike_success` plateaus.

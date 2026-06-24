@@ -2,6 +2,10 @@
 
 Use this file for short project-state updates that future humans and agents need to see. Keep detailed reasoning in the relevant gate doc.
 
+## 2026-06-24
+
+- Integrated `origin/jiayi` commit `c951d9d` into this harness branch while preserving the open-source placeholders and A3 support-material docs. The branch now includes `reference_perturbed` racket target sampling for `HOPEPingPong`, training override plumbing for the new parameters, and Avatar-Pro relay `ball_tracking_mode` support (`rigid_body` preferred, `auto` fallback).
+
 ## 2026-06-23
 
 - Open-source documentation pass for this branch: rewrote `README.md` (About-this-branch, Repository Layout, Quickstart, Assumptions & Limitations; corrected A3 31/29-DOF and ChingMu/VRPN framing), indexed `reimplement.md` from `START_HERE`, and filled env-setup gaps across `docs/operations/*` (environment creation, GMR/GVHMR + SMPL-X/checkpoint restore, WandB team-vs-org + offline `logger=tensorboard`, the `Live/...` telemetry and the reward-std `strike_success=0` fix) and `docs/interfaces/*` (31-DOF list, 31-vs-29 deploy, real actor/critic observations + action dims, world-Z frame, RacketCommand fields).

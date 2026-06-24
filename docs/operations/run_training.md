@@ -155,9 +155,22 @@ num_envs=4096 max_iterations=20000 seed=1
 - `save_interval` 500 -> 100.
 - `entropy_coef` 0.005 -> 0.004.
 
-### Racket target sampling is PLACEHOLDER
+### Racket Target Sampling
 
-The `HOPEPingPong.yaml` racket target-sampling ranges (`pos_x [0.25,0.55]`, `pos_y [-0.45,0.45]`, `pos_z [0.70,1.15]`, `vel_x [1.5,4.0]`, ...) are PLACEHOLDER and must be validated against A3 right-arm IK reachability. An unreachable sampled target caps `strike_success` regardless of the reward fix below.
+`HOPEPingPong.yaml` now defaults to `racket.target_mode: reference_perturbed`. In this mode the command term computes the reference motion's racket position, velocity, and face normal at the strike frame using the same FK path as the actual racket, then samples a curriculum-scaled perturbation around that reachable reference state:
+
+```yaml
+target_mode: reference_perturbed
+ref_perturb_pos: [0.15, 0.20, 0.15]
+ref_perturb_vel: [1.0, 1.0, 0.8]
+ref_perturb_normal: 0.30
+ref_perturb_curriculum_steps: 30000
+ref_perturb_curriculum_start: 0.15
+```
+
+This is the current first-loop default because the old independent uniform box could sample targets the imitated swing never reaches, keeping `strike_success` at 0 even with reward shaping.
+
+The legacy uniform ranges (`pos_x [0.25,0.55]`, `pos_y [-0.45,0.45]`, `pos_z [0.70,1.15]`, `vel_x [1.5,4.0]`, ...) are still present but ignored unless `target_mode: uniform`. Treat them as PLACEHOLDER until validated against A3 right-arm IK reachability.
 
 ## Live Training Telemetry
 
@@ -171,7 +184,7 @@ The real "is it learning to hit" signal is `strike_success` (fraction of strikes
 
 ## Reward Shaping (strike_success=0 fix)
 
-The reward kernel is `exp(-||err||^2 / std^2)`. With `std` set to the final acceptance tolerance, the reward is ~0 for any early error (a 50 cm error gives `exp(-44) ~ 0`), so there is no gradient and `strike_success` stays stuck at 0.
+The reward kernel is `exp(-||err||^2 / std^2)`. With `std` set to the final acceptance tolerance, the reward is ~0 for any early error (a 50 cm error gives `exp(-44) ~ 0`), so there is no gradient and `strike_success` stays stuck at 0. The target-sampling fix above handles unreachable targets; the reward shaping here handles too-narrow early rewards.
 
 This branch widens the stds in `HOPEPingPong.yaml` so the reward gives a gradient from tens of cm out:
 

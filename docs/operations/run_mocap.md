@@ -27,11 +27,16 @@ ros2 launch vrpn_mocap client.launch.yaml server:=PLACEHOLDER_MOCAP_SERVER_IP po
 ros2 topic list | grep vrpn_mocap
 ```
 
-The HOPE relay maps these to `PPT` (table), `P1`, `P2`, and an auto-detected `ball` object (the `avatar_pro_vrpn.yaml` `ball_object` is left empty for auto-detection). These four names are TODO(confirm) placeholders until verified against the live rig — record the confirmed labels in G01 and [../interfaces/ros_topics.md](../interfaces/ros_topics.md).
+The HOPE relay maps these to `PPT` (table), `P1`, `P2`, and `/ball/point`. `PPT`/`P1`/`P2` are TODO(confirm) placeholders until verified against the live rig. For the ball, choose one mode:
+
+- Preferred: `ball_tracking_mode:=rigid_body ball_object:=Ball` when CMTracker exposes the ball as a named rigid body.
+- Fallback: `ball_tracking_mode:=auto` when the ball is only an unnamed moving marker; `ball_object` is ignored.
+
+Record the confirmed labels, ball mode, and ball name/id in G01 and [../interfaces/ros_topics.md](../interfaces/ros_topics.md).
 
 ## VRPN Client
 
-After building and sourcing `hope_ws`, launch the VRPN client:
+After building and sourcing `hope_ws`, launch the VRPN client directly only when debugging raw mocap:
 
 ```bash
 ros2 launch vrpn_mocap client.launch.yaml server:=PLACEHOLDER_MOCAP_SERVER_IP port:=3883
@@ -45,11 +50,18 @@ ros2 topic list | grep vrpn_mocap
 
 ## HOPE Relay
 
-Launch the relay:
+For normal bringup, launch the full bridge so the VRPN client, relay, and world frame start together:
 
 ```bash
-ros2 launch hope_bringup avatar_pro_vrpn_relay.launch.py
+ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
+  server:=PLACEHOLDER_MOCAP_SERVER_IP \
+  port:=3883 \
+  update_freq:=180.0 \
+  ball_tracking_mode:=rigid_body \
+  ball_object:=Ball
 ```
+
+Use `ball_tracking_mode:=auto` and omit `ball_object` if the ball is not a named rigid body.
 
 Expected HOPE-standard topics are listed in [../interfaces/ros_topics.md](../interfaces/ros_topics.md).
 
@@ -75,4 +87,4 @@ While the bag plays, run the HOPE Relay and Verification steps above (skip the V
 
 ## Update Rule
 
-After the first successful live mocap run, record the real server IP convention, exact topic names, object names, and QoS notes here and in G01.
+After the first successful live mocap run, record the real server IP convention, exact topic names, object names, ball tracking mode, ball rigid-body name or auto-detection behavior, and QoS notes here and in G01.
