@@ -21,7 +21,14 @@ _WBT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # hydra/omegaconf live in /opt/drone_venv (Isaac's own python has neither);
 # isaaclab_* are required for training (replay/csv_to_npz did not need isaaclab_rl).
-export HOPE_WBT_PYTHONPATH=/opt/drone_venv/lib/python3.11/site-packages:$_WBT_DIR/source/whole_body_tracking:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_tasks:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_assets:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_rl
+#
+# ORDER MATTERS: the working-tree `source/whole_body_tracking` MUST come FIRST, before
+# /opt/drone_venv/.../site-packages. If a NON-editable `pip install .` ever put a copy of
+# whole_body_tracking into the Isaac venv, a site-packages-first order would import that STALE copy and
+# silently ignore your edits (cfg classes, reward/command code AND the cfg/task YAML override targets) —
+# the runtime would diverge from your tree with no error. Source-first guarantees the working tree wins.
+# train.py prints "whole_body_tracking imported from: ..." so you can confirm it points here, not there.
+export HOPE_WBT_PYTHONPATH=$_WBT_DIR/source/whole_body_tracking:/opt/drone_venv/lib/python3.11/site-packages:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_tasks:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_assets:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_rl
 
 # Launch Isaac's python with the training PYTHONPATH. The `${VAR:-<default>}` form
 # falls back to a built-in absolute path if HOPE_WBT_PYTHONPATH is ever unset, so
@@ -29,7 +36,7 @@ export HOPE_WBT_PYTHONPATH=/opt/drone_venv/lib/python3.11/site-packages:$_WBT_DI
 # can't happen even if only the function got redefined in a fresh shell.
 hope_isaac_py () {
   local _wbt=$HOME/workspace/HOPE/hope_training/whole_body_tracking/source/whole_body_tracking
-  PYTHONPATH="${HOPE_WBT_PYTHONPATH:-/opt/drone_venv/lib/python3.11/site-packages:$_wbt:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_tasks:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_assets:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_rl}" \
+  PYTHONPATH="${HOPE_WBT_PYTHONPATH:-$_wbt:/opt/drone_venv/lib/python3.11/site-packages:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_tasks:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_assets:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_rl}" \
     /workspace/isaacsim/python.sh "$@"
 }
 

@@ -36,9 +36,9 @@ defaults:
 # the acceptance tolerances (the commented values) and resume from the checkpoint.
 rewards:
   racket_position_weight: 4.0
-  racket_position_std: 0.35       # m   tighten later -> 0.075 (acceptance < 7.5 cm)
+  racket_position_std: 0.15       # m   ablation 3: 0.35->0.15 (halfway to acceptance 0.075) so the kernel couples to strike_success
   racket_velocity_weight: 2.0
-  racket_velocity_std: 1.2        # m/s tighten later -> 0.5   (acceptance < 0.5)
+  racket_velocity_std: 0.6        # m/s ablation 3: 1.2->0.6 (halfway to acceptance 0.5)
   racket_normal_weight: 2.0
   racket_normal_std: 0.5          # rad tighten later -> 0.262 (acceptance < 15 deg)
   base_position_weight: 1.0
