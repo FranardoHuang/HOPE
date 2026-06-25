@@ -9,6 +9,7 @@ avatar_pro_vrpn_relay:
     # after the client is up) and copy them verbatim. A mismatch = no data relayed.
     vrpn_namespace: "/vrpn_mocap"
     ppt_object: "PPT"      # TODO: confirm table rigid-body name in CMTracker
+    # train_1 observed ppp2/ppp3 on one rig; keep P1/P2 as defaults until G01 records live labels.
     p1_object: "P1"        # TODO: confirm P1 robot rigid-body name
     p2_object: "P2"        # TODO: confirm P2 robot rigid-body name
     # Ball tracking method. NOTE: both of these are also launch args of

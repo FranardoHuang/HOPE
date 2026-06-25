@@ -35,6 +35,8 @@ Current ignored local asset roots:
 - `vendor_assets/`
 - `external_repos/`
 - `tmp/`
+- `.codex-tmp/`
+- `.vscode/`
 
 ## Agibot Deploy Assets
 
@@ -80,3 +82,7 @@ If a local-only asset is required to reproduce a result:
 A fresh clone is not complete for deployment or training-result reproduction until the required ignored assets have been manually restored or linked from the agreed external artifact system.
 
 For TTRL-only reference work, a fresh clone becomes current after `scripts/sync_external_repos.sh`; reproducible extracted work still needs the source commit recorded.
+
+## Branch Integration Rule
+
+When merging feature/training branches into `main`, keep source, config, tests, and docs tracked, but remove generated/debug artifacts from the index. Current examples are `.codex-tmp/`, `.vscode/`, training logs, WandB caches, checkpoints, and generated `*.onnx` policy files. If a generated artifact is needed to reproduce a gate result, record the restore path and metadata in [operations/setup_local_sync.md](operations/setup_local_sync.md) and the relevant gate doc instead of committing it directly.

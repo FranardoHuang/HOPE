@@ -47,99 +47,218 @@ def _as_bool(x):
     return str(x).strip().lower() in ("true", "1", "yes")
 
 
-def _set_attr(obj, attr, val, cast):
-    if val is not None:
-        setattr(obj, attr, cast(val))
+class _OverrideError(AttributeError):
+    """Raised when the task YAML asks to override an attribute the composed env cfg does not have."""
 
 
-def _set_range(obj, attr, val):
-    if val is not None:
-        setattr(obj, attr, (float(val[0]), float(val[1])))
+def _require(cond, target):
+    # The YAML explicitly set a value, but the target attribute is missing on the composed env cfg.
+    # That is NEVER a benign no-op: either a STALE/shadowed whole_body_tracking was imported (so the
+    # cfg classes differ from the working tree) or the Hydra base groups failed to compose. Fail loud
+    # instead of silently dropping the override (the old behaviour that hid the std/curriculum edits).
+    if not cond:
+        raise _OverrideError(
+            f"[train.py] task YAML overrides '{target}' but the composed env cfg has no such attribute. "
+            f"Check the '[train.py] env cfg source:' line above — if it points into site-packages rather "
+            f"than your working tree, a stale install is shadowing the source (fix PYTHONPATH ordering / "
+            f"reinstall editable). Otherwise the Hydra base-group composition for this task failed."
+        )
 
 
-def _set_vec3(obj, attr, val):
-    if val is not None:
-        setattr(obj, attr, (float(val[0]), float(val[1]), float(val[2])))
+def _set_attr(obj, attr, val, cast, applied, where):
+    if val is None:
+        return  # key absent from YAML -> keep the code default (documented contract)
+    _require(hasattr(obj, attr), f"{where}.{attr}")
+    setattr(obj, attr, cast(val))
+    applied.append(f"{where}.{attr}={cast(val)!r}")
 
 
-def _set_reward(rewards, name, weight, std):
-    if not hasattr(rewards, name):
+def _set_range(obj, attr, val, applied, where):
+    if val is None:
         return
+    _require(hasattr(obj, attr), f"{where}.{attr}")
+    rng = (float(val[0]), float(val[1]))
+    setattr(obj, attr, rng)
+    applied.append(f"{where}.{attr}={rng}")
+
+
+def _set_vec3(obj, attr, val, applied, where):
+    if val is None:
+        return
+    _require(hasattr(obj, attr), f"{where}.{attr}")
+    vec = (float(val[0]), float(val[1]), float(val[2]))
+    setattr(obj, attr, vec)
+    applied.append(f"{where}.{attr}={vec}")
+
+
+def _set_reward(rewards, name, weight, std, applied):
+    if weight is None and std is None:
+        return  # this reward term is not overridden by the YAML -> keep code defaults
+    _require(hasattr(rewards, name), f"rewards.{name}")
     term = getattr(rewards, name)
     if weight is not None:
         term.weight = float(weight)
+        applied.append(f"rewards.{name}.weight={float(weight)}")
     if std is not None:
+        _require("std" in term.params, f"rewards.{name}.params['std']")
         term.params["std"] = float(std)
+        applied.append(f"rewards.{name}.params.std={float(std)}")
+
+
+# YAML keys under `racket:` that target the RacketTargetCommandCfg (used to decide whether the task
+# actually requested racket overrides before requiring the command to exist).
+_RACKET_KEYS = (
+    "strike_phase", "strike_window_s", "strike_success_pos_thresh",
+    "strike_success_vel_thresh", "strike_success_normal_thresh_deg",
+    "pos_x_range", "pos_y_range", "pos_z_range",
+    "vel_x_range", "vel_y_range", "vel_z_range",
+    "base_target_x_range", "base_target_y_range",
+    "normal_mode", "forehand_on_negative_y", "mount_normal_axis", "mount_normal_sign",
+    "target_mode", "ref_perturb_pos", "ref_perturb_vel", "ref_perturb_normal",
+    "ref_perturb_curriculum_steps", "ref_perturb_curriculum_start",
+    "ref_perturb_success_gated", "ref_perturb_advance_threshold", "ref_perturb_advance_rate",
+    "exact_success_decay", "exact_success_min_count",
+)
 
 
 def _apply_task_overrides(env_cfg, task):
-    """Apply cfg/task/<name>.yaml overrides (incl. the composed base/ groups) onto the env cfg."""
-    # env base (num_envs is applied earlier via parse_env_cfg)
+    """Apply cfg/task/<name>.yaml overrides (incl. the composed base/ groups) onto the env cfg.
+
+    Returns the list of applied "attr=value" strings (logged by the caller). Keys absent from the
+    YAML are left at the code default; keys present whose target attribute is missing RAISE (so a
+    stale/shadowed cfg or a broken Hydra composition can never silently swallow an override).
+    """
+    applied = []
+
+    # env base (num_envs is applied earlier via parse_env_cfg). Read every value through _get so the
+    # logic works on both OmegaConf nodes (runtime) and plain dicts (unit tests).
     env = _get(task, "env")
     if env is not None:
-        if _get(env, "env_spacing") is not None:
-            env_cfg.scene.env_spacing = float(env.env_spacing)
-        if _get(env, "episode_length_s") is not None:
-            env_cfg.episode_length_s = float(env.episode_length_s)
+        es = _get(env, "env_spacing")
+        if es is not None:
+            env_cfg.scene.env_spacing = float(es)
+            applied.append(f"scene.env_spacing={float(es)}")
+        els = _get(env, "episode_length_s")
+        if els is not None:
+            env_cfg.episode_length_s = float(els)
+            applied.append(f"episode_length_s={float(els)}")
 
     # sim base (control frequency = 1 / (dt * decimation))
     sim = _get(task, "sim")
     if sim is not None:
-        if _get(sim, "dt") is not None:
-            env_cfg.sim.dt = float(sim.dt)
-        if _get(sim, "decimation") is not None:
-            env_cfg.decimation = int(sim.decimation)
+        dt = _get(sim, "dt")
+        if dt is not None:
+            env_cfg.sim.dt = float(dt)
+            applied.append(f"sim.dt={float(dt)}")
+        dec = _get(sim, "decimation")
+        if dec is not None:
+            env_cfg.decimation = int(dec)
             env_cfg.sim.render_interval = env_cfg.decimation  # keep render in step with decimation
+            applied.append(f"decimation={int(dec)}")
 
     rw = _get(task, "rewards")
     if rw is not None:
         R = env_cfg.rewards
-        _set_reward(R, "racket_position", _get(rw, "racket_position_weight"), _get(rw, "racket_position_std"))
-        _set_reward(R, "racket_velocity", _get(rw, "racket_velocity_weight"), _get(rw, "racket_velocity_std"))
-        _set_reward(R, "racket_normal", _get(rw, "racket_normal_weight"), _get(rw, "racket_normal_std"))
-        _set_reward(R, "base_position", _get(rw, "base_position_weight"), _get(rw, "base_position_std"))
-        if hasattr(R, "joint_torques") and _get(rw, "joint_torques_weight") is not None:
-            R.joint_torques.weight = float(rw.joint_torques_weight)
+        _set_reward(R, "racket_position", _get(rw, "racket_position_weight"), _get(rw, "racket_position_std"), applied)
+        _set_reward(R, "racket_velocity", _get(rw, "racket_velocity_weight"), _get(rw, "racket_velocity_std"), applied)
+        _set_reward(R, "racket_normal", _get(rw, "racket_normal_weight"), _get(rw, "racket_normal_std"), applied)
+        _set_reward(R, "base_position", _get(rw, "base_position_weight"), _get(rw, "base_position_std"), applied)
+        jt = _get(rw, "joint_torques_weight")
+        if jt is not None:
+            _require(hasattr(R, "joint_torques"), "rewards.joint_torques")
+            R.joint_torques.weight = float(jt)
+            applied.append(f"rewards.joint_torques.weight={float(jt)}")
+
+        # --- motion imitation prior (the 6 motion_* terms; base weights sum ~5.0) ---------------
+        # `motion_scale` multiplies all six at once — the main lever to demote imitation to a soft
+        # prior so the racket goal can dominate. Per-term weight/std overrides are also accepted
+        # (e.g. motion_body_pos_weight / motion_body_pos_std) and are applied BEFORE the scale.
+        _MOTION_TERMS = (
+            "motion_global_anchor_pos", "motion_global_anchor_ori",
+            "motion_body_pos", "motion_body_ori",
+            "motion_body_lin_vel", "motion_body_ang_vel",
+        )
+        for _t in _MOTION_TERMS:
+            _set_reward(R, _t, _get(rw, f"{_t}_weight"), _get(rw, f"{_t}_std"), applied)
+        ms = _get(rw, "motion_scale")
+        if ms is not None:
+            ms = float(ms)
+            for _t in _MOTION_TERMS:
+                _require(hasattr(R, _t), f"rewards.{_t}")
+                getattr(R, _t).weight *= ms
+            applied.append(f"rewards.motion_scale={ms} (x{len(_MOTION_TERMS)} motion weights)")
+
+        # --- penalties / regularization (negative weights: energy + smoothness + safety) --------
+        for _name, _key in (
+            ("action_rate_l2", "action_rate_weight"),
+            ("joint_limit", "joint_limit_weight"),
+            ("undesired_contacts", "undesired_contacts_weight"),
+        ):
+            _w = _get(rw, _key)
+            if _w is not None:
+                _require(hasattr(R, _name), f"rewards.{_name}")
+                getattr(R, _name).weight = float(_w)
+                applied.append(f"rewards.{_name}.weight={float(_w)}")
 
     rk = _get(task, "racket")
-    if rk is not None and hasattr(env_cfg.commands, "racket_target"):
-        C = env_cfg.commands.racket_target
-        _set_attr(C, "strike_phase", _get(rk, "strike_phase"), float)
-        _set_attr(C, "strike_window_s", _get(rk, "strike_window_s"), float)
-        _set_attr(C, "strike_success_pos_thresh", _get(rk, "strike_success_pos_thresh"), float)
-        _set_range(C, "racket_pos_x_range", _get(rk, "pos_x_range"))
-        _set_range(C, "racket_pos_y_range", _get(rk, "pos_y_range"))
-        _set_range(C, "racket_pos_z_range", _get(rk, "pos_z_range"))
-        _set_range(C, "racket_vel_x_range", _get(rk, "vel_x_range"))
-        _set_range(C, "racket_vel_y_range", _get(rk, "vel_y_range"))
-        _set_range(C, "racket_vel_z_range", _get(rk, "vel_z_range"))
-        _set_range(C, "base_target_x_range", _get(rk, "base_target_x_range"))
-        _set_range(C, "base_target_y_range", _get(rk, "base_target_y_range"))
-        _set_attr(C, "normal_mode", _get(rk, "normal_mode"), str)
-        _set_attr(C, "forehand_on_negative_y", _get(rk, "forehand_on_negative_y"), _as_bool)
-        _set_attr(C, "mount_normal_axis", _get(rk, "mount_normal_axis"), int)
-        _set_attr(C, "mount_normal_sign", _get(rk, "mount_normal_sign"), float)
-        # reference_perturbed target sampling (rank 5): couple targets to the reference swing.
-        _set_attr(C, "target_mode", _get(rk, "target_mode"), str)
-        _set_vec3(C, "ref_perturb_pos", _get(rk, "ref_perturb_pos"))
-        _set_vec3(C, "ref_perturb_vel", _get(rk, "ref_perturb_vel"))
-        _set_attr(C, "ref_perturb_normal", _get(rk, "ref_perturb_normal"), float)
-        _set_attr(C, "ref_perturb_curriculum_steps", _get(rk, "ref_perturb_curriculum_steps"), int)
-        _set_attr(C, "ref_perturb_curriculum_start", _get(rk, "ref_perturb_curriculum_start"), float)
+    if rk is not None:
+        # Only require the racket_target command when the YAML actually sets racket keys, so tasks
+        # without a racket objective (e.g. TrackingFlat, which has no `racket:` block) never trip this.
+        provided = [k for k in _RACKET_KEYS if _get(rk, k) is not None]
+        if provided:
+            _require(hasattr(env_cfg.commands, "racket_target"),
+                     f"commands.racket_target (task YAML sets racket keys {provided})")
+            C = env_cfg.commands.racket_target
+            _set_attr(C, "strike_phase", _get(rk, "strike_phase"), float, applied, "racket_target")
+            _set_attr(C, "strike_window_s", _get(rk, "strike_window_s"), float, applied, "racket_target")
+            _set_attr(C, "strike_success_pos_thresh", _get(rk, "strike_success_pos_thresh"), float, applied, "racket_target")
+            _set_attr(C, "strike_success_vel_thresh", _get(rk, "strike_success_vel_thresh"), float, applied, "racket_target")
+            _set_attr(C, "strike_success_normal_thresh_deg", _get(rk, "strike_success_normal_thresh_deg"), float, applied, "racket_target")
+            _set_range(C, "racket_pos_x_range", _get(rk, "pos_x_range"), applied, "racket_target")
+            _set_range(C, "racket_pos_y_range", _get(rk, "pos_y_range"), applied, "racket_target")
+            _set_range(C, "racket_pos_z_range", _get(rk, "pos_z_range"), applied, "racket_target")
+            _set_range(C, "racket_vel_x_range", _get(rk, "vel_x_range"), applied, "racket_target")
+            _set_range(C, "racket_vel_y_range", _get(rk, "vel_y_range"), applied, "racket_target")
+            _set_range(C, "racket_vel_z_range", _get(rk, "vel_z_range"), applied, "racket_target")
+            _set_range(C, "base_target_x_range", _get(rk, "base_target_x_range"), applied, "racket_target")
+            _set_range(C, "base_target_y_range", _get(rk, "base_target_y_range"), applied, "racket_target")
+            _set_attr(C, "normal_mode", _get(rk, "normal_mode"), str, applied, "racket_target")
+            _set_attr(C, "forehand_on_negative_y", _get(rk, "forehand_on_negative_y"), _as_bool, applied, "racket_target")
+            _set_attr(C, "mount_normal_axis", _get(rk, "mount_normal_axis"), int, applied, "racket_target")
+            _set_attr(C, "mount_normal_sign", _get(rk, "mount_normal_sign"), float, applied, "racket_target")
+            # reference_perturbed target sampling (rank 5): couple targets to the reference swing.
+            _set_attr(C, "target_mode", _get(rk, "target_mode"), str, applied, "racket_target")
+            _set_vec3(C, "ref_perturb_pos", _get(rk, "ref_perturb_pos"), applied, "racket_target")
+            _set_vec3(C, "ref_perturb_vel", _get(rk, "ref_perturb_vel"), applied, "racket_target")
+            _set_attr(C, "ref_perturb_normal", _get(rk, "ref_perturb_normal"), float, applied, "racket_target")
+            _set_attr(C, "ref_perturb_curriculum_steps", _get(rk, "ref_perturb_curriculum_steps"), int, applied, "racket_target")
+            _set_attr(C, "ref_perturb_curriculum_start", _get(rk, "ref_perturb_curriculum_start"), float, applied, "racket_target")
+            _set_attr(C, "ref_perturb_success_gated", _get(rk, "ref_perturb_success_gated"), _as_bool, applied, "racket_target")
+            _set_attr(C, "ref_perturb_advance_threshold", _get(rk, "ref_perturb_advance_threshold"), float, applied, "racket_target")
+            _set_attr(C, "ref_perturb_advance_rate", _get(rk, "ref_perturb_advance_rate"), float, applied, "racket_target")
+            _set_attr(C, "exact_success_decay", _get(rk, "exact_success_decay"), float, applied, "racket_target")
+            _set_attr(C, "exact_success_min_count", _get(rk, "exact_success_min_count"), float, applied, "racket_target")
 
+    # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
+    # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.
     dr = _get(task, "domain_rand")
     if dr is not None and hasattr(env_cfg, "events"):
         E = env_cfg.events
         mr = _get(dr, "link_mass_range")
         if mr is not None and hasattr(E, "randomize_link_mass"):
             E.randomize_link_mass.params["mass_distribution_params"] = (float(mr[0]), float(mr[1]))
+            applied.append(f"events.randomize_link_mass.mass_distribution_params=({float(mr[0])}, {float(mr[1])})")
         if hasattr(E, "randomize_pd_gains"):
             pr = _get(dr, "pd_gain_range")
             if pr is None:
                 E.randomize_pd_gains = None  # disable
+                applied.append("events.randomize_pd_gains=None(disabled)")
             else:
                 E.randomize_pd_gains.params["stiffness_distribution_params"] = (float(pr[0]), float(pr[1]))
                 E.randomize_pd_gains.params["damping_distribution_params"] = (float(pr[0]), float(pr[1]))
+                applied.append(f"events.randomize_pd_gains=({float(pr[0])}, {float(pr[1])})")
+
+    return applied
 
 
 # --------------------------------------------------------------------------- #
@@ -157,6 +276,7 @@ def _run(cfg):
     from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
     from isaaclab_tasks.utils import parse_env_cfg
 
+    import whole_body_tracking  # noqa: F401
     import whole_body_tracking.tasks  # noqa: F401  -- registers the gym tasks
     from whole_body_tracking.utils.my_on_policy_runner import MotionOnPolicyRunner as OnPolicyRunner
     from whole_body_tracking.utils.ppo_cfg import runner_kwargs
@@ -164,12 +284,38 @@ def _run(cfg):
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
 
+    # Provenance: confirm we imported the WORKING TREE, not a stale install. If this path points into
+    # site-packages instead of .../source/whole_body_tracking, a shadow copy is overriding your edits
+    # (fix PYTHONPATH ordering in setup_train_env.sh / reinstall editable) and the YAML edits below are
+    # being applied onto the wrong cfg classes.
+    print(f"[train.py] whole_body_tracking imported from: {whole_body_tracking.__file__}", flush=True)
+
     task_id = str(cfg.task.gym_task)
     num_envs = int(cfg.num_envs) if cfg.num_envs is not None else int(cfg.task.env.num_envs)
 
     # 1) env cfg (gym registry) + task YAML overrides
     env_cfg = parse_env_cfg(task_id, device=str(cfg.device), num_envs=num_envs)
-    _apply_task_overrides(env_cfg, cfg.task)
+    _cfg_mod = sys.modules.get(type(env_cfg).__module__)
+    print(f"[train.py] env cfg source: {type(env_cfg).__name__} <- {getattr(_cfg_mod, '__file__', '?')}", flush=True)
+    applied = _apply_task_overrides(env_cfg, cfg.task)
+    print(f"[train.py] applied {len(applied)} task override(s) from cfg/task/{_get(cfg.task, 'name', task_id)}.yaml:", flush=True)
+    for _a in applied:
+        print(f"[train.py]     {_a}", flush=True)
+    if not applied:
+        print("[train.py] WARNING: 0 task overrides applied -> the run is using CODE DEFAULTS, not the "
+              "YAML (the rewards/racket/env blocks did not compose, or all keys were absent).", flush=True)
+    # Human-readable confirmation of the strike-training knobs, straight from the post-override cfg, so
+    # you can read the actual runtime values off the launch log without opening logs/.../params/env.yaml.
+    R = env_cfg.rewards
+    if hasattr(R, "racket_position"):
+        print("[train.py] racket reward std (post-override): "
+              f"pos={R.racket_position.params.get('std')} vel={R.racket_velocity.params.get('std')} "
+              f"normal={R.racket_normal.params.get('std')}", flush=True)
+    if hasattr(env_cfg.commands, "racket_target"):
+        _C = env_cfg.commands.racket_target
+        print("[train.py] racket target (post-override): "
+              f"target_mode={_C.target_mode} ref_perturb_curriculum_start={_C.ref_perturb_curriculum_start} "
+              f"strike_window_s={_C.strike_window_s}", flush=True)
     env_cfg.seed = int(cfg.seed)
     env_cfg.sim.device = str(cfg.device)
 

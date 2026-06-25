@@ -57,6 +57,7 @@ Done:
 - Motion-capture reference docs define frame conventions and ChingMu conversion notes.
 - A3 deploy docs and source support are present.
 - Current working A3 joint order exists at `hope_training/config/joint_order_agibot_a3.yaml`.
+- `avatar_pro_vrpn.yaml` keeps `P1`/`P2` as default robot rigid-body labels, while noting that one `train_1` rig observed `ppp2`/`ppp3`; live G01 verification must record the actual labels before relying on them.
 
 Not done:
 

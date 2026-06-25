@@ -5,8 +5,9 @@ This is the step-13 environment. It extends the A3 motion-tracking baseline
 
 * a :class:`RacketTargetCommand` that samples the desired racket state (position/velocity/normal)
   and desired base XY each swing, and computes the actual racket state by FK through ``T_mount``;
-* HITTER actor observations (desired racket pos rel-base, desired racket vel world, time-to-strike,
-  desired base XY rel-base) plus projected gravity, with privileged racket state on the critic;
+* HOPE actor observations (desired racket pos rel-base, desired racket vel/normal world,
+  time-to-strike, desired base XY rel-base) plus projected gravity, with privileged actual racket
+  state on the critic;
 * HITTER goal rewards (base-position before strike; racket pos/vel/normal in a window around strike),
   on top of the BeyondMimic imitation reward and the regularization reward;
 * extended domain randomization for sim-to-real.
@@ -73,6 +74,7 @@ class HOPEObservationsCfg(ObservationsCfg):
             noise=Unoise(n_min=-0.02, n_max=0.02),
         )
         racket_target_vel_w = ObsTerm(func=mdp.racket_target_vel_w, params={"command_name": "racket_target"})
+        racket_target_normal_w = ObsTerm(func=mdp.racket_target_normal_w, params={"command_name": "racket_target"})
         time_to_strike = ObsTerm(func=mdp.time_to_strike, params={"command_name": "racket_target"})
         # swing_type omitted by default (constant per forehand/backhand policy). Enable for a unified policy:
         # swing_type = ObsTerm(func=mdp.swing_type, params={"command_name": "racket_target"})

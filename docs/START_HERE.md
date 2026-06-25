@@ -46,6 +46,18 @@ Do not read every setup document before doing a specific job. Use this task-firs
 
 For broad onboarding, read [PROJECT_MAP.md](PROJECT_MAP.md) and [DEFINITIONS.md](DEFINITIONS.md). For folder or asset-policy changes, read [ASSET_POLICY.md](ASSET_POLICY.md).
 
+## Reimplementation Rhythm
+
+`reimplement.md` is the long-form runbook, not a separate project plan. Use it through the gate docs:
+
+1. Find the gate that matches the work.
+2. Read the gate doc and operation doc first.
+3. Use the referenced `reimplement.md` step for command detail.
+4. Verify the gate's acceptance criteria.
+5. Update the gate doc, `docs/PROGRESS.md`, and any touched interface/operation docs in the same branch.
+
+If a phase/step in `reimplement.md` conflicts with a gate doc, treat the gate doc as current and update both files before continuing.
+
 ## Implementation Principles
 
 Use first-principles gates instead of copying a paper or vendor example blindly:
@@ -83,7 +95,7 @@ Do not hide project state in chat history. If a future contributor or agent need
 
 ## Fast Entry Points
 
-- End-to-end, machine-specific runbook (environment creation, GMR/GVHMR motion pipeline, A3 asset prep, training, deploy): [reimplement.md](../reimplement.md). The `operations/*` docs are the curated per-task views; `reimplement.md` is the long-form narrative source they defer to (e.g. "Step 12.7").
+- End-to-end, gate-indexed runbook (environment creation, GMR/GVHMR motion pipeline, A3 asset prep, training, deploy): [reimplement.md](../reimplement.md). The `operations/*` docs are the curated per-task views; `reimplement.md` is the long-form narrative source they defer to (e.g. "Step 12.7").
 - Environment setup is task-specific. Start from the operation doc for your task; use [operations/setup_environments.md](operations/setup_environments.md) only as a reference matrix.
 - Ignored/local assets that must be copied manually are summarized in [operations/setup_local_sync.md](operations/setup_local_sync.md), but each operation doc should list the assets it needs locally.
 - Auto-sync ignored external references before using them: `scripts/sync_external_repos.sh`.

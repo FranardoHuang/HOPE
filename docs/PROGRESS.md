@@ -2,6 +2,11 @@
 
 Use this file for short project-state updates that future humans and agents need to see. Keep detailed reasoning in the relevant gate doc.
 
+## 2026-06-25
+
+- Merged `origin/train_1` into `main` and updated the docs/reimplementation rhythm so `reimplement.md` is gate-indexed rather than a separate phase plan. G04 now records the new `HOPE-TableTennis-AgibotA3-v0` Isaac scene, and G05 records the updated `HOPEPingPong` exact-strike metrics, reward/target defaults, source-provenance logging, and success-gated reference perturbation.
+- Preserved source/config/test changes while excluding generated or local artifacts (`.codex-tmp/`, `.vscode/`, generated `*.onnx`) under the asset policy. Scrubbed private training paths and WandB identities from `reimplement.md`; machine-specific values belong in `setup_train_env.local.sh`.
+
 ## 2026-06-24
 
 - Integrated `origin/jiayi` commit `c951d9d` into this harness branch while preserving the open-source placeholders and A3 support-material docs. The branch now includes `reference_perturbed` racket target sampling for `HOPEPingPong`, training override plumbing for the new parameters, and Avatar-Pro relay `ball_tracking_mode` support (`rigid_body` preferred, `auto` fallback).

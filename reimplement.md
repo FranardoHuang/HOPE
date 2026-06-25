@@ -1,21 +1,30 @@
 # HOPE Reimplementation Guide
 
-This guide explains how to reimplement the HOPE reference system from the documentation in this repository. The repo is a design-document repository, not a complete runnable software stack. A successful reimplementation means you will create your own ROS 2 packages, training configuration, policy export, and deployment integration while following the reference architecture and competition constraints.
+This guide is the long-form reimplementation runbook. The living source of truth for current project
+state is `docs/START_HERE.md` plus the gate documents under `docs/gates/`. If this file and a gate doc
+disagree, update both in the same branch; do not let this file become a second project plan.
 
-Read this file from top to bottom. Do not skip the verification gates. Each later phase assumes the earlier phase is already working.
+Read this file gate-first, not phase-first. The Phase headings below are retained for navigation, but
+implementation should advance only when the relevant gate has inputs, outputs, verification, and known
+limits recorded.
 
-## Guide Structure By Phase
+## Gate-First Reading Order
 
-Use the steps in order, but think of them as eight larger workstreams:
+| Gate | Reimplementation Steps | What It Proves |
+| --- | --- | --- |
+| `G00 Materials and harness` | `0-5`, support sections | repo structure, ignored assets, setup docs, and basic verification are usable |
+| `G01 Real preparation` | real-hardware parts of `1`, `4`, `16-18` | table, robot, mocap, network, dry-run, joint order, and safety prerequisites are known before hardware risk |
+| `G02 Data acquisition` | `6-8` | ChingMu/VRPN streams provide the required table, robot, and ball data |
+| `G03 Data processing and physics calibration` | planner/calibration parts of `7-8` | ball filtering, prediction, and planner physics are measured rather than guessed |
+| `G04 Sim modeling in MuJoCo and Isaac` | `12-13`, table-tennis scene checks | A3, racket mount, table, ball, contact, and frame semantics load consistently in simulation |
+| `G05 Isaac training first loop` | `9-15` | motion references, WBC training, metrics, checkpoint, and ONNX export can run end to end |
+| `G06 Isaac-to-MuJoCo parity` | sim-to-sim parts of `16-17` | an exported policy behaves consistently before deployment |
+| `G07 MuJoCo-to-real deployment` | deployment parts of `17-18` | policy runtime and robot command path pass dry-run and safety gates |
+| `G08 Blind-spot improvements` | `22-26` and future mini-specs | spin, serve, short/deep balls, opponent adaptation, or other improvements are selected by measured baseline failures |
 
-1. **Phase 1 — Scope, Platform, and Workspace Foundation**: steps `0-5`
-2. **Phase 2 — Motion Capture and Planner Bringup**: steps `6-8`
-3. **Phase 3 — Human Motion Data and Retargeting**: steps `9-11`
-4. **Phase 4 — WBC Training Pipeline**: steps `12-16`
-5. **Phase 5 — Runtime Policy and Hardware Deployment**: steps `17-18`
-6. **Phase 6 — Portability and Full-System Integration**: steps `19-21`
-7. **Phase 7 — Testing, Safety, and Competition Readiness**: steps `22-26`
-8. **Phase 8 — Summaries, Constraints, References, and Open Values**: steps `27-30`
+Before working a step, open the relevant `docs/gates/G*.md` file and the operation doc it links. After
+changing code, assets, commands, contracts, or verification status, update the gate doc and
+`docs/PROGRESS.md` before moving on.
 
 ## How To Read Placeholders And Terms
 
@@ -678,8 +687,9 @@ In Avatar-Pro:
 2. Set the streaming coordinate frame to Z-up if the software exposes that option.
 3. Calibrate the world origin at the P1 near-side left table corner.
 4. Align +X toward P2 along the table length.
-5. Create the rigid bodies and name them exactly `PPT`, `P1`, and `P2`. Track
-   each as a 6-DOF rigid body. These names DO appear in the topic path, so
+5. Create or identify the table and robot rigid bodies. The repo defaults are `PPT`, `P1`, and `P2`,
+   but the live rig may use different labels (one `train_1` rig observed `ppp2`/`ppp3`). Track each as
+   a 6-DOF rigid body and record the exact names in G01. These names DO appear in the topic path, so
    spelling and capitalization matter.
 6. The ball is different, and this is the part that most often goes wrong. A
    ping-pong ball carries one marker and cannot form a rigid body (a rigid body
@@ -696,11 +706,10 @@ In Avatar-Pro:
 7. Enable VRPN streaming, usually on port `3883`.
 8. Record the Avatar-Pro PC IP address.
 
-Because the ball usually arrives under an opaque marker id (not the name
-`ball`), the HOPE relay does NOT rely on a ball name. It auto-detects the ball by
-motion: among every streamed object that is not `PPT`/`P1`/`P2`, the ball is the
-one whose position actually moves. So you do not have to discover and hard-code
-the ball's id before you can run — wave the ball and the relay locks onto it.
+The HOPE relay supports two ball modes. Prefer `ball_tracking_mode:=rigid_body ball_object:=Ball` if
+CMTracker exposes the ball as a named rigid body. Use `ball_tracking_mode:=auto` when the ball arrives
+under an opaque marker id: among every streamed object that is not the table or robot rigid bodies, the
+relay locks onto the marker whose position actually moves.
 
 How to get the Avatar-Pro IP address:
 
@@ -716,11 +725,7 @@ ping AVATAR_PRO_PC_IP
 If the rigid-body names in Avatar-Pro are not exactly `PPT`, `P1`, `P2`, either
 rename them in Avatar-Pro or edit `ppt_object`/`p1_object`/`p2_object` in
 `hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml` and rebuild `hope_bringup`.
-The relay matches rigid bodies by their VRPN sender name, so spelling and
-capitalization matter for those three. The ball has two tracking modes (chosen with
-the `ball_tracking_mode` launch arg): `rigid_body` reads the named ball rigid body
-given in `ball_object` (e.g. `Ball`) — preferred; `auto` matches the ball by motion
-(no name needed) and is the fallback for when the ball cannot be a rigid body.
+The relay matches rigid bodies by their VRPN sender name, so spelling and capitalization matter.
 
 On the ROS 2 machine, install the VRPN client and rebuild the HOPE bringup package:
 
@@ -960,6 +965,141 @@ Verification gate:
   when the real ball moves (not when a robot or the table moves).
 - The ball is not confused with table or robot markers.
 - No racket, wrist, hand, or paddle marker exists.
+
+### 6.2 Record The Mocap Stream To A rosbag (raw, for later processing)
+
+Goal: capture the whole mocap session to disk now and process it later. The safest
+strategy is "record everything raw, reprocess offline" — `ros2 bag record -a` records
+every topic, including every raw `/vrpn_mocap/*` topic, so nothing is lost.
+
+What is on the graph while the Step 6 bridge (Terminal A) runs:
+
+```text
+# Raw, straight from `vrpn_mocap client_node` — one set per rigid body CMTracker streams:
+/vrpn_mocap/PPT/pose
+/vrpn_mocap/P1/pose
+/vrpn_mocap/P2/pose
+/vrpn_mocap/Ball/pose        # only if "Ball" is a rigid body in CMTracker
+/vrpn_mocap/<other>/pose     # every other marker / rigid body CMTracker streams
+
+# Processed by `avatar_pro_vrpn_relay` + `hope_world`:
+/ball/point  /poses  /P1/pose  /P2/pose  /table/pose  /tf  /tf_static
+```
+
+Key point: the raw `/vrpn_mocap/*` topics are the ground truth. Record them and you can
+re-run the relay offline to regenerate `/ball/point`, `/poses`, etc. So `-a` (record all)
+is the right "record now, process later" choice.
+
+What gets captured — ALL streamed rigid bodies, not just the ones you configured. The
+`vrpn_mocap client_node` is launched with only `server`/`port` (no rigid-body whitelist),
+so it auto-discovers EVERY VRPN sender Avatar Pro is streaming and publishes one
+`/vrpn_mocap/<sender>/pose...` per body. The HOPE yaml (`ppt_object`/`p1_object`/
+`p2_object`/`ball_object`) only tells the RELAY which of those to rename into the HOPE
+topics — it does NOT limit what is published or recordable. Add a new rigid body in Avatar
+Pro and it appears under `/vrpn_mocap/*` automatically, with no HOPE config change. Two
+prerequisites: (a) the body must have VRPN streaming enabled in CMTracker, and (b) a VRPN
+sender only appears after it has sent its first frame (i.e. the body is currently tracked /
+visible). Before recording, confirm everything you expect is live with
+`ros2 topic list | grep vrpn_mocap`.
+
+1. Make a folder on disk for the recordings:
+
+```bash
+mkdir -p ~/workspace/HOPE/mocap_bags
+```
+
+2. (Optional) confirm what will be captured before recording:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+source ~/workspace/HOPE/hope_ws/install/local_setup.bash
+ros2 topic list
+'
+```
+
+3. With the Step 6 bridge running in Terminal A, open a new terminal and record
+   EVERYTHING (`-a` = all topics, raw VRPN + relay outputs + tf; `-s mcap` = same
+   storage format Step 8 expects):
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+source ~/workspace/HOPE/hope_ws/install/local_setup.bash
+cd ~/workspace/HOPE/mocap_bags
+ros2 bag record -s mcap -a -o session01
+'
+```
+
+4. (Alternative) record only the named HOPE topics instead of the full raw flood:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+source ~/workspace/HOPE/hope_ws/install/local_setup.bash
+cd ~/workspace/HOPE/mocap_bags
+ros2 bag record -s mcap \
+  /ball/point /poses /P1/pose /P2/pose /table/pose /tf /tf_static \
+  -o session01
+'
+```
+
+5. (Long sessions) split the bag so no single file gets huge:
+
+```bash
+# inside the same `ros2 bag record -s mcap -a` command, add ONE of:
+  --max-bag-size 2000000000     # split every ~2 GB (value is bytes)
+  --max-bag-duration 60         # split every 60 seconds
+```
+
+Stop recording with `Ctrl+C`, then WAIT for it to finish writing `metadata.yaml`
+before closing the terminal.
+
+6. Verify the bag:
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+cd ~/workspace/HOPE/mocap_bags
+ls -lah session01
+ros2 bag info session01
+'
+```
+
+`ros2 bag info` lists each recorded topic with its message count. Every topic you care
+about must have count > 0. A topic that never published (e.g. `/poses` if the ball never
+moved — see the Step 6.1 note) records as 0 messages, which is expected.
+
+7. Watch disk usage — at 180 Hz across many rigid bodies, bags grow fast:
+
+```bash
+df -h ~/workspace/HOPE
+du -sh ~/workspace/HOPE/mocap_bags/session01
+```
+
+8. Reprocess later — replay the raw bag and run the relay/planner against it (downstream
+   nodes cannot tell playback from live mocap):
+
+```bash
+distrobox enter hope -- bash -lc '
+source /opt/ros/jazzy/setup.bash
+source ~/workspace/HOPE/hope_ws/install/local_setup.bash
+cd ~/workspace/HOPE/mocap_bags
+ros2 bag play session01 --clock
+'
+```
+
+Add `--loop` to repeat, `--rate 0.5` to slow it down.
+
+Notes / caveats:
+
+- To regenerate `/poses` or `/ball/point` offline you need either (a) those topics
+  recorded directly, or (b) the raw `/vrpn_mocap/*` topics recorded so you can re-run
+  `avatar_pro_vrpn_relay` on playback. `-a` gives you both, so prefer it.
+- `/tf_static` is latched (transient_local QoS). `ros2 bag record` captures it and
+  playback re-sends it, so frames resolve on replay.
+- Step 8 calibration only needs `/ball/point`. The single-topic recipe in Step 8.1 is
+  just this same recording narrowed to one topic — same mechanism, smaller bag.
 
 ## 7. Implement The Planner Package
 
@@ -2324,38 +2464,40 @@ Open a host terminal and enter `grasping`:
 distrobox enter grasping
 ```
 
-Now inside `grasping`, activate the Isaac / training Python:
+Now inside `grasping`, enter the training workspace and source the shared training environment:
 
 ```bash
-source /opt/drone_venv/bin/activate
 cd ~/workspace/HOPE/hope_training/whole_body_tracking
-python -c "import sys; print(sys.executable)"
+source setup_train_env.sh
+hope_isaac_py -c "import sys; print(sys.executable)"
 ```
 
-Important on this machine:
+Important:
 
-- `wandb` and the Isaac training dependencies are expected to come from `/opt/drone_venv`.
+- `setup_train_env.sh` is the source of truth for `HOPE_ISAAC_PYTHON`, `HOPE_ISAACLAB_ROOT`,
+  optional `HOPE_ISAAC_VENV_SITE`, `HOPE_WBT_PYTHONPATH`, and WandB identities.
+- Put real machine paths in the git-ignored `setup_train_env.local.sh`.
 - Do **not** use plain `/usr/bin/python3` for the training commands in this phase.
 
 ### 12.4 Install `whole_body_tracking`
 
 ```bash
-python -m pip install -e source/whole_body_tracking
-python -m pip show whole_body_tracking
+hope_isaac_py -m pip install -e source/whole_body_tracking
+hope_isaac_py -m pip show whole_body_tracking
 ```
 
 If `pip show` cannot find `whole_body_tracking`, the editable install did not land.
 The actual runtime check for this machine is the `hope_isaac_py ...` check below,
 not plain `python -c "import whole_body_tracking"`.
 
-If `python -m pip install -e source/whole_body_tracking` fails with a permission
+If `hope_isaac_py -m pip install -e source/whole_body_tracking` fails with a permission
 error like:
 
 ```text
-Permission denied: '/opt/drone_venv/lib/python3.11/site-packages/...'
+Permission denied: '<site-packages>/...'
 ```
 
-then do **not** stop here. On this machine, `/opt/drone_venv` may be owned by
+then do **not** stop here. The target Python's `site-packages` may be owned by
 `root`, so editable install can fail even though the runtime itself is usable.
 Use this no-install fallback for the rest of steps `12-15`:
 
@@ -2363,10 +2505,10 @@ Use this no-install fallback for the rest of steps `12-15`:
 cd ~/workspace/HOPE/hope_training/whole_body_tracking
 
 # Source the training env (once per terminal). It sets HOPE_WBT_PYTHONPATH so Isaac's bundled python
-# can see hydra/omegaconf (in /opt/drone_venv) + isaaclab_rl, defines the `hope_isaac_py` launcher,
-# and exports the wandb team/org/project. The script header documents each piece. It MUST be SOURCED
-# (not `./setup_train_env.sh`, which would set everything in a subshell that exits). Re-source every
-# new terminal. (Equivalent to exporting HOPE_WBT_PYTHONPATH + defining hope_isaac_py by hand.)
+# can see working-tree whole_body_tracking first, optional dependency site-packages, and isaaclab_rl.
+# It also defines `hope_isaac_py` and exports the WandB team/org/project. The script header documents
+# each piece. It MUST be SOURCED (not `./setup_train_env.sh`, which would set everything in a
+# subshell that exits). Re-source every new terminal.
 source setup_train_env.sh
 ```
 
@@ -2839,6 +2981,13 @@ note at the end of this step.)
 
 ### 14.1 Set up the training shell (run once per terminal)
 
+Two ways to set the shell up — pick one. The **source way** is the daily driver; the
+**manual way** spells out exactly what the script exports, which is what you want
+when bringing up a new machine (paths may differ) or if you would rather not source
+a file. Both produce the same env and must be redone in every new terminal.
+
+Source way (recommended):
+
 ```bash
 # from the host:
 distrobox enter grasping
@@ -2846,19 +2995,54 @@ distrobox enter grasping
 # inside grasping:
 cd ~/workspace/HOPE/hope_training/whole_body_tracking
 
-# Source the training env. This sets HOPE_WBT_PYTHONPATH (so Isaac's bundled python sees
-# hydra/omegaconf in /opt/drone_venv + isaaclab/isaaclab_rl), defines the `hope_isaac_py` launcher,
-# and exports the wandb team/org/project (WANDB_ENTITY / WANDB_REGISTRY_ORG / WANDB_PROJECT — the
-# team and org are DIFFERENT; using the team for the registry fails, see Step 12.5).
+# Source the training env. This puts the working-tree source first in HOPE_WBT_PYTHONPATH, appends
+# optional dependency/site-package paths plus Isaac Lab source dirs, defines the `hope_isaac_py`
+# launcher, and exports the wandb team/org/project (WANDB_ENTITY / WANDB_REGISTRY_ORG /
+# WANDB_PROJECT). Team and org are DIFFERENT; using the team for the registry fails, see Step 12.5.
 source setup_train_env.sh
 ```
 
 It MUST be **sourced**, not executed (`./setup_train_env.sh` runs in a subshell that exits, leaving
 your shell unchanged), and re-sourced in every new terminal. On success it prints `[hope] training
 env ready`. The script (`setup_train_env.sh`, in this directory) is the single source of truth for
-the training env — edit it there, not inline. If you prefer not to source a file, its three pieces
-(the `HOPE_WBT_PYTHONPATH` export, the `hope_isaac_py` function, and the three wandb exports) can
-still be pasted by hand; the function falls back to a built-in PYTHONPATH if the export is missing.
+the training env. Put real machine paths and private WandB identities in the git-ignored
+`setup_train_env.local.sh`, not in this tracked runbook.
+
+Manual way (equivalent shape - only for debugging a new machine). Prefer the source way above; if you
+do this manually, replace placeholders locally and do not commit private paths or identities:
+
+```bash
+# from the host:
+distrobox enter grasping
+
+# inside grasping:
+cd ~/workspace/HOPE/hope_training/whole_body_tracking
+
+# (1) Site-specific paths.
+export HOPE_ISAAC_PYTHON=/path/to/isaacsim/python.sh
+export HOPE_ISAACLAB_ROOT=/path/to/IsaacLab
+export HOPE_ISAAC_VENV_SITE=/path/to/optional/site-packages  # optional; leave empty if not needed
+
+# (2) PYTHONPATH: working-tree source FIRST (so your edits win over any stale installed copy),
+#     then optional hydra/omegaconf deps + isaaclab_*.
+export HOPE_WBT_PYTHONPATH="$PWD/source/whole_body_tracking"
+if [ -n "$HOPE_ISAAC_VENV_SITE" ]; then
+  export HOPE_WBT_PYTHONPATH="$HOPE_WBT_PYTHONPATH:$HOPE_ISAAC_VENV_SITE"
+fi
+export HOPE_WBT_PYTHONPATH="$HOPE_WBT_PYTHONPATH:$HOPE_ISAACLAB_ROOT/source/isaaclab:$HOPE_ISAACLAB_ROOT/source/isaaclab_tasks:$HOPE_ISAACLAB_ROOT/source/isaaclab_assets:$HOPE_ISAACLAB_ROOT/source/isaaclab_rl"
+
+# (3) the launcher = Isaac's python.sh run with that PYTHONPATH.
+hope_isaac_py () { PYTHONPATH="$HOPE_WBT_PYTHONPATH" "$HOPE_ISAAC_PYTHON" "$@"; }
+
+# (4) wandb: runs log to your TEAM; the motion registry is read from your ORG (different; see 12.5).
+export WANDB_ENTITY=your-wandb-team
+export WANDB_REGISTRY_ORG=your-wandb-org
+export WANDB_PROJECT=hope_wbc
+```
+
+Either way, sanity-check the shell with
+`hope_isaac_py -c "import hydra, omegaconf; print(hydra.__version__)"` (should print
+`1.3.2`) and `echo "$HOPE_WBT_PYTHONPATH"` (blank = the env is not set up in this terminal).
 
 ### 14.2 Smoke test (~1 min) — confirm the whole pipeline runs
 
@@ -2909,8 +3093,13 @@ hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
 ```
 
 Useful overrides (append to any command): `num_envs=4096 max_iterations=20000 seed=1`,
-`task.rewards.racket_position_weight=5.0`, `task.racket.pos_x_range=[0.3,0.6]`,
-`task.domain_rand.pd_gain_range=null`. **Record the wandb run ID of each good run** — Step 15 needs it.
+`task.rewards.motion_scale=0.6`, `task.racket.ref_perturb_success_gated=false`,
+`task.domain_rand.pd_gain_range=null`. **Record the wandb run ID of each good run** - Step 15 needs it.
+
+Current `HOPEPingPong` defaults are tuned around conditional exact-strike metrics. Watch
+`strike_pos_pass_exact`, `strike_vel_pass_exact`, `strike_normal_pass_exact`,
+`strike_composite_success_exact`, and `exact_strike_sample_count_decayed`; these are the less-diluted
+signals for whether the policy is learning to hit.
 
 ### 14.5 Evaluate a trained policy
 
@@ -2972,7 +3161,7 @@ needs `moviepy` and was masked by Isaac's hard-exit). If video errors with `Modu
 | `cfg/algo/ppo.yaml` | rollout length, learning rate, entropy, mini-batches, epochs, network sizes |
 
 Global CLI overrides: `num_envs max_iterations registry_name run_name seed logger log_project_name`.
-Everything else is `task.<group>.<key>` or `algo.<group>.<key>` (e.g. `task.rewards.racket_position_weight=5.0`).
+Everything else is `task.<group>.<key>` or `algo.<group>.<key>` (e.g. `task.rewards.motion_scale=0.6`).
 The legacy `scripts/rsl_rl/train.py --task=HOPE-PingPong-AgibotA3-v0 --registry_name … --headless`
 entrypoint still works if you prefer argparse over Hydra.
 
@@ -2988,11 +3177,11 @@ entrypoint still works if you prefer argparse over Hydra.
   `WANDB_REGISTRY_ORG`, so you may also omit `registry_name=...` entirely.
 - **`ModuleNotFoundError: No module named 'hydra'`** (at `import hydra` near the top of `train.py` /
   `play.py`, run via `hope_isaac_py`). Your shell's `HOPE_WBT_PYTHONPATH` was empty, so `hope_isaac_py`
-  launched Isaac's bundled python with an **empty `PYTHONPATH`**. hydra/omegaconf live in
-  `/opt/drone_venv` and are visible only through that PYTHONPATH (Isaac's python has neither). Usually
-  you opened a new terminal and never sourced the env in it. Fix: `source setup_train_env.sh` (14.1)
-  in *this* terminal — it must be re-sourced per terminal. Check with `echo "$HOPE_WBT_PYTHONPATH"`
-  (blank = not sourced). (Sanity check: `hope_isaac_py -c "import hydra, omegaconf;
+  launched Isaac's bundled python with an **empty `PYTHONPATH`**. hydra/omegaconf must either be
+  importable from the Isaac Lab Python or provided through `HOPE_ISAAC_VENV_SITE`. Usually you opened
+  a new terminal and never sourced the env in it. Fix: `source setup_train_env.sh` (14.1) in *this*
+  terminal - it must be re-sourced per terminal. Check with `echo "$HOPE_WBT_PYTHONPATH"` (blank =
+  not sourced). (Sanity check: `hope_isaac_py -c "import hydra, omegaconf;
   print(hydra.__version__)"` should print `1.3.2`.)
 - **`free(): corrupted unsorted chunks` / Aborted at "Starting the simulation."** PhysX heap
   corruption from the copied A3 ping-pong URDF asset's overlapping wrist collision meshes
@@ -3091,6 +3280,10 @@ Export and evaluate:
 ```bash
 # inside the GPU / Isaac distrobox
 hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+  checkpoint="logs/rsl_rl/agibot_a3_hope/2026-06-24_04-43-26_hope_forehand/model_13100.pt" \
+  motion_file="artifacts/hope_forehand:v0/motion.npz"
+
+hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
   wandb_path=$WANDB_ENTITY/hope_wbc/PLACEHOLDER_RUN_ID
 ```
 
@@ -3131,40 +3324,279 @@ Verification gate:
 
 ## 16. Run Sim-To-Sim Verification
 
-Before touching hardware, verify the ONNX policy in simulation.
+> Reference-implementation status (corrected 2026-06-24): the command this step
+> originally listed — `ros2 launch motion_tracking_controller mujoco.launch.py` —
+> does NOT exist in this repo. There is no `motion_tracking_controller` package in
+> `hope_ws/src/` (only `agibot_bringup`, `agibot_hardware_bridge`, `hope_bringup`,
+> `hope_monitoring`, `hope_msgs`, `hope_planner`), no `mujoco.launch.py` anywhere,
+> and `hope_training/mjlab/` + `hope_training/policies/` are empty. That command
+> referred to the BeyondMimic deploy repo we never cloned. Use the two real paths
+> below instead.
 
-Execution scope:
+Before touching hardware, verify the policy in simulation. This repo gives you two
+sim checks, in increasing fidelity:
 
-- From this step onward, switch back to the ROS distrobox: `distrobox enter hope`.
-- The launch commands below are ROS 2 commands, so they belong in `hope`, not in the GPU distrobox.
+1. **16.1 In-Isaac verification** — runnable *today with your trained policy*. It is
+   the only closed loop that consumes your BeyondMimic `policy.onnx`'s exact
+   obs/action contract, because the same task rebuilds the env around it.
+2. **16.2 A3 MuJoCo sim-to-sim harness** — the real `hal_ethercat`-shaped closed loop:
+   the deploy program (`agi/a3_deploy_example/`) ↔ MuJoCo sim (`agi/A3_MuJoCo_Sim/`)
+   over iceoryx, both built from source on Jazzy. Runs with its *bundled* A3 policy;
+   driving it with your own policy needs an obs/action bridge (see the caveat).
+   Split into **16.2.1 environment preparation** (one-time build) and **16.2.2 the run**.
+
+### 16.1 In-Isaac sim verification (your policy, runnable today)
+
+Execution scope: this is `scripts/play.py` again, so it runs in the **GPU distrobox
+`grasping`**, NOT in `hope`. `play.py` re-exports `policy.onnx` on every run (that
+is Step 15 — the export happens before the rollout, so it never needs a display).
 
 ```bash
-# inside the ROS distrobox: hope
-ros2 launch motion_tracking_controller mujoco.launch.py \
-  policy_path:=~/workspace/HOPE/hope_training/policies/hope_forehand_policy.onnx
-```
+# inside grasping, after: cd .../whole_body_tracking && set up the env (Step 14.1 — source way OR manual way)
 
-Then test backhand:
+# Watch the swing live (needs a local display):
+hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+  checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
+  motion_file="artifacts/hope_forehand:v0/motion.npz" \
+  headless=false
+# e.g. <RUN>=2026-06-24_04-43-26_hope_forehand  <N>=13100  (your latest checkpoint)
+```
 
 ```bash
-# inside the ROS distrobox: hope
-ros2 launch motion_tracking_controller mujoco.launch.py \
-  policy_path:=~/workspace/HOPE/hope_training/policies/hope_backhand_policy.onnx
+# Headless equivalent — exports the onnx AND records a clip, no display needed.
+# Use video=true so the rollout loop terminates; headless=true video=false loops
+# forever after the export (the onnx is written either way, before the loop).
+hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+  checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
+  motion_file="artifacts/hope_forehand:v0/motion.npz" \
+  headless=true video=true video_length=300
+# -> logs/rsl_rl/agibot_a3_hope/<RUN>/exported/policy.onnx  (+ videos/play/play.mp4)
 ```
 
-Check:
+Repeat with `motion_file="artifacts/hope_backhand:v0/motion.npz"` and a backhand
+checkpoint to verify the backhand policy. Both runs are fully offline: with
+`checkpoint=` and `motion_file=` both set, nothing touches wandb.
 
-1. The policy loads.
-2. Joint order is correct.
-3. PD gains are reasonable.
-4. The robot stays upright.
-5. The swing resembles training.
-6. The racket mount moves as expected.
+Check: robot stays upright, the swing resembles the reference clip, the racket mount
+sweeps through the strike. (An undertrained policy failing these is expected — 16.1
+confirms the export→load→rollout *pipeline*, not policy quality.)
+
+### 16.2 A3 MuJoCo sim-to-sim harness (the real deployment loop)
+
+The genuine sim-to-sim is two C++ programs talking over **iceoryx** inside the `hope`
+box, on the robot's `/body_drive/*` topics:
+
+- **Deploy program** `a3_deploy_onnx_ref` (from `agi/a3_deploy_example/`) — runs the
+  policy, publishes `*_joint_command`, subscribes to joint state + IMU. Same program
+  that runs on the real robot.
+- **MuJoCo sim** `aimrt_mujoco_sim` (from `agi/A3_MuJoCo_Sim/`) — the A3 pingpong
+  model (31-DOF + racket); subscribes to `*_joint_command`, publishes joint state +
+  IMU. It stands in for the robot's `hal_ethercat`.
+
+Both must be built against the **same ROS**, and your `hope` box is **ROS 2 Jazzy**,
+so both are built from source here. (The prebuilt
+`a3_deploy_example/mujoco_sim_standalone/` is Humble-only and will NOT run on Jazzy —
+that is why 16.2.1-D builds the source sim.)
+
+Execution scope: **everything in 16.2 runs inside `distrobox enter hope`** (Ubuntu
+24.04 / ROS 2 Jazzy) — NOT `grasping`. Section 16.2.1 is one-time setup; 16.2.2 is the
+run you repeat.
+
+#### 16.2.1 Environment preparation (one-time)
+
+Do these once; they build both programs and patch the dependency/packaging gaps this
+repo ships with. The gotcha table at the end of this section maps each error you might
+hit back to its fix.
+
+**A. System dependencies (apt).** Covers the deploy program and the sim. On the
+`jazzy-desktop-full` box most are already present; the few reliably missing each fail
+the build a different way (see the table). Install the full set (already-present
+packages are no-ops):
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  build-essential cmake git pkg-config patch \
+  libeigen3-dev libyaml-cpp-dev libmsgpack-cxx-dev libacl1-dev nlohmann-json3-dev \
+  libzmq3-dev cppzmq-dev protobuf-compiler libprotobuf-dev zlib1g-dev \
+  libgl1-mesa-dev libx11-dev libxinerama-dev libxcursor-dev libxi-dev libxrandr-dev libxxf86vm-dev \
+  python3-yaml python3-numpy python3-empy python3-lark python3-protobuf python3-catkin-pkg
+```
+
+`libmsgpack-cxx-dev` (not the README's C-only `libmsgpack-dev`) provides `msgpack.hpp`
+on Ubuntu 24.04; `libacl1-dev` lets AimRT build its iceoryx plugin; `nlohmann-json3-dev`
+gives `nlohmann/json.hpp`; the `libx*` / `libgl1-mesa-dev` set is the MuJoCo viewer.
+
+**B. Strip macOS AppleDouble junk (one-time).** This repo arrived via Feishu/Lark on
+macOS, so it is littered with `._*` resource-fork files (~1800). The deploy build globs
+`src/**/*.cpp`, so any `._*.cpp` gets compiled and fails with nonsense like `'Feishu'
+does not name a type` / `stray '\377' in program`. Delete them (never needed on Linux):
+
+```bash
+find ~/workspace/HOPE/agi/a3_deploy_example -name '._*' -type f -delete
+```
+
+**C. Build the deploy program** (`a3_deploy_onnx_ref`). It needs ROS 2 sourced and an
+x86_64 ONNX Runtime *with headers* (the bundled `thirdparty/onnxruntime/*_aarch64.tar.gz`
+is robot-only). `setup_a3_env.sh` handles both. Create it once (the dir is gitignored),
+then source + build:
+
+```bash
+cat > ~/workspace/HOPE/agi/a3_deploy_example/setup_a3_env.sh <<'EOF'
+# Source me (inside `hope`) before building: `source setup_a3_env.sh`
+_A3_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+[ -f /opt/ros/jazzy/setup.bash ] && source /opt/ros/jazzy/setup.bash || \
+  { [ -f /opt/ros/humble/setup.bash ] && source /opt/ros/humble/setup.bash; }
+_ORT="onnxruntime-linux-x64-1.19.2"
+_ORT_DIR="${_A3_DIR}/thirdparty/onnxruntime/${_ORT}"
+if [ ! -f "${_ORT_DIR}/include/onnxruntime_cxx_api.h" ]; then
+  ( cd "${_A3_DIR}/thirdparty/onnxruntime" &&
+    { wget -c "https://github.com/microsoft/onnxruntime/releases/download/v1.19.2/${_ORT}.tgz" ||
+      curl -L -O "https://github.com/microsoft/onnxruntime/releases/download/v1.19.2/${_ORT}.tgz"; } &&
+    tar xzf "${_ORT}.tgz" )
+fi
+export onnxruntime_ROOT="${_ORT_DIR}"
+echo "[a3-env] ready: onnxruntime_ROOT=${onnxruntime_ROOT}  ROS_DISTRO=${ROS_DISTRO:-none}"
+EOF
+
+cd ~/workspace/HOPE/agi/a3_deploy_example
+source setup_a3_env.sh                     # ROS + onnxruntime_ROOT (downloads ORT the first time)
+bash scripts/build_a3_deploy_pkg.sh --arch x86_64 --jobs 20    # -> dist/a3_deploy_x86_64/
+# if a prior configure failed, prepend: rm -rf build/a3_pkg_x86_64   (clears a NOTFOUND / iceoryx=OFF cache)
+```
+
+Then put ONNX Runtime on the runtime library path — the deploy binary links
+`libonnxruntime.so.1` but the build does NOT copy it into `dist/`, so without this it
+dies at launch with `error while loading shared libraries: libonnxruntime.so.1`.
+Install it system-wide once (survives every deploy rebuild — no env var, no re-copy):
+
+```bash
+sudo cp -P ~/workspace/HOPE/agi/a3_deploy_example/thirdparty/onnxruntime/onnxruntime-linux-x64-1.19.2/lib/libonnxruntime.so* \
+  /usr/local/lib/ && sudo ldconfig
+```
+
+(No-sudo alternative: `cp` the same `libonnxruntime.so*` into `dist/a3_deploy_x86_64/`
+next to the binary — `run_a3.sh` adds that dir to `LD_LIBRARY_PATH`. But the deploy
+build **regenerates `dist/`**, wiping it, so you must redo the copy after every
+rebuild; the system-wide install above avoids that.)
+
+`setup_a3_env.sh` must be re-sourced per terminal. Alternatives: append
+`source .../setup_a3_env.sh` to the `hope` `~/.bashrc` (auto-loads every shell); or skip
+the helper and do its three pieces by hand — `source /opt/ros/jazzy/setup.bash`,
+download+extract the ONNX Runtime tarball once, `export
+onnxruntime_ROOT=.../onnxruntime-linux-x64-1.19.2`; or install ORT to `/opt/onnxruntime`
+(which `find_package` also scans) for no env var at all.
+
+**D. Build the Jazzy MuJoCo sim** (`aimrt_mujoco_sim`). The prebuilt
+`a3_deploy_example/mujoco_sim_standalone/` is ROS 2 **Humble**-only — on Jazzy it dies
+with `undefined symbol: rclcpp::QOSEventHandlerBase` then `rclcpp::Clock::now()`. Build
+the **source** sim against Jazzy instead (A3 pingpong model, iceoryx-only cfg,
+ABI-consistent with the deploy program):
+
+```bash
+cd ~/workspace/HOPE/agi/A3_MuJoCo_Sim/aimrt_mujoco_sim
+source /opt/ros/jazzy/setup.bash
+# Two required fixes vs upstream build.sh:
+#  (1) Pin /usr/bin/python3 — a stray ~/.local/bin/python3.10 gets picked by CMake and lacks
+#      ROS's em/empy, so rosidl msg-gen fails ("No module named 'em'").
+#  (2) src/CMakeLists.txt gates `models` (the a3_pingpong sim) behind BUILD_EXAMPLES, but
+#      examples/{hardware,inverted_pendulum} copy a missing install/linux/bin and fail. Move
+#      add_subdirectory(models) OUT of that guard and build examples OFF. (Already applied here.)
+./build.sh -DPython3_EXECUTABLE=/usr/bin/python3 -DPython_EXECUTABLE=/usr/bin/python3 \
+  -DAIMRT_MUJOCO_SIM_BUILD_EXAMPLES=OFF
+# AimRT v1.6.0 + MuJoCo 3.1.6 fetched by CMake; ~15-20 min first time. -> build/install/bin/
+```
+
+Build-gotcha quick reference (each blocked this build once; all are fixed by A–D above):
+
+| Symptom | Fix |
+| --- | --- |
+| `msgpack not found` | `libmsgpack-cxx-dev` (A) |
+| `No target "aimrt_plugins_iceoryx_plugin"` | `libacl1-dev`, then `rm -rf build/a3_pkg_x86_64` (A) |
+| `fatal error: nlohmann/json.hpp` | `nlohmann-json3-dev` (A) |
+| `'Feishu' does not name a type` / `stray '\377'` | delete `._*` files (B) |
+| `Could NOT find onnxruntime` (configure) | `source setup_a3_env.sh` (C) |
+| `libonnxruntime.so.1: cannot open` (launch) | install `libonnxruntime.so*` to `/usr/local/lib` + `ldconfig` (C) |
+| sim `undefined symbol: rclcpp::...` | build the source sim on Jazzy, not the prebuilt (D) |
+| sim `No module named 'em'` | `-DPython3_EXECUTABLE=/usr/bin/python3` (D) |
+
+#### 16.2.2 Real workflow (run the sim-to-sim loop)
+
+With 16.2.1 done, this is the actual run. Two terminals, both `distrobox enter hope`;
+the sim opens a MuJoCo window, so you need a local display.
+
+```bash
+# Terminal A — the sim FIRST (starts iox-roudi, publishes /body_drive state over iceoryx):
+cd ~/workspace/HOPE/agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/build/install/bin
+source /opt/ros/jazzy/setup.bash
+./start_a3_pingpong_iceoryx.sh
+```
+
+```bash
+# Terminal B — the deploy program, staged (once the sim window is up). The sim owns
+# iox-roudi; the deploy only connects, so the sim MUST already be running. Stages 1-2
+# are no-motion by design (they only receive state / test inference); motion is stage 3.
+cd ~/workspace/HOPE/agi/a3_deploy_example/dist/a3_deploy_x86_64
+A3_SOURCE_ROBOT_ENV=0 A3_TRANSPORT=iceoryx ./run_a3.sh --dry-run   # 1) receive /body_drive state, no policy/command
+A3_SOURCE_ROBOT_ENV=0 A3_TRANSPORT=iceoryx ./run_a3_probe.sh       # 2) inference + latency, still no command
+A3_SOURCE_ROBOT_ENV=0 A3_TRANSPORT=iceoryx ./run_a3.sh            # 3) full manual state machine
+```
+
+Manual-control keys for stage 3 — **type s/m/r in the DEPLOY terminal** (the state
+machine reads that terminal's stdin); only `load-key` is clicked in the MuJoCo window:
+
+```text
+[deploy terminal]  s            -> PD_STAND   (robot stands in the MuJoCo window)
+[MuJoCo window]    click 'load-key'
+[deploy terminal]  m            -> MOTION
+[deploy terminal]  r  or SPACE  -> play the current motion clip   (easy to forget)
+```
+
+Troubleshooting — "I press s/m and nothing moves". Read the deploy's startup lines:
+
+- `RouDi not found - waiting` → `Timeout registering at RouDi` — the sim's iceoryx
+  RouDi isn't up. Start the **sim first**, and clear stale daemons from earlier runs:
+  `pkill -f iox-roudi; pkill -f aimrt_main`. The deploy never starts its own RouDi.
+- `[a3_backend] sync startup stats: ... complete=0 ... not all 6 topics ready` — RouDi
+  is connected but **no state is arriving**: the MuJoCo sim isn't stepping. Focus the
+  MuJoCo window and press **space** to un-pause the physics.
+- `... complete=` non-zero (e.g. `topic readiness ... ready=yes samples=6`, `sync=ok`) —
+  state IS flowing and the loop already works. Two sub-cases for "still nothing moves":
+  (a) `s`/`m` get `ignored` → you're typing into the **MuJoCo window**; focus the deploy
+  terminal (it reads *that* terminal's stdin). (b) You reached `mode=motion` but the
+  `[frames]` line shows **`playing=0 hold=1`** → the robot just holds a standing idle; the
+  clip is **paused**. Press **`r`** (restart+play) or **SPACE** in the deploy terminal to
+  actually run it — this is the step most people miss. (Verified 2026-06-24 end-to-end: the
+  deploy synced all 6 inputs from the sim at 100 Hz, ran 5514 policy ticks, 0 safe-halts;
+  channels match exactly — deploy publishes `/body_drive/*_joint_command`, subscribes
+  `*_joint_state`/`*_imu`, the sim mirrors — so a connected, stepping pair with the clip
+  *playing* moves. The bundled clips are generic A3 motions, not ping-pong swings.)
+
+This runs the deploy program's **bundled** policy
+`assets/a3_runtime/models/model_step_098000_a3.onnx` (set by `onnx.model_path` in the
+runtime YAML), so it proves the harness — iceoryx transport, state sync, ONNX
+inference, PD-stand→motion state machine — independent of your training.
+
+Caveat — running YOUR policy here is not a drop-in. The deploy program feeds a
+**29-DOF MuJoCo-policy-view tokenizer** policy with its own obs builder + CSV reference
+motions (see `src/a3/a3_deploy_onnx_ref/include/a3_policy_parameters.hpp`). Your
+BeyondMimic `policy.onnx` has a different contract — inputs `(obs, time_step)`, a
+31-DOF robot, different observation terms and action scaling (see
+`source/whole_body_tracking/whole_body_tracking/utils/exporter.py`). Pointing
+`onnx.model_path` at your file will load but produce garbage actions until an
+obs/action adapter maps between the two. That bridge is the remaining engineering item
+before a WBC-trained policy can drive 16.2.
 
 Verification gate:
 
-- Sim-to-sim behavior matches training playback.
-- No hardware deployment until this passes.
+- 16.1: `play.py` loads the checkpoint, exports `exported/policy.onnx`, and rolls the
+  policy out in Isaac without erroring; the onnx metadata carries the joint order + PD
+  gains (Step 15 gate).
+- 16.2: the deploy `--dry-run` shows `/body_drive/*_joint_state` arriving from the sim
+  (topics + `joint_msgs/JointCommand`/`JointState` types match); then `sync_complete` /
+  `sync_aligned` are stable, `infer_ms` is below the control period, and PD_STAND→MOTION
+  runs without a watchdog trip.
+- No hardware deployment until 16.2 passes with the policy you intend to ship.
 
 ## 17. Implement Runtime Forehand/Backhand Switching
 
@@ -3678,55 +4110,20 @@ No racket markers are used.
 
 ## 27. Suggested Implementation Order Summary
 
-Use this as the master checklist:
+Use this as the gate checklist. The detailed step numbers above are subordinate to these gates.
 
-1. Read all docs.
-2. Choose robot and backend.
-3. Create workspace.
-4. Implement `hope_msgs`.
-5. Configure HOPE world frame.
-6. Set up mocap.
-7. Verify mocap topics.
-8. Implement planner constants.
-9. Implement ball state estimator.
-10. Test state estimator.
-11. Implement trajectory predictor.
-12. Test trajectory predictor.
-13. Implement racket target planner.
-14. Test racket target planner.
-15. Implement planner ROS 2 node.
-16. Test planner with recorded or live ball data.
-17. Calibrate ball physics.
-18. Record forehand and backhand videos.
-19. Run GVHMR.
-20. Verify SMPL-X output.
-21. Install GMR.
-22. Retarget motions to robot.
-23. Verify retargeted motions.
-24. Model `T_mount`.
-25. Verify FK to racket frame.
-26. Install Isaac Lab or mjlab.
-27. Install BeyondMimic training stack.
-28. Preprocess motions.
-29. Replay preprocessed motions.
-30. Implement HOPE-specific WBC observations.
-31. Implement HOPE-specific WBC rewards.
-32. Add domain randomization.
-33. Train forehand policy.
-34. Evaluate forehand policy.
-35. Train backhand policy.
-36. Evaluate backhand policy.
-37. Export ONNX.
-38. Run sim-to-sim verification.
-39. Implement forehand/backhand runtime switching.
-40. Set up hardware deployment.
-41. Test standby and E-stop.
-42. Test no-ball active mode.
-43. Test soft toss.
-44. Tune PD gains and `T_mount`.
-45. Add monitoring and safety nodes.
-46. Run end-to-end rally.
-47. Record qualification video.
+1. `G00` - make the repo harness reproducible: docs, asset policy, ignored local roots, environment entrypoints, and basic test commands.
+2. `G01` - prepare real-world contracts before robot risk: table frame, mocap labels, A3 network, joint order, dry-run limits, safe halt, and no-racket-tracking rule.
+3. `G02` - acquire trustworthy real data: VRPN/table/robot/ball streams, timestamps, QoS, recording commands, and known dropouts.
+4. `G03` - calibrate planner physics from measured data: estimator, bounce/drag constants, predictor error, and racket-command output.
+5. `G04` - make simulation semantics match the real contract: A3 model, racket FK, table/ball frame, MuJoCo/Isaac joint order, and table-tennis contact scene.
+6. `G05` - run the first Isaac training loop: motion references, `HOPEPingPong` exact-strike metrics, reward/target sampling, checkpoints, ONNX export, and recorded run IDs.
+7. `G06` - verify Isaac-to-MuJoCo parity before deployment: observation/action tensors, joint decoder, policy timing, and no-ball rollout behavior.
+8. `G07` - deploy only through documented dry-runs: standby, E-stop, command scaling, no-ball active mode, soft toss, and monitored safety limits.
+9. `G08` - pick one measured blind spot after the baseline: spin, serve, double bounce, short/deep balls, opponent adaptation, or multi-agent training.
+
+Each gate is done only when its `docs/gates/G*.md` file records reproducible commands,
+verification results, current inputs/outputs, and known limitations.
 
 ## 28. Do Not Violate These Constraints
 

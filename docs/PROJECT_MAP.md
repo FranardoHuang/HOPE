@@ -45,6 +45,12 @@ Future packages should be added here when they are runtime ROS packages, for exa
 
 `hope_training/whole_body_tracking` is the current Isaac/BeyondMimic training entry. The A3 `TrackingFlat` and `HOPEPingPong` forehand pipeline can train and export ONNX on the copied A3 URDF asset. Treat this as pipeline viability, not as an accepted quality baseline; use [gates/G05_isaac_training_first_loop.md](gates/G05_isaac_training_first_loop.md) for acceptance status.
 
+The same package now also contains a first-pass table-tennis physics/visualization task:
+
+- `source/whole_body_tracking/whole_body_tracking/tasks/tracking/`: motion-imitation and `HOPEPingPong` racket-target WBC training tasks.
+- `source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/`: `HOPE-TableTennis-AgibotA3-v0`, a full HOPE-frame table/net/ball/A3 scene with drag/Magnus hooks, 400 Hz physics, observations, and placeholder rewards for future returner work.
+- `scripts/play_table_tennis.py`: visualization/headless smoke runner for the table-tennis scene.
+
 Additional training config:
 
 - `hope_training/config/joint_order_agibot_a3.yaml`: current working 31-DOF A3 joint order for training/export alignment.

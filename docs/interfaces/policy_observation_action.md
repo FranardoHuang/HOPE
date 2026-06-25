@@ -6,7 +6,7 @@ Status: Draft
 
 The baseline policy should be compatible with the HITTER-style separation:
 
-- Planner provides target racket position, target racket velocity, and time to strike.
+- Planner provides target racket position, target racket velocity, target racket normal, and time to strike.
 - WBC policy combines planner target, robot state, and previous action.
 - Policy outputs desired joint positions.
 
@@ -20,12 +20,15 @@ PLUS the following appended HOPE terms:
 - `base_target_pos_b` (2)
 - `racket_target_pos_b` (3) — Unoise +/-0.02
 - `racket_target_vel_w` (3)
+- `racket_target_normal_w` (3)
 - `time_to_strike` (1)
 
 `swing_type` is omitted by default (it is constant per forehand/backhand policy).
 
 Notes / corrections:
 
+- Desired racket normal is now an actor observation in the current HOPE task. Actual racket normal is
+  still privileged and simulation-only.
 - "base forward vector" is NOT implemented; `projected_gravity` is the
   orientation cue.
 - The inherited BeyondMimic proprio terms include `base_lin_vel` (3), which
@@ -58,6 +61,25 @@ actor terms it adds the actual racket state computed via FK:
 - Decoder target = `action * action_scale + default_angle`, with per-joint
   `action_scale = 0.25 * effort_limit / stiffness`. This must match the deploy
   action decoder (`a3_action_scale`).
+
+## Table-Tennis Physics Scene Observation (experimental)
+
+`HOPE-TableTennis-AgibotA3-v0` is a G04/G08 physics/visualization scene, not the accepted deployment
+WBC policy. Its current actor observation is robot proprioception plus ball state in the base frame:
+
+- `base_lin_vel`
+- `base_ang_vel`
+- `projected_gravity`
+- `joint_pos_rel`
+- `joint_vel_rel`
+- `last_action`
+- `ball_pos_b`
+- `ball_vel_b`
+
+The critic mirrors these terms without observation noise. The action is A3 joint-position control with
+the same `AGIBOT_A3_ACTION_SCALE` rule used by the tracking task. If this scene becomes a returner
+training baseline, record dimensions, normalization, reward targets, and deploy compatibility here
+before treating it as G05/G07 relevant.
 
 ## Contract Knobs
 

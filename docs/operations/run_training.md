@@ -8,19 +8,24 @@ The training scaffold exists under:
 
 - `hope_training/whole_body_tracking`
 
-`TrackingFlat` and `HOPEPingPong` forehand training have run end-to-end on the copied Agibot A3 URDF asset (31 actuated DOF), including WandB logging, checkpoint save, and ONNX export. This proves the pipeline can run; it is NOT an accepted quality baseline. Every gate is still Partial/Not started.
+`TrackingFlat` and `HOPEPingPong` forehand training have run end-to-end on the copied Agibot A3 URDF asset (31 actuated DOF), including WandB logging, checkpoint save, and ONNX export. This proves the pipeline can run; it is NOT an accepted quality baseline. G04/G05 remain Partial, and G06/G07 are not accepted until sim-to-sim and dry-run deployment gates record verification.
 
 This branch adds:
 
 - a scrubbed `setup_train_env.sh` as the training shell setup source of truth (site paths are now overridable env vars).
+- source-first `HOPE_WBT_PYTHONPATH` ordering, so local `whole_body_tracking` edits beat stale installed copies.
 - richer live `Live/...` telemetry in WandB/TensorBoard from command, reward, termination, action, and env state.
 - ONNX export from training/eval inside the container.
+- `HOPE-TableTennis-AgibotA3-v0`, a first-pass Isaac Lab table/net/ball/A3 physics scene for G04 visualization and future G08 returner/spin experiments.
+- updated `HOPEPingPong` target/reward defaults with conditional exact-strike metrics and success-gated reference perturbation.
 
 ## Entry Files
 
 - `hope_training/whole_body_tracking/README.md`
 - `hope_training/whole_body_tracking/scripts/train.py`
 - `hope_training/whole_body_tracking/scripts/play.py`
+- `hope_training/whole_body_tracking/scripts/play_table_tennis.py`
+- `hope_training/whole_body_tracking/scripts/probe_metric.py`
 - `hope_training/whole_body_tracking/cfg/train.yaml`
 - `hope_training/whole_body_tracking/cfg/play.yaml`
 - `hope_training/whole_body_tracking/setup_train_env.sh`
@@ -119,6 +124,25 @@ hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
 
 Success means the env builds, PPO prints learning iterations, and rewards remain finite.
 
+## Table-Tennis Physics Scene Smoke Test
+
+This is a G04 scene/physics check, not the accepted G05 WBC baseline. It loads
+`HOPE-TableTennis-AgibotA3-v0`, serves a ball from the P2 half toward the P1-side A3, and verifies the
+table/net/ball frame plus drag/Magnus hooks.
+
+```bash
+hope_isaac_py scripts/play_table_tennis.py
+hope_isaac_py scripts/play_table_tennis.py --num_envs 9
+hope_isaac_py scripts/play_table_tennis.py --fix_base
+hope_isaac_py scripts/play_table_tennis.py --disable_aero
+hope_isaac_py scripts/play_table_tennis.py --magnus 0.1
+hope_isaac_py scripts/play_table_tennis.py --headless --steps 300
+```
+
+Expected behavior: the ball arcs with drag, bounces on the table, and travels toward the robot. With
+`--fix_base`, the pelvis stays pinned for a stable visualization. Without it, the robot may drift or
+fall because no balance/return policy exists yet.
+
 ## Baseline Training Commands
 
 Plain tracking first:
@@ -149,6 +173,16 @@ num_envs=4096 max_iterations=20000 seed=1
 
 `HOPEPingPong` trains ONE swing style per policy (forehand or backhand), chosen entirely by the `registry_name` reference clip.
 
+At startup, `scripts/train.py` prints:
+
+- the imported `whole_body_tracking` path,
+- the composed env-cfg source file,
+- every applied task override from `cfg/task/<name>.yaml`,
+- the post-override racket reward stds and target-sampling knobs.
+
+If a YAML key targets a missing env-cfg attribute, training now raises instead of silently ignoring the
+override. Treat these printed lines as part of the G05 verification record.
+
 ### ppo.yaml deltas on this branch
 
 - `max_iterations: 300000000000` is a train-FOREVER sentinel. Always pass `max_iterations=` on the CLI and stop manually when `strike_success` plateaus.
@@ -161,14 +195,24 @@ num_envs=4096 max_iterations=20000 seed=1
 
 ```yaml
 target_mode: reference_perturbed
-ref_perturb_pos: [0.15, 0.20, 0.15]
-ref_perturb_vel: [1.0, 1.0, 0.8]
-ref_perturb_normal: 0.30
+ref_perturb_pos: [0.08, 0.10, 0.08]
+ref_perturb_vel: [0.6, 0.6, 0.5]
+ref_perturb_normal: 0.20
 ref_perturb_curriculum_steps: 30000
 ref_perturb_curriculum_start: 0.15
+ref_perturb_success_gated: true
+ref_perturb_advance_threshold: 0.30
+ref_perturb_advance_rate: 1.0e-5
+exact_success_decay: 0.99
+exact_success_min_count: 50.0
 ```
 
 This is the current first-loop default because the old independent uniform box could sample targets the imitated swing never reaches, keeping `strike_success` at 0 even with reward shaping.
+
+In `reference_perturbed` mode, `base_target` is coupled to the racket target:
+`base_target_xy = racket_target_xy - reference_base_to_racket_xy`, then the YAML
+`base_target_x_range`/`base_target_y_range` add only small jitter (`[-0.10, 0.10]`). This avoids a base
+reward that fights arm reachability.
 
 The legacy uniform ranges (`pos_x [0.25,0.55]`, `pos_y [-0.45,0.45]`, `pos_z [0.70,1.15]`, `vel_x [1.5,4.0]`, ...) are still present but ignored unless `target_mode: uniform`. Treat them as PLACEHOLDER until validated against A3 right-arm IK reachability.
 
@@ -180,19 +224,29 @@ The legacy uniform ranges (`pos_x [0.25,0.55]`, `pos_y [-0.45,0.45]`, `pos_z [0.
 - `Live/Reward/<term>` — per-reward-term contributions.
 - `Live/Termination/*`, `Live/Action/*`, `Live/Env/*`.
 
-The real "is it learning to hit" signal is `strike_success` (fraction of strikes with racket position error < `strike_success_pos_thresh` = 0.075 m) and the `*_at_strike` metrics. Episode-wide errors are DILUTED by the long non-strike phase, so do not judge progress from them.
+The real "is it learning to hit" signal is the exact-strike metric group:
+`strike_pos_pass_exact`, `strike_vel_pass_exact`, `strike_normal_pass_exact`,
+`strike_composite_success_exact`, and `exact_strike_sample_count_decayed`. These are conditional
+sample-weighted pass rates at the exact strike frame. `strike_success` and the `*_at_strike` metrics are
+still useful, but episode-wide errors are diluted by the long non-strike phase, so do not judge progress
+from them.
 
 ## Reward Shaping (strike_success=0 fix)
 
 The reward kernel is `exp(-||err||^2 / std^2)`. With `std` set to the final acceptance tolerance, the reward is ~0 for any early error (a 50 cm error gives `exp(-44) ~ 0`), so there is no gradient and `strike_success` stays stuck at 0. The target-sampling fix above handles unreachable targets; the reward shaping here handles too-narrow early rewards.
 
-This branch widens the stds in `HOPEPingPong.yaml` so the reward gives a gradient from tens of cm out:
+The current `HOPEPingPong.yaml` values make the racket objective dominate early while keeping motion
+imitation as a soft prior:
 
-- `racket_position_std` 0.075 -> 0.35
-- `racket_velocity_std` 0.5 -> 1.2
-- `racket_normal_std` 0.262 -> 0.5
+- `racket_position_weight: 16.0`, `racket_position_std: 0.30`
+- `racket_velocity_weight: 4.0`, `racket_velocity_std: 0.5`
+- `racket_normal_weight: 4.0`, `racket_normal_std: 0.5`
+- `base_position_weight: 6.0`, `base_position_std: 0.3`
+- `motion_scale: 0.4` over the six inherited motion-imitation rewards
 
-These stds are DECOUPLED from `strike_success_pos_thresh` = 0.075: the acceptance metric still reports true success only below 7.5 cm.
+These stds are DECOUPLED from acceptance thresholds: the position metric still reports true success only
+below `strike_success_pos_thresh = 0.075 m`, velocity below `0.5 m/s`, and racket-normal error below
+`15 deg`.
 
 Optional later precision pass: once `strike_success` is non-trivial, tighten the stds back toward `0.075 / 0.5 / 0.262` and resume from the checkpoint.
 

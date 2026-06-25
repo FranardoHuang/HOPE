@@ -26,6 +26,11 @@ Landmark coordinates (from `hope_world_frame.yaml`):
 Current config source:
 
 - [`hope_ws/src/hope_bringup/config/hope_world_frame.yaml`](../../hope_ws/src/hope_bringup/config/hope_world_frame.yaml)
+- [`hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/geometry.py`](../../hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/geometry.py) for the Isaac table-tennis scene.
+
+For `HOPE-TableTennis-AgibotA3-v0`, the Isaac environment-local world frame is intentionally the HOPE
+frame: the table surface is `z = 0`, the floor is `z = -0.76`, and table/net landmarks match the values
+above. Do not introduce a table-center origin in that task without updating this file and G04.
 
 ## Mocap Frames
 

@@ -54,13 +54,35 @@ Done:
 - `reimplement.md` records that `TrackingFlat` and `HOPEPingPong` forehand training have run end-to-end on the copied A3 URDF asset, including wandb logging, checkpoint save, and `policy.onnx` export.
 - Commit `42489cd` adds `setup_train_env.sh`, richer WandB/live metrics, and in-container ONNX export support.
 - Commit `c951d9d` is integrated here: `HOPEPingPong` now defaults to `target_mode: reference_perturbed`, which samples racket targets around the reference motion's strike-frame racket pose/velocity/normal with a curriculum perturbation. This keeps the first RL target distribution reachable by construction while preserving the legacy uniform box as an explicit placeholder mode.
+- `origin/train_1` training updates are integrated here: `HOPEPingPong.yaml` now emphasizes the hitting objective (`racket_position_weight: 16`, `base_position_weight: 6`, `motion_scale: 0.4`), shrinks reference perturbations to `[0.08, 0.10, 0.08]` position and `[0.6, 0.6, 0.5]` velocity, couples the base target to the reference reach offset, and widens the strike reward window to `0.15 s`.
+- `RacketTargetCommand` now logs conditional exact-strike pass rates: `strike_pos_pass_exact`, `strike_vel_pass_exact`, `strike_normal_pass_exact`, `strike_composite_success_exact`, and `exact_strike_sample_count_decayed`. The success-gated perturbation curriculum advances from these exact-strike rates, not from diluted episode-wide errors.
+- The HOPE actor observation now includes desired `racket_target_normal_w`; actual racket pose/velocity/normal remains critic/reward-only simulation state.
+- `scripts/train.py` logs import provenance, env-cfg source, every applied task override, and post-override racket knobs; YAML keys that target missing env-cfg attributes raise instead of silently no-oping.
+- Generated ONNX policy artifacts remain ignored by asset policy unless a gate records an external artifact path.
 
 Not done:
 
 - This Codex shell has not independently reproduced the Isaac training run because the GPU/Isaac environment is not active here.
 - No accepted quality baseline is set yet; the recorded first loop proves pipeline viability, not policy strength.
-- Forehand/backhand reference availability, reference-perturbation ranges, optional uniform reachable target ranges, reward tuning, and stable recovery metrics still need formal acceptance.
+- Forehand/backhand reference availability, reference-perturbation ranges, optional uniform reachable target ranges, reward tuning, exact-strike pass rates, and stable recovery metrics still need formal acceptance.
 - Exact accepted run IDs, checkpoint paths, ONNX paths, and first quality metrics still need to be recorded in this gate.
+
+## Current Verification Commands
+
+GPU/Isaac environment, after `source setup_train_env.sh`:
+
+```bash
+hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
+  num_envs=32 max_iterations=3 logger=tensorboard run_name=smoke
+
+hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
+  num_envs=32 max_iterations=3 logger=tensorboard run_name=hope_smoke
+```
+
+Record the startup lines from `scripts/train.py` showing source provenance and applied overrides. For
+an accepted run, also record the WandB run ID, checkpoint path, exported ONNX path, and exact-strike
+pass metrics.
 
 ## Risks
 

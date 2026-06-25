@@ -27,7 +27,7 @@ ros2 launch vrpn_mocap client.launch.yaml server:=PLACEHOLDER_MOCAP_SERVER_IP po
 ros2 topic list | grep vrpn_mocap
 ```
 
-The HOPE relay maps these to `PPT` (table), `P1`, `P2`, and `/ball/point`. `PPT`/`P1`/`P2` are TODO(confirm) placeholders until verified against the live rig. For the ball, choose one mode:
+The HOPE relay maps these to `PPT` (table), `P1`, `P2`, and `/ball/point`. `PPT`/`P1`/`P2` are TODO(confirm) placeholders until verified against the live rig; one `train_1` rig observed `ppp2`/`ppp3` for robot labels, so do not assume the defaults are universal. For the ball, choose one mode:
 
 - Preferred: `ball_tracking_mode:=rigid_body ball_object:=Ball` when CMTracker exposes the ball as a named rigid body.
 - Fallback: `ball_tracking_mode:=auto` when the ball is only an unnamed moving marker; `ball_object` is ignored.

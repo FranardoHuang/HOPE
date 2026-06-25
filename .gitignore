@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 tmp/
+.codex-tmp/
+.vscode/
 vendor_assets/
 external_repos/
 build/

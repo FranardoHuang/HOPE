@@ -64,6 +64,7 @@ Use the GPU/Isaac environment for:
 - Isaac Sim / Isaac Lab
 - BeyondMimic training
 - motion replay
+- table-tennis physics/visualization scene checks (`scripts/play_table_tennis.py`)
 - policy evaluation
 - ONNX export from training/eval
 

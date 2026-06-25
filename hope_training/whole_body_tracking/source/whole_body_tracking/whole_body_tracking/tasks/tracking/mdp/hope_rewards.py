@@ -30,9 +30,10 @@ def _cmd(env: ManagerBasedRLEnv, command_name: str) -> RacketTargetCommand:
 
 
 def racket_position_tracking_exp(env: ManagerBasedRLEnv, command_name: str, std: float) -> torch.Tensor:
-    """Track racket center position near the strike time (FK actual vs desired, world frame)."""
+    """Track racket center position near strike using the target's swing-through trajectory."""
     cmd = _cmd(env, command_name)
-    error = torch.sum(torch.square(cmd.racket_pos_w - cmd.racket_target_pos_w), dim=-1)
+    target_pos_now = cmd.racket_target_pos_w - cmd.racket_target_vel_w * cmd.time_to_strike.unsqueeze(-1)
+    error = torch.sum(torch.square(cmd.racket_pos_w - target_pos_now), dim=-1)
     return torch.exp(-error / std**2) * cmd.strike_window.float()
 
 
