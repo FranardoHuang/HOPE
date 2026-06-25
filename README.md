@@ -101,7 +101,13 @@ The four `HOPE_*_Reference_Setup.md` documents and the `HOPE_AI_Challenge_2026_R
 
 ## Quickstart: Build & Run
 
-This repo has **no single environment** — work happens in three scopes (full matrix: [docs/operations/setup_environments.md](docs/operations/setup_environments.md)). A brand-new machine should follow the from-scratch runbook in [reimplement.md](reimplement.md); per-task commands live under [docs/operations/](docs/operations/).
+This repo has **no single environment** — work happens in three scopes (full matrix: [docs/operations/setup_environments.md](docs/operations/setup_environments.md)). A new contributor, new computer, or agent should start from [docs/START_HERE.md](docs/START_HERE.md), then follow the relevant operation doc. Use [reimplement.md](reimplement.md) only as the long-form runbook when a gate or operation doc points to a specific step.
+
+For a training machine, the practical index is:
+
+1. [docs/START_HERE.md](docs/START_HERE.md) for the current gate map and task entry points.
+2. [docs/operations/run_training.md](docs/operations/run_training.md) for Isaac/BeyondMimic setup, smoke tests, and training commands.
+3. [docs/operations/setup_local_sync.md](docs/operations/setup_local_sync.md) for ignored/private assets missing from a fresh clone.
 
 **1. ROS 2 workspace** (planner, mocap, bringup) — ROS 2 Jazzy; see [docs/operations/build_and_test.md](docs/operations/build_and_test.md):
 
