@@ -57,7 +57,9 @@ Done:
 - The branch now includes an A3 Isaac/BeyondMimic robot config using the Agibot-provided ping-pong URDF path, official joint/body names, deploy-transcribed PD gains, standing pose, and action-scale logic.
 - A working 31-DOF joint-order YAML exists at `hope_training/config/joint_order_agibot_a3.yaml`.
 - `reimplement.md` records that the A3 task registers and the env launches headless with finite rewards on the copied A3 ping-pong URDF asset.
-- `origin/train_1` adds `HOPE-TableTennis-AgibotA3-v0`, a HOPE-frame Isaac Lab table/net/ball/A3 scene with modular geometry constants, drag and optional Magnus force hooks, table/net/floor contact materials, 400 Hz physics, CCD enabled, ball serve reset, and placeholder returner rewards.
+- `origin/train_1` adds `HOPE-TableTennis-AgibotA3-v0`, a HOPE-frame Isaac Lab table/net/ball/A3 scene with modular geometry constants, optional drag and Magnus force hooks, table/net/floor contact materials, 400 Hz physics, CCD enabled, ball serve reset, and placeholder returner rewards.
+- The table-tennis scene now includes a tracked Purdue PACE table/net USD visual overlay under `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/table_usd/`. Physics still comes from invisible cuboid colliders; the USD is visual-only.
+- Table-tennis ball/table contact now follows Purdue PACE materials by default: ball mass `3.4 g`, ball restitution/friction `0.9/0.1`, table restitution/friction `0.95/0.4`, multiplicative combine for an effective ball-table normal restitution of `0.855`. HOPE-calibrated aero drag is available but off by default for Purdue parity.
 - `tests/test_table_tennis_geometry.py` covers table/frame geometry and pure drag/Magnus math; the drag/Magnus tests skip automatically if host `torch` is missing.
 
 Not done:
@@ -76,6 +78,7 @@ Plain host checks:
 ```bash
 python3 hope_training/whole_body_tracking/tests/test_table_tennis_geometry.py
 python3 -m py_compile hope_training/whole_body_tracking/scripts/play_table_tennis.py
+python3 -m py_compile hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/*.py
 ```
 
 GPU/Isaac checks, inside the sourced training environment:
@@ -83,6 +86,7 @@ GPU/Isaac checks, inside the sourced training environment:
 ```bash
 hope_isaac_py scripts/play_table_tennis.py --headless --steps 300
 hope_isaac_py scripts/play_table_tennis.py --fix_base
+hope_isaac_py scripts/play_table_tennis.py --enable_aero --headless --steps 300
 ```
 
 ## Risks

@@ -12,6 +12,7 @@ Track:
 - Small curated calibration samples.
 - Source papers and reference documents when redistribution is allowed.
 - Small metadata files that explain how to obtain or verify local assets.
+- Small runtime visual assets that are required for a task to load after a fresh clone, when license permits and size is modest.
 
 ## Do Not Track In Normal Git
 
@@ -49,6 +50,14 @@ The complete original payload is kept locally under:
 - `vendor_assets/agibot/a3_deploy_example_full/`
 
 If a command depends on a file inside `vendor_assets/`, the operation doc must say so and give the expected path.
+
+## Tracked Small Runtime Visual Assets
+
+The table-tennis Isaac scene tracks a small Purdue PACE table/net USD visual overlay under:
+
+- `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/table_usd/`
+
+This folder is intentionally committed as ordinary git blobs, not Git LFS pointers, because it is a hard runtime dependency for `HOPE-TableTennis-AgibotA3-v0` visualization and is small enough for normal git. Its local `.gitattributes` disables the repo-root USD LFS filter for that folder. The included license file records the Purdue PACE MIT license. Heavy generated USDs, converted robot assets, logs, checkpoints, videos, and policy exports still belong in ignored local roots unless the team adopts an artifact system.
 
 ## External Repos
 

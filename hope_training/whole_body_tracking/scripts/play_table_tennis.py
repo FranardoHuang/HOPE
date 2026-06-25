@@ -7,7 +7,7 @@ physics (ball flight, drag, table/net bounce) and the scene layout before traini
 Run inside the ``grasping`` distrobox after ``source setup_train_env.sh`` (which defines ``hope_isaac_py``,
 the Isaac Python launcher with the working-tree PYTHONPATH):
 
-    # interactive window (default: 1 env, robot free-standing, aerodynamics on)
+    # interactive window (default: 1 env, robot free-standing, aerodynamics OFF -- Purdue PACE parity)
     hope_isaac_py scripts/play_table_tennis.py
 
     # several courts at once
@@ -16,8 +16,8 @@ the Isaac Python launcher with the working-tree PYTHONPATH):
     # pin the robot upright (stable view of the ball physics while no balance policy exists)
     hope_isaac_py scripts/play_table_tennis.py --fix_base
 
-    # compare flight with/without aerodynamic drag, or enable Magnus (spin) lift
-    hope_isaac_py scripts/play_table_tennis.py --disable_aero
+    # turn ON the HOPE-calibrated air drag (off by default), or enable Magnus (spin) lift
+    hope_isaac_py scripts/play_table_tennis.py --enable_aero
     hope_isaac_py scripts/play_table_tennis.py --magnus 0.1
 
 This uses the standard Isaac Lab ``AppLauncher`` standalone pattern (no Hydra/wandb), so it runs without
@@ -33,7 +33,8 @@ from isaaclab.app import AppLauncher
 parser = argparse.ArgumentParser(description="Visualize the HOPE table-tennis scene.")
 parser.add_argument("--num_envs", type=int, default=1, help="Number of parallel courts to spawn.")
 parser.add_argument("--fix_base", action="store_true", help="Pin the robot pelvis (stable visualization).")
-parser.add_argument("--disable_aero", action="store_true", help="Disable ball aerodynamic drag.")
+parser.add_argument("--disable_aero", action="store_true", help="Disable ball aerodynamic drag (default: already off, Purdue PACE parity).")
+parser.add_argument("--enable_aero", action="store_true", help="Enable the HOPE-calibrated ball aerodynamic drag (off by default).")
 parser.add_argument(
     "--magnus", type=float, default=None, help="Magnus (spin lift) coefficient; also adds serve spin."
 )
@@ -65,7 +66,11 @@ def main() -> None:
         env_cfg.scene.robot.spawn.fix_base = True
     if args_cli.disable_aero:
         env_cfg.ball_aerodynamics.enabled = False
+    if args_cli.enable_aero:
+        env_cfg.ball_aerodynamics.enabled = True
     if args_cli.magnus is not None:
+        # Magnus lift lives in the aero callback, which is off by default now — turn it on.
+        env_cfg.ball_aerodynamics.enabled = True
         env_cfg.ball_aerodynamics.magnus_coefficient = float(args_cli.magnus)
         # Give the served ball some spin so the Magnus term is actually exercised.
         env_cfg.events.serve_ball.params["serve_cfg"].spin_range = (-150.0, 150.0)

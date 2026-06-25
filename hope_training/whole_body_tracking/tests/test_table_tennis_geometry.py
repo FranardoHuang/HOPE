@@ -43,7 +43,8 @@ def test_table_dimensions_match_ittf():
     assert geometry.NET_X == 1.37
     assert geometry.NET_HEIGHT == 0.1525
     assert geometry.BALL_RADIUS == 0.02
-    assert geometry.BALL_MASS == 0.0027
+    # Ball mass follows Purdue PACE (3.4 g), not the 2.7 g ITTF ball.
+    assert geometry.BALL_MASS == 0.0034
 
 
 def test_hope_frame_landmarks():

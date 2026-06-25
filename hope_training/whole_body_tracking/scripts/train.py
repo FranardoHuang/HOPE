@@ -109,15 +109,13 @@ def _set_reward(rewards, name, weight, std, applied):
 # actually requested racket overrides before requiring the command to exist).
 _RACKET_KEYS = (
     "strike_phase", "strike_window_s", "strike_success_pos_thresh",
-    "strike_success_vel_thresh", "strike_success_normal_thresh_deg",
     "pos_x_range", "pos_y_range", "pos_z_range",
     "vel_x_range", "vel_y_range", "vel_z_range",
     "base_target_x_range", "base_target_y_range",
     "normal_mode", "forehand_on_negative_y", "mount_normal_axis", "mount_normal_sign",
     "target_mode", "ref_perturb_pos", "ref_perturb_vel", "ref_perturb_normal",
     "ref_perturb_curriculum_steps", "ref_perturb_curriculum_start",
-    "ref_perturb_success_gated", "ref_perturb_advance_threshold", "ref_perturb_advance_rate",
-    "exact_success_decay", "exact_success_min_count",
+    "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "debug_reward_logging",
 )
 
 
@@ -160,6 +158,12 @@ def _apply_task_overrides(env_cfg, task):
     if rw is not None:
         R = env_cfg.rewards
         _set_reward(R, "racket_position", _get(rw, "racket_position_weight"), _get(rw, "racket_position_std"), applied)
+        # Ablation B: swap the racket-position term to the no-swing-through (static strike-point) variant.
+        if _as_bool(_get(rw, "racket_position_static", False)) and _get(rw, "racket_position_static") is not None:
+            from whole_body_tracking.tasks.tracking import mdp as _mdp
+            _require(hasattr(R, "racket_position"), "rewards.racket_position")
+            R.racket_position.func = _mdp.racket_position_tracking_static_exp
+            applied.append("rewards.racket_position.func=racket_position_tracking_static_exp")
         _set_reward(R, "racket_velocity", _get(rw, "racket_velocity_weight"), _get(rw, "racket_velocity_std"), applied)
         _set_reward(R, "racket_normal", _get(rw, "racket_normal_weight"), _get(rw, "racket_normal_std"), applied)
         _set_reward(R, "base_position", _get(rw, "base_position_weight"), _get(rw, "base_position_std"), applied)
@@ -212,8 +216,6 @@ def _apply_task_overrides(env_cfg, task):
             _set_attr(C, "strike_phase", _get(rk, "strike_phase"), float, applied, "racket_target")
             _set_attr(C, "strike_window_s", _get(rk, "strike_window_s"), float, applied, "racket_target")
             _set_attr(C, "strike_success_pos_thresh", _get(rk, "strike_success_pos_thresh"), float, applied, "racket_target")
-            _set_attr(C, "strike_success_vel_thresh", _get(rk, "strike_success_vel_thresh"), float, applied, "racket_target")
-            _set_attr(C, "strike_success_normal_thresh_deg", _get(rk, "strike_success_normal_thresh_deg"), float, applied, "racket_target")
             _set_range(C, "racket_pos_x_range", _get(rk, "pos_x_range"), applied, "racket_target")
             _set_range(C, "racket_pos_y_range", _get(rk, "pos_y_range"), applied, "racket_target")
             _set_range(C, "racket_pos_z_range", _get(rk, "pos_z_range"), applied, "racket_target")
@@ -233,11 +235,12 @@ def _apply_task_overrides(env_cfg, task):
             _set_attr(C, "ref_perturb_normal", _get(rk, "ref_perturb_normal"), float, applied, "racket_target")
             _set_attr(C, "ref_perturb_curriculum_steps", _get(rk, "ref_perturb_curriculum_steps"), int, applied, "racket_target")
             _set_attr(C, "ref_perturb_curriculum_start", _get(rk, "ref_perturb_curriculum_start"), float, applied, "racket_target")
-            _set_attr(C, "ref_perturb_success_gated", _get(rk, "ref_perturb_success_gated"), _as_bool, applied, "racket_target")
             _set_attr(C, "ref_perturb_advance_threshold", _get(rk, "ref_perturb_advance_threshold"), float, applied, "racket_target")
             _set_attr(C, "ref_perturb_advance_rate", _get(rk, "ref_perturb_advance_rate"), float, applied, "racket_target")
-            _set_attr(C, "exact_success_decay", _get(rk, "exact_success_decay"), float, applied, "racket_target")
-            _set_attr(C, "exact_success_min_count", _get(rk, "exact_success_min_count"), float, applied, "racket_target")
+            # Stage slow->fast hitting: scale the reference racket-velocity target (<1.0 trains slower hits).
+            _set_attr(C, "ref_vel_scale", _get(rk, "ref_vel_scale"), float, applied, "racket_target")
+            # Debug logging (sign verification + raw/gated reward kernels). Off for production runs.
+            _set_attr(C, "debug_reward_logging", _get(rk, "debug_reward_logging"), _as_bool, applied, "racket_target")
 
     # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
     # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.

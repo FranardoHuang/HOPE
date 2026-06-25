@@ -8,6 +8,8 @@ Some required assets are too large or too environment-specific for normal git. T
 
 These files and folders are not provided by `git clone`, `git pull`, or normal branch checkout. A new machine needs restore/copy/sync steps for any gate that depends on them.
 
+Small tracked runtime assets, such as the Purdue PACE table/net USD visual overlay under `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/table_usd/`, do not need a manual restore step; they should appear after a normal clone or pull.
+
 ## Current Local Assets
 
 | Path | Purpose | Source | Required By |

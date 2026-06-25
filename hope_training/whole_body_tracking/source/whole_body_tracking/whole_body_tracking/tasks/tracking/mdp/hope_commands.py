@@ -222,6 +222,21 @@ class RacketTargetCommand(CommandTerm):
             self.metrics[f"racket_pos_error_{axis}"] = torch.zeros(self.num_envs, device=self.device)
             self.metrics[f"racket_vel_error_{axis}"] = torch.zeros(self.num_envs, device=self.device)
 
+        # --- DEBUG: swing-through sign check + raw/gated reward kernels (cfg.debug_reward_logging) ---
+        # err_minus uses the CURRENT (correct) swing-through form target - vel*t_to_strike; err_plus uses
+        # the FLIPPED form target + vel*t_to_strike. In-window we expect err_minus < err_plus (sign OK) and
+        # at the exact strike (t_to_strike~0) the two collapse together. raw/gated are written by the reward
+        # terms in hope_rewards.py. All held over the relevant mask so the reset-mean is the in-window value.
+        if self.cfg.debug_reward_logging:
+            for _k in (
+                "dbg_err_minus_win", "dbg_err_plus_win", "dbg_err_minus_exact", "dbg_err_plus_exact",
+                "dbg_racket_pos_raw", "dbg_racket_pos_gated",
+                "dbg_racket_vel_raw", "dbg_racket_vel_gated",
+                "dbg_racket_normal_raw", "dbg_racket_normal_gated",
+                "dbg_base_raw", "dbg_base_gated",
+            ):
+                self.metrics[_k] = torch.zeros(self.num_envs, device=self.device)
+
     # ------------------------------------------------------------------ #
     # CommandTerm API
     # ------------------------------------------------------------------ #
@@ -363,7 +378,7 @@ class RacketTargetCommand(CommandTerm):
         self.racket_target_pos_w[env_ids] = origins + self._ref_racket_pos_rel.unsqueeze(0) + dpos
 
         dvel = (torch.rand(n, 3, device=dev) * 2.0 - 1.0) * vel_h
-        self.racket_target_vel_w[env_ids] = self._ref_racket_vel_w.unsqueeze(0) + dvel
+        self.racket_target_vel_w[env_ids] = self._ref_racket_vel_w.unsqueeze(0) * self.cfg.ref_vel_scale + dvel
 
         dnrm = (torch.rand(n, 3, device=dev) * 2.0 - 1.0) * nrm_h
         normal = self._ref_racket_normal_w.unsqueeze(0) + dnrm
@@ -515,6 +530,26 @@ class RacketTargetCommand(CommandTerm):
         in_win = self.strike_window
         exact_strike = torch.abs(self.time_to_strike) <= (0.5 * self._env.step_dt + 1e-6)
         self.metrics["exact_strike_hit_rate"] = exact_strike.float()
+
+        # --- DEBUG: swing-through sign verification (cfg.debug_reward_logging) -----------------------
+        # err_minus = ||racket_pos - (target - vel*t_to_strike)||  (the CURRENT form used by the reward)
+        # err_plus  = ||racket_pos - (target + vel*t_to_strike)||  (the FLIPPED form the user suspected)
+        # Held over the strike window / exact strike so the reset-mean reports the in-window value. Expect
+        # err_minus_win < err_plus_win (sign correct) and err_minus_exact ~= err_plus_exact (t~0 collapse).
+        if self.cfg.debug_reward_logging:
+            _ttf = self.time_to_strike.unsqueeze(-1)
+            _tp_minus = self.racket_target_pos_w - self.racket_target_vel_w * _ttf
+            _tp_plus = self.racket_target_pos_w + self.racket_target_vel_w * _ttf
+            _err_minus = torch.norm(self.racket_pos_w - _tp_minus, dim=-1)
+            _err_plus = torch.norm(self.racket_pos_w - _tp_plus, dim=-1)
+            self.metrics["dbg_err_minus_win"] = torch.where(in_win, _err_minus, self.metrics["dbg_err_minus_win"])
+            self.metrics["dbg_err_plus_win"] = torch.where(in_win, _err_plus, self.metrics["dbg_err_plus_win"])
+            self.metrics["dbg_err_minus_exact"] = torch.where(
+                exact_strike, _err_minus, self.metrics["dbg_err_minus_exact"]
+            )
+            self.metrics["dbg_err_plus_exact"] = torch.where(
+                exact_strike, _err_plus, self.metrics["dbg_err_plus_exact"]
+            )
         self.metrics["racket_pos_error_exact_strike"] = torch.where(
             exact_strike, pos_err, self.metrics["racket_pos_error_exact_strike"]
         )
@@ -725,6 +760,20 @@ class RacketTargetCommandCfg(CommandTermCfg):
     ref_perturb_success_gated: bool = True
     ref_perturb_advance_threshold: float = 0.30  # widen once smoothed exact-strike composite success > this
     ref_perturb_advance_rate: float = 1.0e-5  # scale increment per control step while above threshold
+
+    # --- reference velocity scaling (stage slow -> fast hitting) ---
+    # The sampled racket-velocity target is `ref_vel_scale * reference_vel + perturbation`. The reference
+    # forehand clip strikes at ~6 m/s; set <1.0 to train a slower, more controllable hit FIRST (e.g. 0.6
+    # -> ~3.6 m/s) and ramp back to 1.0 once the slow strike is accurate. NOTE: at scale!=1.0 the target
+    # velocity no longer equals the imitated swing's velocity, so a perfect imitator no longer matches it
+    # exactly (the "reachable by construction" guarantee holds for position/normal, not scaled velocity).
+    ref_vel_scale: float = 1.0
+
+    # --- debug logging (sign verification + raw/gated reward kernels) ---
+    # When True, RacketTargetCommand logs dbg_err_{minus,plus}_{win,exact} (swing-through sign check) and
+    # the reward terms log dbg_{racket_pos,racket_vel,racket_normal,base}_{raw,gated}. Pure logging; no
+    # behaviour change. Turn off for production runs (extra wandb scalars).
+    debug_reward_logging: bool = False
 
     # --- conditional exact-strike success metric (logging + curriculum gating) ---
     # The logged strike_*_pass_exact / strike_composite_success_exact are a sample-weighted EMA of the

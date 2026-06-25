@@ -49,6 +49,7 @@ The same package now also contains a first-pass table-tennis physics/visualizati
 
 - `source/whole_body_tracking/whole_body_tracking/tasks/tracking/`: motion-imitation and `HOPEPingPong` racket-target WBC training tasks.
 - `source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/`: `HOPE-TableTennis-AgibotA3-v0`, a full HOPE-frame table/net/ball/A3 scene with drag/Magnus hooks, 400 Hz physics, observations, and placeholder rewards for future returner work.
+- `source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/table_usd/`: tracked, small Purdue PACE table/net USD visual overlay used by the table-tennis scene; physics remains owned by the task's cuboid colliders.
 - `scripts/play_table_tennis.py`: visualization/headless smoke runner for the table-tennis scene.
 
 Additional training config:

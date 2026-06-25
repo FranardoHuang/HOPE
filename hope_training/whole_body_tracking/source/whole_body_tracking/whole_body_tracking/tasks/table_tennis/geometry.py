@@ -48,10 +48,10 @@ LINE_WIDTH: float = 0.02            # painted boundary / center line width
 LINE_THICKNESS: float = 0.001       # painted line slab thickness (sits just above the surface)
 
 ##
-# Ball (40 mm ITTF). Mirrors hope_planner.constants.BallPhysics.
+# Ball (40 mm). Radius matches both ITTF and Purdue PACE; mass follows Purdue PACE (see below).
 ##
-BALL_RADIUS: float = 0.02           # 40 mm diameter
-BALL_MASS: float = 0.0027           # 2.7 g
+BALL_RADIUS: float = 0.02           # 40 mm diameter (20 mm radius)
+BALL_MASS: float = 0.0034           # 3.4 g — Purdue PACE value (heavier than the 2.7 g ITTF ball)
 
 ##
 # Coordinate landmarks in the HOPE frame.
@@ -120,34 +120,41 @@ class ServeConfig:
 class BounceMaterials:
     """PhysX contact-material parameters for the ball and the static surfaces.
 
-    NOTE on restitution: PhysX applies a single (normal) restitution per contact pair, combined from
-    the two materials' coefficients. With ``restitution_combine_mode="multiply"`` everywhere, the
-    effective normal restitution of a ball<->surface bounce is ``ball.restitution * surface.restitution``.
-    We therefore set the *ball* restitution to the table normal-restitution target ``C_v = 0.85`` and the
-    *table* restitution to 1.0, so a ball<->table bounce reproduces C_v, while the net (0.1) kills the
-    ball and the floor (0.4) bounces it modestly.
+    The ball and table values follow the **Purdue PACE** model
+    (``legged_lab/assets/table_tennis/{ball,table}.py``): table ``restitution = 0.95`` / ``friction = 0.4``
+    and ball ``restitution = 0.9`` / ``friction = 0.1``.
 
-    The planner's horizontal restitution ``C_h = 0.75`` and ball<->racket ``C_r = 0.88`` are *not*
-    reproduced exactly: tangential (horizontal) velocity loss is governed by PhysX friction, not by a
-    restitution coefficient, and the racket inherits the robot's contact material. Matching C_h / C_r
-    exactly is a calibration TODO (a sim analogue of ``hope_planner.calibrate_ball_physics``); the
-    values below give a visibly correct bounce as the first-pass default. All knobs live here so a
-    calibration pass only edits this one place.
+    NOTE on combine modes: every material here is created with ``*_combine_mode="multiply"`` (see
+    ``table_tennis_env_cfg._surface_material``), so the *effective* coefficient of a ball<->surface
+    contact is the **product** of the two materials' values. That product is what lets the net kill the
+    ball. Effective ball<->surface **normal restitutions** are therefore:
+
+        table  0.9 * 0.95 = 0.855      floor  0.9 * 0.4 = 0.36      net  0.9 * 0.1 = 0.09
+
+    (Purdue itself uses a single material for the whole table+net under PhysX-default averaging, so in
+    their sim the ball *bounces* off the net. We keep multiply + a separate low-restitution net so the
+    ball still dies on a net touch — more correct for match play. Adopting Purdue's net behavior would
+    mean raising ``net_restitution`` to 0.95.)
+
+    Friction is likewise multiplicative; with the low Purdue ball friction (0.1) the tangential
+    (horizontal) bounce is light. Exact horizontal-/racket-restitution matching to the HOPE planner
+    (``C_h = 0.75`` / ``C_r = 0.88``) remains a calibration TODO. All knobs live here so a calibration
+    pass only edits this one place.
     """
 
-    # Ball (dynamic). restitution == C_v target (vertical/normal restitution).
-    ball_restitution: float = 0.85
-    ball_static_friction: float = 0.5
-    ball_dynamic_friction: float = 0.5
-    # Table top.
-    table_restitution: float = 1.0
-    table_static_friction: float = 0.6
-    table_dynamic_friction: float = 0.5
+    # Ball (dynamic) — Purdue PACE values.
+    ball_restitution: float = 0.9
+    ball_static_friction: float = 0.1
+    ball_dynamic_friction: float = 0.1
+    # Table top — Purdue PACE TableMaterial.
+    table_restitution: float = 0.95
+    table_static_friction: float = 0.4
+    table_dynamic_friction: float = 0.4
     # Floor.
     floor_restitution: float = 0.4
     floor_static_friction: float = 0.8
     floor_dynamic_friction: float = 0.8
-    # Net (low restitution so the ball dies on contact).
+    # Net (low restitution so the ball dies on contact; kept separate from Purdue's single material).
     net_restitution: float = 0.1
     net_static_friction: float = 0.5
     net_dynamic_friction: float = 0.5
