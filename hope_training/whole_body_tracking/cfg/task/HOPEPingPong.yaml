@@ -27,44 +27,57 @@ defaults:
 #   num_envs: 2048
 
 # ---- reward weights / kernel std (EDIT) ----------------------------------
-# PATH A (2026-06-24): flip the objective so HITTING dominates, not imitation.
-# Diagnosis from the 2026-06-24_04-43 forehand run (tensorboard): episode reward motion≈4.2 vs
-# racket≈0.4 (~10x), so the optimum was literally "do the animation". Worse, racket_pos_error_at_strike
-# ≈0.5 m (Y-dominated) while std=0.15 → exp(-(0.5/0.15)^2)≈0, i.e. NO gradient at the real error scale.
-# Fixes: (1) widen std so there is a smooth gradient from ~40 cm in; (2) raise racket/base weights so
-# the strike-window gradient can actually pull the swing off the reference (racket only scores inside
-# the ±strike_window, so it needs a high weight to compete with motion that scores every step);
-# (3) base_position up hard — the base was drifting ~25 cm in Y, which alone explains most of the miss.
-# Targets are also shrunk (see racket: below) so strike_success can leave 0. Old A/B values in comments.
+# PATH B (2026-06-25): fix the kernel-std mis-scaling that left velocity unlearnable.
+# Diagnosis (current forehand run): the policy discovers the swing ~iter 1.45k but converges to
+# fast-but-wrong — racket_speed≈5 m/s, vel-vector error≈1.4 m/s, pos error drifting 4→10 cm,
+# strike_vel_pass_exact≈0.04, composite≈0.015. Root cause is the two racket kernels are scaled wrong
+# for the CURRENT error regime:
+#   * VELOCITY std=0.5 with |Δv|≈1.4 → exp(-1.4²/0.5²)=exp(-7.8)≈0: dead reward, no gradient. The prior
+#     1.5→0.5 change KILLED velocity learning (tightening std when far from target removes the gradient).
+#     REVERT toward ~1.2; only tighten as racket_vel_error_exact_strike actually falls.
+#   * POSITION std=0.30 is flat 4–10 cm (exp(-0.11)=0.89 @10cm), so nothing holds position tight and it
+#     drifts up. Tighten to 0.15 for a real gradient in the operating band.
+# Principle: set each std to BRACKET the current error (gradient), then tighten via curriculum — never
+# jump straight to the acceptance tolerance. Also raise motion_scale (tame the violent swing) and
+# penalties (limit/torque/contacts) since hitting reward dwarfed them. Old PATH A values in comments.
 rewards:
-  racket_position_weight: 16.0    # was 4.0  — compete with motion≈4.2 (racket only scores in-window)
-  racket_position_std: 0.30       # was 0.15 — gradient at 20-40cm (exp(-(0.4/0.3)^2)=0.17), not flat exp(-11)
-  racket_velocity_weight: 4.0     # was 2.0
-  racket_velocity_std: 0.5        # was 1.5 — ALIGN to the 0.5 m/s exact-strike success threshold. With the
-                                  # metric fix verified, velocity is the lone bottleneck (exact-strike vel<0.5
-                                  # pass ~38% vs pos ~71% / normal ~98%); std=1.5 saturated the reward at the
-                                  # ~m/s error scale so there was no gradient to push velocity inside 0.5 m/s.
-  racket_normal_weight: 4.0       # was 2.0
-  racket_normal_std: 0.5          # rad (already fine at exact strike ~5.6 deg)
-  base_position_weight: 6.0       # was 1.0  — stop the ~25cm Y base drift that compounds the racket miss
-  base_position_std: 0.3
+  racket_position_weight: 8.0     # PATH A: 16.0 — lower so the swing isn't slammed to joint limits
+  racket_position_std: 0.15       # PATH A: 0.30 — gradient in the 4–10cm band (0.30 was flat there)
+  racket_velocity_weight: 4.0     # PATH C (2026-06-25): 2.0 → 4.0 — give the velocity goal weight again
+  racket_velocity_std: 1.2        # keep; with ref_vel_scale=0.6 below the realized velE~1.4 lands in the live band
+  racket_normal_weight: 3.0       # PATH A: 4.0
+  racket_normal_std: 0.30         # rad (~17°); already passing ~0.85+, keep loose
+  base_position_weight: 4.0       # PATH A: 6.0
+  base_position_std: 0.25
+  # Ablation B (no swing-through): set true to track the bare strike point instead of the moving
+  # swing-through line (decouples position from timing/velocity). Default false = standard swing-through.
+  racket_position_static: false
 
   # ---- motion imitation prior (the 6 motion_* terms; base weights sum ≈5.0) ----
-  # motion_scale multiplies ALL six motion weights at once — the main lever to demote imitation to a
-  # soft prior so the racket goal can win. 1.0 = unchanged; lower = weaker imitation. PATH A cut to 0.4
-  # (motion sum 5.0->2.0). Don't go too low or it deviates/falls and trips the anchor terminations —
-  # watch Mean reward / episode length, raise back toward 0.6 if it gets unstable.
-  motion_scale: 0.4
+  # motion_scale multiplies ALL six motion weights at once. PATH A cut to 0.4; raise to 0.6 here — a
+  # stronger imitation anchor keeps the swing close to the controlled reference (imitation is NOT the
+  # bottleneck, it improves). Watch Mean reward / episode length; lower again if it over-constrains.
+  # PATH C: 0.6 → 0.45 — the ablation-B run showed motion_scale=0.6 (+ low racket weight) suppressed the
+  # swing entirely (racket_speed plateaued ~1.6 m/s vs ~5 m/s target). Imitation alone does NOT reproduce
+  # the 5-6 m/s tip speed, so demote it again to let the velocity goal pull the swing.
+  # PATH C2 (2026-06-25): 0.45 → 0.40 — pathC_velrevive revived velocity (comp 0.035, posPass 0.36 by
+  # ~it1000) but then relapsed into the B "stand-and-imitate" attractor: episode length ran away 42→284,
+  # and posPass/posEx regressed (0.36→0.32 / 0.057→0.090) while velPass/comp stalled (~0.10 / ~0.035).
+  # Long episodes let per-step motion reward dwarf the in-window racket reward, so demote imitation once
+  # more. If eplen still runs away, next structural fix is capping episode_length_s to ~1 clip (~1.9s).
+  motion_scale: 0.30
   # per-term override also available (applied before motion_scale), e.g.:
   #   motion_body_pos_weight: 1.0   motion_body_pos_std: 0.3   motion_body_ori_weight: ...
   #   motion_body_lin_vel_weight/_std   motion_body_ang_vel_weight/_std
   #   motion_global_anchor_pos_weight/_std   motion_global_anchor_ori_weight/_std
 
   # ---- penalties / regularization (negative weights; energy, smoothness, safety) ----
-  joint_torques_weight: -0.00001  # joint torque L2 (energy)
-  action_rate_weight: -0.1        # base -0.1; action smoothness (more negative = smoother but slower)
-  joint_limit_weight: -10.0       # base -10.0; penalty near joint limits (keep strong for safety)
-  undesired_contacts_weight: -0.1 # base -0.1; non-foot/hand body contacts
+  # Raised across the board: post-swing-onset the hit reward dwarfed these, so the policy slammed joints
+  # to limits and spiked torque. These tame aggressiveness without killing the swing.
+  joint_torques_weight: -0.00003  # PATH A: -0.00001
+  action_rate_weight: -0.15       # PATH A: -0.1
+  joint_limit_weight: -15.0       # PATH A: -10.0
+  undesired_contacts_weight: -0.2 # PATH A: -0.1
 
 # ---- racket target sampling (EDIT) ---------------------------------------
 # Full forehand workspace (no curriculum / no warmup narrowing). These are still PLACEHOLDER ranges —
@@ -73,8 +86,13 @@ rewards:
 # workspace. pos_y straddles the robot center (forehand on -Y, see forehand_on_negative_y).
 racket:
   strike_phase: 0.46              # fraction of the clip where the paddle meets the ball
-  strike_window_s: 0.15           # PATH A: was 0.1 — a bit more in-window gradient time
+  strike_window_s: 0.12           # PATH B: was 0.15 — shrink the swept swing-through target (0.72m vs 0.9m), less timing dilution
   strike_success_pos_thresh: 0.075  # m; wandb "strike_success" = fraction of strikes with racket pos error below this
+
+  # Debug: log dbg_err_{minus,plus}_{win,exact} (swing-through SIGN check) + dbg_*_{raw,gated} reward
+  # kernels. Run ~200 iters to confirm err_minus_win < err_plus_win (sign correct) and dbg_racket_vel_raw
+  # ~0 (velocity kernel dead). Turn OFF for production (extra wandb scalars, tiny overhead).
+  debug_reward_logging: false
 
   # --- rank 5: reference-coupled target sampling (the strike_success=0 fix) ----------------------
   # The previous "uniform" box was sampled INDEPENDENTLY of the imitated swing, and the forehand
@@ -84,11 +102,25 @@ racket:
   # reference_perturbed sets target = reference racket state @ strike (pos/vel/normal, same FK as the
   # actual racket) + a curriculum-scaled perturbation: reachable by construction, widening over time.
   target_mode: reference_perturbed
-  ref_perturb_pos: [0.08, 0.10, 0.08]   # PATH A: was [0.15,0.20,0.15] — shrink to a REACHABLE range (esp Y) so strike_success can leave 0; widen again once it climbs
-  ref_perturb_vel: [0.6, 0.6, 0.5]      # PATH A: was [1.0,1.0,0.8]
-  ref_perturb_normal: 0.20              # PATH A: was 0.30
-  ref_perturb_curriculum_steps: 30000   # control steps to ramp perturbation start->full (~1250 iters)
-  ref_perturb_curriculum_start: 0.15    # fraction of the final perturbation at step 0
+  ref_perturb_pos: [0.06, 0.08, 0.06]   # PATH B: was [0.08,0.10,0.08] — keep targets near the reference until it hits
+  ref_perturb_vel: [0.3, 0.3, 0.25]     # PATH B: was [0.6,0.6,0.5]
+  ref_perturb_normal: 0.15              # PATH B: was 0.20
+  ref_perturb_curriculum_steps: 30000   # OPEN-LOOP fallback only; ignored while ref_perturb_success_gated=True (default)
+  ref_perturb_curriculum_start: 0.05    # PATH B: was 0.15 — start narrower (the gate was frozen here all run)
+  # Success-gated curriculum: widen the perturbation only once smoothed exact-strike composite > threshold.
+  ref_perturb_advance_threshold: 0.25   # was 0.30 — let it start widening a touch sooner once it hits
+  ref_perturb_advance_rate: 1.0e-5      # scale increment per control step while above threshold
+
+  # Stage slow->fast hitting (priority: stable 3–4 m/s BEFORE 6 m/s). The reference forehand clip strikes
+  # at ~6 m/s; ref_vel_scale multiplies that reference velocity target. Default 1.0 = clip speed. To train
+  # a controllable slower hit first, set e.g. 0.6 (~3.6 m/s), then raise to 1.0 once the slow strike passes
+  # the success gates. NOTE: at scale!=1.0 the target velocity no longer matches the imitated swing, so a
+  # perfect imitator no longer scores velocity exactly (position/normal stay reachable-by-construction).
+  ref_vel_scale: 0.6              # PATH C: 1.0 → 0.6 — target ~3 m/s first. Ablation B showed the policy
+                                  # tops out ~1.6 m/s, so at full clip speed (~5) velE~2.9 fell OUTSIDE the
+                                  # velocity kernel (std=1.2 → exp(-5.8)≈0, dead). At ~3 m/s velE~1.4 lands
+                                  # in the live band (exp(-1.36)=0.26). Ramp back to 0.8→1.0 once the slow
+                                  # strike clears the success gates (composite>0.25, vel_pass>0.5).
 
   # --- legacy "uniform" box (ignored when target_mode=reference_perturbed) -----------------------
   pos_x_range: [0.25, 0.55]
