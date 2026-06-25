@@ -60,7 +60,12 @@ rewards:
   # PATH C: 0.6 → 0.45 — the ablation-B run showed motion_scale=0.6 (+ low racket weight) suppressed the
   # swing entirely (racket_speed plateaued ~1.6 m/s vs ~5 m/s target). Imitation alone does NOT reproduce
   # the 5-6 m/s tip speed, so demote it again to let the velocity goal pull the swing.
-  motion_scale: 0.45
+  # PATH C2 (2026-06-25): 0.45 → 0.40 — pathC_velrevive revived velocity (comp 0.035, posPass 0.36 by
+  # ~it1000) but then relapsed into the B "stand-and-imitate" attractor: episode length ran away 42→284,
+  # and posPass/posEx regressed (0.36→0.32 / 0.057→0.090) while velPass/comp stalled (~0.10 / ~0.035).
+  # Long episodes let per-step motion reward dwarf the in-window racket reward, so demote imitation once
+  # more. If eplen still runs away, next structural fix is capping episode_length_s to ~1 clip (~1.9s).
+  motion_scale: 0.30
   # per-term override also available (applied before motion_scale), e.g.:
   #   motion_body_pos_weight: 1.0   motion_body_pos_std: 0.3   motion_body_ori_weight: ...
   #   motion_body_lin_vel_weight/_std   motion_body_ang_vel_weight/_std
