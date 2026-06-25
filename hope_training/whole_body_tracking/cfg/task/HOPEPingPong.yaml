@@ -27,23 +27,44 @@ defaults:
 #   num_envs: 2048
 
 # ---- reward weights / kernel std (EDIT) ----------------------------------
-# WIDE kernel std (the strike_success=0 fix). The reward kernel is exp(-||err||^2 / std^2); with std
-# at the final acceptance tolerance the reward is ~0 for any early-training error (e.g. 50 cm pos
-# error -> exp(-44) ~ 0), so there is no gradient and strike_success never leaves 0. These wide stds
-# give a smooth gradient from tens-of-cm out. The std is DECOUPLED from strike_success_pos_thresh
-# (0.075, below) — that metric still reports the true <7.5 cm success rate, so you can watch real
-# accuracy climb. Optional later precision pass: once strike_success is high, tighten the std toward
-# the acceptance tolerances (the commented values) and resume from the checkpoint.
+# PATH A (2026-06-24): flip the objective so HITTING dominates, not imitation.
+# Diagnosis from the 2026-06-24_04-43 forehand run (tensorboard): episode reward motion≈4.2 vs
+# racket≈0.4 (~10x), so the optimum was literally "do the animation". Worse, racket_pos_error_at_strike
+# ≈0.5 m (Y-dominated) while std=0.15 → exp(-(0.5/0.15)^2)≈0, i.e. NO gradient at the real error scale.
+# Fixes: (1) widen std so there is a smooth gradient from ~40 cm in; (2) raise racket/base weights so
+# the strike-window gradient can actually pull the swing off the reference (racket only scores inside
+# the ±strike_window, so it needs a high weight to compete with motion that scores every step);
+# (3) base_position up hard — the base was drifting ~25 cm in Y, which alone explains most of the miss.
+# Targets are also shrunk (see racket: below) so strike_success can leave 0. Old A/B values in comments.
 rewards:
-  racket_position_weight: 4.0
-  racket_position_std: 0.15       # m   ablation 3: 0.35->0.15 (halfway to acceptance 0.075) so the kernel couples to strike_success
-  racket_velocity_weight: 2.0
-  racket_velocity_std: 0.6        # m/s ablation 3: 1.2->0.6 (halfway to acceptance 0.5)
-  racket_normal_weight: 2.0
-  racket_normal_std: 0.5          # rad tighten later -> 0.262 (acceptance < 15 deg)
-  base_position_weight: 1.0
+  racket_position_weight: 16.0    # was 4.0  — compete with motion≈4.2 (racket only scores in-window)
+  racket_position_std: 0.30       # was 0.15 — gradient at 20-40cm (exp(-(0.4/0.3)^2)=0.17), not flat exp(-11)
+  racket_velocity_weight: 4.0     # was 2.0
+  racket_velocity_std: 0.5        # was 1.5 — ALIGN to the 0.5 m/s exact-strike success threshold. With the
+                                  # metric fix verified, velocity is the lone bottleneck (exact-strike vel<0.5
+                                  # pass ~38% vs pos ~71% / normal ~98%); std=1.5 saturated the reward at the
+                                  # ~m/s error scale so there was no gradient to push velocity inside 0.5 m/s.
+  racket_normal_weight: 4.0       # was 2.0
+  racket_normal_std: 0.5          # rad (already fine at exact strike ~5.6 deg)
+  base_position_weight: 6.0       # was 1.0  — stop the ~25cm Y base drift that compounds the racket miss
   base_position_std: 0.3
-  joint_torques_weight: -0.00001
+
+  # ---- motion imitation prior (the 6 motion_* terms; base weights sum ≈5.0) ----
+  # motion_scale multiplies ALL six motion weights at once — the main lever to demote imitation to a
+  # soft prior so the racket goal can win. 1.0 = unchanged; lower = weaker imitation. PATH A cut to 0.4
+  # (motion sum 5.0->2.0). Don't go too low or it deviates/falls and trips the anchor terminations —
+  # watch Mean reward / episode length, raise back toward 0.6 if it gets unstable.
+  motion_scale: 0.4
+  # per-term override also available (applied before motion_scale), e.g.:
+  #   motion_body_pos_weight: 1.0   motion_body_pos_std: 0.3   motion_body_ori_weight: ...
+  #   motion_body_lin_vel_weight/_std   motion_body_ang_vel_weight/_std
+  #   motion_global_anchor_pos_weight/_std   motion_global_anchor_ori_weight/_std
+
+  # ---- penalties / regularization (negative weights; energy, smoothness, safety) ----
+  joint_torques_weight: -0.00001  # joint torque L2 (energy)
+  action_rate_weight: -0.1        # base -0.1; action smoothness (more negative = smoother but slower)
+  joint_limit_weight: -10.0       # base -10.0; penalty near joint limits (keep strong for safety)
+  undesired_contacts_weight: -0.1 # base -0.1; non-foot/hand body contacts
 
 # ---- racket target sampling (EDIT) ---------------------------------------
 # Full forehand workspace (no curriculum / no warmup narrowing). These are still PLACEHOLDER ranges —
@@ -52,7 +73,7 @@ rewards:
 # workspace. pos_y straddles the robot center (forehand on -Y, see forehand_on_negative_y).
 racket:
   strike_phase: 0.46              # fraction of the clip where the paddle meets the ball
-  strike_window_s: 0.1            # half-window (+/-) for the racket-state reward
+  strike_window_s: 0.15           # PATH A: was 0.1 — a bit more in-window gradient time
   strike_success_pos_thresh: 0.075  # m; wandb "strike_success" = fraction of strikes with racket pos error below this
 
   # --- rank 5: reference-coupled target sampling (the strike_success=0 fix) ----------------------
@@ -63,9 +84,9 @@ racket:
   # reference_perturbed sets target = reference racket state @ strike (pos/vel/normal, same FK as the
   # actual racket) + a curriculum-scaled perturbation: reachable by construction, widening over time.
   target_mode: reference_perturbed
-  ref_perturb_pos: [0.15, 0.20, 0.15]   # m, final per-axis half-range around the reference strike pos
-  ref_perturb_vel: [1.0, 1.0, 0.8]      # m/s, final per-axis half-range around the reference strike vel
-  ref_perturb_normal: 0.30              # final face-normal jitter (added then renormalized)
+  ref_perturb_pos: [0.08, 0.10, 0.08]   # PATH A: was [0.15,0.20,0.15] — shrink to a REACHABLE range (esp Y) so strike_success can leave 0; widen again once it climbs
+  ref_perturb_vel: [0.6, 0.6, 0.5]      # PATH A: was [1.0,1.0,0.8]
+  ref_perturb_normal: 0.20              # PATH A: was 0.30
   ref_perturb_curriculum_steps: 30000   # control steps to ramp perturbation start->full (~1250 iters)
   ref_perturb_curriculum_start: 0.15    # fraction of the final perturbation at step 0
 
@@ -77,8 +98,11 @@ racket:
   vel_y_range: [-1.0, 1.0]
   vel_z_range: [0.0, 1.5]
 
+  # base_target is now COUPLED to the racket target (base_target = racket_target_xy - reference
+  # base->racket offset); these ranges are a SMALL JITTER around that coupled point, not the whole
+  # position. Shrunk Y from ±0.35 (it used to fight the arm reach).
   base_target_x_range: [-0.10, 0.10]
-  base_target_y_range: [-0.35, 0.35]
+  base_target_y_range: [-0.10, 0.10]
   normal_mode: velocity           # "velocity" (n = v/|v|) or "sampled"  (uniform mode only)
   forehand_on_negative_y: true    # right arm holds the paddle
   mount_normal_axis: 1            # racket-local +Y is the face normal (red/hitting face; confirmed in Step 11)

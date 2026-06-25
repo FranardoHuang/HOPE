@@ -1,0 +1,22 @@
+MESA: warning: Driver does not support the 0x7d67 PCI ID.
+MESA: warning: Driver does not support the 0x7d67 PCI ID.
+MESA: warning: Driver does not support the 0x7d67 PCI ID.
+MESA: warning: Driver does not support the 0x7d67 PCI ID.
+2026-06-25T03:03:43Z [7,427ms] [Error] [isaacsim.asset.importer.urdf] *** Could not parse xyz string '0.0' 
+2026-06-25T03:03:43Z [7,427ms] [Error] [isaacsim.asset.importer.urdf] *** xyz not specified for axis
+2026-06-25T03:03:43Z [7,427ms] [Error] [isaacsim.asset.importer.urdf] *** Could not parse xyz string '' 
+2026-06-25T03:03:43Z [7,427ms] [Error] [isaacsim.asset.importer.urdf] *** xyz not specified for axis
+2026-06-25T03:03:43Z [7,427ms] [Error] [isaacsim.asset.importer.urdf] *** Could not parse xyz string '' 
+2026-06-25T03:03:43Z [7,427ms] [Error] [isaacsim.asset.importer.urdf] *** xyz not specified for axis
+2026-06-25T03:03:43Z [7,427ms] [Error] [isaacsim.asset.importer.urdf] *** Could not parse xyz string '' 
+2026-06-25T03:03:43Z [7,427ms] [Error] [isaacsim.asset.importer.urdf] *** xyz not specified for axis
+2026-06-25T03:03:43Z [7,427ms] [Error] [isaacsim.asset.importer.urdf] *** Could not parse xyz string '0.0' 
+2026-06-25T03:03:43Z [7,427ms] [Error] [isaacsim.asset.importer.urdf] *** xyz not specified for axis
+2026-06-25T03:03:43Z [7,427ms] [Error] [isaacsim.asset.importer.urdf] *** Could not parse xyz string '0.0' 
+2026-06-25T03:03:43Z [7,427ms] [Error] [isaacsim.asset.importer.urdf] *** xyz not specified for axis
+/opt/drone_venv/lib/python3.11/site-packages/rsl_rl/utils/utils.py:245: UserWarning: The observation configuration dictionary 'obs_groups' must contain the 'policy' key. As an observation group with the name 'policy' was found, this is assumed to be the observation set. Consider adding the 'policy' key to the 'obs_groups' dictionary for clarity. This behavior will be removed in a future version.
+  warnings.warn(
+/opt/drone_venv/lib/python3.11/site-packages/rsl_rl/utils/utils.py:283: UserWarning: The observation configuration dictionary 'obs_groups' must contain the 'critic' key. As an observation group with the name 'critic' was found, this is assumed to be the observation set. Consider adding the 'critic' key to the 'obs_groups' dictionary for clarity. This behavior will be removed in a future version.
+  warnings.warn(
+/workspace/omni_drones/third_party/IsaacLab/source/isaaclab/isaaclab/managers/command_manager.py:143: UserWarning: Use of index_put_ on expanded tensors is deprecated. Please clone() the tensor before performing this operation. This also applies to advanced indexing e.g. tensor[indices] = tensor (Triggered internally at /pytorch/aten/src/ATen/native/TensorAdvancedIndexing.cpp:987.)
+  metric_value[env_ids] = 0.0

@@ -166,6 +166,37 @@ def _apply_task_overrides(env_cfg, task):
             R.joint_torques.weight = float(jt)
             applied.append(f"rewards.joint_torques.weight={float(jt)}")
 
+        # --- motion imitation prior (the 6 motion_* terms; base weights sum ~5.0) ---------------
+        # `motion_scale` multiplies all six at once — the main lever to demote imitation to a soft
+        # prior so the racket goal can dominate. Per-term weight/std overrides are also accepted
+        # (e.g. motion_body_pos_weight / motion_body_pos_std) and are applied BEFORE the scale.
+        _MOTION_TERMS = (
+            "motion_global_anchor_pos", "motion_global_anchor_ori",
+            "motion_body_pos", "motion_body_ori",
+            "motion_body_lin_vel", "motion_body_ang_vel",
+        )
+        for _t in _MOTION_TERMS:
+            _set_reward(R, _t, _get(rw, f"{_t}_weight"), _get(rw, f"{_t}_std"), applied)
+        ms = _get(rw, "motion_scale")
+        if ms is not None:
+            ms = float(ms)
+            for _t in _MOTION_TERMS:
+                _require(hasattr(R, _t), f"rewards.{_t}")
+                getattr(R, _t).weight *= ms
+            applied.append(f"rewards.motion_scale={ms} (x{len(_MOTION_TERMS)} motion weights)")
+
+        # --- penalties / regularization (negative weights: energy + smoothness + safety) --------
+        for _name, _key in (
+            ("action_rate_l2", "action_rate_weight"),
+            ("joint_limit", "joint_limit_weight"),
+            ("undesired_contacts", "undesired_contacts_weight"),
+        ):
+            _w = _get(rw, _key)
+            if _w is not None:
+                _require(hasattr(R, _name), f"rewards.{_name}")
+                getattr(R, _name).weight = float(_w)
+                applied.append(f"rewards.{_name}.weight={float(_w)}")
+
     rk = _get(task, "racket")
     if rk is not None:
         # Only require the racket_target command when the YAML actually sets racket keys, so tasks
