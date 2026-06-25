@@ -94,7 +94,6 @@ Each document contains a **Section 0 prologue** listing all implementation diffe
 | [mocap/](mocap/) | Motion-capture setup and coordinate reference |
 | [scripts/](scripts/) | Repo maintenance (`sync_external_repos.sh`) |
 | [calib_bags/](calib_bags/), [calib_csv/](calib_csv/) | Small curated calibration recordings and processed CSVs |
-| [Dockerfile.hope-ros2-jazzy](Dockerfile.hope-ros2-jazzy) | ROS 2 Jazzy container recipe |
 | `vendor_assets/`, `external_repos/` | Git-ignored: heavy vendor payloads and auto-synced reference repos (absent on a fresh clone) |
 
 The four `HOPE_*_Reference_Setup.md` documents and the `HOPE_AI_Challenge_2026_Rules_*.docx` files (see *Documents* above) are the original public competition/design references; they describe the broader system, not this branch's implementation specifics.
@@ -118,7 +117,7 @@ colcon build --symlink-install
 source install/setup.bash
 ```
 
-A container recipe is provided in [Dockerfile.hope-ros2-jazzy](Dockerfile.hope-ros2-jazzy).
+Use the ROS environment described in [docs/operations/setup_environments.md](docs/operations/setup_environments.md); the old root Dockerfile has been removed because the project no longer uses that Docker path.
 
 **2. WBC training** (Isaac Lab + BeyondMimic) — needs a GPU plus a pre-provisioned Isaac Sim 4.5.0 / Isaac Lab 2.1.0 (Python 3.10); see [docs/operations/run_training.md](docs/operations/run_training.md):
 

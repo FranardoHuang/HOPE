@@ -45,7 +45,7 @@ The `rosdep install` step resolves `vrpn_mocap` VRPN/eigen dependencies and must
 
 Current status:
 
-- Target environment is Linux + ROS 2 Jazzy. The build is to be verified inside the ROS environment (see [Dockerfile.hope-ros2-jazzy](../../Dockerfile.hope-ros2-jazzy)).
+- Target environment is Linux + ROS 2 Jazzy. The build is to be verified inside the ROS environment described in [setup_environments.md](setup_environments.md). The obsolete root `Dockerfile.hope-ros2-jazzy` has been removed.
 
 ## Deploy Source Build
 

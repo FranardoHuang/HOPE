@@ -256,7 +256,7 @@ sudo apt install git curl build-essential cmake python3-pip python3-venv
 Install ROS 2:
 
 - HOPE's reference environment is Ubuntu 24.04 LTS plus ROS 2 Jazzy.
-- If your host is Ubuntu 26.04, use Distrobox or Docker for the HOPE ROS 2 workspace instead of mixing 24.04/Jazzy apt packages into the host OS.
+- If your host is Ubuntu 26.04, use Distrobox for the HOPE ROS 2 workspace instead of mixing 24.04/Jazzy apt packages into the host OS.
 - Use a native install only when the machine itself is Ubuntu 24.04.
 - ROS 2 Humble on Ubuntu 22.04 is allowed by the rules for external communication, but the reference docs use Jazzy.
 
@@ -345,75 +345,9 @@ Execution scope from this point:
 - Physical mocap setup, robot cabling, and network inspection still happen outside the container in the real arena.
 - The Isaac Sim / Isaac Lab training steps later in this guide do **not** run in `hope`; they switch to a separate GPU distrobox.
 
-Docker path for an Ubuntu 26.04 host:
+Obsolete Docker path:
 
-Use this path if you want an explicit Docker image, need to debug low-level Docker run flags, or need a more conventional container setup for hardware integration.
-
-Copy and paste this whole block into your host terminal:
-
-```bash
-cd ~/workspace/HOPE
-
-sudo apt update
-sudo apt install -y docker.io
-sudo systemctl enable --now docker
-
-DOCKER_CMD="docker"
-if ! docker info >/dev/null 2>&1; then
-  DOCKER_CMD="sudo docker"
-fi
-
-cat > Dockerfile.hope-ros2-jazzy <<'EOF'
-FROM osrf/ros:jazzy-desktop-full
-
-SHELL ["/bin/bash", "-c"]
-
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    cmake \
-    curl \
-    git \
-    python3-colcon-common-extensions \
-    python3-pip \
-    python3-rosdep \
-    python3-venv \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN rosdep update || true
-
-WORKDIR /root/workspace/HOPE
-RUN echo "source /opt/ros/jazzy/setup.bash" >> /root/.bashrc
-EOF
-
-$DOCKER_CMD build -t hope-ros2-jazzy -f Dockerfile.hope-ros2-jazzy .
-mkdir -p \
-  ~/workspace/HOPE/hope_ws/src/hope_planner \
-  ~/workspace/HOPE/hope_ws/src/hope_bringup \
-  ~/workspace/HOPE/hope_ws/src/hope_monitoring \
-  ~/workspace/HOPE/hope_ws/src/agibot_bringup \
-  ~/workspace/HOPE/hope_ws/src/agibot_hardware_bridge \
-  ~/workspace/HOPE/hope_training/GVHMR \
-  ~/workspace/HOPE/hope_training/GMR \
-  ~/workspace/HOPE/hope_training/whole_body_tracking \
-  ~/workspace/HOPE/hope_training/mjlab \
-  ~/workspace/HOPE/hope_training/motions/raw_video \
-  ~/workspace/HOPE/hope_training/motions/smplx \
-  ~/workspace/HOPE/hope_training/motions/retargeted \
-  ~/workspace/HOPE/hope_training/motions/preprocessed \
-  ~/workspace/HOPE/hope_training/policies
-
-$DOCKER_CMD run --rm -it \
-  --net=host \
-  --ipc=host \
-  --privileged \
-  -v "$PWD":/root/workspace/HOPE \
-  -w /root/workspace/HOPE \
-  hope-ros2-jazzy
-```
-
-This block creates `Dockerfile.hope-ros2-jazzy`, builds the `hope-ros2-jazzy` image, creates your host workspace folders inside `~/workspace/HOPE`, and opens a shell inside the ROS 2 Jazzy container with that same repository mounted at `~/workspace/HOPE`.
-
-For GPU simulation or training, install NVIDIA Container Toolkit on the host and add `--gpus all` to the `docker run` command. For real hardware, keep `--net=host` so ROS 2 DDS discovery and the Agibot A3 robot network (AimRT/AimDK) are visible inside the container.
+The old root `Dockerfile.hope-ros2-jazzy` path is no longer used and has been removed from the repo. Do not recreate it from this runbook. Use the Distrobox/native Ubuntu 24.04 ROS 2 Jazzy environment described above and in `docs/operations/setup_environments.md`.
 
 Verification gate:
 

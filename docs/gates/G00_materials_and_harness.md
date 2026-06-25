@@ -63,6 +63,7 @@ Done:
 - `origin/train_1` was integrated while preserving source/config/test changes and excluding generated or local editor/debug artifacts from the index.
 - `.gitignore` covers `.codex-tmp/`, `.vscode/`, training logs/caches, and generated policy/model artifacts such as `*.onnx`.
 - Generated `hope_training/policies/hope_forehand_policy.onnx` is treated as an ignored artifact, not a tracked source file.
+- The obsolete root `Dockerfile.hope-ros2-jazzy` has been removed; ROS work now relies on the distrobox or otherwise pre-provisioned ROS 2 Jazzy environment described in `docs/operations/setup_environments.md`.
 
 Not done:
 

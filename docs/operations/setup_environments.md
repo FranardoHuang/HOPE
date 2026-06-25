@@ -29,7 +29,7 @@ Use the host terminal for:
 - git operations
 - file organization
 - local asset sync under `vendor_assets/`
-- entering distroboxes or containers
+- entering distroboxes or the already-provisioned project environments
 
 The repo is assumed to be visible at the same path from the host and project environments. Existing long-form commands in `reimplement.md` use `~/workspace/HOPE` as the shared path.
 
@@ -109,10 +109,9 @@ The sections above describe how to *enter* the environments. This section covers
 
 ### ROS box
 
-Linux + ROS 2 Jazzy. Two ways to build it:
+Linux + ROS 2 Jazzy. The supported path is a distrobox or otherwise pre-provisioned ROS 2 Jazzy environment. The old root `Dockerfile.hope-ros2-jazzy` has been removed because this repo no longer uses that Docker path.
 
 - distrobox: the full `distrobox-create` recipe lives in `reimplement.md`.
-- container: build from the reference recipe [Dockerfile.hope-ros2-jazzy](../../Dockerfile.hope-ros2-jazzy), which is based on `docker.io/osrf/ros:jazzy-desktop-full` and now includes `ros-jazzy-vrpn-mocap` and `python3-vcstool`.
 
 Apt packages to install in the box:
 
