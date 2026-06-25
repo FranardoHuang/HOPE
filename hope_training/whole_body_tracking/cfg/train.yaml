@@ -1,0 +1,42 @@
+# =============================================================================
+# Main Hydra config for HOPE Agibot A3 WBC training.
+#
+# Usage:
+#   python scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+#       logger=tensorboard motion_file=sample_motions/agibot_a3_smoke_stand.npz
+#
+# Pick the task/algo YAML with `task=...` / `algo=...`; override any field on the
+# CLI (e.g. num_envs=2048 max_iterations=20000 seed=1 task.rewards.racket_position_weight=5).
+# =============================================================================
+
+defaults:
+  - task: HOPEPingPong
+  - algo: ppo
+  - _self_
+
+headless: true
+device: cuda:0
+seed: 0
+
+# Override the task defaults when set (null -> use the task/algo YAML value).
+num_envs: null
+max_iterations: null
+registry_name: null     # falls back to task.registry_name when null
+motion_file: null        # local .npz path; preferred for public smoke runs
+run_name: null
+
+# logging
+logger: tensorboard     # tensorboard | wandb | neptune
+log_project_name: hope_wbc
+
+# video capture (off by default)
+video: false
+video_length: 200
+video_interval: 2000
+
+# keep the working directory at the launch dir so logs/ lands next to the legacy script's logs
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
