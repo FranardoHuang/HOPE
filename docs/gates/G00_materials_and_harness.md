@@ -64,10 +64,13 @@ Done:
 - `.gitignore` covers `.codex-tmp/`, `.vscode/`, training logs/caches, and generated policy/model artifacts such as `*.onnx`.
 - Generated `hope_training/policies/hope_forehand_policy.onnx` is treated as an ignored artifact, not a tracked source file.
 - The obsolete root `Dockerfile.hope-ros2-jazzy` has been removed; ROS work now relies on the distrobox or otherwise pre-provisioned ROS 2 Jazzy environment described in `docs/operations/setup_environments.md`.
+- On 2026-06-25, `~/workspace/HOPE` was created as a symlink to this checkout so `reimplement.md` commands resolve to the current repo. User-local `distrobox 1.8.2.5` and `lilipod v0.0.3` were installed, and the `osrf/ros:jazzy-desktop-full` image was pulled.
+- Host `podman` and `uidmap` are installed, `hope` exists from `docker.io/osrf/ros:jazzy-desktop-full`, and the first `hope` entry verified `ROS_DISTRO=jazzy`, Python `3.12.3`, and `/usr/bin/colcon`.
+- `.gitignore` now excludes `pw.txt` so local password scratch files do not enter git.
 
 Not done:
 
-- ROS workspace build has not been verified because `colcon` is not available in the current shell.
+- ROS workspace build has not been verified inside `hope`; only the ROS/Jazzy tools and container entry were verified.
 - TTRL has not been promoted to a pinned submodule or fork because it is currently reference-only.
 - Git LFS policy has not been decided.
 

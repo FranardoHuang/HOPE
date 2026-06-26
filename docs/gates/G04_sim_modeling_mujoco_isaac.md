@@ -54,6 +54,7 @@ Done:
 - A3 URDF and MuJoCo support materials exist.
 - Agibot MuJoCo sim source exists.
 - Tracked deploy subset includes standalone MuJoCo configs.
+- On 2026-06-25, this harness restored the ignored package-local A3 Isaac asset under `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/` materials and rewrote URDF mesh paths to local `../meshes/` references. Host verification found `86` mesh references and `0` missing files.
 - The branch now includes an A3 Isaac/BeyondMimic robot config using the Agibot-provided ping-pong URDF path, official joint/body names, deploy-transcribed PD gains, standing pose, and action-scale logic.
 - A working 31-DOF joint-order YAML exists at `hope_training/config/joint_order_agibot_a3.yaml`.
 - `reimplement.md` records that the A3 task registers and the env launches headless with finite rewards on the copied A3 ping-pong URDF asset.

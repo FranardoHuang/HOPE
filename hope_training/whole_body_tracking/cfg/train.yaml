@@ -22,6 +22,7 @@ seed: 0
 num_envs: null
 max_iterations: null
 registry_name: null     # falls back to task.registry_name when null
+motion_file: null       # explicit local motion .npz; when set, skips the wandb registry fetch
 run_name: null
 
 # logging

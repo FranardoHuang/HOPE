@@ -52,6 +52,52 @@ Set these for your machine in a git-ignored `setup_train_env.local.sh` next to t
 
 A from-scratch Isaac Sim 4.5.0 / Isaac Lab 2.1.0 / Python 3.10 install is NOT documented here and is the single biggest reproducibility gap. Follow the official [Isaac Lab install guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html) first, then point `HOPE_ISAAC_PYTHON` / `HOPE_ISAACLAB_ROOT` at it.
 
+### Blackwell (RTX 50-series, sm_120) torch fix
+
+Isaac Sim 4.5.0 ships `torch 2.5.1+cu124`, which has **no sm_120 kernels**. On a Blackwell GPU
+(e.g. RTX 5090) `import torch` "works" and `torch.cuda.is_available()` is `True`, but any real CUDA op
+fails with `no kernel image is available for execution on the device`, so training crashes after Kit
+startup. Fix (verified 2026-06-26 on RTX 5090):
+
+```bash
+# inside the Isaac env (hope-isaac-py310)
+pip install torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
+pip install numpy==1.26.4    # Isaac Sim 4.5 requires numpy<2; the torch upgrade may pull numpy 2.x
+```
+
+`isaaclab*` carry a `torch==2.5.1` pin in metadata but are editable installs imported at runtime, so the
+upgrade does not break them. Rollback: `pip install torch==2.5.1+cu124 torchvision==0.20.1+cu124
+--index-url https://download.pytorch.org/whl/cu124`. Verify with a real kernel, not just `is_available()`:
+
+```bash
+python -c "import torch; x=torch.randn(2048,2048,device='cuda'); print((x@x).sum().item())"
+```
+
+### EULA
+
+The first Kit launch needs the NVIDIA Omniverse EULA. Accept it non-interactively for headless runs:
+
+```bash
+export OMNI_KIT_ACCEPT_EULA=YES
+```
+
+### No-WandB training (local motion override)
+
+`scripts/train.py` can load the motion clip from a local `.npz` instead of the WandB registry. Pass
+`motion_file=<path>` (mirrors `scripts/play.py`); when set it skips WandB entirely, so use it with
+`logger=tensorboard` for an account-free run. If you have no motion data at all, generate a placeholder
+"stand at default pose" clip (pipeline proof only, not a real swing):
+
+```bash
+hope_isaac_py scripts/make_static_motion.py --robot agibot_a3 \
+  --output_file ../motions/a3_stand.npz --frames 600 --fps 50
+
+hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
+  num_envs=1024 max_iterations=60 algo.runner.save_interval=25 \
+  logger=tensorboard run_name=stand_bootstrap \
+  motion_file=$(pwd)/../motions/a3_stand.npz
+```
+
 `hydra`, `omegaconf`, and `rsl_rl` are NOT in the package `setup.py` `install_requires`; they must be importable from the Isaac Lab Python (provide via Isaac Lab itself or `HOPE_ISAAC_VENV_SITE`). Install the package into that Python:
 
 ```bash

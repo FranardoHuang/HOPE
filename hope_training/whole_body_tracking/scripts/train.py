@@ -337,16 +337,27 @@ def _run(cfg):
         agent_cfg.wandb_project = str(cfg.log_project_name)
         agent_cfg.neptune_project = str(cfg.log_project_name)
 
-    # 3) motion file from the wandb registry (forehand/backhand clip)
-    registry_name = cfg.registry_name if cfg.registry_name is not None else cfg.task.registry_name
-    registry_name = str(registry_name)
-    if ":" not in registry_name:
-        registry_name += ":latest"
-    import wandb
+    # 3) motion file: explicit local .npz override (skips wandb) OR the wandb registry clip.
+    # The local path mirrors play.py's `motion_file=` override and lets training run without a
+    # wandb account/registry (e.g. a bootstrapped clip). registry_name is only consumed by the
+    # runner when logger=wandb, so a placeholder is safe for the local/tensorboard path.
+    motion_file_override = cfg.motion_file if cfg.get("motion_file", None) is not None else None
+    if motion_file_override is not None:
+        motion_path = str(motion_file_override)
+        assert os.path.isfile(motion_path), f"motion_file not found: {motion_path}"
+        env_cfg.commands.motion.motion_file = motion_path
+        registry_name = f"local:{os.path.basename(motion_path)}"
+        print(f"[train.py] using LOCAL motion_file (wandb registry skipped): {motion_path}", flush=True)
+    else:
+        registry_name = cfg.registry_name if cfg.registry_name is not None else cfg.task.registry_name
+        registry_name = str(registry_name)
+        if ":" not in registry_name:
+            registry_name += ":latest"
+        import wandb
 
-    api = wandb.Api()
-    artifact = api.artifact(registry_name)
-    env_cfg.commands.motion.motion_file = str(pathlib.Path(artifact.download()) / "motion.npz")
+        api = wandb.Api()
+        artifact = api.artifact(registry_name)
+        env_cfg.commands.motion.motion_file = str(pathlib.Path(artifact.download()) / "motion.npz")
 
     # 4) logging dir (same layout as scripts/rsl_rl/train.py so export/eval are unchanged)
     log_root_path = os.path.abspath(os.path.join("logs", "rsl_rl", agent_cfg.experiment_name))

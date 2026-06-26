@@ -50,6 +50,7 @@ The same package now also contains a first-pass table-tennis physics/visualizati
 - `source/whole_body_tracking/whole_body_tracking/tasks/tracking/`: motion-imitation and `HOPEPingPong` racket-target WBC training tasks.
 - `source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/`: `HOPE-TableTennis-AgibotA3-v0`, a full HOPE-frame table/net/ball/A3 scene with drag/Magnus hooks, 400 Hz physics, observations, and placeholder rewards for future returner work.
 - `source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/table_usd/`: tracked, small Purdue PACE table/net USD visual overlay used by the table-tennis scene; physics remains owned by the task's cuboid colliders.
+- `source/whole_body_tracking/whole_body_tracking/assets/`: package-local asset path helper plus ignored copied/generated robot assets; restore `assets/agibot_a3/` from tracked Agibot URDF materials per `docs/operations/setup_local_sync.md`.
 - `scripts/play_table_tennis.py`: visualization/headless smoke runner for the table-tennis scene.
 
 Additional training config:
@@ -64,6 +65,10 @@ Additional training config:
 ```bash
 scripts/sync_external_repos.sh
 ```
+
+`external_repos/IsaacLab` is an ignored local Isaac Lab source checkout used by the G05 training
+environment when a pre-provisioned Isaac Lab checkout is absent. Record the tag/commit in G05 before
+using it for a reproducible training result.
 
 It is allowed to drift with upstream while it is only used as reading material. If it becomes a stable dependency, promote it to one of these:
 

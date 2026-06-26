@@ -38,6 +38,9 @@ Current ignored local asset roots:
 - `tmp/`
 - `.codex-tmp/`
 - `.vscode/`
+- `pw.txt` or other local secret scratch files; never commit passwords, tokens, or private identities.
+- `external_repos/IsaacLab/` when a local Isaac Lab source checkout is used for the training environment; record the tag/commit in the relevant gate doc.
+- `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` and other package-local copied/generated training assets; keep only the tiny `assets/__init__.py` path-helper tracked so `whole_body_tracking.assets.ASSET_DIR` remains importable after a fresh clone.
 
 ## Agibot Deploy Assets
 
