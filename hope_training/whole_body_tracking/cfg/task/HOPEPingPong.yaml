@@ -100,7 +100,17 @@ rewards:
 # outside the arm's reach the policy physically cannot hit it, so keep the ranges inside the real
 # workspace. pos_y straddles the robot center (forehand on -Y, see forehand_on_negative_y).
 racket:
-  strike_phase: 0.46              # fraction of the clip where the paddle meets the ball
+  # Paddle-contact phase is PER-CLIP: the racket-tip (pingpang_red_Link) speed peak lands at a
+  # different fraction in each swing, so a single global value is wrong when the trained motion
+  # changes. `strike_phase_by_motion` (registry clip-name substring -> phase) wins for the trained
+  # clip; `strike_phase` is the fallback for any clip not listed. Verified 2026-06-26 from the
+  # racket-tip FK speed peak in each clip's motion.npz (forehand peak phase 0.485 / 5.4 m/s;
+  # backhand peak phase 0.591 / 2.4 m/s on the +Y side). At the OLD shared 0.46 the backhand strike
+  # landed in a stationary mid-swing pause (target speed ~0.05 m/s) and strike_success stalled ~4%.
+  strike_phase: 0.46              # fallback / default (forehand-tuned)
+  strike_phase_by_motion:
+    hope_forehand: 0.46           # racket-speed peak at phase 0.485; 0.46 = just onto contact
+    hope_backhand: 0.59           # racket-speed peak at phase 0.591 (+Y side = backhand)
   strike_window_s: 0.12           # PATH B: was 0.15 — shrink the swept swing-through target (0.72m vs 0.9m), less timing dilution
   strike_success_pos_thresh: 0.075  # m; wandb "strike_success" = fraction of strikes with racket pos error below this
 

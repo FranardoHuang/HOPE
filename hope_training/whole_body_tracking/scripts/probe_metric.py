@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hydra
 from omegaconf import OmegaConf
 
-from train import _apply_task_overrides
+from train import _apply_task_overrides, _registry_clip_name
 
 
 def _run(cfg, simulation_app):
@@ -37,7 +37,7 @@ def _run(cfg, simulation_app):
     num_envs = int(cfg.num_envs) if cfg.num_envs is not None else int(cfg.task.env.num_envs)
 
     env_cfg = parse_env_cfg(task_id, device=str(cfg.device), num_envs=num_envs)
-    _apply_task_overrides(env_cfg, cfg.task)
+    _apply_task_overrides(env_cfg, cfg.task, _registry_clip_name(cfg))
     env_cfg.sim.device = str(cfg.device)
     env_cfg.commands.motion.motion_file = str(cfg.motion_file)
 
