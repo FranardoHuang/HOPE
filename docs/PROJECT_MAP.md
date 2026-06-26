@@ -9,7 +9,7 @@ This file describes stable repository zones. Gates describe work over time; fold
 | `docs/` | Living project map, gates, interfaces, and operations | tracked |
 | `papers/` | Source papers used as technical ground truth | tracked when license allows |
 | `mocap/` | Motion-capture setup, coordinates, and vendor notes | tracked |
-| `scripts/` | Repo maintenance helpers for local sync and project hygiene | tracked |
+| `scripts/` | Repo maintenance helpers for local sync, asset preparation, and project hygiene | tracked |
 | `calib_bags/` | Small reference raw calibration recordings | tracked only for curated samples |
 | `calib_csv/` | Processed calibration CSVs, chunks, and plots | tracked only for curated samples |
 | `hope_ws/` | ROS 2 integration workspace | tracked source, ignored build/install/log |
@@ -51,6 +51,7 @@ The same package now also contains a first-pass table-tennis physics/visualizati
 - `source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/`: `HOPE-TableTennis-AgibotA3-v0`, a full HOPE-frame table/net/ball/A3 scene with drag/Magnus hooks, 400 Hz physics, observations, and placeholder rewards for future returner work.
 - `source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/table_usd/`: tracked, small Purdue PACE table/net USD visual overlay used by the table-tennis scene; physics remains owned by the task's cuboid colliders.
 - `source/whole_body_tracking/whole_body_tracking/assets/`: package-local asset path helper plus ignored copied/generated robot assets; restore `assets/agibot_a3/` from tracked Agibot URDF materials per `docs/operations/setup_local_sync.md`.
+- `source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/`: ignored generated Isaac asset rebuilt from `agi/URDF/A3T2.5-URDF-std-pingpang/` with `scripts/prepare_a3_isaac_asset.py`.
 - `scripts/play_table_tennis.py`: visualization/headless smoke runner for the table-tennis scene.
 
 Additional training config:

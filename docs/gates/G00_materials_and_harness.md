@@ -62,6 +62,7 @@ Done:
 - Planner package tests pass when run from `hope_ws/src/hope_planner`.
 - `origin/train_1` was integrated while preserving source/config/test changes and excluding generated or local editor/debug artifacts from the index.
 - `.gitignore` covers `.codex-tmp/`, `.vscode/`, training logs/caches, and generated policy/model artifacts such as `*.onnx`.
+- Asset policy now separates tracked A3 source URDF/MuJoCo layers from ignored generated Isaac copies, and `THIRD_PARTY_NOTICES.md` records internal third-party/vendor provenance categories.
 - Generated `hope_training/policies/hope_forehand_policy.onnx` is treated as an ignored artifact, not a tracked source file.
 - The obsolete root `Dockerfile.hope-ros2-jazzy` has been removed; ROS work now relies on the distrobox or otherwise pre-provisioned ROS 2 Jazzy environment described in `docs/operations/setup_environments.md`.
 - On 2026-06-25, `~/workspace/HOPE` was created as a symlink to this checkout so `reimplement.md` commands resolve to the current repo. User-local `distrobox 1.8.2.5` and `lilipod v0.0.3` were installed, and the `osrf/ros:jazzy-desktop-full` image was pulled.

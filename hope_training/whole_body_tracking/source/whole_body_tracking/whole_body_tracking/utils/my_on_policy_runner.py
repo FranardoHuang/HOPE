@@ -7,7 +7,6 @@ from rsl_rl.runners.on_policy_runner import OnPolicyRunner
 
 from isaaclab_rl.rsl_rl import export_policy_as_onnx
 
-import wandb
 from whole_body_tracking.utils.exporter import attach_onnx_metadata, export_motion_policy_as_onnx
 
 
@@ -16,6 +15,8 @@ class MyOnPolicyRunner(OnPolicyRunner):
         """Save the model and training information."""
         super().save(path, infos)
         if self.logger_type in ["wandb"]:
+            import wandb
+
             policy_path = path.split("model")[0]
             filename = policy_path.split("/")[-2] + ".onnx"
             export_policy_as_onnx(
@@ -39,6 +40,8 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         """Save the model and training information."""
         super().save(path, infos)
         if self.logger_type in ["wandb"]:
+            import wandb
+
             policy_path = path.split("model")[0]
             filename = policy_path.split("/")[-2] + ".onnx"
             # rsl_rl moved obs normalization onto the policy (actor_obs_normalizer); the runner no

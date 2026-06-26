@@ -38,7 +38,7 @@ Relevant files:
 
 ### RacketCommand message
 
-Defined in [RacketCommand.msg](../../hope_ws/src/hope_msgs/msg/RacketCommand.msg). The carrying topic name should be confirmed from [node.py](../../hope_ws/src/hope_planner/hope_planner/node.py) (see also [hope_planner.launch.py](../../hope_ws/src/hope_planner/launch/hope_planner.launch.py) and [hope_planner.yaml](../../hope_ws/src/hope_planner/config/hope_planner.yaml)): TBD.
+Defined in [RacketCommand.msg](../../hope_ws/src/hope_msgs/msg/RacketCommand.msg). The planner publishes it on `/racket/command` from [node.py](../../hope_ws/src/hope_planner/hope_planner/node.py) (see also [hope_planner.launch.py](../../hope_ws/src/hope_planner/launch/hope_planner.launch.py) and [hope_planner.yaml](../../hope_ws/src/hope_planner/config/hope_planner.yaml)).
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -56,7 +56,15 @@ Defined in [RacketCommand.msg](../../hope_ws/src/hope_msgs/msg/RacketCommand.msg
 
 ## QoS Notes
 
-High-rate mocap data should prefer low latency over reliable delivery when the stream is continuous. Confirm QoS in live tests and record changes here.
+Current planner QoS:
+
+| Topic | Direction | QoS |
+| --- | --- | --- |
+| `/poses` | Planner subscription | best-effort, volatile, keep-last depth 1 |
+| `/racket/command` | Planner publication | reliable, volatile, keep-last depth 10 |
+| `/planner/diagnostics` | Planner publication | default integer depth 1 |
+
+High-rate mocap data prefers low latency over reliable delivery because fresh samples replace old ones. `/racket/command` is a control setpoint, so it uses reliable delivery with a small keep-last queue. Confirm live compatibility with downstream controllers before hardware use.
 
 ## Update Rule
 

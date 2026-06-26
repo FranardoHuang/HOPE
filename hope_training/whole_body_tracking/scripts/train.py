@@ -9,8 +9,9 @@ Pick the task/algo YAML on the command line and override any field:
         registry_name=<entity>/wandb-registry-motions/hope_forehand
 
 Tune by editing cfg/task/*.yaml (env / reward / racket / DR) and cfg/algo/ppo.yaml (PPO). This
-script reuses BeyondMimic's training mechanics (Isaac Lab + rsl_rl + the wandb motion registry);
-the legacy `scripts/rsl_rl/train.py --task=... --registry_name=...` still works too.
+script reuses BeyondMimic's training mechanics (Isaac Lab + rsl_rl + the wandb motion registry).
+Pass `motion_file=<local.npz>` to explicitly override the registry for local smoke/debug runs.
+The legacy `scripts/rsl_rl/train.py --task=... --registry_name=...` still works too.
 """
 
 import sys
@@ -395,20 +396,20 @@ def _run(cfg):
         agent_cfg.wandb_project = str(cfg.log_project_name)
         agent_cfg.neptune_project = str(cfg.log_project_name)
 
-    # 3) motion file: explicit local .npz override (skips wandb) OR the wandb registry clip.
-    # The local path mirrors play.py's `motion_file=` override and lets training run without a
-    # wandb account/registry (e.g. a bootstrapped clip). registry_name is only consumed by the
-    # runner when logger=wandb, so a placeholder is safe for the local/tensorboard path.
-    motion_file_override = cfg.motion_file if cfg.get("motion_file", None) is not None else None
-    if motion_file_override is not None:
-        motion_path = str(motion_file_override)
-        assert os.path.isfile(motion_path), f"motion_file not found: {motion_path}"
-        env_cfg.commands.motion.motion_file = motion_path
-        registry_name = f"local:{os.path.basename(motion_path)}"
+    # 3) reference motion: internal default is the WandB registry, but an explicit local .npz wins.
+    motion_file = cfg.motion_file if cfg.get("motion_file", None) is not None else _get(cfg.task, "motion_file")
+    registry_name = cfg.registry_name if cfg.registry_name is not None else _get(cfg.task, "registry_name")
+    registry_name = None if registry_name in (None, "") else str(registry_name)
+    registry_for_runner = None
+    if motion_file not in (None, ""):
+        motion_path = pathlib.Path(str(motion_file)).expanduser()
+        if not motion_path.is_absolute():
+            motion_path = pathlib.Path.cwd() / motion_path
+        if not motion_path.is_file():
+            raise FileNotFoundError(f"[train.py] motion_file not found: {motion_path}")
+        env_cfg.commands.motion.motion_file = str(motion_path)
         print(f"[train.py] using LOCAL motion_file (wandb registry skipped): {motion_path}", flush=True)
-    else:
-        registry_name = cfg.registry_name if cfg.registry_name is not None else cfg.task.registry_name
-        registry_name = str(registry_name)
+    elif registry_name is not None:
         if ":" not in registry_name:
             registry_name += ":latest"
         import wandb
@@ -416,6 +417,13 @@ def _run(cfg):
         api = wandb.Api()
         artifact = api.artifact(registry_name)
         env_cfg.commands.motion.motion_file = str(pathlib.Path(artifact.download()) / "motion.npz")
+        registry_for_runner = registry_name
+        print(f"[train.py] reference motion: WandB registry={registry_name}", flush=True)
+    else:
+        raise RuntimeError(
+            "[train.py] No reference motion configured. Pass motion_file=/path/to/motion.npz for the "
+            "local override path, or pass registry_name=<org>/wandb-registry-motions/<name>."
+        )
 
     # 4) logging dir (same layout as scripts/rsl_rl/train.py so export/eval are unchanged)
     log_root_path = os.path.abspath(os.path.join("logs", "rsl_rl", agent_cfg.experiment_name))
@@ -439,7 +447,7 @@ def _run(cfg):
     env = RslRlVecEnvWrapper(env)
 
     runner = OnPolicyRunner(
-        env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device, registry_name=registry_name
+        env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device, registry_name=registry_for_runner
     )
     runner.add_git_repo_to_log(__file__)
 

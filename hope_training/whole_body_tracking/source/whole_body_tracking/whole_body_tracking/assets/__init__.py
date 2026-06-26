@@ -1,5 +1,5 @@
 """Package-local training assets."""
 
-import os
+from pathlib import Path
 
-ASSET_DIR = os.path.dirname(__file__)
+ASSET_DIR = str(Path(__file__).resolve().parent)

@@ -40,7 +40,7 @@ Current ignored local asset roots:
 - `.vscode/`
 - `pw.txt` or other local secret scratch files; never commit passwords, tokens, or private identities.
 - `external_repos/IsaacLab/` when a local Isaac Lab source checkout is used for the training environment; record the tag/commit in the relevant gate doc.
-- `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` and other package-local copied/generated training assets; keep only the tiny `assets/__init__.py` path-helper tracked so `whole_body_tracking.assets.ASSET_DIR` remains importable after a fresh clone.
+- `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` and other package-local copied/generated training assets; keep only the tiny `assets/__init__.py` path-helper and local `.gitignore` tracked so `whole_body_tracking.assets.ASSET_DIR` remains importable after a fresh clone.
 
 ## Agibot Deploy Assets
 
@@ -53,6 +53,22 @@ The complete original payload is kept locally under:
 - `vendor_assets/agibot/a3_deploy_example_full/`
 
 If a command depends on a file inside `vendor_assets/`, the operation doc must say so and give the expected path.
+
+## Agibot A3 Robot Assets
+
+Tracked source assets:
+
+- `agi/URDF/A3T2.5-URDF-std-pingpang/` is the current internal source URDF package for the A3 ping-pong variant. It includes the racket hand, red/black paddle faces, and the racket-center ball marker meshes: `right_hand_pingpang_Link.STL`, `pingpang_red_Link.STL`, `pingpang_black_Link.STL`, and `pingbang_ball_Link.STL`.
+- `agi/URDF/a3_t2d5/` is the non-ping-pong standard A3 URDF package. Keep it as a source reference for non-racket comparisons; do not delete it just because the WBC training asset uses the ping-pong variant.
+- `agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/` is the Agibot-provided MuJoCo/AimRT ping-pong model layer, including collision-oriented MJCF/mesh materials used for sim parity work.
+
+Generated Isaac training asset:
+
+- `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` is generated from the tracked ping-pong URDF package by `scripts/prepare_a3_isaac_asset.py`. It is ignored to avoid committing duplicate copied meshes.
+- The tracked `whole_body_tracking/assets/__init__.py` only defines `ASSET_DIR`; it is source code, not a generated asset.
+- Verify the generated asset with `python3 scripts/prepare_a3_isaac_asset.py --check`. The check parses `model.urdf`, rejects stale `package://.../meshes` references, verifies every `../meshes/...` reference exists, and requires the ping-pong/racket meshes listed above.
+
+Do not remove the standard `right_hand_Link.STL`, non-racket URDF, MuJoCo MJCF, or collision mesh materials unless a gate records that they are obsolete. Main is the internal solution branch and keeps these layers for training, planner, mocap, MuJoCo parity, and sim-to-real work.
 
 ## Tracked Small Runtime Visual Assets
 
@@ -81,6 +97,12 @@ Promote external repos when they become real dependencies:
 - Use Git LFS only after the team agrees to track heavy binary artifacts.
 
 TTRL is currently an auto-synced reference clone, not a pinned dependency. If code, config, or an experiment result is extracted from TTRL, record the upstream commit in the relevant gate doc or operation doc. Its future dependency state should be decided during G05/G08 planning.
+
+## Third-Party And Vendor Provenance
+
+Keep a short notice file at [../THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) for bundled source/vendor drops and ignored runtime payloads. At minimum it must describe Agibot A3 URDF/deploy materials, BeyondMimic/whole_body_tracking provenance, VRPN/mocap source, and AimRT/MuJoCo runtime policy.
+
+Public-release branches may omit private or redistribution-restricted materials, but `main` should not remove internal runbooks, gates, or source/vendor layers only for public cleanliness. Instead, document which materials are source in git, generated, local-only ignored, external references, future-open candidates, or not currently public.
 
 ## Local Sync Rule
 

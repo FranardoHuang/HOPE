@@ -59,6 +59,7 @@ Done:
 - `RacketTargetCommand` also supports optional debug reward logging (`debug_reward_logging`) for swing-through sign checks and raw-vs-gated reward kernels. Keep it off for production runs unless diagnosing reward scale.
 - The HOPE actor observation now includes desired `racket_target_normal_w`; actual racket pose/velocity/normal remains critic/reward-only simulation state.
 - `scripts/train.py` logs import provenance, env-cfg source, every applied task override, and post-override racket knobs; YAML keys that target missing env-cfg attributes raise instead of silently no-oping.
+- `scripts/train.py` keeps the internal WandB defaults from `cfg/task/*.yaml` and `cfg/train.yaml`, while allowing `motion_file=<local.npz>` to take precedence over registry reads for no-WandB smoke tests or locally generated references.
 - Generated ONNX policy artifacts remain ignored by asset policy unless a gate records an external artifact path.
 - Merged from `train_1` (2026-06-26): paddle-contact phase is now PER-CLIP via `strike_phase_by_motion` (`hope_forehand: 0.46` / `hope_backhand: 0.59`) instead of one shared `strike_phase` (the old shared 0.46 landed the backhand strike in a stationary mid-swing pause and stalled `strike_success` ~4%); `clean_reference_strike_velocity` recomputes the strike target velocity by a centered finite difference (the stored `body_lin_vel_w` was ~1 m/s inconsistent with the position trajectory at the racket tip); `episode_length_s: 3.0` caps each episode to ~one swing; `motion_scale: 0.50`. `scripts/train.py` / `cfg/train.yaml` gain a `checkpoint_path` knob that resumes weights+optimizer from a prior run for curriculum hand-off.
 
@@ -96,16 +97,15 @@ GPU/Isaac environment, after `source setup_train_env.sh` (WandB-registry path):
 
 ```bash
 hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
-  num_envs=32 max_iterations=3 logger=tensorboard run_name=smoke
+  num_envs=32 max_iterations=3 run_name=smoke
 
 hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
-  num_envs=32 max_iterations=3 logger=tensorboard run_name=hope_smoke
+  num_envs=32 max_iterations=3 run_name=hope_smoke
 ```
 
 Record the startup lines from `scripts/train.py` showing source provenance and applied overrides. For
-an accepted run, also record the WandB run ID, checkpoint path, exported ONNX path, and exact-strike
-pass metrics.
+an accepted run, also record the registry artifact or local `motion_file`, WandB run ID when logging to
+WandB, checkpoint path, exported ONNX path, and exact-strike pass metrics.
 
 ### Local Harness Check 2026-06-25
 
@@ -152,7 +152,7 @@ without a compatibility pass.
 
 ## Next Steps
 
-1. Record exact wandb run IDs, checkpoint paths, and ONNX export paths for the first successful runs.
+1. Record exact registry artifacts or local motion paths, WandB run IDs, checkpoint paths, and ONNX export paths for the first successful runs.
 2. Set measurable acceptance metrics for first usable baseline: fall rate, racket error at strike, recovery, and command latency assumptions.
 3. Train and evaluate both forehand and backhand references with `target_mode: reference_perturbed`, then compare against legacy uniform sampling only after reachable ranges are measured.
 4. Run `scripts/sync_external_repos.sh` before using TTRL for comparison, and record the source commit for any extracted idea or config.

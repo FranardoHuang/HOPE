@@ -27,8 +27,20 @@ python3 -m pytest test
 Current known result:
 
 - 2026-06-22: 20 passed.
+- 2026-06-26: 26 passed with `PYTHONPATH=hope_ws/src/hope_planner python3 -m pytest hope_ws/src/hope_planner/test -q`.
 
-Running the same command from the repo root currently fails unless `hope_planner` is on `PYTHONPATH`.
+From the repo root, set `PYTHONPATH` explicitly:
+
+```bash
+PYTHONPATH=hope_ws/src/hope_planner python3 -m pytest \
+  hope_ws/src/hope_planner/test/test_racket_target_planner.py \
+  hope_ws/src/hope_planner/test/test_ball_trajectory_predictor.py \
+  hope_ws/src/hope_planner/test/test_quaternion_utils.py -q
+```
+
+Current known result:
+
+- 2026-06-26: selected planner math tests above, 16 passed.
 
 ## ROS Workspace Build
 

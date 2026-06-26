@@ -40,7 +40,7 @@ cd ~/workspace/HOPE/hope_training/whole_body_tracking
 source setup_train_env.sh
 ```
 
-The script must be SOURCED (not executed) in every new GPU/Isaac terminal. It defines the `hope_isaac_py` launcher, sets `HOPE_WBT_PYTHONPATH`, and exports the WandB variables.
+The script must be SOURCED (not executed) in every new GPU/Isaac terminal. It defines the `hope_isaac_py` launcher, sets `HOPE_WBT_PYTHONPATH`, and exports placeholder WandB variables for the internal default registry/logging path.
 
 The script is now scrubbed of site-specific paths. It reads overridable env vars with placeholder defaults:
 
@@ -123,7 +123,7 @@ Minimum order for a training machine:
 
 ## WandB Setup
 
-WandB needs two DISTINCT identities. They MUST differ or motion-registry reads fail with `Unable to find organization for entity ...`.
+Internal training defaults to WandB logging and the org-scoped WandB motion registry. WandB needs two DISTINCT identities; they MUST differ or motion-registry reads fail with `Unable to find organization for entity ...`.
 
 - `WANDB_ENTITY` — your team, used for run logging.
 - `WANDB_REGISTRY_ORG` — your org, used for the motion registry.
@@ -138,7 +138,7 @@ export WANDB_REGISTRY_ORG=your-wandb-org
 export WANDB_PROJECT=hope_wbc
 ```
 
-No WandB account? Pass `logger=tensorboard` for smoke tests and local runs; it is the no-WandB fallback and needs no login or registry.
+No WandB account or testing on a fresh box? Pass `logger=tensorboard` and `motion_file=...`; this explicit smoke path needs no login or registry.
 
 ## Local Assets Needed For This Task
 
@@ -148,34 +148,30 @@ Before smoke tests or training, the A3 Isaac asset must exist at the path expect
 hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/urdf/model.urdf
 ```
 
-If it is missing, create it from the tracked Agibot URDF package:
+If it is missing, create it from the tracked Agibot ping-pong URDF package:
 
 ```bash
 cd ~/workspace/HOPE
-mkdir -p hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/{urdf,meshes,config}
-cp -r agi/URDF/A3T2.5-URDF-std-pingpang/meshes/. \
-  hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/meshes/
-cp -r agi/URDF/A3T2.5-URDF-std-pingpang/config/. \
-  hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/config/
-cp agi/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf \
-  hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/urdf/model.urdf
+python3 scripts/prepare_a3_isaac_asset.py --force
+python3 scripts/prepare_a3_isaac_asset.py --check
 ```
 
-Then rewrite mesh references in the copied URDF if they still use `package://...` paths. The long-form version of this setup is in `reimplement.md` Step 12.7.
+The script copies meshes/config from `agi/URDF/A3T2.5-URDF-std-pingpang/`, rewrites `package://.../meshes` URDF references to `../meshes/...`, and checks that the generated URDF references existing meshes including `right_hand_pingpang_Link.STL`, `pingpang_red_Link.STL`, `pingpang_black_Link.STL`, and `pingbang_ball_Link.STL`.
 
-Motion references are also task-local setup. Use one of:
+Motion references are also task-local setup. Internal default runs use the WandB registry from `cfg/task/*.yaml`; local generated `.npz` files can override that default:
 
-- WandB registry paths such as `$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand`.
-- Local ignored `.npz` motion files under `hope_training/motions/` or `hope_training/whole_body_tracking/artifacts/`, with the exact path recorded in G05.
+- Internal registry paths such as `registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand"`.
+- Local ignored `.npz` motion files under `hope_training/motions/` or `hope_training/whole_body_tracking/artifacts/`, passed as `motion_file=...`, with the exact path recorded in G05 when used.
 
 Do not commit generated logs, checkpoints, WandB caches, or motion artifacts unless the asset policy changes.
 
 ## Smoke Test
 
-`TrackingFlat` needs no motion registry and no WandB account, so it is the cleanest smoke test:
+`TrackingFlat` needs a reference motion but no motion registry and no WandB account, so it is the cleanest smoke test once you have a local `.npz`:
 
 ```bash
 hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
+  motion_file=../motions/hope_forehand.npz \
   num_envs=32 max_iterations=3 logger=tensorboard run_name=smoke
 ```
 
@@ -206,7 +202,6 @@ Plain tracking first:
 
 ```bash
 hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
-  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
   run_name=forehand_tracking
 ```
 
@@ -214,7 +209,6 @@ HOPE racket task, one policy per swing:
 
 ```bash
 hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
   run_name=hope_forehand
 
 hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
@@ -236,7 +230,15 @@ change — e.g. tightening `racket_velocity_std` — without throwing away progr
 checkpoint_path=logs/rsl_rl/agibot_a3_hope/<run>/model_2000.pt
 ```
 
-`HOPEPingPong` trains ONE swing style per policy (forehand or backhand), chosen entirely by the `registry_name` reference clip.
+`HOPEPingPong` trains ONE swing style per policy (forehand or backhand), chosen by the reference clip. By default that clip comes from `registry_name`; pass `motion_file=...` to override with a local `.npz`.
+
+Explicit local-motion equivalent:
+
+```bash
+hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+  motion_file=../motions/hope_forehand.npz \
+  logger=tensorboard run_name=hope_forehand_local_smoke
+```
 
 At startup, `scripts/train.py` prints:
 

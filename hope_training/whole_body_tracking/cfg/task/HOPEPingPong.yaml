@@ -10,8 +10,10 @@ name: HOPEPingPong
 gym_task: HOPE-PingPong-AgibotA3-v0
 experiment_name: agibot_a3_hope
 
-# wandb motion registry for the reference clip (override on the CLI with
-# registry_name=...; run once per swing style with the forehand/backhand clip).
+# Internal default reference clip comes from the WandB motion registry. A local generated .npz can
+# override it explicitly:
+#   motion_file=../motions/hope_forehand.npz
+motion_file: null
 # NOTE: the prefix is the wandb ORG (WANDB_REGISTRY_ORG), NOT the team (WANDB_ENTITY) — registries
 # are org-scoped, so a team name fails with "Unable to find organization for entity ...".
 registry_name: ${oc.env:WANDB_REGISTRY_ORG,BerkeleyPingPong}/wandb-registry-motions/hope_forehand

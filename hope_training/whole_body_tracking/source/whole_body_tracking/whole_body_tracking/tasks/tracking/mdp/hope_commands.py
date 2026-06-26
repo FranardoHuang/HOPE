@@ -302,15 +302,10 @@ class RacketTargetCommand(CommandTerm):
         strike_step = round(self.cfg.strike_phase * (total - 1))
         if self._racket_mode == "body":
             idx = self._racket_body_index
-            pos = motion._body_pos_w[strike_step, idx]
-            quat = motion._body_quat_w[strike_step, idx]
-            lin = motion._body_lin_vel_w[strike_step, idx]
+            pos, quat, lin, _ = self._reference_body_state(motion, strike_step, idx)
         else:
             widx = self._wrist_body_index
-            wpos = motion._body_pos_w[strike_step, widx]
-            wquat = motion._body_quat_w[strike_step, widx]
-            wlin = motion._body_lin_vel_w[strike_step, widx]
-            wang = motion._body_ang_vel_w[strike_step, widx]
+            wpos, wquat, wlin, wang = self._reference_body_state(motion, strike_step, widx, require_ang_vel=True)
             offset_w = quat_apply(wquat.unsqueeze(0), self._mount_offset[0:1]).squeeze(0)
             pos = wpos + offset_w
             lin = wlin + torch.cross(wang, offset_w, dim=-1)
@@ -341,7 +336,7 @@ class RacketTargetCommand(CommandTerm):
         self._ref_racket_normal_w = (normal / (torch.norm(normal) + 1e-6)).detach().clone()
         # Reference base (root) XY at the strike — root is articulation body index 0 (same order the
         # motion arrays use). The base->racket horizontal offset couples base_target to racket_target.
-        self._ref_base_pos_rel = motion._body_pos_w[strike_step, 0].detach().clone()
+        self._ref_base_pos_rel = self._reference_body_state(motion, strike_step, 0)[0].detach().clone()
         self._ref_reach_offset_xy = (self._ref_racket_pos_rel[:2] - self._ref_base_pos_rel[:2]).detach().clone()
         self._ref_strike_cached = True
         p, v, nrm = self._ref_racket_pos_rel, self._ref_racket_vel_w, self._ref_racket_normal_w
@@ -367,6 +362,31 @@ class RacketTargetCommand(CommandTerm):
             f"(target uses {'CLEAN' if self.cfg.clean_reference_strike_velocity else 'RAW'} velocity)",
             flush=True,
         )
+
+    def _reference_body_state(self, motion, step: int, body_index: int, require_ang_vel: bool = False):
+        """Return reference body state from MotionLoader's full-articulation private arrays.
+
+        This is the current, intentional coupling point to upstream ``MotionLoader`` internals. Public
+        ``MotionCommand`` buffers expose only the tracking subset, while the racket FK needs the full
+        articulation body order so it can read the racket body or wrist mount. Keep direct private-field
+        access centralized here until MotionLoader grows a public full-body state API.
+        """
+        required = ["_body_pos_w", "_body_quat_w", "_body_lin_vel_w"]
+        if require_ang_vel:
+            required.append("_body_ang_vel_w")
+        missing = [name for name in required if not hasattr(motion, name)]
+        if missing:
+            raise AttributeError(
+                "RacketTargetCommand requires MotionLoader full-body reference arrays "
+                f"{required}, but missing {missing}. This is the HOPE coupling point for "
+                "reference_perturbed racket FK; update _reference_body_state if upstream MotionLoader changes."
+            )
+
+        pos = motion._body_pos_w[step, body_index]
+        quat = motion._body_quat_w[step, body_index]
+        lin = motion._body_lin_vel_w[step, body_index]
+        ang = motion._body_ang_vel_w[step, body_index] if require_ang_vel else None
+        return pos, quat, lin, ang
 
     def _perturb_scale(self) -> float:
         """Curriculum factor in [start, 1.0] that widens the reference perturbation over training.
