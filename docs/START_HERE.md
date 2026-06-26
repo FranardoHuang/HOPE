@@ -48,7 +48,7 @@ For broad onboarding, read [PROJECT_MAP.md](PROJECT_MAP.md) and [DEFINITIONS.md]
 
 ## Reimplementation Rhythm
 
-`reimplement.md` is the long-form runbook, not a separate project plan. Use it through the gate docs:
+`reimplement.md` is the long-form supplemental runbook, not the primary setup path or a separate project plan. Use it through the gate docs:
 
 1. Find the gate that matches the work.
 2. Read the gate doc and operation doc first.
@@ -96,7 +96,7 @@ Do not hide project state in chat history. If a future contributor or agent need
 ## Fast Entry Points
 
 - New computer or agent startup: use this file as the index, then go to the operation doc for the task. For Isaac training, use [operations/run_training.md](operations/run_training.md); for ignored/private assets missing from a fresh clone, use [operations/setup_local_sync.md](operations/setup_local_sync.md). Use [reimplement.md](../reimplement.md) only as the long-form runbook when a gate or operation doc points to a specific step.
-- End-to-end, gate-indexed runbook (environment creation, GMR/GVHMR motion pipeline, A3 asset prep, training, deploy): [reimplement.md](../reimplement.md). The `operations/*` docs are the curated per-task views; `reimplement.md` is the long-form narrative source they defer to (e.g. "Step 12.7").
+- End-to-end historical runbook (environment creation, GMR/GVHMR motion pipeline, A3 asset prep, training, deploy): [reimplement.md](../reimplement.md). The `operations/*` docs are the curated per-task source of truth; use `reimplement.md` only for supplemental command detail when an operation or gate doc cites a specific step (e.g. "Step 12.7").
 - Environment setup is task-specific. Start from the operation doc for your task; use [operations/setup_environments.md](operations/setup_environments.md) only as a reference matrix.
 - Ignored/local assets that must be copied manually are summarized in [operations/setup_local_sync.md](operations/setup_local_sync.md), but each operation doc should list the assets it needs locally.
 - Auto-sync ignored external references before using them: `scripts/sync_external_repos.sh`.

@@ -105,7 +105,7 @@ These ignored paths are not fully restored by `git clone` or `git pull`. If a co
 
 ## Creating the environments
 
-The sections above describe how to *enter* the environments. This section covers how to *create* them on a fresh machine. This repo currently uses the `reimplement.md` distrobox names `hope` for ROS/Jazzy work and `grasping` for GPU/Isaac work.
+The sections above describe how to *enter* the environments. This section covers how to *create* them on a fresh machine. This operation doc is the current setup entry; the old long-form runbook uses the same distrobox names, `hope` for ROS/Jazzy work and `grasping` for GPU/Isaac work.
 
 ### Host container prerequisites
 
@@ -123,7 +123,7 @@ sudo apt update
 sudo apt install -y podman uidmap
 ```
 
-If the packaged distrobox is preferred over the user-local script, also install `distrobox`. Keep the container names `hope` and `grasping` to match `reimplement.md`.
+If the packaged distrobox is preferred over the user-local script, also install `distrobox`. Keep the container names `hope` and `grasping` so current docs and old command snippets stay aligned.
 
 Current local status: `podman 3.4.4` and `uidmap` are installed, `hope` was created from
 `docker.io/osrf/ros:jazzy-desktop-full`, and `grasping` was created with `--nvidia` from
@@ -133,7 +133,7 @@ Current local status: `podman 3.4.4` and `uidmap` are installed, `hope` was crea
 
 Linux + ROS 2 Jazzy. The supported path is a distrobox or otherwise pre-provisioned ROS 2 Jazzy environment. The old root `Dockerfile.hope-ros2-jazzy` has been removed because this repo no longer uses that Docker path.
 
-- distrobox: the full `distrobox-create` recipe lives in `reimplement.md`.
+- distrobox: use this doc for the supported package list and ROS commands; if you need the exact historical `distrobox-create` invocation, see `reimplement.md`.
 
 Apt packages to install in the box:
 
@@ -180,7 +180,7 @@ hope_isaac_py -c "import hydra, omegaconf; print(hydra.__version__)"
 
 ### Motion retargeting (GMR + GVHMR)
 
-The motion pipeline uses two separate conda envs (`python=3.10`). Both are git-ignored clones and are absent on a fresh clone. The full procedure is in `reimplement.md` steps 9-11.
+The motion pipeline uses two separate conda envs (`python=3.10`). Both are git-ignored clones and are absent on a fresh clone. Use [setup_local_sync.md](setup_local_sync.md) for current restore points; `reimplement.md` steps 9-11 provide supplemental historical command detail.
 
 Current local status from 2026-06-25:
 
