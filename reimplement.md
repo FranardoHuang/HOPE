@@ -3587,7 +3587,9 @@ BeyondMimic `policy.onnx` has a different contract — inputs `(obs, time_step)`
 `source/whole_body_tracking/whole_body_tracking/utils/exporter.py`). Pointing
 `onnx.model_path` at your file will load but produce garbage actions until an
 obs/action adapter maps between the two. That bridge is the remaining engineering item
-before a WBC-trained policy can drive 16.2.
+before a WBC-trained policy can drive 16.2. The same bridge gates Step 18: until it exists,
+validate the real-robot link with Agibot's bundled policy via Step 18.0 (which depends on
+neither the bridge nor your training).
 
 Verification gate:
 
@@ -3650,6 +3652,93 @@ Verification gate:
 ## 18. Deploy On The Agibot Expedition A3
 
 Use this path for the A3. Keep the HOPE ROS 2 interfaces stable and put all Agibot-specific logic (AimDK/AimRT) behind a bridge package so the rest of the stack does not depend on the vendor API.
+
+> Reference-implementation status (added 2026-06-26): the real, shipping deployment
+> program in this repo is Agibot's `a3_deploy_onnx_ref` (`agi/a3_deploy_example/`) — the
+> **same binary used in Step 16.2**, cross-compiled for the robot's Rockchip/MDU and run
+> on the robot over an SSH jump host. The generic `agibot_bringup` /
+> `agibot_hardware_bridge` / `motion_tracking_controller` packages described in 18.1 below
+> remain the clean-room blueprint; the actually-running path is the Agibot program. Two
+> facts gate hardware deployment of **your** policy:
+>
+> 1. Your BeyondMimic `policy.onnx` is **NOT drop-in compatible** with `a3_deploy_onnx_ref`.
+>    Your contract: inputs `(obs, time_step)`, **7 outputs**, **31-DOF** (see
+>    `source/whole_body_tracking/whole_body_tracking/utils/exporter.py`). The deploy
+>    program: single in / single out (`onnx.mode: monolithic`), **29-DOF MuJoCo policy
+>    view**, A3 obs `[1,1570]` (see `a3_deploy_onnx_ref/include/a3_policy_parameters.hpp`).
+>    Pointing `onnx.model_path` at your file loads but produces **garbage actions** until an
+>    obs/action bridge maps between the two (same caveat as Step 16.2).
+> 2. Per Step 16.2 and constraint 4 (§28): **no hardware run of your own policy until the
+>    A3 MuJoCo sim-to-sim passes with that policy.**
+>
+> Therefore validate the hardware path FIRST with Agibot's bundled policy (Step 18.0) — it
+> exercises the entire real-robot link without depending on your training. Build the bridge
+> and pass 16.2 in parallel, then repeat 18.0's run with your own policy.
+
+### 18.0 Validate the hardware path first (Agibot bundled policy)
+
+This is the safe sim-to-real bring-up you can run **today**, before sim-to-sim is finished
+and before your own policy is ready. It runs Agibot's bundled A3 policy
+(`assets/a3_runtime/models/model_step_098000_a3.onnx`, or its `.rknn` on Rockchip), so it
+proves the harness/hardware — network → `hal_ethercat` → 6-way state sync → PD_STAND →
+motion → E-stop — not your swing. Full copy-paste (placeholders, safety state machine,
+troubleshooting) lives in `agi/a3_deploy_example/HARDWARE_BRINGUP_CHECKLIST.md`; summary:
+
+Execution scope: **build/cross-compile on the dev machine** (host or `hope`, needs Docker);
+**the run happens ON the robot's MDU over an SSH jump host, NOT inside `hope`**. Transport
+is `iceoryx`. Never use `--auto-start` on hardware.
+
+Fill in on site: `PLACEHOLDER_HDU_WIFI_IP` (HDU jump-host Wi-Fi IP), `PLACEHOLDER_MDU_IP`
+(robot compute unit, Agibot default `10.42.10.12`). If the unit is **Thor/ADU** instead of
+Rockchip/MDU, swap `rockchip`→`thor` and `iceoryx`→`ros2`.
+
+```bash
+# 1) Dev machine — cross-compile the Rockchip package (Docker + bundled sysroot):
+cd ~/workspace/HOPE/agi/a3_deploy_example
+find . -name '._*' -type f -delete                       # strip macOS junk or the glob build breaks
+bash scripts/build_a3_deploy_pkg.sh --arch rockchip --jobs 20   # -> dist/a3_deploy_rockchip/
+
+# 2) Dev machine — push to the MDU through the HDU jump host:
+ssh -J agi@PLACEHOLDER_HDU_WIFI_IP agi@PLACEHOLDER_MDU_IP 'mkdir -p /agibot/a3_deploy'
+rsync -azP -e "ssh -J agi@PLACEHOLDER_HDU_WIFI_IP" \
+  dist/a3_deploy_rockchip/ agi@PLACEHOLDER_MDU_IP:/agibot/a3_deploy/
+
+# 3) MDU terminal A — stop the system service, start EtherCAT (keep this open):
+ssh -J agi@PLACEHOLDER_HDU_WIFI_IP agi@PLACEHOLDER_MDU_IP
+sudo systemctl stop agibot_pm
+source /agibot/software/v0/entry/env/env.sh
+cd /agibot/software/v0 && bash scripts/hal_ethercat/start_hal_ethercat.sh
+
+# 4) MDU terminal B — confirm state is flowing, then dry-run -> probe -> run:
+ssh -J agi@PLACEHOLDER_HDU_WIFI_IP agi@PLACEHOLDER_MDU_IP
+cd /agibot/a3_deploy
+file ./a3_deploy_onnx_ref            # must be aarch64
+source ./setup_ros2_msgs.bash
+ros2 topic hz /body_drive/arm_joint_state
+taskset -c 4-7 ./run_a3.sh --dry-run                       # 6 inputs ready, sync_complete/aligned stable
+A3_LATENCY_LOG=verbose taskset -c 4-7 ./run_a3_probe.sh    # infer_ms < 20 ms (50 Hz period)
+taskset -c 4-7 ./run_a3.sh                                 # full manual state machine
+```
+
+Manual state machine — type keys in the DEPLOY terminal: `p` PASSIVE → `s` PD_STAND (wait
+~3 s for it to settle) → `m` MOTION → `r`/SPACE play. First run: short, small-amplitude
+motion only, hand on the E-stop. `q` quits, `p` drops to passive; the hardware E-stop and
+Ctrl+C are your aborts.
+
+18.0 verification gate:
+
+- dry-run: all 6 `/body_drive/*` inputs ready; `sync_complete` / `sync_aligned` stable.
+- probe: `infer_ms` below the control period; header/group skew and sample age within thresholds.
+- run: `s` stands stably; `m`+`r` plays a short clip without falling.
+- E-stop stops upper-body and gait within 200 ms (competition requirement).
+
+Only after 18.0 passes, **and** the obs/action bridge plus Step 16.2 are done, run the same
+sequence with your own policy.
+
+### 18.1 Clean-room bridge blueprint (ROS 2 packages)
+
+The rest of this section is the vendor-neutral blueprint for the case where you build your
+own ROS 2 bridge instead of (or alongside) Agibot's `a3_deploy_onnx_ref`.
 
 Execution scope:
 
