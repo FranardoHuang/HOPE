@@ -80,7 +80,12 @@ rewards:
   # it1165, posPass 0.456 (new high), velPass 0.108 & comp 0.072 both still rising, no instability. 0.30
   # works; watch the swing still looks like a real forehand (motion is now a weak prior). If eplen ever
   # runs away again, next structural fix is capping episode_length_s to ~1 clip (~1.9s).
-  motion_scale: 0.50
+  # 2026-06-26: 0.50 → 0.60 — mild anti-sink for the backhand. The reference torso RISES through the
+  # backhand strike (+0.2~0.37 m/s) but the trained robot SINKS (anchor v_z ≈ -0.78), which both triggers
+  # the ee_body_pos Z-termination (eplen stuck ~0.2s, time_out=0) and adds downward jitter at the strike.
+  # A slightly stronger imitation anchor holds the vertical weight-transfer. The 3.0s episode cap already
+  # blocks the stand-and-imitate runaway, so this is safe; drop back to 0.50 if eplen runs away.
+  motion_scale: 0.60
   # per-term override also available (applied before motion_scale), e.g.:
   #   motion_body_pos_weight: 1.0   motion_body_pos_std: 0.3   motion_body_ori_weight: ...
   #   motion_body_lin_vel_weight/_std   motion_body_ang_vel_weight/_std
@@ -150,11 +155,22 @@ racket:
   # a controllable slower hit first, set e.g. 0.6 (~3.6 m/s), then raise to 1.0 once the slow strike passes
   # the success gates. NOTE: at scale!=1.0 the target velocity no longer matches the imitated swing, so a
   # perfect imitator no longer scores velocity exactly (position/normal stay reachable-by-construction).
-  ref_vel_scale: 0.6              # PATH C: 1.0 → 0.6 — target ~3 m/s first. Ablation B showed the policy
+  ref_vel_scale: 0.6              # fallback for clips not in ref_vel_scale_by_motion (forehand-tuned).
+                                  # PATH C: 1.0 → 0.6 — target ~3 m/s first. Ablation B showed the policy
                                   # tops out ~1.6 m/s, so at full clip speed (~5) velE~2.9 fell OUTSIDE the
                                   # velocity kernel (std=1.2 → exp(-5.8)≈0, dead). At ~3 m/s velE~1.4 lands
                                   # in the live band (exp(-1.36)=0.26). Ramp back to 0.8→1.0 once the slow
                                   # strike clears the success gates (composite>0.25, vel_pass>0.5).
+  # ref_vel_scale is PER-CLIP (2026-06-26): down-scaling only makes sense for the VIOLENT forehand.
+  # Measured from motion.npz: forehand tip peaks 6.14 m/s, backhand only 3.32 m/s (~1.8 m/s at the mount).
+  # Applying 0.6 to the already-gentle backhand pushed its velocity TARGET down to ~1.1 m/s — into the
+  # body-jitter floor (the 0.5 m/s accept gate is then ~45% of target vs ~8% for the forehand) AND pitted
+  # imitation (wants ~1.8) against the velocity goal (wants ~1.1), producing the awkward sink. So DON'T
+  # slow the backhand: scale 1.0 keeps target == imitated swing speed (~1.8), aligning the two rewards and
+  # giving more signal vs jitter. Substring match, longest key wins; ref_vel_scale above is the fallback.
+  ref_vel_scale_by_motion:
+    hope_forehand: 0.6            # tame the 6 m/s tip → ~3.6 m/s target (slow-first curriculum)
+    hope_backhand: 1.0            # already gentle (3.3 m/s tip); full speed = target matches the swing
 
   # --- legacy "uniform" box (ignored when target_mode=reference_perturbed) -----------------------
   pos_x_range: [0.25, 0.55]

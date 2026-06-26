@@ -115,7 +115,8 @@ _RACKET_KEYS = (
     "normal_mode", "forehand_on_negative_y", "mount_normal_axis", "mount_normal_sign",
     "target_mode", "ref_perturb_pos", "ref_perturb_vel", "ref_perturb_normal",
     "ref_perturb_curriculum_steps", "ref_perturb_curriculum_start",
-    "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "debug_reward_logging",
+    "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "ref_vel_scale_by_motion",
+    "debug_reward_logging",
     "clean_reference_strike_velocity", "clean_strike_vel_window",
 )
 
@@ -164,6 +165,29 @@ def _resolve_strike_phase(rk, clip_name):
             return float(v), f"racket_target.strike_phase<-by_motion[{k}]={float(v)} (clip={clip_name})"
     sp = _get(rk, "strike_phase")
     return (None if sp is None else float(sp)), None
+
+
+def _resolve_ref_vel_scale(rk, clip_name):
+    """Select the reference racket-velocity scale for the trained clip (PER-CLIP, like strike_phase).
+
+    ``ref_vel_scale`` <1.0 trains a slower-than-reference hit. It was tuned to TAME the violent forehand
+    (~6 m/s tip) — but the backhand is already a gentle swing (~3.3 m/s tip / ~1.8 m/s at the mount), so
+    down-scaling it shrinks the velocity TARGET into the body-jitter floor AND pits the imitation prior
+    (wants full speed) against the velocity goal (wants 0.6x). So the scale must be per-clip:
+    ``ref_vel_scale_by_motion`` maps a motion-name substring to its scale (longest match wins); falls back
+    to the scalar ``ref_vel_scale``. Returns ``(scale_or_None, note_or_None)``.
+    """
+    by_motion = _get(rk, "ref_vel_scale_by_motion")
+    if by_motion is not None and clip_name:
+        cn = str(clip_name).lower()
+        matches = [(str(k).lower(), v) for k, v in by_motion.items()
+                   if str(k).lower() in cn or cn in str(k).lower()]
+        if matches:
+            matches.sort(key=lambda kv: len(kv[0]), reverse=True)  # longest key = most specific
+            k, v = matches[0]
+            return float(v), f"racket_target.ref_vel_scale<-by_motion[{k}]={float(v)} (clip={clip_name})"
+    rv = _get(rk, "ref_vel_scale")
+    return (None if rv is None else float(rv)), None
 
 
 def _apply_task_overrides(env_cfg, task, clip_name=None):
@@ -292,7 +316,11 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(C, "ref_perturb_advance_threshold", _get(rk, "ref_perturb_advance_threshold"), float, applied, "racket_target")
             _set_attr(C, "ref_perturb_advance_rate", _get(rk, "ref_perturb_advance_rate"), float, applied, "racket_target")
             # Stage slow->fast hitting: scale the reference racket-velocity target (<1.0 trains slower hits).
-            _set_attr(C, "ref_vel_scale", _get(rk, "ref_vel_scale"), float, applied, "racket_target")
+            # PER-CLIP: ref_vel_scale_by_motion wins for the trained clip, else the scalar ref_vel_scale.
+            _rv_val, _rv_note = _resolve_ref_vel_scale(rk, clip_name)
+            _set_attr(C, "ref_vel_scale", _rv_val, float, applied, "racket_target")
+            if _rv_note is not None:
+                applied.append(_rv_note)
             # Debug logging (sign verification + raw/gated reward kernels). Off for production runs.
             _set_attr(C, "debug_reward_logging", _get(rk, "debug_reward_logging"), _as_bool, applied, "racket_target")
             # Clean reference strike velocity (denoise the FD'd target velocity at the racket tip).
