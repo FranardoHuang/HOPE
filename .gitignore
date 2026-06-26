@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+tmp/
+vendor_assets/
+external_repos/
 build/
 install/
 log/
@@ -27,5 +30,22 @@ hope_training/whole_body_tracking/wandb/
 *.log
 .codex-env-snapshots
 
-# Agibot A3 deploy example package (vendor-provided, ~1.7 GB — too large for git)
+# Local, machine-specific training env override (Isaac paths + wandb identity).
+# Sourced by setup_train_env.sh if present; keep real paths/identity out of git.
+hope_training/whole_body_tracking/setup_train_env.local.sh
+
+# Agibot A3 deploy example package (vendor-provided, ~1.7 GB - too large for git)
 agi/a3_deploy_example/
+
+# Large vendor/runtime artifacts kept outside normal git history.
+*.onnx
+*.rknn
+*.engine
+*.trt
+*.pt
+*.pth
+*.ckpt
+*.tar.gz
+*.deb
+*.so
+*.a

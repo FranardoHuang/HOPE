@@ -4,7 +4,7 @@
   <name>hope_msgs</name>
   <version>0.0.0</version>
   <description>Shared ROS 2 interface definitions for the HOPE ping-pong stack.</description>
-  <maintainer email="dongc_1@yahoo.com">dongc1</maintainer>
+  <maintainer email="maintainer@example.com">HOPE Maintainers</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

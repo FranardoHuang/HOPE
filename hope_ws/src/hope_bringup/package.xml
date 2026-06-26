@@ -4,7 +4,7 @@
   <name>hope_bringup</name>
   <version>0.0.0</version>
   <description>Bringup assets for the HOPE ROS 2 stack, including the canonical world frame.</description>
-  <maintainer email="dongc_1@yahoo.com">dongc1</maintainer>
+  <maintainer email="maintainer@example.com">HOPE Maintainers</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

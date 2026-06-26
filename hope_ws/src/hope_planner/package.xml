@@ -4,7 +4,7 @@
   <name>hope_planner</name>
   <version>0.0.0</version>
   <description>HOPE model-based ping-pong planner (Stages 1-3): ball state estimation, trajectory prediction, and racket target planning.</description>
-  <maintainer email="redspry@gmail.com">dongc1</maintainer>
+  <maintainer email="maintainer@example.com">HOPE Maintainers</maintainer>
   <license>Apache-2.0</license>
 
   <depend>rclpy</depend>

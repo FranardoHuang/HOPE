@@ -1,4 +1,55 @@
+## HOPE Agibot A3 Ping-Pong (this repo)
+
+Status: Partial — A3 training here demonstrates pipeline viability, NOT an accepted quality baseline.
+
+This package is the BeyondMimic motion-tracking trainer (upstream G1 docs below), extended in HOPE
+to train an [Agibot A3](../../agi/) (31 actuated DOF) ping-pong swing policy. Unlike the upstream
+`argparse` entry (`scripts/rsl_rl/train.py --task=Tracking-Flat-G1-v0`), HOPE drives training through
+**Hydra** entry points:
+
+- `scripts/train.py` and `scripts/play.py` with `task=HOPEPingPong algo=ppo`.
+- The `HOPEPingPong` task maps to the gym task `HOPE-PingPong-AgibotA3-v0` (`experiment_name agibot_a3_hope`).
+- Overrides are layered from the `cfg/` tree: `cfg/task` (env/task), `cfg/algo` (PPO), `cfg/base` (shared defaults).
+- Each policy trains **ONE swing style** (forehand or backhand), selected by the reference clip in `registry_name`.
+- A plain tracking smoke test (no registry, no WandB) is `task=TrackingFlat algo=ppo` — see the runbook.
+
+**The authoritative runbook is [docs/operations/run_training.md](../../docs/operations/run_training.md).**
+A from-scratch Isaac Sim/Lab install is out of scope here — follow the upstream
+[Isaac Lab installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html).
+
+### HOPE environment (GPU/Isaac box)
+
+- Isaac Sim 4.5.0, Isaac Lab 2.1.0, Python 3.10, NVIDIA CUDA GPU; `rsl_rl` comes via Isaac Lab.
+- Install into the Isaac Lab python: `python -m pip install -e source/whole_body_tracking`.
+- Extra pip deps NOT in `setup.py` `install_requires` (must be importable in the Isaac Lab python):
+  `hydra`, `omegaconf`, plus `wandb`, `onnxscript`, `psutil`.
+- `source setup_train_env.sh` (must be **sourced**, in the GPU/Isaac shell) to get the `hope_isaac_py`
+  launcher and `WANDB_*` exports. Edit its site-specific paths, or provide an (git-ignored)
+  `setup_train_env.local.sh` override that it auto-sources.
+
+### A3 asset and motions
+
+- The A3 ping-pong URDF lives at
+  `source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/urdf/model.urdf`, built from
+  `agi/URDF/A3T2.5-URDF-std-pingpang/` per [reimplement.md](../../reimplement.md) Step 12.7.
+- Motion flow: GVHMR (video → SMPL-X) → GMR (`--robot agibot_a3`; the default robot is `g1`, A3 NEEDS
+  `--robot agibot_a3`) → `scripts/csv_to_npz.py --robot agibot_a3` → upload to **your own** WandB
+  "Motions" registry collection. `csv_to_npz.py` writes `/tmp/motion.npz` (edit if `/tmp` is inaccessible).
+- WandB identities must differ: `WANDB_ENTITY` (team, run logging) vs `WANDB_REGISTRY_ORG` (org, motion
+  registry) — if they match, registry reads fail. Use placeholders `your-wandb-team` / `your-wandb-org`.
+- `HOPEPingPong.yaml` defaults to `target_mode: reference_perturbed`: the racket target is sampled
+  around the reference motion's strike-frame racket state with a widening perturbation curriculum.
+  The legacy uniform target ranges are still placeholders and should only be used after IK validation
+  against A3 right-arm reachability; an unreachable target caps `strike_success` regardless of reward tuning.
+- `max_iterations` defaults to a train-forever sentinel — pass `max_iterations=` on the CLI and stop
+  manually when `strike_success` plateaus.
+
+---
+
 # BeyondMimic Motion Tracking Code
+
+> The sections below are the **upstream BeyondMimic (Unitree G1) baseline** documentation, retained
+> for reference. For the HOPE Agibot A3 ping-pong workflow, see the section above.
 
 [![IsaacSim](https://img.shields.io/badge/IsaacSim-4.5.0-silver.svg)](https://docs.omniverse.nvidia.com/isaacsim/latest/overview.html)
 [![Isaac Lab](https://img.shields.io/badge/IsaacLab-2.1.0-silver)](https://isaac-sim.github.io/IsaacLab)
