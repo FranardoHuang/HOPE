@@ -24,6 +24,11 @@ max_iterations: null
 registry_name: null     # falls back to task.registry_name when null
 motion_file: null       # explicit local motion .npz; when set, skips the wandb registry fetch
 run_name: null
+# Resume / curriculum hand-off: load model+optimizer from a prior run's checkpoint and CONTINUE training
+# (iteration counter + wandb step continue from the checkpoint). null -> fresh init. Use this to apply a
+# staged config change (e.g. tightening racket_velocity_std) WITHOUT throwing away progress:
+#   checkpoint_path=logs/rsl_rl/agibot_a3_hope/<run>/model_2000.pt
+checkpoint_path: null
 
 # logging
 logger: wandb           # wandb | tensorboard | neptune

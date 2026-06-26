@@ -108,7 +108,7 @@ def _set_reward(rewards, name, weight, std, applied):
 # YAML keys under `racket:` that target the RacketTargetCommandCfg (used to decide whether the task
 # actually requested racket overrides before requiring the command to exist).
 _RACKET_KEYS = (
-    "strike_phase", "strike_window_s", "strike_success_pos_thresh",
+    "strike_phase", "strike_phase_by_motion", "strike_window_s", "strike_success_pos_thresh",
     "pos_x_range", "pos_y_range", "pos_z_range",
     "vel_x_range", "vel_y_range", "vel_z_range",
     "base_target_x_range", "base_target_y_range",
@@ -116,10 +116,57 @@ _RACKET_KEYS = (
     "target_mode", "ref_perturb_pos", "ref_perturb_vel", "ref_perturb_normal",
     "ref_perturb_curriculum_steps", "ref_perturb_curriculum_start",
     "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "debug_reward_logging",
+    "clean_reference_strike_velocity", "clean_strike_vel_window",
 )
 
 
-def _apply_task_overrides(env_cfg, task):
+def _registry_clip_name(cfg):
+    """Motion clip name used to key per-motion settings (e.g. ``strike_phase_by_motion``).
+
+    Resolution order (most explicit wins): CLI ``registry_name`` -> explicit ``motion_file`` (its parent
+    dir, the artifact folder such as ``hope_backhand:v0``) -> the task default ``registry_name``. Any
+    registry path prefix and ``:version`` suffix are stripped, so the result is e.g. ``hope_forehand`` /
+    ``hope_backhand``. Returns ``None`` when nothing is set. Shared by train/play/probe so all three pick
+    the same per-clip strike phase.
+    """
+    reg = _get(cfg, "registry_name")  # CLI override (train/play): wins over the forehand default
+    if reg is not None:
+        return str(reg).split("/")[-1].split(":")[0] or None
+    mf = _get(cfg, "motion_file")  # explicit motion file (probe / play replay): next most specific
+    if mf is not None:
+        parts = [p for p in str(mf).replace("\\", "/").split("/") if p]
+        if len(parts) >= 2:
+            return parts[-2].split(":")[0] or None
+    task = _get(cfg, "task")
+    reg = _get(task, "registry_name") if task is not None else None  # task default (forehand): last
+    if reg is not None:
+        return str(reg).split("/")[-1].split(":")[0] or None
+    return None
+
+
+def _resolve_strike_phase(rk, clip_name):
+    """Select the strike phase for the trained clip (paddle-contact frame is PER-CLIP).
+
+    A single global ``strike_phase`` cannot serve both swings (the racket-tip speed peak lands at a
+    different fraction in each clip, e.g. forehand ~0.46 vs backhand ~0.59), so ``strike_phase_by_motion``
+    maps a motion-name substring (the registry clip name) to its contact phase; the most-specific
+    (longest) matching key wins. Falls back to the scalar ``strike_phase`` when nothing matches or the
+    clip is unknown. Returns ``(phase_or_None, note_or_None)``; ``note`` records which mapping fired.
+    """
+    by_motion = _get(rk, "strike_phase_by_motion")
+    if by_motion is not None and clip_name:
+        cn = str(clip_name).lower()
+        matches = [(str(k).lower(), v) for k, v in by_motion.items()
+                   if str(k).lower() in cn or cn in str(k).lower()]
+        if matches:
+            matches.sort(key=lambda kv: len(kv[0]), reverse=True)  # longest key = most specific
+            k, v = matches[0]
+            return float(v), f"racket_target.strike_phase<-by_motion[{k}]={float(v)} (clip={clip_name})"
+    sp = _get(rk, "strike_phase")
+    return (None if sp is None else float(sp)), None
+
+
+def _apply_task_overrides(env_cfg, task, clip_name=None):
     """Apply cfg/task/<name>.yaml overrides (incl. the composed base/ groups) onto the env cfg.
 
     Returns the list of applied "attr=value" strings (logged by the caller). Keys absent from the
@@ -213,7 +260,14 @@ def _apply_task_overrides(env_cfg, task):
             _require(hasattr(env_cfg.commands, "racket_target"),
                      f"commands.racket_target (task YAML sets racket keys {provided})")
             C = env_cfg.commands.racket_target
-            _set_attr(C, "strike_phase", _get(rk, "strike_phase"), float, applied, "racket_target")
+            # strike_phase is PER-MOTION: the racket-tip contact frame differs per clip, so a single
+            # global value is wrong when the trained motion changes (forehand 0.46 vs backhand 0.59).
+            # `strike_phase_by_motion` (clip-name substring -> phase) wins when it matches `clip_name`;
+            # `strike_phase` is the fallback. See _resolve_strike_phase / _registry_clip_name.
+            _sp_val, _sp_note = _resolve_strike_phase(rk, clip_name)
+            _set_attr(C, "strike_phase", _sp_val, float, applied, "racket_target")
+            if _sp_note is not None:
+                applied.append(_sp_note)
             _set_attr(C, "strike_window_s", _get(rk, "strike_window_s"), float, applied, "racket_target")
             _set_attr(C, "strike_success_pos_thresh", _get(rk, "strike_success_pos_thresh"), float, applied, "racket_target")
             _set_range(C, "racket_pos_x_range", _get(rk, "pos_x_range"), applied, "racket_target")
@@ -241,6 +295,10 @@ def _apply_task_overrides(env_cfg, task):
             _set_attr(C, "ref_vel_scale", _get(rk, "ref_vel_scale"), float, applied, "racket_target")
             # Debug logging (sign verification + raw/gated reward kernels). Off for production runs.
             _set_attr(C, "debug_reward_logging", _get(rk, "debug_reward_logging"), _as_bool, applied, "racket_target")
+            # Clean reference strike velocity (denoise the FD'd target velocity at the racket tip).
+            _set_attr(C, "clean_reference_strike_velocity", _get(rk, "clean_reference_strike_velocity"),
+                      _as_bool, applied, "racket_target")
+            _set_attr(C, "clean_strike_vel_window", _get(rk, "clean_strike_vel_window"), int, applied, "racket_target")
 
     # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
     # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.
@@ -300,7 +358,7 @@ def _run(cfg):
     env_cfg = parse_env_cfg(task_id, device=str(cfg.device), num_envs=num_envs)
     _cfg_mod = sys.modules.get(type(env_cfg).__module__)
     print(f"[train.py] env cfg source: {type(env_cfg).__name__} <- {getattr(_cfg_mod, '__file__', '?')}", flush=True)
-    applied = _apply_task_overrides(env_cfg, cfg.task)
+    applied = _apply_task_overrides(env_cfg, cfg.task, _registry_clip_name(cfg))
     print(f"[train.py] applied {len(applied)} task override(s) from cfg/task/{_get(cfg.task, 'name', task_id)}.yaml:", flush=True)
     for _a in applied:
         print(f"[train.py]     {_a}", flush=True)
@@ -384,6 +442,18 @@ def _run(cfg):
         env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device, registry_name=registry_name
     )
     runner.add_git_repo_to_log(__file__)
+
+    # Resume / curriculum hand-off: load weights+optimizer from a prior checkpoint and CONTINUE (the
+    # iteration counter resumes from the checkpoint). Config changes in the task YAML (e.g. a tighter
+    # racket_velocity_std) take effect immediately on the loaded policy — no fresh restart needed.
+    ckpt = getattr(cfg, "checkpoint_path", None)
+    if ckpt is not None:
+        ckpt = os.path.abspath(str(ckpt))
+        if not os.path.isfile(ckpt):
+            raise FileNotFoundError(f"[train.py] checkpoint_path does not exist: {ckpt}")
+        runner.load(ckpt)
+        print(f"[train.py] RESUMED from checkpoint: {ckpt} (continuing at iteration "
+              f"{getattr(runner, 'current_learning_iteration', '?')})", flush=True)
 
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)

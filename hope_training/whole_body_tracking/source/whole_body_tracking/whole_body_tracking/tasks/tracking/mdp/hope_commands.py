@@ -268,6 +268,23 @@ class RacketTargetCommand(CommandTerm):
             self._motion_term = self._env.command_manager.get_term(self.cfg.motion_command_name)
         return self._motion_term
 
+    def _ref_racket_pos_at(self, motion, f: int) -> torch.Tensor:
+        """Racket-center FK position (env-origin rel) at reference frame ``f``.
+
+        Uses the SAME FK as :meth:`_compute_racket_state` / :meth:`_ensure_reference_strike_state`
+        (racket body, or wrist + constant mount offset) but reads the reference MOTION's body poses.
+        ``f`` is clamped to the valid frame range. Used by the clean-strike-velocity centered difference.
+        """
+        total = max(int(motion.time_step_total), 1)
+        f = int(max(0, min(total - 1, f)))
+        if self._racket_mode == "body":
+            return motion._body_pos_w[f, self._racket_body_index]
+        widx = self._wrist_body_index
+        wpos = motion._body_pos_w[f, widx]
+        wquat = motion._body_quat_w[f, widx]
+        offset_w = quat_apply(wquat.unsqueeze(0), self._mount_offset[0:1]).squeeze(0)
+        return wpos + offset_w
+
     def _ensure_reference_strike_state(self):
         """Cache the reference racket state at the strike frame (once, after the motion is loaded).
 
@@ -299,6 +316,26 @@ class RacketTargetCommand(CommandTerm):
             lin = wlin + torch.cross(wang, offset_w, dim=-1)
             quat = quat_mul(wquat.unsqueeze(0), self._mount_quat[0:1]).squeeze(0)
         normal = matrix_from_quat(quat.unsqueeze(0))[0, :, self.cfg.mount_normal_axis] * self.cfg.mount_normal_sign
+
+        # --- clean reference strike velocity ---------------------------------------------------------
+        # Recompute the strike target velocity from the FINAL racket FK position by a centered finite
+        # difference, so it is consistent with the position the policy actually tracks (the stored
+        # body_lin_vel_w is FD'd/interpolated and ~1 m/s inconsistent at the racket tip — see cfg docs).
+        # raw_lin = legacy single-frame stored velocity (kept for the flag-off path and the diagnostics).
+        raw_lin = lin.detach().clone()
+        dt = float(self._env.step_dt)
+        # single-frame centered difference of the FK position (the consistency probe vs the stored vel)
+        fd1 = (self._ref_racket_pos_at(motion, strike_step + 1) - self._ref_racket_pos_at(motion, strike_step - 1)) / (
+            2.0 * dt
+        )
+        # windowed centered difference (the clean target velocity): wider baseline rejects single-frame jitter
+        W = max(1, int(self.cfg.clean_strike_vel_window))
+        clean_lin = (
+            self._ref_racket_pos_at(motion, strike_step + W) - self._ref_racket_pos_at(motion, strike_step - W)
+        ) / (2.0 * W * dt)
+        if self.cfg.clean_reference_strike_velocity:
+            lin = clean_lin
+
         self._ref_racket_pos_rel = pos.detach().clone()
         self._ref_racket_vel_w = lin.detach().clone()
         self._ref_racket_normal_w = (normal / (torch.norm(normal) + 1e-6)).detach().clone()
@@ -309,6 +346,10 @@ class RacketTargetCommand(CommandTerm):
         self._ref_strike_cached = True
         p, v, nrm = self._ref_racket_pos_rel, self._ref_racket_vel_w, self._ref_racket_normal_w
         b, off = self._ref_base_pos_rel, self._ref_reach_offset_xy
+        raw_strike_speed = float(torch.norm(raw_lin))
+        clean_strike_speed = float(torch.norm(clean_lin))
+        raw_clean_vel_diff = float(torch.norm(raw_lin - clean_lin))
+        raw_vs_fd_vel_diff = float(torch.norm(raw_lin - fd1))
         print(
             f"[RacketTargetCommand] reference_perturbed: strike frame {strike_step}/{total - 1} "
             f"(phase {self.cfg.strike_phase}); reference racket @ strike (env-origin rel): "
@@ -316,6 +357,14 @@ class RacketTargetCommand(CommandTerm):
             f"vel=({v[0]:.3f},{v[1]:.3f},{v[2]:.3f}) |v|={float(torch.norm(v)):.2f} "
             f"normal=({nrm[0]:.3f},{nrm[1]:.3f},{nrm[2]:.3f}); "
             f"reference base XY=({b[0]:.3f},{b[1]:.3f}) base->racket offset XY=({off[0]:.3f},{off[1]:.3f})",
+            flush=True,
+        )
+        print(
+            f"[RacketTargetCommand] strike-velocity denoise (clean_reference_strike_velocity="
+            f"{self.cfg.clean_reference_strike_velocity}, window=+-{W}): "
+            f"raw_strike_speed={raw_strike_speed:.3f} clean_strike_speed={clean_strike_speed:.3f} "
+            f"raw_clean_vel_diff={raw_clean_vel_diff:.3f} raw_vs_fd_vel_diff={raw_vs_fd_vel_diff:.3f} "
+            f"(target uses {'CLEAN' if self.cfg.clean_reference_strike_velocity else 'RAW'} velocity)",
             flush=True,
         )
 
@@ -768,6 +817,20 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # velocity no longer equals the imitated swing's velocity, so a perfect imitator no longer matches it
     # exactly (the "reachable by construction" guarantee holds for position/normal, not scaled velocity).
     ref_vel_scale: float = 1.0
+
+    # --- clean reference strike velocity (denoise the target velocity) ---
+    # The motion's stored body_lin_vel_w is a finite-difference (torch.gradient) of the 30->50 fps
+    # interpolated joint trajectory propagated through FK (see scripts/csv_to_npz.py). At the fast,
+    # high-jerk racket tip those FD/interpolation errors accumulate to ~1 m/s and are INCONSISTENT with
+    # the position trajectory (stored-vel vs central-diff-of-pos differ ~1.1 m/s near the strike). Since
+    # the racket-velocity reward target is essentially the reference velocity, that ~1 m/s noise is the
+    # floor on racket_vel_error_exact_strike (velEx parked ~0.74 regardless of reward tuning).
+    # When True, the cached strike target velocity is recomputed from the FINAL racket FK position
+    # (body_pos_w, the same FK as the actual racket) by a centered finite difference over +-window frames,
+    # which is consistent with the position the policy actually tracks and rejects single-frame jitter.
+    # False keeps the legacy single-frame stored-velocity path.
+    clean_reference_strike_velocity: bool = False
+    clean_strike_vel_window: int = 2  # half-window (frames) for the centered finite difference (try 2 or 3)
 
     # --- debug logging (sign verification + raw/gated reward kernels) ---
     # When True, RacketTargetCommand logs dbg_err_{minus,plus}_{win,exact} (swing-through sign check) and

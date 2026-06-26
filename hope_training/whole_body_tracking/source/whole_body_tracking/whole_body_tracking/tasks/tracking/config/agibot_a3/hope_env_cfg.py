@@ -65,6 +65,13 @@ class HOPECommandsCfg(CommandsCfg):
 class HOPEObservationsCfg(ObservationsCfg):
     @configclass
     class HOPEPolicyCfg(ObservationsCfg.PolicyCfg):
+        # Deployment alignment with HITTER (arXiv:2508.21043, Table — actor obs): world-frame base LINEAR
+        # velocity is a CRITIC-ONLY (privileged) observation there, because a humanoid's floating-base
+        # linear velocity is not cleanly measurable on hardware (it needs a fragile IMU+leg-odometry state
+        # estimator). The BeyondMimic base PolicyCfg feeds it to the actor; remove it here so the actor
+        # never depends on a quantity it cannot reliably get at deploy. base_ang_vel / projected_gravity
+        # (both from the IMU) and joint pos/vel stay. The critic (HOPECriticCfg) keeps base_lin_vel.
+        base_lin_vel = None
         # Appended after the BeyondMimic proprioceptive + motion terms.
         projected_gravity = ObsTerm(func=mdp.projected_gravity, noise=Unoise(n_min=-0.05, n_max=0.05))
         base_target_pos_b = ObsTerm(func=mdp.base_target_pos_b, params={"command_name": "racket_target"})
