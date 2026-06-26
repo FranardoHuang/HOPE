@@ -228,6 +228,14 @@ Useful overrides:
 num_envs=4096 max_iterations=20000 seed=1
 ```
 
+Resume / curriculum hand-off (added on `train_1`): `checkpoint_path=<model.pt>` loads weights + optimizer
+from a prior run and CONTINUES training (the iteration counter resumes). Use it to apply a staged config
+change — e.g. tightening `racket_velocity_std` — without throwing away progress:
+
+```bash
+checkpoint_path=logs/rsl_rl/agibot_a3_hope/<run>/model_2000.pt
+```
+
 `HOPEPingPong` trains ONE swing style per policy (forehand or backhand), chosen entirely by the `registry_name` reference clip.
 
 At startup, `scripts/train.py` prints:

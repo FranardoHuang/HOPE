@@ -60,6 +60,7 @@ Done:
 - The HOPE actor observation now includes desired `racket_target_normal_w`; actual racket pose/velocity/normal remains critic/reward-only simulation state.
 - `scripts/train.py` logs import provenance, env-cfg source, every applied task override, and post-override racket knobs; YAML keys that target missing env-cfg attributes raise instead of silently no-oping.
 - Generated ONNX policy artifacts remain ignored by asset policy unless a gate records an external artifact path.
+- Merged from `train_1` (2026-06-26): paddle-contact phase is now PER-CLIP via `strike_phase_by_motion` (`hope_forehand: 0.46` / `hope_backhand: 0.59`) instead of one shared `strike_phase` (the old shared 0.46 landed the backhand strike in a stationary mid-swing pause and stalled `strike_success` ~4%); `clean_reference_strike_velocity` recomputes the strike target velocity by a centered finite difference (the stored `body_lin_vel_w` was ~1 m/s inconsistent with the position trajectory at the racket tip); `episode_length_s: 3.0` caps each episode to ~one swing; `motion_scale: 0.50`. `scripts/train.py` / `cfg/train.yaml` gain a `checkpoint_path` knob that resumes weights+optimizer from a prior run for curriculum hand-off.
 
 Done (2026-06-26 — first loop reproduced in this harness):
 
