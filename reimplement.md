@@ -3074,6 +3074,35 @@ Useful overrides (append to any command): `num_envs=4096 max_iterations=20000 se
 `task.rewards.racket_position_weight=5.0`, `task.racket.pos_x_range=[0.3,0.6]`,
 `task.domain_rand.pd_gain_range=null`. **Record the wandb run ID of each good run** — Step 15 needs it.
 
+#### 14.4b Resume from a checkpoint (staged-curriculum hand-off)
+
+`train.py` accepts `checkpoint_path=<model_N.pt>` to **load weights + optimizer and continue** training
+(the iteration counter and wandb step resume from the checkpoint). `null` (default) = fresh init. Use
+this to apply a staged config change — tightening `racket_velocity_std`, ramping `racket.ref_vel_scale`
+toward full speed, widening the target box — **without throwing away progress** (each stage otherwise
+costs a from-scratch restart of thousands of iterations).
+
+Workflow: edit `cfg/task/HOPEPingPong.yaml` (the new, tighter value), then resume from the latest
+checkpoint of the run you are continuing:
+
+```bash
+# pick the newest checkpoint of the run you want to continue
+ls -t logs/rsl_rl/agibot_a3_hope/<run_dir>/model_*.pt | head -1
+
+# resume + apply the edited YAML (e.g. after lowering racket_velocity_std 1.2 -> 0.8)
+hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
+  run_name=pathC3_velstd08 \
+  checkpoint_path=logs/rsl_rl/agibot_a3_hope/<run_dir>/model_2100.pt
+```
+
+Confirm resume worked: the log prints `[train.py] RESUMED from checkpoint: ... (continuing at iteration
+~N)`, and the goal metrics (e.g. `strike_vel_pass_exact`) pick up from their prior level rather than from
+zero. The YAML edit takes effect immediately on the loaded policy — no fresh restart needed. Recommended
+curriculum order: hold the velocity-std tighten (1.2→0.8→0.5) until `strike_vel_pass_exact` plateaus and
+`racket_vel_error_exact_strike` is reliably below the next std, *then* ramp `racket.ref_vel_scale`
+0.6→0.8→1.0 toward full clip speed.
+
 ### 14.5 Evaluate a trained policy
 
 Run all of these **from inside `~/workspace/HOPE/hope_training/whole_body_tracking`** — the

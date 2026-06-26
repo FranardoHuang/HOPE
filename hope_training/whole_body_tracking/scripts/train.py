@@ -116,6 +116,7 @@ _RACKET_KEYS = (
     "target_mode", "ref_perturb_pos", "ref_perturb_vel", "ref_perturb_normal",
     "ref_perturb_curriculum_steps", "ref_perturb_curriculum_start",
     "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "debug_reward_logging",
+    "clean_reference_strike_velocity", "clean_strike_vel_window",
 )
 
 
@@ -241,6 +242,10 @@ def _apply_task_overrides(env_cfg, task):
             _set_attr(C, "ref_vel_scale", _get(rk, "ref_vel_scale"), float, applied, "racket_target")
             # Debug logging (sign verification + raw/gated reward kernels). Off for production runs.
             _set_attr(C, "debug_reward_logging", _get(rk, "debug_reward_logging"), _as_bool, applied, "racket_target")
+            # Clean reference strike velocity (denoise the FD'd target velocity at the racket tip).
+            _set_attr(C, "clean_reference_strike_velocity", _get(rk, "clean_reference_strike_velocity"),
+                      _as_bool, applied, "racket_target")
+            _set_attr(C, "clean_strike_vel_window", _get(rk, "clean_strike_vel_window"), int, applied, "racket_target")
 
     # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
     # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.
@@ -373,6 +378,18 @@ def _run(cfg):
         env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device, registry_name=registry_name
     )
     runner.add_git_repo_to_log(__file__)
+
+    # Resume / curriculum hand-off: load weights+optimizer from a prior checkpoint and CONTINUE (the
+    # iteration counter resumes from the checkpoint). Config changes in the task YAML (e.g. a tighter
+    # racket_velocity_std) take effect immediately on the loaded policy — no fresh restart needed.
+    ckpt = getattr(cfg, "checkpoint_path", None)
+    if ckpt is not None:
+        ckpt = os.path.abspath(str(ckpt))
+        if not os.path.isfile(ckpt):
+            raise FileNotFoundError(f"[train.py] checkpoint_path does not exist: {ckpt}")
+        runner.load(ckpt)
+        print(f"[train.py] RESUMED from checkpoint: {ckpt} (continuing at iteration "
+              f"{getattr(runner, 'current_learning_iteration', '?')})", flush=True)
 
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
