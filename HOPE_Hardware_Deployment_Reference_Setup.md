@@ -2,6 +2,12 @@
 
 v0.2 — 2026-04-02
 
+> Public starter note: this preserved reference document describes the broader
+> G1/A3 deployment architecture. The current public branch also includes
+> Agibot's A3 deployment example source under `agi/code_deployment/`. Treat the
+> example source as the current A3 body-drive code reference, while this
+> document remains the high-level architecture and safety background.
+
 ## Overview
 
 This document describes how to deploy trained HOPE ping-pong WBC policies onto physical humanoid hardware — the Unitree G1 or Agibot Expedition A3. It is the final step in the HOPE pipeline, consuming the ONNX policy exported from simulation training (see companion *HOPE WBC Simulation Training Reference Setup*, Section 5) and connecting it to the live motion capture system (see companion *HOPE Motion Capture System Reference Setup*) and the real-time planner (see companion *HOPE 7DOF Racket Model-based Planner Reference Setup*).
