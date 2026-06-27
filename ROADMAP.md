@@ -8,7 +8,7 @@
 - Provide a local smoke motion generator.
 - Run `TrackingFlat` PPO smoke training with TensorBoard and no WandB
   requirement.
-- Include Agibot-provided A3 reference materials under `agi/`, including URDF
+- Include Agibot-provided A3 reference materials under `agibot/`, including URDF
   variants, the MuJoCo/AimRT simulation reference, and the A3 deployment
   example.
 
@@ -24,7 +24,7 @@
 ## Optional: MuJoCo
 
 - Keep the Agibot-provided MuJoCo/AimRT reference project under
-  `agi/A3_MuJoCo_Sim/`.
+  `agibot/A3_MuJoCo_Sim/`.
 - Treat it as an optional reference path; the validated v1 onboarding flow is
   Isaac Lab setup and smoke training.
 - Do not claim a public MuJoCo RL backend in v1.

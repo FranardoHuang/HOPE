@@ -3,7 +3,7 @@
 Status: Partial — A3 training here demonstrates pipeline viability, NOT an accepted quality baseline.
 
 This package is the BeyondMimic motion-tracking trainer (upstream G1 docs below), extended in HOPE
-to train an [Agibot A3](../../agi/) (31 actuated DOF) ping-pong swing policy. Unlike the upstream
+to train an [Agibot A3](../../agibot/) (31 actuated DOF) ping-pong swing policy. Unlike the upstream
 `argparse` entry (`scripts/rsl_rl/train.py --task=Tracking-Flat-G1-v0`), HOPE drives training through
 **Hydra** entry points:
 
@@ -31,7 +31,7 @@ A from-scratch Isaac Sim/Lab install is out of scope here; follow the upstream
 
 ### A3 asset and motions
 
-- The source A3 ping-pong URDF lives at `../../agi/URDF/A3T2.5-URDF-std-pingpang/`.
+- The source A3 ping-pong URDF lives at `../../agibot/URDF/A3T2.5-URDF-std-pingpang/`.
   Generate the Isaac-ready copy with `../../scripts/prepare_a3_isaac_asset.py`; see
   `../../A3_ASSETS.md`.
 - Motion flow: GVHMR (video → SMPL-X) → GMR (`--robot agibot_a3`; the default robot is `g1`, A3 NEEDS

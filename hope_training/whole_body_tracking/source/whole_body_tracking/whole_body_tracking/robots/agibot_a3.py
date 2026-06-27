@@ -1,7 +1,7 @@
 """Agibot (Zhiyuan) Expedition A3 — ping-pong configuration for BeyondMimic / HOPE WBC.
 
 This file is written against the Agibot A3 ping-pong assets shipped in the HOPE repo under
-``agi/`` (the URDF ``agi/URDF/A3T2.5-URDF-std-pingpang/``).
+``agibot/`` (the URDF ``agibot/URDF/A3T2.5-URDF-std-pingpang/``).
 Names, link inertials (urdf mass.txt), effort/velocity limits (joints.txt), and the
 standing pose follow the provided model materials. The PD control gains
 (Kp/Kd = stiffness/damping) and armature values are starter reference values
@@ -24,7 +24,7 @@ from isaaclab.assets.articulation import ArticulationCfg
 from whole_body_tracking.assets import ASSET_DIR
 
 ##
-# Asset path: the A3 ping-pong URDF is copied from agi/URDF/A3T2.5-URDF-std-pingpang/
+# Asset path: the A3 ping-pong URDF is copied from agibot/URDF/A3T2.5-URDF-std-pingpang/
 # into assets/agibot_a3/ by scripts/prepare_a3_isaac_asset.py. Isaac Lab spawns the URDF directly;
 # MuJoCo/AimRT runtime assets are intentionally not vendored in the v1 starter.
 ##
@@ -68,7 +68,7 @@ A3_HAND_BODIES = ["left_wrist_yaw_Link", "right_wrist_yaw_Link"]
 # the *DOF columns* in the A3 retargeted CSV (columns 7: after base pos/quat), i.e. the order your
 # GMR retargeting outputs — NOT the simulation articulation order (the npz stores joint_pos in the
 # articulation order automatically). The default below follows the A3 controller_joint_names.yaml
-# (agi/.../config/joint_names_*.yaml). IMPORTANT: if your GMR A3 retargeting emits a different
+# (agibot/.../config/joint_names_*.yaml). IMPORTANT: if your GMR A3 retargeting emits a different
 # column order, reorder this list to match it, or the npz joints will be scrambled.
 AGIBOT_A3_JOINT_NAMES = [
     "waist_yaw_joint",

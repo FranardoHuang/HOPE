@@ -37,7 +37,7 @@ does not require live ROS topics.
 
 ## A3 Body-Drive Deployment Topics
 
-The optional Agibot A3 deploy example under `agi/code_deployment/` uses the A3
+The optional Agibot A3 deploy example under `agibot/code_deployment/` uses the A3
 body-drive interface. The backend consumes six state streams and publishes four
 command streams:
 

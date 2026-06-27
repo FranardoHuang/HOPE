@@ -2,7 +2,7 @@
 
 HOPE is an open platform for humanoid robot table tennis, developed by [Hitch Interactive](https://hitchinteractive.com) (Intelligent Racing Inc.) in collaboration with the [ROAR Platform](https://roar.berkeley.edu) at UC Berkeley. The challenge invites teams to deploy whole-body humanoid controllers that can rally a ping-pong ball against human opponents or other robots, using off-the-shelf humanoid hardware and an open-source perception and planning stack.
 
-This repository contains the **reference design documents** for the HOPE system architecture, a public **Agibot A3 + Isaac Lab starter**, and Agibot-provided A3 reference materials under `agi/`. The starter is intended to get new teams from clone to asset load, table-tennis scene smoke test, and local-motion PPO smoke training.
+This repository contains the **reference design documents** for the HOPE system architecture, a public **Agibot A3 + Isaac Lab starter**, and Agibot-provided A3 reference materials under `agibot/`. The starter is intended to get new teams from clone to asset load, table-tennis scene smoke test, and local-motion PPO smoke training.
 
 ## How To Read This Repository
 
@@ -12,14 +12,14 @@ repository is organized into four layers:
 
 | Layer | What to read or run | Purpose |
 |-------|---------------------|---------|
-| Required starter path | `QUICKSTART_A3_ISAAC.md`, `scripts/prepare_a3_isaac_asset.py`, `agi/URDF/A3T2.5-URDF-std-pingpang/`, `hope_training/whole_body_tracking/` | Prepare the A3 Isaac asset, import the task package, launch the table-tennis scene, and run local-motion PPO smoke training. |
+| Required starter path | `QUICKSTART_A3_ISAAC.md`, `scripts/prepare_a3_isaac_asset.py`, `agibot/URDF/A3T2.5-URDF-std-pingpang/`, `hope_training/whole_body_tracking/` | Prepare the A3 Isaac asset, import the task package, launch the table-tennis scene, and run local-motion PPO smoke training. |
 | Stable public contracts | `A3_ASSETS.md`, `docs/interfaces/` | Explain frame conventions, joint order, observations/actions, ROS topics, and asset expectations that other teams should keep stable when integrating their own code. |
-| Agibot A3 reference bundle | `agi/` | Agibot-provided A3 URDF variants, MuJoCo/AimRT simulation reference, and deployment example. Only the racket-equipped URDF is required for the Isaac quickstart. |
+| Agibot A3 reference bundle | `agibot/` | Agibot-provided A3 URDF variants, MuJoCo/AimRT simulation reference, and deployment example. Only the racket-equipped URDF is required for the Isaac quickstart. |
 | Optional or background material | `hope_ws/`, `mocap/`, `HOPE_*_Reference_Setup.md`, `ROADMAP.md` | Preserve broader HOPE architecture, ROS/mocap/planner context, and future work. These are not required before the Isaac smoke run. |
 
 A fresh clone contains only tracked files. Developer-local folders such as
 `external_repos/`, `vendor_assets/`, generated Isaac assets, logs, checkpoints,
-and WandB caches are git-ignored. Agibot-provided materials under `agi/` are
+and WandB caches are git-ignored. Agibot-provided materials under `agibot/` are
 tracked. If you switch branches in an existing checkout and still see an ignored
 local folder, that usually means it is an untracked folder left on disk; it is
 not part of the tracked public starter contents.
@@ -65,8 +65,8 @@ Each document contains a **Section 0 prologue** listing all implementation diffe
 | [REFERENCE_DOCS.md](REFERENCE_DOCS.md) | Index of preserved architecture, rules, mocap, training, and deployment reference documents. |
 | [ROADMAP.md](ROADMAP.md) | Current starter scope, optional integrations, and future work. |
 | `scripts/` | Small setup and smoke-run helpers. The main public entry is `prepare_a3_isaac_asset.py`. |
-| `agi/` | Public Agibot A3 reference bundle. `agi/URDF/A3T2.5-URDF-std-pingpang/` is the racket-equipped variant required for Isaac; `agi/A3_MuJoCo_Sim/` contains the Agibot MuJoCo/AimRT simulation reference; `agi/code_deployment/` contains the Agibot A3 deploy example. |
-| `agi/code_deployment/` | Optional Agibot A3 deployment example for connecting exported policies to A3 body-drive state/command topics. Not required for Isaac smoke training. |
+| `agibot/` | Public Agibot A3 reference bundle. `agibot/URDF/A3T2.5-URDF-std-pingpang/` is the racket-equipped variant required for Isaac; `agibot/A3_MuJoCo_Sim/` contains the Agibot MuJoCo/AimRT simulation reference; `agibot/code_deployment/` contains the Agibot A3 deploy example. |
+| `agibot/code_deployment/` | Optional Agibot A3 deployment example for connecting exported policies to A3 body-drive state/command topics. Not required for Isaac smoke training. |
 | `hope_training/config/` | Shared robot configuration, including the public A3 joint order. |
 | `hope_training/whole_body_tracking/` | Isaac Lab whole-body tracking starter, table-tennis scene, PPO entry points, and smoke-motion generator. |
 | `docs/interfaces/` | Compact contracts for frames, joint order, policy IO, and ROS topics. These are the public interface docs, not an internal gate system. |

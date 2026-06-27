@@ -42,7 +42,7 @@ hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking
 
 ## A3 Deployment Reference IO
 
-The optional Agibot A3 deployment example under `agi/code_deployment/` includes
+The optional Agibot A3 deployment example under `agibot/code_deployment/` includes
 an ONNX runtime reference. It is not required for the Isaac Lab smoke-training
 path, but it documents the policy/runtime contract used by the A3 body-drive
 example.

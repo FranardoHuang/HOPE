@@ -10,4 +10,4 @@ python3 scripts/prepare_a3_isaac_asset.py --force
 ```
 
 The generated `agibot_a3/` directory is derived from
-`agi/URDF/A3T2.5-URDF-std-pingpang/` and is intentionally git-ignored.
+`agibot/URDF/A3T2.5-URDF-std-pingpang/` and is intentionally git-ignored.

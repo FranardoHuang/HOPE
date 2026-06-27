@@ -10,7 +10,7 @@ starter.
 Path:
 
 ```text
-agi/
+agibot/
 ```
 
 This directory contains Agibot-provided A3 reference materials, including URDF
@@ -22,7 +22,7 @@ notices.
 The Isaac Lab quickstart uses:
 
 ```text
-agi/URDF/A3T2.5-URDF-std-pingpang/
+agibot/URDF/A3T2.5-URDF-std-pingpang/
 ```
 
 That package metadata declares license `BSD` in `package.xml`.
@@ -64,7 +64,7 @@ follow that package's own license.
 Path:
 
 ```text
-agi/code_deployment/
+agibot/code_deployment/
 ```
 
 This directory contains the Agibot-provided A3 deployment example for HOPE,
@@ -89,7 +89,7 @@ or MuJoCo. Review those upstream build files before enabling them in CI.
 Path:
 
 ```text
-agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/
+agibot/A3_MuJoCo_Sim/aimrt_mujoco_sim/
 ```
 
 This Agibot-provided reference project includes its own `LICENSE`, which is
@@ -98,7 +98,7 @@ build files from the upstream-style project. The upstream workflow files are
 preserved as reference material under:
 
 ```text
-agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/github_workflows_reference/
+agibot/A3_MuJoCo_Sim/aimrt_mujoco_sim/github_workflows_reference/
 ```
 
 They are intentionally not placed under a `.github/workflows/` path in this

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Prepare the Agibot A3 ping-pong URDF for Isaac Lab.
 
-The source URDF package is kept under agi/ so users can inspect the original
+The source URDF package is kept under agibot/ so users can inspect the original
 materials. Isaac Lab loads a derived copy under the whole_body_tracking Python
 package asset directory, where mesh paths are relative to model.urdf.
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SOURCE = REPO_ROOT / "agi" / "URDF" / "A3T2.5-URDF-std-pingpang"
+DEFAULT_SOURCE = REPO_ROOT / "agibot" / "URDF" / "A3T2.5-URDF-std-pingpang"
 DEFAULT_DEST = (
     REPO_ROOT
     / "hope_training"

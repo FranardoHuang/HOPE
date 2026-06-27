@@ -46,7 +46,7 @@ TensorBoard.
 
 ## 2. Prepare the A3 Isaac Asset
 
-The source A3 ping-pong URDF lives in `agi/URDF/A3T2.5-URDF-std-pingpang`.
+The source A3 ping-pong URDF lives in `agibot/URDF/A3T2.5-URDF-std-pingpang`.
 Isaac Lab loads a prepared copy under the Python package asset directory.
 
 From the repository root:

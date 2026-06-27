@@ -3,26 +3,26 @@
 This branch includes the public Agibot A3 materials used by the HOPE starter.
 
 For the Isaac Lab quickstart, teams only need the source URDF package and the
-asset preparation script. The rest of `agi/` is Agibot-provided reference
+asset preparation script. The rest of `agibot/` is Agibot-provided reference
 material for teams studying deployment or optional MuJoCo/AimRT simulation.
 
 ## What Each A3 Area Means
 
 | Path | Required for quickstart? | Role |
 |------|--------------------------|------|
-| `agi/URDF/A3T2.5-URDF-std-pingpang/` | Yes | Source A3 ping-pong URDF, meshes, joint config, and metadata. |
+| `agibot/URDF/A3T2.5-URDF-std-pingpang/` | Yes | Source A3 ping-pong URDF, meshes, joint config, and metadata. |
 | `scripts/prepare_a3_isaac_asset.py` | Yes | Copies the source URDF package into the Isaac Lab Python package and rewrites mesh paths for local loading. |
 | `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` | Generated locally | Derived Isaac-ready copy. It is ignored by git and can be regenerated. |
 | `hope_training/config/joint_order_agibot_a3.yaml` | Yes | Canonical public A3 policy joint order. |
-| `agi/code_deployment/` | No | Agibot A3 deployment example for ONNX policy runtime and body-drive I/O. |
-| `agi/A3_MuJoCo_Sim/` | No | Agibot MuJoCo/AimRT simulation reference. Not required for Isaac smoke training. |
+| `agibot/code_deployment/` | No | Agibot A3 deployment example for ONNX policy runtime and body-drive I/O. |
+| `agibot/A3_MuJoCo_Sim/` | No | Agibot MuJoCo/AimRT simulation reference. Not required for Isaac smoke training. |
 
 ## Source URDF
 
 The source package is:
 
 ```text
-agi/URDF/A3T2.5-URDF-std-pingpang/
+agibot/URDF/A3T2.5-URDF-std-pingpang/
 ```
 
 It contains the A3 ping-pong URDF, mesh files, joint-name config, and runtime
@@ -30,7 +30,7 @@ metadata, plus Agibot's source authoring helpers.
 
 This is the racket-equipped A3 variant. The URDF uses
 `right_hand_pingpang_Link` and fixed `pingpang_red_Link` /
-`pingpang_black_Link` racket bodies. The broader `agi/URDF/` bundle also
+`pingpang_black_Link` racket bodies. The broader `agibot/URDF/` bundle also
 contains Agibot's non-racket A3 source variant for reference; the Isaac starter
 uses the racket-equipped package above.
 
@@ -74,7 +74,7 @@ contracts unless you intentionally change the robot configuration.
 The Agibot A3 deployment example is under:
 
 ```text
-agi/code_deployment/
+agibot/code_deployment/
 ```
 
 This area is optional for the Isaac quickstart. It is useful after teams have
@@ -86,7 +86,7 @@ runtime configuration, and deployment packaging examples.
 The Agibot MuJoCo/AimRT reference project is under:
 
 ```text
-agi/A3_MuJoCo_Sim/
+agibot/A3_MuJoCo_Sim/
 ```
 
 This is included as Agibot-provided reference material. The v1 quickstart does

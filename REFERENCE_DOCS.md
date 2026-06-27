@@ -13,7 +13,7 @@ Some preserved reference documents predate this public A3 Isaac starter and
 may describe A3 as an mjlab/MuJoCo-first target. For v1, the recommended first
 setup path is the URDF-based Isaac Lab smoke path in `QUICKSTART_A3_ISAAC.md`.
 Agibot-provided MuJoCo/AimRT and deployment reference materials are included
-under `agi/`, but they are optional for the starter smoke run.
+under `agibot/`, but they are optional for the starter smoke run.
 
 ## Root Reference Documents
 
@@ -34,12 +34,12 @@ under `agi/`, but they are optional for the starter smoke run.
 - `QUICKSTART_A3_ISAAC.md`
 - `A3_ASSETS.md`
 - `ROADMAP.md`
-- `agi/A3_MuJoCo_Sim/README.md`
-- `agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/README.md`
-- `agi/code_deployment/A3_DEPLOY_EXAMPLE.md`
-- `agi/code_deployment/ROBOT_IO_BACKEND_GUIDE.md`
-- `agi/code_deployment/a3_deploy_example/README.md`
-- `agi/code_deployment/a3_deploy_example/README_robot_io_backend.md`
+- `agibot/A3_MuJoCo_Sim/README.md`
+- `agibot/A3_MuJoCo_Sim/aimrt_mujoco_sim/README.md`
+- `agibot/code_deployment/A3_DEPLOY_EXAMPLE.md`
+- `agibot/code_deployment/ROBOT_IO_BACKEND_GUIDE.md`
+- `agibot/code_deployment/a3_deploy_example/README.md`
+- `agibot/code_deployment/a3_deploy_example/README_robot_io_backend.md`
 - `docs/interfaces/frames.md`
 - `docs/interfaces/joint_order.md`
 - `docs/interfaces/policy_io.md`

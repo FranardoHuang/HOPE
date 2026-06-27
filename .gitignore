@@ -26,7 +26,7 @@ hope_training/whole_body_tracking/.neptune/
 hope_training/whole_body_tracking/artifacts/
 hope_training/whole_body_tracking/sample_motions/*.npz
 
-# Generated local Isaac asset derived from agi/URDF.
+# Generated local Isaac asset derived from agibot/URDF.
 hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/
 
 # Local machine paths.
@@ -54,17 +54,17 @@ hope_ws/src/vrpn_mocap/
 *.tmp
 *.log
 
-# Source authoring spreadsheets outside agi/ are not part of the public starter
+# Source authoring spreadsheets outside agibot/ are not part of the public starter
 # runtime.
 *.xlsx
 
-# Agibot-provided A3 materials under agi/ are tracked as public reference
+# Agibot-provided A3 materials under agibot/ are tracked as public reference
 # assets/examples, including their source tooling and small runtime examples.
-!agi/**/*.csv
-!agi/**/*.xlsx
-!agi/**/*.onnx
-!agi/**/*.rknn
-!agi/**/*.engine
-!agi/**/*.trt
-!agi/**/*.npz
-!agi/**/*.pkl
+!agibot/**/*.csv
+!agibot/**/*.xlsx
+!agibot/**/*.onnx
+!agibot/**/*.rknn
+!agibot/**/*.engine
+!agibot/**/*.trt
+!agibot/**/*.npz
+!agibot/**/*.pkl

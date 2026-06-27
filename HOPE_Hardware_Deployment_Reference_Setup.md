@@ -4,7 +4,7 @@ v0.2 — 2026-04-02
 
 > Public starter note: this preserved reference document describes the broader
 > G1/A3 deployment architecture. The current public branch also includes
-> Agibot's A3 deployment example source under `agi/code_deployment/`. Treat the
+> Agibot's A3 deployment example source under `agibot/code_deployment/`. Treat the
 > example source as the current A3 body-drive code reference, while this
 > document remains the high-level architecture and safety background.
 
