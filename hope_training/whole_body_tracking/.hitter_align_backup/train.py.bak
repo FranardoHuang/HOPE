@@ -297,12 +297,6 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_range(C, "racket_pos_x_range", _get(rk, "pos_x_range"), applied, "racket_target")
             _set_range(C, "racket_pos_y_range", _get(rk, "pos_y_range"), applied, "racket_target")
             _set_range(C, "racket_pos_z_range", _get(rk, "pos_z_range"), applied, "racket_target")
-            # Unified multi-clip: per-clip strike phase (aligned with the clip order) + per-clip |y| region.
-            _spc = _get(rk, "strike_phase_per_clip")
-            if _spc is not None:
-                C.strike_phase_per_clip = tuple(float(x) for x in _spc)
-                applied.append(f"racket_target.strike_phase_per_clip={C.strike_phase_per_clip}")
-            _set_range(C, "racket_pos_y_abs_range", _get(rk, "racket_pos_y_abs_range"), applied, "racket_target")
             _set_range(C, "racket_vel_x_range", _get(rk, "vel_x_range"), applied, "racket_target")
             _set_range(C, "racket_vel_y_range", _get(rk, "vel_y_range"), applied, "racket_target")
             _set_range(C, "racket_vel_z_range", _get(rk, "vel_z_range"), applied, "racket_target")
@@ -429,10 +423,7 @@ def _run(cfg):
         agent_cfg.wandb_project = str(cfg.log_project_name)
         agent_cfg.neptune_project = str(cfg.log_project_name)
 
-    # 3) motion file(s) from the wandb registry. ONE clip = single-swing-type policy. TWO clips
-    #    (forehand + backhand) = unified HITTER policy: MotionLoader concatenates them and clip_id selects
-    #    which swing each env imitates. Order matters: clip 0 = registry_name (forehand), clip 1 =
-    #    registry_name_2 (backhand); it must match racket.strike_phase_per_clip.
+    # 3) motion file from the wandb registry (forehand/backhand clip)
     registry_name = cfg.registry_name if cfg.registry_name is not None else cfg.task.registry_name
     registry_name = str(registry_name)
     if ":" not in registry_name:
@@ -440,15 +431,8 @@ def _run(cfg):
     import wandb
 
     api = wandb.Api()
-    motion_files = [str(pathlib.Path(api.artifact(registry_name).download()) / "motion.npz")]
-    reg2 = _get(cfg, "registry_name_2", None) or _get(cfg.task, "registry_name_2", None)
-    if reg2 is not None and str(reg2).strip() and str(reg2).lower() != "none":
-        reg2 = str(reg2)
-        if ":" not in reg2:
-            reg2 += ":latest"
-        motion_files.append(str(pathlib.Path(api.artifact(reg2).download()) / "motion.npz"))
-        print(f"[train.py] UNIFIED multi-clip policy: clip0={registry_name}  clip1={reg2}", flush=True)
-    env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
+    artifact = api.artifact(registry_name)
+    env_cfg.commands.motion.motion_file = str(pathlib.Path(artifact.download()) / "motion.npz")
 
     # 4) logging dir (same layout as scripts/rsl_rl/train.py so export/eval are unchanged)
     log_root_path = os.path.abspath(os.path.join("logs", "rsl_rl", agent_cfg.experiment_name))

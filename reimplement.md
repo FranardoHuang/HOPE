@@ -2903,6 +2903,28 @@ What the HOPE task adds on top of plain BeyondMimic tracking:
 3. **Privileged critic observations** that additionally include the FK-computed actual racket state.
 4. **Goal rewards** for base repositioning before strike and racket tracking near strike.
 
+HITTER-alignment status (2026-06-27): the task was realigned to **reproduce HITTER** rather than run a
+HOPE-invented curriculum. The current `cfg/task/HOPEPingPong.yaml` + code implement HITTER's design:
+
+- **Unified policy** — ONE policy learns forehand AND backhand. Both reference clips are loaded
+  (`registry_name` = forehand = clip 0, `registry_name_2` = backhand = clip 1); `MotionLoader`
+  concatenates them and a per-env `clip_id` (uniformly resampled each swing) selects which swing is
+  imitated. The actor gets a `swing_type` observation. (Set `registry_name_2=null` to train one stroke.)
+- **Direct uniform target sampling, no curriculum** — `racket.target_mode: uniform` with a fixed
+  striking plane `pos_x_range: [0.4, 0.4]`; only (y, z) of the racket target and the racket velocity
+  vector are sampled (HITTER §IV). The Y region is conditioned on the swing type
+  (`racket_pos_y_abs_range`, non-overlapping forehand −y / backhand +y). The invented machinery
+  (`motion_scale`, `ref_perturb` success-gated curriculum, `ref_vel_scale`) was removed.
+- **Per-clip strike** — `racket.strike_phase_per_clip: [0.36, 0.74]` (the racket-tip contact phase
+  differs per clip); strike timing is resolved per env from its `clip_id`.
+- **Racket normal is reward-only** — removed from the actor observation (HITTER Table I); the critic
+  keeps it.
+- **Faithful DR** — PD gains FIXED (`domain_rand.pd_gain_range: null`) and external push disabled
+  (HITTER fixes PD and has no shove); mass/friction/CoM + observation noise are kept (HITTER prose).
+
+Reward *weights and kernel widths* are NOT published by HITTER, so they remain reasonable HOPE choices
+(goal terms weighted relatively high); only the task STRUCTURE is paper-aligned.
+
 Reward design is split cleanly:
 
 1. **Inherited imitation reward** stays in `tracking_env_cfg.py` as the `motion_*` terms.
@@ -2923,21 +2945,15 @@ These are multiplied by the timing masks from `RacketTargetCommand`, so:
 1. `base_position` is active only before strike.
 2. `racket_position`, `racket_velocity`, and `racket_normal` are active only in the strike window.
 
-Domain randomization is also split cleanly:
+Domain randomization (HITTER-faithful as of 2026-06-27 — see the HITTER-alignment status above):
 
-1. Base BeyondMimic-style DR stays in the base environment config:
-   - friction
-   - center of mass
-   - joint default position offsets
-   - external pushes
-2. Extra HOPE/A3 DR is controlled from `cfg/base/randomization_base.yaml` and applied by `scripts/train.py`:
-   - link mass range
-   - PD gain range
+1. KEPT (HITTER prose randomizes these): friction (`physics_material`), center of mass (`base_com`),
+   joint default position offsets, link mass range, and observation noise.
+2. DISABLED to match HITTER: **PD-gain randomization** (`domain_rand.pd_gain_range: null` — HITTER fixes
+   PD) and **external push** (`push_robot = None` in `HOPEEventCfg` — HITTER has no shove).
 
-Important paper-alignment note:
-
-- HITTER states PD gains are fixed / heuristic, not randomized.
-- If you want to match that behavior more closely, set `task.domain_rand.pd_gain_range=null`.
+To re-enable PD randomization for sim-to-real robustness (a deliberate divergence from the paper), set a
+range in `cfg/task/HOPEPingPong.yaml` under `domain_rand.pd_gain_range`, e.g. `[0.8, 1.2]`.
 
 Fixes already applied (verified end-to-end — the env builds headless on 16 envs and steps with finite
 rewards):
@@ -3061,33 +3077,59 @@ hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
   run_name=forehand_tracking
 ```
 
-### 14.4 Train the HOPE racket task (one policy per swing)
+### 14.4 Train the unified HITTER policy (forehand + backhand in ONE policy)
 
-Train forehand and backhand as separate policies (the HOPE default), each from its own clip:
+HITTER (arXiv:2508.21043) trains a **single unified policy** that, each swing, uniformly samples the
+swing type (forehand/backhand), the racket target, and the base target. HOPE reproduces this: one policy
+imitates BOTH reference clips and learns both strokes. This is the default for `task=HOPEPingPong`.
 
 ```bash
-# forehand
+# Unified policy. Both clips come from the task YAML (registry_name = hope_forehand = clip 0,
+# registry_name_2 = hope_backhand = clip 1). No need for two separate runs anymore.
+hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+  run_name=hitter_unified
+```
+
+How the unified policy works (all wired in `cfg/task/HOPEPingPong.yaml` + the code):
+
+1. `registry_name` (clip 0 = forehand) and `registry_name_2` (clip 1 = backhand) are both downloaded;
+   `MotionLoader` concatenates them and a per-env `clip_id` selects which swing each env imitates
+   (uniformly resampled every swing).
+2. `racket.strike_phase_per_clip: [0.36, 0.74]` — the racket-tip contact phase is per clip (forehand
+   peaks ~0.36, backhand ~0.74); the strike window is computed per clip.
+3. `racket.target_mode: uniform` with a **fixed striking plane** `pos_x_range: [0.4, 0.4]` — only
+   (y, z) of the racket position and the racket velocity vector are sampled (HITTER §IV). The Y region
+   is conditioned on the swing type (`racket_pos_y_abs_range` + `forehand_on_negative_y`) so forehand
+   (−y) and backhand (+y) regions are non-overlapping.
+4. The actor sees a `swing_type` observation (forehand +1 / backhand −1).
+
+Confirm on the launch log: `UNIFIED multi-clip policy: clip0=...hope_forehand clip1=...hope_backhand`,
+`racket_target.strike_phase_per_clip=(0.36, 0.74)`, `racket_target.target_mode='uniform'`, and a
+`swing_type` row in the observation table. At runtime `Live/motion/sampling_entropy` ≈ 1.0 means both
+swings are being sampled.
+
+Train a SINGLE-swing-type policy instead (e.g. only forehand) by disabling the second clip:
+
+```bash
 hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
   registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
-  run_name=hope_forehand
-
-# backhand
-hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_backhand" \
-  run_name=hope_backhand
+  registry_name_2=null run_name=hope_forehand_only
 ```
 
 Useful overrides (append to any command): `num_envs=4096 max_iterations=20000 seed=1`,
-`task.rewards.racket_position_weight=5.0`, `task.racket.pos_x_range=[0.3,0.6]`,
-`task.domain_rand.pd_gain_range=null`. **Record the wandb run ID of each good run** — Step 15 needs it.
+`task.rewards.racket_position_weight=5.0`, `task.racket.racket_pos_y_abs_range=[0.05,0.4]`.
+**Record the wandb run ID of the good run** — Step 15 needs it.
 
 #### 14.4b Resume from a checkpoint (staged-curriculum hand-off)
 
 `train.py` accepts `checkpoint_path=<model_N.pt>` to **load weights + optimizer and continue** training
 (the iteration counter and wandb step resume from the checkpoint). `null` (default) = fresh init. Use
-this to apply a staged config change — tightening `racket_velocity_std`, ramping `racket.ref_vel_scale`
-toward full speed, widening the target box — **without throwing away progress** (each stage otherwise
-costs a from-scratch restart of thousands of iterations).
+this to apply a staged config change — e.g. tightening `racket_velocity_std`, widening
+`racket_pos_y_abs_range` — **without throwing away progress** (each stage otherwise costs a from-scratch
+restart of thousands of iterations).
+
+(The HITTER-aligned config has NO curriculum — direct uniform sampling, no `ref_vel_scale`/`ref_perturb`
+ramp. Staged resume is therefore optional, only for hand-tuning reward kernels mid-run.)
 
 Workflow: edit `cfg/task/HOPEPingPong.yaml` (the new, tighter value), then resume from the latest
 checkpoint of the run you are continuing:
@@ -3105,10 +3147,9 @@ hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
 
 Confirm resume worked: the log prints `[train.py] RESUMED from checkpoint: ... (continuing at iteration
 ~N)`, and the goal metrics (e.g. `strike_vel_pass_exact`) pick up from their prior level rather than from
-zero. The YAML edit takes effect immediately on the loaded policy — no fresh restart needed. Recommended
-curriculum order: hold the velocity-std tighten (1.2→0.8→0.5) until `strike_vel_pass_exact` plateaus and
-`racket_vel_error_exact_strike` is reliably below the next std, *then* ramp `racket.ref_vel_scale`
-0.6→0.8→1.0 toward full clip speed.
+zero. The YAML edit takes effect immediately on the loaded policy — no fresh restart needed. If you hand-
+tune the velocity kernel, hold each `racket_velocity_std` tighten (e.g. 1.2→0.8→0.5) until
+`strike_vel_pass_exact` plateaus and `racket_vel_error_exact_strike` is reliably below the next std.
 
 ### 14.5 Evaluate a trained policy
 

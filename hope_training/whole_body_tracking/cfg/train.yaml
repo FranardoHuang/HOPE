@@ -22,6 +22,7 @@ seed: 0
 num_envs: null
 max_iterations: null
 registry_name: null     # falls back to task.registry_name when null
+registry_name_2: null   # optional 2nd clip for the unified HITTER policy (backhand); falls back to task.registry_name_2
 run_name: null
 # Resume / curriculum hand-off: load model+optimizer from a prior run's checkpoint and CONTINUE training
 # (iteration counter + wandb step continue from the checkpoint). null -> fresh init. Use this to apply a

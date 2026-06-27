@@ -117,14 +117,6 @@ class RacketTargetCommand(CommandTerm):
         # reach (a perfect imitator hits it exactly). Cached lazily on first resample, after the motion
         # term is resolved and its motion_file is loaded.
         self._ref_strike_cached = False
-        # Unified multi-clip: per-clip strike phase as a [num_segments] tensor (built lazily once the
-        # motion term is resolved). None until then; falls back to the scalar strike_phase.
-        self._strike_phase_per_clip_t = None
-        # Per-clip reference paddle FACE NORMAL at the strike frame ([num_segments, 3], built lazily). In
-        # uniform mode the target normal is set to the imitated swing's actual paddle normal (which the
-        # policy can achieve) — NOT the racket-velocity direction, which is ~18-110 deg off the +Y blade
-        # face and makes the normal goal (and thus the composite success metric) unsatisfiable.
-        self._ref_normal_per_clip = None
         self._ref_racket_pos_rel = torch.zeros(3, device=self.device)
         self._ref_racket_vel_w = torch.zeros(3, device=self.device)
         self._ref_racket_normal_w = torch.zeros(3, device=self.device)
@@ -393,52 +385,11 @@ class RacketTargetCommand(CommandTerm):
             scale = start + (1.0 - start) * frac
         return min(1.0, max(start, scale))
 
-    def _ensure_ref_normal_per_clip(self):
-        """Cache the reference paddle face normal at each clip's strike frame ([num_segments, 3]).
-
-        Uses the SAME FK as the live racket normal (racket-body quat, or wrist-quat * mount_quat) but reads
-        the reference MOTION's body quats at that clip's strike frame, so a robot tracking the clip lands
-        its paddle normal exactly on this target. Used as the uniform-mode normal target (the sampled
-        racket velocity is not the paddle-face direction).
-        """
-        if self._ref_normal_per_clip is not None:
-            return
-        motion = self._motion()
-        ml = motion.motion
-        nseg = ml.num_segments
-        spc = tuple(self.cfg.strike_phase_per_clip)
-        normals = torch.zeros(nseg, 3, device=self.device)
-        for c in range(nseg):
-            ss = int(ml.seg_start[c])
-            sl = int(ml.seg_len[c])
-            ph = float(spc[c]) if spc and len(spc) == nseg else float(self.cfg.strike_phase)
-            f = ss + round(ph * (sl - 1))
-            if self._racket_mode == "body":
-                quat = ml._body_quat_w[f, self._racket_body_index]
-            else:
-                wquat = ml._body_quat_w[f, self._wrist_body_index]
-                quat = quat_mul(wquat.unsqueeze(0), self._mount_quat[0:1]).squeeze(0)
-            nrm = matrix_from_quat(quat.unsqueeze(0))[0, :, self.cfg.mount_normal_axis] * self.cfg.mount_normal_sign
-            normals[c] = nrm / (torch.norm(nrm) + 1e-6)
-        self._ref_normal_per_clip = normals
-        print(f"[RacketTargetCommand] per-clip reference strike paddle normals: {normals.tolist()}", flush=True)
-
     def _sample_targets_uniform(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
         """Independent box sampling (legacy mode). Ranges are PLACEHOLDERS not tied to the swing."""
         pos = origins.clone()
         pos[:, 0] += sample_uniform(*self.cfg.racket_pos_x_range, (n,), self.device)
-        motion = self._motion()
-        if motion._multiseg:
-            # Unified policy: the target Y region is conditioned on the swing TYPE (clip) so forehand and
-            # backhand regions are non-overlapping (HITTER §IV). Sample |y| and set the sign per clip:
-            # forehand (clip 0) on -y if forehand_on_negative_y, backhand (clip 1) on the opposite side.
-            clip = motion.clip_id[env_ids]
-            ymag = sample_uniform(*self.cfg.racket_pos_y_abs_range, (n,), self.device)
-            fh_sign = -1.0 if self.cfg.forehand_on_negative_y else 1.0
-            sign = torch.where(clip == 0, fh_sign, -fh_sign)
-            pos[:, 1] = origins[:, 1] + sign * ymag
-        else:
-            pos[:, 1] += sample_uniform(*self.cfg.racket_pos_y_range, (n,), self.device)
+        pos[:, 1] += sample_uniform(*self.cfg.racket_pos_y_range, (n,), self.device)
         pos[:, 2] += sample_uniform(*self.cfg.racket_pos_z_range, (n,), self.device)
         self.racket_target_pos_w[env_ids] = pos
 
@@ -448,15 +399,7 @@ class RacketTargetCommand(CommandTerm):
         vel[:, 2] = sample_uniform(*self.cfg.racket_vel_z_range, (n,), self.device)
         self.racket_target_vel_w[env_ids] = vel
 
-        if motion._multiseg:
-            # Unified policy: the target paddle normal is the imitated swing's actual face normal at
-            # strike (reachable by the imitation). The sampled racket velocity is the SWING-PATH direction,
-            # which is ~18-110 deg off the +Y blade face, so normal_mode=velocity makes the normal goal
-            # unsatisfiable (normal_pass=0 -> composite success stuck at 0).
-            self._ensure_ref_normal_per_clip()
-            clip = motion.clip_id[env_ids]
-            normal = self._ref_normal_per_clip[clip]
-        elif self.cfg.normal_mode == "velocity":
+        if self.cfg.normal_mode == "velocity":
             normal = vel / (torch.norm(vel, dim=-1, keepdim=True) + 1e-6)
         else:  # "sampled"
             normal = torch.empty(n, 3, device=self.device)
@@ -518,19 +461,13 @@ class RacketTargetCommand(CommandTerm):
         base_xy[:, 1] += sample_uniform(*self.cfg.base_target_y_range, (n,), self.device)
         self.base_target_pos_w[env_ids] = base_xy
 
-        # Swing type. Unified multi-clip: it IS the imitated clip (forehand=clip 0 -> +1, backhand=clip 1
-        # -> -1), matching the swing_type observation. Single-clip legacy: infer from the target Y side.
-        motion = self._motion()
-        if motion._multiseg:
-            clip = motion.clip_id[env_ids]
-            self.swing_sign[env_ids] = torch.where(clip == 0, 1.0, -1.0)
+        # Swing type from target Y relative to the nominal base Y (right arm holds the paddle).
+        base_y_nom = origins[:, 1] + self.cfg.base_nominal_offset[1]
+        dy = self.racket_target_pos_w[env_ids][:, 1] - base_y_nom
+        if self.cfg.forehand_on_negative_y:
+            self.swing_sign[env_ids] = torch.where(dy <= 0.0, 1.0, -1.0)
         else:
-            base_y_nom = origins[:, 1] + self.cfg.base_nominal_offset[1]
-            dy = self.racket_target_pos_w[env_ids][:, 1] - base_y_nom
-            if self.cfg.forehand_on_negative_y:
-                self.swing_sign[env_ids] = torch.where(dy <= 0.0, 1.0, -1.0)
-            else:
-                self.swing_sign[env_ids] = torch.where(dy >= 0.0, 1.0, -1.0)
+            self.swing_sign[env_ids] = torch.where(dy >= 0.0, 1.0, -1.0)
 
         # Stamp the motion phase baseline for these envs so the per-swing wrap detector in
         # _update_command does not immediately re-trigger after this (e.g. reset-time) resample.
@@ -573,28 +510,9 @@ class RacketTargetCommand(CommandTerm):
         near the peak). That made strike_composite_success_exact ~6x pessimistic vs the honest probe.
         """
         motion = self._motion()
-        ml = motion.motion
-        if motion._multiseg:
-            # Per-clip strike frame on the concatenated time axis: the contact phase differs per swing
-            # (forehand peak ~0.36, backhand ~0.74), so resolve strike_step per env from its clip.
-            if self._strike_phase_per_clip_t is None:
-                sp = tuple(self.cfg.strike_phase_per_clip)
-                if sp and len(sp) == ml.num_segments:
-                    self._strike_phase_per_clip_t = torch.tensor([float(x) for x in sp], device=self.device)
-                else:
-                    self._strike_phase_per_clip_t = torch.full(
-                        (ml.num_segments,), float(self.cfg.strike_phase), device=self.device
-                    )
-            clip = motion.clip_id
-            seg_start = ml.seg_start[clip]
-            seg_len = ml.seg_len[clip]
-            phase = self._strike_phase_per_clip_t[clip]
-            strike_step = seg_start + (phase * (seg_len - 1).float()).round().long()
-            self.time_to_strike = (strike_step - motion.time_steps).float() * self._env.step_dt
-        else:
-            total = max(int(ml.time_step_total), 1)
-            strike_step = round(self.cfg.strike_phase * (total - 1))
-            self.time_to_strike = (strike_step - motion.time_steps).float() * self._env.step_dt
+        total = max(int(motion.motion.time_step_total), 1)
+        strike_step = round(self.cfg.strike_phase * (total - 1))
+        self.time_to_strike = (strike_step - motion.time_steps).float() * self._env.step_dt
         self.pre_strike = self.time_to_strike > 0.0
         self.strike_window = self.time_to_strike.abs() <= self.cfg.strike_window_s
 
@@ -605,12 +523,10 @@ class RacketTargetCommand(CommandTerm):
         # (motion.time_steps is unchanged between the two calls).
         self._compute_strike_timing()
 
-        # Re-sample the target at each new swing. Use the motion command's robust just_resampled signal
-        # (set this same step when it wrapped a swing) instead of a time_steps<prev heuristic — the latter
-        # fails for the unified policy when a wrap jumps the index to a HIGHER concatenated segment start
-        # (forehand->backhand). Targets for fresh episodes are sampled by the manager's reset.
-        wrapped = torch.where(motion.just_resampled)[0] if hasattr(motion, "just_resampled") else \
-            torch.where(motion.time_steps < self._prev_motion_steps)[0]
+        # Re-sample the target at each new swing (the motion clip wrapped to an earlier frame).
+        # _resample_command re-stamps _prev_motion_steps for the affected envs; the full clone below
+        # keeps every env current. Targets for fresh episodes are sampled by the manager's reset.
+        wrapped = torch.where(motion.time_steps < self._prev_motion_steps)[0]
         if len(wrapped) > 0:
             self._resample_command(wrapped)
         self._prev_motion_steps = motion.time_steps.clone()
@@ -860,10 +776,6 @@ class RacketTargetCommandCfg(CommandTermCfg):
 
     # --- strike timing (fraction of the reference clip where the paddle meets the ball) ---
     strike_phase: float = 0.46  # HITTER clip: strike at frame 43/94 ≈ 0.46
-    # Unified multi-clip (HITTER forehand+backhand single policy): per-clip strike phase, aligned with the
-    # MotionLoader segment order (i.e. the order of motion files: forehand, backhand). Empty -> use the
-    # scalar strike_phase for every clip. e.g. (0.36, 0.74) for forehand_new + backhand_new.
-    strike_phase_per_clip: tuple = ()
     strike_window_s: float = 0.1  # half-window; goal-racket reward active within ±strike_window_s
     strike_success_pos_thresh: float = 0.075  # m; "strike_success" metric = fraction of strikes with racket pos error below this
     strike_success_vel_thresh: float = 0.5  # m/s; exact-strike racket velocity acceptance threshold
@@ -937,9 +849,6 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # Used only by target_mode="uniform". PLACEHOLDER ranges (not the reference strike point).
     racket_pos_x_range: tuple[float, float] = (0.25, 0.55)
     racket_pos_y_range: tuple[float, float] = (-0.45, 0.45)
-    # Unified multi-clip: |y| sampling range; the SIGN is set per clip (forehand on -y, backhand on +y,
-    # per forehand_on_negative_y) so forehand/backhand target regions are non-overlapping (HITTER §IV).
-    racket_pos_y_abs_range: tuple[float, float] = (0.05, 0.45)
     racket_pos_z_range: tuple[float, float] = (0.70, 1.15)
 
     # --- desired racket velocity (world frame, m/s) ---

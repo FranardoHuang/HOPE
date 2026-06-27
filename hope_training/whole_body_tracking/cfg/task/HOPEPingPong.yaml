@@ -1,20 +1,38 @@
 # =============================================================================
-# HOPE ping-pong WBC task (Agibot A3) — racket-target tracking.
+# HOPE ping-pong WBC task (Agibot A3) — HITTER-aligned (arXiv:2508.21043).
 #
 # Selected with `task=HOPEPingPong`. Composes the shared env/sim/randomization
-# bases (cfg/base/*) and overrides the HOPE-specific knobs below. A key present
-# here overrides the code default; a missing key keeps the code default (106B style).
+# bases (cfg/base/*) and overrides the HOPE-specific knobs below.
+#
+# ALIGNMENT GOAL (2026-06-26): reproduce HITTER, not invent our own curriculum.
+# This file was stripped of the HOPE-invented machinery (motion_scale demotion,
+# ref_perturb success-gated curriculum, ref_vel_scale clip down-scaling, 3-D
+# target box, per-clip strike tuning) and set to HITTER's design:
+#   * 10 s episode, multiple swings (resample target on each clip wrap)
+#   * direct uniform target sampling at a FIXED strike plane x=0.4 m; sample
+#     only (y, z) of racket position + the racket velocity vector (Table-/ §IV)
+#   * NO curriculum: just sample + PPO
+#   * imitation prior at natural weight (no motion_scale)
+#   * DR: keep mass/friction/restitution + observation noise (HITTER prose),
+#     PD gains FIXED (HITTER) -> pd_gain_range: null
+# Reward weights/kernel widths are NOT published by HITTER, so they stay as
+# reasonable HOPE choices (goal terms weighted relatively high, per the paper).
+#
+# STAGE NOTE: this is the single-swing-type (forehand) config. The unified
+# forehand+backhand policy (sampled swing type each swing, dual-clip imitation,
+# non-overlapping y regions) is Stage 2 and adds swing_type + a second clip.
 # =============================================================================
 
 name: HOPEPingPong
 gym_task: HOPE-PingPong-AgibotA3-v0
 experiment_name: agibot_a3_hope
 
-# wandb motion registry for the reference clip (override on the CLI with
-# registry_name=...; run once per swing style with the forehand/backhand clip).
-# NOTE: the prefix is the wandb ORG (WANDB_REGISTRY_ORG), NOT the team (WANDB_ENTITY) — registries
-# are org-scoped, so a team name fails with "Unable to find organization for entity ...".
+# wandb motion registry clips. UNIFIED HITTER policy: clip 0 = forehand (registry_name), clip 1 =
+# backhand (registry_name_2). MotionLoader concatenates them; clip_id selects which swing each env
+# imitates. Order must match racket.strike_phase_per_clip. Set registry_name_2: null for a single-swing
+# policy. (Override on the CLI with registry_name=... / registry_name_2=...)
 registry_name: ${oc.env:WANDB_REGISTRY_ORG,BerkeleyPingPong}/wandb-registry-motions/hope_forehand
+registry_name_2: ${oc.env:WANDB_REGISTRY_ORG,BerkeleyPingPong}/wandb-registry-motions/hope_backhand
 
 defaults:
   - /base/env_base@_here_
@@ -22,170 +40,96 @@ defaults:
   - /base/randomization_base@_here_
   - _self_
 
-# env / sim / domain_rand are inherited from the base files above; override here, e.g.:
-# env:
-#   num_envs: 2048
 env:
-  # PATH C4 (2026-06-25): 10.0 → 2.0 — cap the episode to ~1 clip (clip ≈1.9s) so each episode is ONE
-  # swing. The 10s/multi-swing default (HITTER) let the always-on motion reward accumulate over 3+ clips
-  # and dwarf the in-window racket reward → the policy relapsed into "stand-and-imitate" (episode length
-  # ran away 22→334, position regressed) every time imitation got cheap relative to hitting. Capping to
-  # one swing removes that arbitrage at the root AND de-biases the held strike metrics. No ball, so swings
-  # are independent — nothing needs the multi-swing episode. Raise back toward HITTER's 10s only if a
-  # later stage needs consecutive-swing footwork.
-  episode_length_s: 3.0
+  # HITTER: 10 s episode with multiple swings. With no ball the swings are independent; the target
+  # resamples on each clip wrap, so a 10 s episode gives ~5 swings of practice and trains the
+  # between-swing recovery. (Was capped to 3 s in the HOPE curriculum path; restored to HITTER.)
+  episode_length_s: 10.0
 
-# ---- reward weights / kernel std (EDIT) ----------------------------------
-# PATH B (2026-06-25): fix the kernel-std mis-scaling that left velocity unlearnable.
-# Diagnosis (current forehand run): the policy discovers the swing ~iter 1.45k but converges to
-# fast-but-wrong — racket_speed≈5 m/s, vel-vector error≈1.4 m/s, pos error drifting 4→10 cm,
-# strike_vel_pass_exact≈0.04, composite≈0.015. Root cause is the two racket kernels are scaled wrong
-# for the CURRENT error regime:
-#   * VELOCITY std=0.5 with |Δv|≈1.4 → exp(-1.4²/0.5²)=exp(-7.8)≈0: dead reward, no gradient. The prior
-#     1.5→0.5 change KILLED velocity learning (tightening std when far from target removes the gradient).
-#     REVERT toward ~1.2; only tighten as racket_vel_error_exact_strike actually falls.
-#   * POSITION std=0.30 is flat 4–10 cm (exp(-0.11)=0.89 @10cm), so nothing holds position tight and it
-#     drifts up. Tighten to 0.15 for a real gradient in the operating band.
-# Principle: set each std to BRACKET the current error (gradient), then tighten via curriculum — never
-# jump straight to the acceptance tolerance. Also raise motion_scale (tame the violent swing) and
-# penalties (limit/torque/contacts) since hitting reward dwarfed them. Old PATH A values in comments.
+# ---- reward weights / kernel std --------------------------------------------
+# HITTER does not publish reward weights or kernel forms. Goal terms get relatively high weight
+# (paper). std brackets the operating error band (gradient), NOT the acceptance tolerance.
+#
+# REBALANCE 2026-06-27 (reward-share analysis on hitter_unified_v3): the strike objective
+# (racket pos+vel+normal) was only ~8% of the positive reward while base_position alone was 45% and
+# imitation ~47% — the optimizer barely "felt" the hit. Two fixes:
+#   (a) WIDEN the dead velocity kernel: at strike the racket-velocity error is ~2 m/s, but std=0.8 gives
+#       exp(-(2/0.8)^2)=exp(-6.25)~0.002 -> no gradient. Widen to 1.8 to BRACKET the ~2 m/s error
+#       (exp(-1.2)~0.3, live), then curriculum-tighten 1.8->1.2->0.8->0.5 as the error falls. Same rule
+#       widens position std a touch (0.15->0.20) for the 10-20 cm operating band.
+#   (b) RAISE the racket weights (~1.7x) and TRIM base_position (4->2.5) so the hit is a real share of the
+#       gradient. base still matters (HITTER's headline metric is base reach) — just no longer dominant.
+# strike_window_s kept at 0.12 (widening it re-introduces swing-through timing dilution). All tunable.
 rewards:
-  racket_position_weight: 8.0     # PATH A: 16.0 — lower so the swing isn't slammed to joint limits
-  racket_position_std: 0.15       # PATH A: 0.30 — gradient in the 4–10cm band (0.30 was flat there)
-  racket_velocity_weight: 6.0     # PATH C (2026-06-25): 2.0 → 4.0 — give the velocity goal weight again
-  racket_velocity_std: 0.8        # PATH C3 (2026-06-25): 1.2 → 0.8 — velPass plateaued ~0.145 (it1600-2050)
-                                  # with velEx parked reliably ~0.80 (<1.0); std=1.2 too flat at 0.8 to push
-                                  # error under the 0.5 m/s gate. Tighten now to sharpen the gradient. Apply
-                                  # via checkpoint resume from model_2000.pt, NOT a fresh restart.
-  racket_normal_weight: 3.0       # PATH A: 4.0
-  racket_normal_std: 0.30         # rad (~17°); already passing ~0.85+, keep loose
-  base_position_weight: 4.0       # PATH A: 6.0
+  racket_position_weight: 14.0     # 8 -> 14
+  racket_position_std: 0.20        # 0.15 -> 0.20 (gradient in the 10-20 cm band)
+  racket_velocity_weight: 10.0     # 6 -> 10
+  racket_velocity_std: 1.8         # 0.8 -> 1.8 (BRACKET the ~2 m/s error; 0.8 was ~dead). Tighten later.
+  racket_normal_weight: 5.0        # 3 -> 5 (normal already satisfied ~0-2 deg; keep std 0.30)
+  racket_normal_std: 0.30
+  base_position_weight: 2.5        # 4 -> 2.5 (trim the dominant repositioning reward)
   base_position_std: 0.25
-  # Ablation B (no swing-through): set true to track the bare strike point instead of the moving
-  # swing-through line (decouples position from timing/velocity). Default false = standard swing-through.
   racket_position_static: false
 
-  # ---- motion imitation prior (the 6 motion_* terms; base weights sum ≈5.0) ----
-  # motion_scale multiplies ALL six motion weights at once. PATH A cut to 0.4; raise to 0.6 here — a
-  # stronger imitation anchor keeps the swing close to the controlled reference (imitation is NOT the
-  # bottleneck, it improves). Watch Mean reward / episode length; lower again if it over-constrains.
-  # PATH C: 0.6 → 0.45 — the ablation-B run showed motion_scale=0.6 (+ low racket weight) suppressed the
-  # swing entirely (racket_speed plateaued ~1.6 m/s vs ~5 m/s target). Imitation alone does NOT reproduce
-  # the 5-6 m/s tip speed, so demote it again to let the velocity goal pull the swing.
-  # PATH C2 (2026-06-25): 0.45 → 0.30 — pathC_velrevive revived velocity (comp 0.035, posPass 0.36 by
-  # ~it1000) but then relapsed into the B "stand-and-imitate" attractor: episode length ran away 42→284,
-  # and posPass/posEx regressed (0.36→0.32 / 0.057→0.090) while velPass/comp stalled (~0.10 / ~0.035).
-  # Long episodes let per-step motion reward dwarf the in-window racket reward, so demote imitation hard.
-  # CONFIRMED (run pathC2_ms040, actually motion_scale=0.30): relapse fixed — eplen pinned ~15 through
-  # it1165, posPass 0.456 (new high), velPass 0.108 & comp 0.072 both still rising, no instability. 0.30
-  # works; watch the swing still looks like a real forehand (motion is now a weak prior). If eplen ever
-  # runs away again, next structural fix is capping episode_length_s to ~1 clip (~1.9s).
-  # 2026-06-26: 0.50 → 0.60 — mild anti-sink for the backhand. The reference torso RISES through the
-  # backhand strike (+0.2~0.37 m/s) but the trained robot SINKS (anchor v_z ≈ -0.78), which both triggers
-  # the ee_body_pos Z-termination (eplen stuck ~0.2s, time_out=0) and adds downward jitter at the strike.
-  # A slightly stronger imitation anchor holds the vertical weight-transfer. The 3.0s episode cap already
-  # blocks the stand-and-imitate runaway, so this is safe; drop back to 0.50 if eplen runs away.
-  motion_scale: 0.60
-  # per-term override also available (applied before motion_scale), e.g.:
-  #   motion_body_pos_weight: 1.0   motion_body_pos_std: 0.3   motion_body_ori_weight: ...
-  #   motion_body_lin_vel_weight/_std   motion_body_ang_vel_weight/_std
-  #   motion_global_anchor_pos_weight/_std   motion_global_anchor_ori_weight/_std
+  # Imitation prior at NATURAL weight (no motion_scale). HITTER does not demote the imitation reward
+  # with a global scale; it relies on upper-body-only imitation + relatively-high goal weights +
+  # multi-swing episodes to keep the swing dominant. (motion_scale removed in the HITTER alignment.)
 
-  # ---- penalties / regularization (negative weights; energy, smoothness, safety) ----
-  # Raised across the board: post-swing-onset the hit reward dwarfed these, so the policy slammed joints
-  # to limits and spiked torque. These tame aggressiveness without killing the swing.
-  joint_torques_weight: -0.00003  # PATH A: -0.00001
-  action_rate_weight: -0.15       # PATH A: -0.1
-  joint_limit_weight: -15.0       # PATH A: -10.0
-  undesired_contacts_weight: -0.2 # PATH A: -0.1
+  # Penalties / regularization (r_regularization).
+  joint_torques_weight: -0.00003
+  action_rate_weight: -0.10
+  joint_limit_weight: -10.0
+  undesired_contacts_weight: -0.1
 
-# ---- racket target sampling (EDIT) ---------------------------------------
-# Full forehand workspace (no curriculum / no warmup narrowing). These are still PLACEHOLDER ranges —
-# validate them against the A3 right-arm IK reachability before the final run. If a sampled target is
-# outside the arm's reach the policy physically cannot hit it, so keep the ranges inside the real
-# workspace. pos_y straddles the robot center (forehand on -Y, see forehand_on_negative_y).
+# ---- racket target sampling (HITTER: direct, fixed plane, no curriculum) -----
 racket:
-  # Paddle-contact phase is PER-CLIP: the racket-tip (pingpang_red_Link) speed peak lands at a
-  # different fraction in each swing, so a single global value is wrong when the trained motion
-  # changes. `strike_phase_by_motion` (registry clip-name substring -> phase) wins for the trained
-  # clip; `strike_phase` is the fallback for any clip not listed. Verified 2026-06-26 from the
-  # racket-tip FK speed peak in each clip's motion.npz (forehand peak phase 0.485 / 5.4 m/s;
-  # backhand peak phase 0.591 / 2.4 m/s on the +Y side). At the OLD shared 0.46 the backhand strike
-  # landed in a stationary mid-swing pause (target speed ~0.05 m/s) and strike_success stalled ~4%.
-  strike_phase: 0.46              # fallback / default (forehand-tuned)
-  strike_phase_by_motion:
-    hope_forehand: 0.46           # racket-speed peak at phase 0.485; 0.46 = just onto contact
-    hope_backhand: 0.59           # racket-speed peak at phase 0.591 (+Y side = backhand)
-  strike_window_s: 0.12           # PATH B: was 0.15 — shrink the swept swing-through target (0.72m vs 0.9m), less timing dilution
-  strike_success_pos_thresh: 0.075  # m; wandb "strike_success" = fraction of strikes with racket pos error below this
-
-  # Debug: log dbg_err_{minus,plus}_{win,exact} (swing-through SIGN check) + dbg_*_{raw,gated} reward
-  # kernels. Run ~200 iters to confirm err_minus_win < err_plus_win (sign correct) and dbg_racket_vel_raw
-  # ~0 (velocity kernel dead). Turn OFF for production (extra wandb scalars, tiny overhead).
+  # Strike timing: phase of the clip at which contact happens (racket-tip speed peak).
+  # forehand_new clip: peak at phase 0.362. Single value here (the per-clip table is a Stage-2 concern
+  # once a second clip is imitated by one policy).
+  strike_phase: 0.36              # fallback (single-clip / clips not in the per-clip table)
+  # Unified policy: per-clip strike phase, aligned with the clip order (clip0=forehand, clip1=backhand).
+  # Measured from each clip's racket-tip (pingpang_red_Link) speed peak: forehand 0.36 (2.57 m/s, y<0),
+  # backhand 0.74 (1.60 m/s, y>0).
+  strike_phase_per_clip: [0.36, 0.74]
+  strike_window_s: 0.12
+  strike_success_pos_thresh: 0.075
   debug_reward_logging: false
 
-  # Clean reference strike velocity (deployment-aligned run). The motion's stored body_lin_vel_w is FD'd
-  # from the 30->50fps interpolated joints and is ~1 m/s inconsistent with the position trajectory at the
-  # racket tip (verified: stored-vel vs central-diff-of-pos differ ~1.1 m/s near strike) → that noise is
-  # the floor on racket_vel_error_exact_strike (velEx parked ~0.74). True = recompute the strike target
-  # velocity from the racket FK position by a centered finite difference (consistent, denoised target).
-  # Startup log prints raw_strike_speed / clean_strike_speed / raw_clean_vel_diff / raw_vs_fd_vel_diff.
+  # Recompute the strike-target velocity from racket-FK position by a centered finite difference
+  # (denoises the FD'd stored body_lin_vel). Kept — it is a data-quality fix, not a HITTER divergence.
   clean_reference_strike_velocity: true
-  clean_strike_vel_window: 2        # half-window frames for the centered difference (2 -> +-40ms baseline)
+  clean_strike_vel_window: 2
 
-  # --- rank 5: reference-coupled target sampling (the strike_success=0 fix) ----------------------
-  # The previous "uniform" box was sampled INDEPENDENTLY of the imitated swing, and the forehand
-  # clip's racket at the strike frame is at x~0.72 y~-0.90 z~0.72 (env-origin rel) -- OUTSIDE the old
-  # box (x[0.25,0.55] y[-0.45,0.45]). So the swing could not reach the target and training traded the
-  # racket goal away (racket_pos_error_at_strike grew 0.16->0.78, strike_success stuck at 0).
-  # reference_perturbed sets target = reference racket state @ strike (pos/vel/normal, same FK as the
-  # actual racket) + a curriculum-scaled perturbation: reachable by construction, widening over time.
-  target_mode: reference_perturbed
-  ref_perturb_pos: [0.06, 0.08, 0.06]   # PATH B: was [0.08,0.10,0.08] — keep targets near the reference until it hits
-  ref_perturb_vel: [0.3, 0.3, 0.25]     # PATH B: was [0.6,0.6,0.5]
-  ref_perturb_normal: 0.15              # PATH B: was 0.20
-  ref_perturb_curriculum_steps: 30000   # OPEN-LOOP fallback only; ignored while ref_perturb_success_gated=True (default)
-  ref_perturb_curriculum_start: 0.05    # PATH B: was 0.15 — start narrower (the gate was frozen here all run)
-  # Success-gated curriculum: widen the perturbation only once smoothed exact-strike composite > threshold.
-  ref_perturb_advance_threshold: 0.25   # was 0.30 — let it start widening a touch sooner once it hits
-  ref_perturb_advance_rate: 1.0e-5      # scale increment per control step while above threshold
+  # HITTER target sampling: uniform, directly sampled, NO reference-perturb curriculum.
+  target_mode: uniform
 
-  # Stage slow->fast hitting (priority: stable 3–4 m/s BEFORE 6 m/s). The reference forehand clip strikes
-  # at ~6 m/s; ref_vel_scale multiplies that reference velocity target. Default 1.0 = clip speed. To train
-  # a controllable slower hit first, set e.g. 0.6 (~3.6 m/s), then raise to 1.0 once the slow strike passes
-  # the success gates. NOTE: at scale!=1.0 the target velocity no longer matches the imitated swing, so a
-  # perfect imitator no longer scores velocity exactly (position/normal stay reachable-by-construction).
-  ref_vel_scale: 0.6              # fallback for clips not in ref_vel_scale_by_motion (forehand-tuned).
-                                  # PATH C: 1.0 → 0.6 — target ~3 m/s first. Ablation B showed the policy
-                                  # tops out ~1.6 m/s, so at full clip speed (~5) velE~2.9 fell OUTSIDE the
-                                  # velocity kernel (std=1.2 → exp(-5.8)≈0, dead). At ~3 m/s velE~1.4 lands
-                                  # in the live band (exp(-1.36)=0.26). Ramp back to 0.8→1.0 once the slow
-                                  # strike clears the success gates (composite>0.25, vel_pass>0.5).
-  # ref_vel_scale is PER-CLIP (2026-06-26): down-scaling only makes sense for the VIOLENT forehand.
-  # Measured from motion.npz: forehand tip peaks 6.14 m/s, backhand only 3.32 m/s (~1.8 m/s at the mount).
-  # Applying 0.6 to the already-gentle backhand pushed its velocity TARGET down to ~1.1 m/s — into the
-  # body-jitter floor (the 0.5 m/s accept gate is then ~45% of target vs ~8% for the forehand) AND pitted
-  # imitation (wants ~1.8) against the velocity goal (wants ~1.1), producing the awkward sink. So DON'T
-  # slow the backhand: scale 1.0 keeps target == imitated swing speed (~1.8), aligning the two rewards and
-  # giving more signal vs jitter. Substring match, longest key wins; ref_vel_scale above is the fallback.
-  ref_vel_scale_by_motion:
-    hope_forehand: 0.6            # tame the 6 m/s tip → ~3.6 m/s target (slow-first curriculum)
-    hope_backhand: 1.0            # already gentle (3.3 m/s tip); full speed = target matches the swing
-
-  # --- legacy "uniform" box (ignored when target_mode=reference_perturbed) -----------------------
-  pos_x_range: [0.25, 0.55]
-  pos_y_range: [-0.45, 0.45]
-  pos_z_range: [0.70, 1.15]
-  vel_x_range: [1.5, 4.0]
+  # Fixed striking plane at x = 0.4 m in front of the robot (HITTER §IV: "the striking plane is fixed
+  # at 0.4 m in front of the robot, so only the y and z coordinates of the racket target are sampled").
+  pos_x_range: [0.40, 0.40]
+  # Unified policy: the Y region is conditioned on the swing type. |y| is sampled from
+  # racket_pos_y_abs_range and the sign is set per clip (forehand on -y, backhand on +y) so the regions
+  # are non-overlapping (HITTER §IV). pos_y_range below is the single-clip fallback (ignored when 2 clips).
+  racket_pos_y_abs_range: [0.05, 0.45]
+  pos_y_range: [-0.45, -0.05]
+  pos_z_range: [0.70, 1.05]
+  # Racket target VELOCITY sampled directly (HITTER), not derived from the clip * a scale.
+  vel_x_range: [1.5, 3.5]
   vel_y_range: [-1.0, 1.0]
   vel_z_range: [0.0, 1.5]
 
-  # base_target is now COUPLED to the racket target (base_target = racket_target_xy - reference
-  # base->racket offset); these ranges are a SMALL JITTER around that coupled point, not the whole
-  # position. Shrunk Y from ±0.35 (it used to fight the arm reach).
+  # Base XY target: small jitter around the reference-coupled repositioning point.
   base_target_x_range: [-0.10, 0.10]
   base_target_y_range: [-0.10, 0.10]
-  normal_mode: velocity           # "velocity" (n = v/|v|) or "sampled"  (uniform mode only)
+  normal_mode: velocity           # n = v/|v| (face follows the sampled velocity direction)
   forehand_on_negative_y: true    # right arm holds the paddle
-  mount_normal_axis: 1            # racket-local +Y is the face normal (red/hitting face; confirmed in Step 11)
-  mount_normal_sign: 1.0          # +1 = red/forehand face; use -1 for the black face (backhand-only policy)
+  mount_normal_axis: 1            # racket-local +Y is the face normal (red/hitting face; Step 11)
+  mount_normal_sign: 1.0          # +1 = red/forehand face
+
+# ---- domain randomization (HITTER-faithful) ---------------------------------
+# HITTER publishes no DR table; prose randomizes mass/friction/restitution + perception noise, and
+# states PD gains are FIXED. So: keep link-mass randomization + the base friction/CoM + observation
+# noise; DISABLE PD-gain randomization (pd_gain_range: null). External push is dropped via the base
+# randomization override below if present.
+domain_rand:
+  link_mass_range: [0.9, 1.1]
+  pd_gain_range: null
