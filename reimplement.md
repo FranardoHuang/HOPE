@@ -3103,6 +3103,25 @@ How the unified policy works (all wired in `cfg/task/HOPEPingPong.yaml` + the co
    (−y) and backhand (+y) regions are non-overlapping.
 4. The actor sees a `swing_type` observation (forehand +1 / backhand −1).
 
+Stability + reward knobs added 2026-06-27 (all in `cfg/task/HOPEPingPong.yaml`, no command change needed —
+they are picked up automatically by `task=HOPEPingPong`):
+
+1. `rewards.racket_velocity_std: 1.0` — the velocity-tracking kernel width. This is a **manual curriculum**
+   knob: start loose (`1.8` brackets the ~2 m/s initial error), then tighten `1.0 → 0.8 → 0.5` as
+   `racket_vel_error_exact_strike` drops below the current std (velocity is the composite bottleneck). Never
+   jump straight to `0.5`. Pair tightening with `14.4b` resume so you do not restart from scratch.
+2. `rewards.pre_strike_foot_slip_weight: -0.4` — a new stability penalty (`mdp.pre_strike_foot_slip`) on
+   horizontal foot speed *while a foot is in contact*, gated by `pre_strike` ONLY (the strike swing's
+   footwork is untouched). It stops the robot sliding/leaning to reach far targets. Raise its magnitude if
+   `foot_slip_speed` stays high / `foot_contact_frac` stays low; lower it if it starts hurting the strike.
+3. `racket.base_couple_blend: 0.3` + `racket.base_couple_max_offset: 0.20` — weak base→racket coupling
+   (uniform mode): shifts the base XY target toward 30% of the racket target's sideways (Y) offset, clamped
+   to ≤0.20 m, so the robot steps toward far targets instead of stretching in place. Set
+   `base_couple_blend: 0.0` to disable. The racket target distribution is unchanged.
+4. `racket.normal_mode: velocity` is **ignored in the unified (2-clip) policy** — the target normal is the
+   per-clip reference paddle normal, because the +Y blade face is 18–110° off the swing-velocity direction.
+   `normal_mode` only takes effect when `registry_name_2: null` (single-clip).
+
 Confirm on the launch log: `UNIFIED multi-clip policy: clip0=...hope_forehand clip1=...hope_backhand`,
 `racket_target.strike_phase_per_clip=(0.36, 0.74)`, `racket_target.target_mode='uniform'`, and a
 `swing_type` row in the observation table. At runtime `Live/motion/sampling_entropy` ≈ 1.0 means both
@@ -3200,6 +3219,33 @@ tuple), so the rollout loop uses `obs = env.get_observations()` + `env.step(acti
 video uses a manual `env.render()` + `imageio` capture rather than `gym.wrappers.RecordVideo` (which
 needs `moviepy` and was masked by Isaac's hard-exit). If video errors with `ModuleNotFoundError`, run
 `hope_isaac_py -m pip install imageio imageio-ffmpeg`.
+
+### 14.5b Quantitative eval + deterministic-vs-dither check (`eval_deterministic.py`)
+
+`play.py` shows you the swing; it does **not** give you numbers. `scripts/eval_deterministic.py` is the
+headless metric harness: it sets up the same UNIFIED 2-clip motion as `train.py`, rolls the policy out on
+many envs, and prints the **full `cmd.metrics` dict** (strike pos/vel/normal pass, `strike_composite_success_exact`,
+fh/bh split) plus a termination / episode-length tally — averaged over the last `tail` steps.
+
+Its key purpose is the **deterministic-vs-dither** sweep. The exported/deployed ONNX runs the distribution
+**mean** (deterministic). A pure-mean policy is fragile (~34% early `ee_body_pos` termination in Isaac even
+though strike accuracy is ~0.99). `noise_scale=s` adds `s × learned_std × N(0,1)` to the mean; a small
+`0.05` dither recovers stability (term ~0.34 → ~0.015) without retraining. Sweep several scales in ONE sim
+process to find the deployment dither:
+
+```bash
+# inside grasping, in .../whole_body_tracking, after Step 14.1 env setup.
+# +steps/+tail/+noise_scales need the Hydra `+` prefix (they are not in the base config).
+hope_isaac_py scripts/eval_deterministic.py task=HOPEPingPong algo=ppo headless=true \
+  num_envs=128 +steps=1200 +tail=400 +noise_scales=0.0,0.05,0.10,0.20 \
+  checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt"
+```
+
+Reference numbers (run `2026-06-27_18-14-06_basecouple03_resume`, `model_32200`, unified fh+bh): det
+(`ns=0.0`) `strike_composite_success_exact=0.9874`, `terminated_rate=0.3385`, `mean_episode_length=333`;
+dither (`ns=0.05`) `0.9932`, `0.0154`, `494`. So **deploy with ~0.05 action dithering**, not the pure mean.
+Without `checkpoint=` it falls back to the newest local run; `+base_couple_blend=0.0` overrides the base→racket
+coupling for the eval; pass `'motion_file=[.../fh.npz,.../bh.npz]'` to run fully offline.
 
 ### 14.6 Where to tune
 
@@ -3383,12 +3429,15 @@ Verification gate:
 > referred to the BeyondMimic deploy repo we never cloned. Use the two real paths
 > below instead.
 
-Before touching hardware, verify the policy in simulation. This repo gives you two
+Before touching hardware, verify the policy in simulation. This repo gives you three
 sim checks, in increasing fidelity:
 
 1. **16.1 In-Isaac verification** — runnable *today with your trained policy*. It is
    the only closed loop that consumes your BeyondMimic `policy.onnx`'s exact
    obs/action contract, because the same task rebuilds the env around it.
+   **16.1b** adds a lightweight MuJoCo cross-simulator run of the same ONNX (different
+   physics engine, no Isaac) — the best true sim-to-sim available, since the heavy C++
+   harness below cannot load this ONNX.
 2. **16.2 A3 MuJoCo sim-to-sim harness** — the real `hal_ethercat`-shaped closed loop:
    the deploy program (`agi/a3_deploy_example/`) ↔ MuJoCo sim (`agi/A3_MuJoCo_Sim/`)
    over iceoryx, both built from source on Jazzy. Runs with its *bundled* A3 policy;
@@ -3430,6 +3479,42 @@ checkpoint to verify the backhand policy. Both runs are fully offline: with
 Check: robot stays upright, the swing resembles the reference clip, the racket mount
 sweeps through the strike. (An undertrained policy failing these is expected — 16.1
 confirms the export→load→rollout *pipeline*, not policy quality.)
+
+### 16.1b Lightweight MuJoCo cross-simulator check (`mujoco_eval_onnx.py`)
+
+Between the in-Isaac check (16.1) and the heavy C++ harness (16.2) there is a third, **runnable-today**
+verification: `scripts/mujoco_eval_onnx.py` runs your exported `policy.onnx` in a *different physics engine*
+(MuJoCo) with **no Isaac, no retrain, no reward/target changes**. It loads the official A3 ping-pong MJCF,
+reconstructs the exact **180-D** observation the policy was trained on (NOT 129-D — `command`=62 ref joint
+pos+vel, `motion_anchor_ori_b`=6; verified from `actor.0.weight=(512,180)`), drives a 50 Hz control loop
+with the deploy-matched Agibot PD gains, and prints the same Isaac strike-composite metrics. It is the best
+sim-to-sim available because the official Agibot C++ harness (16.2) is **incompatible** with this ONNX (it
+expects a 1570-D HITTER-tokenizer obs / 29 DOF / single-output policy; ours is 180-D / 31 DOF / 7 outputs).
+
+Run it in a plain Python env that has `mujoco` + `onnxruntime` (e.g. conda `hope-motion-py310`), **not**
+`hope_isaac_py`:
+
+```bash
+# from .../whole_body_tracking. --mjcf is relative to the repo root; everything else to this dir.
+python scripts/mujoco_eval_onnx.py \
+  --onnx logs/rsl_rl/agibot_a3_hope/<RUN>/exported/policy.onnx \
+  --mjcf agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml \
+  --motion-files logs/rsl_rl/eval_motion/fh.npz logs/rsl_rl/eval_motion/bh.npz \
+  --noise-scales 0.0 0.05 --steps 1200 --pd-mode implicit --seed 0
+```
+
+`--pd-mode implicit` is the **faithful** mode: it models the PD as passive damping (`kd`) + `implicitfast`,
+matching Isaac's `ImplicitActuator`. `--pd-mode explicit` (the default) computes `torque = kp·(q*−q) − kd·q̇`
+each substep; it is a harder, less faithful test and inflates the strike velocity error (~0.61 vs implicit
+~0.31 m/s) purely from actuator discretization, not a transfer failure. Use implicit for the verdict.
+
+Expected result: the robot stays upright in **both** deterministic and dither modes (0 falls, full 10 s
+episodes) — Isaac's ~34% deterministic `ee_body_pos` fragility does NOT reproduce in MuJoCo. Racket-site
+position error vs the Isaac racket body is ~0.07 m; implicit-PD strike composite ~0.60 (vel_pass ~0.88,
+normal ~2°, pos_pass ~0.60) — velocity is the composite bottleneck, same as Isaac. Output: a per-step
+`mujoco_sim2sim_log.csv` in the ONNX run dir plus a printed summary table. `--keep-passive` leaves the MJCF
+damping in (double-damped, for debugging); `--sim-dt/--decimation` keep the 50 Hz control rate (default
+`0.005 × 4`).
 
 ### 16.2 A3 MuJoCo sim-to-sim harness (the real deployment loop)
 

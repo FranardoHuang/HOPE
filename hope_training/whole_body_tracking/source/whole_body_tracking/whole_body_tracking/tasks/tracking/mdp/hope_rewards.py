@@ -94,3 +94,17 @@ def base_position_tracking_exp(env: ManagerBasedRLEnv, command_name: str, std: f
     raw = torch.exp(-error / std**2)
     _dbg_log(cmd, "base", raw, cmd.pre_strike)
     return raw * cmd.pre_strike.float()
+
+
+def pre_strike_foot_slip(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Penalize horizontal foot speed WHILE the foot is in contact, BEFORE the strike only.
+
+    The robot was sliding/leaning to reach far racket targets while the base reward pinned it near spawn
+    (foot_slip_speed high, foot_contact_frac low). This term teaches it to plant its feet and stabilize
+    during the approach. It is gated by ``pre_strike`` ONLY (not ``strike_window``), so the strike swing's
+    footwork is untouched. ``foot_slip_in_contact`` (sum over feet of horizontal speed * in_contact) is
+    precomputed by the RacketTargetCommand each step (0 if the feet/contact sensor cannot be resolved).
+    Returns a positive magnitude; the RewTerm weight is negative.
+    """
+    cmd = _cmd(env, command_name)
+    return cmd.foot_slip_in_contact * cmd.pre_strike.float()

@@ -64,7 +64,10 @@ rewards:
   racket_position_weight: 14.0     # 8 -> 14
   racket_position_std: 0.20        # 0.15 -> 0.20 (gradient in the 10-20 cm band)
   racket_velocity_weight: 10.0     # 6 -> 10
-  racket_velocity_std: 1.8         # 0.8 -> 1.8 (BRACKET the ~2 m/s error; 0.8 was ~dead). Tighten later.
+  racket_velocity_std: 1.0         # 1.8 -> 1.0 (curriculum tighten: vel_error fell to ~0.47, so 1.8 was
+                                   # too lenient — exp(-(0.47/1.8)^2)=0.93, ~no gradient to improve. 1.0
+                                   # sharpens the peak (exp(-(0.47/1.0)^2)=0.80) to push velocity lower.
+                                   # Next: 1.0 -> 0.8 -> 0.5 as vel_error keeps dropping; never jump to 0.5.
   racket_normal_weight: 5.0        # 3 -> 5 (normal already satisfied ~0-2 deg; keep std 0.30)
   racket_normal_std: 0.30
   base_position_weight: 2.5        # 4 -> 2.5 (trim the dominant repositioning reward)
@@ -80,6 +83,10 @@ rewards:
   action_rate_weight: -0.10
   joint_limit_weight: -10.0
   undesired_contacts_weight: -0.1
+  # Pre-strike foot-slip penalty (stability). Penalizes horizontal foot speed while the foot is in
+  # contact, gated by pre_strike ONLY (the strike swing is untouched). Start small; raise if
+  # foot_slip_speed stays high / foot_contact_frac stays low, lower if it starts hurting the strike.
+  pre_strike_foot_slip_weight: -0.4
 
 # ---- racket target sampling (HITTER: direct, fixed plane, no curriculum) -----
 racket:
@@ -117,10 +124,20 @@ racket:
   vel_y_range: [-1.0, 1.0]
   vel_z_range: [0.0, 1.5]
 
-  # Base XY target: small jitter around the reference-coupled repositioning point.
+  # Base XY target: small jitter around the (coupled) repositioning point.
   base_target_x_range: [-0.10, 0.10]
   base_target_y_range: [-0.10, 0.10]
-  normal_mode: velocity           # n = v/|v| (face follows the sampled velocity direction)
+  # Weak base->racket coupling (uniform mode, root-cause stability fix 2026-06-27): shift the base target
+  # toward a FRACTION of the racket target's sideways (Y) offset, clamped, so the robot leans/steps slightly
+  # toward far targets instead of stretching in place. Conservative: Y only, 30% blend, <=0.20 m. The racket
+  # target distribution is unchanged. Set base_couple_blend: 0.0 to disable. (No walking reference -> small.)
+  base_couple_blend: 0.3
+  base_couple_max_offset: 0.20
+  # normal_mode is the SINGLE-CLIP normal target rule ("velocity" = n=v/|v|, or "sampled"). NOTE: in the
+  # UNIFIED multi-clip policy it is IGNORED — the target normal is the per-clip reference paddle normal
+  # (hope_commands.py `_ensure_ref_normal_per_clip` / `_sample_targets_uniform` multiseg branch), because
+  # the +Y blade face is 18-110 deg off the swing-velocity direction. Only used if registry_name_2: null.
+  normal_mode: velocity
   forehand_on_negative_y: true    # right arm holds the paddle
   mount_normal_axis: 1            # racket-local +Y is the face normal (red/hitting face; Step 11)
   mount_normal_sign: 1.0          # +1 = red/forehand face

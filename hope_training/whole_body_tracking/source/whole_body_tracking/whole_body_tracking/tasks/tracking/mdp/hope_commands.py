@@ -36,6 +36,7 @@ from isaaclab.assets import Articulation
 from isaaclab.managers import CommandTerm, CommandTermCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.math import (
+    euler_xyz_from_quat,
     matrix_from_quat,
     quat_apply,
     quat_mul,
@@ -149,6 +150,20 @@ class RacketTargetCommand(CommandTerm):
         self._exact_pass_normal_acc = 0.0
         self._exact_composite_rate = 0.0
 
+        # Per-clip (forehand=clip 0 / backhand=clip 1) breakdown of the exact-strike metrics, so wandb
+        # shows each swing separately (the aggregate composite can hide one swing lagging). Same
+        # sample-weighted EMA as the global accumulators above, but each clip's exact-strike samples are
+        # accumulated separately (selected by the motion command's clip_id). Populated in multiseg only.
+        self._clip_names = {0: "forehand", 1: "backhand"}
+        self._exact_n_acc_c = {c: 0.0 for c in self._clip_names}
+        self._exact_pass_pos_acc_c = {c: 0.0 for c in self._clip_names}
+        self._exact_pass_vel_acc_c = {c: 0.0 for c in self._clip_names}
+        self._exact_pass_normal_acc_c = {c: 0.0 for c in self._clip_names}
+        self._exact_pass_comp_acc_c = {c: 0.0 for c in self._clip_names}
+        self._exact_pos_err_sum_c = {c: 0.0 for c in self._clip_names}
+        self._exact_vel_err_sum_c = {c: 0.0 for c in self._clip_names}
+        self._exact_nrm_err_sum_c = {c: 0.0 for c in self._clip_names}
+
         # Strike timing / gating.
         self.time_to_strike = torch.zeros(self.num_envs, device=self.device)
         self.pre_strike = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
@@ -159,6 +174,9 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["racket_vel_error"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["racket_normal_error_deg"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["base_pos_error"] = torch.zeros(self.num_envs, device=self.device)
+        # How far the (coupled) base target sits from spawn — i.e. how much repositioning is commanded.
+        # ~0 when base_couple_blend=0; grows with the coupling toward far racket targets.
+        self.metrics["base_target_offset_norm"] = torch.zeros(self.num_envs, device=self.device)
         # Strike-window metrics: hold the value from the MOST RECENT strike — these map directly to
         # the acceptance criteria (racket pos < 7.5 cm, vel < 0.5 m/s, normal < 15 deg AT strike) and
         # are the real "is the policy learning to hit" signal (the episode-wide ones above are diluted
@@ -185,6 +203,15 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["strike_pos_pass_exact"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["strike_vel_pass_exact"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["strike_normal_pass_exact"] = torch.zeros(self.num_envs, device=self.device)
+        # Per-clip (forehand/backhand) versions of the exact-strike pass rates + errors (multiseg only;
+        # stay 0 for a single-clip run). Updated in _update_metrics.
+        for _cname in self._clip_names.values():
+            for _key in (
+                "strike_pos_pass_exact", "strike_vel_pass_exact", "strike_normal_pass_exact",
+                "strike_composite_success_exact", "racket_pos_error_exact_strike",
+                "racket_vel_error_exact_strike", "racket_normal_error_deg_exact_strike",
+            ):
+                self.metrics[f"{_key}_{_cname}"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["exact_strike_sample_count_decayed"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["strike_window_hit_rate"] = torch.zeros(self.num_envs, device=self.device)
         # Base-position error while the base target is active (pre-strike), held at its last value.
@@ -202,6 +229,17 @@ class RacketTargetCommand(CommandTerm):
         # holds ``self.robot``. Useful for sim2real: standing height, peak joint speed, actuator effort.
         self.metrics["base_height"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["base_upright"] = torch.zeros(self.num_envs, device=self.device)
+        # Stability diagnostics (instability shows up here BEFORE a termination): absolute base roll/pitch
+        # (deg; 0 = level — base_upright only gives the combined tilt), and foot contact + slip (a planted
+        # foot should be ~still; horizontal foot speed while in contact = slip = the robot shuffling/sliding).
+        self.metrics["base_roll_deg"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["base_pitch_deg"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["foot_contact_frac"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["foot_slip_speed"] = torch.zeros(self.num_envs, device=self.device)
+        # Foot-slip magnitude (sum over feet of horizontal speed WHILE in contact) used by the
+        # pre_strike_foot_slip reward. Recomputed each step in _update_metrics; stays 0 if the feet /
+        # contact sensor cannot be resolved, so the reward is a safe no-op in that case.
+        self.foot_slip_in_contact = torch.zeros(self.num_envs, device=self.device)
         self.metrics["joint_vel_abs_max"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["time_to_strike_s"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["pre_strike_flag"] = torch.zeros(self.num_envs, device=self.device)
@@ -513,7 +551,19 @@ class RacketTargetCommand(CommandTerm):
             self._ensure_reference_strike_state()
             base_xy = self.racket_target_pos_w[env_ids][:, :2] - self._ref_reach_offset_xy.unsqueeze(0)
         else:
+            # uniform: start at spawn, then WEAKLY couple the base toward the racket target's SIDEWAYS
+            # offset (Y only; X is the fixed strike plane, so no forward repositioning). The base shifts a
+            # fraction (base_couple_blend) of the target's Y offset, clamped to ±base_couple_max_offset, so
+            # the robot leans/steps slightly toward far targets instead of stretching in place. blend=0 ->
+            # the old spawn-only behaviour. This only moves a REWARD target — the racket target distribution
+            # is unchanged. (No walking reference exists, so keep the blend small: it fights leg imitation.)
             base_xy = origins[:, :2].clone()
+            blend = float(self.cfg.base_couple_blend)
+            if blend > 0.0:
+                racket_y_off = self.racket_target_pos_w[env_ids][:, 1] - origins[:, 1]
+                base_xy[:, 1] += (blend * racket_y_off).clamp(
+                    -self.cfg.base_couple_max_offset, self.cfg.base_couple_max_offset
+                )
         base_xy[:, 0] += sample_uniform(*self.cfg.base_target_x_range, (n,), self.device)
         base_xy[:, 1] += sample_uniform(*self.cfg.base_target_y_range, (n,), self.device)
         self.base_target_pos_w[env_ids] = base_xy
@@ -625,6 +675,8 @@ class RacketTargetCommand(CommandTerm):
         self._compute_racket_state()
         self._compute_strike_timing()
         origins = self._env.scene.env_origins
+        # commanded base repositioning = distance of the base target from spawn (0 if coupling disabled).
+        self.metrics["base_target_offset_norm"] = torch.norm(self.base_target_pos_w - origins[:, :2], dim=-1)
         pos_err = torch.norm(self.racket_pos_w - self.racket_target_pos_w, dim=-1)
         vel_err = torch.norm(self.racket_lin_vel_w - self.racket_target_vel_w, dim=-1)
         cos_ang = torch.sum(self.racket_normal_w * self.racket_target_normal_w, dim=-1).clamp(-1.0, 1.0)
@@ -719,6 +771,35 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["strike_vel_pass_exact"][:] = (self._exact_pass_vel_acc / denom) if enough else 0.0
         self.metrics["strike_normal_pass_exact"][:] = (self._exact_pass_normal_acc / denom) if enough else 0.0
         self.metrics["exact_strike_sample_count_decayed"][:] = self._exact_n_acc
+        # --- per-clip (forehand/backhand) breakdown of the exact-strike pass rates + errors -----------
+        # Same sample-weighted EMA as the global block above, selected by the motion command's clip_id so
+        # wandb shows each swing separately. pass_pos/vel/normal already include `& exact_strike`. Multiseg
+        # (unified forehand+backhand) only; single-clip leaves these at 0.
+        _motion = self._motion()
+        if getattr(_motion, "_multiseg", False):
+            _clip = _motion.clip_id
+            for _c, _cn in self._clip_names.items():
+                _sel = exact_strike & (_clip == _c)
+                _self_f = _sel.float()
+                self._exact_n_acc_c[_c] = decay * self._exact_n_acc_c[_c] + float(_sel.sum())
+                self._exact_pass_pos_acc_c[_c] = decay * self._exact_pass_pos_acc_c[_c] + float((pass_pos & _sel).sum())
+                self._exact_pass_vel_acc_c[_c] = decay * self._exact_pass_vel_acc_c[_c] + float((pass_vel & _sel).sum())
+                self._exact_pass_normal_acc_c[_c] = decay * self._exact_pass_normal_acc_c[_c] + float((pass_normal & _sel).sum())
+                self._exact_pass_comp_acc_c[_c] = decay * self._exact_pass_comp_acc_c[_c] + float((pass_comp & _sel).sum())
+                self._exact_pos_err_sum_c[_c] = decay * self._exact_pos_err_sum_c[_c] + float((pos_err * _self_f).sum())
+                self._exact_vel_err_sum_c[_c] = decay * self._exact_vel_err_sum_c[_c] + float((vel_err * _self_f).sum())
+                self._exact_nrm_err_sum_c[_c] = decay * self._exact_nrm_err_sum_c[_c] + float((normal_err_deg * _self_f).sum())
+                _n = self._exact_n_acc_c[_c]
+                # rate = acc / n once enough decayed samples accumulated (else 0). errors = decayed mean
+                # error over THIS clip's exact-strike samples. _scale folds in the "enough" gate.
+                _scale = (1.0 / max(_n, 1e-6)) if _n >= float(self.cfg.exact_success_min_count) else 0.0
+                self.metrics[f"strike_pos_pass_exact_{_cn}"][:] = self._exact_pass_pos_acc_c[_c] * _scale
+                self.metrics[f"strike_vel_pass_exact_{_cn}"][:] = self._exact_pass_vel_acc_c[_c] * _scale
+                self.metrics[f"strike_normal_pass_exact_{_cn}"][:] = self._exact_pass_normal_acc_c[_c] * _scale
+                self.metrics[f"strike_composite_success_exact_{_cn}"][:] = self._exact_pass_comp_acc_c[_c] * _scale
+                self.metrics[f"racket_pos_error_exact_strike_{_cn}"][:] = self._exact_pos_err_sum_c[_c] * _scale
+                self.metrics[f"racket_vel_error_exact_strike_{_cn}"][:] = self._exact_vel_err_sum_c[_c] * _scale
+                self.metrics[f"racket_normal_error_deg_exact_strike_{_cn}"][:] = self._exact_nrm_err_sum_c[_c] * _scale
         # Per-axis position error AT the exact strike frame (which axis is the miss?). The position-only
         # strike_success_exact was dropped — strike_pos_pass_exact above is the same signal, undiluted.
         _axis_err_exact = torch.abs(self.racket_pos_w - self.racket_target_pos_w)
@@ -786,6 +867,36 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["base_height"] = data.root_pos_w[:, 2]
         self.metrics["base_upright"] = matrix_from_quat(self.base_quat_w)[:, 2, 2]  # 1.0 = perfectly upright
         self.metrics["joint_vel_abs_max"] = torch.max(torch.abs(data.joint_vel), dim=-1).values
+        # --- stability diagnostics: absolute base roll/pitch + foot contact/slip --------------------
+        # Resolve foot body indices + the contact sensor once (robust to USD Link/link casing; degrades
+        # gracefully to 0 if absent so it can never crash training).
+        if not getattr(self, "_stab_resolved", False):
+            self._stab_resolved = True
+            self._foot_idx_robot, self._foot_idx_contact, self._contact_sensor = [], [], None
+            try:
+                self._foot_idx_robot = list(self.robot.find_bodies([".*ankle_roll.*"])[0])
+            except Exception:
+                pass
+            try:
+                cs = self._env.scene.sensors["contact_forces"]
+                self._contact_sensor = cs
+                self._foot_idx_contact = list(cs.find_bodies([".*ankle_roll.*"])[0])
+            except Exception:
+                pass
+        _roll, _pitch, _ = euler_xyz_from_quat(self.base_quat_w)
+        # wrap to (-180, 180] so a level base reads ~0 (euler_xyz_from_quat can return [0, 2pi))
+        self.metrics["base_roll_deg"] = torch.rad2deg(torch.atan2(torch.sin(_roll), torch.cos(_roll)))
+        self.metrics["base_pitch_deg"] = torch.rad2deg(torch.atan2(torch.sin(_pitch), torch.cos(_pitch)))
+        if self._foot_idx_robot and self._contact_sensor is not None and self._foot_idx_contact:
+            f_force = torch.norm(self._contact_sensor.data.net_forces_w[:, self._foot_idx_contact, :], dim=-1)  # (E,2)
+            in_contact = (f_force > 10.0).float()  # 10 N = the sensor's force_threshold
+            self.metrics["foot_contact_frac"] = in_contact.mean(dim=-1)  # 1.0 = both feet planted
+            f_speed = torch.norm(data.body_lin_vel_w[:, self._foot_idx_robot, :2], dim=-1)  # horizontal (E,2)
+            _slip_sum = (f_speed * in_contact).sum(dim=-1)  # sum over feet of horizontal speed while in contact
+            # metric = MEAN slip over the contacting feet (m/s; planted foot should be ~0).
+            self.metrics["foot_slip_speed"] = _slip_sum / in_contact.sum(dim=-1).clamp(min=1.0)
+            # reward signal = SUM over feet (so both slipping feet are penalized); pre_strike-gated in the reward.
+            self.foot_slip_in_contact = _slip_sum
         if self._has_jpos_limits:
             limits = getattr(data, "soft_joint_pos_limits", None)
             if limits is None:
@@ -956,6 +1067,11 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # --- desired base XY target (offsets from the env origin, world frame, meters) ---
     base_target_x_range: tuple[float, float] = (-0.10, 0.10)
     base_target_y_range: tuple[float, float] = (-0.35, 0.35)
+    # Weak base->racket coupling (UNIFORM mode only). base_couple_blend = fraction of the racket target's
+    # sideways (Y) offset that the base target shifts toward; clamped to ±base_couple_max_offset meters.
+    # 0.0 = disabled (spawn-only). Conservative because no walking reference exists (it fights leg imitation).
+    base_couple_blend: float = 0.0
+    base_couple_max_offset: float = 0.20
 
     # --- swing-type convention ---
     forehand_on_negative_y: bool = True  # right arm holds the paddle: target on -Y side -> forehand (+1)

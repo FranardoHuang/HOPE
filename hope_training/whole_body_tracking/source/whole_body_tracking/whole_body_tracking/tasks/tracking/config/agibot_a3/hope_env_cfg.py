@@ -138,6 +138,14 @@ class HOPERewardsCfg(RewardsCfg):
         weight=1.0,
         params={"command_name": "racket_target", "std": 0.3},
     )
+    # r_regularization — pre-strike foot-slip penalty (stability). Penalizes horizontal foot speed while
+    # the foot is in contact, gated by pre_strike ONLY (the strike swing is untouched). Default weight is
+    # overridden by cfg/task/HOPEPingPong.yaml `pre_strike_foot_slip_weight`.
+    pre_strike_foot_slip = RewTerm(
+        func=mdp.pre_strike_foot_slip,
+        weight=-0.2,
+        params={"command_name": "racket_target"},
+    )
     # r_regularization — energy / torque smoothness (action_rate_l2 already inherited).
     joint_torques = RewTerm(func=mdp.joint_torques_l2, weight=-1.0e-5)
 

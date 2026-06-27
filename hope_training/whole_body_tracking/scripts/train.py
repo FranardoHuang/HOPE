@@ -268,6 +268,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             ("action_rate_l2", "action_rate_weight"),
             ("joint_limit", "joint_limit_weight"),
             ("undesired_contacts", "undesired_contacts_weight"),
+            ("pre_strike_foot_slip", "pre_strike_foot_slip_weight"),
         ):
             _w = _get(rw, _key)
             if _w is not None:
@@ -308,6 +309,9 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_range(C, "racket_vel_z_range", _get(rk, "vel_z_range"), applied, "racket_target")
             _set_range(C, "base_target_x_range", _get(rk, "base_target_x_range"), applied, "racket_target")
             _set_range(C, "base_target_y_range", _get(rk, "base_target_y_range"), applied, "racket_target")
+            # weak base->racket coupling (uniform mode): fraction of the racket Y offset + clamp (meters)
+            _set_attr(C, "base_couple_blend", _get(rk, "base_couple_blend"), float, applied, "racket_target")
+            _set_attr(C, "base_couple_max_offset", _get(rk, "base_couple_max_offset"), float, applied, "racket_target")
             _set_attr(C, "normal_mode", _get(rk, "normal_mode"), str, applied, "racket_target")
             _set_attr(C, "forehand_on_negative_y", _get(rk, "forehand_on_negative_y"), _as_bool, applied, "racket_target")
             _set_attr(C, "mount_normal_axis", _get(rk, "mount_normal_axis"), int, applied, "racket_target")
