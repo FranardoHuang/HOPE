@@ -95,9 +95,13 @@ racket:
   # once a second clip is imitated by one policy).
   strike_phase: 0.36              # fallback (single-clip / clips not in the per-clip table)
   # Unified policy: per-clip strike phase, aligned with the clip order (clip0=forehand, clip1=backhand).
-  # Measured from each clip's racket-tip (pingpang_red_Link) speed peak: forehand 0.36 (2.57 m/s, y<0),
-  # backhand 0.74 (1.60 m/s, y>0).
-  strike_phase_per_clip: [0.36, 0.74]
+  # Each phase must land on the FORWARD contact (racket vx>0 toward the table), not a recovery frame.
+  #   forehand: 0.36  -> forward contact, vx +1.7 m/s, |v| 3.3 (correct).
+  #   backhand: 0.50  -> forward contact, vx +1.8 m/s, |v| ~2.1 (FIX 2026-06-28).
+  #     was 0.74, which lands on the BACKWARD recovery (vx -1.4 m/s) while the +x velocity target asks
+  #     to hit forward -> contradiction that caused an empty first swing + a later forced/contorted hit
+  #     in MuJoCo. Verified from the reference racket-tip velocity sign (scripts/mujoco_eval_onnx.py probe).
+  strike_phase_per_clip: [0.36, 0.50]
   strike_window_s: 0.12
   strike_success_pos_thresh: 0.075
   debug_reward_logging: false
@@ -119,11 +123,23 @@ racket:
   racket_pos_y_abs_range: [0.05, 0.45]
   pos_y_range: [-0.45, -0.05]
   pos_z_range: [0.70, 1.05]
+  # OPTIONAL per-clip POSITION targets (unified policy only) — DISABLED BY DEFAULT (commented -> the
+  # shared pos box above is used for both clips; old behavior unchanged). Each clip's box is ADDED to the
+  # env origin; y is SIGNED here (forehand -y / backhand +y encoded directly). WHY: the shared box was
+  # tuned for backhand strike_phase 0.74 (low follow-through, z~0.84). At the corrected forward-strike
+  # phase 0.50 the backhand racket sits HIGH (reference z~1.22, x~0.58) — above the shared z<=1.05 box —
+  # so its strike-frame position is unreachable and backhand pos_pass collapses (0.96 -> 0.63). Per-clip
+  # boxes let the backhand target track its real strike point. Forehand strike (z~0.84) already fits, so
+  # its box ~= the shared box. Verify first: `python scripts/check_perclip_pos_sampling.py`.
+  pos_range_per_clip:
+    forehand: {x: [0.50, 0.62], y: [-0.45, -0.20], z: [0.74, 0.98]}
+    backhand: {x: [0.50, 0.62], y: [ 0.20,  0.45], z: [1.05, 1.30]}
   # Racket target VELOCITY sampled directly (HITTER), not derived from the clip * a scale.
+  # vel_*_range is the SHARED fallback box (used when vel_range_per_clip is absent, and for single-clip runs).
   vel_x_range: [1.5, 3.5]
   vel_y_range: [-1.0, 1.0]
   vel_z_range: [0.0, 1.5]
-
+ 
   # Base XY target: small jitter around the (coupled) repositioning point.
   base_target_x_range: [-0.10, 0.10]
   base_target_y_range: [-0.10, 0.10]

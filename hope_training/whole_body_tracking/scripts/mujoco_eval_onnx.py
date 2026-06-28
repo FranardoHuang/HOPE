@@ -84,6 +84,7 @@ import argparse
 import csv
 import math
 import os
+import time
 
 import numpy as np
 
@@ -124,7 +125,11 @@ BASE_TARGET_Y_RANGE = (-0.10, 0.10)
 BASE_COUPLE_BLEND = 0.3                  # weak base->racket Y coupling
 BASE_COUPLE_MAX_OFFSET = 0.20
 FOREHAND_ON_NEGATIVE_Y = True            # forehand (clip 0) target on -y
-STRIKE_PHASE_PER_CLIP = (0.36, 0.74)     # forehand / backhand contact phase
+# forehand / backhand contact phase. MUST match the trained model's cfg/task/HOPEPingPong.yaml
+# `racket.strike_phase_per_clip`. Current generation = (0.36, 0.50). Backhand 0.74 was the OLD value
+# (model_32200 era); at 0.74 the backhand racket sits at a dead recovery frame (~0.1 m/s) and backhand
+# strike metrics collapse to ~0 — for those older models pass --strike-phase-per-clip 0.36 0.74.
+STRIKE_PHASE_PER_CLIP = (0.36, 0.50)
 STRIKE_WINDOW_S = 0.12
 # Strike-success acceptance thresholds (RacketTargetCommandCfg) — identical to Isaac's exact metric.
 STRIKE_POS_THRESH = 0.075                 # m   strike_success_pos_thresh
@@ -375,7 +380,8 @@ class MujocoRobot:
 # RacketTargetCommand port (uniform mode, unified 2-clip) — only the obs-feeding quantities.
 # =================================================================================================
 class RacketCommand:
-    def __init__(self, seg_start, seg_len, step_dt, rng, target_normal_per_clip, origin=np.zeros(3)):
+    def __init__(self, seg_start, seg_len, step_dt, rng, target_normal_per_clip, origin=np.zeros(3),
+                 vel_ranges_per_clip=None):
         self.seg_start = seg_start          # (num_clips,)
         self.seg_len = seg_len
         self.step_dt = step_dt
@@ -384,6 +390,12 @@ class RacketCommand:
         # Per-clip target paddle normal: the imitated swing's reference face normal at strike (unified
         # uniform mode uses this, NOT a velocity-derived normal). Precomputed from the ref wrist quat.
         self.target_normal_per_clip = target_normal_per_clip
+        # DIAGNOSTIC (eval-only, --eval-per-clip-vel-targets): optional per-clip racket target-velocity
+        # boxes. None -> use the single clip-independent training box (RACKET_VEL_*_RANGE) for both clips
+        # (the faithful baseline). When set, it is a list indexed by clip_id; each entry is
+        # (x_range, y_range, z_range). This ONLY changes which target velocity the MuJoCo RacketCommand
+        # samples at eval time — it does NOT touch the policy, ONNX, rewards, or any training code.
+        self.vel_ranges_per_clip = vel_ranges_per_clip
         # state
         self.racket_target_pos_w = np.zeros(3)
         self.racket_target_vel_w = np.zeros(3)
@@ -406,10 +418,15 @@ class RacketCommand:
         py = o[1] + sign * ymag
         pz = o[2] + self._u(*RACKET_POS_Z_RANGE)
         self.racket_target_pos_w = np.array([px, py, pz])
-        # racket target velocity (world): independent box sample.
-        self.racket_target_vel_w = np.array([self._u(*RACKET_VEL_X_RANGE),
-                                             self._u(*RACKET_VEL_Y_RANGE),
-                                             self._u(*RACKET_VEL_Z_RANGE)])
+        # racket target velocity (world): independent box sample. Default = the single training box for
+        # every clip; with --eval-per-clip-vel-targets, use this clip's diagnostic box instead.
+        if self.vel_ranges_per_clip is not None:
+            vx_r, vy_r, vz_r = self.vel_ranges_per_clip[clip_id]
+        else:
+            vx_r, vy_r, vz_r = RACKET_VEL_X_RANGE, RACKET_VEL_Y_RANGE, RACKET_VEL_Z_RANGE
+        self.racket_target_vel_w = np.array([self._u(*vx_r),
+                                             self._u(*vy_r),
+                                             self._u(*vz_r)])
         # swing sign: clip 0 -> +1 (forehand), clip 1 -> -1 (backhand).
         self.swing_sign = 1.0 if clip_id == 0 else -1.0
         # target paddle normal = the per-clip reference face normal at strike (unified uniform mode).
@@ -534,17 +551,59 @@ class StrikeAcc:
         self.n = 0
         self.pos_err = self.vel_err = self.nrm_err = 0.0
         self.pos_pass = self.vel_pass = self.nrm_pass = self.comp = 0
+        # speed-magnitude diagnostics (separate the "too slow / wrong direction" question)
+        self.act_speed = self.tgt_speed = self.speed_err = 0.0   # ||v||, ||v_tgt||, ||v||-||v_tgt||
+        # failure-mode counts (mutually-exclusive pos/vel breakdown + raw per-channel fails)
+        self.pos_fail = self.vel_fail = self.nrm_fail = 0
+        self.pos_only_fail = self.vel_only_fail = self.pos_and_vel_fail = 0
 
-    def add(self, pos_err, vel_err, nrm_err_deg):
+    def add(self, pos_err, vel_err, nrm_err_deg, act_speed, tgt_speed):
         pp = pos_err < STRIKE_POS_THRESH
         pv = vel_err < STRIKE_VEL_THRESH
         pn = nrm_err_deg < STRIKE_NORMAL_THRESH_DEG
         self.n += 1
         self.pos_err += pos_err; self.vel_err += vel_err; self.nrm_err += nrm_err_deg
         self.pos_pass += pp; self.vel_pass += pv; self.nrm_pass += pn; self.comp += (pp and pv and pn)
+        self.act_speed += act_speed; self.tgt_speed += tgt_speed
+        self.speed_err += (act_speed - tgt_speed)
+        pf, vf, nf = (not pp), (not pv), (not pn)
+        self.pos_fail += pf; self.vel_fail += vf; self.nrm_fail += nf
+        self.pos_only_fail += (pf and not vf)
+        self.vel_only_fail += (vf and not pf)
+        self.pos_and_vel_fail += (pf and vf)
 
     def rate(self, k):
+        """Mean of accumulator `k` over the strike samples (nan if none)."""
         return (getattr(self, k) / self.n) if self.n else float("nan")
+
+    def count(self, k):
+        """Raw integer count of accumulator `k` (0 if none)."""
+        return int(getattr(self, k))
+
+
+# =================================================================================================
+# Viewer markers (VISUALIZATION ONLY — no physics, no collision, no reward, no observation effect).
+# Drawn into the viewer's user scene each frame; they never touch model/data/qpos/obs/action.
+# =================================================================================================
+def _draw_markers(viewer, mujoco, racket, robot, ball_pos):
+    scn = viewer.user_scn
+    eye = np.eye(3).flatten()
+
+    def add(pos, radius, rgba):
+        i = scn.ngeom
+        if i >= scn.maxgeom:
+            return
+        mujoco.mjv_initGeom(
+            scn.geoms[i], mujoco.mjtGeom.mjGEOM_SPHERE,
+            np.array([radius, radius, radius], float), np.asarray(pos, float),
+            eye, np.asarray(rgba, np.float32))
+        scn.ngeom = i + 1
+
+    scn.ngeom = 0
+    add(racket.racket_target_pos_w, 0.045, [0.10, 0.90, 0.10, 0.55])  # green  = racket TARGET point
+    add(robot.racket_pos(),         0.035, [0.95, 0.20, 0.20, 0.95])  # red    = ACTUAL racket center
+    if ball_pos is not None:
+        add(ball_pos,               0.020, [1.00, 0.55, 0.00, 1.00])  # orange = visual-only incoming ball
 
 
 # =================================================================================================
@@ -552,8 +611,10 @@ class StrikeAcc:
 # =================================================================================================
 def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_dt, decimation,
                 noise_scale, std_vec, n_steps, max_ep_len, rng, csv_writer, mode_label,
-                target_normal_per_clip):
-    racket = RacketCommand(seg_start, seg_len, step_dt, rng, target_normal_per_clip)
+                target_normal_per_clip, strike_csv_writer=None, viewer=None, realtime=True,
+                vel_ranges_per_clip=None):
+    racket = RacketCommand(seg_start, seg_len, step_dt, rng, target_normal_per_clip,
+                           vel_ranges_per_clip=vel_ranges_per_clip)
     strike = {"all": StrikeAcc(), "forehand": StrikeAcc(), "backhand": StrikeAcc()}
 
     def fresh_swing():
@@ -582,6 +643,7 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
     racket_velerr_acc = 0.0                       # racket vel err at the exact strike frame (Isaac bottleneck)
     fell = 0
     exact_tol = 0.5 * step_dt + 1e-6
+    frame_clock = time.perf_counter()   # realtime pacing reference for the viewer (no effect headless)
 
     for step in range(n_steps):
         refs = refs_table[time_step]
@@ -595,6 +657,21 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         target_q = policy.default_q + action * policy.action_scale
         tau = robot.apply_pd_and_step(target_q, policy.kp, policy.kd, decimation)
         ep_len += 1
+
+        # --- viewer (visualization only; does not touch sim/obs/action) ---
+        if viewer is not None:
+            if not viewer.is_running():
+                break
+            # visual-only "incoming ball": approaches the target along +x, arriving at strike time.
+            ball_pos = (racket.racket_target_pos_w
+                        + np.array([1.0, 0.0, 0.0]) * max(racket.time_to_strike, 0.0) * 3.0)
+            _draw_markers(viewer, robot.mj, racket, robot, ball_pos)
+            viewer.sync()
+            if realtime:
+                frame_clock += step_dt
+                sleep_t = frame_clock - time.perf_counter()
+                if sleep_t > 0:
+                    time.sleep(sleep_t)
 
         # --- metrics (post-step state) ---
         bq = robot.body_quat(robot.pelvis_bid)
@@ -618,15 +695,39 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 #   vel_err = ||racket_lin_vel_w - target_vel_w||   (full 3-vec norm)
                 #   nrm_err = acos(dot(unit normals)) in degrees
                 pos_err = racket_err
-                vel_err = float(np.linalg.norm(robot.racket_lin_vel_w() - racket.racket_target_vel_w))
+                act_vel_w = robot.racket_lin_vel_w()
+                tgt_vel_w = racket.racket_target_vel_w
+                vel_err = float(np.linalg.norm(act_vel_w - tgt_vel_w))
+                act_speed = float(np.linalg.norm(act_vel_w))
+                tgt_speed = float(np.linalg.norm(tgt_vel_w))
                 nrm = robot.racket_normal_w()
                 tgt_nrm = racket.racket_target_normal_w
                 cos_a = float(np.clip(np.dot(nrm, tgt_nrm), -1.0, 1.0))
                 nrm_err_deg = math.degrees(math.acos(cos_a))
-                strike["all"].add(pos_err, vel_err, nrm_err_deg)
-                strike[CLIP_NAMES[clip]].add(pos_err, vel_err, nrm_err_deg)
+                strike["all"].add(pos_err, vel_err, nrm_err_deg, act_speed, tgt_speed)
+                strike[CLIP_NAMES[clip]].add(pos_err, vel_err, nrm_err_deg, act_speed, tgt_speed)
                 racket_exact_acc += pos_err; racket_exact_n += 1
                 racket_velerr_acc += vel_err
+                # --- per-strike CSV row (one line per exact-strike sample) ---
+                if strike_csv_writer is not None:
+                    pp = pos_err < STRIKE_POS_THRESH
+                    pv = vel_err < STRIKE_VEL_THRESH
+                    pn = nrm_err_deg < STRIKE_NORMAL_THRESH_DEG
+                    racket_pos_w = robot.racket_pos()
+                    tgt_pos_w = racket.racket_target_pos_w
+                    base_pos_w = robot.body_pos(robot.pelvis_bid)
+                    strike_csv_writer.writerow([
+                        mode_label, step, len(ep_lengths), CLIP_NAMES[clip], f"{racket.swing_sign:+.0f}",
+                        f"{racket.time_to_strike:.4f}",
+                        f"{pos_err:.4f}", f"{vel_err:.4f}", f"{nrm_err_deg:.3f}",
+                        int(pp), int(pv), int(pn), int(pp and pv and pn),
+                        f"{act_vel_w[0]:.4f}", f"{act_vel_w[1]:.4f}", f"{act_vel_w[2]:.4f}",
+                        f"{tgt_vel_w[0]:.4f}", f"{tgt_vel_w[1]:.4f}", f"{tgt_vel_w[2]:.4f}",
+                        f"{act_speed:.4f}", f"{tgt_speed:.4f}",
+                        f"{racket_pos_w[0]:.4f}", f"{racket_pos_w[1]:.4f}", f"{racket_pos_w[2]:.4f}",
+                        f"{tgt_pos_w[0]:.4f}", f"{tgt_pos_w[1]:.4f}", f"{tgt_pos_w[2]:.4f}",
+                        f"{base_pos_w[0]:.4f}", f"{base_pos_w[1]:.4f}", f"{base_pos_w[2]:.4f}",
+                    ])
 
         # --- terminations ---
         reasons = check_terminations(refs, robot, ra_pos, ra_quat, refa_pos, refa_quat)
@@ -641,6 +742,7 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 f"{np.mean(np.abs(target_q)):.4f}", f"{np.max(np.abs(target_q)):.4f}",
                 f"{torque_max:.2f}", f"{foot_c:.2f}",
                 ("" if math.isnan(racket_err) else f"{racket_err:.4f}"),
+                f"{float(np.linalg.norm(robot.racket_lin_vel_w())):.4f}",
                 ep_len, ("|".join(reasons) if terminated else ("timeout" if timeout else "")),
             ])
 
@@ -675,6 +777,30 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
     total_term = n_term_early + n_timeout
     from collections import Counter
     rc = Counter(term_reasons)
+
+    def clip_metrics(acc):
+        """Full per-clip strike breakdown (means + raw failure-mode counts)."""
+        return dict(
+            n_strikes=acc.n,
+            strike_composite_success_exact=acc.rate("comp"),
+            strike_pos_pass_exact=acc.rate("pos_pass"),
+            strike_vel_pass_exact=acc.rate("vel_pass"),
+            strike_normal_pass_exact=acc.rate("nrm_pass"),
+            racket_pos_err_exact=acc.rate("pos_err"),
+            racket_vel_err_exact=acc.rate("vel_err"),          # full 3-vec ||actual-target|| mean
+            racket_normal_err_exact=acc.rate("nrm_err"),
+            actual_speed_exact=acc.rate("act_speed"),
+            target_speed_exact=acc.rate("tgt_speed"),
+            speed_error_scalar=acc.rate("speed_err"),          # mean(||v|| - ||v_tgt||)
+            full_vel_vec_err=acc.rate("vel_err"),              # same as racket_vel_err_exact, by name
+            pos_fail=acc.count("pos_fail"),
+            vel_fail=acc.count("vel_fail"),
+            normal_fail=acc.count("nrm_fail"),
+            pos_only_fail=acc.count("pos_only_fail"),
+            vel_only_fail=acc.count("vel_only_fail"),
+            pos_and_vel_fail=acc.count("pos_and_vel_fail"),
+        )
+
     return dict(
         mode=mode_label, noise_scale=noise_scale,
         mean_ep_len=(sum(ep_lengths) / len(ep_lengths)) if ep_lengths else float("nan"),
@@ -696,6 +822,10 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         strike_composite_forehand=strike["forehand"].rate("comp"),
         strike_composite_backhand=strike["backhand"].rate("comp"),
         n_strikes_fh=strike["forehand"].n, n_strikes_bh=strike["backhand"].n,
+        # --- full per-clip breakdown dicts (the diagnostic the report is built from) ---
+        clip_all=clip_metrics(strike["all"]),
+        clip_forehand=clip_metrics(strike["forehand"]),
+        clip_backhand=clip_metrics(strike["backhand"]),
     )
 
 
@@ -728,7 +858,63 @@ def main():
                    help="explicit: torque=kp*e-kd*qd. implicit: kp torque + kd as passive damping via "
                         "MuJoCo implicitfast (matches Isaac's ImplicitActuator; less fast-swing undershoot).")
     p.add_argument("--out-dir", default=None, help="where to write the CSV (default: ONNX run dir)")
+    p.add_argument("--viewer", action="store_true",
+                   help="launch the MuJoCo passive viewer to watch the robot (keeps all metric/CSV "
+                        "behavior). Adds visualization-only markers: green=racket target, red=actual "
+                        "racket, orange=incoming ball. Does NOT affect physics/obs/action/rewards.")
+    p.add_argument("--no-realtime", action="store_true",
+                   help="with --viewer, run as fast as possible instead of pacing to ~real time.")
+    # --- DIAGNOSTIC (eval-only): per-clip racket target-velocity sampling ----------------------------
+    # The trained policy uses a single clip-INDEPENDENT velocity box for both swings (target_mode:
+    # uniform). That box (mean |v| ~2.7 m/s) fits the forehand but overshoots the backhand (achievable
+    # ~2.0-2.2 m/s), so backhand vel_pass is low. This flag lets us TEST, with NO retrain and NO change
+    # to the policy/ONNX/rewards, whether sampling a lower backhand target velocity recovers backhand
+    # vel_pass/composite — i.e. whether per-clip velocity targets are worth adding to TRAINING later.
+    p.add_argument("--eval-per-clip-vel-targets", action="store_true",
+                   help="DIAGNOSTIC: sample DIFFERENT racket target-velocity boxes for forehand vs "
+                        "backhand at eval time (forehand unchanged; backhand lowered). Eval-only — does "
+                        "NOT change the policy, ONNX, rewards, or any training config.")
+    p.add_argument("--fh-vel-x-range", nargs=2, type=float, default=[1.5, 3.5],
+                   help="forehand target vel x range (only with --eval-per-clip-vel-targets)")
+    p.add_argument("--fh-vel-y-range", nargs=2, type=float, default=[-1.0, 1.0],
+                   help="forehand target vel y range (only with --eval-per-clip-vel-targets)")
+    p.add_argument("--fh-vel-z-range", nargs=2, type=float, default=[0.0, 1.5],
+                   help="forehand target vel z range (only with --eval-per-clip-vel-targets)")
+    p.add_argument("--bh-vel-x-range", nargs=2, type=float, default=[1.2, 2.4],
+                   help="backhand target vel x range (only with --eval-per-clip-vel-targets)")
+    p.add_argument("--bh-vel-y-range", nargs=2, type=float, default=[-1.0, 1.0],
+                   help="backhand target vel y range (only with --eval-per-clip-vel-targets)")
+    p.add_argument("--bh-vel-z-range", nargs=2, type=float, default=[0.0, 1.2],
+                   help="backhand target vel z range (only with --eval-per-clip-vel-targets)")
+    # DIAGNOSTIC (eval-only): override the strike phase and/or target z-range to MATCH a model trained
+    # with a different config (e.g. a backhand strike_phase fix). The defaults mirror the training YAML;
+    # when you eval a model trained with strike_phase_per_clip=[0.36,0.50] you MUST pass the same here, or
+    # the eval measures the wrong frame. Does NOT touch the policy/ONNX/rewards.
+    p.add_argument("--ee-term-z", type=float, default=None,
+                   help="override the ee_body_pos termination z-threshold (training default 0.25 m). "
+                        "ee_body_pos is a TRAINING reset guard, not a deployment condition; raise it "
+                        "(e.g. 100) to let swings run past a loose wind-up and measure the true strike/"
+                        "fall rate without the guard cutting episodes off mid-swing.")
+    p.add_argument("--strike-phase-per-clip", nargs="+", type=float, default=None,
+                   help="DIAGNOSTIC: override per-clip strike phase. Must match the trained model's "
+                        "strike_phase_per_clip. Default: the built-in (0.36, 0.50); pass 0.36 0.74 for "
+                        "old model_32200-era backhand.")
+    p.add_argument("--pos-z-range", nargs=2, type=float, default=None,
+                   help="DIAGNOSTIC: override the racket target z-range (e.g. 0.85 1.25). Default (0.70,1.05).")
     args = p.parse_args()
+
+    # Apply eval-only overrides to the module globals BEFORE any precompute/rollout reads them.
+    global STRIKE_PHASE_PER_CLIP, RACKET_POS_Z_RANGE, TERM_EE_POS_Z
+    if args.strike_phase_per_clip is not None:
+        STRIKE_PHASE_PER_CLIP = tuple(args.strike_phase_per_clip)
+        print(f"[mj-sim2sim] OVERRIDE strike_phase_per_clip -> {STRIKE_PHASE_PER_CLIP} (eval-only)")
+    if args.ee_term_z is not None:
+        TERM_EE_POS_Z = float(args.ee_term_z)
+        print(f"[mj-sim2sim] OVERRIDE ee_body_pos termination z-threshold -> {TERM_EE_POS_Z} m "
+              f"(training default 0.25; large value = deployment-realistic, no tracking-guard cutoff)")
+    if args.pos_z_range is not None:
+        RACKET_POS_Z_RANGE = tuple(args.pos_z_range)
+        print(f"[mj-sim2sim] OVERRIDE pos_z_range -> {RACKET_POS_Z_RANGE} (eval-only)")
 
     step_dt = args.sim_dt * args.decimation
     assert abs(step_dt - 0.02) < 1e-9, f"control dt {step_dt} != 0.02 (50 Hz). adjust --sim-dt/--decimation"
@@ -783,6 +969,21 @@ def main():
         target_normal_per_clip.append(mat_from_quat(ref_wrist_quat)[:, MOUNT_NORMAL_AXIS] * MOUNT_NORMAL_SIGN)
     target_normal_per_clip = np.array(target_normal_per_clip)
 
+    # DIAGNOSTIC: per-clip eval target-velocity boxes (clip 0 = forehand, clip 1 = backhand). None ->
+    # faithful baseline (single training box for both clips). num_clips>2 reuse the backhand box.
+    vel_ranges_per_clip = None
+    if args.eval_per_clip_vel_targets:
+        fh = (tuple(args.fh_vel_x_range), tuple(args.fh_vel_y_range), tuple(args.fh_vel_z_range))
+        bh = (tuple(args.bh_vel_x_range), tuple(args.bh_vel_y_range), tuple(args.bh_vel_z_range))
+        vel_ranges_per_clip = [fh if c == 0 else bh for c in range(num_clips)]
+        print("[mj-sim2sim] per-clip eval velocity targets: ENABLED (DIAGNOSTIC, eval-only; "
+              "policy/ONNX/rewards/training UNCHANGED)")
+        print(f"[mj-sim2sim]   forehand vel box: x={fh[0]} y={fh[1]} z={fh[2]}")
+        print(f"[mj-sim2sim]   backhand vel box: x={bh[0]} y={bh[1]} z={bh[2]}")
+    else:
+        print("[mj-sim2sim] per-clip eval velocity targets: DISABLED (baseline — both clips use the "
+              f"training box x={RACKET_VEL_X_RANGE} y={RACKET_VEL_Y_RANGE} z={RACKET_VEL_Z_RANGE})")
+
     out_dir = args.out_dir or default_run
     os.makedirs(out_dir, exist_ok=True)
     csv_path = os.path.join(out_dir, "mujoco_sim2sim_log.csv")
@@ -791,7 +992,30 @@ def main():
     cw.writerow(["mode", "step", "time_step", "clip", "swing_sign", "time_to_strike",
                  "base_roll_deg", "base_pitch_deg", "torso_z", "ref_torso_z",
                  "target_q_mean_abs", "target_q_max_abs", "torque_max", "foot_contact_frac",
-                 "racket_pos_err_strike", "episode_len", "term_reason"])
+                 "racket_pos_err_strike", "racket_speed", "episode_len", "term_reason"])
+
+    # Second CSV: one row per EXACT-strike sample (the fh/bh failure-breakdown raw data).
+    strike_csv_path = os.path.join(out_dir, "mujoco_sim2sim_strikes.csv")
+    strike_csv_f = open(strike_csv_path, "w", newline="")
+    scw = csv.writer(strike_csv_f)
+    scw.writerow([
+        "mode", "step", "episode", "clip_name", "swing_type", "time_to_strike",
+        "pos_err", "vel_err", "normal_err_deg",
+        "pos_pass", "vel_pass", "normal_pass", "composite_pass",
+        "actual_racket_vel_w_x", "actual_racket_vel_w_y", "actual_racket_vel_w_z",
+        "target_racket_vel_w_x", "target_racket_vel_w_y", "target_racket_vel_w_z",
+        "actual_speed", "target_speed",
+        "racket_pos_w_x", "racket_pos_w_y", "racket_pos_w_z",
+        "racket_target_pos_w_x", "racket_target_pos_w_y", "racket_target_pos_w_z",
+        "base_pos_w_x", "base_pos_w_y", "base_pos_w_z",
+    ])
+
+    viewer = None
+    if args.viewer:
+        import mujoco.viewer
+        viewer = mujoco.viewer.launch_passive(robot.model, robot.data)
+        print("[mj-sim2sim] MuJoCo passive viewer launched "
+              f"(realtime={'off' if args.no_realtime else 'on'}). Close the window to stop.")
 
     results = []
     for ns in args.noise_scales:
@@ -799,9 +1023,14 @@ def main():
         print(f"\n[mj-sim2sim] >>> rollout noise_scale={ns}")
         res = run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_dt,
                           args.decimation, ns, std_vec, args.steps, max_ep_len, rng, cw,
-                          mode_label=f"ns={ns}", target_normal_per_clip=target_normal_per_clip)
+                          mode_label=f"ns={ns}", target_normal_per_clip=target_normal_per_clip,
+                          strike_csv_writer=scw, viewer=viewer, realtime=not args.no_realtime,
+                          vel_ranges_per_clip=vel_ranges_per_clip)
         results.append(res)
     csv_f.close()
+    strike_csv_f.close()
+    if viewer is not None:
+        viewer.close()
 
     # ---- summary table ----
     print("\n" + "=" * 92)
@@ -839,7 +1068,41 @@ def main():
     row("fell(count)", "fell", "{:16d}")
     print(f"{'term_breakdown':28s}" + "".join(f"{str(r['term_breakdown']):>16s}" for r in results))
     print("=" * 92)
-    print(f"[mj-sim2sim] per-step CSV -> {csv_path}\n")
+
+    # ---- per-clip (forehand vs backhand) failure breakdown ----
+    CLIP_ROWS = [
+        ("n_strikes",                  "n_strikes",                       "{:16d}"),
+        ("composite_succ_exact",       "strike_composite_success_exact",  "{:16.4f}"),
+        ("pos_pass_exact",             "strike_pos_pass_exact",           "{:16.4f}"),
+        ("vel_pass_exact",             "strike_vel_pass_exact",           "{:16.4f}"),
+        ("normal_pass_exact",          "strike_normal_pass_exact",        "{:16.4f}"),
+        ("racket_pos_err@exact(m)",    "racket_pos_err_exact",            "{:16.4f}"),
+        ("racket_vel_err@exact(m/s)",  "racket_vel_err_exact",            "{:16.4f}"),
+        ("full_vel_vec_err(m/s)",      "full_vel_vec_err",                "{:16.4f}"),
+        ("racket_normal_err(deg)",     "racket_normal_err_exact",         "{:16.4f}"),
+        ("actual_speed@exact(m/s)",    "actual_speed_exact",              "{:16.4f}"),
+        ("target_speed@exact(m/s)",    "target_speed_exact",              "{:16.4f}"),
+        ("speed_err_scalar(m/s)",      "speed_error_scalar",              "{:16.4f}"),
+        ("pos_fail(count)",            "pos_fail",                        "{:16d}"),
+        ("vel_fail(count)",            "vel_fail",                        "{:16d}"),
+        ("normal_fail(count)",         "normal_fail",                     "{:16d}"),
+        ("pos_only_fail(count)",       "pos_only_fail",                   "{:16d}"),
+        ("vel_only_fail(count)",       "vel_only_fail",                   "{:16d}"),
+        ("pos_and_vel_fail(count)",    "pos_and_vel_fail",                "{:16d}"),
+    ]
+    for clip_key, clip_label in (("clip_forehand", "FOREHAND"), ("clip_backhand", "BACKHAND")):
+        print(f"\n{clip_label} per-clip breakdown")
+        print("-" * 92)
+        print(f"{'metric':28s}" + "".join(cols))
+        for label, key, fmt in CLIP_ROWS:
+            print(f"{label:28s}" + "".join(
+                (fmt.format(r[clip_key][key]) if isinstance(r[clip_key][key], (int, float))
+                 and not (isinstance(r[clip_key][key], float) and math.isnan(r[clip_key][key]))
+                 else f"{str(r[clip_key][key]):>16s}")
+                for r in results))
+    print("=" * 92)
+    print(f"[mj-sim2sim] per-step CSV   -> {csv_path}")
+    print(f"[mj-sim2sim] per-strike CSV -> {strike_csv_path}\n")
 
 
 if __name__ == "__main__":

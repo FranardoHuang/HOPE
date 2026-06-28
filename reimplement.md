@@ -3261,6 +3261,43 @@ Everything else is `task.<group>.<key>` or `algo.<group>.<key>` (e.g. `task.rewa
 The legacy `scripts/rsl_rl/train.py --task=HOPE-PingPong-AgibotA3-v0 --registry_name … --headless`
 entrypoint still works if you prefer argparse over Hydra.
 
+#### Optional: per-clip racket target velocity (forehand vs backhand)
+
+**Why.** The unified policy trains forehand (clip 0) and backhand (clip 1) together. In `target_mode:
+uniform` the racket target velocity is sampled from a single **shared** box for both swings
+(`racket:vel_*_range`). But the two reference clips have different natural strike speeds (~2.6 m/s forehand
+vs ~2.0 m/s backhand), so the shared box (mean |v| ≈ 2.7 m/s) overshoots the slower backhand: its strike
+can't meet the 0.5 m/s velocity gate. The MuJoCo per-clip eval probe (16.1b) confirmed this — lowering
+**only** the backhand target box raised backhand composite **0.32 → 0.79** (deterministic) / **0.39 → 0.77**
+(dither) with the forehand result byte-identical.
+
+- **Old / default behavior** — one shared velocity box for both clips (`vel_x_range: [1.5, 3.5]`,
+  `vel_y_range: [-1, 1]`, `vel_z_range: [0, 1.5]`). This is unchanged and remains the default.
+- **New optional behavior** — `racket:vel_range_per_clip` (commented out in `HOPEPingPong.yaml` by default):
+  forehand keeps `[1.5, 3.5]`; backhand uses the lower `[1.2, 2.4]` (and `z: [0, 1.2]`). It is **opt-in** and
+  multi-clip only — when the key is absent (or the run is single-clip) sampling falls back to the shared box,
+  so default behavior is fully backward-compatible. Code: `RacketTargetCommandCfg.racket_vel_range_per_clip`
+  + the per-clip branch in `hope_commands.py:_sample_targets_uniform`, wired from YAML in `train.py`.
+
+**Enable it** by uncommenting the `vel_range_per_clip` block in `cfg/task/HOPEPingPong.yaml`:
+
+```yaml
+  vel_range_per_clip:
+    forehand: {x: [1.5, 3.5], y: [-1.0, 1.0], z: [0.0, 1.5]}
+    backhand: {x: [1.2, 2.4], y: [-1.0, 1.0], z: [0.0, 1.2]}
+```
+
+**Verify before training** (numpy-only, no Isaac) — confirms forehand mean ≈ 2.7 m/s, backhand mean ≈ 2.0:
+
+```bash
+# from .../whole_body_tracking
+python scripts/check_perclip_vel_sampling.py --n 300000 --seed 0
+# disabled -> both clips ~2.71 m/s; enabled -> forehand ~2.71, backhand ~2.02 ("OK: backhand is slower")
+```
+
+At train start the `[train.py] applied …` log prints `racket_target.racket_vel_range_per_clip=(…)` when the
+override took. Recommended run name for the first per-clip experiment: **`hope_unified_perclip_vel_bhslow`**.
+
 ### 14.7 Troubleshooting
 
 - **`train.py` returns to the shell with no error, log stops right after Isaac startup.** Isaac's
@@ -3487,20 +3524,24 @@ verification: `scripts/mujoco_eval_onnx.py` runs your exported `policy.onnx` in 
 (MuJoCo) with **no Isaac, no retrain, no reward/target changes**. It loads the official A3 ping-pong MJCF,
 reconstructs the exact **180-D** observation the policy was trained on (NOT 129-D — `command`=62 ref joint
 pos+vel, `motion_anchor_ori_b`=6; verified from `actor.0.weight=(512,180)`), drives a 50 Hz control loop
-with the deploy-matched Agibot PD gains, and prints the same Isaac strike-composite metrics. It is the best
-sim-to-sim available because the official Agibot C++ harness (16.2) is **incompatible** with this ONNX (it
-expects a 1570-D HITTER-tokenizer obs / 29 DOF / single-output policy; ours is 180-D / 31 DOF / 7 outputs).
+with the deploy-matched Agibot PD gains, and prints the same Isaac strike-composite metrics, now split per
+swing (forehand vs backhand). (The official Agibot C++ harness in 16.2 cannot load this ONNX: it expects a
+1570-D HITTER-tokenizer obs / 29 DOF / single-output policy; ours is 180-D / 31 DOF / 7 outputs.)
 
 Run it in a plain Python env that has `mujoco` + `onnxruntime` (e.g. conda `hope-motion-py310`), **not**
 `hope_isaac_py`:
 
 ```bash
 # from .../whole_body_tracking. --mjcf is relative to the repo root; everything else to this dir.
+# --onnx/--std default to the basecouple03_resume run; pass them to point at another checkpoint.
+# NOTE: --std does NOT follow --onnx, and any dither mode (noise_scale > 0) requires the std sidecar,
+# so when you override --onnx pass the matching --std (and --out-dir) from the SAME run.
 python scripts/mujoco_eval_onnx.py \
   --onnx logs/rsl_rl/agibot_a3_hope/<RUN>/exported/policy.onnx \
+  --std  logs/rsl_rl/agibot_a3_hope/<RUN>/exported/learned_std.npy \
   --mjcf agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml \
   --motion-files logs/rsl_rl/eval_motion/fh.npz logs/rsl_rl/eval_motion/bh.npz \
-  --noise-scales 0.0 0.05 --steps 1200 --pd-mode implicit --seed 0
+  --noise-scales 0.0 0.05 --steps 4000 --pd-mode implicit --seed 0
 ```
 
 `--pd-mode implicit` is the **faithful** mode: it models the PD as passive damping (`kd`) + `implicitfast`,
@@ -3510,11 +3551,26 @@ each substep; it is a harder, less faithful test and inflates the strike velocit
 
 Expected result: the robot stays upright in **both** deterministic and dither modes (0 falls, full 10 s
 episodes) — Isaac's ~34% deterministic `ee_body_pos` fragility does NOT reproduce in MuJoCo. Racket-site
-position error vs the Isaac racket body is ~0.07 m; implicit-PD strike composite ~0.60 (vel_pass ~0.88,
-normal ~2°, pos_pass ~0.60) — velocity is the composite bottleneck, same as Isaac. Output: a per-step
-`mujoco_sim2sim_log.csv` in the ONNX run dir plus a printed summary table. `--keep-passive` leaves the MJCF
-damping in (double-damped, for debugging); `--sim-dt/--decimation` keep the 50 Hz control rate (default
-`0.005 × 4`).
+position error vs the Isaac racket body is ~0.07 m. The overall implicit-PD strike composite is ~0.43–0.70,
+but the **per-clip breakdown** (printed as `FOREHAND` / `BACKHAND` tables, backed by a per-strike
+`mujoco_sim2sim_strikes.csv`) shows the swings transfer very differently:
+
+- **Forehand** composite ~0.70–0.95 (vel_pass ~0.85–1.0, pos_pass ~0.70–1.0, normal ~1.5°) — transfers well.
+- **Backhand** composite ~0.15–0.56 — much lower, and gated by **velocity**: backhand actual racket speed at
+  strike is ~2.0–2.2 m/s while the commanded target is ~2.6–2.9 m/s (a systematic −0.5 to −0.65 m/s deficit).
+  `normal_pass` = 1.0 for backhand, so orientation is *not* the issue.
+
+Root cause is **target sampling, not the policy**: in uniform mode (`target_mode: uniform`)
+`racket_target_vel_w` is drawn from a **clip-independent** box (`vx∈[1.5,3.5]`, mean `|v|≈2.7` m/s) for both
+swings (`hope_commands.py:_sample_targets_uniform`), but the backhand reference swing only reaches ~1.65–2.0
+m/s, so backhand cannot satisfy the 0.5 m/s velocity gate. `ref_vel_scale` does **not** help — it is read only
+in `reference_perturbed` mode, which is currently single-clip (not multiseg-aware). The fix is **per-clip
+velocity targets**. Dither (`noise_scale 0.05`) helps forehand consistently but only seed-dependently for
+backhand, so sweep seeds 0–3 before drawing a verdict.
+
+Output: a per-step `mujoco_sim2sim_log.csv` **and** a per-strike `mujoco_sim2sim_strikes.csv` in the ONNX run
+dir (or `--out-dir`), plus the printed summary + per-clip tables. `--keep-passive` leaves the MJCF damping in
+(double-damped, for debugging); `--sim-dt/--decimation` keep the 50 Hz control rate (default `0.005 × 4`).
 
 ### 16.2 A3 MuJoCo sim-to-sim harness (the real deployment loop)
 

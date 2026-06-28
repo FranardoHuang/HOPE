@@ -126,6 +126,26 @@ class RacketTargetCommand(CommandTerm):
         # policy can achieve) — NOT the racket-velocity direction, which is ~18-110 deg off the +Y blade
         # face and makes the normal goal (and thus the composite success metric) unsatisfiable.
         self._ref_normal_per_clip = None
+        # Optional per-clip racket target-velocity boxes (uniform mode). Built ONCE from cfg; stays None
+        # when the shared box is used (backward compatible). Shape (num_clips, 3, 2): [clip][x/y/z][lo/hi].
+        self._vel_range_per_clip_t = None
+        if self.cfg.racket_vel_range_per_clip is not None:
+            self._vel_range_per_clip_t = torch.tensor(
+                [[[float(lo), float(hi)] for (lo, hi) in clip_rng]
+                 for clip_rng in self.cfg.racket_vel_range_per_clip],
+                dtype=torch.float32,
+                device=self.device,
+            )
+        # Optional per-clip racket target-POSITION boxes (uniform mode). Same shape/semantics as the
+        # velocity one above; None -> shared pos box (backward compatible). (num_clips, 3, 2): [clip][x/y/z][lo/hi].
+        self._pos_range_per_clip_t = None
+        if self.cfg.racket_pos_range_per_clip is not None:
+            self._pos_range_per_clip_t = torch.tensor(
+                [[[float(lo), float(hi)] for (lo, hi) in clip_rng]
+                 for clip_rng in self.cfg.racket_pos_range_per_clip],
+                dtype=torch.float32,
+                device=self.device,
+            )
         self._ref_racket_pos_rel = torch.zeros(3, device=self.device)
         self._ref_racket_vel_w = torch.zeros(3, device=self.device)
         self._ref_racket_normal_w = torch.zeros(3, device=self.device)
@@ -148,6 +168,11 @@ class RacketTargetCommand(CommandTerm):
         self._exact_pass_pos_acc = 0.0
         self._exact_pass_vel_acc = 0.0
         self._exact_pass_normal_acc = 0.0
+        # 5 cm / 10 cm position-accuracy buckets on the SAME exact-strike mask + EMA denominator as the
+        # pass metrics above (so they are comparable with the composite, unlike the old window-exit-held
+        # strike_success_5cm/10cm which sampled the racket ~0.26 m past target).
+        self._exact_pass_5cm_acc = 0.0
+        self._exact_pass_10cm_acc = 0.0
         self._exact_composite_rate = 0.0
 
         # Per-clip (forehand=clip 0 / backhand=clip 1) breakdown of the exact-strike metrics, so wandb
@@ -203,6 +228,11 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["strike_pos_pass_exact"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["strike_vel_pass_exact"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["strike_normal_pass_exact"] = torch.zeros(self.num_envs, device=self.device)
+        # Position-accuracy buckets + error distribution on the exact-strike sample (comparable w/ composite).
+        self.metrics["exact_strike_pos_success_5cm"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["exact_strike_pos_success_10cm"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["exact_strike_pos_err_mean"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["exact_strike_pos_err_p90"] = torch.zeros(self.num_envs, device=self.device)
         # Per-clip (forehand/backhand) versions of the exact-strike pass rates + errors (multiseg only;
         # stay 0 for a single-clip run). Updated in _update_metrics.
         for _cname in self._clip_names.values():
@@ -223,8 +253,11 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["racket_pos_error_x_at_strike"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["racket_pos_error_y_at_strike"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["racket_pos_error_z_at_strike"] = torch.zeros(self.num_envs, device=self.device)
-        self.metrics["strike_success_5cm"] = torch.zeros(self.num_envs, device=self.device)
-        self.metrics["strike_success_10cm"] = torch.zeros(self.num_envs, device=self.device)
+        # DEPRECATED semantics: these hold the value at the WINDOW-EXIT frame (racket ~0.26 m past target),
+        # NOT at contact, and use the diluting reset-mean denominator. Renamed so they stop reading as
+        # "success". Use exact_strike_pos_success_5cm/10cm above for the real contact-frame accuracy.
+        self.metrics["strike_success_5cm_window_exit"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["strike_success_10cm_window_exit"] = torch.zeros(self.num_envs, device=self.device)
         # Robot-health diagnostics (episode-wide, instantaneous) — logged here because this term already
         # holds ``self.robot``. Useful for sim2real: standing height, peak joint speed, actuator effort.
         self.metrics["base_height"] = torch.zeros(self.num_envs, device=self.device)
@@ -464,26 +497,49 @@ class RacketTargetCommand(CommandTerm):
     def _sample_targets_uniform(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
         """Independent box sampling (legacy mode). Ranges are PLACEHOLDERS not tied to the swing."""
         pos = origins.clone()
-        pos[:, 0] += sample_uniform(*self.cfg.racket_pos_x_range, (n,), self.device)
         motion = self._motion()
-        if motion._multiseg:
-            # Unified policy: the target Y region is conditioned on the swing TYPE (clip) so forehand and
-            # backhand regions are non-overlapping (HITTER §IV). Sample |y| and set the sign per clip:
-            # forehand (clip 0) on -y if forehand_on_negative_y, backhand (clip 1) on the opposite side.
-            clip = motion.clip_id[env_ids]
-            ymag = sample_uniform(*self.cfg.racket_pos_y_abs_range, (n,), self.device)
-            fh_sign = -1.0 if self.cfg.forehand_on_negative_y else 1.0
-            sign = torch.where(clip == 0, fh_sign, -fh_sign)
-            pos[:, 1] = origins[:, 1] + sign * ymag
+        if self._pos_range_per_clip_t is not None and motion._multiseg:
+            # PER-CLIP position box (unified policy): each env samples x/y/z from ITS clip's box (added to
+            # the env origin). The y range is SIGNED per clip (forehand -y / backhand +y encoded directly in
+            # the box), so this REPLACES the shared x-range + |y|-sign + z-range logic below. Lets each clip's
+            # target track its own reference strike point (e.g. backhand z~1.2 when strike_phase=0.50).
+            clip = motion.clip_id[env_ids]                      # (n,) long, 0=forehand / 1=backhand
+            rng_e = self._pos_range_per_clip_t[clip]            # (n, 3, 2): [env][x/y/z][lo/hi]
+            lo = rng_e[..., 0]                                  # (n, 3)
+            hi = rng_e[..., 1]                                  # (n, 3)
+            pos[:, :3] += lo + (hi - lo) * torch.rand(n, 3, device=self.device)
         else:
-            pos[:, 1] += sample_uniform(*self.cfg.racket_pos_y_range, (n,), self.device)
-        pos[:, 2] += sample_uniform(*self.cfg.racket_pos_z_range, (n,), self.device)
+            # Shared box (legacy / single-clip): identical sampling to before — backward compatible.
+            pos[:, 0] += sample_uniform(*self.cfg.racket_pos_x_range, (n,), self.device)
+            if motion._multiseg:
+                # Unified policy: the target Y region is conditioned on the swing TYPE (clip) so forehand and
+                # backhand regions are non-overlapping (HITTER §IV). Sample |y| and set the sign per clip:
+                # forehand (clip 0) on -y if forehand_on_negative_y, backhand (clip 1) on the opposite side.
+                clip = motion.clip_id[env_ids]
+                ymag = sample_uniform(*self.cfg.racket_pos_y_abs_range, (n,), self.device)
+                fh_sign = -1.0 if self.cfg.forehand_on_negative_y else 1.0
+                sign = torch.where(clip == 0, fh_sign, -fh_sign)
+                pos[:, 1] = origins[:, 1] + sign * ymag
+            else:
+                pos[:, 1] += sample_uniform(*self.cfg.racket_pos_y_range, (n,), self.device)
+            pos[:, 2] += sample_uniform(*self.cfg.racket_pos_z_range, (n,), self.device)
         self.racket_target_pos_w[env_ids] = pos
 
-        vel = torch.empty(n, 3, device=self.device)
-        vel[:, 0] = sample_uniform(*self.cfg.racket_vel_x_range, (n,), self.device)
-        vel[:, 1] = sample_uniform(*self.cfg.racket_vel_y_range, (n,), self.device)
-        vel[:, 2] = sample_uniform(*self.cfg.racket_vel_z_range, (n,), self.device)
+        if self._vel_range_per_clip_t is not None and motion._multiseg:
+            # PER-CLIP velocity (unified policy): each env samples from ITS clip's box, so the slower
+            # backhand gets a lower target speed than the forehand instead of one shared box that
+            # overshoots the backhand. Vectorized: gather each env's clip range, then uniform-sample.
+            clip = motion.clip_id[env_ids]                      # (n,) long, 0=forehand / 1=backhand
+            rng_e = self._vel_range_per_clip_t[clip]            # (n, 3, 2): [env][x/y/z][lo/hi]
+            lo = rng_e[..., 0]                                  # (n, 3)
+            hi = rng_e[..., 1]                                  # (n, 3)
+            vel = lo + (hi - lo) * torch.rand(n, 3, device=self.device)
+        else:
+            # Shared box (legacy / single-clip): identical sampling to before — backward compatible.
+            vel = torch.empty(n, 3, device=self.device)
+            vel[:, 0] = sample_uniform(*self.cfg.racket_vel_x_range, (n,), self.device)
+            vel[:, 1] = sample_uniform(*self.cfg.racket_vel_y_range, (n,), self.device)
+            vel[:, 2] = sample_uniform(*self.cfg.racket_vel_z_range, (n,), self.device)
         self.racket_target_vel_w[env_ids] = vel
 
         if motion._multiseg:
@@ -761,6 +817,11 @@ class RacketTargetCommand(CommandTerm):
         self._exact_pass_comp_acc = decay * self._exact_pass_comp_acc + float(pass_comp.sum())
         self._exact_pass_pos_acc = decay * self._exact_pass_pos_acc + float(pass_pos.sum())
         self._exact_pass_vel_acc = decay * self._exact_pass_vel_acc + float(pass_vel.sum())
+        # 5/10 cm position buckets on the exact-strike sample (NOT the window-exit frame).
+        _pass_5cm = (pos_err < 0.05) & exact_strike
+        _pass_10cm = (pos_err < 0.10) & exact_strike
+        self._exact_pass_5cm_acc = decay * self._exact_pass_5cm_acc + float(_pass_5cm.sum())
+        self._exact_pass_10cm_acc = decay * self._exact_pass_10cm_acc + float(_pass_10cm.sum())
         self._exact_pass_normal_acc = decay * self._exact_pass_normal_acc + float(pass_normal.sum())
         enough = self._exact_n_acc >= float(self.cfg.exact_success_min_count)
         denom = max(self._exact_n_acc, 1e-6)
@@ -770,6 +831,14 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["strike_pos_pass_exact"][:] = (self._exact_pass_pos_acc / denom) if enough else 0.0
         self.metrics["strike_vel_pass_exact"][:] = (self._exact_pass_vel_acc / denom) if enough else 0.0
         self.metrics["strike_normal_pass_exact"][:] = (self._exact_pass_normal_acc / denom) if enough else 0.0
+        # Exact-strike position accuracy buckets (comparable with composite: same mask + EMA denominator).
+        self.metrics["exact_strike_pos_success_5cm"][:] = (self._exact_pass_5cm_acc / denom) if enough else 0.0
+        self.metrics["exact_strike_pos_success_10cm"][:] = (self._exact_pass_10cm_acc / denom) if enough else 0.0
+        # Distribution of position error over THIS step's exact-strike samples (p90 + mean), broadcast.
+        _ex_errs = pos_err[exact_strike]
+        if _ex_errs.numel() > 0:
+            self.metrics["exact_strike_pos_err_mean"][:] = _ex_errs.mean()
+            self.metrics["exact_strike_pos_err_p90"][:] = torch.quantile(_ex_errs, 0.90)
         self.metrics["exact_strike_sample_count_decayed"][:] = self._exact_n_acc
         # --- per-clip (forehand/backhand) breakdown of the exact-strike pass rates + errors -----------
         # Same sample-weighted EMA as the global block above, selected by the motion command's clip_id so
@@ -855,11 +924,13 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["racket_pos_error_z_at_strike"] = torch.where(
             in_win, axis_err[:, 2], self.metrics["racket_pos_error_z_at_strike"]
         )
-        self.metrics["strike_success_5cm"] = torch.where(
-            in_win, (pos_err < 0.05).float(), self.metrics["strike_success_5cm"]
+        # Window-exit-held (kept for continuity; the trustworthy contact-frame version is
+        # exact_strike_pos_success_5cm/10cm, computed on the exact-strike mask above).
+        self.metrics["strike_success_5cm_window_exit"] = torch.where(
+            in_win, (pos_err < 0.05).float(), self.metrics["strike_success_5cm_window_exit"]
         )
-        self.metrics["strike_success_10cm"] = torch.where(
-            in_win, (pos_err < 0.10).float(), self.metrics["strike_success_10cm"]
+        self.metrics["strike_success_10cm_window_exit"] = torch.where(
+            in_win, (pos_err < 0.10).float(), self.metrics["strike_success_10cm_window_exit"]
         )
 
         # Robot-health diagnostics (episode-wide, instantaneous).
@@ -1057,6 +1128,26 @@ class RacketTargetCommandCfg(CommandTermCfg):
     racket_vel_x_range: tuple[float, float] = (1.5, 4.0)
     racket_vel_y_range: tuple[float, float] = (-1.0, 1.0)
     racket_vel_z_range: tuple[float, float] = (0.0, 1.5)
+    # Optional PER-CLIP velocity boxes (uniform mode + unified multi-clip only). None -> use the SHARED
+    # racket_vel_*_range above for every clip (BACKWARD COMPATIBLE: old behavior, nothing changes). When
+    # set, it is a tuple indexed by clip_id (0=forehand, 1=backhand — same order as strike_phase_per_clip /
+    # the command's _clip_names), each entry ((x_lo,x_hi),(y_lo,y_hi),(z_lo,z_hi)). Reason: the forehand and
+    # backhand reference clips have DIFFERENT natural strike speeds (~2.6 vs ~2.0 m/s at the racket), so a
+    # single shared box overshoots the slower backhand and its strike can never satisfy the velocity gate.
+    # Confirmed by the MuJoCo per-clip eval probe: lowering only the backhand target box raised backhand
+    # composite 0.32->0.79 (deterministic) / 0.39->0.77 (dither) with forehand byte-identical.
+    racket_vel_range_per_clip: tuple | None = None
+
+    # OPTIONAL per-clip racket target-POSITION boxes (uniform mode, unified multi-clip policy). None ->
+    # use the shared racket_pos_x_range + |y|-sign + racket_pos_z_range box for every clip (BACKWARD
+    # COMPATIBLE: old behavior, nothing changes). When set, it is a tuple indexed by clip_id (0=forehand,
+    # 1=backhand — same order as strike_phase_per_clip), each entry ((x_lo,x_hi),(y_lo,y_hi),(z_lo,z_hi))
+    # added to the env origin. NOTE the y range is SIGNED here (encode forehand -y / backhand +y directly),
+    # so it REPLACES the shared |y|-sign logic. Reason: when strike_phase changes the strike frame, the
+    # racket sits at a DIFFERENT height/depth per clip (e.g. backhand @ phase 0.50 -> z~1.22, above the
+    # shared z<=1.05 box), so a shared box makes that clip's strike-frame position unreachable. Per-clip
+    # boxes let each clip's target track its own reference strike point.
+    racket_pos_range_per_clip: tuple | None = None
 
     # --- desired racket face normal ---
     normal_mode: str = "velocity"  # "velocity" (n = v/|v|) or "sampled"

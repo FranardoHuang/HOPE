@@ -109,8 +109,8 @@ def _set_reward(rewards, name, weight, std, applied):
 # actually requested racket overrides before requiring the command to exist).
 _RACKET_KEYS = (
     "strike_phase", "strike_phase_by_motion", "strike_window_s", "strike_success_pos_thresh",
-    "pos_x_range", "pos_y_range", "pos_z_range",
-    "vel_x_range", "vel_y_range", "vel_z_range",
+    "pos_x_range", "pos_y_range", "pos_z_range", "racket_pos_y_abs_range", "pos_range_per_clip",
+    "vel_x_range", "vel_y_range", "vel_z_range", "vel_range_per_clip",
     "base_target_x_range", "base_target_y_range",
     "normal_mode", "forehand_on_negative_y", "mount_normal_axis", "mount_normal_sign",
     "target_mode", "ref_perturb_pos", "ref_perturb_vel", "ref_perturb_normal",
@@ -165,6 +165,80 @@ def _resolve_strike_phase(rk, clip_name):
             return float(v), f"racket_target.strike_phase<-by_motion[{k}]={float(v)} (clip={clip_name})"
     sp = _get(rk, "strike_phase")
     return (None if sp is None else float(sp)), None
+
+
+# YAML clip-name -> clip_id index. MUST match RacketTargetCommand._clip_names (0=forehand, 1=backhand).
+_CLIP_NAME_TO_ID = {"forehand": 0, "backhand": 1}
+
+
+def _resolve_vel_range_per_clip(rk):
+    """Build the optional PER-CLIP racket target-velocity tuple from the YAML ``vel_range_per_clip`` block.
+
+    YAML (readable, keyed by swing name; each axis a [lo, hi] list)::
+
+        vel_range_per_clip:
+          forehand: {x: [1.5, 3.5], y: [-1.0, 1.0], z: [0.0, 1.5]}
+          backhand: {x: [1.2, 2.4], y: [-1.0, 1.0], z: [0.0, 1.2]}
+
+    Returns a tuple indexed by clip_id (0=forehand, 1=backhand) of ``((xlo,xhi),(ylo,yhi),(zlo,zhi))``,
+    or ``None`` when the key is absent (-> keep the shared ``vel_*_range`` box; backward compatible).
+    Forehand and backhand reference clips have different natural strike speeds, so a shared box overshoots
+    the slower backhand. Mirrors the per-clip ``strike_phase_per_clip`` / ``ref_vel_scale_by_motion`` style.
+    """
+    block = _get(rk, "vel_range_per_clip")
+    if block is None:
+        return None
+    by_id = {}
+    for name in block:
+        cid = _CLIP_NAME_TO_ID.get(str(name).lower())
+        if cid is None:
+            raise _OverrideError(
+                f"racket.vel_range_per_clip: unknown clip name {name!r} (expected forehand/backhand)")
+        axes = _get(block, name)
+
+        def _r(ax):
+            v = _get(axes, ax)
+            if v is None:
+                raise _OverrideError(f"racket.vel_range_per_clip[{name}]: missing '{ax}' [lo,hi] range")
+            return (float(v[0]), float(v[1]))
+
+        by_id[cid] = (_r("x"), _r("y"), _r("z"))
+    return tuple(by_id[i] for i in range(len(by_id)))
+
+
+def _resolve_pos_range_per_clip(rk):
+    """Build the optional PER-CLIP racket target-POSITION tuple from the YAML ``pos_range_per_clip`` block.
+
+    YAML (readable, keyed by swing name; each axis a [lo, hi] list, ADDED to the env origin; y is SIGNED)::
+
+        pos_range_per_clip:
+          forehand: {x: [0.50, 0.62], y: [-0.45, -0.20], z: [0.72, 0.98]}
+          backhand: {x: [0.50, 0.62], y: [ 0.20,  0.45], z: [1.05, 1.30]}
+
+    Returns a tuple indexed by clip_id (0=forehand, 1=backhand) of ``((xlo,xhi),(ylo,yhi),(zlo,zhi))``,
+    or ``None`` when the key is absent (-> keep the shared ``pos_*_range`` box; backward compatible).
+    Mirrors ``vel_range_per_clip``: lets each clip's target track its own reference strike point (e.g. the
+    backhand sits higher/forward at strike_phase 0.50, so a shared z<=1.05 box makes it unreachable).
+    """
+    block = _get(rk, "pos_range_per_clip")
+    if block is None:
+        return None
+    by_id = {}
+    for name in block:
+        cid = _CLIP_NAME_TO_ID.get(str(name).lower())
+        if cid is None:
+            raise _OverrideError(
+                f"racket.pos_range_per_clip: unknown clip name {name!r} (expected forehand/backhand)")
+        axes = _get(block, name)
+
+        def _r(ax):
+            v = _get(axes, ax)
+            if v is None:
+                raise _OverrideError(f"racket.pos_range_per_clip[{name}]: missing '{ax}' [lo,hi] range")
+            return (float(v[0]), float(v[1]))
+
+        by_id[cid] = (_r("x"), _r("y"), _r("z"))
+    return tuple(by_id[i] for i in range(len(by_id)))
 
 
 def _resolve_ref_vel_scale(rk, clip_name):
@@ -307,6 +381,21 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_range(C, "racket_vel_x_range", _get(rk, "vel_x_range"), applied, "racket_target")
             _set_range(C, "racket_vel_y_range", _get(rk, "vel_y_range"), applied, "racket_target")
             _set_range(C, "racket_vel_z_range", _get(rk, "vel_z_range"), applied, "racket_target")
+            # Optional PER-CLIP velocity boxes (unified policy): forehand=clip 0, backhand=clip 1. Absent ->
+            # keep the shared vel_*_range above (backward compatible). The slower backhand needs a lower box.
+            _vpc = _resolve_vel_range_per_clip(rk)
+            if _vpc is not None:
+                _require(hasattr(C, "racket_vel_range_per_clip"), "racket_target.racket_vel_range_per_clip")
+                C.racket_vel_range_per_clip = _vpc
+                applied.append(f"racket_target.racket_vel_range_per_clip={_vpc}")
+            # Optional PER-CLIP position boxes (unified policy): forehand=clip 0, backhand=clip 1. Absent ->
+            # keep the shared pos_*_range + |y|-sign box above (backward compatible). Lets each clip's target
+            # track its own reference strike point (e.g. backhand z~1.2 at strike_phase 0.50).
+            _ppc = _resolve_pos_range_per_clip(rk)
+            if _ppc is not None:
+                _require(hasattr(C, "racket_pos_range_per_clip"), "racket_target.racket_pos_range_per_clip")
+                C.racket_pos_range_per_clip = _ppc
+                applied.append(f"racket_target.racket_pos_range_per_clip={_ppc}")
             _set_range(C, "base_target_x_range", _get(rk, "base_target_x_range"), applied, "racket_target")
             _set_range(C, "base_target_y_range", _get(rk, "base_target_y_range"), applied, "racket_target")
             # weak base->racket coupling (uniform mode): fraction of the racket Y offset + clamp (meters)

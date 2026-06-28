@@ -99,6 +99,17 @@ def _run(cfg, simulation_app):
 
     task_id = str(cfg.task.gym_task)
     num_envs = int(cfg.num_envs) if cfg.num_envs is not None else int(cfg.task.env.num_envs)
+    # Exact-strike pass/composite metrics are gated by a decayed min-sample guard
+    # (RacketTargetCommandCfg.exact_success_min_count, default 50): the exact-strike frame fires only
+    # ~once per swing per env, so with too few envs the EMA never reaches that count and the rates are
+    # FORCED to 0 even when the policy hits perfectly (the *_error_exact_strike values are still valid).
+    # ~48 envs is the floor to cross the guard; use 128/256 for a stable read.
+    if num_envs < 256:
+        print(
+            f"[WARN] num_envs={num_envs} is low. exact-strike pass/composite metrics may be forced to 0 "
+            "by exact_success_min_count. Use num_envs=128 or 256 for standard eval.",
+            flush=True,
+        )
 
     env_cfg = parse_env_cfg(task_id, device=str(cfg.device), num_envs=num_envs)
     _apply_task_overrides(env_cfg, cfg.task, _registry_clip_name(cfg))
