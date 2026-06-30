@@ -146,7 +146,8 @@ void PrintDiagBlock(const a3_pingpong::PpPolicy::DiagSnapshot& d, bool legs_pass
   group("WAIST", 0, 2);
   group("RIGHT ARM (forehand)", 12, 18);
   group("LEFT ARM", 5, 11);
-  summary(legs_passive ? "LEGS (held nominal)" : "LEGS (policy-driven)", 19, 30);
+  if (legs_passive) summary("LEGS (held nominal)", 19, 30);
+  else group("LEGS (policy-driven)", 19, 30);  // per-joint hip/knee/ankle des/q/err for knee-sink diag
   summary("NECK (passive)", 3, 4);
 }
 
@@ -213,15 +214,16 @@ int main(int argc, char** argv) {
     std::cerr << "usage: " << argv[0]
               << " --runtime-cfg PATH [--aimrt-cfg PATH] [--start passive|pd_stand|shadow|motion]"
                  " [--level 0|1]\n"
-                 "       [--backhand] [--legs-passive] [--waist-passive] [--gain-scale F] [--swing-speed F]"
-                 " [--stand-kp K --stand-kd D]\n"
+                 "       [--backhand] [--legs-passive] [--waist-passive] [--auto-leg-hold]"
+                 " [--gain-scale F] [--swing-speed F] [--stand-kp K --stand-kd D]\n"
                  "       [--reference-playback|--mode reference-playback]"
                  " [--no-publish|--dry-run] [--warmup-sec S]\n"
                  "       [--loc-mode fabricated|perfect_tracking|oracle]"
                  " [--perfect-tracking] [--oracle-pelvis] [--use-imu-yaw]\n"
                  "       [--oracle-shm PATH] [--oracle-max-age S]"
                  " [--trace-csv PATH] [--obs-csv PATH] [--shadow-frozen-clock]\n"
-                 "       [--leg-gain-scale F] [--ankle-gain-scale F] [--motion-blend-sec S]\n";
+                 "       [--leg-gain-scale F] [--ankle-gain-scale F] [--motion-blend-sec S]"
+                 " [--squat-guard-rad R] [--tilt-guard G] [--leg-clamp-rad R] [--leg-stand-gains] [--leg-smooth-alpha A]\n";
     return 2;
   }
   const fs::path cfgdir = fs::path(cfg_path).parent_path();
@@ -303,17 +305,30 @@ int main(int argc, char** argv) {
   a3_pingpong::PpPolicyConfig pcfg;
   pcfg.level = level;
   pcfg.legs_passive = Has(argc, argv, "--legs-passive");  // hold legs (hoisted demo)
-  // GROUND legs-held: when legs are HELD and --official-stand is set, hold them with
-  // AGI's official ground-stand gains (the ONLY config verified to stand free on the
-  // ground) instead of the trained leg PD. The held POSE is identical (nominal ==
-  // official_stand_q); only the GAINS change. --legs-passive ALONE keeps the trained
-  // leg PD (hoist demo — official gains buzz a hoisted robot). Arms+waist still swing.
-  const bool legs_official_gains = pcfg.legs_passive && official_stand;
   // Also hold the WAIST (slots 0..2) at nominal — keeps the torso CoM over the feet
   // when the static legs can't rebalance the policy's forward waist_pitch command.
   // ARMS-ONLY swing. With --official-stand the held waist uses official gains too.
   pcfg.waist_passive = Has(argc, argv, "--waist-passive");
+  // AUTO LEG-HOLD: dynamically hold legs+waist at level 0 (stable ready stand, no
+  // frozen-windup foot-lift) and release them at level 1 (full-body self-balancing swing).
+  // Overrides the manual flags; the initial hold follows the START level.
+  pcfg.auto_leg_hold = Has(argc, argv, "--auto-leg-hold");
+  if (pcfg.auto_leg_hold) pcfg.legs_passive = pcfg.waist_passive = (level == 0);
+  // GROUND held joints use AGI's official ground-stand gains (the ONLY config verified to
+  // stand free on the ground) when --official-stand is set; the held POSE is identical
+  // (nominal == official_stand_q), only the GAINS change. Released joints use the policy PD.
+  // (Banner only — the gain loop recomputes this per-tick from the live hold state.)
+  const bool legs_official_gains = pcfg.legs_passive && official_stand;
   const bool waist_official_gains = pcfg.waist_passive && official_stand;
+  // LEG q_des CLAMP: cap how far the released (level-1) legs may deviate from the
+  // nominal upright stand. The trained swing commands a deep crouch (hip_pitch/ankle
+  // -0.6..-0.9 rad) that sinks the real robot; clamp to nominal ± band so the legs
+  // stay weight-bearing while the arms+waist swing. 0 = off (full policy legs).
+  pcfg.leg_clamp_rad = std::stod(Flag(argc, argv, "--leg-clamp-rad", "0.0"));
+  // LEG q_des LOW-PASS: EMA-smooth the released leg q_des so stiff --leg-stand-gains track a
+  // smooth reference instead of the policy jitter (which they amplify into a twitch). 1.0=off;
+  // 0.2-0.3 = moderate. Clamp to (0,1].
+  pcfg.leg_smooth_alpha = std::min(1.0, std::max(0.02, std::stod(Flag(argc, argv, "--leg-smooth-alpha", "1.0"))));
   pcfg.swing_speed = swing_speed;
   pcfg.use_base_estimator = Has(argc, argv, "--base-estimator");  // leg-FK pelvis height (ground)
   pcfg.loc_mode = loc_mode;
@@ -455,6 +470,18 @@ int main(int argc, char** argv) {
   std::atomic<double> ankle_gain_scale{
       Has(argc, argv, "--ankle-gain-scale") ? std::stod(Flag(argc, argv, "--ankle-gain-scale", "1.0"))
                                             : -1.0};  // <0 => follow --leg-gain-scale
+  // SQUAT/TILT SAFETY GUARD (auto-leg-hold full-body swing only): revert to level 0 (re-engage the
+  // held official stand) if a released leg SINKS (knee bends past nominal by > --squat-guard-rad) or
+  // the body TILTS (|gravX| or |gravY| > --tilt-guard). <=0 disables that check. A hoist-test backstop.
+  const double squat_guard_rad = std::stod(Flag(argc, argv, "--squat-guard-rad", "0.6"));
+  const double tilt_guard = std::stod(Flag(argc, argv, "--tilt-guard", "0.35"));
+  // LEG WEIGHT-BEARING: the released (level-1) legs default to the POLICY leg PD x --leg-gain-scale,
+  // whose kp (~150 knee) is ~13x softer than AGI's official ground-stand knee kp (2000) -> the knees
+  // SINK under real body load. --leg-stand-gains keeps the official ground-stand PD on the legs even
+  // when RELEASED (policy still drives the CLAMPED q_des), so they bear weight like the level-0 hold
+  // while making small swing-coupled moves. REQUIRES --official-stand; pair with a TIGHT --leg-clamp-rad
+  // (0.15-0.20) since stiff gains drive the leg firmly to whatever the clamp allows. Default off.
+  const bool leg_stand_gains = Has(argc, argv, "--leg-stand-gains");
   // POSE-BLEND on MOTION entry: ramp the published q_des from the pose at the moment
   // MOTION engaged to the policy target over this many seconds, so (now-stiff) legs
   // do NOT snap through the ~1.5-2 rad stand->windup jump. Convex blend of two
@@ -465,29 +492,69 @@ int main(int argc, char** argv) {
   Mode prev_mode_for_blend = Mode::kPassive;       // driver-thread only (no race)
   std::uint64_t motion_enter_tick = 0;
   Eigen::VectorXd blend_q_start;
+  int prev_level_for_blend = level;                // re-arm the pose-blend on a level toggle
+  // AUTO LEG-HOLD: hold legs+waist at level 0 (stable ready stand, no frozen-windup foot-lift),
+  // release them at level 1 (full-body self-balancing swing). The pose-blend (re-armed on the
+  // level toggle below) ramps q_des from the current measured pose so the stiff official stand
+  // gains do NOT snap the legs on the 1->0 re-engage (the "jump").
+  const bool auto_leg_hold = pcfg.auto_leg_hold;
 
   // --- mode-aware CommandFn (reuses driver's RT loop + watchdog) ---
   a3_pingpong::PpPolicy* ppp = pp.get();
   a3_pingpong::PpReferencePlayback* refp = ref.get();
   auto command_fn = [ppp, refp, &mode, &gain_scale, &leg_gain_scale, &ankle_gain_scale,
                      stand_q, stand_kp, stand_kd,
-                     official_stand, legs_official_gains, waist_official_gains,
+                     official_stand, auto_leg_hold, squat_guard_rad, tilt_guard, leg_stand_gains,
                      trace_ptr, obscsv_ptr, loc_mode_int,
                      &shadow_tick, shadow_free_clock, motion_blend_sec, policy_dt,
-                     &prev_mode_for_blend, &motion_enter_tick, &blend_q_start](
+                     &prev_mode_for_blend, &motion_enter_tick, &blend_q_start,
+                     &prev_level_for_blend](
                         std::uint64_t tick, const robot_io::RobotState& st,
                         robot_io::RobotCommand& cmd) -> bool {
     const Mode m = mode.load();
     const int N = 31;
     bool publish = true;
-    const bool motion_just_entered = (m == Mode::kMotion && prev_mode_for_blend != Mode::kMotion);
-    if (motion_just_entered) motion_enter_tick = tick;
-    prev_mode_for_blend = m;
-    // Refresh the IMU-derived gravity diagnostic EVERY tick in EVERY mode, so the
-    // [status]/trace gravZ reflects the real base orientation even in PASSIVE/PD_STAND
-    // (where ComputeCommand does not run). Without this the ground PD_STAND check
-    // reads a frozen [0,0,-1] and cannot tell whether the robot is actually upright.
+    // Refresh the IMU-derived gravity diagnostic FIRST (every tick, every mode), so the squat/tilt
+    // guard and the [status]/trace gravZ see the real base orientation. ComputeCommand (which also
+    // sets it) does not run in PASSIVE/PD_STAND, so without this the ground checks read a frozen
+    // [0,0,-1].
     ppp->observe_imu(st);
+    // SQUAT/TILT SAFETY GUARD (auto-leg-hold, full-body swing only): if a released leg SINKS (knee
+    // bends past nominal by > squat_guard_rad) or the body TILTS (|gravX|/|gravY| > tilt_guard),
+    // revert to level 0 so the held official stand re-stiffens the legs. Backstop for hoist tests.
+    if (auto_leg_hold && ppp->level() == 1) {
+      const auto g = ppp->last_proj_grav();
+      bool trip = false; const char* why = "";
+      if (tilt_guard > 0.0 && (std::abs(g[0]) > tilt_guard || std::abs(g[1]) > tilt_guard)) {
+        trip = true; why = "tilt";
+      }
+      if (!trip && squat_guard_rad > 0.0 && st.q.size() == N) {
+        const auto& nomq = ppp->official_stand_q();  // slots 22=L knee, 28=R knee
+        if (std::abs(st.q[22] - nomq[22]) > squat_guard_rad ||
+            std::abs(st.q[28] - nomq[28]) > squat_guard_rad) { trip = true; why = "knee-sink"; }
+      }
+      if (trip) {
+        ppp->set_level(0);  // re-engage held stand (the auto-hold below stiffens legs+waist this tick)
+        std::fprintf(stderr, "[pp SAFETY] %s guard tripped -> reverted to level 0 (held official "
+                             "stand); press 1 to retry once stable\n", why);
+      }
+    }
+    // AUTO LEG-HOLD: flip the leg+waist hold from the live level (0=hold ready, 1=release swing)
+    // BEFORE the policy/gain code runs this tick (a guard trip above already forced level 0).
+    if (auto_leg_hold) {
+      const bool hold = (ppp->level() == 0);
+      ppp->set_legs_passive(hold);
+      ppp->set_waist_passive(hold);
+    }
+    // Re-arm the pose-blend on a MOTION entry OR a level toggle, so q_des ramps from the CURRENT
+    // measured pose -> no snap when stiff official stand gains (re)engage at the 1->0 toggle.
+    const int cur_level = ppp->level();
+    const bool level_just_changed = (cur_level != prev_level_for_blend);
+    prev_level_for_blend = cur_level;
+    const bool motion_just_entered = (m == Mode::kMotion && prev_mode_for_blend != Mode::kMotion);
+    const bool rearm_blend = motion_just_entered || level_just_changed;
+    if (rearm_blend) motion_enter_tick = tick;
+    prev_mode_for_blend = m;
     if (m == Mode::kPassive) {  // limp: hold current pose, zero gains
       cmd.q_des = st.q.size() == N ? st.q : Eigen::VectorXd::Zero(N);
       cmd.dq_des = Eigen::VectorXd::Zero(N);
@@ -523,6 +590,13 @@ int main(int argc, char** argv) {
       const double g_leg = (g_leg_o >= 0.0) ? g_leg_o : g_arm;
       const double g_ank_o = ankle_gain_scale.load();
       const double g_ank = (g_ank_o >= 0.0) ? g_ank_o : g_leg;  // ankle: own gain, else follow leg
+      // Per-tick (so --auto-leg-hold's level toggle takes effect): legs/waist that are
+      // HELD with --official-stand get AGI's ground-stand gains; released joints get the
+      // policy gains scaled below. ppp->legs_passive()/waist_passive() reflect the live hold.
+      // --leg-stand-gains keeps the WEIGHT-BEARING official gains on the legs even when
+      // RELEASED (policy still drives the clamped q_des) so the knees don't sink under load.
+      const bool leg_official = official_stand && (ppp->legs_passive() || leg_stand_gains);
+      const bool waist_held_off = official_stand && ppp->waist_passive();
       if (cmd.kp.size() == N && cmd.kd.size() == N) {
         for (int i = 0; i < N; ++i) {
           if (i == a3_pingpong::kHeadSlot0 || i == a3_pingpong::kHeadSlot1) continue;  // neck fixed PD
@@ -531,10 +605,11 @@ int main(int argc, char** argv) {
           const bool is_ankle = (i == 23 || i == 24 || i == 29 || i == 30);  // L/R ankle pitch+roll
           const bool is_waist = (i >= a3_pingpong::kWaistSlotStart &&
                                  i < a3_pingpong::kWaistSlotStart + a3_pingpong::kWaistSlotCount);
-          if ((is_leg && legs_official_gains) || (is_waist && waist_official_gains)) {
-            // GROUND held joint: overwrite with AGI's official ground-stand gains
-            // VERBATIM (the config proven to stand free on the ground); ignore
-            // --gain/--leg/--ankle-gain-scale so a stray scale can't soften the stance.
+          if ((is_leg && leg_official) || (is_waist && waist_held_off)) {
+            // GROUND weight-bearing joint (held, or released under --leg-stand-gains):
+            // overwrite with AGI's official ground-stand gains VERBATIM (the config proven
+            // to stand free on the ground); ignore --gain/--leg/--ankle-gain-scale so a
+            // stray scale can't soften the stance.
             cmd.kp[i] = ppp->official_stand_kp()[i];
             cmd.kd[i] = ppp->official_stand_kd()[i];
             continue;
@@ -543,11 +618,12 @@ int main(int argc, char** argv) {
           cmd.kp[i] *= s; cmd.kd[i] *= s;
         }
       }
-      // pose-blend on MOTION entry: ramp q_des from the entry pose to the policy
-      // target over motion_blend_sec, so stiff legs don't snap through the windup
-      // jump. (convex combo of two in-range poses -> in range; no clamp needed.)
+      // pose-blend on MOTION entry OR level toggle: ramp q_des from the entry/toggle pose
+      // to the (new) target over motion_blend_sec, so stiff legs don't snap through the
+      // windup jump NOR through the 1->0 official-stand re-engage. (convex combo of two
+      // in-range poses -> in range; no clamp needed.)
       if (m == Mode::kMotion && motion_blend_sec > 1e-6) {
-        if (motion_just_entered && st.q.size() == N) blend_q_start = st.q;
+        if (rearm_blend && st.q.size() == N) blend_q_start = st.q;
         if (blend_q_start.size() == N && cmd.q_des.size() == N) {
           const double elapsed = static_cast<double>(tick - motion_enter_tick) * policy_dt;
           const double a = std::min(1.0, std::max(0.0, elapsed / motion_blend_sec));
@@ -632,8 +708,11 @@ int main(int argc, char** argv) {
       "[pingpong]  legs_passive = %-9s  (true=legs HELD; validates UPPER-BODY/waist swing only)\n"
       "[pingpong]  leg_hold     = %-9s  (official=AGI ground-stand gains [GROUND, proven] | trained=ONNX leg PD [HOIST])\n"
       "[pingpong]  waist_hold   = %-9s  (official/trained=waist FROZEN at nominal [ARMS-ONLY swing] | swing=policy-driven)\n"
+      "[pingpong]  auto_hold    = %-9s  (--auto-leg-hold: level0 HOLDS legs+waist [ready stand], level1 RELEASES [full-body swing])\n"
       "[pingpong]  gain_scale   = %-9.2f  (arms/waist swing)   swing_speed = %.2f\n"
       "[pingpong]  leg_gain     = %-9s  ankle_gain = %-7s  (ankle=balance joint; raise if tipping fwd)  motion_blend = %.2fs\n"
+      "[pingpong]  leg_stand_g  = %-9s  (--leg-stand-gains: RELEASED legs use official ground-stand PD [weight-bearing, kp~2000 knee] vs policy PD x leg_gain)\n"
+      "[pingpong]  safety       = squat_guard=%.2frad tilt_guard=%.2f leg_clamp=%.2frad leg_smooth=%.2f  (L1: revert L0 on sink/tilt; clamp+EMA the released legs; off=0/1.0)\n"
       "[pingpong]  publish      = %-9s  (--dry-run/--no-publish => NEVER publishes; SHADOW also no-publish)\n"
       "[pingpong]  model        = %s\n"
       "[pingpong]  trace_csv    = %s\n"
@@ -644,8 +723,11 @@ int main(int argc, char** argv) {
       pcfg.legs_passive ? "true" : "false",
       pcfg.legs_passive ? (legs_official_gains ? "official" : "trained") : "n/a (policy)",
       pcfg.waist_passive ? (waist_official_gains ? "official" : "trained") : "swing",
+      pcfg.auto_leg_hold ? "ON" : "off",
       gain_scale.load(), swing_speed,
       leg_gain_banner, ankle_gain_banner, motion_blend_sec,
+      leg_stand_gains ? "ON" : "off",
+      squat_guard_rad, tilt_guard, pcfg.leg_clamp_rad, pcfg.leg_smooth_alpha,
       no_publish ? "DISABLED" : "enabled",
       model_path.c_str(),
       trace_path.empty() ? "<none>" : trace_path.c_str(),

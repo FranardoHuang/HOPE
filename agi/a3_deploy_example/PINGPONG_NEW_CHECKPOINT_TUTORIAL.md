@@ -1209,8 +1209,8 @@ with **Terminal A already running HAL/EtherCAT** (Stage 6.1).
 ```bash
 cd /agibot/a3_deploy
 file ./a3_deploy_onnx_ref_pingpong     # -> ELF 64-bit ... aarch64
-strings ./a3_deploy_onnx_ref_pingpong | grep -E "target_src|action_src|fullbody|leg_hold|waist_hold" | head
-#   MUST print all five (waist_hold = THIS build, the legs+waist-held-official-gains fix).
+strings ./a3_deploy_onnx_ref_pingpong | grep -E "fullbody|leg_hold|waist_hold|auto_hold" | head
+#   MUST print all four (auto_hold = THIS build, the --auto-leg-hold ready<->swing feature).
 #   Missing any -> stale binary -> rebuild rockchip + reship (Stage C box).
 ```
 
@@ -1373,6 +1373,20 @@ low → raise `--leg-gain-scale`.** Bounded + quiet (legs holding, gravX settlin
 
 ### Stage G4 — Low-gain continuous swing (level 1, short burst)
 
+> 🔑 **CORRECTED 2026-06-30 — the failure is LEVEL 0, not legs-in-the-loop. LEVEL 1 full-body WORKS.**
+> The level-0 re-test (no `--legs-passive`, leg 0.5 / ankle 1.0, `--official-stand`) lifted a foot
+> *worse* than before (legs measured **2.6 rad**, hip_pitch cmdR **3.08**, **gravX 0.67 / ~42°**,
+> right_ankle_pitch clamped **95% / 7.3 rad over**) — but that is the **frozen-windup level-0 hold**
+> (clock pinned `ts=0`, `tts=5.000` constant → an OOD fixed point; in training the clock always
+> advanced). At **level 1** (clock advancing through the trained motion) the **full-body legs-in-the-
+> loop swing works on the ground — complete swing + self-balancing ("自己调整位置")**, operator-
+> observed. It recovered cleanly on `s`/PD_STAND, `halts=0`/`sync_miss=0` (policy chaos at level 0,
+> not a fault). **So a legs-in-loop ground swing does NOT need a retrain** — enter MOTION **at level 1**
+> and never dwell at level 0. The remaining piece is the level-0 "ready/wait" state (between swings):
+> don't freeze at the windup — front-end fix is to hold the legs (Tier-1 mode) while waiting and release
+> to full-body at level 1, or keep the clock gently looping. Capture a clean `--level 1`-from-start
+> full-body trace to document. Tier-1 (Stage G3′) remains a safe fallback demo.
+
 Only after G3 settles (legs holding, gravX bounded). `level 1` is **closer to the training
 distribution** than the frozen level 0, so the swing is smoother — keep arm gain low, legs stiff,
 burst short.
@@ -1423,6 +1437,187 @@ taskset -c 4-7 ./a3_deploy_onnx_ref_pingpong --runtime-cfg $RT \
 # keys: s -> m -> (stays level 1) -> dwell one clean swing window -> q. Keep gain FIXED.
 sed -n '/FIRST-TICK DEBUG/,/^==*$/p' "$RUN/status.log" > "$RUN/first_tick.txt"
 ```
+
+### Stage G7 — Deployable full-body: `--auto-leg-hold` (ready ↔ swing)
+
+The deployable behavior, built on the level-0/level-1 finding: **`--auto-leg-hold` holds legs+waist at
+level 0 (stable ready stand — avoids the frozen-windup foot-lift) and releases them at level 1
+(full-body self-balancing swing).** The `0`/`1` key becomes "ready ↔ swing", both stable. The
+pose-blend re-arms on the toggle so the stiff official stand gains do **not** snap the legs on the
+1→0 re-engage (no jump). Rope **on** for the first `0↔1` toggles.
+
+```bash
+RT=config/a3_runtime_config.pingpong.yaml
+RUN=/tmp/pp_ground_g7_autohold; mkdir -p "$RUN"
+taskset -c 4-7 ./a3_deploy_onnx_ref_pingpong --runtime-cfg $RT \
+  --start passive --official-stand --auto-leg-hold --level 0 --gain-scale 0.30 --motion-blend-sec 0.8 \
+  --trace-csv "$RUN/trace.csv" --obs-csv "$RUN/obs.csv" 2>&1 | tee "$RUN/status.log"
+# banner: auto_hold = ON.  Start at level 0 (legs+waist HELD = stable ready).
+# s (PD_STAND official, rope slack -> confirm it stands)
+# m (MOTION, still level 0 -> legs HELD, stable ready stand, status legs_passive=1)
+# 1 (RELEASE -> full-body swing, legs_passive flips to 0, gravX bounded, self-balances)
+# 0 (re-HOLD -> back to stable ready, NO jump thanks to the blend; legs_passive=1)
+#  ... repeat 1/0 a few times, watch the toggle ...   p   q
+sed -n '/FIRST-TICK DEBUG/,/^==*$/p' "$RUN/status.log" > "$RUN/first_tick.txt"
+```
+**Watch at each toggle:** `legs_passive=` flips 1↔0 with the level; the `[fullbody]` `Lleg/Rleg cmdR`
+goes ~0 (held) at level 0 and moderate (~0.6 rad) at level 1; `gravX` stays bounded through the
+release **and** the re-engage (no jolt). If the 1→0 re-engage still jumps, raise `--motion-blend-sec`
+(e.g. 1.0). **STOP** on any tip that doesn't settle, hip/knee jump, `halts`/`sync_miss` rising.
+
+> 🔑 **Swing-clock reset (fix 2026-06-30):** on each `0→1` release the swing clock resets to its
+> **windup** so `ts` starts **near 0** and the swing begins from the start (matching the held pose).
+> Before this fix, the free-running clock made a release snap into a mid-cycle phase (`ts≈78`) while
+> the legs were still at the stand → lurch/fall. **Verify after pressing `1`: `ts` should start low,
+> not jump to a mid value.** Use `--leg-gain-scale 0.5 --ankle-gain-scale 1.0` (the gains that
+> balanced standalone) — a bare `--gain-scale 0.30` leaves the legs/ankle too soft.
+>
+> ✅✅ **VERIFIED 2026-07-01:** with the clock fix, pressing `1` gives `ts=0` at release and the
+> full-body swing runs **balanced** — gravX bounded −0.01…0.13, gravZ −1.00, legs+waist driven
+> (cmdR 0.5–1.3, ankle within range), `halts=0`/`sync_miss=0`, clock cycling 0→50→0. The auto-hold
+> **ready (level 0) ↔ full-body swing (level 1)** loop works on the ground (legs-in-the-loop, no
+> retrain). Mild windup-phase lean (gravX ~0.13) is the static residual; optional polish = a
+> swing-speed ramp on release.
+
+### Stage G8 — Knee-sink under load: a posture *cap* (`--leg-clamp-rad`) — but NOT the weight-bearing fix
+
+> ⚠️ **READ G9 FIRST.** Hardware (2026-07-01) showed the clamp is only a **safety limiter**: when the
+> hoist is lowered the knees STILL sink (the clamp adds zero holding torque), then the squat guard
+> reverts to level 0. The real fix is **leg stiffness → Stage G9 (`--leg-stand-gains`)**. The clamp is
+> still useful *with* G9 (it keeps the now-stiff legs near upright), but on its own it does not
+> make the legs weight-bearing. The diag below correctly shows the policy commands a crouch — that's
+> real — but capping the crouch is not enough; the legs also need the stiffness to hold the body up.
+
+
+
+When the hoist is **lowered** at level 1, the knees **sink** and the robot crouches/leans forward —
+even with `--leg-gain-scale 0.7`. The per-joint leg diag (now printed when legs are policy-driven)
+root-causes it: **the policy COMMANDS a deep crouch-and-lean, it is NOT a soft-PD collapse.**
+
+```
+-- LEGS (policy-driven) --   (level 1, --leg-gain-scale 0.7)
+ left_hip_pitch    des=-0.50..-0.60   q=-0.23..-0.30   err -0.27..-0.29  trk 12-22%
+ right_hip_pitch   des=-0.58..-0.77   q=-0.24..-0.35   err -0.34..-0.42  trk 19-35%
+ left_knee         des=+0.55..+0.60   q=+0.42..+0.56                     trk 31-54%
+ right_knee        des=+0.76..+0.67   q=+0.43..+0.58                     trk 36-65%
+ left_ankle_pitch  des=-0.91          q=-0.22..-0.30   err -0.69..-0.60  trk 11-20%
+ right_ankle_pitch des=-0.41..-0.68   q=-0.21..-0.28   err -0.19..-0.40  trk  6-10%
+```
+
+`des` itself is a squat: **hip_pitch −0.6…−0.77** (torso pitched forward), **knee +0.6…+0.67**,
+**ankle_pitch −0.7…−0.9** (dorsiflexed). That triad is the trained "plant-and-weight-shift" swing
+posture — legitimate in sim where the planted-foot contact dynamics hold it, but on the real robot
+it is **not a stable static stand**: the CoM target is well forward of the feet. So the sink is the
+robot (partially) *following* a crouch command, not the leg PD failing to hold a good pose.
+
+> ⚠️ **Therefore raising `--leg-gain-scale` to 0.8 is the WRONG lever** — a stiffer leg tracks the
+> crouch *more faithfully* → it squats harder and pitches forward → falls. (That is why 0.7 already
+> sank and the squat guard tripped — correctly.) **The fix is to cap the commanded crouch**, not to
+> chase it harder.
+
+**Fix — `--leg-clamp-rad R`** (front-end only; AGI's MJCF/PD untouched): clamps each **policy-driven**
+leg slot to `nominal ± R` rad, keeping the legs near the proven upright stand while leaving room for
+small balance moves. No-op when legs are HELD (level 0) or `R=0`. The diag's leg `des` after the clamp
+shows the bounded values (e.g. hip_pitch `des` capped near nominal±R instead of −0.77), which is the
+verification signal. The `[pp SAFETY]` squat/tilt guard stays armed as the hard fallback.
+
+```bash
+RT=config/a3_runtime_config.pingpong.yaml
+RUN=/tmp/pp_ground_g8_legclamp; mkdir -p "$RUN"
+taskset -c 4-7 ./a3_deploy_onnx_ref_pingpong --runtime-cfg $RT \
+  --start passive --official-stand --auto-leg-hold --level 0 \
+  --gain-scale 0.30 --leg-gain-scale 0.7 --ankle-gain-scale 1.0 --motion-blend-sec 0.8 \
+  --leg-clamp-rad 0.25 \
+  --trace-csv "$RUN/trace.csv" --obs-csv "$RUN/obs.csv" 2>&1 | tee "$RUN/status.log"
+# banner: safety = ... leg_clamp=0.25rad
+# s -> m (level 0 held, stands free) -> 1 (release) -> WATCH the leg des in [diag]:
+#   hip_pitch des should be ~nominal-0.25 (NOT -0.77); ankle_pitch des ~nominal-0.25 (NOT -0.9).
+#   Knees should hold; gravX bounded. Lower the hoist GRADUALLY (rope still on).
+# If it still leans -> drop to --leg-clamp-rad 0.15.  If too stiff/robotic, won't shift weight -> 0.35.
+```
+**HOIST / LIGHT SUPPORT ONLY** until the knee holds under load. The guard auto-reverts to level 0
+(held official stand) on knee-sink (knee bend > `--squat-guard-rad`) or tilt (`|gravX/Y|` >
+`--tilt-guard`); press `1` to retry once stable.
+
+### Stage G9 — Weight-bearing released legs: `--leg-stand-gains` (the real knee-sink fix)
+
+**Root cause of the knee-sink, quantified.** The leg that HOLDS at level 0 and the leg that SINKS at
+level 1 differ in **stiffness**, not posture:
+
+| leg joint | official ground-stand kp (`a3_pd_stand_kps`) | policy kp (raw ONNX) | released kp @ `--leg-gain-scale 0.6` |
+|---|---|---|---|
+| **knee** | **2000** | ≤250 | ~150 |
+| hip_pitch | 1500 | ~150 | ~90 |
+| ankle_pitch | 500 | ~60 | ~36 |
+
+At level 0 the held knee runs at **kp 2000** (AGI's proven ground stand) → bears weight, stands free.
+At level 1 the released knee drops to the **policy PD ≈ 150** — **~13× softer** — so it sags under real
+body load. The clamp (G8) limits q_des but adds no torque, so it can't fix this.
+
+**Fix — `--leg-stand-gains`:** keep AGI's official ground-stand PD on the legs **even when RELEASED**
+(level 1). The policy still drives the (clamped) leg q_des, but the gains are the weight-bearing ones,
+so the knees hold the body up like the level-0 hold while making small swing-coupled moves. Front-end
+only (AGI's MJCF/PD untouched); `--leg/--ankle-gain-scale` are ignored for the legs (official verbatim).
+
+```bash
+RT=config/a3_runtime_config.pingpong.yaml
+RUN=/tmp/pp_ground_g9_standgains; mkdir -p "$RUN"
+taskset -c 4-7 ./a3_deploy_onnx_ref_pingpong --runtime-cfg $RT \
+  --start passive --official-stand --auto-leg-hold --level 0 \
+  --leg-stand-gains --leg-clamp-rad 0.15 \
+  --gain-scale 0.30 --motion-blend-sec 0.8 \
+  --trace-csv "$RUN/trace.csv" --obs-csv "$RUN/obs.csv" 2>&1 | tee "$RUN/status.log"
+# banner: leg_stand_g = ON   safety = ... leg_clamp=0.15rad
+# s -> m (level 0 held, stands free) -> 1 (release) -> LOWER THE HOIST GRADUALLY, rope still on.
+```
+
+> 🔑 `--leg-stand-gains` **requires** `--official-stand` and pairs with a **TIGHT** `--leg-clamp-rad`
+> (0.15–0.20): stiff gains (kp~2000) drive the leg firmly to whatever the clamp allows, so a loose
+> clamp would force a stiff *crouch*. A tight clamp keeps the firm legs near the upright stand.
+
+**Watch:** with the hoist lowered, the knees should **hold** (no sink) — `[diag]` `left/right_knee_joint`
+`q` stays near the clamped `des`, `baseZ` no longer dips at the strike, the squat guard does NOT trip.
+**Expected residual:** a forward **lean** during the forehand reach may remain — stiff legs hold a
+near-fixed pose, they don't *actively* rebalance the swing's CoM shift (same residual as the Tier-1
+arms-only deploy). Reduce it with a gentler swing (`--gain-scale 0.20→0.15`). **A fully balanced
+dynamic legs-in-the-loop swing — legs actively shifting to counter the CoM — needs the RETRAIN (Path B);
+the front end can make the legs bear weight, not learn to balance.** **HOIST / light support only.**
+
+#### G9.1 — Stiff gains TWITCH; smooth the leg reference (`--leg-smooth-alpha`)
+
+Hardware (2026-07-01): `--leg-stand-gains` alone makes the legs **twitch/convulse at level 1**. The
+official gains are *static-hold* gains (silent at level 0 holding a constant pose); at level 1 the
+policy drives a **time-varying** leg q_des and — because the clamp/hold keeps the leg near nominal —
+the policy sees its leg commands aren't followed, escalates/saturates the leg action, and q_des
+chatters at the clamp boundary every tick. ×kp 2000 = violent chatter.
+
+> **The soft/stiff bracket:** soft policy gains → knees **sink** (no weight-bearing); stiff official
+> gains → legs **twitch** (can't track the moving/OOD policy reference). No single gain wins —
+> the trained policy's leg commands assume sim planted-foot contact dynamics that don't exist on the
+> real standing robot. The proper fix is the **retrain (Path B)**; the front-end attempt below is
+> a long shot.
+
+**`--leg-smooth-alpha A`** EMA-low-passes the released leg q_des (`out = A*in + (1-A)*prev`, seeded
+from nominal) so the stiff gains track a SMOOTH reference instead of the jitter. `A=1.0` off;
+`A≈0.2` moderate (τ≈4 ticks @50 Hz); smaller = heavier (as `A→0` the legs approach a stiff *held*
+stand — safe, bears weight, but barely moves). The experiment is whether some `A` lets the legs move
+enough to be "in the loop" without twitching.
+
+```bash
+RT=config/a3_runtime_config.pingpong.yaml
+RUN=/tmp/pp_ground_g9_smooth; mkdir -p "$RUN"
+taskset -c 4-7 ./a3_deploy_onnx_ref_pingpong --runtime-cfg $RT \
+  --start passive --official-stand --auto-leg-hold --level 0 \
+  --leg-stand-gains --leg-clamp-rad 0.15 --leg-smooth-alpha 0.2 \
+  --gain-scale 0.30 --motion-blend-sec 0.8 \
+  --trace-csv "$RUN/trace.csv" --obs-csv "$RUN/obs.csv" 2>&1 | tee "$RUN/status.log"
+# banner: leg_stand_g = ON,  safety = ... leg_smooth=0.20
+# s -> m -> 1 -> watch the LEGS: twitch gone? then lower the hoist GRADUALLY.
+# Still twitches -> drop --leg-smooth-alpha to 0.10 (heavier).  Sluggish but stable -> that's the floor.
+```
+
+If no `A` gives a twitch-free swing where the legs still contribute, the front-end is exhausted →
+ship **Tier-1** (held legs + arms swing) and **retrain (Path B)** for legs-in-the-loop.
 
 ### Pull logs + analyze (dev box)
 

@@ -108,6 +108,22 @@ struct PpPolicyConfig {
                                  // the feet → a STATIC leg hold can't rebalance → tips forward.
                                  // Freezing the waist keeps the torso CoM over the feet for an
                                  // ARMS-ONLY ground swing (with --official-stand → official gains).
+  bool auto_leg_hold = false;    // dynamic hold: at level 0 (ready/windup) HOLD legs+waist (stable
+                                 // stand, avoids the frozen-windup OOD foot-lift); at level 1 (swing)
+                                 // RELEASE them (full-body self-balancing swing). The driver flips
+                                 // set_legs_passive/set_waist_passive each tick from the level.
+  double leg_smooth_alpha = 1.0; // EMA low-pass on the POLICY-DRIVEN leg q_des: out = a*in + (1-a)*prev.
+                                 // 1.0 = off (no smoothing). <1 removes the tick-to-tick jitter that
+                                 // stiff weight-bearing gains (--leg-stand-gains) amplify into a TWITCH;
+                                 // ~0.2-0.3 = moderate (tau ~3-4 ticks @50Hz). Seeded from nominal so the
+                                 // release does not jump; no-op when legs are HELD. See --leg-smooth-alpha.
+  double leg_clamp_rad = 0.0;    // 0 = off. >0 clamps each POLICY-DRIVEN leg slot (level-1
+                                 // released swing) to nominal ± this band, capping the deep
+                                 // crouch-and-lean the trained swing commands (hip_pitch -0.6..
+                                 // -0.77, ankle_pitch -0.7..-0.9 rad) that the real robot cannot
+                                 // hold standing -> knees sink. Keeps legs near the proven upright
+                                 // stand while leaving room for small balance moves. No-op when
+                                 // legs are HELD (already nominal). See --leg-clamp-rad.
   bool use_base_estimator = false;  // leg-FK + IMU pelvis-height estimate (planted feet).
                                     // ON for the ground test; OFF on the hoist (feet hang ->
                                     // planted assumption invalid -> use nominal height).
@@ -154,10 +170,13 @@ class PpPolicy {
   PpPolicy(const std::string& onnx_path, PpPolicyConfig cfg = {})
       : onnx_(onnx_path), cfg_(cfg), level_(cfg.level),
         swing_speed_(cfg.swing_speed), swing_dir_(cfg.start_backhand ? -1 : 1),
+        legs_passive_(cfg.legs_passive), waist_passive_(cfg.waist_passive),
+        leg_clamp_rad_(cfg.leg_clamp_rad), leg_smooth_alpha_(cfg.leg_smooth_alpha),
         last_action_(Eigen::VectorXd::Zero(kNumJoints)) {
     if (!build_src_to_sdk(onnx_.joint_names(), isaac_to_sdk_))
       throw std::runtime_error("pingpong: ONNX joint_names do not map onto the backend layout");
     nominal_q_sdk_ = to_sdk_order(onnx_.default_q(), isaac_to_sdk_);  // nominal pose in SDK order
+    leg_qdes_smooth_ = nominal_q_sdk_;  // seed the leg q_des EMA at nominal (no jump on first release)
     // Official robust-stand PD gains (a3_pd_stand_*, 29-DOF policy view) scattered
     // to the 31 SDK slots via kA3PolicyToSdkIdx; neck slots get the fixed head PD.
     official_kp_sdk_ = Eigen::VectorXd::Zero(kNumJoints);
@@ -254,8 +273,12 @@ class PpPolicy {
 
   // Full-body gate: true => leg q_des is overwritten to nominal (NOT a full-body
   // test); false => the policy's leg actions pass through (31-DOF command check).
-  bool legs_passive() const { return cfg_.legs_passive; }
-  bool waist_passive() const { return cfg_.waist_passive; }
+  // Atomic so --auto-leg-hold can flip it per-tick from the driver thread while the
+  // status thread reads it. Initialised from cfg in the constructor.
+  bool legs_passive() const { return legs_passive_.load(); }
+  bool waist_passive() const { return waist_passive_.load(); }
+  void set_legs_passive(bool v) { legs_passive_.store(v); }
+  void set_waist_passive(bool v) { waist_passive_.store(v); }
 
   PpRacketTarget ScriptedTarget(std::uint64_t tick_idx) const {
     PpRacketTarget tg;
@@ -267,7 +290,12 @@ class PpPolicy {
     tg.vel_w = cfg_.racket_vel_w;
     tg.swing_sign = (dir >= 0 ? 1.0 : -1.0);  // +1 fore / -1 back
     tg.base_target_xy = Vec2::Zero();
-    const double t = tick_idx * cfg_.dt * swing_speed_.load();  // slowed clock (swing_speed<1)
+    // Swing clock measured from the origin set on each level->1 entry (see ComputeCommand),
+    // so a release from a long level-0 hold starts the swing at the WINDUP (matching the held
+    // pose) instead of snapping into the free-running mid-cycle phase, which would mismatch the
+    // body and lurch the robot. swing_speed<1 stretches the clock.
+    const std::uint64_t origin = swing_clock_origin_.load();
+    const double t = (tick_idx >= origin ? tick_idx - origin : 0) * cfg_.dt * swing_speed_.load();
     if (level_.load() == 0) {
       tg.time_to_strike = 5.0;  // far away -> clock holds at clip start (wind-up)
     } else {
@@ -280,6 +308,12 @@ class PpPolicy {
   // CommandFn body. Fills a full 31-slot RobotCommand (SDK order). Always valid.
   bool ComputeCommand(std::uint64_t tick_idx, const robot_io::RobotState& state,
                       robot_io::RobotCommand& cmd) {
+    // Reset the swing clock to its windup whenever (re)entering level 1, so a release from a
+    // level-0 hold begins the swing at the start (ts->0, matching the held body) rather than
+    // snapping into a free-running mid-cycle phase (-> reference/body mismatch -> lurch/fall).
+    const int swing_lvl_now = level_.load();
+    if (swing_lvl_now == 1 && swing_level_prev_ != 1) swing_clock_origin_.store(tick_idx);
+    swing_level_prev_ = swing_lvl_now;
     const PpRacketTarget tg = ScriptedTarget(tick_idx);
     const int clip_id = clip_id_from_swing_sign(tg.swing_sign);
     const int time_step = clip_.time_step_for(clip_id, tg.time_to_strike);
@@ -372,10 +406,11 @@ class PpPolicy {
     // LEGS PASSIVE (hoisted demo): hold legs at nominal stand with the trained
     // leg PD. Removes leg twitch caused by balance corrections against the
     // nominal-base-position obs (no localisation). Arm + waist still swing.
-    if (cfg_.legs_passive) {
+    if (legs_passive_.load()) {
       // Hold legs at nominal with the TRAINED leg PD (ran clean on the hoist).
       // The stiff official ground-stand gains buzz/swing a hoisted robot, so
       // they are NOT used here; they live behind --official-stand for Step 2.
+      // With --auto-leg-hold this flips true at level 0 / false at level 1.
       for (int s = kLegSlotStart; s < kLegSlotStart + kLegSlotCount; ++s)
         q_sdk[s] = nominal_q_sdk_[s];
     }
@@ -386,9 +421,40 @@ class PpPolicy {
     // rebalance that. Freezing the waist makes the swing ARMS-ONLY but keeps the
     // CoM over the base of support. Gains: official ground-stand kp/kd applied in
     // a3_pingpong_main when --official-stand is set (else the trained waist PD).
-    if (cfg_.waist_passive) {
+    if (waist_passive_.load()) {
       for (int s = kWaistSlotStart; s < kWaistSlotStart + kWaistSlotCount; ++s)
         q_sdk[s] = nominal_q_sdk_[s];
+    }
+
+    // LEG q_des CLAMP (released full-body swing only): the trained swing commands a
+    // deep crouch-and-lean (hip_pitch -0.6..-0.77, knee +0.6, ankle_pitch -0.7..-0.9
+    // rad) that assumes planted-foot contact dynamics. On the real robot that posture
+    // is not a stable static stand -> tracking it sinks the knees / pitches forward.
+    // Clamp each policy-driven leg slot to nominal ± leg_clamp_rad_ to keep the legs
+    // near the proven upright stand while leaving room for small balance moves. The
+    // policy still sees the true measured q in obs, so its feedback loop is intact.
+    // No-op when legs are HELD (already nominal) or when the band is 0 (off).
+    if (leg_clamp_rad_ > 0.0 && !legs_passive_.load()) {
+      for (int s = kLegSlotStart; s < kLegSlotStart + kLegSlotCount; ++s) {
+        const double lo = nominal_q_sdk_[s] - leg_clamp_rad_;
+        const double hi = nominal_q_sdk_[s] + leg_clamp_rad_;
+        q_sdk[s] = std::min(std::max(q_sdk[s], lo), hi);
+      }
+    }
+
+    // LEG q_des LOW-PASS (released swing only): EMA-smooth the leg q_des so stiff
+    // weight-bearing gains (--leg-stand-gains, kp~2000) track a SMOOTH reference
+    // instead of the policy's tick-to-tick jitter (which they amplify into a TWITCH).
+    // Runs AFTER the clamp, so the EMA of in-band values stays in band. Seeded from
+    // nominal; while legs are HELD it tracks nominal so the next release starts smooth.
+    if (leg_smooth_alpha_ < 1.0 && leg_qdes_smooth_.size() == kNumJoints) {
+      const double a = leg_smooth_alpha_;
+      const bool released = !legs_passive_.load();
+      for (int s = kLegSlotStart; s < kLegSlotStart + kLegSlotCount; ++s) {
+        leg_qdes_smooth_[s] = released ? (a * q_sdk[s] + (1.0 - a) * leg_qdes_smooth_[s])
+                                       : q_sdk[s];  // held: track nominal, re-seed for release
+        q_sdk[s] = leg_qdes_smooth_[s];
+      }
     }
 
     // SAFETY: clamp q_des to the MJCF/URDF joint position limits before publish.
@@ -561,6 +627,13 @@ class PpPolicy {
   std::atomic<int> level_;
   std::atomic<double> swing_speed_;
   std::atomic<int> swing_dir_;  // +1 forehand / -1 backhand (scripted; live f/b toggle)
+  std::atomic<bool> legs_passive_{false};   // hold legs at nominal (dyn: --auto-leg-hold flips by level)
+  std::atomic<bool> waist_passive_{false};  // hold waist at nominal (dyn: --auto-leg-hold flips by level)
+  double leg_clamp_rad_ = 0.0;              // clamp policy-driven leg q_des to nominal ± band (0=off)
+  double leg_smooth_alpha_ = 1.0;           // EMA low-pass on released leg q_des (1=off)
+  Eigen::VectorXd leg_qdes_smooth_;         // EMA state for the leg q_des low-pass (seeded to nominal)
+  std::atomic<std::uint64_t> swing_clock_origin_{0};  // tick offset; reset on each level->1 entry
+  int swing_level_prev_ = 0;                          // ComputeCommand (driver thread) only
   ClipLayout clip_;
   std::array<int, 31> isaac_to_sdk_{};
   Eigen::VectorXd nominal_q_sdk_;
