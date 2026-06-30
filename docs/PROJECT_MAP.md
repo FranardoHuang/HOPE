@@ -39,7 +39,14 @@ Future packages should be added here when they are runtime ROS packages, for exa
 | `agi/A3_MuJoCo_Sim/` | MuJoCo/AimRT simulation example and source |
 | `agi/code_deployment/` | A3 deployment documents and source examples |
 | `agi/code_deployment/a3_deploy_example/` | Tracked source/config subset of the Agibot deploy package |
+| `agi/a3_deploy_example/` | Ignored local deploy working package observed on 2026-06-30; includes ping-pong C++ runner, dist config, binaries, and local `model_15200.onnx` |
 | `vendor_assets/agibot/a3_deploy_example_full/` | Full local deploy package including heavy models, sysroots, and binaries |
+
+Do not confuse `agi/code_deployment/a3_deploy_example/` with the ignored local
+`agi/a3_deploy_example/` working package. Source/config that becomes part of the
+accepted G07 path should be promoted into tracked source; heavy generated
+models, runtime libraries, and binaries should stay in ignored asset roots with
+fingerprints recorded in the relevant operation doc.
 
 ## Training Zone
 

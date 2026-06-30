@@ -1,0 +1,38 @@
+wbc_runner:
+  ros__parameters:
+    # --- mode + safety gate ---
+    # dry_run (default) = log only, NEVER publishes; shadow = predict on real state, no publish;
+    # hardware = publish joint cmds ONLY when hardware_enable AND !estop.
+    mode: "dry_run"
+    hardware_enable: false
+    estop_topic: "/hope/estop"
+    enable_topic: "/hope/hardware_enable"
+
+    # --- policy ---
+    onnx_path: ""            # REQUIRED: .../exported/policy.onnx (re-exported with BOTH clips, ~1.24 MB)
+    std_path: ""             # optional; only used if dither_scale > 0
+    dither_scale: 0.0        # 0 = deterministic (recommended; dither not needed and hurts backhand)
+    control_rate_hz: 50.0    # MUST be 50 Hz (training control rate)
+
+    # --- reference clip layout (must match the ONNX export's clip order) ---
+    seg_len: [95, 105]       # (forehand, backhand) frame counts -> total 200
+    strike_phase: [0.36, 0.50]   # (forehand, backhand) contact phase (matches model_15200 training)
+
+    # --- command handling ---
+    command_timeout_s: 0.5   # stale /racket/command -> idle (hold stand pose)
+    base_target_xy: [0.0, 0.0]   # desired base XY (world); robot holds position
+
+    # --- state source ---
+    state_source: "synthetic"    # synthetic (dry-run, perfect-tracking) | ros (subscribe joints+imu)
+    joint_state_topic: "/a3/joint_states"   # robot joint feedback (shadow/hardware)
+    joint_state_type: "sensor_msgs"          # "sensor_msgs" (std JointState) | "joint_msgs" (a3 sim JointState)
+    imu_topic: "/a3/imu"                     # sensor_msgs/Imu (orientation + body-frame gyro)
+    base_pose_topic: ""                      # OPTIONAL geometry_msgs/PoseStamped pelvis world pose; "" => nominal
+    nominal_base_height: 0.95    # fallback pelvis z when no base_pose_topic (sim2real localisation gap)
+    torso_offset_z: 0.20         # fallback torso-above-pelvis z
+
+    # --- output ---
+    joint_command_topic: "/a3/joint_command"  # joint_msgs/JointCommand (hardware mode only)
+
+    # --- logging ---
+    csv_path: ""             # e.g. "/tmp/wbc_runner.csv"; "" disables

@@ -35,6 +35,7 @@ Current ignored local asset roots:
 - `vendor_assets/`
 - `external_repos/`
 - `tmp/`
+- `agi/a3_deploy_example/` when present as a local full deploy working package
 
 ## Agibot Deploy Assets
 
@@ -46,7 +47,19 @@ The complete original payload is kept locally under:
 
 - `vendor_assets/agibot/a3_deploy_example_full/`
 
+An additional ignored local working package was observed on 2026-06-30:
+
+- `agi/a3_deploy_example/`
+
+That package contains a ping-pong C++ runner, dist configs, binaries, and
+`model_15200.onnx`. Treat it as local evidence, not as a reproducible dependency,
+until its source/config changes are promoted into tracked source and heavy
+artifacts are moved or fingerprinted under the agreed ignored-asset policy.
+
 If a command depends on a file inside `vendor_assets/`, the operation doc must say so and give the expected path.
+If a command depends on the ignored `agi/a3_deploy_example/` package, the
+operation doc must also say so and record exact fingerprints for binaries and
+models.
 
 ## External Repos
 

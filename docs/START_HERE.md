@@ -23,7 +23,7 @@ The goal is not to blindly clone every HITTER detail. The goal is to preserve th
 | G04 Sim modeling in MuJoCo and Isaac | Partial | [G04](gates/G04_sim_modeling_mujoco_isaac.md) |
 | G05 Isaac training first loop | Partial | [G05](gates/G05_isaac_training_first_loop.md) |
 | G06 Isaac-to-MuJoCo parity | Not started | [G06](gates/G06_isaac_to_mujoco.md) |
-| G07 MuJoCo-to-real deployment | Not complete | [G07](gates/G07_mujoco_to_real.md) |
+| G07 MuJoCo-to-real deployment | Partial | [G07](gates/G07_mujoco_to_real.md) |
 | G08 Blind-spot improvements | Research track | [G08](gates/G08_blind_spot_improvements.md) |
 
 Status labels:
@@ -92,6 +92,7 @@ Do not hide project state in chat history. If a future contributor or agent need
 - Planner runtime: see [operations/run_planner.md](operations/run_planner.md).
 - Isaac training: see [operations/run_training.md](operations/run_training.md).
 - A3 deploy dry-run: see [operations/run_deploy_dryrun.md](operations/run_deploy_dryrun.md).
+- New ping-pong checkpoint → full deploy (`.pt` → ONNX → AGI parity → MuJoCo → Rockchip → hardware, with the distrobox for each step): see [agi/a3_deploy_example/PINGPONG_NEW_CHECKPOINT_TUTORIAL.md](../agi/a3_deploy_example/PINGPONG_NEW_CHECKPOINT_TUTORIAL.md).
 - Local assets and sync: see [operations/setup_local_sync.md](operations/setup_local_sync.md).
 
 ## Current Known Environment Limits

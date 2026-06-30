@@ -10,27 +10,46 @@ The baseline policy should be compatible with the HITTER-style separation:
 - WBC policy combines planner target, robot state, and previous action.
 - Policy outputs desired joint positions.
 
-## Actor Observation (implemented)
+## Current `model_15200.onnx` Contract
 
-Source of truth: `hope_env_cfg.py`. The actor (policy) group is the BeyondMimic
-proprioceptive + motion terms inherited from `tracking_env_cfg.py` `PolicyCfg`,
-PLUS the following appended HOPE terms:
+Source of truth for the current exported ping-pong deployment artifact is the
+training/eval path around `HOPEPingPong`, `hope_env_cfg.py`, and
+`mujoco_eval_onnx.py`, plus ONNX metadata once inspected in the target runtime.
 
-- `projected_gravity` (3) — Unoise +/-0.05; this is the orientation cue
-- `base_target_pos_b` (2)
-- `racket_target_pos_b` (3) — Unoise +/-0.02
-- `racket_target_vel_w` (3)
-- `time_to_strike` (1)
+The observed deploy contract for `model_15200.onnx` is:
 
-`swing_type` is omitted by default (it is constant per forehand/backhand policy).
+- Input `obs`: shape `[1, 180]`.
+- Input `time_step`: shape `[1, 1]`.
+- Action output: shape `[1, 31]`.
+- Additional reference outputs may be present and should be logged, not used as
+  hardware commands.
+
+The 180-D actor observation order is:
+
+| Slice | Dimension | Meaning |
+| --- | ---: | --- |
+| `command` | 62 | Reference joint positions and velocities |
+| `motion_anchor_pos_b` | 3 | Motion anchor position in body/base frame |
+| `motion_anchor_ori_b` | 6 | Motion anchor orientation representation |
+| `base_ang_vel` | 3 | Base angular velocity |
+| `joint_pos` | 31 | Joint position offset from default |
+| `joint_vel` | 31 | Joint velocity |
+| `last_action` | 31 | Previous policy action |
+| `projected_gravity` | 3 | Orientation cue |
+| `base_target_pos_b` | 2 | Target base position in body/base frame |
+| `racket_target_pos_b` | 3 | Target racket position in body/base frame |
+| `racket_target_vel_w` | 3 | Target racket velocity in world frame |
+| `time_to_strike` | 1 | Time-to-strike scalar |
+| `swing_type` | 1 | Forehand/backhand or unified-policy swing flag |
 
 Notes / corrections:
 
-- "base forward vector" is NOT implemented; `projected_gravity` is the
+- `swing_type` is present in the current unified policy contract.
+- Base linear velocity is not part of the current 180-D actor observation.
+- "base forward vector" is not implemented; `projected_gravity` is the
   orientation cue.
-- The inherited BeyondMimic proprio terms include `base_lin_vel` (3), which
-  sits in the ACTOR group. Base linear velocity is not directly observable on
-  hardware, so this is a real sim-to-real concern (not a typo).
+- Hardware deployment must verify how base pose, torso pose, projected gravity,
+  and anchor terms are estimated before accepting real motion quality.
 
 ## Critic-Only (privileged) Observation (implemented)
 
@@ -51,13 +70,16 @@ actor terms it adds the actual racket state computed via FK:
 
 - `ActionsCfg.joint_pos` with `joint_names=[.*]`, `use_default_offset=True`.
 - ACTION = desired joint position targets.
-- Dimension = 31 (training) / 29 (deploy). The 2 neck joints
-  (`head_yaw_joint`, `head_pitch_joint`) are excluded from the deploy policy and
-  driven at deploy `kp=40`/`kd=2` via `ExpandToBackend`. See
-  [joint_order_and_robot_state.md](joint_order_and_robot_state.md).
-- Decoder target = `action * action_scale + default_angle`, with per-joint
-  `action_scale = 0.25 * effort_limit / stiffness`. This must match the deploy
-  action decoder (`a3_action_scale`).
+- Dimension = 31 for the current HOPE `model_15200.onnx` artifact.
+- The official AGI deploy policy uses a different 29-DOF action contract and is
+  not a drop-in front-end for this model.
+- When scattering to the 31-slot SDK/backend command layout, head and neck
+  handling must be explicit. The AGI baseline pins or holds those slots rather
+  than treating them as policy-controlled HITTER joints.
+- Decoder target = `action * action_scale + default_angle`, with the action
+  scale and default angle matching the training/export contract for the exact
+  model artifact. Record the model fingerprint in the relevant gate before
+  hardware use.
 
 ## Contract Knobs
 

@@ -12,6 +12,7 @@ These files and folders are not provided by `git clone`, `git pull`, or normal b
 
 | Path | Purpose | Source | Required By |
 | --- | --- | --- | --- |
+| `agi/a3_deploy_example/` | Local full-ish Agibot deploy working package with ping-pong C++ runner, dist configs, binaries, and `model_15200.onnx` | Local developer/vendor-derived package, ignored by git; observed on 2026-06-30 | G07 ping-pong recovery audit |
 | `vendor_assets/agibot/a3_deploy_example_full/` | Complete Agibot deploy payload, including heavy runtime assets | Private/vendor-gated: Agibot handoff (~1.7 GB, no public URL) | G07 |
 | `external_repos/TTRL-ICRA2026/` | Auto-synced local TTRL reference clone | Public but may be access-gated: [purdue-tracelab/TTRL-ICRA2026](https://github.com/purdue-tracelab/TTRL-ICRA2026.git) | G05, G08 |
 | `hope_training/GMR/` | Motion retargeting (SMPL-X -> robot) clone | Public: [YanjieZe/GMR](https://github.com/YanjieZe/GMR.git) (observed pin `bb1bbe4`) | Motion pipeline |
@@ -30,11 +31,15 @@ Run from the repo root.
 mkdir -p vendor_assets/agibot external_repos
 ```
 
-2. Restore the full Agibot deploy payload when working on deploy, MuJoCo runtime, or hardware dry-run:
+2. Restore the Agibot deploy payloads when working on deploy, MuJoCo runtime, or hardware dry-run:
 
 ```bash
 # Copy or move the Agibot-provided full deploy package here:
 vendor_assets/agibot/a3_deploy_example_full/
+
+# If reproducing the current ping-pong recovery audit exactly, restore the
+# local working package here as well:
+agi/a3_deploy_example/
 ```
 
 Expected contents include heavy runtime assets that should not be committed in normal git:
@@ -50,6 +55,22 @@ The tracked source/config subset lives separately at:
 ```text
 agi/code_deployment/a3_deploy_example/
 ```
+
+For the ignored ping-pong package observed on 2026-06-30, the relevant local
+artifacts were:
+
+```text
+agi/a3_deploy_example/dist/a3_deploy_x86_64/a3_deploy_onnx_ref_pingpong
+agi/a3_deploy_example/dist/a3_deploy_x86_64/models/model_15200.onnx
+agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/src/a3_deploy/a3_pingpong_main.cpp
+agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/a3_pingpong/
+```
+
+The fingerprints and audit sequence are recorded in
+[run_pingpong_recovery_audit.md](run_pingpong_recovery_audit.md). If this
+package becomes the official deployment path, promote source/config changes to
+tracked `agi/code_deployment/a3_deploy_example/` and keep only heavy binaries or
+models ignored.
 
 3. Sync TTRL when a gate needs it:
 
@@ -131,6 +152,7 @@ Check local-only assets:
 
 ```bash
 test -d vendor_assets/agibot/a3_deploy_example_full && echo "Agibot full deploy payload present"
+test -d agi/a3_deploy_example && echo "Local ping-pong deploy package present"
 scripts/sync_external_repos.sh
 ```
 

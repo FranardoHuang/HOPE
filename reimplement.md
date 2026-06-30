@@ -3271,6 +3271,13 @@ can't meet the 0.5 m/s velocity gate. The MuJoCo per-clip eval probe (16.1b) con
 **only** the backhand target box raised backhand composite **0.32 → 0.79** (deterministic) / **0.39 → 0.77**
 (dither) with the forehand result byte-identical.
 
+> **Status update (model_15200).** The champion `model_15200` trained with the **shared** velocity box
+> (per-clip velocity was NOT needed for it). Two things since this probe revised the picture (Step 16.1b):
+> (1) the most dramatic "dead backhand" was an **ONNX export bug** (forehand-only export froze the backhand
+> reference), now fixed; and (2) after the both-clip re-export the backhand swings, and its residual gap is
+> **position accuracy** (~0.085 m), not the velocity gate. Treat per-clip velocity as an available, optional
+> lever — not a prerequisite — and rank checkpoints by `eval_deterministic` + MuJoCo, not this probe alone.
+
 - **Old / default behavior** — one shared velocity box for both clips (`vel_x_range: [1.5, 3.5]`,
   `vel_y_range: [-1, 1]`, `vel_z_range: [0, 1.5]`). This is unchanged and remains the default.
 - **New optional behavior** — `racket:vel_range_per_clip` (commented out in `HOPEPingPong.yaml` by default):
@@ -3408,17 +3415,30 @@ The preferred export path is now built into `scripts/play.py`. When you evaluate
 the script loads the checkpoint and exports `policy.onnx` next to it under the run's `exported/`
 directory. You do not need a separate export script for the normal workflow.
 
-Export and evaluate:
+Export and evaluate. The current champion is the **unified forehand+backhand** policy
+**`model_15200`** (run `2026-06-28_23-01-24_phase050_perclippos_scratch`); export it with **both
+clips** so the ONNX bakes the full reference motion:
 
 ```bash
 # inside the GPU / Isaac distrobox
-hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
-  checkpoint="logs/rsl_rl/agibot_a3_hope/2026-06-24_04-43-26_hope_forehand/model_13100.pt" \
-  motion_file="artifacts/hope_forehand:v0/motion.npz"
-
-hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
-  wandb_path=$WANDB_ENTITY/hope_wbc/PLACEHOLDER_RUN_ID
+RUN=logs/rsl_rl/agibot_a3_hope/2026-06-28_23-01-24_phase050_perclippos_scratch
+hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo headless=true num_envs=2 \
+  checkpoint=$RUN/model_15200.pt \
+  'motion_file=[logs/rsl_rl/eval_motion/fh.npz, logs/rsl_rl/eval_motion/bh.npz]'
+# -> $RUN/exported/policy.onnx (+ learned_std.npy)
 ```
+
+**CRITICAL — export BOTH clips for a unified policy.** `play.py` used to resolve only one motion
+clip, so a unified forehand+backhand checkpoint exported a **forehand-only** ONNX (`time_step_total`=95
+instead of 200). At deploy the backhand `time_step`s then clamp to the last forehand frame → the
+**reference freezes → the backhand never swings** (sim2sim backhand composite collapses to 0). This is
+fixed: `play.py` now resolves `registry_name_2` (and accepts a `motion_file` list) so both clips bake in.
+**Verify it worked:** the resulting `policy.onnx` is **~1.24 MB** (both clips), not ~1.14 MB
+(forehand-only). The 14-tracked-body × 200-frame motion buffer is the size difference.
+
+Deterministic deployment: model_15200 was validated with the **deterministic (mean, no-dither) policy** —
+MuJoCo showed dither is unnecessary for stability and hurts the backhand. `learned_std.npy` is exported
+for completeness but is **not** needed for deterministic inference (see Step 16.1b).
 
 If you want a stable deployment filename, copy the exported file into `hope_training/policies/`
 after each export:
@@ -3533,15 +3553,21 @@ Run it in a plain Python env that has `mujoco` + `onnxruntime` (e.g. conda `hope
 
 ```bash
 # from .../whole_body_tracking. --mjcf is relative to the repo root; everything else to this dir.
-# --onnx/--std default to the basecouple03_resume run; pass them to point at another checkpoint.
-# NOTE: --std does NOT follow --onnx, and any dither mode (noise_scale > 0) requires the std sidecar,
-# so when you override --onnx pass the matching --std (and --out-dir) from the SAME run.
+# Deterministic is the deploy path: --noise-scales 0.0 (no dither). --std is only needed if you add
+# dither (noise_scale > 0); the ONNX emits the mean action so deterministic needs no std sidecar.
+RUN=logs/rsl_rl/agibot_a3_hope/2026-06-28_23-01-24_phase050_perclippos_scratch
 python scripts/mujoco_eval_onnx.py \
-  --onnx logs/rsl_rl/agibot_a3_hope/<RUN>/exported/policy.onnx \
-  --std  logs/rsl_rl/agibot_a3_hope/<RUN>/exported/learned_std.npy \
+  --onnx $RUN/exported/policy.onnx \
+  --std  $RUN/exported/learned_std.npy \
   --mjcf agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml \
-  --motion-files logs/rsl_rl/eval_motion/fh.npz logs/rsl_rl/eval_motion/bh.npz \
   --noise-scales 0.0 0.05 --steps 4000 --pd-mode implicit --seed 0
+# Useful flags:
+#   --strike-phase-per-clip 0.36 0.50   per-clip contact phase. THIS IS NOW THE DEFAULT (fh 0.36 / bh
+#                                       0.50); only pass it for old model_32200-era models (bh 0.74).
+#                                       It MUST match the trained model's strike_phase_per_clip, else the
+#                                       backhand strike is sampled at a dead frame and reads ~0.
+#   --ee-term-z 100                     relax the ee_body_pos TRAINING tracking-guard so swings run to
+#                                       completion (see "fragility" note below). 0.25 = training default.
 ```
 
 `--pd-mode implicit` is the **faithful** mode: it models the PD as passive damping (`kd`) + `implicitfast`,
@@ -3549,24 +3575,31 @@ matching Isaac's `ImplicitActuator`. `--pd-mode explicit` (the default) computes
 each substep; it is a harder, less faithful test and inflates the strike velocity error (~0.61 vs implicit
 ~0.31 m/s) purely from actuator discretization, not a transfer failure. Use implicit for the verdict.
 
-Expected result: the robot stays upright in **both** deterministic and dither modes (0 falls, full 10 s
-episodes) — Isaac's ~34% deterministic `ee_body_pos` fragility does NOT reproduce in MuJoCo. Racket-site
-position error vs the Isaac racket body is ~0.07 m. The overall implicit-PD strike composite is ~0.43–0.70,
-but the **per-clip breakdown** (printed as `FOREHAND` / `BACKHAND` tables, backed by a per-strike
-`mujoco_sim2sim_strikes.csv`) shows the swings transfer very differently:
+Validated result for **model_15200** (`--ee-term-z 100`, full episodes, implicit PD):
 
-- **Forehand** composite ~0.70–0.95 (vel_pass ~0.85–1.0, pos_pass ~0.70–1.0, normal ~1.5°) — transfers well.
-- **Backhand** composite ~0.15–0.56 — much lower, and gated by **velocity**: backhand actual racket speed at
-  strike is ~2.0–2.2 m/s while the commanded target is ~2.6–2.9 m/s (a systematic −0.5 to −0.65 m/s deficit).
-  `normal_pass` = 1.0 for backhand, so orientation is *not* the issue.
+- **Zero falls** at `--noise-scales 0.0` AND `0.05` (full 500-step episodes). The robot is physically stable
+  deterministically — **no dither needed** (and dither *hurts* the backhand, 0.50→0.31; deploy deterministic).
+- **Forehand** composite **~0.90** (pos_err ~0.06 m, vel_err ~0.29, normal ~1.3°) — a clean sim2sim pass.
+- **Backhand** composite **~0.50** — functional but **position-limited**: the racket lands ~**0.085 m** off
+  target (50% within the 7.5 cm gate) vs Isaac's ~0.038 m. Velocity and normal pass; the gap is the
+  high cross-body backhand reach tracking ~2× looser in MuJoCo (an implicit-PD / arm-dynamics gap).
 
-Root cause is **target sampling, not the policy**: in uniform mode (`target_mode: uniform`)
-`racket_target_vel_w` is drawn from a **clip-independent** box (`vx∈[1.5,3.5]`, mean `|v|≈2.7` m/s) for both
-swings (`hope_commands.py:_sample_targets_uniform`), but the backhand reference swing only reaches ~1.65–2.0
-m/s, so backhand cannot satisfy the 0.5 m/s velocity gate. `ref_vel_scale` does **not** help — it is read only
-in `reference_perturbed` mode, which is currently single-clip (not multiseg-aware). The fix is **per-clip
-velocity targets**. Dither (`noise_scale 0.05`) helps forehand consistently but only seed-dependently for
-backhand, so sweep seeds 0–3 before drawing a verdict.
+Two earlier conclusions were WRONG and are corrected here:
+
+1. **The "deterministic `ee_body_pos` fragility" IS the same training tracking-guard, not a fall.** Running
+   with the guard at its training threshold (`--ee-term-z 0.25`) shows ~80% `terminated_rate` — but at every
+   termination the robot is **upright, both feet planted** (roll ~3°, pitch ~4°). The `ee_body_pos` term is a
+   training reset device (wrist z deviating >0.25 m from reference during the high backhand **wind-up**), not a
+   physical fall. `--ee-term-z 100` removes it → **0 falls**, episodes run to 500 steps. Deployment has no such
+   termination. So the dither that "rescued" this in Isaac was compensating for a training guard, not instability.
+2. **The backhand bottleneck is POSITION, not velocity, and the earlier "dead backhand" was an EXPORT BUG.** A
+   forehand-only ONNX (Step 15) froze the backhand reference → racket ~0.1 m/s, composite 0. After the both-clip
+   re-export the backhand swings (~2.3 m/s); the residual gap is position accuracy, not a velocity-target box
+   mismatch.
+
+Diagnostic CSVs in the run dir (or `--out-dir`): per-step `mujoco_sim2sim_log.csv` (now incl. a `racket_speed`
+column — use it to tell an *absent* swing from a *mistimed* one) and per-strike `mujoco_sim2sim_strikes.csv`
+(incl. `base_pos_w_*` so you can check the target is ~0.40 m in front of the base, not mis-framed).
 
 Output: a per-step `mujoco_sim2sim_log.csv` **and** a per-strike `mujoco_sim2sim_strikes.csv` in the ONNX run
 dir (or `--out-dir`), plus the printed summary + per-clip tables. `--keep-passive` leaves the MJCF damping in
@@ -3792,6 +3825,14 @@ Verification gate:
 - No hardware deployment until 16.2 passes with the policy you intend to ship.
 
 ## 17. Implement Runtime Forehand/Backhand Switching
+
+> **Largely superseded by the unified policy.** The champion **`model_15200`** is a single
+> forehand+backhand policy: both clips are baked into one ONNX, and the swing is selected by the
+> **`swing_type`** observation field (+1 forehand / −1 backhand) which `hope_wbc_runner` sets from the
+> target Y sign (forehand −y / backhand +y). So you do **not** load two ONNX sessions or switch models at
+> runtime — there is one policy, one obs, one inference. The reference clock just picks the forehand vs
+> backhand segment of the baked motion (Step 16.1b). The section below remains valid only if you instead
+> deploy **two single-skill** policies; for model_15200 skip to `hope_wbc_runner` (Step 20.0).
 
 The reference deployment code may load one ONNX policy. HOPE needs forehand and backhand switching unless you train a single multi-skill policy.
 
@@ -4099,7 +4140,103 @@ Execution scope:
 - Then launch the ROS 2 commands below inside that `hope` shell.
 - The Avatar-Pro software itself still runs on the separate mocap PC, outside this machine.
 
-Launch order:
+### 20.0 Bring-up BEFORE mocap (fake planner + staged WBC runner)
+
+Until mocap + real ball tracking are ready, bring up the control path with **`planner_imitate`** (a fake
+HITTER planner) feeding **`hope_wbc_runner`** (the WBC controller) — no mocap, no ball, hardware-safe by
+construction. Both live in `hope_ws/src/` (`hope_planner/PLANNER_IMITATE.md`, `hope_wbc_runner/README.md`).
+
+```bash
+# Build + dry-run smoke first (builds hope_msgs too; runs planner_imitate -> wbc_runner, NO hardware):
+cd ~/workspace/HOPE/hope_ws && ./smoke_test_dry_run.sh /abs/path/to/exported/policy.onnx
+
+# Terminal A — fake planner publishes /racket/command (level 0=stand,1=fh slow,...,5=alternate):
+ros2 launch hope_planner planner_imitate.launch.py dry_run:=false level:=1
+
+# Terminal B — WBC runner, dry-run: builds obs, runs model_15200, LOGS joint targets, NO hardware:
+ros2 launch hope_wbc_runner wbc_runner.launch.py mode:=dry_run \
+  onnx_path:=/abs/path/to/exported/policy.onnx csv_path:=/tmp/wbc_runner.csv
+```
+
+Key points (details in the two package READMEs):
+- **Frames:** the real `hope_planner` publishes `/racket/command` in the HOPE **`world`** (table) frame;
+  `planner_imitate` defaults to **`base_link`** (robot-relative, the frame model_15200 was validated in,
+  x≈0.40 m in front), since the robot's world pose is still unmeasured (`hope_world_frame.yaml:
+  mocap_to_base_link` = TODO). The runner currently expects `base_link` targets.
+- **Safety gate:** `wbc_runner` publishes joint commands ONLY when `mode:=hardware` **AND**
+  `hardware_enable` **AND** `/hope/estop` false. `dry_run`/`shadow` never publish. Deterministic, no dither.
+- **Staging:** `mode:=dry_run` → `shadow` (predict against the a3_pingpong MuJoCo sim / robot, still no
+  publish; compare `target_q` to the MuJoCo eval) → `hardware`. Planner levels 0→1→…→5.
+- `onnxruntime` must be installed in the ROS python; `joint_msgs` (from `agi/A3_MuJoCo_Sim/.../protocols`)
+  is only needed for `mode:=hardware`.
+
+#### 20.0.1 Beginner copy-paste walkthrough (build → dry-run → MuJoCo visual)
+
+A safe, **dry-run only** path — no hardware moves. The fully-annotated version (every command
+with "what it does / success / common error / fix") is in **`hope_ws/BRINGUP_TUTORIAL.md`**; this is the
+condensed in-guide copy.
+
+**Two containers** (this trips up beginners): the ROS bring-up runs in **`hope`** (the ROS 2 Jazzy
+workspace); the MuJoCo *picture* runs in **`grasping`** (it has the `hope-motion-py310` conda env with
+`mujoco` + `onnxruntime`). They are separate today — `wbc_runner` only **logs** joint targets; nothing
+feeds them into a live MuJoCo robot yet (the missing "shadow bridge", see below). The viewer runs the
+**same** policy standalone, so you still see model_15200 swing.
+
+```bash
+# ===== A) ROS bring-up smoke (container: hope) =====
+distrobox enter hope -- bash
+ls /opt/ros/                                   # note the distro name (e.g. jazzy); source the one shown
+source /opt/ros/jazzy/setup.bash
+cd ~/workspace/HOPE/hope_ws
+colcon build --packages-up-to hope_planner hope_wbc_runner --symlink-install
+source install/local_setup.bash
+python3 -c "import onnxruntime" || python3 -m pip install onnxruntime
+export ONNX=~/workspace/HOPE/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope/2026-06-28_23-01-24_phase050_perclippos_scratch/exported/policy.onnx
+stat -c '%s bytes (want ~1243884 = 1.24MB 2-clip; ~1141378 = BAD forehand-only)' "$ONNX"
+./smoke_test_dry_run.sh "$ONNX"
+
+# ===== B) Manual ROS run (container: hope; 4 terminals). Prologue in EACH terminal: =====
+#   distrobox enter hope -- bash
+#   source /opt/ros/jazzy/setup.bash
+#   source ~/workspace/HOPE/hope_ws/install/local_setup.bash
+#   export ONNX=~/workspace/HOPE/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope/2026-06-28_23-01-24_phase050_perclippos_scratch/exported/policy.onnx
+# Terminal A (fake planner publishes /racket/command; dry_run:=false only PUBLISHES, never drives hardware):
+ros2 launch hope_planner planner_imitate.launch.py dry_run:=false level:=1
+# Terminal B (runner builds 180-D obs, runs model_15200 deterministically, LOGS target_q; NO hardware):
+ros2 launch hope_wbc_runner wbc_runner.launch.py mode:=dry_run onnx_path:="$ONNX" csv_path:=/tmp/wbc_runner.csv
+# Terminal C (watch the commands; best_effort REQUIRED — planner publishes best-effort, plain echo
+# defaults to reliable and shows NOTHING despite the topic publishing fine):
+ros2 topic echo --qos-reliability best_effort /racket/command
+# Terminal D (inspect the log; forehand y<0, backhand y>0; columns incl. target_q_0..30):
+tail -5 /tmp/wbc_runner.csv | cut -c1-140
+
+# ===== C) See the A3 swing in MuJoCo (container: grasping) =====
+distrobox enter grasping -- bash
+conda activate hope-motion-py310
+cd ~/workspace/HOPE/hope_training/whole_body_tracking
+RUN=logs/rsl_rl/agibot_a3_hope/2026-06-28_23-01-24_phase050_perclippos_scratch
+# if no window opens: on the HOST run `xhost +local:` (and check `echo $DISPLAY`), then retry.
+python scripts/mujoco_eval_onnx.py --viewer --pd-mode implicit --noise-scales 0.0 --steps 4000 \
+  --onnx $RUN/exported/policy.onnx --std $RUN/exported/learned_std.npy
+```
+
+Beginner gotchas: every new terminal needs BOTH `source /opt/ros/<distro>/setup.bash` AND
+`source ~/workspace/HOPE/hope_ws/install/local_setup.bash`. `ros2 topic echo` needs
+`--qos-reliability best_effort` (the planner publishes best-effort). If `echo` throws
+`xmlrpc.client.ResponseError: unknown tag 'rclpy.endpoint_info.TopicEndpointInfo'`, a stale ros2 daemon
+is to blame → `ros2 daemon stop` (restarts clean) or add `--no-daemon`. If launch fails with
+`Could not import 'rosidl_typesupport_c' for package 'hope_msgs'` / `libpython3.X.so: cannot open`, the
+messages were built under a different python — `cd ~/workspace/HOPE/hope_ws && rm -rf build install &&
+colcon build`. No-display (SSH) → drop `--viewer` for headless numbers, or record an MP4 with
+`scripts/play.py ... video=true` (Isaac).
+
+**Current limitation / missing shadow bridge.** `planner_imitate → /racket/command → wbc_runner` is a
+log-only loop; the official `a3_pingpong` MuJoCo sim is driven by the Agibot C++ deploy over **iceoryx**,
+not ROS, so `wbc_runner` cannot drive it. To watch `wbc_runner`'s OWN output move a robot you need a
+shadow-bridge node (subscribe `/racket/command`, step a live MuJoCo A3, publish `joint_states` back) — not
+built yet. Until then use the standalone viewer in step C.
+
+Launch order (full pipeline, once mocap is live):
 
 ```bash
 # Terminal 1: motion capture bringup (Avatar Pro VRPN client + relay + world frame)
@@ -4109,13 +4246,17 @@ ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
   server:=PLACEHOLDER_AVATAR_PRO_PC_IP port:=3883 update_freq:=360.0 \
   ball_tracking_mode:=rigid_body ball_object:=Ball
 
-# Terminal 2: planner
+# Terminal 2: planner (real mocap-driven planner -> /racket/command in the "world" frame)
 ros2 launch hope_planner hope_planner.launch.py
 
-# Terminal 3: WBC controller
-ros2 launch motion_tracking_controller real.launch.py \
-  network_interface:=PLACEHOLDER_A3_NETWORK_INTERFACE \
-  policy_path:=~/workspace/HOPE/hope_training/policies/hope_forehand_policy.onnx
+# Terminal 3: WBC controller -- hope_wbc_runner consumes /racket/command, builds the 180-D obs,
+# runs model_15200 deterministically, and (only in hardware mode, gated) emits joint commands.
+# STAGE IT: mode:=dry_run (log only) -> shadow (predict on real state, no publish) -> hardware.
+ros2 launch hope_wbc_runner wbc_runner.launch.py \
+  mode:=hardware state_source:=ros \
+  onnx_path:=~/workspace/HOPE/hope_training/policies/hope_unified_policy.onnx
+# arm:   ros2 topic pub -1 /hope/hardware_enable std_msgs/Bool "{data: true}"
+# estop: ros2 topic pub -1 /hope/estop std_msgs/Bool "{data: true}"   # -> STAND, publishing off
 
 # Terminal 4: monitoring
 ros2 topic hz /poses
@@ -4461,6 +4602,14 @@ Use this as the master checklist:
 - `HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md`
 - `HOPE_WBC_Simulation_Training_Reference_Setup.md`
 - `HOPE_Hardware_Deployment_Reference_Setup.md`
+
+Bring-up / deployment (this session — fake-planner + WBC-runner path):
+
+- `hope_ws/src/hope_planner/PLANNER_IMITATE.md` — fake HITTER planner (`planner_imitate`) for bring-up without mocap; staged levels 0–5, safety, frames.
+- `hope_ws/src/hope_wbc_runner/README.md` — staged, safety-gated WBC controller (`wbc_runner`) that runs model_15200 from `/racket/command`; dry_run/shadow/hardware modes, 180-D obs contract, joint command interface.
+- `hope_ws/SMOKE_TEST.md` + `hope_ws/smoke_test_dry_run.sh` — hardware-safe build/launch smoke for the two packages.
+- `hope_training/whole_body_tracking/scripts/mujoco_eval_onnx.py` — MuJoCo cross-sim harness (Step 16.1b); the reference 180-D obs / action-decode / PD that `hope_wbc_runner` ports to ROS.
+- `hope_training/whole_body_tracking/scripts/play.py` — ONNX export (Step 15); resolves both clips for the unified policy.
 
 External Agibot / Expedition A3 references (verified June 2026):
 
