@@ -21,16 +21,19 @@ from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.utils import configclass
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 import whole_body_tracking.tasks.tracking.mdp as mdp
+from whole_body_tracking.robots.agibot_a3 import A3_UPPER_TRACKED
 from whole_body_tracking.tasks.tracking.config.agibot_a3.flat_env_cfg import AgibotA3FlatEnvCfg
 from whole_body_tracking.tasks.tracking.tracking_env_cfg import (
     CommandsCfg,
     EventCfg,
     ObservationsCfg,
     RewardsCfg,
+    TerminationsCfg,
 )
 
 ##
@@ -202,8 +205,115 @@ class HOPEEventCfg(EventCfg):
 ##
 
 
+##
+# real_sensor_only variant — deploy-honest observation (no fabricated base pose).
+#
+# WHY: the `full` actor obs above depends on the robot's true world base pose through three terms
+# (motion_anchor_pos_b, base_target_pos_b, racket_target_pos_b). On the real A3 there is no localizer,
+# so those are fabricated at deploy (anchor_pos_b := 0, base_pos := nominal) -> the deployed policy
+# sees a DIFFERENT observation distribution than training and the legs cannot balance. AGI's reference
+# policy transfers because its observation is real-sensor-only (IMU orientation + proprioception, no
+# world base position). This variant copies that recipe for the HOPE actor. The privileged CRITIC
+# group is unchanged (it may use base pose in sim — it is never deployed). The `full` cfgs above are
+# untouched (kept for comparison / the old path).
+##
+
+
+@configclass
+class HOPEObservationsRealSensorCfg(HOPEObservationsCfg):
+    """Actor obs with every world-frame BASE-POSITION dependency removed (180 -> 175):
+
+    * REMOVED  ``motion_anchor_pos_b`` (3)  — reference torso *position* error needs the world base pose.
+    * REMOVED  ``base_target_pos_b``   (2)  — base-repositioning target needs the world base pose.
+    * REFRAMED ``racket_target_pos_b`` (3)  — now ``target - current_racket`` (FK), base pose cancels.
+    * KEPT     ``motion_anchor_ori_b`` (6, orientation-only / IMU), command, base_ang_vel, joint pos/vel,
+               last action, projected_gravity, racket_target_vel_w, time_to_strike, swing_type.
+
+    Every kept/reframed term is computable on hardware from IMU + joint encoders + the planner target.
+    """
+
+    @configclass
+    class HOPEPolicyRealSensorCfg(HOPEObservationsCfg.HOPEPolicyCfg):
+        # --- remove base-position-dependent terms (fabricated on hardware) ---
+        motion_anchor_pos_b = None  # inherited from ObservationsCfg.PolicyCfg; needs world base position
+        base_target_pos_b = None  # base-repositioning target; needs world base position
+        # --- reframe racket target to be relative to the current racket (FK); no world base position ---
+        racket_target_pos_b = ObsTerm(
+            func=mdp.racket_target_pos_rel_b,
+            params={"command_name": "racket_target"},
+            noise=Unoise(n_min=-0.02, n_max=0.02),
+        )
+
+    policy: HOPEPolicyRealSensorCfg = HOPEPolicyRealSensorCfg()
+
+
+@configclass
+class HOPERealSensorRewardsCfg(HOPERewardsCfg):
+    """FOOTWORK-TO-STRIKE reward — BASE-FREE. No base-position / base-target / base-arrival reward: the
+    legs move because reducing the racket->target distance (``racket_progress``) takes whole-body motion.
+    The feet are FREE to step/shift — only BAD foot behaviour is penalized (slip / drag / violent / unstable
+    at the strike), never "both feet planted". Lower-body imitation is DROPPED (legs free to reach varied
+    targets); upper-body + racket imitation is kept for swing style. All weights are STARTING POINTS — the
+    footwork weights live here (not the task YAML), so tune them in this class. (Obs is the base-free
+    real_sensor layout from HOPEObservationsRealSensorCfg.)"""
+
+    # --- BASE-FREE corrections: remove every base-position-dependent reward ---
+    base_position = None  # inherited HITTER base-repositioning reward -> REMOVED (it needs a base target)
+    motion_global_anchor_pos = None  # reference base-POSITION tracking -> REMOVED (it pins the base)
+
+    # --- racket task: keep the additive pos/vel/normal (inherited, wide gradient) + a MULTIPLICATIVE
+    #     success bonus that fires only when pos AND vel AND normal are all good at once (tight acceptance). ---
+    racket_strike_success = RewTerm(
+        func=mdp.racket_strike_success, weight=5.0,
+        params={"command_name": "racket_target", "std_pos": 0.075, "std_vel": 0.5, "std_normal": 0.262},
+    )
+    # --- the BASE-FREE MOVEMENT DRIVER: dense pre-strike reward for closing the racket->target distance.
+    #     Telescopes to weight * (distance reduced over the approach) -> the whole body moves to the target. ---
+    racket_progress = RewTerm(func=mdp.racket_progress, weight=10.0, params={"command_name": "racket_target"})
+
+    # --- upper-body-only imitation (legs DECOUPLED so footwork is free to adapt to the target) ---
+    motion_body_pos = RewTerm(func=mdp.motion_relative_body_position_error_exp, weight=1.0,
+        params={"command_name": "motion", "std": 0.3, "body_names": A3_UPPER_TRACKED})
+    motion_body_ori = RewTerm(func=mdp.motion_relative_body_orientation_error_exp, weight=1.0,
+        params={"command_name": "motion", "std": 0.4, "body_names": A3_UPPER_TRACKED})
+    motion_body_lin_vel = RewTerm(func=mdp.motion_global_body_linear_velocity_error_exp, weight=1.0,
+        params={"command_name": "motion", "std": 1.0, "body_names": A3_UPPER_TRACKED})
+    motion_body_ang_vel = RewTerm(func=mdp.motion_global_body_angular_velocity_error_exp, weight=1.0,
+        params={"command_name": "motion", "std": 3.14, "body_names": A3_UPPER_TRACKED})
+
+    # --- footwork PENALTIES (the feet may step; punish only bad behaviour, NEVER reward "always planted") ---
+    foot_slip_sq = RewTerm(func=mdp.foot_slip_sq, weight=-1.0, params={"command_name": "racket_target"})
+    foot_velocity = RewTerm(func=mdp.foot_velocity, weight=-0.05, params={"command_name": "racket_target"})
+    foot_drag = RewTerm(func=mdp.foot_drag, weight=-0.5, params={"command_name": "racket_target"})
+    arm_overreach = RewTerm(func=mdp.arm_overreach, weight=-0.5, params={"command_name": "racket_target"})
+
+    # --- strike-window stability: be planted + upright + still AT the hit (gated to the strike window) ---
+    strike_upright = RewTerm(func=mdp.strike_proj_grav_xy, weight=-2.0, params={"command_name": "racket_target"})
+    strike_ang_vel = RewTerm(func=mdp.strike_base_ang_vel, weight=-0.5, params={"command_name": "racket_target"})
+    strike_foot_vel = RewTerm(func=mdp.strike_foot_velocity, weight=-0.5, params={"command_name": "racket_target"})
+    strike_vbob = RewTerm(func=mdp.strike_vertical_bob, weight=-1.0, params={"command_name": "racket_target"})
+
+    # --- always-on balance + safety regularizers (kept) ---
+    upright = RewTerm(func=mdp.flat_orientation_l2, weight=-1.0)  # base tilt
+    base_ang_vel_xy = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)  # roll/pitch rate
+    base_lin_vel_z = RewTerm(func=mdp.lin_vel_z_l2, weight=-0.5)  # vertical bob
+    joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-1.0e-4)  # joint-velocity smoothness
+    # (inherited & kept: racket_position/velocity/normal, pre_strike_foot_slip, action_rate_l2,
+    #  joint_torques, joint_limit, undesired_contacts, motion_global_anchor_ori.)
+
+
+@configclass
+class HOPERealSensorTerminationsCfg(TerminationsCfg):
+    """Inherited reference-relative terminations + ABSOLUTE balance terminations, so a real fall/sink
+    ends the episode regardless of the reference clip (the actual deploy failure mode)."""
+
+    base_fell_tilt = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": 0.7})  # ~40 deg, absolute
+    base_too_low = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": 0.5})
+
+
 @configclass
 class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
+    obs_mode: str = "full"  # descriptive; the real_sensor variant is HOPEPingPongRealSensorAgibotA3EnvCfg
     commands: HOPECommandsCfg = HOPECommandsCfg()
     observations: HOPEObservationsCfg = HOPEObservationsCfg()
     rewards: HOPERewardsCfg = HOPERewardsCfg()
@@ -213,3 +323,14 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
         # AgibotA3FlatEnvCfg sets the robot, action scale, motion anchor/body names, and the A3
         # contact/termination/CoM body names (all valid for the inherited HOPE* cfg subclasses).
         super().__post_init__()
+
+
+@configclass
+class HOPEPingPongRealSensorAgibotA3EnvCfg(HOPEPingPongAgibotA3EnvCfg):
+    """``real_sensor_only`` variant: deploy-honest actor observation (no fabricated base pose) plus
+    absolute balance rewards/terminations. The ``full`` HOPEPingPongAgibotA3EnvCfg is left intact."""
+
+    obs_mode: str = "real_sensor_only"
+    observations: HOPEObservationsRealSensorCfg = HOPEObservationsRealSensorCfg()
+    rewards: HOPERealSensorRewardsCfg = HOPERealSensorRewardsCfg()
+    terminations: HOPERealSensorTerminationsCfg = HOPERealSensorTerminationsCfg()

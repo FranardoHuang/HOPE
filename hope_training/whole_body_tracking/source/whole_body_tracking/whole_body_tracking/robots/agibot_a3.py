@@ -66,6 +66,20 @@ A3_TRACKED_BODIES = [
 A3_FEET_BODIES = ["left_ankle_roll_Link", "right_ankle_roll_Link"]
 A3_HAND_BODIES = ["left_wrist_yaw_Link", "right_wrist_yaw_Link"]
 
+# UPPER-body tracked bodies (torso + both arms) — the subset of A3_TRACKED_BODIES used by the
+# footwork variant's imitation reward. The legs (pelvis/hip/knee/ankle) are intentionally EXCLUDED so
+# the lower body is free to step/shift to reach different racket targets instead of copying the clip's
+# fixed leg motion. Upper-body imitation still gives the swing its style.
+A3_UPPER_TRACKED = [
+    "torso_Link",
+    "left_shoulder_roll_Link",
+    "left_elbow_Link",
+    "left_wrist_yaw_Link",
+    "right_shoulder_roll_Link",
+    "right_elbow_Link",
+    "right_wrist_yaw_Link",
+]
+
 # Joint order for reading the retargeted-motion CSV in scripts/csv_to_npz.py. This is the order of
 # the *DOF columns* in the A3 retargeted CSV (columns 7: after base pos/quat), i.e. the order your
 # GMR retargeting outputs — NOT the simulation articulation order (the npz stores joint_pos in the

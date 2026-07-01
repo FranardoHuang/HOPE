@@ -58,7 +58,7 @@ Same MuJoCo, same model, same ONNX — only `--pd-mode` changes:
 # conda env with mujoco + onnxruntime
 cd hope_training/whole_body_tracking
 RUN=logs/rsl_rl/agibot_a3_hope/2026-06-28_23-01-24_phase050_perclippos_scratch
-MJCF=agi/aimrt_mujoco_sim_source/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml
+MJCF=agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml
 
 # STABLE — implicit actuator (matches Isaac training):
 python scripts/mujoco_eval_onnx.py --viewer --pd-mode implicit --noise-scales 0.0 \

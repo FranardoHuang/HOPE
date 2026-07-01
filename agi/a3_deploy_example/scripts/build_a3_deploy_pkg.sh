@@ -550,6 +550,7 @@ runtime_cfg = Path(sys.argv[3]).resolve()
 pkg_dir = Path(sys.argv[4]).resolve()
 arch = sys.argv[5]
 smpl_zmq_host_override = sys.argv[6]
+runtime_cfg_basename = runtime_cfg.name
 host_repo_root_raw = os.environ.get("HOST_REPO_ROOT", "")
 host_repo_root = Path(host_repo_root_raw).expanduser() if host_repo_root_raw else None
 
@@ -798,6 +799,7 @@ if legacy_extra_motion_dirs_raw is not None:
         ))
 motion_src = None
 used_motion_dir = False
+motion_rel_paths = []
 motion_idle_src = resolve_path(
     nested(cfg, ["reference_motion", "idle_csv_path"]),
     "reference_motion.idle_csv_path",
@@ -823,6 +825,7 @@ aimrt_src = resolve_path(
     nested(cfg, ["backend", "aimrt_cfg_path"]),
     "backend.aimrt_cfg_path",
 )
+aimrt_src_basename = aimrt_src.name
 
 if model_src is not None:
     set_nested(cfg, ["onnx", "model_path"], copy_into(model_src, "models"))
@@ -869,9 +872,11 @@ else:
     motion_src = resolve_path(
         nested(cfg, ["reference_motion", "csv_path"]),
         "reference_motion.csv_path",
+        required=False,
     )
-    motion_rel_paths = copy_motion_dir_csvs(motion_src)
-    set_nested(cfg, ["reference_motion", "csv_path"], str(Path("motions") / motion_src.name))
+    if motion_src is not None:
+        motion_rel_paths = copy_motion_dir_csvs(motion_src)
+        set_nested(cfg, ["reference_motion", "csv_path"], str(Path("motions") / motion_src.name))
 
 remote_motion_rel_dirs = []
 for i, remote_motion_dir_src in enumerate(remote_motion_dir_srcs):
@@ -933,8 +938,14 @@ if isinstance(smpl_zmq_cfg, dict):
     elif arch == "x86_64" and is_localhost(smpl_zmq_cfg.get("host")):
         set_nested(cfg, ["smpl_zmq", "host"], "localhost")
 
-with (pkg_dir / "config" / "a3_runtime_config.yaml").open("w", encoding="utf-8") as f:
+packaged_runtime_cfg = pkg_dir / "config" / "a3_runtime_config.yaml"
+with packaged_runtime_cfg.open("w", encoding="utf-8") as f:
     yaml.safe_dump(cfg, f, sort_keys=False)
+if runtime_cfg_basename != packaged_runtime_cfg.name:
+    shutil.copy2(packaged_runtime_cfg, pkg_dir / "config" / runtime_cfg_basename)
+if aimrt_src_basename != "a3_aimrt_config.yaml":
+    shutil.copy2(pkg_dir / "config" / "a3_aimrt_config.yaml",
+                 pkg_dir / "config" / aimrt_src_basename)
 
 if model_src is not None:
     print(f"packaged model: {model_src}")
@@ -954,7 +965,7 @@ if decoder_model_src is not None:
     print(f"packaged decoder model: {decoder_model_src}")
 if used_motion_dir:
     print(f"packaged motion dir: {motion_dir_src} ({len(motion_rel_paths)} csv files)")
-else:
+elif motion_src is not None:
     print(f"packaged motion: {motion_src}")
     print(f"packaged motion dir: {motion_src.parent} ({len(motion_rel_paths)} csv files)")
 for src, rel_dir in zip(remote_motion_dir_srcs, remote_motion_rel_dirs):
@@ -962,6 +973,10 @@ for src, rel_dir in zip(remote_motion_dir_srcs, remote_motion_rel_dirs):
 if teleop_fallback_src is not None:
     print(f"packaged teleop fallback motion: {teleop_fallback_src}")
 print(f"packaged aimrt cfg: {aimrt_src}")
+if runtime_cfg_basename != packaged_runtime_cfg.name:
+    print(f"packaged runtime cfg alias: config/{runtime_cfg_basename}")
+if aimrt_src_basename != "a3_aimrt_config.yaml":
+    print(f"packaged aimrt cfg alias: config/{aimrt_src_basename}")
 PY
 
   local fastrtps_src="${GEAR_ROOT}/src/a3/a3_deploy_onnx_ref/config/fastrtps_profile.xml"
@@ -1088,7 +1103,88 @@ exec "${SCRIPT_DIR}/run_a3.sh" \
   "$@"
 RUN_A3_PROBE
 
-  chmod +x "${PKG_DIR}/run_a3.sh" "${PKG_DIR}/run_a3_probe.sh"
+  cat > "${PKG_DIR}/run_a3_pingpong.sh" <<'RUN_A3_PINGPONG'
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}"
+
+A3_SOURCE_ROBOT_ENV_DEFAULT="__A3_SOURCE_ROBOT_ENV_DEFAULT__"
+A3_ROBOT_ENV="${A3_ROBOT_ENV:-/agibot/software/v0/entry/env/env.sh}"
+A3_SOURCE_ROBOT_ENV_ENABLED="${A3_SOURCE_ROBOT_ENV:-${A3_SOURCE_ROBOT_ENV_DEFAULT}}"
+if [[ "${A3_SOURCE_ROBOT_ENV_ENABLED}" != "0" ]]; then
+  if [[ ! -f "${A3_ROBOT_ENV}" ]]; then
+    echo "required robot env not found: ${A3_ROBOT_ENV} (set A3_SOURCE_ROBOT_ENV=0 to skip)" >&2
+    exit 66
+  fi
+  set +u
+  # shellcheck disable=SC1090
+  source "${A3_ROBOT_ENV}"
+  set -u
+  echo "[a3_pingpong] sourced robot env: ${A3_ROBOT_ENV}"
+fi
+
+DEFAULT_A3_TRANSPORT="__DEFAULT_A3_TRANSPORT__"
+A3_TRANSPORT="${A3_TRANSPORT:-${DEFAULT_A3_TRANSPORT}}"
+case "${A3_TRANSPORT}" in
+  iceoryx)
+    A3_AIMRT_CFG="${SCRIPT_DIR}/config/a3_aimrt_config.iceoryx.yaml"
+    ;;
+  ros2)
+    A3_AIMRT_CFG="${SCRIPT_DIR}/config/a3_aimrt_config.ros2.yaml"
+    ;;
+  *)
+    echo "invalid A3_TRANSPORT='${A3_TRANSPORT}'; expected one of: iceoryx, ros2" >&2
+    exit 64
+    ;;
+esac
+if [[ ! -f "${A3_AIMRT_CFG}" ]]; then
+  echo "selected AimRT config does not exist: ${A3_AIMRT_CFG}" >&2
+  exit 66
+fi
+
+PINGPONG_RUNTIME_CFG="${SCRIPT_DIR}/config/a3_runtime_config.pingpong.yaml"
+if [[ ! -f "${PINGPONG_RUNTIME_CFG}" ]]; then
+  PINGPONG_RUNTIME_CFG="${SCRIPT_DIR}/config/a3_runtime_config.yaml"
+fi
+if [[ ! -f "${PINGPONG_RUNTIME_CFG}" ]]; then
+  echo "pingpong runtime config not found under ${SCRIPT_DIR}/config/" >&2
+  exit 66
+fi
+
+mkdir -p logs
+export LD_LIBRARY_PATH="${SCRIPT_DIR}:${LD_LIBRARY_PATH:-}"
+export FASTRTPS_DEFAULT_PROFILES_FILE="${SCRIPT_DIR}/config/fastrtps_profile.xml"
+
+if [[ -n "${ROS_DISTRO:-}" && -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]]; then
+  set +u
+  # shellcheck disable=SC1090
+  source "/opt/ros/${ROS_DISTRO}/setup.bash"
+  set -u
+elif [[ -f /opt/ros/jazzy/setup.bash ]]; then
+  set +u
+  # shellcheck disable=SC1091
+  source /opt/ros/jazzy/setup.bash
+  set -u
+elif [[ -f /opt/ros/humble/setup.bash ]]; then
+  set +u
+  # shellcheck disable=SC1091
+  source /opt/ros/humble/setup.bash
+  set -u
+fi
+
+echo "[a3_pingpong] transport=${A3_TRANSPORT} aimrt_cfg=${A3_AIMRT_CFG} runtime_cfg=${PINGPONG_RUNTIME_CFG}"
+exec "${SCRIPT_DIR}/a3_deploy_onnx_ref_pingpong" \
+  --runtime-cfg="${PINGPONG_RUNTIME_CFG}" \
+  --aimrt-cfg="${A3_AIMRT_CFG}" \
+  "$@"
+RUN_A3_PINGPONG
+
+  sed -i "s/__DEFAULT_A3_TRANSPORT__/${default_transport}/g" "${PKG_DIR}/run_a3_pingpong.sh"
+  sed -i "s/__A3_SOURCE_ROBOT_ENV_DEFAULT__/${source_robot_env_default}/g" "${PKG_DIR}/run_a3_pingpong.sh"
+
+  chmod +x "${PKG_DIR}/run_a3.sh" "${PKG_DIR}/run_a3_probe.sh" "${PKG_DIR}/run_a3_pingpong.sh"
 }
 
 stage_extra_libs() {
@@ -1242,10 +1338,20 @@ verify_package() {
     echo "missing executable: ${PKG_DIR}/a3_policy_runtime_probe" >&2
     exit 1
   fi
+  if [[ ! -x "${PKG_DIR}/a3_deploy_onnx_ref_pingpong" ]]; then
+    echo "missing executable: ${PKG_DIR}/a3_deploy_onnx_ref_pingpong" >&2
+    exit 1
+  fi
+  if [[ ! -x "${PKG_DIR}/run_a3_pingpong.sh" ]]; then
+    echo "missing executable: ${PKG_DIR}/run_a3_pingpong.sh" >&2
+    exit 1
+  fi
   if [[ "${ARCH}" == "rockchip" && ! -e "${PKG_DIR}/librknnrt.so" ]]; then
     echo "missing Rockchip RKNN runtime library: librknnrt.so" >&2
     exit 1
   fi
+  local runtime_cfg_basename
+  runtime_cfg_basename="$(basename "${RUNTIME_CFG}")"
   local debug_required=(
     "a3_body_drive_debug_record"
     "liba3_body_drive_debug_ros2_ts.so"
@@ -1278,6 +1384,11 @@ verify_package() {
       exit 1
     fi
   done
+  if [[ "${runtime_cfg_basename}" != "a3_runtime_config.yaml" &&
+        ! -f "${PKG_DIR}/config/${runtime_cfg_basename}" ]]; then
+    echo "missing packaged runtime config alias: config/${runtime_cfg_basename}" >&2
+    exit 1
+  fi
   python3 - "${PKG_DIR}/config/a3_runtime_config.yaml" "${ARCH}" <<'PY'
 import os
 import sys
@@ -1319,16 +1430,19 @@ if encoder_decoder_mode:
         ("onnx.decoder_model_path", onnx_cfg.get("decoder_model_path")),
     ])
 ref_motion = cfg.get("reference_motion", {})
-if ref_motion.get("motion_dir"):
-    checks.append(("reference_motion.motion_dir", ref_motion.get("motion_dir")))
-else:
-    checks.append(("reference_motion.csv_path", ref_motion.get("csv_path")))
-if ref_motion.get("remote_motion_dir"):
-    checks.append(("reference_motion.remote_motion_dir", ref_motion.get("remote_motion_dir")))
-for i, remote_dir in enumerate(ref_motion.get("remote_motion_dirs") or []):
-    checks.append((f"reference_motion.remote_motion_dirs[{i}]", remote_dir))
-if ref_motion.get("idle_csv_path"):
-    checks.append(("reference_motion.idle_csv_path", ref_motion.get("idle_csv_path")))
+if ref_motion:
+    if ref_motion.get("motion_dir"):
+        checks.append(("reference_motion.motion_dir", ref_motion.get("motion_dir")))
+    elif ref_motion.get("csv_path"):
+        checks.append(("reference_motion.csv_path", ref_motion.get("csv_path")))
+    else:
+        raise SystemExit("missing packaged config value: reference_motion.csv_path")
+    if ref_motion.get("remote_motion_dir"):
+        checks.append(("reference_motion.remote_motion_dir", ref_motion.get("remote_motion_dir")))
+    for i, remote_dir in enumerate(ref_motion.get("remote_motion_dirs") or []):
+        checks.append((f"reference_motion.remote_motion_dirs[{i}]", remote_dir))
+    if ref_motion.get("idle_csv_path"):
+        checks.append(("reference_motion.idle_csv_path", ref_motion.get("idle_csv_path")))
 teleop_fallback = cfg.get("teleop", {}).get("fallback_reference", {})
 if isinstance(teleop_fallback, dict) and teleop_fallback.get("enabled", False):
     checks.append(

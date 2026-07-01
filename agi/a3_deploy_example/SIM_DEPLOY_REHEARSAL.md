@@ -42,7 +42,7 @@ in the Python eval this never showed because both had ground-truth pose.
 
 ## Step 1 — build the sim and the runner
 
-The **new sim source** (`agi/aimrt_mujoco_sim_source`) is the rehearsal sim: it
+The **source-built sim** (`agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/build/install`) is the rehearsal sim: it
 drives `/body_drive/*` on **iceoryx** *and* publishes the ground-truth
 `/sim/a3/pelvis_pose`, `/sim/a3/right_racket_pose`, `/tf` on ROS 2 (needed for
 oracle mode). The prebuilt `mujoco_sim_standalone` does **not** publish `/sim/a3/*`,
@@ -51,7 +51,7 @@ so it can only serve modes A/B.
 ```bash
 # (inside the box that has the AGI toolchain + ROS 2 + mujoco)
 # 1a. build the sim (ROS 2 ON so /sim/a3/* publish):
-cd ~/workspace/HOPE/agi/aimrt_mujoco_sim_source/aimrt_mujoco_sim
+cd ~/workspace/HOPE/agi/A3_MuJoCo_Sim/aimrt_mujoco_sim
 ./build.sh
 
 # 1b. rebuild the ping-pong runner (picks up the new source):
@@ -69,7 +69,7 @@ ldd a3_deploy_onnx_ref_pingpong | grep -i onnxruntime    # must resolve
 # IMPORTANT: run from the INSTALLED package dir (build/install/bin), which is
 # self-contained (aimrt_main, cfg/, model/, iox-roudi, ../lib, ../share). The
 # source src/models/bin/ has only the script+cfg -> "./aimrt_main: No such file".
-cd ~/workspace/HOPE/agi/aimrt_mujoco_sim_source/aimrt_mujoco_sim/build/install/bin
+cd ~/workspace/HOPE/agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/build/install/bin
 ./start_a3_pingpong_iceoryx.sh
 # if a stale roudi is running and iceoryx won't connect:
 #   pkill -x iox-roudi; sleep 1; ./start_a3_pingpong_iceoryx.sh

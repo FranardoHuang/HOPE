@@ -269,36 +269,36 @@ onnx:
 
 - Keep the filename `model_15200.onnx` → **no edit needed**. Rename it → change this one key.
 
-### 3.3 Build the x86 package, then stage the ping-pong assets
+### 3.3 Build the x86 package with the ping-pong runtime cfg
 
 **Where:** box **`hope`** · `cd ~/workspace/HOPE/agi/a3_deploy_example`.
 
-The build does **`rm -rf dist/a3_deploy_x86_64`** and rebuilds. It auto-stages only AGI's
-**native** `a3_runtime_config.yaml` — it does **not** stage our `*.pingpong*` configs or
-`model_15200.onnx`. So after every build, copy **all three** back in:
+The recommended path is now to pass the ping-pong runtime cfg directly to the build script.
+That makes the packager carry the `model_15200.onnx`, preserve a
+`config/a3_runtime_config.pingpong.yaml` alias, and generate `run_a3_pingpong.sh` in the
+fresh dist package:
 
 ```bash
 distrobox enter hope                                     # skip if already inside hope
 cd ~/workspace/HOPE/agi/a3_deploy_example
 source /opt/ros/jazzy/setup.bash
-bash scripts/build_a3_deploy_pkg.sh --arch x86_64 --jobs $(nproc)
-
-# stage our ping-pong runner assets into the fresh dist (config + aimrt cfg + model):
-mkdir -p dist/a3_deploy_x86_64/{config,models}
-cp src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml       dist/a3_deploy_x86_64/config/
-cp src/a3/a3_deploy_onnx_ref/config/a3_aimrt_config.pingpong_iceoryx.yaml dist/a3_deploy_x86_64/config/
-cp assets/a3_runtime/models/model_15200.onnx                             dist/a3_deploy_x86_64/models/
+bash scripts/build_a3_deploy_pkg.sh \
+  --arch x86_64 \
+  --runtime-cfg src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml \
+  --jobs $(nproc)
 ```
 
-**Confirm the runner will find the model** (only possible after the staging above —
-`dist/.../config/a3_runtime_config.pingpong.yaml` does not exist until then):
+**Confirm the runner will find the model**:
 
 ```bash
-grep -E '^[[:space:]]*model_path' dist/a3_deploy_x86_64/config/a3_runtime_config.pingpong.yaml
-#   -> model_path: ../models/model_15200.onnx
-ls -la dist/a3_deploy_x86_64/models/model_15200.onnx   # must exist (this is where ../models resolves)
-# at runtime the runner also prints the resolved path: "[pingpong] ... model=.../dist/a3_deploy_x86_64/models/model_15200.onnx"
+ls -la dist/a3_deploy_x86_64/config/a3_runtime_config.pingpong.yaml
+ls -la dist/a3_deploy_x86_64/models/model_15200.onnx
+ls -la dist/a3_deploy_x86_64/run_a3_pingpong.sh
 ```
+
+The packager still writes the normalized runtime cfg as `config/a3_runtime_config.yaml`, but now
+also keeps the ping-pong basename alias so all later commands can continue using
+`config/a3_runtime_config.pingpong.yaml`.
 
 ### 3.4 Dump ONNX metadata (confirm the contract fields)
 
@@ -605,7 +605,10 @@ expected — the container has it). One command.
 cd ~/workspace/HOPE/agi/a3_deploy_example
 
 find . -name '._*' -type f -delete                          # remove macOS junk (usually 0; harmless)
-bash scripts/build_a3_deploy_pkg.sh --arch rockchip --jobs $(nproc)
+bash scripts/build_a3_deploy_pkg.sh \
+  --arch rockchip \
+  --runtime-cfg src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml \
+  --jobs $(nproc)
 
 # confirm the package + that the binary is really aarch64 AND has the latest runner:
 ls -la dist/a3_deploy_rockchip/a3_deploy_onnx_ref_pingpong    # mtime must be from THIS build
@@ -613,14 +616,9 @@ file   dist/a3_deploy_rockchip/a3_deploy_onnx_ref_pingpong   # -> ELF 64-bit ...
 strings dist/a3_deploy_rockchip/a3_deploy_onnx_ref_pingpong | grep -E "RUN CONFIG|f=forehand" \
   || echo "!! STALE BUILD — wipe build/a3_pkg_rockchip and rebuild before shipping"
 
-# stage our ping-pong assets into the fresh dist (same as x86 Stage 3.3 — the build
-# wipes dist/ and does NOT stage the pingpong config or the model_15200 onnx):
-mkdir -p dist/a3_deploy_rockchip/{config,models}
-cp src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml       dist/a3_deploy_rockchip/config/
-cp src/a3/a3_deploy_onnx_ref/config/a3_aimrt_config.pingpong_iceoryx.yaml dist/a3_deploy_rockchip/config/
-cp assets/a3_runtime/models/model_15200.onnx                             dist/a3_deploy_rockchip/models/
-# the config's `model_path: ../models/model_15200.onnx` resolves the same way on the MDU
-# (cfgdir=config -> ../models), so the SAME relative path works on the robot.
+ls -la dist/a3_deploy_rockchip/config/a3_runtime_config.pingpong.yaml
+ls -la dist/a3_deploy_rockchip/models/model_15200.onnx
+ls -la dist/a3_deploy_rockchip/run_a3_pingpong.sh
 ```
 
 ### Ship it to the MDU through the HDU jump host
@@ -899,23 +897,26 @@ does and does **not** prove.
 - **FAIL** — `q_des` non-finite, **qd spikes**, **clamp count explodes**, **sync misses**, or
   the robot **halts**. *Stop immediately.*
 
-> ⚠️ **Prerequisite — stage the ping-pong assets first (or you get `YAML::BadFile`).**
-> Every `build_a3_deploy_pkg.sh` run does `rm -rf dist/...` and rebuilds, and **never**
-> auto-stages our `*.pingpong*` config / aimrt cfg / model — so a freshly built `dist/` has
-> **no** `config/a3_runtime_config.pingpong.yaml`. Symptom:
+> ⚠️ **Prerequisite — use a freshly staged ping-pong dist.**
+> `build_a3_deploy_pkg.sh --runtime-cfg src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml`
+> now preserves the ping-pong runtime-config basename, stages `model_15200.onnx`,
+> and emits `run_a3_pingpong.sh`. If you are using an **older dist** or built with
+> `--build-only`, you can still hit `YAML::BadFile` because the ping-pong cfg/model
+> never got copied into `dist/`. Symptom:
 > ```
 > terminate called after throwing an instance of 'YAML::BadFile'
 >   what():  bad file: config/a3_runtime_config.pingpong.yaml
 > ```
-> Fix — re-run the Stage 3.3 staging (x86 example; for the MDU stage into `dist/a3_deploy_rockchip/`):
+> Fix — rebuild or restage (x86 example; for the MDU stage into `dist/a3_deploy_rockchip/`):
 > ```bash
 > cd ~/workspace/HOPE/agi/a3_deploy_example
-> mkdir -p dist/a3_deploy_x86_64/{config,models}
-> cp src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml       dist/a3_deploy_x86_64/config/
-> cp src/a3/a3_deploy_onnx_ref/config/a3_aimrt_config.pingpong_iceoryx.yaml dist/a3_deploy_x86_64/config/
-> cp assets/a3_runtime/models/model_15200.onnx                             dist/a3_deploy_x86_64/models/
-> # verify (must both exist): the model_path in the cfg resolves to ../models/model_15200.onnx
-> ls dist/a3_deploy_x86_64/config/a3_runtime_config.pingpong.yaml dist/a3_deploy_x86_64/models/model_15200.onnx
+> bash scripts/build_a3_deploy_pkg.sh \
+>   --arch x86_64 \
+>   --runtime-cfg src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml
+> # verify wrapper + cfg alias + model:
+> ls dist/a3_deploy_x86_64/run_a3_pingpong.sh \
+>    dist/a3_deploy_x86_64/config/a3_runtime_config.pingpong.yaml \
+>    dist/a3_deploy_x86_64/models/model_15200.onnx
 > ```
 > (The `--build-only` flag additionally skips **all** asset staging — only use it for a pure
 > compile check, never to produce a runnable dist.)
@@ -1450,7 +1451,8 @@ pose-blend re-arms on the toggle so the stiff official stand gains do **not** sn
 RT=config/a3_runtime_config.pingpong.yaml
 RUN=/tmp/pp_ground_g7_autohold; mkdir -p "$RUN"
 taskset -c 4-7 ./a3_deploy_onnx_ref_pingpong --runtime-cfg $RT \
-  --start passive --official-stand --auto-leg-hold --level 0 --gain-scale 0.30 --motion-blend-sec 0.8 \
+  --start passive --official-stand --auto-leg-hold --level 0 \
+  --gain-scale 0.30 --leg-gain-scale 0.5 --ankle-gain-scale 1.0 --motion-blend-sec 0.8 \
   --trace-csv "$RUN/trace.csv" --obs-csv "$RUN/obs.csv" 2>&1 | tee "$RUN/status.log"
 # banner: auto_hold = ON.  Start at level 0 (legs+waist HELD = stable ready).
 # s (PD_STAND official, rope slack -> confirm it stands)
@@ -1463,7 +1465,10 @@ sed -n '/FIRST-TICK DEBUG/,/^==*$/p' "$RUN/status.log" > "$RUN/first_tick.txt"
 **Watch at each toggle:** `legs_passive=` flips 1↔0 with the level; the `[fullbody]` `Lleg/Rleg cmdR`
 goes ~0 (held) at level 0 and moderate (~0.6 rad) at level 1; `gravX` stays bounded through the
 release **and** the re-engage (no jolt). If the 1→0 re-engage still jumps, raise `--motion-blend-sec`
-(e.g. 1.0). **STOP** on any tip that doesn't settle, hip/knee jump, `halts`/`sync_miss` rising.
+(e.g. 1.0). If the hoist is lowered and the knees still sink, jump straight to Stage G9:
+that is a weight-bearing issue (`--leg-stand-gains` / clamp / smoothing), not something mocap or
+`--gain-scale` alone will fix. **STOP** on any tip that doesn't settle, hip/knee jump, `halts`/
+`sync_miss` rising.
 
 > 🔑 **Swing-clock reset (fix 2026-06-30):** on each `0→1` release the swing clock resets to its
 > **windup** so `ts` starts **near 0** and the swing begins from the start (matching the held pose).
@@ -1696,9 +1701,9 @@ After **every** new training checkpoint:
 | symptom | fix |
 |---|---|
 | `No such file or directory` building a harness | the parity/e2e sources live in `scripts/pingpong_parity/`, not the repo root. Prefer `bash scripts/pingpong_parity/run_parity.sh`. |
-| ONNX path wrong / runner can't find model | check `onnx.model_path` in the cfg resolves (relative to the cfg dir): `ls dist/a3_deploy_x86_64/models/model_15200.onnx`. After a build, re-copy the onnx (build wipes `dist/`). |
-| `model_15200.onnx` missing after build | the model is **not** in `src`; re-copy from `assets/a3_runtime/models/` (Stage 3.3 box). |
-| `YAML::BadFile: bad file: config/a3_runtime_config.pingpong.yaml` | the pingpong **config** wasn't staged into this `dist/` (every build wipes `dist/` and never auto-stages our `*.pingpong*` cfg; `--build-only` skips staging entirely). Re-run the Stage 3.3 staging (copy the runtime cfg + aimrt cfg + model). |
+| ONNX path wrong / runner can't find model | build with `--runtime-cfg src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml`, then check `ls dist/a3_deploy_x86_64/models/model_15200.onnx` and run through `./run_a3_pingpong.sh` so the packaged cfg/aimrt pairing stays consistent. |
+| `model_15200.onnx` missing after build | the durable source is still `assets/a3_runtime/models/model_15200.onnx`; if a package is missing it, rebuild with the ping-pong `--runtime-cfg` instead of doing a plain arch-only build. |
+| `YAML::BadFile: bad file: config/a3_runtime_config.pingpong.yaml` | you are likely using an old `dist/` built before the packager started preserving the ping-pong cfg alias, or you used `--build-only`. Re-run Stage 3.3 / Stage 5 with `--runtime-cfg src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml`. |
 | `libonnxruntime.so not found` | the harnesses need `-Wl,-rpath,$ORT/lib`; the runner needs `export LD_LIBRARY_PATH=".:${LD_LIBRARY_PATH}"`. ORT = `thirdparty/onnxruntime/onnxruntime-linux-x64-1.19.2`. |
 | `ModuleNotFoundError: onnxruntime` in `run_parity.sh` | system `python3` lacks it. Set `PYBIN=` to a python with `onnxruntime`+`numpy` (e.g. the conda env). |
 | ROS commands fail / `aimrt_main: command not found` | you didn't `source /opt/ros/jazzy/setup.bash` (the `hope` box's `.bashrc` is broken — do it in every shell). |

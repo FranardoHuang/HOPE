@@ -528,18 +528,35 @@ def _run(cfg):
     #    registry_name_2 (backhand); it must match racket.strike_phase_per_clip.
     registry_name = cfg.registry_name if cfg.registry_name is not None else cfg.task.registry_name
     registry_name = str(registry_name)
-    if ":" not in registry_name:
-        registry_name += ":latest"
-    import wandb
 
-    api = wandb.Api()
-    motion_files = [str(pathlib.Path(api.artifact(registry_name).download()) / "motion.npz")]
+    def _local_motion(name):
+        """If ``name`` is a local motion.npz (or an artifact dir containing one), return that path.
+
+        Lets you train straight off a local clip (e.g. artifacts/hope_forehand_hopex/motion.npz or its
+        parent dir) WITHOUT publishing to the wandb registry — bypasses the api.artifact().download()
+        below. Returns None for a normal registry reference (``<entity>/wandb-registry-motions/...``).
+        """
+        p = pathlib.Path(str(name).split(":")[0])  # tolerate a :version suffix
+        if p.is_file() and p.suffix == ".npz":
+            return str(p)
+        if (p / "motion.npz").is_file():
+            return str(p / "motion.npz")
+        return None
+
+    def _resolve_clip(name):
+        local = _local_motion(name)
+        if local is not None:
+            print(f"[train.py] LOCAL motion (no registry): {local}", flush=True)
+            return local
+        nm = name if ":" in name else name + ":latest"
+        import wandb
+        return str(pathlib.Path(wandb.Api().artifact(nm).download()) / "motion.npz")
+
+    motion_files = [_resolve_clip(registry_name)]
     reg2 = _get(cfg, "registry_name_2", None) or _get(cfg.task, "registry_name_2", None)
     if reg2 is not None and str(reg2).strip() and str(reg2).lower() != "none":
         reg2 = str(reg2)
-        if ":" not in reg2:
-            reg2 += ":latest"
-        motion_files.append(str(pathlib.Path(api.artifact(reg2).download()) / "motion.npz"))
+        motion_files.append(_resolve_clip(reg2))
         print(f"[train.py] UNIFIED multi-clip policy: clip0={registry_name}  clip1={reg2}", flush=True)
     env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
 
@@ -564,8 +581,11 @@ def _run(cfg):
         )
     env = RslRlVecEnvWrapper(env)
 
+    # Only hand the runner a registry name for wandb lineage (use_artifact) when the clip actually came
+    # from the registry; a local motion path would crash wandb.run.use_artifact.
+    runner_registry_name = None if _local_motion(registry_name) is not None else registry_name
     runner = OnPolicyRunner(
-        env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device, registry_name=registry_name
+        env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device, registry_name=runner_registry_name
     )
     runner.add_git_repo_to_log(__file__)
 

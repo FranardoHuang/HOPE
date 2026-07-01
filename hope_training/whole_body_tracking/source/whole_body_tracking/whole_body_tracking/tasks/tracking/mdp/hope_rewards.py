@@ -108,3 +108,84 @@ def pre_strike_foot_slip(env: ManagerBasedRLEnv, command_name: str) -> torch.Ten
     """
     cmd = _cmd(env, command_name)
     return cmd.foot_slip_in_contact * cmd.pre_strike.float()
+
+
+# ============================================================================================== #
+# Footwork-to-strike (BASE-FREE). The legs move because moving the body REDUCES the racket->target
+# distance (racket_progress), not because they track a base target. Footwork is penalized for being
+# BAD (slip / drag / violent / unstable at strike), NOT for stepping — the feet are free to move.
+# ============================================================================================== #
+def racket_progress(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """DENSE pre-strike reward for reducing the racket->target distance (prev - current, clamped). This
+    is the base-free driver of whole-body footwork: the legs/waist/arms all get credit for moving the
+    racket closer to the target, with NO base-position target. Gated to pre_strike (approach phase); the
+    strike swing itself is scored by the racket pos/vel/normal terms. Positive when approaching; RewTerm
+    weight is POSITIVE."""
+    cmd = _cmd(env, command_name)
+    return cmd.racket_progress * cmd.pre_strike.float()
+
+
+def racket_strike_success(
+    env: ManagerBasedRLEnv, command_name: str, std_pos: float, std_vel: float, std_normal: float
+) -> torch.Tensor:
+    """MULTIPLICATIVE strike success R_pos * R_vel * R_normal, gated to the strike window. Unlike the
+    additive racket terms (which give partial credit for getting only position OR velocity right), the
+    product is high ONLY when position AND velocity AND normal are all good at once — a true hit. RewTerm
+    weight is POSITIVE."""
+    # Each kernel already multiplies by strike_window internally, so the product is non-zero ONLY in the
+    # window (no extra gate needed). The product is high only when pos AND vel AND normal are all good.
+    rp = racket_position_tracking_exp(env, command_name, std_pos)
+    rv = racket_velocity_tracking_exp(env, command_name, std_vel)
+    rn = racket_normal_tracking_exp(env, command_name, std_normal)
+    return rp * rv * rn
+
+
+# --- footwork penalties (feet may STEP; we only punish BAD foot behaviour) --------------------- #
+def foot_slip_sq(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Penalize foot slip while in contact: sum over feet of contact * ||foot_xy_velocity||² (always on).
+    A planted/landing foot should not skate. Positive magnitude; RewTerm weight is negative."""
+    return _cmd(env, command_name).foot_slip_sq
+
+
+def foot_velocity(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Penalize excessive/violent foot velocity: sum over feet of ||foot_velocity||². Lets the foot step
+    but discourages flailing. Positive magnitude; RewTerm weight is negative."""
+    return _cmd(env, command_name).foot_vel_sq
+
+
+def foot_drag(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Penalize foot dragging: lateral foot speed while the foot is near the ground (skimming instead of
+    lifting cleanly to step). Positive magnitude; RewTerm weight is negative."""
+    return _cmd(env, command_name).foot_drag
+
+
+def arm_overreach(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Anti-arm-only: penalize solving the target by maxing the arm out — fraction of ARM joints within
+    10% of a position limit. Encourages using the body/legs to bring the target into a comfortable arm
+    range instead of stretching. Positive in [0,1]; RewTerm weight is negative."""
+    return _cmd(env, command_name).arm_overreach_frac
+
+
+# --- strike-window stability (penalize wobble/bob/skate AT the hit; gated to the strike window) - #
+def strike_proj_grav_xy(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Penalize base tilt (||projected_gravity_xy||) DURING the strike window — be upright at the hit."""
+    cmd = _cmd(env, command_name)
+    return cmd.proj_grav_xy * cmd.strike_window.float()
+
+
+def strike_base_ang_vel(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Penalize base roll/pitch rate (||base_ang_vel_xy||) DURING the strike window."""
+    cmd = _cmd(env, command_name)
+    return cmd.base_ang_vel_xy_norm * cmd.strike_window.float()
+
+
+def strike_foot_velocity(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Penalize foot motion (sum ||foot_velocity||²) DURING the strike window — plant for the hit."""
+    cmd = _cmd(env, command_name)
+    return cmd.foot_vel_sq * cmd.strike_window.float()
+
+
+def strike_vertical_bob(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Penalize vertical base velocity (|base_lin_vel_z|) DURING the strike window — no bob at the hit."""
+    cmd = _cmd(env, command_name)
+    return cmd.vertical_speed * cmd.strike_window.float()

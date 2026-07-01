@@ -48,8 +48,17 @@ Notes / corrections:
 - Base linear velocity is not part of the current 180-D actor observation.
 - "base forward vector" is not implemented; `projected_gravity` is the
   orientation cue.
+- Current hardware default is `loc_mode=perfect_tracking`: base/torso world
+  position is filled from the reference trajectory, while IMU orientation
+  remains real. This is a deploy placeholder, not a true world localizer.
+- `oracle` pose feeding is simulation-only today. The current
+  `a3_deploy_onnx_ref_pingpong` runner does not yet subscribe directly to HOPE
+  mocap/VRPN topics on hardware.
 - Hardware deployment must verify how base pose, torso pose, projected gravity,
   and anchor terms are estimated before accepting real motion quality.
+- `level 0` vs `level 1` is part of the current runtime contract: `level 0` is
+  a ready/windup hold state, while `level 1` releases the full-body swing.
+  A good hoist swing at `level 1` does not by itself prove ground support.
 
 ## Critic-Only (privileged) Observation (implemented)
 

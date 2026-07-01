@@ -19,9 +19,14 @@ For each frame it computes, in the robot-root (pelvis-yaw) frame:
 Then it selects the strike frame and writes plots to diag_videos/strike_phase_*.png.
 
     python scripts/analyze_strike_phase.py
+    python scripts/analyze_strike_phase.py \
+        --clip forehand:artifacts/hope_forehand:v2/motion.npz \
+        --clip backhand:artifacts/hope_backhand:v2/motion.npz \
+        --out-dir analysis/strike_timing_v2
 """
 from __future__ import annotations
 
+import argparse
 import os
 
 import numpy as np
@@ -111,16 +116,17 @@ def analyze(name, path):
             label[i] = "follow-through"
 
     # --- Strike-frame selection -------------------------------------------------
-    # Score: forward (vx>0) frames near the forward-swing peak, close to the plane.
-    # We pick the frame of MINIMUM distance to the x=0.40 plane among frames that are
-    # on the forward swing (vx>0) AND within the high-vx window (>= 0.5 * vx_peak).
-    vx_peak = vx[fwd_peak]
-    fwd_mask = (vx > 0.5 * vx_peak) & (vx > 0.3)
+    # The config defines strike_phase as the RACKET-TIP SPEED PEAK on the forward
+    # swing (hope config comment: "phase of the clip at which contact happens
+    # (racket-tip speed peak)"). So we select the frame of MAXIMUM racket speed
+    # restricted to the forward-swing window (vx>0 near the forward-vx peak). This
+    # is robust when the racket's plane crossing (x=0.40) and its speed peak occur
+    # at different frames (e.g. a swing whose fast contact is past x=0.40).
+    fwd_mask = vx > 0.3
     cand = np.where(fwd_mask)[0]
     if len(cand) == 0:                             # degenerate fallback
         cand = np.array([fwd_peak])
-    # among the forward-swing window, the strike is where the racket crosses the plane
-    strike = cand[np.argmin(dist_plane[cand])]
+    strike = cand[np.argmax(speed[cand])]          # fastest forward-swing frame
 
     info = dict(
         name=name, T=T, fps=fps, phase=phase, speed=speed, vx=vx,
@@ -165,7 +171,9 @@ def plot(infos, out):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(4, 2, figsize=(14, 14), sharex=True)
+    ncols = len(infos)
+    fig, axes = plt.subplots(4, ncols, figsize=(7 * ncols, 14), sharex=True,
+                             squeeze=False)
     for col, info in enumerate(infos):
         ph = info["phase"]
         s = info["strike"]
@@ -199,13 +207,45 @@ def plot(infos, out):
     print(f"\n[plot] wrote {out}")
 
 
+def _resolve(path):
+    """Allow both absolute and WBT-relative clip paths."""
+    return path if os.path.isabs(path) else os.path.join(WBT, path)
+
+
 def main():
-    infos = [analyze(n, p) for n, p in CLIPS.items()]
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--clip", action="append", default=None,
+                    help="name:path.npz  (repeatable). Path may be absolute or "
+                         "relative to the whole_body_tracking dir. Defaults to the "
+                         "hardcoded v1 forehand+backhand clips.")
+    # Convenience single-clip flags matching the requested interface.
+    ap.add_argument("--motion-file", default=None, help="single clip npz path")
+    ap.add_argument("--clip-name", default="clip", help="name for --motion-file")
+    ap.add_argument("--out-dir", default=None,
+                    help="output dir for plots (default: <WBT>/diag_videos)")
+    args = ap.parse_args()
+
+    if args.motion_file:
+        clips = {args.clip_name: _resolve(args.motion_file)}
+    elif args.clip:
+        clips = {}
+        for spec in args.clip:
+            name, _, path = spec.partition(":")
+            if not path:
+                ap.error(f"--clip must be name:path, got {spec!r}")
+            clips[name] = _resolve(path)
+    else:
+        clips = CLIPS
+
+    infos = [analyze(n, p) for n, p in clips.items()]
     for info in infos:
         report(info)
-    outdir = os.path.join(WBT, "diag_videos")
+
+    outdir = args.out_dir if args.out_dir else os.path.join(WBT, "diag_videos")
+    outdir = _resolve(outdir)
     os.makedirs(outdir, exist_ok=True)
-    plot(infos, os.path.join(outdir, "strike_phase_analysis.png"))
+    tag = "_".join(i["name"] for i in infos)
+    plot(infos, os.path.join(outdir, f"strike_phase_{tag}.png"))
 
 
 if __name__ == "__main__":

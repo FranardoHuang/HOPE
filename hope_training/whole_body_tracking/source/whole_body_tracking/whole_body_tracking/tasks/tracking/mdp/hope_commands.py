@@ -273,6 +273,26 @@ class RacketTargetCommand(CommandTerm):
         # pre_strike_foot_slip reward. Recomputed each step in _update_metrics; stays 0 if the feet /
         # contact sensor cannot be resolved, so the reward is a safe no-op in that case.
         self.foot_slip_in_contact = torch.zeros(self.num_envs, device=self.device)
+        # Fraction of feet in contact (mean over the 2 feet): 1.0 = both planted, 0.5 = one foot
+        # unloaded, 0.0 = airborne. Clean attribute for the feet_contact stance reward (real_sensor
+        # variant). Same value as metrics["foot_contact_frac"]; 0 (safe) if the sensor cannot resolve.
+        self.feet_contact_frac = torch.zeros(self.num_envs, device=self.device)
+        # ---- footwork-to-strike signals (base-FREE; reward/metric only, NEVER in the observation) ----
+        # racket_target_distance = ||racket_FK - racket_target|| (frame-invariant, no base position).
+        # racket_progress = prev_distance - current_distance (>0 = the WHOLE body moved the racket closer
+        # to the target). This dense progress term is what drives footwork WITHOUT a base target.
+        z = lambda: torch.zeros(self.num_envs, device=self.device)  # noqa: E731
+        self.racket_target_distance = z()
+        self.racket_progress = z()
+        self._prev_racket_dist = z()
+        self.foot_slip_sq = z()  # sum_feet contact * ||foot_xy_vel||^2
+        self.foot_vel_sq = z()  # sum_feet ||foot_vel||^2 (excessive/violent foot motion)
+        self.foot_drag = z()  # sum_feet ||foot_xy_vel|| while the foot is LOW (near ground -> dragging)
+        self.arm_overreach_frac = z()  # fraction of ARM joints within 10% of a position limit
+        self.proj_grav_xy = z()  # ||projected_gravity_xy|| = base tilt (strike-window stability)
+        self.base_ang_vel_xy_norm = z()  # ||base_ang_vel_xy|| (strike-window stability)
+        self.vertical_speed = z()  # |base_lin_vel_z| (vertical bob)
+        self._drag_height = 0.10  # m: foot below this counts as "near ground" for the drag penalty
         self.metrics["joint_vel_abs_max"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["time_to_strike_s"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["pre_strike_flag"] = torch.zeros(self.num_envs, device=self.device)
@@ -721,6 +741,81 @@ class RacketTargetCommand(CommandTerm):
             self._resample_command(wrapped)
         self._prev_motion_steps = motion.time_steps.clone()
 
+    def _update_footwork_signals(self, racket_dist: torch.Tensor) -> None:
+        """Base-FREE footwork-to-strike signals (reward/metric only; NEVER observed). The legs are driven
+        to move by racket PROGRESS (reducing the racket->target distance), not by any base target. All
+        guards degrade to 0 if a body/sensor cannot resolve, so this can never crash training."""
+        data = self.robot.data
+        # --- racket-target distance + dense progress (the base-free movement driver) ---
+        self.racket_target_distance = racket_dist
+        # progress = previous - current distance; clamp to kill the spike when the target resamples / the
+        # episode resets (a target jump would otherwise read as huge spurious progress).
+        self.racket_progress = (self._prev_racket_dist - racket_dist).clamp(-0.15, 0.15)
+        self._prev_racket_dist = racket_dist.detach()
+        self.metrics["racket_target_distance"] = racket_dist
+        self.metrics["racket_progress"] = self.racket_progress
+        self.metrics["racket_progress_prestrike"] = torch.where(
+            self.pre_strike, self.racket_progress, torch.zeros_like(self.racket_progress)
+        )
+        # --- base stability components (training-only) ---
+        pg = getattr(data, "projected_gravity_b", None)
+        if pg is not None:
+            self.proj_grav_xy = torch.norm(pg[:, :2], dim=-1)
+        self.base_ang_vel_xy_norm = torch.norm(data.root_ang_vel_b[:, :2], dim=-1)
+        self.vertical_speed = torch.abs(data.root_lin_vel_b[:, 2])
+        self.metrics["proj_grav_xy"] = self.proj_grav_xy
+        self.metrics["base_ang_vel_xy"] = self.base_ang_vel_xy_norm
+        self.metrics["base_vertical_speed"] = self.vertical_speed
+        # --- foot footwork signals (slip² / velocity / drag); feet may STEP, so this is PENALTY-only ---
+        if self._foot_idx_robot and self._contact_sensor is not None and self._foot_idx_contact:
+            f_force = torch.norm(self._contact_sensor.data.net_forces_w[:, self._foot_idx_contact, :], dim=-1)
+            in_contact = (f_force > 10.0).float()  # (E,2)
+            f_vel = data.body_lin_vel_w[:, self._foot_idx_robot, :]  # (E,2,3)
+            f_xy_speed = torch.norm(f_vel[..., :2], dim=-1)  # (E,2)
+            f_speed = torch.norm(f_vel, dim=-1)  # (E,2)
+            f_height = data.body_pos_w[:, self._foot_idx_robot, 2]  # (E,2)
+            self.foot_slip_sq = (in_contact * f_xy_speed.square()).sum(dim=-1)  # contact * ||v_xy||²
+            self.foot_vel_sq = f_speed.square().sum(dim=-1)  # excessive/violent foot motion
+            low = (f_height < self._drag_height).float()  # foot near the ground
+            self.foot_drag = (low * f_xy_speed).sum(dim=-1)  # lateral skim while low = dragging
+            self.metrics["foot_slip_sq"] = self.foot_slip_sq
+            self.metrics["foot_vel_mean"] = f_speed.mean(dim=-1)
+            self.metrics["foot_lift_rate"] = (1.0 - in_contact).mean(dim=-1)  # 0 = both planted, 1 = airborne
+            self.metrics["foot_vel_at_strike"] = torch.where(
+                self.strike_window, f_speed.mean(dim=-1), torch.zeros(self.num_envs, device=self.device)
+            )
+        # --- anti-arm-only: ARM joints near a limit + arm joint velocity (resolve arm joint idx once) ---
+        if not getattr(self, "_arm_resolved", False):
+            self._arm_resolved = True
+            self._arm_joint_idx, self._leg_joint_idx = [], []
+            try:
+                self._arm_joint_idx = list(self.robot.find_joints([".*shoulder.*", ".*elbow.*", ".*wrist.*"])[0])
+            except Exception:
+                pass
+            try:
+                self._leg_joint_idx = list(self.robot.find_joints([".*hip.*", ".*knee.*", ".*ankle.*"])[0])
+            except Exception:
+                pass
+        limits = getattr(data, "soft_joint_pos_limits", None)
+        if limits is None:
+            limits = getattr(data, "joint_pos_limits", None)
+        if self._arm_joint_idx and limits is not None:
+            ai = self._arm_joint_idx
+            half = ((limits[:, ai, 1] - limits[:, ai, 0]) * 0.5).clamp(min=1e-6)
+            d = torch.minimum(
+                data.joint_pos[:, ai] - limits[:, ai, 0], limits[:, ai, 1] - data.joint_pos[:, ai]
+            ).clamp(min=0.0)
+            self.arm_overreach_frac = ((d / half) < 0.1).float().mean(dim=-1)  # within 10% of a limit
+            self.metrics["arm_overreach_frac"] = self.arm_overreach_frac
+            self.metrics["arm_joint_vel_max"] = torch.max(torch.abs(data.joint_vel[:, ai]), dim=-1).values
+        # --- diagnostic: do the LEGS actually move before the strike? (footwork is happening) ---
+        if self._leg_joint_idx:
+            leg_vel = torch.max(torch.abs(data.joint_vel[:, self._leg_joint_idx]), dim=-1).values
+            self.metrics["leg_joint_vel_max"] = leg_vel
+            self.metrics["leg_moving_prestrike"] = torch.where(
+                self.pre_strike, (leg_vel > 0.2).float(), torch.zeros(self.num_envs, device=self.device)
+            )
+
     def _update_metrics(self):
         # CommandTerm.compute() runs _update_metrics() BEFORE _update_command(), so refresh the
         # actual racket FK AND the strike timing here (once per step) — metrics, rewards, and
@@ -962,12 +1057,15 @@ class RacketTargetCommand(CommandTerm):
             f_force = torch.norm(self._contact_sensor.data.net_forces_w[:, self._foot_idx_contact, :], dim=-1)  # (E,2)
             in_contact = (f_force > 10.0).float()  # 10 N = the sensor's force_threshold
             self.metrics["foot_contact_frac"] = in_contact.mean(dim=-1)  # 1.0 = both feet planted
+            self.feet_contact_frac = self.metrics["foot_contact_frac"]  # clean attr for feet_contact reward
             f_speed = torch.norm(data.body_lin_vel_w[:, self._foot_idx_robot, :2], dim=-1)  # horizontal (E,2)
             _slip_sum = (f_speed * in_contact).sum(dim=-1)  # sum over feet of horizontal speed while in contact
             # metric = MEAN slip over the contacting feet (m/s; planted foot should be ~0).
             self.metrics["foot_slip_speed"] = _slip_sum / in_contact.sum(dim=-1).clamp(min=1.0)
             # reward signal = SUM over feet (so both slipping feet are penalized); pre_strike-gated in the reward.
             self.foot_slip_in_contact = _slip_sum
+        # footwork-to-strike signals (racket progress, foot slip²/vel/drag, arm overreach, strike stability)
+        self._update_footwork_signals(pos_err)
         if self._has_jpos_limits:
             limits = getattr(data, "soft_joint_pos_limits", None)
             if limits is None:
@@ -997,8 +1095,27 @@ class RacketTargetCommand(CommandTerm):
     # Observation helpers (base-relative quantities)
     # ------------------------------------------------------------------ #
     def racket_target_pos_b(self) -> torch.Tensor:
-        """Desired racket position relative to the base (yaw-heading frame). HITTER actor obs."""
+        """Desired racket position relative to the base (yaw-heading frame). HITTER actor obs.
+
+        PRIVILEGED: uses ``base_pos_w`` (world base position), which is fabricated on hardware
+        (no localizer). Used by the `full` obs mode; the `real_sensor_only` mode replaces it with
+        :meth:`racket_target_pos_b_rel`.
+        """
         return quat_rotate_inverse(yaw_quat(self.base_quat_w), self.racket_target_pos_w - self.base_pos_w)
+
+    def racket_target_pos_b_rel(self) -> torch.Tensor:
+        """Desired racket position relative to the CURRENT racket (FK), in the yaw-heading frame.
+
+        DEPLOY-HONEST (no world base position): expanding the rotation, the base position cancels::
+
+            R_yaw^T (target_w - racket_w) = R_yaw^T(target_w - base_w) - R_yaw^T(racket_w - base_w)
+                                          = (target in base frame) - (racket FK in base frame)
+
+        Both terms are computable on the real robot from the planner's target + racket forward
+        kinematics (joint encoders), WITHOUT a fabricated base pose. Replaces
+        :meth:`racket_target_pos_b` in the ``real_sensor_only`` observation mode.
+        """
+        return quat_rotate_inverse(yaw_quat(self.base_quat_w), self.racket_target_pos_w - self.racket_pos_w)
 
     def base_target_pos_b(self) -> torch.Tensor:
         """Desired base XY position relative to the current base (yaw-heading frame). HITTER actor obs."""

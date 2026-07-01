@@ -65,6 +65,11 @@ Use `ball_tracking_mode:=auto` and omit `ball_object` if the ball is not a named
 
 Expected HOPE-standard topics are listed in [../interfaces/ros_topics.md](../interfaces/ros_topics.md).
 
+Current limitation for G07 ping-pong deploy: these mocap topics are not yet
+consumed directly by `a3_deploy_onnx_ref_pingpong`. Today they help planner and
+future localizer work, but the current deploy runner still uses
+`perfect_tracking` unless a separate hardware pose bridge is added.
+
 ## Verification
 
 ```bash

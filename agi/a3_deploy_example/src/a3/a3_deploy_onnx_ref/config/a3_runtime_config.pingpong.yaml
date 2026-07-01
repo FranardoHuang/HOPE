@@ -6,14 +6,10 @@
 # (Previously this file lived only under dist/, which build_a3_deploy_pkg.sh wipes
 # on every build -> the runner asset was silently dropped. Keep it here in src.)
 onnx:
-  # Resolved RELATIVE TO THIS CONFIG FILE'S DIRECTORY by a3_pingpong_main.cpp Resolve():
-  # a relative path -> cfgdir/path; an absolute path -> used as-is; there is NO cwd
-  # fallback. The runner is launched from dist/a3_deploy_<arch>/ with
-  #   --runtime-cfg config/a3_runtime_config.pingpong.yaml
-  # so cfgdir = dist/.../config and `../models/...` -> dist/.../models/...  Do NOT use a
-  # repo-root path like `agi/a3_deploy_example/assets/...`: it resolves to
-  # `config/agi/a3_deploy_example/assets/...` and the model load FAILS.
-  model_path: ../models/model_15200.onnx   # 180-obs / 31-act pingpong policy (stage into dist/.../models/)
+  # Keep the SOURCE config valid inside the repo tree: from src/.../config this resolves to
+  # assets/a3_runtime/models/model_15200.onnx. During packaging, build_a3_deploy_pkg.sh copies
+  # the model into dist/.../models/ and rewrites the packaged runtime cfg to `models/...`.
+  model_path: ../../../../assets/a3_runtime/models/model_15200.onnx
 
 policy_driver:
   policy_hz: 50.0

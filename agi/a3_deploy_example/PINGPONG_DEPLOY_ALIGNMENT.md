@@ -222,8 +222,11 @@ cd agi/a3_deploy_example
 
 # (a) Build the x86 package (needs ROS 2 Jazzy/Humble + AimRT toolchain).
 source /opt/ros/jazzy/setup.bash
-bash scripts/build_a3_deploy_pkg.sh --arch x86_64 --jobs 20
-# -> dist/a3_deploy_x86_64/{a3_deploy_onnx_ref_pingpong, config/, models/model_15200.onnx}
+bash scripts/build_a3_deploy_pkg.sh \
+  --arch x86_64 \
+  --runtime-cfg src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml \
+  --jobs 20
+# -> dist/a3_deploy_x86_64/{a3_deploy_onnx_ref_pingpong,run_a3_pingpong.sh,config/,models/model_15200.onnx}
 
 # (b) Standalone C++<->Python ONNX parity (NO ROS needed; reproduces this pass).
 #     PREFERRED: the wrapper builds both harnesses, generates the python ref,
@@ -246,9 +249,9 @@ g++ -std=c++20 -O2 scripts/pingpong_parity/pp_e2e_harness.cpp \
   -Isrc/a3/a3_deploy_onnx_ref/include -I/usr/include/eigen3 -I"$ORT/include" \
   -L"$ORT/lib" -lonnxruntime -Wl,-rpath,"$PWD/$ORT/lib" -o /tmp/pp_e2e
 /tmp/pp_e2e assets/a3_runtime/models/model_15200.onnx 1
-# NOTE: model_15200.onnx lives at assets/a3_runtime/models/ (the durable runtime
-# asset). The x86_64 build bundles the AGI official models, NOT model_15200 — so
-# dist/a3_deploy_x86_64/models/model_15200.onnx does NOT exist.
+# NOTE: model_15200.onnx lives durably at assets/a3_runtime/models/, and when the
+# package is built with the pingpong --runtime-cfg it is also staged into
+# dist/a3_deploy_x86_64/models/model_15200.onnx.
 # Result this pass: dims=31, q_des finite max≈0.88 rad, kp∈[20,250], kd∈[2,8] => PASS.
 
 # (d) Unit tests (built by the package): joint-map bijection, obs builder, parity.
@@ -397,17 +400,15 @@ verified each obs block.
 | Hardware-safe default `loc_mode = perfect_tracking` (was `fabricated`, the buzz mode) | HIGH | `PpPolicyConfig`, `a3_pingpong_main.cpp` default, pingpong YAML `obs_debug.loc_mode` |
 | Loud one-shot guard when secondary/torso IMU absent (else anchor-ori silently wrong) | HIGH | `pp_policy.hpp` |
 | Consolidated one-shot first-tick debug dump (obs blocks + IMU + action + q_des/kp/kd + clamp/IMU status) | — | `pp_policy.hpp` `LogFirstTick` |
-| Restored the **x86 dist** `model_15200.onnx` + pingpong YAMLs that a build wiped; made them **durable** in `src/.../config/` + `assets/a3_runtime/models/` | MEDIUM | repo |
+| Restored the pingpong runtime assets as durable source files and taught the packager to preserve the pingpong runtime-config basename + wrapper script | MEDIUM | repo |
 
-> ⚠ **Build staging footgun (do before next package build):** `build_a3_deploy_pkg.sh`
-> `rm -rf`s `dist/` on every build and does **not** stage the pingpong assets — a
-> rebuild silently drops `model_15200.onnx` + the two pingpong YAMLs. They now have
-> durable copies in `assets/a3_runtime/models/` and `src/.../config/`; still extend
-> `stage_runtime_config_and_assets()` to copy them into `dist/` (or pass
-> `--runtime-cfg .../a3_runtime_config.pingpong.yaml`).
+> `build_a3_deploy_pkg.sh` still wipes `dist/` on every rebuild, but the ping-pong
+> path is now staged correctly when you pass
+> `--runtime-cfg src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml`.
+> That build preserves `config/a3_runtime_config.pingpong.yaml`, stages
+> `model_15200.onnx`, and emits `run_a3_pingpong.sh`.
 
 **Remaining gaps / TODO (not blocking the contract; mostly need the build/sim/robot):**
-* **[BUILD]** Wire pingpong-asset staging into `build_a3_deploy_pkg.sh` (above).
 * **[BUILD]** Wire `pp_jointmap_test` / `pp_policy_test` / `pp_parity_test` into a
   CMake/CTest target (currently only one-off `g++` recipes) + commit a golden.
 * **[LOW]** Zero `last_action_` on PASSIVE/PD_STAND / MOTION re-entry to match the

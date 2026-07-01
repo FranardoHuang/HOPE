@@ -389,6 +389,25 @@ using CommandFn = std::function<bool(
 
 如果策略输出不是本仓库 reference policy 的 29-DOF 格式，优先使用 `CommandFn`。
 
+## Ping-pong runner 额外约束
+
+当前仓库里的 `a3_deploy_onnx_ref_pingpong` 属于上面的“路线 A”变体：
+它复用了 `RobotIOBackend` 和 `A3PolicyDriver`，但 180-D 观测、31-DOF
+ONNX、`level 0/1`、reference clock 和 localization mode 都在前端自己实现。
+
+对这条路径，现场最容易误解的边界是：
+
+- backend 只负责 joint/IMU 状态同步与 body-drive command 发布，不负责世界位姿估计。
+- `perfect_tracking` 只是把 base/torso 世界位置用参考轨迹占位；`oracle` 只给仿真。
+- 当前 HOPE mocap/VRPN 话题还没有直接接进 `a3_deploy_onnx_ref_pingpong`，所以“现场有 mocap”
+  不等于这条 deploy 路径已经在用 mocap。
+- MuJoCo 和真机走的是同一条 `A3AimrtBackend` `/body_drive/*` 接口，所以应先在
+  `scripts/run_sim.sh` + `run_a3_pingpong.sh --dry-run/--reference-playback/shadow`
+  这条 shared-interface rehearsal 上过关，再去做真机地面支撑排查。只有 source sim
+  支持 `scripts/run_oracle.sh` / `scripts/reset_sim.sh`；standalone 只覆盖 A/B 模式。
+- 真机 bring-up 不应直接从 ONNX swing 开始，先跑 `--reference-playback` 验证同一条
+  scatter/gain/topic 路径，再跑 `--dry-run` / `--probe` / `shadow`。
+
 ## 诊断和无输出测试
 
 部署包里有两个常用入口：

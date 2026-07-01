@@ -1,8 +1,18 @@
 # =============================================================================
-# HOPE ping-pong WBC task (Agibot A3) — HITTER-aligned (arXiv:2508.21043).
+# HOPE ping-pong WBC task (Agibot A3) — `real_sensor_only` deploy-honest variant.
 #
-# Selected with `task=HOPEPingPong`. Composes the shared env/sim/randomization
-# bases (cfg/base/*) and overrides the HOPE-specific knobs below.
+# Selected with `task=HOPEPingPongRealSensor`. Identical task/reward/racket/DR to
+# HOPEPingPong, but routes to the gym env whose ACTOR observation drops every
+# world-frame base-position dependency (motion_anchor_pos_b, base_target_pos_b)
+# and reframes racket_target_pos_b to be racket-FK-relative (180 -> 175), plus
+# absolute balance rewards/terminations. See the obs-redesign report.
+#
+# KEEP IN SYNC: this file is a copy of HOPEPingPong.yaml with only `name` +
+# `gym_task` changed. When you tune HOPEPingPong.yaml (reward weights / racket /
+# DR), mirror the change here (or vice-versa). The two share every knob below.
+#
+# Composes the shared env/sim/randomization bases (cfg/base/*) and overrides the
+# HOPE-specific knobs below.
 #
 # ALIGNMENT GOAL (2026-06-26): reproduce HITTER, not invent our own curriculum.
 # This file was stripped of the HOPE-invented machinery (motion_scale demotion,
@@ -23,9 +33,9 @@
 # non-overlapping y regions) is Stage 2 and adds swing_type + a second clip.
 # =============================================================================
 
-name: HOPEPingPong
-gym_task: HOPE-PingPong-AgibotA3-v0
-experiment_name: agibot_a3_hope
+name: HOPEPingPongRealSensor
+gym_task: HOPE-PingPong-RealSensor-AgibotA3-v0
+experiment_name: agibot_a3_hope_realsensor
 
 # wandb motion registry clips. UNIFIED HITTER policy: clip 0 = forehand (registry_name), clip 1 =
 # backhand (registry_name_2). MotionLoader concatenates them; clip_id selects which swing each env
@@ -70,8 +80,9 @@ rewards:
                                    # Next: 1.0 -> 0.8 -> 0.5 as vel_error keeps dropping; never jump to 0.5.
   racket_normal_weight: 5.0        # 3 -> 5 (normal already satisfied ~0-2 deg; keep std 0.30)
   racket_normal_std: 0.30
-  base_position_weight: 2.5        # 4 -> 2.5 (trim the dominant repositioning reward)
-  base_position_std: 0.25
+  # BASE-FREE: base_position reward is REMOVED in the footwork cfg (HOPERealSensorRewardsCfg sets it None).
+  # Do NOT re-add base_position_weight/std here — _apply_task_overrides would fail (the term is gone).
+  # The legs are driven by racket_progress instead. The footwork reward weights live in the cfg class.
   racket_position_static: false
 
   # Imitation prior at NATURAL weight (no motion_scale). HITTER does not demote the imitation reward
@@ -114,52 +125,53 @@ racket:
   # HITTER target sampling: uniform, directly sampled, NO reference-perturb curriculum.
   target_mode: uniform
 
-  # Fixed striking plane at x = 0.4 m in front of the robot (HITTER §IV: "the striking plane is fixed
-  # at 0.4 m in front of the robot, so only the y and z coordinates of the racket target are sampled").
+  # ====================== FOOTWORK CURRICULUM (base-free) ======================================
+  # Train in PHASES, widening the racket-target range so the dense racket_progress reward forces more
+  # body/leg contribution as arm-only reach runs out. Warm-start each phase from the previous checkpoint
+  # (checkpoint_path=...). Override the ranges per phase on the Hydra CLI (no extra yaml needed), e.g.:
+  #
+  #   PHASE 0 (this file's defaults): small range -> learn a STABLE strike, legs barely need to move.
+  #   PHASE 1: widen laterally + vertically -> progress reward starts needing body/leg shift. CLI:
+  #     racket.racket_pos_y_abs_range=[0.05,0.30] racket.pos_z_range=[0.75,1.05] \
+  #     'racket.pos_range_per_clip.forehand.y=[-0.35,-0.12]' 'racket.pos_range_per_clip.forehand.z=[0.78,1.00]' \
+  #     'racket.pos_range_per_clip.backhand.y=[0.12,0.35]'  'racket.pos_range_per_clip.backhand.z=[1.00,1.25]'
+  #   PHASE 2: full range + varied time_to_strike -> arm-only reach is insufficient, policy must STEP/shift:
+  #     racket.racket_pos_y_abs_range=[0.05,0.45] racket.pos_z_range=[0.70,1.05] \
+  #     'racket.pos_range_per_clip.forehand.y=[-0.45,-0.20]' 'racket.pos_range_per_clip.backhand.y=[0.20,0.45]'
+  # =============================================================================================
+  # Fixed striking plane at x = 0.4 m in front of the robot (HITTER §IV).
   pos_x_range: [0.40, 0.40]
-  # Unified policy: the Y region is conditioned on the swing type. |y| is sampled from
-  # racket_pos_y_abs_range and the sign is set per clip (forehand on -y, backhand on +y) so the regions
-  # are non-overlapping (HITTER §IV). pos_y_range below is the single-clip fallback (ignored when 2 clips).
-  racket_pos_y_abs_range: [0.05, 0.45]
-  pos_y_range: [-0.45, -0.05]
-  pos_z_range: [0.70, 1.05]
-  # OPTIONAL per-clip POSITION targets (unified policy only) — DISABLED BY DEFAULT (commented -> the
-  # shared pos box above is used for both clips; old behavior unchanged). Each clip's box is ADDED to the
-  # env origin; y is SIGNED here (forehand -y / backhand +y encoded directly). WHY: the shared box was
-  # tuned for backhand strike_phase 0.74 (low follow-through, z~0.84). At the corrected forward-strike
-  # phase 0.50 the backhand racket sits HIGH (reference z~1.22, x~0.58) — above the shared z<=1.05 box —
-  # so its strike-frame position is unreachable and backhand pos_pass collapses (0.96 -> 0.63). Per-clip
-  # boxes let the backhand target track its real strike point. Forehand strike (z~0.84) already fits, so
-  # its box ~= the shared box. Verify first: `python scripts/check_perclip_pos_sampling.py`.
-  # RE-GROUNDED 2026-07-01 into the HOPE WORLD frame (racket_target = env_origin + body_pos_w[strike]).
-  # The v2 clips were mis-grounded facing world +Y (~82-86deg) = table WIDTH, so their return velocity pointed
-  # +Y (lateral) — wrong for the HOPE table (geometry.py: +X = length / toward opponent, Y = width, robot faces
-  # +X). scripts/reground_hope_frame.py rotates each clip about +Z by -(frame-0 pelvis yaw) so the robot stands
-  # facing +X and the return is +X-dominant. Corrected clips: artifacts/hope_{forehand,backhand}_hopex/motion.npz.
-  # Boxes centered on the re-grounded racket-at-strike (fore (0.48,-0.38,0.87) / back (0.52,-0.04,1.05)) at
-  # phases 0.47/0.33 (UNCHANGED by the rotation). +X=forward, -Y=forehand(right) side.
+  # PHASE 0 ranges (narrow — a stable strike near the reference; widen per the curriculum above).
+  racket_pos_y_abs_range: [0.05, 0.15]
+  pos_y_range: [-0.15, -0.05]
+  pos_z_range: [0.82, 0.94]
+  # Per-clip target box, in the HOPE WORLD frame (racket_target = env_origin + motion.body_pos_w[strike]).
+  # RE-GROUNDED 2026-07-01: the v2 clips were mis-grounded facing world +Y (~82-86deg) = table WIDTH, so their
+  # return velocity pointed +Y (lateral) — wrong for the HOPE table (geometry.py: +X = length / toward the
+  # opponent, Y = width, robot faces +X). scripts/reground_hope_frame.py rotates each clip about +Z by
+  # -(frame-0 pelvis yaw) so the robot stands facing +X and the return velocity is +X-dominant. Corrected
+  # clips: artifacts/hope_{forehand,backhand}_hopex/motion.npz (upload as hope_* v3 before training).
+  # Boxes centered on the re-grounded racket-at-strike (fore (0.48,-0.38,0.87) / back (0.52,-0.04,1.05)),
+  # phases 0.47/0.33 (UNCHANGED by the rotation), ~0.10 wide/axis. +X=forward, -Y=forehand(right) side.
   pos_range_per_clip:
     forehand: {x: [0.43, 0.53], y: [-0.43, -0.33], z: [0.82, 0.92]}
     backhand: {x: [0.47, 0.57], y: [-0.09,  0.01], z: [1.00, 1.10]}
   # Racket target VELOCITY (HOPE world frame): return is now +X-dominant (toward the opponent). Centered on the
-  # re-grounded reference strike velocity: fore (+1.54,+1.17,+0.64) / back (+1.79,-0.46,+0.15). X dominates both;
-  # the forehand keeps a real +Y cross-court lateral, the backhand a -Y component.
+  # re-grounded reference strike velocity: fore (+1.54,+1.17,+0.64) / back (+1.79,-0.46,+0.15). X is the
+  # dominant axis of both; the forehand keeps a real +Y cross-court lateral, the backhand a -Y component.
   vel_range_per_clip:
     forehand: {x: [1.05, 2.05], y: [ 0.70, 1.65], z: [0.20, 1.00]}
     backhand: {x: [1.30, 2.30], y: [-0.95, 0.05], z: [0.00, 0.40]}
-  # vel_*_range is the SHARED fallback box (used when vel_range_per_clip is absent, and for single-clip runs).
+  # Shared fallback velocity box (used only for single-clip runs / clips without a per-clip entry).
   vel_x_range: [1.5, 3.5]
   vel_y_range: [-1.0, 1.0]
   vel_z_range: [0.0, 1.5]
- 
-  # Base XY target: small jitter around the (coupled) repositioning point.
+
+  # BASE-FREE: base-target sampling/coupling is unused (base_position reward + base_target obs removed).
+  # Keep the jitter ranges harmless and DISABLE the base->racket coupling so nothing nudges a base target.
   base_target_x_range: [-0.10, 0.10]
   base_target_y_range: [-0.10, 0.10]
-  # Weak base->racket coupling (uniform mode, root-cause stability fix 2026-06-27): shift the base target
-  # toward a FRACTION of the racket target's sideways (Y) offset, clamped, so the robot leans/steps slightly
-  # toward far targets instead of stretching in place. Conservative: Y only, 30% blend, <=0.20 m. The racket
-  # target distribution is unchanged. Set base_couple_blend: 0.0 to disable. (No walking reference -> small.)
-  base_couple_blend: 0.3
+  base_couple_blend: 0.0
   base_couple_max_offset: 0.20
   # normal_mode is the SINGLE-CLIP normal target rule ("velocity" = n=v/|v|, or "sampled"). NOTE: in the
   # UNIFIED multi-clip policy it is IGNORED — the target normal is the per-clip reference paddle normal

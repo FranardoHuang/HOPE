@@ -230,6 +230,56 @@ backend:
 - 加入状态超时、连续 unaligned、推理超时和异常输出 watchdog。
 - 首次实机按 `PASSIVE -> PD_STAND -> POLICY` 推进。
 
+## Ping-Pong `model_15200` 特殊路径
+
+当前仓库里除了 AGI 原始 `a3_deploy_onnx_ref`，还带有单独的
+`a3_deploy_onnx_ref_pingpong`。它用于 HOPE `model_15200.onnx`
+这条 `obs[1,180] + time_step[1,1] -> action[1,31]` 路径，不能和
+AGI 原始 `1570 -> 29` tokenizer policy 混用。
+
+现场如果跑的是你们昨天 tutorial 那条链，请按下面约束理解：
+
+- `a3_deploy_onnx_ref_pingpong` 只复用 AGI 的 `A3AimrtBackend`、
+  `A3PolicyDriver`、watchdog 和 safe-halt；obs、ONNX、action decode、
+  joint map、`level 0/1` 逻辑是 HOPE 自己的前端。
+- `level 0` 是 ready/windup 持有态，`level 1` 才是释放后的 full-body swing。
+  `level 1` 在吊架上动作正常，不等价于机器人已经具备地面自支撑能力。
+- 当前硬件默认定位模式是 `perfect_tracking`。它会把 base/torso 世界位置用
+  参考轨迹占位，只保留真实 IMU 朝向；`oracle` 只给仿真用，不能直接当现场
+  mocap 模式。
+- 现场已有 VRPN/mocap 并不代表 `a3_deploy_onnx_ref_pingpong` 已经在消费这些
+  topic。当前 runner 还没有直接订阅 HOPE mocap/VRPN 话题的硬件 localizer
+  接口，mocap 需要额外桥接后才能真正进入这条 180-D 观测链。
+- 当前已知“脱离吊架站不住”的主要问题不在 body-drive 通讯链，而在 released
+  legs 的承重与姿态：策略会命令深蹲前倾，且 ground bring-up 需要把
+  `--official-stand`、`--auto-leg-hold`、`--leg-gain-scale` /
+  `--ankle-gain-scale`、必要时 `--leg-stand-gains`、
+  `--leg-clamp-rad`、`--leg-smooth-alpha` 作为一组来调，不能只看
+  `--gain-scale`。
+
+推荐的打包方式是直接把 ping-pong runtime cfg 传给打包脚本：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+bash scripts/build_a3_deploy_pkg.sh \
+  --arch x86_64 \
+  --runtime-cfg src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml
+```
+
+打包后包内会同时保留：
+
+- `config/a3_runtime_config.yaml`
+- `config/a3_runtime_config.pingpong.yaml`
+- `run_a3_pingpong.sh`
+
+这样可以直接在 `dist/a3_deploy_<arch>/` 下运行：
+
+```bash
+./run_a3_pingpong.sh --dry-run
+./run_a3_pingpong.sh --reference-playback
+./run_a3_pingpong.sh --start shadow --perfect-tracking --level 1
+```
+
 ## 常用参数
 
 主程序参数：
@@ -380,7 +430,7 @@ dist/a3_deploy_thor/
 | 参数 | 说明 |
 | --- | --- |
 | `--arch x86_64|rockchip|thor` | 目标平台。 |
-| `--runtime-cfg PATH` | 指定 runtime YAML，打包时会复制模型、motion 和 AimRT config。 |
+| `--runtime-cfg PATH` | 指定 runtime YAML，打包时会复制模型、motion 和 AimRT config，并保留原始 basename 的 config alias。对 ping-pong 路径，建议直接传 `src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml`。 |
 | `--smpl-zmq-host HOST` | 覆盖 packaged `smpl_zmq.host`。 |
 | `--jobs N` | 并行编译任务数，默认建议 `20`。 |
 
@@ -426,7 +476,15 @@ Rockchip 包会启用 RKNN Runtime，并把 packaged config 的 `onnx.backend` �
 
 ### 本地 MuJoCo 仿真验证
 
-本地仿真建议先验证通信、同步和推理延迟，再进入手动状态机。仓库内已包含解压后的 MuJoCo standalone 包，路径为 `mujoco_sim_standalone/`；它模拟真机 `hal_ethercat` 一侧的 body-drive 接口，所以 deploy 进程仍然通过同一组 state / command topic 闭环运行。
+本地仿真建议先验证通信、同步和推理延迟，再进入手动状态机。这里最重要的原则是：**MuJoCo 和真机共用同一套 `/body_drive/*` state / command 接口**，所以它不是“另外一套 demo”，而是上机前的 shared-interface rehearsal。
+
+当前这台机器的宿主环境只有 `/opt/ros/lyrical`；下面这条 deploy / MuJoCo / ping-pong
+验证链应在 `distrobox enter hope` 里的 ROS 2 Jazzy 环境执行。
+
+仓库里现在有两条仿真入口：
+
+- `scripts/run_sim.sh`：默认优先使用本地 `agi/A3_MuJoCo_Sim/.../build/install` 包；这条路既复用 shared `/body_drive/*`，也带 `/sim/a3/*` oracle/reset。
+- `A3_SIM_FLAVOR=standalone scripts/run_sim.sh ...`：回退到跟仓库一起保存的 `mujoco_sim_standalone/`；这条路同样复用 shared `/body_drive/*`，但**没有** `/sim/a3/*` oracle/reset。
 
 先编译 x86_64 deploy 包：
 
@@ -438,11 +496,18 @@ bash scripts/build_a3_deploy_pkg.sh --arch x86_64 --jobs 20
 终端 A 启动 MuJoCo sim：
 
 ```bash
-cd mujoco_sim_standalone
-./run.sh a3_t2d0_cfg.yaml
+./scripts/run_sim.sh --print-paths
+
+# 推荐：优先用 source sim（支持 oracle/reset）
+A3_SIM_CFG=a3_pingpong_iceoryx_cfg.yaml ./scripts/run_sim.sh
+
+# 只做 shared-interface A/B 验证时，也可以显式走 standalone：
+A3_SIM_FLAVOR=standalone ./scripts/run_sim.sh a3_t2d0_cfg.yaml
 ```
 
-可用配置位于 `mujoco_sim_standalone/bin/cfg/`。如果不传配置名，`./run.sh` 会列出菜单并等待选择；请按目标机器人型号选择对应 cfg。
+source sim 可用 cfg 位于 `agi/A3_MuJoCo_Sim/.../build/install/bin/cfg/`；
+standalone 可用 cfg 位于 `mujoco_sim_standalone/bin/cfg/`。如果不传配置名，
+standalone `./run.sh` 会列出菜单并等待选择。
 
 终端 B 先做只收包 dry-run：
 
@@ -465,9 +530,59 @@ cd dist/a3_deploy_x86_64
 A3_SOURCE_ROBOT_ENV=0 A3_TRANSPORT=iceoryx ./run_a3.sh
 ```
 
-仿真中进入动作前需要先让机器人站稳：在 deploy 终端按 `s` 进入 `PD_STAND`，等待约 3 秒后，在 MuJoCo 界面点击 `load-key`，确认机器人稳定站立，再回到 deploy 终端按 `m` 进入 `MOTION`。
+如果使用 source sim，还可以通过：
+
+```bash
+cd ~/workspace/HOPE/agi/a3_deploy_example
+./scripts/reset_sim.sh
+```
+
+把机器人拉回 `stand` keyframe；standalone 没有这条 `/sim/a3/reset` 话题。
 
 仓库提供的 MuJoCo sim 默认使用 `iceoryx` transport。仿真阶段推荐先确认 `sync_complete`、`sync_aligned` 稳定，`infer_ms` 低于控制周期，再开始动作播放。
+
+### Ping-pong runner 快速验证
+
+如果本次验证目标是 `model_15200.onnx`，优先使用：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+bash scripts/build_a3_deploy_pkg.sh \
+  --arch x86_64 \
+  --runtime-cfg src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml
+
+cd dist/a3_deploy_x86_64
+A3_SOURCE_ROBOT_ENV=0 ./run_a3_pingpong.sh --dry-run
+A3_SOURCE_ROBOT_ENV=0 ./run_a3_pingpong.sh --reference-playback
+A3_SOURCE_ROBOT_ENV=0 ./run_a3_pingpong.sh --start shadow --perfect-tracking --level 1
+
+# 闭环动作回放（shared /body_drive/*；B=perfect_tracking）
+cd ~/workspace/HOPE/agi/a3_deploy_example
+./scripts/run_mode.sh B 10 0.4
+
+# 只有 source sim 支持 oracle（C 模式）
+./scripts/run_oracle.sh
+./scripts/run_mode.sh C 10 0.4
+```
+
+上机前的最小顺序建议是：
+
+1. `--dry-run` 只看六路 state、sync 和 safe-halt。
+2. `--reference-playback` 先验证 scatter、符号、关节范围和 latency。
+3. `--start shadow --perfect-tracking` 再看 180-D obs、ONNX、`level 0/1` 时钟和 action 是否有界。
+4. 需要闭环 swing 时，先在 shared-interface MuJoCo 上跑 `scripts/run_mode.sh B ...`，确认同一条 `/body_drive/*` 命令路径正常。
+5. 真机再按 `PASSIVE -> PD_STAND(--official-stand) -> MOTION` 推进。
+
+推荐把这条 shared-interface rehearsal 单独记录到
+`docs/operations/run_shared_interface_rehearsal.md`，再进入硬件排查。
+
+如果目的是解决“有吊架能挥、落地站不住”，当前更应该优先排查：
+
+- `level 1` released legs 是否仍在用过软的 policy gains。
+- 是否需要 `--auto-leg-hold --leg-gain-scale 0.5 --ankle-gain-scale 1.0`。
+- 降低吊架后 knees sink 时，是否需要 `--leg-stand-gains --leg-clamp-rad 0.15`。
+- stiff legs 抖动时，是否需要 `--leg-smooth-alpha 0.2`。
+- mocap 是否只是现场可用，但还没有真正接入 runner 的 world-pose 估计。
 
 ### Rockchip/MDU 上机验证
 

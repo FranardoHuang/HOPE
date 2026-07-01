@@ -152,8 +152,9 @@ publishing commands.
 
 ### A5 Reference Playback, No ONNX
 
-Add or run a mode that bypasses ONNX and plays bounded reference targets through
-the same scatter, gains, and AGI body-drive publisher.
+Run the built-in `--reference-playback` mode that bypasses ONNX and plays
+bounded reference targets through the same scatter, gains, and AGI
+body-drive publisher.
 
 Pass condition: with low gains and small amplitudes, each group follows the
 commanded reference with correct sign, range, and latency. Test waist, left arm,
@@ -220,8 +221,9 @@ After hoist checks pass, ground testing still needs its own gate:
 - If A5 fails: fix command semantics, gains, signs, or hardware limits.
 - If A6 fails in shadow: fix ONNX front-end, normalization, timing, or reference
   clock.
-- If A6 passes on hoist but ground fails: investigate base estimation,
-  balance/contact mismatch, and policy robustness.
+- If A6 passes on hoist but ground fails: investigate released-leg
+  weight-bearing support, base estimation/localization, and policy robustness
+  before assuming a communication bug.
 - If ground reference playback passes but ONNX fails: retrain or adapt the
   policy; do not keep tuning deploy glue.
 

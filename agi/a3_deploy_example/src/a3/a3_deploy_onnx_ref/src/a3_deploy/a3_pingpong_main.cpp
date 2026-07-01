@@ -66,7 +66,22 @@ bool Has(int argc, char** argv, const char* name) {
 }
 std::string Resolve(const std::string& p, const fs::path& base) {
   fs::path fp(p);
-  if (fp.is_absolute()) return fp.lexically_normal().string();
+  if (fp.is_absolute() || fs::exists(fp)) return fp.lexically_normal().string();
+
+  std::error_code ec;
+  fs::path cursor = fs::weakly_canonical(base, ec);
+  if (ec) cursor = fs::absolute(base, ec);
+  if (ec) return (base / fp).lexically_normal().string();
+  if (!fs::is_directory(cursor, ec)) cursor = cursor.parent_path();
+
+  while (!cursor.empty()) {
+    const fs::path candidate = (cursor / fp).lexically_normal();
+    if (fs::exists(candidate)) return candidate.string();
+    const fs::path parent = cursor.parent_path();
+    if (parent == cursor) break;
+    cursor = parent;
+  }
+
   return (base / fp).lexically_normal().string();
 }
 
