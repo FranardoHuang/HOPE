@@ -28,18 +28,46 @@ if TYPE_CHECKING:
 
 
 class MotionLoader:
-    def __init__(self, motion_file: str, body_indexes: Sequence[int], device: str = "cpu"):
-        assert os.path.isfile(motion_file), f"Invalid file path: {motion_file}"
-        data = np.load(motion_file)
-        self.fps = data["fps"]
-        self.joint_pos = torch.tensor(data["joint_pos"], dtype=torch.float32, device=device)
-        self.joint_vel = torch.tensor(data["joint_vel"], dtype=torch.float32, device=device)
-        self._body_pos_w = torch.tensor(data["body_pos_w"], dtype=torch.float32, device=device)
-        self._body_quat_w = torch.tensor(data["body_quat_w"], dtype=torch.float32, device=device)
-        self._body_lin_vel_w = torch.tensor(data["body_lin_vel_w"], dtype=torch.float32, device=device)
-        self._body_ang_vel_w = torch.tensor(data["body_ang_vel_w"], dtype=torch.float32, device=device)
+    """Loads one or more motion clips into a single concatenated time axis.
+
+    Passing several files (HITTER unified policy: forehand + backhand) concatenates them along the time
+    dimension and records per-clip ``seg_start`` / ``seg_len`` so the command can step/wrap/strike within
+    one clip ("segment") at a time, selected per-env by swing type. A single file behaves exactly as
+    before: one segment spanning the whole motion, ``time_step_total`` unchanged.
+    """
+
+    def __init__(self, motion_file, body_indexes: Sequence[int], device: str = "cpu"):
+        files = [motion_file] if isinstance(motion_file, str) else list(motion_file)
+        assert len(files) >= 1, "MotionLoader needs at least one motion file"
+        jp, jv, bp, bq, bl, ba = [], [], [], [], [], []
+        seg_lens = []
+        self.fps = None
+        for f in files:
+            assert os.path.isfile(f), f"Invalid file path: {f}"
+            data = np.load(f)
+            if self.fps is None:
+                self.fps = data["fps"]
+            jp.append(torch.tensor(data["joint_pos"], dtype=torch.float32, device=device))
+            jv.append(torch.tensor(data["joint_vel"], dtype=torch.float32, device=device))
+            bp.append(torch.tensor(data["body_pos_w"], dtype=torch.float32, device=device))
+            bq.append(torch.tensor(data["body_quat_w"], dtype=torch.float32, device=device))
+            bl.append(torch.tensor(data["body_lin_vel_w"], dtype=torch.float32, device=device))
+            ba.append(torch.tensor(data["body_ang_vel_w"], dtype=torch.float32, device=device))
+            seg_lens.append(jp[-1].shape[0])
+        self.joint_pos = torch.cat(jp, dim=0)
+        self.joint_vel = torch.cat(jv, dim=0)
+        self._body_pos_w = torch.cat(bp, dim=0)
+        self._body_quat_w = torch.cat(bq, dim=0)
+        self._body_lin_vel_w = torch.cat(bl, dim=0)
+        self._body_ang_vel_w = torch.cat(ba, dim=0)
         self._body_indexes = body_indexes
         self.time_step_total = self.joint_pos.shape[0]
+        # Per-clip segment boundaries on the concatenated time axis.
+        self.num_segments = len(seg_lens)
+        self.seg_len = torch.tensor(seg_lens, dtype=torch.long, device=device)
+        self.seg_start = torch.zeros(self.num_segments, dtype=torch.long, device=device)
+        if self.num_segments > 1:
+            self.seg_start[1:] = torch.cumsum(self.seg_len, dim=0)[:-1]
 
     @property
     def body_pos_w(self) -> torch.Tensor:
@@ -73,6 +101,15 @@ class MotionCommand(CommandTerm):
 
         self.motion = MotionLoader(self.cfg.motion_file, self.body_indexes, device=self.device)
         self.time_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        # Unified multi-clip (HITTER forehand+backhand) support. With one clip these are inert and the
+        # behaviour below is byte-identical to the single-clip path. clip_id[env] selects which segment
+        # (swing type) the env is currently imitating.
+        self._multiseg = self.motion.num_segments > 1
+        self.clip_id = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        # Robust per-step "this env just wrapped to a new swing" signal, consumed by the racket-target
+        # command to resample its target. Replaces a time_steps<prev heuristic that fails when a clip
+        # wrap jumps the index to a HIGHER segment start (forehand->backhand on the concatenated axis).
+        self.just_resampled = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.body_pos_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 3, device=self.device)
         self.body_quat_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 4, device=self.device)
         self.body_quat_relative_w[:, :, 0] = 1.0
@@ -240,9 +277,33 @@ class MotionCommand(CommandTerm):
 
         self.metrics["reference_anchor_speed"] = torch.norm(self.anchor_lin_vel_w, dim=-1)
         self.metrics["robot_anchor_speed"] = torch.norm(self.robot_anchor_lin_vel_w, dim=-1)
-        self.metrics["motion_phase"] = self.time_steps.float() / max(self.motion.time_step_total - 1, 1)
+        if self._multiseg:
+            seg_start = self.motion.seg_start[self.clip_id]
+            seg_len = self.motion.seg_len[self.clip_id].clamp(min=2)
+            self.metrics["motion_phase"] = (self.time_steps - seg_start).float() / (seg_len - 1).float()
+        else:
+            self.metrics["motion_phase"] = self.time_steps.float() / max(self.motion.time_step_total - 1, 1)
 
     def _adaptive_sampling(self, env_ids: Sequence[int]):
+        if self._multiseg:
+            # HITTER unified policy: each new swing uniformly samples the swing TYPE (clip) and starts at
+            # that clip's first frame (reference-state-init at the swing start). The adaptive failure-bin
+            # curriculum is single-clip BeyondMimic machinery and is bypassed here.
+            n = len(env_ids)
+            if n > 0:
+                new_clip = torch.randint(0, self.motion.num_segments, (n,), device=self.device)
+                self.clip_id[env_ids] = new_clip
+                self.time_steps[env_ids] = self.motion.seg_start[new_clip]
+            # Report the REAL clip-sampling distribution (repurpose the bin-sampling metrics for clips):
+            # entropy of the per-clip env fraction (1.0 = balanced), and the most-sampled clip + its share.
+            counts = torch.bincount(self.clip_id, minlength=self.motion.num_segments).float()
+            probs = counts / counts.sum().clamp(min=1.0)
+            H = -(probs * (probs + 1e-12).log()).sum()
+            self.metrics["sampling_entropy"][:] = H / math.log(max(self.motion.num_segments, 2))
+            pmax, imax = probs.max(dim=0)
+            self.metrics["sampling_top1_prob"][:] = pmax
+            self.metrics["sampling_top1_bin"][:] = imax.float() / max(self.motion.num_segments, 1)
+            return
         episode_failed = self._env.termination_manager.terminated[env_ids]
         if torch.any(episode_failed):
             current_bin_index = torch.clamp(
@@ -316,7 +377,15 @@ class MotionCommand(CommandTerm):
 
     def _update_command(self):
         self.time_steps += 1
-        env_ids = torch.where(self.time_steps >= self.motion.time_step_total)[0]
+        if self._multiseg:
+            # Wrap at the END of the env's current clip/segment, not the global concatenated end.
+            seg_end = self.motion.seg_start[self.clip_id] + self.motion.seg_len[self.clip_id]
+            env_ids = torch.where(self.time_steps >= seg_end)[0]
+        else:
+            env_ids = torch.where(self.time_steps >= self.motion.time_step_total)[0]
+        self.just_resampled = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        if len(env_ids) > 0:
+            self.just_resampled[env_ids] = True
         self._resample_command(env_ids)
 
         anchor_pos_w_repeat = self.anchor_pos_w[:, None, :].repeat(1, len(self.cfg.body_names), 1)
