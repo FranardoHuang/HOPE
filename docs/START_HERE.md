@@ -104,6 +104,7 @@ Do not hide project state in chat history. If a future contributor or agent need
 - Mocap bringup: see [operations/run_mocap.md](operations/run_mocap.md).
 - Planner runtime: see [operations/run_planner.md](operations/run_planner.md).
 - Isaac training: see [operations/run_training.md](operations/run_training.md).
+- Video-to-motion references for training: restore ignored GVHMR/GMR assets via [operations/setup_local_sync.md](operations/setup_local_sync.md), then follow [reimplement.md](../reimplement.md) steps 9-12 to produce local `hope_training/motions/preprocessed/*.npz`; upload to WandB only when you need shared registry artifacts.
 - A3 deploy dry-run: see [operations/run_deploy_dryrun.md](operations/run_deploy_dryrun.md).
 - Local assets and sync: see [operations/setup_local_sync.md](operations/setup_local_sync.md).
 

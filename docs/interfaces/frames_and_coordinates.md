@@ -37,8 +37,8 @@ above. Do not introduce a table-center origin in that task without updating this
 Current expected mocap object names:
 
 - Table rigid body: `PPT`
-- Player 1 robot rigid body: `P1`
-- Player 2 robot rigid body: `P2`
+- Player 1 robot rigid body: current config default `ppp2` (publishes `/P1/pose`)
+- Player 2 robot rigid body: current config default `ppp3` (publishes `/P2/pose`)
 - Ball: auto-detected marker unless pinned by live topic name
 
 Current relay config:

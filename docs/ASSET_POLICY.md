@@ -38,6 +38,7 @@ Current ignored local asset roots:
 - `tmp/`
 - `.codex-tmp/`
 - `.vscode/`
+- `hope_training/whole_body_tracking/.hitter_align_backup/` and other one-off backup/debug scratch folders.
 - `pw.txt` or other local secret scratch files; never commit passwords, tokens, or private identities.
 - `external_repos/IsaacLab/` when a local Isaac Lab source checkout is used for the training environment; record the tag/commit in the relevant gate doc.
 - `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` and other package-local copied/generated training assets; keep only the tiny `assets/__init__.py` path-helper and local `.gitignore` tracked so `whole_body_tracking.assets.ASSET_DIR` remains importable after a fresh clone.
@@ -119,4 +120,4 @@ For TTRL-only reference work, a fresh clone becomes current after `scripts/sync_
 
 ## Branch Integration Rule
 
-When merging feature/training branches into `main`, keep source, config, tests, and docs tracked, but remove generated/debug artifacts from the index. Current examples are `.codex-tmp/`, `.vscode/`, training logs, WandB caches, checkpoints, and generated `*.onnx` policy files. If a generated artifact is needed to reproduce a gate result, record the restore path and metadata in [operations/setup_local_sync.md](operations/setup_local_sync.md) and the relevant gate doc instead of committing it directly.
+When merging feature/training branches into `main`, keep source, config, tests, and docs tracked, but remove generated/debug artifacts from the index. Current examples are `.codex-tmp/`, `.vscode/`, `.hitter_align_backup/`, ad hoc comparison scripts, training logs, WandB caches, checkpoints, and generated `*.onnx` policy files. If a generated artifact is needed to reproduce a gate result, record the restore path and metadata in [operations/setup_local_sync.md](operations/setup_local_sync.md) and the relevant gate doc instead of committing it directly.

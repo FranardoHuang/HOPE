@@ -30,9 +30,7 @@ class MyOnPolicyRunner(OnPolicyRunner):
 
 
 class MotionOnPolicyRunner(OnPolicyRunner):
-    def __init__(
-        self, env: VecEnv, train_cfg: dict, log_dir: str | None = None, device="cpu", registry_name: str = None
-    ):
+    def __init__(self, env: VecEnv, train_cfg: dict, log_dir: str | None = None, device="cpu", registry_name=None):
         super().__init__(env, train_cfg, log_dir, device)
         self.registry_name = registry_name
 
@@ -58,7 +56,9 @@ class MotionOnPolicyRunner(OnPolicyRunner):
 
             # link the artifact registry to this run
             if self.registry_name is not None:
-                wandb.run.use_artifact(self.registry_name)
+                registry_names = self.registry_name if isinstance(self.registry_name, (list, tuple)) else [self.registry_name]
+                for registry_name in registry_names:
+                    wandb.run.use_artifact(registry_name)
                 self.registry_name = None
 
     def log(self, locs: dict, width: int = 80, pad: int = 35) -> None:

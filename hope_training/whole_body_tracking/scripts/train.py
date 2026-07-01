@@ -3,21 +3,23 @@
 Pick the task/algo YAML on the command line and override any field:
 
     python scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-        registry_name=<entity>/wandb-registry-motions/hope_forehand
+        motion_file=../motions/preprocessed/hope_forehand.npz \
+        motion_file_2=../motions/preprocessed/hope_backhand.npz
 
     python scripts/train.py task=TrackingFlat algo=ppo num_envs=2048 max_iterations=20000 \
-        registry_name=<entity>/wandb-registry-motions/hope_forehand
+        registry_name=<org>/wandb-registry-motions/hope_forehand
 
 Tune by editing cfg/task/*.yaml (env / reward / racket / DR) and cfg/algo/ppo.yaml (PPO). This
-script reuses BeyondMimic's training mechanics (Isaac Lab + rsl_rl + the wandb motion registry).
-Pass `motion_file=<local.npz>` to explicitly override the registry for local smoke/debug runs.
+script reuses BeyondMimic's training mechanics (Isaac Lab + rsl_rl). Local video-generated `.npz`
+motions are first-class inputs; the WandB motion registry is an optional sharing/publishing layer.
 The legacy `scripts/rsl_rl/train.py --task=... --registry_name=...` still works too.
 """
 
+import pathlib
 import sys
 
 import hydra
-from omegaconf import OmegaConf
+from omegaconf import ListConfig, OmegaConf
 
 
 def dump_pickle(filename: str, data):
@@ -46,6 +48,97 @@ def _as_bool(x):
     if isinstance(x, bool):
         return x
     return str(x).strip().lower() in ("true", "1", "yes")
+
+
+def _is_noneish(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in ("", "none", "null")
+    return False
+
+
+def _configured_items(primary, secondary=None) -> list:
+    items = []
+    if not _is_noneish(primary):
+        if isinstance(primary, (list, tuple, ListConfig)):
+            items.extend(primary)
+        else:
+            items.append(primary)
+    if not _is_noneish(secondary):
+        if isinstance(secondary, (list, tuple, ListConfig)):
+            items.extend(secondary)
+        else:
+            items.append(secondary)
+    return [item for item in items if not _is_noneish(item)]
+
+
+def _normalize_registry_name(name) -> str:
+    reg = str(name)
+    if ":" not in reg:
+        reg += ":latest"
+    return reg
+
+
+def _motion_clip_name_from_path(value) -> str | None:
+    items = _configured_items(value)
+    if not items:
+        return None
+    parts = [p for p in str(items[0]).replace("\\", "/").split("/") if p]
+    if not parts:
+        return None
+    if parts[-1] == "motion.npz" and len(parts) >= 2:
+        return parts[-2].split(":")[0] or None
+    return pathlib.PurePath(parts[-1]).stem or None
+
+
+def _resolve_local_motion_files(primary, secondary=None, cwd: pathlib.Path | None = None) -> list[str]:
+    files = []
+    base = pathlib.Path.cwd() if cwd is None else pathlib.Path(cwd)
+    for value in _configured_items(primary, secondary):
+        path = pathlib.Path(str(value)).expanduser()
+        if not path.is_absolute():
+            path = base / path
+        if not path.is_file():
+            raise FileNotFoundError(f"[train.py] motion_file not found: {path}")
+        files.append(str(path))
+    return files
+
+
+def _download_registry_motion_files(primary, secondary=None) -> tuple[list[str], list[str]]:
+    import wandb
+
+    registries = [_normalize_registry_name(value) for value in _configured_items(primary, secondary)]
+    if not registries:
+        raise RuntimeError(
+            "[train.py] No reference motion configured. Pass motion_file=/path/to/motion.npz "
+            "(and optional motion_file_2=/path/to/backhand.npz) for the local path, or pass "
+            "registry_name=<org>/wandb-registry-motions/<name>."
+        )
+    api = wandb.Api()
+    motion_files = [str(pathlib.Path(api.artifact(reg).download()) / "motion.npz") for reg in registries]
+    return motion_files, registries
+
+
+def resolve_motion_sources(cfg, *, cwd: pathlib.Path | None = None) -> tuple[list[str], list[str]]:
+    """Resolve local or registry motion sources for train/play.
+
+    Local files are intentionally all-or-nothing: once ``motion_file`` is set, training does not touch the
+    registry. Use ``motion_file_2`` (or a list-valued ``motion_file``) for the unified forehand/backhand
+    local workflow.
+    """
+    local_files = _resolve_local_motion_files(
+        _get(cfg, "motion_file"),
+        _get(cfg, "motion_file_2"),
+        cwd=cwd,
+    )
+    if local_files:
+        return local_files, []
+
+    task = _get(cfg, "task")
+    registry_name = _get(cfg, "registry_name") if _get(cfg, "registry_name") is not None else _get(task, "registry_name")
+    reg2 = _get(cfg, "registry_name_2") if _get(cfg, "registry_name_2") is not None else _get(task, "registry_name_2")
+    return _download_registry_motion_files(registry_name, reg2)
 
 
 class _OverrideError(AttributeError):
@@ -132,16 +225,14 @@ def _registry_clip_name(cfg):
     the same per-clip strike phase.
     """
     reg = _get(cfg, "registry_name")  # CLI override (train/play): wins over the forehand default
-    if reg is not None:
+    if not _is_noneish(reg):
         return str(reg).split("/")[-1].split(":")[0] or None
-    mf = _get(cfg, "motion_file")  # explicit motion file (probe / play replay): next most specific
+    mf = _motion_clip_name_from_path(_get(cfg, "motion_file"))
     if mf is not None:
-        parts = [p for p in str(mf).replace("\\", "/").split("/") if p]
-        if len(parts) >= 2:
-            return parts[-2].split(":")[0] or None
+        return mf
     task = _get(cfg, "task")
     reg = _get(task, "registry_name") if task is not None else None  # task default (forehand): last
-    if reg is not None:
+    if not _is_noneish(reg):
         return str(reg).split("/")[-1].split(":")[0] or None
     return None
 
@@ -362,7 +453,6 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
 # --------------------------------------------------------------------------- #
 def _run(cfg):
     import os
-    import pathlib
     from datetime import datetime
 
     import gymnasium as gym
@@ -430,25 +520,16 @@ def _run(cfg):
         agent_cfg.wandb_project = str(cfg.log_project_name)
         agent_cfg.neptune_project = str(cfg.log_project_name)
 
-    # 3) motion file(s) from the wandb registry. ONE clip = single-swing-type policy. TWO clips
-    #    (forehand + backhand) = unified HITTER policy: MotionLoader concatenates them and clip_id selects
-    #    which swing each env imitates. Order matters: clip 0 = registry_name (forehand), clip 1 =
-    #    registry_name_2 (backhand); it must match racket.strike_phase_per_clip.
-    registry_name = cfg.registry_name if cfg.registry_name is not None else cfg.task.registry_name
-    registry_name = str(registry_name)
-    if ":" not in registry_name:
-        registry_name += ":latest"
-    import wandb
-
-    api = wandb.Api()
-    motion_files = [str(pathlib.Path(api.artifact(registry_name).download()) / "motion.npz")]
-    reg2 = _get(cfg, "registry_name_2", None) or _get(cfg.task, "registry_name_2", None)
-    if reg2 is not None and str(reg2).strip() and str(reg2).lower() != "none":
-        reg2 = str(reg2)
-        if ":" not in reg2:
-            reg2 += ":latest"
-        motion_files.append(str(pathlib.Path(api.artifact(reg2).download()) / "motion.npz"))
-        print(f"[train.py] UNIFIED multi-clip policy: clip0={registry_name}  clip1={reg2}", flush=True)
+    # 3) reference motion file(s). Local Step 9-12 products are first-class:
+    #    motion_file=<forehand.npz> motion_file_2=<backhand.npz> runs fully offline. If no local files
+    #    are set, fall back to the WandB registry names from the task YAML / CLI.
+    motion_files, registry_for_runner = resolve_motion_sources(cfg, cwd=pathlib.Path.cwd())
+    if registry_for_runner:
+        print(f"[train.py] reference motion registry source(s): {registry_for_runner}", flush=True)
+    else:
+        print(f"[train.py] using LOCAL motion_file source(s): {motion_files}", flush=True)
+    if len(motion_files) > 1:
+        print(f"[train.py] UNIFIED multi-clip policy: clip0={motion_files[0]}  clip1={motion_files[1]}", flush=True)
     env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
 
     # 4) logging dir (same layout as scripts/rsl_rl/train.py so export/eval are unchanged)

@@ -76,7 +76,7 @@ cd ~/workspace/HOPE/hope_training/whole_body_tracking
 source setup_train_env.sh
 ```
 
-`setup_train_env.sh` is the source of truth for the `hope_isaac_py` launcher and the WandB exports, and must be sourced in every new terminal. The script has been scrubbed of site-specific paths; it now reads overridable env vars (with placeholder defaults) and auto-sources an optional git-ignored local override:
+`setup_train_env.sh` is the source of truth for the `hope_isaac_py` launcher and the WandB exports, and must be sourced in every new terminal. The script reads overridable env vars with placeholder defaults, auto-sources an optional git-ignored local override, and auto-detects the current `/workspace/...` Isaac/IsaacLab layout when present:
 
 - `HOPE_ISAAC_PYTHON` — path to the Isaac Lab Python interpreter (`hope_isaac_py` wraps it)
 - `HOPE_ISAACLAB_ROOT` — Isaac Lab install root
@@ -180,7 +180,7 @@ hope_isaac_py -c "import hydra, omegaconf; print(hydra.__version__)"
 
 ### Motion retargeting (GMR + GVHMR)
 
-The motion pipeline uses two separate conda envs (`python=3.10`). Both are git-ignored clones and are absent on a fresh clone. Use [setup_local_sync.md](setup_local_sync.md) for current restore points; `reimplement.md` steps 9-11 provide supplemental historical command detail.
+The motion pipeline uses separate Python/conda environments for GVHMR/GMR and Isaac preprocessing. The clones and generated motions are git-ignored and absent on a fresh clone. Use [setup_local_sync.md](setup_local_sync.md) for current restore points; `reimplement.md` steps 9-12 provide the supplemental command detail through local `.npz` generation and replay.
 
 Current local status from 2026-06-25:
 

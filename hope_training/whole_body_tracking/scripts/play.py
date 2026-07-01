@@ -17,7 +17,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hydra
 from omegaconf import OmegaConf
 
-from train import _apply_task_overrides, _registry_clip_name
+from train import (
+    _apply_task_overrides,
+    _is_noneish,
+    _normalize_registry_name,
+    _registry_clip_name,
+    resolve_motion_sources,
+)
 
 
 def _run_play(cfg, simulation_app):
@@ -31,9 +37,11 @@ def _run_play(cfg, simulation_app):
     from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
     from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
 
-    import whole_body_tracking.tasks  # noqa: F401  -- registers the gym tasks
+    import whole_body_tracking.tasks as _wbt_tasks  # registers the gym tasks
     from whole_body_tracking.utils.exporter import attach_onnx_metadata, export_motion_policy_as_onnx
     from whole_body_tracking.utils.ppo_cfg import runner_kwargs
+
+    _ = _wbt_tasks
 
     task_id = str(cfg.task.gym_task)
     num_envs = int(cfg.num_envs) if cfg.num_envs is not None else int(cfg.task.env.num_envs)
@@ -64,12 +72,15 @@ def _run_play(cfg, simulation_app):
         wandb_run.file(str(fname)).download("./logs/rsl_rl/temp", replace=True)
         resume_path = f"./logs/rsl_rl/temp/{fname}"
         print(f"[INFO] Loading model checkpoint from: {run_path}/{fname}")
-        if cfg.motion_file is not None:
-            env_cfg.commands.motion.motion_file = str(cfg.motion_file)
+        if not _is_noneish(cfg.motion_file):
+            motion_files, _ = resolve_motion_sources(cfg, cwd=pathlib.Path.cwd())
+            env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
         else:
-            art = next((a for a in wandb_run.used_artifacts() if a.type == "motions"), None)
-            if art is not None:
-                env_cfg.commands.motion.motion_file = str(pathlib.Path(art.download()) / "motion.npz")
+            arts = [a for a in wandb_run.used_artifacts() if a.type == "motions"]
+            if arts:
+                arts.sort(key=lambda a: (0 if "forehand" in a.name.lower() else 1 if "backhand" in a.name.lower() else 2, a.name))
+                motion_files = [str(pathlib.Path(art.download()) / "motion.npz") for art in arts]
+                env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
             else:
                 print("[WARN] No motion artifact in the run; pass motion_file=... if replay fails.")
     else:
@@ -78,17 +89,21 @@ def _run_play(cfg, simulation_app):
         else:
             resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
         print(f"[INFO] Loading model checkpoint from: {resume_path}")
-        reg = cfg.registry_name if cfg.registry_name is not None else cfg.task.get("registry_name")
-        if cfg.motion_file is not None:
-            env_cfg.commands.motion.motion_file = str(cfg.motion_file)
-        elif reg is not None:
+        if not _is_noneish(cfg.motion_file):
+            motion_files, _ = resolve_motion_sources(cfg, cwd=pathlib.Path.cwd())
+            env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
+        else:
             import wandb
 
-            reg = str(reg)
-            if ":" not in reg:
-                reg += ":latest"
-            art = wandb.Api().artifact(reg)
-            env_cfg.commands.motion.motion_file = str(pathlib.Path(art.download()) / "motion.npz")
+            reg = cfg.registry_name if cfg.registry_name is not None else cfg.task.get("registry_name")
+            reg2 = cfg.registry_name_2 if cfg.registry_name_2 is not None else cfg.task.get("registry_name_2")
+            regs = [_normalize_registry_name(r) for r in [reg, reg2] if not _is_noneish(r)]
+            if not regs:
+                raise RuntimeError(
+                    "Pass motion_file=/path/to/motion.npz or registry_name=<org>/wandb-registry-motions/<name>."
+                )
+            motion_files = [str(pathlib.Path(wandb.Api().artifact(r).download()) / "motion.npz") for r in regs]
+            env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
 
     render_mode = "rgb_array" if cfg.video else None
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)

@@ -28,6 +28,7 @@ hope_training/motions/
 hope_training/whole_body_tracking/logs/
 hope_training/whole_body_tracking/outputs/
 hope_training/whole_body_tracking/artifacts/
+hope_training/whole_body_tracking/.hitter_align_backup/
 
 hope_training/wandb/
 hope_training/whole_body_tracking/wandb/

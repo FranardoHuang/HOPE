@@ -20,20 +20,21 @@ PLUS the following appended HOPE terms:
 - `base_target_pos_b` (2)
 - `racket_target_pos_b` (3) — Unoise +/-0.02
 - `racket_target_vel_w` (3)
-- `racket_target_normal_w` (3)
 - `time_to_strike` (1)
+- `swing_type` (1) — forehand `+1`, backhand `-1` for the unified policy
 
-`swing_type` is omitted by default (it is constant per forehand/backhand policy).
+Current HITTER-aligned policy default: `swing_type` is included because the default task trains one
+unified forehand+backhand policy. Desired racket normal is reward/critic-only, not an actor
+observation.
 
 Notes / corrections:
 
-- Desired racket normal is now an actor observation in the current HOPE task. Actual racket normal is
+- Desired racket normal is not an actor observation in the current HOPE task. Actual racket normal is
   still privileged and simulation-only.
 - "base forward vector" is NOT implemented; `projected_gravity` is the
   orientation cue.
-- The inherited BeyondMimic proprio terms include `base_lin_vel` (3), which
-  sits in the ACTOR group. Base linear velocity is not directly observable on
-  hardware, so this is a real sim-to-real concern (not a typo).
+- `HOPEPolicyCfg` removes inherited actor `base_lin_vel`; base linear velocity is kept critic-only for
+  deployment alignment.
 
 ## Critic-Only (privileged) Observation (implemented)
 
@@ -86,10 +87,8 @@ before treating it as G05/G07 relevant.
 - Control rate: intended 50 Hz (decimation 4 over 200 Hz sim) — confirm from
   `base/sim_base.yaml` if unverified.
 - Training target source: `HOPEPingPong` defaults to
-  `racket.target_mode: reference_perturbed`, meaning the command term samples
-  the desired racket pos/vel/normal around the reference motion's strike-frame
-  racket state. This changes target generation, not the observation/action
-  tensor contract.
+  `racket.target_mode: uniform`, fixed `pos_x_range: [0.40, 0.40]`, sampled target `(y, z)` and
+  racket velocity vector, and per-clip strike timing via `strike_phase_per_clip`.
 - Normalization: per-term Unoise with `enable_corruption` on the policy
   observation group (e.g. `projected_gravity` Unoise +/-0.05,
   `racket_target_pos_b` Unoise +/-0.02).

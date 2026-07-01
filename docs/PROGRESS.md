@@ -2,6 +2,20 @@
 
 Use this file for short project-state updates that future humans and agents need to see. Keep detailed reasoning in the relevant gate doc.
 
+## 2026-07-01
+
+- Pulled `main` from `8a4ae7f` to `4ff5f52` (`Merge train_1 into main: unified swing training and HITTER alignment`) and audited the training/documentation state. This was an audit only; no Isaac/ROS gate was newly verified.
+- Found a G05 training blocker in current `main`: `pyflakes hope_training/whole_body_tracking/scripts/train.py` reports `undefined name 'registry_for_runner'` at the runner construction site, so the Hydra training entry will fail after env setup unless this is fixed.
+- Found a reproducibility regression relative to the 2026-06-26 docs: `cfg/train.yaml` and docs still advertise `motion_file=<local.npz>` as a no-WandB training override, but current `scripts/train.py` ignores `cfg.motion_file` and always downloads the primary clip from the WandB registry.
+- Recorded that G05 docs were stale after the unified HITTER merge: code/config now default to forehand+backhand unified training with `registry_name_2`, `strike_phase_per_clip`, `target_mode: uniform`, actor `swing_type`, and no actor racket-normal observation, while several docs still described one-policy-per-swing `reference_perturbed` curriculum training.
+- Recorded non-training drift: `setup_train_env.sh` now contains fixed `/workspace/...` paths and real WandB identity defaults instead of the documented local-override placeholders, and `avatar_pro_vrpn.yaml` now defaults P1/P2 input rigid-body names to `ppp2`/`ppp3` while live mocap verification is still required.
+- Restored a first-class local Step 9-12 motion path: `scripts/train.py` now accepts `motion_file=<forehand.npz>` plus optional `motion_file_2=<backhand.npz>` (or list-valued `motion_file`) and skips WandB entirely when local files are set; `registry_for_runner` is defined only for registry-backed runs. `scripts/play.py` and `scripts/replay_npz.py` also accept local motion files.
+- Restored `setup_train_env.sh` to the portable contract: source-first working tree path, optional `setup_train_env.local.sh`, overridable `HOPE_ISAAC_*` paths, placeholder WandB defaults, and auto-detection for the current `/workspace/...` Isaac/IsaacLab layout when present.
+- Updated the training runbooks to make the video-to-motion workflow local-first: `reimplement.md` Step 12 now writes and replays local `motions/preprocessed/*.npz` files before any optional `--upload_wandb`, and Step 14 / `run_training.md` use `motion_file` + `motion_file_2` for local unified training.
+- Final-aligned the documentation entry points for the video-to-motion workflow: root `README.md`, `docs/START_HERE.md`, `run_training.md`, `setup_environments.md`, `setup_local_sync.md`, `whole_body_tracking/README.md`, and `reimplement.md` now all point to the same local-first Step 9-12 flow, with WandB explicitly optional.
+- Updated the exact-strike probe to share the same local/registry motion resolver and to use the command term's per-clip `time_to_strike`, avoiding a stale single-`strike_phase` assumption for unified forehand/backhand policies.
+- Removed tracked temporary training artifacts: `hope_training/cmp.py`, `reward_share.py`, `scan2.py`, and `whole_body_tracking/.hitter_align_backup/*.bak`; added `.hitter_align_backup/` to `.gitignore`.
+
 ## 2026-06-26
 
 - Clarified setup documentation after the selective backport: new machines should start from `docs/START_HERE.md` and the relevant `docs/operations/*` doc, while `reimplement.md` is only supplemental historical command detail when a gate/operation doc cites a specific step. Also corrected the README local no-WandB smoke command to include an explicit `motion_file=...`; internal full training remains WandB-default.

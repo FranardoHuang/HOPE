@@ -8,9 +8,8 @@ name: TrackingFlat
 gym_task: Tracking-Flat-AgibotA3-v0
 experiment_name: agibot_a3_flat
 
-# Internal default reference clip comes from the WandB motion registry. A local generated .npz can
-# override it explicitly:
-#   motion_file=../motions/hope_forehand.npz
+# Registry-backed runs can use this task default. A local generated .npz can override it explicitly:
+#   motion_file=../motions/preprocessed/hope_forehand.npz
 motion_file: null
 # prefix is the wandb ORG (WANDB_REGISTRY_ORG), not the team — registries are org-scoped.
 registry_name: ${oc.env:WANDB_REGISTRY_ORG,BerkeleyPingPong}/wandb-registry-motions/hope_forehand

@@ -10,8 +10,8 @@ to train an [Agibot A3](../../agi/) (31 actuated DOF) ping-pong swing policy. Un
 - `scripts/train.py` and `scripts/play.py` with `task=HOPEPingPong algo=ppo`.
 - The `HOPEPingPong` task maps to the gym task `HOPE-PingPong-AgibotA3-v0` (`experiment_name agibot_a3_hope`).
 - Overrides are layered from the `cfg/` tree: `cfg/task` (env/task), `cfg/algo` (PPO), `cfg/base` (shared defaults).
-- Each policy trains **ONE swing style** (forehand or backhand), selected by the reference clip in the internal WandB registry by default; `motion_file=...` can explicitly override it with a local `.npz`.
-- A no-WandB smoke test uses `task=TrackingFlat algo=ppo motion_file=... logger=tensorboard` — see the runbook.
+- `HOPEPingPong` trains a unified HITTER-style policy by default: clip 0 = forehand, clip 1 = backhand, with `swing_type` in the actor observation.
+- Local video-generated `.npz` clips are first-class inputs: pass `motion_file=...` plus optional `motion_file_2=...` to train without touching WandB. Registry paths remain useful for shared/internal runs.
 
 **The authoritative runbook is [docs/operations/run_training.md](../../docs/operations/run_training.md).**
 A from-scratch Isaac Sim/Lab install is out of scope here — follow the upstream
@@ -33,14 +33,14 @@ A from-scratch Isaac Sim/Lab install is out of scope here — follow the upstrea
   `source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/urdf/model.urdf`, generated from
   `agi/URDF/A3T2.5-URDF-std-pingpang/` with `python3 ../../scripts/prepare_a3_isaac_asset.py --force`.
 - Motion flow: GVHMR (video → SMPL-X) → GMR (`--robot agibot_a3`; the default robot is `g1`, A3 NEEDS
-  `--robot agibot_a3`) → `scripts/csv_to_npz.py --robot agibot_a3 --output_file ../motions/<name>.npz`
-  → train directly with `motion_file=../motions/<name>.npz` or add `--upload_wandb` to publish an internal registry artifact.
-- WandB identities must differ for the internal default path: `WANDB_ENTITY` (team, run logging) vs `WANDB_REGISTRY_ORG` (org, motion
-  registry) — if they match, registry reads fail. Use placeholders `your-wandb-team` / `your-wandb-org`.
-- `HOPEPingPong.yaml` defaults to `target_mode: reference_perturbed`: the racket target is sampled
-  around the reference motion's strike-frame racket state with a widening perturbation curriculum.
-  The legacy uniform target ranges are still placeholders and should only be used after IK validation
-  against A3 right-arm reachability; an unreachable target caps `strike_success` regardless of reward tuning.
+  `--robot agibot_a3`) → `scripts/csv_to_npz.py --robot agibot_a3 --output_file ../motions/preprocessed/<name>.npz`
+  → train directly with `motion_file=...` / `motion_file_2=...`. Add `--upload_wandb` only if you also want to publish a registry artifact.
+- WandB identities must differ when you use the optional registry path: `WANDB_ENTITY` (team, run logging) vs
+  `WANDB_REGISTRY_ORG` (org, motion registry) — if they match, registry reads fail. Use placeholders
+  `your-wandb-team` / `your-wandb-org`.
+- `HOPEPingPong.yaml` defaults to HITTER-aligned `target_mode: uniform`, fixed strike plane `x=0.4`,
+  forehand/backhand-conditioned Y ranges, and per-clip strike phases. Keep local clip order aligned with
+  `strike_phase_per_clip`: `motion_file` = forehand, `motion_file_2` = backhand.
 - `max_iterations` defaults to a train-forever sentinel — pass `max_iterations=` on the CLI and stop
   manually when `strike_success` plateaus.
 
@@ -49,7 +49,9 @@ A from-scratch Isaac Sim/Lab install is out of scope here — follow the upstrea
 # BeyondMimic Motion Tracking Code
 
 > The sections below are the **upstream BeyondMimic (Unitree G1) baseline** documentation, retained
-> for reference. For the HOPE Agibot A3 ping-pong workflow, see the section above.
+> for reference. For the HOPE Agibot A3 ping-pong workflow, use the section above plus
+> `docs/operations/run_training.md`; the HOPE path writes local `.npz` files first and treats WandB
+> registry upload as optional.
 
 [![IsaacSim](https://img.shields.io/badge/IsaacSim-4.5.0-silver.svg)](https://docs.omniverse.nvidia.com/isaacsim/latest/overview.html)
 [![Isaac Lab](https://img.shields.io/badge/IsaacLab-2.1.0-silver)](https://isaac-sim.github.io/IsaacLab)

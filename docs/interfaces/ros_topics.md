@@ -14,7 +14,10 @@ Configured in `hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml`:
 | `/ball/point` | Ball position as point |
 | `/poses` | PoseArray ordered as `["ball", "PPT", "P1", "P2"]` |
 
-The mocap object names `PPT`/`P1`/`P2` are TODO(confirm) placeholders per [avatar_pro_vrpn.yaml](../../hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml). One `train_1` rig observed `ppp2`/`ppp3` for robot labels, so G01 must record the live CMTracker names before deployment or data collection.
+Current relay config defaults the input object names to `PPT` for the table and `ppp2`/`ppp3` for the
+two robot rigid bodies, while publishing the normalized output topics `/P1/pose` and `/P2/pose`. These
+input names are still TODO(confirm); G01 must record the live CMTracker names before deployment or data
+collection.
 
 Ball tracking is selected by the relay/launch parameter `ball_tracking_mode`:
 

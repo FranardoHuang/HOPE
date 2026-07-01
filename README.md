@@ -127,10 +127,15 @@ source setup_train_env.sh          # put machine paths/IDs in setup_train_env.lo
 # local training-loop smoke test (no WandB account needed; requires a local .npz):
 hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
   num_envs=32 max_iterations=3 logger=tensorboard run_name=smoke \
-  motion_file=../motions/hope_forehand.npz
+  motion_file=../motions/preprocessed/hope_forehand.npz
 ```
 
-**3. Motion retargeting** (optional — to make your own reference clips) — GVHMR (video→SMPL-X) → GMR (SMPL-X→A3) → `scripts/csv_to_npz.py`; see [docs/operations/setup_local_sync.md](docs/operations/setup_local_sync.md).
+**3. Motion retargeting** (optional — to make your own reference clips) — local-first flow:
+raw videos in `hope_training/motions/raw_video/` → GVHMR (video→SMPL-X) → GMR (SMPL-X→A3) →
+`hope_training/motions/preprocessed/{hope_forehand,hope_backhand}.npz` via `scripts/csv_to_npz.py`.
+Use [docs/operations/run_training.md](docs/operations/run_training.md) for the training entry,
+[docs/operations/setup_local_sync.md](docs/operations/setup_local_sync.md) for ignored assets, and
+[reimplement.md](reimplement.md) steps 9-12 for the full command sequence. WandB upload is optional.
 
 > The first real run needs assets that are **not** in a fresh clone (the A3 Isaac asset, reference motions, vendor payloads). See *Assumptions & Limitations* and [docs/operations/setup_local_sync.md](docs/operations/setup_local_sync.md).
 
@@ -141,7 +146,7 @@ hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
 - **The A3 Isaac asset is generated from tracked source** [agi/URDF/A3T2.5-URDF-std-pingpang/](agi/URDF/A3T2.5-URDF-std-pingpang/) into `assets/agibot_a3/urdf/model.urdf` with `package://` mesh paths rewritten; use [docs/operations/run_training.md](docs/operations/run_training.md) and `scripts/prepare_a3_isaac_asset.py` as the current procedure. `reimplement.md` Step 12.7 is historical background.
 - **A3 = 31 actuated DOF** for training; the A3 **deploy** policy I/O is **29** (the 2 neck joints `head_yaw`/`head_pitch` are excluded from the policy and driven at fixed kp=40/kd=2). The "29-DOF" figure in the architecture diagram is the original HITTER **G1** number.
 - **Only the Isaac Lab + URDF backend is runnable today.** The mjlab / MuJoCo-Warp A3 backend referenced in the design docs is not yet wired up in this branch.
-- **WandB is the internal default for full training** (reference clips load from a WandB registry); `logger=tensorboard motion_file=<local.npz>` covers local training-loop smoke tests without an account. Use your **own** WandB team (`WANDB_ENTITY`) and org (`WANDB_REGISTRY_ORG`) — they must differ (see [docs/operations/run_training.md](docs/operations/run_training.md)).
+- **WandB is optional for motion distribution.** Full local training can use `motion_file=<forehand.npz>` plus optional `motion_file_2=<backhand.npz>` with `logger=tensorboard`; registry-backed runs remain useful for shared/internal experiments. Use your **own** WandB team (`WANDB_ENTITY`) and org (`WANDB_REGISTRY_ORG`) — they must differ if you use the registry (see [docs/operations/run_training.md](docs/operations/run_training.md)).
 - **Some inputs are private / vendor-gated** and cannot be redistributed: the full Agibot A3 deploy payload (`vendor_assets/agibot/.../a3_deploy_example_full`, ~1.7 GB), the maintainer's WandB motion registry, and possibly the TTRL reference repo. External users must produce their own equivalents ([docs/operations/setup_local_sync.md](docs/operations/setup_local_sync.md)).
 - **Hardware safety:** do not send real joint commands until the joint-order, command-scaling, and safe-halt checks in [docs/gates/G07_mujoco_to_real.md](docs/gates/G07_mujoco_to_real.md) and [AGENTS.md](AGENTS.md) pass.
 - **Local environment names** (`distrobox` boxes `hope` / `grasping`, working tree at `~/workspace/HOPE`) are the maintainer's concrete examples; substitute your own.

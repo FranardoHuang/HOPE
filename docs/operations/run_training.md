@@ -8,6 +8,12 @@ The training scaffold exists under:
 
 - `hope_training/whole_body_tracking`
 
+2026-07-01 update:
+
+- `HOPEPingPong` now defaults to unified forehand+backhand HITTER training: `registry_name_2` enabled, `target_mode: uniform`, fixed hit plane `x=0.4`, actor `swing_type`, and no actor racket-normal observation.
+- Local Step 9-12 motion products are first-class training inputs. Pass `motion_file=<forehand.npz>` plus optional `motion_file_2=<backhand.npz>` to skip WandB entirely; omit local files to use `registry_name` / `registry_name_2`.
+- `setup_train_env.sh` is portable again: it reads optional `setup_train_env.local.sh` and overridable `HOPE_ISAAC_*` paths, with auto-detection for the current `/workspace/...` Isaac layout when present.
+
 `TrackingFlat` and `HOPEPingPong` forehand training have run end-to-end on the copied Agibot A3 URDF asset (31 actuated DOF), including WandB logging, checkpoint save, and ONNX export. This proves the pipeline can run; it is NOT an accepted quality baseline. G04/G05 remain Partial, and G06/G07 are not accepted until sim-to-sim and dry-run deployment gates record verification.
 
 This branch adds:
@@ -17,7 +23,7 @@ This branch adds:
 - richer live `Live/...` telemetry in WandB/TensorBoard from command, reward, termination, action, and env state.
 - ONNX export from training/eval inside the container.
 - `HOPE-TableTennis-AgibotA3-v0`, a first-pass Isaac Lab table/net/ball/A3 physics scene for G04 visualization and future G08 returner/spin experiments, now with a tracked Purdue PACE USD table/net visual overlay and Purdue-style table/ball contact materials.
-- updated `HOPEPingPong` target/reward defaults with conditional exact-strike metrics, success-gated reference perturbation, debug reward logging hooks, and slow-to-fast velocity staging through `ref_vel_scale`.
+- updated `HOPEPingPong` target/reward defaults with unified forehand/backhand sampling, fixed-plane uniform racket targets, per-clip strike timing, conditional exact-strike metrics, and debug reward logging hooks.
 
 ## Entry Files
 
@@ -40,7 +46,7 @@ cd ~/workspace/HOPE/hope_training/whole_body_tracking
 source setup_train_env.sh
 ```
 
-The script must be SOURCED (not executed) in every new GPU/Isaac terminal. It defines the `hope_isaac_py` launcher, sets `HOPE_WBT_PYTHONPATH`, and exports placeholder WandB variables for the internal default registry/logging path.
+The script must be SOURCED (not executed) in every new GPU/Isaac terminal. It defines the `hope_isaac_py` launcher, sets `HOPE_WBT_PYTHONPATH`, and exports placeholder WandB variables for optional registry/logging use.
 
 The script is now scrubbed of site-specific paths. It reads overridable env vars with placeholder defaults:
 
@@ -84,9 +90,9 @@ export OMNI_KIT_ACCEPT_EULA=YES
 ### No-WandB training (local motion override)
 
 `scripts/train.py` can load the motion clip from a local `.npz` instead of the WandB registry. Pass
-`motion_file=<path>` (mirrors `scripts/play.py`); when set it skips WandB entirely, so use it with
-`logger=tensorboard` for an account-free run. If you have no motion data at all, generate a placeholder
-"stand at default pose" clip (pipeline proof only, not a real swing):
+`motion_file=<path>` (and `motion_file_2=<path>` for a unified forehand/backhand policy); when set it
+skips WandB entirely, so use it with `logger=tensorboard` for an account-free run. If you have no motion
+data at all, generate a placeholder "stand at default pose" clip (pipeline proof only, not a real swing):
 
 ```bash
 hope_isaac_py scripts/make_static_motion.py --robot agibot_a3 \
@@ -96,6 +102,15 @@ hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
   num_envs=1024 max_iterations=60 algo.runner.save_interval=25 \
   logger=tensorboard run_name=stand_bootstrap \
   motion_file=$(pwd)/../motions/a3_stand.npz
+```
+
+For a local unified HITTER smoke after the video pipeline has produced both clips:
+
+```bash
+hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+  motion_file=../motions/preprocessed/hope_forehand.npz \
+  motion_file_2=../motions/preprocessed/hope_backhand.npz \
+  num_envs=32 max_iterations=3 logger=tensorboard run_name=hope_local_unified_smoke
 ```
 
 `hydra`, `omegaconf`, and `rsl_rl` are NOT in the package `setup.py` `install_requires`; they must be importable from the Isaac Lab Python (provide via Isaac Lab itself or `HOPE_ISAAC_VENV_SITE`). Install the package into that Python:
@@ -112,7 +127,7 @@ hope_isaac_py -c "import hydra, omegaconf; print(hydra.__version__)"
 
 ## Fresh Machine Entry
 
-For a new computer, start from `docs/START_HERE.md`, then use this operation doc for Isaac training setup and [setup_local_sync.md](setup_local_sync.md) for ignored/private assets. Use [../../reimplement.md](../../reimplement.md) only as the long-form runbook when a gate or operation doc points at a specific step, such as the A3 URDF copy in Step 12.7 or the motion pipeline in steps 9-11.
+For a new computer, start from `docs/START_HERE.md`, then use this operation doc for Isaac training setup and [setup_local_sync.md](setup_local_sync.md) for ignored/private assets. Use [../../reimplement.md](../../reimplement.md) only as the long-form runbook when a gate or operation doc points at a specific step, such as the A3 URDF copy in Step 12.7 or the motion pipeline in steps 9-12.
 
 Minimum order for a training machine:
 
@@ -123,7 +138,7 @@ Minimum order for a training machine:
 
 ## WandB Setup
 
-Internal training defaults to WandB logging and the org-scoped WandB motion registry. WandB needs two DISTINCT identities; they MUST differ or motion-registry reads fail with `Unable to find organization for entity ...`.
+WandB is optional for local motion-file training, but useful for shared/internal run logging and registry-backed motion distribution. If you use the registry, WandB needs two DISTINCT identities; they MUST differ or motion-registry reads fail with `Unable to find organization for entity ...`.
 
 - `WANDB_ENTITY` — your team, used for run logging.
 - `WANDB_REGISTRY_ORG` — your org, used for the motion registry.
@@ -158,12 +173,25 @@ python3 scripts/prepare_a3_isaac_asset.py --check
 
 The script copies meshes/config from `agi/URDF/A3T2.5-URDF-std-pingpang/`, rewrites `package://.../meshes` URDF references to `../meshes/...`, and checks that the generated URDF references existing meshes including `right_hand_pingpang_Link.STL`, `pingpang_red_Link.STL`, `pingpang_black_Link.STL`, and `pingbang_ball_Link.STL`.
 
-Motion references are also task-local setup. Internal default runs use the WandB registry from `cfg/task/*.yaml`; local generated `.npz` files can override that default:
+Motion references are also task-local setup. Registry-backed runs can use the WandB names from `cfg/task/*.yaml`, while local generated `.npz` files take precedence when passed explicitly:
 
 - Internal registry paths such as `registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand"`.
-- Local ignored `.npz` motion files under `hope_training/motions/` or `hope_training/whole_body_tracking/artifacts/`, passed as `motion_file=...`, with the exact path recorded in G05 when used.
+- Local ignored `.npz` motion files under `hope_training/motions/preprocessed/` or `hope_training/whole_body_tracking/artifacts/`, passed as `motion_file=...` and optional `motion_file_2=...`, with the exact paths recorded in G05 when used.
+- To create those files from manual videos, run the `reimplement.md` Step 9-12 flow: raw video -> GVHMR -> GMR (`--robot agibot_a3`) -> `scripts/csv_to_npz.py --robot agibot_a3 --output_file ../motions/preprocessed/<name>.npz`. Use `--upload_wandb` only if you also want registry artifacts.
 
 Do not commit generated logs, checkpoints, WandB caches, or motion artifacts unless the asset policy changes.
+
+## Video-To-Motion Doc Map
+
+Use this order when generating new reference clips from manually imported videos:
+
+1. Restore local-only motion tooling and model/checkpoint assets: [setup_local_sync.md](setup_local_sync.md) steps 6-8.
+2. Run the long-form command sequence: [../../reimplement.md](../../reimplement.md) steps 9-12.
+3. Confirm local outputs exist:
+   `hope_training/motions/preprocessed/hope_forehand.npz` and
+   `hope_training/motions/preprocessed/hope_backhand.npz`.
+4. Replay with `scripts/replay_npz.py --motion_file ...`, then train with `motion_file=... motion_file_2=...`.
+5. Add `--upload_wandb` / `registry_name=...` only for shared registry runs.
 
 ## Smoke Test
 
@@ -171,7 +199,7 @@ Do not commit generated logs, checkpoints, WandB caches, or motion artifacts unl
 
 ```bash
 hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
-  motion_file=../motions/hope_forehand.npz \
+  motion_file=../motions/preprocessed/hope_forehand.npz \
   num_envs=32 max_iterations=3 logger=tensorboard run_name=smoke
 ```
 
@@ -202,18 +230,26 @@ Plain tracking first:
 
 ```bash
 hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
-  run_name=forehand_tracking
+  motion_file=../motions/preprocessed/hope_forehand.npz \
+  logger=tensorboard run_name=forehand_tracking
 ```
 
-HOPE racket task, one policy per swing:
+HOPE racket task, unified forehand+backhand policy from local Step 9-12 motions:
 
 ```bash
 hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-  run_name=hope_forehand
+  motion_file=../motions/preprocessed/hope_forehand.npz \
+  motion_file_2=../motions/preprocessed/hope_backhand.npz \
+  logger=tensorboard run_name=hope_local_unified
+```
 
+Registry-backed equivalent:
+
+```bash
 hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_backhand" \
-  run_name=hope_backhand
+  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
+  registry_name_2="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_backhand" \
+  run_name=hope_registry_unified
 ```
 
 Useful overrides:
@@ -230,14 +266,12 @@ change — e.g. tightening `racket_velocity_std` — without throwing away progr
 checkpoint_path=logs/rsl_rl/agibot_a3_hope/<run>/model_2000.pt
 ```
 
-`HOPEPingPong` trains ONE swing style per policy (forehand or backhand), chosen by the reference clip. By default that clip comes from `registry_name`; pass `motion_file=...` to override with a local `.npz`.
-
-Explicit local-motion equivalent:
+Single-swing policy, if you deliberately want only one clip:
 
 ```bash
 hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-  motion_file=../motions/hope_forehand.npz \
-  logger=tensorboard run_name=hope_forehand_local_smoke
+  motion_file=../motions/preprocessed/hope_forehand.npz \
+  motion_file_2=null logger=tensorboard run_name=hope_forehand_local_smoke
 ```
 
 At startup, `scripts/train.py` prints:
@@ -258,31 +292,21 @@ override. Treat these printed lines as part of the G05 verification record.
 
 ### Racket Target Sampling
 
-`HOPEPingPong.yaml` now defaults to `racket.target_mode: reference_perturbed`. In this mode the command term computes the reference motion's racket position, velocity, and face normal at the strike frame using the same FK path as the actual racket, then samples a curriculum-scaled perturbation around that reachable reference state:
+`HOPEPingPong.yaml` now defaults to `racket.target_mode: uniform`, matching the HITTER structure. The
+command term samples a fixed striking plane and target velocity directly; the imitated clip supplies
+the motion prior and, in the unified policy, the swing type.
 
 ```yaml
-target_mode: reference_perturbed
-ref_perturb_pos: [0.06, 0.08, 0.06]
-ref_perturb_vel: [0.3, 0.3, 0.25]
-ref_perturb_normal: 0.15
-ref_perturb_curriculum_steps: 30000
-ref_perturb_curriculum_start: 0.05
-ref_perturb_advance_threshold: 0.25
-ref_perturb_advance_rate: 1.0e-5
-ref_vel_scale: 0.6
-debug_reward_logging: false
+target_mode: uniform
+pos_x_range: [0.40, 0.40]
+racket_pos_y_abs_range: [0.05, 0.45]
+pos_z_range: [0.70, 1.05]
+vel_x_range: [1.5, 3.5]
+strike_phase_per_clip: [0.36, 0.74]
 ```
 
-This is the current first-loop default because the old independent uniform box could sample targets the imitated swing never reaches, keeping `strike_success` at 0 even with reward shaping.
-
-The command cfg defaults keep `ref_perturb_success_gated: true`, `exact_success_decay: 0.99`, `exact_success_min_count: 50.0`, `strike_success_vel_thresh: 0.5`, and `strike_success_normal_thresh_deg: 15.0` even when those keys are not present in the YAML. `ref_vel_scale: 0.6` deliberately trains a slower 3-4 m/s racket target first; raise it toward `1.0` after the slow strike clears the exact-success gates.
-
-In `reference_perturbed` mode, `base_target` is coupled to the racket target:
-`base_target_xy = racket_target_xy - reference_base_to_racket_xy`, then the YAML
-`base_target_x_range`/`base_target_y_range` add only small jitter (`[-0.10, 0.10]`). This avoids a base
-reward that fights arm reachability.
-
-The legacy uniform ranges (`pos_x [0.25,0.55]`, `pos_y [-0.45,0.45]`, `pos_z [0.70,1.15]`, `vel_x [1.5,4.0]`, ...) are still present but ignored unless `target_mode: uniform`. Treat them as PLACEHOLDER until validated against A3 right-arm IK reachability.
+For two local clips, `MotionLoader` concatenates the files in order: clip 0 is forehand and clip 1 is
+backhand. Keep `motion_file` / `motion_file_2` ordered the same way as `strike_phase_per_clip`.
 
 ## Live Training Telemetry
 
@@ -303,20 +327,21 @@ from them.
 
 The reward kernel is `exp(-||err||^2 / std^2)`. With `std` set to the final acceptance tolerance, the reward is ~0 for any early error (a 50 cm error gives `exp(-44) ~ 0`), so there is no gradient and `strike_success` stays stuck at 0. The target-sampling fix above handles unreachable targets; the reward shaping here handles too-narrow early rewards.
 
-The current `HOPEPingPong.yaml` PATH B/C values try to keep useful gradients in the observed error band while preventing the motion imitation reward from dominating long episodes:
+The current `HOPEPingPong.yaml` values try to keep useful gradients in the observed error band while
+preventing non-hit rewards from dominating:
 
-- `racket_position_weight: 8.0`, `racket_position_std: 0.15`
-- `racket_velocity_weight: 4.0`, `racket_velocity_std: 1.2`
-- `racket_normal_weight: 3.0`, `racket_normal_std: 0.30`
-- `base_position_weight: 4.0`, `base_position_std: 0.25`
-- `motion_scale: 0.30` over the six inherited motion-imitation rewards
-- regularization tightened to `joint_torques_weight: -0.00003`, `action_rate_weight: -0.15`, `joint_limit_weight: -15.0`, and `undesired_contacts_weight: -0.2`
+- `racket_position_weight: 14.0`, `racket_position_std: 0.20`
+- `racket_velocity_weight: 10.0`, `racket_velocity_std: 1.8`
+- `racket_normal_weight: 5.0`, `racket_normal_std: 0.30`
+- `base_position_weight: 2.5`, `base_position_std: 0.25`
+- regularization: `joint_torques_weight: -0.00003`, `action_rate_weight: -0.10`, `joint_limit_weight: -10.0`, and `undesired_contacts_weight: -0.1`
 
 These stds are DECOUPLED from acceptance thresholds: the position metric still reports true success only
 below `strike_success_pos_thresh = 0.075 m`, velocity below `0.5 m/s`, and racket-normal error below
 `15 deg`.
 
-Optional later precision pass: once the exact-strike pass rates are non-trivial, raise `ref_vel_scale` toward full clip speed, then tighten the stds back toward `0.075 / 0.5 / 0.262` and resume from the checkpoint.
+Optional later precision pass: once the exact-strike pass rates are non-trivial, tighten the racket
+position/velocity stds and resume from the checkpoint.
 
 ## Evaluate And Export
 
@@ -325,7 +350,8 @@ Optional later precision pass: once the exact-strike pass rates are non-trivial,
 ```bash
 hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
-  motion_file="artifacts/hope_forehand:v0/motion.npz" \
+  motion_file="../motions/preprocessed/hope_forehand.npz" \
+  motion_file_2="../motions/preprocessed/hope_backhand.npz" \
   headless=false
 ```
 
@@ -334,7 +360,8 @@ Headless video:
 ```bash
 hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
-  motion_file="artifacts/hope_forehand:v0/motion.npz" \
+  motion_file="../motions/preprocessed/hope_forehand.npz" \
+  motion_file_2="../motions/preprocessed/hope_backhand.npz" \
   headless=true video=true
 ```
 
@@ -353,7 +380,7 @@ Before setting a baseline quality target, record:
 2. Environment start command, including `source setup_train_env.sh`.
 3. Random rollout result.
 4. First training command.
-5. WandB run ID, checkpoint path, and ONNX export path.
+5. Checkpoint path, ONNX export path, and WandB run ID when WandB logging is used.
 6. Failure mode or first metric.
 7. Whether the run is only pipeline viability or an accepted quality baseline.
 

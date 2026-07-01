@@ -3,7 +3,8 @@
 #
 # Usage:
 #   python scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-#       registry_name=<org>/wandb-registry-motions/hope_forehand
+#       motion_file=../motions/preprocessed/hope_forehand.npz \
+#       motion_file_2=../motions/preprocessed/hope_backhand.npz
 #
 # Pick the task/algo YAML with `task=...` / `algo=...`; override any field on the
 # CLI (e.g. num_envs=2048 max_iterations=20000 seed=1 task.rewards.racket_position_weight=5).
@@ -21,7 +22,8 @@ seed: 0
 # Override the task defaults when set (null -> use the task/algo YAML value).
 num_envs: null
 max_iterations: null
-motion_file: null       # optional local .npz reference; takes precedence over registry_name
+motion_file: null       # optional local .npz reference or list; takes precedence over registry_name
+motion_file_2: null     # optional 2nd local clip for unified HITTER policy; used only with motion_file
 registry_name: null     # falls back to task.registry_name when null
 registry_name_2: null   # optional 2nd clip for the unified HITTER policy (backhand); falls back to task.registry_name_2
 run_name: null

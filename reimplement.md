@@ -70,7 +70,7 @@ This guide uses three execution scopes. Do not mix them casually.
    - Practical rule: steps `4-8` and `16-21` are ROS-box work.
 
 3. **GPU / Isaac distrobox: `grasping` or another NVIDIA-enabled box**
-   - Use this box for Isaac Sim, Isaac Lab, BeyondMimic, WandB motion preprocessing, policy training, evaluation, and ONNX export.
+   - Use this box for Isaac Sim, Isaac Lab, BeyondMimic motion preprocessing, policy training, evaluation, and ONNX export.
    - Practical rule: steps `9-15` are GPU-box work. In particular, Step 9 (GVHMR) and Step 10 (GMR) are Python/ML toolchain work and are usually easier in `grasping` than in `hope`.
    - Do not install Isaac Sim or Isaac Lab into `hope`; keep the ROS box and the training box separate.
 
@@ -2329,10 +2329,10 @@ If you already finished steps `10` and `11`, then step `12` on this repo means:
 
 1. Turn the final GMR `.pkl` motions into retargeted `.csv`.
 2. Enter the GPU / Isaac environment.
-3. Install `whole_body_tracking` and set up WandB.
+3. Install `whole_body_tracking`; set up WandB only if you want remote logging or registry upload.
 4. Copy the A3 ping-pong URDF assets into the training repo.
-5. Turn each retargeted `.csv` into a BeyondMimic `.npz` and upload it to the WandB `motions` registry.
-6. Replay the uploaded motions to verify the robot and joint order are correct.
+5. Turn each retargeted `.csv` into a local BeyondMimic `.npz`; optionally upload it to the WandB `motions` registry.
+6. Replay the local motions to verify the robot and joint order are correct.
 
 Do the following **in order**. Do not skip ahead.
 
@@ -2409,7 +2409,7 @@ hope_isaac_py -c "import sys; print(sys.executable)"
 Important:
 
 - `setup_train_env.sh` is the source of truth for `HOPE_ISAAC_PYTHON`, `HOPE_ISAACLAB_ROOT`,
-  optional `HOPE_ISAAC_VENV_SITE`, `HOPE_WBT_PYTHONPATH`, and WandB identities.
+  optional `HOPE_ISAAC_VENV_SITE`, `HOPE_WBT_PYTHONPATH`, and placeholder WandB identities.
 - Put real machine paths in the git-ignored `setup_train_env.local.sh`.
 - Do **not** use plain `/usr/bin/python3` for the training commands in this phase.
 
@@ -2440,8 +2440,8 @@ cd ~/workspace/HOPE/hope_training/whole_body_tracking
 
 # Source the training env (once per terminal). It sets HOPE_WBT_PYTHONPATH so Isaac's bundled python
 # can see working-tree whole_body_tracking first, optional dependency site-packages, and isaaclab_rl.
-# It also defines `hope_isaac_py` and exports the WandB team/org/project. The script header documents
-# each piece. It MUST be SOURCED (not `./setup_train_env.sh`, which would set everything in a
+# It also defines `hope_isaac_py` and placeholder WandB env vars for optional registry/logging use.
+# The script header documents each piece. It MUST be SOURCED (not `./setup_train_env.sh`, which would set everything in a
 # subshell that exits). Re-source every new terminal.
 source setup_train_env.sh
 ```
@@ -2498,10 +2498,15 @@ pkill -f isaacsim || true
 pkill -f 'replay_npz.py' || true
 ```
 
-### 12.5 Configure WandB
+### 12.5 Optional: configure WandB
 
-WandB has **two different scopes** that you must not confuse — getting this wrong
-is the most common Step-12 failure:
+Skip this section when you only need the local video-to-motion-to-training path. Local `.npz` generation,
+`replay_npz.py --motion_file`, and `train.py motion_file=... motion_file_2=... logger=tensorboard` do
+not require WandB.
+
+Configure WandB only when you want remote run logging or shared motion registry artifacts. WandB has
+**two different scopes** that you must not confuse — getting this wrong is the most common registry
+failure:
 
 - **Runs** (training, smoke tests, checkpoints) are logged under an **entity** —
   your personal entity or a **team** (e.g. `your-wandb-team`). This is `WANDB_ENTITY`.
@@ -2556,7 +2561,10 @@ your-wandb-org
 hope_wbc
 ```
 
-### 12.6 Create and smoke-test the WandB `motions` registry
+### 12.6 Optional: create and smoke-test the WandB `motions` registry
+
+Skip this section unless you plan to run `csv_to_npz.py --upload_wandb` or train from
+`registry_name=...`.
 
 In the browser:
 
@@ -2681,12 +2689,14 @@ find source/whole_body_tracking/whole_body_tracking/assets/agibot_a3 -maxdepth 2
 
 - one retargeted CSV
 - the robot name `agibot_a3`
-- an output collection name such as `hope_forehand`
+- an explicit local output file such as `motions/preprocessed/hope_forehand.npz`
+- an output collection name such as `hope_forehand` if you also choose to upload
 
-It does **two** things:
+It does one required thing and one optional thing:
 
-1. It writes a temporary local file to `/tmp/motion.npz`.
-2. It uploads that file to the WandB `motions` registry.
+1. It writes a local BeyondMimic motion `.npz` containing joint trajectories plus FK-derived body
+   position/velocity/acceleration arrays.
+2. Only when `--upload_wandb` is set, it also uploads that same file to the WandB `motions` registry.
 
 Prepare the local folder for keeping a copy of each generated `.npz`:
 
@@ -2701,22 +2711,18 @@ hope_isaac_py scripts/csv_to_npz.py \
   --robot agibot_a3 \
   --input_file ~/workspace/HOPE/hope_training/motions/retargeted/forehand_swing.csv \
   --input_fps 30 \
+  --output_file ~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand.npz \
   --output_name hope_forehand \
   --headless
 
-cp /tmp/motion.npz ~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand.npz
 ls -lh ~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand.npz
 ```
 
 Success marker:
 
 ```text
-[INFO]: Motion saved to wandb registry: motions/hope_forehand
+[INFO]: Motion saved to local npz: .../motions/preprocessed/hope_forehand.npz
 ```
-
-On the current repo version, the script exits automatically after this line.
-If you are running an older copy of the script and it keeps rendering after this
-success line, `Ctrl+C` is safe after the upload has completed.
 
 Convert the backhand motion:
 
@@ -2725,25 +2731,47 @@ hope_isaac_py scripts/csv_to_npz.py \
   --robot agibot_a3 \
   --input_file ~/workspace/HOPE/hope_training/motions/retargeted/backhand_swing.csv \
   --input_fps 30 \
+  --output_file ~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand.npz \
   --output_name hope_backhand \
   --headless
 
-cp /tmp/motion.npz ~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand.npz
 ls -lh ~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand.npz
 ```
 
 Success marker:
 
 ```text
-[INFO]: Motion saved to wandb registry: motions/hope_backhand
+[INFO]: Motion saved to local npz: .../motions/preprocessed/hope_backhand.npz
 ```
 
 Expected local files:
 
-- `motions/preprocessed/hope_forehand.npz`
-- `motions/preprocessed/hope_backhand.npz`
+- `~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand.npz`
+- `~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand.npz`
 
-Expected WandB registry entries:
+Optional registry upload, if the team wants shared remote artifacts:
+
+```bash
+hope_isaac_py scripts/csv_to_npz.py \
+  --robot agibot_a3 \
+  --input_file ~/workspace/HOPE/hope_training/motions/retargeted/forehand_swing.csv \
+  --input_fps 30 \
+  --output_file ~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand.npz \
+  --output_name hope_forehand \
+  --upload_wandb \
+  --headless
+
+hope_isaac_py scripts/csv_to_npz.py \
+  --robot agibot_a3 \
+  --input_file ~/workspace/HOPE/hope_training/motions/retargeted/backhand_swing.csv \
+  --input_fps 30 \
+  --output_file ~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand.npz \
+  --output_name hope_backhand \
+  --upload_wandb \
+  --headless
+```
+
+Registry entries then become available as:
 
 - `$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand:latest`
 - `$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_backhand:latest`
@@ -2752,19 +2780,31 @@ If the robot pose looks scrambled during conversion, check `AGIBOT_A3_JOINT_NAME
 `source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py`. That list must match
 the DOF column order written by your GMR A3 retargeting CSV.
 
-### 12.9 Replay the uploaded motions
+### 12.9 Replay the local motions
 
 Replay forehand:
 
 ```bash
 hope_isaac_py scripts/replay_npz.py \
   --robot agibot_a3 \
-  --registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand"
+  --motion_file ~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand.npz
 ```
 
 Replay backhand:
 
 ```bash
+hope_isaac_py scripts/replay_npz.py \
+  --robot agibot_a3 \
+  --motion_file ~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand.npz
+```
+
+Registry replay still works when you deliberately uploaded the clips:
+
+```bash
+hope_isaac_py scripts/replay_npz.py \
+  --robot agibot_a3 \
+  --registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand"
+
 hope_isaac_py scripts/replay_npz.py \
   --robot agibot_a3 \
   --registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_backhand"
@@ -2784,7 +2824,7 @@ Step `12` is complete only if all of the following are true:
 - `motions/retargeted/backhand_swing.csv` exists.
 - `motions/preprocessed/hope_forehand.npz` exists.
 - `motions/preprocessed/hope_backhand.npz` exists.
-- WandB registry contains `hope_forehand` and `hope_backhand`.
+- WandB registry contains `hope_forehand` and `hope_backhand` only if you chose the optional upload path.
 - `replay_npz.py` shows the A3 replaying both motions without obviously broken joint order.
 
 Backend note: this build trains the A3 on the **Isaac Lab + URDF** path (reimplement.md step 2.3 /
@@ -2797,7 +2837,7 @@ Verification gate:
 - The Agibot A3 (or X1 stand-in) model replays each motion.
 - The wrist and racket mount follow a plausible stroke.
 - Feet, pelvis, torso, and arms do not jitter badly.
-- WandB artifacts are registered and accessible.
+- The local `.npz` files are available for training; registry artifacts are registered only if the optional upload path was used.
 
 ## 13. Implement HOPE-Specific WBC Training Extensions
 
@@ -2947,8 +2987,8 @@ cd ~/workspace/HOPE/hope_training/whole_body_tracking
 
 # Source the training env. This puts the working-tree source first in HOPE_WBT_PYTHONPATH, appends
 # optional dependency/site-package paths plus Isaac Lab source dirs, defines the `hope_isaac_py`
-# launcher, and exports the wandb team/org/project (WANDB_ENTITY / WANDB_REGISTRY_ORG /
-# WANDB_PROJECT). Team and org are DIFFERENT; using the team for the registry fails, see Step 12.5.
+# launcher, and exports placeholder WandB team/org/project values. WandB is optional when you pass
+# local motion_file=... inputs; if you use the registry, team and org are DIFFERENT (see Step 12.5).
 source setup_train_env.sh
 ```
 
@@ -2984,7 +3024,7 @@ export HOPE_WBT_PYTHONPATH="$HOPE_WBT_PYTHONPATH:$HOPE_ISAACLAB_ROOT/source/isaa
 # (3) the launcher = Isaac's python.sh run with that PYTHONPATH.
 hope_isaac_py () { PYTHONPATH="$HOPE_WBT_PYTHONPATH" "$HOPE_ISAAC_PYTHON" "$@"; }
 
-# (4) wandb: runs log to your TEAM; the motion registry is read from your ORG (different; see 12.5).
+# (4) optional wandb: runs log to your TEAM; the motion registry is read from your ORG (different; see 12.5).
 export WANDB_ENTITY=your-wandb-team
 export WANDB_REGISTRY_ORG=your-wandb-org
 export WANDB_PROJECT=hope_wbc
@@ -2998,7 +3038,7 @@ Either way, sanity-check the shell with
 
 ```bash
 hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
-  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
+  motion_file=../motions/preprocessed/hope_forehand.npz \
   num_envs=32 max_iterations=3 logger=tensorboard run_name=smoke
 ```
 
@@ -3018,12 +3058,13 @@ If it instead drops back to the shell with no `Learning iteration` lines, go to 
 ### 14.3 Train the baseline (plain motion tracking)
 
 Train the plain tracker first — it is easier and confirms the robot/asset before adding the racket
-objective. Omitting `num_envs`/`max_iterations` uses the config defaults; logs to wandb by default.
+objective. Omitting `num_envs`/`max_iterations` uses the config defaults. Use local `.npz` first; add
+`logger=wandb` / `registry_name=...` only when you intentionally want remote logging/artifact linkage.
 
 ```bash
 hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
-  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
-  run_name=forehand_tracking
+  motion_file=../motions/preprocessed/hope_forehand.npz \
+  logger=tensorboard run_name=forehand_tracking
 ```
 
 ### 14.4 Train the unified HITTER policy (forehand + backhand in ONE policy)
@@ -3033,15 +3074,18 @@ swing type (forehand/backhand), the racket target, and the base target. HOPE rep
 imitates BOTH reference clips and learns both strokes. This is the default for `task=HOPEPingPong`.
 
 ```bash
-# Unified policy. Both clips come from the task YAML (registry_name = hope_forehand = clip 0,
-# registry_name_2 = hope_backhand = clip 1). No need for two separate runs anymore.
+# Unified policy. Local clip order matters: motion_file = forehand = clip 0,
+# motion_file_2 = backhand = clip 1. No need for two separate runs anymore.
 hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-  run_name=hitter_unified
+  motion_file=../motions/preprocessed/hope_forehand.npz \
+  motion_file_2=../motions/preprocessed/hope_backhand.npz \
+  logger=tensorboard run_name=hitter_unified
 ```
 
 How the unified policy works (all wired in `cfg/task/HOPEPingPong.yaml` + the code):
 
-1. `registry_name` (clip 0 = forehand) and `registry_name_2` (clip 1 = backhand) are both downloaded;
+1. `motion_file` (clip 0 = forehand) and `motion_file_2` (clip 1 = backhand) are both loaded locally
+   when set. If local files are omitted, `registry_name` / `registry_name_2` provide the same ordering;
    `MotionLoader` concatenates them and a per-env `clip_id` selects which swing each env imitates
    (uniformly resampled every swing).
 2. `racket.strike_phase_per_clip: [0.36, 0.74]` — the racket-tip contact phase is per clip (forehand
@@ -3061,13 +3105,14 @@ Train a SINGLE-swing-type policy instead (e.g. only forehand) by disabling the s
 
 ```bash
 hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
-  registry_name_2=null run_name=hope_forehand_only
+  motion_file=../motions/preprocessed/hope_forehand.npz \
+  motion_file_2=null logger=tensorboard run_name=hope_forehand_only
 ```
 
 Useful overrides (append to any command): `num_envs=4096 max_iterations=20000 seed=1`,
 `task.rewards.racket_position_weight=5.0`, `task.racket.racket_pos_y_abs_range=[0.05,0.4]`.
-**Record the wandb run ID of the good run** — Step 15 needs it.
+If you log to WandB, record the run ID of the good run — Step 15 can load it directly. For local
+TensorBoard runs, record the checkpoint path instead.
 
 #### 14.4b Resume from a checkpoint (staged-curriculum hand-off)
 
@@ -3089,7 +3134,9 @@ ls -t logs/rsl_rl/agibot_a3_hope/<run_dir>/model_*.pt | head -1
 
 # resume + apply the edited YAML (e.g. after lowering racket_velocity_std 1.2 -> 0.8)
 hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
+  motion_file=../motions/preprocessed/hope_forehand.npz \
+  motion_file_2=../motions/preprocessed/hope_backhand.npz \
+  logger=tensorboard \
   run_name=pathC3_velstd08 \
   checkpoint_path=logs/rsl_rl/agibot_a3_hope/<run_dir>/model_2100.pt
 ```
@@ -3107,16 +3154,17 @@ Run all of these **from inside `~/workspace/HOPE/hope_training/whole_body_tracki
 exports `policy.onnx` next to the checkpoint (that is Step 15).
 
 Pick the checkpoint source (in precedence order): `checkpoint=<local .pt>` > `wandb_path=<run>` >
-newest local run. Pick the reference motion: `motion_file=<.npz>` (fully offline) > `registry_name=`
-(downloads from wandb) > the task default. The local motion clips that training downloaded are cached
-at `artifacts/hope_forehand:v0/motion.npz` and `artifacts/hope_backhand:v0/motion.npz`.
+newest local run. Pick the reference motion: local `motion_file=<forehand.npz>` plus optional
+`motion_file_2=<backhand.npz>` (fully offline) > `registry_name=` / `registry_name_2=` (downloads from
+wandb) > the task default. Registry-downloaded clips are cached under `artifacts/.../motion.npz`.
 
 **Watch live in the Isaac Sim window** (needs a local display; the window stays open until you close it):
 
 ```bash
 hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
-  motion_file="artifacts/hope_forehand:v0/motion.npz" \
+  motion_file="../motions/preprocessed/hope_forehand.npz" \
+  motion_file_2="../motions/preprocessed/hope_backhand.npz" \
   headless=false
 ```
 
@@ -3127,7 +3175,8 @@ hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
 ```bash
 hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
-  motion_file="artifacts/hope_forehand:v0/motion.npz" \
+  motion_file="../motions/preprocessed/hope_forehand.npz" \
+  motion_file_2="../motions/preprocessed/hope_backhand.npz" \
   headless=true video=true        # video_length frames; tune in cfg/play.yaml
 ```
 
@@ -3216,11 +3265,11 @@ Status / what still needs validation:
 1. Training **runs today** on the copied A3 std-pingpong URDF with self-collision off (Step 13).
    Reaching target metrics still needs collision cleanup, measured reachable target ranges, and
    hardware validation of PD gains / standing height / action scale.
-2. The forehand and backhand reference clips must be in the `motions` registry (Steps 9–12) so
-   `registry_name=.../hope_forehand` and `.../hope_backhand` resolve.
+2. The forehand and backhand reference clips must exist either as local Step 9-12 `.npz` files or as
+   optional `motions` registry artifacts.
 3. Set the reachable-target and reward-tuning values in `cfg/task/HOPEPingPong.yaml` and re-train
    until the target metrics are met.
-4. Record the wandb run IDs of the good forehand and backhand runs — Step 15 needs them.
+4. Record checkpoint paths, and WandB run IDs only for runs that used WandB logging.
 
 ### 14.8 Disk usage and cleanup
 
@@ -3280,7 +3329,8 @@ Export and evaluate:
 # inside the GPU / Isaac distrobox
 hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/2026-06-24_04-43-26_hope_forehand/model_13100.pt" \
-  motion_file="artifacts/hope_forehand:v0/motion.npz"
+  motion_file="../motions/preprocessed/hope_forehand.npz" \
+  motion_file_2="../motions/preprocessed/hope_backhand.npz"
 
 hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
   wandb_path=$WANDB_ENTITY/hope_wbc/PLACEHOLDER_RUN_ID
@@ -3299,8 +3349,8 @@ Run ID lookup:
 
 1. Open the successful training run in WandB.
 2. Copy the run ID from the URL or from the run overview page.
-3. Run `scripts/play.py` once for the forehand run and once for the backhand run.
-4. Copy or rename the exported files to stable names such as `hope_forehand_policy.onnx` and `hope_backhand_policy.onnx`.
+3. Run `scripts/play.py` on the selected checkpoint or WandB run.
+4. Copy or rename the exported file to a stable name such as `hope_unified_policy.onnx`.
 5. Keep each ONNX file and the exact joint-order YAML together. They are a matched pair.
 
 The ONNX should include:
@@ -3356,7 +3406,8 @@ is Step 15 — the export happens before the rollout, so it never needs a displa
 # Watch the swing live (needs a local display):
 hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
-  motion_file="artifacts/hope_forehand:v0/motion.npz" \
+  motion_file="../motions/preprocessed/hope_forehand.npz" \
+  motion_file_2="../motions/preprocessed/hope_backhand.npz" \
   headless=false
 # e.g. <RUN>=2026-06-24_04-43-26_hope_forehand  <N>=13100  (your latest checkpoint)
 ```
@@ -3367,14 +3418,14 @@ hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
 # forever after the export (the onnx is written either way, before the loop).
 hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
-  motion_file="artifacts/hope_forehand:v0/motion.npz" \
+  motion_file="../motions/preprocessed/hope_forehand.npz" \
+  motion_file_2="../motions/preprocessed/hope_backhand.npz" \
   headless=true video=true video_length=300
 # -> logs/rsl_rl/agibot_a3_hope/<RUN>/exported/policy.onnx  (+ videos/play/play.mp4)
 ```
 
-Repeat with `motion_file="artifacts/hope_backhand:v0/motion.npz"` and a backhand
-checkpoint to verify the backhand policy. Both runs are fully offline: with
-`checkpoint=` and `motion_file=` both set, nothing touches wandb.
+For a single-swing checkpoint, pass only the matching `motion_file` and set `motion_file_2=null`.
+These runs are fully offline: with `checkpoint=` and local `motion_file=` set, nothing touches wandb.
 
 Check: robot stays upright, the swing resembles the reference clip, the racket mount
 sweeps through the strike. (An undertrained policy failing these is expected — 16.1
