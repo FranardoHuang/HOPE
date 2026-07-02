@@ -9,9 +9,15 @@ onnx:
   # Keep the SOURCE config valid inside the repo tree: from src/.../config this resolves to
   # assets/a3_runtime/models/model_15200.onnx. During packaging, build_a3_deploy_pkg.sh copies
   # the model into dist/.../models/ and rewrites the packaged runtime cfg to `models/...`.
-  # model_15200.onnx = old 180-D FULL policy. model_p4_deployparity.onnx = new 175-D deploy_parity
-  # policy (runner auto-detects obs dim from the ONNX input and builds obs 175 vs 180 accordingly).
-  model_path: ../../../../assets/a3_runtime/models/model_explicitpd_ft.onnx
+  # model_15200.onnx = old 180-D FULL policy. model_p4_deployparity.onnx = 175-D deploy_parity,
+  # ALL-IMPLICIT training (matches AGI official practice + real-robot actuation). The runner
+  # auto-detects obs dim from the ONNX input and builds obs 175 vs 180 accordingly.
+  # 2026-07-02 A/B in AGI MuJoCo (the binding pre-hardware gate per AGI: "falls in MuJoCo =
+  # falls on the real robot"): p4 forehand = 10 clean cycles, |tilt|<=0.10, 0 guard trips;
+  # explicitpd_ft forehand also passes but its backhand falls on the FIRST swing (IdealPD@200Hz
+  # fine-tune regression) vs p4's 1-3 swings. BACKHAND IS NOT DEPLOY-READY on either model
+  # (training gap: teleport-entry, no stand-entry coverage) — deploy FOREHAND ONLY for now.
+  model_path: ../../../../assets/a3_runtime/models/model_p4_deployparity.onnx
 
 policy_driver:
   policy_hz: 50.0

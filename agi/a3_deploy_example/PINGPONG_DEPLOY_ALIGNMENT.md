@@ -17,6 +17,99 @@ sits alongside (does not replace) `PINGPONG_RUN.md`, `MUJOCO_VALIDATION_RUNBOOK.
 
 ---
 
+## 0. CURRENT DEPLOY STATE (2026-07-02) — read this first, copy-paste to go live
+
+> This section supersedes any `model_15200` reference below. The rest of the doc
+> (§1–§12) is the historical alignment/verification record; the facts here are the
+> current ones.
+
+**Deployed policy:** `model_p4_deployparity.onnx` — **175-D obs / 31-act**,
+ALL-implicit-PD training (matches AGI's real actuation). The runner auto-detects
+175 vs 180 from the ONNX input, so the *same binary* runs p4 or the old 180-D
+`model_15200`. Selected in
+[`config/a3_runtime_config.pingpong.yaml`](src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml)
+(`onnx.model_path`).
+
+**Deploy FOREHAND ONLY.** In the 2026-07-02 AGI-MuJoCo gate p4 forehand = 10 clean
+cycles, |tilt|≤0.10, 0 guard trips. **Backhand is NOT deploy-ready** on any model
+(training gap: teleport-entry, no stand-entry coverage). On the robot press `1`/`f`
+(forehand); **never press `b`.**
+
+**Package state (verified on disk):**
+| Package | Binary | Model | Status |
+|---|---|---|---|
+| `dist/a3_deploy_x86_64/` | 2026-07-02 (has `--single-swing`, ONNX clip-metadata, zero-gain guard, squat-guard 1.4) | `model_p4_deployparity.onnx` | **current** (sim/MuJoCo) |
+| `dist/a3_deploy_rockchip/` | **2026-07-01, STALE** — none of the 07-02 fixes | `model_15200.onnx` | **must rebuild before robot** |
+
+⚠️ The real robot (Rockchip/MDU, aarch64) uses `dist/a3_deploy_rockchip/`. The
+staged one predates every 07-02 sim2real fall fix — **rebuild it first** (the
+builder now auto-stages p4 + rewrites the model path; the old "记得拷回模型"
+note is obsolete).
+
+### A. Rebuild the rockchip package (**HOST shell, NOT `hope`** — needs Docker)
+> ⚠️ `--arch rockchip` re-invokes itself inside the `a3-rockchip-builder` Docker
+> container. Docker lives on the **host**; the `hope` box has ROS but no Docker
+> (`docker: command not found`). So run this from a **host terminal** and do **not**
+> `source /opt/ros/jazzy/setup.bash` (the container carries ROS). This is the opposite
+> of the x86 build.
+```bash
+cd ~/workspace/HOPE/agi/a3_deploy_example
+bash scripts/build_a3_deploy_pkg.sh --arch rockchip \
+  --runtime-cfg src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml \
+  --jobs "$(nproc)"
+```
+
+### B. Verify the fresh package (x86 host)
+```bash
+cd /home/dongc1/workspace/HOPE/agi/a3_deploy_example
+file   dist/a3_deploy_rockchip/a3_deploy_onnx_ref_pingpong                     # -> ELF aarch64
+grep   model_path dist/a3_deploy_rockchip/config/a3_runtime_config.pingpong.yaml  # -> models/model_p4_deployparity.onnx
+ls     dist/a3_deploy_rockchip/models/model_p4_deployparity.onnx
+strings dist/a3_deploy_rockchip/a3_deploy_onnx_ref_pingpong | grep -i "swing complete"  # non-empty = new binary
+```
+
+### C. Ship to the MDU (via the on-site HDU jump host)
+```bash
+cd /home/dongc1/workspace/HOPE/agi/a3_deploy_example
+HDU=<hdu_wifi_ip>          # on-site HDU Wi-Fi address
+ssh -J agi@$HDU agi@10.42.10.12 'mkdir -p /agibot/a3_deploy'
+rsync -azP -e "ssh -J agi@$HDU" dist/a3_deploy_rockchip/ agi@10.42.10.12:/agibot/a3_deploy/
+```
+
+### D. Run on the MDU — HOISTED, low gain, e-stop in hand, forehand only
+```bash
+ssh -J agi@<hdu_wifi_ip> agi@10.42.10.12          # onto the MDU
+source /agibot/software/v0/entry/env/env.sh        # robot env (iceoryx/DDS)
+cd /agibot/a3_deploy
+export A3_TRANSPORT=iceoryx
+file ./a3_deploy_onnx_ref_pingpong                 # MUST say aarch64, not x86-64
+
+# 6a) receive-only: 6 state topics + sync stable, NOTHING published
+taskset -c 4-7 ./run_a3_pingpong.sh --dry-run
+
+# 6b) MOTION, hoisted, forehand single-swing, low gain (recommended first live run)
+taskset -c 4-7 ./run_a3_pingpong.sh \
+  --start passive --legs-passive --gain-scale 0.4 --single-swing
+```
+Keys in the deploy terminal: `p` → `s` (wait ~3 s, confirm stable stand) → `h`
+(SHADOW, no publish, watch tracking) → `m` (MOTION) → `1` (one forehand per press,
+because `--single-swing`). `[`/`]` = gain ∓0.1, `,`/`.` = slower/faster, `q` = quit.
+**Do NOT press `b`.** Do NOT use `--auto-start`.
+
+**New runner flags & guard defaults (all in the fresh binary):**
+| flag | default | meaning |
+|---|---|---|
+| `--single-swing` | off | play the clip once → auto-hold stand (no end→windup snap); press `1` to swing again. **Recommended for robot bring-up.** |
+| `--swing-rest S` | off | like single-swing but auto re-arm after `S` s (continuous demo). A guard trip / manual `0` cancels the re-arm. |
+| `--gain-scale F` | 1.0 | overall PD scale; start **0.4** on the robot |
+| `--legs-passive` | off | hold legs at nominal (HOISTED demo; not a full-body test) |
+| `--squat-guard-rad R` | **1.4** | trip to safe-hold if the policy commands a deep squat (the "catapult" fix) |
+| `--tilt-guard G` | **0.35** | trip on excessive base tilt |
+| `--warmup-sec S` | 0 | hold PD_STAND S s before auto-entering `--start` mode |
+| `--perfect-tracking` | (default `loc_mode`) | hardware-safe localization (no fabricated world-pose error) |
+
+---
+
 ## 1. Task summary
 
 * AGI's runner `a3_deploy_onnx_ref` runs AGI's own teleop/tokenizer policy
@@ -314,7 +407,7 @@ toolchain also lacks them, point `ZMQ_INCLUDE_DIR/CPPZMQ_INCLUDE_DIR` there.)
 Pre-flight:
 - [ ] Robot **hoisted / on safety rope**; physical **e-stop in hand**.
 - [ ] `--perfect-tracking` (no fabricated world-pose error); neck passive.
-- [ ] Confirm `dist/.../config/a3_runtime_config.pingpong.yaml` → `model_15200.onnx`, iceoryx, policy 50 Hz.
+- [ ] Confirm `dist/.../config/a3_runtime_config.pingpong.yaml` → **`models/model_p4_deployparity.onnx`** (175-D; see §0), iceoryx, policy 50 Hz. And `file …_pingpong` == aarch64.
 
 Bring-up order (do **not** `--auto-start`):
 1. [ ] **Log-only / receive:** `taskset -c 4-7 ./run_a3.sh --dry-run` → 6 state topics ready, sync stable.
@@ -326,7 +419,7 @@ Bring-up order (do **not** `--auto-start`):
 7. [ ] **SHADOW** (`h`): policy runs, **no publish**; watch the 1 Hz tracking block; confirm continuity (no q_des jumps).
 8. [ ] **Watchdog:** induce a dropped state (pause sim / unplug a topic) → confirm safe-halt triggers; `halts` counter increments.
 9. [ ] **E-stop / safe-halt:** confirm e-stop cuts power and `q` SIGINT (`q` key) exits cleanly to PASSIVE.
-10. [ ] **MOTION** (`m`) at **low gain** (`--gain-scale 0.4`), level 0 (hold-windup) → level 1 (forehand); short, small first.
+10. [ ] **MOTION** (`m`) at **low gain** (`--gain-scale 0.4`), **`--single-swing`**, press `1` for one **forehand** at a time (never `b` — backhand not deploy-ready); short, small first.
 11. [ ] **Save the first-tick log + a `--trace-csv` / `--obs-csv` capture for AGI staff review.**
 
 Now enforced in code (verify in the first-tick dump):
