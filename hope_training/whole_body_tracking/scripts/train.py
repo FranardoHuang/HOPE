@@ -120,6 +120,8 @@ _RACKET_KEYS = (
     "clean_reference_strike_velocity", "clean_strike_vel_window",
 )
 
+_MOTION_KEYS = ("rsi_on_wrap",)
+
 
 def _registry_clip_name(cfg):
     """Motion clip name used to key per-motion settings (e.g. ``strike_phase_by_motion``).
@@ -298,6 +300,15 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             env_cfg.decimation = int(dec)
             env_cfg.sim.render_interval = env_cfg.decimation  # keep render in step with decimation
             applied.append(f"decimation={int(dec)}")
+
+    mt = _get(task, "motion")
+    if mt is not None:
+        provided = [k for k in _MOTION_KEYS if _get(mt, k) is not None]
+        if provided:
+            _require(hasattr(env_cfg.commands, "motion"),
+                     f"commands.motion (task YAML sets motion keys {provided})")
+            _set_attr(env_cfg.commands.motion, "rsi_on_wrap", _get(mt, "rsi_on_wrap"), _as_bool, applied,
+                      "commands.motion")
 
     rw = _get(task, "rewards")
     if rw is not None:

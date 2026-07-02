@@ -339,9 +339,16 @@ class MotionCommand(CommandTerm):
         self.metrics["sampling_top1_prob"][:] = pmax
         self.metrics["sampling_top1_bin"][:] = imax.float() / self.bin_count
 
-    def _resample_command(self, env_ids: Sequence[int]):
+    def _resample_command(self, env_ids: Sequence[int], write_state_to_sim: bool = True):
         if len(env_ids) == 0:
             return
+        if not write_state_to_sim:
+            if self._multiseg:
+                self._adaptive_sampling(env_ids)
+            else:
+                self.time_steps[env_ids] = 0
+            return
+
         self._adaptive_sampling(env_ids)
 
         root_pos = self.body_pos_w[:, 0].clone()
@@ -386,7 +393,7 @@ class MotionCommand(CommandTerm):
         self.just_resampled = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         if len(env_ids) > 0:
             self.just_resampled[env_ids] = True
-        self._resample_command(env_ids)
+        self._resample_command(env_ids, write_state_to_sim=self.cfg.rsi_on_wrap)
 
         anchor_pos_w_repeat = self.anchor_pos_w[:, None, :].repeat(1, len(self.cfg.body_names), 1)
         anchor_quat_w_repeat = self.anchor_quat_w[:, None, :].repeat(1, len(self.cfg.body_names), 1)
@@ -471,6 +478,11 @@ class MotionCommandCfg(CommandTermCfg):
     velocity_range: dict[str, tuple[float, float]] = {}
 
     joint_position_range: tuple[float, float] = (-0.52, 0.52)
+
+    # Reference-state initialization (RSI) at clip wrap. Keep this enabled for the original BeyondMimic
+    # tracking task. Ping-pong multi-swing training disables it so the robot must physically recover
+    # between swings instead of being teleported to the next clip start mid-episode.
+    rsi_on_wrap: bool = True
 
     adaptive_kernel_size: int = 1
     adaptive_lambda: float = 0.8

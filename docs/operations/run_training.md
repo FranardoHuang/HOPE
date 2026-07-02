@@ -129,16 +129,13 @@ hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
   run_name=forehand_tracking
 ```
 
-HOPE racket task, one policy per swing:
+HOPE racket task, unified forehand+backhand policy:
 
 ```bash
 hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
   registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
-  run_name=hope_forehand
-
-hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_backhand" \
-  run_name=hope_backhand
+  registry_name_2="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_backhand" \
+  run_name=hope_unified
 ```
 
 Useful overrides:
@@ -147,7 +144,7 @@ Useful overrides:
 num_envs=4096 max_iterations=20000 seed=1
 ```
 
-`HOPEPingPong` trains ONE swing style per policy (forehand or backhand), chosen entirely by the `registry_name` reference clip.
+`HOPEPingPong` now defaults to a unified policy: clip 0 comes from `registry_name`, clip 1 comes from `registry_name_2`, and the actor receives `swing_type`. The task YAML also sets `motion.rsi_on_wrap: false`, so clip wrap resamples the reference clip/time and racket target without teleporting the simulated robot. Episode reset still uses RSI.
 
 ### ppo.yaml deltas on this branch
 
@@ -157,20 +154,18 @@ num_envs=4096 max_iterations=20000 seed=1
 
 ### Racket Target Sampling
 
-`HOPEPingPong.yaml` now defaults to `racket.target_mode: reference_perturbed`. In this mode the command term computes the reference motion's racket position, velocity, and face normal at the strike frame using the same FK path as the actual racket, then samples a curriculum-scaled perturbation around that reachable reference state:
+`HOPEPingPong.yaml` and `HOPEPingPongRealSensor.yaml` currently use `racket.target_mode: uniform` for the unified forehand+backhand run. The per-clip boxes are centered on the re-grounded HOPE +X strike points:
 
 ```yaml
-target_mode: reference_perturbed
-ref_perturb_pos: [0.15, 0.20, 0.15]
-ref_perturb_vel: [1.0, 1.0, 0.8]
-ref_perturb_normal: 0.30
-ref_perturb_curriculum_steps: 30000
-ref_perturb_curriculum_start: 0.15
+strike_phase_per_clip: [0.47, 0.33]
+pos_range_per_clip:
+  forehand: {x: [0.43, 0.53], y: [-0.43, -0.33], z: [0.82, 0.92]}
+  backhand: {x: [0.47, 0.57], y: [-0.09, 0.01], z: [1.00, 1.10]}
 ```
 
-This is the current first-loop default because the old independent uniform box could sample targets the imitated swing never reaches, keeping `strike_success` at 0 even with reward shaping.
+These narrow boxes are the active first-loop distribution. They are not the full HITTER wide lateral/vertical sampling range; widen them only after the standing/recovery baseline is accepted. Before a long run, verify the registry aliases point to the matching re-grounded clips, or override `registry_name` / `registry_name_2` with local `artifacts/hope_{forehand,backhand}_hopex/motion.npz` paths.
 
-The legacy uniform ranges (`pos_x [0.25,0.55]`, `pos_y [-0.45,0.45]`, `pos_z [0.70,1.15]`, `vel_x [1.5,4.0]`, ...) are still present but ignored unless `target_mode: uniform`. Treat them as PLACEHOLDER until validated against A3 right-arm IK reachability.
+For the real-sensor footwork variant, `racket_progress` is zeroed on motion/target resample steps and its previous-distance baseline is reset. This prevents clip wrap or reset from contributing a fixed progress penalty/reward that the policy cannot control.
 
 ## Live Training Telemetry
 
@@ -186,11 +181,11 @@ The real "is it learning to hit" signal is `strike_success` (fraction of strikes
 
 The reward kernel is `exp(-||err||^2 / std^2)`. With `std` set to the final acceptance tolerance, the reward is ~0 for any early error (a 50 cm error gives `exp(-44) ~ 0`), so there is no gradient and `strike_success` stays stuck at 0. The target-sampling fix above handles unreachable targets; the reward shaping here handles too-narrow early rewards.
 
-This branch widens the stds in `HOPEPingPong.yaml` so the reward gives a gradient from tens of cm out:
+This branch uses wider-than-acceptance stds in `HOPEPingPong.yaml` so the reward gives a gradient from tens of cm out:
 
-- `racket_position_std` 0.075 -> 0.35
-- `racket_velocity_std` 0.5 -> 1.2
-- `racket_normal_std` 0.262 -> 0.5
+- `racket_position_std` 0.20
+- `racket_velocity_std` 1.0
+- `racket_normal_std` 0.30
 
 These stds are DECOUPLED from `strike_success_pos_thresh` = 0.075: the acceptance metric still reports true success only below 7.5 cm.
 

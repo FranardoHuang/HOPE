@@ -285,6 +285,7 @@ class RacketTargetCommand(CommandTerm):
         self.racket_target_distance = z()
         self.racket_progress = z()
         self._prev_racket_dist = z()
+        self._progress_reset_mask = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
         self.foot_slip_sq = z()  # sum_feet contact * ||foot_xy_vel||^2
         self.foot_vel_sq = z()  # sum_feet ||foot_vel||^2 (excessive/violent foot motion)
         self.foot_drag = z()  # sum_feet ||foot_xy_vel|| while the foot is LOW (near ground -> dragging)
@@ -520,9 +521,10 @@ class RacketTargetCommand(CommandTerm):
         motion = self._motion()
         if self._pos_range_per_clip_t is not None and motion._multiseg:
             # PER-CLIP position box (unified policy): each env samples x/y/z from ITS clip's box (added to
-            # the env origin). The y range is SIGNED per clip (forehand -y / backhand +y encoded directly in
-            # the box), so this REPLACES the shared x-range + |y|-sign + z-range logic below. Lets each clip's
-            # target track its own reference strike point (e.g. backhand z~1.2 when strike_phase=0.50).
+            # the env origin). The y range is SIGNED per clip (the configured box is used directly, so a
+            # near-center backhand box is valid and does not go through the shared +/-|y| fallback). This
+            # replaces the shared x-range + |y|-sign + z-range logic below and lets each clip track its own
+            # reference strike point.
             clip = motion.clip_id[env_ids]                      # (n,) long, 0=forehand / 1=backhand
             rng_e = self._pos_range_per_clip_t[clip]            # (n, 3, 2): [env][x/y/z][lo/hi]
             lo = rng_e[..., 0]                                  # (n, 3)
@@ -661,6 +663,11 @@ class RacketTargetCommand(CommandTerm):
         # Stamp the motion phase baseline for these envs so the per-swing wrap detector in
         # _update_command does not immediately re-trigger after this (e.g. reset-time) resample.
         self._prev_motion_steps[env_ids] = self._motion().time_steps[env_ids]
+        self._prev_racket_dist[env_ids] = torch.norm(
+            self.racket_pos_w[env_ids] - self.racket_target_pos_w[env_ids], dim=-1
+        ).detach()
+        self.racket_progress[env_ids] = 0.0
+        self._progress_reset_mask[env_ids] = True
 
     def _compute_racket_state(self):
         data = self.robot.data
@@ -748,10 +755,16 @@ class RacketTargetCommand(CommandTerm):
         data = self.robot.data
         # --- racket-target distance + dense progress (the base-free movement driver) ---
         self.racket_target_distance = racket_dist
-        # progress = previous - current distance; clamp to kill the spike when the target resamples / the
-        # episode resets (a target jump would otherwise read as huge spurious progress).
-        self.racket_progress = (self._prev_racket_dist - racket_dist).clamp(-0.15, 0.15)
+        # progress = previous - current distance. Resample/reset steps are not learnable progress:
+        # the target and/or reference clip jumped, so reset the baseline and emit exactly zero.
+        motion = self._motion()
+        reset_progress = self._progress_reset_mask.clone()
+        if hasattr(motion, "just_resampled"):
+            reset_progress |= motion.just_resampled
+        progress = (self._prev_racket_dist - racket_dist).clamp(-0.15, 0.15)
+        self.racket_progress = torch.where(reset_progress, torch.zeros_like(progress), progress)
         self._prev_racket_dist = racket_dist.detach()
+        self._progress_reset_mask.zero_()
         self.metrics["racket_target_distance"] = racket_dist
         self.metrics["racket_progress"] = self.racket_progress
         self.metrics["racket_progress_prestrike"] = torch.where(
@@ -1259,11 +1272,10 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # use the shared racket_pos_x_range + |y|-sign + racket_pos_z_range box for every clip (BACKWARD
     # COMPATIBLE: old behavior, nothing changes). When set, it is a tuple indexed by clip_id (0=forehand,
     # 1=backhand — same order as strike_phase_per_clip), each entry ((x_lo,x_hi),(y_lo,y_hi),(z_lo,z_hi))
-    # added to the env origin. NOTE the y range is SIGNED here (encode forehand -y / backhand +y directly),
-    # so it REPLACES the shared |y|-sign logic. Reason: when strike_phase changes the strike frame, the
-    # racket sits at a DIFFERENT height/depth per clip (e.g. backhand @ phase 0.50 -> z~1.22, above the
-    # shared z<=1.05 box), so a shared box makes that clip's strike-frame position unreachable. Per-clip
-    # boxes let each clip's target track its own reference strike point.
+    # added to the env origin. NOTE the y range is SIGNED here and used directly, so it REPLACES the
+    # shared |y|-sign logic. Reason: each clip's strike frame can sit at a different height/depth/lateral
+    # offset, so a shared box can make one clip's strike-frame position unreachable. Per-clip boxes let
+    # each clip's target track its own reference strike point.
     racket_pos_range_per_clip: tuple | None = None
 
     # --- desired racket face normal ---

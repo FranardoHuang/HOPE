@@ -6,8 +6,8 @@ RacketTargetCommand._sample_targets_uniform would, and prints the forehand/backh
 distribution plus physical-plausibility checks (below table surface, below pelvis, distance from the
 measured reference strike point).
 
-Purpose: confirm the config places the targets where the imitated swing actually strikes
-(forehand z~0.84, backhand z~1.22 at strike_phase 0.50) WITHOUT launching a training run. Pure
+Purpose: confirm the config places the targets where the re-grounded imitated swing actually strikes
+(forehand ~[0.48,-0.38,0.87], backhand ~[0.52,-0.04,1.05]) WITHOUT launching a training run. Pure
 sampling check — does not touch the policy, env, rewards, or observations. Mirrors
 `scripts/check_perclip_vel_sampling.py`.
 
@@ -25,8 +25,8 @@ import yaml
 # Frame fact (tasks/table_tennis/geometry.py): table surface is 0.76 m above the floor (training z=0=floor).
 TABLE_H = 0.76
 PELVIS_Z = 0.93
-# Measured reference racket strike points (scripts/strike_phase.py): where the imitated swing's racket is.
-REF_STRIKE = {"forehand": np.array([0.603, -0.323, 0.840]), "backhand": np.array([0.582, 0.282, 1.218])}
+# Re-grounded HOPE +X reference racket strike points used by cfg/task/HOPEPingPong*.yaml.
+REF_STRIKE = {"forehand": np.array([0.48, -0.38, 0.87]), "backhand": np.array([0.52, -0.04, 1.05])}
 
 
 def _sample_shared(rng, n, clip, rk):
@@ -90,7 +90,7 @@ def main():
             print(f"        {name}: x={box['x']} y={box['y']} z={box['z']}")
             _stats(name, _sample_box(rng, args.n, box))
     print("\n[check] GOAL: 'FAR from reference strike' small (targets reachable by the imitated swing),")
-    print("        'below table surface' ~0%, and backhand z mean near its reference z=1.22.")
+    print("        'below table surface' ~0%, and means near the re-grounded reference strike points.")
 
 
 if __name__ == "__main__":

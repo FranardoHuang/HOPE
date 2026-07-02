@@ -10,7 +10,7 @@ to train an [Agibot A3](../../agi/) (31 actuated DOF) ping-pong swing policy. Un
 - `scripts/train.py` and `scripts/play.py` with `task=HOPEPingPong algo=ppo`.
 - The `HOPEPingPong` task maps to the gym task `HOPE-PingPong-AgibotA3-v0` (`experiment_name agibot_a3_hope`).
 - Overrides are layered from the `cfg/` tree: `cfg/task` (env/task), `cfg/algo` (PPO), `cfg/base` (shared defaults).
-- Each policy trains **ONE swing style** (forehand or backhand), selected by the reference clip in `registry_name`.
+- The default ping-pong task trains **one unified forehand+backhand policy**: `registry_name` is forehand, `registry_name_2` is backhand, and `swing_type` tells the actor which swing is active.
 - A plain tracking smoke test (no registry, no WandB) is `task=TrackingFlat algo=ppo` — see the runbook.
 
 **The authoritative runbook is [docs/operations/run_training.md](../../docs/operations/run_training.md).**
@@ -37,10 +37,10 @@ A from-scratch Isaac Sim/Lab install is out of scope here — follow the upstrea
   "Motions" registry collection. `csv_to_npz.py` writes `/tmp/motion.npz` (edit if `/tmp` is inaccessible).
 - WandB identities must differ: `WANDB_ENTITY` (team, run logging) vs `WANDB_REGISTRY_ORG` (org, motion
   registry) — if they match, registry reads fail. Use placeholders `your-wandb-team` / `your-wandb-org`.
-- `HOPEPingPong.yaml` defaults to `target_mode: reference_perturbed`: the racket target is sampled
-  around the reference motion's strike-frame racket state with a widening perturbation curriculum.
-  The legacy uniform target ranges are still placeholders and should only be used after IK validation
-  against A3 right-arm reachability; an unreachable target caps `strike_success` regardless of reward tuning.
+- `HOPEPingPong.yaml` / `HOPEPingPongRealSensor.yaml` currently use unified `target_mode: uniform`
+  with re-grounded per-clip boxes. Make sure the WandB registry aliases resolve to the corrected HOPE +X
+  forehand/backhand clips, or override them with local `artifacts/hope_{forehand,backhand}_hopex/motion.npz`
+  files before launching a long run.
 - `max_iterations` defaults to a train-forever sentinel — pass `max_iterations=` on the CLI and stop
   manually when `strike_success` plateaus.
 

@@ -1,36 +1,36 @@
 # =============================================================================
 # HOPE ping-pong WBC task (Agibot A3) — `real_sensor_only` deploy-honest variant.
 #
-# Selected with `task=HOPEPingPongRealSensor`. Identical task/reward/racket/DR to
-# HOPEPingPong, but routes to the gym env whose ACTOR observation drops every
+# Selected with `task=HOPEPingPongRealSensor`. Shares the same unified
+# forehand+backhand motion/strike setup as HOPEPingPong, but routes to the gym env whose ACTOR observation drops every
 # world-frame base-position dependency (motion_anchor_pos_b, base_target_pos_b)
 # and reframes racket_target_pos_b to be racket-FK-relative (180 -> 175), plus
 # absolute balance rewards/terminations. See the obs-redesign report.
 #
-# KEEP IN SYNC: this file is a copy of HOPEPingPong.yaml with only `name` +
-# `gym_task` changed. When you tune HOPEPingPong.yaml (reward weights / racket /
-# DR), mirror the change here (or vice-versa). The two share every knob below.
+# INTENTIONAL DIFFERENCES from HOPEPingPong: gym task/name/experiment, 175-D
+# real-sensor actor observation, no base_position reward, base_couple_blend=0.0,
+# and the documented footwork curriculum ranges. Shared motion/strike fixes
+# should still be mirrored here.
 #
 # Composes the shared env/sim/randomization bases (cfg/base/*) and overrides the
 # HOPE-specific knobs below.
 #
-# ALIGNMENT GOAL (2026-06-26): reproduce HITTER, not invent our own curriculum.
-# This file was stripped of the HOPE-invented machinery (motion_scale demotion,
-# ref_perturb success-gated curriculum, ref_vel_scale clip down-scaling, 3-D
-# target box, per-clip strike tuning) and set to HITTER's design:
-#   * 10 s episode, multiple swings (resample target on each clip wrap)
-#   * direct uniform target sampling at a FIXED strike plane x=0.4 m; sample
-#     only (y, z) of racket position + the racket velocity vector (Table-/ §IV)
-#   * NO curriculum: just sample + PPO
+# CURRENT TRAINING GOAL (2026-07-02): train one real-sensor policy on both
+# re-grounded HOPE forehand/backhand clips with continuous between-swing
+# recovery. This is a base-free first-loop baseline:
+#   * 10 s episode, multiple swings; target and clip resample on each clip wrap
+#   * NO mid-episode RSI teleport on clip wrap (reset-time RSI only)
+#   * PHASE 0 starts from narrow per-clip target boxes near each reference
+#     strike point; widen with the footwork curriculum below
 #   * imitation prior at natural weight (no motion_scale)
 #   * DR: keep mass/friction/restitution + observation noise (HITTER prose),
 #     PD gains FIXED (HITTER) -> pd_gain_range: null
 # Reward weights/kernel widths are NOT published by HITTER, so they stay as
 # reasonable HOPE choices (goal terms weighted relatively high, per the paper).
 #
-# STAGE NOTE: this is the single-swing-type (forehand) config. The unified
-# forehand+backhand policy (sampled swing type each swing, dual-clip imitation,
-# non-overlapping y regions) is Stage 2 and adds swing_type + a second clip.
+# TRAINING ROUTE: unified forehand+backhand by default. `registry_name` is clip 0
+# (forehand), `registry_name_2` is clip 1 (backhand), and `swing_type` is present
+# in the actor observation so one policy can learn both swings.
 # =============================================================================
 
 name: HOPEPingPongRealSensor
@@ -39,8 +39,9 @@ experiment_name: agibot_a3_hope_realsensor
 
 # wandb motion registry clips. UNIFIED HITTER policy: clip 0 = forehand (registry_name), clip 1 =
 # backhand (registry_name_2). MotionLoader concatenates them; clip_id selects which swing each env
-# imitates. Order must match racket.strike_phase_per_clip. Set registry_name_2: null for a single-swing
-# policy. (Override on the CLI with registry_name=... / registry_name_2=...)
+# imitates. Order must match racket.strike_phase_per_clip. These registry aliases must resolve to the
+# re-grounded HOPE +X clips whose strike points match the per-clip boxes below; otherwise override with
+# local `artifacts/hope_{forehand,backhand}_hopex/motion.npz` paths or corrected registry versions.
 registry_name: ${oc.env:WANDB_REGISTRY_ORG,BerkeleyPingPong}/wandb-registry-motions/hope_forehand
 registry_name_2: ${oc.env:WANDB_REGISTRY_ORG,BerkeleyPingPong}/wandb-registry-motions/hope_backhand
 
@@ -51,10 +52,14 @@ defaults:
   - _self_
 
 env:
-  # HITTER: 10 s episode with multiple swings. With no ball the swings are independent; the target
-  # resamples on each clip wrap, so a 10 s episode gives ~5 swings of practice and trains the
-  # between-swing recovery. (Was capped to 3 s in the HOPE curriculum path; restored to HITTER.)
+  # 10 s episode with multiple physical swings. Clip wrap resamples the command target and reference
+  # clip, but does not teleport the robot; recovery must be learned by the policy.
   episode_length_s: 10.0
+
+motion:
+  # Reset-time RSI is still used at episode reset. During clip wrap, keep the simulated robot state
+  # continuous so the 10 s episode actually trains between-swing recovery.
+  rsi_on_wrap: false
 
 # ---- reward weights / kernel std --------------------------------------------
 # HITTER does not publish reward weights or kernel forms. Goal terms get relatively high weight
@@ -99,7 +104,7 @@ rewards:
   # foot_slip_speed stays high / foot_contact_frac stays low, lower if it starts hurting the strike.
   pre_strike_foot_slip_weight: -0.4
 
-# ---- racket target sampling (HITTER: direct, fixed plane, no curriculum) -----
+# ---- racket target sampling (direct uniform, base-free footwork curriculum) -----
 racket:
   # Strike timing: phase of the clip at which contact happens (racket-tip speed peak).
   # v2 clips (2026-07-01, forehand 139f / backhand 132f @ 50 Hz): re-detected speed peaks with
@@ -122,7 +127,7 @@ racket:
   clean_reference_strike_velocity: true
   clean_strike_vel_window: 2
 
-  # HITTER target sampling: uniform, directly sampled, NO reference-perturb curriculum.
+  # Uniform target sampling, directly sampled, NO reference-perturb curriculum.
   target_mode: uniform
 
   # ====================== FOOTWORK CURRICULUM (base-free) ======================================
@@ -134,12 +139,13 @@ racket:
   #   PHASE 1: widen laterally + vertically -> progress reward starts needing body/leg shift. CLI:
   #     racket.racket_pos_y_abs_range=[0.05,0.30] racket.pos_z_range=[0.75,1.05] \
   #     'racket.pos_range_per_clip.forehand.y=[-0.35,-0.12]' 'racket.pos_range_per_clip.forehand.z=[0.78,1.00]' \
-  #     'racket.pos_range_per_clip.backhand.y=[0.12,0.35]'  'racket.pos_range_per_clip.backhand.z=[1.00,1.25]'
+  #     'racket.pos_range_per_clip.backhand.y=[-0.12,0.05]'  'racket.pos_range_per_clip.backhand.z=[0.96,1.14]'
   #   PHASE 2: full range + varied time_to_strike -> arm-only reach is insufficient, policy must STEP/shift:
   #     racket.racket_pos_y_abs_range=[0.05,0.45] racket.pos_z_range=[0.70,1.05] \
-  #     'racket.pos_range_per_clip.forehand.y=[-0.45,-0.20]' 'racket.pos_range_per_clip.backhand.y=[0.20,0.45]'
+  #     'racket.pos_range_per_clip.forehand.y=[-0.45,-0.20]' 'racket.pos_range_per_clip.backhand.y=[-0.15,0.08]'
   # =============================================================================================
-  # Fixed striking plane at x = 0.4 m in front of the robot (HITTER §IV).
+  # Shared fallback ranges for single-clip/no-per-clip runs. In the unified two-clip task below,
+  # pos_range_per_clip takes precedence and defines the active PHASE 0 distribution.
   pos_x_range: [0.40, 0.40]
   # PHASE 0 ranges (narrow — a stable strike near the reference; widen per the curriculum above).
   racket_pos_y_abs_range: [0.05, 0.15]

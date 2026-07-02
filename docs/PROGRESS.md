@@ -2,6 +2,11 @@
 
 Use this file for short project-state updates that future humans and agents need to see. Keep detailed reasoning in the relevant gate doc.
 
+## 2026-07-02
+
+- **Continuous multi-swing training fix**: HOPE ping-pong now exposes `MotionCommandCfg.rsi_on_wrap` and both `HOPEPingPong*.yaml` set it to `false`, so clip wrap no longer teleports the robot mid-episode. `racket_progress` now emits zero and resets its previous-distance baseline on motion/target resample steps, removing the wrap/reset spike from the base-free footwork reward. The YAML/docs now state that the current full task uses narrow per-clip first-loop target boxes, not the full HITTER wide distribution.
+- **Unified forehand+backhand training YAMLs synchronized**: `HOPEPingPong.yaml` and `HOPEPingPongRealSensor.yaml` now both describe the default route as one unified policy (`registry_name` forehand + `registry_name_2` backhand + `swing_type`) and remove stale single-swing / old backhand positive-y/high-z coordinate notes. The current per-clip boxes remain centered on the re-grounded HOPE +X strike points: forehand `(0.48,-0.38,0.87)`, backhand `(0.52,-0.04,1.05)`. The no-Isaac per-clip position/velocity sampling check scripts now use the same reference points and speed intent.
+
 ## 2026-07-01
 
 - **Aligned the ping-pong deploy docs with the actual `model_15200` runner path** across `agi/a3_deploy_example/README.md`, `README_robot_io_backend.md`, `PINGPONG_NEW_CHECKPOINT_TUTORIAL.md`, `docs/gates/G07_mujoco_to_real.md`, `docs/operations/run_deploy_dryrun.md`, `docs/operations/run_pingpong_recovery_audit.md`, `docs/operations/run_mocap.md`, and `docs/interfaces/policy_observation_action.md`. The docs now explicitly separate AGI's native `1570 -> 29` policy path from HOPE's `180 -> 31` ping-pong runner, document that current hardware uses `perfect_tracking` rather than a real mocap-fed localizer, and call out that "level1 swings fine on the hoist" is not the same as "released legs can stand on ground without support".

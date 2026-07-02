@@ -11,10 +11,9 @@ This is the step-13 environment. It extends the A3 motion-tracking baseline
   on top of the BeyondMimic imitation reward and the regularization reward;
 * extended domain randomization for sim-to-real.
 
-Default usage trains ONE swing style per policy (forehand or backhand), selected by which
-reference clip you pass via ``--registry_name`` (reimplement.md steps 14, 17). The swing-type
-observation is therefore omitted from the actor by default (it is constant per policy); enable
-``swing_type`` on the policy group only if you train a single unified policy.
+Default usage trains one unified forehand+backhand policy by passing two reference clips
+(``registry_name`` + ``registry_name_2``). The swing-type observation is present on the actor so
+one policy can condition on which clip/target family it is currently imitating.
 """
 
 from isaaclab.managers import EventTermCfg as EventTerm
@@ -323,6 +322,9 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
         # AgibotA3FlatEnvCfg sets the robot, action scale, motion anchor/body names, and the A3
         # contact/termination/CoM body names (all valid for the inherited HOPE* cfg subclasses).
         super().__post_init__()
+        # Multi-swing ping-pong must learn physical recovery between clips. Reset-time RSI remains active,
+        # but clip wrap no longer teleports the robot back to the next reference start state.
+        self.commands.motion.rsi_on_wrap = False
 
 
 @configclass
