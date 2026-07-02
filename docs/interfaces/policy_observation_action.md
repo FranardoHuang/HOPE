@@ -95,11 +95,13 @@ actor terms it adds the actual racket state computed via FK:
 - Control rate: intended 50 Hz (decimation 4 over 200 Hz sim) — confirm from
   `base/sim_base.yaml` if unverified.
 - Training target source: the current unified forehand+backhand task YAMLs use
-  `racket.target_mode: uniform` with re-grounded per-clip boxes and
-  `strike_phase_per_clip: [0.47, 0.33]`. The active boxes are narrow first-loop
-  boxes centered near each reference strike point, not the full HITTER wide
-  target distribution. This changes target generation, not the
-  observation/action tensor contract.
+  `racket.target_mode: reference_perturbed` with `strike_phase_per_clip:
+  [0.47, 0.33]`. The target center is computed from each imitated clip's own
+  strike-frame racket FK state (position, velocity, face normal); the long-run
+  distribution widens through success-gated perturbations. This changes target
+  generation, not the observation/action tensor contract. The old per-clip
+  uniform boxes remain fallback/debug settings only when `target_mode` is
+  explicitly overridden to `uniform`.
 - Clip wrap for HOPE ping-pong uses `motion.rsi_on_wrap: false`: the target and
   reference clip/time resample, but the simulated robot is not teleported
   mid-episode. Episode reset still uses reference-state initialization.

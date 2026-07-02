@@ -20,8 +20,8 @@
 # recovery. This is a base-free first-loop baseline:
 #   * 10 s episode, multiple swings; target and clip resample on each clip wrap
 #   * NO mid-episode RSI teleport on clip wrap (reset-time RSI only)
-#   * PHASE 0 starts from narrow per-clip target boxes near each reference
-#     strike point; widen with the footwork curriculum below
+#   * target distribution starts at each teacher strike center and widens via
+#     the success-gated reference_perturbed curriculum
 #   * imitation prior at natural weight (no motion_scale)
 #   * DR: keep mass/friction/restitution + observation noise (HITTER prose),
 #     PD gains FIXED (HITTER) -> pd_gain_range: null
@@ -37,13 +37,14 @@ name: HOPEPingPongRealSensor
 gym_task: HOPE-PingPong-RealSensor-AgibotA3-v0
 experiment_name: agibot_a3_hope_realsensor
 
-# wandb motion registry clips. UNIFIED HITTER policy: clip 0 = forehand (registry_name), clip 1 =
-# backhand (registry_name_2). MotionLoader concatenates them; clip_id selects which swing each env
-# imitates. Order must match racket.strike_phase_per_clip. These registry aliases must resolve to the
-# re-grounded HOPE +X clips whose strike points match the per-clip boxes below; otherwise override with
-# local `artifacts/hope_{forehand,backhand}_hopex/motion.npz` paths or corrected registry versions.
-registry_name: ${oc.env:WANDB_REGISTRY_ORG,BerkeleyPingPong}/wandb-registry-motions/hope_forehand
-registry_name_2: ${oc.env:WANDB_REGISTRY_ORG,BerkeleyPingPong}/wandb-registry-motions/hope_backhand
+# Motion clips. UNIFIED HITTER policy: clip 0 = forehand (registry_name), clip 1 = backhand
+# (registry_name_2). MotionLoader concatenates them; clip_id selects which swing each env imitates.
+# Order must match racket.strike_phase_per_clip. Default to the local corrected HOPE +X clips because
+# the 2026-07-02 `hope_forehand/backhand:latest` registry aliases were verified to still face +Y.
+# Override HOPE_FOREHAND_MOTION / HOPE_BACKHAND_MOTION or pass registry_name=... once corrected v5+
+# registry artifacts exist.
+registry_name: ${oc.env:HOPE_FOREHAND_MOTION,../../hope_training/motions/preprocessed/hope_forehand_hopex.npz}
+registry_name_2: ${oc.env:HOPE_BACKHAND_MOTION,../../hope_training/motions/preprocessed/hope_backhand_hopex.npz}
 
 defaults:
   - /base/env_base@_here_
@@ -104,7 +105,7 @@ rewards:
   # foot_slip_speed stays high / foot_contact_frac stays low, lower if it starts hurting the strike.
   pre_strike_foot_slip_weight: -0.4
 
-# ---- racket target sampling (direct uniform, base-free footwork curriculum) -----
+# ---- racket target sampling (teacher-centered, base-free distribution curriculum) -----
 racket:
   # Strike timing: phase of the clip at which contact happens (racket-tip speed peak).
   # v2 clips (2026-07-01, forehand 139f / backhand 132f @ 50 Hz): re-detected speed peaks with
@@ -127,31 +128,32 @@ racket:
   clean_reference_strike_velocity: true
   clean_strike_vel_window: 2
 
-  # Uniform target sampling, directly sampled, NO reference-perturb curriculum.
-  target_mode: uniform
+  # Reference-centered target sampling. The initial target center is computed from the imitated
+  # clip's own strike-frame racket FK state (position, velocity, face normal), then a success-gated
+  # perturbation widens the long-run distribution. This avoids asking the policy to imitate one
+  # teacher strike while tracking a different target center.
+  target_mode: reference_perturbed
+  ref_perturb_pos: [0.15, 0.20, 0.15]
+  ref_perturb_vel: [1.0, 1.0, 0.8]
+  ref_perturb_normal: 0.30
+  ref_perturb_curriculum_start: 0.05
+  ref_perturb_curriculum_steps: 30000
+  ref_perturb_success_gated: true
+  ref_perturb_advance_threshold: 0.30
+  ref_perturb_advance_rate: 0.00001
+  ref_vel_scale: 1.0
 
-  # ====================== FOOTWORK CURRICULUM (base-free) ======================================
-  # Train in PHASES, widening the racket-target range so the dense racket_progress reward forces more
-  # body/leg contribution as arm-only reach runs out. Warm-start each phase from the previous checkpoint
-  # (checkpoint_path=...). Override the ranges per phase on the Hydra CLI (no extra yaml needed), e.g.:
-  #
-  #   PHASE 0 (this file's defaults): small range -> learn a STABLE strike, legs barely need to move.
-  #   PHASE 1: widen laterally + vertically -> progress reward starts needing body/leg shift. CLI:
-  #     racket.racket_pos_y_abs_range=[0.05,0.30] racket.pos_z_range=[0.75,1.05] \
-  #     'racket.pos_range_per_clip.forehand.y=[-0.35,-0.12]' 'racket.pos_range_per_clip.forehand.z=[0.78,1.00]' \
-  #     'racket.pos_range_per_clip.backhand.y=[-0.12,0.05]'  'racket.pos_range_per_clip.backhand.z=[0.96,1.14]'
-  #   PHASE 2: full range + varied time_to_strike -> arm-only reach is insufficient, policy must STEP/shift:
-  #     racket.racket_pos_y_abs_range=[0.05,0.45] racket.pos_z_range=[0.70,1.05] \
-  #     'racket.pos_range_per_clip.forehand.y=[-0.45,-0.20]' 'racket.pos_range_per_clip.backhand.y=[-0.15,0.08]'
-  # =============================================================================================
-  # Shared fallback ranges for single-clip/no-per-clip runs. In the unified two-clip task below,
-  # pos_range_per_clip takes precedence and defines the active PHASE 0 distribution.
+  # The base-free variant uses the same reference-centered distribution curriculum as HOPEPingPong:
+  # start nearly on the teacher strike, then widen with ref_perturb_pos/ref_perturb_vel once exact-strike
+  # success is non-trivial. The uniform boxes below are fallback/debug knobs only when target_mode is
+  # explicitly overridden to `uniform`.
   pos_x_range: [0.40, 0.40]
   # PHASE 0 ranges (narrow — a stable strike near the reference; widen per the curriculum above).
   racket_pos_y_abs_range: [0.05, 0.15]
   pos_y_range: [-0.15, -0.05]
   pos_z_range: [0.82, 0.94]
-  # Per-clip target box, in the HOPE WORLD frame (racket_target = env_origin + motion.body_pos_w[strike]).
+  # Per-clip target box for fallback uniform mode, in the HOPE WORLD frame
+  # (racket_target = env_origin + motion.body_pos_w[strike]).
   # RE-GROUNDED 2026-07-01: the v2 clips were mis-grounded facing world +Y (~82-86deg) = table WIDTH, so their
   # return velocity pointed +Y (lateral) — wrong for the HOPE table (geometry.py: +X = length / toward the
   # opponent, Y = width, robot faces +X). scripts/reground_hope_frame.py rotates each clip about +Z by

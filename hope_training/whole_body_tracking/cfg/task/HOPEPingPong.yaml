@@ -27,13 +27,14 @@ name: HOPEPingPong
 gym_task: HOPE-PingPong-AgibotA3-v0
 experiment_name: agibot_a3_hope
 
-# wandb motion registry clips. UNIFIED HITTER policy: clip 0 = forehand (registry_name), clip 1 =
-# backhand (registry_name_2). MotionLoader concatenates them; clip_id selects which swing each env
-# imitates. Order must match racket.strike_phase_per_clip. These registry aliases must resolve to the
-# re-grounded HOPE +X clips whose strike points match the per-clip boxes below; otherwise override with
-# local `artifacts/hope_{forehand,backhand}_hopex/motion.npz` paths or corrected registry versions.
-registry_name: ${oc.env:WANDB_REGISTRY_ORG,BerkeleyPingPong}/wandb-registry-motions/hope_forehand
-registry_name_2: ${oc.env:WANDB_REGISTRY_ORG,BerkeleyPingPong}/wandb-registry-motions/hope_backhand
+# Motion clips. UNIFIED HITTER policy: clip 0 = forehand (registry_name), clip 1 = backhand
+# (registry_name_2). MotionLoader concatenates them; clip_id selects which swing each env imitates.
+# Order must match racket.strike_phase_per_clip. Default to the local corrected HOPE +X clips because
+# the 2026-07-02 `hope_forehand/backhand:latest` registry aliases were verified to still face +Y.
+# Override HOPE_FOREHAND_MOTION / HOPE_BACKHAND_MOTION or pass registry_name=... once corrected v5+
+# registry artifacts exist.
+registry_name: ${oc.env:HOPE_FOREHAND_MOTION,../../hope_training/motions/preprocessed/hope_forehand_hopex.npz}
+registry_name_2: ${oc.env:HOPE_BACKHAND_MOTION,../../hope_training/motions/preprocessed/hope_backhand_hopex.npz}
 
 defaults:
   - /base/env_base@_here_
@@ -93,7 +94,7 @@ rewards:
   # foot_slip_speed stays high / foot_contact_frac stays low, lower if it starts hurting the strike.
   pre_strike_foot_slip_weight: -0.4
 
-# ---- racket target sampling (direct uniform, narrow per-clip first loop) -----
+# ---- racket target sampling (teacher-centered, success-gated distribution) -----
 racket:
   # Strike timing: phase of the clip at which contact happens (racket-tip speed peak).
   # v2 clips (2026-07-01, forehand 139f / backhand 132f @ 50 Hz): re-detected speed peaks with
@@ -116,19 +117,30 @@ racket:
   clean_reference_strike_velocity: true
   clean_strike_vel_window: 2
 
-  # Uniform target sampling, directly sampled, NO reference-perturb curriculum.
-  target_mode: uniform
+  # Reference-centered target sampling. The initial target center is computed from the imitated
+  # clip's own strike-frame racket FK state (position, velocity, face normal), then a success-gated
+  # perturbation widens the long-run distribution. This avoids asking the policy to imitate one
+  # teacher strike while tracking a different target center.
+  target_mode: reference_perturbed
+  ref_perturb_pos: [0.15, 0.20, 0.15]
+  ref_perturb_vel: [1.0, 1.0, 0.8]
+  ref_perturb_normal: 0.30
+  ref_perturb_curriculum_start: 0.05
+  ref_perturb_curriculum_steps: 30000
+  ref_perturb_success_gated: true
+  ref_perturb_advance_threshold: 0.30
+  ref_perturb_advance_rate: 0.00001
+  ref_vel_scale: 1.0
 
-  # Shared fallback ranges for single-clip/no-per-clip runs. In the unified two-clip task below,
-  # pos_range_per_clip takes precedence, so these HITTER-wide fallback ranges are not the active
-  # training distribution.
+  # Fallback uniform ranges. They are used only when target_mode is overridden to `uniform`;
+  # reference_perturbed ignores these boxes and derives the target center from the teacher clip.
   pos_x_range: [0.40, 0.40]
   racket_pos_y_abs_range: [0.05, 0.45]
   pos_y_range: [-0.45, -0.05]
   pos_z_range: [0.70, 1.05]
-  # Per-clip POSITION targets (unified policy). Each clip's box is ADDED to the
-  # env origin; y is SIGNED here. These narrow boxes are the ACTIVE distribution
-  # and intentionally replace the shared fallback ranges above. They track the
+  # Per-clip POSITION targets for fallback uniform mode. Each clip's box is ADDED to the
+  # env origin; y is SIGNED here. These boxes are NOT active while target_mode is reference_perturbed.
+  # They track the
   # re-grounded v2 strike points below. Verify first:
   # `python scripts/check_perclip_pos_sampling.py`.
   # RE-GROUNDED 2026-07-01 into the HOPE WORLD frame (racket_target = env_origin + body_pos_w[strike]).

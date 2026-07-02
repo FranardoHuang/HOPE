@@ -114,7 +114,7 @@ _RACKET_KEYS = (
     "base_target_x_range", "base_target_y_range",
     "normal_mode", "forehand_on_negative_y", "mount_normal_axis", "mount_normal_sign",
     "target_mode", "ref_perturb_pos", "ref_perturb_vel", "ref_perturb_normal",
-    "ref_perturb_curriculum_steps", "ref_perturb_curriculum_start",
+    "ref_perturb_curriculum_steps", "ref_perturb_curriculum_start", "ref_perturb_success_gated",
     "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "ref_vel_scale_by_motion",
     "debug_reward_logging",
     "clean_reference_strike_velocity", "clean_strike_vel_window",
@@ -423,6 +423,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(C, "ref_perturb_normal", _get(rk, "ref_perturb_normal"), float, applied, "racket_target")
             _set_attr(C, "ref_perturb_curriculum_steps", _get(rk, "ref_perturb_curriculum_steps"), int, applied, "racket_target")
             _set_attr(C, "ref_perturb_curriculum_start", _get(rk, "ref_perturb_curriculum_start"), float, applied, "racket_target")
+            _set_attr(C, "ref_perturb_success_gated", _get(rk, "ref_perturb_success_gated"), _as_bool, applied, "racket_target")
             _set_attr(C, "ref_perturb_advance_threshold", _get(rk, "ref_perturb_advance_threshold"), float, applied, "racket_target")
             _set_attr(C, "ref_perturb_advance_rate", _get(rk, "ref_perturb_advance_rate"), float, applied, "racket_target")
             # Stage slow->fast hitting: scale the reference racket-velocity target (<1.0 trains slower hits).
@@ -569,6 +570,10 @@ def _run(cfg):
         reg2 = str(reg2)
         motion_files.append(_resolve_clip(reg2))
         print(f"[train.py] UNIFIED multi-clip policy: clip0={registry_name}  clip1={reg2}", flush=True)
+    else:
+        # normalize disable sentinels ('none'/'None'/'') so the runner_registry_names
+        # build below never turns them into a bogus 'none:latest' use_artifact ref
+        reg2 = None
     env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
 
     # 4) logging dir (same layout as scripts/rsl_rl/train.py so export/eval are unchanged)
@@ -592,11 +597,21 @@ def _run(cfg):
         )
     env = RslRlVecEnvWrapper(env)
 
-    # Only hand the runner a registry name for wandb lineage (use_artifact) when the clip actually came
-    # from the registry; a local motion path would crash wandb.run.use_artifact.
-    runner_registry_name = None if _local_motion(registry_name) is not None else registry_name
+    # Only hand registry refs to the runner for wandb lineage (use_artifact) when
+    # clips actually came from the registry; local motion paths would crash it.
+    def _artifact_ref(name):
+        if _local_motion(name) is not None:
+            return None
+        ref = str(name)
+        return ref if ":" in ref.rsplit("/", 1)[-1] else ref + ":latest"
+
+    runner_registry_names = [r for r in (_artifact_ref(registry_name), _artifact_ref(reg2) if reg2 else None) if r]
     runner = OnPolicyRunner(
-        env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device, registry_name=runner_registry_name
+        env,
+        agent_cfg.to_dict(),
+        log_dir=log_dir,
+        device=agent_cfg.device,
+        registry_name=runner_registry_names or None,
     )
     runner.add_git_repo_to_log(__file__)
 
@@ -649,6 +664,13 @@ def main(cfg):
         sys.stderr.flush()
         failed = True
     finally:
+        try:
+            import wandb
+
+            if getattr(wandb, "run", None) is not None:
+                wandb.finish()
+        except Exception as exc:
+            print(f"[train.py] WARNING: wandb.finish() failed: {exc}", flush=True)
         simulation_app.close()
     if failed:
         sys.exit(1)

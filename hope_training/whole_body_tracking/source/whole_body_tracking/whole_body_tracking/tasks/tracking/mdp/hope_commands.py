@@ -153,6 +153,11 @@ class RacketTargetCommand(CommandTerm):
         # base_target to racket_target so standing at base_target keeps the racket reachable.
         self._ref_base_pos_rel = torch.zeros(3, device=self.device)
         self._ref_reach_offset_xy = torch.zeros(2, device=self.device)
+        self._ref_racket_pos_rel_per_clip = None
+        self._ref_racket_vel_w_per_clip = None
+        self._ref_racket_normal_w_per_clip = None
+        self._ref_base_pos_rel_per_clip = None
+        self._ref_reach_offset_xy_per_clip = None
 
         # Success-gated curriculum: running perturbation scale, advanced only when the smoothed
         # exact-strike composite success clears the threshold (see _perturb_scale / _update_metrics).
@@ -367,15 +372,37 @@ class RacketTargetCommand(CommandTerm):
             self._motion_term = self._env.command_manager.get_term(self.cfg.motion_command_name)
         return self._motion_term
 
-    def _ref_racket_pos_at(self, motion, f: int) -> torch.Tensor:
+    def _strike_frame_for_clip(self, motion, clip_id: int) -> tuple[int, float, int, int]:
+        """Return (global strike frame, phase, segment start, segment len) for one reference clip."""
+        nseg = int(motion.num_segments)
+        if clip_id < 0 or clip_id >= nseg:
+            raise IndexError(f"clip_id {clip_id} out of range for {nseg} segments")
+        seg_start = int(motion.seg_start[clip_id].item())
+        seg_len = int(motion.seg_len[clip_id].item())
+        spc = tuple(self.cfg.strike_phase_per_clip)
+        phase = float(spc[clip_id]) if spc and len(spc) == nseg else float(self.cfg.strike_phase)
+        strike_step = seg_start + round(phase * (seg_len - 1))
+        return int(strike_step), phase, seg_start, seg_len
+
+    def _ref_racket_pos_at(
+        self,
+        motion,
+        f: int,
+        *,
+        clip_start: int = 0,
+        clip_end: int | None = None,
+    ) -> torch.Tensor:
         """Racket-center FK position (env-origin rel) at reference frame ``f``.
 
-        Uses the SAME FK as :meth:`_compute_racket_state` / :meth:`_ensure_reference_strike_state`
-        (racket body, or wrist + constant mount offset) but reads the reference MOTION's body poses.
-        ``f`` is clamped to the valid frame range. Used by the clean-strike-velocity centered difference.
+        Uses the SAME FK as :meth:`_compute_racket_state` /
+        :meth:`_ensure_reference_strike_state` (racket body, or wrist + constant mount offset) but reads
+        the reference MOTION's body poses. ``f`` is clamped to the requested clip segment so clean
+        centered-difference velocities never leak across a concatenated forehand/backhand boundary.
         """
         total = max(int(motion.time_step_total), 1)
-        f = int(max(0, min(total - 1, f)))
+        hi = total - 1 if clip_end is None else int(clip_end)
+        lo = int(clip_start)
+        f = int(max(lo, min(hi, f)))
         if self._racket_mode == "body":
             return motion._body_pos_w[f, self._racket_body_index]
         widx = self._wrist_body_index
@@ -385,85 +412,99 @@ class RacketTargetCommand(CommandTerm):
         return wpos + offset_w
 
     def _ensure_reference_strike_state(self):
-        """Cache the reference racket state at the strike frame (once, after the motion is loaded).
+        """Cache per-clip reference racket/base states at each clip's strike frame.
 
-        Uses the SAME FK as :meth:`_compute_racket_state` (racket body, or wrist+mount offset) but
-        reads the reference MOTION's body poses instead of the live robot, so that a robot perfectly
-        tracking the clip would land its racket exactly on this state. The motion's raw body arrays
-        are indexed in live-articulation order (``MotionLoader`` selects tracked bodies from them via
-        the live ``body_indexes``), so the live ``_racket_body_index`` / ``_wrist_body_index`` index
-        them directly. Positions are env-origin relative (as the motion stores them).
+        Target sampling in ``reference_perturbed`` mode must be centered on the exact teacher clip the
+        env is imitating. The old single cached state was fine for one clip, but a unified forehand+
+        backhand policy needs separate strike position, velocity, face normal, and base->racket reach
+        offsets for each concatenated MotionLoader segment.
         """
         if self._ref_strike_cached:
             return
         motion = self._motion().motion  # MotionLoader
-        total = max(int(motion.time_step_total), 1)
-        strike_step = round(self.cfg.strike_phase * (total - 1))
-        if self._racket_mode == "body":
-            idx = self._racket_body_index
-            pos = motion._body_pos_w[strike_step, idx]
-            quat = motion._body_quat_w[strike_step, idx]
-            lin = motion._body_lin_vel_w[strike_step, idx]
-        else:
-            widx = self._wrist_body_index
-            wpos = motion._body_pos_w[strike_step, widx]
-            wquat = motion._body_quat_w[strike_step, widx]
-            wlin = motion._body_lin_vel_w[strike_step, widx]
-            wang = motion._body_ang_vel_w[strike_step, widx]
-            offset_w = quat_apply(wquat.unsqueeze(0), self._mount_offset[0:1]).squeeze(0)
-            pos = wpos + offset_w
-            lin = wlin + torch.cross(wang, offset_w, dim=-1)
-            quat = quat_mul(wquat.unsqueeze(0), self._mount_quat[0:1]).squeeze(0)
-        normal = matrix_from_quat(quat.unsqueeze(0))[0, :, self.cfg.mount_normal_axis] * self.cfg.mount_normal_sign
-
-        # --- clean reference strike velocity ---------------------------------------------------------
-        # Recompute the strike target velocity from the FINAL racket FK position by a centered finite
-        # difference, so it is consistent with the position the policy actually tracks (the stored
-        # body_lin_vel_w is FD'd/interpolated and ~1 m/s inconsistent at the racket tip — see cfg docs).
-        # raw_lin = legacy single-frame stored velocity (kept for the flag-off path and the diagnostics).
-        raw_lin = lin.detach().clone()
-        dt = float(self._env.step_dt)
-        # single-frame centered difference of the FK position (the consistency probe vs the stored vel)
-        fd1 = (self._ref_racket_pos_at(motion, strike_step + 1) - self._ref_racket_pos_at(motion, strike_step - 1)) / (
-            2.0 * dt
-        )
-        # windowed centered difference (the clean target velocity): wider baseline rejects single-frame jitter
+        nseg = int(motion.num_segments)
+        pos_all = torch.zeros(nseg, 3, device=self.device)
+        vel_all = torch.zeros(nseg, 3, device=self.device)
+        nrm_all = torch.zeros(nseg, 3, device=self.device)
+        base_all = torch.zeros(nseg, 3, device=self.device)
+        reach_all = torch.zeros(nseg, 2, device=self.device)
         W = max(1, int(self.cfg.clean_strike_vel_window))
-        clean_lin = (
-            self._ref_racket_pos_at(motion, strike_step + W) - self._ref_racket_pos_at(motion, strike_step - W)
-        ) / (2.0 * W * dt)
-        if self.cfg.clean_reference_strike_velocity:
-            lin = clean_lin
+        dt = float(self._env.step_dt)
+        report_lines = []
 
-        self._ref_racket_pos_rel = pos.detach().clone()
-        self._ref_racket_vel_w = lin.detach().clone()
-        self._ref_racket_normal_w = (normal / (torch.norm(normal) + 1e-6)).detach().clone()
-        # Reference base (root) XY at the strike — root is articulation body index 0 (same order the
-        # motion arrays use). The base->racket horizontal offset couples base_target to racket_target.
-        self._ref_base_pos_rel = motion._body_pos_w[strike_step, 0].detach().clone()
-        self._ref_reach_offset_xy = (self._ref_racket_pos_rel[:2] - self._ref_base_pos_rel[:2]).detach().clone()
+        for clip_id in range(nseg):
+            strike_step, phase, seg_start, seg_len = self._strike_frame_for_clip(motion, clip_id)
+            seg_end = seg_start + seg_len - 1
+            if self._racket_mode == "body":
+                idx = self._racket_body_index
+                pos = motion._body_pos_w[strike_step, idx]
+                quat = motion._body_quat_w[strike_step, idx]
+                lin = motion._body_lin_vel_w[strike_step, idx]
+            else:
+                widx = self._wrist_body_index
+                wpos = motion._body_pos_w[strike_step, widx]
+                wquat = motion._body_quat_w[strike_step, widx]
+                wlin = motion._body_lin_vel_w[strike_step, widx]
+                wang = motion._body_ang_vel_w[strike_step, widx]
+                offset_w = quat_apply(wquat.unsqueeze(0), self._mount_offset[0:1]).squeeze(0)
+                pos = wpos + offset_w
+                lin = wlin + torch.cross(wang, offset_w, dim=-1)
+                quat = quat_mul(wquat.unsqueeze(0), self._mount_quat[0:1]).squeeze(0)
+            normal = matrix_from_quat(quat.unsqueeze(0))[0, :, self.cfg.mount_normal_axis] * self.cfg.mount_normal_sign
+
+            raw_lin = lin.detach().clone()
+            fd1 = (
+                self._ref_racket_pos_at(motion, strike_step + 1, clip_start=seg_start, clip_end=seg_end)
+                - self._ref_racket_pos_at(motion, strike_step - 1, clip_start=seg_start, clip_end=seg_end)
+            ) / (2.0 * dt)
+            clean_lin = (
+                self._ref_racket_pos_at(motion, strike_step + W, clip_start=seg_start, clip_end=seg_end)
+                - self._ref_racket_pos_at(motion, strike_step - W, clip_start=seg_start, clip_end=seg_end)
+            ) / (2.0 * W * dt)
+            if self.cfg.clean_reference_strike_velocity:
+                lin = clean_lin
+
+            pos_all[clip_id] = pos.detach().clone()
+            vel_all[clip_id] = lin.detach().clone()
+            nrm_all[clip_id] = (normal / (torch.norm(normal) + 1e-6)).detach().clone()
+            base_all[clip_id] = motion._body_pos_w[strike_step, 0].detach().clone()
+            reach_all[clip_id] = (pos_all[clip_id, :2] - base_all[clip_id, :2]).detach().clone()
+
+            cname = self._clip_names.get(clip_id, f"clip{clip_id}")
+            p = pos_all[clip_id]
+            v = vel_all[clip_id]
+            nrm = nrm_all[clip_id]
+            b = base_all[clip_id]
+            off = reach_all[clip_id]
+            report_lines.append(
+                f"  {cname}: strike frame {strike_step}/{seg_end} (phase {phase:.3f}) "
+                f"pos=({float(p[0]):.3f},{float(p[1]):.3f},{float(p[2]):.3f}) "
+                f"vel=({float(v[0]):.3f},{float(v[1]):.3f},{float(v[2]):.3f}) "
+                f"|v|={float(torch.norm(v)):.2f} "
+                f"normal=({float(nrm[0]):.3f},{float(nrm[1]):.3f},{float(nrm[2]):.3f}) "
+                f"baseXY=({float(b[0]):.3f},{float(b[1]):.3f}) "
+                f"reachXY=({float(off[0]):.3f},{float(off[1]):.3f}) "
+                f"raw_speed={float(torch.norm(raw_lin)):.3f} "
+                f"clean_speed={float(torch.norm(clean_lin)):.3f} "
+                f"raw_clean_diff={float(torch.norm(raw_lin - clean_lin)):.3f} "
+                f"raw_fd_diff={float(torch.norm(raw_lin - fd1)):.3f}"
+            )
+
+        self._ref_racket_pos_rel_per_clip = pos_all
+        self._ref_racket_vel_w_per_clip = vel_all
+        self._ref_racket_normal_w_per_clip = nrm_all
+        self._ref_base_pos_rel_per_clip = base_all
+        self._ref_reach_offset_xy_per_clip = reach_all
+        self._ref_racket_pos_rel = pos_all[0].detach().clone()
+        self._ref_racket_vel_w = vel_all[0].detach().clone()
+        self._ref_racket_normal_w = nrm_all[0].detach().clone()
+        self._ref_base_pos_rel = base_all[0].detach().clone()
+        self._ref_reach_offset_xy = reach_all[0].detach().clone()
         self._ref_strike_cached = True
-        p, v, nrm = self._ref_racket_pos_rel, self._ref_racket_vel_w, self._ref_racket_normal_w
-        b, off = self._ref_base_pos_rel, self._ref_reach_offset_xy
-        raw_strike_speed = float(torch.norm(raw_lin))
-        clean_strike_speed = float(torch.norm(clean_lin))
-        raw_clean_vel_diff = float(torch.norm(raw_lin - clean_lin))
-        raw_vs_fd_vel_diff = float(torch.norm(raw_lin - fd1))
         print(
-            f"[RacketTargetCommand] reference_perturbed: strike frame {strike_step}/{total - 1} "
-            f"(phase {self.cfg.strike_phase}); reference racket @ strike (env-origin rel): "
-            f"pos=({p[0]:.3f},{p[1]:.3f},{p[2]:.3f}) "
-            f"vel=({v[0]:.3f},{v[1]:.3f},{v[2]:.3f}) |v|={float(torch.norm(v)):.2f} "
-            f"normal=({nrm[0]:.3f},{nrm[1]:.3f},{nrm[2]:.3f}); "
-            f"reference base XY=({b[0]:.3f},{b[1]:.3f}) base->racket offset XY=({off[0]:.3f},{off[1]:.3f})",
-            flush=True,
-        )
-        print(
-            f"[RacketTargetCommand] strike-velocity denoise (clean_reference_strike_velocity="
-            f"{self.cfg.clean_reference_strike_velocity}, window=+-{W}): "
-            f"raw_strike_speed={raw_strike_speed:.3f} clean_strike_speed={clean_strike_speed:.3f} "
-            f"raw_clean_vel_diff={raw_clean_vel_diff:.3f} raw_vs_fd_vel_diff={raw_vs_fd_vel_diff:.3f} "
-            f"(target uses {'CLEAN' if self.cfg.clean_reference_strike_velocity else 'RAW'} velocity)",
+            "[RacketTargetCommand] reference strike centers per clip "
+            f"(clean_reference_strike_velocity={self.cfg.clean_reference_strike_velocity}, window=+-{W}):\n"
+            + "\n".join(report_lines),
             flush=True,
         )
 
@@ -486,34 +527,12 @@ class RacketTargetCommand(CommandTerm):
         return min(1.0, max(start, scale))
 
     def _ensure_ref_normal_per_clip(self):
-        """Cache the reference paddle face normal at each clip's strike frame ([num_segments, 3]).
-
-        Uses the SAME FK as the live racket normal (racket-body quat, or wrist-quat * mount_quat) but reads
-        the reference MOTION's body quats at that clip's strike frame, so a robot tracking the clip lands
-        its paddle normal exactly on this target. Used as the uniform-mode normal target (the sampled
-        racket velocity is not the paddle-face direction).
-        """
+        """Cache the reference paddle face normal at each clip's strike frame ([num_segments, 3])."""
         if self._ref_normal_per_clip is not None:
             return
-        motion = self._motion()
-        ml = motion.motion
-        nseg = ml.num_segments
-        spc = tuple(self.cfg.strike_phase_per_clip)
-        normals = torch.zeros(nseg, 3, device=self.device)
-        for c in range(nseg):
-            ss = int(ml.seg_start[c])
-            sl = int(ml.seg_len[c])
-            ph = float(spc[c]) if spc and len(spc) == nseg else float(self.cfg.strike_phase)
-            f = ss + round(ph * (sl - 1))
-            if self._racket_mode == "body":
-                quat = ml._body_quat_w[f, self._racket_body_index]
-            else:
-                wquat = ml._body_quat_w[f, self._wrist_body_index]
-                quat = quat_mul(wquat.unsqueeze(0), self._mount_quat[0:1]).squeeze(0)
-            nrm = matrix_from_quat(quat.unsqueeze(0))[0, :, self.cfg.mount_normal_axis] * self.cfg.mount_normal_sign
-            normals[c] = nrm / (torch.norm(nrm) + 1e-6)
-        self._ref_normal_per_clip = normals
-        print(f"[RacketTargetCommand] per-clip reference strike paddle normals: {normals.tolist()}", flush=True)
+        self._ensure_reference_strike_state()
+        assert self._ref_racket_normal_w_per_clip is not None
+        self._ref_normal_per_clip = self._ref_racket_normal_w_per_clip
 
     def _sample_targets_uniform(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
         """Independent box sampling (legacy mode). Ranges are PLACEHOLDERS not tied to the swing."""
@@ -583,12 +602,24 @@ class RacketTargetCommand(CommandTerm):
         self.racket_target_normal_w[env_ids] = normal
 
     def _sample_targets_reference_perturbed(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
-        """Target = reference racket state @ strike + curriculum-scaled uniform perturbation.
+        """Target = this env's reference racket state @ strike + curriculum-scaled perturbation.
 
-        Guarantees the target is reachable by the imitated swing (a perfect imitator scores exactly),
-        with the perturbation ball widening over training (``_perturb_scale``) for generalization.
+        The target center is selected by ``motion.clip_id`` for unified forehand+backhand training, so
+        the policy no longer has to imitate one teacher strike while chasing a different sampled target.
         """
         self._ensure_reference_strike_state()
+        assert self._ref_racket_pos_rel_per_clip is not None
+        assert self._ref_racket_vel_w_per_clip is not None
+        assert self._ref_racket_normal_w_per_clip is not None
+        motion = self._motion()
+        if motion._multiseg:
+            clip = motion.clip_id[env_ids]
+        else:
+            clip = torch.zeros(n, dtype=torch.long, device=self.device)
+        ref_pos = self._ref_racket_pos_rel_per_clip[clip]
+        ref_vel = self._ref_racket_vel_w_per_clip[clip]
+        ref_nrm = self._ref_racket_normal_w_per_clip[clip]
+
         scale = self._perturb_scale()
         dev = self.device
         pos_h = torch.tensor(self.cfg.ref_perturb_pos, device=dev) * scale
@@ -596,13 +627,13 @@ class RacketTargetCommand(CommandTerm):
         nrm_h = float(self.cfg.ref_perturb_normal) * scale
 
         dpos = (torch.rand(n, 3, device=dev) * 2.0 - 1.0) * pos_h
-        self.racket_target_pos_w[env_ids] = origins + self._ref_racket_pos_rel.unsqueeze(0) + dpos
+        self.racket_target_pos_w[env_ids] = origins + ref_pos + dpos
 
         dvel = (torch.rand(n, 3, device=dev) * 2.0 - 1.0) * vel_h
-        self.racket_target_vel_w[env_ids] = self._ref_racket_vel_w.unsqueeze(0) * self.cfg.ref_vel_scale + dvel
+        self.racket_target_vel_w[env_ids] = ref_vel * self.cfg.ref_vel_scale + dvel
 
         dnrm = (torch.rand(n, 3, device=dev) * 2.0 - 1.0) * nrm_h
-        normal = self._ref_racket_normal_w.unsqueeze(0) + dnrm
+        normal = ref_nrm + dnrm
         self.racket_target_normal_w[env_ids] = normal / (torch.norm(normal, dim=-1, keepdim=True) + 1e-6)
 
         self.metrics["ref_perturb_scale"][env_ids] = scale
@@ -612,6 +643,7 @@ class RacketTargetCommand(CommandTerm):
             return
         n = len(env_ids)
         origins = self._env.scene.env_origins[env_ids]
+        motion = self._motion()
 
         # Desired racket pos/vel/normal — either independent box sampling (legacy) or coupled to the
         # reference swing's strike state (reachable-by-construction; reimplement.md step 13 / rank 5).
@@ -627,7 +659,12 @@ class RacketTargetCommand(CommandTerm):
         # around the coupled point. Legacy "uniform" mode keeps the old origin-relative sampling.
         if self.cfg.target_mode == "reference_perturbed":
             self._ensure_reference_strike_state()
-            base_xy = self.racket_target_pos_w[env_ids][:, :2] - self._ref_reach_offset_xy.unsqueeze(0)
+            assert self._ref_reach_offset_xy_per_clip is not None
+            if motion._multiseg:
+                clip = motion.clip_id[env_ids]
+            else:
+                clip = torch.zeros(n, dtype=torch.long, device=self.device)
+            base_xy = self.racket_target_pos_w[env_ids][:, :2] - self._ref_reach_offset_xy_per_clip[clip]
         else:
             # uniform: start at spawn, then WEAKLY couple the base toward the racket target's SIDEWAYS
             # offset (Y only; X is the fixed strike plane, so no forward repositioning). The base shifts a
@@ -648,7 +685,6 @@ class RacketTargetCommand(CommandTerm):
 
         # Swing type. Unified multi-clip: it IS the imitated clip (forehand=clip 0 -> +1, backhand=clip 1
         # -> -1), matching the swing_type observation. Single-clip legacy: infer from the target Y side.
-        motion = self._motion()
         if motion._multiseg:
             clip = motion.clip_id[env_ids]
             self.swing_sign[env_ids] = torch.where(clip == 0, 1.0, -1.0)

@@ -19,7 +19,9 @@ These files and folders are not provided by `git clone`, `git pull`, or normal b
 | `hope_training/GVHMR/` | Video -> SMPL-X motion recovery clone | Public: [zju3dv/GVHMR](https://github.com/zju3dv/GVHMR.git) (observed pin `6ec3ca3`) | Motion pipeline |
 | GMR body-models dir (`SMPLX_NEUTRAL/MALE/FEMALE.pkl`) | SMPL-X body models for retargeting | License-gated: [smpl-x.is.tue.mpg.de](https://smpl-x.is.tue.mpg.de) | Motion pipeline |
 | `hope_training/GVHMR/inputs/checkpoints/` | GVHMR model checkpoints | License-gated: per GVHMR instructions | Motion pipeline |
-| WandB motion registry (`hope_forehand`/`hope_backhand` `.npz`) | Reference swing clips for `task=HOPEPingPong` | Private/org-scoped WandB registry (not redistributable) | Training (HOPEPingPong) |
+| `hope_training/GVHMR/inputs/checkpoints/{dpvo,gvhmr,hmr2,vitpose,yolo}/` | GVHMR public pretrained weights restored on the current RunPod | Upstream GVHMR Google Drive hit quota; restored from public Hugging Face mirror `camenduru/GVHMR` on 2026-07-02 | Motion pipeline |
+| `hope_training/motions/preprocessed/hope_forehand_hopex.npz` and `hope_backhand_hopex.npz` | Corrected HOPE +X reference swing clips for current `task=HOPEPingPong*` defaults | Generated locally from the 2026-07-02 v4 motions with `scripts/reground_hope_frame.py`; ignored, not redistributable | Training (HOPEPingPong) |
+| WandB motion registry (`hope_forehand`/`hope_backhand`) | Optional reference swing source after corrected artifacts are uploaded | Private/org-scoped WandB registry. The 2026-07-02 `hope_forehand:v4` / `hope_backhand:v4` artifacts contain canonical `motion.npz` but were later rejected because they still face +Y | Training (HOPEPingPong) |
 
 ## Manual Restore Checklist
 
@@ -102,18 +104,50 @@ See [reimplement.md](../../reimplement.md) steps 9-11 for the full per-env insta
 SMPLX_NEUTRAL.pkl  SMPLX_MALE.pkl  SMPLX_FEMALE.pkl
 
 # GVHMR checkpoints into hope_training/GVHMR/inputs/checkpoints/:
-gvhmr_siga24_release.ckpt
+gvhmr/gvhmr_siga24_release.ckpt
 hmr2/epoch=10-step=25000.ckpt
-vitpose-h-multi-coco.pth
-yolov8x.pt
-dpvo.pth            # optional, only for the DPVO path
+vitpose/vitpose-h-multi-coco.pth
+yolo/yolov8x.pt
+dpvo/dpvo.pth            # optional, only for the DPVO path
+
+# GVHMR body models into hope_training/GVHMR/inputs/checkpoints/body_models/:
+smplx/SMPLX_NEUTRAL.npz
+smpl/SMPL_NEUTRAL.pkl
+
+# GMR body models into hope_training/GMR/assets/body_models/smplx/:
+SMPLX_NEUTRAL.pkl  SMPLX_MALE.pkl  SMPLX_FEMALE.pkl
 ```
 
 6. Provide the reference swing clips for `task=HOPEPingPong`:
 
-The maintainer `hope_forehand`/`hope_backhand` `.npz` live in a private, org-scoped WandB "Motions" registry and cannot be redistributed. External users should make their own instead (see below) and point `registry_name` at their own registry collection.
+Current `HOPEPingPong.yaml` and `HOPEPingPongRealSensor.yaml` defaults use local ignored corrected clips:
 
-> Make your own motions instead: run GVHMR (video -> SMPL-X) -> GMR (`--robot agibot_a3`) -> `scripts/csv_to_npz.py --robot agibot_a3`, then upload the resulting `.npz` to your own WandB Motions registry. This unblocks training without any private artifact. Full steps: [reimplement.md](../../reimplement.md) steps 9-11 and [run_training.md](run_training.md).
+```text
+hope_training/motions/preprocessed/hope_forehand_hopex.npz
+hope_training/motions/preprocessed/hope_backhand_hopex.npz
+```
+
+They were generated on 2026-07-02 from the local v4 artifacts:
+
+```bash
+cd hope_training/whole_body_tracking
+python scripts/reground_hope_frame.py --in artifacts/hope_forehand:v4/motion.npz \
+  --out ../motions/preprocessed/hope_forehand_hopex.npz --strike-phase 0.47
+python scripts/reground_hope_frame.py --in artifacts/hope_backhand:v4/motion.npz \
+  --out ../motions/preprocessed/hope_backhand_hopex.npz --strike-phase 0.33
+python scripts/check_motion_target_alignment.py --yaml cfg/task/HOPEPingPong.yaml
+```
+
+The private registry aliases observed earlier are not accepted for long training until corrected v5+ artifacts are uploaded:
+
+```text
+dongc_1-university-of-california-berkeley-org/wandb-registry-motions/hope_forehand:latest
+  -> BerkeleyPingPong/csv_to_npz/hope_forehand:v4, manifest: motion.npz, REJECTED: frame0_yaw=82.03 deg, +Y-dominant strike velocity
+dongc_1-university-of-california-berkeley-org/wandb-registry-motions/hope_backhand:latest
+  -> BerkeleyPingPong/csv_to_npz/hope_backhand:v4, manifest: motion.npz, REJECTED: frame0_yaw=85.92 deg, +Y-dominant strike velocity
+```
+
+> Make your own motions instead: run GVHMR (video -> SMPL-X) -> GMR (`--robot agibot_a3`) -> `scripts/csv_to_npz.py --robot agibot_a3`. The converter now applies HOPE +X alignment by default for Agibot A3 before local save/upload. Run `scripts/check_motion_target_alignment.py` before training or uploading the resulting `.npz` to your own WandB Motions registry. Full steps: [reimplement.md](../../reimplement.md) steps 9-11 and [run_training.md](run_training.md).
 
 7. Keep generated training artifacts out of git:
 

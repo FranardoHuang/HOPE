@@ -10,6 +10,7 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import os
 import numpy as np
 
 from isaaclab.app import AppLauncher
@@ -29,7 +30,24 @@ parser.add_argument(
     ),
 )
 parser.add_argument("--output_name", type=str, required=True, help="The name of the motion npz file.")
+parser.add_argument("--output_file", type=str, default="/tmp/motion.npz", help="Where to write the local motion npz.")
+parser.add_argument("--no_upload", action="store_true", help="Write the local npz and skip WandB upload.")
 parser.add_argument("--output_fps", type=int, default=50, help="The fps of the output motion.")
+parser.add_argument(
+    "--hope_frame",
+    choices=("auto", "on", "off"),
+    default="auto",
+    help=(
+        "Rotate saved world-frame arrays so frame-0 pelvis heading faces HOPE +X. "
+        "'auto' enables this for --robot agibot_a3 and leaves other robots unchanged."
+    ),
+)
+parser.add_argument(
+    "--hope_frame_theta_deg",
+    type=float,
+    default=None,
+    help="Explicit yaw degrees for --hope_frame on/auto. Default rotates frame-0 pelvis yaw to 0 deg (+X).",
+)
 parser.add_argument(
     "--robot",
     type=str,
@@ -64,6 +82,8 @@ from isaaclab.utils.math import axis_angle_from_quat, quat_conjugate, quat_mul, 
 ##
 from whole_body_tracking.robots.agibot_a3 import AGIBOT_A3_CFG, AGIBOT_A3_JOINT_NAMES
 from whole_body_tracking.robots.g1 import G1_CYLINDER_CFG
+
+from hope_frame_utils import rotate_motion_to_hope_x
 
 # G1 retargeting CSV DOF-column order (29 joints).
 G1_JOINT_NAMES = [
@@ -104,6 +124,25 @@ _ROBOTS = {
     "agibot_a3": (AGIBOT_A3_CFG, AGIBOT_A3_JOINT_NAMES),
 }
 _ROBOT_CFG, _JOINT_NAMES = _ROBOTS[args_cli.robot]
+
+
+def _apply_hope_frame_alignment(log: dict) -> dict:
+    """Optionally rotate the exported motion into the HOPE +X table frame."""
+
+    enabled = args_cli.hope_frame == "on" or (args_cli.hope_frame == "auto" and args_cli.robot == "agibot_a3")
+    if not enabled:
+        return log
+    aligned, report = rotate_motion_to_hope_x(log, theta_deg=args_cli.hope_frame_theta_deg)
+    print(
+        "[INFO]: HOPE frame alignment applied: "
+        f"frame-0 pelvis yaw {np.degrees(report.yaw_before_rad):+.2f} deg -> "
+        f"{np.degrees(report.yaw_after_rad):+.2f} deg "
+        f"(theta={np.degrees(report.theta_rad):+.2f} deg, pivot_xy="
+        f"({report.pivot_xy[0]:+.3f},{report.pivot_xy[1]:+.3f})). "
+        "Rotated body_pos_w/body_quat_w/body_lin_vel_w/body_ang_vel_w; joint arrays unchanged.",
+        flush=True,
+    )
+    return aligned
 
 
 @configclass
@@ -346,18 +385,31 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, joi
             ):
                 log[k] = np.stack(log[k], axis=0)
 
-            np.savez("/tmp/motion.npz", **log)
+            log = _apply_hope_frame_alignment(log)
+
+            np.savez(args_cli.output_file, **log)
+            print(f"[INFO]: Motion saved locally: {args_cli.output_file}")
+
+            if args_cli.no_upload:
+                return
 
             import wandb
 
             COLLECTION = args_cli.output_name
-            run = wandb.init(project="csv_to_npz", name=COLLECTION)
-            print(f"[INFO]: Logging motion to wandb: {COLLECTION}")
+            entity = os.environ.get("WANDB_ENTITY") or None
+            project = os.environ.get("WANDB_MOTION_PROJECT", "csv_to_npz")
+            registry_org = os.environ.get("WANDB_REGISTRY_ORG", entity or "")
+            run = wandb.init(entity=entity, project=project, name=COLLECTION)
+            print(f"[INFO]: Logging motion to wandb: entity={entity} project={project} collection={COLLECTION}")
             REGISTRY = "motions"
-            logged_artifact = run.log_artifact(artifact_or_path="/tmp/motion.npz", name=COLLECTION, type=REGISTRY)
+            artifact = wandb.Artifact(name=COLLECTION, type=REGISTRY)
+            artifact.add_file(args_cli.output_file, name="motion.npz")
+            logged_artifact = run.log_artifact(artifact)
             run.link_artifact(artifact=logged_artifact, target_path=f"wandb-registry-{REGISTRY}/{COLLECTION}")
             run.finish()
             print(f"[INFO]: Motion saved to wandb registry: {REGISTRY}/{COLLECTION}")
+            if registry_org:
+                print(f"[INFO]: Expected registry path: {registry_org}/wandb-registry-{REGISTRY}/{COLLECTION}:latest")
             return
 
 

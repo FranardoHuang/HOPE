@@ -53,9 +53,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             attach_onnx_metadata(self.env.unwrapped, wandb.run.name, path=policy_path, filename=filename)
             wandb.save(policy_path + filename, base_path=os.path.dirname(policy_path))
 
-            # link the artifact registry to this run
+            # Link input motion artifacts to this run. W&B expects registry refs
+            # to include an alias (for example, collection:latest).
             if self.registry_name is not None:
-                wandb.run.use_artifact(self.registry_name)
+                names = self.registry_name if isinstance(self.registry_name, (list, tuple)) else [self.registry_name]
+                for name in names:
+                    wandb.run.use_artifact(name)
                 self.registry_name = None
 
     def log(self, locs: dict, width: int = 80, pad: int = 35) -> None:
