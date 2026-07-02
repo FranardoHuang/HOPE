@@ -1,15 +1,15 @@
-"""Verification harness for the `real_sensor_only` observation redesign.
+"""Verification harness for the deploy-parity actor observation contract.
 
 Checks (pick one with --check):
 
-  layout   A) build the `full` and `real_sensor_only` envs, print each policy-obs term + dim, and
-              assert full==180 / real_sensor==175 and that the base-position terms are gone.
-  rollout  B) build the real_sensor env, step it, and assert the observation + reward stay finite
+  layout   A) build the `full` and deploy-parity envs, print each policy-obs term + dim, and
+              assert full==180 / deploy_parity==175 and that the base-position terms are gone.
+  rollout  B) build the deploy-parity env, step it, and assert the observation + reward stay finite
               (no NaN/Inf) for --steps steps.
-  golden   D) build the real_sensor env, capture {policy obs (175) + the raw state quantities the
+  golden   D) build the deploy-parity env, capture {policy obs (175) + the raw state quantities the
               C++ deploy obs builder needs} to an .npz — the deploy-parity golden for pp_obs_builder.
   onnx     C) (no Isaac needed) load an exported policy .onnx and assert its actor input last-dim ==
-              175. Run this AFTER exporting with: python scripts/play.py task=HOPEPingPongRealSensor
+              175. Run this AFTER exporting with: python scripts/play.py task=HOPEPingPongDeployParity
               algo=ppo checkpoint=<warm/trained ckpt>  (play.py writes policy.onnx next to the ckpt).
 
 Isaac checks need a local reference clip: pass --motion-file <.../motion.npz> (the same npz train.py
@@ -28,7 +28,7 @@ import argparse
 import sys
 
 FULL_ID = "HOPE-PingPong-AgibotA3-v0"
-REAL_ID = "HOPE-PingPong-RealSensor-AgibotA3-v0"
+DEPLOY_ID = "HOPE-PingPong-DeployParity-AgibotA3-v0"
 EXPECT_FULL = 180
 EXPECT_REAL = 175
 
@@ -121,7 +121,7 @@ def print_layout(tag, names, dims):
 def run():
     if args.check == "layout":
         results = {}
-        for tag, tid, expect in [("full", FULL_ID, EXPECT_FULL), ("real_sensor_only", REAL_ID, EXPECT_REAL)]:
+        for tag, tid, expect in [("full", FULL_ID, EXPECT_FULL), ("deploy_parity", DEPLOY_ID, EXPECT_REAL)]:
             env = build_env(tid, 1)
             names, dims, total = policy_layout(env)
             got = print_layout(tag, names, dims)
@@ -130,14 +130,14 @@ def run():
         # assertions
         for tag, (names, got, expect) in results.items():
             assert got == expect, f"[{tag}] policy obs dim {got} != expected {expect}"
-        removed = results["full"][0] - results["real_sensor_only"][0]
+        removed = results["full"][0] - results["deploy_parity"][0]
         print(f"\n[layout] removed from actor: {sorted(removed)}")
         assert "motion_anchor_pos_b" in removed, "motion_anchor_pos_b should be removed from the actor"
         assert "base_target_pos_b" in removed, "base_target_pos_b should be removed from the actor"
-        print("[layout] PASS — full=180, real_sensor_only=175, base-position terms removed.")
+        print("[layout] PASS — full=180, deploy_parity=175, base-position terms removed.")
 
     elif args.check == "rollout":
-        env = build_env(REAL_ID, args.num_envs)
+        env = build_env(DEPLOY_ID, args.num_envs)
         obs, _ = env.reset()
         n_act = env.action_space.shape[-1]
         bad = 0
@@ -152,12 +152,12 @@ def run():
                 bad += 1
                 print(f"  step {t}: NON-FINITE reward")
         env.close()
-        print(f"[rollout] {args.steps} steps, real_sensor_only env, {args.num_envs} envs: "
+        print(f"[rollout] {args.steps} steps, deploy-parity env, {args.num_envs} envs: "
               f"{'PASS (all finite)' if bad == 0 else f'FAIL ({bad} non-finite events)'}")
         assert bad == 0
 
     elif args.check == "golden":
-        env = build_env(REAL_ID, 1)
+        env = build_env(DEPLOY_ID, 1)
         obs, _ = env.reset()
         act = torch.zeros((1, env.action_space.shape[-1]), device=env.unwrapped.device)
         obs, _, _, _, _ = env.step(act)

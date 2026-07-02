@@ -39,7 +39,8 @@ def racket_target_pos_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tens
 
 def racket_target_pos_rel_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Desired racket pos relative to the CURRENT racket (FK), yaw frame. DEPLOY-HONEST (no world
-    base position; see :meth:`RacketTargetCommand.racket_target_pos_b_rel`). Used by `real_sensor_only`."""
+    base position; see :meth:`RacketTargetCommand.racket_target_pos_b_rel`). Used by the deploy-parity
+    actor contract (legacy task name: `real_sensor_only`)."""
     return _cmd(env, command_name).racket_target_pos_b_rel()
 
 

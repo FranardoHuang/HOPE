@@ -55,6 +55,10 @@ Done:
 - RobotIOBackend adaptation guide exists.
 - Deployment source subset is tracked.
 - Full runtime package is preserved locally.
+- The training/export side now records a first-class 175-D deploy-parity actor
+  observation contract (`task=HOPEPingPongDeployParity`) and exports that
+  contract metadata with the ONNX artifact, so deploy-side ports have one
+  tracked source of truth to match.
 - Local ignored ping-pong deploy package was inspected on 2026-06-30 at
   `agi/a3_deploy_example/`. It contains a custom C++ ping-pong runner that
   reuses AGI `A3AimrtBackend` and `A3PolicyDriver`, plus the HOPE
@@ -105,12 +109,17 @@ Not done:
 - The current ping-pong runner still does not consume the HOPE mocap/VRPN
   topics directly; hardware uses `perfect_tracking` for world position unless a
   separate localizer bridge is added.
+- The currently observed local ping-pong runner is still a 180-D front-end with
+  base-position placeholders / `perfect_tracking`, so it is not yet a verified
+  implementation of the new 175-D deploy-parity actor contract.
 
 ## Risks
 
 - Joint order or command scaling mistakes can be dangerous.
 - Latency and dropped messages can destabilize control.
 - Generated policy artifacts should not be treated as safe until dry-run and low-gain tests pass.
+- A deploy-parity-trained ONNX does not by itself fix the front-end mismatch if
+  the runner still builds the older 180-D observation.
 - Hoist support changes contact and balance dynamics; poor hoist swing quality
   can expose command-path bugs but does not prove policy failure by itself.
 - Tuning the policy before reference playback passes can hide joint-order,
@@ -135,6 +144,9 @@ Not done:
    `--official-stand --auto-leg-hold --leg-gain-scale 0.5 --ankle-gain-scale 1.0`,
    then escalate to `--leg-stand-gains --leg-clamp-rad 0.15` and
    `--leg-smooth-alpha 0.2` if the knees still sink under reduced hoist load.
-6. If the field mocap is meant to replace `perfect_tracking`, define and
+6. Port and verify the deploy-side ping-pong obs builder against the exported
+   175-D deploy-parity contract and golden capture before treating a hardware
+   run as an honest front-end parity test.
+7. If the field mocap is meant to replace `perfect_tracking`, define and
    document the actual bridge/topic/frame contract first; do not assume the
    current ping-pong runner is already using it.

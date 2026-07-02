@@ -88,6 +88,15 @@ import time
 
 import numpy as np
 
+# Validated pure-numpy racket forward-kinematics reference (racket pos in the pelvis frame from the
+# 31 Isaac-order joint angles; validated to ~2e-6 m vs Isaac). Used ONLY by the 175-D deploy_parity
+# obs path to reframe racket_target_pos_b relative to the current racket FK. Import from the sibling
+# module (same scripts/ dir) so it works regardless of the caller's cwd.
+import sys as _sys
+
+_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from racket_fk_ref import racket_pos_pelvis  # noqa: E402
+
 # -------------------------------------------------------------------------------------------------
 # Constants pulled from the verified training config (HOPEPingPong.yaml uniform-mode + RacketTargetCmd).
 # These are the RUNTIME values (YAML overrides applied), not the python cfg defaults.
@@ -206,7 +215,10 @@ class OnnxPolicy:
         outs = [o.name for o in self.sess.get_outputs()]
         assert "obs" in ins and "time_step" in ins, f"unexpected ONNX inputs: {ins}"
         self.obs_dim = int(ins["obs"][1])
-        assert self.obs_dim == 180, f"expected obs dim 180, got {self.obs_dim}"
+        assert self.obs_dim in (175, 180), f"expected obs dim 180 (base) or 175 (deploy_parity), got {self.obs_dim}"
+        # 175-D deploy_parity = 180-D MINUS motion_anchor_pos_b(3) and base_target_pos_b(2), with the
+        # racket_target_pos_b term reframed relative to the CURRENT racket FK (not the base). See build_obs.
+        self.deploy_parity = (self.obs_dim == 175)
         self.out_names = outs
         md = self.sess.get_modelmeta().custom_metadata_map
         # --- metadata (FAIL LOUDLY if anything is missing) -------------------------------------
@@ -451,6 +463,13 @@ class RacketCommand:
     def racket_target_pos_b(self, base_pos_w, base_quat_w):
         return quat_rotate_inverse(yaw_quat(base_quat_w), self.racket_target_pos_w - base_pos_w)
 
+    def racket_target_pos_b_rel_fk(self, base_pos_w, base_quat_w, racket_pos_w):
+        """175-D deploy_parity variant: racket target expressed in the yaw-heading base frame but
+        RELATIVE TO THE CURRENT RACKET FK position instead of the base origin. The base position
+        cancels (target - racket_fk), so this obs term is deploy-honest (no world base position).
+        racket_pos_w = base_pos_w + R(base_quat_w) @ racket_pos_pelvis(q)."""
+        return quat_rotate_inverse(yaw_quat(base_quat_w), self.racket_target_pos_w - racket_pos_w)
+
     def base_target_pos_b(self, base_pos_w, base_quat_w):
         delta = np.array([self.base_target_pos_w[0] - base_pos_w[0],
                           self.base_target_pos_w[1] - base_pos_w[1], 0.0])
@@ -458,9 +477,15 @@ class RacketCommand:
 
 
 # =================================================================================================
-# Observation builder (180D, exact training order)
+# Observation builder. Two contracts, detected from the ONNX obs dim:
+#   180-D (base)         : full BeyondMimic obs (has motion_anchor_pos_b + base_target_pos_b, and
+#                          racket_target_pos_b is BASE-relative).
+#   175-D (deploy_parity): DROPS motion_anchor_pos_b(3) and base_target_pos_b(2), and reframes
+#                          racket_target_pos_b to be relative to the CURRENT RACKET FK (deploy-honest,
+#                          no world base position leaks in). Everything else is byte-identical.
 # =================================================================================================
-def build_obs(refs, robot: MujocoRobot, racket: RacketCommand, last_action, default_q):
+def build_obs(refs, robot: MujocoRobot, racket: RacketCommand, last_action, default_q,
+              deploy_parity=False):
     # robot base (pelvis = root) world pose
     base_pos_w = robot.body_pos(robot.pelvis_bid)
     base_quat_w = robot.body_quat(robot.pelvis_bid)
@@ -487,10 +512,6 @@ def build_obs(refs, robot: MujocoRobot, racket: RacketCommand, last_action, defa
     # 7. last action (31)
     # 8. projected gravity (3) body frame
     proj_grav = robot.projected_gravity_body()
-    # 9. base_target_pos_b (2)
-    base_tgt_b = racket.base_target_pos_b(base_pos_w, base_quat_w)
-    # 10. racket_target_pos_b (3)
-    racket_tgt_b = racket.racket_target_pos_b(base_pos_w, base_quat_w)
     # 11. racket_target_vel_w (3)
     racket_vel_w = racket.racket_target_vel_w
     # 12. time_to_strike (1)
@@ -498,11 +519,27 @@ def build_obs(refs, robot: MujocoRobot, racket: RacketCommand, last_action, defa
     # 13. swing_type (1)
     swing = np.array([racket.swing_sign])
 
-    obs = np.concatenate([
-        command, pos_b, ori_b6, base_ang_vel, joint_pos_rel, joint_vel_rel,
-        last_action, proj_grav, base_tgt_b, racket_tgt_b, racket_vel_w, tts, swing,
-    ]).astype(np.float64)
-    assert obs.shape == (180,), f"obs dim {obs.shape} != 180"
+    if deploy_parity:
+        # 175-D deploy_parity: DROP motion_anchor_pos_b(3) and base_target_pos_b(2); reframe
+        # racket_target_pos_b relative to the CURRENT racket FK.
+        #   racket_pos_w = base_pos_w + R(base_quat_w) @ racket_pos_pelvis(q)   (q = current joints)
+        racket_pos_w = base_pos_w + mat_from_quat(base_quat_w) @ racket_pos_pelvis(q)
+        racket_tgt_b = racket.racket_target_pos_b_rel_fk(base_pos_w, base_quat_w, racket_pos_w)
+        obs = np.concatenate([
+            command, ori_b6, base_ang_vel, joint_pos_rel, joint_vel_rel,
+            last_action, proj_grav, racket_tgt_b, racket_vel_w, tts, swing,
+        ]).astype(np.float64)
+        assert obs.shape == (175,), f"obs dim {obs.shape} != 175 (deploy_parity)"
+    else:
+        # 9. base_target_pos_b (2)
+        base_tgt_b = racket.base_target_pos_b(base_pos_w, base_quat_w)
+        # 10. racket_target_pos_b (3) base-relative
+        racket_tgt_b = racket.racket_target_pos_b(base_pos_w, base_quat_w)
+        obs = np.concatenate([
+            command, pos_b, ori_b6, base_ang_vel, joint_pos_rel, joint_vel_rel,
+            last_action, proj_grav, base_tgt_b, racket_tgt_b, racket_vel_w, tts, swing,
+        ]).astype(np.float64)
+        assert obs.shape == (180,), f"obs dim {obs.shape} != 180"
     return obs, base_quat_w, robot_anchor_pos_w, robot_anchor_quat_w, ref_anchor_pos_w, ref_anchor_quat_w
 
 
@@ -648,7 +685,7 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
     for step in range(n_steps):
         refs = refs_table[time_step]
         obs, base_quat_w, ra_pos, ra_quat, refa_pos, refa_quat = build_obs(
-            refs, robot, racket, last_action, policy.default_q)
+            refs, robot, racket, last_action, policy.default_q, deploy_parity=policy.deploy_parity)
 
         mean = policy.action(obs, time_step)
         action = mean if noise_scale <= 0.0 else mean + noise_scale * std_vec * rng.standard_normal(31)
@@ -923,7 +960,9 @@ def main():
     print(f"[mj-sim2sim] onnx={args.onnx}")
     print(f"[mj-sim2sim] mjcf={args.mjcf}")
     policy = OnnxPolicy(args.onnx)
-    print(f"[mj-sim2sim] obs_dim={policy.obs_dim} joints={len(policy.joint_names)} "
+    print(f"[mj-sim2sim] obs_dim={policy.obs_dim} "
+          f"({'deploy_parity: racket_target_pos_b relative to racket FK, no anchor_pos/base_target' if policy.deploy_parity else 'base: full 180-D BeyondMimic obs'}) "
+          f"joints={len(policy.joint_names)} "
           f"control={1/step_dt:.0f}Hz (sim_dt={args.sim_dt}, decim={args.decimation})")
 
     # std sidecar (only needed if a noise_scale > 0 is requested)

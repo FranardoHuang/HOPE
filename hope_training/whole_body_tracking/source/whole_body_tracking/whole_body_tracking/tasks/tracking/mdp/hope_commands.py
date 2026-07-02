@@ -289,6 +289,7 @@ class RacketTargetCommand(CommandTerm):
         self.foot_vel_sq = z()  # sum_feet ||foot_vel||^2 (excessive/violent foot motion)
         self.foot_drag = z()  # sum_feet ||foot_xy_vel|| while the foot is LOW (near ground -> dragging)
         self.arm_overreach_frac = z()  # fraction of ARM joints within 10% of a position limit
+        self.waist_twist = z()  # |waist_yaw - default| + |waist_roll - default| (anti twist-instead-of-step)
         self.proj_grav_xy = z()  # ||projected_gravity_xy|| = base tilt (strike-window stability)
         self.base_ang_vel_xy_norm = z()  # ||base_ang_vel_xy|| (strike-window stability)
         self.vertical_speed = z()  # |base_lin_vel_z| (vertical bob)
@@ -787,13 +788,20 @@ class RacketTargetCommand(CommandTerm):
         # --- anti-arm-only: ARM joints near a limit + arm joint velocity (resolve arm joint idx once) ---
         if not getattr(self, "_arm_resolved", False):
             self._arm_resolved = True
-            self._arm_joint_idx, self._leg_joint_idx = [], []
+            self._arm_joint_idx, self._leg_joint_idx, self._waist_twist_idx = [], [], []
             try:
                 self._arm_joint_idx = list(self.robot.find_joints([".*shoulder.*", ".*elbow.*", ".*wrist.*"])[0])
             except Exception:
                 pass
             try:
                 self._leg_joint_idx = list(self.robot.find_joints([".*hip.*", ".*knee.*", ".*ankle.*"])[0])
+            except Exception:
+                pass
+            # waist YAW+ROLL: the "twist/lean instead of step" DOFs the policy uses to face a lateral
+            # target without moving its feet. Penalized (pre-strike) so reaching a far target needs footwork.
+            # waist_pitch is EXCLUDED (it is the swing wind-up / natural lean, not a lateral-reach cheat).
+            try:
+                self._waist_twist_idx = list(self.robot.find_joints(["waist_yaw_joint", "waist_roll_joint"])[0])
             except Exception:
                 pass
         limits = getattr(data, "soft_joint_pos_limits", None)
@@ -814,6 +822,16 @@ class RacketTargetCommand(CommandTerm):
             self.metrics["leg_joint_vel_max"] = leg_vel
             self.metrics["leg_moving_prestrike"] = torch.where(
                 self.pre_strike, (leg_vel > 0.2).float(), torch.zeros(self.num_envs, device=self.device)
+            )
+        # --- anti twist-instead-of-step: |waist_yaw|+|waist_roll| deviation from the default (neutral,
+        #     facing-forward) pose. This is the magnitude the prestrike_waist_twist reward penalizes, so
+        #     reaching a lateral target by turning the torso (feet planted) becomes costly -> step instead. ---
+        if self._waist_twist_idx:
+            wi = self._waist_twist_idx
+            self.waist_twist = torch.abs(data.joint_pos[:, wi] - data.default_joint_pos[:, wi]).sum(dim=-1)
+            self.metrics["waist_twist_abs"] = self.waist_twist
+            self.metrics["waist_twist_prestrike"] = torch.where(
+                self.pre_strike, self.waist_twist, torch.zeros(self.num_envs, device=self.device)
             )
 
     def _update_metrics(self):
@@ -1098,8 +1116,8 @@ class RacketTargetCommand(CommandTerm):
         """Desired racket position relative to the base (yaw-heading frame). HITTER actor obs.
 
         PRIVILEGED: uses ``base_pos_w`` (world base position), which is fabricated on hardware
-        (no localizer). Used by the `full` obs mode; the `real_sensor_only` mode replaces it with
-        :meth:`racket_target_pos_b_rel`.
+        (no localizer). Used by the `full` obs mode; the deploy-parity mode (legacy task name:
+        `real_sensor_only`) replaces it with :meth:`racket_target_pos_b_rel`.
         """
         return quat_rotate_inverse(yaw_quat(self.base_quat_w), self.racket_target_pos_w - self.base_pos_w)
 
@@ -1113,7 +1131,8 @@ class RacketTargetCommand(CommandTerm):
 
         Both terms are computable on the real robot from the planner's target + racket forward
         kinematics (joint encoders), WITHOUT a fabricated base pose. Replaces
-        :meth:`racket_target_pos_b` in the ``real_sensor_only`` observation mode.
+        :meth:`racket_target_pos_b` in the deploy-parity observation mode (legacy task name:
+        ``real_sensor_only``).
         """
         return quat_rotate_inverse(yaw_quat(self.base_quat_w), self.racket_target_pos_w - self.racket_pos_w)
 

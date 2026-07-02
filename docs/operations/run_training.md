@@ -8,7 +8,14 @@ The training scaffold exists under:
 
 - `hope_training/whole_body_tracking`
 
-`TrackingFlat` and `HOPEPingPong` forehand training have run end-to-end on the copied Agibot A3 URDF asset (31 actuated DOF), including WandB logging, checkpoint save, and ONNX export. This proves the pipeline can run; it is NOT an accepted quality baseline. Every gate is still Partial/Not started.
+`TrackingFlat` and HOPE ping-pong training have run end-to-end on the copied
+Agibot A3 URDF asset (31 actuated DOF), including WandB logging, checkpoint
+save, and ONNX export. This proves the pipeline can run; it is NOT an accepted
+quality baseline. Every gate is still Partial/Not started.
+
+The default HOPE path is now `HOPEPingPongDeployParity`, whose actor observation
+is validated at runtime against the 175-D deploy-parity contract before
+training/export starts.
 
 This branch adds:
 
@@ -129,14 +136,14 @@ hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
   run_name=forehand_tracking
 ```
 
-HOPE racket task, one policy per swing:
+HOPE deploy-parity racket task, one policy per swing:
 
 ```bash
-hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+hope_isaac_py scripts/train.py task=HOPEPingPongDeployParity algo=ppo headless=true \
   registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
   run_name=hope_forehand
 
-hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+hope_isaac_py scripts/train.py task=HOPEPingPongDeployParity algo=ppo headless=true \
   registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_backhand" \
   run_name=hope_backhand
 ```
@@ -147,7 +154,10 @@ Useful overrides:
 num_envs=4096 max_iterations=20000 seed=1
 ```
 
-`HOPEPingPong` trains ONE swing style per policy (forehand or backhand), chosen entirely by the `registry_name` reference clip.
+`HOPEPingPongDeployParity` trains ONE swing style per policy (forehand or
+backhand), chosen entirely by the `registry_name` reference clip. The legacy
+`HOPEPingPong` task is still available for full-observation comparison, but it
+is not the deploy-safe default.
 
 ### ppo.yaml deltas on this branch
 
@@ -157,20 +167,26 @@ num_envs=4096 max_iterations=20000 seed=1
 
 ### Racket Target Sampling
 
-`HOPEPingPong.yaml` now defaults to `racket.target_mode: reference_perturbed`. In this mode the command term computes the reference motion's racket position, velocity, and face normal at the strike frame using the same FK path as the actual racket, then samples a curriculum-scaled perturbation around that reachable reference state:
+`HOPEPingPongDeployParity.yaml` currently defaults to `racket.target_mode:
+uniform` with the per-clip strike boxes recorded in the task YAML. Tune strike
+timing, target ranges, reward weights, episode length, and motion clips there;
+the actor observation contract stays fixed at 175-D deploy parity.
 
 ```yaml
-target_mode: reference_perturbed
-ref_perturb_pos: [0.15, 0.20, 0.15]
-ref_perturb_vel: [1.0, 1.0, 0.8]
-ref_perturb_normal: 0.30
-ref_perturb_curriculum_steps: 30000
-ref_perturb_curriculum_start: 0.15
+target_mode: uniform
+strike_phase_per_clip: [0.47, 0.33]
+pos_range_per_clip:
+  forehand: {x: [0.43, 0.53], y: [-0.43, -0.33], z: [0.82, 0.92]}
+  backhand: {x: [0.47, 0.57], y: [-0.09, 0.01], z: [1.00, 1.10]}
+vel_range_per_clip:
+  forehand: {x: [1.05, 2.05], y: [0.70, 1.65], z: [0.20, 1.00]}
+  backhand: {x: [1.30, 2.30], y: [-0.95, 0.05], z: [0.00, 0.40]}
 ```
 
-This is the current first-loop default because the old independent uniform box could sample targets the imitated swing never reaches, keeping `strike_success` at 0 even with reward shaping.
-
-The legacy uniform ranges (`pos_x [0.25,0.55]`, `pos_y [-0.45,0.45]`, `pos_z [0.70,1.15]`, `vel_x [1.5,4.0]`, ...) are still present but ignored unless `target_mode: uniform`. Treat them as PLACEHOLDER until validated against A3 right-arm IK reachability.
+Current deploy limitation: the local ping-pong C++ runner still uses the older
+180-D front-end, so exporting a 175-D deploy-parity policy does NOT by itself
+prove hardware front-end parity yet. Use the ONNX metadata and deploy-side obs
+golden checks before claiming sim-to-deploy observation match.
 
 ## Live Training Telemetry
 
@@ -186,11 +202,12 @@ The real "is it learning to hit" signal is `strike_success` (fraction of strikes
 
 The reward kernel is `exp(-||err||^2 / std^2)`. With `std` set to the final acceptance tolerance, the reward is ~0 for any early error (a 50 cm error gives `exp(-44) ~ 0`), so there is no gradient and `strike_success` stays stuck at 0. The target-sampling fix above handles unreachable targets; the reward shaping here handles too-narrow early rewards.
 
-This branch widens the stds in `HOPEPingPong.yaml` so the reward gives a gradient from tens of cm out:
+The current deploy-parity task uses these main strike-shaping stds in
+`HOPEPingPongDeployParity.yaml`:
 
-- `racket_position_std` 0.075 -> 0.35
-- `racket_velocity_std` 0.5 -> 1.2
-- `racket_normal_std` 0.262 -> 0.5
+- `racket_position_std: 0.20`
+- `racket_velocity_std: 1.0`
+- `racket_normal_std: 0.30`
 
 These stds are DECOUPLED from `strike_success_pos_thresh` = 0.075: the acceptance metric still reports true success only below 7.5 cm.
 
@@ -201,8 +218,8 @@ Optional later precision pass: once `strike_success` is non-trivial, tighten the
 `play.py` exports the policy to `<checkpoint_dir>/exported/policy.onnx`.
 
 ```bash
-hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
-  checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
+hope_isaac_py scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 \
+  checkpoint="logs/rsl_rl/agibot_a3_hope_deploy_parity/<RUN>/model_<N>.pt" \
   motion_file="artifacts/hope_forehand:v0/motion.npz" \
   headless=false
 ```
@@ -210,8 +227,8 @@ hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
 Headless video:
 
 ```bash
-hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
-  checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
+hope_isaac_py scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 \
+  checkpoint="logs/rsl_rl/agibot_a3_hope_deploy_parity/<RUN>/model_<N>.pt" \
   motion_file="artifacts/hope_forehand:v0/motion.npz" \
   headless=true video=true
 ```
@@ -219,7 +236,7 @@ hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
 From a WandB run:
 
 ```bash
-hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+hope_isaac_py scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 \
   wandb_path="$WANDB_ENTITY/hope_wbc/<RUN_ID>" headless=false
 ```
 

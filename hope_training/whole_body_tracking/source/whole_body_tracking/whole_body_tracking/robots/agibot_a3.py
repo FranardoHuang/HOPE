@@ -20,7 +20,7 @@ each arm 7 (shoulder pitch/roll/yaw, elbow, wrist roll/pitch/yaw), each leg 6
 """
 
 import isaaclab.sim as sim_utils
-from isaaclab.actuators import ImplicitActuatorCfg
+from isaaclab.actuators import IdealPDActuatorCfg, ImplicitActuatorCfg
 from isaaclab.assets.articulation import ArticulationCfg
 
 from whole_body_tracking.assets import ASSET_DIR
@@ -191,6 +191,12 @@ AGIBOT_A3_CFG = ArticulationCfg(
         joint_vel={".*": 0.0},
     ),
     soft_joint_pos_limit_factor=0.9,
+    # ACTUATOR MODEL (sim2real, 2026-07-02): arms/waist/feet use IdealPDActuatorCfg (EXPLICIT clipped PD)
+    # to reproduce AGI's deploy MuJoCo, which applies explicit clipped PD (not PhysX-implicit). Isaac's
+    # implicit PD silently tolerated an over-aggressive swing that saturates the explicit motor on the real
+    # robot (elbow demanded ~6.7x its 24 Nm limit -> lag -> the free base tips over). "legs" and "head"
+    # stay ImplicitActuatorCfg on purpose: the legs are torque-rich (kp up to 250 on the knee) and explicit
+    # PD there risks numerical instability at 200 Hz physics; the head is passive (kp 40, not policy-driven).
     actuators={
         "legs": ImplicitActuatorCfg(
             joint_names_expr=[".*_hip_yaw_joint", ".*_hip_roll_joint", ".*_hip_pitch_joint", ".*_knee_joint"],
@@ -225,16 +231,26 @@ AGIBOT_A3_CFG = ArticulationCfg(
                 ".*_knee_joint": 0.1203404,
             },
         ),
-        "feet": ImplicitActuatorCfg(
+        # EXPLICIT PD (sim2real): AGI's MuJoCo applies clipped explicit PD, not PhysX-implicit PD, so
+        # train the feet under IdealPDActuatorCfg (tau = clip(kp*(q_des-q)+kd*(-qd), ±effort_limit); it
+        # nulls joint_positions/velocities so PhysX does NOT double-apply PD). CRITICAL: for an explicit
+        # actuator cfg.effort_limit=None resolves to the USD default = INFINITY (no clip), so we MUST set
+        # `effort_limit` to the SAME per-joint dict as `effort_limit_sim` or the explicit model never
+        # clips at 118.2/54.75 Nm. effort_limit_sim is kept (AGIBOT_A3_ACTION_SCALE reads it; PhysX backstop).
+        "feet": IdealPDActuatorCfg(
             joint_names_expr=[".*_ankle_pitch_joint", ".*_ankle_roll_joint"],
+            effort_limit={".*_ankle_pitch_joint": 118.2, ".*_ankle_roll_joint": 54.75},
             effort_limit_sim={".*_ankle_pitch_joint": 118.2, ".*_ankle_roll_joint": 54.75},
             velocity_limit_sim={".*_ankle_pitch_joint": 10.8, ".*_ankle_roll_joint": 19.3},
             stiffness=50.0,  # a3.py / deploy a3_kps (ankle)
             damping=2.0,     # a3.py / deploy a3_kds (ankle)
             armature={".*_ankle_pitch_joint": 0.06444060531, ".*_ankle_roll_joint": 0.02012630058},
         ),
-        "waist": ImplicitActuatorCfg(
+        # EXPLICIT PD (sim2real) — see the "feet" group note. effort_limit MUST be set (explicit-cfg
+        # None -> USD INFINITY = no clip); mirror effort_limit_sim so the explicit model clips at 220/46/118 Nm.
+        "waist": IdealPDActuatorCfg(
             joint_names_expr=["waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint"],
+            effort_limit={"waist_yaw_joint": 220.0, "waist_roll_joint": 46.0, "waist_pitch_joint": 118.0},
             effort_limit_sim={"waist_yaw_joint": 220.0, "waist_roll_joint": 46.0, "waist_pitch_joint": 118.0},
             velocity_limit_sim={"waist_yaw_joint": 12.0, "waist_roll_joint": 22.7, "waist_pitch_joint": 9.2},
             stiffness={"waist_yaw_joint": 85.0, "waist_roll_joint": 50.0, "waist_pitch_joint": 50.0},  # a3_kps
@@ -250,7 +266,18 @@ AGIBOT_A3_CFG = ArticulationCfg(
             damping=2.0,
             armature={"head_yaw_joint": 0.0008100893338, "head_pitch_joint": 0.0008100893338},
         ),
-        "arms": ImplicitActuatorCfg(
+        # EXPLICIT PD — THE CORE sim2real FIX. In Isaac's ImplicitActuator the PD was integrated by PhysX
+        # (stable; it tolerated the over-aggressive forehand swing). AGI's MuJoCo applies EXPLICIT clipped
+        # PD, which saturates when the swing demands ~6.7x the 24 Nm elbow limit -> the motor lags, the CoM
+        # shifts forward, and the free base pitches over. Training under IdealPDActuatorCfg reproduces that
+        # clipped-PD dynamics so the fine-tuned policy learns a swing that lives inside the torque envelope.
+        # tau = clip(kp*(q_des-q)+kd*(-qd), ±effort_limit); the model nulls joint_positions/velocities so
+        # PhysX does NOT also apply PD. CRITICAL: cfg.effort_limit=None on an EXPLICIT actuator resolves to
+        # the USD default = INFINITY (no clip). So `effort_limit` MUST be set to the SAME per-joint dict as
+        # `effort_limit_sim` (elbow 24, wrist_pitch/yaw 6, shoulder_pitch/roll 60, shoulder_yaw/wrist_roll 24)
+        # or the explicit model never clips and the fix is silently a no-op. effort_limit_sim is kept
+        # (AGIBOT_A3_ACTION_SCALE reads it; PhysX backstop). AGI's arm limits already match these values.
+        "arms": IdealPDActuatorCfg(
             joint_names_expr=[
                 ".*_shoulder_pitch_joint",
                 ".*_shoulder_roll_joint",
@@ -260,6 +287,15 @@ AGIBOT_A3_CFG = ArticulationCfg(
                 ".*_wrist_pitch_joint",
                 ".*_wrist_yaw_joint",
             ],
+            effort_limit={
+                ".*_shoulder_pitch_joint": 60.0,
+                ".*_shoulder_roll_joint": 60.0,
+                ".*_shoulder_yaw_joint": 24.0,
+                ".*_elbow_joint": 24.0,
+                ".*_wrist_roll_joint": 24.0,
+                ".*_wrist_pitch_joint": 6.0,
+                ".*_wrist_yaw_joint": 6.0,
+            },
             effort_limit_sim={
                 ".*_shoulder_pitch_joint": 60.0,
                 ".*_shoulder_roll_joint": 60.0,

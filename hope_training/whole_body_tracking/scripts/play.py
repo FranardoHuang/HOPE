@@ -1,6 +1,6 @@
 """Hydra eval/export entry for HOPE Agibot A3 WBC (106B-Final-Project style).
 
-    python scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+    python scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 \
         wandb_path=<entity>/hope_wbc/<run_id>
 
 Loads a trained policy (from a wandb run, or the latest local checkpoint), runs it, and exports
@@ -32,6 +32,9 @@ def _run_play(cfg, simulation_app):
     from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
 
     import whole_body_tracking.tasks  # noqa: F401  -- registers the gym tasks
+    from whole_body_tracking.tasks.tracking.actor_observation_contract import (
+        validate_actor_observation_contract,
+    )
     from whole_body_tracking.utils.exporter import attach_onnx_metadata, export_motion_policy_as_onnx
     from whole_body_tracking.utils.ppo_cfg import runner_kwargs
 
@@ -108,6 +111,14 @@ def _run_play(cfg, simulation_app):
 
     render_mode = "rgb_array" if cfg.video else None
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)
+    expected_contract = cfg.task.get("actor_obs_contract", None)
+    if expected_contract is not None:
+        contract = validate_actor_observation_contract(env.unwrapped, str(expected_contract))
+        print(
+            "[play.py] actor observation contract validated: "
+            f"{contract.name} ({contract.total_dim}D, obs_mode={contract.obs_mode})",
+            flush=True,
+        )
     log_dir = os.path.dirname(resume_path)
     env = RslRlVecEnvWrapper(env)
 

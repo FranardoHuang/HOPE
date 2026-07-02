@@ -1,12 +1,12 @@
-// Reference-motion clock for model_15200. Ported from
-// hope_ws/.../hope_wbc_runner/reference_clock.py. Drives the baked-in clip's
-// time_step so the strike frame lands at time_to_strike == 0.
+// Reference-motion clock. Ported from hope_ws/.../hope_wbc_runner/reference_clock.py.
+// Drives the baked-in clip's time_step so the strike frame lands at time_to_strike == 0.
 //
-// Clip layout (must match the ONNX export's clip order):
-//   clip 0 = forehand  frames [0 .. 94]
-//   clip 1 = backhand  frames [95 .. 199]   (seg_len = {95,105}, total 200)
+// The DEFAULTS below are the LEGACY v1 layout (model_15200: forehand frames [0..94],
+// backhand [95..199], phases {0.36,0.50}) and MUST match the clips baked into the loaded
+// ONNX. New exports carry clip_seg_lengths/clip_strike_phases metadata and PpPolicy
+// OVERRIDES these fields from it at load (e.g. v2-hopex: seg_len {139,132}, phases
+// {0.47,0.33}). Do NOT hand-edit per model — bake the metadata instead.
 // Strike frame within clip c = seg_start[c] + round(strike_phase[c]*(seg_len[c]-1)).
-// Strike phases: forehand 0.36, backhand 0.50.
 #pragma once
 
 #include <algorithm>

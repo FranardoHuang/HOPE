@@ -2,7 +2,7 @@
 
 Pick the task/algo YAML on the command line and override any field:
 
-    python scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+    python scripts/train.py task=HOPEPingPongDeployParity algo=ppo headless=true \
         registry_name=<entity>/wandb-registry-motions/hope_forehand
 
     python scripts/train.py task=TrackingFlat algo=ppo num_envs=2048 max_iterations=20000 \
@@ -343,6 +343,10 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             ("joint_limit", "joint_limit_weight"),
             ("undesired_contacts", "undesired_contacts_weight"),
             ("pre_strike_foot_slip", "pre_strike_foot_slip_weight"),
+            ("prestrike_waist_twist", "prestrike_waist_twist_weight"),
+            # sim2real fine-tune (explicit-PD): torque-saturation penalty + pre-strike upright shaping.
+            ("arm_torque_saturation", "arm_torque_saturation_weight"),
+            ("prestrike_upright", "prestrike_upright_weight"),
         ):
             _w = _get(rw, _key)
             if _w is not None:
@@ -466,6 +470,9 @@ def _run(cfg):
 
     import whole_body_tracking  # noqa: F401
     import whole_body_tracking.tasks  # noqa: F401  -- registers the gym tasks
+    from whole_body_tracking.tasks.tracking.actor_observation_contract import (
+        validate_actor_observation_contract,
+    )
     from whole_body_tracking.utils.my_on_policy_runner import MotionOnPolicyRunner as OnPolicyRunner
     from whole_body_tracking.utils.ppo_cfg import runner_kwargs
 
@@ -571,6 +578,14 @@ def _run(cfg):
     # 5) build env, wrap, run
     render_mode = "rgb_array" if cfg.video else None
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)
+    expected_contract = _get(cfg.task, "actor_obs_contract")
+    if expected_contract is not None:
+        contract = validate_actor_observation_contract(env.unwrapped, str(expected_contract))
+        print(
+            "[train.py] actor observation contract validated: "
+            f"{contract.name} ({contract.total_dim}D, obs_mode={contract.obs_mode})",
+            flush=True,
+        )
     if cfg.video:
         env = gym.wrappers.RecordVideo(
             env,

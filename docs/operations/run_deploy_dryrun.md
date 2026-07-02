@@ -85,6 +85,16 @@ Use that order intentionally:
 3. `shadow` proves the 180-D observation, `time_step`, ONNX front-end, and
    `level 0/1` clock without publishing commands.
 
+Important parity note:
+
+- The **training/export** default is now the 175-D deploy-parity actor contract
+  (`task=HOPEPingPongDeployParity`), but the currently observed local ping-pong
+  runner still builds the older 180-D front-end.
+- Treat this dry-run path as runner bring-up and recovery work, not as accepted
+  proof that deploy-parity observation matching has been achieved.
+- Before a hardware parity claim, port and verify the deploy-side obs builder
+  against the exported ONNX metadata and the 175-D golden capture.
+
 On this machine, the rehearsal should not stop there. Because sim and hardware
 share the same `/body_drive/*` interface, the next gate is to run the same
 runner against MuJoCo through

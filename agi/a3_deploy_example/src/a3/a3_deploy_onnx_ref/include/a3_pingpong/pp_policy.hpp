@@ -150,14 +150,20 @@ struct PpPolicyConfig {
                                  // The clip frame AND obs time_to_strike slow
                                  // together, so the (frame,tts) pair stays on the
                                  // training manifold — just evolves slower.
-  // Scripted swing direction at startup: false=forehand (target -y, clip 0),
-  // true=backhand (target +y, clip 1). Toggle live with the f/b keys. Only the
-  // y SIGN is set by the direction; |y| and the rest come from racket_pos_w
-  // below, so backhand mirrors the forehand target across the x axis. No live
-  // planner — this is the scripted backhand TEST path.
+  // Scripted swing direction at startup: false=forehand (clip 0), true=backhand
+  // (clip 1). Toggle live with the f/b keys. No live planner — this is the
+  // scripted TEST path.
   bool start_backhand = false;
-  Vec3 racket_pos_w = Vec3(0.40, -0.22, 0.82);   // forehand target (-y; |y| reused for backhand +y)
-  Vec3 racket_vel_w = Vec3(1.0, 0.0, 0.0);
+  // Scripted racket TEST targets, PER CLIP, chosen inside the TRAINED sampling boxes of the
+  // deployed lineage (explicitpd_ft/params/env.yaml: racket_pos_range_per_clip /
+  // racket_vel_range_per_clip, forehand_on_negative_y=true):
+  //   clip0 forehand: pos x[0.35,0.62] y[-0.95,-0.10] z[0.72,1.02]  vel x[1.05,2.05] y[0.70,1.65] z[0.20,1.00]
+  //   clip1 backhand: pos x[0.40,0.66] y[-0.30, 0.52] z[0.90,1.20]  vel x[1.30,2.30] y[-0.95,0.05] z[0.00,0.40]
+  // The previous SINGLE target (0.40,∓0.22,0.82) + vel (1,0,0) mirrored y for backhand and was
+  // OUT-OF-DISTRIBUTION: vel on every clip (y/z outside the boxes) and backhand z (0.82 < 0.90).
+  // OOD command obs degrade the policy exactly when it must balance the swing.
+  Vec3 racket_pos_w_clip[2] = {Vec3(0.45, -0.25, 0.85), Vec3(0.53, 0.11, 1.05)};
+  Vec3 racket_vel_w_clip[2] = {Vec3(1.55, 1.15, 0.60), Vec3(1.80, -0.45, 0.20)};
   // sim2real localisation gap: no global base/torso pose -> nominal (matches
   // the Python wbc_runner shadow behavior). base orientation uses the real IMU.
   Vec3 nominal_base_pos_w = Vec3(0.0, 0.0, 0.95);
@@ -175,6 +181,30 @@ class PpPolicy {
         last_action_(Eigen::VectorXd::Zero(kNumJoints)) {
     if (!build_src_to_sdk(onnx_.joint_names(), isaac_to_sdk_))
       throw std::runtime_error("pingpong: ONNX joint_names do not map onto the backend layout");
+    // Reference-clock layout: prefer the ONNX-baked per-clip metadata (new exports carry
+    // clip_seg_lengths/clip_strike_phases). The ClipLayout default is the LEGACY v1 layout
+    // ({95,105}/{0.36,0.50}, model_15200-era); driving a v2-baked model with it serves the
+    // wrong reference frames every tick (forehand strike ~0.6 s early, follow-through clamped,
+    // "backhand" spliced across the clip boundary) — the 2026-07-02 stale-clock deploy bug.
+    if (onnx_.has_clip_layout()) {
+      if (onnx_.clip_seg_lengths().size() != 2)
+        throw std::runtime_error("pingpong: ONNX clip layout metadata does not have 2 clips");
+      clip_.seg_len[0] = static_cast<int>(std::lround(onnx_.clip_seg_lengths()[0]));
+      clip_.seg_len[1] = static_cast<int>(std::lround(onnx_.clip_seg_lengths()[1]));
+      clip_.strike_phase[0] = onnx_.clip_strike_phases()[0];
+      clip_.strike_phase[1] = onnx_.clip_strike_phases()[1];
+      std::fprintf(stderr,
+          "[pp] clip layout from ONNX metadata: seg_len={%d,%d} strike_phase={%.3f,%.3f} "
+          "(strike frames %d/%d)\n",
+          clip_.seg_len[0], clip_.seg_len[1], clip_.strike_phase[0], clip_.strike_phase[1],
+          clip_.strike_frame(0), clip_.strike_frame(1));
+    } else {
+      std::fprintf(stderr,
+          "[pp WARN] ONNX carries NO clip layout metadata -> using the hardcoded LEGACY v1 "
+          "layout seg_len={%d,%d} strike_phase={%.2f,%.2f}. Only correct for v1-clip models "
+          "(model_15200); a v2-baked model will swing against the WRONG reference frames.\n",
+          clip_.seg_len[0], clip_.seg_len[1], clip_.strike_phase[0], clip_.strike_phase[1]);
+    }
     nominal_q_sdk_ = to_sdk_order(onnx_.default_q(), isaac_to_sdk_);  // nominal pose in SDK order
     leg_qdes_smooth_ = nominal_q_sdk_;  // seed the leg q_des EMA at nominal (no jump on first release)
     // Official robust-stand PD gains (a3_pd_stand_*, 29-DOF policy view) scattered
@@ -218,7 +248,7 @@ class PpPolicy {
     std::lock_guard<std::mutex> lk(obs_mu_);
     ObsDebug d;
     d.obs = last_obs_;
-    d.valid = last_obs_.size() == kObsDim;
+    d.valid = last_obs_.size() == onnx_.obs_dim();
     d.oracle_enabled = (cfg_.loc_mode == LocMode::kOracle);
     d.oracle_fresh = oracle_fresh_;
     d.oracle_age_s = oracle_age_s_;
@@ -282,12 +312,11 @@ class PpPolicy {
 
   PpRacketTarget ScriptedTarget(std::uint64_t tick_idx) const {
     PpRacketTarget tg;
-    const int dir = swing_dir_.load();  // +1 forehand (-y, clip0) / -1 backhand (+y, clip1)
-    tg.pos_w = cfg_.racket_pos_w;
-    // y sign follows the swing direction (backhand mirrors forehand across x);
-    // |y| + x,z come from the configured forehand target.
-    tg.pos_w[1] = (dir >= 0 ? -1.0 : 1.0) * std::abs(cfg_.racket_pos_w[1]);
-    tg.vel_w = cfg_.racket_vel_w;
+    const int dir = swing_dir_.load();  // +1 forehand (clip0) / -1 backhand (clip1)
+    const int clip = dir >= 0 ? 0 : 1;
+    // Per-clip target from the trained sampling boxes (see PpPolicyConfig) — no mirroring.
+    tg.pos_w = cfg_.racket_pos_w_clip[clip];
+    tg.vel_w = cfg_.racket_vel_w_clip[clip];
     tg.swing_sign = (dir >= 0 ? 1.0 : -1.0);  // +1 fore / -1 back
     tg.base_target_xy = Vec2::Zero();
     // Swing clock measured from the origin set on each level->1 entry (see ComputeCommand),
@@ -386,8 +415,12 @@ class PpPolicy {
 
     last_proj_grav_ = projected_gravity_body(st.base_quat_w);
 
-    const Eigen::VectorXd obs = build_obs_180(refs, st, tg, last_action_, onnx_.default_q(),
-                                              cfg_.use_imu_yaw_for_targets);
+    // 175-D deploy_parity (new policy) vs 180-D full (model_15200). Auto-selected from the loaded
+    // ONNX input dim. build_obs_175 drops motion_anchor_pos_b + base_target_pos_b and reframes the
+    // racket target to be relative to the CURRENT racket FK (pp_racket_fk.hpp) — no world base pos.
+    const Eigen::VectorXd obs = (onnx_.obs_dim() == kObsDim175)
+        ? build_obs_175(refs, st, tg, last_action_, onnx_.default_q(), cfg_.use_imu_yaw_for_targets)
+        : build_obs_180(refs, st, tg, last_action_, onnx_.default_q(), cfg_.use_imu_yaw_for_targets);
     { std::lock_guard<std::mutex> lk(obs_mu_); last_obs_ = obs; }  // for obs-debug
     const Eigen::VectorXd action = onnx_.mean_action(obs, time_step);
     const Eigen::VectorXd tq_isaac = onnx_.target_q(action);
@@ -590,16 +623,26 @@ class PpPolicy {
     if (state.q.size() == kNumJoints) std::fprintf(stderr, " STATE(SDK) q : %s\n", S(state.q).c_str());
     if (state.dq.size() == kNumJoints) std::fprintf(stderr, " STATE(SDK) qd: %s\n", S(state.dq).c_str());
     struct Blk { const char* n; int lo; int len; };
-    static const Blk blks[] = {
+    static const Blk blks180[] = {
         {"command", 0, 62}, {"motion_anchor_pos_b", 62, 3}, {"motion_anchor_ori_b", 65, 6},
         {"base_ang_vel", 71, 3}, {"joint_pos_rel", 74, 31}, {"joint_vel", 105, 31},
         {"actions(last)", 136, 31}, {"projected_gravity", 167, 3}, {"base_target_pos_b", 170, 2},
         {"racket_target_pos_b", 172, 3}, {"racket_target_vel_w", 175, 3},
         {"time_to_strike", 178, 1}, {"swing_type", 179, 1}};
-    std::fprintf(stderr, " OBS blocks (180-D):\n");
-    for (const auto& b : blks)
-      std::fprintf(stderr, "   %-20s [%3d:%3d] %s\n", b.n, b.lo, b.lo + b.len,
-                   S(obs.segment(b.lo, b.len)).c_str());
+    // deploy_parity 175-D: motion_anchor_pos_b + base_target_pos_b dropped; racket_target_pos_b is
+    // relative to the CURRENT racket FK (not base). Everything after motion_anchor_ori_b shifts down 3.
+    static const Blk blks175[] = {
+        {"command", 0, 62}, {"motion_anchor_ori_b", 62, 6}, {"base_ang_vel", 68, 3},
+        {"joint_pos_rel", 71, 31}, {"joint_vel", 102, 31}, {"actions(last)", 133, 31},
+        {"projected_gravity", 164, 3}, {"racket_target_pos_b(relFK)", 167, 3},
+        {"racket_target_vel_w", 170, 3}, {"time_to_strike", 173, 1}, {"swing_type", 174, 1}};
+    const bool dp = (obs.size() == kObsDim175);
+    std::fprintf(stderr, " OBS blocks (%d-D):\n", (int)obs.size());
+    const Blk* blks = dp ? blks175 : blks180;
+    const int nblk = dp ? (int)(sizeof(blks175) / sizeof(Blk)) : (int)(sizeof(blks180) / sizeof(Blk));
+    for (int i = 0; i < nblk; ++i)
+      std::fprintf(stderr, "   %-24s [%3d:%3d] %s\n", blks[i].n, blks[i].lo, blks[i].lo + blks[i].len,
+                   S(obs.segment(blks[i].lo, blks[i].len)).c_str());
     std::fprintf(stderr, " ACTION(raw,Isaac)[31]: %s\n", S(action).c_str());
     std::fprintf(stderr, " Q_DES(SDK)[31]       : %s\n", S(q_sdk).c_str());
     std::fprintf(stderr, " KP(SDK)[31]          : %s\n", S(kp_sdk).c_str());

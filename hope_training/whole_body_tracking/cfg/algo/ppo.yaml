@@ -2,7 +2,7 @@
 # PPO hyperparameters for the Agibot A3 WBC tasks (BeyondMimic / rsl_rl).
 #
 # Selected on the command line with `algo=ppo` (106B-Final-Project style):
-#   python scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+#   python scripts/train.py task=HOPEPingPongDeployParity algo=ppo headless=true \
 #       registry_name=<entity>/wandb-registry-motions/hope_forehand
 #
 # Edit the values here to tune. This same file is the single source of truth for

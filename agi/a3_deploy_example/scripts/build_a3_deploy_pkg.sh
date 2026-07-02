@@ -1176,8 +1176,8 @@ fi
 
 echo "[a3_pingpong] transport=${A3_TRANSPORT} aimrt_cfg=${A3_AIMRT_CFG} runtime_cfg=${PINGPONG_RUNTIME_CFG}"
 exec "${SCRIPT_DIR}/a3_deploy_onnx_ref_pingpong" \
-  --runtime-cfg="${PINGPONG_RUNTIME_CFG}" \
-  --aimrt-cfg="${A3_AIMRT_CFG}" \
+  --runtime-cfg "${PINGPONG_RUNTIME_CFG}" \
+  --aimrt-cfg "${A3_AIMRT_CFG}" \
   "$@"
 RUN_A3_PINGPONG
 

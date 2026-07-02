@@ -9,7 +9,9 @@ onnx:
   # Keep the SOURCE config valid inside the repo tree: from src/.../config this resolves to
   # assets/a3_runtime/models/model_15200.onnx. During packaging, build_a3_deploy_pkg.sh copies
   # the model into dist/.../models/ and rewrites the packaged runtime cfg to `models/...`.
-  model_path: ../../../../assets/a3_runtime/models/model_15200.onnx
+  # model_15200.onnx = old 180-D FULL policy. model_p4_deployparity.onnx = new 175-D deploy_parity
+  # policy (runner auto-detects obs dim from the ONNX input and builds obs 175 vs 180 accordingly).
+  model_path: ../../../../assets/a3_runtime/models/model_explicitpd_ft.onnx
 
 policy_driver:
   policy_hz: 50.0
