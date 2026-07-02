@@ -90,8 +90,10 @@ that imports come from YOUR clone, and a real env build + step.
   and two analysis PNGs were committed as raw blobs while `.gitattributes` marks them LFS, so
   LFS-enabled machines show them as permanently modified. Harmless (pull/push work); repo-side
   normalization is on the fixes list.
-- **Isaac Kit can crash with exit code 0**: judge job success from log sentinels, not `$?` (the
-  smoke suite already does).
+- **Isaac Kit can crash with exit code 0 AND eat the last stdout flush on exit**: judge job success
+  from artifacts (checkpoints on disk), not `$?` and not only log sentinels. The train smoke was
+  updated on 2026-07-03 to accept `model_9.pt` on disk as the success sentinel after a run whose
+  final "Learning iteration 9/10" line never reached the log.
 - **Pod restart**: `/workspace` survives; `/root` (wandb login, apt packages, bash history) does
   not. Re-`source env.sh`, re-login wandb if needed, and re-run `--quick` (or `--concurrent`)
   smoke.
