@@ -67,8 +67,14 @@ class HOPEPlannerNode(Node):
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
         )
+        command_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.VOLATILE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10,
+        )
         self.create_subscription(PoseArray, "/poses", self._poses_cb, mocap_qos)
-        self.cmd_pub = self.create_publisher(RacketCommand, "/racket/command", mocap_qos)
+        self.cmd_pub = self.create_publisher(RacketCommand, "/racket/command", command_qos)
         self.diag_pub = self.create_publisher(DiagnosticArray, "/planner/diagnostics", 1)
 
         # Diagnostics at 10 Hz.

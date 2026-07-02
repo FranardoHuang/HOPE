@@ -41,4 +41,8 @@ _build
 *.npz
 
 **/assets/
+!source/whole_body_tracking/whole_body_tracking/assets/
+source/whole_body_tracking/whole_body_tracking/assets/*
+!source/whole_body_tracking/whole_body_tracking/assets/.gitignore
+!source/whole_body_tracking/whole_body_tracking/assets/__init__.py
 artifacts/

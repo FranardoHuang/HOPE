@@ -5,8 +5,9 @@ This is the step-13 environment. It extends the A3 motion-tracking baseline
 
 * a :class:`RacketTargetCommand` that samples the desired racket state (position/velocity/normal)
   and desired base XY each swing, and computes the actual racket state by FK through ``T_mount``;
-* HITTER actor observations (desired racket pos rel-base, desired racket vel world, time-to-strike,
-  desired base XY rel-base) plus projected gravity, with privileged racket state on the critic;
+* HOPE actor observations (desired racket pos rel-base, desired racket vel/normal world,
+  time-to-strike, desired base XY rel-base) plus projected gravity, with privileged actual racket
+  state on the critic;
 * HITTER goal rewards (base-position before strike; racket pos/vel/normal in a window around strike),
   on top of the BeyondMimic imitation reward and the regularization reward;
 * extended domain randomization for sim-to-real.
@@ -205,7 +206,7 @@ class HOPEEventCfg(EventCfg):
 
 
 ##
-# real_sensor_only variant — deploy-honest observation (no fabricated base pose).
+# deploy-parity variant — deploy-honest observation (no fabricated base pose).
 #
 # WHY: the `full` actor obs above depends on the robot's true world base pose through three terms
 # (motion_anchor_pos_b, base_target_pos_b, racket_target_pos_b). On the real A3 there is no localizer,
@@ -219,7 +220,7 @@ class HOPEEventCfg(EventCfg):
 
 
 @configclass
-class HOPEObservationsRealSensorCfg(HOPEObservationsCfg):
+class HOPEObservationsDeployParityCfg(HOPEObservationsCfg):
     """Actor obs with every world-frame BASE-POSITION dependency removed (180 -> 175):
 
     * REMOVED  ``motion_anchor_pos_b`` (3)  — reference torso *position* error needs the world base pose.
@@ -232,7 +233,7 @@ class HOPEObservationsRealSensorCfg(HOPEObservationsCfg):
     """
 
     @configclass
-    class HOPEPolicyRealSensorCfg(HOPEObservationsCfg.HOPEPolicyCfg):
+    class HOPEPolicyDeployParityCfg(HOPEObservationsCfg.HOPEPolicyCfg):
         # --- remove base-position-dependent terms (fabricated on hardware) ---
         motion_anchor_pos_b = None  # inherited from ObservationsCfg.PolicyCfg; needs world base position
         base_target_pos_b = None  # base-repositioning target; needs world base position
@@ -243,18 +244,18 @@ class HOPEObservationsRealSensorCfg(HOPEObservationsCfg):
             noise=Unoise(n_min=-0.02, n_max=0.02),
         )
 
-    policy: HOPEPolicyRealSensorCfg = HOPEPolicyRealSensorCfg()
+    policy: HOPEPolicyDeployParityCfg = HOPEPolicyDeployParityCfg()
 
 
 @configclass
-class HOPERealSensorRewardsCfg(HOPERewardsCfg):
+class HOPEDeployParityRewardsCfg(HOPERewardsCfg):
     """FOOTWORK-TO-STRIKE reward — BASE-FREE. No base-position / base-target / base-arrival reward: the
     legs move because reducing the racket->target distance (``racket_progress``) takes whole-body motion.
     The feet are FREE to step/shift — only BAD foot behaviour is penalized (slip / drag / violent / unstable
     at the strike), never "both feet planted". Lower-body imitation is DROPPED (legs free to reach varied
     targets); upper-body + racket imitation is kept for swing style. All weights are STARTING POINTS — the
     footwork weights live here (not the task YAML), so tune them in this class. (Obs is the base-free
-    real_sensor layout from HOPEObservationsRealSensorCfg.)"""
+    deploy-parity layout from HOPEObservationsDeployParityCfg.)"""
 
     # --- BASE-FREE corrections: remove every base-position-dependent reward ---
     base_position = None  # inherited HITTER base-repositioning reward -> REMOVED (it needs a base target)
@@ -285,12 +286,32 @@ class HOPERealSensorRewardsCfg(HOPERewardsCfg):
     foot_velocity = RewTerm(func=mdp.foot_velocity, weight=-0.05, params={"command_name": "racket_target"})
     foot_drag = RewTerm(func=mdp.foot_drag, weight=-0.5, params={"command_name": "racket_target"})
     arm_overreach = RewTerm(func=mdp.arm_overreach, weight=-0.5, params={"command_name": "racket_target"})
+    # Anti twist-instead-of-step (pre-strike): penalize |waist_yaw|+|waist_roll| deviation from neutral so
+    # the policy cannot face a lateral target by twisting the torso with planted feet — it must STEP.
+    # Weight is CLI-tunable via task.rewards.prestrike_waist_twist_weight. Raise if the torso still twists
+    # (waist_twist_prestrike stays high / legs stay frozen); lower if it flattens the swing.
+    prestrike_waist_twist = RewTerm(
+        func=mdp.prestrike_waist_twist, weight=-1.0, params={"command_name": "racket_target"})
 
     # --- strike-window stability: be planted + upright + still AT the hit (gated to the strike window) ---
     strike_upright = RewTerm(func=mdp.strike_proj_grav_xy, weight=-2.0, params={"command_name": "racket_target"})
     strike_ang_vel = RewTerm(func=mdp.strike_base_ang_vel, weight=-0.5, params={"command_name": "racket_target"})
     strike_foot_vel = RewTerm(func=mdp.strike_foot_velocity, weight=-0.5, params={"command_name": "racket_target"})
     strike_vbob = RewTerm(func=mdp.strike_vertical_bob, weight=-1.0, params={"command_name": "racket_target"})
+
+    # --- SIM2REAL FINE-TUNE (2026-07-02): survive AGI's EXPLICIT clipped-PD MuJoCo. ------------------
+    # CHANGE 2 — torque-saturation penalty: penalize the mean over-limit fraction of the COMPUTED (pre-clip)
+    # effort over the arm + waist joints so the policy stops demanding torque the explicit motor cannot
+    # deliver (the elbow was at ~6.7x its 24 Nm limit in the failing trace). Modest weight to protect the
+    # strike. CLI-tunable via task.rewards.arm_torque_saturation_weight. Watch metric: arm_torque_sat_frac.
+    arm_torque_saturation = RewTerm(
+        func=mdp.arm_torque_saturation, weight=-0.5, params={"command_name": "racket_target"})
+    # CHANGE 3 — balance shaping (POSITION-based): penalize forward base/torso TILT (proj_grav_xy) DURING
+    # the approach (pre_strike), so the CoM stays over the support base THROUGH the swing (strike_upright
+    # covers the strike window). NOT an angular-velocity penalty (those are gameable / anti-swing).
+    # CLI-tunable via task.rewards.prestrike_upright_weight.
+    prestrike_upright = RewTerm(
+        func=mdp.prestrike_proj_grav_xy, weight=-1.0, params={"command_name": "racket_target"})
 
     # --- always-on balance + safety regularizers (kept) ---
     upright = RewTerm(func=mdp.flat_orientation_l2, weight=-1.0)  # base tilt
@@ -302,7 +323,7 @@ class HOPERealSensorRewardsCfg(HOPERewardsCfg):
 
 
 @configclass
-class HOPERealSensorTerminationsCfg(TerminationsCfg):
+class HOPEDeployParityTerminationsCfg(TerminationsCfg):
     """Inherited reference-relative terminations + ABSOLUTE balance terminations, so a real fall/sink
     ends the episode regardless of the reference clip (the actual deploy failure mode)."""
 
@@ -312,7 +333,7 @@ class HOPERealSensorTerminationsCfg(TerminationsCfg):
 
 @configclass
 class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
-    obs_mode: str = "full"  # descriptive; the real_sensor variant is HOPEPingPongRealSensorAgibotA3EnvCfg
+    obs_mode: str = "full"  # descriptive; the deploy-parity variant is HOPEPingPongDeployParityAgibotA3EnvCfg
     commands: HOPECommandsCfg = HOPECommandsCfg()
     observations: HOPEObservationsCfg = HOPEObservationsCfg()
     rewards: HOPERewardsCfg = HOPERewardsCfg()
@@ -328,11 +349,20 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
 
 
 @configclass
-class HOPEPingPongRealSensorAgibotA3EnvCfg(HOPEPingPongAgibotA3EnvCfg):
-    """``real_sensor_only`` variant: deploy-honest actor observation (no fabricated base pose) plus
+class HOPEPingPongDeployParityAgibotA3EnvCfg(HOPEPingPongAgibotA3EnvCfg):
+    """Deploy-parity variant: deploy-honest actor observation (no fabricated base pose) plus
     absolute balance rewards/terminations. The ``full`` HOPEPingPongAgibotA3EnvCfg is left intact."""
 
-    obs_mode: str = "real_sensor_only"
-    observations: HOPEObservationsRealSensorCfg = HOPEObservationsRealSensorCfg()
-    rewards: HOPERealSensorRewardsCfg = HOPERealSensorRewardsCfg()
-    terminations: HOPERealSensorTerminationsCfg = HOPERealSensorTerminationsCfg()
+    obs_mode: str = "deploy_parity"
+    observations: HOPEObservationsDeployParityCfg = HOPEObservationsDeployParityCfg()
+    rewards: HOPEDeployParityRewardsCfg = HOPEDeployParityRewardsCfg()
+    terminations: HOPEDeployParityTerminationsCfg = HOPEDeployParityTerminationsCfg()
+
+
+@configclass
+class HOPEPingPongRealSensorAgibotA3EnvCfg(HOPEPingPongDeployParityAgibotA3EnvCfg):
+    """Backward-compatible alias for the deploy-parity variant.
+
+    Older docs and scripts still refer to this env as ``real_sensor_only`` / ``RealSensor``.
+    The actor contract is the same deploy-parity 175-D layout.
+    """

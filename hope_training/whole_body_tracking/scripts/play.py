@@ -1,6 +1,6 @@
 """Hydra eval/export entry for HOPE Agibot A3 WBC (106B-Final-Project style).
 
-    python scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+    python scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 \
         wandb_path=<entity>/hope_wbc/<run_id>
 
 Loads a trained policy (from a wandb run, or the latest local checkpoint), runs it, and exports
@@ -17,7 +17,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hydra
 from omegaconf import OmegaConf
 
-from train import _apply_task_overrides, _registry_clip_name
+from train import (
+    _apply_task_overrides,
+    _is_noneish,
+    _normalize_registry_name,
+    _registry_clip_name,
+    resolve_motion_sources,
+)
 
 
 def _run_play(cfg, simulation_app):
@@ -32,8 +38,13 @@ def _run_play(cfg, simulation_app):
     from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
 
     import whole_body_tracking.tasks  # noqa: F401  -- registers the gym tasks
+    from whole_body_tracking.tasks.tracking.actor_observation_contract import (
+        validate_actor_observation_contract,
+    )
     from whole_body_tracking.utils.exporter import attach_onnx_metadata, export_motion_policy_as_onnx
     from whole_body_tracking.utils.ppo_cfg import runner_kwargs
+
+    _ = _wbt_tasks
 
     task_id = str(cfg.task.gym_task)
     num_envs = int(cfg.num_envs) if cfg.num_envs is not None else int(cfg.task.env.num_envs)
@@ -68,9 +79,11 @@ def _run_play(cfg, simulation_app):
             mf = cfg.motion_file
             env_cfg.commands.motion.motion_file = str(mf) if isinstance(mf, str) else [str(x) for x in mf]
         else:
-            art = next((a for a in wandb_run.used_artifacts() if a.type == "motions"), None)
-            if art is not None:
-                env_cfg.commands.motion.motion_file = str(pathlib.Path(art.download()) / "motion.npz")
+            arts = [a for a in wandb_run.used_artifacts() if a.type == "motions"]
+            if arts:
+                arts.sort(key=lambda a: (0 if "forehand" in a.name.lower() else 1 if "backhand" in a.name.lower() else 2, a.name))
+                motion_files = [str(pathlib.Path(art.download()) / "motion.npz") for art in arts]
+                env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
             else:
                 print("[WARN] No motion artifact in the run; pass motion_file=... if replay fails.")
     else:
@@ -93,7 +106,9 @@ def _run_play(cfg, simulation_app):
                 r = str(r)
                 if ":" not in r:
                     r += ":latest"
-                return str(pathlib.Path(api.artifact(r).download()) / "motion.npz")
+                art = api.artifact(r)
+                print(f"[play.py] motion clip: {r} -> {art.source_qualified_name} (digest {art.digest[:12]})", flush=True)
+                return str(pathlib.Path(art.download()) / "motion.npz")
 
             # clip0 = registry_name (forehand); clip1 = registry_name_2 (backhand) if set. MUST match
             # train.py so the exported ONNX bakes the FULL concatenated motion (T = sum of seg_lens).
@@ -108,6 +123,14 @@ def _run_play(cfg, simulation_app):
 
     render_mode = "rgb_array" if cfg.video else None
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)
+    expected_contract = cfg.task.get("actor_obs_contract", None)
+    if expected_contract is not None:
+        contract = validate_actor_observation_contract(env.unwrapped, str(expected_contract))
+        print(
+            "[play.py] actor observation contract validated: "
+            f"{contract.name} ({contract.total_dim}D, obs_mode={contract.obs_mode})",
+            flush=True,
+        )
     log_dir = os.path.dirname(resume_path)
     env = RslRlVecEnvWrapper(env)
 

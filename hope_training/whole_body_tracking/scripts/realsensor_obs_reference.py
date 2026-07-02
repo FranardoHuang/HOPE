@@ -1,4 +1,4 @@
-"""real_sensor_only observation: canonical layout + the deploy-honest racket-target reframe spec.
+"""Deploy-parity observation: canonical layout + the deploy-honest racket-target reframe spec.
 
 This is the DEPLOY-PARITY reference for the C++ obs builder (pp_obs_builder). It documents the exact
 175-D actor observation layout and the ONE non-trivial new transform — the racket-target reframe —
@@ -67,7 +67,7 @@ def racket_target_pos_b_full(base_quat_w, racket_target_pos_w, base_pos_w) -> np
     return quat_rotate_inverse(yaw_quat(base_quat_w), racket_target_pos_w - base_pos_w)
 
 
-# --- canonical 175-D actor layout (real_sensor_only) ------------------------------------------- #
+# --- canonical 175-D actor layout (deploy parity / legacy real_sensor_only) -------------------- #
 # (name, dim, on-hardware source). Order MUST match the obs manager (HOPEPolicyRealSensorCfg) and the
 # C++ pp_obs_builder real_sensor variant.
 LAYOUT = [
@@ -90,7 +90,7 @@ REMOVED_VS_FULL = [
 
 
 def print_layout() -> int:
-    print("real_sensor_only actor observation layout (deploy-honest):")
+    print("deploy-parity actor observation layout (deploy-honest):")
     o = 0
     for name, dim, src in LAYOUT:
         print(f"  [{o:3d}:{o + dim:3d}] {name:22s} ({dim:2d})  <- {src}")
@@ -99,7 +99,7 @@ def print_layout() -> int:
     print("\nremoved vs `full` (180):")
     for name, dim, why in REMOVED_VS_FULL:
         print(f"  - {name:22s} ({dim})  {why}")
-    print(f"  full 180  ->  real_sensor_only {o}")
+    print(f"  full 180  ->  deploy_parity {o}")
     return o
 
 

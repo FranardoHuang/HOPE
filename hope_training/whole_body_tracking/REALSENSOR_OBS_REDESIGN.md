@@ -1,12 +1,12 @@
-# `real_sensor_only` observation redesign — HOPE ping-pong WBC
+# Deploy-parity observation redesign — HOPE ping-pong WBC
 
 **Goal.** Make the *training* observation match what the real A3 can honestly produce. The deployed
 HOPE policy failed sim-to-real because three actor observations depend on the robot's **world base
 pose**, which has no localizer on hardware and is therefore *fabricated* at deploy (`anchor_pos_b := 0`,
 `base_pos := nominal`). The policy then sees a different observation distribution than training and the
 legs cannot balance. AGI's reference policy transfers precisely because its observation is
-**real-sensor-only** (IMU orientation + proprioception, no world base position). This change copies that
-recipe for the HOPE actor.
+**deploy-parity / real-sensor-only** (IMU orientation + proprioception, no
+world base position). This change copies that recipe for the HOPE actor.
 
 **Scope.** Training-side only. AGI's sim/backend are untouched. The old (`full`) path is intact; the new
 mode is an additive variant. No hardware testing here — this is the training redesign + deploy-parity
@@ -16,7 +16,7 @@ preparation.
 
 ## Old vs new actor observation
 
-| # | term | dim | `full` | `real_sensor_only` | honest on hardware? |
+| # | term | dim | `full` | deploy-parity | honest on hardware? |
 |---|------|----:|:------:|:------------------:|---------------------|
 | 1 | `command` (ref clip future joint pos/vel) | 62 | ✓ | ✓ | yes — baked clip (deploy already provides) |
 | 2 | `motion_anchor_pos_b` | 3 | ✓ | **removed** | NO — reference torso *position* error needs world base pose |
@@ -112,9 +112,10 @@ DR is unchanged (mass ±15%, friction, CoM, **PD-gain ±20%** already on, obs no
 |------|--------|
 | `…/mdp/hope_commands.py` | + `RacketTargetCommand.racket_target_pos_b_rel()` (FK-relative, base pose cancels) |
 | `…/mdp/hope_observations.py` | + `racket_target_pos_rel_b()` obs fn |
-| `…/config/agibot_a3/hope_env_cfg.py` | + `HOPEObservationsRealSensorCfg`, `HOPERealSensorRewardsCfg`, `HOPERealSensorTerminationsCfg`, `HOPEPingPongRealSensorAgibotA3EnvCfg`; + `obs_mode` field |
-| `…/config/agibot_a3/__init__.py` | + gym id `HOPE-PingPong-RealSensor-AgibotA3-v0` |
-| `cfg/task/HOPEPingPongRealSensor.yaml` | new task (copy of HOPEPingPong.yaml; only `name`/`gym_task` differ — **keep in sync**) |
+| `…/config/agibot_a3/hope_env_cfg.py` | deploy-parity env cfg classes plus backward-compatible `RealSensor` alias |
+| `…/config/agibot_a3/__init__.py` | gym ids `HOPE-PingPong-DeployParity-AgibotA3-v0` and legacy `HOPE-PingPong-RealSensor-AgibotA3-v0` alias |
+| `cfg/task/HOPEPingPongDeployParity.yaml` | deploy-parity task source of truth |
+| `cfg/task/HOPEPingPongRealSensor.yaml` | thin legacy alias that composes `HOPEPingPongDeployParity.yaml` |
 | `scripts/warm_start_realsensor.py` | partial warm-start 180→175 (column-remap actor input + normalizer; reset optimizer) |
 | `scripts/realsensor_obs_reference.py` | numpy layout + reframe self-test (deploy-parity spec) |
 | `scripts/verify_realsensor.py` | A layout / B rollout / C onnx-dim / D golden-capture |
@@ -128,7 +129,7 @@ DR is unchanged (mass ±15%, friction, CoM, **PD-gain ±20%** already on, obs no
 python scripts/realsensor_obs_reference.py        # prints 175 layout + cancellation self-test (PASS)
 ```
 
-**1) Verify the live obs layout (Isaac) — the deploy-parity GATE (must show full=180, real_sensor=175):**
+**1) Verify the live obs layout (Isaac) — the deploy-parity GATE (must show full=180, deploy_parity=175):**
 ```bash
 python scripts/verify_realsensor.py --check layout  --motion-file <…/motion.npz> --headless
 python scripts/verify_realsensor.py --check rollout --motion-file <…/motion.npz> --headless --steps 100
@@ -145,7 +146,7 @@ python scripts/warm_start_realsensor.py --old-ckpt \
 
 **3) First training (warm-started; drop `checkpoint_path=` to train from scratch):**
 ```bash
-python scripts/train.py task=HOPEPingPongRealSensor algo=ppo headless=true \
+python scripts/train.py task=HOPEPingPongDeployParity algo=ppo headless=true \
   registry_name=${WANDB_REGISTRY_ORG}/wandb-registry-motions/hope_forehand \
   registry_name_2=${WANDB_REGISTRY_ORG}/wandb-registry-motions/hope_backhand \
   checkpoint_path=logs/rsl_rl/warmstart/model_15200_realsensor.pt
@@ -153,10 +154,10 @@ python scripts/train.py task=HOPEPingPongRealSensor algo=ppo headless=true \
 
 **4) First eval + ONNX export (play.py writes policy.onnx next to the checkpoint):**
 ```bash
-python scripts/play.py task=HOPEPingPongRealSensor algo=ppo num_envs=4 \
-  checkpoint=logs/rsl_rl/agibot_a3_hope_realsensor/<run>/model_<N>.pt
+python scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=4 \
+  checkpoint=logs/rsl_rl/agibot_a3_hope_deploy_parity/<run>/model_<N>.pt
 python scripts/verify_realsensor.py --check onnx --onnx \
-  logs/rsl_rl/agibot_a3_hope_realsensor/<run>/policy.onnx        # asserts actor input == 175
+  logs/rsl_rl/agibot_a3_hope_deploy_parity/<run>/policy.onnx        # asserts actor input == 175
 ```
 
 **5) Deploy-parity golden (for the future C++ pp_obs_builder real_sensor variant):**
@@ -168,7 +169,7 @@ python scripts/verify_realsensor.py --check golden --motion-file <…/motion.npz
 ---
 
 ## Next (NOT done here — deploy side)
-The C++ `pp_obs_builder` must get a `real_sensor_only` variant matching the 175-D layout above (drop
+The C++ `pp_obs_builder` must get a deploy-parity variant matching the 175-D layout above (drop
 `motion_anchor_pos_b` + `base_target_pos_b`; reframe `racket_target_pos_b` to `target − racket_FK` in the
 base-yaw frame). Validate it offline against `logs/realsensor_golden.npz` before any hardware run. Do this
 only after the retrained policy passes the sim → MuJoCo sim2sim ladder.

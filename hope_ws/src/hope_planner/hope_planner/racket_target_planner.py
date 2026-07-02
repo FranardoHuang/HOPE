@@ -51,8 +51,73 @@ class RacketTargetPlanner:
     def _compute_outgoing_velocity(
         self, p_strike: np.ndarray, p_land: np.ndarray, delta_t: float,
     ) -> np.ndarray:
-        """v_o = (p_land - p_strike) / dt + 0.5 g dt"""
-        return (p_land - p_strike) / delta_t + 0.5 * self.physics.g * delta_t
+        """Solve initial outgoing velocity with the same drag+gravity model used by Stage 2."""
+        if delta_t <= 0.0:
+            raise ValueError("delta_t must be positive")
+
+        v = (p_land - p_strike) / delta_t - 0.5 * self.physics.g * delta_t
+        if self.physics.k == 0.0:
+            return v
+
+        # Shooting solve: finite-difference Newton on final position after free flight.
+        for _ in range(12):
+            p_end, _ = self._integrate_free_flight(p_strike, v, delta_t)
+            residual = p_end - p_land
+            if np.linalg.norm(residual) < 1e-5:
+                break
+
+            jac = np.zeros((3, 3))
+            for axis in range(3):
+                eps = 1e-4 * max(1.0, abs(v[axis]))
+                v_eps = v.copy()
+                v_eps[axis] += eps
+                p_eps, _ = self._integrate_free_flight(p_strike, v_eps, delta_t)
+                jac[:, axis] = (p_eps - p_end) / eps
+            try:
+                step = np.linalg.solve(jac, residual)
+            except np.linalg.LinAlgError:
+                step = np.linalg.lstsq(jac, residual, rcond=None)[0]
+            v = v - step
+            if not np.all(np.isfinite(v)):
+                raise FloatingPointError("outgoing velocity solve diverged")
+        return v
+
+    def _flight_acceleration(self, v: np.ndarray) -> np.ndarray:
+        """Compute free-flight acceleration: quadratic drag plus gravity."""
+        speed = np.linalg.norm(v)
+        return -self.physics.k * speed * v + self.physics.g
+
+    def _integrate_free_flight(
+        self, p0: np.ndarray, v0: np.ndarray, duration: float,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Integrate ball free flight with the Stage 2 drag+gravity model."""
+        p = p0.astype(float).copy()
+        v = v0.astype(float).copy()
+        remaining = max(float(duration), 0.0)
+        dt = self.config.dt_integrate
+        while remaining > 1e-12:
+            h = min(dt, remaining)
+            a = self._flight_acceleration(v)
+            p = p + v * h + 0.5 * a * h ** 2
+            v = v + a * h
+            remaining -= h
+        return p, v
+
+    @staticmethod
+    def _opponent_facing_normal(candidate: np.ndarray) -> np.ndarray:
+        """Return a unit racket normal with positive HOPE-frame X component."""
+        n = np.asarray(candidate, dtype=float)
+        norm = np.linalg.norm(n)
+        if norm < 1e-9 or not np.isfinite(norm):
+            return np.array([1.0, 0.0, 0.0])
+
+        n = n / norm
+        if n[0] < 0.0:
+            n = -n
+        if n[0] <= 1e-6:
+            n = n + np.array([1.0, 0.0, 0.0])
+            n = n / np.linalg.norm(n)
+        return n
 
     def _compute_racket_velocity(
         self, v_incoming: np.ndarray, v_outgoing: np.ndarray, C_r: float,
@@ -62,33 +127,31 @@ class RacketTargetPlanner:
         delta_v_norm = np.linalg.norm(delta_v)
 
         if delta_v_norm < 1e-6:
-            n = -v_incoming / max(np.linalg.norm(v_incoming), 1e-6)
+            n = np.array([1.0, 0.0, 0.0])
             return np.zeros(3), n
 
-        u_hat = delta_v / delta_v_norm
-        v_o_n = np.dot(v_outgoing, u_hat)
-        v_i_n = np.dot(v_incoming, u_hat)
+        n = self._opponent_facing_normal(delta_v)
+        v_o_n = np.dot(v_outgoing, n)
+        v_i_n = np.dot(v_incoming, n)
         v_r_n = (v_o_n + C_r * v_i_n) / (1.0 + C_r)
 
-        return v_r_n * u_hat, u_hat
+        return v_r_n * n, n
 
     def _check_net_clearance(
         self, p_strike: np.ndarray, v_outgoing: np.ndarray, margin: float = 0.03,
     ) -> Tuple[bool, bool]:
-        """Check height clearance and Y-axis net extent."""
+        """Check net clearance under the drag+gravity free-flight model."""
         x_net = self.table.net_x
         z_net = self.table.net_height
 
-        dx = x_net - p_strike[0]
         if v_outgoing[0] <= 0:
             return False, False
 
-        t_net = dx / v_outgoing[0]
-        if t_net < 0:
+        p_net = self._free_flight_position_at_x(p_strike, v_outgoing, x_net)
+        if p_net is None:
             return False, False
-
-        z_at_net = p_strike[2] + v_outgoing[2] * t_net + 0.5 * self.physics.g[2] * t_net ** 2
-        y_at_net = p_strike[1] + v_outgoing[1] * t_net
+        y_at_net = p_net[1]
+        z_at_net = p_net[2]
 
         y_net_min = -self.table.width - self.table.net_overhang
         y_net_max = self.table.net_overhang
@@ -98,6 +161,34 @@ class RacketTargetPlanner:
             return False, True
 
         return z_at_net > (z_net + margin), False
+
+    def _free_flight_position_at_x(
+        self, p0: np.ndarray, v0: np.ndarray, x_target: float,
+    ) -> np.ndarray | None:
+        """Integrate free flight until x crosses ``x_target`` and return interpolated position."""
+        p = p0.astype(float).copy()
+        v = v0.astype(float).copy()
+        if np.isclose(p[0], x_target, atol=1e-9):
+            return p
+
+        direction = np.sign(x_target - p[0])
+        if direction == 0.0 or direction * v[0] <= 0.0:
+            return None
+
+        dt = self.config.dt_integrate
+        max_steps = int(self.config.max_predict_time / dt)
+        for _ in range(max_steps):
+            a = self._flight_acceleration(v)
+            p_next = p + v * dt + 0.5 * a * dt ** 2
+            v_next = v + a * dt
+            crossed = (p[0] - x_target) * (p_next[0] - x_target) <= 0.0
+            if crossed:
+                dx = p_next[0] - p[0]
+                alpha = 0.0 if abs(dx) < 1e-12 else (x_target - p[0]) / dx
+                alpha = np.clip(alpha, 0.0, 1.0)
+                return p + alpha * (p_next - p)
+            p, v = p_next, v_next
+        return None
 
     def plan(self, strike: StrikeTarget) -> RacketCommand:
         """Compute racket target state for a valid return."""

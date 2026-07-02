@@ -1,0 +1,232 @@
+# =============================================================================
+# HOPE ping-pong WBC task (Agibot A3) — deploy-parity actor observation.
+#
+# Selected with `task=HOPEPingPongDeployParity`. This is the SAFE training path
+# for sim-to-real work: the actor observation drops every world-frame
+# base-position dependency (motion_anchor_pos_b, base_target_pos_b) and reframes
+# racket_target_pos_b to be racket-FK-relative (180 -> 175), plus absolute
+# balance rewards/terminations. Tune reward weights, episode length, strike
+# timing, target ranges, and motion clips here without changing the deploy-parity
+# observation contract.
+#
+# The older `HOPEPingPongRealSensor` task name is kept as a backward-compatible
+# alias that composes this file.
+#
+# Composes the shared env/sim/randomization bases (cfg/base/*) and overrides the
+# HOPE-specific knobs below.
+#
+# ALIGNMENT GOAL (2026-06-26): reproduce HITTER, not invent our own curriculum.
+# This file was stripped of the HOPE-invented machinery (motion_scale demotion,
+# ref_perturb success-gated curriculum, ref_vel_scale clip down-scaling, 3-D
+# target box, per-clip strike tuning) and set to HITTER's design:
+#   * 10 s episode, multiple swings (resample target on each clip wrap)
+#   * direct uniform target sampling at a FIXED strike plane x=0.4 m; sample
+#     only (y, z) of racket position + the racket velocity vector (Table-/ §IV)
+#   * NO curriculum: just sample + PPO
+#   * imitation prior at natural weight (no motion_scale)
+#   * DR: keep mass/friction/restitution + observation noise (HITTER prose),
+#     PD gains FIXED (HITTER) -> pd_gain_range: null
+# Reward weights/kernel widths are NOT published by HITTER, so they stay as
+# reasonable HOPE choices (goal terms weighted relatively high, per the paper).
+#
+# STAGE NOTE: this is the single-swing-type (forehand) config. The unified
+# forehand+backhand policy (sampled swing type each swing, dual-clip imitation,
+# non-overlapping y regions) is Stage 2 and adds swing_type + a second clip.
+# =============================================================================
+
+name: HOPEPingPongDeployParity
+gym_task: HOPE-PingPong-DeployParity-AgibotA3-v0
+experiment_name: agibot_a3_hope_deploy_parity
+actor_obs_contract: deploy_parity
+
+# wandb motion registry clips. UNIFIED HITTER policy: clip 0 = forehand (registry_name), clip 1 =
+# backhand (registry_name_2). MotionLoader concatenates them; clip_id selects which swing each env
+# imitates. Order must match racket.strike_phase_per_clip. Set registry_name_2: null for a single-swing
+# policy. (Override on the CLI with registry_name=... / registry_name_2=...)
+registry_name: ${oc.env:WANDB_REGISTRY_ORG,dongc_1-university-of-california-berkeley-org}/wandb-registry-motions/hope_forehand
+registry_name_2: ${oc.env:WANDB_REGISTRY_ORG,dongc_1-university-of-california-berkeley-org}/wandb-registry-motions/hope_backhand
+
+defaults:
+  - /base/env_base@_here_
+  - /base/sim_base@_here_
+  - /base/randomization_base@_here_
+  - _self_
+
+env:
+  # HITTER: 10 s episode with multiple swings. With no ball the swings are independent; the target
+  # resamples on each clip wrap, so a 10 s episode gives ~5 swings of practice and trains the
+  # between-swing recovery. (Was capped to 3 s in the HOPE curriculum path; restored to HITTER.)
+  episode_length_s: 10.0
+
+# ---- reward weights / kernel std --------------------------------------------
+# HITTER does not publish reward weights or kernel forms. Goal terms get relatively high weight
+# (paper). std brackets the operating error band (gradient), NOT the acceptance tolerance.
+#
+# REBALANCE 2026-06-27 (reward-share analysis on hitter_unified_v3): the strike objective
+# (racket pos+vel+normal) was only ~8% of the positive reward while base_position alone was 45% and
+# imitation ~47% — the optimizer barely "felt" the hit. Two fixes:
+#   (a) WIDEN the dead velocity kernel: at strike the racket-velocity error is ~2 m/s, but std=0.8 gives
+#       exp(-(2/0.8)^2)=exp(-6.25)~0.002 -> no gradient. Widen to 1.8 to BRACKET the ~2 m/s error
+#       (exp(-1.2)~0.3, live), then curriculum-tighten 1.8->1.2->0.8->0.5 as the error falls. Same rule
+#       widens position std a touch (0.15->0.20) for the 10-20 cm operating band.
+#   (b) RAISE the racket weights (~1.7x) and TRIM base_position (4->2.5) so the hit is a real share of the
+#       gradient. base still matters (HITTER's headline metric is base reach) — just no longer dominant.
+# strike_window_s kept at 0.12 (widening it re-introduces swing-through timing dilution). All tunable.
+rewards:
+  racket_position_weight: 14.0     # 8 -> 14
+  racket_position_std: 0.20        # 0.15 -> 0.20 (gradient in the 10-20 cm band)
+  racket_velocity_weight: 10.0     # 6 -> 10
+  racket_velocity_std: 1.0         # 1.8 -> 1.0 (curriculum tighten: vel_error fell to ~0.47, so 1.8 was
+                                   # too lenient — exp(-(0.47/1.8)^2)=0.93, ~no gradient to improve. 1.0
+                                   # sharpens the peak (exp(-(0.47/1.0)^2)=0.80) to push velocity lower.
+                                   # Next: 1.0 -> 0.8 -> 0.5 as vel_error keeps dropping; never jump to 0.5.
+  racket_normal_weight: 5.0        # 3 -> 5 (normal already satisfied ~0-2 deg; keep std 0.30)
+  racket_normal_std: 0.30
+  # BASE-FREE: base_position reward is REMOVED in the footwork cfg (HOPEDeployParityRewardsCfg sets it None).
+  # Do NOT re-add base_position_weight/std here — _apply_task_overrides would fail (the term is gone).
+  # The legs are driven by racket_progress instead. The footwork reward weights live in the cfg class.
+  racket_position_static: false
+
+  # Imitation prior at NATURAL weight (no motion_scale). HITTER does not demote the imitation reward
+  # with a global scale; it relies on upper-body-only imitation + relatively-high goal weights +
+  # multi-swing episodes to keep the swing dominant. (motion_scale removed in the HITTER alignment.)
+
+  # Penalties / regularization (r_regularization).
+  joint_torques_weight: -0.00003
+  action_rate_weight: -0.10
+  joint_limit_weight: -10.0
+  undesired_contacts_weight: -0.1
+  # Pre-strike foot-slip penalty (stability). Penalizes horizontal foot speed while the foot is in
+  # contact, gated by pre_strike ONLY (the strike swing is untouched). Start small; raise if
+  # foot_slip_speed stays high / foot_contact_frac stays low, lower if it starts hurting the strike.
+  pre_strike_foot_slip_weight: -0.4
+  # Anti twist-instead-of-step: penalize |waist_yaw|+|waist_roll| deviation from neutral BEFORE the strike
+  # so the policy must STEP to face a lateral target instead of twisting the torso with planted feet.
+  # Raise if the torso still twists (waist_twist_prestrike high / legs frozen); lower if it flattens the swing.
+  prestrike_waist_twist_weight: -1.0
+  # SIM2REAL FINE-TUNE (2026-07-02) — the deploy target is AGI's EXPLICIT clipped-PD MuJoCo.
+  # Torque-saturation penalty: mean over-limit fraction of the COMPUTED (pre-clip) effort over the arm +
+  # waist joints, so the swing stops demanding torque the explicit motor cannot deliver (elbow was ~6.7x
+  # its 24 Nm limit in the failing trace). Modest to protect the strike. RAISE if arm_torque_sat_frac
+  # stays high / the base still tips in MuJoCo; LOWER if strike_composite drops below ~0.9.
+  arm_torque_saturation_weight: -0.5
+  # Pre-strike upright shaping (POSITION-based tilt, NOT ang-vel): keep the CoM over the support base
+  # THROUGH the approach (strike_upright already covers the strike window). RAISE if the base pitches
+  # forward during the wind-up; LOWER if it stiffens the swing.
+  prestrike_upright_weight: -1.0
+
+# ---- racket target sampling (HITTER: direct, fixed plane, no curriculum) -----
+racket:
+  # Strike timing: phase of the clip at which contact happens (racket-BLADE speed peak).
+  # WRIST -> BLADE RE-PLANE (2026-07-02): the phases/boxes below were previously planned on the bare
+  # WRIST body point (npz body 31 = right_wrist_yaw_Link), but the strike metric (RacketTargetCommand,
+  # wrist_offset FK mode) measures the BLADE = wrist * T_mount, mount_offset (0.21021, 0.032078,
+  # 0.032036) m, identity mount_quat. Re-detected on the BLADE with scripts/analyze_strike_phase.py
+  # (now blade-default; --wrist-point restores the old behavior) on the re-grounded _hopex clips:
+  #   forehand frame 65/139 = phase 0.468, blade |v| 2.69 m/s (wrist analysis picked the same frame).
+  #   backhand frame 44/132 = phase 0.333, blade |v| 3.02 m/s. NOTE: yaml 0.33 rounded to frame 43
+  #     (round(0.33*131)=43); 0.333 rounds to the true blade-speed-peak frame 44.
+  strike_phase: 0.47              # fallback (single-clip / clips not in the per-clip table)
+  # Unified policy: per-clip strike phase, aligned with the clip order (clip0=forehand, clip1=backhand).
+  # Each phase must land on the FORWARD contact (blade speed peak on the forward swing), not a recovery frame.
+  #   forehand: 0.47  -> blade speed peak frame 65/139 (blade re-detect 2026-07-02; unchanged from wrist).
+  #   backhand: 0.333 -> blade speed peak frame 44/132 (was 0.33 -> frame 43, one frame early on the blade).
+  #     (v1 was 0.36/0.50; v2 clips are longer. v2 was mis-grounded facing world +Y (~82-86deg); it is now
+  #     RE-GROUNDED to face +X (HOPE frame) via scripts/reground_hope_frame.py, so the boxes below are +X-frame.)
+  strike_phase_per_clip: [0.47, 0.333]
+  strike_window_s: 0.12
+  strike_success_pos_thresh: 0.075
+  debug_reward_logging: false
+
+  # Recompute the strike-target velocity from racket-FK position by a centered finite difference
+  # (denoises the FD'd stored body_lin_vel). Kept — it is a data-quality fix, not a HITTER divergence.
+  clean_reference_strike_velocity: true
+  clean_strike_vel_window: 2
+
+  # HITTER target sampling: uniform, directly sampled, NO reference-perturb curriculum.
+  target_mode: uniform
+
+  # ====================== FOOTWORK CURRICULUM (base-free) ======================================
+  # Train in PHASES, widening the racket-target range so the dense racket_progress reward forces more
+  # body/leg contribution as arm-only reach runs out. Warm-start each phase from the previous checkpoint
+  # (checkpoint_path=...). Override the ranges per phase on the Hydra CLI (no extra yaml needed), e.g.:
+  #
+  #   PHASE 0 (this file's defaults): small range -> learn a STABLE strike, legs barely need to move.
+  #   PHASE 1: widen laterally + vertically -> progress reward starts needing body/leg shift. CLI:
+  #     racket.racket_pos_y_abs_range=[0.05,0.30] racket.pos_z_range=[0.75,1.05] \
+  #     'racket.pos_range_per_clip.forehand.y=[-0.35,-0.12]' 'racket.pos_range_per_clip.forehand.z=[0.78,1.00]' \
+  #     'racket.pos_range_per_clip.backhand.y=[0.12,0.35]'  'racket.pos_range_per_clip.backhand.z=[1.00,1.25]'
+  #   PHASE 2: full range + varied time_to_strike -> arm-only reach is insufficient, policy must STEP/shift:
+  #     racket.racket_pos_y_abs_range=[0.05,0.45] racket.pos_z_range=[0.70,1.05] \
+  #     'racket.pos_range_per_clip.forehand.y=[-0.45,-0.20]' 'racket.pos_range_per_clip.backhand.y=[0.20,0.45]'
+  # =============================================================================================
+  # Fixed striking plane at x = 0.4 m in front of the robot (HITTER §IV).
+  pos_x_range: [0.40, 0.40]
+  # PHASE 0 ranges (narrow — a stable strike near the reference; widen per the curriculum above).
+  racket_pos_y_abs_range: [0.05, 0.15]
+  pos_y_range: [-0.15, -0.05]
+  pos_z_range: [0.82, 0.94]
+  # Per-clip target box, in the HOPE WORLD frame (racket_target = env_origin + motion.body_pos_w[strike]).
+  # RE-GROUNDED 2026-07-01: the v2 clips were mis-grounded facing world +Y (~82-86deg) = table WIDTH, so their
+  # return velocity pointed +Y (lateral) — wrong for the HOPE table (geometry.py: +X = length / toward the
+  # opponent, Y = width, robot faces +X). scripts/reground_hope_frame.py rotates each clip about +Z by
+  # -(frame-0 pelvis yaw) so the robot stands facing +X and the return velocity is +X-dominant. Corrected
+  # clips: artifacts/hope_{forehand,backhand}_hopex/motion.npz (upload as hope_* v3 before training).
+  #
+  # WRIST -> BLADE RE-PLANE (2026-07-02): the old boxes were centered on the WRIST body at strike
+  # (fore (0.48,-0.38,0.87) / back (0.52,-0.04,1.05)) — but the strike metric measures the BLADE
+  # (wrist + R(wrist)@mount_offset, offset 0.215 m), so those targets sat 0.09-0.20 m short of true
+  # blade contact. Re-centered on the BLADE-at-strike from analyze_strike_phase.py (blade default):
+  #   forehand @ phase 0.47  (frame 65):  blade pos (0.68, -0.44, 0.82)
+  #   backhand @ phase 0.333 (frame 44):  blade pos (0.66,  0.13, 1.03)
+  # PHASE-A STABILITY spans: pos +-(0.10, 0.20, 0.10) m per axis — conservative ON PURPOSE (learn a
+  # stable strike at the reference blade point first; the wide footwork boxes come in later phases).
+  # +X=forward, -Y=forehand(right) side. Sanity: z >= 0.60, x <= 0.85 everywhere.
+  pos_range_per_clip:
+    forehand: {x: [0.58, 0.78], y: [-0.64, -0.24], z: [0.72, 0.92]}
+    backhand: {x: [0.56, 0.76], y: [-0.07,  0.33], z: [0.93, 1.13]}
+  # Racket target VELOCITY (HOPE world frame): return is +X-dominant (toward the opponent). BLADE
+  # RE-PLANE 2026-07-02: old boxes were centered on the WRIST strike velocity (fore (+1.54,+1.17,+0.64) /
+  # back (+1.79,-0.46,+0.15)), 0.5-0.9 m/s slower than the blade (omega x r term). Re-centered on the
+  # BLADE clean strike velocity (+-2-frame centered FD of blade FK pos = training's
+  # clean_reference_strike_velocity parity): fore (+1.55,+1.46,+0.71) / back (+2.11,-0.71,+0.31).
+  # Spans +-(0.5, 0.5, 0.4) m/s; backhand z lower bound clamped to 0.0 (old box was >= 0).
+  # X dominates both; the forehand keeps a real +Y cross-court lateral, the backhand a -Y component.
+  vel_range_per_clip:
+    forehand: {x: [1.05, 2.05], y: [ 0.96, 1.96], z: [0.31, 1.11]}
+    backhand: {x: [1.61, 2.61], y: [-1.21, -0.21], z: [0.00, 0.71]}
+  # Shared fallback velocity box (used only for single-clip runs / clips without a per-clip entry).
+  vel_x_range: [1.5, 3.5]
+  vel_y_range: [-1.0, 1.0]
+  vel_z_range: [0.0, 1.5]
+
+  # BASE-FREE: base-target sampling/coupling is unused (base_position reward + base_target obs removed).
+  # Keep the jitter ranges harmless and DISABLE the base->racket coupling so nothing nudges a base target.
+  base_target_x_range: [-0.10, 0.10]
+  base_target_y_range: [-0.10, 0.10]
+  base_couple_blend: 0.0
+  base_couple_max_offset: 0.20
+  # normal_mode is the SINGLE-CLIP normal target rule ("velocity" = n=v/|v|, or "sampled"). NOTE: in the
+  # UNIFIED multi-clip policy it is IGNORED — the target normal is the per-clip reference paddle normal
+  # (hope_commands.py `_ensure_ref_normal_per_clip` / `_sample_targets_uniform` multiseg branch), because
+  # the +Y blade face is 18-110 deg off the swing-velocity direction. Only used if registry_name_2: null.
+  normal_mode: velocity
+  forehand_on_negative_y: true    # right arm holds the paddle
+  mount_normal_axis: 1            # racket-local +Y is the face normal (red/hitting face; Step 11)
+  mount_normal_sign: 1.0          # +1 = red/forehand face
+
+# ---- domain randomization (HITTER-faithful + sim2real fine-tune) -------------
+# HITTER publishes no DR table; prose randomizes mass/friction/restitution + perception noise, and
+# states PD gains are FIXED. Always-on (base EventCfg): friction (static 0.3-1.6 / dynamic 0.3-1.2 /
+# restitution 0-0.5), torso CoM jitter, joint-default-pos jitter, + link-mass below. External push is
+# dropped (HOPEEventCfg.push_robot=None).
+#
+# SIM2REAL FINE-TUNE (2026-07-02): the deploy target is AGI's EXPLICIT clipped-PD MuJoCo, which does NOT
+# perfectly match the sim PD. ENABLE PD-gain randomization at +/-15% so the fine-tuned policy is robust to
+# the sim<->deploy PD mismatch (departs from HITTER's fixed-PD stance ON PURPOSE, for transfer). NOTE:
+# randomize_actuator_gains writes actuator.stiffness/damping on the model itself for ALL actuator types,
+# and the IdealPDActuator (explicit) reads those in its compute() -> the perturbation IS applied to the
+# explicit arms/waist/feet (NOT a PhysX-only no-op). Link mass widened back to the base +/-15%.
+domain_rand:
+  link_mass_range: [0.85, 1.15]   # +/-15%
+  pd_gain_range: [0.85, 1.15]     # +/-15% (was null); perturbs the explicit IdealPDActuator gains

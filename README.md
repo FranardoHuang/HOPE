@@ -87,21 +87,26 @@ Each document contains a **Section 0 prologue** listing all implementation diffe
 | Path | Role |
 | --- | --- |
 | [docs/](docs/) | Project harness: gates, interfaces, operations, asset policy — start at [docs/START_HERE.md](docs/START_HERE.md) |
-| [reimplement.md](reimplement.md) | Long-form, machine-specific end-to-end build/run runbook (the narrative the `docs/operations/*` how-tos defer to) |
+| [reimplement.md](reimplement.md) | Long-form, machine-specific historical runbook; use only when a gate or operation doc cites a specific step |
 | [hope_ws/](hope_ws/) | ROS 2 (Jazzy) integration workspace: `hope_bringup`, `hope_msgs`, `hope_planner`, `vrpn_mocap` |
 | [hope_training/](hope_training/) | Isaac Lab / BeyondMimic WBC training (`whole_body_tracking`) plus the GMR + GVHMR motion tooling |
 | [agi/](agi/) | Agibot A3 support: URDF (`agi/URDF/`), MuJoCo sim (`agi/A3_MuJoCo_Sim/`), deploy example (`agi/code_deployment/`) |
 | [mocap/](mocap/) | Motion-capture setup and coordinate reference |
 | [scripts/](scripts/) | Repo maintenance (`sync_external_repos.sh`) |
 | [calib_bags/](calib_bags/), [calib_csv/](calib_csv/) | Small curated calibration recordings and processed CSVs |
-| [Dockerfile.hope-ros2-jazzy](Dockerfile.hope-ros2-jazzy) | ROS 2 Jazzy container recipe |
 | `vendor_assets/`, `external_repos/` | Git-ignored: heavy vendor payloads and auto-synced reference repos (absent on a fresh clone) |
 
 The four `HOPE_*_Reference_Setup.md` documents and the `HOPE_AI_Challenge_2026_Rules_*.docx` files (see *Documents* above) are the original public competition/design references; they describe the broader system, not this branch's implementation specifics.
 
 ## Quickstart: Build & Run
 
-This repo has **no single environment** — work happens in three scopes (full matrix: [docs/operations/setup_environments.md](docs/operations/setup_environments.md)). A brand-new machine should follow the from-scratch runbook in [reimplement.md](reimplement.md); per-task commands live under [docs/operations/](docs/operations/).
+This repo has **no single environment** — work happens in three scopes (full matrix: [docs/operations/setup_environments.md](docs/operations/setup_environments.md)). A new contributor, new computer, or agent should start from [docs/START_HERE.md](docs/START_HERE.md), then follow the relevant operation doc. Use [reimplement.md](reimplement.md) only as the long-form runbook when a gate or operation doc points to a specific step.
+
+For a training machine, the practical index is:
+
+1. [docs/START_HERE.md](docs/START_HERE.md) for the current gate map and task entry points.
+2. [docs/operations/run_training.md](docs/operations/run_training.md) for Isaac/BeyondMimic setup, smoke tests, and training commands.
+3. [docs/operations/setup_local_sync.md](docs/operations/setup_local_sync.md) for ignored/private assets missing from a fresh clone.
 
 **1. ROS 2 workspace** (planner, mocap, bringup) — ROS 2 Jazzy; see [docs/operations/build_and_test.md](docs/operations/build_and_test.md):
 
@@ -112,19 +117,25 @@ colcon build --symlink-install
 source install/setup.bash
 ```
 
-A container recipe is provided in [Dockerfile.hope-ros2-jazzy](Dockerfile.hope-ros2-jazzy).
+Use the ROS environment described in [docs/operations/setup_environments.md](docs/operations/setup_environments.md); the old root Dockerfile has been removed because the project no longer uses that Docker path.
 
 **2. WBC training** (Isaac Lab + BeyondMimic) — needs a GPU plus a pre-provisioned Isaac Sim 4.5.0 / Isaac Lab 2.1.0 (Python 3.10); see [docs/operations/run_training.md](docs/operations/run_training.md):
 
 ```bash
 cd hope_training/whole_body_tracking
-source setup_train_env.sh          # edit the site-specific paths in the header first
-# training-loop smoke test (no WandB account needed):
+source setup_train_env.sh          # put machine paths/IDs in setup_train_env.local.sh
+# local training-loop smoke test (no WandB account needed; requires a local .npz):
 hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
-  num_envs=32 max_iterations=3 logger=tensorboard run_name=smoke
+  num_envs=32 max_iterations=3 logger=tensorboard run_name=smoke \
+  motion_file=../motions/preprocessed/hope_forehand.npz
 ```
 
-**3. Motion retargeting** (optional — to make your own reference clips) — GVHMR (video→SMPL-X) → GMR (SMPL-X→A3) → `scripts/csv_to_npz.py`; see [docs/operations/setup_local_sync.md](docs/operations/setup_local_sync.md).
+**3. Motion retargeting** (optional — to make your own reference clips) — local-first flow:
+raw videos in `hope_training/motions/raw_video/` → GVHMR (video→SMPL-X) → GMR (SMPL-X→A3) →
+`hope_training/motions/preprocessed/{hope_forehand,hope_backhand}.npz` via `scripts/csv_to_npz.py`.
+Use [docs/operations/run_training.md](docs/operations/run_training.md) for the training entry,
+[docs/operations/setup_local_sync.md](docs/operations/setup_local_sync.md) for ignored assets, and
+[reimplement.md](reimplement.md) steps 9-12 for the full command sequence. WandB upload is optional.
 
 > The first real run needs assets that are **not** in a fresh clone (the A3 Isaac asset, reference motions, vendor payloads). See *Assumptions & Limitations* and [docs/operations/setup_local_sync.md](docs/operations/setup_local_sync.md).
 
@@ -132,10 +143,10 @@ hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
 
 - **The repo is not self-contained.** A fresh `git clone` does **not** include the git-ignored `vendor_assets/`, `external_repos/`, the `hope_training/GMR` and `hope_training/GVHMR` clones, reference motions, or any `*.onnx/*.pt/*.ckpt` binaries. Restore them per [docs/operations/setup_local_sync.md](docs/operations/setup_local_sync.md).
 - **Isaac is assumed pre-provisioned.** This branch does not document a from-scratch Isaac Sim / Isaac Lab install; `setup_train_env.sh` expects an existing install (target versions: Isaac Sim 4.5.0, Isaac Lab 2.1.0, Python 3.10). Use the [official Isaac Lab install guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html). This is the single biggest reproducibility gap.
-- **The A3 Isaac asset is hand-built** from [agi/URDF/A3T2.5-URDF-std-pingpang/](agi/URDF/A3T2.5-URDF-std-pingpang/) into `assets/agibot_a3/urdf/model.urdf` with `package://` mesh paths rewritten (procedure: `reimplement.md` Step 12.7, summarized in [docs/operations/run_training.md](docs/operations/run_training.md)).
+- **The A3 Isaac asset is generated from tracked source** [agi/URDF/A3T2.5-URDF-std-pingpang/](agi/URDF/A3T2.5-URDF-std-pingpang/) into `assets/agibot_a3/urdf/model.urdf` with `package://` mesh paths rewritten; use [docs/operations/run_training.md](docs/operations/run_training.md) and `scripts/prepare_a3_isaac_asset.py` as the current procedure. `reimplement.md` Step 12.7 is historical background.
 - **A3 = 31 actuated DOF** for training; the A3 **deploy** policy I/O is **29** (the 2 neck joints `head_yaw`/`head_pitch` are excluded from the policy and driven at fixed kp=40/kd=2). The "29-DOF" figure in the architecture diagram is the original HITTER **G1** number.
 - **Only the Isaac Lab + URDF backend is runnable today.** The mjlab / MuJoCo-Warp A3 backend referenced in the design docs is not yet wired up in this branch.
-- **WandB is effectively required for the full motion pipeline** (reference clips load from a WandB registry); `logger=tensorboard` covers training-loop smoke tests without an account. Use your **own** WandB team (`WANDB_ENTITY`) and org (`WANDB_REGISTRY_ORG`) — they must differ (see [docs/operations/run_training.md](docs/operations/run_training.md)).
+- **WandB is optional for motion distribution.** Full local training can use `motion_file=<forehand.npz>` plus optional `motion_file_2=<backhand.npz>` with `logger=tensorboard`; registry-backed runs remain useful for shared/internal experiments. Use your **own** WandB team (`WANDB_ENTITY`) and org (`WANDB_REGISTRY_ORG`) — they must differ if you use the registry (see [docs/operations/run_training.md](docs/operations/run_training.md)).
 - **Some inputs are private / vendor-gated** and cannot be redistributed: the full Agibot A3 deploy payload (`vendor_assets/agibot/.../a3_deploy_example_full`, ~1.7 GB), the maintainer's WandB motion registry, and possibly the TTRL reference repo. External users must produce their own equivalents ([docs/operations/setup_local_sync.md](docs/operations/setup_local_sync.md)).
 - **Hardware safety:** do not send real joint commands until the joint-order, command-scaling, and safe-halt checks in [docs/gates/G07_mujoco_to_real.md](docs/gates/G07_mujoco_to_real.md) and [AGENTS.md](AGENTS.md) pass.
 - **Local environment names** (`distrobox` boxes `hope` / `grasping`, working tree at `~/workspace/HOPE`) are the maintainer's concrete examples; substitute your own.

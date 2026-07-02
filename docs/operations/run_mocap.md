@@ -27,7 +27,7 @@ ros2 launch vrpn_mocap client.launch.yaml server:=PLACEHOLDER_MOCAP_SERVER_IP po
 ros2 topic list | grep vrpn_mocap
 ```
 
-The HOPE relay maps these to `PPT` (table), `P1`, `P2`, and `/ball/point`. `PPT`/`P1`/`P2` are TODO(confirm) placeholders until verified against the live rig. For the ball, choose one mode:
+The HOPE relay maps these to `PPT` (table), `P1`, `P2`, and `/ball/point`. `PPT`/`P1`/`P2` are TODO(confirm) placeholders until verified against the live rig; one `train_1` rig observed `ppp2`/`ppp3` for robot labels, so do not assume the defaults are universal. For the ball, choose one mode:
 
 - Preferred: `ball_tracking_mode:=rigid_body ball_object:=Ball` when CMTracker exposes the ball as a named rigid body.
 - Fallback: `ball_tracking_mode:=auto` when the ball is only an unnamed moving marker; `ball_object` is ignored.
@@ -64,11 +64,6 @@ ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
 Use `ball_tracking_mode:=auto` and omit `ball_object` if the ball is not a named rigid body.
 
 Expected HOPE-standard topics are listed in [../interfaces/ros_topics.md](../interfaces/ros_topics.md).
-
-Current limitation for G07 ping-pong deploy: these mocap topics are not yet
-consumed directly by `a3_deploy_onnx_ref_pingpong`. Today they help planner and
-future localizer work, but the current deploy runner still uses
-`perfect_tracking` unless a separate hardware pose bridge is added.
 
 ## Verification
 

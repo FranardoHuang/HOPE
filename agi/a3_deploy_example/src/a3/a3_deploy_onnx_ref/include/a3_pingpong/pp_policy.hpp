@@ -144,20 +144,54 @@ struct PpPolicyConfig {
   double dt = 0.02;              // 50 Hz
   double strike_period = 3.0;    // seconds between strikes (level 1)
   double strike_lead_frac = 0.7; // strike occurs at this fraction of each cycle
+  // SINGLE-SWING / REST mode: the periodic level-1 clock WRAPS every strike_period —
+  // the reference SNAPS from the clip's end pose back to the windup frame mid-stance.
+  // Training never tracks that transition (clip wraps TELEPORT the robot in Isaac), and
+  // the backhand end->windup pose gap is large enough that the snap topples the free
+  // base (observed: p4 backhand survives swing 1, collapses right after the first wrap;
+  // forehand's smaller gap survives). single_swing: after the clip has fully played
+  // (tts below the clip's end), auto-drop to level 0 (held stand / windup hold) instead
+  // of wrapping — press 1 to swing again from a clean windup start (which the policy
+  // provably handles). swing_rest_s >= 0: additionally auto re-arm level 1 after that
+  // many seconds of rest (continuous demo without ever snapping).
+  bool single_swing = false;
+  double swing_rest_s = -1.0;    // <0 = no auto re-arm (manual '1' per swing)
+  // YAW-ALIGN (hardware fix, 2026-07-02): the pelvis AND torso IMU yaws are NOT
+  // world-referenced on the real robot (boot-to-boot drift; MDU captures show a constant
+  // fictional -12/-15/-38.5 deg yaw error in motion_anchor_ori_b while training reset noise
+  // is only +-11 deg). Two obs terms consume the raw quats: motion_anchor_ori_b (torso vs
+  // clip-frame reference anchor) and the racket-FK world conversion (R(base_quat)*fk vs the
+  // identity-yaw target frame) — the old use_imu_yaw_for_targets=false fix only bypassed the
+  // TARGET rotation. With yaw_align, each IMU's yaw is captured at the moment the policy
+  // engages (SHADOW/MOTION entry; robot standing, facing its operational forward = the clip
+  // world +x) and its inverse is left-multiplied onto every subsequent sample, so attitudes
+  // are expressed relative to the entry heading. No-op in sim (yaw ~ 0 at spawn).
+  bool yaw_align = true;
   double swing_speed = 1.0;      // <1.0 stretches the swing in real time so the
                                  // hardware actuators can actually track it
                                  // (native speed under-shoots + strains loudly).
                                  // The clip frame AND obs time_to_strike slow
                                  // together, so the (frame,tts) pair stays on the
                                  // training manifold — just evolves slower.
-  // Scripted swing direction at startup: false=forehand (target -y, clip 0),
-  // true=backhand (target +y, clip 1). Toggle live with the f/b keys. Only the
-  // y SIGN is set by the direction; |y| and the rest come from racket_pos_w
-  // below, so backhand mirrors the forehand target across the x axis. No live
-  // planner — this is the scripted backhand TEST path.
+  // Scripted swing direction at startup: false=forehand (clip 0), true=backhand
+  // (clip 1). Toggle live with the f/b keys. No live planner — this is the
+  // scripted TEST path.
   bool start_backhand = false;
-  Vec3 racket_pos_w = Vec3(0.40, -0.22, 0.82);   // forehand target (-y; |y| reused for backhand +y)
-  Vec3 racket_vel_w = Vec3(1.0, 0.0, 0.0);
+  // Scripted racket TEST targets, PER CLIP, chosen inside the TRAINED sampling boxes of the
+  // deployed lineage (explicitpd_ft/params/env.yaml: racket_pos_range_per_clip /
+  // racket_vel_range_per_clip, forehand_on_negative_y=true):
+  //   clip0 forehand: pos x[0.35,0.62] y[-0.95,-0.10] z[0.72,1.02]  vel x[1.05,2.05] y[0.70,1.65] z[0.20,1.00]
+  //   clip1 backhand: pos x[0.40,0.66] y[-0.30, 0.52] z[0.90,1.20]  vel x[1.30,2.30] y[-0.95,0.05] z[0.00,0.40]
+  // The previous SINGLE target (0.40,∓0.22,0.82) + vel (1,0,0) mirrored y for backhand and was
+  // OUT-OF-DISTRIBUTION: vel on every clip (y/z outside the boxes) and backhand z (0.82 < 0.90).
+  // OOD command obs degrade the policy exactly when it must balance the swing.
+  // TRUE reference racket strikes (wrist+mount FK from the hopex clips): fh (0.681,-0.441,0.816),
+  // bh (0.616,0.146,1.021). The forehand target below is ~0.30 m SHORT of its ref strike, which
+  // invites the shallow stable swing observed; the original bh target (0.53,0.11,1.05) was only
+  // 0.10 m from the ref strike — a full-commitment lunge that toppled the free base. The bh
+  // target is therefore pulled short/low/slow to match the forehand's proven margin.
+  Vec3 racket_pos_w_clip[2] = {Vec3(0.45, -0.25, 0.85), Vec3(0.45, 0.10, 1.00)};
+  Vec3 racket_vel_w_clip[2] = {Vec3(1.55, 1.15, 0.60), Vec3(1.50, -0.40, 0.20)};
   // sim2real localisation gap: no global base/torso pose -> nominal (matches
   // the Python wbc_runner shadow behavior). base orientation uses the real IMU.
   Vec3 nominal_base_pos_w = Vec3(0.0, 0.0, 0.95);
@@ -175,6 +209,30 @@ class PpPolicy {
         last_action_(Eigen::VectorXd::Zero(kNumJoints)) {
     if (!build_src_to_sdk(onnx_.joint_names(), isaac_to_sdk_))
       throw std::runtime_error("pingpong: ONNX joint_names do not map onto the backend layout");
+    // Reference-clock layout: prefer the ONNX-baked per-clip metadata (new exports carry
+    // clip_seg_lengths/clip_strike_phases). The ClipLayout default is the LEGACY v1 layout
+    // ({95,105}/{0.36,0.50}, model_15200-era); driving a v2-baked model with it serves the
+    // wrong reference frames every tick (forehand strike ~0.6 s early, follow-through clamped,
+    // "backhand" spliced across the clip boundary) — the 2026-07-02 stale-clock deploy bug.
+    if (onnx_.has_clip_layout()) {
+      if (onnx_.clip_seg_lengths().size() != 2)
+        throw std::runtime_error("pingpong: ONNX clip layout metadata does not have 2 clips");
+      clip_.seg_len[0] = static_cast<int>(std::lround(onnx_.clip_seg_lengths()[0]));
+      clip_.seg_len[1] = static_cast<int>(std::lround(onnx_.clip_seg_lengths()[1]));
+      clip_.strike_phase[0] = onnx_.clip_strike_phases()[0];
+      clip_.strike_phase[1] = onnx_.clip_strike_phases()[1];
+      std::fprintf(stderr,
+          "[pp] clip layout from ONNX metadata: seg_len={%d,%d} strike_phase={%.3f,%.3f} "
+          "(strike frames %d/%d)\n",
+          clip_.seg_len[0], clip_.seg_len[1], clip_.strike_phase[0], clip_.strike_phase[1],
+          clip_.strike_frame(0), clip_.strike_frame(1));
+    } else {
+      std::fprintf(stderr,
+          "[pp WARN] ONNX carries NO clip layout metadata -> using the hardcoded LEGACY v1 "
+          "layout seg_len={%d,%d} strike_phase={%.2f,%.2f}. Only correct for v1-clip models "
+          "(model_15200); a v2-baked model will swing against the WRONG reference frames.\n",
+          clip_.seg_len[0], clip_.seg_len[1], clip_.strike_phase[0], clip_.strike_phase[1]);
+    }
     nominal_q_sdk_ = to_sdk_order(onnx_.default_q(), isaac_to_sdk_);  // nominal pose in SDK order
     leg_qdes_smooth_ = nominal_q_sdk_;  // seed the leg q_des EMA at nominal (no jump on first release)
     // Official robust-stand PD gains (a3_pd_stand_*, 29-DOF policy view) scattered
@@ -218,7 +276,7 @@ class PpPolicy {
     std::lock_guard<std::mutex> lk(obs_mu_);
     ObsDebug d;
     d.obs = last_obs_;
-    d.valid = last_obs_.size() == kObsDim;
+    d.valid = last_obs_.size() == onnx_.obs_dim();
     d.oracle_enabled = (cfg_.loc_mode == LocMode::kOracle);
     d.oracle_fresh = oracle_fresh_;
     d.oracle_age_s = oracle_age_s_;
@@ -256,7 +314,9 @@ class PpPolicy {
   const Eigen::VectorXd& official_stand_kd() const { return official_kd_sdk_; }
 
   // Runtime swing level: 0 = hold wind-up (quasi-stand), 1 = periodic forehand.
-  void set_level(int lvl) { level_.store(lvl); }
+  // Any EXTERNAL level change (keyboard, safety guard) cancels a pending swing-rest
+  // auto re-arm — a guard trip must never re-enter the swing on its own.
+  void set_level(int lvl) { rest_rearm_armed_.store(false); level_.store(lvl); }
   int level() const { return level_.load(); }
 
   // Live swing-speed tuning (real-time stretch; <1.0 slower). Clamped to a sane range.
@@ -271,6 +331,11 @@ class PpPolicy {
   int swing_dir() const { return swing_dir_.load(); }
   const char* swing_dir_name() const { return swing_dir_.load() >= 0 ? "FOREHAND" : "BACKHAND"; }
 
+  // Re-capture the yaw-align offsets on the next policy tick. Called by the driver
+  // whenever the mode transitions INTO SHADOW/MOTION from PASSIVE/PD_STAND (the robot
+  // may have been turned/moved between engagements).
+  void rearm_yaw_align() { yaw_align_pending_.store(true); }
+
   // Full-body gate: true => leg q_des is overwritten to nominal (NOT a full-body
   // test); false => the policy's leg actions pass through (31-DOF command check).
   // Atomic so --auto-leg-hold can flip it per-tick from the driver thread while the
@@ -282,12 +347,11 @@ class PpPolicy {
 
   PpRacketTarget ScriptedTarget(std::uint64_t tick_idx) const {
     PpRacketTarget tg;
-    const int dir = swing_dir_.load();  // +1 forehand (-y, clip0) / -1 backhand (+y, clip1)
-    tg.pos_w = cfg_.racket_pos_w;
-    // y sign follows the swing direction (backhand mirrors forehand across x);
-    // |y| + x,z come from the configured forehand target.
-    tg.pos_w[1] = (dir >= 0 ? -1.0 : 1.0) * std::abs(cfg_.racket_pos_w[1]);
-    tg.vel_w = cfg_.racket_vel_w;
+    const int dir = swing_dir_.load();  // +1 forehand (clip0) / -1 backhand (clip1)
+    const int clip = dir >= 0 ? 0 : 1;
+    // Per-clip target from the trained sampling boxes (see PpPolicyConfig) — no mirroring.
+    tg.pos_w = cfg_.racket_pos_w_clip[clip];
+    tg.vel_w = cfg_.racket_vel_w_clip[clip];
     tg.swing_sign = (dir >= 0 ? 1.0 : -1.0);  // +1 fore / -1 back
     tg.base_target_xy = Vec2::Zero();
     // Swing clock measured from the origin set on each level->1 entry (see ComputeCommand),
@@ -298,6 +362,13 @@ class PpPolicy {
     const double t = (tick_idx >= origin ? tick_idx - origin : 0) * cfg_.dt * swing_speed_.load();
     if (level_.load() == 0) {
       tg.time_to_strike = 5.0;  // far away -> clock holds at clip start (wind-up)
+    } else if (cfg_.single_swing || cfg_.swing_rest_s >= 0.0) {
+      // SINGLE-SWING: linear clock, NO fmod wrap. The periodic schedule bounds tts to
+      // [-(1-lead)*period, lead*period] = [-0.9, 2.1], which (a) never reaches the clip's
+      // end (backhand needs tts=-1.76) so the follow-through frames 227..270 never play,
+      // and (b) SNAPS the reference end->windup every period. Linear tts plays the WHOLE
+      // clip once; ComputeCommand then drops to level 0 when the clip has fully played.
+      tg.time_to_strike = cfg_.strike_lead_frac * cfg_.strike_period - t;
     } else {
       const double cyc = std::fmod(t, cfg_.strike_period);
       tg.time_to_strike = cfg_.strike_lead_frac * cfg_.strike_period - cyc;  // windup->strike->follow-through
@@ -308,14 +379,56 @@ class PpPolicy {
   // CommandFn body. Fills a full 31-slot RobotCommand (SDK order). Always valid.
   bool ComputeCommand(std::uint64_t tick_idx, const robot_io::RobotState& state,
                       robot_io::RobotCommand& cmd) {
-    // Reset the swing clock to its windup whenever (re)entering level 1, so a release from a
-    // level-0 hold begins the swing at the start (ts->0, matching the held body) rather than
-    // snapping into a free-running mid-cycle phase (-> reference/body mismatch -> lurch/fall).
+    // Reset the swing clock to its windup on level 0->1 (release from hold) OR on a
+    // forehand<->backhand switch. Either way the swing must (re)start from its WINDUP
+    // (tts -> clip start, matching the current near-stand body) rather than snap into the
+    // free-running mid-cycle phase. Pressing 'b' mid-forehand WITHOUT this reset jumps the
+    // backhand reference straight to a mid-swing frame while the body is still in a
+    // forehand-end pose -> reference/body mismatch -> lurch -> FALL (forehand is fine only
+    // because it gets this clean windup start at MOTION entry).
     const int swing_lvl_now = level_.load();
-    if (swing_lvl_now == 1 && swing_level_prev_ != 1) swing_clock_origin_.store(tick_idx);
+    const int swing_dir_now = swing_dir_.load();
+    if ((swing_lvl_now == 1 && swing_level_prev_ != 1) || swing_dir_now != swing_dir_prev_)
+      swing_clock_origin_.store(tick_idx);
     swing_level_prev_ = swing_lvl_now;
-    const PpRacketTarget tg = ScriptedTarget(tick_idx);
+    swing_dir_prev_ = swing_dir_now;
+    PpRacketTarget tg = ScriptedTarget(tick_idx);
     const int clip_id = clip_id_from_swing_sign(tg.swing_sign);
+    // Clamp time_to_strike to the clip's IN-TRAINING maximum. Training computes
+    // tts = (strike_frame - current_frame)*dt from the actual clip frame, so its max is
+    // (strike_frame - seg_start)*dt (backhand 0.86 s, forehand 1.30 s). The scripted schedule
+    // instead feeds raw 2.1 s at cycle start / 5.0 s at hold — an OOD (tts, windup-frame)
+    // pairing the policy never saw (worst for backhand: 1.24 s of OOD input right before the
+    // swing; observed to precede the free-base backhand fall). Clamping makes the windup state
+    // exactly the training state "at windup frame, tts=max". The reference clock is unaffected
+    // (it already clamps ts to seg_start for any tts >= this bound).
+    const double max_tts =
+        (clip_.strike_frame(clip_id) - clip_.seg_start(clip_id)) * clip_.step_dt;
+    if (tg.time_to_strike > max_tts) tg.time_to_strike = max_tts;
+    // SINGLE-SWING / REST (see PpPolicyConfig): once the clip has fully played, drop to
+    // level 0 (held stand) instead of letting the periodic clock WRAP the reference from
+    // the end pose back to windup (an untracked-in-training snap that topples the backhand).
+    // min_tts = tts at the clip's last frame; below it the clock is clamped at the end.
+    if ((cfg_.single_swing || cfg_.swing_rest_s >= 0.0) && swing_lvl_now == 1) {
+      const double min_tts = (clip_.strike_frame(clip_id) -
+                              (clip_.seg_start(clip_id) + clip_.seg_len[clip_id] - 1)) *
+                             clip_.step_dt;
+      if (tg.time_to_strike < min_tts) {
+        level_.store(0);
+        if (cfg_.swing_rest_s >= 0.0) {
+          rest_rearm_tick_ = tick_idx + static_cast<std::uint64_t>(
+              std::max(0.0, cfg_.swing_rest_s) / std::max(cfg_.dt, 1e-6));
+          rest_rearm_armed_ = true;
+        }
+        std::fprintf(stderr, "[pp] swing complete -> level 0 (held stand)%s\n",
+                     cfg_.swing_rest_s >= 0.0 ? " (auto re-arm after rest)" : "; press 1 to swing again");
+      }
+    }
+    // Auto re-arm after the rest (only if WE dropped the level; a manual '0' clears it).
+    if (rest_rearm_armed_ && level_.load() == 0 && tick_idx >= rest_rearm_tick_) {
+      rest_rearm_armed_ = false;
+      level_.store(1);  // next tick's 0->1 edge resets the swing clock to windup
+    }
     const int time_step = clip_.time_step_for(clip_id, tg.time_to_strike);
 
     const PpRefs refs = onnx_.refs(time_step);
@@ -332,6 +445,27 @@ class PpPolicy {
     // every mode, so always use the real value.
     st.torso_quat_w = state.has_secondary_imu ? state.sec_imu_quat_wxyz
                                               : cfg_.nominal_torso_quat_w;
+
+    // YAW-ALIGN (see PpPolicyConfig::yaw_align). Capture each IMU's yaw on the first
+    // policy tick after (re)engage, then express every subsequent attitude relative to
+    // that entry heading. Fixes the boot-drift yaw polluting motion_anchor_ori_b and the
+    // racket-FK world conversion on hardware; no-op in sim where spawn yaw ~ 0.
+    if (cfg_.yaw_align) {
+      if (yaw_align_pending_.exchange(false)) {
+        yaw0_base_inv_ = quat_inv(yaw_quat(st.base_quat_w));
+        yaw0_torso_inv_ = quat_inv(yaw_quat(st.torso_quat_w));
+        const auto yaw_deg = [](const Vec4& q) {
+          return std::atan2(2.0 * (q[0] * q[3] + q[1] * q[2]),
+                            1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3])) * 180.0 / M_PI;
+        };
+        std::fprintf(stderr,
+            "[pp] yaw-align captured at policy engage: base_yaw=%+.1f deg torso_yaw=%+.1f deg "
+            "(subtracted from all subsequent IMU attitudes; robot heading at engage == clip +x)\n",
+            yaw_deg(st.base_quat_w), yaw_deg(st.torso_quat_w));
+      }
+      st.base_quat_w = quat_mul(yaw0_base_inv_, st.base_quat_w);
+      st.torso_quat_w = quat_mul(yaw0_torso_inv_, st.torso_quat_w);
+    }
     if (!state.has_secondary_imu && !sec_imu_warned_) {
       sec_imu_warned_ = true;
       std::fprintf(stderr,
@@ -386,8 +520,12 @@ class PpPolicy {
 
     last_proj_grav_ = projected_gravity_body(st.base_quat_w);
 
-    const Eigen::VectorXd obs = build_obs_180(refs, st, tg, last_action_, onnx_.default_q(),
-                                              cfg_.use_imu_yaw_for_targets);
+    // 175-D deploy_parity (new policy) vs 180-D full (model_15200). Auto-selected from the loaded
+    // ONNX input dim. build_obs_175 drops motion_anchor_pos_b + base_target_pos_b and reframes the
+    // racket target to be relative to the CURRENT racket FK (pp_racket_fk.hpp) — no world base pos.
+    const Eigen::VectorXd obs = (onnx_.obs_dim() == kObsDim175)
+        ? build_obs_175(refs, st, tg, last_action_, onnx_.default_q(), cfg_.use_imu_yaw_for_targets)
+        : build_obs_180(refs, st, tg, last_action_, onnx_.default_q(), cfg_.use_imu_yaw_for_targets);
     { std::lock_guard<std::mutex> lk(obs_mu_); last_obs_ = obs; }  // for obs-debug
     const Eigen::VectorXd action = onnx_.mean_action(obs, time_step);
     const Eigen::VectorXd tq_isaac = onnx_.target_q(action);
@@ -590,16 +728,26 @@ class PpPolicy {
     if (state.q.size() == kNumJoints) std::fprintf(stderr, " STATE(SDK) q : %s\n", S(state.q).c_str());
     if (state.dq.size() == kNumJoints) std::fprintf(stderr, " STATE(SDK) qd: %s\n", S(state.dq).c_str());
     struct Blk { const char* n; int lo; int len; };
-    static const Blk blks[] = {
+    static const Blk blks180[] = {
         {"command", 0, 62}, {"motion_anchor_pos_b", 62, 3}, {"motion_anchor_ori_b", 65, 6},
         {"base_ang_vel", 71, 3}, {"joint_pos_rel", 74, 31}, {"joint_vel", 105, 31},
         {"actions(last)", 136, 31}, {"projected_gravity", 167, 3}, {"base_target_pos_b", 170, 2},
         {"racket_target_pos_b", 172, 3}, {"racket_target_vel_w", 175, 3},
         {"time_to_strike", 178, 1}, {"swing_type", 179, 1}};
-    std::fprintf(stderr, " OBS blocks (180-D):\n");
-    for (const auto& b : blks)
-      std::fprintf(stderr, "   %-20s [%3d:%3d] %s\n", b.n, b.lo, b.lo + b.len,
-                   S(obs.segment(b.lo, b.len)).c_str());
+    // deploy_parity 175-D: motion_anchor_pos_b + base_target_pos_b dropped; racket_target_pos_b is
+    // relative to the CURRENT racket FK (not base). Everything after motion_anchor_ori_b shifts down 3.
+    static const Blk blks175[] = {
+        {"command", 0, 62}, {"motion_anchor_ori_b", 62, 6}, {"base_ang_vel", 68, 3},
+        {"joint_pos_rel", 71, 31}, {"joint_vel", 102, 31}, {"actions(last)", 133, 31},
+        {"projected_gravity", 164, 3}, {"racket_target_pos_b(relFK)", 167, 3},
+        {"racket_target_vel_w", 170, 3}, {"time_to_strike", 173, 1}, {"swing_type", 174, 1}};
+    const bool dp = (obs.size() == kObsDim175);
+    std::fprintf(stderr, " OBS blocks (%d-D):\n", (int)obs.size());
+    const Blk* blks = dp ? blks175 : blks180;
+    const int nblk = dp ? (int)(sizeof(blks175) / sizeof(Blk)) : (int)(sizeof(blks180) / sizeof(Blk));
+    for (int i = 0; i < nblk; ++i)
+      std::fprintf(stderr, "   %-24s [%3d:%3d] %s\n", blks[i].n, blks[i].lo, blks[i].lo + blks[i].len,
+                   S(obs.segment(blks[i].lo, blks[i].len)).c_str());
     std::fprintf(stderr, " ACTION(raw,Isaac)[31]: %s\n", S(action).c_str());
     std::fprintf(stderr, " Q_DES(SDK)[31]       : %s\n", S(q_sdk).c_str());
     std::fprintf(stderr, " KP(SDK)[31]          : %s\n", S(kp_sdk).c_str());
@@ -633,7 +781,14 @@ class PpPolicy {
   double leg_smooth_alpha_ = 1.0;           // EMA low-pass on released leg q_des (1=off)
   Eigen::VectorXd leg_qdes_smooth_;         // EMA state for the leg q_des low-pass (seeded to nominal)
   std::atomic<std::uint64_t> swing_clock_origin_{0};  // tick offset; reset on each level->1 entry
+  std::uint64_t rest_rearm_tick_ = 0;                 // driver thread only
+  std::atomic<bool> rest_rearm_armed_{false};         // cleared by any external set_level()
+  // yaw-align state (see PpPolicyConfig::yaw_align / rearm_yaw_align)
+  std::atomic<bool> yaw_align_pending_{true};
+  Vec4 yaw0_base_inv_ = Vec4(1.0, 0.0, 0.0, 0.0);     // driver thread only
+  Vec4 yaw0_torso_inv_ = Vec4(1.0, 0.0, 0.0, 0.0);    // driver thread only
   int swing_level_prev_ = 0;                          // ComputeCommand (driver thread) only
+  int swing_dir_prev_ = 1;                            // detect f<->b switch -> restart swing at windup
   ClipLayout clip_;
   std::array<int, 31> isaac_to_sdk_{};
   Eigen::VectorXd nominal_q_sdk_;

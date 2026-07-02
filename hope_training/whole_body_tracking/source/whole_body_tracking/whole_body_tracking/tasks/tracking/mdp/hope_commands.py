@@ -18,7 +18,8 @@ Per the HOPE racket-tracking prohibition, there is NO measured racket feedback a
 
 HITTER alignment notes (see the project HITTER verification):
 * racket *position* is observed relative to the base; racket *velocity* is observed in world.
-* racket *normal* is a REWARD target only (not an actor observation in HITTER).
+* HOPE currently also observes desired racket *normal* in the actor so the policy can respond to
+  normal targets; actual racket normal remains a privileged simulation-only critic/reward signal.
 * swing type is a *sampled* variable used here to (a) flag forehand/backhand and (b) select the
   reference clip; it is not required in the actor observation when separate forehand/backhand
   policies are trained (the HOPE default, reimplement.md step 17).
@@ -194,6 +195,22 @@ class RacketTargetCommand(CommandTerm):
         self._exact_vel_err_sum_c = {c: 0.0 for c in self._clip_names}
         self._exact_nrm_err_sum_c = {c: 0.0 for c in self._clip_names}
 
+        # --- UNCONDITIONAL swing accounting (Phase A wandb fix) ------------------------------------
+        # strike_composite_success_exact is CONDITIONAL: its denominator is exact-strike SAMPLES, so
+        # an env that falls BEFORE the strike frame contributes nothing — composite ~1.0 coexists
+        # with any pre-strike fall rate (exactly what happened in deploy). These accumulators count
+        # every swing START (episode reset or clip wrap assigns a new swing) with the same EMA decay
+        # as the exact accumulators, so:
+        #   swing_completion_rate = exact_n_acc / swing_starts_acc   (unconditional; falls count)
+        #   pre_strike_fall_rate  = pre-strike terminations / swing starts
+        self._swing_starts_acc = 0.0
+        self._swing_starts_acc_c = {c: 0.0 for c in self._clip_names}
+        self._prestrike_fall_acc = 0.0
+        # True only while _resample_command is invoked from the intra-episode WRAP path (see
+        # _update_command): wraps start a new swing but never count a pre-strike fall (a wrapped
+        # env necessarily passed its strike frame alive).
+        self._resample_is_wrap = False
+
         # Strike timing / gating.
         self.time_to_strike = torch.zeros(self.num_envs, device=self.device)
         self.pre_strike = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
@@ -248,6 +265,13 @@ class RacketTargetCommand(CommandTerm):
             ):
                 self.metrics[f"{_key}_{_cname}"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["exact_strike_sample_count_decayed"] = torch.zeros(self.num_envs, device=self.device)
+        # UNCONDITIONAL swing accounting (Phase A): completion_rate = exact-strike arrivals / swing
+        # STARTS (falls count against it, unlike the conditional composite above); fall rate before
+        # the strike frame. Broadcast scalars like the pass rates.
+        self.metrics["swing_completion_rate"] = torch.zeros(self.num_envs, device=self.device)
+        for _cname in self._clip_names.values():
+            self.metrics[f"swing_completion_rate_{_cname}"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["pre_strike_fall_rate"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["strike_window_hit_rate"] = torch.zeros(self.num_envs, device=self.device)
         # Base-position error while the base target is active (pre-strike), held at its last value.
         self.metrics["base_pos_error_pre_strike"] = torch.zeros(self.num_envs, device=self.device)
@@ -295,6 +319,7 @@ class RacketTargetCommand(CommandTerm):
         self.foot_vel_sq = z()  # sum_feet ||foot_vel||^2 (excessive/violent foot motion)
         self.foot_drag = z()  # sum_feet ||foot_xy_vel|| while the foot is LOW (near ground -> dragging)
         self.arm_overreach_frac = z()  # fraction of ARM joints within 10% of a position limit
+        self.waist_twist = z()  # |waist_yaw - default| + |waist_roll - default| (anti twist-instead-of-step)
         self.proj_grav_xy = z()  # ||projected_gravity_xy|| = base tilt (strike-window stability)
         self.base_ang_vel_xy_norm = z()  # ||base_ang_vel_xy|| (strike-window stability)
         self.vertical_speed = z()  # |base_lin_vel_z| (vertical bob)
@@ -437,21 +462,22 @@ class RacketTargetCommand(CommandTerm):
             seg_end = seg_start + seg_len - 1
             if self._racket_mode == "body":
                 idx = self._racket_body_index
-                pos = motion._body_pos_w[strike_step, idx]
-                quat = motion._body_quat_w[strike_step, idx]
-                lin = motion._body_lin_vel_w[strike_step, idx]
+                pos, quat, lin, _ = self._reference_body_state(motion, strike_step, idx)
             else:
                 widx = self._wrist_body_index
-                wpos = motion._body_pos_w[strike_step, widx]
-                wquat = motion._body_quat_w[strike_step, widx]
-                wlin = motion._body_lin_vel_w[strike_step, widx]
-                wang = motion._body_ang_vel_w[strike_step, widx]
+                wpos, wquat, wlin, wang = self._reference_body_state(motion, strike_step, widx, require_ang_vel=True)
                 offset_w = quat_apply(wquat.unsqueeze(0), self._mount_offset[0:1]).squeeze(0)
                 pos = wpos + offset_w
                 lin = wlin + torch.cross(wang, offset_w, dim=-1)
                 quat = quat_mul(wquat.unsqueeze(0), self._mount_quat[0:1]).squeeze(0)
             normal = matrix_from_quat(quat.unsqueeze(0))[0, :, self.cfg.mount_normal_axis] * self.cfg.mount_normal_sign
 
+            # --- clean reference strike velocity --------------------------------------------------
+            # Recompute the strike target velocity from the FINAL racket FK position by a centered
+            # finite difference (clamped to this clip's segment), so it is consistent with the
+            # position the policy actually tracks (the stored body_lin_vel_w is FD'd/interpolated and
+            # ~1 m/s inconsistent at the racket tip — see cfg docs). raw_lin = legacy single-frame
+            # stored velocity (kept for the flag-off path and the diagnostics).
             raw_lin = lin.detach().clone()
             fd1 = (
                 self._ref_racket_pos_at(motion, strike_step + 1, clip_start=seg_start, clip_end=seg_end)
@@ -467,7 +493,9 @@ class RacketTargetCommand(CommandTerm):
             pos_all[clip_id] = pos.detach().clone()
             vel_all[clip_id] = lin.detach().clone()
             nrm_all[clip_id] = (normal / (torch.norm(normal) + 1e-6)).detach().clone()
-            base_all[clip_id] = motion._body_pos_w[strike_step, 0].detach().clone()
+            # Reference base (root) at the strike — root is articulation body index 0 (same order the
+            # motion arrays use). The base->racket horizontal offset couples base_target to racket_target.
+            base_all[clip_id] = self._reference_body_state(motion, strike_step, 0)[0].detach().clone()
             reach_all[clip_id] = (pos_all[clip_id, :2] - base_all[clip_id, :2]).detach().clone()
 
             cname = self._clip_names.get(clip_id, f"clip{clip_id}")
@@ -495,6 +523,7 @@ class RacketTargetCommand(CommandTerm):
         self._ref_racket_normal_w_per_clip = nrm_all
         self._ref_base_pos_rel_per_clip = base_all
         self._ref_reach_offset_xy_per_clip = reach_all
+        # Legacy single-clip fields (no in-file consumers besides diagnostics): mirror clip 0.
         self._ref_racket_pos_rel = pos_all[0].detach().clone()
         self._ref_racket_vel_w = vel_all[0].detach().clone()
         self._ref_racket_normal_w = nrm_all[0].detach().clone()
@@ -507,6 +536,31 @@ class RacketTargetCommand(CommandTerm):
             + "\n".join(report_lines),
             flush=True,
         )
+
+    def _reference_body_state(self, motion, step: int, body_index: int, require_ang_vel: bool = False):
+        """Return reference body state from MotionLoader's full-articulation private arrays.
+
+        This is the current, intentional coupling point to upstream ``MotionLoader`` internals. Public
+        ``MotionCommand`` buffers expose only the tracking subset, while the racket FK needs the full
+        articulation body order so it can read the racket body or wrist mount. Keep direct private-field
+        access centralized here until MotionLoader grows a public full-body state API.
+        """
+        required = ["_body_pos_w", "_body_quat_w", "_body_lin_vel_w"]
+        if require_ang_vel:
+            required.append("_body_ang_vel_w")
+        missing = [name for name in required if not hasattr(motion, name)]
+        if missing:
+            raise AttributeError(
+                "RacketTargetCommand requires MotionLoader full-body reference arrays "
+                f"{required}, but missing {missing}. This is the HOPE coupling point for "
+                "reference_perturbed racket FK; update _reference_body_state if upstream MotionLoader changes."
+            )
+
+        pos = motion._body_pos_w[step, body_index]
+        quat = motion._body_quat_w[step, body_index]
+        lin = motion._body_lin_vel_w[step, body_index]
+        ang = motion._body_ang_vel_w[step, body_index] if require_ang_vel else None
+        return pos, quat, lin, ang
 
     def _perturb_scale(self) -> float:
         """Curriculum factor in [start, 1.0] that widens the reference perturbation over training.
@@ -645,6 +699,11 @@ class RacketTargetCommand(CommandTerm):
         origins = self._env.scene.env_origins[env_ids]
         motion = self._motion()
 
+        # UNCONDITIONAL swing accounting: every resample STARTS a new swing attempt. On the
+        # true-reset path (not a wrap) it also ENDS the previous attempt — count a pre-strike
+        # fall if the env terminated before reaching the strike frame.
+        self._count_swing_starts(env_ids, count_prestrike_falls=not self._resample_is_wrap)
+
         # Desired racket pos/vel/normal — either independent box sampling (legacy) or coupled to the
         # reference swing's strike state (reachable-by-construction; reimplement.md step 13 / rank 5).
         if self.cfg.target_mode == "reference_perturbed":
@@ -781,8 +840,34 @@ class RacketTargetCommand(CommandTerm):
         wrapped = torch.where(motion.just_resampled)[0] if hasattr(motion, "just_resampled") else \
             torch.where(motion.time_steps < self._prev_motion_steps)[0]
         if len(wrapped) > 0:
-            self._resample_command(wrapped)
+            # Wrap path: a wrapped env passed its strike frame alive (strike < seg end), so no
+            # pre-strike fall is counted — the flag only gates fall accounting inside
+            # _resample_command's _count_swing_starts hook.
+            self._resample_is_wrap = True
+            try:
+                self._resample_command(wrapped)
+            finally:
+                self._resample_is_wrap = False
         self._prev_motion_steps = motion.time_steps.clone()
+
+    def _count_swing_starts(self, env_ids, count_prestrike_falls: bool) -> None:
+        """UNCONDITIONAL swing accounting (Phase A wandb fix). Increment-only here; the decay is
+        applied once per step in _update_metrics next to the exact accumulators, so
+        swing_completion_rate = exact_n_acc / swing_starts_acc shares one EMA timescale.
+        NOTE: an episode TIMEOUT mid-swing counts as an uncompleted start (slight deflation,
+        ~one boundary swing per 10 s episode) but never as a fall (terminated excludes timeouts)."""
+        n = int(len(env_ids))
+        if n == 0:
+            return
+        self._swing_starts_acc += float(n)
+        motion = self._motion()
+        if motion._multiseg:
+            clips = motion.clip_id[env_ids]
+            for c in self._clip_names:
+                self._swing_starts_acc_c[c] += float((clips == c).sum())
+        if count_prestrike_falls:
+            term = self._env.termination_manager.terminated[env_ids]
+            self._prestrike_fall_acc += float((term & self.pre_strike[env_ids]).sum())
 
     def _update_footwork_signals(self, racket_dist: torch.Tensor) -> None:
         """Base-FREE footwork-to-strike signals (reward/metric only; NEVER observed). The legs are driven
@@ -825,8 +910,12 @@ class RacketTargetCommand(CommandTerm):
             f_height = data.body_pos_w[:, self._foot_idx_robot, 2]  # (E,2)
             self.foot_slip_sq = (in_contact * f_xy_speed.square()).sum(dim=-1)  # contact * ||v_xy||²
             self.foot_vel_sq = f_speed.square().sum(dim=-1)  # excessive/violent foot motion
-            low = (f_height < self._drag_height).float()  # foot near the ground
-            self.foot_drag = (low * f_xy_speed).sum(dim=-1)  # lateral skim while low = dragging
+            # Phase A fix: the old height gate (f_height < 0.10 m) sat BELOW the planted ankle
+            # origin (~0.07 m), so EVERY low step counted as "dragging" — stepping itself was
+            # taxed, one of the reasons the policy never learned to move left/right. "Drag" now
+            # means lateral speed while the foot is LOADED (in contact) = sliding under load;
+            # airborne swing-leg motion is free (foot_vel_sq still bounds violent motion).
+            self.foot_drag = (in_contact * f_xy_speed).sum(dim=-1)
             self.metrics["foot_slip_sq"] = self.foot_slip_sq
             self.metrics["foot_vel_mean"] = f_speed.mean(dim=-1)
             self.metrics["foot_lift_rate"] = (1.0 - in_contact).mean(dim=-1)  # 0 = both planted, 1 = airborne
@@ -836,13 +925,20 @@ class RacketTargetCommand(CommandTerm):
         # --- anti-arm-only: ARM joints near a limit + arm joint velocity (resolve arm joint idx once) ---
         if not getattr(self, "_arm_resolved", False):
             self._arm_resolved = True
-            self._arm_joint_idx, self._leg_joint_idx = [], []
+            self._arm_joint_idx, self._leg_joint_idx, self._waist_twist_idx = [], [], []
             try:
                 self._arm_joint_idx = list(self.robot.find_joints([".*shoulder.*", ".*elbow.*", ".*wrist.*"])[0])
             except Exception:
                 pass
             try:
                 self._leg_joint_idx = list(self.robot.find_joints([".*hip.*", ".*knee.*", ".*ankle.*"])[0])
+            except Exception:
+                pass
+            # waist YAW+ROLL: the "twist/lean instead of step" DOFs the policy uses to face a lateral
+            # target without moving its feet. Penalized (pre-strike) so reaching a far target needs footwork.
+            # waist_pitch is EXCLUDED (it is the swing wind-up / natural lean, not a lateral-reach cheat).
+            try:
+                self._waist_twist_idx = list(self.robot.find_joints(["waist_yaw_joint", "waist_roll_joint"])[0])
             except Exception:
                 pass
         limits = getattr(data, "soft_joint_pos_limits", None)
@@ -863,6 +959,16 @@ class RacketTargetCommand(CommandTerm):
             self.metrics["leg_joint_vel_max"] = leg_vel
             self.metrics["leg_moving_prestrike"] = torch.where(
                 self.pre_strike, (leg_vel > 0.2).float(), torch.zeros(self.num_envs, device=self.device)
+            )
+        # --- anti twist-instead-of-step: |waist_yaw|+|waist_roll| deviation from the default (neutral,
+        #     facing-forward) pose. This is the magnitude the prestrike_waist_twist reward penalizes, so
+        #     reaching a lateral target by turning the torso (feet planted) becomes costly -> step instead. ---
+        if self._waist_twist_idx:
+            wi = self._waist_twist_idx
+            self.waist_twist = torch.abs(data.joint_pos[:, wi] - data.default_joint_pos[:, wi]).sum(dim=-1)
+            self.metrics["waist_twist_abs"] = self.waist_twist
+            self.metrics["waist_twist_prestrike"] = torch.where(
+                self.pre_strike, self.waist_twist, torch.zeros(self.num_envs, device=self.device)
             )
 
     def _update_metrics(self):
@@ -967,6 +1073,27 @@ class RacketTargetCommand(CommandTerm):
         self._exact_pass_5cm_acc = decay * self._exact_pass_5cm_acc + float(_pass_5cm.sum())
         self._exact_pass_10cm_acc = decay * self._exact_pass_10cm_acc + float(_pass_10cm.sum())
         self._exact_pass_normal_acc = decay * self._exact_pass_normal_acc + float(pass_normal.sum())
+        # UNCONDITIONAL swing accounting: decay the start/fall accumulators at the SAME per-step
+        # rate as the exact accumulators (increments happen in _count_swing_starts), then report
+        #   swing_completion_rate = exact-strike arrivals / swing starts   (falls count against it)
+        #   pre_strike_fall_rate  = pre-strike terminations / swing starts
+        # These are the honest companions to the CONDITIONAL composite below, whose denominator
+        # only contains exact-strike samples (pre-strike falls are invisible to it).
+        self._swing_starts_acc = decay * self._swing_starts_acc
+        self._prestrike_fall_acc = decay * self._prestrike_fall_acc
+        for _c in self._clip_names:
+            self._swing_starts_acc_c[_c] = decay * self._swing_starts_acc_c[_c]
+        _s_denom = max(self._swing_starts_acc, 1e-6)
+        _s_enough = self._swing_starts_acc >= float(self.cfg.exact_success_min_count)
+        self.metrics["swing_completion_rate"][:] = min(self._exact_n_acc / _s_denom, 1.0) if _s_enough else 0.0
+        self.metrics["pre_strike_fall_rate"][:] = min(self._prestrike_fall_acc / _s_denom, 1.0) if _s_enough else 0.0
+        for _c, _cn in self._clip_names.items():
+            _cd = max(self._swing_starts_acc_c[_c], 1e-6)
+            _ce = self._swing_starts_acc_c[_c] >= float(self.cfg.exact_success_min_count)
+            self.metrics[f"swing_completion_rate_{_cn}"][:] = (
+                min(self._exact_n_acc_c[_c] / _cd, 1.0) if _ce else 0.0
+            )
+
         enough = self._exact_n_acc >= float(self.cfg.exact_success_min_count)
         denom = max(self._exact_n_acc, 1e-6)
         self._exact_composite_rate = (self._exact_pass_comp_acc / denom) if enough else 0.0
@@ -1147,8 +1274,8 @@ class RacketTargetCommand(CommandTerm):
         """Desired racket position relative to the base (yaw-heading frame). HITTER actor obs.
 
         PRIVILEGED: uses ``base_pos_w`` (world base position), which is fabricated on hardware
-        (no localizer). Used by the `full` obs mode; the `real_sensor_only` mode replaces it with
-        :meth:`racket_target_pos_b_rel`.
+        (no localizer). Used by the `full` obs mode; the deploy-parity mode (legacy task name:
+        `real_sensor_only`) replaces it with :meth:`racket_target_pos_b_rel`.
         """
         return quat_rotate_inverse(yaw_quat(self.base_quat_w), self.racket_target_pos_w - self.base_pos_w)
 
@@ -1162,7 +1289,8 @@ class RacketTargetCommand(CommandTerm):
 
         Both terms are computable on the real robot from the planner's target + racket forward
         kinematics (joint encoders), WITHOUT a fabricated base pose. Replaces
-        :meth:`racket_target_pos_b` in the ``real_sensor_only`` observation mode.
+        :meth:`racket_target_pos_b` in the deploy-parity observation mode (legacy task name:
+        ``real_sensor_only``).
         """
         return quat_rotate_inverse(yaw_quat(self.base_quat_w), self.racket_target_pos_w - self.racket_pos_w)
 

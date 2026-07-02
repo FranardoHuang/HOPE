@@ -59,11 +59,13 @@ Done:
 
 - HITTER paper limitations have been identified: fixed hitting plane, external mocap dependency, ignored spin, limited stroke repertoire, no autonomous serving, no explicit multi-agent/opponent adaptation.
 - TTRL is locally available as an auto-synced reference through `scripts/sync_external_repos.sh`.
+- `HOPE-TableTennis-AgibotA3-v0` now provides a candidate Isaac scene for later spin, serve, bounce, and returner experiments: dynamic ball, table/net contacts, drag, optional Magnus force, and serve reset are modularized under `tasks/table_tennis/`.
 
 Not done:
 
 - No blind-spot track has been selected for implementation.
-- No spin/double-bounce/serve experiments are implemented.
+- No spin/double-bounce/serve mini-spec has been accepted.
+- The table-tennis scene is not yet a returner-policy baseline or a measured improvement over the HITTER-compatible path.
 
 ## Risks
 

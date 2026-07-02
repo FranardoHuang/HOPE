@@ -8,20 +8,26 @@ Some required assets are too large or too environment-specific for normal git. T
 
 These files and folders are not provided by `git clone`, `git pull`, or normal branch checkout. A new machine needs restore/copy/sync steps for any gate that depends on them.
 
+Small tracked runtime assets, such as the Purdue PACE table/net USD visual overlay under `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/table_usd/`, do not need a manual restore step; they should appear after a normal clone or pull.
+
 ## Current Local Assets
 
 | Path | Purpose | Source | Required By |
 | --- | --- | --- | --- |
-| `agi/a3_deploy_example/` | Local full-ish Agibot deploy working package with ping-pong C++ runner, dist configs, binaries, and `model_15200.onnx` | Local developer/vendor-derived package, ignored by git; observed on 2026-06-30 | G07 ping-pong recovery audit |
 | `vendor_assets/agibot/a3_deploy_example_full/` | Complete Agibot deploy payload, including heavy runtime assets | Private/vendor-gated: Agibot handoff (~1.7 GB, no public URL) | G07 |
 | `external_repos/TTRL-ICRA2026/` | Auto-synced local TTRL reference clone | Public but may be access-gated: [purdue-tracelab/TTRL-ICRA2026](https://github.com/purdue-tracelab/TTRL-ICRA2026.git) | G05, G08 |
-| `hope_training/GMR/` | Motion retargeting (SMPL-X -> robot) clone | Public: [YanjieZe/GMR](https://github.com/YanjieZe/GMR.git) (observed pin `bb1bbe4`) | Motion pipeline |
-| `hope_training/GVHMR/` | Video -> SMPL-X motion recovery clone | Public: [zju3dv/GVHMR](https://github.com/zju3dv/GVHMR.git) (observed pin `6ec3ca3`) | Motion pipeline |
-| GMR body-models dir (`SMPLX_NEUTRAL/MALE/FEMALE.pkl`) | SMPL-X body models for retargeting | License-gated: [smpl-x.is.tue.mpg.de](https://smpl-x.is.tue.mpg.de) | Motion pipeline |
-| `hope_training/GVHMR/inputs/checkpoints/` | GVHMR model checkpoints | License-gated: per GVHMR instructions | Motion pipeline |
-| `hope_training/GVHMR/inputs/checkpoints/{dpvo,gvhmr,hmr2,vitpose,yolo}/` | GVHMR public pretrained weights restored on the current RunPod | Upstream GVHMR Google Drive hit quota; restored from public Hugging Face mirror `camenduru/GVHMR` on 2026-07-02 | Motion pipeline |
-| `hope_training/motions/preprocessed/hope_forehand_hopex.npz` and `hope_backhand_hopex.npz` | Corrected HOPE +X reference swing clips for current `task=HOPEPingPong*` defaults | Generated locally from the 2026-07-02 v4 motions with `scripts/reground_hope_frame.py`; ignored, not redistributable | Training (HOPEPingPong) |
-| WandB motion registry (`hope_forehand`/`hope_backhand`) | Optional reference swing source after corrected artifacts are uploaded | Private/org-scoped WandB registry. The 2026-07-02 `hope_forehand:v4` / `hope_backhand:v4` artifacts contain canonical `motion.npz` but were later rejected because they still face +Y | Training (HOPEPingPong) |
+| `external_repos/IsaacLab/` | Local Isaac Lab source checkout used by `setup_train_env.sh` when a pre-provisioned Isaac Lab checkout is absent | Public: [isaac-sim/IsaacLab](https://github.com/isaac-sim/IsaacLab.git), observed tag `v2.1.0` / commit `21f7136` | G05 |
+| `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` | Package-local Isaac A3 URDF, meshes, and config copied from tracked Agibot materials; ignored by upstream `**/assets/` rule | Tracked `agi/URDF/A3T2.5-URDF-std-pingpang/`, with URDF mesh paths rewritten from `package://.../meshes/` to `../meshes/` | G04, G05 |
+| `hope_training/GMR/` | Motion retargeting (SMPL-X -> robot) clone | Public: [YanjieZe/GMR](https://github.com/YanjieZe/GMR.git) (observed pin `bb1bbe4`) | G05 motion references |
+| `hope_training/GVHMR/` | Video -> SMPL-X motion recovery clone | Public: [zju3dv/GVHMR](https://github.com/zju3dv/GVHMR.git) (observed pin `6ec3ca3`) | G05 motion references |
+| GMR body-models dir (`SMPLX_NEUTRAL/MALE/FEMALE.pkl`) | SMPL-X body models for retargeting | License-gated: [smpl-x.is.tue.mpg.de](https://smpl-x.is.tue.mpg.de) | G05 motion references |
+| `hope_training/GVHMR/inputs/checkpoints/` | GVHMR model checkpoints | License-gated: per GVHMR instructions | G05 motion references |
+| `hope_training/GVHMR/inputs/checkpoints/{dpvo,gvhmr,hmr2,vitpose,yolo}/` | GVHMR public pretrained weights restored on the current RunPod | Upstream GVHMR Google Drive hit quota; restored from public Hugging Face mirror `camenduru/GVHMR` on 2026-07-02 | G05 motion references |
+| WandB motion registry (`hope_forehand`/`hope_backhand` `.npz`) | Optional shared/internal reference swing clips for `task=HOPEPingPong` | Private/org-scoped WandB registry (not redistributable). The 2026-07-02 `hope_forehand:v4` / `hope_backhand:v4` artifacts contain canonical `motion.npz` but were rejected because they still face +Y; corrected v5+ uploads are pending | G05 registry-backed training |
+| `hope_training/motions/preprocessed/*.npz` or `hope_training/whole_body_tracking/artifacts/**/*.npz` | Local reference swing clips passed with `motion_file=...` / `motion_file_2=...` | Generated by GVHMR/GMR/`csv_to_npz.py` or restored from an agreed internal artifact store | No-WandB smoke tests or local G05 training |
+| `hope_training/motions/preprocessed/hope_forehand_hopex.npz` and `hope_backhand_hopex.npz` | Corrected HOPE +X reference swing clips for `task=HOPEPingPong*`, passed with `motion_file=...` / `motion_file_2=...` | Generated locally from the 2026-07-02 v4 motions with `scripts/reground_hope_frame.py`; ignored, not redistributable | Training (HOPEPingPong) |
+| `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` | Generated Isaac A3 ping-pong URDF asset | Rebuilt from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/` using `scripts/prepare_a3_isaac_asset.py` | G04/G05 |
+| Generated policy artifacts such as `hope_training/policies/*.onnx` | Exported policies for local eval/deploy handoff | Produced by `scripts/play.py` or training/eval export; store metadata in G05/G07 | G05/G07 when a specific policy is accepted |
 
 ## Manual Restore Checklist
 
@@ -33,15 +39,11 @@ Run from the repo root.
 mkdir -p vendor_assets/agibot external_repos
 ```
 
-2. Restore the Agibot deploy payloads when working on deploy, MuJoCo runtime, or hardware dry-run:
+2. Restore the full Agibot deploy payload when working on deploy, MuJoCo runtime, or hardware dry-run:
 
 ```bash
 # Copy or move the Agibot-provided full deploy package here:
 vendor_assets/agibot/a3_deploy_example_full/
-
-# If reproducing the current ping-pong recovery audit exactly, restore the
-# local working package here as well:
-agi/a3_deploy_example/
 ```
 
 Expected contents include heavy runtime assets that should not be committed in normal git:
@@ -58,22 +60,6 @@ The tracked source/config subset lives separately at:
 agi/code_deployment/a3_deploy_example/
 ```
 
-For the ignored ping-pong package observed on 2026-06-30, the relevant local
-artifacts were:
-
-```text
-agi/a3_deploy_example/dist/a3_deploy_x86_64/a3_deploy_onnx_ref_pingpong
-agi/a3_deploy_example/dist/a3_deploy_x86_64/models/model_15200.onnx
-agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/src/a3_deploy/a3_pingpong_main.cpp
-agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/a3_pingpong/
-```
-
-The fingerprints and audit sequence are recorded in
-[run_pingpong_recovery_audit.md](run_pingpong_recovery_audit.md). If this
-package becomes the official deployment path, promote source/config changes to
-tracked `agi/code_deployment/a3_deploy_example/` and keep only heavy binaries or
-models ignored.
-
 3. Sync TTRL when a gate needs it:
 
 ```bash
@@ -84,7 +70,37 @@ The script clones TTRL if absent, then fetches and fast-forwards the local refer
 
 If a result depends on TTRL, record the source commit hash printed by the script in the relevant gate doc. If TTRL becomes a stable dependency, promote it to a submodule or fork instead of relying on an ignored clone.
 
-4. Restore the motion-retargeting clones (both git-ignored, absent on a fresh clone) when working on the motion pipeline:
+4. Restore Isaac Lab source when a local training env needs source packages:
+
+```bash
+git clone --depth 1 --branch v2.1.0 https://github.com/isaac-sim/IsaacLab.git external_repos/IsaacLab
+git -C external_repos/IsaacLab rev-parse --short HEAD
+```
+
+Record the commit in G05 before accepting a training result. On 2026-06-25 the observed commit was
+`21f7136`.
+
+5. Restore the package-local A3 Isaac asset when working on G04/G05 training:
+
+```bash
+mkdir -p hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/{urdf,meshes,config}
+cp -r agi/URDF/A3T2.5-URDF-std-pingpang/meshes/. \
+  hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/meshes/
+cp -r agi/URDF/A3T2.5-URDF-std-pingpang/config/. \
+  hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/config/
+cp agi/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf \
+  hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/urdf/model.urdf
+perl -0pi -e 's#package://0000014503_A3T2\.5-URDF-std-pingpang-0409/meshes/#../meshes/#g' \
+  hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/urdf/model.urdf
+```
+
+Then verify all copied URDF mesh references resolve:
+
+```bash
+python3 -c 'import pathlib, re, sys; urdf=pathlib.Path("hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/urdf/model.urdf"); refs=re.findall(r"filename=\"([^\"]+)\"", urdf.read_text()); missing=[r for r in refs if not (urdf.parent / r).resolve().exists()]; print(f"mesh_refs={len(refs)} missing={len(missing)}"); sys.exit(1 if missing else 0)'
+```
+
+6. Restore the motion-retargeting clones (both git-ignored, absent on a fresh clone) when working on the motion pipeline:
 
 ```bash
 # Video -> SMPL-X (observed pin 6ec3ca3)
@@ -95,9 +111,14 @@ git clone https://github.com/YanjieZe/GMR.git hope_training/GMR
 #   pip install -e .
 ```
 
-See [reimplement.md](../../reimplement.md) steps 9-11 for the full per-env install procedure and pins.
+See [reimplement.md](../../reimplement.md) steps 9-12 for the full per-env install procedure, pins, CSV conversion, local `.npz` generation, and replay checks.
 
-5. Add the license-gated model assets the clones depend on (you must accept each license yourself; not redistributable):
+2026-06-25 local status: both ignored clones were restored at the observed pins above. GMR was installed
+editable into the existing `hope-motion-py310` conda env and passed an import check. GVHMR was cloned
+but not installed because its tracked requirements pin CUDA 12.1-era PyTorch/PyTorch3D wheels; resolve
+that compatibility issue before installing on an RTX 5090 / Blackwell host.
+
+7. Add the license-gated model assets the clones depend on (you must accept each license yourself; not redistributable):
 
 ```text
 # SMPL-X body models from smpl-x.is.tue.mpg.de into the GMR body-models dir:
@@ -118,9 +139,9 @@ smpl/SMPL_NEUTRAL.pkl
 SMPLX_NEUTRAL.pkl  SMPLX_MALE.pkl  SMPLX_FEMALE.pkl
 ```
 
-6. Provide the reference swing clips for `task=HOPEPingPong`:
+8. Provide the reference swing clips for `task=HOPEPingPong`:
 
-Current `HOPEPingPong.yaml` and `HOPEPingPongRealSensor.yaml` defaults use local ignored corrected clips:
+Registry defaults exist for internal shared runs, but no-WandB smoke tests and locally generated references should use explicit `.npz` paths under an ignored folder. The current accepted local clips are the corrected HOPE +X versions:
 
 ```text
 hope_training/motions/preprocessed/hope_forehand_hopex.npz
@@ -138,7 +159,17 @@ python scripts/reground_hope_frame.py --in artifacts/hope_backhand:v4/motion.npz
 python scripts/check_motion_target_alignment.py --yaml cfg/task/HOPEPingPong.yaml
 ```
 
-The private registry aliases observed earlier are not accepted for long training until corrected v5+ artifacts are uploaded:
+Then pass them explicitly:
+
+```bash
+cd hope_training/whole_body_tracking
+hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo \
+  motion_file=../motions/preprocessed/hope_forehand_hopex.npz \
+  motion_file_2=../motions/preprocessed/hope_backhand_hopex.npz \
+  logger=tensorboard
+```
+
+The maintainer `hope_forehand`/`hope_backhand` registry artifacts live in a private, org-scoped WandB "Motions" registry and cannot be redistributed. Override `registry_name=...` only when selecting a different registry clip. As of 2026-07-02 the registry aliases below are not accepted for long training until corrected v5+ artifacts are uploaded:
 
 ```text
 dongc_1-university-of-california-berkeley-org/wandb-registry-motions/hope_forehand:latest
@@ -147,9 +178,18 @@ dongc_1-university-of-california-berkeley-org/wandb-registry-motions/hope_backha
   -> BerkeleyPingPong/csv_to_npz/hope_backhand:v4, manifest: motion.npz, REJECTED: frame0_yaw=85.92 deg, +Y-dominant strike velocity
 ```
 
-> Make your own motions instead: run GVHMR (video -> SMPL-X) -> GMR (`--robot agibot_a3`) -> `scripts/csv_to_npz.py --robot agibot_a3`. The converter now applies HOPE +X alignment by default for Agibot A3 before local save/upload. Run `scripts/check_motion_target_alignment.py` before training or uploading the resulting `.npz` to your own WandB Motions registry. Full steps: [reimplement.md](../../reimplement.md) steps 9-11 and [run_training.md](run_training.md).
+> Make your own motions instead: run GVHMR (video -> SMPL-X) -> GMR (`--robot agibot_a3`) -> `scripts/csv_to_npz.py --robot agibot_a3 --output_file ../motions/preprocessed/<name>.npz`. The converter now applies HOPE +X alignment by default for Agibot A3 before local save/upload; run `scripts/check_motion_target_alignment.py` before training. Add `--upload_wandb` only if you also want to upload the resulting `.npz` to your own WandB Motions registry. Full steps: [reimplement.md](../../reimplement.md) steps 9-12 and [run_training.md](run_training.md).
 
-7. Keep generated training artifacts out of git:
+9. Rebuild the generated A3 Isaac asset when missing or stale:
+
+```bash
+python3 scripts/prepare_a3_isaac_asset.py --force
+python3 scripts/prepare_a3_isaac_asset.py --check
+```
+
+The generated directory is ignored because it duplicates tracked Agibot source meshes.
+
+10. Keep generated training artifacts out of git:
 
 ```text
 hope_training/whole_body_tracking/logs/
@@ -186,7 +226,8 @@ Check local-only assets:
 
 ```bash
 test -d vendor_assets/agibot/a3_deploy_example_full && echo "Agibot full deploy payload present"
-test -d agi/a3_deploy_example && echo "Local ping-pong deploy package present"
+test -d external_repos/IsaacLab && git -C external_repos/IsaacLab rev-parse --short HEAD
+test -f hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/urdf/model.urdf && echo "A3 Isaac asset present"
 scripts/sync_external_repos.sh
 ```
 

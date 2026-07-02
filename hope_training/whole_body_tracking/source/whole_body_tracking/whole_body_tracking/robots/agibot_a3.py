@@ -191,6 +191,12 @@ AGIBOT_A3_CFG = ArticulationCfg(
         joint_vel={".*": 0.0},
     ),
     soft_joint_pos_limit_factor=0.9,
+    # ACTUATOR MODEL (Phase A, 2026-07-02): ALL groups are ImplicitActuatorCfg. AGI officially trains
+    # with IsaacLab implicit PD and the real robot's backend is close to implicit PD; the earlier
+    # IdealPDActuatorCfg (explicit) round was built on a falsified premise (implicit training already
+    # clamps torque — effort_limit_sim is written into the PhysX drive max force; the "elbow 6.7x24Nm"
+    # figure was the PRE-clip computed_effort) and IdealPD@200Hz added discrete-overshoot dynamics
+    # (wrist kd*dt/I ~ 1.3-2.5) that empirically DEGRADED the backhand. Do not reintroduce IdealPD.
     actuators={
         "legs": ImplicitActuatorCfg(
             joint_names_expr=[".*_hip_yaw_joint", ".*_hip_roll_joint", ".*_hip_pitch_joint", ".*_knee_joint"],
@@ -233,6 +239,7 @@ AGIBOT_A3_CFG = ArticulationCfg(
             damping=2.0,     # a3.py / deploy a3_kds (ankle)
             armature={".*_ankle_pitch_joint": 0.06444060531, ".*_ankle_roll_joint": 0.02012630058},
         ),
+        # EXPLICIT PD (sim2real) — see the "feet" group note. effort_limit MUST be set (explicit-cfg
         "waist": ImplicitActuatorCfg(
             joint_names_expr=["waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint"],
             effort_limit_sim={"waist_yaw_joint": 220.0, "waist_roll_joint": 46.0, "waist_pitch_joint": 118.0},

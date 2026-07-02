@@ -7,7 +7,6 @@ from rsl_rl.runners.on_policy_runner import OnPolicyRunner
 
 from isaaclab_rl.rsl_rl import export_policy_as_onnx
 
-import wandb
 from whole_body_tracking.utils.exporter import attach_onnx_metadata, export_motion_policy_as_onnx
 
 
@@ -16,6 +15,8 @@ class MyOnPolicyRunner(OnPolicyRunner):
         """Save the model and training information."""
         super().save(path, infos)
         if self.logger_type in ["wandb"]:
+            import wandb
+
             policy_path = path.split("model")[0]
             filename = policy_path.split("/")[-2] + ".onnx"
             export_policy_as_onnx(
@@ -29,9 +30,7 @@ class MyOnPolicyRunner(OnPolicyRunner):
 
 
 class MotionOnPolicyRunner(OnPolicyRunner):
-    def __init__(
-        self, env: VecEnv, train_cfg: dict, log_dir: str | None = None, device="cpu", registry_name: str = None
-    ):
+    def __init__(self, env: VecEnv, train_cfg: dict, log_dir: str | None = None, device="cpu", registry_name=None):
         super().__init__(env, train_cfg, log_dir, device)
         self.registry_name = registry_name
 
@@ -39,6 +38,8 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         """Save the model and training information."""
         super().save(path, infos)
         if self.logger_type in ["wandb"]:
+            import wandb
+
             policy_path = path.split("model")[0]
             filename = policy_path.split("/")[-2] + ".onnx"
             # rsl_rl moved obs normalization onto the policy (actor_obs_normalizer); the runner no
@@ -53,12 +54,18 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             attach_onnx_metadata(self.env.unwrapped, wandb.run.name, path=policy_path, filename=filename)
             wandb.save(policy_path + filename, base_path=os.path.dirname(policy_path))
 
-            # Link input motion artifacts to this run. W&B expects registry refs
-            # to include an alias (for example, collection:latest).
+            # Link the input motion artifact(s) to this run (lineage bookkeeping only — a W&B API
+            # failure here must not kill the training run). W&B expects registry refs to include an
+            # alias (for example, collection:latest).
             if self.registry_name is not None:
-                names = self.registry_name if isinstance(self.registry_name, (list, tuple)) else [self.registry_name]
-                for name in names:
-                    wandb.run.use_artifact(name)
+                registry_names = (
+                    self.registry_name if isinstance(self.registry_name, (list, tuple)) else [self.registry_name]
+                )
+                for registry_name in registry_names:
+                    try:
+                        wandb.run.use_artifact(registry_name)
+                    except Exception as e:
+                        print(f"[MotionOnPolicyRunner] WARNING: use_artifact({registry_name!r}) failed: {e}")
                 self.registry_name = None
 
     def log(self, locs: dict, width: int = 80, pad: int = 35) -> None:

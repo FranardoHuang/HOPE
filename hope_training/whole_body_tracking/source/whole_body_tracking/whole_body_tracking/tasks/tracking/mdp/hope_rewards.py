@@ -166,6 +166,18 @@ def arm_overreach(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     return _cmd(env, command_name).arm_overreach_frac
 
 
+def prestrike_waist_twist(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Anti twist-instead-of-step: penalize |waist_yaw|+|waist_roll| deviation from neutral BEFORE the
+    strike. Widening the racket-target box alone did NOT force footwork — the policy just rotated its
+    torso (waist yaw/roll) to face a lateral target while its feet stayed planted (arm_overreach stayed
+    ~0, legs frozen). This term makes that twist costly during the approach, so getting behind a far
+    target requires STEPPING. Gated by ``pre_strike`` ONLY (the strike swing's rotation is untouched) and
+    ``waist_pitch`` is excluded (that is the swing wind-up / lean, not a lateral-reach cheat). Returns a
+    positive magnitude (radians); the RewTerm weight is negative."""
+    cmd = _cmd(env, command_name)
+    return cmd.waist_twist * cmd.pre_strike.float()
+
+
 # --- strike-window stability (penalize wobble/bob/skate AT the hit; gated to the strike window) - #
 def strike_proj_grav_xy(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Penalize base tilt (||projected_gravity_xy||) DURING the strike window — be upright at the hit."""
@@ -179,6 +191,18 @@ def strike_base_ang_vel(env: ManagerBasedRLEnv, command_name: str) -> torch.Tens
     return cmd.base_ang_vel_xy_norm * cmd.strike_window.float()
 
 
+def prestrike_proj_grav_xy(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Sim2real balance shaping (CHANGE 3): penalize base/torso forward TILT (||projected_gravity_xy||, a
+    POSITION quantity) DURING the approach (pre_strike). Together with the existing strike-window
+    ``strike_upright`` this keeps the CoM over the support base THROUGH the whole swing — the forward
+    pitch-over is exactly the AGI-MuJoCo failure mode. Deliberately NOT an angular-velocity penalty: a
+    base-ang-vel penalty is anti-correlated with swing power and is gameable; projected-gravity tilt is a
+    pose, so it does not fight the swing. Gated by pre_strike ONLY (the strike window is covered by
+    strike_upright). Positive magnitude; the RewTerm weight is NEGATIVE."""
+    cmd = _cmd(env, command_name)
+    return cmd.proj_grav_xy * cmd.pre_strike.float()
+
+
 def strike_foot_velocity(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Penalize foot motion (sum ||foot_velocity||²) DURING the strike window — plant for the hit."""
     cmd = _cmd(env, command_name)
@@ -189,3 +213,50 @@ def strike_vertical_bob(env: ManagerBasedRLEnv, command_name: str) -> torch.Tens
     """Penalize vertical base velocity (|base_lin_vel_z|) DURING the strike window — no bob at the hit."""
     cmd = _cmd(env, command_name)
     return cmd.vertical_speed * cmd.strike_window.float()
+
+
+# ============================================================================================== #
+# Sim2real: torque-saturation penalty (CHANGE 2). Discourage the policy from demanding torque the
+# EXPLICIT clipped-PD motor cannot deliver. Under IdealPDActuatorCfg the model computes the pre-clip
+# effort (kp*(q_des-q)+kd*(-qd)) and clips it to ±effort_limit; the ratio |computed| / effort_limit >1
+# is exactly the over-demand that lags on the real robot. Penalizing the mean over-limit fraction over
+# the arm + waist joints teaches a swing that lives inside the torque envelope (the elbow was measured
+# at ~6.7x its 24 Nm limit in the failing trace). Uses ``data.computed_torque`` (Isaac copies each
+# actuator's PRE-clip computed_effort into it) and ``data.joint_effort_limits`` (the per-joint sim
+# limit written from effort_limit_sim). Both degrade to a 0 reward if unavailable, so it can never crash.
+# ============================================================================================== #
+_TORQUE_SAT_JOINT_EXPR = [".*shoulder.*", ".*elbow.*", ".*wrist.*", "waist_.*_joint"]
+
+
+def _torque_sat_joint_idx(env: ManagerBasedRLEnv, command_name: str):
+    """Resolve+cache the arm+waist joint indices on the command term (once)."""
+    cmd = _cmd(env, command_name)
+    idx = getattr(cmd, "_torque_sat_joint_idx", None)
+    if idx is None:
+        try:
+            idx = list(cmd.robot.find_joints(_TORQUE_SAT_JOINT_EXPR)[0])
+        except Exception:
+            idx = []
+        cmd._torque_sat_joint_idx = idx  # cache (empty list means "unresolvable")
+    return cmd, idx
+
+
+def arm_torque_saturation(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Mean over-limit fraction of the COMPUTED (pre-clip) effort over the arm + waist joints:
+    ``mean_j relu(|computed_torque_j| / effort_limit_j - 1)``. 0 when every arm/waist joint is inside its
+    torque envelope; grows as the swing demands un-deliverable torque (the explicit-PD saturation that
+    tips the free base in AGI's MuJoCo). Positive magnitude; the RewTerm weight is NEGATIVE."""
+    cmd, idx = _torque_sat_joint_idx(env, command_name)
+    data = cmd.robot.data
+    tau = getattr(data, "computed_torque", None)
+    lim = getattr(data, "joint_effort_limits", None)
+    if not idx or tau is None or lim is None:
+        z = torch.zeros(cmd.num_envs, device=cmd.device)
+        cmd.metrics["arm_torque_sat_frac"] = z
+        return z
+    tau_a = torch.abs(tau[:, idx])
+    lim_a = lim[:, idx].clamp(min=1e-3)  # guard against a 0/inf limit
+    over = (tau_a / lim_a - 1.0).clamp(min=0.0)  # relu(ratio - 1): the un-deliverable fraction
+    frac = over.mean(dim=-1)
+    cmd.metrics["arm_torque_sat_frac"] = frac  # watch-metric: should fall toward 0 during fine-tune
+    return frac

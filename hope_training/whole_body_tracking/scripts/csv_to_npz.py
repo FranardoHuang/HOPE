@@ -1,16 +1,24 @@
-"""This script replay a motion from a csv file and output it to a npz file
+"""Replay a retargeted CSV motion and save it as a local ``.npz`` reference.
 
 .. code-block:: bash
 
     # Usage
     python csv_to_npz.py --input_file LAFAN/dance1_subject2.csv --input_fps 30 --frame_range 122 722 \
-    --output_file ./motions/dance1_subject2.npz --output_fps 50
+        --output_file ./motions/dance1_subject2.npz --output_fps 50 --headless
+
+    # Backwards-compatible name shortcut:
+    python csv_to_npz.py --input_file forehand.csv --output_name hope_forehand --headless
+
+    # Optional WandB upload:
+    python csv_to_npz.py --input_file forehand.csv --output_file ./motions/hope_forehand.npz \
+        --output_name hope_forehand --upload_wandb --headless
 """
 
 """Launch Isaac Sim Simulator first."""
 
 import argparse
-import os
+from pathlib import Path
+
 import numpy as np
 
 from isaaclab.app import AppLauncher
@@ -29,10 +37,21 @@ parser.add_argument(
         " loaded."
     ),
 )
-parser.add_argument("--output_name", type=str, required=True, help="The name of the motion npz file.")
-parser.add_argument("--output_file", type=str, default="/tmp/motion.npz", help="Where to write the local motion npz.")
-parser.add_argument("--no_upload", action="store_true", help="Write the local npz and skip WandB upload.")
+parser.add_argument(
+    "--output_file",
+    type=str,
+    default=None,
+    help="Where to save the output .npz. If omitted, --output_name or the input stem is used.",
+)
+parser.add_argument(
+    "--output_name",
+    type=str,
+    default=None,
+    help="Backwards-compatible output base name, and the WandB artifact name when --upload_wandb is set.",
+)
 parser.add_argument("--output_fps", type=int, default=50, help="The fps of the output motion.")
+parser.add_argument("--upload_wandb", action="store_true", help="Upload the saved .npz to a WandB Motions registry.")
+parser.add_argument("--wandb_project", type=str, default="csv_to_npz", help="WandB project for optional upload.")
 parser.add_argument(
     "--hope_frame",
     choices=("auto", "on", "off"),
@@ -60,6 +79,21 @@ parser.add_argument(
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
 args_cli = parser.parse_args()
+
+
+def _resolve_output_file() -> Path:
+    if args_cli.output_file:
+        path = Path(args_cli.output_file).expanduser()
+    else:
+        name = args_cli.output_name or Path(args_cli.input_file).stem
+        path = Path(name).expanduser()
+    if path.suffix.lower() != ".npz":
+        path = path.with_suffix(".npz")
+    return path
+
+
+args_cli.output_file = str(_resolve_output_file())
+args_cli.output_name = args_cli.output_name or Path(args_cli.output_file).stem
 
 # launch omniverse app
 app_launcher = AppLauncher(args_cli)
@@ -387,29 +421,26 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, joi
 
             log = _apply_hope_frame_alignment(log)
 
-            np.savez(args_cli.output_file, **log)
-            print(f"[INFO]: Motion saved locally: {args_cli.output_file}")
+            output_file = Path(args_cli.output_file)
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            np.savez(output_file, **log)
+            print(f"[INFO]: Motion saved to local npz: {output_file}")
 
-            if args_cli.no_upload:
-                return
+            if args_cli.upload_wandb:
+                import wandb
 
-            import wandb
-
-            COLLECTION = args_cli.output_name
-            entity = os.environ.get("WANDB_ENTITY") or None
-            project = os.environ.get("WANDB_MOTION_PROJECT", "csv_to_npz")
-            registry_org = os.environ.get("WANDB_REGISTRY_ORG", entity or "")
-            run = wandb.init(entity=entity, project=project, name=COLLECTION)
-            print(f"[INFO]: Logging motion to wandb: entity={entity} project={project} collection={COLLECTION}")
-            REGISTRY = "motions"
-            artifact = wandb.Artifact(name=COLLECTION, type=REGISTRY)
-            artifact.add_file(args_cli.output_file, name="motion.npz")
-            logged_artifact = run.log_artifact(artifact)
-            run.link_artifact(artifact=logged_artifact, target_path=f"wandb-registry-{REGISTRY}/{COLLECTION}")
-            run.finish()
-            print(f"[INFO]: Motion saved to wandb registry: {REGISTRY}/{COLLECTION}")
-            if registry_org:
-                print(f"[INFO]: Expected registry path: {registry_org}/wandb-registry-{REGISTRY}/{COLLECTION}:latest")
+                collection = args_cli.output_name
+                run = wandb.init(project=args_cli.wandb_project, name=collection)
+                print(f"[INFO]: Logging motion to wandb: {collection}")
+                registry = "motions"
+                # Store the file under the canonical name "motion.npz" inside the artifact,
+                # regardless of the local output filename (train.py downloads <artifact>/motion.npz).
+                artifact = wandb.Artifact(name=collection, type=registry)
+                artifact.add_file(str(output_file), name="motion.npz")
+                logged_artifact = run.log_artifact(artifact)
+                run.link_artifact(artifact=logged_artifact, target_path=f"wandb-registry-{registry}/{collection}")
+                run.finish()
+                print(f"[INFO]: Motion saved to wandb registry: {registry}/{collection}")
             return
 
 

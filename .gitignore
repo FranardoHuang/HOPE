@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 tmp/
+.codex-tmp/
+.vscode/
+pw.txt
+Miniconda3-latest-Linux-x86_64.sh
 vendor_assets/
 external_repos/
 build/
@@ -24,6 +28,7 @@ hope_training/motions/
 hope_training/whole_body_tracking/logs/
 hope_training/whole_body_tracking/outputs/
 hope_training/whole_body_tracking/artifacts/
+hope_training/whole_body_tracking/.hitter_align_backup/
 
 hope_training/wandb/
 hope_training/whole_body_tracking/wandb/

@@ -25,6 +25,8 @@ It does not mean blindly copying the HITTER implementation details. Hardware, mo
 
 `Gate` describes a verifiable project milestone. Gates can share folders and can overlap in time, but each gate needs its own target, inputs, outputs, and acceptance criteria.
 
+`Reimplementation step` describes a long-form command/runbook section in `reimplement.md`. A step can provide useful command detail, but it is not accepted by itself. It must be tied back to the relevant gate and operation doc before work is considered current.
+
 ## Core Frames
 
 - `world`: HOPE table/world frame. Use ROS REP 103: X forward toward opponent, Y left, Z up.

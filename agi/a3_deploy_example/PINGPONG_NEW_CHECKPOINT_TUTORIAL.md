@@ -18,6 +18,23 @@ to AGI's robot-IO backend.
 > native `a3_deploy_onnx_ref` runner cannot load our ONNX, which is exactly why we ship
 > a separate `a3_deploy_onnx_ref_pingpong` binary with our own C++ front-end.
 
+> ### 🔴 CURRENT DEPLOY (2026-07-02) — read before going to the robot
+> **Shipped policy: `model_p4_deployparity.onnx` — 175-D obs / 31-act**, all-implicit-PD
+> training (matches the real actuation). The worked example throughout Stages 1–4 uses the
+> older 180-D `model_15200` — that's fine, the **same** binary auto-detects 175 vs 180 from
+> the ONNX input; only the obs width differs. The runner config already points at p4:
+> [`config/a3_runtime_config.pingpong.yaml`](src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml).
+>
+> **Deploy FOREHAND ONLY.** p4 forehand passed the AGI-MuJoCo gate (10 clean cycles, 0 guard
+> trips); **backhand is NOT deploy-ready** on any model. On the robot press `1`/`f`; **never `b`.**
+>
+> **⚠️ The staged `dist/a3_deploy_rockchip/` (what ships to the robot) is STALE** — a
+> 2026-07-01 binary carrying `model_15200` and **none** of the 07-02 sim2real fall fixes.
+> The x86 dist is current; the rockchip one is not. **You MUST rebuild rockchip (Stage 5)
+> with p4 before shipping** (the builder auto-stages the model — no manual copy). Sim
+> recheck first with `scripts/pp_freebase_watch.sh`, then Stage 5 → Stage 6, low gain,
+> `--single-swing`, forehand only.
+
 ---
 
 ## 0. The three environments (read this first)
@@ -596,9 +613,11 @@ expected — the container has it). One command.
 > ⚠️ **Always re-run this build after editing the runner** (`pp_*` headers, `*main.cpp`)
 > — `dist/a3_deploy_rockchip/` is NOT auto-rebuilt and will silently ship a stale binary.
 > **Gate before shipping:** `strings dist/a3_deploy_rockchip/a3_deploy_onnx_ref_pingpong |
-> grep -E "RUN CONFIG|f=forehand|localization mode ="` must print (these markers prove the
-> *latest* runner — CONFIG banner + backhand keys — is baked in), and the binary mtime must
-> be from *this* build (see [[hope-a3-deploy-bringup-findings]] stale-binary detection).
+> grep -E "swing complete|clip layout from ONNX"` must print — these markers are UNIQUE to
+> the 2026-07-02 binary (the single-swing + ONNX-clip-metadata fixes). Do **not** gate on
+> `RUN CONFIG`/`f=forehand`: those are present in the stale Jul-01 binary too and give false
+> confidence. Also confirm the binary mtime is from *this* build (see
+> [[hope-a3-deploy-bringup-findings]] stale-binary detection).
 
 ```bash
 # HOST terminal (not distrobox). Do NOT source ROS here.
@@ -613,13 +632,50 @@ bash scripts/build_a3_deploy_pkg.sh \
 # confirm the package + that the binary is really aarch64 AND has the latest runner:
 ls -la dist/a3_deploy_rockchip/a3_deploy_onnx_ref_pingpong    # mtime must be from THIS build
 file   dist/a3_deploy_rockchip/a3_deploy_onnx_ref_pingpong   # -> ELF 64-bit ... ARM aarch64
-strings dist/a3_deploy_rockchip/a3_deploy_onnx_ref_pingpong | grep -E "RUN CONFIG|f=forehand" \
-  || echo "!! STALE BUILD — wipe build/a3_pkg_rockchip and rebuild before shipping"
+# Gate on markers UNIQUE to the 2026-07-02 binary. NOTE: "RUN CONFIG"/"f=forehand" are
+# ALSO in the old Jul-01 stale binary, so they do NOT discriminate — use these instead:
+strings dist/a3_deploy_rockchip/a3_deploy_onnx_ref_pingpong | grep -E "swing complete|clip layout from ONNX" \
+  || echo "!! STALE BUILD (pre-07-02) — wipe build/a3_pkg_rockchip and rebuild before shipping"
 
 ls -la dist/a3_deploy_rockchip/config/a3_runtime_config.pingpong.yaml
-ls -la dist/a3_deploy_rockchip/models/model_15200.onnx
+grep  model_path dist/a3_deploy_rockchip/config/a3_runtime_config.pingpong.yaml  # -> models/model_p4_deployparity.onnx
+ls -la dist/a3_deploy_rockchip/models/model_p4_deployparity.onnx
 ls -la dist/a3_deploy_rockchip/run_a3_pingpong.sh
 ```
+
+### ⚠️ If `config/` or `models/` came out EMPTY after the build (host-staging failure — 2026-07-02)
+
+The rockchip build compiles the binaries **inside Docker**, but the asset-staging step
+(`stage_runtime_config_and_assets` — copies the ONNX into `models/`, writes the runtime cfg,
+emits `run_a3_pingpong.sh`) runs **on the HOST afterwards** and needs `python3` + **PyYAML**
+on the host. The host usually has neither, so staging **fails silently**: you get fresh
+aarch64 binaries but `models/` is empty and `config/` has no `a3_runtime_config*.yaml`. The
+MDU then dies with `terminate ... YAML::BadFile: config/a3_runtime_config.pingpong.yaml`.
+
+**Fix — copy the arch-independent assets from the x86 dist.** The ONNX, the yaml configs and
+the run scripts are **identical across arch** (only the ELF binaries differ), so build the x86
+package first (Stage 3.3), then:
+```bash
+cd ~/workspace/HOPE/agi/a3_deploy_example
+SRC=dist/a3_deploy_x86_64; DST=dist/a3_deploy_rockchip
+# runtime + aimrt configs (yaml/xml):
+cp "$SRC"/config/a3_runtime_config.pingpong.yaml "$SRC"/config/a3_runtime_config.yaml "$DST"/config/
+cp "$SRC"/config/a3_aimrt_config.yaml "$SRC"/config/a3_aimrt_config.iceoryx.yaml \
+   "$SRC"/config/a3_aimrt_config.ros2.yaml "$SRC"/config/a3_aimrt_config.pingpong_iceoryx.yaml "$DST"/config/
+# model (same onnx both arches):
+mkdir -p "$DST"/models
+cp "$SRC"/models/model_p4_deployparity.onnx "$DST"/models/
+# run scripts (bash):
+cp "$SRC"/run_a3_pingpong.sh "$SRC"/run_a3.sh "$SRC"/run_a3_probe.sh "$SRC"/setup_ros2_msgs.bash "$DST"/
+# verify complete:
+grep model_path "$DST"/config/a3_runtime_config.pingpong.yaml   # -> models/model_p4_deployparity.onnx (already correct — no edit)
+ls -la "$DST"/models/model_p4_deployparity.onnx "$DST"/config/a3_runtime_config.pingpong.yaml
+file  "$DST"/a3_deploy_onnx_ref_pingpong                        # -> aarch64
+strings "$DST"/a3_deploy_onnx_ref_pingpong | grep -E "swing complete|clip layout from ONNX"
+```
+(Alternative: `pip install pyyaml` on the host and rebuild — but the copy is faster and
+proven. The `model_path` copied from x86 is already `models/model_p4_deployparity.onnx`, so
+no manual edit is needed.)
 
 ### Ship it to the MDU through the HDU jump host
 
@@ -683,10 +739,14 @@ cut inference-latency jitter. Keep `--gain-scale 0.4` until you've seen it stabl
 RT=config/a3_runtime_config.pingpong.yaml
 
 # 6.2a  DRY-RUN / receive-only (PASSIVE, limp): verify the 6 state topics + sync.
+#   --single-swing = play the clip ONCE then auto-hold stand (no end->windup snap); press
+#   `1` for each forehand. Recommended for robot bring-up. (Same session drives 6.2a–e;
+#   you do NOT relaunch between key presses.)
 taskset -c 4-7 ./a3_deploy_onnx_ref_pingpong --runtime-cfg $RT \
-  --start passive --legs-passive --gain-scale 0.4 \
+  --start passive --legs-passive --gain-scale 0.4 --single-swing \
   --trace-csv /tmp/pp_trace.csv --obs-csv /tmp/pp_obs.csv
 #   WATCH: 6 topics ready, sync_complete / sync_aligned stable.
+#   (If it says "required robot env not found", source /agibot/software/v0/entry/env/env.sh first.)
 
 # 6.2b  PROBE latency in SHADOW: press `h` (compute, NO publish). Read the FIRST-TICK DUMP.
 #   WATCH: rate ≈ 50 Hz, infer_ms < 20 ms, proj_grav ≈ [0,0,-1], |action| bounded, robot still.
@@ -697,7 +757,9 @@ taskset -c 4-7 ./a3_deploy_onnx_ref_pingpong --runtime-cfg $RT \
 #   Also confirm `p` and Ctrl-C both stop it. Re-arm only when you're ready.
 
 # 6.2e  LOW-GAIN MOTION: press `m` (still --gain-scale 0.4). Then `0` (hold-windup) FIRST.
-#   Only after level 0 is visibly stable: press `1` (forehand). Watch neck/wrist.
+#   Only after level 0 is visibly stable: press `1` for ONE forehand (--single-swing auto-
+#   holds stand after each swing; press `1` again to repeat). FOREHAND ONLY — never press
+#   `b` (backhand is not deploy-ready). Watch neck/wrist.
 ```
 
 Mapping to runner modes: PASSIVE=`p`/`--start passive`, SHADOW=`h`/`--dry-run`,
@@ -708,6 +770,58 @@ PD_STAND=`s`, MOTION=`m`, level=`0`/`1`, gain=`--gain-scale`/`[`,`]`.
 > EtherCAT/network/sync/PD_STAND/e-stop chain **with AGI's own policy** (it cannot load
 > our 180/31 ONNX). It's worth running once to validate the hardware harness; our policy
 > then runs through the `a3_deploy_onnx_ref_pingpong` binary as above.
+
+### 6.2f Leg modes — upper-body vs whole-body vs pure policy (hard-won 2026-07-02)
+
+The 6.2 flow uses `--legs-passive` = **upper-body only** (legs frozen at nominal; only
+waist+arms swing) — stable, the safest first pass, but **not** whole-body. Beyond it there are
+three modes; the right one depends on **how the feet bear weight**. `RT=config/a3_runtime_config.pingpong.yaml`.
+
+**A. Upper-body only — `--legs-passive`.** Legs held stiff at nominal. Good for the first swing
+on a hoist. (What 6.2 shows.)
+
+**B. Whole-body, weight-bearing — `--auto-leg-hold`.** Legs+waist HELD at level 0 (stable ready
+stand), RELEASED to the policy at level 1 (self-balancing swing); a squat/tilt guard reverts to
+level 0 if a leg sinks or the body tilts. Do **not** just delete `--legs-passive` (that lets the
+policy drive the legs even while standing → collapse). Feet must bear weight, so the held stand
+needs real gains:
+```bash
+# feet on the ground, rope as a catch:
+taskset -c 4-7 ./a3_deploy_onnx_ref_pingpong --runtime-cfg $RT \
+  --start passive --auto-leg-hold --official-stand --leg-gain-scale 1.0 \
+  --gain-scale 0.4 --single-swing
+```
+- `--official-stand` gives the HELD legs+waist AGI's ground-stand gains so they don't sag
+  (without it the held waist gets only policy_kp×0.4 ≈ 20 and the torso topples).
+- Released-leg stiffness = **`--leg-gain-scale`** (policy kp × scale): start 1.0, step
+  1.0→1.5→2.0 if the knees sink; add `--ankle-gain-scale 1.5` if it pitches forward.
+- **Do NOT use `--leg-stand-gains`** here — it forces AGI's kp≈2000 onto the *released, moving*
+  legs and **oscillates/buzzes into a protection trip** on a partially-hoisted base (observed
+  2026-07-02). `--leg-gain-scale` is the safe middle knob (no kp2000 cliff).
+
+**C. Pure policy ("和 policy 一样") — no holds, no scaling.** The policy drives all 31 joints with
+the trained implicit-PD gains at gain 1.0 (neck stays passive by contract). This is the real
+self-balancing policy and it **requires the robot fully on the ground bearing its own weight**
+(rope slack, catch only) — the condition it was trained on; on a hoist it flails (OOD).
+```bash
+# robot fully on the ground, feet bearing full weight, e-stop in hand:
+taskset -c 4-7 ./a3_deploy_onnx_ref_pingpong --runtime-cfg $RT \
+  --start passive --official-stand --single-swing
+```
+- KEY: with NO `--auto-leg-hold`/`--legs-passive`, `--official-stand` **only sets the `s`
+  PD_STAND hold gains — it does NOT touch the MOTION policy gains** (`leg_official`/`waist_held_off`
+  in `a3_pingpong_main.cpp` are both false without those flags). So `s` stands the robot up firmly
+  and `m` hands off to the pure policy (knee kp≈250 trained, etc.) unchanged.
+- Without `--official-stand`, `s` uses the gentle hoist PD (kp≈60) which **cannot bear weight on
+  the ground → "no force", collapses.** PD_STAND is a hold mode, not the policy.
+- `--gain-scale` omitted = 1.0 = exactly the policy. Lower it (e.g. 0.8) only to soften all gains
+  uniformly (no freezing) for a safety margin — but 1.0 is the true policy.
+
+> **Partial hoist is the WORST regime for gain tuning.** With the rope taking part of the weight
+> (feet lightly loaded), kp2000 (`--official-stand` stand / `--leg-stand-gains`) buzzes, while
+> gentle gains sag — you can't win. Commit to ONE clean state: **fully on the ground** (weight on
+> feet, rope slack) for whole-body / pure policy, OR **fully hoisted** for an upper-body-only
+> (`--legs-passive`) check.
 
 ### 6.3 Hardware verification gate
 
@@ -840,10 +954,11 @@ RUN=/agibot/a3_deploy/logs/agi_capture/$(date +%Y%m%d_%H%M%S); mkdir -p "$RUN"
 
 # DRY-RUN/PASSIVE receive-only -> SHADOW probe -> PD_STAND -> low-gain MOTION, all captured.
 # keys: h (SHADOW: obs/IO health, ts FROZEN — no swing) -> s (PD_STAND) -> m (MOTION: clock runs)
-#       -> ] ] (step gain toward 1.0) -> 1 (swing) -> dwell ~10s -> b (backhand) ~10s -> f -> q
+#       -> 1 (ONE forehand; --single-swing auto-holds stand after, press 1 to repeat) -> q
+# FOREHAND ONLY — never press `b` (backhand is not deploy-ready). Keep gain 0.4 for bring-up.
 # The SWING is captured only in the MOTION portion; SHADOW/PD_STAND log holding poses.
 taskset -c 4-7 ./a3_deploy_onnx_ref_pingpong --runtime-cfg $RT \
-  --start passive --legs-passive --gain-scale 0.4 \
+  --start passive --legs-passive --gain-scale 0.4 --single-swing \
   --trace-csv "$RUN/trace.csv" --obs-csv "$RUN/obs.csv" 2>&1 | tee "$RUN/status.log"
 
 sed -n '/FIRST-TICK DEBUG/,/^==*$/p' "$RUN/status.log" > "$RUN/first_tick.txt"
@@ -1031,22 +1146,21 @@ sed -n '/FIRST-TICK DEBUG/,/^==*$/p' "$RUN/status.log" > "$RUN/first_tick.txt"
 > it's not a useful preview either → rebuild + reship (below). (To force the old behavior:
 > `--shadow-frozen-clock`.)
 >
-> **Stale-binary check (do this first):** the **RUN CONFIG** banner must show the
-> `target_src` / `action_src` / `post_onnx` lines, the `[status]` line must contain
-> `sync_miss=` **and** `legs_passive=`, and each status block must print a **`[fullbody]`** line.
-> If any are missing, the MDU is running an **old rockchip binary** — cross-build from the HOST,
-> re-stage `dist/a3_deploy_rockchip/`, and reship before trusting this stage:
+> **Stale-binary check (do this first):** gate on markers **unique to the 2026-07-02 binary**
+> — `swing complete` and `clip layout from ONNX`. (Do NOT gate on `target_src` / `fullbody` /
+> `RUN CONFIG` / `auto_hold`: the stale Jul-01 rockchip binary has all of those too, so they
+> give false confidence.) If the unique markers are missing, the MDU is running an **old
+> rockchip binary** — cross-build from the HOST (the builder auto-stages the model from the
+> runtime cfg; **no manual `cp` of the ONNX**), then reship:
 > ```bash
 > # HOST shell (NOT distrobox — needs docker, no ROS):
 > cd ~/workspace/HOPE/agi/a3_deploy_example
-> scripts/build_a3_deploy_pkg.sh --arch rockchip
-> mkdir -p dist/a3_deploy_rockchip/{config,models}
-> cp src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml       dist/a3_deploy_rockchip/config/
-> cp src/a3/a3_deploy_onnx_ref/config/a3_aimrt_config.pingpong_iceoryx.yaml dist/a3_deploy_rockchip/config/
-> cp assets/a3_runtime/models/model_15200.onnx                             dist/a3_deploy_rockchip/models/
-> # verify it's ARM AND has the new code, then reship to the MDU deploy dir:
-> file dist/a3_deploy_rockchip/a3_deploy_onnx_ref_pingpong          # -> aarch64
-> strings dist/a3_deploy_rockchip/a3_deploy_onnx_ref_pingpong | grep -E "shadow-frozen-clock|fullbody|target_src" | head
+> scripts/build_a3_deploy_pkg.sh --arch rockchip \
+>   --runtime-cfg src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml --jobs $(nproc)
+> # verify it's ARM, points at p4, AND has the 07-02 code, then reship:
+> file    dist/a3_deploy_rockchip/a3_deploy_onnx_ref_pingpong          # -> aarch64
+> grep    model_path dist/a3_deploy_rockchip/config/a3_runtime_config.pingpong.yaml  # -> models/model_p4_deployparity.onnx
+> strings dist/a3_deploy_rockchip/a3_deploy_onnx_ref_pingpong | grep -E "swing complete|clip layout from ONNX" | head
 > rsync -azP -e "ssh -J agi@<HDU_WIFI_IP>" dist/a3_deploy_rockchip/ agi@<MDU_IP>:/agibot/a3_deploy/
 > ```
 > (MDU deploy dir = `/agibot/a3_deploy` — the runner's `Executable Path` in the AimRT init report.
@@ -1210,16 +1324,17 @@ with **Terminal A already running HAL/EtherCAT** (Stage 6.1).
 ```bash
 cd /agibot/a3_deploy
 file ./a3_deploy_onnx_ref_pingpong     # -> ELF 64-bit ... aarch64
-strings ./a3_deploy_onnx_ref_pingpong | grep -E "fullbody|leg_hold|waist_hold|auto_hold" | head
-#   MUST print all four (auto_hold = THIS build, the --auto-leg-hold ready<->swing feature).
-#   Missing any -> stale binary -> rebuild rockchip + reship (Stage C box).
+strings ./a3_deploy_onnx_ref_pingpong | grep -E "swing complete|clip layout from ONNX" | head
+#   MUST print BOTH — they are unique to the 2026-07-02 binary. (Do NOT rely on
+#   fullbody/auto_hold/target_src: the stale Jul-01 binary has those too.)
+#   Missing -> stale binary -> rebuild rockchip with the pingpong --runtime-cfg + reship (Stage 5 / re-stage box).
 ```
 
 - [ ] **Config points at the intended ONNX** and it exists:
 
 ```bash
-grep -E '^[[:space:]]*model_path' config/a3_runtime_config.pingpong.yaml   # -> ../models/model_15200.onnx
-ls -la models/model_15200.onnx
+grep -E '^[[:space:]]*model_path' config/a3_runtime_config.pingpong.yaml   # -> models/model_p4_deployparity.onnx
+ls -la models/model_p4_deployparity.onnx
 ```
 
 - [ ] In the **RUN CONFIG banner** (printed at startup) confirm: `legs_passive = false`,

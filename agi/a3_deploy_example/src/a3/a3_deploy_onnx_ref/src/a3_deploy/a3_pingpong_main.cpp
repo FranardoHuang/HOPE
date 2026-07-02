@@ -178,23 +178,26 @@ void PrintObsDebugBlock(const a3_pingpong::PpPolicy::ObsDebug& d,
                         const Eigen::VectorXd& action) {
   if (!d.valid) return;
   const auto& o = d.obs;
+  const bool dp = (o.size() == a3_pingpong::kObsDim175);  // deploy_parity (175) vs full (180)
   const double omin = o.minCoeff(), omax = o.maxCoeff(), omean = o.mean();
-  const double anchor_pos_norm = o.segment<3>(62).norm();
-  std::printf(" [obs] loc=%s oracle(en=%d fresh=%d age=%.3fs) sync_miss=%llu | "
+  std::printf(" [obs] loc=%s oracle(en=%d fresh=%d age=%.3fs) sync_miss=%llu | dim=%ld "
               "obs[min/mean/max]=[%.3f %.3f %.3f]\n",
               d.oracle_enabled ? "oracle" : "non-oracle",
               d.oracle_enabled ? 1 : 0, d.oracle_fresh ? 1 : 0, d.oracle_age_s,
-              (unsigned long long)d.sync_miss, omin, omean, omax);
-  std::printf("   motion_anchor_pos_b=[%+.4f %+.4f %+.4f] |.|=%.4f  "
-              "base_target_pos_b=[%+.4f %+.4f]\n",
-              o[62], o[63], o[64], anchor_pos_norm, o[170], o[171]);
-  // racket_target_pos_b (172:174) is the SCRIPTED target in the robot frame;
-  // racket_target_vel_w (175:177) the scripted strike velocity (world); swing
-  // (179) +1=FOREHAND/-1=BACKHAND; tts (178) the strike clock (0 at contact).
+              (unsigned long long)d.sync_miss, (long)o.size(), omin, omean, omax);
+  // 175-D deploy_parity DROPS motion_anchor_pos_b + base_target_pos_b and shifts everything after
+  // motion_anchor_ori_b down by 3, then by a further 2. Racket-target block start differs per layout.
+  if (!dp) {
+    const double anchor_pos_norm = o.segment<3>(62).norm();
+    std::printf("   motion_anchor_pos_b=[%+.4f %+.4f %+.4f] |.|=%.4f  base_target_pos_b=[%+.4f %+.4f]\n",
+                o[62], o[63], o[64], anchor_pos_norm, o[170], o[171]);
+  }
+  // racket_target_pos_b: full 180 -> o[172..174] (rel base); deploy 175 -> o[167..169] (rel racket FK).
+  const int rp = dp ? 167 : 172;  // racket_target_pos_b start (vel_w follows, then tts, swing)
   std::printf("   racket_target_pos_b=[%+.4f %+.4f %+.4f]  racket_target_vel_w=[%+.3f %+.3f %+.3f]  "
               "tts=%.3f swing=%+.0f(%s)  [SCRIPTED target -- no live planner]\n",
-              o[172], o[173], o[174], o[175], o[176], o[177], o[178], o[179],
-              o[179] >= 0 ? "FOREHAND" : "BACKHAND");
+              o[rp], o[rp + 1], o[rp + 2], o[rp + 3], o[rp + 4], o[rp + 5], o[rp + 6], o[rp + 7],
+              o[rp + 7] >= 0 ? "FOREHAND" : "BACKHAND");
   if (action.size() == a3_pingpong::kNumJoints)
     std::printf("   action[min/mean/max]=[%+.3f %+.3f %+.3f] |a|=%.3f\n",
                 action.minCoeff(), action.mean(), action.maxCoeff(), action.norm());
@@ -356,6 +359,18 @@ int main(int argc, char** argv) {
   // +y and selects the baked backhand clip. Toggle live with f/b. (No live planner.)
   pcfg.start_backhand = Has(argc, argv, "--backhand");
   pcfg.oracle_max_age_s = oracle_max_age_s;
+  // SINGLE-SWING / REST: avoid the periodic clock's end->windup reference SNAP (untracked
+  // in training; topples the free-base backhand). --single-swing: one swing per '1' press,
+  // then held stand. --swing-rest S: swing, rest S seconds at held stand, swing again
+  // (continuous demo, every swing from a clean windup start).
+  pcfg.single_swing = Has(argc, argv, "--single-swing");
+  if (Has(argc, argv, "--swing-rest"))
+    pcfg.swing_rest_s = std::stod(Flag(argc, argv, "--swing-rest", "1.5"));
+  // YAW-ALIGN default ON (hardware fix: boot-drifted IMU yaw polluted motion_anchor_ori_b
+  // by a constant -12..-38 deg in MDU captures -> the policy fought a fictional torso yaw
+  // error with legs/waist and fell during free-standing swings; no-op in sim). Opt out for
+  // A/B debugging only.
+  pcfg.yaw_align = !Has(argc, argv, "--no-yaw-align");
   auto pp = std::make_unique<a3_pingpong::PpPolicy>(model_path, pcfg);
 
   // ---- SIM-ONLY oracle localization wiring ----
@@ -441,7 +456,7 @@ int main(int argc, char** argv) {
     obscsv.open(obs_csv_path);
     if (obscsv) {
       obscsv << "tick,ts,mode,loc_mode,oracle_fresh,oracle_age_s,sync_miss,legs_passive";
-      for (int i = 0; i < a3_pingpong::kObsDim; ++i) obscsv << ",obs_" << i;
+      for (int i = 0; i < pp->onnx().obs_dim(); ++i) obscsv << ",obs_" << i;
       for (int i = 0; i < a3_pingpong::kNumJoints; ++i) obscsv << ",act_" << i;
       obscsv << "\n";
       std::cout << "[pingpong] obs CSV -> " << obs_csv_path
@@ -488,7 +503,12 @@ int main(int argc, char** argv) {
   // SQUAT/TILT SAFETY GUARD (auto-leg-hold full-body swing only): revert to level 0 (re-engage the
   // held official stand) if a released leg SINKS (knee bends past nominal by > --squat-guard-rad) or
   // the body TILTS (|gravX| or |gravY| > --tilt-guard). <=0 disables that check. A hoist-test backstop.
-  const double squat_guard_rad = std::stod(Flag(argc, argv, "--squat-guard-rad", "0.6"));
+  // DEFAULT 1.4 (was 0.6): the trip point is nominal_knee(0.247)+guard, and the v2 clip's OWN
+  // reference crouch starts at knee 0.62 with swing flexion commanding ~1.14 — a 0.6 guard sits
+  // INSIDE the trained swing envelope, so it fired on a healthy swing at ~5 deg tilt and the
+  // kp-2000 official-stand snap-back CATAPULTED the robot backward (the captured 2026-07-02 fall).
+  // 1.4 (trip at ~1.65) still catches a genuine leg collapse; real tilt is the tilt guard's job.
+  const double squat_guard_rad = std::stod(Flag(argc, argv, "--squat-guard-rad", "1.4"));
   const double tilt_guard = std::stod(Flag(argc, argv, "--tilt-guard", "0.35"));
   // LEG WEIGHT-BEARING: the released (level-1) legs default to the POLICY leg PD x --leg-gain-scale,
   // whose kp (~150 knee) is ~13x softer than AGI's official ground-stand knee kp (2000) -> the knees
@@ -508,6 +528,7 @@ int main(int argc, char** argv) {
   std::uint64_t motion_enter_tick = 0;
   Eigen::VectorXd blend_q_start;
   int prev_level_for_blend = level;                // re-arm the pose-blend on a level toggle
+  int prev_swing_dir_for_blend = pcfg.start_backhand ? -1 : 1;  // re-arm on f<->b switch
   // AUTO LEG-HOLD: hold legs+waist at level 0 (stable ready stand, no frozen-windup foot-lift),
   // release them at level 1 (full-body self-balancing swing). The pose-blend (re-armed on the
   // level toggle below) ramps q_des from the current measured pose so the stiff official stand
@@ -523,7 +544,7 @@ int main(int argc, char** argv) {
                      trace_ptr, obscsv_ptr, loc_mode_int,
                      &shadow_tick, shadow_free_clock, motion_blend_sec, policy_dt,
                      &prev_mode_for_blend, &motion_enter_tick, &blend_q_start,
-                     &prev_level_for_blend](
+                     &prev_level_for_blend, &prev_swing_dir_for_blend](
                         std::uint64_t tick, const robot_io::RobotState& st,
                         robot_io::RobotCommand& cmd) -> bool {
     const Mode m = mode.load();
@@ -561,14 +582,25 @@ int main(int argc, char** argv) {
       ppp->set_legs_passive(hold);
       ppp->set_waist_passive(hold);
     }
-    // Re-arm the pose-blend on a MOTION entry OR a level toggle, so q_des ramps from the CURRENT
-    // measured pose -> no snap when stiff official stand gains (re)engage at the 1->0 toggle.
+    // Re-arm the pose-blend on a MOTION entry, a level toggle, OR a forehand<->backhand switch,
+    // so q_des ramps from the CURRENT measured pose -> no snap when stiff official stand gains
+    // (re)engage at the 1->0 toggle, NOR when the reference jumps to the other clip's windup on a
+    // dir switch (the swing clock restarts at windup in PpPolicy; this blends the command to match).
     const int cur_level = ppp->level();
+    const int cur_swing_dir = ppp->swing_dir();
     const bool level_just_changed = (cur_level != prev_level_for_blend);
+    const bool dir_just_changed = (cur_swing_dir != prev_swing_dir_for_blend);
     prev_level_for_blend = cur_level;
+    prev_swing_dir_for_blend = cur_swing_dir;
     const bool motion_just_entered = (m == Mode::kMotion && prev_mode_for_blend != Mode::kMotion);
-    const bool rearm_blend = motion_just_entered || level_just_changed;
+    const bool rearm_blend = motion_just_entered || level_just_changed || dir_just_changed;
     if (rearm_blend) motion_enter_tick = tick;
+    // Re-capture the IMU yaw-align offsets whenever the POLICY (SHADOW/MOTION) engages
+    // from a non-policy mode — the operator may have moved/turned the robot in between.
+    const bool policy_just_engaged =
+        (m == Mode::kMotion || m == Mode::kShadow) &&
+        prev_mode_for_blend != Mode::kMotion && prev_mode_for_blend != Mode::kShadow;
+    if (policy_just_engaged) ppp->rearm_yaw_align();
     prev_mode_for_blend = m;
     if (m == Mode::kPassive) {  // limp: hold current pose, zero gains
       cmd.q_des = st.q.size() == N ? st.q : Eigen::VectorXd::Zero(N);
@@ -654,7 +686,7 @@ int main(int argc, char** argv) {
           o << tick << ',' << ppp->last_time_step() << ',' << static_cast<int>(m) << ','
             << loc_mode_int << ',' << (d.oracle_fresh ? 1 : 0) << ',' << d.oracle_age_s
             << ',' << d.sync_miss << ',' << (ppp->legs_passive() ? 1 : 0);
-          for (int i = 0; i < a3_pingpong::kObsDim; ++i) o << ',' << d.obs[i];
+          for (int i = 0; i < d.obs.size(); ++i) o << ',' << d.obs[i];
           const auto& a = ppp->last_action();
           for (int i = 0; i < a3_pingpong::kNumJoints; ++i)
             o << ',' << (a.size() == a3_pingpong::kNumJoints ? a[i] : 0.0);
