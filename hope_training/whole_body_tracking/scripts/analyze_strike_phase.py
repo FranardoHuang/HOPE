@@ -1,0 +1,252 @@
+"""Find the correct strike phase for the forehand & backhand reference clips.
+
+Analyzes the RETARGETED ROBOT REFERENCE MOTION (artifacts/hope_*:v1/motion.npz),
+NOT the trained policy. The npz already stores world-frame body kinematics for all
+32 bodies, so no FK / Isaac is needed:
+    body_pos_w     (T, 32, 3)   world position
+    body_quat_w    (T, 32, 4)   world orientation (wxyz)
+    body_lin_vel_w (T, 32, 3)   world linear velocity
+
+Body 0  = pelvis_link (root).   Body 31 = pingpang_red_Link (racket center).
+Racket face normal = R(racket_quat)[:, 1]  (+Y blade face, red/forehand face).
+
+For each frame it computes, in the robot-root (pelvis-yaw) frame:
+  frame index, normalized phase, racket world pos, racket world lin vel, speed,
+  racket vx along HOPE +X (root forward), racket face normal, distance to the
+  fixed strike plane (x = 0.40 m in front of the robot), and a phase label
+  (backswing / forward-strike / follow-through).
+
+Then it selects the strike frame and writes plots to diag_videos/strike_phase_*.png.
+
+    python scripts/analyze_strike_phase.py
+    python scripts/analyze_strike_phase.py \
+        --clip forehand:artifacts/hope_forehand:v2/motion.npz \
+        --clip backhand:artifacts/hope_backhand:v2/motion.npz \
+        --out-dir analysis/strike_timing_v2
+"""
+from __future__ import annotations
+
+import argparse
+import os
+
+import numpy as np
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+WBT = os.path.dirname(HERE)
+
+RACKET_BODY = 31           # pingpang_red_Link
+PELVIS_BODY = 0            # pelvis_link
+NORMAL_AXIS = 1            # racket-local +Y is the blade face normal
+STRIKE_PLANE_X = 0.40      # HITTER fixed striking plane, 0.40 m in front of robot
+
+CLIPS = {
+    "forehand": os.path.join(WBT, "artifacts/hope_forehand:v1/motion.npz"),
+    "backhand": os.path.join(WBT, "artifacts/hope_backhand:v1/motion.npz"),
+}
+
+
+def quat_to_rot(q):
+    """wxyz quats (..,4) -> rotation matrices (..,3,3)."""
+    q = q / np.linalg.norm(q, axis=-1, keepdims=True)
+    w, x, y, z = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
+    R = np.empty(q.shape[:-1] + (3, 3), dtype=np.float64)
+    R[..., 0, 0] = 1 - 2 * (y * y + z * z)
+    R[..., 0, 1] = 2 * (x * y - w * z)
+    R[..., 0, 2] = 2 * (x * z + w * y)
+    R[..., 1, 0] = 2 * (x * y + w * z)
+    R[..., 1, 1] = 1 - 2 * (x * x + z * z)
+    R[..., 1, 2] = 2 * (y * z - w * x)
+    R[..., 2, 0] = 2 * (x * z - w * y)
+    R[..., 2, 1] = 2 * (y * z + w * x)
+    R[..., 2, 2] = 1 - 2 * (x * x + y * y)
+    return R
+
+
+def yaw_only_rot(R):
+    """Project a rotation onto its yaw (heading) about world +Z -> (..,3,3)."""
+    fwd = R[..., :, 0].copy()      # body +X axis in world
+    fwd[..., 2] = 0.0
+    n = np.linalg.norm(fwd, axis=-1, keepdims=True)
+    n = np.where(n < 1e-8, 1.0, n)
+    fwd = fwd / n
+    up = np.zeros_like(fwd)
+    up[..., 2] = 1.0
+    left = np.cross(up, fwd)
+    Ry = np.stack([fwd, left, up], axis=-1)   # columns = root x,y,z in world
+    return Ry
+
+
+def analyze(name, path):
+    d = np.load(path)
+    fps = int(d["fps"][0])
+    P = d["body_pos_w"].astype(np.float64)        # (T,32,3)
+    Q = d["body_quat_w"].astype(np.float64)
+    V = d["body_lin_vel_w"].astype(np.float64)
+    T = P.shape[0]
+    phase = np.arange(T) / T
+
+    # Root (pelvis) yaw frame: world -> root rotation = Ry^T applied to world vectors.
+    Rroot = yaw_only_rot(quat_to_rot(Q[:, PELVIS_BODY]))     # (T,3,3) cols=root axes in world
+    pelvis_xy = P[:, PELVIS_BODY].copy()
+
+    racket_w = P[:, RACKET_BODY]                  # world pos
+    racket_v_w = V[:, RACKET_BODY]                # world vel
+    racket_R = quat_to_rot(Q[:, RACKET_BODY])
+    normal_w = racket_R[:, :, NORMAL_AXIS]        # world face normal
+
+    # Express racket pos/vel/normal in the root (pelvis-yaw, origin at pelvis) frame.
+    rel = racket_w - pelvis_xy                    # (T,3)
+    racket_root = np.einsum("tij,tj->ti", np.transpose(Rroot, (0, 2, 1)), rel)
+    racket_v_root = np.einsum("tij,tj->ti", np.transpose(Rroot, (0, 2, 1)), racket_v_w)
+    normal_root = np.einsum("tij,tj->ti", np.transpose(Rroot, (0, 2, 1)), normal_w)
+
+    speed = np.linalg.norm(racket_v_w, axis=1)
+    vx = racket_v_root[:, 0]                       # along HOPE +X (forward)
+    dist_plane = np.abs(racket_root[:, 0] - STRIKE_PLANE_X)
+
+    # Phase labels. Forward strike = vx>0 region around the forward-swing peak.
+    fwd_peak = int(np.argmax(vx))                 # largest forward velocity
+    label = np.empty(T, dtype=object)
+    for i in range(T):
+        if vx[i] > 0.3 and speed[i] > 0.4 * speed.max():
+            label[i] = "forward-strike"
+        elif i < fwd_peak:
+            label[i] = "backswing"
+        else:
+            label[i] = "follow-through"
+
+    # --- Strike-frame selection -------------------------------------------------
+    # The config defines strike_phase as the RACKET-TIP SPEED PEAK on the forward
+    # swing (hope config comment: "phase of the clip at which contact happens
+    # (racket-tip speed peak)"). So we select the frame of MAXIMUM racket speed
+    # restricted to the forward-swing window (vx>0 near the forward-vx peak). This
+    # is robust when the racket's plane crossing (x=0.40) and its speed peak occur
+    # at different frames (e.g. a swing whose fast contact is past x=0.40).
+    fwd_mask = vx > 0.3
+    cand = np.where(fwd_mask)[0]
+    if len(cand) == 0:                             # degenerate fallback
+        cand = np.array([fwd_peak])
+    strike = cand[np.argmax(speed[cand])]          # fastest forward-swing frame
+
+    info = dict(
+        name=name, T=T, fps=fps, phase=phase, speed=speed, vx=vx,
+        dist_plane=dist_plane, racket_root=racket_root, racket_v_root=racket_v_root,
+        normal_root=normal_root, label=label, strike=strike,
+        fwd_peak=fwd_peak, speed_peak=int(np.argmax(speed)),
+    )
+    return info
+
+
+def report(info):
+    name, T = info["name"], info["T"]
+    s = info["strike"]
+    print("\n" + "=" * 74)
+    print(f"{name.upper()}  ({T} frames @ {info['fps']} Hz)")
+    print("=" * 74)
+    print(f"  racket SPEED peak : frame {info['speed_peak']:3d}  phase {info['speed_peak']/T:.3f}  "
+          f"|v|={info['speed'][info['speed_peak']]:.2f}  vx={info['vx'][info['speed_peak']]:+.2f}")
+    print(f"  forward VX peak   : frame {info['fwd_peak']:3d}  phase {info['fwd_peak']/T:.3f}  "
+          f"|v|={info['speed'][info['fwd_peak']]:.2f}  vx={info['vx'][info['fwd_peak']]:+.2f}")
+    print(f"  --> SELECTED STRIKE FRAME {s} <--")
+    print(f"      phase            = {s/T:.3f}")
+    print(f"      racket speed     = {info['speed'][s]:.3f} m/s")
+    print(f"      racket vx (+X)   = {info['vx'][s]:+.3f} m/s")
+    print(f"      racket pos(root) = ({info['racket_root'][s,0]:+.3f}, {info['racket_root'][s,1]:+.3f}, {info['racket_root'][s,2]:+.3f})")
+    print(f"      dist to x=0.40   = {info['dist_plane'][s]:.3f} m")
+    print(f"      face normal(root)= ({info['normal_root'][s,0]:+.3f}, {info['normal_root'][s,1]:+.3f}, {info['normal_root'][s,2]:+.3f})")
+    print(f"      label            = {info['label'][s]}")
+
+    # candidate comparison (backhand of interest, but print for both)
+    print("\n  candidate-phase table:")
+    print(f"    {'phase':>6} {'frame':>5} {'|v|':>6} {'vx':>7} {'dist0.4':>8} {'label':>15}")
+    for ph in (0.36, 0.50, 0.59, 0.74):
+        f = int(round(ph * (T - 1)))
+        f = min(max(f, 0), T - 1)
+        print(f"    {ph:6.2f} {f:5d} {info['speed'][f]:6.2f} {info['vx'][f]:+7.2f} "
+              f"{info['dist_plane'][f]:8.3f} {info['label'][f]:>15}")
+
+
+def plot(infos, out):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    ncols = len(infos)
+    fig, axes = plt.subplots(4, ncols, figsize=(7 * ncols, 14), sharex=True,
+                             squeeze=False)
+    for col, info in enumerate(infos):
+        ph = info["phase"]
+        s = info["strike"]
+        name = info["name"]
+        for row, (y, ylab, ref) in enumerate([
+            (info["vx"], "racket vx (+X) [m/s]", 0.0),
+            (info["speed"], "racket speed [m/s]", None),
+            (info["dist_plane"], "dist to x=0.40 plane [m]", None),
+            (np.degrees(np.arccos(np.clip(info["racket_v_root"][:, 0] /
+             np.maximum(np.linalg.norm(info["racket_v_root"], axis=1), 1e-6), -1, 1))),
+             "vel angle off +X [deg]", None),
+        ]):
+            ax = axes[row, col]
+            ax.plot(ph, y, "-o", ms=2, lw=1)
+            if ref is not None:
+                ax.axhline(ref, color="gray", ls=":", lw=0.8)
+            ax.axvline(s / info["T"], color="r", ls="--", lw=1.2, label=f"strike {s/info['T']:.3f}")
+            for ph_c, c in [(0.36, "g"), (0.50, "m"), (0.59, "orange"), (0.74, "brown")]:
+                ax.axvline(ph_c, color=c, ls=":", lw=0.8, alpha=0.6)
+            ax.set_ylabel(ylab)
+            if row == 0:
+                ax.set_title(f"{name}  (strike frame {s}, phase {s/info['T']:.3f})")
+                ax.legend(fontsize=8)
+            if row == 3:
+                ax.set_xlabel("normalized phase")
+            ax.grid(alpha=0.3)
+    fig.suptitle("Reference racket kinematics over phase  "
+                 "(dotted: candidates g=0.36 m=0.50 o=0.59 brown=0.74; red=selected)", y=1.0)
+    fig.tight_layout()
+    fig.savefig(out, dpi=110, bbox_inches="tight")
+    print(f"\n[plot] wrote {out}")
+
+
+def _resolve(path):
+    """Allow both absolute and WBT-relative clip paths."""
+    return path if os.path.isabs(path) else os.path.join(WBT, path)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--clip", action="append", default=None,
+                    help="name:path.npz  (repeatable). Path may be absolute or "
+                         "relative to the whole_body_tracking dir. Defaults to the "
+                         "hardcoded v1 forehand+backhand clips.")
+    # Convenience single-clip flags matching the requested interface.
+    ap.add_argument("--motion-file", default=None, help="single clip npz path")
+    ap.add_argument("--clip-name", default="clip", help="name for --motion-file")
+    ap.add_argument("--out-dir", default=None,
+                    help="output dir for plots (default: <WBT>/diag_videos)")
+    args = ap.parse_args()
+
+    if args.motion_file:
+        clips = {args.clip_name: _resolve(args.motion_file)}
+    elif args.clip:
+        clips = {}
+        for spec in args.clip:
+            name, _, path = spec.partition(":")
+            if not path:
+                ap.error(f"--clip must be name:path, got {spec!r}")
+            clips[name] = _resolve(path)
+    else:
+        clips = CLIPS
+
+    infos = [analyze(n, p) for n, p in clips.items()]
+    for info in infos:
+        report(info)
+
+    outdir = args.out_dir if args.out_dir else os.path.join(WBT, "diag_videos")
+    outdir = _resolve(outdir)
+    os.makedirs(outdir, exist_ok=True)
+    tag = "_".join(i["name"] for i in infos)
+    plot(infos, os.path.join(outdir, f"strike_phase_{tag}.png"))
+
+
+if __name__ == "__main__":
+    main()

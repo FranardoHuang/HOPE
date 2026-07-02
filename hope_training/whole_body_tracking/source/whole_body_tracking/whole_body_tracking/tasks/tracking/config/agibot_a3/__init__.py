@@ -27,3 +27,27 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
     },
 )
+
+# HOPE ping-pong WBC — deploy-parity actor observation (no fabricated base pose).
+# Same task/reward family; the actor obs drops every world-frame base-position dependency (180 -> 175)
+# and adds absolute balance rewards/terminations. The `full` env above is unchanged.
+gym.register(
+    id="HOPE-PingPong-DeployParity-AgibotA3-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": hope_env_cfg.HOPEPingPongDeployParityAgibotA3EnvCfg,
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
+    },
+)
+
+# Backward-compatible alias for older docs/scripts that still say `RealSensor`.
+gym.register(
+    id="HOPE-PingPong-RealSensor-AgibotA3-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": hope_env_cfg.HOPEPingPongRealSensorAgibotA3EnvCfg,
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
+    },
+)

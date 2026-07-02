@@ -1,6 +1,6 @@
 """Hydra eval/export entry for HOPE Agibot A3 WBC (106B-Final-Project style).
 
-    python scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+    python scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 \
         wandb_path=<entity>/hope_wbc/<run_id>
 
 Loads a trained policy (from a wandb run, or the latest local checkpoint), runs it, and exports
@@ -37,7 +37,10 @@ def _run_play(cfg, simulation_app):
     from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
     from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
 
-    import whole_body_tracking.tasks as _wbt_tasks  # registers the gym tasks
+    import whole_body_tracking.tasks  # noqa: F401  -- registers the gym tasks
+    from whole_body_tracking.tasks.tracking.actor_observation_contract import (
+        validate_actor_observation_contract,
+    )
     from whole_body_tracking.utils.exporter import attach_onnx_metadata, export_motion_policy_as_onnx
     from whole_body_tracking.utils.ppo_cfg import runner_kwargs
 
@@ -72,9 +75,9 @@ def _run_play(cfg, simulation_app):
         wandb_run.file(str(fname)).download("./logs/rsl_rl/temp", replace=True)
         resume_path = f"./logs/rsl_rl/temp/{fname}"
         print(f"[INFO] Loading model checkpoint from: {run_path}/{fname}")
-        if not _is_noneish(cfg.motion_file):
-            motion_files, _ = resolve_motion_sources(cfg, cwd=pathlib.Path.cwd())
-            env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
+        if cfg.motion_file is not None:
+            mf = cfg.motion_file
+            env_cfg.commands.motion.motion_file = str(mf) if isinstance(mf, str) else [str(x) for x in mf]
         else:
             arts = [a for a in wandb_run.used_artifacts() if a.type == "motions"]
             if arts:
@@ -89,24 +92,43 @@ def _run_play(cfg, simulation_app):
         else:
             resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
         print(f"[INFO] Loading model checkpoint from: {resume_path}")
-        if not _is_noneish(cfg.motion_file):
-            motion_files, _ = resolve_motion_sources(cfg, cwd=pathlib.Path.cwd())
-            env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
-        else:
+        reg = cfg.registry_name if cfg.registry_name is not None else cfg.task.get("registry_name")
+        if cfg.motion_file is not None:
+            # accept a list (unified 2-clip forehand+backhand) or a single path
+            mf = cfg.motion_file
+            env_cfg.commands.motion.motion_file = str(mf) if isinstance(mf, str) else [str(x) for x in mf]
+        elif reg is not None:
             import wandb
 
-            reg = cfg.registry_name if cfg.registry_name is not None else cfg.task.get("registry_name")
-            reg2 = cfg.registry_name_2 if cfg.registry_name_2 is not None else cfg.task.get("registry_name_2")
-            regs = [_normalize_registry_name(r) for r in [reg, reg2] if not _is_noneish(r)]
-            if not regs:
-                raise RuntimeError(
-                    "Pass motion_file=/path/to/motion.npz or registry_name=<org>/wandb-registry-motions/<name>."
-                )
-            motion_files = [str(pathlib.Path(wandb.Api().artifact(r).download()) / "motion.npz") for r in regs]
+            api = wandb.Api()
+
+            def _dl(r):
+                r = str(r)
+                if ":" not in r:
+                    r += ":latest"
+                return str(pathlib.Path(api.artifact(r).download()) / "motion.npz")
+
+            # clip0 = registry_name (forehand); clip1 = registry_name_2 (backhand) if set. MUST match
+            # train.py so the exported ONNX bakes the FULL concatenated motion (T = sum of seg_lens).
+            # Without this, a unified policy exports forehand-only and backhand time_steps clamp to the
+            # last forehand frame -> frozen reference -> dead backhand swing in deployment / sim2sim.
+            motion_files = [_dl(reg)]
+            reg2 = cfg.get("registry_name_2", None) or cfg.task.get("registry_name_2", None)
+            if reg2 is not None and str(reg2).strip() and str(reg2).lower() != "none":
+                motion_files.append(_dl(reg2))
+                print(f"[play.py] UNIFIED 2-clip export: clip0={reg}  clip1={reg2}", flush=True)
             env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
 
     render_mode = "rgb_array" if cfg.video else None
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)
+    expected_contract = cfg.task.get("actor_obs_contract", None)
+    if expected_contract is not None:
+        contract = validate_actor_observation_contract(env.unwrapped, str(expected_contract))
+        print(
+            "[play.py] actor observation contract validated: "
+            f"{contract.name} ({contract.total_dim}D, obs_mode={contract.obs_mode})",
+            flush=True,
+        )
     log_dir = os.path.dirname(resume_path)
     env = RslRlVecEnvWrapper(env)
 

@@ -1,0 +1,40 @@
+[pp WARN] secondary (torso) IMU ABSENT -> torso orientation falls back to identity; motion_anchor_ori_b (and the anchor frame feeding motion_anchor_pos_b) will be WRONG. Do NOT run MOTION on hardware without a working torso IMU.
+
+===================== [pp FIRST-TICK DEBUG] =====================
+ loc_mode=perfect_tracking(B)  time_step=0  swing_level=1  obs_dim=180 act_dim=31
+ IMU: base_quat(wxyz)=[+1.000 +0.000 +0.000 +0.000] proj_grav=[+0.000 +0.000 -1.000]
+      gyro=[+0.000 +0.000 +0.000] sec_imu=0 torso_quat=[+1.000 +0.000 +0.000 +0.000]
+ STATE(SDK) q : min=-0.1310 mean=+0.0707 max=+0.8000 |.|=1.2948
+ STATE(SDK) qd: min=+0.0000 mean=+0.0000 max=+0.0000 |.|=0.0000
+ OBS blocks (180-D):
+   command              [  0: 62] min=-4.7673 mean=+0.0819 max=+8.5998 |.|=14.4385
+   motion_anchor_pos_b  [ 62: 65] min=+0.0000 mean=+0.0000 max=+0.0000 |.|=0.0000
+   motion_anchor_ori_b  [ 65: 71] min=-0.6178 mean=+0.2433 max=+0.7861 |.|=1.4142
+   base_ang_vel         [ 71: 74] min=+0.0000 mean=+0.0000 max=+0.0000 |.|=0.0000
+   joint_pos_rel        [ 74:105] min=+0.0000 mean=+0.0000 max=+0.0000 |.|=0.0000
+   joint_vel            [105:136] min=+0.0000 mean=+0.0000 max=+0.0000 |.|=0.0000
+   actions(last)        [136:167] min=+0.0000 mean=+0.0000 max=+0.0000 |.|=0.0000
+   projected_gravity    [167:170] min=-1.0000 mean=-0.3333 max=+0.0000 |.|=1.0000
+   base_target_pos_b    [170:172] min=+0.0099 mean=+0.0149 max=+0.0198 |.|=0.0222
+   racket_target_pos_b  [172:175] min=-0.2369 mean=-0.0091 max=+0.4099 |.|=0.5140
+   racket_target_vel_w  [175:178] min=+0.0000 mean=+0.3333 max=+1.0000 |.|=1.0000
+   time_to_strike       [178:179] min=+2.1000 mean=+2.1000 max=+2.1000 |.|=2.1000
+   swing_type           [179:180] min=+1.0000 mean=+1.0000 max=+1.0000 |.|=1.0000
+ ACTION(raw,Isaac)[31]: min=-1.9846 mean=-0.0592 max=+1.1805 |.|=3.7110
+ Q_DES(SDK)[31]       : min=-0.6544 mean=+0.0571 max=+0.5748 |.|=1.4077
+ KP(SDK)[31]          : min=+20.0000 mean=+62.7419 max=+250.0000 |.|=467.1456
+ KD(SDK)[31]          : min=+2.0000 mean=+2.8065 max=+8.0000 |.|=17.6918
+ |q_des-q_meas| max=0.5234 at left_hip_pitch_joint (slot 19)
+ NECK passive: slots[3,4] q=0.00 kp=40.0 kd=2.0 (model neck output dropped)
+ SAFETY: q_des clamped on 0/31 joint(s) | sec(torso) IMU=0 -> torso ori IDENTITY-FALLBACK(!)
+=================================================================
+
+=== ComputeCommand OK (level=1, loc=perfect_tracking(B)) ===
+dims: q_des=31 dq_des=31 tau_ff=31 kp=31 kd=31 (expect 31)
+  q_des      n=31 min=-0.8847 max=+0.5518 mean=+0.0497 |.|=1.6922 finite=1
+  kp         n=31 min=+20.0000 max=+250.0000 mean=+62.7419 |.|=467.1456 finite=1
+  kd         n=31 min=+2.0000 max=+8.0000 mean=+2.8065 |.|=17.6918 finite=1
+  action     n=31 min=-3.3370 max=+3.7915 mean=-0.0789 |.|=7.2746 finite=1
+neck slots: head_yaw_joint q=0.000 kp=40.0 kd=2.0 | head_pitch_joint q=0.000 kp=40.0 kd=2.0
+max|q_des|=0.885 at left_hip_pitch_joint
+RESULT: PASS (finite, bounded)

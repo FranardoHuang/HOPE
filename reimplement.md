@@ -1,30 +1,21 @@
 # HOPE Reimplementation Guide
 
-This guide is the long-form reimplementation runbook. The living source of truth for current project
-state is `docs/START_HERE.md` plus the gate documents under `docs/gates/`. If this file and a gate doc
-disagree, update both in the same branch; do not let this file become a second project plan.
+This guide explains how to reimplement the HOPE reference system from the documentation in this repository. The repo is a design-document repository, not a complete runnable software stack. A successful reimplementation means you will create your own ROS 2 packages, training configuration, policy export, and deployment integration while following the reference architecture and competition constraints.
 
-Read this file gate-first, not phase-first. The Phase headings below are retained for navigation, but
-implementation should advance only when the relevant gate has inputs, outputs, verification, and known
-limits recorded.
+Read this file from top to bottom. Do not skip the verification gates. Each later phase assumes the earlier phase is already working.
 
-## Gate-First Reading Order
+## Guide Structure By Phase
 
-| Gate | Reimplementation Steps | What It Proves |
-| --- | --- | --- |
-| `G00 Materials and harness` | `0-5`, support sections | repo structure, ignored assets, setup docs, and basic verification are usable |
-| `G01 Real preparation` | real-hardware parts of `1`, `4`, `16-18` | table, robot, mocap, network, dry-run, joint order, and safety prerequisites are known before hardware risk |
-| `G02 Data acquisition` | `6-8` | ChingMu/VRPN streams provide the required table, robot, and ball data |
-| `G03 Data processing and physics calibration` | planner/calibration parts of `7-8` | ball filtering, prediction, and planner physics are measured rather than guessed |
-| `G04 Sim modeling in MuJoCo and Isaac` | `12-13`, table-tennis scene checks | A3, racket mount, table, ball, contact, and frame semantics load consistently in simulation |
-| `G05 Isaac training first loop` | `9-15` | motion references, WBC training, metrics, checkpoint, and ONNX export can run end to end |
-| `G06 Isaac-to-MuJoCo parity` | sim-to-sim parts of `16-17` | an exported policy behaves consistently before deployment |
-| `G07 MuJoCo-to-real deployment` | deployment parts of `17-18` | policy runtime and robot command path pass dry-run and safety gates |
-| `G08 Blind-spot improvements` | `22-26` and future mini-specs | spin, serve, short/deep balls, opponent adaptation, or other improvements are selected by measured baseline failures |
+Use the steps in order, but think of them as eight larger workstreams:
 
-Before working a step, open the relevant `docs/gates/G*.md` file and the operation doc it links. After
-changing code, assets, commands, contracts, or verification status, update the gate doc and
-`docs/PROGRESS.md` before moving on.
+1. **Phase 1 — Scope, Platform, and Workspace Foundation**: steps `0-5`
+2. **Phase 2 — Motion Capture and Planner Bringup**: steps `6-8`
+3. **Phase 3 — Human Motion Data and Retargeting**: steps `9-11`
+4. **Phase 4 — WBC Training Pipeline**: steps `12-16`
+5. **Phase 5 — Runtime Policy and Hardware Deployment**: steps `17-18`
+6. **Phase 6 — Portability and Full-System Integration**: steps `19-21`
+7. **Phase 7 — Testing, Safety, and Competition Readiness**: steps `22-26`
+8. **Phase 8 — Summaries, Constraints, References, and Open Values**: steps `27-30`
 
 ## How To Read Placeholders And Terms
 
@@ -70,7 +61,7 @@ This guide uses three execution scopes. Do not mix them casually.
    - Practical rule: steps `4-8` and `16-21` are ROS-box work.
 
 3. **GPU / Isaac distrobox: `grasping` or another NVIDIA-enabled box**
-   - Use this box for Isaac Sim, Isaac Lab, BeyondMimic motion preprocessing, policy training, evaluation, and ONNX export.
+   - Use this box for Isaac Sim, Isaac Lab, BeyondMimic, WandB motion preprocessing, policy training, evaluation, and ONNX export.
    - Practical rule: steps `9-15` are GPU-box work. In particular, Step 9 (GVHMR) and Step 10 (GMR) are Python/ML toolchain work and are usually easier in `grasping` than in `hope`.
    - Do not install Isaac Sim or Isaac Lab into `hope`; keep the ROS box and the training box separate.
 
@@ -256,7 +247,7 @@ sudo apt install git curl build-essential cmake python3-pip python3-venv
 Install ROS 2:
 
 - HOPE's reference environment is Ubuntu 24.04 LTS plus ROS 2 Jazzy.
-- If your host is Ubuntu 26.04, use Distrobox for the HOPE ROS 2 workspace instead of mixing 24.04/Jazzy apt packages into the host OS.
+- If your host is Ubuntu 26.04, use Distrobox or Docker for the HOPE ROS 2 workspace instead of mixing 24.04/Jazzy apt packages into the host OS.
 - Use a native install only when the machine itself is Ubuntu 24.04.
 - ROS 2 Humble on Ubuntu 22.04 is allowed by the rules for external communication, but the reference docs use Jazzy.
 
@@ -345,9 +336,75 @@ Execution scope from this point:
 - Physical mocap setup, robot cabling, and network inspection still happen outside the container in the real arena.
 - The Isaac Sim / Isaac Lab training steps later in this guide do **not** run in `hope`; they switch to a separate GPU distrobox.
 
-Obsolete Docker path:
+Docker path for an Ubuntu 26.04 host:
 
-The old root `Dockerfile.hope-ros2-jazzy` path is no longer used and has been removed from the repo. Do not recreate it from this runbook. Use the Distrobox/native Ubuntu 24.04 ROS 2 Jazzy environment described above and in `docs/operations/setup_environments.md`.
+Use this path if you want an explicit Docker image, need to debug low-level Docker run flags, or need a more conventional container setup for hardware integration.
+
+Copy and paste this whole block into your host terminal:
+
+```bash
+cd ~/workspace/HOPE
+
+sudo apt update
+sudo apt install -y docker.io
+sudo systemctl enable --now docker
+
+DOCKER_CMD="docker"
+if ! docker info >/dev/null 2>&1; then
+  DOCKER_CMD="sudo docker"
+fi
+
+cat > Dockerfile.hope-ros2-jazzy <<'EOF'
+FROM osrf/ros:jazzy-desktop-full
+
+SHELL ["/bin/bash", "-c"]
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    curl \
+    git \
+    python3-colcon-common-extensions \
+    python3-pip \
+    python3-rosdep \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN rosdep update || true
+
+WORKDIR /root/workspace/HOPE
+RUN echo "source /opt/ros/jazzy/setup.bash" >> /root/.bashrc
+EOF
+
+$DOCKER_CMD build -t hope-ros2-jazzy -f Dockerfile.hope-ros2-jazzy .
+mkdir -p \
+  ~/workspace/HOPE/hope_ws/src/hope_planner \
+  ~/workspace/HOPE/hope_ws/src/hope_bringup \
+  ~/workspace/HOPE/hope_ws/src/hope_monitoring \
+  ~/workspace/HOPE/hope_ws/src/agibot_bringup \
+  ~/workspace/HOPE/hope_ws/src/agibot_hardware_bridge \
+  ~/workspace/HOPE/hope_training/GVHMR \
+  ~/workspace/HOPE/hope_training/GMR \
+  ~/workspace/HOPE/hope_training/whole_body_tracking \
+  ~/workspace/HOPE/hope_training/mjlab \
+  ~/workspace/HOPE/hope_training/motions/raw_video \
+  ~/workspace/HOPE/hope_training/motions/smplx \
+  ~/workspace/HOPE/hope_training/motions/retargeted \
+  ~/workspace/HOPE/hope_training/motions/preprocessed \
+  ~/workspace/HOPE/hope_training/policies
+
+$DOCKER_CMD run --rm -it \
+  --net=host \
+  --ipc=host \
+  --privileged \
+  -v "$PWD":/root/workspace/HOPE \
+  -w /root/workspace/HOPE \
+  hope-ros2-jazzy
+```
+
+This block creates `Dockerfile.hope-ros2-jazzy`, builds the `hope-ros2-jazzy` image, creates your host workspace folders inside `~/workspace/HOPE`, and opens a shell inside the ROS 2 Jazzy container with that same repository mounted at `~/workspace/HOPE`.
+
+For GPU simulation or training, install NVIDIA Container Toolkit on the host and add `--gpus all` to the `docker run` command. For real hardware, keep `--net=host` so ROS 2 DDS discovery and the Agibot A3 robot network (AimRT/AimDK) are visible inside the container.
 
 Verification gate:
 
@@ -621,9 +678,8 @@ In Avatar-Pro:
 2. Set the streaming coordinate frame to Z-up if the software exposes that option.
 3. Calibrate the world origin at the P1 near-side left table corner.
 4. Align +X toward P2 along the table length.
-5. Create or identify the table and robot rigid bodies. The repo defaults are `PPT`, `P1`, and `P2`,
-   but the live rig may use different labels (one `train_1` rig observed `ppp2`/`ppp3`). Track each as
-   a 6-DOF rigid body and record the exact names in G01. These names DO appear in the topic path, so
+5. Create the rigid bodies and name them exactly `PPT`, `P1`, and `P2`. Track
+   each as a 6-DOF rigid body. These names DO appear in the topic path, so
    spelling and capitalization matter.
 6. The ball is different, and this is the part that most often goes wrong. A
    ping-pong ball carries one marker and cannot form a rigid body (a rigid body
@@ -640,10 +696,11 @@ In Avatar-Pro:
 7. Enable VRPN streaming, usually on port `3883`.
 8. Record the Avatar-Pro PC IP address.
 
-The HOPE relay supports two ball modes. Prefer `ball_tracking_mode:=rigid_body ball_object:=Ball` if
-CMTracker exposes the ball as a named rigid body. Use `ball_tracking_mode:=auto` when the ball arrives
-under an opaque marker id: among every streamed object that is not the table or robot rigid bodies, the
-relay locks onto the marker whose position actually moves.
+Because the ball usually arrives under an opaque marker id (not the name
+`ball`), the HOPE relay does NOT rely on a ball name. It auto-detects the ball by
+motion: among every streamed object that is not `PPT`/`P1`/`P2`, the ball is the
+one whose position actually moves. So you do not have to discover and hard-code
+the ball's id before you can run — wave the ball and the relay locks onto it.
 
 How to get the Avatar-Pro IP address:
 
@@ -659,7 +716,11 @@ ping AVATAR_PRO_PC_IP
 If the rigid-body names in Avatar-Pro are not exactly `PPT`, `P1`, `P2`, either
 rename them in Avatar-Pro or edit `ppt_object`/`p1_object`/`p2_object` in
 `hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml` and rebuild `hope_bringup`.
-The relay matches rigid bodies by their VRPN sender name, so spelling and capitalization matter.
+The relay matches rigid bodies by their VRPN sender name, so spelling and
+capitalization matter for those three. The ball has two tracking modes (chosen with
+the `ball_tracking_mode` launch arg): `rigid_body` reads the named ball rigid body
+given in `ball_object` (e.g. `Ball`) — preferred; `auto` matches the ball by motion
+(no name needed) and is the fallback for when the ball cannot be a rigid body.
 
 On the ROS 2 machine, install the VRPN client and rebuild the HOPE bringup package:
 
@@ -2329,10 +2390,10 @@ If you already finished steps `10` and `11`, then step `12` on this repo means:
 
 1. Turn the final GMR `.pkl` motions into retargeted `.csv`.
 2. Enter the GPU / Isaac environment.
-3. Install `whole_body_tracking`; set up WandB only if you want remote logging or registry upload.
+3. Install `whole_body_tracking` and set up WandB.
 4. Copy the A3 ping-pong URDF assets into the training repo.
-5. Turn each retargeted `.csv` into a local BeyondMimic `.npz`; optionally upload it to the WandB `motions` registry.
-6. Replay the local motions to verify the robot and joint order are correct.
+5. Turn each retargeted `.csv` into a BeyondMimic `.npz` and upload it to the WandB `motions` registry.
+6. Replay the uploaded motions to verify the robot and joint order are correct.
 
 Do the following **in order**. Do not skip ahead.
 
@@ -2398,40 +2459,38 @@ Open a host terminal and enter `grasping`:
 distrobox enter grasping
 ```
 
-Now inside `grasping`, enter the training workspace and source the shared training environment:
+Now inside `grasping`, activate the Isaac / training Python:
 
 ```bash
+source /opt/drone_venv/bin/activate
 cd ~/workspace/HOPE/hope_training/whole_body_tracking
-source setup_train_env.sh
-hope_isaac_py -c "import sys; print(sys.executable)"
+python -c "import sys; print(sys.executable)"
 ```
 
-Important:
+Important on this machine:
 
-- `setup_train_env.sh` is the source of truth for `HOPE_ISAAC_PYTHON`, `HOPE_ISAACLAB_ROOT`,
-  optional `HOPE_ISAAC_VENV_SITE`, `HOPE_WBT_PYTHONPATH`, and placeholder WandB identities.
-- Put real machine paths in the git-ignored `setup_train_env.local.sh`.
+- `wandb` and the Isaac training dependencies are expected to come from `/opt/drone_venv`.
 - Do **not** use plain `/usr/bin/python3` for the training commands in this phase.
 
 ### 12.4 Install `whole_body_tracking`
 
 ```bash
-hope_isaac_py -m pip install -e source/whole_body_tracking
-hope_isaac_py -m pip show whole_body_tracking
+python -m pip install -e source/whole_body_tracking
+python -m pip show whole_body_tracking
 ```
 
 If `pip show` cannot find `whole_body_tracking`, the editable install did not land.
 The actual runtime check for this machine is the `hope_isaac_py ...` check below,
 not plain `python -c "import whole_body_tracking"`.
 
-If `hope_isaac_py -m pip install -e source/whole_body_tracking` fails with a permission
+If `python -m pip install -e source/whole_body_tracking` fails with a permission
 error like:
 
 ```text
-Permission denied: '<site-packages>/...'
+Permission denied: '/opt/drone_venv/lib/python3.11/site-packages/...'
 ```
 
-then do **not** stop here. The target Python's `site-packages` may be owned by
+then do **not** stop here. On this machine, `/opt/drone_venv` may be owned by
 `root`, so editable install can fail even though the runtime itself is usable.
 Use this no-install fallback for the rest of steps `12-15`:
 
@@ -2439,10 +2498,11 @@ Use this no-install fallback for the rest of steps `12-15`:
 cd ~/workspace/HOPE/hope_training/whole_body_tracking
 
 # Source the training env (once per terminal). It sets HOPE_WBT_PYTHONPATH so Isaac's bundled python
-# can see working-tree whole_body_tracking first, optional dependency site-packages, and isaaclab_rl.
-# It also defines `hope_isaac_py` and placeholder WandB env vars for optional registry/logging use.
-# The script header documents each piece. It MUST be SOURCED (not `./setup_train_env.sh`, which would set everything in a
-# subshell that exits). Re-source every new terminal.
+# can see hydra/omegaconf (in /opt/drone_venv) + isaaclab_rl, defines the `hope_isaac_py` launcher,
+# and exports the wandb team/org/project. The script header documents each piece. It MUST be SOURCED
+# (not `./setup_train_env.sh`, which would set everything in a subshell that exits). Re-source every
+# new terminal. (Prefer not to source? Step 14.1 "Manual way" lists the exact equivalent commands —
+# the HOPE_WBT_PYTHONPATH export, the hope_isaac_py function, and the three wandb exports.)
 source setup_train_env.sh
 ```
 
@@ -2498,15 +2558,10 @@ pkill -f isaacsim || true
 pkill -f 'replay_npz.py' || true
 ```
 
-### 12.5 Optional: configure WandB
+### 12.5 Configure WandB
 
-Skip this section when you only need the local video-to-motion-to-training path. Local `.npz` generation,
-`replay_npz.py --motion_file`, and `train.py motion_file=... motion_file_2=... logger=tensorboard` do
-not require WandB.
-
-Configure WandB only when you want remote run logging or shared motion registry artifacts. WandB has
-**two different scopes** that you must not confuse — getting this wrong is the most common registry
-failure:
+WandB has **two different scopes** that you must not confuse — getting this wrong
+is the most common Step-12 failure:
 
 - **Runs** (training, smoke tests, checkpoints) are logged under an **entity** —
   your personal entity or a **team** (e.g. `your-wandb-team`). This is `WANDB_ENTITY`.
@@ -2561,10 +2616,7 @@ your-wandb-org
 hope_wbc
 ```
 
-### 12.6 Optional: create and smoke-test the WandB `motions` registry
-
-Skip this section unless you plan to run `csv_to_npz.py --upload_wandb` or train from
-`registry_name=...`.
+### 12.6 Create and smoke-test the WandB `motions` registry
 
 In the browser:
 
@@ -2689,14 +2741,12 @@ find source/whole_body_tracking/whole_body_tracking/assets/agibot_a3 -maxdepth 2
 
 - one retargeted CSV
 - the robot name `agibot_a3`
-- an explicit local output file such as `motions/preprocessed/hope_forehand.npz`
-- an output collection name such as `hope_forehand` if you also choose to upload
+- an output collection name such as `hope_forehand`
 
-It does one required thing and one optional thing:
+It does **two** things:
 
-1. It writes a local BeyondMimic motion `.npz` containing joint trajectories plus FK-derived body
-   position/velocity/acceleration arrays.
-2. Only when `--upload_wandb` is set, it also uploads that same file to the WandB `motions` registry.
+1. It writes a temporary local file to `/tmp/motion.npz`.
+2. It uploads that file to the WandB `motions` registry.
 
 Prepare the local folder for keeping a copy of each generated `.npz`:
 
@@ -2711,18 +2761,22 @@ hope_isaac_py scripts/csv_to_npz.py \
   --robot agibot_a3 \
   --input_file ~/workspace/HOPE/hope_training/motions/retargeted/forehand_swing.csv \
   --input_fps 30 \
-  --output_file ~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand.npz \
   --output_name hope_forehand \
   --headless
 
+cp /tmp/motion.npz ~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand.npz
 ls -lh ~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand.npz
 ```
 
 Success marker:
 
 ```text
-[INFO]: Motion saved to local npz: .../motions/preprocessed/hope_forehand.npz
+[INFO]: Motion saved to wandb registry: motions/hope_forehand
 ```
+
+On the current repo version, the script exits automatically after this line.
+If you are running an older copy of the script and it keeps rendering after this
+success line, `Ctrl+C` is safe after the upload has completed.
 
 Convert the backhand motion:
 
@@ -2731,47 +2785,25 @@ hope_isaac_py scripts/csv_to_npz.py \
   --robot agibot_a3 \
   --input_file ~/workspace/HOPE/hope_training/motions/retargeted/backhand_swing.csv \
   --input_fps 30 \
-  --output_file ~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand.npz \
   --output_name hope_backhand \
   --headless
 
+cp /tmp/motion.npz ~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand.npz
 ls -lh ~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand.npz
 ```
 
 Success marker:
 
 ```text
-[INFO]: Motion saved to local npz: .../motions/preprocessed/hope_backhand.npz
+[INFO]: Motion saved to wandb registry: motions/hope_backhand
 ```
 
 Expected local files:
 
-- `~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand.npz`
-- `~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand.npz`
+- `motions/preprocessed/hope_forehand.npz`
+- `motions/preprocessed/hope_backhand.npz`
 
-Optional registry upload, if the team wants shared remote artifacts:
-
-```bash
-hope_isaac_py scripts/csv_to_npz.py \
-  --robot agibot_a3 \
-  --input_file ~/workspace/HOPE/hope_training/motions/retargeted/forehand_swing.csv \
-  --input_fps 30 \
-  --output_file ~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand.npz \
-  --output_name hope_forehand \
-  --upload_wandb \
-  --headless
-
-hope_isaac_py scripts/csv_to_npz.py \
-  --robot agibot_a3 \
-  --input_file ~/workspace/HOPE/hope_training/motions/retargeted/backhand_swing.csv \
-  --input_fps 30 \
-  --output_file ~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand.npz \
-  --output_name hope_backhand \
-  --upload_wandb \
-  --headless
-```
-
-Registry entries then become available as:
+Expected WandB registry entries:
 
 - `$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand:latest`
 - `$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_backhand:latest`
@@ -2780,31 +2812,19 @@ If the robot pose looks scrambled during conversion, check `AGIBOT_A3_JOINT_NAME
 `source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py`. That list must match
 the DOF column order written by your GMR A3 retargeting CSV.
 
-### 12.9 Replay the local motions
+### 12.9 Replay the uploaded motions
 
 Replay forehand:
 
 ```bash
 hope_isaac_py scripts/replay_npz.py \
   --robot agibot_a3 \
-  --motion_file ~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand.npz
+  --registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand"
 ```
 
 Replay backhand:
 
 ```bash
-hope_isaac_py scripts/replay_npz.py \
-  --robot agibot_a3 \
-  --motion_file ~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand.npz
-```
-
-Registry replay still works when you deliberately uploaded the clips:
-
-```bash
-hope_isaac_py scripts/replay_npz.py \
-  --robot agibot_a3 \
-  --registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand"
-
 hope_isaac_py scripts/replay_npz.py \
   --robot agibot_a3 \
   --registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_backhand"
@@ -2824,7 +2844,7 @@ Step `12` is complete only if all of the following are true:
 - `motions/retargeted/backhand_swing.csv` exists.
 - `motions/preprocessed/hope_forehand.npz` exists.
 - `motions/preprocessed/hope_backhand.npz` exists.
-- WandB registry contains `hope_forehand` and `hope_backhand` only if you chose the optional upload path.
+- WandB registry contains `hope_forehand` and `hope_backhand`.
 - `replay_npz.py` shows the A3 replaying both motions without obviously broken joint order.
 
 Backend note: this build trains the A3 on the **Isaac Lab + URDF** path (reimplement.md step 2.3 /
@@ -2837,7 +2857,7 @@ Verification gate:
 - The Agibot A3 (or X1 stand-in) model replays each motion.
 - The wrist and racket mount follow a plausible stroke.
 - Feet, pelvis, torso, and arms do not jitter badly.
-- The local `.npz` files are available for training; registry artifacts are registered only if the optional upload path was used.
+- WandB artifacts are registered and accessible.
 
 ## 13. Implement HOPE-Specific WBC Training Extensions
 
@@ -2985,21 +3005,21 @@ distrobox enter grasping
 # inside grasping:
 cd ~/workspace/HOPE/hope_training/whole_body_tracking
 
-# Source the training env. This puts the working-tree source first in HOPE_WBT_PYTHONPATH, appends
-# optional dependency/site-package paths plus Isaac Lab source dirs, defines the `hope_isaac_py`
-# launcher, and exports placeholder WandB team/org/project values. WandB is optional when you pass
-# local motion_file=... inputs; if you use the registry, team and org are DIFFERENT (see Step 12.5).
+# Source the training env. This sets HOPE_WBT_PYTHONPATH (so Isaac's bundled python sees
+# hydra/omegaconf in /opt/drone_venv + isaaclab/isaaclab_rl), defines the `hope_isaac_py` launcher,
+# and exports the wandb team/org/project (WANDB_ENTITY / WANDB_REGISTRY_ORG / WANDB_PROJECT — the
+# team and org are DIFFERENT; using the team for the registry fails, see Step 12.5).
 source setup_train_env.sh
 ```
 
 It MUST be **sourced**, not executed (`./setup_train_env.sh` runs in a subshell that exits, leaving
 your shell unchanged), and re-sourced in every new terminal. On success it prints `[hope] training
 env ready`. The script (`setup_train_env.sh`, in this directory) is the single source of truth for
-the training env. Put real machine paths and private WandB identities in the git-ignored
-`setup_train_env.local.sh`, not in this tracked runbook.
+the training env — edit it there, not inline.
 
-Manual way (equivalent shape - only for debugging a new machine). Prefer the source way above; if you
-do this manually, replace placeholders locally and do not commit private paths or identities:
+Manual way (equivalent — paste the three pieces by hand instead of sourcing). The
+values come verbatim from `setup_train_env.sh`; on a new machine, adjust the paths
+there and re-source rather than hand-editing here:
 
 ```bash
 # from the host:
@@ -3008,25 +3028,16 @@ distrobox enter grasping
 # inside grasping:
 cd ~/workspace/HOPE/hope_training/whole_body_tracking
 
-# (1) Site-specific paths.
-export HOPE_ISAAC_PYTHON=/path/to/isaacsim/python.sh
-export HOPE_ISAACLAB_ROOT=/path/to/IsaacLab
-export HOPE_ISAAC_VENV_SITE=/path/to/optional/site-packages  # optional; leave empty if not needed
+# (1) PYTHONPATH: working-tree source FIRST (so your edits win over any stale installed copy),
+#     then hydra/omegaconf (/opt/drone_venv) + isaaclab_*.
+export HOPE_WBT_PYTHONPATH=$PWD/source/whole_body_tracking:/opt/drone_venv/lib/python3.11/site-packages:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_tasks:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_assets:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_rl
 
-# (2) PYTHONPATH: working-tree source FIRST (so your edits win over any stale installed copy),
-#     then optional hydra/omegaconf deps + isaaclab_*.
-export HOPE_WBT_PYTHONPATH="$PWD/source/whole_body_tracking"
-if [ -n "$HOPE_ISAAC_VENV_SITE" ]; then
-  export HOPE_WBT_PYTHONPATH="$HOPE_WBT_PYTHONPATH:$HOPE_ISAAC_VENV_SITE"
-fi
-export HOPE_WBT_PYTHONPATH="$HOPE_WBT_PYTHONPATH:$HOPE_ISAACLAB_ROOT/source/isaaclab:$HOPE_ISAACLAB_ROOT/source/isaaclab_tasks:$HOPE_ISAACLAB_ROOT/source/isaaclab_assets:$HOPE_ISAACLAB_ROOT/source/isaaclab_rl"
+# (2) the launcher = Isaac's python.sh run with that PYTHONPATH.
+hope_isaac_py () { PYTHONPATH="$HOPE_WBT_PYTHONPATH" /workspace/isaacsim/python.sh "$@"; }
 
-# (3) the launcher = Isaac's python.sh run with that PYTHONPATH.
-hope_isaac_py () { PYTHONPATH="$HOPE_WBT_PYTHONPATH" "$HOPE_ISAAC_PYTHON" "$@"; }
-
-# (4) optional wandb: runs log to your TEAM; the motion registry is read from your ORG (different; see 12.5).
-export WANDB_ENTITY=your-wandb-team
-export WANDB_REGISTRY_ORG=your-wandb-org
+# (3) wandb: runs log to your TEAM; the motion registry is read from your ORG (different — see 12.5).
+export WANDB_ENTITY=BerkeleyPingPong
+export WANDB_REGISTRY_ORG=dongc_1-university-of-california-berkeley-org
 export WANDB_PROJECT=hope_wbc
 ```
 
@@ -3038,7 +3049,7 @@ Either way, sanity-check the shell with
 
 ```bash
 hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
-  motion_file=../motions/preprocessed/hope_forehand.npz \
+  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
   num_envs=32 max_iterations=3 logger=tensorboard run_name=smoke
 ```
 
@@ -3058,13 +3069,12 @@ If it instead drops back to the shell with no `Learning iteration` lines, go to 
 ### 14.3 Train the baseline (plain motion tracking)
 
 Train the plain tracker first — it is easier and confirms the robot/asset before adding the racket
-objective. Omitting `num_envs`/`max_iterations` uses the config defaults. Use local `.npz` first; add
-`logger=wandb` / `registry_name=...` only when you intentionally want remote logging/artifact linkage.
+objective. Omitting `num_envs`/`max_iterations` uses the config defaults; logs to wandb by default.
 
 ```bash
 hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
-  motion_file=../motions/preprocessed/hope_forehand.npz \
-  logger=tensorboard run_name=forehand_tracking
+  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
+  run_name=forehand_tracking
 ```
 
 ### 14.4 Train the unified HITTER policy (forehand + backhand in ONE policy)
@@ -3074,18 +3084,15 @@ swing type (forehand/backhand), the racket target, and the base target. HOPE rep
 imitates BOTH reference clips and learns both strokes. This is the default for `task=HOPEPingPong`.
 
 ```bash
-# Unified policy. Local clip order matters: motion_file = forehand = clip 0,
-# motion_file_2 = backhand = clip 1. No need for two separate runs anymore.
+# Unified policy. Both clips come from the task YAML (registry_name = hope_forehand = clip 0,
+# registry_name_2 = hope_backhand = clip 1). No need for two separate runs anymore.
 hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-  motion_file=../motions/preprocessed/hope_forehand.npz \
-  motion_file_2=../motions/preprocessed/hope_backhand.npz \
-  logger=tensorboard run_name=hitter_unified
+  run_name=hitter_unified
 ```
 
 How the unified policy works (all wired in `cfg/task/HOPEPingPong.yaml` + the code):
 
-1. `motion_file` (clip 0 = forehand) and `motion_file_2` (clip 1 = backhand) are both loaded locally
-   when set. If local files are omitted, `registry_name` / `registry_name_2` provide the same ordering;
+1. `registry_name` (clip 0 = forehand) and `registry_name_2` (clip 1 = backhand) are both downloaded;
    `MotionLoader` concatenates them and a per-env `clip_id` selects which swing each env imitates
    (uniformly resampled every swing).
 2. `racket.strike_phase_per_clip: [0.36, 0.74]` — the racket-tip contact phase is per clip (forehand
@@ -3096,6 +3103,25 @@ How the unified policy works (all wired in `cfg/task/HOPEPingPong.yaml` + the co
    (−y) and backhand (+y) regions are non-overlapping.
 4. The actor sees a `swing_type` observation (forehand +1 / backhand −1).
 
+Stability + reward knobs added 2026-06-27 (all in `cfg/task/HOPEPingPong.yaml`, no command change needed —
+they are picked up automatically by `task=HOPEPingPong`):
+
+1. `rewards.racket_velocity_std: 1.0` — the velocity-tracking kernel width. This is a **manual curriculum**
+   knob: start loose (`1.8` brackets the ~2 m/s initial error), then tighten `1.0 → 0.8 → 0.5` as
+   `racket_vel_error_exact_strike` drops below the current std (velocity is the composite bottleneck). Never
+   jump straight to `0.5`. Pair tightening with `14.4b` resume so you do not restart from scratch.
+2. `rewards.pre_strike_foot_slip_weight: -0.4` — a new stability penalty (`mdp.pre_strike_foot_slip`) on
+   horizontal foot speed *while a foot is in contact*, gated by `pre_strike` ONLY (the strike swing's
+   footwork is untouched). It stops the robot sliding/leaning to reach far targets. Raise its magnitude if
+   `foot_slip_speed` stays high / `foot_contact_frac` stays low; lower it if it starts hurting the strike.
+3. `racket.base_couple_blend: 0.3` + `racket.base_couple_max_offset: 0.20` — weak base→racket coupling
+   (uniform mode): shifts the base XY target toward 30% of the racket target's sideways (Y) offset, clamped
+   to ≤0.20 m, so the robot steps toward far targets instead of stretching in place. Set
+   `base_couple_blend: 0.0` to disable. The racket target distribution is unchanged.
+4. `racket.normal_mode: velocity` is **ignored in the unified (2-clip) policy** — the target normal is the
+   per-clip reference paddle normal, because the +Y blade face is 18–110° off the swing-velocity direction.
+   `normal_mode` only takes effect when `registry_name_2: null` (single-clip).
+
 Confirm on the launch log: `UNIFIED multi-clip policy: clip0=...hope_forehand clip1=...hope_backhand`,
 `racket_target.strike_phase_per_clip=(0.36, 0.74)`, `racket_target.target_mode='uniform'`, and a
 `swing_type` row in the observation table. At runtime `Live/motion/sampling_entropy` ≈ 1.0 means both
@@ -3105,14 +3131,13 @@ Train a SINGLE-swing-type policy instead (e.g. only forehand) by disabling the s
 
 ```bash
 hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-  motion_file=../motions/preprocessed/hope_forehand.npz \
-  motion_file_2=null logger=tensorboard run_name=hope_forehand_only
+  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
+  registry_name_2=null run_name=hope_forehand_only
 ```
 
 Useful overrides (append to any command): `num_envs=4096 max_iterations=20000 seed=1`,
 `task.rewards.racket_position_weight=5.0`, `task.racket.racket_pos_y_abs_range=[0.05,0.4]`.
-If you log to WandB, record the run ID of the good run — Step 15 can load it directly. For local
-TensorBoard runs, record the checkpoint path instead.
+**Record the wandb run ID of the good run** — Step 15 needs it.
 
 #### 14.4b Resume from a checkpoint (staged-curriculum hand-off)
 
@@ -3134,9 +3159,7 @@ ls -t logs/rsl_rl/agibot_a3_hope/<run_dir>/model_*.pt | head -1
 
 # resume + apply the edited YAML (e.g. after lowering racket_velocity_std 1.2 -> 0.8)
 hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-  motion_file=../motions/preprocessed/hope_forehand.npz \
-  motion_file_2=../motions/preprocessed/hope_backhand.npz \
-  logger=tensorboard \
+  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
   run_name=pathC3_velstd08 \
   checkpoint_path=logs/rsl_rl/agibot_a3_hope/<run_dir>/model_2100.pt
 ```
@@ -3154,17 +3177,16 @@ Run all of these **from inside `~/workspace/HOPE/hope_training/whole_body_tracki
 exports `policy.onnx` next to the checkpoint (that is Step 15).
 
 Pick the checkpoint source (in precedence order): `checkpoint=<local .pt>` > `wandb_path=<run>` >
-newest local run. Pick the reference motion: local `motion_file=<forehand.npz>` plus optional
-`motion_file_2=<backhand.npz>` (fully offline) > `registry_name=` / `registry_name_2=` (downloads from
-wandb) > the task default. Registry-downloaded clips are cached under `artifacts/.../motion.npz`.
+newest local run. Pick the reference motion: `motion_file=<.npz>` (fully offline) > `registry_name=`
+(downloads from wandb) > the task default. The local motion clips that training downloaded are cached
+at `artifacts/hope_forehand:v0/motion.npz` and `artifacts/hope_backhand:v0/motion.npz`.
 
 **Watch live in the Isaac Sim window** (needs a local display; the window stays open until you close it):
 
 ```bash
 hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
-  motion_file="../motions/preprocessed/hope_forehand.npz" \
-  motion_file_2="../motions/preprocessed/hope_backhand.npz" \
+  motion_file="artifacts/hope_forehand:v0/motion.npz" \
   headless=false
 ```
 
@@ -3175,8 +3197,7 @@ hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
 ```bash
 hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
-  motion_file="../motions/preprocessed/hope_forehand.npz" \
-  motion_file_2="../motions/preprocessed/hope_backhand.npz" \
+  motion_file="artifacts/hope_forehand:v0/motion.npz" \
   headless=true video=true        # video_length frames; tune in cfg/play.yaml
 ```
 
@@ -3199,6 +3220,33 @@ video uses a manual `env.render()` + `imageio` capture rather than `gym.wrappers
 needs `moviepy` and was masked by Isaac's hard-exit). If video errors with `ModuleNotFoundError`, run
 `hope_isaac_py -m pip install imageio imageio-ffmpeg`.
 
+### 14.5b Quantitative eval + deterministic-vs-dither check (`eval_deterministic.py`)
+
+`play.py` shows you the swing; it does **not** give you numbers. `scripts/eval_deterministic.py` is the
+headless metric harness: it sets up the same UNIFIED 2-clip motion as `train.py`, rolls the policy out on
+many envs, and prints the **full `cmd.metrics` dict** (strike pos/vel/normal pass, `strike_composite_success_exact`,
+fh/bh split) plus a termination / episode-length tally — averaged over the last `tail` steps.
+
+Its key purpose is the **deterministic-vs-dither** sweep. The exported/deployed ONNX runs the distribution
+**mean** (deterministic). A pure-mean policy is fragile (~34% early `ee_body_pos` termination in Isaac even
+though strike accuracy is ~0.99). `noise_scale=s` adds `s × learned_std × N(0,1)` to the mean; a small
+`0.05` dither recovers stability (term ~0.34 → ~0.015) without retraining. Sweep several scales in ONE sim
+process to find the deployment dither:
+
+```bash
+# inside grasping, in .../whole_body_tracking, after Step 14.1 env setup.
+# +steps/+tail/+noise_scales need the Hydra `+` prefix (they are not in the base config).
+hope_isaac_py scripts/eval_deterministic.py task=HOPEPingPong algo=ppo headless=true \
+  num_envs=128 +steps=1200 +tail=400 +noise_scales=0.0,0.05,0.10,0.20 \
+  checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt"
+```
+
+Reference numbers (run `2026-06-27_18-14-06_basecouple03_resume`, `model_32200`, unified fh+bh): det
+(`ns=0.0`) `strike_composite_success_exact=0.9874`, `terminated_rate=0.3385`, `mean_episode_length=333`;
+dither (`ns=0.05`) `0.9932`, `0.0154`, `494`. So **deploy with ~0.05 action dithering**, not the pure mean.
+Without `checkpoint=` it falls back to the newest local run; `+base_couple_blend=0.0` overrides the base→racket
+coupling for the eval; pass `'motion_file=[.../fh.npz,.../bh.npz]'` to run fully offline.
+
 ### 14.6 Where to tune
 
 | File | What |
@@ -3209,9 +3257,53 @@ needs `moviepy` and was masked by Isaac's hard-exit). If video errors with `Modu
 | `cfg/algo/ppo.yaml` | rollout length, learning rate, entropy, mini-batches, epochs, network sizes |
 
 Global CLI overrides: `num_envs max_iterations registry_name run_name seed logger log_project_name`.
-Everything else is `task.<group>.<key>` or `algo.<group>.<key>` (e.g. `task.rewards.motion_scale=0.6`).
+Everything else is `task.<group>.<key>` or `algo.<group>.<key>` (e.g. `task.rewards.racket_position_weight=5.0`).
 The legacy `scripts/rsl_rl/train.py --task=HOPE-PingPong-AgibotA3-v0 --registry_name … --headless`
 entrypoint still works if you prefer argparse over Hydra.
+
+#### Optional: per-clip racket target velocity (forehand vs backhand)
+
+**Why.** The unified policy trains forehand (clip 0) and backhand (clip 1) together. In `target_mode:
+uniform` the racket target velocity is sampled from a single **shared** box for both swings
+(`racket:vel_*_range`). But the two reference clips have different natural strike speeds (~2.6 m/s forehand
+vs ~2.0 m/s backhand), so the shared box (mean |v| ≈ 2.7 m/s) overshoots the slower backhand: its strike
+can't meet the 0.5 m/s velocity gate. The MuJoCo per-clip eval probe (16.1b) confirmed this — lowering
+**only** the backhand target box raised backhand composite **0.32 → 0.79** (deterministic) / **0.39 → 0.77**
+(dither) with the forehand result byte-identical.
+
+> **Status update (model_15200).** The champion `model_15200` trained with the **shared** velocity box
+> (per-clip velocity was NOT needed for it). Two things since this probe revised the picture (Step 16.1b):
+> (1) the most dramatic "dead backhand" was an **ONNX export bug** (forehand-only export froze the backhand
+> reference), now fixed; and (2) after the both-clip re-export the backhand swings, and its residual gap is
+> **position accuracy** (~0.085 m), not the velocity gate. Treat per-clip velocity as an available, optional
+> lever — not a prerequisite — and rank checkpoints by `eval_deterministic` + MuJoCo, not this probe alone.
+
+- **Old / default behavior** — one shared velocity box for both clips (`vel_x_range: [1.5, 3.5]`,
+  `vel_y_range: [-1, 1]`, `vel_z_range: [0, 1.5]`). This is unchanged and remains the default.
+- **New optional behavior** — `racket:vel_range_per_clip` (commented out in `HOPEPingPong.yaml` by default):
+  forehand keeps `[1.5, 3.5]`; backhand uses the lower `[1.2, 2.4]` (and `z: [0, 1.2]`). It is **opt-in** and
+  multi-clip only — when the key is absent (or the run is single-clip) sampling falls back to the shared box,
+  so default behavior is fully backward-compatible. Code: `RacketTargetCommandCfg.racket_vel_range_per_clip`
+  + the per-clip branch in `hope_commands.py:_sample_targets_uniform`, wired from YAML in `train.py`.
+
+**Enable it** by uncommenting the `vel_range_per_clip` block in `cfg/task/HOPEPingPong.yaml`:
+
+```yaml
+  vel_range_per_clip:
+    forehand: {x: [1.5, 3.5], y: [-1.0, 1.0], z: [0.0, 1.5]}
+    backhand: {x: [1.2, 2.4], y: [-1.0, 1.0], z: [0.0, 1.2]}
+```
+
+**Verify before training** (numpy-only, no Isaac) — confirms forehand mean ≈ 2.7 m/s, backhand mean ≈ 2.0:
+
+```bash
+# from .../whole_body_tracking
+python scripts/check_perclip_vel_sampling.py --n 300000 --seed 0
+# disabled -> both clips ~2.71 m/s; enabled -> forehand ~2.71, backhand ~2.02 ("OK: backhand is slower")
+```
+
+At train start the `[train.py] applied …` log prints `racket_target.racket_vel_range_per_clip=(…)` when the
+override took. Recommended run name for the first per-clip experiment: **`hope_unified_perclip_vel_bhslow`**.
 
 ### 14.7 Troubleshooting
 
@@ -3225,11 +3317,11 @@ entrypoint still works if you prefer argparse over Hydra.
   `WANDB_REGISTRY_ORG`, so you may also omit `registry_name=...` entirely.
 - **`ModuleNotFoundError: No module named 'hydra'`** (at `import hydra` near the top of `train.py` /
   `play.py`, run via `hope_isaac_py`). Your shell's `HOPE_WBT_PYTHONPATH` was empty, so `hope_isaac_py`
-  launched Isaac's bundled python with an **empty `PYTHONPATH`**. hydra/omegaconf must either be
-  importable from the Isaac Lab Python or provided through `HOPE_ISAAC_VENV_SITE`. Usually you opened
-  a new terminal and never sourced the env in it. Fix: `source setup_train_env.sh` (14.1) in *this*
-  terminal - it must be re-sourced per terminal. Check with `echo "$HOPE_WBT_PYTHONPATH"` (blank =
-  not sourced). (Sanity check: `hope_isaac_py -c "import hydra, omegaconf;
+  launched Isaac's bundled python with an **empty `PYTHONPATH`**. hydra/omegaconf live in
+  `/opt/drone_venv` and are visible only through that PYTHONPATH (Isaac's python has neither). Usually
+  you opened a new terminal and never sourced the env in it. Fix: `source setup_train_env.sh` (14.1)
+  in *this* terminal — it must be re-sourced per terminal. Check with `echo "$HOPE_WBT_PYTHONPATH"`
+  (blank = not sourced). (Sanity check: `hope_isaac_py -c "import hydra, omegaconf;
   print(hydra.__version__)"` should print `1.3.2`.)
 - **`free(): corrupted unsorted chunks` / Aborted at "Starting the simulation."** PhysX heap
   corruption from the copied A3 ping-pong URDF asset's overlapping wrist collision meshes
@@ -3265,11 +3357,11 @@ Status / what still needs validation:
 1. Training **runs today** on the copied A3 std-pingpong URDF with self-collision off (Step 13).
    Reaching target metrics still needs collision cleanup, measured reachable target ranges, and
    hardware validation of PD gains / standing height / action scale.
-2. The forehand and backhand reference clips must exist either as local Step 9-12 `.npz` files or as
-   optional `motions` registry artifacts.
+2. The forehand and backhand reference clips must be in the `motions` registry (Steps 9–12) so
+   `registry_name=.../hope_forehand` and `.../hope_backhand` resolve.
 3. Set the reachable-target and reward-tuning values in `cfg/task/HOPEPingPong.yaml` and re-train
    until the target metrics are met.
-4. Record checkpoint paths, and WandB run IDs only for runs that used WandB logging.
+4. Record the wandb run IDs of the good forehand and backhand runs — Step 15 needs them.
 
 ### 14.8 Disk usage and cleanup
 
@@ -3323,18 +3415,30 @@ The preferred export path is now built into `scripts/play.py`. When you evaluate
 the script loads the checkpoint and exports `policy.onnx` next to it under the run's `exported/`
 directory. You do not need a separate export script for the normal workflow.
 
-Export and evaluate:
+Export and evaluate. The current champion is the **unified forehand+backhand** policy
+**`model_15200`** (run `2026-06-28_23-01-24_phase050_perclippos_scratch`); export it with **both
+clips** so the ONNX bakes the full reference motion:
 
 ```bash
 # inside the GPU / Isaac distrobox
-hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
-  checkpoint="logs/rsl_rl/agibot_a3_hope/2026-06-24_04-43-26_hope_forehand/model_13100.pt" \
-  motion_file="../motions/preprocessed/hope_forehand.npz" \
-  motion_file_2="../motions/preprocessed/hope_backhand.npz"
-
-hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
-  wandb_path=$WANDB_ENTITY/hope_wbc/PLACEHOLDER_RUN_ID
+RUN=logs/rsl_rl/agibot_a3_hope/2026-06-28_23-01-24_phase050_perclippos_scratch
+hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo headless=true num_envs=2 \
+  checkpoint=$RUN/model_15200.pt \
+  'motion_file=[logs/rsl_rl/eval_motion/fh.npz, logs/rsl_rl/eval_motion/bh.npz]'
+# -> $RUN/exported/policy.onnx (+ learned_std.npy)
 ```
+
+**CRITICAL — export BOTH clips for a unified policy.** `play.py` used to resolve only one motion
+clip, so a unified forehand+backhand checkpoint exported a **forehand-only** ONNX (`time_step_total`=95
+instead of 200). At deploy the backhand `time_step`s then clamp to the last forehand frame → the
+**reference freezes → the backhand never swings** (sim2sim backhand composite collapses to 0). This is
+fixed: `play.py` now resolves `registry_name_2` (and accepts a `motion_file` list) so both clips bake in.
+**Verify it worked:** the resulting `policy.onnx` is **~1.24 MB** (both clips), not ~1.14 MB
+(forehand-only). The 14-tracked-body × 200-frame motion buffer is the size difference.
+
+Deterministic deployment: model_15200 was validated with the **deterministic (mean, no-dither) policy** —
+MuJoCo showed dither is unnecessary for stability and hurts the backhand. `learned_std.npy` is exported
+for completeness but is **not** needed for deterministic inference (see Step 16.1b).
 
 If you want a stable deployment filename, copy the exported file into `hope_training/policies/`
 after each export:
@@ -3349,8 +3453,8 @@ Run ID lookup:
 
 1. Open the successful training run in WandB.
 2. Copy the run ID from the URL or from the run overview page.
-3. Run `scripts/play.py` on the selected checkpoint or WandB run.
-4. Copy or rename the exported file to a stable name such as `hope_unified_policy.onnx`.
+3. Run `scripts/play.py` once for the forehand run and once for the backhand run.
+4. Copy or rename the exported files to stable names such as `hope_forehand_policy.onnx` and `hope_backhand_policy.onnx`.
 5. Keep each ONNX file and the exact joint-order YAML together. They are a matched pair.
 
 The ONNX should include:
@@ -3382,12 +3486,15 @@ Verification gate:
 > referred to the BeyondMimic deploy repo we never cloned. Use the two real paths
 > below instead.
 
-Before touching hardware, verify the policy in simulation. This repo gives you two
+Before touching hardware, verify the policy in simulation. This repo gives you three
 sim checks, in increasing fidelity:
 
 1. **16.1 In-Isaac verification** — runnable *today with your trained policy*. It is
    the only closed loop that consumes your BeyondMimic `policy.onnx`'s exact
    obs/action contract, because the same task rebuilds the env around it.
+   **16.1b** adds a lightweight MuJoCo cross-simulator run of the same ONNX (different
+   physics engine, no Isaac) — the best true sim-to-sim available, since the heavy C++
+   harness below cannot load this ONNX.
 2. **16.2 A3 MuJoCo sim-to-sim harness** — the real `hal_ethercat`-shaped closed loop:
    the deploy program (`agi/a3_deploy_example/`) ↔ MuJoCo sim (`agi/A3_MuJoCo_Sim/`)
    over iceoryx, both built from source on Jazzy. Runs with its *bundled* A3 policy;
@@ -3406,8 +3513,7 @@ is Step 15 — the export happens before the rollout, so it never needs a displa
 # Watch the swing live (needs a local display):
 hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
-  motion_file="../motions/preprocessed/hope_forehand.npz" \
-  motion_file_2="../motions/preprocessed/hope_backhand.npz" \
+  motion_file="artifacts/hope_forehand:v0/motion.npz" \
   headless=false
 # e.g. <RUN>=2026-06-24_04-43-26_hope_forehand  <N>=13100  (your latest checkpoint)
 ```
@@ -3418,18 +3524,86 @@ hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
 # forever after the export (the onnx is written either way, before the loop).
 hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
-  motion_file="../motions/preprocessed/hope_forehand.npz" \
-  motion_file_2="../motions/preprocessed/hope_backhand.npz" \
+  motion_file="artifacts/hope_forehand:v0/motion.npz" \
   headless=true video=true video_length=300
 # -> logs/rsl_rl/agibot_a3_hope/<RUN>/exported/policy.onnx  (+ videos/play/play.mp4)
 ```
 
-For a single-swing checkpoint, pass only the matching `motion_file` and set `motion_file_2=null`.
-These runs are fully offline: with `checkpoint=` and local `motion_file=` set, nothing touches wandb.
+Repeat with `motion_file="artifacts/hope_backhand:v0/motion.npz"` and a backhand
+checkpoint to verify the backhand policy. Both runs are fully offline: with
+`checkpoint=` and `motion_file=` both set, nothing touches wandb.
 
 Check: robot stays upright, the swing resembles the reference clip, the racket mount
 sweeps through the strike. (An undertrained policy failing these is expected — 16.1
 confirms the export→load→rollout *pipeline*, not policy quality.)
+
+### 16.1b Lightweight MuJoCo cross-simulator check (`mujoco_eval_onnx.py`)
+
+Between the in-Isaac check (16.1) and the heavy C++ harness (16.2) there is a third, **runnable-today**
+verification: `scripts/mujoco_eval_onnx.py` runs your exported `policy.onnx` in a *different physics engine*
+(MuJoCo) with **no Isaac, no retrain, no reward/target changes**. It loads the official A3 ping-pong MJCF,
+reconstructs the exact **180-D** observation the policy was trained on (NOT 129-D — `command`=62 ref joint
+pos+vel, `motion_anchor_ori_b`=6; verified from `actor.0.weight=(512,180)`), drives a 50 Hz control loop
+with the deploy-matched Agibot PD gains, and prints the same Isaac strike-composite metrics, now split per
+swing (forehand vs backhand). (The official Agibot C++ harness in 16.2 cannot load this ONNX: it expects a
+1570-D HITTER-tokenizer obs / 29 DOF / single-output policy; ours is 180-D / 31 DOF / 7 outputs.)
+
+Run it in a plain Python env that has `mujoco` + `onnxruntime` (e.g. conda `hope-motion-py310`), **not**
+`hope_isaac_py`:
+
+```bash
+# from .../whole_body_tracking. --mjcf is relative to the repo root; everything else to this dir.
+# Deterministic is the deploy path: --noise-scales 0.0 (no dither). --std is only needed if you add
+# dither (noise_scale > 0); the ONNX emits the mean action so deterministic needs no std sidecar.
+RUN=logs/rsl_rl/agibot_a3_hope/2026-06-28_23-01-24_phase050_perclippos_scratch
+python scripts/mujoco_eval_onnx.py \
+  --onnx $RUN/exported/policy.onnx \
+  --std  $RUN/exported/learned_std.npy \
+  --mjcf agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml \
+  --noise-scales 0.0 0.05 --steps 4000 --pd-mode implicit --seed 0
+# Useful flags:
+#   --strike-phase-per-clip 0.36 0.50   per-clip contact phase. THIS IS NOW THE DEFAULT (fh 0.36 / bh
+#                                       0.50); only pass it for old model_32200-era models (bh 0.74).
+#                                       It MUST match the trained model's strike_phase_per_clip, else the
+#                                       backhand strike is sampled at a dead frame and reads ~0.
+#   --ee-term-z 100                     relax the ee_body_pos TRAINING tracking-guard so swings run to
+#                                       completion (see "fragility" note below). 0.25 = training default.
+```
+
+`--pd-mode implicit` is the **faithful** mode: it models the PD as passive damping (`kd`) + `implicitfast`,
+matching Isaac's `ImplicitActuator`. `--pd-mode explicit` (the default) computes `torque = kp·(q*−q) − kd·q̇`
+each substep; it is a harder, less faithful test and inflates the strike velocity error (~0.61 vs implicit
+~0.31 m/s) purely from actuator discretization, not a transfer failure. Use implicit for the verdict.
+
+Validated result for **model_15200** (`--ee-term-z 100`, full episodes, implicit PD):
+
+- **Zero falls** at `--noise-scales 0.0` AND `0.05` (full 500-step episodes). The robot is physically stable
+  deterministically — **no dither needed** (and dither *hurts* the backhand, 0.50→0.31; deploy deterministic).
+- **Forehand** composite **~0.90** (pos_err ~0.06 m, vel_err ~0.29, normal ~1.3°) — a clean sim2sim pass.
+- **Backhand** composite **~0.50** — functional but **position-limited**: the racket lands ~**0.085 m** off
+  target (50% within the 7.5 cm gate) vs Isaac's ~0.038 m. Velocity and normal pass; the gap is the
+  high cross-body backhand reach tracking ~2× looser in MuJoCo (an implicit-PD / arm-dynamics gap).
+
+Two earlier conclusions were WRONG and are corrected here:
+
+1. **The "deterministic `ee_body_pos` fragility" IS the same training tracking-guard, not a fall.** Running
+   with the guard at its training threshold (`--ee-term-z 0.25`) shows ~80% `terminated_rate` — but at every
+   termination the robot is **upright, both feet planted** (roll ~3°, pitch ~4°). The `ee_body_pos` term is a
+   training reset device (wrist z deviating >0.25 m from reference during the high backhand **wind-up**), not a
+   physical fall. `--ee-term-z 100` removes it → **0 falls**, episodes run to 500 steps. Deployment has no such
+   termination. So the dither that "rescued" this in Isaac was compensating for a training guard, not instability.
+2. **The backhand bottleneck is POSITION, not velocity, and the earlier "dead backhand" was an EXPORT BUG.** A
+   forehand-only ONNX (Step 15) froze the backhand reference → racket ~0.1 m/s, composite 0. After the both-clip
+   re-export the backhand swings (~2.3 m/s); the residual gap is position accuracy, not a velocity-target box
+   mismatch.
+
+Diagnostic CSVs in the run dir (or `--out-dir`): per-step `mujoco_sim2sim_log.csv` (now incl. a `racket_speed`
+column — use it to tell an *absent* swing from a *mistimed* one) and per-strike `mujoco_sim2sim_strikes.csv`
+(incl. `base_pos_w_*` so you can check the target is ~0.40 m in front of the base, not mis-framed).
+
+Output: a per-step `mujoco_sim2sim_log.csv` **and** a per-strike `mujoco_sim2sim_strikes.csv` in the ONNX run
+dir (or `--out-dir`), plus the printed summary + per-clip tables. `--keep-passive` leaves the MJCF damping in
+(double-damped, for debugging); `--sim-dt/--decimation` keep the 50 Hz control rate (default `0.005 × 4`).
 
 ### 16.2 A3 MuJoCo sim-to-sim harness (the real deployment loop)
 
@@ -3651,6 +3825,14 @@ Verification gate:
 - No hardware deployment until 16.2 passes with the policy you intend to ship.
 
 ## 17. Implement Runtime Forehand/Backhand Switching
+
+> **Largely superseded by the unified policy.** The champion **`model_15200`** is a single
+> forehand+backhand policy: both clips are baked into one ONNX, and the swing is selected by the
+> **`swing_type`** observation field (+1 forehand / −1 backhand) which `hope_wbc_runner` sets from the
+> target Y sign (forehand −y / backhand +y). So you do **not** load two ONNX sessions or switch models at
+> runtime — there is one policy, one obs, one inference. The reference clock just picks the forehand vs
+> backhand segment of the baked motion (Step 16.1b). The section below remains valid only if you instead
+> deploy **two single-skill** policies; for model_15200 skip to `hope_wbc_runner` (Step 20.0).
 
 The reference deployment code may load one ONNX policy. HOPE needs forehand and backhand switching unless you train a single multi-skill policy.
 
@@ -3958,7 +4140,103 @@ Execution scope:
 - Then launch the ROS 2 commands below inside that `hope` shell.
 - The Avatar-Pro software itself still runs on the separate mocap PC, outside this machine.
 
-Launch order:
+### 20.0 Bring-up BEFORE mocap (fake planner + staged WBC runner)
+
+Until mocap + real ball tracking are ready, bring up the control path with **`planner_imitate`** (a fake
+HITTER planner) feeding **`hope_wbc_runner`** (the WBC controller) — no mocap, no ball, hardware-safe by
+construction. Both live in `hope_ws/src/` (`hope_planner/PLANNER_IMITATE.md`, `hope_wbc_runner/README.md`).
+
+```bash
+# Build + dry-run smoke first (builds hope_msgs too; runs planner_imitate -> wbc_runner, NO hardware):
+cd ~/workspace/HOPE/hope_ws && ./smoke_test_dry_run.sh /abs/path/to/exported/policy.onnx
+
+# Terminal A — fake planner publishes /racket/command (level 0=stand,1=fh slow,...,5=alternate):
+ros2 launch hope_planner planner_imitate.launch.py dry_run:=false level:=1
+
+# Terminal B — WBC runner, dry-run: builds obs, runs model_15200, LOGS joint targets, NO hardware:
+ros2 launch hope_wbc_runner wbc_runner.launch.py mode:=dry_run \
+  onnx_path:=/abs/path/to/exported/policy.onnx csv_path:=/tmp/wbc_runner.csv
+```
+
+Key points (details in the two package READMEs):
+- **Frames:** the real `hope_planner` publishes `/racket/command` in the HOPE **`world`** (table) frame;
+  `planner_imitate` defaults to **`base_link`** (robot-relative, the frame model_15200 was validated in,
+  x≈0.40 m in front), since the robot's world pose is still unmeasured (`hope_world_frame.yaml:
+  mocap_to_base_link` = TODO). The runner currently expects `base_link` targets.
+- **Safety gate:** `wbc_runner` publishes joint commands ONLY when `mode:=hardware` **AND**
+  `hardware_enable` **AND** `/hope/estop` false. `dry_run`/`shadow` never publish. Deterministic, no dither.
+- **Staging:** `mode:=dry_run` → `shadow` (predict against the a3_pingpong MuJoCo sim / robot, still no
+  publish; compare `target_q` to the MuJoCo eval) → `hardware`. Planner levels 0→1→…→5.
+- `onnxruntime` must be installed in the ROS python; `joint_msgs` (from `agi/A3_MuJoCo_Sim/.../protocols`)
+  is only needed for `mode:=hardware`.
+
+#### 20.0.1 Beginner copy-paste walkthrough (build → dry-run → MuJoCo visual)
+
+A safe, **dry-run only** path — no hardware moves. The fully-annotated version (every command
+with "what it does / success / common error / fix") is in **`hope_ws/BRINGUP_TUTORIAL.md`**; this is the
+condensed in-guide copy.
+
+**Two containers** (this trips up beginners): the ROS bring-up runs in **`hope`** (the ROS 2 Jazzy
+workspace); the MuJoCo *picture* runs in **`grasping`** (it has the `hope-motion-py310` conda env with
+`mujoco` + `onnxruntime`). They are separate today — `wbc_runner` only **logs** joint targets; nothing
+feeds them into a live MuJoCo robot yet (the missing "shadow bridge", see below). The viewer runs the
+**same** policy standalone, so you still see model_15200 swing.
+
+```bash
+# ===== A) ROS bring-up smoke (container: hope) =====
+distrobox enter hope -- bash
+ls /opt/ros/                                   # note the distro name (e.g. jazzy); source the one shown
+source /opt/ros/jazzy/setup.bash
+cd ~/workspace/HOPE/hope_ws
+colcon build --packages-up-to hope_planner hope_wbc_runner --symlink-install
+source install/local_setup.bash
+python3 -c "import onnxruntime" || python3 -m pip install onnxruntime
+export ONNX=~/workspace/HOPE/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope/2026-06-28_23-01-24_phase050_perclippos_scratch/exported/policy.onnx
+stat -c '%s bytes (want ~1243884 = 1.24MB 2-clip; ~1141378 = BAD forehand-only)' "$ONNX"
+./smoke_test_dry_run.sh "$ONNX"
+
+# ===== B) Manual ROS run (container: hope; 4 terminals). Prologue in EACH terminal: =====
+#   distrobox enter hope -- bash
+#   source /opt/ros/jazzy/setup.bash
+#   source ~/workspace/HOPE/hope_ws/install/local_setup.bash
+#   export ONNX=~/workspace/HOPE/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope/2026-06-28_23-01-24_phase050_perclippos_scratch/exported/policy.onnx
+# Terminal A (fake planner publishes /racket/command; dry_run:=false only PUBLISHES, never drives hardware):
+ros2 launch hope_planner planner_imitate.launch.py dry_run:=false level:=1
+# Terminal B (runner builds 180-D obs, runs model_15200 deterministically, LOGS target_q; NO hardware):
+ros2 launch hope_wbc_runner wbc_runner.launch.py mode:=dry_run onnx_path:="$ONNX" csv_path:=/tmp/wbc_runner.csv
+# Terminal C (watch the commands; best_effort REQUIRED — planner publishes best-effort, plain echo
+# defaults to reliable and shows NOTHING despite the topic publishing fine):
+ros2 topic echo --qos-reliability best_effort /racket/command
+# Terminal D (inspect the log; forehand y<0, backhand y>0; columns incl. target_q_0..30):
+tail -5 /tmp/wbc_runner.csv | cut -c1-140
+
+# ===== C) See the A3 swing in MuJoCo (container: grasping) =====
+distrobox enter grasping -- bash
+conda activate hope-motion-py310
+cd ~/workspace/HOPE/hope_training/whole_body_tracking
+RUN=logs/rsl_rl/agibot_a3_hope/2026-06-28_23-01-24_phase050_perclippos_scratch
+# if no window opens: on the HOST run `xhost +local:` (and check `echo $DISPLAY`), then retry.
+python scripts/mujoco_eval_onnx.py --viewer --pd-mode implicit --noise-scales 0.0 --steps 4000 \
+  --onnx $RUN/exported/policy.onnx --std $RUN/exported/learned_std.npy
+```
+
+Beginner gotchas: every new terminal needs BOTH `source /opt/ros/<distro>/setup.bash` AND
+`source ~/workspace/HOPE/hope_ws/install/local_setup.bash`. `ros2 topic echo` needs
+`--qos-reliability best_effort` (the planner publishes best-effort). If `echo` throws
+`xmlrpc.client.ResponseError: unknown tag 'rclpy.endpoint_info.TopicEndpointInfo'`, a stale ros2 daemon
+is to blame → `ros2 daemon stop` (restarts clean) or add `--no-daemon`. If launch fails with
+`Could not import 'rosidl_typesupport_c' for package 'hope_msgs'` / `libpython3.X.so: cannot open`, the
+messages were built under a different python — `cd ~/workspace/HOPE/hope_ws && rm -rf build install &&
+colcon build`. No-display (SSH) → drop `--viewer` for headless numbers, or record an MP4 with
+`scripts/play.py ... video=true` (Isaac).
+
+**Current limitation / missing shadow bridge.** `planner_imitate → /racket/command → wbc_runner` is a
+log-only loop; the official `a3_pingpong` MuJoCo sim is driven by the Agibot C++ deploy over **iceoryx**,
+not ROS, so `wbc_runner` cannot drive it. To watch `wbc_runner`'s OWN output move a robot you need a
+shadow-bridge node (subscribe `/racket/command`, step a live MuJoCo A3, publish `joint_states` back) — not
+built yet. Until then use the standalone viewer in step C.
+
+Launch order (full pipeline, once mocap is live):
 
 ```bash
 # Terminal 1: motion capture bringup (Avatar Pro VRPN client + relay + world frame)
@@ -3968,13 +4246,17 @@ ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
   server:=PLACEHOLDER_AVATAR_PRO_PC_IP port:=3883 update_freq:=360.0 \
   ball_tracking_mode:=rigid_body ball_object:=Ball
 
-# Terminal 2: planner
+# Terminal 2: planner (real mocap-driven planner -> /racket/command in the "world" frame)
 ros2 launch hope_planner hope_planner.launch.py
 
-# Terminal 3: WBC controller
-ros2 launch motion_tracking_controller real.launch.py \
-  network_interface:=PLACEHOLDER_A3_NETWORK_INTERFACE \
-  policy_path:=~/workspace/HOPE/hope_training/policies/hope_forehand_policy.onnx
+# Terminal 3: WBC controller -- hope_wbc_runner consumes /racket/command, builds the 180-D obs,
+# runs model_15200 deterministically, and (only in hardware mode, gated) emits joint commands.
+# STAGE IT: mode:=dry_run (log only) -> shadow (predict on real state, no publish) -> hardware.
+ros2 launch hope_wbc_runner wbc_runner.launch.py \
+  mode:=hardware state_source:=ros \
+  onnx_path:=~/workspace/HOPE/hope_training/policies/hope_unified_policy.onnx
+# arm:   ros2 topic pub -1 /hope/hardware_enable std_msgs/Bool "{data: true}"
+# estop: ros2 topic pub -1 /hope/estop std_msgs/Bool "{data: true}"   # -> STAND, publishing off
 
 # Terminal 4: monitoring
 ros2 topic hz /poses
@@ -4249,20 +4531,55 @@ No racket markers are used.
 
 ## 27. Suggested Implementation Order Summary
 
-Use this as the gate checklist. The detailed step numbers above are subordinate to these gates.
+Use this as the master checklist:
 
-1. `G00` - make the repo harness reproducible: docs, asset policy, ignored local roots, environment entrypoints, and basic test commands.
-2. `G01` - prepare real-world contracts before robot risk: table frame, mocap labels, A3 network, joint order, dry-run limits, safe halt, and no-racket-tracking rule.
-3. `G02` - acquire trustworthy real data: VRPN/table/robot/ball streams, timestamps, QoS, recording commands, and known dropouts.
-4. `G03` - calibrate planner physics from measured data: estimator, bounce/drag constants, predictor error, and racket-command output.
-5. `G04` - make simulation semantics match the real contract: A3 model, racket FK, table/ball frame, MuJoCo/Isaac joint order, and table-tennis contact scene.
-6. `G05` - run the first Isaac training loop: motion references, `HOPEPingPong` exact-strike metrics, reward/target sampling, checkpoints, ONNX export, and recorded run IDs.
-7. `G06` - verify Isaac-to-MuJoCo parity before deployment: observation/action tensors, joint decoder, policy timing, and no-ball rollout behavior.
-8. `G07` - deploy only through documented dry-runs: standby, E-stop, command scaling, no-ball active mode, soft toss, and monitored safety limits.
-9. `G08` - pick one measured blind spot after the baseline: spin, serve, double bounce, short/deep balls, opponent adaptation, or multi-agent training.
-
-Each gate is done only when its `docs/gates/G*.md` file records reproducible commands,
-verification results, current inputs/outputs, and known limitations.
+1. Read all docs.
+2. Choose robot and backend.
+3. Create workspace.
+4. Implement `hope_msgs`.
+5. Configure HOPE world frame.
+6. Set up mocap.
+7. Verify mocap topics.
+8. Implement planner constants.
+9. Implement ball state estimator.
+10. Test state estimator.
+11. Implement trajectory predictor.
+12. Test trajectory predictor.
+13. Implement racket target planner.
+14. Test racket target planner.
+15. Implement planner ROS 2 node.
+16. Test planner with recorded or live ball data.
+17. Calibrate ball physics.
+18. Record forehand and backhand videos.
+19. Run GVHMR.
+20. Verify SMPL-X output.
+21. Install GMR.
+22. Retarget motions to robot.
+23. Verify retargeted motions.
+24. Model `T_mount`.
+25. Verify FK to racket frame.
+26. Install Isaac Lab or mjlab.
+27. Install BeyondMimic training stack.
+28. Preprocess motions.
+29. Replay preprocessed motions.
+30. Implement HOPE-specific WBC observations.
+31. Implement HOPE-specific WBC rewards.
+32. Add domain randomization.
+33. Train forehand policy.
+34. Evaluate forehand policy.
+35. Train backhand policy.
+36. Evaluate backhand policy.
+37. Export ONNX.
+38. Run sim-to-sim verification.
+39. Implement forehand/backhand runtime switching.
+40. Set up hardware deployment.
+41. Test standby and E-stop.
+42. Test no-ball active mode.
+43. Test soft toss.
+44. Tune PD gains and `T_mount`.
+45. Add monitoring and safety nodes.
+46. Run end-to-end rally.
+47. Record qualification video.
 
 ## 28. Do Not Violate These Constraints
 
@@ -4285,6 +4602,14 @@ verification results, current inputs/outputs, and known limitations.
 - `HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md`
 - `HOPE_WBC_Simulation_Training_Reference_Setup.md`
 - `HOPE_Hardware_Deployment_Reference_Setup.md`
+
+Bring-up / deployment (this session — fake-planner + WBC-runner path):
+
+- `hope_ws/src/hope_planner/PLANNER_IMITATE.md` — fake HITTER planner (`planner_imitate`) for bring-up without mocap; staged levels 0–5, safety, frames.
+- `hope_ws/src/hope_wbc_runner/README.md` — staged, safety-gated WBC controller (`wbc_runner`) that runs model_15200 from `/racket/command`; dry_run/shadow/hardware modes, 180-D obs contract, joint command interface.
+- `hope_ws/SMOKE_TEST.md` + `hope_ws/smoke_test_dry_run.sh` — hardware-safe build/launch smoke for the two packages.
+- `hope_training/whole_body_tracking/scripts/mujoco_eval_onnx.py` — MuJoCo cross-sim harness (Step 16.1b); the reference 180-D obs / action-decode / PD that `hope_wbc_runner` ports to ROS.
+- `hope_training/whole_body_tracking/scripts/play.py` — ONNX export (Step 15); resolves both clips for the unified policy.
 
 External Agibot / Expedition A3 references (verified June 2026):
 

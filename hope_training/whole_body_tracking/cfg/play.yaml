@@ -2,9 +2,8 @@
 # Hydra eval/export config for HOPE Agibot A3 WBC (106B-Final-Project style).
 #
 # Usage:
-#   python scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
-#       checkpoint=logs/rsl_rl/agibot_a3_hope/<run>/model_<N>.pt \
-#       motion_file=../motions/preprocessed/hope_forehand.npz
+#   python scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 \
+#       wandb_path=<entity>/hope_wbc/<run_id>
 #
 # Loads the trained policy from a wandb run (largest model_*.pt), runs it, and
 # exports policy.onnx next to the checkpoint (step 15). Without wandb_path it
@@ -12,7 +11,7 @@
 # =============================================================================
 
 defaults:
-  - task: HOPEPingPong
+  - task: HOPEPingPongDeployParity
   - algo: ppo
   - _self_
 

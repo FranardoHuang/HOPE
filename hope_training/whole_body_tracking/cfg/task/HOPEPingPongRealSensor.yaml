@@ -1,0 +1,16 @@
+# =============================================================================
+# Legacy alias for the deploy-parity HOPE ping-pong task.
+#
+# Keep this entry so older scripts and notes that say `task=HOPEPingPongRealSensor`
+# continue to work, but make all task tuning changes in
+# `cfg/task/HOPEPingPongDeployParity.yaml`.
+# =============================================================================
+
+defaults:
+  - HOPEPingPongDeployParity@_here_
+  - _self_
+
+name: HOPEPingPongRealSensor
+gym_task: HOPE-PingPong-RealSensor-AgibotA3-v0
+experiment_name: agibot_a3_hope_realsensor
+actor_obs_contract: deploy_parity

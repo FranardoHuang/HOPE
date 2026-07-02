@@ -1,0 +1,31 @@
+# Runtime config for the model_15200 ping-pong runner (a3_deploy_onnx_ref_pingpong).
+# This runner reads: onnx.model_path, policy_driver.policy_hz, the backend block,
+# and obs_debug (localization mode). Paths are relative to THIS file's directory.
+#
+# DURABLE SOURCE OF TRUTH. The package builder stages this into dist/.../config/.
+# (Previously this file lived only under dist/, which build_a3_deploy_pkg.sh wipes
+# on every build -> the runner asset was silently dropped. Keep it here in src.)
+onnx:
+  # Keep the SOURCE config valid inside the repo tree: from src/.../config this resolves to
+  # assets/a3_runtime/models/model_15200.onnx. During packaging, build_a3_deploy_pkg.sh copies
+  # the model into dist/.../models/ and rewrites the packaged runtime cfg to `models/...`.
+  # model_15200.onnx = old 180-D FULL policy. model_p4_deployparity.onnx = new 175-D deploy_parity
+  # policy (runner auto-detects obs dim from the ONNX input and builds obs 175 vs 180 accordingly).
+  model_path: ../../../../assets/a3_runtime/models/model_explicitpd_ft.onnx
+
+policy_driver:
+  policy_hz: 50.0
+
+obs_debug:
+  # HARDWARE-SAFE default. fabricated synthesizes a fictional world-tracking error
+  # (the documented "deploy buzz" mode) and must NOT be used on hardware. The
+  # A/B/C rehearsal selects fabricated/oracle explicitly via --loc-mode.
+  loc_mode: perfect_tracking   # fabricated | perfect_tracking | oracle(sim-only)
+
+backend:
+  # PURE-iceoryx cfg (no ros2_plugin) to match the iceoryx-only sim cfg and avoid
+  # the ABI-mismatched prebuilt libaimrt_ros2_plugin.so. For the real robot use
+  # a3_aimrt_config.ros2.yaml (rebuilt in-box) instead.
+  aimrt_cfg_path: a3_aimrt_config.pingpong_iceoryx.yaml
+  sync_mode: min_skew_pair
+  sync_hz: 100.0

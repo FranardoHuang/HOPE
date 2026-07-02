@@ -34,13 +34,23 @@ hope_training/wandb/
 hope_training/whole_body_tracking/wandb/
 *.log
 .codex-env-snapshots
+hope_training/whole_body_tracking/diag_videos
 
 # Local, machine-specific training env override (Isaac paths + wandb identity).
 # Sourced by setup_train_env.sh if present; keep real paths/identity out of git.
 hope_training/whole_body_tracking/setup_train_env.local.sh
 
-# Agibot A3 deploy example package (vendor-provided, ~1.7 GB - too large for git)
-agi/a3_deploy_example/
+# Agibot A3 deploy example (vendor package). We DO track the source/configs/docs
+# here -- including our a3_pingpong sim-to-real port. Only the multi-GB build
+# outputs, bundled third-party libs, model/mesh assets, and logs are ignored.
+# Stray binaries (*.onnx/*.so/*.pt/...) are already covered by the global rules below.
+agi/a3_deploy_example/build/
+agi/a3_deploy_example/dist/
+agi/a3_deploy_example/thirdparty/
+agi/a3_deploy_example/assets/
+agi/a3_deploy_example/mujoco_sim_standalone/
+agi/a3_deploy_example/logs/
+agi/a3_deploy_example/.github/
 
 # Large vendor/runtime artifacts kept outside normal git history.
 *.onnx

@@ -25,6 +25,7 @@ setup(
     entry_points={
         "console_scripts": [
             "hope_planner_node = hope_planner.node:main",
+            "planner_imitate_node = hope_planner.planner_imitate:main",
             "hope_calibrate = hope_planner.calibration:main",
             "hope_bag_to_csv = hope_planner.bag_to_csv:main",
             "hope_split_calibration_csv = hope_planner.split_calibration_csv:main",

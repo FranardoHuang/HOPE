@@ -2,9 +2,8 @@
 
 Pick the task/algo YAML on the command line and override any field:
 
-    python scripts/train.py task=HOPEPingPong algo=ppo headless=true \
-        motion_file=../motions/preprocessed/hope_forehand.npz \
-        motion_file_2=../motions/preprocessed/hope_backhand.npz
+    python scripts/train.py task=HOPEPingPongDeployParity algo=ppo headless=true \
+        registry_name=<entity>/wandb-registry-motions/hope_forehand
 
     python scripts/train.py task=TrackingFlat algo=ppo num_envs=2048 max_iterations=20000 \
         registry_name=<org>/wandb-registry-motions/hope_forehand
@@ -203,8 +202,8 @@ def _set_reward(rewards, name, weight, std, applied):
 # actually requested racket overrides before requiring the command to exist).
 _RACKET_KEYS = (
     "strike_phase", "strike_phase_by_motion", "strike_window_s", "strike_success_pos_thresh",
-    "pos_x_range", "pos_y_range", "pos_z_range",
-    "vel_x_range", "vel_y_range", "vel_z_range",
+    "pos_x_range", "pos_y_range", "pos_z_range", "racket_pos_y_abs_range", "pos_range_per_clip",
+    "vel_x_range", "vel_y_range", "vel_z_range", "vel_range_per_clip",
     "base_target_x_range", "base_target_y_range",
     "normal_mode", "forehand_on_negative_y", "mount_normal_axis", "mount_normal_sign",
     "target_mode", "ref_perturb_pos", "ref_perturb_vel", "ref_perturb_normal",
@@ -257,6 +256,80 @@ def _resolve_strike_phase(rk, clip_name):
             return float(v), f"racket_target.strike_phase<-by_motion[{k}]={float(v)} (clip={clip_name})"
     sp = _get(rk, "strike_phase")
     return (None if sp is None else float(sp)), None
+
+
+# YAML clip-name -> clip_id index. MUST match RacketTargetCommand._clip_names (0=forehand, 1=backhand).
+_CLIP_NAME_TO_ID = {"forehand": 0, "backhand": 1}
+
+
+def _resolve_vel_range_per_clip(rk):
+    """Build the optional PER-CLIP racket target-velocity tuple from the YAML ``vel_range_per_clip`` block.
+
+    YAML (readable, keyed by swing name; each axis a [lo, hi] list)::
+
+        vel_range_per_clip:
+          forehand: {x: [1.5, 3.5], y: [-1.0, 1.0], z: [0.0, 1.5]}
+          backhand: {x: [1.2, 2.4], y: [-1.0, 1.0], z: [0.0, 1.2]}
+
+    Returns a tuple indexed by clip_id (0=forehand, 1=backhand) of ``((xlo,xhi),(ylo,yhi),(zlo,zhi))``,
+    or ``None`` when the key is absent (-> keep the shared ``vel_*_range`` box; backward compatible).
+    Forehand and backhand reference clips have different natural strike speeds, so a shared box overshoots
+    the slower backhand. Mirrors the per-clip ``strike_phase_per_clip`` / ``ref_vel_scale_by_motion`` style.
+    """
+    block = _get(rk, "vel_range_per_clip")
+    if block is None:
+        return None
+    by_id = {}
+    for name in block:
+        cid = _CLIP_NAME_TO_ID.get(str(name).lower())
+        if cid is None:
+            raise _OverrideError(
+                f"racket.vel_range_per_clip: unknown clip name {name!r} (expected forehand/backhand)")
+        axes = _get(block, name)
+
+        def _r(ax):
+            v = _get(axes, ax)
+            if v is None:
+                raise _OverrideError(f"racket.vel_range_per_clip[{name}]: missing '{ax}' [lo,hi] range")
+            return (float(v[0]), float(v[1]))
+
+        by_id[cid] = (_r("x"), _r("y"), _r("z"))
+    return tuple(by_id[i] for i in range(len(by_id)))
+
+
+def _resolve_pos_range_per_clip(rk):
+    """Build the optional PER-CLIP racket target-POSITION tuple from the YAML ``pos_range_per_clip`` block.
+
+    YAML (readable, keyed by swing name; each axis a [lo, hi] list, ADDED to the env origin; y is SIGNED)::
+
+        pos_range_per_clip:
+          forehand: {x: [0.50, 0.62], y: [-0.45, -0.20], z: [0.72, 0.98]}
+          backhand: {x: [0.50, 0.62], y: [ 0.20,  0.45], z: [1.05, 1.30]}
+
+    Returns a tuple indexed by clip_id (0=forehand, 1=backhand) of ``((xlo,xhi),(ylo,yhi),(zlo,zhi))``,
+    or ``None`` when the key is absent (-> keep the shared ``pos_*_range`` box; backward compatible).
+    Mirrors ``vel_range_per_clip``: lets each clip's target track its own reference strike point (e.g. the
+    backhand sits higher/forward at strike_phase 0.50, so a shared z<=1.05 box makes it unreachable).
+    """
+    block = _get(rk, "pos_range_per_clip")
+    if block is None:
+        return None
+    by_id = {}
+    for name in block:
+        cid = _CLIP_NAME_TO_ID.get(str(name).lower())
+        if cid is None:
+            raise _OverrideError(
+                f"racket.pos_range_per_clip: unknown clip name {name!r} (expected forehand/backhand)")
+        axes = _get(block, name)
+
+        def _r(ax):
+            v = _get(axes, ax)
+            if v is None:
+                raise _OverrideError(f"racket.pos_range_per_clip[{name}]: missing '{ax}' [lo,hi] range")
+            return (float(v[0]), float(v[1]))
+
+        by_id[cid] = (_r("x"), _r("y"), _r("z"))
+    return tuple(by_id[i] for i in range(len(by_id)))
 
 
 def _resolve_ref_vel_scale(rk, clip_name):
@@ -360,6 +433,11 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             ("action_rate_l2", "action_rate_weight"),
             ("joint_limit", "joint_limit_weight"),
             ("undesired_contacts", "undesired_contacts_weight"),
+            ("pre_strike_foot_slip", "pre_strike_foot_slip_weight"),
+            ("prestrike_waist_twist", "prestrike_waist_twist_weight"),
+            # sim2real fine-tune (explicit-PD): torque-saturation penalty + pre-strike upright shaping.
+            ("arm_torque_saturation", "arm_torque_saturation_weight"),
+            ("prestrike_upright", "prestrike_upright_weight"),
         ):
             _w = _get(rw, _key)
             if _w is not None:
@@ -398,8 +476,26 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_range(C, "racket_vel_x_range", _get(rk, "vel_x_range"), applied, "racket_target")
             _set_range(C, "racket_vel_y_range", _get(rk, "vel_y_range"), applied, "racket_target")
             _set_range(C, "racket_vel_z_range", _get(rk, "vel_z_range"), applied, "racket_target")
+            # Optional PER-CLIP velocity boxes (unified policy): forehand=clip 0, backhand=clip 1. Absent ->
+            # keep the shared vel_*_range above (backward compatible). The slower backhand needs a lower box.
+            _vpc = _resolve_vel_range_per_clip(rk)
+            if _vpc is not None:
+                _require(hasattr(C, "racket_vel_range_per_clip"), "racket_target.racket_vel_range_per_clip")
+                C.racket_vel_range_per_clip = _vpc
+                applied.append(f"racket_target.racket_vel_range_per_clip={_vpc}")
+            # Optional PER-CLIP position boxes (unified policy): forehand=clip 0, backhand=clip 1. Absent ->
+            # keep the shared pos_*_range + |y|-sign box above (backward compatible). Lets each clip's target
+            # track its own reference strike point (e.g. backhand z~1.2 at strike_phase 0.50).
+            _ppc = _resolve_pos_range_per_clip(rk)
+            if _ppc is not None:
+                _require(hasattr(C, "racket_pos_range_per_clip"), "racket_target.racket_pos_range_per_clip")
+                C.racket_pos_range_per_clip = _ppc
+                applied.append(f"racket_target.racket_pos_range_per_clip={_ppc}")
             _set_range(C, "base_target_x_range", _get(rk, "base_target_x_range"), applied, "racket_target")
             _set_range(C, "base_target_y_range", _get(rk, "base_target_y_range"), applied, "racket_target")
+            # weak base->racket coupling (uniform mode): fraction of the racket Y offset + clamp (meters)
+            _set_attr(C, "base_couple_blend", _get(rk, "base_couple_blend"), float, applied, "racket_target")
+            _set_attr(C, "base_couple_max_offset", _get(rk, "base_couple_max_offset"), float, applied, "racket_target")
             _set_attr(C, "normal_mode", _get(rk, "normal_mode"), str, applied, "racket_target")
             _set_attr(C, "forehand_on_negative_y", _get(rk, "forehand_on_negative_y"), _as_bool, applied, "racket_target")
             _set_attr(C, "mount_normal_axis", _get(rk, "mount_normal_axis"), int, applied, "racket_target")
@@ -464,6 +560,9 @@ def _run(cfg):
 
     import whole_body_tracking  # noqa: F401
     import whole_body_tracking.tasks  # noqa: F401  -- registers the gym tasks
+    from whole_body_tracking.tasks.tracking.actor_observation_contract import (
+        validate_actor_observation_contract,
+    )
     from whole_body_tracking.utils.my_on_policy_runner import MotionOnPolicyRunner as OnPolicyRunner
     from whole_body_tracking.utils.ppo_cfg import runner_kwargs
 
@@ -520,16 +619,42 @@ def _run(cfg):
         agent_cfg.wandb_project = str(cfg.log_project_name)
         agent_cfg.neptune_project = str(cfg.log_project_name)
 
-    # 3) reference motion file(s). Local Step 9-12 products are first-class:
-    #    motion_file=<forehand.npz> motion_file_2=<backhand.npz> runs fully offline. If no local files
-    #    are set, fall back to the WandB registry names from the task YAML / CLI.
-    motion_files, registry_for_runner = resolve_motion_sources(cfg, cwd=pathlib.Path.cwd())
-    if registry_for_runner:
-        print(f"[train.py] reference motion registry source(s): {registry_for_runner}", flush=True)
-    else:
-        print(f"[train.py] using LOCAL motion_file source(s): {motion_files}", flush=True)
-    if len(motion_files) > 1:
-        print(f"[train.py] UNIFIED multi-clip policy: clip0={motion_files[0]}  clip1={motion_files[1]}", flush=True)
+    # 3) motion file(s) from the wandb registry. ONE clip = single-swing-type policy. TWO clips
+    #    (forehand + backhand) = unified HITTER policy: MotionLoader concatenates them and clip_id selects
+    #    which swing each env imitates. Order matters: clip 0 = registry_name (forehand), clip 1 =
+    #    registry_name_2 (backhand); it must match racket.strike_phase_per_clip.
+    registry_name = cfg.registry_name if cfg.registry_name is not None else cfg.task.registry_name
+    registry_name = str(registry_name)
+
+    def _local_motion(name):
+        """If ``name`` is a local motion.npz (or an artifact dir containing one), return that path.
+
+        Lets you train straight off a local clip (e.g. artifacts/hope_forehand_hopex/motion.npz or its
+        parent dir) WITHOUT publishing to the wandb registry — bypasses the api.artifact().download()
+        below. Returns None for a normal registry reference (``<entity>/wandb-registry-motions/...``).
+        """
+        p = pathlib.Path(str(name).split(":")[0])  # tolerate a :version suffix
+        if p.is_file() and p.suffix == ".npz":
+            return str(p)
+        if (p / "motion.npz").is_file():
+            return str(p / "motion.npz")
+        return None
+
+    def _resolve_clip(name):
+        local = _local_motion(name)
+        if local is not None:
+            print(f"[train.py] LOCAL motion (no registry): {local}", flush=True)
+            return local
+        nm = name if ":" in name else name + ":latest"
+        import wandb
+        return str(pathlib.Path(wandb.Api().artifact(nm).download()) / "motion.npz")
+
+    motion_files = [_resolve_clip(registry_name)]
+    reg2 = _get(cfg, "registry_name_2", None) or _get(cfg.task, "registry_name_2", None)
+    if reg2 is not None and str(reg2).strip() and str(reg2).lower() != "none":
+        reg2 = str(reg2)
+        motion_files.append(_resolve_clip(reg2))
+        print(f"[train.py] UNIFIED multi-clip policy: clip0={registry_name}  clip1={reg2}", flush=True)
     env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
 
     # 4) logging dir (same layout as scripts/rsl_rl/train.py so export/eval are unchanged)
@@ -543,6 +668,14 @@ def _run(cfg):
     # 5) build env, wrap, run
     render_mode = "rgb_array" if cfg.video else None
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)
+    expected_contract = _get(cfg.task, "actor_obs_contract")
+    if expected_contract is not None:
+        contract = validate_actor_observation_contract(env.unwrapped, str(expected_contract))
+        print(
+            "[train.py] actor observation contract validated: "
+            f"{contract.name} ({contract.total_dim}D, obs_mode={contract.obs_mode})",
+            flush=True,
+        )
     if cfg.video:
         env = gym.wrappers.RecordVideo(
             env,
@@ -553,8 +686,11 @@ def _run(cfg):
         )
     env = RslRlVecEnvWrapper(env)
 
+    # Only hand the runner a registry name for wandb lineage (use_artifact) when the clip actually came
+    # from the registry; a local motion path would crash wandb.run.use_artifact.
+    runner_registry_name = None if _local_motion(registry_name) is not None else registry_name
     runner = OnPolicyRunner(
-        env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device, registry_name=registry_for_runner
+        env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device, registry_name=runner_registry_name
     )
     runner.add_git_repo_to_log(__file__)
 
