@@ -57,16 +57,14 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             # link the artifact registry to this run (lineage bookkeeping only — a W&B API failure here
             # must not kill the training run)
             if self.registry_name is not None:
-<<<<<<< HEAD
-                registry_names = self.registry_name if isinstance(self.registry_name, (list, tuple)) else [self.registry_name]
+                registry_names = (
+                    self.registry_name if isinstance(self.registry_name, (list, tuple)) else [self.registry_name]
+                )
                 for registry_name in registry_names:
-                    wandb.run.use_artifact(registry_name)
-=======
-                try:
-                    wandb.run.use_artifact(self.registry_name)
-                except Exception as e:
-                    print(f"[MotionOnPolicyRunner] WARNING: use_artifact({self.registry_name!r}) failed: {e}")
->>>>>>> simtoreal2
+                    try:
+                        wandb.run.use_artifact(registry_name)
+                    except Exception as e:
+                        print(f"[MotionOnPolicyRunner] WARNING: use_artifact({registry_name!r}) failed: {e}")
                 self.registry_name = None
 
     def log(self, locs: dict, width: int = 80, pad: int = 35) -> None:

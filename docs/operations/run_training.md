@@ -2,6 +2,10 @@
 
 Status: Draft
 
+For GPU runs on the shared team pod (3× RTX 5090, per-user clones and folders), see
+[run_on_runpod.md](run_on_runpod.md); the commands below are identical there after
+`source /workspace/<name>/env.sh`.
+
 ## Current State
 
 The training scaffold exists under:
