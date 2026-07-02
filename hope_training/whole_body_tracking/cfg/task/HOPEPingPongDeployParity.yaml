@@ -43,8 +43,8 @@ actor_obs_contract: deploy_parity
 # backhand (registry_name_2). MotionLoader concatenates them; clip_id selects which swing each env
 # imitates. Order must match racket.strike_phase_per_clip. Set registry_name_2: null for a single-swing
 # policy. (Override on the CLI with registry_name=... / registry_name_2=...)
-registry_name: ${oc.env:WANDB_REGISTRY_ORG,BerkeleyPingPong}/wandb-registry-motions/hope_forehand
-registry_name_2: ${oc.env:WANDB_REGISTRY_ORG,BerkeleyPingPong}/wandb-registry-motions/hope_backhand
+registry_name: ${oc.env:WANDB_REGISTRY_ORG,dongc_1-university-of-california-berkeley-org}/wandb-registry-motions/hope_forehand
+registry_name_2: ${oc.env:WANDB_REGISTRY_ORG,dongc_1-university-of-california-berkeley-org}/wandb-registry-motions/hope_backhand
 
 defaults:
   - /base/env_base@_here_

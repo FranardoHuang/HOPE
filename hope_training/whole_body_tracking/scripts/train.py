@@ -647,7 +647,9 @@ def _run(cfg):
             return local
         nm = name if ":" in name else name + ":latest"
         import wandb
-        return str(pathlib.Path(wandb.Api().artifact(nm).download()) / "motion.npz")
+        art = wandb.Api().artifact(nm)
+        print(f"[train.py] motion clip: {nm} -> {art.source_qualified_name} (digest {art.digest[:12]})", flush=True)
+        return str(pathlib.Path(art.download()) / "motion.npz")
 
     motion_files = [_resolve_clip(registry_name)]
     reg2 = _get(cfg, "registry_name_2", None) or _get(cfg.task, "registry_name_2", None)
@@ -687,8 +689,12 @@ def _run(cfg):
     env = RslRlVecEnvWrapper(env)
 
     # Only hand the runner a registry name for wandb lineage (use_artifact) when the clip actually came
-    # from the registry; a local motion path would crash wandb.run.use_artifact.
-    runner_registry_name = None if _local_motion(registry_name) is not None else registry_name
+    # from the registry; a local motion path would crash wandb.run.use_artifact. The W&B backend requires
+    # 'collection:alias' form (a bare collection name is an HTTP 400), so qualify like _resolve_clip does.
+    if _local_motion(registry_name) is not None:
+        runner_registry_name = None
+    else:
+        runner_registry_name = registry_name if ":" in registry_name else registry_name + ":latest"
     runner = OnPolicyRunner(
         env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device, registry_name=runner_registry_name
     )
