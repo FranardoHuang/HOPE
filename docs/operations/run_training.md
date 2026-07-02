@@ -10,9 +10,14 @@ The training scaffold exists under:
 
 2026-07-01 update:
 
-- `HOPEPingPong` now defaults to unified forehand+backhand HITTER training: `registry_name_2` enabled, `target_mode: uniform`, fixed hit plane `x=0.4`, actor `swing_type`, and no actor racket-normal observation.
+- `HOPEPingPong` now defaults to unified forehand+backhand HITTER training: `registry_name_2` enabled, `target_mode: uniform`, per-clip 3-D blade-centered position and velocity target boxes (`pos_range_per_clip` / `vel_range_per_clip`; this supersedes the earlier fixed hit plane `x=0.4` with (y,z)-only sampling), actor `swing_type`, and no actor racket-normal observation.
 - Local Step 9-12 motion products are first-class training inputs. Pass `motion_file=<forehand.npz>` plus optional `motion_file_2=<backhand.npz>` to skip WandB entirely; omit local files to use `registry_name` / `registry_name_2`.
 - `setup_train_env.sh` is portable again: it reads optional `setup_train_env.local.sh` and overridable `HOPE_ISAAC_*` paths, with auto-detection for the current `/workspace/...` Isaac layout when present.
+
+2026-07-03 realignment:
+
+- The default training task is now `HOPEPingPongDeployParity` (gym id `HOPE-PingPong-DeployParity-AgibotA3-v0`); `HOPEPingPongRealSensor` is a backward-compat alias for the same task. Its actor observation is 175-D deploy-parity: it removes `motion_anchor_pos_b` (3) and `base_target_pos_b` (2) and reframes `racket_target_pos_b` racket-FK-relative. Layout reference: `scripts/realsensor_obs_reference.py`; checks: `scripts/verify_realsensor.py`.
+- `task=HOPEPingPong` remains available only as the legacy 180-D full-obs comparison path; it is NOT deploy-honest and cannot deploy.
 
 `TrackingFlat` and `HOPEPingPong` forehand training have run end-to-end on the copied Agibot A3 URDF asset (31 actuated DOF), including WandB logging, checkpoint save, and ONNX export. This proves the pipeline can run; it is NOT an accepted quality baseline. G04/G05 remain Partial, and G06/G07 are not accepted until sim-to-sim and dry-run deployment gates record verification.
 
@@ -23,7 +28,7 @@ This branch adds:
 - richer live `Live/...` telemetry in WandB/TensorBoard from command, reward, termination, action, and env state.
 - ONNX export from training/eval inside the container.
 - `HOPE-TableTennis-AgibotA3-v0`, a first-pass Isaac Lab table/net/ball/A3 physics scene for G04 visualization and future G08 returner/spin experiments, now with a tracked Purdue PACE USD table/net visual overlay and Purdue-style table/ball contact materials.
-- updated `HOPEPingPong` target/reward defaults with unified forehand/backhand sampling, fixed-plane uniform racket targets, per-clip strike timing, conditional exact-strike metrics, and debug reward logging hooks.
+- updated `HOPEPingPong` target/reward defaults with unified forehand/backhand sampling, per-clip blade-centered uniform racket target boxes, per-clip strike timing, conditional exact-strike metrics, and debug reward logging hooks.
 
 ## Entry Files
 
@@ -107,7 +112,7 @@ hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
 For a local unified HITTER smoke after the video pipeline has produced both clips:
 
 ```bash
-hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+hope_isaac_py scripts/train.py task=HOPEPingPongDeployParity algo=ppo headless=true \
   motion_file=../motions/preprocessed/hope_forehand.npz \
   motion_file_2=../motions/preprocessed/hope_backhand.npz \
   num_envs=32 max_iterations=3 logger=tensorboard run_name=hope_local_unified_smoke
@@ -237,7 +242,7 @@ hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
 HOPE racket task, unified forehand+backhand policy from local Step 9-12 motions:
 
 ```bash
-hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+hope_isaac_py scripts/train.py task=HOPEPingPongDeployParity algo=ppo headless=true \
   motion_file=../motions/preprocessed/hope_forehand.npz \
   motion_file_2=../motions/preprocessed/hope_backhand.npz \
   logger=tensorboard run_name=hope_local_unified
@@ -246,7 +251,7 @@ hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
 Registry-backed equivalent:
 
 ```bash
-hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+hope_isaac_py scripts/train.py task=HOPEPingPongDeployParity algo=ppo headless=true \
   registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
   registry_name_2="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_backhand" \
   run_name=hope_registry_unified
@@ -269,7 +274,7 @@ checkpoint_path=logs/rsl_rl/agibot_a3_hope/<run>/model_2000.pt
 Single-swing policy, if you deliberately want only one clip:
 
 ```bash
-hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+hope_isaac_py scripts/train.py task=HOPEPingPongDeployParity algo=ppo headless=true \
   motion_file=../motions/preprocessed/hope_forehand.npz \
   motion_file_2=null logger=tensorboard run_name=hope_forehand_local_smoke
 ```
@@ -288,22 +293,30 @@ override. Treat these printed lines as part of the G05 verification record.
 
 - `max_iterations: 300000000000` is a train-FOREVER sentinel. Always pass `max_iterations=` on the CLI and stop manually when `strike_success` plateaus.
 - `save_interval` 500 -> 100.
-- `entropy_coef` 0.005 -> 0.004.
+- `entropy_coef` is 0.01; treat `cfg/algo/ppo.yaml` as the source of truth for the current value.
 
 ### Racket Target Sampling
 
-`HOPEPingPong.yaml` now defaults to `racket.target_mode: uniform`, matching the HITTER structure. The
-command term samples a fixed striking plane and target velocity directly; the imitated clip supplies
-the motion prior and, in the unified policy, the swing type.
+`HOPEPingPongDeployParity.yaml` defaults to `racket.target_mode: uniform`, matching the HITTER
+structure. The command term samples per-clip 3-D blade-centered position AND velocity boxes
+(`pos_range_per_clip` / `vel_range_per_clip`); the earlier fixed hit plane `x=0.4` with (y,z)-only
+sampling is superseded. The imitated clip supplies the motion prior and, in the unified policy, the
+swing type.
 
 ```yaml
 target_mode: uniform
-pos_x_range: [0.40, 0.40]
-racket_pos_y_abs_range: [0.05, 0.45]
-pos_z_range: [0.70, 1.05]
-vel_x_range: [1.5, 3.5]
-strike_phase_per_clip: [0.36, 0.74]
+pos_range_per_clip:
+  forehand: {x: [0.58, 0.78], y: [-0.64, -0.24], z: [0.72, 0.92]}
+  backhand: {x: [0.56, 0.76], y: [-0.07,  0.33], z: [0.93, 1.13]}
+vel_range_per_clip:
+  forehand: {x: [1.05, 2.05], y: [ 0.96, 1.96], z: [0.31, 1.11]}
+  backhand: {x: [1.61, 2.61], y: [-1.21, -0.21], z: [0.00, 0.71]}
+strike_phase_per_clip: [0.47, 0.333]
 ```
+
+Strike phases are blade-speed-peak detected per clip version (`scripts/analyze_strike_phase.py`). The
+values above come from the 2026-07-02 blade re-detect on the re-grounded `_hopex` v3 clips; the old
+`[0.36, 0.74]` values were for the v1 clips.
 
 For two local clips, `MotionLoader` concatenates the files in order: clip 0 is forehand and clip 1 is
 backhand. Keep `motion_file` / `motion_file_2` ordered the same way as `strike_phase_per_clip`.
@@ -327,13 +340,13 @@ from them.
 
 The reward kernel is `exp(-||err||^2 / std^2)`. With `std` set to the final acceptance tolerance, the reward is ~0 for any early error (a 50 cm error gives `exp(-44) ~ 0`), so there is no gradient and `strike_success` stays stuck at 0. The target-sampling fix above handles unreachable targets; the reward shaping here handles too-narrow early rewards.
 
-The current `HOPEPingPong.yaml` values try to keep useful gradients in the observed error band while
-preventing non-hit rewards from dominating:
+The current `HOPEPingPongDeployParity.yaml` values try to keep useful gradients in the observed error
+band while preventing non-hit rewards from dominating:
 
 - `racket_position_weight: 14.0`, `racket_position_std: 0.20`
-- `racket_velocity_weight: 10.0`, `racket_velocity_std: 1.8`
+- `racket_velocity_weight: 10.0`, `racket_velocity_std: 1.0` (curriculum-tightened from 1.8; the plan is 1.0 -> 0.8 -> 0.5)
 - `racket_normal_weight: 5.0`, `racket_normal_std: 0.30`
-- `base_position_weight: 2.5`, `base_position_std: 0.25`
+- `base_position_weight: 2.5`, `base_position_std: 0.25` — legacy `HOPEPingPong` task only; the deploy-parity default REMOVES the base_position term entirely (base-free footwork: dense `racket_progress` plus pre-strike stability penalties)
 - regularization: `joint_torques_weight: -0.00003`, `action_rate_weight: -0.10`, `joint_limit_weight: -10.0`, and `undesired_contacts_weight: -0.1`
 
 These stds are DECOUPLED from acceptance thresholds: the position metric still reports true success only
@@ -343,12 +356,19 @@ below `strike_success_pos_thresh = 0.075 m`, velocity below `0.5 m/s`, and racke
 Optional later precision pass: once the exact-strike pass rates are non-trivial, tighten the racket
 position/velocity stds and resume from the checkpoint.
 
+## Domain Randomization (deploy-parity task)
+
+2026-07-03 note: the deploy-parity task RE-ENABLES `pd_gain_range: [0.85, 1.15]` (+/-15% PD gains)
+alongside +/-15% link-mass randomization (added in the 2026-07-02 sim2real fine-tune; a deliberate,
+documented departure from HITTER, which keeps PD gains fixed). External push disturbance remains
+disabled.
+
 ## Evaluate And Export
 
 `play.py` exports the policy to `<checkpoint_dir>/exported/policy.onnx`.
 
 ```bash
-hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+hope_isaac_py scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
   motion_file="../motions/preprocessed/hope_forehand.npz" \
   motion_file_2="../motions/preprocessed/hope_backhand.npz" \
@@ -358,7 +378,7 @@ hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
 Headless video:
 
 ```bash
-hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+hope_isaac_py scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
   motion_file="../motions/preprocessed/hope_forehand.npz" \
   motion_file_2="../motions/preprocessed/hope_backhand.npz" \
@@ -368,7 +388,7 @@ hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
 From a WandB run:
 
 ```bash
-hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+hope_isaac_py scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 \
   wandb_path="$WANDB_ENTITY/hope_wbc/<RUN_ID>" headless=false
 ```
 

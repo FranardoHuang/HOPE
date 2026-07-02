@@ -1,6 +1,6 @@
 # HOPE Developer And Agent Start Here
 
-This is the first file to read before changing code, moving assets, or assigning work. The repository is in an early reimplementation stage: it already contains reference documents, initial ROS planner code, calibration data, Agibot support materials, and training/deployment scaffolding, but the full real-to-sim-to-real loop is not complete.
+This is the first file to read before changing code, moving assets, or assigning work. The repository has walked the Isaac → MuJoCo → real-A3 chain once for the policy side (first sim-to-real transfer of the unified swing policy on 2026-07-02, forehand only, with real behavior matching MuJoCo), but the loop is not closed: the perception chain (mocap → planner → deploy runner) is not yet bridged, there is no accepted quality baseline, and the data-collection/physics-calibration phase has not run.
 
 ## Project Goal
 
@@ -22,8 +22,8 @@ The goal is not to blindly clone every HITTER detail. The goal is to preserve th
 | G03 Data processing and physics calibration | Partial | [G03](gates/G03_data_processing_and_physics_calibration.md) |
 | G04 Sim modeling in MuJoCo and Isaac | Partial | [G04](gates/G04_sim_modeling_mujoco_isaac.md) |
 | G05 Isaac training first loop | Partial | [G05](gates/G05_isaac_training_first_loop.md) |
-| G06 Isaac-to-MuJoCo parity | Not started | [G06](gates/G06_isaac_to_mujoco.md) |
-| G07 MuJoCo-to-real deployment | Not complete | [G07](gates/G07_mujoco_to_real.md) |
+| G06 Isaac-to-MuJoCo parity | Partial | [G06](gates/G06_isaac_to_mujoco.md) |
+| G07 MuJoCo-to-real deployment | Partial | [G07](gates/G07_mujoco_to_real.md) |
 | G08 Blind-spot improvements | Research track | [G08](gates/G08_blind_spot_improvements.md) |
 
 Status labels:

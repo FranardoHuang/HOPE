@@ -1,6 +1,6 @@
 # Joint Order And Robot State
 
-Status: Working source exists; hardware verification pending
+Status: Working source exists; backend command order hardware-verified (2026-07-03): `pp_joint_map` checked slot-for-slot against AGI `robot_io::MakeA3Layout31()` (bijection — see `agi/a3_deploy_example/PINGPONG_DEPLOY_ALIGNMENT.md:137-139`), joint limits clamped from the MJCF, staged PASSIVE→PD_STAND→SHADOW→MOTION bring-up used on the MDU
 
 ## Goal
 
@@ -69,7 +69,7 @@ This order originates from the `<joint>` hinge order in the GMR `a3_mocap.xml` (
 
 ### 31-DOF Training vs 29-DOF Deploy
 
-Training emits 31 actions (one per actuated DOF above). The A3 deploy policy I/O view is 29: the 2 neck joints (`head_yaw_joint`, `head_pitch_joint`, indices 3 and 4) are excluded from the deploy policy I/O and driven separately at deploy `kp=40` / `kd=2` via `ExpandToBackend`. The remaining 29 joints keep their relative order.
+Training emits 31 actions (one per actuated DOF above). The HOPE ping-pong deploy runner (`a3_deploy_onnx_ref_pingpong` under `agi/a3_deploy_example/`) consumes the full 31-action ONNX; the 2 neck joints (`head_yaw_joint`, `head_pitch_joint`, indices 3 and 4) are overridden post-decode to `q=0`, `kp=40`, `kd=2`. The 29-DOF policy-I/O view driven via `ExpandToBackend` is AGI's official reference runner path, not the HOPE ping-pong runner.
 
 - Per-joint `action_scale = 0.25 * effort_limit / stiffness`, exactly matching the deploy `a3_action_scale`.
 - Decoder target = `action * action_scale + default_angle`.
@@ -79,16 +79,16 @@ Training emits 31 actions (one per actuated DOF above). The A3 deploy policy I/O
 
 Fill this table before real commands:
 
-The YAML source order is confirmed (training/export, identical to `AGIBOT_A3_JOINT_NAMES`). The SDK command field, `/joint_states` state field, and limits columns remain hardware-TBD until verified on a real A3.
+The YAML source order is confirmed (training/export, identical to `AGIBOT_A3_JOINT_NAMES`). The SDK command field order is verified (2026-07-03): the `pp_joint_map` backend order was checked slot-for-slot against AGI `robot_io::MakeA3Layout31()` — a bijection (`agi/a3_deploy_example/PINGPONG_DEPLOY_ALIGNMENT.md:137-139`). Deploy joint limits are clamped from the MJCF. The `/joint_states` state field column remains hardware-TBD.
 
 | Index | Joint name | YAML source | SDK command field | State field | Limits source | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| 0 | `waist_yaw_joint` | confirmed (`joint_order_agibot_a3.yaml` row 0) | TBD | TBD | A3 URDF/MJCF/SDK | Verify before deployment |
-| 1 | `waist_roll_joint` | confirmed (row 1) | TBD | TBD | A3 URDF/MJCF/SDK | Verify before deployment |
-| 2 | `waist_pitch_joint` | confirmed (row 2) | TBD | TBD | A3 URDF/MJCF/SDK | Verify before deployment |
-| 3 | `head_yaw_joint` | confirmed (row 3) | TBD (deploy-excluded; kp=40/kd=2) | TBD | A3 URDF/MJCF/SDK | Not in 29-DOF deploy I/O |
-| 4 | `head_pitch_joint` | confirmed (row 4) | TBD (deploy-excluded; kp=40/kd=2) | TBD | A3 URDF/MJCF/SDK | Not in 29-DOF deploy I/O |
-| 5-30 | See [explicit 31-DOF order](#explicit-31-dof-order) | confirmed (rows 5-30) | TBD | TBD | A3 URDF/MJCF/SDK | Verify before deployment |
+| 0 | `waist_yaw_joint` | confirmed (`joint_order_agibot_a3.yaml` row 0) | verified (`MakeA3Layout31` bijection) | TBD | MJCF (clamped in deploy runner) | |
+| 1 | `waist_roll_joint` | confirmed (row 1) | verified (`MakeA3Layout31` bijection) | TBD | MJCF (clamped in deploy runner) | |
+| 2 | `waist_pitch_joint` | confirmed (row 2) | verified (`MakeA3Layout31` bijection) | TBD | MJCF (clamped in deploy runner) | |
+| 3 | `head_yaw_joint` | confirmed (row 3) | verified (`MakeA3Layout31` bijection) | TBD | MJCF (clamped in deploy runner) | Neck output overridden post-decode (q=0, kp=40, kd=2) |
+| 4 | `head_pitch_joint` | confirmed (row 4) | verified (`MakeA3Layout31` bijection) | TBD | MJCF (clamped in deploy runner) | Neck output overridden post-decode (q=0, kp=40, kd=2) |
+| 5-30 | See [explicit 31-DOF order](#explicit-31-dof-order) | confirmed (rows 5-30) | verified (`MakeA3Layout31` bijection) | TBD | MJCF (clamped in deploy runner) | |
 
 ## Robot State Contract
 
@@ -107,10 +107,12 @@ See [policy_observation_action.md](policy_observation_action.md).
 ## Current Materials
 
 - A3 URDF materials: `agi/URDF/`
-- A3 deploy source: `agi/code_deployment/a3_deploy_example`
+- A3 deploy source: `agi/a3_deploy_example` (tracked; HOPE ping-pong runner `a3_deploy_onnx_ref_pingpong`)
 - RobotIOBackend guide: `agi/code_deployment/RobotIOBackend 架构与策略适配指南.md`
 - Isaac robot config and PD/action-scale source: `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py`
 
 ## Blocking Rule
 
 Do not run real joint commands until this document is filled from verified model and SDK sources.
+
+Satisfied for the current deploy path (2026-07-03): before the first real joint commands, the `pp_joint_map` backend order was verified slot-for-slot against AGI `robot_io::MakeA3Layout31()` — a checked bijection (`agi/a3_deploy_example/PINGPONG_DEPLOY_ALIGNMENT.md:137-139`) — joint limits were clamped from the MJCF, and a staged PASSIVE→PD_STAND→SHADOW→MOTION bring-up was used on the MDU. Any change to the joint map, ONNX action layout, or backend layout re-triggers this rule.

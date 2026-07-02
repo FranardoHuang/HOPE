@@ -17,7 +17,7 @@ On top of `main`, it adds:
 3. **A WBC training scaffold** under [hope_training/whole_body_tracking/](hope_training/whole_body_tracking/): a new A3 ping-pong task (`HOPE-PingPong-AgibotA3-v0`), a Hydra config tree, the `setup_train_env.sh` launcher, richer Weights & Biases telemetry, reference-coupled racket target sampling, and the reward-shaping `strike_success=0` fix.
 4. **External-reference auto-sync** ([scripts/sync_external_repos.sh](scripts/sync_external_repos.sh)) and an expanded `.gitignore` so heavy/vendor artifacts stay out of git.
 
-**Status:** this is an in-progress reimplementation. The full sim-to-real loop is **not** complete — every gate is `Partial` or `Not started` (see the live table in [docs/START_HERE.md](docs/START_HERE.md)). Treat the A3 training pipeline as *demonstrated end-to-end (pipeline viability)*, not as an accepted quality baseline. New contributors should read [docs/START_HERE.md](docs/START_HERE.md) and the **Quickstart** below.
+**Status:** this is an in-progress reimplementation. The **first sim-to-real transfer succeeded on 2026-07-02**: the unified swing policy (deploy-parity 175-D actor obs / 31 actions / 50 Hz, `model_p4_deployparity.onnx`) ran on the real A3 via the Route A C++ runner (`a3_deploy_onnx_ref_pingpong` under `agi/a3_deploy_example/`), with real behavior matching MuJoCo — **forehand only** (backhand has a stand-entry training gap), and with scripted targets (the mocap→planner→runner perception loop is not yet closed). Still open: mocap-in-the-loop play, an accepted quality baseline, backhand deploy readiness, and smash (see the live gate table in [docs/START_HERE.md](docs/START_HERE.md)). New contributors should read [docs/START_HERE.md](docs/START_HERE.md) and the **Quickstart** below.
 
 ## Documents
 
@@ -36,8 +36,9 @@ Each document contains a **Section 0 prologue** listing all implementation diffe
 ```
                     ┌─────────────────────────────┐
                     │     OptiTrack Cameras        │
-                    │     (9×, 360 Hz)             │
-                    └──────────┬──────────────────┘
+                    │     (9×, 360 Hz)             │  ← generic HITTER/HOPE-challenge
+                    └──────────┬──────────────────┘    reference diagram; our rig is
+                               │                       ChingMu at 300 Hz
                                │ NatNet
                                ▼
                     ┌─────────────────────────────┐
@@ -153,7 +154,7 @@ Use [docs/operations/run_training.md](docs/operations/run_training.md) for the t
 
 ## Key Design Decisions
 
-**Racket tracking is prohibited.** The motion capture system tracks exactly three categories of objects: the ping-pong table origin frame (PPT), each humanoid's `base_link` (P1, P2), and the ball. No reflective markers may be placed on the racket, the robot's hand, or the wrist link. Each robot must infer its paddle's 6-DOF pose through forward kinematics from its own `base_link` + joint encoders. This is a deliberate competition constraint that tests autonomous paddle control through the robot's internal body model.
+**Racket tracking is prohibited during competition/play.** During play the motion capture system tracks exactly three categories of objects: the ping-pong table origin frame (PPT), each humanoid's `base_link` (P1, P2), and the ball. No reflective markers may be placed on the racket, the robot's hand, or the wrist link during play. Each robot must infer its paddle's 6-DOF pose through forward kinematics from its own `base_link` + joint encoders. This is a deliberate competition constraint that tests autonomous paddle control through the robot's internal body model. During the internal data-collection / physics-calibration phase, however, the racket pose IS mocap-tracked (along with the table's 4 corners and the net's 2 corners) for model fitting.
 
 **Multi-platform support.** The reference design supports both the Unitree G1 (via Isaac Lab + PhysX with USD assets) and the Agibot Expedition A3 (via mjlab + MuJoCo Warp with MJCF assets). Both backends share the same BeyondMimic MDP formulation and export to ONNX for deployment.
 

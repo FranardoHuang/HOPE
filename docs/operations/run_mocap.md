@@ -56,14 +56,23 @@ For normal bringup, launch the full bridge so the VRPN client, relay, and world 
 ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
   server:=PLACEHOLDER_MOCAP_SERVER_IP \
   port:=3883 \
-  update_freq:=180.0 \
+  update_freq:=300.0 \
   ball_tracking_mode:=rigid_body \
   ball_object:=Ball
 ```
 
+The real rig streams at 300 Hz during play, so pass `update_freq:=300.0`; the launch default is being aligned to 300.
+
 Use `ball_tracking_mode:=auto` and omit `ball_object` if the ball is not a named rigid body.
 
 Expected HOPE-standard topics are listed in [../interfaces/ros_topics.md](../interfaces/ros_topics.md).
+
+## Capture Sets by Phase
+
+Team ground truth (realigned 2026-07-03):
+
+- PLAY: the rig streams the robot base (pelvis) pose and the ball position at 300 Hz. Ball rotation/spin is NOT yet measured — it is planned for the upcoming physics-modeling phase (a patterned/rigid-body ball plus relay changes will be needed); the relay currently publishes the ball as a position-only `PointStamped`.
+- DATA-COLLECTION / physics-calibration: mocap additionally captures the racket pose, the table's 4 corners, and the net's 2 corners. The racket-tracking prohibition applies to competition play only.
 
 ## Verification
 

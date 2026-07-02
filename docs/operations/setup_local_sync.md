@@ -52,11 +52,14 @@ Expected contents include heavy runtime assets that should not be committed in n
 - prebuilt libraries
 - full standalone MuJoCo/deploy runtime files
 
-The tracked source/config subset lives separately at:
+Tracked deploy code lives separately at:
 
 ```text
-agi/code_deployment/a3_deploy_example/
+agi/a3_deploy_example/                  # active working ping-pong deploy example (tracked)
+agi/code_deployment/a3_deploy_example/  # older vendor reference subset
 ```
+
+The deployed policy artifact (`models/model_p4_deployparity.onnx` under the deploy package build output `dist/`) is generated and git-ignored; rebuild it via `agi/a3_deploy_example/scripts/build_a3_deploy_pkg.sh`.
 
 3. Sync TTRL when a gate needs it:
 

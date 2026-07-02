@@ -612,8 +612,16 @@ Hardware requirements:
 1. Use at least 6 cameras.
 2. Prefer 8-12 cameras.
 3. Use at least 120 Hz.
-4. Prefer 240-360 Hz for fast ball tracking.
+4. Prefer 240-360 Hz for fast ball tracking. (2026-07-03: the real HOPE rig streams at
+   **300 Hz** during play — set `update_freq:=300.0` in the launch commands below.)
 5. Cover the full table plus at least 1.5 m margin on each player's side.
+
+What the rig actually streams (confirmed 2026-07-03): during play the mocap link carries the
+**robot base pose + ball position** at 300 Hz. Ball **spin is NOT yet measured** — it is planned
+for the physics-modeling phase (patterned / rigid-body ball; the relay currently drops
+orientation). The data-collection phase will additionally capture the **racket pose, the table's
+4 corners, and the net's 2 corners**; the racket-marker prohibition is play/competition-scoped
+only.
 
 Create the table rigid body:
 
@@ -701,6 +709,10 @@ Because the ball usually arrives under an opaque marker id (not the name
 motion: among every streamed object that is not `PPT`/`P1`/`P2`, the ball is the
 one whose position actually moves. So you do not have to discover and hard-code
 the ball's id before you can run — wave the ball and the relay locks onto it.
+
+> **Spin (2026-07-03):** the single-blob ball gives position only — the relay drops orientation,
+> so **spin is not measured** in the current setup. Spin capture is planned for the
+> physics-modeling phase via a patterned / rigid-body ball.
 
 How to get the Avatar-Pro IP address:
 
@@ -802,7 +814,7 @@ source ~/workspace/HOPE/hope_ws/install/local_setup.bash
 ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
   server:=192.168.1.100 \
   port:=3883 \
-  update_freq:=180.0 \
+  update_freq:=300.0 \
   ball_tracking_mode:=rigid_body \
   ball_object:=Ball
 '
@@ -2883,8 +2895,12 @@ source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/hope_commands.
 source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/hope_rewards.py
   HOPE reward formulas and strike-time gating
 
+cfg/task/HOPEPingPongDeployParity.yaml
+  the main task-tuning file (current default task, alias HOPEPingPongRealSensor): reward
+  weights/stds, racket target ranges, strike timing
+
 cfg/task/HOPEPingPong.yaml
-  the main task-tuning file: reward weights/stds, racket target ranges, strike timing
+  the LEGACY 180-D task, kept only for comparison runs (not deploy-honest)
 
 cfg/base/{env_base,sim_base,randomization_base}.yaml
   shared num_envs, 50 Hz timing, and shared DR defaults
@@ -2901,7 +2917,21 @@ What the HOPE task adds on top of plain BeyondMimic tracking:
    - strike timing (`time_to_strike`, `pre_strike`, `strike_window`)
 2. **Actor observations** that contain only runtime-available desired targets.
 3. **Privileged critic observations** that additionally include the FK-computed actual racket state.
-4. **Goal rewards** for base repositioning before strike and racket tracking near strike.
+4. **Goal rewards** for base repositioning before strike and racket tracking near strike
+   (base repositioning: legacy `HOPEPingPong` task only — see the 2026-07-03 note below).
+
+> **Deploy-parity actor obs — current default (2026-07-03).** The default task is now
+> **`HOPEPingPongDeployParity`** (alias `HOPEPingPongRealSensor`), which uses a **175-D**
+> deploy-parity actor observation: it drops `motion_anchor_pos_b` (3) and `base_target_pos_b`
+> (2), and reframes `racket_target_pos_b` as `yaw(base)^T (target_w − racket_FK_w)` so the base
+> position cancels. Rationale: the actor is made **base-position-free** so the policy does not
+> depend on the mocap/VRPN link — the rig exists and streams at 300 Hz during play, but it is
+> not bridged into the deploy front-end. (NOT because "no localizer exists on the A3".) The
+> legacy 180-D obs lives on in `task=HOPEPingPong` for comparison only. 175-D layout reference:
+> `scripts/realsensor_obs_reference.py` + `REALSENSOR_OBS_REDESIGN.md`; check a checkpoint with
+> `scripts/verify_realsensor.py`. Rewards also changed: the deploy-parity default **removes**
+> `base_position` and all base-target coupling (`base_couple_blend: 0.0`); movement is driven by
+> dense `racket_progress` + pre-strike slip/twist/upright penalties + `arm_torque_saturation`.
 
 HITTER-alignment status (2026-06-27): the task was realigned to **reproduce HITTER** rather than run a
 HOPE-invented curriculum. The current `cfg/task/HOPEPingPong.yaml` + code implement HITTER's design:
@@ -2915,12 +2945,21 @@ HOPE-invented curriculum. The current `cfg/task/HOPEPingPong.yaml` + code implem
   vector are sampled (HITTER §IV). The Y region is conditioned on the swing type
   (`racket_pos_y_abs_range`, non-overlapping forehand −y / backhand +y). The invented machinery
   (`motion_scale`, `ref_perturb` success-gated curriculum, `ref_vel_scale`) was removed.
+  (**Superseded 2026-07-03:** the fixed x=0.4 plane is the original HITTER-faithful stage; the
+  deploy-parity default now samples from **active per-clip 3-D blade-centered position AND
+  velocity boxes** — `pos_range_per_clip` / `vel_range_per_clip`.)
 - **Per-clip strike** — `racket.strike_phase_per_clip: [0.36, 0.74]` (the racket-tip contact phase
   differs per clip); strike timing is resolved per env from its `clip_id`.
+  (**Updated 2026-07-03:** current default is **`[0.47, 0.333]`** from the 2026-07-02 blade
+  re-detect on the re-grounded `_hopex` v3 clips; the v1-clip values were `[0.36, 0.50]`, and
+  `0.74` for the backhand dates to the model_32200 era.)
 - **Racket normal is reward-only** — removed from the actor observation (HITTER Table I); the critic
   keeps it.
 - **Faithful DR** — PD gains FIXED (`domain_rand.pd_gain_range: null`) and external push disabled
   (HITTER fixes PD and has no shove); mass/friction/CoM + observation noise are kept (HITTER prose).
+  (**Updated 2026-07-03:** PD-gain DR is now **ON at ±15%** (`pd_gain_range: [0.85, 1.15]`) in the
+  deploy-parity default — a documented HITTER departure from the 2026-07-02 sim2real fine-tune;
+  fixed PD applies only to the legacy `HOPEPingPong` comparison task.)
 
 Reward *weights and kernel widths* are NOT published by HITTER, so they remain reasonable HOPE choices
 (goal terms weighted relatively high); only the task STRUCTURE is paper-aligned.
@@ -2945,12 +2984,23 @@ These are multiplied by the timing masks from `RacketTargetCommand`, so:
 1. `base_position` is active only before strike.
 2. `racket_position`, `racket_velocity`, and `racket_normal` are active only in the strike window.
 
+(**2026-07-03:** `base_position_tracking_exp` is **legacy `HOPEPingPong` only** — the deploy-parity
+default removes `base_position` and the base-target coupling entirely (`base_couple_blend: 0.0`);
+footwork comes from dense `racket_progress` plus the pre-strike slip/twist/upright penalties and
+`arm_torque_saturation`.)
+
 Domain randomization (HITTER-faithful as of 2026-06-27 — see the HITTER-alignment status above):
 
 1. KEPT (HITTER prose randomizes these): friction (`physics_material`), center of mass (`base_com`),
    joint default position offsets, link mass range, and observation noise.
 2. DISABLED to match HITTER: **PD-gain randomization** (`domain_rand.pd_gain_range: null` — HITTER fixes
    PD) and **external push** (`push_robot = None` in `HOPEEventCfg` — HITTER has no shove).
+
+> **Updated 2026-07-03.** PD-gain randomization is exactly the "deliberate divergence" below, and it
+> is now **the default** in the deploy-parity task: `cfg/task/HOPEPingPongDeployParity.yaml` sets
+> `domain_rand.pd_gain_range: [0.85, 1.15]` (±15%, from the 2026-07-02 sim2real fine-tune — a
+> documented HITTER departure). Fixed PD (`null`) now applies only to the legacy `HOPEPingPong`
+> comparison task. External push stays disabled in both.
 
 To re-enable PD randomization for sim-to-real robustness (a deliberate divergence from the paper), set a
 range in `cfg/task/HOPEPingPong.yaml` under `domain_rand.pd_gain_range`, e.g. `[0.8, 1.2]`.
@@ -3081,30 +3131,39 @@ hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
 
 HITTER (arXiv:2508.21043) trains a **single unified policy** that, each swing, uniformly samples the
 swing type (forehand/backhand), the racket target, and the base target. HOPE reproduces this: one policy
-imitates BOTH reference clips and learns both strokes. This is the default for `task=HOPEPingPong`.
+imitates BOTH reference clips and learns both strokes. This is the default for
+`task=HOPEPingPongDeployParity` (the current default training task — 175-D deploy-parity actor
+obs, alias `HOPEPingPongRealSensor`; `task=HOPEPingPong` is the legacy 180-D comparison task, not
+deploy-honest).
 
 ```bash
 # Unified policy. Both clips come from the task YAML (registry_name = hope_forehand = clip 0,
 # registry_name_2 = hope_backhand = clip 1). No need for two separate runs anymore.
-hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+hope_isaac_py scripts/train.py task=HOPEPingPongDeployParity algo=ppo headless=true \
   run_name=hitter_unified
 ```
 
-How the unified policy works (all wired in `cfg/task/HOPEPingPong.yaml` + the code):
+How the unified policy works (all wired in `cfg/task/HOPEPingPongDeployParity.yaml` + the code):
 
 1. `registry_name` (clip 0 = forehand) and `registry_name_2` (clip 1 = backhand) are both downloaded;
    `MotionLoader` concatenates them and a per-env `clip_id` selects which swing each env imitates
    (uniformly resampled every swing).
-2. `racket.strike_phase_per_clip: [0.36, 0.74]` — the racket-tip contact phase is per clip (forehand
-   peaks ~0.36, backhand ~0.74); the strike window is computed per clip.
-3. `racket.target_mode: uniform` with a **fixed striking plane** `pos_x_range: [0.4, 0.4]` — only
-   (y, z) of the racket position and the racket velocity vector are sampled (HITTER §IV). The Y region
-   is conditioned on the swing type (`racket_pos_y_abs_range` + `forehand_on_negative_y`) so forehand
-   (−y) and backhand (+y) regions are non-overlapping.
+2. `racket.strike_phase_per_clip: [0.47, 0.333]` — the racket-tip contact phase is per clip; the
+   strike window is computed per clip. (Current default from the 2026-07-02 blade re-detect on the
+   re-grounded `_hopex` v3 clips. History: v1 clips used `[0.36, 0.50]`; the model_32200-era
+   backhand was `0.74`.)
+3. `racket.target_mode: uniform` — targets come from **active per-clip 3-D blade-centered position
+   and velocity boxes** (`pos_range_per_clip` / `vel_range_per_clip`), the default since 2026-07-03.
+   The original HITTER-faithful stage (fixed striking plane `pos_x_range: [0.4, 0.4]`, only (y, z)
+   of the racket position + the velocity vector sampled, HITTER §IV) is superseded and survives only
+   in the legacy `HOPEPingPong` task. The Y region is conditioned on the swing type
+   (`racket_pos_y_abs_range` + `forehand_on_negative_y`) so forehand (−y) and backhand (+y) regions
+   are non-overlapping.
 4. The actor sees a `swing_type` observation (forehand +1 / backhand −1).
 
-Stability + reward knobs added 2026-06-27 (all in `cfg/task/HOPEPingPong.yaml`, no command change needed —
-they are picked up automatically by `task=HOPEPingPong`):
+Stability + reward knobs added 2026-06-27 (in the task YAML — now
+`cfg/task/HOPEPingPongDeployParity.yaml`; no command change needed, they are picked up
+automatically by the task):
 
 1. `rewards.racket_velocity_std: 1.0` — the velocity-tracking kernel width. This is a **manual curriculum**
    knob: start loose (`1.8` brackets the ~2 m/s initial error), then tighten `1.0 → 0.8 → 0.5` as
@@ -3118,19 +3177,22 @@ they are picked up automatically by `task=HOPEPingPong`):
    (uniform mode): shifts the base XY target toward 30% of the racket target's sideways (Y) offset, clamped
    to ≤0.20 m, so the robot steps toward far targets instead of stretching in place. Set
    `base_couple_blend: 0.0` to disable. The racket target distribution is unchanged.
+   (**Legacy-task only, 2026-07-03:** the deploy-parity default sets `base_couple_blend: 0.0` and
+   removes the base target / `base_position` reward entirely — footwork is base-free, driven by
+   dense `racket_progress` + the pre-strike slip/twist/upright penalties.)
 4. `racket.normal_mode: velocity` is **ignored in the unified (2-clip) policy** — the target normal is the
    per-clip reference paddle normal, because the +Y blade face is 18–110° off the swing-velocity direction.
    `normal_mode` only takes effect when `registry_name_2: null` (single-clip).
 
 Confirm on the launch log: `UNIFIED multi-clip policy: clip0=...hope_forehand clip1=...hope_backhand`,
-`racket_target.strike_phase_per_clip=(0.36, 0.74)`, `racket_target.target_mode='uniform'`, and a
+`racket_target.strike_phase_per_clip=(0.47, 0.333)`, `racket_target.target_mode='uniform'`, and a
 `swing_type` row in the observation table. At runtime `Live/motion/sampling_entropy` ≈ 1.0 means both
 swings are being sampled.
 
 Train a SINGLE-swing-type policy instead (e.g. only forehand) by disabling the second clip:
 
 ```bash
-hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+hope_isaac_py scripts/train.py task=HOPEPingPongDeployParity algo=ppo headless=true \
   registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
   registry_name_2=null run_name=hope_forehand_only
 ```
@@ -3150,15 +3212,15 @@ restart of thousands of iterations).
 (The HITTER-aligned config has NO curriculum — direct uniform sampling, no `ref_vel_scale`/`ref_perturb`
 ramp. Staged resume is therefore optional, only for hand-tuning reward kernels mid-run.)
 
-Workflow: edit `cfg/task/HOPEPingPong.yaml` (the new, tighter value), then resume from the latest
-checkpoint of the run you are continuing:
+Workflow: edit `cfg/task/HOPEPingPongDeployParity.yaml` (the new, tighter value), then resume from
+the latest checkpoint of the run you are continuing:
 
 ```bash
 # pick the newest checkpoint of the run you want to continue
 ls -t logs/rsl_rl/agibot_a3_hope/<run_dir>/model_*.pt | head -1
 
 # resume + apply the edited YAML (e.g. after lowering racket_velocity_std 1.2 -> 0.8)
-hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+hope_isaac_py scripts/train.py task=HOPEPingPongDeployParity algo=ppo headless=true \
   registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
   run_name=pathC3_velstd08 \
   checkpoint_path=logs/rsl_rl/agibot_a3_hope/<run_dir>/model_2100.pt
@@ -3184,18 +3246,21 @@ at `artifacts/hope_forehand:v0/motion.npz` and `artifacts/hope_backhand:v0/motio
 **Watch live in the Isaac Sim window** (needs a local display; the window stays open until you close it):
 
 ```bash
-hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+hope_isaac_py scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
   motion_file="artifacts/hope_forehand:v0/motion.npz" \
   headless=false
 ```
+
+(All `play.py`/eval commands in this step: `task=` must match the task the checkpoint was trained
+on — `HOPEPingPongDeployParity` for current 175-D runs, `HOPEPingPong` only for legacy 180-D ones.)
 
 **Record a video instead** (headless, no display needed; writes
 `logs/rsl_rl/agibot_a3_hope/<RUN>/videos/play/play.mp4` via imageio — the terminal prints
 `captured N frames` then `wrote video -> …`):
 
 ```bash
-hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+hope_isaac_py scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
   motion_file="artifacts/hope_forehand:v0/motion.npz" \
   headless=true video=true        # video_length frames; tune in cfg/play.yaml
@@ -3204,7 +3269,7 @@ hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
 **From a wandb run** (instead of a local checkpoint; entity = your TEAM where runs are logged):
 
 ```bash
-hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+hope_isaac_py scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 \
   wandb_path="$WANDB_ENTITY/hope_wbc/<RUN_ID>" headless=false
 ```
 
@@ -3236,12 +3301,14 @@ process to find the deployment dither:
 ```bash
 # inside grasping, in .../whole_body_tracking, after Step 14.1 env setup.
 # +steps/+tail/+noise_scales need the Hydra `+` prefix (they are not in the base config).
-hope_isaac_py scripts/eval_deterministic.py task=HOPEPingPong algo=ppo headless=true \
+hope_isaac_py scripts/eval_deterministic.py task=HOPEPingPongDeployParity algo=ppo headless=true \
   num_envs=128 +steps=1200 +tail=400 +noise_scales=0.0,0.05,0.10,0.20 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt"
 ```
 
-Reference numbers (run `2026-06-27_18-14-06_basecouple03_resume`, `model_32200`, unified fh+bh): det
+Reference numbers (historical run on the legacy `task=HOPEPingPong` — current default is
+`HOPEPingPongDeployParity`, see the gate doc) (run `2026-06-27_18-14-06_basecouple03_resume`,
+`model_32200`, unified fh+bh): det
 (`ns=0.0`) `strike_composite_success_exact=0.9874`, `terminated_rate=0.3385`, `mean_episode_length=333`;
 dither (`ns=0.05`) `0.9932`, `0.0154`, `494`. So **deploy with ~0.05 action dithering**, not the pure mean.
 Without `checkpoint=` it falls back to the newest local run; `+base_couple_blend=0.0` overrides the base→racket
@@ -3251,7 +3318,8 @@ coupling for the eval; pass `'motion_file=[.../fh.npz,.../bh.npz]'` to run fully
 
 | File | What |
 | --- | --- |
-| `cfg/task/HOPEPingPong.yaml` | HOPE reward weights/stds, racket target ranges, strike timing |
+| `cfg/task/HOPEPingPongDeployParity.yaml` | HOPE reward weights/stds, racket target ranges, strike timing (current default task) |
+| `cfg/task/HOPEPingPong.yaml` | legacy 180-D comparison task (not deploy-honest) |
 | `cfg/task/TrackingFlat.yaml` | baseline plain-tracking task |
 | `cfg/base/{env_base,sim_base,randomization_base}.yaml` | shared env count, 50 Hz timing, DR defaults |
 | `cfg/algo/ppo.yaml` | rollout length, learning rate, entropy, mini-batches, epochs, network sizes |
@@ -3285,6 +3353,12 @@ can't meet the 0.5 m/s velocity gate. The MuJoCo per-clip eval probe (16.1b) con
   multi-clip only — when the key is absent (or the run is single-clip) sampling falls back to the shared box,
   so default behavior is fully backward-compatible. Code: `RacketTargetCommandCfg.racket_vel_range_per_clip`
   + the per-clip branch in `hope_commands.py:_sample_targets_uniform`, wired from YAML in `train.py`.
+
+> **Superseded (2026-07-03).** In the current default task (`HOPEPingPongDeployParity`) the per-clip
+> boxes are **ACTIVE by default**: both `pos_range_per_clip` and `vel_range_per_clip` ship enabled
+> as 3-D blade-centered boxes. The "shared box + fixed x=0.4 plane" described above is the original
+> HITTER-faithful stage and now applies only to the legacy `HOPEPingPong` comparison task; the
+> "opt-in / commented-out" framing in this subsection is historical.
 
 **Enable it** by uncommenting the `vel_range_per_clip` block in `cfg/task/HOPEPingPong.yaml`:
 
@@ -3415,17 +3489,19 @@ The preferred export path is now built into `scripts/play.py`. When you evaluate
 the script loads the checkpoint and exports `policy.onnx` next to it under the run's `exported/`
 directory. You do not need a separate export script for the normal workflow.
 
-Export and evaluate. The current champion is the **unified forehand+backhand** policy
-**`model_15200`** (run `2026-06-28_23-01-24_phase050_perclippos_scratch`); export it with **both
-clips** so the ONNX bakes the full reference motion:
+Export and evaluate. The current shipped policy is **`model_p4_deployparity.onnx`** (unified
+forehand+backhand, **175-D deploy-parity** / 31-act / 50 Hz — it superseded the 180-D champion
+`model_15200` as of 2026-07-03); export with **both clips** — the re-grounded **`_hopex` (v3)**
+clips — so the ONNX bakes the full reference motion:
 
 ```bash
 # inside the GPU / Isaac distrobox
-RUN=logs/rsl_rl/agibot_a3_hope/2026-06-28_23-01-24_phase050_perclippos_scratch
-hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo headless=true num_envs=2 \
-  checkpoint=$RUN/model_15200.pt \
-  'motion_file=[logs/rsl_rl/eval_motion/fh.npz, logs/rsl_rl/eval_motion/bh.npz]'
-# -> $RUN/exported/policy.onnx (+ learned_std.npy)
+RUN=logs/rsl_rl/agibot_a3_hope/<your_deployparity_run>
+hope_isaac_py scripts/play.py task=HOPEPingPongDeployParity algo=ppo headless=true num_envs=2 \
+  checkpoint=$RUN/model_<N>.pt \
+  'motion_file=[artifacts/hope_forehand_hopex/motion.npz, artifacts/hope_backhand_hopex/motion.npz]'
+# -> $RUN/exported/policy.onnx (deterministic mean policy; generate learned_std.npy via
+#    scripts/make_std_sidecar.py only if you need dither)
 ```
 
 **CRITICAL — export BOTH clips for a unified policy.** `play.py` used to resolve only one motion
@@ -3466,6 +3542,9 @@ The ONNX should include:
 5. PD gains.
 6. Action scale.
 7. Reference motion metadata.
+8. Clip metadata keys **`clip_seg_lengths`** and **`clip_strike_phases`** (added 2026-07-03; read
+   by the C++ runner `a3_deploy_onnx_ref_pingpong` and by `mujoco_eval_onnx.py` so the deploy
+   contract travels with the model).
 
 Verification gate:
 
@@ -3498,7 +3577,8 @@ sim checks, in increasing fidelity:
 2. **16.2 A3 MuJoCo sim-to-sim harness** — the real `hal_ethercat`-shaped closed loop:
    the deploy program (`agi/a3_deploy_example/`) ↔ MuJoCo sim (`agi/A3_MuJoCo_Sim/`)
    over iceoryx, both built from source on Jazzy. Runs with its *bundled* A3 policy;
-   driving it with your own policy needs an obs/action bridge (see the caveat).
+   driving it with your own policy needs an obs/action bridge — now built, as
+   `a3_deploy_onnx_ref_pingpong` (see the 2026-07-03 update in the caveat).
    Split into **16.2.1 environment preparation** (one-time build) and **16.2.2 the run**.
 
 ### 16.1 In-Isaac sim verification (your policy, runnable today)
@@ -3510,8 +3590,9 @@ is Step 15 — the export happens before the rollout, so it never needs a displa
 ```bash
 # inside grasping, after: cd .../whole_body_tracking && set up the env (Step 14.1 — source way OR manual way)
 
-# Watch the swing live (needs a local display):
-hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+# Watch the swing live (needs a local display). task= must match the checkpoint's task
+# (HOPEPingPongDeployParity = current default; HOPEPingPong = legacy 180-D only):
+hope_isaac_py scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
   motion_file="artifacts/hope_forehand:v0/motion.npz" \
   headless=false
@@ -3522,7 +3603,7 @@ hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
 # Headless equivalent — exports the onnx AND records a clip, no display needed.
 # Use video=true so the rollout loop terminates; headless=true video=false loops
 # forever after the export (the onnx is written either way, before the loop).
-hope_isaac_py scripts/play.py task=HOPEPingPong algo=ppo num_envs=2 \
+hope_isaac_py scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 \
   checkpoint="logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt" \
   motion_file="artifacts/hope_forehand:v0/motion.npz" \
   headless=true video=true video_length=300
@@ -3542,11 +3623,15 @@ confirms the export→load→rollout *pipeline*, not policy quality.)
 Between the in-Isaac check (16.1) and the heavy C++ harness (16.2) there is a third, **runnable-today**
 verification: `scripts/mujoco_eval_onnx.py` runs your exported `policy.onnx` in a *different physics engine*
 (MuJoCo) with **no Isaac, no retrain, no reward/target changes**. It loads the official A3 ping-pong MJCF,
-reconstructs the exact **180-D** observation the policy was trained on (NOT 129-D — `command`=62 ref joint
-pos+vel, `motion_anchor_ori_b`=6; verified from `actor.0.weight=(512,180)`), drives a 50 Hz control loop
+reconstructs the exact actor observation the policy was trained on (auto-detected from the ONNX input:
+**175-D** deploy-parity = the current default, or **180-D** legacy full — for the 180-D layout, NOT
+129-D: `command`=62 ref joint pos+vel, `motion_anchor_ori_b`=6; verified from
+`actor.0.weight=(512,180)`; the 175-D layout is documented in `scripts/realsensor_obs_reference.py` +
+`REALSENSOR_OBS_REDESIGN.md`), drives a 50 Hz control loop
 with the deploy-matched Agibot PD gains, and prints the same Isaac strike-composite metrics, now split per
-swing (forehand vs backhand). (The official Agibot C++ harness in 16.2 cannot load this ONNX: it expects a
-1570-D HITTER-tokenizer obs / 29 DOF / single-output policy; ours is 180-D / 31 DOF / 7 outputs.)
+swing (forehand vs backhand). (The *stock* Agibot C++ harness in 16.2 cannot load this ONNX: it expects a
+1570-D HITTER-tokenizer obs / 29 DOF / single-output policy; ours is 175/180-D / 31 DOF / 7 outputs.
+The pingpong runner `a3_deploy_onnx_ref_pingpong` CAN — see the 2026-07-03 update in 16.2.)
 
 Run it in a plain Python env that has `mujoco` + `onnxruntime` (e.g. conda `hope-motion-py310`), **not**
 `hope_isaac_py`:
@@ -3562,18 +3647,29 @@ python scripts/mujoco_eval_onnx.py \
   --mjcf agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml \
   --noise-scales 0.0 0.05 --steps 4000 --pd-mode implicit --seed 0
 # Useful flags:
-#   --strike-phase-per-clip 0.36 0.50   per-clip contact phase. THIS IS NOW THE DEFAULT (fh 0.36 / bh
-#                                       0.50); only pass it for old model_32200-era models (bh 0.74).
-#                                       It MUST match the trained model's strike_phase_per_clip, else the
+#   --strike-phase-per-clip 0.47 0.333  per-clip contact phase. MUST BE PASSED for current models
+#                                       (2026-07-03): the script's built-in default is still
+#                                       (0.36, 0.50) — the v1-clip values — while the trained cfg
+#                                       default is [0.47, 0.333] (2026-07-02 blade re-detect on the
+#                                       _hopex v3 clips; model_32200-era backhand was 0.74). It MUST
+#                                       match the trained model's strike_phase_per_clip, else the
 #                                       backhand strike is sampled at a dead frame and reads ~0.
 #   --ee-term-z 100                     relax the ee_body_pos TRAINING tracking-guard so swings run to
 #                                       completion (see "fragility" note below). 0.25 = training default.
 ```
 
-`--pd-mode implicit` is the **faithful** mode: it models the PD as passive damping (`kd`) + `implicitfast`,
-matching Isaac's `ImplicitActuator`. `--pd-mode explicit` (the default) computes `torque = kp·(q*−q) − kd·q̇`
-each substep; it is a harder, less faithful test and inflates the strike velocity error (~0.61 vs implicit
-~0.31 m/s) purely from actuator discretization, not a transfer failure. Use implicit for the verdict.
+`--pd-mode implicit` is the **Isaac-faithful** mode: it models the PD as passive damping (`kd`) +
+`implicitfast`, matching Isaac's `ImplicitActuator`. `--pd-mode explicit` (the default) computes
+`torque = kp·(q*−q) − kd·q̇` each substep; it is a harder test and inflates the strike velocity error
+(~0.61 vs implicit ~0.31 m/s) purely from actuator discretization, not a transfer failure.
+
+> **Verdict stance revised (2026-07-03).** `--pd-mode implicit` remains the Isaac-faithful
+> *cross-check*, but the **binding pre-hardware gate is AGI's EXPLICIT clipped-PD MuJoCo check**
+> ("falls in MuJoCo = falls on the real robot") — do not ship on an implicit-only pass.
+> `mujoco_eval_onnx.py` also gained a **`--deploy-faithful`** protocol
+> (`--df-hold-steps` / `--df-rest-steps` / `--df-clips`) that mirrors the C++ runner's episode
+> protocol (nominal stand → hold → play the whole clip → rest; only real falls end an episode).
+> The sentence "use implicit for the verdict" that used to end the paragraph above is superseded.
 
 Validated result for **model_15200** (`--ee-term-z 100`, full episodes, implicit PD):
 
@@ -3583,6 +3679,11 @@ Validated result for **model_15200** (`--ee-term-z 100`, full episodes, implicit
 - **Backhand** composite **~0.50** — functional but **position-limited**: the racket lands ~**0.085 m** off
   target (50% within the 7.5 cm gate) vs Isaac's ~0.038 m. Velocity and normal pass; the gap is the
   high cross-body backhand reach tracking ~2× looser in MuJoCo (an implicit-PD / arm-dynamics gap).
+
+> **Hardware safety note (2026-07-03).** The shipped/deployed policy is
+> **`model_p4_deployparity.onnx`** (175-D / 31-act / 50 Hz). On hardware run **FOREHAND ONLY** —
+> never trigger the backhand — until stand-entry backhand training closes the gap (the backhand is
+> not deploy-ready). See `agi/a3_deploy_example/PINGPONG_DEPLOY_ALIGNMENT.md` §0.
 
 Two earlier conclusions were WRONG and are corrected here:
 
@@ -3801,17 +3902,23 @@ This runs the deploy program's **bundled** policy
 runtime YAML), so it proves the harness — iceoryx transport, state sync, ONNX
 inference, PD-stand→motion state machine — independent of your training.
 
-Caveat — running YOUR policy here is not a drop-in. The deploy program feeds a
-**29-DOF MuJoCo-policy-view tokenizer** policy with its own obs builder + CSV reference
-motions (see `src/a3/a3_deploy_onnx_ref/include/a3_policy_parameters.hpp`). Your
+Caveat — running YOUR policy through the STOCK runner is not a drop-in. The stock deploy
+program feeds a **29-DOF MuJoCo-policy-view tokenizer** policy with its own obs builder + CSV
+reference motions (see `src/a3/a3_deploy_onnx_ref/include/a3_policy_parameters.hpp`). Your
 BeyondMimic `policy.onnx` has a different contract — inputs `(obs, time_step)`, a
 31-DOF robot, different observation terms and action scaling (see
-`source/whole_body_tracking/whole_body_tracking/utils/exporter.py`). Pointing
-`onnx.model_path` at your file will load but produce garbage actions until an
-obs/action adapter maps between the two. That bridge is the remaining engineering item
-before a WBC-trained policy can drive 16.2. The same bridge gates Step 18: until it exists,
-validate the real-robot link with Agibot's bundled policy via Step 18.0 (which depends on
-neither the bridge nor your training).
+`source/whole_body_tracking/whole_body_tracking/utils/exporter.py`). Pointing the stock
+runner's `onnx.model_path` at your file will load but produce garbage actions.
+
+> **Update (2026-07-03): the obs/action bridge EXISTS and is the shipping deploy path.** The
+> C++ runner **`a3_deploy_onnx_ref_pingpong`** (under `agi/a3_deploy_example/`) builds the WBC
+> actor observation natively, **auto-detects 175-D (deploy-parity, current default) vs 180-D
+> (legacy) from the ONNX input**, and reads the contract baked into the ONNX metadata (incl.
+> `clip_seg_lengths` / `clip_strike_phases`). It ships with a zero-gain guard, a 1.4 rad squat
+> guard, and IMU yaw-align at engage. Nothing gates 16.2 or Step 18 on a "missing bridge"
+> anymore — the caveat above now applies only to the *stock* `a3_deploy_onnx_ref` runner.
+> Step 18.0 (Agibot's bundled policy) remains a useful hardware-link check that is independent
+> of your training.
 
 Verification gate:
 
@@ -3833,6 +3940,12 @@ Verification gate:
 > runtime — there is one policy, one obs, one inference. The reference clock just picks the forehand vs
 > backhand segment of the baked motion (Step 16.1b). The section below remains valid only if you instead
 > deploy **two single-skill** policies; for model_15200 skip to `hope_wbc_runner` (Step 20.0).
+>
+> **Update (2026-07-03):** the shipped policy is now **`model_p4_deployparity.onnx`** (175-D
+> deploy-parity). Swing selection is unchanged (one ONNX, `swing_type` obs) — but on hardware run
+> **FOREHAND ONLY**: never trigger the backhand until stand-entry backhand training closes the
+> deploy gap (the backhand was not trained from a stand entry and is not deploy-ready). See
+> `agi/a3_deploy_example/PINGPONG_DEPLOY_ALIGNMENT.md` §0.
 
 The reference deployment code may load one ONNX policy. HOPE needs forehand and backhand switching unless you train a single multi-skill policy.
 
@@ -3897,13 +4010,23 @@ Use this path for the A3. Keep the HOPE ROS 2 interfaces stable and put all Agib
 >    program: single in / single out (`onnx.mode: monolithic`), **29-DOF MuJoCo policy
 >    view**, A3 obs `[1,1570]` (see `a3_deploy_onnx_ref/include/a3_policy_parameters.hpp`).
 >    Pointing `onnx.model_path` at your file loads but produces **garbage actions** until an
->    obs/action bridge maps between the two (same caveat as Step 16.2).
+>    obs/action bridge maps between the two (same caveat as Step 16.2 — resolved, see the
+>    2026-07-03 update below).
 > 2. Per Step 16.2 and constraint 4 (§28): **no hardware run of your own policy until the
 >    A3 MuJoCo sim-to-sim passes with that policy.**
 >
 > Therefore validate the hardware path FIRST with Agibot's bundled policy (Step 18.0) — it
 > exercises the entire real-robot link without depending on your training. Build the bridge
 > and pass 16.2 in parallel, then repeat 18.0's run with your own policy.
+
+> **Update (2026-07-03).** Point 1 is resolved: the obs/action bridge exists as
+> **`a3_deploy_onnx_ref_pingpong`** (`agi/a3_deploy_example/`) and is the **shipping deploy
+> path** — it builds the WBC actor obs natively, auto-detects **175-D deploy-parity vs 180-D
+> legacy** from the ONNX input, and reads the clip contract (`clip_seg_lengths` /
+> `clip_strike_phases`) from the ONNX metadata; safety features include the zero-gain guard,
+> the 1.4 rad squat guard, and IMU yaw-align at engage. The policy actually deployed is
+> **`model_p4_deployparity.onnx`** (175-D / 31-act / 50 Hz) — **FOREHAND ONLY on hardware**
+> (see the Step 17 note). Reference: `agi/a3_deploy_example/PINGPONG_DEPLOY_ALIGNMENT.md`.
 
 ### 18.0 Validate the hardware path first (Agibot bundled policy)
 
@@ -3962,7 +4085,8 @@ Ctrl+C are your aborts.
 - run: `s` stands stably; `m`+`r` plays a short clip without falling.
 - E-stop stops upper-body and gait within 200 ms (competition requirement).
 
-Only after 18.0 passes, **and** the obs/action bridge plus Step 16.2 are done, run the same
+Only after 18.0 passes, **and** the obs/action bridge plus Step 16.2 are done (the bridge is
+done as of 2026-07-03 — `a3_deploy_onnx_ref_pingpong`, see the update above), run the same
 sequence with your own policy.
 
 ### 18.1 Clean-room bridge blueprint (ROS 2 packages)
@@ -4202,7 +4326,8 @@ stat -c '%s bytes (want ~1243884 = 1.24MB 2-clip; ~1141378 = BAD forehand-only)'
 #   export ONNX=~/workspace/HOPE/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope/2026-06-28_23-01-24_phase050_perclippos_scratch/exported/policy.onnx
 # Terminal A (fake planner publishes /racket/command; dry_run:=false only PUBLISHES, never drives hardware):
 ros2 launch hope_planner planner_imitate.launch.py dry_run:=false level:=1
-# Terminal B (runner builds 180-D obs, runs model_15200 deterministically, LOGS target_q; NO hardware):
+# Terminal B (runner builds the exact actor obs — 175-D deploy-parity or 180-D legacy, auto-detected
+# from the ONNX input — runs the policy deterministically, LOGS target_q; NO hardware):
 ros2 launch hope_wbc_runner wbc_runner.launch.py mode:=dry_run onnx_path:="$ONNX" csv_path:=/tmp/wbc_runner.csv
 # Terminal C (watch the commands; best_effort REQUIRED — planner publishes best-effort, plain echo
 # defaults to reliable and shows NOTHING despite the topic publishing fine):
@@ -4243,14 +4368,15 @@ Launch order (full pipeline, once mocap is live):
 # ball_tracking_mode:=rigid_body uses the named ball rigid body; drop both ball args
 # (or use ball_tracking_mode:=auto) to fall back to motion-based ball detection.
 ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
-  server:=PLACEHOLDER_AVATAR_PRO_PC_IP port:=3883 update_freq:=360.0 \
+  server:=PLACEHOLDER_AVATAR_PRO_PC_IP port:=3883 update_freq:=300.0 \
   ball_tracking_mode:=rigid_body ball_object:=Ball
 
 # Terminal 2: planner (real mocap-driven planner -> /racket/command in the "world" frame)
 ros2 launch hope_planner hope_planner.launch.py
 
-# Terminal 3: WBC controller -- hope_wbc_runner consumes /racket/command, builds the 180-D obs,
-# runs model_15200 deterministically, and (only in hardware mode, gated) emits joint commands.
+# Terminal 3: WBC controller -- hope_wbc_runner consumes /racket/command, builds the exact actor
+# obs (175-D deploy-parity or 180-D legacy, auto-detected from the ONNX), runs the policy
+# deterministically, and (only in hardware mode, gated) emits joint commands.
 # STAGE IT: mode:=dry_run (log only) -> shadow (predict on real state, no publish) -> hardware.
 ros2 launch hope_wbc_runner wbc_runner.launch.py \
   mode:=hardware state_source:=ros \
@@ -4606,9 +4732,9 @@ Use this as the master checklist:
 Bring-up / deployment (this session — fake-planner + WBC-runner path):
 
 - `hope_ws/src/hope_planner/PLANNER_IMITATE.md` — fake HITTER planner (`planner_imitate`) for bring-up without mocap; staged levels 0–5, safety, frames.
-- `hope_ws/src/hope_wbc_runner/README.md` — staged, safety-gated WBC controller (`wbc_runner`) that runs model_15200 from `/racket/command`; dry_run/shadow/hardware modes, 180-D obs contract, joint command interface.
+- `hope_ws/src/hope_wbc_runner/README.md` — staged, safety-gated WBC controller (`wbc_runner`) that runs the trained ONNX from `/racket/command`; dry_run/shadow/hardware modes, exact actor obs contract (175-D deploy-parity default / 180-D legacy, auto-detected from the ONNX), joint command interface.
 - `hope_ws/SMOKE_TEST.md` + `hope_ws/smoke_test_dry_run.sh` — hardware-safe build/launch smoke for the two packages.
-- `hope_training/whole_body_tracking/scripts/mujoco_eval_onnx.py` — MuJoCo cross-sim harness (Step 16.1b); the reference 180-D obs / action-decode / PD that `hope_wbc_runner` ports to ROS.
+- `hope_training/whole_body_tracking/scripts/mujoco_eval_onnx.py` — MuJoCo cross-sim harness (Step 16.1b); the reference actor obs (175-D deploy-parity / 180-D legacy, auto-detected from the ONNX) / action-decode / PD that `hope_wbc_runner` ports to ROS.
 - `hope_training/whole_body_tracking/scripts/play.py` — ONNX export (Step 15); resolves both clips for the unified policy.
 
 External Agibot / Expedition A3 references (verified June 2026):
@@ -4637,7 +4763,7 @@ calibration run, or Agibot.
 |-------|-------|-----|---------------|
 | Avatar Pro server IP | `avatar_pro_hope_bridge.launch.py` arg `server` | `192.168.1.100` | Run `ipconfig` on the Avatar-Pro / CMTracker PC; use the wired-adapter IPv4 on the robot LAN. Confirm with `ping <ip>` from the ROS host. |
 | VRPN port | launch arg `port` | `3883` | Chingmu/Avatar-Pro default is 3883; confirm in the CMTracker streaming settings. |
-| Camera / poll rate | launch arg `update_freq` | `360.0` | Set to the mocap system's frame rate (≥240–360 Hz for the ball). |
+| Camera / poll rate | launch arg `update_freq` | `300.0` | Set to the mocap system's frame rate — the HOPE rig streams at **300 Hz** during play (confirmed 2026-07-03; earlier drafts said "≥240–360 Hz"). |
 | Object names | `avatar_pro_vrpn.yaml` (`ppt_object`, `p1_object`, `p2_object`, `ball_object`) | `PPT`/`P1`/`P2`/`ball_object=""` | `PPT`/`P1`/`P2` must match the rigid-body labels in CMTracker exactly. |
 | Ball tracking method | `avatar_pro_hope_bridge.launch.py` args `ball_tracking_mode` / `ball_object` | `auto` / `""` | `rigid_body` + `ball_object:=Ball` reads the named ball rigid body (preferred). `auto` detects the ball by motion (fallback; `ball_object` ignored). |
 | Stream frame is REP-103 Z-up | mocap software | assumed | Set the mocap Up Axis to Z and calibrate the origin at the P1 near-side left corner. If it can only stream Y-up, add the fixed rotation in the relay (mocap doc §6.5.3). |

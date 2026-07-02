@@ -56,6 +56,10 @@ Not done:
 - Large evolving mocap datasets are not yet assigned a local sync path.
 - Live arena confirmation is still needed for the real `PPT`/`P1`/`P2` labels and whether the ball is best exposed as a named rigid body or auto-detected marker.
 
+## Calibration-Phase Capture Set (Planned)
+
+For the physics-modeling / calibration phase, the capture set extends beyond ball trajectories: the racket pose, the table's 4 corners, and the net's 2 corners are also mocap-tracked for model fitting (racket tracking is prohibited only during competition/play). The only in-repo artifact today is ball-only: `calib_bags/traj01` contains just `/ball/point`; the corner/racket capture set is planned for the physics-modeling phase.
+
 ## Risks
 
 - Data without metadata becomes hard to use for physics calibration.

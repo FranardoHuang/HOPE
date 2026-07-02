@@ -1,5 +1,13 @@
 # A3 Deployment Actuator / Controller Audit
 
+> **Status update (2026-07-03):** this is a point-in-time audit from the 180-D `model_32200` era.
+> Its recommendation was implemented: the lightweight runner now exists as
+> `a3_deploy_onnx_ref_pingpong` (`agi/a3_deploy_example`), walked sim-to-real on 2026-07-02, and
+> the current contract is 175-D deploy-parity (see
+> `docs/interfaces/policy_observation_action.md`). The backend/gain analysis below remains valid;
+> the implicit-vs-explicit PD conclusion was later sharpened in
+> `agi/a3_deploy_example/SIM_FIDELITY_NOTE_FOR_AGI.md`.
+
 **Date:** 2026-06-27  **Scope:** audit-only (no retrain, no reward/policy/deploy changes).
 **Question:** when our ONNX policy outputs a 31-D action, how does the real Agibot A3 deploy stack
 turn it into joint commands — and is that actuator model compatible with the Isaac-trained policy?

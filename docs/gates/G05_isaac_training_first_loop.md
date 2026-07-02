@@ -46,9 +46,26 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
-Follow-up note (2026-07-01, `main` after the unified HITTER audit):
+Follow-up note (2026-07-02/03, after the simtoreal2 merge):
 
-- The active `HOPEPingPong` config now defaults to unified forehand+backhand training (`registry_name_2` enabled), `target_mode: uniform`, fixed strike plane `x=0.4`, `strike_phase_per_clip: [0.36, 0.74]`, actor `swing_type`, and no actor `racket_target_normal_w`.
+- The training default is now `task=HOPEPingPongDeployParity` (`cfg/train.yaml`;
+  `HOPEPingPongRealSensor` is a backward-compat alias): the 175-D deploy-parity actor contract
+  (see [../interfaces/policy_observation_action.md](../interfaces/policy_observation_action.md)),
+  base-free footwork rewards (`base_position` removed; dense `racket_progress` + pre-strike
+  slip/twist/upright penalties + `arm_torque_saturation`), per-clip blade-centered 3-D target
+  pos/vel boxes, `strike_phase_per_clip: [0.47, 0.333]` on the re-grounded `_hopex` (v3) clips,
+  `racket_velocity_std: 1.0` (plan 1.0 → 0.8 → 0.5), and PD-gain DR re-enabled at ±15%
+  (2026-07-02 sim2real fine-tune; documented HITTER departure). The 180-D `task=HOPEPingPong` is a
+  legacy comparison path and is not deploy-honest.
+- This path produced the first hardware-deployed policy: `model_p4_deployparity.onnx` (175-D /
+  31-act), sim2sim-validated in MuJoCo and run on the real A3 on 2026-07-02 (forehand only). The
+  newest lineage is the explicit-clipped-PD fine-tune (`launch_explicitpd_ft.sh`, model_25700).
+  Contract checks: `hope_isaac_py scripts/verify_realsensor.py --check layout|rollout|onnx`.
+- Exact accepted run IDs/metrics for a quality baseline are still pending (see Not done).
+
+Follow-up note (2026-07-01, `main` after the unified HITTER audit — values superseded above):
+
+- The active `HOPEPingPong` config then defaulted to unified forehand+backhand training (`registry_name_2` enabled), `target_mode: uniform`, fixed strike plane `x=0.4`, `strike_phase_per_clip: [0.36, 0.74]` (v1 clips), actor `swing_type`, and no actor `racket_target_normal_w`.
 - The `registry_for_runner` blocker and local-motion regression found during the audit were fixed in the training entry: local `motion_file=<forehand.npz> motion_file_2=<backhand.npz>` now bypasses WandB, while registry-backed runs still link the used registry artifact(s).
 - The 2026-06-26 first-loop result remains useful as pipeline history, but the unified HOPEPingPong path still needs a fresh Isaac run before it can count as an accepted baseline.
 
@@ -67,7 +84,7 @@ Done:
 - `scripts/train.py` keeps registry defaults available from `cfg/task/*.yaml`, while `motion_file=<local.npz>` and optional `motion_file_2=<local.npz>` take precedence for no-WandB smoke tests or locally generated references.
 - Local unified-policy training can use Step 9-12 video-generated motions directly with `motion_file=../motions/preprocessed/hope_forehand.npz motion_file_2=../motions/preprocessed/hope_backhand.npz logger=tensorboard`.
 - Generated ONNX policy artifacts remain ignored by asset policy unless a gate records an external artifact path.
-- Merged from `train_1` (2026-06-26) and superseded by the unified HITTER alignment: paddle-contact timing is per clip, now expressed as `strike_phase_per_clip: [0.36, 0.74]`; `episode_length_s: 3.0` caps each episode to about one swing; `scripts/train.py` / `cfg/train.yaml` keep the `checkpoint_path` knob for staged resume.
+- Merged from `train_1` (2026-06-26) and superseded by the unified HITTER alignment: paddle-contact timing is per clip, expressed as `strike_phase_per_clip` (then `[0.36, 0.74]` on v1 clips; current default `[0.47, 0.333]` on the `_hopex` v3 clips); `episode_length_s: 3.0` caps each episode to about one swing; `scripts/train.py` / `cfg/train.yaml` keep the `checkpoint_path` knob for staged resume.
 
 Done (2026-06-26 — first loop reproduced in this harness):
 

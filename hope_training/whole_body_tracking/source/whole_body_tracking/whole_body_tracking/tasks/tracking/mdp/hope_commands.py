@@ -1215,9 +1215,11 @@ class RacketTargetCommand(CommandTerm):
     def racket_target_pos_b(self) -> torch.Tensor:
         """Desired racket position relative to the base (yaw-heading frame). HITTER actor obs.
 
-        PRIVILEGED: uses ``base_pos_w`` (world base position), which is fabricated on hardware
-        (no localizer). Used by the `full` obs mode; the deploy-parity mode (legacy task name:
-        `real_sensor_only`) replaces it with :meth:`racket_target_pos_b_rel`.
+        PRIVILEGED: uses ``base_pos_w`` (world base position). Mocap streams the base pose at 300 Hz
+        during play, but that link is not bridged into the deploy front-end, so this term is fabricated
+        at deploy; base-position-freedom is a deliberate robustness choice. Used by the `full` obs mode;
+        the deploy-parity mode (legacy task name: `real_sensor_only`) replaces it with
+        :meth:`racket_target_pos_b_rel`.
         """
         return quat_rotate_inverse(yaw_quat(self.base_quat_w), self.racket_target_pos_w - self.base_pos_w)
 
