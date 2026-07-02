@@ -117,18 +117,23 @@ rewards:
 
 # ---- racket target sampling (HITTER: direct, fixed plane, no curriculum) -----
 racket:
-  # Strike timing: phase of the clip at which contact happens (racket-tip speed peak).
-  # v2 clips (2026-07-01, forehand 139f / backhand 132f @ 50 Hz): re-detected speed peaks with
-  # scripts/analyze_strike_phase.py -> forehand frame 65/139 = phase 0.468, backhand frame 44/132 =
-  # phase 0.333. (Old v1 values were forehand 0.36 / backhand 0.50; correct for v1, wrong for v2.)
+  # Strike timing: phase of the clip at which contact happens (racket-BLADE speed peak).
+  # WRIST -> BLADE RE-PLANE (2026-07-02): the phases/boxes below were previously planned on the bare
+  # WRIST body point (npz body 31 = right_wrist_yaw_Link), but the strike metric (RacketTargetCommand,
+  # wrist_offset FK mode) measures the BLADE = wrist * T_mount, mount_offset (0.21021, 0.032078,
+  # 0.032036) m, identity mount_quat. Re-detected on the BLADE with scripts/analyze_strike_phase.py
+  # (now blade-default; --wrist-point restores the old behavior) on the re-grounded _hopex clips:
+  #   forehand frame 65/139 = phase 0.468, blade |v| 2.69 m/s (wrist analysis picked the same frame).
+  #   backhand frame 44/132 = phase 0.333, blade |v| 3.02 m/s. NOTE: yaml 0.33 rounded to frame 43
+  #     (round(0.33*131)=43); 0.333 rounds to the true blade-speed-peak frame 44.
   strike_phase: 0.47              # fallback (single-clip / clips not in the per-clip table)
   # Unified policy: per-clip strike phase, aligned with the clip order (clip0=forehand, clip1=backhand).
-  # Each phase must land on the FORWARD contact (racket speed peak on the forward swing), not a recovery frame.
-  #   forehand: 0.47  -> speed peak frame 65/139, |v| 2.04 m/s (v2 re-detect).
-  #   backhand: 0.33  -> speed peak frame 44/132, |v| 1.90 m/s (v2 re-detect).
+  # Each phase must land on the FORWARD contact (blade speed peak on the forward swing), not a recovery frame.
+  #   forehand: 0.47  -> blade speed peak frame 65/139 (blade re-detect 2026-07-02; unchanged from wrist).
+  #   backhand: 0.333 -> blade speed peak frame 44/132 (was 0.33 -> frame 43, one frame early on the blade).
   #     (v1 was 0.36/0.50; v2 clips are longer. v2 was mis-grounded facing world +Y (~82-86deg); it is now
   #     RE-GROUNDED to face +X (HOPE frame) via scripts/reground_hope_frame.py, so the boxes below are +X-frame.)
-  strike_phase_per_clip: [0.47, 0.33]
+  strike_phase_per_clip: [0.47, 0.333]
   strike_window_s: 0.12
   strike_success_pos_thresh: 0.075
   debug_reward_logging: false
@@ -167,17 +172,29 @@ racket:
   # opponent, Y = width, robot faces +X). scripts/reground_hope_frame.py rotates each clip about +Z by
   # -(frame-0 pelvis yaw) so the robot stands facing +X and the return velocity is +X-dominant. Corrected
   # clips: artifacts/hope_{forehand,backhand}_hopex/motion.npz (upload as hope_* v3 before training).
-  # Boxes centered on the re-grounded racket-at-strike (fore (0.48,-0.38,0.87) / back (0.52,-0.04,1.05)),
-  # phases 0.47/0.33 (UNCHANGED by the rotation), ~0.10 wide/axis. +X=forward, -Y=forehand(right) side.
+  #
+  # WRIST -> BLADE RE-PLANE (2026-07-02): the old boxes were centered on the WRIST body at strike
+  # (fore (0.48,-0.38,0.87) / back (0.52,-0.04,1.05)) — but the strike metric measures the BLADE
+  # (wrist + R(wrist)@mount_offset, offset 0.215 m), so those targets sat 0.09-0.20 m short of true
+  # blade contact. Re-centered on the BLADE-at-strike from analyze_strike_phase.py (blade default):
+  #   forehand @ phase 0.47  (frame 65):  blade pos (0.68, -0.44, 0.82)
+  #   backhand @ phase 0.333 (frame 44):  blade pos (0.66,  0.13, 1.03)
+  # PHASE-A STABILITY spans: pos +-(0.10, 0.20, 0.10) m per axis — conservative ON PURPOSE (learn a
+  # stable strike at the reference blade point first; the wide footwork boxes come in later phases).
+  # +X=forward, -Y=forehand(right) side. Sanity: z >= 0.60, x <= 0.85 everywhere.
   pos_range_per_clip:
-    forehand: {x: [0.43, 0.53], y: [-0.43, -0.33], z: [0.82, 0.92]}
-    backhand: {x: [0.47, 0.57], y: [-0.09,  0.01], z: [1.00, 1.10]}
-  # Racket target VELOCITY (HOPE world frame): return is now +X-dominant (toward the opponent). Centered on the
-  # re-grounded reference strike velocity: fore (+1.54,+1.17,+0.64) / back (+1.79,-0.46,+0.15). X is the
-  # dominant axis of both; the forehand keeps a real +Y cross-court lateral, the backhand a -Y component.
+    forehand: {x: [0.58, 0.78], y: [-0.64, -0.24], z: [0.72, 0.92]}
+    backhand: {x: [0.56, 0.76], y: [-0.07,  0.33], z: [0.93, 1.13]}
+  # Racket target VELOCITY (HOPE world frame): return is +X-dominant (toward the opponent). BLADE
+  # RE-PLANE 2026-07-02: old boxes were centered on the WRIST strike velocity (fore (+1.54,+1.17,+0.64) /
+  # back (+1.79,-0.46,+0.15)), 0.5-0.9 m/s slower than the blade (omega x r term). Re-centered on the
+  # BLADE clean strike velocity (+-2-frame centered FD of blade FK pos = training's
+  # clean_reference_strike_velocity parity): fore (+1.55,+1.46,+0.71) / back (+2.11,-0.71,+0.31).
+  # Spans +-(0.5, 0.5, 0.4) m/s; backhand z lower bound clamped to 0.0 (old box was >= 0).
+  # X dominates both; the forehand keeps a real +Y cross-court lateral, the backhand a -Y component.
   vel_range_per_clip:
-    forehand: {x: [1.05, 2.05], y: [ 0.70, 1.65], z: [0.20, 1.00]}
-    backhand: {x: [1.30, 2.30], y: [-0.95, 0.05], z: [0.00, 0.40]}
+    forehand: {x: [1.05, 2.05], y: [ 0.96, 1.96], z: [0.31, 1.11]}
+    backhand: {x: [1.61, 2.61], y: [-1.21, -0.21], z: [0.00, 0.71]}
   # Shared fallback velocity box (used only for single-clip runs / clips without a per-clip entry).
   vel_x_range: [1.5, 3.5]
   vel_y_range: [-1.0, 1.0]
