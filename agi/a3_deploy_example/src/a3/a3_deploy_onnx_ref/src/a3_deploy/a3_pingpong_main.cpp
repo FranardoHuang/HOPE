@@ -359,6 +359,18 @@ int main(int argc, char** argv) {
   // +y and selects the baked backhand clip. Toggle live with f/b. (No live planner.)
   pcfg.start_backhand = Has(argc, argv, "--backhand");
   pcfg.oracle_max_age_s = oracle_max_age_s;
+  // SINGLE-SWING / REST: avoid the periodic clock's end->windup reference SNAP (untracked
+  // in training; topples the free-base backhand). --single-swing: one swing per '1' press,
+  // then held stand. --swing-rest S: swing, rest S seconds at held stand, swing again
+  // (continuous demo, every swing from a clean windup start).
+  pcfg.single_swing = Has(argc, argv, "--single-swing");
+  if (Has(argc, argv, "--swing-rest"))
+    pcfg.swing_rest_s = std::stod(Flag(argc, argv, "--swing-rest", "1.5"));
+  // YAW-ALIGN default ON (hardware fix: boot-drifted IMU yaw polluted motion_anchor_ori_b
+  // by a constant -12..-38 deg in MDU captures -> the policy fought a fictional torso yaw
+  // error with legs/waist and fell during free-standing swings; no-op in sim). Opt out for
+  // A/B debugging only.
+  pcfg.yaw_align = !Has(argc, argv, "--no-yaw-align");
   auto pp = std::make_unique<a3_pingpong::PpPolicy>(model_path, pcfg);
 
   // ---- SIM-ONLY oracle localization wiring ----
@@ -516,6 +528,7 @@ int main(int argc, char** argv) {
   std::uint64_t motion_enter_tick = 0;
   Eigen::VectorXd blend_q_start;
   int prev_level_for_blend = level;                // re-arm the pose-blend on a level toggle
+  int prev_swing_dir_for_blend = pcfg.start_backhand ? -1 : 1;  // re-arm on f<->b switch
   // AUTO LEG-HOLD: hold legs+waist at level 0 (stable ready stand, no frozen-windup foot-lift),
   // release them at level 1 (full-body self-balancing swing). The pose-blend (re-armed on the
   // level toggle below) ramps q_des from the current measured pose so the stiff official stand
@@ -531,7 +544,7 @@ int main(int argc, char** argv) {
                      trace_ptr, obscsv_ptr, loc_mode_int,
                      &shadow_tick, shadow_free_clock, motion_blend_sec, policy_dt,
                      &prev_mode_for_blend, &motion_enter_tick, &blend_q_start,
-                     &prev_level_for_blend](
+                     &prev_level_for_blend, &prev_swing_dir_for_blend](
                         std::uint64_t tick, const robot_io::RobotState& st,
                         robot_io::RobotCommand& cmd) -> bool {
     const Mode m = mode.load();
@@ -569,14 +582,25 @@ int main(int argc, char** argv) {
       ppp->set_legs_passive(hold);
       ppp->set_waist_passive(hold);
     }
-    // Re-arm the pose-blend on a MOTION entry OR a level toggle, so q_des ramps from the CURRENT
-    // measured pose -> no snap when stiff official stand gains (re)engage at the 1->0 toggle.
+    // Re-arm the pose-blend on a MOTION entry, a level toggle, OR a forehand<->backhand switch,
+    // so q_des ramps from the CURRENT measured pose -> no snap when stiff official stand gains
+    // (re)engage at the 1->0 toggle, NOR when the reference jumps to the other clip's windup on a
+    // dir switch (the swing clock restarts at windup in PpPolicy; this blends the command to match).
     const int cur_level = ppp->level();
+    const int cur_swing_dir = ppp->swing_dir();
     const bool level_just_changed = (cur_level != prev_level_for_blend);
+    const bool dir_just_changed = (cur_swing_dir != prev_swing_dir_for_blend);
     prev_level_for_blend = cur_level;
+    prev_swing_dir_for_blend = cur_swing_dir;
     const bool motion_just_entered = (m == Mode::kMotion && prev_mode_for_blend != Mode::kMotion);
-    const bool rearm_blend = motion_just_entered || level_just_changed;
+    const bool rearm_blend = motion_just_entered || level_just_changed || dir_just_changed;
     if (rearm_blend) motion_enter_tick = tick;
+    // Re-capture the IMU yaw-align offsets whenever the POLICY (SHADOW/MOTION) engages
+    // from a non-policy mode — the operator may have moved/turned the robot in between.
+    const bool policy_just_engaged =
+        (m == Mode::kMotion || m == Mode::kShadow) &&
+        prev_mode_for_blend != Mode::kMotion && prev_mode_for_blend != Mode::kShadow;
+    if (policy_just_engaged) ppp->rearm_yaw_align();
     prev_mode_for_blend = m;
     if (m == Mode::kPassive) {  // limp: hold current pose, zero gains
       cmd.q_des = st.q.size() == N ? st.q : Eigen::VectorXd::Zero(N);
