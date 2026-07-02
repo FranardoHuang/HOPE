@@ -122,6 +122,12 @@ TERM_ANCHOR_POS_Z = 0.25     # |ref_torso_z - robot_torso_z| > 0.25  -> fall
 TERM_ANCHOR_ORI = 0.8        # |proj_grav_z(ref) - proj_grav_z(robot)| > 0.8 -> fall
 TERM_EE_POS_Z = 0.25         # any ee |z(ref_relative) - z(robot)| > 0.25 -> fall
 
+# --deploy-faithful fall thresholds — mirror the training BALANCE terminations (hope_env_cfg
+# RealSensor TerminationsCfg: bad_orientation limit_angle=0.7 rad, root_height_below_minimum=0.5 m).
+# In deploy-faithful mode these are the ONLY episode-enders (no tracking guards, no 10 s timeout).
+DF_FALL_TILT_RAD = 0.7       # acos(-proj_grav_z) > 0.7 rad (~40 deg from upright) -> fall
+DF_FALL_ROOT_Z_MIN = 0.5     # pelvis z below 0.5 m -> fall
+
 # RacketTargetCommand uniform-mode sampling (HOPEPingPong.yaml overrides).
 RACKET_POS_X_RANGE = (0.40, 0.40)        # fixed strike plane (x), relative to env origin
 RACKET_POS_Y_ABS_RANGE = (0.05, 0.45)    # |y|; sign set per clip
@@ -370,6 +376,16 @@ class MujocoRobot:
         self.data.qvel[0:3] = root_lin_w
         self.data.qvel[3:6] = R.T @ root_ang_w
         self.data.qvel[self.vadr] = 0.0
+        self.mj.mj_forward(self.model, self.data)
+
+    def reset_to_stand(self, root_pos, root_quat, q_artic):
+        """--deploy-faithful episode init: nominal stand (default_joint_pos, upright root at standing
+        height), ALL velocities zero. This mirrors how the deployed robot enters MOTION from PD_STAND
+        (pp_policy.hpp) — it is deliberately NOT reference-state-init."""
+        self.data.qpos[0:3] = root_pos
+        self.data.qpos[3:7] = root_quat
+        self.data.qpos[self.qadr] = q_artic
+        self.data.qvel[:] = 0.0
         self.mj.mj_forward(self.model, self.data)
 
     def apply_pd_and_step(self, target_q_artic, kp, kd, decimation):
@@ -649,7 +665,7 @@ def _draw_markers(viewer, mujoco, racket, robot, ball_pos):
 def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_dt, decimation,
                 noise_scale, std_vec, n_steps, max_ep_len, rng, csv_writer, mode_label,
                 target_normal_per_clip, strike_csv_writer=None, viewer=None, realtime=True,
-                vel_ranges_per_clip=None):
+                vel_ranges_per_clip=None, df=None):
     racket = RacketCommand(seg_start, seg_len, step_dt, rng, target_normal_per_clip,
                            vel_ranges_per_clip=vel_ranges_per_clip)
     strike = {"all": StrikeAcc(), "forehand": StrikeAcc(), "backhand": StrikeAcc()}
@@ -667,7 +683,70 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         racket.update_strike_timing(clip, ts)
         return clip, ts
 
-    clip, time_step = fresh_swing()
+    # ---------------------------------------------------------------------------------------------
+    # --deploy-faithful machinery (df is None => this whole block is inert and the training-like
+    # protocol runs unchanged). Mirrors pp_policy.hpp's single-swing/rest deploy logic:
+    #   nominal-stand episode start (NEVER reference-state-init) -> hold the windup reference at
+    #   seg_start with obs time_to_strike pinned at the per-clip in-training max -> advance the clip
+    #   ONE frame per control step through its FULL length (final frames included) -> rest at the
+    #   NEXT swing's windup (new clip + freshly resampled racket target, like a training resample)
+    #   -> repeat. NO teleports ever; episodes end only on a REAL fall (tilt / root-height).
+    # ---------------------------------------------------------------------------------------------
+    def df_strike_step(c):
+        return int(seg_start[c]) + int(round(STRIKE_PHASE_PER_CLIP[c] * (int(seg_len[c]) - 1)))
+
+    dfs = None
+    if df is not None:
+        dfs = {
+            "phase": "hold", "left": 0, "completed": True, "next_clip": 0,
+            "swing_starts": [0] * num_clips, "swing_completions": [0] * num_clips,
+            "fall_times_s": [],
+        }
+
+        def df_pick_clip():
+            if df["clip_mode"] == "fh":
+                return 0
+            if df["clip_mode"] == "bh":
+                return min(1, num_clips - 1)
+            c = dfs["next_clip"] % num_clips          # "both": strict fh/bh alternation per swing
+            dfs["next_clip"] += 1
+            return c
+
+        def df_new_swing(phase, steps_left):
+            """Arm the NEXT swing: pick its clip, resample its racket target (exactly what a training
+            resample would do), pin the clock at that clip's windup (seg_start => obs time_to_strike
+            = the per-clip in-training max, matching deploy's tts clamp), hold for `steps_left`."""
+            c = df_pick_clip()
+            racket.resample(c)
+            ts = int(seg_start[c])
+            racket.update_strike_timing(c, ts)
+            dfs["phase"] = phase
+            dfs["left"] = int(steps_left)
+            dfs["completed"] = True                    # no swing in flight yet
+            return c, ts
+
+        def df_start_episode():
+            """Nominal stand: default_joint_pos + upright root at standing height, zero velocity —
+            how the deployed robot enters MOTION. NEVER reference-state-init."""
+            robot.reset_to_stand(df["stand_root_pos"], df["stand_root_quat"], policy.default_q)
+            return df_new_swing("hold", df["hold_steps"])
+
+        def df_fall_reasons():
+            """Deploy-faithful fall = the training BALANCE terminations only (hope_env_cfg RealSensor:
+            bad_orientation tilt > 0.7 rad OR root_height_below_minimum pelvis z < 0.5 m)."""
+            reasons = []
+            pg = robot.projected_gravity_body()
+            tilt = math.acos(max(-1.0, min(1.0, -float(pg[2]))))   # angle from upright
+            if tilt > DF_FALL_TILT_RAD:
+                reasons.append("fall_tilt")
+            if float(robot.body_pos(robot.pelvis_bid)[2]) < DF_FALL_ROOT_Z_MIN:
+                reasons.append("fall_root_z")
+            return reasons
+
+    if df is None:
+        clip, time_step = fresh_swing()
+    else:
+        clip, time_step = df_start_episode()
     last_action = np.zeros(31)
     ep_len = 0
 
@@ -767,9 +846,15 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                     ])
 
         # --- terminations ---
-        reasons = check_terminations(refs, robot, ra_pos, ra_quat, refa_pos, refa_quat)
+        if df is None:
+            # training-like: tracking-guard resets + 10 s timeout
+            reasons = check_terminations(refs, robot, ra_pos, ra_quat, refa_pos, refa_quat)
+            timeout = ep_len >= max_ep_len
+        else:
+            # deploy-faithful: only REAL falls end an episode (no tracking guards, no timeout)
+            reasons = df_fall_reasons()
+            timeout = False
         terminated = len(reasons) > 0
-        timeout = ep_len >= max_ep_len
 
         if csv_writer is not None:
             csv_writer.writerow([
@@ -789,26 +874,51 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 n_term_early += 1; fell += 1; term_reasons.extend(reasons)
             else:
                 n_timeout += 1
+            if df is not None:
+                dfs["fall_times_s"].append(ep_len * step_dt)   # time-to-fall from episode start
             ep_len = 0
-            clip, time_step = fresh_swing()
+            if df is None:
+                clip, time_step = fresh_swing()
+            else:
+                clip, time_step = df_start_episode()   # fresh nominal stand — NEVER ref-state-init
             last_action = np.zeros(31)
             continue
 
-        # --- advance the motion clock; wrap within the env's current segment (multi-swing per episode) ---
-        time_step += 1
-        seg_end = int(seg_start[clip]) + int(seg_len[clip])
-        if time_step >= seg_end:
-            # clip wrap mid-episode: sample a new swing + ref-state-init (Isaac teleports here too),
-            # but do NOT reset ep_len (the episode continues across swings until a fall/timeout).
-            clip = int(rng.integers(0, num_clips))
-            time_step = int(seg_start[clip])
-            r = refs_table[time_step]
-            robot.reset_to_reference(
-                root_pos=r["body_pos_w"][ROOT_TRACKED_IDX], root_quat=r["body_quat_w"][ROOT_TRACKED_IDX],
-                root_lin_w=r["body_lin_vel_w"][ROOT_TRACKED_IDX], root_ang_w=r["body_ang_vel_w"][ROOT_TRACKED_IDX],
-                q_artic=r["joint_pos"])
-            racket.resample(clip)
-            last_action = np.zeros(31)
+        if df is None:
+            # --- advance the motion clock; wrap within the env's current segment (multi-swing per episode) ---
+            time_step += 1
+            seg_end = int(seg_start[clip]) + int(seg_len[clip])
+            if time_step >= seg_end:
+                # clip wrap mid-episode: sample a new swing + ref-state-init (Isaac teleports here too),
+                # but do NOT reset ep_len (the episode continues across swings until a fall/timeout).
+                clip = int(rng.integers(0, num_clips))
+                time_step = int(seg_start[clip])
+                r = refs_table[time_step]
+                robot.reset_to_reference(
+                    root_pos=r["body_pos_w"][ROOT_TRACKED_IDX], root_quat=r["body_quat_w"][ROOT_TRACKED_IDX],
+                    root_lin_w=r["body_lin_vel_w"][ROOT_TRACKED_IDX], root_ang_w=r["body_ang_vel_w"][ROOT_TRACKED_IDX],
+                    q_artic=r["joint_pos"])
+                racket.resample(clip)
+                last_action = np.zeros(31)
+        else:
+            # --- deploy-faithful swing schedule: hold -> play the WHOLE clip once -> rest -> repeat.
+            # NO teleports; last_action carries across swings (the deployed policy runs continuously).
+            if dfs["phase"] == "swing":
+                if not dfs["completed"] and time_step >= df_strike_step(clip):
+                    dfs["completed"] = True                       # reached the strike frame ALIVE
+                    dfs["swing_completions"][clip] += 1
+                if time_step >= int(seg_start[clip]) + int(seg_len[clip]) - 1:
+                    # final clip frame has been played -> rest at the NEXT swing's windup
+                    clip, time_step = df_new_swing("rest", df["rest_steps"])
+                else:
+                    time_step += 1
+            else:  # "hold" (episode start) or "rest" (between swings): clock pinned at the windup
+                dfs["left"] -= 1
+                if dfs["left"] <= 0:
+                    dfs["phase"] = "swing"
+                    dfs["swing_starts"][clip] += 1
+                    dfs["completed"] = False
+                    time_step += 1                                # first advancing frame after windup
         racket.update_strike_timing(clip, time_step)
 
     total_term = n_term_early + n_timeout
@@ -838,7 +948,7 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
             pos_and_vel_fail=acc.count("pos_and_vel_fail"),
         )
 
-    return dict(
+    out = dict(
         mode=mode_label, noise_scale=noise_scale,
         mean_ep_len=(sum(ep_lengths) / len(ep_lengths)) if ep_lengths else float("nan"),
         n_episodes=len(ep_lengths), n_term_early=n_term_early, n_timeout=n_timeout,
@@ -864,6 +974,26 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         clip_forehand=clip_metrics(strike["forehand"]),
         clip_backhand=clip_metrics(strike["backhand"]),
     )
+    if df is not None:
+        starts, comps = dfs["swing_starts"], dfs["swing_completions"]
+        tot_s, tot_c = sum(starts), sum(comps)
+        ftimes = dfs["fall_times_s"]
+        dfd = dict(
+            swing_starts=tot_s, swing_completions=tot_c,
+            # UNCONDITIONAL completion rate: swings interrupted by a fall count as started-not-completed.
+            completion_rate=(tot_c / tot_s) if tot_s else float("nan"),
+            falls=fell,
+            mean_time_to_fall_s=(sum(ftimes) / len(ftimes)) if ftimes else float("nan"),
+            min_time_to_fall_s=(min(ftimes) if ftimes else float("nan")),
+            fall_times_s=[round(t, 2) for t in ftimes],
+        )
+        for c in range(num_clips):
+            nm = CLIP_NAMES.get(c, f"clip{c}")
+            dfd[f"swing_starts_{nm}"] = starts[c]
+            dfd[f"swing_completions_{nm}"] = comps[c]
+            dfd[f"completion_rate_{nm}"] = (comps[c] / starts[c]) if starts[c] else float("nan")
+        out["df"] = dfd
+    return out
 
 
 # =================================================================================================
@@ -938,6 +1068,25 @@ def main():
                         "old model_32200-era backhand.")
     p.add_argument("--pos-z-range", nargs=2, type=float, default=None,
                    help="DIAGNOSTIC: override the racket target z-range (e.g. 0.85 1.25). Default (0.70,1.05).")
+    # --- DEPLOY-FAITHFUL evaluation mode (default OFF; existing behavior byte-identical when off) --
+    p.add_argument("--deploy-faithful", action="store_true",
+                   help="evaluate with the DEPLOYED episode protocol (pp_policy.hpp single-swing/rest "
+                        "logic) instead of the training-like one: start from a nominal stand "
+                        "(default_joint_pos, XML 'stand' keyframe root, zero velocity), hold the windup "
+                        "reference with time_to_strike pinned at the per-clip in-training max, advance "
+                        "the clip ONE frame per control step through its FULL length, rest at the NEXT "
+                        "swing's windup (fresh racket target), repeat. NO reference-state-init, NO clip-"
+                        "wrap teleports, NO tracking-guard terminations, NO timeout — episodes end only "
+                        "on a real fall (tilt > 0.7 rad or pelvis z < 0.5 m).")
+    p.add_argument("--df-hold-steps", type=int, default=50,
+                   help="[--deploy-faithful] control steps to hold the FIRST windup after the "
+                        "nominal-stand episode start (50 = 1.0 s at 50 Hz).")
+    p.add_argument("--df-rest-steps", type=int, default=75,
+                   help="[--deploy-faithful] control steps to rest at the next swing's windup between "
+                        "swings (75 = 1.5 s at 50 Hz).")
+    p.add_argument("--df-clips", choices=["fh", "bh", "both"], default="both",
+                   help="[--deploy-faithful] which clip(s) to swing: fh=forehand only, bh=backhand "
+                        "only, both=strict forehand/backhand alternation per swing (default).")
     args = p.parse_args()
 
     # Apply eval-only overrides to the module globals BEFORE any precompute/rollout reads them.
@@ -995,6 +1144,27 @@ def main():
                         args.pd_mode, kd_for_implicit=policy.kd)
     print(f"[mj-sim2sim] PD mode: {args.pd_mode}"
           + ("  (kd as passive damping + implicitfast integrator)" if args.pd_mode == "implicit" else ""))
+
+    # --- deploy-faithful config (nominal-stand root from the XML 'stand' keyframe when present) ---
+    df_cfg = None
+    if args.deploy_faithful:
+        stand_root_pos = np.array([0.0, 0.0, 0.93])          # fallback: standing height, identity yaw
+        stand_root_quat = np.array([1.0, 0.0, 0.0, 0.0])
+        kid = robot.mj.mj_name2id(robot.model, robot.mj.mjtObj.mjOBJ_KEY, "stand")
+        if kid >= 0:
+            kq = np.asarray(robot.model.key_qpos[kid], np.float64)
+            stand_root_pos = kq[0:3].copy()
+            stand_root_quat = kq[3:7].copy() / np.linalg.norm(kq[3:7])
+            stand_src = f"XML 'stand' keyframe (root z={stand_root_pos[2]:.4f})"
+        else:
+            stand_src = "fallback (root z=0.93, identity yaw)"
+        df_cfg = dict(hold_steps=args.df_hold_steps, rest_steps=args.df_rest_steps,
+                      clip_mode=args.df_clips, stand_root_pos=stand_root_pos,
+                      stand_root_quat=stand_root_quat)
+        print(f"[mj-sim2sim] DEPLOY-FAITHFUL mode: nominal-stand init from {stand_src}; "
+              f"hold={args.df_hold_steps} rest={args.df_rest_steps} steps; clips={args.df_clips}; "
+              f"NO teleports / NO tracking-guard terminations / NO timeout "
+              f"(fall = tilt>{DF_FALL_TILT_RAD} rad or pelvis z<{DF_FALL_ROOT_Z_MIN} m)")
 
     # Precompute the reference table (refs depend only on time_step) -> one ONNX call per frame, once.
     refs_table = [policy.refs(ts) for ts in range(T)]
@@ -1064,7 +1234,7 @@ def main():
                           args.decimation, ns, std_vec, args.steps, max_ep_len, rng, cw,
                           mode_label=f"ns={ns}", target_normal_per_clip=target_normal_per_clip,
                           strike_csv_writer=scw, viewer=viewer, realtime=not args.no_realtime,
-                          vel_ranges_per_clip=vel_ranges_per_clip)
+                          vel_ranges_per_clip=vel_ranges_per_clip, df=df_cfg)
         results.append(res)
     csv_f.close()
     strike_csv_f.close()
@@ -1140,6 +1310,38 @@ def main():
                  else f"{str(r[clip_key][key]):>16s}")
                 for r in results))
     print("=" * 92)
+
+    # ---- deploy-faithful swing-schedule report ----
+    if args.deploy_faithful:
+        print("\nDEPLOY-FAITHFUL report (nominal-stand start, hold -> full-clip swing -> rest; NO teleports)")
+        print("-" * 92)
+        print(f"{'metric':28s}" + "".join(cols))
+
+        def dfrow(label, key, fmt="{:16.4f}"):
+            vals = []
+            for r in results:
+                v = r["df"].get(key, float("nan"))
+                if isinstance(v, bool) or isinstance(v, int):
+                    vals.append(f"{v:16d}")
+                elif isinstance(v, float):
+                    vals.append(fmt.format(v) if not math.isnan(v) else f"{'nan':>16s}")
+                else:
+                    vals.append(f"{str(v):>16s}")
+            print(f"{label:28s}" + "".join(vals))
+
+        dfrow("swing_starts(total)", "swing_starts")
+        dfrow("swing_completions(total)", "swing_completions")
+        dfrow("completion_rate(uncond)", "completion_rate")
+        for cname in ("forehand", "backhand"):
+            dfrow(f"  {cname}_starts", f"swing_starts_{cname}")
+            dfrow(f"  {cname}_completions", f"swing_completions_{cname}")
+            dfrow(f"  {cname}_completion_rate", f"completion_rate_{cname}")
+        dfrow("falls", "falls")
+        dfrow("mean_time_to_fall(s)", "mean_time_to_fall_s")
+        dfrow("min_time_to_fall(s)", "min_time_to_fall_s")
+        print(f"{'fall_times_s':28s}" + "".join(f"{str(r['df']['fall_times_s']):>16s}" for r in results))
+        print("=" * 92)
+
     print(f"[mj-sim2sim] per-step CSV   -> {csv_path}")
     print(f"[mj-sim2sim] per-strike CSV -> {strike_csv_path}\n")
 

@@ -110,6 +110,13 @@ class MotionCommand(CommandTerm):
         # command to resample its target. Replaces a time_steps<prev heuristic that fails when a clip
         # wrap jumps the index to a HIGHER segment start (forehand->backhand on the concatenated axis).
         self.just_resampled = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        # Pre-swing hold state (see cfg.hold_steps_range): while hold_counter > 0 the reference
+        # clock is frozen at the swing's first frame ("waiting for the ball"). _update_command
+        # decrements it. in_hold is exposed for rewards/metrics.
+        self.hold_counter = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        # True only while _resample_command is being invoked from an intra-episode clip WRAP
+        # (as opposed to a true episode reset) — wraps skip the RSI teleport (cfg.wrap_teleport).
+        self._resampling_from_wrap = False
         self.body_pos_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 3, device=self.device)
         self.body_quat_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 4, device=self.device)
         self.body_quat_relative_w[:, :, 0] = 1.0
@@ -134,6 +141,7 @@ class MotionCommand(CommandTerm):
         self.metrics["sampling_top1_prob"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["sampling_top1_bin"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["motion_phase"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["in_hold"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_anchor_rot_deg"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_joint_pos_mean_abs"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_joint_pos_max_abs"] = torch.zeros(self.num_envs, device=self.device)
@@ -150,6 +158,11 @@ class MotionCommand(CommandTerm):
     @property
     def command(self) -> torch.Tensor:  # TODO Consider again if this is the best observation
         return torch.cat([self.joint_pos, self.joint_vel], dim=1)
+
+    @property
+    def in_hold(self) -> torch.Tensor:
+        """Bool mask: env is in the pre-swing hold (reference frozen at the swing's first frame)."""
+        return self.hold_counter > 0
 
     @property
     def joint_pos(self) -> torch.Tensor:
@@ -344,6 +357,47 @@ class MotionCommand(CommandTerm):
             return
         self._adaptive_sampling(env_ids)
 
+        env_ids_t = env_ids if torch.is_tensor(env_ids) else torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        env_ids_t = env_ids_t.to(device=self.device, dtype=torch.long)
+
+        # Pre-swing HOLD (Phase A): freeze the reference at the swing's first frame for a random
+        # number of control steps ("the ball is not reaching yet"). Applies to resets AND wraps.
+        lo, hi = self.cfg.hold_steps_range
+        self.hold_counter[env_ids_t] = torch.randint(int(lo), int(hi) + 1, (len(env_ids_t),), device=self.device)
+
+        # Intra-episode clip WRAP: no teleport (deploy case) — the policy must physically carry
+        # the body from the previous swing's end into the new swing's windup. The imitation
+        # targets are anchor-relative, so the new reference re-anchors to the robot where it is.
+        if self._resampling_from_wrap and not self.cfg.wrap_teleport:
+            return
+
+        # TRUE episode reset: a fraction starts from the DEFAULT STAND (deploy entry), the rest
+        # keeps the legacy RSI teleport onto the (noised) reference frame.
+        stand_mask = torch.zeros(len(env_ids_t), dtype=torch.bool, device=self.device)
+        if not self._resampling_from_wrap and self.cfg.stand_start_prob > 0.0:
+            stand_mask = torch.rand(len(env_ids_t), device=self.device) < self.cfg.stand_start_prob
+        stand_ids = env_ids_t[stand_mask]
+        rsi_ids = env_ids_t[~stand_mask]
+
+        if len(stand_ids) > 0:
+            default_root = self.robot.data.default_root_state[stand_ids].clone()
+            default_root[:, :3] += self._env.scene.env_origins[stand_ids]
+            default_root[:, 7:] = 0.0  # zero lin/ang velocity
+            self.robot.write_root_state_to_sim(default_root, env_ids=stand_ids)
+            self.robot.write_joint_state_to_sim(
+                self.robot.data.default_joint_pos[stand_ids],
+                torch.zeros_like(self.robot.data.default_joint_vel[stand_ids]),
+                env_ids=stand_ids,
+            )
+            # Give the stand-started envs time to travel stand -> windup before the clip runs.
+            self.hold_counter[stand_ids] = torch.clamp(
+                self.hold_counter[stand_ids], min=int(self.cfg.stand_start_min_hold)
+            )
+
+        if len(rsi_ids) == 0:
+            return
+        env_ids = rsi_ids
+
         root_pos = self.body_pos_w[:, 0].clone()
         root_ori = self.body_quat_w[:, 0].clone()
         root_lin_vel = self.body_lin_vel_w[:, 0].clone()
@@ -376,7 +430,12 @@ class MotionCommand(CommandTerm):
         )
 
     def _update_command(self):
-        self.time_steps += 1
+        # Pre-swing HOLD: held envs keep the reference frozen at the swing's first frame
+        # ("waiting for the ball"); everyone else advances the clip clock.
+        held = self.hold_counter > 0
+        self.hold_counter = torch.clamp(self.hold_counter - 1, min=0)
+        self.metrics["in_hold"] = held.float()
+        self.time_steps += (~held).long()
         if self._multiseg:
             # Wrap at the END of the env's current clip/segment, not the global concatenated end.
             seg_end = self.motion.seg_start[self.clip_id] + self.motion.seg_len[self.clip_id]
@@ -386,7 +445,13 @@ class MotionCommand(CommandTerm):
         self.just_resampled = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         if len(env_ids) > 0:
             self.just_resampled[env_ids] = True
-        self._resample_command(env_ids)
+        # Wrap-path resample: skips the RSI teleport (cfg.wrap_teleport=False) so the policy
+        # physically transitions swing -> swing. True resets go through reset()/manager instead.
+        self._resampling_from_wrap = True
+        try:
+            self._resample_command(env_ids)
+        finally:
+            self._resampling_from_wrap = False
 
         anchor_pos_w_repeat = self.anchor_pos_w[:, None, :].repeat(1, len(self.cfg.body_names), 1)
         anchor_quat_w_repeat = self.anchor_quat_w[:, None, :].repeat(1, len(self.cfg.body_names), 1)
@@ -471,6 +536,25 @@ class MotionCommandCfg(CommandTermCfg):
     velocity_range: dict[str, tuple[float, float]] = {}
 
     joint_position_range: tuple[float, float] = (-0.52, 0.52)
+
+    # --- Phase A (2026-07-02): swing ENTRY / TRANSITION / WAITING coverage --------------------
+    # Deploy enters every swing from a NOMINAL STAND, waits at the windup while the ball is not
+    # yet reaching, and must physically transition between swings — none of which the pure-RSI
+    # scheme ever produced (teleport at every episode start AND every clip wrap). These knobs
+    # close that gap; the imitation targets are anchor-RELATIVE (re-anchored to the robot's
+    # current xy+yaw every step), so no-teleport starts/wraps are well-posed.
+    # Fraction of TRUE episode resets that start from the robot's DEFAULT STAND pose (zero
+    # velocities) instead of teleporting onto the reference clip frame (RSI).
+    stand_start_prob: float = 0.25
+    # Teleport the robot onto the new clip's start frame at intra-episode wraps (legacy RSI
+    # behavior). False = the policy must physically transition swing->swing (the deploy case).
+    wrap_teleport: bool = False
+    # Pre-swing HOLD: on every swing (re)start, freeze the reference at the clip's first frame
+    # for U[lo,hi] control steps (50 Hz). While held, time_to_strike sits at its per-clip
+    # maximum — exactly the deploy runner's clamped "waiting for the ball" pairing.
+    hold_steps_range: tuple[int, int] = (0, 100)
+    # Stand-started envs get at least this much hold (they must travel stand -> windup first).
+    stand_start_min_hold: int = 25
 
     adaptive_kernel_size: int = 1
     adaptive_lambda: float = 0.8

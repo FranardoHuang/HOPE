@@ -6,9 +6,23 @@ NOT the trained policy. The npz already stores world-frame body kinematics for a
     body_pos_w     (T, 32, 3)   world position
     body_quat_w    (T, 32, 4)   world orientation (wxyz)
     body_lin_vel_w (T, 32, 3)   world linear velocity
+    body_ang_vel_w (T, 32, 3)   world angular velocity
 
-Body 0  = pelvis_link (root).   Body 31 = pingpang_red_Link (racket center).
-Racket face normal = R(racket_quat)[:, 1]  (+Y blade face, red/forehand face).
+Body 0  = pelvis_link (root).   Body 31 = right_wrist_yaw_Link (the WRIST — the
+fixed massless racket links pingpang_red_Link etc. are MERGED by PhysX and are
+NOT separate bodies in the npz; 32 bodies = pelvis + 31 actuated links).
+
+RACKET BLADE (default, 2026-07-02 fix): the training strike metric
+(RacketTargetCommand in mdp/hope_commands.py, wrist_offset FK mode) measures the
+BLADE = wrist frame * T_mount with mount_offset=(0.21021, 0.032078, 0.032036) m
+and identity mount_quat. This script used to analyze the bare wrist point, which
+planned targets ~0.1-0.2 m short and ~0.5-0.9 m/s slow of true blade contact.
+Default is now the blade:
+    blade_pos = wrist_pos + R(wrist_quat) @ mount_offset
+    blade_vel = wrist_lin_vel + wrist_ang_vel x (R(wrist_quat) @ mount_offset)
+Pass --wrist-point to reproduce the old wrist-point behavior.
+Racket face normal = R(wrist_quat)[:, 1]  (+Y blade face, red/forehand face;
+mount_quat is identity so wrist +Y == blade +Y).
 
 For each frame it computes, in the robot-root (pelvis-yaw) frame:
   frame index, normalized phase, racket world pos, racket world lin vel, speed,
@@ -34,10 +48,18 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 WBT = os.path.dirname(HERE)
 
-RACKET_BODY = 31           # pingpang_red_Link
+RACKET_BODY = 31           # right_wrist_yaw_Link (racket links are merged fixed links)
 PELVIS_BODY = 0            # pelvis_link
 NORMAL_AXIS = 1            # racket-local +Y is the blade face normal
 STRIKE_PLANE_X = 0.40      # HITTER fixed striking plane, 0.40 m in front of robot
+
+# Wrist -> blade-center mount transform. MUST match RacketTargetCommandCfg in
+# mdp/hope_commands.py (mount_offset / mount_quat). mount_quat is identity, so
+# only the position offset matters here.
+MOUNT_OFFSET = np.array([0.210211399202899, 0.0320784994676765, 0.0320358706296689])
+# Training-parity clean strike velocity: centered FD of the blade FK position
+# over +-CLEAN_VEL_WINDOW frames (RacketTargetCommand clean_reference_strike_velocity).
+CLEAN_VEL_WINDOW = 2
 
 CLIPS = {
     "forehand": os.path.join(WBT, "artifacts/hope_forehand:v1/motion.npz"),
@@ -76,12 +98,13 @@ def yaw_only_rot(R):
     return Ry
 
 
-def analyze(name, path):
+def analyze(name, path, use_blade=True):
     d = np.load(path)
     fps = int(d["fps"][0])
     P = d["body_pos_w"].astype(np.float64)        # (T,32,3)
     Q = d["body_quat_w"].astype(np.float64)
     V = d["body_lin_vel_w"].astype(np.float64)
+    A = d["body_ang_vel_w"].astype(np.float64)
     T = P.shape[0]
     phase = np.arange(T) / T
 
@@ -89,10 +112,23 @@ def analyze(name, path):
     Rroot = yaw_only_rot(quat_to_rot(Q[:, PELVIS_BODY]))     # (T,3,3) cols=root axes in world
     pelvis_xy = P[:, PELVIS_BODY].copy()
 
-    racket_w = P[:, RACKET_BODY]                  # world pos
-    racket_v_w = V[:, RACKET_BODY]                # world vel
-    racket_R = quat_to_rot(Q[:, RACKET_BODY])
+    racket_R = quat_to_rot(Q[:, RACKET_BODY])     # wrist orientation (== blade, identity mount_quat)
+    if use_blade:
+        # Blade point = wrist FK'd through the mount (matches RacketTargetCommand wrist_offset mode).
+        offset_w = np.einsum("tij,j->ti", racket_R, MOUNT_OFFSET)          # (T,3)
+        racket_w = P[:, RACKET_BODY] + offset_w                            # blade world pos
+        racket_v_w = V[:, RACKET_BODY] + np.cross(A[:, RACKET_BODY], offset_w)  # + omega x r
+    else:
+        racket_w = P[:, RACKET_BODY]              # legacy: bare wrist point
+        racket_v_w = V[:, RACKET_BODY]
     normal_w = racket_R[:, :, NORMAL_AXIS]        # world face normal
+
+    # Training-parity CLEAN strike velocity: centered finite difference of the (blade) position over
+    # +-CLEAN_VEL_WINDOW frames with edge clamping, exactly like _ensure_reference_strike_state().
+    W = CLEAN_VEL_WINDOW
+    lo = np.clip(np.arange(T) - W, 0, T - 1)
+    hi = np.clip(np.arange(T) + W, 0, T - 1)
+    clean_v_w = (racket_w[hi] - racket_w[lo]) / (2.0 * W / fps)
 
     # Express racket pos/vel/normal in the root (pelvis-yaw, origin at pelvis) frame.
     rel = racket_w - pelvis_xy                    # (T,3)
@@ -133,6 +169,8 @@ def analyze(name, path):
         dist_plane=dist_plane, racket_root=racket_root, racket_v_root=racket_v_root,
         normal_root=normal_root, label=label, strike=strike,
         fwd_peak=fwd_peak, speed_peak=int(np.argmax(speed)),
+        racket_w=racket_w, racket_v_w=racket_v_w, clean_v_w=clean_v_w,
+        point="blade" if use_blade else "wrist",
     )
     return info
 
@@ -141,7 +179,7 @@ def report(info):
     name, T = info["name"], info["T"]
     s = info["strike"]
     print("\n" + "=" * 74)
-    print(f"{name.upper()}  ({T} frames @ {info['fps']} Hz)")
+    print(f"{name.upper()}  ({T} frames @ {info['fps']} Hz)  [tracked point: {info['point'].upper()}]")
     print("=" * 74)
     print(f"  racket SPEED peak : frame {info['speed_peak']:3d}  phase {info['speed_peak']/T:.3f}  "
           f"|v|={info['speed'][info['speed_peak']]:.2f}  vx={info['vx'][info['speed_peak']]:+.2f}")
@@ -152,6 +190,10 @@ def report(info):
     print(f"      racket speed     = {info['speed'][s]:.3f} m/s")
     print(f"      racket vx (+X)   = {info['vx'][s]:+.3f} m/s")
     print(f"      racket pos(root) = ({info['racket_root'][s,0]:+.3f}, {info['racket_root'][s,1]:+.3f}, {info['racket_root'][s,2]:+.3f})")
+    print(f"      pos (WORLD)      = ({info['racket_w'][s,0]:+.3f}, {info['racket_w'][s,1]:+.3f}, {info['racket_w'][s,2]:+.3f})   <- YAML pos_range_per_clip center")
+    print(f"      vel (WORLD)      = ({info['racket_v_w'][s,0]:+.3f}, {info['racket_v_w'][s,1]:+.3f}, {info['racket_v_w'][s,2]:+.3f})")
+    print(f"      vel (WORLD,clean)= ({info['clean_v_w'][s,0]:+.3f}, {info['clean_v_w'][s,1]:+.3f}, {info['clean_v_w'][s,2]:+.3f})   "
+          f"<- +-{CLEAN_VEL_WINDOW}-frame FD, training-parity; YAML vel_range_per_clip center")
     print(f"      dist to x=0.40   = {info['dist_plane'][s]:.3f} m")
     print(f"      face normal(root)= ({info['normal_root'][s,0]:+.3f}, {info['normal_root'][s,1]:+.3f}, {info['normal_root'][s,2]:+.3f})")
     print(f"      label            = {info['label'][s]}")
@@ -223,6 +265,10 @@ def main():
     ap.add_argument("--clip-name", default="clip", help="name for --motion-file")
     ap.add_argument("--out-dir", default=None,
                     help="output dir for plots (default: <WBT>/diag_videos)")
+    ap.add_argument("--wrist-point", action="store_true",
+                    help="analyze the bare wrist body point (legacy pre-2026-07-02 behavior) "
+                         "instead of the racket BLADE (wrist + mount FK, matches the training "
+                         "strike metric in mdp/hope_commands.py)")
     args = ap.parse_args()
 
     if args.motion_file:
@@ -237,7 +283,7 @@ def main():
     else:
         clips = CLIPS
 
-    infos = [analyze(n, p) for n, p in clips.items()]
+    infos = [analyze(n, p, use_blade=not args.wrist_point) for n, p in clips.items()]
     for info in infos:
         report(info)
 
