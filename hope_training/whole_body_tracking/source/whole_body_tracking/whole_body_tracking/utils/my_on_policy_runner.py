@@ -53,9 +53,13 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             attach_onnx_metadata(self.env.unwrapped, wandb.run.name, path=policy_path, filename=filename)
             wandb.save(policy_path + filename, base_path=os.path.dirname(policy_path))
 
-            # link the artifact registry to this run
+            # link the artifact registry to this run (lineage bookkeeping only — a W&B API failure here
+            # must not kill the training run)
             if self.registry_name is not None:
-                wandb.run.use_artifact(self.registry_name)
+                try:
+                    wandb.run.use_artifact(self.registry_name)
+                except Exception as e:
+                    print(f"[MotionOnPolicyRunner] WARNING: use_artifact({self.registry_name!r}) failed: {e}")
                 self.registry_name = None
 
     def log(self, locs: dict, width: int = 80, pad: int = 35) -> None:

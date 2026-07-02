@@ -96,7 +96,9 @@ def _run_play(cfg, simulation_app):
                 r = str(r)
                 if ":" not in r:
                     r += ":latest"
-                return str(pathlib.Path(api.artifact(r).download()) / "motion.npz")
+                art = api.artifact(r)
+                print(f"[play.py] motion clip: {r} -> {art.source_qualified_name} (digest {art.digest[:12]})", flush=True)
+                return str(pathlib.Path(art.download()) / "motion.npz")
 
             # clip0 = registry_name (forehand); clip1 = registry_name_2 (backhand) if set. MUST match
             # train.py so the exported ONNX bakes the FULL concatenated motion (T = sum of seg_lens).
