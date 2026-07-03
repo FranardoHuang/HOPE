@@ -1,0 +1,58 @@
+All source material read (paper 8 pp. + the open-sourced training code at github.com/purdue-tracelab/TTRL-ICRA2026, cloned to scratchpad). Notes below. Code paths are relative to the repo clone `/tmp/claude-0/-workspace-yikang/56ec1c84-c2df-4667-8842-59b9f726e183/scratchpad/ttrl/`.
+
+# PACE (arXiv 2509.21690v3) — ball-model-based reward design notes
+
+## 0) Architecture in one line (FACT)
+End-to-end PPO (no hierarchy, no motion imitation): actor sees ball position + a LEARNED predictor output; rewards are built from a PHYSICS-based (analytic closed-form, not learned, not sim-rollout) predictor. Asymmetric actor-critic: critic gets physics-based predictions + ball velocity as privileged info (paper Sec. III, Fig. 2, p.3; Table I, p.4).
+
+## 1) At-contact landing reward — exact formulation
+
+FACTS (paper Sec. III-B.2 "Returning reward", p.4; code):
+- **Predictor is analytic physics, closed-form, NOT learned, NOT a sim rollout.** Computed every step from the CURRENT ball state (tt_env.py:964-1030):
+  - `t_land = (vz + sqrt(vz² + 2g(z−h)))/g` with table plane h=0.78 m — **drag-free vertical** quadratic solve (tt_env.py:981-985).
+  - Horizontal displacement uses the **quadratic-drag closed form**: `s(T) = (1/k)·sign(v0)·ln(1 + k|v0|T)` with scalar `k = 0.5ρC_d A/m` computed as ρ=1.225, C_d=0.47, R=0.02, m=0.0027 → k≈0.13 m⁻¹ (tt_env.py:350-360, 1000-1003). `predict_x_land = x + s(vx,t_land)`, same for y (tt_env.py:1011-1013).
+- **Landing reward** (`reward_future_landing_dis`, rewards.py:742-759): `r = threshold − ||(x̂_land, ŷ_land) − (1.15, 0)||₂` — **linear (signed) distance to a fixed target point at the middle of the opponent's half**, NOT an exp kernel. Config: threshold=3.0, weight=60 (t1_tt_config.py:198-204).
+- **Fired exactly ONCE, at the step of first paddle contact**: mask `ball_landing_dis_rew = has_touch_paddle & ~has_touch_paddle_rew` (tt_env.py:892), which is true only on the contact step. At that step the sim has already resolved the impulse, so `predict_*_land` is evaluated on the **post-impact ball state** → this is literally an at-contact predicted-landing reward. Comment in code shows they tried a continuous (every-step-after-hit) variant and switched to one-shot (rewards.py:756-758).
+- **Net-clearance companion** (`reward_future_pass_net`, rewards.py:761-797): from current (post-impact) state, **drag-free** time to net plane `t_net = (0−x)/vx`, height `ẑ_net = z + vz·t_net − ½g·t_net²`; reward `exp(−|ẑ_net − z_target|/std)`, gated to `vx>0` and the same one-shot contact mask. Deployed config: z_target = 0.76+0.35 = 1.11 m, std=0.4, **weight=100** (t1_tt_config.py:207-211). (Paper: "predict the ball's height ẑ_ball as it crosses the net plane... pass the net at a specified margin", Sec. III-B.2, p.4.)
+- Paper's stated rationale: rewards "are available immediately at the moment of contact, rather than only after the ball lands... removing the dependence on late outcome signals" (Sec. III-B.2, p.4).
+- Contact detection itself is **proximity-based, not force-based**: `contact_score = (0.05 − (||ball − paddle_touch_point|| − 0.02))/0.05`, clamped to [0,1]; `reward_contact` pays the max proximity score achieved, once per serve, **weight=150** (tt_env.py:869-881, 891; tt_env_config.py:106; t1_tt_config.py:165-168).
+- Sparse ground-truth success is KEPT alongside: `reward_table_success` = 1 on actual first bounce in opponent-table box after paddle touch, **weight=100** (rewards.py:613-615; table box defined tt_config.py:83-90).
+
+## 2) Spin — none
+
+FACTS: Serve angular velocity is hard-zeroed (`ang_vel = torch.zeros...`, tt_env.py reset_ball). Sim aero model supports Magnus (`F_m = 0.5ρAR·magnus_factor·(ω×v)`, aero_model.py:78-86) but `magnus_factor=0.0` (aerodynamics.py:25). Paper: drag calibrated from 22 real pre-bounce near-zero-spin trajectories, single constant C_d via least squares; "aerodynamic lift due to Magnus effect is assumed to be negligible" (Sec. IV-A.2, p.5). Sim drag C_d=0.4378 "match the real world testing" (tt_env.py:212). No spin objectives, no spin conditioning, no racket-rubber tangential model anywhere. (Minor inconsistency: reward-side k uses C_d=0.47 while sim applies 0.4378 — the reward predictor is deliberately approximate.)
+
+## 3) Imitation vs task balance at contact
+
+FACTS:
+- **There is no imitation/motion-tracking term at all.** Action = residual around a fixed nominal standing pose with right hand raised: `q_target = q_nom + 0.25·a` (paper Sec. III-C.2, p.4; tt_config.py:62 action_scale 0.25). Posture is held only by tiny `joint_deviation_l1` penalties: right (striking) arm −0.05, left arm/waist/hips −0.2 (t1_tt_config.py:119-163) vs task rewards of +60/+100/+100/+150 — task terms dominate by ~3 orders of magnitude.
+- **Hit-guidance (tracking) rewards are explicitly switched OFF at/near contact** so they cannot fight the strike: `mask_invalid = (x<−1.9) | (vx>0) | (z<0.7) | (x<−1.35 & vz<0) | has_touch_paddle` zeroes the EE-target, base-target and base-velocity tracking rewards (tt_env.py:1040-1046; rewards.py:683, 711, 738). Paper: "disable the prediction-based reward near the end of the ball's flight... retains flexibility to explore effective striking strategies not constrained to hitting the ball exactly at the apex" (Sec. III-B.1, p.4).
+- **Tracking kernels are clamped (flat-topped)**: `exp(−clamp(dist, min=threshold)/std²)` — error below tolerance yields constant max reward, i.e., zero gradient toward exact tracking (rewards.py:681, 710, 736; thresholds 0.15 m EE / 0.05 m base / 0.1 m/s vel, t1_tt_config.py:171-196). Paper: "clamp the reward once the position or velocity error falls within a tolerance range" (Sec. III-B.1, p.4).
+- Hit-guidance targets: EE tracks `ball_future_pose` = predicted **post-bounce apex** (drag-adjusted ascent: `t₂ = atan(v_up·√(k/g))/√(gk)`, `Δz = (1/2k)·ln(1+(k/g)v_up²)`, restitution 0.9 on vz, 0.7 tangential retention on vx,vy — tt_env.py:989-1024); base tracks apex_xy offset by (−0.1, −paddle_y_offset=+0.6); pseudo base-velocity command = 4×(position error), clamped ±7 m/s (tt_env.py:1081-1082) — paper: "target velocity proportional to the tracking error of base position" (Sec. III-B.1, p.4).
+
+## 4) Curriculum / ball randomization
+
+FACTS (paper Sec. IV-A.3 p.5, Table II p.5; code):
+- Serve: ball spawned at fixed point (1.35, 0, 1.03) on opponent side ± y-noise (−0.1,0.1); v_x ∈ (−6.5,−5.0), v_y ∈ (−0.8,0.4), v_z ∈ (1.5,2.0) m/s in training config (tt_env_config.py:91-101); eval buckets: long (−6.5,−6.2), mid-long (−6.2,−5.7), short (−5.7,−5.2) (Table II, p.5).
+- **No speed curriculum** in the released code — full serve range from the start; each sampled serve is **repeated 5×** (`ball_reset_repeat=5`) before drawing a new one (tt_env.py reset_ball), up to 5 serves/episode, ball episode 1.5 s. Robot base start randomized. Paper defers curriculum learning to future work (Sec. VI, p.7).
+- Ball mass in sim is 3.4 g "Vicon Table tennis ball mass" — marker tape added mass (ball.py:22); restitution 0.9 (ball.py:36).
+- Learned actor-side predictor: MLP [64,64], input = last 5 ball positions (15-D), output = 3-D post-bounce apex; trained online against the analytic `ball_future_pose` as ground truth for the first 20 PPO iters only, MSE loss, 0.02 Gaussian input noise; RMSE ≈ 3 cm (paper Sec. V-A.4 p.6; t1_tt_config.py:329-337; on_policy_predictor_regression_runner.py:368-433).
+
+## 5) Effect sizes
+
+FACTS (paper Sec. V-B, Fig. 5, p.6 — qualitative curves, no numeric table):
+- Sparse-only baseline (binary hit/return): "we could not learn a functional WBC policy... using them alone" (Sec. III-B, p.4); with sparse success only, "the policy never learns the appropriate returning velocity or orientation" — success ≈ 0.
+- Remove return-guidance (the at-contact landing+net rewards) → hit rate still learnable but essentially no successful returns.
+- Remove hit-guidance → much slower hit-rate rise (with it: high hit rate within first 4000 updates).
+- Remove learned predictor from actor obs → can still intercept but "achieves almost no successful returns" (fails stable stance/strike).
+- Full system: sim 96.1–99.3% hit / 92.3–95.0% success over 250k+ serves (Table II, p.5); hardware zero-shot 29/31 hit (93.5%), 19/31 success (61.3%), mean return speed 6.9 m/s (Sec. V-C, p.6-7).
+
+## JUDGMENT — minimal PACE-style reward for HOPE given our validated flight+contact model
+
+1. **The load-bearing piece is tiny**: one-shot, at-first-racket-contact, evaluate the post-impact ball state and emit (a) linear landing reward `w_land·(c − ||p̂_land,xy − p_target||)` and (b) net-clearance kernel `w_net·exp(−|ẑ_net − (h_table+m)|/σ)`. PACE's own predictor is a crude closed-form (drag-free vertical, log-drag horizontal, no Magnus) and it still works — our RK4 `flight.py` rollout from the contact-step ball state is strictly better and directly substitutable; we don't need racket FK at all if we read the post-impulse ball state from Isaac (PACE does exactly this). Racket FK + our `spin_contact.py` model is only needed if we want the reward before the sim resolves contact or for spin-conditioned targets.
+2. **Keep the sparse true-bounce reward at comparable weight** (PACE: predicted landing 60 / net 100 / true bounce 100 / contact 150). The sparse term anchors against predictor error; the predicted terms supply gradient at contact time.
+3. **Directly addresses our imitation-anchoring failure**: PACE's two mechanisms are (i) hard-gate all pre-strike tracking/guidance rewards to zero once contact occurs or the ball is in the terminal flight window (mask_invalid), and (ii) flat-top (clamp) tracking kernels so tracking gives no gradient inside a tolerance band. Translation for HOPE: gate/flatten the imitation term in a window around predicted strike time so the at-contact landing gradient is the only thing shaping racket velocity/orientation at impact — PACE shows a policy learns return velocity/orientation ONLY from the at-contact predicted terms.
+4. **Spin extension (beyond PACE)**: PACE is spin-free; nothing in it conflicts with adding a spin term. Natural extension consistent with their template: at contact, also compute post-impact ω from our contact model and reward `−||ω − ω_cmd||` or fold Magnus into the RK4 landing prediction (which our flight model already supports), making landing accuracy and spin production the same one-shot signal.
+5. **Caution transferring effect sizes**: PACE is position-only ball obs at 150 Hz mocap, 5.2–6.5 m/s spinless serves, ball mass inflated to 3.4 g by marker tape, proximity-based (not force-based) contact — all close to our venue setup, but their 61% hardware success came from ankle-model gaps, so treat their sim numbers as ceiling. Their landing target is a single fixed point (1.15, 0); a commanded/randomized target point would be needed for our "win matches" placement goal and is a trivial change to the same reward.
+
+Key file refs: paper `/workspace/yikang/nohope/papers/2509.21690v3.pdf` (Sec. III-B p.4 rewards; Table I p.4 obs; Sec. IV-A p.5 drag/serves; Table II p.5; Fig. 5 + Sec. V-B p.6 ablations). Code (clone): `legged_lab/envs/base/tt_env.py:964-1090` (analytic predictor + masks), `legged_lab/mdp/rewards.py:742-797` (landing + net rewards), `:659-740` (gated/clamped hit-guidance), `legged_lab/envs/t1_tt/t1_tt_config.py:37-216` (all weights), `legged_lab/physics/aero_model.py:78-86` (drag+Magnus form, Magnus=0), `rsl_rl/rsl_rl/runners/on_policy_predictor_regression_runner.py` (learned apex predictor).
