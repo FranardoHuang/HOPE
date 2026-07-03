@@ -50,6 +50,16 @@ class OnnxPolicy:
         if len(self.joint_names) != EXPECTED_JOINTS:
             raise ValueError(f"expected {EXPECTED_JOINTS} joints, got {len(self.joint_names)}")
 
+        # Per-clip reference-clock layout, baked at export by attach_onnx_metadata
+        # (clip_seg_lengths / clip_strike_phases). None on older exports -> the runner
+        # falls back to its yaml config (and warns: a stale yaml mis-times every strike).
+        self.clip_seg_lengths = None
+        self.clip_strike_phases = None
+        if md.get("clip_seg_lengths", "").strip():
+            self.clip_seg_lengths = tuple(int(float(v)) for v in md["clip_seg_lengths"].split(","))
+        if md.get("clip_strike_phases", "").strip():
+            self.clip_strike_phases = tuple(float(v) for v in md["clip_strike_phases"].split(","))
+
         # std only if explicitly requested (deterministic by default -> not loaded)
         self.std = None
         if std_path:

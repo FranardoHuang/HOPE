@@ -94,7 +94,18 @@ env:
 # strike_window_s kept at 0.12 (widening it re-introduces swing-through timing dilution). All tunable.
 rewards:
   racket_position_weight: 14.0     # 8 -> 14
-  racket_position_std: 0.20        # 0.15 -> 0.20 (gradient in the 10-20 cm band)
+  # std RE-TIGHTENED 0.20 -> 0.15 (2026-07-03, hopex re-grounded run 11-57-16): with correct
+  # geometry the reference swing passes ~0.13 m from every sampled target, so at std 0.20 pure
+  # imitation already collects exp(-(0.137/0.20)^2)=0.63 of the position reward — a lazy local
+  # optimum where the policy strikes the BOX CENTER regardless of the sampled target (pos_err
+  # plateaued at ~0.14-0.19 = the uniform-box sampling distance itself, pos_pass crawling +0.01/100
+  # iters vs the v4 run's +0.05/100 breakout). Same disease as the ablation-1/2 saturation; same
+  # cure: tighten the kernel to the operating band (0.137/0.15 -> kernel 0.43, live gradient).
+  # Next levers if pos_pass still crawls after ~1k iters: hold_ready_weight 2.0 -> 1.0 (the
+  # now-live stillness income suppresses footwork/approach vigor), then
+  # racket.achieved_target_mix_prob 0.30 -> 0.15 (replayed targets cluster at the reference blade
+  # point when the policy strikes in place, diluting conditioning pressure).
+  racket_position_std: 0.15
   racket_velocity_weight: 10.0     # 6 -> 10
   racket_velocity_std: 1.0         # 1.8 -> 1.0 (curriculum tighten: vel_error fell to ~0.47, so 1.8 was
                                    # too lenient — exp(-(0.47/1.8)^2)=0.93, ~no gradient to improve. 1.0

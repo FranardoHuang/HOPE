@@ -187,10 +187,11 @@ class AvatarProVrpnRelay(Node):
 
         vrpn_mocap names the pose topic differently depending on multi_sensor:
           * single sensor: ``/vrpn_mocap/PPT/pose``
-          * multi_sensor:  ``/vrpn_mocap/PPT/pose0`` (sensor index is a SUFFIX
-            on ``pose`` -- e.g. ``pose0``, ``pose31664``)
+          * multi_sensor:  ``/vrpn_mocap/PPT/pose_id_0`` (our vendored
+            vrpn_mocap, tracker.hpp: channel + "_id_" + sensor_idx). Upstream
+            builds have used a bare suffix instead (``pose0``, ``pose31664``).
         Some builds instead nest the index as its own segment
-        (``/vrpn_mocap/PPT/0/pose``). All three -> sender ``PPT``. The type
+        (``/vrpn_mocap/PPT/0/pose``). All layouts -> sender ``PPT``. The type
         filter in _discover_and_select already drops the twist*/accel* topics,
         so here we only need to recognise a pose topic and read its sender.
         """
@@ -201,8 +202,11 @@ class AvatarProVrpnRelay(Node):
         if len(segments) < 2:
             return None
         last = segments[-1]
-        # "pose" (single/nested layouts) or "pose<sensor_index>" (multi_sensor).
-        if last != "pose" and not (last.startswith("pose") and last[4:].isdigit()):
+        # "pose" (single/nested), "pose<idx>" (upstream multi_sensor) or
+        # "pose_id_<idx>" (vendored multi_sensor).
+        if last != "pose" \
+                and not (last.startswith("pose") and last[4:].isdigit()) \
+                and not (last.startswith("pose_id_") and last[8:].isdigit()):
             return None
         return segments[0]
 

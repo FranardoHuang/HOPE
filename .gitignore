@@ -29,6 +29,8 @@ hope_training/wandb/
 hope_training/whole_body_tracking/wandb/
 *.log
 .codex-env-snapshots
+.codex-temp
+.vscode
 hope_training/whole_body_tracking/diag_videos
 
 # Local, machine-specific training env override (Isaac paths + wandb identity).

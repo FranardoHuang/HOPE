@@ -37,8 +37,9 @@ def generate_launch_description():
                               description="'sensor_msgs' (std JointState) | 'joint_msgs' (a3 sim JointState)"),
         DeclareLaunchArgument("imu_topic", default_value="/a3/imu",
                               description="sensor_msgs/Imu topic"),
-        DeclareLaunchArgument("base_pose_topic", default_value="",
-                              description="optional geometry_msgs/PoseStamped pelvis world pose ('' => nominal)"),
+        DeclareLaunchArgument("base_pose_topic", default_value="/P1/pose",
+                              description="geometry_msgs/PoseStamped pelvis world pose from mocap relay; "
+                                          "set '' to use nominal height fallback (standalone dry-run without mocap)"),
         DeclareLaunchArgument("csv_path", default_value="",
                               description="CSV log path ('' disables)"),
     ]

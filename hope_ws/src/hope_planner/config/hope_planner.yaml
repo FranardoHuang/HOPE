@@ -6,7 +6,13 @@ hope_planner:
     # "ball"). Confirm against your live stream: `ros2 topic echo /poses --once`
     # and count the ball's index. TODO: confirm against your live /poses.
     ball_pose_index: 0
-    x_hit: 0.0              # virtual hit plane X (m); ~0.0 = HOPE origin end of table
+    # Virtual hit plane X (m); ~0.0 = HOPE origin end of table. MUST be matched to the
+    # ROBOT PLACEMENT: the policy strikes ~0.55-0.80 m in front of its base, so
+    # x_hit ≈ robot_start_x + 0.65 (e.g. robot at x=-0.5 -> x_hit ≈ 0.15). Targets the
+    # swing can't reach are rejected by the wbc_runner's base-relative target gate
+    # (idle_reason=target_gate in its diagnostics) — if you see that constantly,
+    # x_hit and robot_start_xy_table (wbc_runner.yaml) disagree.
+    x_hit: 0.0
     target_land_x: 2.055   # opponent half-center X (fixed by table geometry)
     target_land_y: -0.7625 # opponent half-center Y (fixed by table geometry)
     delta_t_flight: 0.5    # desired return flight time (s); tune for your robot

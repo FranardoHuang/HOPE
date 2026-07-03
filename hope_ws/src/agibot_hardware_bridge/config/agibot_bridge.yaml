@@ -1,0 +1,24 @@
+agibot_hardware_bridge:
+  ros__parameters:
+    # AGI body-drive topic namespace (all /body_drive/* topics live here)
+    body_drive_ns: "/body_drive"
+
+    # Topic the WBC runner listens to for merged joint state
+    joint_states_topic: "/a3/joint_states"
+
+    # Topic the WBC runner publishes 31-DOF joint commands to
+    joint_command_topic: "/a3/joint_command"
+
+    # Topic the WBC runner listens to for IMU data
+    imu_topic: "/a3/imu"
+
+    # Which body-drive IMU to forward: "pelvis" or "torso"
+    # The policy was trained with the pelvis (base_link) IMU.
+    imu_source: "pelvis"
+
+    # Publish merged state at this rate (Hz). 0 = reactive (on every incoming
+    # state message, which keeps latency minimal at the cost of mixed timestamps).
+    # >0 = timer-based ONLY (reactive publishing is disabled in that case).
+    # Merged state is withheld until ALL four groups (waist/neck/arm/leg) have
+    # reported at least once — a partial merge would feed q=0 limbs to the policy.
+    merge_publish_rate_hz: 0.0

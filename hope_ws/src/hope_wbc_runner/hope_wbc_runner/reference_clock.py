@@ -52,7 +52,13 @@ class ClipLayout:
 
 def swing_sign_from_target_y(target_y: float) -> float:
     """+1 forehand (target on -y) / -1 backhand (target on +y). Matches training's
-    swing_type obs field and planner_imitate's Y-sign convention."""
+    swing_type obs field and planner_imitate's Y-sign convention.
+
+    ``target_y`` must be BASE-RELATIVE (yaw-heading base frame, y left of the
+    robot) — see world_frame.base_relative_target. Feeding a raw HOPE-table-frame
+    world Y here is wrong: the whole table spans y<0, so every real-planner
+    target would classify as forehand.
+    """
     return 1.0 if target_y < 0.0 else -1.0
 
 

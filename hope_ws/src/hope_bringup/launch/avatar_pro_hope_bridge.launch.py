@@ -43,8 +43,10 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("port", default_value="3883", description="Chingmu VRPN port."),
         DeclareLaunchArgument(
-            "update_freq", default_value="180.0",
-            description="VRPN client poll rate (Hz); match the mocap camera rate.",
+            "update_freq", default_value="300.0",
+            description="VRPN client poll rate (Hz); match the mocap camera rate (arena "
+                        "cameras run 300 Hz; the planner's velocity polyfit window is sized "
+                        "for a >=240 Hz ball stream — 180 Hz doubles its time window).",
         ),
         DeclareLaunchArgument("start_vrpn_client", default_value="true"),
         DeclareLaunchArgument("start_world", default_value="true"),
