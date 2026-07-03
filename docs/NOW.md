@@ -121,6 +121,25 @@ franco 已提供 forehand_new.mp4 / backhand_new.mp4,已上传 `/workspace/share
 | 正录(现役) | hopex 转正版(139/132 帧) | 所有既有结果就是它,无需重跑 |
 | 斜录(新) | raw_video_oblique 两条视频 | **卡在 GVHMR→GMR→npz→转正→相位标定 管线**(pod 无 GVHMR 环境;dongc1 机器有)→ 产出后同配置 2000 步对照 |
 
+## 关键更新联合消融(Isaac 复活即发射;2000 步信号档,4096 envs,一卡两跑错峰)
+
+| 臂 | 配置(完整命令附后) | 回答什么 |
+| --- | --- | --- |
+| R0 基线 | `task=HOPEPingPongDeployParity`(main 默认) | 合并后的参照点 |
+| R1 虚拟球·上旋 | `task=HOPEPingPongVirtualBall`(yikang 默认,落点30/过网20/旋转5,拍速法线降权) | 物理奖励栈是否成立 |
+| R2 虚拟球·消旋 | R1 + `task.racket.vb_spin_mode=minimize`(franco 第一阶段:不奖励球质,奖励落点+出球旋转最小) | 两种旋转哲学谁先学会站稳打准 |
+| R3 斜录数据 | R0 + `motion_file=/workspace/shared/motions/hope_forehand_oblique.npz motion_file_2=..._backhand_oblique.npz "task.racket.strike_phase_per_clip=[0.368,0.495]"` + 下方专属采样框 | 实战动作源是否更好(franco 预判:是) |
+| R4 组合 | R1/R2 胜者 + adaptive_sigma + post_swing(可再叠 R3 若其胜) | 产品候选 |
+
+斜录臂专属采样框(从斜录击球帧提取,保持参考-目标一致性):
+`--pos-range-per-clip 0.08 0.28 -0.72 -0.32 0.79 0.99 0.38 0.58 -0.51 -0.11 1.10 1.30`
+`--vel-range-per-clip 1.52 2.52 -0.57 0.43 0.49 1.29 0.73 1.73 -0.30 0.70 0.06 0.86`
+(yaml 键 pos/vel_range_per_clip 同值;斜录反手峰速仅 1.33 m/s 偏温和,视频重录候补)
+
+新增部件状态:vb_spin_mode=minimize 已实现入 main(默认仍 topspin);斜录 npz 已产出
+(`hope_{forehand,backhand}_oblique.npz`,96/106 帧,yaw 已转正,MuJoCo-FK 转换器 body 残差 0.00mm;
+速度用有限差分,与 Isaac 雅可比法峰值差 ~0.18m/s——首个 mech check 时顺带确认无碍)。
+
 ## 基建现状(2026-07-04 凌晨)
 
 - **pod 宿主机对 Isaac 判死**:裸 Kit 在重建容器上仍挂死;Stop→Start 不换宿主机(卷钉死机器)。
