@@ -128,13 +128,26 @@ TERM_EE_POS_Z = 0.25         # any ee |z(ref_relative) - z(robot)| > 0.25 -> fal
 DF_FALL_TILT_RAD = 0.7       # acos(-proj_grav_z) > 0.7 rad (~40 deg from upright) -> fall
 DF_FALL_ROOT_Z_MIN = 0.5     # pelvis z below 0.5 m -> fall
 
-# RacketTargetCommand uniform-mode sampling (HOPEPingPong.yaml overrides).
-RACKET_POS_X_RANGE = (0.40, 0.40)        # fixed strike plane (x), relative to env origin
-RACKET_POS_Y_ABS_RANGE = (0.05, 0.45)    # |y|; sign set per clip
-RACKET_POS_Z_RANGE = (0.70, 1.05)
-RACKET_VEL_X_RANGE = (1.5, 3.5)
-RACKET_VEL_Y_RANGE = (-1.0, 1.0)
-RACKET_VEL_Z_RANGE = (0.0, 1.5)
+# RacketTargetCommand uniform-mode sampling. DEFAULTS UPDATED 2026-07-03 to mirror the CURRENT
+# training config (cfg/task/HOPEPingPongDeployParity.yaml, 2026-07-02 blade re-plane): PER-CLIP
+# pos/vel boxes centered on each clip's reference BLADE strike state. The legacy shared box below is
+# the fallback when POS/VEL_RANGE_PER_CLIP is None (e.g. --pos-z-range override) — it matches the OLD
+# HOPEPingPong.yaml wrist-era generation; evaluating a DeployParity model on it puts the targets
+# out-of-training-distribution.
+POS_RANGE_PER_CLIP = (
+    ((0.58, 0.78), (-0.64, -0.24), (0.72, 0.92)),   # forehand: blade strike (0.68, -0.44, 0.82)
+    ((0.56, 0.76), (-0.07, 0.33), (0.93, 1.13)),    # backhand: blade strike (0.66,  0.13, 1.03)
+)
+VEL_RANGE_PER_CLIP = (
+    ((1.05, 2.05), (0.96, 1.96), (0.31, 1.11)),     # forehand: blade clean strike vel (1.55, 1.46, 0.71)
+    ((1.61, 2.61), (-1.21, -0.21), (0.00, 0.71)),   # backhand: blade clean strike vel (2.11, -0.71, 0.31)
+)
+RACKET_POS_X_RANGE = (0.40, 0.40)        # legacy fallback: fixed strike plane (x), rel. to env origin
+RACKET_POS_Y_ABS_RANGE = (0.05, 0.45)    # legacy fallback: |y|; sign set per clip
+RACKET_POS_Z_RANGE = (0.70, 1.05)        # legacy fallback
+RACKET_VEL_X_RANGE = (1.5, 3.5)          # legacy fallback
+RACKET_VEL_Y_RANGE = (-1.0, 1.0)         # legacy fallback
+RACKET_VEL_Z_RANGE = (0.0, 1.5)          # legacy fallback
 BASE_TARGET_X_RANGE = (-0.10, 0.10)
 BASE_TARGET_Y_RANGE = (-0.10, 0.10)
 BASE_COUPLE_BLEND = 0.3                  # weak base->racket Y coupling
@@ -143,9 +156,10 @@ FOREHAND_ON_NEGATIVE_Y = True            # forehand (clip 0) target on -y
 # forehand / backhand contact phase. MUST match the trained model's task YAML
 # `racket.strike_phase_per_clip`. Resolution order at runtime: --strike-phase-per-clip CLI override >
 # `clip_strike_phases` baked in the ONNX metadata (scripts/play.py; same keys the C++ runner uses) >
-# this built-in legacy fallback. History: v1 clips (0.36, 0.50); model_32200-era backhand 0.74 (at
-# 0.74 the backhand racket sits at a dead recovery frame and strike metrics collapse to ~0); current
-# _hopex (v3) clips bake (0.47, 0.333) into the ONNX.
+# this built-in fallback. The fallback stays at the LEGACY value because only metadata-less (= old)
+# exports ever reach it: v1 clips (0.36, 0.50); model_32200-era backhand 0.74 (dead recovery frame —
+# strike metrics collapse to ~0). Current v2-blade/_hopex clips (0.47, 0.333) always arrive via ONNX
+# metadata; a wrong phase silently collapses strike metrics, so pass the era explicitly for old models.
 STRIKE_PHASE_PER_CLIP = (0.36, 0.50)
 STRIKE_WINDOW_S = 0.12
 # Strike-success acceptance thresholds (RacketTargetCommandCfg) — identical to Isaac's exact metric.
@@ -429,9 +443,10 @@ class RacketCommand:
         # uniform mode uses this, NOT a velocity-derived normal). Precomputed from the ref wrist quat.
         self.target_normal_per_clip = target_normal_per_clip
         # DIAGNOSTIC (eval-only, --eval-per-clip-vel-targets): optional per-clip racket target-velocity
-        # boxes. None -> use the single clip-independent training box (RACKET_VEL_*_RANGE) for both clips
-        # (the faithful baseline). When set, it is a list indexed by clip_id; each entry is
-        # (x_range, y_range, z_range). This ONLY changes which target velocity the MuJoCo RacketCommand
+        # boxes. None -> the training-default per-clip blade boxes (VEL_RANGE_PER_CLIP); the legacy
+        # shared box (RACKET_VEL_*_RANGE) applies only if that is ALSO None (--pos-z-range legacy mode).
+        # When set, it is a list indexed by clip_id; each entry is (x_range, y_range, z_range) and it
+        # overrides both defaults. This ONLY changes which target velocity the MuJoCo RacketCommand
         # samples at eval time — it does NOT touch the policy, ONNX, rewards, or any training code.
         self.vel_ranges_per_clip = vel_ranges_per_clip
         # Optional per-clip POSITION boxes ((x_range, y_range, z_range) per clip, SIGNED y used
@@ -453,15 +468,17 @@ class RacketCommand:
     def resample(self, clip_id):
         """New swing: sample racket target (pos/vel), base target, swing sign — matches uniform mode."""
         o = self.origin
-        if self.pos_ranges_per_clip is not None:
-            # Per-clip 3-D position box (training's racket_pos_range_per_clip parity): SIGNED y
-            # sampled directly from the clip's box; replaces the fixed-plane logic below.
-            px_r, py_r, pz_r = self.pos_ranges_per_clip[clip_id]
+        # racket target position (world). Precedence: explicit per-clip boxes from the CLI/scoreboard
+        # (--pos-range-per-clip / task-YAML auto-forward; training racket.pos_range_per_clip parity,
+        # SIGNED y) > module-default current-generation blade boxes (POS_RANGE_PER_CLIP; disabled via
+        # --pos-z-range) > legacy shared fixed-x-plane + |y|-per-clip-sign + z-range box.
+        pos_boxes = self.pos_ranges_per_clip if self.pos_ranges_per_clip is not None else POS_RANGE_PER_CLIP
+        if pos_boxes is not None:
+            px_r, py_r, pz_r = pos_boxes[min(clip_id, len(pos_boxes) - 1)]
             self.racket_target_pos_w = np.array([o[0] + self._u(*px_r),
                                                  o[1] + self._u(*py_r),
                                                  o[2] + self._u(*pz_r)])
         else:
-            # racket target position (world): fixed x-plane; |y| per clip sign; z range.
             px = o[0] + self._u(*RACKET_POS_X_RANGE)
             ymag = self._u(*RACKET_POS_Y_ABS_RANGE)
             fh_sign = -1.0 if FOREHAND_ON_NEGATIVE_Y else 1.0
@@ -469,10 +486,13 @@ class RacketCommand:
             py = o[1] + sign * ymag
             pz = o[2] + self._u(*RACKET_POS_Z_RANGE)
             self.racket_target_pos_w = np.array([px, py, pz])
-        # racket target velocity (world): independent box sample. Default = the single training box for
-        # every clip; with --eval-per-clip-vel-targets, use this clip's diagnostic box instead.
+        # racket target velocity (world): independent box sample. Precedence: explicit per-clip boxes
+        # (--vel-range-per-clip / task-YAML auto-forward, or --eval-per-clip-vel-targets diagnostic) >
+        # module-default per-clip blade boxes (VEL_RANGE_PER_CLIP) > the legacy shared box.
         if self.vel_ranges_per_clip is not None:
             vx_r, vy_r, vz_r = self.vel_ranges_per_clip[clip_id]
+        elif VEL_RANGE_PER_CLIP is not None:
+            vx_r, vy_r, vz_r = VEL_RANGE_PER_CLIP[min(clip_id, len(VEL_RANGE_PER_CLIP) - 1)]
         else:
             vx_r, vy_r, vz_r = RACKET_VEL_X_RANGE, RACKET_VEL_Y_RANGE, RACKET_VEL_Z_RANGE
         self.racket_target_vel_w = np.array([self._u(*vx_r),
@@ -884,7 +904,7 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
             csv_writer.writerow([
                 mode_label, step, time_step, clip, f"{racket.swing_sign:+.0f}",
                 f"{racket.time_to_strike:.4f}", f"{roll_d:.3f}", f"{pitch_d:.3f}",
-                f"{ra_pos[2]:.4f}", f"{refa_pos[2]:.4f}",
+                f"{ra_pos[0]:.4f}", f"{ra_pos[1]:.4f}", f"{ra_pos[2]:.4f}", f"{refa_pos[2]:.4f}",
                 f"{np.mean(np.abs(target_q)):.4f}", f"{np.max(np.abs(target_q)):.4f}",
                 f"{torque_max:.2f}", f"{foot_c:.2f}",
                 ("" if math.isnan(racket_err) else f"{racket_err:.4f}"),
@@ -1088,12 +1108,12 @@ def main():
                         "fall rate without the guard cutting episodes off mid-swing.")
     p.add_argument("--strike-phase-per-clip", nargs="+", type=float, default=None,
                    help="DIAGNOSTIC: override per-clip strike phase. Must match the trained model's "
-                        "strike_phase_per_clip. Default: the ONNX metadata clip_strike_phases when "
-                        "present, else the built-in legacy (0.36, 0.50); pass 0.36 0.74 for old "
-                        "model_32200-era backhand.")
+                        "strike_phase_per_clip. Default: ONNX metadata clip_strike_phases when present "
+                        "(all current exports incl. v2-blade 0.47/0.333), else the built-in legacy "
+                        "(0.36, 0.50); pass 0.36 0.74 for model_32200-era backhand. A wrong phase "
+                        "silently collapses strike metrics to ~0.")
     # Per-clip TARGET BOXES matching the trained task YAML (racket.pos_range_per_clip /
-    # vel_range_per_clip) — REQUIRED for in-distribution eval of blade-centered-box checkpoints;
-    # the built-in constants are the legacy fixed-plane distribution. 12 floats each:
+    # vel_range_per_clip). Explicit values here override the module-default blade boxes. 12 floats:
     #   fh_x_lo fh_x_hi fh_y_lo fh_y_hi fh_z_lo fh_z_hi bh_x_lo bh_x_hi bh_y_lo bh_y_hi bh_z_lo bh_z_hi
     p.add_argument("--pos-range-per-clip", nargs=12, type=float, default=None,
                    help="per-clip racket target POSITION boxes (see comment; matches training "
@@ -1102,7 +1122,9 @@ def main():
                    help="per-clip racket target VELOCITY boxes (compact alternative to "
                         "--eval-per-clip-vel-targets + six --fh/bh-vel-*-range args).")
     p.add_argument("--pos-z-range", nargs=2, type=float, default=None,
-                   help="DIAGNOSTIC: override the racket target z-range (e.g. 0.85 1.25). Default (0.70,1.05).")
+                   help="DIAGNOSTIC: override the LEGACY shared-box target z-range (e.g. 0.85 1.25). "
+                        "NOTE: this disables the default per-clip blade pos AND vel boxes entirely "
+                        "(full legacy shared-box generation in effect). Default: per-clip blade boxes.")
     # --- DEPLOY-FAITHFUL evaluation mode (default OFF; existing behavior byte-identical when off) --
     p.add_argument("--deploy-faithful", action="store_true",
                    help="evaluate with the DEPLOYED episode protocol (pp_policy.hpp single-swing/rest "
@@ -1125,17 +1147,25 @@ def main():
     args = p.parse_args()
 
     # Apply eval-only overrides to the module globals BEFORE any precompute/rollout reads them.
-    global STRIKE_PHASE_PER_CLIP, RACKET_POS_Z_RANGE, TERM_EE_POS_Z
+    global STRIKE_PHASE_PER_CLIP, RACKET_POS_Z_RANGE, TERM_EE_POS_Z, POS_RANGE_PER_CLIP, VEL_RANGE_PER_CLIP
     if args.strike_phase_per_clip is not None:
         STRIKE_PHASE_PER_CLIP = tuple(args.strike_phase_per_clip)
         print(f"[mj-sim2sim] OVERRIDE strike_phase_per_clip -> {STRIKE_PHASE_PER_CLIP} (eval-only)")
+    # A wrong phase silently zeroes the strike metrics, so always print the one in effect.
+    print(f"[mj-sim2sim] strike_phase_per_clip in effect: {STRIKE_PHASE_PER_CLIP} "
+          f"(must match the model's training YAML)")
     if args.ee_term_z is not None:
         TERM_EE_POS_Z = float(args.ee_term_z)
         print(f"[mj-sim2sim] OVERRIDE ee_body_pos termination z-threshold -> {TERM_EE_POS_Z} m "
               f"(training default 0.25; large value = deployment-realistic, no tracking-guard cutoff)")
     if args.pos_z_range is not None:
+        # The z override belongs to the LEGACY shared box, so drop back to it entirely — pos AND vel
+        # (a hybrid legacy-pos + per-clip-vel distribution matches no training generation).
         RACKET_POS_Z_RANGE = tuple(args.pos_z_range)
-        print(f"[mj-sim2sim] OVERRIDE pos_z_range -> {RACKET_POS_Z_RANGE} (eval-only)")
+        POS_RANGE_PER_CLIP = None
+        VEL_RANGE_PER_CLIP = None
+        print(f"[mj-sim2sim] OVERRIDE pos_z_range -> {RACKET_POS_Z_RANGE} (eval-only; per-clip pos AND "
+              f"vel boxes DISABLED, full legacy shared-box generation in effect)")
 
     step_dt = args.sim_dt * args.decimation
     assert abs(step_dt - 0.02) < 1e-9, f"control dt {step_dt} != 0.02 (50 Hz). adjust --sim-dt/--decimation"
@@ -1218,6 +1248,19 @@ def main():
     # Precompute the reference table (refs depend only on time_step) -> one ONNX call per frame, once.
     refs_table = [policy.refs(ts) for ts in range(T)]
 
+    # GROUNDING check (2026-07-03): this gate's target boxes (POS/VEL_RANGE_PER_CLIP) and the
+    # deploy runner's scripted targets assume clips RE-GROUNDED to face +X (frame-0 pelvis yaw ~0,
+    # scripts/reground_hope_frame.py). A raw clip (registry v4: yaw ~+82/+86 deg) trains a
+    # TURN-AND-WALK policy that can pass THIS gate (true poses fed to obs = oracle localization)
+    # yet fail on deploy under perfect_tracking, whose base obs cannot see the footwork.
+    for c in range(num_clips):
+        q0 = refs_table[int(seg_start[c])]["body_quat_w"][ROOT_TRACKED_IDX]
+        yaw0 = math.degrees(math.atan2(2.0 * (q0[0] * q0[3] + q0[1] * q0[2]),
+                                       1.0 - 2.0 * (q0[2] * q0[2] + q0[3] * q0[3])))
+        flag = ("  ** NOT RE-GROUNDED — turn-and-walk policy; a PASS here does NOT clear "
+                "perfect_tracking deploy (needs oracle/mocap) **" if abs(yaw0) > 10.0 else "")
+        print(f"[mj-sim2sim] clip {c} baked frame-0 pelvis yaw = {yaw0:+.1f} deg{flag}")
+
     # Per-clip TARGET paddle normal (unified uniform mode): the imitated swing's reference face normal
     # at its strike frame = local +Y of the reference wrist(=racket) frame at strike_step.
     target_normal_per_clip = []
@@ -1247,6 +1290,11 @@ def main():
               "policy/ONNX/rewards/training UNCHANGED)")
         print(f"[mj-sim2sim]   forehand vel box: x={fh[0]} y={fh[1]} z={fh[2]}")
         print(f"[mj-sim2sim]   backhand vel box: x={bh[0]} y={bh[1]} z={bh[2]}")
+    elif VEL_RANGE_PER_CLIP is not None:
+        print("[mj-sim2sim] target sampling: training-default PER-CLIP blade boxes (DeployParity "
+              "2026-07-02 re-plane)")
+        print(f"[mj-sim2sim]   forehand pos/vel: {POS_RANGE_PER_CLIP[0] if POS_RANGE_PER_CLIP else 'legacy shared'} / {VEL_RANGE_PER_CLIP[0]}")
+        print(f"[mj-sim2sim]   backhand pos/vel: {POS_RANGE_PER_CLIP[1] if POS_RANGE_PER_CLIP else 'legacy shared'} / {VEL_RANGE_PER_CLIP[1]}")
     else:
         print("[mj-sim2sim] per-clip eval velocity targets: DISABLED (baseline — both clips use the "
               f"training box x={RACKET_VEL_X_RANGE} y={RACKET_VEL_Y_RANGE} z={RACKET_VEL_Z_RANGE})")
@@ -1266,7 +1314,7 @@ def main():
     csv_f = open(csv_path, "w", newline="")
     cw = csv.writer(csv_f)
     cw.writerow(["mode", "step", "time_step", "clip", "swing_sign", "time_to_strike",
-                 "base_roll_deg", "base_pitch_deg", "torso_z", "ref_torso_z",
+                 "base_roll_deg", "base_pitch_deg", "torso_x", "torso_y", "torso_z", "ref_torso_z",
                  "target_q_mean_abs", "target_q_max_abs", "torque_max", "foot_contact_frac",
                  "racket_pos_err_strike", "racket_speed", "episode_len", "term_reason"])
 

@@ -125,6 +125,39 @@ def racket_progress(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     return cmd.racket_progress * cmd.pre_strike.float()
 
 
+def hold_ready(env: ManagerBasedRLEnv, command_name: str, std: float, reach: float = 0.65) -> torch.Tensor:
+    """POSITIVE ready-stance reward during the pre-swing HOLD (the between-swing recovery phase).
+
+    HITTER's balance recovery comes from a positive "prepare for the next target" signal (its pre-strike
+    base-position reward), not from balance penalties. In the base-free deploy-parity design the hold
+    phase (reference frozen at the next swing's first frame) already pulls the UPPER body to the ready
+    pose via imitation, but the legs/base get zero positive signal — only penalties. This term fills that
+    gap without a base-position target (deploy-honest: everything here is proprioceptive in spirit —
+    stillness + planted feet): ``exp(-(|v_base|^2 + |w_base|^2)/std^2) * feet_contact_frac``, gated to
+    the motion command's ``in_hold`` mask. Rewards arriving at the next windup calm, upright-by-stillness
+    and with both feet planted — i.e. finishing the previous swing in a recoverable state.
+
+    ``reach`` gate: stillness is only the CORRECT ready action when the new target is already within
+    arm's reach. Without the gate this term pays ~weight/step for planted stillness, which out-earns the
+    telescoping racket_progress for stepping during the hold — i.e. it would teach freeze-then-rush
+    exactly when the Phase 1-2 box widening needs footwork. Gated by
+    ``racket_target_distance < reach``: near targets -> stand ready; far targets -> the term is silent
+    and racket_progress drives stepping, untaxed. Zero outside the hold (the swing itself is untouched)
+    and a safe no-op if the motion command has no hold state. RewTerm weight is POSITIVE.
+    """
+    cmd = _cmd(env, command_name)
+    in_hold = getattr(cmd._motion(), "in_hold", None)
+    if in_hold is None:
+        return torch.zeros(cmd.num_envs, device=cmd.device)
+    data = cmd.robot.data
+    motion_sq = torch.sum(torch.square(data.root_lin_vel_w), dim=-1) + torch.sum(
+        torch.square(data.root_ang_vel_w), dim=-1
+    )
+    raw = torch.exp(-motion_sq / std**2) * cmd.feet_contact_frac
+    near = (cmd.racket_target_distance < reach).float()
+    return raw * near * in_hold.float()
+
+
 def racket_strike_success(
     env: ManagerBasedRLEnv, command_name: str, std_pos: float, std_vel: float, std_normal: float
 ) -> torch.Tensor:

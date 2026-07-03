@@ -100,6 +100,24 @@ class MotionCommand(CommandTerm):
         )
 
         self.motion = MotionLoader(self.cfg.motion_file, self.body_indexes, device=self.device)
+        # GROUNDING preflight (2026-07-03): the actor obs consumes the RAW clip-world anchor quat,
+        # and the racket-target boxes are planned in the +X-grounded frame — a clip that was never
+        # re-grounded (frame-0 anchor yaw far from 0, e.g. registry v4 at ~+84 deg) trains a
+        # TURN-AND-WALK policy whose footwork is undeployable without real base localization
+        # (the 2026-07-03 model_9000 backward-jump lesson). Warn loudly; do not silently train.
+        for _c in range(self.motion.num_segments):
+            _q0 = self.motion.body_quat_w[int(self.motion.seg_start[_c]), self.motion_anchor_body_index]
+            _w, _x, _y, _z = (float(_q0[0]), float(_q0[1]), float(_q0[2]), float(_q0[3]))
+            _yaw0 = math.degrees(math.atan2(2.0 * (_w * _z + _x * _y), 1.0 - 2.0 * (_y * _y + _z * _z)))
+            if abs(_yaw0) > 10.0:
+                print(
+                    f"[MotionCommand WARN] clip {_c} frame-0 anchor yaw = {_yaw0:+.1f} deg — this clip "
+                    "was NOT re-grounded to +X (scripts/reground_hope_frame.py). Target boxes assume "
+                    "+X grounding; training on it produces a turn-and-walk policy that needs "
+                    "oracle/mocap localization at deploy. Pin registry_name to the re-grounded "
+                    "lineage (hopex/v3) or re-ground and re-upload before training.",
+                    flush=True,
+                )
         self.time_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         # Unified multi-clip (HITTER forehand+backhand) support. With one clip these are inert and the
         # behaviour below is byte-identical to the single-clip path. clip_id[env] selects which segment

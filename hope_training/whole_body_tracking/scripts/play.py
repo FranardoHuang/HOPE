@@ -51,6 +51,12 @@ def _run_play(cfg, simulation_app):
     _apply_task_overrides(env_cfg, cfg.task, _registry_clip_name(cfg))
     env_cfg.sim.device = str(cfg.device)
 
+    # HER achieved-target replay is TRAIN-ONLY (export/replay must see the pure box distribution).
+    if hasattr(env_cfg.commands, "racket_target") and hasattr(
+        env_cfg.commands.racket_target, "achieved_target_mix_prob"
+    ):
+        env_cfg.commands.racket_target.achieved_target_mix_prob = 0.0
+
     agent_cfg = RslRlOnPolicyRunnerCfg(**runner_kwargs(OmegaConf.to_container(cfg.algo, resolve=True), str(cfg.task.experiment_name)))
     agent_cfg.device = str(cfg.device)
 
@@ -133,7 +139,11 @@ def _run_play(cfg, simulation_app):
     env = RslRlVecEnvWrapper(env)
 
     ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
-    ppo_runner.load(resume_path)
+    # Shape-tolerant load: pre-2026-07-03 checkpoints have the old (2-dim-wider) critic; export only
+    # needs the actor, so fall back to an actor-preserving partial load instead of dying.
+    from whole_body_tracking.utils.ckpt_compat import load_actor_tolerant
+
+    load_actor_tolerant(ppo_runner, resume_path)
     policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
 
     # export the policy to ONNX next to the checkpoint (step 15)

@@ -23,6 +23,10 @@ def main():
     md = sess.get_modelmeta().custom_metadata_map
     default_q = np.array([float(x) for x in md["default_joint_pos"].split(",")])
     scale = np.array([float(x) for x in md["action_scale"].split(",")])
+    # obs dim from the model itself (175 = deploy_parity, 180 = full) — a hardcoded 180
+    # made this script reject every deploy_parity model.
+    obs_dim = int(sess.get_inputs()[0].shape[-1])
+    print(f"[gen_python_ref] obs_dim={obs_dim} ({md.get('actor_obs_contract', 'unknown contract')})")
 
     def writevec(path, v):
         open(path, "w").write(" ".join(repr(float(x)) for x in np.asarray(v).reshape(-1)))
@@ -32,8 +36,8 @@ def main():
                 "time_step": np.array([[ts]], dtype=np.float32)}
         return sess.run(["actions"], feed)[0].reshape(-1).astype(np.float64)
 
-    cases = {"zeros": (np.zeros((1, 180)), 0),
-             "seed": (np.random.default_rng(12345).standard_normal((1, 180)), 3)}
+    cases = {"zeros": (np.zeros((1, obs_dim)), 0),
+             "seed": (np.random.default_rng(12345).standard_normal((1, obs_dim)), 3)}
     for name, (obs, ts) in cases.items():
         writevec(f"{outdir}/obs_{name}.txt", obs.astype(np.float32).astype(np.float64))
         act = run(obs.astype(np.float32), ts)

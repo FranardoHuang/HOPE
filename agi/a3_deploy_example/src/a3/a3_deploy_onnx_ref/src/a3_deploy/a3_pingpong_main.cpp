@@ -237,7 +237,7 @@ int main(int argc, char** argv) {
                  "       [--reference-playback|--mode reference-playback]"
                  " [--no-publish|--dry-run] [--warmup-sec S]\n"
                  "       [--loc-mode fabricated|perfect_tracking|oracle]"
-                 " [--perfect-tracking] [--oracle-pelvis] [--use-imu-yaw]\n"
+                 " [--perfect-tracking] [--oracle-pelvis] [--no-imu-yaw]\n"
                  "       [--oracle-shm PATH] [--oracle-max-age S]"
                  " [--trace-csv PATH] [--obs-csv PATH] [--shadow-frozen-clock]\n"
                  "       [--leg-gain-scale F] [--ankle-gain-scale F] [--motion-blend-sec S]"
@@ -350,11 +350,12 @@ int main(int argc, char** argv) {
   pcfg.swing_speed = swing_speed;
   pcfg.use_base_estimator = Has(argc, argv, "--base-estimator");  // leg-FK pelvis height (ground)
   pcfg.loc_mode = loc_mode;
-  // Opt-in to using the real (absolute) IMU yaw for the racket/base target
-  // transform. OFF by default: on hardware the pelvis IMU yaw is unreferenced
-  // (drifts boot-to-boot) and would rotate the scripted target. Only enable with
-  // a real world-yaw localizer. (No-op in sim where base yaw ~ 0.)
-  pcfg.use_imu_yaw_for_targets = Has(argc, argv, "--use-imu-yaw");
+  // DEFAULT ON since 2026-07-03: with yaw_align the base yaw is engage-relative (starts at
+  // identity, tracks the robot's REAL turning) — matching training's rotate-by-current-yaw
+  // target transform. Required for turning models (model_9000 turns ~84 deg by design).
+  // --no-imu-yaw reverts to the legacy identity-yaw transform (only sensible for a
+  // non-turning model, e.g. p4); --use-imu-yaw is still accepted (now a no-op).
+  pcfg.use_imu_yaw_for_targets = !Has(argc, argv, "--no-imu-yaw");
   // Scripted swing direction: default forehand; --backhand mirrors the target to
   // +y and selects the baked backhand clip. Toggle live with f/b. (No live planner.)
   pcfg.start_backhand = Has(argc, argv, "--backhand");

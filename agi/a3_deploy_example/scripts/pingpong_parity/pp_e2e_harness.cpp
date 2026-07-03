@@ -10,7 +10,7 @@ static void stats(const char* nm, const Eigen::VectorXd& v){
     nm, (long)v.size(), v.minCoeff(), v.maxCoeff(), v.mean(), v.norm(), (int)fin);
 }
 int main(int argc, char** argv){
-  std::string model = argc>1?argv[1]:"dist/a3_deploy_x86_64/models/model_15200.onnx";
+  std::string model = argc>1?argv[1]:"dist/a3_deploy_x86_64/models/model_9000_replane.onnx";
   PpPolicyConfig cfg; cfg.level = argc>2?atoi(argv[2]):1;
   cfg.loc_mode = LocMode::kPerfectTracking;
   PpPolicy pp(model, cfg);

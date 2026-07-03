@@ -6,18 +6,26 @@
 # (Previously this file lived only under dist/, which build_a3_deploy_pkg.sh wipes
 # on every build -> the runner asset was silently dropped. Keep it here in src.)
 onnx:
-  # Keep the SOURCE config valid inside the repo tree: from src/.../config this resolves to
-  # assets/a3_runtime/models/model_15200.onnx. During packaging, build_a3_deploy_pkg.sh copies
-  # the model into dist/.../models/ and rewrites the packaged runtime cfg to `models/...`.
-  # model_15200.onnx = old 180-D FULL policy. model_p4_deployparity.onnx = 175-D deploy_parity,
-  # ALL-IMPLICIT training (matches AGI official practice + real-robot actuation). The runner
+  # Keep the SOURCE config valid inside the repo tree: from src/.../config this resolves under
+  # assets/a3_runtime/models/. During packaging, build_a3_deploy_pkg.sh copies the model into
+  # dist/.../models/ and rewrites the packaged runtime cfg to `models/...`. The runner
   # auto-detects obs dim from the ONNX input and builds obs 175 vs 180 accordingly.
-  # 2026-07-02 A/B in AGI MuJoCo (the binding pre-hardware gate per AGI: "falls in MuJoCo =
-  # falls on the real robot"): p4 forehand = 10 clean cycles, |tilt|<=0.10, 0 guard trips;
-  # explicitpd_ft forehand also passes but its backhand falls on the FIRST swing (IdealPD@200Hz
-  # fine-tune regression) vs p4's 1-3 swings. BACKHAND IS NOT DEPLOY-READY on either model
-  # (training gap: teleport-entry, no stand-entry coverage) — deploy FOREHAND ONLY for now.
-  model_path: ../../../../assets/a3_runtime/models/model_p4_deployparity.onnx
+  #
+  # CURRENT: model_9000_replane.onnx (2026-07-03, run 2026-07-03_02-01-17 model_9000) —
+  # 175-D deploy_parity, all-implicit training, v4 clips (seg 139/132, strike phases
+  # 0.470/0.333 baked in metadata), audit-config (multi-swing + HER). Training-side
+  # deploy-faithful MuJoCo gate: 7/7 swings incl. BACKHAND 3/3, 0 falls (oracle base pose).
+  # ⚠ model_9000 is a WALK-AND-STRIKE policy (turns ~84 deg + steps 0.4-0.65 m to the target):
+  # its footwork is only observable with a real localization source. Validate in AGI MuJoCo
+  # with BOTH --loc-mode perfect_tracking (hardware-realistic) AND --oracle-pelvis before any
+  # hardware decision; if perfect_tracking degrades the strike, hardware needs mocap.
+  # PREVIOUS: model_p4_deployparity.onnx (forehand-only verdict, strikes in place — the safe
+  # hardware fallback; needs --no-imu-yaw to reproduce its validated legacy behavior).
+  model_path: ../../../../assets/a3_runtime/models/model_9000_replane.onnx
+  # The pingpong runner runs its ONNX on the CPU via the bundled onnxruntime — on rockchip too.
+  # no_rknn tells build_a3_deploy_pkg.sh NOT to auto-promote to the RKNN/NPU path (which would
+  # SystemExit on a missing <model>.rknn and block the standard rockchip staging).
+  backend: no_rknn
 
 policy_driver:
   policy_hz: 50.0

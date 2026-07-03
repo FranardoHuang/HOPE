@@ -29,9 +29,21 @@
 # Reward weights/kernel widths are NOT published by HITTER, so they stay as
 # reasonable HOPE choices (goal terms weighted relatively high, per the paper).
 #
-# STAGE NOTE: this is the single-swing-type (forehand) config. The unified
-# forehand+backhand policy (sampled swing type each swing, dual-clip imitation,
-# non-overlapping y regions) is Stage 2 and adds swing_type + a second clip.
+# STAGE NOTE (updated 2026-07-03): this IS the unified forehand+backhand config
+# (registry_name_2 = backhand; swing type resampled per swing, per-clip boxes).
+#
+# AUDIT ALIGNMENT (2026-07-03): two structural additions from the HITTER/SMASH/
+# Ace training-design audit, on top of the Phase-A multi-swing episode (10 s,
+# no-teleport wraps, per-wrap target+swing-type resample, pre-swing hold):
+#   * hold_ready reward — POSITIVE ready-stance signal for the legs/base during
+#     the between-swing hold (HITTER's recovery is a positive "prepare for the
+#     next target" signal, not penalties; ours previously covered only the
+#     upper body via imitation of the frozen windup frame).
+#   * achieved-target replay (racket.achieved_*) — on-policy HER: a fraction of
+#     next-swing targets are drawn from previously-ACHIEVED strike states, so
+#     the target distribution stops asking for points the taught swing never
+#     passes through (kills the "learn the swing AND fight the box" conflict
+#     without widening any box).
 # =============================================================================
 
 name: HOPEPingPongDeployParity
@@ -43,6 +55,14 @@ actor_obs_contract: deploy_parity
 # backhand (registry_name_2). MotionLoader concatenates them; clip_id selects which swing each env
 # imitates. Order must match racket.strike_phase_per_clip. Set registry_name_2: null for a single-swing
 # policy. (Override on the CLI with registry_name=... / registry_name_2=...)
+#
+# ⚠ GROUNDING (2026-07-03): registry :latest NOW = the RE-GROUNDED hopex lineage (frame-0 pelvis yaw
+# exactly 0; uploaded+verified via scripts/upload_hopex_0703.py / verify_registry_latest_0703.py) —
+# plain training picks it up automatically. HISTORY: the previous :latest was the RAW v4 clips
+# (yaw +82/+86 deg, never re-grounded); training on them produced the turn-and-walk model_9000 that
+# fell on deploy (perfect_tracking cannot see the footwork). If you ever re-upload clips, re-ground
+# FIRST (scripts/reground_hope_frame.py) — MotionCommand warns loudly at startup when a loaded clip's
+# frame-0 anchor yaw exceeds 10 deg, and upload_hopex_0703.py refuses to publish a raw clip.
 registry_name: ${oc.env:WANDB_REGISTRY_ORG,dongc_1-university-of-california-berkeley-org}/wandb-registry-motions/hope_forehand
 registry_name_2: ${oc.env:WANDB_REGISTRY_ORG,dongc_1-university-of-california-berkeley-org}/wandb-registry-motions/hope_backhand
 
@@ -127,12 +147,29 @@ rewards:
   # so the policy must STEP to face a lateral target instead of twisting the torso with planted feet.
   # Raise if the torso still twists (waist_twist_prestrike high / legs frozen); lower if it flattens the swing.
   prestrike_waist_twist_weight: -1.0
-  # SIM2REAL FINE-TUNE (2026-07-02) — the deploy target is AGI's EXPLICIT clipped-PD MuJoCo.
   # Torque-saturation penalty: mean over-limit fraction of the COMPUTED (pre-clip) effort over the arm +
-  # waist joints, so the swing stops demanding torque the explicit motor cannot deliver (elbow was ~6.7x
-  # its 24 Nm limit in the failing trace). Modest to protect the strike. RAISE if arm_torque_sat_frac
-  # stays high / the base still tips in MuJoCo; LOWER if strike_composite drops below ~0.9.
+  # waist joints. STALE CONTEXT NOTE (2026-07-03): this was added for the explicit clipped-PD deploy
+  # theory; Phase A reverted ALL actuator groups to ImplicitActuatorCfg (robots/agibot_a3.py), and
+  # implicit actuators do not fill computed_torque — so this term is likely INERT now (watch
+  # arm_torque_sat_frac: if it is exactly 0 all run, the term is a no-op). Kept harmless.
   arm_torque_saturation_weight: -0.5
+  # Between-swing recovery (2026-07-03 audit alignment): POSITIVE ready-stance reward during the
+  # pre-swing HOLD — exp(-(|v_base|^2+|w_base|^2)/std^2) * feet_contact_frac, gated to motion.in_hold
+  # AND to target-within-reach (racket_target_distance < hold_ready_reach). The reach gate keeps it from
+  # out-earning racket_progress on far targets (planted stillness would otherwise pay ~1.5/step for NOT
+  # stepping -> freeze-then-rush). The hold's imitation reward only covers the UPPER body (legs are
+  # decoupled in the base-free design); this gives the legs/base their first positive "finish the swing
+  # calm, planted, ready" signal.
+  # RAISE if post_strike_fall_rate stays high with good strikes; LOWER if the robot freezes mid-approach;
+  # keep hold_ready_reach roughly at comfortable arm reach (shrink it when the Phase 1-2 boxes widen if
+  # the robot still refuses to step).
+  hold_ready_weight: 2.0
+  # std RETUNED 0.5 -> 1.5 (2026-07-03): the 2026-07-03_02-01-17 run showed hold_ready ~inert
+  # (Episode_Reward ~0.013/s, ~1/100 of expected) because real base |omega| during the hold is
+  # ~1.2 rad/s -> exp(-1.5/0.25) ~ 0.002 dead kernel. 1.5 brackets the operating band
+  # (exp(-2/2.25) ~ 0.41, live gradient) — same lesson as the racket velocity std saga.
+  hold_ready_std: 1.5
+  hold_ready_reach: 0.65
   # Pre-strike upright shaping (POSITION-based tilt, NOT ang-vel): keep the CoM over the support base
   # THROUGH the approach (strike_upright already covers the strike window). RAISE if the base pitches
   # forward during the wind-up; LOWER if it stiffens the swing.
@@ -181,6 +218,27 @@ racket:
 
   # HITTER target sampling: uniform, directly sampled, NO reference-perturb curriculum.
   target_mode: uniform
+
+  # ---- HER-style achieved-target replay (2026-07-03 audit alignment) -------------------------
+  # On-policy hindsight relabeling (Ace/HER, forward-looking): with prob achieved_target_mix_prob the
+  # next swing's target (pos+vel) is a jittered PREVIOUSLY-ACHIEVED strike state from that clip's ring
+  # buffer (filled at exact-strike frames of alive envs) instead of a fresh box sample. Replayed targets
+  # are reachable-by-demonstration, clamped into the per-clip box inflated by achieved_clamp_inflate so
+  # the distribution can neither collapse onto current behaviour nor leave the training workspace.
+  # DEPLOY SYNC WARNING (2026-07-03): the deploy-side target clips (pp_policy.hpp racket_pos/vel_w_clip,
+  # hope_planner imitate_presets SafetyLimits) are NOT in sync with the boxes below — they still encode
+  # the pre-re-plane lineage (x<=0.50 vs our x>=0.56). They MUST be re-synced before deploying any model
+  # trained on this config, or planner targets will sit 6-28 cm outside the training support. The target
+  # NORMAL stays the per-clip reference normal on both paths. Watch: achieved_replay_frac (should sit
+  # near the mix prob once achieved_buffer_fill_* passes achieved_min_fill). Set mix prob 0.0 to disable
+  # (pure HITTER box sampling). Raise toward 0.5 if strike_pos_pass stalls with the box targets;
+  # lower if the target distribution gets too narrow (racket_target_speed_at_strike variance shrinking).
+  achieved_target_mix_prob: 0.30
+  achieved_buffer_size: 4096
+  achieved_min_fill: 256
+  achieved_jitter_pos: 0.03    # m, per-axis uniform jitter on a replayed position
+  achieved_jitter_vel: 0.15    # m/s, per-axis uniform jitter on a replayed velocity
+  achieved_clamp_inflate: 0.20 # clamp replay into the per-clip box inflated by 20%
 
   # ====================== FOOTWORK CURRICULUM (base-free) ======================================
   # Train in PHASES, widening the racket-target range so the dense racket_progress reward forces more
@@ -257,12 +315,12 @@ racket:
 # restitution 0-0.5), torso CoM jitter, joint-default-pos jitter, + link-mass below. External push is
 # dropped (HOPEEventCfg.push_robot=None).
 #
-# SIM2REAL FINE-TUNE (2026-07-02): the deploy target is AGI's EXPLICIT clipped-PD MuJoCo, which does NOT
-# perfectly match the sim PD. ENABLE PD-gain randomization at +/-15% so the fine-tuned policy is robust to
-# the sim<->deploy PD mismatch (departs from HITTER's fixed-PD stance ON PURPOSE, for transfer). NOTE:
-# randomize_actuator_gains writes actuator.stiffness/damping on the model itself for ALL actuator types,
-# and the IdealPDActuator (explicit) reads those in its compute() -> the perturbation IS applied to the
-# explicit arms/waist/feet (NOT a PhysX-only no-op). Link mass widened back to the base +/-15%.
+# SIM2REAL FINE-TUNE (2026-07-02): PD-gain randomization at +/-15% keeps the policy robust to the
+# sim<->deploy PD mismatch (departs from HITTER's fixed-PD stance ON PURPOSE, for transfer).
+# CONTEXT UPDATE (2026-07-03): Phase A reverted ALL actuator groups to ImplicitActuatorCfg
+# (robots/agibot_a3.py — AGI's real backend behaves like implicit PD), so the old rationale text about
+# IdealPDActuator/explicit clipped-PD is stale; randomize_actuator_gains still applies to implicit
+# actuators (PhysX drive gains), so the randomization itself remains live. Link mass +/-15%.
 domain_rand:
   link_mass_range: [0.85, 1.15]   # +/-15%
   pd_gain_range: [0.85, 1.15]     # +/-15% (was null); perturbs the explicit IdealPDActuator gains

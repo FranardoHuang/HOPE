@@ -1656,6 +1656,13 @@ Verification gate:
 
 ## 9. Acquire Human Swing Motions
 
+> **Note for agents:** You do **not** need to record or process a new video to proceed.
+> The latest retargeted motion files (`forehand_swing` and `backhand_swing`) are already
+> published to the W&B artifact registry and are automatically fetched by Step 12 (csv_to_npz)
+> and Step 14 (train). Simply use the latest version from the registry — it is maintained and
+> updated by **dongc1**. Only follow the GVHMR pipeline below if you are processing a brand-new
+> swing video that has not yet been uploaded to the registry.
+
 ### 9.0 New-Video Pipeline: Step 9 -> Step 11
 
 For the current repo, the simplest way to process a newly recorded clip is:

@@ -12,7 +12,7 @@
 # python3). Run from the a3_deploy_example repo root, or pass MODEL/PYBIN.
 set -euo pipefail
 cd "$(dirname "$0")/../.."                    # -> a3_deploy_example root
-MODEL="${MODEL:-assets/a3_runtime/models/model_15200.onnx}"
+MODEL="${MODEL:-assets/a3_runtime/models/model_9000_replane.onnx}"
 PYBIN="${PYBIN:-python3}"
 ORT="thirdparty/onnxruntime/onnxruntime-linux-x64-1.19.2"
 INC=(-Isrc/a3/a3_deploy_onnx_ref/include -I/usr/include/eigen3 -I"$ORT/include")

@@ -695,9 +695,16 @@ onnx_mode_norm = onnx_mode.strip().lower().replace("-", "_")
 encoder_decoder_mode = onnx_mode_norm in ("encoder_decoder", "encoderdecoder", "split")
 onnx_backend_norm = str(onnx_cfg.get("backend") or "ort_cpu").strip().lower().replace("-", "_")
 explicit_rknn_backend = onnx_backend_norm in ("rknn", "rk_npu", "rockchip_npu")
+# Explicit RKNN opt-out (2026-07-03): the pingpong runner executes its ONNX with the bundled
+# onnxruntime on the MDU CPU — it has no RKNN path, so the rockchip auto-RKNN promotion below
+# used to SystemExit on the (nonexistent) <model>.rknn and block the standard rockchip staging
+# for pingpong configs. `onnx.backend: no_rknn` in the runtime cfg bypasses the promotion; the
+# AGI-native configs (backend unset) keep the auto-RKNN behavior unchanged.
+explicit_no_rknn = onnx_backend_norm in ("no_rknn", "ort_cpu_only", "cpu_only")
 rockchip_auto_rknn_backend = (
     arch == "rockchip"
     and not encoder_decoder_mode
+    and not explicit_no_rknn
     and onnx_backend_norm in ("", "auto", "ort_cpu", "cpu", "ort", "onnxruntime", "onnxruntime_cpu")
 )
 rknn_backend = explicit_rknn_backend or rockchip_auto_rknn_backend
