@@ -81,6 +81,26 @@ Parallel tracks (no GPU conflict):
   ready-stance clip stay on the longer-horizon list (P2.0/A5 in G08), not on Saturday's path.
 - simtoreal2 → main merge + doc updates (claude, in progress).
 
+## Roadmap Scorecard (你的 5 项 + 审计 8 项,完成度 2026-07-03 傍晚)
+
+| 项 | 完成度 | 状态一句话 |
+| --- | --- | --- |
+| P2.1 连续挥拍不倒 | ~80% | 结构在 main 默认开;14k 长跑今晚终审;差成熟版过门禁+真机验证 |
+| P2.2 视频朝向归一 | ~70% | jiayi 的 re-ground 管线已产出 0703 clips(训练在用);批量化等 A5 新视频 |
+| P2.3 目标-老师一致 | ~60% | 自适应σ(+48%)与 HER 均已合并;SMASH 式动作库检索等 A5 数据 |
+| P2.4 移动激进/准备动作 | ~30% | hold 机制+hold_ready 已在;PACE 减速命令、base-target 回归 ablation、ready pose 数据未做 |
+| P2.5 物理建模 | ~25% | 球轨迹今天在采(yikang);spin 物理代码已在 main;球进训练环境+落点奖励=下周主菜 |
+| P2.6 smash | 0% | 依赖 P2.5 + 专用挥拍数据,长线 |
+| A1 延迟/目标时变 | ~70% | 机制实现+验证+合并;数值待 mocap 标定;今晚信号档 A/B |
+| A2 坐标变换归属 | ~10% | 已立项归 yikang,设计未写(mocap 桥前必须) |
+| A3 执行器辨识 | 0% | 需真机时段;PD 保真一轮已完成算前置 |
+| A4 评估基建+数据飞轮 | ~60% | 四协议记分板完成;真机全量落盘制度+击球自动检测(A7)未做 |
+| A5 30-50 新视频 | 0%(主动推迟) | 周六不需要;排长线,与 P2.0 ready pose 同一次拍摄 |
+| A6 摔倒管理 | ~20% | 绝对终止已在;guard 包络分析、recover 行为未做 |
+| A8 post-swing 起手 | ~80% | 实现+验证+合并;单独中性,三合一里今晚终审 |
+
+不在"今晚测试清单"里的原因:那张表只排**今晚要占 GPU 的事**;其余项各有明确的阻塞物(等数据/等真机/下周工程),都落在 Gap List 和 G08 里。本记分卡此后每天傍晚更新一次。
+
 ## Gap List To Sunday (明确缺的活,截止周日 — added 2026-07-03)
 
 | # | 缺什么 | 谁 | 何时 |
