@@ -301,9 +301,11 @@ Raw verdicts: `<venue data>/analysis/forensics/`.
 Team questions answered by simulation ON the shipped constants (deterministic sweeps +
 MC with the forensics noise model of §9.3; adversarially code-reviewed). These are
 model-derived numbers, not new measurements — the model itself is only validated
-inside the §6 envelope. Two runnable-on-real-data tools were shipped alongside:
-`predict_check.py --full-state` and `falsify/f10_paddle_split.py` (§8 / pipeline
-README) — **neither has run on the venue data yet** (data lives on yikang's Mac).
+inside the §6 envelope. Three runnable-on-real-data tools were shipped alongside:
+`predict_check.py --full-state`, `falsify/f10_paddle_split.py`, and
+`flight_selfcheck.py` (§8 / pipeline README). **All three have now run on the venue
+data** (copied 2026-07-03 late to the RunPod at `/workspace/yikang/latest_data`;
+set `BALLFIT_DATA_ROOT` there) — real-data results folded into items 4–6 below.
 
 1. **Spin (旋转影响)** — tiered. At the venue-median 2 rev/s, ignoring Magnus moves the
    landing only ~31 mm (14–58) — under the noise floor; the spin-blind deployed planner
@@ -334,25 +336,66 @@ README) — **neither has run on the venue data yet** (data lives on yikang's Ma
    the true net-crossing 42–84 mm lower than the planner's drag-only check — more than
    its 30 mm margin. Do NOT add net-contact physics (zero data); add clearance
    diagnostics/flags and raise the return margin to ≥0.10 m until Magnus is in.
-4. **Face/paddle splits (正反面/拍位/双拍)** — not yet measurable here (needs the Mac
-   run of `falsify/f10_paddle_split.py`; smoke-verified to recover a planted 10% face
-   difference at the real-data noise level). Sensitivity ruler from the shipped model,
-   robot-return geometry (u_n 5.1–9.7 m/s — note upper half EXCEEDS the fitted u_n
-   envelope 1.4–7.2): a face Δe of 0.02 → 39 mm return-landing shift (ignorable);
-   0.05 → ~98 mm (42–146) + net-clearance +15 mm (matters: same order as the paddle
-   e-calibration optimum, flips some returns off-table); 0.10 → ~195 mm (planner must
-   go per-face). Δa_t 0.05/0.10 → 22/43 mm (second-order). Detection floor of F10 on
-   n≈82 strikes is ~Δe 0.05 — conveniently, what is detectable is what matters.
-   **The robot will play with the SAME racket as the venue-capture paddles (team info
-   2026-07-03), so if F10 finds a face split ≥0.05 the planner's outgoing solve must
-   consume per-face constants (and know which face it strikes with).**
-5. **Full-state prediction (不能只预测落点)** — the flight model already integrates
-   (p, v, ω); landing-only was just the scoring choice. `--full-state` scores position
-   vs horizon, velocity + spin at arc checkpoints, and the net-plane crossing state, for
-   H0/H1/H1q (H1q = spin from the first 100 ms of flight quats — the deploy-realistic
-   spin source, since the at-strike quat spin channel reads ~0.22×). Expectations from
-   existing evidence: velocity along the arc good (H2 mm-level, bounce speed 2.32%);
-   spin is the honest wall — ω assumed constant in flight (F7 decay 12%/flight,
-   borderline), spin TRANSFER at strikes unvalidated, measurement floor ~2 rev/s.
-   Deploy gap to close when wiring: state estimator has no spin channel, predictor has
-   no Magnus/spin and returns a single hitting-plane point instead of a trajectory.
+4. **Face/paddle splits (正反面/拍位/双拍)** — F10 RAN on the venue data (n_used=145,
+   face identity from the raw npz body-normal channel — `pad_n` in strikes.json is
+   flipped toward approach and cannot carry face identity). Results:
+   **(a) The two paddles ARE different (DIFFERENT verdict, slope form)**: p1
+   e(u_n)=0.682·exp(−0.0093·u_n) (nearly flat) vs p2 0.975·exp(−0.1093·u_n) (steep);
+   Δg2 = +0.100, bootstrap CI [0.015, 0.201] excludes 0; implied Δe ≈ 0.073 over the
+   common u_n band. At u_n=7 m/s the spread is large: p1 0.64 / shipped-pooled 0.56 /
+   p2 0.45. Caveat: paddle is partially confounded with stroke type (p1 dominates the
+   juggling takes: 63/100 of its strikes) — but F4's within-take evidence pointed the
+   same way. **Action: identify WHICH physical paddle the robot plays with
+   (b_PPP1 vs b_PPP2) and use that paddle's e(u_n) in the planner, not the pooled
+   curve** (±0.09 e at fast strikes ≈ ±0.15–0.2 m of return landing per the ruler
+   below). (b) **Face split: UNDERPOWERED, not settled** — p1 hit 93/7 with one face
+   (unmeasurable); p2: Δe(n+ − n−) = +0.054 point estimate — exactly at the
+   "it matters" threshold — but MW p=0.145, CI [−0.018, +0.119] spans 0 at n=19/26.
+   Needs a dedicated capture: ≥50 strikes per face with the ROBOT's racket, and a
+   bench note pairing the mocap n+/n− label to rubber color. (c) Blade position: no
+   detectable e trend vs contact offset (Theil-Sen −0.33/m, perm p=0.30). Sensitivity
+   ruler (shipped model, robot-return geometry, u_n 5.1–9.7 — upper half EXCEEDS the
+   fitted envelope): face Δe 0.02 → 39 mm return-landing shift (ignorable); 0.05 →
+   ~98 mm + net-clearance +15 mm (matters); 0.10 → ~195 mm (planner must go per-face).
+   Δa_t 0.05/0.10 → 22/43 mm (second-order). The robot plays with the SAME racket as
+   the venue-capture paddles (team info 2026-07-03), so these splits feed the planner
+   directly.
+5. **Full-state prediction (不能只预测落点)** — `--full-state` RAN on the venue data
+   (n=82 strikes, 7/4/3 rows envelope-flagged for H0/H1/H1q). Real numbers:
+   **position along the arc (3D median per horizon bin, H1 = measured out-state):
+   19 / 21 / 31 / 47 / 74 mm at 0–100 / 100–200 / 200–300 / 300–450 / >450 ms**
+   (planar 14→54 mm) — the flight model tracks the whole trajectory, not just the
+   landing. H0 (through paddle model): 48→269 mm — paddle error dominates from the
+   first bin. **Velocity along the arc: H1 |Δv| 0.24–0.27 m/s, direction 3.1–3.4°**
+   (≈ the window-fit measurement floor 0.2 m/s seen on synthetic) vs H0 0.65–0.83 m/s,
+   6–13.5° (the paddle tangential form error, matching §9.2's 0.68 m/s). **Spin: H1
+   vector error 11–16 rad/s ≈ the 12.6 rad/s (2 rev/s) quat noise floor** — spin
+   prediction cannot be graded better than the sensor here; H0 spin transfer is worse
+   (22–25 rad/s, axis error 38–48°) and remains unvalidated. Net-plane crossing (H1):
+   dz median −0.6 mm but p90 49 mm — confirms the §10.3 σ_z story. **H1q ≈ H1
+   everywhere** → sourcing spin from the first 100 ms of flight quats (the only option
+   in matches) costs nothing measurable. Deploy gap to close when wiring: state
+   estimator has no spin channel, predictor has no Magnus/spin and returns a single
+   hitting-plane point instead of a trajectory.
+6. **Front-predicts-back / back-predicts-front (前推后/后推前, variance or bias?)** —
+   NEW `flight_selfcheck.py`, ran on 192 gap-free ballistic arcs ≥0.35 s (100 ms
+   windows both ends; matched-geometry MC noise floor; smoke-validated on synthetic
+   zero-model-error data where observed ≈ floor). Real data:
+
+   | horizon | n | FWD med/p90 | noise floor | BWD med/p90 | floor | excess (model-form) |
+   | --- | --- | --- | --- | --- | --- | --- |
+   | 0.25–0.35 s | 82 | 55.5 / 106 mm | 36.5 | 55.2 / 100 mm | 43.0 | 41.8 mm |
+   | 0.35–0.50 s | 92 | 64.0 / 116 mm | 44.8 | 78.7 / 127 mm | 60.9 | 45.8 mm |
+   | 0.50–2.0 s | 18 | 84.7 / 159 mm | 57.3 | 108 / 180 mm | 78.5 | 62.4 mm |
+
+   Answer: the disagreement is **~half variance, half bias, in quadrature** — the
+   noise floor explains 36–57 mm and a model-form excess of **42–62 mm** remains,
+   growing with horizon; this independently reproduces the §9.3 noise-floor-MC
+   estimate (45–66 mm @0.4 s) by a completely different method. So "误差大" is NOT
+   simply large variance: the variance half shrinks with longer windows/better
+   observers, the bias half (wrong per-arc k_d/k_m, spin decay, unmodeled aero) does
+   not average away. Backward error exceeds forward (ratio 1.11 median) but LESS than
+   the noise floor's own drag asymmetry (1.18–1.36 expected from e^{±k_d|v|T}) — no
+   evidence of direction-dependent model bias. Caveat: the heavy-topspin takes
+   contribute few arcs (shangxuan 0, xiaxuan 3 — short/gappy tracks), so the check
+   under-covers exactly the high-spin regime.

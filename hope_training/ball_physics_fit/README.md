@@ -14,7 +14,10 @@ Deliverables produced by this pipeline live at:
 ## Data layout
 
 Point `BALLFIT_DATA_ROOT` at the venue recording folder (default: yikang's Mac,
-`~/Desktop/Hope/Record/latest`). Expected tree:
+`~/Desktop/Hope/Record/latest`; a copy — extracted npz + segments + analysis
+artifacts — lives on the RunPod at `/workspace/yikang/latest_data` since
+2026-07-03; the `.tak` files there are raw Avatar projects the pipeline never
+reads). Expected tree:
 
 ```
 $BALLFIT_DATA_ROOT/
@@ -61,7 +64,13 @@ python falsify/f10_paddle_split.py    # per-paddle / per-face / blade-position s
                                       # contact model (answers 正反面/拍位/双拍 questions; needs
                                       # extracted npz for face identity — pad_n in strikes.json is
                                       # flipped toward approach, so face comes from the raw body
-                                      # normal channel). NOT yet run on the venue data.
+                                      # normal channel). Venue verdicts: paddles DIFFERENT (p2's
+                                      # e falls much faster with u_n), face/blade UNDERPOWERED.
+python flight_selfcheck.py --yaml ../../configs/ball_physics_venue.yaml
+                                      # front-window -> back-window (and reverse) self-consistency
+                                      # on ballistic arcs + matched MC noise floor: decomposes
+                                      # prediction error into variance (noise) vs model-form bias.
+                                      # Venue: ~half/half in quadrature; excess 42-62 mm.
 python test_oracle_present.py # loud-fail oracle check (never skips)
 ```
 
