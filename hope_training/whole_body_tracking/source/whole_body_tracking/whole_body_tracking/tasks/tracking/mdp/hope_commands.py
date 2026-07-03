@@ -1336,9 +1336,15 @@ class RacketTargetCommand(CommandTerm):
         )
 
         # Achieved-state contact (venue paddle model, e(u_n)) + coarse landing rollout.
+        # The rollout must start in the ENV-LOCAL frame: the virtual table landmarks
+        # (vb_table_near_x / net / far end) and vb_target_xy are per-env offsets from the env
+        # origin, while racket_pos_w is TRUE world frame (env grids span tens of meters at 4096
+        # envs — using it raw put every landing ~|env_origin| away from the target; caught in the
+        # first vb_warmE14k run: virtual_land_err_m ~62 m). Env grids are pure translations, so
+        # velocities, normals, and spins need no correction.
         v_plus, w_plus = _vb.predict_paddle_contact(v_in, v_r, n_face, w_in, prm)
         land = _vb.coarse_landing(
-            self.racket_pos_w,
+            self.racket_pos_w - self._env.scene.env_origins,
             v_plus,
             w_plus,
             prm,
