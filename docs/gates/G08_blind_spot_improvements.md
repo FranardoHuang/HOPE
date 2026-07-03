@@ -14,6 +14,28 @@ are the evidence base: HITTER (`2508.21043`), PACE (`2509.21690`, the TTRL-ICRA2
 ## Phase 2 Performance Roadmap (team, 2026-07)
 
 Each item lists the failure being targeted and the paper-backed mechanism to try first.
+Priority (franco, 2026-07-03): **P2.3, A8, P2.1 first** (with P2.0 as their shared foundation);
+active assignments live in [../NOW.md](../NOW.md).
+
+### P2.0 Ready-pose definition (foundation for P2.1/P2.4/backhand stand-entry)
+
+Missing piece surfaced 2026-07-03: the whole plan assumes a defined 准备动作/ready stance, but none
+exists. Today "ready" is implicitly one of two wrong things: the pre-swing hold freezes the
+reference at the CLIP'S FIRST FRAME (whatever skewed stance the source video started with — the
+P2.2 problem), and `stand_start` initializes from `default_joint_pos` (a neutral robot stand, not
+a table-tennis athletic stance). Everything downstream needs the real anchor:
+
+- P2.1 recovery must know what to recover TO;
+- P2.4 stitching is "ready → strike → ready" by definition;
+- backhand stand-entry and the deploy idle pose are the same stance;
+- PACE anchors its residual action space to a nominal ready pose (hand raised); SMASH's clips all
+  pass through prep/recovery phases; Ace learns a prepare policy per next-shot (far-term).
+
+Plan (v0 needs a source decision — franco): (a) record one short ready-stance video through the
+existing GVHMR→GMR pipeline (cheapest, consistent), (b) handcraft the joint pose, or (c) average
+the orientation-normalized clip start frames. Then wire it in three places: the `stand_start`
+branch initializes to READY (not default stand), the pre-swing hold holds READY (not clip frame
+0), and the clips are re-processed to enter/exit through ready (P2.2-lite pass).
 
 ### P2.1 Balance across consecutive swings
 
