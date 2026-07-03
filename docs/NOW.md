@@ -12,7 +12,8 @@ Rules:
    twice (no-teleport wrap: `3eba347` on main vs the `rsi-on-wrap-progress-fix` branch).
 2. One row per active item; move finished rows to the Done section with a date, and put the
    substance into PROGRESS.md / the gate doc.
-3. Franco arbitrates priority; anyone can edit their own row.
+3. Priority ordering is maintained by claude (franco's agent) and discussed with franco; anyone can
+   edit their own row.
 
 ## Team
 
@@ -30,7 +31,7 @@ Rules:
 | P2.1 A/B: no-teleport+stand-start vs teleport-era (2000 it, seed 1) | ★★★ | claude | `p2-multiswing` | RUNNING on pod GPU1/GPU2 (started 2026-07-03); next: scoreboard both arms, post curves here |
 | P2.3: target-reference consistency — adaptive tracking sigma (SMASH) + sampling audit | ★★★ | claude | `p2-target-consistency` (to open) | design mapping in progress; next: implement sigma curriculum, A/B vs fixed std |
 | A8: post-swing initial-state buffer (Ace recipe, third reset branch) | ★★★ | claude | `p2-multiswing` (follow-up commit) | implementation mapped; next: code + mechanics check |
-| P2.0: ready-pose definition (see G08) | ★★ (foundation) | **unassigned — needs franco's source decision** | — | decide source: record a ready-stance video vs handcraft joint pose vs average of clip start frames; then re-process clips to start/end at ready |
+| P2.0: ready-pose definition (see G08) | ★★ (foundation) | franco (拍摄) + claude (pipeline) | — | DECIDED 2026-07-03: option (a) — record a ready-stance video through GVHMR→GMR on the next site visit (bundle with A5's 30-50 new swing clips); claude processes + wires into stand_start/hold/clip re-entry |
 | Legacy-task long run `merged_uniform_hopex` (20000 it, task=HOPEPingPong on own branch) | ? | yikang | `rsi-on-wrap-progress-fix` | RUNNING on pod GPU0. ⚠ branch duplicates main's wrap_teleport machinery and has LFS-pointerized CSVs — reconcile with main before merging; the unique progress-fix is already ported to `p2-multiswing` |
 | Reward tuning (current focus unknown — jiayi please claim/describe) | ? | jiayi | ? | — |
 | G07 mocap→runner bridge + world→robot target transform design (A2) | ★★ | unassigned (natural fit: yikang) | — | design doc first; see G07 Next Steps and G08 audit item 2 |
