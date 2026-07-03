@@ -148,21 +148,28 @@ def racket_strike_success(
 # verification (verify_tier1-reward-soundness.md (c)):
 #   1. the in-bounds bonus requires landing depth > net_x + vb_min_landing_depth (dink guard),
 #   2. the capture gate requires a minimum paddle approach speed (phantom-block guard, in _vb_evaluate),
-#   3. pass_net pays ONLY for shots that also land legally (net-without-landing guard).
+#   3. the pass_net CLEAR BONUS pays only for shots that also land legally (net-without-landing
+#      guard); its height KERNEL is deliberately ungated shaping — see virtual_pass_net docstring.
 # ============================================================================================== #
 def virtual_pass_net(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
-    """Net-clearance shaping at the virtual net crossing, paid only for legally-landing shots.
+    """Net-height shaping at the virtual net-plane crossing + fully-gated clear bonus.
 
-    Port of v0 ``pass_net_margin``: Gaussian on (net-crossing height - (net_top + margin)) plus a
-    0.5 clear bonus — but BOTH gated on a valid in-bounds opponent-half landing, so blasting long /
-    out / over-horizon lobs collect nothing (verify (c)4). RewTerm weight POSITIVE.
+    The Gaussian kernel on (net-crossing height - (net_top + margin)) pays for ANY shot that
+    reaches the net plane inside the rollout horizon (v0 ``pass_net_margin`` semantics): it is the
+    CLIMB gradient that teaches a flat-hitting policy to angle shots upward. Gating it on a legal
+    landing (this term's original verify (c)4 reading) starved training completely — the E-champion
+    warm-start crosses the net legally on only ~0.2% of strikes, so 2.5k iterations of vb_warmE14k3
+    paid exactly zero virtual reward (2026-07-03 incident). The farming surface is bounded: the
+    kernel requires an actual net-plane crossing, maxes only at the correct height, and is worth at
+    most 1/swing; anti-farming gates stay in full on the +0.5 clear bonus here and on the
+    landing/spin terms. RewTerm weight POSITIVE.
     """
     cmd = _cmd(env, command_name)
     target_z = cmd._vb_net_top_z + float(cmd.cfg.vb_net_margin)
     err = cmd.vb_net_z - target_z
     kernel = torch.exp(-(err**2) / float(cmd.cfg.vb_net_sigma) ** 2)
     legal = cmd.vb_net_clear & cmd.vb_landing_valid & cmd.vb_on_opponent
-    raw = (kernel + 0.5 * cmd.vb_net_clear.float()) * legal.float()
+    raw = kernel * cmd.vb_net_crossed.float() + 0.5 * legal.float()
     return raw * cmd.vb_fired.float()
 
 

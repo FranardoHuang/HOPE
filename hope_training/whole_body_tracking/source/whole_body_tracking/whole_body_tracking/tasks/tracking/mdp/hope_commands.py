@@ -126,6 +126,7 @@ class RacketTargetCommand(CommandTerm):
         self.vb_depth_ok = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.vb_net_z = torch.zeros(self.num_envs, device=self.device)
         self.vb_net_clear = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.vb_net_crossed = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.vb_topspin = torch.zeros(self.num_envs, device=self.device)
         self._vb_params = None  # lazy venue-yaml load on first evaluation
         # Derived table landmarks (env frame), from geometry.py ITTF constants.
@@ -1110,6 +1111,7 @@ class RacketTargetCommand(CommandTerm):
         self.vb_depth_ok = depth_ok
         self.vb_net_z = land["net_z"]
         self.vb_net_clear = net_clear
+        self.vb_net_crossed = land["net_valid"]
         self.vb_topspin = topspin
 
         # Sample-weighted EMA rates (hit rate over exact-strike samples; outcome rates over captured
