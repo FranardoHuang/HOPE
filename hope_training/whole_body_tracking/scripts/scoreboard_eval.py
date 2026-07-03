@@ -149,6 +149,9 @@ def run_protocol(args, protocol: str, out_dir: pathlib.Path) -> dict:
         cmd += ["--strike-phase-per-clip", *[str(p) for p in args.strike_phase_per_clip]]
     if args.ee_term_z is not None:
         cmd += ["--ee-term-z", str(args.ee_term_z)]
+    for flag, vals in (("--pos-range-per-clip", args._pos_box12), ("--vel-range-per-clip", args._vel_box12)):
+        if vals:
+            cmd += [flag, *[str(v) for v in vals]]
 
     print(f"[scoreboard] {protocol}: {' '.join(cmd)}", flush=True)
     proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -176,6 +179,13 @@ def main() -> int:
     p.add_argument("--strike-phase-per-clip", nargs="+", type=float, default=None,
                    help="only for legacy ONNX without clip_strike_phases metadata")
     p.add_argument("--ee-term-z", type=float, default=None)
+    p.add_argument("--task-yaml", type=pathlib.Path,
+                   default=WBT / "cfg" / "task" / "HOPEPingPongDeployParity.yaml",
+                   help="task YAML whose racket.pos_range_per_clip / vel_range_per_clip define the "
+                        "IN-DISTRIBUTION eval target boxes (the eval script's built-ins are the "
+                        "legacy fixed-plane distribution and floor blade-centered checkpoints).")
+    p.add_argument("--no-task-boxes", action="store_true",
+                   help="do not forward the task YAML target boxes (legacy fixed-plane eval)")
     p.add_argument("--out-root", type=pathlib.Path, default=WBT / "logs" / "scoreboard")
     args = p.parse_args()
 
@@ -184,6 +194,33 @@ def main() -> int:
     for m in args.motion_files:
         if not m.is_file():
             raise SystemExit(f"[scoreboard] motion file not found: {m}")
+
+    # In-distribution target boxes from the trained task YAML (racket.pos/vel_range_per_clip).
+    args._pos_box12, args._vel_box12 = None, None
+    if not args.no_task_boxes and args.task_yaml.is_file():
+        try:
+            import yaml
+            racket = (yaml.safe_load(args.task_yaml.read_text()) or {}).get("racket", {})
+
+            def _flat12(block):
+                if not block:
+                    return None
+                out = []
+                for clip in ("forehand", "backhand"):
+                    axes = block.get(clip)
+                    if not axes:
+                        return None
+                    for ax in ("x", "y", "z"):
+                        out += [float(axes[ax][0]), float(axes[ax][1])]
+                return out
+
+            args._pos_box12 = _flat12(racket.get("pos_range_per_clip"))
+            args._vel_box12 = _flat12(racket.get("vel_range_per_clip"))
+            print(f"[scoreboard] task boxes from {args.task_yaml.name}: "
+                  f"pos={'ON' if args._pos_box12 else 'absent'} vel={'ON' if args._vel_box12 else 'absent'}")
+        except ImportError:
+            print("[scoreboard] WARNING: pyyaml unavailable — evaluating with the eval script's "
+                  "LEGACY built-in target boxes (out-of-distribution for blade-centered checkpoints)")
 
     meta = {
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
