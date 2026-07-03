@@ -43,6 +43,10 @@ PROTOCOLS = {
     "implicit": ["--pd-mode", "implicit"],
     "explicit": ["--pd-mode", "explicit"],
     "deploy_faithful": ["--pd-mode", "explicit", "--deploy-faithful"],
+    # Structure-only variant: the runner episode protocol (stand start, hold, rest, no teleports)
+    # under the Isaac-faithful implicit actuator — separates "can it survive stand-entry multi-swing"
+    # (P2.1) from "can it survive the explicit clipped PD" (actuator robustness / explicitpd_ft).
+    "deploy_faithful_implicit": ["--pd-mode", "implicit", "--deploy-faithful"],
 }
 
 # stdout labels worth scraping (Block 1/2 + deploy-faithful Block 4); everything else comes from
