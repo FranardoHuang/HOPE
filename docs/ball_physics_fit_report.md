@@ -33,6 +33,51 @@ sphere-fit residual 17 mm). The centroid is a rigidly-attached virtual point —
 for dynamics; the geometric center offset is unknowable from geometry alone and was
 handled dynamically (Stage 0 wobble check found spins too low for it to matter).
 
+### 0.1 Data sources & references (traceability)
+
+Capture session: **2026-07-03, competition venue, Avatar Pro optical mocap at 300 Hz**
+(the same rig/venue as match play; 3.4 g retro-reflective-coated MATCH ball, paddles
+b_PPP1/b_PPP2, table + net posts as rigid bodies).
+
+Data lineage, from raw to shipped constants:
+
+1. **Primary raw** — Avatar Pro project files, one `.tak` per take (take names are the
+   Chinese stroke types). Master copy: the venue capture Mac,
+   `~/Desktop/Hope/Record/latest/`. This is the only place holding ALL raw takes.
+2. **C3D exports** — per-take folders next to the `.tak`s (e.g. `上旋/shangxuan_000.c3d`),
+   exported from Avatar Pro; input to `extract_canonical.py`.
+3. **Pod working copy (PARTIAL)** — `/workspace/yikang/latest_data/` (2.8 GB, copied
+   2026-07-03 late; `export BALLFIT_DATA_ROOT=/workspace/yikang/latest_data`).
+   Present: 8/9 `.tak` (missing `弹跳.tak`) and 5/9 C3D exports (上旋/下旋/侧旋/弹跳/快速;
+   正常/颠球×2/高球 folders are empty here — their extraction ran on the Mac).
+   `.tak` identities on the pod (md5 · size):
+
+   | take | md5 | size |
+   | --- | --- | --- |
+   | 上旋.tak | `a5e1592f79f7ed203caed8a96b493475` | 85M |
+   | 下旋.tak | `21136d280ddd65155b130068582c99e4` | 65M |
+   | 侧旋.tak | `815a0eace0210a449349e599b545e32c` | 133M |
+   | 快速.tak | `80cc0683b7358f510dec9cfeb7a1fdb1` | 222M |
+   | 正常.tak | `f29bec9ffda4764308e64ffee0c83ca5` | 137M |
+   | 颠球（不转）_000.tak | `e573dc9b60e36d9c652ff122f66900cc` | 32M |
+   | 颠球（增加旋转）.tak | `4610920c9f515fc2e34f41b9fd39176c` | 65M |
+   | 高球.tak | `b55035e5866e1838bf1aaae04692676a` | 92M |
+
+4. **Canonical extraction** — `hope_training/ball_physics_fit/extract_canonical.py` →
+   `<BALLFIT_DATA_ROOT>/analysis/extracted/` (9/9 takes present as `<take>_000.npz` +
+   `<take>_000_manifest.json`; each manifest records frame counts, trim, tracking %,
+   Kabsch RMS, table-frame residuals for its take).
+5. **Fit/falsification outputs** — `<BALLFIT_DATA_ROOT>/analysis/{qa_stage0.json,
+   segments, fits, falsification, forensics}` (per-event tables behind every number in
+   this report).
+6. **Shipped constants** — `configs/ball_physics_venue.yaml` (single source of truth for
+   sim + planner + the Tier-1 virtual-ball reward), produced by `stage2_fits.py` and
+   annotated with the §9.3 capture-noise model.
+
+Anything re-derived later should start from (1) on the Mac or (3)+(4) on the pod and
+verify the checksums above; the analysis npz in (4) are the exact arrays every stage in
+this report consumed.
+
 ## 1. Stage 0 — QA gates: **PASS**
 
 | Gate | Requirement | Measured | Verdict |
@@ -205,7 +250,8 @@ addendum (§9).
 
 ```bash
 cd hope_training/ball_physics_fit
-export BALLFIT_DATA_ROOT=~/Desktop/Hope/Record/latest
+# data root: pod copy (partial, see §0.1) or the capture Mac (full raw set)
+export BALLFIT_DATA_ROOT=/workspace/yikang/latest_data   # Mac: ~/Desktop/Hope/Record/latest
 python extract_canonical.py "$BALLFIT_DATA_ROOT/<take>" analysis/extracted  # ×9
 python qa_stage0.py && python stage1_segments.py
 python stage2_fits.py --split all && python stage2_fits.py --split train

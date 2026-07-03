@@ -6,9 +6,11 @@
 # spin_contact.py (+ C++ mirror) changes to consume, flagged inline.
 #
 # Fit pipeline + full report: hope_training/ball_physics_fit/ and
-# docs/ball_physics_fit_report.md. Falsification battery F1–F8 verdicts and the
-# per-event tables live in <venue data>/analysis/ (yikang's Mac,
-# ~/Desktop/Hope/Record/latest).
+# docs/ball_physics_fit_report.md (§0.1 = full data-source references: raw .tak
+# checksums, Mac master vs pod copy). Falsification battery F1–F8 verdicts and
+# the per-event tables live in <venue data>/analysis/ — pod copy
+# /workspace/yikang/latest_data/analysis (BALLFIT_DATA_ROOT), master on
+# yikang's Mac ~/Desktop/Hope/Record/latest.
 #
 # VALIDITY ENVELOPE (do NOT extrapolate silently — Sony's own failure mode):
 #   ball speed 1–7 m/s (Re 2.5e3–2.8e4) · spin 0–15 rev/s · SR <= 0.5 well
@@ -102,3 +104,56 @@ contact:
     e_lin_b: 0.0258
     e_exp_g1: 0.759       # RECOMMENDED: e(u_n) = g1 * exp(g2 * |u_n|), valid u_n 1.4-7.2 m/s
     e_exp_g2: -0.0441
+
+# =============================================================================
+# CAPTURE-RIG ERROR MODEL (采集误差 / 时间随机延迟) — Avatar Pro C3D venue rig.
+# These are MEASUREMENT-SYSTEM numbers, not ball physics. Use them to
+# (a) read the fit uncertainties above, (b) inject ACE-style sensor noise in
+# sim, (c) tune the deploy Kalman/observer (model the COLORED term!).
+# Sources: docs/ball_physics_fit_report.md §0/§1/§5.1/§9.3 (noise-floor MC),
+# hope_training/ball_physics_fit/README.md.
+# =============================================================================
+capture:
+  rate_hz: 300.0
+  position_noise:           # ball-centroid error (采集误差) — NOT white (§9.3 MC)
+    white_mm: 1.9           # per-axis white component
+    ar1_marginal_mm: 5.2    # per-axis correlated AR(1) component
+    ar1_rho: 0.946          # per-frame @300 Hz (flight_selfcheck.py noise model; report
+    ar1_tau_ms: 60          # rounds to 0.94) -> correlation time ~60 ms; this is why
+                            # short windows look clean but long arcs read ~9 mm
+    long_arc_rms_mm: 9.1    # 3D shooting-fit RMS over long arcs (per-axis marginal
+                            # sqrt(1.9^2+5.2^2)=5.5 mm, x sqrt(3) ~ 9.6 — consistent).
+                            # Old OptiTrack rig reference: 0.4 mm (20x cleaner).
+    center_offset_mm: 1.9   # SYSTEMATIC (not random): extractor sphere-fit center
+                            # offset, 35 deg direction error; dynamics effect ~0.1 mm
+                            # rms under the 9 mm floor — documented, not re-extracted.
+  spin_noise:               # quaternion channel
+    floor_rev_s: 2.0        # per-event noise floor (= 12.6 rad/s, predict_check.py
+                            # FS_SPIN_NOISE). Venue-median spin ~ this floor.
+    bounce_dw_scale: 0.65   # quat delta-omega across TABLE bounces reads ~0.65x the
+                            # position-implied value (contact-window blur)...
+    strike_dw_scale: 0.22   # ...and ~0.22x at RACKET strikes -> unusable there; never
+                            # joint-fit paddle params through the strike spin channel.
+  timing:                   # 时间随机延迟误差
+    same_clock: true        # ball + paddles in ONE hardware-synced C3D stream ->
+                            # inter-body sync error = 0 (QA gate, trivially PASS).
+    frame_quantization_ms: 1.67  # +- half frame @300 Hz (uniform; std 0.96 ms).
+                            # Per-frame trigger jitter is UNOBSERVABLE in C3D exports
+                            # (time axis = frame_index/rate, extract_canonical.py);
+                            # genlocked rig -> true jitter << frame interval. No
+                            # random-delay term was needed anywhere in the fit;
+                            # empirical end-to-end bound: H2 landing-time bias
+                            # -0.7 ms median (predict_check §5.1).
+    gap_p50_ms: 10          # occlusion gaps (not frame drops), concentrated AT
+                            # contacts (racket occludes the ball).
+    racket_occlusion_ms: 30 # +- occluded window around strikes; racket state is
+                            # bridged by a const-accel fit on [-120, -15] ms.
+    contact_dwell_ms: 2     # ball-racket dwell ~1-3 ms = SUB-FRAME at 300 Hz; the
+                            # contact instant is never sampled. t_c is estimated by
+                            # intersecting pre/post shooting fits on a 1-ms grid ->
+                            # resolution ~1-3 ms.
+    # DEPLOY-SIDE WARNING (not this C3D capture): the live ROS/VRPN relay path
+    # previously measured only ~44 Hz EFFECTIVE (median dt 22.6 ms, p90 41.6 ms)
+    # despite the nominal 300 Hz — random delivery delay lives THERE, not in the
+    # rig. Re-verify received rate + use VRPN header stamps at deploy
+    # (mocapDesign.md §venue-checklist).
