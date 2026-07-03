@@ -790,9 +790,21 @@ def _run(cfg):
         ckpt = os.path.abspath(str(ckpt))
         if not os.path.isfile(ckpt):
             raise FileNotFoundError(f"[train.py] checkpoint_path does not exist: {ckpt}")
-        runner.load(ckpt)
-        print(f"[train.py] RESUMED from checkpoint: {ckpt} (continuing at iteration "
-              f"{getattr(runner, 'current_learning_iteration', '?')})", flush=True)
+        if bool(getattr(cfg, "checkpoint_tolerant", False)):
+            # Warm-start ACROSS critic-layout changes (e.g. the 318-D pre-merge lineage into the
+            # 316-D merged model, or deploy-parity ckpts into VirtualBall's critic): actor + std
+            # (+ obs normalizer if shapes agree) load strictly by name; the critic re-initializes
+            # and re-learns — PPO tolerates this warm-start (fresh value function, ~hundreds of
+            # iterations of value lag). Deliberate resume stays STRICT without this flag.
+            from whole_body_tracking.utils.ckpt_compat import load_actor_tolerant
+
+            load_actor_tolerant(runner, ckpt)
+            print(f"[train.py] TOLERANT warm-start from {ckpt} (actor loaded; critic fresh if "
+                  f"layout changed — deliberate warm-start semantics)", flush=True)
+        else:
+            runner.load(ckpt)
+            print(f"[train.py] RESUMED from checkpoint: {ckpt} (continuing at iteration "
+                  f"{getattr(runner, 'current_learning_iteration', '?')})", flush=True)
 
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
