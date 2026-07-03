@@ -46,6 +46,10 @@ Do not read every setup document before doing a specific job. Use this task-firs
 
 For broad onboarding, read [PROJECT_MAP.md](PROJECT_MAP.md) and [DEFINITIONS.md](DEFINITIONS.md). For folder or asset-policy changes, read [ASSET_POLICY.md](ASSET_POLICY.md).
 
+**Before starting ANY work item, claim it in [NOW.md](NOW.md)** (owner + branch). NOW.md is the
+short-horizon board (who is doing what right now); the long-horizon roadmap is
+[gates/G08_blind_spot_improvements.md](gates/G08_blind_spot_improvements.md).
+
 ## Reimplementation Rhythm
 
 `reimplement.md` is the long-form supplemental runbook, not the primary setup path or a separate project plan. Use it through the gate docs:
