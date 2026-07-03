@@ -173,6 +173,62 @@ def racket_strike_success(
     return rp * rv * rn
 
 
+# ============================================================================================== #
+# Tier-1 VIRTUAL-BALL outcome terms (rewardDesign.md). One-shot: non-zero ONLY on the exact-strike
+# step of envs that passed the capture gate (cmd.vb_fired, set by RacketTargetCommand._vb_evaluate
+# from the venue-fitted contact + coarse landing rollout). All are inert (all-zero) unless
+# commands.racket_target.virtual_ball is enabled. Anti-farming gates follow the adversarial
+# verification (verify_tier1-reward-soundness.md (c)):
+#   1. the in-bounds bonus requires landing depth > net_x + vb_min_landing_depth (dink guard),
+#   2. the capture gate requires a minimum paddle approach speed (phantom-block guard, in _vb_evaluate),
+#   3. pass_net pays ONLY for shots that also land legally (net-without-landing guard).
+# ============================================================================================== #
+def virtual_pass_net(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Net-clearance shaping at the virtual net crossing, paid only for legally-landing shots.
+
+    Port of v0 ``pass_net_margin``: Gaussian on (net-crossing height - (net_top + margin)) plus a
+    0.5 clear bonus — but BOTH gated on a valid in-bounds opponent-half landing, so blasting long /
+    out / over-horizon lobs collect nothing (verify (c)4). RewTerm weight POSITIVE.
+    """
+    cmd = _cmd(env, command_name)
+    target_z = cmd._vb_net_top_z + float(cmd.cfg.vb_net_margin)
+    err = cmd.vb_net_z - target_z
+    kernel = torch.exp(-(err**2) / float(cmd.cfg.vb_net_sigma) ** 2)
+    legal = cmd.vb_net_clear & cmd.vb_landing_valid & cmd.vb_on_opponent
+    raw = (kernel + 0.5 * cmd.vb_net_clear.float()) * legal.float()
+    return raw * cmd.vb_fired.float()
+
+
+def virtual_landing(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Landing-accuracy kernel + in-bounds bonus for the virtual shot (v0 ``landing_in_opponent_half``).
+
+    Gaussian on ||landing_xy - target_xy|| gated on net clearance (anti net-farming, v0 parity);
+    the +1.0 in-bounds bonus additionally requires landing DEPTH past net_x + vb_min_landing_depth
+    so a just-over-the-net dink cannot collect it (verify (c)1). RewTerm weight POSITIVE.
+    """
+    cmd = _cmd(env, command_name)
+    dist2 = torch.sum(torch.square(cmd.vb_landing_xy - cmd._vb_target_xy.unsqueeze(0)), dim=-1)
+    kernel = torch.exp(-dist2 / float(cmd.cfg.vb_landing_sigma) ** 2)
+    valid = cmd.vb_landing_valid & cmd.vb_net_clear
+    bonus = (valid & cmd.vb_on_opponent & cmd.vb_depth_ok).float()
+    raw = kernel * valid.float() + bonus
+    return raw * cmd.vb_fired.float()
+
+
+def virtual_spin(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Outgoing-topspin reward (Ace's ws-term), only for shots that land legally.
+
+    ``clamp(topspin / vb_spin_ref, 0, 1)`` where topspin is omega_plus projected on z_hat x d_hat
+    of the outgoing direction; gated on a valid net-clearing in-bounds landing so brushing wild
+    swipes that miss the table cannot farm spin. RewTerm weight POSITIVE (ramp toward parity with
+    landing per the Ace precedent once the wiring is validated).
+    """
+    cmd = _cmd(env, command_name)
+    legal = cmd.vb_landing_valid & cmd.vb_net_clear & cmd.vb_on_opponent
+    raw = (cmd.vb_topspin / float(cmd.cfg.vb_spin_ref)).clamp(0.0, 1.0) * legal.float()
+    return raw * cmd.vb_fired.float()
+
+
 # --- footwork penalties (feet may STEP; we only punish BAD foot behaviour) --------------------- #
 def foot_slip_sq(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Penalize foot slip while in contact: sum over feet of contact * ||foot_xy_velocity||² (always on).

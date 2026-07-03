@@ -88,6 +88,18 @@ source setup_train_env.sh
 
 Replace the placeholders with your own values (never commit a private WandB identity to this public branch).
 
+On the current shared RunPod (paths verified 2026-07-02) the sourced environment resolves to:
+
+- Isaac venv `/workspace/hope_isaac_venv` with the Isaac Lab checkout at `/workspace/IsaacLab`
+- `HOPE_WBT_PYTHONPATH=<repo>/hope_training/whole_body_tracking/source/whole_body_tracking` (working-tree source first)
+- `WANDB_ENTITY=BerkeleyPingPong`
+- `WANDB_REGISTRY_ORG=dongc_1-university-of-california-berkeley-org`
+- `WANDB_PROJECT=hope_wbc`
+- `WANDB_MOTION_PROJECT=csv_to_npz`
+- `WANDB_DIR=/workspace/yikang/nohope/hope_training/wandb`
+
+The legacy `/workspace/isaacsim/python.sh`, `/opt/drone_venv`, and `hope-motion-py310` paths are not used for Isaac training on this machine. If another machine differs, set the machine-specific values in the git-ignored `setup_train_env.local.sh`, and update this operation doc if the shared layout changes.
+
 Quick check:
 
 ```bash
@@ -172,7 +184,7 @@ unless the user has explicitly accepted that EULA.
 
 A from-scratch Isaac install is otherwise **not fully documented here** — follow the official [Isaac Lab installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html) to provision the GPU box, then point `setup_train_env.sh` at it.
 
-`source setup_train_env.sh` provides the `hope_isaac_py` launcher and the `WANDB_*` exports. The scrubbed script reads the overridable `HOPE_ISAAC_PYTHON` / `HOPE_ISAACLAB_ROOT` / `HOPE_ISAAC_VENV_SITE` env vars (or your git-ignored `setup_train_env.local.sh`) — see [GPU / Isaac Environment](#gpu--isaac-environment) above. `hydra` and `omegaconf` are not in the package `install_requires`; they must be importable in the Isaac Lab Python (inject them via `HOPE_ISAAC_VENV_SITE` if needed). Sanity check:
+`source setup_train_env.sh` provides the `hope_isaac_py` launcher and the `WANDB_*` exports. The scrubbed script reads the overridable `HOPE_ISAAC_PYTHON` / `HOPE_ISAACLAB_ROOT` / `HOPE_ISAAC_VENV_SITE` env vars (or your git-ignored `setup_train_env.local.sh`) — see [GPU / Isaac Environment](#gpu--isaac-environment) above; on the current shared RunPod the launcher resolves to `/workspace/hope_isaac_venv` plus `/workspace/IsaacLab/isaaclab.sh`. `hydra` and `omegaconf` are not in the package `install_requires`; they must be importable in the Isaac Lab Python (inject them via `HOPE_ISAAC_VENV_SITE` if needed). Sanity check:
 
 ```bash
 hope_isaac_py -c "import hydra, omegaconf; print(hydra.__version__)"
@@ -190,6 +202,15 @@ Current local status from 2026-06-25:
 - `hope_training/GVHMR` is restored at commit `6ec3ca3`, but its `requirements.txt` pins `torch==2.3.0+cu121` and a `pytorch3d` CUDA 12.1 wheel. Do not blindly install those pins on the RTX 5090 / Blackwell host; resolve the CUDA compatibility issue first.
 - License-gated SMPL-X body models and GVHMR checkpoints were not present in this checkout.
 
+- On the current shared RunPod with RTX 5090 / Blackwell (`sm_120`), the working motion env is **independent from Isaac Lab**:
+
+  ```bash
+  source /workspace/yikang/miniforge3/etc/profile.d/conda.sh
+  conda activate hope-motion-py310
+  ```
+
+  Do not reuse `/workspace/hope_isaac_venv` for GVHMR/GMR. The env uses PyTorch `2.7.0+cu128` and a source-built `pytorch3d 0.7.9`; GVHMR's upstream `cu121` pins are not used on this GPU.
+
 - **GMR** ([YanjieZe/GMR](https://github.com/YanjieZe/GMR.git), local pin `bb1bbe4`): `pip install -e .`. Needs license-gated SMPL-X body models (`SMPLX_NEUTRAL/MALE/FEMALE.pkl` from [smpl-x.is.tue.mpg.de](https://smpl-x.is.tue.mpg.de)).
 - **GVHMR** ([zju3dv/GVHMR](https://github.com/zju3dv/GVHMR.git), local pin `6ec3ca3`):
 
@@ -201,6 +222,10 @@ Current local status from 2026-06-25:
   ```
 
   Optional DPVO needs CUDA 12.1; the `cu121` pins fix `torch==2.3.0` and `pytorch3d 0.7.6 py310_cu121_pyt230`. Blackwell (sm_120) GPUs are incompatible with the `cu121` pins — see `hope_training/GVHMR/.hope-motion-py310-freeze-before-blackwell-fix.txt`. GVHMR also needs license-gated checkpoints into `inputs/checkpoints/`.
+
+  Current RunPod note: the five non-body GVHMR checkpoint files were restored under `hope_training/GVHMR/inputs/checkpoints/` from a public Hugging Face mirror after the upstream Google Drive folder hit quota, and the local license-gated body-model files were sufficient for the completed forehand/backhand MP4 -> motion run. New machines must still restore SMPL/SMPL-X manually because those files are not redistributable.
+
+  Required before `tools/demo/demo.py` on torch>=2.6 envs (this pod's hope-motion-py310 uses torch 2.7.0+cu128): `export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1`. ultralytics 8.2.42 loads the YOLO checkpoint with a plain `torch.load`, which fails under the new `weights_only=True` default (`UnpicklingError: ... DetectionModel was not an allowed global`). The checkpoints are local and hash-checked, so opting out is safe. Verified 2026-07-02: a fresh shell without the variable fails at `[Preprocess]`; with it, the full mp4 -> csv -> npz rerun reproduces the existing artifacts bit-for-bit.
 
 ## Update Rule
 

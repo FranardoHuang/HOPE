@@ -12,10 +12,9 @@ This is the step-13 environment. It extends the A3 motion-tracking baseline
   on top of the BeyondMimic imitation reward and the regularization reward;
 * extended domain randomization for sim-to-real.
 
-Default usage trains ONE swing style per policy (forehand or backhand), selected by which
-reference clip you pass via ``--registry_name`` (reimplement.md steps 14, 17). The swing-type
-observation is therefore omitted from the actor by default (it is constant per policy); enable
-``swing_type`` on the policy group only if you train a single unified policy.
+Default usage trains one unified forehand+backhand policy by passing two reference clips
+(``registry_name`` + ``registry_name_2``). The swing-type observation is present on the actor so
+one policy can condition on which clip/target family it is currently imitating.
 """
 
 from isaaclab.managers import EventTermCfg as EventTerm
@@ -373,6 +372,10 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
         # AgibotA3FlatEnvCfg sets the robot, action scale, motion anchor/body names, and the A3
         # contact/termination/CoM body names (all valid for the inherited HOPE* cfg subclasses).
         super().__post_init__()
+        # Multi-swing ping-pong must learn physical recovery between clips. Reset-time RSI remains active,
+        # but clip wrap never teleports the robot back to the next reference start state
+        # (MotionCommandCfg.wrap_teleport already defaults to False; kept explicit here).
+        self.commands.motion.wrap_teleport = False
 
 
 @configclass
@@ -393,3 +396,61 @@ class HOPEPingPongRealSensorAgibotA3EnvCfg(HOPEPingPongDeployParityAgibotA3EnvCf
     Older docs and scripts still refer to this env as ``real_sensor_only`` / ``RealSensor``.
     The actor contract is the same deploy-parity 175-D layout.
     """
+
+
+##
+# Tier-1 virtual-ball variant (rewardDesign.md) — REWARD-ONLY on top of deploy-parity.
+#
+# The observation is the UNCHANGED deploy-parity 175-D actor contract (sim-to-real alignment is
+# frozen; the virtual ball is never observed — it exists only inside the reward). Per swing the
+# command term samples a virtual incoming ball that arrives at the racket target at strike time;
+# at the exact-strike frame the achieved racket FK state is pushed through the venue-fitted paddle
+# contact model + a coarse landing rollout, and the one-shot virtual_* terms below score the
+# predicted shot (net clearance / landing accuracy / outgoing topspin).
+##
+
+
+@configclass
+class HOPEVirtualBallRewardsCfg(HOPEDeployParityRewardsCfg):
+    """DeployParity reward stack + Tier-1 virtual-ball outcome terms.
+
+    Weights follow rewardDesign.md: landing 30 / pass_net 20 / spin 5 (start of the 5->10 ramp),
+    ordered clear-net-first below landing per the PACE/v0 precedent. racket_velocity/racket_normal
+    drop 2.0 -> 0.5: the contact model now scores the whole (velocity, normal, timing) manifold
+    directly, so vector-matching the commanded velocity becomes shaping, not the task. The approach
+    gradient (racket_position 4.0, racket_progress 10.0, racket_strike_success 5.0) is kept — the
+    virtual terms are zero until the paddle reaches the 9.5 cm capture gate at the strike frame.
+    """
+
+    virtual_pass_net = RewTerm(
+        func=mdp.virtual_pass_net, weight=20.0, params={"command_name": "racket_target"})
+    virtual_landing = RewTerm(
+        func=mdp.virtual_landing, weight=30.0, params={"command_name": "racket_target"})
+    virtual_spin = RewTerm(
+        func=mdp.virtual_spin, weight=5.0, params={"command_name": "racket_target"})
+
+    racket_velocity = RewTerm(
+        func=mdp.racket_velocity_tracking_exp,
+        weight=0.5,
+        params={"command_name": "racket_target", "std": 0.5},
+    )
+    racket_normal = RewTerm(
+        func=mdp.racket_normal_tracking_exp,
+        weight=0.5,
+        params={"command_name": "racket_target", "std": 0.262},
+    )
+
+
+@configclass
+class HOPEPingPongVirtualBallAgibotA3EnvCfg(HOPEPingPongDeployParityAgibotA3EnvCfg):
+    """Deploy-parity env + Tier-1 virtual-ball rewards. Obs/terminations/DR inherited untouched."""
+
+    obs_mode: str = "deploy_parity"
+    rewards: HOPEVirtualBallRewardsCfg = HOPEVirtualBallRewardsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Reward-only feature switch: enables the per-swing virtual-ball sampler and the at-strike
+        # contact + coarse-landing evaluation in RacketTargetCommand (vb_* cfg fields hold the
+        # venue-fit sampling boxes / gates; tune there, not here).
+        self.commands.racket_target.virtual_ball = True

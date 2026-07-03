@@ -53,6 +53,21 @@ parser.add_argument("--output_fps", type=int, default=50, help="The fps of the o
 parser.add_argument("--upload_wandb", action="store_true", help="Upload the saved .npz to a WandB Motions registry.")
 parser.add_argument("--wandb_project", type=str, default="csv_to_npz", help="WandB project for optional upload.")
 parser.add_argument(
+    "--hope_frame",
+    choices=("auto", "on", "off"),
+    default="auto",
+    help=(
+        "Rotate saved world-frame arrays so frame-0 pelvis heading faces HOPE +X. "
+        "'auto' enables this for --robot agibot_a3 and leaves other robots unchanged."
+    ),
+)
+parser.add_argument(
+    "--hope_frame_theta_deg",
+    type=float,
+    default=None,
+    help="Explicit yaw degrees for --hope_frame on/auto. Default rotates frame-0 pelvis yaw to 0 deg (+X).",
+)
+parser.add_argument(
     "--robot",
     type=str,
     default="g1",
@@ -102,6 +117,8 @@ from isaaclab.utils.math import axis_angle_from_quat, quat_conjugate, quat_mul, 
 from whole_body_tracking.robots.agibot_a3 import AGIBOT_A3_CFG, AGIBOT_A3_JOINT_NAMES
 from whole_body_tracking.robots.g1 import G1_CYLINDER_CFG
 
+from hope_frame_utils import rotate_motion_to_hope_x
+
 # G1 retargeting CSV DOF-column order (29 joints).
 G1_JOINT_NAMES = [
     "left_hip_pitch_joint",
@@ -141,6 +158,25 @@ _ROBOTS = {
     "agibot_a3": (AGIBOT_A3_CFG, AGIBOT_A3_JOINT_NAMES),
 }
 _ROBOT_CFG, _JOINT_NAMES = _ROBOTS[args_cli.robot]
+
+
+def _apply_hope_frame_alignment(log: dict) -> dict:
+    """Optionally rotate the exported motion into the HOPE +X table frame."""
+
+    enabled = args_cli.hope_frame == "on" or (args_cli.hope_frame == "auto" and args_cli.robot == "agibot_a3")
+    if not enabled:
+        return log
+    aligned, report = rotate_motion_to_hope_x(log, theta_deg=args_cli.hope_frame_theta_deg)
+    print(
+        "[INFO]: HOPE frame alignment applied: "
+        f"frame-0 pelvis yaw {np.degrees(report.yaw_before_rad):+.2f} deg -> "
+        f"{np.degrees(report.yaw_after_rad):+.2f} deg "
+        f"(theta={np.degrees(report.theta_rad):+.2f} deg, pivot_xy="
+        f"({report.pivot_xy[0]:+.3f},{report.pivot_xy[1]:+.3f})). "
+        "Rotated body_pos_w/body_quat_w/body_lin_vel_w/body_ang_vel_w; joint arrays unchanged.",
+        flush=True,
+    )
+    return aligned
 
 
 @configclass
@@ -383,6 +419,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, joi
             ):
                 log[k] = np.stack(log[k], axis=0)
 
+            log = _apply_hope_frame_alignment(log)
+
             output_file = Path(args_cli.output_file)
             output_file.parent.mkdir(parents=True, exist_ok=True)
             np.savez(output_file, **log)
@@ -395,9 +433,11 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, joi
                 run = wandb.init(project=args_cli.wandb_project, name=collection)
                 print(f"[INFO]: Logging motion to wandb: {collection}")
                 registry = "motions"
-                logged_artifact = run.log_artifact(
-                    artifact_or_path=str(output_file), name=collection, type=registry
-                )
+                # Store the file under the canonical name "motion.npz" inside the artifact,
+                # regardless of the local output filename (train.py downloads <artifact>/motion.npz).
+                artifact = wandb.Artifact(name=collection, type=registry)
+                artifact.add_file(str(output_file), name="motion.npz")
+                logged_artifact = run.log_artifact(artifact)
                 run.link_artifact(artifact=logged_artifact, target_path=f"wandb-registry-{registry}/{collection}")
                 run.finish()
                 print(f"[INFO]: Motion saved to wandb registry: {registry}/{collection}")

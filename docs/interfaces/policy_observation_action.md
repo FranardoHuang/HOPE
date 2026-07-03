@@ -121,6 +121,18 @@ reward targets, and deploy compatibility here first.
   centered on the reference blade strike state (`pos_range_per_clip` / `vel_range_per_clip` in
   `cfg/task/HOPEPingPongDeployParity.yaml`); `strike_phase_per_clip: [0.47, 0.333]` on the
   re-grounded `_hopex` clips. The fixed `x=0.4` hit plane with (y,z)-only sampling is superseded.
+- `racket.target_mode: reference_perturbed` remains a non-default option (it was
+  the default on the pre-merge `rsi-on-wrap-progress-fix` branch): the target
+  center is computed from each imitated clip's own strike-frame racket FK state
+  (position, velocity, face normal), and the long-run distribution widens
+  through success-gated perturbations. Either mode changes target generation
+  only, not the observation/action tensor contract.
+- Clip wrap for HOPE ping-pong does not teleport the robot mid-episode: the
+  target and reference clip/time resample, but the policy must physically carry
+  the body between swings (`MotionCommandCfg.wrap_teleport` defaults to false;
+  the HOPE task YAMLs keep it explicit as `motion.wrap_teleport: false`). True episode resets
+  still use reference-state initialization, except for the `stand_start_prob`
+  fraction of envs that start from the default stand pose.
 - Normalization: per-term Unoise with `enable_corruption` on the policy group (values in the actor
   table above).
 

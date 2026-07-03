@@ -105,8 +105,6 @@ def _resolve_local_motion_files(primary, secondary=None, cwd: pathlib.Path | Non
 
 
 def _download_registry_motion_files(primary, secondary=None) -> tuple[list[str], list[str]]:
-    import wandb
-
     registries = [_normalize_registry_name(value) for value in _configured_items(primary, secondary)]
     if not registries:
         raise RuntimeError(
@@ -114,8 +112,18 @@ def _download_registry_motion_files(primary, secondary=None) -> tuple[list[str],
             "(and optional motion_file_2=/path/to/backhand.npz) for the local path, or pass "
             "registry_name=<org>/wandb-registry-motions/<name>."
         )
+    # Import lazily and AFTER the guard: the no-WandB local path must never require wandb, and a
+    # missing-motion misconfiguration should raise the guidance error above, not ModuleNotFoundError.
+    import wandb
+
     api = wandb.Api()
-    motion_files = [str(pathlib.Path(api.artifact(reg).download()) / "motion.npz") for reg in registries]
+    motion_files = []
+    for reg in registries:
+        art = api.artifact(reg)
+        # Provenance: record exactly which artifact version/digest the run trains on (the registry
+        # alias is mutable, e.g. ':latest' can move between runs).
+        print(f"[train.py] motion clip: {reg} -> {art.source_qualified_name} (digest {art.digest[:12]})", flush=True)
+        motion_files.append(str(pathlib.Path(art.download()) / "motion.npz"))
     return motion_files, registries
 
 
@@ -207,7 +215,7 @@ _RACKET_KEYS = (
     "base_target_x_range", "base_target_y_range",
     "normal_mode", "forehand_on_negative_y", "mount_normal_axis", "mount_normal_sign",
     "target_mode", "ref_perturb_pos", "ref_perturb_vel", "ref_perturb_normal",
-    "ref_perturb_curriculum_steps", "ref_perturb_curriculum_start",
+    "ref_perturb_curriculum_steps", "ref_perturb_curriculum_start", "ref_perturb_success_gated",
     "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "ref_vel_scale_by_motion",
     "debug_reward_logging",
     "clean_reference_strike_velocity", "clean_strike_vel_window",
@@ -229,6 +237,10 @@ _MOTION_KEYS = (
     "wrap_teleport", "stand_start_prob", "hold_steps_range", "stand_start_min_hold",
     "post_swing_start_prob", "post_swing_buffer_size", "post_swing_min_fill", "post_swing_min_hold",
 )
+
+# YAML keys under `motion:` that target the MotionCommandCfg swing-entry structure
+# (Phase-A multi-swing machinery: no-teleport wrap, stand-entry resets, pre-swing hold).
+_MOTION_KEYS = ("wrap_teleport", "stand_start_prob", "hold_steps_range", "stand_start_min_hold")
 
 
 def _registry_clip_name(cfg):
@@ -557,6 +569,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(C, "ref_perturb_normal", _get(rk, "ref_perturb_normal"), float, applied, "racket_target")
             _set_attr(C, "ref_perturb_curriculum_steps", _get(rk, "ref_perturb_curriculum_steps"), int, applied, "racket_target")
             _set_attr(C, "ref_perturb_curriculum_start", _get(rk, "ref_perturb_curriculum_start"), float, applied, "racket_target")
+            _set_attr(C, "ref_perturb_success_gated", _get(rk, "ref_perturb_success_gated"), _as_bool, applied, "racket_target")
             _set_attr(C, "ref_perturb_advance_threshold", _get(rk, "ref_perturb_advance_threshold"), float, applied, "racket_target")
             _set_attr(C, "ref_perturb_advance_rate", _get(rk, "ref_perturb_advance_rate"), float, applied, "racket_target")
             # Stage slow->fast hitting: scale the reference racket-velocity target (<1.0 trains slower hits).
@@ -686,23 +699,14 @@ def _run(cfg):
         agent_cfg.wandb_project = str(cfg.log_project_name)
         agent_cfg.neptune_project = str(cfg.log_project_name)
 
-    # 3) motion file(s). Explicit local motion_file/motion_file_2 take precedence and bypass W&B
-    #    entirely (the documented no-WandB path — see run_training.md); otherwise resolve from the
-    #    wandb registry. ONE clip = single-swing-type policy. TWO clips (forehand + backhand) =
-    #    unified HITTER policy: MotionLoader concatenates them and clip_id selects which swing each
-    #    env imitates. Order matters: clip 0 = forehand, clip 1 = backhand; it must match
-    #    racket.strike_phase_per_clip.
-    local_files = _resolve_local_motion_files(_get(cfg, "motion_file"), _get(cfg, "motion_file_2"))
-    registry_name = cfg.registry_name if cfg.registry_name is not None else cfg.task.registry_name
-    registry_name = str(registry_name)
-
+    # 3) reference motion clip(s), LOCAL-FIRST: motion_file=/motion_file_2= (or a local .npz path passed
+    #    as registry_name/registry_name_2) skips WandB entirely (the documented no-WandB path — see
+    #    run_training.md); otherwise the WandB registry is used.
+    #    ONE clip = single-swing-type policy. TWO clips (forehand + backhand) = unified HITTER policy:
+    #    MotionLoader concatenates them and clip_id selects which swing each env imitates. Order matters:
+    #    clip 0 = forehand, clip 1 = backhand; it must match racket.strike_phase_per_clip.
     def _local_motion(name):
-        """If ``name`` is a local motion.npz (or an artifact dir containing one), return that path.
-
-        Lets you train straight off a local clip (e.g. artifacts/hope_forehand_hopex/motion.npz or its
-        parent dir) WITHOUT publishing to the wandb registry — bypasses the api.artifact().download()
-        below. Returns None for a normal registry reference (``<entity>/wandb-registry-motions/...``).
-        """
+        """If ``name`` is a local motion.npz (or a dir containing one), return that path, else None."""
         p = pathlib.Path(str(name).split(":")[0])  # tolerate a :version suffix
         if p.is_file() and p.suffix == ".npz":
             return str(p)
@@ -710,30 +714,33 @@ def _run(cfg):
             return str(p / "motion.npz")
         return None
 
-    def _resolve_clip(name):
-        local = _local_motion(name)
-        if local is not None:
-            print(f"[train.py] LOCAL motion (no registry): {local}", flush=True)
-            return local
-        nm = name if ":" in name else name + ":latest"
-        import wandb
-        art = wandb.Api().artifact(nm)
-        print(f"[train.py] motion clip: {nm} -> {art.source_qualified_name} (digest {art.digest[:12]})", flush=True)
-        return str(pathlib.Path(art.download()) / "motion.npz")
-
-    if local_files:
-        motion_files = list(local_files)
-        for f in motion_files:
-            print(f"[train.py] LOCAL motion (no registry): {f}", flush=True)
-        if len(motion_files) > 1:
-            print(f"[train.py] UNIFIED multi-clip policy (local): clip0={motion_files[0]}  clip1={motion_files[1]}", flush=True)
-    else:
-        motion_files = [_resolve_clip(registry_name)]
-        reg2 = _get(cfg, "registry_name_2", None) or _get(cfg.task, "registry_name_2", None)
-        if reg2 is not None and str(reg2).strip() and str(reg2).lower() != "none":
-            reg2 = str(reg2)
-            motion_files.append(_resolve_clip(reg2))
-            print(f"[train.py] UNIFIED multi-clip policy: clip0={registry_name}  clip1={reg2}", flush=True)
+    if not _configured_items(_get(cfg, "motion_file"), _get(cfg, "motion_file_2")):
+        # Back-compat: local paths passed as registry_name/registry_name_2 become motion_file, so
+        # resolve_motion_sources below stays the single source of truth for local-vs-registry.
+        _reg_candidates = _configured_items(
+            _get(cfg, "registry_name") if _get(cfg, "registry_name") is not None else _get(cfg.task, "registry_name"),
+            _get(cfg, "registry_name_2")
+            if _get(cfg, "registry_name_2") is not None
+            else _get(cfg.task, "registry_name_2"),
+        )
+        _local_hits = [_local_motion(r) for r in _reg_candidates]
+        if _local_hits and all(h is not None for h in _local_hits):
+            cfg.motion_file = _local_hits
+        elif any(h is not None for h in _local_hits):
+            # Local clips are all-or-nothing (see resolve_motion_sources): fail loud instead of
+            # letting wandb.Api().artifact(<local path>) throw a cryptic HTTP error below.
+            raise RuntimeError(
+                f"[train.py] Mixed motion sources in registry_name/registry_name_2: {_reg_candidates}. "
+                "Some values are local .npz paths and some are registry refs. Pass ALL clips locally "
+                "via motion_file=/motion_file_2= (or make every registry_name a local path), or "
+                "publish the local clip to the registry."
+            )
+    motion_files, motion_registries = resolve_motion_sources(cfg)
+    for i, mf in enumerate(motion_files):
+        src = motion_registries[i] if i < len(motion_registries) else "LOCAL (no registry)"
+        print(f"[train.py] motion clip {i}: {mf}  [{src}]", flush=True)
+    if len(motion_files) > 1:
+        print(f"[train.py] UNIFIED multi-clip policy: clip0=forehand  clip1=backhand", flush=True)
     env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
 
     # 4) logging dir (same layout as scripts/rsl_rl/train.py so export/eval are unchanged)
@@ -765,13 +772,11 @@ def _run(cfg):
         )
     env = RslRlVecEnvWrapper(env)
 
-    # Only hand the runner a registry name for wandb lineage (use_artifact) when the clip actually came
-    # from the registry; a local motion path would crash wandb.run.use_artifact. The W&B backend requires
-    # 'collection:alias' form (a bare collection name is an HTTP 400), so qualify like _resolve_clip does.
-    if local_files or _local_motion(registry_name) is not None:
-        runner_registry_name = None
-    else:
-        runner_registry_name = registry_name if ":" in registry_name else registry_name + ":latest"
+    # Only hand the runner registry refs for wandb lineage (use_artifact) when the clips actually came
+    # from the registry; local runs pass None (a local motion path would crash wandb.run.use_artifact).
+    # resolve_motion_sources already returned normalized 'collection:alias' refs (a bare collection name
+    # is an HTTP 400). List-valued: the runner records ALL used clips, not just clip 0.
+    runner_registry_name = motion_registries if motion_registries else None
     runner = OnPolicyRunner(
         env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device, registry_name=runner_registry_name
     )
@@ -826,6 +831,13 @@ def main(cfg):
         sys.stderr.flush()
         failed = True
     finally:
+        try:
+            import wandb
+
+            if getattr(wandb, "run", None) is not None:
+                wandb.finish()
+        except Exception as exc:
+            print(f"[train.py] WARNING: wandb.finish() failed: {exc}", flush=True)
         simulation_app.close()
     if failed:
         sys.exit(1)

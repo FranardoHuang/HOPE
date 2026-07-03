@@ -35,10 +35,10 @@ class HOPEPlannerNode(Node):
         self.declare_parameter("target_land_x", 2.055)
         self.declare_parameter("target_land_y", -0.7625)
         self.declare_parameter("delta_t_flight", 0.5)
-        self.declare_parameter("drag_k", 0.5)
-        self.declare_parameter("restitution_h", 0.75)
-        self.declare_parameter("restitution_v", 0.85)
-        self.declare_parameter("restitution_racket", 0.88)
+        self.declare_parameter("drag_k", 0.1261)          # venue fit 2026-07-03 (configs/ball_physics_venue.yaml)
+        self.declare_parameter("restitution_h", 0.64)     # no-spin grip equivalent (1 - a_t)
+        self.declare_parameter("restitution_v", 0.9215)   # venue table e_n
+        self.declare_parameter("restitution_racket", 0.654)  # paddle e const; e(u_n) exp form applied in racket_target_planner
 
         self._ball_index = int(self.get_parameter("ball_pose_index").value)
 

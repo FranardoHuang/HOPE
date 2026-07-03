@@ -434,6 +434,7 @@ class MotionCommand(CommandTerm):
         # Intra-episode clip WRAP: no teleport (deploy case) — the policy must physically carry
         # the body from the previous swing's end into the new swing's windup. The imitation
         # targets are anchor-relative, so the new reference re-anchors to the robot where it is.
+        # Teleporting at a wrap (legacy RSI behavior) requires wrap_teleport=True.
         if self._resampling_from_wrap and not self.cfg.wrap_teleport:
             return
 
