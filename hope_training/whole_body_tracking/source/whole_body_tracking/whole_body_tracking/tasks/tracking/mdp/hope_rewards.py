@@ -225,7 +225,14 @@ def virtual_spin(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """
     cmd = _cmd(env, command_name)
     legal = cmd.vb_landing_valid & cmd.vb_net_clear & cmd.vb_on_opponent
-    raw = (cmd.vb_topspin / float(cmd.cfg.vb_spin_ref)).clamp(0.0, 1.0) * legal.float()
+    if getattr(cmd.cfg, "vb_spin_mode", "topspin") == "minimize":
+        # Stage-1 placement-first semantics (franco 2026-07-04): the BEST shot kills the incoming
+        # spin — reward small outgoing |omega|, not topspin generation (which is ball quality and
+        # deliberately unrewarded in stage 1).
+        kernel = torch.exp(-(cmd.vb_spin_out_norm / float(cmd.cfg.vb_spin_min_sigma)) ** 2)
+        raw = kernel * legal.float()
+    else:
+        raw = (cmd.vb_topspin / float(cmd.cfg.vb_spin_ref)).clamp(0.0, 1.0) * legal.float()
     return raw * cmd.vb_fired.float()
 
 

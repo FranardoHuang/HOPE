@@ -127,6 +127,7 @@ class RacketTargetCommand(CommandTerm):
         self.vb_net_z = torch.zeros(self.num_envs, device=self.device)
         self.vb_net_clear = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.vb_topspin = torch.zeros(self.num_envs, device=self.device)
+        self.vb_spin_out_norm = torch.zeros(self.num_envs, device=self.device)
         self._vb_params = None  # lazy venue-yaml load on first evaluation
         # Derived table landmarks (env frame), from geometry.py ITTF constants.
         from whole_body_tracking.tasks.table_tennis import geometry as _tt_geom
@@ -1367,6 +1368,7 @@ class RacketTargetCommand(CommandTerm):
         self.vb_net_z = land["net_z"]
         self.vb_net_clear = net_clear
         self.vb_topspin = topspin
+        self.vb_spin_out_norm = torch.linalg.norm(w_plus, dim=-1)
 
         # Sample-weighted EMA rates (hit rate over exact-strike samples; outcome rates over captured
         # hits). NOTE: accumulators only decay on strike-carrying steps — exact at 4096 envs (a
@@ -1999,6 +2001,12 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # Incoming spin: per-axis uniform (rad/s). 50 rad/s ~ 8 rev/s per axis keeps |omega| inside the
     # quaternion-validated 0-15 rev/s envelope.
     vb_spin_abs_max: float = 50.0
+    # virtual_spin reward semantics: "topspin" = Ace-style outgoing-topspin generation (ball
+    # quality); "minimize" = stage-1 placement-first mode (franco 2026-07-04) — reward CANCELING
+    # the incoming spin, kernel exp(-|omega_out|^2 / vb_spin_min_sigma^2) on the outgoing spin
+    # magnitude, same legal-landing gate. Sigma in rad/s (10 ~ 1.6 rev/s residual).
+    vb_spin_mode: str = "topspin"
+    vb_spin_min_sigma: float = 10.0
     # CAPTURE GATE: the virtual contact only evaluates when (a) the racket center is within this
     # distance of the ball (= racket 0.075 + ball 0.020, the v0 real-hit radius) at the exact-strike
     # frame, and (b) the paddle is actively moving INTO the ball along the oriented contact normal

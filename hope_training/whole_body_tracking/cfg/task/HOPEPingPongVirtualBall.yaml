@@ -17,3 +17,9 @@ name: HOPEPingPongVirtualBall
 gym_task: HOPE-PingPong-VirtualBall-AgibotA3-v0
 experiment_name: agibot_a3_hope_virtualball
 actor_obs_contract: deploy_parity
+
+racket:
+  # virtual_spin semantics: "topspin" (Ace ws-term, generates ball quality) or "minimize"
+  # (stage-1 placement-first: cancel incoming spin; see RacketTargetCommandCfg.vb_spin_mode).
+  vb_spin_mode: topspin
+  vb_spin_min_sigma: 10.0
