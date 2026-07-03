@@ -96,6 +96,21 @@ Parallel tracks (no GPU conflict):
 | 9 | 球进训练环境 + 落点奖励(P2.5-lite)— **周六前不可行,诚实排下周**;周六的增益来自策略改进+planner 物理参数,不来自训练内球 | claude/jiayi | 下周 |
 | 10 | mocap→runner 桥 + 坐标变换设计(A2) | yikang | 下周 |
 
+## Tonight's Test Slots (2026-07-03 evening, policy: 4096 envs × 2 jobs/GPU, stagger ≥60 s)
+
+After the 18:15 finish + verdict, the freed slots run signal-tier (2000-it ≈ 1.5 h co-run) A/Bs.
+"Winner" = tonight's better 14k run. All arms resume FROM the winner checkpoint:
+
+| Slot | Run | 目的 |
+| --- | --- | --- |
+| GPU1-a | winner + 2000 it, plain (shared CONTROL) | 两组 A/B 的公共对照 |
+| GPU1-b | winner + 2000 it, jiayi 默认捆绑（HER 30% + hold_ready 2.0,合并后已是 yaml 默认) | 验证新默认在我们谱系上不劣化——默认值影响所有人,必须有对照数字 |
+| GPU2-a | winner + 2000 it, A1 延迟包（delay=2, jitter, 2% 中途更新) | 目标延迟训练在信号档稳定且不伤命中率(为 mocap 闭环) |
+| GPU2-b | (备用) 若 backhand 在 deploy-faithful 明显弱于 forehand → backhand 加权微调 | 周六反手 SHADOW 测试的胜算 |
+| GPU0-a/b | 留给 yikang 重启他的 20k(建议挂 adaptive_sigma)+ jiayi 任意 | 团队槽位 |
+
+已关闭、不再测的问题:num_envs 扩缩(4096 定版)、一卡并行数(今晚 3 任务探针出数后定版)、显式执行器路线(团队已否决)。
+
 ## Active
 
 | Item | Priority | Owner | Branch | Status / next checkpoint |
