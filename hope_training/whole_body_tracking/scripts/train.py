@@ -213,6 +213,10 @@ _RACKET_KEYS = (
     "clean_reference_strike_velocity", "clean_strike_vel_window",
 )
 
+# YAML keys under `motion:` that target the MotionCommandCfg swing-entry structure
+# (Phase-A multi-swing machinery: no-teleport wrap, stand-entry resets, pre-swing hold).
+_MOTION_KEYS = ("wrap_teleport", "stand_start_prob", "hold_steps_range", "stand_start_min_hold")
+
 
 def _registry_clip_name(cfg):
     """Motion clip name used to key per-motion settings (e.g. ``strike_phase_by_motion``).
@@ -389,6 +393,20 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             env_cfg.decimation = int(dec)
             env_cfg.sim.render_interval = env_cfg.decimation  # keep render in step with decimation
             applied.append(f"decimation={int(dec)}")
+
+    # motion command (swing-entry structure): no-teleport wrap / stand-entry resets / pre-swing hold
+    mt = _get(task, "motion")
+    if mt is not None:
+        provided = [k for k in _MOTION_KEYS if _get(mt, k) is not None]
+        if provided:
+            _require(hasattr(env_cfg.commands, "motion"),
+                     f"commands.motion (task YAML sets motion keys {provided})")
+            M = env_cfg.commands.motion
+            _set_attr(M, "wrap_teleport", _get(mt, "wrap_teleport"), _as_bool, applied, "commands.motion")
+            _set_attr(M, "stand_start_prob", _get(mt, "stand_start_prob"), float, applied, "commands.motion")
+            _set_attr(M, "hold_steps_range", _get(mt, "hold_steps_range"),
+                      lambda v: tuple(int(x) for x in v), applied, "commands.motion")
+            _set_attr(M, "stand_start_min_hold", _get(mt, "stand_start_min_hold"), int, applied, "commands.motion")
 
     rw = _get(task, "rewards")
     if rw is not None:
