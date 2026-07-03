@@ -299,10 +299,22 @@ class RacketTargetCommand(CommandTerm):
         self._delay_steps = max(int(cfg.target_delay_steps), 0)
         self._jitter_pos = max(float(cfg.target_jitter_pos_per_s), 0.0)
         self._jitter_vel = max(float(cfg.target_jitter_vel_per_s), 0.0)
+        # Calibrated MEASUREMENT noise (ball_physics_venue.yaml `capture:` block, 2026-07-03 fit):
+        # white + AR(1)-colored position error of the mocap link. Unlike the tts-scaled jitter above
+        # (which models PREDICTION convergence), measurement noise does NOT shrink as the strike
+        # approaches, so no tts scaling. rho is per POLICY step: venue 0.946/frame @300 Hz -> ^6 @50 Hz.
+        self._mnoise_white = max(float(cfg.target_noise_white), 0.0)
+        self._mnoise_ar1_sigma = max(float(cfg.target_noise_ar1_sigma), 0.0)
+        self._mnoise_ar1_rho = min(max(float(cfg.target_noise_ar1_rho), 0.0), 0.9999)
+        if self._mnoise_ar1_sigma > 0.0:
+            self._mnoise_ar1_state = torch.zeros(self.num_envs, 3, device=self.device)
         # The actor view is materialized (separate tensors) whenever latency OR jitter is on;
         # otherwise the delayed_* attributes ARE the live tensors (which are only ever index-assigned
         # after __init__, so the alias stays valid for the whole run).
-        self._actor_view_active = self._delay_steps > 0 or self._jitter_pos > 0.0 or self._jitter_vel > 0.0
+        self._actor_view_active = (
+            self._delay_steps > 0 or self._jitter_pos > 0.0 or self._jitter_vel > 0.0
+            or self._mnoise_white > 0.0 or self._mnoise_ar1_sigma > 0.0
+        )
         if self._delay_steps > 0:
             # Ring buffers (length delay+1) over the ACTOR-VISIBLE target quantities: the slot
             # written this step is read back `delay` pushes later (see _push_actor_target).
@@ -1135,6 +1147,14 @@ class RacketTargetCommand(CommandTerm):
                 pos = pos + torch.randn_like(pos) * (self._jitter_pos * scale)
             if self._jitter_vel > 0.0:
                 vel = vel + torch.randn_like(vel) * (self._jitter_vel * scale)
+        if self._mnoise_ar1_sigma > 0.0:
+            rho = self._mnoise_ar1_rho
+            self._mnoise_ar1_state.mul_(rho).add_(
+                torch.randn_like(self._mnoise_ar1_state), alpha=self._mnoise_ar1_sigma * (1.0 - rho * rho) ** 0.5
+            )
+            pos = pos + self._mnoise_ar1_state
+        if self._mnoise_white > 0.0:
+            pos = pos + torch.randn_like(pos) * self._mnoise_white
         if self._delay_steps > 0:
             # Write this step's (jittered) target into slot `w`; the next slot in the length-
             # (delay+1) ring was written exactly `delay` pushes ago — that is the actor's view.
@@ -1983,6 +2003,12 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # i.e. the knob is the std at time_to_strike >= 1 s, decaying to 0 at the strike (prediction
     # convergence). Units: m (pos) / m/s (vel).
     target_jitter_pos_per_s: float = 0.0
+    # Calibrated mocap MEASUREMENT noise on the actor-visible target position (m). Venue fit
+    # 2026-07-03 (`capture.position_noise`): white 0.0019, ar1 marginal 0.0052, rho/frame 0.946
+    # @300 Hz -> 0.946**6 = 0.717 per 50 Hz policy step. Defaults OFF.
+    target_noise_white: float = 0.0
+    target_noise_ar1_sigma: float = 0.0
+    target_noise_ar1_rho: float = 0.717
     target_jitter_vel_per_s: float = 0.0
     # Mid-swing target refinement: each control step, envs with pre_strike AND time_to_strike >
     # midswing_resample_tts_floor re-draw their target (position/velocity/normal via the existing

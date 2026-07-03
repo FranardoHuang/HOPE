@@ -205,6 +205,9 @@ racket:
   # refinement fraction, ~ prob * eligible fraction).
   target_delay_steps: 0            # control steps (50 Hz) the actor sees target pos/vel/swing_sign late
   target_jitter_pos_per_s: 0.0     # m: actor target pos noise std at tts>=1 s, decays ~ clamp(tts,0,1)
+  target_noise_white: 0.0          # m: calibrated mocap white noise (venue fit: 0.0019); no tts decay
+  target_noise_ar1_sigma: 0.0      # m: calibrated AR(1) colored noise marginal std (venue fit: 0.0052)
+  target_noise_ar1_rho: 0.717      # per 50 Hz step (= venue 0.946/frame @300 Hz ^6)
   target_jitter_vel_per_s: 0.0     # m/s: same decay law for the target velocity
   midswing_resample_prob: 0.0      # per-step prob of re-drawing WHERE mid-swing (strike timing untouched)
   midswing_resample_tts_floor: 0.3 # s: no refinement inside the last 0.3 s before the strike
