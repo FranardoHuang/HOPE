@@ -18,8 +18,12 @@ Each item lists the failure being targeted and the paper-backed mechanism to try
 ### P2.1 Balance across consecutive swings
 
 Failure: the robot falls after several swings; it does not recover weight/posture into a robust
-ready stance. Root cause is structural: training uses `episode_length_s: 3.0` (one swing per
-episode), so recovery-to-ready is never part of the task.
+ready stance. Status correction (2026-07-03): the structural machinery already exists on main
+(`3eba347`) — 10 s multi-swing episodes, `wrap_teleport=False` (no teleport between swings),
+`stand_start_prob=0.25` (deploy-entry resets), pre-swing hold — but no shipped checkpoint was
+trained with it (the deployed model predates it, hence the teleport-entry backhand gap). The task
+is therefore to train and validate under this structure (P2.1 A/B on branch `p2-multiswing`), not
+to build it.
 
 - HITTER: 10 s episodes chain swings; after each swing the next swing type and targets are
   resampled; the base-position reward is active only pre-strike, which *is* the ready phase
