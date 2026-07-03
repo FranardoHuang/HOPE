@@ -73,6 +73,11 @@ Use first-principles gates instead of copying a paper or vendor example blindly:
 5. Prefer small reproducible gate checks over large undocumented demos.
 6. Treat HITTER as the baseline system contract, not as a restriction on improvements.
 7. Do not advance real-hardware risk faster than the safety documentation and dry-runs.
+8. **Grade your sources.** Papers and our own measurements are primary and may drive decisions;
+   relayed verbal information (author chats, hallway advice) is secondary — record it dated and
+   marked 转述/未验证, use it to corroborate or to form hypotheses, and when it conflicts with a
+   primary source, the primary source wins and the conflict is written down (see G08 for the
+   pattern).
 
 ## Documentation Update Rule
 
