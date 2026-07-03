@@ -85,11 +85,12 @@ def main() -> int:
     actor = build_actor(msd)
     in_dim = actor[0].in_features
 
-    from rsl_rl.modules import EmpiricalNormalization
-
-    normalizer = EmpiricalNormalization(shape=[in_dim])
-    normalizer.load_state_dict(ckpt["obs_norm_state_dict"])
-    normalizer.eval()
+    # The validated export chain (play.py -> _OnnxPolicyExporter -> hardware/MuJoCo) bakes the RAW
+    # actor with NO empirical normalizer — verified 2026-07-04 by zero-point matching a donor ONNX
+    # against its own checkpoint (matches ONLY without the normalizer). The checkpoint's
+    # obs_norm_state_dict is not part of the deployed policy path; baking it in produces a policy
+    # that scores 0 in MuJoCo. Identity keeps bit-parity with everything already validated.
+    normalizer = nn.Identity()
 
     clips = [dict(np.load(args.fh)), dict(np.load(args.bh))]
     seg_lengths = [c["joint_pos"].shape[0] for c in clips]
