@@ -129,6 +129,20 @@ franco 已提供 forehand_new.mp4 / backhand_new.mp4,已上传 `/workspace/share
   元数据从同配置旧 ONNX 拷贝)——两个 14k checkpoint 已导出成功,四协议评分进行中(纯 CPU)。
   周六候选的裁决不再依赖 Isaac。
 
+## 周六早晨交接(2026-07-04 04:30 写)
+
+**给今天打球的建议(按风险排序):**
+1. **主用 07-02 已验证的部署包**(yikang 手上,正手已在真机成功过)——零新风险,保底能打
+2. **E@14k 作为实验候选交给 yikang 过厂商门禁**:ONNX 已导出(位级忠实,`.../p21_E_sigma_postswing/exported/policy.onnx`,sha12=e2c19a01cd3e)。他的 AGI-MuJoCo 门禁环境在他自己机器上,不受 pod 影响。**过了门禁才上机,过不了就只用保底包**
+3. Isaac 复活后第一件事:A/E 的正规 Isaac 评估补认证
+
+**今晚查明的三件大事:**
+- **pod 宿主机对 Isaac 判死刑**(裸 Kit 两种缓存状态都起不来;裸 CUDA 正常)→ **需要:RunPod 支持票 或 新建 pod**。训练全阻塞,消融梯/斜录臂都在等这个
+- **MuJoCo 评分器与连挥模型的契约不匹配**(P0,周日修):新旧两版评分器对 E@14k 给出一致的病理性全零(回合 ~1s 截断、只评反手、误差系统偏移 ~0.5m);真机验证过的 07-02 模型在同评分器下 0 击球窗口。评分器的回合/参考时钟按旧谱系(瞬移单挥)假设写死,对 wrap_teleport=False 的模型无效。证据:/workspace/franco/{premerge_check2,knowngood_check2}
+- **Isaac-free 导出链已建成并验证**(standalone_onnx_export.py + harvest,位级零差)——导出永不再被 Isaac 绑架
+
+**斜录(实战)动作:视频→CSV 全通**(GVHMR/GMR 在 pod 上直接跑通了,产物 /workspace/shared/motions/oblique/,58/64 帧)。剩 csv→npz 一步需要 Isaac FK(或我写 MuJoCo FK 版,已排队)。球轨迹数据已入共享区 ball_mocap_0703。
+
 ## Gap List To Sunday (明确缺的活,截止周日 — added 2026-07-03)
 
 | # | 缺什么 | 谁 | 何时 |
