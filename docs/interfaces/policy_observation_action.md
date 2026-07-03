@@ -98,8 +98,8 @@ before treating it as G05/G07 relevant.
   only, not the observation/action tensor contract.
 - Clip wrap for HOPE ping-pong does not teleport the robot mid-episode: the
   target and reference clip/time resample, but the policy must physically carry
-  the body between swings (`motion.rsi_on_wrap: false` in the HOPE task YAMLs;
-  `MotionCommandCfg.wrap_teleport` also defaults to false). True episode resets
+  the body between swings (`MotionCommandCfg.wrap_teleport` defaults to false;
+  the HOPE task YAMLs keep it explicit as `motion.wrap_teleport: false`). True episode resets
   still use reference-state initialization, except for the `stand_start_prob`
   fraction of envs that start from the default stand pose.
 - Normalization: per-term Unoise with `enable_corruption` on the policy

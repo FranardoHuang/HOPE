@@ -368,9 +368,8 @@ class MotionCommand(CommandTerm):
         # Intra-episode clip WRAP: no teleport (deploy case) — the policy must physically carry
         # the body from the previous swing's end into the new swing's windup. The imitation
         # targets are anchor-relative, so the new reference re-anchors to the robot where it is.
-        # Teleporting at a wrap (legacy RSI) requires BOTH wrap_teleport=True AND rsi_on_wrap=True
-        # (rsi_on_wrap=False is the HOPE task-YAML knob that disables mid-episode RSI teleports).
-        if self._resampling_from_wrap and not (self.cfg.wrap_teleport and self.cfg.rsi_on_wrap):
+        # Teleporting at a wrap (legacy RSI behavior) requires wrap_teleport=True.
+        if self._resampling_from_wrap and not self.cfg.wrap_teleport:
             return
 
         # TRUE episode reset: a fraction starts from the DEFAULT STAND (deploy entry), the rest
@@ -447,7 +446,7 @@ class MotionCommand(CommandTerm):
         self.just_resampled = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         if len(env_ids) > 0:
             self.just_resampled[env_ids] = True
-        # Wrap-path resample: skips the RSI teleport (cfg.wrap_teleport=False or cfg.rsi_on_wrap=False)
+        # Wrap-path resample: skips the RSI teleport (cfg.wrap_teleport=False, the default)
         # so the policy physically transitions swing -> swing. True resets go through reset()/manager.
         self._resampling_from_wrap = True
         try:
@@ -538,13 +537,6 @@ class MotionCommandCfg(CommandTermCfg):
     velocity_range: dict[str, tuple[float, float]] = {}
 
     joint_position_range: tuple[float, float] = (-0.52, 0.52)
-
-    # Reference-state initialization (RSI) at clip wrap. HOPE ping-pong task YAMLs set this to
-    # false so the robot must physically recover between swings instead of being teleported to
-    # the next clip start mid-episode. NOTE: since the Phase A redesign below, wraps only teleport
-    # when BOTH rsi_on_wrap AND wrap_teleport are true — with wrap_teleport's default of False,
-    # wraps never teleport unless both knobs are explicitly enabled (legacy BeyondMimic behavior).
-    rsi_on_wrap: bool = True
 
     # --- Phase A (2026-07-02): swing ENTRY / TRANSITION / WAITING coverage --------------------
     # Deploy enters every swing from a NOMINAL STAND, waits at the windup while the ball is not

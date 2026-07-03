@@ -14,9 +14,3 @@ name: HOPEPingPongRealSensor
 gym_task: HOPE-PingPong-RealSensor-AgibotA3-v0
 experiment_name: agibot_a3_hope_realsensor
 actor_obs_contract: deploy_parity
-
-motion:
-  # Reset-time RSI is still used at episode reset. During clip wrap, keep the simulated robot state
-  # continuous so the 10 s episode actually trains between-swing recovery (MotionCommandCfg.rsi_on_wrap
-  # defaults to true; this override disables the mid-episode teleport). Mirrors HOPEPingPong.yaml.
-  rsi_on_wrap: false

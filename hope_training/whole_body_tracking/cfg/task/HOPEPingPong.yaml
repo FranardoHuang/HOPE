@@ -21,7 +21,7 @@
 # Reward weights/kernel widths are NOT published by HITTER, so they stay as
 # reasonable HOPE choices (goal terms weighted relatively high, per the paper).
 #
-# UPDATE (2026-07-02): NO mid-episode RSI teleport on clip wrap (motion.rsi_on_wrap: false
+# UPDATE (2026-07-02): NO mid-episode RSI teleport on clip wrap (motion.wrap_teleport: false
 # below; reset-time RSI still applies at episode reset), so the 10 s episode trains continuous
 # between-swing recovery. An OPTIONAL reference-centered target mode
 # (racket.target_mode=reference_perturbed, verified on the rsi-on-wrap branch) exists as a
@@ -63,9 +63,9 @@ env:
 
 motion:
   # Reset-time RSI is still used at episode reset. During clip wrap, keep the simulated robot state
-  # continuous so the 10 s episode actually trains between-swing recovery (MotionCommandCfg.rsi_on_wrap,
-  # applied via the train.py motion.* override plumbing).
-  rsi_on_wrap: false
+  # continuous so the 10 s episode actually trains between-swing recovery (MotionCommandCfg.wrap_teleport
+  # already defaults to false; kept explicit here, applied via the train.py motion.* override plumbing).
+  wrap_teleport: false
 
 # ---- reward weights / kernel std --------------------------------------------
 # HITTER does not publish reward weights or kernel forms. Goal terms get relatively high weight

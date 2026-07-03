@@ -18,7 +18,7 @@ The training scaffold exists under:
 
 - Local two-clip `HOPEPingPong` smoke and a registry-backed WandB pipeline smoke both ran on the copied Agibot A3 URDF asset (31 actuated DOF). The registry smoke run `6xus13ga` finished at https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/6xus13ga, but the `hope_forehand:v4` / `hope_backhand:v4` motion artifacts it used were later verified to face world +Y rather than HOPE +X. Treat that run as pipeline-only evidence.
 - Until corrected v5+ registry artifacts are uploaded, pass the corrected local `_hopex.npz` clips explicitly via `motion_file=` / `motion_file_2=` instead of relying on the v4 registry aliases.
-- HOPE task YAMLs set `motion.rsi_on_wrap: false`: a mid-episode clip wrap resamples the reference clip/time and racket target without teleporting the simulated robot. Episode reset still uses RSI.
+- HOPE task YAMLs set `motion.wrap_teleport: false` (also the code default): a mid-episode clip wrap resamples the reference clip/time and racket target without teleporting the simulated robot. Episode reset still uses RSI.
 
 `TrackingFlat` and `HOPEPingPong` forehand training have run end-to-end on the copied Agibot A3 URDF asset (31 actuated DOF), including WandB logging, checkpoint save, and ONNX export. This proves the pipeline can run; it is NOT an accepted quality baseline. G04/G05 remain Partial, and G06/G07 are not accepted until sim-to-sim and dry-run deployment gates record verification.
 
@@ -33,7 +33,7 @@ This branch adds:
 - canonical WandB motion uploads where every motion artifact contains `motion.npz`, regardless of the source filename.
 - HOPE +X motion alignment in `scripts/csv_to_npz.py --robot agibot_a3` (`--hope_frame auto`) before local save/upload.
 - `scripts/check_motion_target_alignment.py`, a no-Isaac gate for frame-0 yaw, +X-dominant strike velocity, and target/reference center alignment.
-- `motion.rsi_on_wrap` (default `false` in HOPE task YAMLs) to disable the mid-episode RSI teleport on clip wrap, plus a `racket_progress` resample-spike fix.
+- `motion.wrap_teleport` (default `false`; kept explicit in the HOPE task YAMLs) controlling the mid-episode RSI teleport on clip wrap, plus a `racket_progress` resample-spike fix. (The branch's original `rsi_on_wrap` knob was dropped 2026-07-03 in favor of main's equivalent `wrap_teleport`.)
 - explicit `wandb.finish()` before Isaac `simulation_app.close()`, so WandB runs finish and sync before Isaac can hard-exit the process.
 
 ## Entry Files
@@ -299,7 +299,7 @@ Useful overrides:
 num_envs=4096 max_iterations=20000 seed=1
 ```
 
-`HOPEPingPong` defaults to a unified policy: clip 0 comes from `registry_name` / `motion_file`, clip 1 comes from `registry_name_2` / `motion_file_2`, and the actor receives `swing_type`. The HOPE task YAMLs also set `motion.rsi_on_wrap: false`, so a mid-episode clip wrap resamples the reference clip/time and racket target without teleporting the simulated robot; episode reset still uses RSI.
+`HOPEPingPong` defaults to a unified policy: clip 0 comes from `registry_name` / `motion_file`, clip 1 comes from `registry_name_2` / `motion_file_2`, and the actor receives `swing_type`. The HOPE task YAMLs also set `motion.wrap_teleport: false` (the code default), so a mid-episode clip wrap resamples the reference clip/time and racket target without teleporting the simulated robot; episode reset still uses RSI.
 
 Resume / curriculum hand-off (added on `train_1`): `checkpoint_path=<model.pt>` loads weights + optimizer
 from a prior run and CONTINUES training (the iteration counter resumes). Use it to apply a staged config

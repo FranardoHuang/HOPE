@@ -344,8 +344,9 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
         # contact/termination/CoM body names (all valid for the inherited HOPE* cfg subclasses).
         super().__post_init__()
         # Multi-swing ping-pong must learn physical recovery between clips. Reset-time RSI remains active,
-        # but clip wrap no longer teleports the robot back to the next reference start state.
-        self.commands.motion.rsi_on_wrap = False
+        # but clip wrap never teleports the robot back to the next reference start state
+        # (MotionCommandCfg.wrap_teleport already defaults to False; kept explicit here).
+        self.commands.motion.wrap_teleport = False
 
 
 @configclass
