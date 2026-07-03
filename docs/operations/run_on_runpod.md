@@ -10,13 +10,18 @@ to get on, what is verified, and the repo-side conventions.
 ## Access
 
 ```bash
-ssh root@162.43.172.171 -p 15320 -i ~/.ssh/id_ed25519_runpod
+ssh root@162.43.172.171 -p 18333 -i ~/.ssh/id_ed25519_runpod
 ```
 
-- Endpoint current as of 2026-07-03 evening (port changed 17424 → 15320 after a pod restart the
-  same day — the restart confirmed `/workspace` survives intact incl. checkpoints/venvs; only
-  running processes and `/root` were lost). RunPod may assign a new IP/port on any re-provision —
-  update this file when it changes.
+- Endpoint current as of 2026-07-04 (port history: 17424 → 15320 → 18333 across restarts; the key
+  stays the same). Every restart confirmed `/workspace` survives intact; only running processes and
+  `/root` are lost. RunPod may assign a new IP/port on any re-provision — update this file when it
+  changes.
+- **After EVERY restart, run `bash /workspace/restore_root.sh` once** — it re-wires `/root/.bashrc`
+  (claude/codex/git-lfs on PATH for bare logins) and restores the GitHub key if a persistent one
+  exists under `/workspace/.ssh_github/`. Then re-run the `--quick` smoke.
+- Note: a full Stop→Start rebuilds the container but does NOT move hosts (the 500 GB volume is
+  host-local and pins the pod to its machine) — verified 2026-07-04 via unchanged `/proc/uptime`.
 - Each teammate (and each teammate's coding agent) uses the same root login; separation is by
   directory, not by account. Work ONLY under your own `/workspace/<name>/`.
 - The pod holds one GitHub deploy key (dongc1's) shared for pull/push; per-clone `user.name`/
