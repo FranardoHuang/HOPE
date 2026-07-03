@@ -75,6 +75,18 @@ REPORT_ROWS = [
     ("strike_vel_pass_exact", "strike_vel_pass_exact"),
     ("strike_pos_pass_exact", "strike_pos_pass_exact"),
     ("strike_normal_pass_exact", "strike_normal_pass_exact"),
+    # UNCONDITIONAL swing accounting (Phase A + 2026-07-03): falls count against these, unlike the
+    # conditional composite above. NOTE: the episode-timeout boundary swing deflates completion — with
+    # ~2.7 swings per 10 s episode a PERFECT policy reads ~0.6-0.7, not 1.0; compare runs, not to 1.0.
+    ("swing_completion_rate", "swing_completion_rate"),
+    ("pre_strike_fall_rate", "pre_strike_fall_rate"),
+    ("post_strike_fall_rate", "post_strike_fall_rate"),
+    ("  pre-strike falls forehand", "pre_strike_fall_rate_forehand"),
+    ("  pre-strike falls backhand", "pre_strike_fall_rate_backhand"),
+    ("  post-strike falls forehand", "post_strike_fall_rate_forehand"),
+    ("  post-strike falls backhand", "post_strike_fall_rate_backhand"),
+    # Auditability: MUST read 0.0000 in a gate eval (HER replay is train-only; forced off above).
+    ("achieved_replay_frac", "achieved_replay_frac"),
     ("base_target_offset_norm", "base_target_offset_norm"),
     ("base_pos_error", "base_pos_error"),
     ("base_pos_error_pre_strike", "base_pos_error_pre_strike"),
@@ -115,6 +127,18 @@ def _run(cfg, simulation_app):
     _apply_task_overrides(env_cfg, cfg.task, _registry_clip_name(cfg))
     env_cfg.sim.device = str(cfg.device)
 
+    # HER achieved-target replay is TRAIN-ONLY: the eval gate must score the pure box target
+    # distribution (deploy-matched, comparable across checkpoints). Without this, ~30% of eval targets
+    # would be jittered copies of states this very policy just produced — systematically easier than
+    # box targets — inflating the ranking metrics. Opt back in with +allow_achieved_replay=true.
+    if hasattr(env_cfg.commands, "racket_target") and hasattr(
+        env_cfg.commands.racket_target, "achieved_target_mix_prob"
+    ):
+        if not bool(cfg.get("allow_achieved_replay", False)):
+            env_cfg.commands.racket_target.achieved_target_mix_prob = 0.0
+            print("[eval] HER achieved-target replay DISABLED (achieved_target_mix_prob=0; "
+                  "pass +allow_achieved_replay=true to keep the training mixture)", flush=True)
+
     motion_files = _resolve_motion_files(cfg)
     env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
 
@@ -136,7 +160,11 @@ def _run(cfg, simulation_app):
     env = gym.make(task_id, cfg=env_cfg, render_mode=None)
     env = RslRlVecEnvWrapper(env)
     runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=dev)
-    runner.load(str(cfg.checkpoint))
+    # Shape-tolerant load: pre-2026-07-03 checkpoints have the old (2-dim-wider) critic; eval only
+    # needs the actor, so fall back to an actor-preserving partial load instead of dying.
+    from whole_body_tracking.utils.ckpt_compat import load_actor_tolerant
+
+    load_actor_tolerant(runner, str(cfg.checkpoint))
     det_policy = runner.get_inference_policy(device=env.unwrapped.device)  # MEAN action
 
     # learned per-action std (state-independent parameter on the ActorCritic)

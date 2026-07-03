@@ -41,6 +41,12 @@ USAGE (run inside the Isaac/torch training env):
     # 3) fine-tune from it (fresh run; the env provides the 175-D actor obs):
     python scripts/train.py task=HOPEPingPongRealSensor algo=ppo headless=true \
         checkpoint_path=logs/rsl_rl/warmstart/model_15200_realsensor.pt
+
+STALE AS OF 2026-07-03: the deploy-parity CRITIC obs also dropped base_target_pos_b (2 dims,
+HOPECriticDeployParityCfg), so "the ENTIRE critic ... unchanged" no longer holds — a checkpoint
+produced by this script will fail to load its critic first layer into the current cfg. The audit
+retrain is from scratch; if a warm-start is ever needed again, extend this script with the critic
+drop indices first.
 """
 
 from __future__ import annotations

@@ -31,7 +31,9 @@ int main(int argc, char** argv) {
   }
   using namespace a3_pingpong;
   PpOnnxPolicy onnx(argv[1]);
-  Eigen::VectorXd obs = read_vec(argv[2], kObsDim);
+  // obs dim from the loaded model (175 deploy_parity / 180 full) — a hardcoded kObsDim
+  // made this harness reject every deploy_parity model.
+  Eigen::VectorXd obs = read_vec(argv[2], onnx.obs_dim());
   int ts = std::atoi(argv[3]);
 
   Eigen::VectorXd act = onnx.mean_action(obs, ts);
@@ -39,7 +41,7 @@ int main(int argc, char** argv) {
 
   // joint_names / metadata sanity
   std::fprintf(stderr, "[cpp] joints=%zu obsdim=%d ts=%d  act min/max/mean=%.5f/%.5f/%.5f\n",
-               onnx.joint_names().size(), kObsDim, ts, act.minCoeff(), act.maxCoeff(), act.mean());
+               onnx.joint_names().size(), onnx.obs_dim(), ts, act.minCoeff(), act.maxCoeff(), act.mean());
 
   std::ostringstream a, t;
   a.precision(17); t.precision(17);

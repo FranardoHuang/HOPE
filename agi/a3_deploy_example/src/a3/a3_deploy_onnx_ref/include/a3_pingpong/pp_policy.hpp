@@ -133,13 +133,16 @@ struct PpPolicyConfig {
   // default on hardware. The A/B/C rehearsal selects fabricated explicitly via
   // --loc-mode. See LocMode + SIM_DEPLOY_REHEARSAL.md.
   LocMode loc_mode = LocMode::kPerfectTracking;  // A/B/C localization mode (see LocMode).
-  // HARDWARE-SAFE DEFAULT: false. The base/racket world targets are rotated into
-  // the robot's yaw-heading frame. On the real robot the pelvis IMU yaw is NOT
-  // world-referenced (drifts ~130-165 deg boot-to-boot, disagrees with the torso
-  // IMU) -> using it rotates the scripted target away from front-right. With
-  // false we use identity yaw (the scripted target is already in the robot's +x
-  // heading). No-op in sim (base yaw ~ 0). Set true only with a real localizer.
-  bool use_imu_yaw_for_targets = false;  // see build_obs_180(use_base_yaw_for_targets)
+  // DEFAULT FLIPPED TO TRUE (2026-07-03): with yaw_align (below, default on) the base yaw is
+  // expressed relative to the ENGAGE heading — it starts at identity and then tracks the robot's
+  // REAL turning, which is exactly what training saw (targets rotated by the current base yaw,
+  // hope_commands.racket_target_pos_b_rel). The old false default (identity yaw) predates
+  // yaw_align and silently mixed frames: the racket-FK world conversion uses the full
+  // yaw-aligned quat while the target rotation ignored yaw — fine only while the robot never
+  // turns. model_9000 TURNS ~84 deg by design (v4 clips are baked facing world +Y), so identity
+  // yaw would rotate the target obs ~84 deg OOD mid-motion. Revert with --no-imu-yaw (only
+  // sensible for a non-turning model, e.g. p4).
+  bool use_imu_yaw_for_targets = true;  // see build_obs_180(use_base_yaw_for_targets)
   double oracle_max_age_s = 0.1;    // reject oracle samples older than this (stale bridge/sim).
   double dt = 0.02;              // 50 Hz
   double strike_period = 3.0;    // seconds between strikes (level 1)
@@ -177,21 +180,23 @@ struct PpPolicyConfig {
   // (clip 1). Toggle live with the f/b keys. No live planner — this is the
   // scripted TEST path.
   bool start_backhand = false;
-  // Scripted racket TEST targets, PER CLIP, chosen inside the TRAINED sampling boxes of the
-  // deployed lineage (explicitpd_ft/params/env.yaml: racket_pos_range_per_clip /
-  // racket_vel_range_per_clip, forehand_on_negative_y=true):
-  //   clip0 forehand: pos x[0.35,0.62] y[-0.95,-0.10] z[0.72,1.02]  vel x[1.05,2.05] y[0.70,1.65] z[0.20,1.00]
-  //   clip1 backhand: pos x[0.40,0.66] y[-0.30, 0.52] z[0.90,1.20]  vel x[1.30,2.30] y[-0.95,0.05] z[0.00,0.40]
-  // The previous SINGLE target (0.40,∓0.22,0.82) + vel (1,0,0) mirrored y for backhand and was
-  // OUT-OF-DISTRIBUTION: vel on every clip (y/z outside the boxes) and backhand z (0.82 < 0.90).
-  // OOD command obs degrade the policy exactly when it must balance the swing.
-  // TRUE reference racket strikes (wrist+mount FK from the hopex clips): fh (0.681,-0.441,0.816),
-  // bh (0.616,0.146,1.021). The forehand target below is ~0.30 m SHORT of its ref strike, which
-  // invites the shallow stable swing observed; the original bh target (0.53,0.11,1.05) was only
-  // 0.10 m from the ref strike — a full-commitment lunge that toppled the free base. The bh
-  // target is therefore pulled short/low/slow to match the forehand's proven margin.
-  Vec3 racket_pos_w_clip[2] = {Vec3(0.45, -0.25, 0.85), Vec3(0.45, 0.10, 1.00)};
-  Vec3 racket_vel_w_clip[2] = {Vec3(1.55, 1.15, 0.60), Vec3(1.50, -0.40, 0.20)};
+  // Scripted racket TEST targets, PER CLIP, chosen inside the TRAINED sampling boxes.
+  // RE-SYNCED 2026-07-03 to the model_9000 generation (run 2026-07-03_02-01-17,
+  // cfg/task/HOPEPingPongDeployParity.yaml 2026-07-02 blade re-plane; same constants as
+  // mujoco_eval_onnx.py POS/VEL_RANGE_PER_CLIP):
+  //   clip0 forehand: pos x[0.58,0.78] y[-0.64,-0.24] z[0.72,0.92]  vel x[1.05,2.05] y[ 0.96, 1.96] z[0.31,1.11]
+  //   clip1 backhand: pos x[0.56,0.76] y[-0.07, 0.33] z[0.93,1.13]  vel x[1.61,2.61] y[-1.21,-0.21] z[0.00,0.71]
+  // Targets sit at the BOX CENTERS = each clip's reference BLADE strike state (fh (0.68,-0.44,0.82)
+  // vel (1.55,1.46,0.71); bh (0.66,0.13,1.03) vel (2.11,-0.71,0.36)). The previous values
+  // (fh/bh pos x=0.45, bh vel x=1.50) were the OLD explicitpd_ft-era boxes — 0.11-0.13 m BELOW the
+  // new x ranges = an OOD command obs on every tick of the swing.
+  // ⚠ model_9000 is a WALK-AND-STRIKE policy: with these world-fixed targets it turns ~84 deg and
+  // displaces its base 0.4-0.65 m before contact (measured in the deploy-faithful MuJoCo gate).
+  // That footwork only closes the loop when the localization source reports the REAL base motion
+  // (sim: --oracle-pelvis; hardware: mocap). Under perfect_tracking the base obs stays pinned to
+  // the reference pelvis and the strike loop runs OPEN — validate in sim with BOTH loc modes.
+  Vec3 racket_pos_w_clip[2] = {Vec3(0.68, -0.44, 0.82), Vec3(0.66, 0.13, 1.03)};
+  Vec3 racket_vel_w_clip[2] = {Vec3(1.55, 1.46, 0.71), Vec3(2.11, -0.71, 0.36)};
   // sim2real localisation gap: no global base/torso pose -> nominal (matches
   // the Python wbc_runner shadow behavior). base orientation uses the real IMU.
   Vec3 nominal_base_pos_w = Vec3(0.0, 0.0, 0.95);
@@ -226,6 +231,48 @@ class PpPolicy {
           "(strike frames %d/%d)\n",
           clip_.seg_len[0], clip_.seg_len[1], clip_.strike_phase[0], clip_.strike_phase[1],
           clip_.strike_frame(0), clip_.strike_frame(1));
+      // Baked-clip GROUNDING check (2026-07-03): the runner (and training's actor obs!) consume
+      // the RAW clip-world reference. A properly re-grounded clip (scripts/reground_hope_frame.py,
+      // e.g. the hopex lineage / p4) has frame-0 pelvis yaw == 0 -> refs coincide with the engage
+      // heading and a strike-in-place policy deploys cleanly under perfect_tracking. A NON-re-
+      // grounded clip (e.g. registry v4, pelvis yaw ~+82/+86 deg) trains a TURN-AND-WALK policy
+      // whose footwork perfect_tracking cannot observe (base obs pinned to the ref pelvis) ->
+      // open strike loop on hardware. Print per-clip baked yaw so a raw-clip model is never a
+      // silent surprise again.
+      for (int c = 0; c < 2; ++c) {
+        const auto r0 = onnx_.refs(clip_.seg_start(c));
+        const Vec4& q0 = r0.anchor_quat_w;
+        const double yaw0 = std::atan2(2.0 * (q0[0] * q0[3] + q0[1] * q0[2]),
+                                       1.0 - 2.0 * (q0[2] * q0[2] + q0[3] * q0[3]));
+        const double yaw0_deg = yaw0 * 180.0 / M_PI;
+        std::fprintf(stderr, "[pp] clip %d baked frame-0 anchor yaw = %+.1f deg%s\n", c, yaw0_deg,
+                     (std::fabs(yaw0_deg) > 20.0)
+                         ? "  ** NOT RE-GROUNDED: policy will TURN toward the clip heading and "
+                           "step to its target; that footwork is INVISIBLE under perfect_tracking "
+                           "(open strike loop). Use oracle/mocap localization, or deploy a model "
+                           "trained on re-grounded (+X, yaw~0) clips. **"
+                         : "");
+      }
+      // Periodic-wrap guard (2026-07-03): in the default periodic mode the tts clock wraps
+      // (1-strike_lead_frac)*strike_period seconds after the strike. If that is shorter than a
+      // clip's follow-through, the reference SNAPS back to the windup MID-FOLLOW-THROUGH — an
+      // untracked transition that topples the free base (the p4 backhand failure signature).
+      // v4 clips have LONG follow-throughs (fh 1.46 s / bh 1.74 s vs the 0.9 s default budget).
+      if (!cfg_.single_swing && cfg_.swing_rest_s < 0.0) {
+        const double post_budget = (1.0 - cfg_.strike_lead_frac) * cfg_.strike_period;
+        for (int c = 0; c < 2; ++c) {
+          const double follow_s =
+              (clip_.seg_len[c] - 1 - (clip_.strike_frame(c) - clip_.seg_start(c))) * cfg_.dt;
+          if (post_budget < follow_s - 1e-9) {
+            std::fprintf(stderr,
+                "[pp WARN] periodic mode wraps %.2f s after the strike but clip %d's "
+                "follow-through is %.2f s -> the reference will SNAP mid-follow-through "
+                "(untrained; topples the free base). Run with --single-swing or --swing-rest S, "
+                "or raise strike_period.\n",
+                post_budget, c, follow_s);
+          }
+        }
+      }
     } else {
       std::fprintf(stderr,
           "[pp WARN] ONNX carries NO clip layout metadata -> using the hardcoded LEGACY v1 "
@@ -487,11 +534,17 @@ class PpPolicy {
           oracle_fresh_ = true;
           oracle_age_s_ = s.age_s;
           st.torso_pos_w = torso_pos_from_base(st.base_pos_w, st.base_quat_w, st.q);
-        } else {  // stale/missing oracle -> SAFE fallback to perfect-tracking, warn
-          if (!oracle_warned_) {
-            oracle_warned_ = true;
-            std::fprintf(stderr, "[pp ORACLE] no fresh sample (bridge down / not "
-                                 "in sim?) -> falling back to perfect-tracking\n");
+        } else {  // stale/missing oracle -> SAFE fallback to perfect-tracking, warn LOUDLY
+          // 2026-07-03: this used to warn ONCE and then silently degrade — an --oracle-pelvis
+          // A/B run with the bridge down produced a perfect_tracking run in disguise (the two
+          // "different" loc-mode tests were identical). Now: repeat the warning every ~2 s and
+          // mark the fallback in oracle_fresh_ so the [obs] status line shows fresh=0.
+          oracle_fresh_ = false;
+          if ((oracle_warn_tick_++ % 100) == 0) {
+            std::fprintf(stderr,
+                "[pp ORACLE] NO FRESH SAMPLE (bridge down / stale shm?) -> running as "
+                "perfect-tracking. This is NOT an oracle run — start "
+                "scripts/run_oracle.sh first and require 'fresh=1' in the [obs] line.\n");
           }
           st.base_pos_w = refs.ref_pelvis_pos_w;
           st.torso_pos_w = refs.anchor_pos_w;
@@ -809,7 +862,7 @@ class PpPolicy {
   // --- localization / oracle (sim-only) + obs-debug state ---
   std::shared_ptr<PpOraclePose> oracle_;       // only used when loc_mode == kOracle
   bool oracle_fresh_ = false;
-  bool oracle_warned_ = false;
+  std::uint64_t oracle_warn_tick_ = 0;  // repeat the stale-oracle warning every ~2 s (100 ticks)
   double oracle_age_s_ = -1.0;
   std::uint64_t sync_miss_ = 0;
   mutable std::mutex obs_mu_;

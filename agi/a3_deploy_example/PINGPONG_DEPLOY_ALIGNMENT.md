@@ -17,34 +17,35 @@ sits alongside (does not replace) `PINGPONG_RUN.md`, `MUJOCO_VALIDATION_RUNBOOK.
 
 ---
 
-## 0. CURRENT DEPLOY STATE (2026-07-02) — read this first, copy-paste to go live
+## 0. CURRENT DEPLOY STATE (2026-07-03) — read this first, copy-paste to go live
 
-> This section supersedes any `model_15200` reference below. The rest of the doc
+> This section supersedes any `model_15200`/`p4` reference below. The rest of the doc
 > (§1–§12) is the historical alignment/verification record; the facts here are the
 > current ones.
 
-**Deployed policy:** `model_p4_deployparity.onnx` — **175-D obs / 31-act**,
-ALL-implicit-PD training (matches AGI's real actuation). The runner auto-detects
-175 vs 180 from the ONNX input, so the *same binary* runs p4 or the old 180-D
-`model_15200`. Selected in
+**Staged policy:** `model_9000_replane.onnx` — **175-D obs / 31-act**, all-implicit-PD
+training, v4 clips (seg `139,132` / strike phases `0.470,0.333` in metadata), from run
+`logs/rsl_rl/agibot_a3_hope_deploy_parity/2026-07-03_02-01-17` (`model_9000.pt`).
+Selected in
 [`config/a3_runtime_config.pingpong.yaml`](src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml)
-(`onnx.model_path`).
+(`onnx.model_path`). Scripted targets in `pp_policy.hpp` re-synced to its blade re-plane
+boxes; C++⇔Python parity PASS (5.4e-7); `--use-imu-yaw` now default ON (engage-relative
+yaw via yaw-align; revert `--no-imu-yaw` for p4).
 
-**Deploy FOREHAND ONLY.** In the 2026-07-02 AGI-MuJoCo gate p4 forehand = 10 clean
-cycles, |tilt|≤0.10, 0 guard trips. **Backhand is NOT deploy-ready** on any model
-(training gap: teleport-entry, no stand-entry coverage). On the robot press `1`/`f`
-(forehand); **never press `b`.**
+**Swing clearance is PENDING the AGI-MuJoCo gate for this model** — do not inherit the
+p4-era "forehand only / never `b`" verdict. Training-side deploy-faithful gate: 7/7 swings
+incl. backhand 3/3, 0 falls (oracle base pose). ⚠ **model_9000 is a WALK-AND-STRIKE
+policy** (turns ~84°, steps 0.4–0.65 m to its target): the AGI-MuJoCo gate MUST be run in
+BOTH loc modes (`perfect_tracking` default AND `--oracle-pelvis`); if perfect_tracking
+fails, hardware requires mocap localization — fall back to
+`model_p4_deployparity.onnx` (+`--no-imu-yaw`), whose forehand-only 2026-07-02 verdict
+(10 clean cycles, never `b`) still stands for p4 itself.
 
-**Package state (verified on disk):**
-| Package | Binary | Model | Status |
-|---|---|---|---|
-| `dist/a3_deploy_x86_64/` | 2026-07-02 (has `--single-swing`, ONNX clip-metadata, zero-gain guard, squat-guard 1.4) | `model_p4_deployparity.onnx` | **current** (sim/MuJoCo) |
-| `dist/a3_deploy_rockchip/` | **2026-07-01, STALE** — none of the 07-02 fixes | `model_15200.onnx` | **must rebuild before robot** |
-
-⚠️ The real robot (Rockchip/MDU, aarch64) uses `dist/a3_deploy_rockchip/`. The
-staged one predates every 07-02 sim2real fall fix — **rebuild it first** (the
-builder now auto-stages p4 + rewrites the model path; the old "记得拷回模型"
-note is obsolete).
+**Package state:** both dists rebuilt 2026-07-03 with `model_9000_replane.onnx` + the
+07-03 runner changes (targets re-sync, imu-yaw default, periodic-wrap startup warning).
+Rebuild BOTH dists after ANY `pp_*.hpp` edit — dist is never auto-rebuilt. Startup marker
+that proves fresh binary AND fresh model:
+`[pp] clip layout from ONNX metadata: seg_len={139,132} strike_phase={0.470,0.333}`.
 
 ### A. Rebuild the rockchip package (**HOST shell, NOT `hope`** — needs Docker)
 > ⚠️ `--arch rockchip` re-invokes itself inside the `a3-rockchip-builder` Docker

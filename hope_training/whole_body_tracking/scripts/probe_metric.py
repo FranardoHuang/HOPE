@@ -41,6 +41,12 @@ def _run(cfg, simulation_app):
     env_cfg.sim.device = str(cfg.device)
     env_cfg.commands.motion.motion_file = str(cfg.motion_file)
 
+    # HER achieved-target replay is TRAIN-ONLY (the probe must measure the pure box distribution).
+    if hasattr(env_cfg.commands, "racket_target") and hasattr(
+        env_cfg.commands.racket_target, "achieved_target_mix_prob"
+    ):
+        env_cfg.commands.racket_target.achieved_target_mix_prob = 0.0
+
     agent_cfg = RslRlOnPolicyRunnerCfg(
         **runner_kwargs(OmegaConf.to_container(cfg.algo, resolve=True), str(cfg.task.experiment_name))
     )

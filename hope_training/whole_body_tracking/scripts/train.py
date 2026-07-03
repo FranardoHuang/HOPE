@@ -118,6 +118,9 @@ _RACKET_KEYS = (
     "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "ref_vel_scale_by_motion",
     "debug_reward_logging",
     "clean_reference_strike_velocity", "clean_strike_vel_window",
+    # HER-style achieved-target replay (mixture sampling from previously-achieved strike states).
+    "achieved_target_mix_prob", "achieved_buffer_size", "achieved_min_fill",
+    "achieved_jitter_pos", "achieved_jitter_vel", "achieved_clamp_inflate",
 )
 
 
@@ -312,6 +315,13 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
         _set_reward(R, "racket_velocity", _get(rw, "racket_velocity_weight"), _get(rw, "racket_velocity_std"), applied)
         _set_reward(R, "racket_normal", _get(rw, "racket_normal_weight"), _get(rw, "racket_normal_std"), applied)
         _set_reward(R, "base_position", _get(rw, "base_position_weight"), _get(rw, "base_position_std"), applied)
+        # Between-swing recovery: positive ready-stance reward during the pre-swing hold (deploy-parity).
+        _set_reward(R, "hold_ready", _get(rw, "hold_ready_weight"), _get(rw, "hold_ready_std"), applied)
+        _hr_reach = _get(rw, "hold_ready_reach")
+        if _hr_reach is not None:
+            _require(hasattr(R, "hold_ready"), "rewards.hold_ready")
+            R.hold_ready.params["reach"] = float(_hr_reach)
+            applied.append(f"rewards.hold_ready.params.reach={float(_hr_reach)}")
         jt = _get(rw, "joint_torques_weight")
         if jt is not None:
             _require(hasattr(R, "joint_torques"), "rewards.joint_torques")
@@ -430,6 +440,14 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(C, "clean_reference_strike_velocity", _get(rk, "clean_reference_strike_velocity"),
                       _as_bool, applied, "racket_target")
             _set_attr(C, "clean_strike_vel_window", _get(rk, "clean_strike_vel_window"), int, applied, "racket_target")
+            # HER-style achieved-target replay: with prob achieved_target_mix_prob the next swing's target
+            # is a jittered previously-ACHIEVED strike state (per-clip ring buffer) instead of a box sample.
+            _set_attr(C, "achieved_target_mix_prob", _get(rk, "achieved_target_mix_prob"), float, applied, "racket_target")
+            _set_attr(C, "achieved_buffer_size", _get(rk, "achieved_buffer_size"), int, applied, "racket_target")
+            _set_attr(C, "achieved_min_fill", _get(rk, "achieved_min_fill"), int, applied, "racket_target")
+            _set_attr(C, "achieved_jitter_pos", _get(rk, "achieved_jitter_pos"), float, applied, "racket_target")
+            _set_attr(C, "achieved_jitter_vel", _get(rk, "achieved_jitter_vel"), float, applied, "racket_target")
+            _set_attr(C, "achieved_clamp_inflate", _get(rk, "achieved_clamp_inflate"), float, applied, "racket_target")
 
     # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
     # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.

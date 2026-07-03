@@ -36,21 +36,25 @@ import sys
 from statistics import mean, median
 
 # ---- contract constants (from the ONNX metadata / PINGPONG_DEPLOY_ALIGNMENT.md) ----
-OBS_DIM = 180
 N_ACT = 31
 # Isaac policy index of waist_roll, its action_scale, default pose, A3 limit.
 WAIST_ROLL_ISAAC_IDX = 5
 WAIST_ROLL_SCALE = 0.230
 WAIST_ROLL_DEFAULT = 0.0
 WAIST_ROLL_LIMIT = 0.34907  # +/- rad, A3 MJCF (pp_joint_limits.hpp slot 1)
-# obs block spans (see pp_obs_builder.hpp / a3_pingpong_main.cpp index map)
-B_ANCHOR_POS = (62, 65)
-B_PROJ_GRAV = (167, 170)
-B_JOINT_POS_REL = (74, 105)
-B_JOINT_VEL = (105, 136)
-B_RACKET_TGT = (172, 175)
-B_TTS = 178
-B_SWING = 179
+
+
+# obs block spans per contract (see pp_obs_builder.hpp / a3_pingpong_main.cpp blks175/blks180).
+# 180 = legacy FULL layout; 175 = deploy_parity (drops motion_anchor_pos_b[62:65] +
+# base_target_pos_b[170:172], racket target reframed relative to the racket FK).
+def obs_blocks(n_obs_cols):
+    if n_obs_cols == 180:
+        return {"anchor_pos": (62, 65), "joint_pos_rel": (74, 105), "joint_vel": (105, 136),
+                "proj_grav": (167, 170), "racket_tgt": (172, 175), "tts": 178, "swing": 179}
+    if n_obs_cols == 175:
+        return {"anchor_pos": None, "joint_pos_rel": (71, 102), "joint_vel": (102, 133),
+                "proj_grav": (164, 167), "racket_tgt": (167, 170), "tts": 173, "swing": 174}
+    return None
 
 # A3 joint POSITION limits in backend(SDK) order, verbatim from pp_joint_limits.hpp
 # (kSdkJointPosLo/Hi). Used by the trace full-body audit to flag rail-bound q_des.
@@ -170,12 +174,20 @@ def analyze_obs(label, path, rows, cols):
     n_obs_cols = sum(1 for c in cols if c.startswith("obs_"))
     has_act = any(c.startswith("act_") for c in cols)
 
-    # 1. obs dimension
-    rep.check("obs_dim==180", "PASS" if n_obs_cols == OBS_DIM else "FAIL",
+    # 1. obs dimension (175 deploy_parity or 180 full)
+    blocks = obs_blocks(n_obs_cols)
+    rep.check("obs_dim in (175,180)", "PASS" if blocks is not None else "FAIL",
               f"found {n_obs_cols}")
-    if n_obs_cols != OBS_DIM:
+    if blocks is None:
         rep.info(f"  ticks logged : {len(rows)}")
         return rep
+    OBS_DIM = n_obs_cols
+    B_ANCHOR_POS = blocks["anchor_pos"]
+    B_PROJ_GRAV = blocks["proj_grav"]
+    B_JOINT_POS_REL = blocks["joint_pos_rel"]
+    B_JOINT_VEL = blocks["joint_vel"]
+    B_RACKET_TGT = blocks["racket_tgt"]
+    B_SWING = blocks["swing"]
 
     # Build obs/act from COMPLETE rows only (a live/streaming CSV may have a
     # partial last line -> DictReader yields None cells; skip those).
@@ -216,14 +228,17 @@ def analyze_obs(label, path, rows, cols):
     rep.check("projected_gravity |g|~1", "PASS" if worst < 0.1 else "FAIL",
               f"max|‖g‖-1|={worst:.3f}  meanGz={mean(gz):+.3f} (upright≈-1)")
 
-    # 4. motion_anchor_pos_b ~ 0 in perfect_tracking
-    an = [vnorm(o[B_ANCHOR_POS[0]:B_ANCHOR_POS[1]]) for o in obs]
-    amax = max(an)
-    if loc_mode == "1":
-        st = "PASS" if amax < 1e-3 else ("WARN" if amax < 0.05 else "FAIL")
-        rep.check("anchor_pos_b~0 (perfect)", st, f"max|.|={amax:.5f}")
+    # 4. motion_anchor_pos_b ~ 0 in perfect_tracking (180-D layout only; 175 drops the term)
+    if B_ANCHOR_POS is not None:
+        an = [vnorm(o[B_ANCHOR_POS[0]:B_ANCHOR_POS[1]]) for o in obs]
+        amax = max(an)
+        if loc_mode == "1":
+            st = "PASS" if amax < 1e-3 else ("WARN" if amax < 0.05 else "FAIL")
+            rep.check("anchor_pos_b~0 (perfect)", st, f"max|.|={amax:.5f}")
+        else:
+            rep.check("anchor_pos_b (non-perfect)", "INFO", f"max|.|={amax:.4f} (only ~0 expected in perfect_tracking)")
     else:
-        rep.check("anchor_pos_b (non-perfect)", "INFO", f"max|.|={amax:.4f} (only ~0 expected in perfect_tracking)")
+        rep.info("  anchor_pos_b: n/a (175-D deploy_parity layout has no world anchor-pos term)")
 
     # 5. joint_pos_rel bounded
     jpr = [max(abs(x) for x in o[B_JOINT_POS_REL[0]:B_JOINT_POS_REL[1]]) for o in obs]
@@ -252,7 +267,9 @@ def analyze_obs(label, path, rows, cols):
     rk = [o[B_RACKET_TGT[0]:B_RACKET_TGT[1]] for o in obs]
     rkx = [v[0] for v in rk]
     rep.info(f"  racket_target_pos_b x: min={min(rkx):+.3f} max={max(rkx):+.3f}  "
-             f"(forehand expects ~+0.4 FRONT; negative => yaw-frame wrong)")
+             + ("(175-D: target RELATIVE TO RACKET FK; shrinks toward 0 through the swing)"
+                if OBS_DIM == 175 else
+                "(180-D: forehand expects ~+0.4 FRONT; negative => yaw-frame wrong)"))
     sw = set(round(o[B_SWING]) for o in obs)
     rep.info(f"  swing_type values: {sorted(sw)}  (+1 forehand / -1 backhand)")
     sm = [int(r["sync_miss"]) for r in grows

@@ -58,15 +58,43 @@ MODEL_15200_RANGE = {
     "z": (0.65, 1.30),        # forehand box ~[0.74,0.98], backhand box ~[1.05,1.30]
     "speed": (0.0, 3.50),     # target paddle speed at strike (training box |v|)
 }
+# ---------------------------------------------------------------------------
+# model_9000 (2026-07-03, run 2026-07-03_02-01-17) target distribution — the
+# 2026-07-02 blade re-plane PER-CLIP boxes (cfg/task/HOPEPingPongDeployParity.yaml).
+# NOTE the schema differs from 15200: boxes are per-clip and SIGNED in y (the
+# backhand box crosses y=0), so the shared y_abs form is only an approximation.
+# ⚠ model_9000 is a WALK-AND-STRIKE policy (turns ~84 deg, steps 0.4-0.65 m to
+# its target): its targets are only meaningful with real base localization; do
+# NOT drive it through this base_link-frame fake planner without mocap.
+# ---------------------------------------------------------------------------
+MODEL_9000_RANGE = {
+    "x": (0.56, 0.78),        # union of fh [0.58,0.78] / bh [0.56,0.76]
+    "y_abs": (0.00, 0.64),    # fh y in [-0.64,-0.24]; bh y in [-0.07,0.33] (crosses 0)
+    "z": (0.72, 1.13),        # fh z [0.72,0.92]; bh z [0.93,1.13]
+    "speed": (0.0, 3.50),
+    "pos_per_clip": {"forehand": ((0.58, 0.78), (-0.64, -0.24), (0.72, 0.92)),
+                     "backhand": ((0.56, 0.76), (-0.07, 0.33), (0.93, 1.13))},
+    "vel_per_clip": {"forehand": ((1.05, 2.05), (0.96, 1.96), (0.31, 1.11)),
+                     "backhand": ((1.61, 2.61), (-1.21, -0.21), (0.00, 0.71))},
+}
+# Strike phases are PER-MODEL (baked in each ONNX's clip_strike_phases metadata):
+# model_15200 era = (0.36, 0.50); model_9000 / v4 clips = (0.47, 0.333).
 FOREHAND_STRIKE_PHASE = 0.36
 BACKHAND_STRIKE_PHASE = 0.50
+MODEL_9000_FOREHAND_STRIKE_PHASE = 0.47
+MODEL_9000_BACKHAND_STRIKE_PHASE = 0.333
 FOREHAND = "forehand"
 BACKHAND = "backhand"
 
 
 @dataclass
 class SafetyLimits:
-    """Conservative clamps applied to every generated command."""
+    """Conservative clamps applied to every generated command.
+
+    DEFAULTS ARE model_15200-ERA (x capped at 0.50). For a model_9000 bring-up use
+    ``SafetyLimits.for_model_9000()`` — the 15200 defaults hard-clamp every valid
+    model_9000 target OOD (its boxes need x >= 0.56).
+    """
 
     x_range: tuple = (0.30, 0.50)
     y_abs_range: tuple = (0.05, 0.45)
@@ -74,6 +102,10 @@ class SafetyLimits:
     max_speed: float = 3.0          # m/s hard ceiling on target paddle speed
     max_pos_step: float = 0.50      # m; max change in target position per published cycle (slew)
     backhand_disabled: bool = False  # hard-disable backhand swings (bring-up safety)
+
+    @classmethod
+    def for_model_9000(cls) -> "SafetyLimits":
+        return cls(x_range=(0.56, 0.78), y_abs_range=(0.00, 0.64), z_range=(0.72, 1.13))
 
 
 @dataclass

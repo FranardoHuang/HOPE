@@ -200,10 +200,41 @@ class RacketTargetCommand(CommandTerm):
         self._swing_starts_acc = 0.0
         self._swing_starts_acc_c = {c: 0.0 for c in self._clip_names}
         self._prestrike_fall_acc = 0.0
+        # POST-strike falls (fall AFTER reaching the strike frame — the follow-through/recovery fall that
+        # swing_completion_rate + pre_strike_fall_rate are both blind to; it was the actual backhand
+        # deploy failure mode). Same swing-starts denominator as pre_strike_fall_rate.
+        self._poststrike_fall_acc = 0.0
+        # Per-clip fall attribution. NOTE: at reset time the MOTION command has already resampled
+        # clip_id to the NEW swing (motion resets before racket_target), so falls are attributed via
+        # _prev_clip_id — the clip snapshot taken at the END of the previous _update_command, i.e. the
+        # clip the env was actually swinging when it fell.
+        self._prestrike_fall_acc_c = {c: 0.0 for c in self._clip_names}
+        self._poststrike_fall_acc_c = {c: 0.0 for c in self._clip_names}
+        self._prev_clip_id = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        # Post-wrap recovery latch: >=0 = the clip whose swing JUST finished while this env sits in the
+        # post-wrap hold. A fall during that hold is physically the PREVIOUS swing's recovery fall, but
+        # at the wrap the timing already describes the NEXT swing (pre_strike=True, clip_id=new random
+        # clip) — without the latch such falls book as pre-strike falls of a 50%-wrong clip, which would
+        # invert exactly the backhand-recovery diagnosis these metrics exist for. -1 = not recovering.
+        self._recover_from_clip = torch.full((self.num_envs,), -1, dtype=torch.long, device=self.device)
         # True only while _resample_command is invoked from the intra-episode WRAP path (see
         # _update_command): wraps start a new swing but never count a pre-strike fall (a wrapped
         # env necessarily passed its strike frame alive).
         self._resample_is_wrap = False
+
+        # --- HER-style achieved-target replay buffers (see RacketTargetCommandCfg) -----------------
+        # Per-clip ring buffers of the racket state the policy ACTUALLY produced at exact-strike frames:
+        # position env-origin-relative (world minus env origin), velocity world. Written in
+        # _update_metrics on the exact_strike mask (alive envs only — terminated envs were reset before
+        # the command computes); read in _sample_targets_uniform with prob achieved_target_mix_prob.
+        _absize = max(int(cfg.achieved_buffer_size), 1)
+        self._ach_pos = {c: torch.zeros(_absize, 3, device=self.device) for c in self._clip_names}
+        self._ach_vel = {c: torch.zeros(_absize, 3, device=self.device) for c in self._clip_names}
+        self._ach_fill = {c: 0 for c in self._clip_names}
+        self._ach_ptr = {c: 0 for c in self._clip_names}
+        # Decayed counters for the logged replay fraction (same EMA timescale as the exact accumulators).
+        self._resample_n_acc = 0.0
+        self._replay_n_acc = 0.0
 
         # Strike timing / gating.
         self.time_to_strike = torch.zeros(self.num_envs, device=self.device)
@@ -266,6 +297,18 @@ class RacketTargetCommand(CommandTerm):
         for _cname in self._clip_names.values():
             self.metrics[f"swing_completion_rate_{_cname}"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["pre_strike_fall_rate"] = torch.zeros(self.num_envs, device=self.device)
+        # Post-strike (follow-through/recovery) falls + per-clip fall attribution: the multi-swing
+        # episode's real recovery signal. pre_strike_fall_rate alone hides a policy that hits and THEN
+        # falls (100% completion, 0% pre-strike falls — the actual backhand deploy failure signature).
+        self.metrics["post_strike_fall_rate"] = torch.zeros(self.num_envs, device=self.device)
+        for _cname in self._clip_names.values():
+            self.metrics[f"pre_strike_fall_rate_{_cname}"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[f"post_strike_fall_rate_{_cname}"] = torch.zeros(self.num_envs, device=self.device)
+        # HER-style achieved-target replay diagnostics: fraction of resampled targets drawn from the
+        # achieved buffer (EMA; ~achieved_target_mix_prob once the buffers are filled) + per-clip fill.
+        self.metrics["achieved_replay_frac"] = torch.zeros(self.num_envs, device=self.device)
+        for _cname in self._clip_names.values():
+            self.metrics[f"achieved_buffer_fill_{_cname}"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["strike_window_hit_rate"] = torch.zeros(self.num_envs, device=self.device)
         # Base-position error while the base target is active (pre-strike), held at its last value.
         self.metrics["base_pos_error_pre_strike"] = torch.zeros(self.num_envs, device=self.device)
@@ -586,6 +629,49 @@ class RacketTargetCommand(CommandTerm):
             vel[:, 2] = sample_uniform(*self.cfg.racket_vel_z_range, (n,), self.device)
         self.racket_target_vel_w[env_ids] = vel
 
+        # --- HER-style achieved-target replay (mixture) --------------------------------------------
+        # With prob achieved_target_mix_prob, overwrite the freshly box-sampled pos+vel with a jittered
+        # PREVIOUSLY-ACHIEVED strike state from this clip's ring buffer (written at exact-strike frames
+        # in _update_metrics). Replayed targets are reachable-by-demonstration, so the target
+        # distribution stops asking for points the taught swing never passes through (Ace/HER, adapted
+        # forward-looking for on-policy PPO — retroactive relabel would be obs-inconsistent). Clamped
+        # into the per-clip box inflated by achieved_clamp_inflate so replay can neither collapse the
+        # target support nor drift outside the deploy runner's hand-synced target clips. Non-replayed
+        # envs keep the pure box sample; the per-clip reference normal below is shared by both paths.
+        if self.cfg.achieved_target_mix_prob > 0.0 and motion._multiseg:
+            env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+            clip_all = motion.clip_id[env_ids_t]
+            replay = torch.rand(n, device=self.device) < float(self.cfg.achieved_target_mix_prob)
+            self._resample_n_acc += float(n)
+            infl = 1.0 + float(self.cfg.achieved_clamp_inflate)
+            for c in self._clip_names:
+                fill = self._ach_fill.get(c, 0)
+                if fill < int(self.cfg.achieved_min_fill):
+                    continue
+                sel = replay & (clip_all == c)
+                m = int(sel.sum())
+                if m == 0:
+                    continue
+                rows = torch.randint(0, fill, (m,), device=self.device)
+                rpos = self._ach_pos[c][rows] + (torch.rand(m, 3, device=self.device) * 2.0 - 1.0) * float(
+                    self.cfg.achieved_jitter_pos
+                )
+                rvel = self._ach_vel[c][rows] + (torch.rand(m, 3, device=self.device) * 2.0 - 1.0) * float(
+                    self.cfg.achieved_jitter_vel
+                )
+                if self._pos_range_per_clip_t is not None and c < self._pos_range_per_clip_t.shape[0]:
+                    lo, hi = self._pos_range_per_clip_t[c, :, 0], self._pos_range_per_clip_t[c, :, 1]
+                    ctr, half = (lo + hi) * 0.5, (hi - lo) * 0.5 * infl
+                    rpos = torch.min(torch.max(rpos, ctr - half), ctr + half)
+                if self._vel_range_per_clip_t is not None and c < self._vel_range_per_clip_t.shape[0]:
+                    lo, hi = self._vel_range_per_clip_t[c, :, 0], self._vel_range_per_clip_t[c, :, 1]
+                    ctr, half = (lo + hi) * 0.5, (hi - lo) * 0.5 * infl
+                    rvel = torch.min(torch.max(rvel, ctr - half), ctr + half)
+                ids_sel = env_ids_t[sel]
+                self.racket_target_pos_w[ids_sel] = self._env.scene.env_origins[ids_sel] + rpos
+                self.racket_target_vel_w[ids_sel] = rvel
+                self._replay_n_acc += float(m)
+
         if motion._multiseg:
             # Unified policy: the target paddle normal is the imitated swing's actual face normal at
             # strike (reachable by the imitation). The sampled racket velocity is the SWING-PATH direction,
@@ -731,7 +817,7 @@ class RacketTargetCommand(CommandTerm):
         ml = motion.motion
         if motion._multiseg:
             # Per-clip strike frame on the concatenated time axis: the contact phase differs per swing
-            # (forehand peak ~0.36, backhand ~0.74), so resolve strike_step per env from its clip.
+            # (v2 blade re-plane: forehand 0.47, backhand 0.333), so resolve strike_step per env from its clip.
             if self._strike_phase_per_clip_t is None:
                 sp = tuple(self.cfg.strike_phase_per_clip)
                 if sp and len(sp) == ml.num_segments:
@@ -770,12 +856,25 @@ class RacketTargetCommand(CommandTerm):
             # Wrap path: a wrapped env passed its strike frame alive (strike < seg end), so no
             # pre-strike fall is counted — the flag only gates fall accounting inside
             # _resample_command's _count_swing_starts hook.
+            if motion._multiseg:
+                # Latch the clip that JUST finished (before _prev_clip_id is re-snapshotted below):
+                # while the post-wrap hold lasts, a fall belongs to THIS swing's recovery.
+                self._recover_from_clip[wrapped] = self._prev_clip_id[wrapped]
             self._resample_is_wrap = True
             try:
                 self._resample_command(wrapped)
             finally:
                 self._resample_is_wrap = False
+        # The recovery window ends when the post-wrap hold expires (the new swing's clock starts
+        # advancing) — from then on falls are genuinely pre-strike of the new clip. in_hold is this
+        # step's post-decrement hold state, so a zero-length hold clears the latch immediately.
+        if motion._multiseg and hasattr(motion, "in_hold"):
+            self._recover_from_clip[~motion.in_hold] = -1
         self._prev_motion_steps = motion.time_steps.clone()
+        # Snapshot the clip each env is swinging THIS step: at the next true reset the motion command
+        # will already have resampled clip_id, so fall attribution reads this snapshot instead.
+        if motion._multiseg:
+            self._prev_clip_id = motion.clip_id.clone()
 
     def _count_swing_starts(self, env_ids, count_prestrike_falls: bool) -> None:
         """UNCONDITIONAL swing accounting (Phase A wandb fix). Increment-only here; the decay is
@@ -794,7 +893,30 @@ class RacketTargetCommand(CommandTerm):
                 self._swing_starts_acc_c[c] += float((clips == c).sum())
         if count_prestrike_falls:
             term = self._env.termination_manager.terminated[env_ids]
-            self._prestrike_fall_acc += float((term & self.pre_strike[env_ids]).sum())
+            pre = self.pre_strike[env_ids]
+            # POST-strike fall = terminated at/after the strike frame (tts <= 0, follow-through) OR
+            # during the post-wrap hold (_recover_from_clip latch >= 0: the previous swing's recovery,
+            # even though the wrap already flipped pre_strike=True for the NEXT swing). Both are the
+            # "hit, then fall while recovering" failure that completion + pre-strike metrics miss.
+            rec = self._recover_from_clip[env_ids]
+            recovering = rec >= 0
+            true_pre = term & pre & ~recovering
+            post = term & (~pre | recovering)
+            self._prestrike_fall_acc += float(true_pre.sum())
+            self._poststrike_fall_acc += float(post.sum())
+            if motion._multiseg:
+                # Attribute the fall to the clip the env was ON when it fell: pre-strike falls to the
+                # _prev_clip_id snapshot (motion already resampled clip_id for the new episode);
+                # post-wrap-hold falls to the latched clip whose swing caused the recovery.
+                fall_clips = torch.where(recovering, rec, self._prev_clip_id[env_ids])
+                for c in self._clip_names:
+                    csel = fall_clips == c
+                    self._prestrike_fall_acc_c[c] += float((true_pre & csel).sum())
+                    self._poststrike_fall_acc_c[c] += float((post & csel).sum())
+            # True reset: the new episode starts fresh (its stand-start/reset hold is genuine
+            # pre-strike preparation, not recovery), so clear the latch for these envs.
+            env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+            self._recover_from_clip[env_ids_t] = -1
 
     def _update_footwork_signals(self, racket_dist: torch.Tensor) -> None:
         """Base-FREE footwork-to-strike signals (reward/metric only; NEVER observed). The legs are driven
@@ -1002,17 +1124,40 @@ class RacketTargetCommand(CommandTerm):
         # only contains exact-strike samples (pre-strike falls are invisible to it).
         self._swing_starts_acc = decay * self._swing_starts_acc
         self._prestrike_fall_acc = decay * self._prestrike_fall_acc
+        self._poststrike_fall_acc = decay * self._poststrike_fall_acc
+        self._resample_n_acc = decay * self._resample_n_acc
+        self._replay_n_acc = decay * self._replay_n_acc
         for _c in self._clip_names:
             self._swing_starts_acc_c[_c] = decay * self._swing_starts_acc_c[_c]
+            self._prestrike_fall_acc_c[_c] = decay * self._prestrike_fall_acc_c[_c]
+            self._poststrike_fall_acc_c[_c] = decay * self._poststrike_fall_acc_c[_c]
         _s_denom = max(self._swing_starts_acc, 1e-6)
         _s_enough = self._swing_starts_acc >= float(self.cfg.exact_success_min_count)
         self.metrics["swing_completion_rate"][:] = min(self._exact_n_acc / _s_denom, 1.0) if _s_enough else 0.0
         self.metrics["pre_strike_fall_rate"][:] = min(self._prestrike_fall_acc / _s_denom, 1.0) if _s_enough else 0.0
+        self.metrics["post_strike_fall_rate"][:] = (
+            min(self._poststrike_fall_acc / _s_denom, 1.0) if _s_enough else 0.0
+        )
+        # HER replay diagnostics: fraction of resampled targets drawn from the achieved buffer
+        # (~achieved_target_mix_prob once the per-clip buffers pass achieved_min_fill).
+        self.metrics["achieved_replay_frac"][:] = (
+            self._replay_n_acc / max(self._resample_n_acc, 1e-6)
+            if self._resample_n_acc >= float(self.cfg.exact_success_min_count)
+            else 0.0
+        )
         for _c, _cn in self._clip_names.items():
             _cd = max(self._swing_starts_acc_c[_c], 1e-6)
             _ce = self._swing_starts_acc_c[_c] >= float(self.cfg.exact_success_min_count)
             self.metrics[f"swing_completion_rate_{_cn}"][:] = (
                 min(self._exact_n_acc_c[_c] / _cd, 1.0) if _ce else 0.0
+            )
+            # Fall attribution uses _prev_clip_id (the clip during the fall) while starts use the NEW
+            # clip; with uniform clip resampling the denominators match in expectation.
+            self.metrics[f"pre_strike_fall_rate_{_cn}"][:] = (
+                min(self._prestrike_fall_acc_c[_c] / _cd, 1.0) if _ce else 0.0
+            )
+            self.metrics[f"post_strike_fall_rate_{_cn}"][:] = (
+                min(self._poststrike_fall_acc_c[_c] / _cd, 1.0) if _ce else 0.0
             )
 
         enough = self._exact_n_acc >= float(self.cfg.exact_success_min_count)
@@ -1061,6 +1206,25 @@ class RacketTargetCommand(CommandTerm):
                 self.metrics[f"racket_pos_error_exact_strike_{_cn}"][:] = self._exact_pos_err_sum_c[_c] * _scale
                 self.metrics[f"racket_vel_error_exact_strike_{_cn}"][:] = self._exact_vel_err_sum_c[_c] * _scale
                 self.metrics[f"racket_normal_error_deg_exact_strike_{_cn}"][:] = self._exact_nrm_err_sum_c[_c] * _scale
+            # --- HER achieved-target buffer WRITE ---------------------------------------------------
+            # Record the racket state the policy ACTUALLY produced at this step's exact-strike frames
+            # (pos env-origin-relative, vel world). Alive envs only by construction: terminated envs
+            # were reset before the command computes, so their state never lands here. Gated on the mix
+            # prob so the buffers cost nothing when replay is off.
+            if self.cfg.achieved_target_mix_prob > 0.0:
+                for _c in self._clip_names:
+                    _bidx = torch.where(exact_strike & (_clip == _c))[0]
+                    _m = int(_bidx.numel())
+                    if _m == 0:
+                        continue
+                    _size = self._ach_pos[_c].shape[0]
+                    _rows = (self._ach_ptr[_c] + torch.arange(_m, device=self.device)) % _size
+                    self._ach_pos[_c][_rows] = self.racket_pos_w[_bidx] - origins[_bidx]
+                    self._ach_vel[_c][_rows] = self.racket_lin_vel_w[_bidx]
+                    self._ach_ptr[_c] = int((self._ach_ptr[_c] + _m) % _size)
+                    self._ach_fill[_c] = min(self._ach_fill[_c] + _m, _size)
+            for _c, _cn in self._clip_names.items():
+                self.metrics[f"achieved_buffer_fill_{_cn}"][:] = float(self._ach_fill[_c])
         # Per-axis position error AT the exact strike frame (which axis is the miss?). The position-only
         # strike_success_exact was dropped — strike_pos_pass_exact above is the same signal, undiluted.
         _axis_err_exact = torch.abs(self.racket_pos_w - self.racket_target_pos_w)
@@ -1363,6 +1527,28 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # shared z<=1.05 box), so a shared box makes that clip's strike-frame position unreachable. Per-clip
     # boxes let each clip's target track its own reference strike point.
     racket_pos_range_per_clip: tuple | None = None
+
+    # --- HER-style achieved-target replay (uniform mode + unified multi-clip only) -------------------
+    # On-policy-compatible hindsight relabeling (Ace/HER, adapted for PPO): true retroactive relabeling is
+    # observation-inconsistent here (the target is in the actor obs every step), so instead the NEXT
+    # swing's target is drawn, with probability `achieved_target_mix_prob`, from a per-clip ring buffer of
+    # racket states the policy ACTUALLY produced at previous exact-strike frames (pos env-origin-relative,
+    # vel world). Every replayed target is reachable-by-demonstration — it kills the "the box asks for a
+    # point the taught swing never passes through" mismatch without moving the box. Mixture (not pure
+    # replay) + jitter + clamping into the per-clip box inflated by `achieved_clamp_inflate` (clamp
+    # applies only when per-clip boxes are configured — the unified task always sets them) prevent the
+    # target distribution from collapsing onto what the policy already does or drifting far from the
+    # training workspace. NOTE the deploy-side target clips must be re-synced to the training boxes
+    # whenever the boxes change (they are hand-maintained in pp_policy.hpp / imitate_presets.py).
+    # 0.0 = OFF (backward compatible: pure box sampling). TRAIN-ONLY: eval entry points force this to
+    # 0.0 so checkpoints are always scored on the pure box distribution. The buffer only fills at
+    # exact-strike frames of envs that are still alive, so fallen approaches never contribute targets.
+    achieved_target_mix_prob: float = 0.0
+    achieved_buffer_size: int = 4096  # per-clip ring buffer capacity (entries)
+    achieved_min_fill: int = 256  # replay only once a clip's buffer holds at least this many entries
+    achieved_jitter_pos: float = 0.03  # m, uniform per-axis jitter added to a replayed position
+    achieved_jitter_vel: float = 0.15  # m/s, uniform per-axis jitter added to a replayed velocity
+    achieved_clamp_inflate: float = 0.20  # clamp replayed targets into the per-clip box inflated by this fraction
 
     # --- desired racket face normal ---
     normal_mode: str = "velocity"  # "velocity" (n = v/|v|) or "sampled"

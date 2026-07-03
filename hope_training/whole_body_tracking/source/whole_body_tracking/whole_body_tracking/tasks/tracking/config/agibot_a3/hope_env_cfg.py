@@ -244,7 +244,18 @@ class HOPEObservationsDeployParityCfg(HOPEObservationsCfg):
             noise=Unoise(n_min=-0.02, n_max=0.02),
         )
 
+    @configclass
+    class HOPECriticDeployParityCfg(HOPEObservationsCfg.HOPECriticCfg):
+        # Vestigial in the base-free deploy-parity task: the base target is never consumed by any reward
+        # or actor obs and (base_couple_blend=0) is pure spawn+jitter noise — conditioning the value
+        # function on it only adds variance. Removing it changes the CRITIC input dim (2026-07-03), so
+        # every pre-change checkpoint fails a FULL strict load — train.py resume stays a loud error on
+        # purpose; play.py (export) and eval_deterministic.py fall back to an actor-only tolerant load
+        # (utils/ckpt_compat.py). The exported ACTOR / 175-D contract is untouched.
+        base_target_pos_b = None
+
     policy: HOPEPolicyDeployParityCfg = HOPEPolicyDeployParityCfg()
+    critic: HOPECriticDeployParityCfg = HOPECriticDeployParityCfg()
 
 
 @configclass
@@ -292,6 +303,19 @@ class HOPEDeployParityRewardsCfg(HOPERewardsCfg):
     # (waist_twist_prestrike stays high / legs stay frozen); lower if it flattens the swing.
     prestrike_waist_twist = RewTerm(
         func=mdp.prestrike_waist_twist, weight=-1.0, params={"command_name": "racket_target"})
+
+    # --- between-swing recovery: POSITIVE ready-stance reward during the pre-swing HOLD --------------
+    # (2026-07-03 audit alignment) HITTER's recovery signal is positive-and-causal ("prepare for the next
+    # target"), not a pile of penalties. During the hold the imitation reward already pulls the UPPER body
+    # to the windup pose, but the legs/base had zero positive signal. hold_ready = exp(-(|v|^2+|w|^2)/std^2)
+    # * feet_contact_frac, gated to motion.in_hold AND to target-within-reach (racket_target_distance <
+    # reach): near targets -> stand ready pays; far targets -> the term is SILENT so it never out-earns
+    # racket_progress for stepping (without the reach gate, planted stillness beats stepping ~1.5/step and
+    # teaches freeze-then-rush). The swing itself is untouched (zero outside the hold). CLI-tunable via
+    # task.rewards.hold_ready_weight / hold_ready_std / hold_ready_reach.
+    hold_ready = RewTerm(
+        func=mdp.hold_ready, weight=2.0,
+        params={"command_name": "racket_target", "std": 0.5, "reach": 0.65})
 
     # --- strike-window stability: be planted + upright + still AT the hit (gated to the strike window) ---
     strike_upright = RewTerm(func=mdp.strike_proj_grav_xy, weight=-2.0, params={"command_name": "racket_target"})

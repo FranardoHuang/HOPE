@@ -40,5 +40,9 @@ _build
 *.zarr
 *.npz
 
-**/assets/
+# Ignore asset CONTENTS (meshes/urdf are huge) but keep the directory itself un-excluded so the
+# package marker below can be re-included — `whole_body_tracking.assets.__init__` defines ASSET_DIR
+# and the tracking tasks fail to import without it (it silently vanished once as a gitignored file).
+**/assets/**
+!**/assets/__init__.py
 artifacts/
