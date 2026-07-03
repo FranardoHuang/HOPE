@@ -137,7 +137,13 @@ franco 已提供 forehand_new.mp4 / backhand_new.mp4,已上传 `/workspace/share
 3. Isaac 复活后第一件事:A/E 的正规 Isaac 评估补认证
 
 **今晚查明的三件大事:**
-- **pod 宿主机对 Isaac 判死刑**(裸 Kit 两种缓存状态都起不来;裸 CUDA 正常)→ **需要:RunPod 支持票 或 新建 pod**。训练全阻塞,消融梯/斜录臂都在等这个
+- ~~**pod 宿主机对 Isaac 判死刑**(裸 Kit 两种缓存状态都起不来;裸 CUDA 正常)→ **需要:RunPod 支持票 或 新建 pod**。训练全阻塞,消融梯/斜录臂都在等这个~~
+  **→ 已解决(2026-07-03 19:15, yikang):训练在这台 host 上复活了,不用迁移 pod。** 死刑判早了:barekit6 的 faulthandler 栈显示挂点在
+  `isaacsim.asset.importer.urdf` 扩展 on_startup **无条件构建导入窗口 UI**——headless 也建,而第一个 `omni.ui.StringField` 控件创建在这台
+  host 上永不返回(渲染栈 iray/RTX 确实坏了,franco 的判断对了一半)。修法:extscache 的该扩展打了**环境变量门控补丁**
+  (`HOPE_URDF_IMPORTER_NO_UI=1` 跳过 build_ui,不设=原版行为;URDF→USD 转换 API 不依赖该窗口)。yikang 的 env.sh 已默认导出;**其他人的
+  env.sh 也要加**。验证:HOPEPingPongVirtualBall 4096 envs 正常进入 PPO 循环(vb_smoke, GPU0)。注意:**需要 RTX 渲染/相机的任务在这台
+  host 上仍然是死的**(_wait_for_viewport 挂,iray 插件加载失败)——headless 无相机训练/评估 OK,录像/render 类任务仍需迁移。
 - **MuJoCo 评分器与连挥模型的契约不匹配**(P0,周日修):新旧两版评分器对 E@14k 给出一致的病理性全零(回合 ~1s 截断、只评反手、误差系统偏移 ~0.5m);真机验证过的 07-02 模型在同评分器下 0 击球窗口。评分器的回合/参考时钟按旧谱系(瞬移单挥)假设写死,对 wrap_teleport=False 的模型无效。证据:/workspace/franco/{premerge_check2,knowngood_check2}
 - **Isaac-free 导出链已建成并验证**(standalone_onnx_export.py + harvest,位级零差)——导出永不再被 Isaac 绑架
 

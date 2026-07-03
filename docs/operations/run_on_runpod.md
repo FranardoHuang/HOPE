@@ -107,7 +107,16 @@ that imports come from YOUR clone, and a real env build + step.
    job freezes at the AutoNode-registration boot phase forever. Check `fuser
    /workspace/.cache/ov/_cache.lock` — no holder = orphaned; `rm` it and relaunch. (A lock held by
    a LIVE process is healthy — do not delete that one.) Prefer SIGTERM first when killing Kits.
-5. **Verify every launch.** After starting a job, confirm within ~60 s that its log exists and the
+5. **Hosts with a broken render stack hang the boot in the URDF importer's UI build.** Symptom
+   (2026-07-03 host): every headless boot freezes forever right after the AutoNode phase at ~110%
+   CPU, with NO stale cache lock; faulthandler shows the main thread inside
+   `isaacsim.asset.importer.urdf .../ui_utils.py string_filed_builder` — the extension builds its
+   import window even headless, and the first `omni.ui.StringField` never returns when the host's
+   iray/RTX stack is broken (bare CUDA fine). Fix: `export HOPE_URDF_IMPORTER_NO_UI=1` (env.sh) —
+   the shared venv's extscache extension is patched to skip `build_ui()` under this flag (unset =
+   stock). Headless no-camera training/eval then works; anything needing RTX rendering/cameras is
+   still dead on such a host (`_wait_for_viewport` hangs, `rtx.neuraylib` fails to load).
+6. **Verify every launch.** After starting a job, confirm within ~60 s that its log exists and the
    process is alive; a launcher that prints nothing probably did nothing (two silent queue failures
    cost us 30 idle GPU-minutes).
 
