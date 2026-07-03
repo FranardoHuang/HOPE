@@ -17,7 +17,7 @@ Specifically, the Berkeley HITTER system installed:
 For the HOPE reference design, the minimum recommended specification is:
 
 - At least **6 cameras** (8–12 preferred) arranged to cover the full table volume plus a 1.5 m margin on each player's side
-- Camera frame rate **≥ 120 Hz** (240–360 Hz recommended for competitive ball tracking at speeds exceeding 5 m/s)
+- Camera frame rate **≥ 120 Hz** (240–360 Hz recommended for competitive ball tracking at speeds exceeding 5 m/s; the HOPE ChingMu rig runs at **300 Hz** at play time)
 - Sub-millimeter reconstruction accuracy within the tracking volume
 
 ---
@@ -88,7 +88,7 @@ The motion capture system tracks exactly **three categories** of objects. The ra
 
 ### 3.1  Racket Exclusion Policy — Paddle Is NOT Tracked by Motion Capture
 
-**The motion capture system must not track the ping-pong racket (paddle).** No reflective markers or tracking assets should be placed on or attached to the racket. This is a deliberate architectural decision aligned with the HITTER framework and the HOPE competition design:
+**During competition and play, the motion capture system must not track the ping-pong racket (paddle).** No reflective markers or tracking assets should be placed on or attached to the racket during play. This is a deliberate architectural decision aligned with the HITTER framework and the HOPE competition design. Note that this prohibition is a competition/play-time rule only: during the internal data-collection / physics-calibration phase the racket IS mocap-tracked (together with the table's 4 corners and the net's 2 corners) for model fitting.
 
 **Rationale:**
 
@@ -100,7 +100,7 @@ The motion capture system tracks exactly **three categories** of objects. The ra
 
 4. **Practical reliability.** Markers on a rapidly swinging paddle (arm speeds exceeding 3 m/s) suffer from severe occlusion, motion blur, and centripetal marker detachment. Excluding the paddle from tracking eliminates a fragile sensing link.
 
-**Enforcement:** During competition setup, referees verify that no retroreflective material is present on the racket, the robot's hand, or the wrist link beyond the last tracked rigid-body marker on the robot's torso/pelvis.
+**Enforcement (competition/play only):** During competition setup, referees verify that no retroreflective material is present on the racket, the robot's hand, or the wrist link beyond the last tracked rigid-body marker on the robot's torso/pelvis. Racket markers applied for the internal data-collection / physics-calibration phase must be removed before play.
 
 **Cross-references:** The companion *HOPE 7DOF Racket Model-based Planner Reference Setup* (Section 0.1) documents that the planner outputs a desired racket state without any racket pose feedback. The companion *HOPE WBC Simulation Training Reference Setup* (Section 2.8 — Racket Mount Kinematics) documents the complete FK chain from `base_link` through the 7-DOF arm to the 3D-printed fixed racket mount, including the `T_mount` calibration procedure that ensures the simulation model matches the physical bracket.
 
@@ -111,6 +111,8 @@ The motion capture system tracks exactly **three categories** of objects. The ra
 | **PPT** | Rigid body (vendor-tracked) | Ping-pong table frame | ≥ 4 asymmetric on table outer frame | Vendor 6-DOF |
 | **P1, P2, ...** | Rigid body (vendor-tracked) | Humanoid `base_link` | ≥ 4 asymmetric on torso/pelvis plate | Vendor 6-DOF |
 | **Ball** | Single unlabeled marker | Ping-pong ball center | 1 retroreflective marker or tape on ball | Frame-to-frame point tracking |
+
+The PPT/table pose serves setup and calibration anchoring (world-frame origin and drift detection) and is optional during play. The confirmed play-time streamed set on the HOPE rig is: **robot base (pelvis) pose + ball position, at 300 Hz**.
 
 No other objects should carry retroreflective markers within the tracking volume during play. Stray markers cause false associations and corrupt ball tracking.
 
@@ -224,7 +226,7 @@ Node(
 
 | Information | Source | Used by |
 |-------------|--------|---------|
-| Ball position [x, y, z] at 360 Hz | Motion capture → ROS 2 topic | Planner (Stages 1–3) |
+| Ball position [x, y, z] at 300 Hz | Motion capture → ROS 2 topic | Planner (Stages 1–3) |
 | Humanoid `base_link` 6-DOF pose | Motion capture → ROS 2 topic | WBC (Stage 4) for base position commands |
 | Table frame (PPT) pose | Motion capture → ROS 2 topic | Planner (origin reference / drift detection) |
 | Paddle 6-DOF pose | **Forward kinematics** from joint encoders + `base_link` | WBC internal state; **not** from motion capture |
@@ -264,6 +266,8 @@ robot_types:
 ### 5.3  Ball Spin (Future Extension)
 
 In the current reference design, ball spin is ignored. The ball is tracked as a single point with position `[x, y, z]` only. The HOPE planner's aerodynamic model uses translational drag but does not model Magnus force (spin-induced lift).
+
+> **Note (2026-07-03):** Spin measurement is planned for the upcoming physics-modeling phase. It requires a patterned / rigid-body-tracked ball, and the mocap relay — which currently publishes the ball as a position-only `PointStamped` — must then forward orientation as well.
 
 Future extensions may investigate whether finer marker patterns on the ball (e.g., multiple small patches in a known geometric pattern) could enable spin estimation. This would require upgrading to rigid-body tracking of the ball (≥ 3 markers) and depacketizing the orientation quaternion as angular velocity. Such an extension is outside the scope of the current reference design.
 
@@ -340,6 +344,8 @@ The Berkeley HITTER system used `mocap4ros2_optitrack` (MOCAP4ROS2 Project). How
   ```
 - Publishes via **tf2** and a `/poses` topic with configurable QoS.
 
+> **Status (2026-07-03):** The implemented, sim-to-real-era stack is the ChingMu/VRPN path — the `vrpn_mocap` client (Section 6.5.1) plus the `hope_bringup` `avatar_pro_vrpn_relay`. `motion_capture_tracking` remains an unused alternative for OptiTrack/Vicon rigs.
+
 ### 6.3  Motive Streaming Settings Checklist
 
 Before streaming from Motive to the ROS 2 host, verify these settings in the Data Streaming pane:
@@ -363,8 +369,8 @@ After configuration, the following ROS 2 topics are available:
 
 | Topic | Message type | Content | Rate |
 |-------|-------------|---------|------|
-| `/poses` | `geometry_msgs/PoseArray` | All tracked rigid bodies and custom-tracked markers | 360 Hz |
-| `/tf` | `tf2_msgs/TFMessage` | Transform tree: world → PPT, world → P1, world → P2, world → Ball | 360 Hz |
+| `/poses` | `geometry_msgs/PoseArray` | All tracked rigid bodies and custom-tracked markers | Camera rate (HOPE rig: 300 Hz) |
+| `/tf` | `tf2_msgs/TFMessage` | Transform tree: world → PPT, world → P1, world → P2, world → Ball | Camera rate (HOPE rig: 300 Hz) |
 
 The planner subscribes to the ball position from `/poses` or `/tf` and produces `RacketCommand` messages as described in the planner document. The WBC subscribes to both the `RacketCommand` and the humanoid's `base_link` transform from `/tf`.
 
@@ -396,7 +402,7 @@ or via a parameter file:
     server: "CHINGMU_SERVER_IP"   # CMTracker / MCServer PC
     port: 3883                    # Chingmu VRPN port
     frame_id: "world"
-    update_freq: 100.0
+    update_freq: 300.0            # match the HOPE rig's confirmed 300 Hz play-time stream rate
     refresh_freq: 1.0
 ```
 
@@ -473,7 +479,7 @@ Once the ROS 2 client is running, `ros2 topic list` shows one `/vrpn_mocap/<obje
 The companion planner document (*HOPE 7DOF Racket Model-based Planner Reference Setup*) consumes ball position data published by `motion_capture_tracking` and produces racket target commands. The data flow through the complete system is:
 
 ```
-Motion Capture System (360 Hz)                         Humanoid (proprioceptive)
+Motion Capture System (300 Hz)                         Humanoid (proprioceptive)
   │                                                      │
   ├── Ball [x,y,z] (single marker) ──▶ HOPE Planner     │
   │                                     Stages 1–3       │
@@ -505,7 +511,7 @@ The HOPE motion capture reference system tracks exactly three categories of obje
 2. **P1, P2** — humanoid `base_link` poses, providing the spatial anchor for each robot. The `base_link` definition varies by manufacturer (Section 4); each team declares theirs at registration.
 3. **Ball** — the ping-pong ball as a single unlabeled marker, providing position input to the planner.
 
-**The paddle/racket is never tracked by the motion capture system.** Each humanoid must infer its own paddle pose through forward kinematics from joint encoders and the tracked `base_link`. This is the fundamental sensing architecture: external perception (ball trajectory) feeds the model-based planner, while internal proprioception (joint states + `base_link`) drives the whole-body controller that positions the paddle. See the companion *HOPE WBC Simulation Training Reference Setup* (Section 2.8) for the complete forward kinematics chain from `base_link` through the 7-DOF arm to the 3D-printed racket mount.
+**During competition/play the paddle/racket is not tracked by the motion capture system** (during the internal data-collection / physics-calibration phase the racket IS tracked, along with the table's 4 corners and the net's 2 corners, for model fitting). Each humanoid must infer its own paddle pose through forward kinematics from joint encoders and the tracked `base_link`. This is the fundamental sensing architecture: external perception (ball trajectory) feeds the model-based planner, while internal proprioception (joint states + `base_link`) drives the whole-body controller that positions the paddle. See the companion *HOPE WBC Simulation Training Reference Setup* (Section 2.8) for the complete forward kinematics chain from `base_link` through the 7-DOF arm to the 3D-printed racket mount.
 
 ---
 

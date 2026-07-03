@@ -29,7 +29,11 @@ Current config:
 
 ## Inputs
 
-The planner currently expects ball pose/position data according to the config and source. Confirm live topic wiring before relying on outputs.
+The planner subscribes to `/poses` (`geometry_msgs/PoseArray`) with best-effort, keep-last depth 1. The configured `ball_pose_index` selects the ball pose from the array.
+
+The planner publishes `/racket/command` (`hope_msgs/RacketCommand`) with reliable, keep-last depth 10 because it is a control setpoint.
+
+Confirm live topic wiring before relying on outputs.
 
 Relevant source:
 
@@ -40,5 +44,10 @@ Relevant source:
 
 1. Start mocap or replay data.
 2. Launch planner.
-3. Echo planner output topic after confirming the exact topic from source or `ros2 topic list`.
+3. Echo planner output:
+
+```bash
+ros2 topic echo /racket/command
+```
+
 4. Record latency and prediction sanity checks in G03.

@@ -1,6 +1,6 @@
 # HOPE Developer And Agent Start Here
 
-This is the first file to read before changing code, moving assets, or assigning work. The repository is in an early reimplementation stage: it already contains reference documents, initial ROS planner code, calibration data, Agibot support materials, and training/deployment scaffolding, but the full real-to-sim-to-real loop is not complete.
+This is the first file to read before changing code, moving assets, or assigning work. The repository has walked the Isaac → MuJoCo → real-A3 chain once for the policy side (first sim-to-real transfer of the unified swing policy on 2026-07-02, forehand only, with real behavior matching MuJoCo), but the loop is not closed: the perception chain (mocap → planner → deploy runner) is not yet bridged, there is no accepted quality baseline, and the data-collection/physics-calibration phase has not run.
 
 ## Project Goal
 
@@ -22,7 +22,7 @@ The goal is not to blindly clone every HITTER detail. The goal is to preserve th
 | G03 Data processing and physics calibration | Partial | [G03](gates/G03_data_processing_and_physics_calibration.md) |
 | G04 Sim modeling in MuJoCo and Isaac | Partial | [G04](gates/G04_sim_modeling_mujoco_isaac.md) |
 | G05 Isaac training first loop | Partial | [G05](gates/G05_isaac_training_first_loop.md) |
-| G06 Isaac-to-MuJoCo parity | Not started | [G06](gates/G06_isaac_to_mujoco.md) |
+| G06 Isaac-to-MuJoCo parity | Partial | [G06](gates/G06_isaac_to_mujoco.md) |
 | G07 MuJoCo-to-real deployment | Partial | [G07](gates/G07_mujoco_to_real.md) |
 | G08 Blind-spot improvements | Research track | [G08](gates/G08_blind_spot_improvements.md) |
 
@@ -45,6 +45,22 @@ Do not read every setup document before doing a specific job. Use this task-firs
 5. Open interface or asset docs only when the operation doc links to them or when you are changing that contract.
 
 For broad onboarding, read [PROJECT_MAP.md](PROJECT_MAP.md) and [DEFINITIONS.md](DEFINITIONS.md). For folder or asset-policy changes, read [ASSET_POLICY.md](ASSET_POLICY.md).
+
+**Before starting ANY work item, claim it in [NOW.md](NOW.md)** (owner + branch). NOW.md is the
+short-horizon board (who is doing what right now); the long-horizon roadmap is
+[gates/G08_blind_spot_improvements.md](gates/G08_blind_spot_improvements.md).
+
+## Reimplementation Rhythm
+
+`reimplement.md` is the long-form supplemental runbook, not the primary setup path or a separate project plan. Use it through the gate docs:
+
+1. Find the gate that matches the work.
+2. Read the gate doc and operation doc first.
+3. Use the referenced `reimplement.md` step for command detail.
+4. Verify the gate's acceptance criteria.
+5. Update the gate doc, `docs/PROGRESS.md`, and any touched interface/operation docs in the same branch.
+
+If a phase/step in `reimplement.md` conflicts with a gate doc, treat the gate doc as current and update both files before continuing.
 
 ## Implementation Principles
 
@@ -83,7 +99,8 @@ Do not hide project state in chat history. If a future contributor or agent need
 
 ## Fast Entry Points
 
-- End-to-end, machine-specific runbook (environment creation, GMR/GVHMR motion pipeline, A3 asset prep, training, deploy): [reimplement.md](../reimplement.md). The `operations/*` docs are the curated per-task views; `reimplement.md` is the long-form narrative source they defer to (e.g. "Step 12.7").
+- New computer or agent startup: use this file as the index, then go to the operation doc for the task. For Isaac training, use [operations/run_training.md](operations/run_training.md); for ignored/private assets missing from a fresh clone, use [operations/setup_local_sync.md](operations/setup_local_sync.md). Use [reimplement.md](../reimplement.md) only as the long-form runbook when a gate or operation doc points to a specific step.
+- End-to-end historical runbook (environment creation, GMR/GVHMR motion pipeline, A3 asset prep, training, deploy): [reimplement.md](../reimplement.md). The `operations/*` docs are the curated per-task source of truth; use `reimplement.md` only for supplemental command detail when an operation or gate doc cites a specific step (e.g. "Step 12.7").
 - Environment setup is task-specific. Start from the operation doc for your task; use [operations/setup_environments.md](operations/setup_environments.md) only as a reference matrix.
 - Ignored/local assets that must be copied manually are summarized in [operations/setup_local_sync.md](operations/setup_local_sync.md), but each operation doc should list the assets it needs locally.
 - Auto-sync ignored external references before using them: `scripts/sync_external_repos.sh`.
@@ -91,8 +108,9 @@ Do not hide project state in chat history. If a future contributor or agent need
 - Mocap bringup: see [operations/run_mocap.md](operations/run_mocap.md).
 - Planner runtime: see [operations/run_planner.md](operations/run_planner.md).
 - Isaac training: see [operations/run_training.md](operations/run_training.md).
+- Shared RunPod GPU training (team pod, per-user folders, smoke suite): see [operations/run_on_runpod.md](operations/run_on_runpod.md).
+- Video-to-motion references for training: restore ignored GVHMR/GMR assets via [operations/setup_local_sync.md](operations/setup_local_sync.md), then follow [reimplement.md](../reimplement.md) steps 9-12 to produce local `hope_training/motions/preprocessed/*.npz`; upload to WandB only when you need shared registry artifacts.
 - A3 deploy dry-run: see [operations/run_deploy_dryrun.md](operations/run_deploy_dryrun.md).
-- New ping-pong checkpoint → full deploy (`.pt` → ONNX → AGI parity → MuJoCo → Rockchip → hardware, with the distrobox for each step): see [agi/a3_deploy_example/PINGPONG_NEW_CHECKPOINT_TUTORIAL.md](../agi/a3_deploy_example/PINGPONG_NEW_CHECKPOINT_TUTORIAL.md).
 - Local assets and sync: see [operations/setup_local_sync.md](operations/setup_local_sync.md).
 
 ## Current Known Environment Limits

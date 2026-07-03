@@ -1,0 +1,136 @@
+# NOW — Active Work Board
+
+Short-horizon board: what is being worked on RIGHT NOW, by whom, on which branch, and what the
+next checkpoint is. The long-horizon roadmap lives in
+[gates/G08_blind_spot_improvements.md](gates/G08_blind_spot_improvements.md); history lives in
+[PROGRESS.md](PROGRESS.md).
+
+Rules:
+
+1. **Claim before you code.** Add/update your row here (owner + branch) BEFORE starting a work
+   item, in the same push as your branch. This exists because we already built the same feature
+   twice (no-teleport wrap: `3eba347` on main vs the `rsi-on-wrap-progress-fix` branch).
+2. One row per active item; move finished rows to the Done section with a date, and put the
+   substance into PROGRESS.md / the gate doc.
+3. Priority ordering is maintained by claude (franco's agent) and discussed with franco; anyone can
+   edit their own row.
+4. **This file lives on `main` ONLY.** Never edit NOW.md on a feature branch (it would fork the
+   board and merge back stale). Claim/update flow from any branch, without switching:
+   ```bash
+   git fetch origin && git show origin/main:docs/NOW.md   # read the live board
+   # edit + push a docs-only commit straight to main:
+   git stash -q; git switch main && git pull --ff-only && $EDITOR docs/NOW.md \
+     && git commit -am "now: <one line>" && git push && git switch - && git stash pop -q
+   ```
+   Docs-only commits to main need no PR/review; everything else goes through branches.
+
+## Runtime Estimates (RTX 5090, measured 2026-07-03)
+
+| Job | Cost |
+| --- | --- |
+| DeployParity training, 4096 envs, solo GPU | **~2.0-2.2 s/iter → 2000 it ≈ 1.2 h · 8000 ≈ 4.7 h · 12000 ≈ 7 h · 20000 ≈ 12 h** (corrected 2026-07-03; earlier 4.7 s/iter figure had boot time baked in) |
+| Co-running 2 jobs on one GPU (measured) | each job ~20-25% slower, TOTAL throughput ≈ +37%; memory fine (2×~7 GB of 32 GB). Fleet = 3 GPUs × 2 slots = **6 parallel experiments** for signal-tier runs; keep critical-path runs solo. **Stagger starts ≥60 s** (two Kits booting the same second can kill one: the B-ext incident) |
+| num_envs scaling, SOLO (measured) | 4096: 2.1 s/iter (~47k samples/s) · 8192: 3.2 s/iter (~61k, 65% eff.) · 16384: 4.4 s/iter (~88k, 47% eff.) — GPU has headroom but diminishing returns; whether bigger batches reach the SAME metric in less wall time is being raced (8192@1350it vs 4096@2000it, equal ~1.2 h wall) |
+| Kit boot + env build (per run) | ~2 min |
+| Mechanics check (512 envs, 25 it) | ~3 min |
+| ONNX export (play.py) | ~2 min |
+| Scoreboard, 4 protocols × 2400 steps (CPU) | ~25 min/checkpoint (parallel to training) |
+| Reference lineage | shipped models ≈ 9-25k it; treat <8k as immature for deploy protocols |
+
+## Team
+
+| Person | Focus |
+| --- | --- |
+| franco | Direction, priorities, arbitration |
+| jiayi | End-to-end training bring-up; reward tuning — the simtoreal2 lineage (HER achieved-replay, hold_ready, model_9000 training) |
+| yikang | Deployment; sim/env alignment |
+| claude (franco's agent) | Foundation: infrastructure, A/B experiments, doc/code hygiene |
+
+## Run-Name Legend (人话对照表 — 报告里不再用裸字母)
+
+| run_name | 人话 |
+| --- | --- |
+| p21_A_noteleport / p21_A_ext12k | 「基线结构」：挥拍间不传送 + 25% 从站姿开始（main 默认配置），2k / 续跑到 14k |
+| p21_B_teleport | 「旧传送式」对照：每拍开始把机器人瞬移到位（部署模型的旧训法），仅 2k，已停 |
+| p21_C_sigma | 基线结构 + 「奖励自动收紧」（误差变小奖励口径跟着变严），2k |
+| p21_D_postswing | 基线结构 + 「上拍收尾姿态起手」（一部分回合从上一拍打完的姿势开始练），2k |
+| p21_E_sigma_postswing | 「三合一」＝基线结构＋奖励自动收紧＋收尾姿态起手，从 C 续跑到 14k —— **当前最优候选** |
+
+## Plan To Saturday (2026-07-03 → 07-04, target: play at the venue with an improved policy)
+
+Critical path (GPU 1/2) — ETAs corrected 2026-07-03 15:40 with the measured 2.15 s/iter:
+
+1. **TODAY ~18:15** — 「基线结构」and「三合一」long runs hit 14k iters → 4-protocol scoreboard
+   verdict (claude, ~40 min, CPU).
+2. **TODAY 19:00-24:00** — explicit-clipped-PD fine-tune from the winner (~8000 it ≈ 4.7 h, GPU1);
+   GPU2 = backup ft from the other run. (claude)
+3. **TONIGHT/midnight** — export → MuJoCo explicit gate + deploy-faithful → build the MDU package
+   (`build_a3_deploy_pkg.sh`). Saturday morning = verification margin, not critical path.
+   (claude prepares, yikang ships/runs on the MDU)
+4. **Saturday** — deploy & play: forehand first; **try backhand in SHADOW mode** —「三合一」and
+   model_9000 both trained stand-entry, this is the potential headline. (yikang + franco)
+
+Parallel tracks (no GPU conflict):
+
+- **Ball physics v1 (P2.5 prerequisite)**: mocap ball-trajectory collection is happening NOW at the
+  venue → fit drag/bounce from the fresh recordings (planner calibration path); spin-aware physics
+  arrives with the simtoreal2 merge. Owner: **yikang** (franco 2026-07-03).
+- **Teacher clips for Saturday: NO mass shoot needed** (franco 2026-07-03): the swings recorded
+  during play sessions + orientation rotation (P2.2-lite, `reground_hope_frame.py` path) are
+  sufficient; the 0703 clip uploads are that set. A5's 30-50-clip library and the dedicated
+  ready-stance clip stay on the longer-horizon list (P2.0/A5 in G08), not on Saturday's path.
+- simtoreal2 → main merge + doc updates (claude, in progress).
+
+## Gap List To Sunday (明确缺的活,截止周日 — added 2026-07-03)
+
+| # | 缺什么 | 谁 | 何时 |
+| --- | --- | --- | --- |
+| 1 | 两条 14k 长跑的终审 + 选周六候选 | claude | 今天 18:15-19:00 |
+| 2 | explicit-PD 微调腿(过 MuJoCo 硬门禁的配方) | claude | 今天 19:00-24:00 |
+| 3 | MuJoCo 双门禁 + MDU 打包 | claude 备 / yikang 运 | 今晚-周六早 |
+| 4 | model_9000 与我们候选的同板对比(缺 onnx 文件:请 jiayi 放 `/workspace/shared/models/`) | jiayi + claude | 今晚 |
+| 5 | 物理模型 v1:用今天采的球轨迹拟合 drag/bounce(→ planner 参数;训练侧下周) | yikang | 数据到即做,周六 planner 可用 |
+| 6 | **延迟/误差标定**:从动捕录制的时间戳量真实延迟与噪声谱 → 填 A1 各 flag 的数值(franco 指出:这些本就该从物理建模数据算出,不拍脑袋) | yikang(数据)+ claude(分析脚本) | 周六-周日 |
+| 7 | 0703 打球录像 → 旋转归一 → 新参考 clip 验证(jiayi 的 re-ground 管线已做一版,确认覆盖) | jiayi | 周六前 |
+| 8 | 训练速度 vs 并行数的 trade-off 终版报告(见下,搜索范围 4096/8192/16384 + 共卡) | claude | 今天 |
+| 9 | 球进训练环境 + 落点奖励(P2.5-lite)— **周六前不可行,诚实排下周**;周六的增益来自策略改进+planner 物理参数,不来自训练内球 | claude/jiayi | 下周 |
+| 10 | mocap→runner 桥 + 坐标变换设计(A2) | yikang | 下周 |
+
+## Active
+
+| Item | Priority | Owner | Branch | Status / next checkpoint |
+| --- | --- | --- | --- | --- |
+| P2.1/P2.3/A8 ablation ladder (arms A-E) | ★★★ | claude | `p2-multiswing` | 2000-it round DONE (Isaac composite: A 0.42 / B-teleport 0.79 / **C+sigma 0.62** / D+postswing 0.40; adaptive sigma = +48% over A at equal budget). All arms too immature to survive MuJoCo deploy protocol (fall ~1.2 s from stand) — overnight: GPU1 A-ext→12k (control), GPU2 **E-ext = C-resume + post_swing + sigma →12k (product candidate)**; B-ext dropped (hardware already proved teleport-era fails stand-entry). 4-protocol scoreboard verdict when done |
+| P2.3: adaptive tracking sigma (SMASH) | ★★★ | claude | `p2-multiswing` (flag `racket.adaptive_sigma`) | IMPLEMENTED + mech-verified 2026-07-03 (sigma live-updates within clamps); next: arm C after P2.1 A/B |
+| A8: post-swing initial-state buffer (Ace) | ★★★ | claude | `p2-multiswing` (flag `motion.post_swing_start_prob`) | IMPLEMENTED + mech-verified 2026-07-03; next: arm D after P2.1 A/B |
+| P2.0: ready-pose definition (see G08) | ★★ (foundation) | franco (拍摄) + claude (pipeline) | — | DECIDED 2026-07-03: option (a) — record a ready-stance video through GVHMR→GMR on the next site visit (bundle with A5's 30-50 new swing clips); claude processes + wires into stand_start/hold/clip re-entry |
+| Legacy-task long run `merged_uniform_hopex` (20000 it, task=HOPEPingPong on own branch) | ? | yikang | `rsi-on-wrap-progress-fix` | RUNNING on pod GPU0. ⚠ branch duplicates main's wrap_teleport machinery and has LFS-pointerized CSVs — reconcile with main before merging; the unique progress-fix is already ported to `p2-multiswing` |
+| simtoreal2 lineage: HER achieved-replay + hold_ready + model_9000_replane training (merged to main 2026-07-03) | ★★★ | jiayi | `simtoreal2` (merged) | model_9000 backhand passed training gate; **needs**: drop `model_9000_replane.onnx` into `/workspace/shared/models/` so the scoreboard can grade it against tonight's candidates |
+| G07 mocap→runner bridge + world→robot target transform design (A2) | ★★ | unassigned (natural fit: yikang) | — | design doc first; see G07 Next Steps and G08 audit item 2 |
+
+## Queued (priority order, from G08)
+
+1. A1 目标延迟/抖动/中途更新 — **MERGED to main** 2026-07-03 (flags `racket.target_delay_steps` / `target_jitter_pos_per_s` / `target_jitter_vel_per_s` / `midswing_resample_prob`, default off; mech-verified: delay=2 in effect, redraw rate 0.0201≈p=0.02). Next: stack on tonight's winner as the mocap-loop rehearsal arm.
+2. P2.2-lite: orientation-normalize the existing two clips at retarget (`reground_hope_frame.py`).
+3. A5: record 30-50 new reference swing videos (needs a human + camera; processing pipeline ready).
+4. P2.5-lite: ball + drag/bounce + PACE at-contact landing reward (independent track; big).
+5. A3: per-joint actuator ID on the real A3 (needs hardware time).
+6. G06 acceptance numbers for the shipped checkpoint (needs `model_p4_deployparity.onnx` copied to
+   `/workspace/shared/models/` or dongc1's machine).
+
+## Done
+
+| Item | Owner | Landed | Where |
+| --- | --- | --- | --- |
+| Fixed-protocol sim2sim scoreboard (`scoreboard_eval.py`), validated end-to-end on pod | claude | 2026-07-03 | `p2-eval-harness` |
+| 4 main-breaking merge casualties fixed (conflict markers; `motion_file` regression; `episode_time_left` probe crash; `play.py` `_wbt_tasks`) | claude | 2026-07-03 | main / `p2-multiswing` |
+| `motion:` task-YAML/CLI plumbing for wrap_teleport / stand_start / hold | claude | 2026-07-03 | `p2-multiswing` |
+| racket_progress exact-zero on resample (ported from yikang's `c7733db`) | yikang→claude | 2026-07-03 | `p2-multiswing` |
+| RunPod multiuser provisioning + smoke suite | yikang (+team) | 2026-07-02 | pod `/workspace` |
+| Doc realignment to simtoreal2 reality; Phase 2 roadmap into G08; papers | claude | 2026-07-03 | main |
+| First sim-to-real (forehand-only, `model_p4_deployparity.onnx`) | yikang/dongc1 | 2026-07-02 | main |
+
+## Update Rule
+
+Update your row when: you start/finish an item, change branch, hit a blocker, or hand something
+off. Keep rows one line; details go in the gate doc or PR description.

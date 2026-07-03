@@ -40,15 +40,22 @@ def racket_target_pos_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tens
 def racket_target_pos_rel_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Desired racket pos relative to the CURRENT racket (FK), yaw frame. DEPLOY-HONEST (no world
     base position; see :meth:`RacketTargetCommand.racket_target_pos_b_rel`). Used by the deploy-parity
-    actor contract (legacy task name: `real_sensor_only`)."""
+    actor contract (legacy task name: `real_sensor_only`). A1: reads the ACTOR-visible target view
+    (delayed/jittered when target latency is on; the live tensor otherwise)."""
     return _cmd(env, command_name).racket_target_pos_b_rel()
 
 
 def racket_target_vel_w(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
-    return _cmd(env, command_name).racket_target_vel_w
+    """Desired racket velocity, world frame. ACTOR term — A1: reads the ACTOR-visible view
+    (delayed/jittered when target latency is on; the live tensor otherwise, byte-identical).
+    The critic uses :func:`racket_target_vel_w_live`."""
+    return _cmd(env, command_name).actor_racket_target_vel_w()
 
 
 def time_to_strike(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Time remaining until the strike (s). NOT delayed by A1 target latency ON PURPOSE: the swing
+    clock is generated robot-side by the deploy runner, not by the mocap link, so it carries no
+    mocap/planner transport latency."""
     return _cmd(env, command_name).time_to_strike.unsqueeze(-1)
 
 
@@ -57,11 +64,19 @@ def base_target_pos_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor
 
 
 def swing_type(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
-    """Forehand (+1) / backhand (-1). Only needed for a unified (single) policy."""
-    return _cmd(env, command_name).swing_sign.unsqueeze(-1)
+    """Forehand (+1) / backhand (-1). Only needed for a unified (single) policy. A1: delayed with
+    the target when latency is on (the flag rides the same planner->runner message as the target)."""
+    return _cmd(env, command_name).actor_swing_sign().unsqueeze(-1)
 
 
 # --- privileged (critic) observations: desired normal + actual racket state --------------- #
+def racket_target_vel_w_live(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """TRUE live desired racket velocity (world). CRITIC/privileged term: the asymmetric critic
+    keeps the undegraded target even when the actor's view is delayed/jittered (A1). Identical to
+    :func:`racket_target_vel_w` when the A1 knobs are off."""
+    return _cmd(env, command_name).racket_target_vel_w
+
+
 def racket_target_normal_w(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     return _cmd(env, command_name).racket_target_normal_w
 
@@ -84,5 +99,10 @@ def racket_normal_w(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
 
 def episode_time_left(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Time remaining in the episode (seconds). HITTER critic privileged input."""
-    left = (env.max_episode_length - env.episode_length_buf).float() * env.step_dt
+    # IsaacLab 2.1 calls observation terms once during ObservationManager._prepare_terms (dimension
+    # probe) BEFORE ManagerBasedRLEnv allocates episode_length_buf — fall back to zeros there.
+    buf = getattr(env, "episode_length_buf", None)
+    if buf is None:
+        return torch.zeros(env.num_envs, 1, device=env.device)
+    left = (env.max_episode_length - buf).float() * env.step_dt
     return left.unsqueeze(-1)

@@ -5,8 +5,9 @@ This is the step-13 environment. It extends the A3 motion-tracking baseline
 
 * a :class:`RacketTargetCommand` that samples the desired racket state (position/velocity/normal)
   and desired base XY each swing, and computes the actual racket state by FK through ``T_mount``;
-* HITTER actor observations (desired racket pos rel-base, desired racket vel world, time-to-strike,
-  desired base XY rel-base) plus projected gravity, with privileged racket state on the critic;
+* HOPE actor observations (desired racket pos rel-base, desired racket vel/normal world,
+  time-to-strike, desired base XY rel-base) plus projected gravity, with privileged actual racket
+  state on the critic;
 * HITTER goal rewards (base-position before strike; racket pos/vel/normal in a window around strike),
   on top of the BeyondMimic imitation reward and the regularization reward;
 * extended domain randomization for sim-to-real.
@@ -96,7 +97,10 @@ class HOPEObservationsCfg(ObservationsCfg):
     class HOPECriticCfg(ObservationsCfg.PrivilegedCfg):
         base_target_pos_b = ObsTerm(func=mdp.base_target_pos_b, params={"command_name": "racket_target"})
         racket_target_pos_b = ObsTerm(func=mdp.racket_target_pos_b, params={"command_name": "racket_target"})
-        racket_target_vel_w = ObsTerm(func=mdp.racket_target_vel_w, params={"command_name": "racket_target"})
+        # A1: the CRITIC keeps the TRUE live target velocity even when the actor's view is
+        # delayed/jittered (task.racket.target_delay_steps / target_jitter_*): the asymmetric critic
+        # is privileged/sim-side. Identical value to mdp.racket_target_vel_w when the A1 knobs are off.
+        racket_target_vel_w = ObsTerm(func=mdp.racket_target_vel_w_live, params={"command_name": "racket_target"})
         racket_target_normal_w = ObsTerm(func=mdp.racket_target_normal_w, params={"command_name": "racket_target"})
         time_to_strike = ObsTerm(func=mdp.time_to_strike, params={"command_name": "racket_target"})
         # actual racket state (FK) — privileged, never available on hardware
@@ -209,9 +213,11 @@ class HOPEEventCfg(EventCfg):
 # deploy-parity variant — deploy-honest observation (no fabricated base pose).
 #
 # WHY: the `full` actor obs above depends on the robot's true world base pose through three terms
-# (motion_anchor_pos_b, base_target_pos_b, racket_target_pos_b). On the real A3 there is no localizer,
-# so those are fabricated at deploy (anchor_pos_b := 0, base_pos := nominal) -> the deployed policy
-# sees a DIFFERENT observation distribution than training and the legs cannot balance. AGI's reference
+# (motion_anchor_pos_b, base_target_pos_b, racket_target_pos_b). The mocap streams the base pose at
+# 300 Hz during play, but that link is not bridged into the deploy front-end, so those terms are
+# fabricated at deploy (anchor_pos_b := 0, base_pos := nominal) -> the deployed policy
+# sees a DIFFERENT observation distribution than training and the legs cannot balance. Making the
+# actor base-position-free is a deliberate robustness choice (no mocap/VRPN dependency). AGI's reference
 # policy transfers because its observation is real-sensor-only (IMU orientation + proprioception, no
 # world base position). This variant copies that recipe for the HOPE actor. The privileged CRITIC
 # group is unchanged (it may use base pose in sim — it is never deployed). The `full` cfgs above are

@@ -22,7 +22,9 @@ num_envs: 2
 wandb_path: null      # <entity>/hope_wbc/<run_id>  (a trained run to load)
 checkpoint: null      # explicit local model_*.pt path (takes precedence over wandb_path / latest-local)
 registry_name: null   # motion override for the local-checkpoint path (falls back to task.registry_name)
+registry_name_2: null # optional 2nd registry clip for unified policies
 motion_file: null     # explicit motion .npz override
+motion_file_2: null   # optional 2nd local clip for unified policies
 
 video: false
 video_length: 200

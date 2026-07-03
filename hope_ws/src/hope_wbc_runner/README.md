@@ -1,5 +1,15 @@
 # `hope_wbc_runner` — staged, safety-gated WBC controller for `model_15200`
 
+> **Status (2026-07-03):** this Python runner is the **legacy/bring-up
+> companion** — it builds the **180-D obs only** and takes its clip layout
+> (`seg_len` [95, 105], `strike_phase` [0.36, 0.50]) from ROS params; it
+> predates the ONNX clip-metadata clock fix and the 175-D contract. It is
+> **superseded as the deploy path** by the C++ runner
+> `a3_deploy_onnx_ref_pingpong` (`agi/a3_deploy_example`). Before using this
+> runner with new checkpoints (175-D deploy-parity, e.g.
+> `model_p4_deployparity`), port the 175-D obs builder and the ONNX
+> clip-metadata clock override.
+
 Runs the validated `model_15200` ONNX from `/racket/command` (e.g. from
 `planner_imitate`), builds the exact 180-D observation, infers **deterministically**
 (mean action, no dither), logs the joint targets, and — only when explicitly

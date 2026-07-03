@@ -18,7 +18,8 @@ Per the HOPE racket-tracking prohibition, there is NO measured racket feedback a
 
 HITTER alignment notes (see the project HITTER verification):
 * racket *position* is observed relative to the base; racket *velocity* is observed in world.
-* racket *normal* is a REWARD target only (not an actor observation in HITTER).
+* HOPE currently also observes desired racket *normal* in the actor so the policy can respond to
+  normal targets; actual racket normal remains a privileged simulation-only critic/reward signal.
 * swing type is a *sampled* variable used here to (a) flag forehand/backhand and (b) select the
   reference clip; it is not required in the actor observation when separate forehand/backhand
   policies are trained (the HOPE default, reimplement.md step 17).
@@ -174,6 +175,14 @@ class RacketTargetCommand(CommandTerm):
         self._exact_pass_5cm_acc = 0.0
         self._exact_pass_10cm_acc = 0.0
         self._exact_composite_rate = 0.0
+        # P2.3 adaptive-sigma driver: global decayed error-magnitude sums over exact-strike samples
+        # (mean = sum / _exact_n_acc). Per-clip variants exist below; sigma needs one global signal.
+        self._exact_pos_err_sum = 0.0
+        self._exact_vel_err_sum = 0.0
+        # Live adaptive sigmas (start at the cfg maxima = the hand-tuned YAML stds; only applied to
+        # the reward terms when cfg.adaptive_sigma is on).
+        self._adaptive_sigma_pos = float(cfg.sigma_pos_max)
+        self._adaptive_sigma_vel = float(cfg.sigma_vel_max)
 
         # Per-clip (forehand=clip 0 / backhand=clip 1) breakdown of the exact-strike metrics, so wandb
         # shows each swing separately (the aggregate composite can hide one swing lagging). Same
@@ -236,6 +245,51 @@ class RacketTargetCommand(CommandTerm):
         self._resample_n_acc = 0.0
         self._replay_n_acc = 0.0
 
+        # --- A1 target latency & time-variance (mocap->planner->runner realism) --------------------
+        # MOTIVATION: training previously handed the actor a PERFECT, instantly-updated target; the
+        # real loop (mocap -> planner -> runner) delivers it LATE (transport + planning latency),
+        # NOISY (ball-prediction error that SHRINKS as the strike approaches — SMASH Eq. 14), and
+        # REFINED mid-swing (the planner re-plans WHERE while the swing clock keeps running — PACE
+        # injects sensor delays for the same reason). Without modeling this, the mocap-closed-loop
+        # deployment faces out-of-distribution target dynamics. ALL knobs default OFF and the default
+        # path is byte-identical: delay==0 & jitter==0 make the actor-visible views ALIAS the live
+        # tensors (zero overhead, no extra RNG); midswing_resample_prob==0 short-circuits before any
+        # RNG draw. Only the ACTOR-visible view is degraded — rewards, metrics, the privileged critic,
+        # and the achieved-target-replay WRITE always use the TRUE live target.
+        self._delay_steps = max(int(cfg.target_delay_steps), 0)
+        self._jitter_pos = max(float(cfg.target_jitter_pos_per_s), 0.0)
+        self._jitter_vel = max(float(cfg.target_jitter_vel_per_s), 0.0)
+        # The actor view is materialized (separate tensors) whenever latency OR jitter is on;
+        # otherwise the delayed_* attributes ARE the live tensors (which are only ever index-assigned
+        # after __init__, so the alias stays valid for the whole run).
+        self._actor_view_active = self._delay_steps > 0 or self._jitter_pos > 0.0 or self._jitter_vel > 0.0
+        if self._delay_steps > 0:
+            # Ring buffers (length delay+1) over the ACTOR-VISIBLE target quantities: the slot
+            # written this step is read back `delay` pushes later (see _push_actor_target).
+            # time_to_strike is NOT buffered ON PURPOSE: the swing clock is generated robot-side by
+            # the deploy runner, not by the mocap link, so it carries no mocap latency.
+            _L = self._delay_steps + 1
+            self._delay_buf_pos = torch.zeros(_L, self.num_envs, 3, device=self.device)
+            self._delay_buf_vel = torch.zeros(_L, self.num_envs, 3, device=self.device)
+            self._delay_buf_sign = torch.ones(_L, self.num_envs, device=self.device)
+            self._delay_ptr = 0
+        if self._actor_view_active:
+            self.delayed_racket_target_pos_w = self.racket_target_pos_w.clone()
+            self.delayed_racket_target_vel_w = self.racket_target_vel_w.clone()
+            self.delayed_swing_sign = self.swing_sign.clone()
+        else:
+            # Flags off: zero-overhead aliases of the live tensors (byte-identical baseline).
+            self.delayed_racket_target_pos_w = self.racket_target_pos_w
+            self.delayed_racket_target_vel_w = self.racket_target_vel_w
+            self.delayed_swing_sign = self.swing_sign
+        # A1 metrics: per-step per-env redraw indicator (wandb reset-mean = per-step mid-swing
+        # refinement fraction) + the constant delay-in-effect broadcast (refreshed every step in
+        # _update_metrics because CommandTerm.reset() zeros metric entries of resetting envs).
+        self.metrics["midswing_resample_count"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["target_delay_steps_in_effect"] = torch.full(
+            (self.num_envs,), float(self._delay_steps), device=self.device
+        )
+
         # Strike timing / gating.
         self.time_to_strike = torch.zeros(self.num_envs, device=self.device)
         self.pre_strike = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
@@ -244,6 +298,8 @@ class RacketTargetCommand(CommandTerm):
         # Episode-wide tracking errors (instantaneous; averaged over terminating envs at reset).
         self.metrics["racket_pos_error"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["racket_vel_error"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["adaptive_sigma_pos"] = torch.full((self.num_envs,), float(cfg.sigma_pos_max), device=self.device)
+        self.metrics["adaptive_sigma_vel"] = torch.full((self.num_envs,), float(cfg.sigma_vel_max), device=self.device)
         self.metrics["racket_normal_error_deg"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["base_pos_error"] = torch.zeros(self.num_envs, device=self.device)
         # How far the (coupled) base target sits from spawn — i.e. how much repositioning is commanded.
@@ -351,6 +407,7 @@ class RacketTargetCommand(CommandTerm):
         self.racket_target_distance = z()
         self.racket_progress = z()
         self._prev_racket_dist = z()
+        self._progress_reset_mask = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
         self.foot_slip_sq = z()  # sum_feet contact * ||foot_xy_vel||^2
         self.foot_vel_sq = z()  # sum_feet ||foot_vel||^2 (excessive/violent foot motion)
         self.foot_drag = z()  # sum_feet ||foot_xy_vel|| while the foot is LOW (near ground -> dragging)
@@ -467,15 +524,10 @@ class RacketTargetCommand(CommandTerm):
         strike_step = round(self.cfg.strike_phase * (total - 1))
         if self._racket_mode == "body":
             idx = self._racket_body_index
-            pos = motion._body_pos_w[strike_step, idx]
-            quat = motion._body_quat_w[strike_step, idx]
-            lin = motion._body_lin_vel_w[strike_step, idx]
+            pos, quat, lin, _ = self._reference_body_state(motion, strike_step, idx)
         else:
             widx = self._wrist_body_index
-            wpos = motion._body_pos_w[strike_step, widx]
-            wquat = motion._body_quat_w[strike_step, widx]
-            wlin = motion._body_lin_vel_w[strike_step, widx]
-            wang = motion._body_ang_vel_w[strike_step, widx]
+            wpos, wquat, wlin, wang = self._reference_body_state(motion, strike_step, widx, require_ang_vel=True)
             offset_w = quat_apply(wquat.unsqueeze(0), self._mount_offset[0:1]).squeeze(0)
             pos = wpos + offset_w
             lin = wlin + torch.cross(wang, offset_w, dim=-1)
@@ -506,7 +558,7 @@ class RacketTargetCommand(CommandTerm):
         self._ref_racket_normal_w = (normal / (torch.norm(normal) + 1e-6)).detach().clone()
         # Reference base (root) XY at the strike — root is articulation body index 0 (same order the
         # motion arrays use). The base->racket horizontal offset couples base_target to racket_target.
-        self._ref_base_pos_rel = motion._body_pos_w[strike_step, 0].detach().clone()
+        self._ref_base_pos_rel = self._reference_body_state(motion, strike_step, 0)[0].detach().clone()
         self._ref_reach_offset_xy = (self._ref_racket_pos_rel[:2] - self._ref_base_pos_rel[:2]).detach().clone()
         self._ref_strike_cached = True
         p, v, nrm = self._ref_racket_pos_rel, self._ref_racket_vel_w, self._ref_racket_normal_w
@@ -532,6 +584,31 @@ class RacketTargetCommand(CommandTerm):
             f"(target uses {'CLEAN' if self.cfg.clean_reference_strike_velocity else 'RAW'} velocity)",
             flush=True,
         )
+
+    def _reference_body_state(self, motion, step: int, body_index: int, require_ang_vel: bool = False):
+        """Return reference body state from MotionLoader's full-articulation private arrays.
+
+        This is the current, intentional coupling point to upstream ``MotionLoader`` internals. Public
+        ``MotionCommand`` buffers expose only the tracking subset, while the racket FK needs the full
+        articulation body order so it can read the racket body or wrist mount. Keep direct private-field
+        access centralized here until MotionLoader grows a public full-body state API.
+        """
+        required = ["_body_pos_w", "_body_quat_w", "_body_lin_vel_w"]
+        if require_ang_vel:
+            required.append("_body_ang_vel_w")
+        missing = [name for name in required if not hasattr(motion, name)]
+        if missing:
+            raise AttributeError(
+                "RacketTargetCommand requires MotionLoader full-body reference arrays "
+                f"{required}, but missing {missing}. This is the HOPE coupling point for "
+                "reference_perturbed racket FK; update _reference_body_state if upstream MotionLoader changes."
+            )
+
+        pos = motion._body_pos_w[step, body_index]
+        quat = motion._body_quat_w[step, body_index]
+        lin = motion._body_lin_vel_w[step, body_index]
+        ang = motion._body_ang_vel_w[step, body_index] if require_ang_vel else None
+        return pos, quat, lin, ang
 
     def _perturb_scale(self) -> float:
         """Curriculum factor in [start, 1.0] that widens the reference perturbation over training.
@@ -587,9 +664,10 @@ class RacketTargetCommand(CommandTerm):
         motion = self._motion()
         if self._pos_range_per_clip_t is not None and motion._multiseg:
             # PER-CLIP position box (unified policy): each env samples x/y/z from ITS clip's box (added to
-            # the env origin). The y range is SIGNED per clip (forehand -y / backhand +y encoded directly in
-            # the box), so this REPLACES the shared x-range + |y|-sign + z-range logic below. Lets each clip's
-            # target track its own reference strike point (e.g. backhand z~1.2 when strike_phase=0.50).
+            # the env origin). The y range is SIGNED per clip (the configured box is used directly, so a
+            # near-center backhand box is valid and does not go through the shared +/-|y| fallback). This
+            # replaces the shared x-range + |y|-sign + z-range logic below and lets each clip track its own
+            # reference strike point.
             clip = motion.clip_id[env_ids]                      # (n,) long, 0=forehand / 1=backhand
             rng_e = self._pos_range_per_clip_t[clip]            # (n, 3, 2): [env][x/y/z][lo/hi]
             lo = rng_e[..., 0]                                  # (n, 3)
@@ -776,6 +854,26 @@ class RacketTargetCommand(CommandTerm):
         # Stamp the motion phase baseline for these envs so the per-swing wrap detector in
         # _update_command does not immediately re-trigger after this (e.g. reset-time) resample.
         self._prev_motion_steps[env_ids] = self._motion().time_steps[env_ids]
+        self._prev_racket_dist[env_ids] = torch.norm(
+            self.racket_pos_w[env_ids] - self.racket_target_pos_w[env_ids], dim=-1
+        ).detach()
+        self.racket_progress[env_ids] = 0.0
+        self._progress_reset_mask[env_ids] = True
+
+        # A1 target latency: a TRUE reset (not an intra-episode wrap) starts a fresh "deploy
+        # session" — the runner latches the first planner target before the policy steps, so the
+        # actor-visible view (and the whole ring buffer) is backfilled with the fresh target: no
+        # cross-episode target leakage. Intra-episode WRAPS are deliberately NOT backfilled — the
+        # next swing's target reaching the actor `delay` steps late is exactly the latency modeled.
+        if self._actor_view_active and not self._resample_is_wrap:
+            ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+            self.delayed_racket_target_pos_w[ids] = self.racket_target_pos_w[ids]
+            self.delayed_racket_target_vel_w[ids] = self.racket_target_vel_w[ids]
+            self.delayed_swing_sign[ids] = self.swing_sign[ids]
+            if self._delay_steps > 0:
+                self._delay_buf_pos[:, ids] = self.racket_target_pos_w[ids].unsqueeze(0)
+                self._delay_buf_vel[:, ids] = self.racket_target_vel_w[ids].unsqueeze(0)
+                self._delay_buf_sign[:, ids] = self.swing_sign[ids].unsqueeze(0)
 
     def _compute_racket_state(self):
         data = self.robot.data
@@ -876,6 +974,86 @@ class RacketTargetCommand(CommandTerm):
         if motion._multiseg:
             self._prev_clip_id = motion.clip_id.clone()
 
+        # --- A1 mid-swing target refinement (the planner refines WHERE, not WHEN) -------------------
+        # Each step, envs still approaching the strike (pre_strike AND time_to_strike > tts floor)
+        # re-draw their target with per-step prob p, exactly as the deploy planner refines its ball
+        # prediction mid-swing. ONLY the target sampling runs (position/velocity/normal through the
+        # existing uniform / per-clip-box / reference-perturbed path, including the HER achieved-target
+        # mixture inside it):
+        #   * strike timing untouched — same strike step, the swing clock keeps running;
+        #   * NO _count_swing_starts — a refinement is not a new swing attempt (metrics denominators
+        #     would otherwise be inflated);
+        #   * base target / swing type / _prev_motion_steps untouched;
+        #   * the racket-progress baseline is reset via _progress_reset_mask (same mechanism as the
+        #     resample path) so the target jump creates no fake progress reward;
+        #   * the achieved-target replay WRITE is unaffected (it stores the LIVE target state at
+        #     exact-strike frames, and tts floor > 0 keeps refinement away from the strike frame).
+        # prob==0 (default) short-circuits before any RNG draw — byte-identical baseline.
+        _ms_prob = float(self.cfg.midswing_resample_prob)
+        if _ms_prob > 0.0:
+            eligible = self.pre_strike & (self.time_to_strike > float(self.cfg.midswing_resample_tts_floor))
+            redraw = eligible & (torch.rand(self.num_envs, device=self.device) < _ms_prob)
+            ids = torch.where(redraw)[0]
+            if len(ids) > 0:
+                origins = self._env.scene.env_origins[ids]
+                if self.cfg.target_mode == "reference_perturbed":
+                    self._sample_targets_reference_perturbed(ids, origins, len(ids))
+                else:
+                    self._sample_targets_uniform(ids, origins, len(ids))
+                self._prev_racket_dist[ids] = torch.norm(
+                    self.racket_pos_w[ids] - self.racket_target_pos_w[ids], dim=-1
+                ).detach()
+                self.racket_progress[ids] = 0.0
+                self._progress_reset_mask[ids] = True
+            # Per-env 0/1 indicator; the wandb reset-mean = per-step refinement fraction (~ prob *
+            # eligible fraction). Written every step while the feature is on so zero-redraw steps count.
+            self.metrics["midswing_resample_count"] = redraw.float()
+
+        # A1 target latency/jitter: refresh the ACTOR-visible target view once per step (no-op alias
+        # when the knobs are off). Runs LAST so it sees this step's wrap/refinement target updates.
+        self._push_actor_target()
+
+    def _push_actor_target(self):
+        """A1: refresh the ACTOR-visible target view once per control step (latency + jitter).
+
+        Applied on PUSH (not on read) so the jitter is drawn ONCE per step and every actor obs term
+        reads the same tensor within the step (determinism). The jitter std decays with the time to
+        strike (SMASH Eq. 14 — the mocap ball prediction converges as the strike approaches):
+        per-step std = knob * clamp(time_to_strike, 0, 1). The ring buffer stores the jittered
+        values, so a delayed read reproduces the prediction noise AS OF push time (what the mocap
+        link actually emitted then). The TRUE live target is untouched — rewards, metrics, the
+        privileged critic, and the achieved-target-replay write keep reading racket_target_pos_w /
+        racket_target_vel_w / swing_sign. time_to_strike is never delayed: the swing clock is
+        generated robot-side by the deploy runner, not by the mocap link.
+        """
+        if not self._actor_view_active:
+            return  # default path: delayed_* alias the live tensors — nothing to compute, no RNG
+        pos = self.racket_target_pos_w
+        vel = self.racket_target_vel_w
+        if self._jitter_pos > 0.0 or self._jitter_vel > 0.0:
+            scale = self.time_to_strike.clamp(0.0, 1.0).unsqueeze(-1)
+            if self._jitter_pos > 0.0:
+                pos = pos + torch.randn_like(pos) * (self._jitter_pos * scale)
+            if self._jitter_vel > 0.0:
+                vel = vel + torch.randn_like(vel) * (self._jitter_vel * scale)
+        if self._delay_steps > 0:
+            # Write this step's (jittered) target into slot `w`; the next slot in the length-
+            # (delay+1) ring was written exactly `delay` pushes ago — that is the actor's view.
+            w = self._delay_ptr
+            self._delay_buf_pos[w].copy_(pos)
+            self._delay_buf_vel[w].copy_(vel)
+            self._delay_buf_sign[w].copy_(self.swing_sign)
+            r = (w + 1) % (self._delay_steps + 1)
+            self._delay_ptr = r
+            self.delayed_racket_target_pos_w.copy_(self._delay_buf_pos[r])
+            self.delayed_racket_target_vel_w.copy_(self._delay_buf_vel[r])
+            self.delayed_swing_sign.copy_(self._delay_buf_sign[r])
+        else:
+            # Jitter-only (delay==0): the actor view is live + this step's noise, no latency.
+            self.delayed_racket_target_pos_w.copy_(pos)
+            self.delayed_racket_target_vel_w.copy_(vel)
+            self.delayed_swing_sign.copy_(self.swing_sign)
+
     def _count_swing_starts(self, env_ids, count_prestrike_falls: bool) -> None:
         """UNCONDITIONAL swing accounting (Phase A wandb fix). Increment-only here; the decay is
         applied once per step in _update_metrics next to the exact accumulators, so
@@ -925,10 +1103,16 @@ class RacketTargetCommand(CommandTerm):
         data = self.robot.data
         # --- racket-target distance + dense progress (the base-free movement driver) ---
         self.racket_target_distance = racket_dist
-        # progress = previous - current distance; clamp to kill the spike when the target resamples / the
-        # episode resets (a target jump would otherwise read as huge spurious progress).
-        self.racket_progress = (self._prev_racket_dist - racket_dist).clamp(-0.15, 0.15)
+        # progress = previous - current distance. Resample/reset steps are not learnable progress:
+        # the target and/or reference clip jumped, so reset the baseline and emit exactly zero.
+        motion = self._motion()
+        reset_progress = self._progress_reset_mask.clone()
+        if hasattr(motion, "just_resampled"):
+            reset_progress |= motion.just_resampled
+        progress = (self._prev_racket_dist - racket_dist).clamp(-0.15, 0.15)
+        self.racket_progress = torch.where(reset_progress, torch.zeros_like(progress), progress)
         self._prev_racket_dist = racket_dist.detach()
+        self._progress_reset_mask.zero_()
         self.metrics["racket_target_distance"] = racket_dist
         self.metrics["racket_progress"] = self.racket_progress
         self.metrics["racket_progress_prestrike"] = torch.where(
@@ -1116,6 +1300,10 @@ class RacketTargetCommand(CommandTerm):
         self._exact_pass_5cm_acc = decay * self._exact_pass_5cm_acc + float(_pass_5cm.sum())
         self._exact_pass_10cm_acc = decay * self._exact_pass_10cm_acc + float(_pass_10cm.sum())
         self._exact_pass_normal_acc = decay * self._exact_pass_normal_acc + float(pass_normal.sum())
+        # GLOBAL error-magnitude EMAs (P2.3 adaptive sigma driver) — same decay/mask as the pass
+        # counters above; per-clip variants exist further down but sigma needs one global signal.
+        self._exact_pos_err_sum = decay * self._exact_pos_err_sum + float((pos_err * exact_strike).sum())
+        self._exact_vel_err_sum = decay * self._exact_vel_err_sum + float((vel_err * exact_strike).sum())
         # UNCONDITIONAL swing accounting: decay the start/fall accumulators at the SAME per-step
         # rate as the exact accumulators (increments happen in _count_swing_starts), then report
         #   swing_completion_rate = exact-strike arrivals / swing starts   (falls count against it)
@@ -1232,6 +1420,43 @@ class RacketTargetCommand(CommandTerm):
             self.metrics[f"racket_pos_error_{_ax}_exact_strike"] = torch.where(
                 exact_strike, _axis_err_exact[:, _ai], self.metrics[f"racket_pos_error_{_ax}_exact_strike"]
             )
+        # P2.3 SMASH-style ADAPTIVE TRACKING SIGMA (coarse-to-fine): every sigma_update_every steps,
+        # set the racket position/velocity reward stds to the clamped decayed MEAN exact-strike error,
+        # so the kernel always brackets the current operating band instead of a hand-tuned constant
+        # (SMASH Table IV: removing this collapses success 86.4 -> 22.6). Mutates the LIVE reward-term
+        # params in place (read per compute() call); also keeps racket_strike_success's own std_pos/
+        # std_vel in lockstep so the multiplicative bonus agrees with the additive terms. Same
+        # placement/pattern as the success-gated perturb curriculum below.
+        if (
+            self.cfg.adaptive_sigma
+            and enough
+            and self._env.common_step_counter % int(self.cfg.sigma_update_every) == 0
+        ):
+            pos_mean = self._exact_pos_err_sum / denom
+            vel_mean = self._exact_vel_err_sum / denom
+            sigma_pos = min(max(float(self.cfg.sigma_ema_scale) * pos_mean, float(self.cfg.sigma_pos_min)),
+                            float(self.cfg.sigma_pos_max))
+            sigma_vel = min(max(float(self.cfg.sigma_ema_scale) * vel_mean, float(self.cfg.sigma_vel_min)),
+                            float(self.cfg.sigma_vel_max))
+            rm = self._env.reward_manager
+            try:
+                rm.get_term_cfg("racket_position").params["std"] = sigma_pos
+                rm.get_term_cfg("racket_velocity").params["std"] = sigma_vel
+                succ = rm.get_term_cfg("racket_strike_success").params
+                succ["std_pos"] = sigma_pos
+                succ["std_vel"] = sigma_vel
+            except ValueError:
+                pass  # a variant task without these terms: adaptive sigma is a no-op there
+            self._adaptive_sigma_pos = sigma_pos
+            self._adaptive_sigma_vel = sigma_vel
+        if self.cfg.adaptive_sigma:
+            self.metrics["adaptive_sigma_pos"][:] = self._adaptive_sigma_pos
+            self.metrics["adaptive_sigma_vel"][:] = self._adaptive_sigma_vel
+        # A1 target latency diagnostic: constant broadcast, refreshed every step because
+        # CommandTerm.reset() zeros metric entries of resetting envs before logging them.
+        # (midswing_resample_count is written per step in _update_command while the feature is on.)
+        self.metrics["target_delay_steps_in_effect"][:] = float(self._delay_steps)
+
         # Success-gated curriculum: widen the perturbation only once the smoothed CONDITIONAL exact-strike
         # composite success (fraction of exact-strike samples passing all three thresholds) clears the bar.
         if self.cfg.target_mode == "reference_perturbed" and self.cfg.ref_perturb_success_gated:
@@ -1358,9 +1583,11 @@ class RacketTargetCommand(CommandTerm):
     def racket_target_pos_b(self) -> torch.Tensor:
         """Desired racket position relative to the base (yaw-heading frame). HITTER actor obs.
 
-        PRIVILEGED: uses ``base_pos_w`` (world base position), which is fabricated on hardware
-        (no localizer). Used by the `full` obs mode; the deploy-parity mode (legacy task name:
-        `real_sensor_only`) replaces it with :meth:`racket_target_pos_b_rel`.
+        PRIVILEGED: uses ``base_pos_w`` (world base position). Mocap streams the base pose at 300 Hz
+        during play, but that link is not bridged into the deploy front-end, so this term is fabricated
+        at deploy; base-position-freedom is a deliberate robustness choice. Used by the `full` obs mode;
+        the deploy-parity mode (legacy task name: `real_sensor_only`) replaces it with
+        :meth:`racket_target_pos_b_rel`.
         """
         return quat_rotate_inverse(yaw_quat(self.base_quat_w), self.racket_target_pos_w - self.base_pos_w)
 
@@ -1376,8 +1603,28 @@ class RacketTargetCommand(CommandTerm):
         kinematics (joint encoders), WITHOUT a fabricated base pose. Replaces
         :meth:`racket_target_pos_b` in the deploy-parity observation mode (legacy task name:
         ``real_sensor_only``).
+
+        A1: reads the ACTOR-visible target view (delayed/jittered when the A1 knobs are on;
+        the live tensor itself otherwise — byte-identical default). This method backs the
+        deploy-parity ACTOR obs only; the critic's :meth:`racket_target_pos_b` stays live.
         """
-        return quat_rotate_inverse(yaw_quat(self.base_quat_w), self.racket_target_pos_w - self.racket_pos_w)
+        return quat_rotate_inverse(yaw_quat(self.base_quat_w), self.actor_racket_target_pos_w() - self.racket_pos_w)
+
+    # --- A1 ACTOR-visible target accessors (delayed/jittered view; live aliases when off) ------- #
+    def actor_racket_target_pos_w(self) -> torch.Tensor:
+        """ACTOR-visible desired racket position (world): the A1 delayed/jittered view when target
+        latency/jitter is enabled, else the live tensor itself (zero-overhead alias). Rewards,
+        metrics, and the privileged critic keep reading the TRUE live ``racket_target_pos_w``."""
+        return self.delayed_racket_target_pos_w
+
+    def actor_racket_target_vel_w(self) -> torch.Tensor:
+        """ACTOR-visible desired racket velocity (world). See :meth:`actor_racket_target_pos_w`."""
+        return self.delayed_racket_target_vel_w
+
+    def actor_swing_sign(self) -> torch.Tensor:
+        """ACTOR-visible swing sign (forehand +1 / backhand -1), delayed with the target when A1
+        latency is on (the swing-type flag rides the same planner->runner message as the target)."""
+        return self.delayed_swing_sign
 
     def base_target_pos_b(self) -> torch.Tensor:
         """Desired base XY position relative to the current base (yaw-heading frame). HITTER actor obs."""
@@ -1494,6 +1741,47 @@ class RacketTargetCommandCfg(CommandTermCfg):
     exact_success_decay: float = 0.99
     exact_success_min_count: float = 50.0
 
+    # --- P2.3 SMASH-style adaptive tracking sigma (coarse-to-fine reward kernel widths) ---
+    # When on, every `sigma_update_every` control steps the racket_position/racket_velocity reward
+    # stds (and racket_strike_success's std_pos/std_vel) are set to
+    #   clamp(sigma_ema_scale * decayed_mean_exact_strike_error, sigma_min, sigma_max)
+    # so the exp kernel always brackets the CURRENT operating error band. Replaces the hand-run
+    # 1.8 -> 1.0 -> 0.8 -> 0.5 velocity-std curriculum. sigma_*_max should match the task YAML's
+    # starting stds; sigma_*_min should sit at the acceptance thresholds (0.075 m / 0.5 m/s).
+    adaptive_sigma: bool = False
+    sigma_update_every: int = 500
+    sigma_ema_scale: float = 1.0
+    sigma_pos_min: float = 0.075
+    sigma_pos_max: float = 0.20
+    sigma_vel_min: float = 0.5
+    sigma_vel_max: float = 1.0
+
+    # --- A1 target latency & time-variance (mocap->planner->runner realism; roadmap A1) -------------
+    # MOTIVATION: training otherwise hands the actor a PERFECT, instantly-updated target, while the
+    # real loop (mocap -> planner -> runner) delivers it LATE (transport + planning latency), NOISY
+    # (ball-prediction error that shrinks as the strike approaches — SMASH Eq. 14), and REFINED
+    # mid-swing (the planner re-plans WHERE, not WHEN). PACE injects sensor delays for the same
+    # reason. Without this, the mocap-closed-loop deployment faces out-of-distribution target
+    # dynamics. Scope: ONLY the ACTOR-visible target view (pos/vel/swing_sign) is degraded; rewards,
+    # metrics, the privileged critic, and the achieved-target-replay write use the TRUE live target.
+    # time_to_strike is NEVER delayed: the swing clock is generated robot-side by the deploy runner,
+    # not by the mocap link. ALL defaults OFF => byte-identical baseline (delay==0 aliases the live
+    # tensors; jitter==0 / prob==0 short-circuit before any RNG draw).
+    target_delay_steps: int = 0  # actor sees target pos/vel/swing_sign this many control steps (50 Hz) late
+    # SMASH-style tts-decaying gaussian noise on the ACTOR-visible target, drawn ONCE per step on the
+    # ring-buffer push (determinism within a step): per-step std = knob * clamp(time_to_strike, 0, 1),
+    # i.e. the knob is the std at time_to_strike >= 1 s, decaying to 0 at the strike (prediction
+    # convergence). Units: m (pos) / m/s (vel).
+    target_jitter_pos_per_s: float = 0.0
+    target_jitter_vel_per_s: float = 0.0
+    # Mid-swing target refinement: each control step, envs with pre_strike AND time_to_strike >
+    # midswing_resample_tts_floor re-draw their target (position/velocity/normal via the existing
+    # sampling path) with this per-step probability. Strike timing is untouched (same strike step),
+    # no swing start is counted, and the racket-progress baseline is reset so the target jump creates
+    # no fake progress.
+    midswing_resample_prob: float = 0.0
+    midswing_resample_tts_floor: float = 0.3  # s; no refinement inside the last `floor` seconds before the strike
+
     # --- reachable racket-target workspace (offsets from the env origin, world frame, meters) ---
     # Used only by target_mode="uniform". PLACEHOLDER ranges (not the reference strike point).
     racket_pos_x_range: tuple[float, float] = (0.25, 0.55)
@@ -1521,11 +1809,10 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # use the shared racket_pos_x_range + |y|-sign + racket_pos_z_range box for every clip (BACKWARD
     # COMPATIBLE: old behavior, nothing changes). When set, it is a tuple indexed by clip_id (0=forehand,
     # 1=backhand — same order as strike_phase_per_clip), each entry ((x_lo,x_hi),(y_lo,y_hi),(z_lo,z_hi))
-    # added to the env origin. NOTE the y range is SIGNED here (encode forehand -y / backhand +y directly),
-    # so it REPLACES the shared |y|-sign logic. Reason: when strike_phase changes the strike frame, the
-    # racket sits at a DIFFERENT height/depth per clip (e.g. backhand @ phase 0.50 -> z~1.22, above the
-    # shared z<=1.05 box), so a shared box makes that clip's strike-frame position unreachable. Per-clip
-    # boxes let each clip's target track its own reference strike point.
+    # added to the env origin. NOTE the y range is SIGNED here and used directly, so it REPLACES the
+    # shared |y|-sign logic. Reason: each clip's strike frame can sit at a different height/depth/lateral
+    # offset, so a shared box can make one clip's strike-frame position unreachable. Per-clip boxes let
+    # each clip's target track its own reference strike point.
     racket_pos_range_per_clip: tuple | None = None
 
     # --- HER-style achieved-target replay (uniform mode + unified multi-clip only) -------------------

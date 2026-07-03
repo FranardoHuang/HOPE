@@ -1,17 +1,19 @@
 """Headless probe: verify the corrected exact-strike success metric vs the RAW conditional pass rate.
 
-Loads a trained checkpoint + local motion clip (no wandb), steps the env, and each step pairs the
+Loads a trained checkpoint + local motion clip(s) (no wandb), steps the env, and each step pairs the
 per-env exact-strike mask with the instantaneous racket errors to recompute the RAW conditional
-exact-strike pass rates. It then compares those to the LOGGED metric tensor the curriculum reads:
+exact-strike pass rates. It then compares those to the LOGGED metric tensors:
 
     hope_isaac_py scripts/probe_metric.py task=HOPEPingPong algo=ppo headless=true num_envs=512 \
-        checkpoint=logs/rsl_rl/agibot_a3_hope/2026-06-25_08-10-54_pathA_basecouple/model_4400.pt \
-        motion_file=artifacts/hope_forehand:v0/motion.npz steps=800
+        checkpoint=logs/rsl_rl/agibot_a3_hope/<run>/model_4400.pt \
+        motion_file=../motions/preprocessed/hope_forehand.npz \
+        motion_file_2=../motions/preprocessed/hope_backhand.npz steps=800
 
 Confirms: (1) logged strike_composite_success_exact ~= raw exact composite, (2) pos/vel/normal logged
-separately, (3) the success-gated ref_perturb_scale can move off its start value.
+separately, (3) exact-strike timing stays aligned for unified multi-clip policies.
 """
 import os
+import pathlib
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -19,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hydra
 from omegaconf import OmegaConf
 
-from train import _apply_task_overrides, _registry_clip_name
+from train import _apply_task_overrides, _registry_clip_name, resolve_motion_sources
 
 
 def _run(cfg, simulation_app):
@@ -30,8 +32,10 @@ def _run(cfg, simulation_app):
     from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
     from isaaclab_tasks.utils import parse_env_cfg
 
-    import whole_body_tracking.tasks  # noqa: F401  -- registers the gym tasks
+    import whole_body_tracking.tasks as _wbt_tasks  # registers the gym tasks
     from whole_body_tracking.utils.ppo_cfg import runner_kwargs
+
+    _ = _wbt_tasks
 
     task_id = str(cfg.task.gym_task)
     num_envs = int(cfg.num_envs) if cfg.num_envs is not None else int(cfg.task.env.num_envs)
@@ -39,7 +43,8 @@ def _run(cfg, simulation_app):
     env_cfg = parse_env_cfg(task_id, device=str(cfg.device), num_envs=num_envs)
     _apply_task_overrides(env_cfg, cfg.task, _registry_clip_name(cfg))
     env_cfg.sim.device = str(cfg.device)
-    env_cfg.commands.motion.motion_file = str(cfg.motion_file)
+    motion_files, _ = resolve_motion_sources(cfg, cwd=pathlib.Path.cwd())
+    env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
 
     # HER achieved-target replay is TRAIN-ONLY (the probe must measure the pure box distribution).
     if hasattr(env_cfg.commands, "racket_target") and hasattr(
@@ -63,15 +68,11 @@ def _run(cfg, simulation_app):
     vel_thr = float(cmd.cfg.strike_success_vel_thresh)
     nrm_thr = float(cmd.cfg.strike_success_normal_thresh_deg)
     step_dt = float(env.unwrapped.step_dt)
-    motion_term = cmd._motion()
-    total = max(int(motion_term.motion.time_step_total), 1)
-    strike_step = round(cmd.cfg.strike_phase * (total - 1))
 
-    # accumulators over exact-strike samples, for TWO masks:
-    #   stale = the in-code exact_strike (uses self.time_to_strike, 1 step lagged)
-    #   fresh = recomputed from the CURRENT motion phase (aligned with the current racket FK)
-    acc = {k: dict(n=0, pos=0, vel=0, nrm=0, comp=0) for k in ("stale", "fresh")}
-    scale_start = float(cmd._curr_perturb_scale)
+    # Accumulate exact-strike samples for the logged mask and the live command timing. The latter uses
+    # the command term's per-clip time_to_strike, so unified forehand/backhand probes do not assume one
+    # scalar strike phase for all clips.
+    acc = {k: dict(n=0, pos=0, vel=0, nrm=0, comp=0) for k in ("logged", "live")}
     n_steps = int(cfg.get("steps", 800))
 
     def tally(which, mask, m):
@@ -93,9 +94,9 @@ def _run(cfg, simulation_app):
             actions = policy(obs)
             obs, _, _, _ = env.step(actions.to(env.unwrapped.device))
         m = cmd.metrics
-        tally("stale", m["exact_strike_hit_rate"] > 0.5, m)
-        fresh_tts = (strike_step - motion_term.time_steps).float() * step_dt
-        tally("fresh", fresh_tts.abs() <= (0.5 * step_dt + 1e-6), m)
+        tally("logged", m["exact_strike_hit_rate"] > 0.5, m)
+        fresh_tts = cmd.time_to_strike
+        tally("live", fresh_tts.abs() <= (0.5 * step_dt + 1e-6), m)
         step += 1
 
     def rate(a, key):
@@ -106,23 +107,18 @@ def _run(cfg, simulation_app):
     logged_vel = float(cmd.metrics["strike_vel_pass_exact"][0])
     logged_nrm = float(cmd.metrics["strike_normal_pass_exact"][0])
     logged_decN = float(cmd.metrics["exact_strike_sample_count_decayed"][0])
-    scale_end = float(cmd._curr_perturb_scale)
 
     print("\n" + "=" * 72, flush=True)
-    print(f"PROBE over {step} steps, {num_envs} envs  |  exact samples stale={acc['stale']['n']} "
-          f"fresh={acc['fresh']['n']}", flush=True)
+    print(f"PROBE over {step} steps, {num_envs} envs  |  exact samples logged={acc['logged']['n']} "
+          f"live={acc['live']['n']}", flush=True)
     print("-" * 72, flush=True)
-    print(f"{'metric':<22}{'RAW stale':>12}{'RAW fresh':>12}{'LOGGED':>12}", flush=True)
-    print(f"{'pos < %.3g m' % pos_thr:<22}{rate('stale','pos'):>12.4f}{rate('fresh','pos'):>12.4f}{logged_pos:>12.4f}", flush=True)
-    print(f"{'vel < %.3g m/s' % vel_thr:<22}{rate('stale','vel'):>12.4f}{rate('fresh','vel'):>12.4f}{logged_vel:>12.4f}", flush=True)
-    print(f"{'normal < %.3g deg' % nrm_thr:<22}{rate('stale','nrm'):>12.4f}{rate('fresh','nrm'):>12.4f}{logged_nrm:>12.4f}", flush=True)
-    print(f"{'composite (all 3)':<22}{rate('stale','comp'):>12.4f}{rate('fresh','comp'):>12.4f}{logged_comp:>12.4f}", flush=True)
+    print(f"{'metric':<22}{'RAW logged':>12}{'RAW live':>12}{'LOGGED':>12}", flush=True)
+    print(f"{'pos < %.3g m' % pos_thr:<22}{rate('logged','pos'):>12.4f}{rate('live','pos'):>12.4f}{logged_pos:>12.4f}", flush=True)
+    print(f"{'vel < %.3g m/s' % vel_thr:<22}{rate('logged','vel'):>12.4f}{rate('live','vel'):>12.4f}{logged_vel:>12.4f}", flush=True)
+    print(f"{'normal < %.3g deg' % nrm_thr:<22}{rate('logged','nrm'):>12.4f}{rate('live','nrm'):>12.4f}{logged_nrm:>12.4f}", flush=True)
+    print(f"{'composite (all 3)':<22}{rate('logged','comp'):>12.4f}{rate('live','comp'):>12.4f}{logged_comp:>12.4f}", flush=True)
     print("-" * 72, flush=True)
     print(f"decayed exact-strike sample count (logged): {logged_decN:.1f}", flush=True)
-    print(f"ref_perturb_scale: start={scale_start:.4f}  end={scale_end:.4f}  "
-          f"moved={'YES' if scale_end > scale_start + 1e-9 else 'no'}", flush=True)
-    print(f"advance_threshold={cmd.cfg.ref_perturb_advance_threshold}  "
-          f"success_gated={cmd.cfg.ref_perturb_success_gated}", flush=True)
     print("=" * 72 + "\n", flush=True)
 
     env.close()

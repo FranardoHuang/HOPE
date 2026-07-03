@@ -30,6 +30,34 @@ def test_normal_vector_is_unit_length():
     assert np.isclose(np.linalg.norm(cmd.n_racket), 1.0, atol=1e-9)
 
 
+def test_normal_vector_faces_opponent_side():
+    cmd = _planner().plan(_incoming_strike())
+    assert np.dot(cmd.n_racket, np.array([1.0, 0.0, 0.0])) > 0.0
+
+
+def test_degenerate_sideways_and_reversed_normals_face_opponent():
+    pl = _planner()
+    cases = [
+        (np.array([1.0, 0.0, 0.0]), np.array([1.0, 0.0, 0.0])),   # delta_v ~= 0
+        (np.array([0.0, -1.0, 0.0]), np.array([0.0, 1.0, 0.0])),  # pure sideways delta_v
+        (np.array([3.0, 0.0, 0.0]), np.array([-1.0, 0.0, 0.0])),  # raw delta_v points -x
+    ]
+    for v_in, v_out in cases:
+        _, n = pl._compute_racket_velocity(v_in, v_out, pl.config.C_r)
+        assert np.isclose(np.linalg.norm(n), 1.0, atol=1e-9)
+        assert n[0] > 0.0
+
+
+def test_outgoing_velocity_with_drag_lands_near_target():
+    pl = _planner()
+    p_strike = np.array([0.0, -0.7625, 0.3])
+    p_land = np.array([2.055, -0.7625, 0.0])
+    dt = 0.55
+    v_out = pl._compute_outgoing_velocity(p_strike, p_land, dt)
+    p_end, _ = pl._integrate_free_flight(p_strike, v_out, dt)
+    assert np.allclose(p_end, p_land, atol=5e-4)
+
+
 def test_net_clearance_reported_correctly():
     pl = _planner()
     p_strike = np.array([0.0, -0.7625, 0.3])

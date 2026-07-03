@@ -1,5 +1,15 @@
 # MuJoCo deploy-path rehearsal + fabricated-pose fix (sim-to-real)
 
+> **SUPERSEDED for current checkpoints (2026-07-03):** the 180-D obs-layout
+> assertions in this doc (the obs indices below, the "180-D obs layout …
+> unchanged" claim, the Step-5 "obs still 180-D" check) and the loc_mode A/B/C
+> rehearsal apply to **legacy 180-D checkpoints only** (model_15200 lineage).
+> Current 175-D deploy-parity policies (model_p4_deployparity / explicitpd_ft)
+> remove `motion_anchor_pos_b` and `base_target_pos_b` and reframe
+> `racket_target_pos_b` racket-FK-relative, so they have **no world-base-position
+> obs terms** — loc_mode is irrelevant for them. See
+> `hope_training/whole_body_tracking/scripts/realsensor_obs_reference.py`.
+
 Goal: reproduce the deployed buzz/instability **in MuJoCo, off-hardware**, prove
 it is the **fabricated world-pose observation** (not the ONNX policy), and validate
 the **perfect-tracking** fix before any hardware staging.

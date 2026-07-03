@@ -98,43 +98,47 @@ def _run_ball_tests() -> int:
     import torch
 
     ball = _load("tt_ball", "ball.py")
+    try:
+        # Pure drag: a = -k |v| v  =>  F = -m k |v| v, exactly opposing velocity.
+        cfg = ball.BallAerodynamicsCfg(enabled=True, drag_coefficient=0.5, magnus_coefficient=0.0)
+        v = torch.tensor([[3.0, 0.0, 0.0], [0.0, -4.0, 0.0]])
+        w = torch.zeros_like(v)
+        m = 0.0027
+        f, t = ball.compute_aero_wrench(v, w, m, cfg)
+        assert torch.allclose(t, torch.zeros_like(t))
+        # First sample: |v|=3 -> F_x = -m*k*3*3 = -m*4.5
+        assert torch.allclose(f[0], torch.tensor([-m * 0.5 * 9.0, 0.0, 0.0]), atol=1e-9)
+        # Drag must point opposite velocity.
+        assert torch.all(torch.sum(f * v, dim=-1) <= 0.0)
 
-    # Pure drag: a = -k |v| v  =>  F = -m k |v| v, exactly opposing velocity.
-    cfg = ball.BallAerodynamicsCfg(enabled=True, drag_coefficient=0.5, magnus_coefficient=0.0)
-    v = torch.tensor([[3.0, 0.0, 0.0], [0.0, -4.0, 0.0]])
-    w = torch.zeros_like(v)
-    m = 0.0027
-    f, t = ball.compute_aero_wrench(v, w, m, cfg)
-    assert torch.allclose(t, torch.zeros_like(t))
-    # First sample: |v|=3 -> F_x = -m*k*3*3 = -m*4.5
-    assert torch.allclose(f[0], torch.tensor([-m * 0.5 * 9.0, 0.0, 0.0]), atol=1e-9)
-    # Drag must point opposite velocity.
-    assert torch.all(torch.sum(f * v, dim=-1) <= 0.0)
+        # Magnus: F_magnus = m k_m (w x v), perpendicular to both w and v.
+        cfg_m = ball.BallAerodynamicsCfg(enabled=True, drag_coefficient=0.0, magnus_coefficient=0.1)
+        v2 = torch.tensor([[5.0, 0.0, 0.0]])
+        w2 = torch.tensor([[0.0, 0.0, 10.0]])  # topspin about +z
+        f2, _ = ball.compute_aero_wrench(v2, w2, m, cfg_m)
+        expected = m * 0.1 * torch.cross(w2, v2, dim=-1)
+        assert torch.allclose(f2, expected, atol=1e-9)
+    except AssertionError as e:
+        print(f"[FAIL] ball-aerodynamics tests: {e}")
+        return 1
 
-    # Magnus: F_magnus = m k_m (w x v), perpendicular to both w and v.
-    cfg_m = ball.BallAerodynamicsCfg(enabled=True, drag_coefficient=0.0, magnus_coefficient=0.1)
-    v2 = torch.tensor([[5.0, 0.0, 0.0]])
-    w2 = torch.tensor([[0.0, 0.0, 10.0]])  # topspin about +z
-    f2, _ = ball.compute_aero_wrench(v2, w2, m, cfg_m)
-    expected = m * 0.1 * torch.cross(w2, v2, dim=-1)
-    assert torch.allclose(f2, expected, atol=1e-9)
     print("[ok] ball-aerodynamics tests passed")
     return 0
 
 
 def main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
-    failed = 0
+    geometry_failed = 0
     for fn in tests:
         try:
             fn()
             print(f"[ok] {fn.__name__}")
         except AssertionError as e:
-            failed += 1
+            geometry_failed += 1
             print(f"[FAIL] {fn.__name__}: {e}")
-    _run_ball_tests()
-    print(f"\n{len(tests) - failed}/{len(tests)} geometry tests passed")
-    return 1 if failed else 0
+    ball_failed = _run_ball_tests()
+    print(f"\n{len(tests) - geometry_failed}/{len(tests)} geometry tests passed")
+    return 1 if geometry_failed or ball_failed else 0
 
 
 if __name__ == "__main__":

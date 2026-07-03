@@ -27,8 +27,20 @@ python3 -m pytest test
 Current known result:
 
 - 2026-06-22: 20 passed.
+- 2026-06-26: 26 passed with `PYTHONPATH=hope_ws/src/hope_planner python3 -m pytest hope_ws/src/hope_planner/test -q`.
 
-Running the same command from the repo root currently fails unless `hope_planner` is on `PYTHONPATH`.
+From the repo root, set `PYTHONPATH` explicitly:
+
+```bash
+PYTHONPATH=hope_ws/src/hope_planner python3 -m pytest \
+  hope_ws/src/hope_planner/test/test_racket_target_planner.py \
+  hope_ws/src/hope_planner/test/test_ball_trajectory_predictor.py \
+  hope_ws/src/hope_planner/test/test_quaternion_utils.py -q
+```
+
+Current known result:
+
+- 2026-06-26: selected planner math tests above, 16 passed.
 
 ## ROS Workspace Build
 
@@ -45,7 +57,7 @@ The `rosdep install` step resolves `vrpn_mocap` VRPN/eigen dependencies and must
 
 Current status:
 
-- Target environment is Linux + ROS 2 Jazzy. The build is to be verified inside the ROS environment (see [Dockerfile.hope-ros2-jazzy](../../Dockerfile.hope-ros2-jazzy)).
+- Target environment is Linux + ROS 2 Jazzy. The build is to be verified inside the ROS environment described in [setup_environments.md](setup_environments.md). The obsolete root `Dockerfile.hope-ros2-jazzy` has been removed.
 
 ## Deploy Source Build
 

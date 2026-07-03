@@ -39,6 +39,17 @@ def test_table_bounce_reverses_z_velocity():
     assert np.isclose(v_plus[0], BallPhysics().C_h * 2.0)
 
 
+def test_bounce_then_cross_hit_plane_path():
+    pred = _predictor()
+    p0 = np.array([0.2, -0.7625, 0.03])
+    v0 = np.array([-1.5, 0.0, -2.0])
+    strike = pred.predict(p0, v0, 0.0)
+    assert strike.valid
+    assert strike.num_bounces == 1
+    assert abs(strike.p_ball[0]) < 1e-6
+    assert strike.p_ball[2] > 0.0
+
+
 def test_bounce_outside_table_bounds_not_valid():
     pred = _predictor()
     on_table = np.array([1.0, -0.7625, -0.01])   # within bounds (expanded by radius)

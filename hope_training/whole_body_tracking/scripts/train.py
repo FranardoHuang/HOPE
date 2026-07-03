@@ -6,17 +6,19 @@ Pick the task/algo YAML on the command line and override any field:
         registry_name=<entity>/wandb-registry-motions/hope_forehand
 
     python scripts/train.py task=TrackingFlat algo=ppo num_envs=2048 max_iterations=20000 \
-        registry_name=<entity>/wandb-registry-motions/hope_forehand
+        registry_name=<org>/wandb-registry-motions/hope_forehand
 
 Tune by editing cfg/task/*.yaml (env / reward / racket / DR) and cfg/algo/ppo.yaml (PPO). This
-script reuses BeyondMimic's training mechanics (Isaac Lab + rsl_rl + the wandb motion registry);
-the legacy `scripts/rsl_rl/train.py --task=... --registry_name=...` still works too.
+script reuses BeyondMimic's training mechanics (Isaac Lab + rsl_rl). Local video-generated `.npz`
+motions are first-class inputs; the WandB motion registry is an optional sharing/publishing layer.
+The legacy `scripts/rsl_rl/train.py --task=... --registry_name=...` still works too.
 """
 
+import pathlib
 import sys
 
 import hydra
-from omegaconf import OmegaConf
+from omegaconf import ListConfig, OmegaConf
 
 
 def dump_pickle(filename: str, data):
@@ -45,6 +47,97 @@ def _as_bool(x):
     if isinstance(x, bool):
         return x
     return str(x).strip().lower() in ("true", "1", "yes")
+
+
+def _is_noneish(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in ("", "none", "null")
+    return False
+
+
+def _configured_items(primary, secondary=None) -> list:
+    items = []
+    if not _is_noneish(primary):
+        if isinstance(primary, (list, tuple, ListConfig)):
+            items.extend(primary)
+        else:
+            items.append(primary)
+    if not _is_noneish(secondary):
+        if isinstance(secondary, (list, tuple, ListConfig)):
+            items.extend(secondary)
+        else:
+            items.append(secondary)
+    return [item for item in items if not _is_noneish(item)]
+
+
+def _normalize_registry_name(name) -> str:
+    reg = str(name)
+    if ":" not in reg:
+        reg += ":latest"
+    return reg
+
+
+def _motion_clip_name_from_path(value) -> str | None:
+    items = _configured_items(value)
+    if not items:
+        return None
+    parts = [p for p in str(items[0]).replace("\\", "/").split("/") if p]
+    if not parts:
+        return None
+    if parts[-1] == "motion.npz" and len(parts) >= 2:
+        return parts[-2].split(":")[0] or None
+    return pathlib.PurePath(parts[-1]).stem or None
+
+
+def _resolve_local_motion_files(primary, secondary=None, cwd: pathlib.Path | None = None) -> list[str]:
+    files = []
+    base = pathlib.Path.cwd() if cwd is None else pathlib.Path(cwd)
+    for value in _configured_items(primary, secondary):
+        path = pathlib.Path(str(value)).expanduser()
+        if not path.is_absolute():
+            path = base / path
+        if not path.is_file():
+            raise FileNotFoundError(f"[train.py] motion_file not found: {path}")
+        files.append(str(path))
+    return files
+
+
+def _download_registry_motion_files(primary, secondary=None) -> tuple[list[str], list[str]]:
+    import wandb
+
+    registries = [_normalize_registry_name(value) for value in _configured_items(primary, secondary)]
+    if not registries:
+        raise RuntimeError(
+            "[train.py] No reference motion configured. Pass motion_file=/path/to/motion.npz "
+            "(and optional motion_file_2=/path/to/backhand.npz) for the local path, or pass "
+            "registry_name=<org>/wandb-registry-motions/<name>."
+        )
+    api = wandb.Api()
+    motion_files = [str(pathlib.Path(api.artifact(reg).download()) / "motion.npz") for reg in registries]
+    return motion_files, registries
+
+
+def resolve_motion_sources(cfg, *, cwd: pathlib.Path | None = None) -> tuple[list[str], list[str]]:
+    """Resolve local or registry motion sources for train/play.
+
+    Local files are intentionally all-or-nothing: once ``motion_file`` is set, training does not touch the
+    registry. Use ``motion_file_2`` (or a list-valued ``motion_file``) for the unified forehand/backhand
+    local workflow.
+    """
+    local_files = _resolve_local_motion_files(
+        _get(cfg, "motion_file"),
+        _get(cfg, "motion_file_2"),
+        cwd=cwd,
+    )
+    if local_files:
+        return local_files, []
+
+    task = _get(cfg, "task")
+    registry_name = _get(cfg, "registry_name") if _get(cfg, "registry_name") is not None else _get(task, "registry_name")
+    reg2 = _get(cfg, "registry_name_2") if _get(cfg, "registry_name_2") is not None else _get(task, "registry_name_2")
+    return _download_registry_motion_files(registry_name, reg2)
 
 
 class _OverrideError(AttributeError):
@@ -118,9 +211,23 @@ _RACKET_KEYS = (
     "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "ref_vel_scale_by_motion",
     "debug_reward_logging",
     "clean_reference_strike_velocity", "clean_strike_vel_window",
+    "adaptive_sigma", "sigma_update_every", "sigma_ema_scale",
+    "sigma_pos_min", "sigma_pos_max", "sigma_vel_min", "sigma_vel_max",
     # HER-style achieved-target replay (mixture sampling from previously-achieved strike states).
     "achieved_target_mix_prob", "achieved_buffer_size", "achieved_min_fill",
     "achieved_jitter_pos", "achieved_jitter_vel", "achieved_clamp_inflate",
+    # A1 target latency & time-variance (actor-visible delay, SMASH tts-decaying jitter,
+    # mid-swing target refinement). Defaults OFF; byte-identical baseline.
+    "target_delay_steps", "target_jitter_pos_per_s", "target_jitter_vel_per_s",
+    "midswing_resample_prob", "midswing_resample_tts_floor",
+)
+
+# YAML keys under `motion:` that target the MotionCommandCfg swing-entry structure
+# (Phase-A multi-swing machinery: no-teleport wrap, stand-entry resets, pre-swing hold,
+# A8 post-swing initial-state buffer).
+_MOTION_KEYS = (
+    "wrap_teleport", "stand_start_prob", "hold_steps_range", "stand_start_min_hold",
+    "post_swing_start_prob", "post_swing_buffer_size", "post_swing_min_fill", "post_swing_min_hold",
 )
 
 
@@ -134,16 +241,14 @@ def _registry_clip_name(cfg):
     the same per-clip strike phase.
     """
     reg = _get(cfg, "registry_name")  # CLI override (train/play): wins over the forehand default
-    if reg is not None:
+    if not _is_noneish(reg):
         return str(reg).split("/")[-1].split(":")[0] or None
-    mf = _get(cfg, "motion_file")  # explicit motion file (probe / play replay): next most specific
+    mf = _motion_clip_name_from_path(_get(cfg, "motion_file"))
     if mf is not None:
-        parts = [p for p in str(mf).replace("\\", "/").split("/") if p]
-        if len(parts) >= 2:
-            return parts[-2].split(":")[0] or None
+        return mf
     task = _get(cfg, "task")
     reg = _get(task, "registry_name") if task is not None else None  # task default (forehand): last
-    if reg is not None:
+    if not _is_noneish(reg):
         return str(reg).split("/")[-1].split(":")[0] or None
     return None
 
@@ -302,6 +407,24 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             env_cfg.sim.render_interval = env_cfg.decimation  # keep render in step with decimation
             applied.append(f"decimation={int(dec)}")
 
+    # motion command (swing-entry structure): no-teleport wrap / stand-entry resets / pre-swing hold
+    mt = _get(task, "motion")
+    if mt is not None:
+        provided = [k for k in _MOTION_KEYS if _get(mt, k) is not None]
+        if provided:
+            _require(hasattr(env_cfg.commands, "motion"),
+                     f"commands.motion (task YAML sets motion keys {provided})")
+            M = env_cfg.commands.motion
+            _set_attr(M, "wrap_teleport", _get(mt, "wrap_teleport"), _as_bool, applied, "commands.motion")
+            _set_attr(M, "stand_start_prob", _get(mt, "stand_start_prob"), float, applied, "commands.motion")
+            _set_attr(M, "hold_steps_range", _get(mt, "hold_steps_range"),
+                      lambda v: tuple(int(x) for x in v), applied, "commands.motion")
+            _set_attr(M, "stand_start_min_hold", _get(mt, "stand_start_min_hold"), int, applied, "commands.motion")
+            _set_attr(M, "post_swing_start_prob", _get(mt, "post_swing_start_prob"), float, applied, "commands.motion")
+            _set_attr(M, "post_swing_buffer_size", _get(mt, "post_swing_buffer_size"), int, applied, "commands.motion")
+            _set_attr(M, "post_swing_min_fill", _get(mt, "post_swing_min_fill"), int, applied, "commands.motion")
+            _set_attr(M, "post_swing_min_hold", _get(mt, "post_swing_min_hold"), int, applied, "commands.motion")
+
     rw = _get(task, "rewards")
     if rw is not None:
         R = env_cfg.rewards
@@ -383,6 +506,14 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 applied.append(_sp_note)
             _set_attr(C, "strike_window_s", _get(rk, "strike_window_s"), float, applied, "racket_target")
             _set_attr(C, "strike_success_pos_thresh", _get(rk, "strike_success_pos_thresh"), float, applied, "racket_target")
+            # P2.3 adaptive tracking sigma (coarse-to-fine reward kernel widths)
+            _set_attr(C, "adaptive_sigma", _get(rk, "adaptive_sigma"), _as_bool, applied, "racket_target")
+            _set_attr(C, "sigma_update_every", _get(rk, "sigma_update_every"), int, applied, "racket_target")
+            _set_attr(C, "sigma_ema_scale", _get(rk, "sigma_ema_scale"), float, applied, "racket_target")
+            _set_attr(C, "sigma_pos_min", _get(rk, "sigma_pos_min"), float, applied, "racket_target")
+            _set_attr(C, "sigma_pos_max", _get(rk, "sigma_pos_max"), float, applied, "racket_target")
+            _set_attr(C, "sigma_vel_min", _get(rk, "sigma_vel_min"), float, applied, "racket_target")
+            _set_attr(C, "sigma_vel_max", _get(rk, "sigma_vel_max"), float, applied, "racket_target")
             _set_range(C, "racket_pos_x_range", _get(rk, "pos_x_range"), applied, "racket_target")
             _set_range(C, "racket_pos_y_range", _get(rk, "pos_y_range"), applied, "racket_target")
             _set_range(C, "racket_pos_z_range", _get(rk, "pos_z_range"), applied, "racket_target")
@@ -448,6 +579,15 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(C, "achieved_jitter_pos", _get(rk, "achieved_jitter_pos"), float, applied, "racket_target")
             _set_attr(C, "achieved_jitter_vel", _get(rk, "achieved_jitter_vel"), float, applied, "racket_target")
             _set_attr(C, "achieved_clamp_inflate", _get(rk, "achieved_clamp_inflate"), float, applied, "racket_target")
+            # A1 target latency & time-variance: the ACTOR-visible target arrives late
+            # (target_delay_steps), noisy (SMASH-style tts-decaying jitter), and is refined
+            # mid-swing (midswing_resample_*), matching the real mocap->planner->runner loop.
+            # Rewards/critic keep the live target. All default OFF (byte-identical baseline).
+            _set_attr(C, "target_delay_steps", _get(rk, "target_delay_steps"), int, applied, "racket_target")
+            _set_attr(C, "target_jitter_pos_per_s", _get(rk, "target_jitter_pos_per_s"), float, applied, "racket_target")
+            _set_attr(C, "target_jitter_vel_per_s", _get(rk, "target_jitter_vel_per_s"), float, applied, "racket_target")
+            _set_attr(C, "midswing_resample_prob", _get(rk, "midswing_resample_prob"), float, applied, "racket_target")
+            _set_attr(C, "midswing_resample_tts_floor", _get(rk, "midswing_resample_tts_floor"), float, applied, "racket_target")
 
     # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
     # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.
@@ -476,7 +616,6 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
 # --------------------------------------------------------------------------- #
 def _run(cfg):
     import os
-    import pathlib
     from datetime import datetime
 
     import gymnasium as gym
@@ -547,10 +686,13 @@ def _run(cfg):
         agent_cfg.wandb_project = str(cfg.log_project_name)
         agent_cfg.neptune_project = str(cfg.log_project_name)
 
-    # 3) motion file(s) from the wandb registry. ONE clip = single-swing-type policy. TWO clips
-    #    (forehand + backhand) = unified HITTER policy: MotionLoader concatenates them and clip_id selects
-    #    which swing each env imitates. Order matters: clip 0 = registry_name (forehand), clip 1 =
-    #    registry_name_2 (backhand); it must match racket.strike_phase_per_clip.
+    # 3) motion file(s). Explicit local motion_file/motion_file_2 take precedence and bypass W&B
+    #    entirely (the documented no-WandB path — see run_training.md); otherwise resolve from the
+    #    wandb registry. ONE clip = single-swing-type policy. TWO clips (forehand + backhand) =
+    #    unified HITTER policy: MotionLoader concatenates them and clip_id selects which swing each
+    #    env imitates. Order matters: clip 0 = forehand, clip 1 = backhand; it must match
+    #    racket.strike_phase_per_clip.
+    local_files = _resolve_local_motion_files(_get(cfg, "motion_file"), _get(cfg, "motion_file_2"))
     registry_name = cfg.registry_name if cfg.registry_name is not None else cfg.task.registry_name
     registry_name = str(registry_name)
 
@@ -579,12 +721,19 @@ def _run(cfg):
         print(f"[train.py] motion clip: {nm} -> {art.source_qualified_name} (digest {art.digest[:12]})", flush=True)
         return str(pathlib.Path(art.download()) / "motion.npz")
 
-    motion_files = [_resolve_clip(registry_name)]
-    reg2 = _get(cfg, "registry_name_2", None) or _get(cfg.task, "registry_name_2", None)
-    if reg2 is not None and str(reg2).strip() and str(reg2).lower() != "none":
-        reg2 = str(reg2)
-        motion_files.append(_resolve_clip(reg2))
-        print(f"[train.py] UNIFIED multi-clip policy: clip0={registry_name}  clip1={reg2}", flush=True)
+    if local_files:
+        motion_files = list(local_files)
+        for f in motion_files:
+            print(f"[train.py] LOCAL motion (no registry): {f}", flush=True)
+        if len(motion_files) > 1:
+            print(f"[train.py] UNIFIED multi-clip policy (local): clip0={motion_files[0]}  clip1={motion_files[1]}", flush=True)
+    else:
+        motion_files = [_resolve_clip(registry_name)]
+        reg2 = _get(cfg, "registry_name_2", None) or _get(cfg.task, "registry_name_2", None)
+        if reg2 is not None and str(reg2).strip() and str(reg2).lower() != "none":
+            reg2 = str(reg2)
+            motion_files.append(_resolve_clip(reg2))
+            print(f"[train.py] UNIFIED multi-clip policy: clip0={registry_name}  clip1={reg2}", flush=True)
     env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
 
     # 4) logging dir (same layout as scripts/rsl_rl/train.py so export/eval are unchanged)
@@ -619,7 +768,7 @@ def _run(cfg):
     # Only hand the runner a registry name for wandb lineage (use_artifact) when the clip actually came
     # from the registry; a local motion path would crash wandb.run.use_artifact. The W&B backend requires
     # 'collection:alias' form (a bare collection name is an HTTP 400), so qualify like _resolve_clip does.
-    if _local_motion(registry_name) is not None:
+    if local_files or _local_motion(registry_name) is not None:
         runner_registry_name = None
     else:
         runner_registry_name = registry_name if ":" in registry_name else registry_name + ":latest"

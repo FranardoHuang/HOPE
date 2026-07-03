@@ -44,9 +44,11 @@ This gate supports real-to-sim and planner validation.
 
 Done:
 
-- `hope_planner` tests pass from the package directory: 20 tests.
+- `hope_planner` tests pass from the repo root with `PYTHONPATH=hope_ws/src/hope_planner`: 26 tests on 2026-06-26.
 - Existing tests cover ball state estimation, trajectory prediction, calibration, quaternion utilities, racket target planning, and CSV splitting.
 - Processed calibration CSVs and chunk manifests exist.
+- Stage 3 racket target planning now uses the same quadratic-drag-plus-gravity free-flight model as Stage 2 for outgoing velocity shooting and net-clearance interpolation, instead of solving outgoing returns ballistically while inbound prediction used drag.
+- Pure Python planner tests now cover opponent-facing racket normals, degenerate/sideways normal cases, drag-aware outgoing landing, bounce-then-cross hit-plane prediction, and quaternion local-`+x` alignment.
 
 Not done:
 
@@ -64,4 +66,4 @@ Not done:
 
 1. Record the current fitted parameters and source dataset.
 2. Add a small planner regression dataset if needed.
-3. Define explicit tests for short balls, deep balls, and double-bounce cases.
+3. Define explicit tests for short balls, deep balls, spin, and double-bounce cases.

@@ -9,6 +9,7 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import pathlib
 import numpy as np
 import torch
 
@@ -16,7 +17,8 @@ from isaaclab.app import AppLauncher
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Replay converted motions.")
-parser.add_argument("--registry_name", type=str, required=True, help="The name of the wand registry.")
+parser.add_argument("--registry_name", type=str, default=None, help="The name of the wandb motion registry.")
+parser.add_argument("--motion_file", type=str, default=None, help="Local motion .npz file. Takes precedence.")
 parser.add_argument(
     "--robot",
     type=str,
@@ -77,16 +79,19 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     # Define simulation stepping
     sim_dt = sim.get_physics_dt()
 
-    registry_name = args_cli.registry_name
-    if ":" not in registry_name:  # Check if the registry name includes alias, if not, append ":latest"
-        registry_name += ":latest"
-    import pathlib
+    if args_cli.motion_file:
+        motion_file = str(pathlib.Path(args_cli.motion_file).expanduser())
+    else:
+        if args_cli.registry_name is None:
+            raise RuntimeError("Pass either --motion_file=/path/to/motion.npz or --registry_name=<org>/wandb-registry-motions/<name>.")
+        registry_name = args_cli.registry_name
+        if ":" not in registry_name:
+            registry_name += ":latest"
+        import wandb
 
-    import wandb
-
-    api = wandb.Api()
-    artifact = api.artifact(registry_name)
-    motion_file = str(pathlib.Path(artifact.download()) / "motion.npz")
+        api = wandb.Api()
+        artifact = api.artifact(registry_name)
+        motion_file = str(pathlib.Path(artifact.download()) / "motion.npz")
 
     motion = MotionLoader(
         motion_file,

@@ -78,6 +78,29 @@ env:
   # between-swing recovery. (Was capped to 3 s in the HOPE curriculum path; restored to HITTER.)
   episode_length_s: 10.0
 
+# ---- swing-entry structure (MotionCommand) -----------------------------------
+# Explicit defaults for the Phase-A multi-swing machinery (commands.py). Keys are optional: absent
+# keys keep the code defaults. These are the knobs of the P2.1 A/B (baseline arm re-enables the
+# teleport-entry era with wrap_teleport=true stand_start_prob=0.0).
+motion:
+  # Clip wrap during the episode does NOT teleport the robot: the policy must physically carry the
+  # body from the previous swing's end into the next windup (deploy-honest recovery training).
+  wrap_teleport: false
+  # Fraction of TRUE episode resets that start from the default STAND (deploy entry, zero velocity)
+  # instead of the legacy RSI teleport onto the reference windup frame.
+  stand_start_prob: 0.25
+  # Pre-swing hold: freeze the reference at the swing's first frame for a random number of control
+  # steps ("the ball is not here yet"); stand-started envs hold at least stand_start_min_hold.
+  hold_steps_range: [0, 100]
+  stand_start_min_hold: 25
+  # A8 (Ace): fraction of TRUE resets initialized from the policy's OWN buffered end-of-swing
+  # states (captured at clip wraps). Default OFF; enable per-experiment:
+  #   task.motion.post_swing_start_prob=0.25
+  post_swing_start_prob: 0.0
+  post_swing_buffer_size: 4096
+  post_swing_min_fill: 256
+  post_swing_min_hold: 25
+
 # ---- reward weights / kernel std --------------------------------------------
 # HITTER does not publish reward weights or kernel forms. Goal terms get relatively high weight
 # (paper). std brackets the operating error band (gradient), NOT the acceptance tolerance.
@@ -165,6 +188,38 @@ rewards:
 
 # ---- racket target sampling (HITTER: direct, fixed plane, no curriculum) -----
 racket:
+  # P2.3 SMASH-style adaptive tracking sigma: when true, racket_position/racket_velocity stds (and
+  # racket_strike_success std_pos/std_vel) auto-tighten to clamp(mean exact-strike error, min, max)
+  # every sigma_update_every steps — replaces the hand-run 1.8->1.0->0.8->0.5 std curriculum.
+  # Default OFF; enable per-experiment: task.racket.adaptive_sigma=true
+  # (maxima match this file's starting stds; minima are the acceptance thresholds)
+  adaptive_sigma: false
+  sigma_update_every: 500
+  sigma_ema_scale: 1.0
+  sigma_pos_min: 0.075
+  sigma_pos_max: 0.20
+  sigma_vel_min: 0.5
+  sigma_vel_max: 1.0
+
+  # ---- A1 target latency & time-variance (mocap->planner->runner realism) --------------------
+  # Training otherwise hands the actor a PERFECT, instantly-updated target; the real loop delivers
+  # it LATE (transport + planning latency), NOISY (ball-prediction error that shrinks as the strike
+  # approaches — SMASH Eq. 14 tts-decaying noise), and REFINED mid-swing (the planner re-plans
+  # WHERE, not WHEN — PACE injects sensor delays for the same reason). Only the ACTOR-visible
+  # target view (pos/vel/swing_sign) is degraded: rewards, metrics, and the privileged critic
+  # always use the true live target, and time_to_strike is never delayed (the swing clock is
+  # generated robot-side by the runner, not by the mocap link).
+  # ALL OFF by default (byte-identical baseline). Enable per-experiment, e.g.:
+  #   task.racket.target_delay_steps=2 task.racket.target_jitter_pos_per_s=0.05 \
+  #   task.racket.midswing_resample_prob=0.02
+  # Watch: metrics target_delay_steps_in_effect (constant) + midswing_resample_count (per-step
+  # refinement fraction, ~ prob * eligible fraction).
+  target_delay_steps: 0            # control steps (50 Hz) the actor sees target pos/vel/swing_sign late
+  target_jitter_pos_per_s: 0.0     # m: actor target pos noise std at tts>=1 s, decays ~ clamp(tts,0,1)
+  target_jitter_vel_per_s: 0.0     # m/s: same decay law for the target velocity
+  midswing_resample_prob: 0.0      # per-step prob of re-drawing WHERE mid-swing (strike timing untouched)
+  midswing_resample_tts_floor: 0.3 # s: no refinement inside the last 0.3 s before the strike
+
   # Strike timing: phase of the clip at which contact happens (racket-BLADE speed peak).
   # WRIST -> BLADE RE-PLANE (2026-07-02): the phases/boxes below were previously planned on the bare
   # WRIST body point (npz body 31 = right_wrist_yaw_Link), but the strike metric (RacketTargetCommand,

@@ -57,13 +57,15 @@ Done:
 - Motion-capture reference docs define frame conventions and ChingMu conversion notes.
 - A3 deploy docs and source support are present.
 - Current working A3 joint order exists at `hope_training/config/joint_order_agibot_a3.yaml`.
+- `avatar_pro_vrpn.yaml` currently defaults the robot input rigid-body labels to `ppp2`/`ppp3` after one observed rig, while the relayed HOPE topics remain `/P1/pose` and `/P2/pose`; live G01 verification must record the actual CMTracker labels before relying on them.
+- Mocap play-time contract confirmed with the team (2026-07): ChingMu over VRPN streams the robot base (pelvis) pose plus the ball position at 300 Hz during play; the relay publishes the ball as position-only `PointStamped` (spin measurement is planned for the physics-modeling phase).
+- `colcon build --packages-up-to hope_planner hope_wbc_runner` verified inside the `hope` distrobox; the x86_64 deploy package builds via `agi/a3_deploy_example/scripts/build_a3_deploy_pkg.sh`.
+- Hardware SDK/runtime state layout verified: the `pp_joint_map` backend order was checked slot-for-slot against AGI `robot_io::MakeA3Layout31()` — a checked bijection (`agi/a3_deploy_example/PINGPONG_DEPLOY_ALIGNMENT.md:137-139`) — with joint limits clamped from the MJCF.
+- A3 safe dry-run executed: staged PASSIVE→PD_STAND→SHADOW→MOTION bring-up on the MDU preceded the first real joint commands (2026-07-02 sim-to-real run).
 
 Not done:
 
-- Live VRPN stream has not been verified in this repo.
-- `colcon build` for the ROS workspace has not been verified in the intended environment.
-- A3 joint order has a working training/export source, but hardware SDK/runtime state layout has not been verified.
-- A3 safe dry-run has not been executed.
+- Live VRPN stream into the deploy chain: the rig streams during play, but the mocap link is not yet bridged into the deploy front-end (targets were scripted for the 2026-07-02 run).
 
 ## Risks
 
@@ -73,7 +75,5 @@ Not done:
 
 ## Next Steps
 
-1. Build `hope_ws` inside the ROS environment.
-2. Run VRPN against ChingMu and record exact topic names.
-3. Fill [../interfaces/frames_and_coordinates.md](../interfaces/frames_and_coordinates.md) with measured transforms.
-4. Fill [../interfaces/joint_order_and_robot_state.md](../interfaces/joint_order_and_robot_state.md) from A3 SDK/model/runtime messages.
+1. Run VRPN against ChingMu, record exact topic names, and bridge the mocap stream into the deploy chain.
+2. Fill [../interfaces/frames_and_coordinates.md](../interfaces/frames_and_coordinates.md) with measured transforms.

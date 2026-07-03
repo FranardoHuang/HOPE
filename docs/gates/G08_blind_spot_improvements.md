@@ -1,38 +1,190 @@
 # G08 Blind-Spot Improvements
 
-Status: Research track
+Status: Research track (Phase 2 roadmap recorded 2026-07-03)
 
 ## Goal
 
 Improve beyond the HITTER-compatible baseline by targeting weaknesses that can decide matches.
 
-This gate should not block the first reproduction loop. It becomes important once the baseline can hit and return reliably.
+The baseline exists as of 2026-07-02: the unified swing policy transferred to the real A3
+(forehand only, scripted targets). Phase 2 is about performance; the reference papers in `papers/`
+are the evidence base: HITTER (`2508.21043`), PACE (`2509.21690`, the TTRL-ICRA2026 paper), SMASH
+(`2604.01158`), Sony Ace (`s41586-026-10338-5`).
 
-## Inputs
+## Phase 2 Performance Roadmap (team, 2026-07)
 
-- Baseline planner and WBC results.
-- Real and simulated evaluation data.
-- Failure cases from G03-G07.
-- References such as TTRL, table-tennis papers, and opponent-modeling work.
+Each item lists the failure being targeted and the paper-backed mechanism to try first.
+Priority (franco, 2026-07-03): **P2.3, A8, P2.1 first** (with P2.0 as their shared foundation);
+active assignments live in [../NOW.md](../NOW.md).
 
-## Candidate Tracks
+### P2.0 Ready-pose definition (foundation for P2.1/P2.4/backhand stand-entry)
 
-1. Spin perception and spin-aware ball dynamics.
+Missing piece surfaced 2026-07-03: the whole plan assumes a defined 准备动作/ready stance, but none
+exists. Today "ready" is implicitly one of two wrong things: the pre-swing hold freezes the
+reference at the CLIP'S FIRST FRAME (whatever skewed stance the source video started with — the
+P2.2 problem), and `stand_start` initializes from `default_joint_pos` (a neutral robot stand, not
+a table-tennis athletic stance). Everything downstream needs the real anchor:
+
+- P2.1 recovery must know what to recover TO;
+- P2.4 stitching is "ready → strike → ready" by definition;
+- backhand stand-entry and the deploy idle pose are the same stance;
+- PACE anchors its residual action space to a nominal ready pose (hand raised); SMASH's clips all
+  pass through prep/recovery phases; Ace learns a prepare policy per next-shot (far-term).
+
+Plan (v0 needs a source decision — franco): (a) record one short ready-stance video through the
+existing GVHMR→GMR pipeline (cheapest, consistent), (b) handcraft the joint pose, or (c) average
+the orientation-normalized clip start frames. Then wire it in three places: the `stand_start`
+branch initializes to READY (not default stand), the pre-swing hold holds READY (not clip frame
+0), and the clips are re-processed to enter/exit through ready (P2.2-lite pass).
+
+### P2.1 Balance across consecutive swings
+
+Failure: the robot falls after several swings; it does not recover weight/posture into a robust
+ready stance. Status correction (2026-07-03): the structural machinery already exists on main
+(`3eba347`) — 10 s multi-swing episodes, `wrap_teleport=False` (no teleport between swings),
+`stand_start_prob=0.25` (deploy-entry resets), pre-swing hold — but no shipped checkpoint was
+trained with it (the deployed model predates it, hence the teleport-entry backhand gap). The task
+is therefore to train and validate under this structure (P2.1 A/B on branch `p2-multiswing`), not
+to build it.
+
+- HITTER: 10 s episodes chain swings; after each swing the next swing type and targets are
+  resampled; the base-position reward is active only pre-strike, which *is* the ready phase
+  (Sec V-B). Restoring multi-swing episodes is the primary fix.
+- PACE: up to 5 consecutive serves per episode + fall termination + residual actions anchored to a
+  nominal ready pose → recovery emerges without a dedicated reward.
+- SMASH: every reference clip embeds a ~0.54 s recovery segment after contact plus a cyclic strike
+  phase variable, making cycles chainable.
+- Ace (cheap alternative/complement): train single swings but sample episode initial states from
+  the distribution of the policy's own post-swing/recovery states instead of always default-stand.
+
+### P2.2 Reference-motion orientation normalization
+
+Failure: collected swing videos were not rotated to face the incoming-ball direction, so imitated
+stance and swing are skewed.
+
+- HITTER: base orientation command is always "face forward"; references are anchored
+  pelvis-relative — heading is never inherited from the video.
+- SMASH: strike-target features and motion matching are anchor-relative; the racket-orientation
+  objective uses `|n·v̂|` (driven by commanded strike velocity, not the clip's facing).
+- Action: normalize orientation at the GMR retarget/anchor step and keep the base-heading command
+  fixed forward.
+
+### P2.3 Target distribution vs teacher motion consistency
+
+Failure: the sampled target's center (hit position, racket velocity) differs from what the teacher
+motion represents, forcing the policy to learn two things at once.
+
+- HITTER: targets are sampled conditioned on swing type in non-overlapping per-swing regions;
+  workspace coverage comes from moving the base command, not widening the racket-target box.
+- Ace: hindsight experience replay — relabel each transition with the achieved state as the target
+  (removes the two-objectives conflict at near-zero cost) + event-table stratified replay to keep
+  rare high-quality strikes represented.
+- SMASH (systematic solution): expand the clip library (Motion-VAE 400 → 5k), retrieve the
+  nearest-reference per sampled target, region-adaptive sampling, and adaptive tracking sigma
+  (their ablation: removing adaptive sigma collapses success 86.4 → 22.6).
+- PACE: tolerance-clamped tracking rewards (stop rewarding once inside tolerance) preserve
+  exploration freedom around the target.
+
+### P2.4 Locomotion aggressiveness / ready motion / clip stitching
+
+Failure: the robot moves too violently toward targets; no preparation motion; needs
+target-conditioned stitching/scaling of ready+strike references and eventually rallies.
+
+- HITTER: position-style base commands (with fixed forward heading) produced faster AND calmer
+  single-step reaches than velocity commands. Note: the deploy-parity redesign removed the base
+  target/reward entirely — with the mocap base pose available at play time, re-adding the base
+  command mechanism (as an ablation at minimum) is paper-supported.
+- PACE: pseudo-velocity command proportional to remaining position error → smooth deceleration
+  into the strike stance; predictor-based proactive targets (reactive control is the root cause of
+  late/violent motion).
+- SMASH: autoregressive Motion-VAE generates the next reference segment from the robot's *current*
+  state (built-in stitching); strike rewards gated to short windows around impact avoid sharp wrist
+  accelerations; phase-dependent target noise trains tolerance to late target updates.
+
+### P2.5 Ball-flight physics modeling (landing point, spin, ball-quality rewards)
+
+Failure: no ball model at hit time → cannot reward landing point, pace, angle, or spin; cannot
+switch strategy objective (win the point vs sustain the rally). Note: the trained task currently
+contains NO ball at all; ball spin is not yet measured by the rig (a patterned/rigid-body ball and
+a relay change are prerequisites — see `docs/interfaces/frames_and_coordinates.md`).
+
+- HITTER: drag+gravity flight + diagonal restitution bounce, identified from 15 trajectories; its
+  Eq. 5-6 run forward from racket state at contact predict landing/pace — directly a reward.
+- PACE (the key reward template): at the instant of paddle contact, physics-predict the landing
+  point and net-crossing height and reward them immediately; their ablation shows sparse
+  landed/not-landed feedback alone never learns returning.
+- SMASH: AEKF with bounce handling (removing bounce handling explodes prediction error
+  3.5 → 12.7 cm); analytic inversion of a linearized drag model — chosen flight time T_f is the
+  pace knob.
+- Ace (ceiling): velocity-dependent Magnus model, data-fit table/racket contact + residual MLP,
+  spin measured at 400-700 Hz; policy-sampler modes are exactly the win-vs-rally objective switch.
+- In-repo head start: `hope_planner` already has drag+bounce with traj01 calibration, the
+  `tasks/table_tennis` Isaac scene has drag/Magnus hooks, and the unmerged branch
+  `ball-physics-realistic` (commit `0098c43`) contains mocap-calibrated spin-aware ball physics
+  fitted from 300 Hz recordings.
+
+### P2.6 Smash (on top of P2.1-P2.5)
+
+- SMASH's lesson: train smash as a SEPARATE policy with dedicated smash reference data (longer
+  execution horizon than the shared strike policy handles). Their smash deployment was limited by
+  egocentric-camera FOV during aggressive postures — our external mocap does not have that
+  weakness.
+- Pace maps analytically: shorter chosen flight time → larger commanded racket velocity
+  (HITTER Eq. 5-6 / SMASH Eq. 28-29); the WBC already tracks commanded racket velocity, so smash
+  training is target-velocity-distribution + dedicated references + P2.5 rewards.
+
+## Audit-Derived Additions (2026-07-03)
+
+High-leverage items the papers treat as first-class but the roadmap above does not cover:
+
+1. **Latency and target-time-variance modeling.** Training currently assumes a perfect, constant
+   target from t=0; the real loop delivers late, jittery, converging targets (SMASH quantifies
+   ~10 cm error at 0.6 s-to-strike → ~1 cm at contact and injects tts-decaying target noise; PACE
+   injects delays/noise at real-sensor magnitudes; Ace models latency/dropout). Measure end-to-end
+   mocap→tick latency and train with target delay + mid-swing re-sampling before the mocap bridge
+   lands.
+2. **Planner→policy frame-transform ownership.** The 175-D actor is base-position-free, but
+   converting a HOPE-world planner target into the robot-relative frame requires the mocap base
+   pose at the interface boundary (plus the engage-time yaw alignment). This transform currently
+   has no owner and is masked by scripted targets. Design it before/with the mocap bridge (G07
+   Next Steps).
+3. **Actuator system identification.** PACE's sim-to-real gap (94 → 61%) came from one
+   mis-modeled transmission; our implicit/explicit-PD incident is the same class. Per-joint
+   step/chirp ID (arms + waist first), fit delay/bandwidth (Ace uses delayed-LTI joints), feed
+   both sims. The elbow-at-6.7× -torque-limit trace shows the policy currently exploits actuator
+   fictions.
+4. **Evaluation infrastructure + real-data flywheel.** Fixed serve corpus (recorded real serves
+   replayed in sim), fixed target grids, per-checkpoint scoreboard on `mujoco_eval_onnx.py`,
+   mandatory full mocap/obs/action logging for every hardware session (the MDU captures already
+   found the yaw drift and the elbow saturation — make it policy), automatic hit detection from
+   ball-velocity discontinuities for real hit/return/landing stats.
+5. **Reference-motion scale.** 2 clips vs SMASH's 400(+5k generated). The GVHMR→GMR pipeline
+   already works; 30-50 orientation-normalized clips across the target workspace is the cheapest
+   attack on P2.2/P2.3. MVAE generation can come later (SMASH: 5k→10k was already marginal).
+6. **Fall management as a subsystem.** Guard thresholds must be derived from the trained state
+   envelope (the 0.6 rad squat-guard incident), take-over should damp rather than snap, and a
+   recover-to-ready behavior is the long-term answer (Ace always keeps a verified-safe reset
+   trajectory). Fewer falls = more data per hardware session.
+
+## Candidate Tracks (longer-term)
+
+1. Spin perception and spin-aware ball dynamics (P2.5 extension; `ball-physics-realistic` branch).
 2. Double-bounce and short-ball handling.
 3. Deep-ball and non-fixed hitting-plane handling.
-4. Serve generation.
+4. Serve generation (Ace: demonstrated toss stitched to an optimized strike).
 5. Topspin, backspin, sidespin, block, chop, and loop stroke repertoire.
-6. Opponent intent modeling and tactical adaptation.
+6. Opponent intent modeling and tactical adaptation (Ace policy sampler; HITTER cites Latte-MV).
 7. Multi-agent training.
-8. Vision-based perception to reduce mocap dependency.
+8. Vision-based perception to reduce mocap dependency (SMASH is the humanoid existence proof).
 
 ## Related Directories
 
 - `hope_ws/src/hope_planner`
 - `hope_training/whole_body_tracking`
 - `agi/A3_MuJoCo_Sim/`
-- `external_repos/TTRL-ICRA2026`
-- Future experiment folders to be defined by project management
+- `external_repos/TTRL-ICRA2026` (PACE's public training code)
+- `papers/` — HITTER, PACE, SMASH, Ace
+- branch `ball-physics-realistic` (spin-aware ball physics, unmerged)
 
 ## Operation Docs
 
@@ -44,7 +196,7 @@ Pick the operation doc based on the selected mini-spec. Common starting points:
 
 ## Acceptance Criteria
 
-Each blind-spot track needs its own mini-spec before implementation:
+Each track needs its own mini-spec before implementation:
 
 - Failure case being targeted.
 - Measurable improvement metric.
@@ -57,23 +209,33 @@ Each blind-spot track needs its own mini-spec before implementation:
 
 Done:
 
-- HITTER paper limitations have been identified: fixed hitting plane, external mocap dependency, ignored spin, limited stroke repertoire, no autonomous serving, no explicit multi-agent/opponent adaptation.
-- TTRL is locally available as an auto-synced reference through `scripts/sync_external_repos.sh`.
+- HITTER paper limitations identified: fixed hitting plane, external mocap dependency, ignored
+  spin, limited stroke repertoire, no autonomous serving, no opponent adaptation.
+- All four reference papers read and mapped to the roadmap (2026-07-03, see above).
+- Baseline exists: first sim-to-real of the unified swing policy (2026-07-02, forehand only).
+- TTRL/PACE code locally available via `scripts/sync_external_repos.sh`;
+  `HOPE-TableTennis-AgibotA3-v0` provides the candidate Isaac scene for ball/serve experiments;
+  `ball-physics-realistic` branch holds spin-aware ball physics.
 
 Not done:
 
-- No blind-spot track has been selected for implementation.
-- No spin/double-bounce/serve experiments are implemented.
+- No Phase 2 track has a written mini-spec yet.
+- The audit-derived items 1-4 are not yet scheduled; item 2 must land before/with the mocap
+  bridge.
 
 ## Risks
 
-- Starting this gate before the baseline works can scatter effort.
-- The highest-impact blind spot may depend on first real/RL results.
-- TTRL may drift with upstream; blind-spot mini-specs must record the TTRL commit when they extract ideas, configs, or code.
+- Stacking new rewards before restoring the two dropped HITTER structures (multi-swing episodes,
+  target-reference consistency) treats symptoms; fix structure first.
+- The highest-impact blind spot may shift once mocap-in-the-loop play produces real failure modes.
+- TTRL may drift upstream; mini-specs must record the TTRL commit when extracting ideas or code.
 
 ## Next Steps
 
-1. Wait for first RL loop and baseline failure modes.
-2. Pick one blind spot with high match impact and low integration risk.
-3. Write a mini-spec before code changes.
-4. Run `scripts/sync_external_repos.sh` before using TTRL as a reference.
+1. Write the P2.1 mini-spec first (multi-swing episodes + initial-state-distribution variant) —
+   highest evidence, smallest change.
+2. Schedule audit item 2 (frame-transform design) into the G07 mocap-bridge work.
+3. Start the P2.5 prerequisite chain: patterned ball + relay orientation forwarding + serve-corpus
+   recording, and evaluate the `ball-physics-realistic` branch for merging.
+4. Run `scripts/sync_external_repos.sh` before using TTRL/PACE as a reference and record the
+   commit.

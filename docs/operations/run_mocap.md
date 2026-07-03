@@ -27,7 +27,7 @@ ros2 launch vrpn_mocap client.launch.yaml server:=PLACEHOLDER_MOCAP_SERVER_IP po
 ros2 topic list | grep vrpn_mocap
 ```
 
-The HOPE relay maps these to `PPT` (table), `P1`, `P2`, and `/ball/point`. `PPT`/`P1`/`P2` are TODO(confirm) placeholders until verified against the live rig. For the ball, choose one mode:
+The HOPE relay maps these to `PPT` (table), `P1`, `P2`, and `/ball/point`. `PPT`/`P1`/`P2` are TODO(confirm) placeholders until verified against the live rig; one `train_1` rig observed `ppp2`/`ppp3` for robot labels, so do not assume the defaults are universal. For the ball, choose one mode:
 
 - Preferred: `ball_tracking_mode:=rigid_body ball_object:=Ball` when CMTracker exposes the ball as a named rigid body.
 - Fallback: `ball_tracking_mode:=auto` when the ball is only an unnamed moving marker; `ball_object` is ignored.
@@ -56,19 +56,23 @@ For normal bringup, launch the full bridge so the VRPN client, relay, and world 
 ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py \
   server:=PLACEHOLDER_MOCAP_SERVER_IP \
   port:=3883 \
-  update_freq:=180.0 \
+  update_freq:=300.0 \
   ball_tracking_mode:=rigid_body \
   ball_object:=Ball
 ```
+
+The real rig streams at 300 Hz during play, so pass `update_freq:=300.0`; the launch default is being aligned to 300.
 
 Use `ball_tracking_mode:=auto` and omit `ball_object` if the ball is not a named rigid body.
 
 Expected HOPE-standard topics are listed in [../interfaces/ros_topics.md](../interfaces/ros_topics.md).
 
-Current limitation for G07 ping-pong deploy: these mocap topics are not yet
-consumed directly by `a3_deploy_onnx_ref_pingpong`. Today they help planner and
-future localizer work, but the current deploy runner still uses
-`perfect_tracking` unless a separate hardware pose bridge is added.
+## Capture Sets by Phase
+
+Team ground truth (realigned 2026-07-03):
+
+- PLAY: the rig streams the robot base (pelvis) pose and the ball position at 300 Hz. Ball rotation/spin is NOT yet measured — it is planned for the upcoming physics-modeling phase (a patterned/rigid-body ball plus relay changes will be needed); the relay currently publishes the ball as a position-only `PointStamped`.
+- DATA-COLLECTION / physics-calibration: mocap additionally captures the racket pose, the table's 4 corners, and the net's 2 corners. The racket-tracking prohibition applies to competition play only.
 
 ## Verification
 

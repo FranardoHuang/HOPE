@@ -21,6 +21,8 @@ seed: 0
 # Override the task defaults when set (null -> use the task/algo YAML value).
 num_envs: null
 max_iterations: null
+motion_file: null       # optional local .npz reference or list; takes precedence over registry_name
+motion_file_2: null     # optional 2nd local clip for unified HITTER policy; used only with motion_file
 registry_name: null     # falls back to task.registry_name when null
 registry_name_2: null   # optional 2nd clip for the unified HITTER policy (backhand); falls back to task.registry_name_2
 run_name: null

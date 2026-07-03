@@ -17,7 +17,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hydra
 from omegaconf import OmegaConf
 
-from train import _apply_task_overrides, _registry_clip_name
+from train import (
+    _apply_task_overrides,
+    _is_noneish,
+    _normalize_registry_name,
+    _registry_clip_name,
+    resolve_motion_sources,
+)
 
 
 def _run_play(cfg, simulation_app):
@@ -77,9 +83,11 @@ def _run_play(cfg, simulation_app):
             mf = cfg.motion_file
             env_cfg.commands.motion.motion_file = str(mf) if isinstance(mf, str) else [str(x) for x in mf]
         else:
-            art = next((a for a in wandb_run.used_artifacts() if a.type == "motions"), None)
-            if art is not None:
-                env_cfg.commands.motion.motion_file = str(pathlib.Path(art.download()) / "motion.npz")
+            arts = [a for a in wandb_run.used_artifacts() if a.type == "motions"]
+            if arts:
+                arts.sort(key=lambda a: (0 if "forehand" in a.name.lower() else 1 if "backhand" in a.name.lower() else 2, a.name))
+                motion_files = [str(pathlib.Path(art.download()) / "motion.npz") for art in arts]
+                env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
             else:
                 print("[WARN] No motion artifact in the run; pass motion_file=... if replay fails.")
     else:
