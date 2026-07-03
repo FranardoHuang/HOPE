@@ -134,13 +134,14 @@ optimistic and is only reported for comparison.
 | Bounce ω⁺ | ≤ 15% | — | 217% | not meaningful (spins ≤15 rev/s ≈ noise; Δω channel reads 0.65×) |
 | **Strike → landing vs observed/terminal GT** | med ≤ 0.10 / p90 ≤ 0.25 m / on-off ≥ 90% | — | **med 0.25 m, p90 0.72 m, on/off 100%** (n=82 all-split incl. 32 recovered landings; test-split n=15: 0.26/0.60) | on/off PASS; distances FAIL (model-form limited, §9) |
 
-Notes: (i) the previously-reported bounce-speed 4.2% PASS came from the train-fit's
-*degenerate* tangential block, not the shipped yaml — with the yaml's v0 grip block the
-same metric is 5.96% and FAILS; the yaml is scored honestly above. (ii) the
-reconstructed-label landing numbers (0.151/0.556 on the same pairs) are optimistic vs
-observed-p_c ground truth, as expected for a label that shares the flight model.
+Notes: (i) the first-pass bounce-speed history: 4.2% "PASS" came from the train-fit's
+*degenerate* tangential block; scoring the shipped yaml honestly gave 5.96% FAIL; the
+stage1 contact-time fix (§9.1) brought the same yaml metric to 2.32% PASS — the final
+number above. (ii) the legacy reconstructed landing label (0.32/0.63 on the current
+test pairs) is NOT comparable to observed-GT numbers — it shares the flight model with
+the prediction and is kept only as a consistency diagnostic.
 
-### 5.1 Error budget — two-horizon prediction check (`predict_check.py`, n=48 pairs)
+### 5.1 Error budget — two-horizon prediction check (`predict_check.py`, n=82: 50 observed bounces + 32 terminal-window-recovered landings)
 
 Prediction of the observed landing point made at three moments:
 
@@ -243,20 +244,24 @@ Raw verdicts: `<venue data>/analysis/forensics/`.
   With b_t≡0 the subsample spread collapses (a_eff = 0.375 ± 0.031 joint).
 - **The strike spin channel is junk on this rig**: quaternion Δω at strikes reads
   ~0.22× the position-implied impulse (IQR −0.01…0.46; table bounces read 0.65×).
-  Joint fits let it drag a_t down to ~0.38. The velocity channel and three
-  model-free tangential-impulse estimates agree on **a_t ≈ 0.58** (0.576 / 0.601 /
-  0.622; stat std 0.023, systematic floor 0.49). Adopted in the yaml with μ→0.5
-  (cap never binds; measured impulse-ratio p90 = 0.27).
+  Joint fits let it drag a_t down to ~0.32–0.38. The velocity channel and three
+  model-free tangential-impulse estimates agree on a_t ≈ 0.58–0.62 on the original
+  segments; refit on the FIXED segments (35-frame windows, t_c fix) the
+  velocity-channel value is **a_t = 0.52** (bootstrap CI [0.46, 0.61]) — adopted in
+  the yaml with μ→0.5 (cap never binds; measured impulse-ratio p90 = 0.27). Honest
+  range across variants: 0.46–0.62.
 - Landing error is FLAT over a_t 0.2–0.6 and sharply optimal at the F4 e-calibration
   (±10% e ≈ ±5 cm landing) — so the a_t choice follows the direct tangential
   measurement, and the landing-relevant error is elsewhere:
-- **Dissection of the through-paddle landing error** (48 clean pairs): swapping the
-  model's outgoing VELOCITY for the measured one removes nearly all excess error
-  (0.164→0.074 median) while swapping spin changes little → the residual paddle-model
+- **Dissection of the through-paddle landing error** (48 clean pairs, pre-fix
+  segments): swapping the model's outgoing VELOCITY for the measured one removes
+  nearly all excess error (0.164→0.074 median) while swapping spin changes little → the residual paddle-model
   deficit is tangential-velocity form error (median |Δv_t| = 0.68 m/s vs |Δv_n| = 0.02)
   plus racket-face-normal sensitivity (±5° tilt swings worst-case landings by ±0.3 m).
-  Parameter refits cannot buy more here (landing-error sweep over (a_t, e-scale):
-  best cell 0.163 m vs shipped 0.164 m — zero headroom); the ceiling is model FORM
+  Parameter refits cannot buy more here (landing-error sweep over (a_t, e-scale),
+  pre-fix segments: best cell 0.163 m vs then-shipped 0.164 m — zero headroom; the
+  post-fix full-coverage H0 is 0.25 m because the recovered-GT strikes are harder,
+  not because the model got worse); the ceiling is model FORM
   (dwell/normal estimation), consistent with H0−H1 in §5.1 and the noise-floor MC.
 
 ### 9.3 What was checked and NOT changed
@@ -282,7 +287,7 @@ Raw verdicts: `<venue data>/analysis/forensics/`.
 | Lever | Status | Gain |
 | --- | --- | --- |
 | Bounce t_c bias fix | **DONE** | e_n unbiased (0.9215); F3 clean; e>1 17%→4%; bounce-speed validation 5.96%→2.32% (FAIL→PASS) |
-| Observed/terminal-window landing GT | **DONE** | honest metrics + n 48→84 |
+| Observed/terminal-window landing GT | **DONE** | honest metrics + landing-GT n 48→82 (identity-gated) |
 | Paddle a_t via velocity channel | **DONE** | tangential gain trustworthy (0.58±0.02 stat) |
 | Paddle e(u_n) exp form | **DONE** (F4) | landing-relevant e calibrated at optimum |
 | Longer init windows for deploy prediction | free at deploy time | H2 shows the ceiling: mm-level at 100 ms lead |

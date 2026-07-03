@@ -70,9 +70,12 @@ Not done:
 - Magnus saturation above SR ≈ 0.7 is unvalidated — the venue data never reaches it
   (F2 inconclusive by coverage); needs a dedicated high-spin capture.
 - The venue rig's 9 mm noise leaves the table tangential block at the v0 values and
-  paddle a_t with wide uncertainty; Stage-4 absolute landing bars not met against
-  observed-bounce ground truth (median ≈ 0.17 m vs the 0.10 m target — error budget
-  dominated by the paddle block, see `predict_check.py` H0/H1/H2 decomposition).
+  paddle a_t identified only through the velocity channel (0.52, CI [0.46, 0.61]);
+  Stage-4 absolute landing bars not met against observed/terminal-window ground
+  truth (through-paddle median ≈ 0.25 m on full coverage n=82, vs the 0.10 m
+  target — error budget dominated by paddle model form + racket-state accuracy;
+  flight model is fine: 67 mm at contact from measured out-state, 5 mm at ~100 ms
+  before landing. See `predict_check.py` H0/H1/H2 decomposition).
 
 ## Risks
 
