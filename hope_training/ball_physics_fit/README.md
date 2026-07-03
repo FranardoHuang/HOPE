@@ -50,6 +50,18 @@ python validate_stage4.py --yaml ../../configs/ball_physics_venue.yaml --paddle-
 python predict_check.py --yaml ../../configs/ball_physics_venue.yaml --split all
                                       # two-horizon landing check: H0 at-contact through paddle /
                                       # H1 at-contact measured-out / H2 ~100 ms before landing
+python predict_check.py --yaml ../../configs/ball_physics_venue.yaml --split all --full-state
+                                      # FULL-STATE validation: position error vs horizon bins,
+                                      # velocity/spin at 25/50/75% arc checkpoints, net-plane (x=0)
+                                      # crossing state. Adds H1q = H1 velocity with spin re-estimated
+                                      # from the FIRST 100 ms of flight quats (deploy-realistic spin
+                                      # source; the strike w_out quat channel reads ~0.22x = junk).
+                                      # Optional --magnus sat (saturating C_L form).
+python falsify/f10_paddle_split.py    # per-paddle / per-face / blade-position splits of the racket
+                                      # contact model (answers 正反面/拍位/双拍 questions; needs
+                                      # extracted npz for face identity — pad_n in strikes.json is
+                                      # flipped toward approach, so face comes from the raw body
+                                      # normal channel). NOT yet run on the venue data.
 python test_oracle_present.py # loud-fail oracle check (never skips)
 ```
 

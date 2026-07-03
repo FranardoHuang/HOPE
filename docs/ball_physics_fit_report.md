@@ -295,3 +295,64 @@ Raw verdicts: `<venue data>/analysis/forensics/`.
 | Longer init windows for deploy prediction | free at deploy time | H2 shows the ceiling: mm-level at 100 ms lead |
 | Paddle model FORM (tangential + face normal) | **the remaining wall** | would need cleaner racket tracking or dwell modeling; est. bulk of the H0 ~250 mm vs H1 67 mm gap |
 | Magnus saturation / high spin | **not addressable** with this data | needs a dedicated high-spin capture |
+
+## 10. Open-questions quantification (2026-07-03 late) — model-based, no new data
+
+Team questions answered by simulation ON the shipped constants (deterministic sweeps +
+MC with the forensics noise model of §9.3; adversarially code-reviewed). These are
+model-derived numbers, not new measurements — the model itself is only validated
+inside the §6 envelope. Two runnable-on-real-data tools were shipped alongside:
+`predict_check.py --full-state` and `falsify/f10_paddle_split.py` (§8 / pipeline
+README) — **neither has run on the venue data yet** (data lives on yikang's Mac).
+
+1. **Spin (旋转影响)** — tiered. At the venue-median 2 rev/s, ignoring Magnus moves the
+   landing only ~31 mm (14–58) — under the noise floor; the spin-blind deployed planner
+   is fine for that regime (no-spin interception miss 75–102 mm ≈ racket radius). From
+   ~5 rev/s it dominates: 15 rev/s = 103–514 mm landing shift in flight; the table
+   bounce adds a ±0.7 m/s tangential kick (top/backspin 15 rev/s → 250–310 mm of
+   position 0.4 s after the bounce) that the deployed diagonal bounce cannot represent;
+   end-to-end deploy miss vs a 15 rev/s ball: 167–482 mm (2–6× racket radius; sidespin
+   ~19–31 mm per rev/s laterally, topspin mostly TIMING — up to 166 ms early, can flip
+   the predicted bounce count). 30–60 rev/s is extrapolation: constant-k_m vs saturating
+   C_L alone changes answers by 0.09–3.1 m — order-of-magnitude only.
+2. **Prediction moment (击球后 vs 过网, no racket data in matches)** — MC calibrated to
+   the real anchors (H1-like config: MC 48 mm vs real 67 mm ⇒ 46.7 mm model-form
+   residual, inside the measured 45–66 mm band). Anchored landing error: predict at
+   +77 ms (60 ms window) = 90 mm median / 143 p90; +167 ms (150 ms window) = 58 mm;
+   at net crossing (~+250–280 ms) = 45 mm; H2-style near landing ≈ 10 mm. So early vs
+   net-crossing is ~2×, NOT an order of magnitude, and ~70% of the gain comes from just
+   lengthening the early window to 150 ms. Landing-TIME error is never the problem
+   (5–11 ms median). Strategy: predict early for gross motion, refine at net/long-window,
+   final correction pre-bounce.
+3. **Net (球网)** — the whole stack is currently net-blind (fit pipeline integrates
+   through x=0; deployed incoming predictor never checks the net; the return-side
+   `_check_net_clearance` is drag-only). Quantified: H1-grade state error ⇒ σ_z at the
+   net 34–64 mm, so predicted clearance < 2σ (≈ 7–13 cm) is a coin flip; ~7% of
+   synthetic-grid crossings sit 0–3 cm above the cord; an unmodeled cord clip moves the
+   landing 0.06–0.49 m, and roll-over clips (dt≈0) PASS the strike–bounce pairing gates
+   → plausible contributor to H1 p90 / H0 tails (not medians). 10–15 rev/s topspin makes
+   the true net-crossing 42–84 mm lower than the planner's drag-only check — more than
+   its 30 mm margin. Do NOT add net-contact physics (zero data); add clearance
+   diagnostics/flags and raise the return margin to ≥0.10 m until Magnus is in.
+4. **Face/paddle splits (正反面/拍位/双拍)** — not yet measurable here (needs the Mac
+   run of `falsify/f10_paddle_split.py`; smoke-verified to recover a planted 10% face
+   difference at the real-data noise level). Sensitivity ruler from the shipped model,
+   robot-return geometry (u_n 5.1–9.7 m/s — note upper half EXCEEDS the fitted u_n
+   envelope 1.4–7.2): a face Δe of 0.02 → 39 mm return-landing shift (ignorable);
+   0.05 → ~98 mm (42–146) + net-clearance +15 mm (matters: same order as the paddle
+   e-calibration optimum, flips some returns off-table); 0.10 → ~195 mm (planner must
+   go per-face). Δa_t 0.05/0.10 → 22/43 mm (second-order). Detection floor of F10 on
+   n≈82 strikes is ~Δe 0.05 — conveniently, what is detectable is what matters.
+   **The robot will play with the SAME racket as the venue-capture paddles (team info
+   2026-07-03), so if F10 finds a face split ≥0.05 the planner's outgoing solve must
+   consume per-face constants (and know which face it strikes with).**
+5. **Full-state prediction (不能只预测落点)** — the flight model already integrates
+   (p, v, ω); landing-only was just the scoring choice. `--full-state` scores position
+   vs horizon, velocity + spin at arc checkpoints, and the net-plane crossing state, for
+   H0/H1/H1q (H1q = spin from the first 100 ms of flight quats — the deploy-realistic
+   spin source, since the at-strike quat spin channel reads ~0.22×). Expectations from
+   existing evidence: velocity along the arc good (H2 mm-level, bounce speed 2.32%);
+   spin is the honest wall — ω assumed constant in flight (F7 decay 12%/flight,
+   borderline), spin TRANSFER at strikes unvalidated, measurement floor ~2 rev/s.
+   Deploy gap to close when wiring: state estimator has no spin channel, predictor has
+   no Magnus/spin and returns a single hitting-plane point instead of a trajectory.
