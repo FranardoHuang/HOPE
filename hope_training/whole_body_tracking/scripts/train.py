@@ -216,6 +216,10 @@ _RACKET_KEYS = (
     # HER-style achieved-target replay (mixture sampling from previously-achieved strike states).
     "achieved_target_mix_prob", "achieved_buffer_size", "achieved_min_fill",
     "achieved_jitter_pos", "achieved_jitter_vel", "achieved_clamp_inflate",
+    # A1 target latency & time-variance (actor-visible delay, SMASH tts-decaying jitter,
+    # mid-swing target refinement). Defaults OFF; byte-identical baseline.
+    "target_delay_steps", "target_jitter_pos_per_s", "target_jitter_vel_per_s",
+    "midswing_resample_prob", "midswing_resample_tts_floor",
 )
 
 # YAML keys under `motion:` that target the MotionCommandCfg swing-entry structure
@@ -575,6 +579,15 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(C, "achieved_jitter_pos", _get(rk, "achieved_jitter_pos"), float, applied, "racket_target")
             _set_attr(C, "achieved_jitter_vel", _get(rk, "achieved_jitter_vel"), float, applied, "racket_target")
             _set_attr(C, "achieved_clamp_inflate", _get(rk, "achieved_clamp_inflate"), float, applied, "racket_target")
+            # A1 target latency & time-variance: the ACTOR-visible target arrives late
+            # (target_delay_steps), noisy (SMASH-style tts-decaying jitter), and is refined
+            # mid-swing (midswing_resample_*), matching the real mocap->planner->runner loop.
+            # Rewards/critic keep the live target. All default OFF (byte-identical baseline).
+            _set_attr(C, "target_delay_steps", _get(rk, "target_delay_steps"), int, applied, "racket_target")
+            _set_attr(C, "target_jitter_pos_per_s", _get(rk, "target_jitter_pos_per_s"), float, applied, "racket_target")
+            _set_attr(C, "target_jitter_vel_per_s", _get(rk, "target_jitter_vel_per_s"), float, applied, "racket_target")
+            _set_attr(C, "midswing_resample_prob", _get(rk, "midswing_resample_prob"), float, applied, "racket_target")
+            _set_attr(C, "midswing_resample_tts_floor", _get(rk, "midswing_resample_tts_floor"), float, applied, "racket_target")
 
     # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
     # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.
