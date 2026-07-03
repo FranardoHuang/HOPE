@@ -1,0 +1,84 @@
+# =============================================================================
+# HOPE ping-pong ball physics — VENUE FIT 2026-07-03 (Avatar Pro C3D, 300 Hz)
+# Same schema as configs/ball_physics.yaml on branch ball-physics-realistic,
+# plus new keys for the velocity-dependent paddle restitution (F4) and the
+# recommended saturating Magnus form (F2) — both need small flight.py /
+# spin_contact.py (+ C++ mirror) changes to consume, flagged inline.
+#
+# Fit pipeline + full report: hope_training/ball_physics_fit/ and
+# docs/ball_physics_fit_report.md. Falsification battery F1–F8 verdicts and the
+# per-event tables live in <venue data>/analysis/ (yikang's Mac,
+# ~/Desktop/Hope/Record/latest).
+#
+# VALIDITY ENVELOPE (do NOT extrapolate silently — Sony's own failure mode):
+#   ball speed 1–7 m/s (Re 2.5e3–2.8e4) · spin 0–15 rev/s · SR <= 0.5 well
+#   covered, 0.5–1.6 sparse, > 1.6 EMPTY · table v_n 1.0–4.5 m/s ·
+#   paddle u_n 1.4–7.2 m/s. High spin (pro serves), smashes > 8 m/s, and
+#   shallow-incidence slip bounces are NOT validated by this fit.
+# =============================================================================
+
+ball:
+  mass: 0.0034            # kg — THE VENUE BALL AS RECORDED (retro-reflective coating adds ~0.7 g;
+                          # clean ITTF ball is 0.0027). k_d/k_m below are ACCELERATION coefficients
+                          # fitted on this 3.4 g ball.
+  mass_clean: 0.0027      # for reference / scaling
+  radius: 0.020
+  inertia_coeff: 0.6666666666666666
+
+air:
+  rho: 1.20
+
+# Flight: a = g - k_d|v|v + k_m (omega x v); omega = physical (quaternion-measured) spin
+flight:
+  k_d: 0.1261             # 1/m — 100 low-spin arcs, joint RK4-shooting (Huber), rms 9.1 mm.
+                          # C_d = 0.569 (coated ball; roughness raises it above the clean ~0.44).
+                          # F1: constant-k_d PASSED, bins within ±6% over 2–6.8 m/s.
+  k_d_clean_scaled: 0.1588  # k_d * (3.4/2.7). AUDIT FLAG: DO NOT USE for a clean ball — it exceeds
+                            # every clean-ball precedent (mass scaling removes the mass effect only;
+                            # the coating also raises C_d). For clean-ball sims keep v0's 0.1222.
+  k_m: 0.00444            # sidespin channel (66 arcs, spin axis vertical, g-degeneracy-free),
+                          # k_d frozen. INSIDE the old rig's 95% CI [0.0035, 0.0049] -> validates
+                          # the quaternion spin scale. Low-SR bin medians ~0.0052.
+  k_m_clean_scaled: 0.00559 # mass-only scaling; same caveat as k_d_clean_scaled.
+  g: 9.81                 # frozen. Venue rig read 9.825 @ 0.15 deg tilt vs world z (QA PASS).
+  rk4_h: 5.0e-4
+  # F2 (Magnus saturation): UNDECIDED on this data — the trusted channel never
+  # exceeds SR 1.6 (amateur spin <= 15 rev/s). Bin medians hint at a decline
+  # (0.0054 -> 0.0028 across SR 0.16 -> 0.35, wide CIs) roughly consistent with
+  # saturation onset. RECOMMENDED (strictly safer, ~5 lines in flight.py + C++):
+  # replace constant k_m with the saturating lift law below, calibrated to match
+  # k_m at low SR; identical behavior in the validated envelope, correct-by-
+  # construction if policies discover high spin.
+  magnus_saturating_form: "C_L(SR) = cl_slope*SR / (1 + cl_slope*SR/cl_max)"
+  cl_slope: 0.87          # = 0.752 * (m_taped/m_clean)-consistent low-SR slope matching k_m=0.00444
+  cl_max: 0.55            # Ito&Kamijima 2025 plateau; NOT venue-fit (out of coverage) — literature value
+
+contact:
+  table:                  # static surface (v_r = 0)
+    e_eff: 0.934          # 92 bounces, v_n 1.0–4.5 m/s, MAD 0.044. F3: flat within ±0.023 where
+                          # measurable (2–4.5 m/s); low-v_n slope is a noise artifact; v_n > 5
+                          # (buckling) NOT covered. AUDIT FLAG: above the ITTF band 0.88–0.92 and
+                          # 17% of bounces read e>1 (unphysical) -> likely 2–5% HIGH from 9 mm
+                          # contact noise. Cross-check with a simple ITTF drop test (30 cm -> 23 cm)
+                          # before trusting the last 2–3%; old-table value was 0.908.
+    a_t: 0.369            # RETAINED FROM v0 (OptiTrack 101-bounce grip fit). The venue tangential
+    b_t: 0.0              # refit was degenerate at this noise level (9 mm vs 0.4 mm) — see F5 in the
+    mu_safety: 2.0        # report. Venue data neither confirms nor moves the grip block.
+  paddle:                 # racket hit (v_r = paddle CONTACT-POINT velocity incl. omega_racket x r;
+                          # the fit included that term — keep it in the sim, v0 code gap #1)
+    e_eff: 0.654          # FIRST REAL RACKET FIT (150 strikes, u_n 1.4–7.2 m/s). v0's 0.4632 was a
+                          # placeholder never fit on racket data.
+    a_t: 0.399            # tangential gain (v0: 1.205 — placeholder, large move expected & observed)
+    b_t: 0.0              # fitted -0.035 ~ 0: cos(theta) term not supported; set 0
+    mu_safety: 2.5        # cap never binds in the data -> mu unidentified; safety value retained
+    # F4 VERDICT: KILL constant-e (medium confidence, adversarially verified).
+    # 7-estimator ensemble delta_e(2-8 m/s) = -0.11..-0.14, all negative, beyond
+    # the -0.05 KILL line; within-take fixed-effects p=0.0015; slope
+    # -0.013..-0.018/m/s matches the 8,194-bounce literature (-0.017..-0.021).
+    # ADOPT e(u_n) — needs a ~3-line change in spin_contact.py + C++ mirror.
+    # Exponential preferred for extrapolation beyond u_n 7.2 (stays positive);
+    # linear and exponential are indistinguishable in-sample (dRMS ~ 1e-5).
+    e_lin_a: 0.729        # e(u_n) = e_lin_a - e_lin_b * |u_n|   (Huber fit)
+    e_lin_b: 0.0182
+    e_exp_g1: 0.784       # RECOMMENDED: e(u_n) = g1 * exp(g2 * |u_n|), valid u_n 1.4-7.2 m/s
+    e_exp_g2: -0.0483
