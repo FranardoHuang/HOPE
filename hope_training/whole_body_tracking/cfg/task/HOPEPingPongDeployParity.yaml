@@ -190,6 +190,25 @@ racket:
   sigma_vel_min: 0.5
   sigma_vel_max: 1.0
 
+  # ---- A1 target latency & time-variance (mocap->planner->runner realism) --------------------
+  # Training otherwise hands the actor a PERFECT, instantly-updated target; the real loop delivers
+  # it LATE (transport + planning latency), NOISY (ball-prediction error that shrinks as the strike
+  # approaches — SMASH Eq. 14 tts-decaying noise), and REFINED mid-swing (the planner re-plans
+  # WHERE, not WHEN — PACE injects sensor delays for the same reason). Only the ACTOR-visible
+  # target view (pos/vel/swing_sign) is degraded: rewards, metrics, and the privileged critic
+  # always use the true live target, and time_to_strike is never delayed (the swing clock is
+  # generated robot-side by the runner, not by the mocap link).
+  # ALL OFF by default (byte-identical baseline). Enable per-experiment, e.g.:
+  #   task.racket.target_delay_steps=2 task.racket.target_jitter_pos_per_s=0.05 \
+  #   task.racket.midswing_resample_prob=0.02
+  # Watch: metrics target_delay_steps_in_effect (constant) + midswing_resample_count (per-step
+  # refinement fraction, ~ prob * eligible fraction).
+  target_delay_steps: 0            # control steps (50 Hz) the actor sees target pos/vel/swing_sign late
+  target_jitter_pos_per_s: 0.0     # m: actor target pos noise std at tts>=1 s, decays ~ clamp(tts,0,1)
+  target_jitter_vel_per_s: 0.0     # m/s: same decay law for the target velocity
+  midswing_resample_prob: 0.0      # per-step prob of re-drawing WHERE mid-swing (strike timing untouched)
+  midswing_resample_tts_floor: 0.3 # s: no refinement inside the last 0.3 s before the strike
+
   # Strike timing: phase of the clip at which contact happens (racket-BLADE speed peak).
   # WRIST -> BLADE RE-PLANE (2026-07-02): the phases/boxes below were previously planned on the bare
   # WRIST body point (npz body 31 = right_wrist_yaw_Link), but the strike metric (RacketTargetCommand,

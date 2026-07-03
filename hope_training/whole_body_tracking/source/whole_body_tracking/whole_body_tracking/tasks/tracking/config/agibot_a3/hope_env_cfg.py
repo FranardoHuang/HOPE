@@ -97,7 +97,10 @@ class HOPEObservationsCfg(ObservationsCfg):
     class HOPECriticCfg(ObservationsCfg.PrivilegedCfg):
         base_target_pos_b = ObsTerm(func=mdp.base_target_pos_b, params={"command_name": "racket_target"})
         racket_target_pos_b = ObsTerm(func=mdp.racket_target_pos_b, params={"command_name": "racket_target"})
-        racket_target_vel_w = ObsTerm(func=mdp.racket_target_vel_w, params={"command_name": "racket_target"})
+        # A1: the CRITIC keeps the TRUE live target velocity even when the actor's view is
+        # delayed/jittered (task.racket.target_delay_steps / target_jitter_*): the asymmetric critic
+        # is privileged/sim-side. Identical value to mdp.racket_target_vel_w when the A1 knobs are off.
+        racket_target_vel_w = ObsTerm(func=mdp.racket_target_vel_w_live, params={"command_name": "racket_target"})
         racket_target_normal_w = ObsTerm(func=mdp.racket_target_normal_w, params={"command_name": "racket_target"})
         time_to_strike = ObsTerm(func=mdp.time_to_strike, params={"command_name": "racket_target"})
         # actual racket state (FK) — privileged, never available on hardware

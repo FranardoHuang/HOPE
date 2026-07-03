@@ -245,6 +245,51 @@ class RacketTargetCommand(CommandTerm):
         self._resample_n_acc = 0.0
         self._replay_n_acc = 0.0
 
+        # --- A1 target latency & time-variance (mocap->planner->runner realism) --------------------
+        # MOTIVATION: training previously handed the actor a PERFECT, instantly-updated target; the
+        # real loop (mocap -> planner -> runner) delivers it LATE (transport + planning latency),
+        # NOISY (ball-prediction error that SHRINKS as the strike approaches — SMASH Eq. 14), and
+        # REFINED mid-swing (the planner re-plans WHERE while the swing clock keeps running — PACE
+        # injects sensor delays for the same reason). Without modeling this, the mocap-closed-loop
+        # deployment faces out-of-distribution target dynamics. ALL knobs default OFF and the default
+        # path is byte-identical: delay==0 & jitter==0 make the actor-visible views ALIAS the live
+        # tensors (zero overhead, no extra RNG); midswing_resample_prob==0 short-circuits before any
+        # RNG draw. Only the ACTOR-visible view is degraded — rewards, metrics, the privileged critic,
+        # and the achieved-target-replay WRITE always use the TRUE live target.
+        self._delay_steps = max(int(cfg.target_delay_steps), 0)
+        self._jitter_pos = max(float(cfg.target_jitter_pos_per_s), 0.0)
+        self._jitter_vel = max(float(cfg.target_jitter_vel_per_s), 0.0)
+        # The actor view is materialized (separate tensors) whenever latency OR jitter is on;
+        # otherwise the delayed_* attributes ARE the live tensors (which are only ever index-assigned
+        # after __init__, so the alias stays valid for the whole run).
+        self._actor_view_active = self._delay_steps > 0 or self._jitter_pos > 0.0 or self._jitter_vel > 0.0
+        if self._delay_steps > 0:
+            # Ring buffers (length delay+1) over the ACTOR-VISIBLE target quantities: the slot
+            # written this step is read back `delay` pushes later (see _push_actor_target).
+            # time_to_strike is NOT buffered ON PURPOSE: the swing clock is generated robot-side by
+            # the deploy runner, not by the mocap link, so it carries no mocap latency.
+            _L = self._delay_steps + 1
+            self._delay_buf_pos = torch.zeros(_L, self.num_envs, 3, device=self.device)
+            self._delay_buf_vel = torch.zeros(_L, self.num_envs, 3, device=self.device)
+            self._delay_buf_sign = torch.ones(_L, self.num_envs, device=self.device)
+            self._delay_ptr = 0
+        if self._actor_view_active:
+            self.delayed_racket_target_pos_w = self.racket_target_pos_w.clone()
+            self.delayed_racket_target_vel_w = self.racket_target_vel_w.clone()
+            self.delayed_swing_sign = self.swing_sign.clone()
+        else:
+            # Flags off: zero-overhead aliases of the live tensors (byte-identical baseline).
+            self.delayed_racket_target_pos_w = self.racket_target_pos_w
+            self.delayed_racket_target_vel_w = self.racket_target_vel_w
+            self.delayed_swing_sign = self.swing_sign
+        # A1 metrics: per-step per-env redraw indicator (wandb reset-mean = per-step mid-swing
+        # refinement fraction) + the constant delay-in-effect broadcast (refreshed every step in
+        # _update_metrics because CommandTerm.reset() zeros metric entries of resetting envs).
+        self.metrics["midswing_resample_count"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["target_delay_steps_in_effect"] = torch.full(
+            (self.num_envs,), float(self._delay_steps), device=self.device
+        )
+
         # Strike timing / gating.
         self.time_to_strike = torch.zeros(self.num_envs, device=self.device)
         self.pre_strike = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
@@ -815,6 +860,21 @@ class RacketTargetCommand(CommandTerm):
         self.racket_progress[env_ids] = 0.0
         self._progress_reset_mask[env_ids] = True
 
+        # A1 target latency: a TRUE reset (not an intra-episode wrap) starts a fresh "deploy
+        # session" — the runner latches the first planner target before the policy steps, so the
+        # actor-visible view (and the whole ring buffer) is backfilled with the fresh target: no
+        # cross-episode target leakage. Intra-episode WRAPS are deliberately NOT backfilled — the
+        # next swing's target reaching the actor `delay` steps late is exactly the latency modeled.
+        if self._actor_view_active and not self._resample_is_wrap:
+            ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+            self.delayed_racket_target_pos_w[ids] = self.racket_target_pos_w[ids]
+            self.delayed_racket_target_vel_w[ids] = self.racket_target_vel_w[ids]
+            self.delayed_swing_sign[ids] = self.swing_sign[ids]
+            if self._delay_steps > 0:
+                self._delay_buf_pos[:, ids] = self.racket_target_pos_w[ids].unsqueeze(0)
+                self._delay_buf_vel[:, ids] = self.racket_target_vel_w[ids].unsqueeze(0)
+                self._delay_buf_sign[:, ids] = self.swing_sign[ids].unsqueeze(0)
+
     def _compute_racket_state(self):
         data = self.robot.data
         if self._racket_mode == "body":
@@ -913,6 +973,86 @@ class RacketTargetCommand(CommandTerm):
         # will already have resampled clip_id, so fall attribution reads this snapshot instead.
         if motion._multiseg:
             self._prev_clip_id = motion.clip_id.clone()
+
+        # --- A1 mid-swing target refinement (the planner refines WHERE, not WHEN) -------------------
+        # Each step, envs still approaching the strike (pre_strike AND time_to_strike > tts floor)
+        # re-draw their target with per-step prob p, exactly as the deploy planner refines its ball
+        # prediction mid-swing. ONLY the target sampling runs (position/velocity/normal through the
+        # existing uniform / per-clip-box / reference-perturbed path, including the HER achieved-target
+        # mixture inside it):
+        #   * strike timing untouched — same strike step, the swing clock keeps running;
+        #   * NO _count_swing_starts — a refinement is not a new swing attempt (metrics denominators
+        #     would otherwise be inflated);
+        #   * base target / swing type / _prev_motion_steps untouched;
+        #   * the racket-progress baseline is reset via _progress_reset_mask (same mechanism as the
+        #     resample path) so the target jump creates no fake progress reward;
+        #   * the achieved-target replay WRITE is unaffected (it stores the LIVE target state at
+        #     exact-strike frames, and tts floor > 0 keeps refinement away from the strike frame).
+        # prob==0 (default) short-circuits before any RNG draw — byte-identical baseline.
+        _ms_prob = float(self.cfg.midswing_resample_prob)
+        if _ms_prob > 0.0:
+            eligible = self.pre_strike & (self.time_to_strike > float(self.cfg.midswing_resample_tts_floor))
+            redraw = eligible & (torch.rand(self.num_envs, device=self.device) < _ms_prob)
+            ids = torch.where(redraw)[0]
+            if len(ids) > 0:
+                origins = self._env.scene.env_origins[ids]
+                if self.cfg.target_mode == "reference_perturbed":
+                    self._sample_targets_reference_perturbed(ids, origins, len(ids))
+                else:
+                    self._sample_targets_uniform(ids, origins, len(ids))
+                self._prev_racket_dist[ids] = torch.norm(
+                    self.racket_pos_w[ids] - self.racket_target_pos_w[ids], dim=-1
+                ).detach()
+                self.racket_progress[ids] = 0.0
+                self._progress_reset_mask[ids] = True
+            # Per-env 0/1 indicator; the wandb reset-mean = per-step refinement fraction (~ prob *
+            # eligible fraction). Written every step while the feature is on so zero-redraw steps count.
+            self.metrics["midswing_resample_count"] = redraw.float()
+
+        # A1 target latency/jitter: refresh the ACTOR-visible target view once per step (no-op alias
+        # when the knobs are off). Runs LAST so it sees this step's wrap/refinement target updates.
+        self._push_actor_target()
+
+    def _push_actor_target(self):
+        """A1: refresh the ACTOR-visible target view once per control step (latency + jitter).
+
+        Applied on PUSH (not on read) so the jitter is drawn ONCE per step and every actor obs term
+        reads the same tensor within the step (determinism). The jitter std decays with the time to
+        strike (SMASH Eq. 14 — the mocap ball prediction converges as the strike approaches):
+        per-step std = knob * clamp(time_to_strike, 0, 1). The ring buffer stores the jittered
+        values, so a delayed read reproduces the prediction noise AS OF push time (what the mocap
+        link actually emitted then). The TRUE live target is untouched — rewards, metrics, the
+        privileged critic, and the achieved-target-replay write keep reading racket_target_pos_w /
+        racket_target_vel_w / swing_sign. time_to_strike is never delayed: the swing clock is
+        generated robot-side by the deploy runner, not by the mocap link.
+        """
+        if not self._actor_view_active:
+            return  # default path: delayed_* alias the live tensors — nothing to compute, no RNG
+        pos = self.racket_target_pos_w
+        vel = self.racket_target_vel_w
+        if self._jitter_pos > 0.0 or self._jitter_vel > 0.0:
+            scale = self.time_to_strike.clamp(0.0, 1.0).unsqueeze(-1)
+            if self._jitter_pos > 0.0:
+                pos = pos + torch.randn_like(pos) * (self._jitter_pos * scale)
+            if self._jitter_vel > 0.0:
+                vel = vel + torch.randn_like(vel) * (self._jitter_vel * scale)
+        if self._delay_steps > 0:
+            # Write this step's (jittered) target into slot `w`; the next slot in the length-
+            # (delay+1) ring was written exactly `delay` pushes ago — that is the actor's view.
+            w = self._delay_ptr
+            self._delay_buf_pos[w].copy_(pos)
+            self._delay_buf_vel[w].copy_(vel)
+            self._delay_buf_sign[w].copy_(self.swing_sign)
+            r = (w + 1) % (self._delay_steps + 1)
+            self._delay_ptr = r
+            self.delayed_racket_target_pos_w.copy_(self._delay_buf_pos[r])
+            self.delayed_racket_target_vel_w.copy_(self._delay_buf_vel[r])
+            self.delayed_swing_sign.copy_(self._delay_buf_sign[r])
+        else:
+            # Jitter-only (delay==0): the actor view is live + this step's noise, no latency.
+            self.delayed_racket_target_pos_w.copy_(pos)
+            self.delayed_racket_target_vel_w.copy_(vel)
+            self.delayed_swing_sign.copy_(self.swing_sign)
 
     def _count_swing_starts(self, env_ids, count_prestrike_falls: bool) -> None:
         """UNCONDITIONAL swing accounting (Phase A wandb fix). Increment-only here; the decay is
@@ -1312,6 +1452,10 @@ class RacketTargetCommand(CommandTerm):
         if self.cfg.adaptive_sigma:
             self.metrics["adaptive_sigma_pos"][:] = self._adaptive_sigma_pos
             self.metrics["adaptive_sigma_vel"][:] = self._adaptive_sigma_vel
+        # A1 target latency diagnostic: constant broadcast, refreshed every step because
+        # CommandTerm.reset() zeros metric entries of resetting envs before logging them.
+        # (midswing_resample_count is written per step in _update_command while the feature is on.)
+        self.metrics["target_delay_steps_in_effect"][:] = float(self._delay_steps)
 
         # Success-gated curriculum: widen the perturbation only once the smoothed CONDITIONAL exact-strike
         # composite success (fraction of exact-strike samples passing all three thresholds) clears the bar.
@@ -1459,8 +1603,28 @@ class RacketTargetCommand(CommandTerm):
         kinematics (joint encoders), WITHOUT a fabricated base pose. Replaces
         :meth:`racket_target_pos_b` in the deploy-parity observation mode (legacy task name:
         ``real_sensor_only``).
+
+        A1: reads the ACTOR-visible target view (delayed/jittered when the A1 knobs are on;
+        the live tensor itself otherwise — byte-identical default). This method backs the
+        deploy-parity ACTOR obs only; the critic's :meth:`racket_target_pos_b` stays live.
         """
-        return quat_rotate_inverse(yaw_quat(self.base_quat_w), self.racket_target_pos_w - self.racket_pos_w)
+        return quat_rotate_inverse(yaw_quat(self.base_quat_w), self.actor_racket_target_pos_w() - self.racket_pos_w)
+
+    # --- A1 ACTOR-visible target accessors (delayed/jittered view; live aliases when off) ------- #
+    def actor_racket_target_pos_w(self) -> torch.Tensor:
+        """ACTOR-visible desired racket position (world): the A1 delayed/jittered view when target
+        latency/jitter is enabled, else the live tensor itself (zero-overhead alias). Rewards,
+        metrics, and the privileged critic keep reading the TRUE live ``racket_target_pos_w``."""
+        return self.delayed_racket_target_pos_w
+
+    def actor_racket_target_vel_w(self) -> torch.Tensor:
+        """ACTOR-visible desired racket velocity (world). See :meth:`actor_racket_target_pos_w`."""
+        return self.delayed_racket_target_vel_w
+
+    def actor_swing_sign(self) -> torch.Tensor:
+        """ACTOR-visible swing sign (forehand +1 / backhand -1), delayed with the target when A1
+        latency is on (the swing-type flag rides the same planner->runner message as the target)."""
+        return self.delayed_swing_sign
 
     def base_target_pos_b(self) -> torch.Tensor:
         """Desired base XY position relative to the current base (yaw-heading frame). HITTER actor obs."""
@@ -1591,6 +1755,32 @@ class RacketTargetCommandCfg(CommandTermCfg):
     sigma_pos_max: float = 0.20
     sigma_vel_min: float = 0.5
     sigma_vel_max: float = 1.0
+
+    # --- A1 target latency & time-variance (mocap->planner->runner realism; roadmap A1) -------------
+    # MOTIVATION: training otherwise hands the actor a PERFECT, instantly-updated target, while the
+    # real loop (mocap -> planner -> runner) delivers it LATE (transport + planning latency), NOISY
+    # (ball-prediction error that shrinks as the strike approaches — SMASH Eq. 14), and REFINED
+    # mid-swing (the planner re-plans WHERE, not WHEN). PACE injects sensor delays for the same
+    # reason. Without this, the mocap-closed-loop deployment faces out-of-distribution target
+    # dynamics. Scope: ONLY the ACTOR-visible target view (pos/vel/swing_sign) is degraded; rewards,
+    # metrics, the privileged critic, and the achieved-target-replay write use the TRUE live target.
+    # time_to_strike is NEVER delayed: the swing clock is generated robot-side by the deploy runner,
+    # not by the mocap link. ALL defaults OFF => byte-identical baseline (delay==0 aliases the live
+    # tensors; jitter==0 / prob==0 short-circuit before any RNG draw).
+    target_delay_steps: int = 0  # actor sees target pos/vel/swing_sign this many control steps (50 Hz) late
+    # SMASH-style tts-decaying gaussian noise on the ACTOR-visible target, drawn ONCE per step on the
+    # ring-buffer push (determinism within a step): per-step std = knob * clamp(time_to_strike, 0, 1),
+    # i.e. the knob is the std at time_to_strike >= 1 s, decaying to 0 at the strike (prediction
+    # convergence). Units: m (pos) / m/s (vel).
+    target_jitter_pos_per_s: float = 0.0
+    target_jitter_vel_per_s: float = 0.0
+    # Mid-swing target refinement: each control step, envs with pre_strike AND time_to_strike >
+    # midswing_resample_tts_floor re-draw their target (position/velocity/normal via the existing
+    # sampling path) with this per-step probability. Strike timing is untouched (same strike step),
+    # no swing start is counted, and the racket-progress baseline is reset so the target jump creates
+    # no fake progress.
+    midswing_resample_prob: float = 0.0
+    midswing_resample_tts_floor: float = 0.3  # s; no refinement inside the last `floor` seconds before the strike
 
     # --- reachable racket-target workspace (offsets from the env origin, world frame, meters) ---
     # Used only by target_mode="uniform". PLACEHOLDER ranges (not the reference strike point).
