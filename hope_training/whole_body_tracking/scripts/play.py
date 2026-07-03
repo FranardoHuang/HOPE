@@ -44,8 +44,6 @@ def _run_play(cfg, simulation_app):
     from whole_body_tracking.utils.exporter import attach_onnx_metadata, export_motion_policy_as_onnx
     from whole_body_tracking.utils.ppo_cfg import runner_kwargs
 
-    _ = _wbt_tasks
-
     task_id = str(cfg.task.gym_task)
     num_envs = int(cfg.num_envs) if cfg.num_envs is not None else int(cfg.task.env.num_envs)
 
