@@ -73,6 +73,13 @@ motion:
   # steps ("the ball is not here yet"); stand-started envs hold at least stand_start_min_hold.
   hold_steps_range: [0, 100]
   stand_start_min_hold: 25
+  # A8 (Ace): fraction of TRUE resets initialized from the policy's OWN buffered end-of-swing
+  # states (captured at clip wraps). Default OFF; enable per-experiment:
+  #   task.motion.post_swing_start_prob=0.25
+  post_swing_start_prob: 0.0
+  post_swing_buffer_size: 4096
+  post_swing_min_fill: 256
+  post_swing_min_hold: 25
 
 # ---- reward weights / kernel std --------------------------------------------
 # HITTER does not publish reward weights or kernel forms. Goal terms get relatively high weight
@@ -133,6 +140,19 @@ rewards:
 
 # ---- racket target sampling (HITTER: direct, fixed plane, no curriculum) -----
 racket:
+  # P2.3 SMASH-style adaptive tracking sigma: when true, racket_position/racket_velocity stds (and
+  # racket_strike_success std_pos/std_vel) auto-tighten to clamp(mean exact-strike error, min, max)
+  # every sigma_update_every steps — replaces the hand-run 1.8->1.0->0.8->0.5 std curriculum.
+  # Default OFF; enable per-experiment: task.racket.adaptive_sigma=true
+  # (maxima match this file's starting stds; minima are the acceptance thresholds)
+  adaptive_sigma: false
+  sigma_update_every: 500
+  sigma_ema_scale: 1.0
+  sigma_pos_min: 0.075
+  sigma_pos_max: 0.20
+  sigma_vel_min: 0.5
+  sigma_vel_max: 1.0
+
   # Strike timing: phase of the clip at which contact happens (racket-BLADE speed peak).
   # WRIST -> BLADE RE-PLANE (2026-07-02): the phases/boxes below were previously planned on the bare
   # WRIST body point (npz body 31 = right_wrist_yaw_Link), but the strike metric (RacketTargetCommand,

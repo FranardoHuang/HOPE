@@ -84,11 +84,10 @@ def racket_normal_w(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
 
 def episode_time_left(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Time remaining in the episode (seconds). HITTER critic privileged input."""
-    # IsaacLab creates the observation manager while ManagerBasedRLEnv is still
-    # initializing; episode_length_buf is allocated immediately after the base
-    # class returns. During that shape-probe call, report the full remaining time.
-    if not hasattr(env, "episode_length_buf"):
-        left = torch.full((env.num_envs,), float(env.max_episode_length) * env.step_dt, device=env.device)
-    else:
-        left = (env.max_episode_length - env.episode_length_buf).float() * env.step_dt
+    # IsaacLab 2.1 calls observation terms once during ObservationManager._prepare_terms (dimension
+    # probe) BEFORE ManagerBasedRLEnv allocates episode_length_buf — fall back to zeros there.
+    buf = getattr(env, "episode_length_buf", None)
+    if buf is None:
+        return torch.zeros(env.num_envs, 1, device=env.device)
+    left = (env.max_episode_length - buf).float() * env.step_dt
     return left.unsqueeze(-1)

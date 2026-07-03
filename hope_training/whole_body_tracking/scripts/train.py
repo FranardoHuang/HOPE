@@ -219,6 +219,16 @@ _RACKET_KEYS = (
     "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "ref_vel_scale_by_motion",
     "debug_reward_logging",
     "clean_reference_strike_velocity", "clean_strike_vel_window",
+    "adaptive_sigma", "sigma_update_every", "sigma_ema_scale",
+    "sigma_pos_min", "sigma_pos_max", "sigma_vel_min", "sigma_vel_max",
+)
+
+# YAML keys under `motion:` that target the MotionCommandCfg swing-entry structure
+# (Phase-A multi-swing machinery: no-teleport wrap, stand-entry resets, pre-swing hold,
+# A8 post-swing initial-state buffer).
+_MOTION_KEYS = (
+    "wrap_teleport", "stand_start_prob", "hold_steps_range", "stand_start_min_hold",
+    "post_swing_start_prob", "post_swing_buffer_size", "post_swing_min_fill", "post_swing_min_hold",
 )
 
 # YAML keys under `motion:` that target the MotionCommandCfg swing-entry structure
@@ -415,6 +425,10 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(M, "hold_steps_range", _get(mt, "hold_steps_range"),
                       lambda v: tuple(int(x) for x in v), applied, "commands.motion")
             _set_attr(M, "stand_start_min_hold", _get(mt, "stand_start_min_hold"), int, applied, "commands.motion")
+            _set_attr(M, "post_swing_start_prob", _get(mt, "post_swing_start_prob"), float, applied, "commands.motion")
+            _set_attr(M, "post_swing_buffer_size", _get(mt, "post_swing_buffer_size"), int, applied, "commands.motion")
+            _set_attr(M, "post_swing_min_fill", _get(mt, "post_swing_min_fill"), int, applied, "commands.motion")
+            _set_attr(M, "post_swing_min_hold", _get(mt, "post_swing_min_hold"), int, applied, "commands.motion")
 
     rw = _get(task, "rewards")
     if rw is not None:
@@ -490,6 +504,14 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 applied.append(_sp_note)
             _set_attr(C, "strike_window_s", _get(rk, "strike_window_s"), float, applied, "racket_target")
             _set_attr(C, "strike_success_pos_thresh", _get(rk, "strike_success_pos_thresh"), float, applied, "racket_target")
+            # P2.3 adaptive tracking sigma (coarse-to-fine reward kernel widths)
+            _set_attr(C, "adaptive_sigma", _get(rk, "adaptive_sigma"), _as_bool, applied, "racket_target")
+            _set_attr(C, "sigma_update_every", _get(rk, "sigma_update_every"), int, applied, "racket_target")
+            _set_attr(C, "sigma_ema_scale", _get(rk, "sigma_ema_scale"), float, applied, "racket_target")
+            _set_attr(C, "sigma_pos_min", _get(rk, "sigma_pos_min"), float, applied, "racket_target")
+            _set_attr(C, "sigma_pos_max", _get(rk, "sigma_pos_max"), float, applied, "racket_target")
+            _set_attr(C, "sigma_vel_min", _get(rk, "sigma_vel_min"), float, applied, "racket_target")
+            _set_attr(C, "sigma_vel_max", _get(rk, "sigma_vel_max"), float, applied, "racket_target")
             _set_range(C, "racket_pos_x_range", _get(rk, "pos_x_range"), applied, "racket_target")
             _set_range(C, "racket_pos_y_range", _get(rk, "pos_y_range"), applied, "racket_target")
             _set_range(C, "racket_pos_z_range", _get(rk, "pos_z_range"), applied, "racket_target")

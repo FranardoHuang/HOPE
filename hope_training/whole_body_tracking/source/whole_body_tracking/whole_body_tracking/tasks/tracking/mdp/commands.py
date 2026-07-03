@@ -117,6 +117,14 @@ class MotionCommand(CommandTerm):
         # True only while _resample_command is being invoked from an intra-episode clip WRAP
         # (as opposed to a true episode reset) — wraps skip the RSI teleport (cfg.wrap_teleport).
         self._resampling_from_wrap = False
+        # A8: post-swing initial-state ring buffer (root state stored ORIGIN-RELATIVE in [:3] so a
+        # snapshot from env B can seed env A; quats/velocities/joints are origin-invariant).
+        # Tensors are allocated lazily at first capture (dof count comes from live robot data).
+        self._post_swing_root: torch.Tensor | None = None
+        self._post_swing_joint_pos: torch.Tensor | None = None
+        self._post_swing_joint_vel: torch.Tensor | None = None
+        self._post_swing_count = 0
+        self._post_swing_ptr = 0
         self.body_pos_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 3, device=self.device)
         self.body_quat_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 4, device=self.device)
         self.body_quat_relative_w[:, :, 0] = 1.0
@@ -352,6 +360,46 @@ class MotionCommand(CommandTerm):
         self.metrics["sampling_top1_prob"][:] = pmax
         self.metrics["sampling_top1_bin"][:] = imax.float() / self.bin_count
 
+    def _capture_post_swing_states(self, env_ids: torch.Tensor):
+        """A8: snapshot end-of-swing robot states (wrap envs only) into the ring buffer.
+
+        Wrapped envs necessarily completed their swing physically (no teleport happened and they
+        reached the clip's final frame), so every buffer entry is a genuine follow-through state.
+        Root position is stored origin-relative; write pairs root_state_w <->
+        write_root_state_to_sim (com-frame velocities) to match the stand/RSI branches.
+        """
+        n = len(env_ids)
+        if n == 0:
+            return
+        root = self.robot.data.root_state_w[env_ids].clone()
+        root[:, :3] -= self._env.scene.env_origins[env_ids]
+        jp = self.robot.data.joint_pos[env_ids].clone()
+        jv = self.robot.data.joint_vel[env_ids].clone()
+        size = int(self.cfg.post_swing_buffer_size)
+        if self._post_swing_root is None:
+            self._post_swing_root = torch.zeros(size, 13, device=self.device)
+            self._post_swing_joint_pos = torch.zeros(size, jp.shape[1], device=self.device)
+            self._post_swing_joint_vel = torch.zeros(size, jv.shape[1], device=self.device)
+        # ring write (n < size in practice; wrap the slot indices just in case)
+        slots = (self._post_swing_ptr + torch.arange(n, device=self.device)) % size
+        self._post_swing_root[slots] = root
+        self._post_swing_joint_pos[slots] = jp
+        self._post_swing_joint_vel[slots] = jv
+        self._post_swing_ptr = int((self._post_swing_ptr + n) % size)
+        self._post_swing_count = min(self._post_swing_count + n, size)
+
+    def _write_post_swing_states(self, env_ids: torch.Tensor):
+        """A8: initialize `env_ids` from random buffered end-of-swing states (origin re-based)."""
+        picks = torch.randint(0, self._post_swing_count, (len(env_ids),), device=self.device)
+        root = self._post_swing_root[picks].clone()
+        root[:, :3] += self._env.scene.env_origins[env_ids]
+        self.robot.write_root_state_to_sim(root, env_ids=env_ids)
+        self.robot.write_joint_state_to_sim(
+            self._post_swing_joint_pos[picks].clone(),
+            self._post_swing_joint_vel[picks].clone(),
+            env_ids=env_ids,
+        )
+
     def _resample_command(self, env_ids: Sequence[int]):
         if len(env_ids) == 0:
             return
@@ -372,13 +420,24 @@ class MotionCommand(CommandTerm):
         if self._resampling_from_wrap and not self.cfg.wrap_teleport:
             return
 
-        # TRUE episode reset: a fraction starts from the DEFAULT STAND (deploy entry), the rest
-        # keeps the legacy RSI teleport onto the (noised) reference frame.
+        # TRUE episode reset: three-way split — DEFAULT STAND (deploy entry) / POST-SWING buffer
+        # (A8: the policy's own end-of-swing states) / legacy RSI teleport onto the (noised)
+        # reference frame. One uniform draw per env: u < stand_p -> stand; stand_p <= u <
+        # stand_p + post_p -> post-swing (only once the buffer has post_swing_min_fill entries);
+        # else RSI.
+        u = torch.rand(len(env_ids_t), device=self.device)
         stand_mask = torch.zeros(len(env_ids_t), dtype=torch.bool, device=self.device)
-        if not self._resampling_from_wrap and self.cfg.stand_start_prob > 0.0:
-            stand_mask = torch.rand(len(env_ids_t), device=self.device) < self.cfg.stand_start_prob
+        post_mask = torch.zeros(len(env_ids_t), dtype=torch.bool, device=self.device)
+        if not self._resampling_from_wrap:
+            stand_p = float(self.cfg.stand_start_prob)
+            post_p = float(self.cfg.post_swing_start_prob)
+            if stand_p > 0.0:
+                stand_mask = u < stand_p
+            if post_p > 0.0 and self._post_swing_count >= int(self.cfg.post_swing_min_fill):
+                post_mask = (u >= stand_p) & (u < stand_p + post_p)
         stand_ids = env_ids_t[stand_mask]
-        rsi_ids = env_ids_t[~stand_mask]
+        post_ids = env_ids_t[post_mask]
+        rsi_ids = env_ids_t[~(stand_mask | post_mask)]
 
         if len(stand_ids) > 0:
             default_root = self.robot.data.default_root_state[stand_ids].clone()
@@ -393,6 +452,13 @@ class MotionCommand(CommandTerm):
             # Give the stand-started envs time to travel stand -> windup before the clip runs.
             self.hold_counter[stand_ids] = torch.clamp(
                 self.hold_counter[stand_ids], min=int(self.cfg.stand_start_min_hold)
+            )
+
+        if len(post_ids) > 0:
+            self._write_post_swing_states(post_ids)
+            # Settle follow-through -> windup before the clip runs.
+            self.hold_counter[post_ids] = torch.clamp(
+                self.hold_counter[post_ids], min=int(self.cfg.post_swing_min_hold)
             )
 
         if len(rsi_ids) == 0:
@@ -446,8 +512,13 @@ class MotionCommand(CommandTerm):
         self.just_resampled = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         if len(env_ids) > 0:
             self.just_resampled[env_ids] = True
-        # Wrap-path resample: skips the RSI teleport (cfg.wrap_teleport=False, the default)
-        # so the policy physically transitions swing -> swing. True resets go through reset()/manager.
+            # A8: wrapped envs just physically completed a swing (they passed the strike alive and
+            # were not teleported) — snapshot their states into the post-swing ring buffer so true
+            # episode resets can start from realistic end-of-swing states (cfg.post_swing_start_prob).
+            if self.cfg.post_swing_start_prob > 0.0:
+                self._capture_post_swing_states(env_ids)
+        # Wrap-path resample: skips the RSI teleport (cfg.wrap_teleport=False) so the policy
+        # physically transitions swing -> swing. True resets go through reset()/manager instead.
         self._resampling_from_wrap = True
         try:
             self._resample_command(env_ids)
@@ -556,6 +627,17 @@ class MotionCommandCfg(CommandTermCfg):
     hold_steps_range: tuple[int, int] = (0, 100)
     # Stand-started envs get at least this much hold (they must travel stand -> windup first).
     stand_start_min_hold: int = 25
+    # --- A8 (Ace recipe): post-swing initial-state distribution ------------------------------
+    # Fraction of TRUE episode resets initialized from a ring buffer of the policy's OWN
+    # end-of-swing states (captured at every intra-episode clip wrap — envs that physically
+    # completed a swing). Teaches "start the next swing from wherever the last one left you"
+    # even for single-swing episodes. Drawn AFTER stand_start_prob from the remaining resets;
+    # falls back to RSI while the buffer has fewer than post_swing_min_fill entries.
+    post_swing_start_prob: float = 0.0
+    post_swing_buffer_size: int = 4096
+    post_swing_min_fill: int = 256
+    # Post-swing-started envs get at least this much hold (settle follow-through -> windup).
+    post_swing_min_hold: int = 25
 
     adaptive_kernel_size: int = 1
     adaptive_lambda: float = 0.8
