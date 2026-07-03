@@ -44,6 +44,16 @@ Rules:
 | yikang | Deployment; sim/env alignment |
 | claude (franco's agent) | Foundation: infrastructure, A/B experiments, doc/code hygiene |
 
+## Run-Name Legend (人话对照表 — 报告里不再用裸字母)
+
+| run_name | 人话 |
+| --- | --- |
+| p21_A_noteleport / p21_A_ext12k | 「基线结构」：挥拍间不传送 + 25% 从站姿开始（main 默认配置），2k / 续跑到 14k |
+| p21_B_teleport | 「旧传送式」对照：每拍开始把机器人瞬移到位（部署模型的旧训法），仅 2k，已停 |
+| p21_C_sigma | 基线结构 + 「奖励自动收紧」（误差变小奖励口径跟着变严），2k |
+| p21_D_postswing | 基线结构 + 「上拍收尾姿态起手」（一部分回合从上一拍打完的姿势开始练），2k |
+| p21_E_sigma_postswing | 「三合一」＝基线结构＋奖励自动收紧＋收尾姿态起手，从 C 续跑到 14k —— **当前最优候选** |
+
 ## Plan To Saturday (2026-07-03 → 07-04, target: play at the venue with an improved policy)
 
 Critical path (GPU 1/2):
@@ -62,10 +72,11 @@ Parallel tracks (no GPU conflict):
 
 - **Ball physics v1 (P2.5 prerequisite)**: mocap ball-trajectory collection is happening NOW at the
   venue → fit drag/bounce from the fresh recordings (planner calibration path); spin-aware physics
-  arrives with the simtoreal2 merge. Suggested owner: jiayi (+claude for pipeline).
-- **P2.0 + A5 bundling REMINDER**: while the mocap rig is up, also record the READY-STANCE clip and
-  30-50 orientation-normalized swing videos (face the incoming-ball direction!). 0703 teacher-clip
-  uploads suggest this may be partly done — confirm coverage before teardown. (franco/on-site)
+  arrives with the simtoreal2 merge. Owner: **yikang** (franco 2026-07-03).
+- **Teacher clips for Saturday: NO mass shoot needed** (franco 2026-07-03): the swings recorded
+  during play sessions + orientation rotation (P2.2-lite, `reground_hope_frame.py` path) are
+  sufficient; the 0703 clip uploads are that set. A5's 30-50-clip library and the dedicated
+  ready-stance clip stay on the longer-horizon list (P2.0/A5 in G08), not on Saturday's path.
 - simtoreal2 → main merge + doc updates (claude, in progress).
 
 ## Active
