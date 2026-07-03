@@ -77,10 +77,12 @@ Not done:
 - Formal per-checkpoint acceptance: the metric thresholds and the numbers for the currently shipped
   checkpoint (`model_p4_deployparity` / explicitpd_ft `model_25700`) are not yet pasted into this
   gate as an accepted record.
-- `eval_realsensor_hopex.sh` and `export_onnx_explicitpd.sh` hardcode another machine's absolute
-  paths (`/home/dongc1/workspace/HOPE/...`), and `mujoco_eval_onnx.py`'s built-in defaults
-  (`--onnx`, `--motion-files`, strike phases `(0.36, 0.50)`) point at the legacy 180-D era — pass
-  current 175-D artifacts and `--strike-phase-per-clip 0.47 0.333` explicitly.
+- (Fixed 2026-07-03, branch `audit-leftover-fixes`.) `eval_realsensor_hopex.sh` /
+  `export_onnx_explicitpd.sh` now resolve their own location and take `HOPE_EVAL_*` /
+  `HOPE_EXPORT_*` env overrides, and `mujoco_eval_onnx.py` resolves strike phases as CLI >
+  ONNX `clip_strike_phases` metadata > built-in legacy `(0.36, 0.50)` (plus a
+  `clip_seg_lengths`-vs-npz mismatch warning). The `--onnx`/`--motion-files` defaults still point
+  at a legacy run — pass current artifacts explicitly.
 - No decision recorded on MuJoCo as a training backend (currently it is a validation/dry-run stage
   only).
 
@@ -95,7 +97,6 @@ Not done:
 
 1. Record the accepted sim2sim numbers for the shipped checkpoint (implicit cross-check + explicit
    clipped-PD gate + `--deploy-faithful` protocol) in this gate.
-2. Parameterize the two machine-specific launcher scripts via env vars like the training launchers.
-3. When the mocap→planner bridge lands, extend the MuJoCo rehearsal to consume live
+2. When the mocap→planner bridge lands, extend the MuJoCo rehearsal to consume live
    `/racket/command` targets instead of sampled planner-equivalents
    (`docs/operations/run_shared_interface_rehearsal.md`).

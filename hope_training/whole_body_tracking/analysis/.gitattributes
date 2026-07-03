@@ -1,0 +1,5 @@
+# Analysis plots are small PNGs committed as RAW blobs, but the package-level
+# .gitattributes (copied from IsaacLab) marks *.png as lfs — the repo has no
+# actual git-lfs objects, so on lfs-configured machines these show as
+# permanently "modified". Deepest .gitattributes wins: keep them plain.
+*.png -filter -diff -merge

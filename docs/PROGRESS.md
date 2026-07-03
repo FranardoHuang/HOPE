@@ -2,6 +2,12 @@
 
 Use this file for short project-state updates that future humans and agents need to see. Keep detailed reasoning in the relevant gate doc.
 
+## 2026-07-03 (later, branch `audit-leftover-fixes`)
+
+- Fixed the audit's leftover technical items: `eval_realsensor_hopex.sh` / `export_onnx_explicitpd.sh` are now portable (self-locating + `HOPE_EVAL_*`/`HOPE_EXPORT_*` env overrides instead of `/home/dongc1/...` paths); `mujoco_eval_onnx.py` now resolves `strike_phase_per_clip` as CLI > ONNX `clip_strike_phases` metadata > built-in legacy fallback (same keys the C++ runner uses) and warns when the motion npz `seg_len` disagrees with the ONNX `clip_seg_lengths`; the VRPN relay topic matcher now accepts all observed pose-topic forms (`pose`, `pose<idx>`, `pose_id_<idx>`, `pose_<idx>`), covering the vendored tracker.hpp naming.
+- Normalized the git-lfs mismatch: the repo has NO actual LFS objects, yet vendor/IsaacLab-copied `.gitattributes` marked 13 `a3_runtime/*.csv` + 5 `analysis/*.png` raw blobs as lfs, making them show permanently "modified" on lfs-configured machines (found via the RunPod smoke). Added deepest-level `.gitattributes` unset rules for exactly those trees.
+- Hotfixed `main` (`8d2af53`): the simtoreal2 merge had left raw conflict markers in `my_on_policy_runner.py`, breaking every training import — caught by the RunPod train smoke. Also provisioned/verified the shared RunPod (see `docs/operations/run_on_runpod.md`): franco's clone synced + git-lfs configured locally, full smoke incl. 10-iteration training run.
+
 ## 2026-07-03
 
 - Ran a full doc-vs-implementation audit of `main` at `0bc9c53` (multi-agent, 68 verified findings) plus a structured read of the four reference papers now in `papers/` (HITTER `2508.21043`, PACE `2509.21690` = the TTRL-ICRA2026 paper, SMASH `2604.01158`, Sony Ace `s41586-026-10338-5`). Realigned the docs that had gone stale after the simtoreal2 merge: gate statuses (G06/G07 → Partial), the actor observation contract (175-D deploy-parity), the deploy action path (31-act pingpong runner), the mocap interface contract (play vs data-collection phases), PROJECT_MAP zones, operations runbooks, and `reimplement.md` steps 13-18. Note: merge `73297db` took "docs from main" and silently clobbered the a197bde doc updates (G07, policy_observation_action, run_deploy_dryrun); this pass restored and extended them.
