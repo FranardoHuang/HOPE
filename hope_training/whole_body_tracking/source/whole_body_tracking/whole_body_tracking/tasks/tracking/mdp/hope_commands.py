@@ -175,6 +175,14 @@ class RacketTargetCommand(CommandTerm):
         self._exact_pass_5cm_acc = 0.0
         self._exact_pass_10cm_acc = 0.0
         self._exact_composite_rate = 0.0
+        # P2.3 adaptive-sigma driver: global decayed error-magnitude sums over exact-strike samples
+        # (mean = sum / _exact_n_acc). Per-clip variants exist below; sigma needs one global signal.
+        self._exact_pos_err_sum = 0.0
+        self._exact_vel_err_sum = 0.0
+        # Live adaptive sigmas (start at the cfg maxima = the hand-tuned YAML stds; only applied to
+        # the reward terms when cfg.adaptive_sigma is on).
+        self._adaptive_sigma_pos = float(cfg.sigma_pos_max)
+        self._adaptive_sigma_vel = float(cfg.sigma_vel_max)
 
         # Per-clip (forehand=clip 0 / backhand=clip 1) breakdown of the exact-strike metrics, so wandb
         # shows each swing separately (the aggregate composite can hide one swing lagging). Same
@@ -214,6 +222,8 @@ class RacketTargetCommand(CommandTerm):
         # Episode-wide tracking errors (instantaneous; averaged over terminating envs at reset).
         self.metrics["racket_pos_error"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["racket_vel_error"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["adaptive_sigma_pos"] = torch.full((self.num_envs,), float(cfg.sigma_pos_max), device=self.device)
+        self.metrics["adaptive_sigma_vel"] = torch.full((self.num_envs,), float(cfg.sigma_vel_max), device=self.device)
         self.metrics["racket_normal_error_deg"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["base_pos_error"] = torch.zeros(self.num_envs, device=self.device)
         # How far the (coupled) base target sits from spawn — i.e. how much repositioning is commanded.
@@ -1028,6 +1038,10 @@ class RacketTargetCommand(CommandTerm):
         self._exact_pass_5cm_acc = decay * self._exact_pass_5cm_acc + float(_pass_5cm.sum())
         self._exact_pass_10cm_acc = decay * self._exact_pass_10cm_acc + float(_pass_10cm.sum())
         self._exact_pass_normal_acc = decay * self._exact_pass_normal_acc + float(pass_normal.sum())
+        # GLOBAL error-magnitude EMAs (P2.3 adaptive sigma driver) — same decay/mask as the pass
+        # counters above; per-clip variants exist further down but sigma needs one global signal.
+        self._exact_pos_err_sum = decay * self._exact_pos_err_sum + float((pos_err * exact_strike).sum())
+        self._exact_vel_err_sum = decay * self._exact_vel_err_sum + float((vel_err * exact_strike).sum())
         # UNCONDITIONAL swing accounting: decay the start/fall accumulators at the SAME per-step
         # rate as the exact accumulators (increments happen in _count_swing_starts), then report
         #   swing_completion_rate = exact-strike arrivals / swing starts   (falls count against it)
@@ -1102,6 +1116,39 @@ class RacketTargetCommand(CommandTerm):
             self.metrics[f"racket_pos_error_{_ax}_exact_strike"] = torch.where(
                 exact_strike, _axis_err_exact[:, _ai], self.metrics[f"racket_pos_error_{_ax}_exact_strike"]
             )
+        # P2.3 SMASH-style ADAPTIVE TRACKING SIGMA (coarse-to-fine): every sigma_update_every steps,
+        # set the racket position/velocity reward stds to the clamped decayed MEAN exact-strike error,
+        # so the kernel always brackets the current operating band instead of a hand-tuned constant
+        # (SMASH Table IV: removing this collapses success 86.4 -> 22.6). Mutates the LIVE reward-term
+        # params in place (read per compute() call); also keeps racket_strike_success's own std_pos/
+        # std_vel in lockstep so the multiplicative bonus agrees with the additive terms. Same
+        # placement/pattern as the success-gated perturb curriculum below.
+        if (
+            self.cfg.adaptive_sigma
+            and enough
+            and self._env.common_step_counter % int(self.cfg.sigma_update_every) == 0
+        ):
+            pos_mean = self._exact_pos_err_sum / denom
+            vel_mean = self._exact_vel_err_sum / denom
+            sigma_pos = min(max(float(self.cfg.sigma_ema_scale) * pos_mean, float(self.cfg.sigma_pos_min)),
+                            float(self.cfg.sigma_pos_max))
+            sigma_vel = min(max(float(self.cfg.sigma_ema_scale) * vel_mean, float(self.cfg.sigma_vel_min)),
+                            float(self.cfg.sigma_vel_max))
+            rm = self._env.reward_manager
+            try:
+                rm.get_term_cfg("racket_position").params["std"] = sigma_pos
+                rm.get_term_cfg("racket_velocity").params["std"] = sigma_vel
+                succ = rm.get_term_cfg("racket_strike_success").params
+                succ["std_pos"] = sigma_pos
+                succ["std_vel"] = sigma_vel
+            except ValueError:
+                pass  # a variant task without these terms: adaptive sigma is a no-op there
+            self._adaptive_sigma_pos = sigma_pos
+            self._adaptive_sigma_vel = sigma_vel
+        if self.cfg.adaptive_sigma:
+            self.metrics["adaptive_sigma_pos"][:] = self._adaptive_sigma_pos
+            self.metrics["adaptive_sigma_vel"][:] = self._adaptive_sigma_vel
+
         # Success-gated curriculum: widen the perturbation only once the smoothed CONDITIONAL exact-strike
         # composite success (fraction of exact-strike samples passing all three thresholds) clears the bar.
         if self.cfg.target_mode == "reference_perturbed" and self.cfg.ref_perturb_success_gated:
@@ -1365,6 +1412,21 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # rate (and the curriculum) only trust it once `exact_success_min_count` decayed samples accumulate.
     exact_success_decay: float = 0.99
     exact_success_min_count: float = 50.0
+
+    # --- P2.3 SMASH-style adaptive tracking sigma (coarse-to-fine reward kernel widths) ---
+    # When on, every `sigma_update_every` control steps the racket_position/racket_velocity reward
+    # stds (and racket_strike_success's std_pos/std_vel) are set to
+    #   clamp(sigma_ema_scale * decayed_mean_exact_strike_error, sigma_min, sigma_max)
+    # so the exp kernel always brackets the CURRENT operating error band. Replaces the hand-run
+    # 1.8 -> 1.0 -> 0.8 -> 0.5 velocity-std curriculum. sigma_*_max should match the task YAML's
+    # starting stds; sigma_*_min should sit at the acceptance thresholds (0.075 m / 0.5 m/s).
+    adaptive_sigma: bool = False
+    sigma_update_every: int = 500
+    sigma_ema_scale: float = 1.0
+    sigma_pos_min: float = 0.075
+    sigma_pos_max: float = 0.20
+    sigma_vel_min: float = 0.5
+    sigma_vel_max: float = 1.0
 
     # --- reachable racket-target workspace (offsets from the env origin, world frame, meters) ---
     # Used only by target_mode="uniform". PLACEHOLDER ranges (not the reference strike point).
