@@ -81,6 +81,27 @@ that imports come from YOUR clone, and a real env build + step.
 5. WandB login is global and ephemeral (`/root/.netrc`); pass `WANDB_API_KEY=...` per run or use
    `logger=tensorboard`.
 
+## Launch Rules (hard-won 2026-07-03 — read before starting ANY job over ssh)
+
+1. **One Kit boot at a time, pod-wide.** Parallel Isaac boots deadlock each other (worst with cold
+   caches right after a restart: five jobs sat 20+ min at 0 progress). Wrap every training/play
+   launch in the global boot lock:
+   ```bash
+   /workspace/bin/kit_boot_lock.sh /path/to/run.log python scripts/train.py ...
+   ```
+   It serializes only the boot (releases when "Learning iteration" appears), then jobs run in
+   parallel normally.
+2. **Detach properly or your job dies with the ssh session (“陪葬”).** `nohup ... &` alone is NOT
+   enough under flaky connections; use `setsid nohup <cmd> </dev/null > log 2>&1 &` (the boot-lock
+   wrapper does this for you). Judge success by artifacts (checkpoints/ONNX on disk), never by the
+   session surviving.
+3. **pkill self-match kills your own session.** `ssh pod 'pkill -f myscript'` matches the ssh
+   command line itself → session dies mid-command with exit 255 and later commands silently never
+   run. Always bracket the first char: `pkill -f "[m]yscript"`.
+4. **Verify every launch.** After starting a job, confirm within ~60 s that its log exists and the
+   process is alive; a launcher that prints nothing probably did nothing (two silent queue failures
+   cost us 30 idle GPU-minutes).
+
 ## Known Quirks
 
 - **git-lfs**: the git-lfs filters are NOT configured globally (global gitconfig lives on the
@@ -96,9 +117,12 @@ that imports come from YOUR clone, and a real env build + step.
   from artifacts (checkpoints on disk), not `$?` and not only log sentinels. The train smoke was
   updated on 2026-07-03 to accept `model_9.pt` on disk as the success sentinel after a run whose
   final "Learning iteration 9/10" line never reached the log.
-- **Pod restart**: `/workspace` survives; `/root` (wandb login, apt packages, bash history) does
-  not. Re-`source env.sh`, re-login wandb if needed, and re-run `--quick` (or `--concurrent`)
-  smoke.
+- **Pod restart**: `/workspace` survives; `/root` (wandb login, apt packages, bash history, ssh
+  keys, installed CLIs) does not. Restart-proofed on 2026-07-03: `/workspace/bin` (git-lfs, claude,
+  kit_boot_lock.sh) + `CLAUDE_CONFIG_DIR=/workspace/.claude` are wired into every `env.sh`; the
+  GitHub deploy key however still lives in `/root/.ssh` and must be re-installed after each restart
+  (persistent-key decision pending). After restart: re-`source env.sh`, re-run `--quick` smoke, and
+  expect the FIRST Kit boot to be slow (cold caches — all the more reason for the boot lock).
 
 ## Adding A New User (or Agent Workspace)
 
