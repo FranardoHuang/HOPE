@@ -454,3 +454,9 @@ class HOPEPingPongVirtualBallAgibotA3EnvCfg(HOPEPingPongDeployParityAgibotA3EnvC
         # contact + coarse-landing evaluation in RacketTargetCommand (vb_* cfg fields hold the
         # venue-fit sampling boxes / gates; tune there, not here).
         self.commands.racket_target.virtual_ball = True
+        # CLIMB-PHASE shaping width (2026-07-03): the E-champion warm start crosses the net plane
+        # ~0.3-0.5 m BELOW the target height; at the v0 default sigma 0.10 the height kernel is
+        # exp(-(0.5/0.1)^2) ~ 0 there — no gradient, and vb_warmE14k3 paid zero virtual reward for
+        # 2.5k iters. 0.25 keeps a usable gradient down to the current operating band. Tighten
+        # back toward 0.10 once virtual_net_clear_rate is healthy (>0.3 or so).
+        self.commands.racket_target.vb_net_sigma = 0.25
