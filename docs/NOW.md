@@ -30,7 +30,7 @@ Rules:
 | --- | --- |
 | DeployParity training, 4096 envs, solo GPU | **~2.0-2.2 s/iter → 2000 it ≈ 1.2 h · 8000 ≈ 4.7 h · 12000 ≈ 7 h · 20000 ≈ 12 h** (corrected 2026-07-03; earlier 4.7 s/iter figure had boot time baked in) |
 | Co-running 2 jobs on one GPU (measured) | each job ~20-25% slower, TOTAL throughput ≈ +37%; memory fine (2×~7 GB of 32 GB). Fleet = 3 GPUs × 2 slots = **6 parallel experiments** for signal-tier runs; keep critical-path runs solo. **Stagger starts ≥60 s** (two Kits booting the same second can kill one: the B-ext incident) |
-| num_envs scaling, SOLO (measured) | 4096: 2.1 s/iter (~47k samples/s) · 8192: 3.2 s/iter (~61k, 65% eff.) · 16384: 4.4 s/iter (~88k, 47% eff.) — GPU has headroom but diminishing returns; whether bigger batches reach the SAME metric in less wall time is being raced (8192@1350it vs 4096@2000it, equal ~1.2 h wall) |
+| num_envs scaling — VERDICT (equal ~72 min wall-clock, same seed/task) | **4096 envs: composite 0.42** · 8192 envs: 0.30 · 16384: running (completes the sweep; expected worse) → **4096 is the sweet spot; bigger batches trade gradient updates for samples and LOSE on time-to-result. Policy: critical-path runs at 4096 solo; spare capacity = 2nd co-run job per GPU (+37% total throughput), NOT bigger batches** |
 | Kit boot + env build (per run) | ~2 min |
 | Mechanics check (512 envs, 25 it) | ~3 min |
 | ONNX export (play.py) | ~2 min |
