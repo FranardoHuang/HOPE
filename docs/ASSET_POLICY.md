@@ -47,7 +47,9 @@ Current ignored local asset roots:
 
 The tracked deploy source is under:
 
-- `agi/code_deployment/a3_deploy_example/`
+- `agi/a3_deploy_example/` — the active ping-pong deploy tree (Route A runner, build scripts,
+  runbooks); generated build outputs under its `dist/` and policy `.onnx` artifacts stay ignored.
+- `agi/code_deployment/a3_deploy_example/` — the older vendor reference subset.
 
 The complete original payload is kept locally under:
 

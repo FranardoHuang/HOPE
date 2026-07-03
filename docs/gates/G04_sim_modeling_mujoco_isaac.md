@@ -63,14 +63,14 @@ Done:
 - The table-tennis scene now includes a tracked Purdue PACE table/net USD visual overlay under `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/table_usd/`. Physics still comes from invisible cuboid colliders; the USD is visual-only.
 - Table-tennis ball/table contact now follows Purdue PACE materials by default: ball mass `3.4 g`, ball restitution/friction `0.9/0.1`, table restitution/friction `0.95/0.4`, multiplicative combine for an effective ball-table normal restitution of `0.855`. HOPE-calibrated aero drag is available but off by default for Purdue parity.
 - `tests/test_table_tennis_geometry.py` covers table/frame geometry and pure drag/Magnus math; the drag/Magnus tests skip automatically if host `torch` is missing.
+- Sim parity between MuJoCo and Isaac is established via `hope_training/whole_body_tracking/scripts/mujoco_eval_onnx.py`: MuJoCo with `implicitfast` integration and kd placed in `dof_damping` matches Isaac's `ImplicitActuator` (stable rollout), while the AGI deploy sim's explicit Euler PD diverges in ~0.1 s. Documented in `agi/a3_deploy_example/SIM_FIDELITY_NOTE_FOR_AGI.md`.
+- Hardware SDK parity for joint order is established: the `pp_joint_map` backend order was verified slot-for-slot against AGI `robot_io::MakeA3Layout31()` — a checked bijection (`agi/a3_deploy_example/PINGPONG_DEPLOY_ALIGNMENT.md:137-139`).
 
 Not done:
 
 - This Codex shell has not independently run Isaac because the required GPU/Isaac environment is not active here.
 - The table-tennis scene has not yet been verified in-sim in this Codex shell with `scripts/play_table_tennis.py`.
 - Self-collision is disabled in the Isaac config due to overlapping wrist/racket collision meshes; a cleaner Isaac collision asset is still needed before re-enabling it.
-- Sim parity between MuJoCo and Isaac is not established.
-- Hardware SDK parity for joint order and command/state layout is not established.
 - The table-tennis scene is not yet a trained returner or accepted sim-to-real baseline; it is a G04/G08 candidate scene.
 - The internal main branch intentionally keeps multiple A3 asset layers: ping-pong URDF source for WBC, standard non-racket `agi/URDF/a3_t2d5/` for comparison, and Agibot MuJoCo/AimRT ping-pong MJCF/collision materials for parity. Do not delete the standard `right_hand_Link.STL` or MuJoCo collision assets without a recorded replacement.
 
@@ -101,7 +101,5 @@ hope_isaac_py scripts/play_table_tennis.py --enable_aero --headless --steps 300
 
 ## Next Steps
 
-1. Use `hope_training/config/joint_order_agibot_a3.yaml` as the current working joint-order source and verify it against the real SDK before deployment.
-2. Load the same standing pose in MuJoCo and Isaac and compare FK.
-3. Clean or replace Isaac collision geometry so self-collision can be revisited.
-4. Document MuJoCo/Isaac parity metrics before policy transfer work.
+1. Load the same standing pose in MuJoCo and Isaac and compare FK.
+2. Clean or replace Isaac collision geometry so self-collision can be revisited.

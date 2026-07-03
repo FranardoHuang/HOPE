@@ -140,10 +140,12 @@ BASE_TARGET_Y_RANGE = (-0.10, 0.10)
 BASE_COUPLE_BLEND = 0.3                  # weak base->racket Y coupling
 BASE_COUPLE_MAX_OFFSET = 0.20
 FOREHAND_ON_NEGATIVE_Y = True            # forehand (clip 0) target on -y
-# forehand / backhand contact phase. MUST match the trained model's cfg/task/HOPEPingPong.yaml
-# `racket.strike_phase_per_clip`. Current generation = (0.36, 0.50). Backhand 0.74 was the OLD value
-# (model_32200 era); at 0.74 the backhand racket sits at a dead recovery frame (~0.1 m/s) and backhand
-# strike metrics collapse to ~0 — for those older models pass --strike-phase-per-clip 0.36 0.74.
+# forehand / backhand contact phase. MUST match the trained model's task YAML
+# `racket.strike_phase_per_clip`. Resolution order at runtime: --strike-phase-per-clip CLI override >
+# `clip_strike_phases` baked in the ONNX metadata (scripts/play.py; same keys the C++ runner uses) >
+# this built-in legacy fallback. History: v1 clips (0.36, 0.50); model_32200-era backhand 0.74 (at
+# 0.74 the backhand racket sits at a dead recovery frame and strike metrics collapse to ~0); current
+# _hopex (v3) clips bake (0.47, 0.333) into the ONNX.
 STRIKE_PHASE_PER_CLIP = (0.36, 0.50)
 STRIKE_WINDOW_S = 0.12
 # Strike-success acceptance thresholds (RacketTargetCommandCfg) — identical to Isaac's exact metric.
@@ -242,6 +244,14 @@ class OnnxPolicy:
         self.kp = np.array([float(v) for v in md["joint_stiffness"].split(",")], np.float64)
         self.kd = np.array([float(v) for v in md["joint_damping"].split(",")], np.float64)
         self.body_names = md["body_names"].split(",")
+        # optional clip-clock metadata (baked by scripts/play.py; the same keys the C++ deploy
+        # runner uses to override its built-in clip layout)
+        self.clip_strike_phases = None
+        if md.get("clip_strike_phases", "").strip():
+            self.clip_strike_phases = tuple(float(v) for v in md["clip_strike_phases"].split(","))
+        self.clip_seg_lengths = None
+        if md.get("clip_seg_lengths", "").strip():
+            self.clip_seg_lengths = tuple(int(float(v)) for v in md["clip_seg_lengths"].split(","))
         n = len(self.joint_names)
         assert n == 31 and self.default_q.shape == (31,) and self.action_scale.shape == (31,), \
             f"expected 31 joints, got {n}"
@@ -409,7 +419,7 @@ class MujocoRobot:
 # =================================================================================================
 class RacketCommand:
     def __init__(self, seg_start, seg_len, step_dt, rng, target_normal_per_clip, origin=np.zeros(3),
-                 vel_ranges_per_clip=None):
+                 vel_ranges_per_clip=None, pos_ranges_per_clip=None):
         self.seg_start = seg_start          # (num_clips,)
         self.seg_len = seg_len
         self.step_dt = step_dt
@@ -424,6 +434,11 @@ class RacketCommand:
         # (x_range, y_range, z_range). This ONLY changes which target velocity the MuJoCo RacketCommand
         # samples at eval time — it does NOT touch the policy, ONNX, rewards, or any training code.
         self.vel_ranges_per_clip = vel_ranges_per_clip
+        # Optional per-clip POSITION boxes ((x_range, y_range, z_range) per clip, SIGNED y used
+        # directly) — matches training's racket_pos_range_per_clip semantics and REPLACES the
+        # fixed-plane + |y|-sign + z-range logic when set. Needed to evaluate blade-centered-box
+        # checkpoints in-distribution (the built-in constants are the legacy fixed-plane ranges).
+        self.pos_ranges_per_clip = pos_ranges_per_clip
         # state
         self.racket_target_pos_w = np.zeros(3)
         self.racket_target_vel_w = np.zeros(3)
@@ -438,14 +453,22 @@ class RacketCommand:
     def resample(self, clip_id):
         """New swing: sample racket target (pos/vel), base target, swing sign — matches uniform mode."""
         o = self.origin
-        # racket target position (world): fixed x-plane; |y| per clip sign; z range.
-        px = o[0] + self._u(*RACKET_POS_X_RANGE)
-        ymag = self._u(*RACKET_POS_Y_ABS_RANGE)
-        fh_sign = -1.0 if FOREHAND_ON_NEGATIVE_Y else 1.0
-        sign = fh_sign if clip_id == 0 else -fh_sign      # forehand clip0 on -y, backhand clip1 on +y
-        py = o[1] + sign * ymag
-        pz = o[2] + self._u(*RACKET_POS_Z_RANGE)
-        self.racket_target_pos_w = np.array([px, py, pz])
+        if self.pos_ranges_per_clip is not None:
+            # Per-clip 3-D position box (training's racket_pos_range_per_clip parity): SIGNED y
+            # sampled directly from the clip's box; replaces the fixed-plane logic below.
+            px_r, py_r, pz_r = self.pos_ranges_per_clip[clip_id]
+            self.racket_target_pos_w = np.array([o[0] + self._u(*px_r),
+                                                 o[1] + self._u(*py_r),
+                                                 o[2] + self._u(*pz_r)])
+        else:
+            # racket target position (world): fixed x-plane; |y| per clip sign; z range.
+            px = o[0] + self._u(*RACKET_POS_X_RANGE)
+            ymag = self._u(*RACKET_POS_Y_ABS_RANGE)
+            fh_sign = -1.0 if FOREHAND_ON_NEGATIVE_Y else 1.0
+            sign = fh_sign if clip_id == 0 else -fh_sign  # forehand clip0 on -y, backhand clip1 on +y
+            py = o[1] + sign * ymag
+            pz = o[2] + self._u(*RACKET_POS_Z_RANGE)
+            self.racket_target_pos_w = np.array([px, py, pz])
         # racket target velocity (world): independent box sample. Default = the single training box for
         # every clip; with --eval-per-clip-vel-targets, use this clip's diagnostic box instead.
         if self.vel_ranges_per_clip is not None:
@@ -665,9 +688,10 @@ def _draw_markers(viewer, mujoco, racket, robot, ball_pos):
 def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_dt, decimation,
                 noise_scale, std_vec, n_steps, max_ep_len, rng, csv_writer, mode_label,
                 target_normal_per_clip, strike_csv_writer=None, viewer=None, realtime=True,
-                vel_ranges_per_clip=None, df=None):
+                vel_ranges_per_clip=None, pos_ranges_per_clip=None, df=None):
     racket = RacketCommand(seg_start, seg_len, step_dt, rng, target_normal_per_clip,
-                           vel_ranges_per_clip=vel_ranges_per_clip)
+                           vel_ranges_per_clip=vel_ranges_per_clip,
+                           pos_ranges_per_clip=pos_ranges_per_clip)
     strike = {"all": StrikeAcc(), "forehand": StrikeAcc(), "backhand": StrikeAcc()}
 
     def fresh_swing():
@@ -1064,8 +1088,19 @@ def main():
                         "fall rate without the guard cutting episodes off mid-swing.")
     p.add_argument("--strike-phase-per-clip", nargs="+", type=float, default=None,
                    help="DIAGNOSTIC: override per-clip strike phase. Must match the trained model's "
-                        "strike_phase_per_clip. Default: the built-in (0.36, 0.50); pass 0.36 0.74 for "
-                        "old model_32200-era backhand.")
+                        "strike_phase_per_clip. Default: the ONNX metadata clip_strike_phases when "
+                        "present, else the built-in legacy (0.36, 0.50); pass 0.36 0.74 for old "
+                        "model_32200-era backhand.")
+    # Per-clip TARGET BOXES matching the trained task YAML (racket.pos_range_per_clip /
+    # vel_range_per_clip) — REQUIRED for in-distribution eval of blade-centered-box checkpoints;
+    # the built-in constants are the legacy fixed-plane distribution. 12 floats each:
+    #   fh_x_lo fh_x_hi fh_y_lo fh_y_hi fh_z_lo fh_z_hi bh_x_lo bh_x_hi bh_y_lo bh_y_hi bh_z_lo bh_z_hi
+    p.add_argument("--pos-range-per-clip", nargs=12, type=float, default=None,
+                   help="per-clip racket target POSITION boxes (see comment; matches training "
+                        "racket.pos_range_per_clip; signed y).")
+    p.add_argument("--vel-range-per-clip", nargs=12, type=float, default=None,
+                   help="per-clip racket target VELOCITY boxes (compact alternative to "
+                        "--eval-per-clip-vel-targets + six --fh/bh-vel-*-range args).")
     p.add_argument("--pos-z-range", nargs=2, type=float, default=None,
                    help="DIAGNOSTIC: override the racket target z-range (e.g. 0.85 1.25). Default (0.70,1.05).")
     # --- DEPLOY-FAITHFUL evaluation mode (default OFF; existing behavior byte-identical when off) --
@@ -1114,6 +1149,16 @@ def main():
           f"joints={len(policy.joint_names)} "
           f"control={1/step_dt:.0f}Hz (sim_dt={args.sim_dt}, decim={args.decimation})")
 
+    # strike-phase resolution: CLI (handled above) > ONNX clip metadata > built-in legacy fallback
+    if args.strike_phase_per_clip is None:
+        if policy.clip_strike_phases:
+            STRIKE_PHASE_PER_CLIP = policy.clip_strike_phases
+            print(f"[mj-sim2sim] strike_phase_per_clip from ONNX metadata -> {STRIKE_PHASE_PER_CLIP}")
+        else:
+            print(f"[mj-sim2sim] WARNING: no clip_strike_phases in ONNX metadata; using built-in "
+                  f"legacy {STRIKE_PHASE_PER_CLIP} — pass --strike-phase-per-clip to match the "
+                  f"trained cfg if this is not a v1-clip model.")
+
     # std sidecar (only needed if a noise_scale > 0 is requested)
     std_vec = None
     if any(s > 0 for s in args.noise_scales):
@@ -1139,6 +1184,10 @@ def main():
     T = int(seg_len.sum())
     print(f"[mj-sim2sim] motion: {num_clips} clips, seg_len={seg_len.tolist()}, "
           f"seg_start={seg_start.tolist()}, T={T}")
+    if policy.clip_seg_lengths and tuple(seg_len.tolist()) != tuple(policy.clip_seg_lengths):
+        print(f"[mj-sim2sim] WARNING: motion npz seg_len {tuple(seg_len.tolist())} != ONNX "
+              f"clip_seg_lengths {tuple(policy.clip_seg_lengths)} — these are probably NOT the "
+              f"clips this model was trained/exported with.")
 
     robot = MujocoRobot(args.mjcf, policy.joint_names, policy.body_names, args.sim_dt, args.keep_passive,
                         args.pd_mode, kd_for_implicit=policy.kd)
@@ -1180,8 +1229,17 @@ def main():
 
     # DIAGNOSTIC: per-clip eval target-velocity boxes (clip 0 = forehand, clip 1 = backhand). None ->
     # faithful baseline (single training box for both clips). num_clips>2 reuse the backhand box.
+    def _boxes12(vals):
+        fh = ((vals[0], vals[1]), (vals[2], vals[3]), (vals[4], vals[5]))
+        bh = ((vals[6], vals[7]), (vals[8], vals[9]), (vals[10], vals[11]))
+        return [fh if c == 0 else bh for c in range(num_clips)]
+
     vel_ranges_per_clip = None
-    if args.eval_per_clip_vel_targets:
+    if args.vel_range_per_clip is not None:
+        vel_ranges_per_clip = _boxes12(args.vel_range_per_clip)
+        print(f"[mj-sim2sim] per-clip eval velocity boxes (training parity): "
+              f"fh={vel_ranges_per_clip[0]} bh={vel_ranges_per_clip[-1]}")
+    elif args.eval_per_clip_vel_targets:
         fh = (tuple(args.fh_vel_x_range), tuple(args.fh_vel_y_range), tuple(args.fh_vel_z_range))
         bh = (tuple(args.bh_vel_x_range), tuple(args.bh_vel_y_range), tuple(args.bh_vel_z_range))
         vel_ranges_per_clip = [fh if c == 0 else bh for c in range(num_clips)]
@@ -1192,6 +1250,15 @@ def main():
     else:
         print("[mj-sim2sim] per-clip eval velocity targets: DISABLED (baseline — both clips use the "
               f"training box x={RACKET_VEL_X_RANGE} y={RACKET_VEL_Y_RANGE} z={RACKET_VEL_Z_RANGE})")
+
+    pos_ranges_per_clip = None
+    if args.pos_range_per_clip is not None:
+        pos_ranges_per_clip = _boxes12(args.pos_range_per_clip)
+        print(f"[mj-sim2sim] per-clip eval position boxes (training parity): "
+              f"fh={pos_ranges_per_clip[0]} bh={pos_ranges_per_clip[-1]}")
+    else:
+        print("[mj-sim2sim] per-clip eval position boxes: DISABLED (legacy fixed-plane sampling "
+              f"x={RACKET_POS_X_RANGE} |y|={RACKET_POS_Y_ABS_RANGE} z={RACKET_POS_Z_RANGE})")
 
     out_dir = args.out_dir or default_run
     os.makedirs(out_dir, exist_ok=True)
@@ -1234,7 +1301,8 @@ def main():
                           args.decimation, ns, std_vec, args.steps, max_ep_len, rng, cw,
                           mode_label=f"ns={ns}", target_normal_per_clip=target_normal_per_clip,
                           strike_csv_writer=scw, viewer=viewer, realtime=not args.no_realtime,
-                          vel_ranges_per_clip=vel_ranges_per_clip, df=df_cfg)
+                          vel_ranges_per_clip=vel_ranges_per_clip,
+                          pos_ranges_per_clip=pos_ranges_per_clip, df=df_cfg)
         results.append(res)
     csv_f.close()
     strike_csv_f.close()

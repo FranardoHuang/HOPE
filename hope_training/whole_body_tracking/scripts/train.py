@@ -105,8 +105,6 @@ def _resolve_local_motion_files(primary, secondary=None, cwd: pathlib.Path | Non
 
 
 def _download_registry_motion_files(primary, secondary=None) -> tuple[list[str], list[str]]:
-    import wandb
-
     registries = [_normalize_registry_name(value) for value in _configured_items(primary, secondary)]
     if not registries:
         raise RuntimeError(
@@ -114,8 +112,18 @@ def _download_registry_motion_files(primary, secondary=None) -> tuple[list[str],
             "(and optional motion_file_2=/path/to/backhand.npz) for the local path, or pass "
             "registry_name=<org>/wandb-registry-motions/<name>."
         )
+    # Import lazily and AFTER the guard: the no-WandB local path must never require wandb, and a
+    # missing-motion misconfiguration should raise the guidance error above, not ModuleNotFoundError.
+    import wandb
+
     api = wandb.Api()
-    motion_files = [str(pathlib.Path(api.artifact(reg).download()) / "motion.npz") for reg in registries]
+    motion_files = []
+    for reg in registries:
+        art = api.artifact(reg)
+        # Provenance: record exactly which artifact version/digest the run trains on (the registry
+        # alias is mutable, e.g. ':latest' can move between runs).
+        print(f"[train.py] motion clip: {reg} -> {art.source_qualified_name} (digest {art.digest[:12]})", flush=True)
+        motion_files.append(str(pathlib.Path(art.download()) / "motion.npz"))
     return motion_files, registries
 
 
@@ -639,7 +647,8 @@ def _run(cfg):
         agent_cfg.neptune_project = str(cfg.log_project_name)
 
     # 3) reference motion clip(s), LOCAL-FIRST: motion_file=/motion_file_2= (or a local .npz path passed
-    #    as registry_name/registry_name_2) skips WandB entirely; otherwise the WandB registry is used.
+    #    as registry_name/registry_name_2) skips WandB entirely (the documented no-WandB path — see
+    #    run_training.md); otherwise the WandB registry is used.
     #    ONE clip = single-swing-type policy. TWO clips (forehand + backhand) = unified HITTER policy:
     #    MotionLoader concatenates them and clip_id selects which swing each env imitates. Order matters:
     #    clip 0 = forehand, clip 1 = backhand; it must match racket.strike_phase_per_clip.
@@ -664,6 +673,15 @@ def _run(cfg):
         _local_hits = [_local_motion(r) for r in _reg_candidates]
         if _local_hits and all(h is not None for h in _local_hits):
             cfg.motion_file = _local_hits
+        elif any(h is not None for h in _local_hits):
+            # Local clips are all-or-nothing (see resolve_motion_sources): fail loud instead of
+            # letting wandb.Api().artifact(<local path>) throw a cryptic HTTP error below.
+            raise RuntimeError(
+                f"[train.py] Mixed motion sources in registry_name/registry_name_2: {_reg_candidates}. "
+                "Some values are local .npz paths and some are registry refs. Pass ALL clips locally "
+                "via motion_file=/motion_file_2= (or make every registry_name a local path), or "
+                "publish the local clip to the registry."
+            )
     motion_files, motion_registries = resolve_motion_sources(cfg)
     for i, mf in enumerate(motion_files):
         src = motion_registries[i] if i < len(motion_registries) else "LOCAL (no registry)"
@@ -702,9 +720,9 @@ def _run(cfg):
     env = RslRlVecEnvWrapper(env)
 
     # Only hand the runner registry refs for wandb lineage (use_artifact) when the clips actually came
-    # from the registry; local runs pass None. resolve_motion_sources already returned normalized
-    # 'collection:alias' refs (a bare collection name is an HTTP 400). List-valued: the runner records
-    # ALL used clips, not just clip 0.
+    # from the registry; local runs pass None (a local motion path would crash wandb.run.use_artifact).
+    # resolve_motion_sources already returned normalized 'collection:alias' refs (a bare collection name
+    # is an HTTP 400). List-valued: the runner records ALL used clips, not just clip 0.
     runner_registry_name = motion_registries if motion_registries else None
     runner = OnPolicyRunner(
         env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device, registry_name=runner_registry_name

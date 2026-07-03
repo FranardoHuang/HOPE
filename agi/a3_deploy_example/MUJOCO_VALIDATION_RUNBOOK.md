@@ -1,5 +1,7 @@
 # model_15200 → AGI RobotIOBackend 对齐 + MuJoCo 仿真验证 · 完整 Hands-on 手册
 
+> **状态更新（2026-07-03）**：当前上线契约是 **175 维 deploy-parity**（`model_p4_deployparity`；最新导出谱系为 explicitpd_ft 微调 `model_25700`）。C++ runner 会按 ONNX 输入维度自动识别 175/180（`pp_onnx_policy.hpp`）。本手册中 `model_15200` / 180 维的细节仅适用于旧版（legacy 180-D）谱系。换 checkpoint 的流程见 `PINGPONG_NEW_CHECKPOINT_TUTORIAL.md`。
+
 > 对应 AGI 两份文档：`README_robot_io_backend.md`（Step 1 ONNX 对齐）+ `README.md`（Step 2/3 编译 & MuJoCo 验证）。
 > 状态（2026-06-30 复核）：对齐 + x86_64 + rockchip 编译**都已完成并验证**。本手册是“怎么跑”，不是“从头做”。
 

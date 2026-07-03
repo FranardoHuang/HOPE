@@ -8,11 +8,15 @@ Configured in `hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml`:
 
 | Topic | Meaning |
 | --- | --- |
-| `/table/pose` | Table pose in HOPE frame |
-| `/P1/pose` | Player 1 robot base or mocap rigid body pose |
-| `/P2/pose` | Player 2 robot base or mocap rigid body pose |
-| `/ball/point` | Ball position as point |
+| `/table/pose` | Table pose in HOPE frame (setup/calibration anchoring; optional during play) |
+| `/P1/pose` | Player 1 robot base rigid-body pose (6-DOF, streamed at play time) |
+| `/P2/pose` | Player 2 robot base rigid-body pose (6-DOF) |
+| `/ball/point` | Ball position as point — the relay deliberately drops the VRPN pose orientation; when ball spin arrives (physics-modeling phase) the relay must forward orientation or add a spin topic |
 | `/poses` | PoseArray ordered as `["ball", "PPT", "P1", "P2"]` |
+
+Rates: the rig streams at 300 Hz during play (team contract, 2026-07); the bridge launch default
+`update_freq` is aligned to 300 Hz. The vendored client's own `client.yaml` default is 100 Hz —
+always launch through `avatar_pro_hope_bridge.launch.py`.
 
 Current relay config defaults the input object names to `PPT` for the table and `ppp2`/`ppp3` for the
 two robot rigid bodies, while publishing the normalized output topics `/P1/pose` and `/P2/pose`. These
@@ -26,7 +30,12 @@ Ball tracking is selected by the relay/launch parameter `ball_tracking_mode`:
 
 VRPN client namespace:
 
-- `/vrpn_mocap` (raw client topics live here, e.g. `/vrpn_mocap/<server>/pose_<id>`)
+- `/vrpn_mocap` (raw client topics live here). Naming is currently inconsistent across the stack:
+  the vendored client builds multi-sensor topics as `/vrpn_mocap/<sender>/pose_id_<n>`
+  (`tracker.hpp`), the relay matcher accepts `pose` / `pose<digits>` (live-rig example
+  `/vrpn_mocap/MCAvatar/pose31664`), and older docs showed `pose_<id>`. Confirm the live form on
+  the rig and align the relay matcher/vendored client before relying on multi-sensor topics
+  (TODO, tracked in G01).
 
 ## Current Planner Topics
 
@@ -56,6 +65,19 @@ Defined in [RacketCommand.msg](../../hope_ws/src/hope_msgs/msg/RacketCommand.msg
 | `clears_net` | `bool` | Whether the shot clears the net |
 | `bypasses_net_posts` | `bool` | Whether the shot bypasses the net posts |
 | `predicted_bounces` | `int32` | Predicted number of bounces |
+
+Planner ball selection note: `hope_planner` identifies the ball by PoseArray index 0 on `/poses`,
+not by rigid-body name; its `ball_rigid_body_name` parameter is currently unused.
+
+## Deploy Runtime Topics
+
+- `/racket/command` — consumed by `hope_wbc_runner` (the legacy 180-D Python runner); the C++
+  deploy runner (`a3_deploy_onnx_ref_pingpong`) does not subscribe to ROS mocap/planner topics yet
+  and runs scripted targets (see G07).
+- `/hope/estop` — hope_wbc_runner safety gate.
+- `/body_drive/*` — AGI backend command/state interface; on the MDU these run over iceoryx and are
+  invisible to the ros2 CLI. A ros2/iceoryx transport mismatch presents as `rate=0` + safe-halt
+  (a known transport-mismatch symptom; see `agi/a3_deploy_example/README_robot_io_backend.md`).
 
 ## QoS Notes
 

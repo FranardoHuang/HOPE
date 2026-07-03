@@ -8,7 +8,8 @@ The reframe (replaces the `full`-mode racket_target_pos_b):
 
     racket_target_pos_b = quat_rotate_inverse( yaw_quat(base_quat_w),  racket_target_pos_w - racket_pos_w )
 
-vs the OLD `full` term which used the world BASE position (fabricated on hardware):
+vs the OLD `full` term which used the world BASE position (streamed by mocap at 300 Hz during play,
+but not bridged into the deploy front-end, so fabricated at deploy):
 
     full:  quat_rotate_inverse( yaw_quat(base_quat_w),  racket_target_pos_w - base_pos_w )
 

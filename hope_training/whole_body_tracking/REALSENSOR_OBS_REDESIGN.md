@@ -1,12 +1,14 @@
 # Deploy-parity observation redesign — HOPE ping-pong WBC
 
-**Goal.** Make the *training* observation match what the real A3 can honestly produce. The deployed
-HOPE policy failed sim-to-real because three actor observations depend on the robot's **world base
-pose**, which has no localizer on hardware and is therefore *fabricated* at deploy (`anchor_pos_b := 0`,
-`base_pos := nominal`). The policy then sees a different observation distribution than training and the
-legs cannot balance. AGI's reference policy transfers precisely because its observation is
-**deploy-parity / real-sensor-only** (IMU orientation + proprioception, no
-world base position). This change copies that recipe for the HOPE actor.
+**Goal.** Make the *training* observation independent of the world base pose so the policy does not
+depend on the mocap/VRPN link. The deployed HOPE policy failed sim-to-real because three actor
+observations depend on the robot's **world base pose**: the mocap DOES stream the robot base pose at
+300 Hz during play (the relay publishes 6-DOF `/P1/pose`), but that link is not bridged into the deploy
+front-end, so those terms were *fabricated* at deploy (`anchor_pos_b := 0`, `base_pos := nominal`). The
+policy then sees a different observation distribution than training and the legs cannot balance. AGI's
+reference policy transfers precisely because its observation is **deploy-parity / real-sensor-only**
+(IMU orientation + proprioception, no world base position). This change copies that recipe for the HOPE
+actor; independence from the mocap link is a deliberate robustness choice.
 
 **Scope.** Training-side only. AGI's sim/backend are untouched. The old (`full`) path is intact; the new
 mode is an additive variant. No hardware testing here — this is the training redesign + deploy-parity

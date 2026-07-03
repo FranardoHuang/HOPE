@@ -209,9 +209,11 @@ class HOPEEventCfg(EventCfg):
 # deploy-parity variant — deploy-honest observation (no fabricated base pose).
 #
 # WHY: the `full` actor obs above depends on the robot's true world base pose through three terms
-# (motion_anchor_pos_b, base_target_pos_b, racket_target_pos_b). On the real A3 there is no localizer,
-# so those are fabricated at deploy (anchor_pos_b := 0, base_pos := nominal) -> the deployed policy
-# sees a DIFFERENT observation distribution than training and the legs cannot balance. AGI's reference
+# (motion_anchor_pos_b, base_target_pos_b, racket_target_pos_b). The mocap streams the base pose at
+# 300 Hz during play, but that link is not bridged into the deploy front-end, so those terms are
+# fabricated at deploy (anchor_pos_b := 0, base_pos := nominal) -> the deployed policy
+# sees a DIFFERENT observation distribution than training and the legs cannot balance. Making the
+# actor base-position-free is a deliberate robustness choice (no mocap/VRPN dependency). AGI's reference
 # policy transfers because its observation is real-sensor-only (IMU orientation + proprioception, no
 # world base position). This variant copies that recipe for the HOPE actor. The privileged CRITIC
 # group is unchanged (it may use base pose in sim — it is never deployed). The `full` cfgs above are

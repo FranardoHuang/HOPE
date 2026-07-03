@@ -32,18 +32,38 @@ For `HOPE-TableTennis-AgibotA3-v0`, the Isaac environment-local world frame is i
 frame: the table surface is `z = 0`, the floor is `z = -0.76`, and table/net landmarks match the values
 above. Do not introduce a table-center origin in that task without updating this file and G04.
 
-## Mocap Frames
+## Mocap Runtime Contract (team contract, 2026-07)
+
+The rig is ChingMu streaming over VRPN. The tracked-object set differs by phase:
+
+- **PLAY (live table tennis), 300 Hz**: robot base (pelvis) pose and ball position. Ball
+  rotation/spin is planned for the physics-modeling phase — the ball is currently tracked as a
+  point and the relay publishes a position-only `PointStamped` (`/ball/point`), so spin work will
+  also require a patterned/rigid-body ball and a relay change to forward orientation.
+- **DATA-COLLECTION / physics-calibration only**: additionally racket pose, the table's 4 corners,
+  and the net's 2 corners. The racket-tracking prohibition in the HOPE challenge materials applies
+  to competition play, not to this internal calibration phase.
 
 Current expected mocap object names:
 
-- Table rigid body: `PPT`
+- Table rigid body: `PPT` (setup/calibration anchoring; optional during play)
 - Player 1 robot rigid body: current config default `ppp2` (publishes `/P1/pose`)
 - Player 2 robot rigid body: current config default `ppp3` (publishes `/P2/pose`)
-- Ball: auto-detected marker unless pinned by live topic name
+- Ball: named rigid body (preferred) or auto-detected moving marker
 
 Current relay config:
 
 - `hope_ws/src/hope_bringup/config/avatar_pro_vrpn.yaml`
+- VRPN bridge launch default `update_freq` is aligned to the rig's 300 Hz
+  (`hope_ws/src/hope_bringup/launch/avatar_pro_hope_bridge.launch.py`).
+
+Consumption status (2026-07-03): the ROS chain (relay → `hope_planner` → `/racket/command` →
+`hope_wbc_runner`) consumes these topics, but the C++ deploy runner does not subscribe to any mocap
+topic yet — deployed runs used scripted targets. The deployed 175-D actor observation deliberately
+consumes no mocap term (see
+[policy_observation_action.md](policy_observation_action.md)); when the mocap→planner bridge
+lands, the HOPE-world → robot-frame target transform will still need the mocap base pose at the
+interface boundary.
 
 ## Base Link
 
@@ -57,7 +77,9 @@ Pending measurements:
 
 ## Racket Frame
 
-The racket is not tracked by motion capture. It must be inferred from:
+The racket is not tracked by motion capture **during play** (competition rule); during the
+data-collection/physics-calibration phase the racket pose IS captured for model fitting. At play
+time it must be inferred from:
 
 1. `world -> base_link`
 2. robot joint state
