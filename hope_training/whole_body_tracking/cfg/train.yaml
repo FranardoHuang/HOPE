@@ -31,6 +31,10 @@ run_name: null
 # staged config change (e.g. tightening racket_velocity_std) WITHOUT throwing away progress:
 #   checkpoint_path=logs/rsl_rl/agibot_a3_hope/<run>/model_2000.pt
 checkpoint_path: null
+# With checkpoint_tolerant=true, checkpoint_path warm-starts ACROSS critic-layout changes
+# (actor loads by name; mismatched critic re-initializes — deliberate warm-start semantics).
+# Plain resume stays strict.
+checkpoint_tolerant: false
 
 # logging
 logger: wandb           # wandb | tensorboard | neptune
