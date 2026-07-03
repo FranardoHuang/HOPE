@@ -79,7 +79,9 @@ constant-acceleration fit on [−120, −15] ms (never post-contact frames), wit
 Mass scaling (doc Stage 0.5): k_d,clean = k_d·(3.4/2.7) = **0.159**, k_m,clean =
 **0.00559** — these remove the mass effect ONLY; a clean ball is also smoother
 (C_d likely ~0.44 vs 0.57 coated), so treat clean-ball extrapolation as an upper
-bound on drag/Magnus. The v0 yaml's 0.1222 remains the best clean-ball estimate.
+bound. **In practice this is moot: competition play uses the same coated 3.4 g
+ball, so the venue constants apply to matches directly** (the clean-scaled keys
+stay in the yaml for reference only).
 
 ## 4. Stage 3 — falsification verdicts (doc §3)
 

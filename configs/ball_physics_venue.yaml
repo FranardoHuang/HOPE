@@ -18,9 +18,10 @@
 # =============================================================================
 
 ball:
-  mass: 0.0034            # kg — THE VENUE BALL AS RECORDED (retro-reflective coating adds ~0.7 g;
-                          # clean ITTF ball is 0.0027). k_d/k_m below are ACCELERATION coefficients
-                          # fitted on this 3.4 g ball.
+  mass: 0.0034            # kg — the coated 3.4 g ball (retro-reflective coating adds ~0.7 g over
+                          # the clean 2.7 g ITTF ball). COMPETITION USES THIS SAME COATED BALL,
+                          # so every constant in this file applies to match play directly.
+                          # k_d/k_m below are ACCELERATION coefficients fitted on this ball.
   mass_clean: 0.0027      # for reference / scaling
   radius: 0.020
   inertia_coeff: 0.6666666666666666
@@ -33,9 +34,10 @@ flight:
   k_d: 0.1261             # 1/m — 100 low-spin arcs, joint RK4-shooting (Huber), rms 9.1 mm.
                           # C_d = 0.569 (coated ball; roughness raises it above the clean ~0.44).
                           # F1: constant-k_d PASSED, bins within ±6% over 2–6.8 m/s.
-  k_d_clean_scaled: 0.1588  # k_d * (3.4/2.7). AUDIT FLAG: DO NOT USE for a clean ball — it exceeds
-                            # every clean-ball precedent (mass scaling removes the mass effect only;
-                            # the coating also raises C_d). For clean-ball sims keep v0's 0.1222.
+  k_d_clean_scaled: 0.1588  # k_d * (3.4/2.7). Reference only — matches use the coated ball, so
+                            # this should never be needed. AUDIT FLAG: even for a hypothetical
+                            # clean-ball sim DO NOT USE (mass scaling removes the mass effect only;
+                            # the coating also raises C_d) — v0's 0.1222 would be the estimate.
   k_m: 0.00444            # sidespin channel (66 arcs, spin axis vertical, g-degeneracy-free),
                           # k_d frozen. INSIDE the old rig's 95% CI [0.0035, 0.0049] -> validates
                           # the quaternion spin scale. Low-SR bin medians ~0.0052.
