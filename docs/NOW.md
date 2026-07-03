@@ -14,6 +14,26 @@ Rules:
    substance into PROGRESS.md / the gate doc.
 3. Priority ordering is maintained by claude (franco's agent) and discussed with franco; anyone can
    edit their own row.
+4. **This file lives on `main` ONLY.** Never edit NOW.md on a feature branch (it would fork the
+   board and merge back stale). Claim/update flow from any branch, without switching:
+   ```bash
+   git fetch origin && git show origin/main:docs/NOW.md   # read the live board
+   # edit + push a docs-only commit straight to main:
+   git stash -q; git switch main && git pull --ff-only && $EDITOR docs/NOW.md \
+     && git commit -am "now: <one line>" && git push && git switch - && git stash pop -q
+   ```
+   Docs-only commits to main need no PR/review; everything else goes through branches.
+
+## Runtime Estimates (RTX 5090, measured 2026-07-03)
+
+| Job | Cost |
+| --- | --- |
+| DeployParity training, 4096 envs | ~4.7-5.3 s/iter → **2000 it ≈ 2.8 h · 8000 ≈ 11 h · 12000 ≈ 16 h · 20000 ≈ 27 h** |
+| Kit boot + env build (per run) | ~2 min |
+| Mechanics check (512 envs, 25 it) | ~3 min |
+| ONNX export (play.py) | ~2 min |
+| Scoreboard, 4 protocols × 2400 steps (CPU) | ~25 min/checkpoint (parallel to training) |
+| Reference lineage | shipped model_p4 ≈ 15-25k it; treat <8k as immature for deploy protocols |
 
 ## Team
 
@@ -23,6 +43,30 @@ Rules:
 | jiayi | End-to-end training bring-up; reward tuning |
 | yikang | Deployment; sim/env alignment |
 | claude (franco's agent) | Foundation: infrastructure, A/B experiments, doc/code hygiene |
+
+## Plan To Saturday (2026-07-03 → 07-04, target: play at the venue with an improved policy)
+
+Critical path (GPU 1/2):
+
+1. **Tonight ~19:30** — A-ext/E-ext hit 14k iters → 4-protocol scoreboard verdict (claude, ~1 h).
+2. **Tonight** — warm-start the **explicit-clipped-PD fine-tune from the E champion** (the
+   pre-hardware gate recipe, ~8000 it ≈ 11 h overnight, GPU1); GPU2 = same ft from A-ext champion
+   as backup. (claude)
+3. **Saturday morning** — export → MuJoCo explicit gate + deploy-faithful → if pass, build the MDU
+   package (`build_a3_deploy_pkg.sh`) per PINGPONG_NEW_CHECKPOINT_TUTORIAL. (claude prepares,
+   yikang ships/runs on the MDU)
+4. **Saturday afternoon** — deploy & play: forehand first; **try backhand in SHADOW mode** — E was
+   trained for stand-entry, this is the potential headline of the day. (yikang + franco)
+
+Parallel tracks (no GPU conflict):
+
+- **Ball physics v1 (P2.5 prerequisite)**: mocap ball-trajectory collection is happening NOW at the
+  venue → fit drag/bounce from the fresh recordings (planner calibration path); spin-aware physics
+  arrives with the simtoreal2 merge. Suggested owner: jiayi (+claude for pipeline).
+- **P2.0 + A5 bundling REMINDER**: while the mocap rig is up, also record the READY-STANCE clip and
+  30-50 orientation-normalized swing videos (face the incoming-ball direction!). 0703 teacher-clip
+  uploads suggest this may be partly done — confirm coverage before teardown. (franco/on-site)
+- simtoreal2 → main merge + doc updates (claude, in progress).
 
 ## Active
 
