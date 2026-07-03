@@ -98,7 +98,11 @@ that imports come from YOUR clone, and a real env build + step.
 3. **pkill self-match kills your own session.** `ssh pod 'pkill -f myscript'` matches the ssh
    command line itself → session dies mid-command with exit 255 and later commands silently never
    run. Always bracket the first char: `pkill -f "[m]yscript"`.
-4. **Verify every launch.** After starting a job, confirm within ~60 s that its log exists and the
+4. **A SIGKILL'd Kit leaves an orphaned cache lock that hangs every later boot.** Symptom: a lone
+   job freezes at the AutoNode-registration boot phase forever. Check `fuser
+   /workspace/.cache/ov/_cache.lock` — no holder = orphaned; `rm` it and relaunch. (A lock held by
+   a LIVE process is healthy — do not delete that one.) Prefer SIGTERM first when killing Kits.
+5. **Verify every launch.** After starting a job, confirm within ~60 s that its log exists and the
    process is alive; a launcher that prints nothing probably did nothing (two silent queue failures
    cost us 30 idle GPU-minutes).
 
