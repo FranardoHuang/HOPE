@@ -109,6 +109,26 @@ Parallel tracks (no GPU conflict):
 
 读法:**一列看进度深度,一行看卡在哪一格**。今晚之后"门禁"列会填掉 4 格;"真机"列整列等周六。
 
+## 动作源消融(franco 2026-07-04 拍板,今晚/明天必跑)
+
+事实修正(2026-07-04 凌晨):registry 里两套(v3/v4 原始与 :latest 微调转正)**均为正面摆拍录制**;
+此前 npz frame-0 yaw +82° 是 GVHMR 全局朝向产物,不代表机位。真正的**斜录(实战击球)视频**是新东西:
+franco 已提供 forehand_new.mp4 / backhand_new.mp4,已上传 `/workspace/shared/motions/raw_video_oblique/`
+(附 README 说明谱系)。franco 预期:实战斜录的动作质量会好很多。
+
+| 消融臂 | 数据 | 状态 |
+| --- | --- | --- |
+| 正录(现役) | hopex 转正版(139/132 帧) | 所有既有结果就是它,无需重跑 |
+| 斜录(新) | raw_video_oblique 两条视频 | **卡在 GVHMR→GMR→npz→转正→相位标定 管线**(pod 无 GVHMR 环境;dongc1 机器有)→ 产出后同配置 2000 步对照 |
+
+## 基建现状(2026-07-04 凌晨)
+
+- **pod 宿主机对 Isaac 判死**:裸 Kit 在重建容器上仍挂死;Stop→Start 不换宿主机(卷钉死机器)。
+  训练全面阻塞。选项:RunPod 支持重置宿主机 / 新建 pod 迁移(venv 可重装,数据 ~20GB 可 rsync)。
+- **导出与评分已绕开 Isaac**:`standalone_onnx_export.py`(纯 CPU 重建 actor+归一化器+动作缓冲,
+  元数据从同配置旧 ONNX 拷贝)——两个 14k checkpoint 已导出成功,四协议评分进行中(纯 CPU)。
+  周六候选的裁决不再依赖 Isaac。
+
 ## Gap List To Sunday (明确缺的活,截止周日 — added 2026-07-03)
 
 | # | 缺什么 | 谁 | 何时 |
