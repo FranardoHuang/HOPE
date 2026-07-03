@@ -95,7 +95,7 @@ Parallel tracks (no GPU conflict):
 
 ## Queued (priority order, from G08)
 
-1. A1: target latency / mid-swing re-sampling / obs delay injection (stack on P2.1+P2.3 winner).
+1. A1 目标延迟/抖动/中途更新 — **IMPLEMENTED** 2026-07-03 on `p2-latency` (flags `racket.target_delay_steps` / `target_jitter_pos_per_s` / `target_jitter_vel_per_s` / `midswing_resample_prob`, default off; reviewed; mech check running). Next: merge to main after mech check, stack on tonight's winner.
 2. P2.2-lite: orientation-normalize the existing two clips at retarget (`reground_hope_frame.py`).
 3. A5: record 30-50 new reference swing videos (needs a human + camera; processing pipeline ready).
 4. P2.5-lite: ball + drag/bounce + PACE at-contact landing reward (independent track; big).
