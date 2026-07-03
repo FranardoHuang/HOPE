@@ -92,9 +92,24 @@ def main() -> int:
 
     clips = [dict(np.load(args.fh)), dict(np.load(args.bh))]
     seg_lengths = [c["joint_pos"].shape[0] for c in clips]
-    motion = {
-        k: torch.cat([torch.as_tensor(c[k], dtype=torch.float32) for c in clips], dim=0) for k in MOTION_KEYS
-    }
+    # Motion buffers are HARVESTED from the donor ONNX rather than rebuilt from the npz: the env
+    # subsets body arrays to cfg.body_names (14 tracked bodies) in cfg order, while the npz holds
+    # all robot bodies — reproducing that mapping here would duplicate config; the donor (same clip
+    # pair, asserted below) already carries the exact baked buffers. Bit-parity by construction.
+    import onnxruntime as ort
+
+    sess = ort.InferenceSession(args.donor, providers=["CPUExecutionProvider"])
+    total = sum(seg_lengths)
+    probe = np.zeros((1, 1), dtype=np.float32)
+    obs0 = np.zeros((1, 1), dtype=np.float32)  # replaced below once in_dim known from donor input
+    donor_in = {i.name: i.shape for i in sess.get_inputs()}
+    obs0 = np.zeros((1, donor_in["obs"][1]), dtype=np.float32)
+    rows = {k: [] for k in MOTION_KEYS}
+    for ts in range(total):
+        outs = sess.run(None, {"obs": obs0, "time_step": np.array([[ts]], dtype=np.float32)})
+        for k, v in zip(MOTION_KEYS, outs[1:]):
+            rows[k].append(v[0])
+    motion = {k: torch.as_tensor(np.stack(rows[k]), dtype=torch.float32) for k in MOTION_KEYS}
 
     os.makedirs(args.out, exist_ok=True)
     out_path = os.path.join(args.out, "policy.onnx")
