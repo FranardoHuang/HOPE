@@ -51,14 +51,17 @@ wbc_runner:
     imu_yaw_align_samples: 100
     base_pose_timeout_s: 0.5     # /P1/pose older than this -> nominal fallback + warn
 
-    # --- target reachability gate (base-relative; out-of-distribution target -> stand) ---
-    # Defaults = union of the model_15200 + model_9000 validated boxes + margin.
-    # Tighten per-model for hardware (model_9000: x [0.56,0.78], z [0.72,1.13]).
+    # --- target reachability gate (base-relative XY, z above floor; OOD target -> stand) ---
+    # ALIGNED to the current deploy_parity generation's training boxes (model_9000 /
+    # model_7500_hopex, cfg/task/HOPEPingPongDeployParity.yaml pos_range_per_clip:
+    # fh x[0.58,0.78] y[-0.64,-0.24] z[0.72,0.92]; bh x[0.56,0.76] y[-0.07,0.33]
+    # z[0.93,1.13]) + a small bring-up margin. For model_15200 (180-D) widen to
+    # x [0.25,0.55], z [0.60,1.35].
     target_gate_enable: true
-    target_gate_x: [0.20, 0.90]
-    target_gate_y_abs: 0.85
-    target_gate_z: [0.55, 1.40]
-    target_gate_speed_max: 3.5
+    target_gate_x: [0.50, 0.85]
+    target_gate_y_abs: 0.70
+    target_gate_z: [0.65, 1.20]
+    target_gate_speed_max: 3.3
 
     # --- state source ---
     state_source: "synthetic"    # synthetic (dry-run, perfect-tracking) | ros (subscribe joints+imu)

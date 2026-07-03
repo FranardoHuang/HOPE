@@ -73,14 +73,26 @@ Verified end-to-end in dry run: synthetic 300 Hz ball serves → planner → run
 alternating forehand (ball right) / backhand (ball left), strike frames aligned to
 tts=0, latch riding follow-throughs to the clip end, 0 gate rejections in-box.
 
-## ⚠ Model compatibility
+## Model compatibility (updated 2026-07-03 evening)
 
-This ROS runner builds the **180-D** observation (`model_15200`-era). The current
-champion `model_9000_replane` and `model_p4_deployparity` are **175-D
-`deploy_parity`** exports — they do NOT run on this chain yet (the runner refuses
-at load: obs dim mismatch). They deploy through the AGI C++ runner. To use them
-here, `obs_builder.py` needs the deploy_parity contract (drop world-base terms,
-racket target FK-relative) — see `actor_obs_term_sources_json` in the ONNX metadata.
+The runner now supports BOTH obs contracts, auto-detected from the ONNX input dim
+(mirrors the C++ runner): **180-D** full (`model_15200` era) and **175-D
+`deploy_parity`** (`model_9000_replane` / `model_7500_hopex` generation — racket
+target relative to the live racket FK, world-base terms dropped). The FK port
+(`hope_wbc_runner/racket_fk.py`) is cross-checked against the C++
+`pp_racket_fk.hpp` to 4e-13. Verified end-to-end in dry run with
+`model_7500_hopex.onnx`: forehand + backhand swings on the v4-lineage clip
+frames (metadata seg 139/132, phases 0.47/0.333 auto-override the yaml).
+
+## ⚠ Ball-physics calibration blocks real-ball play
+
+`hope_planner.yaml drag_k: 0.8781` (salvaged single-recording fit) is ~8x the
+physical value (k ≈ 0.11 for a 40 mm ball). With it, the planner's drag-aware
+return solve demands 4.6–10 m/s racket speeds — ALL outside the policy's trained
+envelope (max ~3.0 m/s) — so the runner's target gate correctly stands on every
+ball. With a plausible k (0.11–0.15) demands drop to ~1 m/s. Re-fit from the
+2026-07-03 venue recordings (`hope_calibrate`), or override `-p drag_k:=0.15`
+for bring-up. `delta_t_flight` is now 0.65 s (0.5 s also pushed demands OOD).
 
 ## MANUAL FILL-IN CHECKLIST (in order, before hardware)
 

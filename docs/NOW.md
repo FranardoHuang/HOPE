@@ -106,7 +106,8 @@ Parallel tracks (no GPU conflict):
 | P2.0: ready-pose definition (see G08) | ★★ (foundation) | franco (拍摄) + claude (pipeline) | — | DECIDED 2026-07-03: option (a) — record a ready-stance video through GVHMR→GMR on the next site visit (bundle with A5's 30-50 new swing clips); claude processes + wires into stand_start/hold/clip re-entry |
 | Legacy-task long run `merged_uniform_hopex` (20000 it, task=HOPEPingPong on own branch) | ? | yikang | `rsi-on-wrap-progress-fix` | RUNNING on pod GPU0. ⚠ branch duplicates main's wrap_teleport machinery and has LFS-pointerized CSVs — reconcile with main before merging; the unique progress-fix is already ported to `p2-multiswing` |
 | simtoreal2 lineage: HER achieved-replay + hold_ready + model_9000_replane training (merged to main 2026-07-03) | ★★★ | dongc1 | `simtoreal2` (merged) | model_9000 backhand passed training gate; **needs**: drop `model_9000_replane.onnx` into `/workspace/shared/models/` so the scoreboard can grade it against tonight's candidates |
-| G07 mocap→runner bridge + world→robot target transform design (A2) | ★★ | unassigned (natural fit: yikang) | — | design doc first; see G07 Next Steps and G08 audit item 2 |
+| Sim2real deploy bridge: `agibot_hardware_bridge` ROS pkg (`bridge_node`) + `world_frame` world→robot target transform (+`test_world_frame`) + `hope_pingpong_sim2real` launch + `wbc_runner` rebuild for the planner-driven deploy path; `HOPEPingPongDeployParity` hyperparameter tuning | ★★★ | dongc1 | `simtoreal2` | IMPLEMENTED 2026-07-03 (`a5016d43`) with `run_sim2real_bridge.md` ops doc; this is the concrete build of the G07 world→robot transform (row below). Next: wire mocap relay → planner → runner end-to-end on hardware |
+| G07 mocap→runner bridge + world→robot target transform design (A2) | ★★ | dongc1 (impl started; see row above) | `simtoreal2` | `world_frame.py` + `test_world_frame` landed 2026-07-03; design doc still TODO — see G07 Next Steps and G08 audit item 2 |
 
 ## Queued (priority order, from G08)
 
@@ -122,6 +123,9 @@ Parallel tracks (no GPU conflict):
 
 | Item | Owner | Landed | Where |
 | --- | --- | --- | --- |
+| Standardize VRPN rigid-body object names (`P1`/`P2`/`Ball`) in the mocap relay config | dongc1 | 2026-07-03 | `simtoreal2` (`ac79a17a`) |
+| wandb registry: fetch only the newest `motion.npz` | dongc1 | 2026-07-03 | `simtoreal2` (`3c9bc0cf`) |
+| Merge `origin/main` (49 commits) into `simtoreal2` (local-first, doc+code) | dongc1 | 2026-07-03 | `simtoreal2` |
 | Fixed-protocol sim2sim scoreboard (`scoreboard_eval.py`), validated end-to-end on pod | claude | 2026-07-03 | `p2-eval-harness` |
 | 4 main-breaking merge casualties fixed (conflict markers; `motion_file` regression; `episode_time_left` probe crash; `play.py` `_wbt_tasks`) | claude | 2026-07-03 | main / `p2-multiswing` |
 | `motion:` task-YAML/CLI plumbing for wrap_teleport / stand_start / hold | claude | 2026-07-03 | `p2-multiswing` |

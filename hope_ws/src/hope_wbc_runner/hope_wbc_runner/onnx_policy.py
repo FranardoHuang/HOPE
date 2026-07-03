@@ -1,12 +1,16 @@
-"""ONNX policy wrapper for model_15200 (ported from mujoco_eval_onnx.py OnnxPolicy).
+"""ONNX policy wrapper (ported from mujoco_eval_onnx.py OnnxPolicy).
 
 Loads the exported ``policy.onnx``:
-  * inputs : obs[1,180] (float32), time_step[1,1] (float32)
+  * inputs : obs[1,180] (FULL, model_15200 era) OR obs[1,175] (deploy_parity,
+             model_9000 generation onward) + time_step[1,1] (float32). The obs
+             contract is auto-detected from the input dim (mirrors the C++
+             pp_onnx_policy.hpp); the runner picks build_obs vs build_obs_175.
   * outputs: actions[1,31] (the deterministic MEAN action), followed by the
              reference-motion side-outputs (joint_pos, joint_vel, body_pos_w,
              body_quat_w, body_lin_vel_w, body_ang_vel_w) indexed by time_step.
   * metadata: joint_names, default_joint_pos, action_scale, joint_stiffness (kp),
-              joint_damping (kd), body_names, anchor_body_name, observation_names.
+              joint_damping (kd), body_names, anchor_body_name, observation_names,
+              clip_seg_lengths / clip_strike_phases (newer exports).
 
 learned_std.npy: NOT needed for deterministic inference. The ONNX emits the MEAN
 action directly; std is only used to add exploration dither (mean + scale*std*N).
@@ -16,7 +20,8 @@ dither scale is requested (kept available for parity testing, off by default).
 
 import numpy as np
 
-EXPECTED_OBS_DIM = 180
+OBS_DIM_FULL = 180
+OBS_DIM_DEPLOY_PARITY = 175
 EXPECTED_JOINTS = 31
 
 
@@ -29,8 +34,10 @@ class OnnxPolicy:
         if "obs" not in ins or "time_step" not in ins:
             raise ValueError(f"unexpected ONNX inputs {list(ins)}; expected obs + time_step")
         self.obs_dim = int(ins["obs"][1])
-        if self.obs_dim != EXPECTED_OBS_DIM:
-            raise ValueError(f"obs dim {self.obs_dim} != {EXPECTED_OBS_DIM}")
+        if self.obs_dim not in (OBS_DIM_FULL, OBS_DIM_DEPLOY_PARITY):
+            raise ValueError(
+                f"obs dim {self.obs_dim} is neither {OBS_DIM_FULL} (full) nor "
+                f"{OBS_DIM_DEPLOY_PARITY} (deploy_parity)")
         self.out_names = [o.name for o in self.sess.get_outputs()]
 
         md = self.sess.get_modelmeta().custom_metadata_map

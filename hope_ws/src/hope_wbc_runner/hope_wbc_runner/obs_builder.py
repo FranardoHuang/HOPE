@@ -40,9 +40,11 @@ from .frame_math import (
     subtract_frame_transforms,
     yaw_quat,
 )
+from .racket_fk import racket_pos_pelvis
 
 ANCHOR_TRACKED_IDX = 7   # torso_Link in the 14-body tracked order
 OBS_DIM = 180
+OBS_DIM_175 = 175        # deploy_parity contract (model_9000 generation onward)
 N_JOINTS = 31
 
 
@@ -119,6 +121,59 @@ def build_obs(refs: dict, state: RobotState, target: RacketTarget,
         last_action, proj_grav, base_tgt_b, racket_tgt_b, racket_vel_w, tts, swing,
     ]).astype(np.float64)
     assert obs.shape == (OBS_DIM,), f"obs dim {obs.shape} != {OBS_DIM}"
+    return obs
+
+
+def build_obs_175(refs: dict, state: RobotState, target: RacketTarget,
+                  last_action: np.ndarray, default_q: np.ndarray) -> np.ndarray:
+    """Assemble the 175-D "deploy_parity" observation (model_9000 generation).
+
+    Port of pp_obs_builder.hpp build_obs_175 / the real_sensor training layout.
+    Differences from build_obs (everything else identical):
+      1. motion_anchor_pos_b (3) is REMOVED (world base position unobservable on real).
+      2. base_target_pos_b (2) is REMOVED.
+      3. racket_target_pos_b uses the CURRENT racket FK world position as the
+         reference point instead of the base position:
+           180: quat_rotate_inverse(yq, target.pos_w - base_pos_w)
+           175: quat_rotate_inverse(yq, target.pos_w - racket_pos_w)
+         with racket_pos_w = base_pos_w + R(base_quat_w) @ racket_pos_pelvis(q)
+         — the world base position CANCELS out (deploy-honest recipe).
+    """
+    # 1. command (62)
+    command = np.concatenate([np.asarray(refs["joint_pos"]), np.asarray(refs["joint_vel"])])
+
+    # 2. motion_anchor_ori_b (6) — anchor POSITION intentionally not emitted
+    ref_anchor_pos_w = np.asarray(refs["body_pos_w"])[ANCHOR_TRACKED_IDX]
+    ref_anchor_quat_w = np.asarray(refs["body_quat_w"])[ANCHOR_TRACKED_IDX]
+    _pos_b, ori_q = subtract_frame_transforms(
+        state.torso_pos_w, state.torso_quat_w, ref_anchor_pos_w, ref_anchor_quat_w)
+    ori_b6 = mat_from_quat(ori_q)[:, :2].reshape(-1)
+
+    # 3-6. base gyro, joint pos rel, joint vel, last action
+    base_ang_vel = np.asarray(state.base_ang_vel_b)
+    joint_pos_rel = np.asarray(state.q) - np.asarray(default_q)
+    joint_vel_rel = np.asarray(state.qd)
+    last_action = np.asarray(last_action)
+
+    # 7. projected gravity (3), body frame
+    proj_grav = projected_gravity_body(state.base_quat_w)
+
+    # 8. racket target pos relative to CURRENT racket FK, yaw-heading base frame (3)
+    yq = yaw_quat(state.base_quat_w)
+    racket_pos_w = np.asarray(state.base_pos_w) + \
+        mat_from_quat(state.base_quat_w) @ racket_pos_pelvis(state.q)
+    racket_tgt_b = quat_rotate_inverse(yq, np.asarray(target.pos_w) - racket_pos_w)
+
+    # 9-11. racket target velocity (world), time_to_strike, swing_type
+    racket_vel_w = np.asarray(target.vel_w)
+    tts = np.array([target.time_to_strike])
+    swing = np.array([target.swing_sign])
+
+    obs = np.concatenate([
+        command, ori_b6, base_ang_vel, joint_pos_rel, joint_vel_rel,
+        last_action, proj_grav, racket_tgt_b, racket_vel_w, tts, swing,
+    ]).astype(np.float64)
+    assert obs.shape == (OBS_DIM_175,), f"obs dim {obs.shape} != {OBS_DIM_175}"
     return obs
 
 

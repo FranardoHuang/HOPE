@@ -37,7 +37,15 @@ from std_msgs.msg import Bool
 from hope_msgs.msg import RacketCommand
 
 from .frame_math import projected_gravity_body, quat_rotate, yaw_quat
-from .obs_builder import N_JOINTS, RacketTarget, RobotState, build_obs, synthetic_state_from_refs
+from .obs_builder import (
+    N_JOINTS,
+    OBS_DIM_175,
+    RacketTarget,
+    RobotState,
+    build_obs,
+    build_obs_175,
+    synthetic_state_from_refs,
+)
 from .onnx_policy import OnnxPolicy
 from .reference_clock import (
     ClipLayout,
@@ -235,6 +243,7 @@ class WbcRunnerNode(Node):
         self.get_logger().info(
             f"wbc_runner started | mode={self._mode} | state_source={self._state_source} | "
             f"rate={rate:.0f} Hz | dither={self._dither} (deterministic={self._dither == 0.0}) | "
+            f"obs={self.policy.obs_dim}-D ({'deploy_parity/racket-FK' if self.policy.obs_dim == OBS_DIM_175 else 'full'}) | "
             f"seg_len={self._layout.seg_len} strike_phase={self._layout.strike_phase}")
         self.get_logger().info(
             "[frames] table->policy: origin_xy_table="
@@ -348,7 +357,11 @@ class WbcRunnerNode(Node):
                               swing_sign=swing_sign, time_to_strike=tts,
                               base_target_xy=self._base_target_xy)
 
-        obs = build_obs(refs, state, target, self._last_action, self.policy.default_q)
+        # obs contract auto-selected from the loaded ONNX (mirrors the C++ runner):
+        # 175 = deploy_parity (racket-FK-relative target, no world-base terms);
+        # 180 = full (model_15200 era).
+        builder = build_obs_175 if self.policy.obs_dim == OBS_DIM_175 else build_obs
+        obs = builder(refs, state, target, self._last_action, self.policy.default_q)
         self._verify_obs_once(state)
         action = self.policy.action(obs, time_step, dither_scale=self._dither)
         self._last_action = action

@@ -7,21 +7,37 @@ hope_planner:
     # and count the ball's index. TODO: confirm against your live /poses.
     ball_pose_index: 0
     # Virtual hit plane X (m); ~0.0 = HOPE origin end of table. MUST be matched to the
-    # ROBOT PLACEMENT: the policy strikes ~0.55-0.80 m in front of its base, so
-    # x_hit ≈ robot_start_x + 0.65 (e.g. robot at x=-0.5 -> x_hit ≈ 0.15). Targets the
-    # swing can't reach are rejected by the wbc_runner's base-relative target gate
+    # ROBOT PLACEMENT: the current deploy_parity policy (model_7500_hopex / model_9000)
+    # strikes at base-relative x in [0.56, 0.78] (box center 0.67), so
+    # x_hit ≈ robot_start_x + 0.67. Default assumes the robot at table x = -0.5
+    # (wbc_runner.yaml robot_start_xy_table) -> x_hit = 0.17. Targets the swing can't
+    # reach are rejected by the wbc_runner's base-relative target gate
     # (idle_reason=target_gate in its diagnostics) — if you see that constantly,
-    # x_hit and robot_start_xy_table (wbc_runner.yaml) disagree.
-    x_hit: 0.0
+    # x_hit and robot_start_xy_table disagree.
+    x_hit: 0.17
     target_land_x: 2.055   # opponent half-center X (fixed by table geometry)
     target_land_y: -0.7625 # opponent half-center Y (fixed by table geometry)
-    delta_t_flight: 0.5    # desired return flight time (s); tune for your robot
-    # TODO(calibrate): drag + restitution. Defaults are reasonable starting points
-    # from the HITTER paper. HOW TO GET: record >=15 ball trajectories with the
-    # mocap, export to CSV (t,x,y,z), then run
+    # Desired return flight time (s). ALIGNED to the current policy's racket-speed
+    # envelope: the deploy_parity vel boxes cap at |v|≈3.0 m/s, and the required racket
+    # speed ≈ (v_out + C_r·v_in)/(1+C_r) — at 0.5 s the demanded speed is ~4-6 m/s
+    # (every command OOD -> wbc_runner target gate stands). 0.65 s keeps demands inside
+    # the trained envelope for moderate serves; slower/faster policies retune this.
+    delta_t_flight: 0.65
+    # TODO(calibrate): drag + restitution. HOW TO GET: record >=15 ball trajectories
+    # with the mocap, export to CSV (t,x,y,z), then run
     #   ros2 run hope_planner hope_calibrate traj1.csv ... traj15.csv
     # and paste the printed values here (see reimplement.md Section 8).
-    drag_k: 0.8781         # Calibrated from salvaged traj01 split into 15 toss chunks.
-    restitution_h: 0.8527  # Calibrated from salvaged traj01 split into 15 toss chunks.
-    restitution_v: 0.8518  # Calibrated from salvaged traj01 split into 15 toss chunks.
-    restitution_racket: 0.88  # TODO: calibrate (ball-racket restitution)
+    #
+    # ⚠⚠ drag_k = 0.8781 is PHYSICALLY IMPLAUSIBLE (2026-07-03 analysis): a 40 mm
+    # 2.7 g ball has k = rho*Cd*A/(2m) ≈ 0.11 1/m; 0.878 = ~9 g deceleration at
+    # 10 m/s (~8x too high; single salvaged recording, bad fit). Consequences:
+    # predictions kill the ball before the hit plane, and the drag-aware outgoing-
+    # velocity solve demands |v_racket| 4.6-10 m/s — ALL out of the policy's trained
+    # envelope (max ~3.0), so the wbc_runner target gate stands on every ball.
+    # With a plausible k (0.11-0.15) demands drop to 0.8-1.0 m/s (verified offline).
+    # RE-FIT from the 2026-07-03 venue recordings before hardware (yikang's task);
+    # until then override on the command line: -p drag_k:=0.15.
+    drag_k: 0         # Todo: Calibrated from salvaged traj01 (SUSPECT — see above)
+    restitution_h: 0  # Todo: Calibrated from salvaged traj01 split into 15 toss chunks.
+    restitution_v: 0  # Todo: Calibrated from salvaged traj01 split into 15 toss chunks.
+    restitution_racket: 0  # TODO: calibrate (ball-racket restitution)
