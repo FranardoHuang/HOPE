@@ -55,22 +55,40 @@ flight:
 
 contact:
   table:                  # static surface (v_r = 0)
-    e_eff: 0.934          # 92 bounces, v_n 1.0–4.5 m/s, MAD 0.044. F3: flat within ±0.023 where
-                          # measurable (2–4.5 m/s); low-v_n slope is a noise artifact; v_n > 5
-                          # (buckling) NOT covered. AUDIT FLAG: above the ITTF band 0.88–0.92 and
-                          # 17% of bounces read e>1 (unphysical) -> likely 2–5% HIGH from 9 mm
-                          # contact noise. Cross-check with a simple ITTF drop test (30 cm -> 23 cm)
-                          # before trusting the last 2–3%; old-table value was 0.908.
+    e_eff: 0.9215         # v_n 1.0–4.5 m/s (58 gated bounces; forensics estimator over all 218:
+                          # 0.925, CI95 [0.920, 0.937] ± 0.005 systematic). The earlier 0.934 was
+                          # biased +0.010 by a contact-time bug (assumed contact height ~9 mm above
+                          # the true arc intersection -> e inflated by ~0.17/vn^2; e>1 tail 17%),
+                          # FIXED in stage1 (t_c = two-sided meeting point, 35-frame windows;
+                          # e>1 now ~4% = pure noise tail). F3 after fix: flat, slope +0.005/m/s
+                          # CI [-0.007, +0.018]. Optional speed-dependent form from forensics:
+                          # e(v_n) = 0.948 - 0.011*v_n (slope CI excludes 0, small real effect).
+                          # v_n > 5 (shell buckling) NOT covered. At ITTF drop speed this reads
+                          # 0.921 = top of the ITTF band (old table: 0.908 — remaining gap
+                          # plausibly a real table difference; a 30 cm drop test adjudicates).
     a_t: 0.369            # RETAINED FROM v0 (OptiTrack 101-bounce grip fit). The venue tangential
     b_t: 0.0              # refit was degenerate at this noise level (9 mm vs 0.4 mm) — see F5 in the
     mu_safety: 2.0        # report. Venue data neither confirms nor moves the grip block.
   paddle:                 # racket hit (v_r = paddle CONTACT-POINT velocity incl. omega_racket x r;
                           # the fit included that term — keep it in the sim, v0 code gap #1)
     e_eff: 0.654          # FIRST REAL RACKET FIT (150 strikes, u_n 1.4–7.2 m/s). v0's 0.4632 was a
-                          # placeholder never fit on racket data.
-    a_t: 0.399            # tangential gain (v0: 1.205 — placeholder, large move expected & observed)
-    b_t: 0.0              # fitted -0.035 ~ 0: cos(theta) term not supported; set 0
-    mu_safety: 2.5        # cap never binds in the data -> mu unidentified; safety value retained
+                          # placeholder never fit on racket data. Landing-error sweep confirms the e
+                          # calibration is at its optimum (scaling e ±10% costs ~5 cm of landing).
+    a_t: 0.52             # tangential gain, VELOCITY-CHANNEL fit on the fixed segments
+                          # (bootstrap CI [0.46, 0.61]; old-segment value 0.58 and the model-free
+                          # cross-checks 0.58/0.60/0.62 sit at the top of the CI -> honest range
+                          # ~0.46-0.62). Forensics: at strikes the quaternion spin-change reads
+                          # only ~0.22x the position-implied value (noise-dominated), so JOINT
+                          # fits get dragged to ~0.32-0.38 — do not use them. NOTE (a_t,b_t) are
+                          # collinear (all contacts near-normal, cos(theta) median 0.98): only
+                          # a_t + b_t*cos(theta) is identified. Landing error is flat over
+                          # a_t 0.2–0.6, so this choice follows the direct tangential-impulse
+                          # measurement, not landing tuning. Spin-transfer prediction remains
+                          # UNVALIDATED at strikes (spin channel unmeasurable on this rig).
+    b_t: 0.0              # unsupported: bootstrap CI [-0.98, 0.52] spans 0, AIC prefers b_t=0
+    mu_safety: 0.5        # cap never binds (measured tangential/normal impulse ratio p90 = 0.27) ->
+                          # mu unidentified; 0.5 keeps grazing-hit extrapolation sane and does not
+                          # distort any observed strike (binds 0/130 at a_t=0.52). Was 2.5 (v0).
     # F4 VERDICT: KILL constant-e (medium confidence, adversarially verified).
     # 7-estimator ensemble delta_e(2-8 m/s) = -0.11..-0.14, all negative, beyond
     # the -0.05 KILL line; within-take fixed-effects p=0.0015; slope
@@ -78,7 +96,7 @@ contact:
     # ADOPT e(u_n) — needs a ~3-line change in spin_contact.py + C++ mirror.
     # Exponential preferred for extrapolation beyond u_n 7.2 (stays positive);
     # linear and exponential are indistinguishable in-sample (dRMS ~ 1e-5).
-    e_lin_a: 0.729        # e(u_n) = e_lin_a - e_lin_b * |u_n|   (Huber fit)
-    e_lin_b: 0.0182
-    e_exp_g1: 0.784       # RECOMMENDED: e(u_n) = g1 * exp(g2 * |u_n|), valid u_n 1.4-7.2 m/s
-    e_exp_g2: -0.0483
+    e_lin_a: 0.749        # e(u_n) = e_lin_a - e_lin_b * |u_n|
+    e_lin_b: 0.0258
+    e_exp_g1: 0.759       # RECOMMENDED: e(u_n) = g1 * exp(g2 * |u_n|), valid u_n 1.4-7.2 m/s
+    e_exp_g2: -0.0441

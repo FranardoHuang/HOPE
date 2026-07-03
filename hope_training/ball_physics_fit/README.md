@@ -28,17 +28,37 @@ $BALLFIT_DATA_ROOT/
     falsification/F*_verdict.json + .png # F1–F8 battery
 ```
 
-## Pipeline (run in order; python needs numpy/scipy/matplotlib + `c3d`)
+## Environment
+
+`pip install -r requirements-ballfit.txt` (numpy/scipy/matplotlib always; the `c3d`
+reader is needed ONLY for `extract_canonical.py` — everything downstream runs from
+the extracted npz). On yikang's Mac this is the `pingpong` conda env
+(`/Users/yyk956614/anaconda3/envs/pingpong/bin/python`); the system python3 lacks `c3d`.
+
+## Pipeline (run in order)
 
 ```bash
-python extract_canonical.py <take_dir_or_c3d> analysis/extracted   # per take
-python qa_stage0.py           # sampling/units/gravity gates — STOP if it fails
-python stage1_segments.py     # flights / table bounces / racket strikes
-python stage2_fits.py --split all     # ordered fits: k_d → k_m → table e → table tan → paddle
+python extract_canonical.py <take_dir_or_c3d> analysis/extracted   # per take (needs c3d)
+python qa_stage0.py           # Stage 0: sampling/units/gravity gates — STOP if it fails
+python stage1_segments.py     # Stage 1: flights / table bounces / racket strikes
+python stage2_fits.py --split all     # Stage 2: k_d → k_m → table e → table tan → paddle
+python stage3_falsify.py              # Stage 3: F1–F8 battery + adversarial verifiers (falsify/)
 python stage2_fits.py --split train   # for held-out validation
-python validate_stage4.py --fits .../stage2_fits_train.json --split test
+python validate_stage4.py             # Stage 4 vs the train-split fit (test split)
+python validate_stage4.py --yaml ../../configs/ball_physics_venue.yaml --paddle-e exp
+                                      # Stage 4 vs THE SHIPPED YAML — the honest acceptance numbers
+python predict_check.py --yaml ../../configs/ball_physics_venue.yaml --split all
+                                      # two-horizon landing check: H0 at-contact through paddle /
+                                      # H1 at-contact measured-out / H2 ~100 ms before landing
 python test_oracle_present.py # loud-fail oracle check (never skips)
 ```
+
+Landing ground truth everywhere is the OBSERVED first-bounce contact point `p_c`
+from `bounces.json` under a continuity gate (measured post-strike state must land
+within 0.30 m / 80 ms of the recorded bounce). The legacy label (integrating the
+measured out-state through the same flight model) is reported separately as
+`landing_reconstructed_label` — it shares the flight model with the prediction and
+reads optimistic, so it is never the headline.
 
 ## Conventions
 
@@ -52,7 +72,12 @@ python test_oracle_present.py # loud-fail oracle check (never skips)
 - The 15 exported ball "markers" are Avatar-Pro solved-model points, NOT physical
   sphere-surface positions (max pairwise span 56 mm > ball diameter). Treat the centroid
   as a rigidly-attached virtual point; the true-center offset is handled dynamically
-  (QA wobble check), not geometrically.
+  (QA wobble check), not geometrically. KNOWN SYSTEMATIC (forensics
+  `g1_wobble_delta_verdict`): the sphere-fit offset applied by the extractor is wrong by
+  ~1.9 mm (35° direction error); the residual wobble is coherent but sits ~0.1 mm-rms
+  under the 9 mm venue noise floor (k_d bias ≈ 0, k_m shift < 3%), so it is documented
+  rather than re-extracted. On a cleaner rig, fold the correction
+  (δ_common ≈ [−1.5, −0.4, −1.1] mm in the shared template frame) into extract_canonical.
 - Never finite-difference accelerations for fitting — RK4 shooting fits only
   (`ballcore.fit_arcs_global`), g frozen at 9.81.
 

@@ -138,7 +138,10 @@ def fit_km(arcs, kd, split):
 
 
 def fit_table_e(bounces, split):
-    sel = [b for b in bounces if 0.4 < b["e_n"] < 1.1 and b["fit_rms_mm"] < 5.0
+    # No censoring on e itself (indefensible on the fitted quantity; the e>1 tail
+    # was a t_c bias, fixed in stage1 — residual tail is ~4% symmetric noise).
+    # Keep only quality gates + a physicality bound far outside the noise tail.
+    sel = [b for b in bounces if 0.0 < b["e_n"] < 1.8 and b["fit_rms_mm"] < 5.0
            and in_split(f'{b["take"]}:{b["t_c"]:.3f}', split)]
     e = np.array([b["e_n"] for b in sel])
     vn = np.array([b["vn_in"] for b in sel])

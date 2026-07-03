@@ -161,8 +161,8 @@ def main():
             gap = b["t"][0] - a["t"][-1]
             if not (-0.005 <= gap <= 0.40):
                 continue
-            wa = slice(max(0, len(a["t"]) - 25), len(a["t"]))
-            wb = slice(0, min(25, len(b["t"])))
+            wa = slice(max(0, len(a["t"]) - 35), len(a["t"]))
+            wb = slice(0, min(35, len(b["t"])))
             _, _, w_pre = spin_from_quats(a["quat"][wa], rate, R_table=Rt)
             _, _, w_post = spin_from_quats(b["quat"][wb], rate, R_table=Rt)
             w_pre_f = w_pre if np.isfinite(w_pre).all() else np.zeros(3)
@@ -193,11 +193,13 @@ def main():
 
             near_table = p_m[2] < SURFACE_Z + R_BALL + 0.060
             if near_table and v_m[2] < -0.2 and v_p[2] > 0.05:
-                # refine t_c to the surface crossing of the incoming arc
-                dtc = (p_m[2] - (SURFACE_Z + R_BALL)) / -v_m[2]
-                t_c2 = t_c + float(np.clip(dtc, -0.02, 0.02))
-                p_m, v_m = prop_state(fa, t_c2)
-                p_p, v_p = prop_state(fb, t_c2)
+                # t_c stays at the two-sided meeting point. Do NOT refine to the
+                # nominal contact height: the bounce-minima surface calibration sits
+                # ~9 mm above the true pre/post intersection, and refining to it made
+                # t_c early -> gravity back-extrapolation inflated e by ~0.17/vn^2
+                # (the e>1 tail and the spurious F3 low-vn slope; see forensics
+                # g_e_gt1_dissection).
+                t_c2 = t_c
                 e_n = -v_p[2] / v_m[2]
                 ut = np.linalg.norm((v_m + np.cross(w_pre_f, -R_BALL * np.array([0, 0, 1.0])))[:2])
                 bounces.append(dict(
