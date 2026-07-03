@@ -42,7 +42,7 @@ Rules:
 | Person | Focus |
 | --- | --- |
 | franco | Direction, priorities, arbitration |
-| jiayi | End-to-end training bring-up; reward tuning |
+| jiayi | End-to-end training bring-up; reward tuning — the simtoreal2 lineage (HER achieved-replay, hold_ready, model_9000 training) |
 | yikang | Deployment; sim/env alignment |
 | claude (franco's agent) | Foundation: infrastructure, A/B experiments, doc/code hygiene |
 
@@ -58,17 +58,17 @@ Rules:
 
 ## Plan To Saturday (2026-07-03 → 07-04, target: play at the venue with an improved policy)
 
-Critical path (GPU 1/2):
+Critical path (GPU 1/2) — ETAs corrected 2026-07-03 15:40 with the measured 2.15 s/iter:
 
-1. **Tonight ~19:30** — A-ext/E-ext hit 14k iters → 4-protocol scoreboard verdict (claude, ~1 h).
-2. **Tonight** — warm-start the **explicit-clipped-PD fine-tune from the E champion** (the
-   pre-hardware gate recipe, ~8000 it ≈ 11 h overnight, GPU1); GPU2 = same ft from A-ext champion
-   as backup. (claude)
-3. **Saturday morning** — export → MuJoCo explicit gate + deploy-faithful → if pass, build the MDU
-   package (`build_a3_deploy_pkg.sh`) per PINGPONG_NEW_CHECKPOINT_TUTORIAL. (claude prepares,
-   yikang ships/runs on the MDU)
-4. **Saturday afternoon** — deploy & play: forehand first; **try backhand in SHADOW mode** — E was
-   trained for stand-entry, this is the potential headline of the day. (yikang + franco)
+1. **TODAY ~18:15** — 「基线结构」and「三合一」long runs hit 14k iters → 4-protocol scoreboard
+   verdict (claude, ~40 min, CPU).
+2. **TODAY 19:00-24:00** — explicit-clipped-PD fine-tune from the winner (~8000 it ≈ 4.7 h, GPU1);
+   GPU2 = backup ft from the other run. (claude)
+3. **TONIGHT/midnight** — export → MuJoCo explicit gate + deploy-faithful → build the MDU package
+   (`build_a3_deploy_pkg.sh`). Saturday morning = verification margin, not critical path.
+   (claude prepares, yikang ships/runs on the MDU)
+4. **Saturday** — deploy & play: forehand first; **try backhand in SHADOW mode** —「三合一」and
+   model_9000 both trained stand-entry, this is the potential headline. (yikang + franco)
 
 Parallel tracks (no GPU conflict):
 
@@ -81,6 +81,21 @@ Parallel tracks (no GPU conflict):
   ready-stance clip stay on the longer-horizon list (P2.0/A5 in G08), not on Saturday's path.
 - simtoreal2 → main merge + doc updates (claude, in progress).
 
+## Gap List To Sunday (明确缺的活,截止周日 — added 2026-07-03)
+
+| # | 缺什么 | 谁 | 何时 |
+| --- | --- | --- | --- |
+| 1 | 两条 14k 长跑的终审 + 选周六候选 | claude | 今天 18:15-19:00 |
+| 2 | explicit-PD 微调腿(过 MuJoCo 硬门禁的配方) | claude | 今天 19:00-24:00 |
+| 3 | MuJoCo 双门禁 + MDU 打包 | claude 备 / yikang 运 | 今晚-周六早 |
+| 4 | model_9000 与我们候选的同板对比(缺 onnx 文件:请 jiayi 放 `/workspace/shared/models/`) | jiayi + claude | 今晚 |
+| 5 | 物理模型 v1:用今天采的球轨迹拟合 drag/bounce(→ planner 参数;训练侧下周) | yikang | 数据到即做,周六 planner 可用 |
+| 6 | **延迟/误差标定**:从动捕录制的时间戳量真实延迟与噪声谱 → 填 A1 各 flag 的数值(franco 指出:这些本就该从物理建模数据算出,不拍脑袋) | yikang(数据)+ claude(分析脚本) | 周六-周日 |
+| 7 | 0703 打球录像 → 旋转归一 → 新参考 clip 验证(jiayi 的 re-ground 管线已做一版,确认覆盖) | jiayi | 周六前 |
+| 8 | 训练速度 vs 并行数的 trade-off 终版报告(见下,搜索范围 4096/8192/16384 + 共卡) | claude | 今天 |
+| 9 | 球进训练环境 + 落点奖励(P2.5-lite)— **周六前不可行,诚实排下周**;周六的增益来自策略改进+planner 物理参数,不来自训练内球 | claude/jiayi | 下周 |
+| 10 | mocap→runner 桥 + 坐标变换设计(A2) | yikang | 下周 |
+
 ## Active
 
 | Item | Priority | Owner | Branch | Status / next checkpoint |
@@ -90,7 +105,7 @@ Parallel tracks (no GPU conflict):
 | A8: post-swing initial-state buffer (Ace) | ★★★ | claude | `p2-multiswing` (flag `motion.post_swing_start_prob`) | IMPLEMENTED + mech-verified 2026-07-03; next: arm D after P2.1 A/B |
 | P2.0: ready-pose definition (see G08) | ★★ (foundation) | franco (拍摄) + claude (pipeline) | — | DECIDED 2026-07-03: option (a) — record a ready-stance video through GVHMR→GMR on the next site visit (bundle with A5's 30-50 new swing clips); claude processes + wires into stand_start/hold/clip re-entry |
 | Legacy-task long run `merged_uniform_hopex` (20000 it, task=HOPEPingPong on own branch) | ? | yikang | `rsi-on-wrap-progress-fix` | RUNNING on pod GPU0. ⚠ branch duplicates main's wrap_teleport machinery and has LFS-pointerized CSVs — reconcile with main before merging; the unique progress-fix is already ported to `p2-multiswing` |
-| Reward tuning (current focus unknown — jiayi please claim/describe) | ? | jiayi | ? | — |
+| simtoreal2 lineage: HER achieved-replay + hold_ready + model_9000_replane training (merged to main 2026-07-03) | ★★★ | jiayi | `simtoreal2` (merged) | model_9000 backhand passed training gate; **needs**: drop `model_9000_replane.onnx` into `/workspace/shared/models/` so the scoreboard can grade it against tonight's candidates |
 | G07 mocap→runner bridge + world→robot target transform design (A2) | ★★ | unassigned (natural fit: yikang) | — | design doc first; see G07 Next Steps and G08 audit item 2 |
 
 ## Queued (priority order, from G08)
