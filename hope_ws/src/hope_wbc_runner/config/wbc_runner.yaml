@@ -74,6 +74,11 @@ wbc_runner:
     # robot world position so the racket-target-relative-to-base obs is correct.
     # Leave "" for standalone dry-run (no mocap): uses nominal height fallback.
     base_pose_topic: "/P1/pose"             # geometry_msgs/PoseStamped pelvis world pose (from mocap relay)
+    # Frame of base_pose_topic: "table" = HOPE table frame (arena mocap /P1/pose,
+    # converted via the table->policy transform below) | "policy" = already the policy
+    # frame (AGI MuJoCo ground truth /sim/a3/pelvis_pose in the sim closed-loop; used
+    # verbatim, origin autocapture disabled).
+    base_pose_frame: "table"
     nominal_base_height: 0.95    # fallback pelvis z when no base_pose_topic (sim2real localisation gap)
     torso_offset_z: 0.20         # fallback torso-above-pelvis z
 

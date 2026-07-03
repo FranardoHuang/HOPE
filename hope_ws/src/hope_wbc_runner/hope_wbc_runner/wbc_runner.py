@@ -86,7 +86,11 @@ class WbcRunnerNode(Node):
         self.declare_parameter("imu_topic", "/a3/imu")
         self.declare_parameter("nominal_base_height", 0.95)    # fallback pelvis z when no localisation
         self.declare_parameter("torso_offset_z", 0.20)         # fallback torso-above-pelvis z
-        self.declare_parameter("base_pose_topic", "")          # optional geometry_msgs/PoseStamped pelvis pose (TABLE frame)
+        self.declare_parameter("base_pose_topic", "")          # optional geometry_msgs/PoseStamped pelvis pose
+        # Frame of base_pose_topic: "table" = HOPE table frame (arena mocap /P1/pose;
+        # converted via TableToPolicy) | "policy" = already the policy/env frame
+        # (AGI MuJoCo ground truth /sim/a3/pelvis_pose; used verbatim, origin capture off).
+        self.declare_parameter("base_pose_frame", "table")
         self.declare_parameter("joint_state_type", "sensor_msgs")  # "sensor_msgs" (std) | "joint_msgs" (a3 sim)
         # --- sim2real frame alignment: HOPE table frame -> policy frame (world_frame.py) ---
         # Applied to /racket/command with frame_id=="world" AND to base_pose_topic (both are
@@ -162,8 +166,14 @@ class WbcRunnerNode(Node):
             origin_xy_table=np.array([float(v) for v in gp("robot_start_xy_table").value]),
             yaw_table=float(gp("robot_start_yaw_table").value),
             floor_z_table=float(gp("table_floor_z").value))
+        self._base_pose_frame = str(gp("base_pose_frame").value)
+        if self._base_pose_frame not in ("table", "policy"):
+            raise ValueError(f"base_pose_frame must be 'table' or 'policy', got '{self._base_pose_frame}'")
+        # origin capture only makes sense for table-frame mocap (policy-frame poses
+        # already carry the right origin)
         self._origin_capture = (OriginCapture(int(gp("origin_capture_samples").value))
-                                if bool(gp("origin_autocapture").value) else None)
+                                if bool(gp("origin_autocapture").value)
+                                and self._base_pose_frame == "table" else None)
         self._marker_to_base = np.array([float(v) for v in gp("marker_to_base_xyz").value])
         self._use_mocap_ori = bool(gp("use_mocap_orientation").value)
         self._yaw_aligner = (ImuYawAligner(int(gp("imu_yaw_align_samples").value))
@@ -429,13 +439,19 @@ class WbcRunnerNode(Node):
         src = "nominal"
         raw = self._fresh_base_pose_raw()
         if raw is not None:
-            pos_table, quat_table = raw
-            if self._use_mocap_ori:
-                quat = self._t2p.quat(quat_table)
-            pos = self._t2p.pos(pos_table)
+            pos_raw, quat_raw = raw
+            if self._base_pose_frame == "policy":
+                # already the policy/env frame (e.g. sim ground truth) — no transform
+                pos = np.asarray(pos_raw, dtype=float)
+                if self._use_mocap_ori:
+                    quat = np.asarray(quat_raw, dtype=float)
+            else:
+                if self._use_mocap_ori:
+                    quat = self._t2p.quat(quat_raw)
+                pos = self._t2p.pos(pos_raw)
             if np.any(self._marker_to_base):
                 pos = pos + quat_rotate(yaw_quat(quat), self._marker_to_base)
-            src = "mocap"
+            src = "mocap" if self._base_pose_frame == "table" else "policy_frame"
         return pos, quat, src
 
     # ----- state assembly -----
