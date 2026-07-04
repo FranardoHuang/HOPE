@@ -199,6 +199,25 @@ franco 已提供 forehand_new.mp4 / backhand_new.mp4,已上传 `/workspace/share
 
 **斜录(实战)动作:视频→CSV 全通**(GVHMR/GMR 在 pod 上直接跑通了,产物 /workspace/shared/motions/oblique/,58/64 帧)。剩 csv→npz 一步需要 Isaac FK(或我写 MuJoCo FK 版,已排队)。球轨迹数据已入共享区 ball_mocap_0703。
 
+## Gap List 状态扫描(2026-07-04 中午重扫;原表保留在下方)
+
+| # | 状态 |
+| --- | --- |
+| 1 终审+候选 | 候选=P2 线(0.884)已定;**双仿真认证仍开放**(eval 契约修复在飞,P0)|
+| 2 explicit-PD 微调腿 | 作废(IdealPD 已否决;记分板显式门禁替代)|
+| 3 门禁+MDU 打包 | **最大的真缺口**:P2 终版 → 门禁(等 eval 修复或厂商门禁)→ 打包 |
+| 4 部署配置悬空引用 | 仍未改指,打包时一并(依赖 #3)|
+| 5 物理 v1 | ✅ 完成(yikang 场馆拟合已 merge)|
+| 6 延迟/误差标定 | 噪声谱 ✅ 已接进训练;**端到端延迟仍未测**(delay_steps=2 还是假设);帧率定案 300 |
+| 7 0703 clip 覆盖(jiayi)| 状态未知,需 jiayi 确认 |
+| 8 算力 trade-off | ✅ 完成(手册封版)|
+| 9 球进训练 | 虚拟球已实质替代(奖励层);真球入 sim 仍下周 |
+| 10 A2 桥(yikang)| 下周 |
+
+另扫出的未跑测试:R6 裁剪 clip 臂(工具/clip 齐,排 GPU0 空槽);HER 隔离 A/B(已被 P2
+胜线包含,降级为学术项,正式放弃);KF 真流验证 + StrikeSpec 部署接线 + 机器人挥拍标定
+= **下次场地日清单**。
+
 ## Gap List To Sunday (明确缺的活,截止周日 — added 2026-07-03)
 
 | # | 缺什么 | 谁 | 何时 |
@@ -214,7 +233,7 @@ franco 已提供 forehand_new.mp4 / backhand_new.mp4,已上传 `/workspace/share
 | 9 | 球进训练环境 + 落点奖励(P2.5-lite)— **周六前不可行,诚实排下周**;周六的增益来自策略改进+planner 物理参数,不来自训练内球 | claude/jiayi | 下周 |
 | 10 | mocap→runner 桥 + 坐标变换设计(A2) | yikang | 下周 |
 
-## Tonight's Test Slots (2026-07-03 evening, policy: 4096 envs × 2 jobs/GPU, stagger ≥60 s)
+## ~~Tonight's Test Slots (2026-07-03)~~ 已过期,由「关键更新联合消融」与通宵舰队替代
 
 After the 18:15 finish + verdict, the freed slots run signal-tier (2000-it ≈ 1.5 h co-run) A/Bs.
 "Winner" = tonight's better 14k run. All arms resume FROM the winner checkpoint:
