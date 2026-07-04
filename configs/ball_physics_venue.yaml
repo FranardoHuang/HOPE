@@ -32,6 +32,13 @@ air:
   rho: 1.20
 
 # Flight: a = g - k_d|v|v + k_m (omega x v); omega = physical (quaternion-measured) spin
+# omega is held CONSTANT in flight — justified by measurement (2026-07-04,
+# /workspace/franco/research/spin_decay_arcs.py, report §11.2): on 192 ballistic
+# arcs the median fractional spin decay per 0.5 s is +2.4%, CI [-8.1, +10.7]
+# (consistent with zero; 47% of arcs read "negative decay" = noise-symmetric);
+# high-spin subset lambda ~= 0, decay time constant tau > 5 s @95%. Matches
+# Sony Ace's constant-omega assumption. This is a VENUE CONSTRAINT (<=15 rev/s,
+# arcs <=2 s), not an omission — pro-spin decay remains uncovered.
 flight:
   k_d: 0.1261             # 1/m — 100 low-spin arcs, joint RK4-shooting (Huber), rms 9.1 mm.
                           # C_d = 0.569 (coated ball; roughness raises it above the clean ~0.44).
@@ -104,6 +111,17 @@ contact:
     e_lin_b: 0.0258
     e_exp_g1: 0.759       # RECOMMENDED: e(u_n) = g1 * exp(g2 * |u_n|), valid u_n 1.4-7.2 m/s
     e_exp_g2: -0.0441
+    # PADDLE-SPLIT RESOLUTION (2026-07-04, report §11.1,
+    # /workspace/franco/research/strat_paddle_split.py): F10's "two paddles are
+    # DIFFERENT" verdict was substantially a stroke-mix artifact (juggling 63:0
+    # toward p1; p1 median u_n 3.03 vs p2 3.59). Stratified + u_n-matched on the
+    # same 145 strikes, the e-level difference vanishes (non-juggling p1 0.658
+    # vs p2 0.705, MW p=0.37; within-take perm p=0.51); the slope difference is
+    # only suggestive (dg2=+0.091, perm p=0.070, carried by 14-vs-5 strikes at
+    # u_n>=4.5). This POOLED curve is therefore CONFIRMED CORRECT for the
+    # planner (the §10.4 per-paddle advice is withdrawn); treat e(u_n) above
+    # u_n ~ 4.5 m/s with WIDENED uncertainty until ~20 high-u_n low-spin p1
+    # strikes are captured.
 
 # =============================================================================
 # CAPTURE-RIG ERROR MODEL (采集误差 / 时间随机延迟) — Avatar Pro C3D venue rig.
@@ -128,6 +146,11 @@ capture:
                             # offset, 35 deg direction error; dynamics effect ~0.1 mm
                             # rms under the 9 mm floor — documented, not re-extracted.
   spin_noise:               # quaternion channel
+                            # MULTIPLICATIVE component measured 2026-07-04
+                            # (spin_decay_arcs.py, report §11.2): sigma/|omega|
+                            # ~= 0.28-0.31 (~30%) across the 192-arc set; spin
+                            # AXIS unreliable below ~2 rev/s. Use ~30%
+                            # multiplicative on top of the additive floor below.
     floor_rev_s: 2.0        # per-event noise floor (= 12.6 rad/s, predict_check.py
                             # FS_SPIN_NOISE). Venue-median spin ~ this floor.
     bounce_dw_scale: 0.65   # quat delta-omega across TABLE bounces reads ~0.65x the

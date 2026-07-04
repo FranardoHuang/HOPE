@@ -138,7 +138,7 @@ stay in the yaml for reference only).
 | **F5** grip-only tangential | **INCONCLUSIVE — venue refit degenerate; v0 grip block retained** | the venue tangential refit collapsed to zero tangential impulse (Coulomb cap never binds, μ unidentified) because the Δω noise floor alone is 2.0 rev/s (vs the 3 rev/s PASS bar) at 9 mm position noise. Residuals DO grow with \|u_t\|/\|u_n\| (Spearman 0.45, p=1.5e-6, coverage to ratio 2.8) but not in the specific slip signature. Diagnostic: across contacts, quaternion Δω reads ~0.65× the value implied by the position-derived tangential impulse (contact-window blur) — the two channels disagree, so this dataset cannot beat the old 101-bounce/0.4 mm fit; a_t=0.369 grip block retained in the yaml |
 | F1 k_d const | **PASS** (medium) | bins within ±6% of global over 2–6.8 m/s (n=100); Spearman p=0.52; >6.8 m/s uncovered |
 | F6 no inverse Magnus | **PASS (high conf.)** | worst cell (highest Re 12.6–28k × lowest SR): median km = +0.0065, 1/13 arcs negative, sign-test p=1.0. The one negative-median cell sits at LOWEST Re × HIGHEST SR (the physical opposite of inverse-Magnus) and dissolves under a deflection-≥-noise gate (n=7, median −0.0004, p=0.5). Certifies the envelope only — Re tops out at 2.8e4, far below the ~1e5 inverse-Magnus onset |
-| F7 no spin decay | **borderline KILL (low conf.)** | median decay 12.2%/flight but n=14, IQR [−3%, +21%], bootstrap CI includes 0, Wilcoxon p=0.086; alt normalization gives 5%. Not actionable alone — see recommendation |
+| F7 no spin decay | **borderline KILL (low conf.)** → **PASS, closed (§11.2, 2026-07-04)** | median decay 12.2%/flight but n=14, IQR [−3%, +21%], bootstrap CI includes 0, Wilcoxon p=0.086; alt normalization gives 5%. Re-measured on 192 arcs: consistent with zero, τ ≥ 5 s @95% — constant-ω stands |
 | F8 instantaneous paddle | **INCONCLUSIVE → PASS-leaning** | raw Spearman 0.21 (p=0.01) between direction residual and \|ω_racket\| collapses to 0.11 (p=0.19) after controlling u_n and to −0.03 controlling (u_n,u_t,v_out): the correlation is speed confounding. Direct dwell rotation ≈ 0.15° median — well under 2° |
 
 ### 4.5 Adversarial verification (independent re-derivations; all AGREE, severity "minor")
@@ -244,7 +244,8 @@ addendum (§9).
    bounces, denser cameras on the strike zone (racket normal), and an ITTF drop test
    on the venue table (adjudicates e_n 0.92 vs the old 0.908).
 6. F7 spin decay: not actionable (n=14, CI includes 0). Re-test on the next dataset;
-   an exponential decay term costs one line if it firms up.
+   an exponential decay term costs one line if it firms up. **Resolved 2026-07-04:
+   re-measured on all 192 arcs — no decay detectable, constant-ω stands (§11.2).**
 
 ## 8. Reproduction
 
@@ -391,10 +392,13 @@ set `BALLFIT_DATA_ROOT` there) — real-data results folded into items 4–6 bel
    common u_n band. At u_n=7 m/s the spread is large: p1 0.64 / shipped-pooled 0.56 /
    p2 0.45. Caveat: paddle is partially confounded with stroke type (p1 dominates the
    juggling takes: 63/100 of its strikes) — but F4's within-take evidence pointed the
-   same way. **Action: identify WHICH physical paddle the robot plays with
+   same way. ~~**Action: identify WHICH physical paddle the robot plays with
    (b_PPP1 vs b_PPP2) and use that paddle's e(u_n) in the planner, not the pooled
    curve** (±0.09 e at fast strikes ≈ ±0.15–0.2 m of return landing per the ruler
-   below). (b) **Face split: UNDERPOWERED, not settled** — p1 hit 93/7 with one face
+   below).~~ **[SUPERSEDED 2026-07-04, kept for the record]** — the stratified +
+   u_n-matched reanalysis (§11.1) shows the caveat above was the story: the
+   DIFFERENT verdict was substantially a stroke-mix artifact. Ship the POOLED
+   e(u_n) curve; widen stated uncertainty above u_n ≈ 4.5. (b) **Face split: UNDERPOWERED, not settled** — p1 hit 93/7 with one face
    (unmeasurable); p2: Δe(n+ − n−) = +0.054 point estimate — exactly at the
    "it matters" threshold — but MW p=0.145, CI [−0.018, +0.119] spans 0 at n=19/26.
    Needs a dedicated capture: ≥50 strikes per face with the ROBOT's racket, and a
@@ -445,3 +449,55 @@ set `BALLFIT_DATA_ROOT` there) — real-data results folded into items 4–6 bel
    evidence of direction-dependent model bias. Caveat: the heavy-topspin takes
    contribute few arcs (shangxuan 0, xiaxuan 3 — short/gappy tracks), so the check
    under-covers exactly the high-spin regime.
+
+## 11. Stratified reanalysis (2026-07-04) — paddle split downgraded; spin decay closed
+
+Two of §10's open threads re-examined on the SAME data with confound-aware methods
+(no new capture). Scripts: pod `/workspace/franco/research/strat_paddle_split.py`
+and `/workspace/franco/research/spin_decay_arcs.py`; inputs are the exact
+strikes.json / arc npz behind §10.4 and §10.6.
+
+### 11.1 Paddle split (F10) — DIFFERENT verdict downgraded to stroke-mix artifact
+
+Stratified-by-stroke + u_n-matched reanalysis of the same 145 strikes:
+
+- **The e-LEVEL difference vanishes once stroke mix is controlled.** Non-juggling
+  strikes only: p1 e = 0.658 vs p2 0.705, MW p=0.37; restricting further to the
+  matched u_n band 3.0–5.0 m/s: p=0.35; within-take permutation test: p=0.51. The
+  confound §10.4 flagged as a caveat was in fact the mechanism: juggling strikes
+  split 63:0 toward p1, and p1 is systematically slower (median u_n 3.03 vs 3.59
+  m/s), so the pooled comparison was comparing strokes, not hardware.
+- **The slope difference (Δg2) weakens to suggestive, not hardware-attributable.**
+  Non-juggling Δg2 = +0.091, bootstrap CI [0.007, 0.201] (still excludes 0), but the
+  within-take permutation p rises to 0.070, and the effect is carried entirely by
+  the sparse u_n ≥ 4.5 tail — 14 p2 strikes vs 5 p1 strikes. At that n the split
+  cannot separate paddle hardware from residual stroke/spin composition.
+- **The spin asymmetry is real but stroke-borne, not a rig/paddle effect**: p2 sees
+  incoming |ω_in| median 2.68 vs 1.68 rev/s for p1 (p=4e-4) — a property of who/what
+  hit at that paddle, consistent with the stroke-mix story above.
+- **ACTION REVERSAL**: §10.4(a)'s "identify the robot's paddle and use that paddle's
+  e(u_n), not the pooled curve" is **WITHDRAWN** (original text kept there under a
+  SUPERSEDED tag). Ship the **pooled e(u_n)** curve; widen the stated uncertainty
+  above u_n ≈ 4.5 m/s (where the two per-paddle curves genuinely diverge but the
+  data cannot adjudicate); and put **~20 high-u_n (>4.5 m/s), low-spin p1 strikes**
+  on the next-capture list to settle the residual slope question.
+
+### 11.2 Spin decay in air — measured, consistent with zero; constant-ω stands (F7 closed)
+
+Direct measurement on the same 192 gap-free ballistic arcs of §10.6 (quaternion
+|ω| regressed within-arc):
+
+- Median fractional decay per 0.5 s = **+2.4%, CI [−8.1%, +10.7%]** — consistent
+  with zero; 47% of arcs read "negative decay", i.e. the distribution is
+  noise-symmetric about no-decay.
+- High-spin subset: exponential-decay λ point estimate 0; **τ 95% lower bound
+  ≈ 5 s** — over a 0.3–0.8 s flight the constant-ω error bound is a few percent,
+  far below contact-model uncertainty.
+- **Decision: constant-ω stands** (this also matches Sony Ace's flight assumption).
+  Documented as a VENUE CONSTRAINT (spins ≤15 rev/s, arcs ≤2 s — decay at pro spin
+  levels remains uncovered), not a modeling omission. F7's borderline-KILL (n=14)
+  does not survive the full-sample re-measurement.
+- Measured along the way, adopted into the yaml capture block: quaternion spin noise
+  is **~30% multiplicative** (σ/|ω| = 0.28–0.31 across the arc set), and the spin
+  AXIS is unreliable below ~2 rev/s — consistent with, and sharpening, the 2 rev/s
+  floor of §9.3/`capture.spin_noise`.

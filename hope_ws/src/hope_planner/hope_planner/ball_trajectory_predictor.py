@@ -8,6 +8,7 @@ See HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md, Section 4.
 """
 
 from dataclasses import dataclass
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -48,17 +49,78 @@ class BallTrajectoryPredictor:
             and -self.table.width - r <= p[1] <= r
         )
 
-    def _flight_acceleration(self, v: np.ndarray) -> np.ndarray:
-        """Compute ball acceleration during free flight: a = -k|v|v + g"""
+    def _flight_acceleration(self, v: np.ndarray, omega: Optional[np.ndarray] = None) -> np.ndarray:
+        """Flight acceleration: a = -k|v|v + g [+ k_m (omega x v)].
+
+        omega is the ball spin (rad/s); when omega is None or zero the Magnus
+        term contributes exactly 0.0 so legacy (spin-blind) behavior is
+        bit-identical. k_m is the venue Magnus coefficient
+        (configs/ball_physics_venue.yaml flight.k_m).
+        """
         speed = np.linalg.norm(v)
-        return -self.physics.k * speed * v + self.physics.g
+        a = -self.physics.k * speed * v + self.physics.g
+        if omega is not None:
+            a = a + self.config.k_m * np.cross(omega, v)
+        return a
 
     def _apply_bounce(self, v: np.ndarray) -> np.ndarray:
         """Apply table bounce restitution: v+ = diag(C_h, C_h, -C_v) @ v-"""
         C = np.diag([self.physics.C_h, self.physics.C_h, -self.physics.C_v])
         return C @ v
 
-    def predict(self, p0: np.ndarray, v0: np.ndarray, t0: float) -> StrikeTarget:
+    def _apply_bounce_nakashima(
+        self, v: np.ndarray, w: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Spin-coupled table bounce (Ace/Nakashima impulse model).
+
+        Contact-point tangential velocity (contact at -r*ez from center):
+            v_T = [vx - r*wy, vy + r*wx, 0]
+        A friction impulse -alpha*m*v_T acts at the contact point, with
+        alpha = mu (1 + e_n) |vz| / |v_T| while sliding persists, capped at
+        the ROLLING value alpha = 2/5 (hollow-sphere inertia I = (2/3) m r^2)
+        at which v_T+ = (1 - 5/2 alpha) v_T reaches exactly zero. The spin
+        rows follow from the impulse torque delta_w = -(3/2r) ez x delta_v:
+            w+_x = wx - (3 alpha / 2r) v_Ty
+            w+_y = wy + (3 alpha / 2r) v_Tx
+            w+_z = wz
+        e_n is the venue-fit table restitution (BallPhysics.C_v = contact.
+        table.e_eff); mu is an UNFITTED Ace prior (constants.mu_table) — the
+        venue tangential refit was degenerate (F5 in the fit report).
+        """
+        r = self.physics.radius
+        e_n = self.physics.C_v
+        mu = self.config.mu_table
+
+        v_T = np.array([v[0] - r * w[1], v[1] + r * w[0], 0.0])
+        v_T_norm = np.linalg.norm(v_T)
+
+        if v_T_norm < 1e-9:
+            alpha = 0.0
+        else:
+            alpha_slide = mu * (1.0 + e_n) * abs(v[2]) / v_T_norm
+            nu_s = 1.0 - 2.5 * alpha_slide
+            alpha = alpha_slide if nu_s > 0.0 else 0.4  # rolling cap = 2/5
+
+        v_out = np.array([
+            v[0] - alpha * v_T[0],
+            v[1] - alpha * v_T[1],
+            -e_n * v[2],
+        ])
+        gain = 3.0 * alpha / (2.0 * r)
+        w_out = np.array([
+            w[0] - gain * v_T[1],
+            w[1] + gain * v_T[0],
+            w[2],
+        ])
+        return v_out, w_out
+
+    def predict(
+        self,
+        p0: np.ndarray,
+        v0: np.ndarray,
+        t0: float,
+        omega0: Optional[np.ndarray] = None,
+    ) -> StrikeTarget:
         """Forward-integrate and find the hitting-plane crossing.
 
         Parameters
@@ -66,6 +128,9 @@ class BallTrajectoryPredictor:
         p0 : Current ball position in HOPE frame.
         v0 : Current ball velocity in HOPE frame.
         t0 : Current timestamp (s).
+        omega0 : Optional ball spin (rad/s) for the Magnus term and (with
+            config.bounce_model == "nakashima") the spin-coupled bounce.
+            Default None -> zero spin -> identical to the legacy prediction.
 
         Returns
         -------
@@ -77,6 +142,10 @@ class BallTrajectoryPredictor:
 
         p = p0.copy()
         v = v0.copy()
+        # Spin is carried as a constant during flight (no spin-decay model)
+        # and updated at bounces when the nakashima map is active.
+        omega = np.zeros(3) if omega0 is None else np.asarray(omega0, dtype=float).copy()
+        use_nakashima = self.config.bounce_model == "nakashima"
         t = t0
         bounces = 0
 
@@ -90,7 +159,7 @@ class BallTrajectoryPredictor:
             p_prev_x = p[0]
 
             # --- Euler integration step ---
-            a = self._flight_acceleration(v)
+            a = self._flight_acceleration(v, omega)
             v_new = v + a * dt
             p_new = p + v * dt + 0.5 * a * dt ** 2
             t += dt
@@ -108,11 +177,14 @@ class BallTrajectoryPredictor:
                     p_bounce[2] = 0.0
                     v_at_bounce = v + a * (frac * dt)
 
-                    v_post = self._apply_bounce(v_at_bounce)
+                    if use_nakashima:
+                        v_post, omega = self._apply_bounce_nakashima(v_at_bounce, omega)
+                    else:
+                        v_post = self._apply_bounce(v_at_bounce)
 
                     # Continue from bounce with second-order correction
                     remaining_dt = (1.0 - frac) * dt
-                    a_post = self._flight_acceleration(v_post)
+                    a_post = self._flight_acceleration(v_post, omega)
                     p_new = p_bounce + v_post * remaining_dt + 0.5 * a_post * remaining_dt ** 2
                     v_new = v_post + a_post * remaining_dt
                     bounces += 1

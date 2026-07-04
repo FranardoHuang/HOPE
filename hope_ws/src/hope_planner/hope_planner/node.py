@@ -19,6 +19,7 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 
 from hope_msgs.msg import RacketCommand
 
+from .ball_kalman_estimator import BallKalmanEstimator
 from .constants import BallPhysics, PlannerConfig
 from .planner import HOPEPlanner
 
@@ -39,6 +40,7 @@ class HOPEPlannerNode(Node):
         self.declare_parameter("restitution_h", 0.64)     # no-spin grip equivalent (1 - a_t)
         self.declare_parameter("restitution_v", 0.9215)   # venue table e_n
         self.declare_parameter("restitution_racket", 0.654)  # paddle e const; e(u_n) exp form applied in racket_target_planner
+        self.declare_parameter("use_kalman", False)          # shadow-run the EKF next to the polyfit estimator
 
         self._ball_index = int(self.get_parameter("ball_pose_index").value)
 
@@ -51,6 +53,7 @@ class HOPEPlannerNode(Node):
             ]),
             delta_t_flight=self.get_parameter("delta_t_flight").value,
             C_r=self.get_parameter("restitution_racket").value,
+            use_kalman=bool(self.get_parameter("use_kalman").value),
         )
         physics = BallPhysics(
             k=self.get_parameter("drag_k").value,
@@ -59,6 +62,14 @@ class HOPEPlannerNode(Node):
         )
 
         self.planner = HOPEPlanner(physics=physics, config=config)
+
+        # Flag-gated EKF SHADOW estimator: fed the same measurements as the
+        # legacy polyfit estimator; the planner still ACTS on the legacy path.
+        # Only position/velocity deltas are published (diagnostics) so the
+        # EKF can be validated on live venue data before promotion.
+        self._kf = BallKalmanEstimator(config, physics) if config.use_kalman else None
+        self._kf_pos_delta = float("nan")
+        self._kf_vel_delta = float("nan")
 
         # Best-effort, depth-1 QoS for high-rate mocap topics (REP-2003 sensor style).
         mocap_qos = QoSProfile(
@@ -102,6 +113,18 @@ class HOPEPlannerNode(Node):
         p_ball = np.array([pose.position.x, pose.position.y, pose.position.z])
 
         cmd = self.planner.update(t, p_ball)
+
+        if self._kf is not None:
+            self._kf.push(t, p_ball)
+            if self._kf.ready and self.planner.estimator.ready:
+                p_kf, v_kf, _ = self._kf.estimate()
+                p_leg, v_leg, _ = self.planner.estimator.estimate()
+                self._kf_pos_delta = float(np.linalg.norm(p_kf - p_leg))
+                self._kf_vel_delta = float(np.linalg.norm(v_kf - v_leg))
+            else:
+                self._kf_pos_delta = float("nan")
+                self._kf_vel_delta = float("nan")
+
         if cmd is None:
             self._last_valid = False
             self._last_tts = float("nan")
@@ -160,6 +183,12 @@ class HOPEPlannerNode(Node):
             KeyValue(key="last_valid", value=str(self._last_valid)),
             KeyValue(key="time_to_strike_s", value=f"{self._last_tts:.4f}"),
         ]
+        if self._kf is not None:
+            status.values += [
+                KeyValue(key="kf_pos_delta_m", value=f"{self._kf_pos_delta:.4f}"),
+                KeyValue(key="kf_vel_delta_mps", value=f"{self._kf_vel_delta:.4f}"),
+                KeyValue(key="kf_rejected", value=str(self._kf.rejected_count)),
+            ]
         arr.status = [status]
         self.diag_pub.publish(arr)
 

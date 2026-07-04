@@ -77,3 +77,15 @@ class PlannerConfig:
     e_exp_g1: float = 0.759       # e(u_n) = g1 * exp(g2 * |u_n|), valid u_n 1.4-7.2 m/s
     e_exp_g2: float = -0.0441     # (u_n = normal approach speed in the racket frame)
     racket_radius: float = 0.075  # 7.5 cm paddle radius
+
+    # --- Ball estimation / prediction upgrade (flag-gated; defaults keep legacy behavior) ---
+    use_kalman: bool = False      # shadow-run BallKalmanEstimator next to the polyfit estimator
+    bounce_model: str = "diagonal"  # "diagonal" (legacy) | "nakashima" spin-coupled table bounce
+    sigma_white_m: float = 0.0019   # capture.position_noise.white_mm, configs/ball_physics_venue.yaml
+    sigma_ar1_m: float = 0.0052     # capture.position_noise.ar1_marginal_mm, configs/ball_physics_venue.yaml
+    ar1_tau_s: float = 0.060        # capture.position_noise.ar1_tau_ms (~rho 0.946 @300 Hz), configs/ball_physics_venue.yaml
+    q_accel_psd: float = 0.1        # m^2/s^3 unmodeled-accel PSD; conservative prior, NOT a venue fit
+    chi2_gate: float = 16.3         # 3-dof chi-square @ ~0.999 innovation gate (measurement outliers)
+    bounce_sigma_t: float = 0.2     # m/s post-bounce tangential vel std (grip refit degenerate, F5 in fit report)
+    k_m: float = 0.00444            # Magnus accel coeff, flight.k_m, configs/ball_physics_venue.yaml
+    mu_table: float = 0.25          # table friction, Ace prior — UNFITTED (venue F5 tangential refit degenerate)
