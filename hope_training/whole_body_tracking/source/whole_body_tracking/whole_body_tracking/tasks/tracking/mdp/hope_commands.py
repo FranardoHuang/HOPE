@@ -495,6 +495,9 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["joint_vel_abs_max"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["time_to_strike_s"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["pre_strike_flag"] = torch.zeros(self.num_envs, device=self.device)
+        # P2.4 watch-metric: planar |v_base| during the approach (the base_decel_tracking reward's
+        # subject). 0 outside pre_strike -> the reset-mean dilutes like the other *_prestrike metrics.
+        self.metrics["base_speed_xy_prestrike"] = torch.zeros(self.num_envs, device=self.device)
         # Curriculum perturbation scale (reference_perturbed mode): 0 at start ramping to 1; lets you
         # watch the reachable target ball widen in wandb. Stays 0 in "uniform" mode.
         self.metrics["ref_perturb_scale"] = torch.zeros(self.num_envs, device=self.device)
@@ -1281,6 +1284,13 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["proj_grav_xy"] = self.proj_grav_xy
         self.metrics["base_ang_vel_xy"] = self.base_ang_vel_xy_norm
         self.metrics["base_vertical_speed"] = self.vertical_speed
+        # P2.4 (PACE smooth deceleration): mean planar base speed during the approach — the quantity
+        # the base_decel_tracking reward shapes toward v_des = clamp(v_gain*dist_xy, 0, v_max).
+        # Watch it fall on far targets when the term is enabled (task.rewards.base_decel_weight>0).
+        base_speed_xy = torch.norm(data.root_lin_vel_w[:, :2], dim=-1)
+        self.metrics["base_speed_xy_prestrike"] = torch.where(
+            self.pre_strike, base_speed_xy, torch.zeros_like(base_speed_xy)
+        )
         # --- foot footwork signals (slip² / velocity / drag); feet may STEP, so this is PENALTY-only ---
         if self._foot_idx_robot and self._contact_sensor is not None and self._foot_idx_contact:
             f_force = torch.norm(self._contact_sensor.data.net_forces_w[:, self._foot_idx_contact, :], dim=-1)

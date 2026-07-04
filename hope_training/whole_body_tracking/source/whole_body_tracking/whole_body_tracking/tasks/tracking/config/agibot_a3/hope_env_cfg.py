@@ -322,6 +322,19 @@ class HOPEDeployParityRewardsCfg(HOPERewardsCfg):
         func=mdp.hold_ready, weight=2.0,
         params={"command_name": "racket_target", "std": 0.5, "reach": 0.65})
 
+    # --- P2.4 PACE-style smooth deceleration (G08, flag-gated, DEFAULT OFF) --------------------------
+    # Pseudo base-velocity command proportional to the remaining PLANAR racket->target error:
+    # v_des = clamp(v_gain*dist_xy, 0, v_max); reward = exp(-(|v_base_xy| - v_des)^2/std^2), gated to
+    # pre_strike. Far target -> pays for moving at v_max (cooperates with racket_progress); at arrival
+    # v_des -> 0 -> pays for a CALM base, killing the reactive rush-then-slam toward far targets.
+    # REWARD-side only — the frozen 175-D actor obs contract is untouched. weight 0.0 = OFF (IsaacLab's
+    # RewardManager skips zero-weight terms); enable per-experiment via task.rewards.base_decel_weight
+    # (suggested trial 1.0). CLI/yaml-tunable: base_decel_weight / _v_gain / _v_max / _std.
+    # Watch metric: base_speed_xy_prestrike (should taper near targets instead of staying hot).
+    base_decel = RewTerm(
+        func=mdp.base_decel_tracking, weight=0.0,
+        params={"command_name": "racket_target", "v_gain": 2.0, "v_max": 1.6, "std": 0.4})
+
     # --- strike-window stability: be planted + upright + still AT the hit (gated to the strike window) ---
     strike_upright = RewTerm(func=mdp.strike_proj_grav_xy, weight=-2.0, params={"command_name": "racket_target"})
     strike_ang_vel = RewTerm(func=mdp.strike_base_ang_vel, weight=-0.5, params={"command_name": "racket_target"})
