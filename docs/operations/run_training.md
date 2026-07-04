@@ -29,6 +29,32 @@ The training scaffold exists under:
 - The default training task is now `HOPEPingPongDeployParity` (gym id `HOPE-PingPong-DeployParity-AgibotA3-v0`); `HOPEPingPongRealSensor` is a backward-compat alias for the same task. Its actor observation is 175-D deploy-parity: it removes `motion_anchor_pos_b` (3) and `base_target_pos_b` (2) and reframes `racket_target_pos_b` racket-FK-relative. Layout reference: `scripts/realsensor_obs_reference.py`; checks: `scripts/verify_realsensor.py`.
 - `task=HOPEPingPong` remains available only as the legacy 180-D full-obs comparison path; it is NOT deploy-honest and cannot deploy.
 
+2026-07-04 update (deploy-parity robustness flags, all default OFF):
+
+- `motion.clip_switch_prob` (default `0.0`; try `0.002` ≈ one switch per 3-4 swings): each control
+  step that fraction of envs aborts its swing operator-style — the reference jumps to a random
+  clip's FIRST frame with a fresh pre-swing hold and a fresh target; the robot is untouched (no
+  teleport). This is deploy parity for `pp_reference_clock.hpp`, which flips `clip_id` mid-swing
+  whenever the planner re-sides the target; training previously only switched at clip END — the
+  root cause of the venue falls at 准备/正手/反手 switches. Aborted swings do NOT enter the A8
+  post-swing buffer and slightly deflate completion-rate metrics. Watch: `clip_switch_count`.
+- P2.4 `base_decel` reward (PACE-style pre-strike base-speed shaping, default OFF via
+  `rewards.base_decel_weight: 0.0`): see Reward Shaping below.
+- A1v2 actor-view sensor defects (`racket:` block; modeled on the venue mocap fit — occlusion gaps
+  concentrate at contacts, re-lock after contact carries a fresh bias): `target_dropout_prob`
+  (per-step frame loss, hold-last), `target_post_strike_dropout_s` (forced hold-last window after
+  each strike; venue ~0.03 s), `target_bias_per_swing` (3-D Gaussian position bias resampled at
+  each strike edge, held constant within a swing). They degrade ONLY the actor-visible target
+  view; rewards, critic, and metrics keep the true target. Same block as the A1 latency/noise
+  family (`target_delay_steps`, `target_jitter_pos_per_s`, `target_jitter_vel_per_s`,
+  `midswing_resample_prob`, `target_noise_white`, `target_noise_ar1_sigma`,
+  `target_noise_ar1_rho`) — every one of these defaults off.
+- ⚠ Override-whitelist rule: task-yaml keys under `task.motion` / `task.racket` are translated
+  through explicit whitelists (`_MOTION_KEYS` / `_RACKET_KEYS` in `scripts/train.py`) and any
+  unconsumed key RAISES at startup. Adding a new key to a task yaml therefore requires extending
+  the whitelist in the SAME commit — 018467a added `clip_switch_prob` to the yaml only and broke
+  every task-yaml startup until the 74c129e hotfix.
+
 `TrackingFlat` and `HOPEPingPong` forehand training have run end-to-end on the copied Agibot A3 URDF asset (31 actuated DOF), including WandB logging, checkpoint save, and ONNX export. This proves the pipeline can run; it is NOT an accepted quality baseline. G04/G05 remain Partial, and G06/G07 are not accepted until sim-to-sim and dry-run deployment gates record verification.
 
 This branch adds:
@@ -410,6 +436,15 @@ band while preventing non-hit rewards from dominating:
 - `racket_normal_weight: 5.0`, `racket_normal_std: 0.30`
 - `base_position_weight: 2.5`, `base_position_std: 0.25` — legacy `HOPEPingPong` task only; the deploy-parity default REMOVES the base_position term entirely (base-free footwork: dense `racket_progress` plus pre-strike stability penalties)
 - regularization: `joint_torques_weight: -0.00003`, `action_rate_weight: -0.10`, `joint_limit_weight: -10.0`, and `undesired_contacts_weight: -0.1`
+- `base_decel_weight: 0.0` (P2.4, OFF by default; trial weight 1.0) — PACE-style pre-strike base
+  speed shaping: `exp(-(||v_base_xy|| - v_des)^2 / base_decel_std^2) * pre_strike` with
+  `v_des = clamp(base_decel_v_gain * planar_dist(racket→target), 0, base_decel_v_max)` (defaults
+  `v_gain 2.0 /s`, `v_max 1.6 m/s`, `std 0.4 m/s`). Uses racket→target planar distance, NOT base
+  position (deploy-parity obs and the base-free reward structure stay untouched); gated dead at
+  and after the strike frame so it never commands a speed-up toward the swung-through old target.
+  Speed-magnitude-only v1; the v2 spec (fitted accel/decel envelope, direction term, time budget,
+  stroke-amplitude coupling) is `docs/motion_and_contract_v3.md` §5. Watch:
+  `base_speed_xy_prestrike`.
 
 These stds are DECOUPLED from acceptance thresholds: the position metric still reports true success only
 below `strike_success_pos_thresh = 0.075 m`, velocity below `0.5 m/s`, and racket-normal error below

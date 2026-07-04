@@ -2,6 +2,36 @@
 
 Use this file for short project-state updates that future humans and agents need to see. Keep detailed reasoning in the relevant gate doc.
 
+## 2026-07-04 (day/evening, main) — deploy-parity robustness flags; eval mode B finds the face normal is clip-locked; contract v3 design
+
+- **`motion.clip_switch_prob`** (018467a, default 0.0, try 0.002): deploy-parity MID-swing clip
+  switch through the wrap-resample path (random abort → other clip's frame 0 + fresh hold +
+  fresh target, robot untouched). Root-caused the venue falls at 准备/正手/反手 switches to
+  untrained mid-clip reference jumps (`pp_reference_clock` flips clip_id at arbitrary tts). A8
+  capture stays wrap-only.
+- **P2.4 `base_decel` reward** (74c129e, default off): PACE-style pre-strike pseudo-speed tracking
+  `v_des = clamp(2.0·planar_dist(racket→target), 0, 1.6)` on ‖v_base_xy‖, `std 0.4`, dead at/after
+  the strike frame. Mech-verified on/off. v1 is a deliberate proxy — the P-law critique (no fitted
+  accel/decel envelope, magnitude-only, no time budget) and the v2 spec live in
+  `docs/motion_and_contract_v3.md` §5.
+- **train.py override layer hardened** (1181c74 + 74c129e hotfix): `task.motion`/`task.racket`
+  yaml keys translate through explicit whitelists; unknown keys RAISE at startup. Lesson recorded
+  in run_training.md: a new task-yaml key must extend the whitelist in the same commit (018467a
+  briefly broke every task-yaml startup).
+- **Eval mode B landed** (f56f9c4): `--target-source venue-balls` — sample fitted venue incoming
+  balls (with spin), StrikeSpec-derive the demanded racket state, score the virtual return
+  (contact model → drag+Magnus flight → bounds+net). HEADLINE: the policy tracks venue balls
+  pos/vel OOD (3.7 cm / 0.18 m/s) **but the face normal is clip-locked** (36-76° err, 0% legal
+  returns; counterfactual with the demanded normal: 25/25, median 6.7 cm) — the 175-D contract has
+  NO normal-demand channel. Two paths logged in NOW.md (planner-side fixed-normal solve now /
+  175→179 contract extension next gen); decision doc: `docs/motion_and_contract_v3.md`.
+- **Contract & motion-library v3 design committed** (`docs/motion_and_contract_v3.md`): planner
+  output ↔ policy egocentric input table verified against code (finding: `racket_target_vel_w` is
+  a WORLD-frame passthrough — only position is egocentric; the deploy wire `RacketCommand.normal`
+  already carries the face normal, it dies at `pp_obs_builder` for lack of an obs slot; the critic
+  already has privileged `racket_target_normal_w`), 175→179 migration plan, continuous-intensity
+  motion library q_ref(φ,ρ) with cost-based selector, PACE-decel v2, 6-clip capture plan.
+
 ## 2026-07-03 (night, branch `rsi-on-wrap-progress-fix`) — venue data on RunPod; F10/full-state/self-check ran on real data
 
 - **Venue dataset copied to `/workspace/yikang/latest_data`** (extracted npz ×9 + segments + qa + analysis artifacts; the `.tak` files are unused raw Avatar projects). All report-§10 tools now have REAL-data results (report §10.4–10.6 updated):

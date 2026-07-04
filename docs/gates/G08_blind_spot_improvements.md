@@ -117,6 +117,14 @@ target-conditioned stitching/scaling of ready+strike references and eventually r
   state (built-in stitching); strike rewards gated to short windows around impact avoid sharp wrist
   accelerations; phase-dependent target noise trains tolerance to late target updates.
 
+Status (2026-07-04): two v1 pieces landed on main as default-off flags — `motion.clip_switch_prob`
+(deploy-parity mid-swing clip switch; venue 准备/正手/反手-switch falls root cause) and the
+PACE-style `base_decel` reward (`rewards.base_decel_weight`, pre-strike pseudo-speed tracking).
+Signal-tier arms R11/R12 in NOW.md. The v2 deceleration design (fitted accel/decel envelope +
+direction + time budget + stroke-amplitude coupling — franco's correction to the PACE P-law) and
+the continuous-intensity motion library q_ref(φ,ρ) are specified in
+[../motion_and_contract_v3.md](../motion_and_contract_v3.md).
+
 ### P2.5 Ball-flight physics modeling (landing point, spin, ball-quality rewards)
 
 Failure: no ball model at hit time → cannot reward landing point, pace, angle, or spin; cannot
@@ -182,7 +190,9 @@ High-leverage items the papers treat as first-class but the roadmap above does n
    replayed in sim), fixed target grids, per-checkpoint scoreboard on `mujoco_eval_onnx.py`,
    mandatory full mocap/obs/action logging for every hardware session (the MDU captures already
    found the yaw drift and the elbow saturation — make it policy), automatic hit detection from
-   ball-velocity discontinuities for real hit/return/landing stats.
+   ball-velocity discontinuities for real hit/return/landing stats. Partially realized 2026-07-04:
+   venue-ball-driven eval (`--target-source venue-balls`, see G06) covers the "real incoming
+   distribution" half; the fixed-serve-corpus replay half stays open.
 5. **Reference-motion scale.** 2 clips vs SMASH's 400(+5k generated). The GVHMR→GMR pipeline
    already works; 30-50 orientation-normalized clips across the target workspace is the cheapest
    attack on P2.2/P2.3. MVAE generation can come later (SMASH: 5k→10k was already marginal).

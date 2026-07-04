@@ -68,6 +68,18 @@ Done (2026-06-27 → 2026-07-02, recorded 2026-07-03):
   (nominal-stand start, windup hold with pinned time_to_strike, one full clip per swing, rest
   between swings, no teleports, absolute fall terminations only), reporting swing completion rates
   and time-to-fall.
+- Eval mode B exists (2026-07-04): `--target-source venue-balls` (`mujoco_eval_onnx.py` +
+  `scripts/venue_ball_sampler.py`) samples fitted venue incoming balls (with spin), StrikeSpec-
+  inverts the demanded racket state (pos/vel/normal, sign-matched to the swing side's reference
+  face), drives the unchanged target pipeline, and scores a virtual return at the exact-strike
+  frame (capture gate → venue contact model → drag+Magnus flight → bounds + net clearance).
+  Headline reported as `return_success_rate` per strike; mode-A (`boxes`) output stays
+  byte-identical. First run: pos/vel tracking survives the OOD venue distribution (3.7 cm /
+  0.18 m/s) but the face normal is clip-locked (36-76° err, 0% legal returns; ad-hoc
+  counterfactual with the demanded normal: 25/25) — the 175-D contract has no normal channel
+  (`docs/motion_and_contract_v3.md`). v1 caveats: uncorrelated box sampling, human-receiver
+  contact heights (0.98-1.26 m vs trained 0.72-1.13 m — intentional realism, expect pos_pass to
+  drop), incompatible with `--deploy-faithful`, counterfactual not yet a committed flag.
 - A documented validation flow with an acceptance-criteria table exists:
   `agi/a3_deploy_example/MUJOCO_VALIDATION_RUNBOOK.md` (rate ~50 Hz, sync stable, infer < 20 ms,
   projected gravity sanity, bounded actions, neck passive).

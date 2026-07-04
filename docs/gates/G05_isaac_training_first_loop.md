@@ -97,6 +97,18 @@ Done:
 - 2026-07-02: `scripts/csv_to_npz.py --robot agibot_a3` now auto-aligns exported world-frame arrays into HOPE +X before saving/uploading, and `scripts/check_motion_target_alignment.py` provides a no-Isaac gate. Verification: `python -m py_compile ...` passed; `python scripts/check_motion_target_alignment.py --yaml cfg/task/HOPEPingPong.yaml` and `--yaml cfg/task/HOPEPingPongRealSensor.yaml` passed; the same check fails on old v4 as expected.
 - 2026-07-02 (later): Fixed an `UnboundLocalError` in `RacketTargetCommand._resample_command` (`hope_commands.py`; the base-XY coupling branch read `motion` before assignment) that crashed EVERY `HOPEPingPong*` env reset — the working tree could not start training at all until this fix. After the fix: local-clip smoke passed (`num_envs=32 max_iterations=2 logger=tensorboard`), and a bounded verification training run passed: `hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true num_envs=4096 max_iterations=300 run_name=e2e_verify_train seed=1` -> W&B run `wuj6ds9u` (https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/wuj6ds9u), mean reward -1.37 -> ~25, mean episode length 5 -> ~340 steps, `strike_success` 0 -> 0.006 in 300 iters, `model_{0,100,200,299}.pt` + ONNX exported and synced. Pipeline viability evidence on the corrected `_hopex` clips, still not a quality baseline. [This run used the pre-merge branch defaults, i.e. `target_mode: reference_perturbed`.]
 - 2026-07-02 (later): Full fresh MP4 -> npz rerun in an isolated dir reproduces the shipped artifacts bit-for-bit (GMR pkl and retargeted CSV byte-identical; npz equal to `hope_forehand_hopex.npz` within 2e-7 float noise), and `check_motion_target_alignment.py --clip` passes on the regenerated clip. One env caveat found and documented: GVHMR's YOLO load needs `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1` under torch 2.7 (see `docs/operations/setup_environments.md`).
+- 2026-07-04: `motion.clip_switch_prob` (default 0.0, try 0.002) adds deploy-parity MID-swing clip
+  switches through the existing wrap-resample path: per-step random abort to a different clip's
+  frame 0 + fresh pre-swing hold + fresh target, robot untouched. Parity for
+  `pp_reference_clock.hpp`, which flips `clip_id` at arbitrary tts when the planner re-sides the
+  target — the root cause of the venue falls at 准备/正手/反手 switches. A8 post-swing capture
+  stays wrap-only (aborted swings are not captured). Mech-verified via `clip_switch_count`.
+- 2026-07-04: P2.4 `base_decel` reward landed default-off (`rewards.base_decel_weight: 0.0`;
+  PACE-style pre-strike pseudo-speed tracking on racket→target planar distance — formula and v2
+  plan in `docs/operations/run_training.md` Reward Shaping and `docs/motion_and_contract_v3.md`
+  §5). Mech-verified on/off. Same commit hardened `scripts/train.py`: `task.motion`/`task.racket`
+  yaml keys go through explicit whitelists and unknown keys RAISE — new yaml keys must extend the
+  whitelist in the same commit (the 018467a startup-crash lesson).
 
 Done (2026-06-26 — first loop reproduced in this harness):
 
