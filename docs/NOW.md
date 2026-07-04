@@ -199,6 +199,32 @@ franco 已提供 forehand_new.mp4 / backhand_new.mp4,已上传 `/workspace/share
 
 **斜录(实战)动作:视频→CSV 全通**(GVHMR/GMR 在 pod 上直接跑通了,产物 /workspace/shared/motions/oblique/,58/64 帧)。剩 csv→npz 一步需要 Isaac FK(或我写 MuJoCo FK 版,已排队)。球轨迹数据已入共享区 ball_mocap_0703。
 
+## 计划未做全量清单(2026-07-04 franco 抓漏后建立;常驻,每日对账)
+
+**P2.4 集群(本次漏账主体,franco 抓出):**
+| 项 | 状态 | 归属/时机 |
+| --- | --- | --- |
+| P2.0 准备动作定义(视频→GVHMR,方案已拍板) | **未做——但今天在场地拍 2 分钟就有原料**,管线已在 pod 跑通 | franco 场地拍,claude 处理 |
+| PACE 减速命令(伪速度∝剩余误差→平滑减速入站位) | 未设计未实现 | claude,今晚设计+实现(flag 化) |
+| ready→strike→ready 拼接 | 未做(依赖 P2.0) | P2.0 后 |
+| base-target 回归 ablation(HITTER 位置命令,论文背书) | 未做 | 通宵臂后的下一轮 |
+
+**其余未做(按可行动性排序):**
+| 项 | 状态 | 阻塞物 |
+| --- | --- | --- |
+| A4 后半:真机数据落盘制度 | 未建 | **今天场地就该全量落盘**(planner 日志/VRPN 流/视频) |
+| A5 挥拍视频 30-50 条 | 主动推迟 | 场地顺手拍几条即赚 |
+| eval B 模式(来球分布驱动) | 承诺未交 | claude,修复已 landed,今天补 |
+| Ace 饱和 Magnus 形式接进 flight/virtual_ball | yaml 有键未消费 | 小活,高旋外推保护 |
+| A6 摔倒管理(guard 包络、recover 行为) | 未做 | 下周 |
+| A7 击球事件自动检测 | 未做 | 依赖 A4 落盘 |
+| A2 坐标变换设计 | 未做 | yikang 下周 |
+| A3 执行器辨识 | 未做 | 需专门真机时段 |
+| P2.5-full 真球进 Isaac | 未做 | 下周主菜 |
+| P2.6 扣杀 | 未动 | 长线 |
+| Queued#6 G06 验收数字 | 半吊 | 新候选认证流程替代中 |
+| Queued#2 clip 转正 | **其实已完成**(hopex=转正版),标记关闭 | — |
+
 ## Gap List 状态扫描(2026-07-04 中午重扫;原表保留在下方)
 
 | # | 状态 |
