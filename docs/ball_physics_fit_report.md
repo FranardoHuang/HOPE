@@ -501,3 +501,26 @@ Direct measurement on the same 192 gap-free ballistic arcs of §10.6 (quaternion
   is **~30% multiplicative** (σ/|ω| = 0.28–0.31 across the arc set), and the spin
   AXIS is unreliable below ~2 rev/s — consistent with, and sharpening, the 2 rev/s
   floor of §9.3/`capture.spin_noise`.
+
+### 11.3 a_t refit adjudication with clean-spin sources (2026-07-04) — no yaml change
+
+Full run on the 145 f10-gated strikes (`/workspace/franco/research/at_refit/`, ~20 min pod run):
+
+- **Trajectory-Magnus spin inference does NOT exist on this rig** (quantified, not assumed):
+  144/145 strikes have a ≥100 ms pre-strike arc, but the MC noise floor gives per-strike spin
+  sigma median **142 rev/s** (q25 59, best single strike 9.6) vs venue-median spin 1.9 rev/s —
+  usable count **0/144** at any threshold. Physically: Magnus displacement at 2 rev/s over 0.3 s
+  ≈ 10 mm ≈ the 9 mm correlated noise floor. Even at pro spin (≥15 rev/s) the best windows reach
+  only σ≈10 rev/s — not fit-grade. Adjudicating strike spin transfer needs a cleaner rig
+  (OptiTrack-class 0.4 mm) or marked-ball high-speed video.
+- **Pre-strike quat spin is GOOD input** — the 0.22× junk is the ACROSS-strike Δω only (never
+  used by this fit). Dropping spin (ω=0) makes the tangential fit WORSE (+0.06 m/s median).
+- **a_t refits**: quat-spin a_lsq 0.559 CI [0.441, 0.677], grid-best 0.58. Median |Δv_t| on this
+  set: shipped 0.52 → **0.377 m/s**; best achievable by ANY (a_t × spin source) → 0.356 (−5.6%).
+  (The §9.2 figure 0.68 was the pre-fix 48 through-paddle pairs — different set, same story.)
+- **Rolling-cap hypothesis REJECTED**: a_t = 2/5 fits worse under every source and every bootstrap
+  CI excludes 0.40 → the rubber shows real tangential restitution; a_t > 2/5 is physical.
+- **Verdict: keep a_t = 0.52 (0.58 defensible; do not go below 0.46). No yaml change.** The
+  residual ~0.36-0.38 m/s is model-FORM ceiling (as large as the tangential signal itself);
+  remaining levers = racket face-normal estimation (±5°) and finite-dwell contact — i.e. §9.2's
+  wall, now with the spin-input hypothesis eliminated.
