@@ -180,6 +180,12 @@ rewards:
   base_decel_v_gain: 2.0    # 1/s: slope of the pseudo velocity command per meter of planar error
   base_decel_v_max: 1.6     # m/s: desired-speed cap for far targets
   base_decel_std: 0.4       # m/s: kernel width around the desired speed
+  # R16 (franco 2026-07-04): free the racket-side wrist from ORIENTATION mimic — drop
+  # right_wrist_yaw_Link from the motion_body_ori / motion_body_ang_vel body lists (position and
+  # linear-velocity mimic keep the swing path). Rationale: the video pipeline's wrist orientation
+  # is unreliable (GVHMR), so mimicking it caps face quality; freed, the face is shaped only by
+  # the racket_normal reward (and by the commanded normal at contract v3). Default off.
+  free_wrist_ori_mimic: false
   hold_ready_weight: 2.0
   # std RETUNED 0.5 -> 1.5 (2026-07-03): the 2026-07-03_02-01-17 run showed hold_ready ~inert
   # (Episode_Reward ~0.013/s, ~1/100 of expected) because real base |omega| during the hold is

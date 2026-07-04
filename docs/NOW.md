@@ -244,6 +244,7 @@ B 模式(真实来球分布 + StrikeSpec 反解应有拍状态)实测:位置/速
 | R13 | R11/R12 赢家叠加进产品线 | 产品候选 |
 | R14 | `"task.motion.speed_scale_range=[0.8,1.2]"`(2026-07-04 晚已实现入库,默认关) | **变速重定时**:同一 clip 变速播放+速度需求同步缩放,策略能否学会按需调节挥拍速度幅值 = 无新数据的连续强度 v0(franco"加减速改幅度";空间幅度另由 R6 裁剪臂回答,两臂合看) |
 | R15 | v5 clip 臂:`motion_file=/workspace/shared/motions/hope_forehand_v5.npz motion_file_2=.../hope_backhand_v5.npz "task.racket.strike_phase_per_clip=[0.768,0.345]"` + 下方 v5 专属采样框 | 新动作源(短条、首尾贴 ready);⚠与 hopex 差两个因子(数据源+clip 长度),与 R6 对照拆长度因子 |
+| R16 | `task.rewards.free_wrist_ori_mimic=true`(franco 提议 2026-07-04 晚;已实现+机制验证,默认关) | **手腕解除姿态模仿**:把 right_wrist_yaw_Link 从 motion_body_ori/ang_vel 列表拿掉(位置/线速度模仿保留=挥拍路径照学)。理由:视频管线的手腕朝向不可靠(GVHMR),模仿它给拍面质量封顶。**在 vb 产品线上跑才有真学习信号**(落点/消旋奖励直接塑形拍面;纯 DeployParity 上只是去噪)。契约日它是法线指令通道的执行机构 |
 
 R15 v5 专属采样框(从 v5 击球帧提取,pos ±0.10 / vel(clean) ±0.50,沿斜录臂惯例):
 `"task.racket.pos_range_per_clip.forehand.x=[0.42,0.62]" ...y=[-0.40,-0.20] ...z=[0.99,1.19]`

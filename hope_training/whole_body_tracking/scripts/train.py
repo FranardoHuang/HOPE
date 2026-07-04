@@ -500,6 +500,20 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 _require(hasattr(R, "base_decel"), "rewards.base_decel")
                 R.base_decel.params[_pk] = float(_bd)
                 applied.append(f"rewards.base_decel.params.{_pk}={float(_bd)}")
+        # R16 (franco 2026-07-04): free the racket wrist from ORIENTATION mimic. Config-level only —
+        # drop the racket-mount link from the body lists of the two orientation-imitation terms;
+        # position / linear-velocity mimic keep the swing path, and the face orientation is then
+        # shaped by the racket_normal reward alone (commanded normal at contract v3).
+        if _get(rw, "free_wrist_ori_mimic") is not None and _as_bool(_get(rw, "free_wrist_ori_mimic")):
+            _WRIST = "right_wrist_yaw_Link"
+            for _tn in ("motion_body_ori", "motion_body_ang_vel"):
+                _require(hasattr(R, _tn), f"rewards.{_tn}")
+                _term = getattr(R, _tn)
+                _names = [b for b in _term.params["body_names"] if b != _WRIST]
+                _require(len(_names) < len(_term.params["body_names"]),
+                         f"rewards.{_tn}.params.body_names contains {_WRIST}")
+                _term.params["body_names"] = _names
+                applied.append(f"rewards.{_tn}.body_names-={_WRIST}")
         jt = _get(rw, "joint_torques_weight")
         if jt is not None:
             _require(hasattr(R, "joint_torques"), "rewards.joint_torques")

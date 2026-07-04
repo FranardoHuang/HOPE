@@ -59,6 +59,14 @@ The training scaffold exists under:
   family (`target_delay_steps`, `target_jitter_pos_per_s`, `target_jitter_vel_per_s`,
   `midswing_resample_prob`, `target_noise_white`, `target_noise_ar1_sigma`,
   `target_noise_ar1_rho`) — every one of these defaults off.
+- `rewards.free_wrist_ori_mimic` (R16, default `false`): drop `right_wrist_yaw_Link` (the racket
+  mount) from the `motion_body_ori` / `motion_body_ang_vel` body lists — the wrist's ORIENTATION
+  stops being imitated while position/linear-velocity mimic keep the swing path. Rationale
+  (franco): the video pipeline's wrist orientation is unreliable (GVHMR), so mimicking it caps
+  face quality; freed, the face is shaped by the `racket_normal` reward (and by ball-outcome
+  rewards on the VirtualBall stack — the arm with a real learning signal for the face). Note this
+  codebase has NO joint-level imitation rewards — body-level `motion_body_ori` on the wrist link
+  IS the face mimic, so the flag is config-level (body-list filtering in `train.py`).
 - ⚠ Override-whitelist rule: task-yaml keys under `task.motion` / `task.racket` are translated
   through explicit whitelists (`_MOTION_KEYS` / `_RACKET_KEYS` in `scripts/train.py`) and any
   unconsumed key RAISES at startup. Adding a new key to a task yaml therefore requires extending

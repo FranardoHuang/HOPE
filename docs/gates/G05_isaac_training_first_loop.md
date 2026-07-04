@@ -117,6 +117,14 @@ Done:
   clean; ON run `[0.8,1.2]` 25 it clean with `Live/motion/playback_speed` per-iter env-mean
   fluctuating 0.981-1.012 — the U(0.8,1.2)/√512 signature (a dead flag would sit at 1.0000).
   Arm R14 is launch-ready.
+- 2026-07-04 (late): `rewards.free_wrist_ori_mimic` (R16, franco's wrist idea) landed default-off
+  and MECH-VERIFIED on pod (25 it clean; startup override log shows both
+  `motion_body_ori.body_names-=right_wrist_yaw_Link` and `motion_body_ang_vel.body_names-=...`).
+  Config-level: this codebase has no joint-level mimic rewards — body-level orientation tracking
+  on the racket-mount link IS the face mimic; the flag filters it out of the two orientation
+  terms while keeping position/linear-velocity mimic (swing path). Face is then shaped by
+  `racket_normal` / ball-outcome rewards; at contract v3 the freed wrist becomes the actuator of
+  the commanded-normal channel.
 - 2026-07-04 (evening): v5 clips processed end-to-end ON the pod (`v5_pipeline.sh`, reusing the
   oblique pipeline + `csv_to_npz_mujoco.py`): `/workspace/shared/motions/hope_{forehand,backhand}_v5.npz`
   (56/58 frames @50 Hz, yaw re-grounded +86.6°/+83.6°→0, strike phases [0.768, 0.345]). Data
