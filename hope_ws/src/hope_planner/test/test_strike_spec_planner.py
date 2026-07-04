@@ -242,3 +242,66 @@ def test_integrate_to_table_plane_none_when_never_crossing():
         np.array([0.0, 0.0, -0.1]), np.array([1.0, 0.0, -1.0])
     )
     assert out is None
+
+
+# --- spin-return physics anchors (franco 2026-07-04: 拍面角度是为了接旋球的) ------------------- #
+def test_flat_face_flies_on_topspin():
+    """A flat-face return of a 15 rev/s topspin ball kicks UP ~10 deg vs the no-spin return —
+    the reason face angle exists. Anchors the omega x r coupling in the contact model."""
+    import numpy as np
+
+    from hope_planner.ball_contact import predict_paddle_contact
+    from hope_planner.constants import BallPhysics, PlannerConfig
+
+    phy, cfg = BallPhysics(), PlannerConfig()
+    v_in = np.array([-5.0, 0.0, -0.5])
+    v_r = np.array([1.5, 0.0, 0.2])
+    n = np.array([1.0, 0.0, 0.0])
+    v_flat, _ = predict_paddle_contact(v_in, v_r, n, np.zeros(3), phy, cfg)
+    v_top, _ = predict_paddle_contact(v_in, v_r, n, np.array([0.0, -94.2, 0.0]), phy, cfg)
+    ang_flat = np.degrees(np.arctan2(v_flat[2], np.hypot(v_flat[0], v_flat[1])))
+    ang_top = np.degrees(np.arctan2(v_top[2], np.hypot(v_top[0], v_top[1])))
+    assert ang_top - ang_flat > 8.0  # measured 10.7 deg at venue params
+    # sidespin analogue: ~1 m/s lateral kick
+    v_side, _ = predict_paddle_contact(v_in, v_r, n, np.array([0.0, 0.0, 94.2]), phy, cfg)
+    assert abs(v_side[1]) > 0.7
+
+
+def test_spin_ignorant_solution_misses():
+    """Solve the strike spec ASSUMING no spin, then apply it to the real 15 rev/s topspin ball:
+    the landing must miss by a large margin (this is why the planner needs a spin input), while
+    the spin-aware solution lands on target."""
+    import numpy as np
+
+    from hope_planner.ball_contact import predict_paddle_contact
+    from hope_planner.constants import BallPhysics, PlannerConfig
+    from hope_planner.ball_trajectory_predictor import BallTrajectoryPredictor
+    from hope_planner.constants import TableParams
+    from hope_planner.strike_spec_planner import StrikeSpecPlanner
+
+    phy, cfg, tab = BallPhysics(), PlannerConfig(), TableParams()
+    planner = StrikeSpecPlanner(phy, cfg, tab)
+    pred = BallTrajectoryPredictor(phy, cfg, tab)
+    ball_p = np.array([0.3, -0.4, 1.0])
+    ball_v = np.array([-5.0, 0.3, -0.6])
+    w_top = np.array([0.0, -94.2, 0.0])
+    target = np.array([2.2, -0.3])
+
+    spec_blind = planner.solve(ball_p, ball_v, np.zeros(3), target, racket_speed_budget=10.0)
+    spec_aware = planner.solve(ball_p, ball_v, w_top, target, racket_speed_budget=10.0)
+    assert spec_blind is not None and spec_aware is not None
+    # replay the blind spec against the REAL spinny ball
+    v_plus, w_plus = predict_paddle_contact(ball_v, spec_blind.v_r, spec_blind.n, w_top, phy, cfg)
+    land_blind = pred.integrate_to_table_plane(ball_p, v_plus, w_plus)
+    assert land_blind is not None
+    miss_blind = np.linalg.norm(np.asarray(land_blind[0][:2]) - target)
+    resid_aware = np.linalg.norm(np.asarray(spec_aware.landing_xy) - target)
+    # Measured at venue params: blind miss 45 mm vs aware residual 2.4 mm. NOTE the model
+    # PREDICTS partial cancellation for topspin (contact kick lifts ~ a_t*R*omega, flight Magnus
+    # drops ~ k_m*omega*v — both linear in omega), so the blind miss is centimeters, not the
+    # folk-expected half meter. This is a falsifiable prediction: if real robot blocks fly LONG
+    # on topspin, the fitted tangential transfer (a_t=0.52, form error 0.377 m/s) underestimates
+    # the kick — capture that on the robot-swing calibration day.
+    assert resid_aware < 0.01
+    assert miss_blind > 5 * resid_aware
+    assert miss_blind > 0.03
