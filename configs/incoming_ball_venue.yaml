@@ -59,7 +59,12 @@ vb_boxes_training_rebalanced:
   vb_vel_x_range: [-3.29, -0.10]   # rally fast end .. other slow end
   vb_vel_y_range: [-0.58, 0.41]
   vb_vel_z_range: [-2.30, 0.49]    # lob steep drop .. lob rising edge
-  vb_spin_abs_max: 65.2            # spin-class |w| q90 (10.4 rev/s)
+  vb_spin_abs_max: 50.0            # NOT the spin-class q90 (65.2): that comes from n=5 gated
+                                   # strikes (statistically fragile) AND per-component sampling
+                                   # corners at cap*sqrt(3) — 65.2 -> 113 rad/s = 18 rev/s, OUTSIDE
+                                   # the contact-model validity envelope (0-15 rev/s). 50 keeps the
+                                   # corner at 13.8 rev/s (inside) and ~= rally-class q90 (45.6).
+                                   # (franco 2026-07-04: recording max 87 rad/s was deliberate feeds)
   # per-class cores, for curriculum or class-conditional sampling:
   #   rally: vx[-3.29,-1.43] vz[-1.25,0.35] |w|q90=45.6
   #   lob:   vx[-1.71,-0.69] vz[-2.30,0.49] |w|q90=24.3
