@@ -206,6 +206,26 @@ def _set_reward(rewards, name, weight, std, applied):
         applied.append(f"rewards.{name}.params.std={float(std)}")
 
 
+def _check_unknown_keys(node, known, where):
+    # _require guards one direction (YAML sets a key, env cfg lacks the attribute); this guards the
+    # other: a key present under the node that no _set_attr/_set_range call below ever reads would be
+    # a SILENT no-op (this is exactly how r3_P2_product's task.racket.target_noise_white=0.0019 /
+    # target_noise_ar1_sigma=0.0052 / vb_spin_mode=minimize CLI overrides got dropped on 2026-07-03).
+    if node is None:
+        return
+    try:
+        present = list(node.keys())
+    except Exception:
+        return
+    unknown = sorted(str(k) for k in present if str(k) not in known)
+    if unknown:
+        raise _OverrideError(
+            f"[train.py] {where} sets key(s) {unknown} that the override translation layer does not "
+            f"consume — they would be silently ignored. Add each to the whitelist AND a "
+            f"_set_attr/_set_range call in _apply_task_overrides, or remove it from the YAML/CLI."
+        )
+
+
 # YAML keys under `racket:` that target the RacketTargetCommandCfg (used to decide whether the task
 # actually requested racket overrides before requiring the command to exist).
 _RACKET_KEYS = (
@@ -228,6 +248,14 @@ _RACKET_KEYS = (
     # mid-swing target refinement). Defaults OFF; byte-identical baseline.
     "target_delay_steps", "target_jitter_pos_per_s", "target_jitter_vel_per_s",
     "midswing_resample_prob", "midswing_resample_tts_floor",
+    # A1v2 calibrated mocap-degradation channels (white/AR1 noise, frame dropout, per-swing bias).
+    "target_noise_white", "target_noise_ar1_sigma", "target_noise_ar1_rho",
+    "target_dropout_prob", "target_post_strike_dropout_s", "target_bias_per_swing",
+    # Tier-1 virtual ball: incoming-ball sampling boxes + outgoing-spin objective.
+    "vb_spin_mode", "vb_spin_min_sigma", "vb_spin_abs_max",
+    "vb_vel_x_range", "vb_vel_y_range", "vb_vel_z_range",
+    # translated below but previously missing from this whitelist
+    "strike_phase_per_clip", "base_couple_blend", "base_couple_max_offset",
 )
 
 # YAML keys under `motion:` that target the MotionCommandCfg swing-entry structure
@@ -237,10 +265,6 @@ _MOTION_KEYS = (
     "wrap_teleport", "stand_start_prob", "hold_steps_range", "stand_start_min_hold",
     "post_swing_start_prob", "post_swing_buffer_size", "post_swing_min_fill", "post_swing_min_hold",
 )
-
-# YAML keys under `motion:` that target the MotionCommandCfg swing-entry structure
-# (Phase-A multi-swing machinery: no-teleport wrap, stand-entry resets, pre-swing hold).
-_MOTION_KEYS = ("wrap_teleport", "stand_start_prob", "hold_steps_range", "stand_start_min_hold")
 
 
 def _registry_clip_name(cfg):
@@ -421,6 +445,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
 
     # motion command (swing-entry structure): no-teleport wrap / stand-entry resets / pre-swing hold
     mt = _get(task, "motion")
+    _check_unknown_keys(mt, _MOTION_KEYS, "task.motion")
     if mt is not None:
         provided = [k for k in _MOTION_KEYS if _get(mt, k) is not None]
         if provided:
@@ -500,6 +525,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 applied.append(f"rewards.{_name}.weight={float(_w)}")
 
     rk = _get(task, "racket")
+    _check_unknown_keys(rk, _RACKET_KEYS, "task.racket")
     if rk is not None:
         # Only require the racket_target command when the YAML actually sets racket keys, so tasks
         # without a racket objective (e.g. TrackingFlat, which has no `racket:` block) never trip this.
@@ -601,6 +627,27 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(C, "target_jitter_vel_per_s", _get(rk, "target_jitter_vel_per_s"), float, applied, "racket_target")
             _set_attr(C, "midswing_resample_prob", _get(rk, "midswing_resample_prob"), float, applied, "racket_target")
             _set_attr(C, "midswing_resample_tts_floor", _get(rk, "midswing_resample_tts_floor"), float, applied, "racket_target")
+            # A1v2 calibrated mocap-degradation channels — same actor-only scope as the delay/jitter
+            # group above (venue fits documented in the task YAML: white 0.0019, ar1 0.0052).
+            _set_attr(C, "target_noise_white", _get(rk, "target_noise_white"), float, applied, "racket_target")
+            _set_attr(C, "target_noise_ar1_sigma", _get(rk, "target_noise_ar1_sigma"), float, applied, "racket_target")
+            _set_attr(C, "target_noise_ar1_rho", _get(rk, "target_noise_ar1_rho"), float, applied, "racket_target")
+            _set_attr(C, "target_dropout_prob", _get(rk, "target_dropout_prob"), float, applied, "racket_target")
+            _set_attr(C, "target_post_strike_dropout_s", _get(rk, "target_post_strike_dropout_s"), float, applied, "racket_target")
+            _set_attr(C, "target_bias_per_swing", _get(rk, "target_bias_per_swing"), float, applied, "racket_target")
+            # Tier-1 virtual ball: incoming-ball sampling boxes + outgoing-spin objective. The reward
+            # side reads vb_spin_mode with a default-else branch, so an unknown mode would silently
+            # train topspin — validate the value here instead.
+            _set_attr(C, "vb_spin_mode", _get(rk, "vb_spin_mode"), str, applied, "racket_target")
+            if getattr(C, "vb_spin_mode", "topspin") not in ("topspin", "minimize"):
+                raise _OverrideError(
+                    f"[train.py] racket.vb_spin_mode must be 'topspin' or 'minimize', "
+                    f"got {C.vb_spin_mode!r}")
+            _set_attr(C, "vb_spin_min_sigma", _get(rk, "vb_spin_min_sigma"), float, applied, "racket_target")
+            _set_attr(C, "vb_spin_abs_max", _get(rk, "vb_spin_abs_max"), float, applied, "racket_target")
+            _set_range(C, "vb_vel_x_range", _get(rk, "vb_vel_x_range"), applied, "racket_target")
+            _set_range(C, "vb_vel_y_range", _get(rk, "vb_vel_y_range"), applied, "racket_target")
+            _set_range(C, "vb_vel_z_range", _get(rk, "vb_vel_z_range"), applied, "racket_target")
 
     # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
     # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.
