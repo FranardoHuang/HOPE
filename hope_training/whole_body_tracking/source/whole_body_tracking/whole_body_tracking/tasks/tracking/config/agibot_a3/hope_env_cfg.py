@@ -433,3 +433,9 @@ class HOPEPingPongVirtualBallAgibotA3EnvCfg(HOPEPingPongDeployParityAgibotA3EnvC
         # 2.5k iters. 0.25 keeps a usable gradient down to the current operating band. Tighten
         # back toward 0.10 once virtual_net_clear_rate is healthy (>0.3 or so).
         self.commands.racket_target.vb_net_sigma = 0.25
+        # CLIMB-PHASE landing kernel width (2026-07-04): landings start ~1.9 m short of the target
+        # (exp(-(1.9/0.3)^2) = 0 — the v0 sigma has no reach); 1.0 pays 0.03 at the current band
+        # and grows monotonically toward the target = dense "hit deeper" gradient (the kernel is
+        # also ungated from net clearance during the climb — see hope_rewards.virtual_landing).
+        # Tighten back toward 0.3 together with re-gating once the net terms carry the signal.
+        self.commands.racket_target.vb_landing_sigma = 1.0
