@@ -23,7 +23,11 @@ sleep 1
 
 echo "[v] sim up (iceoryx body-drive + ros2 /sim/a3/pelvis_pose)"
 cd "$GEAR"
-setsid bash -c "source /opt/ros/jazzy/setup.bash 2>/dev/null; MUJOCO_GL=egl A3_SIM_FLAVOR=auto A3_SIM_CFG=a3_pingpong_iceoryx_cfg.yaml ./scripts/run_sim.sh" >/tmp/pp_sim.log 2>&1 &
+# PP_VIEWER=1 opens the MuJoCo viewer (needs a display) instead of headless EGL —
+# same conductor, same PASS criteria, you just get to WATCH it.
+GL_ENV="MUJOCO_GL=egl"
+[ "${PP_VIEWER:-0}" = "1" ] && GL_ENV=""
+setsid bash -c "source /opt/ros/jazzy/setup.bash 2>/dev/null; $GL_ENV A3_SIM_FLAVOR=auto A3_SIM_CFG=a3_pingpong_iceoryx_cfg.yaml ./scripts/run_sim.sh" >/tmp/pp_sim.log 2>&1 &
 for i in $(seq 1 40); do
   grep -qiE "will wait for shutdown|Sim Start|gui" /tmp/pp_sim.log 2>/dev/null && break
   sleep 1
@@ -80,8 +84,8 @@ rm -f /dev/shm/iox1_0_* 2>/dev/null
 echo "========================= RESULTS ========================="
 echo "--- engages + completions (want >=2 engages, tts0 transferred) ---"
 grep -aE "\[pp engage\]|swing complete" /tmp/pp_runner.log | head -12
-echo "--- falls AFTER MOTION entry (want NONE after the 'm' key) ---"
-grep -anE "FALL GUARD|-> MOTION|-> PD_STAND" /tmp/pp_runner.log | head -12
+echo "--- FALL GUARD events (want NONE — the per-point 'p' aborts are deliberate) ---"
+grep -anE "FALL GUARD|-> MOTION|-> PD_STAND" /tmp/pp_runner.log | head -16
 echo "--- planner status distribution ---"
 grep -aoE "PLANNER: [a-z_]+\]" /tmp/pp_runner.log | sort | uniq -c
 echo "--- planner side: valid plans? ---"

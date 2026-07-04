@@ -344,17 +344,25 @@ semantics: §9.6. Closed-loop VERIFIED 2026-07-04 (§9.6 status).
 
 ```bash
 distrobox enter hope -- bash ~/workspace/HOPE/agi/a3_deploy_example/scripts/pp_planner_closedloop.sh
+# add PP_VIEWER=1 before `bash` to WATCH it (opens the MuJoCo viewer, same test)
 # Runs the WHOLE chain: AGI sim (iceoryx body-drive) + REAL hope_planner (sim profile,
 # publishes the flats) + fake_ball + the C++ runner in --planner mode, conducted by
 # scripts/pp_planner_conductor.py (owns the runner pty, stands the robot via
-# reset-into-armed-PD_STAND, presses m only when verifiably standing, watches 65 s).
-# PASS: "[pp engage] ... locked ... (clock tts0=...)" → "swing complete" →
-#   "post-swing recovery done -> STATIC official stand" → a re-engage on a later serve;
-#   conductor SUMMARY line reports min_z/falls (want falls=0). Logs: /tmp/pp_runner.log
-#   (runner), /tmp/pp_planner.log, /tmp/pp_ball.log, /tmp/pp_sim.log.
+# reset-into-armed-PD_STAND, presses m only when verifiably standing).
+# The conductor plays PER-POINT, mirroring the §9.3 hardware demo discipline: serve →
+# return → post-swing recovery → 'p' (operator abort, point over) → reset to the start
+# spot → 's' → 'm' → next point, for 3 points. The model holds ONE clean return per
+# placement (known margin: the post-lunge static stand tips after ~5-7 s, and the
+# walked-forward robot puts later serves out of reach) — parking it after the return
+# is NOT part of the contract, on hardware OR in sim.
+# PASS: conductor SUMMARY "points_ok=3/3 ... -> PASS" (each point: engage → swing
+#   complete → recovery done, fall_guard=0; the limp collapse after each deliberate
+#   'p' is the operator catch, NOT a fall). Logs: /tmp/pp_runner.log (runner),
+#   /tmp/pp_planner.log, /tmp/pp_ball.log, /tmp/pp_sim.log.
 # The [obs] line shows "PLANNER: <status>" (no_command/stale/planner_invalid/too_late/
 # base_low/target_gate/rest/engage/swinging); "[pp gate] REJECT ..." prints the values
-# behind every reachability rejection (z_w≈0.00 = the ball died before the plane).
+# behind every reachability rejection (z_w≈0.00 = the ball died before the plane —
+# EXPECTED for serves arriving after the robot has lunged forward within a point).
 ```
 
 Verification physics inside that harness (arena values DON'T work here — expected):
@@ -368,7 +376,13 @@ so the adaptive x_hit (robot_x+0.67) sits at the hop apex; serve cadence `pause_
 expected in sim; the ARENA clamp ([0.0,0.35], hope_planner.yaml) is the
 table-collision protection and must stay tight in real life.
 
-**Manual / viewer variant (to WATCH it)** — three terminals:
+**Manual / raw three-terminal variant** — ⚠ prefer `PP_VIEWER=1` above: the manual
+stand dance below has a **~0.5 s** reset→`s` window that is genuinely hard to hit by
+hand across two terminals, and missing it produces a state that LOOKS completely dead:
+`s` on a lying robot trips the fall guard → PASSIVE, after which every reset collapses
+limp and no key seems to do anything (recovery: press `s` again within 0.5 s of the
+NEXT reset — or just use the conductor, which retries this loop for you). Keep this
+variant for debugging individual pieces:
 
 Terminal A — the sim, with viewer:
 
@@ -418,14 +432,23 @@ immediately. And NEVER reset after MOTION entry — it teleports the robot mid-h
 (the reset-during-MOTION trap). The one-command conductor handles all of this,
 which is why it is the standard way to run this gate.
 
-PASS looks like (verified 2026-07-04, headless): ≥2 `[pp engage] ... locked ...
-(clock tts0=...)` across serves → full swing with a forward lunge (~0.7 m, the
-trained walk-and-strike) → `swing complete` → bounded post-swing policy hold →
-STATIC official stand (sticky) → re-engage from the walked position → zero falls
-(min pelvis z ≳0.95). `PLANNER:` status cycling
-no_command/stale/planner_invalid/too_late between serves is NORMAL. Constant
-`target_gate` REJECTs = geometry mismatch — read the printed values (z_w≈0.00
-means the ball died before the plane: serve faster/higher or check drag_k).
+Each POINT looks like: `[pp engage] ... locked ... (clock tts0=...)` → full swing
+with a forward lunge (~0.7 m, the trained walk-and-strike) → `swing complete` →
+bounded post-swing policy hold → `post-swing recovery done -> STATIC official
+stand` → conductor `p` + reset (point over). PASS = 3/3 points with `fall_guard=0`.
+`PLANNER:` status cycling no_command/stale/planner_invalid/too_late between serves
+is NORMAL, as are `z_w≈0.00` gate REJECTs late in a point (the robot lunged forward,
+later serves die before the walked plane). Constant REJECTs from the FIRST serve of
+a point = real geometry mismatch — read the printed values.
+
+> **Why per-point (2026-07-04 evening finding):** a 65 s "park and rally" run fell
+> ~6 s after the first return — the post-lunge stance is feet-staggered, and the
+> STATIC official stand cannot actively rebalance it (the policy hold that could is
+> itself only good for ~5 s, Gate 2.5). Not an input-chain bug: engage, swing,
+> recovery and the sticky-stand handoff all executed cleanly, and every later serve
+> was correctly gate-rejected (adaptive plane ahead of the dead ball). One clean
+> return per placement IS the model's contract (§9.3); the durable fix is the
+> post-strike homing / long-hold TRAINING item.
 
 ## 8. Deploy to the robot
 

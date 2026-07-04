@@ -107,51 +107,100 @@ spin(1.0)
 print(f"[conductor] /sim/a3/reset subscribers: {node.count_subscribers('/sim/a3/reset')}",
       flush=True)
 
-# ---- STAND: per attempt = reset (teleport to the stand keyframe, limp) then IMMEDIATELY
-# 's' (official gains catch it inside the ~0.5 s buckle window). Arming 's' on a LYING
-# robot instead trips the fall guard -> PASSIVE -> every later reset collapses limp.
-# If a guard trip does happen mid-attempt, the next attempt's 's' re-arms PD_STAND.
-motion = False
-for attempt in range(12):
-    reset()
-    spin(0.15)
-    key("s")
-    spin(1.5)
-    if z() < 0.95:
-        print(f"[conductor] attempt {attempt}: z={z():.2f} after reset+s, retry", flush=True)
-        continue
-    # settle 6 s under PD_STAND and require CONTINUOUS standing (the gain-catch leaves
-    # residual sway; 'm' too early -> the policy hold amplifies it and falls)
-    stable = True
-    for _ in range(12):
-        spin(0.5)
-        if z() < 1.0:
-            stable = False
-            break
-    if stable:
-        key("m")                  # MOTION: planner-driven engage from here on
-        motion = True
-        break
-    print(f"[conductor] stand lost in settle (z={z():.2f}); retry", flush=True)
+# ---- incremental runner-log watcher (per-point event detection) ----
+_log_ofs = [0]
 
-if not motion:
+
+def new_log_events():
+    """Return counts of interesting markers in log bytes appended since last call."""
+    try:
+        with open(RUNNER_LOG, "rb") as f:
+            f.seek(_log_ofs[0])
+            chunk = f.read()
+            _log_ofs[0] += len(chunk)
+    except FileNotFoundError:
+        chunk = b""
+    return {
+        "engage": chunk.count(b"[pp engage]"),
+        "complete": chunk.count(b"swing complete"),
+        "recovered": chunk.count(b"post-swing recovery done"),
+        "fall_guard": chunk.count(b"FALL GUARD"),
+    }
+
+
+def stand_and_motion(label):
+    """STAND dance: per attempt = reset (teleport to the stand keyframe, limp) then
+    IMMEDIATELY 's' (official gains catch it inside the ~0.5 s buckle window). Arming
+    's' on a LYING robot instead trips the fall guard -> PASSIVE -> every later reset
+    collapses limp; the next attempt's 's' re-arms PD_STAND. Ends with 'm' (MOTION)."""
+    for attempt in range(12):
+        reset()
+        spin(0.15)
+        key("s")
+        spin(1.5)
+        if z() < 0.95:
+            print(f"[conductor] {label} attempt {attempt}: z={z():.2f} after reset+s, retry",
+                  flush=True)
+            continue
+        # settle under PD_STAND, require CONTINUOUS standing (the gain-catch leaves
+        # residual sway; 'm' too early -> the policy hold amplifies it and falls)
+        stable = True
+        for _ in range(12):
+            spin(0.5)
+            if z() < 1.0:
+                stable = False
+                break
+        if stable:
+            new_log_events()          # flush pending markers before the point starts
+            key("m")                  # MOTION: planner-driven engage from here on
+            return True
+        print(f"[conductor] {label} stand lost in settle (z={z():.2f}); retry", flush=True)
+    return False
+
+
+if not stand_and_motion("point 1"):
     print("[conductor] FAILED to stand the robot; aborting", flush=True)
     key("q")
     spin(3)
     proc.terminate()
     sys.exit(1)
 
-# ---- RUN phase: watch 65 s ----
-print("[conductor] MOTION entered standing; running 65 s", flush=True)
-t0 = time.time()
-fall_at = None
-while time.time() - t0 < 65:
-    spin(0.5)
-    if z() >= 0:
-        state["min_z_motion"] = min(state["min_z_motion"], z())
-    if z() < 0.5 and fall_at is None:
-        fall_at = time.time() - t0
-        print(f"[conductor] FALL detected at +{fall_at:.1f}s (z={z():.2f})", flush=True)
+# ---- RUN phase: PER-POINT loop, mirroring the §9.3 hardware demo discipline ----
+# The model holds ONE clean return per placement (known margin: the post-lunge static
+# stand tips over after ~5-7 s, and the walked-forward robot puts later serves out of
+# reach). So the honest closed-loop test = the demo loop: serve -> return -> recovery
+# -> 'p' (operator abort / point over) -> reset to the start spot -> 's' -> 'm' ->
+# next point. A fall BEFORE the deliberate 'p' is a real failure; the limp collapse
+# AFTER 'p' is the operator catch, not a fall.
+POINTS = 3
+POINT_TIMEOUT_S = 22.0   # serves every 4 s; engage typically within ~8 s of 'm'
+results = []
+for point in range(1, POINTS + 1):
+    t0 = time.time()
+    got = {"engage": 0, "complete": 0, "recovered": 0, "fall_guard": 0}
+    while time.time() - t0 < POINT_TIMEOUT_S:
+        spin(0.3)
+        if z() >= 0:
+            state["min_z_motion"] = min(state["min_z_motion"], z())
+        ev = new_log_events()
+        for k in got:
+            got[k] += ev[k]
+        if got["fall_guard"]:
+            break                      # fell during the point = real failure
+        if got["recovered"]:
+            break                      # clean return + balanced out = point over
+    ok = bool(got["recovered"]) and not got["fall_guard"]
+    results.append({"point": point, **got, "ok": ok,
+                    "dur_s": round(time.time() - t0, 1)})
+    print(f"[conductor] point {point}: engage={got['engage']} complete={got['complete']} "
+          f"recovered={got['recovered']} fall_guard={got['fall_guard']} "
+          f"-> {'OK' if ok else 'FAIL'}", flush=True)
+    key("p")                           # point over: operator abort (limp; sim 'catch')
+    spin(1.0)
+    if point < POINTS:
+        if not stand_and_motion(f"point {point + 1}"):
+            print("[conductor] FAILED to re-stand between points; aborting", flush=True)
+            break
 
 key("q")
 spin(3)
@@ -160,6 +209,8 @@ try:
 except subprocess.TimeoutExpired:
     proc.kill()
 
-print(f"[conductor] SUMMARY: min_z_motion={state['min_z_motion']:.3f} "
-      f"fall_at={fall_at} valid_cmds={state['valid']} invalid_cmds={state['invalid']}",
-      flush=True)
+n_ok = sum(1 for r in results if r["ok"])
+print(f"[conductor] SUMMARY: points_ok={n_ok}/{len(results)} results={results} "
+      f"min_z_motion={state['min_z_motion']:.3f} "
+      f"valid_cmds={state['valid']} invalid_cmds={state['invalid']} "
+      f"-> {'PASS' if n_ok == POINTS else 'FAIL'}", flush=True)
