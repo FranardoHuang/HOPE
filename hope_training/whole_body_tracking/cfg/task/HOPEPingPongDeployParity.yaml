@@ -100,6 +100,7 @@ motion:
   post_swing_buffer_size: 4096
   post_swing_min_fill: 256
   post_swing_min_hold: 25
+  clip_switch_prob: 0.0        # deploy-parity mid-swing clip switch (venue falls fix; try 0.002)
 
 # ---- reward weights / kernel std --------------------------------------------
 # HITTER does not publish reward weights or kernel forms. Goal terms get relatively high weight
