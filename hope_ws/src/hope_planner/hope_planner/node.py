@@ -28,8 +28,10 @@ try:
 except ImportError:  # flat-only environment (e.g. the MDU)
     RacketCommand = None
 
+from .ball_kalman_estimator import BallKalmanEstimator
 from .constants import BallPhysics, PlannerConfig
 from .planner import HOPEPlanner
+from .strike_spec_planner import StrikeSpecPlanner
 
 
 class HOPEPlannerNode(Node):
@@ -44,10 +46,15 @@ class HOPEPlannerNode(Node):
         self.declare_parameter("target_land_x", 2.055)
         self.declare_parameter("target_land_y", -0.7625)
         self.declare_parameter("delta_t_flight", 0.5)
-        self.declare_parameter("drag_k", 0.5)
-        self.declare_parameter("restitution_h", 0.75)
-        self.declare_parameter("restitution_v", 0.85)
-        self.declare_parameter("restitution_racket", 0.88)
+        self.declare_parameter("drag_k", 0.1261)          # venue fit 2026-07-03 (configs/ball_physics_venue.yaml)
+        self.declare_parameter("restitution_h", 0.64)     # no-spin grip equivalent (1 - a_t)
+        self.declare_parameter("restitution_v", 0.9215)   # venue table e_n
+        self.declare_parameter("restitution_racket", 0.654)  # paddle e const; e(u_n) exp form applied in racket_target_planner
+        self.declare_parameter("use_kalman", False)          # shadow-run the EKF next to the polyfit estimator
+        self.declare_parameter("publish_strike_spec", False)  # diagnostics-only strike-spec inverse solve
+        self.declare_parameter("racket_speed_budget", 10.0)   # m/s cap for the spec solve — diagnostic
+                                                              # sanity bound, above venue strike speeds
+                                                              # (paddle u_n fit envelope tops out 7.2 m/s)
         # --- ADAPTIVE hit plane (2026-07-04): x_hit follows the LIVE robot position ---
         # The trained policy WALKS to the strike (walk-and-strike lunge, ~0.5-0.8 m): after
         # one return the robot stands AT the old static plane, so subsequent plans land at
@@ -64,17 +71,17 @@ class HOPEPlannerNode(Node):
         self.declare_parameter("x_hit_offset", 0.67)
         self.declare_parameter("x_hit_min", -0.30)
         self.declare_parameter("x_hit_max", 0.30)   # table edge x=0 + racket reach margin
-        # --- FLAT outputs for the AGI native C++ runner (Path A binary, --planner) ---
+        # --- FLAT outputs for the AGI native C++ runner (--planner, the ONLY control path) ---
         # The C++ a3_deploy_onnx_ref_pingpong subscribes std_msgs/Float64MultiArray (it avoids
         # vendoring hope_msgs typesupport on aarch64). We MIRROR /racket/command as a flat array
         # and stream the robot base pose (from robot_pose_topic) as a second flat array so the
-        # runner's external_base localization has a live base (the ONLY control path since 2026-07-04).
+        # runner's external_base localization has a live base.
         self.declare_parameter("publish_flat_cmd", True)
         self.declare_parameter("racket_flat_topic", "/racket/command_flat")
         self.declare_parameter("base_flat_topic", "/a3/base_pose_flat")
         # marker-cluster -> base_link offset (table frame). /P1/pose is the marker cluster; the
         # policy base is the pelvis. In sim (robot_pose_topic=/sim/a3/pelvis_pose) it is already
-        # the pelvis, so [0,0,0]. Set per venue (mirrors wbc_runner marker_to_base_xyz / G8).
+        # the pelvis, so [0,0,0]. Set per venue (mirrors hope_world_frame.yaml mocap_to_base_link / G8).
         self.declare_parameter("marker_to_base_xyz", [0.0, 0.0, 0.0])
 
         self._ball_index = int(self.get_parameter("ball_pose_index").value)
@@ -95,6 +102,7 @@ class HOPEPlannerNode(Node):
             ]),
             delta_t_flight=self.get_parameter("delta_t_flight").value,
             C_r=self.get_parameter("restitution_racket").value,
+            use_kalman=bool(self.get_parameter("use_kalman").value),
         )
         physics = BallPhysics(
             k=self.get_parameter("drag_k").value,
@@ -103,6 +111,28 @@ class HOPEPlannerNode(Node):
         )
 
         self.planner = HOPEPlanner(physics=physics, config=config)
+
+        # Flag-gated EKF SHADOW estimator: fed the same measurements as the
+        # legacy polyfit estimator; the planner still ACTS on the legacy path.
+        # Only position/velocity deltas are published (diagnostics) so the
+        # EKF can be validated on live venue data before promotion.
+        self._kf = BallKalmanEstimator(config, physics) if config.use_kalman else None
+        self._kf_pos_delta = float("nan")
+        self._kf_vel_delta = float("nan")
+
+        # Flag-gated strike-spec DIAGNOSTICS: inverse-solve the racket control
+        # variables (face tilt, v_n, v_t) + their landing sensitivities next to
+        # the existing racket command. Does NOT touch the command path. The LM
+        # solve costs ~0.3 s, so it is throttled to at most 1 Hz rather than
+        # running per 300 Hz mocap frame.
+        self._publish_strike_spec = bool(self.get_parameter("publish_strike_spec").value)
+        self._racket_speed_budget = float(self.get_parameter("racket_speed_budget").value)
+        self._spec_planner = (
+            StrikeSpecPlanner(physics=physics, config=config)
+            if self._publish_strike_spec else None
+        )
+        self._last_spec = None
+        self._spec_next_t = float("-inf")
 
         # Best-effort, depth-1 QoS for high-rate mocap topics (REP-2003 sensor style).
         mocap_qos = QoSProfile(
@@ -195,6 +225,18 @@ class HOPEPlannerNode(Node):
                 np.clip(self._robot_x + self._x_hit_offset, self._x_hit_min, self._x_hit_max))
 
         cmd = self.planner.update(t, p_ball)
+
+        if self._kf is not None:
+            self._kf.push(t, p_ball)
+            if self._kf.ready and self.planner.estimator.ready:
+                p_kf, v_kf, _ = self._kf.estimate()
+                p_leg, v_leg, _ = self.planner.estimator.estimate()
+                self._kf_pos_delta = float(np.linalg.norm(p_kf - p_leg))
+                self._kf_vel_delta = float(np.linalg.norm(v_kf - v_leg))
+            else:
+                self._kf_pos_delta = float("nan")
+                self._kf_vel_delta = float("nan")
+
         if cmd is None:
             self._last_valid = False
             self._last_tts = float("nan")
@@ -247,6 +289,36 @@ class HOPEPlannerNode(Node):
             ]
             self.flat_cmd_pub.publish(fm)
 
+        # Strike-spec diagnostics AFTER the command publish so the solve
+        # latency never delays the command itself.
+        if self._spec_planner is not None and cmd.valid and t >= self._spec_next_t:
+            self._spec_next_t = t + 1.0
+            strike = self.planner.strike_target
+            if strike is not None and strike.valid:
+                # Legacy command path is spin-blind -> omega None (zeros);
+                # promote to the EKF/spin estimate when that path lands.
+                self._last_spec = self._spec_planner.solve(
+                    strike.p_ball, strike.v_ball, None,
+                    self.planner.config.target_land[:2],
+                    self._racket_speed_budget,
+                )
+                if self._last_spec is not None:
+                    s = self._last_spec
+                    self.get_logger().info(
+                        "strike spec: tilt=(%.2f, %.2f) deg  v_n=%.2f  |v_t|=%.2f m/s  "
+                        "land=(%.3f, %.3f)  sens: %.3f m/deg pitch, %.3f m/deg yaw, "
+                        "%.3f m/(m/s) v_n, %.3f m/(m/s) v_t"
+                        % (
+                            s.tilt_pitch_deg, s.tilt_yaw_deg, s.v_n_signed,
+                            float(np.linalg.norm(s.v_t_vec)),
+                            s.landing_xy[0], s.landing_xy[1],
+                            float(np.linalg.norm(s.d_landing_d_pitch)),
+                            float(np.linalg.norm(s.d_landing_d_yaw)),
+                            float(np.linalg.norm(s.d_landing_d_v_n)),
+                            float(np.linalg.norm(s.d_landing_d_v_t)),
+                        )
+                    )
+
     def _publish_diagnostics(self) -> None:
         arr = DiagnosticArray()
         arr.header.stamp = self.get_clock().now().to_msg()
@@ -268,6 +340,36 @@ class HOPEPlannerNode(Node):
             KeyValue(key="last_valid", value=str(self._last_valid)),
             KeyValue(key="time_to_strike_s", value=f"{self._last_tts:.4f}"),
         ]
+        if self._kf is not None:
+            status.values += [
+                KeyValue(key="kf_pos_delta_m", value=f"{self._kf_pos_delta:.4f}"),
+                KeyValue(key="kf_vel_delta_mps", value=f"{self._kf_vel_delta:.4f}"),
+                KeyValue(key="kf_rejected", value=str(self._kf.rejected_count)),
+            ]
+        if self._publish_strike_spec:
+            s = self._last_spec
+            if s is None:
+                status.values.append(KeyValue(key="spec_valid", value="False"))
+            else:
+                status.values += [
+                    KeyValue(key="spec_valid", value="True"),
+                    KeyValue(key="spec_tilt_pitch_deg", value=f"{s.tilt_pitch_deg:.3f}"),
+                    KeyValue(key="spec_tilt_yaw_deg", value=f"{s.tilt_yaw_deg:.3f}"),
+                    KeyValue(key="spec_v_n_mps", value=f"{s.v_n_signed:.3f}"),
+                    KeyValue(key="spec_v_t_mps", value=f"{np.linalg.norm(s.v_t_vec):.3f}"),
+                    KeyValue(key="spec_landing_x_m", value=f"{s.landing_xy[0]:.3f}"),
+                    KeyValue(key="spec_landing_y_m", value=f"{s.landing_xy[1]:.3f}"),
+                    # Landing-sensitivity norms = the control-precision budget:
+                    # how much landing error one unit of control error buys.
+                    KeyValue(key="spec_dland_dpitch_m_per_deg",
+                             value=f"{np.linalg.norm(s.d_landing_d_pitch):.4f}"),
+                    KeyValue(key="spec_dland_dyaw_m_per_deg",
+                             value=f"{np.linalg.norm(s.d_landing_d_yaw):.4f}"),
+                    KeyValue(key="spec_dland_dvn_m_per_mps",
+                             value=f"{np.linalg.norm(s.d_landing_d_v_n):.4f}"),
+                    KeyValue(key="spec_dland_dvt_m_per_mps",
+                             value=f"{np.linalg.norm(s.d_landing_d_v_t):.4f}"),
+                ]
         arr.status = [status]
         self.diag_pub.publish(arr)
 

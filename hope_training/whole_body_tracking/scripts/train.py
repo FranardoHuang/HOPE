@@ -105,8 +105,6 @@ def _resolve_local_motion_files(primary, secondary=None, cwd: pathlib.Path | Non
 
 
 def _download_registry_motion_files(primary, secondary=None) -> tuple[list[str], list[str]]:
-    import wandb
-
     registries = [_normalize_registry_name(value) for value in _configured_items(primary, secondary)]
     if not registries:
         raise RuntimeError(
@@ -114,8 +112,18 @@ def _download_registry_motion_files(primary, secondary=None) -> tuple[list[str],
             "(and optional motion_file_2=/path/to/backhand.npz) for the local path, or pass "
             "registry_name=<org>/wandb-registry-motions/<name>."
         )
+    # Import lazily and AFTER the guard: the no-WandB local path must never require wandb, and a
+    # missing-motion misconfiguration should raise the guidance error above, not ModuleNotFoundError.
+    import wandb
+
     api = wandb.Api()
-    motion_files = [str(pathlib.Path(api.artifact(reg).download()) / "motion.npz") for reg in registries]
+    motion_files = []
+    for reg in registries:
+        art = api.artifact(reg)
+        # Provenance: record exactly which artifact version/digest the run trains on (the registry
+        # alias is mutable, e.g. ':latest' can move between runs).
+        print(f"[train.py] motion clip: {reg} -> {art.source_qualified_name} (digest {art.digest[:12]})", flush=True)
+        motion_files.append(str(pathlib.Path(art.download()) / "motion.npz"))
     return motion_files, registries
 
 
@@ -198,6 +206,26 @@ def _set_reward(rewards, name, weight, std, applied):
         applied.append(f"rewards.{name}.params.std={float(std)}")
 
 
+def _check_unknown_keys(node, known, where):
+    # _require guards one direction (YAML sets a key, env cfg lacks the attribute); this guards the
+    # other: a key present under the node that no _set_attr/_set_range call below ever reads would be
+    # a SILENT no-op (this is exactly how r3_P2_product's task.racket.target_noise_white=0.0019 /
+    # target_noise_ar1_sigma=0.0052 / vb_spin_mode=minimize CLI overrides got dropped on 2026-07-03).
+    if node is None:
+        return
+    try:
+        present = list(node.keys())
+    except Exception:
+        return
+    unknown = sorted(str(k) for k in present if str(k) not in known)
+    if unknown:
+        raise _OverrideError(
+            f"[train.py] {where} sets key(s) {unknown} that the override translation layer does not "
+            f"consume — they would be silently ignored. Add each to the whitelist AND a "
+            f"_set_attr/_set_range call in _apply_task_overrides, or remove it from the YAML/CLI."
+        )
+
+
 # YAML keys under `racket:` that target the RacketTargetCommandCfg (used to decide whether the task
 # actually requested racket overrides before requiring the command to exist).
 _RACKET_KEYS = (
@@ -207,7 +235,7 @@ _RACKET_KEYS = (
     "base_target_x_range", "base_target_y_range",
     "normal_mode", "forehand_on_negative_y", "mount_normal_axis", "mount_normal_sign",
     "target_mode", "ref_perturb_pos", "ref_perturb_vel", "ref_perturb_normal",
-    "ref_perturb_curriculum_steps", "ref_perturb_curriculum_start",
+    "ref_perturb_curriculum_steps", "ref_perturb_curriculum_start", "ref_perturb_success_gated",
     "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "ref_vel_scale_by_motion",
     "debug_reward_logging",
     "clean_reference_strike_velocity", "clean_strike_vel_window",
@@ -220,6 +248,14 @@ _RACKET_KEYS = (
     # mid-swing target refinement). Defaults OFF; byte-identical baseline.
     "target_delay_steps", "target_jitter_pos_per_s", "target_jitter_vel_per_s",
     "midswing_resample_prob", "midswing_resample_tts_floor",
+    # A1v2 calibrated mocap-degradation channels (white/AR1 noise, frame dropout, per-swing bias).
+    "target_noise_white", "target_noise_ar1_sigma", "target_noise_ar1_rho",
+    "target_dropout_prob", "target_post_strike_dropout_s", "target_bias_per_swing",
+    # Tier-1 virtual ball: incoming-ball sampling boxes + outgoing-spin objective.
+    "vb_spin_mode", "vb_spin_min_sigma", "vb_spin_abs_max",
+    "vb_vel_x_range", "vb_vel_y_range", "vb_vel_z_range",
+    # translated below but previously missing from this whitelist
+    "strike_phase_per_clip", "base_couple_blend", "base_couple_max_offset",
 )
 
 # YAML keys under `motion:` that target the MotionCommandCfg swing-entry structure
@@ -228,6 +264,9 @@ _RACKET_KEYS = (
 _MOTION_KEYS = (
     "wrap_teleport", "stand_start_prob", "hold_steps_range", "stand_start_min_hold",
     "post_swing_start_prob", "post_swing_buffer_size", "post_swing_min_fill", "post_swing_min_hold",
+    # deploy-parity mid-swing clip switch (018467a added the yaml key + MotionCommandCfg field but not
+    # this whitelist/translation, so every run of the task yaml raised in _check_unknown_keys).
+    "clip_switch_prob",
 )
 
 
@@ -409,6 +448,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
 
     # motion command (swing-entry structure): no-teleport wrap / stand-entry resets / pre-swing hold
     mt = _get(task, "motion")
+    _check_unknown_keys(mt, _MOTION_KEYS, "task.motion")
     if mt is not None:
         provided = [k for k in _MOTION_KEYS if _get(mt, k) is not None]
         if provided:
@@ -424,6 +464,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(M, "post_swing_buffer_size", _get(mt, "post_swing_buffer_size"), int, applied, "commands.motion")
             _set_attr(M, "post_swing_min_fill", _get(mt, "post_swing_min_fill"), int, applied, "commands.motion")
             _set_attr(M, "post_swing_min_hold", _get(mt, "post_swing_min_hold"), int, applied, "commands.motion")
+            _set_attr(M, "clip_switch_prob", _get(mt, "clip_switch_prob"), float, applied, "commands.motion")
 
     rw = _get(task, "rewards")
     if rw is not None:
@@ -445,6 +486,16 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _require(hasattr(R, "hold_ready"), "rewards.hold_ready")
             R.hold_ready.params["reach"] = float(_hr_reach)
             applied.append(f"rewards.hold_ready.params.reach={float(_hr_reach)}")
+        # P2.4 PACE-style smooth deceleration (flag-gated, default weight 0.0 = OFF): pseudo base-speed
+        # command proportional to the remaining planar racket->target error. REWARD-side only (the
+        # frozen 175-D actor obs contract is untouched).
+        _set_reward(R, "base_decel", _get(rw, "base_decel_weight"), _get(rw, "base_decel_std"), applied)
+        for _pk, _yk in (("v_gain", "base_decel_v_gain"), ("v_max", "base_decel_v_max")):
+            _bd = _get(rw, _yk)
+            if _bd is not None:
+                _require(hasattr(R, "base_decel"), "rewards.base_decel")
+                R.base_decel.params[_pk] = float(_bd)
+                applied.append(f"rewards.base_decel.params.{_pk}={float(_bd)}")
         jt = _get(rw, "joint_torques_weight")
         if jt is not None:
             _require(hasattr(R, "joint_torques"), "rewards.joint_torques")
@@ -488,6 +539,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 applied.append(f"rewards.{_name}.weight={float(_w)}")
 
     rk = _get(task, "racket")
+    _check_unknown_keys(rk, _RACKET_KEYS, "task.racket")
     if rk is not None:
         # Only require the racket_target command when the YAML actually sets racket keys, so tasks
         # without a racket objective (e.g. TrackingFlat, which has no `racket:` block) never trip this.
@@ -557,6 +609,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(C, "ref_perturb_normal", _get(rk, "ref_perturb_normal"), float, applied, "racket_target")
             _set_attr(C, "ref_perturb_curriculum_steps", _get(rk, "ref_perturb_curriculum_steps"), int, applied, "racket_target")
             _set_attr(C, "ref_perturb_curriculum_start", _get(rk, "ref_perturb_curriculum_start"), float, applied, "racket_target")
+            _set_attr(C, "ref_perturb_success_gated", _get(rk, "ref_perturb_success_gated"), _as_bool, applied, "racket_target")
             _set_attr(C, "ref_perturb_advance_threshold", _get(rk, "ref_perturb_advance_threshold"), float, applied, "racket_target")
             _set_attr(C, "ref_perturb_advance_rate", _get(rk, "ref_perturb_advance_rate"), float, applied, "racket_target")
             # Stage slow->fast hitting: scale the reference racket-velocity target (<1.0 trains slower hits).
@@ -588,6 +641,27 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(C, "target_jitter_vel_per_s", _get(rk, "target_jitter_vel_per_s"), float, applied, "racket_target")
             _set_attr(C, "midswing_resample_prob", _get(rk, "midswing_resample_prob"), float, applied, "racket_target")
             _set_attr(C, "midswing_resample_tts_floor", _get(rk, "midswing_resample_tts_floor"), float, applied, "racket_target")
+            # A1v2 calibrated mocap-degradation channels — same actor-only scope as the delay/jitter
+            # group above (venue fits documented in the task YAML: white 0.0019, ar1 0.0052).
+            _set_attr(C, "target_noise_white", _get(rk, "target_noise_white"), float, applied, "racket_target")
+            _set_attr(C, "target_noise_ar1_sigma", _get(rk, "target_noise_ar1_sigma"), float, applied, "racket_target")
+            _set_attr(C, "target_noise_ar1_rho", _get(rk, "target_noise_ar1_rho"), float, applied, "racket_target")
+            _set_attr(C, "target_dropout_prob", _get(rk, "target_dropout_prob"), float, applied, "racket_target")
+            _set_attr(C, "target_post_strike_dropout_s", _get(rk, "target_post_strike_dropout_s"), float, applied, "racket_target")
+            _set_attr(C, "target_bias_per_swing", _get(rk, "target_bias_per_swing"), float, applied, "racket_target")
+            # Tier-1 virtual ball: incoming-ball sampling boxes + outgoing-spin objective. The reward
+            # side reads vb_spin_mode with a default-else branch, so an unknown mode would silently
+            # train topspin — validate the value here instead.
+            _set_attr(C, "vb_spin_mode", _get(rk, "vb_spin_mode"), str, applied, "racket_target")
+            if getattr(C, "vb_spin_mode", "topspin") not in ("topspin", "minimize"):
+                raise _OverrideError(
+                    f"[train.py] racket.vb_spin_mode must be 'topspin' or 'minimize', "
+                    f"got {C.vb_spin_mode!r}")
+            _set_attr(C, "vb_spin_min_sigma", _get(rk, "vb_spin_min_sigma"), float, applied, "racket_target")
+            _set_attr(C, "vb_spin_abs_max", _get(rk, "vb_spin_abs_max"), float, applied, "racket_target")
+            _set_range(C, "vb_vel_x_range", _get(rk, "vb_vel_x_range"), applied, "racket_target")
+            _set_range(C, "vb_vel_y_range", _get(rk, "vb_vel_y_range"), applied, "racket_target")
+            _set_range(C, "vb_vel_z_range", _get(rk, "vb_vel_z_range"), applied, "racket_target")
 
     # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
     # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.
@@ -686,23 +760,14 @@ def _run(cfg):
         agent_cfg.wandb_project = str(cfg.log_project_name)
         agent_cfg.neptune_project = str(cfg.log_project_name)
 
-    # 3) motion file(s). Explicit local motion_file/motion_file_2 take precedence and bypass W&B
-    #    entirely (the documented no-WandB path — see run_training.md); otherwise resolve from the
-    #    wandb registry. ONE clip = single-swing-type policy. TWO clips (forehand + backhand) =
-    #    unified HITTER policy: MotionLoader concatenates them and clip_id selects which swing each
-    #    env imitates. Order matters: clip 0 = forehand, clip 1 = backhand; it must match
-    #    racket.strike_phase_per_clip.
-    local_files = _resolve_local_motion_files(_get(cfg, "motion_file"), _get(cfg, "motion_file_2"))
-    registry_name = cfg.registry_name if cfg.registry_name is not None else cfg.task.registry_name
-    registry_name = str(registry_name)
-
+    # 3) reference motion clip(s), LOCAL-FIRST: motion_file=/motion_file_2= (or a local .npz path passed
+    #    as registry_name/registry_name_2) skips WandB entirely (the documented no-WandB path — see
+    #    run_training.md); otherwise the WandB registry is used.
+    #    ONE clip = single-swing-type policy. TWO clips (forehand + backhand) = unified HITTER policy:
+    #    MotionLoader concatenates them and clip_id selects which swing each env imitates. Order matters:
+    #    clip 0 = forehand, clip 1 = backhand; it must match racket.strike_phase_per_clip.
     def _local_motion(name):
-        """If ``name`` is a local motion.npz (or an artifact dir containing one), return that path.
-
-        Lets you train straight off a local clip (e.g. artifacts/hope_forehand_hopex/motion.npz or its
-        parent dir) WITHOUT publishing to the wandb registry — bypasses the api.artifact().download()
-        below. Returns None for a normal registry reference (``<entity>/wandb-registry-motions/...``).
-        """
+        """If ``name`` is a local motion.npz (or a dir containing one), return that path, else None."""
         p = pathlib.Path(str(name).split(":")[0])  # tolerate a :version suffix
         if p.is_file() and p.suffix == ".npz":
             return str(p)
@@ -710,30 +775,33 @@ def _run(cfg):
             return str(p / "motion.npz")
         return None
 
-    def _resolve_clip(name):
-        local = _local_motion(name)
-        if local is not None:
-            print(f"[train.py] LOCAL motion (no registry): {local}", flush=True)
-            return local
-        nm = name if ":" in name else name + ":latest"
-        import wandb
-        art = wandb.Api().artifact(nm)
-        print(f"[train.py] motion clip: {nm} -> {art.source_qualified_name} (digest {art.digest[:12]})", flush=True)
-        return str(pathlib.Path(art.download()) / "motion.npz")
-
-    if local_files:
-        motion_files = list(local_files)
-        for f in motion_files:
-            print(f"[train.py] LOCAL motion (no registry): {f}", flush=True)
-        if len(motion_files) > 1:
-            print(f"[train.py] UNIFIED multi-clip policy (local): clip0={motion_files[0]}  clip1={motion_files[1]}", flush=True)
-    else:
-        motion_files = [_resolve_clip(registry_name)]
-        reg2 = _get(cfg, "registry_name_2", None) or _get(cfg.task, "registry_name_2", None)
-        if reg2 is not None and str(reg2).strip() and str(reg2).lower() != "none":
-            reg2 = str(reg2)
-            motion_files.append(_resolve_clip(reg2))
-            print(f"[train.py] UNIFIED multi-clip policy: clip0={registry_name}  clip1={reg2}", flush=True)
+    if not _configured_items(_get(cfg, "motion_file"), _get(cfg, "motion_file_2")):
+        # Back-compat: local paths passed as registry_name/registry_name_2 become motion_file, so
+        # resolve_motion_sources below stays the single source of truth for local-vs-registry.
+        _reg_candidates = _configured_items(
+            _get(cfg, "registry_name") if _get(cfg, "registry_name") is not None else _get(cfg.task, "registry_name"),
+            _get(cfg, "registry_name_2")
+            if _get(cfg, "registry_name_2") is not None
+            else _get(cfg.task, "registry_name_2"),
+        )
+        _local_hits = [_local_motion(r) for r in _reg_candidates]
+        if _local_hits and all(h is not None for h in _local_hits):
+            cfg.motion_file = _local_hits
+        elif any(h is not None for h in _local_hits):
+            # Local clips are all-or-nothing (see resolve_motion_sources): fail loud instead of
+            # letting wandb.Api().artifact(<local path>) throw a cryptic HTTP error below.
+            raise RuntimeError(
+                f"[train.py] Mixed motion sources in registry_name/registry_name_2: {_reg_candidates}. "
+                "Some values are local .npz paths and some are registry refs. Pass ALL clips locally "
+                "via motion_file=/motion_file_2= (or make every registry_name a local path), or "
+                "publish the local clip to the registry."
+            )
+    motion_files, motion_registries = resolve_motion_sources(cfg)
+    for i, mf in enumerate(motion_files):
+        src = motion_registries[i] if i < len(motion_registries) else "LOCAL (no registry)"
+        print(f"[train.py] motion clip {i}: {mf}  [{src}]", flush=True)
+    if len(motion_files) > 1:
+        print(f"[train.py] UNIFIED multi-clip policy: clip0=forehand  clip1=backhand", flush=True)
     env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
 
     # 4) logging dir (same layout as scripts/rsl_rl/train.py so export/eval are unchanged)
@@ -765,13 +833,11 @@ def _run(cfg):
         )
     env = RslRlVecEnvWrapper(env)
 
-    # Only hand the runner a registry name for wandb lineage (use_artifact) when the clip actually came
-    # from the registry; a local motion path would crash wandb.run.use_artifact. The W&B backend requires
-    # 'collection:alias' form (a bare collection name is an HTTP 400), so qualify like _resolve_clip does.
-    if local_files or _local_motion(registry_name) is not None:
-        runner_registry_name = None
-    else:
-        runner_registry_name = registry_name if ":" in registry_name else registry_name + ":latest"
+    # Only hand the runner registry refs for wandb lineage (use_artifact) when the clips actually came
+    # from the registry; local runs pass None (a local motion path would crash wandb.run.use_artifact).
+    # resolve_motion_sources already returned normalized 'collection:alias' refs (a bare collection name
+    # is an HTTP 400). List-valued: the runner records ALL used clips, not just clip 0.
+    runner_registry_name = motion_registries if motion_registries else None
     runner = OnPolicyRunner(
         env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device, registry_name=runner_registry_name
     )
@@ -785,9 +851,21 @@ def _run(cfg):
         ckpt = os.path.abspath(str(ckpt))
         if not os.path.isfile(ckpt):
             raise FileNotFoundError(f"[train.py] checkpoint_path does not exist: {ckpt}")
-        runner.load(ckpt)
-        print(f"[train.py] RESUMED from checkpoint: {ckpt} (continuing at iteration "
-              f"{getattr(runner, 'current_learning_iteration', '?')})", flush=True)
+        if bool(getattr(cfg, "checkpoint_tolerant", False)):
+            # Warm-start ACROSS critic-layout changes (e.g. the 318-D pre-merge lineage into the
+            # 316-D merged model, or deploy-parity ckpts into VirtualBall's critic): actor + std
+            # (+ obs normalizer if shapes agree) load strictly by name; the critic re-initializes
+            # and re-learns — PPO tolerates this warm-start (fresh value function, ~hundreds of
+            # iterations of value lag). Deliberate resume stays STRICT without this flag.
+            from whole_body_tracking.utils.ckpt_compat import load_actor_tolerant
+
+            load_actor_tolerant(runner, ckpt)
+            print(f"[train.py] TOLERANT warm-start from {ckpt} (actor loaded; critic fresh if "
+                  f"layout changed — deliberate warm-start semantics)", flush=True)
+        else:
+            runner.load(ckpt)
+            print(f"[train.py] RESUMED from checkpoint: {ckpt} (continuing at iteration "
+                  f"{getattr(runner, 'current_learning_iteration', '?')})", flush=True)
 
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
@@ -826,6 +904,13 @@ def main(cfg):
         sys.stderr.flush()
         failed = True
     finally:
+        try:
+            import wandb
+
+            if getattr(wandb, "run", None) is not None:
+                wandb.finish()
+        except Exception as exc:
+            print(f"[train.py] WARNING: wandb.finish() failed: {exc}", flush=True)
         simulation_app.close()
     if failed:
         sys.exit(1)

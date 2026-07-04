@@ -158,6 +158,37 @@ def hold_ready(env: ManagerBasedRLEnv, command_name: str, std: float, reach: flo
     return raw * near * in_hold.float()
 
 
+def base_decel_tracking(
+    env: ManagerBasedRLEnv, command_name: str, v_gain: float = 2.0, v_max: float = 1.6, std: float = 0.4
+) -> torch.Tensor:
+    """P2.4 PACE-style smooth-deceleration shaping: track a pseudo base-velocity command that decays
+    with the remaining planar racket->target error (G08: the robot rushes far targets reactively, with
+    no deceleration profile, and arrives too hot to strike).
+
+    PACE's remedy is a velocity command proportional to the remaining position error, so the DESIRED
+    speed goes to ~0 exactly at arrival. Deploy-parity constraint: the 175-D actor obs contract is
+    FROZEN, so this is a REWARD-side term only — nothing new is observed; the kernel reuses the task's
+    own error measure (the planar racket->target distance, frame-invariant, no world base position):
+
+        v_des = clamp(v_gain * ||(racket_target_xy - racket_xy)||, 0, v_max)
+        reward = exp(-(||v_base_xy|| - v_des)^2 / std^2)
+
+    Far target -> v_des saturates at v_max and the term pays for MOVING (it cooperates with
+    racket_progress instead of taxing the approach); as the strike stance is reached v_des -> 0 and the
+    term pays for a CALM base — a smooth taper instead of the bang-bang rush-then-slam. Gated to
+    ``pre_strike`` ONLY: the strike swing and the post-strike recovery are untouched (post-strike the
+    distance to the OLD swung-through target would otherwise command a bogus speed-up). Base velocity
+    is the WORLD planar root velocity (same source as hold_ready); v_gain [1/s] is the P-gain of the
+    pseudo velocity command, v_max [m/s] its cap, std [m/s] the kernel width. RewTerm weight is
+    POSITIVE; default weight 0.0 = OFF (flag-gated via task.rewards.base_decel_weight)."""
+    cmd = _cmd(env, command_name)
+    planar_err = torch.norm(cmd.racket_target_pos_w[:, :2] - cmd.racket_pos_w[:, :2], dim=-1)
+    v_des = (v_gain * planar_err).clamp(0.0, v_max)
+    v_base = torch.norm(cmd.robot.data.root_lin_vel_w[:, :2], dim=-1)
+    raw = torch.exp(-torch.square(v_base - v_des) / std**2)
+    return raw * cmd.pre_strike.float()
+
+
 def racket_strike_success(
     env: ManagerBasedRLEnv, command_name: str, std_pos: float, std_vel: float, std_normal: float
 ) -> torch.Tensor:
@@ -171,6 +202,83 @@ def racket_strike_success(
     rv = racket_velocity_tracking_exp(env, command_name, std_vel)
     rn = racket_normal_tracking_exp(env, command_name, std_normal)
     return rp * rv * rn
+
+
+# ============================================================================================== #
+# Tier-1 VIRTUAL-BALL outcome terms (rewardDesign.md). One-shot: non-zero ONLY on the exact-strike
+# step of envs that passed the capture gate (cmd.vb_fired, set by RacketTargetCommand._vb_evaluate
+# from the venue-fitted contact + coarse landing rollout). All are inert (all-zero) unless
+# commands.racket_target.virtual_ball is enabled. Anti-farming gates follow the adversarial
+# verification (verify_tier1-reward-soundness.md (c)):
+#   1. the in-bounds bonus requires landing depth > net_x + vb_min_landing_depth (dink guard),
+#   2. the capture gate requires a minimum paddle approach speed (phantom-block guard, in _vb_evaluate),
+#   3. the pass_net CLEAR BONUS pays only for shots that also land legally (net-without-landing
+#      guard); its height KERNEL is deliberately ungated shaping — see virtual_pass_net docstring.
+# ============================================================================================== #
+def virtual_pass_net(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Net-height shaping at the virtual net-plane crossing + fully-gated clear bonus.
+
+    The Gaussian kernel on (net-crossing height - (net_top + margin)) pays for ANY shot that
+    reaches the net plane inside the rollout horizon (v0 ``pass_net_margin`` semantics): it is the
+    CLIMB gradient that teaches a flat-hitting policy to angle shots upward. Gating it on a legal
+    landing (this term's original verify (c)4 reading) starved training completely — the E-champion
+    warm-start crosses the net legally on only ~0.2% of strikes, so 2.5k iterations of vb_warmE14k3
+    paid exactly zero virtual reward (2026-07-03 incident). The farming surface is bounded: the
+    kernel requires an actual net-plane crossing, maxes only at the correct height, and is worth at
+    most 1/swing; anti-farming gates stay in full on the +0.5 clear bonus here and on the
+    landing/spin terms. RewTerm weight POSITIVE.
+    """
+    cmd = _cmd(env, command_name)
+    target_z = cmd._vb_net_top_z + float(cmd.cfg.vb_net_margin)
+    err = cmd.vb_net_z - target_z
+    kernel = torch.exp(-(err**2) / float(cmd.cfg.vb_net_sigma) ** 2)
+    legal = cmd.vb_net_clear & cmd.vb_landing_valid & cmd.vb_on_opponent
+    raw = kernel * cmd.vb_net_crossed.float() + 0.5 * legal.float()
+    return raw * cmd.vb_fired.float()
+
+
+def virtual_landing(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Landing-accuracy kernel + fully-gated in-bounds bonus (v0 ``landing_in_opponent_half``).
+
+    CLIMB-PHASE shape (2026-07-04): the Gaussian kernel on ||landing_xy - target_xy|| pays for any
+    landing inside the rollout horizon — NOT gated on net clearance. The E-warm-started policy
+    lands ~1.9 m short of the target and reaches the net plane on only a few % of strikes, so both
+    net-gated terms stayed ~zero for 5k+ iterations (vb_warmE14k3/4); this kernel is the dense
+    bottom rung that pays for hitting DEEPER. Net-farming risk is bounded: the rollout has no net
+    collider, so the kernel is smooth through the net plane with its single max AT the target —
+    drilling the net base (err ~0.75 m) always pays less than clearing and landing deeper. The
+    +1.0 bonus keeps the full gate: net clearance AND on-opponent AND depth past
+    net_x + vb_min_landing_depth (verify (c)1 dink guard). Re-tighten (restore the net_clear gate
+    on the kernel, sigma back toward 0.3) once virtual_net_clear_rate is healthy. RewTerm weight
+    POSITIVE.
+    """
+    cmd = _cmd(env, command_name)
+    dist2 = torch.sum(torch.square(cmd.vb_landing_xy - cmd._vb_target_xy.unsqueeze(0)), dim=-1)
+    kernel = torch.exp(-dist2 / float(cmd.cfg.vb_landing_sigma) ** 2)
+    bonus = (cmd.vb_landing_valid & cmd.vb_net_clear & cmd.vb_on_opponent & cmd.vb_depth_ok).float()
+    raw = kernel * cmd.vb_landing_valid.float() + bonus
+    return raw * cmd.vb_fired.float()
+
+
+def virtual_spin(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Outgoing-topspin reward (Ace's ws-term), only for shots that land legally.
+
+    ``clamp(topspin / vb_spin_ref, 0, 1)`` where topspin is omega_plus projected on z_hat x d_hat
+    of the outgoing direction; gated on a valid net-clearing in-bounds landing so brushing wild
+    swipes that miss the table cannot farm spin. RewTerm weight POSITIVE (ramp toward parity with
+    landing per the Ace precedent once the wiring is validated).
+    """
+    cmd = _cmd(env, command_name)
+    legal = cmd.vb_landing_valid & cmd.vb_net_clear & cmd.vb_on_opponent
+    if getattr(cmd.cfg, "vb_spin_mode", "topspin") == "minimize":
+        # Stage-1 placement-first semantics (franco 2026-07-04): the BEST shot kills the incoming
+        # spin — reward small outgoing |omega|, not topspin generation (which is ball quality and
+        # deliberately unrewarded in stage 1).
+        kernel = torch.exp(-(cmd.vb_spin_out_norm / float(cmd.cfg.vb_spin_min_sigma)) ** 2)
+        raw = kernel * legal.float()
+    else:
+        raw = (cmd.vb_topspin / float(cmd.cfg.vb_spin_ref)).clamp(0.0, 1.0) * legal.float()
+    return raw * cmd.vb_fired.float()
 
 
 # --- footwork penalties (feet may STEP; we only punish BAD foot behaviour) --------------------- #

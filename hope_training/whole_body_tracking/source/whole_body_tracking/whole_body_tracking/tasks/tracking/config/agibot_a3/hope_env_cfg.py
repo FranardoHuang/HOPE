@@ -12,10 +12,9 @@ This is the step-13 environment. It extends the A3 motion-tracking baseline
   on top of the BeyondMimic imitation reward and the regularization reward;
 * extended domain randomization for sim-to-real.
 
-Default usage trains ONE swing style per policy (forehand or backhand), selected by which
-reference clip you pass via ``--registry_name`` (reimplement.md steps 14, 17). The swing-type
-observation is therefore omitted from the actor by default (it is constant per policy); enable
-``swing_type`` on the policy group only if you train a single unified policy.
+Default usage trains one unified forehand+backhand policy by passing two reference clips
+(``registry_name`` + ``registry_name_2``). The swing-type observation is present on the actor so
+one policy can condition on which clip/target family it is currently imitating.
 """
 
 from isaaclab.managers import EventTermCfg as EventTerm
@@ -323,6 +322,19 @@ class HOPEDeployParityRewardsCfg(HOPERewardsCfg):
         func=mdp.hold_ready, weight=2.0,
         params={"command_name": "racket_target", "std": 0.5, "reach": 0.65})
 
+    # --- P2.4 PACE-style smooth deceleration (G08, flag-gated, DEFAULT OFF) --------------------------
+    # Pseudo base-velocity command proportional to the remaining PLANAR racket->target error:
+    # v_des = clamp(v_gain*dist_xy, 0, v_max); reward = exp(-(|v_base_xy| - v_des)^2/std^2), gated to
+    # pre_strike. Far target -> pays for moving at v_max (cooperates with racket_progress); at arrival
+    # v_des -> 0 -> pays for a CALM base, killing the reactive rush-then-slam toward far targets.
+    # REWARD-side only — the frozen 175-D actor obs contract is untouched. weight 0.0 = OFF (IsaacLab's
+    # RewardManager skips zero-weight terms); enable per-experiment via task.rewards.base_decel_weight
+    # (suggested trial 1.0). CLI/yaml-tunable: base_decel_weight / _v_gain / _v_max / _std.
+    # Watch metric: base_speed_xy_prestrike (should taper near targets instead of staying hot).
+    base_decel = RewTerm(
+        func=mdp.base_decel_tracking, weight=0.0,
+        params={"command_name": "racket_target", "v_gain": 2.0, "v_max": 1.6, "std": 0.4})
+
     # --- strike-window stability: be planted + upright + still AT the hit (gated to the strike window) ---
     strike_upright = RewTerm(func=mdp.strike_proj_grav_xy, weight=-2.0, params={"command_name": "racket_target"})
     strike_ang_vel = RewTerm(func=mdp.strike_base_ang_vel, weight=-0.5, params={"command_name": "racket_target"})
@@ -373,6 +385,10 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
         # AgibotA3FlatEnvCfg sets the robot, action scale, motion anchor/body names, and the A3
         # contact/termination/CoM body names (all valid for the inherited HOPE* cfg subclasses).
         super().__post_init__()
+        # Multi-swing ping-pong must learn physical recovery between clips. Reset-time RSI remains active,
+        # but clip wrap never teleports the robot back to the next reference start state
+        # (MotionCommandCfg.wrap_teleport already defaults to False; kept explicit here).
+        self.commands.motion.wrap_teleport = False
 
 
 @configclass
@@ -393,3 +409,73 @@ class HOPEPingPongRealSensorAgibotA3EnvCfg(HOPEPingPongDeployParityAgibotA3EnvCf
     Older docs and scripts still refer to this env as ``real_sensor_only`` / ``RealSensor``.
     The actor contract is the same deploy-parity 175-D layout.
     """
+
+
+##
+# Tier-1 virtual-ball variant (rewardDesign.md) — REWARD-ONLY on top of deploy-parity.
+#
+# The observation is the UNCHANGED deploy-parity 175-D actor contract (sim-to-real alignment is
+# frozen; the virtual ball is never observed — it exists only inside the reward). Per swing the
+# command term samples a virtual incoming ball that arrives at the racket target at strike time;
+# at the exact-strike frame the achieved racket FK state is pushed through the venue-fitted paddle
+# contact model + a coarse landing rollout, and the one-shot virtual_* terms below score the
+# predicted shot (net clearance / landing accuracy / outgoing topspin).
+##
+
+
+@configclass
+class HOPEVirtualBallRewardsCfg(HOPEDeployParityRewardsCfg):
+    """DeployParity reward stack + Tier-1 virtual-ball outcome terms.
+
+    Weights follow rewardDesign.md: landing 30 / pass_net 20 / spin 5 (start of the 5->10 ramp),
+    ordered clear-net-first below landing per the PACE/v0 precedent. racket_velocity/racket_normal
+    drop 2.0 -> 0.5: the contact model now scores the whole (velocity, normal, timing) manifold
+    directly, so vector-matching the commanded velocity becomes shaping, not the task. The approach
+    gradient (racket_position 4.0, racket_progress 10.0, racket_strike_success 5.0) is kept — the
+    virtual terms are zero until the paddle reaches the 9.5 cm capture gate at the strike frame.
+    """
+
+    virtual_pass_net = RewTerm(
+        func=mdp.virtual_pass_net, weight=20.0, params={"command_name": "racket_target"})
+    virtual_landing = RewTerm(
+        func=mdp.virtual_landing, weight=30.0, params={"command_name": "racket_target"})
+    virtual_spin = RewTerm(
+        func=mdp.virtual_spin, weight=5.0, params={"command_name": "racket_target"})
+
+    racket_velocity = RewTerm(
+        func=mdp.racket_velocity_tracking_exp,
+        weight=0.5,
+        params={"command_name": "racket_target", "std": 0.5},
+    )
+    racket_normal = RewTerm(
+        func=mdp.racket_normal_tracking_exp,
+        weight=0.5,
+        params={"command_name": "racket_target", "std": 0.262},
+    )
+
+
+@configclass
+class HOPEPingPongVirtualBallAgibotA3EnvCfg(HOPEPingPongDeployParityAgibotA3EnvCfg):
+    """Deploy-parity env + Tier-1 virtual-ball rewards. Obs/terminations/DR inherited untouched."""
+
+    obs_mode: str = "deploy_parity"
+    rewards: HOPEVirtualBallRewardsCfg = HOPEVirtualBallRewardsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Reward-only feature switch: enables the per-swing virtual-ball sampler and the at-strike
+        # contact + coarse-landing evaluation in RacketTargetCommand (vb_* cfg fields hold the
+        # venue-fit sampling boxes / gates; tune there, not here).
+        self.commands.racket_target.virtual_ball = True
+        # CLIMB-PHASE shaping width (2026-07-03): the E-champion warm start crosses the net plane
+        # ~0.3-0.5 m BELOW the target height; at the v0 default sigma 0.10 the height kernel is
+        # exp(-(0.5/0.1)^2) ~ 0 there — no gradient, and vb_warmE14k3 paid zero virtual reward for
+        # 2.5k iters. 0.25 keeps a usable gradient down to the current operating band. Tighten
+        # back toward 0.10 once virtual_net_clear_rate is healthy (>0.3 or so).
+        self.commands.racket_target.vb_net_sigma = 0.25
+        # CLIMB-PHASE landing kernel width (2026-07-04): landings start ~1.9 m short of the target
+        # (exp(-(1.9/0.3)^2) = 0 — the v0 sigma has no reach); 1.0 pays 0.03 at the current band
+        # and grows monotonically toward the target = dense "hit deeper" gradient (the kernel is
+        # also ungated from net clearance during the climb — see hope_rewards.virtual_landing).
+        # Tighten back toward 0.3 together with re-gating once the net terms carry the signal.
+        self.commands.racket_target.vb_landing_sigma = 1.0

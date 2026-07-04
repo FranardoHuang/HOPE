@@ -78,6 +78,15 @@ class HOPEPlanner:
         return self._latest_command
 
     @property
+    def strike_target(self) -> Optional[StrikeTarget]:
+        """Latest Stage-2 prediction (ball state at the hitting plane).
+
+        Exposed for the strike-spec diagnostics path (node.py), which needs
+        the predicted ball state AT the strike, not just the racket command.
+        """
+        return self._latest_strike
+
+    @property
     def time_to_strike(self) -> Optional[float]:
         """Seconds remaining until the predicted strike (positive, decreasing).
 

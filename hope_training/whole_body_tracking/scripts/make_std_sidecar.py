@@ -1,16 +1,24 @@
-"""Extract the policy's learned action std from an rsl_rl checkpoint -> exported/learned_std.npy.
+"""Extract policy sidecars from an rsl_rl checkpoint -> exported/learned_std.npy + obs_norm.npz.
 
-scripts/play.py exports policy.onnx but NOT the learned std, and mujoco_eval_onnx.py needs the std
-sidecar for any dither mode (noise_scale > 0). This pulls the state-independent std parameter out of a
-checkpoint and saves it as a (31,) float32 .npy next to the ONNX.
+scripts/play.py exports policy.onnx but NOT (a) the learned action std, and NOT (b) the empirical
+OBS-NORMALIZATION stats — the export bakes the RAW actor while every training run uses
+empirical_normalization=true (P0 found 2026-07-04: without the normalization, every ONNX consumer
+feeds out-of-distribution obs and the policy scores ~0). This script pulls BOTH out of a checkpoint:
 
-IMPORTANT: run this on the SAME checkpoint you exported the ONNX from, so the std matches the policy.
-Needs torch (run with the Isaac env python `hope_isaac_py`, or any env that has torch + numpy — NOT the
-mujoco-only hope-motion-py310, which lacks torch).
+  * learned_std.npy : (31,) float32 action std (mujoco_eval_onnx.py dither modes, noise_scale > 0).
+  * obs_norm.npz    : mean/std/eps/count of the actor obs EmpiricalNormalization
+                      (checkpoint obs_norm_state_dict). mujoco_eval_onnx.py auto-loads this from
+                      the ONNX's directory and applies (obs - mean) / (std + eps) before inference.
+
+IMPORTANT: run this on the SAME checkpoint you exported the ONNX from, so the sidecars match the
+policy (zero-point-match the ONNX against candidate checkpoints if unsure). Needs torch (run with
+the Isaac env python `hope_isaac_py`, or any env that has torch + numpy — NOT the mujoco-only
+hope-motion-py310, which lacks torch).
 
     hope_isaac_py scripts/make_std_sidecar.py \
         --checkpoint logs/rsl_rl/agibot_a3_hope/<RUN>/model_<N>.pt
-    # -> writes logs/rsl_rl/agibot_a3_hope/<RUN>/exported/learned_std.npy  (override with --out)
+    # -> writes logs/rsl_rl/agibot_a3_hope/<RUN>/exported/learned_std.npy + obs_norm.npz
+    #    (override the std path with --out; obs_norm.npz always lands next to it)
 """
 from __future__ import annotations
 
@@ -65,6 +73,24 @@ def main():
     print(f"[make_std_sidecar] std param  = '{key}'  shape={std.shape}  "
           f"mean={std.mean():.4f} min={std.min():.4f} max={std.max():.4f}")
     print(f"[make_std_sidecar] saved -> {out}")
+
+    # --- actor obs EmpiricalNormalization stats -> obs_norm.npz (P0 fix 2026-07-04) ---------------
+    # rsl_rl OnPolicyRunner (empirical_normalization=true) stores the running stats under
+    # obs_norm_state_dict with keys _mean/_var/_std/count; the actor consumes
+    # (obs - _mean) / (_std + eps), eps = 1e-2 (rsl_rl EmpiricalNormalization default).
+    nsd = ckpt.get("obs_norm_state_dict") if isinstance(ckpt, dict) else None
+    norm_out = os.path.join(os.path.dirname(out), "obs_norm.npz")
+    if nsd is not None:
+        mean = nsd["_mean"].detach().cpu().numpy().reshape(-1).astype(np.float32)
+        nstd = nsd["_std"].detach().cpu().numpy().reshape(-1).astype(np.float32)
+        count = int(nsd.get("count", torch.tensor(0)).item()) if "count" in nsd else 0
+        np.savez(norm_out, mean=mean, std=nstd, eps=np.float32(1e-2), count=np.int64(count))
+        print(f"[make_std_sidecar] obs_norm   = dim {mean.shape[0]}  mean|max|={np.abs(mean).max():.3f} "
+              f"std max={nstd.max():.3f}  count={count}")
+        print(f"[make_std_sidecar] saved -> {norm_out}")
+    else:
+        print("[make_std_sidecar] WARNING: checkpoint has no obs_norm_state_dict — no obs_norm.npz "
+              "written. Only correct if this run trained with empirical_normalization=false.")
 
 
 if __name__ == "__main__":

@@ -4,7 +4,8 @@ Reads `vel_range_per_clip` (and the shared `vel_*_range` fallback) straight from
 cfg/task/HOPEPingPong.yaml, samples many targets exactly as RacketTargetCommand._sample_targets_uniform
 would (independent uniform boxes per axis), and prints the forehand/backhand target-SPEED distribution.
 
-Purpose: confirm the config produces the intended speeds (forehand mean ~2.7 m/s, backhand mean ~2.0 m/s)
+Purpose: confirm the config produces the intended re-grounded target speeds (forehand mean ~2.1 m/s,
+backhand mean ~1.9 m/s)
 WITHOUT launching a training run. This is a pure sampling check — it does not touch the policy, the env,
 rewards, or observations.
 
@@ -70,12 +71,12 @@ def main():
         print(f"{name:18s}" + "".join(f"{s[k]:9.3f}" for k in ("mean", "std", "p10", "p50", "p90", "min", "max")))
     print("=" * 78)
 
-    # Sanity checks against the design intent (forehand ~2.7, backhand ~2.0).
+    # Sanity checks against the re-grounded design intent (forehand ~2.1, backhand ~1.9).
     fh = next((v for k, v in stats.items() if k.startswith("forehand")), None)
     bh = next((v for k, v in stats.items() if k.startswith("backhand")), None)
     if fh and bh:
-        print(f"\nforehand mean speed = {fh['mean']:.3f} m/s   (intent ~2.7)")
-        print(f"backhand mean speed = {bh['mean']:.3f} m/s   (intent ~2.0)")
+        print(f"\nforehand mean speed = {fh['mean']:.3f} m/s   (intent ~2.1)")
+        print(f"backhand mean speed = {bh['mean']:.3f} m/s   (intent ~1.9)")
         print(f"forehand - backhand mean = {fh['mean'] - bh['mean']:.3f} m/s "
               f"({'OK: backhand is slower' if bh['mean'] < fh['mean'] else 'WARNING: backhand not slower'})")
 

@@ -64,6 +64,14 @@ The same package now also contains a first-pass table-tennis physics/visualizati
 - `source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/`: ignored generated Isaac asset rebuilt from `agi/URDF/A3T2.5-URDF-std-pingpang/` with `scripts/prepare_a3_isaac_asset.py`.
 - `scripts/play_table_tennis.py`: visualization/headless smoke runner for the table-tennis scene.
 
+Ball-physics fitting (2026-07-03):
+
+- `hope_training/ball_physics_fit/`: the venue ball-physics fitting pipeline of record
+  (C3D extraction → QA → segmentation → ordered fits → F1–F8 falsification battery in
+  `falsify/` → held-out validation → two-horizon landing `predict_check.py`). Data root
+  via `BALLFIT_DATA_ROOT`; deps in `requirements-ballfit.txt` (`c3d` only for extraction).
+  Fitted constants: `configs/ball_physics_venue.yaml`; report: `docs/ball_physics_fit_report.md`.
+
 Additional training config:
 
 - `hope_training/config/joint_order_agibot_a3.yaml`: current working 31-DOF A3 joint order for training/export alignment.

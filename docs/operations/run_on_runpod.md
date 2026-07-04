@@ -10,11 +10,18 @@ to get on, what is verified, and the repo-side conventions.
 ## Access
 
 ```bash
-ssh root@162.43.172.171 -p 17424 -i ~/.ssh/id_ed25519_runpod
+ssh root@162.43.172.171 -p 18333 -i ~/.ssh/id_ed25519_runpod
 ```
 
-- Endpoint current as of 2026-07-03; RunPod may assign a new IP/port if the pod is re-provisioned —
-  update this file when it changes.
+- Endpoint current as of 2026-07-04 (port history: 17424 → 15320 → 18333 across restarts; the key
+  stays the same). Every restart confirmed `/workspace` survives intact; only running processes and
+  `/root` are lost. RunPod may assign a new IP/port on any re-provision — update this file when it
+  changes.
+- **After EVERY restart, run `bash /workspace/restore_root.sh` once** — it re-wires `/root/.bashrc`
+  (claude/codex/git-lfs on PATH for bare logins) and restores the GitHub key if a persistent one
+  exists under `/workspace/.ssh_github/`. Then re-run the `--quick` smoke.
+- Note: a full Stop→Start rebuilds the container but does NOT move hosts (the 500 GB volume is
+  host-local and pins the pod to its machine) — verified 2026-07-04 via unchanged `/proc/uptime`.
 - Each teammate (and each teammate's coding agent) uses the same root login; separation is by
   directory, not by account. Work ONLY under your own `/workspace/<name>/`.
 - The pod holds one GitHub deploy key (dongc1's) shared for pull/push; per-clone `user.name`/
@@ -79,6 +86,40 @@ that imports come from YOUR clone, and a real env build + step.
 5. WandB login is global and ephemeral (`/root/.netrc`); pass `WANDB_API_KEY=...` per run or use
    `logger=tensorboard`.
 
+## Launch Rules (hard-won 2026-07-03 — read before starting ANY job over ssh)
+
+1. **One Kit boot at a time, pod-wide.** Parallel Isaac boots deadlock each other (worst with cold
+   caches right after a restart: five jobs sat 20+ min at 0 progress). Wrap every training/play
+   launch in the global boot lock:
+   ```bash
+   /workspace/bin/kit_boot_lock.sh /path/to/run.log python scripts/train.py ...
+   ```
+   It serializes only the boot (releases when "Learning iteration" appears), then jobs run in
+   parallel normally.
+2. **Detach properly or your job dies with the ssh session (“陪葬”).** `nohup ... &` alone is NOT
+   enough under flaky connections; use `setsid nohup <cmd> </dev/null > log 2>&1 &` (the boot-lock
+   wrapper does this for you). Judge success by artifacts (checkpoints/ONNX on disk), never by the
+   session surviving.
+3. **pkill self-match kills your own session.** `ssh pod 'pkill -f myscript'` matches the ssh
+   command line itself → session dies mid-command with exit 255 and later commands silently never
+   run. Always bracket the first char: `pkill -f "[m]yscript"`.
+4. **A SIGKILL'd Kit leaves an orphaned cache lock that hangs every later boot.** Symptom: a lone
+   job freezes at the AutoNode-registration boot phase forever. Check `fuser
+   /workspace/.cache/ov/_cache.lock` — no holder = orphaned; `rm` it and relaunch. (A lock held by
+   a LIVE process is healthy — do not delete that one.) Prefer SIGTERM first when killing Kits.
+5. **Hosts with a broken render stack hang the boot in the URDF importer's UI build.** Symptom
+   (2026-07-03 host): every headless boot freezes forever right after the AutoNode phase at ~110%
+   CPU, with NO stale cache lock; faulthandler shows the main thread inside
+   `isaacsim.asset.importer.urdf .../ui_utils.py string_filed_builder` — the extension builds its
+   import window even headless, and the first `omni.ui.StringField` never returns when the host's
+   iray/RTX stack is broken (bare CUDA fine). Fix: `export HOPE_URDF_IMPORTER_NO_UI=1` (env.sh) —
+   the shared venv's extscache extension is patched to skip `build_ui()` under this flag (unset =
+   stock). Headless no-camera training/eval then works; anything needing RTX rendering/cameras is
+   still dead on such a host (`_wait_for_viewport` hangs, `rtx.neuraylib` fails to load).
+6. **Verify every launch.** After starting a job, confirm within ~60 s that its log exists and the
+   process is alive; a launcher that prints nothing probably did nothing (two silent queue failures
+   cost us 30 idle GPU-minutes).
+
 ## Known Quirks
 
 - **git-lfs**: the git-lfs filters are NOT configured globally (global gitconfig lives on the
@@ -94,9 +135,12 @@ that imports come from YOUR clone, and a real env build + step.
   from artifacts (checkpoints on disk), not `$?` and not only log sentinels. The train smoke was
   updated on 2026-07-03 to accept `model_9.pt` on disk as the success sentinel after a run whose
   final "Learning iteration 9/10" line never reached the log.
-- **Pod restart**: `/workspace` survives; `/root` (wandb login, apt packages, bash history) does
-  not. Re-`source env.sh`, re-login wandb if needed, and re-run `--quick` (or `--concurrent`)
-  smoke.
+- **Pod restart**: `/workspace` survives; `/root` (wandb login, apt packages, bash history, ssh
+  keys, installed CLIs) does not. Restart-proofed on 2026-07-03: `/workspace/bin` (git-lfs, claude,
+  kit_boot_lock.sh) + `CLAUDE_CONFIG_DIR=/workspace/.claude` are wired into every `env.sh`; the
+  GitHub deploy key however still lives in `/root/.ssh` and must be re-installed after each restart
+  (persistent-key decision pending). After restart: re-`source env.sh`, re-run `--quick` smoke, and
+  expect the FIRST Kit boot to be slow (cold caches — all the more reason for the boot lock).
 
 ## Adding A New User (or Agent Workspace)
 

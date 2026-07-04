@@ -21,9 +21,15 @@
 # Reward weights/kernel widths are NOT published by HITTER, so they stay as
 # reasonable HOPE choices (goal terms weighted relatively high, per the paper).
 #
-# STAGE NOTE: this is the single-swing-type (forehand) config. The unified
-# forehand+backhand policy (sampled swing type each swing, dual-clip imitation,
-# non-overlapping y regions) is Stage 2 and adds swing_type + a second clip.
+# UPDATE (2026-07-02): NO mid-episode RSI teleport on clip wrap (motion.wrap_teleport: false
+# below; reset-time RSI still applies at episode reset), so the 10 s episode trains continuous
+# between-swing recovery. An OPTIONAL reference-centered target mode
+# (racket.target_mode=reference_perturbed, verified on the rsi-on-wrap branch) exists as a
+# non-default override; `uniform` stays the default here.
+#
+# TRAINING ROUTE: unified forehand+backhand by default. `registry_name` is clip 0
+# (forehand), `registry_name_2` is clip 1 (backhand), and `swing_type` is present
+# in the actor observation so one policy can learn both swings.
 # =============================================================================
 
 name: HOPEPingPong
@@ -35,6 +41,12 @@ actor_obs_contract: full
 # backhand (registry_name_2). MotionLoader concatenates them; clip_id selects which swing each env
 # imitates. Order must match racket.strike_phase_per_clip. Set registry_name_2: null for a single-swing
 # policy. (Override on the CLI with registry_name=... / registry_name_2=...)
+# NOTE (2026-07-02): the `hope_forehand/backhand:latest` registry aliases were verified to still face
+# world +Y (pre-reground). Until corrected v5+ registry artifacts exist, pass the local corrected +X
+# clips on the CLI via the local-first params, e.g.
+#   motion_file=hope_training/motions/preprocessed/hope_forehand_hopex.npz
+#   motion_file_2=hope_training/motions/preprocessed/hope_backhand_hopex.npz
+# (motion_file bypasses the registry entirely; see scripts/train.py resolve_motion_sources).
 registry_name: ${oc.env:WANDB_REGISTRY_ORG,dongc_1-university-of-california-berkeley-org}/wandb-registry-motions/hope_forehand
 registry_name_2: ${oc.env:WANDB_REGISTRY_ORG,dongc_1-university-of-california-berkeley-org}/wandb-registry-motions/hope_backhand
 
@@ -45,10 +57,15 @@ defaults:
   - _self_
 
 env:
-  # HITTER: 10 s episode with multiple swings. With no ball the swings are independent; the target
-  # resamples on each clip wrap, so a 10 s episode gives ~5 swings of practice and trains the
-  # between-swing recovery. (Was capped to 3 s in the HOPE curriculum path; restored to HITTER.)
+  # 10 s episode with multiple physical swings. Clip wrap resamples the command target and reference
+  # clip, but does not teleport the robot; recovery must be learned by the policy.
   episode_length_s: 10.0
+
+motion:
+  # Reset-time RSI is still used at episode reset. During clip wrap, keep the simulated robot state
+  # continuous so the 10 s episode actually trains between-swing recovery (MotionCommandCfg.wrap_teleport
+  # already defaults to false; kept explicit here, applied via the train.py motion.* override plumbing).
+  wrap_teleport: false
 
 # ---- reward weights / kernel std --------------------------------------------
 # HITTER does not publish reward weights or kernel forms. Goal terms get relatively high weight
@@ -118,6 +135,14 @@ racket:
   # HITTER target sampling: uniform, directly sampled, NO reference-perturb curriculum.
   target_mode: uniform
 
+  # OPTIONAL reference-centered mode (NON-default). Override target_mode=reference_perturbed to derive
+  # the target center from the imitated clip's OWN per-clip strike-frame racket FK state (position,
+  # velocity, face normal; hope_commands.py _ref_*_per_clip selected by motion.clip_id), widened by a
+  # success-gated perturbation. The keys below are consumed ONLY in that mode (inert under uniform);
+  # the remaining ref_perturb_* knobs keep their hope_commands.py code defaults.
+  ref_perturb_pos: [0.15, 0.20, 0.15]
+  ref_perturb_vel: [1.0, 1.0, 0.8]
+
   # Fixed striking plane at x = 0.4 m in front of the robot (HITTER §IV: "the striking plane is fixed
   # at 0.4 m in front of the robot, so only the y and z coordinates of the racket target are sampled").
   pos_x_range: [0.40, 0.40]
@@ -127,8 +152,8 @@ racket:
   racket_pos_y_abs_range: [0.05, 0.45]
   pos_y_range: [-0.45, -0.05]
   pos_z_range: [0.70, 1.05]
-  # OPTIONAL per-clip POSITION targets (unified policy only) — DISABLED BY DEFAULT (commented -> the
-  # shared pos box above is used for both clips; old behavior unchanged). Each clip's box is ADDED to the
+  # Per-clip POSITION targets (unified policy only) — ACTIVE here (comment them out to fall back to
+  # the shared pos box above for both clips). Each clip's box is ADDED to the
   # env origin; y is SIGNED here (forehand -y / backhand +y encoded directly). WHY: the shared box was
   # tuned for backhand strike_phase 0.74 (low follow-through, z~0.84). At the corrected forward-strike
   # phase 0.50 the backhand racket sits HIGH (reference z~1.22, x~0.58) — above the shared z<=1.05 box —

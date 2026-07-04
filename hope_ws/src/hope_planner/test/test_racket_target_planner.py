@@ -75,3 +75,32 @@ def test_invalid_strike_produces_valid_false():
     )
     cmd = _planner().plan(invalid)
     assert not cmd.valid
+
+
+def test_velocity_dependent_restitution_self_consistent():
+    """The fixed-point e(u_n) solve must satisfy the restitution identity
+    v_o_n - v_r_n = -e(u_n) * (v_i_n - v_r_n) with e = g1*exp(g2*|u_n|)."""
+    pl = _planner()
+    v_in = np.array([-6.0, 0.3, -1.0])
+    v_out = np.array([4.0, -0.2, 2.5])
+    v_r, n = pl._compute_racket_velocity(v_in, v_out, pl.config.C_r)
+    v_r_n = float(np.dot(v_r, n))
+    v_i_n = float(np.dot(v_in, n))
+    v_o_n = float(np.dot(v_out, n))
+    u_n = abs(v_i_n - v_r_n)
+    e = pl.config.e_exp_g1 * np.exp(pl.config.e_exp_g2 * u_n)
+    assert abs((v_o_n - v_r_n) + e * (v_i_n - v_r_n)) < 1e-3
+
+
+def test_velocity_dependent_restitution_needs_faster_racket():
+    """F4 physics: a faster contact has LOWER e, so the planner must command
+    more racket speed than the constant-C_r model would."""
+    pl = _planner()
+    v_in = np.array([-7.0, 0.0, -1.0])
+    v_out = np.array([5.0, 0.0, 2.0])
+    v_r, n = pl._compute_racket_velocity(v_in, v_out, pl.config.C_r)
+    # constant-e reference
+    v_o_n = float(np.dot(v_out, n))
+    v_i_n = float(np.dot(v_in, n))
+    v_r_n_const = (v_o_n + pl.config.C_r * v_i_n) / (1.0 + pl.config.C_r)
+    assert float(np.dot(v_r, n)) > v_r_n_const

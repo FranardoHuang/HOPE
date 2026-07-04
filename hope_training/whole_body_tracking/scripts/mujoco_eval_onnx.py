@@ -5,6 +5,12 @@ to verify the exported ONNX before hardware. NO retraining, NO reward changes, N
 changes. This deliberately does NOT use the official Agibot 1570D HITTER-tokenizer C++ harness and
 does NOT convert the policy to 29D — it runs the 31D BeyondMimic ONNX as-is.
 
+SCOPE: this script is the IN-REPO STRIKE-METRICS tool (composite/pos/vel/normal pass rates, per-clip
+breakdowns). The OFFICIAL deploy validation sim is the vendor C++/aimrt harness under
+agi/A3_MuJoCo_Sim/aimrt_mujoco_sim (the real-hardware gate; deploy-faithful robot validation, no
+strike metrics). The vendor/deploy runner drives a CONTINUOUS reference clock with NO per-swing
+teleports — which is what the multiswing reset mode below mirrors on the training side.
+
 =============================================================================================
 POLICY CONTRACT (verified against the exported ONNX metadata + checkpoint weights, 2026-06-27)
 =============================================================================================
@@ -67,6 +73,71 @@ REFERENCE-STATE-INIT (matches Isaac): each new swing (episode reset OR clip wrap
 
 OBSERVATION NOISE: training adds small uniform obs corruption; deployment/sim-to-sim feeds CLEAN obs
   (the ONNX is deterministic). We feed clean obs and document it; sensor noise is a separate concern.
+
+=============================================================================================
+P0 FIX (2026-07-04): all-zero scores for the multiswing generation — TWO root causes
+=============================================================================================
+1. OBS NORMALIZATION (the actual all-zero bug, affects EVERY generation).
+   Every run trains with rsl_rl `empirical_normalization: true`, i.e. the actor consumes
+   (obs - mean) / (std + 0.01) with running stats stored in the checkpoint's obs_norm_state_dict.
+   The export chain (scripts/play.py -> _OnnxPolicyExporter, and standalone_onnx_export.py) bakes the
+   RAW actor with NO normalizer (verified 2026-07-04 by zero-point matching the p21_E and old-gen
+   hopex ONNXs against their checkpoints: ONNX == raw actor to ~1e-6; the checkpoints DO carry
+   non-trivial stats, mean |max| ~4, var up to ~13). Feeding raw obs to a normalized-obs actor
+   lobotomizes the policy: in MuJoCo it staggered forward-right ~0.5 m on a canonical trajectory
+   regardless of the sampled target (the 0.53 +/- 0.06 m "systematic offset"), tripped the
+   anchor_pos/ee_body_pos tracking guards at ~52 steps, and only the backhand strike frame
+   (44 steps in) was ever inside an episode — forehand (65 steps in) never evaluated. It could not
+   even hold a nominal stand (deploy-faithful fell at ~1.1 s). Diagnosed with a perfect-tracking
+   probe: with the robot PINNED to the reference each step, actions still exploded (|a| -> ~60)
+   through the last-action feedback obs; with the normalizer applied they are sane.
+   FIX: this runner now loads an `obs_norm.npz` sidecar (keys mean/std/eps; produced from the SAME
+   checkpoint as the ONNX by scripts/make_std_sidecar.py) and applies (obs - mean)/(std + eps)
+   before inference. Resolution: --obs-norm PATH > auto (<onnx_dir>/obs_norm.npz) > loud WARNING and
+   raw obs (only correct for a hypothetical normalizer-free training run or a future export that
+   bakes the normalizer in). NOTE FOR DEPLOY: the C++ runner consuming these ONNX files raw has the
+   same defect — either bake the normalizer into the export or normalize obs on the robot.
+2. EPISODE PROTOCOL (--reset-mode): the old harness teleported the robot to the next clip's first
+   frame on EVERY clip wrap (legacy RSI generation, wrap_teleport=true). The multiswing generation
+   (HOPEPingPong/DeployParity, 2026-07+) trains with wrap_teleport=false + a pre-swing HOLD of
+   U[0,100] control steps (reference frozen at the swing's first frame, time_to_strike pinned at its
+   per-clip max) and the robot physically carries itself between swings. New flag:
+     --reset-mode teleport   : byte-identical legacy behavior (teleport per swing, no holds).
+     --reset-mode multiswing : no wrap teleports; per-swing pre-swing hold sampled from
+                               --hold-steps-range (training default 0..100); last_action persists
+                               across wraps (training only zeroes it on true episode resets); adds
+                               the absolute balance terminations (tilt > 0.7 rad, pelvis z < 0.5 m)
+                               that HOPEDeployParityTerminationsCfg trains with, alongside the
+                               inherited tracking guards.
+     --reset-mode auto (default): ONNX metadata `wrap_teleport` when present, else multiswing.
+   Episode RESETS still reference-state-init at the sampled clip's first frame in both modes
+   (training's dominant reset path); the 10 s timeout matches episode_length_s.
+   Also fixed here: the strike-phase precedence is resolved (CLI > ONNX metadata > legacy builtin)
+   BEFORE anything is printed or computed — the old code printed a misleading
+   "strike_phase_per_clip in effect" line from the builtin default before metadata resolution
+   (the metadata value did take effect for the metrics, but the double print hid what ran).
+
+=============================================================================================
+TARGET SOURCE (--target-source, 2026-07-04): where the per-strike racket targets come from.
+  boxes (default) ....... per-clip training boxes (mode A, in-distribution vs training). This is
+                          the pre-existing behavior, byte-identical (same RNG stream, same CSVs).
+  venue-balls (mode B) .. distribution-driven REALISM eval: sample an INCOMING BALL at-strike
+                          state from the fitted venue distribution (configs/
+                          incoming_ball_venue.yaml pooled/matchlike spec — the eval principle in
+                          that file), invert it through the StrikeSpec planner (hope_ws/src/
+                          hope_planner, imported lazily by path) into the racket (pos, vel,
+                          normal) that ball DEMANDS for a sampled opponent-half landing, and feed
+                          that through the unchanged target pipeline. Strikes are scored exactly
+                          like mode A (pos/vel/normal pass + composite) AND, for CONTACTED strikes
+                          (training capture gate: pos_err < 0.095 m, approach > 0.3 m/s), the
+                          virtual return of the ACHIEVED racket state vs the SAMPLED ball is
+                          rolled out (venue contact model + drag/Magnus flight) to a landing:
+                          the mode-B summary reports the landing-in-bounds/net-clear rate
+                          ("回球成功率" headline) + median landing error vs the intended target,
+                          and the strikes CSV gains ball/landing columns. Frames, geometry and v1
+                          caveats (independent box sampling ignores the documented correlations;
+                          human-height contact z) are documented in scripts/venue_ball_sampler.py.
+                          Not supported together with --deploy-faithful (v1).
 
 =============================================================================================
 USAGE (motion env that has mujoco + onnxruntime, e.g. hope-motion-py310):
@@ -229,7 +300,7 @@ def subtract_frame_transforms(t01, q01, t02, q02):
 # ONNX policy wrapper
 # =================================================================================================
 class OnnxPolicy:
-    def __init__(self, onnx_path):
+    def __init__(self, onnx_path, obs_norm="auto"):
         import onnxruntime as ort
 
         self.sess = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
@@ -266,11 +337,51 @@ class OnnxPolicy:
         self.clip_seg_lengths = None
         if md.get("clip_seg_lengths", "").strip():
             self.clip_seg_lengths = tuple(int(float(v)) for v in md["clip_seg_lengths"].split(","))
+        # optional episode-semantics metadata (future exports may bake the training wrap_teleport
+        # flag; none do as of 2026-07-04 — --reset-mode auto then defaults to multiswing).
+        self.wrap_teleport_meta = None
+        if md.get("wrap_teleport", "").strip():
+            self.wrap_teleport_meta = md["wrap_teleport"].strip().lower() in ("1", "true", "yes")
         n = len(self.joint_names)
         assert n == 31 and self.default_q.shape == (31,) and self.action_scale.shape == (31,), \
             f"expected 31 joints, got {n}"
         assert self.body_names == TRACKED_BODIES, \
             f"ONNX body_names != expected tracked order:\n {self.body_names}\n {TRACKED_BODIES}"
+        # --- empirical obs normalization (P0 fix 2026-07-04, see module docstring #1) -------------
+        # Every training run uses rsl_rl empirical_normalization=true, but the export chain bakes the
+        # RAW actor. The `obs_norm.npz` sidecar (mean/std/eps from the checkpoint's
+        # obs_norm_state_dict; scripts/make_std_sidecar.py writes it next to the ONNX) restores the
+        # training-time obs transform (obs - mean) / (std + eps). Without it, a normalized-obs model
+        # is evaluated on garbage and scores ~0 with a very consistent staggering pathology.
+        self.obs_mean = self.obs_std = None
+        self.obs_eps = 1e-2                      # rsl_rl EmpiricalNormalization default
+        self.obs_norm_path = None
+        # Double-normalization guard: exports made with standalone_onnx_export.py --bake-obs-norm
+        # carry obs_norm_baked=1 in metadata and must NOT get the sidecar on top.
+        if str(md.get("obs_norm_baked", "0")) == "1":
+            print("[mj-sim2sim] obs normalization BAKED into the ONNX graph (metadata) — sidecar skipped")
+            obs_norm = "off"
+        if obs_norm != "off":
+            path = obs_norm if obs_norm not in (None, "auto") else \
+                os.path.join(os.path.dirname(os.path.abspath(onnx_path)), "obs_norm.npz")
+            if os.path.isfile(path):
+                d = np.load(path)
+                mean = np.asarray(d["mean"], np.float64).reshape(-1)
+                std = np.asarray(d["std"], np.float64).reshape(-1)
+                assert mean.shape == (self.obs_dim,) and std.shape == (self.obs_dim,), (
+                    f"obs_norm sidecar dim {mean.shape}/{std.shape} != obs dim {self.obs_dim} "
+                    f"({path}) — sidecar from a different obs contract/checkpoint?")
+                self.obs_mean, self.obs_std = mean, std
+                self.obs_eps = float(d["eps"]) if "eps" in d else 1e-2
+                self.obs_norm_path = path
+            elif obs_norm not in (None, "auto"):
+                raise SystemExit(f"[FATAL] --obs-norm sidecar not found: {path}")
+
+    def normalize_obs(self, obs):
+        """Training-time empirical obs normalization (identity if no sidecar loaded)."""
+        if self.obs_mean is None:
+            return obs
+        return (obs - self.obs_mean) / (self.obs_std + self.obs_eps)
 
     def refs(self, time_step):
         """Reference motion at `time_step` (obs-independent). Returns dict of arrays in metadata order."""
@@ -283,6 +394,7 @@ class OnnxPolicy:
 
     def action(self, obs, time_step):
         ts = np.array([[float(time_step)]], np.float32)
+        obs = self.normalize_obs(obs)
         o = self.sess.run(None, {"obs": obs[None].astype(np.float32), "time_step": ts})
         return o[0][0].astype(np.float64)    # mean action (31,), Isaac articulation order
 
@@ -511,6 +623,23 @@ class RacketCommand:
         base_xy[1] += self._u(*BASE_TARGET_Y_RANGE)
         self.base_target_pos_w = base_xy
 
+    def set_external_target(self, pos_w, vel_w, normal_w, clip_id):
+        """Mode-B (venue-balls) target injection: same state writes as resample(), but with an
+        externally computed (ball-demanded) pos/vel/normal instead of box draws. The base-target
+        coupling is kept identical to resample() so the policy sees the same obs semantics."""
+        o = self.origin
+        self.racket_target_pos_w = np.asarray(pos_w, np.float64).copy()
+        self.racket_target_vel_w = np.asarray(vel_w, np.float64).copy()
+        self.racket_target_normal_w = np.asarray(normal_w, np.float64).copy()
+        self.swing_sign = 1.0 if clip_id == 0 else -1.0
+        base_xy = o[:2].copy()
+        racket_y_off = self.racket_target_pos_w[1] - o[1]
+        base_xy[1] += float(np.clip(BASE_COUPLE_BLEND * racket_y_off,
+                                    -BASE_COUPLE_MAX_OFFSET, BASE_COUPLE_MAX_OFFSET))
+        base_xy[0] += self._u(*BASE_TARGET_X_RANGE)
+        base_xy[1] += self._u(*BASE_TARGET_Y_RANGE)
+        self.base_target_pos_w = base_xy
+
     def update_strike_timing(self, clip_id, time_step):
         seg_start = self.seg_start[clip_id]
         seg_len = self.seg_len[clip_id]
@@ -678,6 +807,47 @@ class StrikeAcc:
 
 
 # =================================================================================================
+# Mode-B (venue-balls) virtual-return accumulator: one add() per exact-strike frame.
+# =================================================================================================
+class VenueAcc:
+    def __init__(self):
+        self.n = 0
+        self.contacted = self.landing_valid = self.on_opp = self.net_clear = self.landed_ok = 0
+        self.land_errs = []          # ||achieved - intended|| for CONTACTED strikes w/ valid landing
+        self.demanded_speed = 0.0    # |v_r| the spec demanded (target_speed)
+
+    def add(self, ret, demanded_speed):
+        self.n += 1
+        self.contacted += ret.contacted
+        self.demanded_speed += demanded_speed
+        if ret.contacted:
+            self.landing_valid += ret.landing_valid
+            self.on_opp += ret.on_opponent
+            self.net_clear += ret.net_clear
+            self.landed_ok += ret.landed_ok
+            if ret.landing_valid and not math.isnan(ret.land_err):
+                self.land_errs.append(ret.land_err)
+
+    def metrics(self):
+        nan = float("nan")
+        n_c = self.contacted
+        return dict(
+            n_strikes=self.n,
+            contacted=n_c,
+            contact_rate=(n_c / self.n) if self.n else nan,
+            landing_valid_rate=(self.landing_valid / n_c) if n_c else nan,   # of contacted
+            in_bounds_rate=(self.on_opp / n_c) if n_c else nan,              # of contacted
+            net_clear_rate=(self.net_clear / n_c) if n_c else nan,           # of contacted
+            landed_ok=self.landed_ok,
+            # headline 回球成功率: legal return (contact + in-bounds + net clear) per strike CHANCE
+            return_success_rate=(self.landed_ok / self.n) if self.n else nan,
+            land_err_median=(float(np.median(self.land_errs)) if self.land_errs else nan),
+            land_err_mean=(float(np.mean(self.land_errs)) if self.land_errs else nan),
+            demanded_speed_mean=(self.demanded_speed / self.n) if self.n else nan,
+        )
+
+
+# =================================================================================================
 # Viewer markers (VISUALIZATION ONLY — no physics, no collision, no reward, no observation effect).
 # Drawn into the viewer's user scene each frame; they never touch model/data/qpos/obs/action.
 # =================================================================================================
@@ -708,22 +878,56 @@ def _draw_markers(viewer, mujoco, racket, robot, ball_pos):
 def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_dt, decimation,
                 noise_scale, std_vec, n_steps, max_ep_len, rng, csv_writer, mode_label,
                 target_normal_per_clip, strike_csv_writer=None, viewer=None, realtime=True,
-                vel_ranges_per_clip=None, pos_ranges_per_clip=None, df=None):
+                vel_ranges_per_clip=None, pos_ranges_per_clip=None, df=None,
+                reset_mode="teleport", hold_range=(0, 100), venue_sampler=None):
     racket = RacketCommand(seg_start, seg_len, step_dt, rng, target_normal_per_clip,
                            vel_ranges_per_clip=vel_ranges_per_clip,
                            pos_ranges_per_clip=pos_ranges_per_clip)
     strike = {"all": StrikeAcc(), "forehand": StrikeAcc(), "backhand": StrikeAcc()}
+    multiswing = (reset_mode == "multiswing") and (df is None)
+    # --- mode B (venue-balls): per-rollout accumulators + the current swing's sampled ball -------
+    assert venue_sampler is None or df is None, "venue-balls + --deploy-faithful unsupported (v1)"
+    venue = {"all": VenueAcc(), "forehand": VenueAcc(), "backhand": VenueAcc()}
+    cur_venue_strike = [None]     # VenueStrike of the swing in flight (list = py2-style nonlocal)
+    if venue_sampler is not None:
+        venue_sampler.reset_counters()
+
+    def sample_swing():
+        """Pick the next swing's clip (+ ball, in venue mode). boxes mode draws the clip exactly
+        like the legacy code (SAME rng call, byte-identical stream); venue mode is ball-first —
+        the clip follows from the sampled ball's y side."""
+        if venue_sampler is None:
+            return int(rng.integers(0, num_clips)), None
+        vs = venue_sampler.sample(rng)
+        return vs.clip, vs
+
+    def apply_target(c, vs):
+        """Set the swing's racket target: legacy per-clip box resample (mode A, byte-identical) or
+        the venue ball's StrikeSpec demand (mode B)."""
+        if vs is None:
+            racket.resample(c)
+        else:
+            racket.set_external_target(vs.target_pos_w, vs.target_vel_w, vs.target_normal_w, c)
+            cur_venue_strike[0] = vs
+
+    def sample_hold():
+        """Pre-swing HOLD length (multiswing only): training freezes the reference at the swing's
+        first frame for U[hold_range] control steps on EVERY resample (reset AND wrap). Teleport
+        mode draws nothing so its RNG stream stays byte-identical to the legacy harness."""
+        if not multiswing:
+            return 0
+        return int(rng.integers(int(hold_range[0]), int(hold_range[1]) + 1))
 
     def fresh_swing():
         """Sample a clip, set time_step to its start, ref-state-init the robot, resample racket target."""
-        clip = int(rng.integers(0, num_clips))
+        clip, vs = sample_swing()
         ts = int(seg_start[clip])
         r = refs_table[ts]
         robot.reset_to_reference(
             root_pos=r["body_pos_w"][ROOT_TRACKED_IDX], root_quat=r["body_quat_w"][ROOT_TRACKED_IDX],
             root_lin_w=r["body_lin_vel_w"][ROOT_TRACKED_IDX], root_ang_w=r["body_ang_vel_w"][ROOT_TRACKED_IDX],
             q_artic=r["joint_pos"])
-        racket.resample(clip)
+        apply_target(clip, vs)
         racket.update_strike_timing(clip, ts)
         return clip, ts
 
@@ -789,8 +993,10 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
 
     if df is None:
         clip, time_step = fresh_swing()
+        hold_left = sample_hold()
     else:
         clip, time_step = df_start_episode()
+        hold_left = 0
     last_action = np.zeros(31)
     ep_len = 0
 
@@ -822,9 +1028,14 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         if viewer is not None:
             if not viewer.is_running():
                 break
-            # visual-only "incoming ball": approaches the target along +x, arriving at strike time.
-            ball_pos = (racket.racket_target_pos_w
-                        + np.array([1.0, 0.0, 0.0]) * max(racket.time_to_strike, 0.0) * 3.0)
+            # visual-only "incoming ball": approaches the target along +x, arriving at strike time
+            # (venue mode: back-extrapolated along the SAMPLED ball velocity instead).
+            if venue_sampler is not None and cur_venue_strike[0] is not None:
+                ball_pos = (racket.racket_target_pos_w
+                            - cur_venue_strike[0].ball_vel_w * max(racket.time_to_strike, 0.0))
+            else:
+                ball_pos = (racket.racket_target_pos_w
+                            + np.array([1.0, 0.0, 0.0]) * max(racket.time_to_strike, 0.0) * 3.0)
             _draw_markers(viewer, robot.mj, racket, robot, ball_pos)
             viewer.sync()
             if realtime:
@@ -868,6 +1079,25 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 strike[CLIP_NAMES[clip]].add(pos_err, vel_err, nrm_err_deg, act_speed, tgt_speed)
                 racket_exact_acc += pos_err; racket_exact_n += 1
                 racket_velerr_acc += vel_err
+                # --- mode B: virtual return of the ACHIEVED racket state vs the SAMPLED ball ---
+                venue_extra = []
+                if venue_sampler is not None and cur_venue_strike[0] is not None:
+                    vs = cur_venue_strike[0]
+                    ret = venue_sampler.score_return(
+                        vs, racket_pos_w=robot.racket_pos(), racket_vel_w=act_vel_w,
+                        racket_normal_w=nrm, pos_err=pos_err)
+                    venue["all"].add(ret, tgt_speed)
+                    venue[CLIP_NAMES[clip]].add(ret, tgt_speed)
+                    lx = "" if math.isnan(ret.landing_xy[0]) else f"{ret.landing_xy[0]:.4f}"
+                    ly = "" if math.isnan(ret.landing_xy[1]) else f"{ret.landing_xy[1]:.4f}"
+                    lerr = "" if math.isnan(ret.land_err) else f"{ret.land_err:.4f}"
+                    venue_extra = [
+                        f"{vs.ball_vel_w[0]:.4f}", f"{vs.ball_vel_w[1]:.4f}", f"{vs.ball_vel_w[2]:.4f}",
+                        f"{vs.ball_spin_w[0]:.4f}", f"{vs.ball_spin_w[1]:.4f}", f"{vs.ball_spin_w[2]:.4f}",
+                        int(ret.contacted),
+                        f"{vs.intended_landing_xy[0]:.4f}", f"{vs.intended_landing_xy[1]:.4f}",
+                        lx, ly, int(ret.landed_ok), lerr, int(ret.net_clear),
+                    ]
                 # --- per-strike CSV row (one line per exact-strike sample) ---
                 if strike_csv_writer is not None:
                     pp = pos_err < STRIKE_POS_THRESH
@@ -887,12 +1117,21 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                         f"{racket_pos_w[0]:.4f}", f"{racket_pos_w[1]:.4f}", f"{racket_pos_w[2]:.4f}",
                         f"{tgt_pos_w[0]:.4f}", f"{tgt_pos_w[1]:.4f}", f"{tgt_pos_w[2]:.4f}",
                         f"{base_pos_w[0]:.4f}", f"{base_pos_w[1]:.4f}", f"{base_pos_w[2]:.4f}",
-                    ])
+                    ] + venue_extra)
 
         # --- terminations ---
         if df is None:
             # training-like: tracking-guard resets + 10 s timeout
             reasons = check_terminations(refs, robot, ra_pos, ra_quat, refa_pos, refa_quat)
+            if multiswing:
+                # HOPEDeployParityTerminationsCfg adds ABSOLUTE balance terminations on top of the
+                # inherited tracking guards — a real fall/sink ends the episode regardless of clip.
+                pg = robot.projected_gravity_body()
+                tilt = math.acos(max(-1.0, min(1.0, -float(pg[2]))))
+                if tilt > DF_FALL_TILT_RAD:
+                    reasons.append("fall_tilt")
+                if float(robot.body_pos(robot.pelvis_bid)[2]) < DF_FALL_ROOT_Z_MIN:
+                    reasons.append("fall_root_z")
             timeout = ep_len >= max_ep_len
         else:
             # deploy-faithful: only REAL falls end an episode (no tracking guards, no timeout)
@@ -923,6 +1162,7 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
             ep_len = 0
             if df is None:
                 clip, time_step = fresh_swing()
+                hold_left = sample_hold()
             else:
                 clip, time_step = df_start_episode()   # fresh nominal stand — NEVER ref-state-init
             last_action = np.zeros(31)
@@ -930,20 +1170,33 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
 
         if df is None:
             # --- advance the motion clock; wrap within the env's current segment (multi-swing per episode) ---
-            time_step += 1
-            seg_end = int(seg_start[clip]) + int(seg_len[clip])
-            if time_step >= seg_end:
-                # clip wrap mid-episode: sample a new swing + ref-state-init (Isaac teleports here too),
-                # but do NOT reset ep_len (the episode continues across swings until a fall/timeout).
-                clip = int(rng.integers(0, num_clips))
-                time_step = int(seg_start[clip])
-                r = refs_table[time_step]
-                robot.reset_to_reference(
-                    root_pos=r["body_pos_w"][ROOT_TRACKED_IDX], root_quat=r["body_quat_w"][ROOT_TRACKED_IDX],
-                    root_lin_w=r["body_lin_vel_w"][ROOT_TRACKED_IDX], root_ang_w=r["body_ang_vel_w"][ROOT_TRACKED_IDX],
-                    q_artic=r["joint_pos"])
-                racket.resample(clip)
-                last_action = np.zeros(31)
+            if multiswing and hold_left > 0:
+                # Pre-swing HOLD (training parity, MotionCommand._update_command): the reference
+                # clock is FROZEN at the swing's first frame ("the ball is not here yet") and
+                # time_to_strike stays pinned at its per-clip max. The robot keeps being simulated.
+                hold_left -= 1
+            else:
+                time_step += 1
+                seg_end = int(seg_start[clip]) + int(seg_len[clip])
+                if time_step >= seg_end:
+                    # clip wrap mid-episode: sample the next swing + resample its target. Teleport
+                    # mode = legacy RSI generation (Isaac wrap_teleport=true): ref-state-init the
+                    # robot + zero last_action. Multiswing mode = current generation
+                    # (wrap_teleport=false): NO teleport — the policy physically carries the body
+                    # into the new swing's windup during the pre-swing hold; last_action persists
+                    # (training only zeroes it on true episode resets). ep_len is NOT reset either
+                    # way (the episode continues across swings until a fall/timeout).
+                    clip, vs = sample_swing()
+                    time_step = int(seg_start[clip])
+                    if not multiswing:
+                        r = refs_table[time_step]
+                        robot.reset_to_reference(
+                            root_pos=r["body_pos_w"][ROOT_TRACKED_IDX], root_quat=r["body_quat_w"][ROOT_TRACKED_IDX],
+                            root_lin_w=r["body_lin_vel_w"][ROOT_TRACKED_IDX], root_ang_w=r["body_ang_vel_w"][ROOT_TRACKED_IDX],
+                            q_artic=r["joint_pos"])
+                        last_action = np.zeros(31)
+                    apply_target(clip, vs)
+                    hold_left = sample_hold()
         else:
             # --- deploy-faithful swing schedule: hold -> play the WHOLE clip once -> rest -> repeat.
             # NO teleports; last_action carries across swings (the deployed policy runs continuously).
@@ -1018,6 +1271,13 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         clip_forehand=clip_metrics(strike["forehand"]),
         clip_backhand=clip_metrics(strike["backhand"]),
     )
+    if venue_sampler is not None:
+        out["venue"] = dict(
+            all=venue["all"].metrics(),
+            forehand=venue["forehand"].metrics(),
+            backhand=venue["backhand"].metrics(),
+            sampler=venue_sampler.counters(),
+        )
     if df is not None:
         starts, comps = dfs["swing_starts"], dfs["swing_completions"]
         tot_s, tot_c = sum(starts), sum(comps)
@@ -1144,6 +1404,60 @@ def main():
     p.add_argument("--df-clips", choices=["fh", "bh", "both"], default="both",
                    help="[--deploy-faithful] which clip(s) to swing: fh=forehand only, bh=backhand "
                         "only, both=strict forehand/backhand alternation per swing (default).")
+    # --- P0 fix 2026-07-04 (see module docstring): obs normalization + episode protocol ------------
+    p.add_argument("--obs-norm", default="auto",
+                   help="empirical obs-normalization sidecar (obs_norm.npz with mean/std/eps from the "
+                        "checkpoint's obs_norm_state_dict; scripts/make_std_sidecar.py writes it). "
+                        "'auto' (default) = <onnx_dir>/obs_norm.npz when present. ALL training runs "
+                        "use empirical_normalization=true but the exports bake the RAW actor, so "
+                        "evaluating without the sidecar lobotomizes the policy (all-zero scores).")
+    p.add_argument("--no-obs-norm", action="store_true",
+                   help="feed RAW obs even if an obs_norm.npz sidecar exists (legacy/broken behavior; "
+                        "only correct for an export that already bakes the normalizer in).")
+    p.add_argument("--reset-mode", choices=["auto", "teleport", "multiswing"], default="auto",
+                   help="clip-wrap protocol for the training-like rollout. teleport = legacy RSI "
+                        "generation (ref-state-init at every clip wrap, wrap_teleport=true era). "
+                        "multiswing = current generation (wrap_teleport=false): NO wrap teleports, "
+                        "pre-swing hold (--hold-steps-range) with time_to_strike pinned, last_action "
+                        "persists across wraps, plus the absolute balance terminations "
+                        "(tilt/root-height) that DeployParity trains with. auto (default) = ONNX "
+                        "metadata 'wrap_teleport' when present, else multiswing.")
+    p.add_argument("--hold-steps-range", nargs=2, type=int, default=[0, 100],
+                   help="[--reset-mode multiswing] pre-swing hold U[lo,hi] control steps at every "
+                        "swing start (training MotionCommandCfg.hold_steps_range default 0 100).")
+    # --- MODE B: distribution-driven realism eval (2026-07-04; see module docstring TARGET SOURCE
+    # + scripts/venue_ball_sampler.py for frames/geometry/caveats). Default boxes = mode A,
+    # byte-identical to the pre-existing behavior.
+    p.add_argument("--target-source", choices=["boxes", "venue-balls"], default="boxes",
+                   help="boxes (default): racket targets from the per-clip training boxes (mode A, "
+                        "in-distribution). venue-balls (mode B): sample INCOMING BALLS from the "
+                        "fitted venue matchlike distribution (configs/incoming_ball_venue.yaml), "
+                        "derive the racket (pos,vel,normal) each ball demands via the StrikeSpec "
+                        "inverse planner (hope_ws/src/hope_planner), score strikes as usual PLUS "
+                        "the virtual return landing of contacted strikes (回球成功率).")
+    p.add_argument("--venue-speed-budget", type=float, default=10.0,
+                   help="[venue-balls] max |v_r| the StrikeSpec solve may demand (m/s); specs "
+                        "beyond it are rejected+resampled. Default 10.0 = the hope_planner node's "
+                        "racket_speed_budget config default (diagnostic, effectively uncapped).")
+    p.add_argument("--venue-landing-x-range", nargs=2, type=float, default=None,
+                   help="[venue-balls] landing-target x box on the opponent half, env frame. "
+                        "Default: geometry-derived [net_x+0.3 (dink guard), far_x-0.2] = "
+                        "[2.17, 3.04] with the training virtual table (near edge x=0.5).")
+    p.add_argument("--venue-landing-y-range", nargs=2, type=float, default=[-0.5, 0.5],
+                   help="[venue-balls] landing-target y box (env frame; table half-width 0.7625).")
+    p.add_argument("--venue-table-near-x", type=float, default=None,
+                   help="[venue-balls] near table edge x in the env frame (default 0.5 = training "
+                        "vb_table_near_x; the robot stands 0.5 m behind its table end).")
+    p.add_argument("--venue-table-surface-z", type=float, default=None,
+                   help="[venue-balls] table surface height above the env origin (default 0.76 = "
+                        "training vb_table_surface_z).")
+    p.add_argument("--venue-fh-y-split", type=float, default=None,
+                   help="[venue-balls] swing-side split on the ball's y: y < split -> forehand "
+                        "(targets on -y), else backhand. Default -0.155 = midpoint between the "
+                        "training forehand/backhand box y edges.")
+    p.add_argument("--venue-max-tries", type=int, default=100,
+                   help="[venue-balls] max ball redraws per swing when the StrikeSpec solve "
+                        "rejects (no-converge / speed budget); exceeding it is FATAL.")
     args = p.parse_args()
 
     # Apply eval-only overrides to the module globals BEFORE any precompute/rollout reads them.
@@ -1151,9 +1465,6 @@ def main():
     if args.strike_phase_per_clip is not None:
         STRIKE_PHASE_PER_CLIP = tuple(args.strike_phase_per_clip)
         print(f"[mj-sim2sim] OVERRIDE strike_phase_per_clip -> {STRIKE_PHASE_PER_CLIP} (eval-only)")
-    # A wrong phase silently zeroes the strike metrics, so always print the one in effect.
-    print(f"[mj-sim2sim] strike_phase_per_clip in effect: {STRIKE_PHASE_PER_CLIP} "
-          f"(must match the model's training YAML)")
     if args.ee_term_z is not None:
         TERM_EE_POS_Z = float(args.ee_term_z)
         print(f"[mj-sim2sim] OVERRIDE ee_body_pos termination z-threshold -> {TERM_EE_POS_Z} m "
@@ -1173,21 +1484,60 @@ def main():
 
     print(f"[mj-sim2sim] onnx={args.onnx}")
     print(f"[mj-sim2sim] mjcf={args.mjcf}")
-    policy = OnnxPolicy(args.onnx)
+    policy = OnnxPolicy(args.onnx, obs_norm=("off" if args.no_obs_norm else args.obs_norm))
     print(f"[mj-sim2sim] obs_dim={policy.obs_dim} "
           f"({'deploy_parity: racket_target_pos_b relative to racket FK, no anchor_pos/base_target' if policy.deploy_parity else 'base: full 180-D BeyondMimic obs'}) "
           f"joints={len(policy.joint_names)} "
           f"control={1/step_dt:.0f}Hz (sim_dt={args.sim_dt}, decim={args.decimation})")
 
-    # strike-phase resolution: CLI (handled above) > ONNX clip metadata > built-in legacy fallback
+    # --- obs normalization status (P0 fix #1) — a missing sidecar silently zeroes every metric for
+    # a normalized-obs model, so make the state of this transform impossible to miss.
+    if policy.obs_mean is not None:
+        print(f"[mj-sim2sim] obs normalization: ON (sidecar {policy.obs_norm_path}; "
+              f"(obs-mean)/(std+{policy.obs_eps:g}), mean|max|={np.abs(policy.obs_mean).max():.2f}, "
+              f"std max={policy.obs_std.max():.2f})")
+    elif args.no_obs_norm:
+        print("[mj-sim2sim] obs normalization: OFF (--no-obs-norm)")
+    else:
+        print("[mj-sim2sim] WARNING: obs normalization sidecar NOT FOUND (<onnx_dir>/obs_norm.npz). "
+              "All known training runs use empirical_normalization=true while the export bakes the "
+              "RAW actor — without the sidecar such a model is fed unnormalized obs and scores ~0 "
+              "with a staggering/early-termination pathology. Create it with "
+              "scripts/make_std_sidecar.py --checkpoint <the model_<N>.pt the ONNX came from>.")
+
+    # strike-phase resolution: CLI (handled above) > ONNX clip metadata > built-in legacy fallback.
+    # Resolved (and printed ONCE, with its source) BEFORE any strike-frame precompute.
     if args.strike_phase_per_clip is None:
         if policy.clip_strike_phases:
             STRIKE_PHASE_PER_CLIP = policy.clip_strike_phases
-            print(f"[mj-sim2sim] strike_phase_per_clip from ONNX metadata -> {STRIKE_PHASE_PER_CLIP}")
+            print(f"[mj-sim2sim] strike_phase_per_clip in effect: {STRIKE_PHASE_PER_CLIP} "
+                  f"(from ONNX metadata clip_strike_phases)")
         else:
-            print(f"[mj-sim2sim] WARNING: no clip_strike_phases in ONNX metadata; using built-in "
-                  f"legacy {STRIKE_PHASE_PER_CLIP} — pass --strike-phase-per-clip to match the "
-                  f"trained cfg if this is not a v1-clip model.")
+            print(f"[mj-sim2sim] strike_phase_per_clip in effect: {STRIKE_PHASE_PER_CLIP} "
+                  f"(built-in legacy fallback — no clip_strike_phases in ONNX metadata; pass "
+                  f"--strike-phase-per-clip to match the trained cfg if this is not a v1-clip model)")
+    else:
+        print(f"[mj-sim2sim] strike_phase_per_clip in effect: {STRIKE_PHASE_PER_CLIP} (CLI override; "
+              f"must match the model's training YAML)")
+
+    # --- episode/reset protocol resolution (P0 fix #2) --------------------------------------------
+    reset_mode = args.reset_mode
+    if reset_mode == "auto":
+        md_wrap = getattr(policy, "wrap_teleport_meta", None)
+        if md_wrap is not None:
+            reset_mode = "teleport" if md_wrap else "multiswing"
+            print(f"[mj-sim2sim] reset mode: {reset_mode} (from ONNX metadata wrap_teleport={md_wrap})")
+        else:
+            reset_mode = "multiswing"
+            print("[mj-sim2sim] reset mode: multiswing (auto default — no episode-semantics metadata; "
+                  "current generation trains wrap_teleport=false. Pass --reset-mode teleport for "
+                  "legacy RSI-per-swing models.)")
+    else:
+        print(f"[mj-sim2sim] reset mode: {reset_mode} (CLI)")
+    if reset_mode == "multiswing":
+        print(f"[mj-sim2sim]   multiswing: no wrap teleports; pre-swing hold U{tuple(args.hold_steps_range)} "
+              f"steps (ref frozen at windup, tts pinned); + balance terminations "
+              f"(tilt>{DF_FALL_TILT_RAD} rad, pelvis z<{DF_FALL_ROOT_Z_MIN} m)")
 
     # std sidecar (only needed if a noise_scale > 0 is requested)
     std_vec = None
@@ -1270,6 +1620,44 @@ def main():
         target_normal_per_clip.append(mat_from_quat(ref_wrist_quat)[:, MOUNT_NORMAL_AXIS] * MOUNT_NORMAL_SIGN)
     target_normal_per_clip = np.array(target_normal_per_clip)
 
+    # --- MODE B (venue-balls) sampler: lazy import so mode A never needs hope_planner ----------
+    venue_sampler = None
+    if args.target_source == "venue-balls":
+        if args.deploy_faithful:
+            raise SystemExit("[FATAL] --target-source venue-balls + --deploy-faithful is "
+                             "unsupported (v1): the df swing scheduler owns its own resample path.")
+        import venue_ball_sampler as _vbs   # sibling module (scripts/ is on sys.path, top of file)
+        kw = {}
+        if args.venue_table_near_x is not None:
+            kw["table_near_x"] = args.venue_table_near_x
+        if args.venue_table_surface_z is not None:
+            kw["table_surface_z"] = args.venue_table_surface_z
+        if args.venue_fh_y_split is not None:
+            kw["fh_y_split"] = args.venue_fh_y_split
+        venue_sampler = _vbs.VenueBallSampler(
+            repo_root=repo, ref_normal_per_clip=target_normal_per_clip, num_clips=num_clips,
+            landing_x_range=args.venue_landing_x_range,
+            landing_y_range=tuple(args.venue_landing_y_range),
+            speed_budget=args.venue_speed_budget, max_tries=args.venue_max_tries, **kw)
+        print(f"[mj-sim2sim] MODE B — target source: VENUE BALLS "
+              f"(spec mirrors {_vbs.VENUE_YAML_REL}, pooled matchlike)")
+        print(f"[mj-sim2sim]   incoming ball: contact_pos(venue frame)={_vbs.VENUE_CONTACT_POS_Q10_Q90} "
+              f"vel={_vbs.VENUE_VEL_BOX_MATCHLIKE} |spin|<= {_vbs.VENUE_SPIN_ABS_MAX} rad/s (isotropic)")
+        print(f"[mj-sim2sim]   virtual table (env frame): near_x={venue_sampler.table_near_x} "
+              f"net_x={venue_sampler.net_x:.2f} far_x={venue_sampler.far_x:.2f} "
+              f"surface_z={venue_sampler.table_surface_z} (training vb parity)")
+        print(f"[mj-sim2sim]   landing target box: x={venue_sampler.landing_x_range} "
+              f"y={venue_sampler.landing_y_range}; speed budget {venue_sampler.speed_budget} m/s; "
+              f"fh/bh split at ball y={venue_sampler.fh_y_split}")
+        print(f"[mj-sim2sim]   contact box in env frame: "
+              f"x=[{_vbs.VENUE_CONTACT_POS_Q10_Q90[0][0] + venue_sampler.net_x:.2f}, "
+              f"{_vbs.VENUE_CONTACT_POS_Q10_Q90[0][1] + venue_sampler.net_x:.2f}] "
+              f"z=[{_vbs.VENUE_CONTACT_POS_Q10_Q90[2][0] + venue_sampler.table_surface_z:.2f}, "
+              f"{_vbs.VENUE_CONTACT_POS_Q10_Q90[2][1] + venue_sampler.table_surface_z:.2f}] — "
+              f"NOTE: human-height contacts, mostly ABOVE the trained strike boxes (realism test)")
+        print(f"[mj-sim2sim]   v1 caveat: independent box sampling; the venue correlations "
+              f"(corr(vx,vz)=-0.44 etc.) are NOT enforced, only the sign structure (vx<0)")
+
     # DIAGNOSTIC: per-clip eval target-velocity boxes (clip 0 = forehand, clip 1 = backhand). None ->
     # faithful baseline (single training box for both clips). num_clips>2 reuse the backhand box.
     def _boxes12(vals):
@@ -1278,7 +1666,12 @@ def main():
         return [fh if c == 0 else bh for c in range(num_clips)]
 
     vel_ranges_per_clip = None
-    if args.vel_range_per_clip is not None:
+    if venue_sampler is not None:
+        # mode B: RacketCommand.resample() is never called — every target comes from the sampled
+        # ball's StrikeSpec demand, so ALL box config (per-clip/legacy/CLI) is inert this run.
+        print("[mj-sim2sim] per-clip target boxes: INERT (--target-source venue-balls; targets "
+              "are ball-demanded via StrikeSpec)")
+    elif args.vel_range_per_clip is not None:
         vel_ranges_per_clip = _boxes12(args.vel_range_per_clip)
         print(f"[mj-sim2sim] per-clip eval velocity boxes (training parity): "
               f"fh={vel_ranges_per_clip[0]} bh={vel_ranges_per_clip[-1]}")
@@ -1300,7 +1693,9 @@ def main():
               f"training box x={RACKET_VEL_X_RANGE} y={RACKET_VEL_Y_RANGE} z={RACKET_VEL_Z_RANGE})")
 
     pos_ranges_per_clip = None
-    if args.pos_range_per_clip is not None:
+    if venue_sampler is not None:
+        pass    # mode B: position boxes inert too (single INERT line printed above)
+    elif args.pos_range_per_clip is not None:
         pos_ranges_per_clip = _boxes12(args.pos_range_per_clip)
         print(f"[mj-sim2sim] per-clip eval position boxes (training parity): "
               f"fh={pos_ranges_per_clip[0]} bh={pos_ranges_per_clip[-1]}")
@@ -1322,7 +1717,7 @@ def main():
     strike_csv_path = os.path.join(out_dir, "mujoco_sim2sim_strikes.csv")
     strike_csv_f = open(strike_csv_path, "w", newline="")
     scw = csv.writer(strike_csv_f)
-    scw.writerow([
+    strike_cols = [
         "mode", "step", "episode", "clip_name", "swing_type", "time_to_strike",
         "pos_err", "vel_err", "normal_err_deg",
         "pos_pass", "vel_pass", "normal_pass", "composite_pass",
@@ -1332,7 +1727,17 @@ def main():
         "racket_pos_w_x", "racket_pos_w_y", "racket_pos_w_z",
         "racket_target_pos_w_x", "racket_target_pos_w_y", "racket_target_pos_w_z",
         "base_pos_w_x", "base_pos_w_y", "base_pos_w_z",
-    ])
+    ]
+    if venue_sampler is not None:
+        # mode-B extras (only written in venue-balls mode -> mode A CSVs stay byte-identical).
+        # ball state at strike == racket target pos columns above; landed_ok = contacted AND
+        # valid landing AND on-opponent-half AND net cleared (the legal-return definition).
+        strike_cols += [
+            "ball_v_x", "ball_v_y", "ball_v_z", "ball_w_x", "ball_w_y", "ball_w_z",
+            "contacted", "intended_land_x", "intended_land_y",
+            "achieved_land_x", "achieved_land_y", "landed_ok", "land_err_m", "net_clear",
+        ]
+    scw.writerow(strike_cols)
 
     viewer = None
     if args.viewer:
@@ -1350,7 +1755,9 @@ def main():
                           mode_label=f"ns={ns}", target_normal_per_clip=target_normal_per_clip,
                           strike_csv_writer=scw, viewer=viewer, realtime=not args.no_realtime,
                           vel_ranges_per_clip=vel_ranges_per_clip,
-                          pos_ranges_per_clip=pos_ranges_per_clip, df=df_cfg)
+                          pos_ranges_per_clip=pos_ranges_per_clip, df=df_cfg,
+                          reset_mode=reset_mode, hold_range=tuple(args.hold_steps_range),
+                          venue_sampler=venue_sampler)
         results.append(res)
     csv_f.close()
     strike_csv_f.close()
@@ -1426,6 +1833,46 @@ def main():
                  else f"{str(r[clip_key][key]):>16s}")
                 for r in results))
     print("=" * 92)
+
+    # ---- MODE B (venue-balls) summary: distribution-driven realism + virtual return landing ----
+    if venue_sampler is not None:
+        print("\nMODE B — VENUE-BALL REALISM (incoming balls ~ venue matchlike spec; racket "
+              "targets = StrikeSpec demands;\n         return landing = achieved racket state x "
+              "sampled ball through the venue contact+flight model)")
+        print("-" * 92)
+        print(f"{'metric':28s}" + "".join(cols))
+
+        def vrow(label, key, sub="all", fmt="{:16.4f}"):
+            vals = []
+            for r in results:
+                v = r["venue"][sub].get(key, float("nan"))
+                if isinstance(v, bool) or isinstance(v, (int, np.integer)):
+                    vals.append(f"{int(v):16d}")
+                elif isinstance(v, float):
+                    vals.append(fmt.format(v) if not math.isnan(v) else f"{'nan':>16s}")
+                else:
+                    vals.append(f"{str(v):>16s}")
+            print(f"{label:28s}" + "".join(vals))
+
+        vrow("n_strikes (exact)", "n_strikes")
+        vrow("ball_contacted (n)", "contacted")
+        vrow("contact_rate", "contact_rate")
+        vrow("landing_valid|contact", "landing_valid_rate")
+        vrow("in_bounds|contact", "in_bounds_rate")
+        vrow("net_clear|contact", "net_clear_rate")
+        vrow("landed_ok (n)", "landed_ok")
+        vrow("RETURN SUCCESS (回球成功率)", "return_success_rate")
+        vrow("land_err_median(m)", "land_err_median")
+        vrow("land_err_mean(m)", "land_err_mean")
+        vrow("demanded_|v_r|_mean(m/s)", "demanded_speed_mean")
+        for sub, nm in (("forehand", "fh"), ("backhand", "bh")):
+            vrow(f"  {nm}: n_strikes", "n_strikes", sub=sub)
+            vrow(f"  {nm}: contact_rate", "contact_rate", sub=sub)
+            vrow(f"  {nm}: return_success", "return_success_rate", sub=sub)
+        vrow("spec_solve_fails", "solve_fail", sub="sampler")
+        vrow("sign_rejects", "sign_reject", sub="sampler")
+        vrow("mean_solve_iters", "mean_solve_iters", sub="sampler")
+        print("=" * 92)
 
     # ---- deploy-faithful swing-schedule report ----
     if args.deploy_faithful:

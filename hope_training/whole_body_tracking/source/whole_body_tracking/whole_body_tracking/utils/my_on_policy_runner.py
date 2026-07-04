@@ -54,8 +54,9 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             attach_onnx_metadata(self.env.unwrapped, wandb.run.name, path=policy_path, filename=filename)
             wandb.save(policy_path + filename, base_path=os.path.dirname(policy_path))
 
-            # link the artifact registry to this run (lineage bookkeeping only — a W&B API failure here
-            # must not kill the training run)
+            # Link the input motion artifact(s) to this run (lineage bookkeeping only — a W&B API
+            # failure here must not kill the training run). W&B expects registry refs to include an
+            # alias (for example, collection:latest).
             if self.registry_name is not None:
                 registry_names = (
                     self.registry_name if isinstance(self.registry_name, (list, tuple)) else [self.registry_name]

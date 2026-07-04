@@ -51,17 +51,15 @@ hope_planner:
     # velocity solve demands |v_racket| 4.6-10 m/s — ALL out of the policy's trained
     # envelope (max ~3.0), so the runner's target gate stands on every ball.
     # With a plausible k (0.11-0.15) demands drop to 0.8-1.0 m/s (verified offline).
-    # RE-FIT from the 2026-07-03 venue recordings before hardware (yikang's task);
-    # until then override on the command line: -p drag_k:=0.15.
-    # INTERIM VALUES (2026-07-04): filled with the documented bring-up interims so the
-    # chain runs; the 2026-07-03 venue re-fit (yikang) REPLACES these when it lands.
-    # 0 placeholders made the planner predict a drag-free ball — also wrong.
-    drag_k: 0.15          # INTERIM physical estimate (k = rho*Cd*A/2m ≈ 0.11-0.15 for a
-                          # 40 mm 2.7 g ball); salvaged-traj01 fit 0.8781 is REJECTED (8x
-                          # too high, see analysis above). RE-FIT from venue recordings.
-    restitution_h: 0.85   # INTERIM: salvaged traj01 fit = 0.8527 (single session, rounded)
-    restitution_v: 0.85   # INTERIM: salvaged traj01 fit = 0.8518 (single session, rounded)
-    restitution_racket: 0.88  # HITTER default C_r (constants.py); calibrate when possible
+    # VENUE FIT LANDED (2026-07-03 recordings, merged from main 2026-07-04): values below
+    # = configs/ball_physics_venue.yaml fit (match ball 3.4 g coated) and MATCH the node.py
+    # defaults — the venue-yaml <-> planner-constants consistency guard tests police drift.
+    # Re-run hope_calibrate only if the venue/ball changes.
+    drag_k: 0.1261        # venue fit (inside the physical 0.11-0.15 envelope); the salvaged
+                          # traj01 fit 0.8781 stays REJECTED (8x too high, see analysis above)
+    restitution_h: 0.64   # venue fit: no-spin grip equivalent (1 - a_t)
+    restitution_v: 0.9215 # venue fit: table e_n
+    restitution_racket: 0.654 # venue fit: paddle e const (e(u_n) exp form in racket_target_planner)
 
     # --- FLAT outputs for the C++ --planner runner (Path A live mode, 2026-07-04) ---
     # The native runner subscribes std_msgs/Float64MultiArray (no hope_msgs typesupport

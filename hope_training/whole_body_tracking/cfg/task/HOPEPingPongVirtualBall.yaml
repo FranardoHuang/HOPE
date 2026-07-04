@@ -1,0 +1,32 @@
+# =============================================================================
+# HOPE ping-pong WBC — deploy-parity obs + Tier-1 VIRTUAL-BALL rewards.
+#
+# Selected with `task=HOPEPingPongVirtualBall`. Composes the deploy-parity task
+# (same 175-D actor contract, same racket/DR/motion tuning) and only swaps the
+# gym task to the variant whose reward stack adds the virtual-ball outcome terms
+# (virtual_pass_net 20 / virtual_landing 30 / virtual_spin 5; racket_velocity &
+# racket_normal reweighted 2.0 -> 0.5). See rewardDesign.md (Tier 1) and
+# RacketTargetCommandCfg.vb_* for the sampling boxes / gates.
+# =============================================================================
+
+defaults:
+  - HOPEPingPongDeployParity@_here_
+  - _self_
+
+name: HOPEPingPongVirtualBall
+gym_task: HOPE-PingPong-VirtualBall-AgibotA3-v0
+experiment_name: agibot_a3_hope_virtualball
+actor_obs_contract: deploy_parity
+
+racket:
+  # virtual_spin semantics: "topspin" (Ace ws-term, generates ball quality) or "minimize"
+  # (stage-1 placement-first: cancel incoming spin; see RacketTargetCommandCfg.vb_spin_mode).
+  vb_spin_mode: topspin
+  vb_spin_min_sigma: 10.0
+  # Virtual incoming-ball sampling boxes — explicit here so Hydra CLI overrides work (struct
+  # mode). Defaults = the hand-set boxes; the venue-fitted alternatives live in
+  # configs/incoming_ball_venue.yaml (training = vb_boxes_training_rebalanced).
+  vb_vel_x_range: [-4.5, -2.0]
+  vb_vel_y_range: [-0.6, 0.6]
+  vb_vel_z_range: [-1.0, 0.5]
+  vb_spin_abs_max: 50.0

@@ -122,7 +122,15 @@ class RacketTargetPlanner:
     def _compute_racket_velocity(
         self, v_incoming: np.ndarray, v_outgoing: np.ndarray, C_r: float,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Compute desired racket velocity and face normal from impact model."""
+        """Compute desired racket velocity and face normal from impact model.
+
+        Restitution is velocity-dependent (venue fit, F4 KILL of constant e):
+        e(u_n) = g1 * exp(g2 * |u_n|) with u_n = v_i_n - v_r_n, the normal
+        approach speed in the racket frame. Since u_n depends on the answer,
+        solve by fixed point from the constant seed C_r (converges in 2-3
+        iterations; g2*u_n is small). Falls back to constant C_r when the
+        exponential parameters are absent (older configs).
+        """
         delta_v = v_outgoing - v_incoming
         delta_v_norm = np.linalg.norm(delta_v)
 
@@ -133,7 +141,16 @@ class RacketTargetPlanner:
         n = self._opponent_facing_normal(delta_v)
         v_o_n = np.dot(v_outgoing, n)
         v_i_n = np.dot(v_incoming, n)
-        v_r_n = (v_o_n + C_r * v_i_n) / (1.0 + C_r)
+
+        g1 = getattr(self.config, "e_exp_g1", None)
+        g2 = getattr(self.config, "e_exp_g2", None)
+        e = C_r
+        v_r_n = (v_o_n + e * v_i_n) / (1.0 + e)
+        if g1 is not None and g2 is not None:
+            for _ in range(3):
+                u_n = abs(v_i_n - v_r_n)
+                e = float(np.clip(g1 * np.exp(g2 * u_n), 0.2, 0.95))
+                v_r_n = (v_o_n + e * v_i_n) / (1.0 + e)
 
         return v_r_n * n, n
 

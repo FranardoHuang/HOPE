@@ -51,3 +51,15 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
     },
 )
+
+# HOPE ping-pong WBC — deploy-parity obs + Tier-1 virtual-ball outcome rewards (rewardDesign.md).
+# REWARD-ONLY variant: identical 175-D actor contract; the virtual ball lives only in the reward.
+gym.register(
+    id="HOPE-PingPong-VirtualBall-AgibotA3-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": hope_env_cfg.HOPEPingPongVirtualBallAgibotA3EnvCfg,
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
+    },
+)

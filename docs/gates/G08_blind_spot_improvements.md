@@ -85,6 +85,22 @@ motion represents, forcing the policy to learn two things at once.
 - PACE: tolerance-clamped tracking rewards (stop rewarding once inside tolerance) preserve
   exploration freedom around the target.
 
+Relayed SMASH-author conversation (二手转述 via team member, 2026-07-03, 未验证 — weigh below
+the paper), affecting P2.3/P2.4 design choices:
+
+- **Strike region**: torso-frame plane anchoring with local refinement — CONSISTENT with the
+  paper's anchor-relative target features (Sec IV.A), adopt as a design reference for
+  base-relative targets. ⚠ The relayed claim that y/z caps existed "mainly to reject
+  egocentric-perception outliers" CONFLICTS with the paper's own framing of the strike volume as
+  the reachable hitting workspace (Fig. 5) — treat as unverified. Our y/z widening decisions
+  follow our own measured reachability + the footwork curriculum, not this rationale.
+- **Clip length is not a magic number**: their ~1.08 s strike segments (0.54 s each side of
+  contact) are a scale for THEIR data; segment length must be re-calibrated to our own strike
+  timing. Note OUR clips are 2.6-2.8 s (139/132 frames @ 50 Hz) — 2.5× longer than theirs. A
+  **clip-trimming experiment** (cut a ~1.2-1.6 s window centered on the detected strike phase) is a
+  cheap candidate: tighter strike-centered imitation, more swings per episode, less irrelevant
+  follow-through imitation. Queue after the current ablation round.
+
 ### P2.4 Locomotion aggressiveness / ready motion / clip stitching
 
 Failure: the robot moves too violently toward targets; no preparation motion; needs
@@ -115,7 +131,12 @@ a relay change are prerequisites — see `docs/interfaces/frames_and_coordinates
   landed/not-landed feedback alone never learns returning.
 - SMASH: AEKF with bounce handling (removing bounce handling explodes prediction error
   3.5 → 12.7 cm); analytic inversion of a linearized drag model — chosen flight time T_f is the
-  pace knob.
+  pace knob. **AEKF de-scoped for our mocap setup** — primary evidence: HITTER
+  itself used plain 31-sample polynomial fitting at 360 Hz mocap with no Kalman filter and hit
+  92.3% real return rate (Sec IV-A); corroborated by a relayed SMASH-author conversation
+  (二手转述, 2026-07-03, 未验证) saying their AEKF mainly served 60 Hz egocentric noise. FINAL
+  arbiter = our own fit residuals on the fresh trajectory recordings — if residuals are clean,
+  polyfit stands; keep BOUNCE SEGMENTATION regardless (model structure, not filtering).
 - Ace (ceiling): velocity-dependent Magnus model, data-fit table/racket contact + residual MLP,
   spin measured at 400-700 Hz; policy-sampler modes are exactly the win-vs-rally objective switch.
 - In-repo head start: `hope_planner` already has drag+bounce with traj01 calibration, the
@@ -128,7 +149,11 @@ a relay change are prerequisites — see `docs/interfaces/frames_and_coordinates
 - SMASH's lesson: train smash as a SEPARATE policy with dedicated smash reference data (longer
   execution horizon than the shared strike policy handles). Their smash deployment was limited by
   egocentric-camera FOV during aggressive postures — our external mocap does not have that
-  weakness.
+  weakness. Relayed author conversation (二手转述, 2026-07-03) confirms what the paper already states
+  (p.11): main policy contains no smash; demo smashes are a separately trained policy; adds that
+  systematic integration was attempted and dropped for difficulty/deadline. The open extension they
+  themselves point to — and our concrete P2.6 design — is a **policy-selection mechanism** choosing
+  between normal-return and smash policies per incoming ball (cf. Ace's policy sampler).
 - Pace maps analytically: shorter chosen flight time → larger commanded racket velocity
   (HITTER Eq. 5-6 / SMASH Eq. 28-29); the WBC already tracks commanded racket velocity, so smash
   training is target-velocity-distribution + dedicated references + P2.5 rewards.

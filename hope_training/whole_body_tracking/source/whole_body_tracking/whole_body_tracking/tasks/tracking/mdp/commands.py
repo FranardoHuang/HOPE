@@ -434,6 +434,7 @@ class MotionCommand(CommandTerm):
         # Intra-episode clip WRAP: no teleport (deploy case) — the policy must physically carry
         # the body from the previous swing's end into the new swing's windup. The imitation
         # targets are anchor-relative, so the new reference re-anchors to the robot where it is.
+        # Teleporting at a wrap (legacy RSI behavior) requires wrap_teleport=True.
         if self._resampling_from_wrap and not self.cfg.wrap_teleport:
             return
 
@@ -519,21 +520,39 @@ class MotionCommand(CommandTerm):
         held = self.hold_counter > 0
         self.hold_counter = torch.clamp(self.hold_counter - 1, min=0)
         self.metrics["in_hold"] = held.float()
+        if "clip_switch_count" not in self.metrics:
+            self.metrics["clip_switch_count"] = torch.zeros(self.num_envs, device=self.device)
         self.time_steps += (~held).long()
         if self._multiseg:
             # Wrap at the END of the env's current clip/segment, not the global concatenated end.
             seg_end = self.motion.seg_start[self.clip_id] + self.motion.seg_len[self.clip_id]
-            env_ids = torch.where(self.time_steps >= seg_end)[0]
+            wrap_ids = torch.where(self.time_steps >= seg_end)[0]
+            # DEPLOY-PARITY CLIP SWITCH (venue falls 2026-07-04): the runner's reference clock flips
+            # clip_id whenever the planner re-sides the target — at an ARBITRARY mid-swing moment —
+            # and the reference jumps to the new clip's first frame (pp_reference_clock.hpp clamps
+            # tts-large to seg_start). Training previously only switched clips at clip END, so the
+            # policy never saw that discontinuity and falls at 准备/正手/反手 switches on hardware.
+            # With per-step prob clip_switch_prob an env aborts its swing operator-style and routes
+            # through the SAME wrap-resample path (uniform new clip, frame 0, hold, fresh target).
+            # NOTE: aborted swings count as uncompleted starts (slight completion-rate deflation).
+            if float(self.cfg.clip_switch_prob) > 0.0:
+                sw = torch.rand(self.num_envs, device=self.device) < float(self.cfg.clip_switch_prob)
+                sw[wrap_ids] = False
+                self.metrics["clip_switch_count"] = sw.float()
+                switch_ids = torch.where(sw)[0]
+                env_ids = torch.cat([wrap_ids, switch_ids]) if len(switch_ids) > 0 else wrap_ids
+            else:
+                env_ids = wrap_ids
         else:
             env_ids = torch.where(self.time_steps >= self.motion.time_step_total)[0]
+            wrap_ids = env_ids
         self.just_resampled = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         if len(env_ids) > 0:
             self.just_resampled[env_ids] = True
-            # A8: wrapped envs just physically completed a swing (they passed the strike alive and
-            # were not teleported) — snapshot their states into the post-swing ring buffer so true
-            # episode resets can start from realistic end-of-swing states (cfg.post_swing_start_prob).
-            if self.cfg.post_swing_start_prob > 0.0:
-                self._capture_post_swing_states(env_ids)
+            # A8: only envs that physically COMPLETED a swing (true wraps — passed the strike alive,
+            # not teleported, not aborted-by-switch) feed the post-swing ring buffer.
+            if self.cfg.post_swing_start_prob > 0.0 and len(wrap_ids) > 0:
+                self._capture_post_swing_states(wrap_ids)
         # Wrap-path resample: skips the RSI teleport (cfg.wrap_teleport=False) so the policy
         # physically transitions swing -> swing. True resets go through reset()/manager instead.
         self._resampling_from_wrap = True
@@ -655,6 +674,9 @@ class MotionCommandCfg(CommandTermCfg):
     post_swing_min_fill: int = 256
     # Post-swing-started envs get at least this much hold (settle follow-through -> windup).
     post_swing_min_hold: int = 25
+    # Per-step per-env probability of an operator-style mid-swing clip switch (deploy parity —
+    # see the venue-falls note in _update_command). 0.002 ~ one switch per ~3-4 swings. Default off.
+    clip_switch_prob: float = 0.0
 
     adaptive_kernel_size: int = 1
     adaptive_lambda: float = 0.8

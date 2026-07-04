@@ -1,0 +1,526 @@
+# Ball Physics v1 — Venue Fit Report (2026-07-03 dataset)
+
+> Produced 2026-07-03 by the Stage 0–5 pipeline of
+> `docs/ball_physics_low_speed_validation.md` §4, on the venue mocap dataset.
+> Fitting code: `hope_training/ball_physics_fit/` (this replaces the Mac-local
+> Record workspace). Constants: `configs/ball_physics_venue.yaml`.
+> Raw analysis artifacts (segments, per-event tables, falsification plots):
+> `~/Desktop/Hope/Record/latest/analysis/` on yikang's Mac.
+
+## 0. Dataset
+
+9 takes, Avatar Pro C3D exports, 300 Hz, ~800 s total: 上旋/下旋/侧旋 (spin strikes),
+弹跳 (bounce trials), 快速 (fast strikes), 正常 (rally), 颠球不转/颠球增旋 (juggling),
+高球 (lobs). Rigid bodies: ball (15-marker solved body), two paddles (4 markers each,
+b_PPP1/b_PPP2 — **first time racket data exists**), table (4 corners + 2 net posts).
+
+Preprocessing (`extract_canonical.py`): per-take npz with ball 6-DoF (centroid +
+Kabsch quaternion), both paddle poses + face normals, canonical table frame
+(origin table center, X = length, Y = width, Z = up); first/last 2 s trimmed;
+below-table samples (ball center z < 0 in table frame) invalidated **with the time
+axis preserved**; original frame indices kept.
+
+Data quality: ball tracked 62–99.5% per take (fast/spin takes lower — the ball
+leaves the capture volume between rallies); gaps concentrate AT contacts
+(racket occlusion); no interpolation artifacts (0 frozen frames); Kabsch RMS
+≈ 1e-4 mm (solved body). **Venue position noise ≈ 9 mm shooting-fit RMS — 20×
+noisier than the old OptiTrack rig (0.4 mm). All fits use robust losses; contact
+states use ≤35-frame shooting windows with ±3/±5-frame exclusion zones.**
+
+A finding to keep in mind: the 15 exported ball "markers" are solved-model points,
+not physical surface positions (max pairwise span 56 mm > 40 mm ball diameter;
+sphere-fit residual 17 mm). The centroid is a rigidly-attached virtual point — fine
+for dynamics; the geometric center offset is unknowable from geometry alone and was
+handled dynamically (Stage 0 wobble check found spins too low for it to matter).
+
+### 0.1 Data sources & references (traceability)
+
+Capture session: **2026-07-03, competition venue, Avatar Pro optical mocap at 300 Hz**
+(the same rig/venue as match play; 3.4 g retro-reflective-coated MATCH ball, paddles
+b_PPP1/b_PPP2, table + net posts as rigid bodies).
+
+Data lineage, from raw to shipped constants:
+
+1. **Primary raw** — Avatar Pro project files, one `.tak` per take (take names are the
+   Chinese stroke types). Master copy: the venue capture Mac,
+   `~/Desktop/Hope/Record/latest/`. This is the only place holding ALL raw takes.
+2. **C3D exports** — per-take folders next to the `.tak`s (e.g. `上旋/shangxuan_000.c3d`),
+   exported from Avatar Pro; input to `extract_canonical.py`.
+3. **Pod working copy (PARTIAL)** — `/workspace/yikang/latest_data/` (2.8 GB, copied
+   2026-07-03 late; `export BALLFIT_DATA_ROOT=/workspace/yikang/latest_data`).
+   Present: 8/9 `.tak` (missing `弹跳.tak`) and 5/9 C3D exports (上旋/下旋/侧旋/弹跳/快速;
+   正常/颠球×2/高球 folders are empty here — their extraction ran on the Mac).
+   `.tak` identities on the pod (md5 · size):
+
+   | take | md5 | size |
+   | --- | --- | --- |
+   | 上旋.tak | `a5e1592f79f7ed203caed8a96b493475` | 85M |
+   | 下旋.tak | `21136d280ddd65155b130068582c99e4` | 65M |
+   | 侧旋.tak | `815a0eace0210a449349e599b545e32c` | 133M |
+   | 快速.tak | `80cc0683b7358f510dec9cfeb7a1fdb1` | 222M |
+   | 正常.tak | `f29bec9ffda4764308e64ffee0c83ca5` | 137M |
+   | 颠球（不转）_000.tak | `e573dc9b60e36d9c652ff122f66900cc` | 32M |
+   | 颠球（增加旋转）.tak | `4610920c9f515fc2e34f41b9fd39176c` | 65M |
+   | 高球.tak | `b55035e5866e1838bf1aaae04692676a` | 92M |
+
+4. **Canonical extraction** — `hope_training/ball_physics_fit/extract_canonical.py` →
+   `<BALLFIT_DATA_ROOT>/analysis/extracted/` (9/9 takes present as `<take>_000.npz` +
+   `<take>_000_manifest.json`; each manifest records frame counts, trim, tracking %,
+   Kabsch RMS, table-frame residuals for its take).
+5. **Fit/falsification outputs** — `<BALLFIT_DATA_ROOT>/analysis/{qa_stage0.json,
+   segments, fits, falsification, forensics}` (per-event tables behind every number in
+   this report).
+6. **Shipped constants** — `configs/ball_physics_venue.yaml` (single source of truth for
+   sim + planner + the Tier-1 virtual-ball reward), produced by `stage2_fits.py` and
+   annotated with the §9.3 capture-noise model.
+
+Anything re-derived later should start from (1) on the Mac or (3)+(4) on the pod and
+verify the checksums above; the analysis npz in (4) are the exact arrays every stage in
+this report consumed.
+
+## 1. Stage 0 — QA gates: **PASS**
+
+| Gate | Requirement | Measured | Verdict |
+| --- | --- | --- | --- |
+| Sampling | ≥250 Hz effective | 300 Hz uniform, gap p50 ≈ 10 ms (occlusions, not drops) | PASS |
+| Units/frame | table = 2.740 × 1.525 m | 2.745 × 1.523 m (marker centers) | PASS |
+| Gravity | 9.81 ± 0.05, tilt < 0.2° | **9.825**, tilt vs world z **0.15°** (60 low-spin arcs, joint shooting fit) | PASS |
+| Time sync | ball/paddles same clock | same C3D stream | PASS (trivially) |
+| Ball mass | record taped mass | **3.4 g** (coated; clean 2.70 g) — from team memory, no session metadata file | PASS w/ note |
+
+Notes: (a) the table-corner-marker plane is tilted 0.40° vs gravity while the mocap
+world z is gravity-true to 0.15° — corner markers stand 12–40 mm proud (uneven
+mounts); the playing surface was therefore self-calibrated from 179 bounce minima:
+**surface z = −14.1 mm** below the marker plane. Normal-direction error ≤0.4° affects
+e_n by <0.7‰ — negligible. (b) Quaternion spin reads low overall (median 2 rev/s,
+max 15 rev/s across ballistic arcs). Adjudicated aerodynamically in Stage 2: the
+sidespin-channel k_m came out **inside the old rig's 95% CI**, so the spin *scale*
+is right — this venue session simply contains modest spin (amateur play, no
+high-spin serves).
+
+## 2. Stage 1 — segmentation
+
+1286 flight arcs (514 clean ballistic, 337 s), **218 table bounces**, **154 racket
+strikes**, produced by pairing ballistic arcs ACROSS tracking gaps (extrapolating
+both sides to a meeting point < 60 mm, requiring |Δv| > 0.8 m/s) — contacts are
+occluded in this rig, so in-run contact detection alone finds almost nothing.
+Racket state at contact is bridged over the ±30 ms occlusion window by a
+constant-acceleration fit on [−120, −15] ms (never post-contact frames), with the
+ω_racket × r contact-point term included in v_r (the v0 code gap #1).
+
+## 3. Stage 2 — fitted constants (all data; g frozen at 9.81)
+
+| Param | Venue value | Old value | Notes |
+| --- | --- | --- | --- |
+| k_d | **0.1261** 1/m (C_d 0.569 taped) | 0.1222 (v0), 0.136 (OptiTrack) | 100 low-spin arcs, joint shooting fit; rms 9.1 mm |
+| k_m | **0.00444** | 0.0042, CI [0.0035, 0.0049] | 66 sidespin arcs (axis_z > 0.6); inside precedent CI → spin channel validated |
+| table e_n | **0.9215** (forensics estimator over all 218: 0.925, CI [0.920, 0.937]) | 0.908 (old venue table) | v_n 1.0–4.5 m/s. The first-pass 0.934 carried a +0.010 contact-time bias (fixed, §9.1); remaining +0.013 vs the old table is plausibly real |
+| table a_t/b_t/μ | see F5 | 0.369/0/2.0 | tangential fit is the weakest block on this data — see §4 F5 |
+| paddle e_eff | **0.654 const**; shipped form e(u_n) = 0.759·exp(−0.0441·u_n) (F4 KILL) | 0.4632 (never fit on racket) | **first real racket fit**, 150 strikes, u_n 1.4–7.2 m/s |
+| paddle a_t | **0.52** (velocity channel, CI [0.46, 0.61]) | 1.205 | joint fits are dragged to ~0.32–0.38 by the noise-dominated strike spin channel (§9.2); μ_safety → 0.5 |
+| paddle b_t | −0.035 (≈0) | 0.304 | cosθ term not supported by venue data |
+| paddle μ | unidentified (cap never binds) | 2.5 | keep safety value |
+
+Mass scaling (doc Stage 0.5): k_d,clean = k_d·(3.4/2.7) = **0.159**, k_m,clean =
+**0.00559** — these remove the mass effect ONLY; a clean ball is also smoother
+(C_d likely ~0.44 vs 0.57 coated), so treat clean-ball extrapolation as an upper
+bound. **In practice this is moot: competition play uses the same coated 3.4 g
+ball, so the venue constants apply to matches directly** (the clean-scaled keys
+stay in the yaml for reference only).
+
+## 4. Stage 3 — falsification verdicts (doc §3)
+
+| # | Assumption | Verdict | Key numbers |
+| --- | --- | --- | --- |
+| **F2** Magnus saturation | **INCONCLUSIVE — by coverage (high conf.)** | the trusted channel never reaches the saturation region: only 1 kept arc with SR > 1.5 (KILL test needs ≥5/bin). Low-SR sanity PASSES (bin medians ~0.0052 ∈ [0.003, 0.006] → not a rig problem). Suggestive: sidespin bin medians fall 0.0054 → 0.0028 across SR 0.16 → 0.35 (wide CIs), roughly consistent with saturation onset (saturating law predicts 0.68×). **The R1 risk stays open for high-spin play** — see §7.2 |
+| **F4** paddle e const | **KILL (medium conf.) — adopt e(u_n)** | 7-estimator ensemble Δe(2–8 m/s) = −0.14 (quality-gated re-derivation: −0.11), all 7 negative, beyond the −0.05 KILL line; within-take fixed-effects slope p=0.0015 (survives excluding the suspicious dianqiu_spin take and controlling fit quality); high-quality u_n≥5 tail: median e 0.628 vs 0.675 bulk (MW p=0.017); best slope −0.013…−0.018/m/s ≈ literature −0.017…−0.021. Racket-ω confound ruled out (partial r=−0.05). Caveats: pooled Theil-Sen alone straddles 0; trend carried by the u_n>4.3 tail (n=17); paddle p2 shows it robustly, p1 weakly; e also correlates with \|ω_out\| at fixed u_n → e(u_n)-only is an incomplete form |
+| **F3** table e const | **PASS within coverage (upgraded by forensics)** | the e>1 tail and the apparent low-v_n slope were a PIPELINE BUG, mechanism found (forensics `g_e_gt1_dissection`): the assumed contact height sat ~9 mm above the true pre/post-fit intersection, making t_c early and inflating e by ≈0.17/v_n² (95% of v_n<1 bounces read e>1). With the fix (t_c at the two-sided meeting point, 35-frame windows): **e_n = 0.920, MAD 0.03, e>1 down to 3–4%, slope vs v_n ≈ −0.003/m/s ≈ 0** over v_n 1–4.5. v_n>4.5 (shell-buckling) still NOT covered |
+| **F5** grip-only tangential | **INCONCLUSIVE — venue refit degenerate; v0 grip block retained** | the venue tangential refit collapsed to zero tangential impulse (Coulomb cap never binds, μ unidentified) because the Δω noise floor alone is 2.0 rev/s (vs the 3 rev/s PASS bar) at 9 mm position noise. Residuals DO grow with \|u_t\|/\|u_n\| (Spearman 0.45, p=1.5e-6, coverage to ratio 2.8) but not in the specific slip signature. Diagnostic: across contacts, quaternion Δω reads ~0.65× the value implied by the position-derived tangential impulse (contact-window blur) — the two channels disagree, so this dataset cannot beat the old 101-bounce/0.4 mm fit; a_t=0.369 grip block retained in the yaml |
+| F1 k_d const | **PASS** (medium) | bins within ±6% of global over 2–6.8 m/s (n=100); Spearman p=0.52; >6.8 m/s uncovered |
+| F6 no inverse Magnus | **PASS (high conf.)** | worst cell (highest Re 12.6–28k × lowest SR): median km = +0.0065, 1/13 arcs negative, sign-test p=1.0. The one negative-median cell sits at LOWEST Re × HIGHEST SR (the physical opposite of inverse-Magnus) and dissolves under a deflection-≥-noise gate (n=7, median −0.0004, p=0.5). Certifies the envelope only — Re tops out at 2.8e4, far below the ~1e5 inverse-Magnus onset |
+| F7 no spin decay | **borderline KILL (low conf.)** → **PASS, closed (§11.2, 2026-07-04)** | median decay 12.2%/flight but n=14, IQR [−3%, +21%], bootstrap CI includes 0, Wilcoxon p=0.086; alt normalization gives 5%. Re-measured on 192 arcs: consistent with zero, τ ≥ 5 s @95% — constant-ω stands |
+| F8 instantaneous paddle | **INCONCLUSIVE → PASS-leaning** | raw Spearman 0.21 (p=0.01) between direction residual and \|ω_racket\| collapses to 0.11 (p=0.19) after controlling u_n and to −0.03 controlling (u_n,u_t,v_out): the correlation is speed confounding. Direct dwell rotation ≈ 0.15° median — well under 2° |
+
+### 4.5 Adversarial verification (independent re-derivations; all AGREE, severity "minor")
+
+- **F2 verified** by a fit-free path (per-arc cubic-polynomial acceleration, gravity+drag
+  subtracted, projected on unit(ω×v)): per-arc k̂_m agreement with the shooting fits
+  Spearman 0.905. Sharpened finding: effective SR > 0.7 coverage is actually **zero**
+  (the single "kept" high-SR arc flips sign between methods = noise; all 4 raw SR>0.7
+  arcs also have near-degenerate Magnus geometry). The SR 0.3–0.45 dip is slightly
+  deeper independently (0.46×) and remains non-monotonic — neither PASS for constant
+  k_m nor confirmation of the saturating law inside coverage.
+- **F4 verified**: independent re-derivation from strikes.json reproduces the pipeline
+  e/u_n to machine precision (max diff 2e-16) — the dispute is purely statistical.
+  Under stricter quality gates the pooled OLS weakens (p=0.088) but the within-take
+  fixed-effects evidence (p=0.0015) and the u_n≥5 tail keep the KILL; magnitude
+  tempered to Δe(2–8) ≈ −0.107.
+- **Constants audit**: kd convention/value PASS (C_d taped 0.569, clean-mass 0.452);
+  reproducibility PASS (6 random per-arc refits from raw npz bit-identical). Three
+  flags adopted into the yaml: (1) **naive mass-scaled k_d,clean = 0.159 exceeds all
+  clean-ball precedents — do not use** (tape changes C_d, not just mass); (2) **table
+  e_n = 0.934 is above the ITTF band and 17% of bounces read e>1 (unphysical) —
+  likely 2–5% high from 9 mm contact noise; adopt after an ITTF drop-test cross-check**;
+  (3) k_m implies lift coefficient ≈ 1.00 (physical ceiling) — weakly corroborates
+  quaternion spin reading ~6% low (inside the prior CI).
+
+## 5. Stage 4 — held-out validation (fit on 70%, score on 30%, split by trial)
+
+Two parameter sources are scored: the train-split refit (methodology check) and
+**THE SHIPPED `ball_physics_venue.yaml`** (`validate_stage4.py --yaml`, paddle e =
+exponential; table block = the retained v0 grip params). Landing ground truth is the
+**observed first-bounce contact point p_c** (continuity-gated pairing); the earlier
+reconstructed label (measured out-state through the same flight model) read
+optimistic and is only reported for comparison.
+
+| Metric | Target | train-fit | **shipped yaml** | Verdict (yaml) |
+| --- | --- | --- | --- | --- |
+| Flight +0.4 s from first 60 ms | med ≤ 25 / p95 ≤ 60 mm | 76 / 147 mm (n=31) | 77 / 147 mm | FAIL vs bar |
+| Bounce outgoing speed | ≤ 5% | 4.2% (degenerate tangential) | **2.32%** (n=22, after the t_c fix) | **PASS** |
+| Bounce outgoing direction | ≤ 3° | 6.1° | 4.6° | FAIL vs bar (noise-limited) |
+| Bounce ω⁺ | ≤ 15% | — | 217% | not meaningful (spins ≤15 rev/s ≈ noise; Δω channel reads 0.65×) |
+| **Strike → landing vs observed/terminal GT** | med ≤ 0.10 / p90 ≤ 0.25 m / on-off ≥ 90% | — | **med 0.25 m, p90 0.72 m, on/off 100%** (n=82 all-split incl. 32 recovered landings; test-split n=15: 0.26/0.60) | on/off PASS; distances FAIL (model-form limited, §9) |
+
+Notes: (i) the first-pass bounce-speed history: 4.2% "PASS" came from the train-fit's
+*degenerate* tangential block; scoring the shipped yaml honestly gave 5.96% FAIL; the
+stage1 contact-time fix (§9.1) brought the same yaml metric to 2.32% PASS — the final
+number above. (ii) the legacy reconstructed landing label (0.32/0.63 on the current
+test pairs) is NOT comparable to observed-GT numbers — it shares the flight model with
+the prediction and is kept only as a consistency diagnostic.
+
+### 5.1 Error budget — two-horizon prediction check (`predict_check.py`, n=82: 50 observed bounces + 32 terminal-window-recovered landings)
+
+Prediction of the observed landing point made at three moments:
+
+| Horizon | Median | p90 | Timing (med) |
+| --- | --- | --- | --- |
+| **H2 — ~100 ms before touchdown** (state refit near landing → flight) | **5.3 mm** | 15 mm | −0.7 ms |
+| **H1 — at racket contact, measured outgoing state → flight** | **67 mm** | 144 mm | −5 ms |
+| **H0 — at racket contact, through the paddle model** | **250 mm** | 725 mm | −96 ms |
+
+Reading: the flight model itself is excellent (H2 ≈ mm-level; H1's 67 mm over
+0.3–0.9 s of flight is consistent with outgoing-state estimation noise at 9 mm/300 Hz).
+**The paddle contact model dominates the at-strike error** (H0 ≈ 3–4× H1, and its −96 ms
+median timing bias says the modeled outgoing ball is systematically "hot"). Fit
+stability across the 70/30 split: k_d ±1.7%, k_m ±3.6%, table e ±0.01%, paddle e ±0.2%
+— but paddle a_t is NOT stable (0.40 vs 0.83). Improvement without new data therefore
+concentrates on the paddle block (coherent refit with e(u_n) frozen, better racket
+contact-point handling) and on contact-window state estimation — see the forensics
+addendum (§9).
+
+## 6. Validity envelope — nothing outside this box is validated
+
+- Ball speed: **1–7 m/s** (p95 5.6, thin to 10.5); Re 2.5e3–2.8e4
+- Spin: **0–15 rev/s** quaternion-validated (scale cross-checked aerodynamically)
+- Spin ratio SR: **≤ 0.5 well covered; 0.5–1.6 sparse (20 arcs); > 1.6 EMPTY**
+- Table impact v_n: **1.0–4.5 m/s** (buckling regime > 5 m/s not probed)
+- Paddle u_n: **1.4–7.2 m/s**
+- NOT covered: pro-level spin (40–100+ rev/s), SR > 1.6 (exactly where Magnus
+  saturation lives), smashes > 8 m/s, shallow-incidence slip bounces (ratio > 2.3).
+  Sony's own high-speed extrapolation failure applies verbatim: do not silently
+  extrapolate.
+
+## 7. Recommendations for the sim (v1)
+
+1. **Adopt the venue yaml for Isaac/MuJoCo low-speed work** — with eyes open: the
+   paddle block is the big win (first real racket fit; e(u_n) exponential form,
+   ±0.05 e ≈ 15 cm landing) and the flight block is solid (H2 = mm-level, model
+   residual ~45–66 mm @0.4 s). Know the honest at-strike ceiling: through-paddle
+   landing prediction is ~0.17–0.22 m median with this model form (§5.1, §9) — good
+   enough for on/off-table reward gating (95%), NOT yet for 0.10 m-grade shaping.
+2. **Magnus saturation (F2/R1) stays OPEN** — the venue data never reaches SR > 0.7
+   effectively. Options: (a) keep constant k_m and enforce the SR ≤ 0.5 envelope in
+   reward rollouts; (b) adopt the Ace saturating form now (calibrated to match
+   k_m = 0.00444 at SR ≤ 0.5) so behavior is already correct if policies discover
+   high spin. (b) is ~5 lines in flight.py + C++ mirror and strictly safer.
+3. **Deploy-side freebies from the noise-floor MC**: 120 ms init windows
+   (flight prediction 76→~57–68 mm), spin from longer quat windows, and observer
+   tuning that models the colored noise (1.9 mm white + AR(1) ρ≈0.94, 5.2 mm marginal).
+4. **The remaining wall is paddle model FORM / racket-state accuracy** (tangential
+   velocity error 0.68 m/s median; face-normal ±5° swings worst cases by ±0.3 m).
+   Parameter tuning is exhausted (§9.2). Improvements need either dwell modeling /
+   better face-normal estimation on existing data, or cleaner racket capture.
+5. Next capture session: heavy-spin serves (30–60 rev/s, SR 1–4), shallow-incidence
+   bounces, denser cameras on the strike zone (racket normal), and an ITTF drop test
+   on the venue table (adjudicates e_n 0.92 vs the old 0.908).
+6. F7 spin decay: not actionable (n=14, CI includes 0). Re-test on the next dataset;
+   an exponential decay term costs one line if it firms up. **Resolved 2026-07-04:
+   re-measured on all 192 arcs — no decay detectable, constant-ω stands (§11.2).**
+
+## 8. Reproduction
+
+```bash
+cd hope_training/ball_physics_fit
+# data root: pod copy (partial, see §0.1) or the capture Mac (full raw set)
+export BALLFIT_DATA_ROOT=/workspace/yikang/latest_data   # Mac: ~/Desktop/Hope/Record/latest
+python extract_canonical.py "$BALLFIT_DATA_ROOT/<take>" analysis/extracted  # ×9
+python qa_stage0.py && python stage1_segments.py
+python stage2_fits.py --split all && python stage2_fits.py --split train
+python stage3_falsify.py                         # F1–F8 + adversarial verifiers
+python validate_stage4.py --yaml ../../configs/ball_physics_venue.yaml --paddle-e exp
+python predict_check.py  --yaml ../../configs/ball_physics_venue.yaml --split all
+python test_oracle_present.py
+```
+
+## 9. Forensics addendum (2026-07-03 late) — active bug hunt + improvement ceiling
+
+A second adversarial pass ("it ran" ≠ "it is right") over the finished pipeline.
+Raw verdicts: `<venue data>/analysis/forensics/`.
+
+### 9.1 Pipeline bugs found and FIXED
+
+1. **Table-bounce contact-time bias (the e>1 mechanism).** The assumed contact height
+   (bounce-minima surface + R) sits ~9 mm above where the pre/post window fits actually
+   intersect; refining t_c to that height made t_c early, and gravity back-extrapolation
+   inflated e by ≈0.17/v_n² — hence 95% of v_n<1 bounces reading e>1 and the fake
+   F3 slope. FIX in `stage1_segments.py`: t_c stays at the two-sided meeting point,
+   35-frame windows. Corrected **table e_n = 0.9215 (was 0.934)**; e>1 tail 17%→~4%;
+   e-vs-v_n slope ≈ 0. F3 upgraded INCONCLUSIVE → PASS-within-coverage.
+2. **Landing ground truth.** Stage-4 originally reconstructed the "measured" landing
+   through the same flight model (optimistic, as flagged in review). Now: observed
+   bounce p_c, continuity-gated. Additionally, the bounce extractor misses ~2/3 of
+   first bounces (post-bounce arc occluded/short) — `predict_check.py` recovers those
+   landings from the TERMINAL WINDOW of the incoming arc (H2-grade, mm–cm accurate,
+   identity-gated so juggle re-hits can't masquerade as landings): landing-GT n 48→82 (identity-gated).
+3. **Wrong strike→bounce pairings.** 21/69 naive pairings grabbed a later bounce
+   (median continuity error 6.5 m — unambiguous). All landing metrics use the
+   continuity gate now; 1 of the original 20 stage-4 pairs was wrong.
+
+### 9.2 Paddle block — resolved (this is where the improvement budget went)
+
+- The a_t "instability" (0.40↔0.83 across splits) is **collinearity, not noise**: all
+  strikes are near-normal (cosθ median 0.98), so only a_t + b_t·cosθ is identified.
+  With b_t≡0 the subsample spread collapses (a_eff = 0.375 ± 0.031 joint).
+- **The strike spin channel is junk on this rig**: quaternion Δω at strikes reads
+  ~0.22× the position-implied impulse (IQR −0.01…0.46; table bounces read 0.65×).
+  Joint fits let it drag a_t down to ~0.32–0.38. The velocity channel and three
+  model-free tangential-impulse estimates agree on a_t ≈ 0.58–0.62 on the original
+  segments; refit on the FIXED segments (35-frame windows, t_c fix) the
+  velocity-channel value is **a_t = 0.52** (bootstrap CI [0.46, 0.61]) — adopted in
+  the yaml with μ→0.5 (cap never binds; measured impulse-ratio p90 = 0.27). Honest
+  range across variants: 0.46–0.62.
+- Landing error is FLAT over a_t 0.2–0.6 and sharply optimal at the F4 e-calibration
+  (±10% e ≈ ±5 cm landing) — so the a_t choice follows the direct tangential
+  measurement, and the landing-relevant error is elsewhere:
+- **Dissection of the through-paddle landing error** (48 clean pairs, pre-fix
+  segments): swapping the model's outgoing VELOCITY for the measured one removes
+  nearly all excess error (0.164→0.074 median) while swapping spin changes little → the residual paddle-model
+  deficit is tangential-velocity form error (median |Δv_t| = 0.68 m/s vs |Δv_n| = 0.02)
+  plus racket-face-normal sensitivity (±5° tilt swings worst-case landings by ±0.3 m).
+  Parameter refits cannot buy more here (landing-error sweep over (a_t, e-scale),
+  pre-fix segments: best cell 0.163 m vs then-shipped 0.164 m — zero headroom; the
+  post-fix full-coverage H0 is 0.25 m because the recovered-GT strikes are harder,
+  not because the model got worse); the ceiling is model FORM
+  (dwell/normal estimation), consistent with H0−H1 in §5.1 and the noise-floor MC.
+
+### 9.3 What was checked and NOT changed
+
+- **Wobble δ**: the extractor's sphere-fit center offset is wrong by ~1.9 mm (35°
+  direction error), verified by injection test and split-half stability. Effect is
+  ~0.1 mm rms under the 9 mm noise floor (k_d bias ≈0, k_m < 3%) → documented in the
+  README as a known systematic; not worth a full re-extraction on this rig.
+- **Noise-floor Monte Carlo** (exact Stage-4 estimators on synthetic truth): the rig
+  noise is NOT white — ~1.9 mm/axis white + a correlated AR(1) ρ≈0.94 component
+  (5.2 mm marginal, ~60 ms correlation time; this is why short windows look clean but
+  long arcs read 9 mm). Flight metric floor at 60 ms init: 37–60 mm median (white →
+  colored) vs 76 observed → noise explains 24–63% of the variance; a genuine
+  **flight model-form residual of ~45–66 mm @0.4 s remains**. Landing floor: 32–64 mm
+  vs 164 observed → **noise explains only 4–15% — the landing miss is decisively
+  model/racket-state error (~0.15 m median residual)**, robust to every noise model
+  tested. Free deploy-side gains: 120 ms init window (flight 76→~57–68 mm), longer
+  spin windows (+16 mm quadrature removed); deploy Kalman/observer tuning should
+  model the colored noise term. Old-rig reference: both floors collapse to ~2 mm.
+
+### 9.4 Improvement space without new data — final accounting
+
+| Lever | Status | Gain |
+| --- | --- | --- |
+| Bounce t_c bias fix | **DONE** | e_n unbiased (0.9215); F3 clean; e>1 17%→4%; bounce-speed validation 5.96%→2.32% (FAIL→PASS) |
+| Observed/terminal-window landing GT | **DONE** | honest metrics + landing-GT n 48→82 (identity-gated) |
+| Paddle a_t via velocity channel | **DONE** | tangential gain trustworthy (0.58±0.02 stat) |
+| Paddle e(u_n) exp form | **DONE** (F4) | landing-relevant e calibrated at optimum |
+| Longer init windows for deploy prediction | free at deploy time | H2 shows the ceiling: mm-level at 100 ms lead |
+| Paddle model FORM (tangential + face normal) | **the remaining wall** | would need cleaner racket tracking or dwell modeling; est. bulk of the H0 ~250 mm vs H1 67 mm gap |
+| Magnus saturation / high spin | **not addressable** with this data | needs a dedicated high-spin capture |
+
+## 10. Open-questions quantification (2026-07-03 late) — model-based, no new data
+
+Team questions answered by simulation ON the shipped constants (deterministic sweeps +
+MC with the forensics noise model of §9.3; adversarially code-reviewed). These are
+model-derived numbers, not new measurements — the model itself is only validated
+inside the §6 envelope. Three runnable-on-real-data tools were shipped alongside:
+`predict_check.py --full-state`, `falsify/f10_paddle_split.py`, and
+`flight_selfcheck.py` (§8 / pipeline README). **All three have now run on the venue
+data** (copied 2026-07-03 late to the RunPod at `/workspace/yikang/latest_data`;
+set `BALLFIT_DATA_ROOT` there) — real-data results folded into items 4–6 below.
+
+1. **Spin (旋转影响)** — tiered. At the venue-median 2 rev/s, ignoring Magnus moves the
+   landing only ~31 mm (14–58) — under the noise floor; the spin-blind deployed planner
+   is fine for that regime (no-spin interception miss 75–102 mm ≈ racket radius). From
+   ~5 rev/s it dominates: 15 rev/s = 103–514 mm landing shift in flight; the table
+   bounce adds a ±0.7 m/s tangential kick (top/backspin 15 rev/s → 250–310 mm of
+   position 0.4 s after the bounce) that the deployed diagonal bounce cannot represent;
+   end-to-end deploy miss vs a 15 rev/s ball: 167–482 mm (2–6× racket radius; sidespin
+   ~19–31 mm per rev/s laterally, topspin mostly TIMING — up to 166 ms early, can flip
+   the predicted bounce count). 30–60 rev/s is extrapolation: constant-k_m vs saturating
+   C_L alone changes answers by 0.09–3.1 m — order-of-magnitude only.
+2. **Prediction moment (击球后 vs 过网, no racket data in matches)** — MC calibrated to
+   the real anchors (H1-like config: MC 48 mm vs real 67 mm ⇒ 46.7 mm model-form
+   residual, inside the measured 45–66 mm band). Anchored landing error: predict at
+   +77 ms (60 ms window) = 90 mm median / 143 p90; +167 ms (150 ms window) = 58 mm;
+   at net crossing (~+250–280 ms) = 45 mm; H2-style near landing ≈ 10 mm. So early vs
+   net-crossing is ~2×, NOT an order of magnitude, and ~70% of the gain comes from just
+   lengthening the early window to 150 ms. Landing-TIME error is never the problem
+   (5–11 ms median). Strategy: predict early for gross motion, refine at net/long-window,
+   final correction pre-bounce.
+3. **Net (球网)** — the whole stack is currently net-blind (fit pipeline integrates
+   through x=0; deployed incoming predictor never checks the net; the return-side
+   `_check_net_clearance` is drag-only). Quantified: H1-grade state error ⇒ σ_z at the
+   net 34–64 mm, so predicted clearance < 2σ (≈ 7–13 cm) is a coin flip; ~7% of
+   synthetic-grid crossings sit 0–3 cm above the cord; an unmodeled cord clip moves the
+   landing 0.06–0.49 m, and roll-over clips (dt≈0) PASS the strike–bounce pairing gates
+   → plausible contributor to H1 p90 / H0 tails (not medians). 10–15 rev/s topspin makes
+   the true net-crossing 42–84 mm lower than the planner's drag-only check — more than
+   its 30 mm margin. Do NOT add net-contact physics (zero data); add clearance
+   diagnostics/flags and raise the return margin to ≥0.10 m until Magnus is in.
+4. **Face/paddle splits (正反面/拍位/双拍)** — F10 RAN on the venue data (n_used=145,
+   face identity from the raw npz body-normal channel — `pad_n` in strikes.json is
+   flipped toward approach and cannot carry face identity). Results:
+   **(a) The two paddles ARE different (DIFFERENT verdict, slope form)**: p1
+   e(u_n)=0.682·exp(−0.0093·u_n) (nearly flat) vs p2 0.975·exp(−0.1093·u_n) (steep);
+   Δg2 = +0.100, bootstrap CI [0.015, 0.201] excludes 0; implied Δe ≈ 0.073 over the
+   common u_n band. At u_n=7 m/s the spread is large: p1 0.64 / shipped-pooled 0.56 /
+   p2 0.45. Caveat: paddle is partially confounded with stroke type (p1 dominates the
+   juggling takes: 63/100 of its strikes) — but F4's within-take evidence pointed the
+   same way. ~~**Action: identify WHICH physical paddle the robot plays with
+   (b_PPP1 vs b_PPP2) and use that paddle's e(u_n) in the planner, not the pooled
+   curve** (±0.09 e at fast strikes ≈ ±0.15–0.2 m of return landing per the ruler
+   below).~~ **[SUPERSEDED 2026-07-04, kept for the record]** — the stratified +
+   u_n-matched reanalysis (§11.1) shows the caveat above was the story: the
+   DIFFERENT verdict was substantially a stroke-mix artifact. Ship the POOLED
+   e(u_n) curve; widen stated uncertainty above u_n ≈ 4.5. (b) **Face split: UNDERPOWERED, not settled** — p1 hit 93/7 with one face
+   (unmeasurable); p2: Δe(n+ − n−) = +0.054 point estimate — exactly at the
+   "it matters" threshold — but MW p=0.145, CI [−0.018, +0.119] spans 0 at n=19/26.
+   Needs a dedicated capture: ≥50 strikes per face with the ROBOT's racket, and a
+   bench note pairing the mocap n+/n− label to rubber color. (c) Blade position: no
+   detectable e trend vs contact offset (Theil-Sen −0.33/m, perm p=0.30). Sensitivity
+   ruler (shipped model, robot-return geometry, u_n 5.1–9.7 — upper half EXCEEDS the
+   fitted envelope): face Δe 0.02 → 39 mm return-landing shift (ignorable); 0.05 →
+   ~98 mm + net-clearance +15 mm (matters); 0.10 → ~195 mm (planner must go per-face).
+   Δa_t 0.05/0.10 → 22/43 mm (second-order). The robot plays with the SAME racket as
+   the venue-capture paddles (team info 2026-07-03), so these splits feed the planner
+   directly.
+5. **Full-state prediction (不能只预测落点)** — `--full-state` RAN on the venue data
+   (n=82 strikes, 7/4/3 rows envelope-flagged for H0/H1/H1q). Real numbers:
+   **position along the arc (3D median per horizon bin, H1 = measured out-state):
+   19 / 21 / 31 / 47 / 74 mm at 0–100 / 100–200 / 200–300 / 300–450 / >450 ms**
+   (planar 14→54 mm) — the flight model tracks the whole trajectory, not just the
+   landing. H0 (through paddle model): 48→269 mm — paddle error dominates from the
+   first bin. **Velocity along the arc: H1 |Δv| 0.24–0.27 m/s, direction 3.1–3.4°**
+   (≈ the window-fit measurement floor 0.2 m/s seen on synthetic) vs H0 0.65–0.83 m/s,
+   6–13.5° (the paddle tangential form error, matching §9.2's 0.68 m/s). **Spin: H1
+   vector error 11–16 rad/s ≈ the 12.6 rad/s (2 rev/s) quat noise floor** — spin
+   prediction cannot be graded better than the sensor here; H0 spin transfer is worse
+   (22–25 rad/s, axis error 38–48°) and remains unvalidated. Net-plane crossing (H1):
+   dz median −0.6 mm but p90 49 mm — confirms the §10.3 σ_z story. **H1q ≈ H1
+   everywhere** → sourcing spin from the first 100 ms of flight quats (the only option
+   in matches) costs nothing measurable. Deploy gap to close when wiring: state
+   estimator has no spin channel, predictor has no Magnus/spin and returns a single
+   hitting-plane point instead of a trajectory.
+6. **Front-predicts-back / back-predicts-front (前推后/后推前, variance or bias?)** —
+   NEW `flight_selfcheck.py`, ran on 192 gap-free ballistic arcs ≥0.35 s (100 ms
+   windows both ends; matched-geometry MC noise floor; smoke-validated on synthetic
+   zero-model-error data where observed ≈ floor). Real data:
+
+   | horizon | n | FWD med/p90 | noise floor | BWD med/p90 | floor | excess (model-form) |
+   | --- | --- | --- | --- | --- | --- | --- |
+   | 0.25–0.35 s | 82 | 55.5 / 106 mm | 36.5 | 55.2 / 100 mm | 43.0 | 41.8 mm |
+   | 0.35–0.50 s | 92 | 64.0 / 116 mm | 44.8 | 78.7 / 127 mm | 60.9 | 45.8 mm |
+   | 0.50–2.0 s | 18 | 84.7 / 159 mm | 57.3 | 108 / 180 mm | 78.5 | 62.4 mm |
+
+   Answer: the disagreement is **~half variance, half bias, in quadrature** — the
+   noise floor explains 36–57 mm and a model-form excess of **42–62 mm** remains,
+   growing with horizon; this independently reproduces the §9.3 noise-floor-MC
+   estimate (45–66 mm @0.4 s) by a completely different method. So "误差大" is NOT
+   simply large variance: the variance half shrinks with longer windows/better
+   observers, the bias half (wrong per-arc k_d/k_m, spin decay, unmodeled aero) does
+   not average away. Backward error exceeds forward (ratio 1.11 median) but LESS than
+   the noise floor's own drag asymmetry (1.18–1.36 expected from e^{±k_d|v|T}) — no
+   evidence of direction-dependent model bias. Caveat: the heavy-topspin takes
+   contribute few arcs (shangxuan 0, xiaxuan 3 — short/gappy tracks), so the check
+   under-covers exactly the high-spin regime.
+
+## 11. Stratified reanalysis (2026-07-04) — paddle split downgraded; spin decay closed
+
+Two of §10's open threads re-examined on the SAME data with confound-aware methods
+(no new capture). Scripts: pod `/workspace/franco/research/strat_paddle_split.py`
+and `/workspace/franco/research/spin_decay_arcs.py`; inputs are the exact
+strikes.json / arc npz behind §10.4 and §10.6.
+
+### 11.1 Paddle split (F10) — DIFFERENT verdict downgraded to stroke-mix artifact
+
+Stratified-by-stroke + u_n-matched reanalysis of the same 145 strikes:
+
+- **The e-LEVEL difference vanishes once stroke mix is controlled.** Non-juggling
+  strikes only: p1 e = 0.658 vs p2 0.705, MW p=0.37; restricting further to the
+  matched u_n band 3.0–5.0 m/s: p=0.35; within-take permutation test: p=0.51. The
+  confound §10.4 flagged as a caveat was in fact the mechanism: juggling strikes
+  split 63:0 toward p1, and p1 is systematically slower (median u_n 3.03 vs 3.59
+  m/s), so the pooled comparison was comparing strokes, not hardware.
+- **The slope difference (Δg2) weakens to suggestive, not hardware-attributable.**
+  Non-juggling Δg2 = +0.091, bootstrap CI [0.007, 0.201] (still excludes 0), but the
+  within-take permutation p rises to 0.070, and the effect is carried entirely by
+  the sparse u_n ≥ 4.5 tail — 14 p2 strikes vs 5 p1 strikes. At that n the split
+  cannot separate paddle hardware from residual stroke/spin composition.
+- **The spin asymmetry is real but stroke-borne, not a rig/paddle effect**: p2 sees
+  incoming |ω_in| median 2.68 vs 1.68 rev/s for p1 (p=4e-4) — a property of who/what
+  hit at that paddle, consistent with the stroke-mix story above.
+- **ACTION REVERSAL**: §10.4(a)'s "identify the robot's paddle and use that paddle's
+  e(u_n), not the pooled curve" is **WITHDRAWN** (original text kept there under a
+  SUPERSEDED tag). Ship the **pooled e(u_n)** curve; widen the stated uncertainty
+  above u_n ≈ 4.5 m/s (where the two per-paddle curves genuinely diverge but the
+  data cannot adjudicate); and put **~20 high-u_n (>4.5 m/s), low-spin p1 strikes**
+  on the next-capture list to settle the residual slope question.
+
+### 11.2 Spin decay in air — measured, consistent with zero; constant-ω stands (F7 closed)
+
+Direct measurement on the same 192 gap-free ballistic arcs of §10.6 (quaternion
+|ω| regressed within-arc):
+
+- Median fractional decay per 0.5 s = **+2.4%, CI [−8.1%, +10.7%]** — consistent
+  with zero; 47% of arcs read "negative decay", i.e. the distribution is
+  noise-symmetric about no-decay.
+- High-spin subset: exponential-decay λ point estimate 0; **τ 95% lower bound
+  ≈ 5 s** — over a 0.3–0.8 s flight the constant-ω error bound is a few percent,
+  far below contact-model uncertainty.
+- **Decision: constant-ω stands** (this also matches Sony Ace's flight assumption).
+  Documented as a VENUE CONSTRAINT (spins ≤15 rev/s, arcs ≤2 s — decay at pro spin
+  levels remains uncovered), not a modeling omission. F7's borderline-KILL (n=14)
+  does not survive the full-sample re-measurement.
+- Measured along the way, adopted into the yaml capture block: quaternion spin noise
+  is **~30% multiplicative** (σ/|ω| = 0.28–0.31 across the arc set), and the spin
+  AXIS is unreliable below ~2 rev/s — consistent with, and sharpening, the 2 rev/s
+  floor of §9.3/`capture.spin_noise`.
+
+### 11.3 a_t refit adjudication with clean-spin sources (2026-07-04) — no yaml change
+
+Full run on the 145 f10-gated strikes (`/workspace/franco/research/at_refit/`, ~20 min pod run):
+
+- **Trajectory-Magnus spin inference does NOT exist on this rig** (quantified, not assumed):
+  144/145 strikes have a ≥100 ms pre-strike arc, but the MC noise floor gives per-strike spin
+  sigma median **142 rev/s** (q25 59, best single strike 9.6) vs venue-median spin 1.9 rev/s —
+  usable count **0/144** at any threshold. Physically: Magnus displacement at 2 rev/s over 0.3 s
+  ≈ 10 mm ≈ the 9 mm correlated noise floor. Even at pro spin (≥15 rev/s) the best windows reach
+  only σ≈10 rev/s — not fit-grade. Adjudicating strike spin transfer needs a cleaner rig
+  (OptiTrack-class 0.4 mm) or marked-ball high-speed video.
+- **Pre-strike quat spin is GOOD input** — the 0.22× junk is the ACROSS-strike Δω only (never
+  used by this fit). Dropping spin (ω=0) makes the tangential fit WORSE (+0.06 m/s median).
+- **a_t refits**: quat-spin a_lsq 0.559 CI [0.441, 0.677], grid-best 0.58. Median |Δv_t| on this
+  set: shipped 0.52 → **0.377 m/s**; best achievable by ANY (a_t × spin source) → 0.356 (−5.6%).
+  (The §9.2 figure 0.68 was the pre-fix 48 through-paddle pairs — different set, same story.)
+- **Rolling-cap hypothesis REJECTED**: a_t = 2/5 fits worse under every source and every bootstrap
+  CI excludes 0.40 → the rubber shows real tangential restitution; a_t > 2/5 is physical.
+- **Verdict: keep a_t = 0.52 (0.58 defensible; do not go below 0.46). No yaml change.** The
+  residual ~0.36-0.38 m/s is model-FORM ceiling (as large as the tangential signal itself);
+  remaining levers = racket face-normal estimation (±5°) and finite-dwell contact — i.e. §9.2's
+  wall, now with the spin-input hypothesis eliminated.

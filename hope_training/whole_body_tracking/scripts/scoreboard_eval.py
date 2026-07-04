@@ -41,8 +41,11 @@ EVAL = WBT / "scripts" / "mujoco_eval_onnx.py"
 
 PROTOCOLS = {
     "implicit": ["--pd-mode", "implicit"],
-    "explicit": ["--pd-mode", "explicit"],
-    "deploy_faithful": ["--pd-mode", "explicit", "--deploy-faithful"],
+    # explicit protocols carry --keep-passive: the AGI deploy sim applies explicit-Euler PD AND does
+    # not zero the MJCF passive damping (S2R_KNOWHOW/SIM_FIDELITY_NOTE) — without it the "explicit"
+    # gate is softer than the real validation sim.
+    "explicit": ["--pd-mode", "explicit", "--keep-passive"],
+    "deploy_faithful": ["--pd-mode", "explicit", "--keep-passive", "--deploy-faithful"],
     # Structure-only variant: the runner episode protocol (stand start, hold, rest, no teleports)
     # under the Isaac-faithful implicit actuator — separates "can it survive stand-entry multi-swing"
     # (P2.1) from "can it survive the explicit clipped PD" (actuator robustness / explicitpd_ft).

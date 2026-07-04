@@ -1690,6 +1690,7 @@ new video
     | command:
     |   cd ~/workspace/HOPE/hope_training/GVHMR
     |   source ~/workspace/HOPE/hope_training/.venv-motion/bin/activate
+    |   export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1   # torch>=2.6 + ultralytics 8.2.42, see Step 9 notes
     |   python tools/demo/demo.py --video=../motions/raw_video/forehand_swing.mp4 -s
     | writes:
     |   GVHMR/outputs/demo/forehand_swing/hmr4d_results.pt
@@ -1917,6 +1918,10 @@ Run GVHMR:
 
 ```bash
 cd ~/workspace/HOPE/hope_training/GVHMR
+# Required with torch>=2.6 (e.g. the RunPod hope-motion-py310 env, torch 2.7.0+cu128):
+# ultralytics 8.2.42's YOLO checkpoint load breaks under the new weights_only=True
+# torch.load default. The checkpoints are local and hash-checked, so opting out is safe.
+export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1
 python tools/demo/demo.py --video=../motions/raw_video/forehand_swing.mp4 -s
 ```
 
@@ -2478,17 +2483,20 @@ Open a host terminal and enter `grasping`:
 distrobox enter grasping
 ```
 
-Now inside `grasping`, activate the Isaac / training Python:
+Now inside `grasping`, use the Isaac / training Python that is actually installed on this machine:
 
 ```bash
-source /opt/drone_venv/bin/activate
+export HOPE_ISAAC_VENV=/workspace/hope_isaac_venv
+export ISAACLAB_PATH=/workspace/IsaacLab
+export PATH="$HOPE_ISAAC_VENV/bin:$PATH"
 cd ~/workspace/HOPE/hope_training/whole_body_tracking
 python -c "import sys; print(sys.executable)"
 ```
 
 Important on this machine:
 
-- `wandb` and the Isaac training dependencies are expected to come from `/opt/drone_venv`.
+- Isaac Sim / Isaac Lab are installed through `/workspace/hope_isaac_venv` plus `/workspace/IsaacLab`.
+- `/workspace/isaacsim/python.sh` and `/opt/drone_venv` are legacy paths and are not present here.
 - Do **not** use plain `/usr/bin/python3` for the training commands in this phase.
 
 ### 12.4 Install `whole_body_tracking`
@@ -2502,26 +2510,17 @@ If `pip show` cannot find `whole_body_tracking`, the editable install did not la
 The actual runtime check for this machine is the `hope_isaac_py ...` check below,
 not plain `python -c "import whole_body_tracking"`.
 
-If `python -m pip install -e source/whole_body_tracking` fails with a permission
-error like:
-
-```text
-Permission denied: '/opt/drone_venv/lib/python3.11/site-packages/...'
-```
-
-then do **not** stop here. On this machine, `/opt/drone_venv` may be owned by
-`root`, so editable install can fail even though the runtime itself is usable.
-Use this no-install fallback for the rest of steps `12-15`:
+If `python -m pip install -e source/whole_body_tracking` is already satisfied or
+cannot be run in the current shell, use this no-install fallback for the rest of
+steps `12-15`:
 
 ```bash
 cd ~/workspace/HOPE/hope_training/whole_body_tracking
 
-# Source the training env (once per terminal). It sets HOPE_WBT_PYTHONPATH so Isaac's bundled python
-# can see hydra/omegaconf (in /opt/drone_venv) + isaaclab_rl, defines the `hope_isaac_py` launcher,
-# and exports the wandb team/org/project. The script header documents each piece. It MUST be SOURCED
-# (not `./setup_train_env.sh`, which would set everything in a subshell that exits). Re-source every
-# new terminal. (Prefer not to source? Step 14.1 "Manual way" lists the exact equivalent commands —
-# the HOPE_WBT_PYTHONPATH export, the hope_isaac_py function, and the three wandb exports.)
+# Source the training env (once per terminal). It sets HOPE_WBT_PYTHONPATH,
+# points `hope_isaac_py` at /workspace/hope_isaac_venv + /workspace/IsaacLab,
+# and exports the wandb team/org/project. The script header documents each piece.
+# It MUST be SOURCED, not executed. Re-source every new terminal.
 source setup_train_env.sh
 ```
 
@@ -2604,7 +2603,12 @@ Back in `grasping`:
 
 ```bash
 wandb login --relogin --verify
-wandb whoami
+python - <<'PY'
+import wandb
+viewer = wandb.Api().viewer
+print(viewer.username)
+print(viewer.entity)
+PY
 ```
 
 Persist the defaults for this workspace (replace the two names with your own team
@@ -2688,6 +2692,8 @@ PY
 
 If both smoke tests succeed, WandB is ready.
 
+Current shared RunPod verification (2026-07-02): W&B login works for user `yyk956614`, runs log under `BerkeleyPingPong`, the registry org is `dongc_1-university-of-california-berkeley-org`, and the motion upload project is `csv_to_npz`. The SDK version here is `wandb==0.28.0`; `wandb whoami` is not available in that version, so use the API smoke snippets above rather than relying on that command.
+
 ### 12.7 Copy the A3 ping-pong URDF assets into the training repo
 
 On this repo, use the existing A3 ping-pong URDF package here:
@@ -2762,10 +2768,11 @@ find source/whole_body_tracking/whole_body_tracking/assets/agibot_a3 -maxdepth 2
 - the robot name `agibot_a3`
 - an output collection name such as `hope_forehand`
 
-It does **two** things:
+The current script supports both local-only output and WandB upload:
 
-1. It writes a temporary local file to `/tmp/motion.npz`.
-2. It uploads that file to the WandB `motions` registry.
+1. With `--output_file <path> --no_upload`, it writes the final local `.npz` directly.
+2. Without `--no_upload`, it also uploads the file to the WandB `motions` registry.
+3. For `--robot agibot_a3`, `--hope_frame auto` is the default: saved/uploaded world-frame arrays are rotated so frame-0 pelvis yaw faces HOPE +X. Use `--hope_frame off` only for a deliberate diagnostic run.
 
 Prepare the local folder for keeping a copy of each generated `.npz`:
 
@@ -2781,16 +2788,17 @@ hope_isaac_py scripts/csv_to_npz.py \
   --input_file ~/workspace/HOPE/hope_training/motions/retargeted/forehand_swing.csv \
   --input_fps 30 \
   --output_name hope_forehand \
+  --output_file ~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand_hopex.npz \
+  --no_upload \
   --headless
 
-cp /tmp/motion.npz ~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand.npz
-ls -lh ~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand.npz
+ls -lh ~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand_hopex.npz
 ```
 
 Success marker:
 
 ```text
-[INFO]: Motion saved to wandb registry: motions/hope_forehand
+[INFO]: Motion saved locally: .../motions/preprocessed/hope_forehand_hopex.npz
 ```
 
 On the current repo version, the script exits automatically after this line.
@@ -2805,27 +2813,38 @@ hope_isaac_py scripts/csv_to_npz.py \
   --input_file ~/workspace/HOPE/hope_training/motions/retargeted/backhand_swing.csv \
   --input_fps 30 \
   --output_name hope_backhand \
+  --output_file ~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand_hopex.npz \
+  --no_upload \
   --headless
 
-cp /tmp/motion.npz ~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand.npz
-ls -lh ~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand.npz
+ls -lh ~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand_hopex.npz
 ```
 
 Success marker:
 
 ```text
-[INFO]: Motion saved to wandb registry: motions/hope_backhand
+[INFO]: Motion saved locally: .../motions/preprocessed/hope_backhand_hopex.npz
 ```
 
 Expected local files:
 
-- `motions/preprocessed/hope_forehand.npz`
-- `motions/preprocessed/hope_backhand.npz`
+- `motions/preprocessed/hope_forehand_hopex.npz`
+- `motions/preprocessed/hope_backhand_hopex.npz`
 
-Expected WandB registry entries:
+Before upload or training, run the no-Isaac alignment gate:
+
+```bash
+python scripts/check_motion_target_alignment.py \
+  --clip forehand:~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand_hopex.npz \
+  --clip backhand:~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand_hopex.npz
+```
+
+Expected WandB registry entries after you upload corrected clips:
 
 - `$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand:latest`
 - `$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_backhand:latest`
+
+Do not use the 2026-07-02 `hope_forehand:v4` / `hope_backhand:v4` artifacts for long training: they contain canonical `motion.npz` files, but were later rejected because they still face world +Y (frame-0 yaw 82.03/85.92 deg and +Y-dominant strike velocity).
 
 If the robot pose looks scrambled during conversion, check `AGIBOT_A3_JOINT_NAMES` in
 `source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py`. That list must match
@@ -2861,8 +2880,8 @@ Step `12` is complete only if all of the following are true:
 
 - `motions/retargeted/forehand_swing.csv` exists.
 - `motions/retargeted/backhand_swing.csv` exists.
-- `motions/preprocessed/hope_forehand.npz` exists.
-- `motions/preprocessed/hope_backhand.npz` exists.
+- `motions/preprocessed/hope_forehand_hopex.npz` exists.
+- `motions/preprocessed/hope_backhand_hopex.npz` exists.
 - WandB registry contains `hope_forehand` and `hope_backhand`.
 - `replay_npz.py` shows the A3 replaying both motions without obviously broken joint order.
 
@@ -2955,11 +2974,17 @@ HOPE-invented curriculum. The current `cfg/task/HOPEPingPong.yaml` + code implem
   (**Superseded 2026-07-03:** the fixed x=0.4 plane is the original HITTER-faithful stage; the
   deploy-parity default now samples from **active per-clip 3-D blade-centered position AND
   velocity boxes** — `pos_range_per_clip` / `vel_range_per_clip`.)
+  (A **teacher-centered** `racket.target_mode: reference_perturbed` variant — target center = the
+  imitated clip's own strike-frame racket FK state (position, velocity, face normal), widened by the
+  `ref_perturb_*` knobs — was verified on this branch and survives as an optional NON-default
+  override in `cfg/task/HOPEPingPong.yaml`. It avoids the failure mode of imitating one teacher
+  strike while chasing an unrelated sampled target; `uniform` stays the default everywhere.)
 - **Per-clip strike** — `racket.strike_phase_per_clip: [0.36, 0.74]` (the racket-tip contact phase
   differs per clip); strike timing is resolved per env from its `clip_id`.
   (**Updated 2026-07-03:** current default is **`[0.47, 0.333]`** from the 2026-07-02 blade
-  re-detect on the re-grounded `_hopex` v3 clips; the v1-clip values were `[0.36, 0.50]`, and
-  `0.74` for the backhand dates to the model_32200 era.)
+  re-detect on the re-grounded `_hopex` v3 clips; the legacy `HOPEPingPong` comparison task keeps
+  the rounded `[0.47, 0.33]`. The v1-clip values were `[0.36, 0.50]`, and `0.74` for the backhand
+  dates to the model_32200 era.)
 - **Racket normal is reward-only** — removed from the actor observation (HITTER Table I); the critic
   keeps it.
 - **Faithful DR** — PD gains FIXED (`domain_rand.pd_gain_range: null`) and external push disabled
@@ -3062,10 +3087,10 @@ distrobox enter grasping
 # inside grasping:
 cd ~/workspace/HOPE/hope_training/whole_body_tracking
 
-# Source the training env. This sets HOPE_WBT_PYTHONPATH (so Isaac's bundled python sees
-# hydra/omegaconf in /opt/drone_venv + isaaclab/isaaclab_rl), defines the `hope_isaac_py` launcher,
-# and exports the wandb team/org/project (WANDB_ENTITY / WANDB_REGISTRY_ORG / WANDB_PROJECT — the
-# team and org are DIFFERENT; using the team for the registry fails, see Step 12.5).
+# Source the training env. This sets HOPE_WBT_PYTHONPATH, points `hope_isaac_py`
+# at /workspace/hope_isaac_venv + /workspace/IsaacLab, and exports the wandb
+# team/org/project (WANDB_ENTITY / WANDB_REGISTRY_ORG / WANDB_PROJECT — the team
+# and org are DIFFERENT; using the team for the registry fails, see Step 12.5).
 source setup_train_env.sh
 ```
 
@@ -3085,14 +3110,22 @@ distrobox enter grasping
 # inside grasping:
 cd ~/workspace/HOPE/hope_training/whole_body_tracking
 
-# (1) PYTHONPATH: working-tree source FIRST (so your edits win over any stale installed copy),
-#     then hydra/omegaconf (/opt/drone_venv) + isaaclab_*.
-export HOPE_WBT_PYTHONPATH=$PWD/source/whole_body_tracking:/opt/drone_venv/lib/python3.11/site-packages:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_tasks:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_assets:/workspace/omni_drones/third_party/IsaacLab/source/isaaclab_rl
+# (1) current machine Isaac paths.
+export HOPE_ISAAC_VENV=/workspace/hope_isaac_venv
+export ISAACLAB_PATH=/workspace/IsaacLab
 
-# (2) the launcher = Isaac's python.sh run with that PYTHONPATH.
-hope_isaac_py () { PYTHONPATH="$HOPE_WBT_PYTHONPATH" /workspace/isaacsim/python.sh "$@"; }
+# (2) PYTHONPATH: working-tree source FIRST so your edits win over any stale installed copy.
+export HOPE_WBT_PYTHONPATH=$PWD/source/whole_body_tracking
 
-# (3) wandb: runs log to your TEAM; the motion registry is read from your ORG (different — see 12.5).
+# (3) the launcher = IsaacLab wrapper with the venv first on PATH.
+hope_isaac_py () {
+  TERM="${HOPE_ISAAC_TERM:-xterm}" \
+    PATH="$HOPE_ISAAC_VENV/bin:$PATH" \
+    PYTHONPATH="${HOPE_WBT_PYTHONPATH}${PYTHONPATH:+:$PYTHONPATH}" \
+    "$ISAACLAB_PATH/isaaclab.sh" -p "$@"
+}
+
+# (4) wandb: runs log to your TEAM; the motion registry is read from your ORG (different — see 12.5).
 export WANDB_ENTITY=BerkeleyPingPong
 export WANDB_REGISTRY_ORG=dongc_1-university-of-california-berkeley-org
 export WANDB_PROJECT=hope_wbc
@@ -3102,26 +3135,35 @@ Either way, sanity-check the shell with
 `hope_isaac_py -c "import hydra, omegaconf; print(hydra.__version__)"` (should print
 `1.3.2`) and `echo "$HOPE_WBT_PYTHONPATH"` (blank = the env is not set up in this terminal).
 
-### 14.2 Smoke test (~1 min) — confirm the whole pipeline runs
+### 14.2 Smoke test (~1 min) — confirm the local two-clip pipeline runs
+
+Use the local corrected `_hopex.npz` files from Step 12.8 first. This avoids WandB and verifies the exact
+forehand/backhand clips that will be used for unified training:
 
 ```bash
-hope_isaac_py scripts/train.py task=TrackingFlat algo=ppo headless=true \
-  registry_name="$WANDB_REGISTRY_ORG/wandb-registry-motions/hope_forehand" \
-  num_envs=32 max_iterations=3 logger=tensorboard run_name=smoke
+hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true \
+  registry_name=~/workspace/HOPE/hope_training/motions/preprocessed/hope_forehand_hopex.npz \
+  registry_name_2=~/workspace/HOPE/hope_training/motions/preprocessed/hope_backhand_hopex.npz \
+  num_envs=32 max_iterations=3 logger=tensorboard run_name=smoke_local_two_clip
 ```
 
-Success = the env builds on 32 envs, then PPO iterates with finite rewards:
+Success = the env builds on 32 envs, both local motions are accepted, and PPO iterates
+with finite rewards:
 
 ```text
-[INFO] Task: Tracking-Flat-AgibotA3-v0 | experiment: agibot_a3_flat | log: .../logs/rsl_rl/...
+[train.py] LOCAL motion (no registry): .../hope_forehand_hopex.npz
+[train.py] LOCAL motion (no registry): .../hope_backhand_hopex.npz
+[train.py] UNIFIED multi-clip policy: clip0=...hope_forehand_hopex.npz  clip1=...hope_backhand_hopex.npz
+[INFO] Task: HOPE-PingPong-AgibotA3-v0 | experiment: agibot_a3_hope | log: .../logs/rsl_rl/...
 ...
                         Learning iteration 0/3
-                       Mean reward: -0.62
 ...
                         Learning iteration 2/3
 ```
 
 If it instead drops back to the shell with no `Learning iteration` lines, go to 14.7.
+
+Current shared RunPod verification (2026-07-02): the no-Isaac alignment gate passes on `hope_forehand_hopex.npz` / `hope_backhand_hopex.npz` and fails on the old v4 registry downloads as intended. Earlier local/registry smokes prove the pipeline runs, but the registry smoke used the later-rejected +Y-facing v4 motions and is not motion-quality evidence.
 
 ### 14.3 Train the baseline (plain motion tracking)
 
@@ -3152,9 +3194,7 @@ hope_isaac_py scripts/train.py task=HOPEPingPongDeployParity algo=ppo headless=t
 
 How the unified policy works (all wired in `cfg/task/HOPEPingPongDeployParity.yaml` + the code):
 
-1. `registry_name` (clip 0 = forehand) and `registry_name_2` (clip 1 = backhand) are both downloaded;
-   `MotionLoader` concatenates them and a per-env `clip_id` selects which swing each env imitates
-   (uniformly resampled every swing).
+1. `registry_name` (clip 0 = forehand) and `registry_name_2` (clip 1 = backhand) default to the corrected local `_hopex.npz` files; `MotionLoader` concatenates them and a per-env `clip_id` selects which swing each env imitates (uniformly resampled every swing). Override them with registry paths only after the registry artifacts pass `scripts/check_motion_target_alignment.py`.
 2. `racket.strike_phase_per_clip: [0.47, 0.333]` — the racket-tip contact phase is per clip; the
    strike window is computed per clip. (Current default from the 2026-07-02 blade re-detect on the
    re-grounded `_hopex` v3 clips. History: v1 clips used `[0.36, 0.50]`; the model_32200-era
@@ -3165,7 +3205,8 @@ How the unified policy works (all wired in `cfg/task/HOPEPingPongDeployParity.ya
    of the racket position + the velocity vector sampled, HITTER §IV) is superseded and survives only
    in the legacy `HOPEPingPong` task. The Y region is conditioned on the swing type
    (`racket_pos_y_abs_range` + `forehand_on_negative_y`) so forehand (−y) and backhand (+y) regions
-   are non-overlapping.
+   are non-overlapping. (The teacher-centered `reference_perturbed` mode remains an optional
+   non-default override in the legacy `cfg/task/HOPEPingPong.yaml` — see Step 13.)
 4. The actor sees a `swing_type` observation (forehand +1 / backhand −1).
 
 Stability + reward knobs added 2026-06-27 (in the task YAML — now
@@ -3399,7 +3440,7 @@ override took. Recommended run name for the first per-clip experiment: **`hope_u
 - **`ModuleNotFoundError: No module named 'hydra'`** (at `import hydra` near the top of `train.py` /
   `play.py`, run via `hope_isaac_py`). Your shell's `HOPE_WBT_PYTHONPATH` was empty, so `hope_isaac_py`
   launched Isaac's bundled python with an **empty `PYTHONPATH`**. hydra/omegaconf live in
-  `/opt/drone_venv` and are visible only through that PYTHONPATH (Isaac's python has neither). Usually
+  `setup_train_env.sh` and are visible only through that launcher. Usually
   you opened a new terminal and never sourced the env in it. Fix: `source setup_train_env.sh` (14.1)
   in *this* terminal — it must be re-sourced per terminal. Check with `echo "$HOPE_WBT_PYTHONPATH"`
   (blank = not sourced). (Sanity check: `hope_isaac_py -c "import hydra, omegaconf;

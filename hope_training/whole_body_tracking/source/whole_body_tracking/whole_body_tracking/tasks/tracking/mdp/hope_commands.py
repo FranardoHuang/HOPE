@@ -112,6 +112,42 @@ class RacketTargetCommand(CommandTerm):
         self.racket_normal_w = torch.zeros(self.num_envs, 3, device=self.device)
         self.racket_normal_w[:, 2] = 1.0
 
+        # --- Tier-1 virtual incoming ball (rewardDesign.md): per-swing sampled incoming state and
+        # the at-strike outcome caches read by the one-shot virtual_* reward terms. vb_fired is
+        # recomputed EVERY step in _update_metrics (true only on a gated exact-strike frame), so the
+        # cached outcome is consumed exactly once per swing. Buffers exist even when the feature is
+        # off (all-zero / all-False) so the reward terms are safely inert.
+        self.vb_vel_in_w = torch.zeros(self.num_envs, 3, device=self.device)
+        self.vb_spin_in_w = torch.zeros(self.num_envs, 3, device=self.device)
+        self.vb_fired = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.vb_landing_xy = torch.zeros(self.num_envs, 2, device=self.device)
+        self.vb_landing_valid = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.vb_on_opponent = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.vb_depth_ok = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.vb_net_z = torch.zeros(self.num_envs, device=self.device)
+        self.vb_net_clear = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.vb_net_crossed = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.vb_topspin = torch.zeros(self.num_envs, device=self.device)
+        self.vb_spin_out_norm = torch.zeros(self.num_envs, device=self.device)
+        self._vb_params = None  # lazy venue-yaml load on first evaluation
+        # Derived table landmarks (env frame), from geometry.py ITTF constants.
+        from whole_body_tracking.tasks.table_tennis import geometry as _tt_geom
+
+        self._vb_net_x = float(cfg.vb_table_near_x) + _tt_geom.NET_X
+        self._vb_far_x = float(cfg.vb_table_near_x) + _tt_geom.TABLE_LENGTH
+        self._vb_half_w = _tt_geom.TABLE_WIDTH / 2.0
+        self._vb_net_top_z = float(cfg.vb_table_surface_z) + _tt_geom.NET_HEIGHT
+        self._vb_ball_r = _tt_geom.BALL_RADIUS
+        self._vb_target_xy = torch.tensor(
+            [float(cfg.vb_target_x), float(cfg.vb_target_y)], device=self.device
+        )
+        # Sample-weighted EMA accumulators (same decay/min-count discipline as the exact-strike block).
+        self._vb_exact_acc = 0.0
+        self._vb_hit_acc = 0.0
+        self._vb_net_acc = 0.0
+        self._vb_land_valid_acc = 0.0
+        self._vb_inb_acc = 0.0
+
         # Reference racket state at the strike frame (CONSTANT per clip): pos (env-origin relative),
         # world linear velocity, and face normal, computed by the SAME FK as the actual racket
         # (_compute_racket_state) but fed the reference MOTION's body poses. Used by the
@@ -154,6 +190,11 @@ class RacketTargetCommand(CommandTerm):
         # base_target to racket_target so standing at base_target keeps the racket reachable.
         self._ref_base_pos_rel = torch.zeros(3, device=self.device)
         self._ref_reach_offset_xy = torch.zeros(2, device=self.device)
+        self._ref_racket_pos_rel_per_clip = None
+        self._ref_racket_vel_w_per_clip = None
+        self._ref_racket_normal_w_per_clip = None
+        self._ref_base_pos_rel_per_clip = None
+        self._ref_reach_offset_xy_per_clip = None
 
         # Success-gated curriculum: running perturbation scale, advanced only when the smoothed
         # exact-strike composite success clears the threshold (see _perturb_scale / _update_metrics).
@@ -259,10 +300,35 @@ class RacketTargetCommand(CommandTerm):
         self._delay_steps = max(int(cfg.target_delay_steps), 0)
         self._jitter_pos = max(float(cfg.target_jitter_pos_per_s), 0.0)
         self._jitter_vel = max(float(cfg.target_jitter_vel_per_s), 0.0)
+        # Calibrated MEASUREMENT noise (ball_physics_venue.yaml `capture:` block, 2026-07-03 fit):
+        # white + AR(1)-colored position error of the mocap link. Unlike the tts-scaled jitter above
+        # (which models PREDICTION convergence), measurement noise does NOT shrink as the strike
+        # approaches, so no tts scaling. rho is per POLICY step: venue 0.946/frame @300 Hz -> ^6 @50 Hz.
+        self._mnoise_white = max(float(cfg.target_noise_white), 0.0)
+        self._mnoise_ar1_sigma = max(float(cfg.target_noise_ar1_sigma), 0.0)
+        self._mnoise_ar1_rho = min(max(float(cfg.target_noise_ar1_rho), 0.0), 0.9999)
+        if self._mnoise_ar1_sigma > 0.0:
+            self._mnoise_ar1_state = torch.zeros(self.num_envs, 3, device=self.device)
+        self._drop_prob = max(float(cfg.target_dropout_prob), 0.0)
+        self._post_strike_drop_steps = max(int(round(float(cfg.target_post_strike_dropout_s) * 50.0)), 0)
+        self._bias_per_swing = max(float(cfg.target_bias_per_swing), 0.0)
+        self._a1v2_active = self._drop_prob > 0.0 or self._post_strike_drop_steps > 0 or self._bias_per_swing > 0.0
+        if self._a1v2_active:
+            self._swing_bias = torch.zeros(self.num_envs, 3, device=self.device)
+            self._drop_cd = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+            self._prev_pre_strike = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+            self._held_pos = torch.zeros(self.num_envs, 3, device=self.device)
+            self._held_vel = torch.zeros(self.num_envs, 3, device=self.device)
         # The actor view is materialized (separate tensors) whenever latency OR jitter is on;
         # otherwise the delayed_* attributes ARE the live tensors (which are only ever index-assigned
         # after __init__, so the alias stays valid for the whole run).
-        self._actor_view_active = self._delay_steps > 0 or self._jitter_pos > 0.0 or self._jitter_vel > 0.0
+        self._actor_view_active = (
+            self._delay_steps > 0 or self._jitter_pos > 0.0 or self._jitter_vel > 0.0
+            or self._mnoise_white > 0.0 or self._mnoise_ar1_sigma > 0.0
+            or float(cfg.target_dropout_prob) > 0.0
+            or float(cfg.target_post_strike_dropout_s) > 0.0
+            or float(cfg.target_bias_per_swing) > 0.0
+        )
         if self._delay_steps > 0:
             # Ring buffers (length delay+1) over the ACTOR-VISIBLE target quantities: the slot
             # written this step is read back `delay` pushes later (see _push_actor_target).
@@ -346,6 +412,15 @@ class RacketTargetCommand(CommandTerm):
             ):
                 self.metrics[f"{_key}_{_cname}"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["exact_strike_sample_count_decayed"] = torch.zeros(self.num_envs, device=self.device)
+        # Tier-1 virtual-ball outcome rates (broadcast sample-weighted EMAs, exact-strike denominator
+        # for hit rate; hit (captured) denominator for the outcome rates). Only logged when enabled.
+        if cfg.virtual_ball:
+            for _vk in (
+                "virtual_hit_rate", "virtual_net_clear_rate", "virtual_land_valid_rate",
+                "virtual_land_inbounds_rate", "virtual_land_err_m", "virtual_topspin_revs",
+                "virtual_approach_speed",
+            ):
+                self.metrics[_vk] = torch.zeros(self.num_envs, device=self.device)
         # UNCONDITIONAL swing accounting (Phase A): completion_rate = exact-strike arrivals / swing
         # STARTS (falls count against it, unlike the conditional composite above); fall rate before
         # the strike frame. Broadcast scalars like the pass rates.
@@ -420,6 +495,9 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["joint_vel_abs_max"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["time_to_strike_s"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["pre_strike_flag"] = torch.zeros(self.num_envs, device=self.device)
+        # P2.4 watch-metric: planar |v_base| during the approach (the base_decel_tracking reward's
+        # subject). 0 outside pre_strike -> the reset-mean dilutes like the other *_prestrike metrics.
+        self.metrics["base_speed_xy_prestrike"] = torch.zeros(self.num_envs, device=self.device)
         # Curriculum perturbation scale (reference_perturbed mode): 0 at start ramping to 1; lets you
         # watch the reachable target ball widen in wandb. Stays 0 in "uniform" mode.
         self.metrics["ref_perturb_scale"] = torch.zeros(self.num_envs, device=self.device)
@@ -490,15 +568,37 @@ class RacketTargetCommand(CommandTerm):
             self._motion_term = self._env.command_manager.get_term(self.cfg.motion_command_name)
         return self._motion_term
 
-    def _ref_racket_pos_at(self, motion, f: int) -> torch.Tensor:
+    def _strike_frame_for_clip(self, motion, clip_id: int) -> tuple[int, float, int, int]:
+        """Return (global strike frame, phase, segment start, segment len) for one reference clip."""
+        nseg = int(motion.num_segments)
+        if clip_id < 0 or clip_id >= nseg:
+            raise IndexError(f"clip_id {clip_id} out of range for {nseg} segments")
+        seg_start = int(motion.seg_start[clip_id].item())
+        seg_len = int(motion.seg_len[clip_id].item())
+        spc = tuple(self.cfg.strike_phase_per_clip)
+        phase = float(spc[clip_id]) if spc and len(spc) == nseg else float(self.cfg.strike_phase)
+        strike_step = seg_start + round(phase * (seg_len - 1))
+        return int(strike_step), phase, seg_start, seg_len
+
+    def _ref_racket_pos_at(
+        self,
+        motion,
+        f: int,
+        *,
+        clip_start: int = 0,
+        clip_end: int | None = None,
+    ) -> torch.Tensor:
         """Racket-center FK position (env-origin rel) at reference frame ``f``.
 
-        Uses the SAME FK as :meth:`_compute_racket_state` / :meth:`_ensure_reference_strike_state`
-        (racket body, or wrist + constant mount offset) but reads the reference MOTION's body poses.
-        ``f`` is clamped to the valid frame range. Used by the clean-strike-velocity centered difference.
+        Uses the SAME FK as :meth:`_compute_racket_state` /
+        :meth:`_ensure_reference_strike_state` (racket body, or wrist + constant mount offset) but reads
+        the reference MOTION's body poses. ``f`` is clamped to the requested clip segment so clean
+        centered-difference velocities never leak across a concatenated forehand/backhand boundary.
         """
         total = max(int(motion.time_step_total), 1)
-        f = int(max(0, min(total - 1, f)))
+        hi = total - 1 if clip_end is None else int(clip_end)
+        lo = int(clip_start)
+        f = int(max(lo, min(hi, f)))
         if self._racket_mode == "body":
             return motion._body_pos_w[f, self._racket_body_index]
         widx = self._wrist_body_index
@@ -508,80 +608,103 @@ class RacketTargetCommand(CommandTerm):
         return wpos + offset_w
 
     def _ensure_reference_strike_state(self):
-        """Cache the reference racket state at the strike frame (once, after the motion is loaded).
+        """Cache per-clip reference racket/base states at each clip's strike frame.
 
-        Uses the SAME FK as :meth:`_compute_racket_state` (racket body, or wrist+mount offset) but
-        reads the reference MOTION's body poses instead of the live robot, so that a robot perfectly
-        tracking the clip would land its racket exactly on this state. The motion's raw body arrays
-        are indexed in live-articulation order (``MotionLoader`` selects tracked bodies from them via
-        the live ``body_indexes``), so the live ``_racket_body_index`` / ``_wrist_body_index`` index
-        them directly. Positions are env-origin relative (as the motion stores them).
+        Target sampling in ``reference_perturbed`` mode must be centered on the exact teacher clip the
+        env is imitating. The old single cached state was fine for one clip, but a unified forehand+
+        backhand policy needs separate strike position, velocity, face normal, and base->racket reach
+        offsets for each concatenated MotionLoader segment.
         """
         if self._ref_strike_cached:
             return
         motion = self._motion().motion  # MotionLoader
-        total = max(int(motion.time_step_total), 1)
-        strike_step = round(self.cfg.strike_phase * (total - 1))
-        if self._racket_mode == "body":
-            idx = self._racket_body_index
-            pos, quat, lin, _ = self._reference_body_state(motion, strike_step, idx)
-        else:
-            widx = self._wrist_body_index
-            wpos, wquat, wlin, wang = self._reference_body_state(motion, strike_step, widx, require_ang_vel=True)
-            offset_w = quat_apply(wquat.unsqueeze(0), self._mount_offset[0:1]).squeeze(0)
-            pos = wpos + offset_w
-            lin = wlin + torch.cross(wang, offset_w, dim=-1)
-            quat = quat_mul(wquat.unsqueeze(0), self._mount_quat[0:1]).squeeze(0)
-        normal = matrix_from_quat(quat.unsqueeze(0))[0, :, self.cfg.mount_normal_axis] * self.cfg.mount_normal_sign
-
-        # --- clean reference strike velocity ---------------------------------------------------------
-        # Recompute the strike target velocity from the FINAL racket FK position by a centered finite
-        # difference, so it is consistent with the position the policy actually tracks (the stored
-        # body_lin_vel_w is FD'd/interpolated and ~1 m/s inconsistent at the racket tip — see cfg docs).
-        # raw_lin = legacy single-frame stored velocity (kept for the flag-off path and the diagnostics).
-        raw_lin = lin.detach().clone()
-        dt = float(self._env.step_dt)
-        # single-frame centered difference of the FK position (the consistency probe vs the stored vel)
-        fd1 = (self._ref_racket_pos_at(motion, strike_step + 1) - self._ref_racket_pos_at(motion, strike_step - 1)) / (
-            2.0 * dt
-        )
-        # windowed centered difference (the clean target velocity): wider baseline rejects single-frame jitter
+        nseg = int(motion.num_segments)
+        pos_all = torch.zeros(nseg, 3, device=self.device)
+        vel_all = torch.zeros(nseg, 3, device=self.device)
+        nrm_all = torch.zeros(nseg, 3, device=self.device)
+        base_all = torch.zeros(nseg, 3, device=self.device)
+        reach_all = torch.zeros(nseg, 2, device=self.device)
         W = max(1, int(self.cfg.clean_strike_vel_window))
-        clean_lin = (
-            self._ref_racket_pos_at(motion, strike_step + W) - self._ref_racket_pos_at(motion, strike_step - W)
-        ) / (2.0 * W * dt)
-        if self.cfg.clean_reference_strike_velocity:
-            lin = clean_lin
+        dt = float(self._env.step_dt)
+        report_lines = []
 
-        self._ref_racket_pos_rel = pos.detach().clone()
-        self._ref_racket_vel_w = lin.detach().clone()
-        self._ref_racket_normal_w = (normal / (torch.norm(normal) + 1e-6)).detach().clone()
-        # Reference base (root) XY at the strike — root is articulation body index 0 (same order the
-        # motion arrays use). The base->racket horizontal offset couples base_target to racket_target.
-        self._ref_base_pos_rel = self._reference_body_state(motion, strike_step, 0)[0].detach().clone()
-        self._ref_reach_offset_xy = (self._ref_racket_pos_rel[:2] - self._ref_base_pos_rel[:2]).detach().clone()
+        for clip_id in range(nseg):
+            strike_step, phase, seg_start, seg_len = self._strike_frame_for_clip(motion, clip_id)
+            seg_end = seg_start + seg_len - 1
+            if self._racket_mode == "body":
+                idx = self._racket_body_index
+                pos, quat, lin, _ = self._reference_body_state(motion, strike_step, idx)
+            else:
+                widx = self._wrist_body_index
+                wpos, wquat, wlin, wang = self._reference_body_state(motion, strike_step, widx, require_ang_vel=True)
+                offset_w = quat_apply(wquat.unsqueeze(0), self._mount_offset[0:1]).squeeze(0)
+                pos = wpos + offset_w
+                lin = wlin + torch.cross(wang, offset_w, dim=-1)
+                quat = quat_mul(wquat.unsqueeze(0), self._mount_quat[0:1]).squeeze(0)
+            normal = matrix_from_quat(quat.unsqueeze(0))[0, :, self.cfg.mount_normal_axis] * self.cfg.mount_normal_sign
+
+            # --- clean reference strike velocity --------------------------------------------------
+            # Recompute the strike target velocity from the FINAL racket FK position by a centered
+            # finite difference (clamped to this clip's segment), so it is consistent with the
+            # position the policy actually tracks (the stored body_lin_vel_w is FD'd/interpolated and
+            # ~1 m/s inconsistent at the racket tip — see cfg docs). raw_lin = legacy single-frame
+            # stored velocity (kept for the flag-off path and the diagnostics).
+            raw_lin = lin.detach().clone()
+            fd1 = (
+                self._ref_racket_pos_at(motion, strike_step + 1, clip_start=seg_start, clip_end=seg_end)
+                - self._ref_racket_pos_at(motion, strike_step - 1, clip_start=seg_start, clip_end=seg_end)
+            ) / (2.0 * dt)
+            clean_lin = (
+                self._ref_racket_pos_at(motion, strike_step + W, clip_start=seg_start, clip_end=seg_end)
+                - self._ref_racket_pos_at(motion, strike_step - W, clip_start=seg_start, clip_end=seg_end)
+            ) / (2.0 * W * dt)
+            if self.cfg.clean_reference_strike_velocity:
+                lin = clean_lin
+
+            pos_all[clip_id] = pos.detach().clone()
+            vel_all[clip_id] = lin.detach().clone()
+            nrm_all[clip_id] = (normal / (torch.norm(normal) + 1e-6)).detach().clone()
+            # Reference base (root) at the strike — root is articulation body index 0 (same order the
+            # motion arrays use). The base->racket horizontal offset couples base_target to racket_target.
+            base_all[clip_id] = self._reference_body_state(motion, strike_step, 0)[0].detach().clone()
+            reach_all[clip_id] = (pos_all[clip_id, :2] - base_all[clip_id, :2]).detach().clone()
+
+            cname = self._clip_names.get(clip_id, f"clip{clip_id}")
+            p = pos_all[clip_id]
+            v = vel_all[clip_id]
+            nrm = nrm_all[clip_id]
+            b = base_all[clip_id]
+            off = reach_all[clip_id]
+            report_lines.append(
+                f"  {cname}: strike frame {strike_step}/{seg_end} (phase {phase:.3f}) "
+                f"pos=({float(p[0]):.3f},{float(p[1]):.3f},{float(p[2]):.3f}) "
+                f"vel=({float(v[0]):.3f},{float(v[1]):.3f},{float(v[2]):.3f}) "
+                f"|v|={float(torch.norm(v)):.2f} "
+                f"normal=({float(nrm[0]):.3f},{float(nrm[1]):.3f},{float(nrm[2]):.3f}) "
+                f"baseXY=({float(b[0]):.3f},{float(b[1]):.3f}) "
+                f"reachXY=({float(off[0]):.3f},{float(off[1]):.3f}) "
+                f"raw_speed={float(torch.norm(raw_lin)):.3f} "
+                f"clean_speed={float(torch.norm(clean_lin)):.3f} "
+                f"raw_clean_diff={float(torch.norm(raw_lin - clean_lin)):.3f} "
+                f"raw_fd_diff={float(torch.norm(raw_lin - fd1)):.3f}"
+            )
+
+        self._ref_racket_pos_rel_per_clip = pos_all
+        self._ref_racket_vel_w_per_clip = vel_all
+        self._ref_racket_normal_w_per_clip = nrm_all
+        self._ref_base_pos_rel_per_clip = base_all
+        self._ref_reach_offset_xy_per_clip = reach_all
+        # Legacy single-clip fields (no in-file consumers besides diagnostics): mirror clip 0.
+        self._ref_racket_pos_rel = pos_all[0].detach().clone()
+        self._ref_racket_vel_w = vel_all[0].detach().clone()
+        self._ref_racket_normal_w = nrm_all[0].detach().clone()
+        self._ref_base_pos_rel = base_all[0].detach().clone()
+        self._ref_reach_offset_xy = reach_all[0].detach().clone()
         self._ref_strike_cached = True
-        p, v, nrm = self._ref_racket_pos_rel, self._ref_racket_vel_w, self._ref_racket_normal_w
-        b, off = self._ref_base_pos_rel, self._ref_reach_offset_xy
-        raw_strike_speed = float(torch.norm(raw_lin))
-        clean_strike_speed = float(torch.norm(clean_lin))
-        raw_clean_vel_diff = float(torch.norm(raw_lin - clean_lin))
-        raw_vs_fd_vel_diff = float(torch.norm(raw_lin - fd1))
         print(
-            f"[RacketTargetCommand] reference_perturbed: strike frame {strike_step}/{total - 1} "
-            f"(phase {self.cfg.strike_phase}); reference racket @ strike (env-origin rel): "
-            f"pos=({p[0]:.3f},{p[1]:.3f},{p[2]:.3f}) "
-            f"vel=({v[0]:.3f},{v[1]:.3f},{v[2]:.3f}) |v|={float(torch.norm(v)):.2f} "
-            f"normal=({nrm[0]:.3f},{nrm[1]:.3f},{nrm[2]:.3f}); "
-            f"reference base XY=({b[0]:.3f},{b[1]:.3f}) base->racket offset XY=({off[0]:.3f},{off[1]:.3f})",
-            flush=True,
-        )
-        print(
-            f"[RacketTargetCommand] strike-velocity denoise (clean_reference_strike_velocity="
-            f"{self.cfg.clean_reference_strike_velocity}, window=+-{W}): "
-            f"raw_strike_speed={raw_strike_speed:.3f} clean_strike_speed={clean_strike_speed:.3f} "
-            f"raw_clean_vel_diff={raw_clean_vel_diff:.3f} raw_vs_fd_vel_diff={raw_vs_fd_vel_diff:.3f} "
-            f"(target uses {'CLEAN' if self.cfg.clean_reference_strike_velocity else 'RAW'} velocity)",
+            "[RacketTargetCommand] reference strike centers per clip "
+            f"(clean_reference_strike_velocity={self.cfg.clean_reference_strike_velocity}, window=+-{W}):\n"
+            + "\n".join(report_lines),
             flush=True,
         )
 
@@ -629,34 +752,12 @@ class RacketTargetCommand(CommandTerm):
         return min(1.0, max(start, scale))
 
     def _ensure_ref_normal_per_clip(self):
-        """Cache the reference paddle face normal at each clip's strike frame ([num_segments, 3]).
-
-        Uses the SAME FK as the live racket normal (racket-body quat, or wrist-quat * mount_quat) but reads
-        the reference MOTION's body quats at that clip's strike frame, so a robot tracking the clip lands
-        its paddle normal exactly on this target. Used as the uniform-mode normal target (the sampled
-        racket velocity is not the paddle-face direction).
-        """
+        """Cache the reference paddle face normal at each clip's strike frame ([num_segments, 3])."""
         if self._ref_normal_per_clip is not None:
             return
-        motion = self._motion()
-        ml = motion.motion
-        nseg = ml.num_segments
-        spc = tuple(self.cfg.strike_phase_per_clip)
-        normals = torch.zeros(nseg, 3, device=self.device)
-        for c in range(nseg):
-            ss = int(ml.seg_start[c])
-            sl = int(ml.seg_len[c])
-            ph = float(spc[c]) if spc and len(spc) == nseg else float(self.cfg.strike_phase)
-            f = ss + round(ph * (sl - 1))
-            if self._racket_mode == "body":
-                quat = ml._body_quat_w[f, self._racket_body_index]
-            else:
-                wquat = ml._body_quat_w[f, self._wrist_body_index]
-                quat = quat_mul(wquat.unsqueeze(0), self._mount_quat[0:1]).squeeze(0)
-            nrm = matrix_from_quat(quat.unsqueeze(0))[0, :, self.cfg.mount_normal_axis] * self.cfg.mount_normal_sign
-            normals[c] = nrm / (torch.norm(nrm) + 1e-6)
-        self._ref_normal_per_clip = normals
-        print(f"[RacketTargetCommand] per-clip reference strike paddle normals: {normals.tolist()}", flush=True)
+        self._ensure_reference_strike_state()
+        assert self._ref_racket_normal_w_per_clip is not None
+        self._ref_normal_per_clip = self._ref_racket_normal_w_per_clip
 
     def _sample_targets_uniform(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
         """Independent box sampling (legacy mode). Ranges are PLACEHOLDERS not tied to the swing."""
@@ -769,12 +870,24 @@ class RacketTargetCommand(CommandTerm):
         self.racket_target_normal_w[env_ids] = normal
 
     def _sample_targets_reference_perturbed(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
-        """Target = reference racket state @ strike + curriculum-scaled uniform perturbation.
+        """Target = this env's reference racket state @ strike + curriculum-scaled perturbation.
 
-        Guarantees the target is reachable by the imitated swing (a perfect imitator scores exactly),
-        with the perturbation ball widening over training (``_perturb_scale``) for generalization.
+        The target center is selected by ``motion.clip_id`` for unified forehand+backhand training, so
+        the policy no longer has to imitate one teacher strike while chasing a different sampled target.
         """
         self._ensure_reference_strike_state()
+        assert self._ref_racket_pos_rel_per_clip is not None
+        assert self._ref_racket_vel_w_per_clip is not None
+        assert self._ref_racket_normal_w_per_clip is not None
+        motion = self._motion()
+        if motion._multiseg:
+            clip = motion.clip_id[env_ids]
+        else:
+            clip = torch.zeros(n, dtype=torch.long, device=self.device)
+        ref_pos = self._ref_racket_pos_rel_per_clip[clip]
+        ref_vel = self._ref_racket_vel_w_per_clip[clip]
+        ref_nrm = self._ref_racket_normal_w_per_clip[clip]
+
         scale = self._perturb_scale()
         dev = self.device
         pos_h = torch.tensor(self.cfg.ref_perturb_pos, device=dev) * scale
@@ -782,13 +895,13 @@ class RacketTargetCommand(CommandTerm):
         nrm_h = float(self.cfg.ref_perturb_normal) * scale
 
         dpos = (torch.rand(n, 3, device=dev) * 2.0 - 1.0) * pos_h
-        self.racket_target_pos_w[env_ids] = origins + self._ref_racket_pos_rel.unsqueeze(0) + dpos
+        self.racket_target_pos_w[env_ids] = origins + ref_pos + dpos
 
         dvel = (torch.rand(n, 3, device=dev) * 2.0 - 1.0) * vel_h
-        self.racket_target_vel_w[env_ids] = self._ref_racket_vel_w.unsqueeze(0) * self.cfg.ref_vel_scale + dvel
+        self.racket_target_vel_w[env_ids] = ref_vel * self.cfg.ref_vel_scale + dvel
 
         dnrm = (torch.rand(n, 3, device=dev) * 2.0 - 1.0) * nrm_h
-        normal = self._ref_racket_normal_w.unsqueeze(0) + dnrm
+        normal = ref_nrm + dnrm
         self.racket_target_normal_w[env_ids] = normal / (torch.norm(normal, dim=-1, keepdim=True) + 1e-6)
 
         self.metrics["ref_perturb_scale"][env_ids] = scale
@@ -798,6 +911,7 @@ class RacketTargetCommand(CommandTerm):
             return
         n = len(env_ids)
         origins = self._env.scene.env_origins[env_ids]
+        motion = self._motion()
 
         # UNCONDITIONAL swing accounting: every resample STARTS a new swing attempt. On the
         # true-reset path (not a wrap) it also ENDS the previous attempt — count a pre-strike
@@ -818,7 +932,12 @@ class RacketTargetCommand(CommandTerm):
         # around the coupled point. Legacy "uniform" mode keeps the old origin-relative sampling.
         if self.cfg.target_mode == "reference_perturbed":
             self._ensure_reference_strike_state()
-            base_xy = self.racket_target_pos_w[env_ids][:, :2] - self._ref_reach_offset_xy.unsqueeze(0)
+            assert self._ref_reach_offset_xy_per_clip is not None
+            if motion._multiseg:
+                clip = motion.clip_id[env_ids]
+            else:
+                clip = torch.zeros(n, dtype=torch.long, device=self.device)
+            base_xy = self.racket_target_pos_w[env_ids][:, :2] - self._ref_reach_offset_xy_per_clip[clip]
         else:
             # uniform: start at spawn, then WEAKLY couple the base toward the racket target's SIDEWAYS
             # offset (Y only; X is the fixed strike plane, so no forward repositioning). The base shifts a
@@ -839,7 +958,6 @@ class RacketTargetCommand(CommandTerm):
 
         # Swing type. Unified multi-clip: it IS the imitated clip (forehand=clip 0 -> +1, backhand=clip 1
         # -> -1), matching the swing_type observation. Single-clip legacy: infer from the target Y side.
-        motion = self._motion()
         if motion._multiseg:
             clip = motion.clip_id[env_ids]
             self.swing_sign[env_ids] = torch.where(clip == 0, 1.0, -1.0)
@@ -850,6 +968,16 @@ class RacketTargetCommand(CommandTerm):
                 self.swing_sign[env_ids] = torch.where(dy <= 0.0, 1.0, -1.0)
             else:
                 self.swing_sign[env_ids] = torch.where(dy >= 0.0, 1.0, -1.0)
+
+        # Tier-1 virtual incoming ball: one (v_in, omega_in) per swing. The ball's position at the
+        # strike time is the racket target BY CONSTRUCTION (the sampler defines the ball to arrive
+        # there), so only velocity + spin are sampled. Boxes stay inside the venue-fit envelope.
+        if self.cfg.virtual_ball:
+            self.vb_vel_in_w[env_ids, 0] = sample_uniform(*self.cfg.vb_vel_x_range, (n,), self.device)
+            self.vb_vel_in_w[env_ids, 1] = sample_uniform(*self.cfg.vb_vel_y_range, (n,), self.device)
+            self.vb_vel_in_w[env_ids, 2] = sample_uniform(*self.cfg.vb_vel_z_range, (n,), self.device)
+            _s = float(self.cfg.vb_spin_abs_max)
+            self.vb_spin_in_w[env_ids] = sample_uniform(-_s, _s, (n, 3), self.device)
 
         # Stamp the motion phase baseline for these envs so the per-swing wrap detector in
         # _update_command does not immediately re-trigger after this (e.g. reset-time) resample.
@@ -1036,6 +1164,35 @@ class RacketTargetCommand(CommandTerm):
                 pos = pos + torch.randn_like(pos) * (self._jitter_pos * scale)
             if self._jitter_vel > 0.0:
                 vel = vel + torch.randn_like(vel) * (self._jitter_vel * scale)
+        if self._mnoise_ar1_sigma > 0.0:
+            rho = self._mnoise_ar1_rho
+            self._mnoise_ar1_state.mul_(rho).add_(
+                torch.randn_like(self._mnoise_ar1_state), alpha=self._mnoise_ar1_sigma * (1.0 - rho * rho) ** 0.5
+            )
+            pos = pos + self._mnoise_ar1_state
+        if self._mnoise_white > 0.0:
+            pos = pos + torch.randn_like(pos) * self._mnoise_white
+        if self._a1v2_active:
+            # (c) per-swing systematic bias: resample at each strike moment (pre_strike falling edge
+            # = sensor re-lock after the contact), constant until the next strike.
+            struck = self._prev_pre_strike & ~self.pre_strike
+            if self._bias_per_swing > 0.0 and struck.any():
+                self._swing_bias[struck] = torch.randn(int(struck.sum()), 3, device=self.device) * self._bias_per_swing
+            # (b) forced hold-last window right after the strike (sensor loses the target at contact)
+            if self._post_strike_drop_steps > 0 and struck.any():
+                self._drop_cd[struck] = self._post_strike_drop_steps
+            self._prev_pre_strike.copy_(self.pre_strike)
+            pos = pos + self._swing_bias
+            # (a) random frame loss + (b) countdown: actor view HOLDS the last emitted value
+            drop = self._drop_cd > 0
+            if self._drop_prob > 0.0:
+                drop = drop | (torch.rand(self.num_envs, device=self.device) < self._drop_prob)
+            self._drop_cd = (self._drop_cd - 1).clamp_(min=0)
+            d3 = drop.unsqueeze(-1)
+            pos = torch.where(d3, self._held_pos, pos)
+            vel = torch.where(d3, self._held_vel, vel)
+            self._held_pos.copy_(pos)
+            self._held_vel.copy_(vel)
         if self._delay_steps > 0:
             # Write this step's (jittered) target into slot `w`; the next slot in the length-
             # (delay+1) ring was written exactly `delay` pushes ago — that is the actor's view.
@@ -1127,6 +1284,13 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["proj_grav_xy"] = self.proj_grav_xy
         self.metrics["base_ang_vel_xy"] = self.base_ang_vel_xy_norm
         self.metrics["base_vertical_speed"] = self.vertical_speed
+        # P2.4 (PACE smooth deceleration): mean planar base speed during the approach — the quantity
+        # the base_decel_tracking reward shapes toward v_des = clamp(v_gain*dist_xy, 0, v_max).
+        # Watch it fall on far targets when the term is enabled (task.rewards.base_decel_weight>0).
+        base_speed_xy = torch.norm(data.root_lin_vel_w[:, :2], dim=-1)
+        self.metrics["base_speed_xy_prestrike"] = torch.where(
+            self.pre_strike, base_speed_xy, torch.zeros_like(base_speed_xy)
+        )
         # --- foot footwork signals (slip² / velocity / drag); feet may STEP, so this is PENALTY-only ---
         if self._foot_idx_robot and self._contact_sensor is not None and self._foot_idx_contact:
             f_force = torch.norm(self._contact_sensor.data.net_forces_w[:, self._foot_idx_contact, :], dim=-1)
@@ -1197,6 +1361,114 @@ class RacketTargetCommand(CommandTerm):
             self.metrics["waist_twist_prestrike"] = torch.where(
                 self.pre_strike, self.waist_twist, torch.zeros(self.num_envs, device=self.device)
             )
+
+    def _vb_evaluate(self, exact_strike: torch.Tensor, pos_err: torch.Tensor):
+        """Tier-1 at-strike virtual-ball evaluation (rewardDesign.md).
+
+        Runs once per control step from ``_update_metrics`` (rewards/obs read the same fresh
+        buffers after ``command_manager.compute()``). Whenever ANY env sits at its exact-strike
+        frame, the FULL batch goes through contact + coarse rollout — the cost is kernel-launch
+        bound and batch-size independent, so gathering the ~30 striking envs saves nothing
+        (verify_tier1 (b)); ``vb_fired`` masks consumption. On strike-free steps the one-shot
+        mask is cleared and nothing is computed.
+        """
+        from whole_body_tracking.tasks.tracking.mdp import virtual_ball as _vb
+
+        if not bool(exact_strike.any()):
+            self.vb_fired.zero_()
+            return
+        if self._vb_params is None:
+            self._vb_params = _vb.load_venue_params()
+            print(
+                f"[RacketTargetCommand] virtual ball ON: venue constants from "
+                f"{self._vb_params.source_path} (k_d={self._vb_params.k_d}, "
+                f"k_m={self._vb_params.k_m}, e(u_n)={self._vb_params.paddle_e_g1}"
+                f"*exp({self._vb_params.paddle_e_g2}*u_n), a_t={self._vb_params.paddle_a_t})",
+                flush=True,
+            )
+        prm = self._vb_params
+
+        v_in, w_in = self.vb_vel_in_w, self.vb_spin_in_w
+        v_r, n_face = self.racket_lin_vel_w, self.racket_normal_w
+        # CAPTURE GATE: close enough at the strike frame AND paddle moving INTO the ball along the
+        # oriented contact normal (a stationary/retreating wall-block scores nothing — verify (c)3).
+        n_or = _vb.orient_normal(n_face, v_in, v_r)
+        approach = torch.sum(v_r * n_or, dim=-1)
+        gate = (
+            exact_strike
+            & (pos_err < float(self.cfg.vb_capture_radius))
+            & (approach > float(self.cfg.vb_min_approach_speed))
+        )
+
+        # Achieved-state contact (venue paddle model, e(u_n)) + coarse landing rollout.
+        # The rollout must start in the ENV-LOCAL frame: the virtual table landmarks
+        # (vb_table_near_x / net / far end) and vb_target_xy are per-env offsets from the env
+        # origin, while racket_pos_w is TRUE world frame (env grids span tens of meters at 4096
+        # envs — using it raw put every landing ~|env_origin| away from the target; caught in the
+        # first vb_warmE14k run: virtual_land_err_m ~62 m). Env grids are pure translations, so
+        # velocities, normals, and spins need no correction.
+        v_plus, w_plus = _vb.predict_paddle_contact(v_in, v_r, n_face, w_in, prm)
+        land = _vb.coarse_landing(
+            self.racket_pos_w - self._env.scene.env_origins,
+            v_plus,
+            w_plus,
+            prm,
+            surface_z=float(self.cfg.vb_table_surface_z),
+            net_x=self._vb_net_x,
+            h=float(self.cfg.vb_rollout_h),
+            n_steps=int(self.cfg.vb_rollout_steps),
+        )
+        lx, ly = land["land_xy"][:, 0], land["land_xy"][:, 1]
+        on_opp = (
+            land["land_valid"] & (lx > self._vb_net_x) & (lx <= self._vb_far_x) & (ly.abs() <= self._vb_half_w)
+        )
+        depth_ok = lx > (self._vb_net_x + float(self.cfg.vb_min_landing_depth))
+        net_clear = land["net_valid"] & (land["net_z"] > self._vb_net_top_z + self._vb_ball_r)
+        # Outgoing topspin component about t_hat = z_hat x d_hat of the outgoing horizontal
+        # direction (Ace-style): omega . t_hat = -w_x*d_y + w_y*d_x.
+        d_xy = v_plus[:, :2]
+        d_hat = d_xy / (torch.linalg.norm(d_xy, dim=-1, keepdim=True) + 1e-9)
+        topspin = -w_plus[:, 0] * d_hat[:, 1] + w_plus[:, 1] * d_hat[:, 0]
+
+        # One-shot caches consumed by hope_rewards.virtual_* THIS step.
+        self.vb_fired = gate
+        self.vb_landing_xy = land["land_xy"]
+        self.vb_landing_valid = land["land_valid"]
+        self.vb_on_opponent = on_opp
+        self.vb_depth_ok = depth_ok
+        self.vb_net_z = land["net_z"]
+        self.vb_net_clear = net_clear
+        self.vb_net_crossed = land["net_valid"]
+        self.vb_topspin = topspin
+        self.vb_spin_out_norm = torch.linalg.norm(w_plus, dim=-1)
+
+        # Sample-weighted EMA rates (hit rate over exact-strike samples; outcome rates over captured
+        # hits). NOTE: accumulators only decay on strike-carrying steps — exact at 4096 envs (a
+        # strike happens ~every step), slightly stale at small env counts (diagnostics only).
+        decay = float(self.cfg.exact_success_decay)
+        self._vb_exact_acc = decay * self._vb_exact_acc + float(exact_strike.sum())
+        self._vb_hit_acc = decay * self._vb_hit_acc + float(gate.sum())
+        self._vb_net_acc = decay * self._vb_net_acc + float((gate & net_clear).sum())
+        self._vb_land_valid_acc = decay * self._vb_land_valid_acc + float((gate & land["land_valid"]).sum())
+        self._vb_inb_acc = decay * self._vb_inb_acc + float((gate & net_clear & on_opp).sum())
+        enough_e = self._vb_exact_acc >= float(self.cfg.exact_success_min_count)
+        enough_h = self._vb_hit_acc >= 1.0
+        self.metrics["virtual_hit_rate"][:] = (self._vb_hit_acc / max(self._vb_exact_acc, 1e-6)) if enough_e else 0.0
+        self.metrics["virtual_net_clear_rate"][:] = (self._vb_net_acc / max(self._vb_hit_acc, 1e-6)) if enough_h else 0.0
+        self.metrics["virtual_land_valid_rate"][:] = (
+            (self._vb_land_valid_acc / max(self._vb_hit_acc, 1e-6)) if enough_h else 0.0
+        )
+        self.metrics["virtual_land_inbounds_rate"][:] = (
+            (self._vb_inb_acc / max(self._vb_hit_acc, 1e-6)) if enough_h else 0.0
+        )
+        self.metrics["virtual_approach_speed"] = torch.where(
+            exact_strike, approach, self.metrics["virtual_approach_speed"]
+        )
+        fired_valid = gate & land["land_valid"]
+        if bool(fired_valid.any()):
+            derr = torch.linalg.norm(land["land_xy"] - self._vb_target_xy.unsqueeze(0), dim=-1)
+            self.metrics["virtual_land_err_m"][:] = derr[fired_valid].mean()
+            self.metrics["virtual_topspin_revs"][:] = (topspin[fired_valid] / (2.0 * math.pi)).mean()
 
     def _update_metrics(self):
         # CommandTerm.compute() runs _update_metrics() BEFORE _update_command(), so refresh the
@@ -1300,6 +1572,10 @@ class RacketTargetCommand(CommandTerm):
         self._exact_pass_5cm_acc = decay * self._exact_pass_5cm_acc + float(_pass_5cm.sum())
         self._exact_pass_10cm_acc = decay * self._exact_pass_10cm_acc + float(_pass_10cm.sum())
         self._exact_pass_normal_acc = decay * self._exact_pass_normal_acc + float(pass_normal.sum())
+        # Tier-1 virtual-ball at-strike evaluation (one-shot buffers consumed by the virtual_*
+        # reward terms after this compute()); no-op (and vb_fired stays False) when disabled.
+        if self.cfg.virtual_ball:
+            self._vb_evaluate(exact_strike, pos_err)
         # GLOBAL error-magnitude EMAs (P2.3 adaptive sigma driver) — same decay/mask as the pass
         # counters above; per-clip variants exist further down but sigma needs one global signal.
         self._exact_pos_err_sum = decay * self._exact_pos_err_sum + float((pos_err * exact_strike).sum())
@@ -1773,6 +2049,18 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # i.e. the knob is the std at time_to_strike >= 1 s, decaying to 0 at the strike (prediction
     # convergence). Units: m (pos) / m/s (vel).
     target_jitter_pos_per_s: float = 0.0
+    # Calibrated mocap MEASUREMENT noise on the actor-visible target position (m). Venue fit
+    # 2026-07-03 (`capture.position_noise`): white 0.0019, ar1 marginal 0.0052, rho/frame 0.946
+    # @300 Hz -> 0.946**6 = 0.717 per 50 Hz policy step. Defaults OFF.
+    target_noise_white: float = 0.0
+    target_noise_ar1_sigma: float = 0.0
+    target_noise_ar1_rho: float = 0.717
+    # A1 v2 — the three Ace-style sensor defects the mocap link actually has (venue capture fit:
+    # occlusion gaps concentrate at contacts, gap_p50 10 ms / racket occlusion ~30 ms; re-lock
+    # after a contact carries a fresh systematic bias). All default OFF.
+    target_dropout_prob: float = 0.0        # per-step P(frame lost) -> actor view holds last value
+    target_post_strike_dropout_s: float = 0.0  # forced hold-last window right after each strike (s)
+    target_bias_per_swing: float = 0.0      # m: constant bias per swing, resampled at swing start
     target_jitter_vel_per_s: float = 0.0
     # Mid-swing target refinement: each control step, envs with pre_strike AND time_to_strike >
     # midswing_resample_tts_floor re-draw their target (position/velocity/normal via the existing
@@ -1781,6 +2069,53 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # no fake progress.
     midswing_resample_prob: float = 0.0
     midswing_resample_tts_floor: float = 0.3  # s; no refinement inside the last `floor` seconds before the strike
+
+    # --- Tier-1 VIRTUAL INCOMING BALL + at-strike landing evaluation (rewardDesign.md) -----------
+    # Per swing, a virtual incoming ball (v_in, omega_in) is sampled that BY CONSTRUCTION arrives at
+    # the racket target point at the strike time. On the exact-strike frame, the achieved racket FK
+    # state is pushed through the venue-fitted paddle contact model (virtual_ball.predict_paddle_
+    # contact, e(u_n) restitution) and a coarse RK4 landing rollout; the cached outcome buffers feed
+    # the one-shot virtual_* reward terms in hope_rewards.py. No obs change; 175-D contract untouched.
+    virtual_ball: bool = False
+    # Incoming-ball velocity box (world/env frame, m/s; -x = toward the robot). Kept inside the venue
+    # fit's validity envelope (ball speed 1-7 m/s); vertical component ~near-apex-to-descending.
+    vb_vel_x_range: tuple[float, float] = (-4.5, -2.0)
+    vb_vel_y_range: tuple[float, float] = (-0.6, 0.6)
+    vb_vel_z_range: tuple[float, float] = (-1.0, 0.5)
+    # Incoming spin: per-axis uniform (rad/s). 50 rad/s ~ 8 rev/s per axis keeps |omega| inside the
+    # quaternion-validated 0-15 rev/s envelope.
+    vb_spin_abs_max: float = 50.0
+    # virtual_spin reward semantics: "topspin" = Ace-style outgoing-topspin generation (ball
+    # quality); "minimize" = stage-1 placement-first mode (franco 2026-07-04) — reward CANCELING
+    # the incoming spin, kernel exp(-|omega_out|^2 / vb_spin_min_sigma^2) on the outgoing spin
+    # magnitude, same legal-landing gate. Sigma in rad/s (10 ~ 1.6 rev/s residual).
+    vb_spin_mode: str = "topspin"
+    vb_spin_min_sigma: float = 10.0
+    # CAPTURE GATE: the virtual contact only evaluates when (a) the racket center is within this
+    # distance of the ball (= racket 0.075 + ball 0.020, the v0 real-hit radius) at the exact-strike
+    # frame, and (b) the paddle is actively moving INTO the ball along the oriented contact normal
+    # faster than vb_min_approach_speed (kills the phantom-block / retreating-racket exploit,
+    # verify_tier1 (c)3 — a stationary wall-block scores nothing).
+    vb_capture_radius: float = 0.095
+    vb_min_approach_speed: float = 0.3
+    # Virtual table placement in the env frame. The _hopex clips are HOPE +X aligned with the root at
+    # the env origin, so the HOPE convention (robot ~0.5 m behind its table end, centered on the
+    # width) puts the near table edge at x = +0.5 and the surface at z = +0.76 above the env origin.
+    # Net/far-end/half-width follow from the ITTF table (geometry.py): net at near_x + 1.37 etc.
+    vb_table_near_x: float = 0.5
+    vb_table_surface_z: float = 0.76
+    # Landing target on the opponent half (env frame). Default = P2 half center (near_x + 2.055, 0).
+    vb_target_x: float = 2.555
+    vb_target_y: float = 0.0
+    # Reward shaping constants (read by hope_rewards.virtual_*).
+    vb_landing_sigma: float = 0.3     # m — Gaussian width on ||landing_xy - target_xy|| (v0 parity)
+    vb_net_margin: float = 0.12      # m — target clearance above the net top (v0 pass_net parity)
+    vb_net_sigma: float = 0.10       # m — Gaussian width on the net-clearance error
+    vb_spin_ref: float = 250.0       # rad/s (~40 rev/s) — full-credit outgoing topspin (Ace-style)
+    vb_min_landing_depth: float = 0.3  # m past the net for the in-bounds bonus (dink guard, verify (c)1)
+    # Coarse rollout resolution (verify_tier1 (b): h=10 ms, 1.0 s horizon covers 1-7 m/s shots).
+    vb_rollout_h: float = 0.01
+    vb_rollout_steps: int = 100
 
     # --- reachable racket-target workspace (offsets from the env origin, world frame, meters) ---
     # Used only by target_mode="uniform". PLACEHOLDER ranges (not the reference strike point).

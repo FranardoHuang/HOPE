@@ -11,7 +11,7 @@ to train an [Agibot A3](../../agi/) (31 actuated DOF) ping-pong swing policy. Un
 - The `HOPEPingPong` task maps to the gym task `HOPE-PingPong-AgibotA3-v0` (`experiment_name agibot_a3_hope`).
 - Overrides are layered from the `cfg/` tree: `cfg/task` (env/task), `cfg/algo` (PPO), `cfg/base` (shared defaults).
 - `HOPEPingPong` trains a unified HITTER-style policy by default: clip 0 = forehand, clip 1 = backhand, with `swing_type` in the actor observation.
-- Local video-generated `.npz` clips are first-class inputs: pass `motion_file=...` plus optional `motion_file_2=...` to train without touching WandB. Registry paths remain useful for shared/internal runs.
+- Local video-generated `.npz` clips are first-class inputs: pass `motion_file=...` plus optional `motion_file_2=...` to train without touching WandB. Registry paths remain useful for shared/internal runs (`registry_name` = forehand, `registry_name_2` = backhand).
 
 **The authoritative runbook is [docs/operations/run_training.md](../../docs/operations/run_training.md).**
 A from-scratch Isaac Sim/Lab install is out of scope here — follow the upstream
@@ -38,9 +38,13 @@ A from-scratch Isaac Sim/Lab install is out of scope here — follow the upstrea
 - WandB identities must differ when you use the optional registry path: `WANDB_ENTITY` (team, run logging) vs
   `WANDB_REGISTRY_ORG` (org, motion registry) — if they match, registry reads fail. Use placeholders
   `your-wandb-team` / `your-wandb-org`.
-- `HOPEPingPong.yaml` defaults to HITTER-aligned `target_mode: uniform`, fixed strike plane `x=0.4`,
-  forehand/backhand-conditioned Y ranges, and per-clip strike phases. Keep local clip order aligned with
-  `strike_phase_per_clip`: `motion_file` = forehand, `motion_file_2` = backhand.
+- `HOPEPingPong.yaml` / `HOPEPingPongRealSensor.yaml` default to HITTER-aligned `target_mode: uniform`,
+  fixed strike plane `x=0.4`, forehand/backhand-conditioned Y ranges, and per-clip strike phases. Keep
+  local clip order aligned with `strike_phase_per_clip`: `motion_file` = forehand, `motion_file_2` = backhand.
+- Train against the corrected **HOPE +X** forehand/backhand clips (`csv_to_npz.py --hope_frame auto`, the
+  default for `--robot agibot_a3`, writes them — e.g. `motions/preprocessed/hope_{forehand,backhand}_hopex.npz`).
+  If you use the optional WandB registry path instead, make sure the aliases resolve to the same corrected
+  clips before launching a long run.
 - `max_iterations` defaults to a train-forever sentinel — pass `max_iterations=` on the CLI and stop
   manually when `strike_success` plateaus.
 
