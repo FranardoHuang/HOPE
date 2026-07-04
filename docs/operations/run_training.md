@@ -40,6 +40,16 @@ The training scaffold exists under:
   post-swing buffer and slightly deflate completion-rate metrics. Watch: `clip_switch_count`.
 - P2.4 `base_decel` reward (PACE-style pre-strike base-speed shaping, default OFF via
   `rewards.base_decel_weight: 0.0`): see Reward Shaping below.
+- `motion.speed_scale_range` (R14 retiming, default `[1.0, 1.0]` = OFF; ablation trial
+  `[0.8, 1.2]`): per-swing reference playback speed, resampled at every swing entry (wrap,
+  clip switch, reset). At speed s the clip clock advances s frames per control step (float shadow
+  clock, round() indexing = deploy-clock parity), reference joint/body/anchor velocities read ×s,
+  `time_to_strike` runs ÷s (computed from the float clock so the exact-strike detector still fires
+  once per swing), and the racket velocity target scales ×s (uniform boxes, reference_perturbed,
+  and the HER clamp box). Positions/normals are speed-invariant. Retiming is TRAIN-ONLY:
+  play/eval force it back to `[1.0, 1.0]`. Deploy note: the runner's `swing_speed` knob retimes
+  the clock but does NOT scale reference/target velocities — enabling it for an R14-trained
+  policy requires adding those two scalings. Watch metric: `playback_speed`.
 - A1v2 actor-view sensor defects (`racket:` block; modeled on the venue mocap fit — occlusion gaps
   concentrate at contacts, re-lock after contact carries a fresh bias): `target_dropout_prob`
   (per-step frame loss, hold-last), `target_post_strike_dropout_s` (forced hold-last window after

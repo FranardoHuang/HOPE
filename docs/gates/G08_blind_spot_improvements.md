@@ -37,6 +37,16 @@ the orientation-normalized clip start frames. Then wire it in three places: the 
 branch initializes to READY (not default stand), the pre-swing hold holds READY (not clip frame
 0), and the clips are re-processed to enter/exit through ready (P2.2-lite pass).
 
+DECISION REVISED (franco 2026-07-04 evening): no dedicated ready video. The v5 clips
+(`hope_{forehand,backhand}_v5.npz`) start AND end near the ready stance — measured: the two
+clips' first frames agree to 0.15 rad mean joint distance (a usable shared ready anchor), and
+each clip's last frame is 0.24-0.27 rad mean from its first (RL learns the in-between filling;
+the clip_switch/post_swing/hold machinery already trains exactly those transitions). So P2.0
+reduces to option (c)-adjacent at zero capture cost: extract the ready reference from the v5
+first frames and wire it into `stand_start`/hold. The 6-anchor capture spec
+(`../motion_and_contract_v3.md` §4) still records every future clip ready→…→ready, which keeps
+this property by construction.
+
 ### P2.1 Balance across consecutive swings
 
 Failure: the robot falls after several swings; it does not recover weight/posture into a robust

@@ -31,6 +31,16 @@ Use this file for short project-state updates that future humans and agents need
   already carries the face normal, it dies at `pp_obs_builder` for lack of an obs slot; the critic
   already has privileged `racket_target_normal_w`), 175→179 migration plan, continuous-intensity
   motion library q_ref(φ,ρ) with cost-based selector, PACE-decel v2, 6-clip capture plan.
+- **R14 retiming implemented** (evening): `motion.speed_scale_range` — per-swing reference
+  playback speed (clock ×s / ref velocities ×s / tts ÷s / target velocity ×s, one consistency
+  cascade; train-only, default off). The "can accel/decel modulate stroke amplitude" experiment:
+  retiming modulates VELOCITY amplitude; SPATIAL amplitude is the clip-trim axis (R6) — the two
+  arms together are the no-new-data continuous-intensity v0.
+- **v5 clips processed to npz on the pod** (evening): `hope_{forehand,backhand}_v5.npz` (56/58
+  frames, re-grounded, phases [0.768, 0.345]) → ablation arm R15. P2.0 REVISED (franco): no
+  dedicated ready video — v5 first frames agree to 0.15 rad mean (shared ready anchor), last
+  frames 0.24-0.27 rad from first (RL fills the gap). Data flag: v5 forehand strike velocity +
+  face normal are +Y-dominant (sideways) — eyeball review before deploy use.
 
 ## 2026-07-03 (night, branch `rsi-on-wrap-progress-fix`) — venue data on RunPod; F10/full-state/self-check ran on real data
 

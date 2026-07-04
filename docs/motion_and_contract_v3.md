@@ -71,6 +71,13 @@ planner 空间里解这两个 + 拍面法线 n;给 policy 时合成完整速度�
   `φ̇_req = (φ_hit − φ)/(t_strike − t)`,经平滑 + [γ_min, γ_max] 限幅——防过度慢放
   与暴力压缩;超界时不 if-else,由 selector 换更 compact 的 k/ρ。
   注:这推广了现役 time_step_for 的匀速时钟;训练侧需同分布(hold + 变速时钟增广)。
+- **训练侧增广已落地(2026-07-04 晚,R14)**:`motion.speed_scale_range`——每挥一次采样
+  播放速度 s,时钟 ×s、参考速度 ×s、tts ÷s、目标拍速 ×s,(帧,tts,速度) 配对全程一致。
+  这就是"变速改幅度"的 v0:**变速改的是速度幅值,空间幅度的杠杆是裁剪窗口(R6)**,
+  两臂合看 = 无新数据的连续强度雏形;等 6 套 anchor 落地后 ρ 混合替代。
+  附:部署 runner 已有 `swing_speed` 旋钮(pp_policy.hpp)但**不缩放参考速度与目标速度**
+  ——policy 若训练过 R14,部署侧启用 swing_speed 时必须同步补上这两个缩放,否则正好落进
+  R14 消除的 OOD 配对。
 
 ## 3. Cost-based stroke selector(不上 classifier)
 
@@ -84,7 +91,9 @@ k* = argmin,部署加滞回(C_new < C_old − δ 才换)防边界抖动。
 
 ## 4. 采集方案(下一次专门拍摄;今天的 3 条先行版不冲突,是 P2.0/P2.4 的急救包)
 
-**6 套 + 1**:{正手, 反手} × {小幅挡 compact, 标准攻 normal, 快速攻 fast} + ready 静止条。
+**6 套**:{正手, 反手} × {小幅挡 compact, 标准攻 normal, 快速攻 fast}。
+(原方案的"+1 ready 静止条"取消——franco 改判 2026-07-04:v5 clip 首尾已贴 ready
+(起始帧互差 0.15 rad),ready 锚从 clip 首帧提取,swing 间填充交 RL;见 G08 P2.0。)
 每套 **10-20 次重复**(选 3-5 条最干净或做 prototype);每条完整包含
 ready → 引拍 → 加速 → 击球 → 随挥 → 恢复(首尾都在 ready);**自然速度,禁止慢动作
 表演**(否则速度剖面失真)。标注击球帧、拍速、随挥。

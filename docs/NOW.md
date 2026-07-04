@@ -151,6 +151,7 @@ franco 已提供 forehand_new.mp4 / backhand_new.mp4,已上传 `/workspace/share
 | --- | --- | --- |
 | 正录(现役) | hopex 转正版(139/132 帧) | 所有既有结果就是它,无需重跑 |
 | 斜录(新) | raw_video_oblique 两条视频 | **卡在 GVHMR→GMR→npz→转正→相位标定 管线**(pod 无 GVHMR 环境;dongc1 机器有)→ 产出后同配置 2000 步对照 |
+| v5(更新) | raw_video_v5 两条视频(1.17/1.20s,franco 2026-07-04 下午提供) | **管线全通(2026-07-04 晚,claude,`/workspace/franco/v5_pipeline.sh` 复用斜录管线)**:npz 56/58 帧 @50Hz 已入 `/workspace/shared/motions/hope_{forehand,backhand}_v5.npz`,yaw 转正(+86.6°/+83.6°→0),相位 [0.768, 0.345] → 消融臂 R15(含正手 +Y 红旗,见新臂表) |
 
 ## 关键更新联合消融(Isaac 复活即发射;2000 步信号档,4096 envs,一卡两跑错峰)
 
@@ -241,6 +242,30 @@ B 模式(真实来球分布 + StrikeSpec 反解应有拍状态)实测:位置/速
 | R11 | `task.motion.clip_switch_prob=0.002` | 中途换 clip 平价能否救场馆切换摔倒,命中率代价多少 |
 | R12 | `task.rewards.base_decel_weight=1.0` | 减速塑形方向有没有信号(v1 P 律;v2 拟合包络等 6 套采集) |
 | R13 | R11/R12 赢家叠加进产品线 | 产品候选 |
+| R14 | `"task.motion.speed_scale_range=[0.8,1.2]"`(2026-07-04 晚已实现入库,默认关) | **变速重定时**:同一 clip 变速播放+速度需求同步缩放,策略能否学会按需调节挥拍速度幅值 = 无新数据的连续强度 v0(franco"加减速改幅度";空间幅度另由 R6 裁剪臂回答,两臂合看) |
+| R15 | v5 clip 臂:`motion_file=/workspace/shared/motions/hope_forehand_v5.npz motion_file_2=.../hope_backhand_v5.npz "task.racket.strike_phase_per_clip=[0.768,0.345]"` + 下方 v5 专属采样框 | 新动作源(短条、首尾贴 ready);⚠与 hopex 差两个因子(数据源+clip 长度),与 R6 对照拆长度因子 |
+
+R15 v5 专属采样框(从 v5 击球帧提取,pos ±0.10 / vel(clean) ±0.50,沿斜录臂惯例):
+`"task.racket.pos_range_per_clip.forehand.x=[0.42,0.62]" ...y=[-0.40,-0.20] ...z=[0.99,1.19]`
+`"task.racket.pos_range_per_clip.backhand.x=[0.60,0.80]" ...y=[0.12,0.32] ...z=[0.81,1.01]`
+`"task.racket.vel_range_per_clip.forehand.x=[-0.19,0.81]" ...y=[2.63,3.63] ...z=[1.73,2.73]`
+`"task.racket.vel_range_per_clip.backhand.x=[2.60,3.60]" ...y=[0.51,1.51] ...z=[1.66,2.66]`
+⚠ **v5 正手数据红旗**:转正后击球速度 (+0.31,+3.13,+2.23)、拍面法线 (+0.02,+0.99,+0.12)
+——挥拍与拍面都 +Y 主导(侧向),而斜录/hopex 正手均 +X 主导;反手健康(vx +3.50,
+拍速 4.20 m/s)。franco 肉眼比对视频与重定向结果;R15 照跑(目标取自 clip 自身,一致性
+不破),但**部署可用性存疑**(+Y 挥拍接不了 +X 需求)。
+
+**合并测试策略(找最优组合,不做全因子):**
+
+1. **按裁决轴分组**。性能类(数据/奖励:R3/R9 斜录、R6 裁剪、R14 变速、R15 v5、R12)
+   看 Isaac composite,期待提升,单臂 vs 同批对照,赢家贪心进产品线;交互只对"赢家对"
+   补一次 2×2。保险类(部署加固:R11 clip_switch、A1、A1v2)**本来就预期 composite 微降、
+   部署轴受益**——判它们用 eval-B 回球率 + deploy-faithful,不用 composite 一刀切。
+2. **保险类整包测**:R11+A1+A1v2 合成一臂"部署加固包";包整体 composite 降幅 <3% 且部署轴
+   不劣 → 整包采纳,不逐个消融(2^n → 1);包失败才 leave-one-out 二分。
+3. **数据源类互斥合并**:hopex(对照)/斜录/v5/裁剪 是同一问题的四个臂,天然同批横比,
+   一批出结论。
+4. 每次产品线换代跑一次换种子臂(R10 惯例)验稳健,防止贪心叠加吃噪声。
 
 **CPU 任务(不占 GPU,可立即做):**
 
@@ -254,7 +279,7 @@ B 模式(真实来球分布 + StrikeSpec 反解应有拍状态)实测:位置/速
 **P2.4 集群(本次漏账主体,franco 抓出):**
 | 项 | 状态 | 归属/时机 |
 | --- | --- | --- |
-| P2.0 准备动作定义(视频→GVHMR,方案已拍板) | **未做——但今天在场地拍 2 分钟就有原料**,管线已在 pod 跑通 | franco 场地拍,claude 处理 |
+| P2.0 准备动作定义 | **franco 改判 2026-07-04 晚:不再专门拍 ready 视频**。v5 两条 clip 首尾均贴准备姿态(量化:fh/bh 起始帧互差 mean 0.15 rad——可直接当共享 ready 锚;首尾差 mean 0.24-0.27 rad,残差交给 RL 填充,clip_switch/post_swing/hold 机制都在)。ready 参考帧从 v5 clip 首帧提取,零采集成本 | claude(提取+接线 stand_start/hold) |
 | PACE 减速命令(伪速度∝剩余误差→平滑减速入站位) | **v1 已实现 2026-07-04**(`rewards.base_decel_weight`,默认关,机制验证过)→ 信号档臂 R12;v2 = 拟合加减速包络+方向+时间预算+幅度耦合([motion_and_contract_v3.md](motion_and_contract_v3.md) §5,等 6 套采集) | claude |
 | ready→strike→ready 拼接 | 未做(依赖 P2.0) | P2.0 后 |
 | base-target 回归 ablation(HITTER 位置命令,论文背书) | 未做 | 通宵臂后的下一轮 |

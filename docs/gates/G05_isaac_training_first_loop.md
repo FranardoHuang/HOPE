@@ -109,6 +109,16 @@ Done:
   §5). Mech-verified on/off. Same commit hardened `scripts/train.py`: `task.motion`/`task.racket`
   yaml keys go through explicit whitelists and unknown keys RAISE — new yaml keys must extend the
   whitelist in the same commit (the 018467a startup-crash lesson).
+- 2026-07-04 (evening): `motion.speed_scale_range` (R14 retiming) landed default-off — per-swing
+  reference playback speed with the full consistency cascade (clock ×s via float shadow clock,
+  reference velocities ×s, tts ÷s, racket velocity target ×s incl. HER clamp box); train-only
+  (play/eval force `[1.0, 1.0]`); flag docs in `docs/operations/run_training.md`, design in
+  `docs/motion_and_contract_v3.md` §2. Pending pod mech check before arm R14 launches.
+- 2026-07-04 (evening): v5 clips processed end-to-end ON the pod (`v5_pipeline.sh`, reusing the
+  oblique pipeline + `csv_to_npz_mujoco.py`): `/workspace/shared/motions/hope_{forehand,backhand}_v5.npz`
+  (56/58 frames @50 Hz, yaw re-grounded +86.6°/+83.6°→0, strike phases [0.768, 0.345]). Data
+  flag: the forehand's strike velocity AND face normal are +Y-dominant after re-grounding
+  (sideways swing) — unlike oblique/hopex forehands; eyeball review queued before deploy use.
 
 Done (2026-06-26 — first loop reproduced in this harness):
 
