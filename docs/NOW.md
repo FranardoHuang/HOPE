@@ -81,6 +81,18 @@ Parallel tracks (no GPU conflict):
   ready-stance clip stay on the longer-horizon list (P2.0/A5 in G08), not on Saturday's path.
 - simtoreal2 → main merge + doc updates (claude, in progress).
 
+## 10:00 判读(2026-07-04,自动流水线交付)
+
+**判词:值得练到底。** P2 产品线(消旋虚拟球 + A1 校准噪声/延迟 + σ收紧 + 挥后起手,
+R2@1500 热启)在 5500/12000 步时命中率 **0.858(峰值 0.884)**,已超 E 谱系终点 0.8128
+—且带着 E 线没有的全部真实性约束。曲线在 0.85-0.88 平台微涨,无退化迹象。训练继续。
+
+- 快照:`logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-03_22-32-36_r3_P2_product/exported_10am/policy.onnx`(iter 5500,Isaac-free 导出链)
+- 信号档裁决(2000 步):R0=0.502 / R3 斜录=0.520(未过门槛,但 2 秒新 clip 首战打平)/
+  R5 A1=0.491(几乎免费→进组合)/ **消旋 0.769 > 上旋 0.753(yikang 线)→ 组合采用消旋**
+- 认证提醒:MuJoCo 评分器对连挂模型失效仍是 P0 —— P2 上真机前需修好评分器或走
+  yikang 的厂商门禁
+
 ## Roadmap Scorecard (2026-07-03 傍晚版)
 
 阶段定义(每项按同一条阶梯,标到已完成的最远一格):
