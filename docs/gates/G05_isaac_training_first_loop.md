@@ -113,7 +113,10 @@ Done:
   reference playback speed with the full consistency cascade (clock ×s via float shadow clock,
   reference velocities ×s, tts ÷s, racket velocity target ×s incl. HER clamp box); train-only
   (play/eval force `[1.0, 1.0]`); flag docs in `docs/operations/run_training.md`, design in
-  `docs/motion_and_contract_v3.md` §2. Pending pod mech check before arm R14 launches.
+  `docs/motion_and_contract_v3.md` §2. MECH-VERIFIED on pod (2026-07-04 late): OFF run 25 it
+  clean; ON run `[0.8,1.2]` 25 it clean with `Live/motion/playback_speed` per-iter env-mean
+  fluctuating 0.981-1.012 — the U(0.8,1.2)/√512 signature (a dead flag would sit at 1.0000).
+  Arm R14 is launch-ready.
 - 2026-07-04 (evening): v5 clips processed end-to-end ON the pod (`v5_pipeline.sh`, reusing the
   oblique pipeline + `csv_to_npz_mujoco.py`): `/workspace/shared/motions/hope_{forehand,backhand}_v5.npz`
   (56/58 frames @50 Hz, yaw re-grounded +86.6°/+83.6°→0, strike phases [0.768, 0.345]). Data
