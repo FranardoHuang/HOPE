@@ -81,6 +81,25 @@ Parallel tracks (no GPU conflict):
   ready-stance clip stay on the longer-horizon list (P2.0/A5 in G08), not on Saturday's path.
 - simtoreal2 → main merge + doc updates (claude, in progress).
 
+## 2026-07-04 白天台账(物理建模冲刺 + 白天测试/晚上跑满)
+
+**入 main 的交付**(细节见 ball_physics_v2_roadmap / fit report §11):
+- planner:12 态 EKF(有色噪声,影子模式)· Magnus 项 · Nakashima 自旋耦合反弹 · StrikeSpec
+  逆解器(拍面角+v_n/v_t+落点敏感度;实测预算:v_n 0.85 m/(m/s) 是王,拍面 0.04-0.06 m/度)
+  · venue 参数一致性守卫 —— 共 73 测试全绿
+- 训练:A1v2 感知三缺陷(丢帧/击后盲窗/每击重锁偏差,默认关)
+- configs/incoming_ball_venue.yaml:实测来球分布。**头条:手设 vb 盒只覆盖真球 20%**(训练
+  一直在打"想象中的快平球")。采样原则(franco):**训练=按类重平衡的丰富度盒**(x −3.29~−0.10,
+  z 到 −2.30,旋转 65 rad/s),**评估=综合分布**(答"真球接得住吗")
+- 裁决:a_t=0.52 维持(自旋输入非病根;轨迹反推在本 rig 不可行 0/144;滚动上限被 CI 排除);
+  双拍=打法混淆(§11.1);自旋衰减关闭(τ>5s)
+- 实战互证:上旋不飞(接触抬升与 Magnus 下压线性抵消)、侧旋飞出台(无抵消)——**拍面补偿
+  优先场景=侧旋**,已固化测试
+
+**在飞**:P2 收尾(→自动导出终版)· eval 契约修复(P0,旧行为保留)+ 之后加"来球分布
+驱动"的 B 模式评估 · R7+R8 机制检查 · 通宵舰队待命(R7 重平衡盒/R8 感知缺陷/R9 斜录
+12k/R10 换种子,全部跑到底,P2 完成后自动点火)
+
 ## 10:00 判读(2026-07-04,自动流水线交付)
 
 **判词:值得练到底。** P2 产品线(消旋虚拟球 + A1 校准噪声/延迟 + σ收紧 + 挥后起手,
