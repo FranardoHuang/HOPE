@@ -309,12 +309,25 @@ class RacketTargetCommand(CommandTerm):
         self._mnoise_ar1_rho = min(max(float(cfg.target_noise_ar1_rho), 0.0), 0.9999)
         if self._mnoise_ar1_sigma > 0.0:
             self._mnoise_ar1_state = torch.zeros(self.num_envs, 3, device=self.device)
+        self._drop_prob = max(float(cfg.target_dropout_prob), 0.0)
+        self._post_strike_drop_steps = max(int(round(float(cfg.target_post_strike_dropout_s) * 50.0)), 0)
+        self._bias_per_swing = max(float(cfg.target_bias_per_swing), 0.0)
+        self._a1v2_active = self._drop_prob > 0.0 or self._post_strike_drop_steps > 0 or self._bias_per_swing > 0.0
+        if self._a1v2_active:
+            self._swing_bias = torch.zeros(self.num_envs, 3, device=self.device)
+            self._drop_cd = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+            self._prev_pre_strike = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+            self._held_pos = torch.zeros(self.num_envs, 3, device=self.device)
+            self._held_vel = torch.zeros(self.num_envs, 3, device=self.device)
         # The actor view is materialized (separate tensors) whenever latency OR jitter is on;
         # otherwise the delayed_* attributes ARE the live tensors (which are only ever index-assigned
         # after __init__, so the alias stays valid for the whole run).
         self._actor_view_active = (
             self._delay_steps > 0 or self._jitter_pos > 0.0 or self._jitter_vel > 0.0
             or self._mnoise_white > 0.0 or self._mnoise_ar1_sigma > 0.0
+            or float(cfg.target_dropout_prob) > 0.0
+            or float(cfg.target_post_strike_dropout_s) > 0.0
+            or float(cfg.target_bias_per_swing) > 0.0
         )
         if self._delay_steps > 0:
             # Ring buffers (length delay+1) over the ACTOR-VISIBLE target quantities: the slot
@@ -1156,6 +1169,27 @@ class RacketTargetCommand(CommandTerm):
             pos = pos + self._mnoise_ar1_state
         if self._mnoise_white > 0.0:
             pos = pos + torch.randn_like(pos) * self._mnoise_white
+        if self._a1v2_active:
+            # (c) per-swing systematic bias: resample at each strike moment (pre_strike falling edge
+            # = sensor re-lock after the contact), constant until the next strike.
+            struck = self._prev_pre_strike & ~self.pre_strike
+            if self._bias_per_swing > 0.0 and struck.any():
+                self._swing_bias[struck] = torch.randn(int(struck.sum()), 3, device=self.device) * self._bias_per_swing
+            # (b) forced hold-last window right after the strike (sensor loses the target at contact)
+            if self._post_strike_drop_steps > 0 and struck.any():
+                self._drop_cd[struck] = self._post_strike_drop_steps
+            self._prev_pre_strike.copy_(self.pre_strike)
+            pos = pos + self._swing_bias
+            # (a) random frame loss + (b) countdown: actor view HOLDS the last emitted value
+            drop = self._drop_cd > 0
+            if self._drop_prob > 0.0:
+                drop = drop | (torch.rand(self.num_envs, device=self.device) < self._drop_prob)
+            self._drop_cd = (self._drop_cd - 1).clamp_(min=0)
+            d3 = drop.unsqueeze(-1)
+            pos = torch.where(d3, self._held_pos, pos)
+            vel = torch.where(d3, self._held_vel, vel)
+            self._held_pos.copy_(pos)
+            self._held_vel.copy_(vel)
         if self._delay_steps > 0:
             # Write this step's (jittered) target into slot `w`; the next slot in the length-
             # (delay+1) ring was written exactly `delay` pushes ago — that is the actor's view.
@@ -2011,6 +2045,12 @@ class RacketTargetCommandCfg(CommandTermCfg):
     target_noise_white: float = 0.0
     target_noise_ar1_sigma: float = 0.0
     target_noise_ar1_rho: float = 0.717
+    # A1 v2 — the three Ace-style sensor defects the mocap link actually has (venue capture fit:
+    # occlusion gaps concentrate at contacts, gap_p50 10 ms / racket occlusion ~30 ms; re-lock
+    # after a contact carries a fresh systematic bias). All default OFF.
+    target_dropout_prob: float = 0.0        # per-step P(frame lost) -> actor view holds last value
+    target_post_strike_dropout_s: float = 0.0  # forced hold-last window right after each strike (s)
+    target_bias_per_swing: float = 0.0      # m: constant bias per swing, resampled at swing start
     target_jitter_vel_per_s: float = 0.0
     # Mid-swing target refinement: each control step, envs with pre_strike AND time_to_strike >
     # midswing_resample_tts_floor re-draw their target (position/velocity/normal via the existing

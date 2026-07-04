@@ -208,6 +208,9 @@ racket:
   target_noise_white: 0.0          # m: calibrated mocap white noise (venue fit: 0.0019); no tts decay
   target_noise_ar1_sigma: 0.0      # m: calibrated AR(1) colored noise marginal std (venue fit: 0.0052)
   target_noise_ar1_rho: 0.717      # per 50 Hz step (= venue 0.946/frame @300 Hz ^6)
+  target_dropout_prob: 0.0         # A1v2: per-step frame loss -> actor holds last target value
+  target_post_strike_dropout_s: 0.0  # A1v2: forced hold-last right after each strike (s; venue ~0.03)
+  target_bias_per_swing: 0.0       # A1v2: constant per-swing bias std (m), resampled at strike
   target_jitter_vel_per_s: 0.0     # m/s: same decay law for the target velocity
   midswing_resample_prob: 0.0      # per-step prob of re-drawing WHERE mid-swing (strike timing untouched)
   midswing_resample_tts_floor: 0.3 # s: no refinement inside the last 0.3 s before the strike
