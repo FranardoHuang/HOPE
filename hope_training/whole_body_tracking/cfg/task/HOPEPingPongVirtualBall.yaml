@@ -23,3 +23,10 @@ racket:
   # (stage-1 placement-first: cancel incoming spin; see RacketTargetCommandCfg.vb_spin_mode).
   vb_spin_mode: topspin
   vb_spin_min_sigma: 10.0
+  # Virtual incoming-ball sampling boxes — explicit here so Hydra CLI overrides work (struct
+  # mode). Defaults = the hand-set boxes; the venue-fitted alternatives live in
+  # configs/incoming_ball_venue.yaml (training = vb_boxes_training_rebalanced).
+  vb_vel_x_range: [-4.5, -2.0]
+  vb_vel_y_range: [-0.6, 0.6]
+  vb_vel_z_range: [-1.0, 0.5]
+  vb_spin_abs_max: 50.0
