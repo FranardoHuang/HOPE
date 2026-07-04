@@ -85,11 +85,17 @@ def main() -> int:
     actor = build_actor(msd)
     in_dim = actor[0].in_features
 
-    # The validated export chain (play.py -> _OnnxPolicyExporter -> hardware/MuJoCo) bakes the RAW
+    # The existing export chain (play.py -> _OnnxPolicyExporter -> hardware/MuJoCo) bakes the RAW
     # actor with NO empirical normalizer — verified 2026-07-04 by zero-point matching a donor ONNX
-    # against its own checkpoint (matches ONLY without the normalizer). The checkpoint's
-    # obs_norm_state_dict is not part of the deployed policy path; baking it in produces a policy
-    # that scores 0 in MuJoCo. Identity keeps bit-parity with everything already validated.
+    # against its own checkpoint (matches ONLY without the normalizer). Identity keeps bit-parity
+    # with that chain, so consumers treat every ONNX the same way.
+    # P0 CORRECTION (2026-07-04): training DOES use empirical_normalization=true, so a raw-actor
+    # ONNX fed raw obs is out-of-distribution and scores ~0 — the earlier "baking it in scores 0"
+    # conclusion was an artifact of the then-broken eval harness (it normalized nothing, so ONLY a
+    # raw export could match its raw obs at the zero point). The training-time transform now ships
+    # as an `obs_norm.npz` SIDECAR next to the ONNX (scripts/make_std_sidecar.py), applied by
+    # scripts/mujoco_eval_onnx.py before inference. If you ever bake the normalizer INTO an export,
+    # do NOT ship the sidecar next to it (it would be applied twice).
     normalizer = nn.Identity()
 
     clips = [dict(np.load(args.fh)), dict(np.load(args.bh))]

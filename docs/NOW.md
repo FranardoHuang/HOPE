@@ -205,11 +205,11 @@ franco 已提供 forehand_new.mp4 / backhand_new.mp4,已上传 `/workspace/share
 | --- | --- |
 | 1 终审+候选 | 候选=P2 线(0.884)已定;**双仿真认证仍开放**(eval 契约修复在飞,P0)|
 | 2 explicit-PD 微调腿 | 作废(IdealPD 已否决;记分板显式门禁替代)|
-| 3 门禁+MDU 打包 | **最大的真缺口**。认证分工定案(jiayi 提醒 2026-07-04):**官方门禁 = agi/A3_MuJoCo_Sim 厂商仿真**(部署保真,yikang 的门);wbt 的 mujoco_eval = 我们的指标工具(修复继续,但只服务指标)。链条:P2 终版 ONNX(今晚自动)→ 厂商门禁 → MDU 打包 + 部署配置改指 |
+| 3 门禁+MDU 打包 | **最大的真缺口**。认证分工定案(jiayi 提醒 2026-07-04):**官方门禁 = agi/A3_MuJoCo_Sim 厂商仿真**(部署保真,yikang 的门);wbt 的 mujoco_eval = 我们的指标工具(修复继续,但只服务指标)。门禁三层,claude 全接(franco 2026-07-04):L1 平价校验(pingpong_parity,无 ROS/AimRT,pod 可跑)→ L2 deploy-faithful 指标(修复后的 wbt eval × 厂商 MJCF)→ L3 完整 AimRT 仿真(需 distrobox 环境,pod 上立环境为后备,诚实标注工作量)。链条:P2 终版 ONNX(今晚自动)→ L1+L2 → MDU 打包 + 部署配置改指 |
 | 4 部署配置悬空引用 | 仍未改指,打包时一并(依赖 #3)|
 | 5 物理 v1 | ✅ 完成(yikang 场馆拟合已 merge)|
 | 6 延迟/误差标定 | 噪声谱 ✅ 已接进训练;**延迟已有界**(franco rig ground truth 2026-07-04:传输稳定 <10ms;动捕处理本身支撑 300Hz 输出 → 端到端 ≈≤20ms ≈ ≤1 个 50Hz 策略步)→ 训练用 delay_steps=2(40ms)是保守上界,保留;时间戳精测降级为机会项 |
-| 7 0703 clip 覆盖(jiayi)| 状态未知,需 jiayi 确认 |
+| 7 0703 clip 覆盖 | **franco/jiayi 团队接走**(2026-07-04);备胎:pod 上 GVHMR/GMR 管线已通,给原始视频即可出 clip |
 | 8 算力 trade-off | ✅ 完成(手册封版)|
 | 9 球进训练 | 虚拟球已实质替代(奖励层);真球入 sim 仍下周 |
 | 10 A2 桥(yikang)| 下周 |

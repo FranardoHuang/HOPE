@@ -5,6 +5,12 @@ to verify the exported ONNX before hardware. NO retraining, NO reward changes, N
 changes. This deliberately does NOT use the official Agibot 1570D HITTER-tokenizer C++ harness and
 does NOT convert the policy to 29D — it runs the 31D BeyondMimic ONNX as-is.
 
+SCOPE: this script is the IN-REPO STRIKE-METRICS tool (composite/pos/vel/normal pass rates, per-clip
+breakdowns). The OFFICIAL deploy validation sim is the vendor C++/aimrt harness under
+agi/A3_MuJoCo_Sim/aimrt_mujoco_sim (the real-hardware gate; deploy-faithful robot validation, no
+strike metrics). The vendor/deploy runner drives a CONTINUOUS reference clock with NO per-swing
+teleports — which is what the multiswing reset mode below mirrors on the training side.
+
 =============================================================================================
 POLICY CONTRACT (verified against the exported ONNX metadata + checkpoint weights, 2026-06-27)
 =============================================================================================
@@ -309,6 +315,11 @@ class OnnxPolicy:
         self.clip_seg_lengths = None
         if md.get("clip_seg_lengths", "").strip():
             self.clip_seg_lengths = tuple(int(float(v)) for v in md["clip_seg_lengths"].split(","))
+        # optional episode-semantics metadata (future exports may bake the training wrap_teleport
+        # flag; none do as of 2026-07-04 — --reset-mode auto then defaults to multiswing).
+        self.wrap_teleport_meta = None
+        if md.get("wrap_teleport", "").strip():
+            self.wrap_teleport_meta = md["wrap_teleport"].strip().lower() in ("1", "true", "yes")
         n = len(self.joint_names)
         assert n == 31 and self.default_q.shape == (31,) and self.action_scale.shape == (31,), \
             f"expected 31 joints, got {n}"
@@ -1253,6 +1264,27 @@ def main():
     p.add_argument("--df-clips", choices=["fh", "bh", "both"], default="both",
                    help="[--deploy-faithful] which clip(s) to swing: fh=forehand only, bh=backhand "
                         "only, both=strict forehand/backhand alternation per swing (default).")
+    # --- P0 fix 2026-07-04 (see module docstring): obs normalization + episode protocol ------------
+    p.add_argument("--obs-norm", default="auto",
+                   help="empirical obs-normalization sidecar (obs_norm.npz with mean/std/eps from the "
+                        "checkpoint's obs_norm_state_dict; scripts/make_std_sidecar.py writes it). "
+                        "'auto' (default) = <onnx_dir>/obs_norm.npz when present. ALL training runs "
+                        "use empirical_normalization=true but the exports bake the RAW actor, so "
+                        "evaluating without the sidecar lobotomizes the policy (all-zero scores).")
+    p.add_argument("--no-obs-norm", action="store_true",
+                   help="feed RAW obs even if an obs_norm.npz sidecar exists (legacy/broken behavior; "
+                        "only correct for an export that already bakes the normalizer in).")
+    p.add_argument("--reset-mode", choices=["auto", "teleport", "multiswing"], default="auto",
+                   help="clip-wrap protocol for the training-like rollout. teleport = legacy RSI "
+                        "generation (ref-state-init at every clip wrap, wrap_teleport=true era). "
+                        "multiswing = current generation (wrap_teleport=false): NO wrap teleports, "
+                        "pre-swing hold (--hold-steps-range) with time_to_strike pinned, last_action "
+                        "persists across wraps, plus the absolute balance terminations "
+                        "(tilt/root-height) that DeployParity trains with. auto (default) = ONNX "
+                        "metadata 'wrap_teleport' when present, else multiswing.")
+    p.add_argument("--hold-steps-range", nargs=2, type=int, default=[0, 100],
+                   help="[--reset-mode multiswing] pre-swing hold U[lo,hi] control steps at every "
+                        "swing start (training MotionCommandCfg.hold_steps_range default 0 100).")
     args = p.parse_args()
 
     # Apply eval-only overrides to the module globals BEFORE any precompute/rollout reads them.
@@ -1260,9 +1292,6 @@ def main():
     if args.strike_phase_per_clip is not None:
         STRIKE_PHASE_PER_CLIP = tuple(args.strike_phase_per_clip)
         print(f"[mj-sim2sim] OVERRIDE strike_phase_per_clip -> {STRIKE_PHASE_PER_CLIP} (eval-only)")
-    # A wrong phase silently zeroes the strike metrics, so always print the one in effect.
-    print(f"[mj-sim2sim] strike_phase_per_clip in effect: {STRIKE_PHASE_PER_CLIP} "
-          f"(must match the model's training YAML)")
     if args.ee_term_z is not None:
         TERM_EE_POS_Z = float(args.ee_term_z)
         print(f"[mj-sim2sim] OVERRIDE ee_body_pos termination z-threshold -> {TERM_EE_POS_Z} m "
@@ -1282,21 +1311,60 @@ def main():
 
     print(f"[mj-sim2sim] onnx={args.onnx}")
     print(f"[mj-sim2sim] mjcf={args.mjcf}")
-    policy = OnnxPolicy(args.onnx)
+    policy = OnnxPolicy(args.onnx, obs_norm=("off" if args.no_obs_norm else args.obs_norm))
     print(f"[mj-sim2sim] obs_dim={policy.obs_dim} "
           f"({'deploy_parity: racket_target_pos_b relative to racket FK, no anchor_pos/base_target' if policy.deploy_parity else 'base: full 180-D BeyondMimic obs'}) "
           f"joints={len(policy.joint_names)} "
           f"control={1/step_dt:.0f}Hz (sim_dt={args.sim_dt}, decim={args.decimation})")
 
-    # strike-phase resolution: CLI (handled above) > ONNX clip metadata > built-in legacy fallback
+    # --- obs normalization status (P0 fix #1) — a missing sidecar silently zeroes every metric for
+    # a normalized-obs model, so make the state of this transform impossible to miss.
+    if policy.obs_mean is not None:
+        print(f"[mj-sim2sim] obs normalization: ON (sidecar {policy.obs_norm_path}; "
+              f"(obs-mean)/(std+{policy.obs_eps:g}), mean|max|={np.abs(policy.obs_mean).max():.2f}, "
+              f"std max={policy.obs_std.max():.2f})")
+    elif args.no_obs_norm:
+        print("[mj-sim2sim] obs normalization: OFF (--no-obs-norm)")
+    else:
+        print("[mj-sim2sim] WARNING: obs normalization sidecar NOT FOUND (<onnx_dir>/obs_norm.npz). "
+              "All known training runs use empirical_normalization=true while the export bakes the "
+              "RAW actor — without the sidecar such a model is fed unnormalized obs and scores ~0 "
+              "with a staggering/early-termination pathology. Create it with "
+              "scripts/make_std_sidecar.py --checkpoint <the model_<N>.pt the ONNX came from>.")
+
+    # strike-phase resolution: CLI (handled above) > ONNX clip metadata > built-in legacy fallback.
+    # Resolved (and printed ONCE, with its source) BEFORE any strike-frame precompute.
     if args.strike_phase_per_clip is None:
         if policy.clip_strike_phases:
             STRIKE_PHASE_PER_CLIP = policy.clip_strike_phases
-            print(f"[mj-sim2sim] strike_phase_per_clip from ONNX metadata -> {STRIKE_PHASE_PER_CLIP}")
+            print(f"[mj-sim2sim] strike_phase_per_clip in effect: {STRIKE_PHASE_PER_CLIP} "
+                  f"(from ONNX metadata clip_strike_phases)")
         else:
-            print(f"[mj-sim2sim] WARNING: no clip_strike_phases in ONNX metadata; using built-in "
-                  f"legacy {STRIKE_PHASE_PER_CLIP} — pass --strike-phase-per-clip to match the "
-                  f"trained cfg if this is not a v1-clip model.")
+            print(f"[mj-sim2sim] strike_phase_per_clip in effect: {STRIKE_PHASE_PER_CLIP} "
+                  f"(built-in legacy fallback — no clip_strike_phases in ONNX metadata; pass "
+                  f"--strike-phase-per-clip to match the trained cfg if this is not a v1-clip model)")
+    else:
+        print(f"[mj-sim2sim] strike_phase_per_clip in effect: {STRIKE_PHASE_PER_CLIP} (CLI override; "
+              f"must match the model's training YAML)")
+
+    # --- episode/reset protocol resolution (P0 fix #2) --------------------------------------------
+    reset_mode = args.reset_mode
+    if reset_mode == "auto":
+        md_wrap = getattr(policy, "wrap_teleport_meta", None)
+        if md_wrap is not None:
+            reset_mode = "teleport" if md_wrap else "multiswing"
+            print(f"[mj-sim2sim] reset mode: {reset_mode} (from ONNX metadata wrap_teleport={md_wrap})")
+        else:
+            reset_mode = "multiswing"
+            print("[mj-sim2sim] reset mode: multiswing (auto default — no episode-semantics metadata; "
+                  "current generation trains wrap_teleport=false. Pass --reset-mode teleport for "
+                  "legacy RSI-per-swing models.)")
+    else:
+        print(f"[mj-sim2sim] reset mode: {reset_mode} (CLI)")
+    if reset_mode == "multiswing":
+        print(f"[mj-sim2sim]   multiswing: no wrap teleports; pre-swing hold U{tuple(args.hold_steps_range)} "
+              f"steps (ref frozen at windup, tts pinned); + balance terminations "
+              f"(tilt>{DF_FALL_TILT_RAD} rad, pelvis z<{DF_FALL_ROOT_Z_MIN} m)")
 
     # std sidecar (only needed if a noise_scale > 0 is requested)
     std_vec = None
@@ -1459,7 +1527,8 @@ def main():
                           mode_label=f"ns={ns}", target_normal_per_clip=target_normal_per_clip,
                           strike_csv_writer=scw, viewer=viewer, realtime=not args.no_realtime,
                           vel_ranges_per_clip=vel_ranges_per_clip,
-                          pos_ranges_per_clip=pos_ranges_per_clip, df=df_cfg)
+                          pos_ranges_per_clip=pos_ranges_per_clip, df=df_cfg,
+                          reset_mode=reset_mode, hold_range=tuple(args.hold_steps_range))
         results.append(res)
     csv_f.close()
     strike_csv_f.close()
