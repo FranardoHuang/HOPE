@@ -133,6 +133,11 @@ contact:
 # =============================================================================
 capture:
   rate_hz: 300.0
+  # E2E latency bound (franco rig ground truth, 2026-07-04, verbal->recorded): transmission
+  # measured stable <10 ms; capture processing sustains 300 Hz output -> end-to-end <= ~20 ms
+  # (<= 1 policy step @50 Hz). Training delay_steps=2 (40 ms) is therefore a CONSERVATIVE upper
+  # bound. Timestamp-based precise measurement demoted to opportunistic (next venue session).
+  e2e_latency_bound_ms: 20
   position_noise:           # ball-centroid error (采集误差) — NOT white (§9.3 MC)
     white_mm: 1.9           # per-axis white component
     ar1_marginal_mm: 5.2    # per-axis correlated AR(1) component

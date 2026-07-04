@@ -69,6 +69,49 @@ OBSERVATION NOISE: training adds small uniform obs corruption; deployment/sim-to
   (the ONNX is deterministic). We feed clean obs and document it; sensor noise is a separate concern.
 
 =============================================================================================
+P0 FIX (2026-07-04): all-zero scores for the multiswing generation — TWO root causes
+=============================================================================================
+1. OBS NORMALIZATION (the actual all-zero bug, affects EVERY generation).
+   Every run trains with rsl_rl `empirical_normalization: true`, i.e. the actor consumes
+   (obs - mean) / (std + 0.01) with running stats stored in the checkpoint's obs_norm_state_dict.
+   The export chain (scripts/play.py -> _OnnxPolicyExporter, and standalone_onnx_export.py) bakes the
+   RAW actor with NO normalizer (verified 2026-07-04 by zero-point matching the p21_E and old-gen
+   hopex ONNXs against their checkpoints: ONNX == raw actor to ~1e-6; the checkpoints DO carry
+   non-trivial stats, mean |max| ~4, var up to ~13). Feeding raw obs to a normalized-obs actor
+   lobotomizes the policy: in MuJoCo it staggered forward-right ~0.5 m on a canonical trajectory
+   regardless of the sampled target (the 0.53 +/- 0.06 m "systematic offset"), tripped the
+   anchor_pos/ee_body_pos tracking guards at ~52 steps, and only the backhand strike frame
+   (44 steps in) was ever inside an episode — forehand (65 steps in) never evaluated. It could not
+   even hold a nominal stand (deploy-faithful fell at ~1.1 s). Diagnosed with a perfect-tracking
+   probe: with the robot PINNED to the reference each step, actions still exploded (|a| -> ~60)
+   through the last-action feedback obs; with the normalizer applied they are sane.
+   FIX: this runner now loads an `obs_norm.npz` sidecar (keys mean/std/eps; produced from the SAME
+   checkpoint as the ONNX by scripts/make_std_sidecar.py) and applies (obs - mean)/(std + eps)
+   before inference. Resolution: --obs-norm PATH > auto (<onnx_dir>/obs_norm.npz) > loud WARNING and
+   raw obs (only correct for a hypothetical normalizer-free training run or a future export that
+   bakes the normalizer in). NOTE FOR DEPLOY: the C++ runner consuming these ONNX files raw has the
+   same defect — either bake the normalizer into the export or normalize obs on the robot.
+2. EPISODE PROTOCOL (--reset-mode): the old harness teleported the robot to the next clip's first
+   frame on EVERY clip wrap (legacy RSI generation, wrap_teleport=true). The multiswing generation
+   (HOPEPingPong/DeployParity, 2026-07+) trains with wrap_teleport=false + a pre-swing HOLD of
+   U[0,100] control steps (reference frozen at the swing's first frame, time_to_strike pinned at its
+   per-clip max) and the robot physically carries itself between swings. New flag:
+     --reset-mode teleport   : byte-identical legacy behavior (teleport per swing, no holds).
+     --reset-mode multiswing : no wrap teleports; per-swing pre-swing hold sampled from
+                               --hold-steps-range (training default 0..100); last_action persists
+                               across wraps (training only zeroes it on true episode resets); adds
+                               the absolute balance terminations (tilt > 0.7 rad, pelvis z < 0.5 m)
+                               that HOPEDeployParityTerminationsCfg trains with, alongside the
+                               inherited tracking guards.
+     --reset-mode auto (default): ONNX metadata `wrap_teleport` when present, else multiswing.
+   Episode RESETS still reference-state-init at the sampled clip's first frame in both modes
+   (training's dominant reset path); the 10 s timeout matches episode_length_s.
+   Also fixed here: the strike-phase precedence is resolved (CLI > ONNX metadata > legacy builtin)
+   BEFORE anything is printed or computed — the old code printed a misleading
+   "strike_phase_per_clip in effect" line from the builtin default before metadata resolution
+   (the metadata value did take effect for the metrics, but the double print hid what ran).
+
+=============================================================================================
 USAGE (motion env that has mujoco + onnxruntime, e.g. hope-motion-py310):
   python scripts/mujoco_eval_onnx.py \
       --onnx logs/rsl_rl/agibot_a3_hope/2026-06-27_18-14-06_basecouple03_resume/exported/policy.onnx \
@@ -229,7 +272,7 @@ def subtract_frame_transforms(t01, q01, t02, q02):
 # ONNX policy wrapper
 # =================================================================================================
 class OnnxPolicy:
-    def __init__(self, onnx_path):
+    def __init__(self, onnx_path, obs_norm="auto"):
         import onnxruntime as ort
 
         self.sess = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
@@ -271,6 +314,36 @@ class OnnxPolicy:
             f"expected 31 joints, got {n}"
         assert self.body_names == TRACKED_BODIES, \
             f"ONNX body_names != expected tracked order:\n {self.body_names}\n {TRACKED_BODIES}"
+        # --- empirical obs normalization (P0 fix 2026-07-04, see module docstring #1) -------------
+        # Every training run uses rsl_rl empirical_normalization=true, but the export chain bakes the
+        # RAW actor. The `obs_norm.npz` sidecar (mean/std/eps from the checkpoint's
+        # obs_norm_state_dict; scripts/make_std_sidecar.py writes it next to the ONNX) restores the
+        # training-time obs transform (obs - mean) / (std + eps). Without it, a normalized-obs model
+        # is evaluated on garbage and scores ~0 with a very consistent staggering pathology.
+        self.obs_mean = self.obs_std = None
+        self.obs_eps = 1e-2                      # rsl_rl EmpiricalNormalization default
+        self.obs_norm_path = None
+        if obs_norm != "off":
+            path = obs_norm if obs_norm not in (None, "auto") else \
+                os.path.join(os.path.dirname(os.path.abspath(onnx_path)), "obs_norm.npz")
+            if os.path.isfile(path):
+                d = np.load(path)
+                mean = np.asarray(d["mean"], np.float64).reshape(-1)
+                std = np.asarray(d["std"], np.float64).reshape(-1)
+                assert mean.shape == (self.obs_dim,) and std.shape == (self.obs_dim,), (
+                    f"obs_norm sidecar dim {mean.shape}/{std.shape} != obs dim {self.obs_dim} "
+                    f"({path}) — sidecar from a different obs contract/checkpoint?")
+                self.obs_mean, self.obs_std = mean, std
+                self.obs_eps = float(d["eps"]) if "eps" in d else 1e-2
+                self.obs_norm_path = path
+            elif obs_norm not in (None, "auto"):
+                raise SystemExit(f"[FATAL] --obs-norm sidecar not found: {path}")
+
+    def normalize_obs(self, obs):
+        """Training-time empirical obs normalization (identity if no sidecar loaded)."""
+        if self.obs_mean is None:
+            return obs
+        return (obs - self.obs_mean) / (self.obs_std + self.obs_eps)
 
     def refs(self, time_step):
         """Reference motion at `time_step` (obs-independent). Returns dict of arrays in metadata order."""
@@ -283,6 +356,7 @@ class OnnxPolicy:
 
     def action(self, obs, time_step):
         ts = np.array([[float(time_step)]], np.float32)
+        obs = self.normalize_obs(obs)
         o = self.sess.run(None, {"obs": obs[None].astype(np.float32), "time_step": ts})
         return o[0][0].astype(np.float64)    # mean action (31,), Isaac articulation order
 
@@ -708,11 +782,21 @@ def _draw_markers(viewer, mujoco, racket, robot, ball_pos):
 def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_dt, decimation,
                 noise_scale, std_vec, n_steps, max_ep_len, rng, csv_writer, mode_label,
                 target_normal_per_clip, strike_csv_writer=None, viewer=None, realtime=True,
-                vel_ranges_per_clip=None, pos_ranges_per_clip=None, df=None):
+                vel_ranges_per_clip=None, pos_ranges_per_clip=None, df=None,
+                reset_mode="teleport", hold_range=(0, 100)):
     racket = RacketCommand(seg_start, seg_len, step_dt, rng, target_normal_per_clip,
                            vel_ranges_per_clip=vel_ranges_per_clip,
                            pos_ranges_per_clip=pos_ranges_per_clip)
     strike = {"all": StrikeAcc(), "forehand": StrikeAcc(), "backhand": StrikeAcc()}
+    multiswing = (reset_mode == "multiswing") and (df is None)
+
+    def sample_hold():
+        """Pre-swing HOLD length (multiswing only): training freezes the reference at the swing's
+        first frame for U[hold_range] control steps on EVERY resample (reset AND wrap). Teleport
+        mode draws nothing so its RNG stream stays byte-identical to the legacy harness."""
+        if not multiswing:
+            return 0
+        return int(rng.integers(int(hold_range[0]), int(hold_range[1]) + 1))
 
     def fresh_swing():
         """Sample a clip, set time_step to its start, ref-state-init the robot, resample racket target."""
@@ -789,8 +873,10 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
 
     if df is None:
         clip, time_step = fresh_swing()
+        hold_left = sample_hold()
     else:
         clip, time_step = df_start_episode()
+        hold_left = 0
     last_action = np.zeros(31)
     ep_len = 0
 
@@ -893,6 +979,15 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         if df is None:
             # training-like: tracking-guard resets + 10 s timeout
             reasons = check_terminations(refs, robot, ra_pos, ra_quat, refa_pos, refa_quat)
+            if multiswing:
+                # HOPEDeployParityTerminationsCfg adds ABSOLUTE balance terminations on top of the
+                # inherited tracking guards — a real fall/sink ends the episode regardless of clip.
+                pg = robot.projected_gravity_body()
+                tilt = math.acos(max(-1.0, min(1.0, -float(pg[2]))))
+                if tilt > DF_FALL_TILT_RAD:
+                    reasons.append("fall_tilt")
+                if float(robot.body_pos(robot.pelvis_bid)[2]) < DF_FALL_ROOT_Z_MIN:
+                    reasons.append("fall_root_z")
             timeout = ep_len >= max_ep_len
         else:
             # deploy-faithful: only REAL falls end an episode (no tracking guards, no timeout)
@@ -923,6 +1018,7 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
             ep_len = 0
             if df is None:
                 clip, time_step = fresh_swing()
+                hold_left = sample_hold()
             else:
                 clip, time_step = df_start_episode()   # fresh nominal stand — NEVER ref-state-init
             last_action = np.zeros(31)
@@ -930,20 +1026,33 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
 
         if df is None:
             # --- advance the motion clock; wrap within the env's current segment (multi-swing per episode) ---
-            time_step += 1
-            seg_end = int(seg_start[clip]) + int(seg_len[clip])
-            if time_step >= seg_end:
-                # clip wrap mid-episode: sample a new swing + ref-state-init (Isaac teleports here too),
-                # but do NOT reset ep_len (the episode continues across swings until a fall/timeout).
-                clip = int(rng.integers(0, num_clips))
-                time_step = int(seg_start[clip])
-                r = refs_table[time_step]
-                robot.reset_to_reference(
-                    root_pos=r["body_pos_w"][ROOT_TRACKED_IDX], root_quat=r["body_quat_w"][ROOT_TRACKED_IDX],
-                    root_lin_w=r["body_lin_vel_w"][ROOT_TRACKED_IDX], root_ang_w=r["body_ang_vel_w"][ROOT_TRACKED_IDX],
-                    q_artic=r["joint_pos"])
-                racket.resample(clip)
-                last_action = np.zeros(31)
+            if multiswing and hold_left > 0:
+                # Pre-swing HOLD (training parity, MotionCommand._update_command): the reference
+                # clock is FROZEN at the swing's first frame ("the ball is not here yet") and
+                # time_to_strike stays pinned at its per-clip max. The robot keeps being simulated.
+                hold_left -= 1
+            else:
+                time_step += 1
+                seg_end = int(seg_start[clip]) + int(seg_len[clip])
+                if time_step >= seg_end:
+                    # clip wrap mid-episode: sample the next swing + resample its target. Teleport
+                    # mode = legacy RSI generation (Isaac wrap_teleport=true): ref-state-init the
+                    # robot + zero last_action. Multiswing mode = current generation
+                    # (wrap_teleport=false): NO teleport — the policy physically carries the body
+                    # into the new swing's windup during the pre-swing hold; last_action persists
+                    # (training only zeroes it on true episode resets). ep_len is NOT reset either
+                    # way (the episode continues across swings until a fall/timeout).
+                    clip = int(rng.integers(0, num_clips))
+                    time_step = int(seg_start[clip])
+                    if not multiswing:
+                        r = refs_table[time_step]
+                        robot.reset_to_reference(
+                            root_pos=r["body_pos_w"][ROOT_TRACKED_IDX], root_quat=r["body_quat_w"][ROOT_TRACKED_IDX],
+                            root_lin_w=r["body_lin_vel_w"][ROOT_TRACKED_IDX], root_ang_w=r["body_ang_vel_w"][ROOT_TRACKED_IDX],
+                            q_artic=r["joint_pos"])
+                        last_action = np.zeros(31)
+                    racket.resample(clip)
+                    hold_left = sample_hold()
         else:
             # --- deploy-faithful swing schedule: hold -> play the WHOLE clip once -> rest -> repeat.
             # NO teleports; last_action carries across swings (the deployed policy runs continuously).
