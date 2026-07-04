@@ -57,6 +57,10 @@ def _run_play(cfg, simulation_app):
     ):
         env_cfg.commands.racket_target.achieved_target_mix_prob = 0.0
 
+    # R14 retiming is TRAIN-ONLY (export/replay must see the native-speed reference clock).
+    if hasattr(env_cfg.commands, "motion") and hasattr(env_cfg.commands.motion, "speed_scale_range"):
+        env_cfg.commands.motion.speed_scale_range = (1.0, 1.0)
+
     agent_cfg = RslRlOnPolicyRunnerCfg(**runner_kwargs(OmegaConf.to_container(cfg.algo, resolve=True), str(cfg.task.experiment_name)))
     agent_cfg.device = str(cfg.device)
 

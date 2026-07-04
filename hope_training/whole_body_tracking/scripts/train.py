@@ -267,6 +267,8 @@ _MOTION_KEYS = (
     # deploy-parity mid-swing clip switch (018467a added the yaml key + MotionCommandCfg field but not
     # this whitelist/translation, so every run of the task yaml raised in _check_unknown_keys).
     "clip_switch_prob",
+    # P2.4/R14 per-swing reference playback speed range (retiming).
+    "speed_scale_range",
 )
 
 
@@ -465,6 +467,8 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(M, "post_swing_min_fill", _get(mt, "post_swing_min_fill"), int, applied, "commands.motion")
             _set_attr(M, "post_swing_min_hold", _get(mt, "post_swing_min_hold"), int, applied, "commands.motion")
             _set_attr(M, "clip_switch_prob", _get(mt, "clip_switch_prob"), float, applied, "commands.motion")
+            _set_attr(M, "speed_scale_range", _get(mt, "speed_scale_range"),
+                      lambda v: tuple(float(x) for x in v), applied, "commands.motion")
 
     rw = _get(task, "rewards")
     if rw is not None:

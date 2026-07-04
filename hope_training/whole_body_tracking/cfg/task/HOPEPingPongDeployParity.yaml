@@ -101,6 +101,9 @@ motion:
   post_swing_min_fill: 256
   post_swing_min_hold: 25
   clip_switch_prob: 0.0        # deploy-parity mid-swing clip switch (venue falls fix; try 0.002)
+  # P2.4/R14 retiming: per-swing reference playback speed U[lo,hi] (clock ×s, ref velocities ×s,
+  # tts ÷s, target velocity ×s). [1.0, 1.0] = off; ablation trial [0.8, 1.2].
+  speed_scale_range: [1.0, 1.0]
 
 # ---- reward weights / kernel std --------------------------------------------
 # HITTER does not publish reward weights or kernel forms. Goal terms get relatively high weight

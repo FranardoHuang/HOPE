@@ -280,8 +280,14 @@ class RacketTargetCommand(CommandTerm):
         _absize = max(int(cfg.achieved_buffer_size), 1)
         self._ach_pos = {c: torch.zeros(_absize, 3, device=self.device) for c in self._clip_names}
         self._ach_vel = {c: torch.zeros(_absize, 3, device=self.device) for c in self._clip_names}
+        # R14: playback speed of the swing that PRODUCED each achieved state (1.0 when retiming off),
+        # so replay can rescale the velocity to the replaying swing's own speed.
+        self._ach_spd = {c: torch.ones(_absize, device=self.device) for c in self._clip_names}
         self._ach_fill = {c: 0 for c in self._clip_names}
         self._ach_ptr = {c: 0 for c in self._clip_names}
+        # R14: one-shot exact-strike latch per swing (armed at every target resample). Only consulted
+        # when retiming is active — the float clock's ~1e-4/swing double-fire guard.
+        self._exact_fired = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         # Decayed counters for the logged replay fraction (same EMA timescale as the exact accumulators).
         self._resample_n_acc = 0.0
         self._replay_n_acc = 0.0
@@ -806,6 +812,10 @@ class RacketTargetCommand(CommandTerm):
             vel[:, 0] = sample_uniform(*self.cfg.racket_vel_x_range, (n,), self.device)
             vel[:, 1] = sample_uniform(*self.cfg.racket_vel_y_range, (n,), self.device)
             vel[:, 2] = sample_uniform(*self.cfg.racket_vel_z_range, (n,), self.device)
+        if motion.retiming_active:
+            # R14: the vel boxes are centered on the clips' NATIVE strike velocities; a swing replayed
+            # at speed s can only deliver ~s× that, so scale the demand (reference-target consistency).
+            vel = vel * motion.speed_scale[env_ids].unsqueeze(-1)
         self.racket_target_vel_w[env_ids] = vel
 
         # --- HER-style achieved-target replay (mixture) --------------------------------------------
@@ -835,7 +845,13 @@ class RacketTargetCommand(CommandTerm):
                 rpos = self._ach_pos[c][rows] + (torch.rand(m, 3, device=self.device) * 2.0 - 1.0) * float(
                     self.cfg.achieved_jitter_pos
                 )
-                rvel = self._ach_vel[c][rows] + (torch.rand(m, 3, device=self.device) * 2.0 - 1.0) * float(
+                rvel_c = self._ach_vel[c][rows]
+                if motion.retiming_active:
+                    # R14: achieved velocities carry their SOURCE swing's playback speed; rescale to
+                    # the replaying swing's own s so a slowed swing is not asked for a fast strike.
+                    s_now = motion.speed_scale[env_ids_t[sel]]
+                    rvel_c = rvel_c * (s_now / self._ach_spd[c][rows].clamp(min=1e-6)).unsqueeze(-1)
+                rvel = rvel_c + (torch.rand(m, 3, device=self.device) * 2.0 - 1.0) * float(
                     self.cfg.achieved_jitter_vel
                 )
                 if self._pos_range_per_clip_t is not None and c < self._pos_range_per_clip_t.shape[0]:
@@ -845,7 +861,13 @@ class RacketTargetCommand(CommandTerm):
                 if self._vel_range_per_clip_t is not None and c < self._vel_range_per_clip_t.shape[0]:
                     lo, hi = self._vel_range_per_clip_t[c, :, 0], self._vel_range_per_clip_t[c, :, 1]
                     ctr, half = (lo + hi) * 0.5, (hi - lo) * 0.5 * infl
-                    rvel = torch.min(torch.max(rvel, ctr - half), ctr + half)
+                    if motion.retiming_active:
+                        # R14: clamp replayed velocities into the box scaled by THIS swing's playback
+                        # speed, so replay does not demand native-speed strikes from a slowed swing.
+                        s_sel = motion.speed_scale[env_ids_t[sel]].unsqueeze(-1)
+                        rvel = torch.min(torch.max(rvel, (ctr - half) * s_sel), (ctr + half) * s_sel)
+                    else:
+                        rvel = torch.min(torch.max(rvel, ctr - half), ctr + half)
                 ids_sel = env_ids_t[sel]
                 self.racket_target_pos_w[ids_sel] = self._env.scene.env_origins[ids_sel] + rpos
                 self.racket_target_vel_w[ids_sel] = rvel
@@ -898,7 +920,11 @@ class RacketTargetCommand(CommandTerm):
         self.racket_target_pos_w[env_ids] = origins + ref_pos + dpos
 
         dvel = (torch.rand(n, 3, device=dev) * 2.0 - 1.0) * vel_h
-        self.racket_target_vel_w[env_ids] = ref_vel * self.cfg.ref_vel_scale + dvel
+        ref_vel_scaled = ref_vel * self.cfg.ref_vel_scale
+        if motion.retiming_active:
+            # R14: the cached reference strike velocity is native-speed; scale by this swing's playback speed.
+            ref_vel_scaled = ref_vel_scaled * motion.speed_scale[env_ids].unsqueeze(-1)
+        self.racket_target_vel_w[env_ids] = ref_vel_scaled + dvel
 
         dnrm = (torch.rand(n, 3, device=dev) * 2.0 - 1.0) * nrm_h
         normal = ref_nrm + dnrm
@@ -912,6 +938,8 @@ class RacketTargetCommand(CommandTerm):
         n = len(env_ids)
         origins = self._env.scene.env_origins[env_ids]
         motion = self._motion()
+        # R14: re-arm the one-shot exact-strike latch for the new swing.
+        self._exact_fired[env_ids] = False
 
         # UNCONDITIONAL swing accounting: every resample STARTS a new swing attempt. On the
         # true-reset path (not a wrap) it also ENDS the previous attempt — count a pre-strike
@@ -1057,11 +1085,24 @@ class RacketTargetCommand(CommandTerm):
             seg_len = ml.seg_len[clip]
             phase = self._strike_phase_per_clip_t[clip]
             strike_step = seg_start + (phase * (seg_len - 1).float()).round().long()
-            self.time_to_strike = (strike_step - motion.time_steps).float() * self._env.step_dt
+            if motion.retiming_active:
+                # R14: at playback speed s the clock covers (strike_step - t) frames in
+                # (strike_step - t)/s control steps. Use the FLOAT clock so tts still decreases by
+                # exactly step_dt per unheld step and the exact-strike detector fires once per swing.
+                self.time_to_strike = (
+                    (strike_step.float() - motion.time_steps_f) * self._env.step_dt / motion.speed_scale
+                )
+            else:
+                self.time_to_strike = (strike_step - motion.time_steps).float() * self._env.step_dt
         else:
             total = max(int(ml.time_step_total), 1)
             strike_step = round(self.cfg.strike_phase * (total - 1))
-            self.time_to_strike = (strike_step - motion.time_steps).float() * self._env.step_dt
+            if motion.retiming_active:
+                self.time_to_strike = (
+                    (float(strike_step) - motion.time_steps_f) * self._env.step_dt / motion.speed_scale
+                )
+            else:
+                self.time_to_strike = (strike_step - motion.time_steps).float() * self._env.step_dt
         self.pre_strike = self.time_to_strike > 0.0
         self.strike_window = self.time_to_strike.abs() <= self.cfg.strike_window_s
 
@@ -1518,6 +1559,12 @@ class RacketTargetCommand(CommandTerm):
         # the ±strike_window_s window). Between strikes the held value carries to the next reset.
         in_win = self.strike_window
         exact_strike = torch.abs(self.time_to_strike) <= (0.5 * self._env.step_dt + 1e-6)
+        if self._motion().retiming_active:
+            # R14: float32 clock drift can (~1e-4/swing) land two consecutive tts values inside the
+            # ±dt/2 window; latch so one-shot consumers (vb rewards, exact EMAs, achieved-buffer
+            # writes) fire once per swing. The latch re-arms at every target resample.
+            exact_strike = exact_strike & ~self._exact_fired
+            self._exact_fired = self._exact_fired | exact_strike
         self.metrics["exact_strike_hit_rate"] = exact_strike.float()
 
         # --- DEBUG: swing-through sign verification (cfg.debug_reward_logging) -----------------------
@@ -1685,6 +1732,7 @@ class RacketTargetCommand(CommandTerm):
                     _rows = (self._ach_ptr[_c] + torch.arange(_m, device=self.device)) % _size
                     self._ach_pos[_c][_rows] = self.racket_pos_w[_bidx] - origins[_bidx]
                     self._ach_vel[_c][_rows] = self.racket_lin_vel_w[_bidx]
+                    self._ach_spd[_c][_rows] = _motion.speed_scale[_bidx]
                     self._ach_ptr[_c] = int((self._ach_ptr[_c] + _m) % _size)
                     self._ach_fill[_c] = min(self._ach_fill[_c] + _m, _size)
             for _c, _cn in self._clip_names.items():

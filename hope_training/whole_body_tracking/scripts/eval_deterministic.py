@@ -139,6 +139,13 @@ def _run(cfg, simulation_app):
             print("[eval] HER achieved-target replay DISABLED (achieved_target_mix_prob=0; "
                   "pass +allow_achieved_replay=true to keep the training mixture)", flush=True)
 
+    # R14 retiming is TRAIN-ONLY: the eval gate scores the native-speed reference clock
+    # (deploy-matched, comparable across checkpoints).
+    if hasattr(env_cfg.commands, "motion") and hasattr(env_cfg.commands.motion, "speed_scale_range"):
+        if tuple(env_cfg.commands.motion.speed_scale_range) != (1.0, 1.0):
+            env_cfg.commands.motion.speed_scale_range = (1.0, 1.0)
+            print("[eval] R14 retiming DISABLED (speed_scale_range=(1.0, 1.0))", flush=True)
+
     motion_files = _resolve_motion_files(cfg)
     env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
 
