@@ -86,6 +86,9 @@ class PlannerConfig:
     ar1_tau_s: float = 0.060        # capture.position_noise.ar1_tau_ms (~rho 0.946 @300 Hz), configs/ball_physics_venue.yaml
     q_accel_psd: float = 0.1        # m^2/s^3 unmodeled-accel PSD; conservative prior, NOT a venue fit
     chi2_gate: float = 16.3         # 3-dof chi-square @ ~0.999 innovation gate (measurement outliers)
+    chi2_reinit_after: int = 5      # consecutive gate rejections that force a filter re-seed from the
+                                    # current measurement — recovers from unmodeled paddle hits, which
+                                    # otherwise reject every real measurement forever (0703 replay finding)
     bounce_sigma_t: float = 0.2     # m/s post-bounce tangential vel std (grip refit degenerate, F5 in fit report)
     k_m: float = 0.00444            # Magnus accel coeff, flight.k_m, configs/ball_physics_venue.yaml
     mu_table: float = 0.25          # table friction, Ace prior — UNFITTED (venue F5 tangential refit degenerate)

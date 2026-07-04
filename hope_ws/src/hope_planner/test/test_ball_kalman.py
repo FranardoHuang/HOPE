@@ -181,3 +181,32 @@ def test_kf_estimate_full_and_predict_to():
         ps[-1], vs[-1], int(round(horizon / DT)) + 1, physics)
     assert np.linalg.norm(p_pred - truth_p[-1]) < 0.02
     assert np.linalg.norm(v_pred - truth_v[-1]) < 0.2
+
+
+def test_kf_recovers_from_unmodeled_paddle_hit():
+    """A racket strike is an unmodeled multi-m/s velocity jump. Without the
+    consecutive-rejection re-seed the gate rejects every post-hit measurement
+    while the mean coasts under gravity (0703 venue-replay divergence)."""
+    cfg = PlannerConfig()
+    physics = BallPhysics()
+    rng = np.random.default_rng(11)
+
+    p0 = np.array([2.5, -0.76, 0.35])
+    v_in = np.array([-3.0, 0.3, 2.0])
+    ps_in, vs_in = _integrate_truth(p0, v_in, 100, physics)
+    # paddle hit: reverse + speed up, like an opponent return
+    v_out = np.array([3.5, -0.4, 2.5])
+    ps_out, vs_out = _integrate_truth(ps_in[-1], v_out, 100, physics)
+    ps = np.vstack([ps_in, ps_out[1:]])
+    vs = np.vstack([vs_in, vs_out[1:]])
+    zs = ps + _venue_noise(len(ps), rng)
+
+    kf = BallKalmanEstimator(cfg)
+    for k in range(len(zs)):
+        kf.push(k * DT, zs[k])
+
+    assert kf.rejected_count >= 1  # the hit must actually trip the gate
+    assert kf.ready                # re-seed finished its warm-up
+    p_end, v_end, _ = kf.estimate()
+    assert np.linalg.norm(p_end - ps[-1]) < 0.03
+    assert np.linalg.norm(v_end - vs[-1]) < 0.8
