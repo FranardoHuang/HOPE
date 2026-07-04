@@ -89,7 +89,7 @@ cd ~/workspace/HOPE/hope_ws
 colcon build --packages-up-to hope_bringup hope_planner
 source install/local_setup.bash
 # sanity: pure-python tests need no ROS
-cd src/hope_planner && python3 -m pytest test/ -q   # 41 passed
+cd src/hope_planner && python3 -m pytest test/ -q   # 73 passed
 ```
 
 **Build the deploy package** (hope box):
@@ -110,10 +110,11 @@ Fill these before the corresponding stage; the chain tells you when one is missi
 
 **Planner ball physics + hit plane**
 
-- [x] ~~zeroed placeholders~~ → **INTERIM values FILLED 2026-07-04** in
-  `hope_ws/src/hope_planner/config/hope_planner.yaml`: `drag_k: 0.15` (physical
-  estimate), `restitution_h/v: 0.85`, `restitution_racket: 0.88`. Still re-fit at the
-  venue from ≥15 mocap ball recordings:
+- [x] ~~zeroed placeholders~~ → **VENUE FIT LANDED (2026-07-03 recordings, merged
+  from main 2026-07-04)** in `hope_ws/src/hope_planner/config/hope_planner.yaml`:
+  `drag_k: 0.1261`, `restitution_h: 0.64` (no-spin grip equiv), `restitution_v: 0.9215`,
+  `restitution_racket: 0.654` — matching node.py defaults; consistency-guard tests
+  police drift. Re-fit ONLY if the venue/ball changes:
   `ros2 run hope_planner hope_calibrate traj1.csv ... traj15.csv` → paste values.
   (The old `drag_k 0.8781` fit was ~8× physical — do NOT restore it; it makes the
   planner demand 4.6–10 m/s racket speeds and the runner gate stands on every ball.)
@@ -134,9 +135,9 @@ hope_planner hope_bringup` (NEVER hand-edit `install/`, it is overwritten).
 
 | key (line) | now | fill with |
 |---|---|---|
-| ✎ `drag_k` (~59) | `0.15` interim | re-fit: record ≥15 ball trajectories → CSV (t,x,y,z) → `ros2 run hope_planner hope_calibrate traj*.csv` → paste. ⚠ if the fit comes out ≥0.5 it is WRONG (the rejected 0.8781 class) — keep 0.11-0.15 |
-| ✎ `restitution_h` / `restitution_v` (~62-63) | `0.85`/`0.85` interim | same calibrate run prints both |
-| `restitution_racket` (~64) | `0.88` HITTER default | only if a racket-bounce recording exists |
+| ✓ `drag_k` (~59) | `0.1261` venue fit | re-fit only if venue/ball changes: ≥15 trajectories → CSV (t,x,y,z) → `ros2 run hope_planner hope_calibrate traj*.csv` → paste. ⚠ if the fit comes out ≥0.5 it is WRONG (the rejected 0.8781 class) — keep 0.11-0.15 |
+| ✓ `restitution_h` / `restitution_v` | `0.64`/`0.9215` venue fit | same calibrate run prints both (h = no-spin grip equivalent) |
+| `restitution_racket` | `0.654` venue fit (paddle e const) | re-fit only with a new racket-bounce recording |
 | ✎ `marker_to_base_xyz` (bottom, flat block) | `[0,0,0]` | SAME number as (2)'s `mocap_to_base_link.p1_xyz` — the planner applies it to `/P1/pose` before publishing `/a3/base_pose_flat` for the C++ `--planner` runner |
 | ✓ `robot_pose_topic` | `/P1/pose` | arena default; sim overlay overrides |
 | ✓ `x_hit` static fallback (~18) | `0.17` | only matters before the first `/P1/pose`; MUST equal `robot_start_x + 0.67` — if you place the robot at −0.8 (recommended, §9.3) set this to **−0.13** |
@@ -516,7 +517,7 @@ VENUE FILL-IN SHEET** — G3/G4/G5 → sheet items (3)+(4), G6/G7 → §9.3 plac
 | G6 | Robot placement: **0.8 m behind the table edge on the forehand half** (physical placement, see §9.3 why). No yaml key anymore — the C++ runner localizes from the live mocap base pose; just update (1)'s `x_hit` static fallback to `robot_x + 0.67` (−0.8 → **−0.13**). | venue | 🏟 |
 | G7 | **Placement convention**: the robot FACES +x (the opponent), square. The C++ runner yaw-aligns the IMU at every MOTION entry (`m`) — keep it still ~2 s there. There is no yaml yaw override anymore: place it square. | venue | 🏟 |
 | G8 | `marker_to_base_xyz` (hope_planner.yaml, sheet (1)) + `mocap_to_base_link.p1_xyz` (hope_world_frame.yaml, sheet (2)): P1 marker-cluster → base_link offset. Measure per the procedure in hope_world_frame.yaml. `[0,0,0]` is usable if the cluster sits on the pelvis. | venue | 🏟 |
-| G9 | Ball physics re-fit: record ≥15 ball trajectories at the venue, `ros2 run hope_planner hope_calibrate traj*.csv`, paste into hope_planner.yaml. **INTERIM values are already in the yaml** (drag_k 0.15 physical estimate, restitution 0.85/0.85/0.88) — good enough to start; the salvaged Jun-23 fit (0.8781) is REJECTED (8× physical). The referenced 2026-07-03 venue recordings are NOT in the repo. | venue | 🏟 (interim ✅) |
+| G9 | Ball physics: **VENUE FIT IN THE YAML** (2026-07-03 recordings via main: drag_k 0.1261, restitution 0.64/0.9215/0.654; consistency-guard tests police drift vs node defaults). Spot-check on venue day; full re-fit only if venue/ball changed. The salvaged Jun-23 fit (0.8781) stays REJECTED (8× physical). | venue | ✅ (spot-check 🏟) |
 | G10 | Planner adaptive x_hit: `robot_pose_topic:=/P1/pose`, `x_hit_offset 0.67`, clamp `[0.0, 0.35]` — **already the yaml defaults** (2026-07-04). The clamp is the TABLE-COLLISION protection: it stops the demanded plane (and the lunge endpoint ≈ plane − 0.67) short of the table edge. | — | ✅ |
 | G11 | Runner engage-safety set (active-swing lock + frozen target, bounded post-swing hold → sticky static stand, engage-tts clock seed + clamp, invalid-flutter grace, base_low guard, **MOTION-entry yaw align**) — in the C++ runner (§9.6). | — | ✅ |
 | G12 | Baseline ONNX on the robot: `model_11400_hopex.onnx` staged in `assets/a3_runtime/models/` + runtime cfg points at it; **rockchip dist rebuilt AFTER the 2026-07-04 C++ changes** (dir-flip latch, PD_STAND blend, yaw guard, fall guard — §8 build). | laptop→MDU | ✅ code / ⛔ rebuild+ship pending |
