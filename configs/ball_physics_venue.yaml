@@ -138,6 +138,12 @@ capture:
   # (<= 1 policy step @50 Hz). Training delay_steps=2 (40 ms) is therefore a CONSERVATIVE upper
   # bound. Timestamp-based precise measurement demoted to opportunistic (next venue session).
   e2e_latency_bound_ms: 20
+  # FULL-LOOP budget incl. OUR algorithm (franco Q 2026-07-04): mocap+transmission <=20 ms
+  # + planner/policy compute ~1-5 ms (tiny MLP + numpy planner; negligible on 5090, small even
+  # on the onboard SoC) + command transport ~5 ms + up-to-half-step quantization ~10 ms
+  # => ~30-40 ms total. Training's target_delay_steps=2 (40 ms @50 Hz) therefore matches the
+  # MEASURED full loop almost exactly ("正正好好") — the lumped-delay model covers algorithm
+  # latency; the extra inherent 1-step action application in sim mirrors deploy's next-tick apply.
   position_noise:           # ball-centroid error (采集误差) — NOT white (§9.3 MC)
     white_mm: 1.9           # per-axis white component
     ar1_marginal_mm: 5.2    # per-axis correlated AR(1) component

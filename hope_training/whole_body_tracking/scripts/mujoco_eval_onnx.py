@@ -334,6 +334,11 @@ class OnnxPolicy:
         self.obs_mean = self.obs_std = None
         self.obs_eps = 1e-2                      # rsl_rl EmpiricalNormalization default
         self.obs_norm_path = None
+        # Double-normalization guard: exports made with standalone_onnx_export.py --bake-obs-norm
+        # carry obs_norm_baked=1 in metadata and must NOT get the sidecar on top.
+        if str(self.meta.get("obs_norm_baked", "0")) == "1":
+            print("[mj-sim2sim] obs normalization BAKED into the ONNX graph (metadata) — sidecar skipped")
+            obs_norm = "off"
         if obs_norm != "off":
             path = obs_norm if obs_norm not in (None, "auto") else \
                 os.path.join(os.path.dirname(os.path.abspath(onnx_path)), "obs_norm.npz")

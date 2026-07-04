@@ -78,6 +78,8 @@ def main() -> int:
     p.add_argument("--harvest", required=True, help="motion-buffer npz produced by harvest_onnx_motion.py from the donor")
     p.add_argument("--out", required=True)
     p.add_argument("--run-path", default="standalone-export")
+    p.add_argument("--bake-obs-norm", action="store_true",
+                   help="bake the checkpoint's empirical obs normalization into the graph (DEPLOY artifacts)")
     args = p.parse_args()
 
     ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
@@ -96,7 +98,18 @@ def main() -> int:
     # as an `obs_norm.npz` SIDECAR next to the ONNX (scripts/make_std_sidecar.py), applied by
     # scripts/mujoco_eval_onnx.py before inference. If you ever bake the normalizer INTO an export,
     # do NOT ship the sidecar next to it (it would be applied twice).
-    normalizer = nn.Identity()
+    if args.bake_obs_norm:
+        # DEPLOY FIX (2026-07-04 P0): training uses empirical_normalization=true, so the raw actor
+        # is lobotomized on raw obs. Baking (x-mean)/(std+eps) INTO the graph makes the artifact
+        # self-contained for the C++ deploy runner (which has no normalization stage). Metadata
+        # obs_norm_baked=1 tells eval harnesses NOT to also apply the sidecar (double-norm guard).
+        from rsl_rl.modules import EmpiricalNormalization
+
+        normalizer = EmpiricalNormalization(shape=[in_dim])
+        normalizer.load_state_dict(ckpt["obs_norm_state_dict"])
+        normalizer.eval()
+    else:
+        normalizer = nn.Identity()
 
     clips = [dict(np.load(args.fh)), dict(np.load(args.bh))]
     seg_lengths = [c["joint_pos"].shape[0] for c in clips]
@@ -132,6 +145,8 @@ def main() -> int:
         f"same motion pair (otherwise gains/obs metadata may not match either)"
     )
     donor_meta["run_path"] = args.run_path
+    if args.bake_obs_norm:
+        donor_meta["obs_norm_baked"] = "1"
 
     model = onnx.load(out_path)
     del model.metadata_props[:]
