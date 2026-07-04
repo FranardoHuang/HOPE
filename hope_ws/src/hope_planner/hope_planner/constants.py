@@ -17,6 +17,13 @@ class TableParams:
     length: float = 2.74          # m, along X
     width: float = 1.525          # m, along -Y
     height: float = 0.76          # m, table surface above floor
+    # Table Y span = [y_max - width, y_max]. Default 0.0 = the ARENA convention
+    # (origin at the P1 near-side LEFT corner, table entirely at y<=0). The sim
+    # closed-loop harness centers the table on the robot (robot at y=0) and MUST
+    # override this (hope_planner.sim.yaml table_y_max: 0.7825) — a hardcoded
+    # arena band made every backhand serve off-table for the predictor: no bounce
+    # modeled, floor-slide garbage plans, zero backhand engages (2026-07-05).
+    y_max: float = 0.0            # m, table's +Y edge
     net_x: float = 1.37           # m, net position along X
     net_height: float = 0.1525    # m, net height above table surface
     net_overhang: float = 0.15    # m, net extends past each table edge in Y
