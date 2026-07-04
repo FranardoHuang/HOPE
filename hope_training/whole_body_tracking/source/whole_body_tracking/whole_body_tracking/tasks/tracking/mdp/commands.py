@@ -196,7 +196,15 @@ class MotionCommand(CommandTerm):
 
     @property
     def joint_vel(self) -> torch.Tensor:
-        return self.motion.joint_vel[self.time_steps]
+        # HOLD = a STATIONARY reference (2026-07-05): clip frame 0 is a mid-crouch
+        # TRANSIENT (knee +7.8 rad/s, torso -1.11 m/s DOWN in the hopex clips). Feeding
+        # its raw velocities through the whole hold taught the policy to fight a phantom
+        # squat at soft gains and made "sink slowly" the velocity-reward optimum — the
+        # AGI-sim / hardware bare-hold fall (Gate 2.5 P2, 3-5 s tip). A frozen reference
+        # is not moving: zero its velocities on held envs. The C++ runner mirrors this
+        # (pp_policy zeroes refs.joint_vel in its hold states) — keep them in lockstep.
+        jv = self.motion.joint_vel[self.time_steps]
+        return torch.where(self.in_hold[:, None], torch.zeros_like(jv), jv)
 
     @property
     def body_pos_w(self) -> torch.Tensor:
@@ -208,11 +216,15 @@ class MotionCommand(CommandTerm):
 
     @property
     def body_lin_vel_w(self) -> torch.Tensor:
-        return self.motion.body_lin_vel_w[self.time_steps]
+        # Zeroed during hold — see joint_vel. Un-gated motion_body_lin_vel otherwise
+        # pays for tracking frame-0's -1.11 m/s DOWNWARD torso velocity all hold long.
+        v = self.motion.body_lin_vel_w[self.time_steps]
+        return torch.where(self.in_hold[:, None, None], torch.zeros_like(v), v)
 
     @property
     def body_ang_vel_w(self) -> torch.Tensor:
-        return self.motion.body_ang_vel_w[self.time_steps]
+        v = self.motion.body_ang_vel_w[self.time_steps]
+        return torch.where(self.in_hold[:, None, None], torch.zeros_like(v), v)
 
     @property
     def anchor_pos_w(self) -> torch.Tensor:

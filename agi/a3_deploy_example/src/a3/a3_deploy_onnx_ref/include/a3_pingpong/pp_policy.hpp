@@ -594,7 +594,14 @@ class PpPolicy {
     }
     const int time_step = clip_.time_step_for(clip_id, tg.time_to_strike);
 
-    const PpRefs refs = onnx_.refs(time_step);
+    PpRefs refs = onnx_.refs(time_step);
+    // HOLD = a STATIONARY reference (2026-07-05, train==deploy lockstep): clip frame 0
+    // is a mid-crouch TRANSIENT (knee +7.8 rad/s, torso -1.11 m/s down) — feeding its
+    // raw velocities through the whole hold taught the policy to fight a phantom squat
+    // (the Gate 2.5 P2 3-5 s bare-hold tip). Training now zeroes the reference joint
+    // velocities on held envs (commands.py joint_vel); mirror it in every policy-hold
+    // state (level 0 = scripted hold AND the planner post-swing recovery hold).
+    if (level_.load() == 0) refs.joint_vel.setZero();
 
     if (!state.sync_aligned) ++sync_miss_;  // dropped/unaligned state packet count
 

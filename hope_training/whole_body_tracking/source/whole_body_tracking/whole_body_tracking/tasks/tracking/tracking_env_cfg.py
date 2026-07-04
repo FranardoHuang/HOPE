@@ -103,7 +103,9 @@ class CommandsCfg:
 class ActionsCfg:
     """Action specifications for the MDP."""
 
-    joint_pos = mdp.JointPositionActionCfg(asset_name="robot", joint_names=[".*"], use_default_offset=True)
+    # Clamped variant (2026-07-05): q_des limited to joint limits, matching the C++
+    # deploy runner's safety clamp — see mdp/hope_actions.py for the Gate 2.5 evidence.
+    joint_pos = mdp.ClampedJointPositionActionCfg(asset_name="robot", joint_names=[".*"], use_default_offset=True)
 
 
 @configclass
