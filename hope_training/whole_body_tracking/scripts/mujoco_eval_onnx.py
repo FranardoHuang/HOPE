@@ -336,7 +336,7 @@ class OnnxPolicy:
         self.obs_norm_path = None
         # Double-normalization guard: exports made with standalone_onnx_export.py --bake-obs-norm
         # carry obs_norm_baked=1 in metadata and must NOT get the sidecar on top.
-        if str(self.meta.get("obs_norm_baked", "0")) == "1":
+        if str(md.get("obs_norm_baked", "0")) == "1":
             print("[mj-sim2sim] obs normalization BAKED into the ONNX graph (metadata) — sidecar skipped")
             obs_norm = "off"
         if obs_norm != "off":
