@@ -1,0 +1,27 @@
+# SIM PROFILE overlay for hope_planner.yaml — AGI MuJoCo closed-loop (Gate 3).
+# Layered on top of hope_planner.yaml as a second --params-file (pp_planner_closedloop.sh / runbook §7).
+# Convention: sim world == table world, robot at origin, ground-truth pelvis pose
+# available on /sim/a3/pelvis_pose. Keep every sim-only deviation HERE (the base yaml
+# stays the arena/hardware truth); never edit the installed tree.
+hope_planner:
+  ros__parameters:
+    # Ball physics MUST match fake_ball_publisher's defaults (drag 0.15 / rest 0.85) —
+    # the base yaml keeps the arena-fit placeholders. Mismatch -> predicted ball dies
+    # before the hit plane -> strike plans at floor level -> target gate rejects all.
+    drag_k: 0.15
+    restitution_h: 0.85
+    restitution_v: 0.85
+    # softer returns: keeps the demanded racket speed near the trained ~2.2 m/s envelope
+    delta_t_flight: 0.7
+    # ADAPTIVE hit plane from the sim ground-truth pelvis pose (sim world == table frame).
+    # After the walk-and-strike lunge the robot stands AT the old plane; tracking the
+    # robot keeps subsequent serves reachable (multi-swing rally).
+    robot_pose_topic: "/sim/a3/pelvis_pose"
+    x_hit_offset: 0.67
+    # clamp = the training-box regime: pin the plane inside a fixed window so post-lunge
+    # regression stays the small trained back-step, never a long untrained walk-back.
+    # (No physical table in the sim -> window centered on the spawn-forward strike zone.)
+    x_hit_min: 0.55
+    x_hit_max: 2.20
+    # static fallback while no robot pose has arrived yet
+    x_hit: 0.65

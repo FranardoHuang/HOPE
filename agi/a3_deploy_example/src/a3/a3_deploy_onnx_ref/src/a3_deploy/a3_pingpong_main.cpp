@@ -25,6 +25,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <termios.h>
 #include <unistd.h>
@@ -175,7 +176,8 @@ void PrintDiagBlock(const a3_pingpong::PpPolicy::DiagSnapshot& d, bool legs_pass
 //   racket_target_pos_b [172..174] | racket_target_vel_w [175..177] |
 //   time_to_strike [178] | swing_type [179]
 void PrintObsDebugBlock(const a3_pingpong::PpPolicy::ObsDebug& d,
-                        const Eigen::VectorXd& action) {
+                        const Eigen::VectorXd& action,
+                        const std::string& planner_status = "") {
   if (!d.valid) return;
   const auto& o = d.obs;
   const bool dp = (o.size() == a3_pingpong::kObsDim175);  // deploy_parity (175) vs full (180)
@@ -194,10 +196,13 @@ void PrintObsDebugBlock(const a3_pingpong::PpPolicy::ObsDebug& d,
   }
   // racket_target_pos_b: full 180 -> o[172..174] (rel base); deploy 175 -> o[167..169] (rel racket FK).
   const int rp = dp ? 167 : 172;  // racket_target_pos_b start (vel_w follows, then tts, swing)
+  char src[64];
+  if (planner_status.empty()) std::snprintf(src, sizeof src, "SCRIPTED target -- no live planner");
+  else std::snprintf(src, sizeof src, "PLANNER: %s", planner_status.c_str());
   std::printf("   racket_target_pos_b=[%+.4f %+.4f %+.4f]  racket_target_vel_w=[%+.3f %+.3f %+.3f]  "
-              "tts=%.3f swing=%+.0f(%s)  [SCRIPTED target -- no live planner]\n",
+              "tts=%.3f swing=%+.0f(%s)  [%s]\n",
               o[rp], o[rp + 1], o[rp + 2], o[rp + 3], o[rp + 4], o[rp + 5], o[rp + 6], o[rp + 7],
-              o[rp + 7] >= 0 ? "FOREHAND" : "BACKHAND");
+              o[rp + 7] >= 0 ? "FOREHAND" : "BACKHAND", src);
   if (action.size() == a3_pingpong::kNumJoints)
     std::printf("   action[min/mean/max]=[%+.3f %+.3f %+.3f] |a|=%.3f\n",
                 action.minCoeff(), action.mean(), action.maxCoeff(), action.norm());
@@ -236,7 +241,9 @@ int main(int argc, char** argv) {
                  " [--gain-scale F] [--swing-speed F] [--stand-kp K --stand-kd D]\n"
                  "       [--reference-playback|--mode reference-playback]"
                  " [--no-publish|--dry-run] [--warmup-sec S]\n"
-                 "       [--loc-mode fabricated|perfect_tracking|oracle]"
+                 "       [--planner] (LIVE planner: racket <- /racket/command_flat, base <- /a3/base_pose_flat over ros2;"
+                 " [--engage-min-tts S] [--cmd-timeout S] [--invalid-grace S])\n"
+                 "       [--loc-mode fabricated|perfect_tracking|oracle|external_base]"
                  " [--perfect-tracking] [--oracle-pelvis] [--no-imu-yaw]\n"
                  "       [--oracle-shm PATH] [--oracle-max-age S]"
                  " [--trace-csv PATH] [--obs-csv PATH] [--shadow-frozen-clock]\n"
@@ -252,10 +259,18 @@ int main(int argc, char** argv) {
       Has(argc, argv, "--reference-playback") || run_mode == "reference-playback";
   const bool no_publish = Has(argc, argv, "--no-publish") || Has(argc, argv, "--dry-run");
 
+  // LIVE PLANNER mode (Path B): racket target from /racket/command_flat + mocap base pose
+  // from /a3/base_pose_flat, both over the AimRT ros2 backend; body-drive stays iceoryx.
+  const bool planner_mode = Has(argc, argv, "--planner");
+
   const std::string aimrt_override =
       Resolve(Flag(argc, argv, "--aimrt-cfg", ""), cfgdir);
-  const std::string aimrt_override_arg =
+  std::string aimrt_override_arg =
       Has(argc, argv, "--aimrt-cfg") ? aimrt_override : std::string{};
+  // In planner mode, default the AimRT transport cfg to the dual-plugin (iceoryx body-drive
+  // + ros2 planner inputs) unless the operator passed an explicit --aimrt-cfg.
+  if (planner_mode && aimrt_override_arg.empty())
+    aimrt_override_arg = Resolve("a3_aimrt_config.pingpong_ros2body.yaml", cfgdir);
 
   const std::string model_path =
       Resolve(cfg["onnx"]["model_path"].as<std::string>(), cfgdir);
@@ -286,11 +301,19 @@ int main(int argc, char** argv) {
   if (Has(argc, argv, "--loc-mode")) loc_mode_s = Flag(argc, argv, "--loc-mode", loc_mode_s);
   if (Has(argc, argv, "--perfect-tracking")) loc_mode_s = "perfect_tracking";
   if (Has(argc, argv, "--oracle-pelvis")) loc_mode_s = "oracle";
+  // Planner mode needs the target frame to match a REAL base: default to live mocap base
+  // (external_base) unless the operator picked a loc mode explicitly (e.g. --oracle-pelvis
+  // for the sim closed-loop rehearsal, where sim ground truth plays the mocap role).
+  const bool loc_mode_explicit = Has(argc, argv, "--loc-mode") ||
+      Has(argc, argv, "--perfect-tracking") || Has(argc, argv, "--oracle-pelvis");
+  if (planner_mode && !loc_mode_explicit) loc_mode_s = "external_base";
   a3_pingpong::LocMode loc_mode = a3_pingpong::LocMode::kFabricated;
   if (loc_mode_s == "perfect_tracking" || loc_mode_s == "B" || loc_mode_s == "b")
     loc_mode = a3_pingpong::LocMode::kPerfectTracking;
   else if (loc_mode_s == "oracle" || loc_mode_s == "C" || loc_mode_s == "c")
     loc_mode = a3_pingpong::LocMode::kOracle;
+  else if (loc_mode_s == "external_base" || loc_mode_s == "mocap")
+    loc_mode = a3_pingpong::LocMode::kExternalBase;
   else if (loc_mode_s == "fabricated" || loc_mode_s == "A" || loc_mode_s == "a")
     loc_mode = a3_pingpong::LocMode::kFabricated;
   else { std::cerr << "unknown loc_mode '" << loc_mode_s << "'\n"; return 2; }
@@ -321,7 +344,10 @@ int main(int argc, char** argv) {
 
   // --- our front-end ---
   a3_pingpong::PpPolicyConfig pcfg;
-  pcfg.level = level;
+  // Planner mode MUST start idle (level 0): the swing level is driven ONLY by the engage
+  // machine. Starting at level 1 makes PlannerEngageStep_ see "already swinging" on the
+  // first tick and skip the real engage (target/velocity never frozen -> a dead swing).
+  pcfg.level = planner_mode ? 0 : level;
   pcfg.legs_passive = Has(argc, argv, "--legs-passive");  // hold legs (hoisted demo)
   // Also hold the WAIST (slots 0..2) at nominal — keeps the torso CoM over the feet
   // when the static legs can't rebalance the policy's forward waist_pitch command.
@@ -367,12 +393,40 @@ int main(int argc, char** argv) {
   pcfg.single_swing = Has(argc, argv, "--single-swing");
   if (Has(argc, argv, "--swing-rest"))
     pcfg.swing_rest_s = std::stod(Flag(argc, argv, "--swing-rest", "1.5"));
+  // LIVE PLANNER: one clip per engage + a short settle before re-engaging (the wbc_runner
+  // swing_rest semantics). single_swing gives the linear clock + clip-end completion the
+  // engage machine relies on; swing_rest_s>=0 arms the inter-swing rest timer.
+  pcfg.planner_mode = planner_mode;
+  if (planner_mode) {
+    pcfg.single_swing = true;
+    if (!Has(argc, argv, "--swing-rest")) pcfg.swing_rest_s = 0.5;
+    pcfg.engage_min_tts_s = std::stod(Flag(argc, argv, "--engage-min-tts", "1.0"));
+    pcfg.command_timeout_s = std::stod(Flag(argc, argv, "--cmd-timeout", "0.5"));
+    pcfg.planner_invalid_grace_s = std::stod(Flag(argc, argv, "--invalid-grace", "0.25"));
+  }
   // YAW-ALIGN default ON (hardware fix: boot-drifted IMU yaw polluted motion_anchor_ori_b
   // by a constant -12..-38 deg in MDU captures -> the policy fought a fictional torso yaw
   // error with legs/waist and fell during free-standing swings; no-op in sim). Opt out for
   // A/B debugging only.
   pcfg.yaw_align = !Has(argc, argv, "--no-yaw-align");
   auto pp = std::make_unique<a3_pingpong::PpPolicy>(model_path, pcfg);
+
+  // ---- LIVE PLANNER input wiring (Path B) ----
+  // Backend AimRT subscribers (set BEFORE Start()) push decoded Float64MultiArrays into
+  // thread-safe holders that PpPolicy reads on the 50 Hz driver thread. The racket topic
+  // feeds the engage machine; the base topic feeds LocMode::kExternalBase.
+  if (planner_mode) {
+    auto racket_in = std::make_shared<a3_pingpong::PpRacketTargetInput>();
+    auto base_in = std::make_shared<a3_pingpong::PpBasePoseInput>();
+    pp->SetRacketInput(racket_in);
+    pp->SetBasePoseInput(base_in);
+    backend->SetRacketTargetCallback(
+        [racket_in](const std::vector<double>& a) { racket_in->SetFromFlat(a); });
+    backend->SetBasePoseCallback(
+        [base_in](const std::vector<double>& a) { base_in->SetFromFlat(a); });
+    std::cout << "[pingpong] LIVE PLANNER: racket <- /racket/command_flat, base <- "
+                 "/a3/base_pose_flat (std_msgs/Float64MultiArray, ros2); body-drive iceoryx\n";
+  }
 
   // ---- SIM-ONLY oracle localization wiring ----
   // The shm file is produced by scripts/oracle_pose_bridge.py (an rclpy node
@@ -511,6 +565,16 @@ int main(int argc, char** argv) {
   // 1.4 (trip at ~1.65) still catches a genuine leg collapse; real tilt is the tilt guard's job.
   const double squat_guard_rad = std::stod(Flag(argc, argv, "--squat-guard-rad", "1.4"));
   const double tilt_guard = std::stod(Flag(argc, argv, "--tilt-guard", "0.35"));
+  // ALWAYS-ON FALL GUARD (2026-07-04): every free-base test showed a FALLEN robot happily
+  // "swinging" on the floor — the only fall-adjacent check (tilt guard above) is gated on
+  // --auto-leg-hold and only drops to level 0 (still publishing a stiff stand). If the
+  // pelvis tilts past ~60 deg (|gravZ| < 0.5) for fall_guard_ticks consecutive ticks in
+  // any publishing mode, drop to PASSIVE (zero gains): stiff commands on a downed robot
+  // thrash it against the floor and burn motors. Disable (hoist rigs that pitch the
+  // pelvis, debugging) with --no-fall-guard.
+  const bool fall_guard = !Has(argc, argv, "--no-fall-guard");
+  const double fall_guard_gz = -0.5;   // body-frame gravity z above this = fallen
+  int fall_guard_ticks = 0;
   // LEG WEIGHT-BEARING: the released (level-1) legs default to the POLICY leg PD x --leg-gain-scale,
   // whose kp (~150 knee) is ~13x softer than AGI's official ground-stand knee kp (2000) -> the knees
   // SINK under real body load. --leg-stand-gains keeps the official ground-stand PD on the legs even
@@ -526,6 +590,8 @@ int main(int argc, char** argv) {
   const double policy_dt = cfg["policy_driver"]["policy_hz"]
                                ? 1.0 / cfg["policy_driver"]["policy_hz"].as<double>() : 0.02;
   Mode prev_mode_for_blend = Mode::kPassive;       // driver-thread only (no race)
+  std::uint64_t stand_enter_tick = 0;              // PD_STAND entry blend (2026-07-04)
+  Eigen::VectorXd stand_blend_q_start;
   std::uint64_t motion_enter_tick = 0;
   Eigen::VectorXd blend_q_start;
   int prev_level_for_blend = level;                // re-arm the pose-blend on a level toggle
@@ -545,7 +611,9 @@ int main(int argc, char** argv) {
                      trace_ptr, obscsv_ptr, loc_mode_int,
                      &shadow_tick, shadow_free_clock, motion_blend_sec, policy_dt,
                      &prev_mode_for_blend, &motion_enter_tick, &blend_q_start,
-                     &prev_level_for_blend, &prev_swing_dir_for_blend](
+                     &prev_level_for_blend, &prev_swing_dir_for_blend,
+                     &stand_enter_tick, &stand_blend_q_start,
+                     fall_guard, fall_guard_gz, &fall_guard_ticks](
                         std::uint64_t tick, const robot_io::RobotState& st,
                         robot_io::RobotCommand& cmd) -> bool {
     const Mode m = mode.load();
@@ -556,6 +624,21 @@ int main(int argc, char** argv) {
     // sets it) does not run in PASSIVE/PD_STAND, so without this the ground checks read a frozen
     // [0,0,-1].
     ppp->observe_imu(st);
+    // ALWAYS-ON FALL GUARD (see flag above): fallen -> PASSIVE, independent of --auto-leg-hold.
+    if (fall_guard && (m == Mode::kMotion || m == Mode::kPdStand)) {
+      const auto gfg = ppp->last_proj_grav();
+      if (gfg[2] > fall_guard_gz) {
+        if (++fall_guard_ticks >= 25) {  // ~0.5 s persistent at 50 Hz
+          mode.store(Mode::kPassive);
+          fall_guard_ticks = 0;
+          std::fprintf(stderr,
+              "[pp SAFETY] FALL GUARD: gravZ=%+.2f > %.2f for 0.5 s -> PASSIVE (zero gains). "
+              "Stand the robot up, then 's' -> 'm' to re-engage.\n", gfg[2], fall_guard_gz);
+        }
+      } else {
+        fall_guard_ticks = 0;
+      }
+    }
     // SQUAT/TILT SAFETY GUARD (auto-leg-hold, full-body swing only): if a released leg SINKS (knee
     // bends past nominal by > squat_guard_rad) or the body TILTS (|gravX|/|gravY| > tilt_guard),
     // revert to level 0 so the held official stand re-stiffens the legs. Backstop for hoist tests.
@@ -594,6 +677,7 @@ int main(int argc, char** argv) {
     prev_level_for_blend = cur_level;
     prev_swing_dir_for_blend = cur_swing_dir;
     const bool motion_just_entered = (m == Mode::kMotion && prev_mode_for_blend != Mode::kMotion);
+    const bool stand_just_entered = (m == Mode::kPdStand && prev_mode_for_blend != Mode::kPdStand);
     const bool rearm_blend = motion_just_entered || level_just_changed || dir_just_changed;
     if (rearm_blend) motion_enter_tick = tick;
     // Re-capture the IMU yaw-align offsets whenever the POLICY (SHADOW/MOTION) engages
@@ -619,6 +703,18 @@ int main(int argc, char** argv) {
       } else {               // gentle flat PD — clean on a HOIST (default)
         cmd.kp = Eigen::VectorXd::Constant(N, stand_kp);
         cmd.kd = Eigen::VectorXd::Constant(N, stand_kd);
+      }
+      // pose-blend on PD_STAND ENTRY (2026-07-04): 's' pressed mid-swing used to slam the
+      // stiff (kp~2000 knee) static stand target onto a moving robot with NO ramp — the
+      // same catapult class as the auto-leg-hold level drop, and the one transition the
+      // MOTION-only blend below did not cover. Ramp q_des from the entry pose.
+      if (motion_blend_sec > 1e-6 && st.q.size() == N) {
+        if (stand_just_entered) { stand_blend_q_start = st.q; stand_enter_tick = tick; }
+        if (stand_blend_q_start.size() == N) {
+          const double elapsed = static_cast<double>(tick - stand_enter_tick) * policy_dt;
+          const double a = std::min(1.0, std::max(0.0, elapsed / motion_blend_sec));
+          if (a < 1.0) cmd.q_des = (1.0 - a) * stand_blend_q_start + a * cmd.q_des;
+        }
       }
     } else if (m == Mode::kReferencePlayback) {
       if (!refp->ComputeCommand(tick, st, cmd)) return false;
@@ -749,7 +845,7 @@ int main(int argc, char** argv) {
       "[pingpong]  start_mode   = %-9s  (s=PD_STAND hold/NO swing, m=MOTION publish)\n"
       "[pingpong]  level        = %-9d  (0=hold/windup, 1=SWING)\n"
       "[pingpong]  swing_dir    = %-9s  (f=forehand / b=backhand keys)\n"
-      "[pingpong]  target_src   = SCRIPTED   (fixed front-right TEST target; NO live ball planner -- f/b only flips y-sign+clip)\n"
+      "[pingpong]  target_src   = %s\n"
       "[pingpong]  action_src   = ONNX policy (LEARNED 31-DOF action every tick; q_des = default_q + a*action_scale)\n"
       "[pingpong]  post_onnx    = neck[3,4] HELD q=0 kp40 kd2 | legs %-6s | q_des CLAMPED to A3 limits (nothing else overridden)\n"
       "[pingpong]  loc_mode     = %s\n"
@@ -767,6 +863,9 @@ int main(int argc, char** argv) {
       "[pingpong]  obs_csv      = %s\n"
       "[pingpong] =============================================\n",
       ModeName(default_mode), level, pp->swing_dir_name(),
+      planner_mode
+          ? "PLANNER  (live: racket <- /racket/command_flat, base <- /a3/base_pose_flat over ros2; engage machine drives swing)"
+          : "SCRIPTED (fixed front-right TEST target; NO live planner -- f/b only flips y-sign+clip)",
       pcfg.legs_passive ? "HELD" : "policy", pp->loc_mode_name(),
       pcfg.legs_passive ? "true" : "false",
       pcfg.legs_passive ? (legs_official_gains ? "official" : "trained") : "n/a (policy)",
@@ -825,6 +924,8 @@ int main(int argc, char** argv) {
               std::cout << "-> ref group " << gi << " ("
                         << a3_pingpong::RefPlaybackGroupName(refp->group())
                         << "), HOLD; press r to move\n";
+            } else if (planner_mode) {
+              std::cout << "-> level key ignored (PLANNER drives swing engage)\n";
             } else if (c == '0') {
               ppp->set_level(0); std::cout << "-> level 0 (hold)\n";
             } else if (c == '1') {
@@ -839,9 +940,11 @@ int main(int argc, char** argv) {
                     std::cout << "swing_speed=" << ppp->swing_speed() << "\n"; break;
           case '.': ppp->set_swing_speed(ppp->swing_speed() + 0.1);
                     std::cout << "swing_speed=" << ppp->swing_speed() << "\n"; break;
-          case 'f': ppp->set_swing_dir(+1);
+          case 'f': if (planner_mode) { std::cout << "-> f/b ignored (PLANNER picks the side)\n"; break; }
+                    ppp->set_swing_dir(+1);
                     std::cout << "-> swing dir = FOREHAND (scripted target -y, clip0)\n"; break;
-          case 'b': ppp->set_swing_dir(-1);
+          case 'b': if (planner_mode) { std::cout << "-> f/b ignored (PLANNER picks the side)\n"; break; }
+                    ppp->set_swing_dir(-1);
                     std::cout << "-> swing dir = BACKHAND (scripted target +y, clip1)\n"; break;
           case 'r': refp->Start(); mode.store(Mode::kReferencePlayback);
                     std::cout << "-> REFERENCE_PLAYBACK moving group="
@@ -934,7 +1037,8 @@ int main(int argc, char** argv) {
                   "Lleg cmdR=%.3f measR=%.3f | Rleg cmdR=%.3f measR=%.3f  (rad, peak this window)\n",
                   ppp->legs_passive() ? 1 : 0, waist_c, waist_m, lleg_c, lleg_m, rleg_c, rleg_m);
       PrintDiagBlock(diag, ppp->legs_passive());  // per-joint cmd-vs-meas block (SHADOW/MOTION)
-      PrintObsDebugBlock(obsd, ppp->last_action());  // obs slices + stats
+      PrintObsDebugBlock(obsd, ppp->last_action(),
+                         ppp->planner_mode() ? ppp->planner_status() : std::string{});  // obs slices + stats
       // one-shot warning if any joint is hitting its clamp on a large fraction of
       // ticks (the documented waist_roll mismatch): the policy keeps commanding
       // beyond the A3 limit. NOT a fault (clamp keeps it safe) — a tuning flag.

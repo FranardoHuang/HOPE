@@ -7,20 +7,36 @@ hope_planner:
     # and count the ball's index. TODO: confirm against your live /poses.
     ball_pose_index: 0
     # Virtual hit plane X (m); ~0.0 = HOPE origin end of table. MUST be matched to the
-    # ROBOT PLACEMENT: the current deploy_parity policy (model_7500_hopex / model_9000)
+    # ROBOT PLACEMENT: the current deploy_parity policy (model_11400/7500_hopex lineage)
     # strikes at base-relative x in [0.56, 0.78] (box center 0.67), so
     # x_hit ≈ robot_start_x + 0.67. Default assumes the robot at table x = -0.5
-    # (wbc_runner.yaml robot_start_xy_table) -> x_hit = 0.17. Targets the swing can't
-    # reach are rejected by the wbc_runner's base-relative target gate
-    # (idle_reason=target_gate in its diagnostics) — if you see that constantly,
-    # x_hit and robot_start_xy_table disagree.
+    # -> x_hit = 0.17 (runbook §9.3 recommends x = -0.8 -> -0.13). Targets the swing
+    # can't reach are rejected by the C++ runner's base-relative target gate
+    # ([pp gate] REJECT in its log) — if you see that constantly, x_hit and the
+    # actual robot placement disagree.
+    # STATIC FALLBACK ONLY when robot_pose_topic is empty / silent (see below).
     x_hit: 0.17
+    # --- ADAPTIVE hit plane (2026-07-04, REQUIRED for multi-swing rallies) ---
+    # The trained policy WALKS to the strike (lunge ~0.5-0.8 m); with a static plane the
+    # robot ends standing ON it and every later plan is unreachable (one swing per
+    # session, Gate 3 finding). With the robot pose feed:
+    #   x_hit = clamp(robot_x + x_hit_offset, x_hit_min, x_hit_max)
+    # x_hit_offset 0.67 = policy strike-box center (base-relative).
+    # x_hit_max PROTECTS THE TABLE: clamping the plane at 0.35 keeps the demanded strike
+    # (and therefore the lunge endpoint, plane - 0.67) at pelvis x <= -0.32, ~30 cm short
+    # of the table edge x=0. The clamp also reproduces the training regime (targets in a
+    # FIXED world box): post-lunge the next target sits slightly behind -> the small
+    # trained back-step, never a long untrained walk-back.
+    robot_pose_topic: "/P1/pose"    # arena mocap robot pose (table frame, position-only)
+    x_hit_offset: 0.67
+    x_hit_min: 0.0
+    x_hit_max: 0.35
     target_land_x: 2.055   # opponent half-center X (fixed by table geometry)
     target_land_y: -0.7625 # opponent half-center Y (fixed by table geometry)
     # Desired return flight time (s). ALIGNED to the current policy's racket-speed
     # envelope: the deploy_parity vel boxes cap at |v|≈3.0 m/s, and the required racket
     # speed ≈ (v_out + C_r·v_in)/(1+C_r) — at 0.5 s the demanded speed is ~4-6 m/s
-    # (every command OOD -> wbc_runner target gate stands). 0.65 s keeps demands inside
+    # (every command OOD -> the runner's target gate stands). 0.65 s keeps demands inside
     # the trained envelope for moderate serves; slower/faster policies retune this.
     delta_t_flight: 0.65
     # TODO(calibrate): drag + restitution. HOW TO GET: record >=15 ball trajectories
@@ -33,11 +49,30 @@ hope_planner:
     # 10 m/s (~8x too high; single salvaged recording, bad fit). Consequences:
     # predictions kill the ball before the hit plane, and the drag-aware outgoing-
     # velocity solve demands |v_racket| 4.6-10 m/s — ALL out of the policy's trained
-    # envelope (max ~3.0), so the wbc_runner target gate stands on every ball.
+    # envelope (max ~3.0), so the runner's target gate stands on every ball.
     # With a plausible k (0.11-0.15) demands drop to 0.8-1.0 m/s (verified offline).
     # RE-FIT from the 2026-07-03 venue recordings before hardware (yikang's task);
     # until then override on the command line: -p drag_k:=0.15.
-    drag_k: 0         # Todo: Calibrated from salvaged traj01 (SUSPECT — see above)
-    restitution_h: 0  # Todo: Calibrated from salvaged traj01 split into 15 toss chunks.
-    restitution_v: 0  # Todo: Calibrated from salvaged traj01 split into 15 toss chunks.
-    restitution_racket: 0  # TODO: calibrate (ball-racket restitution)
+    # INTERIM VALUES (2026-07-04): filled with the documented bring-up interims so the
+    # chain runs; the 2026-07-03 venue re-fit (yikang) REPLACES these when it lands.
+    # 0 placeholders made the planner predict a drag-free ball — also wrong.
+    drag_k: 0.15          # INTERIM physical estimate (k = rho*Cd*A/2m ≈ 0.11-0.15 for a
+                          # 40 mm 2.7 g ball); salvaged-traj01 fit 0.8781 is REJECTED (8x
+                          # too high, see analysis above). RE-FIT from venue recordings.
+    restitution_h: 0.85   # INTERIM: salvaged traj01 fit = 0.8527 (single session, rounded)
+    restitution_v: 0.85   # INTERIM: salvaged traj01 fit = 0.8518 (single session, rounded)
+    restitution_racket: 0.88  # HITTER default C_r (constants.py); calibrate when possible
+
+    # --- FLAT outputs for the C++ --planner runner (Path A live mode, 2026-07-04) ---
+    # The native runner subscribes std_msgs/Float64MultiArray (no hope_msgs typesupport
+    # needed on the aarch64 MDU): /racket/command_flat mirrors /racket/command, and
+    # /a3/base_pose_flat streams the robot base pose (from robot_pose_topic) for the
+    # runner's external_base localization (the ONLY control path since 2026-07-04).
+    publish_flat_cmd: true
+    racket_flat_topic: "/racket/command_flat"
+    base_flat_topic: "/a3/base_pose_flat"
+    # ⚠ VENUE FILL (same measurement as hope_world_frame.yaml mocap_to_base_link / G8):
+    # P1 marker-cluster -> base_link offset (metres, base frame), applied to
+    # robot_pose_topic before publishing the base flat. Arena /P1/pose is the MARKER
+    # CLUSTER; the policy base is the PELVIS. Sim (/sim/a3/pelvis_pose) needs [0,0,0].
+    marker_to_base_xyz: [0.0, 0.0, 0.0]

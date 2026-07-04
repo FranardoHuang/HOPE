@@ -24,6 +24,8 @@
 #include "joint_msgs/msg/joint_command.hpp"
 #include "joint_msgs/msg/joint_state.hpp"
 #include "sensor_msgs/msg/imu.hpp"
+#include "std_msgs/msg/detail/float64_multi_array__rosidl_typesupport_fastrtps_cpp.hpp"
+#include "std_msgs/msg/float64_multi_array.hpp"
 
 #ifdef HAS_A3_TA_PROTO
 #include "aimdk/protocol/ta/ta_channel.pb.h"
@@ -72,6 +74,9 @@ void AnchorJointMsgsFastRtpsTypesupport() {
       rosidl_typesupport_fastrtps_cpp, joint_msgs, msg, JointCommand)();
   (void)ROSIDL_TYPESUPPORT_INTERFACE__MESSAGE_SYMBOL_NAME(
       rosidl_typesupport_fastrtps_cpp, joint_msgs, msg, JointState)();
+  // Same for the std_msgs Float64MultiArray carried by the live-planner subscribers.
+  (void)ROSIDL_TYPESUPPORT_INTERFACE__MESSAGE_SYMBOL_NAME(
+      rosidl_typesupport_fastrtps_cpp, std_msgs, msg, Float64MultiArray)();
 }
 #endif
 
@@ -478,6 +483,33 @@ bool A3AimrtBackend::RegisterPubSub_() {
                    "HAS_A3_TA_PROTO is not defined; /ta subscriber disabled\n";
     }
 #endif
+
+    // ---- LIVE PLANNER inputs (std_msgs/Float64MultiArray over the ros2 backend) ----
+    // Registered only when a callback is set (mirrors the teleop hook). These ride the
+    // AimRT ros2_plugin while /body_drive stays on iceoryx (see a3_aimrt_config.pingpong_
+    // ros2body.yaml). The flat float array dodges vendoring hope_msgs typesupport on aarch64.
+    if (racket_target_cb_) {
+      auto racket_sub = ch.GetSubscriber(racket_topic_);
+      if (!aimrt::channel::Subscribe<std_msgs::msg::Float64MultiArray>(
+              racket_sub,
+              [this](const std::shared_ptr<const std_msgs::msg::Float64MultiArray>& msg) {
+                if (!msg || !racket_target_cb_) return;
+                racket_target_cb_(msg->data);
+              }))
+        throw std::runtime_error("subscribe racket target failed");
+      std::cerr << "[a3_backend] racket target subscriber enabled: " << racket_topic_ << "\n";
+    }
+    if (base_pose_cb_) {
+      auto base_sub = ch.GetSubscriber(base_pose_topic_);
+      if (!aimrt::channel::Subscribe<std_msgs::msg::Float64MultiArray>(
+              base_sub,
+              [this](const std::shared_ptr<const std_msgs::msg::Float64MultiArray>& msg) {
+                if (!msg || !base_pose_cb_) return;
+                base_pose_cb_(msg->data);
+              }))
+        throw std::runtime_error("subscribe base pose failed");
+      std::cerr << "[a3_backend] base pose subscriber enabled: " << base_pose_topic_ << "\n";
+    }
   } catch (const std::exception& e) {
     std::cerr << "[a3_backend] RegisterPubSub_ failed: " << e.what() << "\n";
     return false;
@@ -632,6 +664,19 @@ void A3AimrtBackend::SetTeleopFrameCallback(TeleopFrameCallback cb) {
 
 void A3AimrtBackend::SetTeleopTopic(std::string topic) {
   if (!topic.empty()) teleop_topic_ = std::move(topic);
+}
+
+void A3AimrtBackend::SetRacketTargetCallback(FlatArrayCallback cb) {
+  racket_target_cb_ = std::move(cb);
+}
+void A3AimrtBackend::SetRacketTopic(std::string topic) {
+  if (!topic.empty()) racket_topic_ = std::move(topic);
+}
+void A3AimrtBackend::SetBasePoseCallback(FlatArrayCallback cb) {
+  base_pose_cb_ = std::move(cb);
+}
+void A3AimrtBackend::SetBasePoseTopic(std::string topic) {
+  if (!topic.empty()) base_pose_topic_ = std::move(topic);
 }
 
 void A3AimrtBackend::OnSyncState_(const RobotState& state) {

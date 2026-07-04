@@ -68,7 +68,7 @@ echo "[watch] watch the viewer; keys: 1/0 swing/hold, f/b forehand/backhand, q q
 # so periodic mode SNAPS the reference mid-follow-through (the free-base toppling mode).
 cd "$DIST"
 A3_SOURCE_ROBOT_ENV=0 A3_TRANSPORT=iceoryx LD_LIBRARY_PATH=".:/opt/ros/jazzy/lib" \
-  ./run_a3_pingpong.sh --start motion --level 1 --official-stand --auto-leg-hold --warmup-sec "$WARMUP" \
+  ./run_a3_pingpong.sh --start motion --level 1 --official-stand --warmup-sec "$WARMUP" \
   ${RUN_EXTRA:-} "$@"
 
 echo "[watch] runner exited; cleaning up sim"

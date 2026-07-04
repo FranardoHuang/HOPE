@@ -1,5 +1,11 @@
 # Sim2Real Bridge: mocap → planner → WBC runner → robot
 
+> ⚠ **RETIRED 2026-07-04 — HISTORICAL DOCUMENT.** The python control chain described
+> here (`hope_wbc_runner` + `agibot_hardware_bridge` + `hope_pingpong_sim2real.launch.py`)
+> was removed from the repo; the C++ runner's `--planner` mode is the only control path
+> ([run_pingpong_end_to_end.md](run_pingpong_end_to_end.md) §0 retirement note).
+> Only the mocap-relay and `hope_planner` sections still describe live components.
+
 **Status: implemented + dry-run-verified 2026-07-03.** This is the ROS 2 chain that
 connects the AvatarPro/CMTracker mocap through the real `hope_planner` to the
 `hope_wbc_runner` (and, in hardware mode, through `agibot_hardware_bridge` to the

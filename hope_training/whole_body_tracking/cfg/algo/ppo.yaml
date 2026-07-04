@@ -20,6 +20,15 @@ runner:
   max_iterations: 300000000000        # total PPO iterations
   # -------------------------------------------------------------------------
   save_interval: 100           # checkpoint every N iterations
+  # ⚠ DEAD FLAG (verified 2026-07-04): this deprecated runner-level key is BLOCKED by
+  # rsl_rl 3.1.2's shim because the IsaacLab policy cfg emits
+  # `actor_obs_normalization: {}` (empty dict != None -> shim skips; {} is falsy ->
+  # ActorCritic uses Identity). NO run in this lineage ever normalized observations:
+  # checkpoints carry no normalizer state and every exported ONNX is obs->Gemm direct
+  # (verified across all 6 deployed models). Deploy correctly feeds RAW obs — matching
+  # training. To ACTUALLY enable normalization in a future retrain set
+  # policy.actor_obs_normalization: true (bool) — the exporter will then bake Sub/Div
+  # into the ONNX (deploy still feeds raw obs; no runner change needed).
   empirical_normalization: true
 
 policy:
