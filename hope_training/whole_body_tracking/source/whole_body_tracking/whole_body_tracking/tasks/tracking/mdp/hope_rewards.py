@@ -207,18 +207,25 @@ def virtual_pass_net(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
 
 
 def virtual_landing(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
-    """Landing-accuracy kernel + in-bounds bonus for the virtual shot (v0 ``landing_in_opponent_half``).
+    """Landing-accuracy kernel + fully-gated in-bounds bonus (v0 ``landing_in_opponent_half``).
 
-    Gaussian on ||landing_xy - target_xy|| gated on net clearance (anti net-farming, v0 parity);
-    the +1.0 in-bounds bonus additionally requires landing DEPTH past net_x + vb_min_landing_depth
-    so a just-over-the-net dink cannot collect it (verify (c)1). RewTerm weight POSITIVE.
+    CLIMB-PHASE shape (2026-07-04): the Gaussian kernel on ||landing_xy - target_xy|| pays for any
+    landing inside the rollout horizon — NOT gated on net clearance. The E-warm-started policy
+    lands ~1.9 m short of the target and reaches the net plane on only a few % of strikes, so both
+    net-gated terms stayed ~zero for 5k+ iterations (vb_warmE14k3/4); this kernel is the dense
+    bottom rung that pays for hitting DEEPER. Net-farming risk is bounded: the rollout has no net
+    collider, so the kernel is smooth through the net plane with its single max AT the target —
+    drilling the net base (err ~0.75 m) always pays less than clearing and landing deeper. The
+    +1.0 bonus keeps the full gate: net clearance AND on-opponent AND depth past
+    net_x + vb_min_landing_depth (verify (c)1 dink guard). Re-tighten (restore the net_clear gate
+    on the kernel, sigma back toward 0.3) once virtual_net_clear_rate is healthy. RewTerm weight
+    POSITIVE.
     """
     cmd = _cmd(env, command_name)
     dist2 = torch.sum(torch.square(cmd.vb_landing_xy - cmd._vb_target_xy.unsqueeze(0)), dim=-1)
     kernel = torch.exp(-dist2 / float(cmd.cfg.vb_landing_sigma) ** 2)
-    valid = cmd.vb_landing_valid & cmd.vb_net_clear
-    bonus = (valid & cmd.vb_on_opponent & cmd.vb_depth_ok).float()
-    raw = kernel * valid.float() + bonus
+    bonus = (cmd.vb_landing_valid & cmd.vb_net_clear & cmd.vb_on_opponent & cmd.vb_depth_ok).float()
+    raw = kernel * cmd.vb_landing_valid.float() + bonus
     return raw * cmd.vb_fired.float()
 
 
