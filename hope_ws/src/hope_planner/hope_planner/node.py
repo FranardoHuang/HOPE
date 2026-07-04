@@ -22,6 +22,7 @@ from hope_msgs.msg import RacketCommand
 from .ball_kalman_estimator import BallKalmanEstimator
 from .constants import BallPhysics, PlannerConfig
 from .planner import HOPEPlanner
+from .strike_spec_planner import StrikeSpecPlanner
 
 
 class HOPEPlannerNode(Node):
@@ -41,6 +42,10 @@ class HOPEPlannerNode(Node):
         self.declare_parameter("restitution_v", 0.9215)   # venue table e_n
         self.declare_parameter("restitution_racket", 0.654)  # paddle e const; e(u_n) exp form applied in racket_target_planner
         self.declare_parameter("use_kalman", False)          # shadow-run the EKF next to the polyfit estimator
+        self.declare_parameter("publish_strike_spec", False)  # diagnostics-only strike-spec inverse solve
+        self.declare_parameter("racket_speed_budget", 10.0)   # m/s cap for the spec solve — diagnostic
+                                                              # sanity bound, above venue strike speeds
+                                                              # (paddle u_n fit envelope tops out 7.2 m/s)
 
         self._ball_index = int(self.get_parameter("ball_pose_index").value)
 
@@ -70,6 +75,20 @@ class HOPEPlannerNode(Node):
         self._kf = BallKalmanEstimator(config, physics) if config.use_kalman else None
         self._kf_pos_delta = float("nan")
         self._kf_vel_delta = float("nan")
+
+        # Flag-gated strike-spec DIAGNOSTICS: inverse-solve the racket control
+        # variables (face tilt, v_n, v_t) + their landing sensitivities next to
+        # the existing racket command. Does NOT touch the command path. The LM
+        # solve costs ~0.3 s, so it is throttled to at most 1 Hz rather than
+        # running per 300 Hz mocap frame.
+        self._publish_strike_spec = bool(self.get_parameter("publish_strike_spec").value)
+        self._racket_speed_budget = float(self.get_parameter("racket_speed_budget").value)
+        self._spec_planner = (
+            StrikeSpecPlanner(physics=physics, config=config)
+            if self._publish_strike_spec else None
+        )
+        self._last_spec = None
+        self._spec_next_t = float("-inf")
 
         # Best-effort, depth-1 QoS for high-rate mocap topics (REP-2003 sensor style).
         mocap_qos = QoSProfile(
@@ -162,6 +181,36 @@ class HOPEPlannerNode(Node):
         out.predicted_bounces = int(cmd.num_bounces)
         self.cmd_pub.publish(out)
 
+        # Strike-spec diagnostics AFTER the command publish so the solve
+        # latency never delays the command itself.
+        if self._spec_planner is not None and cmd.valid and t >= self._spec_next_t:
+            self._spec_next_t = t + 1.0
+            strike = self.planner.strike_target
+            if strike is not None and strike.valid:
+                # Legacy command path is spin-blind -> omega None (zeros);
+                # promote to the EKF/spin estimate when that path lands.
+                self._last_spec = self._spec_planner.solve(
+                    strike.p_ball, strike.v_ball, None,
+                    self.planner.config.target_land[:2],
+                    self._racket_speed_budget,
+                )
+                if self._last_spec is not None:
+                    s = self._last_spec
+                    self.get_logger().info(
+                        "strike spec: tilt=(%.2f, %.2f) deg  v_n=%.2f  |v_t|=%.2f m/s  "
+                        "land=(%.3f, %.3f)  sens: %.3f m/deg pitch, %.3f m/deg yaw, "
+                        "%.3f m/(m/s) v_n, %.3f m/(m/s) v_t"
+                        % (
+                            s.tilt_pitch_deg, s.tilt_yaw_deg, s.v_n_signed,
+                            float(np.linalg.norm(s.v_t_vec)),
+                            s.landing_xy[0], s.landing_xy[1],
+                            float(np.linalg.norm(s.d_landing_d_pitch)),
+                            float(np.linalg.norm(s.d_landing_d_yaw)),
+                            float(np.linalg.norm(s.d_landing_d_v_n)),
+                            float(np.linalg.norm(s.d_landing_d_v_t)),
+                        )
+                    )
+
     def _publish_diagnostics(self) -> None:
         arr = DiagnosticArray()
         arr.header.stamp = self.get_clock().now().to_msg()
@@ -189,6 +238,30 @@ class HOPEPlannerNode(Node):
                 KeyValue(key="kf_vel_delta_mps", value=f"{self._kf_vel_delta:.4f}"),
                 KeyValue(key="kf_rejected", value=str(self._kf.rejected_count)),
             ]
+        if self._publish_strike_spec:
+            s = self._last_spec
+            if s is None:
+                status.values.append(KeyValue(key="spec_valid", value="False"))
+            else:
+                status.values += [
+                    KeyValue(key="spec_valid", value="True"),
+                    KeyValue(key="spec_tilt_pitch_deg", value=f"{s.tilt_pitch_deg:.3f}"),
+                    KeyValue(key="spec_tilt_yaw_deg", value=f"{s.tilt_yaw_deg:.3f}"),
+                    KeyValue(key="spec_v_n_mps", value=f"{s.v_n_signed:.3f}"),
+                    KeyValue(key="spec_v_t_mps", value=f"{np.linalg.norm(s.v_t_vec):.3f}"),
+                    KeyValue(key="spec_landing_x_m", value=f"{s.landing_xy[0]:.3f}"),
+                    KeyValue(key="spec_landing_y_m", value=f"{s.landing_xy[1]:.3f}"),
+                    # Landing-sensitivity norms = the control-precision budget:
+                    # how much landing error one unit of control error buys.
+                    KeyValue(key="spec_dland_dpitch_m_per_deg",
+                             value=f"{np.linalg.norm(s.d_landing_d_pitch):.4f}"),
+                    KeyValue(key="spec_dland_dyaw_m_per_deg",
+                             value=f"{np.linalg.norm(s.d_landing_d_yaw):.4f}"),
+                    KeyValue(key="spec_dland_dvn_m_per_mps",
+                             value=f"{np.linalg.norm(s.d_landing_d_v_n):.4f}"),
+                    KeyValue(key="spec_dland_dvt_m_per_mps",
+                             value=f"{np.linalg.norm(s.d_landing_d_v_t):.4f}"),
+                ]
         arr.status = [status]
         self.diag_pub.publish(arr)
 

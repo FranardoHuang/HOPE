@@ -89,3 +89,15 @@ class PlannerConfig:
     bounce_sigma_t: float = 0.2     # m/s post-bounce tangential vel std (grip refit degenerate, F5 in fit report)
     k_m: float = 0.00444            # Magnus accel coeff, flight.k_m, configs/ball_physics_venue.yaml
     mu_table: float = 0.25          # table friction, Ace prior — UNFITTED (venue F5 tangential refit degenerate)
+
+    # --- Paddle spin-impulse contact (ball_contact.py port of the training-side
+    # virtual_ball.predict_paddle_contact). Values MIRROR configs/
+    # ball_physics_venue.yaml contact.paddle / ball — do NOT read the yaml at
+    # runtime; if the venue refits, update both places (same rule as k/C_v above).
+    paddle_a_t: float = 0.52        # tangential gain, velocity-channel fit (CI [0.46, 0.61]);
+                                    # only a_t + b_t*cos(theta) identified (contacts near-normal)
+    paddle_b_t: float = 0.0         # bootstrap CI spans 0, AIC prefers b_t = 0
+    paddle_mu: float = 0.5          # friction cap mu_safety — never binds on venue data
+                                    # (impulse-ratio p90 = 0.27); keeps grazing hits sane
+    ball_inertia_coeff: float = 2.0 / 3.0  # hollow sphere I = c m R^2, ball.inertia_coeff
+                                    # (e_exp_g1/e_exp_g2 above are the same paddle fit — reused)

@@ -114,6 +114,44 @@ class BallTrajectoryPredictor:
         ])
         return v_out, w_out
 
+    def integrate_to_table_plane(
+        self,
+        p0: np.ndarray,
+        v0: np.ndarray,
+        omega0: Optional[np.ndarray] = None,
+    ) -> Optional[Tuple[np.ndarray, float]]:
+        """First DOWNWARD table-plane (z = 0) crossing of a post-strike flight.
+
+        Shares _flight_acceleration (drag + gravity + Magnus) and the Euler
+        scheme with predict() so the strike-spec planner's landing forward
+        model is the same physics as the incoming-ball prediction — no second
+        integrator to keep in sync. Spin is constant in flight (venue
+        measurement: spin decay consistent with zero, fit report §11.2).
+
+        Returns (landing_xy, flight_time_s) or None if the ball never crosses
+        z = 0 from above within config.max_predict_time.
+        """
+        dt = self.config.dt_integrate
+        max_steps = int(self.config.max_predict_time / dt)
+        p = np.asarray(p0, dtype=float).copy()
+        v = np.asarray(v0, dtype=float).copy()
+        omega = np.zeros(3) if omega0 is None else np.asarray(omega0, dtype=float)
+
+        t = 0.0
+        for _ in range(max_steps):
+            a = self._flight_acceleration(v, omega)
+            p_new = p + v * dt + 0.5 * a * dt ** 2
+            v_new = v + a * dt
+            t += dt
+            if p[2] > 0.0 and p_new[2] <= 0.0:
+                dz = p[2] - p_new[2]
+                frac = p[2] / dz if dz > 1e-12 else 0.5
+                frac = float(np.clip(frac, 0.0, 1.0))
+                p_land = p + frac * (p_new - p)
+                return p_land[:2].copy(), (t - dt) + frac * dt
+            p, v = p_new, v_new
+        return None
+
     def predict(
         self,
         p0: np.ndarray,
