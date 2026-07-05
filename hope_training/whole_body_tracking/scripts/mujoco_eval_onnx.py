@@ -445,7 +445,10 @@ class MujocoRobot:
             # under-shoot of fast swings at a 5 ms step). Put kd into the passive joint damping and
             # use MuJoCo's implicitfast integrator; the control torque then applies kp only.
             assert kd_for_implicit is not None
-            self.model.dof_damping[self.vadr] = kd_for_implicit
+            # ADD kd to whatever passive damping survives above (2026-07-05 fix): the old
+            # assignment OVERWROTE dof_damping, so --keep-passive + implicit silently lost
+            # the MJCF passive damping — the AGI plant has BOTH (passive + our commanded kd).
+            self.model.dof_damping[self.vadr] = self.model.dof_damping[self.vadr] + kd_for_implicit
             self.model.opt.integrator = int(self.mj.mjtIntegrator.mjINT_IMPLICITFAST)
 
     # --- state reads (all returned in ARTICULATION order or world/body frame as named) ----------

@@ -27,7 +27,7 @@ onnx:
   # PREVIOUS: model_9000_replane.onnx (2026-07-03_02-01-17; deploy-faithful gate 7/7 incl.
   # backhand, 0 falls). FALLBACK: model_p4_deployparity.onnx (forehand-only, strikes in
   # place — the safe hardware fallback; needs --no-imu-yaw for its validated behavior).
-  model_path: ../../../../assets/a3_runtime/models/model_11400_hopex.onnx
+  model_path: ../../../../assets/a3_runtime/models/model_16400_holdfix.onnx
   # The pingpong runner runs its ONNX on the CPU via the bundled onnxruntime — on rockchip too.
   # no_rknn tells build_a3_deploy_pkg.sh NOT to auto-promote to the RKNN/NPU path (which would
   # SystemExit on a missing <model>.rknn and block the standard rockchip staging).
