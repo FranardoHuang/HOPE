@@ -257,7 +257,7 @@ _RACKET_KEYS = (
     # translated below but previously missing from this whitelist
     "strike_phase_per_clip", "base_couple_blend", "base_couple_max_offset",
     # Stage-1 question bank (fixed contact point, inverse-solved face+velocity targets) + the
-    # face-command reward re-anchor / +3 actor obs channel. Defaults OFF.
+    # face-command reward re-anchor / +4 actor obs channel (normal + rho placeholder, 175->179).
     "question_bank", "face_command", "face_command_obs",
 )
 
@@ -688,7 +688,20 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             # the demanded normal (target_normal_cmd).
             _set_attr(C, "question_bank", _get(rk, "question_bank"), str, applied, "racket_target")
             _set_attr(C, "face_command", _get(rk, "face_command"), _as_bool, applied, "racket_target")
-            # face_command_obs (+3 actor dims): the obs groups were finalized in __post_init__
+            # Bank vs retiming: bank demanded velocities are ABSOLUTE physics answers (inverse-
+            # solved racket velocity for a real incoming ball) — a swing replayed at speed s cannot
+            # have its answer rescaled by s (the ball does not slow down). Same loud-fail pattern
+            # as _check_unknown_keys: never let the combination start and silently train wrong.
+            if str(getattr(C, "question_bank", "") or ""):
+                _ssr = tuple(float(x) for x in getattr(
+                    getattr(env_cfg.commands, "motion", None), "speed_scale_range", (1.0, 1.0)))
+                if _ssr != (1.0, 1.0):
+                    raise _OverrideError(
+                        f"[train.py] racket.question_bank is set but motion.speed_scale_range="
+                        f"{_ssr}: bank demanded velocities are absolute physics answers; retiming "
+                        "cannot scale them. Set motion.speed_scale_range: [1.0, 1.0] or drop the bank.")
+            # face_command_obs (+4 actor dims: demanded normal (3) + zero-filled rho placeholder (1),
+            # the contract-day 175 -> 179 layout): the obs groups were finalized in __post_init__
             # BEFORE overrides run, so setting env_cfg.face_command_obs here would be a silent
             # no-op — attach the ObsTerm directly (same term/tail position as the cfg switch).
             # The enabling experiment must update/remove actor_obs_contract in its YAML:
@@ -703,7 +716,8 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                     func=_mdp.racket_target_normal_cmd, params={"command_name": "racket_target"})
                 if hasattr(env_cfg, "face_command_obs"):
                     env_cfg.face_command_obs = True  # keep the descriptive cfg field honest
-                applied.append("observations.policy.racket_target_normal_cmd(+3D face-command obs)")
+                applied.append(
+                    "observations.policy.racket_target_normal_cmd(+4D face-command obs, 175->179)")
 
     # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
     # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.

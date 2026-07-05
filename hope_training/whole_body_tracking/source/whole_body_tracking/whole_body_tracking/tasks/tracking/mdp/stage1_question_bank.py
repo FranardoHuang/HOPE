@@ -91,6 +91,16 @@ def load_question_bank(
     )
 
 
+def face_command_obs_vector(normal: torch.Tensor) -> torch.Tensor:
+    """Contract-day 179-D face-command lane: ``[demanded normal (3), rho placeholder (1)]``.
+
+    rho (the S3 spin-lane scalar) is reserved NOW, zero-filled, so the actor layout matches the
+    frozen 175 -> 179 contract-day decision and S3 needs no further contract change / ladder
+    retrain. Pure tensor helper (unit-tested without the env); the obs term wraps it.
+    """
+    return torch.cat([normal, normal.new_zeros(normal.shape[:-1] + (1,))], dim=-1)
+
+
 def select_questions(
     bank: QuestionBank, clip_ids: torch.Tensor, u: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:

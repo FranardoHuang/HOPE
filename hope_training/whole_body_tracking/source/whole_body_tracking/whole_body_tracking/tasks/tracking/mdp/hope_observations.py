@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 from isaaclab.utils.math import quat_rotate_inverse, yaw_quat
 
 from whole_body_tracking.tasks.tracking.mdp.hope_commands import RacketTargetCommand
+from whole_body_tracking.tasks.tracking.mdp.stage1_question_bank import face_command_obs_vector
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -70,11 +71,13 @@ def swing_type(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
 
 
 def racket_target_normal_cmd(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
-    """Stage-1 face-command channel: the DEMANDED face normal (world frame, from the question bank),
-    a planner quantity at deploy time (StrikeSpec n). NOT in the frozen 175-D contract — only wired
-    into the actor when racket.face_command_obs is enabled (175 -> 178). Zeros when the question
-    bank is off (the buffer always exists)."""
-    return _cmd(env, command_name).target_normal_cmd
+    """Stage-1 face-command channel, 4-D per env: [DEMANDED face normal (3, world frame, question
+    bank / StrikeSpec n), rho placeholder (1, zero-filled)]. rho is the S3 spin-lane scalar,
+    reserved now so the layout matches the frozen contract-day 175 -> 179 decision and no ladder
+    retrain is needed later. NOT in the frozen 175-D contract — only wired into the actor when
+    racket.face_command_obs is enabled. Normal is zeros when the question bank is off (the buffer
+    always exists)."""
+    return face_command_obs_vector(_cmd(env, command_name).target_normal_cmd)
 
 
 # --- privileged (critic) observations: desired normal + actual racket state --------------- #

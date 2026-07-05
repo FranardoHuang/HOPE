@@ -129,6 +129,41 @@ def test_loud_errors(qb, tmpdir):
     print("[ok] errors: missing clip raises KeyError, mismatched arrays raise ValueError")
 
 
+def test_face_command_obs_vector(qb):
+    """Contract-day 179-D lane layout: [normal (3), rho placeholder (1) = 0]."""
+    normal = torch.randn(7, 3)
+    v = qb.face_command_obs_vector(normal)
+    assert v.shape == (7, 4), v.shape
+    assert torch.equal(v[:, :3], normal), "normal columns must pass through unmodified"
+    assert torch.all(v[:, 3] == 0.0), "rho placeholder column must be zero-filled"
+    # zeros in (bank off) -> zeros out, still 4-D
+    z = qb.face_command_obs_vector(torch.zeros(5, 3))
+    assert z.shape == (5, 4) and torch.all(z == 0.0)
+    print("[ok] obs: face_command_obs_vector = [normal(3), rho=0(1)] (N,4)")
+
+
+def test_generator_split_determinism():
+    """question_split: pure function of v_in (order/seed independent), ~80/20, disjoint sides."""
+    gen_path = os.path.join(HERE, "..", "scripts", "gen_stage1_questions.py")
+    spec = importlib.util.spec_from_file_location("s1_gen", os.path.abspath(gen_path))
+    gen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gen)  # top-level: argparse/os/sys/numpy only (planner import is in main)
+
+    rng = np.random.default_rng(123)
+    v = gen.sample_incoming(rng, 4000, 2.0, 5.0, 0.6, -2.0, 0.3)
+    lab = np.array([gen.question_split(row) for row in v])
+    # pure function of the row: shuffled evaluation order gives identical per-row labels
+    perm = rng.permutation(len(v))
+    lab_shuffled = np.empty_like(lab)
+    lab_shuffled[perm] = np.array([gen.question_split(row) for row in v[perm]])
+    assert (lab == lab_shuffled).all(), "split membership depended on evaluation order"
+    frac = float((lab == "exam").mean())
+    assert 0.15 < frac < 0.25, f"exam fraction {frac} outside the ~20% band"
+    # disjointness: no row is ever on both sides (trivial by construction, asserted anyway)
+    assert not (set(map(tuple, v[lab == "train"])) & set(map(tuple, v[lab == "exam"])))
+    print(f"[ok] split: deterministic per-question membership, exam fraction {frac:.1%}, disjoint")
+
+
 def main():
     qb = _load_module()
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -137,6 +172,8 @@ def main():
         bank = test_load_shapes_keying_padding(qb, bank_path, flat)
         test_select_fixed_point_and_matching_rows(qb, bank, flat)
         test_loud_errors(qb, tmpdir)
+    test_face_command_obs_vector(qb)
+    test_generator_split_determinism()
     print("ALL STAGE-1 WIRING TESTS PASSED")
 
 

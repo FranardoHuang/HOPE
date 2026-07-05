@@ -43,6 +43,11 @@ best suit robot returns). The two may legitimately differ (hopex clips are dry s
 latter exists). The scan therefore NEVER writes the registry: it prints suggested
 ``train_phase_candidates`` for a HUMAN to copy into the yaml as an independent field.
 
+TRAIN/EXAM SPLIT (--split {train,exam,all}, default all = current behavior): membership is a
+deterministic hash of each question's incoming velocity (question_split, ~80/20), NOT a seed/order
+partition — so a --split train bank and a --split exam bank are disjoint at ANY generation seeds.
+Exams are scored only on the exam split (docs/stage_curriculum_v1.md).
+
 Run (Mac base env or pod venv; numpy+torch+yaml):
     python scripts/gen_stage1_questions.py \
         --clip forehand:/workspace/shared/motions/hope_forehand_hopex.npz \
@@ -107,6 +112,24 @@ def sample_incoming(rng, n, speed_lo, speed_hi, vy_max, vz_lo, vz_hi):
     vx_sq = np.maximum(speed**2 - vy**2 - vz**2, 0.25)  # keep a real toward-robot component
     vx = -np.sqrt(vx_sq)
     return np.stack([vx, vy, vz], axis=1)
+
+
+EXAM_FRAC = 0.2  # deterministic hash-split target: ~80% train / ~20% exam
+
+
+def question_split(v_in_row) -> str:
+    """Deterministic train/exam membership of a question, a pure function of its incoming velocity.
+
+    blake2b over the ROUNDED (1e-4 m/s) v_in bytes -> uniform in [0, 1); < EXAM_FRAC = exam.
+    Membership depends ONLY on the question content, never on seed/order/solver outcome, so a
+    train bank and an exam bank generated at ANY seeds can never share a question — the exam is
+    guaranteed disjoint from training.
+    """
+    import hashlib
+
+    key = np.round(np.asarray(v_in_row, dtype=np.float64), 4).tobytes()
+    h = hashlib.blake2b(key, digest_size=8).digest()
+    return "exam" if int.from_bytes(h, "big") / 2.0**64 < EXAM_FRAC else "train"
 
 
 def phase_scan(asp, name: str, path: str, annotations: dict, args) -> None:
@@ -207,6 +230,10 @@ def main() -> int:
     ap.add_argument("--out", default=os.path.join(WBT, "cfg", "stage1_questions.npz"))
     ap.add_argument("--no-check", action="store_true",
                     help="skip the torch virtual-ball closed-loop self-test")
+    ap.add_argument("--split", choices=("train", "exam", "all"), default="all",
+                    help="keep only this side of the deterministic ~80/20 hash split on the "
+                         "incoming-velocity bytes (exam questions are disjoint from training at "
+                         "ANY seed); 'all' = no split (current behavior)")
     # --- phase-scan mode (per-frame returnability under the clip's own swing-velocity cone) ---
     ap.add_argument("--phase-scan", action="store_true",
                     help="scan EVERY frame's returnability instead of building the bank; prints "
@@ -247,8 +274,13 @@ def main() -> int:
         p_hope = p_env + env2hope
 
         v_in = sample_incoming(rng, args.n, *args.speed_range, args.vy_max, *args.vz_range)
+        # Deterministic train/exam membership per question (hash of v_in — see question_split);
+        # counted BEFORE solving so both counts and the answerable-fraction denominator are per split.
+        splits = np.array([question_split(v) for v in v_in])
+        n_train, n_exam = int((splits == "train").sum()), int((splits == "exam").sum())
+        sel = np.arange(args.n) if args.split == "all" else np.where(splits == args.split)[0]
         kept, normals, vels, diffs, residuals, landings, in_cone = [], [], [], [], [], [], []
-        for i in range(args.n):
+        for i in sel:
             s = planner.solve(p_hope, v_in[i], None, landing_hope, args.speed_budget)
             if s is None or s.residual_m > planner.TOL_M:
                 continue
@@ -269,10 +301,13 @@ def main() -> int:
             in_cone.append(bool(ang <= 25.0 and 0.6 * cs <= np.linalg.norm(s.v_r) <= 1.4 * cs))
 
         kept = np.array(kept, dtype=int)
-        rate = len(kept) / args.n
+        # The answerable-fraction denominator is the SELECTED split's question count, not args.n —
+        # with --split the un-selected side is never solved, so args.n would understate the rate.
+        rate = len(kept) / max(len(sel), 1)
         d = np.array(diffs)
         print(f"[{name}] strike point env={np.round(p_env, 3)} (clip frame {st['strike_frame']}/"
-              f"{st['n_frames']}), solvable {len(kept)}/{args.n} = {rate:.0%}")
+              f"{st['n_frames']}), split={args.split} (sampled {n_train} train / {n_exam} exam), "
+              f"solvable {len(kept)}/{len(sel)} = {rate:.0%}")
         if rate < 0.5:
             print(f"  ** WARNING: solvability <50% — the fixed strike point is badly placed for "
                   f"this speed range; move the point / relax the budget instead of training on this **")
@@ -318,7 +353,7 @@ def main() -> int:
 
     meta = dict(seed=args.seed, speed_range=args.speed_range, vy_max=args.vy_max,
                 vz_range=args.vz_range, landing_env=args.landing_env, near_x=args.near_x,
-                speed_budget=args.speed_budget)
+                speed_budget=args.speed_budget, split=args.split, exam_frac=EXAM_FRAC)
     flat = {f"{n}/{k}": v for n, b in banks.items() for k, v in b.items()}
     flat["meta_json"] = np.frombuffer(repr(meta).encode(), dtype=np.uint8)
     os.makedirs(os.path.dirname(args.out), exist_ok=True)

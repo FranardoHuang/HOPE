@@ -203,10 +203,14 @@ racket:
   # Per-swing targets from an offline inverse-solved bank (scripts/gen_stage1_questions.py): fixed
   # contact point per clip, solved racket velocity, DEMANDED face normal (the 175-D contract has no
   # normal-demand channel — the clip-locked face is the 0%-return root cause, eval mode B 2026-07-05).
-  # question_bank: cfg/stage1_questions.npz  # bank npz path; overrides pos/vel per resample
+  # question_bank: cfg/stage1_questions.npz  # bank npz path; overrides pos/vel per resample (also
+  #                                          # forces HER achieved replay off + pins the base target;
+  #                                          # HARD-ERRORS if motion.speed_scale_range != [1.0, 1.0])
   # face_command: true                       # racket_normal reward tracks the demanded normal
-  # face_command_obs: true                   # +3 actor obs (demanded normal appended LAST) — this
-  #                                          # grows the actor contract (175 -> 178 on deploy-parity);
+  #                                          # (requires question_bank — loud init error without it)
+  # face_command_obs: true                   # +4 actor obs appended LAST: demanded normal (3) +
+  #                                          # zero-filled rho placeholder (1, reserved S3 spin lane)
+  #                                          # = contract-day 175 -> 179 on deploy-parity;
   #                                          # update/remove actor_obs_contract when enabling
 
 # ---- domain randomization (HITTER-faithful) ---------------------------------

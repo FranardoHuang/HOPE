@@ -112,11 +112,37 @@ class RacketTargetCommand(CommandTerm):
         # unconditionally safe; it is only ever written when the bank is active.
         self.target_normal_cmd = torch.zeros(self.num_envs, 3, device=self.device)
         self._question_bank = None
+        # face_command without a bank would leave target_normal_cmd all-zero: the re-anchored
+        # racket_normal reward reads cos = <n_fk, 0> = 0 -> a CONSTANT kernel, i.e. the face reward
+        # silently dead while looking configured. Loud error instead.
+        if cfg.face_command and not cfg.question_bank:
+            raise ValueError(
+                "RacketTargetCommandCfg.face_command=True requires question_bank (npz path): "
+                "without a bank target_normal_cmd stays zeros and the re-anchored racket_normal "
+                "reward is silently dead. Set racket.question_bank or drop face_command."
+            )
         if cfg.question_bank:
             # Loaded ONCE (numpy npz -> per-clip torch tensors on device); clip order matches
             # _clip_names (0=forehand, 1=backhand). Loud error on a missing/empty clip.
             self._question_bank = load_question_bank(cfg.question_bank, device=self.device)
             self.metrics["question_difficulty_deg"] = torch.zeros(self.num_envs, device=self.device)
+            # HER achieved-target replay is bank-incompatible: the bank override runs AFTER the HER
+            # block in _sample_targets_uniform, so every replayed target would be clobbered — burned
+            # RNG/compute and a lying achieved_replay_frac (the DeployParity yaml defaults the mix
+            # to 0.30). Forced off, once, loudly; the HER block is also hard-gated on the bank.
+            if float(cfg.achieved_target_mix_prob) > 0.0:
+                print(
+                    f"[RacketTargetCommand] question_bank active -> achieved_target_mix_prob="
+                    f"{cfg.achieved_target_mix_prob} FORCED to 0.0 (HER replay targets would be "
+                    "clobbered by the bank override; S2b+ may revisit as a solver-verified variant)",
+                    flush=True,
+                )
+                cfg.achieved_target_mix_prob = 0.0
+            # S2a base pin: per-clip ready-anchor XY offset, evaluated ONCE from the bank's FIXED
+            # contact point through the same coupling as the per-question path (built lazily in
+            # _qb_base_anchor_off_xy — the reference reach offset needs the motion term, which is
+            # unresolved at __init__).
+            self._qb_base_anchor = None
             print(
                 f"[RacketTargetCommand] stage-1 question bank {cfg.question_bank}: "
                 f"questions per clip = {self._question_bank.counts.tolist()}",
@@ -846,7 +872,11 @@ class RacketTargetCommand(CommandTerm):
         # into the per-clip box inflated by achieved_clamp_inflate so replay can neither collapse the
         # target support nor drift outside the deploy runner's hand-synced target clips. Non-replayed
         # envs keep the pure box sample; the per-clip reference normal below is shared by both paths.
-        if self.cfg.achieved_target_mix_prob > 0.0 and motion._multiseg:
+        # Hard-gated on the question bank (belt to the init-time force-off braces): the bank
+        # override below would clobber every replayed target, so the replay draw AND the
+        # _resample_n_acc/_replay_n_acc accounting must never run — achieved_replay_frac would
+        # otherwise report replays that no env ever trained on.
+        if self.cfg.achieved_target_mix_prob > 0.0 and self._question_bank is None and motion._multiseg:
             env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
             clip_all = motion.clip_id[env_ids_t]
             replay = torch.rand(n, device=self.device) < float(self.cfg.achieved_target_mix_prob)
@@ -985,6 +1015,39 @@ class RacketTargetCommand(CommandTerm):
         # Held per env until its next resample; reset-mean reports the question difficulty mix.
         self.metrics["question_difficulty_deg"][env_ids] = diff
 
+    def _qb_base_anchor_off_xy(self) -> torch.Tensor:
+        """Per-clip PINNED ready-anchor XY offset from the env origin ((C, 2); cached after the
+        first call — the reference reach offset is unresolved at __init__).
+
+        S2a anti-cheat (stage_curriculum_v1): the base demand must NOT track the question. The
+        per-question coupling below re-derives base_xy from racket_target_pos_w every resample, so
+        once the question point starts varying (point_mode box+) it would leak each question's
+        contact point into the base demand and reward stepping toward it — exactly what the
+        stand-your-ground gate (root-XY excursion < 0.15 m, 0 steps) must rule out. Instead the
+        SAME coupling is evaluated ONCE with the bank's FIXED contact point and reused verbatim.
+        """
+        if self._qb_base_anchor is not None:
+            return self._qb_base_anchor
+        contact = self._question_bank.contact_pos  # (C, 3), tracking-env frame
+        if self.cfg.target_mode == "reference_perturbed":
+            self._ensure_reference_strike_state()
+            assert self._ref_reach_offset_xy_per_clip is not None
+            # Single-clip runs cache one reach offset row; clamp the gather like the samplers do.
+            idx = torch.arange(contact.shape[0], device=self.device).clamp_(
+                max=self._ref_reach_offset_xy_per_clip.shape[0] - 1
+            )
+            anchor = contact[:, :2] - self._ref_reach_offset_xy_per_clip[idx]
+        else:
+            # uniform coupling: origin + clamped Y blend toward the (fixed) contact point; X stays 0.
+            anchor = torch.zeros_like(contact[:, :2])
+            blend = float(self.cfg.base_couple_blend)
+            if blend > 0.0:
+                anchor[:, 1] = (blend * contact[:, 1]).clamp(
+                    -self.cfg.base_couple_max_offset, self.cfg.base_couple_max_offset
+                )
+        self._qb_base_anchor = anchor
+        return anchor
+
     def _resample_command(self, env_ids: Sequence[int]):
         if len(env_ids) == 0:
             return
@@ -1011,7 +1074,18 @@ class RacketTargetCommand(CommandTerm):
         # offset). Independent sampling used to fight the arm's reach (the base_position reward pulled
         # the base away from where the racket needed it). base_target_*_range is now a SMALL JITTER
         # around the coupled point. Legacy "uniform" mode keeps the old origin-relative sampling.
-        if self.cfg.target_mode == "reference_perturbed":
+        if self._question_bank is not None:
+            # Stage-1/S2a BASE PIN: fixed per-clip ready anchor (the coupling evaluated ONCE with
+            # the bank's fixed contact point — see _qb_base_anchor_off_xy), never the per-question
+            # coupling below. Numerically identical while the question point is fixed (S1); becomes
+            # load-bearing the moment the point varies (S2a box). base_target_*_range jitter still
+            # applies after, unchanged.
+            if motion._multiseg:
+                clip = motion.clip_id[env_ids]
+            else:
+                clip = torch.zeros(n, dtype=torch.long, device=self.device)
+            base_xy = origins[:, :2] + self._qb_base_anchor_off_xy()[clip]
+        elif self.cfg.target_mode == "reference_perturbed":
             self._ensure_reference_strike_state()
             assert self._ref_reach_offset_xy_per_clip is not None
             if motion._multiseg:

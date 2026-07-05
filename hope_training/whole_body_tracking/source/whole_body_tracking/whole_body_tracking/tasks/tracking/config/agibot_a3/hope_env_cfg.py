@@ -377,9 +377,11 @@ class HOPEDeployParityTerminationsCfg(TerminationsCfg):
 class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
     obs_mode: str = "full"  # descriptive; the deploy-parity variant is HOPEPingPongDeployParityAgibotA3EnvCfg
     # Stage-1 face-command obs switch (DEFAULT OFF = frozen actor contract, 175-D on deploy-parity).
-    # True -> append racket_target_normal_cmd (+3, the question bank's demanded face normal) to the
-    # actor group in __post_init__. train.py toggles this AFTER __post_init__ has run, so its
-    # racket.face_command_obs override attaches the term itself (same ObsTerm, same tail position).
+    # True -> append racket_target_normal_cmd (+4: demanded face normal (3) + zero-filled rho
+    # placeholder (1), the contract-day 175 -> 179 layout — rho is reserved for the S3 spin lane so
+    # no later contract change / ladder retrain) to the actor group in __post_init__. train.py
+    # toggles this AFTER __post_init__ has run, so its racket.face_command_obs override attaches
+    # the term itself (same ObsTerm, same tail position).
     face_command_obs: bool = False
     commands: HOPECommandsCfg = HOPECommandsCfg()
     observations: HOPEObservationsCfg = HOPEObservationsCfg()
