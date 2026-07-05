@@ -37,10 +37,15 @@ Use this file for short project-state updates that future humans and agents need
   retiming modulates VELOCITY amplitude; SPATIAL amplitude is the clip-trim axis (R6) — the two
   arms together are the no-new-data continuous-intensity v0.
 - **v5 clips processed to npz on the pod** (evening): `hope_{forehand,backhand}_v5.npz` (56/58
-  frames, re-grounded, phases [0.768, 0.345]) → ablation arm R15. P2.0 REVISED (franco): no
-  dedicated ready video — v5 first frames agree to 0.15 rad mean (shared ready anchor), last
-  frames 0.24-0.27 rad from first (RL fills the gap). Data flag: v5 forehand strike velocity +
-  face normal are +Y-dominant (sideways) — eyeball review before deploy use.
+  frames, re-grounded) → ablation arm R15. P2.0 REVISED (franco): no dedicated ready video — v5
+  first frames agree to 0.15 rad mean (shared ready anchor), last frames 0.24-0.27 rad from first
+  (RL fills the gap). CORRECTION (late night, franco): the forehand strike phase is 0.673, NOT
+  the detector's 0.768 — the speed peak is the post-contact whip; at the true contact (~2/3, per
+  franco) the velocity is (+1.24,+1.21,+1.70) and the face normal healthy, so the earlier
+  "+Y-dominant" flag was a mis-pinned phase, not a pipeline direction failure. Lesson recorded:
+  speed peak != contact; cross-check with forward-velocity peak / human prior. Remaining real
+  issue: v5 reference jitter is 2-6x hopex (mean joint |acc| 5.9/15.5 vs 2.5/2.7 rad/s^2) —
+  supports R16 and reference filtering; third confounder for R15 verdicts.
 
 ## 2026-07-03 (night, branch `rsi-on-wrap-progress-fix`) — venue data on RunPod; F10/full-state/self-check ran on real data
 

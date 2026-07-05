@@ -127,9 +127,14 @@ Done:
   the commanded-normal channel.
 - 2026-07-04 (evening): v5 clips processed end-to-end ON the pod (`v5_pipeline.sh`, reusing the
   oblique pipeline + `csv_to_npz_mujoco.py`): `/workspace/shared/motions/hope_{forehand,backhand}_v5.npz`
-  (56/58 frames @50 Hz, yaw re-grounded +86.6°/+83.6°→0, strike phases [0.768, 0.345]). Data
-  flag: the forehand's strike velocity AND face normal are +Y-dominant after re-grounding
-  (sideways swing) — unlike oblique/hopex forehands; eyeball review queued before deploy use.
+  (56/58 frames @50 Hz, yaw re-grounded +86.6°/+83.6°→0). Strike phases CORRECTED late-night by
+  franco's prior: forehand 0.673 (detector's speed-peak 0.768 is the post-contact whip — at the
+  true ~2/3 contact the velocity/normal are direction-healthy, retiring the "+Y-dominant" flag),
+  backhand 0.345 (matches franco's "within the first 3/7"). Lesson: speed peak != contact;
+  cross-check `analyze_strike_phase` picks against the forward-velocity peak and a human prior.
+  Remaining data flag: v5 reference jitter is 2-6× hopex (mean joint |acc| 5.9/15.5 vs 2.5/2.7
+  rad/s²; oblique 3.5 sits between) — evidence for R16 / reference filtering, and a third
+  confounder for R15 verdicts.
 
 Done (2026-06-26 — first loop reproduced in this harness):
 
