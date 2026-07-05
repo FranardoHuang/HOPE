@@ -48,11 +48,12 @@ LINE_WIDTH: float = 0.02            # painted boundary / center line width
 LINE_THICKNESS: float = 0.001       # painted line slab thickness (sits just above the surface)
 
 ##
-# Ball (40 mm). These MUST match ``configs/ball_physics.yaml`` (the single source of truth shared with
-# the MuJoCo C++ sim and the Record reference); a regression test asserts they stay in sync.
+# Ball (40 mm). These MUST match ``configs/ball_physics_venue.yaml`` (the single source of truth shared
+# with the MuJoCo C++ sim and the Record reference); a regression test asserts they stay in sync.
 ##
 BALL_RADIUS: float = 0.02           # 40 mm diameter (20 mm radius)
-BALL_MASS: float = 0.0027           # 2.7 g — hollow ITTF ball (mocap-fitted physics; was 3.4 g Purdue PACE)
+BALL_MASS: float = 0.0034           # 3.4 g — the retro-reflective-coated MATCH ball (venue fit 2026-07-03;
+                                    # competition uses this same coated ball, NOT the clean 2.7 g ITTF ball)
 BALL_INERTIA_COEFF: float = 2.0 / 3.0  # hollow sphere: I = c * m * R^2; used by the spin-coupled contact model
 
 ##

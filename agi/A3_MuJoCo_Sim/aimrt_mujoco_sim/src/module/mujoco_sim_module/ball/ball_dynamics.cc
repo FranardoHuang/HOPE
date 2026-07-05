@@ -36,15 +36,20 @@ ContactResult PredictContact(const Vec3& v_minus, const Vec3& v_r, const Vec3& n
   const double u_t_mag = Norm(u_t_vec);
   const double u_n_abs = std::abs(u_n_signed);
 
+  // Venue F4: velocity-dependent normal restitution e(u_n) = g1 * exp(g2 * |u_n|),
+  // clamped so far-out-of-envelope contacts stay physical (paddle only; table constant-e).
+  const double e_eff =
+      p.use_e_exp ? std::clamp(p.e_exp_g1 * std::exp(p.e_exp_g2 * u_n_abs), 0.05, 0.95) : p.e_eff;
+
   const double cos_theta = u_n_abs / (std::hypot(u_t_mag, u_n_signed) + kEps);
   const double raw = (p.a_t + p.b_t * cos_theta) * u_t_mag;
-  const double cap = p.mu_safety * (1.0 + p.e_eff) * u_n_abs;
+  const double cap = p.mu_safety * (1.0 + e_eff) * u_n_abs;
   const double s = std::clamp(raw, 0.0, cap);
 
   Vec3 delta_v_t = {0.0, 0.0, 0.0};
   if (u_t_mag > kEps) delta_v_t = Scale(u_t_vec, -s / u_t_mag);
 
-  const Vec3 delta_v_n = Scale(n, -(1.0 + p.e_eff) * u_n_signed);
+  const Vec3 delta_v_n = Scale(n, -(1.0 + e_eff) * u_n_signed);
   const Vec3 delta_omega = Scale(Cross(n, delta_v_t), -(1.0 / (c * R)));
 
   ContactResult out;
@@ -58,7 +63,16 @@ Vec3 FlightAccel(const Vec3& v, const Vec3& omega, const FlightParams& f) {
   const double sp = Norm(v);
   Vec3 a = {0.0, 0.0, -f.g};
   a = Sub(a, Scale(v, f.k_d * sp));
-  if (f.k_m != 0.0) a = Add(a, Scale(Cross(omega, v), f.k_m));
+  if (f.k_m != 0.0) {
+    double k_m_eff = f.k_m;
+    // Venue F2 saturating lift: k_m_eff(SR) = k_m / (1 + SR/sr_sat), SR = R|omega|/|v|.
+    // Off by default (oracle parity); see FlightParams.
+    if (f.use_saturating_magnus && f.magnus_sr_sat > 0.0) {
+      const double sr = f.ball_radius * Norm(omega) / (sp + kEps);
+      k_m_eff /= 1.0 + sr / f.magnus_sr_sat;
+    }
+    a = Add(a, Scale(Cross(omega, v), k_m_eff));
+  }
   return a;
 }
 

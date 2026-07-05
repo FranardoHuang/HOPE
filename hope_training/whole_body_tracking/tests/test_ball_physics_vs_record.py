@@ -80,8 +80,19 @@ def run() -> int:
     failures = []
 
     # --- 1. contact model: torch vs numpy, table + paddle --------------------
-    def oracle_params(kind):
-        return oracle_sim.TABLE_PARAMS if kind == "table" else oracle_contact.FULL_REFLECT_PARAMS
+    # Oracle params are built FROM cfg (the venue yaml), not from the oracle module constants —
+    # the oracle's own TABLE_PARAMS/FULL_REFLECT_PARAMS are frozen at the v0.1 fit. The oracle
+    # predict_contact only takes a constant e_eff, so for the F4 e(u_n) paddle we compute e per
+    # sample (same u_n definition and [0.05, 0.95] clamp as the torch port) and feed it back.
+    def oracle_e_eff(cp, v_minus, v_r, n, omega):
+        nn = n / np.linalg.norm(n)
+        if np.dot(v_minus - v_r, nn) > 0.0:
+            nn = -nn
+        u = v_minus + np.cross(omega, -cp.ball_radius * nn) - v_r
+        u_n_abs = abs(float(np.dot(u, nn)))
+        if cp.use_e_exp:
+            return float(np.clip(cp.e_exp_g1 * np.exp(cp.e_exp_g2 * u_n_abs), 0.05, 0.95))
+        return cp.e_eff
 
     N = 256
     for kind, cp in (("table", cfg.table), ("paddle", cfg.paddle)):
@@ -92,13 +103,17 @@ def run() -> int:
 
         vp_t, wp_t = spin_contact.predict_contact(v_minus, v_r, n, omega, cp)
 
-        op = oracle_params(kind)
         max_dv = 0.0
         max_dw = 0.0
         for i in range(N):
+            vm_i, vr_i = v_minus[i].numpy(), v_r[i].numpy()
+            n_i, w_i = n[i].numpy(), omega[i].numpy()
+            op = oracle_contact.SpinEquationParams(
+                e_eff=oracle_e_eff(cp, vm_i, vr_i, n_i, w_i),
+                a_t=cp.a_t, b_t=cp.b_t, mu_safety=cp.mu_safety,
+            )
             out = oracle_contact.predict_contact(
-                v_minus=v_minus[i].numpy(), v_r=v_r[i].numpy(), n=n[i].numpy(),
-                omega_minus=omega[i].numpy(), params=op,
+                v_minus=vm_i, v_r=vr_i, n=n_i, omega_minus=w_i, params=op,
             )
             max_dv = max(max_dv, float(np.max(np.abs(out["v_plus"] - vp_t[i].numpy()))))
             max_dw = max(max_dw, float(np.max(np.abs(out["omega_plus"] - wp_t[i].numpy()))))

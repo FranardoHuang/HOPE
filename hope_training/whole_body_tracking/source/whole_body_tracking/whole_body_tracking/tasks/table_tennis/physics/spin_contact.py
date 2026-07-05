@@ -19,6 +19,10 @@ Equation (SI units), per contact:
 
 Both ``v_r`` (contact-point velocity) and ``n`` (face normal) are inputs, so the same function serves
 both the static table bounce (``v_r = 0``, ``n = +Z``) and the moving paddle hit.
+
+Venue F4: when ``params.use_e_exp`` is set (the paddle section of ``ball_physics_venue.yaml``),
+``e_eff`` above is replaced per contact by ``e(u_n) = e_exp_g1 * exp(e_exp_g2 * |u_n|)`` clamped to
+[0.05, 0.95] — same form and clamp as the tracking-task ``virtual_ball.predict_paddle_contact``.
 """
 
 from __future__ import annotations
@@ -64,16 +68,25 @@ def predict_contact(
     u_t_mag = torch.linalg.norm(u_t_vec, dim=-1, keepdim=True)  # (N,1)
     u_n_abs = torch.abs(u_n_signed)                            # (N,1)
 
+    # F4 (venue fit): velocity-dependent normal restitution for the paddle,
+    # e(u_n) = g1 * exp(g2 * |u_n|), clamped so far-out-of-envelope contacts stay physical.
+    if params.use_e_exp:
+        e_eff: torch.Tensor | float = (
+            params.e_exp_g1 * torch.exp(params.e_exp_g2 * u_n_abs)
+        ).clamp(0.05, 0.95)
+    else:
+        e_eff = params.e_eff
+
     cos_theta = u_n_abs / (torch.hypot(u_t_mag, u_n_signed) + _EPS)
     raw = (params.a_t + params.b_t * cos_theta) * u_t_mag
-    cap = params.mu_safety * (1.0 + params.e_eff) * u_n_abs
+    cap = params.mu_safety * (1.0 + e_eff) * u_n_abs
     s = torch.clamp(raw, min=0.0).minimum(cap)                 # clip(raw, 0, cap)
 
     # dv_t = -s * unit(u_t); guard the zero-tangential case.
     safe_dir = u_t_vec / (u_t_mag + _EPS)
     delta_v_t = torch.where(u_t_mag > _EPS, -s * safe_dir, torch.zeros_like(u_t_vec))
 
-    delta_v_n = -(1.0 + params.e_eff) * u_n_signed * n
+    delta_v_n = -(1.0 + e_eff) * u_n_signed * n
     delta_omega = -(1.0 / (c * R)) * torch.cross(n, delta_v_t, dim=-1)
 
     v_plus = v_minus + delta_v_n + delta_v_t

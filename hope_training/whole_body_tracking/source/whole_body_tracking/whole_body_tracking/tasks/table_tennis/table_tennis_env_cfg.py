@@ -43,7 +43,7 @@ from .ball import BallAerodynamicsCfg
 from .geometry import BounceMaterials, OutOfBoundsBox, ServeConfig
 from .physics.params import load_ball_physics
 
-# Shared, mocap-fitted ball physics (configs/ball_physics.yaml) is the SINGLE SOURCE OF TRUTH for the
+# Shared, mocap-fitted ball physics (configs/ball_physics_venue.yaml) is the SINGLE SOURCE OF TRUTH for the
 # ball mass/radius and the drag/Magnus flight coefficients used below. Fall back to the geometry / aero
 # dataclass defaults only if the YAML is unavailable on this host (a regression test asserts they agree).
 try:
@@ -140,7 +140,7 @@ def build_net_cfg(mats: BounceMaterials, visible: bool = True) -> AssetBaseCfg:
 
 
 def build_ball_cfg(mats: BounceMaterials) -> RigidObjectCfg:
-    """The dynamic ball (40 mm, 2.7 g). Mass/radius come from ``configs/ball_physics.yaml`` (single source
+    """The dynamic ball (40 mm, 3.4 g coated match ball). Mass/radius come from ``configs/ball_physics_venue.yaml`` (single source
     of truth, shared with the MuJoCo C++ sim). PhysX handles gravity + anti-tunnelling; drag + Magnus are
     added per substep by the environment and the bounces are code-driven. ``linear_damping`` is 0 so PhysX
     does not double-count drag."""
@@ -457,7 +457,7 @@ class TableTennisEnvCfg(ManagerBasedRLEnvCfg):
     # Ball aerodynamics + code-driven spin-equation contacts (applied per physics substep by
     # TableTennisEnv). Enabled by default: the ball flies on the mocap-fitted drag + Magnus model and
     # bounces via the spin-equation contact model (PhysX restitution is neutralized — see
-    # geometry.BounceMaterials). The drag/Magnus coefficients come from configs/ball_physics.yaml (single
+    # geometry.BounceMaterials). The drag/Magnus coefficients come from configs/ball_physics_venue.yaml (single
     # source of truth). Disable with the play script's --disable_aero flag for a PhysX-only scene.
     ball_aerodynamics: BallAerodynamicsCfg = (
         BallAerodynamicsCfg(

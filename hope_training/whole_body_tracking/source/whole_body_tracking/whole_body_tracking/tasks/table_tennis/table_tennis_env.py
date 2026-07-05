@@ -15,7 +15,7 @@ every physics substep (400 Hz):
      the SAME flight model (:func:`.physics.predict_landing`) to where the shot will land. Cached per env
      for the reward / observation managers.
 
-All fitted constants come from the shared ``configs/ball_physics.yaml`` (:mod:`.physics.params`), so the
+All fitted constants come from the shared ``configs/ball_physics_venue.yaml`` (:mod:`.physics.params`), so the
 sim, the analytic predictor, and the MuJoCo C++ sim share one source of truth. If the callback cannot be
 registered, the env still runs on PhysX gravity + (zero-restitution) contacts.
 """

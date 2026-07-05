@@ -5,9 +5,9 @@ restitution + friction. What PhysX does **not** model is aerodynamics: a 40 mm b
 air drag noticeably bends its flight. This module supplies that missing force so the simulated flight
 matches the model the HOPE planner was calibrated against.
 
-Drag model (matches ``configs/ball_physics.yaml`` and the Record flight fit ``simulator.flight_accel``):
+Drag model (matches ``configs/ball_physics_venue.yaml`` and the Record flight fit ``simulator.flight_accel``):
 
-    a_drag = -k_d * |v| * v        (k_d = 0.1222 1/m, fit from mocap trajectories; Cd ~= 0.438)
+    a_drag = -k_d * |v| * v        (k_d = 0.1261 1/m, venue fit on the 3.4 g coated MATCH ball; Cd ~= 0.569)
     F_drag = m * a_drag = -m * k_d * |v| * v
 
 NOTE on units: ``k_d`` is **1/m** (a drag *acceleration* coefficient, mass-independent), NOT s/m.
@@ -17,7 +17,7 @@ true ball mass (PhysX then divides by that same mass, recovering ``a_drag = -k_d
 Magnus (lift) from PHYSICAL spin is now **on by default** (the experiment shows spin materially curves
 the flight and shifts the landing point):
 
-    a_magnus = k_m * (omega x v)   (k_m = 0.0042, bridges physical spin -> force)
+    a_magnus = k_m * (omega x v)   (k_m = 0.00444, venue sidespin-channel fit, physical spin -> force)
     F_magnus = m * k_m * (omega x v)
 
 Everything here is expressed in the **world frame** and is pure ``torch`` (no Isaac imports) so it can be
@@ -40,13 +40,14 @@ class BallAerodynamicsCfg:
     enabled: bool = True
     """Master switch. If False, the ball flies on PhysX gravity + contacts alone (still a valid scene)."""
 
-    drag_coefficient: float = 0.1222
-    """Quadratic drag coefficient ``k_d`` (**1/m**, NOT s/m). a_drag = -k_d|v|v. Mocap-fitted (Cd~=0.438)."""
+    drag_coefficient: float = 0.1261
+    """Quadratic drag coefficient ``k_d`` (**1/m**, NOT s/m). a_drag = -k_d|v|v. Venue fit 2026-07-03
+    (coated 3.4 g match ball, Cd~=0.569)."""
 
-    magnus_coefficient: float = 0.0042
+    magnus_coefficient: float = 0.00444
     """Magnus/lift coefficient ``k_m`` for PHYSICAL spin. a_magnus = k_m (omega x v). Mocap-fitted bridge
-    (OptiTrack gold-standard recal, lateral channel; was 0.006). Fallback only — the env reads it from
-    ``configs/ball_physics.yaml``. Set to 0.0 to disable spin lift."""
+    (venue sidespin-channel fit, inside the OptiTrack recal CI; was 0.006/0.0042). Fallback only — the env reads it from
+    ``configs/ball_physics_venue.yaml``. Set to 0.0 to disable spin lift."""
 
     linear_velocity_clip: float = 50.0
     """Safety clip on |v| (m/s) used when computing drag, so a numerical blowup can't inject huge forces."""

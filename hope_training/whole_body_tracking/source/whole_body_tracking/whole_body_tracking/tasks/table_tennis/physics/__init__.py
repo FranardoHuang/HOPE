@@ -1,7 +1,7 @@
 """Experimentally-calibrated, spin-aware ball physics (flight + contact + landing).
 
 Pure ``torch`` + ``PyYAML`` (no Isaac imports) so it can be imported and unit-tested anywhere. The
-fitted constants come from the shared ``configs/ball_physics.yaml`` (see :mod:`.params`). The numpy
+fitted constants come from the shared ``configs/ball_physics_venue.yaml`` (see :mod:`.params`). The numpy
 reference in ``Record/analysis/{flight_model,contact_model}`` is the regression oracle.
 """
 

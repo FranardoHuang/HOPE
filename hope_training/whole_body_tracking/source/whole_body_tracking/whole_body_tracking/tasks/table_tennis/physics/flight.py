@@ -21,11 +21,20 @@ def gravity_vec(g: float, like: torch.Tensor) -> torch.Tensor:
 
 
 def flight_accel(v: torch.Tensor, omega: torch.Tensor, flight: FlightParams) -> torch.Tensor:
-    """a = g - k_d |v| v + k_m (omega x v). Inputs ``(N, 3)``."""
+    """a = g - k_d |v| v + k_m_eff (omega x v). Inputs ``(N, 3)``.
+
+    ``k_m_eff = k_m`` (fitted constant law, oracle parity) unless
+    ``flight.use_saturating_magnus`` — then the venue F2 saturating lift law
+    ``k_m_eff = k_m / (1 + SR / magnus_sr_sat)``, ``SR = R |omega| / |v|`` (see FlightParams).
+    """
     speed = torch.linalg.norm(v, dim=-1, keepdim=True)
     a = gravity_vec(flight.g, v) - flight.k_d * speed * v
     if flight.k_m != 0.0:
-        a = a + flight.k_m * torch.cross(omega, v, dim=-1)
+        k_m_eff: torch.Tensor | float = flight.k_m
+        if flight.use_saturating_magnus and flight.magnus_sr_sat > 0.0:
+            sr = flight.ball_radius * torch.linalg.norm(omega, dim=-1, keepdim=True) / (speed + 1e-12)
+            k_m_eff = flight.k_m / (1.0 + sr / flight.magnus_sr_sat)
+        a = a + k_m_eff * torch.cross(omega, v, dim=-1)
     return a
 
 

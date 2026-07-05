@@ -21,7 +21,7 @@ namespace aimrt_mujoco_sim::mujoco_sim_module::ball {
 
 class BallPhysics {
  public:
-  // Resolve the ball mocap body + racket site and load configs/ball_physics.yaml. Returns true (and
+  // Resolve the ball mocap body + racket site and load configs/ball_physics_venue.yaml. Returns true (and
   // sets Enabled()) iff a mocap ball body named `ball_body_name` exists. Paddle-hit + landing prediction
   // are additionally gated on finding the racket site (logged if absent).
   bool Init(mjModel* m, mjData* d, const std::string& config_path);
