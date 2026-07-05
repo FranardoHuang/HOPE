@@ -97,7 +97,9 @@ def strike_state_from_clip(asp, name: str, path: str, annotations: dict):
     s = info["strike"]
     return dict(
         contact_pos_env=info["racket_w"][s].copy(),      # tracking env frame (root at origin)
-        clip_normal=info["normal_root"][s].copy(),        # difficulty anchor (proxy on video clips)
+        clip_normal=info["normal_w"][s].copy(),   # WORLD-frame face proxy (frame-mix fix
+        # 2026-07-05, franco's catch: normal_root is PELVIS-frame while positions/velocities
+        # are world — mid-swing pelvis rotation rotated every "face" by tens of degrees)
         clip_vel=info["clean_v_w"][s].copy(),
         strike_frame=int(s),
         n_frames=int(info["T"]),
@@ -177,7 +179,7 @@ def phase_scan(asp, name: str, path: str, annotations: dict, args) -> None:
         dirs = np.cos(ang)[:, None] * v_dir[None, :] + np.sin(ang)[:, None] * aux
         v_r = dirs * (speed * rng.uniform(*args.cone_mag, size=K))[:, None]
 
-        n_face = np.asarray(info["normal_root"][t], float)
+        n_face = np.asarray(info["normal_w"][t], float)   # world frame (frame-mix fix)
         p_env = np.asarray(info["racket_w"][t], float)
         vv_in = t64(np.repeat(v_in, K, axis=0))               # (M*K,3)
         vv_r = t64(np.tile(v_r, (M, 1)))

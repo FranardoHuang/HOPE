@@ -176,7 +176,7 @@ def analyze(name, path, use_blade=True):
     info = dict(
         name=name, T=T, fps=fps, phase=phase, speed=speed, vx=vx,
         path=path, dist_plane=dist_plane, racket_root=racket_root, racket_v_root=racket_v_root,
-        normal_root=normal_root, label=label, strike=auto_strike, auto_strike=auto_strike,
+        normal_root=normal_root, normal_w=normal_w, label=label, strike=auto_strike, auto_strike=auto_strike,
         fwd_peak=fwd_peak, speed_peak=int(np.argmax(speed)),
         racket_w=racket_w, racket_v_w=racket_v_w, clean_v_w=clean_v_w,
         point="blade" if use_blade else "wrist", annotation=None, annotation_key=None,
