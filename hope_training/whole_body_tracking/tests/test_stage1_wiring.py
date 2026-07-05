@@ -10,6 +10,11 @@ gen_stage1_questions.py loading virtual_ball.py). Covers:
 * select_questions: a fake resample-index selection (deterministic u draws) returns the FIXED
   contact point of each env's clip and the vel/normal/difficulty rows of the SAME question index,
   and padding rows are never selected (u -> 1 clamps to counts-1).
+* grip calibration (0g): a synthetic wrist rotation + the registry grip -> the expected WORLD
+  face normal AND grip-rotated blade position/velocity mount FK (pins the mount-offset-rotates
+  decision), plus the generator's single-application guard catching a double rally rotation.
+* rally-yaw canonicalization: rotate by psi then -psi = identity; -psi-about-+Z convention;
+  vertical vectors invariant.
 
 Run:  /opt/anaconda3/bin/python3 hope_training/whole_body_tracking/tests/test_stage1_wiring.py
 """
@@ -142,12 +147,19 @@ def test_face_command_obs_vector(qb):
     print("[ok] obs: face_command_obs_vector = [normal(3), rho=0(1)] (N,4)")
 
 
+def _load_script(fname, modname):
+    """Load a scripts/*.py module by path (top-level imports are numpy-light; planner/torch
+    imports live inside main())."""
+    path = os.path.join(HERE, "..", "scripts", fname)
+    spec = importlib.util.spec_from_file_location(modname, os.path.abspath(path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def test_generator_split_determinism():
     """question_split: pure function of v_in (order/seed independent), ~80/20, disjoint sides."""
-    gen_path = os.path.join(HERE, "..", "scripts", "gen_stage1_questions.py")
-    spec = importlib.util.spec_from_file_location("s1_gen", os.path.abspath(gen_path))
-    gen = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(gen)  # top-level: argparse/os/sys/numpy only (planner import is in main)
+    gen = _load_script("gen_stage1_questions.py", "s1_gen")
 
     rng = np.random.default_rng(123)
     v = gen.sample_incoming(rng, 4000, 2.0, 5.0, 0.6, -2.0, 0.3)
@@ -164,16 +176,101 @@ def test_generator_split_determinism():
     print(f"[ok] split: deterministic per-question membership, exam fraction {frac:.1%}, disjoint")
 
 
+def _write_motion_npz(path, wrist_quat, wrist_pos=(0.3, -0.2, 1.0),
+                      wrist_v=(0.1, 0.0, 0.0), wrist_w=(0.0, 0.0, 1.0), T=4):
+    """Minimal synthetic motion npz for analyze(): identity bodies except the wrist (body 31)."""
+    nb = 32
+    pos = np.zeros((T, nb, 3)); pos[:, 31] = wrist_pos
+    quat = np.zeros((T, nb, 4)); quat[..., 0] = 1.0; quat[:, 31] = wrist_quat
+    lin = np.zeros((T, nb, 3)); lin[:, 31] = wrist_v
+    ang = np.zeros((T, nb, 3)); ang[:, 31] = wrist_w
+    np.savez(path, fps=np.array([50]), body_pos_w=pos, body_quat_w=quat,
+             body_lin_vel_w=lin, body_ang_vel_w=ang)
+
+
+def test_grip_calibration_synthetic(gen, asp, tmpdir):
+    """Synthetic wrist rotation + known grip -> expected WORLD normal + rotated mount FK,
+    and the single-application guard fires on a doubled rally rotation."""
+    # Wrist = 90 deg about world +Z; expected R_wrist hardcoded (independent of quat_to_rot).
+    s2 = np.sqrt(0.5)
+    R_wrist = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+    npz = os.path.join(tmpdir, "syn_motion.npz")
+    wrist_pos, wrist_v, wrist_w = (0.3, -0.2, 1.0), (0.1, 0.0, 0.0), (0.0, 0.0, 1.0)
+    _write_motion_npz(npz, (s2, 0.0, 0.0, s2), wrist_pos, wrist_v, wrist_w)
+
+    # Independent Rg = Rz(+5)Rx(+40) built in-test; matches the registry's wrist-local blade dir.
+    a, b = np.deg2rad(5.0), np.deg2rad(40.0)
+    Rz = np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1.0]])
+    Rx = np.array([[1.0, 0, 0], [0, np.cos(b), -np.sin(b)], [0, np.sin(b), np.cos(b)]])
+    Rg_expected = Rz @ Rx
+    assert np.allclose(Rg_expected @ [0, 1, 0], [-0.0668, 0.7631, 0.6428], atol=1e-3), \
+        "Rg @ y_hat does not match the registry's wrist-local blade dir ~[-0.07, 0.76, 0.64]"
+    Rg = asp.grip_rotation(5.0, 40.0)
+    assert np.allclose(Rg, Rg_expected, atol=1e-12), "grip_rotation != Rz(alpha_z) @ Rx(beta_x)"
+
+    info = asp.analyze("synclip", npz, use_blade=True, grip_rot=Rg)
+    exp_normal = R_wrist @ Rg_expected @ np.array([0.0, 1.0, 0.0])
+    assert np.allclose(info["normal_w"][0], exp_normal, atol=1e-9), \
+        f"grip world normal {info['normal_w'][0]} != R_wrist @ Rg @ y_hat {exp_normal}"
+    # MOUNT-OFFSET DECISION pinned: blade position AND velocity use the grip-rotated mount
+    # (matches the csv_to_npz_mujoco --grip-rot bake; ASSUMPTION flag for franco).
+    exp_off = R_wrist @ Rg_expected @ asp.MOUNT_OFFSET
+    assert np.allclose(info["racket_w"][0], np.asarray(wrist_pos) + exp_off, atol=1e-9), \
+        "blade position must FK through the grip-ROTATED mount offset"
+    exp_vel = np.asarray(wrist_v) + np.cross(wrist_w, exp_off)
+    assert np.allclose(info["racket_v_w"][0], exp_vel, atol=1e-9), \
+        "blade velocity must use omega x (grip-rotated offset)"
+    # --grip off (grip_rot None) reproduces the raw wrist+Y proxy face
+    raw = asp.analyze("synclip", npz, use_blade=True)
+    assert np.allclose(raw["normal_w"][0], R_wrist @ [0.0, 1.0, 0.0], atol=1e-9)
+
+    # SINGLE-APPLICATION GUARD: analyzer-path face + one rally rotation passes; doubled fails.
+    n_pipe = gen.rally_canonicalize(info["normal_w"][0], 40.0)
+    gen._face_self_check(asp, npz, 0, Rg, 40.0, n_pipe)
+    doubled = gen.rally_canonicalize(n_pipe, 40.0)
+    try:
+        gen._face_self_check(asp, npz, 0, Rg, 40.0, doubled)
+        raise AssertionError("a double-rotated face slipped through the guard")
+    except AssertionError as exc:
+        if "single-application guard FAILED" not in str(exc):
+            raise
+    print("[ok] grip: R_wrist@Rg@y_hat world normal, rotated mount pos/vel FK, guard catches x2 rally")
+
+
+def test_rally_canonicalization(gen):
+    """rally_canonicalize: rotate by psi then -psi = identity; -psi about +Z convention;
+    vertical vectors and norms invariant; batch (N,3) supported."""
+    rng = np.random.default_rng(7)
+    v = rng.standard_normal((64, 3))
+    for psi in (40.0, -60.0, 123.4):
+        back = gen.rally_canonicalize(gen.rally_canonicalize(v, psi), -psi)
+        assert np.allclose(back, v, atol=1e-12), f"psi={psi}: canonicalize(-psi) did not invert"
+        assert np.allclose(np.linalg.norm(gen.rally_canonicalize(v, psi), axis=1),
+                           np.linalg.norm(v, axis=1), atol=1e-12)
+    # convention: canonicalize = rotate by -psi about +Z, so psi=+90 sends +X to -Y
+    assert np.allclose(gen.rally_canonicalize(np.array([1.0, 0.0, 0.0]), 90.0),
+                       [0.0, -1.0, 0.0], atol=1e-12)
+    # vertical axis: z-vectors invariant; psi=0 = identity
+    assert np.allclose(gen.rally_canonicalize(np.array([0.0, 0.0, 1.0]), 77.0),
+                       [0.0, 0.0, 1.0], atol=1e-12)
+    assert np.allclose(gen.rally_canonicalize(v, 0.0), v, atol=1e-12)
+    print("[ok] rally: psi/-psi identity, -psi-about-+Z convention, vertical invariant")
+
+
 def main():
     qb = _load_module()
+    gen = _load_script("gen_stage1_questions.py", "s1_gen")
+    asp = gen._load_analyzer()
     with tempfile.TemporaryDirectory() as tmpdir:
         bank_path = os.path.join(tmpdir, "bank.npz")
         flat = _write_bank(bank_path)
         bank = test_load_shapes_keying_padding(qb, bank_path, flat)
         test_select_fixed_point_and_matching_rows(qb, bank, flat)
         test_loud_errors(qb, tmpdir)
+        test_grip_calibration_synthetic(gen, asp, tmpdir)
     test_face_command_obs_vector(qb)
     test_generator_split_determinism()
+    test_rally_canonicalization(gen)
     print("ALL STAGE-1 WIRING TESTS PASSED")
 
 

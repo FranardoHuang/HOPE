@@ -29,6 +29,27 @@ frame has the surface at z=+0.76). Positions convert by a pure translation
 (env->hope: x -= near_x, y -= 0.7625, z -= 0.76); vectors are frame-parallel and
 need no conversion.
 
+GRIP + RALLY-YAW (0g calibration, registry 2026-07-06; --grip {registry,off}, default registry):
+video clips never show the paddle — the registry `grip:` block stores the SOLVED grip rotation
+(HUMAN blade = R_wrist @ Rz(alpha_z)Rx(beta_x) @ y_hat, franco's rally-prior inference) and each
+clip carries `rally_yaw_deg`, the rally diagonal it was actually filmed on. This generator:
+  * applies the grip INSIDE analyze_strike_phase.analyze(grip_rot=...) — the ONE grip
+    application point (clips already baked by csv_to_npz_mujoco --grip-rot are detected via
+    face_normal_reliable: true-calibrated / source grip-calibrated and are NEVER re-rotated);
+  * canonicalizes clip-derived strike VECTORS (blade velocity, face normal) to the registry's
+    straight-line convention by rotating -rally_yaw_deg about the VERTICAL axis through the
+    contact point (rally_canonicalize(), the ONE rotation path shared by bank mode and
+    --phase-scan; the contact point lies on the axis and is invariant, question geometry is
+    already straight-line by construction);
+  * runs a SINGLE-APPLICATION self-check per clip: the strike-frame face is recomputed straight
+    from the raw npz (one grip multiply + one yaw multiply) and must agree with the pipeline
+    value to 1e-6 — a doubled (or dropped) rotation refuses to ship;
+  * records grip_applied / rally_yaw_applied (+ per-clip grip mode, alpha/beta, rally_yaw) in
+    the bank npz meta so downstream can refuse double-rotated banks.
+ASSUMPTION (flagged loudly at runtime, franco to confirm): the blade POSITION mount offset
+rotates with the grip too — consistent with the --grip-rot bake, where blade positions shift up
+to ~13 cm; registry/NOW notes do not state it explicitly for the un-baked FK path.
+
 PHASE SCAN MODE (--phase-scan; merged from claude's 0d scratch scanner 2026-07-05 so there
 is ONE stage-1 tool): instead of solving questions at the annotated frame only, walk EVERY frame
 of the clip and ask "if contact happened here — face pinned to this frame's face, racket velocity
@@ -85,9 +106,103 @@ def _load_analyzer():
     return _load_mod("s1_asp", os.path.join(HERE, "analyze_strike_phase.py"))
 
 
-def strike_state_from_clip(asp, name: str, path: str, annotations: dict):
-    """Fixed strike point (env frame) + clip reference normal from the annotated frame."""
-    info = asp.analyze(name, path, use_blade=True)
+def rally_canonicalize(vec_w, rally_yaw_deg):
+    """THE single rally-yaw rotation path (registry convention, franco 2026-07-06).
+
+    Anchors/questions are designed in the STRAIGHT-hit frame; a clip filmed on the rally
+    diagonal ``rally_yaw_deg`` is canonicalized by rotating its world/env-frame strike VECTORS
+    (blade velocity, face normal) by -rally_yaw_deg about the VERTICAL axis through the contact
+    point. The contact point itself lies on the axis and is INVARIANT — positions are never
+    passed through here. Shared by bank mode and --phase-scan; do not add a second rotation
+    path. Accepts (3,) or (..., 3).
+    """
+    psi = np.deg2rad(-float(rally_yaw_deg))
+    c, s = np.cos(psi), np.sin(psi)
+    R = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+    return np.asarray(vec_w, dtype=np.float64) @ R.T
+
+
+def _grip_is_baked(ann) -> bool:
+    """csv_to_npz_mujoco --grip-rot regenerations carry the grip in the npz wrist joints
+    themselves (registry: face_normal_reliable true-calibrated / source grip-calibrated) —
+    re-applying the registry rotation on top would double-rotate the face."""
+    if not ann:
+        return False
+    return ("grip-calibrated" in str(ann.get("source", ""))
+            or str(ann.get("face_normal_reliable", "")).startswith("true-calibrated"))
+
+
+def resolve_grip_and_yaw(asp, name: str, ann, grip_block: dict, grip_flag: str):
+    """Per-clip grip rotation + rally yaw from the registry.
+
+    Returns (grip_rot 3x3 | None, grip_desc, rally_yaw_deg, grip_mode) with grip_mode in
+    {"registry", "baked", "off"}. grip_rot is None unless the registry rotation must be applied
+    NOW (mode "registry"); "baked" means the npz already contains it.
+    """
+    rally = float(ann.get("rally_yaw_deg") or 0.0) if ann else 0.0
+    if ann is not None and ann.get("rally_yaw_deg") is None:
+        print(f"[{name}] NOTE: registry entry has no rally_yaw_deg — assuming 0 (straight-line clip)")
+    if grip_flag == "off":
+        return None, "OFF (--grip off: raw wrist+Y proxy face)", rally, "off"
+    if _grip_is_baked(ann):
+        return None, "BAKED into the npz (csv_to_npz_mujoco --grip-rot; NOT re-applied)", rally, "baked"
+    if not grip_block:
+        print(f"[{name}] NOTE: --grip registry but the yaml has no `grip:` block — "
+              f"proceeding with the raw wrist+Y proxy face")
+        return None, "OFF (no grip block in the registry)", rally, "off"
+    if len(grip_block) == 1:
+        session, g = next(iter(grip_block.items()))
+    else:
+        session = (ann or {}).get("grip_session")
+        if session not in grip_block:
+            raise SystemExit(f"{name}: multiple grip sessions in the registry {sorted(grip_block)} — "
+                             f"add `grip_session:` to the clip's annotation entry to pick one")
+        g = grip_block[session]
+    a, b = float(g["alpha_z_deg"]), float(g["beta_x_deg"])
+    return (asp.grip_rotation(a, b),
+            f"Rz({a:+.1f} deg)Rx({b:+.1f} deg) [registry:{session}]", rally, "registry")
+
+
+def _print_grip_summary(name: str, grip_desc: str, grip_rot, rally_yaw_deg: float) -> None:
+    print(f"[{name}] grip: {grip_desc} | rally_yaw: {rally_yaw_deg:+.1f} deg (clip strike "
+          f"vectors rotated {-rally_yaw_deg:+.1f} deg about the vertical axis through the "
+          f"contact point; the contact point itself is invariant)")
+    if grip_rot is not None:
+        print(f"[{name}] ** ASSUMPTION (franco to confirm): the blade POSITION mount offset "
+              f"rotates with the grip too (contact point + blade velocity use R_wrist@Rg) — "
+              f"matches the csv_to_npz_mujoco --grip-rot bake, blade shifts up to ~13 cm **")
+
+
+def _face_self_check(asp, path: str, frame: int, grip_rot, rally_yaw_deg: float,
+                     pipeline_normal) -> None:
+    """SINGLE-APPLICATION GUARD: recompute one strike frame's face straight from the raw npz
+    (wrist quat -> R_wrist [@ Rg] -> +Y column, then exactly ONE -rally_yaw rotation) and
+    assert 1e-6 agreement with the analyzer->rally_canonicalize pipeline value. A grip or
+    rally_yaw applied twice (or dropped) anywhere in either path shows up here as tens of
+    degrees and refuses to ship."""
+    d = np.load(path)
+    q = d["body_quat_w"].astype(np.float64)[frame, asp.RACKET_BODY]
+    R = asp.quat_to_rot(q)
+    if grip_rot is not None:
+        R = R @ np.asarray(grip_rot, dtype=np.float64)
+    n = rally_canonicalize(R[:, asp.NORMAL_AXIS], rally_yaw_deg)
+    err = float(np.max(np.abs(n - np.asarray(pipeline_normal, dtype=np.float64))))
+    assert err < 1e-6, (
+        f"single-application guard FAILED at frame {frame}: generator-path face {n} vs "
+        f"pipeline face {np.asarray(pipeline_normal)} (max abs diff {err:.2e}) — grip/rally_yaw "
+        f"applied twice (or not at all) somewhere; refusing to ship a double-rotated bank")
+
+
+def strike_state_from_clip(asp, name: str, path: str, annotations: dict,
+                           grip_rot=None, rally_yaw_deg: float = 0.0):
+    """Fixed strike point (env frame) + clip reference normal/velocity from the annotated frame.
+
+    The grip is applied INSIDE asp.analyze() (the single grip application point — it rotates
+    the face normal AND the blade position/velocity mount FK); clip_normal / clip_vel are then
+    rally-canonicalized here via rally_canonicalize (the single rally application point for bank
+    mode). clip_normal_raw is the uncalibrated, uncanonicalized wrist+Y proxy at the same frame,
+    kept only for the old-vs-new difficulty print."""
+    info = asp.analyze(name, path, use_blade=True, grip_rot=grip_rot)
     keys = asp._annotation_keys(name, path)
     ann = next((annotations[k] for k in keys if k in annotations), None)
     if ann is None:
@@ -95,12 +210,18 @@ def strike_state_from_clip(asp, name: str, path: str, annotations: dict):
                          "annotate first, do not fall back to the speed peak")
     asp._apply_annotation(info, next(k for k in keys if k in annotations), ann)
     s = info["strike"]
+    # WORLD-frame face (frame-mix fix 2026-07-05, franco's catch: normal_root is PELVIS-frame
+    # while positions/velocities are world — mid-swing pelvis rotation rotated every "face" by
+    # tens of degrees), grip-calibrated in analyze(), rally-canonicalized here.
+    clip_normal = rally_canonicalize(info["normal_w"][s], rally_yaw_deg)
+    clip_vel = rally_canonicalize(info["clean_v_w"][s], rally_yaw_deg)
+    _face_self_check(asp, path, int(s), grip_rot, rally_yaw_deg, clip_normal)
+    raw = asp.analyze(name, path, use_blade=True)  # no grip, no yaw: the pre-0g proxy face
     return dict(
         contact_pos_env=info["racket_w"][s].copy(),      # tracking env frame (root at origin)
-        clip_normal=info["normal_w"][s].copy(),   # WORLD-frame face proxy (frame-mix fix
-        # 2026-07-05, franco's catch: normal_root is PELVIS-frame while positions/velocities
-        # are world — mid-swing pelvis rotation rotated every "face" by tens of degrees)
-        clip_vel=info["clean_v_w"][s].copy(),
+        clip_normal=clip_normal,
+        clip_vel=clip_vel,
+        clip_normal_raw=raw["normal_w"][s].copy(),
         strike_frame=int(s),
         n_frames=int(info["T"]),
     )
@@ -134,7 +255,7 @@ def question_split(v_in_row) -> str:
     return "exam" if int.from_bytes(h, "big") / 2.0**64 < EXAM_FRAC else "train"
 
 
-def phase_scan(asp, name: str, path: str, annotations: dict, args) -> None:
+def phase_scan(asp, name: str, path: str, annotations: dict, grip_block: dict, args) -> None:
     """Per-frame returnability under the frame's own swing-velocity cone (torch batch/frame)."""
     import torch
 
@@ -144,14 +265,24 @@ def phase_scan(asp, name: str, path: str, annotations: dict, args) -> None:
     prm = vb.load_venue_params(os.path.join(REPO, "configs", "ball_physics_venue.yaml"))
     torch.set_default_dtype(torch.float64)
 
-    info = asp.analyze(name, path, use_blade=True)
     keys = asp._annotation_keys(name, path)
     ann = next((annotations[k] for k in keys if k in annotations), None)
+    grip_rot, grip_desc, rally_yaw, _grip_mode = resolve_grip_and_yaw(
+        asp, name, ann, grip_block, args.grip)
+    _print_grip_summary(name, grip_desc, grip_rot, rally_yaw)
+    info = asp.analyze(name, path, use_blade=True, grip_rot=grip_rot)
     label_frame = None
     if ann is not None:
         asp._apply_annotation(info, next(k for k in keys if k in annotations), ann)
         label_frame = int(info["strike"])
     T = int(info["T"])
+    # Rally canonicalization of the whole clip's strike vectors, applied exactly ONCE here
+    # (same rotation path as bank mode: rally_canonicalize). Per-frame contact POSITIONS are
+    # invariant (the axis passes through each frame's own contact point).
+    v_all = rally_canonicalize(info["clean_v_w"], rally_yaw)      # (T,3)
+    n_all = rally_canonicalize(info["normal_w"], rally_yaw)       # (T,3)
+    _face_self_check(asp, path, int(info["strike"]), grip_rot, rally_yaw,
+                     n_all[int(info["strike"])])
 
     rng = np.random.default_rng(args.seed)
     v_in = sample_incoming(rng, args.scan_balls, *args.speed_range, args.vy_max, *args.vz_range)
@@ -167,7 +298,7 @@ def phase_scan(asp, name: str, path: str, annotations: dict, args) -> None:
     t64 = lambda a: torch.as_tensor(np.asarray(a), dtype=torch.float64)  # noqa: E731
     scores = np.zeros(T)
     for t in range(T):
-        v_clip = np.asarray(info["clean_v_w"][t], float)
+        v_clip = np.asarray(v_all[t], float)              # grip-FK'd + rally-canonicalized
         speed = float(np.linalg.norm(v_clip))
         if speed < args.scan_min_speed:
             continue
@@ -179,7 +310,7 @@ def phase_scan(asp, name: str, path: str, annotations: dict, args) -> None:
         dirs = np.cos(ang)[:, None] * v_dir[None, :] + np.sin(ang)[:, None] * aux
         v_r = dirs * (speed * rng.uniform(*args.cone_mag, size=K))[:, None]
 
-        n_face = np.asarray(info["normal_w"][t], float)   # world frame (frame-mix fix)
+        n_face = np.asarray(n_all[t], float)   # world frame (frame-mix fix), calibrated+canonical
         p_env = np.asarray(info["racket_w"][t], float)
         vv_in = t64(np.repeat(v_in, K, axis=0))               # (M*K,3)
         vv_r = t64(np.tile(v_r, (M, 1)))
@@ -232,6 +363,14 @@ def main() -> int:
     ap.add_argument("--out", default=os.path.join(WBT, "cfg", "stage1_questions.npz"))
     ap.add_argument("--no-check", action="store_true",
                     help="skip the torch virtual-ball closed-loop self-test")
+    ap.add_argument("--grip", choices=("registry", "off"), default="registry",
+                    help="apply the registry grip calibration (strike_annotations.yaml `grip:` "
+                         "block: HUMAN blade = R_wrist @ Rz(alpha_z)Rx(beta_x) @ y_hat) to the "
+                         "clip face normal AND blade position/velocity FK; clips already baked "
+                         "by csv_to_npz_mujoco --grip-rot (face_normal_reliable: "
+                         "true-calibrated) are detected and never re-rotated. "
+                         "'off' = raw wrist+Y proxy (pre-0g behavior). rally_yaw "
+                         "canonicalization is independent and always applied")
     ap.add_argument("--split", choices=("train", "exam", "all"), default="all",
                     help="keep only this side of the deterministic ~80/20 hash split on the "
                          "incoming-velocity bytes (exam questions are disjoint from training at "
@@ -255,11 +394,12 @@ def main() -> int:
 
     asp = _load_analyzer()
     annotations = asp._load_annotations(asp.DEFAULT_ANNOTATIONS)
+    grip_block = asp._load_grip_block(asp.DEFAULT_ANNOTATIONS) if args.grip == "registry" else {}
 
     if args.phase_scan:
         for spec in args.clip:
             name, _, path = spec.partition(":")
-            phase_scan(asp, name, path, annotations, args)
+            phase_scan(asp, name, path, annotations, grip_block, args)
         return 0
 
     planner = StrikeSpecPlanner()
@@ -269,11 +409,22 @@ def main() -> int:
     landing_hope = np.asarray(args.landing_env) + env2hope[:2]
 
     banks = {}
+    clip_meta = {}
+    grip_any = False
     for spec in args.clip:
         name, _, path = spec.partition(":")
-        st = strike_state_from_clip(asp, name, path, annotations)
+        keys = asp._annotation_keys(name, path)
+        ann = next((annotations[k] for k in keys if k in annotations), None)
+        grip_rot, grip_desc, rally_yaw, grip_mode = resolve_grip_and_yaw(
+            asp, name, ann, grip_block, args.grip)
+        _print_grip_summary(name, grip_desc, grip_rot, rally_yaw)
+        st = strike_state_from_clip(asp, name, path, annotations, grip_rot, rally_yaw)
         p_env = st["contact_pos_env"]
         p_hope = p_env + env2hope
+        # Effective clip face for sign-alignment + NEW difficulty; raw wrist+Y proxy (no grip,
+        # no yaw) kept only for the OLD difficulty column of the summary print.
+        cn = st["clip_normal"] / np.linalg.norm(st["clip_normal"])
+        cn_raw = st["clip_normal_raw"] / np.linalg.norm(st["clip_normal_raw"])
 
         v_in = sample_incoming(rng, args.n, *args.speed_range, args.vy_max, *args.vz_range)
         # Deterministic train/exam membership per question (hash of v_in — see question_split);
@@ -282,21 +433,24 @@ def main() -> int:
         n_train, n_exam = int((splits == "train").sum()), int((splits == "exam").sum())
         sel = np.arange(args.n) if args.split == "all" else np.where(splits == args.split)[0]
         kept, normals, vels, diffs, residuals, landings, in_cone = [], [], [], [], [], [], []
+        diffs_old = []
         for i in sel:
             s = planner.solve(p_hope, v_in[i], None, landing_hope, args.speed_budget)
             if s is None or s.residual_m > planner.TOL_M:
                 continue
             kept.append(i)
-            cn = st["clip_normal"] / np.linalg.norm(st["clip_normal"])
-            # Store the normal SIGN-ALIGNED to the clip's FK +Y red face: contact physics is
-            # sign-agnostic (orient_normal flips internally) but the face-tracking reward is
-            # sign-sensitive — the raw solver sign is arbitrary and could demand a 180-deg flip.
+            # Store the normal SIGN-ALIGNED to the clip's (calibrated) +Y red face: contact
+            # physics is sign-agnostic (orient_normal flips internally) but the face-tracking
+            # reward is sign-sensitive — the raw solver sign is arbitrary and could demand a
+            # 180-deg flip.
             nn = s.n if np.dot(s.n, cn) >= 0 else -s.n
             normals.append(nn)
             vels.append(s.v_r)
             residuals.append(s.residual_m)
             landings.append(s.landing_xy)
             diffs.append(np.degrees(np.arccos(np.clip(np.dot(nn, cn), -1, 1))))
+            nn_old = s.n if np.dot(s.n, cn_raw) >= 0 else -s.n
+            diffs_old.append(np.degrees(np.arccos(np.clip(np.dot(nn_old, cn_raw), -1, 1))))
             cv = st["clip_vel"]; cs = np.linalg.norm(cv)
             ang = np.degrees(np.arccos(np.clip(
                 np.dot(s.v_r, cv) / (np.linalg.norm(s.v_r) * cs + 1e-12), -1, 1)))
@@ -314,8 +468,13 @@ def main() -> int:
             print(f"  ** WARNING: solvability <50% — the fixed strike point is badly placed for "
                   f"this speed range; move the point / relax the budget instead of training on this **")
         if len(kept):
-            print(f"  difficulty (face vs clip normal): med={np.median(d):.1f} deg  "
-                  f"p90={np.percentile(d, 90):.1f}  max={d.max():.1f}  |  answers inside the "
+            d_old = np.array(diffs_old)
+            face_desc = {"registry": "calibrated+canonical", "baked": "baked+canonical",
+                         "off": "raw+canonical"}[grip_mode]
+            print(f"  difficulty (demanded face vs clip face): "
+                  f"OLD raw-proxy med={np.median(d_old):.1f} deg p90={np.percentile(d_old, 90):.1f}"
+                  f"  ->  NEW {face_desc} med={np.median(d):.1f} deg "
+                  f"p90={np.percentile(d, 90):.1f} max={d.max():.1f}  |  answers inside the "
                   f"clip swing-velocity cone (25deg/0.6-1.4x): {np.mean(in_cone):.0%}")
         banks[name] = dict(
             contact_pos_env=p_env, clip_normal=st["clip_normal"], clip_vel=st["clip_vel"],
@@ -324,6 +483,9 @@ def main() -> int:
             residual_m=np.array(residuals), landing_xy_hope=np.array(landings),
             in_cone=np.array(in_cone, dtype=bool),
         )
+        clip_meta[name] = dict(grip_mode=grip_mode, grip_desc=grip_desc,
+                               rally_yaw_deg=rally_yaw)
+        grip_any = grip_any or grip_mode in ("registry", "baked")
 
     # --- torch virtual-ball closed-loop self-test (trainer-side venue physics) ----------
     if not args.no_check:
@@ -353,9 +515,14 @@ def main() -> int:
                   f"|err| med={err[ok].median():.3f} m  p90={err[ok].quantile(0.9):.3f} m  "
                   f"(planner residual med={np.median(b['residual_m'])*1000:.1f} mm)")
 
+    # grip_applied / rally_yaw_applied: SINGLE-APPLICATION flags — a bank with these set has
+    # calibrated-face (registry-rotated or baked) and rally-canonicalized clip vectors already;
+    # downstream must refuse to rotate again (see clips[...] for per-clip mode/yaw).
     meta = dict(seed=args.seed, speed_range=args.speed_range, vy_max=args.vy_max,
                 vz_range=args.vz_range, landing_env=args.landing_env, near_x=args.near_x,
-                speed_budget=args.speed_budget, split=args.split, exam_frac=EXAM_FRAC)
+                speed_budget=args.speed_budget, split=args.split, exam_frac=EXAM_FRAC,
+                grip=args.grip, grip_applied=bool(grip_any), rally_yaw_applied=True,
+                clips=clip_meta)
     flat = {f"{n}/{k}": v for n, b in banks.items() for k, v in b.items()}
     flat["meta_json"] = np.frombuffer(repr(meta).encode(), dtype=np.uint8)
     os.makedirs(os.path.dirname(args.out), exist_ok=True)

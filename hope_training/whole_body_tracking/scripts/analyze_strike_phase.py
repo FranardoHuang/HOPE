@@ -26,6 +26,10 @@ Racket face normal = R(wrist_quat)[:, 1]  (+Y blade face, red/forehand face;
 mount_quat is identity so wrist +Y == blade +Y). For video/GVHMR clips this is
 only a wrist-frame proxy; when cfg/strike_annotations.yaml marks
 face_normal_reliable: false, do not quote it as the physical paddle face normal.
+analyze(grip_rot=grip_rotation(alpha_z, beta_x)) applies the registry grip
+calibration (the solved HUMAN blade = R_wrist @ Rg @ y_hat, `grip:` block) to the
+face normal AND the blade position/velocity FK — the single grip application
+point used by gen_stage1_questions --grip registry.
 
 For each frame it computes, in the robot-root (pelvis-yaw) frame:
   frame index, normalized phase, racket world pos, racket world lin vel, speed,
@@ -96,6 +100,25 @@ def quat_to_rot(q):
     return R
 
 
+def grip_rotation(alpha_z_deg, beta_x_deg):
+    """Registry grip calibration rotation (strike_annotations.yaml ``grip:``, franco 2026-07-06).
+
+    The video pipeline never sees the paddle; the HUMAN blade orientation was inferred from the
+    rally prior as a constant WRIST-LOCAL rotation, right-multiplied onto the wrist frame:
+
+        Rg = Rz(alpha_z) @ Rx(beta_x)
+        blade_normal_world = R_wrist_world @ Rg @ y_hat
+
+    Same convention (and matrix order) as csv_to_npz_mujoco.apply_grip_rotation — the bake path
+    that re-solves the wrist joints so the robot blade points along R_wrist_old @ Rg.
+    """
+    ca, sa = np.cos(np.deg2rad(alpha_z_deg)), np.sin(np.deg2rad(alpha_z_deg))
+    cb, sb = np.cos(np.deg2rad(beta_x_deg)), np.sin(np.deg2rad(beta_x_deg))
+    Rz = np.array([[ca, -sa, 0.0], [sa, ca, 0.0], [0.0, 0.0, 1.0]])
+    Rx = np.array([[1.0, 0.0, 0.0], [0.0, cb, -sb], [0.0, sb, cb]])
+    return Rz @ Rx
+
+
 def yaw_only_rot(R):
     """Project a rotation onto its yaw (heading) about world +Z -> (..,3,3)."""
     fwd = R[..., :, 0].copy()      # body +X axis in world
@@ -110,7 +133,7 @@ def yaw_only_rot(R):
     return Ry
 
 
-def analyze(name, path, use_blade=True):
+def analyze(name, path, use_blade=True, grip_rot=None):
     d = np.load(path)
     fps = int(d["fps"][0])
     P = d["body_pos_w"].astype(np.float64)        # (T,32,3)
@@ -125,6 +148,14 @@ def analyze(name, path, use_blade=True):
     pelvis_xy = P[:, PELVIS_BODY].copy()
 
     racket_R = quat_to_rot(Q[:, RACKET_BODY])     # wrist orientation (== blade, identity mount_quat)
+    if grip_rot is not None:
+        # GRIP CALIBRATION — the SINGLE application point in the whole stage-1 pipeline
+        # (gen_stage1_questions self-check asserts this). The human blade frame is the wrist
+        # frame right-multiplied by Rg = grip_rotation(alpha_z, beta_x); face normal, blade
+        # POSITION mount offset and blade velocity below all use the rotated frame — the same
+        # convention as the csv_to_npz_mujoco --grip-rot bake (registry note 2026-07-06: blade
+        # positions shift up to ~13 cm with the wrist rotation).
+        racket_R = racket_R @ np.asarray(grip_rot, dtype=np.float64)
     if use_blade:
         # Blade point = wrist FK'd through the mount (matches RacketTargetCommand wrist_offset mode).
         offset_w = np.einsum("tij,j->ti", racket_R, MOUNT_OFFSET)          # (T,3)
@@ -179,6 +210,7 @@ def analyze(name, path, use_blade=True):
         normal_root=normal_root, normal_w=normal_w, label=label, strike=auto_strike, auto_strike=auto_strike,
         fwd_peak=fwd_peak, speed_peak=int(np.argmax(speed)),
         racket_w=racket_w, racket_v_w=racket_v_w, clean_v_w=clean_v_w,
+        grip_applied=grip_rot is not None,
         point="blade" if use_blade else "wrist", annotation=None, annotation_key=None,
         annotation_phase=None, face_normal_reliable=True, selection_source="auto-unverified",
     )
@@ -202,6 +234,17 @@ def _load_annotations(path):
     with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     return data.get("clips", {}) or {}
+
+
+def _load_grip_block(path):
+    """The registry ``grip:`` block ({session: {alpha_z_deg, beta_x_deg, ...}}), {} if absent."""
+    if not path or not os.path.exists(path):
+        return {}
+    if yaml is None:
+        raise RuntimeError("PyYAML is required to read strike annotations")
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    return data.get("grip", {}) or {}
 
 
 def _annotation_frame(ann, T):
