@@ -159,3 +159,43 @@ clips:
     source: video-gvhmr
     face_normal_reliable: false
     rally_yaw_deg: -40  # dry swing: window f42-46 straddles the 0.333 convention
+
+  # --- GRIP-CALIBRATED regenerations (2026-07-06, csv_to_npz_mujoco --grip-rot 5 40) ---------
+  # Wrist joints re-solved per frame so the ROBOT blade (wrist+Y, STL) points along the
+  # calibrated HUMAN blade; worst face residual 0.01 deg, wrist-limit clamps: ZERO on all four
+  # (the hardware wrist reaches the calibrated face everywhere). Blade POSITIONS shift with the
+  # wrist rotation (up to ~13 cm) — anchors/questions must come from these files, not the originals.
+  # Validation at truth frames, rally_yaw applied, plain wrist+Y, venue topspin:
+  #   v5 fh 69% / v5 bh 100% / oblique fh 100% / oblique bh 100%.
+  hope_forehand_v5_cal:
+    phase: 0.673
+    status: verified
+    annotator: carried from hope_forehand_v5 (grip bake does not change contact TIME)
+    source: video-gvhmr + grip-calibrated
+    face_normal_reliable: true-calibrated
+    rally_yaw_deg: 40
+
+  hope_backhand_v5_cal:
+    phase: 0.362
+    status: verified
+    annotator: carried from hope_backhand_v5
+    source: video-gvhmr + grip-calibrated
+    face_normal_reliable: true-calibrated
+    rally_yaw_deg: -40
+    train_phase_candidates: [0.298, 0.316, 0.333]   # re-verify on the _cal kinematics
+
+  hope_forehand_oblique_cal:
+    phase: 0.432
+    status: verified
+    annotator: carried from hope_forehand_oblique
+    source: video-gvhmr + grip-calibrated
+    face_normal_reliable: true-calibrated
+    rally_yaw_deg: 55
+
+  hope_backhand_oblique_cal:
+    phase: 0.495
+    status: verified
+    annotator: carried from hope_backhand_oblique
+    source: video-gvhmr + grip-calibrated
+    face_normal_reliable: true-calibrated
+    rally_yaw_deg: -60
