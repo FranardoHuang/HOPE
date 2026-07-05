@@ -34,8 +34,10 @@ video clips never show the paddle — the registry `grip:` block stores the SOLV
 (HUMAN blade = R_wrist @ Rz(alpha_z)Rx(beta_x) @ y_hat, franco's rally-prior inference) and each
 clip carries `rally_yaw_deg`, the rally diagonal it was actually filmed on. This generator:
   * applies the grip INSIDE analyze_strike_phase.analyze(grip_rot=...) — the ONE grip
-    application point (clips already baked by csv_to_npz_mujoco --grip-rot are detected via
-    face_normal_reliable: true-calibrated / source grip-calibrated and are NEVER re-rotated);
+    application point. Bake detection is FAIL-CLOSED on the registry's face_normal_reliable
+    field (exactly `false` = raw, string 'true-calibrated...' = baked and NEVER re-rotated,
+    anything else refuses loudly) and runs regardless of --grip so a baked clip always reports
+    grip_applied=True; a *_cal stem whose registry entry lacks the bake marker also refuses;
   * canonicalizes clip-derived strike VECTORS (blade velocity, face normal) to the registry's
     straight-line convention by rotating -rally_yaw_deg about the VERTICAL axis through the
     contact point (rally_canonicalize(), the ONE rotation path shared by bank mode and
@@ -44,11 +46,20 @@ clip carries `rally_yaw_deg`, the rally diagonal it was actually filmed on. This
   * runs a SINGLE-APPLICATION self-check per clip: the strike-frame face is recomputed straight
     from the raw npz (one grip multiply + one yaw multiply) and must agree with the pipeline
     value to 1e-6 — a doubled (or dropped) rotation refuses to ship;
-  * records grip_applied / rally_yaw_applied (+ per-clip grip mode, alpha/beta, rally_yaw) in
-    the bank npz meta so downstream can refuse double-rotated banks.
-ASSUMPTION (flagged loudly at runtime, franco to confirm): the blade POSITION mount offset
-rotates with the grip too — consistent with the --grip-rot bake, where blade positions shift up
-to ~13 cm; registry/NOW notes do not state it explicitly for the un-baked FK path.
+  * records grip_applied / rally_yaw_applied (+ per-clip grip mode, rally_yaw) as real JSON in
+    the bank npz meta_json; stage1_question_bank.load_question_bank ENFORCES both flags at load
+    time (ValueError unless grip_applied and rally_yaw_applied are true; allow_legacy=True is
+    the explicit escape hatch) so training can never silently consume a raw or double-rotated
+    bank.
+MOUNT-OFFSET TRUTH (audit round 2): registry-mode FK rotates the mount offset by Rg, which
+shifts the blade point by only a CONSTANT |Rg@r - r| ~ 1.6 cm — the mount offset
+[0.2102, 0.0321, 0.0320] lies ~6 deg from Rg's rotation axis [0.992, 0.043, 0.119]. The bake's
+~13 cm blade shift comes from RE-SOLVING THE WRIST JOINT CHAIN (csv_to_npz_mujoco --grip-rot),
+which registry-mode FK does NOT reproduce: face normal + blade velocity are calibrated, but the
+contact POSITION can sit up to ~11 cm from the robot-executable baked blade. Hence a raw clip
+with a *_cal sibling in the registry is REFUSED (anchors must come from the _cal npz, registry
+note 2026-07-06), and a raw clip without one gets a loud WARNING. The offset rotation itself is
+kept (ASSUMPTION, franco to confirm) as the analyzer-side convention closest to the bake.
 
 PHASE SCAN MODE (--phase-scan; merged from claude's 0d scratch scanner 2026-07-05 so there
 is ONE stage-1 tool): instead of solving questions at the annotated frame only, walk EVERY frame
@@ -79,6 +90,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import sys
 
@@ -122,42 +134,89 @@ def rally_canonicalize(vec_w, rally_yaw_deg):
     return np.asarray(vec_w, dtype=np.float64) @ R.T
 
 
-def _grip_is_baked(ann) -> bool:
-    """csv_to_npz_mujoco --grip-rot regenerations carry the grip in the npz wrist joints
-    themselves (registry: face_normal_reliable true-calibrated / source grip-calibrated) —
-    re-applying the registry rotation on top would double-rotate the face."""
-    if not ann:
+def _grip_is_baked(clip: str, ann) -> bool:
+    """FAIL-CLOSED bake detection (audit round 2). The only trusted marker is the registry's
+    ``face_normal_reliable`` field: exactly ``false`` (bool) = raw video proxy, NOT baked; a
+    string starting ``'true-calibrated'`` = csv_to_npz_mujoco --grip-rot regeneration (the grip
+    already lives in the npz wrist joints). ANY other value — including bool ``true`` — is
+    ambiguous about whether the npz carries the grip, and a wrong guess either double-rotates
+    or drops the face, so it refuses loudly instead of guessing. No annotation entry at all
+    -> not baked (there is no registry claim to consult)."""
+    if ann is None:
         return False
-    return ("grip-calibrated" in str(ann.get("source", ""))
-            or str(ann.get("face_normal_reliable", "")).startswith("true-calibrated"))
+    v = ann.get("face_normal_reliable")
+    if v is False:
+        return False
+    if isinstance(v, str) and v.startswith("true-calibrated"):
+        return True
+    raise SystemExit(
+        f"{clip}: face_normal_reliable={v!r} in strike_annotations.yaml is not a recognized "
+        f"bake marker (must be exactly `false`, or a string starting 'true-calibrated') — "
+        f"cannot decide whether the npz already carries the grip; fix the registry entry "
+        f"before generating")
 
 
-def resolve_grip_and_yaw(asp, name: str, ann, grip_block: dict, grip_flag: str):
-    """Per-clip grip rotation + rally yaw from the registry.
+def resolve_grip_and_yaw(asp, name: str, path: str, annotations: dict, grip_block: dict,
+                         grip_flag: str):
+    """Per-clip grip rotation + rally yaw from the registry (annotation looked up here, same
+    key resolution as the analyzer).
 
     Returns (grip_rot 3x3 | None, grip_desc, rally_yaw_deg, grip_mode) with grip_mode in
     {"registry", "baked", "off"}. grip_rot is None unless the registry rotation must be applied
-    NOW (mode "registry"); "baked" means the npz already contains it.
+    NOW (mode "registry"). Bake detection runs BEFORE the --grip off early-return: the bake
+    lives in the npz wrist joints, so a baked clip is baked no matter what the flag says and
+    the bank meta must record grip_applied=True for it.
     """
+    keys = asp._annotation_keys(name, path)
+    ann = next((annotations[k] for k in keys if k in annotations), None)
+    stem = keys[0]
+    ann_key = next((k for k in keys if k in annotations), stem)
     rally = float(ann.get("rally_yaw_deg") or 0.0) if ann else 0.0
     if ann is not None and ann.get("rally_yaw_deg") is None:
         print(f"[{name}] NOTE: registry entry has no rally_yaw_deg — assuming 0 (straight-line clip)")
+    baked = _grip_is_baked(ann_key, ann)
+    if stem.endswith("_cal") and not baked:
+        raise SystemExit(
+            f"{name}: clip stem {stem!r} names a grip-calibrated regeneration (*_cal) but its "
+            f"registry entry does not carry the bake marker (face_normal_reliable: "
+            f"true-calibrated) — filename and registry disagree about whether the grip is in "
+            f"the npz; fix strike_annotations.yaml before generating")
+    if baked:
+        return None, "BAKED into the npz (csv_to_npz_mujoco --grip-rot; NOT re-applied)", rally, "baked"
     if grip_flag == "off":
         return None, "OFF (--grip off: raw wrist+Y proxy face)", rally, "off"
-    if _grip_is_baked(ann):
-        return None, "BAKED into the npz (csv_to_npz_mujoco --grip-rot; NOT re-applied)", rally, "baked"
     if not grip_block:
         print(f"[{name}] NOTE: --grip registry but the yaml has no `grip:` block — "
               f"proceeding with the raw wrist+Y proxy face")
         return None, "OFF (no grip block in the registry)", rally, "off"
     if len(grip_block) == 1:
         session, g = next(iter(grip_block.items()))
+        pinned = (ann or {}).get("grip_session")
+        if pinned is not None and pinned != session:
+            raise SystemExit(f"{name}: clip pins grip_session={pinned!r} but the registry's only "
+                             f"grip session is {session!r} — registry and annotation disagree; "
+                             f"fix strike_annotations.yaml before generating")
     else:
         session = (ann or {}).get("grip_session")
         if session not in grip_block:
             raise SystemExit(f"{name}: multiple grip sessions in the registry {sorted(grip_block)} — "
                              f"add `grip_session:` to the clip's annotation entry to pick one")
         g = grip_block[session]
+    # Registry-mode grip on a RAW clip only fixes face + velocity; the contact POSITION moves
+    # by the constant ~1.6 cm mount rotation, NOT the bake's ~13 cm wrist-chain re-solve. If a
+    # *_cal regeneration exists, anchors MUST come from it (registry note 2026-07-06).
+    cal_key = f"{ann_key}_cal"
+    if cal_key in annotations:
+        raise SystemExit(
+            f"{name}: a grip-calibrated regeneration {cal_key!r} exists in the registry — "
+            f"anchors/questions must come from the *_cal npz, not the original (the baked wrist "
+            f"re-solve shifts blade POSITIONS up to ~13 cm; registry-mode FK reproduces only a "
+            f"~1.6 cm constant mount shift). Point --clip at the *_cal motion file, or pass "
+            f"--grip off to study the raw proxy face")
+    print(f"[{name}] ** WARNING: registry-mode grip on a raw clip (no *_cal regeneration "
+          f"registered) — face normal + blade velocity are calibrated, but the contact "
+          f"POSITION only moves by the constant ~1.6 cm mount rotation and can sit up to "
+          f"~11 cm from the robot-executable BAKED blade **")
     a, b = float(g["alpha_z_deg"]), float(g["beta_x_deg"])
     return (asp.grip_rotation(a, b),
             f"Rz({a:+.1f} deg)Rx({b:+.1f} deg) [registry:{session}]", rally, "registry")
@@ -169,8 +228,11 @@ def _print_grip_summary(name: str, grip_desc: str, grip_rot, rally_yaw_deg: floa
           f"contact point; the contact point itself is invariant)")
     if grip_rot is not None:
         print(f"[{name}] ** ASSUMPTION (franco to confirm): the blade POSITION mount offset "
-              f"rotates with the grip too (contact point + blade velocity use R_wrist@Rg) — "
-              f"matches the csv_to_npz_mujoco --grip-rot bake, blade shifts up to ~13 cm **")
+              f"rotates with the grip (contact point + blade velocity use R_wrist@Rg). This "
+              f"shifts the blade point by only a CONSTANT |Rg@r - r| ~ 1.6 cm (the mount "
+              f"offset lies ~6 deg from Rg's rotation axis [0.992, 0.043, 0.119]) — it does "
+              f"NOT reproduce the csv_to_npz_mujoco bake's ~13 cm shift, which comes from "
+              f"re-solving the wrist joint chain **")
 
 
 def _face_self_check(asp, path: str, frame: int, grip_rot, rally_yaw_deg: float,
@@ -187,10 +249,12 @@ def _face_self_check(asp, path: str, frame: int, grip_rot, rally_yaw_deg: float,
         R = R @ np.asarray(grip_rot, dtype=np.float64)
     n = rally_canonicalize(R[:, asp.NORMAL_AXIS], rally_yaw_deg)
     err = float(np.max(np.abs(n - np.asarray(pipeline_normal, dtype=np.float64))))
-    assert err < 1e-6, (
-        f"single-application guard FAILED at frame {frame}: generator-path face {n} vs "
-        f"pipeline face {np.asarray(pipeline_normal)} (max abs diff {err:.2e}) — grip/rally_yaw "
-        f"applied twice (or not at all) somewhere; refusing to ship a double-rotated bank")
+    if not (err < 1e-6):  # explicit raise — a bare assert vanishes under python -O
+        raise SystemExit(
+            f"single-application guard FAILED at frame {frame}: generator-path face {n} vs "
+            f"pipeline face {np.asarray(pipeline_normal)} (max abs diff {err:.2e}) — "
+            f"grip/rally_yaw applied twice (or not at all) somewhere; refusing to ship a "
+            f"double-rotated bank")
 
 
 def strike_state_from_clip(asp, name: str, path: str, annotations: dict,
@@ -268,7 +332,7 @@ def phase_scan(asp, name: str, path: str, annotations: dict, grip_block: dict, a
     keys = asp._annotation_keys(name, path)
     ann = next((annotations[k] for k in keys if k in annotations), None)
     grip_rot, grip_desc, rally_yaw, _grip_mode = resolve_grip_and_yaw(
-        asp, name, ann, grip_block, args.grip)
+        asp, name, path, annotations, grip_block, args.grip)
     _print_grip_summary(name, grip_desc, grip_rot, rally_yaw)
     info = asp.analyze(name, path, use_blade=True, grip_rot=grip_rot)
     label_frame = None
@@ -413,10 +477,8 @@ def main() -> int:
     grip_any = False
     for spec in args.clip:
         name, _, path = spec.partition(":")
-        keys = asp._annotation_keys(name, path)
-        ann = next((annotations[k] for k in keys if k in annotations), None)
         grip_rot, grip_desc, rally_yaw, grip_mode = resolve_grip_and_yaw(
-            asp, name, ann, grip_block, args.grip)
+            asp, name, path, annotations, grip_block, args.grip)
         _print_grip_summary(name, grip_desc, grip_rot, rally_yaw)
         st = strike_state_from_clip(asp, name, path, annotations, grip_rot, rally_yaw)
         p_env = st["contact_pos_env"]
@@ -524,7 +586,9 @@ def main() -> int:
                 grip=args.grip, grip_applied=bool(grip_any), rally_yaw_applied=True,
                 clips=clip_meta)
     flat = {f"{n}/{k}": v for n, b in banks.items() for k, v in b.items()}
-    flat["meta_json"] = np.frombuffer(repr(meta).encode(), dtype=np.uint8)
+    # REAL json (audit round 2) — load_question_bank parses this and refuses banks whose
+    # grip_applied / rally_yaw_applied flags are not both true (allow_legacy escape hatch).
+    flat["meta_json"] = np.frombuffer(json.dumps(meta).encode("utf-8"), dtype=np.uint8)
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     np.savez(args.out, **flat)
     print(f"[bank] wrote {args.out}  (clips: {list(banks)})")

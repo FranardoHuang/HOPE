@@ -152,9 +152,13 @@ def analyze(name, path, use_blade=True, grip_rot=None):
         # GRIP CALIBRATION — the SINGLE application point in the whole stage-1 pipeline
         # (gen_stage1_questions self-check asserts this). The human blade frame is the wrist
         # frame right-multiplied by Rg = grip_rotation(alpha_z, beta_x); face normal, blade
-        # POSITION mount offset and blade velocity below all use the rotated frame — the same
-        # convention as the csv_to_npz_mujoco --grip-rot bake (registry note 2026-07-06: blade
-        # positions shift up to ~13 cm with the wrist rotation).
+        # POSITION mount offset and blade velocity below all use the rotated frame.
+        # POSITION caveat (audit round 2): rotating the mount offset moves the blade point by
+        # only a CONSTANT |Rg@r - r| ~ 1.6 cm (the offset lies ~6 deg from Rg's rotation axis
+        # [0.992, 0.043, 0.119]) — it does NOT reproduce the csv_to_npz_mujoco --grip-rot bake,
+        # whose ~13 cm blade shift comes from re-solving the wrist joint chain. Faces and
+        # velocities are calibrated here; POSITION anchors must come from *_cal npz where they
+        # exist (registry note 2026-07-06).
         racket_R = racket_R @ np.asarray(grip_rot, dtype=np.float64)
     if use_blade:
         # Blade point = wrist FK'd through the mount (matches RacketTargetCommand wrist_offset mode).

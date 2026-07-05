@@ -12,9 +12,15 @@ gen_stage1_questions.py loading virtual_ball.py). Covers:
   and padding rows are never selected (u -> 1 clamps to counts-1).
 * grip calibration (0g): a synthetic wrist rotation + the registry grip -> the expected WORLD
   face normal AND grip-rotated blade position/velocity mount FK (pins the mount-offset-rotates
-  decision), plus the generator's single-application guard catching a double rally rotation.
+  decision — a CONSTANT ~1.6 cm blade shift, NOT the bake's ~13 cm wrist-chain re-solve), plus
+  the generator's single-application guard (SystemExit) catching a double rally rotation.
 * rally-yaw canonicalization: rotate by psi then -psi = identity; -psi-about-+Z convention;
   vertical vectors invariant.
+* fail-closed bake detection (audit round 2): corrupted face_normal_reliable markers, *_cal
+  stem/registry disagreement, _cal-sibling refusal, pinned-session mismatch, baked-under---grip
+  off reporting.
+* loader meta enforcement (audit round 2): banks without meta_json / non-JSON meta / flags not
+  both true are refused with ValueError; allow_legacy=True is the explicit escape hatch.
 
 Run:  /opt/anaconda3/bin/python3 hope_training/whole_body_tracking/tests/test_stage1_wiring.py
 """
@@ -22,6 +28,7 @@ Run:  /opt/anaconda3/bin/python3 hope_training/whole_body_tracking/tests/test_st
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import tempfile
 
@@ -42,6 +49,13 @@ def _load_module():
     return mod
 
 
+def _meta_bytes(grip_applied=True, rally_yaw_applied=True):
+    """meta_json payload as the generator writes it (real JSON, loader-enforced flags)."""
+    return np.frombuffer(json.dumps({"grip_applied": grip_applied,
+                                     "rally_yaw_applied": rally_yaw_applied}).encode("utf-8"),
+                         dtype=np.uint8)
+
+
 def _write_bank(path, forehand_q=3, backhand_q=2):
     """Tiny synthetic bank with recognizable per-row values (row i of clip c encodes (c, i))."""
     def rows(c, q, base):
@@ -60,7 +74,7 @@ def _write_bank(path, forehand_q=3, backhand_q=2):
         "forehand/incoming_vel": rows(0, forehand_q, -3.0),
         "backhand/incoming_vel": rows(1, backhand_q, -3.0),
     }
-    np.savez(path, **flat)
+    np.savez(path, meta_json=_meta_bytes(), **flat)
     return flat
 
 
@@ -108,11 +122,12 @@ def test_select_fixed_point_and_matching_rows(qb, bank, flat):
 
 
 def test_loud_errors(qb, tmpdir):
-    # missing clip -> KeyError
+    # missing clip -> KeyError (valid meta so the meta gate is not what fires)
     p1 = os.path.join(tmpdir, "missing_clip.npz")
-    np.savez(p1, **{"forehand/contact_pos_env": np.zeros(3),
-                    "forehand/demanded_vel": np.zeros((2, 3)),
-                    "forehand/demanded_normal": np.zeros((2, 3))})
+    np.savez(p1, meta_json=_meta_bytes(),
+             **{"forehand/contact_pos_env": np.zeros(3),
+                "forehand/demanded_vel": np.zeros((2, 3)),
+                "forehand/demanded_normal": np.zeros((2, 3))})
     try:
         qb.load_question_bank(p1)
         raise AssertionError("missing backhand clip did not raise")
@@ -120,18 +135,52 @@ def test_loud_errors(qb, tmpdir):
         pass
     # empty / mismatched question arrays -> ValueError
     p2 = os.path.join(tmpdir, "mismatched.npz")
-    np.savez(p2, **{"forehand/contact_pos_env": np.zeros(3),
-                    "forehand/demanded_vel": np.zeros((2, 3)),
-                    "forehand/demanded_normal": np.zeros((3, 3)),
-                    "backhand/contact_pos_env": np.zeros(3),
-                    "backhand/demanded_vel": np.zeros((1, 3)),
-                    "backhand/demanded_normal": np.zeros((1, 3))})
+    np.savez(p2, meta_json=_meta_bytes(),
+             **{"forehand/contact_pos_env": np.zeros(3),
+                "forehand/demanded_vel": np.zeros((2, 3)),
+                "forehand/demanded_normal": np.zeros((3, 3)),
+                "backhand/contact_pos_env": np.zeros(3),
+                "backhand/demanded_vel": np.zeros((1, 3)),
+                "backhand/demanded_normal": np.zeros((1, 3))})
     try:
         qb.load_question_bank(p2)
         raise AssertionError("mismatched vel/normal shapes did not raise")
     except ValueError:
         pass
     print("[ok] errors: missing clip raises KeyError, mismatched arrays raise ValueError")
+
+
+def test_loader_meta_enforcement(qb, tmpdir):
+    """Banks without meta_json / non-JSON meta / flags not both true -> ValueError;
+    allow_legacy=True is the explicit escape hatch (audit round 2)."""
+    arrays = {"forehand/contact_pos_env": np.zeros(3),
+              "forehand/demanded_vel": np.ones((2, 3)),
+              "forehand/demanded_normal": np.ones((2, 3)),
+              "backhand/contact_pos_env": np.zeros(3),
+              "backhand/demanded_vel": np.ones((1, 3)),
+              "backhand/demanded_normal": np.ones((1, 3))}
+    cases = {
+        "no_meta.npz": {},                                    # missing meta_json
+        "repr_meta.npz": {"meta_json": np.frombuffer(        # pre-audit python-repr meta
+            repr({"grip_applied": True}).encode(), dtype=np.uint8)},
+        "grip_off.npz": {"meta_json": _meta_bytes(grip_applied=False)},
+        "no_rally.npz": {"meta_json": _meta_bytes(rally_yaw_applied=False)},
+    }
+    for fname, extra in cases.items():
+        p = os.path.join(tmpdir, fname)
+        np.savez(p, **arrays, **extra)
+        try:
+            qb.load_question_bank(p)
+            raise AssertionError(f"{fname}: un-provable bank loaded without allow_legacy")
+        except ValueError:
+            pass
+        bank = qb.load_question_bank(p, allow_legacy=True)   # explicit escape hatch loads
+        assert bank.counts.tolist() == [2, 1]
+    # flags both true -> loads without the escape hatch
+    p_ok = os.path.join(tmpdir, "ok_meta.npz")
+    np.savez(p_ok, meta_json=_meta_bytes(), **arrays)
+    assert qb.load_question_bank(p_ok).counts.tolist() == [2, 1]
+    print("[ok] loader meta: missing/repr/false-flag banks refused, allow_legacy escape hatch works")
 
 
 def test_face_command_obs_vector(qb):
@@ -224,17 +273,63 @@ def test_grip_calibration_synthetic(gen, asp, tmpdir):
     raw = asp.analyze("synclip", npz, use_blade=True)
     assert np.allclose(raw["normal_w"][0], R_wrist @ [0.0, 1.0, 0.0], atol=1e-9)
 
-    # SINGLE-APPLICATION GUARD: analyzer-path face + one rally rotation passes; doubled fails.
+    # SINGLE-APPLICATION GUARD: analyzer-path face + one rally rotation passes; doubled fails
+    # with SystemExit (explicit raise — survives python -O, unlike a bare assert).
     n_pipe = gen.rally_canonicalize(info["normal_w"][0], 40.0)
     gen._face_self_check(asp, npz, 0, Rg, 40.0, n_pipe)
     doubled = gen.rally_canonicalize(n_pipe, 40.0)
     try:
         gen._face_self_check(asp, npz, 0, Rg, 40.0, doubled)
         raise AssertionError("a double-rotated face slipped through the guard")
-    except AssertionError as exc:
-        if "single-application guard FAILED" not in str(exc):
-            raise
+    except SystemExit as exc:
+        assert "single-application guard FAILED" in str(exc)
     print("[ok] grip: R_wrist@Rg@y_hat world normal, rotated mount pos/vel FK, guard catches x2 rally")
+
+
+def test_bake_detection_fail_closed(gen, asp):
+    """_grip_is_baked + resolve_grip_and_yaw refuse ambiguous registry states (audit round 2)."""
+    def expect_exit(fn, *frags):
+        try:
+            fn()
+            raise AssertionError(f"expected SystemExit mentioning {frags}")
+        except SystemExit as exc:
+            for f in frags:
+                assert f in str(exc), f"{f!r} not in {exc}"
+
+    # marker semantics: exactly False -> raw; 'true-calibrated...' -> baked; no entry -> raw
+    assert gen._grip_is_baked("c", {"face_normal_reliable": False}) is False
+    assert gen._grip_is_baked("c", {"face_normal_reliable": "true-calibrated"}) is True
+    assert gen._grip_is_baked("c", None) is False
+    # corrupted markers refuse loudly (fail-closed): bool True, strings, missing field
+    for bad in (True, "yes", "false", None):
+        expect_exit(lambda b=bad: gen._grip_is_baked("clipx", {"face_normal_reliable": b}),
+                    "clipx", "bake marker")
+
+    grip_block = {"sess": {"alpha_z_deg": 5, "beta_x_deg": 40}}
+    raw = {"face_normal_reliable": False, "rally_yaw_deg": 10}
+    baked = {"face_normal_reliable": "true-calibrated", "rally_yaw_deg": 10}
+    # *_cal stem whose registry entry lacks the bake marker -> refuse
+    expect_exit(lambda: gen.resolve_grip_and_yaw(
+        asp, "fh", "/x/foo_cal.npz", {"foo_cal": dict(raw)}, grip_block, "registry"),
+        "foo_cal", "bake marker")
+    # raw clip with a *_cal sibling registered -> refuse (anchors must come from the _cal npz)
+    expect_exit(lambda: gen.resolve_grip_and_yaw(
+        asp, "fh", "/x/bar.npz", {"bar": dict(raw), "bar_cal": dict(baked)},
+        grip_block, "registry"), "bar_cal", "_cal npz")
+    # pinned session != the single available session -> refuse
+    expect_exit(lambda: gen.resolve_grip_and_yaw(
+        asp, "fh", "/x/baz.npz", {"baz": dict(raw, grip_session="other")},
+        grip_block, "registry"), "grip_session", "'sess'")
+    # baked clip reports mode 'baked' even under --grip off (meta must say grip_applied=True)
+    r, desc, yaw, mode = gen.resolve_grip_and_yaw(
+        asp, "fh", "/x/qux_cal.npz", {"qux_cal": dict(baked)}, grip_block, "off")
+    assert mode == "baked" and r is None and yaw == 10.0, (mode, r, yaw)
+    # raw clip without a sibling still resolves (registry mode, Rg present)
+    r, desc, yaw, mode = gen.resolve_grip_and_yaw(
+        asp, "fh", "/x/solo.npz", {"solo": dict(raw)}, grip_block, "registry")
+    assert mode == "registry" and r is not None and yaw == 10.0, (mode, r, yaw)
+    print("[ok] bake detection: fail-closed markers, _cal stem/sibling refusals, pinned-session"
+          " mismatch, baked-under-off")
 
 
 def test_rally_canonicalization(gen):
@@ -267,10 +362,12 @@ def main():
         bank = test_load_shapes_keying_padding(qb, bank_path, flat)
         test_select_fixed_point_and_matching_rows(qb, bank, flat)
         test_loud_errors(qb, tmpdir)
+        test_loader_meta_enforcement(qb, tmpdir)
         test_grip_calibration_synthetic(gen, asp, tmpdir)
     test_face_command_obs_vector(qb)
     test_generator_split_determinism()
     test_rally_canonicalization(gen)
+    test_bake_detection_fail_closed(gen, asp)
     print("ALL STAGE-1 WIRING TESTS PASSED")
 
 

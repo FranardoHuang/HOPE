@@ -12,6 +12,7 @@ so the loading/selection logic is unit-testable without the training env.
 
 from __future__ import annotations
 
+import json
 from typing import NamedTuple, Sequence
 
 import numpy as np
@@ -30,15 +31,46 @@ class QuestionBank(NamedTuple):
 
 
 def load_question_bank(
-    path: str, device: str | torch.device = "cpu", clip_names: Sequence[str] = ("forehand", "backhand")
+    path: str,
+    device: str | torch.device = "cpu",
+    clip_names: Sequence[str] = ("forehand", "backhand"),
+    allow_legacy: bool = False,
 ) -> QuestionBank:
     """Load a stage-1 bank npz ONCE into per-clip float32 tensors on ``device``.
 
     Every name in ``clip_names`` must be present in the bank with >= 1 question — a missing or
     empty clip raises (do not train a clip on silent zeros). ``clip_names`` order defines the
     clip_id indexing (must match RacketTargetCommand._clip_names: 0=forehand, 1=backhand).
+
+    META ENFORCEMENT (audit round 2): the generator writes real JSON under ``meta_json`` with
+    ``grip_applied`` / ``rally_yaw_applied`` single-application flags. Unless ``allow_legacy``
+    is True, a bank whose meta is missing, unparseable (pre-audit repr format), or whose flags
+    are not BOTH true is refused with ValueError — training must never silently consume a
+    raw-proxy-face (--grip off) or pre-0g bank, and a double-rotated bank cannot claim the
+    flags twice (the generator sets them exactly once, guarded by its 1e-6 face self-check).
     """
     data = np.load(path)
+    if not allow_legacy:
+        if "meta_json" not in data:
+            raise ValueError(
+                f"question bank {path!r} has no meta_json — cannot prove its clip faces are "
+                f"grip-calibrated + rally-canonicalized; regenerate with the current "
+                f"gen_stage1_questions.py (or pass allow_legacy=True to load it anyway)"
+            )
+        try:
+            meta = json.loads(bytes(np.asarray(data["meta_json"], dtype=np.uint8)).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"question bank {path!r}: meta_json is not valid JSON ({exc}) — pre-audit "
+                f"banks stored a python repr; regenerate (or pass allow_legacy=True)"
+            ) from None
+        if meta.get("grip_applied") is not True or meta.get("rally_yaw_applied") is not True:
+            raise ValueError(
+                f"question bank {path!r}: meta grip_applied={meta.get('grip_applied')!r} / "
+                f"rally_yaw_applied={meta.get('rally_yaw_applied')!r} — training requires "
+                f"calibrated-face, rally-canonicalized banks (regenerate without --grip off, "
+                f"or pass allow_legacy=True to override)"
+            )
     per_clip = []
     for name in clip_names:
         key = f"{name}/contact_pos_env"
