@@ -333,10 +333,15 @@ class OnnxPolicy:
         outs = [o.name for o in self.sess.get_outputs()]
         assert "obs" in ins and "time_step" in ins, f"unexpected ONNX inputs: {ins}"
         self.obs_dim = int(ins["obs"][1])
-        assert self.obs_dim in (175, 180), f"expected obs dim 180 (base) or 175 (deploy_parity), got {self.obs_dim}"
+        assert self.obs_dim in (175, 179, 180), \
+            f"expected obs dim 180 (base), 175 (deploy_parity) or 179 (deploy_parity + face command), got {self.obs_dim}"
         # 175-D deploy_parity = 180-D MINUS motion_anchor_pos_b(3) and base_target_pos_b(2), with the
         # racket_target_pos_b term reframed relative to the CURRENT racket FK (not the base). See build_obs.
-        self.deploy_parity = (self.obs_dim == 175)
+        # 179-D (stage 1, 2026-07-06) = 175-D + racket_target_normal_cmd tail: DEMANDED face normal
+        # (3, world) + zero-filled rho placeholder (1) — the frozen contract-day 175->179 layout
+        # (train.py face_command_obs appends the term LAST, so the 175 prefix is byte-identical).
+        self.deploy_parity = (self.obs_dim in (175, 179))
+        self.face_command = (self.obs_dim == 179)
         self.out_names = outs
         md = self.sess.get_modelmeta().custom_metadata_map
         # --- metadata (FAIL LOUDLY if anything is missing) -------------------------------------
@@ -698,7 +703,7 @@ class RacketCommand:
 #                          no world base position leaks in). Everything else is byte-identical.
 # =================================================================================================
 def build_obs(refs, robot: MujocoRobot, racket: RacketCommand, last_action, default_q,
-              deploy_parity=False):
+              deploy_parity=False, face_command=False):
     # robot base (pelvis = root) world pose
     base_pos_w = robot.body_pos(robot.pelvis_bid)
     base_quat_w = robot.body_quat(robot.pelvis_bid)
@@ -738,11 +743,18 @@ def build_obs(refs, robot: MujocoRobot, racket: RacketCommand, last_action, defa
         #   racket_pos_w = base_pos_w + R(base_quat_w) @ racket_pos_pelvis(q)   (q = current joints)
         racket_pos_w = base_pos_w + mat_from_quat(base_quat_w) @ racket_pos_pelvis(q)
         racket_tgt_b = racket.racket_target_pos_b_rel_fk(base_pos_w, base_quat_w, racket_pos_w)
-        obs = np.concatenate([
+        parts = [
             command, ori_b6, base_ang_vel, joint_pos_rel, joint_vel_rel,
             last_action, proj_grav, racket_tgt_b, racket_vel_w, tts, swing,
-        ]).astype(np.float64)
-        assert obs.shape == (175,), f"obs dim {obs.shape} != 175 (deploy_parity)"
+        ]
+        if face_command:
+            # stage-1 face-command tail: DEMANDED face normal (world; box mode = the clip
+            # reference, venue mode = the per-ball StrikeSpec demand) + zero rho placeholder.
+            parts.append(racket.racket_target_normal_w)
+            parts.append(np.zeros(1))
+        obs = np.concatenate(parts).astype(np.float64)
+        want = 179 if face_command else 175
+        assert obs.shape == (want,), f"obs dim {obs.shape} != {want} (deploy_parity)"
     else:
         # 9. base_target_pos_b (2)
         base_tgt_b = racket.base_target_pos_b(base_pos_w, base_quat_w)
@@ -1053,7 +1065,8 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
     for step in range(n_steps):
         refs = refs_table[time_step]
         obs, base_quat_w, ra_pos, ra_quat, refa_pos, refa_quat = build_obs(
-            refs, robot, racket, last_action, policy.default_q, deploy_parity=policy.deploy_parity)
+            refs, robot, racket, last_action, policy.default_q, deploy_parity=policy.deploy_parity,
+            face_command=getattr(policy, "face_command", False))
 
         mean = policy.action(obs, time_step)
         action = mean if noise_scale <= 0.0 else mean + noise_scale * std_vec * rng.standard_normal(31)
@@ -1625,8 +1638,12 @@ def main():
     print(f"[mj-sim2sim] onnx={args.onnx}")
     print(f"[mj-sim2sim] mjcf={args.mjcf}")
     policy = OnnxPolicy(args.onnx, obs_norm=("off" if args.no_obs_norm else args.obs_norm))
+    contract = ('deploy_parity + FACE COMMAND tail (demanded normal 3 + rho placeholder)'
+                if getattr(policy, 'face_command', False) else
+                ('deploy_parity: racket_target_pos_b relative to racket FK, no anchor_pos/base_target'
+                 if policy.deploy_parity else 'base: full 180-D BeyondMimic obs'))
     print(f"[mj-sim2sim] obs_dim={policy.obs_dim} "
-          f"({'deploy_parity: racket_target_pos_b relative to racket FK, no anchor_pos/base_target' if policy.deploy_parity else 'base: full 180-D BeyondMimic obs'}) "
+          f"({contract}) "
           f"joints={len(policy.joint_names)} "
           f"control={1/step_dt:.0f}Hz (sim_dt={args.sim_dt}, decim={args.decimation})")
 
