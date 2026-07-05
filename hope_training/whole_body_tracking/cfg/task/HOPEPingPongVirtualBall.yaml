@@ -30,3 +30,19 @@ racket:
   vb_vel_y_range: [-0.6, 0.6]
   vb_vel_z_range: [-1.0, 0.5]
   vb_spin_abs_max: 50.0
+
+# ---- PRODUCT-LINE BASELINE PINS (2026-07-05, simtoreal2 merge guard) --------------------------
+# The composed base (HOPEPingPongDeployParity.yaml) carries jiayi's ARM A retrain values
+# (16 s episodes, 0-8 s holds, post_swing 0.25, base_decel ON, position std 0.15 — see the
+# ARM A comments there). Every P2/o2/o3 virtual-ball arm trained with the values below, and
+# arm launchers pass recipe flags (e.g. post_swing_start_prob) explicitly — so the yaml keeps
+# the flags-off baseline. Changing ANY of these goes through the ablation ladder (NOW.md),
+# never through a merge.
+env:
+  episode_length_s: 10.0
+motion:
+  hold_steps_range: [0, 100]
+  post_swing_start_prob: 0.0
+rewards:
+  racket_position_std: 0.20
+  base_decel_weight: 0.0

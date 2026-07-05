@@ -185,16 +185,13 @@ class AvatarProVrpnRelay(Node):
     def _topic_to_sender(self, topic: str) -> str | None:
         """Return the VRPN sender name (first path segment) of a pose topic.
 
-        vrpn_mocap names the pose topic differently depending on multi_sensor
-        and the client build:
-          * single sensor:   ``/vrpn_mocap/PPT/pose``
-          * multi_sensor:    ``/vrpn_mocap/PPT/pose0`` (index suffixed on
-            ``pose`` -- e.g. ``pose0``, ``pose31664``)
-          * vendored client: ``/vrpn_mocap/PPT/pose_id_31664`` (tracker.hpp
-            builds ``<channel>_id_<idx>`` topic names)
-          * legacy docs:     ``/vrpn_mocap/PPT/pose_31664``
+        vrpn_mocap names the pose topic differently depending on multi_sensor:
+          * single sensor: ``/vrpn_mocap/PPT/pose``
+          * multi_sensor:  ``/vrpn_mocap/PPT/pose_id_0`` (our vendored
+            vrpn_mocap, tracker.hpp: channel + "_id_" + sensor_idx). Upstream
+            builds have used a bare suffix instead (``pose0``, ``pose31664``).
         Some builds instead nest the index as its own segment
-        (``/vrpn_mocap/PPT/0/pose``). All forms -> sender ``PPT``. The type
+        (``/vrpn_mocap/PPT/0/pose``). All layouts -> sender ``PPT``. The type
         filter in _discover_and_select already drops the twist*/accel* topics,
         so here we only need to recognise a pose topic and read its sender.
         """
@@ -205,14 +202,12 @@ class AvatarProVrpnRelay(Node):
         if len(segments) < 2:
             return None
         last = segments[-1]
-        # "pose" (single/nested layouts) or an indexed form:
-        # "pose<idx>" / "pose_id_<idx>" / "pose_<idx>".
-        if last != "pose":
-            for stem in ("pose_id_", "pose_", "pose"):
-                if last.startswith(stem) and last[len(stem):].isdigit():
-                    break
-            else:
-                return None
+        # "pose" (single/nested), "pose<idx>" (upstream multi_sensor) or
+        # "pose_id_<idx>" (vendored multi_sensor).
+        if last != "pose" \
+                and not (last.startswith("pose") and last[4:].isdigit()) \
+                and not (last.startswith("pose_id_") and last[8:].isdigit()):
+            return None
         return segments[0]
 
     def _classify(self, sender: str) -> str | None:

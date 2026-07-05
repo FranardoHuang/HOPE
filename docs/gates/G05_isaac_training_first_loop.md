@@ -103,6 +103,44 @@ Done:
 - 2026-07-02: `scripts/csv_to_npz.py --robot agibot_a3` now auto-aligns exported world-frame arrays into HOPE +X before saving/uploading, and `scripts/check_motion_target_alignment.py` provides a no-Isaac gate. Verification: `python -m py_compile ...` passed; `python scripts/check_motion_target_alignment.py --yaml cfg/task/HOPEPingPong.yaml` and `--yaml cfg/task/HOPEPingPongRealSensor.yaml` passed; the same check fails on old v4 as expected.
 - 2026-07-02 (later): Fixed an `UnboundLocalError` in `RacketTargetCommand._resample_command` (`hope_commands.py`; the base-XY coupling branch read `motion` before assignment) that crashed EVERY `HOPEPingPong*` env reset — the working tree could not start training at all until this fix. After the fix: local-clip smoke passed (`num_envs=32 max_iterations=2 logger=tensorboard`), and a bounded verification training run passed: `hope_isaac_py scripts/train.py task=HOPEPingPong algo=ppo headless=true num_envs=4096 max_iterations=300 run_name=e2e_verify_train seed=1` -> W&B run `wuj6ds9u` (https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/wuj6ds9u), mean reward -1.37 -> ~25, mean episode length 5 -> ~340 steps, `strike_success` 0 -> 0.006 in 300 iters, `model_{0,100,200,299}.pt` + ONNX exported and synced. Pipeline viability evidence on the corrected `_hopex` clips, still not a quality baseline. [This run used the pre-merge branch defaults, i.e. `target_mode: reference_perturbed`.]
 - 2026-07-02 (later): Full fresh MP4 -> npz rerun in an isolated dir reproduces the shipped artifacts bit-for-bit (GMR pkl and retargeted CSV byte-identical; npz equal to `hope_forehand_hopex.npz` within 2e-7 float noise), and `check_motion_target_alignment.py --clip` passes on the regenerated clip. One env caveat found and documented: GVHMR's YOLO load needs `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1` under torch 2.7 (see `docs/operations/setup_environments.md`).
+- 2026-07-04: `motion.clip_switch_prob` (default 0.0, try 0.002) adds deploy-parity MID-swing clip
+  switches through the existing wrap-resample path: per-step random abort to a different clip's
+  frame 0 + fresh pre-swing hold + fresh target, robot untouched. Parity for
+  `pp_reference_clock.hpp`, which flips `clip_id` at arbitrary tts when the planner re-sides the
+  target — the root cause of the venue falls at 准备/正手/反手 switches. A8 post-swing capture
+  stays wrap-only (aborted swings are not captured). Mech-verified via `clip_switch_count`.
+- 2026-07-04: P2.4 `base_decel` reward landed default-off (`rewards.base_decel_weight: 0.0`;
+  PACE-style pre-strike pseudo-speed tracking on racket→target planar distance — formula and v2
+  plan in `docs/operations/run_training.md` Reward Shaping and `docs/motion_and_contract_v3.md`
+  §5). Mech-verified on/off. Same commit hardened `scripts/train.py`: `task.motion`/`task.racket`
+  yaml keys go through explicit whitelists and unknown keys RAISE — new yaml keys must extend the
+  whitelist in the same commit (the 018467a startup-crash lesson).
+- 2026-07-04 (evening): `motion.speed_scale_range` (R14 retiming) landed default-off — per-swing
+  reference playback speed with the full consistency cascade (clock ×s via float shadow clock,
+  reference velocities ×s, tts ÷s, racket velocity target ×s incl. HER clamp box); train-only
+  (play/eval force `[1.0, 1.0]`); flag docs in `docs/operations/run_training.md`, design in
+  `docs/motion_and_contract_v3.md` §2. MECH-VERIFIED on pod (2026-07-04 late): OFF run 25 it
+  clean; ON run `[0.8,1.2]` 25 it clean with `Live/motion/playback_speed` per-iter env-mean
+  fluctuating 0.981-1.012 — the U(0.8,1.2)/√512 signature (a dead flag would sit at 1.0000).
+  Arm R14 is launch-ready.
+- 2026-07-04 (late): `rewards.free_wrist_ori_mimic` (R16, franco's wrist idea) landed default-off
+  and MECH-VERIFIED on pod (25 it clean; startup override log shows both
+  `motion_body_ori.body_names-=right_wrist_yaw_Link` and `motion_body_ang_vel.body_names-=...`).
+  Config-level: this codebase has no joint-level mimic rewards — body-level orientation tracking
+  on the racket-mount link IS the face mimic; the flag filters it out of the two orientation
+  terms while keeping position/linear-velocity mimic (swing path). Face is then shaped by
+  `racket_normal` / ball-outcome rewards; at contract v3 the freed wrist becomes the actuator of
+  the commanded-normal channel.
+- 2026-07-04 (evening): v5 clips processed end-to-end ON the pod (`v5_pipeline.sh`, reusing the
+  oblique pipeline + `csv_to_npz_mujoco.py`): `/workspace/shared/motions/hope_{forehand,backhand}_v5.npz`
+  (56/58 frames @50 Hz, yaw re-grounded +86.6°/+83.6°→0). Strike phases CORRECTED late-night by
+  franco's prior: forehand 0.673 (detector's speed-peak 0.768 is the post-contact whip — at the
+  true ~2/3 contact the velocity/normal are direction-healthy, retiring the "+Y-dominant" flag),
+  backhand 0.345 (matches franco's "within the first 3/7"). Lesson: speed peak != contact;
+  cross-check `analyze_strike_phase` picks against the forward-velocity peak and a human prior.
+  Remaining data flag: v5 reference jitter is 2-6× hopex (mean joint |acc| 5.9/15.5 vs 2.5/2.7
+  rad/s²; oblique 3.5 sits between) — evidence for R16 / reference filtering, and a third
+  confounder for R15 verdicts.
 
 Done (2026-06-26 — first loop reproduced in this harness):
 

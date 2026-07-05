@@ -305,3 +305,116 @@ def test_spin_ignorant_solution_misses():
     assert resid_aware < 0.01
     assert miss_blind > 5 * resid_aware
     assert miss_blind > 0.03
+
+
+# --------------------------------------------------------------------- #
+# solve_fixed_normal: path A — normal pinned, velocity-only inversion
+# --------------------------------------------------------------------- #
+
+
+def test_fixed_normal_round_trip_pins_normal_and_lands():
+    """Forward-sim a known (n, v_r); solve_fixed_normal with that SAME n must land on the
+    generated target, return exactly the pinned normal (tilt 0), and stay self-consistent."""
+    p_strike = np.array([0.0, -0.7625, 0.3])
+    v_ball = np.array([-4.0, 0.3, -0.8])
+    w_ball = np.array([0.0, -30.0, 0.0])
+    n = np.array([0.92, -0.06, 0.39])
+    n = n / np.linalg.norm(n)
+    b1 = np.cross([0.0, 0.0, 1.0], n)
+    b1 = b1 / np.linalg.norm(b1)
+    v_r = 1.8 * n + 0.5 * np.cross(n, b1)
+
+    landing = _forward_landing(p_strike, v_ball, w_ball, n, v_r)
+    assert landing is not None
+    target_xy, _ = landing
+
+    planner = StrikeSpecPlanner(physics=PHYS, config=CFG, table=TAB)
+    spec = planner.solve_fixed_normal(
+        p_strike, v_ball, w_ball, target_xy, racket_speed_budget=10.0, n_fixed=n
+    )
+    assert spec is not None
+    assert np.allclose(spec.n, n, atol=1e-12)              # normal PINNED, sign preserved
+    assert spec.tilt_pitch_deg == 0.0 and spec.tilt_yaw_deg == 0.0
+    assert np.linalg.norm(spec.landing_xy - target_xy) < 0.02
+    assert spec.residual_m < planner.TOL_M
+
+    # Self-consistency: replaying (n, v_r) reproduces the landing; decomposition holds.
+    replay = _forward_landing(p_strike, v_ball, w_ball, spec.n, spec.v_r)
+    assert replay is not None
+    assert np.linalg.norm(replay[0] - spec.landing_xy) < 1e-9
+    b1s, b2s = spec.face_basis
+    v_rebuilt = spec.v_n_signed * spec.n + spec.v_t_vec[0] * b1s + spec.v_t_vec[1] * b2s
+    assert np.allclose(v_rebuilt, spec.v_r, atol=1e-9)
+
+
+def test_fixed_normal_differs_from_free_solve_but_still_lands():
+    """Pin a normal AWAY from the free solve's optimum: the velocity-only solve must still
+    reach the same landing target (3 velocity DOF vs 2 landing DOF), with a different v_r."""
+    planner = StrikeSpecPlanner(physics=PHYS, config=CFG, table=TAB)
+    p_strike = np.array([0.3, -0.4, 1.0])
+    v_ball = np.array([-5.0, 0.3, -0.6])
+    w_ball = np.array([0.0, -40.0, 5.0])
+    target = np.array([2.2, -0.3])
+
+    free = planner.solve(p_strike, v_ball, w_ball, target, racket_speed_budget=10.0)
+    assert free is not None
+    # ~10 deg pitch off the free solution's face — a clip-locked-face magnitude of error.
+    c, s = np.cos(np.deg2rad(10.0)), np.sin(np.deg2rad(10.0))
+    n_pin = np.array([c * free.n[0] - s * free.n[2], free.n[1], s * free.n[0] + c * free.n[2]])
+    n_pin = n_pin / np.linalg.norm(n_pin)
+
+    pinned = planner.solve_fixed_normal(
+        p_strike, v_ball, w_ball, target, racket_speed_budget=10.0, n_fixed=n_pin
+    )
+    assert pinned is not None
+    assert np.allclose(pinned.n, n_pin, atol=1e-12)
+    assert np.linalg.norm(pinned.landing_xy - target) < planner.TOL_M + 1e-9
+    assert float(np.arccos(np.clip(np.dot(pinned.n, free.n), -1, 1))) > np.deg2rad(5.0)
+    assert np.linalg.norm(pinned.v_r - free.v_r) > 0.1   # a genuinely different strike
+
+
+def test_fixed_normal_sign_agnostic_physics():
+    """±n span the same face plane and the contact model orients internally: the flipped
+    pin must land on the same target (the reported n keeps the sign handed in)."""
+    planner = StrikeSpecPlanner(physics=PHYS, config=CFG, table=TAB)
+    p_strike = np.array([0.0, -0.7625, 0.3])
+    v_ball = np.array([-4.0, 0.3, -0.8])
+    n = np.array([0.95, 0.05, 0.3])
+    n = n / np.linalg.norm(n)
+    target = np.array([2.3, -0.5])
+
+    a = planner.solve_fixed_normal(p_strike, v_ball, None, target, 10.0, n_fixed=n)
+    b = planner.solve_fixed_normal(p_strike, v_ball, None, target, 10.0, n_fixed=-n)
+    assert a is not None and b is not None
+    assert np.allclose(a.n, n, atol=1e-12) and np.allclose(b.n, -n, atol=1e-12)
+    assert np.linalg.norm(a.landing_xy - target) < planner.TOL_M + 1e-9
+    assert np.linalg.norm(b.landing_xy - target) < planner.TOL_M + 1e-9
+
+
+def test_fixed_normal_unreachable_returns_none():
+    """A face pinned nearly EDGE-ON to the return direction cannot steer the ball to the
+    target with any budget-bounded velocity -> graceful None (the resample signal)."""
+    planner = StrikeSpecPlanner(physics=PHYS, config=CFG, table=TAB)
+    p_strike = np.array([0.0, -0.7625, 0.3])
+    v_ball = np.array([-4.0, 0.3, -0.8])
+    n_sideways = np.array([0.02, 1.0, 0.0])
+    n_sideways = n_sideways / np.linalg.norm(n_sideways)
+    spec = planner.solve_fixed_normal(
+        p_strike, v_ball, None, np.array([2.2, -0.5]), racket_speed_budget=6.0,
+        n_fixed=n_sideways,
+    )
+    assert spec is None
+
+
+def test_fixed_normal_speed_budget_respected():
+    """Same budget rule as solve(): a solution demanding more than the budget -> None."""
+    planner = StrikeSpecPlanner(physics=PHYS, config=CFG, table=TAB)
+    p_strike = np.array([0.0, -0.7625, 0.3])
+    v_ball = np.array([-4.0, 0.3, -0.8])
+    n = np.array([0.92, -0.06, 0.39])
+    n = n / np.linalg.norm(n)
+    spec = planner.solve_fixed_normal(
+        p_strike, v_ball, None, np.array([2.055, -0.7625]), racket_speed_budget=0.3,
+        n_fixed=n,
+    )
+    assert spec is None

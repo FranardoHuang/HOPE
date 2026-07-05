@@ -31,6 +31,7 @@
 // a3_deploy::CommandFn exactly (assignable without including the AimRT driver).
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -47,6 +48,7 @@
 #include "a3_pingpong/pp_obs_builder.hpp"
 #include "a3_pingpong/pp_onnx_policy.hpp"
 #include "a3_pingpong/pp_oracle_pose.hpp"
+#include "a3_pingpong/pp_planner_input.hpp"
 #include "a3_pingpong/pp_reference_clock.hpp"
 #include "a3_policy_parameters.hpp"      // ::a3_pd_stand_kps / kds (official robust-stand gains)
 #include "robot_io/a3_layout_extra.hpp"  // robot_io::kA3PolicyToSdkIdx (29->31 scatter)
@@ -95,6 +97,11 @@ enum class LocMode {
                      //   where we SHOULD be). Real IMU still drives orientation.
   kOracle,           // C (SIMULATION ONLY): true MuJoCo pelvis pose from the shm
                      //   bridge. NEVER available on hardware (shm file absent).
+  kExternalBase,     // HARDWARE planner mode: real base POSITION from a live mocap
+                     //   localizer (PpBasePoseInput / /a3/base_pose_flat), in the SAME
+                     //   world frame as the planner's racket target. Orientation stays
+                     //   the yaw-aligned IMU (mocap is position-only). Stale stream ->
+                     //   SAFE fallback to perfect_tracking + loud warn (like oracle).
 };
 
 struct PpPolicyConfig {
@@ -159,6 +166,35 @@ struct PpPolicyConfig {
   // many seconds of rest (continuous demo without ever snapping).
   bool single_swing = false;
   double swing_rest_s = -1.0;    // <0 = no auto re-arm (manual '1' per swing)
+  // ===================== LIVE PLANNER MODE (Path B, official) =====================
+  // When planner_mode: the racket target is NO LONGER the scripted per-clip box center.
+  // A real planner feeds PpRacketTargetInput (over AimRT /racket/command_flat) and a mocap
+  // localizer feeds PpBasePoseInput (LocMode::kExternalBase). Each ComputeCommand tick,
+  // PlannerEngageStep_ reproduces the proven Python wbc_runner._tick engage machine:
+  // gate a fresh VALID command (timeout / invalid-flutter grace / min-tts / base-low /
+  // reachability), then set_swing_dir + set_level(1) + FREEZE the target. The existing
+  // swing clock, tts clamps, single-swing completion and mid-swing latch execute the swing
+  // UNCHANGED. planner_mode implies single_swing (one clip per engage, then a held stand).
+  bool planner_mode = false;
+  double engage_min_tts_s = 1.0;      // never START a swing later than this (deep-clip snap -> fall)
+  double planner_invalid_grace_s = 0.25;  // a valid cmd still engages if an invalid arrived within this
+  double command_timeout_s = 0.5;     // no fresh VALID command within this -> stand
+  double base_low_z = 0.7;            // base below this (fallen/crouched) -> refuse to engage
+  double hold_anchor_x_b = 0.40;      // base-rel x of the ready-hold target between swings (racket-reach)
+  // Post-swing hold budget: run the POLICY hold this long after a completed swing (it must
+  // actively balance out of the follow-through — a static stand cannot), then blend to the
+  // STATIC official stand until the next engage. The model's level-0 policy hold only has
+  // ~5 s of margin (Gate 2.5: scripted m0 hold falls at ~5 s; closed-loop: post-swing hold
+  // degrades at ~5-10 s) — never park on it.
+  double hold_recover_s = 2.5;
+  double hold_blend_s = 0.8;          // q_des ramp measured-pose -> nominal at the switch
+  double external_base_max_age_s = 0.2;   // reject base-pose samples older than this (stale mocap)
+  // Reachability gate (base-relative x,y + world z + speed); mirrors wbc_runner target_gate.
+  bool target_gate_enable = true;
+  double gate_x_lo = 0.20, gate_x_hi = 0.90;
+  double gate_y_abs = 0.85;
+  double gate_z_lo = 0.55, gate_z_hi = 1.40;
+  double gate_speed_max = 3.5;
   // YAW-ALIGN (hardware fix, 2026-07-02): the pelvis AND torso IMU yaws are NOT
   // world-referenced on the real robot (boot-to-boot drift; MDU captures show a constant
   // fictional -12/-15/-38.5 deg yaw error in motion_anchor_ori_b while training reset noise
@@ -214,6 +250,16 @@ class PpPolicy {
         last_action_(Eigen::VectorXd::Zero(kNumJoints)) {
     if (!build_src_to_sdk(onnx_.joint_names(), isaac_to_sdk_))
       throw std::runtime_error("pingpong: ONNX joint_names do not map onto the backend layout");
+    // Planner-mode pre-engage hold target: seed pos/vel from the forehand box center (the
+    // same in-training values the SCRIPTED hold uses) so the level-0 hold obs before the
+    // first serve is on-manifold; each engage overwrites them with the frozen command.
+    // The y seed matters: a centered (y=0) hold target sits ~0.3 m LEFT of the forehand
+    // ready racket -> the policy leans/reaches toward it, sinks, and tips (observed in the
+    // headless closed-loop). Box-center y keeps the hold at the trained ready stance.
+    planner_frozen_vel_w_ = cfg_.racket_vel_w_clip[0];
+    planner_hold_z_w_ = cfg_.racket_pos_w_clip[0][2];
+    planner_hold_pos_b_engage_ =
+        Vec3(cfg_.hold_anchor_x_b, cfg_.racket_pos_w_clip[0][1], 0.0);
     // Reference-clock layout: prefer the ONNX-baked per-clip metadata (new exports carry
     // clip_seg_lengths/clip_strike_phases). The ClipLayout default is the LEGACY v1 layout
     // ({95,105}/{0.36,0.50}, model_15200-era); driving a v2-baked model with it serves the
@@ -300,12 +346,25 @@ class PpPolicy {
   // fails to open and oracle mode falls back with a loud warning.
   void SetOracle(std::shared_ptr<PpOraclePose> oracle) { oracle_ = std::move(oracle); }
 
+  // Attach LIVE planner inputs (Path B). racket_in feeds the racket target; base_in feeds
+  // LocMode::kExternalBase. Both are written by the AimRT subscriber thread and read here
+  // from the driver thread (each is internally lock-guarded + age-gated). Only consulted
+  // when cfg_.planner_mode is set; absent/stale streams degrade to a held stand.
+  void SetRacketInput(std::shared_ptr<PpRacketTargetInput> r) { racket_in_ = std::move(r); }
+  void SetBasePoseInput(std::shared_ptr<PpBasePoseInput> b) { base_in_ = std::move(b); }
+  bool planner_mode() const { return cfg_.planner_mode; }
+  std::string planner_status() const {
+    std::lock_guard<std::mutex> lk(planner_mu_);
+    return planner_status_;
+  }
+
   LocMode loc_mode() const { return cfg_.loc_mode; }
   const char* loc_mode_name() const {
     switch (cfg_.loc_mode) {
       case LocMode::kFabricated: return "fabricated(A)";
       case LocMode::kPerfectTracking: return "perfect_tracking(B)";
       case LocMode::kOracle: return "oracle(C)";
+      case LocMode::kExternalBase: return "external_base(mocap)";
     }
     return "?";
   }
@@ -374,7 +433,24 @@ class PpPolicy {
   // (target -y, baked clip 0), -1 = backhand (target +y, baked clip 1). Flips the
   // scripted target's y-sign and swing_type; the reference clock then selects the
   // matching baked clip via clip_id_from_swing_sign.
-  void set_swing_dir(int d) { swing_dir_.store(d >= 0 ? 1 : -1); }
+  //
+  // MID-SWING LATCH (2026-07-04): applying a dir flip while a swing is in progress
+  // snaps the 62-D reference obs from clip A's mid-swing frame to clip B's windup
+  // while the BODY is mid-swing — the exact OOD transition training never contains
+  // (clips only switch at a completed wrap + hold; see the Python runner's
+  // active-swing lock and the free-base 'b'-key falls). At level 1 the request is
+  // QUEUED and applied at the next safe boundary (level 0, or the next windup start
+  // of the periodic/single-swing clock) in ComputeCommand.
+  void set_swing_dir(int d) {
+    const int want = d >= 0 ? 1 : -1;
+    if (level_.load() == 1 && swing_dir_.load() != want) {
+      pending_swing_dir_.store(want);
+      std::fprintf(stderr, "[pp] swing dir -> %s QUEUED (mid-swing switch is OOD; "
+                   "applies at the next windup/hold)\n", want > 0 ? "FOREHAND" : "BACKHAND");
+      return;
+    }
+    swing_dir_.store(want);
+  }
   int swing_dir() const { return swing_dir_.load(); }
   const char* swing_dir_name() const { return swing_dir_.load() >= 0 ? "FOREHAND" : "BACKHAND"; }
 
@@ -409,6 +485,11 @@ class PpPolicy {
     const double t = (tick_idx >= origin ? tick_idx - origin : 0) * cfg_.dt * swing_speed_.load();
     if (level_.load() == 0) {
       tg.time_to_strike = 5.0;  // far away -> clock holds at clip start (wind-up)
+    } else if (cfg_.planner_mode) {
+      // LIVE PLANNER: linear clock seeded from the ENGAGE-time tts (clamped to the clip's
+      // windup length at engage) so the reference strike aligns with the ball's arrival.
+      // Same no-wrap semantics as single_swing; completion still trips on tts < min_tts.
+      tg.time_to_strike = planner_tts0_ - t;
     } else if (cfg_.single_swing || cfg_.swing_rest_s >= 0.0) {
       // SINGLE-SWING: linear clock, NO fmod wrap. The periodic schedule bounds tts to
       // [-(1-lead)*period, lead*period] = [-0.9, 2.1], which (a) never reaches the clip's
@@ -426,6 +507,11 @@ class PpPolicy {
   // CommandFn body. Fills a full 31-slot RobotCommand (SDK order). Always valid.
   bool ComputeCommand(std::uint64_t tick_idx, const robot_io::RobotState& state,
                       robot_io::RobotCommand& cmd) {
+    // LIVE PLANNER (Path B): decide engage/hold from the latest planner command and drive
+    // the EXISTING swing controls (set_swing_dir/set_level + freeze). Runs before the swing
+    // clock logic so the 0->1 edge below resets the clock to the windup as usual. No-op in
+    // the scripted/keyboard path (planner_mode == false).
+    if (cfg_.planner_mode) PlannerEngageStep_(tick_idx);
     // Reset the swing clock to its windup on level 0->1 (release from hold) OR on a
     // forehand<->backhand switch. Either way the swing must (re)start from its WINDUP
     // (tts -> clip start, matching the current near-stand body) rather than snap into the
@@ -433,6 +519,20 @@ class PpPolicy {
     // backhand reference straight to a mid-swing frame while the body is still in a
     // forehand-end pose -> reference/body mismatch -> lurch -> FALL (forehand is fine only
     // because it gets this clean windup start at MOTION entry).
+    // Apply a QUEUED dir flip (set_swing_dir latch) only at a safe boundary: held stand,
+    // or while the swing clock still sits at the windup start (tts clamped at max — early
+    // cycle / just released). There the flip re-selects the OTHER clip's windup, the same
+    // reference-pose family the clock reset produces anyway; mid-swing it would snap the
+    // obs reference across clips (the 'b'-mid-forehand OOD fall).
+    {
+      const int pend = pending_swing_dir_.load();
+      if (pend != 0 && (level_.load() == 0 || last_tts_at_windup_)) {
+        pending_swing_dir_.store(0);
+        swing_dir_.store(pend);
+        std::fprintf(stderr, "[pp] queued swing dir applied -> %s\n",
+                     pend > 0 ? "FOREHAND" : "BACKHAND");
+      }
+    }
     const int swing_lvl_now = level_.load();
     const int swing_dir_now = swing_dir_.load();
     if ((swing_lvl_now == 1 && swing_level_prev_ != 1) || swing_dir_now != swing_dir_prev_)
@@ -452,6 +552,7 @@ class PpPolicy {
     const double max_tts =
         (clip_.strike_frame(clip_id) - clip_.seg_start(clip_id)) * clip_.step_dt;
     if (tg.time_to_strike > max_tts) tg.time_to_strike = max_tts;
+    last_tts_at_windup_ = (tg.time_to_strike >= max_tts - 1e-9);
     // SINGLE-SWING / REST (see PpPolicyConfig): once the clip has fully played, drop to
     // level 0 (held stand) instead of letting the periodic clock WRAP the reference from
     // the end pose back to windup (an untracked-in-training snap that topples the backhand).
@@ -462,6 +563,7 @@ class PpPolicy {
                              clip_.step_dt;
       if (tg.time_to_strike < min_tts) {
         level_.store(0);
+        if (cfg_.planner_mode) planner_hold_start_tick_ = tick_idx;  // recovery-window clock
         if (cfg_.swing_rest_s >= 0.0) {
           rest_rearm_tick_ = tick_idx + static_cast<std::uint64_t>(
               std::max(0.0, cfg_.swing_rest_s) / std::max(cfg_.dt, 1e-6));
@@ -472,9 +574,23 @@ class PpPolicy {
       }
     }
     // Auto re-arm after the rest (only if WE dropped the level; a manual '0' clears it).
-    if (rest_rearm_armed_ && level_.load() == 0 && tick_idx >= rest_rearm_tick_) {
+    // NOT in planner mode: there a swing re-engages only on a fresh VALID command
+    // (PlannerEngageStep_); rest_rearm_tick_ is reused there purely as the rest timer.
+    if (!cfg_.planner_mode && rest_rearm_armed_ && level_.load() == 0 &&
+        tick_idx >= rest_rearm_tick_) {
       rest_rearm_armed_ = false;
       level_.store(1);  // next tick's 0->1 edge resets the swing clock to windup
+    }
+    // MIN-side OBS clamp (2026-07-04): the reference clock clamps the FRAME at the clip
+    // end, but the raw tts kept decreasing into values training never paired with the
+    // frozen end frame (periodic mode with a raised strike_period). Clamp the OBS tts to
+    // the in-training minimum, symmetric with the max clamp above. AFTER the completion
+    // check on purpose — that check needs the raw sub-minimum tts to detect clip end.
+    {
+      const double min_tts_clip = (clip_.strike_frame(clip_id) -
+                                   (clip_.seg_start(clip_id) + clip_.seg_len[clip_id] - 1)) *
+                                  clip_.step_dt;
+      if (tg.time_to_strike < min_tts_clip) tg.time_to_strike = min_tts_clip;
     }
     const int time_step = clip_.time_step_for(clip_id, tg.time_to_strike);
 
@@ -498,9 +614,28 @@ class PpPolicy {
     // that entry heading. Fixes the boot-drift yaw polluting motion_anchor_ori_b and the
     // racket-FK world conversion on hardware; no-op in sim where spawn yaw ~ 0.
     if (cfg_.yaw_align) {
-      if (yaw_align_pending_.exchange(false)) {
-        yaw0_base_inv_ = quat_inv(yaw_quat(st.base_quat_w));
-        yaw0_torso_inv_ = quat_inv(yaw_quat(st.torso_quat_w));
+      if (yaw_align_pending_.load()) {
+        // UPRIGHT + STATIONARY GUARD (2026-07-04): capturing while the robot is tilted,
+        // turning, or fallen bakes a garbage offset into EVERY subsequent obs (yaw of a
+        // fallen quat is ill-defined; observed in the ROS runner: all base-relative
+        // targets rotated ~125 deg, magnitude untouched). Defer the capture until the
+        // robot is upright (proj gravity ~[0,0,-1]) and still (|gyro| small); warn while
+        // waiting so a hoisted/leaning engage is visible instead of silently wrong.
+        // body-frame gravity z from the raw base quat (w,x,y,z): R(q)^T·[0,0,-1] |_z
+        const double gz = 2.0 * (st.base_quat_w[1] * st.base_quat_w[1] +
+                                 st.base_quat_w[2] * st.base_quat_w[2]) - 1.0;
+        const double gyro_n = st.base_ang_vel_b.norm();
+        if (gz > -0.95 || gyro_n > 0.5) {
+          if (++yaw_align_defer_ticks_ % 50 == 1) {
+            std::fprintf(stderr,
+                "[pp WARN] yaw-align DEFERRED: robot not upright/still (gravZ=%+.2f "
+                "|gyro|=%.2f); stand the robot at its heading to capture.\n", gz, gyro_n);
+          }
+        } else {
+          yaw_align_pending_.store(false);
+          yaw_align_defer_ticks_ = 0;
+          yaw0_base_inv_ = quat_inv(yaw_quat(st.base_quat_w));
+          yaw0_torso_inv_ = quat_inv(yaw_quat(st.torso_quat_w));
         const auto yaw_deg = [](const Vec4& q) {
           return std::atan2(2.0 * (q[0] * q[3] + q[1] * q[2]),
                             1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3])) * 180.0 / M_PI;
@@ -509,6 +644,7 @@ class PpPolicy {
             "[pp] yaw-align captured at policy engage: base_yaw=%+.1f deg torso_yaw=%+.1f deg "
             "(subtracted from all subsequent IMU attitudes; robot heading at engage == clip +x)\n",
             yaw_deg(st.base_quat_w), yaw_deg(st.torso_quat_w));
+        }
       }
       st.base_quat_w = quat_mul(yaw0_base_inv_, st.base_quat_w);
       st.torso_quat_w = quat_mul(yaw0_torso_inv_, st.torso_quat_w);
@@ -559,6 +695,27 @@ class PpPolicy {
         st.torso_pos_w = refs.anchor_pos_w;   // -> motion_anchor_pos_b == 0
         break;
       }
+      case LocMode::kExternalBase: {  // ===== HARDWARE planner: live mocap base POSITION =====
+        // Mocap is position-only, so take the real base POSITION and keep the yaw-aligned
+        // IMU orientation (st.base_quat_w set above). Torso position follows the base by FK.
+        PpBaseSample s;
+        if (base_in_ && base_in_->Latest(s, cfg_.external_base_max_age_s)) {
+          st.base_pos_w = s.pos;
+          st.torso_pos_w = torso_pos_from_base(st.base_pos_w, st.base_quat_w, st.q);
+          base_fresh_ = true;
+          oracle_age_s_ = s.age_s;
+        } else {  // stale/absent mocap -> SAFE fallback to perfect-tracking + loud warn.
+          base_fresh_ = false;
+          if ((base_warn_tick_++ % 100) == 0) {
+            std::fprintf(stderr,
+                "[pp EXT-BASE] NO FRESH mocap base sample (relay down / stale?) -> running as "
+                "perfect-tracking; planner engage is BLOCKED until the base stream returns.\n");
+          }
+          st.base_pos_w = refs.ref_pelvis_pos_w;
+          st.torso_pos_w = refs.anchor_pos_w;
+        }
+        break;
+      }
       case LocMode::kFabricated:  // ===== A: legacy fabricated nominal pose =====
       default: {
         st.base_pos_w = cfg_.nominal_base_pos_w;
@@ -570,6 +727,80 @@ class PpPolicy {
       }
     }
     last_base_pos_ = st.base_pos_w;
+    last_base_quat_w_ = st.base_quat_w;  // yaw-aligned; PlannerEngageStep_ gates on it next tick
+
+    // LIVE PLANNER static stand at level 0 — in TWO regimes:
+    //   (a) pre-FIRST-engage (the Python runner's proven _stand-until-engage design;
+    //       running the policy hold from a cold stand knelt the robot within ~2 s), and
+    //   (b) POST-RECOVERY: hold_recover_s after a completed swing. The policy hold must
+    //       run first (it actively balances out of the follow-through — a static stand
+    //       cannot), but the model's level-0 hold only has ~5 s of margin (Gate 2.5 +
+    //       closed-loop falls), so after the recovery window we blend to the static
+    //       official stand and stay there until the next engage.
+    // Localization/engage above still run every tick; an engage (level 0->1) exits this
+    // branch and main's blend covers the stand -> swing transition (the Gate-2-proven
+    // MOTION-entry path). q_des ramps measured -> nominal over hold_blend_s so the stiff
+    // official gains never snap onto a displaced pose (the kp-2000 catapult class).
+    {
+      // Handoff is QUIESCENCE-GATED, not time-only: a timed switch fell 0.6 s after the
+      // blend began (the robot still carried follow-through momentum — the documented
+      // "blended static stand cannot balance out of the follow-through" failure). The
+      // policy hold keeps actively balancing until the robot is upright AND still; a
+      // force-switch at recover+3 s bounds the stay inside the fragile ~5-10 s window.
+      const double t_since =
+          (tick_idx - planner_hold_start_tick_) * cfg_.dt;
+      const bool upright_still =
+          projected_gravity_body(st.base_quat_w)[2] < -0.95 &&
+          st.base_ang_vel_b.norm() < 0.4 &&
+          (st.qd.size() == 0 || st.qd.cwiseAbs().maxCoeff() < 1.0);
+      const bool post_recovery = planner_have_hold_ &&
+          ((t_since > cfg_.hold_recover_s && upright_still) ||
+           t_since > cfg_.hold_recover_s + 3.0);
+      // STICKY: once static engages it stays until the next swing (level 1). A quiescence
+      // condition that flaps re-enters the branch every few ticks — policy/static command
+      // CHATTER with a restarted blend each time (observed: 9 re-entries then a fall).
+      if (cfg_.planner_mode && !planner_engaged_ && level_.load() == 0 &&
+          (!planner_have_hold_ || post_recovery || planner_static_active_)) {
+        if (!planner_static_active_) {
+          planner_static_active_ = true;
+          planner_static_start_tick_ = tick_idx;
+          planner_static_q0_ = state.q.size() == kNumJoints ? state.q : nominal_q_sdk_;
+          if (planner_have_hold_)
+            std::fprintf(stderr,
+                "[pp] post-swing recovery done -> STATIC official stand until next engage\n");
+        }
+        const double a = std::min(1.0,
+            (tick_idx - planner_static_start_tick_) * cfg_.dt /
+                std::max(cfg_.hold_blend_s, 1e-3));
+        cmd.q_des = (1.0 - a) * planner_static_q0_ + a * nominal_q_sdk_;
+        cmd.dq_des = Eigen::VectorXd::Zero(kNumJoints);
+        cmd.tau_ff = Eigen::VectorXd::Zero(kNumJoints);
+        cmd.kp = official_kp_sdk_;
+        cmd.kd = official_kd_sdk_;
+        return true;
+      }
+      // Reset the sticky latch only when a swing actually runs (engage exited the branch);
+      // never mid-hold, or quiescence flapping chatters between policy and static commands.
+      if (level_.load() == 1) planner_static_active_ = false;
+    }
+
+    // LIVE PLANNER target override (Path B): the swing clock already set tg.time_to_strike,
+    // swing_sign, clip_id and time_step above; here we only swap the REACH POINT. During a
+    // swing use the FROZEN world target; while holding, use a base-anchored ready target at
+    // racket-reach x (so the footwork policy is not commanded to walk to a fixed world point
+    // during the hold — the wbc_runner rest-hold semantics). Untouched when not planner_mode.
+    if (cfg_.planner_mode) {
+      if (planner_engaged_) {   // active swing -> frozen world target
+        tg.pos_w = planner_frozen_pos_w_;
+        tg.vel_w = planner_frozen_vel_w_;
+      } else {                  // idle/rest (incl. before the first engage) -> base-anchored hold
+        const Vec4 base_yaw = yaw_quat(st.base_quat_w);
+        Vec3 hb(cfg_.hold_anchor_x_b, planner_hold_pos_b_engage_[1], 0.0);
+        tg.pos_w = st.base_pos_w + quat_rotate(base_yaw, hb);
+        tg.pos_w[2] = planner_hold_z_w_;
+        tg.vel_w = planner_frozen_vel_w_;
+      }
+    }
 
     last_proj_grav_ = projected_gravity_body(st.base_quat_w);
 
@@ -753,6 +984,112 @@ class PpPolicy {
   PpOnnxPolicy& onnx() { return onnx_; }
 
  private:
+  void set_planner_status_(const char* s) {
+    std::lock_guard<std::mutex> lk(planner_mu_);
+    if (planner_status_ != s) planner_status_ = s;
+  }
+
+  // Live-planner engage machine (Path B). Reproduces the PROVEN Python wbc_runner._tick:
+  // while a swing runs, the target is FROZEN and the existing clock/completion owns it (no
+  // mid-swing abort on planner flutter); at idle, gate a fresh VALID command (timeout /
+  // invalid-grace / min-tts / base-low / reachability) and, if it passes, FREEZE the target
+  // and drive the EXISTING controls (set_swing_dir + set_level(1)). Uses the PREVIOUS tick's
+  // localized base (1-tick lag @50 Hz is negligible) so it can run before localization.
+  void PlannerEngageStep_(std::uint64_t tick_idx) {
+    if (level_.load() == 1) { set_planner_status_("swinging"); return; }  // frozen, in flight
+    planner_engaged_ = false;  // level 0: idle/hold (ready-hold override uses planner_have_hold_)
+
+    // Inter-swing rest: the completion path armed rest_rearm_tick_ (planner mode never
+    // auto-re-arms; it is reused purely as a settle timer). Hold until it elapses.
+    if (rest_rearm_armed_ && tick_idx < rest_rearm_tick_) { set_planner_status_("rest"); return; }
+
+    if (!racket_in_) { set_planner_status_("no_input"); return; }
+    const auto snap = racket_in_->Latest();
+    if (!snap.has_valid) { set_planner_status_("no_command"); return; }
+
+    const double tts = snap.cmd.time_to_strike - snap.valid_age_s;  // decays since send
+    if (snap.valid_age_s > cfg_.command_timeout_s) { set_planner_status_("stale"); return; }
+    if (snap.invalid_after && snap.valid_age_s > cfg_.planner_invalid_grace_s) {
+      set_planner_status_("planner_invalid"); return;
+    }
+    if (tts < cfg_.engage_min_tts_s) { set_planner_status_("too_late"); return; }
+
+    // A stale localization frame makes the base obs (and this gate) incoherent -> block
+    // engage. Covers BOTH live-base modes: external_base (mocap) and oracle (sim GT) —
+    // a stale-oracle run silently degrades to the reference pelvis, and engaging on that
+    // fictional base would gate/aim against a position the robot is not at.
+    if ((cfg_.loc_mode == LocMode::kExternalBase && !base_fresh_) ||
+        (cfg_.loc_mode == LocMode::kOracle && !oracle_fresh_)) {
+      set_planner_status_("no_base"); return;
+    }
+
+    const Vec3 base_pos = last_base_pos_;
+    const Vec4 base_yaw = yaw_quat(last_base_quat_w_);
+    if (base_pos[2] < cfg_.base_low_z) { set_planner_status_("base_low"); return; }
+
+    // Racket target -> policy WORLD frame. frame_code 0 = same world as the base (planner
+    // table frame == mocap world). frame_code 1 = base_link-relative -> lift to world
+    // (BOTH position and velocity rotate; a translated-only velocity would mix frames
+    // once the robot has turned).
+    Vec3 pos_w = snap.cmd.pos_w;
+    Vec3 vel_w = snap.cmd.vel_w;
+    if (snap.cmd.frame_code == 1) {
+      pos_w = base_pos + quat_rotate(base_yaw, snap.cmd.pos_w);
+      vel_w = quat_rotate(base_yaw, snap.cmd.vel_w);
+    }
+
+    const Vec3 tgt_b = quat_rotate_inverse(base_yaw, pos_w - base_pos);
+    if (cfg_.target_gate_enable) {
+      const bool ok = tgt_b[0] >= cfg_.gate_x_lo && tgt_b[0] <= cfg_.gate_x_hi &&
+                      std::abs(tgt_b[1]) <= cfg_.gate_y_abs &&
+                      pos_w[2] >= cfg_.gate_z_lo && pos_w[2] <= cfg_.gate_z_hi &&
+                      vel_w.norm() <= cfg_.gate_speed_max;
+      if (!ok) {
+        // Throttled detail print (mirrors the Python runner's gate warn): without the
+        // inputs a rejection is undebuggable at the venue.
+        if ((gate_warn_tick_++ % 50) == 0) {
+          std::fprintf(stderr,
+              "[pp gate] REJECT base-rel (%+.2f,%+.2f) z_w=%.2f |v|=%.2f tts=%.2f "
+              "(need x[%.2f,%.2f] |y|<=%.2f z[%.2f,%.2f] v<=%.2f)\n",
+              tgt_b[0], tgt_b[1], pos_w[2], vel_w.norm(), tts,
+              cfg_.gate_x_lo, cfg_.gate_x_hi, cfg_.gate_y_abs,
+              cfg_.gate_z_lo, cfg_.gate_z_hi, cfg_.gate_speed_max);
+        }
+        set_planner_status_("target_gate"); return;
+      }
+    }
+
+    // Swing side from the BASE-RELATIVE y (raw world-y is always <0 in the table frame).
+    const double sign = swing_sign_from_target_y(tgt_b[1]);
+
+    // ENGAGE: freeze target, lock side, release the swing. set_swing_dir applies immediately
+    // at level 0; the 0->1 edge in ComputeCommand resets the swing clock to the windup.
+    // tts0 is stored CLAMPED to the clip's windup length and DRIVES the swing clock
+    // (ScriptedTarget planner branch: tts = tts0 - t), so the STRIKE fires when the ball
+    // arrives — not a fixed clip-length after engage. Mirrors wbc_runner's
+    // `"tts0": min(tts, max_tts0)`; without the transfer every strike would be late by
+    // (max_tts - planner_tts).
+    {
+      const int eng_clip = clip_id_from_swing_sign(sign);
+      const double max_tts0 =
+          (clip_.strike_frame(eng_clip) - clip_.seg_start(eng_clip)) * clip_.step_dt;
+      planner_tts0_ = std::min(tts, max_tts0);
+    }
+    planner_frozen_pos_w_ = pos_w;
+    planner_frozen_vel_w_ = vel_w;
+    planner_frozen_sign_ = sign;
+    planner_hold_pos_b_engage_ = tgt_b;
+    planner_hold_z_w_ = pos_w[2];
+    planner_have_hold_ = true;
+    planner_engaged_ = true;
+    set_swing_dir(sign >= 0.0 ? 1 : -1);
+    set_level(1);
+    std::fprintf(stderr,
+        "[pp engage] %s locked: tgt base-rel (%+.2f,%+.2f,%+.2f) tts=%.2fs (clock tts0=%.2fs)\n",
+        sign > 0 ? "forehand" : "backhand", tgt_b[0], tgt_b[1], tgt_b[2], tts, planner_tts0_);
+    set_planner_status_("engage");
+  }
+
   // One-shot first-tick diagnostic dump (stderr). action = raw Isaac-order policy
   // output; q_sdk/kp_sdk/kd_sdk = final backend-slot command; st = policy-frame
   // robot state; state = raw backend RobotState (SDK order).
@@ -828,6 +1165,9 @@ class PpPolicy {
   std::atomic<int> level_;
   std::atomic<double> swing_speed_;
   std::atomic<int> swing_dir_;  // +1 forehand / -1 backhand (scripted; live f/b toggle)
+  std::atomic<int> pending_swing_dir_{0};  // queued mid-swing dir flip (0 = none); see set_swing_dir
+  bool last_tts_at_windup_ = true;  // last tick's clock sat at the windup start (safe flip point)
+  int yaw_align_defer_ticks_ = 0;   // ticks spent waiting for upright+still before yaw capture
   std::atomic<bool> legs_passive_{false};   // hold legs at nominal (dyn: --auto-leg-hold flips by level)
   std::atomic<bool> waist_passive_{false};  // hold waist at nominal (dyn: --auto-leg-hold flips by level)
   double leg_clamp_rad_ = 0.0;              // clamp policy-driven leg q_des to nominal ± band (0=off)
@@ -851,6 +1191,7 @@ class PpPolicy {
   int last_time_step_ = -1;
   Vec3 last_proj_grav_ = Vec3(0.0, 0.0, -1.0);
   Vec3 last_base_pos_ = Vec3(0.0, 0.0, 0.95);
+  Vec4 last_base_quat_w_ = Vec4(1.0, 0.0, 0.0, 0.0);  // yaw-aligned; planner gate uses last tick's
   bool dbg_done_ = false;
   bool sec_imu_warned_ = false;  // one-shot warn when torso IMU is absent
   bool clamp_warned_ = false;    // one-shot warn when q_des hits a joint limit
@@ -865,6 +1206,34 @@ class PpPolicy {
   std::uint64_t oracle_warn_tick_ = 0;  // repeat the stale-oracle warning every ~2 s (100 ticks)
   double oracle_age_s_ = -1.0;
   std::uint64_t sync_miss_ = 0;
+
+  // --- LIVE PLANNER inputs + engage state (Path B; driver-thread only unless noted) ---
+  std::shared_ptr<PpRacketTargetInput> racket_in_;  // written by AimRT subscriber thread
+  std::shared_ptr<PpBasePoseInput> base_in_;        // written by AimRT subscriber thread
+  bool base_fresh_ = false;             // a fresh external-base sample was used this tick
+  std::uint64_t base_warn_tick_ = 0;    // repeat the stale-mocap warning every ~2 s
+  std::uint64_t gate_warn_tick_ = 0;    // throttle the target-gate rejection detail print
+  bool planner_engaged_ = false;        // a planner swing is active (frozen target in flight)
+  bool planner_have_hold_ = false;      // at least one swing engaged (diagnostic)
+  double planner_tts0_ = 0.0;           // engage-time tts, clamped to the clip windup length;
+                                        // seeds the swing clock so the strike meets the ball
+  Vec3 planner_frozen_pos_w_ = Vec3::Zero();
+  // Hold/pre-engage target velocity: initialised in the ctor to the forehand box-center
+  // vel (a ZERO vel target is outside every trained target-vel box = an obs state
+  // training never saw); overwritten by each engage's frozen velocity.
+  Vec3 planner_frozen_vel_w_ = Vec3::Zero();
+  double planner_frozen_sign_ = 1.0;
+  // base-rel target at engage (hold anchor); defaults = a centered, racket-reachable ready
+  // stance so the pre-first-engage hold is safe even before any command arrives.
+  Vec3 planner_hold_pos_b_engage_ = Vec3(0.40, 0.0, 0.0);
+  double planner_hold_z_w_ = 0.90;
+  // post-swing recovery clock + static-stand blend state (driver thread only)
+  std::uint64_t planner_hold_start_tick_ = 0;
+  bool planner_static_active_ = false;
+  std::uint64_t planner_static_start_tick_ = 0;
+  Eigen::VectorXd planner_static_q0_;
+  mutable std::mutex planner_mu_;
+  std::string planner_status_ = "init";
   mutable std::mutex obs_mu_;
   Eigen::VectorXd last_obs_;
 

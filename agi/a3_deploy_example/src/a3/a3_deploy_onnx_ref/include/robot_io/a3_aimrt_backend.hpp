@@ -24,6 +24,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #ifdef ENABLE_A3_AIMRT_BACKEND
 #include <future>
@@ -86,6 +87,15 @@ class A3AimrtBackend : public RobotIOBackend {
   void SetTeleopFrameCallback(TeleopFrameCallback cb);
   void SetTeleopTopic(std::string topic);
 
+  // LIVE PLANNER inputs (Path B): std_msgs/Float64MultiArray carried over the ros2 backend.
+  // A subscriber is registered (in RegisterPubSub_) only when the callback is set — set
+  // these before Start(). The callback receives the raw msg.data (decoded by the caller).
+  using FlatArrayCallback = std::function<void(const std::vector<double>&)>;
+  void SetRacketTargetCallback(FlatArrayCallback cb);
+  void SetRacketTopic(std::string topic);
+  void SetBasePoseCallback(FlatArrayCallback cb);
+  void SetBasePoseTopic(std::string topic);
+
   // ---------- Test hooks (no AimRT required) ----------
   void InjectWaistSample_ForTest(const a3_sync::WaistSample& s);
   void InjectLegSample_ForTest(const a3_sync::LegSample& s);
@@ -137,6 +147,10 @@ class A3AimrtBackend : public RobotIOBackend {
   TestCaptureFn test_capture_fn_{};
   TeleopFrameCallback teleop_frame_cb_{};
   std::string teleop_topic_{"/ta/whole_body_command"};
+  FlatArrayCallback racket_target_cb_{};
+  std::string racket_topic_{"/racket/command_flat"};
+  FlatArrayCallback base_pose_cb_{};
+  std::string base_pose_topic_{"/a3/base_pose_flat"};
 
 #ifdef ENABLE_A3_AIMRT_BACKEND
   aimrt::runtime::core::AimRTCore          aimrt_core_;

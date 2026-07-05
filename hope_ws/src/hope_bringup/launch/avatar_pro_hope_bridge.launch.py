@@ -44,19 +44,22 @@ def generate_launch_description():
         DeclareLaunchArgument("port", default_value="3883", description="Chingmu VRPN port."),
         DeclareLaunchArgument(
             "update_freq", default_value="300.0",
-            description="VRPN client poll rate (Hz); matches the HOPE rig's confirmed 300 Hz play-time rate.",
+            description="VRPN client poll rate (Hz); match the mocap camera rate (arena "
+                        "cameras run 300 Hz; the planner's velocity polyfit window is sized "
+                        "for a >=240 Hz ball stream — 180 Hz doubles its time window).",
         ),
         DeclareLaunchArgument("start_vrpn_client", default_value="true"),
         DeclareLaunchArgument("start_world", default_value="true"),
         DeclareLaunchArgument(
-            "ball_tracking_mode", default_value="auto",
-            description="How to track the ball: 'auto' (motion-based detection, fallback) or "
-                        "'rigid_body' (use the named rigid body in ball_object).",
+            "ball_tracking_mode", default_value="rigid_body",
+            description="How to track the ball: 'rigid_body' (default — the ball is the "
+                        "STANDARDIZED rigid body named in ball_object) or 'auto' "
+                        "(motion-based detection, fallback for setups without a ball body).",
         ),
         DeclareLaunchArgument(
-            "ball_object", default_value="",
-            description="Ball rigid-body name in CMTracker (e.g. 'Ball'); used only when "
-                        "ball_tracking_mode:=rigid_body. Ignored in 'auto' mode.",
+            "ball_object", default_value="Ball",
+            description="Ball rigid-body name in CMTracker. STANDARDIZED 2026-07-03: every "
+                        "AvatarPro setup must name the ball rigid body 'Ball' (robots: P1/P2).",
         ),
 
         # Static HOPE world frame: table landmarks + mocap->base_link offsets.

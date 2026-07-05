@@ -76,7 +76,10 @@ env:
   # HITTER: 10 s episode with multiple swings. With no ball the swings are independent; the target
   # resamples on each clip wrap, so a 10 s episode gives ~5 swings of practice and trains the
   # between-swing recovery. (Was capped to 3 s in the HOPE curriculum path; restored to HITTER.)
-  episode_length_s: 10.0
+  # ARM A (2026-07-04 2-day retrain): 10 -> 16 s so the extended hold (hold_steps_range up to
+  # 8 s) still leaves room for swing + recovery + a second hold inside one episode — at 10 s a
+  # long-hold draw would truncate before the swing ever runs.
+  episode_length_s: 16.0
 
 # ---- swing-entry structure (MotionCommand) -----------------------------------
 # Explicit defaults for the Phase-A multi-swing machinery (commands.py). Keys are optional: absent
@@ -91,15 +94,26 @@ motion:
   stand_start_prob: 0.25
   # Pre-swing hold: freeze the reference at the swing's first frame for a random number of control
   # steps ("the ball is not here yet"); stand-started envs hold at least stand_start_min_hold.
-  hold_steps_range: [0, 100]
+  # ARM A (2026-07-04): [0,100] -> [0,400]. 0-2 s holds are why the deployed hold margin is
+  # ~5 s (Gate 2.5 P2 m0-hold falls at ~5 s; Gate 3 closed-loop tipped ~6 s after the return).
+  # 0-8 s holds cover the demo serve cadence (4-6 s) with margin; acceptance = Gate 2.5 P2
+  # 20 s hold PASS + mujoco_eval --df-hold-steps 1000.
+  hold_steps_range: [0, 400]
   stand_start_min_hold: 25
   # A8 (Ace): fraction of TRUE resets initialized from the policy's OWN buffered end-of-swing
   # states (captured at clip wraps). Default OFF; enable per-experiment:
   #   task.motion.post_swing_start_prob=0.25
-  post_swing_start_prob: 0.0
+  # ARM A (2026-07-04): ON at 0.25 — episodes starting from the policy's OWN end-of-swing
+  # (feet-staggered, post-lunge) states train precisely the stance that tipped the static
+  # stand in the Gate 3 closed-loop. Mech-verified on main 2026-07-03 (P2.1 arm D).
+  post_swing_start_prob: 0.25
   post_swing_buffer_size: 4096
   post_swing_min_fill: 256
   post_swing_min_hold: 25
+  clip_switch_prob: 0.0        # deploy-parity mid-swing clip switch (venue falls fix; try 0.002)
+  # P2.4/R14 retiming: per-swing reference playback speed U[lo,hi] (clock ×s, ref velocities ×s,
+  # tts ÷s, target velocity ×s). [1.0, 1.0] = off; ablation trial [0.8, 1.2].
+  speed_scale_range: [1.0, 1.0]
 
 # ---- reward weights / kernel std --------------------------------------------
 # HITTER does not publish reward weights or kernel forms. Goal terms get relatively high weight
@@ -117,7 +131,18 @@ motion:
 # strike_window_s kept at 0.12 (widening it re-introduces swing-through timing dilution). All tunable.
 rewards:
   racket_position_weight: 14.0     # 8 -> 14
-  racket_position_std: 0.20        # 0.15 -> 0.20 (gradient in the 10-20 cm band)
+  # std RE-TIGHTENED 0.20 -> 0.15 (2026-07-03, hopex re-grounded run 11-57-16): with correct
+  # geometry the reference swing passes ~0.13 m from every sampled target, so at std 0.20 pure
+  # imitation already collects exp(-(0.137/0.20)^2)=0.63 of the position reward — a lazy local
+  # optimum where the policy strikes the BOX CENTER regardless of the sampled target (pos_err
+  # plateaued at ~0.14-0.19 = the uniform-box sampling distance itself, pos_pass crawling +0.01/100
+  # iters vs the v4 run's +0.05/100 breakout). Same disease as the ablation-1/2 saturation; same
+  # cure: tighten the kernel to the operating band (0.137/0.15 -> kernel 0.43, live gradient).
+  # Next levers if pos_pass still crawls after ~1k iters: hold_ready_weight 2.0 -> 1.0 (the
+  # now-live stillness income suppresses footwork/approach vigor), then
+  # racket.achieved_target_mix_prob 0.30 -> 0.15 (replayed targets cluster at the reference blade
+  # point when the policy strikes in place, diluting conditioning pressure).
+  racket_position_std: 0.15
   racket_velocity_weight: 10.0     # 6 -> 10
   racket_velocity_std: 1.0         # 1.8 -> 1.0 (curriculum tighten: vel_error fell to ~0.47, so 1.8 was
                                    # too lenient — exp(-(0.47/1.8)^2)=0.93, ~no gradient to improve. 1.0
@@ -163,6 +188,27 @@ rewards:
   # RAISE if post_strike_fall_rate stays high with good strikes; LOWER if the robot freezes mid-approach;
   # keep hold_ready_reach roughly at comfortable arm reach (shrink it when the Phase 1-2 boxes widen if
   # the robot still refuses to step).
+  # P2.4 (G08) PACE-style smooth deceleration — flag-gated, DEFAULT OFF. Pseudo base-velocity command
+  # proportional to the remaining PLANAR racket->target error: v_des = clamp(v_gain*dist_xy, 0, v_max);
+  # reward = exp(-(|v_base_xy| - v_des)^2 / std^2), gated to pre_strike only. Far target -> pays for
+  # moving at v_max (cooperates with racket_progress); as the strike stance is reached v_des -> 0 and
+  # the term pays for a CALM base — a smooth taper instead of the violent reactive rush (deploy-parity
+  # safe: REWARD-side only, the frozen 175-D actor obs contract is untouched). weight 0.0 = term OFF
+  # (RewardManager skips zero-weight terms); trial arm: task.rewards.base_decel_weight=1.0.
+  # Watch metric: base_speed_xy_prestrike. Keys MUST stay declared here — Hydra struct mode rejects
+  # undeclared CLI overrides.
+  base_decel_weight: 1.0    # ARM A (2026-07-04): ON — taper the lunge instead of the reactive
+                            # rush; pairs with the extended hold (calm base when v_des -> 0).
+                            # Watch base_speed_xy_prestrike.
+  base_decel_v_gain: 2.0    # 1/s: slope of the pseudo velocity command per meter of planar error
+  base_decel_v_max: 1.6     # m/s: desired-speed cap for far targets
+  base_decel_std: 0.4       # m/s: kernel width around the desired speed
+  # R16 (franco 2026-07-04): free the racket-side wrist from ORIENTATION mimic — drop
+  # right_wrist_yaw_Link from the motion_body_ori / motion_body_ang_vel body lists (position and
+  # linear-velocity mimic keep the swing path). Rationale: the video pipeline's wrist orientation
+  # is unreliable (GVHMR), so mimicking it caps face quality; freed, the face is shaped only by
+  # the racket_normal reward (and by the commanded normal at contract v3). Default off.
+  free_wrist_ori_mimic: false
   hold_ready_weight: 2.0
   # std RETUNED 0.5 -> 1.5 (2026-07-03): the 2026-07-03_02-01-17 run showed hold_ready ~inert
   # (Episode_Reward ~0.013/s, ~1/100 of expected) because real base |omega| during the hold is

@@ -158,6 +158,37 @@ def hold_ready(env: ManagerBasedRLEnv, command_name: str, std: float, reach: flo
     return raw * near * in_hold.float()
 
 
+def base_decel_tracking(
+    env: ManagerBasedRLEnv, command_name: str, v_gain: float = 2.0, v_max: float = 1.6, std: float = 0.4
+) -> torch.Tensor:
+    """P2.4 PACE-style smooth-deceleration shaping: track a pseudo base-velocity command that decays
+    with the remaining planar racket->target error (G08: the robot rushes far targets reactively, with
+    no deceleration profile, and arrives too hot to strike).
+
+    PACE's remedy is a velocity command proportional to the remaining position error, so the DESIRED
+    speed goes to ~0 exactly at arrival. Deploy-parity constraint: the 175-D actor obs contract is
+    FROZEN, so this is a REWARD-side term only — nothing new is observed; the kernel reuses the task's
+    own error measure (the planar racket->target distance, frame-invariant, no world base position):
+
+        v_des = clamp(v_gain * ||(racket_target_xy - racket_xy)||, 0, v_max)
+        reward = exp(-(||v_base_xy|| - v_des)^2 / std^2)
+
+    Far target -> v_des saturates at v_max and the term pays for MOVING (it cooperates with
+    racket_progress instead of taxing the approach); as the strike stance is reached v_des -> 0 and the
+    term pays for a CALM base — a smooth taper instead of the bang-bang rush-then-slam. Gated to
+    ``pre_strike`` ONLY: the strike swing and the post-strike recovery are untouched (post-strike the
+    distance to the OLD swung-through target would otherwise command a bogus speed-up). Base velocity
+    is the WORLD planar root velocity (same source as hold_ready); v_gain [1/s] is the P-gain of the
+    pseudo velocity command, v_max [m/s] its cap, std [m/s] the kernel width. RewTerm weight is
+    POSITIVE; default weight 0.0 = OFF (flag-gated via task.rewards.base_decel_weight)."""
+    cmd = _cmd(env, command_name)
+    planar_err = torch.norm(cmd.racket_target_pos_w[:, :2] - cmd.racket_pos_w[:, :2], dim=-1)
+    v_des = (v_gain * planar_err).clamp(0.0, v_max)
+    v_base = torch.norm(cmd.robot.data.root_lin_vel_w[:, :2], dim=-1)
+    raw = torch.exp(-torch.square(v_base - v_des) / std**2)
+    return raw * cmd.pre_strike.float()
+
+
 def racket_strike_success(
     env: ManagerBasedRLEnv, command_name: str, std_pos: float, std_vel: float, std_normal: float
 ) -> torch.Tensor:

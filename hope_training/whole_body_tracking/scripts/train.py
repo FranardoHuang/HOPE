@@ -264,6 +264,11 @@ _RACKET_KEYS = (
 _MOTION_KEYS = (
     "wrap_teleport", "stand_start_prob", "hold_steps_range", "stand_start_min_hold",
     "post_swing_start_prob", "post_swing_buffer_size", "post_swing_min_fill", "post_swing_min_hold",
+    # deploy-parity mid-swing clip switch (018467a added the yaml key + MotionCommandCfg field but not
+    # this whitelist/translation, so every run of the task yaml raised in _check_unknown_keys).
+    "clip_switch_prob",
+    # P2.4/R14 per-swing reference playback speed range (retiming).
+    "speed_scale_range",
 )
 
 
@@ -461,6 +466,9 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(M, "post_swing_buffer_size", _get(mt, "post_swing_buffer_size"), int, applied, "commands.motion")
             _set_attr(M, "post_swing_min_fill", _get(mt, "post_swing_min_fill"), int, applied, "commands.motion")
             _set_attr(M, "post_swing_min_hold", _get(mt, "post_swing_min_hold"), int, applied, "commands.motion")
+            _set_attr(M, "clip_switch_prob", _get(mt, "clip_switch_prob"), float, applied, "commands.motion")
+            _set_attr(M, "speed_scale_range", _get(mt, "speed_scale_range"),
+                      lambda v: tuple(float(x) for x in v), applied, "commands.motion")
 
     rw = _get(task, "rewards")
     if rw is not None:
@@ -482,6 +490,30 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _require(hasattr(R, "hold_ready"), "rewards.hold_ready")
             R.hold_ready.params["reach"] = float(_hr_reach)
             applied.append(f"rewards.hold_ready.params.reach={float(_hr_reach)}")
+        # P2.4 PACE-style smooth deceleration (flag-gated, default weight 0.0 = OFF): pseudo base-speed
+        # command proportional to the remaining planar racket->target error. REWARD-side only (the
+        # frozen 175-D actor obs contract is untouched).
+        _set_reward(R, "base_decel", _get(rw, "base_decel_weight"), _get(rw, "base_decel_std"), applied)
+        for _pk, _yk in (("v_gain", "base_decel_v_gain"), ("v_max", "base_decel_v_max")):
+            _bd = _get(rw, _yk)
+            if _bd is not None:
+                _require(hasattr(R, "base_decel"), "rewards.base_decel")
+                R.base_decel.params[_pk] = float(_bd)
+                applied.append(f"rewards.base_decel.params.{_pk}={float(_bd)}")
+        # R16 (franco 2026-07-04): free the racket wrist from ORIENTATION mimic. Config-level only —
+        # drop the racket-mount link from the body lists of the two orientation-imitation terms;
+        # position / linear-velocity mimic keep the swing path, and the face orientation is then
+        # shaped by the racket_normal reward alone (commanded normal at contract v3).
+        if _get(rw, "free_wrist_ori_mimic") is not None and _as_bool(_get(rw, "free_wrist_ori_mimic")):
+            _WRIST = "right_wrist_yaw_Link"
+            for _tn in ("motion_body_ori", "motion_body_ang_vel"):
+                _require(hasattr(R, _tn), f"rewards.{_tn}")
+                _term = getattr(R, _tn)
+                _names = [b for b in _term.params["body_names"] if b != _WRIST]
+                _require(len(_names) < len(_term.params["body_names"]),
+                         f"rewards.{_tn}.params.body_names contains {_WRIST}")
+                _term.params["body_names"] = _names
+                applied.append(f"rewards.{_tn}.body_names-={_WRIST}")
         jt = _get(rw, "joint_torques_weight")
         if jt is not None:
             _require(hasattr(R, "joint_torques"), "rewards.joint_torques")

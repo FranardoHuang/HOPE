@@ -119,6 +119,16 @@ class MotionCommand(CommandTerm):
                     flush=True,
                 )
         self.time_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        # R14 retiming: float shadow clock + per-env playback speed. Inactive at the default
+        # (1.0, 1.0), keeping the integer-clock path byte-identical; when active, time_steps is
+        # derived as round(time_steps_f) (matching the deploy clock's round() in time_step_for).
+        _s_rng = tuple(float(x) for x in self.cfg.speed_scale_range)
+        if len(_s_rng) != 2 or not (0.0 < _s_rng[0] <= _s_rng[1]):
+            raise ValueError(f"speed_scale_range must be (lo, hi) with 0 < lo <= hi, got {self.cfg.speed_scale_range}")
+        _s_lo, _s_hi = _s_rng
+        self.retiming_active = not (_s_lo == 1.0 and _s_hi == 1.0)
+        self.time_steps_f = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+        self.speed_scale = torch.ones(self.num_envs, device=self.device)
         # Unified multi-clip (HITTER forehand+backhand) support. With one clip these are inert and the
         # behaviour below is byte-identical to the single-clip path. clip_id[env] selects which segment
         # (swing type) the env is currently imitating.
@@ -196,7 +206,9 @@ class MotionCommand(CommandTerm):
 
     @property
     def joint_vel(self) -> torch.Tensor:
-        return self.motion.joint_vel[self.time_steps]
+        jv = self.motion.joint_vel[self.time_steps]
+        # R14: at playback speed s the reference joints traverse the same poses s× as fast.
+        return jv * self.speed_scale[:, None] if self.retiming_active else jv
 
     @property
     def body_pos_w(self) -> torch.Tensor:
@@ -208,11 +220,13 @@ class MotionCommand(CommandTerm):
 
     @property
     def body_lin_vel_w(self) -> torch.Tensor:
-        return self.motion.body_lin_vel_w[self.time_steps]
+        blv = self.motion.body_lin_vel_w[self.time_steps]
+        return blv * self.speed_scale[:, None, None] if self.retiming_active else blv
 
     @property
     def body_ang_vel_w(self) -> torch.Tensor:
-        return self.motion.body_ang_vel_w[self.time_steps]
+        bav = self.motion.body_ang_vel_w[self.time_steps]
+        return bav * self.speed_scale[:, None, None] if self.retiming_active else bav
 
     @property
     def anchor_pos_w(self) -> torch.Tensor:
@@ -224,11 +238,13 @@ class MotionCommand(CommandTerm):
 
     @property
     def anchor_lin_vel_w(self) -> torch.Tensor:
-        return self.motion.body_lin_vel_w[self.time_steps, self.motion_anchor_body_index]
+        alv = self.motion.body_lin_vel_w[self.time_steps, self.motion_anchor_body_index]
+        return alv * self.speed_scale[:, None] if self.retiming_active else alv
 
     @property
     def anchor_ang_vel_w(self) -> torch.Tensor:
-        return self.motion.body_ang_vel_w[self.time_steps, self.motion_anchor_body_index]
+        aav = self.motion.body_ang_vel_w[self.time_steps, self.motion_anchor_body_index]
+        return aav * self.speed_scale[:, None] if self.retiming_active else aav
 
     @property
     def robot_joint_pos(self) -> torch.Tensor:
@@ -333,6 +349,11 @@ class MotionCommand(CommandTerm):
                 new_clip = torch.randint(0, self.motion.num_segments, (n,), device=self.device)
                 self.clip_id[env_ids] = new_clip
                 self.time_steps[env_ids] = self.motion.seg_start[new_clip]
+                if self.retiming_active:
+                    # R14: re-base the float clock and draw this swing's playback speed.
+                    self.time_steps_f[env_ids] = self.time_steps[env_ids].float()
+                    s_lo, s_hi = self.cfg.speed_scale_range
+                    self.speed_scale[env_ids] = sample_uniform(float(s_lo), float(s_hi), (n,), device=self.device)
             # Report the REAL clip-sampling distribution (repurpose the bin-sampling metrics for clips):
             # entropy of the per-clip env fraction (1.0 = balanced), and the most-sampled clip + its share.
             counts = torch.bincount(self.clip_id, minlength=self.motion.num_segments).float()
@@ -369,6 +390,13 @@ class MotionCommand(CommandTerm):
             / self.bin_count
             * (self.motion.time_step_total - 1)
         ).long()
+        if self.retiming_active:
+            # R14: re-base the float clock and draw this swing's playback speed (single-clip path).
+            self.time_steps_f[env_ids] = self.time_steps[env_ids].float()
+            s_lo, s_hi = self.cfg.speed_scale_range
+            self.speed_scale[env_ids] = sample_uniform(
+                float(s_lo), float(s_hi), (len(env_ids),), device=self.device
+            )
 
         # Metrics
         H = -(sampling_probabilities * (sampling_probabilities + 1e-12).log()).sum()
@@ -520,21 +548,48 @@ class MotionCommand(CommandTerm):
         held = self.hold_counter > 0
         self.hold_counter = torch.clamp(self.hold_counter - 1, min=0)
         self.metrics["in_hold"] = held.float()
-        self.time_steps += (~held).long()
+        if "clip_switch_count" not in self.metrics:
+            self.metrics["clip_switch_count"] = torch.zeros(self.num_envs, device=self.device)
+        if self.retiming_active:
+            # R14: fractional clock — advance s frames per unheld control step; the integer index is
+            # derived by round(), mirroring the deploy clock's nearest-frame mapping (torch rounds
+            # half-to-even vs C++ half-away-from-zero — differs only on exact .5 ties, measure-zero
+            # for continuous speed ranges).
+            self.time_steps_f += (~held).float() * self.speed_scale
+            self.time_steps = self.time_steps_f.round().long()
+            self.metrics["playback_speed"] = self.speed_scale.clone()
+        else:
+            self.time_steps += (~held).long()
         if self._multiseg:
             # Wrap at the END of the env's current clip/segment, not the global concatenated end.
             seg_end = self.motion.seg_start[self.clip_id] + self.motion.seg_len[self.clip_id]
-            env_ids = torch.where(self.time_steps >= seg_end)[0]
+            wrap_ids = torch.where(self.time_steps >= seg_end)[0]
+            # DEPLOY-PARITY CLIP SWITCH (venue falls 2026-07-04): the runner's reference clock flips
+            # clip_id whenever the planner re-sides the target — at an ARBITRARY mid-swing moment —
+            # and the reference jumps to the new clip's first frame (pp_reference_clock.hpp clamps
+            # tts-large to seg_start). Training previously only switched clips at clip END, so the
+            # policy never saw that discontinuity and falls at 准备/正手/反手 switches on hardware.
+            # With per-step prob clip_switch_prob an env aborts its swing operator-style and routes
+            # through the SAME wrap-resample path (uniform new clip, frame 0, hold, fresh target).
+            # NOTE: aborted swings count as uncompleted starts (slight completion-rate deflation).
+            if float(self.cfg.clip_switch_prob) > 0.0:
+                sw = torch.rand(self.num_envs, device=self.device) < float(self.cfg.clip_switch_prob)
+                sw[wrap_ids] = False
+                self.metrics["clip_switch_count"] = sw.float()
+                switch_ids = torch.where(sw)[0]
+                env_ids = torch.cat([wrap_ids, switch_ids]) if len(switch_ids) > 0 else wrap_ids
+            else:
+                env_ids = wrap_ids
         else:
             env_ids = torch.where(self.time_steps >= self.motion.time_step_total)[0]
+            wrap_ids = env_ids
         self.just_resampled = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         if len(env_ids) > 0:
             self.just_resampled[env_ids] = True
-            # A8: wrapped envs just physically completed a swing (they passed the strike alive and
-            # were not teleported) — snapshot their states into the post-swing ring buffer so true
-            # episode resets can start from realistic end-of-swing states (cfg.post_swing_start_prob).
-            if self.cfg.post_swing_start_prob > 0.0:
-                self._capture_post_swing_states(env_ids)
+            # A8: only envs that physically COMPLETED a swing (true wraps — passed the strike alive,
+            # not teleported, not aborted-by-switch) feed the post-swing ring buffer.
+            if self.cfg.post_swing_start_prob > 0.0 and len(wrap_ids) > 0:
+                self._capture_post_swing_states(wrap_ids)
         # Wrap-path resample: skips the RSI teleport (cfg.wrap_teleport=False) so the policy
         # physically transitions swing -> swing. True resets go through reset()/manager instead.
         self._resampling_from_wrap = True
@@ -656,6 +711,17 @@ class MotionCommandCfg(CommandTermCfg):
     post_swing_min_fill: int = 256
     # Post-swing-started envs get at least this much hold (settle follow-through -> windup).
     post_swing_min_hold: int = 25
+    # Per-step per-env probability of an operator-style mid-swing clip switch (deploy parity —
+    # see the venue-falls note in _update_command). 0.002 ~ one switch per ~3-4 swings. Default off.
+    clip_switch_prob: float = 0.0
+    # P2.4/R14 retiming: per-swing reference playback speed, uniform-sampled from this range at
+    # every swing entry (wrap, mid-swing clip switch, and true reset). At speed s the clip clock
+    # advances s frames per control step, reference velocities read ×s, time_to_strike runs ÷s,
+    # and the racket velocity target scales ×s (hope_commands) — the (frame, tts, velocity)
+    # pairing stays consistent, unlike the deploy runner's swing_speed knob which retimes the
+    # clock but NOT the velocities (pp_policy.hpp). Default (1.0, 1.0) = OFF: the integer-clock
+    # path below is byte-identical to before this flag existed.
+    speed_scale_range: tuple[float, float] = (1.0, 1.0)
 
     adaptive_kernel_size: int = 1
     adaptive_lambda: float = 0.8

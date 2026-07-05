@@ -20,6 +20,18 @@ runner:
   max_iterations: 300000000000        # total PPO iterations
   # -------------------------------------------------------------------------
   save_interval: 100           # checkpoint every N iterations
+  # ⚠ DEAD FLAG **in the simtoreal2 lineage** (jiayi, verified 2026-07-04 across its 6 deployed
+  # models): rsl_rl 3.1.2's shim blocks this deprecated runner-level key when the IsaacLab
+  # policy cfg emits `actor_obs_normalization: {}` (empty dict != None -> shim skips; {} is
+  # falsy -> ActorCritic uses Identity). In THAT lineage checkpoints carry no normalizer state,
+  # exports are obs->Gemm direct, and deploy correctly feeds RAW obs. To actually enable
+  # normalization there set policy.actor_obs_normalization: true (bool).
+  # ⚠ NOT true for the virtual-ball/product lineage (verified 2026-07-04/05, opposite result):
+  # those checkpoints DO carry non-trivial obs_norm_state_dict (mean|max|~4, var to ~13 — the
+  # 07-04 eval P0: feeding raw obs scored ~0 until the obs_norm.npz sidecar / --bake-obs-norm
+  # export restored the transform; model_9600's normbaked ONNX fingerprint-matches actor∘norm).
+  # The two lineages evidently take different runner paths — when consolidating training code,
+  # VERIFY which path a run uses (make_std_sidecar.py errors loudly if no normalizer state).
   empirical_normalization: true
 
 policy:

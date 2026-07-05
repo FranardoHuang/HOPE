@@ -164,6 +164,9 @@ if(ENABLE_A3_ROS_MSGS)
   find_package(ament_cmake QUIET)
   find_package(rosidl_default_generators QUIET)
   find_package(sensor_msgs CONFIG QUIET)
+  # std_msgs (Float64MultiArray) carries the live-planner racket target + base pose. It is a
+  # core ROS pkg (a sensor_msgs dependency), so it is present wherever sensor_msgs is.
+  find_package(std_msgs CONFIG QUIET)
   if(ament_cmake_FOUND AND rosidl_default_generators_FOUND AND sensor_msgs_FOUND)
     # Build vendored joint_msgs. rosidl_generate_interfaces (inside the
     # nested CMakeLists) emits raw targets like joint_msgs__rosidl_generator_cpp;
@@ -232,6 +235,14 @@ if(A3_ROS_MSGS_AVAILABLE)
     sensor_msgs::sensor_msgs__rosidl_typesupport_fastrtps_cpp
     sensor_msgs::sensor_msgs__rosidl_typesupport_introspection_cpp
   )
+  if(std_msgs_FOUND)
+    list(APPEND A3_ROS_MSGS_LIBS
+      std_msgs::std_msgs__rosidl_generator_cpp
+      std_msgs::std_msgs__rosidl_typesupport_cpp
+      std_msgs::std_msgs__rosidl_typesupport_fastrtps_cpp
+      std_msgs::std_msgs__rosidl_typesupport_introspection_cpp
+    )
+  endif()
 endif()
 
 # -----------------------------------------------------------------------------

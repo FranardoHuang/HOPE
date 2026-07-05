@@ -4,7 +4,63 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-05
 
-- Corrected the RunPod `/workspace/yikang/nohope` v5 config mistake. Product/default train and replay configs stay on the existing hopex/registry route (`cfg/train.yaml` and `cfg/play.yaml` keep `motion_file: null`; deploy-parity stays `strike_phase_per_clip: [0.47, 0.333]`). The v5 clips are R15 ablation inputs only and must be passed by CLI override. Added `cfg/strike_annotations.yaml` plus annotation-first `scripts/analyze_strike_phase.py`; verified it selects forehand v5 frame 37 / phase 0.673 instead of the speed-peak whip at frame 43/44, prints the R15 sampling boxes, marks video/GVHMR face normals unreliable, and leaves backhand v5 phase 0.345 as unverified pending frame scrub. Kept the `scripts/play.py` fix so two local clips are resolved the same way in replay/export as in training.
+- Strike alignment closed out (yikang-driven round): corrected the RunPod v5 config mistake
+  (product/default configs stay on the hopex/registry route; v5 is R15-CLI-only), landed
+  `cfg/strike_annotations.yaml` as the contact-phase source of truth with ALL 6 clips
+  adjudicated — v5 [0.673 franco / 0.362 claude visual frame scrub of the source video], oblique
+  [0.432 (old auto 0.368 was the pre-contact acceleration peak, ~120 ms early; boxes regenerated)
+  / 0.495 confirmed], hopex [0.47 / 0.333] KEPT: the source videos (raw_video_hopex/) are DRY
+  SWINGS with no ball — the values are the forward-swing speed-peak convention (18/33 cm past the
+  x=0.40 plane), and the semantic mismatch vs true-contact clips is filed as R15 decision input.
+  `analyze_strike_phase.py` is annotation-first (speed peak demoted to a diagnostic candidate —
+  known whip/pull-up trap) and tags GVHMR face normals UNRELIABLE on all video-derived clips incl.
+  hopex. `scripts/play.py` resolves local `motion_file`/`motion_file_2` the same way as training
+  (R15 replay/export parity).
+
+## 2026-07-04 (day/evening, main) — deploy-parity robustness flags; eval mode B finds the face normal is clip-locked; contract v3 design
+
+- **`motion.clip_switch_prob`** (018467a, default 0.0, try 0.002): deploy-parity MID-swing clip
+  switch through the wrap-resample path (random abort → other clip's frame 0 + fresh hold +
+  fresh target, robot untouched). Root-caused the venue falls at 准备/正手/反手 switches to
+  untrained mid-clip reference jumps (`pp_reference_clock` flips clip_id at arbitrary tts). A8
+  capture stays wrap-only.
+- **P2.4 `base_decel` reward** (74c129e, default off): PACE-style pre-strike pseudo-speed tracking
+  `v_des = clamp(2.0·planar_dist(racket→target), 0, 1.6)` on ‖v_base_xy‖, `std 0.4`, dead at/after
+  the strike frame. Mech-verified on/off. v1 is a deliberate proxy — the P-law critique (no fitted
+  accel/decel envelope, magnitude-only, no time budget) and the v2 spec live in
+  `docs/motion_and_contract_v3.md` §5.
+- **train.py override layer hardened** (1181c74 + 74c129e hotfix): `task.motion`/`task.racket`
+  yaml keys translate through explicit whitelists; unknown keys RAISE at startup. Lesson recorded
+  in run_training.md: a new task-yaml key must extend the whitelist in the same commit (018467a
+  briefly broke every task-yaml startup).
+- **Eval mode B landed** (f56f9c4): `--target-source venue-balls` — sample fitted venue incoming
+  balls (with spin), StrikeSpec-derive the demanded racket state, score the virtual return
+  (contact model → drag+Magnus flight → bounds+net). HEADLINE: the policy tracks venue balls
+  pos/vel OOD (3.7 cm / 0.18 m/s) **but the face normal is clip-locked** (36-76° err, 0% legal
+  returns; counterfactual with the demanded normal: 25/25, median 6.7 cm) — the 175-D contract has
+  NO normal-demand channel. Two paths logged in NOW.md (planner-side fixed-normal solve now /
+  175→179 contract extension next gen); decision doc: `docs/motion_and_contract_v3.md`.
+- **Contract & motion-library v3 design committed** (`docs/motion_and_contract_v3.md`): planner
+  output ↔ policy egocentric input table verified against code (finding: `racket_target_vel_w` is
+  a WORLD-frame passthrough — only position is egocentric; the deploy wire `RacketCommand.normal`
+  already carries the face normal, it dies at `pp_obs_builder` for lack of an obs slot; the critic
+  already has privileged `racket_target_normal_w`), 175→179 migration plan, continuous-intensity
+  motion library q_ref(φ,ρ) with cost-based selector, PACE-decel v2, 6-clip capture plan.
+- **R14 retiming implemented** (evening): `motion.speed_scale_range` — per-swing reference
+  playback speed (clock ×s / ref velocities ×s / tts ÷s / target velocity ×s, one consistency
+  cascade; train-only, default off). The "can accel/decel modulate stroke amplitude" experiment:
+  retiming modulates VELOCITY amplitude; SPATIAL amplitude is the clip-trim axis (R6) — the two
+  arms together are the no-new-data continuous-intensity v0.
+- **v5 clips processed to npz on the pod** (evening): `hope_{forehand,backhand}_v5.npz` (56/58
+  frames, re-grounded) → ablation arm R15. P2.0 REVISED (franco): no dedicated ready video — v5
+  first frames agree to 0.15 rad mean (shared ready anchor), last frames 0.24-0.27 rad from first
+  (RL fills the gap). CORRECTION (late night, franco): the forehand strike phase is 0.673, NOT
+  the detector's 0.768 — the speed peak is the post-contact whip; at the true contact (~2/3, per
+  franco) the velocity is (+1.24,+1.21,+1.70) and the face normal healthy, so the earlier
+  "+Y-dominant" flag was a mis-pinned phase, not a pipeline direction failure. Lesson recorded:
+  speed peak != contact; cross-check with forward-velocity peak / human prior. Remaining real
+  issue: v5 reference jitter is 2-6x hopex (mean joint |acc| 5.9/15.5 vs 2.5/2.7 rad/s^2) —
+  supports R16 and reference filtering; third confounder for R15 verdicts.
 
 ## 2026-07-03 (night, branch `rsi-on-wrap-progress-fix`) — venue data on RunPod; F10/full-state/self-check ran on real data
 

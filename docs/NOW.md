@@ -42,7 +42,7 @@ Rules:
 | Person | Focus |
 | --- | --- |
 | franco | Direction, priorities, arbitration |
-| jiayi | End-to-end training bring-up; reward tuning — the simtoreal2 lineage (HER achieved-replay, hold_ready, model_9000 training) |
+| dongc1 | End-to-end training bring-up; reward tuning — the simtoreal2 lineage (HER achieved-replay, hold_ready, model_9000 training) |
 | yikang | Deployment; sim/env alignment |
 | claude (franco's agent) | Foundation: infrastructure, A/B experiments, doc/code hygiene |
 
@@ -50,11 +50,63 @@ Rules:
 
 | run_name | 人话 |
 | --- | --- |
+| r3_P2_product | 「产品线」:虚拟球(奖励打到落点、压出球旋转)+ 动捕毛病仿真 + 奖励自动收紧 + 上拍收尾起手,从消旋臂 1500 步续训。**13.5k 跑完,平台 0.89** |
+| o2_R7_databoxes | 「真球分布盒」:训练时来球/目标的采样范围换成场馆实测分布(旧手设范围只盖住真球 20%)。**训练内分数不可与别的臂直接比**(它打的题更难),用统一评估裁决 |
+| o2_R8_sensorv2 | 「感知三毛病」:模拟动捕在击球时的三种真实缺陷——①偶尔丢一帧(拿上一帧凑合);②击球后约 0.03 秒完全看不见目标(拍子挡住反光球);③每拍重新锁定后带一个小的固定偏移,整拍不变。只骗策略的眼睛,评分照旧。**结论:白送,不掉分** |
+| o2_R9_oblique12k | 「斜录实战动作」:斜角机位拍的实战挥拍当模仿模板(替换现役摆拍数据) |
+| o2_R10_seed2 | 「换种子重跑产品线」:验证 0.89 不是运气。**结论:同迭代差 0.004,稳** |
+| o2_R11_clipswitch | 「中途换招练习」:每挥约 1/3 概率被中途喊停、立刻换一套动作从头打(模拟真机上规划器中途改主意的场景——场馆摔倒的根源之一) |
+| day_R6_trimclips | 「剪短模板」:把 2.6-2.8 秒模板剪到约 1.4 秒(只留击球前后),看模仿更聚焦是否更好 |
+| R14(待跑) | 「变速播放」:同一套模板随机快放/慢放(0.8-1.2 倍),要求的击球速度同步缩放——看策略能否"要多快给多快" |
+| R15(待跑) | 「v5 新视频」:franco 07-04 下午拍的短条正反手当模板 |
+| R16(待跑) | 「手腕放开」:拍子那节手腕不再照抄视频朝向(视频里手腕本来就测不准),只照抄挥拍路径;拍面朝向由打球效果的奖励自己教 |
 | p21_A_noteleport / p21_A_ext12k | 「基线结构」：挥拍间不传送 + 25% 从站姿开始（main 默认配置），2k / 续跑到 14k |
-| p21_B_teleport | 「旧传送式」对照：每拍开始把机器人瞬移到位（部署模型的旧训法），仅 2k，已停 |
-| p21_C_sigma | 基线结构 + 「奖励自动收紧」（误差变小奖励口径跟着变严），2k |
-| p21_D_postswing | 基线结构 + 「上拍收尾姿态起手」（一部分回合从上一拍打完的姿势开始练），2k |
-| p21_E_sigma_postswing | 「三合一」＝基线结构＋奖励自动收紧＋收尾姿态起手，从 C 续跑到 14k —— **当前最优候选** |
+
+## 术语人话表(报告与文档里第一次出现的术语,以这张表为准;新术语先上表再使用)
+
+| 术语 | 人话 |
+| --- | --- |
+| composite(strike_composite_success_exact) | 「击球三合格率」:击球那一帧,位置/速度/拍面朝向三项同时达标的比例——训练里最主要的分数 |
+| 信号档 | 短跑对比:2000-4000 步(1-3 小时),只回答"这个想法有没有苗头" |
+| 跑到底 | 12000 步(约 7 小时)长跑,出能考门禁的成熟存档 |
+| 机制检查(mech check) | 3 分钟小跑:只确认开关真的生效、程序不崩,不看成绩 |
+| 热启(warm start) | 从练到一半的存档继续练,不从零开始 |
+| checkpoint(ckpt) | 训练存档 |
+| eval-B / 真球考试 | 用场馆实测来球分布出题,策略虚拟回球,看能否合法落到对面台(报"回球成功率") |
+| deploy-faithful / 部署仿真考试 | 完全按真机流程(站姿起步、等球、一次挥完、不传送)在 MuJoCo 里考,主要看摔不摔 |
+| 门禁 | 上真机前必须通过的仿真考试(官方口径=厂商 AGI-MuJoCo) |
+| HER 目标重放 | 把策略自己打到过的击球状态混进新目标里练——要求的目标永远"确实做得到" |
+| RSI(传送式起手) | 回合开始把机器人直接摆到模板某一帧上,与真机不符,正被站姿/上拍收尾起手替代 |
+| 消旋(vb_spin_mode=minimize) | 虚拟球奖励口径:先不追求球质,奖励打到落点 + 出球旋转越小越好 |
+| composite 不可比 | 改了训练题目难度的臂(换数据源/换采样分布),训练内分数不能和别人直接比,要用同一张考卷(eval-B/记分板)重考 |
+| 采样框/盒(box) | 训练时随机出题的范围:击球点的位置框 + 要求拍速的速度框,按正/反手各一套 |
+| 相位(phase) | 挥拍模板里的时间进度,0=起手,1=收尾;击球相位=触球在模板里的位置 |
+| 反事实回球率(cf\_\* 列) | 真球考试的附加评分:击球那一刻,把实际摆出的拍面朝向换成"这颗球需要的朝向"再虚拟回球一次(位置、拍速都用实际达成值)——量"光是拍面朝向错,损失了多少回球" |
+| 固定拍面反解(--venue-fixed-normal) | 真球考试变体:反过来让规划器迁就策略——拍面钉死在模板参考朝向,只解拍速去凑落点。答出的回球率=不重训练、只改规划器能到的上限 |
+| 换招压力测试(--switch-stress p) | 部署仿真变体:每步以概率 p 强制"中途换招"(换模板跳回起手帧+换目标,机器人不动,和真机规划器改主意一个动作),报摔倒率、换招后 2 秒存活率、换招后命中率 vs 干净挥拍命中率 |
+| 契约日 | 「改策略输入格式的大日子」:策略吃的观测(现在 175 个数)是训练端和真机 C++ 端共同的约定,改一次要两边同步+重训,所以攒着一起改。首个内容(franco 2026-07-05 拍板)=给观测加 3 个数:**这颗球需要的拍面朝向**(规划器已会算,策略现在根本看不见题目)——先只加角度,侧旋/强度以后按消融一点点加。现有目标信息只有:位置 3 + 拍速 3 + 击球倒计时 1 + 正反手 1 |
+| 北极星指标(回球率) | franco 2026-07-05 定:主追踪指标升级为**真球考试回球率**(击球三合格率保留继续看)。理由:三合格率的"拍面项"按模板打分,而模板拍面本身不可信;回球率直接量"真球能不能合法打回去"。现状 0%——它动了才算真进步 |
+| 分阶段出题(franco 2026-07-05 方针) | 训练/考试的出题都分阶段:**第一阶段只出"当前动作直接打得回去"的题**(确保奖励拿得到、梯度点得亮),之后按真实来球分布一点点扩散题库——涉及多轮消融,不许一步跳到全真题 |
+
+## 🏆 当前胜利组合(常驻;每出一个裁决就更新这里,谁赢谁进)
+
+**产品配方 v2(2026-07-05 定)** = 虚拟球·消旋 + 动捕毛病仿真(A1 延迟/噪声 **+ R8 感知三毛病,新采纳**)+ 奖励自动收紧 + 上拍收尾起手 + 2% 中途改目标,从消旋臂 1500 步热启:
+
+- 峰值 **0.908-0.910 @ ~9540**(r3_P2_product,tensorboard 曲线复核 2026-07-05;旧记录
+  "0.893@11-12k"不准。13.5k 终点回落到 0.885 → **选峰值附近的存档,别拿最后一个**)
+- **现役打包模型出处已查明(2026-07-05 指纹匹配)**:`exported_deploy_normbaked` = **model_9600**
+  (输出差 5.7e-6),恰好落在峰值区——无需重导;此前"出处未记录"的坑就此关闭(以后导出用
+  standalone_onnx_export,--run-path 里写明迭代号)
+- R8 感知三毛病:0.890 平台 ≈ 无代价 → **并入配方**(理由:白送的抗噪,真机全是这些毛病)。**跑到底终判(13.5k,2026-07-05):峰值 0.905@10.6k——白送再证**
+- R10 换种子:0.885-0.890 → 平台可信,不是运气。**跑到底终判(13.5k):峰值 0.914@10.3k,比 P2 自己还高——稳上加稳;且所有长跑峰值都落在 ~10-11k、终点回落,"选峰值存档"铁律再+1**
+- **候审**(信号档在跑,赢了进组合):R16 手腕放开 / R14 变速播放 / R12 减速塑形 / R11b 低剂量中途换招
+- **等统一考卷**(训练内分数不可比):R7 真球盒(0.83@8.7k 还在爬)/ R9 斜录(0.71 到顶)/ R15 v5(排队)
+- **已拒绝**:R11@0.002 剂量(命中率税 0.12,已停在 10.7k;抗摔收益已复核:换招压力测试 14 组全 0 摔,收益轴饱和、税为真)、R6 剪短模板@2k(无优势)
+- **⚠ simtoreal2 合并警示(2026-07-05)**:DeployParity 任务 yaml 现在带着 jiayi ARM A 重训的
+  实验默认值(回合 16s、等球 0-8s、A8=0.25、base_decel=ON、位置奖励 std 0.15)。**产品线
+  (VirtualBall)已在自己的 yaml 里显式钉回基线值不受影响**;在 DeployParity 上开新臂的人注意
+  基线已变,对照要自带。jiayi 的 std 0.15 理由(0.20 下模仿白拿 0.63 位置分=偷懒局部最优)
+  值得产品线走梯子验证 → 排为候选臂 R17
 
 ## Plan To Saturday (2026-07-03 → 07-04, target: play at the venue with an improved policy)
 
@@ -127,7 +179,7 @@ R2@1500 热启)在 5500/12000 步时命中率 **0.858(峰值 0.884)**,已超 E �
 | P2.3b HER 目标重放(jiayi) | ✓ | ✓ | ✓(jiayi 线) | **今晚对照** | 未 | 未 |
 | P2.3c 动作库检索(SMASH) | 未 | — | — | — | — | — |
 | P2.4a 等球 hold+hold_ready | ✓ | ✓ | ✓ | 今晚对照 | 未 | 未 |
-| P2.4b 减速命令/base 回归/ready pose | 未(ready pose 已定方案) | — | — | — | — | — |
+| P2.4b 减速命令/base 回归/ready pose | ✓(v3 doc) | 部分(base_decel v1) | ✓ | R12 待跑 | 未 | 未 |
 | P2.5 物理建模 | ✓ | 部分(spin 代码在 main) | **数据采集中** | 未拟合 | 未入训练 | 未 |
 | P2.6 smash | 未 | — | — | — | — | — |
 | A1 延迟/时变注入 | ✓ | ✓ | ✓ | **今晚** | 未 | 未(数值等标定) |
@@ -145,34 +197,13 @@ R2@1500 热启)在 5500/12000 步时命中率 **0.858(峰值 0.884)**,已超 E �
 事实修正(2026-07-04 凌晨):registry 里两套(v3/v4 原始与 :latest 微调转正)**均为正面摆拍录制**;
 此前 npz frame-0 yaw +82° 是 GVHMR 全局朝向产物,不代表机位。真正的**斜录(实战击球)视频**是新东西:
 franco 已提供 forehand_new.mp4 / backhand_new.mp4,已上传 `/workspace/shared/motions/raw_video_oblique/`
-
-**击球相位人工对齐(2026-07-05,yikang 驱动)——视频管线两个坑 + 登记表机制:**
-
-1. **拍速峰 ≠ 触球**:自动选帧(analyze_strike_phase 取前挥速度峰)在真实对打视频上常选到
-   触球后的甩鞭段或触球前的上拉加速段。实锤两例:v5 正手 auto 0.768 vs 真触球 0.673(franco
-   逐帧);斜录正手 auto 0.368 vs 真触球 **0.432**(claude 逐帧对源视频,0.368 时刻球离拍还有
-   3 帧)。机制已固化:`hope_training/whole_body_tracking/cfg/strike_annotations.yaml` 人工
-   登记表 = strike_phase 唯一可信源;analyze_strike_phase 注释优先,速度峰降级为诊断候选,
-   不一致 >1 帧打警告并拒绝无注释 clip 用于训练。
-2. **视频源 clip 的"拍面法线"是手腕 +Y 代理**(视频里拍面不可观测,GVHMR 只给手腕系),
-   登记表按 clip 标 `face_normal_reliable: false`,分析器打 UNRELIABLE——不得当物理拍面
-   方向引用(这是 R16 手腕解除姿态模仿的直接论据;拍面质量只能靠 vb 落点/消旋奖励塑形)。
-
-状态(6 条 clip,5 条已人工核定):v5 = [0.673(franco), **0.362**(claude;原 0.345 早 1-2 帧,
-在跑的 R15 不重启,下次 re-arm 采用)];斜录 = [**0.432**, 0.495](claude 逐帧;反手确认原值);
-**hopex = [0.47, 0.333] 已收口(2026-07-05,源视频 raw_video_hopex/ 已入库):v4 正录是
-无球空挥 → 触球相位没有物理真值,现值是速度峰约定(正手过 x=0.40 平面后 18 cm、反手
-33 cm;真触球类 clip 都在平面上升沿)。产品线按此约定训练,不单独"修";与 v5/斜录的
-语义差异列为动作源换代(R15)决策输入。hopex 也是 GVHMR 管线 → 拍面法线同为手腕代理,
-可靠性下调(登记表已改 false)**。
-新采样框由分析器在注释帧直出(pos ±0.10 / clean-vel ±0.50 惯例),运行
-`python scripts/analyze_strike_phase.py --clip forehand:<npz> --clip backhand:<npz>` 即可粘贴。
 (附 README 说明谱系)。franco 预期:实战斜录的动作质量会好很多。
 
 | 消融臂 | 数据 | 状态 |
 | --- | --- | --- |
 | 正录(现役) | hopex 转正版(139/132 帧) | 所有既有结果就是它,无需重跑 |
 | 斜录(新) | raw_video_oblique 两条视频 | **卡在 GVHMR→GMR→npz→转正→相位标定 管线**(pod 无 GVHMR 环境;dongc1 机器有)→ 产出后同配置 2000 步对照 |
+| v5(更新) | raw_video_v5 两条视频(1.17/1.20s,franco 2026-07-04 下午提供) | **管线全通(2026-07-04 晚,claude,`/workspace/franco/v5_pipeline.sh` 复用斜录管线)**:npz 56/58 帧 @50Hz 已入 `/workspace/shared/motions/hope_{forehand,backhand}_v5.npz`,yaw 转正(+86.6°/+83.6°→0),相位 **[0.673, 0.345](franco 纠错版;检测器的 0.768 是甩鞭峰不是触球)** → 消融臂 R15 |
 
 ## 关键更新联合消融(Isaac 复活即发射;2000 步信号档,4096 envs,一卡两跑错峰)
 
@@ -181,7 +212,7 @@ franco 已提供 forehand_new.mp4 / backhand_new.mp4,已上传 `/workspace/share
 | R0 基线 | `task=HOPEPingPongDeployParity`(main 默认) | 合并后的参照点 |
 | R1 虚拟球·上旋 | `task=HOPEPingPongVirtualBall`(yikang 默认,落点30/过网20/旋转5,拍速法线降权) | 物理奖励栈是否成立 |
 | R2 虚拟球·消旋 | R1 + `task.racket.vb_spin_mode=minimize`(franco 第一阶段:不奖励球质,奖励落点+出球旋转最小) | 两种旋转哲学谁先学会站稳打准 |
-| R3 斜录数据 | R0 + `motion_file=/workspace/shared/motions/hope_forehand_oblique.npz motion_file_2=..._backhand_oblique.npz "task.racket.strike_phase_per_clip=[0.432,0.495]"` + 下方专属采样框(**⚠ 正手相位 0.368→0.432 人工纠错 2026-07-05:旧值是触球前加速段,球还差 3 帧才到拍;正手框要按新帧重算再 re-arm,见下方"击球相位人工对齐"**) | 实战动作源是否更好(franco 预判:是) |
+| R3 斜录数据 | R0 + `motion_file=/workspace/shared/motions/hope_forehand_oblique.npz motion_file_2=..._backhand_oblique.npz "task.racket.strike_phase_per_clip=[0.432,0.495]"` + 下方专属采样框(**⚠ 正手 0.368→0.432 人工纠错 2026-07-05:旧值=触球前加速段,球还差 3 帧才到拍;框按新帧重算,见 strike_annotations.yaml**) | 实战动作源是否更好(franco 预判:是) |
 | R4 组合 | R1/R2 胜者 + adaptive_sigma + post_swing(可再叠 R3 若其胜) | 产品候选 |
 
 斜录臂专属采样框(从斜录击球帧提取,保持参考-目标一致性):
@@ -221,13 +252,196 @@ franco 已提供 forehand_new.mp4 / backhand_new.mp4,已上传 `/workspace/share
 
 **斜录(实战)动作:视频→CSV 全通**(GVHMR/GMR 在 pod 上直接跑通了,产物 /workspace/shared/motions/oblique/,58/64 帧)。剩 csv→npz 一步需要 Isaac FK(或我写 MuJoCo FK 版,已排队)。球轨迹数据已入共享区 ball_mocap_0703。
 
+## 🔴 结构级发现(2026-07-04 傍晚,eval B 模式首跑)— 需要 franco 拍板
+
+**策略的拍面朝向是"clip 锁死"的,175 维观测契约里没有任何法线指令通道。**
+B 模式(真实来球分布 + StrikeSpec 反解应有拍状态)实测:位置/速度跟踪意外地好
+(OOD 到 3.7cm / 0.18 m/s,双双满分)——但法线误差 36-76°,虚拟回球率 **0%**。
+反事实归因:同样的达成质量,换上"应有法线"→ **25/25 合法回球**(中位 6.7cm);
+换回错误法线 → 0/25。**法线是唯一短板,而且是架构性的**(策略只模仿 clip 的拍面,
+无从得知"这个球需要什么拍面")。这正是 franco"拍面角度是接旋球的关键"的最终形态。
+
+两条路(可并行):
+- **A 短期(零训练,立即可部署)**:planner 反过来适配策略——StrikeSpec 加"固定法线求解"
+  变体(法线钉在 clip 参考值,只解 v_r/落点),放弃部分落点自由度换取合法回球。claude 可即做。
+  **→ 已做并判死刑(2026-07-05,claude)**:固定法线求解已实现(`solve_fixed_normal` +
+  `--venue-fixed-normal`,16/16 测试过),复测结果 **0% —— 不是求解器不收敛,是物理不可行**。
+  暴力可达性扫描(拍面钉在 clip 参考朝向,遍历 ≤6 m/s 全部拍速,~7000 落点/球)证明:
+  **正手拍面(几乎朝正侧方 [0.41,0.90,-0.17])打出的球最远落 x≈1.4 m,连网(1.87 m)都
+  过不了——任何拍速都救不了**;反手拍面只剩一条"贴网大斜线"小缝(落点 x≈1.9-2.0、
+  y≈±0.3-0.67,需 2.5-4.3 m/s),全部在合法回球框(过网纵深 ≥0.3 m,即训练自己的
+  dink 保护)之外。前提核实过:mode-A 里策略实际拍面 vs clip 参考只差 1.9°(达标率 100%),
+  钉 clip 参考=钉策略真实拍面。**结论:规划器迁就救不了现役 clip 拍面,路 B(契约加法线
+  通道)/ R16(手腕放开)/ 新拍面数据是唯一活路。**
+  **→ 第三根钉子(2026-07-05 晚,R16 信号档 eval-B)**:手腕放开跑了 5.5k 步,拍面-vs-应有
+  误差 43.5°(基线 42.5°)纹丝不动、回球率仍 0%——**落点奖励的间接梯度掰不动拍面,
+  "契约日加法线指令通道"从三选一变成唯一剩下的路**。
+  **→ 第四根钉子,也是机制解释(2026-07-05 晚,P2 训练曲线复盘,franco 追问"训练有落点
+  奖励为什么没学会"逼出来的)**:P2 训练全程 13.5k 步,虚拟球**落点入界率 0.03%、过网率
+  0.2%、落点误差 1.9m(和考试的 1.5-1.6m 同病)——三个打球奖励项(落点 30/过网 20/消旋 5)
+  的实际收入全程 ≈ 0**。也就是说:0.89 的三合格率全部来自模仿+位置/速度跟踪,"打球效果"
+  奖励装了却从没通电;R16 放开手腕也没用,因为一次正样本都没有、没有梯度可爬(奖励沙漠,
+  yikang 07-03 已放宽过一轮核仍如此)。**训练分布 ≠ 考试分布不是主因——训练分布下它同样
+  一颗都打不回**。治法两条腿(o4 轮):①契约日拍面指令 = 直接姿态梯度,不经过接触模型;
+  ②franco 分阶段出题 = 把第一阶段题目限制在"物理上打得回"的域内,先点亮奖励再扩散
+  (注意:可达性扫描已证正手拍面在任何拍速下无解,所以 curriculum 单独救不了正手,两条腿
+  必须一起上)。
+- **B 长期(下一代训练)**:观测契约 175→178(+目标法线 3 维),训练 racket_normal 奖励改跟
+  指令法线,部署 pp_obs_builder 同步——一次契约变更,换来真正的"按需拍面"。需要全队排期。
+  **路 A 死刑后升级为"必须做",不再是可选项。**
+
+(附带发现:场馆来球接触点在人的击球高度 0.98-1.26m,高于训练框——采集分布是"人接球"
+视角,机器人版分布尚缺;B 模式 v1 盒采样未强制相关性,升级路径已注明。)
+
+→ 设计已固化并按代码逐条核实:[motion_and_contract_v3.md](motion_and_contract_v3.md)
+(2026-07-04 晚,claude)。核实中的新发现:①`racket_target_vel_w` 是世界系裸直通——现役
+契约里只有位置做自我中心化,速度不做(真机 identity-yaw 下退化一致);②部署线协议
+`RacketCommand.normal` **已经在传法线**,缺口只在 obs 坑位与训练奖励参照;③critic 已有
+特权 `racket_target_normal_w`,契约日训练侧只是把 racket_normal 奖励参照从 clip 换成指令。
+迁移定为 **175→179**(法线 3 + ρ 1,可顺手把 vel 也改自我中心)。
+
+## 三阶段课程决定(2026-07-05 深夜,yikang;o4 方向的落地拆解)
+
+**背景:训出来的球实际过不了网**(与 o3 eval-B 四臂 0% 回球、vb 奖励"装了没通电"互相印证)。
+训练拆成三个阶段,每阶段只放开一个难度轴,奖励先点亮再扩散(franco"分阶段出题"方针的课程化):
+
+- **阶段 1「固定点养成」(yikang,进行中)**:击球点固定(每套动作一个点)、来球速度在范围内
+  变、无旋转、落点固定。配套一起上:目标=逐球反解的应有拍面+拍速(不再是盒采样)、观测
+  +3 维拍面要求(R18 通道)、拍面奖励改跟指令、手腕模仿解除(R16 归位为执行机构)。目标:
+  学会"用合适的角度和速度把不同速度的球打回固定点"。
+- **阶段 2「位置放开」(@dongc1)**:击球点 固定→小框→真球分布(步法压力进场;位置跟踪
+  奖励已有,配套现成)。
+- **阶段 3「旋转进场」**:旋转 无→小→场馆水平(反解自动给出随旋变化的拍面/切向速度目标,
+  消旋奖励从这一刻起才真正有意义)。
+
+## o4 轮计划 v2(2026-07-05 晚,**提案待 franco 拍板**;北极星=回球率)
+
+**第一性原理重构(franco 追问出的三个断点,全部代码实锤)**:①训练的拍速目标是盒子随机、
+拍面目标抄模板——**目标本身不是"能回球的解"**,完美跟踪也回不了球(落点目标还是全场一个
+固定点);②策略看不见题目(观测无拍面要求);③打球奖励只在击球那 1 帧发、且高斯核在当前
+1.9m 误差处只付 ~3% 分,против模仿/跟踪奖励每步发钱——**信号比 ≈ 1:5000,PPO 看不见**。
+**方向 = 把"教打球"从结果空间(落点)搬回控制空间(目标差)**:位置/拍速跟踪奖励已被证明
+有效(3.7cm/0.18m/s 就是它们教的),要做的是让它们指向**逐球反解的应有拍状态**;落点奖励
+降级为小额验证奖金。
+
+| 步骤 | 内容(人话) | 判据 | 规模 |
+| --- | --- | --- | --- |
+| 0a 诊断「目标不是解」 | 盒采样拍速+模板拍面,对训练分布的球算虚拟回球:完美跟踪下入界率几何(预期≈0,把"目标错"和"策略菜"彻底分开) | 一个百分数 | CPU 小时级 |
+| 0b 题目难度地图 | 按场馆分布出 10 万题逐题反解,统计"需要的拍面偏离模板几度"的分布+各层可解率 | 分层直方图 | CPU 小时级 |
+| 1 题库生成器 | 离线批量反解成题库:每题=(来球、应有拍位/拍速/拍面、落点、难度=拍面偏离度)。训练按难度窗口采样,**窗口宽度随回球成功率自适应放大**(franco 的连续 curriculum,复用"奖励自动收紧"的自适应机制、方向反用) | 题库落盘+采样器测试 | CPU |
+| 2-臂1 换目标不换观测 | 目标改为题库解、拍面奖励参照改题目;观测不动(175)——策略只能学"平均应有拍面",回答**光换目标值多少** | 回球率>0 即历史第一次 | 信号档 |
+| 2-臂2 换目标+给观测(**主攻**) | 臂1 + 观测加 3 维拍面要求(175→178)+ 去掉手腕朝向模仿(之前"手腕放开"在这里才配齐另一半) | 回球率(反事实上限~100%,拿 20-30%=方向大胜)+ 拍面误差从 43° 显著降 | 信号档 |
+| 2-臂3 自适应扩圈 | 臂2 + 题库难度窗口自适应放大 vs 固定全开——**franco 的 curriculum 消融** | 同臂2,比爬升速度 | 信号档 |
+| 2-对照 | 现产品线不动,同批同种子 | — | 信号档 |
+| 3(臂2/3 赢后) | 真机契约日排期(C++ 观测端);逐项 shaped 奖励细化(franco 的横向速度差=反解的 v_n/v_t 分量差,可按落点敏感度加权);侧旋/强度通道;v5 模板重发 | — | 排期 |
+
+判读全用回球率+拍面误差;composite 参考(臂2/3 的拍面项按模板打分天生不可比)。
+搭车项(不占主线):变速考卷(R14 判读前提)、R12「刹得住」专项考、R17 位置奖励收紧、R15 重发。
+
+## 快速横向对比制度 + 新消融臂(2026-07-04 晚;franco:想法变多了,不再默认训久)
+
+**制度(新想法一律走梯子,不再单独长训):**
+
+1. 机制检查(512 envs × 25 it,~3 min):开关生效、无崩。
+2. **信号档 2000 it @ 4096 envs**(独占 ~1.2h / 共卡 ~1.5h;3 卡 × 2 槽 = 6 臂/批,
+   错峰 ≥60 s):同种子、同热启(当前 P2 产品线 ckpt),**每批必带同批对照臂**。
+   裁决口径 = Isaac composite(2000 步,同 10:00 判读)+ eval-B 回球率(CPU,不占卡)双轴。
+3. 只有信号档赢家进组合臂;组合赢家才升 12k(~7h)与门禁。输家记下数字后关闭。
+4. **不急着跑全(franco 2026-07-05)**:新臂默认 4000 步(热启臂)/2000 步(从零臂),
+   赢家再续跑(checkpoint_path 无缝续);**平台化的长跑当场停**(先记数字)——R11 在
+   10.7k 平台 0.762 被停就是首例。每张卡最多 2 个任务、错峰 ≥60s 的定版继续有效。
+5. **排队脚本必须"发射前查卡"(2026-07-05 事故规则)**:GPU1 曾出现 3 任务同跑,复盘 =
+   两条发射链都把卡号写死在写脚本的时刻 + 一个手动加的臂(R11,06:27 临时发的 12k 长跑)
+   没进任何账本 → 4 小时后舰队脚本按旧地图开火撞车。修法已落地:看门狗改用 wait_slot
+   (发射瞬间数一遍卡上 >2GB 的进程,<2 才发,占满则等待并每 30 分钟报一次);**临时手动
+   发臂必须当场进 NOW 消融表**(就是"先认领再动工"规则的 GPU 版)。加固版
+   `o3_watchers2.sh` 已替换旧链。
+
+**新臂(接 R 系列;R0-R10 已用):**
+
+| 臂 | 配置(叠在当批对照/胜者上) | 回答什么 |
+| --- | --- | --- |
+| R11 | `task.motion.clip_switch_prob=0.002` | **已停 2026-07-05(平台 0.762@10.7k,命中率税 0.12)**。剂量 0.002=每挥约 28% 被打断,远高于真机频率;回合长度 463≈469 说明没有多摔,掉的纯是命中率。~~真收益(抗切换摔倒)的量尺缺失~~ **量尺已建并量完(2026-07-05,`--switch-stress`):纯换招扰动压不出收益**——P2(没练过换招)在两种 PD 口径(Isaac 对照 implicit + 门禁 explicit clipped-PD)、24000 步 230 次换招(127 次在挥拍中段)下 **0 摔、换招后 2 秒存活率 100%、换招后命中率 0.97-1.00**;R11 同样 0 摔,唯一可见差别是它在门禁口径下命中率还略低(0.98-0.99 vs P2 的 0.99-1.00,税的延续)。**判读:MuJoCo 里换招离散跳变本身不构成摔倒威胁,switch 训练在这把尺子上零收益、税为真 → R11@0.002 维持拒绝**。尺子的适用边界:场馆真机摔倒可能是换招×感知毛病×延迟的交互(纯换招在干净仿真里不复现);若还要追这个方向,下一步是压力协议叠 A1 校准噪声或"击球窗口内定点换招",而不是继续扫剂量 |
+| R11b | `task.motion.clip_switch_prob=0.0005`(剂量/4,**已点火 2026-07-05,o3_R11b_switch5e4**) | franco:继续调参找好参数。先扫剂量;若 0.0005 仍税重,下一轮动奖励侧(打断后 hold 补偿)。**⚠ 判读标准更新(2026-07-05 换招压力测试结果)**:抗摔轴上 P2 本来就满分(0 摔),R11b 在该轴不可能赢——它的存在意义只剩"更低剂量是否免税"(Isaac composite 对齐 P2)。**4000 步跑完,压力测试终值已量(exported_it4000_normbaked,2026-07-05)**:230 次换招 0 摔、换招后 2 秒存活 100%、两种 PD 口径命中率干净/换招后均 1.00(@2700 临时值相同;分布内不伤命中,好于 R11@0.002 的 0.98)。**信号档跑完(→5499,2026-07-05 判读):composite 峰值 0.839@5247,同批最低(R12 0.888 / R14 0.871 / R16 0.870)——低剂量税没免掉(~0.03-0.05),抗摔轴又已证明买不到东西(压力测试 0 摔)+ eval-B 0%/CF 98% 与全批一致 → 建议 clip_switch 方向整体关闭**(除非部署轴另有理由,franco 拍板) |
+| R12 | `task.rewards.base_decel_weight=1.0`(o3_R12_basedecel,02:45 点火) | 减速塑形方向有没有信号(v1 P 律;v2 拟合包络等 6 套采集)。**信号档跑完(→5499):composite 峰值 0.888@4654,同批最高、与产品线持平——composite 无税**;eval-B(峰值存档 it4700):回球 0%/CF 100%/拍面 43.3°(结构现状不变,如预期——它本来就不是治拍面的)。终判看部署轴(减速入位行为、base_speed_xy_prestrike),candidate 进保险包 |
+| R13 | 赢家叠加进产品线 | 产品候选 |
+| R14 | `"task.motion.speed_scale_range=[0.8,1.2]"`(o3_R14_retiming) | **变速重定时**:同一 clip 变速播放+速度需求同步缩放,策略能否学会按需调节挥拍速度幅值 = 无新数据的连续强度 v0(franco"加减速改幅度";空间幅度另由 R6 裁剪臂回答,两臂合看)。**信号档跑完(→5499):峰值 0.871@4843,比产品线低 ~0.02——变速出题更难,小幅回落属预期**;eval-B(it4800):回球 0%/CF 96%/拍面 48.5°(比其他臂散 ~5°,变速让拍面更飘——判读时的一个减分项) |
+| R15 | v5 clip 臂:`motion_file=/workspace/shared/motions/hope_forehand_v5.npz motion_file_2=.../hope_backhand_v5.npz` + 下方 v5 专属采样框(相位 [0.673,0.362],反手 2026-07-05 人工复核 +1 帧)(o3_R15_v5clips) | 新动作源(短条、首尾贴 ready);⚠与 hopex 差三个因子(数据源+clip 长度+参考噪声),与 R6 对照拆长度因子。**⚠ 发射异常(2026-07-05 06:57):看门狗把它发到了 DeployParity 任务、从零 2000 步(峰值 0.355,从零短跑正常水平)——与同批 vb 臂不可比,run 在 `agibot_a3_hope_deploy_parity/…o3_R15_v5clips`。按计划判读需在 vb 线重发(等 franco 定)** |
+| R16 | `task.rewards.free_wrist_ori_mimic=true`(**已点火 2026-07-05,o3_R16_freewrist,franco 最高优先**) | **手腕解除姿态模仿**:把 right_wrist_yaw_Link 从 motion_body_ori/ang_vel 列表拿掉(位置/线速度模仿保留=挥拍路径照学)。理由:视频管线的手腕朝向不可靠(GVHMR),模仿它给拍面质量封顶。**在 vb 产品线上跑才有真学习信号**(落点/消旋奖励直接塑形拍面;纯 DeployParity 上只是去噪)。契约日它是法线指令通道的执行机构。**信号档跑完(→5499)+ eval-B 终判(2026-07-05):峰值 composite 0.870;真球考试拍面-vs-应有误差 43.5°(基线 P2 42.5°,纹丝不动)、回球率 0%、反事实 98% —— 手腕放开单独掰不动拍面**:落点/消旋奖励的间接梯度在 5.5k 步内没把拍面拉向可回球朝向。判定:**单独不进配方;它的正确位置是契约日的执行机构**(有了法线指令+奖励参照改跟指令,拍面才有直接梯度可爬) |
+
+R15 v5 专属采样框(**franco 纠错后 2026-07-04 深夜版**;从击球帧提取,pos ±0.10 / vel(clean) ±0.50):
+`"task.racket.strike_phase_per_clip=[0.673,0.362]"`(正手 0.768→0.673 franco;反手 0.345→0.362
+claude 目视复核 2026-07-05,球 f014 贴拍,旧值早 1-2 帧;反手框已按帧 21 重算)
+`"task.racket.pos_range_per_clip.forehand.x=[0.29,0.49]" ...y=[-0.63,-0.43] ...z=[0.74,0.94]`
+`"task.racket.pos_range_per_clip.backhand.x=[0.68,0.88]" ...y=[0.13,0.33] ...z=[0.85,1.05]`
+`"task.racket.vel_range_per_clip.forehand.x=[0.74,1.74]" ...y=[0.71,1.71] ...z=[1.20,2.20]`
+`"task.racket.vel_range_per_clip.backhand.x=[2.30,3.30]" ...y=[0.06,1.06] ...z=[1.69,2.69]`
+
+~~⚠ v5 正手 +Y 红旗~~ **已解除(franco 定位对了 2026-07-04 深夜)**:所谓 +Y 主导是**击球
+相位钉错**——检测器选了拍速峰 0.768,那是触球后的甩鞭段;逐帧核查后真实触球 ≈ 0.67-0.69
+(franco 给的"约 2/3 处"),该处速度 (+1.24,+1.21,+1.70)、法线 (+0.47,+0.84,−0.27),
+方向健康。教训已**机制化(2026-07-05)**:`cfg/strike_annotations.yaml` 人工触球登记表 =
+strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级为诊断候选并打不一致警告。
+6/6 clip 已判定:v5 反手 0.345→**0.362**(claude 目视,球 f014 贴拍)、斜录正手 0.368→**0.432**
+(触球前加速段,早 ~120ms)、斜录反手 0.495 确认;**hopex [0.47,0.333] 是速度峰约定值——
+源视频(raw_video_hopex/ 已入库)为无球空挥,不存在触球真值**(正/反手约定帧在过击球平面后
+18/33 cm,与真触球 clip 的"平面上升沿"语义不一致,列为 R15 动作源决策输入,不单独"修")。
+视频源(GVHMR)clip 的拍面法线一律为手腕 +Y 代理(含 hopex),登记表已标 face_normal_reliable。
+残留的真问题:**v5 参考噪声大**——mean|关节加速度| 5.9/15.5 rad/s²(正/反手),是 hopex
+(2.5/2.7)的 2-6 倍,斜录(3.5/3.5)介于其间。短条+快挥拍给 GVHMR 的平滑上下文更少。
+这是 R16(手腕解除姿态模仿)与参考滤波的直接论据;R15 判读时把"噪声"当第三个混杂因子。
+
+**合并测试策略(找最优组合,不做全因子):**
+
+1. **按裁决轴分组**。性能类(数据/奖励:R3/R9 斜录、R6 裁剪、R14 变速、R15 v5、R12)
+   看 Isaac composite,期待提升,单臂 vs 同批对照,赢家贪心进产品线;交互只对"赢家对"
+   补一次 2×2。保险类(部署加固:R11 clip_switch、A1、A1v2)**本来就预期 composite 微降、
+   部署轴受益**——判它们用 eval-B 回球率 + deploy-faithful,不用 composite 一刀切。
+2. **保险类整包测**:R11+A1+A1v2 合成一臂"部署加固包";包整体 composite 降幅 <3% 且部署轴
+   不劣 → 整包采纳,不逐个消融(2^n → 1);包失败才 leave-one-out 二分。
+3. **数据源类互斥合并**:hopex(对照)/斜录/v5/裁剪 是同一问题的四个臂,天然同批横比,
+   一批出结论。
+4. 每次产品线换代跑一次换种子臂(R10 惯例)验稳健,防止贪心叠加吃噪声。
+
+**CPU 任务(不占 GPU,可立即做):**
+
+- ~~StrikeSpec **固定法线求解**变体(结构级发现路 A)→ eval-B 复测~~ **已做 2026-07-05**:
+  `StrikeSpecPlanner.solve_fixed_normal`(现有 solve() 一字未动,+5 个新测试,16/16 过)+
+  `mujoco_eval_onnx.py --venue-fixed-normal`。**答案 = 0%(物理不可行,不是没解出来)**——
+  详见上方 🔴 结构级发现的路 A 判决;证据存 pod `/workspace/franco/cf_eval/`
+  (scan_reachability.py + modeB_fixed9600.log + verify_solver.out——网格可行点喂回求解器,
+  内点可解 2.8 m/s/3 迭代/4.7 mm,判决不依赖求解器召回:合法框内无任何可行落点)。
+- ~~eval-B 反事实 flag 化~~ **已固化 2026-07-05**:venue 模式每次击球自动多评一次
+  "换上应有拍面朝向"(达成位置/速度不变),strikes CSV 追加 6 个 cf\_\* 列(原 14 列字节
+  不变),汇总块报 CF 回球率。正式复现(P2 产品线,9600 步 seed 0,44 次击球):
+  **实际 0/44,反事实 44/44,CF 落点中位差 0.10 m**——"拍面朝向是唯一短板"从手工分析
+  升级为每次评估自动输出的常驻证据(当日 2400 步存档逐字节复现,前 43 列与 07-04 一致)。
+- eval-B v2:截断 MVN 相关采样;机器人视角接触高度分布(等采集)。
+- **门禁补 q_des 限位剪切(2026-07-05 新立,jiayi 部署发现的训练/部署不对齐)**:部署端
+  (pp_joint_limits.hpp)发布前把每个关节的目标角硬剪到物理范围,训练(clip_actions=null)和
+  MuJoCo 门禁都不剪——策略靠"超范围目标角"多要力的那部分,真机拿不到。**P2 暴露面已量
+  (2026-07-05 探针,闭环加剪/不加剪各跑 4800 步)**:超限步数 10-18%,**全部在腰/踝等平衡
+  关节(手臂 0 超限)**,最狠瞬间被剪掉该关节力矩上限的 35-56%;但闭环剪着打,击球三合格率
+  1.000 不变、0 摔,拍速误差只 +0.02-0.03 m/s → **对 P2 产品线,仿真里看不出实质伤害;残余
+  风险在真机平衡临界时刻(踝力矩恰好在最需要时被剪)**。待办:①门禁加同款剪切 flag(探针已
+  验证一行 clip 即可,mirror pp_joint_limits);②训练侧剪切=jiayi 修复中(他的谱系上观察到
+  的现象,各模型暴露面不同,他的存档修好后拿探针复量)。
+- ~~**换招压力测试 eval 变体**(R11 收益的量尺,2026-07-05 立项)~~ **已建成并量完 2026-07-05**:
+  `mujoco_eval_onnx.py --switch-stress p`(默认关,关=字节不变;训练侧 commands.py clip_switch
+  同语义:均匀换模板、跳回起手帧、重新等球+换目标、机器人不动;开着时模仿守卫改成只看真摔)。
+  量的结果见上方 R11 行:**两存档 × 两 PD 口径 × 三剂量全部 0 摔,收益轴饱和,税轴坐实**。
+  R11b 跑完后一条命令补量(`--switch-stress 0.01 --pd-mode explicit --keep-passive`,
+  先 standalone_onnx_export 带 --bake-obs-norm 导出;R11 的导出已放
+  `o2_R11_clipswitch/exported_deploy_normbaked/`)。原始 12 组日志:pod
+  `/workspace/franco/cf_eval/sw_*.log`。
+
 ## 计划未做全量清单(2026-07-04 franco 抓漏后建立;常驻,每日对账)
 
 **P2.4 集群(本次漏账主体,franco 抓出):**
 | 项 | 状态 | 归属/时机 |
 | --- | --- | --- |
-| P2.0 准备动作定义(视频→GVHMR,方案已拍板) | **未做——但今天在场地拍 2 分钟就有原料**,管线已在 pod 跑通 | franco 场地拍,claude 处理 |
-| PACE 减速命令(伪速度∝剩余误差→平滑减速入站位) | 未设计未实现 | claude,今晚设计+实现(flag 化) |
+| P2.0 准备动作定义 | **franco 改判 2026-07-04 晚:不再专门拍 ready 视频**。v5 两条 clip 首尾均贴准备姿态(量化:fh/bh 起始帧互差 mean 0.15 rad——可直接当共享 ready 锚;首尾差 mean 0.24-0.27 rad,残差交给 RL 填充,clip_switch/post_swing/hold 机制都在)。ready 参考帧从 v5 clip 首帧提取,零采集成本 | claude(提取+接线 stand_start/hold) |
+| PACE 减速命令(伪速度∝剩余误差→平滑减速入站位) | **v1 已实现 2026-07-04**(`rewards.base_decel_weight`,默认关,机制验证过)→ 信号档臂 R12;v2 = 拟合加减速包络+方向+时间预算+幅度耦合([motion_and_contract_v3.md](motion_and_contract_v3.md) §5,等 6 套采集) | claude |
 | ready→strike→ready 拼接 | 未做(依赖 P2.0) | P2.0 后 |
 | base-target 回归 ablation(HITTER 位置命令,论文背书) | 未做 | 通宵臂后的下一轮 |
 
@@ -236,7 +450,7 @@ franco 已提供 forehand_new.mp4 / backhand_new.mp4,已上传 `/workspace/share
 | --- | --- | --- |
 | A4 后半:真机数据落盘制度 | 未建 | **今天场地就该全量落盘**(planner 日志/VRPN 流/视频) |
 | A5 挥拍视频 30-50 条 | 主动推迟 | 场地顺手拍几条即赚 |
-| eval B 模式(来球分布驱动) | 承诺未交 | claude,修复已 landed,今天补 |
+| eval B 模式(来球分布驱动) | **已交付 2026-07-04**(`--target-source venue-balls`;头条 = 法线 clip 锁死,见上方结构级发现;G06 有正式记录) | — |
 | Ace 饱和 Magnus 形式接进 flight/virtual_ball | yaml 有键未消费 | 小活,高旋外推保护 |
 | A6 摔倒管理(guard 包络、recover 行为) | 未做 | 下周 |
 | A7 击球事件自动检测 | 未做 | 依赖 A4 落盘 |
@@ -278,7 +492,7 @@ franco 已提供 forehand_new.mp4 / backhand_new.mp4,已上传 `/workspace/share
 | 6 | **延迟/误差标定**:从动捕录制的时间戳量真实延迟与噪声谱 → 填 A1 各 flag 的数值(franco 指出:这些本就该从物理建模数据算出,不拍脑袋)。顺带确认真实帧率(现有 300 与 320 两种说法,时间戳一算便知) | yikang(数据)+ claude(分析脚本) | 周六-周日 |
 | 7 | 0703 打球录像 → 旋转归一 → 新参考 clip 验证(jiayi 的 re-ground 管线已做一版,确认覆盖) | jiayi | 周六前 |
 | 8 | 训练速度 vs 并行数的 trade-off 终版报告(见下,搜索范围 4096/8192/16384 + 共卡) | claude | 今天 |
-| 9 | 球进训练环境 + 落点奖励(P2.5-lite)— **周六前不可行,诚实排下周**;周六的增益来自策略改进+planner 物理参数,不来自训练内球 | claude/jiayi | 下周 |
+| 9 | 球进训练环境 + 落点奖励(P2.5-lite)— **周六前不可行,诚实排下周**;周六的增益来自策略改进+planner 物理参数,不来自训练内球 | claude/dongc1 | 下周 |
 | 10 | mocap→runner 桥 + 坐标变换设计(A2) | yikang | 下周 |
 
 ## ~~Tonight's Test Slots (2026-07-03)~~ 已过期,由「关键更新联合消融」与通宵舰队替代
@@ -305,8 +519,9 @@ After the 18:15 finish + verdict, the freed slots run signal-tier (2000-it ≈ 1
 | A8: post-swing initial-state buffer (Ace) | ★★★ | claude | `p2-multiswing` (flag `motion.post_swing_start_prob`) | IMPLEMENTED + mech-verified 2026-07-03; next: arm D after P2.1 A/B |
 | P2.0: ready-pose definition (see G08) | ★★ (foundation) | franco (拍摄) + claude (pipeline) | — | DECIDED 2026-07-03: option (a) — record a ready-stance video through GVHMR→GMR on the next site visit (bundle with A5's 30-50 new swing clips); claude processes + wires into stand_start/hold/clip re-entry |
 | Legacy-task long run `merged_uniform_hopex` (20000 it, task=HOPEPingPong on own branch) | ? | yikang | `rsi-on-wrap-progress-fix` | RUNNING on pod GPU0. ⚠ branch duplicates main's wrap_teleport machinery and has LFS-pointerized CSVs — reconcile with main before merging; the unique progress-fix is already ported to `p2-multiswing` |
-| simtoreal2 lineage: HER achieved-replay + hold_ready + model_9000_replane training (merged to main 2026-07-03) | ★★★ | jiayi | `simtoreal2` (merged) | model_9000 backhand passed training gate; **needs**: drop `model_9000_replane.onnx` into `/workspace/shared/models/` so the scoreboard can grade it against tonight's candidates |
-| G07 mocap→runner bridge + world→robot target transform design (A2) | ★★ | unassigned (natural fit: yikang) | — | design doc first; see G07 Next Steps and G08 audit item 2 |
+| simtoreal2 lineage: HER achieved-replay + hold_ready + model_9000_replane training (merged to main 2026-07-03) | ★★★ | dongc1 | `simtoreal2` (merged) | model_9000 backhand passed training gate; **needs**: drop `model_9000_replane.onnx` into `/workspace/shared/models/` so the scoreboard can grade it against tonight's candidates |
+| Sim2real deploy bridge: `agibot_hardware_bridge` ROS pkg (`bridge_node`) + `world_frame` world→robot target transform (+`test_world_frame`) + `hope_pingpong_sim2real` launch + `wbc_runner` rebuild for the planner-driven deploy path; `HOPEPingPongDeployParity` hyperparameter tuning | ★★★ | dongc1 | `simtoreal2` | IMPLEMENTED 2026-07-03 (`a5016d43`) with `run_sim2real_bridge.md` ops doc; this is the concrete build of the G07 world→robot transform (row below). Next: wire mocap relay → planner → runner end-to-end on hardware |
+| G07 mocap→runner bridge + world→robot target transform design (A2) | ★★ | dongc1 (impl started; see row above) | `simtoreal2` | `world_frame.py` + `test_world_frame` landed 2026-07-03; design doc still TODO — see G07 Next Steps and G08 audit item 2 |
 
 ## Queued (priority order, from G08)
 
@@ -322,7 +537,9 @@ After the 18:15 finish + verdict, the freed slots run signal-tier (2000-it ≈ 1
 
 | Item | Owner | Landed | Where |
 | --- | --- | --- | --- |
-| R15 v5 strike annotation guardrail; product defaults restored | Codex | 2026-07-05 | `/workspace/yikang/nohope` on `main` |
+| Standardize VRPN rigid-body object names (`P1`/`P2`/`Ball`) in the mocap relay config | dongc1 | 2026-07-03 | `simtoreal2` (`ac79a17a`) |
+| wandb registry: fetch only the newest `motion.npz` | dongc1 | 2026-07-03 | `simtoreal2` (`3c9bc0cf`) |
+| Merge `origin/main` (49 commits) into `simtoreal2` (local-first, doc+code) | dongc1 | 2026-07-03 | `simtoreal2` |
 | Fixed-protocol sim2sim scoreboard (`scoreboard_eval.py`), validated end-to-end on pod | claude | 2026-07-03 | `p2-eval-harness` |
 | 4 main-breaking merge casualties fixed (conflict markers; `motion_file` regression; `episode_time_left` probe crash; `play.py` `_wbt_tasks`) | claude | 2026-07-03 | main / `p2-multiswing` |
 | `motion:` task-YAML/CLI plumbing for wrap_teleport / stand_start / hold | claude | 2026-07-03 | `p2-multiswing` |

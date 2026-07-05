@@ -29,11 +29,63 @@ The training scaffold exists under:
 - The default training task is now `HOPEPingPongDeployParity` (gym id `HOPE-PingPong-DeployParity-AgibotA3-v0`); `HOPEPingPongRealSensor` is a backward-compat alias for the same task. Its actor observation is 175-D deploy-parity: it removes `motion_anchor_pos_b` (3) and `base_target_pos_b` (2) and reframes `racket_target_pos_b` racket-FK-relative. Layout reference: `scripts/realsensor_obs_reference.py`; checks: `scripts/verify_realsensor.py`.
 - `task=HOPEPingPong` remains available only as the legacy 180-D full-obs comparison path; it is NOT deploy-honest and cannot deploy.
 
-2026-07-05 R15 v5 correction:
+2026-07-05 R15 v5 correction + strike-annotation registry:
 
-- Product/default train and replay configs remain on the hopex/registry route: `cfg/train.yaml` and `cfg/play.yaml` keep `motion_file: null`, and `HOPEPingPongDeployParity.yaml` keeps `strike_phase_per_clip: [0.47, 0.333]`. Do not edit those defaults to v5 for R15.
-- `cfg/strike_annotations.yaml` is the contact-phase source of truth for video-derived clips. `scripts/analyze_strike_phase.py` now applies those annotations before reporting an auto candidate. For v5 it selects forehand frame 37 / phase 0.673 and flags the frame 43/44 speed peak as post-contact whip; backhand 0.345 remains unverified.
-- `scripts/play.py` now uses the same local motion resolver as training when `motion_file` or `motion_file_2` is set, so R15 replay/export honors both local clips.
+- Product/default train and replay configs remain on the hopex/registry route: `cfg/train.yaml`
+  and `cfg/play.yaml` keep `motion_file: null`, and `HOPEPingPongDeployParity.yaml` keeps
+  `strike_phase_per_clip: [0.47, 0.333]`. Do not edit those defaults to v5 for R15.
+- `cfg/strike_annotations.yaml` is the contact-phase source of truth for reference clips (all 6
+  adjudicated 2026-07-05; the hopex values are a speed-peak CONVENTION — its source videos are
+  ball-less dry swings). `scripts/analyze_strike_phase.py` applies annotations first and reports
+  the speed peak only as a diagnostic candidate (known trap: post-contact whip / pre-contact
+  pull-up). R15 overrides are now `strike_phase_per_clip=[0.673,0.362]` with the regenerated
+  backhand boxes (see NOW.md).
+- `scripts/play.py` uses the same local motion resolver as training when `motion_file` or
+  `motion_file_2` is set, so R15 replay/export honors both local clips.
+
+2026-07-04 update (deploy-parity robustness flags, all default OFF):
+
+- `motion.clip_switch_prob` (default `0.0`; try `0.002` ≈ one switch per 3-4 swings): each control
+  step that fraction of envs aborts its swing operator-style — the reference jumps to a random
+  clip's FIRST frame with a fresh pre-swing hold and a fresh target; the robot is untouched (no
+  teleport). This is deploy parity for `pp_reference_clock.hpp`, which flips `clip_id` mid-swing
+  whenever the planner re-sides the target; training previously only switched at clip END — the
+  root cause of the venue falls at 准备/正手/反手 switches. Aborted swings do NOT enter the A8
+  post-swing buffer and slightly deflate completion-rate metrics. Watch: `clip_switch_count`.
+- P2.4 `base_decel` reward (PACE-style pre-strike base-speed shaping, default OFF via
+  `rewards.base_decel_weight: 0.0`): see Reward Shaping below.
+- `motion.speed_scale_range` (R14 retiming, default `[1.0, 1.0]` = OFF; ablation trial
+  `[0.8, 1.2]`): per-swing reference playback speed, resampled at every swing entry (wrap,
+  clip switch, reset). At speed s the clip clock advances s frames per control step (float shadow
+  clock, round() indexing = deploy-clock parity), reference joint/body/anchor velocities read ×s,
+  `time_to_strike` runs ÷s (computed from the float clock so the exact-strike detector still fires
+  once per swing), and the racket velocity target scales ×s (uniform boxes, reference_perturbed,
+  and the HER clamp box). Positions/normals are speed-invariant. Retiming is TRAIN-ONLY:
+  play/eval force it back to `[1.0, 1.0]`. Deploy note: the runner's `swing_speed` knob retimes
+  the clock but does NOT scale reference/target velocities — enabling it for an R14-trained
+  policy requires adding those two scalings. Watch metric: `playback_speed`.
+- A1v2 actor-view sensor defects (`racket:` block; modeled on the venue mocap fit — occlusion gaps
+  concentrate at contacts, re-lock after contact carries a fresh bias): `target_dropout_prob`
+  (per-step frame loss, hold-last), `target_post_strike_dropout_s` (forced hold-last window after
+  each strike; venue ~0.03 s), `target_bias_per_swing` (3-D Gaussian position bias resampled at
+  each strike edge, held constant within a swing). They degrade ONLY the actor-visible target
+  view; rewards, critic, and metrics keep the true target. Same block as the A1 latency/noise
+  family (`target_delay_steps`, `target_jitter_pos_per_s`, `target_jitter_vel_per_s`,
+  `midswing_resample_prob`, `target_noise_white`, `target_noise_ar1_sigma`,
+  `target_noise_ar1_rho`) — every one of these defaults off.
+- `rewards.free_wrist_ori_mimic` (R16, default `false`): drop `right_wrist_yaw_Link` (the racket
+  mount) from the `motion_body_ori` / `motion_body_ang_vel` body lists — the wrist's ORIENTATION
+  stops being imitated while position/linear-velocity mimic keep the swing path. Rationale
+  (franco): the video pipeline's wrist orientation is unreliable (GVHMR), so mimicking it caps
+  face quality; freed, the face is shaped by the `racket_normal` reward (and by ball-outcome
+  rewards on the VirtualBall stack — the arm with a real learning signal for the face). Note this
+  codebase has NO joint-level imitation rewards — body-level `motion_body_ori` on the wrist link
+  IS the face mimic, so the flag is config-level (body-list filtering in `train.py`).
+- ⚠ Override-whitelist rule: task-yaml keys under `task.motion` / `task.racket` are translated
+  through explicit whitelists (`_MOTION_KEYS` / `_RACKET_KEYS` in `scripts/train.py`) and any
+  unconsumed key RAISES at startup. Adding a new key to a task yaml therefore requires extending
+  the whitelist in the SAME commit — 018467a added `clip_switch_prob` to the yaml only and broke
+  every task-yaml startup until the 74c129e hotfix.
 
 `TrackingFlat` and `HOPEPingPong` forehand training have run end-to-end on the copied Agibot A3 URDF asset (31 actuated DOF), including WandB logging, checkpoint save, and ONNX export. This proves the pipeline can run; it is NOT an accepted quality baseline. G04/G05 remain Partial, and G06/G07 are not accepted until sim-to-sim and dry-run deployment gates record verification.
 
@@ -444,6 +496,15 @@ band while preventing non-hit rewards from dominating:
 - `racket_normal_weight: 5.0`, `racket_normal_std: 0.30`
 - `base_position_weight: 2.5`, `base_position_std: 0.25` — legacy `HOPEPingPong` task only; the deploy-parity default REMOVES the base_position term entirely (base-free footwork: dense `racket_progress` plus pre-strike stability penalties)
 - regularization: `joint_torques_weight: -0.00003`, `action_rate_weight: -0.10`, `joint_limit_weight: -10.0`, and `undesired_contacts_weight: -0.1`
+- `base_decel_weight: 0.0` (P2.4, OFF by default; trial weight 1.0) — PACE-style pre-strike base
+  speed shaping: `exp(-(||v_base_xy|| - v_des)^2 / base_decel_std^2) * pre_strike` with
+  `v_des = clamp(base_decel_v_gain * planar_dist(racket→target), 0, base_decel_v_max)` (defaults
+  `v_gain 2.0 /s`, `v_max 1.6 m/s`, `std 0.4 m/s`). Uses racket→target planar distance, NOT base
+  position (deploy-parity obs and the base-free reward structure stay untouched); gated dead at
+  and after the strike frame so it never commands a speed-up toward the swung-through old target.
+  Speed-magnitude-only v1; the v2 spec (fitted accel/decel envelope, direction term, time budget,
+  stroke-amplitude coupling) is `docs/motion_and_contract_v3.md` §5. Watch:
+  `base_speed_xy_prestrike`.
 
 These stds are DECOUPLED from acceptance thresholds: the position metric still reports true success only
 below `strike_success_pos_thresh = 0.075 m`, velocity below `0.5 m/s`, and racket-normal error below
