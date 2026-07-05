@@ -29,6 +29,13 @@
 # status: verified   = a human scrubbed the source video / npz frames to contact
 #         unverified = value in use but produced by the speed-peak auto detector
 #                      (KNOWN TRAP) - needs hand alignment
+#
+# train_phase_candidates (OPTIONAL, independent field, 2026-07-05): TRAINING-optimal
+# phases from the returnability scan (gen_stage1_questions.py --phase-scan) — which
+# frame's kinematics best suit ROBOT returns. Semantically different from `phase`
+# (VIDEO truth: when the human touched the ball); the two may legitimately differ.
+# The scan never writes this file — a human copies suggestions here. Consumers:
+# stage-1 arm configs pick their anchor frame from these, NEVER from `phase` blindly.
 # =============================================================================
 
 clips:
@@ -53,6 +60,12 @@ clips:
       early (pre-contact approach); within franco's "first 3/7" prior either way
     source: video-gvhmr
     face_normal_reliable: false
+    train_phase_candidates: [0.298, 0.316]   # returnability-optimal frames f17-f18
+      # (phase-scan 2026-07-05, the ONLY window in all 6 clips; video-truth frame 21
+      # scores 0% either way). Score depends on ball difficulty: venue-speed balls
+      # (~0.8-2.9 m/s) 96%; the stage-1 default speed range [2,5] m/s only 17% ->
+      # stage-1 should START at venue-like speeds [~1.0,2.5] and widen (curriculum).
+      # NOT a contact-time claim — see the field doc above
 
   # --- oblique real-play clips (GVHMR video source, R3 arm) --------------------
   hope_forehand_oblique:
