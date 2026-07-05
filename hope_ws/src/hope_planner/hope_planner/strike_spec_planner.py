@@ -305,6 +305,134 @@ class StrikeSpecPlanner:
             q, fwd, phi0, theta0, p_ball, v_ball, omega_ball, residual_m, iterations
         )
 
+    def solve_fixed_normal(
+        self,
+        p_ball: np.ndarray,
+        v_ball: np.ndarray,
+        omega_ball: Optional[np.ndarray],
+        landing_target_xy: np.ndarray,
+        racket_speed_budget: float,
+        n_fixed: np.ndarray,
+    ) -> Optional[StrikeSpec]:
+        """solve() with the face normal PINNED at n_fixed; LM over (v_n, v_t_x, v_t_y) only.
+
+        Structural-finding path A (docs/motion_and_contract_v3.md §6): the deployed policy's
+        face orientation is clip-locked (the 175-D contract has no normal channel), so instead
+        of demanding a normal the policy cannot produce, the planner adapts — the normal is
+        fixed at the caller's reference (the clip's face normal at strike) and only the racket
+        velocity steers the landing. Two landing DOF vs three velocity DOF stays generically
+        solvable, but the reachable landing set shrinks: expect more None returns than solve()
+        (callers resample the landing target, e.g. VenueBallSampler.sample).
+
+        n_fixed: face normal, world frame (normalized here; sign is preserved — the contact
+        model orients internally, so ±n give the same physics, only the reported v_n_signed /
+        face basis follow the sign handed in). The returned spec has n == n_fixed and
+        tilt_pitch_deg == tilt_yaw_deg == 0 by construction; tilt sensitivities are still
+        reported (what a face tilt WOULD buy — the DOF this mode gives up).
+
+        Deliberately a standalone sibling of solve() (no shared LM core) so the free-normal
+        path stays byte-identical; keep the two in sync when tuning LM constants.
+        """
+        p_ball = np.asarray(p_ball, dtype=float)
+        v_ball = np.asarray(v_ball, dtype=float)
+        omega_ball = (
+            np.zeros(3) if omega_ball is None else np.asarray(omega_ball, dtype=float)
+        )
+        target_xy = np.asarray(landing_target_xy, dtype=float)[:2]
+        n_fixed = np.asarray(n_fixed, dtype=float)
+        norm = float(np.linalg.norm(n_fixed))
+        if norm < 1e-9:
+            return None
+        n_fixed = n_fixed / norm
+        # Exact spherical angles of n_fixed: _normal_from_tilt(phi0, theta0, 0, 0) == n_fixed,
+        # so the q[0] == q[1] == 0 plane of the 5-var parameterization IS the pinned normal.
+        phi0 = float(np.arctan2(n_fixed[1], n_fixed[0]))
+        theta0 = float(np.arcsin(np.clip(n_fixed[2], -1.0, 1.0)))
+
+        # v_n seed: same ballistic v_out + e(u_n) fixed point as _initial_guess, but projected
+        # on the PINNED normal instead of the mirror-law one.
+        T = self.config.delta_t_flight
+        p_land = np.array([target_xy[0], target_xy[1], 0.0])
+        v_out = (p_land - p_ball) / T - 0.5 * self.physics.g * T
+        v_o_n = float(np.dot(v_out, n_fixed))
+        v_i_n = float(np.dot(v_ball, n_fixed))
+        e = self.config.C_r
+        v_n0 = (v_o_n + e * v_i_n) / (1.0 + e)
+        for _ in range(3):  # fixed point on e(u_n), converges in 2-3 iterations
+            u_n = abs(v_i_n - v_n0)
+            e = float(np.clip(
+                self.config.e_exp_g1 * np.exp(self.config.e_exp_g2 * u_n), 0.05, 0.95))
+            v_n0 = (v_o_n + e * v_i_n) / (1.0 + e)
+
+        # LM over the velocity block q[2:5]; q[0:2] stay 0 (the pinned normal). Same residual,
+        # tolerances, damping schedule and budget rule as solve().
+        q = np.array([0.0, 0.0, v_n0, 0.0, 0.0])
+        fwd = self._forward(q, phi0, theta0, p_ball, v_ball, omega_ball)
+        if fwd is None:
+            return None
+        r = self._residual(fwd, q, target_xy)
+        cost = float(r @ r)
+
+        h = np.array([0.02, 0.02, 0.02])          # m/s steps for the 3 velocity variables
+        lam = 1e-3
+        iterations = 0
+
+        for _ in range(self.MAX_ITER):
+            iterations += 1
+            if np.linalg.norm(fwd["landing_xy"] - target_xy) < self.TOL_M:
+                break
+
+            J = np.zeros((r.size, 3))
+            failed = False
+            for j in range(3):
+                q_j = q.copy()
+                q_j[2 + j] += h[j]
+                fwd_j = self._forward(q_j, phi0, theta0, p_ball, v_ball, omega_ball)
+                if fwd_j is None:
+                    failed = True
+                    break
+                J[:, j] = (self._residual(fwd_j, q_j, target_xy) - r) / h[j]
+            if failed:
+                lam *= 10.0
+                if lam > 1e6:
+                    return None
+                continue
+
+            JtJ = J.T @ J
+            g = J.T @ r
+            damp = np.diag(np.diag(JtJ)) + 1e-9 * np.eye(3)
+            accepted = False
+            for _try in range(6):
+                try:
+                    dq = np.linalg.solve(JtJ + lam * damp, -g)
+                except np.linalg.LinAlgError:
+                    lam *= 10.0
+                    continue
+                q_new = q.copy()
+                q_new[2:5] += dq
+                fwd_new = self._forward(q_new, phi0, theta0, p_ball, v_ball, omega_ball)
+                if fwd_new is not None:
+                    r_new = self._residual(fwd_new, q_new, target_xy)
+                    cost_new = float(r_new @ r_new)
+                    if cost_new < cost:
+                        q, fwd, r, cost = q_new, fwd_new, r_new, cost_new
+                        lam = max(lam * 0.3, 1e-8)
+                        accepted = True
+                        break
+                lam *= 10.0
+            if not accepted and lam > 1e6:
+                return None
+
+        residual_m = float(np.linalg.norm(fwd["landing_xy"] - target_xy))
+        if residual_m >= self.TOL_M:
+            return None
+        if float(np.linalg.norm(fwd["v_r"])) > racket_speed_budget + 1e-9:
+            return None
+
+        return self._build_spec(
+            q, fwd, phi0, theta0, p_ball, v_ball, omega_ball, residual_m, iterations
+        )
+
     # ------------------------------------------------------------------ #
     # sensitivities + spec assembly
     # ------------------------------------------------------------------ #

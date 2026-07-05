@@ -27,6 +27,16 @@ PER-STRIKE FLOW (VenueBallSampler.sample):
      and +/-n span the same face plane). solve() returning None (LM no-converge / speed budget)
      rejects the whole draw and resamples; rejections are counted and reported.
 
+FIXED-NORMAL MODE (fixed_normal=True; --venue-fixed-normal; structural-finding path A,
+docs/motion_and_contract_v3.md §6): step 4 uses StrikeSpecPlanner.solve_fixed_normal with the
+normal PINNED at the swing side's clip reference face normal — the planner adapts to the
+clip-locked face the policy actually produces, solving velocity only. The demanded normal then
+equals what the policy naturally swings, so the eval answers "what return rate can the CURRENT
+policy + an adapted planner reach" (the zero-training deployment ceiling). Expect a higher
+solve-rejection rate (2 landing DOF chased with the face DOF given up); rejections resample the
+whole draw (ball + landing) exactly like free mode, i.e. the planner effectively picks
+reachable landings — that selection IS the deployment semantics being measured.
+
 RETURN SCORING (VenueBallSampler.score_return, at the exact-strike frame, mirrors the training
 gate in hope_commands._vb_evaluate):
   contacted = pos_err < vb_capture_radius (0.095 m) AND the paddle moving INTO the ball along the
@@ -150,7 +160,8 @@ class VenueBallSampler:
     def __init__(self, repo_root, ref_normal_per_clip, num_clips,
                  table_near_x=DEFAULT_TABLE_NEAR_X, table_surface_z=DEFAULT_TABLE_SURFACE_Z,
                  landing_x_range=None, landing_y_range=(-0.5, 0.5),
-                 fh_y_split=DEFAULT_FH_Y_SPLIT, speed_budget=10.0, max_tries=100):
+                 fh_y_split=DEFAULT_FH_Y_SPLIT, speed_budget=10.0, max_tries=100,
+                 fixed_normal=False):
         # hope_planner by path (numpy-only package; node.py's ROS import is NOT in __init__).
         hp = hope_planner_path(repo_root)
         if not os.path.isdir(os.path.join(hp, "hope_planner")):
@@ -189,6 +200,7 @@ class VenueBallSampler:
         self.fh_y_split = float(fh_y_split)
         self.speed_budget = float(speed_budget)
         self.max_tries = int(max_tries)
+        self.fixed_normal = bool(fixed_normal)
         self.reset_counters()
 
     # ------------------------------------------------------------------------------------------
@@ -231,7 +243,14 @@ class VenueBallSampler:
             # 4. invert: what racket state does this ball demand? (planner frame: z rel. table)
             p_env = p_venue + np.array([self.net_x, 0.0, self.table_surface_z])
             p_planner = p_venue + np.array([self.net_x, 0.0, 0.0])
-            spec = self.planner.solve(p_planner, v_ball, w_ball, landing_xy, self.speed_budget)
+            if self.fixed_normal:
+                # Path A: normal pinned at the clip's reference face — the planner adapts to
+                # the policy's clip-locked face and only the velocity steers the landing.
+                spec = self.planner.solve_fixed_normal(
+                    p_planner, v_ball, w_ball, landing_xy, self.speed_budget,
+                    n_fixed=self.ref_normal_per_clip[clip])
+            else:
+                spec = self.planner.solve(p_planner, v_ball, w_ball, landing_xy, self.speed_budget)
             if spec is None:
                 self.n_solve_fail += 1
                 continue
@@ -250,11 +269,20 @@ class VenueBallSampler:
                 spec_speed=float(np.linalg.norm(spec.v_r)), spec_iters=int(spec.iterations),
                 tries=attempt,
             )
+        hint = (
+            "With fixed_normal ON this is the EXPECTED verdict when the pinned clip face cannot "
+            "legally return the venue distribution at all (measured 2026-07-05 for the hopex "
+            "clips: forehand face reaches x<=1.4 m at ANY |v_r|<=6 — never clears the net; "
+            "backhand only a net-hugging cross-court sliver outside the legal landing box). "
+            "The path-A ceiling is then ~0, not a bug."
+            if self.fixed_normal else
+            "The landing box or speed budget is likely unreachable from the venue contact box — "
+            "check the frame mapping.")
         raise SystemExit(
             f"[FATAL] venue-balls: no solvable incoming ball in {self.max_tries} draws "
-            f"(solve_fail={self.n_solve_fail}, sign_reject={self.n_sign_reject}). The landing box "
-            f"{self.landing_x_range}x{self.landing_y_range} or speed budget {self.speed_budget} "
-            f"m/s is likely unreachable from the venue contact box — check the frame mapping.")
+            f"(solve_fail={self.n_solve_fail}, sign_reject={self.n_sign_reject}; "
+            f"landing box {self.landing_x_range}x{self.landing_y_range}, speed budget "
+            f"{self.speed_budget} m/s, fixed_normal={self.fixed_normal}). {hint}")
 
     # ------------------------------------------------------------------------------------------
     def _net_plane_z(self, p0, v0, w0):

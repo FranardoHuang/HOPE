@@ -138,6 +138,31 @@ TARGET SOURCE (--target-source, 2026-07-04): where the per-strike racket targets
                           caveats (independent box sampling ignores the documented correlations;
                           human-height contact z) are documented in scripts/venue_ball_sampler.py.
                           Not supported together with --deploy-faithful (v1).
+                          COUNTERFACTUAL (committed 2026-07-05; was the ad-hoc 2026-07-04 analysis
+                          that found 0/25 -> 25/25): every venue strike is ALSO scored with the
+                          DEMANDED face normal swapped in for the achieved one (same achieved
+                          pos/vel/pos_err) — cf_* CSV columns + summary rows. It isolates the
+                          normal channel: cf return rate >> actual return rate means the face
+                          orientation alone is what fails the return (the 175-D contract has no
+                          normal channel; docs/motion_and_contract_v3.md).
+  venue-balls + --venue-fixed-normal (path A, 2026-07-05): the StrikeSpec inversion PINS the
+                          face normal at the swing side's clip reference normal
+                          (solve_fixed_normal — velocity-only inversion): the planner adapts to
+                          the clip-locked face the policy actually produces. The demanded normal
+                          becomes reachable, so the return_success_rate under this flag is the
+                          ZERO-TRAINING DEPLOYMENT CEILING of the current policy + an adapted
+                          planner. Compare against the free-normal baseline + its counterfactual.
+
+SWITCH-STRESS (--switch-stress P, 2026-07-05; R11's missing benefit ruler): deploy-parity
+  mid-swing clip-switch stress protocol for the training-like multiswing rollout. Each control
+  step, with probability P, the reference clock aborts the swing exactly like the deploy runner
+  does when the planner changes its mind (commands.py clip_switch_prob semantics /
+  pp_reference_clock.hpp tts clamp): uniform new clip, reference jumped to its windup frame,
+  fresh pre-swing hold + racket target, robot state untouched. While ON, tracking-guard
+  terminations are DISABLED (balance falls + timeout only): the reference jump makes imitation
+  guards fire spuriously, and the question is deploy falls. Reports switches, falls, 2 s
+  post-switch survival, and hit rates on post-switch swings vs clean swings (the within-run
+  baseline). P=0 (default) draws nothing — byte-identical baseline behavior.
 
 =============================================================================================
 USAGE (motion env that has mujoco + onnxruntime, e.g. hope-motion-py310):
@@ -879,7 +904,8 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 noise_scale, std_vec, n_steps, max_ep_len, rng, csv_writer, mode_label,
                 target_normal_per_clip, strike_csv_writer=None, viewer=None, realtime=True,
                 vel_ranges_per_clip=None, pos_ranges_per_clip=None, df=None,
-                reset_mode="teleport", hold_range=(0, 100), venue_sampler=None):
+                reset_mode="teleport", hold_range=(0, 100), venue_sampler=None,
+                switch_stress=0.0):
     racket = RacketCommand(seg_start, seg_len, step_dt, rng, target_normal_per_clip,
                            vel_ranges_per_clip=vel_ranges_per_clip,
                            pos_ranges_per_clip=pos_ranges_per_clip)
@@ -888,9 +914,22 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
     # --- mode B (venue-balls): per-rollout accumulators + the current swing's sampled ball -------
     assert venue_sampler is None or df is None, "venue-balls + --deploy-faithful unsupported (v1)"
     venue = {"all": VenueAcc(), "forehand": VenueAcc(), "backhand": VenueAcc()}
+    # mode-B counterfactual: same achieved kinematics, DEMANDED normal swapped in (see docstring).
+    venue_cf = {"all": VenueAcc(), "forehand": VenueAcc(), "backhand": VenueAcc()}
     cur_venue_strike = [None]     # VenueStrike of the swing in flight (list = py2-style nonlocal)
     if venue_sampler is not None:
         venue_sampler.reset_counters()
+    # --- switch-stress (deploy-parity mid-swing clip switch; see docstring) ----------------------
+    stress = (switch_stress > 0.0) and (df is None)
+    assert not (stress and venue_sampler is not None), "--switch-stress + venue-balls unsupported (v1)"
+    assert not stress or multiswing, "--switch-stress needs the multiswing protocol"
+    # per-swing provenance + per-rollout stress counters (inert when stress is off)
+    swing_from_switch = False        # current swing was started by a mid-swing switch
+    last_switch = {"step": None, "mid": False}   # most recent switch (for the 2 s fall window)
+    surv_window = int(round(2.0 / step_dt))      # "survived the switch" horizon: 2 s = 100 steps
+    sw = dict(n_switches=0, n_midswing=0, n_inhold=0, n_prestrike=0,
+              falls_2s=0, falls_2s_midswing=0)
+    strike_sw = {"clean": StrikeAcc(), "postswitch": StrikeAcc()}
 
     def sample_swing():
         """Pick the next swing's clip (+ ball, in venue mode). boxes mode draws the clip exactly
@@ -1077,6 +1116,9 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 nrm_err_deg = math.degrees(math.acos(cos_a))
                 strike["all"].add(pos_err, vel_err, nrm_err_deg, act_speed, tgt_speed)
                 strike[CLIP_NAMES[clip]].add(pos_err, vel_err, nrm_err_deg, act_speed, tgt_speed)
+                if stress:   # hit-rate split: swings born of a switch vs clean swings
+                    strike_sw["postswitch" if swing_from_switch else "clean"].add(
+                        pos_err, vel_err, nrm_err_deg, act_speed, tgt_speed)
                 racket_exact_acc += pos_err; racket_exact_n += 1
                 racket_velerr_acc += vel_err
                 # --- mode B: virtual return of the ACHIEVED racket state vs the SAMPLED ball ---
@@ -1088,15 +1130,27 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                         racket_normal_w=nrm, pos_err=pos_err)
                     venue["all"].add(ret, tgt_speed)
                     venue[CLIP_NAMES[clip]].add(ret, tgt_speed)
+                    # COUNTERFACTUAL: same achieved pos/vel/pos_err, DEMANDED normal swapped in —
+                    # isolates the normal channel (deterministic rescore, no RNG involved).
+                    ret_cf = venue_sampler.score_return(
+                        vs, racket_pos_w=robot.racket_pos(), racket_vel_w=act_vel_w,
+                        racket_normal_w=vs.target_normal_w, pos_err=pos_err)
+                    venue_cf["all"].add(ret_cf, tgt_speed)
+                    venue_cf[CLIP_NAMES[clip]].add(ret_cf, tgt_speed)
                     lx = "" if math.isnan(ret.landing_xy[0]) else f"{ret.landing_xy[0]:.4f}"
                     ly = "" if math.isnan(ret.landing_xy[1]) else f"{ret.landing_xy[1]:.4f}"
                     lerr = "" if math.isnan(ret.land_err) else f"{ret.land_err:.4f}"
+                    cx = "" if math.isnan(ret_cf.landing_xy[0]) else f"{ret_cf.landing_xy[0]:.4f}"
+                    cy = "" if math.isnan(ret_cf.landing_xy[1]) else f"{ret_cf.landing_xy[1]:.4f}"
+                    cerr = "" if math.isnan(ret_cf.land_err) else f"{ret_cf.land_err:.4f}"
                     venue_extra = [
                         f"{vs.ball_vel_w[0]:.4f}", f"{vs.ball_vel_w[1]:.4f}", f"{vs.ball_vel_w[2]:.4f}",
                         f"{vs.ball_spin_w[0]:.4f}", f"{vs.ball_spin_w[1]:.4f}", f"{vs.ball_spin_w[2]:.4f}",
                         int(ret.contacted),
                         f"{vs.intended_landing_xy[0]:.4f}", f"{vs.intended_landing_xy[1]:.4f}",
                         lx, ly, int(ret.landed_ok), lerr, int(ret.net_clear),
+                        int(ret_cf.contacted), cx, cy, int(ret_cf.landed_ok), cerr,
+                        int(ret_cf.net_clear),
                     ]
                 # --- per-strike CSV row (one line per exact-strike sample) ---
                 if strike_csv_writer is not None:
@@ -1117,12 +1171,15 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                         f"{racket_pos_w[0]:.4f}", f"{racket_pos_w[1]:.4f}", f"{racket_pos_w[2]:.4f}",
                         f"{tgt_pos_w[0]:.4f}", f"{tgt_pos_w[1]:.4f}", f"{tgt_pos_w[2]:.4f}",
                         f"{base_pos_w[0]:.4f}", f"{base_pos_w[1]:.4f}", f"{base_pos_w[2]:.4f}",
-                    ] + venue_extra)
+                    ] + venue_extra + ([int(swing_from_switch)] if stress else []))
 
         # --- terminations ---
         if df is None:
-            # training-like: tracking-guard resets + 10 s timeout
-            reasons = check_terminations(refs, robot, ra_pos, ra_quat, refa_pos, refa_quat)
+            # training-like: tracking-guard resets + 10 s timeout. Under --switch-stress the
+            # tracking guards are OFF (the reference jump fires them spuriously; the question
+            # is deploy falls) — balance terminations + timeout only.
+            reasons = [] if stress else check_terminations(refs, robot, ra_pos, ra_quat,
+                                                           refa_pos, refa_quat)
             if multiswing:
                 # HOPEDeployParityTerminationsCfg adds ABSOLUTE balance terminations on top of the
                 # inherited tracking guards — a real fall/sink ends the episode regardless of clip.
@@ -1155,6 +1212,13 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
             ep_lengths.append(ep_len)
             if terminated:
                 n_term_early += 1; fell += 1; term_reasons.extend(reasons)
+                # switch-stress fall attribution: a fall within 2 s of the most recent switch
+                # counts against that switch ("did the mid-swing abort knock it over").
+                if stress and last_switch["step"] is not None \
+                        and (step - last_switch["step"]) <= surv_window:
+                    sw["falls_2s"] += 1
+                    if last_switch["mid"]:
+                        sw["falls_2s_midswing"] += 1
             else:
                 n_timeout += 1
             if df is not None:
@@ -1166,10 +1230,13 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
             else:
                 clip, time_step = df_start_episode()   # fresh nominal stand — NEVER ref-state-init
             last_action = np.zeros(31)
+            swing_from_switch = False
+            last_switch = {"step": None, "mid": False}
             continue
 
         if df is None:
             # --- advance the motion clock; wrap within the env's current segment (multi-swing per episode) ---
+            wrapped = False
             if multiswing and hold_left > 0:
                 # Pre-swing HOLD (training parity, MotionCommand._update_command): the reference
                 # clock is FROZEN at the swing's first frame ("the ball is not here yet") and
@@ -1186,6 +1253,8 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                     # into the new swing's windup during the pre-swing hold; last_action persists
                     # (training only zeroes it on true episode resets). ep_len is NOT reset either
                     # way (the episode continues across swings until a fall/timeout).
+                    wrapped = True
+                    swing_from_switch = False       # a natural wrap starts a CLEAN swing
                     clip, vs = sample_swing()
                     time_step = int(seg_start[clip])
                     if not multiswing:
@@ -1197,6 +1266,24 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                         last_action = np.zeros(31)
                     apply_target(clip, vs)
                     hold_left = sample_hold()
+            # --- switch-stress injection (deploy-parity mid-swing clip switch; the commands.py
+            # clip_switch_prob semantics): per-step Bernoulli, suppressed on a step that already
+            # wrapped (training masks sw[wrap_ids]=False); HELD swings can switch too (the
+            # planner may change its mind while waiting). Routes through the SAME resample path
+            # as a wrap — uniform new clip, windup frame, fresh hold + target — and the robot's
+            # physical state is untouched.
+            if stress and not wrapped and float(rng.uniform(0.0, 1.0)) < switch_stress:
+                mid = (hold_left == 0)
+                sw["n_switches"] += 1
+                sw["n_midswing" if mid else "n_inhold"] += 1
+                if racket.time_to_strike > exact_tol:
+                    sw["n_prestrike"] += 1          # aborted BEFORE its strike -> strike lost
+                last_switch = {"step": step, "mid": mid}
+                swing_from_switch = True
+                clip, vs = sample_swing()
+                time_step = int(seg_start[clip])
+                apply_target(clip, vs)
+                hold_left = sample_hold()
         else:
             # --- deploy-faithful swing schedule: hold -> play the WHOLE clip once -> rest -> repeat.
             # NO teleports; last_action carries across swings (the deployed policy runs continuously).
@@ -1276,7 +1363,29 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
             all=venue["all"].metrics(),
             forehand=venue["forehand"].metrics(),
             backhand=venue["backhand"].metrics(),
+            cf_all=venue_cf["all"].metrics(),
+            cf_forehand=venue_cf["forehand"].metrics(),
+            cf_backhand=venue_cf["backhand"].metrics(),
             sampler=venue_sampler.counters(),
+        )
+    if stress:
+        clean, post = strike_sw["clean"], strike_sw["postswitch"]
+        n_sw = sw["n_switches"]
+        out["switch_stress"] = dict(
+            p=switch_stress,
+            n_switches=n_sw, n_midswing=sw["n_midswing"], n_inhold=sw["n_inhold"],
+            n_prestrike_aborts=sw["n_prestrike"],
+            falls=fell,
+            falls_within_2s=sw["falls_2s"], falls_within_2s_midswing=sw["falls_2s_midswing"],
+            survival_2s=(1.0 - sw["falls_2s"] / n_sw) if n_sw else float("nan"),
+            survival_2s_midswing=(1.0 - sw["falls_2s_midswing"] / sw["n_midswing"])
+                                 if sw["n_midswing"] else float("nan"),
+            strikes_clean=clean.n, composite_clean=clean.rate("comp"),
+            pos_pass_clean=clean.rate("pos_pass"), vel_pass_clean=clean.rate("vel_pass"),
+            nrm_pass_clean=clean.rate("nrm_pass"),
+            strikes_postswitch=post.n, composite_postswitch=post.rate("comp"),
+            pos_pass_postswitch=post.rate("pos_pass"), vel_pass_postswitch=post.rate("vel_pass"),
+            nrm_pass_postswitch=post.rate("nrm_pass"),
         )
     if df is not None:
         starts, comps = dfs["swing_starts"], dfs["swing_completions"]
@@ -1458,7 +1567,38 @@ def main():
     p.add_argument("--venue-max-tries", type=int, default=100,
                    help="[venue-balls] max ball redraws per swing when the StrikeSpec solve "
                         "rejects (no-converge / speed budget); exceeding it is FATAL.")
+    p.add_argument("--venue-fixed-normal", action="store_true",
+                   help="[venue-balls] PATH A (docs/motion_and_contract_v3.md §6): pin the "
+                        "StrikeSpec face normal at the swing side's clip reference normal and "
+                        "solve velocity only (solve_fixed_normal) — the planner adapts to the "
+                        "policy's clip-locked face. The reported return_success_rate is the "
+                        "ZERO-TRAINING deployment ceiling of the current policy + an adapted "
+                        "planner. Expect more solve rejections (landing DOF given up).")
+    # --- SWITCH-STRESS protocol (2026-07-05): R11/R11b's benefit ruler — see module docstring --
+    p.add_argument("--switch-stress", type=float, default=0.0, metavar="P",
+                   help="deploy-parity mid-swing clip-switch stress protocol (multiswing rollout "
+                        "only; NOT with --deploy-faithful / venue-balls). Each control step, with "
+                        "probability P, the reference clock aborts the swing the way the deploy "
+                        "runner does when the planner changes its mind (commands.py "
+                        "clip_switch_prob / pp_reference_clock.hpp): uniform new clip, windup "
+                        "frame, fresh hold + racket target, robot state untouched. Tracking-guard "
+                        "terminations are DISABLED while on (balance falls + timeout only). "
+                        "Reports switches, falls, 2 s post-switch survival, and post-switch vs "
+                        "clean-swing hit rates. 0.0 (default) = off, byte-identical baseline. "
+                        "Reference: training dose 0.002/step ~ 24-28%%/swing; suggested stress "
+                        "dose 0.01 ~ 75%%/swing.")
     args = p.parse_args()
+
+    if args.venue_fixed_normal and args.target_source != "venue-balls":
+        raise SystemExit("[FATAL] --venue-fixed-normal only means something with "
+                         "--target-source venue-balls")
+    if args.switch_stress > 0.0:
+        if args.deploy_faithful:
+            raise SystemExit("[FATAL] --switch-stress + --deploy-faithful is unsupported (v1): "
+                             "the df swing scheduler owns its own clip clock.")
+        if args.target_source == "venue-balls":
+            raise SystemExit("[FATAL] --switch-stress + --target-source venue-balls is "
+                             "unsupported (v1): one stressor per protocol.")
 
     # Apply eval-only overrides to the module globals BEFORE any precompute/rollout reads them.
     global STRIKE_PHASE_PER_CLIP, RACKET_POS_Z_RANGE, TERM_EE_POS_Z, POS_RANGE_PER_CLIP, VEL_RANGE_PER_CLIP
@@ -1538,6 +1678,15 @@ def main():
         print(f"[mj-sim2sim]   multiswing: no wrap teleports; pre-swing hold U{tuple(args.hold_steps_range)} "
               f"steps (ref frozen at windup, tts pinned); + balance terminations "
               f"(tilt>{DF_FALL_TILT_RAD} rad, pelvis z<{DF_FALL_ROOT_Z_MIN} m)")
+    if args.switch_stress > 0.0:
+        if reset_mode != "multiswing":
+            raise SystemExit("[FATAL] --switch-stress needs the multiswing protocol (got "
+                             f"reset_mode={reset_mode}); a teleport-era model has no deploy-"
+                             "parity swing-to-swing carry to stress.")
+        print(f"[mj-sim2sim] SWITCH-STRESS protocol: p={args.switch_stress}/step — mid-swing "
+              f"clip switch (commands.py clip_switch semantics: uniform new clip, windup frame, "
+              f"fresh hold + target, NO teleport). Tracking guards OFF (balance falls + timeout "
+              f"only). Post-switch vs clean-swing hit rates reported.")
 
     # std sidecar (only needed if a noise_scale > 0 is requested)
     std_vec = None
@@ -1638,9 +1787,14 @@ def main():
             repo_root=repo, ref_normal_per_clip=target_normal_per_clip, num_clips=num_clips,
             landing_x_range=args.venue_landing_x_range,
             landing_y_range=tuple(args.venue_landing_y_range),
-            speed_budget=args.venue_speed_budget, max_tries=args.venue_max_tries, **kw)
+            speed_budget=args.venue_speed_budget, max_tries=args.venue_max_tries,
+            fixed_normal=args.venue_fixed_normal, **kw)
         print(f"[mj-sim2sim] MODE B — target source: VENUE BALLS "
               f"(spec mirrors {_vbs.VENUE_YAML_REL}, pooled matchlike)")
+        if args.venue_fixed_normal:
+            print("[mj-sim2sim]   FIXED-NORMAL inversion (path A): StrikeSpec normal PINNED at "
+                  "the clip reference face; velocity-only solve. return_success_rate = the "
+                  "zero-training ceiling of current policy + adapted planner.")
         print(f"[mj-sim2sim]   incoming ball: contact_pos(venue frame)={_vbs.VENUE_CONTACT_POS_Q10_Q90} "
               f"vel={_vbs.VENUE_VEL_BOX_MATCHLIKE} |spin|<= {_vbs.VENUE_SPIN_ABS_MAX} rad/s (isotropic)")
         print(f"[mj-sim2sim]   virtual table (env frame): near_x={venue_sampler.table_near_x} "
@@ -1732,11 +1886,18 @@ def main():
         # mode-B extras (only written in venue-balls mode -> mode A CSVs stay byte-identical).
         # ball state at strike == racket target pos columns above; landed_ok = contacted AND
         # valid landing AND on-opponent-half AND net cleared (the legal-return definition).
+        # cf_* = the COUNTERFACTUAL rescore (same achieved pos/vel, DEMANDED normal swapped in).
         strike_cols += [
             "ball_v_x", "ball_v_y", "ball_v_z", "ball_w_x", "ball_w_y", "ball_w_z",
             "contacted", "intended_land_x", "intended_land_y",
             "achieved_land_x", "achieved_land_y", "landed_ok", "land_err_m", "net_clear",
+            "cf_contacted", "cf_achieved_land_x", "cf_achieved_land_y", "cf_landed_ok",
+            "cf_land_err_m", "cf_net_clear",
         ]
+    if args.switch_stress > 0.0:
+        # switch-stress extra (only in stress runs -> baseline CSVs stay byte-identical):
+        # was this strike's swing started by a mid-swing switch?
+        strike_cols += ["born_of_switch"]
     scw.writerow(strike_cols)
 
     viewer = None
@@ -1757,7 +1918,7 @@ def main():
                           vel_ranges_per_clip=vel_ranges_per_clip,
                           pos_ranges_per_clip=pos_ranges_per_clip, df=df_cfg,
                           reset_mode=reset_mode, hold_range=tuple(args.hold_steps_range),
-                          venue_sampler=venue_sampler)
+                          venue_sampler=venue_sampler, switch_stress=args.switch_stress)
         results.append(res)
     csv_f.close()
     strike_csv_f.close()
@@ -1869,6 +2030,16 @@ def main():
             vrow(f"  {nm}: n_strikes", "n_strikes", sub=sub)
             vrow(f"  {nm}: contact_rate", "contact_rate", sub=sub)
             vrow(f"  {nm}: return_success", "return_success_rate", sub=sub)
+        print("-" * 92)
+        print("COUNTERFACTUAL — DEMANDED normal swapped into the achieved strike (same achieved "
+              "pos/vel/pos_err):\n  CF >> actual return rate = the face-orientation channel "
+              "ALONE fails the return (no normal channel in the obs contract)")
+        vrow("CF contact_rate", "contact_rate", sub="cf_all")
+        vrow("CF RETURN SUCCESS", "return_success_rate", sub="cf_all")
+        vrow("CF land_err_median(m)", "land_err_median", sub="cf_all")
+        for sub, nm in (("cf_forehand", "fh"), ("cf_backhand", "bh")):
+            vrow(f"  {nm}: CF return_success", "return_success_rate", sub=sub)
+        print("-" * 92)
         vrow("spec_solve_fails", "solve_fail", sub="sampler")
         vrow("sign_rejects", "sign_reject", sub="sampler")
         vrow("mean_solve_iters", "mean_solve_iters", sub="sampler")
@@ -1903,6 +2074,42 @@ def main():
         dfrow("mean_time_to_fall(s)", "mean_time_to_fall_s")
         dfrow("min_time_to_fall(s)", "min_time_to_fall_s")
         print(f"{'fall_times_s':28s}" + "".join(f"{str(r['df']['fall_times_s']):>16s}" for r in results))
+        print("=" * 92)
+
+    # ---- switch-stress report: R11/R11b's benefit ruler (deploy-parity mid-swing aborts) ----
+    if args.switch_stress > 0.0:
+        print(f"\nSWITCH-STRESS report (p={args.switch_stress}/step mid-swing clip switch; "
+              f"tracking guards OFF, balance falls only)")
+        print("-" * 92)
+        print(f"{'metric':28s}" + "".join(cols))
+
+        def swrow(label, key, fmt="{:16.4f}"):
+            vals = []
+            for r in results:
+                v = r["switch_stress"].get(key, float("nan"))
+                if isinstance(v, bool) or isinstance(v, (int, np.integer)):
+                    vals.append(f"{int(v):16d}")
+                elif isinstance(v, float):
+                    vals.append(fmt.format(v) if not math.isnan(v) else f"{'nan':>16s}")
+                else:
+                    vals.append(f"{str(v):>16s}")
+            print(f"{label:28s}" + "".join(vals))
+
+        swrow("switches(total)", "n_switches")
+        swrow("  mid-swing switches", "n_midswing")
+        swrow("  in-hold switches", "n_inhold")
+        swrow("  pre-strike aborts", "n_prestrike_aborts")
+        swrow("falls(total)", "falls")
+        swrow("falls within 2s of switch", "falls_within_2s")
+        swrow("SURVIVAL 2s post-switch", "survival_2s")
+        swrow("  mid-swing only", "survival_2s_midswing")
+        swrow("strikes on clean swings", "strikes_clean")
+        swrow("  composite (clean)", "composite_clean")
+        swrow("strikes on post-switch", "strikes_postswitch")
+        swrow("  COMPOSITE (post-switch)", "composite_postswitch")
+        swrow("  pos_pass (post-switch)", "pos_pass_postswitch")
+        swrow("  vel_pass (post-switch)", "vel_pass_postswitch")
+        swrow("  nrm_pass (post-switch)", "nrm_pass_postswitch")
         print("=" * 92)
 
     print(f"[mj-sim2sim] per-step CSV   -> {csv_path}")
