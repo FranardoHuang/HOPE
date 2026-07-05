@@ -256,6 +256,9 @@ _RACKET_KEYS = (
     "vb_vel_x_range", "vb_vel_y_range", "vb_vel_z_range",
     # translated below but previously missing from this whitelist
     "strike_phase_per_clip", "base_couple_blend", "base_couple_max_offset",
+    # Stage-1 question bank (fixed contact point, inverse-solved face+velocity targets) + the
+    # face-command reward re-anchor / +3 actor obs channel. Defaults OFF.
+    "question_bank", "face_command", "face_command_obs",
 )
 
 # YAML keys under `motion:` that target the MotionCommandCfg swing-entry structure
@@ -680,6 +683,27 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_range(C, "vb_vel_x_range", _get(rk, "vb_vel_x_range"), applied, "racket_target")
             _set_range(C, "vb_vel_y_range", _get(rk, "vb_vel_y_range"), applied, "racket_target")
             _set_range(C, "vb_vel_z_range", _get(rk, "vb_vel_z_range"), applied, "racket_target")
+            # Stage-1 question bank + face-command channel (defaults OFF). question_bank = bank npz
+            # path (gen_stage1_questions.py); face_command re-anchors the racket_normal reward onto
+            # the demanded normal (target_normal_cmd).
+            _set_attr(C, "question_bank", _get(rk, "question_bank"), str, applied, "racket_target")
+            _set_attr(C, "face_command", _get(rk, "face_command"), _as_bool, applied, "racket_target")
+            # face_command_obs (+3 actor dims): the obs groups were finalized in __post_init__
+            # BEFORE overrides run, so setting env_cfg.face_command_obs here would be a silent
+            # no-op — attach the ObsTerm directly (same term/tail position as the cfg switch).
+            # The enabling experiment must update/remove actor_obs_contract in its YAML:
+            # validate_actor_observation_contract stays a loud error on the frozen 175-D value.
+            _fc_obs = _get(rk, "face_command_obs")
+            if _fc_obs is not None and _as_bool(_fc_obs):
+                from isaaclab.managers import ObservationTermCfg as _ObsTerm
+
+                from whole_body_tracking.tasks.tracking import mdp as _mdp
+
+                env_cfg.observations.policy.racket_target_normal_cmd = _ObsTerm(
+                    func=_mdp.racket_target_normal_cmd, params={"command_name": "racket_target"})
+                if hasattr(env_cfg, "face_command_obs"):
+                    env_cfg.face_command_obs = True  # keep the descriptive cfg field honest
+                applied.append("observations.policy.racket_target_normal_cmd(+3D face-command obs)")
 
     # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
     # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.

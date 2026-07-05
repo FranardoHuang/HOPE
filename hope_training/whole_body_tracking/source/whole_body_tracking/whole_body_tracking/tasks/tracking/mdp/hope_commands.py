@@ -47,6 +47,7 @@ from isaaclab.utils.math import (
 )
 
 from whole_body_tracking.tasks.tracking.mdp.commands import MotionCommand
+from whole_body_tracking.tasks.tracking.mdp.stage1_question_bank import load_question_bank, select_questions
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -103,6 +104,24 @@ class RacketTargetCommand(CommandTerm):
         self.racket_target_normal_w[:, 2] = 1.0
         self.base_target_pos_w = torch.zeros(self.num_envs, 2, device=self.device)
         self.swing_sign = torch.ones(self.num_envs, device=self.device)
+
+        # --- Stage-1 question bank (fixed contact point / inverse-solved face+velocity answers) ----
+        # cfg.question_bank non-empty -> per-swing targets are OVERRIDDEN by a bank row (see
+        # _apply_question_bank_targets); empty (default) -> the sampling paths below are untouched.
+        # target_normal_cmd ALWAYS exists (zeros when off) so the face-command obs/reward reads are
+        # unconditionally safe; it is only ever written when the bank is active.
+        self.target_normal_cmd = torch.zeros(self.num_envs, 3, device=self.device)
+        self._question_bank = None
+        if cfg.question_bank:
+            # Loaded ONCE (numpy npz -> per-clip torch tensors on device); clip order matches
+            # _clip_names (0=forehand, 1=backhand). Loud error on a missing/empty clip.
+            self._question_bank = load_question_bank(cfg.question_bank, device=self.device)
+            self.metrics["question_difficulty_deg"] = torch.zeros(self.num_envs, device=self.device)
+            print(
+                f"[RacketTargetCommand] stage-1 question bank {cfg.question_bank}: "
+                f"questions per clip = {self._question_bank.counts.tolist()}",
+                flush=True,
+            )
 
         # Actual racket state, world frame (from FK).
         self.racket_pos_w = torch.zeros(self.num_envs, 3, device=self.device)
@@ -891,6 +910,9 @@ class RacketTargetCommand(CommandTerm):
             normal = normal / (torch.norm(normal, dim=-1, keepdim=True) + 1e-6)
         self.racket_target_normal_w[env_ids] = normal
 
+        # Stage-1 question bank: overrides pos/vel + target_normal_cmd for these envs (no-op when off).
+        self._apply_question_bank_targets(env_ids, origins, n)
+
     def _sample_targets_reference_perturbed(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
         """Target = this env's reference racket state @ strike + curriculum-scaled perturbation.
 
@@ -931,6 +953,37 @@ class RacketTargetCommand(CommandTerm):
         self.racket_target_normal_w[env_ids] = normal / (torch.norm(normal, dim=-1, keepdim=True) + 1e-6)
 
         self.metrics["ref_perturb_scale"][env_ids] = scale
+
+        # Stage-1 question bank: overrides pos/vel + target_normal_cmd for these envs (no-op when off).
+        self._apply_question_bank_targets(env_ids, origins, n)
+
+    def _apply_question_bank_targets(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
+        """Stage-1 question bank: replace the sampled target with a per-env bank question.
+
+        A question row is the inverse-solved ANSWER to a sampled incoming ball at the clip's FIXED
+        contact point (scripts/gen_stage1_questions.py): target pos := contact point (tracking-env
+        frame -> world by adding the env origin), target vel := demanded racket velocity, and
+        target_normal_cmd := demanded face normal. Runs at the END of BOTH sampling paths so every
+        resample route (reset / clip wrap / mid-swing refinement) sees a bank target, and the
+        downstream A1 delay/noise injectors act on it exactly like a box-sampled one.
+        racket_target_normal_w is deliberately LEFT on the clip reference normal (metrics + critic
+        obs unchanged); the face reward reads target_normal_cmd only when cfg.face_command is on.
+        """
+        if self._question_bank is None:
+            return
+        motion = self._motion()
+        if motion._multiseg:
+            clip = motion.clip_id[env_ids]
+        else:
+            clip = torch.zeros(n, dtype=torch.long, device=self.device)
+        pos, vel, nrm, diff = select_questions(
+            self._question_bank, clip, torch.rand(n, device=self.device)
+        )
+        self.racket_target_pos_w[env_ids] = origins + pos
+        self.racket_target_vel_w[env_ids] = vel
+        self.target_normal_cmd[env_ids] = nrm
+        # Held per env until its next resample; reset-mean reports the question difficulty mix.
+        self.metrics["question_difficulty_deg"][env_ids] = diff
 
     def _resample_command(self, env_ids: Sequence[int]):
         if len(env_ids) == 0:
@@ -2225,6 +2278,20 @@ class RacketTargetCommandCfg(CommandTermCfg):
     racket_normal_x_range: tuple[float, float] = (0.5, 1.0)
     racket_normal_y_range: tuple[float, float] = (-0.3, 0.3)
     racket_normal_z_range: tuple[float, float] = (-0.3, 0.3)
+
+    # --- Stage-1 question bank + face-command channel (defaults OFF; byte-identical baseline) -------
+    # Path to an offline bank npz (scripts/gen_stage1_questions.py): per clip a FIXED contact point
+    # plus per-question inverse-solved racket velocity + face normal (the ANSWER to a sampled
+    # incoming ball). Non-empty -> every target resample (reset / wrap / mid-swing) OVERRIDES the
+    # sampled pos/vel with a bank row and writes target_normal_cmd; the A1 delay/noise injectors act
+    # downstream unchanged. Bank positions are tracking-env-frame (world = env_origin + pos).
+    # Empty (default) = OFF: the sampling paths above run untouched, target_normal_cmd stays zeros.
+    question_bank: str = ""
+    # Re-anchor the racket_normal reward (and racket_strike_success through it) onto the demanded
+    # target_normal_cmd instead of the clip-locked racket_target_normal_w (the clip-locked face is
+    # the 0%-return root cause — eval mode B 2026-07-05). Exact-strike normal metrics and the critic
+    # obs keep racket_target_normal_w either way. False (default) = old path byte-identical.
+    face_command: bool = False
 
     # --- desired base XY target (offsets from the env origin, world frame, meters) ---
     base_target_x_range: tuple[float, float] = (-0.10, 0.10)

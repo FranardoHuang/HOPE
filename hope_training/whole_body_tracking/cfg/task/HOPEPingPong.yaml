@@ -199,6 +199,16 @@ racket:
   mount_normal_axis: 1            # racket-local +Y is the face normal (red/hitting face; Step 11)
   mount_normal_sign: 1.0          # +1 = red/forehand face
 
+  # ---- Stage-1 question bank + face-command channel (flag-gated, default OFF) ------------------
+  # Per-swing targets from an offline inverse-solved bank (scripts/gen_stage1_questions.py): fixed
+  # contact point per clip, solved racket velocity, DEMANDED face normal (the 175-D contract has no
+  # normal-demand channel — the clip-locked face is the 0%-return root cause, eval mode B 2026-07-05).
+  # question_bank: cfg/stage1_questions.npz  # bank npz path; overrides pos/vel per resample
+  # face_command: true                       # racket_normal reward tracks the demanded normal
+  # face_command_obs: true                   # +3 actor obs (demanded normal appended LAST) — this
+  #                                          # grows the actor contract (175 -> 178 on deploy-parity);
+  #                                          # update/remove actor_obs_contract when enabling
+
 # ---- domain randomization (HITTER-faithful) ---------------------------------
 # HITTER publishes no DR table; prose randomizes mass/friction/restitution + perception noise, and
 # states PD gains are FIXED. So: keep link-mass randomization + the base friction/CoM + observation

@@ -69,6 +69,14 @@ def swing_type(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     return _cmd(env, command_name).actor_swing_sign().unsqueeze(-1)
 
 
+def racket_target_normal_cmd(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Stage-1 face-command channel: the DEMANDED face normal (world frame, from the question bank),
+    a planner quantity at deploy time (StrikeSpec n). NOT in the frozen 175-D contract — only wired
+    into the actor when racket.face_command_obs is enabled (175 -> 178). Zeros when the question
+    bank is off (the buffer always exists)."""
+    return _cmd(env, command_name).target_normal_cmd
+
+
 # --- privileged (critic) observations: desired normal + actual racket state --------------- #
 def racket_target_vel_w_live(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """TRUE live desired racket velocity (world). CRITIC/privileged term: the asymmetric critic

@@ -376,6 +376,11 @@ class HOPEDeployParityTerminationsCfg(TerminationsCfg):
 @configclass
 class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
     obs_mode: str = "full"  # descriptive; the deploy-parity variant is HOPEPingPongDeployParityAgibotA3EnvCfg
+    # Stage-1 face-command obs switch (DEFAULT OFF = frozen actor contract, 175-D on deploy-parity).
+    # True -> append racket_target_normal_cmd (+3, the question bank's demanded face normal) to the
+    # actor group in __post_init__. train.py toggles this AFTER __post_init__ has run, so its
+    # racket.face_command_obs override attaches the term itself (same ObsTerm, same tail position).
+    face_command_obs: bool = False
     commands: HOPECommandsCfg = HOPECommandsCfg()
     observations: HOPEObservationsCfg = HOPEObservationsCfg()
     rewards: HOPERewardsCfg = HOPERewardsCfg()
@@ -389,6 +394,13 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
         # but clip wrap never teleports the robot back to the next reference start state
         # (MotionCommandCfg.wrap_teleport already defaults to False; kept explicit here).
         self.commands.motion.wrap_teleport = False
+        # Stage-1 face-command channel: appended LAST in the actor group (configclass attribute order),
+        # so every existing term keeps its slot and the contract only grows at the tail. The frozen
+        # 175-D/180-D contracts stay byte-identical while the switch is off.
+        if self.face_command_obs:
+            self.observations.policy.racket_target_normal_cmd = ObsTerm(
+                func=mdp.racket_target_normal_cmd, params={"command_name": "racket_target"}
+            )
 
 
 @configclass
