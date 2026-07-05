@@ -21,8 +21,11 @@ Default is now the blade:
     blade_pos = wrist_pos + R(wrist_quat) @ mount_offset
     blade_vel = wrist_lin_vel + wrist_ang_vel x (R(wrist_quat) @ mount_offset)
 Pass --wrist-point to reproduce the old wrist-point behavior.
+
 Racket face normal = R(wrist_quat)[:, 1]  (+Y blade face, red/forehand face;
-mount_quat is identity so wrist +Y == blade +Y).
+mount_quat is identity so wrist +Y == blade +Y). For video/GVHMR clips this is
+only a wrist-frame proxy; when cfg/strike_annotations.yaml marks
+face_normal_reliable: false, do not quote it as the physical paddle face normal.
 
 For each frame it computes, in the robot-root (pelvis-yaw) frame:
   frame index, normalized phase, racket world pos, racket world lin vel, speed,
@@ -30,7 +33,9 @@ For each frame it computes, in the robot-root (pelvis-yaw) frame:
   fixed strike plane (x = 0.40 m in front of the robot), and a phase label
   (backswing / forward-strike / follow-through).
 
-Then it selects the strike frame and writes plots to diag_videos/strike_phase_*.png.
+Then it applies hand-aligned strike annotations from cfg/strike_annotations.yaml.
+The speed-peak detector is diagnostic only; it is a known trap on real-play video
+where the post-contact whip can be faster than contact.
 
     python scripts/analyze_strike_phase.py
     python scripts/analyze_strike_phase.py \
@@ -42,8 +47,14 @@ from __future__ import annotations
 
 import argparse
 import os
+import pathlib
 
 import numpy as np
+
+try:
+    import yaml
+except ImportError:  # keep the script importable in minimal numpy-only shells
+    yaml = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WBT = os.path.dirname(HERE)
@@ -65,6 +76,7 @@ CLIPS = {
     "forehand": os.path.join(WBT, "artifacts/hope_forehand:v1/motion.npz"),
     "backhand": os.path.join(WBT, "artifacts/hope_backhand:v1/motion.npz"),
 }
+DEFAULT_ANNOTATIONS = os.path.join(WBT, "cfg", "strike_annotations.yaml")
 
 
 def quat_to_rot(q):
@@ -152,41 +164,111 @@ def analyze(name, path, use_blade=True):
             label[i] = "follow-through"
 
     # --- Strike-frame selection -------------------------------------------------
-    # The config defines strike_phase as the RACKET-TIP SPEED PEAK on the forward
-    # swing (hope config comment: "phase of the clip at which contact happens
-    # (racket-tip speed peak)"). So we select the frame of MAXIMUM racket speed
-    # restricted to the forward-swing window (vx>0 near the forward-vx peak). This
-    # is robust when the racket's plane crossing (x=0.40) and its speed peak occur
-    # at different frames (e.g. a swing whose fast contact is past x=0.40).
+    # Auto candidate only. On real-play video the fastest forward frame can be the
+    # post-contact whip/pull-up, so a hand annotation must override it before the
+    # value is used for training or evaluation.
     fwd_mask = vx > 0.3
     cand = np.where(fwd_mask)[0]
     if len(cand) == 0:                             # degenerate fallback
         cand = np.array([fwd_peak])
-    strike = cand[np.argmax(speed[cand])]          # fastest forward-swing frame
+    auto_strike = int(cand[np.argmax(speed[cand])])
 
     info = dict(
         name=name, T=T, fps=fps, phase=phase, speed=speed, vx=vx,
-        dist_plane=dist_plane, racket_root=racket_root, racket_v_root=racket_v_root,
-        normal_root=normal_root, label=label, strike=strike,
+        path=path, dist_plane=dist_plane, racket_root=racket_root, racket_v_root=racket_v_root,
+        normal_root=normal_root, label=label, strike=auto_strike, auto_strike=auto_strike,
         fwd_peak=fwd_peak, speed_peak=int(np.argmax(speed)),
         racket_w=racket_w, racket_v_w=racket_v_w, clean_v_w=clean_v_w,
-        point="blade" if use_blade else "wrist",
+        point="blade" if use_blade else "wrist", annotation=None, annotation_key=None,
+        annotation_phase=None, face_normal_reliable=True, selection_source="auto-unverified",
     )
     return info
+
+
+
+def _annotation_keys(name, path):
+    p = pathlib.Path(path)
+    keys = [p.stem, name]
+    if p.name == "motion.npz":
+        keys.insert(0, p.parent.name)
+    return [k for i, k in enumerate(keys) if k and k not in keys[:i]]
+
+
+def _load_annotations(path):
+    if not path or not os.path.exists(path):
+        return {}
+    if yaml is None:
+        raise RuntimeError("PyYAML is required to read strike annotations")
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    return data.get("clips", {}) or {}
+
+
+def _annotation_frame(ann, T):
+    if ann.get("frame") is not None:
+        return int(ann["frame"])
+    if ann.get("phase") is None:
+        return None
+    return int(round(float(ann["phase"]) * (T - 1)))
+
+
+def _apply_annotation(info, key, ann):
+    frame = _annotation_frame(ann, info["T"])
+    if frame is None:
+        return
+    frame = max(0, min(int(frame), info["T"] - 1))
+    info["strike"] = frame
+    info["annotation"] = ann
+    info["annotation_key"] = key
+    info["annotation_phase"] = float(ann["phase"]) if ann.get("phase") is not None else None
+    info["face_normal_reliable"] = bool(ann.get("face_normal_reliable", True))
+    info["selection_source"] = "annotation"
+
+
+def _sampling_box_lines(info, s):
+    pos = info["racket_w"][s]
+    vel = info["clean_v_w"][s]
+    clip = info["name"]
+    axes = "xyz"
+    for axis, center in zip(axes, pos):
+        yield f'task.racket.pos_range_per_clip.{clip}.{axis}=[{center - 0.10:.2f},{center + 0.10:.2f}]'
+    for axis, center in zip(axes, vel):
+        yield f'task.racket.vel_range_per_clip.{clip}.{axis}=[{center - 0.50:.2f},{center + 0.50:.2f}]'
 
 
 def report(info):
     name, T = info["name"], info["T"]
     s = info["strike"]
+    auto = info["auto_strike"]
+    ann = info.get("annotation")
     print("\n" + "=" * 74)
-    print(f"{name.upper()}  ({T} frames @ {info['fps']} Hz)  [tracked point: {info['point'].upper()}]")
+    key = info.get("annotation_key") or pathlib.Path(info["path"]).stem
+    print(f"{name.upper()}  ({T} frames @ {info['fps']} Hz)  [tracked point: {info['point'].upper()}]  [key: {key}]")
     print("=" * 74)
     print(f"  racket SPEED peak : frame {info['speed_peak']:3d}  phase {info['speed_peak']/T:.3f}  "
           f"|v|={info['speed'][info['speed_peak']]:.2f}  vx={info['vx'][info['speed_peak']]:+.2f}")
     print(f"  forward VX peak   : frame {info['fwd_peak']:3d}  phase {info['fwd_peak']/T:.3f}  "
           f"|v|={info['speed'][info['fwd_peak']]:.2f}  vx={info['vx'][info['fwd_peak']]:+.2f}")
+    print(f"  AUTO pick (trap!) : frame {auto:3d}  phase {auto/T:.3f}")
+    if ann:
+        status = ann.get("status", "?")
+        who = ann.get("annotator", "?") or "?"
+        date = ann.get("date", "-") or "-"
+        phase = info.get("annotation_phase")
+        phase_s = f"{phase:.3f}" if phase is not None else f"{s/(T - 1):.3f}"
+        print(f"  HAND ANNOTATION   : frame {s:3d}  phase {phase_s}  [{status}, {who}, {date}] <- SELECTED")
+        if auto != s:
+            print(f"  ** AUTO != ANNOTATION by {abs(auto - s)} frames - speed peak can be post-contact whip/pull-up; trust the annotation. **")
+        if status != "verified":
+            print("  ** UNVERIFIED annotation - scrub the source video frame-by-frame before accepting this clip. **")
+    else:
+        print("  ** NO HAND ANNOTATION - auto pick is diagnostic only. Add this clip to cfg/strike_annotations.yaml before training. **")
     print(f"  --> SELECTED STRIKE FRAME {s} <--")
-    print(f"      phase            = {s/T:.3f}")
+    if info.get("annotation_phase") is not None:
+        print(f"      annotation phase = {info['annotation_phase']:.3f}")
+        print(f"      frame phase      = {s}/{T}={s/T:.3f}, {s}/(T-1)={s/(T - 1):.3f}")
+    else:
+        print(f"      phase            = {s/(T - 1):.3f}  (frame/(T-1); auto-unverified)")
     print(f"      racket speed     = {info['speed'][s]:.3f} m/s")
     print(f"      racket vx (+X)   = {info['vx'][s]:+.3f} m/s")
     print(f"      racket pos(root) = ({info['racket_root'][s,0]:+.3f}, {info['racket_root'][s,1]:+.3f}, {info['racket_root'][s,2]:+.3f})")
@@ -195,8 +277,14 @@ def report(info):
     print(f"      vel (WORLD,clean)= ({info['clean_v_w'][s,0]:+.3f}, {info['clean_v_w'][s,1]:+.3f}, {info['clean_v_w'][s,2]:+.3f})   "
           f"<- +-{CLEAN_VEL_WINDOW}-frame FD, training-parity; YAML vel_range_per_clip center")
     print(f"      dist to x=0.40   = {info['dist_plane'][s]:.3f} m")
-    print(f"      face normal(root)= ({info['normal_root'][s,0]:+.3f}, {info['normal_root'][s,1]:+.3f}, {info['normal_root'][s,2]:+.3f})")
+    face_note = ""
+    if not info.get("face_normal_reliable", True):
+        face_note = "  ** UNRELIABLE: video/GVHMR wrist +Y proxy; do NOT quote as physical paddle face direction **"
+    print(f"      face normal(root)= ({info['normal_root'][s,0]:+.3f}, {info['normal_root'][s,1]:+.3f}, {info['normal_root'][s,2]:+.3f}){face_note}")
     print(f"      label            = {info['label'][s]}")
+    print("      paste-ready sampling box (pos +-0.10 / clean vel +-0.50):")
+    for line in _sampling_box_lines(info, s):
+        print(f'        "{line}"')
 
     # candidate comparison (backhand of interest, but print for both)
     print("\n  candidate-phase table:")
@@ -265,6 +353,9 @@ def main():
     ap.add_argument("--clip-name", default="clip", help="name for --motion-file")
     ap.add_argument("--out-dir", default=None,
                     help="output dir for plots (default: <WBT>/diag_videos)")
+    ap.add_argument("--annotations", default=DEFAULT_ANNOTATIONS,
+                    help="hand-aligned strike annotation YAML. Relative paths are resolved from the "
+                         "whole_body_tracking dir. Use '' to disable.")
     ap.add_argument("--wrist-point", action="store_true",
                     help="analyze the bare wrist body point (legacy pre-2026-07-02 behavior) "
                          "instead of the racket BLADE (wrist + mount FK, matches the training "
@@ -283,15 +374,35 @@ def main():
     else:
         clips = CLIPS
 
-    infos = [analyze(n, p, use_blade=not args.wrist_point) for n, p in clips.items()]
+    ann_path = _resolve(args.annotations) if args.annotations else None
+    annotations = _load_annotations(ann_path)
+    if ann_path and annotations:
+        print(f"[annotations] loaded {len(annotations)} clips from {ann_path}")
+
+    infos = []
+    for n, p in clips.items():
+        info = analyze(n, p, use_blade=not args.wrist_point)
+        for key in _annotation_keys(n, p):
+            if key in annotations:
+                _apply_annotation(info, key, annotations[key])
+                break
+        infos.append(info)
     for info in infos:
         report(info)
+    if len(infos) > 1:
+        phases = [info["annotation_phase"] if info.get("annotation_phase") is not None else info["strike"] / (info["T"] - 1) for info in infos]
+        sources = ["ann" if info.get("annotation") else "auto-unverified" for info in infos]
+        print(f"\n  strike_phase_per_clip override (order = {'/'.join(i['name'] for i in infos)}; source = {','.join(sources)}):")
+        print(f"    \"task.racket.strike_phase_per_clip=[{','.join(f'{p:.3f}' for p in phases)}]\"")
 
     outdir = args.out_dir if args.out_dir else os.path.join(WBT, "diag_videos")
     outdir = _resolve(outdir)
     os.makedirs(outdir, exist_ok=True)
     tag = "_".join(i["name"] for i in infos)
-    plot(infos, os.path.join(outdir, f"strike_phase_{tag}.png"))
+    try:
+        plot(infos, os.path.join(outdir, f"strike_phase_{tag}.png"))
+    except ModuleNotFoundError as exc:
+        print(f"\n[plot] skipped ({exc}); report above is still valid")
 
 
 if __name__ == "__main__":

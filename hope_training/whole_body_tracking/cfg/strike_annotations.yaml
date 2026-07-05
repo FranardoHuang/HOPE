@@ -1,0 +1,109 @@
+# =============================================================================
+# HAND-ALIGNED STRIKE (ball-contact) ANNOTATIONS - the only trusted source of
+# strike_phase for reference clips.
+#
+# WHY THIS FILE EXISTS (two video-pipeline failure modes, found 2026-07-04/05):
+#   1. STRIKE TIME: the auto detector (analyze_strike_phase.py) picks the racket
+#      speed peak on the forward swing. On real-play video the speed peak is
+#      routinely the POST-CONTACT WHIP or the PULL-UP, not the contact - v5
+#      forehand read 0.768 when true contact is ~0.673 (franco, frame-by-frame,
+#      2026-07-04). Speed peak != contact. Auto values are candidates only;
+#      every clip must be hand-aligned and recorded here.
+#   2. FACE NORMAL: the paddle face is not observable in the videos; the
+#      "face normal" of a video-derived (GVHMR) clip is just the wrist +Y frame
+#      - a wrist-direction proxy, NOT the blade orientation. Mark such clips
+#      face_normal_reliable: false and never quote their strike-frame normal as
+#      a physical face direction. Mocap-retargeted clips with a rigid mount are
+#      the safer source for face-normal work.
+#
+# Consumers:
+#   - scripts/analyze_strike_phase.py --annotations (default: this file). An
+#     annotated phase OVERRIDES the auto pick; a large disagreement prints the
+#     known-trap warning. Unannotated clips are reported as UNVERIFIED.
+#   - humans: the phase values here are what goes into an explicit training
+#     override such as `task.racket.strike_phase_per_clip=[fh,bh]`.
+#
+# Key = motion-file stem (hope_forehand_v5.npz -> hope_forehand_v5); for
+# artifacts/<name>:vN/motion.npz use the parent directory name (hope_forehand:v1).
+#
+# status: verified   = a human scrubbed the source video / npz frames to contact
+#         unverified = value in use but produced by the speed-peak auto detector
+#                      (KNOWN TRAP) - needs hand alignment
+# =============================================================================
+
+clips:
+  # --- v5 real-play clips (GVHMR video source) --------------------------------
+  hope_forehand_v5:
+    phase: 0.673
+    status: verified
+    annotator: franco
+    date: 2026-07-04
+    method: frame-by-frame scrub; detector's 0.768 identified as post-contact whip
+    source: video-gvhmr
+    face_normal_reliable: false
+    notes: strike-frame normal (+0.47,+0.84,-0.27) is wrist-proxy only
+
+  hope_backhand_v5:
+    phase: 0.362
+    status: verified
+    annotator: claude (visual frame scrub, raw_video_v5/backhand_v5.mp4)
+    date: 2026-07-05
+    method: ball contacts blade at video f014 (t=0.433s); start-aligned video->npz
+      mapping -> frame 21 +-1 of 58. Previous auto 0.345 (frame 20) was 1-2 frames
+      early (pre-contact approach); within franco's "first 3/7" prior either way
+    source: video-gvhmr
+    face_normal_reliable: false
+
+  # --- oblique real-play clips (GVHMR video source, R3 arm) --------------------
+  hope_forehand_oblique:
+    phase: 0.432
+    status: verified
+    annotator: claude (visual frame scrub, raw_video_oblique/forehand_new.mp4)
+    date: 2026-07-05
+    method: ball reaches blade at video f025-f026 (t~0.82-0.83s); start-aligned
+      mapping -> frame 41 +-2 of 96. The old auto 0.368 (frame 35) is the PRE-CONTACT
+      acceleration peak ~120 ms early (ball still 3 video frames away) — the
+      pull-up variant of the speed-peak trap. R3 sampling boxes derived at 0.368
+      are stale; regenerate from this frame
+    source: video-gvhmr
+    face_normal_reliable: false
+
+  hope_backhand_oblique:
+    phase: 0.495
+    status: verified
+    annotator: claude (visual frame scrub, raw_video_oblique/backhand_new.mp4)
+    date: 2026-07-05
+    method: ball contacts blade at video f032 (t=1.033s); start-aligned mapping ->
+      frame 51.7 of 106; auto value 0.495 (frame 53) agrees within 1.5 frames —
+      CONFIRMED (backhand speed peak ~coincides with contact, like v5 backhand)
+    source: video-gvhmr
+    face_normal_reliable: false
+
+  # --- hopex v3 clips (product/default lineage: [0.47, 0.333]) -----------------
+  # Source videos reviewed 2026-07-05 (raw_video_hopex/, claude): DRY SWINGS with
+  # NO BALL -> there is no observable contact to align; the phases are the
+  # forward-swing SPEED-PEAK CONVENTION (fh 18 cm / bh 33 cm past the x=0.40
+  # plane; plane crossings sit at ~0.43 / ~0.27). Semantically DIFFERENT from the
+  # v5/oblique true-contact phases (those sit near the plane on the rising edge).
+  # Do NOT "fix" the values in isolation - the product lineage was trained on this
+  # convention; treat the mismatch as a known caveat for the next motion-source
+  # decision (R15). GVHMR source -> face normal is a wrist proxy here too.
+  hope_forehand_hopex:
+    phase: 0.47
+    status: verified
+    annotator: claude (source-video review + kinematic table)
+    date: 2026-07-05
+    method: no ball in source video (dry swing) - phase is the speed-peak
+      convention, kinematically checked; no physical contact exists to observe
+    source: video-gvhmr
+    face_normal_reliable: false
+
+  hope_backhand_hopex:
+    phase: 0.333
+    status: verified
+    annotator: claude (source-video review + kinematic table)
+    date: 2026-07-05
+    method: no ball in source video (dry swing) - phase is the speed-peak
+      convention, kinematically checked; no physical contact exists to observe
+    source: video-gvhmr
+    face_normal_reliable: false

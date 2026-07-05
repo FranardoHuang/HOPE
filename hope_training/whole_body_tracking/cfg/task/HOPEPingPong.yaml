@@ -42,7 +42,7 @@ actor_obs_contract: full
 # imitates. Order must match racket.strike_phase_per_clip. Set registry_name_2: null for a single-swing
 # policy. (Override on the CLI with registry_name=... / registry_name_2=...)
 # NOTE (2026-07-02): the `hope_forehand/backhand:latest` registry aliases were verified to still face
-# world +Y (pre-reground). Until corrected v5+ registry artifacts exist, pass the local corrected +X
+# world +Y (pre-reground). Until future verified registry artifacts exist, pass the local corrected +X
 # clips on the CLI via the local-first params, e.g.
 #   motion_file=hope_training/motions/preprocessed/hope_forehand_hopex.npz
 #   motion_file_2=hope_training/motions/preprocessed/hope_backhand_hopex.npz

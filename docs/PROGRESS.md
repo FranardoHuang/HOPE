@@ -2,6 +2,10 @@
 
 Use this file for short project-state updates that future humans and agents need to see. Keep detailed reasoning in the relevant gate doc.
 
+## 2026-07-05
+
+- Corrected the RunPod `/workspace/yikang/nohope` v5 config mistake. Product/default train and replay configs stay on the existing hopex/registry route (`cfg/train.yaml` and `cfg/play.yaml` keep `motion_file: null`; deploy-parity stays `strike_phase_per_clip: [0.47, 0.333]`). The v5 clips are R15 ablation inputs only and must be passed by CLI override. Added `cfg/strike_annotations.yaml` plus annotation-first `scripts/analyze_strike_phase.py`; verified it selects forehand v5 frame 37 / phase 0.673 instead of the speed-peak whip at frame 43/44, prints the R15 sampling boxes, marks video/GVHMR face normals unreliable, and leaves backhand v5 phase 0.345 as unverified pending frame scrub. Kept the `scripts/play.py` fix so two local clips are resolved the same way in replay/export as in training.
+
 ## 2026-07-03 (night, branch `rsi-on-wrap-progress-fix`) — venue data on RunPod; F10/full-state/self-check ran on real data
 
 - **Venue dataset copied to `/workspace/yikang/latest_data`** (extracted npz ×9 + segments + qa + analysis artifacts; the `.tak` files are unused raw Avatar projects). All report-§10 tools now have REAL-data results (report §10.4–10.6 updated):

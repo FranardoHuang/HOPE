@@ -145,6 +145,28 @@ R2@1500 热启)在 5500/12000 步时命中率 **0.858(峰值 0.884)**,已超 E �
 事实修正(2026-07-04 凌晨):registry 里两套(v3/v4 原始与 :latest 微调转正)**均为正面摆拍录制**;
 此前 npz frame-0 yaw +82° 是 GVHMR 全局朝向产物,不代表机位。真正的**斜录(实战击球)视频**是新东西:
 franco 已提供 forehand_new.mp4 / backhand_new.mp4,已上传 `/workspace/shared/motions/raw_video_oblique/`
+
+**击球相位人工对齐(2026-07-05,yikang 驱动)——视频管线两个坑 + 登记表机制:**
+
+1. **拍速峰 ≠ 触球**:自动选帧(analyze_strike_phase 取前挥速度峰)在真实对打视频上常选到
+   触球后的甩鞭段或触球前的上拉加速段。实锤两例:v5 正手 auto 0.768 vs 真触球 0.673(franco
+   逐帧);斜录正手 auto 0.368 vs 真触球 **0.432**(claude 逐帧对源视频,0.368 时刻球离拍还有
+   3 帧)。机制已固化:`hope_training/whole_body_tracking/cfg/strike_annotations.yaml` 人工
+   登记表 = strike_phase 唯一可信源;analyze_strike_phase 注释优先,速度峰降级为诊断候选,
+   不一致 >1 帧打警告并拒绝无注释 clip 用于训练。
+2. **视频源 clip 的"拍面法线"是手腕 +Y 代理**(视频里拍面不可观测,GVHMR 只给手腕系),
+   登记表按 clip 标 `face_normal_reliable: false`,分析器打 UNRELIABLE——不得当物理拍面
+   方向引用(这是 R16 手腕解除姿态模仿的直接论据;拍面质量只能靠 vb 落点/消旋奖励塑形)。
+
+状态(6 条 clip,5 条已人工核定):v5 = [0.673(franco), **0.362**(claude;原 0.345 早 1-2 帧,
+在跑的 R15 不重启,下次 re-arm 采用)];斜录 = [**0.432**, 0.495](claude 逐帧;反手确认原值);
+**hopex = [0.47, 0.333] 已收口(2026-07-05,源视频 raw_video_hopex/ 已入库):v4 正录是
+无球空挥 → 触球相位没有物理真值,现值是速度峰约定(正手过 x=0.40 平面后 18 cm、反手
+33 cm;真触球类 clip 都在平面上升沿)。产品线按此约定训练,不单独"修";与 v5/斜录的
+语义差异列为动作源换代(R15)决策输入。hopex 也是 GVHMR 管线 → 拍面法线同为手腕代理,
+可靠性下调(登记表已改 false)**。
+新采样框由分析器在注释帧直出(pos ±0.10 / clean-vel ±0.50 惯例),运行
+`python scripts/analyze_strike_phase.py --clip forehand:<npz> --clip backhand:<npz>` 即可粘贴。
 (附 README 说明谱系)。franco 预期:实战斜录的动作质量会好很多。
 
 | 消融臂 | 数据 | 状态 |
@@ -159,7 +181,7 @@ franco 已提供 forehand_new.mp4 / backhand_new.mp4,已上传 `/workspace/share
 | R0 基线 | `task=HOPEPingPongDeployParity`(main 默认) | 合并后的参照点 |
 | R1 虚拟球·上旋 | `task=HOPEPingPongVirtualBall`(yikang 默认,落点30/过网20/旋转5,拍速法线降权) | 物理奖励栈是否成立 |
 | R2 虚拟球·消旋 | R1 + `task.racket.vb_spin_mode=minimize`(franco 第一阶段:不奖励球质,奖励落点+出球旋转最小) | 两种旋转哲学谁先学会站稳打准 |
-| R3 斜录数据 | R0 + `motion_file=/workspace/shared/motions/hope_forehand_oblique.npz motion_file_2=..._backhand_oblique.npz "task.racket.strike_phase_per_clip=[0.368,0.495]"` + 下方专属采样框 | 实战动作源是否更好(franco 预判:是) |
+| R3 斜录数据 | R0 + `motion_file=/workspace/shared/motions/hope_forehand_oblique.npz motion_file_2=..._backhand_oblique.npz "task.racket.strike_phase_per_clip=[0.432,0.495]"` + 下方专属采样框(**⚠ 正手相位 0.368→0.432 人工纠错 2026-07-05:旧值是触球前加速段,球还差 3 帧才到拍;正手框要按新帧重算再 re-arm,见下方"击球相位人工对齐"**) | 实战动作源是否更好(franco 预判:是) |
 | R4 组合 | R1/R2 胜者 + adaptive_sigma + post_swing(可再叠 R3 若其胜) | 产品候选 |
 
 斜录臂专属采样框(从斜录击球帧提取,保持参考-目标一致性):
@@ -300,6 +322,7 @@ After the 18:15 finish + verdict, the freed slots run signal-tier (2000-it ≈ 1
 
 | Item | Owner | Landed | Where |
 | --- | --- | --- | --- |
+| R15 v5 strike annotation guardrail; product defaults restored | Codex | 2026-07-05 | `/workspace/yikang/nohope` on `main` |
 | Fixed-protocol sim2sim scoreboard (`scoreboard_eval.py`), validated end-to-end on pod | claude | 2026-07-03 | `p2-eval-harness` |
 | 4 main-breaking merge casualties fixed (conflict markers; `motion_file` regression; `episode_time_left` probe crash; `play.py` `_wbt_tasks`) | claude | 2026-07-03 | main / `p2-multiswing` |
 | `motion:` task-YAML/CLI plumbing for wrap_teleport / stand_start / hold | claude | 2026-07-03 | `p2-multiswing` |

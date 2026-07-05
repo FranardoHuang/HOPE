@@ -62,6 +62,11 @@ def _run_play(cfg, simulation_app):
 
     log_root_path = os.path.abspath(os.path.join("logs", "rsl_rl", agent_cfg.experiment_name))
 
+    def _use_configured_motion_files():
+        motion_files, _ = resolve_motion_sources(cfg, cwd=pathlib.Path.cwd())
+        env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
+        print(f"[play.py] local/config motion clips: {motion_files}", flush=True)
+
     # resolve the checkpoint + reference motion
     wandb_path = cfg.wandb_path
     checkpoint = cfg.get("checkpoint", None)
@@ -79,9 +84,8 @@ def _run_play(cfg, simulation_app):
         wandb_run.file(str(fname)).download("./logs/rsl_rl/temp", replace=True)
         resume_path = f"./logs/rsl_rl/temp/{fname}"
         print(f"[INFO] Loading model checkpoint from: {run_path}/{fname}")
-        if cfg.motion_file is not None:
-            mf = cfg.motion_file
-            env_cfg.commands.motion.motion_file = str(mf) if isinstance(mf, str) else [str(x) for x in mf]
+        if cfg.get("motion_file", None) is not None or cfg.get("motion_file_2", None) is not None:
+            _use_configured_motion_files()
         else:
             arts = [a for a in wandb_run.used_artifacts() if a.type == "motions"]
             if arts:
@@ -97,10 +101,8 @@ def _run_play(cfg, simulation_app):
             resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
         print(f"[INFO] Loading model checkpoint from: {resume_path}")
         reg = cfg.registry_name if cfg.registry_name is not None else cfg.task.get("registry_name")
-        if cfg.motion_file is not None:
-            # accept a list (unified 2-clip forehand+backhand) or a single path
-            mf = cfg.motion_file
-            env_cfg.commands.motion.motion_file = str(mf) if isinstance(mf, str) else [str(x) for x in mf]
+        if cfg.get("motion_file", None) is not None or cfg.get("motion_file_2", None) is not None:
+            _use_configured_motion_files()
         elif reg is not None:
             import wandb
 
