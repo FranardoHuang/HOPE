@@ -143,7 +143,7 @@ v1 保留为消融臂(NOW.md R12):它回答"减速塑形这个方向有没有信
 
 | 阶段 | 内容 | 依赖 |
 | --- | --- | --- |
-| 现在 | v1 消融:base_decel(已实现,R12)、clip_switch(已实现,R11)、固定法线 StrikeSpec(未做,CPU 活,eval-B 复测) | 无 |
+| 现在 | v1 消融:base_decel(已实现,R12)、clip_switch(已实现,R11)、固定法线 StrikeSpec(**已做 2026-07-05,判死**:拍面钉在 clip 参考朝向后,正手任何 ≤6 m/s 拍速都过不了网,反手只剩贴网大斜线小缝(在合法回球框外)——eval-B 复测 0%,路 A 物理不可行,见 NOW.md 🔴 判决) | 无 |
 | 视频后 | 6 套处理→anchor 组;ρ 混合 MotionLoader;相位重定时训练增广 | franco 拍摄 |
-| 契约日 | 175→179 一次迁移(法线+ρ);normal 奖励改跟指令;pp_obs_builder 同步 | 全队排期 |
+| 契约日 | 175→179 一次迁移(法线+ρ);normal 奖励改跟指令;pp_obs_builder 同步(**路 A 判死后由"可选"升级为必须**) | 全队排期 |
 | 之后 | cost selector 部署;gating 网络(有成功数据后) | 上两行 |

@@ -75,11 +75,37 @@ Done (2026-06-27 → 2026-07-02, recorded 2026-07-03):
   frame (capture gate → venue contact model → drag+Magnus flight → bounds + net clearance).
   Headline reported as `return_success_rate` per strike; mode-A (`boxes`) output stays
   byte-identical. First run: pos/vel tracking survives the OOD venue distribution (3.7 cm /
-  0.18 m/s) but the face normal is clip-locked (36-76° err, 0% legal returns; ad-hoc
-  counterfactual with the demanded normal: 25/25) — the 175-D contract has no normal channel
-  (`docs/motion_and_contract_v3.md`). v1 caveats: uncorrelated box sampling, human-receiver
-  contact heights (0.98-1.26 m vs trained 0.72-1.13 m — intentional realism, expect pos_pass to
-  drop), incompatible with `--deploy-faithful`, counterfactual not yet a committed flag.
+  0.18 m/s) but the face normal is clip-locked (36-76° err, 0% legal returns) — the 175-D
+  contract has no normal channel (`docs/motion_and_contract_v3.md`). v1 caveats: uncorrelated
+  box sampling, human-receiver contact heights (0.98-1.26 m vs trained 0.72-1.13 m —
+  intentional realism, expect pos_pass to drop), incompatible with `--deploy-faithful`.
+- The normal counterfactual is a committed output (2026-07-05; was an ad-hoc uncommitted
+  analysis on 07-04): every venue strike is auto-rescored with the DEMANDED face normal swapped
+  into the achieved kinematics — `cf_*` columns after the 14 venue columns + a CF summary
+  block. Committed record (P2 product line, 9600 steps seed 0, 44 strikes): actual 0/44 vs
+  counterfactual 44/44, CF median landing error 0.10 m; the 07-04 2400-step run reproduces
+  byte-identically (first 43 CSV columns). The face-orientation channel alone fails the return.
+- Fixed-normal inversion exists and delivered a verdict (2026-07-05): `--venue-fixed-normal`
+  pins the StrikeSpec normal at the clip reference face (`solve_fixed_normal`, velocity-only
+  LM; free `solve()` untouched; 16/16 planner tests). Result: the path-A ceiling is ~0% — a
+  brute-force reachability scan (face pinned, all |v_r| ≤ 6 m/s, ~7k landings/ball) shows the
+  forehand face ([0.41,0.90,-0.17], near-sideways) lands x ≤ 1.4 m at ANY racket velocity
+  (never clears the net at 1.87 m) and the backhand face only reaches a net-hugging cross-court
+  sliver (x≈1.9-2.0, |y|≈0.3-0.67) outside the legal landing box (≥0.3 m depth guard =
+  training's own dink rule). Premise verified: mode-A achieved normal is within 1.9° of the
+  clip reference, so the pinned face IS the policy's face. Planner adaptation cannot rescue the
+  clip-locked face; the normal-channel contract change (175→179) is the only path.
+  Evidence: pod `/workspace/franco/cf_eval/` (scan_reachability.py, modeB_*.log).
+- A deploy-parity mid-swing switch stress protocol exists (2026-07-05): `--switch-stress P`
+  (multiswing only; default off = byte-identical) aborts the swing each step with probability P
+  exactly like the deploy runner's planner re-decides (training `clip_switch` semantics:
+  uniform new clip, windup frame, fresh hold + target, robot untouched; tracking guards off —
+  balance falls + timeout only). Reports switches, falls, 2 s post-switch survival, post-switch
+  vs clean-swing hit rates. First matrix ({P2, R11} × {implicit, explicit+keep-passive} ×
+  {~0, 0.002, 0.01}/step, 24000 steps each): zero falls in all 12 runs, 100% post-switch
+  survival, post-switch hit rate ≈ clean — the switch discontinuity alone does not topple even
+  the non-switch-trained P2 in MuJoCo; R11's in-distribution hit-rate tax remains visible on
+  the explicit gate (0.98-0.99 vs P2's 0.99-1.00). Logs: pod `/workspace/franco/cf_eval/sw_*`.
 - A documented validation flow with an acceptance-criteria table exists:
   `agi/a3_deploy_example/MUJOCO_VALIDATION_RUNBOOK.md` (rate ~50 Hz, sync stable, infer < 20 ms,
   projected gravity sanity, bounded actions, neck passive).
