@@ -44,7 +44,7 @@ algorithm:
   learning_rate: 0.001         # initial LR
   schedule: adaptive           # "adaptive" (KL-based) or "fixed"
   desired_kl: 0.01             # target KL for the adaptive schedule
-  entropy_coef: 0.01          # exploration bonus
+  entropy_coef: 0.015          # exploration bonus
   num_learning_epochs: 5       # gradient epochs per update
   num_mini_batches: 4          # minibatches per epoch
   # -------------------------------------------------------------------------

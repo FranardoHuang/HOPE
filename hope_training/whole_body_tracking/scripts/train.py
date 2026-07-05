@@ -256,6 +256,8 @@ _RACKET_KEYS = (
     "vb_vel_x_range", "vb_vel_y_range", "vb_vel_z_range",
     # translated below but previously missing from this whitelist
     "strike_phase_per_clip", "base_couple_blend", "base_couple_max_offset",
+    # HITTER separate-commands base/racket coupling ("blend" | "reference_reach"), 2026-07-05
+    "base_couple_mode",
 )
 
 # YAML keys under `motion:` that target the MotionCommandCfg swing-entry structure
@@ -486,6 +488,19 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _require(hasattr(R, "hold_ready"), "rewards.hold_ready")
             R.hold_ready.params["reach"] = float(_hr_reach)
             applied.append(f"rewards.hold_ready.params.reach={float(_hr_reach)}")
+        # FOOTWORK V2 (2026-07-05): gate mode for the hold_ready reach gate — "racket" (legacy
+        # blade->target distance; arm-gameable, not station-selective) or "station" (planar
+        # base->commanded-station error; required for the HITTER footwork task). See hold_ready().
+        _hr_mode = _get(rw, "hold_ready_reach_mode")
+        if _hr_mode is not None:
+            _require(hasattr(R, "hold_ready"), "rewards.hold_ready")
+            _hr_mode = str(_hr_mode)
+            if _hr_mode not in ("racket", "station"):
+                raise ValueError(
+                    f"[train.py] rewards.hold_ready_reach_mode must be 'racket' or 'station', got '{_hr_mode}'"
+                )
+            R.hold_ready.params["reach_mode"] = _hr_mode
+            applied.append(f"rewards.hold_ready.params.reach_mode={_hr_mode}")
         # P2.4 PACE-style smooth deceleration (flag-gated, default weight 0.0 = OFF): pseudo base-speed
         # command proportional to the remaining planar racket->target error. REWARD-side only (the
         # frozen 175-D actor obs contract is untouched).
@@ -598,6 +613,8 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             # weak base->racket coupling (uniform mode): fraction of the racket Y offset + clamp (meters)
             _set_attr(C, "base_couple_blend", _get(rk, "base_couple_blend"), float, applied, "racket_target")
             _set_attr(C, "base_couple_max_offset", _get(rk, "base_couple_max_offset"), float, applied, "racket_target")
+            # HITTER base-station derivation: "blend" (legacy) | "reference_reach" (base = racket − ref reach)
+            _set_attr(C, "base_couple_mode", _get(rk, "base_couple_mode"), str, applied, "racket_target")
             _set_attr(C, "normal_mode", _get(rk, "normal_mode"), str, applied, "racket_target")
             _set_attr(C, "forehand_on_negative_y", _get(rk, "forehand_on_negative_y"), _as_bool, applied, "racket_target")
             _set_attr(C, "mount_normal_axis", _get(rk, "mount_normal_axis"), int, applied, "racket_target")
@@ -863,9 +880,14 @@ def _run(cfg):
             print(f"[train.py] TOLERANT warm-start from {ckpt} (actor loaded; critic fresh if "
                   f"layout changed — deliberate warm-start semantics)", flush=True)
         else:
-            runner.load(ckpt)
+            # Warm-start checkpoints (e.g. make_hitter_warmstart.py) deliberately drop the
+            # optimizer state because parameter shapes changed; a fresh optimizer is correct there.
+            has_optimizer = "optimizer_state_dict" in torch.load(ckpt, map_location="cpu", weights_only=False)
+            runner.load(ckpt, load_optimizer=has_optimizer)
             print(f"[train.py] RESUMED from checkpoint: {ckpt} (continuing at iteration "
-                  f"{getattr(runner, 'current_learning_iteration', '?')})", flush=True)
+                  f"{getattr(runner, 'current_learning_iteration', '?')}, "
+                  f"optimizer={'resumed' if has_optimizer else 'FRESH — no optimizer_state_dict in ckpt'})",
+                  flush=True)
 
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)

@@ -63,3 +63,17 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
     },
 )
+
+# HOPE ping-pong WBC — HITTER separate base/racket commands (arXiv:2508.21043 §V-B-1).
+# Deploy-parity base + base_target_pos_b actor obs restored (175 -> 177) + pre-strike base
+# tracking reward + reference-reach base/racket coupling. NOT deploy-compatible with the
+# 175-D C++ runner until it grows the base channel (see hope_env_cfg comments).
+gym.register(
+    id="HOPE-PingPong-Hitter-AgibotA3-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": hope_env_cfg.HOPEPingPongHitterAgibotA3EnvCfg,
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
+    },
+)

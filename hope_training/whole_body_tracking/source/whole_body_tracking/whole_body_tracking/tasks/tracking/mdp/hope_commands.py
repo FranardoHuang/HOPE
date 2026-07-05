@@ -938,6 +938,21 @@ class RacketTargetCommand(CommandTerm):
             else:
                 clip = torch.zeros(n, dtype=torch.long, device=self.device)
             base_xy = self.racket_target_pos_w[env_ids][:, :2] - self._ref_reach_offset_xy_per_clip[clip]
+        elif self.cfg.base_couple_mode == "reference_reach":
+            # uniform + HITTER separate-commands coupling (§V-B-1): base_target = racket_target_xy −
+            # (reference base→racket strike offset). Same derivation as the reference_perturbed branch
+            # above, but the racket target keeps the proven uniform box distribution (warm-start
+            # friendly). Standing at the commanded station = racket target at the clip's reference
+            # reach, so the striking plane is fixed RELATIVE TO THE COMMANDED BASE and the x-span of
+            # the box moves the STATION, not the reach depth. The jitter below (base_target_*_range)
+            # trains the policy to strike with the station deliberately offset — y-reach diversity.
+            self._ensure_reference_strike_state()
+            assert self._ref_reach_offset_xy_per_clip is not None
+            if motion._multiseg:
+                clip = motion.clip_id[env_ids]
+            else:
+                clip = torch.zeros(n, dtype=torch.long, device=self.device)
+            base_xy = self.racket_target_pos_w[env_ids][:, :2] - self._ref_reach_offset_xy_per_clip[clip]
         else:
             # uniform: start at spawn, then WEAKLY couple the base toward the racket target's SIDEWAYS
             # offset (Y only; X is the fixed strike plane, so no forward repositioning). The base shifts a
@@ -2186,6 +2201,19 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # 0.0 = disabled (spawn-only). Conservative because no walking reference exists (it fights leg imitation).
     base_couple_blend: float = 0.0
     base_couple_max_offset: float = 0.20
+    # UNIFORM-mode base-target derivation (HITTER §V-B-1 alignment, 2026-07-05):
+    #   "blend"           — legacy: spawn + weak Y blend above (BASE-FREE tasks leave this the default).
+    #   "reference_reach" — HITTER separate-commands scheme: base_target = racket_target_xy −
+    #                       (reference base→racket strike offset, per clip). Standing AT the commanded
+    #                       station puts the racket target at the clip's reference reach — the striking
+    #                       plane is fixed RELATIVE TO THE COMMANDED BASE (HITTER's "0.4 m in front"),
+    #                       and footwork (mostly lateral) is driven by the base channel, not by
+    #                       stretching at a deep world point. base_target_*_range then acts as a JITTER
+    #                       around the coupled station (widen y to train y-reach diversity).
+    # Sim2real: the paired actor obs (base_target_pos_b) is a RELATIVE Δxy in the yaw-heading frame —
+    # deployable from mocap base position (300 Hz, position-only) without any absolute world frame; if
+    # mocap drops, feeding Δ=0 degrades gracefully to "already at station" (today's BASE-FREE behavior).
+    base_couple_mode: str = "blend"
 
     # --- swing-type convention ---
     forehand_on_negative_y: bool = True  # right arm holds the paddle: target on -Y side -> forehand (+1)

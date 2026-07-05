@@ -231,6 +231,12 @@ struct PpPolicyConfig {
   // That footwork only closes the loop when the localization source reports the REAL base motion
   // (sim: --oracle-pelvis; hardware: mocap). Under perfect_tracking the base obs stays pinned to
   // the reference pelvis and the strike loop runs OPEN — validate in sim with BOTH loc modes.
+  // ⚠ DO NOT pull x below the box centers to reduce the scripted forward walk: tried
+  // 2026-07-05 with model_19400_holdfix2 — x=0.58 (box edge) AND x=0.63 (half-way) BOTH
+  // fail Gate 2.5 P3b (post-swing hold fall; the shallower strike leaves a follow-through
+  // pose the policy never recovers from — post-swing recovery is only trained near the
+  // reference blade point). Fixed-x-plane / y-only strikes need the retrain rider
+  // (base-relative fixed-reach-x target sampling), not a runner-side constant.
   Vec3 racket_pos_w_clip[2] = {Vec3(0.68, -0.44, 0.82), Vec3(0.66, 0.13, 1.03)};
   Vec3 racket_vel_w_clip[2] = {Vec3(1.55, 1.46, 0.71), Vec3(2.11, -0.71, 0.36)};
   // sim2real localisation gap: no global base/torso pose -> nominal (matches

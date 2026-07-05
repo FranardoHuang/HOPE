@@ -486,3 +486,87 @@ class HOPEPingPongVirtualBallAgibotA3EnvCfg(HOPEPingPongDeployParityAgibotA3EnvC
         # also ungated from net clearance during the climb — see hope_rewards.virtual_landing).
         # Tighten back toward 0.3 together with re-gating once the net terms carry the signal.
         self.commands.racket_target.vb_landing_sigma = 1.0
+
+
+##
+# HITTER-footwork variant (arXiv:2508.21043 §V-B-1 "Separate Commands for Base and Racket") —
+# deploy-parity base + the base-position command channel restored (2026-07-05).
+#
+# WHY: the BASE-FREE deploy-parity policy self-selects walk-and-strike footwork toward deep
+# world-frame racket targets ("chasing a point forward"); it cannot be commanded to a station.
+# HITTER instead (a) commands the base to a world XY station, (b) fixes the striking plane
+# RELATIVE to the robot (0.4 m in front on their G1; our analog = each clip's reference
+# base→racket strike offset), sampling only the racket target's y/z spread, and (c) activates
+# base tracking only PRE-STRIKE (mdp.base_position_tracking_exp is already gated that way).
+#
+# SIM2REAL CONTRACT (177-D actor = 175-D deploy-parity + base_target_pos_b(2) restored at its
+# original slot between projected_gravity and racket_target_pos_b):
+#   * base_target_pos_b is a RELATIVE Δxy in the yaw-heading frame — computable on hardware from
+#     the mocap base position (300 Hz, position-only; hope-mocap-spec) + IMU yaw-align-at-engage.
+#     No absolute world coordinates enter the obs; mocap dropout → feed Δ=0, which degrades
+#     gracefully to "already at station" (today's BASE-FREE behavior).
+#   * A1 target latency/jitter does NOT yet degrade the base channel (the racket channel does);
+#     the base station demand is O(10 cm), obs Unoise covers mocap noise. Revisit if hardware
+#     shows base-channel transport lag matters.
+#   * The C++ runner (pp_policy.hpp build_obs_175) and mujoco_eval_onnx are 175-D and need the
+#     177-D layout + a planner base-target input before this variant can deploy — verify with
+#     scripts/verify_realsensor.py layout print after any obs change.
+##
+
+
+@configclass
+class HOPEObservationsHitterCfg(HOPEObservationsDeployParityCfg):
+    """Deploy-parity actor obs + the HITTER base-position command channel (175 -> 177)."""
+
+    @configclass
+    class HOPEPolicyHitterCfg(HOPEObservationsDeployParityCfg.HOPEPolicyDeployParityCfg):
+        # Restore the base-repositioning target (Δxy, yaw-heading frame). Overriding the parent's
+        # `= None` puts the term back at its ORIGINAL declaration slot (configclass inheritance
+        # preserves attribute order): between projected_gravity and racket_target_pos_b.
+        base_target_pos_b = ObsTerm(
+            func=mdp.base_target_pos_b,
+            params={"command_name": "racket_target"},
+            noise=Unoise(n_min=-0.03, n_max=0.03),  # ~mocap base-position noise at 300 Hz
+        )
+
+    @configclass
+    class HOPECriticHitterCfg(HOPEObservationsDeployParityCfg.HOPECriticDeployParityCfg):
+        # The critic conditions on the station too now that a reward consumes it.
+        base_target_pos_b = ObsTerm(func=mdp.base_target_pos_b, params={"command_name": "racket_target"})
+
+    policy: HOPEPolicyHitterCfg = HOPEPolicyHitterCfg()
+    critic: HOPECriticHitterCfg = HOPECriticHitterCfg()
+
+
+@configclass
+class HOPEHitterRewardsCfg(HOPEDeployParityRewardsCfg):
+    """Deploy-parity rewards + the HITTER base-repositioning goal reward restored.
+
+    mdp.base_position_tracking_exp is PRE-STRIKE gated in the reward function itself (HITTER:
+    "the base position tracking reward is activated only before the strike"). std 0.3 m matches
+    the original HITTER-alignment tuning (HOPERewardsCfg.base_position).
+    """
+
+    base_position = RewTerm(
+        func=mdp.base_position_tracking_exp,
+        weight=1.0,
+        params={"command_name": "racket_target", "std": 0.3},
+    )
+
+
+@configclass
+class HOPEPingPongHitterAgibotA3EnvCfg(HOPEPingPongDeployParityAgibotA3EnvCfg):
+    """Deploy-parity env + HITTER separate base/racket commands (obs 177-D; NOT deploy-compatible
+    with the 175-D C++ runner until the runner/planner grow the base channel)."""
+
+    obs_mode: str = "hitter_footwork"
+    observations: HOPEObservationsHitterCfg = HOPEObservationsHitterCfg()
+    rewards: HOPEHitterRewardsCfg = HOPEHitterRewardsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        # HITTER coupling: base station derived from the racket target at the clip's reference
+        # reach — the striking plane is fixed relative to the COMMANDED base; the box x-span moves
+        # the station, not the reach depth. Jitter ranges (base_target_*_range) train deliberate
+        # station offsets (y-reach diversity); the yaml preset owns their spans.
+        self.commands.racket_target.base_couple_mode = "reference_reach"
