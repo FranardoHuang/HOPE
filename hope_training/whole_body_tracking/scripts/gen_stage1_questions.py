@@ -141,12 +141,15 @@ def main() -> int:
             if s is None or s.residual_m > planner.TOL_M:
                 continue
             kept.append(i)
-            normals.append(s.n)
+            cn = st["clip_normal"] / np.linalg.norm(st["clip_normal"])
+            # Store the normal SIGN-ALIGNED to the clip's FK +Y red face: contact physics is
+            # sign-agnostic (orient_normal flips internally) but the face-tracking reward is
+            # sign-sensitive — the raw solver sign is arbitrary and could demand a 180-deg flip.
+            nn = s.n if np.dot(s.n, cn) >= 0 else -s.n
+            normals.append(nn)
             vels.append(s.v_r)
             residuals.append(s.residual_m)
             landings.append(s.landing_xy)
-            cn = st["clip_normal"] / np.linalg.norm(st["clip_normal"])
-            nn = s.n if np.dot(s.n, cn) >= 0 else -s.n  # face sign-invariant difficulty
             diffs.append(np.degrees(np.arccos(np.clip(np.dot(nn, cn), -1, 1))))
 
         kept = np.array(kept, dtype=int)
