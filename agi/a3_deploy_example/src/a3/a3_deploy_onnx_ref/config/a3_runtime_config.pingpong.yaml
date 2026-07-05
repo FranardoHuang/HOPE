@@ -11,17 +11,23 @@ onnx:
   # dist/.../models/ and rewrites the packaged runtime cfg to `models/...`. The runner
   # auto-detects obs dim from the ONNX input and builds obs 175 vs 180 accordingly.
   #
-  # CURRENT: model_9000_replane.onnx (2026-07-03, run 2026-07-03_02-01-17 model_9000) —
-  # 175-D deploy_parity, all-implicit training, v4 clips (seg 139/132, strike phases
-  # 0.470/0.333 baked in metadata), audit-config (multi-swing + HER). Training-side
-  # deploy-faithful MuJoCo gate: 7/7 swings incl. BACKHAND 3/3, 0 falls (oracle base pose).
-  # ⚠ model_9000 is a WALK-AND-STRIKE policy (turns ~84 deg + steps 0.4-0.65 m to the target):
-  # its footwork is only observable with a real localization source. Validate in AGI MuJoCo
-  # with BOTH --loc-mode perfect_tracking (hardware-realistic) AND --oracle-pelvis before any
-  # hardware decision; if perfect_tracking degrades the strike, hardware needs mocap.
-  # PREVIOUS: model_p4_deployparity.onnx (forehand-only verdict, strikes in place — the safe
-  # hardware fallback; needs --no-imu-yaw to reproduce its validated legacy behavior).
-  model_path: ../../../../assets/a3_runtime/models/model_9000_replane.onnx
+  # CURRENT: model_7500_hopex.onnx (2026-07-03, run 2026-07-03_13-32-07 model_7500) —
+  # 175-D deploy_parity, hopex RE-GROUNDED clips baked (== registry sources
+  # hope_forehand:v2 / hope_backhand:v1; seg 139/132, strike phases 0.470/0.333 in
+  # metadata). ⚠ do NOT bake v4 clips for this lineage — a v4-baked export of the same
+  # weights failed the gate (vel err 2.6 m/s, 1 fall). Deploy-faithful MuJoCo gate
+  # (implicit PD, hopex clips): composite 1.0 BOTH clips, 7/7 swings, 0 falls,
+  # pos err 4.1 cm, vel err 0.20 m/s. Training health @7k: Isaac composite 0.64,
+  # pos_pass 0.97, falls pre 1.4% / post 0.1%. C++ parity PASS (9.5e-7).
+  # Same target boxes as model_9000 (pp_policy.hpp scripted targets remain valid).
+  # ⚠ same walk-and-strike caveats as model_9000: footwork only closes the loop with a real
+  # localization source. Validate in AGI MuJoCo with BOTH --loc-mode perfect_tracking AND
+  # --oracle-pelvis before any hardware decision; if perfect_tracking degrades, hardware
+  # needs mocap.
+  # PREVIOUS: model_9000_replane.onnx (2026-07-03_02-01-17; deploy-faithful gate 7/7 incl.
+  # backhand, 0 falls). FALLBACK: model_p4_deployparity.onnx (forehand-only, strikes in
+  # place — the safe hardware fallback; needs --no-imu-yaw for its validated behavior).
+  model_path: ../../../../assets/a3_runtime/models/model_11400_hopex.onnx
   # The pingpong runner runs its ONNX on the CPU via the bundled onnxruntime — on rockchip too.
   # no_rknn tells build_a3_deploy_pkg.sh NOT to auto-promote to the RKNN/NPU path (which would
   # SystemExit on a missing <model>.rknn and block the standard rockchip staging).

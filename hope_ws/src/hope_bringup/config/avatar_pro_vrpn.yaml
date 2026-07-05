@@ -3,14 +3,14 @@ avatar_pro_vrpn_relay:
     # NOTE: the VRPN server IP/port and poll rate are launch args of
     # avatar_pro_hope_bridge.launch.py (server / port / update_freq), NOT here.
     #
-    # TODO(confirm): these must EXACTLY match the rigid-body / marker labels
-    # configured in the Avatar-Pro / CMTracker (MCServer) object list. HOW TO GET:
-    # open CMTracker, read the object names (or run `ros2 topic list | grep vrpn_mocap`
-    # after the client is up) and copy them verbatim. A mismatch = no data relayed.
+    # STANDARDIZED rigid-body names (2026-07-03): every AvatarPro/CMTracker setup
+    # must create the rigid bodies with EXACTLY these names — Ball / P1 / P2 (+ PPT
+    # for the table if used). A mismatch = no data relayed; check with
+    # `ros2 topic list | grep vrpn_mocap` after the client is up.
     vrpn_namespace: "/vrpn_mocap"
-    ppt_object: "PPT"      # TODO: confirm table rigid-body name in CMTracker
-    p1_object: "ppp2"        # TODO: confirm P1 robot rigid-body name
-    p2_object: "ppp3"        # TODO: confirm P2 robot rigid-body name
+    ppt_object: "PPT"      # table rigid body (optional)
+    p1_object: "P1"        # our robot's base rigid body (standardized)
+    p2_object: "P2"        # opponent robot rigid body (standardized)
     # Ball tracking method. NOTE: both of these are also launch args of
     # avatar_pro_hope_bridge.launch.py (ball_tracking_mode / ball_object) and the
     # launch args OVERRIDE the values here, so you normally pick the method on the
@@ -20,8 +20,8 @@ avatar_pro_vrpn_relay:
     #     /vrpn_mocap/<ball_object>/pose and publishes it to /ball/point. Preferred.
     #   * "auto"       -> motion-based fallback: the ball has no usable name, so the
     #     relay locks onto the moving non-rigid marker. ball_object is ignored.
-    ball_tracking_mode: "auto"
-    ball_object: ""        # rigid_body name (e.g. "Ball"); ignored in "auto" mode
+    ball_tracking_mode: "rigid_body"   # standardized: the ball IS a named rigid body
+    ball_object: "Ball"        # standardized ball rigid-body name; ignored in "auto" mode
 
     world_frame: "world"
 

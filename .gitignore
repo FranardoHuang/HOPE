@@ -34,6 +34,8 @@ hope_training/wandb/
 hope_training/whole_body_tracking/wandb/
 *.log
 .codex-env-snapshots
+.codex-temp
+.vscode
 hope_training/whole_body_tracking/diag_videos
 
 # Local, machine-specific training env override (Isaac paths + wandb identity).
@@ -46,8 +48,17 @@ hope_training/whole_body_tracking/setup_train_env.local.sh
 # Stray binaries (*.onnx/*.so/*.pt/...) are already covered by the global rules below.
 agi/a3_deploy_example/build/
 agi/a3_deploy_example/dist/
-agi/a3_deploy_example/thirdparty/
-agi/a3_deploy_example/assets/
+# thirdparty: ignore the big vendor bundles (onnxruntime 118M, unitree_sdk2 81M,
+# rknn runtime, .deb) BUT track joint_msgs -- 40 KB of .msg/CMake sources that the
+# deploy package build AND the hope_ws ROS chain (agibot_hardware_bridge, wbc_runner
+# hardware mode) depend on. A blanket thirdparty/ ignore made fresh clones unbuildable.
+agi/a3_deploy_example/thirdparty/*
+!agi/a3_deploy_example/thirdparty/joint_msgs/
+# assets: ignore models/motions (binary, 175M+) but keep the README that documents them.
+agi/a3_deploy_example/assets/*
+!agi/a3_deploy_example/assets/a3_runtime/
+agi/a3_deploy_example/assets/a3_runtime/*
+!agi/a3_deploy_example/assets/a3_runtime/README.md
 agi/a3_deploy_example/mujoco_sim_standalone/
 agi/a3_deploy_example/logs/
 agi/a3_deploy_example/.github/

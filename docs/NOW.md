@@ -42,7 +42,7 @@ Rules:
 | Person | Focus |
 | --- | --- |
 | franco | Direction, priorities, arbitration |
-| jiayi | End-to-end training bring-up; reward tuning — the simtoreal2 lineage (HER achieved-replay, hold_ready, model_9000 training) |
+| dongc1 | End-to-end training bring-up; reward tuning — the simtoreal2 lineage (HER achieved-replay, hold_ready, model_9000 training) |
 | yikang | Deployment; sim/env alignment |
 | claude (franco's agent) | Foundation: infrastructure, A/B experiments, doc/code hygiene |
 
@@ -98,11 +98,12 @@ Rules:
 - R10 换种子:0.885-0.890 → 平台可信,不是运气
 - **候审**(信号档在跑,赢了进组合):R16 手腕放开 / R14 变速播放 / R12 减速塑形 / R11b 低剂量中途换招
 - **等统一考卷**(训练内分数不可比):R7 真球盒(0.83@8.7k 还在爬)/ R9 斜录(0.71 到顶)/ R15 v5(排队)
-- **已拒绝**:R11@0.002 剂量(命中率税 0.12,已停在 10.7k;抗摔收益待部署仿真考试复核——**量这个收益的尺子还没有:现有考试不含中途换招,要加一个"换招压力测试"变体,CPU 活**)、R6 剪短模板@2k(无优势)
-| p21_B_teleport | 「旧传送式」对照：每拍开始把机器人瞬移到位（部署模型的旧训法），仅 2k，已停 |
-| p21_C_sigma | 基线结构 + 「奖励自动收紧」（误差变小奖励口径跟着变严），2k |
-| p21_D_postswing | 基线结构 + 「上拍收尾姿态起手」（一部分回合从上一拍打完的姿势开始练），2k |
-| p21_E_sigma_postswing | 「三合一」＝基线结构＋奖励自动收紧＋收尾姿态起手，从 C 续跑到 14k —— **当前最优候选** |
+- **已拒绝**:R11@0.002 剂量(命中率税 0.12,已停在 10.7k;抗摔收益已复核:换招压力测试 14 组全 0 摔,收益轴饱和、税为真)、R6 剪短模板@2k(无优势)
+- **⚠ simtoreal2 合并警示(2026-07-05)**:DeployParity 任务 yaml 现在带着 jiayi ARM A 重训的
+  实验默认值(回合 16s、等球 0-8s、A8=0.25、base_decel=ON、位置奖励 std 0.15)。**产品线
+  (VirtualBall)已在自己的 yaml 里显式钉回基线值不受影响**;在 DeployParity 上开新臂的人注意
+  基线已变,对照要自带。jiayi 的 std 0.15 理由(0.20 下模仿白拿 0.63 位置分=偷懒局部最优)
+  值得产品线走梯子验证 → 排为候选臂 R17
 
 ## Plan To Saturday (2026-07-03 → 07-04, target: play at the venue with an improved policy)
 
@@ -431,7 +432,7 @@ R15 v5 专属采样框(**franco 纠错后 2026-07-04 深夜版**;从击球帧提
 | 6 | **延迟/误差标定**:从动捕录制的时间戳量真实延迟与噪声谱 → 填 A1 各 flag 的数值(franco 指出:这些本就该从物理建模数据算出,不拍脑袋)。顺带确认真实帧率(现有 300 与 320 两种说法,时间戳一算便知) | yikang(数据)+ claude(分析脚本) | 周六-周日 |
 | 7 | 0703 打球录像 → 旋转归一 → 新参考 clip 验证(jiayi 的 re-ground 管线已做一版,确认覆盖) | jiayi | 周六前 |
 | 8 | 训练速度 vs 并行数的 trade-off 终版报告(见下,搜索范围 4096/8192/16384 + 共卡) | claude | 今天 |
-| 9 | 球进训练环境 + 落点奖励(P2.5-lite)— **周六前不可行,诚实排下周**;周六的增益来自策略改进+planner 物理参数,不来自训练内球 | claude/jiayi | 下周 |
+| 9 | 球进训练环境 + 落点奖励(P2.5-lite)— **周六前不可行,诚实排下周**;周六的增益来自策略改进+planner 物理参数,不来自训练内球 | claude/dongc1 | 下周 |
 | 10 | mocap→runner 桥 + 坐标变换设计(A2) | yikang | 下周 |
 
 ## ~~Tonight's Test Slots (2026-07-03)~~ 已过期,由「关键更新联合消融」与通宵舰队替代
@@ -458,8 +459,9 @@ After the 18:15 finish + verdict, the freed slots run signal-tier (2000-it ≈ 1
 | A8: post-swing initial-state buffer (Ace) | ★★★ | claude | `p2-multiswing` (flag `motion.post_swing_start_prob`) | IMPLEMENTED + mech-verified 2026-07-03; next: arm D after P2.1 A/B |
 | P2.0: ready-pose definition (see G08) | ★★ (foundation) | franco (拍摄) + claude (pipeline) | — | DECIDED 2026-07-03: option (a) — record a ready-stance video through GVHMR→GMR on the next site visit (bundle with A5's 30-50 new swing clips); claude processes + wires into stand_start/hold/clip re-entry |
 | Legacy-task long run `merged_uniform_hopex` (20000 it, task=HOPEPingPong on own branch) | ? | yikang | `rsi-on-wrap-progress-fix` | RUNNING on pod GPU0. ⚠ branch duplicates main's wrap_teleport machinery and has LFS-pointerized CSVs — reconcile with main before merging; the unique progress-fix is already ported to `p2-multiswing` |
-| simtoreal2 lineage: HER achieved-replay + hold_ready + model_9000_replane training (merged to main 2026-07-03) | ★★★ | jiayi | `simtoreal2` (merged) | model_9000 backhand passed training gate; **needs**: drop `model_9000_replane.onnx` into `/workspace/shared/models/` so the scoreboard can grade it against tonight's candidates |
-| G07 mocap→runner bridge + world→robot target transform design (A2) | ★★ | unassigned (natural fit: yikang) | — | design doc first; see G07 Next Steps and G08 audit item 2 |
+| simtoreal2 lineage: HER achieved-replay + hold_ready + model_9000_replane training (merged to main 2026-07-03) | ★★★ | dongc1 | `simtoreal2` (merged) | model_9000 backhand passed training gate; **needs**: drop `model_9000_replane.onnx` into `/workspace/shared/models/` so the scoreboard can grade it against tonight's candidates |
+| Sim2real deploy bridge: `agibot_hardware_bridge` ROS pkg (`bridge_node`) + `world_frame` world→robot target transform (+`test_world_frame`) + `hope_pingpong_sim2real` launch + `wbc_runner` rebuild for the planner-driven deploy path; `HOPEPingPongDeployParity` hyperparameter tuning | ★★★ | dongc1 | `simtoreal2` | IMPLEMENTED 2026-07-03 (`a5016d43`) with `run_sim2real_bridge.md` ops doc; this is the concrete build of the G07 world→robot transform (row below). Next: wire mocap relay → planner → runner end-to-end on hardware |
+| G07 mocap→runner bridge + world→robot target transform design (A2) | ★★ | dongc1 (impl started; see row above) | `simtoreal2` | `world_frame.py` + `test_world_frame` landed 2026-07-03; design doc still TODO — see G07 Next Steps and G08 audit item 2 |
 
 ## Queued (priority order, from G08)
 
@@ -475,6 +477,9 @@ After the 18:15 finish + verdict, the freed slots run signal-tier (2000-it ≈ 1
 
 | Item | Owner | Landed | Where |
 | --- | --- | --- | --- |
+| Standardize VRPN rigid-body object names (`P1`/`P2`/`Ball`) in the mocap relay config | dongc1 | 2026-07-03 | `simtoreal2` (`ac79a17a`) |
+| wandb registry: fetch only the newest `motion.npz` | dongc1 | 2026-07-03 | `simtoreal2` (`3c9bc0cf`) |
+| Merge `origin/main` (49 commits) into `simtoreal2` (local-first, doc+code) | dongc1 | 2026-07-03 | `simtoreal2` |
 | Fixed-protocol sim2sim scoreboard (`scoreboard_eval.py`), validated end-to-end on pod | claude | 2026-07-03 | `p2-eval-harness` |
 | 4 main-breaking merge casualties fixed (conflict markers; `motion_file` regression; `episode_time_left` probe crash; `play.py` `_wbt_tasks`) | claude | 2026-07-03 | main / `p2-multiswing` |
 | `motion:` task-YAML/CLI plumbing for wrap_teleport / stand_start / hold | claude | 2026-07-03 | `p2-multiswing` |

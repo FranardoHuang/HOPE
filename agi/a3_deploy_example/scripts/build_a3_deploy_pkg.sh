@@ -919,7 +919,9 @@ if motion_idle_src is not None:
         copy_into(motion_idle_src, "teleop_motions"),
     )
 set_nested(cfg, ["backend", "aimrt_cfg_path"], copy_into(aimrt_src, "config", "a3_aimrt_config.yaml"))
-for aimrt_name in ("a3_aimrt_config.iceoryx.yaml", "a3_aimrt_config.ros2.yaml"):
+for aimrt_name in ("a3_aimrt_config.iceoryx.yaml", "a3_aimrt_config.ros2.yaml",
+                   "a3_aimrt_config.pingpong_iceoryx.yaml",
+                   "a3_aimrt_config.pingpong_ros2body.yaml"):
     aimrt_variant = aimrt_src.parent / aimrt_name
     if aimrt_variant.exists():
         copy_into(aimrt_variant, "config", aimrt_name)
@@ -1150,6 +1152,19 @@ if [[ ! -f "${A3_AIMRT_CFG}" ]]; then
   echo "selected AimRT config does not exist: ${A3_AIMRT_CFG}" >&2
   exit 66
 fi
+
+# LIVE PLANNER (--planner): body-drive stays iceoryx; the planner racket target + mocap
+# base pose ride ros2. Override the transport cfg with the dual-plugin ros2body config.
+for _arg in "$@"; do
+  if [[ "${_arg}" == "--planner" ]]; then
+    A3_AIMRT_CFG="${SCRIPT_DIR}/config/a3_aimrt_config.pingpong_ros2body.yaml"
+    if [[ ! -f "${A3_AIMRT_CFG}" ]]; then
+      echo "--planner requires a3_aimrt_config.pingpong_ros2body.yaml under config/" >&2
+      exit 66
+    fi
+    break
+  fi
+done
 
 PINGPONG_RUNTIME_CFG="${SCRIPT_DIR}/config/a3_runtime_config.pingpong.yaml"
 if [[ ! -f "${PINGPONG_RUNTIME_CFG}" ]]; then
