@@ -21,6 +21,9 @@ gen_stage1_questions.py loading virtual_ball.py). Covers:
   off reporting.
 * loader meta enforcement (audit round 2): banks without meta_json / non-JSON meta / flags not
   both true are refused with ValueError; allow_legacy=True is the explicit escape hatch.
+* --anchor train-candidate: strike frame anchored at the FIRST entry of the registry's
+  independent train_phase_candidates field; a clip without the field refuses (SystemExit);
+  the default annotated anchor keeps the registry `phase` frame.
 
 Run:  /opt/anaconda3/bin/python3 hope_training/whole_body_tracking/tests/test_stage1_wiring.py
 """
@@ -286,6 +289,34 @@ def test_grip_calibration_synthetic(gen, asp, tmpdir):
     print("[ok] grip: R_wrist@Rg@y_hat world normal, rotated mount pos/vel FK, guard catches x2 rally")
 
 
+def test_anchor_train_candidate(gen, asp, tmpdir):
+    """--anchor train-candidate: strike frame = round(candidates[0] * (T-1)) (FIRST registry
+    entry, same phase->frame convention as _annotation_frame); absent field -> SystemExit;
+    default annotated anchor keeps the registry `phase` frame."""
+    npz = os.path.join(tmpdir, "anch_motion.npz")
+    _write_motion_npz(npz, (1.0, 0.0, 0.0, 0.0), T=11)
+    ann = {"phase": 0.9, "face_normal_reliable": False,
+           "train_phase_candidates": [0.3, 0.6]}
+    annotations = {"anch_motion": ann}
+    # default (annotated) anchor: frame = round(0.9 * 10) = 9, phase recorded from the registry
+    st = gen.strike_state_from_clip(asp, "bh", npz, annotations)
+    assert st["strike_frame"] == 9 and st["anchor"] == "annotated", (st["strike_frame"], st["anchor"])
+    assert abs(st["anchor_phase"] - 0.9) < 1e-12, st["anchor_phase"]
+    # train-candidate anchor: FIRST candidate 0.3 (not 0.6) -> frame round(0.3 * 10) = 3
+    st = gen.strike_state_from_clip(asp, "bh", npz, annotations, anchor="train-candidate")
+    assert st["strike_frame"] == 3 and st["anchor"] == "train-candidate", \
+        (st["strike_frame"], st["anchor"])
+    assert abs(st["anchor_phase"] - 0.3) < 1e-12, st["anchor_phase"]
+    # registry entry without the field refuses loudly (never falls back to `phase`)
+    bare = {"anch_motion": {"phase": 0.9, "face_normal_reliable": False}}
+    try:
+        gen.strike_state_from_clip(asp, "bh", npz, bare, anchor="train-candidate")
+        raise AssertionError("train-candidate anchor without the registry field did not refuse")
+    except SystemExit as exc:
+        assert "train_phase_candidates" in str(exc), exc
+    print("[ok] anchor: train-candidate uses FIRST registry candidate, absent field refuses")
+
+
 def test_bake_detection_fail_closed(gen, asp):
     """_grip_is_baked + resolve_grip_and_yaw refuse ambiguous registry states (audit round 2)."""
     def expect_exit(fn, *frags):
@@ -364,6 +395,7 @@ def main():
         test_loud_errors(qb, tmpdir)
         test_loader_meta_enforcement(qb, tmpdir)
         test_grip_calibration_synthetic(gen, asp, tmpdir)
+        test_anchor_train_candidate(gen, asp, tmpdir)
     test_face_command_obs_vector(qb)
     test_generator_split_determinism()
     test_rally_canonicalization(gen)

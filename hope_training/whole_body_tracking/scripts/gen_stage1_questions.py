@@ -17,6 +17,15 @@ The fixed strike point defaults to the clip's HAND-ANNOTATED strike-frame blade
 position (cfg/strike_annotations.yaml via analyze_strike_phase conventions), so the
 motion prior and the question are automatically consistent.
 
+ANCHOR MODE (--anchor {annotated,train-candidate}, default annotated = current behavior):
+``train-candidate`` anchors the strike frame at the FIRST entry of the clip's registry
+``train_phase_candidates`` field (the returnability-scan TRAINING-optimal phase, an
+independent field a human copied from --phase-scan output; NOT video contact truth —
+see the semantics boundary below) instead of the annotated ``phase``. A clip whose
+registry entry has no such field refuses with SystemExit (run --phase-scan and copy
+the suggestions in first). The anchor mode + chosen phase/frame are recorded in the
+bank meta_json (top-level ``anchor`` + per-clip ``anchor_phase``/``anchor_frame``).
+
 Self-test (--check, default on): every kept answer is replayed through the TRAINING-
 side physics (tracking/mdp/virtual_ball.py, torch venue port): predict_paddle_contact
 + coarse_landing must land within tolerance of the target — a cross-implementation
@@ -258,21 +267,43 @@ def _face_self_check(asp, path: str, frame: int, grip_rot, rally_yaw_deg: float,
 
 
 def strike_state_from_clip(asp, name: str, path: str, annotations: dict,
-                           grip_rot=None, rally_yaw_deg: float = 0.0):
-    """Fixed strike point (env frame) + clip reference normal/velocity from the annotated frame.
+                           grip_rot=None, rally_yaw_deg: float = 0.0,
+                           anchor: str = "annotated"):
+    """Fixed strike point (env frame) + clip reference normal/velocity from the anchor frame.
 
-    The grip is applied INSIDE asp.analyze() (the single grip application point — it rotates
-    the face normal AND the blade position/velocity mount FK); clip_normal / clip_vel are then
-    rally-canonicalized here via rally_canonicalize (the single rally application point for bank
-    mode). clip_normal_raw is the uncalibrated, uncanonicalized wrist+Y proxy at the same frame,
-    kept only for the old-vs-new difficulty print."""
+    ``anchor='annotated'`` (default) uses the registry ``phase`` (video contact truth);
+    ``anchor='train-candidate'`` uses the FIRST entry of the registry's independent
+    ``train_phase_candidates`` field (returnability-scan training-optimal frame) and refuses
+    (SystemExit) if the clip has no such field. The grip is applied INSIDE asp.analyze() (the
+    single grip application point — it rotates the face normal AND the blade position/velocity
+    mount FK); clip_normal / clip_vel are then rally-canonicalized here via rally_canonicalize
+    (the single rally application point for bank mode). clip_normal_raw is the uncalibrated,
+    uncanonicalized wrist+Y proxy at the same frame, kept only for the old-vs-new difficulty
+    print."""
     info = asp.analyze(name, path, use_blade=True, grip_rot=grip_rot)
     keys = asp._annotation_keys(name, path)
     ann = next((annotations[k] for k in keys if k in annotations), None)
     if ann is None:
         raise SystemExit(f"{name}: no entry in strike_annotations.yaml (keys tried: {keys}) — "
                          "annotate first, do not fall back to the speed peak")
-    asp._apply_annotation(info, next(k for k in keys if k in annotations), ann)
+    ann_key = next(k for k in keys if k in annotations)
+    asp._apply_annotation(info, ann_key, ann)
+    if anchor == "train-candidate":
+        # TRAINING-optimal anchor: the registry's independent train_phase_candidates field
+        # (human-copied --phase-scan output; NOT video contact truth). FIRST entry = the
+        # scan's earliest returnability-optimal frame. Same phase->frame convention as
+        # _annotation_frame (round(phase * (T-1))).
+        cands = ann.get("train_phase_candidates") or []
+        if not cands:
+            raise SystemExit(
+                f"{name}: --anchor train-candidate but registry entry {ann_key!r} has no "
+                f"train_phase_candidates field — run --phase-scan and copy the suggested "
+                f"candidates into strike_annotations.yaml (human step) before anchoring here")
+        anchor_phase = float(cands[0])
+        info["strike"] = max(0, min(int(round(anchor_phase * (info["T"] - 1))), info["T"] - 1))
+    else:
+        anchor_phase = (float(ann["phase"]) if ann.get("phase") is not None
+                        else info["strike"] / max(info["T"] - 1, 1))
     s = info["strike"]
     # WORLD-frame face (frame-mix fix 2026-07-05, franco's catch: normal_root is PELVIS-frame
     # while positions/velocities are world — mid-swing pelvis rotation rotated every "face" by
@@ -288,6 +319,8 @@ def strike_state_from_clip(asp, name: str, path: str, annotations: dict,
         clip_normal_raw=raw["normal_w"][s].copy(),
         strike_frame=int(s),
         n_frames=int(info["T"]),
+        anchor=anchor,
+        anchor_phase=float(anchor_phase),
     )
 
 
@@ -435,6 +468,12 @@ def main() -> int:
                          "true-calibrated) are detected and never re-rotated. "
                          "'off' = raw wrist+Y proxy (pre-0g behavior). rally_yaw "
                          "canonicalization is independent and always applied")
+    ap.add_argument("--anchor", choices=("annotated", "train-candidate"), default="annotated",
+                    help="strike-frame anchor: 'annotated' = the registry `phase` (video "
+                         "contact truth; current behavior); 'train-candidate' = the FIRST "
+                         "entry of the clip's independent `train_phase_candidates` registry "
+                         "field (returnability-scan training-optimal frame; refuses with "
+                         "SystemExit if the clip has no such field)")
     ap.add_argument("--split", choices=("train", "exam", "all"), default="all",
                     help="keep only this side of the deterministic ~80/20 hash split on the "
                          "incoming-velocity bytes (exam questions are disjoint from training at "
@@ -480,7 +519,8 @@ def main() -> int:
         grip_rot, grip_desc, rally_yaw, grip_mode = resolve_grip_and_yaw(
             asp, name, path, annotations, grip_block, args.grip)
         _print_grip_summary(name, grip_desc, grip_rot, rally_yaw)
-        st = strike_state_from_clip(asp, name, path, annotations, grip_rot, rally_yaw)
+        st = strike_state_from_clip(asp, name, path, annotations, grip_rot, rally_yaw,
+                                    anchor=args.anchor)
         p_env = st["contact_pos_env"]
         p_hope = p_env + env2hope
         # Effective clip face for sign-alignment + NEW difficulty; raw wrist+Y proxy (no grip,
@@ -523,8 +563,9 @@ def main() -> int:
         # with --split the un-selected side is never solved, so args.n would understate the rate.
         rate = len(kept) / max(len(sel), 1)
         d = np.array(diffs)
-        print(f"[{name}] strike point env={np.round(p_env, 3)} (clip frame {st['strike_frame']}/"
-              f"{st['n_frames']}), split={args.split} (sampled {n_train} train / {n_exam} exam), "
+        print(f"[{name}] anchor={args.anchor} phase {st['anchor_phase']:.3f} -> clip frame "
+              f"{st['strike_frame']}/{st['n_frames']}, strike point env={np.round(p_env, 3)}, "
+              f"split={args.split} (sampled {n_train} train / {n_exam} exam), "
               f"solvable {len(kept)}/{len(sel)} = {rate:.0%}")
         if rate < 0.5:
             print(f"  ** WARNING: solvability <50% — the fixed strike point is badly placed for "
@@ -546,7 +587,9 @@ def main() -> int:
             in_cone=np.array(in_cone, dtype=bool),
         )
         clip_meta[name] = dict(grip_mode=grip_mode, grip_desc=grip_desc,
-                               rally_yaw_deg=rally_yaw)
+                               rally_yaw_deg=rally_yaw, anchor=st["anchor"],
+                               anchor_phase=st["anchor_phase"],
+                               anchor_frame=st["strike_frame"], n_frames=st["n_frames"])
         grip_any = grip_any or grip_mode in ("registry", "baked")
 
     # --- torch virtual-ball closed-loop self-test (trainer-side venue physics) ----------
@@ -584,7 +627,7 @@ def main() -> int:
                 vz_range=args.vz_range, landing_env=args.landing_env, near_x=args.near_x,
                 speed_budget=args.speed_budget, split=args.split, exam_frac=EXAM_FRAC,
                 grip=args.grip, grip_applied=bool(grip_any), rally_yaw_applied=True,
-                clips=clip_meta)
+                anchor=args.anchor, clips=clip_meta)
     flat = {f"{n}/{k}": v for n, b in banks.items() for k, v in b.items()}
     # REAL json (audit round 2) — load_question_bank parses this and refuses banks whose
     # grip_applied / rally_yaw_applied flags are not both true (allow_legacy escape hatch).
