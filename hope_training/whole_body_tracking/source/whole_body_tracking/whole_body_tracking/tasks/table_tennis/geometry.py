@@ -48,10 +48,12 @@ LINE_WIDTH: float = 0.02            # painted boundary / center line width
 LINE_THICKNESS: float = 0.001       # painted line slab thickness (sits just above the surface)
 
 ##
-# Ball (40 mm). Radius matches both ITTF and Purdue PACE; mass follows Purdue PACE (see below).
+# Ball (40 mm). These MUST match ``configs/ball_physics.yaml`` (the single source of truth shared with
+# the MuJoCo C++ sim and the Record reference); a regression test asserts they stay in sync.
 ##
 BALL_RADIUS: float = 0.02           # 40 mm diameter (20 mm radius)
-BALL_MASS: float = 0.0034           # 3.4 g — Purdue PACE value (heavier than the 2.7 g ITTF ball)
+BALL_MASS: float = 0.0027           # 2.7 g — hollow ITTF ball (mocap-fitted physics; was 3.4 g Purdue PACE)
+BALL_INERTIA_COEFF: float = 2.0 / 3.0  # hollow sphere: I = c * m * R^2; used by the spin-coupled contact model
 
 ##
 # Coordinate landmarks in the HOPE frame.
@@ -112,49 +114,65 @@ class ServeConfig:
     vel_x_range: tuple[float, float] = (-5.0, -3.5)
     vel_y_range: tuple[float, float] = (-0.4, 0.4)
     vel_z_range: tuple[float, float] = (-0.2, 0.5)
-    # Optional initial spin (rad/s) about each HOPE axis; only matters if Magnus is enabled.
-    spin_range: tuple[float, float] = (0.0, 0.0)
+    # Initial spin (rad/s) sampled uniformly per HOPE axis. Tens of rad/s is the physical regime the
+    # mocap fit implies (~25-75 rad/s); this exercises the Magnus flight term and the spin-coupled
+    # bounce. Set both ends to 0.0 to serve a spin-free ball.
+    spin_range: tuple[float, float] = (-100.0, 100.0)
+
+    @classmethod
+    def reachable_returner(cls) -> "ServeConfig":
+        """Narrow, zero-spin serve for fixed-base / arm-only **returner** training (and the first smoke run).
+
+        Tuned against the fitted flight + spin-equation bounce model (``physics/flight.py`` +
+        ``spin_contact.py``): every sample clears the net, bounces once on the **P1 half** (x ~ 0.6-0.8 m),
+        and rises into a paddle-reachable band (z ~ 0.2-0.44 m above the table) near the table front edge
+        (x ~ 0), centred on the robot's stance line (y = -0.7625). Spin is zero so the trajectory is
+        predictable. This gives the per-hit ``pass_net``/``landing`` rewards a consistent ball to hit
+        instead of the wide, ±100 rad/s default serve. Validated by sweep: 16/16 box corners + 40/40
+        random interior samples clear the net and land a hittable window. Confirm reachability against the
+        A3 racket workspace visually (``play_table_tennis.py --serve returner``) before a long run."""
+        return cls(
+            pos_x_range=(1.95, 2.05),
+            pos_y_range=(-0.85, -0.70),
+            pos_z_range=(0.64, 0.72),
+            vel_x_range=(-3.5, -3.1),
+            vel_y_range=(-0.05, 0.05),
+            vel_z_range=(0.35, 0.55),
+            spin_range=(0.0, 0.0),
+        )
 
 
 @dataclass
 class BounceMaterials:
     """PhysX contact-material parameters for the ball and the static surfaces.
 
-    The ball and table values follow the **Purdue PACE** model
-    (``legged_lab/assets/table_tennis/{ball,table}.py``): table ``restitution = 0.95`` / ``friction = 0.4``
-    and ball ``restitution = 0.9`` / ``friction = 0.1``.
+    IMPORTANT — the ball<->table and ball<->racket bounces are NOT resolved by PhysX restitution any
+    more. They are owned by the code-driven, spin-coupled **spin-equation** contact model (see
+    ``physics/spin_contact.py``, applied per substep by ``TableTennisEnv``), because PhysX's scalar
+    Newton/Coulomb restitution cannot reproduce the fitted angle-dependent tangential impulse or the
+    spin update ``dw = -(3/2R)(n x dv_t)``.
 
-    NOTE on combine modes: every material here is created with ``*_combine_mode="multiply"`` (see
-    ``table_tennis_env_cfg._surface_material``), so the *effective* coefficient of a ball<->surface
-    contact is the **product** of the two materials' values. That product is what lets the net kill the
-    ball. Effective ball<->surface **normal restitutions** are therefore:
-
-        table  0.9 * 0.95 = 0.855      floor  0.9 * 0.4 = 0.36      net  0.9 * 0.1 = 0.09
-
-    (Purdue itself uses a single material for the whole table+net under PhysX-default averaging, so in
-    their sim the ball *bounces* off the net. We keep multiply + a separate low-restitution net so the
-    ball still dies on a net touch — more correct for match play. Adopting Purdue's net behavior would
-    mean raising ``net_restitution`` to 0.95.)
-
-    Friction is likewise multiplicative; with the low Purdue ball friction (0.1) the tangential
-    (horizontal) bounce is light. Exact horizontal-/racket-restitution matching to the HOPE planner
-    (``C_h = 0.75`` / ``C_r = 0.88``) remains a calibration TODO. All knobs live here so a calibration
-    pass only edits this one place.
+    To get out of PhysX's way, ``ball_restitution = 0`` — with the multiplicative combine mode (see
+    ``table_tennis_env_cfg._surface_material``) the *effective* restitution of every ball<->surface
+    contact is the **product**, so a zero ball restitution makes PhysX add **no** bounce on any surface:
+    it only resolves penetration (anti-tunnelling, helped by CCD), while the code sets the true
+    post-contact velocity + spin. The friction values are kept small/benign for the rare resting/rolling
+    case (after a point is effectively over); they do not affect the code-driven bounce.
     """
 
-    # Ball (dynamic) — Purdue PACE values.
-    ball_restitution: float = 0.9
+    # Ball (dynamic) — restitution 0 hands ALL bounces to the code-driven spin-equation model.
+    ball_restitution: float = 0.0
     ball_static_friction: float = 0.1
     ball_dynamic_friction: float = 0.1
-    # Table top — Purdue PACE TableMaterial.
-    table_restitution: float = 0.95
+    # Table top.
+    table_restitution: float = 0.95   # product with ball (0) is 0; kept for clarity / future tuning
     table_static_friction: float = 0.4
     table_dynamic_friction: float = 0.4
     # Floor.
     floor_restitution: float = 0.4
     floor_static_friction: float = 0.8
     floor_dynamic_friction: float = 0.8
-    # Net (low restitution so the ball dies on contact; kept separate from Purdue's single material).
+    # Net.
     net_restitution: float = 0.1
     net_static_friction: float = 0.5
     net_dynamic_friction: float = 0.5

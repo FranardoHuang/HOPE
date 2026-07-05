@@ -1,0 +1,52 @@
+# =============================================================================
+# HOPE ping-pong ball physics — single source of truth (experimentally fitted).
+# =============================================================================
+#
+# These constants were fitted from real ball flight measured with a motion-capture
+# system at 300 Hz (see /Users/.../Hope/Record, analysis/flight_model + analysis/
+# contact_model). They are consumed by:
+#
+#   * the Isaac Lab training env   (Python/torch) — whole_body_tracking .../table_tennis/physics
+#   * the MuJoCo deployment sim    (C++/yaml-cpp) — agi/A3_MuJoCo_Sim .../ball
+#   * (reference oracle, unchanged) Record/analysis/{flight_model,contact_model}
+#
+# This file holds ONLY frame-independent physics (ball, air, flight, contact).
+# Scene GEOMETRY (table surface height, net position, court extents) is NOT here:
+# it is frame-dependent and lives with each consumer (geometry.py for Isaac in the
+# HOPE frame z=0; the MJCF + a small geometry block for MuJoCo at z=0.76). The
+# physics algorithms only ever need "ball-centre height relative to the table
+# plane", which each consumer supplies.
+#
+# Units are SI throughout: m, m/s, rad/s, s, kg.
+# =============================================================================
+
+ball:
+  mass: 0.0027            # kg — 2.7 g hollow ITTF ball
+  radius: 0.020           # m  — 40 mm diameter
+  inertia_coeff: 0.6666666666666666  # hollow sphere: I = inertia_coeff * m * R^2 = (2/3) m R^2
+
+air:
+  rho: 1.20               # kg/m^3 — assumed air density (informational; drag uses k_d directly)
+
+# Flight: a = g - k_d * |v| * v + k_m * (omega x v)   (gravity + quadratic drag + Magnus)
+flight:
+  k_d: 0.1222             # 1/m — quadratic-drag accel coefficient (Cd ~= 0.438). NOTE: 1/m, NOT s/m.
+  k_m: 0.006              # bridges PHYSICAL spin -> Magnus force; recalibrate on heavy-spin data.
+  g: 9.81                 # m/s^2 — gravity magnitude (acts along -Z)
+  rk4_h: 5.0e-4           # s — reference RK4 integration step
+
+# Contacts: angle-dependent tangential-impulse "spin equation" (see contact_model/spin_equation.py).
+#   u        = v_minus + omega_minus x (-R n) - v_r          (relative contact velocity)
+#   s(theta) = clip((a_t + b_t*cos(theta)) * |u_t|, 0, mu_safety*(1+e_eff)*|u_n|)
+#   dv_t     = -s * unit(u_t);   dv_n = -(1+e_eff)*u_n*n;   dw = -(1/(c R)) (n x dv_t)
+contact:
+  table:                  # static table surface (v_r = 0). Slippery -> Coulomb cap dominates.
+    e_eff: 0.87           # normal restitution (validated e_n = 0.870 +/- 0.103, ITTF spec 0.88-0.92)
+    a_t: 1.0e6            # huge -> raw tangential always clips to the Coulomb cap
+    b_t: 0.0
+    mu_safety: 0.055      # slippery surface
+  paddle:                 # racket hit (v_r = paddle contact-point velocity, n = paddle face normal)
+    e_eff: 0.46319679859308827
+    a_t: 1.204821709011627
+    b_t: 0.3038927475721802
+    mu_safety: 2.5
