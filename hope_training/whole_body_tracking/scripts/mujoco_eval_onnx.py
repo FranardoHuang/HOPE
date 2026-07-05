@@ -1587,6 +1587,17 @@ def main():
                         "policy's clip-locked face. The reported return_success_rate is the "
                         "ZERO-TRAINING deployment ceiling of the current policy + an adapted "
                         "planner. Expect more solve rejections (landing DOF given up).")
+    # --- STAGE EXAMS (2026-07-06, franco's staged-question doctrine) -------------------------
+    p.add_argument("--venue-contact-fixed", nargs=3, type=float, default=None, metavar=("X", "Y", "Z"),
+                   help="[venue-balls] STAGE-1 exam: pin the incoming-ball contact point (env "
+                        "frame; e.g. the v5-bh _cal anchor blade point). Default: venue box.")
+    p.add_argument("--venue-spin-max", type=float, default=None,
+                   help="[venue-balls] cap the isotropic incoming-spin magnitude (rad/s); 0 = "
+                        "spinless stage-1 balls. Default: 34 (venue matchlike).")
+    p.add_argument("--venue-vel-box", nargs=6, type=float, default=None,
+                   metavar=("VX_LO", "VX_HI", "VY_LO", "VY_HI", "VZ_LO", "VZ_HI"),
+                   help="[venue-balls] override the incoming velocity box (speed tier / staged "
+                        "curriculum). Default: venue matchlike.")
     # --- SWITCH-STRESS protocol (2026-07-05): R11/R11b's benefit ruler — see module docstring --
     p.add_argument("--switch-stress", type=float, default=0.0, metavar="P",
                    help="deploy-parity mid-swing clip-switch stress protocol (multiswing rollout "
@@ -1805,7 +1816,14 @@ def main():
             landing_x_range=args.venue_landing_x_range,
             landing_y_range=tuple(args.venue_landing_y_range),
             speed_budget=args.venue_speed_budget, max_tries=args.venue_max_tries,
-            fixed_normal=args.venue_fixed_normal, **kw)
+            fixed_normal=args.venue_fixed_normal,
+            contact_fixed_env=args.venue_contact_fixed, spin_abs_max=args.venue_spin_max,
+            vel_box=(None if args.venue_vel_box is None else
+                     tuple((args.venue_vel_box[i], args.venue_vel_box[i + 1]) for i in (0, 2, 4))),
+            **kw)
+        if args.venue_contact_fixed or args.venue_spin_max is not None or args.venue_vel_box:
+            print(f"[mj-sim2sim]   STAGE EXAM overrides: contact_fixed={args.venue_contact_fixed} "
+                  f"spin_max={args.venue_spin_max} vel_box={args.venue_vel_box}")
         print(f"[mj-sim2sim] MODE B — target source: VENUE BALLS "
               f"(spec mirrors {_vbs.VENUE_YAML_REL}, pooled matchlike)")
         if args.venue_fixed_normal:

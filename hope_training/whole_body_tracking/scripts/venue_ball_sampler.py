@@ -161,7 +161,7 @@ class VenueBallSampler:
                  table_near_x=DEFAULT_TABLE_NEAR_X, table_surface_z=DEFAULT_TABLE_SURFACE_Z,
                  landing_x_range=None, landing_y_range=(-0.5, 0.5),
                  fh_y_split=DEFAULT_FH_Y_SPLIT, speed_budget=10.0, max_tries=100,
-                 fixed_normal=False):
+                 fixed_normal=False, contact_fixed_env=None, spin_abs_max=None, vel_box=None):
         # hope_planner by path (numpy-only package; node.py's ROS import is NOT in __init__).
         hp = hope_planner_path(repo_root)
         if not os.path.isdir(os.path.join(hp, "hope_planner")):
@@ -201,6 +201,12 @@ class VenueBallSampler:
         self.speed_budget = float(speed_budget)
         self.max_tries = int(max_tries)
         self.fixed_normal = bool(fixed_normal)
+        # STAGE-EXAM overrides (2026-07-06, franco's staged-question doctrine): None = the venue
+        # matchlike defaults (mode-B realism). Stage-1 paper: fixed contact point (env frame,
+        # e.g. the v5-bh _cal anchor blade point), zero spin, venue-like speed tier.
+        self.contact_fixed_env = None if contact_fixed_env is None else np.asarray(contact_fixed_env, float)
+        self.spin_abs_max = VENUE_SPIN_ABS_MAX if spin_abs_max is None else float(spin_abs_max)
+        self.vel_box = VENUE_VEL_BOX_MATCHLIKE if vel_box is None else tuple(vel_box)
         self.reset_counters()
 
     # ------------------------------------------------------------------------------------------
@@ -224,11 +230,16 @@ class VenueBallSampler:
         """Draw one venue ball + its StrikeSpec racket demand (resampling on solve failure)."""
         for attempt in range(1, self.max_tries + 1):
             # 1. incoming ball at-strike state (venue table frame).
-            p_venue = self._u3(rng, VENUE_CONTACT_POS_Q10_Q90)
-            v_ball = self._u3(rng, VENUE_VEL_BOX_MATCHLIKE)
+            if self.contact_fixed_env is not None:
+                # stage exam: contact pinned (env frame given) -> convert to venue frame
+                p_venue = self.contact_fixed_env - np.array([self.net_x, 0.0, self.table_surface_z])
+            else:
+                p_venue = self._u3(rng, VENUE_CONTACT_POS_Q10_Q90)
+            v_ball = self._u3(rng, self.vel_box)
             w_dir = rng.standard_normal(3)
             w_dir /= max(float(np.linalg.norm(w_dir)), 1e-9)
-            w_ball = w_dir * float(rng.uniform(0.0, VENUE_SPIN_ABS_MAX))
+            w_ball = w_dir * float(rng.uniform(0.0, self.spin_abs_max)) if self.spin_abs_max > 0 \
+                else np.zeros(3)
             # Sign structure (correlation caveat, v1): the ball must approach the robot. The
             # matchlike box already guarantees vx < 0; full correlations are NOT enforced.
             if v_ball[0] >= 0.0:
