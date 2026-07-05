@@ -1454,7 +1454,10 @@ class RacketTargetCommand(CommandTerm):
             v_plus,
             w_plus,
             prm,
-            surface_z=float(self.cfg.vb_table_surface_z),
+            # Physical table contact = ball CENTER crossing surface + R (the oracle / C++ /
+            # landing.py convention; the venue landing points were extracted at this plane).
+            # Passing the bare surface read the landing ~24 mm long (measured 2026-07-05).
+            surface_z=float(self.cfg.vb_table_surface_z) + prm.ball_radius,
             net_x=self._vb_net_x,
             h=float(self.cfg.vb_rollout_h),
             n_steps=int(self.cfg.vb_rollout_steps),

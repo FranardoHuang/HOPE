@@ -29,7 +29,7 @@ from dataclasses import dataclass
 import torch
 import yaml
 
-_EPS = 1e-9
+_EPS = 1e-12  # matches spin_contact.py / C++ kEps / the numpy oracle (was 1e-9; pure guard)
 
 
 @dataclass(frozen=True)
@@ -180,6 +180,10 @@ def coarse_landing(
     n_steps: int = 100,
 ) -> dict[str, torch.Tensor]:
     """Fixed-length branch-free rollout: first descending table-plane crossing + net-plane crossing.
+
+    ``surface_z`` is the plane the ball CENTER crosses. Physical table contact happens at
+    ``table_surface + ball_radius`` (the oracle / C++ / landing.py convention — the venue landing
+    points were extracted at that plane), so pass surface + R, not the bare surface.
 
     Returns (all first-crossing values; envs that never cross keep valid=False):
       ``land_xy`` (N,2)  interpolated table-plane crossing point,
