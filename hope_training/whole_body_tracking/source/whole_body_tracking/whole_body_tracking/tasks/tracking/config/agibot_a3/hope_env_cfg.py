@@ -288,9 +288,16 @@ class HOPEDeployParityRewardsCfg(HOPERewardsCfg):
     racket_progress = RewTerm(func=mdp.racket_progress, weight=10.0, params={"command_name": "racket_target"})
 
     # --- upper-body-only imitation (legs DECOUPLED so footwork is free to adapt to the target) ---
-    motion_body_pos = RewTerm(func=mdp.motion_relative_body_position_error_exp, weight=1.0,
+    # swing-only since 2026-07-05: during hold the body refs (frozen crouch frame) fought
+    # the stand joint reference -> splayed-feet crouch-stand; see hope_rewards wrappers.
+    # Foot discipline (2026-07-05): hip yaw/roll + ankle roll held to the reference
+    # footwork (hold-aware). Penalty; tune in [-0.5,-0.1] if it taxes the lunge.
+    foot_orientation = RewTerm(func=mdp.foot_orientation_discipline, weight=-0.3,
+        params={"command_name": "motion",
+                "asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_yaw_joint", ".*_hip_roll_joint", ".*_ankle_roll_joint"])})
+    motion_body_pos = RewTerm(func=mdp.motion_body_pos_swing_only, weight=1.0,
         params={"command_name": "motion", "std": 0.3, "body_names": A3_UPPER_TRACKED})
-    motion_body_ori = RewTerm(func=mdp.motion_relative_body_orientation_error_exp, weight=1.0,
+    motion_body_ori = RewTerm(func=mdp.motion_body_ori_swing_only, weight=1.0,
         params={"command_name": "motion", "std": 0.4, "body_names": A3_UPPER_TRACKED})
     motion_body_lin_vel = RewTerm(func=mdp.motion_global_body_linear_velocity_error_exp, weight=1.0,
         params={"command_name": "motion", "std": 1.0, "body_names": A3_UPPER_TRACKED})

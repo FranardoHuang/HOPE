@@ -601,7 +601,14 @@ class PpPolicy {
     // (the Gate 2.5 P2 3-5 s bare-hold tip). Training now zeroes the reference joint
     // velocities on held envs (commands.py joint_vel); mirror it in every policy-hold
     // state (level 0 = scripted hold AND the planner post-swing recovery hold).
-    if (level_.load() == 0) refs.joint_vel.setZero();
+    if (level_.load() == 0) {
+      refs.joint_vel.setZero();
+      // ...and the hold JOINT reference is the READY STAND, not the windup crouch
+      // (2026-07-05 lockstep with training commands.joint_pos): frame 0 is an
+      // asymmetric mid-crouch — imitating it during hold produced the splayed-feet
+      // crouch-stand. The release into the swing is the trained stand_start regime.
+      refs.joint_pos = onnx_.default_q();
+    }
 
     if (!state.sync_aligned) ++sync_miss_;  // dropped/unaligned state packet count
 

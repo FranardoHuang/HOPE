@@ -401,3 +401,37 @@ def arm_torque_saturation(env: ManagerBasedRLEnv, command_name: str) -> torch.Te
     frac = over.mean(dim=-1)
     cmd.metrics["arm_torque_sat_frac"] = frac  # watch-metric: should fall toward 0 during fine-tune
     return frac
+
+def motion_body_pos_swing_only(env, command_name: str, std: float, body_names=None):
+    """motion_relative_body_position_error_exp gated to ~in_hold (2026-07-05): during
+    hold the joint reference is the default STAND (commands.joint_pos) while the frozen
+    body refs still show clip frame 0's crouch — un-gated, the two imitation pulls
+    fight and the policy settles into the splayed-feet crouch-stand. Swing-only."""
+    from .rewards import motion_relative_body_position_error_exp
+    cmd = env.command_manager.get_term(command_name)
+    r = motion_relative_body_position_error_exp(env, command_name, std, body_names)
+    return torch.where(cmd.in_hold, torch.zeros_like(r), r)
+
+
+def motion_body_ori_swing_only(env, command_name: str, std: float, body_names=None):
+    """See motion_body_pos_swing_only."""
+    from .rewards import motion_relative_body_orientation_error_exp
+    cmd = env.command_manager.get_term(command_name)
+    r = motion_relative_body_orientation_error_exp(env, command_name, std, body_names)
+    return torch.where(cmd.in_hold, torch.zeros_like(r), r)
+
+def foot_orientation_discipline(env, command_name: str, asset_cfg):
+    """L1 deviation of the foot-orientation joints (hip yaw/roll, ankle roll) from the
+    REFERENCE joint positions — hold-aware via commands.joint_pos (default stand during
+    hold, clip footwork during swings). 2026-07-05: with no joint-level imitation in
+    the stack these DOF were reward-free, and the policy twisted the feet to
+    -1.13/+0.90 rad during swings/side-switches vs a reference envelope of ±0.41
+    (Gate 2.5 diag) — the 'weird foot placement' at strike/switch. Use a NEGATIVE
+    weight (penalty); keep it small so it disciplines feet without taxing the lunge.
+    """
+    cmd = env.command_manager.get_term(command_name)
+    asset = env.scene[asset_cfg.name]
+    q = asset.data.joint_pos[:, asset_cfg.joint_ids]
+    ref = cmd.joint_pos[:, asset_cfg.joint_ids]
+    return torch.sum(torch.abs(q - ref), dim=1)
+

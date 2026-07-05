@@ -1016,6 +1016,14 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
 
     for step in range(n_steps):
         refs = refs_table[time_step]
+        # DF hold/rest = READY-STAND reference (2026-07-05, lockstep with training
+        # commands.joint_pos + C++ pp_policy level-0): a frozen clock imitates the
+        # default stand (joint refs = default_q, ref vel = 0), not frame 0's
+        # asymmetric mid-crouch. Swing phases feed the raw clip refs unchanged.
+        if df is not None and dfs["phase"] != "swing":
+            refs = dict(refs)
+            refs["joint_pos"] = policy.default_q
+            refs["joint_vel"] = np.zeros_like(refs["joint_vel"])
         obs, base_quat_w, ra_pos, ra_quat, refa_pos, refa_quat = build_obs(
             refs, robot, racket, last_action, policy.default_q, deploy_parity=policy.deploy_parity)
 

@@ -192,7 +192,16 @@ class MotionCommand(CommandTerm):
 
     @property
     def joint_pos(self) -> torch.Tensor:
-        return self.motion.joint_pos[self.time_steps]
+        # HOLD imitates the READY STAND, not the windup crouch (2026-07-05, pragmatic
+        # P2.0): clip frame 0 is an asymmetric mid-crouch (knee 0.62/0.52 vs stand 0.25,
+        # left hip_roll +0.14) — imitating it all hold long produced the splayed-feet
+        # crouch-stand seen in Gate 2.5/3. During hold the joint reference is the
+        # default stand pose; the release (stand -> windup) is exactly the trained
+        # stand_start transition. C++ mirrors this (pp_policy: refs.joint_pos =
+        # default_q at level 0) — keep them in lockstep.
+        jp = self.motion.joint_pos[self.time_steps]
+        dq = self.robot.data.default_joint_pos
+        return torch.where(self.in_hold[:, None], dq, jp)
 
     @property
     def joint_vel(self) -> torch.Tensor:
