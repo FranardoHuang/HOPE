@@ -357,3 +357,108 @@ class VenueBallSampler:
             landed_ok=bool(contacted and landing_valid and on_opp and net_clear),
             land_err=land_err,
         )
+
+
+class BankExamSampler(VenueBallSampler):
+    """STAGE-1 OFFICIAL EXAM (--target-source bank): questions straight from an exam bank npz.
+
+    Same-source law (yikang handoff 2026-07-06): the S1 exam asks the exam split of the SAME
+    bank family the arm trained on. Loading goes through stage1_question_bank.load_question_bank
+    so the meta guards (grip_applied / rally_yaw_applied) are ENFORCED, never bypassed. Per
+    question: target pos = the clip's fixed contact point, target vel/normal = the solved
+    answer (demanded_normal feeds the 179-D obs tail per question), incoming ball = the
+    question's own sampled ball (npz incoming_vel; spinless stage 1). Contact/flight/net
+    judging is inherited from VenueBallSampler verbatim (same constants as the bank's own
+    entry gate and the training reward).
+    """
+
+    def __init__(self, repo_root, ref_normal_per_clip, num_clips, bank_path,
+                 clip_names=("forehand", "backhand"), **kw):
+        super().__init__(repo_root=repo_root, ref_normal_per_clip=ref_normal_per_clip,
+                         num_clips=num_clips, **kw)
+        import json
+        if num_clips != len(clip_names):
+            raise SystemExit(f"[FATAL] bank exam has {len(clip_names)} clips, eval replays "
+                             f"{num_clips} — motion files must be the same pair the bank was "
+                             f"generated from (0=forehand, 1=backhand)")
+        # torch-side loader = THE validation gate; numpy views afterwards. Import the MODULE FILE
+        # directly when $HOPE_STAGE1_QB is set (spec_from_file_location) — the package __init__
+        # chain pulls isaaclab, which the mjeval venv rightly lacks; the module itself only needs
+        # json/numpy/torch (mjeval venv: cpu torch wheel installed 2026-07-06).
+        qb_py = os.environ.get("HOPE_STAGE1_QB", "")
+        if qb_py:
+            import importlib.util as _ilu
+            _sp = _ilu.spec_from_file_location("stage1_question_bank", qb_py)
+            _m = _ilu.module_from_spec(_sp)
+            _sp.loader.exec_module(_m)
+            load_question_bank = _m.load_question_bank
+        else:
+            from whole_body_tracking.tasks.tracking.mdp.stage1_question_bank import (
+                load_question_bank,
+            )
+        qb = load_question_bank(bank_path, device="cpu", clip_names=clip_names)
+        data = np.load(bank_path)
+        self.bank_path = bank_path
+        self.clip_names = tuple(clip_names)
+        self.q_contact = qb.contact_pos.numpy().astype(np.float64)      # (C,3)
+        self.q_vel = qb.demanded_vel.numpy().astype(np.float64)         # (C,Qmax,3)
+        self.q_nrm = qb.demanded_normal.numpy().astype(np.float64)      # (C,Qmax,3)
+        self.q_diff = qb.difficulty_deg.numpy().astype(np.float64)      # (C,Qmax)
+        self.q_counts = [int(n) for n in qb.counts.numpy()]             # (C,)
+        self.q_income = []
+        for c, name in enumerate(clip_names):
+            inc = np.asarray(data[f"{name}/incoming_vel"], np.float64).reshape(-1, 3)
+            if len(inc) != self.q_counts[c]:
+                raise SystemExit(f"[FATAL] bank {bank_path}: {name} incoming_vel rows "
+                                 f"{len(inc)} != question count {self.q_counts[c]}")
+            self.q_income.append(inc)
+        meta = json.loads(bytes(np.asarray(data["meta_json"], dtype=np.uint8)).decode("utf-8"))
+        self.bank_meta = meta
+        land = meta.get("landing_env") or [2.555, 0.0]
+        self.q_landing = np.asarray(land, np.float64).reshape(2)
+        # lazily shuffled with the rollout rng (deterministic per --seed); exhaust-then-wrap.
+        self._order = None
+        self._next = [0] * len(clip_names)
+        self.asked = [0] * len(clip_names)
+        self.wrapped = [0] * len(clip_names)
+
+    def sample(self, rng):
+        if self._order is None:
+            self._order = [rng.permutation(n) for n in self.q_counts]
+        rem = [max(n - self.asked[c], 0) for c, n in enumerate(self.q_counts)]
+        tot = sum(rem)
+        if tot > 0:
+            c = int(rng.choice(len(rem), p=np.asarray(rem, np.float64) / tot))
+        else:
+            c = int(rng.integers(len(self.q_counts)))
+        i = int(self._order[c][self._next[c]])
+        self._next[c] += 1
+        if self._next[c] >= self.q_counts[c]:
+            self._next[c] = 0
+            self.wrapped[c] += 1
+        self.asked[c] += 1
+        v = self.q_vel[c, i]
+        return VenueStrike(
+            clip=c, ball_pos_w=self.q_contact[c].copy(),
+            ball_vel_w=self.q_income[c][i].copy(), ball_spin_w=np.zeros(3),
+            intended_landing_xy=self.q_landing.copy(),
+            target_pos_w=self.q_contact[c].copy(), target_vel_w=v.copy(),
+            target_normal_w=self.q_nrm[c, i].copy(),
+            spec_speed=float(np.linalg.norm(v)), spec_iters=0, tries=1)
+
+    def denominator_report(self):
+        """判卷分母法则 lines: per side — questions in the exam split (kept), how many were
+        asked/wrapped this run, and the share of answers inside the 25-deg face cone."""
+        lines = []
+        for c, name in enumerate(self.clip_names):
+            n = self.q_counts[c]
+            cone = float((self.q_diff[c, :n] <= 25.0).mean()) if n else float("nan")
+            med = float(np.median(self.q_diff[c, :n])) if n else float("nan")
+            lines.append(f"  {name}: exam questions kept={n} asked={self.asked[c]} "
+                         f"wrapped={self.wrapped[c]}x | face-cone(<=25deg) share={cone:.1%} "
+                         f"difficulty median={med:.1f}deg")
+        g = self.bank_meta.get("grip", "?")
+        lines.append(f"  meta: grip={g} grip_applied={self.bank_meta.get('grip_applied')} "
+                     f"rally_yaw_applied={self.bank_meta.get('rally_yaw_applied')} "
+                     f"landing_env={self.q_landing.tolist()}")
+        return lines
