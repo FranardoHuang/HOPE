@@ -183,6 +183,28 @@ H 训练侧捕获健康(virtual_hit 0.945、strike_pos_err 1.8cm、回合长 465
 处置:判卷 H 照常进卷,但动作源结论必须标注该张力;若要救斜录源,方向是 clip 几何同步转正(而非重跑)。
 判卷阻塞项仍是 1a-0(wip-bank-exam-source-0706 收尾)。
 
+## planner 延迟×精度基准(2026-07-06 深夜,yikang;分支 `planner-latency-bench` 8c1b34e,默认字节不变)
+
+**0.4s 成因定论**:`StrikeSpecPlanner.solve` → 每次 LM 迭代全程重积分(1kHz 纯 python Euler)。
+一次冷解 = 8 迭代 × 57 次全飞行 rollout = 3.6 万步 × 15.4µs = **451ms 中位**;单步 ~60% 在
+`np.cross`(Magnus)。node.py 里它已被限流 1Hz 只做诊断——部署 tick 真正在跑的是镜像律管线。
+
+**"jiayi planner" 考证**:不存在独立实现——部署三段管线(估计→预测→镜像律 plan)即 jiayi 6-17
+所写(ed5cca9);"我随手做的" RacketTargetPlanner = 该管线第三段。C++ runner 只消费
+`/racket/command_flat`,无 planner 数学。所以对比是**镜像律家族 vs 逆解家族**:
+
+| 候选 | 中位 ms | p90 ms | 落点误差中位 |
+|---|---|---|---|
+| 镜像律(user_quick / jiayi 管线) | 18.6 / 22.7 | ~106 | **~75mm(盲旋+无切向,真实代价)** |
+| StrikeSpec LM 基线 | 451 | 788 | 18.9mm(surface 口径 3.3mm;19 里 ~16 是 z=0 vs z=R 口径差) |
+| **赢家:fastnp+远粗近细20ms+热启动+iter6** | **15.2** | **41.8** | 18.6mm(精度不掉,30-45×) |
+| torch 批量 | batch1 1222 / batch64 摊销 24 | — | 1.9mm → **题库后端**(kernel-launch bound,非单题部署后端) |
+
+N=200 场馆题,oracle=venue RK4@2ms;Mac CPU 是代理尺,pod/SoC 复跑:
+`python3 hope_ws/src/hope_planner/benchmarks/benchmark_planner_latency.py --n 200 --seed 0`。
+**部署建议**:tick 路径换 fast 变体(flag 门控已入库,默认关)+ Stage-2 predict 同 flag(3.9→0.96ms)
++ 重规划降频 30-50Hz;后续杠杆:手写 cross(单步 ~60%)、C++/torch 后端。含 87 tests 绿(已独立复验)。
+
 ## 四阶段总计划(2026-07-06 重排版;每阶段 = 开发任务 + 测试臂,过线才升段)
 
 | 臂 | 配置(完整命令附后) | 回答什么 |
