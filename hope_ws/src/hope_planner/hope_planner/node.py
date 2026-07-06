@@ -83,6 +83,10 @@ class HOPEPlannerNode(Node):
         # policy base is the pelvis. In sim (robot_pose_topic=/sim/a3/pelvis_pose) it is already
         # the pelvis, so [0,0,0]. Set per venue (mirrors hope_world_frame.yaml mocap_to_base_link / G8).
         self.declare_parameter("marker_to_base_xyz", [0.0, 0.0, 0.0])
+        # Table +Y edge in the working frame (TableParams.y_max). Arena default 0.0
+        # (origin at near-left corner, table at y<=0); the SIM harness centers the
+        # table on the robot -> hope_planner.sim.yaml sets 0.7825.
+        self.declare_parameter("table_y_max", 0.0)
 
         self._ball_index = int(self.get_parameter("ball_pose_index").value)
         self._x_hit_offset = float(self.get_parameter("x_hit_offset").value)
@@ -110,7 +114,9 @@ class HOPEPlannerNode(Node):
             C_v=self.get_parameter("restitution_v").value,
         )
 
-        self.planner = HOPEPlanner(physics=physics, config=config)
+        from .constants import TableParams
+        table = TableParams(y_max=float(self.get_parameter("table_y_max").value))
+        self.planner = HOPEPlanner(physics=physics, config=config, table=table)
 
         # Flag-gated EKF SHADOW estimator: fed the same measurements as the
         # legacy polyfit estimator; the planner still ACTS on the legacy path.

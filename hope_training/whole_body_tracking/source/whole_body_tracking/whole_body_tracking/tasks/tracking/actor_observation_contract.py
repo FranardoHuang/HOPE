@@ -96,11 +96,49 @@ DEPLOY_PARITY = ActorObservationContract(
     ),
 )
 
+HITTER_FOOTWORK = ActorObservationContract(
+    name="hitter_footwork",
+    obs_mode="hitter_footwork",
+    total_dim=177,
+    terms=(
+        ActorObservationTerm("command", 62, "reference_clip", "reference joint positions and velocities"),
+        ActorObservationTerm(
+            "motion_anchor_ori_b",
+            6,
+            "imu_plus_reference_clip",
+            "reference torso orientation error",
+        ),
+        ActorObservationTerm("base_ang_vel", 3, "imu", "pelvis angular velocity in the body frame"),
+        ActorObservationTerm("joint_pos", 31, "encoders", "joint position offset from default"),
+        ActorObservationTerm("joint_vel", 31, "encoders", "joint velocities"),
+        ActorObservationTerm("actions", 31, "runtime_state", "previous policy action"),
+        ActorObservationTerm("projected_gravity", 3, "imu", "gravity direction in the base frame"),
+        ActorObservationTerm(
+            "base_target_pos_b",
+            2,
+            "planner_plus_mocap",
+            "desired base XY station relative to the current base (yaw-heading frame); mocap base "
+            "position at deploy — relative Δ only, Δ=0 graceful fallback on mocap dropout",
+        ),
+        ActorObservationTerm(
+            "racket_target_pos_b",
+            3,
+            "planner_plus_racket_fk",
+            "desired racket position relative to the current racket FK; no world base position",
+        ),
+        ActorObservationTerm("racket_target_vel_w", 3, "planner", "desired racket velocity in the world frame"),
+        ActorObservationTerm("time_to_strike", 1, "reference_clock", "time remaining until strike"),
+        ActorObservationTerm("swing_type", 1, "reference_clip", "forehand (+1) or backhand (-1) flag"),
+    ),
+)
+
 CONTRACTS = {
     FULL.name: FULL,
     DEPLOY_PARITY.name: DEPLOY_PARITY,
+    HITTER_FOOTWORK.name: HITTER_FOOTWORK,
     FULL.obs_mode: FULL,
     DEPLOY_PARITY.obs_mode: DEPLOY_PARITY,
+    HITTER_FOOTWORK.obs_mode: HITTER_FOOTWORK,
     **{alias: DEPLOY_PARITY for alias in DEPLOY_PARITY.legacy_names},
 }
 
@@ -140,7 +178,7 @@ def total_policy_dim_from_env(env) -> int:
 def infer_actor_observation_contract(env) -> ActorObservationContract | None:
     layout = policy_layout_from_env(env)
     total_dim = total_policy_dim_from_env(env)
-    for contract in (FULL, DEPLOY_PARITY):
+    for contract in (FULL, DEPLOY_PARITY, HITTER_FOOTWORK):
         if layout == contract.layout and total_dim == contract.total_dim:
             return contract
     return None

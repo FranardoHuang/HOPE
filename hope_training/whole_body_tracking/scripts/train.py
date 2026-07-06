@@ -254,8 +254,12 @@ _RACKET_KEYS = (
     # Tier-1 virtual ball: incoming-ball sampling boxes + outgoing-spin objective.
     "vb_spin_mode", "vb_spin_min_sigma", "vb_spin_abs_max",
     "vb_vel_x_range", "vb_vel_y_range", "vb_vel_z_range",
+    # metrics-only virtual ball (in-training 上台率/击球率 curves without vb rewards)
+    "vb_metrics_only",
     # translated below but previously missing from this whitelist
     "strike_phase_per_clip", "base_couple_blend", "base_couple_max_offset",
+    # HITTER separate-commands base/racket coupling ("blend" | "reference_reach"), 2026-07-05
+    "base_couple_mode",
 )
 
 # YAML keys under `motion:` that target the MotionCommandCfg swing-entry structure
@@ -490,6 +494,19 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _require(hasattr(R, "hold_ready"), "rewards.hold_ready")
             R.hold_ready.params["reach"] = float(_hr_reach)
             applied.append(f"rewards.hold_ready.params.reach={float(_hr_reach)}")
+        # FOOTWORK V2 (2026-07-05): gate mode for the hold_ready reach gate — "racket" (legacy
+        # blade->target distance; arm-gameable, not station-selective) or "station" (planar
+        # base->commanded-station error; required for the HITTER footwork task). See hold_ready().
+        _hr_mode = _get(rw, "hold_ready_reach_mode")
+        if _hr_mode is not None:
+            _require(hasattr(R, "hold_ready"), "rewards.hold_ready")
+            _hr_mode = str(_hr_mode)
+            if _hr_mode not in ("racket", "station"):
+                raise ValueError(
+                    f"[train.py] rewards.hold_ready_reach_mode must be 'racket' or 'station', got '{_hr_mode}'"
+                )
+            R.hold_ready.params["reach_mode"] = _hr_mode
+            applied.append(f"rewards.hold_ready.params.reach_mode={_hr_mode}")
         # P2.4 PACE-style smooth deceleration (flag-gated, default weight 0.0 = OFF): pseudo base-speed
         # command proportional to the remaining planar racket->target error. REWARD-side only (the
         # frozen 175-D actor obs contract is untouched).
@@ -549,12 +566,26 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             # sim2real fine-tune (explicit-PD): torque-saturation penalty + pre-strike upright shaping.
             ("arm_torque_saturation", "arm_torque_saturation_weight"),
             ("prestrike_upright", "prestrike_upright_weight"),
+            # Foot discipline (jiayi hold-fall stack, 2026-07-05): hip yaw/roll + ankle roll held to
+            # the reference footwork. Cfg default 0.0 (merge-audit flag-off); jiayi lineages pin -0.3.
+            ("foot_orientation", "foot_orientation_weight"),
         ):
             _w = _get(rw, _key)
             if _w is not None:
                 _require(hasattr(R, _name), f"rewards.{_name}")
                 getattr(R, _name).weight = float(_w)
                 applied.append(f"rewards.{_name}.weight={float(_w)}")
+
+    # actions: deploy-faithful action-processing switches (train==deploy parity knobs).
+    ac = _get(task, "actions")
+    _check_unknown_keys(ac, ("qdes_clamp",), "task.actions")
+    if ac is not None:
+        _qc = _get(ac, "qdes_clamp")
+        if _qc is not None:
+            _require(hasattr(env_cfg.actions, "joint_pos") and hasattr(env_cfg.actions.joint_pos, "clamp"),
+                     "actions.joint_pos.clamp")
+            env_cfg.actions.joint_pos.clamp = _as_bool(_qc)
+            applied.append(f"actions.joint_pos.clamp={_as_bool(_qc)}")
 
     rk = _get(task, "racket")
     _check_unknown_keys(rk, _RACKET_KEYS, "task.racket")
@@ -616,6 +647,8 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             # weak base->racket coupling (uniform mode): fraction of the racket Y offset + clamp (meters)
             _set_attr(C, "base_couple_blend", _get(rk, "base_couple_blend"), float, applied, "racket_target")
             _set_attr(C, "base_couple_max_offset", _get(rk, "base_couple_max_offset"), float, applied, "racket_target")
+            # HITTER base-station derivation: "blend" (legacy) | "reference_reach" (base = racket − ref reach)
+            _set_attr(C, "base_couple_mode", _get(rk, "base_couple_mode"), str, applied, "racket_target")
             _set_attr(C, "normal_mode", _get(rk, "normal_mode"), str, applied, "racket_target")
             _set_attr(C, "forehand_on_negative_y", _get(rk, "forehand_on_negative_y"), _as_bool, applied, "racket_target")
             _set_attr(C, "mount_normal_axis", _get(rk, "mount_normal_axis"), int, applied, "racket_target")
@@ -680,6 +713,9 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_range(C, "vb_vel_x_range", _get(rk, "vb_vel_x_range"), applied, "racket_target")
             _set_range(C, "vb_vel_y_range", _get(rk, "vb_vel_y_range"), applied, "racket_target")
             _set_range(C, "vb_vel_z_range", _get(rk, "vb_vel_z_range"), applied, "racket_target")
+            # Metrics-only virtual ball (franco 2026-07-06): in-training 上台率/击球率 curves on
+            # tasks whose rewards have no virtual_* terms (DeployParity/Hitter). Metrics only.
+            _set_attr(C, "vb_metrics_only", _get(rk, "vb_metrics_only"), _as_bool, applied, "racket_target")
 
     # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
     # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.
@@ -765,6 +801,17 @@ def _run(cfg):
 
     # 2) PPO runner cfg from cfg.algo
     algo = OmegaConf.to_container(cfg.algo, resolve=True)
+    # Task-level algo override (merge-audit 2026-07-06): a task YAML may pin ITS lineage's
+    # algorithm deviations (e.g. Hitter entropy_coef 0.015) without touching the global
+    # cfg/algo/ppo.yaml that every other lineage trains through. Whitelisted + fail-loud,
+    # same contract as _apply_task_overrides.
+    _task_algo = _get(cfg.task, "algo")
+    _check_unknown_keys(_task_algo, ("entropy_coef",), "task.algo")
+    if _task_algo is not None:
+        _ec = _get(_task_algo, "entropy_coef")
+        if _ec is not None:
+            algo["algorithm"]["entropy_coef"] = float(_ec)
+            print(f"[train.py] task.algo override: algorithm.entropy_coef={float(_ec)}", flush=True)
     agent_cfg = RslRlOnPolicyRunnerCfg(**runner_kwargs(algo, str(cfg.task.experiment_name)))
     agent_cfg.seed = int(cfg.seed)
     agent_cfg.device = str(cfg.device)
@@ -881,9 +928,14 @@ def _run(cfg):
             print(f"[train.py] TOLERANT warm-start from {ckpt} (actor loaded; critic fresh if "
                   f"layout changed — deliberate warm-start semantics)", flush=True)
         else:
-            runner.load(ckpt)
+            # Warm-start checkpoints (e.g. make_hitter_warmstart.py) deliberately drop the
+            # optimizer state because parameter shapes changed; a fresh optimizer is correct there.
+            has_optimizer = "optimizer_state_dict" in torch.load(ckpt, map_location="cpu", weights_only=False)
+            runner.load(ckpt, load_optimizer=has_optimizer)
             print(f"[train.py] RESUMED from checkpoint: {ckpt} (continuing at iteration "
-                  f"{getattr(runner, 'current_learning_iteration', '?')})", flush=True)
+                  f"{getattr(runner, 'current_learning_iteration', '?')}, "
+                  f"optimizer={'resumed' if has_optimizer else 'FRESH — no optimizer_state_dict in ckpt'})",
+                  flush=True)
 
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)

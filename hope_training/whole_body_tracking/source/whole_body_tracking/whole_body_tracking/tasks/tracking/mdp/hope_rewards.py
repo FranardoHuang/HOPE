@@ -125,7 +125,9 @@ def racket_progress(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     return cmd.racket_progress * cmd.pre_strike.float()
 
 
-def hold_ready(env: ManagerBasedRLEnv, command_name: str, std: float, reach: float = 0.65) -> torch.Tensor:
+def hold_ready(
+    env: ManagerBasedRLEnv, command_name: str, std: float, reach: float = 0.65, reach_mode: str = "racket"
+) -> torch.Tensor:
     """POSITIVE ready-stance reward during the pre-swing HOLD (the between-swing recovery phase).
 
     HITTER's balance recovery comes from a positive "prepare for the next target" signal (its pre-strike
@@ -137,13 +139,24 @@ def hold_ready(env: ManagerBasedRLEnv, command_name: str, std: float, reach: flo
     the motion command's ``in_hold`` mask. Rewards arriving at the next windup calm, upright-by-stillness
     and with both feet planted — i.e. finishing the previous swing in a recoverable state.
 
-    ``reach`` gate: stillness is only the CORRECT ready action when the new target is already within
-    arm's reach. Without the gate this term pays ~weight/step for planted stillness, which out-earns the
+    ``reach`` gate: stillness is only the CORRECT ready action when the robot is already where it can
+    strike from. Without the gate this term pays ~weight/step for planted stillness, which out-earns the
     telescoping racket_progress for stepping during the hold — i.e. it would teach freeze-then-rush
-    exactly when the Phase 1-2 box widening needs footwork. Gated by
-    ``racket_target_distance < reach``: near targets -> stand ready; far targets -> the term is silent
-    and racket_progress drives stepping, untaxed. Zero outside the hold (the swing itself is untouched)
-    and a safe no-op if the motion command has no hold state. RewTerm weight is POSITIVE.
+    exactly when wide target boxes need footwork. Two gate modes (``reach_mode``):
+
+    * ``"racket"`` (legacy default, base-free tasks): ``racket_target_distance < reach`` — the 3D
+      FK-blade->target distance. CAVEAT (2026-07-05 footwork audit): this gate is NOT
+      station-selective — the blade distance is arm-pose-controllable (arm imitation is swing-only,
+      so reaching toward the target during the hold is reward-free), and for near-side targets it is
+      SMALLER at the wrong station than at the correct one, inverting the settle income exactly where
+      a step is required. Keep it only for base-free tasks that have no meaningful station.
+    * ``"station"`` (HITTER footwork tasks): ``|base_xy − base_target_xy| < reach`` — the planar
+      base->commanded-station error. Station-selective by construction and not arm-gameable: far
+      station -> the term is silent (base_position/racket_progress drive the step, untaxed);
+      arrived -> the stillness income switches on (move to the stance, THEN settle, then swing).
+
+    Zero outside the hold (the swing itself is untouched) and a safe no-op if the motion command has
+    no hold state. RewTerm weight is POSITIVE.
     """
     cmd = _cmd(env, command_name)
     in_hold = getattr(cmd._motion(), "in_hold", None)
@@ -154,7 +167,13 @@ def hold_ready(env: ManagerBasedRLEnv, command_name: str, std: float, reach: flo
         torch.square(data.root_ang_vel_w), dim=-1
     )
     raw = torch.exp(-motion_sq / std**2) * cmd.feet_contact_frac
-    near = (cmd.racket_target_distance < reach).float()
+    if reach_mode == "station":
+        station_err = torch.norm(cmd.base_pos_w[:, :2] - cmd.base_target_pos_w, dim=-1)
+        near = (station_err < reach).float()
+    elif reach_mode == "racket":
+        near = (cmd.racket_target_distance < reach).float()
+    else:
+        raise ValueError(f"hold_ready: unknown reach_mode '{reach_mode}' (expected 'racket' or 'station')")
     return raw * near * in_hold.float()
 
 
@@ -401,3 +420,37 @@ def arm_torque_saturation(env: ManagerBasedRLEnv, command_name: str) -> torch.Te
     frac = over.mean(dim=-1)
     cmd.metrics["arm_torque_sat_frac"] = frac  # watch-metric: should fall toward 0 during fine-tune
     return frac
+
+def motion_body_pos_swing_only(env, command_name: str, std: float, body_names=None):
+    """motion_relative_body_position_error_exp gated to ~in_hold (2026-07-05): during
+    hold the joint reference is the default STAND (commands.joint_pos) while the frozen
+    body refs still show clip frame 0's crouch — un-gated, the two imitation pulls
+    fight and the policy settles into the splayed-feet crouch-stand. Swing-only."""
+    from .rewards import motion_relative_body_position_error_exp
+    cmd = env.command_manager.get_term(command_name)
+    r = motion_relative_body_position_error_exp(env, command_name, std, body_names)
+    return torch.where(cmd.in_hold, torch.zeros_like(r), r)
+
+
+def motion_body_ori_swing_only(env, command_name: str, std: float, body_names=None):
+    """See motion_body_pos_swing_only."""
+    from .rewards import motion_relative_body_orientation_error_exp
+    cmd = env.command_manager.get_term(command_name)
+    r = motion_relative_body_orientation_error_exp(env, command_name, std, body_names)
+    return torch.where(cmd.in_hold, torch.zeros_like(r), r)
+
+def foot_orientation_discipline(env, command_name: str, asset_cfg):
+    """L1 deviation of the foot-orientation joints (hip yaw/roll, ankle roll) from the
+    REFERENCE joint positions — hold-aware via commands.joint_pos (default stand during
+    hold, clip footwork during swings). 2026-07-05: with no joint-level imitation in
+    the stack these DOF were reward-free, and the policy twisted the feet to
+    -1.13/+0.90 rad during swings/side-switches vs a reference envelope of ±0.41
+    (Gate 2.5 diag) — the 'weird foot placement' at strike/switch. Use a NEGATIVE
+    weight (penalty); keep it small so it disciplines feet without taxing the lunge.
+    """
+    cmd = env.command_manager.get_term(command_name)
+    asset = env.scene[asset_cfg.name]
+    q = asset.data.joint_pos[:, asset_cfg.joint_ids]
+    ref = cmd.joint_pos[:, asset_cfg.joint_ids]
+    return torch.sum(torch.abs(q - ref), dim=1)
+

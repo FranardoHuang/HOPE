@@ -67,7 +67,8 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--onnx", default=os.path.join(
         wbt, "logs/rsl_rl/agibot_a3_hope/2026-06-27_18-14-06_basecouple03_resume/exported/policy.onnx"),
-        help="exported policy ONNX (legacy 180-D default; pass a current 175-D export explicitly)")
+        help="exported policy ONNX (legacy 180-D default; pass a current 175-D deploy_parity "
+             "or 177-D hitter_footwork export explicitly)")
     p.add_argument("--hpp", default=os.path.join(
         repo, "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/a3_policy_parameters.hpp"))
     args = p.parse_args()
@@ -122,8 +123,8 @@ def main():
     print(f"train-only (head) joints: {head_joints}")
     print("VERDICT (gains): " + ("ALL shared joints match the deploy a3_kps/a3_kds/defaults/action_scale"
                                   if mism == 0 else f"{mism} shared-joint mismatches — INVESTIGATE"))
-    print("NOTE: obs (current deploy contract = 175-D deploy-parity, legacy full = 180-D, vs deploy 1570) "
-          "and action dim (31 vs 29) + joint ORDER still differ — see the audit doc.")
+    print("NOTE: obs (deploy contracts = 175-D deploy-parity / 177-D hitter_footwork, legacy full = "
+          "180-D, vs deploy 1570) and action dim (31 vs 29) + joint ORDER still differ — see the audit doc.")
     print("=" * 118)
 
 

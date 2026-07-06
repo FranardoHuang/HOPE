@@ -25,3 +25,14 @@ hope_planner:
     x_hit_max: 2.20
     # static fallback while no robot pose has arrived yet
     x_hit: 0.65
+    # Sim harness centers the table on the robot (robot at y=0): table y in [-0.7825, +0.7825].
+    # Without this the predictor uses the ARENA band [-1.545,+0.02] and every backhand serve
+    # is off-table: no bounce modeled -> dead-ball plans -> zero backhand engages (2026-07-05).
+    table_y_max: 0.7825
+    # Return AIM POINT for the same centered table. The base yaml's -0.7625 is the ARENA
+    # convention (table at y<=0); left un-overridden it aims every return at the sim
+    # table's right EDGE, which skews the demanded racket vy NEGATIVE on forehand
+    # (-0.30 vs the trained [+0.96,+1.96] box — wrong sign). 0.0 = opponent half
+    # centerline in the centered sim frame (2026-07-06 fix; the 2026-07-05 table_y_max
+    # override fixed only the PREDICTOR band, not the aim).
+    target_land_y: 0.0

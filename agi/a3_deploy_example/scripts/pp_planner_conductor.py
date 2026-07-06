@@ -56,16 +56,25 @@ def z():
     return state["z"] if state["z"] is not None else -1.0
 
 
+# Reset y-offset (m): shifts the robot's start spot laterally so serve arrivals land at a
+# DIFFERENT base-relative y than world y — with the 177-D hitter contract this makes the
+# derived station command nonzero from the first serve (footwork exercised, not just
+# in-place reach). 0.0 = legacy behavior. Keep |y| <= ~0.3: the runner's engage gate
+# allows |y|<=0.85 base-rel, but the policy's trained station envelope is ~±0.3-0.4.
+RESET_Y = float(os.environ.get("PP_RESET_Y", "0.0"))
+
+
 def reset():
     # Keyframe stand + base placed at x=0.33: the adaptive x_hit (robot_x + 0.67) then sits
     # at 1.0 where the probed serve's post-bounce arc peaks at z=0.72 — inside the forehand
-    # training box. (175-D obs has no world base position; placement is free.)
+    # training box. (175-D obs has no world base position; placement is free. 177-D reads
+    # the REAL base via /a3/base_pose_flat, so PP_RESET_Y shifts the station demand.)
     m = SimReset()
     m.mode = 1
     m.keyframe_id = 0
     m.set_base = True
     m.pelvis_pose.position.x = 0.33
-    m.pelvis_pose.position.y = 0.0
+    m.pelvis_pose.position.y = RESET_Y
     m.pelvis_pose.position.z = 1.07
     m.pelvis_pose.orientation.w = 1.0
     m.set_base_twist = True
@@ -172,7 +181,9 @@ if not stand_and_motion("point 1"):
 # -> 'p' (operator abort / point over) -> reset to the start spot -> 's' -> 'm' ->
 # next point. A fall BEFORE the deliberate 'p' is a real failure; the limp collapse
 # AFTER 'p' is the operator catch, not a fall.
-POINTS = 3
+# PP_POINTS=10 sweeps every placement of the closed-loop script's 10-serve coverage list
+# (serves cycle fh1,bh1,fh2,... independently of points; more points = more placements).
+POINTS = int(os.environ.get("PP_POINTS", "3"))
 POINT_TIMEOUT_S = 22.0   # serves every 4 s; engage typically within ~8 s of 'm'
 results = []
 for point in range(1, POINTS + 1):

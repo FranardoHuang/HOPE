@@ -14,3 +14,4 @@ from .terminations import *  # noqa: F401, F403
 from .hope_commands import *  # noqa: F401, F403
 from .hope_observations import *  # noqa: F401, F403
 from .hope_rewards import *  # noqa: F401, F403
+from .hope_actions import *  # noqa: F401, F403

@@ -27,10 +27,12 @@ class PpOnnxPolicy {
     so.SetIntraOpNumThreads(1);
     session_ = std::make_unique<Ort::Session>(env_, model_path.c_str(), so);
 
-    // detect obs input dim: 180 (full) or 175 (deploy_parity). The obs builder + buffers use obs_dim_.
+    // detect obs input dim: 180 (full), 175 (deploy_parity) or 177 (hitter_footwork).
+    // The obs builder + buffers use obs_dim_.
     auto in0 = session_->GetInputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
-    if (in0.size() != 2 || (in0[1] != kObsDim && in0[1] != kObsDim175))
-      throw std::runtime_error("ONNX obs input is not [1,180] or [1,175]");
+    if (in0.size() != 2 ||
+        (in0[1] != kObsDim && in0[1] != kObsDim175 && in0[1] != kObsDim177))
+      throw std::runtime_error("ONNX obs input is not [1,180], [1,177] or [1,175]");
     obs_dim_ = static_cast<int>(in0[1]);
 
     Ort::AllocatorWithDefaultOptions alloc;
@@ -72,6 +74,18 @@ class PpOnnxPolicy {
         clip_strike_phases_.assign(pha.data(), pha.data() + pha.size());
       }
     }
+
+    // OPTIONAL per-clip reference base->racket reach offset at the strike frame
+    // (dx0,dy0,dx1,dy1,...). Baked by utils/exporter.py since 2026-07-06 for 177-D
+    // hitter_footwork models: the runner derives the deploy-time base STATION from the
+    // racket target as station_xy = target_xy - reach_offset_xy[clip] (training
+    // base_couple_mode=reference_reach). PpPolicy computes a refs-based fallback for
+    // metadata-less 177 exports.
+    const std::string reach_s = LookupMetaOptional(md, alloc, "ref_reach_offset_xy");
+    if (!reach_s.empty()) {
+      const Eigen::VectorXd v = ToVec(reach_s);
+      for (int i = 0; i + 1 < v.size(); i += 2) reach_offsets_.push_back(Vec2(v[i], v[i + 1]));
+    }
   }
 
   int obs_dim() const { return obs_dim_; }
@@ -79,6 +93,25 @@ class PpOnnxPolicy {
   bool has_clip_layout() const { return !clip_seg_lengths_.empty(); }
   const std::vector<double>& clip_seg_lengths() const { return clip_seg_lengths_; }
   const std::vector<double>& clip_strike_phases() const { return clip_strike_phases_; }
+  // Per-clip reference reach offsets (empty when the export predates the metadata key).
+  bool has_reach_offsets() const { return !reach_offsets_.empty(); }
+  const std::vector<Vec2>& reach_offsets() const { return reach_offsets_; }
+
+  // Reference base->racket reach offset at a given time_step, computed from the baked refs:
+  // blade world xy (ref pelvis pose + racket FK on the ref joints) minus ref pelvis xy. Same
+  // arithmetic as training's _ensure_reference_strike_state — the fallback for 177 models
+  // whose export predates the ref_reach_offset_xy metadata key.
+  Vec2 reach_offset_from_refs(int time_step) {
+    auto out = Run(Eigen::VectorXd::Zero(obs_dim_), time_step,
+                   {"joint_pos", "body_pos_w", "body_quat_w"});
+    const Eigen::VectorXd ref_q = Map(out[0], kNumJoints);
+    const float* bp = out[1].GetTensorData<float>();  // [1,14,3]; tracked body 0 = pelvis
+    const float* bq = out[2].GetTensorData<float>();  // [1,14,4]
+    const Vec3 pelvis_pos(bp[0], bp[1], bp[2]);
+    const Vec4 pelvis_quat(bq[0], bq[1], bq[2], bq[3]);
+    const Vec3 blade_w = pelvis_pos + mat_from_quat(pelvis_quat) * racket_pos_pelvis(ref_q);
+    return Vec2(blade_w[0] - pelvis_pos[0], blade_w[1] - pelvis_pos[1]);
+  }
   const std::vector<std::string>& joint_names() const { return joint_names_; }
   const std::vector<std::string>& body_names() const { return body_names_; }
   const Eigen::VectorXd& default_q() const { return default_q_; }
@@ -164,6 +197,7 @@ class PpOnnxPolicy {
   std::unique_ptr<Ort::Session> session_;
   std::vector<std::string> joint_names_, body_names_;
   std::vector<double> clip_seg_lengths_, clip_strike_phases_;  // empty on legacy exports
+  std::vector<Vec2> reach_offsets_;  // per-clip ref base->racket reach; empty on old exports
   Eigen::VectorXd default_q_, action_scale_, kp_, kd_;
   std::vector<float> obs_f_;
   int obs_dim_ = kObsDim;  // detected from the model input at load (180 full / 175 deploy_parity)

@@ -1,5 +1,6 @@
-// model_15200 front-end as a drop-in A3PolicyDriver CommandFn. Per tick:
-//   scripted racket target -> reference clock -> ONNX refs -> 180-D obs ->
+// Ping-pong policy front-end as a drop-in A3PolicyDriver CommandFn. Per tick:
+//   scripted/planner racket target -> reference clock -> ONNX refs ->
+//   180/177/175-D obs (auto-selected from the model input dim) ->
 //   action -> target_q (Isaac) -> scatter to 31 SDK slots -> RobotCommand.
 // NECK PASSIVE: head slots [3,4] are held at nominal (q=0) with AGI's fixed PD
 // (kp=40, kd=2); the model's neck outputs are ignored for hardware command.
@@ -231,6 +232,12 @@ struct PpPolicyConfig {
   // That footwork only closes the loop when the localization source reports the REAL base motion
   // (sim: --oracle-pelvis; hardware: mocap). Under perfect_tracking the base obs stays pinned to
   // the reference pelvis and the strike loop runs OPEN — validate in sim with BOTH loc modes.
+  // ⚠ DO NOT pull x below the box centers to reduce the scripted forward walk: tried
+  // 2026-07-05 with model_19400_holdfix2 — x=0.58 (box edge) AND x=0.63 (half-way) BOTH
+  // fail Gate 2.5 P3b (post-swing hold fall; the shallower strike leaves a follow-through
+  // pose the policy never recovers from — post-swing recovery is only trained near the
+  // reference blade point). Fixed-x-plane / y-only strikes need the retrain rider
+  // (base-relative fixed-reach-x target sampling), not a runner-side constant.
   Vec3 racket_pos_w_clip[2] = {Vec3(0.68, -0.44, 0.82), Vec3(0.66, 0.13, 1.03)};
   Vec3 racket_vel_w_clip[2] = {Vec3(1.55, 1.46, 0.71), Vec3(2.11, -0.71, 0.36)};
   // sim2real localisation gap: no global base/torso pose -> nominal (matches
@@ -325,6 +332,42 @@ class PpPolicy {
           "layout seg_len={%d,%d} strike_phase={%.2f,%.2f}. Only correct for v1-clip models "
           "(model_15200); a v2-baked model will swing against the WRONG reference frames.\n",
           clip_.seg_len[0], clip_.seg_len[1], clip_.strike_phase[0], clip_.strike_phase[1]);
+    }
+    // 177-D hitter_footwork: resolve the per-clip base-station reach offsets. The runner
+    // derives the deploy-time base STATION from the racket target as
+    //   station_xy = target_xy - reach_offset_xy[clip]
+    // (training base_couple_mode=reference_reach: standing AT the station puts the racket
+    // target at the clip's reference reach). Prefer the ONNX-baked ref_reach_offset_xy
+    // metadata (exports since 2026-07-06); else compute from the baked refs at each clip's
+    // strike frame (same arithmetic as training _ensure_reference_strike_state). The station
+    // channel is the whole point of the 177 contract — refuse to run without it rather than
+    // silently feeding a garbage station.
+    if (onnx_.obs_dim() == kObsDim177) {
+      if (onnx_.has_reach_offsets()) {
+        if (onnx_.reach_offsets().size() < 2)
+          throw std::runtime_error(
+              "pingpong: 177 model's ref_reach_offset_xy metadata does not have 2 clips");
+        reach_offset_clip_[0] = onnx_.reach_offsets()[0];
+        reach_offset_clip_[1] = onnx_.reach_offsets()[1];
+        std::fprintf(stderr,
+            "[pp] 177 hitter: reach offsets from ONNX metadata: fh=(%+.3f,%+.3f) "
+            "bh=(%+.3f,%+.3f)\n",
+            reach_offset_clip_[0][0], reach_offset_clip_[0][1],
+            reach_offset_clip_[1][0], reach_offset_clip_[1][1]);
+      } else if (onnx_.has_clip_layout()) {
+        for (int c = 0; c < 2; ++c)
+          reach_offset_clip_[c] = onnx_.reach_offset_from_refs(clip_.strike_frame(c));
+        std::fprintf(stderr,
+            "[pp WARN] 177 hitter: ONNX lacks ref_reach_offset_xy metadata -> computed from "
+            "the baked refs: fh=(%+.3f,%+.3f) bh=(%+.3f,%+.3f). Re-export with the patched "
+            "exporter (scripts/export_onnx_hitter.sh) to bake it.\n",
+            reach_offset_clip_[0][0], reach_offset_clip_[0][1],
+            reach_offset_clip_[1][0], reach_offset_clip_[1][1]);
+      } else {
+        throw std::runtime_error(
+            "pingpong: 177 hitter model without clip layout OR reach-offset metadata — "
+            "cannot derive the base station; re-export with scripts/export_onnx_hitter.sh");
+      }
     }
     nominal_q_sdk_ = to_sdk_order(onnx_.default_q(), isaac_to_sdk_);  // nominal pose in SDK order
     leg_qdes_smooth_ = nominal_q_sdk_;  // seed the leg q_des EMA at nominal (no jump on first release)
@@ -594,7 +637,21 @@ class PpPolicy {
     }
     const int time_step = clip_.time_step_for(clip_id, tg.time_to_strike);
 
-    const PpRefs refs = onnx_.refs(time_step);
+    PpRefs refs = onnx_.refs(time_step);
+    // HOLD = a STATIONARY reference (2026-07-05, train==deploy lockstep): clip frame 0
+    // is a mid-crouch TRANSIENT (knee +7.8 rad/s, torso -1.11 m/s down) — feeding its
+    // raw velocities through the whole hold taught the policy to fight a phantom squat
+    // (the Gate 2.5 P2 3-5 s bare-hold tip). Training now zeroes the reference joint
+    // velocities on held envs (commands.py joint_vel); mirror it in every policy-hold
+    // state (level 0 = scripted hold AND the planner post-swing recovery hold).
+    if (level_.load() == 0) {
+      refs.joint_vel.setZero();
+      // ...and the hold JOINT reference is the READY STAND, not the windup crouch
+      // (2026-07-05 lockstep with training commands.joint_pos): frame 0 is an
+      // asymmetric mid-crouch — imitating it during hold produced the splayed-feet
+      // crouch-stand. The release into the swing is the trained stand_start regime.
+      refs.joint_pos = onnx_.default_q();
+    }
 
     if (!state.sync_aligned) ++sync_miss_;  // dropped/unaligned state packet count
 
@@ -804,11 +861,34 @@ class PpPolicy {
 
     last_proj_grav_ = projected_gravity_body(st.base_quat_w);
 
-    // 175-D deploy_parity (new policy) vs 180-D full (model_15200). Auto-selected from the loaded
-    // ONNX input dim. build_obs_175 drops motion_anchor_pos_b + base_target_pos_b and reframes the
-    // racket target to be relative to the CURRENT racket FK (pp_racket_fk.hpp) — no world base pos.
+    // 177-D hitter_footwork base-station channel (base_target_pos_b = yaw-frame Δxy from the
+    // current base to the commanded station). The station rides the SAME reach point the swing
+    // uses (scripted box center or frozen planner target) minus the per-clip reference reach —
+    // training's base_couple_mode=reference_reach coupling. The Δ only closes a REAL footwork
+    // loop when the base position is genuinely measured (oracle / fresh mocap); under
+    // perfect_tracking / fabricated / stale-stream localization — and during any level-0
+    // hold — feed Δ=0 ("already at station", the contract's graceful mocap-dropout fallback)
+    // instead of a fictional step command the policy would chase open-loop.
+    if (onnx_.obs_dim() == kObsDim177) {
+      const bool base_real =
+          (cfg_.loc_mode == LocMode::kOracle && oracle_fresh_) ||
+          (cfg_.loc_mode == LocMode::kExternalBase && base_fresh_);
+      if (level_.load() == 1 && base_real) {
+        const int c = clip_id_from_swing_sign(tg.swing_sign);
+        tg.base_target_xy = Vec2(tg.pos_w[0], tg.pos_w[1]) - reach_offset_clip_[c];
+      } else {
+        tg.base_target_xy = Vec2(st.base_pos_w[0], st.base_pos_w[1]);  // Δ=0
+      }
+    }
+
+    // 175-D deploy_parity vs 177-D hitter_footwork vs 180-D full (model_15200). Auto-selected
+    // from the loaded ONNX input dim. build_obs_175 drops motion_anchor_pos_b + base_target_pos_b
+    // and reframes the racket target relative to the CURRENT racket FK (pp_racket_fk.hpp) — no
+    // world base pos. build_obs_177 = the 175 layout + base_target_pos_b(2) re-inserted (above).
     const Eigen::VectorXd obs = (onnx_.obs_dim() == kObsDim175)
         ? build_obs_175(refs, st, tg, last_action_, onnx_.default_q(), cfg_.use_imu_yaw_for_targets)
+        : (onnx_.obs_dim() == kObsDim177)
+        ? build_obs_177(refs, st, tg, last_action_, onnx_.default_q(), cfg_.use_imu_yaw_for_targets)
         : build_obs_180(refs, st, tg, last_action_, onnx_.default_q(), cfg_.use_imu_yaw_for_targets);
     { std::lock_guard<std::mutex> lk(obs_mu_); last_obs_ = obs; }  // for obs-debug
     const Eigen::VectorXd action = onnx_.mean_action(obs, time_step);
@@ -1131,10 +1211,21 @@ class PpPolicy {
         {"joint_pos_rel", 71, 31}, {"joint_vel", 102, 31}, {"actions(last)", 133, 31},
         {"projected_gravity", 164, 3}, {"racket_target_pos_b(relFK)", 167, 3},
         {"racket_target_vel_w", 170, 3}, {"time_to_strike", 173, 1}, {"swing_type", 174, 1}};
-    const bool dp = (obs.size() == kObsDim175);
+    // hitter_footwork 177-D: the 175 layout + base_target_pos_b(2) station Δxy re-inserted
+    // after projected_gravity; everything after it shifts up 2.
+    static const Blk blks177[] = {
+        {"command", 0, 62}, {"motion_anchor_ori_b", 62, 6}, {"base_ang_vel", 68, 3},
+        {"joint_pos_rel", 71, 31}, {"joint_vel", 102, 31}, {"actions(last)", 133, 31},
+        {"projected_gravity", 164, 3}, {"base_target_pos_b", 167, 2},
+        {"racket_target_pos_b(relFK)", 169, 3}, {"racket_target_vel_w", 172, 3},
+        {"time_to_strike", 175, 1}, {"swing_type", 176, 1}};
     std::fprintf(stderr, " OBS blocks (%d-D):\n", (int)obs.size());
-    const Blk* blks = dp ? blks175 : blks180;
-    const int nblk = dp ? (int)(sizeof(blks175) / sizeof(Blk)) : (int)(sizeof(blks180) / sizeof(Blk));
+    const Blk* blks = (obs.size() == kObsDim175) ? blks175
+                    : (obs.size() == kObsDim177) ? blks177
+                                                 : blks180;
+    const int nblk = (obs.size() == kObsDim175) ? (int)(sizeof(blks175) / sizeof(Blk))
+                   : (obs.size() == kObsDim177) ? (int)(sizeof(blks177) / sizeof(Blk))
+                                                : (int)(sizeof(blks180) / sizeof(Blk));
     for (int i = 0; i < nblk; ++i)
       std::fprintf(stderr, "   %-24s [%3d:%3d] %s\n", blks[i].n, blks[i].lo, blks[i].lo + blks[i].len,
                    S(obs.segment(blks[i].lo, blks[i].len)).c_str());
@@ -1183,6 +1274,10 @@ class PpPolicy {
   int swing_level_prev_ = 0;                          // ComputeCommand (driver thread) only
   int swing_dir_prev_ = 1;                            // detect f<->b switch -> restart swing at windup
   ClipLayout clip_;
+  // 177-D hitter_footwork only: per-clip reference base->racket reach at the strike frame.
+  // station_xy = racket_target_xy - reach_offset_clip_[clip]. Resolved in the ctor (ONNX
+  // metadata or refs fallback); Zero for 175/180 models (never read there).
+  Vec2 reach_offset_clip_[2] = {Vec2::Zero(), Vec2::Zero()};
   std::array<int, 31> isaac_to_sdk_{};
   Eigen::VectorXd nominal_q_sdk_;
   Eigen::VectorXd official_kp_sdk_;

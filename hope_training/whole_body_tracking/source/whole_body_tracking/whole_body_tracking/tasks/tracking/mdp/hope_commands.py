@@ -147,6 +147,11 @@ class RacketTargetCommand(CommandTerm):
         self._vb_net_acc = 0.0
         self._vb_land_valid_acc = 0.0
         self._vb_inb_acc = 0.0
+        # Per-clip (forehand/backhand) accumulators for the PRIMARY in-training metric
+        # virtual_return_rate (franco 2026-07-06 "反手先行" needs the per-side number).
+        # Literal keys: self._clip_names ({0:"forehand",1:"backhand"}) is defined later in __init__.
+        self._vb_exact_acc_c = {0: 0.0, 1: 0.0}
+        self._vb_inb_acc_c = {0: 0.0, 1: 0.0}
 
         # Reference racket state at the strike frame (CONSTANT per clip): pos (env-origin relative),
         # world linear velocity, and face normal, computed by the SAME FK as the actual racket
@@ -419,9 +424,14 @@ class RacketTargetCommand(CommandTerm):
                 self.metrics[f"{_key}_{_cname}"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["exact_strike_sample_count_decayed"] = torch.zeros(self.num_envs, device=self.device)
         # Tier-1 virtual-ball outcome rates (broadcast sample-weighted EMAs, exact-strike denominator
-        # for hit rate; hit (captured) denominator for the outcome rates). Only logged when enabled.
-        if cfg.virtual_ball:
+        # for hit rate; hit (captured) denominator for the outcome rates). Logged when the virtual
+        # ball is enabled for rewards (virtual_ball) OR as pure metrics (vb_metrics_only).
+        # virtual_return_rate is the PRIMARY in-training curve (franco 2026-07-06): legal returns
+        # per exact-strike sample (上台率); virtual_hit_rate (击球率) is the auxiliary;
+        # strike_composite (三合格) is a diagnostic only. Canonical bookkeeping stays MuJoCo.
+        if cfg.virtual_ball or cfg.vb_metrics_only:
             for _vk in (
+                "virtual_return_rate", "virtual_return_rate_forehand", "virtual_return_rate_backhand",
                 "virtual_hit_rate", "virtual_net_clear_rate", "virtual_land_valid_rate",
                 "virtual_land_inbounds_rate", "virtual_land_err_m", "virtual_topspin_revs",
                 "virtual_approach_speed",
@@ -966,6 +976,21 @@ class RacketTargetCommand(CommandTerm):
             else:
                 clip = torch.zeros(n, dtype=torch.long, device=self.device)
             base_xy = self.racket_target_pos_w[env_ids][:, :2] - self._ref_reach_offset_xy_per_clip[clip]
+        elif self.cfg.base_couple_mode == "reference_reach":
+            # uniform + HITTER separate-commands coupling (§V-B-1): base_target = racket_target_xy −
+            # (reference base→racket strike offset). Same derivation as the reference_perturbed branch
+            # above, but the racket target keeps the proven uniform box distribution (warm-start
+            # friendly). Standing at the commanded station = racket target at the clip's reference
+            # reach, so the striking plane is fixed RELATIVE TO THE COMMANDED BASE and the x-span of
+            # the box moves the STATION, not the reach depth. The jitter below (base_target_*_range)
+            # trains the policy to strike with the station deliberately offset — y-reach diversity.
+            self._ensure_reference_strike_state()
+            assert self._ref_reach_offset_xy_per_clip is not None
+            if motion._multiseg:
+                clip = motion.clip_id[env_ids]
+            else:
+                clip = torch.zeros(n, dtype=torch.long, device=self.device)
+            base_xy = self.racket_target_pos_w[env_ids][:, :2] - self._ref_reach_offset_xy_per_clip[clip]
         else:
             # uniform: start at spawn, then WEAKLY couple the base toward the racket target's SIDEWAYS
             # offset (Y only; X is the fixed strike plane, so no forward repositioning). The base shifts a
@@ -1000,7 +1025,7 @@ class RacketTargetCommand(CommandTerm):
         # Tier-1 virtual incoming ball: one (v_in, omega_in) per swing. The ball's position at the
         # strike time is the racket target BY CONSTRUCTION (the sampler defines the ball to arrive
         # there), so only velocity + spin are sampled. Boxes stay inside the venue-fit envelope.
-        if self.cfg.virtual_ball:
+        if self.cfg.virtual_ball or self.cfg.vb_metrics_only:
             self.vb_vel_in_w[env_ids, 0] = sample_uniform(*self.cfg.vb_vel_x_range, (n,), self.device)
             self.vb_vel_in_w[env_ids, 1] = sample_uniform(*self.cfg.vb_vel_y_range, (n,), self.device)
             self.vb_vel_in_w[env_ids, 2] = sample_uniform(*self.cfg.vb_vel_z_range, (n,), self.device)
@@ -1502,6 +1527,26 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["virtual_land_inbounds_rate"][:] = (
             (self._vb_inb_acc / max(self._vb_hit_acc, 1e-6)) if enough_h else 0.0
         )
+        # PRIMARY in-training curve (franco 2026-07-06): 上台率 per strike OPPORTUNITY — legal
+        # returns (captured hit & net cleared & landed on the opponent half) over EXACT-STRIKE
+        # samples. Composes hit-rate x land-rate, so "hit rarely but land those" cannot inflate
+        # it the way virtual_land_inbounds_rate (hit-denominator) can. 击球率 = virtual_hit_rate
+        # stays the auxiliary; strike_composite is diagnostics. Canonical bookkeeping = MuJoCo.
+        self.metrics["virtual_return_rate"][:] = (
+            (self._vb_inb_acc / max(self._vb_exact_acc, 1e-6)) if enough_e else 0.0
+        )
+        # Per-side (forehand/backhand) return rate — 反手先行 judging needs the per-side number.
+        _motion = self._motion()
+        if getattr(_motion, "_multiseg", False):
+            _clip = _motion.clip_id
+            _legal = gate & net_clear & on_opp
+            for _c, _cn in self._clip_names.items():
+                _sel = exact_strike & (_clip == _c)
+                self._vb_exact_acc_c[_c] = decay * self._vb_exact_acc_c[_c] + float(_sel.sum())
+                self._vb_inb_acc_c[_c] = decay * self._vb_inb_acc_c[_c] + float((_legal & _sel).sum())
+                _n = self._vb_exact_acc_c[_c]
+                _scale = (1.0 / max(_n, 1e-6)) if _n >= float(self.cfg.exact_success_min_count) else 0.0
+                self.metrics[f"virtual_return_rate_{_cn}"][:] = self._vb_inb_acc_c[_c] * _scale
         self.metrics["virtual_approach_speed"] = torch.where(
             exact_strike, approach, self.metrics["virtual_approach_speed"]
         )
@@ -1621,7 +1666,9 @@ class RacketTargetCommand(CommandTerm):
         self._exact_pass_normal_acc = decay * self._exact_pass_normal_acc + float(pass_normal.sum())
         # Tier-1 virtual-ball at-strike evaluation (one-shot buffers consumed by the virtual_*
         # reward terms after this compute()); no-op (and vb_fired stays False) when disabled.
-        if self.cfg.virtual_ball:
+        # vb_metrics_only runs the same evaluation purely for the virtual_*_rate curves (the
+        # reward stack of such tasks has no virtual_* terms, so the caches go unread).
+        if self.cfg.virtual_ball or self.cfg.vb_metrics_only:
             self._vb_evaluate(exact_strike, pos_err)
         # GLOBAL error-magnitude EMAs (P2.3 adaptive sigma driver) — same decay/mask as the pass
         # counters above; per-clip variants exist further down but sigma needs one global signal.
@@ -2125,6 +2172,13 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # contact, e(u_n) restitution) and a coarse RK4 landing rollout; the cached outcome buffers feed
     # the one-shot virtual_* reward terms in hope_rewards.py. No obs change; 175-D contract untouched.
     virtual_ball: bool = False
+    # METRICS-ONLY virtual ball (franco 2026-07-06 "训练的时候以上台率为准"): run the same
+    # per-swing ball sampling + at-strike contact/landing evaluation PURELY for the
+    # virtual_*_rate metrics (in-training 上台率/击球率 curves) on tasks whose reward stack has
+    # no virtual_* terms (DeployParity / Hitter). No reward change; the vb_* one-shot caches are
+    # simply never consumed. Default OFF (the per-swing sampling consumes RNG, so byte-exact
+    # reproducibility of old runs is preserved); pinned ON in the jiayi-lineage task YAMLs.
+    vb_metrics_only: bool = False
     # Incoming-ball velocity box (world/env frame, m/s; -x = toward the robot). Kept inside the venue
     # fit's validity envelope (ball speed 1-7 m/s); vertical component ~near-apex-to-descending.
     vb_vel_x_range: tuple[float, float] = (-4.5, -2.0)
@@ -2234,6 +2288,19 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # 0.0 = disabled (spawn-only). Conservative because no walking reference exists (it fights leg imitation).
     base_couple_blend: float = 0.0
     base_couple_max_offset: float = 0.20
+    # UNIFORM-mode base-target derivation (HITTER §V-B-1 alignment, 2026-07-05):
+    #   "blend"           — legacy: spawn + weak Y blend above (BASE-FREE tasks leave this the default).
+    #   "reference_reach" — HITTER separate-commands scheme: base_target = racket_target_xy −
+    #                       (reference base→racket strike offset, per clip). Standing AT the commanded
+    #                       station puts the racket target at the clip's reference reach — the striking
+    #                       plane is fixed RELATIVE TO THE COMMANDED BASE (HITTER's "0.4 m in front"),
+    #                       and footwork (mostly lateral) is driven by the base channel, not by
+    #                       stretching at a deep world point. base_target_*_range then acts as a JITTER
+    #                       around the coupled station (widen y to train y-reach diversity).
+    # Sim2real: the paired actor obs (base_target_pos_b) is a RELATIVE Δxy in the yaw-heading frame —
+    # deployable from mocap base position (300 Hz, position-only) without any absolute world frame; if
+    # mocap drops, feeding Δ=0 degrades gracefully to "already at station" (today's BASE-FREE behavior).
+    base_couple_mode: str = "blend"
 
     # --- swing-type convention ---
     forehand_on_negative_y: bool = True  # right arm holds the paddle: target on -Y side -> forehand (+1)

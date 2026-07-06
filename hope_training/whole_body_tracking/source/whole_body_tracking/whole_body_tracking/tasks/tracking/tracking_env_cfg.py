@@ -103,7 +103,12 @@ class CommandsCfg:
 class ActionsCfg:
     """Action specifications for the MDP."""
 
-    joint_pos = mdp.JointPositionActionCfg(asset_name="robot", joint_names=[".*"], use_default_offset=True)
+    # Clamp-CAPABLE action term (2026-07-05/06): with clamp=False (the default here) this is
+    # byte-identical to the stock JointPositionAction. Tasks whose lineage trained with the
+    # train==deploy q_des clamp (DeployParity hold-fall fix stack, Hitter) enable it from
+    # their YAML via `actions: qdes_clamp: true` — see mdp/hope_actions.py for the Gate 2.5
+    # evidence and the merge-audit flag-gating rationale.
+    joint_pos = mdp.ClampedJointPositionActionCfg(asset_name="robot", joint_names=[".*"], use_default_offset=True)
 
 
 @configclass

@@ -202,13 +202,31 @@ class MotionCommand(CommandTerm):
 
     @property
     def joint_pos(self) -> torch.Tensor:
-        return self.motion.joint_pos[self.time_steps]
+        # HOLD imitates the READY STAND, not the windup crouch (2026-07-05, pragmatic
+        # P2.0): clip frame 0 is an asymmetric mid-crouch (knee 0.62/0.52 vs stand 0.25,
+        # left hip_roll +0.14) — imitating it all hold long produced the splayed-feet
+        # crouch-stand seen in Gate 2.5/3. During hold the joint reference is the
+        # default stand pose; the release (stand -> windup) is exactly the trained
+        # stand_start transition. C++ mirrors this (pp_policy: refs.joint_pos =
+        # default_q at level 0) — keep them in lockstep.
+        jp = self.motion.joint_pos[self.time_steps]
+        dq = self.robot.data.default_joint_pos
+        return torch.where(self.in_hold[:, None], dq, jp)
 
     @property
     def joint_vel(self) -> torch.Tensor:
+        # HOLD = a STATIONARY reference (2026-07-05): clip frame 0 is a mid-crouch
+        # TRANSIENT (knee +7.8 rad/s, torso -1.11 m/s DOWN in the hopex clips). Feeding
+        # its raw velocities through the whole hold taught the policy to fight a phantom
+        # squat at soft gains and made "sink slowly" the velocity-reward optimum — the
+        # AGI-sim / hardware bare-hold fall (Gate 2.5 P2, 3-5 s tip). A frozen reference
+        # is not moving: zero its velocities on held envs. The C++ runner mirrors this
+        # (pp_policy zeroes refs.joint_vel in its hold states) — keep them in lockstep.
         jv = self.motion.joint_vel[self.time_steps]
         # R14: at playback speed s the reference joints traverse the same poses s× as fast.
-        return jv * self.speed_scale[:, None] if self.retiming_active else jv
+        if self.retiming_active:
+            jv = jv * self.speed_scale[:, None]
+        return torch.where(self.in_hold[:, None], torch.zeros_like(jv), jv)
 
     @property
     def body_pos_w(self) -> torch.Tensor:
@@ -220,13 +238,20 @@ class MotionCommand(CommandTerm):
 
     @property
     def body_lin_vel_w(self) -> torch.Tensor:
-        blv = self.motion.body_lin_vel_w[self.time_steps]
-        return blv * self.speed_scale[:, None, None] if self.retiming_active else blv
+        # Zeroed during hold — see joint_vel. Un-gated motion_body_lin_vel otherwise
+        # pays for tracking frame-0's -1.11 m/s DOWNWARD torso velocity all hold long.
+        # R14 retiming composes: scale by playback speed first, then hold-zero wins.
+        v = self.motion.body_lin_vel_w[self.time_steps]
+        if self.retiming_active:
+            v = v * self.speed_scale[:, None, None]
+        return torch.where(self.in_hold[:, None, None], torch.zeros_like(v), v)
 
     @property
     def body_ang_vel_w(self) -> torch.Tensor:
-        bav = self.motion.body_ang_vel_w[self.time_steps]
-        return bav * self.speed_scale[:, None, None] if self.retiming_active else bav
+        v = self.motion.body_ang_vel_w[self.time_steps]
+        if self.retiming_active:
+            v = v * self.speed_scale[:, None, None]
+        return torch.where(self.in_hold[:, None, None], torch.zeros_like(v), v)
 
     @property
     def anchor_pos_w(self) -> torch.Tensor:

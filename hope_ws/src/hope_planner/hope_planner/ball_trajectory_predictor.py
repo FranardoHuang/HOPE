@@ -44,9 +44,10 @@ class BallTrajectoryPredictor:
         Bounds are expanded by ball radius to handle edge contacts.
         """
         r = self.physics.radius
+        y_hi = self.table.y_max
         return (
             -r <= p[0] <= self.table.length + r
-            and -self.table.width - r <= p[1] <= r
+            and y_hi - self.table.width - r <= p[1] <= y_hi + r
         )
 
     def _flight_acceleration(self, v: np.ndarray, omega: Optional[np.ndarray] = None) -> np.ndarray:
@@ -256,9 +257,15 @@ class BallTrajectoryPredictor:
 
                 p_cross[0] = x_hit
 
+                # DEAD-BALL GUARD (2026-07-05): a crossing at table-skim height with the
+                # ball still falling means the prediction never modeled a bounce (off-table
+                # per _is_on_table, z clamped to 0 while vz kept integrating) — publishing
+                # it as valid=True produced garbage strike plans (z=0.00, vz=-7 m/s) that
+                # the runner's gate had to reject every time. A dead ball is NOT a plan.
+                dead_ball = p_cross[2] < 0.05 and v_cross[2] < 0.0
                 return StrikeTarget(
                     p_ball=p_cross, v_ball=v_cross,
-                    t_strike=t_cross, num_bounces=bounces, valid=True,
+                    t_strike=t_cross, num_bounces=bounces, valid=not dead_ball,
                 )
 
             p = p_new

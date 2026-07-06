@@ -230,6 +230,22 @@ AGIBOT_A3_CFG = ArticulationCfg(
                 ".*_hip_pitch_joint": 0.06646569891,
                 ".*_knee_joint": 0.1203404,
             },
+            # STATIC JOINT FRICTION (MJCF a3_pingpong.xml frictionloss) — 2026-07-05 sim2sim fix.
+            # AGI's MuJoCo (their "≈ real hardware" gate) models 1.2-2.4 Nm of stiction per leg
+            # joint; Isaac trained with ZERO. At quasi-static hold the policy's small corrective
+            # torques (kp~60 x 0.05-0.2 rad ≈ 2-12 Nm) are mostly eaten by stiction -> commanded
+            # corrections barely move the plant (Gate 2.5 measured trk 9-32%) -> the policy
+            # (trained on a frictionless plant) winds up and tips the robot in 3-5 s. Big swing
+            # motions are barely affected (feedforward-dominated, trk 80-200%), which is why
+            # Gate 2 / Gate 3 pass while the bare hold fails. NOTE: the MJCF also has passive
+            # viscous damping (1-2 Nm s/rad) NOT modeled here — folding it into `damping` would
+            # corrupt the exported deploy kd contract; accepted residual gap.
+            friction={
+                ".*_hip_yaw_joint": 1.1971,
+                ".*_hip_roll_joint": 1.1971,
+                ".*_hip_pitch_joint": 1.1971,
+                ".*_knee_joint": 2.4276,
+            },
         ),
         "feet": ImplicitActuatorCfg(
             joint_names_expr=[".*_ankle_pitch_joint", ".*_ankle_roll_joint"],
@@ -238,6 +254,7 @@ AGIBOT_A3_CFG = ArticulationCfg(
             stiffness=50.0,  # a3.py / deploy a3_kps (ankle)
             damping=2.0,     # a3.py / deploy a3_kds (ankle)
             armature={".*_ankle_pitch_joint": 0.06444060531, ".*_ankle_roll_joint": 0.02012630058},
+            friction={".*_ankle_pitch_joint": 1.4, ".*_ankle_roll_joint": 0.778},  # MJCF frictionloss
         ),
         # EXPLICIT PD (sim2real) — see the "feet" group note. effort_limit MUST be set (explicit-cfg
         "waist": ImplicitActuatorCfg(
@@ -247,6 +264,7 @@ AGIBOT_A3_CFG = ArticulationCfg(
             stiffness={"waist_yaw_joint": 85.0, "waist_roll_joint": 50.0, "waist_pitch_joint": 50.0},  # a3_kps
             damping={"waist_yaw_joint": 3.0, "waist_roll_joint": 2.0, "waist_pitch_joint": 2.0},        # a3_kds
             armature={"waist_yaw_joint": 0.06646569891, "waist_roll_joint": 0.01462087613, "waist_pitch_joint": 0.08820859156},
+            friction={"waist_yaw_joint": 1.1971, "waist_roll_joint": 0.69223, "waist_pitch_joint": 1.7},  # MJCF frictionloss
         ),
         "head": ImplicitActuatorCfg(
             joint_names_expr=["head_yaw_joint", "head_pitch_joint"],
@@ -256,6 +274,7 @@ AGIBOT_A3_CFG = ArticulationCfg(
             stiffness=40.0,
             damping=2.0,
             armature={"head_yaw_joint": 0.0008100893338, "head_pitch_joint": 0.0008100893338},
+            friction=0.1,  # MJCF frictionloss
         ),
         "arms": ImplicitActuatorCfg(
             joint_names_expr=[
@@ -311,6 +330,15 @@ AGIBOT_A3_CFG = ArticulationCfg(
                 ".*_wrist_roll_joint": 0.004967351303,
                 ".*_wrist_pitch_joint": 0.0008100893338,
                 ".*_wrist_yaw_joint": 0.0008100893338,
+            },
+            friction={  # MJCF a3_pingpong.xml frictionloss
+                ".*_shoulder_pitch_joint": 0.6293,
+                ".*_shoulder_roll_joint": 0.6293,
+                ".*_shoulder_yaw_joint": 0.41197,
+                ".*_elbow_joint": 0.41197,
+                ".*_wrist_roll_joint": 0.41197,
+                ".*_wrist_pitch_joint": 0.1,
+                ".*_wrist_yaw_joint": 0.1,
             },
         ),
     },

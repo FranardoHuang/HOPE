@@ -43,11 +43,25 @@ setsid bash -c "source /opt/ros/jazzy/setup.bash 2>/dev/null; source $WS/install
   --params-file $WS/src/hope_planner/config/hope_planner.sim.yaml \
   -p drag_k:=0.05" >/tmp/pp_planner.log 2>&1 &
 
-echo "[v] fake_ball_publisher (probed serve: post-bounce z=0.72 at x=1.0 = the adaptive plane"
-echo "    for a robot at x=0.33; tts@plane ~1.26s)"
+echo "[v] fake_ball_publisher: 10-placement coverage sweep (5 fh + 5 bh, alternating;"
+echo "    solved+sim-verified 2026-07-06 against the trained hitter boxes):"
+echo "      fh arrive y -0.65..-0.20 (box [-0.74,-0.14]) z=0.725, tts@plane ~1.26s"
+echo "      bh arrive y +0.02..+0.34 (box [-0.17,0.43]; runner fh/bh split needs y>=0)"
+echo "         z=1.008 (box [0.93,1.13] — old vz=3.6 serve arrived 20cm BELOW box), ~1.63s"
+# Serve design notes (2026-07-06, replaces the single fh/bh pair):
+#   * fh vy SIGN FIX finally landed: legacy +0.10 arrived y=-0.13 = fh box EDGE (the -0.10
+#     fix was flagged 2026-07-03 but never applied here). Sweep vy values are solved per
+#     placement with the exact publisher physics (drag 0.05, rest 0.85/0.85, dt=1/300).
+#   * fh base kinematics [3.2,-0.24,0.5,-2.0,vy,3.6]; bh RETUNED to vx=-1.6 vz=5.0 so the
+#     post-bounce arc crosses the x=1.0 plane at trained backhand height.
+#   * bh y sweep stays >= +0.02: the runner classifies fh/bh by base-rel target y sign
+#     (pp_reference_clock.hpp swing_sign_from_target_y) — negative-y backhands would
+#     engage as forehands. The bh box's negative-y part is unreachable by construction.
+#   * Order fh1,bh1,fh2,bh2,...: the default 3-point conductor samples 3 distinct
+#     placements; PP_POINTS=10 sweeps all 10 (serve<->point sync is deliberately loose —
+#     serves keep cycling during stand/reset and a point takes whichever arrives next).
 setsid bash -c "source /opt/ros/jazzy/setup.bash 2>/dev/null; source $WS/install/local_setup.bash 2>/dev/null; ros2 run hope_bringup fake_ball_publisher --ros-args \
-  -p serve_forehand:='[3.2, -0.24, 0.5, -2.0, 0.10, 3.6]' \
-  -p serve_backhand:='[3.2, 0.24, 0.5, -2.0, -0.10, 3.6]' \
+  -p serves:='[3.2,-0.24,0.5,-2.0,-0.372,3.6, 3.2,0.24,0.5,-1.6,-0.160,5.0, 3.2,-0.24,0.5,-2.0,-0.270,3.6, 3.2,0.24,0.5,-1.6,-0.102,5.0, 3.2,-0.24,0.5,-2.0,-0.168,3.6, 3.2,0.24,0.5,-1.6,-0.044,5.0, 3.2,-0.24,0.5,-2.0,-0.066,3.6, 3.2,0.24,0.5,-1.6,0.015,5.0, 3.2,-0.24,0.5,-2.0,0.036,3.6, 3.2,0.24,0.5,-1.6,0.073,5.0]' \
   -p drag_k:=0.05 \
   -p pause_s:=4.0" >/tmp/pp_ball.log 2>&1 &
 

@@ -154,6 +154,19 @@ def attach_onnx_metadata(env: ManagerBasedRLEnv, run_path: str, path: str, filen
         if phases is None:
             phases = [rt_cfg.strike_phase] * motion_cmd.motion.num_segments
         metadata["clip_strike_phases"] = ",".join(f"{float(p):.4f}" for p in phases)
+        # Per-clip reference base->racket reach offset at the strike frame (dx0,dy0,dx1,dy1,...).
+        # The 177-D hitter_footwork deploy path derives its base station from the frozen racket
+        # target as station_xy = racket_target_xy - reach_offset_xy[clip] (base_couple_mode
+        # reference_reach) — the C++ runner refuses a 177 model without this key rather than
+        # silently feeding a zero station.
+        rt_cmd = env.command_manager.get_term("racket_target")
+        if hasattr(rt_cmd, "_ensure_reference_strike_state"):
+            rt_cmd._ensure_reference_strike_state()
+            reach = getattr(rt_cmd, "_ref_reach_offset_xy_per_clip", None)
+            if reach is not None:
+                metadata["ref_reach_offset_xy"] = ",".join(
+                    f"{float(v):.6f}" for v in reach.reshape(-1).cpu().tolist()
+                )
     except (KeyError, ValueError):
         pass  # task without a racket_target command (plain tracking) — clock keys not needed
     actor_contract = infer_actor_observation_contract(env)
