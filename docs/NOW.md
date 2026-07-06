@@ -370,7 +370,7 @@ S3/快球要么球子步减 dt、要么接受 <30mm(仍远低于 0.10m 考卷线
 
 | 项 | owner/分支 | 属性 | 要点 | 依赖 |
 |---|---|---|---|---|
-| **physical_ball Phase B:拍面冲量入引擎** | yikang / stage1-fixed-point | CPU 开发 + 共跑 mech | 拍面拟合冲量入 Isaac(**复用 spin_contact 现有实现,不写第四份**)+ per-pair 碰撞过滤 + CCD。**球子步决定当场闭环**:S1 场馆档 in-loop 17mm 已过线 → **不需要子步**;机制做成可配、默认关(S3 快球再开)——franco"排期时带子步决定"项就此关闭 | Phase A(已落地 9ed33b4/673cb53/274fa69)。**状态:5d6d236 已推;对抗验证轮 9 项确认(1 major:子步 FK 重绑一帧鲜度泄入奖励流,破 metrics-only 契约)修复推进中,修完才排 pod mech** |
+| **physical_ball Phase B:拍面冲量入引擎** | yikang / stage1-fixed-point | CPU 开发 + 共跑 mech | 拍面拟合冲量入 Isaac(**复用 spin_contact 现有实现,不写第四份**)+ per-pair 碰撞过滤 + CCD。**球子步决定当场闭环**:S1 场馆档 in-loop 17mm 已过线 → **不需要子步**;机制做成可配、默认关(S3 快球再开)——franco"排期时带子步决定"项就此关闭 | Phase A(已落地 9ed33b4/673cb53/274fa69)。**状态:已收口**——5d6d236 + 对抗验证轮(15 代理,10 报 9 确认 1 驳回)+ 九项修复 7e3be78(major:子步 FK 重绑一帧鲜度泄入奖励流→FK 纯函数化 _racket_fk,冲量扫描零属性写;另 8 minor:reset 步先算后清、撞点插值吸附、免同步热路径、presence 守卫、中挥重抽响亮守卫、回程弹跳分列计数)。**pod mech 全绿(GPU1,512envs×40iters×5 发)**:A≡A2 决定论成立;**A≡B 机器人流逐位一致(major 修复引擎内验证)**;A≡D Phase A 保存;pb 差异方向=修复本意(land_count 131 vs 118,reset 步事件不再漏计);serve_err 4.6mm;B 发随机策略即触发 2 hit/1 return(冲量路径引擎内实弹)。诚实边界:hit 通道仅 2 次实弹,富击球验证(pb_virt_phys_gap 大样本)搭下一个 warm-start 臂的车 |
 | **MuJoCo 真球+真桌接线** | yikang / 新分支 mujoco-ball-wiring | CPU 开发;vendor 编译=交接件 | 把"编好没插电"的 C++ 球内核(venue 参数,已 4e-10mm 交叉验证)插上电:MJCF 球 mocap body + 桌/网 geom、**放置约定选边(vendor 竞技场系 vs 训练 env 系)+ drift-guard**、SimLoop 接线、发球注入/落点发布。vendor sim 编译实测需 jiayi distrobox(pod 封死)→ 产出做成**交接件**给 jiayi 本地跑 | C++ 内核(main 已有)+ 放置约定拍板。**状态:已交付 4607410(分支 mujoco-ball-wiring):训练系为准+单一平移到 vendor 系、drift-guard 七方一致、E2E 落点 vs 镜像 oracle 5.5e-12m、mujoco 3.10 smoke 过;交接件 docs/handoffs/mujoco_ball_wiring_jiayi.md,vendor 编译/QoS/GUI 只有 jiayi 能验** |
 
 
