@@ -172,7 +172,7 @@ gpu0 = jiayi 测试中(其上我方僵尸进程已清,07-06)。
 
 | 顺序 | 类型 | 内容(人话) | 依赖 | 谁 |
 | --- | --- | --- | --- | --- |
-| 1a-0 | 开发 | **考卷工具补题源**(yikang 交接 07-06):`mujoco_eval_onnx.py` 加 `--target-source bank`——S1 判卷必须问 exam 卷的同源题(现有 boxes/venue-balls 都不是)。规格:装载走 `stage1_question_bank.load_question_bank`(强制校验烤入/转正标记,别绕过);逐题喂固定击球点 + 该题需求拍速 + **179 观测尾 4 维用该题需求拍面**(不是 clip 参考);输出连分母(可解率 kept/N + 锥内比例);网/界判据沿用现有常数 | 无(**判卷的前置!**) | claude |
+| 1a-0 | 开发 | **考卷工具补题源**(yikang 交接 07-06):`mujoco_eval_onnx.py` 加 `--target-source bank`——S1 判卷必须问 exam 卷的同源题(现有 boxes/venue-balls 都不是)。规格:装载走 `stage1_question_bank.load_question_bank`(强制校验烤入/转正标记,别绕过);逐题喂固定击球点 + 该题需求拍速 + **179 观测尾 4 维用该题需求拍面**(不是 clip 参考);输出连分母(可解率 kept/N + 锥内比例);网/界判据沿用现有常数。**半成品已存在**:分支 `wip-bank-exam-source-0706`(+297 行,--exam-bank/--target-source bank/锚终止守卫已具形)——收尾=搬到合并后的 main 上(评估器已变:177/179 契约并存)+ 跑通一次 | 无(**判卷的前置!**) | claude |
 | 1a | 判卷 | 第一波 8 臂按预注册分支判读(上表)。**S1 臂契约名已注册**(`deploy_parity_face179`,发射不再传 contract=null;导出器元数据即刻可用,契约日 181 时与站位 2 维一起换名) | 1a-0 + 各臂到线 | claude |
 | 1b | 开发 | **奖励收入记账**(半天;也是"A≈D"分支的排查工具) | 无 | claude |
 | 1c | 开发 | **击球窗分通道奖励**(SMASH 整包,W2 门票;旗标默认关) | 无 | claude |
