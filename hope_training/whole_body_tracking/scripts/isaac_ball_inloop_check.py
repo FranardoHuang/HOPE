@@ -173,15 +173,17 @@ def main() -> int:
     parser.add_argument("--surface-z", type=float, default=0.76)
     parser.add_argument("--max-time", type=float, default=2.0)
     parser.add_argument("--tol-mm", type=float, default=20.0)
-    # AppLauncher args (headless etc.)
-    from isaaclab.app import AppLauncher
-
-    AppLauncher.add_app_launcher_args(parser)
+    parser.add_argument("--device", default="cuda:0")
     args = parser.parse_args()
     if args.bank is None and not args.synthetic:
         parser.error("need --bank <npz> or --synthetic")
 
-    app_launcher = AppLauncher(args)
+    # Kit parses sys.argv itself and hangs on unknown args — strip ours BEFORE launching,
+    # exactly like train.py:942. Launch with kwargs (headless always: no display on the pod).
+    sys.argv = sys.argv[:1]
+    from isaaclab.app import AppLauncher
+
+    app_launcher = AppLauncher(headless=True, device=str(args.device))
     simulation_app = app_launcher.app
 
     import torch  # noqa: E402
