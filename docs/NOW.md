@@ -386,6 +386,22 @@ v2 = 全程链级 morph 或**预烤变体库 + SMASH 最近邻检索**(优先)�
 (z 偏移、骨盆系混用、腕点≠拍面点、旋向符号、offset≠腕链)——全是"solver 全绿、物理全错"型,
 **对抗验证轮固定进流程**。
 
+**→ franco agent 交接(2026-07-06,yikang):MuJoCo 考卷缺 bank 题源 + 179 合同名已就位**
+
+1. **需求:`mujoco_eval_onnx.py` 加 `--target-source bank`**(S1 考卷按记分通则必须问 exam
+   split 的同源题;现有 boxes/venue-balls 都不是)。规格:(a) 加载 exam bank npz(唯一合法
+   来源 = `--split exam` 产物;装载走 `stage1_question_bank.load_question_bank`,它会强制校验
+   meta 的 grip_applied/rally_yaw_applied,别绕过);(b) 逐题喂:目标位置 = bank 固定击球点、
+   目标速度 = 该题 demanded_vel、**+4 维 obs 用该题的 demanded_normal**(不是 clip ref,
+   你 bec7673 的 venue 模式语义换成 bank 逐题);(c) 输出按判卷分母法则:回球率必须同时打印
+   kept/N(可解率)与锥内比例;(d) 判分链的网/界判据沿用现有(净空 = 球心 > 台面+0.1525+R,
+   与 bank 入库 gate、训练奖励同一常数——ab0bbcc 已在反解侧加了 clears_net 标注可直接读)。
+2. **信息:S1 臂发射不再用 `actor_obs_contract=null`**——`deploy_parity_face179` 已注册
+   (stage1-fixed-point 72bcc28,= deploy_parity + racket_target_normal_cmd:4 尾插,真训练
+   循环校验通过 179D);exporter 元数据即刻可用。契约日 181 合并时与 Hitter +2 站位维一起换名。
+3. **波次边界顺手项**:你的 `strike_spec_torch.py` 里 `coarse_landing` 返回的 `net_z` 无人
+   消费——同一行网 gate(numpy 侧 ab0bbcc 已做,E2E 证伪臂实测拦下 249/256 挂网答案)。
+
 **0i SMASH 动作泛化对表(franco 让研究;2026-07-06 读原文 §IV,VAE 之外全部可借)**:
 SMASH 的泛化 = 库(400 真实条 → VAE 扩 5k,**造库工具我们换成物理反解+烤入,不用 VAE**)+
 **最近邻检索当老师**(特征=锚相对击球点,加小扰动 ε 模拟部署预测误差;检索到的 clip 进观测当
