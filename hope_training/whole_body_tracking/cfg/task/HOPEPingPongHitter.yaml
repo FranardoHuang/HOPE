@@ -129,7 +129,7 @@ env:
   # ARM A (2026-07-04 2-day retrain): 10 -> 16 s so the extended hold (hold_steps_range up to
   # 8 s) still leaves room for swing + recovery + a second hold inside one episode — at 10 s a
   # long-hold draw would truncate before the swing ever runs.
-  episode_length_s: 16.0
+  episode_length_s: 10.0
 
 # ---- swing-entry structure (MotionCommand) -----------------------------------
 # Explicit defaults for the Phase-A multi-swing machinery (commands.py). Keys are optional: absent
@@ -153,7 +153,7 @@ motion:
   # target+station is hold + windup-to-strike (fh 1.30 s / bh 0.88 s). With stations now up to
   # 0.40 m out (and consecutive stations up to ~0.8 m apart), a 0-step hold would make some
   # swings physically unreachable-in-time -> gradient noise. Min 50 guarantees >= ~1.9 s.
-  hold_steps_range: [50, 400]
+  hold_steps_range: [50, 200]
   stand_start_min_hold: 25
   # A8 (Ace): fraction of TRUE resets initialized from the policy's OWN buffered end-of-swing
   # states (captured at clip wraps). Default OFF; enable per-experiment:
@@ -220,7 +220,7 @@ rewards:
   # Weight 2.0 makes arriving out-earn the residual in-place income. Gated pre_strike in the fn
   # (pre_strike = tts>0 covers the post-wrap hold too, so recovery footwork toward the NEXT
   # station is paid immediately after the follow-through).
-  base_position_weight: 2.0
+  base_position_weight: 1.5
   base_position_std: 0.20
   racket_position_static: false
 

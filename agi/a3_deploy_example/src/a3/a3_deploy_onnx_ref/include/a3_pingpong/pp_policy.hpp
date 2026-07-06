@@ -499,8 +499,13 @@ class PpPolicy {
 
   // Re-capture the yaw-align offsets on the next policy tick. Called by the driver
   // whenever the mode transitions INTO SHADOW/MOTION from PASSIVE/PD_STAND (the robot
-  // may have been turned/moved between engagements).
-  void rearm_yaw_align() { yaw_align_pending_.store(true); }
+  // may have been turned/moved between engagements). Also drops the 177-D hold-station
+  // anchor so it re-captures at the robot's NEW spot (a stale anchor from before the
+  // move would command a walk back to the old position).
+  void rearm_yaw_align() {
+    yaw_align_pending_.store(true);
+    hold_station_set_ = false;
+  }
 
   // Full-body gate: true => leg q_des is overwritten to nominal (NOT a full-body
   // test); false => the policy's leg actions pass through (31-DOF command check).
@@ -862,22 +867,36 @@ class PpPolicy {
     last_proj_grav_ = projected_gravity_body(st.base_quat_w);
 
     // 177-D hitter_footwork base-station channel (base_target_pos_b = yaw-frame Δxy from the
-    // current base to the commanded station). The station rides the SAME reach point the swing
-    // uses (scripted box center or frozen planner target) minus the per-clip reference reach —
-    // training's base_couple_mode=reference_reach coupling. The Δ only closes a REAL footwork
-    // loop when the base position is genuinely measured (oracle / fresh mocap); under
-    // perfect_tracking / fabricated / stale-stream localization — and during any level-0
-    // hold — feed Δ=0 ("already at station", the contract's graceful mocap-dropout fallback)
-    // instead of a fictional step command the policy would chase open-loop.
+    // current base to the commanded station). During a swing the station rides the SAME reach
+    // point the swing uses (scripted box center or frozen planner target) minus the per-clip
+    // reference reach — training's base_couple_mode=reference_reach coupling. During level-0
+    // holds the station is a FIXED WORLD ANCHOR (captured at hold entry / carried over from
+    // the completed swing): the live Δ to that anchor is the policy's balance signal —
+    // training pays pbase through every hold, so the policy leans on this channel to stay
+    // put. Feeding Δ=0 through holds was the first design and is WRONG as the nominal path:
+    // it removes the only anchor and the policy free-wanders meters during holds, then falls
+    // off-station (2026-07-06 MuJoCo deploy-faithful CSV phase analysis: falls at |torso|
+    // 1-2 m with ±0.1 m stations; live-station holds: model_17400 0 falls x 3 seeds).
+    // Δ=0 remains ONLY the localization-dropout fallback (perfect_tracking / fabricated /
+    // stale mocap/oracle), where any nonzero Δ would be fictional and chased open-loop.
     if (onnx_.obs_dim() == kObsDim177) {
       const bool base_real =
           (cfg_.loc_mode == LocMode::kOracle && oracle_fresh_) ||
           (cfg_.loc_mode == LocMode::kExternalBase && base_fresh_);
-      if (level_.load() == 1 && base_real) {
+      if (!base_real) {
+        tg.base_target_xy = Vec2(st.base_pos_w[0], st.base_pos_w[1]);  // dropout: Δ=0
+        hold_station_set_ = false;  // re-anchor at the CURRENT spot when localization returns
+      } else if (level_.load() == 1) {
         const int c = clip_id_from_swing_sign(tg.swing_sign);
         tg.base_target_xy = Vec2(tg.pos_w[0], tg.pos_w[1]) - reach_offset_clip_[c];
+        hold_station_w_ = tg.base_target_xy;  // post-swing hold recovers AT the strike station
+        hold_station_set_ = true;
       } else {
-        tg.base_target_xy = Vec2(st.base_pos_w[0], st.base_pos_w[1]);  // Δ=0
+        if (!hold_station_set_) {  // fresh hold (pre-first-engage / after re-localization)
+          hold_station_w_ = Vec2(st.base_pos_w[0], st.base_pos_w[1]);
+          hold_station_set_ = true;
+        }
+        tg.base_target_xy = hold_station_w_;
       }
     }
 
@@ -1278,6 +1297,12 @@ class PpPolicy {
   // station_xy = racket_target_xy - reach_offset_clip_[clip]. Resolved in the ctor (ONNX
   // metadata or refs fallback); Zero for 175/180 models (never read there).
   Vec2 reach_offset_clip_[2] = {Vec2::Zero(), Vec2::Zero()};
+  // 177-D hold-station anchor (driver thread only): the fixed WORLD station fed to the
+  // base_target obs during level-0 holds (captured at hold entry; carried from the last
+  // swing's station after a completed swing). Cleared on localization dropout and by
+  // rearm_yaw_align() (mode re-entry — the robot may have been carried/moved).
+  Vec2 hold_station_w_ = Vec2::Zero();
+  bool hold_station_set_ = false;
   std::array<int, 31> isaac_to_sdk_{};
   Eigen::VectorXd nominal_q_sdk_;
   Eigen::VectorXd official_kp_sdk_;

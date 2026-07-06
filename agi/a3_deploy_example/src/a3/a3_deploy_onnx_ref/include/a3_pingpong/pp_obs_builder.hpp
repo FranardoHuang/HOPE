@@ -210,9 +210,11 @@ inline Eigen::VectorXd build_obs_175(const PpRefs& refs, const PpRobotState& sta
 // between projected_gravity and racket_target_pos_b. Training semantics
 // (hope_commands.py base_target_pos_b): Δxy from the CURRENT base to the commanded
 // station, rotated into the yaw-heading base frame. Callers must set
-// target.base_target_xy to the WORLD station; for the Δ=0 graceful fallback (hold /
-// no real base localization: contract "already at station") set it to the CURRENT
-// base xy so the delta vanishes. Everything else is byte-identical to build_obs_175.
+// target.base_target_xy to the WORLD station — during holds a FIXED world anchor,
+// not the live base (the Δ to the anchor is the policy's balance signal; feeding
+// Δ=0 through holds lets the base free-wander — 2026-07-06 finding). Δ=0 (station
+// := current base xy) is ONLY the no-real-localization dropout fallback.
+// Everything else is byte-identical to build_obs_175.
 inline Eigen::VectorXd build_obs_177(const PpRefs& refs, const PpRobotState& state,
                                      const PpRacketTarget& target,
                                      const Eigen::VectorXd& last_action,
