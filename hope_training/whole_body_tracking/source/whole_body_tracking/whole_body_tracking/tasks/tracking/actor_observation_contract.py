@@ -96,9 +96,30 @@ DEPLOY_PARITY = ActorObservationContract(
     ),
 )
 
+# Stage-1 face-command contract (2026-07-06): deploy_parity + the +4D face-command channel
+# appended LAST — racket_target_normal_cmd = demanded face normal (3, world frame, from the
+# question bank / planner) + spin-rho placeholder (1, zero-filled until the S3 spin tier).
+# Matches train.py's face_command_obs wiring and the MuJoCo evaluator's 179-D support (bec7673).
+# Contract-day note: the 181-D single cut (this + Hitter's +2 station dims) supersedes it later.
+DEPLOY_PARITY_FACE179 = ActorObservationContract(
+    name="deploy_parity_face179",
+    obs_mode="deploy_parity",
+    total_dim=179,
+    terms=DEPLOY_PARITY.terms
+    + (
+        ActorObservationTerm(
+            "racket_target_normal_cmd",
+            4,
+            "planner",
+            "demanded racket face normal (world, 3) + spin-rho placeholder (zero until S3)",
+        ),
+    ),
+)
+
 CONTRACTS = {
     FULL.name: FULL,
     DEPLOY_PARITY.name: DEPLOY_PARITY,
+    DEPLOY_PARITY_FACE179.name: DEPLOY_PARITY_FACE179,
     FULL.obs_mode: FULL,
     DEPLOY_PARITY.obs_mode: DEPLOY_PARITY,
     **{alias: DEPLOY_PARITY for alias in DEPLOY_PARITY.legacy_names},
