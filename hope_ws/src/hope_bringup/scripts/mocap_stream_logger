@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+"""Log mocap-stream arrival timing at the venue to measure TRANSPORT random delay.
+
+Why this exists
+---------------
+The recorded ChingMu takes (`.tak` -> C3D -> extract_canonical.py) are resampled
+onto a fixed 300 Hz grid (`t = arange(nf)/rate`), so packet-arrival jitter -- the
+"our mocap has random delay" effect -- is thrown away at export. It is only
+observable on a LIVE stream. This node timestamps every incoming mocap sample
+with its own monotonic clock and writes a CSV that `mocap_timing.py stream`
+analyses into an inter-arrival jitter / effective-rate / dropout distribution.
+
+It subscribes as far UPSTREAM as possible -- the raw `/vrpn_mocap/<sender>/pose*`
+topics (discovered at runtime) -- so the jitter measured is the ChingMu->host
+transport, before the relay adds any processing. It also optionally logs the
+relay outputs (`/ball/point`, `/P1/pose`, `/P2/pose`, `/poses`) so you can see
+what the planner actually consumes.
+
+Note on absolute latency: the vendored vrpn client stamps `header.stamp` with
+`get_clock()->now()` (tracker.cpp:110), i.e. the ARRIVAL time, not the mocap
+capture time. So this log gives sync-free inter-arrival JITTER (the random-delay
+signal), but NOT absolute source->host latency. For that, patch tracker.cpp to
+publish VRPN `t.msg_time`, or NTP/PTP-sync the ChingMu host and the deploy host.
+
+Usage (in the ROS distrobox, after `colcon build` + `source install/setup.bash`):
+    ros2 run hope_bringup mocap_stream_logger --ros-args \
+        -p out_dir:=~/mocap_timing_logs -p duration_s:=120.0
+    # or directly:
+    python3 mocap_stream_logger --ros-args -p duration_s:=60.0
+Then:
+    python3 hope_training/ball_physics_fit/mocap_timing.py stream ~/mocap_timing_logs/*.csv
+"""
+from __future__ import annotations
+
+import csv
+import json
+import os
+import time
+
+import numpy as np
+import rclpy
+from geometry_msgs.msg import PointStamped, PoseArray, PoseStamped
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+
+NOMINAL_MOCAP_HZ = 300.0
+POLICY_STEP_MS = 20.0  # 50 Hz policy step
+
+# Best-effort, keep-last: match the relay's sensor publishers; a BEST_EFFORT
+# subscriber is compatible with both BEST_EFFORT and RELIABLE publishers, so
+# this also receives from the raw vrpn client whatever its reliability.
+_SENSOR_QOS = QoSProfile(
+    reliability=ReliabilityPolicy.BEST_EFFORT,
+    durability=DurabilityPolicy.VOLATILE,
+    history=HistoryPolicy.KEEP_LAST,
+    depth=200,  # deep enough that the logger itself does not drop 300 Hz bursts
+)
+
+_CSV_FIELDS = ["topic", "seq", "t_wall", "t_mono", "stamp", "x", "y", "z"]
+
+
+def _stamp_s(header) -> float:
+    return float(header.stamp.sec) + float(header.stamp.nanosec) * 1e-9
+
+
+class MocapStreamLogger(Node):
+    def __init__(self) -> None:
+        super().__init__("mocap_stream_logger")
+
+        self.declare_parameter("out_dir", "~/mocap_timing_logs")
+        self.declare_parameter("duration_s", 0.0)  # 0 => until Ctrl-C
+        self.declare_parameter("flush_period_s", 2.0)
+        self.declare_parameter("discovery_period_s", 1.0)
+        self.declare_parameter("vrpn_namespace", "/vrpn_mocap")
+        self.declare_parameter("raw_vrpn", True)  # discover+log raw vrpn pose topics
+        self.declare_parameter("include_relay", True)  # log relay outputs too
+        self.declare_parameter("pose_array_order", ["ball", "PPT", "P1", "P2"])
+
+        out_dir = os.path.expanduser(
+            self.get_parameter("out_dir").get_parameter_value().string_value)
+        os.makedirs(out_dir, exist_ok=True)
+        # perf_counter has no wall epoch; name the file from wall time.
+        stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+        self._csv_path = os.path.join(out_dir, f"mocap_stream_{stamp}.csv")
+        self._json_path = os.path.join(out_dir, f"mocap_stream_{stamp}.summary.json")
+        self._fh = open(self._csv_path, "w", newline="")
+        self._writer = csv.writer(self._fh)
+        self._writer.writerow(_CSV_FIELDS)
+
+        self._rows: list[tuple] = []
+        self._seq: dict[str, int] = {}
+        self._t0 = time.perf_counter()
+        self._subscribed: set[str] = set()
+        self._subs = []
+
+        self._pose_order = list(
+            self.get_parameter("pose_array_order").get_parameter_value().string_array_value
+        ) or ["ball", "PPT", "P1", "P2"]
+
+        if self.get_parameter("include_relay").get_parameter_value().bool_value:
+            self._subs.append(self.create_subscription(
+                PointStamped, "/ball/point",
+                lambda m: self._on_point("/ball/point", m), _SENSOR_QOS))
+            for tp in ("/P1/pose", "/P2/pose", "/table/pose"):
+                self._subs.append(self.create_subscription(
+                    PoseStamped, tp, lambda m, t=tp: self._on_pose(t, m), _SENSOR_QOS))
+            self._subs.append(self.create_subscription(
+                PoseArray, "/poses",
+                lambda m: self._on_pose_array("/poses", m), _SENSOR_QOS))
+            for tp in ("/ball/point", "/P1/pose", "/P2/pose", "/table/pose", "/poses"):
+                self._subscribed.add(tp)
+
+        self._raw_vrpn = self.get_parameter("raw_vrpn").get_parameter_value().bool_value
+        self._vrpn_ns = self.get_parameter("vrpn_namespace").get_parameter_value().string_value
+        if self._raw_vrpn:
+            self._discover()  # once immediately, then on a timer
+            self.create_timer(
+                self.get_parameter("discovery_period_s").get_parameter_value().double_value,
+                self._discover)
+
+        self.create_timer(
+            self.get_parameter("flush_period_s").get_parameter_value().double_value,
+            self._flush)
+
+        self._duration = self.get_parameter("duration_s").get_parameter_value().double_value
+        if self._duration > 0:
+            self.create_timer(self._duration, self._on_duration_elapsed)
+        self._done = False
+
+        self.get_logger().info(
+            f"logging to {self._csv_path} | raw_vrpn={self._raw_vrpn} "
+            f"relay={self.get_parameter('include_relay').value} "
+            f"duration={'until Ctrl-C' if self._duration <= 0 else f'{self._duration:.0f}s'}")
+
+    # ---- discovery of raw vrpn pose topics ---------------------------------
+    def _discover(self) -> None:
+        for name, types in self.get_topic_names_and_types():
+            if name in self._subscribed:
+                continue
+            if not name.startswith(self._vrpn_ns):
+                continue
+            if "geometry_msgs/msg/PoseStamped" not in types:
+                continue
+            self._subs.append(self.create_subscription(
+                PoseStamped, name, lambda m, t=name: self._on_pose(t, m), _SENSOR_QOS))
+            self._subscribed.add(name)
+            self.get_logger().info(f"+ raw vrpn topic: {name}")
+
+    # ---- message callbacks -------------------------------------------------
+    def _row(self, topic, stamp, x, y, z) -> None:
+        t_mono = time.perf_counter()
+        t_wall = time.time()
+        seq = self._seq.get(topic, 0)
+        self._seq[topic] = seq + 1
+        self._rows.append((topic, seq, f"{t_wall:.6f}", f"{t_mono:.6f}",
+                           f"{stamp:.6f}", f"{x:.6f}", f"{y:.6f}", f"{z:.6f}"))
+
+    def _on_point(self, topic, msg) -> None:
+        self._row(topic, _stamp_s(msg.header), msg.point.x, msg.point.y, msg.point.z)
+
+    def _on_pose(self, topic, msg) -> None:
+        p = msg.pose.position
+        self._row(topic, _stamp_s(msg.header), p.x, p.y, p.z)
+
+    def _on_pose_array(self, topic, msg) -> None:
+        stamp = _stamp_s(msg.header)
+        for i, pose in enumerate(msg.poses):
+            name = self._pose_order[i] if i < len(self._pose_order) else str(i)
+            self._row(f"{topic}[{name}]", stamp,
+                      pose.position.x, pose.position.y, pose.position.z)
+
+    # ---- periodic flush ----------------------------------------------------
+    def _flush(self) -> None:
+        if self._rows:
+            self._writer.writerows(self._rows)
+            self._fh.flush()
+            self._rows.clear()
+
+    def _on_duration_elapsed(self) -> None:
+        self.get_logger().info("duration elapsed -> stopping")
+        self._done = True
+
+    # ---- shutdown summary --------------------------------------------------
+    def finalize(self) -> None:
+        self._flush()
+        self._fh.close()
+        summary = self._summarize()
+        with open(self._json_path, "w") as fh:
+            json.dump(summary, fh, indent=2)
+        self._print_summary(summary)
+
+    def _summarize(self) -> dict:
+        # re-read the CSV we just wrote (single source of truth)
+        per_topic: dict[str, list[float]] = {}
+        with open(self._csv_path) as fh:
+            for r in csv.DictReader(fh):
+                per_topic.setdefault(r["topic"], []).append(float(r["t_mono"]))
+        out = {"csv": self._csv_path, "nominal_hz": NOMINAL_MOCAP_HZ, "topics": {}}
+        for topic, ts in per_topic.items():
+            t = np.sort(np.asarray(ts))
+            if len(t) < 3:
+                out["topics"][topic] = {"n": len(t)}
+                continue
+            dur = float(t[-1] - t[0])
+            dt = np.diff(t) * 1e3
+            thr = 1.5 * 1e3 / NOMINAL_MOCAP_HZ
+            gaps = dt[dt > thr]
+            out["topics"][topic] = {
+                "n": len(t), "dur_s": round(dur, 2),
+                "eff_hz": round((len(t) - 1) / dur, 1) if dur > 0 else None,
+                "dt_med_ms": round(float(np.median(dt)), 2),
+                "dt_p90_ms": round(float(np.percentile(dt, 90)), 2),
+                "dt_p99_ms": round(float(np.percentile(dt, 99)), 2),
+                "dt_max_ms": round(float(dt.max()), 2),
+                "jitter_std_ms": round(float(np.std(dt)), 2),
+                "dropout_gaps": int(len(gaps)),
+                "dropout_max_steps": round(float(gaps.max() / POLICY_STEP_MS), 1) if len(gaps) else 0.0,
+            }
+        return out
+
+    def _print_summary(self, summary: dict) -> None:
+        log = self.get_logger()
+        log.info(f"wrote {summary['csv']}")
+        log.info(f"{'topic':<26}{'n':>7}{'eff_Hz':>8}{'med':>7}{'p90':>7}{'p99':>7}{'max_ms':>8}{'jit':>7}")
+        for topic, s in summary["topics"].items():
+            if s.get("n", 0) < 3:
+                log.info(f"{topic:<26}{s.get('n', 0):>7}  (too few)"); continue
+            log.info(f"{topic:<26}{s['n']:>7}{s['eff_hz']:>8}{s['dt_med_ms']:>7}"
+                     f"{s['dt_p90_ms']:>7}{s['dt_p99_ms']:>7}{s['dt_max_ms']:>8}{s['jitter_std_ms']:>7}")
+        log.info("run: mocap_timing.py stream <csv> for the full distribution")
+
+
+def main() -> None:
+    rclpy.init()
+    node = MocapStreamLogger()
+    try:
+        while rclpy.ok() and not node._done:
+            rclpy.spin_once(node, timeout_sec=0.2)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.finalize()
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()
