@@ -205,6 +205,20 @@ N=200 场馆题,oracle=venue RK4@2ms;Mac CPU 是代理尺,pod/SoC 复跑:
 **部署建议**:tick 路径换 fast 变体(flag 门控已入库,默认关)+ Stage-2 predict 同 flag(3.9→0.96ms)
 + 重规划降频 30-50Hz;后续杠杆:手写 cross(单步 ~60%)、C++/torch 后端。含 87 tests 绿(已独立复验)。
 
+## planner 延迟×精度基准已结(2026-07-07,yikang;分支 planner-latency-bench,commit 8c1b34e)
+
+**0.4s 成因定死**:StrikeSpecPlanner.solve 一次冷解 = 8 LM 迭代 → 57 次全飞行 rollout → 3.6 万步
+1kHz python-Euler(15.4µs/步,np.cross Magnus 项占大头)= 中位 451ms;灵敏度差分再 +87ms。
+**"jiayi 的 planner"考古结论:不存在独立实现**——部署管线三段(估计→1kHz 预测→镜像律 plan)本就是
+jiayi 6-17 所写(ed5cca9),C++ runner 只消费 /racket/command_flat;所以对比 = 镜像律家族 vs StrikeSpec 家族。
+**N=200 场馆题实测(Mac CPU,oracle=venue RK4)**:镜像律家族(user_quick 18.6ms / jiayi 管线 22.7ms)
+落点真误差 ~75mm(盲旋+无切向接触);StrikeSpec 基线 18.9mm 但 451ms。**胜者 = numpy 批量探针
++ 远粗近细 dt=0.02 + 上 tick 热启动 + 6 迭代 + 免每 tick 灵敏度:中位 15.2ms / p90 41.8ms,精度持平基线
+(30-45×提速)**;油门到 dt=0.04 → 10.1ms。torch 批量 1.9mm 但单题 1.2s(kernel-launch 束缚)→ 训练侧
+题库专用,部署单题别用。落地建议:部署 tick 走 FastStrikeSpec 组合 + Stage-2 预测同旗(3.9→0.96ms)
++ 30-50Hz 重规划间用缓存 spec;后续杠杆 = 手写 cross 替 np.cross(~60% 步成本)或 C++ 化。
+诚实边界:Mac 为代理,上 SoC/pod 重跑 benchmark_planner_latency.py。旗默认全关,off 路径已验位等价。
+
 ## 四阶段总计划(2026-07-06 重排版;每阶段 = 开发任务 + 测试臂,过线才升段)
 
 | 臂 | 配置(完整命令附后) | 回答什么 |
