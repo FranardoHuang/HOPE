@@ -1123,11 +1123,14 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
             refs = dict(refs)
             refs["joint_pos"] = policy.default_q
             refs["joint_vel"] = np.zeros_like(refs["joint_vel"])
-            # 177 hitter: hold/rest feeds a Δ=0 station (base target pinned to the LIVE base xy),
-            # mirroring the C++ runner's level-0 / non-engaged plan ("already at station" — the
-            # contract's mocap-dropout fallback). The armed swing's sampled station is restored
-            # from racket.station_pos_w at the hold->swing transition below.
-            if policy.hitter:
+            # 177 hitter: hold/rest keeps the SAMPLED station live (world anchor), exactly like
+            # training (pbase pays through the hold and the Δ obs is real). Feeding Δ=0 here was
+            # tried first ("already at station" — the mocap-dropout fallback) and is WRONG as the
+            # nominal hold: it removes the only signal anchoring the base, and the policy free-
+            # wanders 1-2 m during holds then falls off-station (2026-07-06 CSV phase analysis:
+            # falls at torso x 1.0-2.0 m with station boxes at ±0.1). Δ=0 stays the DROPOUT
+            # fallback only. PP_DF_HOLD_DZERO=1 restores the old pinning for A/B.
+            if policy.hitter and os.environ.get("PP_DF_HOLD_DZERO", "0") == "1":
                 racket.base_target_pos_w = robot.body_pos(robot.pelvis_bid)[:2].copy()
         obs, base_quat_w, ra_pos, ra_quat, refa_pos, refa_quat = build_obs(
             refs, robot, racket, last_action, policy.default_q, deploy_parity=policy.deploy_parity,

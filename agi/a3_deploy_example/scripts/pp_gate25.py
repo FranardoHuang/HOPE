@@ -191,17 +191,23 @@ if ok:
 if ok:
     spin(3.0)                      # settle in hold
     if not fell():
-        off = len(log_bytes())
         key("1")                   # bh swing (dir still b)
         spin(0.6)                  # 0.6s INTO the swing:
+        off_f = len(log_bytes())   # scan baseline: BEFORE the 'f' key (see P6 note)
         key("f")                   # mid-swing switch -> must QUEUE
-        queued, off = wait_marker("QUEUED", 2.0, off)
-        done, off = wait_marker("swing complete", 8.0, off)
+        queued, _ = wait_marker("QUEUED", 2.0, off_f)
+        done, off = wait_marker("swing complete", 8.0, off_f)
         p5_ok = queued and done and not fell()
         phase("P5 mid-swing f-switch queued + swing completes", p5_ok,
               f"queued={queued} complete={done} z={z():.2f}")
         if p5_ok:
-            applied, off = wait_marker("queued swing dir applied", 4.0, off)
+            # The latch may LEGALLY apply BEFORE "swing complete": if 'f' lands while the
+            # swing clock still sits at the windup clamp, the apply condition
+            # (last_tts_at_windup_) fires immediately — QUEUED and applied print 2 lines
+            # apart, then the (now-fh) swing completes (2026-07-06 g25 oracle log). Scan
+            # from the pre-'f' offset: wait_marker returns the CURRENT log end, which by
+            # then is already past the early apply line, so any later baseline misses it.
+            applied, _ = wait_marker("queued swing dir applied", 4.0, off_f)
             spin(2.0)
             off = len(log_bytes())
             key("1")               # fh swing via the applied latch

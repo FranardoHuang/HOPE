@@ -183,8 +183,10 @@ launch file, override per run):
 *(5) C++ `--planner` runner — CLI flags, not yaml* (defaults are the verified values;
 touch only if the venue forces it): `--engage-min-tts 1.0`, `--cmd-timeout 0.5`,
 `--invalid-grace 0.25`, `--swing-rest` (0.5 default). The reachability gate box is
-compile-time in `pp_policy.hpp` (`gate_x_lo/hi` etc.) — matches the model_11400
-boxes; rebuild rockchip if the model generation changes.
+compile-time in `pp_policy.hpp` (`gate_x_lo/hi` etc.) — matches the hopex-lineage
+boxes (unchanged through model_17400_hitter177: the hitter generation widened the
+sampling y-span but kept the box CENTERS); rebuild rockchip if the model generation
+changes.
 
 **Training / eval**
 
@@ -192,6 +194,15 @@ boxes; rebuild rockchip if the model generation changes.
   venue recordings — currently default-off.
 - [ ] Per-model reachability-gate box (compile-time `gate_*` in `pp_policy.hpp`, sheet
   item (5)) when the training boxes change — rebuild BOTH dists.
+- [ ] **Next-retrain riders (2026-07-06, from the model_17400 gate campaign)** — none
+  block the current baseline: (a) hold-gated ARM default-pose term (arms twist
+  left-down/right-up during holds — upper-body imitation is `swing_only` and
+  `hold_ready` std 1.5 only constrains the racket point, so hold arm posture is
+  reward-free; q_des clamp protects the limits meanwhile); (b) hold-gated knee
+  soft-limit (chronic `right_knee` clamp at ~86% of ticks, max viol 1.29 rad — safe
+  but habitual); (c) if station range is widened toward HITTER ±0.75 m, revisit
+  entropy 0.01 / hold_steps_range [50,200] / base_position 1.5 / episode 16 s (the
+  2026-07-06 audited knob set).
 
 **Robot / deploy**
 
@@ -220,9 +231,16 @@ lie; judge checkpoints by the gates below, not W&B.
 
 ```bash
 distrobox enter grasping
+# 177-D hitter_footwork generation (HOPEPingPongHitter, current baseline):
+bash ~/workspace/HOPE/hope_training/whole_body_tracking/scripts/export_onnx_hitter.sh \
+  logs/rsl_rl/agibot_a3_hope_hitter/<run>  [model_XXXX.pt]          # omit ckpt = newest
+# 175-D deploy_parity generation (legacy lineage):
 bash ~/workspace/HOPE/hope_training/whole_body_tracking/scripts/export_onnx_deploy_parity.sh \
-  logs/rsl_rl/agibot_a3_hope_deploy_parity/<run>  [model_XXXX.pt]   # omit ckpt = newest
+  logs/rsl_rl/agibot_a3_hope_deploy_parity/<run>  [model_XXXX.pt]
 # -> <run>/exported/policy.onnx  (auto-kills the hung Isaac after the file appears)
+# 177 exports MUST carry actor_obs_contract=hitter_footwork + ref_reach_offset_xy metadata
+# (the C++ runner derives the base station from them and REFUSES a 177 model without
+# clip-layout/reach info; the hitter export script verifies both keys after the export).
 ```
 
 ⚠ **The export must bake the SAME motion clips the run trained on.** The script pins
@@ -246,16 +264,21 @@ termination. **PASS = falls 0, completion 1.0 per clip, high composite.**
 ```bash
 cd ~/workspace/HOPE/hope_training/whole_body_tracking
 ../.venv-motion/bin/python scripts/mujoco_eval_onnx.py \
-  --onnx logs/rsl_rl/agibot_a3_hope_deploy_parity/2026-07-03_13-32-07/exported/policy.onnx \
+  --onnx logs/rsl_rl/agibot_a3_hope_hitter/2026-07-06_00-56-46/exported/model_17400_hitter177.onnx \
   --motion-files artifacts/hope_forehand_hopex/motion.npz artifacts/hope_backhand_hopex/motion.npz \
-  --noise-scales 0.0 --pd-mode implicit --deploy-faithful --steps 1500
+  --noise-scales 0.0 --pd-mode implicit --deploy-faithful --df-clips both --steps 6000
 # cross-checkpoint comparison on fixed protocols (appends to logs/scoreboard/scoreboard.csv):
 ../.venv-motion/bin/python scripts/scoreboard_eval.py --onnx <...> --label <name> \
   --motion-files artifacts/hope_forehand_hopex/motion.npz artifacts/hope_backhand_hopex/motion.npz
 ```
 
-Reference: `model_7500_hopex` scored composite 1.0 both clips, 7/7 swings, 0 falls,
-pos err 4.1 cm, vel err 0.20 m/s.
+Reference: `model_17400_hitter177` (baseline, 2026-07-06) scored 0 falls × 3 seeds at
+6000 steps, completion 1.0, composite 0.966, pos err ~6-7 cm; the prior 175-D
+`model_7500_hopex` reference was composite 1.0 both clips, 7/7 swings, 0 falls at
+1500 steps. ⚠ 177 models: the harness feeds a LIVE station through holds (training
+semantics). `PP_DF_HOLD_DZERO=1` restores the old Δ=0-during-hold pinning for A/B
+only — with it the policy free-wanders meters during holds and falls off-station
+(that is the localization-DROPOUT behavior, not the nominal deploy path).
 
 ## 6. Sync to the AGI side + Gate 2 (policy-only in the official sim)
 
@@ -265,8 +288,8 @@ cd ~/workspace/HOPE/agi/a3_deploy_example
 # stage asset + rewrite runtime cfg + C++<->Python parity (expect PASS ~1e-6):
 PYBIN=~/workspace/HOPE/hope_training/.venv-motion/bin/python \
   bash scripts/sync_pingpong_model.sh \
-   ~/workspace/HOPE/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_deploy_parity/2026-07-03_13-32-07/exported/policy.onnx \
-    model_11400_hopex
+   ~/workspace/HOPE/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_hitter/2026-07-06_00-56-46/exported/model_17400_hitter177.onnx \
+    model_17400_hitter177
 # if the training target boxes moved: update racket_{pos,vel}_w_clip in
 # src/a3/a3_deploy_onnx_ref/include/a3_pingpong/pp_policy.hpp (compile-time!) then:
 bash scripts/build_a3_deploy_pkg.sh --arch x86_64 \
@@ -279,8 +302,12 @@ bash scripts/pp_freebase_watch.sh --single-swing --oracle-pelvis  # + run script
 
 PASS per swing direction: ≥5 clean cycles, 0 falls, no guard trips, sync_miss 0.
 Boot log must show `[pp] clip layout from ONNX metadata: seg_len={139,132} ...` —
-the legacy `{95,105}` means a stale binary or wrong model. Test BOTH loc modes: this
-generation walks to its target; `perfect_tracking` runs that loop open.
+the legacy `{95,105}` means a stale binary or wrong model. A 177 model must ALSO
+print `[pp] 177 hitter: reach offsets from ONNX metadata: fh=(+0.700,-0.409)
+bh=(+0.706,+0.185)` (a "computed from the baked refs" WARN = pre-fix export; values
+must match). Test BOTH loc modes: this generation walks to its station AND anchors
+its holds on the station channel; `perfect_tracking` runs both loops open (the
+station obs degrades to the Δ=0 dropout fallback).
 
 > ⚠ **Gate 2 coverage limits (2026-07-04 audit)** — know what a PASS does NOT prove:
 > the AUTOMATED portion drives exactly ONE path (PD_STAND warmup → MOTION at level 1
@@ -314,23 +341,40 @@ generation walks to its target; `perfect_tracking` runs that loop open.
 > is IDENTIFIED, not averaged away. Run BOTH loc modes when qualifying a new
 > checkpoint.
 >
-> **Expected with model_11400 + what the m0-hold FAIL means** (differential run
-> 2026-07-04): `P2 m0 hold 20s` FAILS at ~5 s in BOTH loc modes — but the SAME onnx
-> holds the SAME 20 s windup hold INDEFINITELY in the training-side harness
-> (`mujoco_eval_onnx.py --deploy-faithful --df-hold-steps 1000`: sinks to ~0.96,
-> recovers, oscillates 0.98–1.01 for the full 20 s). The C++ obs at hold are verified
-> healthy (upright gravity, nominal joints, sane FK-relative target, tts clamped) —
-> so this is NOT a pp_policy obs bug and NOT a pure model failure: the policy's hold
-> posture is MARGINAL (it always dips to ~0.95), training-side physics lets it
-> recover, the AGI sim's actuation/joint model does not (same class as the known
-> explicit-PD lean artifact — but AGI calls their sim predictive of hardware, so
-> treat the long policy hold as UNSAFE on the robot). Mitigations already shipped:
+> **Expected with model_17400_hitter177 (baseline, verified 2026-07-06)**:
+> `--oracle` = **10/10 phases PASS** — including the two historic killers: P2 m0
+> hold 20 s (the 175-era models fell at ~5 s; the ARM-A hold training + the 177
+> station anchor fixed it) and P3b post-swing hold 8 s. perfect_tracking = 3/4
+> (aborts at `P3b post-swing hold`): **that FAIL is BY DESIGN**, not a regression —
+> without real base localization the 177 station channel degrades to the Δ=0
+> dropout fallback, and the post-swing recovery hold has no world anchor to lean
+> on (the policy free-wanders and tips; same mechanism, measured in the training
+> harness: falls at |torso| 1–2 m from ±0.1 m stations). Consequences: (a) qualify
+> 177 checkpoints on the `--oracle` matrix; perfect_tracking checks only the
+> strike-in-place + dropout-degradation path; (b) on HARDWARE, live mocap
+> (`external_base`) is REQUIRED for the 177 generation — it feeds both the footwork
+> loop and the hold anchor. Known cosmetic behavior: during the policy hold the
+> ARMS drift/twist (left down / right up, occasionally kissing joint limits —
+> q_des clamp protects): training gates upper-body imitation OFF during holds
+> (`motion_body_pos_swing_only`) and `hold_ready` (std 1.5) constrains only the
+> racket point, so hold arm posture is reward-free. Harmless in `--planner` mode
+> (the static-stand handoff covers idle); NEXT-RETRAIN rider: a hold-gated
+> arm-default-pose term (see §2 TODO).
+>
+> *(2026-07-06 harness fix: P6 "latched fh swing" used to read `applied=False`
+> on a HEALTHY latch — the queued flip legally applies while the swing clock still
+> sits at the windup clamp, i.e. BEFORE "swing complete", and the old scan baseline
+> missed it. The 175-era "6/7" scores had the same false FAIL. pp_gate25.py now
+> scans from the pre-`f` offset.)*
+>
+> **Historic note (175-era, model_11400, 2026-07-04)**: `P2 m0 hold 20s` failed at
+> ~5 s in BOTH loc modes while the SAME onnx held 20 s in the training-side harness
+> — the AGI sim's actuation model is stricter than Isaac's on marginal holds, and
+> AGI calls their sim predictive of hardware. That gap drove the ARM-A hold
+> retrain; it is CLOSED in the 177 baseline (oracle P2/P3b PASS above). The
+> mitigations remain shipped and still apply to any future marginal model:
 > `--planner` mode never parks on the policy hold (static stand except the bounded
-> recovery window, §9.6); in scripted mode drop to `s` when idling. Note the
-> training-side run ALSO fell during the swing AFTER its 20 s hold (drift
-> accumulates) — keep holds short everywhere. NEXT-RETRAIN item: train the hold
-> (hold(0,100)→(0,500+) steps, stillness reward, friction/armature DR) — repro =
-> Gate 2.5 P2 and `--df-hold-steps 1000`.
+> recovery window, §9.6); in scripted mode drop to `s` when idling.
 
 ## 7. Gate 3 — planner + control closed-loop in MuJoCo (C++ `--planner`, sim)
 
@@ -339,7 +383,11 @@ profile, publishes the flat topics) → C++ runner in `--planner` mode
 (`external_base` localization from `/a3/base_pose_flat`) → AGI MuJoCo sim (iceoryx
 body-drive). This is the exact hardware wiring — the only sim-specific pieces are
 the fake ball and the ground-truth base pose source. Input contract + engage
-semantics: §9.6. Closed-loop VERIFIED 2026-07-04 (§9.6 status).
+semantics: §9.6. Closed-loop VERIFIED 2026-07-04 (§9.6 status); re-verified
+2026-07-06 with the 177-D baseline `model_17400_hitter177` on the full serve sweep:
+`PP_POINTS=10` → **10/10 points PASS** (every point engage → swing complete →
+recovery done, fall_guard=0, min pelvis z 1.010) across 10 distinct placements
+(fh arrivals y −0.65..−0.20, bh y +0.02..+0.34 — the trained-box sweep).
 
 **ONE COMMAND, headless (the standard way to run this gate):**
 
@@ -509,10 +557,18 @@ taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --gain-scale 0.4
 ## 9. Planner + control in REAL LIFE (hardware) — the demo runbook
 
 Scenario: HUMAN serves, robot returns. The robot does not serve. Baseline policy:
-`model_11400_hopex` (2026-07-04 verification: C++⇔Py ONNX parity 1e-7; training-side
-deploy-faithful MuJoCo gate 7/7 completions fh+bh ZERO falls; AGI-sim free-base
-continuous swings; Gate 3 closed-loop planner-driven rally in sim, 2 engages, zero
-falls).
+`model_17400_hitter177` — the 177-D hitter_footwork generation (2026-07-06
+verification chain: Isaac det composite 0.993; C++⇔Py ONNX parity 2e-7; training-side
+deploy-faithful MuJoCo gate 0 falls × 3 seeds / completion 1.0 / composite 0.966;
+Gate 2.5 transition matrix ORACLE **10/10** incl. the 20 s hold and post-swing hold
+that felled every 175-era model; Gate 3 closed loop **10/10 points** over the
+10-placement serve sweep). ⚠ **177 HARD REQUIREMENT: live mocap** (`external_base`)
+— the base-station obs channel feeds BOTH the footwork loop and the hold/recovery
+anchor; without a fresh base pose the channel degrades to the Δ=0 dropout fallback
+(strike-in-place, no hold anchor — the Gate 2.5 perfect_tracking P3b failure mode).
+Do not arm MOTION on hardware without the mocap relay alive. Previous baseline
+`model_11400_hopex` (175-D, 2026-07-04) remains the mocap-less fallback: it strikes
+in place and needs no base feed.
 
 ### 9.0 Gap checklist — fill EVERY row before arming on hardware
 
@@ -536,7 +592,7 @@ VENUE FILL-IN SHEET** — G3/G4/G5 → sheet items (3)+(4), G6/G7 → §9.3 plac
 | G9 | Ball physics: **VENUE FIT IN THE YAML** (2026-07-03 recordings via main: drag_k 0.1261, restitution 0.64/0.9215/0.654; consistency-guard tests police drift vs node defaults). Spot-check on venue day; full re-fit only if venue/ball changed. The salvaged Jun-23 fit (0.8781) stays REJECTED (8× physical). | venue | ✅ (spot-check 🏟) |
 | G10 | Planner adaptive x_hit: `robot_pose_topic:=/P1/pose`, `x_hit_offset 0.67`, clamp `[0.0, 0.35]` — **already the yaml defaults** (2026-07-04). The clamp is the TABLE-COLLISION protection: it stops the demanded plane (and the lunge endpoint ≈ plane − 0.67) short of the table edge. | — | ✅ |
 | G11 | Runner engage-safety set (active-swing lock + frozen target, bounded post-swing hold → sticky static stand, engage-tts clock seed + clamp, invalid-flutter grace, base_low guard, **MOTION-entry yaw align**) — in the C++ runner (§9.6). | — | ✅ |
-| G12 | Baseline ONNX on the robot: `model_11400_hopex.onnx` staged in `assets/a3_runtime/models/` + runtime cfg points at it; **rockchip dist rebuilt AFTER the 2026-07-04 C++ changes** (dir-flip latch, PD_STAND blend, yaw guard, fall guard — §8 build). | laptop→MDU | ✅ code / ⛔ rebuild+ship pending |
+| G12 | Baseline ONNX on the robot: `model_17400_hitter177.onnx` staged in `assets/a3_runtime/models/` + runtime cfg points at it (2026-07-06 sync); **rockchip dist rebuilt AFTER the 2026-07-06 C++ changes** (177-D obs builder, reach-offset metadata parse, hold-station anchor — §8 build; x86_64 rebuilt + gate-verified same day). ⚠ 177 needs mocap (see baseline note above); fallback without mocap = `model_11400_hopex.onnx` (175-D). | laptop→MDU | ✅ code+x86 / ⛔ rockchip rebuild+ship pending |
 
 **G1/G2 were the blockers; the 2026-07-04 `--planner` port (§9.6) shrank both** from
 "build a full aarch64 ROS chain + re-plumb /body_drive" to "get two topics onto the MDU
@@ -784,5 +840,5 @@ into the MOTION window, observed).
 | ship to robot | host→MDU | `agi/a3_deploy_example` | `rsync ... dist/a3_deploy_rockchip/ agi@10.42.10.12:/agibot/a3_deploy/` |
 | run on robot (scripted) | MDU | `/agibot/a3_deploy` | `taskset -c 4-7 ./run_a3_pingpong.sh --start passive --legs-passive --gain-scale 0.4 --single-swing` |
 | run on robot (planner) | MDU | `/agibot/a3_deploy` | `taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --gain-scale 0.4` (§9.6; G2 gate first) |
-| transition matrix (Gate 2.5) | hope | `agi/a3_deploy_example` | `bash scripts/pp_gate25.sh [--oracle]` (§6: per-phase PASS/FAIL; m0-hold FAIL expected on model_11400) |
+| transition matrix (Gate 2.5) | hope | `agi/a3_deploy_example` | `bash scripts/pp_gate25.sh [--oracle]` (§6: per-phase PASS/FAIL; model_17400_hitter177 = 10/10 oracle, 3/4 perfect_tracking — P3b Δ=0-fallback fail is by design) |
 | hardware planner+control | MDU | §9.2 | mocap → planner+flats → `--planner --dry-run` (G2) → shadow `h` → ARM ritual + `m` (§9.2-9.3) |

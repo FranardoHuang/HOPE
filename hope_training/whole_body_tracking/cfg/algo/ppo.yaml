@@ -47,10 +47,12 @@ algorithm:
   learning_rate: 0.001         # initial LR
   schedule: adaptive           # "adaptive" (KL-based) or "fixed"
   desired_kl: 0.01             # target KL for the adaptive schedule
-  entropy_coef: 0.01           # exploration bonus. NOTE merge-audit 2026-07-06: jiayi's
-                               # Hitter-scratch runs use 0.015 — un-ablated, so it lives in
-                               # HOPEPingPongHitter.yaml (task-level algo override), not in
-                               # this global default (every lineage trains through this file)
+  entropy_coef: 0.01           # exploration bonus. History (merge-audit 2026-07-06): jiayi's
+                               # early Hitter-scratch runs briefly used 0.015 as a GLOBAL edit;
+                               # audit moved it out, and jiayi himself reverted to 0.01 the same
+                               # day (05b9c6e). If a lineage wants a different value, pin it via
+                               # the task-level `algo:` override + a same-batch A/B (J1) — never
+                               # by editing this global default.
   num_learning_epochs: 5       # gradient epochs per update
   num_mini_batches: 4          # minibatches per epoch
   # -------------------------------------------------------------------------
