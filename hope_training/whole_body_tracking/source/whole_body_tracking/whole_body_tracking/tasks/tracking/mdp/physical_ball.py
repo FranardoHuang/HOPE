@@ -363,8 +363,22 @@ class PhysicalBallManager:
         with open(self._prm.source_path, "r") as fh:
             self._mass = float(_yaml.safe_load(fh)["ball"]["mass"])
 
-        # Virtual-table landmarks (env-local), same convention as the vb reward path.
-        from whole_body_tracking.tasks.table_tennis import geometry as _tt_geom
+        # Virtual-table landmarks (env-local), same convention as the vb reward path. geometry.py
+        # is pure python; fall back to a file-path load when the package import is unavailable
+        # (Isaac-free harness tests drive the real manager through mocks).
+        try:
+            from whole_body_tracking.tasks.table_tennis import geometry as _tt_geom
+        except Exception:
+            import importlib.util as _ilu
+            import sys as _sys
+
+            _geo_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "..", "..", "table_tennis", "geometry.py"
+            )
+            _spec = _ilu.spec_from_file_location("physical_ball._tt_geometry", _geo_path)
+            _tt_geom = _ilu.module_from_spec(_spec)
+            _sys.modules["physical_ball._tt_geometry"] = _tt_geom  # dataclass resolution needs this
+            _spec.loader.exec_module(_tt_geom)
 
         self._near_x = float(command.cfg.vb_table_near_x)
         self._table_len = float(_tt_geom.TABLE_LENGTH)
@@ -377,9 +391,24 @@ class PhysicalBallManager:
         self._land_new = torch.zeros(n, dtype=torch.bool, device=self.device)
         self._land_xy = torch.zeros(n, 2, device=self.device)
         self._bounce_new = torch.zeros(n, dtype=torch.bool, device=self.device)
-        # Per-swing latch: this swing's serve was delayed by the table-plane truncation (counted
-        # once into pb_serve_truncated_count; re-armed at every resample).
+        # Truncation latch: set on any candidate step whose serve is delayed by the plane
+        # truncation; COUNTED into pb_serve_truncated_count exactly once, at CONSUMPTION (the
+        # serve, or the strike if it never served), where it is also cleared — and ONLY there.
+        # Deliberately NOT cleared in on_resample: upstream _resample_command can repeat within
+        # one physical wait (motion.just_resampled stays latched across steps at low env counts
+        # — the seed=1 exposing config), and a resample-cleared latch either re-counts per
+        # candidate step (counting while waiting: the observed 1945 counts vs 110 serves) or
+        # never counts at all (counting at serve: the final repeat's fresh discovery serves
+        # un-delayed). Consumption events are the only cadence-invariant swing boundary; a latch
+        # carried from an aborted wait into the next swing's consumption keeps the AGGREGATE
+        # honest (one count per physical wait that ever hit truncation).
         self._trunc_flag = torch.zeros(n, dtype=torch.bool, device=self.device)
+        # Per-swing tts_effective cache: the final-ballistic-segment length is a trajectory
+        # property fixed when the question is sampled, so it is DISCOVERED once (first candidate
+        # step) and cached; waiting steps only compare tts against it instead of re-running the
+        # full reverse integration every step (the wasted-compute half of the same defect).
+        self._teff_cache = torch.zeros(n, device=self.device)
+        self._teff_valid = torch.zeros(n, dtype=torch.bool, device=self.device)
         self._prev_valid = torch.zeros(n, dtype=torch.bool, device=self.device)
         self._prev_pos_env = torch.zeros(n, 3, device=self.device)
         # Reusable wrench buffers (num_envs, 1 body, 3), zeroed like table_tennis_env.py.
@@ -450,7 +479,10 @@ class PhysicalBallManager:
         self._landed[ids] = False
         self._land_new[ids] = False
         self._bounce_new[ids] = False
-        self._trunc_flag[ids] = False
+        # NOTE: _trunc_flag is NOT cleared here — it is consumed (counted + cleared) at the
+        # serve/strike only, so pb_serve_truncated_count stays exactly-once-per-wait even when
+        # upstream resamples repeat within one wait (see the latch comment in __init__).
+        self._teff_valid[ids] = False  # new question -> new trajectory -> re-discover its segment
         self._prev_valid[ids] = False
 
     def update(self, exact_strike: torch.Tensor) -> None:
@@ -462,30 +494,40 @@ class PhysicalBallManager:
         # 1) fold bounce/landing events flagged by the physics callback since last control step.
         self._consume_events()
 
-        # 2) serve: parked envs whose tts entered (step_dt, SERVE_HORIZON_S] are CANDIDATES; the
-        #    reverse integration (env-local frame, vb-convention) returns per-env tts_effective —
-        #    a row launches only when its remaining tts fits inside the un-truncated final
-        #    ballistic segment (tts <= tts_effective), i.e. TRUNCATED rows serve LATER, from ON
-        #    the incoming trajectory, and forward flight for exactly tts seconds still arrives at
-        #    the question (contact, velocity) at the exact-strike frame (tts is an exact multiple
-        #    of step_dt — bank runs forbid retiming). Rows whose whole final segment is shorter
-        #    than one control step never serve and are counted at the strike as pb_missed_serve.
+        # 2) serve: parked envs whose tts entered (step_dt, SERVE_HORIZON_S] are CANDIDATES.
+        #    FIRST candidate step per swing runs the reverse integration (env-local frame,
+        #    vb-convention) once to DISCOVER the final-ballistic-segment length tts_effective,
+        #    which is cached — subsequent WAITING steps only compare tts against the cache, no
+        #    re-integration. A row launches only when its remaining tts fits inside the
+        #    un-truncated segment (tts <= tts_effective): un-truncated discoveries serve on the
+        #    spot from that same integration; TRUNCATED rows serve LATER (one more integration on
+        #    the serve step, over exactly t_back = tts <= tts_effective — un-truncated by
+        #    construction), from ON the incoming trajectory, so forward flight for exactly tts
+        #    seconds still arrives at the question (contact, velocity) at the exact-strike frame
+        #    (tts is an exact multiple of step_dt — bank runs forbid retiming). Rows whose whole
+        #    final segment is shorter than one control step never serve and are counted at the
+        #    strike as pb_missed_serve. Cost: <= 2 integrations per swing (was: one per waiting
+        #    step). Truncation is LATCHED here but counted only at consumption (serve/strike).
         just_served = torch.zeros_like(self._landed)
         cand = schedule_serves(self._mode == _MODE_PARKED, cmd.time_to_strike,
                                SERVE_HORIZON_S, min_tts_s=step_dt)
-        if bool(cand.any()):
+        discover = cand & ~self._teff_valid
+        serve_cached = cand & self._teff_valid & (cmd.time_to_strike <= self._teff_cache + 1e-6)
+        integ = discover | serve_cached
+        if bool(integ.any()):
             t_back = cmd.time_to_strike.clamp(min=0.0, max=SERVE_HORIZON_S)
             pos_env, vel_w, t_eff = back_integrate_incoming(
                 cmd.racket_target_pos_w - origins, cmd.vb_vel_in_w, cmd.vb_spin_in_w,
                 t_back, self._prm, h=SERVE_BACKINT_H,
                 surface_z=float(cmd.cfg.vb_table_surface_z), margin=SERVE_PLANE_MARGIN,
             )
-            due = cand & (t_eff >= t_back - 1e-6)
-            # Swings whose serve is DELAYED by the plane truncation (counted once per swing).
-            delayed = cand & ~due & ~self._trunc_flag
-            if bool(delayed.any()):
-                self._trunc_count += float(delayed.sum())
-                self._trunc_flag |= delayed
+            self._teff_cache = torch.where(discover, t_eff, self._teff_cache)
+            self._teff_valid |= discover
+            # 1e-4 truncation tolerance: t_eff is a float32 per-step sum (~1e-5 noise); a row
+            # truly truncated within the last 1e-4 s costs <= |v|*1e-4 ~ 0.4 mm at the strike —
+            # far below the 17 mm engine floor.
+            due = integ & (t_eff >= t_back - 1e-4)
+            self._trunc_flag |= discover & ~due  # latch only; counted at serve/strike
             just_served = due
             if bool(due.any()):
                 ids = torch.where(due)[0]
@@ -497,6 +539,13 @@ class PhysicalBallManager:
                 self._landed[ids] = False
                 self._prev_valid[ids] = False
                 self._serve_count += float(len(ids))
+                # One-per-swing truncation accounting, CONSUMED at the serve: invariant under
+                # upstream resample repeats (each repeat clears the latch, the next candidate
+                # step re-latches it, the single serve consumes it once).
+                delayed = due & self._trunc_flag
+                if bool(delayed.any()):
+                    self._trunc_count += float(delayed.sum())
+                self._trunc_flag = self._trunc_flag & ~due
 
         # 3) strike-frame truth measurement (the instrument's headline numbers). just_served envs
         #    are excluded (their write hasn't been integrated yet); with tts > step_dt at serve
@@ -517,10 +566,16 @@ class PhysicalBallManager:
             # Phase A: no racket impulse — the ball continues THROUGH the strike point/robot.
             self._mode[meas] = _MODE_POST
         # Strike frame reached while still parked (resampled inside the last control step, or the
-        # question was never realizable this swing): count the unserved strike.
+        # question was never realizable this swing): count the unserved strike, and consume the
+        # truncation latch of swings that were delayed but never got a serve window (t_eff <
+        # one control step) — the OTHER once-per-swing consumption point.
         missed = exact_strike & (self._mode == _MODE_PARKED)
         if bool(missed.any()):
             self._missed_serve_count += float(missed.sum())
+            late = missed & self._trunc_flag
+            if bool(late.any()):
+                self._trunc_count += float(late.sum())
+            self._trunc_flag = self._trunc_flag & ~missed
         # Clock jumped past the strike WITHOUT an exact-strike frame (deploy-parity mid-swing clip
         # switch): the inbound flight is no longer measurable — let it fly out as POST (silently:
         # the gate was never evaluated; mirrors the shadow driver's stale handling).

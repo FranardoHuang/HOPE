@@ -296,6 +296,151 @@ def test_serve_scheduling(pb):
           "table_bounds_mask edges exact")
 
 
+# ------------------------------------------------------------------------------------------- #
+# Manager harness (Isaac-free mocks driving the REAL PhysicalBallManager.update path)
+# ------------------------------------------------------------------------------------------- #
+class _MockBall:
+    def __init__(self, n):
+        import types
+
+        self.data = types.SimpleNamespace(
+            root_pos_w=torch.zeros(n, 3),
+            root_lin_vel_w=torch.zeros(n, 3),
+            root_ang_vel_w=torch.zeros(n, 3),
+            root_quat_w=torch.tensor([[1.0, 0.0, 0.0, 0.0]]).expand(n, 4).contiguous(),
+        )
+
+    def write_root_pose_to_sim(self, pose, env_ids=None):
+        self.data.root_pos_w[env_ids] = pose[:, :3]
+
+    def write_root_velocity_to_sim(self, vel6, env_ids=None):
+        self.data.root_lin_vel_w[env_ids] = vel6[:, :3]
+        self.data.root_ang_vel_w[env_ids] = vel6[:, 3:]
+
+
+def _make_mock_world(n):
+    """Minimal (env, cmd) pair for PhysicalBallManager: no Isaac, no physics callback (degraded
+    control-rate path), flat env origins at zero (env-local == world)."""
+    import types
+
+    ball = _MockBall(n)
+
+    class _Scene:
+        env_origins = torch.zeros(n, 3)
+
+        def __getitem__(self, key):
+            assert key == "pb_ball", key
+            return ball
+
+    class _Sim:
+        def add_physics_callback(self, name, fn):
+            raise RuntimeError("no sim in the Isaac-free harness")
+
+    env = types.SimpleNamespace(scene=_Scene(), sim=_Sim(), step_dt=0.02)
+    cmd = types.SimpleNamespace(
+        device="cpu",
+        num_envs=n,
+        metrics={},
+        cfg=types.SimpleNamespace(
+            vb_table_near_x=0.5, vb_table_surface_z=0.76, exact_success_decay=1.0
+        ),
+        time_to_strike=torch.zeros(n),
+        racket_target_pos_w=torch.zeros(n, 3),
+        vb_vel_in_w=torch.zeros(n, 3),
+        vb_spin_in_w=torch.zeros(n, 3),
+    )
+    return env, cmd, ball
+
+
+def _run_swing(pb, mgr, cmd, tts0, resample_every_step=False):
+    """Drive one swing: on_resample, then tts marches down by step_dt to the exact-strike frame.
+    ``resample_every_step`` simulates the upstream pathology (motion.just_resampled staying
+    latched across steps at low env counts -> _resample_command repeats within one wait)."""
+    n = cmd.num_envs
+    no_strike = torch.zeros(n, dtype=torch.bool)
+    mgr.on_resample(torch.arange(n))
+    serve_tts = None
+    tts = tts0
+    while tts > 0.01:
+        if resample_every_step and bool((mgr._mode == 0).all()):
+            mgr.on_resample(torch.arange(n))  # upstream repeat while everyone still waits
+        cmd.time_to_strike[:] = tts
+        mgr.update(no_strike)
+        if serve_tts is None and float(cmd.metrics["pb_serve_count"][0]) > mgr._harness_served:
+            serve_tts = tts
+        tts = round(tts - 0.02, 10)
+    cmd.time_to_strike[:] = 0.0
+    mgr.update(torch.ones(n, dtype=torch.bool))  # exact-strike frame
+    mgr._harness_served = float(cmd.metrics["pb_serve_count"][0])
+    return serve_tts
+
+
+def test_manager_truncation_counting(pbmod):
+    """Seed=1 cosmetic-defect regression: pb_serve_truncated_count must advance EXACTLY once per
+    truncation-delayed swing — counted at consumption (the serve), invariant to upstream
+    _resample_command repeats within the wait — and waiting steps must NOT re-run the reverse
+    integration (cached tts_effective; <= 2 integrations per quiet swing)."""
+    n = 2
+    env, cmd, ball = _make_mock_world(n)
+    mgr = pbmod.PhysicalBallManager(cmd, env)
+    mgr._harness_served = 0.0
+
+    # Count the batched reverse-integration calls the manager actually makes.
+    calls = {"n": 0}
+    orig = pbmod.back_integrate_incoming
+
+    def counting(*a, **k):
+        calls["n"] += 1
+        return orig(*a, **k)
+
+    pbmod.back_integrate_incoming = counting
+    try:
+        # A truncating question: rising contact velocity at bank-like height (t_eff ~ 0.16 s).
+        cmd.racket_target_pos_w[:] = torch.tensor([0.42, -0.15, 0.95])
+        cmd.vb_vel_in_w[:] = torch.tensor([-3.0, 0.2, 0.2])
+        cmd.vb_spin_in_w[:] = 0.0
+
+        # Swing 1 (quiet): one truncation count per env, serve fired inside the truncated
+        # window, and exactly 2 integrations (discovery + serve) — NOT one per waiting step.
+        calls["n"] = 0
+        serve_tts = _run_swing(pbmod, mgr, cmd, tts0=0.60)
+        m = cmd.metrics
+        assert float(m["pb_serve_count"][0]) == n, f"swing 1 serves {float(m['pb_serve_count'][0])}"
+        assert float(m["pb_serve_truncated_count"][0]) == n, (
+            f"swing 1 truncation count {float(m['pb_serve_truncated_count'][0])} != {n}"
+        )
+        assert serve_tts is not None and 0.10 <= serve_tts <= 0.20, (
+            f"truncated serve should fire near t_eff~0.16, got {serve_tts}"
+        )
+        assert calls["n"] == 2, f"quiet swing ran {calls['n']} integrations (cache broken)"
+
+        # Swing 2 (PATHOLOGICAL: on_resample repeats every waiting step — the pod cadence that
+        # produced 1945 counts for 110 serves): the count still advances by exactly n.
+        serve_tts = _run_swing(pbmod, mgr, cmd, tts0=0.60, resample_every_step=True)
+        assert float(m["pb_serve_truncated_count"][0]) == 2 * n, (
+            f"pathological swing re-counted: {float(m['pb_serve_truncated_count'][0])} != {2 * n}"
+        )
+        assert float(m["pb_serve_count"][0]) == 2 * n and serve_tts is not None
+
+        # Swing 3 (un-truncated question: high contact, descending): serves on the FIRST
+        # candidate step, 1 integration, truncation count unchanged.
+        cmd.racket_target_pos_w[:] = torch.tensor([0.42, -0.15, 2.50])
+        cmd.vb_vel_in_w[:] = torch.tensor([-3.5, 0.0, -0.6])
+        calls["n"] = 0
+        serve_tts = _run_swing(pbmod, mgr, cmd, tts0=0.30)
+        assert float(m["pb_serve_truncated_count"][0]) == 2 * n, "un-truncated swing must not count"
+        assert float(m["pb_serve_count"][0]) == 3 * n and serve_tts == 0.30, (
+            f"un-truncated swing must serve on the first candidate step (got {serve_tts})"
+        )
+        assert calls["n"] == 1, f"un-truncated swing ran {calls['n']} integrations"
+        assert float(m["pb_strike_meas_count"][0]) == 3 * n, "every served swing must be measured"
+    finally:
+        pbmod.back_integrate_incoming = orig
+    print("[ok] manager truncation counting: exactly one pb_serve_truncated_count per delayed "
+          "swing (quiet AND under per-step upstream resample repeats); tts_effective cached — "
+          "2 integrations per truncated swing, 1 per clean swing")
+
+
 def main():
     pb = _load(os.path.join(MDP_DIR, "physical_ball.py"), "physical_ball_standalone")
     vb = _load(os.path.join(MDP_DIR, "virtual_ball.py"), "virtual_ball_standalone")
@@ -306,6 +451,7 @@ def main():
     test_table_params_loader(pb)
     test_table_bounce_math(pb, sbmod, cm)
     test_serve_scheduling(pb)
+    test_manager_truncation_counting(pb)
     print("ALL PHYSICAL-BALL HELPER TESTS PASSED")
 
 
