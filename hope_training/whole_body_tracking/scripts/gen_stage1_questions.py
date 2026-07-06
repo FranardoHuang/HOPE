@@ -9,9 +9,11 @@ inverse-solved face + racket velocity". This script builds that question bank of
   strike point) -> StrikeSpecPlanner.solve() (franco's LM inverse over the venue
   contact+Magnus chain) -> demanded face normal + racket velocity = the ANSWER.
 
-Only answerable questions are kept (LM converged <=5 mm, speed budget respected);
-the solvability rate is reported — if it is low, the fixed strike point is badly
-chosen (move the point, do not train on unanswerable questions).
+Only answerable questions are kept (LM converged <=5 mm, speed budget respected,
+AND the solved return CLEARS THE NET — spec.clears_net, the planner-side post-solve
+annotation; net-rejects are counted per clip and recorded in the bank meta as
+net_gate/net_rejects); the solvability rate is reported — if it is low, the fixed
+strike point is badly chosen (move the point, do not train on unanswerable questions).
 
 The fixed strike point defaults to the clip's HAND-ANNOTATED strike-frame blade
 position (cfg/strike_annotations.yaml via analyze_strike_phase conventions), so the
@@ -29,7 +31,9 @@ bank meta_json (top-level ``anchor`` + per-clip ``anchor_phase``/``anchor_frame`
 Self-test (--check, default on): every kept answer is replayed through the TRAINING-
 side physics (tracking/mdp/virtual_ball.py, torch venue port): predict_paddle_contact
 + coarse_landing must land within tolerance of the target — a cross-implementation
-closed loop (planner numpy solver vs trainer torch physics).
+closed loop (planner numpy solver vs trainer torch physics). It also ASSERTS
+(SystemExit) that every kept answer clears net_top + ball radius in the torch flight,
+so the numpy net gate and the torch check cross-validate.
 
 Frames: the tracking env frame has the table near edge at x=vb_table_near_x and the
 table CENTER line at y=0; the planner HOPE frame has the near-left corner at the
@@ -536,9 +540,17 @@ def main() -> int:
         sel = np.arange(args.n) if args.split == "all" else np.where(splits == args.split)[0]
         kept, normals, vels, diffs, residuals, landings, in_cone = [], [], [], [], [], [], []
         diffs_old = []
+        net_rejects = 0
         for i in sel:
             s = planner.solve(p_hope, v_in[i], None, landing_hope, args.speed_budget)
             if s is None or s.residual_m > planner.TOL_M:
+                continue
+            # NET GATE: the solver ANNOTATES (clears_net computed post-solve, same venue
+            # flight model) and the bank DECIDES — a converged answer whose return would
+            # clip the net (center at x=net_x below net_height + ball radius) is not a
+            # trainable stage-1 answer. Counted separately from unsolvable.
+            if not s.clears_net:
+                net_rejects += 1
                 continue
             kept.append(i)
             # Store the normal SIGN-ALIGNED to the clip's (calibrated) +Y red face: contact
@@ -566,7 +578,7 @@ def main() -> int:
         print(f"[{name}] anchor={args.anchor} phase {st['anchor_phase']:.3f} -> clip frame "
               f"{st['strike_frame']}/{st['n_frames']}, strike point env={np.round(p_env, 3)}, "
               f"split={args.split} (sampled {n_train} train / {n_exam} exam), "
-              f"solvable {len(kept)}/{len(sel)} = {rate:.0%}")
+              f"solvable {len(kept)}/{len(sel)} = {rate:.0%}, net-rejected {net_rejects}")
         if rate < 0.5:
             print(f"  ** WARNING: solvability <50% — the fixed strike point is badly placed for "
                   f"this speed range; move the point / relax the budget instead of training on this **")
@@ -589,7 +601,8 @@ def main() -> int:
         clip_meta[name] = dict(grip_mode=grip_mode, grip_desc=grip_desc,
                                rally_yaw_deg=rally_yaw, anchor=st["anchor"],
                                anchor_phase=st["anchor_phase"],
-                               anchor_frame=st["strike_frame"], n_frames=st["n_frames"])
+                               anchor_frame=st["strike_frame"], n_frames=st["n_frames"],
+                               net_rejects=net_rejects)
         grip_any = grip_any or grip_mode in ("registry", "baked")
 
     # --- torch virtual-ball closed-loop self-test (trainer-side venue physics) ----------
@@ -616,9 +629,24 @@ def main() -> int:
             tgt = torch.tensor(args.landing_env)
             err = torch.linalg.norm(land["land_xy"] - tgt, dim=-1)
             ok = land["land_valid"]
+            # Independent NET cross-check: the numpy planner gate (spec.clears_net, Euler
+            # @1 kHz) already rejected net-clippers; the torch venue physics (RK4, same
+            # clearance expression as --phase-scan `legal`) must AGREE that every KEPT
+            # answer clears net_top + R — numpy gate and torch check cross-validate.
+            net_top = TABLE_SURFACE_Z + 0.1525
+            net_margin = land["net_z"] - (net_top + prm.ball_radius)
+            net_ok = land["net_valid"] & (net_margin > 0.0)
+            margin_txt = (f"min margin {float(net_margin[land['net_valid']].min()):+.3f} m"
+                          if bool(land["net_valid"].any()) else "no net-plane crossing at all")
             print(f"[{name}] torch closed-loop: landed {int(ok.sum())}/{N}, "
                   f"|err| med={err[ok].median():.3f} m  p90={err[ok].quantile(0.9):.3f} m  "
-                  f"(planner residual med={np.median(b['residual_m'])*1000:.1f} mm)")
+                  f"(planner residual med={np.median(b['residual_m'])*1000:.1f} mm)  |  "
+                  f"net cleared {int(net_ok.sum())}/{N} ({margin_txt})")
+            if int((~net_ok).sum()):  # explicit raise — a bare assert vanishes under python -O
+                raise SystemExit(
+                    f"{name}: {int((~net_ok).sum())}/{N} KEPT answers fail the torch-side net "
+                    f"clearance (net_top + ball radius) that the numpy planner gate said they "
+                    f"pass — the two flight models disagree; refusing to write the bank")
 
     # grip_applied / rally_yaw_applied: SINGLE-APPLICATION flags — a bank with these set has
     # calibrated-face (registry-rotated or baked) and rally-canonicalized clip vectors already;
@@ -627,7 +655,7 @@ def main() -> int:
                 vz_range=args.vz_range, landing_env=args.landing_env, near_x=args.near_x,
                 speed_budget=args.speed_budget, split=args.split, exam_frac=EXAM_FRAC,
                 grip=args.grip, grip_applied=bool(grip_any), rally_yaw_applied=True,
-                anchor=args.anchor, clips=clip_meta)
+                anchor=args.anchor, net_gate=True, clips=clip_meta)
     flat = {f"{n}/{k}": v for n, b in banks.items() for k, v in b.items()}
     # REAL json (audit round 2) — load_question_bank parses this and refuses banks whose
     # grip_applied / rally_yaw_applied flags are not both true (allow_legacy escape hatch).
