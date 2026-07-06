@@ -189,8 +189,11 @@ gpu0 = jiayi 测试中(其上我方僵尸进程已清,07-06)。
 p90 30mm 超 20mm 线;**dt 减半误差精确减半**(30.1→15.0mm 全线 ×0.5,全包络 PASS)⇒ 差异=纯半隐式
 欧拉一阶系统项,无建模/坐标错,旋钮=球物理 dt。判定:**S1(场馆速度、无旋)在训练 dt 下真球可用**;
 S3/快球要么球子步减 dt、要么接受 <30mm(仍远低于 0.10m 考卷线)。工具:`scripts/isaac_ball_inloop_check.py`
-(bank/synthetic 双模,日志 /workspace/yikang/inloop_{bank,syn,syn25}.log)。Phase A(physical_ball
-真值仪表 flag)在制;Phase B(拍面冲量入引擎)排期时带上子步决定。
+(bank/synthetic 双模,日志 /workspace/yikang/inloop_{bank,syn,syn25}.log)。**Phase A 已落地并 mech 双向全绿**(stage1-fixed-point
+9ed33b4):`++task.physical_ball=true` = 每 env 真球+真球桌,题目驱动反向积分发球,pod 实测
+**发球精度 12.2mm / 速度误差 0.018 m/s**(正是 in-loop 预测量级);flag off 零痕迹。真球现为
+纯真值仪表(不动奖励/观测);Phase B(拍面拟合冲量入引擎+CCD)排期时带上球子步决定。
+附带物理发现:二次阻力反向积分在 ~1.3s 有限时间奇点(速度帽 40 m/s 规避,发球窗 0.6s,余量 >2x)。
 
 ### 阶段 2a「拍点放开」— 击球点从固定点扩成框(手补)
 
