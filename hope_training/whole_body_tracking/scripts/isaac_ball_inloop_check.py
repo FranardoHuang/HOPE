@@ -205,43 +205,38 @@ def main() -> int:
     print(f"[in-loop] {tag}: {K} balls, physics_dt={args.physics_dt}s, "
           f"contact plane z={contact_z:.4f} (surface {args.surface_z} + R {prm.ball_radius})")
 
-    # --- scene: K collision-free spheres, venue mass/inertia, zero damping ---------------
+    # --- scene: K collision-free spheres via ONE regex view (128 separate RigidObjects
+    # would build 128 physics views and take forever; spawn prims manually, view them once) ---
     sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(dt=args.physics_dt, device=args.device))
     # NOTE: inertia is irrelevant here — zero applied torque, angular damping 0, gyroscopic
     # forces disabled => omega constant by construction (the fit's assumption); only mass matters.
-    balls: list[RigidObject] = []
-    # spread spawn origins on a grid so the parallel flights never interact (collisions off anyway)
     grid = int(np.ceil(np.sqrt(K)))
+    sphere_cfg = sim_utils.SphereCfg(
+        radius=prm.ball_radius,
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            linear_damping=0.0, angular_damping=0.0, disable_gravity=False,
+            enable_gyroscopic_forces=False,
+        ),
+        mass_props=sim_utils.MassPropertiesCfg(mass=0.0034),
+        collision_props=None,  # no collider: pure flight, nothing to touch
+    )
     for i in range(K):
-        ox, oy = 30.0 * (i % grid), 30.0 * (i // grid)
-        cfg = RigidObjectCfg(
-            prim_path=f"/World/Ball_{i:04d}",
-            spawn=sim_utils.SphereCfg(
-                radius=prm.ball_radius,
-                rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                    linear_damping=0.0, angular_damping=0.0, disable_gravity=False,
-                    enable_gyroscopic_forces=False,
-                ),
-                mass_props=sim_utils.MassPropertiesCfg(mass=0.0034),
-                collision_props=None,  # no collider: pure flight, nothing to touch
-            ),
-            init_state=RigidObjectCfg.InitialStateCfg(pos=(ox, oy, 5.0)),
-        )
-        balls.append(RigidObject(cfg))
+        sphere_cfg.func(f"/World/Ball_{i:04d}", sphere_cfg,
+                        translation=(30.0 * (i % grid), 30.0 * (i // grid), 5.0))
+    balls = RigidObject(RigidObjectCfg(prim_path="/World/Ball_.*", spawn=None))
     sim.reset()
+    print(f"[in-loop] scene ready: {balls.num_instances} instances in one view", flush=True)
 
     offsets = torch.tensor([[30.0 * (i % grid), 30.0 * (i // grid), 0.0] for i in range(K)],
                            dtype=torch.float32, device=sim.device)
     p0f = p0.to(torch.float32).to(sim.device) + offsets
     v0f = v0.to(torch.float32).to(sim.device)
     w0f = w0.to(torch.float32).to(sim.device)
-    ident = torch.tensor([1.0, 0.0, 0.0, 0.0], device=sim.device)
-    for i, b in enumerate(balls):
-        pose = torch.cat([p0f[i], ident]).unsqueeze(0)
-        b.write_root_pose_to_sim(pose)
-        b.write_root_velocity_to_sim(torch.cat([v0f[i], w0f[i]]).unsqueeze(0))
+    quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=sim.device).expand(K, 4)
+    balls.write_root_pose_to_sim(torch.cat([p0f, quat], dim=-1))
+    balls.write_root_velocity_to_sim(torch.cat([v0f, w0f], dim=-1))
 
-    # --- step: inject aero force from SIM state each physics step -----------------------
+    # --- step: inject aero force from SIM state each physics step (batched) --------------
     steps = int(args.max_time / args.physics_dt)
     zs = np.zeros((steps + 1, K))
     xys = np.zeros((steps + 1, K, 2))
@@ -250,37 +245,33 @@ def main() -> int:
     mass = 0.0034
 
     def record(row):
-        for i, b in enumerate(balls):
-            p = (b.data.root_pos_w[0] - offsets[i]).cpu().numpy()
-            zs[row, i] = p[2]
-            xys[row, i] = p[:2]
+        pos = (balls.data.root_pos_w - offsets).cpu().numpy()
+        zs[row] = pos[:, 2]
+        xys[row] = pos[:, :2]
 
     record(0)
     for k in range(steps):
-        for i, b in enumerate(balls):
-            v = b.data.root_lin_vel_w[0]
-            w = b.data.root_ang_vel_w[0]
-            speed = torch.linalg.norm(v)
-            a = -kd * speed * v + km * torch.cross(w, v, dim=-1)
-            # Isaac Lab 2.1 applies external wrenches in the BODY frame at COM (is_global only
-            # exists in >=2.2); rotate the world-frame aero force into the body frame — same
-            # convention table_tennis_env.py uses. The ball spins fast (up to ~95 rad/s), so
-            # skipping this rotates the force by ~0.5 rad per 5 ms step = garbage flight.
-            f_w = (mass * a).reshape(1, 3)
-            f_b = quat_rotate_inverse(b.data.root_quat_w, f_w).reshape(1, 1, 3)
-            b.set_external_force_and_torque(f_b, torch.zeros_like(f_b))
-            b.write_data_to_sim()
+        v = balls.data.root_lin_vel_w
+        w = balls.data.root_ang_vel_w
+        speed = torch.linalg.norm(v, dim=-1, keepdim=True)
+        a = -kd * speed * v + km * torch.cross(w, v, dim=-1)
+        # Isaac Lab 2.1 applies external wrenches in the BODY frame at COM (is_global only in
+        # >=2.2); rotate world->body — same convention as table_tennis_env.py. The ball spins
+        # fast (up to ~95 rad/s): skipping this rotates the force ~0.5 rad per 5 ms step.
+        f_b = quat_rotate_inverse(balls.data.root_quat_w, mass * a).unsqueeze(1)
+        balls.set_external_force_and_torque(f_b, torch.zeros_like(f_b))
+        balls.write_data_to_sim()
         sim.step()
-        for b in balls:
-            b.update(args.physics_dt)
+        balls.update(args.physics_dt)
         record(k + 1)
         if (zs[k + 1] <= contact_z - 0.3).all():
             zs, xys, ts = zs[: k + 2], xys[: k + 2], ts[: k + 2]
             break
+    print(f"[in-loop] stepping done at t={ts[-1]:.3f}s", flush=True)
 
     # omega drift check (constant-omega assumption under PhysX)
-    w_end = torch.stack([b.data.root_ang_vel_w[0] for b in balls]).cpu().to(torch.float64)
-    w_drift = torch.linalg.norm(w_end - w0f.cpu().to(torch.float64), dim=-1)
+    w_end = balls.data.root_ang_vel_w.cpu().to(torch.float64)
+    w_drift = torch.linalg.norm(w_end - w0.to(torch.float64), dim=-1)
 
     # --- compare -------------------------------------------------------------------------
     ref_xy, ref_t, ref_ok = reference_landing(p0, v0, w0, vb, prm, contact_z)
@@ -295,8 +286,8 @@ def main() -> int:
     err = np.asarray(err)
     dts = np.asarray(dts)
     ok, line = summarize(err, dts, args.tol_mm)
-    print(f"[in-loop] compared {used}/{K} balls (both crossed the plane)")
-    print(f"[in-loop] {line}")
+    print(f"[in-loop] compared {used}/{K} balls (both crossed the plane)", flush=True)
+    print(f"[in-loop] {line}", flush=True)
     print(f"[in-loop] |omega drift| rad/s: med={float(w_drift.median()):.4f} "
           f"max={float(w_drift.max()):.4f} (constant-omega check)")
 
