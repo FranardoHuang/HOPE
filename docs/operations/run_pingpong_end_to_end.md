@@ -27,8 +27,9 @@ ROS control chain — historical), `agi/a3_deploy_example/PINGPONG_NEW_CHECKPOIN
                        ▼                       ▼
                  AGI MuJoCo sim            robot MDU
 
-        input side (plain ROS 2, laptop or MDU — carries NO control code):
+        input side (plain ROS 2, laptop for sim / HDU for arena — carries NO control code):
           fake_ball_publisher (sim) / mocap vrpn relay (arena) → hope_planner
+          [arena: on the HDU, ROS_DOMAIN_ID=232 to reach the MDU runner — §9.-1]
 ```
 
 - **Scripted mode** (built-in test targets) is for policy validation in sim and first
@@ -139,6 +140,8 @@ hope_planner hope_bringup` (NEVER hand-edit `install/`, it is overwritten).
 | ✓ `restitution_h` / `restitution_v` | `0.64`/`0.9215` venue fit | same calibrate run prints both (h = no-spin grip equivalent) |
 | `restitution_racket` | `0.654` venue fit (paddle e const) | re-fit only with a new racket-bounce recording |
 | ✎ `marker_to_base_xyz` (bottom, flat block) | `[0,0,0]` | SAME number as (2)'s `mocap_to_base_link.p1_xyz` — the planner applies it to `/P1/pose` before publishing `/a3/base_pose_flat` for the C++ `--planner` runner |
+| ✓ `policy_z_offset` (bottom, flat block) | `0.76` (field 2026-07-07) | mocap/table-surface frame → policy/floor frame on ALL planner outputs; 0.76 = table height whenever the G5 calibration puts z=0 ON the surface (it does). Sim yaml keeps 0.0 |
+| ✓ `position_scale` (avatar_pro_vrpn.yaml, relay) | `0.001` (field 2026-07-07) | this venue's CMTracker streams MILLIMETRES over VRPN; relay converts to metres. Set 1.0 if the export is switched to metres |
 | ✓ `robot_pose_topic` | `/P1/pose` | arena default; sim overlay overrides |
 | ✓ `x_hit` static fallback (~18) | `0.17` | only matters before the first `/P1/pose`; MUST equal `robot_start_x + 0.67` — if you place the robot at −0.8 (recommended, §9.3) set this to **−0.13** |
 | ✓ `x_hit_offset/min/max` | `0.67 / 0.0 / 0.35` | retune the clamp only if robot placement changes (table-collision protection) |
@@ -162,7 +165,7 @@ launch file, override per run):
 
 | arg | default | fill with |
 |---|---|---|
-| ✎ `server:=` | `192.168.10.100` (placeholder!) | the MCServer/CMTracker PC IP on the arena LAN — there is NO working default |
+| ✎ `server:=` | `192.168.10.100` (confirmed IP, but 2026-07-07 **UNROUTABLE** from HDU+MDU — 100% loss, no `192.168.10.x` route; G3/§9.-1) | the MCServer/CMTracker PC IP; the HDU (planner host) needs a route/NIC onto `192.168.10.x` before VRPN connects |
 | ✓ `port:=` | `3883` | Chingmu VRPN default |
 | ✓ `update_freq:=` | `300.0` | match the camera rate (ball needs ≥240) |
 | ✓ `ball_tracking_mode:=` / `ball_object:=` | `rigid_body` / `Ball` | matches the standardized naming |
@@ -549,12 +552,19 @@ ros2). Boot log must show `target_src = PLANNER`, `localization mode = external_
 and BOTH `racket target subscriber enabled` + `base pose subscriber enabled` lines:
 
 ```bash
-taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --gain-scale 0.4
+taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --official-stand \
+  --gain-scale 0.4 --leg-gain-scale 1.0
+# --official-stand + --leg-gain-scale 1.0 MANDATORY free-standing (knee gains, §9.7 STEP 5).
 # 0/1/f/b keys are IGNORED (the planner drives engage + side); p/s/h/m still work — 'p'
 # (PASSIVE) is the operator abort. Full bring-up + input contract: §9.6.
 ```
 
 ## 9. Planner + control in REAL LIFE (hardware) — the demo runbook
+
+> **★★ To RUN the mocap policy test: §9.8 — the bare copy-paste version** (4 terminals, in
+> order, no checks). **§9.7** is the same flow WITH verification at every step (use it when §9.8
+> doesn't behave). The subsections below (§9.-1 topology, §9.0 gap checklist, §9.1b builds,
+> §9.2b/c tests + body-drive) are the reference detail.
 
 Scenario: HUMAN serves, robot returns. The robot does not serve. Baseline policy:
 `model_17400_hitter177` — the 177-D hitter_footwork generation (2026-07-06
@@ -570,6 +580,60 @@ Do not arm MOTION on hardware without the mocap relay alive. Previous baseline
 `model_11400_hopex` (175-D, 2026-07-04) remains the mocap-less fallback: it strikes
 in place and needs no base feed.
 
+### 9.-1 Verified robot topology + first hardware session (2026-07-07)
+
+First on-robot bring-up (read-only recon + the G2 dry-run). **Two-box robot, both aarch64:**
+
+| box | hostname | interfaces | reaches | runs |
+|-----|----------|-----------|---------|------|
+| **HDU** (head unit) | `hdu` | `eth_hdu` 10.42.10.10/24 · `wifi_hdu` 192.168.120.249/24 | the MDU (10.42.10.x, 0-loss L2) + the laptop (wifi). **NOT** the mocap LAN. | mocap relay + `hope_planner` (the flats' publisher) |
+| **MDU** (motion unit) | `mdu` | `eth_mdu` 10.42.10.12/24 (gw 10.42.10.10 = HDU) | the HDU only. | the C++ `--planner` control runner (iceoryx body-drive + the two ros2 flats) |
+
+Laptop→HDU = `ssh agi@192.168.120.249`; laptop→MDU = `ssh -J agi@192.168.120.249 agi@10.42.10.12` (password `1`, both hops). (An alternate jump `172.16.238.4` routes via **ProtonVPN** and may time out from some hosts — the wifi jump `192.168.120.249` is the reliable path.)
+
+**Session results:**
+- ✅ **Runner fully shipped + fresh on the MDU** — `/agibot/a3_deploy` has `model_17400_hitter177.onnx`
+  (+ `model_p4_deployparity.onnx` 175 fallback), the aarch64 binary + run script (Jul 7 00:19), runtime
+  cfg → the 177 model, and `a3_aimrt_config.pingpong_ros2body.yaml`.
+- ✅ **G2 PASSES on the real MDU** (`--planner --dry-run`, no-publish, 25 s clean, no lingering proc). Boot log:
+  `clip layout seg_len={139,132}`, `177 hitter reach offsets fh=(+0.700,-0.409) bh=(+0.706,+0.185)` (from ONNX
+  metadata, no "computed from baked refs" warn), BOTH `racket target subscriber enabled` + `base pose subscriber
+  enabled`, `backend started`, `target_src = PLANNER`, `localization mode = external_base(mocap)`. **The aarch64
+  AimRT ros2 plugin loads on hardware — the historical G2 blocker is CLOSED.**
+- ✅ **HDU→MDU DDS interop VERIFIED** — the runner runs on **`ROS_DOMAIN_ID=232`** (set by the MDU's
+  `/agibot/software/v0/entry/env/env.sh`; both boxes `rmw_fastrtps_cpp`, `ROS_LOCALHOST_ONLY=0`). From an
+  HDU shell with `export ROS_DOMAIN_ID=232`, `ros2 topic info /racket/command_flat` + `/a3/base_pose_flat`
+  each show `Subscription count: 1` (the runner) across 10.42.10.x. ⚠ A fresh HDU jazzy shell is domain 0 =
+  INVISIBLE to the runner — the planner shell MUST set 232. The hand-fed-flats path (§9.2b) is fully wired.
+- ✅ **Planner builds on the HDU** — `colcon build --packages-up-to hope_planner` (69 passed / 4 skipped);
+  `--packages-select` fails on the missing `hope_msgs` build-dep.
+- ⛔ **hope_ws (mocap relay + planner) is on NEITHER box.** Build tooling IS present on both
+  (colcon/cmake/g++, python3-numpy 1.24.2) → build it on the **HDU** (§9.1b). `hope_planner` is pure-python
+  (builds now via `--packages-up-to hope_planner`; `hope_msgs` is a build-time dep, the runtime import is optional); **`vrpn_mocap` is C++ and needs libVRPN, installed
+  nowhere and absent from the apt cache** — the one real build dep to source.
+- 🟡 **Live-mocap ingress via the LAPTOP (2026-07-07 — corrects the earlier "network-blocked" claim):** the
+  HDU/MDU can't route to the MCServer `192.168.10.100` (100% loss), BUT the **laptop is ON the mocap LAN**
+  (`enx…` = `192.168.10.82/24`, reaches `192.168.10.100` 0-loss) AND on the HDU's wifi
+  (`192.168.120.133` ↔ HDU `192.168.120.249`, 0-loss). So the mocap chain is: **laptop** runs `vrpn_mocap`+relay
+  (already built in the `hope` box; ingests `192.168.10.100`) → publishes `/P1/pose`+`/ball` on **domain 232**
+  over wifi → **HDU** runs `hope_planner` (subscribes those, publishes the flats to the MDU over `10.42.10.x`;
+  the HDU bridges its two NICs on one domain) → **MDU** runner. **Laptop→HDU DDS on domain 232 VERIFIED
+  2026-07-07** (HDU discovered + read a laptop-published probe; the laptop's ProtonVPN did NOT break it) — and
+  HDU→MDU was already verified, so the full mocap transport is proven end-to-end. Remaining are venue items only:
+  the `vrpn_mocap`↔MCServer VRPN connection (rigid bodies named `Ball`/`P1`/`P2`, world calibration) + the
+  hope_planner params (G4/G5/G8). (The earlier "mocap blocked" conclusion only checked HDU/MDU — not the laptop,
+  which is the natural ingress.)
+
+**Corrected host assignment (supersedes the earlier "run the planner ON the MDU"):** runner on the **MDU**;
+mocap relay + `hope_planner` on the **HDU** (it sees the MDU's DDS on 10.42.10.0/24 and is the box that will
+route to the mocap LAN). The laptop cannot publish the flats to the MDU (different subnet, no DDS discovery
+across the jump). The MDU is disqualified as the planner host: no mocap route + no libVRPN.
+
+**What is unblocked right now** (no mocap needed): drive the runner from a **hand-crafted flat publisher on the
+HDU** (decision-tree item 2) — publish `/racket/command_flat` + `/a3/base_pose_flat` (std_msgs/Float64MultiArray)
+and exercise the real engage→swing pipeline on hardware. The 177 hold anchor still wants a live base pose, so
+keep such tests to single strikes + `s`-to-stand between them (the perfect_tracking/Δ=0 caveat, §6).
+
 ### 9.0 Gap checklist — fill EVERY row before arming on hardware
 
 Legend: ✅ = filled in the repo (2026-07-04), 🏟 = venue-day measurement/procedure,
@@ -581,9 +645,9 @@ VENUE FILL-IN SHEET** — G3/G4/G5 → sheet items (3)+(4), G6/G7 → §9.3 plac
 
 | # | item | where | status |
 |---|------|-------|--------|
-| G1 | **Planner inputs DDS-visible to the MDU** *(2026-07-04 REFRAMED — was: full hope_ws chain on the MDU)*. The `--planner` C++ runner (§9.6) eliminates wbc_runner, the hw bridge, and the python-onnxruntime wheel from the MDU entirely; the control loop is the native aarch64 binary. What remains: the two flat input topics must reach the MDU's DDS, and the laptop cannot see the MDU's DDS → run **mocap relay + hope_planner ON the MDU**. hope_planner is pure python (rclpy/numpy/core msgs — the AGI robot env already ships a ros2+rclpy runtime; the flats are `std_msgs`, no custom typesupport needed on the receive side). Remaining build items: **numpy on the MDU** (pip/apt, aarch64) and **vrpn_mocap** (one small C++ pkg: 3 .cpp + libVRPN — cross-compile with the rockchip sysroot or build on the MDU), plus the IP route MDU → MCServer LAN (VRPN is plain TCP/UDP — works if routable). | MDU | 🟡 (was ⛔) |
-| G2 | **aarch64 AimRT ros2_plugin loads on the MDU** *(2026-07-04 SCOPED DOWN — was: ros2-enabled `/body_drive`)*. `/body_drive` **stays iceoryx** in `--planner` mode; only the two low-rate flat topics ride the ros2 backend (`a3_aimrt_config.pingpong_ros2body.yaml`, same dual-plugin pattern as AGI's own teleop cfg). The aarch64 `libaimrt_ros2_plugin.so` ships in the rockchip dist; it loads clean on x86-in-box but has NEVER been exercised on the MDU (the x86 HOST hits an rclcpp ABI break — box works, host doesn't; the MDU is a third environment). Verify FIRST THING: `./run_a3_pingpong.sh --planner --dry-run` must reach "backend started" with both `subscriber enabled` lines and no undefined-symbol abort; then `ros2 topic hz /racket/command_flat` (after `setup_ros2_msgs.bash`) sees the planner. If the plugin won't load → fallback §9.5. | MDU | 🟡 (was ⛔) |
-| G3 | MCServer (CMTracker PC) IP on the arena LAN → `server:=` launch arg. No working default. | venue | 🏟 |
+| G1 | **Planner inputs DDS-visible to the MDU** *(2026-07-04 REFRAMED — was: full hope_ws chain on the MDU)*. The `--planner` C++ runner (§9.6) eliminates wbc_runner, the hw bridge, and the python-onnxruntime wheel from the MDU entirely; the control loop is the native aarch64 binary. What remains: the two flat input topics must reach the MDU's DDS, and the laptop cannot see the MDU's DDS → run **mocap relay + hope_planner ON the MDU**. hope_planner is pure python (rclpy/numpy/core msgs — the AGI robot env already ships a ros2+rclpy runtime; the flats are `std_msgs`, no custom typesupport needed on the receive side). Remaining build items: **numpy on the MDU** (pip/apt, aarch64) and **vrpn_mocap** (one small C++ pkg: 3 .cpp + libVRPN — cross-compile with the rockchip sysroot or build on the MDU), plus the IP route MDU → MCServer LAN (VRPN is plain TCP/UDP — works if routable). **[2026-07-07 SUPERSEDED: build on the HDU, not the MDU — the MDU has no route to the mocap LAN and lacks libVRPN; the HDU sees the MDU's DDS on 10.42.10.0/24. Tooling present on both boxes; hope_planner builds now (pure-python), vrpn_mocap awaits libVRPN. See §9.-1 + §9.1b.]** | HDU | 🟡 |
+| G2 | **aarch64 AimRT ros2_plugin loads on the MDU** *(2026-07-04 SCOPED DOWN — was: ros2-enabled `/body_drive`)*. `/body_drive` **stays iceoryx** in `--planner` mode; only the two low-rate flat topics ride the ros2 backend (`a3_aimrt_config.pingpong_ros2body.yaml`, same dual-plugin pattern as AGI's own teleop cfg). The aarch64 `libaimrt_ros2_plugin.so` ships in the rockchip dist; it loads clean on x86-in-box but has NEVER been exercised on the MDU (the x86 HOST hits an rclcpp ABI break — box works, host doesn't; the MDU is a third environment). Verify FIRST THING: `./run_a3_pingpong.sh --planner --dry-run` must reach "backend started" with both `subscriber enabled` lines and no undefined-symbol abort; then `ros2 topic hz /racket/command_flat` (after `setup_ros2_msgs.bash`) sees the planner. If the plugin won't load → fallback §9.5. **[2026-07-07 ✅ VERIFIED on the real MDU — plugin loads, both subscribers enabled, 177 metadata parsed, `backend started`, 25 s no-publish clean. Boot log in §9.-1.]** | MDU | ✅ |
+| G3 | MCServer (CMTracker PC) IP on the arena LAN → `server:=` launch arg. No working default. **[2026-07-07: IP is `192.168.10.100`, but NEITHER robot box can route to `192.168.10.x` (100% loss from HDU + MDU) — this is now a real routing/interface gap, not just a value to paste. The HDU (the planner host) needs a route or NIC onto the mocap LAN before vrpn_mocap can connect. See §9.-1.]** | venue | 🏟 ⛔route |
 | G4 | CMTracker rigid bodies named EXACTLY `Ball`, `P1` (robot), `P2`, `PPT` (2026-07-03 convention, avatar_pro_vrpn.yaml). Verify: `ros2 topic list \| grep vrpn_mocap`. | venue | 🏟 |
 | G5 | Mocap world calibration: meters, Z-up, origin at P1 near-side LEFT table corner ON the surface, +x toward the opponent. VERIFY with a marker at the net center → must read ≈ (1.37, −0.7625, 0). | venue | 🏟 |
 | G6 | Robot placement: **0.8 m behind the table edge on the forehand half** (physical placement, see §9.3 why). No yaml key anymore — the C++ runner localizes from the live mocap base pose; just update (1)'s `x_hit` static fallback to `robot_x + 0.67` (−0.8 → **−0.13**). | venue | 🏟 |
@@ -592,19 +656,22 @@ VENUE FILL-IN SHEET** — G3/G4/G5 → sheet items (3)+(4), G6/G7 → §9.3 plac
 | G9 | Ball physics: **VENUE FIT IN THE YAML** (2026-07-03 recordings via main: drag_k 0.1261, restitution 0.64/0.9215/0.654; consistency-guard tests police drift vs node defaults). Spot-check on venue day; full re-fit only if venue/ball changed. The salvaged Jun-23 fit (0.8781) stays REJECTED (8× physical). | venue | ✅ (spot-check 🏟) |
 | G10 | Planner adaptive x_hit: `robot_pose_topic:=/P1/pose`, `x_hit_offset 0.67`, clamp `[0.0, 0.35]` — **already the yaml defaults** (2026-07-04). The clamp is the TABLE-COLLISION protection: it stops the demanded plane (and the lunge endpoint ≈ plane − 0.67) short of the table edge. | — | ✅ |
 | G11 | Runner engage-safety set (active-swing lock + frozen target, bounded post-swing hold → sticky static stand, engage-tts clock seed + clamp, invalid-flutter grace, base_low guard, **MOTION-entry yaw align**) — in the C++ runner (§9.6). | — | ✅ |
-| G12 | Baseline ONNX on the robot: `model_17400_hitter177.onnx` staged in `assets/a3_runtime/models/` + runtime cfg points at it (2026-07-06 sync); **rockchip dist rebuilt AFTER the 2026-07-06 C++ changes** (177-D obs builder, reach-offset metadata parse, hold-station anchor — §8 build; x86_64 rebuilt + gate-verified same day). ⚠ 177 needs mocap (see baseline note above); fallback without mocap = `model_11400_hopex.onnx` (175-D). | laptop→MDU | ✅ code+x86 / ⛔ rockchip rebuild+ship pending |
+| G12 | Baseline ONNX on the robot: `model_17400_hitter177.onnx` staged in `assets/a3_runtime/models/` + runtime cfg points at it (2026-07-06 sync); **rockchip dist rebuilt AFTER the 2026-07-06 C++ changes** (177-D obs builder, reach-offset metadata parse, hold-station anchor — §8 build; x86_64 rebuilt + gate-verified same day). ⚠ 177 needs mocap (see baseline note above); fallback without mocap = `model_11400_hopex.onnx` (175-D). **[2026-07-07: rockchip dist shipped to the MDU + G2-verified on hardware (§9.-1). Note the shipped mocap-less fallback is `model_p4_deployparity.onnx` (175 forehand), NOT `model_11400_hopex` — stage 11400 too if you want its in-place hold.]** | laptop→MDU | ✅ shipped + G2-verified |
 
 **G1/G2 were the blockers; the 2026-07-04 `--planner` port (§9.6) shrank both** from
 "build a full aarch64 ROS chain + re-plumb /body_drive" to "get two topics onto the MDU
-+ confirm one plugin loads". The demo decision tree:
++ confirm one plugin loads". **2026-07-07: G2 is now CLOSED (verified on the real MDU,
+§9.-1); G1 remains open and reframed — the relay+planner host is the HDU, and the current
+hard sub-blocker is the mocap-LAN route (G3) + libVRPN, not the plugin.** The demo decision
+tree:
 
-1. `--planner --dry-run` on the MDU loads the ros2 plugin (G2 ✓) AND relay+planner run
-   on the MDU (G1 ✓) → **autonomous demo via §9.6** (official path).
-2. G2 ✓ but no time for vrpn_mocap/numpy on the MDU → no live ball, but §9.6 can still
-   be driven by any hand-crafted `/racket/command_flat` publisher on the MDU (scripted
-   serves with real engage logic).
-3. ros2 plugin fails on the MDU → **fallback demo §9.5** (scripted keys) — runs TODAY
-   on the proven scripted-mode binary.
+1. ~~`--planner --dry-run` on the MDU loads the ros2 plugin (G2 ✓)~~ **DONE** AND relay+planner
+   run **on the HDU** (G1 — pending libVRPN + mocap route) → **autonomous demo via §9.6** (official path).
+2. G2 ✓ but no live mocap yet → no live ball, but §9.6 can still be driven by a hand-crafted
+   `/racket/command_flat` (+ `/a3/base_pose_flat`) publisher **on the HDU** (scripted serves,
+   real engage logic). **← this path is UNBLOCKED today** (G2 passed; the HDU sees the MDU's DDS).
+3. ~~ros2 plugin fails on the MDU~~ (didn't) → **fallback demo §9.5** (scripted keys) — still
+   available on the proven scripted-mode binary.
 
 ### 9.1 One-time prep (laptop)
 
@@ -619,25 +686,84 @@ HDU=<hdu_wifi_ip>
 rsync -azP -e "ssh -J agi@$HDU" dist/a3_deploy_rockchip/ agi@10.42.10.12:/agibot/a3_deploy/
 ```
 
-### 9.2 Staged bring-up (each stage safe by construction)
+### 9.1b Build the planner chain on the HDU (2026-07-07 — the G1 procedure)
 
-All commands below run **on the MDU** once G1 is closed (until then rehearse on the
-laptop against the AGI sim, §7 — the identical wiring). Every MDU shell first:
+The mocap relay + `hope_planner` run on the **HDU** (`192.168.120.249` wifi / `10.42.10.10`
+on the robot net) — the box that sees the MDU's DDS on `10.42.10.0/24`. Both boxes carry
+colcon/cmake/g++ + `python3-numpy 1.24.2`, so build on-robot. `hope_planner` is pure-python
+and runs flat-only at RUNTIME (its `hope_msgs` import is optional, `node.py:28`), but colcon
+still needs `hope_msgs` BUILT — so use `--packages-up-to hope_planner` (NOT `--packages-select`,
+which skips the dep and fails on a missing `hope_msgs/package.sh`). `vrpn_mocap` is C++ and needs **libVRPN** (absent
+on both boxes, not in the apt cache) — source it first (apt if a Debian mirror is reachable,
+else cross-build with the rockchip sysroot and ship the `.so`) AND give the HDU a route to
+the mocap LAN (G3, §9.-1).
 
 ```bash
-ssh -J agi@$HDU agi@10.42.10.12
-source /agibot/software/v0/entry/env/env.sh
-# + source the MDU-side hope_ws overlay (planner) where a ros2 command needs it
+# LAPTOP → HDU: copy the overlay source only (no build products)
+cd ~/workspace/HOPE
+rsync -azP --exclude build --exclude install --exclude log \
+  -e ssh hope_ws/ agi@192.168.120.249:~/hope_ws/
+
+# ON THE HDU:
+ssh agi@192.168.120.249
+source /opt/ros/jazzy/setup.bash
+cd ~/hope_ws
+
+# the planner + its hope_msgs build-dep — pure-python, ALL the HDU needs:
+colcon build --packages-up-to hope_planner          # NOT --packages-select (skips hope_msgs → fails)
+source install/local_setup.bash
+python3 -m pytest src/hope_planner/test -q          # sanity (expect all pass); import needs the build above
 ```
 
-1. **Mocap sanity** — `cd <hope_ws on MDU>`:
+> ⚠ Do NOT run `colcon build --packages-up-to hope_bringup ...` on the HDU — it fails on
+> `vrpn_mocap` (`FindVRPN.cmake` missing: no libVRPN on the HDU) and that is FINE: the mocap
+> bridge (`hope_bringup` + `vrpn_mocap`) runs on the **LAPTOP** (§9.7 STEP 1, the only box that
+> reaches the MCServer), never on the HDU. The HDU's entire job is `hope_planner`. (An earlier
+> revision of this section suggested the full build on the HDU — superseded 2026-07-07.)
+
+With (a) alone you can already drive the MDU runner from the HDU with a hand-crafted flat
+publisher (decision-tree item 2) — the whole engage→swing pipeline on hardware, minus the
+live ball. With (b) + the G3 mocap route, the full autonomous chain (§9.6) comes up.
+
+### 9.2 Staged bring-up (each stage safe by construction)
+
+⚠ **2026-07-07 host correction:** the mocap + planner steps (1, 2) run **on the HDU**
+(`ssh agi@192.168.120.249`), NOT the MDU — see §9.-1. Only the runner steps (3, 4, 5)
+run on the MDU. Until G1 (hope_ws on the HDU + libVRPN + mocap route) is closed, rehearse
+on the laptop against the AGI sim, §7 (identical wiring).
+
+Runner shells (MDU) first:
+
+```bash
+ssh -J agi@$HDU agi@10.42.10.12        # $HDU = 192.168.120.249
+source /agibot/software/v0/entry/env/env.sh
+```
+
+Planner/mocap shells (HDU) first:
+
+```bash
+ssh agi@192.168.120.249
+source /opt/ros/jazzy/setup.bash
+source ~/hope_ws/install/local_setup.bash   # after §9.1b builds the overlay
+export ROS_DOMAIN_ID=232                     # ⚠ MUST match the MDU runner (env.sh sets 232); domain 0 = invisible
+export ROS_LOCALHOST_ONLY=0                  # ⚠ the HDU login env sets 1 → localhost-trapped even on 232
+```
+
+1. **Mocap sanity** — the bridge runs on the **LAPTOP**, inside the `hope` distrobox (⚠ NOT the HDU): the
+   laptop is the only box that reaches the MCServer `192.168.10.100` (via its `192.168.10.82` mocap-LAN NIC; the
+   HDU/MDU have no route), and its `hope_ws` already has `hope_bringup`+`vrpn_mocap` built. Laptop→HDU DDS on
+   domain 232 VERIFIED 2026-07-07 (§9.-1), so the mocap topics reach the HDU planner.
    ```bash
-   ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py server:=<MCSERVER_IP>
-   ros2 topic hz /poses            # ball ≥240 Hz
-   ros2 topic echo /P1/pose --once # robot pose alive, sane table-frame numbers
+   distrobox enter hope
+   source /opt/ros/jazzy/setup.bash
+   cd ~/workspace/HOPE/hope_ws && source install/local_setup.bash
+   export ROS_DOMAIN_ID=232                     # MUST — so /P1/pose+/ball reach the HDU planner + MDU
+   ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py server:=192.168.10.100
+   # sanity (laptop): ros2 topic list | grep vrpn_mocap ; ros2 topic hz /poses  (ball ≥240 Hz)
+   #                  ros2 topic echo /P1/pose --once   # net-center marker ≈ (1.37, −0.7625, 0)
    ```
-   Landmark check: marker at net center reads ≈ (1.37, −0.7625, 0).
-2. **Planner sanity** (no robot motion): start the planner, toss real balls:
+2. **Planner sanity** — on the **HDU** (`ROS_DOMAIN_ID=232`, no robot motion); it receives `/P1/pose`+`/ball`
+   from the laptop bridge over domain 232 and republishes the flats to the MDU:
    ```bash
    ros2 run hope_planner hope_planner_node --ros-args --params-file hope_planner.yaml \
      -p robot_pose_topic:=/P1/pose -p marker_to_base_xyz:="[<G8 values>]"
@@ -656,7 +782,9 @@ source /agibot/software/v0/entry/env/env.sh
    ```
 4. **Shadow** — staged start, then `h`:
    ```bash
-   taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --gain-scale 0.4
+   taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --official-stand \
+     --gain-scale 0.4 --leg-gain-scale 1.0
+   # --official-stand: the 's' stand needs the official knee gains to bear weight (§9.7 STEP 5).
    # passive → hoist checks → 's' (stand). Then 'h' (SHADOW): the FULL engage+swing
    # pipeline runs on real serves, publishing nothing. Verify [pp engage] fires on
    # good serves, the PLANNER status cycles sanely, [pp gate] REJECT only on
@@ -664,6 +792,100 @@ source /agibot/software/v0/entry/env/env.sh
    ```
 5. **Hardware** — the ARM ritual below, then `m` (MOTION); gain-scale 0.4 first,
    raise with `]` once stable.
+
+### 9.2b Hand-fed-flats hardware test (no mocap) — the unblocked path (wiring VERIFIED 2026-07-07)
+
+Decision-tree item 2: with the mocap chain still blocked (G3 route to `192.168.10.100` + libVRPN),
+drive the MDU runner from a hand-crafted flat publisher on the HDU. This exercises the REAL
+engage→swing pipeline on hardware as a **strike-in-place** (the fed base pose is static → no
+footwork; that needs live mocap). Transport is verified end-to-end (§9.-1).
+
+⚠ **Every HDU shell must `export ROS_DOMAIN_ID=232`** (the MDU `env.sh` sets it; a fresh jazzy shell
+is domain 0 = invisible to the runner). ⚠ **`--dry-run` and SHADOW publish NOTHING** (the robot is NOT
+driven), so keep it HOISTED/supported until the MOTION step.
+
+**Step 1 — iterate the target with ZERO motion (`--dry-run`, robot hoisted/safe):**
+
+MDU:
+```bash
+ssh -J agi@192.168.120.249 agi@10.42.10.12
+source /agibot/software/v0/entry/env/env.sh          # sets ROS_DOMAIN_ID=232
+cd /agibot/a3_deploy && export A3_TRANSPORT=iceoryx   # ⚠ EXACTLY iceoryx — a typo like 'iceory' STICKS in the shell (re-export or unset)
+taskset -c 4-7 ./run_a3_pingpong.sh --planner --dry-run --start shadow
+# --start shadow runs the policy + engage machine from t=0 with NO key-press and NO motion
+# (--dry-run never publishes). Equivalent: plain --dry-run then press 'h'.
+```
+HDU term 1 — base pose, ≥5 Hz continuous (engage drops if base stale >0.2 s):
+```bash
+ssh agi@192.168.120.249
+source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=232
+ros2 topic pub -r 30 /a3/base_pose_flat std_msgs/msg/Float64MultiArray \
+  "{data: [1, 1, 0.0, 0.0, 0.95, 1.0, 0.0, 0.0, 0.0]}"   # [schema,valid,x,y,z,qw,qx,qy,qz]: robot at origin, standing
+```
+HDU term 2 — fire ONE forehand engage (20 msgs @4Hz ≈ 5 s window, then exits):
+```bash
+ssh agi@192.168.120.249
+source /opt/ros/jazzy/setup.bash; export ROS_DOMAIN_ID=232
+ros2 topic pub -t 20 -r 4 /racket/command_flat std_msgs/msg/Float64MultiArray \
+  "{data: [1, 1, 0, 0.70, -0.41, 0.82, 2.0, 0.0, 0.5, 1.5, 0.0, 0]}"
+#  [schema,valid,swing_sign,px,py,pz,vx,vy,vz,tts,strike_time,frame_code=0(world)]
+#  fh target base-rel x0.70 y-0.41 z0.82 (station≈base → strike in place, no walk), tts1.5
+```
+Expect on the MDU (**VERIFIED on hardware 2026-07-07**, both MDU-loopback and HDU→MDU):
+`[pp engage] forehand locked: tgt base-rel (+0.70,-0.41,-0.13) tts=1.45s (clock tts0=1.30s)` → PLANNER
+`racket`→`swinging` → `[pp] swing complete -> level 0 (held stand) (auto re-arm after rest)` → re-engage,
+all with ZERO motion. (base-rel z −0.13 = world 0.82 − pelvis 0.95; tts0 clamps to the ~1.30 s clip windup.)
+If instead `[pp gate] REJECT ...`, read the printed values and adjust the target
+(gate: base-rel x∈[0.20,0.90], |y|≤0.85, z∈[0.55,1.40], speed≤3.5; base z≥0.7; tts≥1.0). Side is by
+base-rel y sign (y<0 = forehand). `PLANNER: no_command/stale` between bursts is normal.
+
+**Step 2 — a real strike (MOTION), operator hands-on.** ⚠ FIRST bring up the body-drive backend
+per **§9.2c** (stop the default `agibot_pm` controller, keep the HAL) — otherwise the AGI default
+controller fights our runner over the motors. Robot supported per §9.2c's safety gate.
+```bash
+# MDU: restart WITHOUT --dry-run (AFTER the §9.2c body-drive bring-up):
+taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --official-stand \
+  --gain-scale 0.4 --leg-gain-scale 1.0 --arm-hold-nominal --hold-recover 1.2
+# --official-stand + --leg-gain-scale 1.0 are MANDATORY free-standing (knee gains — §9.7 STEP 5 notes)
+# stage: passive -> hoist checks -> 's' (STAND, real) -> keep still ~2 s (IMU yaw-align) -> 'm' (MOTION)
+# HDU: keep term-1 base stream running; fire term-2's racket burst -> ONE real forehand strike.
+# hand on 'p' (PASSIVE = abort). 's' to re-stand between strikes — the static fed base pose gives no
+# walk-forward recovery anchor, so single strikes only until live mocap (the §9 177 mocap requirement).
+```
+
+### 9.2c Real-motion body-drive bring-up — stop the default stack, keep the HAL (⚠ 2026-07-07)
+
+The dry-run/engage checks (§9.2b) publish nothing → no body-drive backend needed. A REAL strike
+(`m` = MOTION) publishes body-drive over iceoryx, which needs the low-level HAL EtherCat up AND the
+AGI default controller stopped — otherwise TWO controllers fight the motors. Recon 2026-07-07 on the
+demo robot (model **A3_P1D0**): the boot service `agibot_pm` runs the default stack that OWNS the
+motors — `process_manager` → `motion_player` + `start_motion_control` + `hal_ethercat`. Good news:
+`iox-roudi` (the iceoryx broker our runner needs) runs INDEPENDENTLY (ppid 1) and SURVIVES stopping
+agibot_pm; the HAL publishes joint + IMU state over iceoryx (no separate estimator process seen).
+`start_hal_ethercat.sh` launches `aimrt_main_hal` with the model config, refuses if one is already
+running, and its RouDi launch is commented out (assumes RouDi already up — it is).
+
+⚠⚠ **SAFETY — stopping agibot_pm can DROP the robot.** It kills the controller currently HOLDING the
+robot; until our runner takes over in MOTION the robot is uncommanded. **HOIST / support the robot
+(feet off-load) BEFORE stopping agibot_pm.** Never on a free-standing, weight-bearing robot. These
+are `sudo` + motion-enabling commands — operator-run (the automated harness never runs them).
+
+Sequence (robot SUPPORTED; two MDU terminals):
+```bash
+# --- terminal HAL (MDU) ---
+sudo systemctl stop agibot_pm                 # stops the default controller (RouDi survives)
+pgrep -a iox-roudi                            # MUST still be running (our runner's iceoryx broker)
+pgrep -a hal_ethercat && sudo pkill -TERM aimrt_main_hal   # drop the OLD HAL so the next line owns EtherCat
+source /agibot/software/v0/entry/env/env.sh
+cd /agibot/software/v0
+bash scripts/hal_ethercat/start_hal_ethercat.sh   # A3_P1D0 -> hal_ethercat_a3_p1d0_cfg.yaml; BLOCKS (own terminal)
+
+# --- terminal RUNNER (MDU) --- our runner is now the SOLE controller (then §9.2b Step 2 s->m + flats):
+cd /agibot/a3_deploy && export A3_TRANSPORT=iceoryx
+taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --official-stand \
+  --gain-scale 0.4 --leg-gain-scale 1.0 --arm-hold-nominal --hold-recover 1.2
+```
+Restore the robot's normal stack afterwards: `sudo systemctl start agibot_pm`.
 
 ### 9.3 The ARM ritual + demo constraints (READ BEFORE ENABLING)
 
@@ -789,7 +1011,7 @@ verification physics and the reset-into-armed-stand mechanics).
 
 **Hardware bring-up (MDU)** — after §9.1 ship: follow §9.2 (mocap → planner+flats
 → `--planner --dry-run` G2 gate → staged start + shadow `h` → ARM ritual §9.3 →
-`m`). The G1 items (numpy + vrpn_mocap on the MDU, MCServer IP-routable) are in
+`m`). The G1 items (numpy [present] + vrpn_mocap [needs libVRPN] on the HDU, MCServer IP-routable) are in
 §9.0.
 
 **Status (2026-07-04, evening — closed-loop VERIFIED headless):** the full chain
@@ -825,6 +1047,224 @@ reset collapses limp. The runner's keys need a real pty headless (`isatty` gate)
 rclpy publisher — per-call `ros2 topic pub --once` cold discovery can delay a reset
 into the MOTION window, observed).
 
+### 9.7 ★ FULL MOCAP POLICY TEST — copy-paste walkthrough (2026-07-07)
+
+The end-to-end autonomous test: a human serves → mocap tracks the ball + robot base → the planner
+computes a racket target → the C++ runner engages and swings → the robot returns. **Four roles, all
+on `ROS_DOMAIN_ID=232`.** The whole DDS transport (laptop→HDU→MDU) was verified 2026-07-07; the
+runner engage/swing was verified via hand-fed flats (§9.2b). What remains is the venue mocap config
+and the physical bring-up.
+
+```
+  MCServer 192.168.10.100                LAPTOP (hope box)          HDU                    MDU
+  (Ball/P1/P2 rigid bodies) --VRPN-->  vrpn_mocap + relay  --DDS-->  hope_planner --DDS-->  a3_deploy runner
+                                       (only box that            (flats over 10.42.10.x)  (--planner)
+                                        reaches the MCServer)                              --iceoryx--> HAL --> motors
+```
+
+**Pre-flight** (one-time; ✅ = verified this session, 🏟 = venue-day):
+- ✅ MDU: `model_17400_hitter177.onnx` runner shipped; G2 ros2-plugin load verified (§9.-1).
+- ✅ HDU: `hope_planner` built (`colcon build --packages-up-to hope_planner`, §9.1b).
+- ✅ Laptop: `hope_bringup`+`vrpn_mocap` built in the `hope` box; laptop reaches the MCServer + HDU.
+- 🏟 MCServer streaming rigid bodies named **`Ball`/`P1`/`P2`**, world-calibrated (net center ≈ (1.37,−0.7625,0)) — G4/G5.
+- 🏟 Robot **0.8 m behind the table on the forehand half, facing +x, square** (§9.3); `marker_to_base_xyz` measured — G8.
+
+---
+
+**STEP 1 — Mocap bridge (LAPTOP, in the `hope` distrobox — ⚠ NOT the HDU)**
+```bash
+distrobox enter hope
+source /opt/ros/jazzy/setup.bash
+cd ~/workspace/HOPE/hope_ws && source install/local_setup.bash
+export ROS_DOMAIN_ID=232
+ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py server:=192.168.10.100
+```
+Verify in a 2nd laptop shell (`distrobox enter hope`; source; `export ROS_DOMAIN_ID=232`):
+```bash
+ros2 topic list | grep vrpn_mocap        # vrpn topics present = VRPN connected
+ros2 topic hz /poses                      # ball ≥240 Hz (publishes ONLY while ball data flows)
+ros2 topic echo /P1/pose --once           # MUST be METRES + mocap frame: |x|,|y| < 3 and z ≈ 0.15
+                                          #   (marker height ABOVE THE TABLE SURFACE — the G5 mocap
+                                          #   origin is ON the surface); net-center marker ≈ (1.37,−0.7625,0)
+# Position values in the HUNDREDS = the mocap streams MILLIMETRES (this venue does) — covered by
+# avatar_pro_vrpn.yaml `position_scale: 0.001` (relay-side mm→m, field 2026-07-07). Without it the
+# planner's solver diverges on the first ball (FloatingPointError) — now crash-guarded, but blind.
+> `/vrpn_mocap/...` present but `/P1/pose` empty → the MCServer isn't streaming rigid bodies named
+> `Ball`/`P1`/`P2` (fix on the mocap software — G4).
+> Notes (field 2026-07-07): (a) run ONE bridge instance — a duplicate launch doubles every topic
+> (two publishers on /P1/pose) and muddies rates; `pgrep -f avatar_pro_hope_bridge` before launching.
+> (b) vrpn topics carry SENSOR-SUFFIXED names here (`/vrpn_mocap/P1/pose8`, `/vrpn_mocap/Ball/pose5`,
+> plus a huge `/vrpn_mocap/MCAvatar/pose#####` flood) — that is normal, the relay discovers suffixed
+> topics. (c) THE BALL CHECK: with the ball VISIBLY on the table,
+> `ros2 topic hz /vrpn_mocap/Ball/pose5` and `/ball/point` must both tick. `/poses` is published ONLY
+> when ball data flows (relay `_emit_ball` → `_publish_poses`) and the planner takes the ball FROM
+> `/poses` — no ball stream ⇒ planner NEVER emits a racket command (runner `ts=-1` forever), even
+> though `/P1/pose` is fine. Silent `Ball/pose5` while the ball is visible = CMTracker not tracking
+> the Ball rigid body (re-enable it / check markers) — G4.
+
+**STEP 2 — Planner (HDU)**
+```bash
+ssh agi@192.168.120.249                    # password 1 (wifi jump; NOT the ProtonVPN 172.16.238.4)
+source /opt/ros/jazzy/setup.bash
+source ~/hope_ws/install/local_setup.bash
+export ROS_DOMAIN_ID=232
+export ROS_LOCALHOST_ONLY=0                # ⚠ the HDU LOGIN env (aima load-env) sets this to 1 —
+                                           # localhost-only traps the planner on the HDU even with
+                                           # the right domain (field 2026-07-07, planner log said
+                                           # "'localhost_only' is enabled")
+echo $ROS_DOMAIN_ID $ROS_LOCALHOST_ONLY    # ⚠ MUST print "232 0" BEFORE starting the planner — wrong
+                                           # domain OR localhost_only=1 = INVISIBLE to laptop+MDU and
+                                           # the runner spams "[pp EXT-BASE] NO FRESH mocap base sample"
+ros2 run hope_planner hope_planner_node --ros-args \
+  --params-file ~/hope_ws/src/hope_planner/config/hope_planner.yaml \
+  -p robot_pose_topic:=/P1/pose \
+  -p marker_to_base_xyz:="[0.0, 0.0, 0.0]"     # G8: marker→base_link offset ([0,0,0] ok if cluster on the pelvis)
+```
+**MANDATORY verify** in a 2nd HDU shell (also `export ROS_DOMAIN_ID=232` + `export ROS_LOCALHOST_ONLY=0`)
+— do NOT arm the robot until both pass:
+```bash
+ros2 topic hz /a3/base_pose_flat          # continuous ~15-40 Hz (robot pose alone drives it) — silence
+                                          #   = planner not on 232 OR /P1/pose not reaching the HDU
+ros2 topic echo --once /a3/base_pose_flat # data[4] (z) MUST read ≈0.91 (mocap 0.15 + policy_z_offset
+                                          #   0.76 → floor frame; <0.7 = the runner base_low-blocks ALL
+                                          #   engage). x,y in metres. Verified 2026-07-07: z=0.9125 ✓
+ros2 topic info /poses                    # Subscription count ≥1 = the planner is really subscribed
+# then toss a real ball THROUGH the air:
+ros2 topic hz /racket/command_flat        # bursts while the ball flies
+ros2 topic echo /racket/command_flat --once   # data[1]=1.0 valid, data[3] px∈[0.0,0.35], data[9] tts→0
+# cross-check the planner's own env if in doubt:
+#   tr "\0" "\n" < /proc/$(pgrep -f hope_planner_node | head -1)/environ | grep ROS_DOMAIN_ID
+```
+> **Frame contract (2026-07-07 fixes)**: the planner INGESTS the mocap frame (z=0 at the TABLE
+> SURFACE — its bounce plane is z=0) and PUBLISHES the policy/floor frame (`policy_z_offset: 0.76`
+> in hope_planner.yaml shifts both flats + /racket/command; sim yaml keeps 0.0 — sim feeds are
+> already floor-origin). The planner is also crash-guarded: a diverging solve (garbage/mm feed)
+> logs a throttled warning and degrades to no-command instead of killing the node.
+
+**STEP 3 — Runner in SHADOW: verify engage on REAL serves, ZERO motion (MDU)**
+```bash
+ssh -J agi@192.168.120.249 agi@10.42.10.12
+source /agibot/software/v0/entry/env/env.sh          # sets ROS_DOMAIN_ID=232
+cd /agibot/a3_deploy && export A3_TRANSPORT=iceoryx   # ⚠ EXACTLY iceoryx
+taskset -c 4-7 ./run_a3_pingpong.sh --planner --dry-run --start shadow
+```
+Serve balls. Expect `[pp engage] forehand/backhand locked …` on good serves and `[pp gate] REJECT …`
+(with values) on unreachable ones — the WHOLE pipeline minus motion. Tune serve style / robot
+placement here until engage fires reliably. This is the safe gate before any motion.
+
+**STEP 4 — Body-drive backend for real motion (⚠ robot HOISTED — see §9.2c)**
+```bash
+# MDU terminal HAL (robot SUPPORTED — stopping agibot_pm drops the controller holding it):
+sudo systemctl stop agibot_pm
+pgrep -a iox-roudi                                   # must stay alive (our iceoryx broker)
+pgrep -a hal_ethercat && sudo pkill -TERM aimrt_main_hal
+source /agibot/software/v0/entry/env/env.sh
+cd /agibot/software/v0 && bash scripts/hal_ethercat/start_hal_ethercat.sh   # A3_P1D0; BLOCKS here
+```
+
+**STEP 5 — Runner in MOTION: real returns (MDU, 2nd terminal)**
+```bash
+cd /agibot/a3_deploy && export A3_TRANSPORT=iceoryx
+taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --official-stand \
+  --gain-scale 0.4 --leg-gain-scale 1.0 --arm-hold-nominal --hold-recover 1.2
+# ⚠ --official-stand is MANDATORY for free-standing: without it 's' uses --stand-kp 60
+#   (vs the official knee ~2000) → the KNEES BUCKLE and the robot cannot stand
+#   (field-confirmed 2026-07-07; main.cpp:709 picks the gain set on this flag).
+# ⚠ --leg-gain-scale 1.0 is MANDATORY on the ground with --gain-scale 0.4: gain-scale
+#   alone also softens the POLICY leg kp to 0.4× → legs sink during the swing
+#   (main.cpp:551 comment). 0.4 keeps only arms/waist gentle; legs stay full strength.
+# ARM ritual (§9.3): 's' (stand — VERIFY it bears weight, knees firm) → keep still ~2 s
+# (IMU yaw-align) → 'm' (MOTION). 'p' = PASSIVE abort. Raise --gain-scale with ']' once stable.
+```
+**Human serving** (§9.3): slow HIGH lobs (apex ≥1.3 m, flight ≥1.3 s), into the **forehand half first**,
+bounce mid-table. Hard/flat serves are stood out as `too_late` by design. **One clean return per
+placement**, then `p` → walk the robot back to the start spot → `s` → `m` for the next point (no
+post-strike homing yet). Restore the normal robot afterwards: `sudo systemctl start agibot_pm`.
+
+> ⚠ **A STATIC ball does nothing — BY DESIGN.** Holding/placing a ball in front of the robot will
+> NEVER trigger a swing: the planner fits a FLIGHT trajectory and predicts its crossing of the hit
+> plane; a ball with ~zero velocity never crosses it → `valid=0` → the runner stands
+> (`PLANNER: planner_invalid`/`no_command`). Engage also needs ≥1.0 s time-to-strike and a standing
+> robot (`base z ≥ 0.7`). The ONLY trigger is a real served lob per the rules above.
+
+**If it's not working:**
+| symptom | cause → fix |
+|---|---|
+| STEP 2 `/racket/command_flat` never valid | mocap not flowing to the HDU → recheck STEP 1 `/P1/pose`, and `ROS_DOMAIN_ID=232` on BOTH laptop + HDU |
+| **runner spams `[pp EXT-BASE] NO FRESH mocap base sample`** (field 2026-07-07) | the PLANNER shell missed `export ROS_DOMAIN_ID=232` → planner on domain 0, invisible to the runner. Decisive check: `tr "\0" "\n" < /proc/$(pgrep -f hope_planner_node\|head -1)/environ \| grep ROS_DOMAIN` — no line = domain 0. Restart the planner after the export. Engage is BLOCKED (by design) until the base stream returns |
+| planner on 232 but STILL invisible / base flat silent (field 2026-07-07 #2) | `ROS_LOCALHOST_ONLY=1` from the HDU login env (`aima em load-env`) — planner boot log prints `'localhost_only' is enabled`. Fix: `export ROS_LOCALHOST_ONLY=0` before starting (STEP 2). The correct boot log says `'localhost_only' is disabled` |
+| **runner `ts=-1` forever, robot stands through serves** (field 2026-07-07) | no racket command ever received → the BALL isn't streaming: `/vrpn_mocap/Ball/pose*` silent → `/ball/point`+`/poses` never publish → planner has no ball. Verify with the ball VISIBLE on the table (STEP 1 ball check); fix = CMTracker Ball rigid body tracking (G4) |
+| **planner crashes `FloatingPointError: outgoing velocity solve diverged`** (field 2026-07-07) | garbage-scale measurements — the venue mocap streams MILLIMETRES. Fix = `position_scale: 0.001` in avatar_pro_vrpn.yaml (relay mm→m). The node is now crash-guarded (degrades to no-command), but the feed must still be fixed for real solutions |
+| every engage `base_low`-rejected though the robot stands | base flat z < 0.7 → the mocap-frame z (surface origin, robot ≈0.15) reached the runner unshifted. Fix = `policy_z_offset: 0.76` in hope_planner.yaml (mocap/table frame → policy/floor frame); verify `data[4]≈0.91` per STEP 2 |
+| STEP 3 no `[pp engage]`, only `no_command` | HDU planner not publishing / domain mismatch → `ros2 topic echo /racket/command_flat` on the HDU; confirm 232 |
+| STEP 3 constant `[pp gate] REJECT z_w≈0.00` | ball dies before the plane → higher/slower serves (§9.3); or robot placement vs `x_hit` |
+| STEP 3 engage only forehand, never backhand | runner splits fh/bh by base-rel target-y **sign** (y<0=fh); backhand needs the ball to arrive y≥0 |
+| STEP 5 robot sags when you stop agibot_pm | it wasn't hoisted — that stop removes the holding controller (§9.2c safety) |
+| **'s' but KNEES BUCKLE, cannot stand** (field 2026-07-07) | `--official-stand` missing → PD_STAND uses `--stand-kp 60` instead of the official knee ~2000. Re-run with `--official-stand`. If it buckled, fall guard likely tripped → PASSIVE (looks totally dead): support robot upright, then `s` again |
+| stands, but legs SINK during the swing / tiny swing | `--gain-scale 0.4` also softened the policy LEG kp → add `--leg-gain-scale 1.0` (arms stay gentle, legs full); raise `--gain-scale` with `]` for full swings |
+| ball placed/held in front → nothing | **by design** — static ball never crosses the hit plane, planner never emits valid. Serve a real lob (apex ≥1.3 m, flight ≥1.3 s, bounce mid-table) |
+| boot log `seg_len={95,105}` or no 177 line | stale binary → re-ship the rockchip dist (§9.1) |
+
+### 9.8 ★★ BARE COPY-PASTE VERSION — 4 terminals, in order, no checks
+
+No verification steps. Four terminals, start them in this order, leave each one running.
+Every password is `1`. Robot: HOISTED until Terminal D says otherwise.
+
+**Terminal A — LAPTOP (mocap bridge). Leave running.**
+```bash
+distrobox enter hope
+source /opt/ros/jazzy/setup.bash
+cd ~/workspace/HOPE/hope_ws
+source install/local_setup.bash
+export ROS_DOMAIN_ID=232
+export ROS_LOCALHOST_ONLY=0
+pkill -INT -f "avatar_pro_hope_bridge.launch"; sleep 5
+ros2 launch hope_bringup avatar_pro_hope_bridge.launch.py server:=192.168.10.100
+```
+
+**Terminal B — HDU (planner). Leave running.**
+```bash
+ssh agi@192.168.120.249
+source /opt/ros/jazzy/setup.bash
+source ~/hope_ws/install/local_setup.bash
+export ROS_DOMAIN_ID=232
+export ROS_LOCALHOST_ONLY=0
+pkill -f "hope_planner_nod[e]"; sleep 2
+ros2 run hope_planner hope_planner_node --ros-args \
+  --params-file ~/hope_ws/src/hope_planner/config/hope_planner.yaml \
+  -p robot_pose_topic:=/P1/pose \
+  -p marker_to_base_xyz:="[0.0, 0.0, 0.0]"
+```
+
+**Terminal C — MDU (HAL). ⚠ robot MUST be hoisted/supported BEFORE the first line. Leave running.**
+```bash
+ssh -J agi@192.168.120.249 agi@10.42.10.12
+sudo systemctl stop agibot_pm
+sudo pkill -TERM aimrt_main_hal; sleep 2
+source /agibot/software/v0/entry/env/env.sh
+cd /agibot/software/v0
+bash scripts/hal_ethercat/start_hal_ethercat.sh
+```
+
+**Terminal D — MDU (runner).**
+```bash
+ssh -J agi@192.168.120.249 agi@10.42.10.12
+source /agibot/software/v0/entry/env/env.sh
+cd /agibot/a3_deploy
+export A3_TRANSPORT=iceoryx
+taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --official-stand \
+  --gain-scale 0.4 --leg-gain-scale 1.0 --arm-hold-nominal --hold-recover 1.2
+```
+
+**Then, in Terminal D (keyboard):**
+1. Put the robot on the floor at its spot: **0.8 m behind the table edge, forehand half, facing the table, square**. Hand on `p` (= PASSIVE abort) from here on.
+2. Press `s` — robot stands.
+3. Keep it untouched **2 seconds**.
+4. Press `m` — MOTION.
+5. **Serve**: slow HIGH lob (apex ≥ 1.3 m), bounce mid-table, into the robot's right half. Robot swings.
+6. After each return: press `p` → carry the robot back to its spot → `s` → wait 2 s → `m` → next serve.
+7. Done for the day: `q` in Terminal D, Ctrl-C in Terminal C, then on the MDU: `sudo systemctl start agibot_pm`. Ctrl-C Terminals A/B.
+
 ## 10. Quick reference
 
 | task | box | directory | command |
@@ -836,9 +1276,10 @@ into the MOTION window, observed).
 | build x86 / rockchip | hope / HOST | same | `bash scripts/build_a3_deploy_pkg.sh --arch x86_64\|rockchip --runtime-cfg ...pingpong.yaml` |
 | AGI sim policy-only | hope | same | `bash scripts/pp_freebase_watch.sh --single-swing [--oracle-pelvis]` |
 | AGI sim + planner loop (Gate 3) | hope | same | `bash scripts/pp_planner_closedloop.sh` — one command; viewer variant also in §7 |
-| mocap + planner sanity (arena) | hope/MDU | `hope_ws` | `avatar_pro_hope_bridge.launch.py server:=<IP>` + `hope_planner_node` + `ros2 topic hz /racket/command_flat` (§9.2 steps 1-2) |
+| mocap + planner sanity (arena) | **HDU** (dom 232) | `~/hope_ws` | `export ROS_DOMAIN_ID=232` + `avatar_pro_hope_bridge.launch.py server:=192.168.10.100` + `hope_planner_node` (§9.2 steps 1-2; libVRPN + mocap route pending) |
 | ship to robot | host→MDU | `agi/a3_deploy_example` | `rsync ... dist/a3_deploy_rockchip/ agi@10.42.10.12:/agibot/a3_deploy/` |
 | run on robot (scripted) | MDU | `/agibot/a3_deploy` | `taskset -c 4-7 ./run_a3_pingpong.sh --start passive --legs-passive --gain-scale 0.4 --single-swing` |
 | run on robot (planner) | MDU | `/agibot/a3_deploy` | `taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --gain-scale 0.4` (§9.6; G2 gate first) |
 | transition matrix (Gate 2.5) | hope | `agi/a3_deploy_example` | `bash scripts/pp_gate25.sh [--oracle]` (§6: per-phase PASS/FAIL; model_17400_hitter177 = 10/10 oracle, 3/4 perfect_tracking — P3b Δ=0-fallback fail is by design) |
-| hardware planner+control | MDU | §9.2 | mocap → planner+flats → `--planner --dry-run` (G2) → shadow `h` → ARM ritual + `m` (§9.2-9.3) |
+| hardware planner+control | HDU planner + MDU runner | §9.2 | (HDU dom 232) mocap → planner+flats → (MDU) `--planner --dry-run` (G2 ✅) → shadow `h` → ARM ritual + `m` (§9.2-9.3) |
+| hand-fed flats test (no mocap) | HDU pub + MDU runner | §9.2b | (HDU dom 232) `ros2 topic pub` the 2 flats → (MDU) `--planner --dry-run`+`h` iterate → real `s`→`m` strike; wiring verified 2026-07-07 |

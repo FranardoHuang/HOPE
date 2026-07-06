@@ -118,6 +118,14 @@ class HOPEPlannerNode(Node):
         # policy base is the pelvis. In sim (robot_pose_topic=/sim/a3/pelvis_pose) it is already
         # the pelvis, so [0,0,0]. Set per venue (mirrors hope_world_frame.yaml mocap_to_base_link / G8).
         self.declare_parameter("marker_to_base_xyz", [0.0, 0.0, 0.0])
+        # Z offset added to ALL PUBLISHED OUTPUTS (both flats + /racket/command) converting the
+        # planner's working frame into the POLICY world frame (z=0 at the FLOOR — the training
+        # frame the C++ runner's gates expect: base_low 0.7, target z in [0.55,1.40]).
+        # Planner INTERNALS (bounce plane z=0, net check, target_land) stay in the MOCAP frame;
+        # at the arena that is the G5 calibration with z=0 at the TABLE SURFACE, so set 0.76
+        # (= TableParams.height). Sim feeds are already floor-origin -> keep 0.0.
+        # (Field 2026-07-07: without this, arena base z ~0.15 < base_low 0.7 -> engage never fires.)
+        self.declare_parameter("policy_z_offset", 0.0)
         # Table +Y edge in the working frame (TableParams.y_max). Arena default 0.0
         # (origin at near-left corner, table at y<=0); the SIM harness centers the
         # table on the robot -> hope_planner.sim.yaml sets 0.7825.
@@ -131,6 +139,7 @@ class HOPEPlannerNode(Node):
         self._publish_flat = bool(self.get_parameter("publish_flat_cmd").value)
         self._marker_to_base = np.array(
             [float(v) for v in self.get_parameter("marker_to_base_xyz").value])
+        self._policy_z_offset = float(self.get_parameter("policy_z_offset").value)
 
         config = PlannerConfig(
             x_hit=self.get_parameter("x_hit").value,
@@ -245,7 +254,7 @@ class HOPEPlannerNode(Node):
                 if self.flat_base_pub is not None:
                     bx = float(p.x) + float(self._marker_to_base[0])
                     by = float(p.y) + float(self._marker_to_base[1])
-                    bz = float(p.z) + float(self._marker_to_base[2])
+                    bz = float(p.z) + float(self._marker_to_base[2]) + self._policy_z_offset
                     q = msg.pose.orientation
                     m = Float64MultiArray()
                     # [schema, valid, x, y, z, qw, qx, qy, qz]
@@ -296,7 +305,18 @@ class HOPEPlannerNode(Node):
             self.planner.config.x_hit = float(
                 np.clip(self._robot_x + self._x_hit_offset, self._x_hit_min, self._x_hit_max))
 
-        cmd = self.planner.update(t, p_ball)
+        # CRASH GUARD (field 2026-07-07): garbage measurements (e.g. a mocap feed in
+        # millimetres) made the outgoing-velocity solve raise FloatingPointError and
+        # KILLED the node mid-demo. A planner glitch must degrade to "no command"
+        # (the runner's safe stand), never to a dead planner.
+        try:
+            cmd = self.planner.update(t, p_ball)
+        except (FloatingPointError, ValueError, np.linalg.LinAlgError) as exc:
+            self.get_logger().warning(
+                f"planner solve failed ({type(exc).__name__}: {exc}) - treating as no-solution; "
+                "if persistent, check the mocap feed (units/units-of-metres, frame, outliers)",
+                throttle_duration_sec=2.0)
+            cmd = None
 
         if self._kf is not None:
             self._kf.push(t, p_ball)
@@ -326,7 +346,7 @@ class HOPEPlannerNode(Node):
             out.header.frame_id = "world"
             out.position.x = float(cmd.p_intercept[0])
             out.position.y = float(cmd.p_intercept[1])
-            out.position.z = float(cmd.p_intercept[2])
+            out.position.z = float(cmd.p_intercept[2]) + self._policy_z_offset
             out.velocity.x = float(cmd.v_racket[0])
             out.velocity.y = float(cmd.v_racket[1])
             out.velocity.z = float(cmd.v_racket[2])
@@ -354,7 +374,8 @@ class HOPEPlannerNode(Node):
             # [schema, valid, swing_sign, px, py, pz, vx, vy, vz, tts, strike_time, frame_code]
             fm.data = [
                 1.0, 1.0 if cmd.valid else 0.0, 0.0,
-                float(cmd.p_intercept[0]), float(cmd.p_intercept[1]), float(cmd.p_intercept[2]),
+                float(cmd.p_intercept[0]), float(cmd.p_intercept[1]),
+                float(cmd.p_intercept[2]) + self._policy_z_offset,
                 float(cmd.v_racket[0]), float(cmd.v_racket[1]), float(cmd.v_racket[2]),
                 float(self._last_tts) if self._last_tts == self._last_tts else 0.0,
                 float(cmd.t_strike), 0.0,

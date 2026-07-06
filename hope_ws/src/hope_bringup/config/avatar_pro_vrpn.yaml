@@ -23,6 +23,12 @@ avatar_pro_vrpn_relay:
     ball_tracking_mode: "rigid_body"   # standardized: the ball IS a named rigid body
     ball_object: "Ball"        # standardized ball rigid-body name; ignored in "auto" mode
 
+    # Unit conversion for every relayed position (poses, ball point, TF). THE CHAIN WORKS
+    # IN METRES; this venue's CMTracker streams MILLIMETRES over VRPN (field 2026-07-07:
+    # /P1/pose read x=-315.9 "m" = -0.316 m real) -> 0.001. Set back to 1.0 if the mocap
+    # export is switched to metres.
+    position_scale: 0.001
+
     world_frame: "world"
 
     # Ball auto-detection tuning (used only when ball_tracking_mode is "auto").

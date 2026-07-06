@@ -74,3 +74,10 @@ hope_planner:
     # robot_pose_topic before publishing the base flat. Arena /P1/pose is the MARKER
     # CLUSTER; the policy base is the PELVIS. Sim (/sim/a3/pelvis_pose) needs [0,0,0].
     marker_to_base_xyz: [0.0, 0.0, 0.0]
+    # Z offset (metres) added to ALL published outputs (both flats + /racket/command):
+    # converts the mocap frame into the POLICY world frame (z=0 at the FLOOR, the frame the
+    # C++ runner's gates expect: base_low 0.7, target z 0.55-1.40). The G5 arena calibration
+    # puts mocap z=0 at the TABLE SURFACE -> 0.76 (= table height). The planner INTERNALS
+    # (bounce plane z=0, net check) correctly stay in the mocap/table-surface frame.
+    # Field 2026-07-07: without this the arena base z reads ~0.15 -> engage never fires.
+    policy_z_offset: 0.76

@@ -83,11 +83,21 @@ class AvatarProVrpnRelay(Node):
         self.declare_parameter("ball_switch_ratio", 2.0)
         # Drop a candidate / release the lock after this long without messages.
         self.declare_parameter("ball_stale_s", 2.0)
+        # Uniform scale applied to every relayed POSITION (poses, ball point, TF).
+        # The chain works in METRES; some CMTracker/VRPN exports stream MILLIMETRES
+        # (field 2026-07-07: /P1/pose read x=-315.9 -> the venue streams mm) -> set
+        # 0.001 there. Leave 1.0 when the mocap already streams metres.
+        self.declare_parameter("position_scale", 1.0)
 
         self._vrpn_ns = str(self.get_parameter("vrpn_namespace").value).rstrip("/")
         self._ppt_object = str(self.get_parameter("ppt_object").value)
         self._p1_object = str(self.get_parameter("p1_object").value)
         self._p2_object = str(self.get_parameter("p2_object").value)
+        self._position_scale = float(self.get_parameter("position_scale").value)
+        if self._position_scale != 1.0:
+            self.get_logger().info(
+                f"position_scale={self._position_scale} (relayed positions are scaled; "
+                "0.001 = mm->m for CMTracker feeds that stream millimetres)")
         # Resolve the ball tracking mode. `self._ball_name` non-empty => pin to
         # that VRPN sender (rigid_body); empty => motion-based auto-detect. The
         # rest of the relay keys off `self._ball_name`, so the mode only needs to
@@ -346,7 +356,15 @@ class AvatarProVrpnRelay(Node):
         normalized.header = msg.header
         if not normalized.header.frame_id:
             normalized.header.frame_id = self._world_frame
-        normalized.pose = msg.pose
+        if self._position_scale == 1.0:
+            normalized.pose = msg.pose
+        else:  # unit conversion (e.g. mm->m); orientation is unit-free
+            s = self._position_scale
+            normalized.pose = Pose()
+            normalized.pose.position.x = msg.pose.position.x * s
+            normalized.pose.position.y = msg.pose.position.y * s
+            normalized.pose.position.z = msg.pose.position.z * s
+            normalized.pose.orientation = msg.pose.orientation
         return normalized
 
     def _broadcast_tf(self, object_key: str, msg: PoseStamped) -> None:

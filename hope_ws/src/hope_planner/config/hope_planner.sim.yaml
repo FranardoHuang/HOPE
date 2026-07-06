@@ -43,3 +43,6 @@ hope_planner:
     # centerline in the centered sim frame (2026-07-06 fix; the 2026-07-05 table_y_max
     # override fixed only the PREDICTOR band, not the aim).
     target_land_y: 0.0
+    # Sim feeds (/sim/a3/pelvis_pose + fake_ball) are ALREADY floor-origin (the policy
+    # frame) -> no output z shift. The arena yaml sets 0.76 (mocap z=0 at table surface).
+    policy_z_offset: 0.0
