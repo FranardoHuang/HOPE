@@ -6,9 +6,16 @@ reference) directly by file path, the same standalone pattern as ``test_shadow_b
 file-path loading in this context). Covers the Phase A truth-instrument math:
 
 * back_integrate_incoming: reverse-time venue-model integration ROUNDTRIPS — forward RK4 flight
-  (virtual_ball.rk4_step) from the returned launch state for tts seconds re-arrives at the
-  question (contact_pos, incoming_vel) to < 1 mm / < 0.01 m/s, for tts in {0.3, 0.6, 1.0}
-  (+ the 1.5 s support bound), with and without spin, and with MIXED per-env tts in one call.
+  (virtual_ball.rk4_step) from the returned launch state for tts_effective seconds re-arrives at
+  the question (contact_pos, incoming_vel) to < 1 mm / < 0.01 m/s, for tts in {0.3, 0.6, 1.0}
+  (+ the 1.5 s support bound), with and without spin, and with MIXED per-env tts in one call
+  (pure reverse math isolated by passing the truncation plane far below).
+* TABLE-PLANE TRUNCATION (seed=1 pod-defect fix): rising-contact (vz=+0.2) and long-tts
+  descending cases whose backward path dips below z = surface+R stop at the LAST state strictly
+  above plane+margin, report tts_effective < tts, and the forward roundtrip over tts_effective
+  still arrives < 1 mm / < 0.01 m/s (final-ballistic-segment serve; pre-bounce = future
+  bounce-aware serve). Re-serving with tts = tts_effective (the manager's delayed-serve path)
+  is un-truncated.
 * predict_table_contact: the fitted table bounce with the venue ``contact.table`` params —
   analytic vertical-drop case (v_z+ = e |v_z-|, spin untouched), and a crafted descending
   crossing cross-checked NUMERICALLY against the canonical numpy contact model
@@ -44,6 +51,13 @@ def _load(path, name):
     return mod
 
 
+# Pure reverse-flight math is ISOLATED from the plane truncation by pushing the truncation
+# plane far below (surface_z = -100): with nothing to truncate, tts_effective == tts exactly and
+# the full-tts roundtrip bound applies. The truncation behaviour itself (the real default plane)
+# is covered by test_plane_truncation below.
+_NO_PLANE = -100.0
+
+
 def test_back_integration_roundtrip(pb, vb):
     prm = vb.load_venue_params()
     h = 1e-3
@@ -63,7 +77,14 @@ def test_back_integration_roundtrip(pb, vb):
         v_in = torch.tensor([list(v_in_t)])
         omega = torch.tensor([list(omega_t)])
         tts = torch.full((1,), tts_val)
-        launch_p, launch_v = pb.back_integrate_incoming(contact, v_in, omega, tts, prm, h=h)
+        launch_p, launch_v, t_eff = pb.back_integrate_incoming(
+            contact, v_in, omega, tts, prm, h=h, surface_z=_NO_PLANE
+        )
+        # (1e-4 tolerance: t_eff is a float32 sum over up to 1000 per-env steps ~ 1e-5 noise,
+        # far below half a step h = 1e-3.)
+        assert abs(float(t_eff[0]) - tts_val) < 1e-4, (
+            f"tts={tts_val}: un-truncatable case reported tts_effective={float(t_eff[0])}"
+        )
 
         # forward flight from the launch state for exactly tts seconds via virtual_ball.rk4_step
         # (the SAME per-env-uniform step-count convention the helper uses).
@@ -85,7 +106,10 @@ def test_back_integration_roundtrip(pb, vb):
     contact_b = torch.tensor([[0.42, -0.15, 0.95]]).expand(n_env, 3).contiguous()
     v_in_b = torch.tensor([[-3.5, 0.3, -0.6], [-3.0, 0.6, 0.2], [-2.8, -0.3, -0.4], [-4.0, 0.0, 0.0]])
     omega_b = torch.tensor([[0.0, 0.0, 0.0], [30.0, -20.0, 40.0], [-25.0, 35.0, -15.0], [10.0, 10.0, 10.0]])
-    lp, lv = pb.back_integrate_incoming(contact_b, v_in_b, omega_b, tts_vec, prm, h=h)
+    lp, lv, te = pb.back_integrate_incoming(
+        contact_b, v_in_b, omega_b, tts_vec, prm, h=h, surface_z=_NO_PLANE
+    )
+    assert torch.allclose(te, tts_vec, atol=1e-4), f"batched tts_effective wrong: {te.tolist()}"
     # tts = 0 row: launch state IS the contact state.
     assert torch.allclose(lp[3], contact_b[3], atol=1e-9) and torch.allclose(lv[3], v_in_b[3], atol=1e-9)
     for i in range(3):
@@ -101,21 +125,82 @@ def test_back_integration_roundtrip(pb, vb):
     # tts = 1.5 s support bound: reverse-time quadratic drag has a finite-time blowup at
     # t_back ~ 1.3 s for venue contact states (a slow arrival cannot have a longer pure-flight
     # history — the real one includes a table bounce), so the guarantee at 1.5 s is FINITENESS
-    # via the documented BACKINT_SPEED_CAP freeze, not exact arrival.
+    # via the documented BACKINT_SPEED_CAP stop (tts_effective reports the integrated span),
+    # not exact arrival.
     tts15 = torch.full((1,), 1.5)
-    lp15, lv15 = pb.back_integrate_incoming(
+    lp15, lv15, te15 = pb.back_integrate_incoming(
         contact, torch.tensor([[-3.2, 0.2, -0.5]]), torch.tensor([[20.0, -40.0, 25.0]]),
-        tts15, prm, h=h,
+        tts15, prm, h=h, surface_z=_NO_PLANE,
     )
     assert bool(torch.isfinite(lp15).all()) and bool(torch.isfinite(lv15).all()), "1.5 s must stay finite"
     sp15 = float(torch.linalg.norm(lv15, dim=-1))
-    assert sp15 <= pb.BACKINT_SPEED_CAP * 1.1, f"capped speed {sp15:.1f} escaped the freeze"
+    assert sp15 <= pb.BACKINT_SPEED_CAP * 1.1, f"capped speed {sp15:.1f} escaped the stop"
+    assert float(te15[0]) < 1.5, "speed-capped row must report a shorter tts_effective"
     print(
         f"[ok] back_integrate_incoming roundtrip: pos err < 1 mm, vel err < 0.01 m/s "
         f"(worst {worst_pos:.2e} m / {worst_vel:.2e} m/s over tts 0.3/0.6/1.0 s, with/without "
-        f"spin; mixed per-env tts batched call exact; 1.5 s support = finite via speed-cap "
-        f"freeze, |v|={sp15:.1f} m/s)"
+        f"spin; tts_effective == tts un-truncated; mixed per-env tts batched call exact; 1.5 s "
+        f"support = finite via speed-cap stop, |v|={sp15:.1f} m/s, t_eff={float(te15[0]):.2f} s)"
     )
+
+
+def test_plane_truncation(pb, vb):
+    """Seed=1 pod-defect fix: the backward path must STOP above the table plane, and the forward
+    roundtrip over the returned tts_effective must still arrive exactly."""
+    prm = vb.load_venue_params()
+    h = 1e-3
+    surface_z = 0.76
+    z_min = surface_z + prm.ball_radius + pb.SERVE_PLANE_MARGIN
+    contact = torch.tensor([[0.42, -0.15, 0.95]])
+    cases = [
+        # rising contact velocity (vz = +0.2, ~11% of the bank): the backward path dips below the
+        # plane almost immediately (the real history bounced here).
+        ("rising vz=+0.2", 0.6, (-3.0, 0.2, 0.2), (0.0, 0.0, 0.0)),
+        ("rising vz=+0.2 spin", 0.6, (-3.0, 0.2, 0.2), (30.0, -20.0, 40.0)),
+        # long-tts descending case: backward first rises above the contact, then its backward
+        # apex passes below the plane further out (pre-bounce segment).
+        ("long-tts descending", 1.0, (-3.5, 0.0, -0.6), (0.0, 0.0, 0.0)),
+        ("long-tts descending spin", 1.0, (-3.5, 0.0, -0.6), (-25.0, 35.0, -15.0)),
+    ]
+    for name, tts_val, v_in_t, omega_t in cases:
+        v_in = torch.tensor([list(v_in_t)])
+        omega = torch.tensor([list(omega_t)])
+        tts = torch.full((1,), tts_val)
+        lp, lv, te = pb.back_integrate_incoming(
+            contact, v_in, omega, tts, prm, h=h, surface_z=surface_z
+        )
+        t_eff = float(te[0])
+        assert 0.0 < t_eff < tts_val, f"{name}: expected truncation, got tts_effective={t_eff}"
+        assert float(lp[0, 2]) > z_min, (
+            f"{name}: launch z={float(lp[0, 2]):.4f} not strictly above plane+margin {z_min:.4f}"
+        )
+
+        # forward roundtrip over the TRUNCATED span: k accepted steps of the helper's per-env
+        # step h_i reproduce the contact state.
+        n_total = max(1, int(math.ceil(tts_val / h)))
+        h_i = tts_val / n_total
+        k = int(round(t_eff / h_i))
+        assert abs(k * h_i - t_eff) < 0.5 * h_i, f"{name}: tts_effective not a multiple of h_i"
+        p, v = lp, lv
+        for _ in range(k):
+            p, v = vb.rk4_step(p, v, omega, h_i, prm)
+        pos_err = float(torch.linalg.norm(p - contact))
+        vel_err = float(torch.linalg.norm(v - v_in))
+        assert pos_err < 1e-3, f"{name}: truncated roundtrip pos err {pos_err:.2e} m >= 1 mm"
+        assert vel_err < 1e-2, f"{name}: truncated roundtrip vel err {vel_err:.2e} m/s >= 0.01"
+
+        # Manager delayed-serve equivalence: re-asking for exactly tts_effective must be
+        # UN-truncated (the whole final ballistic segment is above the plane) — this is the
+        # per-env condition (t_eff >= t_back) the manager serves on.
+        lp2, lv2, te2 = pb.back_integrate_incoming(
+            contact, v_in, omega, torch.full((1,), t_eff), prm, h=h, surface_z=surface_z
+        )
+        assert abs(float(te2[0]) - t_eff) < 2e-3, (
+            f"{name}: re-serve at tts_effective re-truncated ({float(te2[0])} vs {t_eff})"
+        )
+        print(f"[ok] plane truncation ({name}): tts {tts_val} -> tts_effective {t_eff:.3f}, "
+              f"launch z {float(lp[0, 2]):.3f} > {z_min:.3f}, truncated roundtrip "
+              f"{pos_err:.1e} m / {vel_err:.1e} m/s")
 
 
 def test_table_params_loader(pb):
@@ -217,6 +302,7 @@ def main():
     sbmod = _load(os.path.join(MDP_DIR, "shadow_ball.py"), "shadow_ball_standalone")
     cm = _load(CONTACT_MODEL_PATH, "contact_model_standalone")
     test_back_integration_roundtrip(pb, vb)
+    test_plane_truncation(pb, vb)
     test_table_params_loader(pb)
     test_table_bounce_math(pb, sbmod, cm)
     test_serve_scheduling(pb)

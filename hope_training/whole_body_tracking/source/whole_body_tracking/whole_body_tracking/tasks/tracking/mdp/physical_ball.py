@@ -7,9 +7,10 @@ question-bank incoming ball PHYSICALLY:
 
 * SERVE — when the per-swing question is known (bank resample) and ``time_to_strike`` enters the
   serve horizon, the ball is launched from the venue-model REVERSE-TIME integrated state
-  (:func:`back_integrate_incoming`: RK4 of the fitted flight law with a negative step), so that
-  forward flight for exactly ``tts`` seconds arrives at the question's contact point with the
-  question's incoming velocity at the exact-strike frame.
+  (:func:`back_integrate_incoming`: RK4 of the fitted flight law with a negative step, TRUNCATED
+  at the table plane — the FINAL BALLISTIC SEGMENT only), ``tts_effective`` seconds before the
+  strike, so that forward flight arrives at the question's contact point with the question's
+  incoming velocity exactly at the exact-strike frame.
 * FLIGHT — PhysX gravity + the per-physics-substep venue aero wrench (drag + Magnus,
   ``F = m(-k_d|v|v + k_m omega x v)``, world->body rotated because Isaac Lab 2.1
   ``set_external_force_and_torque`` applies wrenches in the BODY frame — the
@@ -41,13 +42,16 @@ post-strike flight/bounce/landing metrics record what the real ball did.
 
 HONESTY NOTES (read before trusting the numbers):
 
-* The launch state is the PURE reverse-flight state. Questions whose real history includes the
-  incoming table bounce (near-apex / rising contact velocities more than ~0.2-0.4 s after the
-  bounce) back-integrate THROUGH where the bounce would have been — the launch point can then sit
-  below/inside the table. The ball has no collider, rises out, and still arrives exactly at
-  contact (the arrival guarantee is what the instrument needs); realizing the pre-strike bounce
-  chain (bounce-map inversion) is future work. ``SERVE_HORIZON_S`` caps how far back the serve
-  starts, both for env footprint and to bound this non-physicality window.
+* Phase A serves ONLY the FINAL BALLISTIC SEGMENT (post-last-bounce): the reverse integration
+  TRUNCATES at the table plane (last state strictly above ``surface_z + R + SERVE_PLANE_MARGIN``)
+  and returns the per-env ``tts_effective`` it actually covered. Questions whose real history
+  includes the incoming table bounce (rising contact velocities — ~11% of the bank — and moderate
+  tts generally) launch LATER, ``tts_effective`` before the strike, from ON the incoming
+  trajectory, so forward flight for ``tts_effective`` still arrives exactly at the question
+  (contact, velocity) — the arrival guarantee the instrument needs. The pre-bounce segment is
+  OUT OF SCOPE until the bounce-aware serve (bounce-map inversion — future work). This fix is
+  the seed=1 pod-defect root cause: un-truncated back-integration put rising-contact launches
+  under/inside the table (pb_serve_err_m 0.58 m); seed=0 had merely been lucky with questions.
 * The strike itself applies NO impulse (Phase B): the ball flies THROUGH the strike point and the
   robot, descends behind it, and its first descending ``surface+R`` crossing is recorded as the
   landing (same plane convention as virtual_ball.coarse_landing / the shadow ball).
@@ -100,14 +104,21 @@ except Exception:  # standalone (tests / scripts without isaaclab on the path)
 # contact states (speed ~8-10 m/s at 0.6 s, ~22-25 m/s at 1.0 s, divergent by ~1.3 s) — 0.6 s
 # keeps a >2x margin below both the blowup and BACKINT_SPEED_CAP.
 SERVE_HORIZON_S = 0.6
-# Reverse-integration speed cap (m/s): rows whose backward speed exceeds this FREEZE (identity
-# steps from then on), so the helper stays finite for any requested tts (up to and beyond 1.5 s)
-# instead of hitting the reverse-drag singularity. The cap NEVER engages within the venue
-# velocity envelope for t_back <= ~1.0 s (backward speeds reach ~22-32 m/s there — tested);
-# capped rows lose the exact-arrival guarantee (they are beyond the horizon where a physical
-# pure-flight history exists at all). One frozen-boundary RK4 step at 40 m/s moves speed by
-# ~0.2 m/s at h=1e-3, so the freeze itself cannot overshoot into the singularity.
+# Reverse-integration speed cap (m/s): rows whose backward speed WOULD exceed this stop stepping
+# (the crossing step is rejected), so the helper stays finite for any requested tts (up to and
+# beyond 1.5 s) instead of hitting the reverse-drag singularity. The cap NEVER engages within
+# the venue velocity envelope for t_back <= ~1.0 s (backward speeds reach ~22-32 m/s there —
+# tested); capped rows report the shorter ``tts_effective`` they actually integrated, and the
+# roundtrip guarantee holds over that span like any truncated row.
 BACKINT_SPEED_CAP = 40.0
+# Table-plane truncation margin (m): the reverse integration STOPS at the last state strictly
+# above z = surface_z + ball_radius + SERVE_PLANE_MARGIN. Root cause of the seed=1 pod defect
+# (pb_serve_err_m = 0.58 m / pb_serve_vel_err = 1.19): for rising-contact questions (vz >= 0,
+# ~11% of the bank) and moderate tts the pure backward path dips below the table plane — in
+# reality that segment is PRE-BOUNCE — so the launch state sat under/inside the table and the
+# serve was garbage. Phase A serves only the FINAL ballistic segment; the pre-bounce segment is
+# the future bounce-aware serve (module docstring).
+SERVE_PLANE_MARGIN = 5e-3
 # Reverse-integration step used by the manager at serve time (helper default is 1e-3 for tests).
 # RK4 truncation at 5 ms over <= 0.6 s is sub-mm — far below the 17 mm engine-integration floor.
 SERVE_BACKINT_H = 5e-3
@@ -166,26 +177,35 @@ def back_integrate_incoming(
     tts: torch.Tensor,
     prm,
     h: float = 1e-3,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Venue-model REVERSE-TIME integration from the contact state to the launch state.
+    surface_z: float = 0.76,
+    margin: float = SERVE_PLANE_MARGIN,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Venue-model REVERSE-TIME integration from the contact state, TRUNCATED at the table plane.
 
     Integrates the fitted flight ODE ``a = g - k_d|v|v + k_m (omega x v)`` backward
-    (``virtual_ball.rk4_step`` with a NEGATIVE per-env step) for ``tts`` seconds, so that forward
-    flight from the returned ``(pos, vel)`` for ``tts`` arrives at ``(contact_pos, incoming_vel)``
-    (roundtrip error is RK4 truncation only: sub-mm at h = 1e-3 — tested at tts 0.3/0.6/1.0 s).
+    (``virtual_ball.rk4_step`` with a NEGATIVE per-env step) for up to ``tts`` seconds, STOPPING
+    per env at the last state strictly above ``z = surface_z + ball_radius + margin`` (and below
+    the ``BACKINT_SPEED_CAP`` reverse-drag guard). The returned state is ON the incoming
+    trajectory, so forward flight from ``(launch_pos, launch_vel)`` for ``tts_effective`` seconds
+    arrives at ``(contact_pos, incoming_vel)`` — roundtrip error is RK4 truncation only (sub-mm
+    at h = 1e-3; tested untruncated at tts 0.3/0.6/1.0 s and truncated for rising/long-tts
+    cases).
+
+    WHY TRUNCATE (seed=1 pod defect): for rising contact velocities (vz >= 0) and moderate tts
+    the pure backward path dips below the table plane — in reality that segment is PRE-BOUNCE —
+    and an un-truncated launch sat under/inside the table (pb_serve_err_m 0.58 m). Phase A
+    serves only the FINAL BALLISTIC SEGMENT (post-last-bounce); realizing the pre-bounce segment
+    (bounce-map inversion) is the future bounce-aware serve. ``tts_effective`` runs ~0.14-0.35 s
+    for typical bank contact heights — the serve simply fires later.
 
     Vectorized over envs with PER-ENV step size: ``n = ceil(max(tts)/h)`` fixed-length loop,
     ``h_i = tts_i / n`` (envs with smaller tts get a smaller, MORE accurate step; ``tts_i = 0``
-    rows take identity steps). Frame-free: positions may be world or env-local (the venue model
-    is translation-invariant); omega is constant in flight (the fit's assumption).
-
-    REVERSE-DRAG BLOWUP (honesty bound): backward in time, quadratic drag ANTI-amplifies speed
-    with a finite-time singularity — for venue contact states the divergence sits at
-    ``t_back ~ 1.3 s`` (a ball cannot have flown much longer than that in pure flight and arrive
-    this slow; the true longer history contains a table bounce). Rows whose backward speed
-    exceeds ``BACKINT_SPEED_CAP`` FREEZE (identity steps onward), so the call is finite/NaN-free
-    for tts up to 1.5 s and beyond; the exact-arrival guarantee holds for every row the cap never
-    touched (all venue-envelope rows with tts <= ~1.0 s; the manager serves at <= 0.6 s).
+    rows take identity steps); a row that would step below the plane (or past the speed cap)
+    rejects that step and freezes, so ``tts_effective`` is an exact multiple of its ``h_i``.
+    Frame-free in xy; ``surface_z`` must be given in the SAME frame as ``contact_pos`` (env-local
+    ``vb_table_surface_z`` when positions are env-local, or origin-shifted when world — the
+    tracking env grids are z-flat so the manager passes world contact points with the env-local
+    plane unchanged). Omega is constant in flight (the fit's assumption).
 
     Args:
         contact_pos: (N, 3) question contact point.
@@ -194,23 +214,40 @@ def back_integrate_incoming(
         tts: (N,) time to strike in seconds (clamped at 0 from below).
         prm: ``virtual_ball.VirtualBallParams`` (venue flight constants).
         h: nominal reverse step size (s).
+        surface_z: table surface height in the frame of ``contact_pos``.
+        margin: extra clearance above ``surface_z + ball_radius`` where truncation stops.
 
     Returns:
-        ``(launch_pos, launch_vel)``: (N, 3) each.
+        ``(launch_pos, launch_vel, tts_effective)``: (N, 3), (N, 3), (N,). ``tts_effective ==
+        tts`` where nothing truncated; smaller where the plane (or the speed cap) cut the span.
     """
     t_back = tts.clamp(min=0.0)
     t_max = float(t_back.max().item()) if t_back.numel() else 0.0
     if t_max <= 0.0:
-        return contact_pos.clone(), incoming_vel.clone()
+        return contact_pos.clone(), incoming_vel.clone(), torch.zeros_like(t_back)
+    z_min = float(surface_z) + float(prm.ball_radius) + float(margin)
     n_steps = max(1, int(math.ceil(t_max / float(h))))
     h_i = (t_back / float(n_steps)).unsqueeze(-1)  # (N, 1), broadcasts through rk4_step
     p, v = contact_pos, incoming_vel
+    t_eff = torch.zeros_like(t_back)
     alive = torch.ones_like(t_back, dtype=torch.bool)
     for _ in range(n_steps):
-        p, v = _vb.rk4_step(p, v, omega, -(h_i * alive.unsqueeze(-1)), prm)
-        # Freeze rows past the reverse-drag speed cap (identity steps onward — see docstring).
-        alive = alive & (torch.linalg.norm(v, dim=-1) < BACKINT_SPEED_CAP)
-    return p, v
+        p_new, v_new = _vb.rk4_step(p, v, omega, -h_i, prm)
+        # Accept the step only where the row is still integrating AND the new state stays
+        # strictly above the truncation plane AND below the reverse-drag speed cap; a rejected
+        # step freezes the row at the last valid state (its candidate recomputes identically and
+        # keeps being rejected — no NaN path).
+        ok = (
+            alive
+            & (p_new[:, 2] > z_min)
+            & (torch.linalg.norm(v_new, dim=-1) < BACKINT_SPEED_CAP)
+        )
+        okc = ok.unsqueeze(-1)
+        p = torch.where(okc, p_new, p)
+        v = torch.where(okc, v_new, v)
+        t_eff = t_eff + h_i.squeeze(-1) * ok
+        alive = ok
+    return p, v, t_eff
 
 
 def predict_table_contact(
@@ -340,6 +377,9 @@ class PhysicalBallManager:
         self._land_new = torch.zeros(n, dtype=torch.bool, device=self.device)
         self._land_xy = torch.zeros(n, 2, device=self.device)
         self._bounce_new = torch.zeros(n, dtype=torch.bool, device=self.device)
+        # Per-swing latch: this swing's serve was delayed by the table-plane truncation (counted
+        # once into pb_serve_truncated_count; re-armed at every resample).
+        self._trunc_flag = torch.zeros(n, dtype=torch.bool, device=self.device)
         self._prev_valid = torch.zeros(n, dtype=torch.bool, device=self.device)
         self._prev_pos_env = torch.zeros(n, 3, device=self.device)
         # Reusable wrench buffers (num_envs, 1 body, 3), zeroed like table_tennis_env.py.
@@ -354,6 +394,7 @@ class PhysicalBallManager:
         self._serve_count = 0.0
         self._meas_count = 0.0
         self._missed_serve_count = 0.0
+        self._trunc_count = 0.0
         self._bounce_count = 0.0
         self._land_count = 0.0
         self._land_on_table_count = 0.0
@@ -366,6 +407,7 @@ class PhysicalBallManager:
         m["pb_serve_count"] = torch.zeros(n, device=self.device)
         m["pb_strike_meas_count"] = torch.zeros(n, device=self.device)
         m["pb_missed_serve_count"] = torch.zeros(n, device=self.device)
+        m["pb_serve_truncated_count"] = torch.zeros(n, device=self.device)
         m["pb_bounce_count"] = torch.zeros(n, device=self.device)
         m["pb_land_count"] = torch.zeros(n, device=self.device)
         m["pb_land_on_table_count"] = torch.zeros(n, device=self.device)
@@ -408,6 +450,7 @@ class PhysicalBallManager:
         self._landed[ids] = False
         self._land_new[ids] = False
         self._bounce_new[ids] = False
+        self._trunc_flag[ids] = False
         self._prev_valid[ids] = False
 
     def update(self, exact_strike: torch.Tensor) -> None:
@@ -419,28 +462,41 @@ class PhysicalBallManager:
         # 1) fold bounce/landing events flagged by the physics callback since last control step.
         self._consume_events()
 
-        # 2) serve: parked envs whose tts entered (step_dt, SERVE_HORIZON_S]. The launch state is
-        #    the reverse-integrated venue-flight state; tts here is an exact multiple of step_dt
-        #    (bank runs forbid retiming), so the k control steps of PhysX flight until the
-        #    exact-strike frame total exactly tts seconds of sim time.
-        due = schedule_serves(self._mode == _MODE_PARKED, cmd.time_to_strike,
-                              SERVE_HORIZON_S, min_tts_s=step_dt)
-        just_served = due
-        if bool(due.any()):
+        # 2) serve: parked envs whose tts entered (step_dt, SERVE_HORIZON_S] are CANDIDATES; the
+        #    reverse integration (env-local frame, vb-convention) returns per-env tts_effective —
+        #    a row launches only when its remaining tts fits inside the un-truncated final
+        #    ballistic segment (tts <= tts_effective), i.e. TRUNCATED rows serve LATER, from ON
+        #    the incoming trajectory, and forward flight for exactly tts seconds still arrives at
+        #    the question (contact, velocity) at the exact-strike frame (tts is an exact multiple
+        #    of step_dt — bank runs forbid retiming). Rows whose whole final segment is shorter
+        #    than one control step never serve and are counted at the strike as pb_missed_serve.
+        just_served = torch.zeros_like(self._landed)
+        cand = schedule_serves(self._mode == _MODE_PARKED, cmd.time_to_strike,
+                               SERVE_HORIZON_S, min_tts_s=step_dt)
+        if bool(cand.any()):
             t_back = cmd.time_to_strike.clamp(min=0.0, max=SERVE_HORIZON_S)
-            pos_w, vel_w = back_integrate_incoming(
-                cmd.racket_target_pos_w, cmd.vb_vel_in_w, cmd.vb_spin_in_w,
+            pos_env, vel_w, t_eff = back_integrate_incoming(
+                cmd.racket_target_pos_w - origins, cmd.vb_vel_in_w, cmd.vb_spin_in_w,
                 t_back, self._prm, h=SERVE_BACKINT_H,
+                surface_z=float(cmd.cfg.vb_table_surface_z), margin=SERVE_PLANE_MARGIN,
             )
-            ids = torch.where(due)[0]
-            pose = torch.cat([pos_w[ids], self._identity_quat[ids]], dim=-1)
-            vel6 = torch.cat([vel_w[ids], cmd.vb_spin_in_w[ids]], dim=-1)
-            self._ball.write_root_pose_to_sim(pose, env_ids=ids)
-            self._ball.write_root_velocity_to_sim(vel6, env_ids=ids)
-            self._mode[ids] = _MODE_INBOUND
-            self._landed[ids] = False
-            self._prev_valid[ids] = False
-            self._serve_count += float(len(ids))
+            due = cand & (t_eff >= t_back - 1e-6)
+            # Swings whose serve is DELAYED by the plane truncation (counted once per swing).
+            delayed = cand & ~due & ~self._trunc_flag
+            if bool(delayed.any()):
+                self._trunc_count += float(delayed.sum())
+                self._trunc_flag |= delayed
+            just_served = due
+            if bool(due.any()):
+                ids = torch.where(due)[0]
+                pose = torch.cat([origins[ids] + pos_env[ids], self._identity_quat[ids]], dim=-1)
+                vel6 = torch.cat([vel_w[ids], cmd.vb_spin_in_w[ids]], dim=-1)
+                self._ball.write_root_pose_to_sim(pose, env_ids=ids)
+                self._ball.write_root_velocity_to_sim(vel6, env_ids=ids)
+                self._mode[ids] = _MODE_INBOUND
+                self._landed[ids] = False
+                self._prev_valid[ids] = False
+                self._serve_count += float(len(ids))
 
         # 3) strike-frame truth measurement (the instrument's headline numbers). just_served envs
         #    are excluded (their write hasn't been integrated yet); with tts > step_dt at serve
@@ -492,6 +548,7 @@ class PhysicalBallManager:
         m["pb_serve_count"][:] = self._serve_count
         m["pb_strike_meas_count"][:] = self._meas_count
         m["pb_missed_serve_count"][:] = self._missed_serve_count
+        m["pb_serve_truncated_count"][:] = self._trunc_count
         m["pb_bounce_count"][:] = self._bounce_count
         m["pb_land_count"][:] = self._land_count
         m["pb_land_on_table_count"][:] = self._land_on_table_count
