@@ -44,6 +44,21 @@ the speed/accuracy trade is a CURVE, not a guess)
                               rollouts integrated as one (6,3) batch)
   ss_combo                    adapt10 + warm + iter6 + nosens (per-tick mode)
 
+PRODUCTION path (2026-07-06: the winner ss_fastnp_a20_warm was PRODUCTIONIZED
+into hope_planner/strike_spec_fast.py — the fast rows below import THAT
+shipped implementation, there is no benchmark-local fork anymore; flags in
+node.py: use_fast_strike_spec / strike_spec_rate_hz / dt_integrate_coarse)
+------------------------------------------------------------------------
+  ss_fastnp_a20_warm          production solve_fast: batched probes + 20 ms
+                              cruise + warm start + iter budget 6
+  prod_solve_fast_spec        the node's actual call (solve_fast_spec):
+                              adds StrikeSpec assembly + net-clear annotation
+  tick_S1S2S3(legacy)         ONE whole node tick, deployed path:
+                              S1 polyfit + S2 predict 1 kHz + RTP.plan
+  tick_S1S2fastSS(prod)       ONE whole node tick, fast path: S1 polyfit +
+                              S2 adaptive predict + solve_fast (warm, iter 6)
+  --variants prod runs exactly these four next to the always-on baselines.
+
 HONEST BOUNDARY: all timings are Mac CPU (this machine) — a proxy. Deploy
 SoC / pod numbers need a follow-up run of the SAME command there:
 
@@ -82,13 +97,24 @@ if _PKG_ROOT not in sys.path:
     sys.path.insert(0, _PKG_ROOT)
 
 from hope_planner.ball_contact import predict_paddle_contact as np_contact  # noqa: E402
+from hope_planner.ball_state_estimator import BallStateEstimator  # noqa: E402
 from hope_planner.ball_trajectory_predictor import (  # noqa: E402
     BallTrajectoryPredictor,
     StrikeTarget,
 )
 from hope_planner.constants import BallPhysics, PlannerConfig, TableParams  # noqa: E402
 from hope_planner.racket_target_planner import RacketTargetPlanner  # noqa: E402
+from hope_planner.strike_spec_fast import (  # noqa: E402
+    FastStrikeSpecPlanner,
+    batch_integrate_to_table_plane,
+)
 from hope_planner.strike_spec_planner import StrikeSpecPlanner  # noqa: E402
+
+# Backward-compat alias: the batched integrator + fast planner were PROTOTYPED
+# here (2026-07-06) and then productionized into hope_planner.strike_spec_fast;
+# the benchmark now imports the ONE production implementation (no fork to
+# drift). ss_fastnp_* rows therefore measure the shipped code path.
+_batch_integrate_to_plane = batch_integrate_to_table_plane
 
 TABLE_Y_MAX = 0.7625        # sim harness centers the table on the robot
 NET_X = TableParams().net_x  # 1.37 (planner frame: z = 0 at the table surface)
@@ -471,206 +497,9 @@ def run_two_stage(scenarios: Sequence[Scenario]) -> CandidateResult:
 
 
 # --------------------------------------------------------------------------- #
-# (iii) numpy-batched LM probes (vectorized predictor inner loop)
+# (iii) numpy-batched LM probes — the PRODUCTION implementation
+# (hope_planner.strike_spec_fast.FastStrikeSpecPlanner, imported above)
 # --------------------------------------------------------------------------- #
-
-
-def _batch_integrate_to_plane(
-    p0: np.ndarray,
-    Vp: np.ndarray,
-    Wp: np.ndarray,
-    physics: BallPhysics,
-    config: PlannerConfig,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Batched twin of integrate_to_table_plane: M rows stepped together.
-
-    Fixed-dt mode uses the LEGACY Euler formula (same per-row arithmetic);
-    with config.dt_integrate_coarse > dt the cruise is batched RK4 and rows
-    whose interval could contain the crossing are replayed scalar-fine.
-    Returns (land_xy (M,2) with NaN for no-crossing, t_land (M,)).
-    """
-    dt = config.dt_integrate
-    dt_c = float(getattr(config, "dt_integrate_coarse", 0.0))
-    k, g, k_m = physics.k, physics.g, config.k_m
-    M = Vp.shape[0]
-    P = np.tile(np.asarray(p0, float), (M, 1))
-    V = Vp.astype(float).copy()
-    W = Wp.astype(float)
-    land = np.full((M, 2), np.nan)
-    t_land = np.full(M, np.nan)
-    active = np.ones(M, bool)
-
-    def accel(Vx):
-        sp = np.linalg.norm(Vx, axis=1, keepdims=True)
-        return -k * sp * Vx + g + k_m * np.cross(W, Vx)
-
-    if dt_c > dt:
-        n_sub = max(1, int(round(dt_c / dt)))
-        t = 0.0
-        while t < config.max_predict_time - 1e-12 and active.any():
-            A1 = accel(V)
-            V2 = V + 0.5 * dt_c * A1
-            A2 = accel(V2)
-            V3 = V + 0.5 * dt_c * A2
-            A3 = accel(V3)
-            V4 = V + dt_c * A3
-            A4 = accel(V4)
-            Pn = P + (dt_c / 6.0) * (V + 2.0 * V2 + 2.0 * V3 + V4)
-            Vn = V + (dt_c / 6.0) * (A1 + 2.0 * A2 + 2.0 * A3 + A4)
-            reach = P[:, 2] + np.minimum(np.minimum(V[:, 2], Vn[:, 2]), 0.0) * dt_c <= 0.0
-            flagged = active & (P[:, 2] > 0.0) & ((Pn[:, 2] <= 0.0) | reach)
-            for i in np.where(flagged)[0]:
-                p, v, w = P[i].copy(), V[i].copy(), W[i]
-                for si in range(n_sub):
-                    a = -k * np.linalg.norm(v) * v + g + k_m * np.cross(w, v)
-                    pn = p + v * dt + 0.5 * a * dt * dt
-                    vn = v + a * dt
-                    if p[2] > 0.0 and pn[2] <= 0.0:
-                        dz = p[2] - pn[2]
-                        frac = p[2] / dz if dz > 1e-12 else 0.5
-                        frac = float(np.clip(frac, 0.0, 1.0))
-                        land[i] = (p + frac * (pn - p))[:2]
-                        t_land[i] = t + si * dt + frac * dt
-                        active[i] = False
-                        break
-                    p, v = pn, vn
-                else:
-                    Pn[i], Vn[i] = p, v
-            P, V = Pn, Vn
-            t += dt_c
-        return land, t_land
-
-    max_steps = int(config.max_predict_time / dt)
-    t = 0.0
-    for _ in range(max_steps):
-        if not active.any():
-            break
-        A = accel(V)
-        Pn = P + V * dt + 0.5 * A * dt * dt
-        Vn = V + A * dt
-        t += dt
-        cross = active & (P[:, 2] > 0.0) & (Pn[:, 2] <= 0.0)
-        if cross.any():
-            dz = P[cross, 2] - Pn[cross, 2]
-            frac = np.where(dz > 1e-12, P[cross, 2] / np.maximum(dz, 1e-12), 0.5).clip(0.0, 1.0)
-            land[cross] = P[cross, :2] + frac[:, None] * (Pn[cross, :2] - P[cross, :2])
-            t_land[cross] = (t - dt) + frac * dt
-            active[cross] = False
-        P, V = Pn, Vn
-    return land, t_land
-
-
-class FastStrikeSpecPlanner(StrikeSpecPlanner):
-    """StrikeSpecPlanner with numpy-BATCHED Jacobian probes (prototype iii).
-
-    Per LM iteration the 5 probe rollouts are integrated as ONE (5,3) batch
-    (contact stays per-row — it is ~1000x cheaper than the flight), so the
-    python-per-step overhead is amortized across probes. Same LM schedule,
-    tolerances and residual as the parent; combine with
-    config.dt_integrate_coarse for the adaptive cruise on top.
-    """
-
-    def _forward_batch(self, Q, phi0, theta0, p_strike, v_ball, omega_ball):
-        Mq = Q.shape[0]
-        Ns = np.zeros((Mq, 3))
-        Vr = np.zeros((Mq, 3))
-        Vp = np.zeros((Mq, 3))
-        Wp = np.zeros((Mq, 3))
-        for i in range(Mq):
-            n = self._normal_from_tilt(phi0, theta0, Q[i, 0], Q[i, 1])
-            b1, b2 = self._face_basis(n)
-            v_r = Q[i, 2] * n + Q[i, 3] * b1 + Q[i, 4] * b2
-            v_plus, w_plus = np_contact(v_ball, v_r, n, omega_ball, self.physics, self.config)
-            Ns[i], Vr[i], Vp[i], Wp[i] = n, v_r, v_plus, w_plus
-        land, t_land = _batch_integrate_to_plane(p_strike, Vp, Wp, self.physics, self.config)
-        return land, t_land, Ns, Vr, Vp, Wp
-
-    def solve_fast(
-        self,
-        p_ball: np.ndarray,
-        v_ball: np.ndarray,
-        omega_ball: Optional[np.ndarray],
-        landing_target_xy: np.ndarray,
-        racket_speed_budget: float,
-        max_iter: Optional[int] = None,
-        tol_m: Optional[float] = None,
-        q0: Optional[np.ndarray] = None,
-    ) -> Optional[dict]:
-        max_iter = self.MAX_ITER if max_iter is None else int(max_iter)
-        tol = self.TOL_M if tol_m is None else float(tol_m)
-        p_ball = np.asarray(p_ball, float)
-        v_ball = np.asarray(v_ball, float)
-        omega_ball = np.zeros(3) if omega_ball is None else np.asarray(omega_ball, float)
-        target_xy = np.asarray(landing_target_xy, float)[:2]
-
-        phi0, theta0, v_n0 = self._initial_guess(p_ball, v_ball, target_xy)
-        q = np.array([0.0, 0.0, v_n0, 0.0, 0.0]) if q0 is None else np.asarray(q0, float).copy()
-
-        def fwd_one(qq):
-            land, tl, Ns, Vr, Vp, Wp = self._forward_batch(
-                qq[None], phi0, theta0, p_ball, v_ball, omega_ball)
-            if np.isnan(land[0]).any():
-                return None
-            return dict(landing_xy=land[0], t_land=tl[0], n=Ns[0], v_r=Vr[0],
-                        v_plus=Vp[0], omega_plus=Wp[0])
-
-        fwd = fwd_one(q)
-        if fwd is None:
-            return None
-        r = self._residual(fwd, q, target_xy)
-        cost = float(r @ r)
-        h = np.array([0.2, 0.2, 0.02, 0.02, 0.02])
-        lam = 1e-3
-        iterations = 0
-
-        for _ in range(max_iter):
-            iterations += 1
-            if np.linalg.norm(fwd["landing_xy"] - target_xy) < tol:
-                break
-            Qp = np.repeat(q[None], 5, axis=0) + np.diag(h)   # 5 probes, ONE batch
-            land_p, _, _, _, _, _ = self._forward_batch(
-                Qp, phi0, theta0, p_ball, v_ball, omega_ball)
-            if np.isnan(land_p).any():
-                lam *= 10.0
-                if lam > 1e6:
-                    return None
-                continue
-            J = np.zeros((r.size, 5))
-            for j in range(5):
-                fj = dict(landing_xy=land_p[j])
-                J[:, j] = (self._residual(fj, Qp[j], target_xy) - r) / h[j]
-
-            JtJ = J.T @ J
-            g = J.T @ r
-            damp = np.diag(np.diag(JtJ)) + 1e-9 * np.eye(5)
-            accepted = False
-            for _try in range(6):
-                try:
-                    dq = np.linalg.solve(JtJ + lam * damp, -g)
-                except np.linalg.LinAlgError:
-                    lam *= 10.0
-                    continue
-                q_new = q + dq
-                fwd_new = fwd_one(q_new)
-                if fwd_new is not None:
-                    r_new = self._residual(fwd_new, q_new, target_xy)
-                    cost_new = float(r_new @ r_new)
-                    if cost_new < cost:
-                        q, fwd, r, cost = q_new, fwd_new, r_new, cost_new
-                        lam = max(lam * 0.3, 1e-8)
-                        accepted = True
-                        break
-                lam *= 10.0
-            if not accepted and lam > 1e6:
-                return None
-
-        resid = float(np.linalg.norm(fwd["landing_xy"] - target_xy))
-        if resid >= tol:
-            return None
-        if float(np.linalg.norm(fwd["v_r"])) > racket_speed_budget + 1e-9:
-            return None
-        return dict(n=fwd["n"], v_r=fwd["v_r"], landing_xy=fwd["landing_xy"],
-                    resid_m=resid, iterations=iterations, q=q.copy())
 
 
 def run_fast_np(
@@ -705,6 +534,161 @@ def run_fast_np(
         return out["n"], out["v_r"]
 
     return _run_candidate(name, scenarios, call, notes=notes)
+
+
+# --------------------------------------------------------------------------- #
+# production-path candidates (import the SHIPPED planner, node-shaped calls)
+# --------------------------------------------------------------------------- #
+
+
+def run_prod_spec(
+    scenarios: Sequence[Scenario],
+    name: str = "prod_solve_fast_spec",
+    dt_coarse: float = FastStrikeSpecPlanner.PROD_DT_COARSE,
+    max_iter: int = FastStrikeSpecPlanner.PROD_MAX_ITER,
+    seed: int = 1234,
+) -> CandidateResult:
+    """The node's fast strike-spec call, timed end to end: solve_fast_spec
+    with the production defaults (adaptive 20 ms cruise, warm start, iter 6,
+    sensitivities OFF) INCLUDING full StrikeSpec assembly + the post-solve
+    net-clearance annotation — i.e. what node.py pays per decimated solve
+    when use_fast_strike_spec is on."""
+    physics = BallPhysics()
+    config = PlannerConfig(dt_integrate_coarse=dt_coarse)
+    planner = FastStrikeSpecPlanner(physics, config, TableParams(y_max=TABLE_Y_MAX))
+    rng = np.random.default_rng(seed)
+    warm_q0: Dict[int, np.ndarray] = {}
+    iters: List[int] = []
+    for i, s in enumerate(scenarios):  # previous tick, untimed (same as run_fast_np)
+        p_prev = s.p_strike + rng.normal(0.0, 0.005, 3)
+        v_prev = s.v_strike * (1.0 + rng.normal(0.0, 0.02, 3))
+        out = planner.solve_fast(p_prev, v_prev, s.w_strike, s.target_xy, SPEED_BUDGET)
+        if out is not None:
+            warm_q0[i] = out["q"]
+    index = {id(s): i for i, s in enumerate(scenarios)}
+
+    def call(s: Scenario):
+        spec = planner.solve_fast_spec(
+            s.p_strike, s.v_strike, s.w_strike, s.target_xy, SPEED_BUDGET,
+            max_iter=max_iter, q0=warm_q0.get(index.get(id(s))),
+            with_sensitivities=False)
+        if spec is None:
+            return None
+        iters.append(spec.iterations)
+        return spec.n, spec.v_r
+
+    res = _run_candidate(name, scenarios, call,
+                         notes="node path: fast spec + net-clear annotation")
+    if iters:
+        res.extra["lm_iters_med"] = float(np.median(iters))
+    return res
+
+
+def run_full_tick(scenarios: Sequence[Scenario], fast: bool) -> CandidateResult:
+    """One WHOLE node tick: S1 polyfit (push+estimate) + S2 predict + S3.
+
+    Mocap samples are synthesized noise-free at config.mocap_hz along the
+    same flight ODE from the pre-strike observation. Untimed setup fills the
+    estimator window and (fast mode) runs the previous tick's solve for the
+    warm start; the TIMED section is exactly one /poses tick: push newest
+    sample -> estimate -> Stage-2 predict -> Stage-3 plan.
+
+      fast=False: legacy deployed tick  = S1 + S2 (1 kHz Euler) + RTP.plan
+      fast=True : production fast tick  = S1 + S2 (adaptive 20 ms cruise)
+                  + FastStrikeSpecPlanner.solve_fast (warm, iter 6)
+
+    Both S3 calls are spin-blind (omega None), matching today's node (no
+    live spin estimate), so oracle accuracy for BOTH rows carries the real
+    spin-blind Stage-2 error — compare their latency, not their mm."""
+    physics, table = BallPhysics(), TableParams(y_max=TABLE_Y_MAX)
+    n_iters: List[int] = []
+
+    # --- untimed per-scenario prep: mocap history + previous-tick warm state ---
+    preps: Dict[int, dict] = {}
+    for i, s in enumerate(scenarios):
+        config = PlannerConfig(
+            x_hit=float(s.p_strike[0]),
+            target_land=np.array([s.target_xy[0], s.target_xy[1], 0.0]),
+            dt_integrate_coarse=FastStrikeSpecPlanner.PROD_DT_COARSE if fast else 0.0,
+        )
+        pred = BallTrajectoryPredictor(physics, config, table)
+        h = 1.0 / config.mocap_hz
+        p, v = s.p_pre.copy(), s.v_pre.copy()
+        samples = [(0.0, p.copy())]
+        for j in range(config.fit_window + 1):
+            p, v = pred._rk4_flight_step(p, v, s.w_strike, h)
+            if p[0] <= config.x_hit + 0.02 or p[2] <= 0.0:
+                break
+            samples.append((float((j + 1) * h), p.copy()))
+        if len(samples) < config.fit_window + 1:
+            continue  # ball reaches the plane inside the fit window -> no tick
+        window = samples[:-1][-config.fit_window:]
+        prep = dict(
+            config=config, pred=pred,
+            t_buf=[t for t, _ in window], p_buf=[q for _, q in window],
+            z_hist=[float(q[2]) for _, q in window[-3:]],
+            t_new=samples[-1][0], p_new=samples[-1][1],
+            rtp=RacketTargetPlanner(physics, config, table),
+            planner_fast=FastStrikeSpecPlanner(physics, config, table) if fast else None,
+            warm_q=None,
+        )
+        if fast:  # previous tick's solve (window without the newest sample)
+            est_prev = BallStateEstimator(config)
+            for t_i, p_i in window:
+                est_prev.push(t_i, p_i)
+            p_e, v_e, t_e = est_prev.estimate()
+            strike_prev = pred.predict(p_e, v_e, t_e)
+            if strike_prev.valid:
+                # DEFAULT iteration budget here: the previous tick converges
+                # cold once, every later tick then rides the budget-6 warm
+                # path (same pattern as the node: first solve of a rally is
+                # cold, budget-6 only pays off warm).
+                out_prev = prep["planner_fast"].solve_fast(
+                    strike_prev.p_ball, strike_prev.v_ball, None,
+                    s.target_xy, SPEED_BUDGET)
+                if out_prev is not None:
+                    prep["warm_q"] = out_prev["q"]
+        preps[i] = prep
+    index = {id(s): i for i, s in enumerate(scenarios)}
+
+    def call(s: Scenario):
+        prep = preps.get(index[id(s)])
+        if prep is None:
+            return None
+        # Estimator state restore is idempotent (warmup calls reuse it) and
+        # cheap (~us, list copies) next to the ms-scale tick being timed.
+        est = BallStateEstimator(prep["config"])
+        est.t_buffer = list(prep["t_buf"])
+        est.p_buffer = list(prep["p_buf"])
+        est._z_hist = list(prep["z_hist"])
+        # --- the actual node tick: push -> estimate -> predict -> plan ---
+        est.push(prep["t_new"], prep["p_new"])
+        p_e, v_e, t_e = est.estimate()
+        if v_e[0] >= 0.0:
+            return None
+        strike = prep["pred"].predict(p_e, v_e, t_e)
+        if not strike.valid:
+            return None
+        if fast:
+            out = prep["planner_fast"].solve_fast(
+                strike.p_ball, strike.v_ball, None, s.target_xy, SPEED_BUDGET,
+                max_iter=FastStrikeSpecPlanner.PROD_MAX_ITER, q0=prep["warm_q"])
+            if out is None:
+                return None
+            n_iters.append(out["iterations"])
+            return out["n"], out["v_r"]
+        cmd = prep["rtp"].plan(strike)
+        if cmd is None or not cmd.valid:
+            return None
+        return cmd.n_racket, cmd.v_racket
+
+    name = "tick_S1S2fastSS(prod)" if fast else "tick_S1S2S3(legacy)"
+    notes = ("full node tick, fast spec path (spin-blind S2)" if fast
+             else "full node tick, deployed RTP path (spin-blind S2)")
+    res = _run_candidate(name, scenarios, call, notes=notes)
+    if n_iters:
+        res.extra["lm_iters_med"] = float(np.median(n_iters))
+    return res
 
 
 def run_torch_batched(scenarios: Sequence[Scenario], batch: int) -> CandidateResult:
@@ -839,14 +823,23 @@ def run_benchmark(
                             max_iter=6, with_sensitivities=False,
                             notes="adapt10+warm+iter6+nosens (per-tick mode)"),
         ]
-    if variants in ("all", "smoke"):
+    if variants in ("all", "smoke", "prod"):
         results += [
             run_fast_np(scenarios, "ss_fastnp_a20_warm", dt_coarse=0.02,
                         max_iter=6, warm=True,
-                        notes="batched+20ms cruise+warm+iter6 (recommended)"),
+                        notes="PRODUCTION strike_spec_fast, a20+warm+iter6"),
+        ]
+    if variants in ("all", "smoke"):
+        results += [
             run_fast_np(scenarios, "ss_fastnp_a40_warm", dt_coarse=0.04,
                         max_iter=6, warm=True,
                         notes="40 ms cruise: python per-call floor probe"),
+        ]
+    if variants in ("all", "prod"):
+        results += [
+            run_prod_spec(scenarios),
+            run_full_tick(scenarios, fast=False),
+            run_full_tick(scenarios, fast=True),
         ]
     if HAVE_TORCH:
         for b in torch_batches:
@@ -960,7 +953,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--oracle-plane", choices=("radius", "surface"), default="radius")
     ap.add_argument("--torch-batches", type=int, nargs="*", default=[1, 64])
-    ap.add_argument("--variants", choices=("all", "smoke", "none"), default="all")
+    ap.add_argument("--variants", choices=("all", "smoke", "prod", "none"), default="all")
     ap.add_argument("--profile", action="store_true")
     ap.add_argument("--json", type=str, default="")
     args = ap.parse_args(argv)

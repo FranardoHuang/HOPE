@@ -9,10 +9,12 @@ from .ball_kalman_estimator import BallKalmanEstimator
 from .ball_state_estimator import BallStateEstimator
 from .ball_trajectory_predictor import BallTrajectoryPredictor, StrikeTarget
 from .constants import BallPhysics, PlannerConfig, TableParams
+from .fastmath import cross3, cross_rows
 from .planner import HOPEPlanner
 from .quaternion_utils import normal_to_quaternion
 from .racket_target_planner import RacketCommand, RacketTargetPlanner
 from .spin_estimator import SpinFromQuats
+from .strike_spec_fast import FastStrikeSpecPlanner, batch_integrate_to_table_plane
 from .strike_spec_planner import StrikeSpec, StrikeSpecPlanner
 
 __all__ = [
@@ -32,4 +34,8 @@ __all__ = [
     "predict_paddle_contact",
     "StrikeSpec",
     "StrikeSpecPlanner",
+    "FastStrikeSpecPlanner",
+    "batch_integrate_to_table_plane",
+    "cross3",
+    "cross_rows",
 ]

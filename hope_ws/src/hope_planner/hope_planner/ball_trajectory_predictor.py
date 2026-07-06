@@ -13,6 +13,7 @@ from typing import Optional, Tuple
 import numpy as np
 
 from .constants import BallPhysics, PlannerConfig, TableParams
+from .fastmath import cross3
 
 
 @dataclass
@@ -57,11 +58,17 @@ class BallTrajectoryPredictor:
         term contributes exactly 0.0 so legacy (spin-blind) behavior is
         bit-identical. k_m is the venue Magnus coefficient
         (configs/ball_physics_venue.yaml flight.k_m).
+
+        The Magnus cross product is the hand-written fastmath.cross3 —
+        BIT-IDENTICAL to np.cross on float64 (asserted by
+        test_strike_spec_fast.py over random states incl. zeros/subnormals)
+        but ~10x cheaper per call; np.cross dispatch was ~60 % of the step
+        cost in this 1 kHz loop (benchmark --profile, 2026-07-06).
         """
         speed = np.linalg.norm(v)
         a = -self.physics.k * speed * v + self.physics.g
         if omega is not None:
-            a = a + self.config.k_m * np.cross(omega, v)
+            a = a + self.config.k_m * cross3(omega, v)
         return a
 
     def _apply_bounce(self, v: np.ndarray) -> np.ndarray:

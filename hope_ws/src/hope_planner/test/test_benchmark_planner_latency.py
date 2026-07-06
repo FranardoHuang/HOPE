@@ -51,3 +51,27 @@ def test_benchmark_end_to_end_n5():
     assert by_name["ss_fastnp_a20_warm"]["med_ms"] < base["med_ms"]
     # table renders
     assert "strike_spec(LM)" in bpl.format_table(rows)
+
+
+def test_benchmark_imports_the_production_fast_planner():
+    """The fast rows must measure the SHIPPED implementation, not a fork."""
+    from hope_planner.strike_spec_fast import (
+        FastStrikeSpecPlanner,
+        batch_integrate_to_table_plane,
+    )
+
+    assert bpl.FastStrikeSpecPlanner is FastStrikeSpecPlanner
+    assert bpl._batch_integrate_to_plane is batch_integrate_to_table_plane
+
+
+@pytest.mark.skipif(not bpl.HAVE_TORCH, reason="oracle needs torch")
+def test_benchmark_production_variant_n4():
+    rows, _ = bpl.run_benchmark(n=4, seed=2, torch_batches=(), variants="prod")
+    by_name = {r["name"]: r for r in rows}
+    for name in ("ss_fastnp_a20_warm", "prod_solve_fast_spec",
+                 "tick_S1S2S3(legacy)", "tick_S1S2fastSS(prod)"):
+        assert name in by_name, name
+        assert by_name[name]["med_ms"] > 0.0
+    # the production full tick must be materially faster than the legacy tick
+    assert (by_name["tick_S1S2fastSS(prod)"]["med_ms"]
+            < by_name["tick_S1S2S3(legacy)"]["med_ms"])

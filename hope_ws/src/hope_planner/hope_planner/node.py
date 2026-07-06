@@ -55,6 +55,34 @@ class HOPEPlannerNode(Node):
         self.declare_parameter("racket_speed_budget", 10.0)   # m/s cap for the spec solve — diagnostic
                                                               # sanity bound, above venue strike speeds
                                                               # (paddle u_n fit envelope tops out 7.2 m/s)
+        # --- FAST strike spec (2026-07-06, flag-gated, DEFAULT OFF) ---
+        # use_fast_strike_spec=True upgrades the strike-spec path from the 1 Hz
+        # throttled scalar LM solve (~0.45 s each — why it was diagnostics-only) to the
+        # PRODUCTION fast solver (strike_spec_fast.FastStrikeSpecPlanner): numpy-batched
+        # Jacobian probes + adaptive 远粗近细 integration (spec_dt_integrate_coarse)
+        # + warm start from the previous solve + LM budget strike_spec_max_iter,
+        # sensitivities OFF the hot path (strike_spec_sensitivities=True re-enables
+        # them per solve, on demand). Replanning is DECIMATED to strike_spec_rate_hz
+        # (30-50 Hz sensible; /poses runs up to 300 Hz) and the cached spec is served
+        # between solves. Measured on N=200 venue scenarios (Mac CPU, benchmark
+        # --variants prod): med ~15 ms / p90 ~42 ms per solve at the SAME ~19 mm
+        # oracle landing error as the 0.45 s baseline.
+        # The published command topics (/racket/command, /racket/command_flat) are
+        # UNTOUCHED by every flag here — same topic, same schema, same values.
+        # Deploy flip: publish_strike_spec:=true use_fast_strike_spec:=true
+        #              (optionally dt_integrate_coarse:=0.02 for the Stage-2 speedup).
+        self.declare_parameter("use_fast_strike_spec", False)
+        self.declare_parameter("strike_spec_rate_hz", 40.0)   # replan decimation (fast path only)
+        self.declare_parameter("strike_spec_max_iter", 6)     # LM budget from a warm start
+        self.declare_parameter("spec_dt_integrate_coarse", 0.02)  # adaptive cruise for the SPEC
+                                                              # solve only (own config copy)
+        self.declare_parameter("strike_spec_sensitivities", False)  # sensitivities on demand
+        # Stage-2 adaptive integrator (EXISTING PlannerConfig.dt_integrate_coarse flag,
+        # plumbed): 0.0 = OFF = legacy fixed-dt 1 kHz Euler, byte-identical. 0.02 cuts
+        # Stage-2 predict ~3.9 ms -> ~1.0 ms per /poses tick (same benchmark). Only the
+        # predictor honors the flag (predict / integrate_to_table_plane / net-clear);
+        # RacketTargetPlanner's own integrations keep the legacy fixed dt either way.
+        self.declare_parameter("dt_integrate_coarse", 0.0)
         # --- ADAPTIVE hit plane (2026-07-04): x_hit follows the LIVE robot position ---
         # The trained policy WALKS to the strike (walk-and-strike lunge, ~0.5-0.8 m): after
         # one return the robot stands AT the old static plane, so subsequent plans land at
@@ -107,6 +135,7 @@ class HOPEPlannerNode(Node):
             delta_t_flight=self.get_parameter("delta_t_flight").value,
             C_r=self.get_parameter("restitution_racket").value,
             use_kalman=bool(self.get_parameter("use_kalman").value),
+            dt_integrate_coarse=float(self.get_parameter("dt_integrate_coarse").value),
         )
         physics = BallPhysics(
             k=self.get_parameter("drag_k").value,
@@ -126,19 +155,42 @@ class HOPEPlannerNode(Node):
         self._kf_pos_delta = float("nan")
         self._kf_vel_delta = float("nan")
 
-        # Flag-gated strike-spec DIAGNOSTICS: inverse-solve the racket control
+        # Flag-gated strike-spec path: inverse-solve the racket control
         # variables (face tilt, v_n, v_t) + their landing sensitivities next to
-        # the existing racket command. Does NOT touch the command path. The LM
-        # solve costs ~0.3 s, so it is throttled to at most 1 Hz rather than
-        # running per 300 Hz mocap frame.
+        # the existing racket command. Does NOT touch the command path.
+        #   legacy (use_fast_strike_spec=False): scalar LM solve ~0.45 s ->
+        #     throttled to at most 1 Hz. Byte-identical to the pre-flag node.
+        #   fast   (use_fast_strike_spec=True): FastStrikeSpecPlanner.solve_fast_spec
+        #     (~15 ms med) -> replans at strike_spec_rate_hz, warm-started, cached
+        #     spec served between solves; log still throttled to 1 Hz.
         self._publish_strike_spec = bool(self.get_parameter("publish_strike_spec").value)
         self._racket_speed_budget = float(self.get_parameter("racket_speed_budget").value)
-        self._spec_planner = (
-            StrikeSpecPlanner(physics=physics, config=config)
-            if self._publish_strike_spec else None
-        )
+        self._use_fast_spec = bool(self.get_parameter("use_fast_strike_spec").value)
+        self._spec_period = 1.0 / max(float(self.get_parameter("strike_spec_rate_hz").value), 1e-3)
+        self._spec_max_iter = int(self.get_parameter("strike_spec_max_iter").value)
+        self._spec_sens = bool(self.get_parameter("strike_spec_sensitivities").value)
+        self._spec_planner = None
+        if self._publish_strike_spec:
+            if self._use_fast_spec:
+                import dataclasses
+
+                from .strike_spec_fast import FastStrikeSpecPlanner
+
+                # Own config COPY so the spec solver's adaptive cruise cannot
+                # leak into the legacy Stage-2 path (which keeps the shared
+                # config and the separate dt_integrate_coarse parameter).
+                spec_config = dataclasses.replace(
+                    config,
+                    dt_integrate_coarse=float(
+                        self.get_parameter("spec_dt_integrate_coarse").value),
+                )
+                self._spec_planner = FastStrikeSpecPlanner(physics=physics, config=spec_config)
+            else:
+                self._spec_planner = StrikeSpecPlanner(physics=physics, config=config)
         self._last_spec = None
         self._spec_next_t = float("-inf")
+        self._spec_log_next_t = float("-inf")
+        self._spec_warm_q = None      # previous fast solve's q, warm start
 
         # Best-effort, depth-1 QoS for high-rate mocap topics (REP-2003 sensor style).
         mocap_qos = QoSProfile(
@@ -211,6 +263,13 @@ class HOPEPlannerNode(Node):
             f"HOPE planner started - x_hit={config.x_hit:.2f}, "
             f"target={config.target_land}, ball_pose_index={self._ball_index}"
         )
+        if self._spec_planner is not None and self._use_fast_spec:
+            self.get_logger().info(
+                f"FAST strike spec ON: replan {1.0 / self._spec_period:.0f} Hz, "
+                f"iter budget {self._spec_max_iter}, spec dt_coarse="
+                f"{self._spec_planner.config.dt_integrate_coarse:.3f} s, "
+                f"sensitivities {'per-solve' if self._spec_sens else 'off (on demand)'}"
+            )
 
     def _poses_cb(self, msg: PoseArray) -> None:
         self._n_received += 1
@@ -295,20 +354,50 @@ class HOPEPlannerNode(Node):
             ]
             self.flat_cmd_pub.publish(fm)
 
-        # Strike-spec diagnostics AFTER the command publish so the solve
-        # latency never delays the command itself.
+        # Strike-spec solve AFTER the command publish so the solve latency
+        # never delays the command itself. Legacy: 1 Hz throttle (scalar LM,
+        # ~0.45 s). Fast (use_fast_strike_spec): replan every _spec_period
+        # (default 40 Hz), warm-started from the previous solve, cached spec
+        # served between solves, log throttled to 1 Hz.
         if self._spec_planner is not None and cmd.valid and t >= self._spec_next_t:
-            self._spec_next_t = t + 1.0
+            self._spec_next_t = t + (self._spec_period if self._use_fast_spec else 1.0)
             strike = self.planner.strike_target
             if strike is not None and strike.valid:
                 # Legacy command path is spin-blind -> omega None (zeros);
                 # promote to the EKF/spin estimate when that path lands.
-                self._last_spec = self._spec_planner.solve(
-                    strike.p_ball, strike.v_ball, None,
-                    self.planner.config.target_land[:2],
-                    self._racket_speed_budget,
-                )
-                if self._last_spec is not None:
+                if self._use_fast_spec:
+                    # Budget rule (measured, benchmark run_full_tick): the
+                    # tight strike_spec_max_iter budget only converges FROM a
+                    # warm start; a cold solve (first tick of a rally / after
+                    # a failed solve) gets the solver's default budget once,
+                    # then later ticks ride the cheap warm path.
+                    self._last_spec = self._spec_planner.solve_fast_spec(
+                        strike.p_ball, strike.v_ball, None,
+                        self.planner.config.target_land[:2],
+                        self._racket_speed_budget,
+                        max_iter=(self._spec_max_iter
+                                  if self._spec_warm_q is not None else None),
+                        q0=self._spec_warm_q,
+                        with_sensitivities=self._spec_sens,
+                    )
+                    if self._last_spec is not None:
+                        sp = self._last_spec
+                        self._spec_warm_q = np.array([
+                            sp.tilt_pitch_deg, sp.tilt_yaw_deg, sp.v_n_signed,
+                            sp.v_t_vec[0], sp.v_t_vec[1],
+                        ])
+                    else:
+                        self._spec_warm_q = None  # cold restart next solve
+                else:
+                    self._last_spec = self._spec_planner.solve(
+                        strike.p_ball, strike.v_ball, None,
+                        self.planner.config.target_land[:2],
+                        self._racket_speed_budget,
+                    )
+                log_now = self._last_spec is not None and (
+                    not self._use_fast_spec or t >= self._spec_log_next_t)
+                if log_now:
+                    self._spec_log_next_t = t + 1.0
                     s = self._last_spec
                     self.get_logger().info(
                         "strike spec: tilt=(%.2f, %.2f) deg  v_n=%.2f  |v_t|=%.2f m/s  "
