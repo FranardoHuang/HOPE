@@ -17,6 +17,7 @@ install(DIRECTORY
 install(PROGRAMS
   scripts/avatar_pro_vrpn_relay
   scripts/fake_ball_publisher
+  scripts/mocap_stream_logger
   DESTINATION lib/${PROJECT_NAME}
 )
 
