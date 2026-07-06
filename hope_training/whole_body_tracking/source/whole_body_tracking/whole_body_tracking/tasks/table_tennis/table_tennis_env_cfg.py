@@ -41,6 +41,18 @@ from . import geometry
 from . import mdp
 from .ball import BallAerodynamicsCfg
 from .geometry import BounceMaterials, OutOfBoundsBox, ServeConfig
+from .physics.params import load_ball_physics
+
+# Shared, mocap-fitted ball physics (configs/ball_physics_venue.yaml) is the SINGLE SOURCE OF TRUTH for the
+# ball mass/radius and the drag/Magnus flight coefficients used below. Fall back to the geometry / aero
+# dataclass defaults only if the YAML is unavailable on this host (a regression test asserts they agree).
+try:
+    _BALL_PHYS = load_ball_physics()
+except Exception:  # pragma: no cover - defensive: never block env import on a missing YAML
+    _BALL_PHYS = None
+
+_BALL_RADIUS = _BALL_PHYS.ball.radius if _BALL_PHYS else geometry.BALL_RADIUS
+_BALL_MASS = _BALL_PHYS.ball.mass if _BALL_PHYS else geometry.BALL_MASS
 
 ##
 # Scene asset builders (modular — one helper per prim, driven by geometry constants).
@@ -128,15 +140,16 @@ def build_net_cfg(mats: BounceMaterials, visible: bool = True) -> AssetBaseCfg:
 
 
 def build_ball_cfg(mats: BounceMaterials) -> RigidObjectCfg:
-    """The dynamic ball (40 mm, 3.4 g — Purdue PACE). PhysX handles gravity + contacts; optional drag is
-    added per substep by the environment (off by default). ``linear_damping`` is 0 so PhysX does not
-    double-count drag when it is enabled."""
+    """The dynamic ball (40 mm, 3.4 g coated match ball). Mass/radius come from ``configs/ball_physics_venue.yaml`` (single source
+    of truth, shared with the MuJoCo C++ sim). PhysX handles gravity + anti-tunnelling; drag + Magnus are
+    added per substep by the environment and the bounces are code-driven. ``linear_damping`` is 0 so PhysX
+    does not double-count drag."""
     return RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Ball",
         # Default spawn over the P2 half; the serve-reset event overrides this on every reset.
         init_state=RigidObjectCfg.InitialStateCfg(pos=(geometry.P2_HALF_CENTER[0], geometry.P2_HALF_CENTER[1], 0.35)),
         spawn=sim_utils.SphereCfg(
-            radius=geometry.BALL_RADIUS,
+            radius=_BALL_RADIUS,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 disable_gravity=False,
                 linear_damping=0.0,
@@ -148,7 +161,7 @@ def build_ball_cfg(mats: BounceMaterials) -> RigidObjectCfg:
                 solver_position_iteration_count=16,
                 solver_velocity_iteration_count=4,
             ),
-            mass_props=sim_utils.MassPropertiesCfg(mass=geometry.BALL_MASS),
+            mass_props=sim_utils.MassPropertiesCfg(mass=_BALL_MASS),
             collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
             physics_material=_surface_material(
                 mats.ball_restitution, mats.ball_static_friction, mats.ball_dynamic_friction
@@ -315,6 +328,8 @@ class ObservationsCfg:
         actions = ObsTerm(func=mdp.last_action)
         ball_pos_b = ObsTerm(func=mdp.ball_position_b)
         ball_vel_b = ObsTerm(func=mdp.ball_velocity_b)
+        # Privileged: predicted landing point of the robot's outgoing shot (x, y, valid), HOPE frame.
+        ball_predicted_landing = ObsTerm(func=mdp.ball_predicted_landing)
 
         def __post_init__(self):
             self.enable_corruption = False
@@ -362,6 +377,38 @@ class RewardsCfg:
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
     # Example ball-aware term: small bonus while the ball is in flight above the table surface.
     ball_in_play = RewTerm(func=mdp.ball_above_surface, weight=0.05)
+    # Outgoing-shot landing: at each racket hit, reward the predicted landing point for being on the
+    # opponent half near its centre (uses the mocap-fitted flight model; see table_tennis_env.py).
+    # Winning a point = clear the net AND land on the opponent half. These two per-hit terms encode that:
+    # `pass_net` is the (denser) shaping gradient toward clearing the net; `landing` is the placement
+    # reward, GATED on net clearance so a would-hit-the-net shot earns no landing reward. pass_net is
+    # weighted above landing (PACE/TTRL uses landing 60, pass-net 100; see commit recorded in G04) — clear
+    # the net first, then place. Both far above the small per-step shaping terms (alive 1.0, ...). These
+    # weights are starting points: per-hit (sparse) vs alive (dense, every step) — rebalance once the
+    # policy makes contact and the reward breakdown shows hit/clear rates.
+    landing = RewTerm(
+        func=mdp.landing_in_opponent_half,
+        weight=30.0,
+        params={
+            "target_xy": geometry.P2_HALF_CENTER[:2],
+            "sigma": 0.3,
+            "in_bounds_bonus": 1.0,
+            "require_net_clearance": True,
+            "net_clear_z": geometry.NET_HEIGHT + geometry.BALL_RADIUS,
+        },
+    )
+    # Net clearance: at each racket hit, reward the predicted net-plane crossing height for passing the
+    # net at a target margin (uses the same RK4 flight predictor as `landing`; see table_tennis_env.py).
+    pass_net = RewTerm(
+        func=mdp.pass_net_margin,
+        weight=50.0,
+        params={
+            "target_z": geometry.NET_HEIGHT + 0.12,                  # clear the net tape by ~12 cm (ball centre)
+            "sigma": 0.10,
+            "clear_bonus": 0.5,
+            "net_clear_z": geometry.NET_HEIGHT + geometry.BALL_RADIUS,  # ball centre above which it clears the net
+        },
+    )
 
 
 @configclass
@@ -407,11 +454,20 @@ class TableTennisEnvCfg(ManagerBasedRLEnvCfg):
     events: EventCfg = EventCfg()
     curriculum: CurriculumCfg = CurriculumCfg()
 
-    # Ball aerodynamics (applied per physics substep by TableTennisEnv). Disabled by default to match
-    # Purdue PACE, which flies the ball on PhysX gravity + contacts only (no air-drag model). Re-enable
-    # with the play script's --enable_aero flag or by setting enabled=True (e.g. to match the HOPE
-    # planner's drag-calibrated flight).
-    ball_aerodynamics: BallAerodynamicsCfg = BallAerodynamicsCfg(enabled=False)
+    # Ball aerodynamics + code-driven spin-equation contacts (applied per physics substep by
+    # TableTennisEnv). Enabled by default: the ball flies on the mocap-fitted drag + Magnus model and
+    # bounces via the spin-equation contact model (PhysX restitution is neutralized — see
+    # geometry.BounceMaterials). The drag/Magnus coefficients come from configs/ball_physics_venue.yaml (single
+    # source of truth). Disable with the play script's --disable_aero flag for a PhysX-only scene.
+    ball_aerodynamics: BallAerodynamicsCfg = (
+        BallAerodynamicsCfg(
+            enabled=True,
+            drag_coefficient=_BALL_PHYS.flight.k_d,
+            magnus_coefficient=_BALL_PHYS.flight.k_m,
+        )
+        if _BALL_PHYS
+        else BallAerodynamicsCfg(enabled=True)
+    )
 
     def __post_init__(self):
         # General.

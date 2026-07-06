@@ -5,16 +5,20 @@ restitution + friction. What PhysX does **not** model is aerodynamics: a 40 mm b
 air drag noticeably bends its flight. This module supplies that missing force so the simulated flight
 matches the model the HOPE planner was calibrated against.
 
-Drag model (matches ``hope_planner.constants.BallPhysics`` / the planner's flight integrator):
+Drag model (matches ``configs/ball_physics_venue.yaml`` and the Record flight fit ``simulator.flight_accel``):
 
-    a_drag = -k * |v| * v          (k = 0.5 s/m, fit from recorded trajectories)
-    F_drag = m * a_drag = -m * k * |v| * v
+    a_drag = -k_d * |v| * v        (k_d = 0.1261 1/m, venue fit on the 3.4 g coated MATCH ball; Cd ~= 0.569)
+    F_drag = m * a_drag = -m * k_d * |v| * v
 
-The planner **neglects spin**, so the Magnus (lift) term is **off by default**. It is provided as an
-opt-in extension for higher-fidelity flight:
+NOTE on units: ``k_d`` is **1/m** (a drag *acceleration* coefficient, mass-independent), NOT s/m.
+``F = m a`` keeps the numeric value usable directly as ``drag_coefficient`` as long as ``mass`` is the
+true ball mass (PhysX then divides by that same mass, recovering ``a_drag = -k_d |v| v``).
 
-    a_magnus = k_magnus * (omega x v)
-    F_magnus = m * k_magnus * (omega x v)
+Magnus (lift) from PHYSICAL spin is now **on by default** (the experiment shows spin materially curves
+the flight and shifts the landing point):
+
+    a_magnus = k_m * (omega x v)   (k_m = 0.00444, venue sidespin-channel fit, physical spin -> force)
+    F_magnus = m * k_m * (omega x v)
 
 Everything here is expressed in the **world frame** and is pure ``torch`` (no Isaac imports) so it can be
 unit-tested without a simulator. The environment is responsible for reading the ball state, calling
@@ -36,12 +40,14 @@ class BallAerodynamicsCfg:
     enabled: bool = True
     """Master switch. If False, the ball flies on PhysX gravity + contacts alone (still a valid scene)."""
 
-    drag_coefficient: float = 0.5
-    """Quadratic drag coefficient ``k`` (s/m). a_drag = -k|v|v. HOPE-calibrated default is 0.5."""
+    drag_coefficient: float = 0.1261
+    """Quadratic drag coefficient ``k_d`` (**1/m**, NOT s/m). a_drag = -k_d|v|v. Venue fit 2026-07-03
+    (coated 3.4 g match ball, Cd~=0.569)."""
 
-    magnus_coefficient: float = 0.0
-    """Magnus/lift coefficient ``k_magnus``. a_magnus = k_magnus (omega x v). 0 disables spin lift
-    (the planner neglects spin; enable only for higher-fidelity flight studies)."""
+    magnus_coefficient: float = 0.00444
+    """Magnus/lift coefficient ``k_m`` for PHYSICAL spin. a_magnus = k_m (omega x v). Mocap-fitted bridge
+    (venue sidespin-channel fit, inside the OptiTrack recal CI; was 0.006/0.0042). Fallback only — the env reads it from
+    ``configs/ball_physics_venue.yaml``. Set to 0.0 to disable spin lift."""
 
     linear_velocity_clip: float = 50.0
     """Safety clip on |v| (m/s) used when computing drag, so a numerical blowup can't inject huge forces."""
