@@ -218,6 +218,11 @@ jiayi 6-17 所写(ed5cca9),C++ runner 只消费 /racket/command_flat;所以对�
 题库专用,部署单题别用。落地建议:部署 tick 走 FastStrikeSpec 组合 + Stage-2 预测同旗(3.9→0.96ms)
 + 30-50Hz 重规划间用缓存 spec;后续杠杆 = 手写 cross 替 np.cross(~60% 步成本)或 C++ 化。
 诚实边界:Mac 为代理,上 SoC/pod 重跑 benchmark_planner_latency.py。旗默认全关,off 路径已验位等价。
+**生产化已落地(07-07,commit b3961a2,已独立复验 97 tests)**:胜者配方进 hope_planner 包
+(FastStrikeSpecPlanner 复用现有物理零复制;np.cross→手写 cross3 位级一致,5200 例过验,单换它就把
+标量基线 451→165ms);node.py 逐 tick 快解旗控(40Hz 重规划间供缓存 spec)。生产实测:快解
+**9.8/28.5ms @ 18.55mm**(比原型再快,cross3 惠及共享积分器);**整 tick S1+S2+快解 2.0/2.3ms**
+(旧 S1+S2+S3 = 19.1/104.6ms,且落点还更好 48.9 vs 72.4mm)。off 指纹 SHA-256 与 8c1b34e 全等。
 
 ## 四阶段总计划(2026-07-06 重排版;每阶段 = 开发任务 + 测试臂,过线才升段)
 
@@ -365,8 +370,8 @@ S3/快球要么球子步减 dt、要么接受 <30mm(仍远低于 0.10m 考卷线
 
 | 项 | owner/分支 | 属性 | 要点 | 依赖 |
 |---|---|---|---|---|
-| **physical_ball Phase B:拍面冲量入引擎** | yikang / stage1-fixed-point | CPU 开发 + 共跑 mech | 拍面拟合冲量入 Isaac(**复用 spin_contact 现有实现,不写第四份**)+ per-pair 碰撞过滤 + CCD。**球子步决定当场闭环**:S1 场馆档 in-loop 17mm 已过线 → **不需要子步**;机制做成可配、默认关(S3 快球再开)——franco"排期时带子步决定"项就此关闭 | Phase A(已落地 9ed33b4/673cb53/274fa69) |
-| **MuJoCo 真球+真桌接线** | yikang / 新分支 mujoco-ball-wiring | CPU 开发;vendor 编译=交接件 | 把"编好没插电"的 C++ 球内核(venue 参数,已 4e-10mm 交叉验证)插上电:MJCF 球 mocap body + 桌/网 geom、**放置约定选边(vendor 竞技场系 vs 训练 env 系)+ drift-guard**、SimLoop 接线、发球注入/落点发布。vendor sim 编译实测需 jiayi distrobox(pod 封死)→ 产出做成**交接件**给 jiayi 本地跑 | C++ 内核(main 已有)+ 放置约定拍板 |
+| **physical_ball Phase B:拍面冲量入引擎** | yikang / stage1-fixed-point | CPU 开发 + 共跑 mech | 拍面拟合冲量入 Isaac(**复用 spin_contact 现有实现,不写第四份**)+ per-pair 碰撞过滤 + CCD。**球子步决定当场闭环**:S1 场馆档 in-loop 17mm 已过线 → **不需要子步**;机制做成可配、默认关(S3 快球再开)——franco"排期时带子步决定"项就此关闭 | Phase A(已落地 9ed33b4/673cb53/274fa69)。**状态:5d6d236 已推;对抗验证轮 9 项确认(1 major:子步 FK 重绑一帧鲜度泄入奖励流,破 metrics-only 契约)修复推进中,修完才排 pod mech** |
+| **MuJoCo 真球+真桌接线** | yikang / 新分支 mujoco-ball-wiring | CPU 开发;vendor 编译=交接件 | 把"编好没插电"的 C++ 球内核(venue 参数,已 4e-10mm 交叉验证)插上电:MJCF 球 mocap body + 桌/网 geom、**放置约定选边(vendor 竞技场系 vs 训练 env 系)+ drift-guard**、SimLoop 接线、发球注入/落点发布。vendor sim 编译实测需 jiayi distrobox(pod 封死)→ 产出做成**交接件**给 jiayi 本地跑 | C++ 内核(main 已有)+ 放置约定拍板。**状态:已交付 4607410(分支 mujoco-ball-wiring):训练系为准+单一平移到 vendor 系、drift-guard 七方一致、E2E 落点 vs 镜像 oracle 5.5e-12m、mujoco 3.10 smoke 过;交接件 docs/handoffs/mujoco_ball_wiring_jiayi.md,vendor 编译/QoS/GUI 只有 jiayi 能验** |
 
 
 | R11 | `task.motion.clip_switch_prob=0.002` | **已停 2026-07-05(平台 0.762@10.7k,命中率税 0.12)**。剂量 0.002=每挥约 28% 被打断,远高于真机频率;回合长度 463≈469 说明没有多摔,掉的纯是命中率。~~真收益(抗切换摔倒)的量尺缺失~~ **量尺已建并量完(2026-07-05,`--switch-stress`):纯换招扰动压不出收益**——P2(没练过换招)在两种 PD 口径(Isaac 对照 implicit + 门禁 explicit clipped-PD)、24000 步 230 次换招(127 次在挥拍中段)下 **0 摔、换招后 2 秒存活率 100%、换招后命中率 0.97-1.00**;R11 同样 0 摔,唯一可见差别是它在门禁口径下命中率还略低(0.98-0.99 vs P2 的 0.99-1.00,税的延续)。**判读:MuJoCo 里换招离散跳变本身不构成摔倒威胁,switch 训练在这把尺子上零收益、税为真 → R11@0.002 维持拒绝**。尺子的适用边界:场馆真机摔倒可能是换招×感知毛病×延迟的交互(纯换招在干净仿真里不复现);若还要追这个方向,下一步是压力协议叠 A1 校准噪声或"击球窗口内定点换招",而不是继续扫剂量 |
