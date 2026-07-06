@@ -37,6 +37,116 @@ from whole_body_tracking.tasks.tracking.tracking_env_cfg import (
 )
 
 ##
+# SHADOW physical ball + table scene attachment (flag-gated, METRICS-ONLY; shadow_ball.py).
+##
+
+
+def attach_shadow_ball_scene(env_cfg, *, shadow_table: bool) -> None:
+    """Attach the shadow-ball scene entities for ``RacketTargetCommandCfg.shadow_ball``.
+
+    Adds to ``env_cfg.scene`` (per-env cloned assets via the ``{ENV_REGEX_NS}`` regex path, the
+    same pattern as the table_tennis scene builders):
+
+    * ``shadow_ball`` — one dynamic sphere per env. Radius/mass come from
+      ``configs/ball_physics_venue.yaml`` (the fitted coated match ball: R=0.02 m, m=3.4 g), zero
+      linear/angular damping and gyroscopic forces OFF so PhysX integrates gravity ONLY and the
+      per-substep venue aero wrench supplies drag+Magnus (omega stays constant in flight, matching
+      the fit — see scripts/isaac_ball_inloop_check.py). The collider is DISABLED unless
+      ``shadow_table`` (pure flight, nothing to touch — the strike is applied analytically, never
+      by PhysX contact).
+    * ``shadow_table`` / ``shadow_table_visual`` (only when ``shadow_table=True``) — the
+      table_tennis static table-top collider (invisible cuboid, multiplicative-restitution
+      material) + the visual USD mesh, both placed at the TRACKING task's virtual-table pose:
+      near edge at env-local ``x = vb_table_near_x``, surface at ``z = vb_table_surface_z``,
+      centered on ``y = 0`` (hope_commands landmark convention). NO net collider: the virtual-ball
+      reward model gates the net analytically, and a physical net would make the engine flight
+      diverge from the analytic reference being cross-checked.
+
+    Idempotent (train.py may call it after ``__post_init__`` already did — the same post-init
+    override timing as ``face_command_obs``). METRICS-ONLY: nothing here is read by rewards/obs.
+    """
+    if getattr(env_cfg.scene, "shadow_ball", None) is not None:
+        return  # already attached (cfg-flag path ran before the train.py override path)
+
+    import yaml as _yaml
+
+    import isaaclab.sim as sim_utils
+    from isaaclab.assets import AssetBaseCfg, RigidObjectCfg
+
+    from whole_body_tracking.tasks.table_tennis import geometry as tt_geom
+    from whole_body_tracking.tasks.table_tennis import table_tennis_env_cfg as tt_cfg
+    from whole_body_tracking.tasks.tracking.mdp.virtual_ball import default_venue_yaml_path
+
+    with open(default_venue_yaml_path(), "r") as fh:
+        _ball_raw = _yaml.safe_load(fh)["ball"]
+    ball_r = float(_ball_raw["radius"])   # 0.02 m
+    ball_m = float(_ball_raw["mass"])     # 0.0034 kg (coated match ball)
+
+    rt = env_cfg.commands.racket_target
+    near_x = float(rt.vb_table_near_x)
+    surface_z = float(rt.vb_table_surface_z)
+    mats = tt_geom.BounceMaterials()
+
+    env_cfg.scene.shadow_ball = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/ShadowBall",
+        # Spawn parked below the floor; the driver rewrites the root state every control step.
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, 0.0, -10.0)),
+        spawn=sim_utils.SphereCfg(
+            radius=ball_r,
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                disable_gravity=False,
+                linear_damping=0.0,
+                angular_damping=0.0,
+                max_linear_velocity=1000.0,   # m/s
+                max_angular_velocity=1.0e5,   # deg/s (PhysX uses deg/s here) ~ 1745 rad/s
+                max_depenetration_velocity=10.0,
+                enable_gyroscopic_forces=False,  # omega constant in flight (venue-fit assumption)
+            ),
+            mass_props=sim_utils.MassPropertiesCfg(mass=ball_m),
+            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=bool(shadow_table)),
+            physics_material=tt_cfg._surface_material(
+                mats.ball_restitution, mats.ball_static_friction, mats.ball_dynamic_friction
+            ),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.95, 0.55, 0.05), roughness=0.6),
+        ),
+    )
+
+    if shadow_table:
+        # Static table-top collider at the virtual-table pose (top face at env-local surface_z),
+        # same slab + multiplicative-restitution material as table_tennis.build_table_top_cfg.
+        env_cfg.scene.shadow_table = AssetBaseCfg(
+            prim_path="{ENV_REGEX_NS}/ShadowTable",
+            init_state=AssetBaseCfg.InitialStateCfg(
+                pos=(
+                    near_x + tt_geom.TABLE_LENGTH / 2.0,
+                    0.0,
+                    surface_z - tt_geom.TABLE_THICKNESS / 2.0,
+                )
+            ),
+            spawn=sim_utils.CuboidCfg(
+                size=tt_geom.table_top_size(),
+                visible=False,
+                collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
+                physics_material=tt_cfg._surface_material(
+                    mats.table_restitution, mats.table_static_friction, mats.table_dynamic_friction
+                ),
+                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.32, 0.55), roughness=0.5),
+            ),
+        )
+        # Visual-only USD table+net mesh overlaid on the invisible collider (no PhysX from it —
+        # the base USD layer carries no colliders; see table_tennis_env_cfg notes). Its local
+        # origin is the floor point under the table center (surface at local z=0.76).
+        env_cfg.scene.shadow_table_visual = AssetBaseCfg(
+            prim_path="{ENV_REGEX_NS}/ShadowTableVisual",
+            init_state=AssetBaseCfg.InitialStateCfg(
+                pos=(near_x + tt_geom.TABLE_LENGTH / 2.0, 0.0, surface_z - tt_geom.TABLE_HEIGHT),
+                rot=(1.0, 0.0, 0.0, 0.0),
+            ),
+            spawn=sim_utils.UsdFileCfg(usd_path=tt_cfg._TABLE_USD_PATH),
+        )
+
+
+##
 # Commands: motion (imitation) + racket target.
 ##
 
@@ -403,6 +513,18 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
             self.observations.policy.racket_target_normal_cmd = ObsTerm(
                 func=mdp.racket_target_normal_cmd, params={"command_name": "racket_target"}
             )
+        # SHADOW physical ball + table (metrics-only measurement; defaults OFF = scene untouched).
+        # NOTE: train.py's racket.shadow_ball/shadow_table override runs AFTER this __post_init__
+        # (same timing as face_command_obs), so it calls attach_shadow_ball_scene itself; the
+        # helper is idempotent so both paths compose.
+        rt = self.commands.racket_target
+        if getattr(rt, "shadow_table", False) and not getattr(rt, "shadow_ball", False):
+            raise ValueError(
+                "RacketTargetCommandCfg.shadow_table=True requires shadow_ball=True "
+                "(the table exists only for the shadow ball to land on)."
+            )
+        if getattr(rt, "shadow_ball", False):
+            attach_shadow_ball_scene(self, shadow_table=bool(rt.shadow_table))
 
 
 @configclass

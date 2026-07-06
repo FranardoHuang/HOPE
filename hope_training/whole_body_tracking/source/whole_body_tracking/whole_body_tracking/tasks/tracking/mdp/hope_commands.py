@@ -573,6 +573,29 @@ class RacketTargetCommand(CommandTerm):
             self.metrics[f"racket_pos_error_{axis}"] = torch.zeros(self.num_envs, device=self.device)
             self.metrics[f"racket_vel_error_{axis}"] = torch.zeros(self.num_envs, device=self.device)
 
+        # --- SHADOW physical ball (+ optional table): flag-gated, METRICS-ONLY measurement --------
+        # A real PhysX ball per env that flies the question in, takes the SAME contact model as the
+        # reward path at a captured strike, and lands under engine integration — an online
+        # engine-vs-analytic cross-check of the virtual-ball prediction. Zero coupling to rewards/
+        # observations/bank-target logic (see shadow_ball.py's module docstring for the honesty
+        # notes: linear cosmetic pre-strike path, no bounce-before-strike, engine-fidelity baseline
+        # from scripts/isaac_ball_inloop_check.py). Default OFF = byte-identical (no driver, no
+        # scene entity, no physics callback, no metrics keys).
+        self._shadow = None
+        if cfg.shadow_ball:
+            # The shadow ball mirrors the virtual-ball question stream (per-swing incoming
+            # velocity/spin + the capture gate live in the vb machinery) — without it there is
+            # nothing to fly in and nothing to cross-check against. Loud error, not silent no-op.
+            if not cfg.virtual_ball:
+                raise ValueError(
+                    "RacketTargetCommandCfg.shadow_ball=True requires virtual_ball=True: the "
+                    "shadow ball flies the vb-sampled incoming ball and cross-checks the vb "
+                    "landing prediction. Enable the virtual-ball task variant or drop shadow_ball."
+                )
+            from whole_body_tracking.tasks.tracking.mdp.shadow_ball import ShadowBallDriver
+
+            self._shadow = ShadowBallDriver(self, env)
+
         # --- DEBUG: swing-through sign check + raw/gated reward kernels (cfg.debug_reward_logging) ---
         # err_minus uses the CURRENT (correct) swing-through form target - vel*t_to_strike; err_plus uses
         # the FLIPPED form target + vel*t_to_strike. In-window we expect err_minus < err_plus (sign OK) and
@@ -1157,6 +1180,11 @@ class RacketTargetCommand(CommandTerm):
                 self._delay_buf_pos[:, ids] = self.racket_target_pos_w[ids].unsqueeze(0)
                 self._delay_buf_vel[:, ids] = self.racket_target_vel_w[ids].unsqueeze(0)
                 self._delay_buf_sign[:, ids] = self.swing_sign[ids].unsqueeze(0)
+
+        # SHADOW ball lifecycle: a resample (reset or wrap) starts these envs' next question —
+        # back to the kinematic incoming path (metrics-only; no reward/obs effect).
+        if self._shadow is not None:
+            self._shadow.on_resample(env_ids)
 
     def _compute_racket_state(self):
         data = self.robot.data
@@ -1750,6 +1778,10 @@ class RacketTargetCommand(CommandTerm):
         # reward terms after this compute()); no-op (and vb_fired stays False) when disabled.
         if self.cfg.virtual_ball:
             self._vb_evaluate(exact_strike, pos_err)
+        # SHADOW physical ball (metrics-only): runs AFTER _vb_evaluate so this step's capture gate
+        # (vb_fired) and the fresh per-env analytic landing prediction can be consumed/snapshotted.
+        if self._shadow is not None:
+            self._shadow.update(exact_strike)
         # GLOBAL error-magnitude EMAs (P2.3 adaptive sigma driver) — same decay/mask as the pass
         # counters above; per-clip variants exist further down but sigma needs one global signal.
         self._exact_pos_err_sum = decay * self._exact_pos_err_sum + float((pos_err * exact_strike).sum())
@@ -2291,6 +2323,25 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # Coarse rollout resolution (verify_tier1 (b): h=10 ms, 1.0 s horizon covers 1-7 m/s shots).
     vb_rollout_h: float = 0.01
     vb_rollout_steps: int = 100
+
+    # --- SHADOW physical ball + table (flag-gated, METRICS-ONLY; defaults OFF = byte-identical) --
+    # shadow_ball=True spawns one real PhysX ball per env (scene entity "shadow_ball", attached by
+    # hope_env_cfg.attach_shadow_ball_scene / the train.py override translation; sphere R/mass from
+    # configs/ball_physics_venue.yaml) driven by shadow_ball.ShadowBallDriver: kinematic linear
+    # incoming flight to the question contact point, the SAME venue paddle-contact model as the
+    # reward path at a captured strike, then dynamic PhysX flight with the venue aero wrench per
+    # physics substep and engine-integrated landing metrics (shadow_land_x/y, shadow_hit_count,
+    # shadow_miss_count, shadow_vs_virtual_land_err vs the analytic vb prediction). PURE
+    # MEASUREMENT: never read by rewards/observations/bank-target logic; requires virtual_ball=True
+    # (loud error otherwise). Honesty notes + mechanisms: shadow_ball.py module docstring.
+    shadow_ball: bool = False
+    # shadow_table=True additionally (a) enables the shadow ball's collider and (b) places the
+    # table_tennis static table collider (+ visual USD mesh) at the tracking task's virtual-table
+    # pose (near edge x=vb_table_near_x, surface z=vb_table_surface_z, centered on y=0), with the
+    # same multiplicative-restitution materials table_tennis uses — so the shadow ball physically
+    # bounces where the virtual table is. No net collider (the vb model gates the net
+    # analytically). Requires shadow_ball=True.
+    shadow_table: bool = False
 
     # --- reachable racket-target workspace (offsets from the env origin, world frame, meters) ---
     # Used only by target_mode="uniform". PLACEHOLDER ranges (not the reference strike point).

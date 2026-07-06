@@ -259,6 +259,9 @@ _RACKET_KEYS = (
     # Stage-1 question bank (fixed contact point, inverse-solved face+velocity targets) + the
     # face-command reward re-anchor / +4 actor obs channel (normal + rho placeholder, 175->179).
     "question_bank", "face_command", "face_command_obs",
+    # SHADOW physical ball + table (flag-gated, METRICS-ONLY engine-vs-analytic landing
+    # cross-check; requires the virtual-ball task variant). shadow_ball.py.
+    "shadow_ball", "shadow_table",
 )
 
 # YAML keys under `motion:` that target the MotionCommandCfg swing-entry structure
@@ -718,6 +721,27 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                     env_cfg.face_command_obs = True  # keep the descriptive cfg field honest
                 applied.append(
                     "observations.policy.racket_target_normal_cmd(+4D face-command obs, 175->179)")
+            # SHADOW physical ball + table (METRICS-ONLY): a real PhysX ball flies each question
+            # in, is struck via the same venue contact model, and lands under engine integration —
+            # an online engine-vs-analytic cross-check of the vb landing prediction. The scene
+            # entities must be attached HERE because __post_init__ already ran before overrides
+            # (the exact face_command_obs timing problem above); attach_shadow_ball_scene is
+            # idempotent so cfg-flag and YAML/CLI paths compose. Requires virtual_ball=True
+            # (RacketTargetCommand.__init__ raises loudly otherwise).
+            _set_attr(C, "shadow_ball", _get(rk, "shadow_ball"), _as_bool, applied, "racket_target")
+            _set_attr(C, "shadow_table", _get(rk, "shadow_table"), _as_bool, applied, "racket_target")
+            if getattr(C, "shadow_table", False) and not getattr(C, "shadow_ball", False):
+                raise _OverrideError(
+                    "[train.py] racket.shadow_table=true requires racket.shadow_ball=true "
+                    "(the table exists only for the shadow ball to land on).")
+            if getattr(C, "shadow_ball", False):
+                from whole_body_tracking.tasks.tracking.config.agibot_a3.hope_env_cfg import (
+                    attach_shadow_ball_scene as _attach_shadow,
+                )
+
+                _attach_shadow(env_cfg, shadow_table=bool(getattr(C, "shadow_table", False)))
+                applied.append(
+                    f"scene.shadow_ball attached (metrics-only; table={bool(C.shadow_table)})")
 
     # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
     # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.

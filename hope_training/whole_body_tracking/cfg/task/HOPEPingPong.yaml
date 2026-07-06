@@ -199,6 +199,20 @@ racket:
   mount_normal_axis: 1            # racket-local +Y is the face normal (red/hitting face; Step 11)
   mount_normal_sign: 1.0          # +1 = red/forehand face
 
+  # --- SHADOW physical ball + table (flag-gated, METRICS-ONLY; defaults OFF) -------------------
+  # A real PhysX ball per env flies each question in, takes the SAME venue paddle-contact model as
+  # the reward path at a captured strike, and lands under engine integration — every training
+  # strike becomes an online engine-vs-analytic cross-check (metrics shadow_hit_count /
+  # shadow_miss_count / shadow_land_x/y / shadow_vs_virtual_land_err). ZERO reward/obs coupling:
+  # the virtual ball stays the reward machine. Requires the virtual-ball task variant
+  # (task=HOPEPingPongVirtualBall or commands.racket_target.virtual_ball=true) — loud error
+  # otherwise. shadow_table additionally enables the ball collider + a static table collider
+  # (+ visual USD) at the virtual-table pose so the ball physically bounces. Honesty notes
+  # (linear cosmetic pre-strike path, no bounce-before-strike, engine-fidelity baseline from
+  # scripts/isaac_ball_inloop_check.py): tasks/tracking/mdp/shadow_ball.py.
+  # shadow_ball: true
+  # shadow_table: true
+
   # ---- Stage-1 question bank + face-command channel (flag-gated, default OFF) ------------------
   # Per-swing targets from an offline inverse-solved bank (scripts/gen_stage1_questions.py): fixed
   # contact point per clip, solved racket velocity, DEMANDED face normal (the 175-D contract has no
