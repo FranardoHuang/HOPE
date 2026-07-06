@@ -25,7 +25,7 @@ def main() -> int:
     p.add_argument("--in", dest="inp", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--strike-frame", type=int, required=True,
-                   help="blade-speed-peak frame in the SOURCE clip (scripts/analyze_strike_phase.py)")
+                   help="hand-annotated contact frame in the SOURCE clip (see cfg/strike_annotations.yaml)")
     p.add_argument("--half-window-s", type=float, default=0.7,
                    help="seconds kept on EACH side of the strike (SMASH uses 0.54)")
     args = p.parse_args()

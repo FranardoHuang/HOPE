@@ -2,6 +2,21 @@
 
 Use this file for short project-state updates that future humans and agents need to see. Keep detailed reasoning in the relevant gate doc.
 
+## 2026-07-05
+
+- Strike alignment closed out (yikang-driven round): corrected the RunPod v5 config mistake
+  (product/default configs stay on the hopex/registry route; v5 is R15-CLI-only), landed
+  `cfg/strike_annotations.yaml` as the contact-phase source of truth with ALL 6 clips
+  adjudicated — v5 [0.673 franco / 0.362 claude visual frame scrub of the source video], oblique
+  [0.432 (old auto 0.368 was the pre-contact acceleration peak, ~120 ms early; boxes regenerated)
+  / 0.495 confirmed], hopex [0.47 / 0.333] KEPT: the source videos (raw_video_hopex/) are DRY
+  SWINGS with no ball — the values are the forward-swing speed-peak convention (18/33 cm past the
+  x=0.40 plane), and the semantic mismatch vs true-contact clips is filed as R15 decision input.
+  `analyze_strike_phase.py` is annotation-first (speed peak demoted to a diagnostic candidate —
+  known whip/pull-up trap) and tags GVHMR face normals UNRELIABLE on all video-derived clips incl.
+  hopex. `scripts/play.py` resolves local `motion_file`/`motion_file_2` the same way as training
+  (R15 replay/export parity).
+
 ## 2026-07-04 (day/evening, main) — deploy-parity robustness flags; eval mode B finds the face normal is clip-locked; contract v3 design
 
 - **`motion.clip_switch_prob`** (018467a, default 0.0, try 0.002): deploy-parity MID-swing clip

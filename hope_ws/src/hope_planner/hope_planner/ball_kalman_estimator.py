@@ -62,6 +62,7 @@ class BallKalmanEstimator:
         self._t: Optional[float] = None
         self._n_updates = 0
         self._n_rejected = 0
+        self._consec_rejected = 0
 
         # Bounce detection: three-sample z-height ring buffer (same pattern as
         # the legacy estimator so both paths trigger on the same frames).
@@ -83,6 +84,7 @@ class BallKalmanEstimator:
         self._t = None
         self._n_updates = 0
         self._n_rejected = 0
+        self._consec_rejected = 0
         self._z_hist = [None, None, None]
         self._bounce_detected = False
 
@@ -289,8 +291,21 @@ class BallKalmanEstimator:
         chi2 = float(y @ S_inv @ y)
         if chi2 > self.config.chi2_gate:
             self._n_rejected += 1
+            self._consec_rejected += 1
+            # Divergence recovery: the gate protects against ISOLATED outliers,
+            # but a sustained rejection streak means the STATE is wrong, not the
+            # measurements — the model has no paddle-hit transition, so an
+            # opponent (or own) racket strike is an unmodeled multi-m/s velocity
+            # jump that makes every subsequent real measurement look like an
+            # outlier while the mean coasts under gravity. Re-seed from the
+            # current measurement (wide velocity prior, same as first lock-on);
+            # ready drops for the standard 6-update warm-up (~17 ms @ 300 Hz).
+            if self._consec_rejected >= self.config.chi2_reinit_after:
+                self._initialize(self._t, z)
+                self._consec_rejected = 0
             return
 
+        self._consec_rejected = 0
         K = self._P @ H.T @ S_inv
         self._x = self._x + K @ y
         # Joseph form: PSD-preserving even with a suboptimal/gated K.

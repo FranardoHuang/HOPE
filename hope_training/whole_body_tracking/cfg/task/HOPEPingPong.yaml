@@ -42,7 +42,7 @@ actor_obs_contract: full
 # imitates. Order must match racket.strike_phase_per_clip. Set registry_name_2: null for a single-swing
 # policy. (Override on the CLI with registry_name=... / registry_name_2=...)
 # NOTE (2026-07-02): the `hope_forehand/backhand:latest` registry aliases were verified to still face
-# world +Y (pre-reground). Until corrected v5+ registry artifacts exist, pass the local corrected +X
+# world +Y (pre-reground). Until future verified registry artifacts exist, pass the local corrected +X
 # clips on the CLI via the local-first params, e.g.
 #   motion_file=hope_training/motions/preprocessed/hope_forehand_hopex.npz
 #   motion_file_2=hope_training/motions/preprocessed/hope_backhand_hopex.npz
@@ -198,6 +198,47 @@ racket:
   forehand_on_negative_y: true    # right arm holds the paddle
   mount_normal_axis: 1            # racket-local +Y is the face normal (red/hitting face; Step 11)
   mount_normal_sign: 1.0          # +1 = red/forehand face
+
+  # --- SHADOW physical ball + table (flag-gated, METRICS-ONLY; defaults OFF) -------------------
+  # A real PhysX ball per env flies each question in, takes the SAME venue paddle-contact model as
+  # the reward path at a captured strike, and lands under engine integration — every training
+  # strike becomes an online engine-vs-analytic cross-check (metrics shadow_hit_count /
+  # shadow_miss_count / shadow_land_x/y / shadow_vs_virtual_land_err). ZERO reward/obs coupling:
+  # the virtual ball stays the reward machine. Requires the virtual-ball task variant
+  # (task=HOPEPingPongVirtualBall or commands.racket_target.virtual_ball=true) — loud error
+  # otherwise. shadow_table additionally enables the ball collider + a static table collider
+  # (+ visual USD) at the virtual-table pose so the ball physically bounces. Honesty notes
+  # (linear cosmetic pre-strike path, no bounce-before-strike, engine-fidelity baseline from
+  # scripts/isaac_ball_inloop_check.py): tasks/tracking/mdp/shadow_ball.py.
+  # shadow_ball: true
+  # shadow_table: true
+
+  # ---- Stage-1 question bank + face-command channel (flag-gated, default OFF) ------------------
+  # Per-swing targets from an offline inverse-solved bank (scripts/gen_stage1_questions.py): fixed
+  # contact point per clip, solved racket velocity, DEMANDED face normal (the 175-D contract has no
+  # normal-demand channel — the clip-locked face is the 0%-return root cause, eval mode B 2026-07-05).
+  # question_bank: cfg/stage1_questions.npz  # bank npz path; overrides pos/vel per resample (also
+  #                                          # forces HER achieved replay off + pins the base target;
+  #                                          # HARD-ERRORS if motion.speed_scale_range != [1.0, 1.0])
+  # face_command: true                       # racket_normal reward tracks the demanded normal
+  #                                          # (requires question_bank — loud init error without it)
+  # face_command_obs: true                   # +4 actor obs appended LAST: demanded normal (3) +
+  #                                          # zero-filled rho placeholder (1, reserved S3 spin lane)
+  #                                          # = contract-day 175 -> 179 on deploy-parity;
+  #                                          # update/remove actor_obs_contract when enabling
+
+# ---- PHYSICAL ball + table — Phase A truth instrument (flag-gated, METRICS-ONLY; default OFF) --
+# TOP-LEVEL task key (NOT under racket:). A real PhysX table + one real ball per env: each swing's
+# question incoming ball is realized physically — launched from the reverse-integrated venue-model
+# state so it arrives at the question contact point with the question incoming velocity exactly at
+# the strike frame, flies under the per-substep venue aero wrench, takes the CODE-DRIVEN fitted
+# table bounce (venue contact.table params), and passes THROUGH the robot (ball collider off; the
+# in-engine fitted racket impulse is Phase B, out of scope). Metrics only (pb_serve_err_m /
+# pb_serve_vel_err at the strike frame + serve/bounce/landing counts) — reward/obs streams are
+# untouched even when on. Requires the virtual-ball task variant (task=HOPEPingPongVirtualBall or
+# commands.racket_target.virtual_ball=true) — loud error otherwise. Physics basis (in-loop 17 mm
+# systematic, scripts/isaac_ball_inloop_check.py) + honesty notes: tasks/tracking/mdp/physical_ball.py.
+# physical_ball: true
 
 # ---- domain randomization (HITTER-faithful) ---------------------------------
 # HITTER publishes no DR table; prose randomizes mass/friction/restitution + perception noise, and

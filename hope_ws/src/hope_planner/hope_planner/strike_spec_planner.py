@@ -68,6 +68,75 @@ class StrikeSpec:
     residual_m: float         # final ||landing - target|| (m)
     iterations: int           # LM iterations used
 
+    # --- net-clearance annotation (computed POST-solve; NOT part of the LM
+    # objective or acceptance — the solver still returns specs that fail the
+    # net, consumers decide what to do with them) ---
+    clears_net: bool = False          # ball CENTER at x=net_x above net_height + ball radius
+    net_z_margin_m: float = float("nan")  # center height at the net plane minus
+                                      # (net_height + radius); nan = the flight never
+                                      # crossed the net plane in +x (e.g. landed short)
+
+
+def compute_net_clearance(
+    p_strike: np.ndarray,
+    v_plus: np.ndarray,
+    omega_plus: Optional[np.ndarray],
+    predictor: BallTrajectoryPredictor,
+) -> Tuple[bool, float]:
+    """Net clearance of a post-strike flight (pure, planner HOPE frame: z=0 = TABLE SURFACE).
+
+    Re-integrates the outgoing ball (v_plus, omega_plus from the solved contact) with the
+    SAME flight model the solver's landing forward model uses — the predictor's
+    _flight_acceleration (drag + gravity + Magnus) under the identical Euler scheme and
+    dt_integrate as integrate_to_table_plane — and linearly interpolates the ball CENTER
+    height at the first +x crossing of the net plane x = table.net_x.
+
+    Returns (clears_net, net_z_margin_m):
+      clears_net       = z_at_net > table.net_height + physics.radius (center-based, so the
+                         ball's lower edge grazes the net top exactly at margin 0);
+      net_z_margin_m   = z_at_net - (net_height + radius), or nan when the flight never
+                         crosses the net plane in +x before landing / the prediction horizon
+                         (then clears_net is False).
+
+    A net-plane crossing only counts if it happens BEFORE the first downward z=0 crossing;
+    when both fall inside one Euler step the interpolation fractions order them.
+    """
+    table = predictor.table
+    net_x = table.net_x
+    clear_z = table.net_height + predictor.physics.radius
+    dt = predictor.config.dt_integrate
+    max_steps = int(predictor.config.max_predict_time / dt)
+
+    p = np.asarray(p_strike, dtype=float).copy()
+    v = np.asarray(v_plus, dtype=float).copy()
+    omega = np.zeros(3) if omega_plus is None else np.asarray(omega_plus, dtype=float)
+
+    if p[0] >= net_x:  # struck at/past the net plane: no crossing to evaluate
+        return False, float("nan")
+
+    for _ in range(max_steps):
+        a = predictor._flight_acceleration(v, omega)
+        p_new = p + v * dt + 0.5 * a * dt ** 2
+        v_new = v + a * dt
+
+        frac_net = None
+        if p[0] < net_x <= p_new[0]:
+            dx = p_new[0] - p[0]
+            frac_net = float(np.clip((net_x - p[0]) / dx, 0.0, 1.0)) if dx > 1e-12 else 0.5
+        frac_land = None
+        if p[2] > 0.0 and p_new[2] <= 0.0:
+            dz = p[2] - p_new[2]
+            frac_land = float(np.clip(p[2] / dz, 0.0, 1.0)) if dz > 1e-12 else 0.5
+
+        if frac_net is not None and (frac_land is None or frac_net <= frac_land):
+            z_at_net = p[2] + frac_net * (p_new[2] - p[2])
+            margin = float(z_at_net - clear_z)
+            return margin > 0.0, margin
+        if frac_land is not None:
+            return False, float("nan")  # landed (short of the net) before crossing it
+        p, v = p_new, v_new
+    return False, float("nan")          # never reached the net plane within the horizon
+
 
 class StrikeSpecPlanner:
     """Invert contact + flight: landing target -> racket control variables."""
@@ -479,6 +548,12 @@ class StrikeSpecPlanner:
             dir_t = np.array([0.0, 0.0, 0.0, 0.0, 1.0])
         d_v_t = self._central_diff(q, dir_t, 0.1, *args)
 
+        # POST-solve net-clearance annotation (both solve() and solve_fixed_normal()
+        # assemble here): same flight model, never part of the LM objective/acceptance.
+        clears_net, net_z_margin_m = compute_net_clearance(
+            p_ball, fwd["v_plus"], fwd["omega_plus"], self.predictor
+        )
+
         return StrikeSpec(
             n=fwd["n"],
             tilt_pitch_deg=float(q[0]),
@@ -497,4 +572,6 @@ class StrikeSpecPlanner:
             d_landing_d_v_t=d_v_t,
             residual_m=residual_m,
             iterations=iterations,
+            clears_net=clears_net,
+            net_z_margin_m=net_z_margin_m,
         )

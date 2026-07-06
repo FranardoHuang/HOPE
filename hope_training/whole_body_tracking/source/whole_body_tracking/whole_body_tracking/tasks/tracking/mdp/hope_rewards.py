@@ -80,7 +80,11 @@ def racket_velocity_tracking_exp(env: ManagerBasedRLEnv, command_name: str, std:
 def racket_normal_tracking_exp(env: ManagerBasedRLEnv, command_name: str, std: float) -> torch.Tensor:
     """Track racket face-normal orientation near the strike time. ``std`` is in radians."""
     cmd = _cmd(env, command_name)
-    cos_ang = torch.sum(cmd.racket_normal_w * cmd.racket_target_normal_w, dim=-1).clamp(-1.0, 1.0)
+    # Stage-1 face command: the reference is the DEMANDED (inverse-solved, question-bank) normal
+    # instead of the clip-locked reference normal. face_command=False keeps the old tensor read —
+    # byte-identical baseline. racket_strike_success re-anchors through this call automatically.
+    target_normal = cmd.target_normal_cmd if cmd.cfg.face_command else cmd.racket_target_normal_w
+    cos_ang = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
     angle = torch.acos(cos_ang)
     raw = torch.exp(-(angle**2) / std**2)
     _dbg_log(cmd, "racket_normal", raw, cmd.strike_window)

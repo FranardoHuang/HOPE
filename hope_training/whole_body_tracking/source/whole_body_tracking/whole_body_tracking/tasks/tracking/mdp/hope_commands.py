@@ -47,6 +47,7 @@ from isaaclab.utils.math import (
 )
 
 from whole_body_tracking.tasks.tracking.mdp.commands import MotionCommand
+from whole_body_tracking.tasks.tracking.mdp.stage1_question_bank import load_question_bank, select_questions
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -103,6 +104,50 @@ class RacketTargetCommand(CommandTerm):
         self.racket_target_normal_w[:, 2] = 1.0
         self.base_target_pos_w = torch.zeros(self.num_envs, 2, device=self.device)
         self.swing_sign = torch.ones(self.num_envs, device=self.device)
+
+        # --- Stage-1 question bank (fixed contact point / inverse-solved face+velocity answers) ----
+        # cfg.question_bank non-empty -> per-swing targets are OVERRIDDEN by a bank row (see
+        # _apply_question_bank_targets); empty (default) -> the sampling paths below are untouched.
+        # target_normal_cmd ALWAYS exists (zeros when off) so the face-command obs/reward reads are
+        # unconditionally safe; it is only ever written when the bank is active.
+        self.target_normal_cmd = torch.zeros(self.num_envs, 3, device=self.device)
+        self._question_bank = None
+        # face_command without a bank would leave target_normal_cmd all-zero: the re-anchored
+        # racket_normal reward reads cos = <n_fk, 0> = 0 -> a CONSTANT kernel, i.e. the face reward
+        # silently dead while looking configured. Loud error instead.
+        if cfg.face_command and not cfg.question_bank:
+            raise ValueError(
+                "RacketTargetCommandCfg.face_command=True requires question_bank (npz path): "
+                "without a bank target_normal_cmd stays zeros and the re-anchored racket_normal "
+                "reward is silently dead. Set racket.question_bank or drop face_command."
+            )
+        if cfg.question_bank:
+            # Loaded ONCE (numpy npz -> per-clip torch tensors on device); clip order matches
+            # _clip_names (0=forehand, 1=backhand). Loud error on a missing/empty clip.
+            self._question_bank = load_question_bank(cfg.question_bank, device=self.device)
+            self.metrics["question_difficulty_deg"] = torch.zeros(self.num_envs, device=self.device)
+            # HER achieved-target replay is bank-incompatible: the bank override runs AFTER the HER
+            # block in _sample_targets_uniform, so every replayed target would be clobbered — burned
+            # RNG/compute and a lying achieved_replay_frac (the DeployParity yaml defaults the mix
+            # to 0.30). Forced off, once, loudly; the HER block is also hard-gated on the bank.
+            if float(cfg.achieved_target_mix_prob) > 0.0:
+                print(
+                    f"[RacketTargetCommand] question_bank active -> achieved_target_mix_prob="
+                    f"{cfg.achieved_target_mix_prob} FORCED to 0.0 (HER replay targets would be "
+                    "clobbered by the bank override; S2b+ may revisit as a solver-verified variant)",
+                    flush=True,
+                )
+                cfg.achieved_target_mix_prob = 0.0
+            # S2a base pin: per-clip ready-anchor XY offset, evaluated ONCE from the bank's FIXED
+            # contact point through the same coupling as the per-question path (built lazily in
+            # _qb_base_anchor_off_xy — the reference reach offset needs the motion term, which is
+            # unresolved at __init__).
+            self._qb_base_anchor = None
+            print(
+                f"[RacketTargetCommand] stage-1 question bank {cfg.question_bank}: "
+                f"questions per clip = {self._question_bank.counts.tolist()}",
+                flush=True,
+            )
 
         # Actual racket state, world frame (from FK).
         self.racket_pos_w = torch.zeros(self.num_envs, 3, device=self.device)
@@ -538,6 +583,52 @@ class RacketTargetCommand(CommandTerm):
             self.metrics[f"racket_pos_error_{axis}"] = torch.zeros(self.num_envs, device=self.device)
             self.metrics[f"racket_vel_error_{axis}"] = torch.zeros(self.num_envs, device=self.device)
 
+        # --- SHADOW physical ball (+ optional table): flag-gated, METRICS-ONLY measurement --------
+        # A real PhysX ball per env that flies the question in, takes the SAME contact model as the
+        # reward path at a captured strike, and lands under engine integration — an online
+        # engine-vs-analytic cross-check of the virtual-ball prediction. Zero coupling to rewards/
+        # observations/bank-target logic (see shadow_ball.py's module docstring for the honesty
+        # notes: linear cosmetic pre-strike path, no bounce-before-strike, engine-fidelity baseline
+        # from scripts/isaac_ball_inloop_check.py). Default OFF = byte-identical (no driver, no
+        # scene entity, no physics callback, no metrics keys).
+        self._shadow = None
+        if cfg.shadow_ball:
+            # The shadow ball mirrors the virtual-ball question stream (per-swing incoming
+            # velocity/spin + the capture gate live in the vb machinery) — without it there is
+            # nothing to fly in and nothing to cross-check against. Loud error, not silent no-op.
+            if not cfg.virtual_ball:
+                raise ValueError(
+                    "RacketTargetCommandCfg.shadow_ball=True requires virtual_ball=True: the "
+                    "shadow ball flies the vb-sampled incoming ball and cross-checks the vb "
+                    "landing prediction. Enable the virtual-ball task variant or drop shadow_ball."
+                )
+            from whole_body_tracking.tasks.tracking.mdp.shadow_ball import ShadowBallDriver
+
+            self._shadow = ShadowBallDriver(self, env)
+
+        # --- PHYSICAL ball + table (Phase A truth instrument): flag-gated, METRICS-ONLY ------------
+        # A real PhysX ball per env + a real static table collider: each swing's question-bank
+        # incoming ball is realized physically (reverse-integrated venue-model launch so it arrives
+        # at the question contact point with the question incoming velocity exactly at the strike
+        # frame), flies under the per-substep venue aero wrench, takes the CODE-DRIVEN fitted table
+        # bounce, and passes THROUGH the robot (collider off — the fitted racket impulse is Phase B).
+        # Zero coupling to rewards/observations/bank-target logic (see physical_ball.py docstring).
+        # Default OFF = byte-identical (no manager, no scene entity, no physics callback, no metrics
+        # keys, no RNG consumption — the serve is deterministic from the question).
+        self._physical = None
+        if cfg.physical_ball:
+            # The physical ball realizes the virtual-ball question stream (per-swing incoming
+            # velocity/spin live in the vb machinery) — without it there is nothing to serve.
+            if not cfg.virtual_ball:
+                raise ValueError(
+                    "RacketTargetCommandCfg.physical_ball=True requires virtual_ball=True: the "
+                    "physical ball serves the vb-sampled incoming ball (contact point + incoming "
+                    "velocity + spin). Enable the virtual-ball task variant or drop physical_ball."
+                )
+            from whole_body_tracking.tasks.tracking.mdp.physical_ball import PhysicalBallManager
+
+            self._physical = PhysicalBallManager(self, env)
+
         # --- DEBUG: swing-through sign check + raw/gated reward kernels (cfg.debug_reward_logging) ---
         # err_minus uses the CURRENT (correct) swing-through form target - vel*t_to_strike; err_plus uses
         # the FLIPPED form target + vel*t_to_strike. In-window we expect err_minus < err_plus (sign OK) and
@@ -837,7 +928,11 @@ class RacketTargetCommand(CommandTerm):
         # into the per-clip box inflated by achieved_clamp_inflate so replay can neither collapse the
         # target support nor drift outside the deploy runner's hand-synced target clips. Non-replayed
         # envs keep the pure box sample; the per-clip reference normal below is shared by both paths.
-        if self.cfg.achieved_target_mix_prob > 0.0 and motion._multiseg:
+        # Hard-gated on the question bank (belt to the init-time force-off braces): the bank
+        # override below would clobber every replayed target, so the replay draw AND the
+        # _resample_n_acc/_replay_n_acc accounting must never run — achieved_replay_frac would
+        # otherwise report replays that no env ever trained on.
+        if self.cfg.achieved_target_mix_prob > 0.0 and self._question_bank is None and motion._multiseg:
             env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
             clip_all = motion.clip_id[env_ids_t]
             replay = torch.rand(n, device=self.device) < float(self.cfg.achieved_target_mix_prob)
@@ -901,6 +996,9 @@ class RacketTargetCommand(CommandTerm):
             normal = normal / (torch.norm(normal, dim=-1, keepdim=True) + 1e-6)
         self.racket_target_normal_w[env_ids] = normal
 
+        # Stage-1 question bank: overrides pos/vel + target_normal_cmd for these envs (no-op when off).
+        self._apply_question_bank_targets(env_ids, origins, n)
+
     def _sample_targets_reference_perturbed(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
         """Target = this env's reference racket state @ strike + curriculum-scaled perturbation.
 
@@ -942,6 +1040,70 @@ class RacketTargetCommand(CommandTerm):
 
         self.metrics["ref_perturb_scale"][env_ids] = scale
 
+        # Stage-1 question bank: overrides pos/vel + target_normal_cmd for these envs (no-op when off).
+        self._apply_question_bank_targets(env_ids, origins, n)
+
+    def _apply_question_bank_targets(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
+        """Stage-1 question bank: replace the sampled target with a per-env bank question.
+
+        A question row is the inverse-solved ANSWER to a sampled incoming ball at the clip's FIXED
+        contact point (scripts/gen_stage1_questions.py): target pos := contact point (tracking-env
+        frame -> world by adding the env origin), target vel := demanded racket velocity, and
+        target_normal_cmd := demanded face normal. Runs at the END of BOTH sampling paths so every
+        resample route (reset / clip wrap / mid-swing refinement) sees a bank target, and the
+        downstream A1 delay/noise injectors act on it exactly like a box-sampled one.
+        racket_target_normal_w is deliberately LEFT on the clip reference normal (metrics + critic
+        obs unchanged); the face reward reads target_normal_cmd only when cfg.face_command is on.
+        """
+        if self._question_bank is None:
+            return
+        motion = self._motion()
+        if motion._multiseg:
+            clip = motion.clip_id[env_ids]
+        else:
+            clip = torch.zeros(n, dtype=torch.long, device=self.device)
+        pos, vel, nrm, diff = select_questions(
+            self._question_bank, clip, torch.rand(n, device=self.device)
+        )
+        self.racket_target_pos_w[env_ids] = origins + pos
+        self.racket_target_vel_w[env_ids] = vel
+        self.target_normal_cmd[env_ids] = nrm
+        # Held per env until its next resample; reset-mean reports the question difficulty mix.
+        self.metrics["question_difficulty_deg"][env_ids] = diff
+
+    def _qb_base_anchor_off_xy(self) -> torch.Tensor:
+        """Per-clip PINNED ready-anchor XY offset from the env origin ((C, 2); cached after the
+        first call — the reference reach offset is unresolved at __init__).
+
+        S2a anti-cheat (stage_curriculum_v1): the base demand must NOT track the question. The
+        per-question coupling below re-derives base_xy from racket_target_pos_w every resample, so
+        once the question point starts varying (point_mode box+) it would leak each question's
+        contact point into the base demand and reward stepping toward it — exactly what the
+        stand-your-ground gate (root-XY excursion < 0.15 m, 0 steps) must rule out. Instead the
+        SAME coupling is evaluated ONCE with the bank's FIXED contact point and reused verbatim.
+        """
+        if self._qb_base_anchor is not None:
+            return self._qb_base_anchor
+        contact = self._question_bank.contact_pos  # (C, 3), tracking-env frame
+        if self.cfg.target_mode == "reference_perturbed":
+            self._ensure_reference_strike_state()
+            assert self._ref_reach_offset_xy_per_clip is not None
+            # Single-clip runs cache one reach offset row; clamp the gather like the samplers do.
+            idx = torch.arange(contact.shape[0], device=self.device).clamp_(
+                max=self._ref_reach_offset_xy_per_clip.shape[0] - 1
+            )
+            anchor = contact[:, :2] - self._ref_reach_offset_xy_per_clip[idx]
+        else:
+            # uniform coupling: origin + clamped Y blend toward the (fixed) contact point; X stays 0.
+            anchor = torch.zeros_like(contact[:, :2])
+            blend = float(self.cfg.base_couple_blend)
+            if blend > 0.0:
+                anchor[:, 1] = (blend * contact[:, 1]).clamp(
+                    -self.cfg.base_couple_max_offset, self.cfg.base_couple_max_offset
+                )
+        self._qb_base_anchor = anchor
+        return anchor
+
     def _resample_command(self, env_ids: Sequence[int]):
         if len(env_ids) == 0:
             return
@@ -968,7 +1130,18 @@ class RacketTargetCommand(CommandTerm):
         # offset). Independent sampling used to fight the arm's reach (the base_position reward pulled
         # the base away from where the racket needed it). base_target_*_range is now a SMALL JITTER
         # around the coupled point. Legacy "uniform" mode keeps the old origin-relative sampling.
-        if self.cfg.target_mode == "reference_perturbed":
+        if self._question_bank is not None:
+            # Stage-1/S2a BASE PIN: fixed per-clip ready anchor (the coupling evaluated ONCE with
+            # the bank's fixed contact point — see _qb_base_anchor_off_xy), never the per-question
+            # coupling below. Numerically identical while the question point is fixed (S1); becomes
+            # load-bearing the moment the point varies (S2a box). base_target_*_range jitter still
+            # applies after, unchanged.
+            if motion._multiseg:
+                clip = motion.clip_id[env_ids]
+            else:
+                clip = torch.zeros(n, dtype=torch.long, device=self.device)
+            base_xy = origins[:, :2] + self._qb_base_anchor_off_xy()[clip]
+        elif self.cfg.target_mode == "reference_perturbed":
             self._ensure_reference_strike_state()
             assert self._ref_reach_offset_xy_per_clip is not None
             if motion._multiseg:
@@ -1055,6 +1228,16 @@ class RacketTargetCommand(CommandTerm):
                 self._delay_buf_pos[:, ids] = self.racket_target_pos_w[ids].unsqueeze(0)
                 self._delay_buf_vel[:, ids] = self.racket_target_vel_w[ids].unsqueeze(0)
                 self._delay_buf_sign[:, ids] = self.swing_sign[ids].unsqueeze(0)
+
+        # SHADOW ball lifecycle: a resample (reset or wrap) starts these envs' next question —
+        # back to the kinematic incoming path (metrics-only; no reward/obs effect).
+        if self._shadow is not None:
+            self._shadow.on_resample(env_ids)
+
+        # PHYSICAL ball lifecycle: the new question's serve is scheduled from here — the ball
+        # parks until time_to_strike enters the serve horizon (metrics-only; no reward/obs effect).
+        if self._physical is not None:
+            self._physical.on_resample(env_ids)
 
     def _compute_racket_state(self):
         data = self.robot.data
@@ -1479,7 +1662,11 @@ class RacketTargetCommand(CommandTerm):
             v_plus,
             w_plus,
             prm,
-            surface_z=float(self.cfg.vb_table_surface_z),
+            # Physical table contact = ball CENTER crossing surface + R (oracle / C++ /
+            # landing.py / shadow-ball convention; venue landings were extracted at this
+            # plane). Bare surface read the landing ~24 mm long (measured on ball-physics-
+            # unify 2026-07-05, ported here so vb and shadow metrics share one convention).
+            surface_z=float(self.cfg.vb_table_surface_z) + prm.ball_radius,
             net_x=self._vb_net_x,
             h=float(self.cfg.vb_rollout_h),
             n_steps=int(self.cfg.vb_rollout_steps),
@@ -1670,6 +1857,14 @@ class RacketTargetCommand(CommandTerm):
         # reward stack of such tasks has no virtual_* terms, so the caches go unread).
         if self.cfg.virtual_ball or self.cfg.vb_metrics_only:
             self._vb_evaluate(exact_strike, pos_err)
+        # SHADOW physical ball (metrics-only): runs AFTER _vb_evaluate so this step's capture gate
+        # (vb_fired) and the fresh per-env analytic landing prediction can be consumed/snapshotted.
+        if self._shadow is not None:
+            self._shadow.update(exact_strike)
+        # PHYSICAL ball truth instrument (metrics-only): same seam/ordering as the shadow driver —
+        # serve scheduling, exact-strike serve-accuracy measurement, park drive. Off = no-op branch.
+        if self._physical is not None:
+            self._physical.update(exact_strike)
         # GLOBAL error-magnitude EMAs (P2.3 adaptive sigma driver) — same decay/mask as the pass
         # counters above; per-clip variants exist further down but sigma needs one global signal.
         self._exact_pos_err_sum = decay * self._exact_pos_err_sum + float((pos_err * exact_strike).sum())
@@ -2219,6 +2414,40 @@ class RacketTargetCommandCfg(CommandTermCfg):
     vb_rollout_h: float = 0.01
     vb_rollout_steps: int = 100
 
+    # --- SHADOW physical ball + table (flag-gated, METRICS-ONLY; defaults OFF = byte-identical) --
+    # shadow_ball=True spawns one real PhysX ball per env (scene entity "shadow_ball", attached by
+    # hope_env_cfg.attach_shadow_ball_scene / the train.py override translation; sphere R/mass from
+    # configs/ball_physics_venue.yaml) driven by shadow_ball.ShadowBallDriver: kinematic linear
+    # incoming flight to the question contact point, the SAME venue paddle-contact model as the
+    # reward path at a captured strike, then dynamic PhysX flight with the venue aero wrench per
+    # physics substep and engine-integrated landing metrics (shadow_land_x/y, shadow_hit_count,
+    # shadow_miss_count, shadow_vs_virtual_land_err vs the analytic vb prediction). PURE
+    # MEASUREMENT: never read by rewards/observations/bank-target logic; requires virtual_ball=True
+    # (loud error otherwise). Honesty notes + mechanisms: shadow_ball.py module docstring.
+    shadow_ball: bool = False
+    # shadow_table=True additionally (a) enables the shadow ball's collider and (b) places the
+    # table_tennis static table collider (+ visual USD mesh) at the tracking task's virtual-table
+    # pose (near edge x=vb_table_near_x, surface z=vb_table_surface_z, centered on y=0), with the
+    # same multiplicative-restitution materials table_tennis uses — so the shadow ball physically
+    # bounces where the virtual table is. No net collider (the vb model gates the net
+    # analytically). Requires shadow_ball=True.
+    shadow_table: bool = False
+
+    # --- PHYSICAL ball + table — Phase A TRUTH INSTRUMENT (flag-gated, METRICS-ONLY; default ----
+    # OFF = byte-identical). physical_ball=True spawns one real PhysX ball per env (scene entity
+    # "pb_ball") + a real static table collider ("pb_table", + visual USD), attached by
+    # hope_env_cfg.attach_physical_ball_scene / the env-cfg physical_ball flag / the train.py
+    # task.physical_ball translation, and driven by physical_ball.PhysicalBallManager: each
+    # swing's question incoming ball is realized physically — reverse-integrated venue-model
+    # launch (arrives at the question contact point with the question incoming velocity exactly
+    # at the strike frame), PhysX flight + per-substep venue aero wrench, CODE-DRIVEN fitted
+    # table bounce (venue contact.table params), robot pass-through (ball collider off — the
+    # in-engine fitted racket impulse is PHASE B, out of scope). Metrics: pb_serve_err_m /
+    # pb_serve_vel_err at the exact-strike frame + serve/bounce/landing counts. PURE MEASUREMENT:
+    # never read by rewards/observations/bank-target logic; consumes NO RNG; requires
+    # virtual_ball=True (loud error otherwise). Full honesty notes: physical_ball.py docstring.
+    physical_ball: bool = False
+
     # --- reachable racket-target workspace (offsets from the env origin, world frame, meters) ---
     # Used only by target_mode="uniform". PLACEHOLDER ranges (not the reference strike point).
     racket_pos_x_range: tuple[float, float] = (0.25, 0.55)
@@ -2279,6 +2508,20 @@ class RacketTargetCommandCfg(CommandTermCfg):
     racket_normal_x_range: tuple[float, float] = (0.5, 1.0)
     racket_normal_y_range: tuple[float, float] = (-0.3, 0.3)
     racket_normal_z_range: tuple[float, float] = (-0.3, 0.3)
+
+    # --- Stage-1 question bank + face-command channel (defaults OFF; byte-identical baseline) -------
+    # Path to an offline bank npz (scripts/gen_stage1_questions.py): per clip a FIXED contact point
+    # plus per-question inverse-solved racket velocity + face normal (the ANSWER to a sampled
+    # incoming ball). Non-empty -> every target resample (reset / wrap / mid-swing) OVERRIDES the
+    # sampled pos/vel with a bank row and writes target_normal_cmd; the A1 delay/noise injectors act
+    # downstream unchanged. Bank positions are tracking-env-frame (world = env_origin + pos).
+    # Empty (default) = OFF: the sampling paths above run untouched, target_normal_cmd stays zeros.
+    question_bank: str = ""
+    # Re-anchor the racket_normal reward (and racket_strike_success through it) onto the demanded
+    # target_normal_cmd instead of the clip-locked racket_target_normal_w (the clip-locked face is
+    # the 0%-return root cause — eval mode B 2026-07-05). Exact-strike normal metrics and the critic
+    # obs keep racket_target_normal_w either way. False (default) = old path byte-identical.
+    face_command: bool = False
 
     # --- desired base XY target (offsets from the env origin, world frame, meters) ---
     base_target_x_range: tuple[float, float] = (-0.10, 0.10)

@@ -195,6 +195,89 @@ def fk_series(fkm: MjFK, base_pos, base_rot, dof, dof_names):
     return pos, quat
 
 
+# ------------------------------------------------------------------- grip calibration -------- #
+_WRIST_JOINTS = ("right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint")
+
+
+def _rotmat_from_quat_w(q):
+    w, x, y, z = q
+    return np.array([[1-2*(y*y+z*z), 2*(x*y-w*z), 2*(x*z+w*y)],
+                     [2*(x*y+w*z), 1-2*(x*x+z*z), 2*(y*z-w*x)],
+                     [2*(x*z-w*y), 2*(y*z+w*x), 1-2*(x*x+y*y)]], dtype=np.float64)
+
+
+def _rotvec(R):
+    tr = np.clip((np.trace(R) - 1.0) / 2.0, -1.0, 1.0)
+    ang = np.arccos(tr)
+    if ang < 1e-9:
+        return np.zeros(3)
+    ax = np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]]) / (2 * np.sin(ang))
+    return ax * ang
+
+
+def apply_grip_rotation(fkm: MjFK, base_pos, base_rot, dof, dof_names, alpha_z_deg, beta_x_deg):
+    """GRIP CALIBRATION bake (franco 2026-07-06): re-solve the RIGHT wrist triplet per frame so
+    the wrist body rotation becomes R_old @ Rg, Rg = Rz(alpha)Rx(beta) — the robot's blade
+    (strictly ⊥ wrist +Y, STL fact) then points along the HUMAN's calibrated blade
+    (strike_annotations.yaml `grip:`). Gauss-Newton over the 3 wrist angles with full FK;
+    warm-started per frame. Joint limits are AUDITED, then clamped: violations mean the
+    hardware wrist cannot reach the calibrated face at those frames — reported, not hidden."""
+    mj = fkm.mujoco
+    ca, sa = np.cos(np.deg2rad(alpha_z_deg)), np.sin(np.deg2rad(alpha_z_deg))
+    cb, sb = np.cos(np.deg2rad(beta_x_deg)), np.sin(np.deg2rad(beta_x_deg))
+    Rg = (np.array([[ca, -sa, 0], [sa, ca, 0], [0, 0, 1]], dtype=np.float64)
+          @ np.array([[1, 0, 0], [0, cb, -sb], [0, sb, cb]], dtype=np.float64))
+    wbid = mj.mj_name2id(fkm.model, mj.mjtObj.mjOBJ_BODY, "right_wrist_yaw_Link")
+    cols = [dof_names.index(n) for n in _WRIST_JOINTS]
+    jids = [mj.mj_name2id(fkm.model, mj.mjtObj.mjOBJ_JOINT, n) for n in _WRIST_JOINTS]
+    lo = np.array([fkm.model.jnt_range[j][0] for j in jids])
+    hi = np.array([fkm.model.jnt_range[j][1] for j in jids])
+
+    def wrist_R(frame_dof, t):
+        _, quat = fkm.fk(base_pos[t], base_rot[t], dict(zip(dof_names, frame_dof)))
+        return _rotmat_from_quat_w(quat[wbid])
+
+    T = dof.shape[0]
+    dof = dof.copy()
+    n_clamped, worst_resid, worst_excess = 0, 0.0, 0.0
+    prev = None
+    for t in range(T):
+        R_tgt = wrist_R(dof[t], t) @ Rg
+        q3 = dof[t, cols].astype(np.float64) if prev is None else prev.copy()
+        fd = dof[t].copy()
+        for _ in range(8):
+            fd[cols] = q3
+            R_cur = wrist_R(fd, t)
+            r = _rotvec(R_cur.T @ R_tgt)
+            if np.linalg.norm(r) < 1e-4:
+                break
+            J = np.zeros((3, 3))
+            for k in range(3):
+                fk_ = fd.copy()
+                fk_[cols[k]] += 1e-3
+                Rk = wrist_R(fk_, t)
+                J[:, k] = (_rotvec(R_cur.T @ Rk)) / 1e-3
+            try:
+                dq = np.linalg.solve(J + 1e-6 * np.eye(3), r)
+            except np.linalg.LinAlgError:
+                break
+            q3 = q3 + np.clip(dq, -0.5, 0.5)
+        exc = np.maximum(q3 - hi, 0.0) + np.maximum(lo - q3, 0.0)
+        if (exc > 1e-6).any():
+            n_clamped += 1
+            worst_excess = max(worst_excess, float(exc.max()))
+            q3 = np.clip(q3, lo, hi)
+        fd[cols] = q3
+        worst_resid = max(worst_resid, float(np.degrees(np.linalg.norm(_rotvec(wrist_R(fd, t).T @ R_tgt)))))
+        dof[t, cols] = q3
+        prev = q3
+    print(f"[grip] baked Rz({alpha_z_deg:+.0f})Rx({beta_x_deg:+.0f}) into {T} frames; "
+          f"worst face residual {worst_resid:.2f} deg; wrist-limit clamped frames: {n_clamped}"
+          + (f" (max excess {np.degrees(worst_excess):.1f} deg — hardware cannot fully reach "
+             f"the calibrated face there)" if n_clamped else ""))
+    return dof
+
+
 # --------------------------------------------------------------------------------- main ------ #
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -207,6 +290,9 @@ def main() -> int:
     ap.add_argument("--output_fps", type=int, default=50)
     ap.add_argument("--output_file")
     ap.add_argument("--hope_frame", choices=("on", "off"), default="on")
+    ap.add_argument("--grip-rot", type=float, nargs=2, metavar=("ALPHA_Z", "BETA_X"), default=None,
+                    help="bake the calibrated grip rotation (deg, strike_annotations.yaml grip:) "
+                         "into the right-wrist joints so the robot blade matches the human blade")
     args = ap.parse_args()
 
     import onnxruntime as ort
@@ -258,7 +344,13 @@ def main() -> int:
     csv_idx = {n: i for i, n in enumerate(CSV_JOINT_NAMES)}
     perm = [csv_idx[n] for n in fkm.isaac_joint_names]
     dof = dof_csv[:, perm]
-    dof_vel = dof_vel_csv[:, perm]
+    if args.grip_rot is not None:
+        dof = apply_grip_rotation(fkm, base_pos, base_rot, dof, fkm.isaac_joint_names,
+                                  args.grip_rot[0], args.grip_rot[1])
+        # wrist columns changed -> re-differentiate ALL joint velocities from the baked dof
+        dof_vel = np.gradient(dof, 1.0 / args.output_fps, axis=0).astype(np.float32)
+    else:
+        dof_vel = dof_vel_csv[:, perm]
 
     pos_all, quat_all = fk_series(fkm, base_pos, base_rot, dof, fkm.isaac_joint_names)
     body_pos = pos_all[:, cols]

@@ -21,13 +21,27 @@ The training scaffold exists under:
 2026-07-02 update (verified on the current shared RunPod):
 
 - Local two-clip `HOPEPingPong` smoke and a registry-backed WandB pipeline smoke both ran on the copied Agibot A3 URDF asset (31 actuated DOF). The registry smoke run `6xus13ga` finished at https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/6xus13ga, but the `hope_forehand:v4` / `hope_backhand:v4` motion artifacts it used were later verified to face world +Y rather than HOPE +X. Treat that run as pipeline-only evidence.
-- Until corrected v5+ registry artifacts are uploaded, pass the corrected local `_hopex.npz` clips explicitly via `motion_file=` / `motion_file_2=` instead of relying on the v4 registry aliases.
+- Until future verified registry artifacts are uploaded, pass the corrected local `_hopex.npz` clips explicitly via `motion_file=` / `motion_file_2=` instead of relying on the v4 registry aliases. The local v5 clips are R15 ablation inputs only, not product/default replacements.
 - HOPE task YAMLs set `motion.wrap_teleport: false` (also the code default): a mid-episode clip wrap resamples the reference clip/time and racket target without teleporting the simulated robot. Episode reset still uses RSI.
 
 2026-07-03 realignment:
 
 - The default training task is now `HOPEPingPongDeployParity` (gym id `HOPE-PingPong-DeployParity-AgibotA3-v0`); `HOPEPingPongRealSensor` is a backward-compat alias for the same task. Its actor observation is 175-D deploy-parity: it removes `motion_anchor_pos_b` (3) and `base_target_pos_b` (2) and reframes `racket_target_pos_b` racket-FK-relative. Layout reference: `scripts/realsensor_obs_reference.py`; checks: `scripts/verify_realsensor.py`.
 - `task=HOPEPingPong` remains available only as the legacy 180-D full-obs comparison path; it is NOT deploy-honest and cannot deploy.
+
+2026-07-05 R15 v5 correction + strike-annotation registry:
+
+- Product/default train and replay configs remain on the hopex/registry route: `cfg/train.yaml`
+  and `cfg/play.yaml` keep `motion_file: null`, and `HOPEPingPongDeployParity.yaml` keeps
+  `strike_phase_per_clip: [0.47, 0.333]`. Do not edit those defaults to v5 for R15.
+- `cfg/strike_annotations.yaml` is the contact-phase source of truth for reference clips (all 6
+  adjudicated 2026-07-05; the hopex values are a speed-peak CONVENTION — its source videos are
+  ball-less dry swings). `scripts/analyze_strike_phase.py` applies annotations first and reports
+  the speed peak only as a diagnostic candidate (known trap: post-contact whip / pre-contact
+  pull-up). R15 overrides are now `strike_phase_per_clip=[0.673,0.362]` with the regenerated
+  backhand boxes (see NOW.md).
+- `scripts/play.py` uses the same local motion resolver as training when `motion_file` or
+  `motion_file_2` is set, so R15 replay/export honors both local clips.
 
 2026-07-04 update (deploy-parity robustness flags, all default OFF):
 
@@ -98,6 +112,7 @@ This branch adds:
 - `hope_training/whole_body_tracking/scripts/probe_metric.py`
 - `hope_training/whole_body_tracking/cfg/train.yaml`
 - `hope_training/whole_body_tracking/cfg/play.yaml`
+- `hope_training/whole_body_tracking/cfg/strike_annotations.yaml`
 - `hope_training/whole_body_tracking/setup_train_env.sh`
 
 ## Environment Setup
@@ -258,6 +273,30 @@ The currently verified clips (2026-07-02) are the corrected HOPE +X local files
 `hope_training/motions/preprocessed/hope_forehand_hopex.npz` and
 `hope_training/motions/preprocessed/hope_backhand_hopex.npz`, passed as `motion_file=` / `motion_file_2=`. The older `hope_forehand:v4` / `hope_backhand:v4` registry artifacts face world +Y and fail the alignment gate below.
 
+Optional R15 v5 ablation clips live on the team RunPod at `/workspace/shared/motions/hope_forehand_v5.npz` and `/workspace/shared/motions/hope_backhand_v5.npz`. Copy them into `hope_training/motions/preprocessed/` only for the R15 arm, then pass all phase and box changes on the CLI:
+
+```bash
+hope_isaac_py scripts/train.py task=HOPEPingPongDeployParity algo=ppo headless=true \
+  motion_file=../motions/preprocessed/hope_forehand_v5.npz \
+  motion_file_2=../motions/preprocessed/hope_backhand_v5.npz \
+  'task.racket.strike_phase_per_clip=[0.673,0.345]' \
+  'task.racket.pos_range_per_clip.forehand.x=[0.29,0.49]' \
+  'task.racket.pos_range_per_clip.forehand.y=[-0.63,-0.43]' \
+  'task.racket.pos_range_per_clip.forehand.z=[0.74,0.94]' \
+  'task.racket.vel_range_per_clip.forehand.x=[0.74,1.74]' \
+  'task.racket.vel_range_per_clip.forehand.y=[0.71,1.71]' \
+  'task.racket.vel_range_per_clip.forehand.z=[1.20,2.20]' \
+  'task.racket.pos_range_per_clip.backhand.x=[0.60,0.80]' \
+  'task.racket.pos_range_per_clip.backhand.y=[0.12,0.32]' \
+  'task.racket.pos_range_per_clip.backhand.z=[0.81,1.01]' \
+  'task.racket.vel_range_per_clip.backhand.x=[2.60,3.60]' \
+  'task.racket.vel_range_per_clip.backhand.y=[0.50,1.50]' \
+  'task.racket.vel_range_per_clip.backhand.z=[1.66,2.66]' \
+  num_envs=32 max_iterations=3 logger=tensorboard run_name=r15_v5_local_smoke
+```
+
+Before copying these values into any config, rerun `python scripts/analyze_strike_phase.py --clip forehand:../motions/preprocessed/hope_forehand_v5.npz --clip backhand:../motions/preprocessed/hope_backhand_v5.npz`; it should print `task.racket.strike_phase_per_clip=[0.673,0.345]`. Video/GVHMR face normals are wrist +Y proxies and are marked unreliable.
+
 Use registry paths only after `scripts/check_motion_target_alignment.py --clip ...` passes for those downloaded artifacts. Do not commit generated logs, checkpoints, WandB caches, or motion artifacts unless the asset policy changes.
 
 ## Video-To-Motion Doc Map
@@ -269,8 +308,9 @@ Use this order when generating new reference clips from manually imported videos
 3. Confirm local outputs exist:
    `hope_training/motions/preprocessed/hope_forehand.npz` and
    `hope_training/motions/preprocessed/hope_backhand.npz`.
-4. Replay with `scripts/replay_npz.py --motion_file ...`, then train with `motion_file=... motion_file_2=...`.
-5. Add `--upload_wandb` / `registry_name=...` only for shared registry runs.
+4. Scrub the source video frame-by-frame for ball contact, record the result in `cfg/strike_annotations.yaml`, and rerun `scripts/analyze_strike_phase.py`; do not promote the speed peak by itself.
+5. Replay with `scripts/replay_npz.py --motion_file ...`, then train with `motion_file=... motion_file_2=...`.
+6. Add `--upload_wandb` / `registry_name=...` only for shared registry runs.
 
 ## Smoke Test
 
@@ -292,6 +332,8 @@ python scripts/check_motion_target_alignment.py --yaml cfg/task/HOPEPingPongReal
 ```
 
 Both commands passed on 2026-07-02 using `hope_forehand_hopex.npz` / `hope_backhand_hopex.npz` against the pre-merge branch YAML values; re-run them against the merged uniform-target config before the next long run. The same check intentionally fails on the old v4 registry downloads because frame-0 yaw is 82.03/85.92 deg and strike velocity is +Y-dominant.
+
+For R15 v5, use `scripts/analyze_strike_phase.py` with `cfg/strike_annotations.yaml` instead of the +X-dominance gate: the forehand contact is hand-verified at frame 37 / phase 0.673, while the later speed peak is the known whip trap.
 
 Local corrected-clips smoke for the unified HOPE task:
 

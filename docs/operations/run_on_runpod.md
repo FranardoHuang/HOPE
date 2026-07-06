@@ -59,6 +59,8 @@ python scripts/train.py task=HOPEPingPongDeployParity algo=ppo headless=true \
   logger=tensorboard run_name=<name>_<experiment>
 ```
 
+For the optional R15 v5 arm only, first copy `/workspace/shared/motions/hope_forehand_v5.npz` and `hope_backhand_v5.npz` into your clone's ignored `hope_training/motions/preprocessed/`, then use the explicit override command in `run_training.md`. Do not switch `cfg/train.yaml`, `cfg/play.yaml`, or task YAML defaults to v5.
+
 ## Smoke Test
 
 After a pod restart, an env change, or provisioning a user:

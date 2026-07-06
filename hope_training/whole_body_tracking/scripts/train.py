@@ -260,6 +260,13 @@ _RACKET_KEYS = (
     "strike_phase_per_clip", "base_couple_blend", "base_couple_max_offset",
     # HITTER separate-commands base/racket coupling ("blend" | "reference_reach"), 2026-07-05
     "base_couple_mode",
+
+    # Stage-1 question bank (fixed contact point, inverse-solved face+velocity targets) + the
+    # face-command reward re-anchor / +4 actor obs channel (normal + rho placeholder, 175->179).
+    "question_bank", "face_command", "face_command_obs",
+    # SHADOW physical ball + table (flag-gated, METRICS-ONLY engine-vs-analytic landing
+    # cross-check; requires the virtual-ball task variant). shadow_ball.py.
+    "shadow_ball", "shadow_table",
 )
 
 # YAML keys under `motion:` that target the MotionCommandCfg swing-entry structure
@@ -716,6 +723,87 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             # Metrics-only virtual ball (franco 2026-07-06): in-training 上台率/击球率 curves on
             # tasks whose rewards have no virtual_* terms (DeployParity/Hitter). Metrics only.
             _set_attr(C, "vb_metrics_only", _get(rk, "vb_metrics_only"), _as_bool, applied, "racket_target")
+
+            # Stage-1 question bank + face-command channel (defaults OFF). question_bank = bank npz
+            # path (gen_stage1_questions.py); face_command re-anchors the racket_normal reward onto
+            # the demanded normal (target_normal_cmd).
+            _set_attr(C, "question_bank", _get(rk, "question_bank"), str, applied, "racket_target")
+            _set_attr(C, "face_command", _get(rk, "face_command"), _as_bool, applied, "racket_target")
+            # Bank vs retiming: bank demanded velocities are ABSOLUTE physics answers (inverse-
+            # solved racket velocity for a real incoming ball) — a swing replayed at speed s cannot
+            # have its answer rescaled by s (the ball does not slow down). Same loud-fail pattern
+            # as _check_unknown_keys: never let the combination start and silently train wrong.
+            if str(getattr(C, "question_bank", "") or ""):
+                _ssr = tuple(float(x) for x in getattr(
+                    getattr(env_cfg.commands, "motion", None), "speed_scale_range", (1.0, 1.0)))
+                if _ssr != (1.0, 1.0):
+                    raise _OverrideError(
+                        f"[train.py] racket.question_bank is set but motion.speed_scale_range="
+                        f"{_ssr}: bank demanded velocities are absolute physics answers; retiming "
+                        "cannot scale them. Set motion.speed_scale_range: [1.0, 1.0] or drop the bank.")
+            # face_command_obs (+4 actor dims: demanded normal (3) + zero-filled rho placeholder (1),
+            # the contract-day 175 -> 179 layout): the obs groups were finalized in __post_init__
+            # BEFORE overrides run, so setting env_cfg.face_command_obs here would be a silent
+            # no-op — attach the ObsTerm directly (same term/tail position as the cfg switch).
+            # The enabling experiment must update/remove actor_obs_contract in its YAML:
+            # validate_actor_observation_contract stays a loud error on the frozen 175-D value.
+            _fc_obs = _get(rk, "face_command_obs")
+            if _fc_obs is not None and _as_bool(_fc_obs):
+                from isaaclab.managers import ObservationTermCfg as _ObsTerm
+
+                from whole_body_tracking.tasks.tracking import mdp as _mdp
+
+                env_cfg.observations.policy.racket_target_normal_cmd = _ObsTerm(
+                    func=_mdp.racket_target_normal_cmd, params={"command_name": "racket_target"})
+                if hasattr(env_cfg, "face_command_obs"):
+                    env_cfg.face_command_obs = True  # keep the descriptive cfg field honest
+                applied.append(
+                    "observations.policy.racket_target_normal_cmd(+4D face-command obs, 175->179)")
+            # SHADOW physical ball + table (METRICS-ONLY): a real PhysX ball flies each question
+            # in, is struck via the same venue contact model, and lands under engine integration —
+            # an online engine-vs-analytic cross-check of the vb landing prediction. The scene
+            # entities must be attached HERE because __post_init__ already ran before overrides
+            # (the exact face_command_obs timing problem above); attach_shadow_ball_scene is
+            # idempotent so cfg-flag and YAML/CLI paths compose. Requires virtual_ball=True
+            # (RacketTargetCommand.__init__ raises loudly otherwise).
+            _set_attr(C, "shadow_ball", _get(rk, "shadow_ball"), _as_bool, applied, "racket_target")
+            _set_attr(C, "shadow_table", _get(rk, "shadow_table"), _as_bool, applied, "racket_target")
+            if getattr(C, "shadow_table", False) and not getattr(C, "shadow_ball", False):
+                raise _OverrideError(
+                    "[train.py] racket.shadow_table=true requires racket.shadow_ball=true "
+                    "(the table exists only for the shadow ball to land on).")
+            if getattr(C, "shadow_ball", False):
+                from whole_body_tracking.tasks.tracking.config.agibot_a3.hope_env_cfg import (
+                    attach_shadow_ball_scene as _attach_shadow,
+                )
+
+                _attach_shadow(env_cfg, shadow_table=bool(getattr(C, "shadow_table", False)))
+                applied.append(
+                    f"scene.shadow_ball attached (metrics-only; table={bool(C.shadow_table)})")
+
+    # PHYSICAL ball + table truth instrument (Phase A) — TOP-LEVEL task key (task.physical_ball),
+    # mirroring the env-cfg field HOPEPingPongAgibotA3EnvCfg.physical_ball. Each swing's question
+    # incoming ball is realized physically (reverse-integrated venue launch, aero-wrench flight,
+    # CODE-DRIVEN fitted table bounce, robot pass-through — racket impulse = Phase B); METRICS-ONLY,
+    # rewards/obs untouched. __post_init__ already ran before overrides (the face_command_obs
+    # timing), so the scene must be attached HERE; attach_physical_ball_scene is idempotent so the
+    # cfg-flag and YAML/CLI paths compose. Requires the virtual-ball task variant
+    # (RacketTargetCommand.__init__ raises loudly otherwise). Consumed in this same commit
+    # (018467a whitelist rule): this block is the translation; there is no top-level unknown-key
+    # scan, so this comment is the whitelist.
+    _pb = _get(task, "physical_ball")
+    if _pb is not None and _as_bool(_pb):
+        from whole_body_tracking.tasks.tracking.config.agibot_a3.hope_env_cfg import (
+            attach_physical_ball_scene as _attach_physical,
+        )
+
+        _require(hasattr(env_cfg, "commands") and hasattr(env_cfg.commands, "racket_target"),
+                 "commands.racket_target (task.physical_ball)")
+        env_cfg.commands.racket_target.physical_ball = True
+        if hasattr(env_cfg, "physical_ball"):
+            env_cfg.physical_ball = True  # keep the descriptive env-cfg field honest
+        _attach_physical(env_cfg)
+        applied.append("scene.pb_ball+pb_table attached (Phase A truth instrument; metrics-only)")
 
     # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
     # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.
