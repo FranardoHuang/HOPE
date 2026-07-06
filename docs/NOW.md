@@ -192,6 +192,17 @@ jiayi 已转本地训练,云上 6 卡全归统一队列。
 | 1i | 顺手项 | 波次边界小活:torch 反解器 `coarse_landing` 的过网高度(net_z)没人消费——补同一行网 gate(numpy 侧已做,实测拦下 249/256 挂网答案) | 波次间隙 | claude |
 | 1j | 开发 | **checkpoint 抽查流水线**(franco 07-06):看门狗盯新存档 → GPU 空隙原生导出(~4 分钟)→ MuJoCo 考卷(CPU 池,~25 分钟)→ 结果追加进该 run 的考卷曲线文件。平时追 Isaac,节点看 MuJoCo | 1a-0(bank 题源) | claude |
 
+**球物理 in-loop 验证收口(2026-07-06,yikang;Isaac 真球接入的物理前提)**:PhysX@训练 dt(5ms)
+注入 venue 气动力 vs 解析 RK4——bank 档(场馆速度)落点差 **17mm 全通**;全包络(1-7 m/s、旋 0-95)
+p90 30mm 超 20mm 线;**dt 减半误差精确减半**(30.1→15.0mm 全线 ×0.5,全包络 PASS)⇒ 差异=纯半隐式
+欧拉一阶系统项,无建模/坐标错,旋钮=球物理 dt。判定:**S1(场馆速度、无旋)在训练 dt 下真球可用**;
+S3/快球要么球子步减 dt、要么接受 <30mm(仍远低于 0.10m 考卷线)。工具:`scripts/isaac_ball_inloop_check.py`
+(bank/synthetic 双模,日志 /workspace/yikang/inloop_{bank,syn,syn25}.log)。**Phase A 已落地并 mech 双向全绿**(stage1-fixed-point
+9ed33b4):`++task.physical_ball=true` = 每 env 真球+真球桌,题目驱动反向积分发球,pod 实测
+**发球精度 12.2mm / 速度误差 0.018 m/s**(正是 in-loop 预测量级);flag off 零痕迹。真球现为
+纯真值仪表(不动奖励/观测);Phase B(拍面拟合冲量入引擎+CCD)排期时带上球子步决定。
+附带物理发现:二次阻力反向积分在 ~1.3s 有限时间奇点(速度帽 40 m/s 规避,发球窗 0.6s,余量 >2x)。
+
 ### 阶段 2a「拍点放开」— 击球点从固定点扩成框(手补)
 
 | 顺序 | 类型 | 内容 | 依赖 | 谁 |
