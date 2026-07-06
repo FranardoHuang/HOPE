@@ -596,6 +596,29 @@ class RacketTargetCommand(CommandTerm):
 
             self._shadow = ShadowBallDriver(self, env)
 
+        # --- PHYSICAL ball + table (Phase A truth instrument): flag-gated, METRICS-ONLY ------------
+        # A real PhysX ball per env + a real static table collider: each swing's question-bank
+        # incoming ball is realized physically (reverse-integrated venue-model launch so it arrives
+        # at the question contact point with the question incoming velocity exactly at the strike
+        # frame), flies under the per-substep venue aero wrench, takes the CODE-DRIVEN fitted table
+        # bounce, and passes THROUGH the robot (collider off — the fitted racket impulse is Phase B).
+        # Zero coupling to rewards/observations/bank-target logic (see physical_ball.py docstring).
+        # Default OFF = byte-identical (no manager, no scene entity, no physics callback, no metrics
+        # keys, no RNG consumption — the serve is deterministic from the question).
+        self._physical = None
+        if cfg.physical_ball:
+            # The physical ball realizes the virtual-ball question stream (per-swing incoming
+            # velocity/spin live in the vb machinery) — without it there is nothing to serve.
+            if not cfg.virtual_ball:
+                raise ValueError(
+                    "RacketTargetCommandCfg.physical_ball=True requires virtual_ball=True: the "
+                    "physical ball serves the vb-sampled incoming ball (contact point + incoming "
+                    "velocity + spin). Enable the virtual-ball task variant or drop physical_ball."
+                )
+            from whole_body_tracking.tasks.tracking.mdp.physical_ball import PhysicalBallManager
+
+            self._physical = PhysicalBallManager(self, env)
+
         # --- DEBUG: swing-through sign check + raw/gated reward kernels (cfg.debug_reward_logging) ---
         # err_minus uses the CURRENT (correct) swing-through form target - vel*t_to_strike; err_plus uses
         # the FLIPPED form target + vel*t_to_strike. In-window we expect err_minus < err_plus (sign OK) and
@@ -1185,6 +1208,11 @@ class RacketTargetCommand(CommandTerm):
         # back to the kinematic incoming path (metrics-only; no reward/obs effect).
         if self._shadow is not None:
             self._shadow.on_resample(env_ids)
+
+        # PHYSICAL ball lifecycle: the new question's serve is scheduled from here — the ball
+        # parks until time_to_strike enters the serve horizon (metrics-only; no reward/obs effect).
+        if self._physical is not None:
+            self._physical.on_resample(env_ids)
 
     def _compute_racket_state(self):
         data = self.robot.data
@@ -1786,6 +1814,10 @@ class RacketTargetCommand(CommandTerm):
         # (vb_fired) and the fresh per-env analytic landing prediction can be consumed/snapshotted.
         if self._shadow is not None:
             self._shadow.update(exact_strike)
+        # PHYSICAL ball truth instrument (metrics-only): same seam/ordering as the shadow driver —
+        # serve scheduling, exact-strike serve-accuracy measurement, park drive. Off = no-op branch.
+        if self._physical is not None:
+            self._physical.update(exact_strike)
         # GLOBAL error-magnitude EMAs (P2.3 adaptive sigma driver) — same decay/mask as the pass
         # counters above; per-clip variants exist further down but sigma needs one global signal.
         self._exact_pos_err_sum = decay * self._exact_pos_err_sum + float((pos_err * exact_strike).sum())
@@ -2346,6 +2378,21 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # bounces where the virtual table is. No net collider (the vb model gates the net
     # analytically). Requires shadow_ball=True.
     shadow_table: bool = False
+
+    # --- PHYSICAL ball + table — Phase A TRUTH INSTRUMENT (flag-gated, METRICS-ONLY; default ----
+    # OFF = byte-identical). physical_ball=True spawns one real PhysX ball per env (scene entity
+    # "pb_ball") + a real static table collider ("pb_table", + visual USD), attached by
+    # hope_env_cfg.attach_physical_ball_scene / the env-cfg physical_ball flag / the train.py
+    # task.physical_ball translation, and driven by physical_ball.PhysicalBallManager: each
+    # swing's question incoming ball is realized physically — reverse-integrated venue-model
+    # launch (arrives at the question contact point with the question incoming velocity exactly
+    # at the strike frame), PhysX flight + per-substep venue aero wrench, CODE-DRIVEN fitted
+    # table bounce (venue contact.table params), robot pass-through (ball collider off — the
+    # in-engine fitted racket impulse is PHASE B, out of scope). Metrics: pb_serve_err_m /
+    # pb_serve_vel_err at the exact-strike frame + serve/bounce/landing counts. PURE MEASUREMENT:
+    # never read by rewards/observations/bank-target logic; consumes NO RNG; requires
+    # virtual_ball=True (loud error otherwise). Full honesty notes: physical_ball.py docstring.
+    physical_ball: bool = False
 
     # --- reachable racket-target workspace (offsets from the env origin, world frame, meters) ---
     # Used only by target_mode="uniform". PLACEHOLDER ranges (not the reference strike point).

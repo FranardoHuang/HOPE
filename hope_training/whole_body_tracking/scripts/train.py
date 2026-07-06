@@ -743,6 +743,30 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 applied.append(
                     f"scene.shadow_ball attached (metrics-only; table={bool(C.shadow_table)})")
 
+    # PHYSICAL ball + table truth instrument (Phase A) — TOP-LEVEL task key (task.physical_ball),
+    # mirroring the env-cfg field HOPEPingPongAgibotA3EnvCfg.physical_ball. Each swing's question
+    # incoming ball is realized physically (reverse-integrated venue launch, aero-wrench flight,
+    # CODE-DRIVEN fitted table bounce, robot pass-through — racket impulse = Phase B); METRICS-ONLY,
+    # rewards/obs untouched. __post_init__ already ran before overrides (the face_command_obs
+    # timing), so the scene must be attached HERE; attach_physical_ball_scene is idempotent so the
+    # cfg-flag and YAML/CLI paths compose. Requires the virtual-ball task variant
+    # (RacketTargetCommand.__init__ raises loudly otherwise). Consumed in this same commit
+    # (018467a whitelist rule): this block is the translation; there is no top-level unknown-key
+    # scan, so this comment is the whitelist.
+    _pb = _get(task, "physical_ball")
+    if _pb is not None and _as_bool(_pb):
+        from whole_body_tracking.tasks.tracking.config.agibot_a3.hope_env_cfg import (
+            attach_physical_ball_scene as _attach_physical,
+        )
+
+        _require(hasattr(env_cfg, "commands") and hasattr(env_cfg.commands, "racket_target"),
+                 "commands.racket_target (task.physical_ball)")
+        env_cfg.commands.racket_target.physical_ball = True
+        if hasattr(env_cfg, "physical_ball"):
+            env_cfg.physical_ball = True  # keep the descriptive env-cfg field honest
+        _attach_physical(env_cfg)
+        applied.append("scene.pb_ball+pb_table attached (Phase A truth instrument; metrics-only)")
+
     # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
     # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.
     dr = _get(task, "domain_rand")

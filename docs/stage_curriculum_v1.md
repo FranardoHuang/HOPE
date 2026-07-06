@@ -35,6 +35,7 @@ kept/N 分母与 in-cone(挥速锥内可答)分母——没有分母的百分比
 | torch 在线求解器 | 预留 `racket.online_solver`(连续拍点分布下离线 bank 覆盖不了;需 StrikeSpec 的批量 torch 移植 + 与 numpy 版的 parity 测试,复用球物理归一的测试模式) | S2a 第 3 级+ |
 | 站位模式 | 预留 `racket.base_mode: pinned\|ball_driven`:**pinned 自 S2a 起生效**(bank 激活即 base 钉死 ready 锚点,已落地于 hope_commands base pin);**S2b 仅把值翻成 ball_driven** | S2a(pinned)/ S2b(ball_driven) |
 | 旋转档 | 预留 `racket.spin_tier: none\|low\|venue`(bank 增 spin 列;StrikeSpec 本就吃 omega;消旋奖励 vb_spin_mode 联动;obs 侧 rho 占位已在 179 维契约中留好) | S3 |
+| 物理球+球桌真值仪 | ✓ `physical_ball`(**任务顶层键**,默认关;S1 训练环境加真 PhysX 球桌 + 每 env 真球:题库来球按场馆模型**反向积分发球**——击球帧恰好以题目速度到达题目触点、场馆气动力逐 substep 施加、**代码驱动拟合桌面反弹**(venue contact.table)、穿透机器人(球碰撞体关);**纯 metrics**(pb_serve_err_m / pb_serve_vel_err + 计数),奖励/观测零耦合;物理基线 = isaac_ball_inloop_check 17 mm systematic) | S1+(truth instrument;**Phase B = 引擎内拟合拍面冲量,待做**) |
 
 规则:预留键**到实现段才添加**(不放死键);每段考卷和训练同源升级(同一个
 bank/求解器产题);升段以考卷过线为准,记 NOW.md。

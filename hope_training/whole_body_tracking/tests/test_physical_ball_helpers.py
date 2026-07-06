@@ -1,0 +1,227 @@
+"""Physical-ball pure-helper unit tests — NO Isaac imports.
+
+Loads ``tasks/tracking/mdp/physical_ball.py`` (and ``virtual_ball.py`` for the forward-flight
+reference) directly by file path, the same standalone pattern as ``test_shadow_ball_helpers.py``
+(the mdp package ``__init__`` pulls isaaclab; physical_ball's own sibling imports fall back to
+file-path loading in this context). Covers the Phase A truth-instrument math:
+
+* back_integrate_incoming: reverse-time venue-model integration ROUNDTRIPS — forward RK4 flight
+  (virtual_ball.rk4_step) from the returned launch state for tts seconds re-arrives at the
+  question (contact_pos, incoming_vel) to < 1 mm / < 0.01 m/s, for tts in {0.3, 0.6, 1.0}
+  (+ the 1.5 s support bound), with and without spin, and with MIXED per-env tts in one call.
+* predict_table_contact: the fitted table bounce with the venue ``contact.table`` params —
+  analytic vertical-drop case (v_z+ = e |v_z-|, spin untouched), and a crafted descending
+  crossing cross-checked NUMERICALLY against the canonical numpy contact model
+  (hope_training/ball_physics_fit/contact_model.predict_contact) including a cap-binding case.
+* load_venue_table_params: reads the REAL venue yaml (e_eff/a_t/b_t/mu + ball constants).
+* schedule_serves / table_bounds_mask: parked-ball serve scheduling and the bounce footprint.
+
+Run:  /opt/anaconda3/bin/python3 hope_training/whole_body_tracking/tests/test_physical_ball_helpers.py
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import math
+import os
+import sys
+
+import numpy as np
+import torch
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+MDP_DIR = os.path.join(
+    HERE, "..", "source", "whole_body_tracking", "whole_body_tracking", "tasks", "tracking", "mdp"
+)
+CONTACT_MODEL_PATH = os.path.join(HERE, "..", "..", "ball_physics_fit", "contact_model.py")
+
+
+def _load(path, name):
+    spec = importlib.util.spec_from_file_location(name, os.path.abspath(path))
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod  # dataclass resolution needs the module registered during exec
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_back_integration_roundtrip(pb, vb):
+    prm = vb.load_venue_params()
+    h = 1e-3
+    contact = torch.tensor([[0.42, -0.15, 0.95]])
+    cases = [
+        # (tts, v_in, omega) — velocities inside the venue sampling box, spins inside 0-15 rev/s.
+        (0.3, (-3.5, 0.3, -0.6), (0.0, 0.0, 0.0)),
+        (0.3, (-2.4, -0.5, 0.4), (30.0, -20.0, 40.0)),
+        (0.6, (-4.2, 0.1, -0.9), (0.0, 0.0, 0.0)),
+        (0.6, (-3.0, 0.6, 0.2), (-25.0, 35.0, -15.0)),
+        (0.6, (-4.5, -0.6, -1.0), (50.0, 50.0, 50.0)),  # venue-box worst corner at the serve horizon
+        (1.0, (-2.8, -0.3, -0.4), (0.0, 0.0, 0.0)),
+        (1.0, (-3.8, 0.4, 0.5), (45.0, 10.0, -30.0)),
+    ]
+    worst_pos, worst_vel = 0.0, 0.0
+    for tts_val, v_in_t, omega_t in cases:
+        v_in = torch.tensor([list(v_in_t)])
+        omega = torch.tensor([list(omega_t)])
+        tts = torch.full((1,), tts_val)
+        launch_p, launch_v = pb.back_integrate_incoming(contact, v_in, omega, tts, prm, h=h)
+
+        # forward flight from the launch state for exactly tts seconds via virtual_ball.rk4_step
+        # (the SAME per-env-uniform step-count convention the helper uses).
+        n = max(1, int(math.ceil(tts_val / h)))
+        hf = tts_val / n
+        p, v = launch_p, launch_v
+        for _ in range(n):
+            p, v = vb.rk4_step(p, v, omega, hf, prm)
+
+        pos_err = float(torch.linalg.norm(p - contact))
+        vel_err = float(torch.linalg.norm(v - v_in))
+        worst_pos, worst_vel = max(worst_pos, pos_err), max(worst_vel, vel_err)
+        assert pos_err < 1e-3, f"tts={tts_val} spin={omega_t}: roundtrip pos err {pos_err:.2e} m >= 1 mm"
+        assert vel_err < 1e-2, f"tts={tts_val} spin={omega_t}: roundtrip vel err {vel_err:.2e} m/s >= 0.01"
+
+    # MIXED per-env tts in ONE batched call (the manager's serve path): every row must roundtrip.
+    tts_vec = torch.tensor([0.3, 0.6, 1.0, 0.0])
+    n_env = tts_vec.shape[0]
+    contact_b = torch.tensor([[0.42, -0.15, 0.95]]).expand(n_env, 3).contiguous()
+    v_in_b = torch.tensor([[-3.5, 0.3, -0.6], [-3.0, 0.6, 0.2], [-2.8, -0.3, -0.4], [-4.0, 0.0, 0.0]])
+    omega_b = torch.tensor([[0.0, 0.0, 0.0], [30.0, -20.0, 40.0], [-25.0, 35.0, -15.0], [10.0, 10.0, 10.0]])
+    lp, lv = pb.back_integrate_incoming(contact_b, v_in_b, omega_b, tts_vec, prm, h=h)
+    # tts = 0 row: launch state IS the contact state.
+    assert torch.allclose(lp[3], contact_b[3], atol=1e-9) and torch.allclose(lv[3], v_in_b[3], atol=1e-9)
+    for i in range(3):
+        tv = float(tts_vec[i])
+        n = max(1, int(math.ceil(float(tts_vec.max()) / h)))  # helper used max-tts step count
+        hf = tv / n
+        p, v = lp[i : i + 1], lv[i : i + 1]
+        for _ in range(n):
+            p, v = vb.rk4_step(p, v, omega_b[i : i + 1], hf, prm)
+        assert float(torch.linalg.norm(p - contact_b[i])) < 1e-3, f"batched row {i} pos roundtrip"
+        assert float(torch.linalg.norm(v - v_in_b[i])) < 1e-2, f"batched row {i} vel roundtrip"
+
+    # tts = 1.5 s support bound: reverse-time quadratic drag has a finite-time blowup at
+    # t_back ~ 1.3 s for venue contact states (a slow arrival cannot have a longer pure-flight
+    # history — the real one includes a table bounce), so the guarantee at 1.5 s is FINITENESS
+    # via the documented BACKINT_SPEED_CAP freeze, not exact arrival.
+    tts15 = torch.full((1,), 1.5)
+    lp15, lv15 = pb.back_integrate_incoming(
+        contact, torch.tensor([[-3.2, 0.2, -0.5]]), torch.tensor([[20.0, -40.0, 25.0]]),
+        tts15, prm, h=h,
+    )
+    assert bool(torch.isfinite(lp15).all()) and bool(torch.isfinite(lv15).all()), "1.5 s must stay finite"
+    sp15 = float(torch.linalg.norm(lv15, dim=-1))
+    assert sp15 <= pb.BACKINT_SPEED_CAP * 1.1, f"capped speed {sp15:.1f} escaped the freeze"
+    print(
+        f"[ok] back_integrate_incoming roundtrip: pos err < 1 mm, vel err < 0.01 m/s "
+        f"(worst {worst_pos:.2e} m / {worst_vel:.2e} m/s over tts 0.3/0.6/1.0 s, with/without "
+        f"spin; mixed per-env tts batched call exact; 1.5 s support = finite via speed-cap "
+        f"freeze, |v|={sp15:.1f} m/s)"
+    )
+
+
+def test_table_params_loader(pb):
+    tp = pb.load_venue_table_params()
+    # The venue fit's table block (configs/ball_physics_venue.yaml, 2026-07-03).
+    assert abs(tp.e_eff - 0.9215) < 1e-9, f"table e_eff {tp.e_eff}"
+    assert abs(tp.a_t - 0.369) < 1e-9, f"table a_t {tp.a_t}"
+    assert tp.b_t == 0.0, f"table b_t {tp.b_t}"
+    assert abs(tp.mu - 2.0) < 1e-9, f"table mu_safety {tp.mu}"
+    assert abs(tp.ball_radius - 0.020) < 1e-12 and abs(tp.inertia_coeff - 2.0 / 3.0) < 1e-9
+    print(
+        f"[ok] load_venue_table_params: e_eff={tp.e_eff} a_t={tp.a_t} b_t={tp.b_t} mu={tp.mu} "
+        f"from {os.path.basename(tp.source_path)}"
+    )
+
+
+def test_table_bounce_math(pb, sbmod, cm):
+    tp = pb.load_venue_table_params()
+    # The numpy canonical model hard-codes the same ball constants — precondition for the mirror.
+    assert abs(cm.R_BALL - tp.ball_radius) < 1e-12 and abs(cm.C_INERTIA - tp.inertia_coeff) < 1e-9
+
+    # (a) analytic: pure vertical drop, no spin -> v+ = (0, 0, e|vz|), spin untouched (u_t = 0).
+    v_minus = torch.tensor([[0.0, 0.0, -3.0]])
+    w_minus = torch.zeros(1, 3)
+    v_plus, w_plus = pb.predict_table_contact(v_minus, w_minus, tp)
+    assert torch.allclose(v_plus, torch.tensor([[0.0, 0.0, tp.e_eff * 3.0]]), atol=1e-6), f"{v_plus}"
+    assert torch.allclose(w_plus, w_minus, atol=1e-9), "no tangential slip -> no spin change"
+
+    # (b) crafted descending crossing through surface+R inside the table footprint: extract the
+    # crossing (shadow_ball.landing_crossing, the manager's detector), then bounce there and
+    # cross-check the full (v+, w+) against the canonical numpy contact model with the SAME
+    # venue table params (v_r = 0, n = +z).
+    z_thr = 0.76 + tp.ball_radius
+    prev = torch.tensor([[1.20, 0.10, z_thr + 0.02]])
+    new = torch.tensor([[1.25, 0.12, z_thr - 0.02]])
+    crossed, xy = sbmod.landing_crossing(prev, new, z_thr)
+    assert bool(crossed[0]), "crafted segment must cross the bounce plane descending"
+    assert bool(pb.table_bounds_mask(xy, 0.5, 2.74, 1.525 / 2.0)[0]), "crossing inside the footprint"
+
+    v_minus = torch.tensor([[1.0, 0.5, -3.0]])
+    w_minus = torch.tensor([[10.0, 5.0, -8.0]])
+    v_plus, w_plus = pb.predict_table_contact(v_minus, w_minus, tp)
+    ref = cm.predict_contact(
+        v_minus.numpy(), np.zeros((1, 3)), np.array([[0.0, 0.0, 1.0]]), w_minus.numpy(),
+        tp.e_eff, tp.a_t, tp.b_t, tp.mu,
+    )
+    dv = float(np.abs(v_plus.numpy() - ref["v_plus"]).max())
+    dw = float(np.abs(w_plus.numpy() - ref["omega_plus"]).max())
+    assert dv < 1e-5, f"v_plus deviates from canonical contact model by {dv}"
+    assert dw < 1e-4, f"omega_plus deviates from canonical contact model by {dw}"
+    assert float(v_plus[0, 2]) > 0.0, "bounce must send the ball back up"
+
+    # (c) cap-binding regime: huge tangential slip vs a soft normal component -> the friction cap
+    # s = mu (1+e) |u_n| binds (needs |u_t|/|u_n| > mu(1+e)/a_t ~ 10.4 at the venue table params;
+    # the numpy model must agree AND report the cap as binding).
+    v_minus = torch.tensor([[9.0, 0.0, -0.5]])
+    w_minus = torch.zeros(1, 3)
+    v_plus, w_plus = pb.predict_table_contact(v_minus, w_minus, tp)
+    ref = cm.predict_contact(
+        v_minus.numpy(), np.zeros((1, 3)), np.array([[0.0, 0.0, 1.0]]), w_minus.numpy(),
+        tp.e_eff, tp.a_t, tp.b_t, tp.mu,
+    )
+    assert bool(ref["cap_binds"][0]), "crafted case must bind the friction cap"
+    assert float(np.abs(v_plus.numpy() - ref["v_plus"]).max()) < 1e-5
+    assert float(np.abs(w_plus.numpy() - ref["omega_plus"]).max()) < 1e-4
+    print("[ok] predict_table_contact: vertical-drop analytic, crafted-crossing + cap-binding "
+          "cases match the canonical numpy contact model on the venue table params")
+
+
+def test_serve_scheduling(pb):
+    horizon, min_tts = pb.SERVE_HORIZON_S, 0.02
+    parked = torch.tensor([True, True, True, True, True, False])
+    tts = torch.tensor([0.70, horizon, 0.30, min_tts, -0.10, 0.30])
+    due = pb.schedule_serves(parked, tts, horizon, min_tts)
+    # 0: beyond horizon -> keep waiting. 1: exactly at horizon -> serve (<=). 2: inside -> serve.
+    # 3: exactly at min_tts -> too late, never serve (strict >). 4: past the strike -> never.
+    # 5: not parked (already flying) -> never double-serve.
+    assert due.tolist() == [False, True, True, False, False, False], f"serve mask wrong: {due.tolist()}"
+
+    # A served env leaves PARKED, so the next step's mask cannot re-serve it (idempotence),
+    # and an un-served env re-parks only via on_resample (new question) — modeled here by the
+    # parked flag the manager owns.
+    parked2 = parked & ~due
+    due2 = pb.schedule_serves(parked2, tts - 0.02, horizon, min_tts)
+    assert not bool(due2[1]) and not bool(due2[2]), "served envs must not serve twice"
+    assert not bool(due2[0]), "0.68 s is still beyond the 0.6 s horizon"
+
+    # Bounds mask sanity (the bounce footprint in env-local frame).
+    xy = torch.tensor([[0.5, 0.0], [3.24, 0.762], [0.49, 0.0], [3.25, 0.0], [1.5, 0.77]])
+    m = pb.table_bounds_mask(xy, 0.5, 2.74, 1.525 / 2.0)
+    assert m.tolist() == [True, True, False, False, False], f"bounds mask wrong: {m.tolist()}"
+    print("[ok] schedule_serves: horizon/min-tts/parked gating + no double serve; "
+          "table_bounds_mask edges exact")
+
+
+def main():
+    pb = _load(os.path.join(MDP_DIR, "physical_ball.py"), "physical_ball_standalone")
+    vb = _load(os.path.join(MDP_DIR, "virtual_ball.py"), "virtual_ball_standalone")
+    sbmod = _load(os.path.join(MDP_DIR, "shadow_ball.py"), "shadow_ball_standalone")
+    cm = _load(CONTACT_MODEL_PATH, "contact_model_standalone")
+    test_back_integration_roundtrip(pb, vb)
+    test_table_params_loader(pb)
+    test_table_bounce_math(pb, sbmod, cm)
+    test_serve_scheduling(pb)
+    print("ALL PHYSICAL-BALL HELPER TESTS PASSED")
+
+
+if __name__ == "__main__":
+    main()

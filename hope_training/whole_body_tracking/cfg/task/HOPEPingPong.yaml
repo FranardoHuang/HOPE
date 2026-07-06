@@ -227,6 +227,19 @@ racket:
   #                                          # = contract-day 175 -> 179 on deploy-parity;
   #                                          # update/remove actor_obs_contract when enabling
 
+# ---- PHYSICAL ball + table — Phase A truth instrument (flag-gated, METRICS-ONLY; default OFF) --
+# TOP-LEVEL task key (NOT under racket:). A real PhysX table + one real ball per env: each swing's
+# question incoming ball is realized physically — launched from the reverse-integrated venue-model
+# state so it arrives at the question contact point with the question incoming velocity exactly at
+# the strike frame, flies under the per-substep venue aero wrench, takes the CODE-DRIVEN fitted
+# table bounce (venue contact.table params), and passes THROUGH the robot (ball collider off; the
+# in-engine fitted racket impulse is Phase B, out of scope). Metrics only (pb_serve_err_m /
+# pb_serve_vel_err at the strike frame + serve/bounce/landing counts) — reward/obs streams are
+# untouched even when on. Requires the virtual-ball task variant (task=HOPEPingPongVirtualBall or
+# commands.racket_target.virtual_ball=true) — loud error otherwise. Physics basis (in-loop 17 mm
+# systematic, scripts/isaac_ball_inloop_check.py) + honesty notes: tasks/tracking/mdp/physical_ball.py.
+# physical_ball: true
+
 # ---- domain randomization (HITTER-faithful) ---------------------------------
 # HITTER publishes no DR table; prose randomizes mass/friction/restitution + perception noise, and
 # states PD gains are FIXED. So: keep link-mass randomization + the base friction/CoM + observation
