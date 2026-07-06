@@ -1556,6 +1556,15 @@ def main():
                         "ee_body_pos is a TRAINING reset guard, not a deployment condition; raise it "
                         "(e.g. 100) to let swings run past a loose wind-up and measure the true strike/"
                         "fall rate without the guard cutting episodes off mid-swing.")
+    p.add_argument("--anchor-term-z", type=float, default=None,
+                   help="override the anchor_pos termination threshold (|ref torso z - robot torso "
+                        "z|, training default 0.25 m). Same class as --ee-term-z: a TRAINING reset "
+                        "guard. Bank/face policies deviate from the replay reference BY DESIGN "
+                        "(2026-07-06: 456 hold-phase kills on arm B before any swing) — raise to "
+                        "100 for bank exams; real falls stay caught by fall_root_z.")
+    p.add_argument("--anchor-term-ori", type=float, default=None,
+                   help="override the anchor_ori termination threshold (projected-gravity z gap, "
+                        "training default 0.8). Same training-guard class as --anchor-term-z.")
     p.add_argument("--strike-phase-per-clip", nargs="+", type=float, default=None,
                    help="DIAGNOSTIC: override per-clip strike phase. Must match the trained model's "
                         "strike_phase_per_clip. Default: ONNX metadata clip_strike_phases when present "
@@ -1618,7 +1627,12 @@ def main():
     # --- MODE B: distribution-driven realism eval (2026-07-04; see module docstring TARGET SOURCE
     # + scripts/venue_ball_sampler.py for frames/geometry/caveats). Default boxes = mode A,
     # byte-identical to the pre-existing behavior.
-    p.add_argument("--target-source", choices=["boxes", "venue-balls"], default="boxes",
+    p.add_argument("--exam-bank", default=None,
+                   help="[bank] stage-1 exam bank npz (gen_stage1_questions.py --split exam "
+                        "product). REQUIRED with --target-source bank; loaded through "
+                        "stage1_question_bank.load_question_bank so the meta guards "
+                        "(grip_applied/rally_yaw_applied) are enforced, never bypassed.")
+    p.add_argument("--target-source", choices=["boxes", "venue-balls", "bank"], default="boxes",
                    help="boxes (default): racket targets from the per-clip training boxes (mode A, "
                         "in-distribution). venue-balls (mode B): sample INCOMING BALLS from the "
                         "fitted venue matchlike distribution (configs/incoming_ball_venue.yaml), "
@@ -1684,19 +1698,40 @@ def main():
     if args.venue_fixed_normal and args.target_source != "venue-balls":
         raise SystemExit("[FATAL] --venue-fixed-normal only means something with "
                          "--target-source venue-balls")
+    if args.target_source == "bank":
+        if not args.exam_bank:
+            raise SystemExit("[FATAL] --target-source bank requires --exam-bank <exam npz> "
+                             "(gen_stage1_questions.py --split exam product)")
+        if args.venue_contact_fixed or args.venue_spin_max is not None or args.venue_vel_box:
+            raise SystemExit("[FATAL] --target-source bank: the exam paper comes SOLELY from "
+                             "the bank; --venue-contact-fixed/--venue-spin-max/--venue-vel-box "
+                             "would silently contradict it — drop them.")
+        if args.deploy_faithful:
+            raise SystemExit("[FATAL] --target-source bank + --deploy-faithful is unsupported "
+                             "(v1): the df swing scheduler owns its own resample path.")
     if args.switch_stress > 0.0:
         if args.deploy_faithful:
             raise SystemExit("[FATAL] --switch-stress + --deploy-faithful is unsupported (v1): "
                              "the df swing scheduler owns its own clip clock.")
-        if args.target_source == "venue-balls":
-            raise SystemExit("[FATAL] --switch-stress + --target-source venue-balls is "
-                             "unsupported (v1): one stressor per protocol.")
+        if args.target_source != "boxes":
+            raise SystemExit("[FATAL] --switch-stress + --target-source "
+                             f"{args.target_source} is unsupported (v1): one stressor per "
+                             "protocol.")
 
     # Apply eval-only overrides to the module globals BEFORE any precompute/rollout reads them.
     global STRIKE_PHASE_PER_CLIP, RACKET_POS_Z_RANGE, TERM_EE_POS_Z, POS_RANGE_PER_CLIP, VEL_RANGE_PER_CLIP
+    global TERM_ANCHOR_POS_Z, TERM_ANCHOR_ORI
     if args.strike_phase_per_clip is not None:
         STRIKE_PHASE_PER_CLIP = tuple(args.strike_phase_per_clip)
         print(f"[mj-sim2sim] OVERRIDE strike_phase_per_clip -> {STRIKE_PHASE_PER_CLIP} (eval-only)")
+    if args.anchor_term_z is not None:
+        TERM_ANCHOR_POS_Z = float(args.anchor_term_z)
+        print(f"[mj-sim2sim] OVERRIDE anchor_pos termination threshold -> {TERM_ANCHOR_POS_Z} m "
+              f"(training reset guard; eval-only)")
+    if args.anchor_term_ori is not None:
+        TERM_ANCHOR_ORI = float(args.anchor_term_ori)
+        print(f"[mj-sim2sim] OVERRIDE anchor_ori termination threshold -> {TERM_ANCHOR_ORI} "
+              f"(training reset guard; eval-only)")
     if args.ee_term_z is not None:
         TERM_EE_POS_Z = float(args.ee_term_z)
         print(f"[mj-sim2sim] OVERRIDE ee_body_pos termination z-threshold -> {TERM_EE_POS_Z} m "
@@ -1891,7 +1926,27 @@ def main():
 
     # --- MODE B (venue-balls) sampler: lazy import so mode A never needs hope_planner ----------
     venue_sampler = None
-    if args.target_source == "venue-balls":
+    if args.target_source == "bank":
+        import venue_ball_sampler as _vbs   # sibling module (scripts/ is on sys.path, top of file)
+        kw = {}
+        if args.venue_table_near_x is not None:
+            kw["table_near_x"] = args.venue_table_near_x
+        if args.venue_table_surface_z is not None:
+            kw["table_surface_z"] = args.venue_table_surface_z
+        if args.venue_fh_y_split is not None:
+            kw["fh_y_split"] = args.venue_fh_y_split
+        venue_sampler = _vbs.BankExamSampler(
+            repo_root=repo, ref_normal_per_clip=target_normal_per_clip, num_clips=num_clips,
+            bank_path=args.exam_bank,
+            landing_x_range=args.venue_landing_x_range,
+            landing_y_range=tuple(args.venue_landing_y_range),
+            speed_budget=args.venue_speed_budget, max_tries=args.venue_max_tries, **kw)
+        print(f"[mj-sim2sim] MODE B — target source: EXAM BANK (official S1 paper; same-source "
+              f"questions, loader meta guards enforced)")
+        print(f"[mj-sim2sim]   bank: {args.exam_bank}")
+        for _ln in venue_sampler.denominator_report():
+            print(f"[mj-sim2sim] {_ln}")
+    elif args.target_source == "venue-balls":
         if args.deploy_faithful:
             raise SystemExit("[FATAL] --target-source venue-balls + --deploy-faithful is "
                              "unsupported (v1): the df swing scheduler owns its own resample path.")
@@ -2170,6 +2225,11 @@ def main():
         vrow("spec_solve_fails", "solve_fail", sub="sampler")
         vrow("sign_rejects", "sign_reject", sub="sampler")
         vrow("mean_solve_iters", "mean_solve_iters", sub="sampler")
+        if hasattr(venue_sampler, "denominator_report"):
+            print("-" * 92)
+            print("DENOMINATORS (判卷分母法则 — return rates are meaningless without these):")
+            for _ln in venue_sampler.denominator_report():
+                print(_ln)
         print("=" * 92)
 
     # ---- deploy-faithful swing-schedule report ----
