@@ -42,7 +42,7 @@ Rules:
 | Person | Focus |
 | --- | --- |
 | franco | Direction, priorities, arbitration |
-| dongc1 | End-to-end training bring-up; reward tuning — the simtoreal2 lineage (HER achieved-replay, hold_ready, model_9000 training) |
+| dongc1 | End-to-end training bring-up; reward tuning — the simtoreal2 lineage (hold-fall fix stack, 177-D Hitter footwork, C++ deploy path) |
 | yikang | Deployment; sim/env alignment |
 | claude (franco's agent) | Foundation: infrastructure, A/B experiments, doc/code hygiene |
 
@@ -622,8 +622,9 @@ R15 v5 专属采样框(**franco 纠错后 2026-07-04 深夜版**;从击球帧提
   关节(手臂 0 超限)**,最狠瞬间被剪掉该关节力矩上限的 35-56%;但闭环剪着打,击球三合格率
   1.000 不变、0 摔,拍速误差只 +0.02-0.03 m/s → **对 P2 产品线,仿真里看不出实质伤害;残余
   风险在真机平衡临界时刻(踝力矩恰好在最需要时被剪)**。待办:①门禁加同款剪切 flag(探针已
-  验证一行 clip 即可,mirror pp_joint_limits);②训练侧剪切=jiayi 修复中(他的谱系上观察到
-  的现象,各模型暴露面不同,他的存档修好后拿探针复量)。
+  验证一行 clip 即可,mirror pp_joint_limits);②训练侧剪切 **✅ 已落地(simtoreal2
+  `f8c166e6`+`df64b9d8`:train==deploy q_des clamp 进训练;修复谱系 model_16400_holdfix
+  已在 TRUE plant 三门禁全过)**——各模型暴露面不同,其它谱系存档仍可拿探针复量。
 - ~~**换招压力测试 eval 变体**(R11 收益的量尺,2026-07-05 立项)~~ **已建成并量完 2026-07-05**:
   `mujoco_eval_onnx.py --switch-stress p`(默认关,关=字节不变;训练侧 commands.py clip_switch
   同语义:均匀换模板、跳回起手帧、重新等球+换目标、机器人不动;开着时模仿守卫改成只看真摔)。
@@ -717,9 +718,10 @@ After the 18:15 finish + verdict, the freed slots run signal-tier (2000-it ≈ 1
 | A8: post-swing initial-state buffer (Ace) | ★★★ | claude | `p2-multiswing` (flag `motion.post_swing_start_prob`) | IMPLEMENTED + mech-verified 2026-07-03; next: arm D after P2.1 A/B |
 | P2.0: ready-pose definition (see G08) | ★★ (foundation) | franco (拍摄) + claude (pipeline) | — | DECIDED 2026-07-03: option (a) — record a ready-stance video through GVHMR→GMR on the next site visit (bundle with A5's 30-50 new swing clips); claude processes + wires into stand_start/hold/clip re-entry |
 | Legacy-task long run `merged_uniform_hopex` (20000 it, task=HOPEPingPong on own branch) | ? | yikang | `rsi-on-wrap-progress-fix` | RUNNING on pod GPU0. ⚠ branch duplicates main's wrap_teleport machinery and has LFS-pointerized CSVs — reconcile with main before merging; the unique progress-fix is already ported to `p2-multiswing` |
-| simtoreal2 lineage: HER achieved-replay + hold_ready + model_9000_replane training (merged to main 2026-07-03) | ★★★ | dongc1 | `simtoreal2` (merged) | model_9000 backhand passed training gate; **needs**: drop `model_9000_replane.onnx` into `/workspace/shared/models/` so the scoreboard can grade it against tonight's candidates |
-| Sim2real deploy bridge: `agibot_hardware_bridge` ROS pkg (`bridge_node`) + `world_frame` world→robot target transform (+`test_world_frame`) + `hope_pingpong_sim2real` launch + `wbc_runner` rebuild for the planner-driven deploy path; `HOPEPingPongDeployParity` hyperparameter tuning | ★★★ | dongc1 | `simtoreal2` | IMPLEMENTED 2026-07-03 (`a5016d43`) with `run_sim2real_bridge.md` ops doc; this is the concrete build of the G07 world→robot transform (row below). Next: wire mocap relay → planner → runner end-to-end on hardware |
-| G07 mocap→runner bridge + world→robot target transform design (A2) | ★★ | dongc1 (impl started; see row above) | `simtoreal2` | `world_frame.py` + `test_world_frame` landed 2026-07-03; design doc still TODO — see G07 Next Steps and G08 audit item 2 |
+| simtoreal2 ARM A(hold-fall fix lineage): stationary hold reference + train==deploy q_des clamp + 训练 plant 加关节摩擦 | ★★★ | dongc1 | `simtoreal2` | **model_16400_holdfix 三门禁全过 TRUE plant(2026-07-05,`cc19b7b0`)**;resume sweep(13-04-02):23000 最稳 / 23700 最准,全面超 16400;Gate 2.5 best = 23700/19400 = 6/7;残留缺口:反手挥后 hold 摔仅在 AGI plant 复现(MuJoCo 门禁看不见)|
+| HOPEPingPongHitter 177-D(HITTER §V-B-1 base/racket 分离命令)+ 步法 V2(stance-driven stepping:boxes ±0.30、station-gated hold_ready、base_position 2.0/0.20) | ★★★ | dongc1 | `simtoreal2` | scratch run 00-56-46 判 HEALTHY(2026-07-06 审计,最快的 scratch hitter;hold(50,400) 把击球密度砍半——判读只看 \*\_exact 家族);07-06 pbase 奖励回归+惩罚项(`85658867`)+ 对齐仿真↔真机 pass(`b76667a4`);next:训练判读 → 导出 → 门禁 |
+| Sim2real 部署路:C++ `pp_policy.hpp --planner` = 唯一控制路(python wbc_runner 链 2026-07-04 退役 `89a1cfa2`) | ★★★ | dongc1 | `simtoreal2` | 闭环 headless 验证过(engage→swing→complete→hold→re-engage)+ Gate-3 逐点 conductor(`181f85c9`);**177-D 部署链已对齐 + parity PASS(2026-07-06:exporter 烤入 ref_reach_offset_xy;C++ station=target−reach 带 Δ=0 守卫)**;next:MDU 硬件门 |
+| G07 mocap→runner 桥 + world→robot 变换设计(A2) | ★★ | dongc1 | `simtoreal2` | mocap relay→planner→runner 链 2026-07-03 桥通+验证;python 链退役后路径 = mocap relay → planner → C++ `--planner`;设计文档仍 TODO — 见 G07 Next Steps 与 G08 audit item 2 |
 
 ## Queued (priority order, from G08)
 
@@ -735,6 +737,10 @@ After the 18:15 finish + verdict, the freed slots run signal-tier (2000-it ≈ 1
 
 | Item | Owner | Landed | Where |
 | --- | --- | --- | --- |
+| 177-D Hitter 部署链对齐 + parity PASS(exporter 烤入 ref_reach_offset_xy;C++ station=target−reach 带 Δ=0 守卫;⚠ npz body31=腕,blade reach=(0.699,−0.409)/(0.706,+0.185)) | dongc1 | 2026-07-06 | `simtoreal2` (`b76667a4`) |
+| Hold-fall fix stack:stationary hold reference + train==deploy q_des clamp;model_16400_holdfix 三门禁全过 TRUE plant | dongc1 | 2026-07-05 | `simtoreal2` (`f8c166e6`, `cc19b7b0`) |
+| sim2sim 根因修复:训练 plant 补关节摩擦 + planner 桌面系 bug | dongc1 | 2026-07-05 | `simtoreal2` (`f921c5b1`) |
+| Python 控制链退役;C++ `--planner` 闭环 headless 验证 + Gate-3 逐点 conductor 工序 | dongc1 | 2026-07-04 | `simtoreal2` (`89a1cfa2`, `181f85c9`) |
 | Standardize VRPN rigid-body object names (`P1`/`P2`/`Ball`) in the mocap relay config | dongc1 | 2026-07-03 | `simtoreal2` (`ac79a17a`) |
 | wandb registry: fetch only the newest `motion.npz` | dongc1 | 2026-07-03 | `simtoreal2` (`3c9bc0cf`) |
 | Merge `origin/main` (49 commits) into `simtoreal2` (local-first, doc+code) | dongc1 | 2026-07-03 | `simtoreal2` |
