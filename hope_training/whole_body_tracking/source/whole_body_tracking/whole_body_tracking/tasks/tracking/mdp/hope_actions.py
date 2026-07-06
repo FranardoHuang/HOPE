@@ -11,12 +11,13 @@ removed at deploy). Clamping the PROCESSED action (the joint-position target) in
 training makes train == deploy so the policy learns torque strategies that
 survive the runner's clamp.
 
-FLAG-GATED (merge-audit 2026-07-06, franco's standing rule): `clamp=False` is
-byte-identical to the stock JointPositionAction — the clean-train path stays
-provable. Lineages that trained WITH the clamp (DeployParity hold-fall fix stack,
-Hitter) turn it on from their task YAML via `actions: qdes_clamp: true`
-(train.py translation). Other lineages adopt it through an A/B arm, not by
-default-drift.
+DEFAULT ON since 2026-07-06 (franco ruling): jiayi found the unclamped P2 product
+line CANNOT EVEN STAND in the MuJoCo gate — the policy's balance strategy leans
+on out-of-range q_des torque the deploy runner will never grant. This is a
+train==deploy correctness alignment, not a tunable: every future run trains
+clamped. `clamp=False` remains available ONLY for explicit legacy-reproduction /
+control arms (`actions: qdes_clamp: false` in the task YAML), and batch
+comparisons must keep clamp state uniform within the batch.
 """
 
 from __future__ import annotations
@@ -53,6 +54,6 @@ class ClampedJointPositionAction(JointPositionAction):
 @configclass
 class ClampedJointPositionActionCfg(JointPositionActionCfg):
     class_type: type = ClampedJointPositionAction
-    # OFF by default: identical to JointPositionAction. Turn on per-task via YAML
-    # `actions: qdes_clamp: true` (see train.py) — never by editing this default.
-    clamp: bool = False
+    # ON by default (franco 2026-07-06, after jiayi's P2-cannot-stand-in-MuJoCo finding).
+    # Set `actions: qdes_clamp: false` in a task YAML ONLY for legacy-reproduction arms.
+    clamp: bool = True

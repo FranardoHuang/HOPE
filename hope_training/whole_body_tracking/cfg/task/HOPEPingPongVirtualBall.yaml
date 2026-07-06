@@ -46,3 +46,9 @@ motion:
 rewards:
   racket_position_std: 0.20
   base_decel_weight: 0.0
+
+actions:
+  # q_des 限位剪切(人话:训练时就把超关节范围的目标角剪掉,和真机一致)。franco 2026-07-06
+  # 定死默认开:jiayi 发现不剪切的产品线在 MuJoCo 门禁里根本站不起来(平衡策略靠"喊超范围
+  # 角度"多要力矩,真机/门禁不给)。此处显式钉住,防未来默认漂移;关闭仅限老配方复现对照臂。
+  qdes_clamp: true
