@@ -223,6 +223,11 @@ BASE_TARGET_X_RANGE = (-0.10, 0.10)
 BASE_TARGET_Y_RANGE = (-0.10, 0.10)
 BASE_COUPLE_BLEND = 0.3                  # weak base->racket Y coupling
 BASE_COUPLE_MAX_OFFSET = 0.20
+# 177-D hitter_footwork base-station coupling (training base_couple_mode=reference_reach):
+# station_xy = racket_target_xy - per-clip reference base->racket reach offset at strike + jitter.
+# Jitter ranges mirror the hitter task YAML (racket.base_target_x_range / base_target_y_range).
+HITTER_BASE_JITTER_X = (-0.05, 0.05)
+HITTER_BASE_JITTER_Y = (-0.10, 0.10)
 FOREHAND_ON_NEGATIVE_Y = True            # forehand (clip 0) target on -y
 # forehand / backhand contact phase. MUST match the trained model's task YAML
 # `racket.strike_phase_per_clip`. Resolution order at runtime: --strike-phase-per-clip CLI override >
@@ -308,10 +313,14 @@ class OnnxPolicy:
         outs = [o.name for o in self.sess.get_outputs()]
         assert "obs" in ins and "time_step" in ins, f"unexpected ONNX inputs: {ins}"
         self.obs_dim = int(ins["obs"][1])
-        assert self.obs_dim in (175, 180), f"expected obs dim 180 (base) or 175 (deploy_parity), got {self.obs_dim}"
+        assert self.obs_dim in (175, 177, 180), (
+            f"expected obs dim 180 (base), 175 (deploy_parity) or 177 (hitter_footwork), got {self.obs_dim}")
         # 175-D deploy_parity = 180-D MINUS motion_anchor_pos_b(3) and base_target_pos_b(2), with the
         # racket_target_pos_b term reframed relative to the CURRENT racket FK (not the base). See build_obs.
+        # 177-D hitter_footwork = the 175-D layout PLUS base_target_pos_b(2) re-inserted after
+        # projected_gravity (relative-Δ station footwork channel); racket reframe stays FK-relative.
         self.deploy_parity = (self.obs_dim == 175)
+        self.hitter = (self.obs_dim == 177)
         self.out_names = outs
         md = self.sess.get_modelmeta().custom_metadata_map
         # --- metadata (FAIL LOUDLY if anything is missing) -------------------------------------
@@ -337,6 +346,14 @@ class OnnxPolicy:
         self.clip_seg_lengths = None
         if md.get("clip_seg_lengths", "").strip():
             self.clip_seg_lengths = tuple(int(float(v)) for v in md["clip_seg_lengths"].split(","))
+        # per-clip reference base->racket reach offset at the strike frame (dx0,dy0,dx1,dy1,...).
+        # Needed to derive the 177-D hitter base station from the racket target (base_couple_mode
+        # reference_reach). Baked by utils/exporter.py since 2026-07-06; older 177 exports lack it —
+        # main() computes a fallback from refs_table (same arithmetic as training).
+        self.ref_reach_offset_xy = None
+        if md.get("ref_reach_offset_xy", "").strip():
+            vals = [float(v) for v in md["ref_reach_offset_xy"].split(",")]
+            self.ref_reach_offset_xy = [np.array(vals[i:i + 2]) for i in range(0, len(vals), 2)]
         # optional episode-semantics metadata (future exports may bake the training wrap_teleport
         # flag; none do as of 2026-07-04 — --reset-mode auto then defaults to multiswing).
         self.wrap_teleport_meta = None
@@ -548,7 +565,7 @@ class MujocoRobot:
 # =================================================================================================
 class RacketCommand:
     def __init__(self, seg_start, seg_len, step_dt, rng, target_normal_per_clip, origin=np.zeros(3),
-                 vel_ranges_per_clip=None, pos_ranges_per_clip=None):
+                 vel_ranges_per_clip=None, pos_ranges_per_clip=None, ref_reach_offset_xy=None):
         self.seg_start = seg_start          # (num_clips,)
         self.seg_len = seg_len
         self.step_dt = step_dt
@@ -569,11 +586,18 @@ class RacketCommand:
         # fixed-plane + |y|-sign + z-range logic when set. Needed to evaluate blade-centered-box
         # checkpoints in-distribution (the built-in constants are the legacy fixed-plane ranges).
         self.pos_ranges_per_clip = pos_ranges_per_clip
+        # 177-D hitter_footwork: per-clip reference base->racket reach offset (list of (dx,dy)).
+        # When set, base targets use training's reference_reach coupling (station follows the racket
+        # target) instead of the legacy 180-era spawn + weak-Y-blend sampling.
+        self.ref_reach_offset_xy = ref_reach_offset_xy
         # state
         self.racket_target_pos_w = np.zeros(3)
         self.racket_target_vel_w = np.zeros(3)
         self.racket_target_normal_w = np.array([0.0, 1.0, 0.0])
         self.base_target_pos_w = np.zeros(2)
+        # the swing's SAMPLED station (deploy-faithful hold pins base_target_pos_w to the live base
+        # for a Δ=0 obs, then restores this at swing start — see run_rollout)
+        self.station_pos_w = np.zeros(2)
         self.swing_sign = 1.0
         self.time_to_strike = 0.0
 
@@ -617,31 +641,40 @@ class RacketCommand:
         self.swing_sign = 1.0 if clip_id == 0 else -1.0
         # target paddle normal = the per-clip reference face normal at strike (unified uniform mode).
         self.racket_target_normal_w = self.target_normal_per_clip[clip_id]
-        # base target XY (world): spawn + weak Y coupling to racket target + small jitter.
-        base_xy = o[:2].copy()
-        racket_y_off = self.racket_target_pos_w[1] - o[1]
-        base_xy[1] += float(np.clip(BASE_COUPLE_BLEND * racket_y_off,
-                                    -BASE_COUPLE_MAX_OFFSET, BASE_COUPLE_MAX_OFFSET))
-        base_xy[0] += self._u(*BASE_TARGET_X_RANGE)
-        base_xy[1] += self._u(*BASE_TARGET_Y_RANGE)
+        # base target XY (world): reference_reach station (hitter) or legacy blend — see helper.
+        self._sample_base_target(clip_id)
+
+    def _sample_base_target(self, clip_id):
+        """Base station (world XY). hitter_footwork (ref_reach_offset_xy set): training
+        base_couple_mode=reference_reach — station = racket_target_xy - per-clip reference
+        base->racket reach at strike + jitter, so standing AT the station puts the racket target
+        at the clip's reference reach. Legacy 180-D: spawn + weak Y blend + jitter. Both branches
+        draw exactly 2 uniforms, keeping the RNG stream length identical across contracts."""
+        o = self.origin
+        if self.ref_reach_offset_xy is not None:
+            reach = self.ref_reach_offset_xy[min(clip_id, len(self.ref_reach_offset_xy) - 1)]
+            base_xy = self.racket_target_pos_w[:2] - reach
+            base_xy[0] += self._u(*HITTER_BASE_JITTER_X)
+            base_xy[1] += self._u(*HITTER_BASE_JITTER_Y)
+        else:
+            base_xy = o[:2].copy()
+            racket_y_off = self.racket_target_pos_w[1] - o[1]
+            base_xy[1] += float(np.clip(BASE_COUPLE_BLEND * racket_y_off,
+                                        -BASE_COUPLE_MAX_OFFSET, BASE_COUPLE_MAX_OFFSET))
+            base_xy[0] += self._u(*BASE_TARGET_X_RANGE)
+            base_xy[1] += self._u(*BASE_TARGET_Y_RANGE)
         self.base_target_pos_w = base_xy
+        self.station_pos_w = base_xy.copy()
 
     def set_external_target(self, pos_w, vel_w, normal_w, clip_id):
         """Mode-B (venue-balls) target injection: same state writes as resample(), but with an
         externally computed (ball-demanded) pos/vel/normal instead of box draws. The base-target
         coupling is kept identical to resample() so the policy sees the same obs semantics."""
-        o = self.origin
         self.racket_target_pos_w = np.asarray(pos_w, np.float64).copy()
         self.racket_target_vel_w = np.asarray(vel_w, np.float64).copy()
         self.racket_target_normal_w = np.asarray(normal_w, np.float64).copy()
         self.swing_sign = 1.0 if clip_id == 0 else -1.0
-        base_xy = o[:2].copy()
-        racket_y_off = self.racket_target_pos_w[1] - o[1]
-        base_xy[1] += float(np.clip(BASE_COUPLE_BLEND * racket_y_off,
-                                    -BASE_COUPLE_MAX_OFFSET, BASE_COUPLE_MAX_OFFSET))
-        base_xy[0] += self._u(*BASE_TARGET_X_RANGE)
-        base_xy[1] += self._u(*BASE_TARGET_Y_RANGE)
-        self.base_target_pos_w = base_xy
+        self._sample_base_target(clip_id)
 
     def update_strike_timing(self, clip_id, time_step):
         seg_start = self.seg_start[clip_id]
@@ -668,15 +701,18 @@ class RacketCommand:
 
 
 # =================================================================================================
-# Observation builder. Two contracts, detected from the ONNX obs dim:
-#   180-D (base)         : full BeyondMimic obs (has motion_anchor_pos_b + base_target_pos_b, and
-#                          racket_target_pos_b is BASE-relative).
-#   175-D (deploy_parity): DROPS motion_anchor_pos_b(3) and base_target_pos_b(2), and reframes
-#                          racket_target_pos_b to be relative to the CURRENT RACKET FK (deploy-honest,
-#                          no world base position leaks in). Everything else is byte-identical.
+# Observation builder. Three contracts, detected from the ONNX obs dim:
+#   180-D (base)           : full BeyondMimic obs (has motion_anchor_pos_b + base_target_pos_b, and
+#                            racket_target_pos_b is BASE-relative).
+#   175-D (deploy_parity)  : DROPS motion_anchor_pos_b(3) and base_target_pos_b(2), and reframes
+#                            racket_target_pos_b to be relative to the CURRENT RACKET FK (deploy-honest,
+#                            no world base position leaks in). Everything else is byte-identical.
+#   177-D (hitter_footwork): the 175-D layout PLUS base_target_pos_b(2) re-inserted after
+#                            projected_gravity — a RELATIVE Δxy station channel in the yaw-heading
+#                            base frame (Δ=0 == "already at station"); racket reframe stays FK-rel.
 # =================================================================================================
 def build_obs(refs, robot: MujocoRobot, racket: RacketCommand, last_action, default_q,
-              deploy_parity=False):
+              deploy_parity=False, hitter=False):
     # robot base (pelvis = root) world pose
     base_pos_w = robot.body_pos(robot.pelvis_bid)
     base_quat_w = robot.body_quat(robot.pelvis_bid)
@@ -710,7 +746,18 @@ def build_obs(refs, robot: MujocoRobot, racket: RacketCommand, last_action, defa
     # 13. swing_type (1)
     swing = np.array([racket.swing_sign])
 
-    if deploy_parity:
+    if hitter:
+        # 177-D hitter_footwork: the 175-D deploy_parity layout PLUS base_target_pos_b(2)
+        # inserted after projected_gravity. Same FK-relative racket reframe as 175.
+        racket_pos_w = base_pos_w + mat_from_quat(base_quat_w) @ racket_pos_pelvis(q)
+        racket_tgt_b = racket.racket_target_pos_b_rel_fk(base_pos_w, base_quat_w, racket_pos_w)
+        base_tgt_b = racket.base_target_pos_b(base_pos_w, base_quat_w)
+        obs = np.concatenate([
+            command, ori_b6, base_ang_vel, joint_pos_rel, joint_vel_rel,
+            last_action, proj_grav, base_tgt_b, racket_tgt_b, racket_vel_w, tts, swing,
+        ]).astype(np.float64)
+        assert obs.shape == (177,), f"obs dim {obs.shape} != 177 (hitter_footwork)"
+    elif deploy_parity:
         # 175-D deploy_parity: DROP motion_anchor_pos_b(3) and base_target_pos_b(2); reframe
         # racket_target_pos_b relative to the CURRENT racket FK.
         #   racket_pos_w = base_pos_w + R(base_quat_w) @ racket_pos_pelvis(q)   (q = current joints)
@@ -885,7 +932,8 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 reset_mode="teleport", hold_range=(0, 100), venue_sampler=None):
     racket = RacketCommand(seg_start, seg_len, step_dt, rng, target_normal_per_clip,
                            vel_ranges_per_clip=vel_ranges_per_clip,
-                           pos_ranges_per_clip=pos_ranges_per_clip)
+                           pos_ranges_per_clip=pos_ranges_per_clip,
+                           ref_reach_offset_xy=(policy.ref_reach_offset_xy if policy.hitter else None))
     strike = {"all": StrikeAcc(), "forehand": StrikeAcc(), "backhand": StrikeAcc()}
     multiswing = (reset_mode == "multiswing") and (df is None)
     # --- mode B (venue-balls): per-rollout accumulators + the current swing's sampled ball -------
@@ -1024,8 +1072,15 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
             refs = dict(refs)
             refs["joint_pos"] = policy.default_q
             refs["joint_vel"] = np.zeros_like(refs["joint_vel"])
+            # 177 hitter: hold/rest feeds a Δ=0 station (base target pinned to the LIVE base xy),
+            # mirroring the C++ runner's level-0 / non-engaged plan ("already at station" — the
+            # contract's mocap-dropout fallback). The armed swing's sampled station is restored
+            # from racket.station_pos_w at the hold->swing transition below.
+            if policy.hitter:
+                racket.base_target_pos_w = robot.body_pos(robot.pelvis_bid)[:2].copy()
         obs, base_quat_w, ra_pos, ra_quat, refa_pos, refa_quat = build_obs(
-            refs, robot, racket, last_action, policy.default_q, deploy_parity=policy.deploy_parity)
+            refs, robot, racket, last_action, policy.default_q, deploy_parity=policy.deploy_parity,
+            hitter=policy.hitter)
 
         mean = policy.action(obs, time_step)
         action = mean if noise_scale <= 0.0 else mean + noise_scale * std_vec * rng.standard_normal(31)
@@ -1226,6 +1281,9 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                     dfs["phase"] = "swing"
                     dfs["swing_starts"][clip] += 1
                     dfs["completed"] = False
+                    # restore the armed swing's SAMPLED station (the hitter hold pins the base
+                    # target to the live base for Δ=0; no-op for non-hitter contracts)
+                    racket.base_target_pos_w = racket.station_pos_w.copy()
                     time_step += 1                                # first advancing frame after windup
         racket.update_strike_timing(clip, time_step)
 
@@ -1496,8 +1554,12 @@ def main():
     print(f"[mj-sim2sim] onnx={args.onnx}")
     print(f"[mj-sim2sim] mjcf={args.mjcf}")
     policy = OnnxPolicy(args.onnx, obs_norm=("off" if args.no_obs_norm else args.obs_norm))
-    print(f"[mj-sim2sim] obs_dim={policy.obs_dim} "
-          f"({'deploy_parity: racket_target_pos_b relative to racket FK, no anchor_pos/base_target' if policy.deploy_parity else 'base: full 180-D BeyondMimic obs'}) "
+    contract_desc = {
+        175: "deploy_parity: racket_target_pos_b relative to racket FK, no anchor_pos/base_target",
+        177: "hitter_footwork: deploy_parity + base_target_pos_b(2) station Δxy after proj_grav",
+        180: "base: full 180-D BeyondMimic obs",
+    }[policy.obs_dim]
+    print(f"[mj-sim2sim] obs_dim={policy.obs_dim} ({contract_desc}) "
           f"joints={len(policy.joint_names)} "
           f"control={1/step_dt:.0f}Hz (sim_dt={args.sim_dt}, decim={args.decimation})")
 
@@ -1630,6 +1692,29 @@ def main():
         ref_wrist_quat = refs_table[strike_step]["body_quat_w"][WRIST_TRACKED_IDX]
         target_normal_per_clip.append(mat_from_quat(ref_wrist_quat)[:, MOUNT_NORMAL_AXIS] * MOUNT_NORMAL_SIGN)
     target_normal_per_clip = np.array(target_normal_per_clip)
+
+    # 177-D hitter_footwork: per-clip reference base->racket reach offset (station coupling).
+    # Metadata (utils/exporter.py) wins; metadata-less 177 exports (pre-2026-07-06) get a fallback
+    # computed from the baked refs — same arithmetic as training _ensure_reference_strike_state:
+    # reach_xy = reference blade world xy - reference pelvis world xy at the clip's strike frame.
+    if policy.hitter and policy.ref_reach_offset_xy is None:
+        reach_fallback = []
+        for c in range(num_clips):
+            strike_step = int(seg_start[c]) + int(round(STRIKE_PHASE_PER_CLIP[c] * (seg_len[c] - 1)))
+            r = refs_table[strike_step]
+            ref_root_pos = r["body_pos_w"][ROOT_TRACKED_IDX]
+            ref_root_quat = r["body_quat_w"][ROOT_TRACKED_IDX]
+            blade_w = ref_root_pos + mat_from_quat(ref_root_quat) @ racket_pos_pelvis(r["joint_pos"])
+            reach_fallback.append(blade_w[:2] - ref_root_pos[:2])
+        policy.ref_reach_offset_xy = reach_fallback
+        print("[mj-sim2sim] 177 hitter: ONNX lacks ref_reach_offset_xy metadata — computed from "
+              "refs: " + ", ".join(f"clip{c}=({v[0]:+.3f},{v[1]:+.3f})"
+                                   for c, v in enumerate(reach_fallback)) +
+              "  (re-export with the patched exporter to bake it)")
+    elif policy.hitter:
+        print("[mj-sim2sim] 177 hitter: ref_reach_offset_xy from ONNX metadata: "
+              + ", ".join(f"clip{c}=({v[0]:+.3f},{v[1]:+.3f})"
+                          for c, v in enumerate(policy.ref_reach_offset_xy)))
 
     # --- MODE B (venue-balls) sampler: lazy import so mode A never needs hope_planner ----------
     venue_sampler = None

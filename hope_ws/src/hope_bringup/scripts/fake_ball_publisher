@@ -34,6 +34,12 @@ class FakeBallPublisher(Node):
         # Defaults assume the arena convention (table x 0..2.74, robot near x=-0.5).
         self.declare_parameter("serve_forehand", [2.3, -1.00, 0.40, -5.0, 0.2, 1.0])
         self.declare_parameter("serve_backhand", [2.3, -0.52, 0.40, -5.0, -0.2, 1.0])
+        # OPTIONAL placement sweep: a flat N*6 list of serves cycled IN ORDER. When set
+        # (length >= 6 and a multiple of 6) it REPLACES the two-serve fh/bh alternation —
+        # the Gate-3 coverage sweep passes 10 serves (5 per clip spanning the trained y
+        # boxes) here. The [0.0] default is a "not set" sentinel (rclpy cannot infer a
+        # DOUBLE_ARRAY from an empty list); any length < 6 keeps the legacy pair.
+        self.declare_parameter("serves", [0.0])
         self.declare_parameter("rate_hz", 300.0)
         self.declare_parameter("drag_k", 0.15)          # MUST match hope_planner drag_k
         self.declare_parameter("restitution_h", 0.85)   # MUST match hope_planner
@@ -45,10 +51,14 @@ class FakeBallPublisher(Node):
         self.declare_parameter("frame_id", "world")
 
         gp = self.get_parameter
-        self._serves = [
-            np.array([float(v) for v in gp("serve_forehand").value]),
-            np.array([float(v) for v in gp("serve_backhand").value]),
-        ]
+        sweep = [float(v) for v in gp("serves").value]
+        if len(sweep) >= 6 and len(sweep) % 6 == 0:
+            self._serves = [np.array(sweep[i:i + 6]) for i in range(0, len(sweep), 6)]
+        else:
+            self._serves = [
+                np.array([float(v) for v in gp("serve_forehand").value]),
+                np.array([float(v) for v in gp("serve_backhand").value]),
+            ]
         self._dt = 1.0 / max(float(gp("rate_hz").value), 1.0)
         self._k = float(gp("drag_k").value)
         self._ch = float(gp("restitution_h").value)

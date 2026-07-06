@@ -178,7 +178,7 @@ def total_policy_dim_from_env(env) -> int:
 def infer_actor_observation_contract(env) -> ActorObservationContract | None:
     layout = policy_layout_from_env(env)
     total_dim = total_policy_dim_from_env(env)
-    for contract in (FULL, DEPLOY_PARITY):
+    for contract in (FULL, DEPLOY_PARITY, HITTER_FOOTWORK):
         if layout == contract.layout and total_dim == contract.total_dim:
             return contract
     return None

@@ -369,10 +369,23 @@ distrobox enter hope -- bash ~/workspace/HOPE/agi/a3_deploy_example/scripts/pp_p
 Verification physics inside that harness (arena values DON'T work here — expected):
 drag_k **0.05** on BOTH planner and fake_ball (the arena 0.15 quadratic drag kills
 every slow lob at floor height before the plane — physically correct, and exactly why
-§9.3 wants close-bounce high-pop serves); serve `[3.2, ∓0.24, 0.5, -2.0, ±0.10, 3.6]`
-(probed: crosses the adaptive plane at z≈0.72-0.85, tts≈1.25); robot reset to x=0.33
-so the adaptive x_hit (robot_x+0.67) sits at the hop apex; serve cadence `pause_s 4.0`
-(the 4-6 s demo cadence). NOTE: the sim overlay's x_hit clamp is deliberately wide
+§9.3 wants close-bounce high-pop serves); robot reset to x=0.33 so the adaptive x_hit
+(robot_x+0.67) sits at the hop apex; serve cadence `pause_s 4.0` (the 4-6 s demo
+cadence). **Serves (2026-07-06 coverage sweep, replaces the old fixed pair)**: 10
+placements (5 fh + 5 bh, alternating) with per-placement vy solved against the exact
+publisher physics — fh `[3.2,-0.24,0.5,-2.0,vy,3.6]` arrives y −0.65..−0.20 at z=0.725
+(trained fh box y [−0.74,−0.14], z [0.72,0.92]); bh **retuned** to
+`[3.2,0.24,0.5,-1.6,vy,5.0]` (slower vx + higher toss) so it arrives at z=1.008 —
+the old vz=3.6 backhand serve arrived at z=0.725, **20 cm below** the trained bh box
+[0.93,1.13]. The old fh `vy=+0.10` (arrival y=−0.13 = box edge; the −0.10 fix flagged
+2026-07-03 had never landed here) is gone with the sweep. bh arrivals stay ≥ +0.02:
+the runner classifies fh/bh by base-rel target-y sign, so negative-y backhands would
+engage as forehands. The sim overlay also sets `target_land_y: 0.0` (centered sim
+table) — the arena aim (−0.7625) pointed every return at the sim table's right edge
+and skewed the demanded forehand vy to the WRONG SIGN vs the trained velocity box.
+Default conductor = 3 points (3 distinct placements); `PP_POINTS=10` sweeps all 10,
+and `PP_RESET_Y=<m>` offsets the start spot so the 177-D station command is nonzero
+from the first serve. NOTE: the sim overlay's x_hit clamp is deliberately wide
 ([0.55,2.20]) so the plane follows the robot's walk-and-strike drift across serves —
 expected in sim; the ARENA clamp ([0.0,0.35], hope_planner.yaml) is the
 table-collision protection and must stay tight in real life.
@@ -403,9 +416,12 @@ ros2 run hope_planner hope_planner_node --ros-args \
   --params-file ~/workspace/HOPE/hope_ws/src/hope_planner/config/hope_planner.sim.yaml \
   -p drag_k:=0.05 &
 ros2 run hope_bringup fake_ball_publisher --ros-args \
-  -p serve_forehand:="[3.2, -0.24, 0.5, -2.0, 0.10, 3.6]" \
-  -p serve_backhand:="[3.2, 0.24, 0.5, -2.0, -0.10, 3.6]" \
+  -p serve_forehand:="[3.2, -0.24, 0.5, -2.0, -0.10, 3.6]" \
+  -p serve_backhand:="[3.2, 0.24, 0.5, -1.6, -0.10, 5.0]" \
   -p drag_k:=0.05 -p pause_s:=4.0
+# fh vy=-0.10 (NOT the old +0.10: that arrived y=-0.13 = box edge; -0.10 -> y=-0.35 mid-box).
+# bh retuned vx=-1.6 vz=5.0 -> arrives z=1.008 inside the trained bh box (old: 20 cm low).
+# For the full 10-placement coverage sweep use pp_planner_closedloop.sh (serves:=... list).
 # sanity: ros2 topic hz /racket/command_flat /a3/base_pose_flat   # both alive
 ```
 
