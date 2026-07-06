@@ -42,6 +42,12 @@ model_13599.pt ──play.py 原生导出(isaac venv,占一个 GPU 槽 ~4 分钟
 ```
 
 - **终版存档名是 model_13599 不是 13600**(rsl_rl 末迭代 0 起数;监视器等 13600 会永远等)。
+- **导出后先补两个 sidecar 再考**(07-07 实错):原生导出不产 obs 归一化(obs_norm.npz)和
+  噪声 std(learned_std.npy),缺前者模型吃未归一化观测必得 ~0 分,缺后者评估器直接 FATAL。
+  一条命令齐活:`make_std_sidecar.py --checkpoint <model_N.pt>`(两个文件都落到 exported/)。
+- **bank 题源考卷(阶段 1 正式卷)**:`--target-source bank --exam-bank <v2 exam npz>` +
+  显式 `--strike-phase-per-clip`;mjeval venv 下设 `HOPE_STAGE1_QB=<stage1_question_bank.py 路径>`
+  (绕过 isaaclab 包链);分母报表(kept/asked/锥内比例/难度中位)开头自动打印,入账连它一起抄。
 - 导出**必须走 play.py 原生路**:快速导出器(standalone_onnx_export)的 donor/harvest 是
   "动作对锁定"的,现存工件都是 hopex 对——非 hopex 臂用它必死;且评估器要消费 ONNX 里的
   clip 元数据,原生导出才正确。导出后 play.py 进死循环,要 kill 进程组。

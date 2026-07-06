@@ -181,7 +181,7 @@ H 训练侧捕获健康(virtual_hit 0.945、strike_pos_err 1.8cm、回合长 465
 拍面误差稳在 40.9°≈该源 rally_yaw(±55-60°)→ 机制 = **rally-yaw 转正张力**:bank 按直线几何出题要拍面,
 模仿项却在斜线旋转的 clip 上,冲突幅度∝|rally_yaw|(直线源 A/E 的 21-26° vs H 的 40.9° 与此一致)。
 处置:判卷 H 照常进卷,但动作源结论必须标注该张力;若要救斜录源,方向是 clip 几何同步转正(而非重跑)。
-判卷阻塞项仍是 1a-0(wip-bank-exam-source-0706 收尾)。
+~~判卷阻塞项仍是 1a-0~~ **已解除(07-07)**:bank 题源落地并在 pod 实跑通过(v2 考卷,守卫/分母报表全对,首考=减观测对照臂)。
 
 ## planner 延迟×精度基准(2026-07-06 深夜,yikang;分支 `planner-latency-bench` 8c1b34e,默认字节不变)
 
@@ -262,7 +262,7 @@ hold-fall 缺陷——判卷预期照此校准;③ S1 wave-3 必须硬厂房发�
 
 | 顺序 | 类型 | 内容(人话) | 依赖 | 谁 |
 | --- | --- | --- | --- | --- |
-| 1a-0 | 开发 | **考卷工具补题源**(yikang 交接 07-06):`mujoco_eval_onnx.py` 加 `--target-source bank`——S1 判卷必须问 exam 卷的同源题(现有 boxes/venue-balls 都不是)。规格:装载走 `stage1_question_bank.load_question_bank`(强制校验烤入/转正标记,别绕过);逐题喂固定击球点 + 该题需求拍速 + **179 观测尾 4 维用该题需求拍面**(不是 clip 参考);输出连分母(可解率 kept/N + 锥内比例);网/界判据沿用现有常数。**半成品已存在**:分支 `wip-bank-exam-source-0706`(+297 行,--exam-bank/--target-source bank/锚终止守卫已具形)——收尾=搬到合并后的 main 上(评估器已变:177/179 契约并存)+ 跑通一次 | 无(**判卷的前置!**) | claude |
+| 1a-0 | 开发 | **考卷工具补题源**(yikang 交接 07-06):`mujoco_eval_onnx.py` 加 `--target-source bank`——S1 判卷必须问 exam 卷的同源题(现有 boxes/venue-balls 都不是)。规格:装载走 `stage1_question_bank.load_question_bank`(强制校验烤入/转正标记,别绕过);逐题喂固定击球点 + 该题需求拍速 + **179 观测尾 4 维用该题需求拍面**(不是 clip 参考);输出连分母(可解率 kept/N + 锥内比例);网/界判据沿用现有常数。**✅ 已落地(07-07)**:救援分支合回 main(等球段站位语义保 main 新版),BankExamSampler 全功能(逐题出卷/耗尽重洗/需求拍面进 179 观测尾/分母法则报表/元数据守卫);pod 实跑通过(v5 标定 v2 考卷 + 减观测臂)。附带坑:原生导出不产 obs 归一化与 std sidecar,判卷前先跑 make_std_sidecar(已进 runbook) | — | claude |
 | 1a | 判卷 | 第一波 8 臂按预注册分支判读(上表)。**S1 臂契约名已注册**(`deploy_parity_face179`,发射不再传 contract=null;导出器元数据即刻可用,契约日 181 时与站位 2 维一起换名) | 1a-0 + 各臂到线 | claude |
 | 1b | 开发 | **奖励收入记账**(半天;也是"A≈D"分支的排查工具) | 无 | claude |
 | 1c | 开发 | **击球窗分通道奖励**(SMASH 整包,W2 门票;旗标默认关) | 无 | claude |
