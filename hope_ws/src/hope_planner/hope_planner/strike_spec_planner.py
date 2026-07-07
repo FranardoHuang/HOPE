@@ -100,12 +100,16 @@ def compute_net_clearance(
 
     A net-plane crossing only counts if it happens BEFORE the first downward z=0 crossing;
     when both fall inside one Euler step the interpolation fractions order them.
+
+    With predictor.config.dt_integrate_coarse > dt_integrate the cruise runs on RK4 steps
+    of the coarse size and only intervals that straddle the net plane / could reach the
+    table are replayed with the legacy fine Euler steps (远粗近细, same scheme as the
+    predictor's adaptive path); flag off (0.0, the default) is byte-identical.
     """
     table = predictor.table
     net_x = table.net_x
     clear_z = table.net_height + predictor.physics.radius
     dt = predictor.config.dt_integrate
-    max_steps = int(predictor.config.max_predict_time / dt)
 
     p = np.asarray(p_strike, dtype=float).copy()
     v = np.asarray(v_plus, dtype=float).copy()
@@ -114,6 +118,47 @@ def compute_net_clearance(
     if p[0] >= net_x:  # struck at/past the net plane: no crossing to evaluate
         return False, float("nan")
 
+    adaptive = getattr(predictor.config, "dt_integrate_coarse", 0.0) > dt
+    if adaptive:
+        dt_f, dt_c, n_sub = predictor._adaptive_dts()
+        t_end = predictor.config.max_predict_time
+        t = 0.0
+        while t < t_end - 1e-12:
+            p_c, v_c = predictor._rk4_flight_step(p, v, omega, dt_c)
+            event_possible = (
+                (p[0] < net_x <= p_c[0])
+                or p_c[2] <= 0.0
+                or min(p[2], p_c[2]) + min(v[2], v_c[2], 0.0) * dt_c <= 0.0
+            )
+            if not event_possible:
+                p, v = p_c, v_c
+                t += dt_c
+                continue
+            for _ in range(n_sub):  # legacy fine replay of this interval
+                a = predictor._flight_acceleration(v, omega)
+                p_new = p + v * dt_f + 0.5 * a * dt_f ** 2
+                v_new = v + a * dt_f
+
+                frac_net = None
+                if p[0] < net_x <= p_new[0]:
+                    dx = p_new[0] - p[0]
+                    frac_net = float(np.clip((net_x - p[0]) / dx, 0.0, 1.0)) if dx > 1e-12 else 0.5
+                frac_land = None
+                if p[2] > 0.0 and p_new[2] <= 0.0:
+                    dz = p[2] - p_new[2]
+                    frac_land = float(np.clip(p[2] / dz, 0.0, 1.0)) if dz > 1e-12 else 0.5
+
+                if frac_net is not None and (frac_land is None or frac_net <= frac_land):
+                    z_at_net = p[2] + frac_net * (p_new[2] - p[2])
+                    margin = float(z_at_net - clear_z)
+                    return margin > 0.0, margin
+                if frac_land is not None:
+                    return False, float("nan")
+                p, v = p_new, v_new
+            t += dt_c
+        return False, float("nan")
+
+    max_steps = int(predictor.config.max_predict_time / dt)
     for _ in range(max_steps):
         a = predictor._flight_acceleration(v, omega)
         p_new = p + v * dt + 0.5 * a * dt ** 2
@@ -281,6 +326,10 @@ class StrikeSpecPlanner:
         omega_ball: Optional[np.ndarray],
         landing_target_xy: np.ndarray,
         racket_speed_budget: float,
+        max_iter: Optional[int] = None,
+        tol_m: Optional[float] = None,
+        q0: Optional[np.ndarray] = None,
+        with_sensitivities: bool = True,
     ) -> Optional[StrikeSpec]:
         """Solve for the strike spec that lands the ball at the target.
 
@@ -290,10 +339,23 @@ class StrikeSpecPlanner:
             omega_ball None means spin-blind (zeros), matching the legacy path.
         landing_target_xy : (2,) desired first-bounce point on the table plane.
         racket_speed_budget : max allowed |v_r| (m/s); specs beyond it -> None.
+        max_iter, tol_m : optional LM budget overrides; None (default) keeps
+            the class constants (MAX_ITER=30, TOL_M=5 mm) — byte-identical.
+        q0 : optional warm start (pitch_deg, yaw_deg, v_n, v_t1, v_t2), e.g.
+            the previous tick's solution (spec.tilt_pitch_deg, spec.tilt_yaw_deg,
+            spec.v_n_signed, *spec.v_t_vec). The tilt origin (mirror-law seed
+            normal) is recomputed from the CURRENT inputs, so warm starts stay
+            valid across small per-tick changes of ball state/target. None
+            (default) = cold mirror-law seed — byte-identical.
+        with_sensitivities : False skips the post-solve central-difference
+            landing sensitivities (8 extra flight rollouts; the d_landing_*
+            fields come back NaN). Default True — byte-identical.
 
-        Returns StrikeSpec, or None when LM does not reach 5 mm in 30
-        iterations or the solution exceeds the speed budget.
+        Returns StrikeSpec, or None when LM does not reach tol in the
+        iteration budget or the solution exceeds the speed budget.
         """
+        max_iter = self.MAX_ITER if max_iter is None else int(max_iter)
+        tol = self.TOL_M if tol_m is None else float(tol_m)
         p_ball = np.asarray(p_ball, dtype=float)
         v_ball = np.asarray(v_ball, dtype=float)
         omega_ball = (
@@ -302,7 +364,10 @@ class StrikeSpecPlanner:
         target_xy = np.asarray(landing_target_xy, dtype=float)[:2]
 
         phi0, theta0, v_n0 = self._initial_guess(p_ball, v_ball, target_xy)
-        q = np.array([0.0, 0.0, v_n0, 0.0, 0.0])
+        if q0 is None:
+            q = np.array([0.0, 0.0, v_n0, 0.0, 0.0])
+        else:
+            q = np.asarray(q0, dtype=float).copy()
 
         fwd = self._forward(q, phi0, theta0, p_ball, v_ball, omega_ball)
         if fwd is None:
@@ -315,9 +380,9 @@ class StrikeSpecPlanner:
         lam = 1e-3
         iterations = 0
 
-        for _ in range(self.MAX_ITER):
+        for _ in range(max_iter):
             iterations += 1
-            if np.linalg.norm(fwd["landing_xy"] - target_xy) < self.TOL_M:
+            if np.linalg.norm(fwd["landing_xy"] - target_xy) < tol:
                 break
 
             # Forward-difference Jacobian (5 extra rollouts/iter; central
@@ -364,14 +429,15 @@ class StrikeSpecPlanner:
                 return None
 
         residual_m = float(np.linalg.norm(fwd["landing_xy"] - target_xy))
-        if residual_m >= self.TOL_M:
+        if residual_m >= tol:
             return None
         v_r = fwd["v_r"]
         if float(np.linalg.norm(v_r)) > racket_speed_budget + 1e-9:
             return None
 
         return self._build_spec(
-            q, fwd, phi0, theta0, p_ball, v_ball, omega_ball, residual_m, iterations
+            q, fwd, phi0, theta0, p_ball, v_ball, omega_ball, residual_m, iterations,
+            with_sensitivities=with_sensitivities,
         )
 
     def solve_fixed_normal(
@@ -528,25 +594,30 @@ class StrikeSpecPlanner:
 
     def _build_spec(
         self, q, fwd, phi0, theta0, p_ball, v_ball, omega_ball, residual_m, iterations,
+        with_sensitivities: bool = True,
     ) -> StrikeSpec:
-        args = (phi0, theta0, p_ball, v_ball, omega_ball)
-        eye = np.eye(5)
-        # Steps: 0.5 deg / 0.1 m/s — large enough to clear the Euler-grid
-        # landing quantization (~0.5 mm), small vs the reported slopes.
-        d_pitch = self._central_diff(q, eye[0], 0.5, *args)
-        d_yaw = self._central_diff(q, eye[1], 0.5, *args)
-        d_v_n = self._central_diff(q, eye[2], 0.1, *args)
+        if with_sensitivities:
+            args = (phi0, theta0, p_ball, v_ball, omega_ball)
+            eye = np.eye(5)
+            # Steps: 0.5 deg / 0.1 m/s — large enough to clear the Euler-grid
+            # landing quantization (~0.5 mm), small vs the reported slopes.
+            d_pitch = self._central_diff(q, eye[0], 0.5, *args)
+            d_yaw = self._central_diff(q, eye[1], 0.5, *args)
+            d_v_n = self._central_diff(q, eye[2], 0.1, *args)
 
-        # |v_t| direction: along the solved tangential velocity; when the
-        # solution has ~zero v_t, probe the face-up direction b2 (the loft /
-        # topspin channel — the tangential axis a controller actually uses).
-        v_t = q[3:5]
-        v_t_norm = float(np.linalg.norm(v_t))
-        if v_t_norm > 1e-6:
-            dir_t = np.concatenate([np.zeros(3), v_t / v_t_norm])
+            # |v_t| direction: along the solved tangential velocity; when the
+            # solution has ~zero v_t, probe the face-up direction b2 (the loft /
+            # topspin channel — the tangential axis a controller actually uses).
+            v_t = q[3:5]
+            v_t_norm = float(np.linalg.norm(v_t))
+            if v_t_norm > 1e-6:
+                dir_t = np.concatenate([np.zeros(3), v_t / v_t_norm])
+            else:
+                dir_t = np.array([0.0, 0.0, 0.0, 0.0, 1.0])
+            d_v_t = self._central_diff(q, dir_t, 0.1, *args)
         else:
-            dir_t = np.array([0.0, 0.0, 0.0, 0.0, 1.0])
-        d_v_t = self._central_diff(q, dir_t, 0.1, *args)
+            # Latency mode (per-tick closed loop): skip the 8 extra rollouts.
+            d_pitch = d_yaw = d_v_n = d_v_t = np.array([np.nan, np.nan])
 
         # POST-solve net-clearance annotation (both solve() and solve_fixed_normal()
         # assemble here): same flight model, never part of the LM objective/acceptance.

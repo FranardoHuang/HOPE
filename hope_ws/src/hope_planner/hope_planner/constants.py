@@ -70,6 +70,15 @@ class PlannerConfig:
     dt_integrate: float = 0.001   # integration time step (s)
     max_predict_time: float = 2.0  # max forward prediction horizon (s)
     bounce_z_tol: float = 0.005   # z threshold for bounce detection (m)
+    # Adaptive integration (远粗近细): 0.0 = OFF = the legacy fixed-dt Euler
+    # path, byte-identical. When > dt_integrate, the predictor cruises with
+    # RK4 steps of this size and drops to dt_integrate-sized Euler sub-steps
+    # (the legacy scheme) only inside coarse intervals that contain an event
+    # (table bounce, hit-plane crossing, landing-plane crossing), so event
+    # interpolation keeps legacy resolution while the cruise costs 10-20x
+    # fewer python steps. Measured speed/accuracy curve:
+    # hope_ws/src/hope_planner/benchmarks/benchmark_planner_latency.py.
+    dt_integrate_coarse: float = 0.0
 
     # Racket planning
     x_hit: float = 0.0            # virtual hitting plane X coordinate (m)
