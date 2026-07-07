@@ -197,6 +197,7 @@ class RacketTargetCommand(CommandTerm):
         # Literal keys: self._clip_names ({0:"forehand",1:"backhand"}) is defined later in __init__.
         self._vb_exact_acc_c = {0: 0.0, 1: 0.0}
         self._vb_inb_acc_c = {0: 0.0, 1: 0.0}
+        self._vb_hit_acc_c = {0: 0.0, 1: 0.0}   # per-side 击球率 (franco 2026-07-08 报数格式)
 
         # Reference racket state at the strike frame (CONSTANT per clip): pos (env-origin relative),
         # world linear velocity, and face normal, computed by the SAME FK as the actual racket
@@ -477,6 +478,7 @@ class RacketTargetCommand(CommandTerm):
         if cfg.virtual_ball or cfg.vb_metrics_only:
             for _vk in (
                 "virtual_return_rate", "virtual_return_rate_forehand", "virtual_return_rate_backhand",
+                "virtual_hit_rate_forehand", "virtual_hit_rate_backhand",
                 "virtual_hit_rate", "virtual_net_clear_rate", "virtual_land_valid_rate",
                 "virtual_land_inbounds_rate", "virtual_land_err_m", "virtual_topspin_revs",
                 "virtual_approach_speed",
@@ -1731,9 +1733,11 @@ class RacketTargetCommand(CommandTerm):
                 _sel = exact_strike & (_clip == _c)
                 self._vb_exact_acc_c[_c] = decay * self._vb_exact_acc_c[_c] + float(_sel.sum())
                 self._vb_inb_acc_c[_c] = decay * self._vb_inb_acc_c[_c] + float((_legal & _sel).sum())
+                self._vb_hit_acc_c[_c] = decay * self._vb_hit_acc_c[_c] + float((gate & _sel).sum())
                 _n = self._vb_exact_acc_c[_c]
                 _scale = (1.0 / max(_n, 1e-6)) if _n >= float(self.cfg.exact_success_min_count) else 0.0
                 self.metrics[f"virtual_return_rate_{_cn}"][:] = self._vb_inb_acc_c[_c] * _scale
+                self.metrics[f"virtual_hit_rate_{_cn}"][:] = self._vb_hit_acc_c[_c] * _scale
         self.metrics["virtual_approach_speed"] = torch.where(
             exact_strike, approach, self.metrics["virtual_approach_speed"]
         )
