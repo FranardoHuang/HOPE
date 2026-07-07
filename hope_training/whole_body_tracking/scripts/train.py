@@ -558,10 +558,18 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
         ms = _get(rw, "motion_scale")
         if ms is not None:
             ms = float(ms)
+            _scaled = []
             for _t in _MOTION_TERMS:
                 _require(hasattr(R, _t), f"rewards.{_t}")
-                getattr(R, _t).weight *= ms
-            applied.append(f"rewards.motion_scale={ms} (x{len(_MOTION_TERMS)} motion weights)")
+                _term = getattr(R, _t)
+                if _term is None:
+                    continue  # term REMOVED in this cfg lineage (e.g. footwork cfg sets
+                              # motion_global_anchor_pos = None) — nothing to scale
+                _term.weight *= ms
+                _scaled.append(_t)
+            _require(len(_scaled) > 0, "rewards.motion_scale (all six motion terms are None)")
+            applied.append(f"rewards.motion_scale={ms} (x{len(_scaled)} motion weights: "
+                           + ",".join(_scaled) + ")")
 
         # --- penalties / regularization (negative weights: energy + smoothness + safety) --------
         for _name, _key in (
