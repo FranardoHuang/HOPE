@@ -499,7 +499,7 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 | 0 | 【判卷】**修C 收卷 MuJoCo 考卷 + fixE(yikang trim6 臂)补考对判**——反手谱系 fixE vs 修C 二选一的入账依据;五停臂顺手补考(判卷链 07-06 后欠账) | 修C 到线;mjeval CPU | CPU(导出占槽 4min) | **修C 到线即做** |
 | 0.5 | 【资产】**swing 对正式入库**:触球帧人工登记(无球空挥则走 hopex 约定帧惯例)→ 会话握拍复核(试产暂借 Rz5Rx40)→ 题库 v2 生成 → 判炸器复审(试产已双 PASS);依赖=GMR 修复分支定版 | swing 试产已完成(regen_test_0708) | CPU | 动作组波门票 |
 | 0.6 | 【制度】**判炸器接线**(分支 `motion-feasibility-audit` 已推 origin 待审):登记表加 feasibility_audit 块+首帧豁免旗(存量六 clip)、gen_stage1_questions fail-closed;**b9d0eec 更正:分支已在 origin(s1-registry-v4cal),真残留=v4_cal 登记 16 行合 main**,合了守卫就不再拦 | franco 审分支 | CPU | 防复发 |
-| 0.7 | 【资产·时机门】**L6 现役 _cal 全量重生成**(吃进 GMR warm-up 修复+还 reground 债+修 5.8cm 悬空;触球相位全部重标 0.362→0.391 等、题库重出、登记表重核)——**修C 收卷后一次性做,franco 拍时机** | GMR 修复分支 + 修C 收卷 | CPU 管线 1-2 天 | 等时机门 |
+| 0.7 | 【资产】**三套动作(swing/v4/v5)管线重跑=候选生成中**(franco 07-08 拍板"可以重跑";GMR 修复已合 master):六条候选 npz + 相位重标建议 + 判炸器全审 + 新旧对照,产物在 regen_0708_candidates/,**不动现役资产**;swap-in(含登记表 phase 人工复核、题库重出)等修C 收卷对判后执行 | 两分支已 merge(main 2187911 / GMR aabea2e;登记 16 行已 cherry-pick 1bcc083) | CPU 管线 | **进行中** |
 | 1 | 【阶段1】第一波成对差初判(主攻/减观测/产品线锚已到线;**只看成对差,绝对分不作数**——题库缺陷见上) | 1a-0 bank 题源收尾(半成品在 `wip-bank-exam-source-0706`) | 导出占槽 4min+CPU | **今天** |
 | 2 | 【阶段1】**六臂合体波(franco 07-07 定稿,07-08 两处更新:动作组成员改 swing/v4/v5、奖励轴扩员)**:基准臂 / 击球窗臂 / 击球窗加权臂 / 课程臂 / **swing 老师臂 / v4 老师臂**(斜录候补)。奖励轴另有 reward 提案臂族排队(V1 手腕速度剔除 / V2 窗内模仿让位 / 接近度门 / 常引导×2 / R-a 遮蔽腿参考 / R-b 终止软化 / R-c RSI 健康化——档位与取舍见提案,franco 拍板后编波)。各臂自家题库 v2 + 自家首帧等球锚 | 硬化植体已默认 + 题库 v2 + 奖励收入记账(1b)+ 击球窗代码(1c)+ 课程 loader(1d)+ 等球锚旗标(1n)+ swing 入库(0.5 行) | 共跑;6 卡下可每臂独占(一轮 ~2.5h) | **最高优先;门票=1b/1c/1d/1n 四件代码** |
 | — | jiayi Hitter 主线长跑 + J1/J2/J4-J7 参数正名(jiayi) | 拉 main 即可 | **本地机器,不占云池** | 周会对表 |
