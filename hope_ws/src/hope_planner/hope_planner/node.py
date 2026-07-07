@@ -51,7 +51,9 @@ class HOPEPlannerNode(Node):
         self.declare_parameter("restitution_v", 0.9215)   # venue table e_n
         self.declare_parameter("restitution_racket", 0.654)  # paddle e const; e(u_n) exp form applied in racket_target_planner
         self.declare_parameter("use_kalman", False)          # shadow-run the EKF next to the polyfit estimator
-        self.declare_parameter("publish_strike_spec", False)  # diagnostics-only strike-spec inverse solve
+        self.declare_parameter("publish_strike_spec", True)   # strike-spec inverse solve (fast path made it
+                                                       # a per-tick production channel, franco 2026-07-07;
+                                                       # False restores the diagnostics-off legacy)
         self.declare_parameter("racket_speed_budget", 10.0)   # m/s cap for the spec solve — diagnostic
                                                               # sanity bound, above venue strike speeds
                                                               # (paddle u_n fit envelope tops out 7.2 m/s)
@@ -71,8 +73,11 @@ class HOPEPlannerNode(Node):
         # UNTOUCHED by every flag here — same topic, same schema, same values.
         # Deploy flip: publish_strike_spec:=true use_fast_strike_spec:=true
         #              (optionally dt_integrate_coarse:=0.02 for the Stage-2 speedup).
-        self.declare_parameter("use_fast_strike_spec", False)
-        self.declare_parameter("strike_spec_rate_hz", 40.0)   # replan decimation (fast path only)
+        self.declare_parameter("use_fast_strike_spec", True)  # DEFAULT ON since 2026-07-07 (franco:
+                                                      # 双档粒度作废,每 tick 全精度重算;flip to False
+                                                      # only to reproduce the legacy 1 Hz throttled path)
+        self.declare_parameter("strike_spec_rate_hz", 50.0)   # replan decimation = policy tick rate
+                                                       # (每 tick 一解,franco 2026-07-07)
         self.declare_parameter("strike_spec_max_iter", 6)     # LM budget from a warm start
         self.declare_parameter("spec_dt_integrate_coarse", 0.02)  # adaptive cruise for the SPEC
                                                               # solve only (own config copy)
@@ -82,7 +87,9 @@ class HOPEPlannerNode(Node):
         # Stage-2 predict ~3.9 ms -> ~1.0 ms per /poses tick (same benchmark). Only the
         # predictor honors the flag (predict / integrate_to_table_plane / net-clear);
         # RacketTargetPlanner's own integrations keep the legacy fixed dt either way.
-        self.declare_parameter("dt_integrate_coarse", 0.0)
+        self.declare_parameter("dt_integrate_coarse", 0.02)  # DEFAULT ON since 2026-07-07: adaptive
+                                                     # cruise (event sub-steps keep legacy dt);
+                                                     # 0.0 restores byte-identical fixed-dt Euler
         # --- ADAPTIVE hit plane (2026-07-04): x_hit follows the LIVE robot position ---
         # The trained policy WALKS to the strike (walk-and-strike lunge, ~0.5-0.8 m): after
         # one return the robot stands AT the old static plane, so subsequent plans land at

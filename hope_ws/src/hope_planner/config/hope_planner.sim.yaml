@@ -5,6 +5,13 @@
 # stays the arena/hardware truth); never edit the installed tree.
 hope_planner:
   ros__parameters:
+    # --- 每 tick 全精度求解(franco 2026-07-07 定版;这里显式写出与节点默认一致,防漂移)---
+    # 双档粒度作废:快路径转正(整 tick 预测+反解 ~2ms 实测),每个策略 tick 全精度重算。
+    publish_strike_spec: true
+    use_fast_strike_spec: true
+    strike_spec_rate_hz: 50.0
+    dt_integrate_coarse: 0.02   # 自适应巡航步长;事件区间自动退回 1ms 细步(过网/弹跳/命中面)
+
     # Ball physics MUST match fake_ball_publisher's defaults (drag 0.15 / rest 0.85) —
     # the base yaml keeps the arena-fit placeholders. Mismatch -> predicted ball dies
     # before the hit plane -> strike plans at floor level -> target gate rejects all.
