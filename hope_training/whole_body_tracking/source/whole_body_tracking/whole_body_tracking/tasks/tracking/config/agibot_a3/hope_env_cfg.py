@@ -26,7 +26,7 @@ from isaaclab.utils import configclass
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 import whole_body_tracking.tasks.tracking.mdp as mdp
-from whole_body_tracking.robots.agibot_a3 import A3_UPPER_TRACKED
+from whole_body_tracking.robots.agibot_a3 import A3_FEET_BODIES, A3_HAND_BODIES, A3_UPPER_TRACKED
 from whole_body_tracking.tasks.tracking.config.agibot_a3.flat_env_cfg import AgibotA3FlatEnvCfg
 from whole_body_tracking.tasks.tracking.tracking_env_cfg import (
     CommandsCfg,
@@ -381,6 +381,27 @@ class HOPERewardsCfg(RewardsCfg):
     )
     # r_regularization — energy / torque smoothness (action_rate_l2 already inherited).
     joint_torques = RewTerm(func=mdp.joint_torques_l2, weight=-1.0e-5)
+
+    # --- reward_staged_design 2026-07-08 flag-off terms (weight 0.0 = SKIPPED by the ---------------
+    # RewardManager = byte-identical baseline; enabled per-arm from the task YAML / CLI) ------------
+    # Constant guidance penalty (§② B2): -w * min(||racket_FK - target||, d_max) every
+    # pre-strike + in-window step — a dense "which way to swing" gradient that survives outside
+    # every exp kernel's responsive band. 人话:挥不到球也天天有"往哪挥"的工资单,小而恒。
+    # Enable via rewards.racket_guidance_weight (NEGATIVE; design铁律: per-second cost <= 10-20%
+    # of the measured imitation income — verify against the launch-log income accounting).
+    racket_guidance = RewTerm(
+        func=mdp.racket_guidance, weight=0.0,
+        params={"command_name": "racket_target", "d_max": 0.5})
+    # R-b envelope-as-penalty (§⑥): per-step indicator of the tracking-envelope violation that
+    # normally TERMINATES (anchor_pos | ee_body_pos, both z>0.25 m vs the reference — identical
+    # expressions/threshold/body list as TerminationsCfg after the A3 __post_init__ re-pin).
+    # 人话:跟丢参考不再判死,改成站在违规区里每秒扣钱。Enabled ONLY by train.py's
+    # terminations.envelope_as_penalty override, which also REMOVES the two terminations and
+    # switches on the tracking_loss accounting; the weight alone is never set by hand.
+    tracking_envelope = RewTerm(
+        func=mdp.tracking_envelope_violation, weight=0.0,
+        params={"command_name": "motion", "threshold": 0.25,
+                "body_names": A3_FEET_BODIES + A3_HAND_BODIES})
 
 
 ##

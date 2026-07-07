@@ -230,6 +230,8 @@ def _check_unknown_keys(node, known, where):
 # actually requested racket overrides before requiring the command to exist).
 _RACKET_KEYS = (
     "strike_phase", "strike_phase_by_motion", "strike_window_s", "strike_success_pos_thresh",
+    # 1c split strike windows (position tight / normal+velocity wide; defaults None = single window)
+    "strike_window_pos_s", "strike_window_wide_s",
     "pos_x_range", "pos_y_range", "pos_z_range", "racket_pos_y_abs_range", "pos_range_per_clip",
     "vel_x_range", "vel_y_range", "vel_z_range", "vel_range_per_clip",
     "base_target_x_range", "base_target_y_range",
@@ -282,7 +284,47 @@ _MOTION_KEYS = (
     "speed_scale_range",
     # 2026-07-08 backhand-fix ablation: fixed per-clip reference playback speed (e.g. [1.0, 0.8]).
     "speed_scale_per_clip",
+    # R-c RSI birth fixes (reward_staged_design 2026-07-08 §⑥): (i) skip the clip's first N
+    # IK-cold-start frames at every swing entry; (ii) held-RSI births get the default-STAND root
+    # height (the stand joints were already used; the crouch root z left the feet 0.29 m under
+    # the floor -> PhysX depenetration kick).
+    "rsi_skip_settle_frames", "rsi_hold_root_stand_z",
 )
+
+# YAML keys under `rewards:` consumed by the rewards block of _apply_task_overrides below.
+# Same fail-loud contract as _RACKET_KEYS/_MOTION_KEYS (2026-07-09): before this whitelist an
+# unknown/misspelled task.rewards key (e.g. a CLI override typo) was SILENTLY ignored — the run
+# started and trained on the wrong reward config. Add each new key here AND a translation below.
+_REWARD_KEYS = (
+    "racket_position_weight", "racket_position_std", "racket_position_static",
+    "racket_velocity_weight", "racket_velocity_std",
+    "racket_normal_weight", "racket_normal_std",
+    "base_position_weight", "base_position_std",
+    "hold_ready_weight", "hold_ready_std", "hold_ready_reach", "hold_ready_reach_mode",
+    "base_decel_weight", "base_decel_std", "base_decel_v_gain", "base_decel_v_max",
+    # R16 / V1 wrist-mimic surgery (orientation 2026-07-04; linear velocity 2026-07-08 §③).
+    "free_wrist_ori_mimic", "free_wrist_vel_mimic",
+    "joint_torques_weight",
+    # per-term overrides of the six imitation terms + the global/in-window scales
+    "motion_global_anchor_pos_weight", "motion_global_anchor_pos_std",
+    "motion_global_anchor_ori_weight", "motion_global_anchor_ori_std",
+    "motion_body_pos_weight", "motion_body_pos_std",
+    "motion_body_ori_weight", "motion_body_ori_std",
+    "motion_body_lin_vel_weight", "motion_body_lin_vel_std",
+    "motion_body_ang_vel_weight", "motion_body_ang_vel_std",
+    "motion_scale", "motion_scale_in_window",
+    # penalties / regularization
+    "action_rate_weight", "joint_limit_weight", "undesired_contacts_weight",
+    "pre_strike_foot_slip_weight", "prestrike_waist_twist_weight",
+    "arm_torque_saturation_weight", "prestrike_upright_weight", "foot_orientation_weight",
+    # proximity power-gate for the face/velocity channels (reward_staged_design §② C2a)
+    "face_gate_by_pos", "face_gate_radius",
+    # constant guidance penalty toward the racket target (reward_staged_design §② B2)
+    "racket_guidance_weight",
+)
+
+# YAML keys under `terminations:` (R-b envelope-termination softening, reward_staged_design §⑥).
+_TERMINATION_KEYS = ("envelope_as_penalty", "envelope_penalty_weight")
 
 
 def _registry_clip_name(cfg):
@@ -485,8 +527,19 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             # Backhand-fix ablation (2026-07-08): fixed per-clip reference playback speed.
             _set_attr(M, "speed_scale_per_clip", _get(mt, "speed_scale_per_clip"),
                       lambda v: tuple(float(x) for x in v), applied, "commands.motion")
+            # R-c(i): every swing entry (RSI reset AND wrap) starts the reference N frames past the
+            # clip start — the v5 clips carry a 3-4 frame IK cold-start transient at frame 0 (GMR
+            # warm-up bug); N=6 is the design's stopgap until the source fix lands. Default 0 = off.
+            # 人话:出生别传送到 IK 瞬态帧上,参考从第 N 帧起播。
+            _set_attr(M, "rsi_skip_settle_frames", _get(mt, "rsi_skip_settle_frames"), int, applied, "commands.motion")
+            # R-c(ii): held-RSI births (hold_counter>0: stand joints, frozen reference) get the
+            # DEFAULT-STAND root height instead of the reference frame-0 crouch z — stand joints at
+            # crouch height put the feet ~0.29 m under the floor and PhysX kicks the robot out.
+            # 人话:站姿关节配站姿身高,脚不再穿地被物理引擎弹飞。
+            _set_attr(M, "rsi_hold_root_stand_z", _get(mt, "rsi_hold_root_stand_z"), _as_bool, applied, "commands.motion")
 
     rw = _get(task, "rewards")
+    _check_unknown_keys(rw, _REWARD_KEYS, "task.rewards")
     if rw is not None:
         R = env_cfg.rewards
         _set_reward(R, "racket_position", _get(rw, "racket_position_weight"), _get(rw, "racket_position_std"), applied)
@@ -543,6 +596,25 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                          f"rewards.{_tn}.params.body_names contains {_WRIST}")
                 _term.params["body_names"] = _names
                 applied.append(f"rewards.{_tn}.body_names-={_WRIST}")
+        # V1 (reward_staged_design 2026-07-08 §③): free the racket wrist from the LINEAR-VELOCITY
+        # mimic — the "second master" fight free_wrist_ori_mimic did NOT touch (the question-bank
+        # answer velocity sits a median 34° outside the teacher's swing-velocity cone, so
+        # motion_body_lin_vel pulls the wrist toward the teacher while racket_velocity pulls it
+        # toward the answer). Config-level only, same drop-the-link pattern as the ori flag above:
+        # the wrist's linear velocity is then shaped by racket_velocity alone; position/ori mimic
+        # keep the swing path. Default OFF = body list untouched, byte-identical baseline.
+        if _get(rw, "free_wrist_vel_mimic") is not None and _as_bool(_get(rw, "free_wrist_vel_mimic")):
+            _WRIST = "right_wrist_yaw_Link"
+            for _tn in ("motion_body_lin_vel",):
+                _require(hasattr(R, _tn), f"rewards.{_tn}")
+                _term = getattr(R, _tn)
+                _require(_term is not None and "body_names" in _term.params,
+                         f"rewards.{_tn}.params['body_names'] (free_wrist_vel_mimic needs an explicit body list)")
+                _names = [b for b in _term.params["body_names"] if b != _WRIST]
+                _require(len(_names) < len(_term.params["body_names"]),
+                         f"rewards.{_tn}.params.body_names contains {_WRIST}")
+                _term.params["body_names"] = _names
+                applied.append(f"rewards.{_tn}.body_names-={_WRIST}")
         jt = _get(rw, "joint_torques_weight")
         if jt is not None:
             _require(hasattr(R, "joint_torques"), "rewards.joint_torques")
@@ -575,6 +647,68 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _require(len(_scaled) > 0, "rewards.motion_scale (all six motion terms are None)")
             applied.append(f"rewards.motion_scale={ms} (x{len(_scaled)} motion weights: "
                            + ",".join(_scaled) + ")")
+        # V2 (reward_staged_design 2026-07-08 §③): IN-WINDOW imitation yield — inside the strike
+        # window every motion_* mimic term is multiplied by k (0 = teacher fully silent, 0.25 =
+        # quarter voice); outside the window imitation pays in full. 人话:触球窗内老师闭嘴(或小
+        # 声),听题目的。A RewTerm weight is a constant, so the gating happens INSIDE the reward
+        # funcs via the window_scale/window_command_name params they all now accept; the mask is
+        # the racket command's WIDE strike window (== the legacy strike_window unless the 1c
+        # split-window flags set racket.strike_window_wide_s), so V2 composes with V3/1c.
+        # Default (key absent) = params untouched = byte-identical baseline.
+        msw = _get(rw, "motion_scale_in_window")
+        if msw is not None:
+            msw = float(msw)
+            _require(hasattr(env_cfg.commands, "racket_target"),
+                     "commands.racket_target (rewards.motion_scale_in_window needs the strike window)")
+            _gated = []
+            for _t in _MOTION_TERMS:
+                _require(hasattr(R, _t), f"rewards.{_t}")
+                _term = getattr(R, _t)
+                if _term is None:
+                    continue  # term REMOVED in this cfg lineage (e.g. footwork cfg) — nothing to gate
+                _term.params["window_scale"] = msw
+                _term.params["window_command_name"] = "racket_target"
+                _gated.append(_t)
+            _require(len(_gated) > 0, "rewards.motion_scale_in_window (all six motion terms are None)")
+            applied.append(f"rewards.motion_scale_in_window={msw} (x{len(_gated)} motion terms inside "
+                           "the strike window: " + ",".join(_gated) + ")")
+        # Proximity power-gate (reward_staged_design 2026-07-08 §② C2 case a): racket_normal and
+        # racket_velocity are additionally multiplied by sigmoid((r_gate - pos_err)/0.05) — the
+        # face/velocity channels only power on when the paddle can physically reach the target.
+        # 人话:拍子够得着球,才开始付拍面/拍速的钱;够不着时也不吃它们的梯度噪声。
+        # racket_position (the reach gradient) and racket_strike_success (already multiplicative)
+        # are NOT gated. Both keys must be set together — a half-configured gate fails loud.
+        _fg = _get(rw, "face_gate_by_pos")
+        _fg_r = _get(rw, "face_gate_radius")
+        if _fg is not None and _as_bool(_fg):
+            if _fg_r is None:
+                raise _OverrideError(
+                    "[train.py] rewards.face_gate_by_pos=true requires rewards.face_gate_radius "
+                    "(meters; design candidates 0.15 = 2x strike_success_pos_thresh, or 0.095 = "
+                    "the vb capture gate).")
+            for _tn in ("racket_velocity", "racket_normal"):
+                _require(hasattr(R, _tn), f"rewards.{_tn}")
+                getattr(R, _tn).params["pos_gate_radius"] = float(_fg_r)
+            applied.append(f"rewards.face_gate_by_pos=true (racket_velocity+racket_normal x "
+                           f"sigmoid(({float(_fg_r)}-pos_err)/0.05))")
+        elif _fg_r is not None:
+            raise _OverrideError(
+                "[train.py] rewards.face_gate_radius is set but face_gate_by_pos is not enabled — "
+                "the radius would be silently ignored. Set rewards.face_gate_by_pos=true or drop it.")
+        # Constant guidance penalty (reward_staged_design 2026-07-08 §② B2): -w * min(dist, 0.5)
+        # every pre-strike + in-window step (dist = ||racket_FK - target||). 人话:挥不到球也天天
+        # 有"往哪挥"的工资单——小而恒,exp 核远处饿死的解药。The func returns a POSITIVE clamped
+        # magnitude, so the weight must be <= 0; 0.0 (the cfg default) keeps the term skipped.
+        _gw = _get(rw, "racket_guidance_weight")
+        if _gw is not None:
+            _gw = float(_gw)
+            if _gw > 0.0:
+                raise _OverrideError(
+                    f"[train.py] rewards.racket_guidance_weight must be <= 0 (penalty; the term "
+                    f"returns +min(dist, d_max)), got {_gw}")
+            _require(hasattr(R, "racket_guidance"), "rewards.racket_guidance")
+            R.racket_guidance.weight = _gw
+            applied.append(f"rewards.racket_guidance.weight={_gw}")
 
         # --- penalties / regularization (negative weights: energy + smoothness + safety) --------
         for _name, _key in (
@@ -626,6 +760,13 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             if _sp_note is not None:
                 applied.append(_sp_note)
             _set_attr(C, "strike_window_s", _get(rk, "strike_window_s"), float, applied, "racket_target")
+            # 1c split strike windows (reward_staged_design 2026-07-08 §② C1): racket_position keeps
+            # a TIGHT half-window (contact must be precise, SMASH position window 0.02 s) while
+            # racket_normal/racket_velocity get a WIDE one (±0.1 s). None (default) = both windows
+            # fall back to strike_window_s = the legacy single window, byte-identical.
+            # 人话:触点要准(紧窗),挥向挥速给余量(宽窗)。
+            _set_attr(C, "strike_window_pos_s", _get(rk, "strike_window_pos_s"), float, applied, "racket_target")
+            _set_attr(C, "strike_window_wide_s", _get(rk, "strike_window_wide_s"), float, applied, "racket_target")
             _set_attr(C, "strike_success_pos_thresh", _get(rk, "strike_success_pos_thresh"), float, applied, "racket_target")
             # P2.3 adaptive tracking sigma (coarse-to-fine reward kernel widths)
             _set_attr(C, "adaptive_sigma", _get(rk, "adaptive_sigma"), _as_bool, applied, "racket_target")
@@ -817,6 +958,69 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             env_cfg.physical_ball = True  # keep the descriptive env-cfg field honest
         _attach_physical(env_cfg)
         applied.append("scene.pb_ball+pb_table attached (Phase A truth instrument; metrics-only)")
+
+    # R-a actor leg-reference masking (reward_staged_design 2026-07-08 §⑥; HITTER critic-only
+    # reference structure) — TOP-LEVEL task key (task.actor_leg_ref_mask), mirroring the
+    # task.physical_ball precedent (this comment is the whitelist). The ACTOR's 62-D motion
+    # command keeps its exact layout but the 24 leg dims (12 leg-joint pos + 12 leg-joint vel)
+    # are fed the DEFAULT STAND pose + zero velocity; the critic's command term is untouched
+    # (privileged). Obs dim unchanged = zero contract cost. 人话:actor 眼里腿参考=站姿常数,
+    # critic 照旧全看。The leg-joint indices are derived at RUNTIME via robot.find_joints and
+    # printed to the launch log (never hardcoded — a wrong index table would be a
+    # policy-killing experiment); see mdp.generated_commands_actor_leg_masked.
+    _alm = _get(task, "actor_leg_ref_mask")
+    if _alm is not None and _as_bool(_alm):
+        from whole_body_tracking.tasks.tracking import mdp as _mdp
+
+        _require(
+            hasattr(env_cfg, "observations") and hasattr(env_cfg.observations, "policy")
+            and getattr(env_cfg.observations.policy, "command", None) is not None,
+            "observations.policy.command (task.actor_leg_ref_mask)")
+        env_cfg.observations.policy.command.func = _mdp.generated_commands_actor_leg_masked
+        applied.append("observations.policy.command.func=generated_commands_actor_leg_masked "
+                       "(R-a: actor leg ref dims -> default stand + zero vel; critic untouched)")
+
+    # R-b envelope-termination softening (reward_staged_design 2026-07-08 §⑥ + R-b细则): the two
+    # tracking-ENVELOPE terminations (anchor_pos / ee_body_pos, both z>0.25 m vs the reference)
+    # stop ENDING the episode and become a per-step penalty (rewards.tracking_envelope, weight =
+    # terminations.envelope_penalty_weight, default -1.0 => -1.0/s => -0.02/step @50 Hz). The
+    # ABSOLUTE terminations (base_fell_tilt 0.7 rad / base_too_low 0.5 m) and anchor_ori stay.
+    # 人话:跟丢参考不再判死,改成站在违规区里每秒扣钱;真摔倒照样判死。
+    # Accounting migration (design's一票否决项): terminated now only fires on the absolute terms,
+    # so pre/post_strike_fall_rate narrow to REAL falls automatically; the envelope violations get
+    # their own counters — tracking_loss_rate (rising edges / swing starts, per-clip too) and
+    # envelope_violated_frac — enabled via racket_target.track_envelope_violation. Cross-arm
+    # comparison: old-arm falls ≈ new-arm (falls + tracking_loss).
+    tm = _get(task, "terminations")
+    _check_unknown_keys(tm, _TERMINATION_KEYS, "task.terminations")
+    if tm is not None:
+        _eap = _get(tm, "envelope_as_penalty")
+        _epw = _get(tm, "envelope_penalty_weight")
+        if _eap is not None and _as_bool(_eap):
+            T = env_cfg.terminations
+            for _tn in ("anchor_pos", "ee_body_pos"):
+                _require(hasattr(T, _tn), f"terminations.{_tn}")
+                setattr(T, _tn, None)  # configclass None = term removed (footwork-cfg precedent)
+            _w = -1.0 if _epw is None else float(_epw)
+            if _w >= 0.0:
+                raise _OverrideError(
+                    f"[train.py] terminations.envelope_penalty_weight must be < 0 (per-step "
+                    f"penalty replacing the removed terminations), got {_w}")
+            _require(hasattr(env_cfg.rewards, "tracking_envelope"), "rewards.tracking_envelope")
+            env_cfg.rewards.tracking_envelope.weight = _w
+            _require(hasattr(env_cfg, "commands") and hasattr(env_cfg.commands, "racket_target")
+                     and hasattr(env_cfg.commands.racket_target, "track_envelope_violation"),
+                     "commands.racket_target.track_envelope_violation (envelope accounting)")
+            env_cfg.commands.racket_target.track_envelope_violation = True
+            applied.append("terminations.anchor_pos=None terminations.ee_body_pos=None "
+                           "(envelope_as_penalty: envelope no longer terminates)")
+            applied.append(f"rewards.tracking_envelope.weight={_w} "
+                           "(+tracking_loss_rate/envelope_violated_frac accounting)")
+        elif _epw is not None:
+            raise _OverrideError(
+                "[train.py] terminations.envelope_penalty_weight is set but envelope_as_penalty "
+                "is not enabled — it would be silently ignored. Set "
+                "terminations.envelope_as_penalty=true or drop the weight.")
 
     # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
     # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.

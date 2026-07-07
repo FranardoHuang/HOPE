@@ -32,6 +32,64 @@ def _cmd(env: ManagerBasedRLEnv, command_name: str) -> RacketTargetCommand:
     return env.command_manager.get_term(command_name)
 
 
+# --- R-a actor leg-reference masking (reward_staged_design 2026-07-08 §⑥) ------------------- #
+_LEG_JOINT_EXPR = [".*_hip_.*", ".*_knee_joint", ".*_ankle_.*"]
+_N_LEG_JOINTS = 12  # 2 x (hip pitch/roll/yaw + knee + ankle pitch/roll); loud error if not
+
+
+def _leg_mask_indices(cmd) -> tuple[torch.Tensor, torch.Tensor]:
+    """Resolve + cache the leg-joint articulation indices for the actor command mask.
+
+    RUNTIME-DERIVED via ``robot.find_joints`` — never hardcoded: the command layout is the Isaac
+    articulation (BFS-interleaved) joint order, and a wrong index table would be a policy-killing
+    experiment (design R-a risk row). The resolved names/indices are printed ONCE to the launch
+    log; pre-registration reads that printout, not any table. Raises loudly unless exactly 12 leg
+    joints resolve.
+    """
+    cached = getattr(cmd, "_actor_leg_mask_ids", None)
+    if cached is not None:
+        return cached
+    ids, names = cmd.robot.find_joints(_LEG_JOINT_EXPR)
+    ids = [int(i) for i in ids]
+    if len(ids) != _N_LEG_JOINTS:
+        raise RuntimeError(
+            f"generated_commands_actor_leg_masked: expected {_N_LEG_JOINTS} leg joints from "
+            f"find_joints({_LEG_JOINT_EXPR}), got {len(ids)}: {list(zip(ids, names))} — refusing "
+            "to mask a wrong dim set (policy-killing if miscounted)."
+        )
+    n_joints = cmd.joint_pos.shape[1]
+    pos_ids = torch.tensor(ids, dtype=torch.long, device=cmd.device)
+    vel_ids = pos_ids + n_joints
+    print(
+        "[actor_leg_ref_mask] R-a ACTIVE — actor command leg dims -> default stand + zero vel "
+        f"(critic untouched). {len(ids)} leg joints (articulation idx: name): "
+        + ", ".join(f"{i}: {n}" for i, n in zip(ids, names))
+        + f" | masked command dims pos={pos_ids.tolist()} vel={vel_ids.tolist()} "
+        f"(command dim = {2 * n_joints})",
+        flush=True,
+    )
+    cmd._actor_leg_mask_ids = (pos_ids, vel_ids)
+    return cmd._actor_leg_mask_ids
+
+
+def generated_commands_actor_leg_masked(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """R-a: the MOTION command (62-D ``cat([joint_pos, joint_vel])``) with the 24 LEG dims fed the
+    DEFAULT STAND joint positions + ZERO velocities — the actor stops seeing the leg reference
+    (HITTER's critic-only reference, observation side), while pos/ori/vel of the upper body keep
+    the swing style. 人话:actor 眼里腿参考=站姿常数,critic 照旧全看。Same output shape/order as
+    ``mdp.generated_commands`` (zero obs-contract cost); wired by train.py's task.actor_leg_ref_mask
+    override, which swaps ONLY ``observations.policy.command.func`` (the critic keeps
+    ``generated_commands``). Zero-OOD: during the pre-swing hold the command already equals
+    stand-pose + zero-vel for every joint, so the masked values are a distribution the policy sees
+    constantly. The leg indices are runtime-derived and printed (see ``_leg_mask_indices``)."""
+    cmd = env.command_manager.get_term(command_name)  # MotionCommand
+    pos_ids, vel_ids = _leg_mask_indices(cmd)
+    out = torch.cat([cmd.joint_pos, cmd.joint_vel], dim=1)  # fresh tensor; safe to write in place
+    out[:, pos_ids] = cmd.robot.data.default_joint_pos[:, pos_ids]
+    out[:, vel_ids] = 0.0
+    return out
+
+
 # --- actor (policy) observations: desired targets only ------------------------------------ #
 def racket_target_pos_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Desired racket pos rel-base (yaw frame). PRIVILEGED — uses world base position (`full` mode)."""

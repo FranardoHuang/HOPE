@@ -417,6 +417,28 @@ class RacketTargetCommand(CommandTerm):
         self.time_to_strike = torch.zeros(self.num_envs, device=self.device)
         self.pre_strike = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
         self.strike_window = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        # 1c split windows: refreshed alongside strike_window in _compute_strike_timing. With the
+        # cfg fields at their None defaults these are recomputed from strike_window_s each step,
+        # i.e. numerically identical to strike_window (byte-identical default path).
+        self.strike_window_pos = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.strike_window_wide = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+
+        # --- R-b envelope-violation accounting (cfg.track_envelope_violation; default OFF) --------
+        # Counts the tracking-envelope violations that no longer terminate under
+        # terminations.envelope_as_penalty: tracking_loss_rate = violation RISING EDGES / swing
+        # starts (same EMA timescale/denominator as pre_strike_fall_rate, per-clip variants too) +
+        # envelope_violated_frac = per-step violation fraction (loafing/挂机 monitor). Cross-arm
+        # bookkeeping: old-arm pre_strike_fall ≈ new-arm (fall + tracking_loss).
+        self._envelope_track = bool(getattr(cfg, "track_envelope_violation", False))
+        if self._envelope_track:
+            self._envelope_body_idx: list[int] | None = None  # resolved lazily vs motion.cfg.body_names
+            self._prev_envelope_viol = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+            self._tracking_loss_acc = 0.0
+            self._tracking_loss_acc_c = {c: 0.0 for c in self._clip_names}
+            self.metrics["envelope_violated_frac"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics["tracking_loss_rate"] = torch.zeros(self.num_envs, device=self.device)
+            for _cname in self._clip_names.values():
+                self.metrics[f"tracking_loss_rate_{_cname}"] = torch.zeros(self.num_envs, device=self.device)
 
         # Episode-wide tracking errors (instantaneous; averaged over terminating envs at reset).
         self.metrics["racket_pos_error"] = torch.zeros(self.num_envs, device=self.device)
@@ -1316,7 +1338,15 @@ class RacketTargetCommand(CommandTerm):
             else:
                 self.time_to_strike = (strike_step - motion.time_steps).float() * self._env.step_dt
         self.pre_strike = self.time_to_strike > 0.0
-        self.strike_window = self.time_to_strike.abs() <= self.cfg.strike_window_s
+        _tts_abs = self.time_to_strike.abs()
+        self.strike_window = _tts_abs <= self.cfg.strike_window_s
+        # 1c split windows: POSITION gets the tight window, NORMAL/VELOCITY the wide one; None
+        # (default) falls back to strike_window_s for that channel — numerically identical to the
+        # legacy single window. The stability penalties / hit-rate metric keep strike_window.
+        _pos_s = self.cfg.strike_window_pos_s
+        _wide_s = self.cfg.strike_window_wide_s
+        self.strike_window_pos = self.strike_window if _pos_s is None else (_tts_abs <= float(_pos_s))
+        self.strike_window_wide = self.strike_window if _wide_s is None else (_tts_abs <= float(_wide_s))
 
     def _update_command(self):
         motion = self._motion()
@@ -1932,6 +1962,50 @@ class RacketTargetCommand(CommandTerm):
                 min(self._poststrike_fall_acc_c[_c] / _cd, 1.0) if _ce else 0.0
             )
 
+        # --- R-b envelope-violation accounting (cfg.track_envelope_violation; default OFF) --------
+        # The envelope no longer terminates under envelope_as_penalty, so terminated-based fall
+        # metrics go blind to it — count it here instead. Same z-only expressions as the removed
+        # terminations (bad_anchor_pos_z_only / bad_motion_body_pos_z_only), same EMA
+        # timescale/denominator as pre_strike_fall_rate: tracking_loss_rate = violation RISING
+        # EDGES per swing start; envelope_violated_frac = per-step violation fraction (挂机 monitor).
+        if self._envelope_track:
+            _em = self._motion()
+            if self._envelope_body_idx is None:
+                _names = list(self.cfg.envelope_body_names)
+                _missing = [n for n in _names if n not in _em.cfg.body_names]
+                if _missing:
+                    raise ValueError(
+                        f"RacketTargetCommand.track_envelope_violation: envelope body name(s) "
+                        f"{_missing} not in motion.cfg.body_names {_em.cfg.body_names} — the "
+                        "tracking_loss accounting would silently watch the wrong bodies.")
+                self._envelope_body_idx = [i for i, n in enumerate(_em.cfg.body_names) if n in _names]
+            _eth = float(self.cfg.envelope_threshold)
+            _anchor_viol = (_em.anchor_pos_w[:, -1] - _em.robot_anchor_pos_w[:, -1]).abs() > _eth
+            _bidx = self._envelope_body_idx
+            _body_viol = torch.any(
+                (_em.body_pos_relative_w[:, _bidx, -1] - _em.robot_body_pos_w[:, _bidx, -1]).abs() > _eth,
+                dim=-1,
+            )
+            _viol = _anchor_viol | _body_viol
+            _rising = _viol & ~self._prev_envelope_viol
+            self._prev_envelope_viol = _viol
+            self._tracking_loss_acc = decay * self._tracking_loss_acc + float(_rising.sum())
+            self.metrics["envelope_violated_frac"] = _viol.float()
+            self.metrics["tracking_loss_rate"][:] = (
+                min(self._tracking_loss_acc / _s_denom, 1.0) if _s_enough else 0.0
+            )
+            if getattr(_em, "_multiseg", False):
+                _rclip = _em.clip_id
+                for _c, _cn in self._clip_names.items():
+                    self._tracking_loss_acc_c[_c] = decay * self._tracking_loss_acc_c[_c] + float(
+                        (_rising & (_rclip == _c)).sum()
+                    )
+                    _cd = max(self._swing_starts_acc_c[_c], 1e-6)
+                    _ce = self._swing_starts_acc_c[_c] >= float(self.cfg.exact_success_min_count)
+                    self.metrics[f"tracking_loss_rate_{_cn}"][:] = (
+                        min(self._tracking_loss_acc_c[_c] / _cd, 1.0) if _ce else 0.0
+                    )
+
         enough = self._exact_n_acc >= float(self.cfg.exact_success_min_count)
         denom = max(self._exact_n_acc, 1e-6)
         self._exact_composite_rate = (self._exact_pass_comp_acc / denom) if enough else 0.0
@@ -2258,6 +2332,16 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # scalar strike_phase for every clip. e.g. (0.36, 0.74) for forehand_new + backhand_new.
     strike_phase_per_clip: tuple = ()
     strike_window_s: float = 0.1  # half-window; goal-racket reward active within ±strike_window_s
+    # 1c SPLIT strike windows (reward_staged_design 2026-07-08 §② C1; defaults None = both fall
+    # back to strike_window_s, byte-identical single-window behavior). When set:
+    #   strike_window_pos_s  — TIGHT half-window for racket_position (+ the position factor of
+    #                          racket_strike_success): contact must be precise (SMASH 0.02 s).
+    #   strike_window_wide_s — WIDE half-window for racket_normal / racket_velocity (SMASH ±0.1 s:
+    #                          face+velocity get slack, damping wrist-accel spikes / sim2real gap).
+    # The legacy strike_window (strike_window_s) keeps gating the strike-stability penalties and
+    # the strike_window_hit_rate metric. 人话:触点要准(紧窗),挥向挥速给余量(宽窗)。
+    strike_window_pos_s: float | None = None
+    strike_window_wide_s: float | None = None
     strike_success_pos_thresh: float = 0.075  # m; "strike_success" metric = fraction of strikes with racket pos error below this
     strike_success_vel_thresh: float = 0.5  # m/s; exact-strike racket velocity acceptance threshold
     strike_success_normal_thresh_deg: float = 15.0  # deg; exact-strike face-normal acceptance threshold
@@ -2317,6 +2401,23 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # the reward terms log dbg_{racket_pos,racket_vel,racket_normal,base}_{raw,gated}. Pure logging; no
     # behaviour change. Turn off for production runs (extra wandb scalars).
     debug_reward_logging: bool = False
+
+    # --- R-b envelope-violation accounting (reward_staged_design 2026-07-08 §⑥ R-b细则) ---------
+    # True (set by train.py's terminations.envelope_as_penalty translation) -> the command term
+    # counts tracking-envelope violations that no longer terminate: tracking_loss_rate
+    # (violation rising edges / swing starts, same EMA timescale as pre_strike_fall_rate; per-clip
+    # variants too) + envelope_violated_frac (per-step violation fraction — the挂机/loafing
+    # monitor). Threshold/bodies mirror TerminationsCfg.anchor_pos/ee_body_pos exactly. Default
+    # False = no new metrics, byte-identical logging.
+    track_envelope_violation: bool = False
+    envelope_threshold: float = 0.25  # m; z-only error, same value the removed terminations used
+    # A3 names (mixed casing is INTENTIONAL — matches the URDF; see robots/agibot_a3.py) = the
+    # exact list AgibotA3FlatEnvCfg.__post_init__ pins into terminations.ee_body_pos
+    # (A3_FEET_BODIES + A3_HAND_BODIES). Resolved against motion.cfg.body_names with a loud
+    # error on a missing name.
+    envelope_body_names: tuple = (
+        "left_ankle_roll_Link", "right_ankle_roll_Link", "left_wrist_yaw_Link", "right_wrist_yaw_Link",
+    )
 
     # --- conditional exact-strike success metric (logging + curriculum gating) ---
     # The logged strike_*_pass_exact / strike_composite_success_exact are a sample-weighted EMA of the

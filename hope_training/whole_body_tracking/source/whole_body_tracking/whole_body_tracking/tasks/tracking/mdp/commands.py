@@ -390,7 +390,19 @@ class MotionCommand(CommandTerm):
             if n > 0:
                 new_clip = torch.randint(0, self.motion.num_segments, (n,), device=self.device)
                 self.clip_id[env_ids] = new_clip
-                self.time_steps[env_ids] = self.motion.seg_start[new_clip]
+                # R-c(i) rsi_skip_settle_frames: enter every swing N frames past the clip start —
+                # the v5 clips carry a 3-4 frame IK cold-start transient at frame 0 (7.4-15.9 rad/s
+                # phantom joint velocities). Wraps go through this same path, so the reference is
+                # live-trimmed for the whole run, not only at RSI births. Clamped to the clip's
+                # last frame so a short clip can never index out of its segment. 0 (default) = off.
+                _skip = int(getattr(self.cfg, "rsi_skip_settle_frames", 0))
+                if _skip > 0:
+                    self.time_steps[env_ids] = torch.minimum(
+                        self.motion.seg_start[new_clip] + _skip,
+                        self.motion.seg_start[new_clip] + self.motion.seg_len[new_clip] - 1,
+                    )
+                else:
+                    self.time_steps[env_ids] = self.motion.seg_start[new_clip]
                 if self.retiming_active:
                     # R14: re-base the float clock and draw this swing's playback speed.
                     self.time_steps_f[env_ids] = self.time_steps[env_ids].float()
@@ -435,6 +447,14 @@ class MotionCommand(CommandTerm):
             / self.bin_count
             * (self.motion.time_step_total - 1)
         ).long()
+        # R-c(i) rsi_skip_settle_frames (single-clip path): clamp the sampled entry frame to >= N,
+        # so the failure-adaptive sampler can never place a birth on the frame-0 IK transient
+        # ("越摔越采"的止血). Guarded against clips shorter than N. 0 (default) = off.
+        _skip = int(getattr(self.cfg, "rsi_skip_settle_frames", 0))
+        if _skip > 0:
+            self.time_steps[env_ids] = self.time_steps[env_ids].clamp(
+                min=min(_skip, max(int(self.motion.time_step_total) - 1, 0))
+            )
         if self.retiming_active:
             # R14: re-base the float clock and draw this swing's playback speed (single-clip path).
             self.time_steps_f[env_ids] = self.time_steps[env_ids].float()
@@ -563,6 +583,22 @@ class MotionCommand(CommandTerm):
         root_ori = self.body_quat_w[:, 0].clone()
         root_lin_vel = self.body_lin_vel_w[:, 0].clone()
         root_ang_vel = self.body_ang_vel_w[:, 0].clone()
+
+        # R-c(ii) rsi_hold_root_stand_z: a HELD RSI birth (hold_counter>0, drawn above — ~100/101
+        # of RSI births at hold_steps_range [0,100]) writes STAND joints (the joint_pos property's
+        # hold gate) but the reference frame's CROUCH root z (~0.78 m; body_pos_w has NO hold
+        # gate) — stand legs at crouch height put the feet ~0.29 m under the floor and PhysX
+        # depenetration kicks the robot out at birth. Fix: give held-RSI births the DEFAULT-STAND
+        # root height (default_root_state z, 1.0684 m on the A3 — read at runtime, never
+        # hardcoded); xy + yaw stay the reference frame's. Velocities are already hold-zeroed by
+        # the body_*_vel_w properties. Default False = byte-identical.
+        if bool(getattr(self.cfg, "rsi_hold_root_stand_z", False)):
+            held_rsi = env_ids[self.hold_counter[env_ids] > 0]
+            if len(held_rsi) > 0:
+                root_pos[held_rsi, 2] = (
+                    self.robot.data.default_root_state[held_rsi, 2]
+                    + self._env.scene.env_origins[held_rsi, 2]
+                )
 
         range_list = [self.cfg.pose_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]]
         ranges = torch.tensor(range_list, device=self.device)
@@ -776,6 +812,21 @@ class MotionCommandCfg(CommandTermCfg):
     # Question-bank targets are NOT rescaled (bank overrides target sampling downstream) — the
     # reference swing slows, the physical answer stays the answer.
     speed_scale_per_clip: tuple[float, ...] | None = None
+
+    # --- R-c RSI birth fixes (reward_staged_design 2026-07-08 §⑥; defaults OFF = byte-identical) --
+    # (i) Skip the first N frames of every swing entry (RSI reset AND wrap — both go through
+    # _adaptive_sampling): the v5 GMR clips carry a 3-4 frame IK cold-start transient at frame 0
+    # (7.4-15.9 rad/s phantom joint velocities), so births teleported onto frame 0 inherit an
+    # instant over-speed reference. N=6 (0.12 s @50 fps) is the design stopgap; once the GMR
+    # warm-up source fix lands, N returns to 0 and this flag retires. 人话:出生别传送到 IK 瞬态
+    # 帧上,参考从第 N 帧起播。
+    rsi_skip_settle_frames: int = 0
+    # (ii) Held-RSI births (hold_counter>0) write the DEFAULT-STAND root height instead of the
+    # reference frame-0 crouch z: the hold gate already substitutes STAND joints, but the root
+    # kept the crouch height (0.78 m vs stand 1.0684 m) -> feet ~0.29 m under the floor -> PhysX
+    # depenetration kick at birth. This makes the birth state self-consistent; it is a
+    # correctness fix, not an incentive change. 人话:站姿关节配站姿身高,脚不再穿地被弹飞。
+    rsi_hold_root_stand_z: bool = False
 
     adaptive_kernel_size: int = 1
     adaptive_lambda: float = 0.8

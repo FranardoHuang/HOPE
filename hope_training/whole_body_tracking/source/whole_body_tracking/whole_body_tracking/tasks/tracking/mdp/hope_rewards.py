@@ -42,14 +42,40 @@ def _dbg_log(cmd: RacketTargetCommand, name: str, raw: torch.Tensor, mask: torch
     cmd.metrics[f"dbg_{name}_gated"] = torch.where(mask, raw * mask.float(), cmd.metrics[f"dbg_{name}_gated"])
 
 
+def _window_pos(cmd: RacketTargetCommand) -> torch.Tensor:
+    """1c TIGHT window for the position channel (== strike_window unless racket.strike_window_pos_s)."""
+    win = getattr(cmd, "strike_window_pos", None)
+    return cmd.strike_window if win is None else win
+
+
+def _window_wide(cmd: RacketTargetCommand) -> torch.Tensor:
+    """1c WIDE window for the normal/velocity channels (== strike_window unless racket.strike_window_wide_s)."""
+    win = getattr(cmd, "strike_window_wide", None)
+    return cmd.strike_window if win is None else win
+
+
+def _pos_gate(cmd: RacketTargetCommand, pos_gate_radius: float | None) -> torch.Tensor | float:
+    """Proximity power-gate (reward_staged_design §② C2a): sigmoid((r_gate - pos_err)/0.05) with
+    pos_err = ||racket_FK - target||. ~0 when the paddle cannot reach the target (no face/velocity
+    money AND no face/velocity gradient noise while out of reach), ~1 once inside the gate; smooth
+    so there is no bang-bang flicker at the gate edge. 人话:拍子够得着球才开始付拍面/拍速的钱。
+    ``None`` (the default of every caller) returns 1.0 — byte-identical baseline."""
+    if pos_gate_radius is None:
+        return 1.0
+    pos_err = torch.norm(cmd.racket_pos_w - cmd.racket_target_pos_w, dim=-1)
+    return torch.sigmoid((float(pos_gate_radius) - pos_err) / 0.05)
+
+
 def racket_position_tracking_exp(env: ManagerBasedRLEnv, command_name: str, std: float) -> torch.Tensor:
-    """Track racket center position near strike using the target's swing-through trajectory."""
+    """Track racket center position near strike using the target's swing-through trajectory.
+    Gated by the TIGHT position window (1c): contact must be precise; == strike_window by default."""
     cmd = _cmd(env, command_name)
     target_pos_now = cmd.racket_target_pos_w - cmd.racket_target_vel_w * cmd.time_to_strike.unsqueeze(-1)
     error = torch.sum(torch.square(cmd.racket_pos_w - target_pos_now), dim=-1)
     raw = torch.exp(-error / std**2)
-    _dbg_log(cmd, "racket_pos", raw, cmd.strike_window)
-    return raw * cmd.strike_window.float()
+    win = _window_pos(cmd)
+    _dbg_log(cmd, "racket_pos", raw, win)
+    return raw * win.float()
 
 
 def racket_position_tracking_static_exp(env: ManagerBasedRLEnv, command_name: str, std: float) -> torch.Tensor:
@@ -64,21 +90,31 @@ def racket_position_tracking_static_exp(env: ManagerBasedRLEnv, command_name: st
     cmd = _cmd(env, command_name)
     error = torch.sum(torch.square(cmd.racket_pos_w - cmd.racket_target_pos_w), dim=-1)
     raw = torch.exp(-error / std**2)
-    _dbg_log(cmd, "racket_pos", raw, cmd.strike_window)
-    return raw * cmd.strike_window.float()
+    win = _window_pos(cmd)
+    _dbg_log(cmd, "racket_pos", raw, win)
+    return raw * win.float()
 
 
-def racket_velocity_tracking_exp(env: ManagerBasedRLEnv, command_name: str, std: float) -> torch.Tensor:
-    """Track racket linear velocity near the strike time (FK actual vs desired, world frame)."""
+def racket_velocity_tracking_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float, pos_gate_radius: float | None = None
+) -> torch.Tensor:
+    """Track racket linear velocity near the strike time (FK actual vs desired, world frame).
+    Gated by the WIDE window (1c; == strike_window by default) and, when rewards.face_gate_by_pos
+    is on, by the proximity power-gate (see ``_pos_gate``)."""
     cmd = _cmd(env, command_name)
     error = torch.sum(torch.square(cmd.racket_lin_vel_w - cmd.racket_target_vel_w), dim=-1)
     raw = torch.exp(-error / std**2)
-    _dbg_log(cmd, "racket_vel", raw, cmd.strike_window)
-    return raw * cmd.strike_window.float()
+    win = _window_wide(cmd)
+    _dbg_log(cmd, "racket_vel", raw, win)
+    return raw * win.float() * _pos_gate(cmd, pos_gate_radius)
 
 
-def racket_normal_tracking_exp(env: ManagerBasedRLEnv, command_name: str, std: float) -> torch.Tensor:
-    """Track racket face-normal orientation near the strike time. ``std`` is in radians."""
+def racket_normal_tracking_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float, pos_gate_radius: float | None = None
+) -> torch.Tensor:
+    """Track racket face-normal orientation near the strike time. ``std`` is in radians.
+    Gated by the WIDE window (1c; == strike_window by default) and, when rewards.face_gate_by_pos
+    is on, by the proximity power-gate (see ``_pos_gate``)."""
     cmd = _cmd(env, command_name)
     # Stage-1 face command: the reference is the DEMANDED (inverse-solved, question-bank) normal
     # instead of the clip-locked reference normal. face_command=False keeps the old tensor read —
@@ -87,8 +123,9 @@ def racket_normal_tracking_exp(env: ManagerBasedRLEnv, command_name: str, std: f
     cos_ang = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
     angle = torch.acos(cos_ang)
     raw = torch.exp(-(angle**2) / std**2)
-    _dbg_log(cmd, "racket_normal", raw, cmd.strike_window)
-    return raw * cmd.strike_window.float()
+    win = _window_wide(cmd)
+    _dbg_log(cmd, "racket_normal", raw, win)
+    return raw * win.float() * _pos_gate(cmd, pos_gate_radius)
 
 
 def base_position_tracking_exp(env: ManagerBasedRLEnv, command_name: str, std: float) -> torch.Tensor:
@@ -219,12 +256,52 @@ def racket_strike_success(
     additive racket terms (which give partial credit for getting only position OR velocity right), the
     product is high ONLY when position AND velocity AND normal are all good at once — a true hit. RewTerm
     weight is POSITIVE."""
-    # Each kernel already multiplies by strike_window internally, so the product is non-zero ONLY in the
-    # window (no extra gate needed). The product is high only when pos AND vel AND normal are all good.
+    # Each kernel already multiplies by its strike window internally, so the product is non-zero ONLY
+    # inside the INTERSECTION of the windows (with 1c split windows that is the tight position window —
+    # a "true hit" is judged at contact precision; identical to before when the windows are not split).
+    # The proximity power-gate is deliberately NOT passed down here: success is already multiplicative
+    # (the design keeps the big money on the ungated product).
     rp = racket_position_tracking_exp(env, command_name, std_pos)
     rv = racket_velocity_tracking_exp(env, command_name, std_vel)
     rn = racket_normal_tracking_exp(env, command_name, std_normal)
     return rp * rv * rn
+
+
+def racket_guidance(env: ManagerBasedRLEnv, command_name: str, d_max: float = 0.5) -> torch.Tensor:
+    """Constant guidance penalty toward the racket target (reward_staged_design 2026-07-08 §② B2):
+    ``min(||racket_FK - target||, d_max)``, paid every pre-strike AND in-window step (union: from
+    swing start through the strike window; the post-strike follow-through is untouched). This is
+    the "挥拍到指定位置" gradient that exists even when the paddle is far outside every exp
+    kernel's responsive band (the exp-starvation antidote); ``min(·, d_max)`` caps the burden so a
+    far target can never drown the imitation signal (risk ⑤-1). Returns a POSITIVE magnitude —
+    the RewTerm weight is NEGATIVE (set via rewards.racket_guidance_weight; cfg default 0.0 = off,
+    the term is skipped). 人话:挥不到球也天天有"往哪挥"的工资单,小而恒。"""
+    cmd = _cmd(env, command_name)
+    dist = torch.norm(cmd.racket_pos_w - cmd.racket_target_pos_w, dim=-1)
+    active = cmd.pre_strike | cmd.strike_window
+    return dist.clamp(max=float(d_max)) * active.float()
+
+
+def tracking_envelope_violation(
+    env: ManagerBasedRLEnv, command_name: str, threshold: float, body_names: list[str]
+) -> torch.Tensor:
+    """R-b envelope-as-penalty (reward_staged_design 2026-07-08 §⑥): per-step indicator of the
+    tracking-envelope violation that used to TERMINATE the episode — the union of the two removed
+    terminations, with the SAME z-only expressions (terminations.bad_anchor_pos_z_only |
+    bad_motion_body_pos_z_only over the feet+wrists list). Returns 1.0 while violating, else 0.0;
+    the RewTerm weight is NEGATIVE (terminations.envelope_penalty_weight, e.g. -1.0 => -0.02/step
+    @50 Hz), so standing in the violation zone costs money instead of ending the episode.
+    ``command_name`` is the MOTION command ("motion"). 人话:跟丢参考不再判死,改成站在违规区里
+    每秒扣钱。Weight 0.0 (cfg default) = term skipped, byte-identical."""
+    from whole_body_tracking.tasks.tracking.mdp.terminations import (
+        bad_anchor_pos_z_only,
+        bad_motion_body_pos_z_only,
+    )
+
+    viol = bad_anchor_pos_z_only(env, command_name, threshold) | bad_motion_body_pos_z_only(
+        env, command_name, threshold, body_names
+    )
+    return viol.float()
 
 
 # ============================================================================================== #
@@ -425,22 +502,28 @@ def arm_torque_saturation(env: ManagerBasedRLEnv, command_name: str) -> torch.Te
     cmd.metrics["arm_torque_sat_frac"] = frac  # watch-metric: should fall toward 0 during fine-tune
     return frac
 
-def motion_body_pos_swing_only(env, command_name: str, std: float, body_names=None):
+def motion_body_pos_swing_only(env, command_name: str, std: float, body_names=None,
+                               window_scale: float = 1.0, window_command_name: str | None = None):
     """motion_relative_body_position_error_exp gated to ~in_hold (2026-07-05): during
     hold the joint reference is the default STAND (commands.joint_pos) while the frozen
     body refs still show clip frame 0's crouch — un-gated, the two imitation pulls
-    fight and the policy settles into the splayed-feet crouch-stand. Swing-only."""
+    fight and the policy settles into the splayed-feet crouch-stand. Swing-only.
+    window_scale/window_command_name: V2 in-window imitation yield, forwarded to the base
+    func (see rewards._apply_window_scale); defaults = no-op."""
     from .rewards import motion_relative_body_position_error_exp
     cmd = env.command_manager.get_term(command_name)
-    r = motion_relative_body_position_error_exp(env, command_name, std, body_names)
+    r = motion_relative_body_position_error_exp(env, command_name, std, body_names,
+                                                window_scale, window_command_name)
     return torch.where(cmd.in_hold, torch.zeros_like(r), r)
 
 
-def motion_body_ori_swing_only(env, command_name: str, std: float, body_names=None):
+def motion_body_ori_swing_only(env, command_name: str, std: float, body_names=None,
+                               window_scale: float = 1.0, window_command_name: str | None = None):
     """See motion_body_pos_swing_only."""
     from .rewards import motion_relative_body_orientation_error_exp
     cmd = env.command_manager.get_term(command_name)
-    r = motion_relative_body_orientation_error_exp(env, command_name, std, body_names)
+    r = motion_relative_body_orientation_error_exp(env, command_name, std, body_names,
+                                                   window_scale, window_command_name)
     return torch.where(cmd.in_hold, torch.zeros_like(r), r)
 
 def foot_orientation_discipline(env, command_name: str, asset_cfg):
