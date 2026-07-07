@@ -297,5 +297,53 @@ def test_mini_yaml_fallback_parser():
     assert "session" not in clips                 # grip section not swallowed
 
 
+# --------------------------------------------- adversarial-review regressions
+def test_long_inline_joint_list_does_not_crash(tmp_path, limits):
+    # a full 31-name comma list (~700 chars) must not hit ENAMETOOLONG via Path()
+    many = ",".join(f"long_name_{i:02d}_joint" * 3 for i in range(31))
+    q = np.full((10, 3), 0.1)
+    f = _write_npz(tmp_path / "c.npz", q, np.zeros((10, 3)))
+    rep = audit.audit_clip(f, limits, joint_names=many)
+    assert rep.verdict == "FAIL"                  # count mismatch -> fail-loud
+    assert _findings(rep, "load", "FAIL")
+
+
+def test_nan_arrays_fail_not_pass(tmp_path, limits):
+    q = np.full((20, 3), np.nan)
+    f = _write_npz(tmp_path / "nan.npz", q, q.copy())
+    rep = audit.audit_clip(f, limits, joint_names=JOINT_SPEC)
+    assert rep.verdict == "FAIL"
+    assert rep.suggestion.kind == "regenerate"
+
+
+def test_short_clip_overlapping_trims_regenerate(tmp_path, limits):
+    # T=15 <= 2*EDGE_WINDOW: a FAIL frame near the middle lands in BOTH edge
+    # windows; combined trim would cover the whole clip -> must regenerate,
+    # never emit an empty-slice trim command
+    T = 15
+    q = np.full((T, 3), 0.1)
+    dq = np.zeros((T, 3))
+    dq[8, 0] = 6.0                                # > 5 rad/s toy limit
+    f = _write_npz(tmp_path / "short.npz", q, dq)
+    rep = audit.audit_clip(f, limits, joint_names=JOINT_SPEC)
+    assert rep.verdict == "FAIL"
+    assert rep.suggestion.kind == "regenerate"
+    assert (rep.suggestion.trim_head or 0) + (rep.suggestion.trim_tail or 0) == 0
+
+
+def test_markdown_pipes_escaped(tmp_path, limits):
+    # |velocity| in finding messages must not break GFM table cells
+    q = np.full((30, 3), 0.1)
+    dq = np.zeros((30, 3))
+    dq[15, 0] = 6.0
+    f = _write_npz(tmp_path / "m.npz", q, dq)
+    rep = audit.audit_clip(f, limits, joint_names=JOINT_SPEC)
+    md = audit.report_markdown([rep], {
+        "generated_utc": "t", "urdf": "u", "soft_factor": 0.9, "annotations": None,
+    })
+    table = [ln for ln in md.splitlines() if ln.startswith("| vel_limit")]
+    assert table and all("\\|velocity\\|" in ln for ln in table)
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

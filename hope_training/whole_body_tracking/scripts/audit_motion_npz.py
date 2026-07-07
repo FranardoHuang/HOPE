@@ -378,9 +378,14 @@ def resolve_joint_names(spec: Optional[str], n_joints: int) -> List[str]:
     if not spec:
         names = list(ISAAC_JOINT_NAMES)
     else:
-        p = Path(spec)
-        if p.is_file():
-            names = [ln.strip() for ln in p.read_text().splitlines() if ln.strip() and not ln.startswith("#")]
+        is_file = False
+        if "," not in spec:
+            try:
+                is_file = Path(spec).is_file()
+            except OSError:  # ENAMETOOLONG etc. — a long inline list is not a path
+                is_file = False
+        if is_file:
+            names = [ln.strip() for ln in Path(spec).read_text().splitlines() if ln.strip() and not ln.startswith("#")]
         else:
             names = [n.strip() for n in spec.split(",") if n.strip()]
     if len(names) != n_joints:
@@ -430,6 +435,11 @@ def audit_clip(
     except Exception as exc:  # malformed npz is a FAIL, not a crash
         rep.add(Finding("load", FAIL, f"cannot load/parse npz: {exc}"))
         rep.suggestion = Suggestion("regenerate", ["clip unreadable — regenerate"])
+        return rep
+
+    if not (np.isfinite(q).all() and np.isfinite(dq).all()):
+        rep.add(Finding("load", FAIL, "non-finite values (NaN/Inf) in joint_pos/joint_vel"))
+        rep.suggestion = Suggestion("regenerate", ["corrupt arrays (NaN/Inf) — regenerate the clip"])
         return rep
 
     T, J = q.shape
@@ -648,6 +658,13 @@ def _build_suggestion(
                 f"{_ranges(sorted(tail))}"
             )
 
+        if trim_head + trim_tail >= T:
+            return Suggestion("regenerate", [
+                f"suggested trims (head {trim_head} + tail {trim_tail}) cover the whole "
+                f"{T}-frame clip (short clip: head/tail edge windows overlap) — nothing would "
+                f"remain; reject / regenerate at the source",
+            ])
+
         # strike protection window: refuse a trim that eats into contact +- margin
         if rep.contact_frame is not None:
             c = rep.contact_frame
@@ -750,12 +767,13 @@ def report_markdown(reports: List[ClipReport], meta: dict) -> str:
             out.append("| check | level | joint | frames | value | threshold | note |")
             out.append("|---|---|---|---|---|---|---|")
             for f in sorted(rows, key=lambda x: -_LEVEL_RANK[x.level]):
+                msg = f.message.replace("|", "\\|")  # keep GFM table cells intact
                 out.append(
                     f"| {f.check} | {f.level} | {f.joint or '-'} "
                     f"| {_ranges(f.frames) if f.frames else '-'} "
                     f"| {'' if f.value is None else format(f.value, '.3f')} "
                     f"| {'' if f.threshold is None else format(f.threshold, '.3f')} "
-                    f"| {f.message} |"
+                    f"| {msg} |"
                 )
         else:
             out.append("no violations — all checks PASS.")
