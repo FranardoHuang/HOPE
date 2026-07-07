@@ -479,6 +479,8 @@ class RacketTargetCommand(CommandTerm):
             for _vk in (
                 "virtual_return_rate", "virtual_return_rate_forehand", "virtual_return_rate_backhand",
                 "virtual_hit_rate_forehand", "virtual_hit_rate_backhand",
+                "virtual_return_rate_rally", "virtual_return_rate_rally_forehand",
+                "virtual_return_rate_rally_backhand",
                 "virtual_hit_rate", "virtual_net_clear_rate", "virtual_land_valid_rate",
                 "virtual_land_inbounds_rate", "virtual_land_err_m", "virtual_topspin_revs",
                 "virtual_approach_speed",
@@ -1724,6 +1726,15 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["virtual_return_rate"][:] = (
             (self._vb_inb_acc / max(self._vb_exact_acc, 1e-6)) if enough_e else 0.0
         )
+        # CONTINUOUS-RALLY return rate (franco 2026-07-08 长期追踪): legal returns per swing
+        # START — falls and never-reached-strike swings count as failures (the completion-rate
+        # denominator), so this is the in-training Isaac twin of the deploy "keep rallying"
+        # number. Same-decay EMAs -> consistent ratio. MuJoCo twin = the deploy-faithful /
+        # Gate 3B periodic exam (checkpoint 抽查).
+        _starts = max(self._swing_starts_acc, 1e-6)
+        self.metrics["virtual_return_rate_rally"][:] = (
+            (self._vb_inb_acc / _starts) if enough_e else 0.0
+        )
         # Per-side (forehand/backhand) return rate — 反手先行 judging needs the per-side number.
         _motion = self._motion()
         if getattr(_motion, "_multiseg", False):
@@ -1738,6 +1749,10 @@ class RacketTargetCommand(CommandTerm):
                 _scale = (1.0 / max(_n, 1e-6)) if _n >= float(self.cfg.exact_success_min_count) else 0.0
                 self.metrics[f"virtual_return_rate_{_cn}"][:] = self._vb_inb_acc_c[_c] * _scale
                 self.metrics[f"virtual_hit_rate_{_cn}"][:] = self._vb_hit_acc_c[_c] * _scale
+                _starts_c = max(self._swing_starts_acc_c[_c], 1e-6)
+                self.metrics[f"virtual_return_rate_rally_{_cn}"][:] = (
+                    (self._vb_inb_acc_c[_c] / _starts_c) if enough_e else 0.0
+                )
         self.metrics["virtual_approach_speed"] = torch.where(
             exact_strike, approach, self.metrics["virtual_approach_speed"]
         )
