@@ -215,3 +215,126 @@ clips:
     source: video-gvhmr + grip-calibrated
     face_normal_reliable: true-calibrated
     rally_yaw_deg: -40
+
+  # --- regen_0708 candidates (GMR warm-up fix, 2026-07-08) ----------------------------------
+  # Fixed-pipeline regenerations of the three motion sources (swing/v4/v5) in
+  # /workspace/franco/motion_work/motions/regen_0708_candidates/ — CANDIDATE assets, the
+  # incumbent *_cal clips above stay in service until franco approves the swap-in.
+  # Provenance (verified numerically, finalize_stats.json in the candidates' audit/ dir):
+  #   * GMR IK warm-up fix prepends ONE 30fps lead-in frame = +5/3 frames at 50fps; measured
+  #     content alignment vs incumbents: best integer lag 2, parabola vertex 1.71-1.79 on all
+  #     four colliding pairs -> true-contact phases below are the old frame + 5/3, /(T_new-1).
+  #   * frame-0 IK cold-start ghost GONE: first-frame joint-vel peak 0.10-1.67 rad/s across all
+  #     six (incumbents: 7.4-15.9 rad/s); bh v5 mid-motion hover fixed (min body z during
+  #     motion 0.045 m vs incumbent 0.102 m, the known ~5.8 cm float).
+  #   * grip bake CONFIRMED in the npz: right-wrist triplet matches the (baked) incumbent _cal
+  #     at aligned frames to 0.002-0.011 rad mean (an unbaked clip would differ by ~Rz5Rx40).
+  # phase values = claude 数值复核 (blade-speed direction/magnitude healthy at the chosen
+  # frames, forward-strike label, speed curves saved for spot-check), franco 抽查待办 before
+  # any swap-in. train_phase_candidates = gen_stage1_questions --phase-scan run 2026-07-08 on
+  # these very files (log: regen_0708_candidates/audit/phase_scan_0708.log), scanned at both
+  # the stage-1 default [2,5] m/s and venue-like [1.0,2.5] m/s ball speeds.
+  hope_forehand_swing_cal:
+    phase: 0.371
+    status: unverified
+    annotator: claude (数值复核; franco 抽查待办 before swap-in)
+    date: 2026-07-08
+    method: dry swing, NO ball (franco frame-checked the source video 2026-07-08) -> hopex
+      speed-peak convention; blade speed peak f36 of 98 (|v|=2.82 m/s, vx=+2.26,
+      forward-strike). No incumbent same-name clip existed
+    source: video-gvhmr + grip-calibrated (regen_0708 warm-up pipeline, csv_to_npz_mujoco
+      --grip-rot 5 40)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: 40   # carried from the v4/hopex same-source convention (swing filmed in the
+      # same session family); NOT solved on this clip yet — rally-yaw scan 待办
+    train_phase_candidates: [0.371, 0.381, 0.392]   # phase-scan 100% at both speed ranges
+      # (venue-range top adds 0.412; >50% band 0.35-0.44). Convention frame 36 IS the top frame
+
+  hope_backhand_swing_cal:
+    phase: 0.514
+    status: unverified
+    annotator: claude (数值复核; franco 抽查待办 before swap-in)
+    date: 2026-07-08
+    method: dry swing, NO ball (franco frame-checked the source video 2026-07-08) -> hopex
+      speed-peak convention; blade speed peak f55 of 108 (|v|=1.83 m/s, vx=+1.69,
+      forward-strike). No incumbent same-name clip existed
+    source: video-gvhmr + grip-calibrated (regen_0708 warm-up pipeline, csv_to_npz_mujoco
+      --grip-rot 5 40)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: -40  # carried from the v4/hopex same-source convention; rally-yaw scan 待办
+    train_phase_candidates: [0.486, 0.495, 0.505, 0.514]   # union of both speed ranges;
+      # convention frame 55 (0.514) scores 100% at venue speeds but <50% at [2,5] — the
+      # [2,5]-range window is f52-f54 (0.486-0.505)
+
+  hope_forehand_v4rg_cal:   # rg = regen_0708 candidate of hope_forehand_v4_cal
+    phase: 0.471
+    status: unverified
+    annotator: claude (数值复核; franco 抽查待办 before swap-in)
+    date: 2026-07-08
+    method: hopex/v4 speed-peak CONVENTION value recomputed on the regenerated frames — blade
+      speed peak f66 of 141 (|v|=2.34 m/s, vx=+1.97, forward-strike); consistent with the
+      incumbent convention frame 65 + the 5/3-frame warm-up lead-in (66.67)
+    source: video-gvhmr + grip-calibrated (regen_0708 warm-up pipeline, csv_to_npz_mujoco
+      --grip-rot 5 40)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: 40   # carried from hope_forehand_v4_cal (same source video)
+    train_phase_candidates: [0.471, 0.486, 0.493, 0.507]   # union of both speed ranges; the
+      # convention frame 66 (0.471) scores 100% at both; >50% band 0.44-0.52
+
+  hope_backhand_v4rg_cal:   # rg = regen_0708 candidate of hope_backhand_v4_cal
+    phase: 0.338
+    status: unverified
+    annotator: claude (数值复核; franco 抽查待办 before swap-in)
+    date: 2026-07-08
+    method: hopex/v4 speed-peak CONVENTION value recomputed on the regenerated frames — blade
+      speed peak f45 of 134 (|v|=2.34 m/s, vx=+1.91, forward-strike); consistent with the
+      incumbent convention frame 44 + the 5/3-frame warm-up lead-in (45.67)
+    source: video-gvhmr + grip-calibrated (regen_0708 warm-up pipeline, csv_to_npz_mujoco
+      --grip-rot 5 40)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: -40  # carried from hope_backhand_v4_cal (same source video)
+    train_phase_candidates: [0.331, 0.338, 0.346]   # identical top-3 at both speed ranges,
+      # all 100%; phase frame 45 (0.338) is inside the window
+
+  hope_forehand_v5rg_cal:   # rg = regen_0708 candidate of hope_forehand_v5_cal
+    phase: 0.678
+    status: unverified
+    annotator: claude (数值复核; franco 抽查待办 before swap-in) — carried from franco's
+      verified hope_forehand_v5 contact (0.673), time-shifted
+    date: 2026-07-08
+    method: video TRUE-CONTACT lineage — incumbent contact frame 37 of 56 (phase 0.673,
+      franco frame-by-frame 2026-07-04) + 5/3-frame warm-up lead-in = frame 38.67 of 58 ->
+      0.678 (rounds to f39; |v|=2.31 m/s, vx=+1.04, forward-strike, 0.04 m off the x=0.40
+      plane). Measured content lag vs incumbent = 1.79 frames (parabola vertex)
+    source: video-gvhmr + grip-calibrated (regen_0708 warm-up pipeline, csv_to_npz_mujoco
+      --grip-rot 5 40)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: 40   # carried from hope_forehand_v5_cal (same source video)
+    train_phase_candidates: [0.684, 0.702, 0.719]   # venue-range top-3 (100/100/75%+); the
+      # [2,5] range adds 0.667 (75% there, only 25% at venue speeds). Contact phase 0.678
+      # sits between the first two candidates
+
+  hope_backhand_v5rg_cal:   # rg = regen_0708 candidate of hope_backhand_v5_cal
+    phase: 0.391
+    status: unverified
+    annotator: claude (数值复核; franco 抽查待办 before swap-in) — carried from the verified
+      hope_backhand_v5 contact (0.362), time-shifted
+    date: 2026-07-08
+    method: video TRUE-CONTACT lineage — incumbent contact frame 21 of 58 (phase 0.362) +
+      5/3-frame warm-up lead-in = frame 22.67 of 59 -> 0.391 (rounds to f23; |v|=3.63 m/s,
+      vx=+2.73, forward-strike; the speed peak sits at f22, same contact-just-before-peak
+      pattern as the incumbent). Measured content lag vs incumbent = 1.71 frames (parabola
+      vertex)
+    source: video-gvhmr + grip-calibrated (regen_0708 warm-up pipeline, csv_to_npz_mujoco
+      --grip-rot 5 40)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: -40  # carried from hope_backhand_v5_cal (same source video)
+    train_phase_candidates: [0.345, 0.362, 0.379]   # identical top-3 at both speed ranges,
+      # all 100% — a MUCH wider window than the old clip's f17-18-only verdict (07-05 scan);
+      # the regenerated kinematics return fine around the (shifted) truth frame
