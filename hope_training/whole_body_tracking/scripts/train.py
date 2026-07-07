@@ -280,6 +280,8 @@ _MOTION_KEYS = (
     "clip_switch_prob",
     # P2.4/R14 per-swing reference playback speed range (retiming).
     "speed_scale_range",
+    # 2026-07-08 backhand-fix ablation: fixed per-clip reference playback speed (e.g. [1.0, 0.8]).
+    "speed_scale_per_clip",
 )
 
 
@@ -479,6 +481,9 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(M, "post_swing_min_hold", _get(mt, "post_swing_min_hold"), int, applied, "commands.motion")
             _set_attr(M, "clip_switch_prob", _get(mt, "clip_switch_prob"), float, applied, "commands.motion")
             _set_attr(M, "speed_scale_range", _get(mt, "speed_scale_range"),
+                      lambda v: tuple(float(x) for x in v), applied, "commands.motion")
+            # Backhand-fix ablation (2026-07-08): fixed per-clip reference playback speed.
+            _set_attr(M, "speed_scale_per_clip", _get(mt, "speed_scale_per_clip"),
                       lambda v: tuple(float(x) for x in v), applied, "commands.motion")
 
     rw = _get(task, "rewards")

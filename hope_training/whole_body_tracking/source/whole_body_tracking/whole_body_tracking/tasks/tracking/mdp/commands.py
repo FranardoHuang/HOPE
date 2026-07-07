@@ -127,6 +127,23 @@ class MotionCommand(CommandTerm):
             raise ValueError(f"speed_scale_range must be (lo, hi) with 0 < lo <= hi, got {self.cfg.speed_scale_range}")
         _s_lo, _s_hi = _s_rng
         self.retiming_active = not (_s_lo == 1.0 and _s_hi == 1.0)
+        # FIXED per-clip playback speed (backhand-fix ablation 2026-07-08): e.g. (1.0, 0.8) plays
+        # the backhand reference at 0.8x while the forehand stays 1.0x. Deterministic per clip
+        # (no per-swing randomness), rides the same R14 float-clock path. Overrides
+        # speed_scale_range sampling when set; None (default) = byte-identical legacy behavior.
+        self._speed_per_clip = None
+        if getattr(self.cfg, "speed_scale_per_clip", None) is not None:
+            _spc = tuple(float(x) for x in self.cfg.speed_scale_per_clip)
+            if any(s <= 0.0 for s in _spc):
+                raise ValueError(f"speed_scale_per_clip must be positive, got {_spc}")
+            if len(_spc) != self.motion.num_segments:
+                raise ValueError(
+                    f"speed_scale_per_clip has {len(_spc)} entries but the motion has "
+                    f"{self.motion.num_segments} clip(s)")
+            self._speed_per_clip = torch.tensor(_spc, device=self.device)
+            self.retiming_active = True
+            print(f"[MotionCommand] speed_scale_per_clip ACTIVE: {_spc} "
+                  f"(fixed per-clip reference playback; overrides speed_scale_range)", flush=True)
         self.time_steps_f = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
         self.speed_scale = torch.ones(self.num_envs, device=self.device)
         # Unified multi-clip (HITTER forehand+backhand) support. With one clip these are inert and the
@@ -377,8 +394,11 @@ class MotionCommand(CommandTerm):
                 if self.retiming_active:
                     # R14: re-base the float clock and draw this swing's playback speed.
                     self.time_steps_f[env_ids] = self.time_steps[env_ids].float()
-                    s_lo, s_hi = self.cfg.speed_scale_range
-                    self.speed_scale[env_ids] = sample_uniform(float(s_lo), float(s_hi), (n,), device=self.device)
+                    if self._speed_per_clip is not None:
+                        self.speed_scale[env_ids] = self._speed_per_clip[new_clip]
+                    else:
+                        s_lo, s_hi = self.cfg.speed_scale_range
+                        self.speed_scale[env_ids] = sample_uniform(float(s_lo), float(s_hi), (n,), device=self.device)
             # Report the REAL clip-sampling distribution (repurpose the bin-sampling metrics for clips):
             # entropy of the per-clip env fraction (1.0 = balanced), and the most-sampled clip + its share.
             counts = torch.bincount(self.clip_id, minlength=self.motion.num_segments).float()
@@ -418,10 +438,13 @@ class MotionCommand(CommandTerm):
         if self.retiming_active:
             # R14: re-base the float clock and draw this swing's playback speed (single-clip path).
             self.time_steps_f[env_ids] = self.time_steps[env_ids].float()
-            s_lo, s_hi = self.cfg.speed_scale_range
-            self.speed_scale[env_ids] = sample_uniform(
-                float(s_lo), float(s_hi), (len(env_ids),), device=self.device
-            )
+            if self._speed_per_clip is not None:
+                self.speed_scale[env_ids] = self._speed_per_clip[self.clip_id[env_ids]]
+            else:
+                s_lo, s_hi = self.cfg.speed_scale_range
+                self.speed_scale[env_ids] = sample_uniform(
+                    float(s_lo), float(s_hi), (len(env_ids),), device=self.device
+                )
 
         # Metrics
         H = -(sampling_probabilities * (sampling_probabilities + 1e-12).log()).sum()
@@ -747,6 +770,12 @@ class MotionCommandCfg(CommandTermCfg):
     # clock but NOT the velocities (pp_policy.hpp). Default (1.0, 1.0) = OFF: the integer-clock
     # path below is byte-identical to before this flag existed.
     speed_scale_range: tuple[float, float] = (1.0, 1.0)
+    # FIXED per-clip playback speed (2026-07-08 backhand-fix ablation): one entry per clip in
+    # motion order, e.g. (1.0, 0.8) = forehand 1.0x, backhand 0.8x. Deterministic (no per-swing
+    # randomness); overrides speed_scale_range when set. None = OFF (byte-identical default).
+    # Question-bank targets are NOT rescaled (bank overrides target sampling downstream) — the
+    # reference swing slows, the physical answer stays the answer.
+    speed_scale_per_clip: tuple[float, ...] | None = None
 
     adaptive_kernel_size: int = 1
     adaptive_lambda: float = 0.8
