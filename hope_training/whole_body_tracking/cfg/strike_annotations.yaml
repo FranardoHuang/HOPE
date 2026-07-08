@@ -518,3 +518,47 @@ clips:
     face_normal_reliable: true-calibrated
     grip_session: session_v5_oblique_hopex
     rally_yaw_deg: -40  # carried from hope_backhand_v5 lineage (same source video)
+
+  # v5syn = TIME-LAW SYNTHESIS (机器人本位时间律合成, docs/research/robot_centric_timing_
+  # 2026-07-09.md 消融 B 臂; tool scripts/synthesize_timing.py): source = v5hLs 只当路径
+  # (s = frame index), timing re-solved from boundary conditions — rest start -> uniform
+  # accel -> cruise through the contact at the source's own clean blade speed (fh 2.487 /
+  # bh 3.405 m/s, preserved to 0.00%) -> 0.04s hold -> uniform decel to rest. Budgets:
+  # per-joint |qd| <= 0.85x URDF velocity limit, |qdd| <= 1.5x measured v4rg envelope.
+  # fh T_a=0.045s verdict ok (mean|acc| 3.29 -> 2.41); bh T_a=0.840s (gentlest triangle)
+  # verdict budget_exceeded_irreducible (right-hip-pitch q''·sdot*² near contact 4.19x
+  # budget — v5 bh SPATIAL aggressiveness at the strike window, unfixable by any time law
+  # without lowering |v*|, which the design forbids; mean|acc| 6.06 -> 2.82). Contact row =
+  # BITWISE copy of the v5hLs contact frame (face-normal diff exactly 0.0 deg, blade-speed
+  # dev 0.00%); audit 0 FAIL both; fh WARN set DROPS the v5hLs first_frame_vel WARN (starts
+  # at rest by construction), bh WARN set == v5hLs with slightly lower peaks.
+  # ⚠ SYNTHESIZED TIMELINE (时间律合成,视频约定帧弃用): phases below are OUTPUT-grid
+  # contact rows from the synthesis reports (v5_height_fix/syn/{fh,bh}_syn.json), not video
+  # frame conventions.
+  hope_forehand_v5syn_cal:
+    phase: 0.5395            # contact f41 of 77 (tool exact 0.539474)
+    status: unverified
+    annotator: claude (时间律合成,触球行逐位=v5hLs f39; franco 抽查待办)
+    date: 2026-07-09
+    method: robot-centric time-law synthesis (synthesize_timing.py v1) on the v5hLs fh path;
+      contact row bitwise = source f39; clean blade speed 2.487 m/s preserved (dev 0.00%);
+      run-up 0.78 -> 0.82 s (x1.05), duration 1.14 -> 1.52 s (x1.33)
+    source: video-gvhmr + grip-calibrated (v5hLs + synthesize_timing.py, report
+      v5_height_fix/syn/fh_syn.json)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: 40   # carried from hope_forehand_v5 lineage (same source video)
+
+  hope_backhand_v5syn_cal:
+    phase: 0.3894            # contact f44 of 114 (tool exact 0.389381)
+    status: unverified
+    annotator: claude (时间律合成,触球行逐位=v5hLs f23; franco 抽查待办)
+    date: 2026-07-09
+    method: robot-centric time-law synthesis (synthesize_timing.py v1) on the v5hLs bh path;
+      contact row bitwise = source f23; clean blade speed 3.405 m/s preserved (dev 0.00%);
+      run-up 0.46 -> 0.88 s (x1.91), duration 1.16 -> 2.26 s (x1.95); mean|acc| 6.06 -> 2.82
+    source: video-gvhmr + grip-calibrated (v5hLs + synthesize_timing.py, report
+      v5_height_fix/syn/bh_syn.json)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: -40  # carried from hope_backhand_v5 lineage (same source video)
