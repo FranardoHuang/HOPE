@@ -338,3 +338,83 @@ clips:
     train_phase_candidates: [0.345, 0.362, 0.379]   # identical top-3 at both speed ranges,
       # all 100% — a MUCH wider window than the old clip's f17-18-only verdict (07-05 scan);
       # the regenerated kinematics return fine around the (shifted) truth frame
+
+  # --- v5_height_fix candidates (v5 尺度修正/腿移植, 2026-07-08/09) ---------------------------
+  # v5 rescue candidates in /workspace/franco/motion_work/motions/v5_height_fix/ — CANDIDATE
+  # assets, the incumbent *_cal clips stay in service until franco approves a swap-in.
+  #   * v5hA = betas swapped to the same person's v4 body (pelvis half-recovered);
+  #   * v5hL = v5hA upper body (BITWISE identical, 19 waist-up joint cols max|Δ|=0.0) + healthy
+  #     v4 stance legs transplanted at the GMR pkl layer, feet pinned (v5hLp winner).
+  # PHASE CONFLICT RESOLVED (claude 2026-07-09): the leg-transplant report cited fh f45/0.789 —
+  # that is the SPEED-PEAK convention value (the file-header known trap: v5 fh peak ~0.77-0.79
+  # vs true contact 0.673 lineage) — and bh f21/0.362, the PRE-warm-up old-asset frame number
+  # (missing the +5/3-frame lead-in). Independent frame-content alignment (P1-style lag scan,
+  # 19 shared upper-body joint cols vs the v5rg npz, integer lags -4..+4 + parabola vertex):
+  # best lag = 0, vertex -0.155 (fh) / -0.148 (bh) frames for BOTH v5hA and v5hL — the upper
+  # bodies are lag-free coeval with v5rg, so the video-truth contact carries verbatim from the
+  # v5rg entries: fh 0.678 (f39 of 58), bh 0.391 (f23 of 59). Blade check at those frames
+  # (v5hA/v5hL): fh |v|=2.33/2.32 m/s vx=+1.39, bh |v|=3.66/3.51 vx=+2.54 — all forward-strike,
+  # within 1-4% of v5rg. Evidence: v5_height_fix/audit/strike_phase/{verify_v5hA_phase.py,
+  # lag_scan_v5h.py} outputs.
+  # NOTE contact WORLD HEIGHT moves with the pelvis fix (blade z at contact, v5hA -> v5hL:
+  # fh 0.899 -> 0.996 m, bh 1.054 -> 1.183 m): question banks must be generated per-clip from
+  # each npz (a v5hA bank is NOT reusable for v5hL).
+  hope_forehand_v5hA_cal:   # hA = v5 height-fix candidate A (betas swapped to same-person v4)
+    phase: 0.678
+    status: unverified
+    annotator: claude (v5hA 沿用 v5rg 相位,claude 数值复核; franco 抽查待办) — carried from
+      hope_forehand_v5rg_cal, lag-verified (see block comment above)
+    date: 2026-07-09
+    method: upper-body timeline is v5rg-coeval — same T=58, lag scan best 0 / vertex -0.155
+      frames; blade at carried f39 |v|=2.33 m/s vx=+1.39 forward-strike (v5rg 2.31/+1.37),
+      speed-peak frame 46 identical to v5rg
+    source: video-gvhmr + grip-calibrated (v5_height_fix betas-swap pipeline, csv_to_npz_mujoco
+      --grip-rot 5 40, warm-up lead-in on)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: 40   # carried from hope_forehand_v5 lineage (same source video)
+
+  hope_backhand_v5hA_cal:   # hA = v5 height-fix candidate A (betas swapped to same-person v4)
+    phase: 0.391
+    status: unverified
+    annotator: claude (v5hA 沿用 v5rg 相位,claude 数值复核; franco 抽查待办) — carried from
+      hope_backhand_v5rg_cal, lag-verified (see block comment above)
+    date: 2026-07-09
+    method: upper-body timeline is v5rg-coeval — same T=59, lag scan best 0 / vertex -0.148
+      frames; blade at carried f23 |v|=3.66 m/s vx=+2.54 forward-strike (v5rg 3.63/+2.68);
+      the report's f21/0.362 is the pre-warm-up old-asset frame, rejected
+    source: video-gvhmr + grip-calibrated (v5_height_fix betas-swap pipeline, csv_to_npz_mujoco
+      --grip-rot 5 40, warm-up lead-in on)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: -40  # carried from hope_backhand_v5 lineage (same source video)
+
+  hope_forehand_v5hL_cal:   # hL = leg transplant (v5hA upper body + pinned v4 stance legs)
+    phase: 0.678
+    status: unverified
+    annotator: claude (上半身与 v5hA 逐位一致,相位同 v5hA/v5rg,claude 数值复核; franco
+      抽查待办)
+    date: 2026-07-09
+    method: waist-up joint cols bitwise-equal to v5hA (max|Δ|=0.0); own lag scan vs v5rg best
+      0 / vertex -0.155; blade at f39 |v|=2.32 m/s vx=+1.39, contact z 0.996 m (+9.7 cm vs
+      v5hA — pelvis fix; anchors MUST come from this npz)
+    source: video-gvhmr + grip-calibrated (v5_height_fix leg-transplant pipeline v5hLp,
+      csv_to_npz_mujoco --grip-rot 5 40, warm-up lead-in on)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: 40   # carried from hope_forehand_v5 lineage (same source video)
+
+  hope_backhand_v5hL_cal:   # hL = leg transplant (v5hA upper body + pinned v4 stance legs)
+    phase: 0.391
+    status: unverified
+    annotator: claude (上半身与 v5hA 逐位一致,相位同 v5hA/v5rg,claude 数值复核; franco
+      抽查待办)
+    date: 2026-07-09
+    method: waist-up joint cols bitwise-equal to v5hA (max|Δ|=0.0); own lag scan vs v5rg best
+      0 / vertex -0.148; blade at f23 |v|=3.51 m/s vx=+2.54, contact z 1.183 m (+12.9 cm vs
+      v5hA — pelvis fix; anchors MUST come from this npz)
+    source: video-gvhmr + grip-calibrated (v5_height_fix leg-transplant pipeline v5hLp,
+      csv_to_npz_mujoco --grip-rot 5 40, warm-up lead-in on)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: -40  # carried from hope_backhand_v5 lineage (same source video)
