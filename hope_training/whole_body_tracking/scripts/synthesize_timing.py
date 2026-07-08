@@ -627,8 +627,8 @@ def main(argv=None) -> int:
         min_cruise_s=args.min_cruise_s, post_hold_s=args.post_contact_hold_s,
         ta_grid_s=args.ta_grid_s, dense_dt_s=args.dense_dt_s,
         body_mode=args.body_mode, fk_ctx=fk_ctx)
-    rep["input"] = os.path.abspath(args.input)
-    rep["output"] = os.path.abspath(args.output)
+    rep["files"] = dict(input=os.path.abspath(args.input),
+                        output=os.path.abspath(args.output))
     rep["budget_provenance"] = dict(clips=[os.path.abspath(p) for p in args.budget_clips],
                                     scale=args.budget_scale,
                                     envelope=[round(float(v), 3) for v in env])
