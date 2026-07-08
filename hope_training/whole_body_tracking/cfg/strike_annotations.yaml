@@ -264,9 +264,17 @@ clips:
     face_normal_reliable: true-calibrated
     grip_session: session_v5_oblique_hopex
     rally_yaw_deg: -40  # carried from the v4/hopex same-source convention; rally-yaw scan 待办
-    train_phase_candidates: [0.486, 0.495, 0.505, 0.514]   # union of both speed ranges;
-      # convention frame 55 (0.514) scores 100% at venue speeds but <50% at [2,5] — the
-      # [2,5]-range window is f52-f54 (0.486-0.505)
+    # TRAINING ANCHOR CHANGED 2026-07-08 (franco ruling: scan-window first; the speed-peak
+    # convention frame stays in `phase:` above for video reference/备查). Reason: M3
+    # (s1w4_M3_swing, trained at the convention 0.514) read bh fall 0.005 / bh rally 0.000 —
+    # a healthy arm drilling questions anchored at a frame whose kinematics can barely return
+    # [2,5] m/s balls. 96-ball rescan (pod /workspace/franco/m3b_swingfix/rescan_bh.log,
+    # three speed ranges) confirmed: f55 (0.514) scores 52% at [2,5]; f53 (0.495) is the
+    # in-band top-1 (100% at [2,5], 99% at 1.2-3.0 bank range, 99% at 1.0-2.5 venue).
+    # FIRST entry below = M3b training anchor (consumed by gen_stage1_questions
+    # --anchor train-candidate). OLD first entry was 0.486 (band-earliest ordering).
+    train_phase_candidates: [0.495, 0.486, 0.505, 0.514]   # first = train anchor f53; band
+      # f52-f54 (0.486-0.505) is the [2,5]-returnable window, 0.514 = speed-peak convention
 
   hope_forehand_v4rg_cal:   # rg = regen_0708 candidate of hope_forehand_v4_cal
     phase: 0.471
