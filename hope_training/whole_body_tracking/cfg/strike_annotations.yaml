@@ -562,3 +562,49 @@ clips:
     face_normal_reliable: true-calibrated
     grip_session: session_v5_oblique_hopex
     rally_yaw_deg: -40  # carried from hope_backhand_v5 lineage (same source video)
+
+  # v5syn35 = v5syn 反手"可执行加速度上限"剂量二分档 (人话: v5syn bh acc 2.82 摔率崩落
+  # 0.29, v5hLt bh acc 4.49 摔率 0.86 高位横盘 — 阈值在 (2.82, 4.49) 之间, franco 要精确
+  # 值; 本档把反手 mean|acc| 落在 ≈3.5 把区间对半切). fh = hope_forehand_v5syn_cal 逐位
+  # 复制改名 (cmp 校验一致; 只动反手 = 对照变量单一, phase 沿用 0.5395). bh = v5hLs bh
+  # 路径重跑 synthesize_timing.py: --budget-scale 6.6 --ta-grid-s 0.15 -> T_a=0.150 s,
+  # mean|acc| 6.06 -> 3.50 (落带 3.4-3.6 正中), verdict ok.
+  # ⚠ 预算旋钮实测是断崖, 不是拨盘 (2026-07-08 实测: scale<=6.56 全停最温和三角
+  # T_a=0.84/acc 2.82; scale>=6.6 直落 T_a=0.01/acc 3.61 出带上沿) — 病根 = solve_min_ta
+  # 相对验收里"巡航段定值峰"(q''·sdot*^2, 与 T_a 无关) 和基线同除预算, 比值不随 scale 变;
+  # 右髋俯仰候选/基线=1.045 恒成立, 卡死一切更短 T_a 直到 scale 大到候选 util<=1 (≈6.6).
+  # 故剂量用 CLI 原生 --ta-grid-s 首点直接定 T_a=0.15 (扫描网格首点即通过), 全程报告留痕
+  # (v5_height_fix/syn35/bh_syn35.json). 触球行逐位 = v5hLs f23 (拍速 3.405 m/s dev 0.00%,
+  # 拍面差 0.0000 deg); 首帧 max|q̇| 0.031 rad/s; audit 0 FAIL 双侧
+  # (syn35/v5syn35_audit.md; bh WARN 集与 v5syn/v5hLs 同族: waist_pitch 软限/饱和 +
+  # 触球窗 right_shoulder_pitch 速度 80% 线 — 源路径自带, 非本次引入).
+  # ⚠ SYNTHESIZED TIMELINE (时间律合成, 视频约定帧弃用): bh phase 是输出网格触球行
+  # (syn35/bh_syn35.json), 不是视频帧约定.
+  hope_forehand_v5syn35_cal:
+    phase: 0.5395            # contact f41 of 77 (tool exact 0.539474) — v5syn fh 逐位复制
+    status: unverified
+    annotator: claude (v5syn fh 逐位复制改名, cmp 校验; franco 抽查待办)
+    date: 2026-07-09
+    method: bitwise copy of hope_forehand_v5syn_cal.npz (v5syn35 只动反手, 正手沿用 v5syn
+      = 对照变量单一; v5syn fh 的全部读数原样成立, 见 syn/fh_syn.json)
+    source: video-gvhmr + grip-calibrated (v5hLs + synthesize_timing.py, report
+      v5_height_fix/syn/fh_syn.json; copy note v5_height_fix/syn35/fh_syn35_NOTE.md)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: 40   # carried from hope_forehand_v5 lineage (same source video)
+
+  hope_backhand_v5syn35_cal:
+    phase: 0.2812            # contact f27 of 97 (tool exact 0.281250)
+    status: unverified
+    annotator: claude (时间律合成剂量二分档, 触球行逐位=v5hLs f23; franco 抽查待办)
+    date: 2026-07-09
+    method: robot-centric time-law synthesis (synthesize_timing.py v1) on the v5hLs bh path,
+      dose-targeted T_a=0.150 s via --ta-grid-s 0.15 --budget-scale 6.6 (预算旋钮断崖,
+      见上方块注释); contact row bitwise = source f23; clean blade speed 3.405 m/s
+      preserved (dev 0.00%); run-up 0.46 -> 0.54 s (x1.17), duration 1.16 -> 1.94 s
+      (x1.66); mean|acc| 6.06 -> 3.50 (dose mid-band 3.4-3.6)
+    source: video-gvhmr + grip-calibrated (v5hLs + synthesize_timing.py, report
+      v5_height_fix/syn35/bh_syn35.json)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: -40  # carried from hope_backhand_v5 lineage (same source video)
