@@ -36,6 +36,11 @@
 
 ## 判卷链(北极星数字怎么产;2026-07-06 全链踩通)
 
+**标准入口=`hope_training/whole_body_tracking/scripts/judge.sh <run_dir> [checkpoint.pt]`
+(2026-07-09 收编:自动解析 env.yaml 的动作对/相位/题库→原生导出+sidecar→双侧×双噪声档考卷→
+md 报告落 run_dir/judge/;解析不到 fail-loud 要求手传;`--dry-run` 打印命令链,`--help` 看旗标),
+以下手动步骤仅供排障。**
+
 ```
 model_13599.pt ──play.py 原生导出(isaac venv,占一个 GPU 槽 ~4 分钟)──> exported/policy.onnx
     ──mujoco_eval_onnx.py(mjeval venv,纯 CPU)──> 按侧考卷分数
