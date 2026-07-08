@@ -25,6 +25,10 @@ REPAIR POLICY (franco, 2026-07-08 — encoded in the suggestion logic below)
     3. Mid-clip velocity violations -> suggest slow-play (<= min(limit/peak));
        anything else -> reject / regenerate. Legal swing peaks (11.88-12.63 rad/s)
        must survive: never suggest a global velocity clamp.
+    4. Foot-skate FAILs beyond the head window (franco/yikang 定案 2026-07-09) are
+       leg-pose pathology (occlusion hallucination / retarget) — trim and slow-play
+       CANNOT fix them; the only repairs are a leg transplant
+       (transplant_legs.py --mode pinned, the v5hL/v5hLp recipe) or a reshoot.
 
 CHECKS (graded PASS / WARN / FAIL; process exit code 0 / 1 / 2)
     1. joint position vs URDF hard limits (exceed = FAIL); soft-limit excursion
@@ -49,11 +53,40 @@ CHECKS (graded PASS / WARN / FAIL; process exit code 0 / 1 / 2)
        "slow-play <= X" (X = min(limit/peak)); otherwise -> reject/regenerate.
        If a suggested trim would eat into the strike protection window (contact
        frame +-5, from --annotations), the suggestion escalates to regenerate.
+       Foot-skate FAILs beyond the head window VETO both trim and slow-play
+       (REPAIR POLICY 4) -> transplant_legs / reshoot.
+    7. support-foot slip a.k.a. FOOT SKATE (franco/yikang 定案 2026-07-09: a
+       nominally planted foot sliding horizontally is the #1 fall killer in
+       reference tracking). Per foot (left/right_ankle_roll_Link columns of
+       body_pos_w; body order via --body-order, an npz-embedded `body_names` key,
+       or body_order.txt / body_order_isaac.txt next to the npz — an UNRESOLVED
+       body order is a FAIL, fail-loud, never a silent skip): support frames are
+       z < min(z) + 0.03 m; slip speed |v_xy| = finite difference * fps over
+       intervals whose BOTH end frames are support. Support-slip peak
+       > 0.15 m/s = FAIL, > 0.05 = WARN, <= 0.05 = PASS. Slip inside the first
+       EDGE_WINDOW (10) frames is graded separately (`foot_skate_head`, the
+       historical head-glitch band) and keeps the normal trim path; FAIL beyond
+       the head window -> transplant/reshoot suggestion (see 6).
+       Calibration (production clips, 定案 2026-07-09): v5 backhand imagined legs
+       0.30-0.35 m/s MID-CLIP (deadly — inside the push-off window); v4 / v5hL
+       true or pinned legs 0.010 (clean); v5rg forehand 0.034 (light, PASS).
+
+REAL-ASSET REGRESSION (no motion npz in the laptop checkout — run on the pod):
+    source /workspace/franco/env.sh && cd $HOPE_WBT && \
+    python scripts/audit_motion_npz.py \
+        /workspace/franco/motion_work/motions/regen_0708_candidates/hope_*hand_v4rg_cal.npz \
+        /workspace/franco/motion_work/motions/regen_0708_candidates/hope_*hand_v5rg_cal.npz \
+        /workspace/franco/motion_work/motions/v5_height_fix/hope_*hand_v5hL_cal.npz \
+        --body-order /workspace/franco/body_order_isaac.txt
+    EXPECT for check 7: hope_backhand_v5rg_cal FAIL (imagined-leg mid-clip slip
+    0.30-0.35 m/s); hope_forehand_v5rg_cal PASS (0.034); all v4rg + v5hL PASS
+    (true/pinned legs, ~0.010).
 
 USAGE
     python scripts/audit_motion_npz.py CLIP.npz [CLIP2.npz ...] \
-        [--urdf PATH] [--joint-names LIST|FILE] [--soft-factor 0.9] \
-        [--annotations cfg/strike_annotations.yaml] [--md OUT.md] [--json OUT.json]
+        [--urdf PATH] [--joint-names LIST|FILE] [--body-order LIST|FILE|none] \
+        [--soft-factor 0.9] [--annotations cfg/strike_annotations.yaml] \
+        [--md OUT.md] [--json OUT.json]
 
     Exit code: 0 = all PASS, 1 = worst is WARN, 2 = any FAIL (CI-friendly).
 
@@ -157,6 +190,13 @@ CONSISTENCY_WARN = 1.0      # stored-vs-gradient velocity mismatch WARN [rad/s]
 EDGE_WINDOW = 10            # head/tail window: trims only up to K<=10 frames
 STRIKE_PROTECT = 5          # protection margin around the annotated contact frame
 
+# --- check 7: support-foot slip (foot skate), 定案 2026-07-09 ----------------
+FOOT_BODIES: Tuple[str, str] = ("left_ankle_roll_Link", "right_ankle_roll_Link")
+SKATE_SUPPORT_BAND = 0.03   # support frames: z < min(z) + band [m] (per foot)
+SKATE_PEAK_FAIL = 0.15      # support-slip peak FAIL [m/s]; v5 bh imagined legs 0.30-0.35
+SKATE_PEAK_WARN = 0.05      # support-slip peak WARN [m/s]; healthy v4/v5hL 0.010, v5rg fh 0.034
+BODY_ORDER_SIDECARS = ("body_order.txt", "body_order_isaac.txt")  # looked up next to the npz
+
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 _LEVEL_RANK = {PASS: 0, WARN: 1, FAIL: 2}
 
@@ -193,7 +233,8 @@ class Finding:
 
 @dataclass
 class Suggestion:
-    kind: str                    # none | trim_head | trim_tail | trim_both | slow_down | regenerate
+    kind: str                    # none | trim_head | trim_tail | trim_both | slow_down |
+                                 # transplant_legs | reaudit | regenerate
     lines: List[str] = field(default_factory=list)
     trim_head: int = 0
     trim_tail: int = 0
@@ -405,6 +446,176 @@ def _limits_for(names: Sequence[str], limits: Dict[str, JointLimits]) -> List[Jo
     return out
 
 
+def _names_from_file(path: Path) -> List[str]:
+    return [ln.strip() for ln in path.read_text().splitlines()
+            if ln.strip() and not ln.startswith("#")]
+
+
+def resolve_body_order(spec: Optional[str], npz_path: str, n_bodies: int, data=None) -> List[str]:
+    """Resolve the body-name order of the npz body_* columns (check 7 input).
+
+    The npz writers store body arrays in the Isaac ARTICULATION body order but do
+    not record it in the file; the pipeline's source of truth is the donor-ONNX /
+    --discover-map body list (csv_to_npz_mujoco.py writes it as body_order.txt,
+    "MJ body names in Isaac column order"; the pod copy lives at
+    /workspace/franco/body_order_isaac.txt).
+
+    Priority: explicit `spec` (comma list, or a file with one name per line) >
+    npz-embedded `body_names` key (newer writers) > a BODY_ORDER_SIDECARS file next
+    to the npz. Raises ValueError when nothing resolves or the count mismatches —
+    check 7 must fail LOUD, never silently skip.
+    """
+    names: Optional[List[str]] = None
+    src = "?"
+    if spec:
+        is_file = False
+        if "," not in spec:
+            try:
+                is_file = Path(spec).is_file()
+            except OSError:  # ENAMETOOLONG etc. — a long inline list is not a path
+                is_file = False
+            if not is_file:
+                raise ValueError(f"--body-order is neither a file nor a comma list: {spec!r}")
+        names = _names_from_file(Path(spec)) if is_file else [n.strip() for n in spec.split(",") if n.strip()]
+        src = spec if is_file else "(inline list)"
+    elif data is not None and "body_names" in getattr(data, "files", []):
+        raw = np.asarray(data["body_names"]).reshape(-1).tolist()
+        names = [n.decode() if isinstance(n, bytes) else str(n) for n in raw]
+        src = "npz body_names key"
+    else:
+        for cand in BODY_ORDER_SIDECARS:
+            p = Path(npz_path).resolve().parent / cand
+            if p.is_file():
+                names, src = _names_from_file(p), str(p)
+                break
+    if names is None:
+        raise ValueError(
+            "body order unknown — pass --body-order (comma list or file; the "
+            "csv_to_npz_mujoco --discover-map output) or place "
+            f"{'/'.join(BODY_ORDER_SIDECARS)} next to the npz"
+        )
+    if len(names) != n_bodies:
+        raise ValueError(f"body-order count {len(names)} != npz body dim {n_bodies} (source: {src})")
+    return names
+
+
+# ---------------------------------------------------------------------------
+# check 7: support-foot slip (foot skate)
+# ---------------------------------------------------------------------------
+
+def _check_foot_skate(
+    rep: ClipReport,
+    data,
+    body_pos: Optional[np.ndarray],
+    body_order: Optional[str],
+    npz_path: str,
+    fps: int,
+    n_frames: int,
+    fail_frames: Set[int],
+) -> Tuple[Set[int], Optional[str]]:
+    """Check 7 (定案 2026-07-09): grade horizontal slip of the nominally planted feet.
+
+    Adds findings to `rep` and FAIL frames to `fail_frames` (head-window FAILs keep
+    the normal trim path). Returns (skate_fail_beyond_head, note):
+      * skate_fail_beyond_head — FAIL frames outside the head window; a non-empty set
+        VETOES trim/slow-play in the suggestion builder (leg-pose pathology);
+      * note — None, or 'unresolved' (body order missing: audit incomplete, re-audit
+        after fixing inputs) or 'corrupt' (body_pos_w unusable: regenerate).
+    """
+    if body_order is not None and str(body_order).strip().lower() == "none":
+        rep.add(Finding("foot_skate", PASS,
+                        "foot-skate check explicitly disabled (--body-order none)"))
+        return set(), None
+    if body_pos is None:
+        rep.add(Finding("foot_skate", FAIL,
+                        "npz has no body_pos_w — support-foot slip cannot be audited "
+                        "(fail-loud: check 7 is never skipped silently)"))
+        return set(), "corrupt"
+    if body_pos.shape[0] != n_frames:
+        rep.add(Finding("foot_skate", FAIL,
+                        f"body_pos_w frame count {body_pos.shape[0]} != joint_pos {n_frames}"))
+        return set(), "corrupt"
+    if not np.isfinite(body_pos).all():
+        rep.add(Finding("foot_skate", FAIL, "non-finite values (NaN/Inf) in body_pos_w"))
+        return set(), "corrupt"
+
+    try:
+        names = resolve_body_order(body_order, npz_path, int(body_pos.shape[1]), data=data)
+        feet_cols = []
+        for foot in FOOT_BODIES:
+            if foot not in names:
+                raise ValueError(f"body order does not contain '{foot}'")
+            feet_cols.append(names.index(foot))
+    except (OSError, ValueError) as exc:
+        rep.add(Finding(
+            "foot_skate", FAIL,
+            f"body order unresolved ({exc}) — FAIL-LOUD: foot skate is the #1 fall "
+            f"killer and check 7 is never skipped silently",
+        ))
+        return set(), "unresolved"
+
+    if n_frames < 2:
+        rep.add(Finding("foot_skate", PASS, "single-frame clip — no slip to measure"))
+        return set(), None
+
+    veto: Set[int] = set()
+    sample_idx = np.arange(n_frames - 1)
+    head_mask = (sample_idx + 1) < EDGE_WINDOW  # both end frames inside the head window
+    for foot, col in zip(FOOT_BODIES, feet_cols):
+        p = body_pos[:, col, :]
+        z = p[:, 2]
+        support = z < (float(z.min()) + SKATE_SUPPORT_BAND)
+        # sample i spans frames i -> i+1; slip counts only while the foot is
+        # nominally planted at BOTH ends (a lifting/landing foot is a legal step)
+        planted = support[:-1] & support[1:]
+        v_xy = np.linalg.norm(np.diff(p[:, :2], axis=0), axis=1) * fps
+        for check, seg, label in (
+            ("foot_skate_head", planted & head_mask,
+             f"in the head window (first {EDGE_WINDOW} frames)"),
+            ("foot_skate", planted & ~head_mask, "beyond the head window"),
+        ):
+            if not seg.any():
+                if check == "foot_skate":
+                    rep.add(Finding(check, PASS,
+                                    "no planted support interval beyond the head window",
+                                    joint=foot))
+                continue
+            speeds = v_xy[seg]
+            peak, mean = float(speeds.max()), float(speeds.mean())
+            if peak > SKATE_PEAK_FAIL:
+                over = seg & (v_xy > SKATE_PEAK_FAIL)
+                fr = sorted({f for i in np.flatnonzero(over).tolist() for f in (i, i + 1)})
+                if check == "foot_skate":
+                    msg = (f"support-foot horizontal slip peak {peak:.3f} m/s (mean {mean:.3f}) "
+                           f"{label} > {SKATE_PEAK_FAIL:g} m/s — FOOT SKATE: the nominally "
+                           f"planted foot slides during stance (定案 calibration: v5 bh imagined "
+                           f"legs 0.30-0.35 = deadly, inside the push-off window; healthy "
+                           f"v4/v5hL band 0.010)")
+                    veto.update(fr)
+                else:
+                    msg = (f"support-foot slip peak {peak:.3f} m/s (mean {mean:.3f}) {label} > "
+                           f"{SKATE_PEAK_FAIL:g} m/s — historical head-glitch band (GMR IK cold "
+                           f"start); if FAILs stay confined here the trim path applies")
+                rep.add(Finding(check, FAIL, msg, joint=foot, frames=fr,
+                                value=peak, threshold=SKATE_PEAK_FAIL))
+                fail_frames.update(fr)
+            elif peak > SKATE_PEAK_WARN:
+                over = seg & (v_xy > SKATE_PEAK_WARN)
+                fr = sorted({f for i in np.flatnonzero(over).tolist() for f in (i, i + 1)})
+                rep.add(Finding(
+                    check, WARN,
+                    f"support-foot slip peak {peak:.3f} m/s (mean {mean:.3f}) {label} in the "
+                    f"{SKATE_PEAK_WARN:g}-{SKATE_PEAK_FAIL:g} m/s band (healthy band ~0.010; "
+                    f"light-but-PASS example v5rg fh 0.034)",
+                    joint=foot, frames=fr, value=peak, threshold=SKATE_PEAK_WARN,
+                ))
+            elif check == "foot_skate":
+                rep.add(Finding(check, PASS,
+                                f"support-foot slip peak {peak:.3f} m/s (mean {mean:.3f}) {label}",
+                                joint=foot, value=peak, threshold=SKATE_PEAK_WARN))
+    return veto, None
+
+
 # ---------------------------------------------------------------------------
 # per-clip audit
 # ---------------------------------------------------------------------------
@@ -415,6 +626,7 @@ def audit_clip(
     joint_names: Optional[str] = None,
     soft_factor: float = 0.9,
     annotations: Optional[Dict[str, dict]] = None,
+    body_order: Optional[str] = None,
 ) -> ClipReport:
     stem = Path(npz_path).stem
     rep = ClipReport(path=str(npz_path), stem=stem)
@@ -432,6 +644,9 @@ def audit_clip(
         if "body_lin_vel_w" in getattr(data, "files", []):
             # body index 0 = root link (pelvis) in the articulation body order
             base_lin = np.linalg.norm(np.asarray(data["body_lin_vel_w"], dtype=np.float64)[:, 0, :], axis=1)
+        body_pos = None
+        if "body_pos_w" in getattr(data, "files", []):
+            body_pos = np.asarray(data["body_pos_w"], dtype=np.float64)
     except Exception as exc:  # malformed npz is a FAIL, not a crash
         rep.add(Finding("load", FAIL, f"cannot load/parse npz: {exc}"))
         rep.suggestion = Suggestion("regenerate", ["clip unreadable — regenerate"])
@@ -596,8 +811,28 @@ def audit_clip(
                 joint=names[jj], value=mismatch, threshold=CONSISTENCY_WARN,
             ))
 
+    # -- check 7: support-foot slip (foot skate) -------------------------------
+    skate_veto, skate_note = _check_foot_skate(
+        rep, data, body_pos, body_order, str(npz_path), fps, T, fail_frames
+    )
+
     # -- check 6: repair suggestion --------------------------------------------
-    rep.suggestion = _build_suggestion(rep, fail_frames, vel_fail_ratios, T, fps, dq, base_lin)
+    rep.suggestion = _build_suggestion(
+        rep, fail_frames, vel_fail_ratios, T, fps, dq, base_lin, skate_veto
+    )
+    if skate_note and rep.suggestion.kind == "none":
+        # a FAIL finding exists but carries no frames — replace the misleading
+        # "nothing to trim" note with the actionable one
+        if skate_note == "unresolved":
+            rep.suggestion = Suggestion("reaudit", [
+                "body order unresolved — check 7 (foot skate, the #1 fall killer) did NOT "
+                "run; supply --body-order (or drop body_order.txt next to the npz) and "
+                "RE-AUDIT before trusting this clip",
+            ])
+        else:
+            rep.suggestion = Suggestion("regenerate", [
+                "body_pos_w missing/corrupt — regenerate the clip (check 7 could not run)",
+            ])
     return rep
 
 
@@ -609,11 +844,27 @@ def _build_suggestion(
     fps: int,
     dq: np.ndarray,
     base_lin: Optional[np.ndarray],
+    skate_veto: Optional[Set[int]] = None,
 ) -> Suggestion:
     """Encode franco's repair ladder: trim only when limits are exceeded."""
     if not fail_frames:
         note = "no FAIL-level violations — nothing to trim (trim only when limits are exceeded)"
         return Suggestion("none", [note])
+
+    # REPAIR POLICY 4 (定案 2026-07-09): foot skate beyond the head window is
+    # leg-pose pathology — it vetoes trim AND slow-play, whatever else FAILed.
+    if skate_veto:
+        return Suggestion("transplant_legs", [
+            "支撑脚滑移 FAIL 在头部窗口之外(帧 " + _ranges(sorted(skate_veto)) + ")——"
+            "腿姿病(遮挡幻觉/重定向),trim/慢放救不了,走腿移植"
+            "(transplant_legs.py --mode pinned)或重拍",
+            "mid-clip support-foot skate = leg-pose pathology (occlusion hallucination / "
+            "retarget): the reference's planted foot slides inside its stance window, so a "
+            "tracking policy inherits a sliding contact and falls. Trimming cannot remove "
+            "mid-clip frames and slow-play only slows the same slide — fix the LEGS: "
+            "transplant healthy stance legs (transplant_legs.py --mode pinned, the "
+            "v5hL/v5hLp recipe) or reshoot the source video",
+        ])
 
     head = {f for f in fail_frames if f < EDGE_WINDOW}
     tail = {f for f in fail_frames if f >= T - EDGE_WINDOW}
@@ -738,6 +989,8 @@ def report_markdown(reports: List[ClipReport], meta: dict) -> str:
     out.append(f"- urdf: `{meta['urdf']}`")
     out.append(f"- soft position-limit factor: {meta['soft_factor']}")
     out.append(f"- annotations: `{meta['annotations'] or '(none)'}`")
+    out.append(f"- body order (check 7): "
+               f"`{meta.get('body_order') or '(auto: npz body_names key / sidecar next to npz)'}`")
     out.append("")
     out.append("| clip | verdict | frames | fps | dur [s] | FAILs | WARNs | suggestion |")
     out.append("|---|---|---|---|---|---|---|---|")
@@ -822,6 +1075,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--joint-names", default=None,
                    help="override joint order: comma-separated names or a file (one per line); "
                         "default = built-in 31-joint Isaac articulation table")
+    p.add_argument("--body-order", default=None,
+                   help="body-name order of the npz body_* columns for check 7 (foot skate): "
+                        "comma list or a file with one name per line (the csv_to_npz_mujoco "
+                        "--discover-map body_order.txt; pod copy "
+                        "/workspace/franco/body_order_isaac.txt). Default: npz-embedded "
+                        "`body_names` key, else body_order.txt / body_order_isaac.txt next to "
+                        "the npz. Unresolved = FAIL (fail-loud). Pass 'none' to explicitly "
+                        "disable check 7.")
     p.add_argument("--soft-factor", type=float, default=0.9,
                    help="soft position-limit factor (WARN band), matches training "
                         "soft_joint_pos_limit_factor (default 0.9)")
@@ -838,7 +1099,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     reports = [
         audit_clip(f, limits, joint_names=args.joint_names,
-                   soft_factor=args.soft_factor, annotations=ann)
+                   soft_factor=args.soft_factor, annotations=ann,
+                   body_order=args.body_order)
         for f in args.npz
     ]
     exit_code = max((_LEVEL_RANK[r.verdict] for r in reports), default=0)
@@ -848,6 +1110,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "urdf": str(args.urdf),
         "soft_factor": args.soft_factor,
         "annotations": None if str(args.annotations).lower() == "none" else str(args.annotations),
+        "body_order": args.body_order,
     }
     md = report_markdown(reports, meta)
     if not args.quiet:

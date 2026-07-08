@@ -328,6 +328,11 @@ clips:
       # sits between the first two candidates
 
   hope_backhand_v5rg_cal:   # rg = regen_0708 candidate of hope_backhand_v5_cal
+    # feasibility_audit 2026-07-09,判炸器检查项 7(支撑脚滑移 foot skate,yikang 取证+复测定案):
+    # FAIL——想象腿中段支撑滑移峰 左 0.205 / 右 0.304 m/s(帧 16-52,正在蹬地窗口;阈值 FAIL>0.15,
+    # 健康带 v4rg/v5hL 0.008-0.011,fh v5rg 0.034 轻)。腿姿病(遮挡幻觉/重定向),trim/慢放救不了,
+    # 建议=腿移植(transplant_legs.py --mode pinned,即 v5hL 配方,移植后审计干净)或重拍。
+    # ⚠ 本资产是 s1w4 现役跑臂底片(M1/M4 等):结论只入档不停臂,swap-in/停用决策归 franco。
     phase: 0.391
     status: unverified
     annotator: claude (数值复核; franco 抽查待办 before swap-in) — carried from the verified
@@ -353,6 +358,8 @@ clips:
   #   * v5hA = betas swapped to the same person's v4 body (pelvis half-recovered);
   #   * v5hL = v5hA upper body (BITWISE identical, 19 waist-up joint cols max|Δ|=0.0) + healthy
   #     v4 stance legs transplanted at the GMR pkl layer, feet pinned (v5hLp winner).
+  #   * foot-skate audit(判炸器检查项 7,2026-07-09):v5hL 正反手支撑滑移峰 0.002-0.011 m/s =
+  #     干净;v5hA bh 仍 0.242/0.349 FAIL(想象腿没换,腿移植修的就是这个)。
   # PHASE CONFLICT RESOLVED (claude 2026-07-09): the leg-transplant report cited fh f45/0.789 —
   # that is the SPEED-PEAK convention value (the file-header known trap: v5 fh peak ~0.77-0.79
   # vs true contact 0.673 lineage) — and bh f21/0.362, the PRE-warm-up old-asset frame number

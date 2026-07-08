@@ -14,6 +14,29 @@ Covered cases (task spec 2026-07-08):
   * mid-clip position beyond limits   -> FAIL + reject/regenerate (trim/slow can't fix)
   * URDF parsing + trim slice command details (phase-shift reminder)
 
+Check 7, support-foot slip / foot skate (task spec 2026-07-09):
+  * clean planted feet                -> PASS (informational peak reported)
+  * mid-clip slip in the WARN band    -> WARN
+  * mid-clip slip > 0.15 m/s          -> FAIL + transplant_legs suggestion (never trim/slow)
+  * ... even when a mid velocity FAIL would otherwise suggest slow-play (veto)
+  * head-window-only slip             -> FAIL routed to the ordinary trim path
+  * missing body order                -> fail-loud FAIL + reaudit suggestion;
+                                         --body-order none = explicit skip
+  * body-order sources: sidecar file next to the npz, explicit file/list
+    (explicit spec beats the npz-embedded body_names key), count mismatch loud
+
+REAL-ASSET REGRESSION (no motion npz ships with the laptop checkout — run on the
+pod after pulling; calibration numbers are the franco/yikang 定案 2026-07-09):
+    source /workspace/franco/env.sh && cd $HOPE_WBT && \
+    python scripts/audit_motion_npz.py \
+        /workspace/franco/motion_work/motions/regen_0708_candidates/hope_*hand_v4rg_cal.npz \
+        /workspace/franco/motion_work/motions/regen_0708_candidates/hope_*hand_v5rg_cal.npz \
+        /workspace/franco/motion_work/motions/v5_height_fix/hope_*hand_v5hL_cal.npz \
+        --body-order /workspace/franco/body_order_isaac.txt
+    EXPECT for check 7: hope_backhand_v5rg_cal FAIL (imagined-leg MID-CLIP slip peak
+    0.30-0.35 m/s -> transplant_legs suggestion); hope_forehand_v5rg_cal PASS
+    (0.034, light); all v4rg + v5hL PASS (true/pinned legs, ~0.010 clean).
+
 Run:  python3 -m pytest hope_training/whole_body_tracking/tests/test_audit_motion_npz.py -q
 """
 
@@ -65,24 +88,50 @@ def limits(toy_urdf):
     return audit.parse_urdf_limits(toy_urdf)
 
 
-def _write_npz(path, q, dq, fps=FPS, base_lin=None):
+# toy body table: col 0 = pelvis (base_lin), cols 1/2 = the two feet (check 7)
+BODIES = ["pelvis_link", "left_ankle_roll_Link", "right_ankle_roll_Link"]
+BODY_SPEC = ",".join(BODIES)
+
+
+def _write_npz(path, q, dq, fps=FPS, base_lin=None, feet=None, body_names=BODIES):
+    """feet: optional (T, 2, 3) world trajectories of the two ankle links (default
+    both planted at the origin = zero slip). body_names embeds the npz `body_names`
+    key; pass None to omit it (fail-loud body-order tests)."""
     q = np.asarray(q, dtype=np.float32)
     dq = np.asarray(dq, dtype=np.float32)
     t, j = q.shape
-    body_lin = np.zeros((t, 1, 3), dtype=np.float32)
+    nb = len(BODIES)
+    body_lin = np.zeros((t, nb, 3), dtype=np.float32)
     if base_lin is not None:
         body_lin[:, 0, 0] = np.asarray(base_lin, dtype=np.float32)
+    body_pos = np.zeros((t, nb, 3), dtype=np.float32)
+    if feet is not None:
+        body_pos[:, 1:3, :] = np.asarray(feet, dtype=np.float32)
+    extra = {} if body_names is None else {"body_names": np.array(body_names)}
     np.savez(
         path,
         fps=np.array([fps]),
         joint_pos=q,
         joint_vel=dq,
-        body_pos_w=np.zeros((t, 1, 3), dtype=np.float32),
-        body_quat_w=np.tile(np.array([1, 0, 0, 0], dtype=np.float32), (t, 1, 1)),
+        body_pos_w=body_pos,
+        body_quat_w=np.tile(np.array([1, 0, 0, 0], dtype=np.float32), (t, nb, 1)),
         body_lin_vel_w=body_lin,
-        body_ang_vel_w=np.zeros((t, 1, 3), dtype=np.float32),
+        body_ang_vel_w=np.zeros((t, nb, 3), dtype=np.float32),
+        **extra,
     )
     return str(path)
+
+
+def _sliding_feet(T, start, stop, step=0.006, foot=0):
+    """(T,2,3) planted feet (z=0); the chosen foot translates +x by `step` m/frame
+    over frames [start, stop] (inclusive), i.e. slip = step*FPS m/s on samples
+    start..stop-1 while remaining inside the z support band."""
+    feet = np.zeros((T, 2, 3), dtype=np.float64)
+    x = np.zeros(T)
+    for i in range(start + 1, T):
+        x[i] = x[i - 1] + (step if i <= stop else 0.0)
+    feet[:, foot, 0] = x
+    return feet
 
 
 def _findings(rep, check, level=None):
@@ -343,6 +392,130 @@ def test_markdown_pipes_escaped(tmp_path, limits):
     })
     table = [ln for ln in md.splitlines() if ln.startswith("| vel_limit")]
     assert table and all("\\|velocity\\|" in ln for ln in table)
+
+
+# ------------------------------------------- 7. support-foot slip (foot skate)
+def test_foot_skate_clean_pass(tmp_path, limits):
+    # 0.02 m/s slide (0.0004 m/frame @50fps): inside the PASS band (<= 0.05);
+    # calibration anchor: healthy v4/v5hL real/pinned legs measure ~0.010
+    T = 30
+    q, dq = np.full((T, 3), 0.1), np.zeros((T, 3))
+    f = _write_npz(tmp_path / "fs_ok.npz", q, dq, feet=_sliding_feet(T, 12, 20, step=0.0004))
+    rep = audit.audit_clip(f, limits, joint_names=JOINT_SPEC)
+    assert rep.verdict == "PASS"
+    info = _findings(rep, "foot_skate", "PASS")
+    assert info and max(x.value for x in info if x.value is not None) == pytest.approx(0.02, abs=1e-3)
+
+
+def test_foot_skate_mid_warn(tmp_path, limits):
+    # 0.08 m/s mid-clip slide: WARN band (0.05, 0.15]
+    T = 30
+    q, dq = np.full((T, 3), 0.1), np.zeros((T, 3))
+    f = _write_npz(tmp_path / "fs_warn.npz", q, dq, feet=_sliding_feet(T, 14, 21, step=0.0016))
+    rep = audit.audit_clip(f, limits, joint_names=JOINT_SPEC)
+    assert rep.verdict == "WARN"
+    w = _findings(rep, "foot_skate", "WARN")
+    assert w and w[0].value == pytest.approx(0.08, abs=1e-3)
+    assert rep.suggestion.kind == "none"
+
+
+def test_foot_skate_mid_fail_suggests_transplant(tmp_path, limits):
+    # 0.30 m/s mid-clip slide on the left foot (the v5-backhand imagined-leg
+    # signature, 定案 0.30-0.35 deadly): FAIL + transplant/reshoot, NEVER trim/slow
+    T = 30
+    q, dq = np.full((T, 3), 0.1), np.zeros((T, 3))
+    f = _write_npz(tmp_path / "fs_mid.npz", q, dq, feet=_sliding_feet(T, 14, 21, step=0.006))
+    rep = audit.audit_clip(f, limits, joint_names=JOINT_SPEC)
+
+    assert rep.verdict == "FAIL"
+    fails = _findings(rep, "foot_skate", "FAIL")
+    assert fails and fails[0].joint == "left_ankle_roll_Link"
+    assert fails[0].value == pytest.approx(0.30, abs=1e-2)
+    assert 15 in fails[0].frames
+    assert rep.suggestion.kind == "transplant_legs"
+    joined = "\n".join(rep.suggestion.lines)
+    assert "腿姿病" in joined and "transplant_legs.py --mode pinned" in joined
+    assert rep.suggestion.trim_head == 0 and rep.suggestion.trim_tail == 0
+    assert rep.suggestion.slow_factor is None
+
+
+def test_foot_skate_veto_beats_slowdown(tmp_path, limits):
+    # a mid-clip stored-velocity FAIL alone would suggest slow-play; a coexisting
+    # mid-clip skate FAIL must veto it (slow-play only slows the same slide)
+    T = 30
+    q, dq = np.full((T, 3), 0.1), np.zeros((T, 3))
+    dq[15, 0] = 6.0                                   # > 5 rad/s toy limit
+    f = _write_npz(tmp_path / "fs_veto.npz", q, dq, feet=_sliding_feet(T, 14, 21, step=0.006))
+    rep = audit.audit_clip(f, limits, joint_names=JOINT_SPEC)
+    assert rep.verdict == "FAIL"
+    assert _findings(rep, "vel_limit_stored", "FAIL")
+    assert rep.suggestion.kind == "transplant_legs"
+
+
+def test_foot_skate_head_routes_to_trim(tmp_path, limits):
+    # slip confined to the head window (samples 0-7, frames 0-8 < EDGE_WINDOW):
+    # the historical head-glitch band -> graded as foot_skate_head and repaired
+    # via the ordinary trim path, not transplant
+    T = 30
+    q, dq = np.full((T, 3), 0.1), np.zeros((T, 3))
+    f = _write_npz(tmp_path / "fs_head.npz", q, dq, feet=_sliding_feet(T, 0, 8, step=0.006))
+    rep = audit.audit_clip(f, limits, joint_names=JOINT_SPEC)
+
+    assert rep.verdict == "FAIL"
+    assert _findings(rep, "foot_skate_head", "FAIL")
+    assert not _findings(rep, "foot_skate", "FAIL")   # nothing beyond the head window
+    assert rep.suggestion.kind == "trim_head"
+    assert rep.suggestion.trim_head == 9              # first frame after the FAIL cluster 0-8
+
+
+def test_missing_body_order_fails_loud(tmp_path, limits):
+    # no embedded body_names, no sidecar, no --body-order: check 7 must FAIL the
+    # clip (never a silent skip) and point at re-auditing, not regenerating
+    T = 30
+    q, dq = np.full((T, 3), 0.1), np.zeros((T, 3))
+    f = _write_npz(tmp_path / "fs_noorder.npz", q, dq, body_names=None)
+    rep = audit.audit_clip(f, limits, joint_names=JOINT_SPEC)
+    assert rep.verdict == "FAIL"
+    fails = _findings(rep, "foot_skate", "FAIL")
+    assert fails and "body order" in fails[0].message
+    assert rep.suggestion.kind == "reaudit"
+
+    # explicit opt-out is the only silent path
+    rep2 = audit.audit_clip(f, limits, joint_names=JOINT_SPEC, body_order="none")
+    assert rep2.verdict == "PASS"
+    assert rep2.suggestion.kind == "none"
+
+
+def test_body_order_sidecar_and_explicit_sources(tmp_path, limits):
+    # sidecar body_order.txt next to the npz (the csv_to_npz_mujoco convention)
+    T = 30
+    q, dq = np.full((T, 3), 0.1), np.zeros((T, 3))
+    f = _write_npz(tmp_path / "fs_sidecar.npz", q, dq, body_names=None)
+    (tmp_path / "body_order.txt").write_text("# discover-map output\n" + "\n".join(BODIES) + "\n")
+    rep = audit.audit_clip(f, limits, joint_names=JOINT_SPEC)
+    assert rep.verdict == "PASS"
+
+    # explicit file wins even where a sidecar/embedded key exists
+    order_file = tmp_path / "custom_order.txt"
+    order_file.write_text("\n".join(BODIES) + "\n")
+    rep2 = audit.audit_clip(f, limits, joint_names=JOINT_SPEC, body_order=str(order_file))
+    assert rep2.verdict == "PASS"
+
+    # explicit inline list BEATS the npz-embedded key: a list without the ankle
+    # links must fail loud even though the embedded body_names are fine
+    f2 = _write_npz(tmp_path / "fs_embedded.npz", q, dq)          # embedded names OK
+    rep3 = audit.audit_clip(f2, limits, joint_names=JOINT_SPEC, body_order="a,b,c")
+    assert rep3.verdict == "FAIL"
+    fails = _findings(rep3, "foot_skate", "FAIL")
+    assert fails and "left_ankle_roll_Link" in fails[0].message
+
+    # count mismatch fails loud too
+    short_file = tmp_path / "short_order.txt"
+    short_file.write_text("pelvis_link\nleft_ankle_roll_Link\n")
+    rep4 = audit.audit_clip(f2, limits, joint_names=JOINT_SPEC, body_order=str(short_file))
+    assert rep4.verdict == "FAIL"
+    fails = _findings(rep4, "foot_skate", "FAIL")
+    assert fails and "count" in fails[0].message
 
 
 if __name__ == "__main__":
