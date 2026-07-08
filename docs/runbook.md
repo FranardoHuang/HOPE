@@ -48,6 +48,12 @@ model_13599.pt ──play.py 原生导出(isaac venv,占一个 GPU 槽 ~4 分钟
 - **bank 题源考卷(阶段 1 正式卷)**:`--target-source bank --exam-bank <v2 exam npz>` +
   显式 `--strike-phase-per-clip`;mjeval venv 下设 `HOPE_STAGE1_QB=<stage1_question_bank.py 路径>`
   (绕过 isaaclab 包链);分母报表(kept/asked/锥内比例/难度中位)开头自动打印,入账连它一起抄。
+- **`--qdes-clamp` 建议一律开**(人话:考卷把动作剪到关节限位,跟训练和真机部署一个规矩;不开的话
+  考卷是三方里唯一不剪的,会错放"骑剪切板"策略/错杀靠剪切的健康策略——fixE 复核 07-08 定的);
+  开没开都会打在报告头(`qdes_clamp=ON/OFF`),入账时连状态一起抄。默认关=老读数可比性不破。
+- **判 07-05 后代际的臂建议 `--hold-ref stand`**(人话:等球段参考喂"站姿+零速",跟 07-05 以后
+  训练的等球语义一致;默认 `clip`=冻结起手帧,是 07-05 前的老语义——拿老语义考新代际就是
+  07-07 事故的形状)。两开关对健康臂无扰动已在 fixE 六格复核里裁过(fixC composite 不变)。
 - 导出**必须走 play.py 原生路**:快速导出器(standalone_onnx_export)的 donor/harvest 是
   "动作对锁定"的,现存工件都是 hopex 对——非 hopex 臂用它必死;且评估器要消费 ONNX 里的
   clip 元数据,原生导出才正确。导出后 play.py 进死循环,要 kill 进程组。

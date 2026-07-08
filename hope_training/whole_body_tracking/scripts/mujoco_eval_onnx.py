@@ -153,6 +153,24 @@ TARGET SOURCE (--target-source, 2026-07-04): where the per-strike racket targets
                           ZERO-TRAINING DEPLOYMENT CEILING of the current policy + an adapted
                           planner. Compare against the free-normal baseline + its counterfactual.
 
+CONTRACT ALIGNMENT (2026-07-08, fixE retrial follow-up — both flags DEFAULT OFF = the exam
+  protocol stays byte-identical to every score already on the books):
+  --qdes-clamp        clamp the decoded q_des to the MJCF soft joint limits (0.9 x range about the
+                      midpoint == Isaac soft_joint_pos_limit_factor) before the PD. Training
+                      (ClampedJointPositionAction, default ON since 2026-07-06) and the C++ deploy
+                      runner (pp_joint_limits.hpp) BOTH clamp; unflagged, this exam is the only leg
+                      of train/deploy/eval that feeds unclamped q_des — it can wrongly pass a
+                      "clamp-rider" policy (q_des far past the limits buying torque the runner will
+                      never grant) or wrongly kill a healthy policy that leans on the clamp.
+                      Recommended ON for every new exam; state is printed in the report header.
+  --hold-ref stand    multiswing pre-swing HOLD reference = READY STAND (joint refs = default_q,
+                      ref vel = 0), the 2026-07-05+ training hold semantics (commands.py). The
+                      default ("clip") keeps the legacy frozen-windup-frame reference the
+                      pre-07-05 generations trained on. Examining a 07-05+ generation with "clip"
+                      is the 07-07 incident shape (generation-mismatched hold reference) — pass
+                      "stand" for those arms. Both toggles were adjudicated harmless on a healthy
+                      arm (fixC six-cell retrial: composite unchanged) and are exam-side only.
+
 SWITCH-STRESS (--switch-stress P, 2026-07-05; R11's missing benefit ruler): deploy-parity
   mid-swing clip-switch stress protocol for the training-like multiswing rollout. Each control
   step, with probability P, the reference clock aborts the swing exactly like the deploy runner
@@ -272,6 +290,34 @@ MOUNT_NORMAL_AXIS = 1
 MOUNT_NORMAL_SIGN = 1.0
 WRIST_TRACKED_IDX = TRACKED_BODIES.index("right_wrist_yaw_Link")   # 13; racket frame == this body's frame
 CLIP_NAMES = {0: "forehand", 1: "backhand"}
+# --qdes-clamp soft-limit factor: Isaac ArticulationCfg soft_joint_pos_limit_factor (robots/
+# agibot_a3.py) — the training ClampedJointPositionAction clamps to soft_joint_pos_limits, which
+# Isaac derives by shrinking each joint's range by this factor about its midpoint.
+SOFT_JOINT_POS_LIMIT_FACTOR = 0.9
+
+
+def soft_joint_limits(jnt_range, factor=SOFT_JOINT_POS_LIMIT_FACTOR):
+    """Isaac-style soft joint position limits from an (N, 2) [lo, hi] range array: shrink each
+    LIMITED joint's range by `factor` about its midpoint (soft_joint_pos_limits semantics).
+    Unlimited joints (MJCF hi <= lo) get (-inf, +inf) so a clamp never touches them."""
+    jnt_range = np.asarray(jnt_range, float)
+    mid = 0.5 * (jnt_range[:, 0] + jnt_range[:, 1])
+    half = 0.5 * (jnt_range[:, 1] - jnt_range[:, 0]) * factor
+    limited = jnt_range[:, 1] > jnt_range[:, 0]
+    lo = np.where(limited, mid - half, -np.inf)
+    hi = np.where(limited, mid + half, np.inf)
+    return lo, hi
+
+
+def stand_hold_refs(refs, default_q):
+    """READY-STAND hold reference (2026-07-05+ training hold semantics, commands.py): joint refs =
+    the default stand, ref joint vel = 0. Returns a shallow COPY of `refs` — body/anchor reference
+    entries pass through untouched (training's hold only re-points the JOINT command), and the
+    refs_table entry itself is never mutated."""
+    refs = dict(refs)
+    refs["joint_pos"] = default_q
+    refs["joint_vel"] = np.zeros_like(refs["joint_vel"])
+    return refs
 
 
 # =================================================================================================
@@ -472,6 +518,12 @@ class MujocoRobot:
         assert (self.act_id >= 0).all(), "missing <joint>_motor actuator(s) in MJCF"
         self.ctrl_lo = self.model.actuator_ctrlrange[self.act_id, 0].copy()
         self.ctrl_hi = self.model.actuator_ctrlrange[self.act_id, 1].copy()
+
+        # Soft joint position limits (ARTICULATION order) for the optional --qdes-clamp: the
+        # training ClampedJointPositionAction and the C++ deploy runner (pp_joint_limits.hpp)
+        # both clamp q_des to these; precomputed unconditionally (read only when the flag is on).
+        self.soft_jnt_lo, self.soft_jnt_hi = soft_joint_limits(
+            np.array([self.model.jnt_range[jid(n)] for n in joint_names], float))
 
         # Body ids for the 14 tracked bodies, the pelvis (free base) and torso (anchor).
         self.tracked_bid = np.array([bid(n) for n in body_names], int)
@@ -967,7 +1019,7 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 target_normal_per_clip, strike_csv_writer=None, viewer=None, realtime=True,
                 vel_ranges_per_clip=None, pos_ranges_per_clip=None, df=None,
                 reset_mode="teleport", hold_range=(0, 100), venue_sampler=None,
-                switch_stress=0.0):
+                switch_stress=0.0, qdes_clamp=False, hold_ref="clip"):
     racket = RacketCommand(seg_start, seg_len, step_dt, rng, target_normal_per_clip,
                            vel_ranges_per_clip=vel_ranges_per_clip,
                            pos_ranges_per_clip=pos_ranges_per_clip,
@@ -1115,6 +1167,14 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
 
     for step in range(n_steps):
         refs = refs_table[time_step]
+        # --hold-ref stand: the multiswing pre-swing HOLD imitates READY STAND (joint refs =
+        # default_q, ref vel = 0) — lockstep with the 2026-07-05+ training hold semantics
+        # (commands.py), instead of the frozen windup-frame reference the pre-07-05 generations
+        # trained on. Default "clip" keeps the frozen-frame reference byte-identical. The refs
+        # swap happens BEFORE build_obs AND the tracking-guard terminations read `refs`, exactly
+        # like training grades its own hold against the stand command.
+        if hold_ref == "stand" and df is None and multiswing and hold_left > 0:
+            refs = stand_hold_refs(refs, policy.default_q)
         # DF hold/rest = READY-STAND reference (2026-07-05, lockstep with training
         # commands.joint_pos + C++ pp_policy level-0): a frozen clock imitates the
         # default stand (joint refs = default_q, ref vel = 0), not frame 0's
@@ -1141,6 +1201,12 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         last_action = action.copy()
 
         target_q = policy.default_q + action * policy.action_scale
+        # --qdes-clamp: clamp the processed q_des to the soft joint limits BEFORE the PD — the
+        # training ClampedJointPositionAction (hope_actions.py, default ON since 2026-07-06) and
+        # the C++ deploy runner (pp_joint_limits.hpp) both do; without this flag the MuJoCo exam
+        # is the only leg of train/deploy/eval that grants unclamped q_des torque.
+        if qdes_clamp:
+            target_q = np.clip(target_q, robot.soft_jnt_lo, robot.soft_jnt_hi)
         tau = robot.apply_pd_and_step(target_q, policy.kp, policy.kd, decimation)
         ep_len += 1
 
@@ -1696,6 +1762,23 @@ def main():
                         "clean-swing hit rates. 0.0 (default) = off, byte-identical baseline. "
                         "Reference: training dose 0.002/step ~ 24-28%%/swing; suggested stress "
                         "dose 0.01 ~ 75%%/swing.")
+    p.add_argument("--qdes-clamp", action="store_true",
+                   help="clamp the decoded q_des to the MJCF soft joint limits (0.9 x range about "
+                        "the midpoint = Isaac soft_joint_pos_limit_factor) before the PD — matches "
+                        "BOTH the training ClampedJointPositionAction (default ON since "
+                        "2026-07-06) and the C++ deploy runner (pp_joint_limits.hpp). Default OFF "
+                        "= legacy exam behavior, byte-identical to every score on the books. "
+                        "Recommended ON for every new exam; the state is printed in the report "
+                        "header either way (fixE retrial 2026-07-08: unflagged, the exam is the "
+                        "only unclamped leg of train/deploy/eval).")
+    p.add_argument("--hold-ref", choices=["clip", "stand"], default="clip",
+                   help="multiswing pre-swing HOLD reference semantics. 'clip' (default, legacy) = "
+                        "freeze the windup frame's raw clip reference — what pre-2026-07-05 "
+                        "generations trained on. 'stand' = READY-STAND (joint refs = default_q, "
+                        "ref vel = 0; the 2026-07-05+ commands.py hold semantics) — use it for "
+                        "arms trained on/after 2026-07-05 or the hold segment grades against a "
+                        "generation-mismatched reference (the 07-07 incident shape). Inert outside "
+                        "the multiswing protocol (teleport / --deploy-faithful).")
     args = p.parse_args()
 
     if args.venue_fixed_normal and args.target_source != "venue-balls":
@@ -1810,9 +1893,21 @@ def main():
     else:
         print(f"[mj-sim2sim] reset mode: {reset_mode} (CLI)")
     if reset_mode == "multiswing":
+        hold_desc = ("READY-STAND ref during holds (joint refs=default_q, vel 0; 2026-07-05+ "
+                     "training hold semantics)" if args.hold_ref == "stand"
+                     else "ref frozen at windup (legacy pre-07-05 hold semantics)")
         print(f"[mj-sim2sim]   multiswing: no wrap teleports; pre-swing hold U{tuple(args.hold_steps_range)} "
-              f"steps (ref frozen at windup, tts pinned); + balance terminations "
+              f"steps ({hold_desc}, tts pinned); + balance terminations "
               f"(tilt>{DF_FALL_TILT_RAD} rad, pelvis z<{DF_FALL_ROOT_Z_MIN} m)")
+    elif args.hold_ref == "stand":
+        print(f"[mj-sim2sim] NOTE: --hold-ref stand is INERT outside the multiswing protocol "
+              f"(reset mode: {reset_mode})")
+    print(f"[mj-sim2sim] q_des clamp: "
+          + ("ON — decoded q_des clamped to soft joint limits (0.9 x range; train "
+             "ClampedJointPositionAction == deploy pp_joint_limits parity)" if args.qdes_clamp
+             else "OFF (legacy exam, byte-identical to booked scores; --qdes-clamp recommended "
+                  "for new exams — training clamps by default since 2026-07-06 and the C++ "
+                  "runner always has)"))
     if args.switch_stress > 0.0:
         if reset_mode != "multiswing":
             raise SystemExit("[FATAL] --switch-stress needs the multiswing protocol (got "
@@ -2103,7 +2198,8 @@ def main():
                           vel_ranges_per_clip=vel_ranges_per_clip,
                           pos_ranges_per_clip=pos_ranges_per_clip, df=df_cfg,
                           reset_mode=reset_mode, hold_range=tuple(args.hold_steps_range),
-                          venue_sampler=venue_sampler, switch_stress=args.switch_stress)
+                          venue_sampler=venue_sampler, switch_stress=args.switch_stress,
+                          qdes_clamp=args.qdes_clamp, hold_ref=args.hold_ref)
         results.append(res)
     csv_f.close()
     strike_csv_f.close()
@@ -2112,7 +2208,8 @@ def main():
 
     # ---- summary table ----
     print("\n" + "=" * 92)
-    print(f"MuJoCo sim-to-sim | {os.path.basename(args.onnx)} | {args.steps} steps | seed {args.seed}")
+    print(f"MuJoCo sim-to-sim | {os.path.basename(args.onnx)} | {args.steps} steps | seed {args.seed}"
+          f" | qdes_clamp={'ON' if args.qdes_clamp else 'OFF'} | hold_ref={args.hold_ref}")
     print("-" * 92)
     cols = [f"{r['mode']:>16s}" for r in results]
     print(f"{'metric':28s}" + "".join(cols))
