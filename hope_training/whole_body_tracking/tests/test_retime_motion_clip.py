@@ -164,6 +164,16 @@ def test_fail_closed():
         _retime(data, budget=1.2, body_mode="fk")
 
 
+def test_budget_one_is_exact_identity():
+    data = _synthetic_clip()
+    out, rep = _retime(data, budget=1.0, s_min=1.0)
+    assert rep["frames"]["T_out"] == T
+    assert np.array_equal(out["joint_pos"], data["joint_pos"])
+    assert np.array_equal(out["body_pos_w"], data["body_pos_w"])
+    assert np.array_equal(out["body_quat_w"], data["body_quat_w"])
+    assert rep["phase"]["in"] == pytest.approx(rep["phase"]["out"])
+
+
 def test_window_at_clip_head_is_supported():
     data = _synthetic_clip()
     out, rep = _retime(data, phase=3 / (T - 1), budget=1.2)    # window clamps at 0

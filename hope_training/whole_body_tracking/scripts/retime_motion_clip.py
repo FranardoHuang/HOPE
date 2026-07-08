@@ -151,7 +151,12 @@ def solve_stretch_for_budget(seg_int: np.ndarray, budget: float, w0: int, w1: in
 
     Monotone: larger a_ref -> smaller s -> shorter. Window segments are pinned at
     1.0, so the achievable factor is bounded; the closest achievable is returned.
+    budget <= 1.0 with no compression allowed is BY DEFINITION the identity map —
+    return it exactly (bisection would only approach s == 1 asymptotically and
+    leave float dust on every resampled row).
     """
+    if budget <= 1.0 and s_min >= 1.0:
+        return np.ones(len(seg_int))
     lo, hi = 1e-6, 1e6  # a_ref bracket
     for _ in range(iters):
         mid = np.sqrt(lo * hi)
