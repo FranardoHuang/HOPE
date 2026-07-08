@@ -608,3 +608,53 @@ clips:
     face_normal_reliable: true-calibrated
     grip_session: session_v5_oblique_hopex
     rally_yaw_deg: -40  # carried from hope_backhand_v5 lineage (same source video)
+
+  # v5topp = ORACLE-GUIDED TIME-LAW v2 (TOPP-lite, 针对性放慢不可行段;
+  # scripts/synthesize_timing_v2.py). Same path as v5syn (v5hLs 只当路径), but instead of
+  # v1's single global uniform-accel T_a, the timeline is iteratively re-solved AGAINST the
+  # A-layer feasibility oracle (feasibility_oracle.py, mj_inverse CoP/摩擦锥/腰τ): each
+  # oracle-infeasible frame OUTSIDE the ±0.1s contact lock gets its local time axis stretched
+  # (ρ≥1 density, |q̇|∝ṡ down, dynamics ∝ṡ² quadratic down); the lock window keeps ρ≡1 so the
+  # contact blade speed/face are BITWISE-preserved. Converges when the oracle CoP dose drops to
+  # target or the only residual-infeasible frames are window-locked (= 触球窗几何本身不可行,
+  # 非时序 → path-morph signal, not a time-law one).
+  # ORACLE DOSE (v5_height_fix/topp/{fh,bh}_topp.json): CoP-out time-share
+  #   fh 0.280 -> 0.132 (verdict PASS in 2 iters, x1.61 duration);
+  #   bh 0.232 -> 0.090 (WARN; residual 12 frames window-locked, x3.45 duration).
+  # Both beat v5syn 0.232 AND the v4rg floor 0.167. Contact row bitwise = v5hLs (fh f39 /
+  # bh f23; clean blade speed fh 2.487 / bh 3.405 m/s preserved dev 0.00%, face-normal diff
+  # 0.0000 deg); first-frame max|q̇| 0.000 rad/s; audit 0 FAIL both, foot-skate (check 7) PASS
+  # (v5hLs 移植腿沿用); bh WARN set = v5syn/v5hLs 同族 (waist_pitch soft-limit/saturation +
+  # 触球窗 right_shoulder_pitch 80% vel line — 源路径自带, 非本次引入).
+  # ⚠ SYNTHESIZED TIMELINE (时间律合成, 视频约定帧弃用): phases below are OUTPUT-grid contact
+  # rows from the synthesis reports, not video frame conventions.
+  hope_forehand_v5topp_cal:
+    phase: 0.5761            # contact f53 of 93 (tool exact 0.576087)
+    status: unverified
+    annotator: claude (oracle-guided TOPP-lite 时间律 v2, 触球行逐位=v5hLs f39; franco 抽查待办)
+    date: 2026-07-09
+    method: oracle-guided time-law synthesis (synthesize_timing_v2.py) on the v5hLs fh path;
+      contact row bitwise = source f39; clean blade speed 2.487 m/s preserved (dev 0.00%);
+      run-up 0.78 -> 1.06 s (x1.36), duration 1.14 -> 1.84 s (x1.61); oracle CoP dose
+      0.280 -> 0.132 (PASS); mean|acc| 3.29 -> 1.74
+    source: video-gvhmr + grip-calibrated (v5hLs + synthesize_timing_v2.py TOPP-lite, report
+      v5_height_fix/topp/fh_topp.json)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: 40   # carried from hope_forehand_v5 lineage (same source video)
+
+  hope_backhand_v5topp_cal:
+    phase: 0.315             # contact f63 of 201 (tool exact 0.315000)
+    status: unverified
+    annotator: claude (oracle-guided TOPP-lite 时间律 v2, 触球行逐位=v5hLs f23; franco 抽查待办)
+    date: 2026-07-09
+    method: oracle-guided time-law synthesis (synthesize_timing_v2.py) on the v5hLs bh path;
+      contact row bitwise = source f23; clean blade speed 3.405 m/s preserved (dev 0.00%);
+      run-up 0.46 -> 1.26 s (x2.74), duration 1.16 -> 4.00 s (x3.45); oracle CoP dose
+      0.232 -> 0.090 (WARN, residual window-locked = 触球窗几何 non-timing signal);
+      mean|acc| 6.06 -> 1.32
+    source: video-gvhmr + grip-calibrated (v5hLs + synthesize_timing_v2.py TOPP-lite, report
+      v5_height_fix/topp/bh_topp.json)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: -40  # carried from hope_backhand_v5 lineage (same source video)
