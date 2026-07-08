@@ -460,3 +460,54 @@ clips:
     face_normal_reliable: true-calibrated
     grip_session: session_v5_oblique_hopex
     rally_yaw_deg: -40  # carried from hope_backhand_v5 lineage (same source video)
+
+  # v5hLt = v5hLs + NON-UNIFORM RETIMING (非均匀重定时, franco 07-09 保底牌设计;
+  # scripts/retime_motion_clip.py) — strike window (phase ±0.1s) time-locked with the new
+  # uniform grid landing EXACTLY on the source window frames (rows BITWISE-copied:
+  # joint_pos + body_pos_w/body_quat_w; contact joint_vel diff exactly 0.0), out-of-window
+  # time reallocated by whole-body |ddq| density to flatten the acceleration profile.
+  # PHASE 口径 = frame-content aligned BY CONSTRUCTION (contact row is a bitwise copy of the
+  # source contact frame; phase = contact_index/(T-1) on the NEW time axis). NOT a speed-peak
+  # value, no lag scan needed — the alignment is a build-time assertion, not a measurement.
+  # Acceptance (retime/v5hLt_{fh,bh}_retime.json + retime/v5hLt_audit.{md,json}):
+  # bh mean|acc| 6.06 -> 4.49 <= 4.5 target @ x1.212 duration (59 -> 71 frames; params
+  # target-mean-acc 4.5 / ramp 12 / s-max 2.0 / no compression); known residual: a +3.5%
+  # acc spike at the pre-window junction (131.8 vs source peak 127.4, the irreducible
+  # re-acceleration wall where the slowed approach meets the locked window); fh already in
+  # the healthy band (3.29) -> budget 1.0 EXACT identity (joint_pos bitwise = v5hLs fh,
+  # body/vel at the float32 quantization floor from FK recompute) so an R9d-vs-R9c arm
+  # comparison isolates the bh retime; audit 0 FAIL both, WARN set == v5hLs zero add/remove
+  # (bh vel WARN values bitwise-equal, frames shifted 20-21 -> 23-24 with the new axis);
+  # first frame no regression (fh 1.518 =, bh 0.835 -> 0.821 rad/s). Contact world height
+  # unchanged (window rows bitwise) but banks are still generated per-clip from each npz.
+  hope_forehand_v5hLt_cal:
+    phase: 0.678
+    status: unverified
+    annotator: claude (恒等重定时=内容同 v5hLs fh,相位沿用 lineage 值; franco 抽查待办)
+    date: 2026-07-09
+    method: retime budget 1.0 exact-identity path (T=58 unchanged, joint_pos bitwise =
+      hope_forehand_v5hLs_cal) — phase carries verbatim; tool exact-frame value 0.684211
+      (= 39/57) rounds to the same contact frame f39; kept 0.678 for lineage consistency
+      (v5rg/v5hA/v5hL/v5hLs same value)
+    source: video-gvhmr + grip-calibrated (v5hLs + retime_motion_clip.py --budget 1.0,
+      report v5_height_fix/retime/v5hLt_fh_retime.json)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: 40   # carried from hope_forehand_v5 lineage (same source video)
+
+  hope_backhand_v5hLt_cal:
+    phase: 0.3714
+    status: unverified
+    annotator: claude (工具输出新相位,窗内逐位=构造性对齐; franco 抽查待办)
+    date: 2026-07-09
+    method: NEW TIME AXIS — contact frame 26 of 71 (tool phase_out 0.371429; registry
+      4-decimal 0.3714 round-trips, 0.3714*70=25.998 -> f26); 口径=帧内容对齐 by
+      construction (contact row + full ±5-frame window bitwise-copied from
+      hope_backhand_v5hLs_cal f18-28; contact joint_vel diff exactly 0.0; blade
+      |v|=3.51 m/s vx=+2.54 carried verbatim). mean|acc| 6.06 -> 4.49 (x1.212 duration)
+    source: video-gvhmr + grip-calibrated (v5hLs + retime_motion_clip.py
+      --target-mean-acc 4.5 --ramp-frames 12 --s-max 2.0,
+      report v5_height_fix/retime/v5hLt_bh_retime.json)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: -40  # carried from hope_backhand_v5 lineage (same source video)
