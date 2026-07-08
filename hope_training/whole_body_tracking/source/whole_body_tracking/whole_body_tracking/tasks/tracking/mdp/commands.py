@@ -162,6 +162,22 @@ class MotionCommand(CommandTerm):
         # True only while _resample_command is being invoked from an intra-episode clip WRAP
         # (as opposed to a true episode reset) — wraps skip the RSI teleport (cfg.wrap_teleport).
         self._resampling_from_wrap = False
+        # --- stagger_initial_clock (metric-sync fix 2026-07-09; default OFF = byte-identical) ------
+        # Disease: 4096 envs constructed/resumed at the SAME instant + a low fall rate => they all
+        # time out together, swing together, and reset together (episode_length sawtooth 52->485,
+        # mass timeouts) — every EMA metric (fall rates, completion, return rates) then reads a
+        # synchronized-queue oscillation instead of a steady rate. Cure, one flag, two one-shot
+        # biases: (a) each env's FIRST true reset adds U[0, stagger_hold_max_steps] extra hold, so
+        # the cohort's swing/strike phases spread within the first episode; (b) the first
+        # _update_command after construction adds U[0, max_episode_length) to every env's episode
+        # clock, so the FIRST timeouts — and every episode boundary after them — spread instead of
+        # firing in one wave. 人话:开了它,4096 个 env 的"到点超时+挥拍节拍"被随机错开,EMA 指标
+        # 不再集体振荡;默认关,现役跑法完全不受影响。
+        self._stagger_hold_pending: torch.Tensor | None = None
+        self._stagger_ep_pending = False
+        if bool(getattr(self.cfg, "stagger_initial_clock", False)):
+            self._stagger_hold_pending = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+            self._stagger_ep_pending = True
         # A8: post-swing initial-state ring buffer (root state stored ORIGIN-RELATIVE in [:3] so a
         # snapshot from env B can seed env A; quats/velocities/joints are origin-invariant).
         # Tensors are allocated lazily at first capture (dof count comes from live robot data).
@@ -527,6 +543,21 @@ class MotionCommand(CommandTerm):
         lo, hi = self.cfg.hold_steps_range
         self.hold_counter[env_ids_t] = torch.randint(int(lo), int(hi) + 1, (len(env_ids_t),), device=self.device)
 
+        # stagger (a): each env's FIRST true reset adds a uniform hold bias, spreading the swing/
+        # strike phases of a same-instant reset cohort across ~one swing period. One-shot per env;
+        # wraps and every later reset draw the plain hold range, so steady-state behavior is
+        # unchanged. The stand/post-swing min-hold clamps below are min= clamps — the bias
+        # survives them. Default OFF (see cfg.stagger_initial_clock): no RNG draw, byte-identical.
+        if self._stagger_hold_pending is not None and not self._resampling_from_wrap:
+            _pend_ids = env_ids_t[self._stagger_hold_pending[env_ids_t]]
+            if len(_pend_ids) > 0:
+                _mx = int(self.cfg.stagger_hold_max_steps)
+                if _mx > 0:
+                    self.hold_counter[_pend_ids] += torch.randint(
+                        0, _mx + 1, (len(_pend_ids),), device=self.device
+                    )
+                self._stagger_hold_pending[_pend_ids] = False
+
         # Intra-episode clip WRAP: no teleport (deploy case) — the policy must physically carry
         # the body from the previous swing's end into the new swing's windup. The imitation
         # targets are anchor-relative, so the new reference re-anchors to the robot where it is.
@@ -627,6 +658,17 @@ class MotionCommand(CommandTerm):
         )
 
     def _update_command(self):
+        # stagger (b): ONE-SHOT at the first step after construction (fresh run OR resume — both
+        # are the same-instant cohort the metric-sync forensics caught): advance every env's
+        # episode clock by U[0, max_episode_length) so the first timeouts, and every episode
+        # boundary after them, spread out instead of firing in one synchronized wave. Guarded on
+        # the env exposing the clock (defensive: metrics must never crash training).
+        if self._stagger_ep_pending:
+            self._stagger_ep_pending = False
+            _ep_buf = getattr(self._env, "episode_length_buf", None)
+            _max_len = int(getattr(self._env, "max_episode_length", 0) or 0)
+            if _ep_buf is not None and _max_len > 1:
+                _ep_buf.add_(torch.randint(0, _max_len, (self.num_envs,), device=_ep_buf.device))
         # Pre-swing HOLD: held envs keep the reference frozen at the swing's first frame
         # ("waiting for the ball"); everyone else advances the clip clock.
         held = self.hold_counter > 0
@@ -827,6 +869,18 @@ class MotionCommandCfg(CommandTermCfg):
     # depenetration kick at birth. This makes the birth state self-consistent; it is a
     # correctness fix, not an incentive change. 人话:站姿关节配站姿身高,脚不再穿地被弹飞。
     rsi_hold_root_stand_z: bool = False
+
+    # --- 防同步 stagger_initial_clock (metric-sync fix 2026-07-09; default OFF = byte-identical) --
+    # 4096 envs resumed at the same instant + low fall rate => synchronized mass timeouts
+    # (episode_length sawtooth 52->485) => every EMA metric reads a queue oscillation. ON adds two
+    # ONE-SHOT uniform biases (see MotionCommand.__init__ / _resample_command / _update_command):
+    # (a) first true reset per env: hold += U[0, stagger_hold_max_steps] (swing phases spread);
+    # (b) first step after construction: episode clock += U[0, max_episode_length) (episode
+    # boundaries spread, permanently). 人话:把所有 env 的节拍随机错开,治 EMA 指标同步振荡;
+    # 默认关=现役可比,新点火臂建议开。
+    stagger_initial_clock: bool = False
+    # (a) 的偏置上限(控制步): 默认 150 步 = 3 s @ 50 Hz ≈ 一个 hold+挥拍 周期。
+    stagger_hold_max_steps: int = 150
 
     adaptive_kernel_size: int = 1
     adaptive_lambda: float = 0.8

@@ -258,6 +258,9 @@ _RACKET_KEYS = (
     "vb_vel_x_range", "vb_vel_y_range", "vb_vel_z_range",
     # metrics-only virtual ball (in-training 上台率/击球率 curves without vb rewards)
     "vb_metrics_only",
+    # metric-sync fix (2026-07-09): keep the OLD mixed-ledger rally curves alive as *_legacy for
+    # one new/old-comparison transition period. 人话:旧算法上台率对照曲线还要不要发。
+    "rally_legacy_metrics",
     # translated below but previously missing from this whitelist
     "strike_phase_per_clip", "base_couple_blend", "base_couple_max_offset",
     # HITTER separate-commands base/racket coupling ("blend" | "reference_reach"), 2026-07-05
@@ -289,6 +292,10 @@ _MOTION_KEYS = (
     # height (the stand joints were already used; the crouch root z left the feet 0.29 m under
     # the floor -> PhysX depenetration kick).
     "rsi_skip_settle_frames", "rsi_hold_root_stand_z",
+    # 防同步 stagger (metric-sync fix 2026-07-09, default OFF): one-shot random offsets on the
+    # first hold + episode clock so a same-instant 4096-env cohort stops timing out / swinging in
+    # one synchronized wave (the EMA-metric oscillation disease). 人话:把所有 env 的节拍随机错开。
+    "stagger_initial_clock", "stagger_hold_max_steps",
 )
 
 # YAML keys under `rewards:` consumed by the rewards block of _apply_task_overrides below.
@@ -539,6 +546,12 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             # crouch height put the feet ~0.29 m under the floor and PhysX kicks the robot out.
             # 人话:站姿关节配站姿身高,脚不再穿地被物理引擎弹飞。
             _set_attr(M, "rsi_hold_root_stand_z", _get(mt, "rsi_hold_root_stand_z"), _as_bool, applied, "commands.motion")
+            # 防同步 stagger (metric-sync fix 2026-07-09; default OFF = byte-identical): one-shot
+            # random offsets on each env's first hold clock + the episode clock, so a same-instant
+            # 4096-env cohort stops swinging/timing-out in one synchronized wave (EMA 指标同步振荡病).
+            # 人话:开了它,所有 env 的节拍被随机错开,摔率/完成率/上台率曲线不再集体振荡。
+            _set_attr(M, "stagger_initial_clock", _get(mt, "stagger_initial_clock"), _as_bool, applied, "commands.motion")
+            _set_attr(M, "stagger_hold_max_steps", _get(mt, "stagger_hold_max_steps"), int, applied, "commands.motion")
 
     rw = _get(task, "rewards")
     _check_unknown_keys(rw, _REWARD_KEYS, "task.rewards")
@@ -879,6 +892,9 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             # Metrics-only virtual ball (franco 2026-07-06): in-training 上台率/击球率 curves on
             # tasks whose rewards have no virtual_* terms (DeployParity/Hitter). Metrics only.
             _set_attr(C, "vb_metrics_only", _get(rk, "vb_metrics_only"), _as_bool, applied, "racket_target")
+            # metric-sync fix (2026-07-09): transition-period *_legacy rally curves on/off.
+            # 人话:旧算法上台率对照曲线还要不要发(新算法曲线不受此开关影响)。
+            _set_attr(C, "rally_legacy_metrics", _get(rk, "rally_legacy_metrics"), _as_bool, applied, "racket_target")
 
             # Stage-1 question bank + face-command channel (defaults OFF). question_bank = bank npz
             # path (gen_stage1_questions.py); face_command re-anchors the racket_normal reward onto
