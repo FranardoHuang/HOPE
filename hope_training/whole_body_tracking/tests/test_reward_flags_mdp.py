@@ -321,9 +321,54 @@ def test_1c_rewards_gate_per_channel():
     assert torch.allclose(rp, torch.tensor([1.0, 0.0, 0.0]))   # tight window
     assert torch.allclose(rv, torch.tensor([1.0, 1.0, 0.0]))   # wide window
     assert torch.allclose(rn, torch.tensor([1.0, 1.0, 0.0]))   # wide window
-    # multiplicative success = intersection = the tight window
+    # multiplicative success = the LEGACY window (R3b fix: the bonus channel must NOT be narrowed
+    # to the window intersection when the split windows are active). Here strike_window == wide_win.
     rs = hope_rewards_mod.racket_strike_success(env, "racket_target", 0.2, 1.0, 0.3)
-    assert torch.allclose(rs, torch.tensor([1.0, 0.0, 0.0]))
+    assert torch.allclose(rs, torch.tensor([1.0, 1.0, 0.0]))
+
+
+def test_1c_strike_success_keeps_legacy_window_not_intersection():
+    """R3b zero-return regression (2026-07-08): with split windows on, racket_strike_success must pay
+    across the FULL legacy strike window — not just the ±0.02 s tight intersection. Before the fix the
+    expected value below read [1, 0, 0, 0] (support collapsed to the tight window)."""
+    n = 4
+    legacy = torch.tensor([True, True, True, False])     # strike_window_s (e.g. ±0.12 s)
+    pos_win = torch.tensor([True, False, False, False])  # strike_window_pos_s = 0.02
+    wide_win = torch.tensor([True, True, False, False])  # strike_window_wide_s = 0.10
+    cmd = _fake_racket_cmd(n, window=legacy, window_pos=pos_win, window_wide=wide_win)
+    env = _fake_env(racket_target=cmd)
+    rs = hope_rewards_mod.racket_strike_success(env, "racket_target", 0.2, 1.0, 0.3)
+    assert torch.allclose(rs, torch.tensor([1.0, 1.0, 1.0, 0.0]))
+    # the additive channels keep their own (narrower) windows — the fix must not widen them
+    rp = hope_rewards_mod.racket_position_tracking_exp(env, "racket_target", std=0.2)
+    rv = hope_rewards_mod.racket_velocity_tracking_exp(env, "racket_target", std=1.0)
+    assert torch.allclose(rp, torch.tensor([1.0, 0.0, 0.0, 0.0]))
+    assert torch.allclose(rv, torch.tensor([1.0, 1.0, 0.0, 0.0]))
+
+
+def test_1c_strike_success_default_path_byte_identical_and_kernels_match():
+    """No split windows (pos/wide alias the legacy window): the fixed product must equal the OLD
+    semantics rp*rv*rn exactly, including nonzero kernel values and the face_command re-anchor."""
+    n = 2
+    win = torch.tensor([True, False])
+    cmd = _fake_racket_cmd(n, window=win)
+    # nonzero errors so the kernels are not trivially 1
+    cmd.racket_pos_w = torch.tensor([[0.1, 0.0, 0.0], [0.1, 0.0, 0.0]])
+    cmd.racket_lin_vel_w = torch.tensor([[0.5, 0.0, 0.0], [0.5, 0.0, 0.0]])
+    cmd.racket_normal_w = torch.tensor([[0.0, 1.0, 0.0], [0.0, 1.0, 0.0]])
+    cmd.racket_target_normal_w = torch.tensor([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]])
+    env = _fake_env(racket_target=cmd)
+    rp = hope_rewards_mod.racket_position_tracking_exp(env, "racket_target", std=0.2)
+    rv = hope_rewards_mod.racket_velocity_tracking_exp(env, "racket_target", std=1.0)
+    rn = hope_rewards_mod.racket_normal_tracking_exp(env, "racket_target", std=0.3)
+    rs = hope_rewards_mod.racket_strike_success(env, "racket_target", 0.2, 1.0, 0.3)
+    assert torch.allclose(rs, rp * rv * rn)
+    assert rs[0].item() > 0.0 and rs[1].item() == 0.0
+    # face_command=True: the product's normal factor re-anchors to target_normal_cmd
+    cmd.cfg.face_command = True
+    cmd.target_normal_cmd = torch.tensor([[0.0, 1.0, 0.0], [0.0, 1.0, 0.0]])  # aligned -> kernel 1
+    rs_fc = hope_rewards_mod.racket_strike_success(env, "racket_target", 0.2, 1.0, 0.3)
+    assert torch.allclose(rs_fc, rp * rv)  # normal factor == 1 when re-anchored and aligned
 
 
 # --------------------------------------------------------------------------------------------- #

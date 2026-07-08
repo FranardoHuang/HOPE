@@ -66,13 +66,37 @@ def _pos_gate(cmd: RacketTargetCommand, pos_gate_radius: float | None) -> torch.
     return torch.sigmoid((float(pos_gate_radius) - pos_err) / 0.05)
 
 
+def _pos_kernel_raw(cmd: RacketTargetCommand, std: float) -> torch.Tensor:
+    """UNGATED swing-through position kernel (shared by racket_position / racket_strike_success)."""
+    target_pos_now = cmd.racket_target_pos_w - cmd.racket_target_vel_w * cmd.time_to_strike.unsqueeze(-1)
+    error = torch.sum(torch.square(cmd.racket_pos_w - target_pos_now), dim=-1)
+    return torch.exp(-error / std**2)
+
+
+def _vel_kernel_raw(cmd: RacketTargetCommand, std: float) -> torch.Tensor:
+    """UNGATED velocity kernel (shared by racket_velocity / racket_strike_success)."""
+    error = torch.sum(torch.square(cmd.racket_lin_vel_w - cmd.racket_target_vel_w), dim=-1)
+    return torch.exp(-error / std**2)
+
+
+def _normal_kernel_raw(cmd: RacketTargetCommand, std: float) -> torch.Tensor:
+    """UNGATED face-normal kernel (shared by racket_normal / racket_strike_success).
+
+    Stage-1 face command: the reference is the DEMANDED (inverse-solved, question-bank) normal
+    instead of the clip-locked reference normal. face_command=False keeps the old tensor read —
+    byte-identical baseline. racket_strike_success re-anchors through this helper automatically.
+    """
+    target_normal = cmd.target_normal_cmd if cmd.cfg.face_command else cmd.racket_target_normal_w
+    cos_ang = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
+    angle = torch.acos(cos_ang)
+    return torch.exp(-(angle**2) / std**2)
+
+
 def racket_position_tracking_exp(env: ManagerBasedRLEnv, command_name: str, std: float) -> torch.Tensor:
     """Track racket center position near strike using the target's swing-through trajectory.
     Gated by the TIGHT position window (1c): contact must be precise; == strike_window by default."""
     cmd = _cmd(env, command_name)
-    target_pos_now = cmd.racket_target_pos_w - cmd.racket_target_vel_w * cmd.time_to_strike.unsqueeze(-1)
-    error = torch.sum(torch.square(cmd.racket_pos_w - target_pos_now), dim=-1)
-    raw = torch.exp(-error / std**2)
+    raw = _pos_kernel_raw(cmd, std)
     win = _window_pos(cmd)
     _dbg_log(cmd, "racket_pos", raw, win)
     return raw * win.float()
@@ -102,8 +126,7 @@ def racket_velocity_tracking_exp(
     Gated by the WIDE window (1c; == strike_window by default) and, when rewards.face_gate_by_pos
     is on, by the proximity power-gate (see ``_pos_gate``)."""
     cmd = _cmd(env, command_name)
-    error = torch.sum(torch.square(cmd.racket_lin_vel_w - cmd.racket_target_vel_w), dim=-1)
-    raw = torch.exp(-error / std**2)
+    raw = _vel_kernel_raw(cmd, std)
     win = _window_wide(cmd)
     _dbg_log(cmd, "racket_vel", raw, win)
     return raw * win.float() * _pos_gate(cmd, pos_gate_radius)
@@ -116,13 +139,7 @@ def racket_normal_tracking_exp(
     Gated by the WIDE window (1c; == strike_window by default) and, when rewards.face_gate_by_pos
     is on, by the proximity power-gate (see ``_pos_gate``)."""
     cmd = _cmd(env, command_name)
-    # Stage-1 face command: the reference is the DEMANDED (inverse-solved, question-bank) normal
-    # instead of the clip-locked reference normal. face_command=False keeps the old tensor read —
-    # byte-identical baseline. racket_strike_success re-anchors through this call automatically.
-    target_normal = cmd.target_normal_cmd if cmd.cfg.face_command else cmd.racket_target_normal_w
-    cos_ang = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
-    angle = torch.acos(cos_ang)
-    raw = torch.exp(-(angle**2) / std**2)
+    raw = _normal_kernel_raw(cmd, std)
     win = _window_wide(cmd)
     _dbg_log(cmd, "racket_normal", raw, win)
     return raw * win.float() * _pos_gate(cmd, pos_gate_radius)
@@ -252,19 +269,31 @@ def base_decel_tracking(
 def racket_strike_success(
     env: ManagerBasedRLEnv, command_name: str, std_pos: float, std_vel: float, std_normal: float
 ) -> torch.Tensor:
-    """MULTIPLICATIVE strike success R_pos * R_vel * R_normal, gated to the strike window. Unlike the
-    additive racket terms (which give partial credit for getting only position OR velocity right), the
-    product is high ONLY when position AND velocity AND normal are all good at once — a true hit. RewTerm
-    weight is POSITIVE."""
-    # Each kernel already multiplies by its strike window internally, so the product is non-zero ONLY
-    # inside the INTERSECTION of the windows (with 1c split windows that is the tight position window —
-    # a "true hit" is judged at contact precision; identical to before when the windows are not split).
-    # The proximity power-gate is deliberately NOT passed down here: success is already multiplicative
-    # (the design keeps the big money on the ungated product).
-    rp = racket_position_tracking_exp(env, command_name, std_pos)
-    rv = racket_velocity_tracking_exp(env, command_name, std_vel)
-    rn = racket_normal_tracking_exp(env, command_name, std_normal)
-    return rp * rv * rn
+    """MULTIPLICATIVE strike success R_pos * R_vel * R_normal, gated to the LEGACY strike window
+    (``strike_window_s``). Unlike the additive racket terms (which give partial credit for getting only
+    position OR velocity right), the product is high ONLY when position AND velocity AND normal are all
+    good at once — a true hit. RewTerm weight is POSITIVE.
+
+    1c split windows deliberately do NOT narrow this term (R3b forensics 2026-07-08): this is a BONUS
+    channel (reward_staged_design §D: landing/net/spin/success 不动——验证奖金不是引导), and the vrr
+    scoring gates (exact_strike, vb capture) are window-independent too. The first 1c implementation
+    reused the internally window-gated kernels, so the product's support collapsed to the window
+    INTERSECTION = the ±0.02 s tight position window (3 frames @50 Hz instead of 13): the true-hit
+    bonus lost ~17x income (R3b 0.0021 vs R1b 0.0350) exactly when the tight window had already cut the
+    dense position money, the policy farmed the wide vel/normal channels instead of contact, and the
+    forehand missed the vb capture gate every swing (hit rate 0, return rate ~0). The product now uses
+    the UNGATED kernels x the legacy window: byte-identical when the windows are not split (bool win:
+    win^3 == win), and under split windows contact precision is still enforced by the position kernel
+    itself + the vb capture gate — not by shrinking the bonus support.
+    The proximity power-gate is deliberately NOT passed down here: success is already multiplicative
+    (the design keeps the big money on the ungated product)."""
+    cmd = _cmd(env, command_name)
+    raw = (
+        _pos_kernel_raw(cmd, std_pos)
+        * _vel_kernel_raw(cmd, std_vel)
+        * _normal_kernel_raw(cmd, std_normal)
+    )
+    return raw * cmd.strike_window.float()
 
 
 def racket_guidance(env: ManagerBasedRLEnv, command_name: str, d_max: float = 0.5) -> torch.Tensor:
