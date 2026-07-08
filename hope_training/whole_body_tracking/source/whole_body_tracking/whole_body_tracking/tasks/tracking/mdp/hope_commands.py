@@ -300,6 +300,27 @@ class RacketTargetCommand(CommandTerm):
         #   pre_strike_fall_rate  = pre-strike terminations / swing starts
         self._swing_starts_acc = 0.0
         self._swing_starts_acc_c = {c: 0.0 for c in self._clip_names}
+        # --- Per-swing SAME-LEDGER rally accounting (metric-sync fix, 取证定案 2026-07-08) ----------
+        # Disease: virtual_return_rate_rally's numerator (_vb_inb_acc) books at the exact-strike
+        # frame and decays ONLY on strike-carrying steps (inside _vb_evaluate), while its
+        # denominator (_swing_starts_acc) books at swing START and decays EVERY step — two ledgers
+        # with different decay schedules plus a ~1-swing (~116-step) booking phase lag. When 4096
+        # envs form a synchronized reset queue (same-instant resume + low fall rate -> mass
+        # timeout; episode_length sawtooth 52->485), the ratio oscillates 0.31->1.48 and breaks 1.
+        # Cure (per-swing 同刻入账): the exact-strike frame only LATCHES "this swing produced a
+        # legal return" (_rally_returned); at the swing's END (wrap or true reset — i.e. inside
+        # _count_swing_starts) the ended attempt books its start AND its returned flag TOGETHER,
+        # into accumulators decayed TOGETHER once per step in _update_metrics. Paired bookings on
+        # one ledger => returns can never outrun starts => the rate is <=1 by construction and
+        # equals the true per-swing return rate under ANY reset synchronization. The old mixed-
+        # ledger readout survives one transition period as *_legacy (cfg.rally_legacy_metrics)
+        # for new/old comparison. 人话:改成"每拍打完才记账,回没回球和这一拍同时入同一本账"。
+        self._rally_active = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._rally_returned = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._rally_starts_acc = 0.0
+        self._rally_returns_acc = 0.0
+        self._rally_starts_acc_c = {c: 0.0 for c in self._clip_names}
+        self._rally_returns_acc_c = {c: 0.0 for c in self._clip_names}
         self._prestrike_fall_acc = 0.0
         # POST-strike falls (fall AFTER reaching the strike frame — the follow-through/recovery fall that
         # swing_completion_rate + pre_strike_fall_rate are both blind to; it was the actual backhand
@@ -508,6 +529,15 @@ class RacketTargetCommand(CommandTerm):
                 "virtual_approach_speed",
             ):
                 self.metrics[_vk] = torch.zeros(self.num_envs, device=self.device)
+            # Transition-period *_legacy rally curves: the OLD mixed-ledger readout (can spike >1
+            # under synchronized reset queues — see the rally block in __init__) kept alongside the
+            # fixed virtual_return_rate_rally* for new/old comparison. Drop by turning the cfg off.
+            if cfg.rally_legacy_metrics:
+                for _vk in (
+                    "virtual_return_rate_rally_legacy", "virtual_return_rate_rally_forehand_legacy",
+                    "virtual_return_rate_rally_backhand_legacy",
+                ):
+                    self.metrics[_vk] = torch.zeros(self.num_envs, device=self.device)
         # UNCONDITIONAL swing accounting (Phase A): completion_rate = exact-strike arrivals / swing
         # STARTS (falls count against it, unlike the conditional composite above); fall rate before
         # the strike frame. Broadcast scalars like the pass rates.
@@ -1503,12 +1533,31 @@ class RacketTargetCommand(CommandTerm):
         n = int(len(env_ids))
         if n == 0:
             return
+        env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
         self._swing_starts_acc += float(n)
         motion = self._motion()
         if motion._multiseg:
             clips = motion.clip_id[env_ids]
             for c in self._clip_names:
                 self._swing_starts_acc_c[c] += float((clips == c).sum())
+        # --- per-swing SAME-LEDGER rally booking (metric-sync fix; see the rally block in __init__) --
+        # The attempt that ENDS at this resample books its start and its returned-latch TOGETHER
+        # (same call, same ledger, decayed together in _update_metrics) — returns can never outrun
+        # starts. An env's very first resample books nothing (_rally_active False: no attempt
+        # existed yet). The ended attempt is attributed to _prev_clip_id, the clip it was actually
+        # swinging (motion has already resampled clip_id for the NEW attempt by this point).
+        ended = self._rally_active[env_ids_t]
+        returned = self._rally_returned[env_ids_t] & ended
+        self._rally_starts_acc += float(ended.sum())
+        self._rally_returns_acc += float(returned.sum())
+        if motion._multiseg:
+            ended_clips = self._prev_clip_id[env_ids_t]
+            for c in self._clip_names:
+                _csel = ended_clips == c
+                self._rally_starts_acc_c[c] += float((ended & _csel).sum())
+                self._rally_returns_acc_c[c] += float((returned & _csel).sum())
+        self._rally_active[env_ids_t] = True
+        self._rally_returned[env_ids_t] = False
         if count_prestrike_falls:
             term = self._env.termination_manager.terminated[env_ids]
             pre = self.pre_strike[env_ids]
@@ -1533,7 +1582,6 @@ class RacketTargetCommand(CommandTerm):
                     self._poststrike_fall_acc_c[c] += float((post & csel).sum())
             # True reset: the new episode starts fresh (its stand-start/reset hold is genuine
             # pre-strike preparation, not recovery), so clear the latch for these envs.
-            env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
             self._recover_from_clip[env_ids_t] = -1
 
     def _update_footwork_signals(self, racket_dist: torch.Tensor) -> None:
@@ -1733,11 +1781,8 @@ class RacketTargetCommand(CommandTerm):
         # hits). NOTE: accumulators only decay on strike-carrying steps — exact at 4096 envs (a
         # strike happens ~every step), slightly stale at small env counts (diagnostics only).
         decay = float(self.cfg.exact_success_decay)
-        self._vb_exact_acc = decay * self._vb_exact_acc + float(exact_strike.sum())
-        self._vb_hit_acc = decay * self._vb_hit_acc + float(gate.sum())
-        self._vb_net_acc = decay * self._vb_net_acc + float((gate & net_clear).sum())
-        self._vb_land_valid_acc = decay * self._vb_land_valid_acc + float((gate & land["land_valid"]).sum())
-        self._vb_inb_acc = decay * self._vb_inb_acc + float((gate & net_clear & on_opp).sum())
+        _legal = gate & net_clear & on_opp
+        self._vb_book_strike_step(decay, exact_strike, gate, net_clear, land["land_valid"], _legal)
         enough_e = self._vb_exact_acc >= float(self.cfg.exact_success_min_count)
         enough_h = self._vb_hit_acc >= 1.0
         self.metrics["virtual_hit_rate"][:] = (self._vb_hit_acc / max(self._vb_exact_acc, 1e-6)) if enough_e else 0.0
@@ -1756,20 +1801,19 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["virtual_return_rate"][:] = (
             (self._vb_inb_acc / max(self._vb_exact_acc, 1e-6)) if enough_e else 0.0
         )
-        # CONTINUOUS-RALLY return rate (franco 2026-07-08 长期追踪): legal returns per swing
-        # START — falls and never-reached-strike swings count as failures (the completion-rate
-        # denominator), so this is the in-training Isaac twin of the deploy "keep rallying"
-        # number. Same-decay EMAs -> consistent ratio. MuJoCo twin = the deploy-faithful /
-        # Gate 3B periodic exam (checkpoint 抽查).
-        _starts = max(self._swing_starts_acc, 1e-6)
-        self.metrics["virtual_return_rate_rally"][:] = (
-            (self._vb_inb_acc / _starts) if enough_e else 0.0
-        )
+        # CONTINUOUS-RALLY return rate (franco 2026-07-08 长期追踪): legal returns per swing —
+        # falls and never-reached-strike swings count as failures. The trusted curve
+        # (virtual_return_rate_rally*) is now computed in _update_metrics from the per-swing
+        # SAME-LEDGER counters (metric-sync fix; see the rally block in __init__ and
+        # _rally_report). The OLD mixed-ledger readout survives one transition period as *_legacy
+        # (written after the per-clip accumulator updates below — the old write points, strike-
+        # carrying steps only, frozen between strikes — so it reproduces the old readings exactly
+        # for new/old comparison). Its known disease: >1 spikes under synchronized reset queues.
         # Per-side (forehand/backhand) return rate — 反手先行 judging needs the per-side number.
         _motion = self._motion()
-        if getattr(_motion, "_multiseg", False):
+        _is_multiseg = getattr(_motion, "_multiseg", False)
+        if _is_multiseg:
             _clip = _motion.clip_id
-            _legal = gate & net_clear & on_opp
             for _c, _cn in self._clip_names.items():
                 _sel = exact_strike & (_clip == _c)
                 self._vb_exact_acc_c[_c] = decay * self._vb_exact_acc_c[_c] + float(_sel.sum())
@@ -1779,10 +1823,12 @@ class RacketTargetCommand(CommandTerm):
                 _scale = (1.0 / max(_n, 1e-6)) if _n >= float(self.cfg.exact_success_min_count) else 0.0
                 self.metrics[f"virtual_return_rate_{_cn}"][:] = self._vb_inb_acc_c[_c] * _scale
                 self.metrics[f"virtual_hit_rate_{_cn}"][:] = self._vb_hit_acc_c[_c] * _scale
-                _starts_c = max(self._swing_starts_acc_c[_c], 1e-6)
-                self.metrics[f"virtual_return_rate_rally_{_cn}"][:] = (
-                    (self._vb_inb_acc_c[_c] / _starts_c) if enough_e else 0.0
-                )
+        if self.cfg.rally_legacy_metrics:
+            _lg_global, _lg_per_clip = self._rally_legacy_values()
+            self.metrics["virtual_return_rate_rally_legacy"][:] = _lg_global
+            if _is_multiseg:
+                for _cn in self._clip_names.values():
+                    self.metrics[f"virtual_return_rate_rally_{_cn}_legacy"][:] = _lg_per_clip[_cn]
         self.metrics["virtual_approach_speed"] = torch.where(
             exact_strike, approach, self.metrics["virtual_approach_speed"]
         )
@@ -1791,6 +1837,89 @@ class RacketTargetCommand(CommandTerm):
             derr = torch.linalg.norm(land["land_xy"] - self._vb_target_xy.unsqueeze(0), dim=-1)
             self.metrics["virtual_land_err_m"][:] = derr[fired_valid].mean()
             self.metrics["virtual_topspin_revs"][:] = (topspin[fired_valid] / (2.0 * math.pi)).mean()
+
+    def _vb_book_strike_step(
+        self,
+        decay: float,
+        exact_strike: torch.Tensor,
+        gate: torch.Tensor,
+        net_clear: torch.Tensor,
+        land_valid: torch.Tensor,
+        legal: torch.Tensor,
+    ) -> None:
+        """EMA booking for THIS strike-carrying step's virtual-ball outcomes + the rally latch.
+
+        Only reached on strike-carrying steps (_vb_evaluate returns early otherwise), so these
+        accumulators skip decay on strike-free steps — that schedule asymmetry vs the every-step
+        _decay_swing_accounting is one half of the legacy rally disease (the other half is the
+        ~1-swing booking phase lag vs _swing_starts_acc). The rally latch on the last line is the
+        metric-sync FIX's booking point: it only marks "this swing produced a legal return";
+        the actual ledger entry happens at the swing's end in _count_swing_starts.
+        """
+        self._vb_exact_acc = decay * self._vb_exact_acc + float(exact_strike.sum())
+        self._vb_hit_acc = decay * self._vb_hit_acc + float(gate.sum())
+        self._vb_net_acc = decay * self._vb_net_acc + float((gate & net_clear).sum())
+        self._vb_land_valid_acc = decay * self._vb_land_valid_acc + float((gate & land_valid).sum())
+        self._vb_inb_acc = decay * self._vb_inb_acc + float(legal.sum())
+        self._rally_returned = self._rally_returned | legal
+
+    def _rally_legacy_values(self) -> tuple[float, dict]:
+        """OLD mixed-ledger rally readout (transition-period *_legacy curves + unit tests).
+
+        numerator _vb_inb_acc: books at exact-strike frames, decays only on strike-carrying steps;
+        denominator _swing_starts_acc: books at swing starts, decays every step. Different decay
+        schedules + booking phase lag => a synchronized reset queue drives the ratio through 1
+        (0.31->1.48 oscillation, 2026-07-08 取证). Kept verbatim for new/old comparison only —
+        judge with virtual_return_rate_rally (per-swing same-ledger counters, _rally_report).
+        """
+        enough_e = self._vb_exact_acc >= float(self.cfg.exact_success_min_count)
+        _g = (self._vb_inb_acc / max(self._swing_starts_acc, 1e-6)) if enough_e else 0.0
+        _per = {}
+        for _c, _cn in self._clip_names.items():
+            _per[_cn] = (
+                (self._vb_inb_acc_c[_c] / max(self._swing_starts_acc_c[_c], 1e-6)) if enough_e else 0.0
+            )
+        return _g, _per
+
+    def _decay_swing_accounting(self, decay: float) -> None:
+        """Once-per-step decay of ALL swing-denominated ledgers (increments live elsewhere:
+        _count_swing_starts for starts/falls/rally pairs, _resample_command for HER replay).
+        The per-swing rally pair decays HERE — numerator and denominator on one schedule, which
+        together with the paired booking in _count_swing_starts is the metric-sync fix."""
+        self._swing_starts_acc = decay * self._swing_starts_acc
+        self._prestrike_fall_acc = decay * self._prestrike_fall_acc
+        self._poststrike_fall_acc = decay * self._poststrike_fall_acc
+        self._resample_n_acc = decay * self._resample_n_acc
+        self._replay_n_acc = decay * self._replay_n_acc
+        self._rally_starts_acc = decay * self._rally_starts_acc
+        self._rally_returns_acc = decay * self._rally_returns_acc
+        for _c in self._clip_names:
+            self._swing_starts_acc_c[_c] = decay * self._swing_starts_acc_c[_c]
+            self._prestrike_fall_acc_c[_c] = decay * self._prestrike_fall_acc_c[_c]
+            self._poststrike_fall_acc_c[_c] = decay * self._poststrike_fall_acc_c[_c]
+            self._rally_starts_acc_c[_c] = decay * self._rally_starts_acc_c[_c]
+            self._rally_returns_acc_c[_c] = decay * self._rally_returns_acc_c[_c]
+
+    def _rally_report(self) -> None:
+        """virtual_return_rate_rally* from the per-swing SAME-LEDGER counters (metric-sync fix).
+
+        Start and returned-flag of every ended swing are booked TOGETHER (_count_swing_starts)
+        and decayed TOGETHER (_decay_swing_accounting), so returns/starts is a decay-weighted
+        average of per-swing 0/1 outcomes: <=1 by construction and equal to the true per-swing
+        return rate under ANY reset synchronization. 人话:新算法=每拍一票,回了球记 1 没回记 0,
+        比值就是真实上台率,永远不会超过 1。The legacy mixed-ledger curve stays available as
+        *_legacy during the transition (see _vb_evaluate / _rally_legacy_values)."""
+        _min_n = float(self.cfg.exact_success_min_count)
+        _enough = self._rally_starts_acc >= _min_n
+        self.metrics["virtual_return_rate_rally"][:] = (
+            (self._rally_returns_acc / max(self._rally_starts_acc, 1e-6)) if _enough else 0.0
+        )
+        if getattr(self._motion(), "_multiseg", False):
+            for _c, _cn in self._clip_names.items():
+                _cs = self._rally_starts_acc_c[_c]
+                self.metrics[f"virtual_return_rate_rally_{_cn}"][:] = (
+                    (self._rally_returns_acc_c[_c] / max(_cs, 1e-6)) if _cs >= _min_n else 0.0
+                )
 
     def _update_metrics(self):
         # CommandTerm.compute() runs _update_metrics() BEFORE _update_command(), so refresh the
@@ -1924,15 +2053,11 @@ class RacketTargetCommand(CommandTerm):
         #   pre_strike_fall_rate  = pre-strike terminations / swing starts
         # These are the honest companions to the CONDITIONAL composite below, whose denominator
         # only contains exact-strike samples (pre-strike falls are invisible to it).
-        self._swing_starts_acc = decay * self._swing_starts_acc
-        self._prestrike_fall_acc = decay * self._prestrike_fall_acc
-        self._poststrike_fall_acc = decay * self._poststrike_fall_acc
-        self._resample_n_acc = decay * self._resample_n_acc
-        self._replay_n_acc = decay * self._replay_n_acc
-        for _c in self._clip_names:
-            self._swing_starts_acc_c[_c] = decay * self._swing_starts_acc_c[_c]
-            self._prestrike_fall_acc_c[_c] = decay * self._prestrike_fall_acc_c[_c]
-            self._poststrike_fall_acc_c[_c] = decay * self._poststrike_fall_acc_c[_c]
+        self._decay_swing_accounting(decay)
+        # Per-swing SAME-LEDGER rally rate (metric-sync fix): reported here, every step, right
+        # after the paired counters decayed together. See _rally_report for the invariants.
+        if self.cfg.virtual_ball or self.cfg.vb_metrics_only:
+            self._rally_report()
         _s_denom = max(self._swing_starts_acc, 1e-6)
         _s_enough = self._swing_starts_acc >= float(self.cfg.exact_success_min_count)
         self.metrics["swing_completion_rate"][:] = min(self._exact_n_acc / _s_denom, 1.0) if _s_enough else 0.0
@@ -2426,6 +2551,15 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # rate (and the curriculum) only trust it once `exact_success_min_count` decayed samples accumulate.
     exact_success_decay: float = 0.99
     exact_success_min_count: float = 50.0
+    # --- metric-sync fix (2026-07-09, correctness — no ablation arm) ---------------------------
+    # virtual_return_rate_rally* now uses per-swing SAME-LEDGER counting: at each swing's END the
+    # attempt's start and its "returned legally" flag book together and decay together, so the
+    # rate is <=1 by construction and immune to synchronized reset queues (the 0.31->1.48
+    # oscillation, 2026-07-08 取证定案). This flag additionally keeps the OLD mixed-ledger curves
+    # alive under the same names + `_legacy` suffix for one transition period of new/old
+    # comparison; flip to False to stop emitting them once the transition ends.
+    # 人话:上台率曲线换了记账法(恒<=1);这个开关只控制"旧算法对照曲线(_legacy)还要不要发"。
+    rally_legacy_metrics: bool = True
 
     # --- P2.3 SMASH-style adaptive tracking sigma (coarse-to-fine reward kernel widths) ---
     # When on, every `sigma_update_every` control steps the racket_position/racket_velocity reward
