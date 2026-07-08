@@ -323,8 +323,10 @@ _REWARD_KEYS = (
     "racket_guidance_weight",
 )
 
-# YAML keys under `terminations:` (R-b envelope-termination softening, reward_staged_design §⑥).
-_TERMINATION_KEYS = ("envelope_as_penalty", "envelope_penalty_weight")
+# YAML keys under `terminations:` (R-b envelope-termination softening, reward_staged_design §⑥;
+# R9 lower-body-free ablation anchor_pos_off / ee_upper_only, franco 拍板 2026-07-08).
+_TERMINATION_KEYS = ("envelope_as_penalty", "envelope_penalty_weight",
+                     "anchor_pos_off", "ee_upper_only")
 
 
 def _registry_clip_name(cfg):
@@ -1021,6 +1023,56 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 "[train.py] terminations.envelope_penalty_weight is set but envelope_as_penalty "
                 "is not enabled — it would be silently ignored. Set "
                 "terminations.envelope_as_penalty=true or drop the weight.")
+
+        # R9 lower-body-free ablation (franco 拍板 2026-07-08): 蹲深该由任务决定,不该抄舞谱。
+        # The imitation reward already only watches the upper body; these two flags cut the last
+        # two LOWER-BODY reference leashes at the TERMINATION layer (删缰绳, not a penalty swap —
+        # that would be envelope_as_penalty's business and the two are mutually exclusive).
+        # The ABSOLUTE safety terms (base_fell_tilt 0.7 rad / base_too_low 0.5 m) and anchor_ori
+        # are untouched: a real fall/sink still ends the episode.
+        _eap_on = _eap is not None and _as_bool(_eap)
+        # ① terminations.anchor_pos_off — REMOVE the torso-z leash termination outright
+        #    (anchor_pos = bad_anchor_pos_z_only, |z - ref z| > 0.25 m judged死).
+        #    人话:躯干高度不再跟舞谱对表,想蹲多深蹲多深;真摔倒/坐地照样判死。
+        _apo = _get(tm, "anchor_pos_off")
+        if _apo is not None and _as_bool(_apo):
+            if _eap_on:
+                raise _OverrideError(
+                    "[train.py] terminations.anchor_pos_off conflicts with envelope_as_penalty: "
+                    "the penalty swap keeps charging for the very anchor-z deviation this switch "
+                    "frees. Enable one or the other, not both.")
+            T = env_cfg.terminations
+            _require(hasattr(T, "anchor_pos"), "terminations.anchor_pos")
+            T.anchor_pos = None  # configclass None = term removed (envelope_as_penalty precedent)
+            applied.append("terminations.anchor_pos=None (anchor_pos_off: torso-z reference leash "
+                           "removed; base_fell_tilt/base_too_low/anchor_ori absolutes stay)")
+        # ② terminations.ee_upper_only — bad_motion_body_pos_z_only keeps judging the WRISTS
+        #    against the reference z (挥拍 execution 还有锚) but drops the ANKLES from its body
+        #    list (脚自由:步法/下蹲不再因为脚离开舞谱高度带被判死).
+        _euo = _get(tm, "ee_upper_only")
+        if _euo is not None and _as_bool(_euo):
+            if _eap_on:
+                raise _OverrideError(
+                    "[train.py] terminations.ee_upper_only conflicts with envelope_as_penalty: "
+                    "envelope_as_penalty already removed the ee_body_pos termination this flag "
+                    "narrows. Enable one or the other, not both.")
+            T = env_cfg.terminations
+            _term = getattr(T, "ee_body_pos", None)
+            _require(_term is not None, "terminations.ee_body_pos")
+            _params = getattr(_term, "params", None)
+            _require(isinstance(_params, dict)
+                     and isinstance(_params.get("body_names"), (list, tuple)),
+                     "terminations.ee_body_pos.params['body_names'] (explicit body list)")
+            _names = [str(n) for n in _params["body_names"]]
+            _kept = [n for n in _names if "wrist" in n.lower()]
+            _dropped = [n for n in _names if "wrist" not in n.lower()]
+            if not _kept or any("ankle" not in n.lower() for n in _dropped):
+                raise _OverrideError(
+                    f"[train.py] terminations.ee_upper_only expects the ee_body_pos body list to "
+                    f"be wrists+ankles, got {_names} — refusing to guess which bodies to free.")
+            _params["body_names"] = _kept
+            applied.append(f"terminations.ee_body_pos.body_names={_kept} "
+                           f"(ee_upper_only: ankles freed, wrist z still tracks the reference)")
 
     # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
     # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.

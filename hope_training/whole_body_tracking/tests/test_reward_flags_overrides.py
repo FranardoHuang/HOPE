@@ -17,6 +17,10 @@ the new task.rewards fail-loud whitelist, at the TRANSLATION layer (_apply_task_
 * R-b terminations.envelope_as_penalty(+envelope_penalty_weight) — anchor_pos/ee_body_pos removed,
       tracking_envelope weight set (default -1.0), track_envelope_violation switched on;
       weight-without-flag and weight>=0 raise; absolute terminations untouched.
+* R9  terminations.anchor_pos_off / ee_upper_only (lower-body-free ablation, franco 2026-07-08) —
+      anchor_pos_off removes ONLY the torso-z leash termination; ee_upper_only narrows the
+      ee_body_pos body list to the wrists (ankles freed); absolutes + anchor_ori stay; either
+      flag combined with envelope_as_penalty raises; an unexpected body list raises.
 * default path: a DeployParity-like task node without any new key leaves every new attr untouched.
 
 train.py is imported directly (its top-level imports are hydra/omegaconf only — no Isaac); the
@@ -370,6 +374,104 @@ def test_rb_off_leaves_terminations_untouched():
 
 
 # --------------------------------------------------------------------------------------------- #
+# R9 lower-body-free: terminations.anchor_pos_off / ee_upper_only
+# --------------------------------------------------------------------------------------------- #
+# Real A3 ee_body_pos list after the flat_env_cfg __post_init__ re-pin (feet first, then hands).
+_EE_BODIES = ["left_ankle_roll_Link", "right_ankle_roll_Link",
+              "left_wrist_yaw_Link", "right_wrist_yaw_Link"]
+_EE_WRISTS = ["left_wrist_yaw_Link", "right_wrist_yaw_Link"]
+
+
+def _make_env_cfg_with_ee_term():
+    """Fake env cfg whose ee_body_pos is a real-shaped DoneTerm (params + body list)."""
+    env_cfg = _make_env_cfg()
+    env_cfg.terminations.ee_body_pos = _Term(
+        params={"command_name": "motion", "threshold": 0.25}, body_names=_EE_BODIES)
+    return env_cfg
+
+
+def test_r9_anchor_pos_off_removes_torso_leash_only():
+    env_cfg, applied = _apply({"terminations": {"anchor_pos_off": True}})
+    T = env_cfg.terminations
+    assert T.anchor_pos is None  # the torso-z leash is gone
+    # everything else — including the OTHER envelope termination — stays
+    assert T.ee_body_pos == "EE_BODY_POS_TERM"
+    assert T.anchor_ori == "ANCHOR_ORI_TERM"
+    assert T.base_fell_tilt == "BASE_FELL_TILT_TERM"
+    assert T.base_too_low == "BASE_TOO_LOW_TERM"
+    # no penalty swap: this is a pure removal
+    assert env_cfg.rewards.tracking_envelope.weight == 0.0
+    assert env_cfg.commands.racket_target.track_envelope_violation is False
+    assert any("anchor_pos_off" in a for a in applied)
+
+
+def test_r9_anchor_pos_off_false_is_noop():
+    env_cfg, applied = _apply({"terminations": {"anchor_pos_off": False}})
+    assert env_cfg.terminations.anchor_pos == "ANCHOR_POS_TERM"
+    assert applied == []
+
+
+def test_r9_ee_upper_only_keeps_wrists_drops_ankles():
+    env_cfg, applied = _apply({"terminations": {"ee_upper_only": True}},
+                              _make_env_cfg_with_ee_term())
+    term = env_cfg.terminations.ee_body_pos
+    assert term.params["body_names"] == _EE_WRISTS  # ankles freed, wrist order preserved
+    assert term.params["threshold"] == 0.25  # threshold/command untouched
+    assert term.params["command_name"] == "motion"
+    # the torso leash and absolutes are not this flag's business
+    assert env_cfg.terminations.anchor_pos == "ANCHOR_POS_TERM"
+    assert env_cfg.terminations.base_fell_tilt == "BASE_FELL_TILT_TERM"
+    assert any("ee_upper_only" in a for a in applied)
+
+
+def test_r9_ee_upper_only_false_is_noop():
+    env_cfg, applied = _apply({"terminations": {"ee_upper_only": False}},
+                              _make_env_cfg_with_ee_term())
+    assert env_cfg.terminations.ee_body_pos.params["body_names"] == _EE_BODIES
+    assert applied == []
+
+
+def test_r9_full_lowerbody_free_pack(monkeypatch):
+    """The R9 arm config: anchor_pos_off + ee_upper_only + actor_leg_ref_mask, all in one task."""
+    fake_mdp = _stub_mdp_module(monkeypatch)
+    env_cfg, applied = _apply(
+        {"actor_leg_ref_mask": True,
+         "terminations": {"anchor_pos_off": True, "ee_upper_only": True}},
+        _make_env_cfg_with_ee_term())
+    T = env_cfg.terminations
+    assert T.anchor_pos is None
+    assert T.ee_body_pos.params["body_names"] == _EE_WRISTS
+    assert T.anchor_ori == "ANCHOR_ORI_TERM"
+    assert T.base_fell_tilt == "BASE_FELL_TILT_TERM"
+    assert T.base_too_low == "BASE_TOO_LOW_TERM"
+    assert env_cfg.observations.policy.command.func is fake_mdp.generated_commands_actor_leg_masked
+    assert env_cfg.observations.critic.command.func == "generated_commands"
+    assert sum(("anchor_pos_off" in a) + ("ee_upper_only" in a) for a in applied) == 2
+
+
+def test_r9_conflicts_with_envelope_as_penalty_raise():
+    with pytest.raises(train_mod._OverrideError, match="anchor_pos_off"):
+        _apply({"terminations": {"envelope_as_penalty": True, "anchor_pos_off": True}})
+    with pytest.raises(train_mod._OverrideError, match="ee_upper_only"):
+        _apply({"terminations": {"envelope_as_penalty": True, "ee_upper_only": True}},
+               _make_env_cfg_with_ee_term())
+
+
+def test_r9_ee_upper_only_unexpected_body_list_raises():
+    # a torso body in the list: refusing to guess beats silently freeing it
+    env_cfg = _make_env_cfg()
+    env_cfg.terminations.ee_body_pos = _Term(
+        params={"command_name": "motion", "threshold": 0.25},
+        body_names=_EE_BODIES + ["torso_Link"])
+    with pytest.raises(train_mod._OverrideError, match="wrists\\+ankles"):
+        _apply({"terminations": {"ee_upper_only": True}}, env_cfg)
+    # no explicit body list at all (params missing): fail loud, never no-op
+    env_cfg2 = _make_env_cfg()  # ee_body_pos is a plain string stand-in, no params
+    with pytest.raises(train_mod._OverrideError, match="body_names"):
+        _apply({"terminations": {"ee_upper_only": True}}, env_cfg2)
+
+
+# --------------------------------------------------------------------------------------------- #
 # default-path guard: a realistic flag-free task node touches none of the new machinery
 # --------------------------------------------------------------------------------------------- #
 def test_deployparity_like_task_without_new_flags_is_untouched():
@@ -396,6 +498,7 @@ def test_deployparity_like_task_without_new_flags_is_untouched():
     assert env_cfg.commands.motion.rsi_hold_root_stand_z is False
     assert env_cfg.observations.policy.command.func == "generated_commands"
     assert env_cfg.terminations.anchor_pos == "ANCHOR_POS_TERM"
+    assert env_cfg.terminations.ee_body_pos == "EE_BODY_POS_TERM"
     # sanity: the plain overrides did land
     assert R.racket_position.weight == 14.0 and R.racket_position.params["std"] == 0.20
     assert len(applied) > 0
