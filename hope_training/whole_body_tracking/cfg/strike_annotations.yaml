@@ -418,3 +418,37 @@ clips:
     face_normal_reliable: true-calibrated
     grip_session: session_v5_oblique_hopex
     rally_yaw_deg: -40  # carried from hope_backhand_v5 lineage (same source video)
+
+  # v5hLs = v5hL legs/root (bitwise preserved) + v5hAs-style OUT-OF-WINDOW smoothing on the 19
+  # waist-up joint cols (butter2 zero-phase fc6 fh / fc4 bh; window = phase ±0.1s bypassed
+  # bitwise + 4-frame cosine ramp). ⚠ NAME COLLISION NOTE: leg_transplant/hope_*_v5hLs_cal.npz
+  # is the REJECTED static-leg transplant variant (s=static there) — THIS entry is the merged
+  # smoothed candidate at v5_height_fix/hope_*_v5hLs_cal.npz (s=smoothed). Acceptance
+  # (smooth/v5hLs_build.json): legs-12+root bitwise = v5hL, foot slip unchanged (≤0.023 cm),
+  # in-window joint_pos bitwise = v5hL, strike-frame face-normal diff exactly 0.0 deg, blade
+  # speed diff ≤3.7e-7 m/s (float32 quantization floor), audit 0 FAIL & WARN set == v5hL.
+  hope_forehand_v5hLs_cal:
+    phase: 0.678
+    status: unverified
+    annotator: claude (窗内逐位=v5hL,相位沿用 v5hA/v5hL/v5rg,lag 复核; franco 抽查待办)
+    date: 2026-07-09
+    method: in-window bitwise v5hL (strike frame untouched by construction); own lag scan vs
+      v5rg best 0 / vertex -0.149; mean|acc| 3.78 -> 3.29 (out-of-window smoothing only)
+    source: video-gvhmr + grip-calibrated (v5hL + selective smoothing make_v5hLs.py,
+      butter2_fc6 out-of-window)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: 40   # carried from hope_forehand_v5 lineage (same source video)
+
+  hope_backhand_v5hLs_cal:
+    phase: 0.391
+    status: unverified
+    annotator: claude (窗内逐位=v5hL,相位沿用 v5hA/v5hL/v5rg,lag 复核; franco 抽查待办)
+    date: 2026-07-09
+    method: in-window bitwise v5hL (strike frame untouched by construction); own lag scan vs
+      v5rg best 0 / vertex -0.149; mean|acc| 6.75 -> 6.06 (out-of-window smoothing only)
+    source: video-gvhmr + grip-calibrated (v5hL + selective smoothing make_v5hLs.py,
+      butter2_fc4 out-of-window)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: -40  # carried from hope_backhand_v5 lineage (same source video)
