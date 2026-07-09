@@ -63,7 +63,7 @@
 | --- | --- | --- |
 | Isaac 击球三合格率(composite) | 训练内:击球帧位置/速度/拍面朝向三项同时达标率 | 训练中看曲线;07-06 起**仅诊断** |
 | 训练内两球率(virtual_hit/land_inbounds) | 训练内:虚拟球打到率/上台率 | 过程监控;**入账须 MuJoCo 版** |
-| 记分板(4 协议 × 2400 步) | MuJoCo 里换一套物理引擎复考:Isaac 对照口径 / 门禁口径(explicit clipped-PD,"这里摔=真机摔")/ 部署仿真 ×2 | 存档要上真机前 |
+| 记分板(4 协议 × 2400 步) | MuJoCo 里换一套物理引擎复考:Isaac 对照口径 / 门禁口径(explicit clipped-PD,~~这里摔=真机摔~~ **07-09 考证更正:这里摔=厂商 AGI-MuJoCo 验收 sim 里摔**——真机=驱动器固件高频闭环+力矩限幅≈implicit+effort limit,反而是 Isaac 训练配置最忠实;详见 07-09 晚考证条)/ 部署仿真 ×2 | 存档要上真机前 |
 | 真球考试 eval-B(--target-source venue-balls) | 用场馆实测来球分布出题,虚拟回球看合法落台率;**自带反事实列**(换上应有拍面朝向再评一次,量"拍面朝向单项损失多少") | 评"真实世界能不能打回去" |
 | 固定拍面反解(--venue-fixed-normal) | 规划器迁就策略(拍面钉死只解拍速)能打回多少 = 不重训练的上限 | 评"改规划器 vs 改训练"的取舍 |
 | 换招压力测试(--switch-stress p) | 挥拍中途强制换招,量摔倒率/换招后 2 秒存活/换招后命中率 | 评抗打断能力(R11 系列的尺子) |
@@ -915,6 +915,25 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
   =腿自由 × {重新点亮 motion_global_anchor_pos 软缰绳(franco 假说最小实现;技术前置:None
   项能否 yaml 点亮待查)/ 模仿整体 ×1.5(字面实现)/ Hitter 站位指令(phase 2 正解)},
   对照=R9g;时机=R9g 读数后、phase 2 前置窗。
+
+### 07-09(晚)——"A3 是 implicit PD"考证定案:厂商同事说得对,门禁口径表述改账
+
+- 【franco】**考证结论(全部文件:行号证据在案)**:①真机=策略 50Hz 发"位置+kp/kd"给
+  /body_drive 话题,PD 在电机驱动器固件里高频闭环(具体频率厂商未书面给,审计推断 0.5-1kHz),
+  上位机不算力矩——**真机行为≈implicit 族连续伺服+力矩限幅**;AGI 官方训练也用 IsaacLab
+  implicit PD(agibot_a3.py 注释明示,且 2026-07-02 已裁决"不要重新引入 IdealPD")。
+  ②**但厂商发的 MuJoCo 部署 sim 恰恰是 explicit Euler PD @1kHz**(MJCF 全 motor 执行器,
+  C++ 每 1ms 手算 τ=kp·e−kd·q̇ 再双重限幅)——同事的话和厂商 sim 的做法同时为真。
+  ③忠实度排序:Isaac implicit+effort_limit(=训练配置)> 我们 implicit 口径(已知小偏差:
+  kd·q̇ 逃过力矩 clip,腕上 25 vs 6 N·m)> 厂商 sim(explicit Euler)> 我们门禁 explicit 口径
+  (PD 仅 200Hz 重算,比厂商 sim 还糙一档)。SIM_FIDELITY_NOTE_FOR_AGI.md 实证:同一 ONNX
+  implicit 稳定零摔、explicit-Euler ~0.1s 发散=数值伪影,真机 kHz 闭环无此机制。
+- **改账三条**:①"这里摔=真机摔"改为"这里摔=厂商验收 sim 里摔"(评估口径速查已改);
+  ②判卷解读规则:implicit 挂=大概率真问题;explicit 挂而 implicit 过=先疑数值伪影,不判死
+  但仍拦上真机(厂商环境要能复跑);③向厂商核实两问(驱动器闭环频率/限幅实现;是否愿按
+  SIM_FIDELITY_NOTE 把 sim 改 implicit——改了我们 explicit 口径跟着走)。备选小改进:
+  "implicit+kd 计入 clip"变体(腕关节可测差异)。旧结论不受伤:fixE 判死(双口径全塌)、
+  qdes 剪切(位置剪切与 PD 口径正交)均维持。
 
 ## 下周要对齐/拍板的事(2026-07-06 周会用)
 
