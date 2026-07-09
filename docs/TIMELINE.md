@@ -773,6 +773,25 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
 - 【franco】判读注意(预注册):M2 seed2 与 M2 唯一差别=种子,若它过涌现窗(fork 后 ~3400 迭代)
   反手仍 0,"新代码共因"假说才需重开;R9g 若考卷反手接触恢复 M2 档,删缰绳三旗标判死。
 
+### 07-09(晨)——三张工单收卷合并 + 站高常量定性(franco"做好的都可以合")
+
+- 【franco】**+0.11m 站高常量定性收案(工单①):训练学出的行为常量,非 sim2sim 税,考卷无罪**。
+  题库 clip 参考躯干全程蹲姿(z≈0.95,hold 与挥拍段都是),策略在 Isaac 里就学成"站直打球"
+  (z≈1.07=XML stand 骨盆 1.068):训练 tfevents 里 robot−reference anchor z = +0.127(M2/R9a
+  同值),MuJoCo 考卷 +0.11~0.12 是忠实复现(两 sim 差 ≤0.02);机理=07-05 等球语义只换**关节**
+  参考、anchor 参考仍指蹲姿帧,关节奖励赢了锚位置奖励。列错位/引擎站姿差两个候选均排除。
+  行为学后果照旧记训练配方账(R9a 删缰绳=拍随躯干上浮挥空)。已知常量入 runbook 判卷链节。
+- 【franco】**rally 记账加固三件套合并(工单②)**:strike_phase_per_clip 长度不匹配 fail-loud
+  (不再静默退全局相位)+ wrap 边界跨拍泄漏停靠闩(just_resampled 守卫;当前相位 0.28-0.50
+  不触发=纯防御,反证红绿已验)+ multiseg wrap 归因端到端测试(真实双 clip MotionCommand)。
+- 【franco】**三个 standalone 测试文件 pytest fixture 修复合并(工单③)**:stage1_wiring/
+  physical_ball/shadow_ball 历史上就是位置参数脚本设计、pytest 收集一直 ERROR;补 fixture
+  双模保留(python 直跑照旧),顺手修 pytest9 返回值判失败一处。
+- 【franco】**TOPP v2 分支合入 main**(topp-budget-search-0709,对抗复核 3 缺陷已修);
+  registry 补 swingsyn/v4rgsyn 四条目(G1/G2 在跑臂的登记欠账,yaml 解析校验过)。
+  **合并后全套测试 172 全绿**(147 原有+6 记账加固+19 TOPP,数目严丝合缝);已推 origin,
+  pod1 git 拉平(11 臂无恙)、pod2 无 GitHub key 走 rsync 拉平。
+
 ## 下周要对齐/拍板的事(2026-07-06 周会用)
 
 1. **契约日排期(franco + 全队)——升级为「177/179 拼桌」**:两条观测演化线在同一个 175 底座上
