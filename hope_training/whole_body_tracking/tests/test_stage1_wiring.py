@@ -36,6 +36,7 @@ import os
 import tempfile
 
 import numpy as np
+import pytest
 import torch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -81,6 +82,52 @@ def _write_bank(path, forehand_q=3, backhand_q=2):
     return flat
 
 
+# ------------------------------------------------------------------------------------------- #
+# pytest fixtures — the same objects main() threads through the direct-run path, so the file
+# works both ways: ``pytest test_stage1_wiring.py`` and ``python3 test_stage1_wiring.py``.
+# ------------------------------------------------------------------------------------------- #
+@pytest.fixture(scope="module")
+def qb():
+    return _load_module()
+
+
+@pytest.fixture(scope="module")
+def gen():
+    return _load_script("gen_stage1_questions.py", "s1_gen")
+
+
+@pytest.fixture(scope="module")
+def asp(gen):
+    return gen._load_analyzer()
+
+
+@pytest.fixture(scope="module")
+def _bank_on_disk(tmp_path_factory):
+    path = str(tmp_path_factory.mktemp("s1_bank") / "bank.npz")
+    return path, _write_bank(path)
+
+
+@pytest.fixture(scope="module")
+def bank_path(_bank_on_disk):
+    return _bank_on_disk[0]
+
+
+@pytest.fixture(scope="module")
+def flat(_bank_on_disk):
+    return _bank_on_disk[1]
+
+
+@pytest.fixture
+def bank(qb, bank_path):
+    return qb.load_question_bank(bank_path)
+
+
+@pytest.fixture
+def tmpdir(tmp_path):
+    # plain-str tmp dir, matching what main() passes (tests os.path.join onto it)
+    return str(tmp_path)
+
+
 def test_load_shapes_keying_padding(qb, bank_path, flat):
     bank = qb.load_question_bank(bank_path)
     # shared Q_max = 3 (forehand), per-clip counts kept
@@ -99,7 +146,6 @@ def test_load_shapes_keying_padding(qb, bank_path, flat):
     assert torch.all(bank.demanded_vel[1, 2] == 0) and torch.all(bank.demanded_normal[1, 2] == 0)
     assert float(bank.difficulty_deg[1, 2]) == 0.0
     print("[ok] load: shapes / clip keying / padding / counts")
-    return bank
 
 
 def test_select_fixed_point_and_matching_rows(qb, bank, flat):
@@ -390,7 +436,8 @@ def main():
     with tempfile.TemporaryDirectory() as tmpdir:
         bank_path = os.path.join(tmpdir, "bank.npz")
         flat = _write_bank(bank_path)
-        bank = test_load_shapes_keying_padding(qb, bank_path, flat)
+        test_load_shapes_keying_padding(qb, bank_path, flat)
+        bank = qb.load_question_bank(bank_path)
         test_select_fixed_point_and_matching_rows(qb, bank, flat)
         test_loud_errors(qb, tmpdir)
         test_loader_meta_enforcement(qb, tmpdir)

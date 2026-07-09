@@ -27,6 +27,7 @@ import math
 import os
 import sys
 
+import pytest
 import torch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -41,6 +42,20 @@ def _load(fname, name):
     sys.modules[name] = mod  # dataclass resolution needs the module registered during exec
     spec.loader.exec_module(mod)
     return mod
+
+
+# ------------------------------------------------------------------------------------------- #
+# pytest fixtures — the same modules main() loads for the direct-run path, so the file works
+# both ways: ``pytest test_shadow_ball_helpers.py`` and ``python3 test_shadow_ball_helpers.py``.
+# ------------------------------------------------------------------------------------------- #
+@pytest.fixture(scope="module")
+def sb():
+    return _load("shadow_ball.py", "shadow_ball_standalone")
+
+
+@pytest.fixture(scope="module")
+def vb():
+    return _load("virtual_ball.py", "virtual_ball_standalone")
 
 
 def test_prestrike_path_hits_contact(sb):
