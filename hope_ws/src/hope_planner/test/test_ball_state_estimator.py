@@ -51,6 +51,42 @@ def test_bounce_pattern_clears_buffer():
     assert not est.ready
 
 
+def test_center_geometry_bounce_clears_buffer():
+    """Real mocap tracks the ball CENTER: its minimum height at contact is the ball RADIUS
+    (0.02 m), which the legacy 5 mm dip condition can never see (audit 2026-07-07). A physically
+    consistent 300 Hz center-height bounce (ballistic descent, dip to z = radius, restitution
+    rebound) must clear the buffer via the center-geometry local-minimum detector."""
+    cfg = PlannerConfig()
+    est = BallStateEstimator(cfg)
+    dt = 1.0 / 300.0
+    radius, vz_in, e_n = 0.02, 3.0, 0.92
+    zs_down = [radius + vz_in * dt * k for k in (4, 3, 2, 1)]      # 0.06 -> 0.03
+    zs_up = [radius + e_n * vz_in * dt * k for k in (1, 2, 3, 4)]  # rebound
+    zs = zs_down + [radius] + zs_up                                # local min at z = 0.02
+    detected = False
+    for i, z in enumerate(zs):
+        est.push(i * dt, np.array([0.0, 0.0, z]))
+        detected = detected or est.bounce_detected
+    assert detected
+    # buffer was cleared at the local-minimum sample -> only post-bounce samples remain
+    assert len(est.t_buffer) <= len(zs_up) + 1
+
+
+def test_no_false_bounce_on_low_flat_or_monotonic_flight():
+    """Low but flat / monotonically descending tracks (no local minimum) must NOT clear."""
+    cfg = PlannerConfig()
+    est = BallStateEstimator(cfg)
+    dt = 1.0 / 300.0
+    for i in range(12):  # flat inside the center band
+        est.push(i * dt, np.array([0.0, 0.0, 0.04]))
+        assert not est.bounce_detected
+    est2 = BallStateEstimator(cfg)
+    for i, z in enumerate([0.08, 0.06, 0.045, 0.035, 0.028, 0.024]):  # still descending
+        est2.push(i * dt, np.array([0.0, 0.0, z]))
+        assert not est2.bounce_detected
+    assert len(est.t_buffer) == 12 and len(est2.t_buffer) == 6
+
+
 def test_fewer_than_six_samples_not_ready():
     cfg = PlannerConfig()
     est = BallStateEstimator(cfg)

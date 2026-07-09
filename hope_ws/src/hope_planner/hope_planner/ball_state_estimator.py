@@ -56,14 +56,21 @@ class BallStateEstimator:
         self._z_hist[1] = self._z_hist[2]
         self._z_hist[2] = p[2]
 
-        # Bounce detection: three-sample pattern.
-        # z_prev_prev was above table, z_prev dipped to contact,
-        # z_curr is rising again -> actual bounce event.
+        # Bounce detection: three-sample pattern, two geometries (paper §IV-A: clear the buffer
+        # on bounce so the polyfit never spans the velocity discontinuity).
+        #   (a) LEGACY point-ball dip: z_prev at/below bounce_z_tol between two above-tol samples
+        #       (sim harness feeds ideal point-ball z that reaches ~0 at contact).
+        #   (b) CENTER geometry (real mocap, audit 2026-07-07): the rigid-body CENTER never goes
+        #       below the ball RADIUS (0.02 m >> bounce_z_tol), so detect a LOCAL Z-MINIMUM below
+        #       bounce_center_z_max — descending then rising with the dip in the contact band.
         self._bounce_detected = False
         z_pp, z_p, z_c = self._z_hist
         tol = self.config.bounce_z_tol
+        center_max = getattr(self.config, "bounce_center_z_max", 0.05)
         if z_pp is not None and z_p is not None and z_c is not None:
-            if z_pp > tol and z_p <= tol and z_c > tol:
+            legacy_dip = z_pp > tol and z_p <= tol and z_c > tol
+            center_min = z_p <= center_max and z_pp > z_p and z_c > z_p
+            if legacy_dip or center_min:
                 self._bounce_detected = True
                 self.reset()
 

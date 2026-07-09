@@ -125,8 +125,13 @@ class BallKalmanEstimator:
         self._bounce_detected = False
         z_pp, z_p, z_c = self._z_hist
         tol = self.config.bounce_z_tol
+        center_max = getattr(self.config, "bounce_center_z_max", 0.05)
         if z_pp is not None and z_p is not None and z_c is not None:
-            if z_pp > tol and z_p <= tol and z_c > tol:
+            legacy_dip = z_pp > tol and z_p <= tol and z_c > tol
+            # Center-geometry detector (audit 2026-07-07): real mocap tracks the ball CENTER
+            # (min height at contact = radius 0.02 > tol) — see BallStateEstimator.push.
+            center_min = z_p <= center_max and z_pp > z_p and z_c > z_p
+            if legacy_dip or center_min:
                 self._bounce_detected = True
 
         if self._t is None:
