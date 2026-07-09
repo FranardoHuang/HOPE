@@ -641,6 +641,14 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
     # toggles this AFTER __post_init__ has run, so its racket.face_command_obs override attaches
     # the term itself (same ObsTerm, same tail position).
     face_command_obs: bool = False
+    # R10c 站位锚观测开关(DEFAULT OFF = 契约逐位不变;franco 2026-07-09 拍板)。True -> actor
+    # 观测再追加 station_anchor_err_b(+2:世界系出生点锚 − 当前 base XY,旋进 base 系),排在
+    # 拍面通道之后 = 179 -> 181。人话:给策略一个世界系"该站哪"的常数锚,躯干漂了这 2 维自己
+    # 变大(R9a 删缰绳后拍随躯干漂移挥空的任务通道解法)。⚠ 必须与 face_command_obs 同开:
+    # 单开会得到 177 维、且与 jiayi Hitter 的 177(站位插在第 167 列)布局不同——评估器按维数
+    # 认契约会静默错位,__post_init__ 直接报错拦住。train.py 的 racket.station_obs 覆盖同 face
+    # 时序:__post_init__ 已跑完,由 train.py 自己挂 ObsTerm(同名同尾部位置)。
+    station_obs: bool = False
     # PHYSICAL ball + table truth instrument (Phase A; DEFAULT OFF = byte-identical scene/env).
     # True -> __post_init__ sets commands.racket_target.physical_ball and attaches the pb_ball /
     # pb_table / pb_table_visual scene entities (attach_physical_ball_scene). The train.py
@@ -666,6 +674,20 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
         if self.face_command_obs:
             self.observations.policy.racket_target_normal_cmd = ObsTerm(
                 func=mdp.racket_target_normal_cmd, params={"command_name": "racket_target"}
+            )
+        # R10c 站位锚通道:必须排在拍面通道之后(179 前缀逐位不变 -> pad_obs_cols 纯尾部扩列
+        # 热启才成立)。⚠ 布局取舍:契约日 181 蓝图是 175+站位2+拍面3+ρ1(站位在前);这里为了
+        # 现役 179 存档能零成本热启,采用「179 + 尾部站位 2」,站位在拍面后——契约日统一时再定
+        # 最终顺序(见 actor_observation_contract.DEPLOY_PARITY_STATION181 注释)。
+        if self.station_obs:
+            if not self.face_command_obs:
+                raise ValueError(
+                    "HOPEPingPongAgibotA3EnvCfg.station_obs=True requires face_command_obs=True: "
+                    "单开站位会得到 177 维、且与 Hitter 的 177(站位在第 167 列)布局不同,评估器"
+                    "按维数认契约会静默错位。R10c 的形状只有 181(=179+尾部站位2)。"
+                )
+            self.observations.policy.station_anchor_err_b = ObsTerm(
+                func=mdp.station_anchor_err_b, params={"command_name": "racket_target"}
             )
         # SHADOW physical ball + table (metrics-only measurement; defaults OFF = scene untouched).
         # NOTE: train.py's racket.shadow_ball/shadow_table override runs AFTER this __post_init__

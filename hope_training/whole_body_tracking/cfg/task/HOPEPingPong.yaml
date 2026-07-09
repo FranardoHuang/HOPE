@@ -226,6 +226,15 @@ racket:
   #                                          # zero-filled rho placeholder (1, reserved S3 spin lane)
   #                                          # = contract-day 175 -> 179 on deploy-parity;
   #                                          # update/remove actor_obs_contract when enabling
+  # station_obs: true                        # R10c 站位锚(franco 07-09):+2 actor obs 追加在拍面
+  #                                          # 通道之后 = 179 -> 181。人话:世界系出生点常数锚减
+  #                                          # 当前 base XY(旋进 base 系),躯干漂了这 2 维自己变大
+  #                                          # ——"就算不需要移动,它也是一个锚"(R9a 删缰绳丢世界
+  #                                          # 系基准的任务通道解法)。必须与 face_command_obs 同开
+  #                                          # (单开=177,与 Hitter 布局撞维,loud error);热启走
+  #                                          # scripts/pad_obs_cols.py 179->181 纯尾部扩列;
+  #                                          # actor_obs_contract 可设 deploy_parity_station181
+  # station_anchor_offset_xy: [0.0, 0.0]     # 锚点相对 env origin 的 XY 偏移(米);默认=出生点本身
 
 # ---- PHYSICAL ball + table — Phase A truth instrument (flag-gated, METRICS-ONLY; default OFF) --
 # TOP-LEVEL task key (NOT under racket:). A real PhysX table + one real ball per env: each swing's

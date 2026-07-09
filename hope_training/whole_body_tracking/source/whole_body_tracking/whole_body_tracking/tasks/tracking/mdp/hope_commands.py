@@ -103,6 +103,13 @@ class RacketTargetCommand(CommandTerm):
         self.racket_target_normal_w = torch.zeros(self.num_envs, 3, device=self.device)
         self.racket_target_normal_w[:, 2] = 1.0
         self.base_target_pos_w = torch.zeros(self.num_envs, 2, device=self.device)
+        # R10c 站位锚(franco 2026-07-09 拍板"planner 的 p_base 应该加进去:就算不需要移动,
+        # 它也是一个锚")——世界系常数锚点 = env origin + cfg.station_anchor_offset_xy。
+        # 固定点阶段 clip 已重落地(frame-0 root xy ≈ origin),所以这就是"出生点常数"。
+        # 纯观测用(station_obs 旗标,读 station_anchor_err_b),不进任何奖励;和 base_target_pos_w
+        # (带耦合+抖动的奖励目标)是两回事,别混。躯干漂移时这 2 维误差自己变大 = 策略始终有
+        # 世界系位置基准(R9a 删缰绳后拍随躯干漂移挥空的任务通道解法)。
+        self.station_anchor_pos_w = torch.zeros(self.num_envs, 2, device=self.device)
         self.swing_sign = torch.ones(self.num_envs, device=self.device)
 
         # --- Stage-1 question bank (fixed contact point / inverse-solved face+velocity answers) ----
@@ -1291,6 +1298,13 @@ class RacketTargetCommand(CommandTerm):
         base_xy[:, 0] += sample_uniform(*self.cfg.base_target_x_range, (n,), self.device)
         base_xy[:, 1] += sample_uniform(*self.cfg.base_target_y_range, (n,), self.device)
         self.base_target_pos_w[env_ids] = base_xy
+
+        # R10c 站位锚:常数 = env origin + 可配置偏移。每次 resample 重写同一常数(幂等,
+        # 放这里只因 origins 在手);故意不带抖动、不跟 racket/base_target 耦合——它是"你该站在
+        # 哪"的世界系锚,不是奖励目标。
+        self.station_anchor_pos_w[env_ids] = origins[:, :2] + torch.tensor(
+            self.cfg.station_anchor_offset_xy, dtype=torch.float32, device=self.device
+        )
 
         # Swing type. Unified multi-clip: it IS the imitated clip (forehand=clip 0 -> +1, backhand=clip 1
         # -> -1), matching the swing_type observation. Single-clip legacy: infer from the target Y side.
@@ -2500,11 +2514,23 @@ class RacketTargetCommand(CommandTerm):
         latency is on (the swing-type flag rides the same planner->runner message as the target)."""
         return self.delayed_swing_sign
 
-    def base_target_pos_b(self) -> torch.Tensor:
-        """Desired base XY position relative to the current base (yaw-heading frame). HITTER actor obs."""
-        delta_xy = self.base_target_pos_w - self.base_pos_w[:, :2]
+    def _target_xy_err_b(self, target_xy_w: torch.Tensor) -> torch.Tensor:
+        """(world XY target − current base XY) rotated into the yaw-heading base frame — the shared
+        math behind both station-style obs terms (Hitter base_target_pos_b / R10c station anchor)."""
+        delta_xy = target_xy_w - self.base_pos_w[:, :2]
         delta = torch.cat([delta_xy, torch.zeros(self.num_envs, 1, device=self.device)], dim=-1)
         return quat_rotate_inverse(yaw_quat(self.base_quat_w), delta)[:, :2]
+
+    def base_target_pos_b(self) -> torch.Tensor:
+        """Desired base XY position relative to the current base (yaw-heading frame). HITTER actor obs."""
+        return self._target_xy_err_b(self.base_target_pos_w)
+
+    def station_anchor_err_b(self) -> torch.Tensor:
+        """R10c 站位锚误差(2 维,actor obs,station_obs 旗标):世界系常数锚点 − 当前 base XY,
+        旋进 yaw-heading base 系。与 Hitter 的 base_target_pos_b 同一套数学(见 _target_xy_err_b),
+        区别只在目标:这里是 reset 常数(env origin + 偏移 = 出生点),不是采样出来的奖励站位。
+        部署侧同 Hitter:mocap base 位置可算相对 Δ,掉 mocap 喂 Δ=0 优雅退化成"没漂"。"""
+        return self._target_xy_err_b(self.station_anchor_pos_w)
 
     # ------------------------------------------------------------------ #
     # Debug visualization (no-op stubs; targets are world-frame buffers).
@@ -2897,6 +2923,13 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # deployable from mocap base position (300 Hz, position-only) without any absolute world frame; if
     # mocap drops, feeding Δ=0 degrades gracefully to "already at station" (today's BASE-FREE behavior).
     base_couple_mode: str = "blend"
+
+    # --- R10c 站位锚(station_obs 旗标的数据源;franco 2026-07-09) ---------------------------------
+    # 世界系常数锚点相对 env origin 的 XY 偏移(米)。默认 (0,0) = 出生点本身(固定点阶段 clip 已
+    # 重落地,frame-0 root xy ≈ origin)。想把"该站的位置"挪开出生点时用它覆盖(如 S2b 身补课程)。
+    # 只喂观测 station_anchor_err_b,不进奖励;env 侧开关见 hope_env_cfg.station_obs / train.py
+    # racket.station_obs。
+    station_anchor_offset_xy: tuple[float, float] = (0.0, 0.0)
 
     # --- swing-type convention ---
     forehand_on_negative_y: bool = True  # right arm holds the paddle: target on -Y side -> forehand (+1)

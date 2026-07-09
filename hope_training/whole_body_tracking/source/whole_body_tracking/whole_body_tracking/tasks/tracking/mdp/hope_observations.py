@@ -7,6 +7,8 @@ quantities the planner provides at deploy time (HITTER actor observation, Table 
 * :func:`racket_target_vel_w`  — desired racket velocity in world frame (3)
 * :func:`time_to_strike`       — time remaining until strike (1)
 * :func:`base_target_pos_b`    — desired base XY position relative to base (2)
+* :func:`station_anchor_err_b` — world station anchor minus current base XY, base frame (2;
+  R10c station_obs flag, appended after the face channel = 179 -> 181)
 
 The desired racket *normal* and the *actual* racket state are privileged/critic-only or used by
 the reward; they are intentionally NOT in the HITTER actor observation (the racket is never sensed
@@ -120,6 +122,16 @@ def time_to_strike(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
 
 def base_target_pos_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     return _cmd(env, command_name).base_target_pos_b()
+
+
+def station_anchor_err_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """R10c 站位锚误差(2)——station_obs 旗标追加在 actor 观测尾部(179→181)。人话:世界系
+    常数锚点(出生点)减去当前 base XY,旋进 base 系;不小心漂移了这两个数自己变大,策略因此
+    始终有世界系位置基准(franco 07-09:"就算不需要移动,它也是一个锚")。语义 = jiayi Hitter
+    的 base_target_pos_b(+2 站位通道)同构物,数学共用 RacketTargetCommand._target_xy_err_b;
+    区别只在目标是 reset 常数而非采样站位。锚点常存在(buffer 无条件初始化),旗标关 = 不进
+    观测,契约逐位不变。"""
+    return _cmd(env, command_name).station_anchor_err_b()
 
 
 def swing_type(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
