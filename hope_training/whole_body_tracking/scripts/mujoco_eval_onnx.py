@@ -171,6 +171,15 @@ CONTRACT ALIGNMENT (2026-07-08, fixE retrial follow-up — both flags DEFAULT OF
                       "stand" for those arms. Both toggles were adjudicated harmless on a healthy
                       arm (fixC six-cell retrial: composite unchanged) and are exam-side only.
 
+STRIKING FACE (--mount-normal-sign-per-clip, 2026-07-09, franco 拍板"哪面拍子超前就是哪面"):
+  per-clip ±1 face-sign table (clip order). A unified fh+bh policy strikes with OPPOSITE paddle
+  faces; the legacy single-face (+Y) scoring pins the backhand face error at ~115-137° (the
+  M3b/CF-swap=1.000 signature). Flag ON scores each swing's REAL striking face — achieved normal
+  and the boxes-mode reference target normal both get the clip's sign (training
+  racket.mount_normal_sign_per_clip semantics); venue/bank demanded normals are untouched. Signs
+  are OFFLINE constants from the reference clip's contact frame (scripts/suggest_face_sign.py),
+  never the live paddle velocity. Default OFF = byte-identical to every booked score.
+
 SWITCH-STRESS (--switch-stress P, 2026-07-05; R11's missing benefit ruler): deploy-parity
   mid-swing clip-switch stress protocol for the training-like multiswing rollout. Each control
   step, with probability P, the reference clock aborts the swing exactly like the deploy runner
@@ -288,6 +297,21 @@ STRIKE_NORMAL_THRESH_DEG = 15.0           # deg strike_success_normal_thresh_deg
 # Racket face normal = local +Y axis of the racket frame (== wrist frame; mount_quat is identity).
 MOUNT_NORMAL_AXIS = 1
 MOUNT_NORMAL_SIGN = 1.0
+# 每 clip 击球面符号表(--mount-normal-sign-per-clip,2026-07-09 franco 拍板"哪面拍子超前就是哪面")。
+# 病根:统一正反手策略用拍子相反的两面击球(正手=红面/+Y,反手=黑面/−Y),判卷只按 +Y 单面算拍面
+# 误差会把反手钉在 ~115-137°(CF 换拍面=1.000 签名)。开表后判卷按该 clip 的实际击球面翻面再算:
+# 实测法向和(boxes 模式的)参考目标法向同乘该 clip 符号——和训练侧 mount_normal_sign_per_clip 同语义。
+# 符号是**离线固定常量**(参考 clip 触球帧的超前面,scripts/suggest_face_sign.py 算),绝不在运行时
+# 用当前拍速动态定——训练早期拍面可能整个反着,动态符号会把"反面"合法化。None(默认)= 全部 clip 用
+# 标量 MOUNT_NORMAL_SIGN,判卷行为与账上每一份成绩逐位一致。
+MOUNT_NORMAL_SIGN_PER_CLIP = None
+
+
+def face_sign_for_clip(clip_id):
+    """该 clip 击球面的符号。表没开(None,默认)= 标量 MOUNT_NORMAL_SIGN,现役判卷行为逐位不变。"""
+    if MOUNT_NORMAL_SIGN_PER_CLIP is None:
+        return MOUNT_NORMAL_SIGN
+    return MOUNT_NORMAL_SIGN_PER_CLIP[clip_id]
 WRIST_TRACKED_IDX = TRACKED_BODIES.index("right_wrist_yaw_Link")   # 13; racket frame == this body's frame
 CLIP_NAMES = {0: "forehand", 1: "backhand"}
 # --qdes-clamp soft-limit factor: Isaac ArticulationCfg soft_joint_pos_limit_factor (robots/
@@ -588,11 +612,13 @@ class MujocoRobot:
                                   self.racket_site, res, 0)  # flg_local=0 -> world frame; [ang(3), lin(3)]
         return res[3:6].copy()
 
-    def racket_normal_w(self):
+    def racket_normal_w(self, sign=None):
         # Actual racket face normal in world = local +Y axis of the racket(=wrist) frame.
         # site has identity orientation rel. to the wrist, so site_xmat == wrist world rotation.
+        # sign: 击球面符号覆盖(每 clip 常量,face_sign_for_clip);None = 标量 MOUNT_NORMAL_SIGN,
+        # 现役行为逐位不变。
         R = self.data.site_xmat[self.racket_site].reshape(3, 3)
-        return R[:, MOUNT_NORMAL_AXIS] * MOUNT_NORMAL_SIGN
+        return R[:, MOUNT_NORMAL_AXIS] * (MOUNT_NORMAL_SIGN if sign is None else float(sign))
 
     def foot_contact_frac(self):
         ncon = self.data.ncon
@@ -1257,7 +1283,10 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 vel_err = float(np.linalg.norm(act_vel_w - tgt_vel_w))
                 act_speed = float(np.linalg.norm(act_vel_w))
                 tgt_speed = float(np.linalg.norm(tgt_vel_w))
-                nrm = robot.racket_normal_w()
+                # 判卷按该 clip 的实际击球面取法向(离线常量表;表没开 = 现役单面行为逐位不变)。
+                # boxes 模式的参考目标法向在预计算处已同乘同一符号;venue/bank 的需求法向来自球/规划器,
+                # 不翻——翻的只是"我们给策略记分的那一面"。
+                nrm = robot.racket_normal_w(sign=face_sign_for_clip(clip))
                 tgt_nrm = racket.racket_target_normal_w
                 cos_a = float(np.clip(np.dot(nrm, tgt_nrm), -1.0, 1.0))
                 nrm_err_deg = math.degrees(math.acos(cos_a))
@@ -1771,6 +1800,21 @@ def main():
                         "Recommended ON for every new exam; the state is printed in the report "
                         "header either way (fixE retrial 2026-07-08: unflagged, the exam is the "
                         "only unclamped leg of train/deploy/eval).")
+    p.add_argument("--mount-normal-sign-per-clip", nargs="+", type=float, default=None,
+                   metavar="SIGN",
+                   help="per-clip striking-FACE sign table (one +1/-1 per --motion-files clip, in "
+                        "clip order; e.g. 1 -1 = forehand red/+Y face, backhand black/-Y face). "
+                        "Score each swing's REAL striking face (franco 2026-07-09 '哪面拍子超前就是"
+                        "哪面'): the achieved normal AND the boxes-mode per-clip reference target "
+                        "normal are both multiplied by the clip's sign before the face error — same "
+                        "semantics as training racket.mount_normal_sign_per_clip. Signs are OFFLINE "
+                        "per-clip constants from the reference clip's contact frame "
+                        "(scripts/suggest_face_sign.py), NEVER derived from the live paddle velocity "
+                        "at eval time. Default OFF = legacy single-face scoring, byte-identical to "
+                        "every score on the books. venue/bank demanded normals come from the "
+                        "ball/planner and are NOT flipped; a 179-D face-command model additionally "
+                        "sees the flipped reference normal in its obs tail (matches flag-ON "
+                        "training).")
     p.add_argument("--hold-ref", choices=["clip", "stand"], default="clip",
                    help="multiswing pre-swing HOLD reference semantics. 'clip' (default, legacy) = "
                         "freeze the windup frame's raw clip reference — what pre-2026-07-05 "
@@ -1806,7 +1850,21 @@ def main():
 
     # Apply eval-only overrides to the module globals BEFORE any precompute/rollout reads them.
     global STRIKE_PHASE_PER_CLIP, RACKET_POS_Z_RANGE, TERM_EE_POS_Z, POS_RANGE_PER_CLIP, VEL_RANGE_PER_CLIP
-    global TERM_ANCHOR_POS_Z, TERM_ANCHOR_ORI
+    global TERM_ANCHOR_POS_Z, TERM_ANCHOR_ORI, MOUNT_NORMAL_SIGN_PER_CLIP
+    if args.mount_normal_sign_per_clip is not None:
+        _signs = tuple(float(s) for s in args.mount_normal_sign_per_clip)
+        # fail-loud:符号表长度必须 = clip 数(照训练侧 _mount_signs_cfg / _strike_phases_cfg 先例),
+        # 符号只认 ±1 —— 静默截断/回退会让某个 clip 按错误的一面判分还不吭声。
+        if len(_signs) != len(args.motion_files):
+            raise SystemExit(f"[FATAL] --mount-normal-sign-per-clip has {len(_signs)} entries but "
+                             f"{len(args.motion_files)} motion file(s) were given — one striking-"
+                             f"face sign per clip, in --motion-files order.")
+        if any(s not in (1.0, -1.0) for s in _signs):
+            raise SystemExit(f"[FATAL] --mount-normal-sign-per-clip entries must be +1 or -1, "
+                             f"got {_signs}")
+        MOUNT_NORMAL_SIGN_PER_CLIP = _signs
+        print(f"[mj-sim2sim] OVERRIDE mount_normal_sign_per_clip -> {_signs} (判卷按每 clip 的实际"
+              f"击球面翻面再算拍面误差;eval-only,与训练 racket.mount_normal_sign_per_clip 同语义)")
     if args.strike_phase_per_clip is not None:
         STRIKE_PHASE_PER_CLIP = tuple(args.strike_phase_per_clip)
         print(f"[mj-sim2sim] OVERRIDE strike_phase_per_clip -> {STRIKE_PHASE_PER_CLIP} (eval-only)")
@@ -1991,12 +2049,16 @@ def main():
         print(f"[mj-sim2sim] clip {c} baked frame-0 pelvis yaw = {yaw0:+.1f} deg{flag}")
 
     # Per-clip TARGET paddle normal (unified uniform mode): the imitated swing's reference face normal
-    # at its strike frame = local +Y of the reference wrist(=racket) frame at strike_step.
+    # at its strike frame = local +Y of the reference wrist(=racket) frame at strike_step, times the
+    # per-clip striking-face sign (--mount-normal-sign-per-clip; 表没开 = 标量 MOUNT_NORMAL_SIGN,逐位
+    # 不变)。参考目标法向和实测法向同乘同一符号 = 训练侧 _ensure_reference_strike_state 同语义;boxes
+    # 模式下两边同翻,拍面误差数值不变,变化只出现在 venue/bank(需求法向来自球,不翻)。
     target_normal_per_clip = []
     for c in range(num_clips):
         strike_step = int(seg_start[c]) + int(round(STRIKE_PHASE_PER_CLIP[c] * (seg_len[c] - 1)))
         ref_wrist_quat = refs_table[strike_step]["body_quat_w"][WRIST_TRACKED_IDX]
-        target_normal_per_clip.append(mat_from_quat(ref_wrist_quat)[:, MOUNT_NORMAL_AXIS] * MOUNT_NORMAL_SIGN)
+        target_normal_per_clip.append(
+            mat_from_quat(ref_wrist_quat)[:, MOUNT_NORMAL_AXIS] * face_sign_for_clip(c))
     target_normal_per_clip = np.array(target_normal_per_clip)
 
     # 177-D hitter_footwork: per-clip reference base->racket reach offset (station coupling).

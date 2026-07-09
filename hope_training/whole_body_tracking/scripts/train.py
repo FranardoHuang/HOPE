@@ -236,6 +236,8 @@ _RACKET_KEYS = (
     "vel_x_range", "vel_y_range", "vel_z_range", "vel_range_per_clip",
     "base_target_x_range", "base_target_y_range",
     "normal_mode", "forehand_on_negative_y", "mount_normal_axis", "mount_normal_sign",
+    # 每 clip 击球面符号(正反手各用拍子固定的一面;空/缺省=标量 mount_normal_sign,现役行为不变)
+    "mount_normal_sign_per_clip",
     "target_mode", "ref_perturb_pos", "ref_perturb_vel", "ref_perturb_normal",
     "ref_perturb_curriculum_steps", "ref_perturb_curriculum_start", "ref_perturb_success_gated",
     "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "ref_vel_scale_by_motion",
@@ -829,6 +831,13 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(C, "forehand_on_negative_y", _get(rk, "forehand_on_negative_y"), _as_bool, applied, "racket_target")
             _set_attr(C, "mount_normal_axis", _get(rk, "mount_normal_axis"), int, applied, "racket_target")
             _set_attr(C, "mount_normal_sign", _get(rk, "mount_normal_sign"), float, applied, "racket_target")
+            # 每 clip 击球面符号(正手一面、反手另一面,franco"哪面超前就是哪面";顺序 = motion_file
+            # clip 顺序,同 strike_phase_per_clip)。缺省/空 -> 用上面的标量符号,现役行为逐位不变;
+            # 表长和 clip 数不匹配由 RacketTargetCommand._mount_signs_cfg 在环境侧当场报错。
+            _mnspc = _get(rk, "mount_normal_sign_per_clip")
+            if _mnspc is not None:
+                C.mount_normal_sign_per_clip = tuple(float(x) for x in _mnspc)
+                applied.append(f"racket_target.mount_normal_sign_per_clip={C.mount_normal_sign_per_clip}")
             # reference_perturbed target sampling (rank 5): couple targets to the reference swing.
             _set_attr(C, "target_mode", _get(rk, "target_mode"), str, applied, "racket_target")
             _set_vec3(C, "ref_perturb_pos", _get(rk, "ref_perturb_pos"), applied, "racket_target")
