@@ -140,11 +140,20 @@ racket:
   #      target = velocity direction (normal_mode below; paper §IV-C impact model).
   target_mode: hitter_pure
   normal_mode: velocity
-  base_target_x_range: [-0.10, 0.10]
+  # X-PLANE LOCKED (2026-07-08): station x FIXED at spawn (no ±0.10 wobble) — the robot reaches the
+  # fixed striking plane by ARM EXTENSION, not by lunging the base forward. Footwork is y-only. Was
+  # [-0.10, 0.10]. (Applied on a clean 5e975048 base; the x-drift termination is NOT included here.)
+  base_target_x_range: [0.0, 0.0]
   base_target_y_range: [-0.40, 0.40]
+  # STRIKING-PLANE x FIX (2026-07-08): was 0.70 — measured 0.16-0.22 m TOO FAR vs the demo racket
+  # (pingpang_red_Link body, the exact body the reward reads): demo strikes at rel-station world x
+  # = 0.484 (fh) / 0.542 (bh). 0.70 forced a forward lunge to reach it (the x-free lineage's drift;
+  # the x-locked policy can't lunge -> forward park + stalled composite). 0.51 = the demo midpoint
+  # so the racket reaches the plane with the base AT the station (no lean). Single value = x-locked
+  # single plane. Deploy: robot stands ~0.19 m CLOSER (station 0.33 -> ~0.52; ball plane 1.03 kept).
   pos_range_per_clip:
-    forehand: {x: [0.70, 0.70], y: [-0.65, -0.15], z: [0.67, 0.97]}
-    backhand: {x: [0.70, 0.70], y: [-0.05,  0.45], z: [0.88, 1.18]}
+    forehand: {x: [0.51, 0.51], y: [-0.65, -0.15], z: [0.67, 0.97]}
+    backhand: {x: [0.51, 0.51], y: [-0.05,  0.45], z: [0.88, 1.18]}
   vel_range_per_clip:
     forehand: {x: [1.05, 2.05], y: [ 0.96, 1.96], z: [0.31, 1.11]}
     backhand: {x: [1.61, 2.61], y: [-1.21, -0.21], z: [0.00, 0.71]}

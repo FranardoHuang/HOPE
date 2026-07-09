@@ -1,0 +1,170 @@
+# =============================================================================
+# HOPE ping-pong WBC (Agibot A3) — HITTER-PURE + RALLY heading recovery, V3 (2026-07-08).
+#
+# ⚠ WHY v3: v2 (run 2026-07-08_10-44-58, warm-resumed from 13200) COLLAPSED single-swing strike
+# composite 0.9931 -> 0.80 (bh 0.983 -> 0.71) and never recovered — it FAILED the cheapest gate.
+# A 4-angle design review (+ adversarial critique) sharpened the root cause well past "too many
+# terms":
+#   1. post_strike_brake is THE precision killer, via GAE — not yaw/heading. PROOF: model_18000
+#      collapsed 0.994 -> 0.866 with SQUARE stands, NO heading term, byte-identical strike reward —
+#      just brake 1.0 + hold_ready. Brake puts positive income on the swing FOLLOW-THROUGH; PPO/GAE
+#      back-props it into the swing ACTION and damps swing commitment (vel-pass 0.99 -> 0.92). v2's
+#      brake 0.3 = same channel. => brake MUST be 0.
+#   2. foot_orientation -0.8 ANTAGONIZES re-squaring: it penalizes hip_yaw deviation from the
+#      reference stand, and during a hold the reference IS the square stand — so it taxes exactly the
+#      hip_yaw motion needed to turn back to +x. => gate it OFF during holds (foot_orientation_hold_gate;
+#      swing-phase -0.8 discipline kept intact).
+#   3. The v2 recovery metric (base_heading_abs_at_swing_start) is DILUTION-BLIND — it averages over
+#      ~94% near-square wrap holds and reads ~0.05-0.10 whether recovery works or fails. => added the
+#      spawn-CONDITIONED heading_recovery_expiry_yaw (hope_commands.py) + a dedicated recovery eval.
+#      NOTE: Isaac does NOT reproduce the deploy 30-55 deg over-rotation (AGI-MuJoCo plant artifact),
+#      so the in-sim number is only a proxy; the load-bearing recovery gate is pp_gate3_rally.sh.
+#
+# STRATEGY (anti-forgetting, mechanistic — not "hope the gate catches it"):
+#   * brake 0, hold_ready 0 (both are hold-adjacent income that competes with the swing; hold_ready
+#     also pays for ZERO angular velocity = directly fights the turn).
+#   * hold_heading is the ONLY new recovery income; RAMP it small->target across stages (this file =
+#     STAGE 1 at 0.10).
+#   * foot_orientation kept -0.8 for swings but HOLD-GATED OFF (code: hope_rewards.foot_orientation_
+#     discipline hold_gate).
+#   * yaw CURRICULUM: start at the known-safe RSI band +-0.2 (base_13200 already tolerates it), ramp
+#     +-0.35 -> +-0.6 -> +-0.9 ONLY after the precision gate holds. NEVER start at +-0.9 (v2's error).
+#   * trust region (CLI, not this file): entropy_coef 0.015 -> ~0.006, keep desired_kl 0.01 — keeps the
+#     policy near the 0.9931 base while it acquires recovery (rsl_rl PPO has adaptive-KL only).
+#   * episode 10 s (v2's 16 s dilutes the strike batch).
+#
+# WARM RESUME (strict) from model_13200_footfix08:
+#   logs/rsl_rl/agibot_a3_hope_hitter_pure/2026-07-07_22-31-59_footfix/model_13200.pt
+#
+# GATES (order = cheapest first; a candidate must clear ALL):
+#   G1 precision (HARD, the v2 killer — check FIRST, every ~200 iters):
+#     eval_deterministic task=HOPEPingPongHitterPure noise_scales=0.0 num_envs=256
+#     -> composite >= 0.95 AND backhand >= 0.93 AND pre_strike_fall_rate <= 0.02.
+#     Roll back to the last passing checkpoint on failure (2-eval grace vs the resume value-refit dip).
+#   G2 recovery (in-sim proxy): the DEDICATED recovery eval (scripts/pp_recovery_eval.sh) —
+#     stand_start_prob=1.0, yaw +-0.9, short episode -> heading_recovery_expiry_yaw << spawn AND < ~0.30.
+#   G3 recovery (REAL, decisive): pp_gate3_rally.sh PP_EXTRA_ARGS="--vel-box-center" -> rescues == 0.
+#
+# Reuses the SAME gym_task/env-cfg as HOPEPingPongHitterPureRally (identical 110-D hitter_pure
+# contract, boxes, terminations, DR). Every value below OVERRIDES the v2 __post_init__ default.
+# =============================================================================
+
+name: HOPEPingPongHitterPureRallyV3
+gym_task: HOPE-PingPong-HitterPureRally-AgibotA3-v0
+experiment_name: agibot_a3_hope_hitter_pure_rally_v3
+actor_obs_contract: hitter_pure
+
+registry_name: ${oc.env:WANDB_REGISTRY_ORG,dongc_1-university-of-california-berkeley-org}/wandb-registry-motions/hope_forehand
+registry_name_2: ${oc.env:WANDB_REGISTRY_ORG,dongc_1-university-of-california-berkeley-org}/wandb-registry-motions/hope_backhand
+
+defaults:
+  - /base/env_base@_here_
+  - /base/sim_base@_here_
+  - /base/randomization_base@_here_
+  - _self_
+
+env:
+  # v3: 10 s (v2 used 16 — the longer episode dilutes the strike batch).
+  episode_length_s: 10.0
+
+# ---- swing-entry structure (MotionCommand) -----------------------------------
+motion:
+  wrap_teleport: false
+  # v3: 0.25 (v2 0.35). Enough yawed-stand data without over-weighting non-striking experience.
+  stand_start_prob: 0.25
+  # v3: 50 (v2 25) — yawed stand starts get >=1.0 s to re-square before the clip arms.
+  stand_start_min_hold: 50
+  # v3 STAGE 1 HEADING DR: +-0.2 rad (+-11 deg) == the RSI band base_13200 already tolerates, so
+  # Stage 1 is in-distribution and precision-safe. Ramp in later stages (see the runbook), NEVER
+  # start at +-0.9 (v2's flat +-0.9-from-iter-0 was the OOD hit).
+  stand_start_yaw_range: [-0.35, 0.35]
+  # 0.5-2.5 s recovery hold at every wrap+reset — required so in_hold=True exists for hold_heading.
+  hold_steps_range: [25, 125]
+  post_swing_start_prob: 0.0
+  clip_switch_prob: 0.0
+
+# ---- reward weights / kernel std ---------------------------------------------
+# Strike block = the 0.9931 HitterPure base, BYTE-IDENTICAL (do not touch — this is the precision).
+rewards:
+  racket_position_weight: 14.0
+  racket_position_std: 0.15
+  racket_velocity_weight: 14.0
+  racket_velocity_std: 0.6
+  racket_normal_weight: 5.0
+  racket_normal_std: 0.30
+  base_position_weight: 2.0
+  base_position_std: 0.20
+
+  # --- rally recovery income (the ONLY departure from the precision base) ---
+  # v3: brake 0.0 (v1/v2 killer — brake income back-props into the swing via GAE and damps commitment).
+  post_strike_brake_weight: 0.0
+  post_strike_brake_std: 0.5
+  # v3: hold_ready 0.0 (it pays for ZERO angular velocity = fights the re-squaring turn; and is
+  # hold-adjacent income the swing must not see). Recovery is hold_heading's job alone.
+  hold_ready_weight: 0.0
+  hold_ready_std: 1.5
+  hold_ready_reach: 0.30
+  hold_ready_reach_mode: station
+  # v3 STAGE 1: hold_heading = the one recovery term, RAMPED. 0.10 now; -> 0.30 -> 0.50 as yaw widens
+  # (runbook). std 0.6 keeps slope ~1/rad across the injected band (0.35 is gradient-dead there).
+  hold_heading_weight: 1
+  hold_heading_std: 0.6
+
+  # foot discipline: keep -0.8 for SWINGS (the 13200 toe-in fix this lineage depends on) but HOLD-GATE
+  # it OFF (code: foot_orientation_discipline hold_gate) so it stops taxing the hip-yaw re-squaring.
+  foot_orientation_weight: -0.8
+  foot_orientation_hold_gate: true
+
+  # regularization (unchanged from the base)
+  joint_torques_weight: -0.00003
+  action_rate_weight: -0.10
+  joint_limit_weight: -10.0
+  undesired_contacts_weight: -0.1
+
+# ---- target sampling: identical to HOPEPingPongHitterPure / v2 (unchanged) ----
+racket:
+  target_mode: hitter_pure
+  normal_mode: velocity
+  # X-PLANE LOCKED (2026-07-08, mirrors HOPEPingPongHitterPure.yaml): station x FIXED at spawn —
+  # the drift-then-fall in the G3 rally was the absence of this lock. Footwork is y-only.
+  base_target_x_range: [0.0, 0.0]
+  base_target_y_range: [-0.40, 0.40]
+  pos_range_per_clip:
+    forehand: {x: [0.70, 0.70], y: [-0.65, -0.15], z: [0.67, 0.97]}
+    backhand: {x: [0.70, 0.70], y: [-0.05,  0.45], z: [0.88, 1.18]}
+  vel_range_per_clip:
+    forehand: {x: [1.05, 2.05], y: [ 0.96, 1.96], z: [0.31, 1.11]}
+    backhand: {x: [1.61, 2.61], y: [-1.21, -0.21], z: [0.00, 0.71]}
+
+  strike_phase: 0.47
+  strike_phase_per_clip: [0.47, 0.333]
+  strike_window_s: 0.12
+  strike_success_pos_thresh: 0.075
+  clean_reference_strike_velocity: true
+  clean_strike_vel_window: 2
+
+  forehand_on_negative_y: true
+  mount_normal_axis: 1
+  mount_normal_sign: 1.0
+  mount_normal_sign_per_clip: [1.0, -1.0]
+
+  achieved_target_mix_prob: 0.0
+  adaptive_sigma: false
+
+  # A1 latency/degradation knobs: ALL OFF (identical to Pure).
+  target_delay_steps: 0
+  target_jitter_pos_per_s: 0.0
+  target_jitter_vel_per_s: 0.0
+  target_noise_white: 0.0
+  target_noise_ar1_sigma: 0.0
+  target_noise_ar1_rho: 0.717
+  target_dropout_prob: 0.0
+  target_post_strike_dropout_s: 0.0
+  target_bias_per_swing: 0.0
+  midswing_resample_prob: 0.0
+  midswing_resample_tts_floor: 0.3
+
+# ---- domain randomization (identical to Pure) --------------------------------
+domain_rand:
+  link_mass_range: [0.85, 1.15]
+  pd_gain_range: [0.85, 1.15]

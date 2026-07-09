@@ -328,6 +328,18 @@ termination. **PASS = falls 0, completion 1.0 per clip, high composite.**
 > 12000–12400 window (all clustered 0.982–0.994; it won on composite AND lowest fall rate). TODO:
 > finish the `mujoco_eval_onnx.py` 110-D branch so the cross-sim deploy-faithful gate also runs here.
 >
+> **[x-LOCKED generation, 2026-07-08] The task itself is now x-plane-locked** —
+> `HOPEPingPongHitterPure.yaml` (+ the mirrored env-cfg default) pins `base_target_x_range: [0,0]`,
+> so the station x is FIXED at spawn and the absolute striking plane no longer wobbles ±0.10 (it now
+> equals the deploy planner's fixed `x_hit=1.03` exactly — a train↔deploy alignment fix, not just a
+> constraint). The G1 command above is UNCHANGED (it inherits the lock), but two things change:
+> * baseline sanity: `model_13200_footfix08` scores **0.9935** on the locked task with zero
+>   retraining (fh 0.998 / bh 0.990) — the lunge was never load-bearing for striking.
+> * NEW x-lock criteria for x-locked candidates (report rows already in `eval_deterministic`):
+>   `base_drift_fwd_per_swing` ≤ **0.03 m** (was ~0.10 tolerance in the x-free world) and
+>   `base_dist_from_origin` tail-mean ≤ **0.20 m**; watch `base_pos_error_x` ≪ `base_pos_error_y`
+>   (the x-locked / y-footwork signature). Footwork budget lives in y ONLY (station y ±0.40).
+>
 > The 177/175 MuJoCo gate below is retained for those generations:
 
 ```bash
@@ -577,6 +589,21 @@ semantics: §9.6.
 > two-plus. The durable fix is the rally/hold retrain done RIGHT (station-anchored hold + heading
 > restoration + post-strike brake — model_18000's regression shows it must be a careful warm
 > resume, not a from-scratch rerun).
+>
+> **[x-LOCKED generation, 2026-07-08 — the retrain rider above is being executed, and this gate's
+> PASS bar changes with it.]** Progress so far: (a) HEADING solved in training — `hold_heading=1.0`
+> (hold-gated, GAE-safe; NOT post_strike_brake, which is the proven precision killer) taught
+> self-squaring; `model_15500_rallyv3` ran this gate with **0 rescues** (engages self-cleared, no
+> `yawed` re-stands). (b) That unmasked FORWARD DRIFT as the next blocker: with nobody re-standing
+> the robot, base-x creep accumulates — 3-run evidence: drift 2.37 m → FELL, 1.49 m → FELL,
+> 0.38 m → survived. Root cause: the task never locked the x-plane (station x wobbled ±0.10, soft
+> symmetric base_position, no x termination). Now fixed at the SOURCE (x-locked task yamls) and the
+> x-locked RallyV3 retrain (warm from 13200) is the candidate pipeline.
+> **PASS bar for x-locked candidates on this gate:** falls == 0 **AND rescues == 0** (no operator
+> re-stands — heading recovery is trained now, so a rescue is a regression) **AND station drift ≤
+> ~0.4 m over 12 serves** (the measured fall threshold sits ≥ 1.5 m; 0.38 m survived; the certified
+> 13200 run drifted 0.15 m) **AND every engaged swing completes + recovers**. Return rate remains
+> reported-not-gated while `--vel-box-center` trades aim for in-band velocities.
 
 Closed-loop VERIFIED 2026-07-04 (§9.6 status); re-verified
 2026-07-06 with the PRIOR 177-D baseline `model_17400_hitter177` on the full serve sweep:

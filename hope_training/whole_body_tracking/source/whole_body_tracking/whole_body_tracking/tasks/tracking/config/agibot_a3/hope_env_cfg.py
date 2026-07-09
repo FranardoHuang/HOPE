@@ -1093,15 +1093,20 @@ class HOPEPingPongHitterPureAgibotA3EnvCfg(HOPEPingPongAgibotA3EnvCfg):
         C.achieved_target_mix_prob = 0.0  # no HER in the paper
         # Independent STATION box (world xy around the env origin; paper Fig. 4 goes to ±0.75-0.8 m —
         # start at ±0.40 = the proven trained band, widen on resume once arrival is established).
-        C.base_target_x_range = (-0.10, 0.10)
+        # X-PLANE LOCKED (2026-07-08): station x FIXED at spawn — mirrors HOPEPingPongHitterPure.yaml.
+        C.base_target_x_range = (0.0, 0.0)
         C.base_target_y_range = (-0.40, 0.40)
         # STATION-RELATIVE racket boxes: x = the FIXED striking plane (blade reach of both clips
         # ≈ 0.70 m in front of the commanded station), y = per-swing non-overlapping bands centered
         # on each clip's natural lateral reach (fh −0.409 / bh +0.185), z = absolute height bands
         # centered on each clip's blade strike height (fh 0.82 / bh 1.03), half-width 0.15.
+        # STRIKING-PLANE x FIX (2026-07-08): x 0.70 -> 0.51 (mirrors HOPEPingPongHitterPure.yaml).
+        # 0.70 was 0.16-0.22 m TOO FAR vs the demo racket (pingpang_red_Link rel-station world x =
+        # 0.484 fh / 0.542 bh), which forced the forward lunge/lean. 0.51 = demo midpoint so the
+        # racket reaches the plane with the base AT the locked station.
         C.racket_pos_range_per_clip = (
-            ((0.70, 0.70), (-0.65, -0.15), (0.67, 0.97)),  # forehand
-            ((0.70, 0.70), (-0.05, 0.45), (0.88, 1.18)),   # backhand
+            ((0.51, 0.51), (-0.65, -0.15), (0.67, 0.97)),  # forehand
+            ((0.51, 0.51), (-0.05, 0.45), (0.88, 1.18)),   # backhand
         )
         # Blade-replaned per-clip velocity boxes (world frame, 2026-07-02 lineage).
         C.racket_vel_range_per_clip = (

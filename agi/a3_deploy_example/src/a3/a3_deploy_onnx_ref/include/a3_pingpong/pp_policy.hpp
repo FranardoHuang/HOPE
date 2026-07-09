@@ -1048,14 +1048,17 @@ class PpPolicy {
         // (last swing side = the side the hold tts clamp already assumes): plane_x +
         // y-band center at the anchor, z-band mid height, trained box-center velocity
         // (the frozen streamed vel could be out-of-band — it is what the LAST swing flew).
-        const Vec4 base_yaw = yaw_quat(st.base_quat_w);
+        // Offset in WORLD axes, deliberately NOT rotated by the base yaw (2026-07-08 review):
+        // training's hold target is world-fixed (station + the +x plane offset in WORLD),
+        // and the engage-side station derivation already uses world-frame reach offsets.
+        // Rotating by the live yaw would make the target ORBIT the station while a yawed
+        // robot re-squares — an obs the (rally2-)trained recovery never sees.
         const int hc = clip_id_from_swing_sign(swing_dir_.load() >= 0 ? 1.0 : -1.0);
         const Vec2 anchor_xy = hold_station_set_
             ? hold_station_w_
             : Vec2(st.base_pos_w[0], st.base_pos_w[1]);  // pre-anchor tick / dropout
-        const Vec3 off = quat_rotate(
-            base_yaw, Vec3(reach_offset_clip_[hc][0], reach_offset_clip_[hc][1], 0.0));
-        tg.pos_w = Vec3(anchor_xy[0] + off[0], anchor_xy[1] + off[1],
+        tg.pos_w = Vec3(anchor_xy[0] + reach_offset_clip_[hc][0],
+                        anchor_xy[1] + reach_offset_clip_[hc][1],
                         0.5 * (hp_z_band_[hc][0] + hp_z_band_[hc][1]));
         tg.vel_w = cfg_.racket_vel_w_clip[hc];
       } else {                  // idle/rest (incl. before the first engage) -> base-anchored hold
