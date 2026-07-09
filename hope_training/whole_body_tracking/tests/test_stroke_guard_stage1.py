@@ -322,12 +322,12 @@ def test_bank_audit_missing_clip_entry_fails_loud(tmp_path):
 
 
 # ------------------------------------------------------------------ CLI defaults -- #
-def test_cli_default_is_stats_and_off_is_available():
-    """v1 拍板: 默认 = stats (统计不拦), enforce 必须显式传, off 可关闭."""
+def test_cli_default_is_enforce_and_off_is_available():
+    """franco 07-10 拍板: 默认 = enforce (六卷实测 0 拦=零代价), stats/off 可显式退."""
     import argparse
     src = (Path(_SCRIPTS) / "gen_stage1_questions.py").read_text()
-    assert '"--stroke-guard", choices=("off", "stats", "enforce"), default="stats"' in src
+    assert '"--stroke-guard", choices=("off", "stats", "enforce"), default="enforce"' in src
     # argparse-level double check via a scratch parser mirroring main()'s declaration
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stroke-guard", choices=("off", "stats", "enforce"), default="stats")
-    assert ap.parse_args([]).stroke_guard == "stats"
+    ap.add_argument("--stroke-guard", choices=("off", "stats", "enforce"), default="enforce")
+    assert ap.parse_args([]).stroke_guard == "enforce"
