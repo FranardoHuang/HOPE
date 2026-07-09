@@ -45,6 +45,10 @@ echo "      station = 1.03-0.70 = spawn; no adaptive plane-chase feedback) + PER
 echo "      (fh land_y +0.70 dtf 0.40 / bh land_y -0.30 dtf 0.35 = offline-solved so the"
 echo "      demanded racket vels sit INSIDE the trained per-clip boxes, 10/10 sweep serves;"
 echo "      a single aim can only satisfy one side's trained cross-court direction)"
+# ⚠ hope_planner.sim.yaml sets x_hit_follow_robot:=true (legacy follow). The `-p
+#   x_hit_follow_robot:=false` below OVERRIDES it by POSITION — rcl merges --params-file and -p
+#   last-wins in command-line order. KEEP the -p AFTER both --params-file lines; if a --params-file
+#   that sets true is ever appended after this -p, follow-mode silently re-enables = drift-fall.
 setsid bash -c "source /opt/ros/jazzy/setup.bash 2>/dev/null; source $WS/install/local_setup.bash 2>/dev/null; ros2 run hope_planner hope_planner_node --ros-args \
   --params-file $WS/src/hope_planner/config/hope_planner.yaml \
   --params-file $WS/src/hope_planner/config/hope_planner.sim.yaml \

@@ -16,7 +16,9 @@ hope_planner:
     # actual robot placement disagree.
     # STATIC FALLBACK ONLY when robot_pose_topic is empty / silent (see below).
     x_hit: 0.17
-    # --- ADAPTIVE hit plane (2026-07-04, REQUIRED for multi-swing rallies) ---
+    # --- ADAPTIVE hit plane (2026-07-04, REQUIRED for the current 175/177 multi-swing rallies) ---
+    # HitterPure/x-locked policies must instead load hope_planner.hitter_pure.yaml, which sets
+    # x_hit_follow_robot=false. Keep that model-specific semantic out of this shared default.
     # The trained policy WALKS to the strike (lunge ~0.5-0.8 m); with a static plane the
     # robot ends standing ON it and every later plan is unreachable (one swing per
     # session, Gate 3 finding). With the robot pose feed:

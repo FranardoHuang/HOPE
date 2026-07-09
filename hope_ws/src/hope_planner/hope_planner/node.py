@@ -122,11 +122,15 @@ class HOPEPlannerNode(Node):
         # HITTER-PURE decoupling (2026-07-07): the paper's virtual hit plane is FIXED (§IV-B,
         # x = -1.37 m table frame) and the ROBOT walks to a commanded station behind it (Fig. 4);
         # the adaptive plane above inverts that causality (plane chases the robot -> the
-        # documented "+x march"). For the 110-D hitter_pure deploy profile set this FALSE:
+        # documented "+x march"). For the 110-D hitter_pure deploy profile keep this FALSE:
         # robot_pose_topic keeps feeding /a3/base_pose_flat (the runner needs the live base),
         # but x_hit stays the static parameter and the runner derives the station from the
-        # target (station_x = x_hit - 0.70, the trained plane offset). Default TRUE = legacy
-        # behavior for the 175/177 lineages.
+        # target (station_x = x_hit - 0.70, the trained plane offset).
+        #
+        # Keep the shared default TRUE for the current 175/177 multi-swing runtime. The
+        # 110-D x-locked HitterPure profile must load hope_planner.hitter_pure.yaml, which
+        # explicitly sets this FALSE. Plane semantics are therefore part of the model contract,
+        # not a global default that can silently change an already-deployed policy.
         self.declare_parameter("x_hit_follow_robot", True)
         # --- FLAT outputs for the AGI native C++ runner (--planner, the ONLY control path) ---
         # The C++ a3_deploy_onnx_ref_pingpong subscribes std_msgs/Float64MultiArray (it avoids
@@ -297,14 +301,16 @@ class HOPEPlannerNode(Node):
 
             self.create_subscription(PoseStamped, robot_pose_topic, _robot_pose_cb, mocap_qos)
             if self._x_hit_follow_robot:
-                self.get_logger().info(
-                    f"adaptive x_hit ON: robot pose from '{robot_pose_topic}', "
+                self.get_logger().warning(
+                    f"adaptive x_hit ON (FOLLOW-MODE): robot pose from '{robot_pose_topic}', "
                     f"x_hit = clamp(robot_x + {self._x_hit_offset:.2f}, "
-                    f"[{self._x_hit_min:.2f}, {self._x_hit_max:.2f}])")
+                    f"[{self._x_hit_min:.2f}, {self._x_hit_max:.2f}]). "
+                    "Required by current 175/177 rallies; incompatible with HitterPure/x-locked "
+                    "policies, which must load hope_planner.hitter_pure.yaml.")
             else:
                 self.get_logger().info(
-                    f"x_hit FIXED at {config.x_hit:.2f} (hitter_pure profile, paper §IV-B); "
-                    f"robot pose from '{robot_pose_topic}' feeds the base flat only")
+                    f"x_hit FIXED at {config.x_hit:.2f} (x-locked / hitter_pure profile, paper "
+                    f"§IV-B); robot pose from '{robot_pose_topic}' feeds the base flat only")
 
         # Diagnostics at 10 Hz.
         self._n_received = 0

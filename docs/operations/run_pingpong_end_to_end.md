@@ -1055,11 +1055,16 @@ export ROS_LOCALHOST_ONLY=0                  # ⚠ the HDU login env sets 1 → 
 2. **Planner sanity** — on the **HDU** (`ROS_DOMAIN_ID=232`, no robot motion); it receives `/P1/pose`+`/ball`
    from the laptop bridge over domain 232 and republishes the flats to the MDU:
    ```bash
-   ros2 run hope_planner hope_planner_node --ros-args --params-file hope_planner.yaml \
+   ros2 run hope_planner hope_planner_node --ros-args \
+     --params-file src/hope_planner/config/hope_planner.yaml \
+     --params-file src/hope_planner/config/hope_planner.hitter_pure.yaml \
      -p robot_pose_topic:=/P1/pose -p marker_to_base_xyz:="[<G8 values>]"
+   # ⚠ hitter_pure.yaml = FIXED plane (x_hit_follow_robot:=false, x_hit 0.20) — same as the armed
+   #   deploy (§9.7). Startup log MUST read "x_hit FIXED", NOT "FOLLOW-MODE" (follow-mode deletes
+   #   the x anchor for the x-locked policy → drift-fall). Needs a rebuilt install (see note below).
    ros2 topic hz /racket/command_flat /a3/base_pose_flat   # both alive
    ros2 topic echo /racket/command_flat  # data[1]=1.0 (valid) on good serves,
-                                         # data[3] (px) inside [0.0,0.35],
+                                         # data[3] (px) ≈ constant x_hit 0.20 (FIXED plane, not a range),
                                          # data[9] (tts) counting down 2.0 → 0
    ```
 3. **G2 gate — the ros2 plugin loads** (first run of the binary; publishes nothing):
@@ -1412,8 +1417,14 @@ echo $ROS_DOMAIN_ID $ROS_LOCALHOST_ONLY    # ⚠ MUST print "232 0" BEFORE start
                                            # the runner spams "[pp EXT-BASE] NO FRESH mocap base sample"
 ros2 run hope_planner hope_planner_node --ros-args \
   --params-file ~/hope_ws/src/hope_planner/config/hope_planner.yaml \
+  --params-file ~/hope_ws/src/hope_planner/config/hope_planner.hitter_pure.yaml \
   -p robot_pose_topic:=/P1/pose \
   -p marker_to_base_xyz:="[0.0, 0.0, 0.0]"     # G8: marker→base_link offset ([0,0,0] ok if cluster on the pelvis)
+# ⚠ hope_planner.hitter_pure.yaml = FIXED plane (x_hit_follow_robot:=false, x_hit 0.20). MANDATORY
+#   for the x-locked HITTER: follow-mode chases the robot, deletes the obs x-anchor, and the policy
+#   drifts +x until it FALLS. The shared base profile deliberately retains follow-mode for 175/177;
+#   load this overlay to select both HitterPure's fixed-plane semantics and venue x_hit/offset.
+#   Startup log MUST read "x_hit FIXED".
 ```
 **MANDATORY verify** in a 2nd HDU shell (also `export ROS_DOMAIN_ID=232` + `export ROS_LOCALHOST_ONLY=0`)
 — do NOT arm the robot until both pass:
@@ -1527,8 +1538,12 @@ export ROS_LOCALHOST_ONLY=0
 pkill -f "hope_planner_nod[e]"; sleep 2
 ros2 run hope_planner hope_planner_node --ros-args \
   --params-file ~/hope_ws/src/hope_planner/config/hope_planner.yaml \
+  --params-file ~/hope_ws/src/hope_planner/config/hope_planner.hitter_pure.yaml \
   -p robot_pose_topic:=/P1/pose \
   -p marker_to_base_xyz:="[0.0, 0.0, 0.0]"
+# ⚠ hope_planner.hitter_pure.yaml = FIXED plane (x_hit_follow_robot:=false). MANDATORY for the
+#   x-locked HITTER: follow-mode chases the robot, deletes the obs x-anchor, and causes drift-fall.
+#   Startup log MUST read "x_hit FIXED", not "FOLLOW-MODE".
 ```
 
 **Terminal C — MDU (HAL). ⚠ robot MUST be hoisted/supported BEFORE the first line. Leave running.**
@@ -1570,7 +1585,8 @@ taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --official-stand \
 | sync + parity | hope | `agi/a3_deploy_example` | `bash scripts/sync_pingpong_model.sh <onnx> <name>` |
 | build x86 / rockchip | hope / HOST | same | `bash scripts/build_a3_deploy_pkg.sh --arch x86_64\|rockchip --runtime-cfg ...pingpong.yaml` |
 | AGI sim policy-only | hope | same | `bash scripts/pp_freebase_watch.sh --single-swing [--oracle-pelvis]` |
-| AGI sim + planner loop (Gate 3) | hope | same | `bash scripts/pp_planner_closedloop.sh` — one command; viewer variant also in §7 |
+| AGI sim rally **Gate 3 (x-locked 110-D)** | hope | same | `bash scripts/pp_gate3_rally.sh` — FIXED plane (`-p x_hit_follow_robot:=false`), continuous rally, per-serve verdicts. **Use this for any x-locked / 110-D hitter_pure ONNX.** |
+| AGI sim + planner loop (**follow-mode, 175/177 only**) | hope | same | `bash scripts/pp_planner_closedloop.sh` — adaptive plane required by the current 175/177 rally. ⚠ Do NOT run an x-locked ONNX through this: follow-mode deletes the x anchor → drift-fall (the planner logs a `FOLLOW-MODE` compatibility warning). Viewer variant in §7. |
 | landing analysis (§7.5) | host | `hope_ws/src/hope_planner` | `python3 -m hope_planner.landing_mc` — on-table % from a checkpoint's exact errors (champion ≈ 98%; training thresholds only 67%) |
 | mocap + planner sanity (arena) | **HDU** (dom 232) | `~/hope_ws` | `export ROS_DOMAIN_ID=232` + `avatar_pro_hope_bridge.launch.py server:=192.168.10.100` + `hope_planner_node` (§9.2 steps 1-2; libVRPN + mocap route pending) |
 | ship to robot | host→MDU | `agi/a3_deploy_example` | `rsync ... dist/a3_deploy_rockchip/ agi@10.42.10.12:/agibot/a3_deploy/` |

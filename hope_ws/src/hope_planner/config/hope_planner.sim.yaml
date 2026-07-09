@@ -21,8 +21,11 @@ hope_planner:
     # softer returns: keeps the demanded racket speed near the trained ~2.2 m/s envelope
     delta_t_flight: 0.7
     # ADAPTIVE hit plane from the sim ground-truth pelvis pose (sim world == table frame).
-    # After the walk-and-strike lunge the robot stands AT the old plane; tracking the
-    # robot keeps subsequent serves reachable (multi-swing rally).
+    # This is the current 175/177 multi-swing profile: after the lunge the robot stands at
+    # the old plane, so following the robot keeps later serves reachable. The 110-D
+    # HitterPure gate overrides this with x_hit_follow_robot:=false; do not use follow-mode
+    # with an x-locked policy because it hides the policy's own x drift.
+    x_hit_follow_robot: true
     robot_pose_topic: "/sim/a3/pelvis_pose"
     x_hit_offset: 0.67
     # clamp = the training-box regime: pin the plane inside a fixed window so post-lunge

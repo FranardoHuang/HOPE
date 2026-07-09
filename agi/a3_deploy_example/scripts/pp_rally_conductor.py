@@ -101,8 +101,10 @@ def xy():
 
 
 def reset():
-    # Keyframe stand at x=0.33: the adaptive plane (robot_x + x_hit_offset 0.70) then sits
-    # at ~1.03 where the sweep serves' post-bounce arcs cross at trained heights.
+    # Keyframe stand at x=0.33: the FIXED plane x_hit=1.03 (pp_gate3_rally.sh forces
+    # x_hit_follow_robot:=false; station = 1.03 - 0.70 = 0.33 = this spawn) is where the sweep
+    # serves' post-bounce arcs cross at trained heights. (Legacy note: the old follow-mode plane
+    # sat at robot_x + x_hit_offset 0.70 ≈ 1.03 — same number, but it CHASED the robot.)
     m = SimReset()
     m.mode = 1
     m.keyframe_id = 0
