@@ -177,15 +177,51 @@ DEPLOY_PARITY_STATION181 = ActorObservationContract(
     ),
 )
 
+HITTER_PURE = ActorObservationContract(
+    name="hitter_pure",
+    obs_mode="hitter_pure",
+    total_dim=110,
+    terms=(
+        # HITTER (arXiv:2508.21043) Table I EXACT structure, sized for the A3's 31 joints:
+        # proprioception + goal ONLY. The 62-D reference joint stream is CRITIC-ONLY in the paper
+        # (and here); swing_type is not observed anywhere (deploy infers fh/bh outside the policy,
+        # §V-B-3). Target vectors are WORLD-frame with the explicit base forward vector e_base,x.
+        ActorObservationTerm("base_ang_vel", 3, "imu", "pelvis angular velocity in the body frame"),
+        ActorObservationTerm("joint_pos", 31, "encoders", "joint position offset from default"),
+        ActorObservationTerm("joint_vel", 31, "encoders", "joint velocities"),
+        ActorObservationTerm("actions", 31, "runtime_state", "previous policy action"),
+        ActorObservationTerm("projected_gravity", 3, "imu", "gravity direction in the base frame"),
+        ActorObservationTerm(
+            "base_forward_xy", 2, "imu_yaw_aligned", "base forward unit vector e_base,x (world xy)"
+        ),
+        ActorObservationTerm(
+            "base_target_delta_xy",
+            2,
+            "planner_plus_mocap",
+            "target base position minus current base position, world xy (Δ=0 on mocap dropout)",
+        ),
+        ActorObservationTerm(
+            "racket_target_rel_base",
+            3,
+            "planner_plus_mocap",
+            "target racket position relative to the base, world frame",
+        ),
+        ActorObservationTerm("racket_target_vel_w", 3, "planner", "desired racket velocity in the world frame"),
+        ActorObservationTerm("time_to_strike", 1, "reference_clock", "time remaining until strike"),
+    ),
+)
+
 CONTRACTS = {
     FULL.name: FULL,
     DEPLOY_PARITY.name: DEPLOY_PARITY,
     DEPLOY_PARITY_FACE179.name: DEPLOY_PARITY_FACE179,
     DEPLOY_PARITY_STATION181.name: DEPLOY_PARITY_STATION181,
     HITTER_FOOTWORK.name: HITTER_FOOTWORK,
+    HITTER_PURE.name: HITTER_PURE,
     FULL.obs_mode: FULL,
     DEPLOY_PARITY.obs_mode: DEPLOY_PARITY,
     HITTER_FOOTWORK.obs_mode: HITTER_FOOTWORK,
+    HITTER_PURE.obs_mode: HITTER_PURE,
     **{alias: DEPLOY_PARITY for alias in DEPLOY_PARITY.legacy_names},
 }
 
@@ -225,7 +261,14 @@ def total_policy_dim_from_env(env) -> int:
 def infer_actor_observation_contract(env) -> ActorObservationContract | None:
     layout = policy_layout_from_env(env)
     total_dim = total_policy_dim_from_env(env)
-    for contract in (FULL, DEPLOY_PARITY, HITTER_FOOTWORK):
+    for contract in (
+        FULL,
+        DEPLOY_PARITY,
+        HITTER_FOOTWORK,
+        DEPLOY_PARITY_FACE179,
+        DEPLOY_PARITY_STATION181,
+        HITTER_PURE,
+    ):
         if layout == contract.layout and total_dim == contract.total_dim:
             return contract
     return None

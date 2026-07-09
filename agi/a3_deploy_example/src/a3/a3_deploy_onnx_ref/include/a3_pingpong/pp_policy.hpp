@@ -196,6 +196,21 @@ struct PpPolicyConfig {
   double gate_y_abs = 0.85;
   double gate_z_lo = 0.55, gate_z_hi = 1.40;
   double gate_speed_max = 3.5;
+  // ============== 110-D hitter_pure additions (2026-07-07, HITTER-paper deploy) =============
+  // The 110 engage gate is METADATA-driven (per-clip z bands + station geometry from the
+  // ONNX hitter_pure boxes), replacing the fixed base-relative box above. These bound the
+  // remaining free parameters:
+  double gate_station_step_max = 0.85;  // max |derived station − current base| xy (m); trained
+                                        // stations span ±0.40 vs spawn and up to ~0.8 m between
+                                        // consecutive swings (paper Fig. 4 goes to ±0.75-0.8)
+  double gate_z_margin = 0.05;          // slack around the per-clip trained z band (m)
+  // STREAM-until-contact (paper Fig. 3: the planner refines the prediction to ~0 error at
+  // contact; the paper's WBC consumes the stream — there is NO lock-at-engage). While a swing
+  // flies, same-side commands passing the band gate keep updating WHERE (pos/vel); WHEN stays
+  // the engage-latched clip clock (training never varies tts mid-swing — the training analog
+  // of streaming WHERE is racket.midswing_resample_prob, whose tts floor this mirrors).
+  bool stream_target = true;            // 110-D models only; other contracts keep the lock
+  double stream_tts_floor_s = 0.30;     // freeze the target inside the last 0.3 s before strike
   // YAW-ALIGN (hardware fix, 2026-07-02): the pelvis AND torso IMU yaws are NOT
   // world-referenced on the real robot (boot-to-boot drift; MDU captures show a constant
   // fictional -12/-15/-38.5 deg yaw error in motion_anchor_ori_b while training reset noise
@@ -368,6 +383,63 @@ class PpPolicy {
             "pingpong: 177 hitter model without clip layout OR reach-offset metadata — "
             "cannot derive the base station; re-export with scripts/export_onnx_hitter.sh");
       }
+    }
+    // 110-D hitter_pure (2026-07-07): resolve the per-side station geometry from the baked
+    // sampling boxes — station_xy = target_xy − (plane_x, y_band_center)[side] (the paper's
+    // §V-B-3 heuristic computes p̂_base downstream of the ball planner; here = the runner).
+    // The per-clip z bands also drive the engage gate. Preference order: hitter_pure box
+    // metadata (exports via scripts/export_onnx_hitter_pure.sh) → ref_reach_offset_xy
+    // (numerically ≈ the box centers by construction: fh (0.699,−0.409) / bh (0.706,+0.185)
+    // vs box (0.70,−0.40)/(0.70,+0.20)) → refs-FK fallback. Refuse to run blind.
+    if (onnx_.obs_dim() == kObsDim110) {
+      if (onnx_.has_hitter_pure_boxes() && onnx_.hp_pos_boxes().size() >= 2) {
+        for (int c = 0; c < 2; ++c) {
+          const auto& b = onnx_.hp_pos_boxes()[c];  // {x_lo,x_hi,y_lo,y_hi,z_lo,z_hi}
+          reach_offset_clip_[c] = Vec2(b[0], 0.5 * (b[2] + b[3]));
+          hp_y_band_[c] = Vec2(b[2], b[3]);
+          hp_z_band_[c] = Vec2(b[4], b[5]);
+        }
+        std::fprintf(stderr,
+            "[pp] 110 hitter_pure: station geometry from ONNX boxes: plane_x=%.2f "
+            "fh y[%.2f,%.2f] z[%.2f,%.2f]  bh y[%.2f,%.2f] z[%.2f,%.2f]\n",
+            reach_offset_clip_[0][0], hp_y_band_[0][0], hp_y_band_[0][1], hp_z_band_[0][0],
+            hp_z_band_[0][1], hp_y_band_[1][0], hp_y_band_[1][1], hp_z_band_[1][0],
+            hp_z_band_[1][1]);
+      } else if (onnx_.has_reach_offsets() && onnx_.reach_offsets().size() >= 2) {
+        reach_offset_clip_[0] = onnx_.reach_offsets()[0];
+        reach_offset_clip_[1] = onnx_.reach_offsets()[1];
+        for (int c = 0; c < 2; ++c) {
+          hp_y_band_[c] = Vec2(reach_offset_clip_[c][1] - 0.25, reach_offset_clip_[c][1] + 0.25);
+          hp_z_band_[c] = Vec2(cfg.gate_z_lo, cfg.gate_z_hi);
+        }
+        std::fprintf(stderr,
+            "[pp WARN] 110 hitter_pure: ONNX lacks hitter_pure box metadata -> station from "
+            "ref_reach_offset_xy fh=(%+.3f,%+.3f) bh=(%+.3f,%+.3f), WIDE z gate. Re-export "
+            "with scripts/export_onnx_hitter_pure.sh to bake the trained boxes.\n",
+            reach_offset_clip_[0][0], reach_offset_clip_[0][1], reach_offset_clip_[1][0],
+            reach_offset_clip_[1][1]);
+      } else if (onnx_.has_clip_layout()) {
+        for (int c = 0; c < 2; ++c) {
+          reach_offset_clip_[c] = onnx_.reach_offset_from_refs(clip_.strike_frame(c));
+          hp_y_band_[c] = Vec2(reach_offset_clip_[c][1] - 0.25, reach_offset_clip_[c][1] + 0.25);
+          hp_z_band_[c] = Vec2(cfg.gate_z_lo, cfg.gate_z_hi);
+        }
+        std::fprintf(stderr,
+            "[pp WARN] 110 hitter_pure: no box/reach metadata -> refs-FK fallback "
+            "fh=(%+.3f,%+.3f) bh=(%+.3f,%+.3f). Re-export to bake the trained boxes.\n",
+            reach_offset_clip_[0][0], reach_offset_clip_[0][1], reach_offset_clip_[1][0],
+            reach_offset_clip_[1][1]);
+      } else {
+        throw std::runtime_error(
+            "pingpong: 110 hitter_pure model without box/reach/clip metadata — cannot derive "
+            "the base station; re-export with scripts/export_onnx_hitter_pure.sh");
+      }
+      // Idle-hold seeds on the trained manifold: ready racket at the fixed plane in front of
+      // the fh band center, at the fh band-center height (hitter_pure trains NO hold — idle
+      // must look like 'standing at station, next target at comfortable reach, tts pinned').
+      planner_hold_pos_b_engage_ =
+          Vec3(reach_offset_clip_[0][0], reach_offset_clip_[0][1], 0.0);
+      planner_hold_z_w_ = 0.5 * (hp_z_band_[0][0] + hp_z_band_[0][1]);
     }
     nominal_q_sdk_ = to_sdk_order(onnx_.default_q(), isaac_to_sdk_);  // nominal pose in SDK order
     leg_qdes_smooth_ = nominal_q_sdk_;  // seed the leg q_des EMA at nominal (no jump on first release)
@@ -857,7 +929,12 @@ class PpPolicy {
         tg.vel_w = planner_frozen_vel_w_;
       } else {                  // idle/rest (incl. before the first engage) -> base-anchored hold
         const Vec4 base_yaw = yaw_quat(st.base_quat_w);
-        Vec3 hb(cfg_.hold_anchor_x_b, planner_hold_pos_b_engage_[1], 0.0);
+        // 110 hitter_pure: idle ready racket sits on the TRAINED fixed plane (0.70 in front),
+        // not the 177-era 0.40 anchor (every pure training target lives at plane depth —
+        // x=0.40 would be an OOD hold obs for a goal-conditioned policy).
+        const double hold_x = (onnx_.obs_dim() == kObsDim110) ? reach_offset_clip_[0][0]
+                                                              : cfg_.hold_anchor_x_b;
+        Vec3 hb(hold_x, planner_hold_pos_b_engage_[1], 0.0);
         tg.pos_w = st.base_pos_w + quat_rotate(base_yaw, hb);
         tg.pos_w[2] = planner_hold_z_w_;
         tg.vel_w = planner_frozen_vel_w_;
@@ -879,7 +956,7 @@ class PpPolicy {
     // 1-2 m with ±0.1 m stations; live-station holds: model_17400 0 falls x 3 seeds).
     // Δ=0 remains ONLY the localization-dropout fallback (perfect_tracking / fabricated /
     // stale mocap/oracle), where any nonzero Δ would be fictional and chased open-loop.
-    if (onnx_.obs_dim() == kObsDim177) {
+    if (onnx_.obs_dim() == kObsDim177 || onnx_.obs_dim() == kObsDim110) {
       const bool base_real =
           (cfg_.loc_mode == LocMode::kOracle && oracle_fresh_) ||
           (cfg_.loc_mode == LocMode::kExternalBase && base_fresh_);
@@ -891,6 +968,12 @@ class PpPolicy {
         tg.base_target_xy = Vec2(tg.pos_w[0], tg.pos_w[1]) - reach_offset_clip_[c];
         hold_station_w_ = tg.base_target_xy;  // post-swing hold recovers AT the strike station
         hold_station_set_ = true;
+      } else if (onnx_.obs_dim() == kObsDim110) {
+        // 110 idle: Δ=0 (station := current base) is IN-DISTRIBUTION for hitter_pure —
+        // the task trains NO hold phase and pays base_position pre-strike only, so idle
+        // never demands station-keeping from the policy. The 177 fixed-world-anchor hold
+        // semantics (below) exist for the hold-TRAINED lineage and do not transfer.
+        tg.base_target_xy = Vec2(st.base_pos_w[0], st.base_pos_w[1]);
       } else {
         if (!hold_station_set_) {  // fresh hold (pre-first-engage / after re-localization)
           hold_station_w_ = Vec2(st.base_pos_w[0], st.base_pos_w[1]);
@@ -900,11 +983,16 @@ class PpPolicy {
       }
     }
 
-    // 175-D deploy_parity vs 177-D hitter_footwork vs 180-D full (model_15200). Auto-selected
-    // from the loaded ONNX input dim. build_obs_175 drops motion_anchor_pos_b + base_target_pos_b
-    // and reframes the racket target relative to the CURRENT racket FK (pp_racket_fk.hpp) — no
-    // world base pos. build_obs_177 = the 175 layout + base_target_pos_b(2) re-inserted (above).
-    const Eigen::VectorXd obs = (onnx_.obs_dim() == kObsDim175)
+    // 175-D deploy_parity vs 177-D hitter_footwork vs 180-D full (model_15200) vs 110-D
+    // hitter_pure. Auto-selected from the loaded ONNX input dim. build_obs_175 drops
+    // motion_anchor_pos_b + base_target_pos_b and reframes the racket target relative to the
+    // CURRENT racket FK (pp_racket_fk.hpp) — no world base pos. build_obs_177 = the 175 layout
+    // + base_target_pos_b(2) re-inserted (above). build_obs_110 = HITTER Table-I exact: NO
+    // reference stream/swing_type, WORLD-frame deltas + e_base,x (refs never enter the obs —
+    // the clip clock above only schedules tts and the graph's time_step input).
+    const Eigen::VectorXd obs = (onnx_.obs_dim() == kObsDim110)
+        ? build_obs_110(st, tg, last_action_, onnx_.default_q())
+        : (onnx_.obs_dim() == kObsDim175)
         ? build_obs_175(refs, st, tg, last_action_, onnx_.default_q(), cfg_.use_imu_yaw_for_targets)
         : (onnx_.obs_dim() == kObsDim177)
         ? build_obs_177(refs, st, tg, last_action_, onnx_.default_q(), cfg_.use_imu_yaw_for_targets)
@@ -1095,7 +1183,13 @@ class PpPolicy {
   // and drive the EXISTING controls (set_swing_dir + set_level(1)). Uses the PREVIOUS tick's
   // localized base (1-tick lag @50 Hz is negligible) so it can run before localization.
   void PlannerEngageStep_(std::uint64_t tick_idx) {
-    if (level_.load() == 1) { set_planner_status_("swinging"); return; }  // frozen, in flight
+    if (level_.load() == 1) {  // in flight
+      // 110-D STREAMING (paper Fig. 3): keep consuming same-side refinements while the swing
+      // flies. Every other contract keeps the proven frozen-target behavior.
+      if (onnx_.obs_dim() == kObsDim110 && cfg_.stream_target) StreamTargetStep_(tick_idx);
+      set_planner_status_("swinging");
+      return;
+    }
     planner_engaged_ = false;  // level 0: idle/hold (ready-hold override uses planner_have_hold_)
 
     // Inter-swing rest: the completion path armed rest_rearm_tick_ (planner mode never
@@ -1111,7 +1205,18 @@ class PpPolicy {
     if (snap.invalid_after && snap.valid_age_s > cfg_.planner_invalid_grace_s) {
       set_planner_status_("planner_invalid"); return;
     }
-    if (tts < cfg_.engage_min_tts_s) { set_planner_status_("too_late"); return; }
+    // Late gate. 110: PER-CLIP (the backhand windup 0.87 s < the legacy 1.0 s constant —
+    // a scalar gate would make backhand unreachable under the wait-for-tts semantics below);
+    // side is not chosen yet, so gate on the LOOSER clip here and re-check after side
+    // selection. Legacy contracts keep the scalar behavior unchanged.
+    if (onnx_.obs_dim() == kObsDim110) {
+      const double windup_max = std::max(
+          (clip_.strike_frame(0) - clip_.seg_start(0)) * clip_.step_dt,
+          (clip_.strike_frame(1) - clip_.seg_start(1)) * clip_.step_dt);
+      if (tts < std::min(cfg_.engage_min_tts_s, 0.9 * windup_max)) {
+        set_planner_status_("too_late"); return;
+      }
+    } else if (tts < cfg_.engage_min_tts_s) { set_planner_status_("too_late"); return; }
 
     // A stale localization frame makes the base obs (and this gate) incoherent -> block
     // engage. Covers BOTH live-base modes: external_base (mocap) and oracle (sim GT) —
@@ -1138,15 +1243,57 @@ class PpPolicy {
     }
 
     const Vec3 tgt_b = quat_rotate_inverse(base_yaw, pos_w - base_pos);
+
+    // Swing side. 110-D hitter_pure: the paper's §V-B-3 heuristic, implemented as
+    // NEAREST-STATION — candidate station per side = target_xy − (plane_x, band_center_y),
+    // pick the side needing the smaller step. The legacy y<0 split is WRONG for the pure
+    // bands (the bh band [−0.05,0.45] crosses y=0: a bh-region ball at station-rel y ∈
+    // [−0.10,0) would grab the fh clip + a ~0.6 m wrong station). Legacy contracts keep
+    // the y-sign split.
+    double sign;
+    if (onnx_.obs_dim() == kObsDim110) {
+      const Vec2 tgt_xy(pos_w[0], pos_w[1]);
+      const Vec2 base_xy(base_pos[0], base_pos[1]);
+      const double d_fh = (tgt_xy - reach_offset_clip_[0] - base_xy).norm();
+      const double d_bh = (tgt_xy - reach_offset_clip_[1] - base_xy).norm();
+      sign = (d_fh <= d_bh) ? 1.0 : -1.0;
+    } else {
+      // BASE-RELATIVE y (raw world-y is always <0 in the table frame).
+      sign = swing_sign_from_target_y(tgt_b[1]);
+    }
+    const int eng_clip = clip_id_from_swing_sign(sign);
+    const double max_tts0 =
+        (clip_.strike_frame(eng_clip) - clip_.seg_start(eng_clip)) * clip_.step_dt;
+
     if (cfg_.target_gate_enable) {
-      const bool ok = tgt_b[0] >= cfg_.gate_x_lo && tgt_b[0] <= cfg_.gate_x_hi &&
-                      std::abs(tgt_b[1]) <= cfg_.gate_y_abs &&
-                      pos_w[2] >= cfg_.gate_z_lo && pos_w[2] <= cfg_.gate_z_hi &&
-                      vel_w.norm() <= cfg_.gate_speed_max;
-      if (!ok) {
-        // Throttled detail print (mirrors the Python runner's gate warn): without the
-        // inputs a rejection is undebuggable at the venue.
-        if ((gate_warn_tick_++ % 50) == 0) {
+      bool ok;
+      if (onnx_.obs_dim() == kObsDim110) {
+        // METADATA-driven gate against the TRAINED distribution: per-clip z band, required
+        // station step, speed cap. No fixed base-relative box — the paper's robot WALKS to
+        // targets the arm alone cannot cover (Fig. 4), so reachability is a station question.
+        const Vec2 station =
+            Vec2(pos_w[0], pos_w[1]) - reach_offset_clip_[eng_clip];
+        const double step = (station - Vec2(base_pos[0], base_pos[1])).norm();
+        ok = pos_w[2] >= hp_z_band_[eng_clip][0] - cfg_.gate_z_margin &&
+             pos_w[2] <= hp_z_band_[eng_clip][1] + cfg_.gate_z_margin &&
+             step <= cfg_.gate_station_step_max &&
+             vel_w.norm() <= cfg_.gate_speed_max;
+        if (!ok && (gate_warn_tick_++ % 50) == 0) {
+          std::fprintf(stderr,
+              "[pp gate] REJECT(110) %s z_w=%.2f (band[%.2f,%.2f]±%.2f) station_step=%.2f "
+              "(<=%.2f) |v|=%.2f (<=%.2f) tts=%.2f\n",
+              sign > 0 ? "fh" : "bh", pos_w[2], hp_z_band_[eng_clip][0],
+              hp_z_band_[eng_clip][1], cfg_.gate_z_margin, step, cfg_.gate_station_step_max,
+              vel_w.norm(), cfg_.gate_speed_max, tts);
+        }
+      } else {
+        ok = tgt_b[0] >= cfg_.gate_x_lo && tgt_b[0] <= cfg_.gate_x_hi &&
+             std::abs(tgt_b[1]) <= cfg_.gate_y_abs &&
+             pos_w[2] >= cfg_.gate_z_lo && pos_w[2] <= cfg_.gate_z_hi &&
+             vel_w.norm() <= cfg_.gate_speed_max;
+        if (!ok && (gate_warn_tick_++ % 50) == 0) {
+          // Throttled detail print (mirrors the Python runner's gate warn): without the
+          // inputs a rejection is undebuggable at the venue.
           std::fprintf(stderr,
               "[pp gate] REJECT base-rel (%+.2f,%+.2f) z_w=%.2f |v|=%.2f tts=%.2f "
               "(need x[%.2f,%.2f] |y|<=%.2f z[%.2f,%.2f] v<=%.2f)\n",
@@ -1154,24 +1301,28 @@ class PpPolicy {
               cfg_.gate_x_lo, cfg_.gate_x_hi, cfg_.gate_y_abs,
               cfg_.gate_z_lo, cfg_.gate_z_hi, cfg_.gate_speed_max);
         }
-        set_planner_status_("target_gate"); return;
       }
+      if (!ok) { set_planner_status_("target_gate"); return; }
     }
 
-    // Swing side from the BASE-RELATIVE y (raw world-y is always <0 in the table frame).
-    const double sign = swing_sign_from_target_y(tgt_b[1]);
-
-    // ENGAGE: freeze target, lock side, release the swing. set_swing_dir applies immediately
-    // at level 0; the 0->1 edge in ComputeCommand resets the swing clock to the windup.
-    // tts0 is stored CLAMPED to the clip's windup length and DRIVES the swing clock
-    // (ScriptedTarget planner branch: tts = tts0 - t), so the STRIKE fires when the ball
-    // arrives — not a fixed clip-length after engage. Mirrors wbc_runner's
-    // `"tts0": min(tts, max_tts0)`; without the transfer every strike would be late by
-    // (max_tts - planner_tts).
-    {
-      const int eng_clip = clip_id_from_swing_sign(sign);
-      const double max_tts0 =
-          (clip_.strike_frame(eng_clip) - clip_.seg_start(eng_clip)) * clip_.step_dt;
+    // Strike-time alignment. 110: WAIT-until-tts (paper: the hit time comes from the
+    // virtual-plane crossing and the strike fires when the ball arrives). The legacy clamp
+    // planner_tts0_ = min(tts, max_tts0) starts the clip early and lets the strike frame
+    // fire (planner_tts − max_tts0) seconds BEFORE the ball (bh: >1 s early on a slow lob
+    // = multi-decimeter miss). Wait at ready until the decaying tts enters the windup
+    // window, then engage with the strike frame exactly on the predicted arrival. Per-clip
+    // late gate re-check (side is now known).
+    if (onnx_.obs_dim() == kObsDim110) {
+      if (tts < std::min(cfg_.engage_min_tts_s, 0.9 * max_tts0)) {
+        set_planner_status_("too_late"); return;
+      }
+      if (tts > max_tts0) { set_planner_status_("waiting_tts"); return; }
+      planner_tts0_ = tts;
+    } else {
+      // ENGAGE: tts0 stored CLAMPED to the clip's windup length; DRIVES the swing clock
+      // (ScriptedTarget planner branch: tts = tts0 - t). Mirrors wbc_runner's
+      // `"tts0": min(tts, max_tts0)`; without the transfer every strike would be late by
+      // (max_tts - planner_tts).
       planner_tts0_ = std::min(tts, max_tts0);
     }
     planner_frozen_pos_w_ = pos_w;
@@ -1184,9 +1335,47 @@ class PpPolicy {
     set_swing_dir(sign >= 0.0 ? 1 : -1);
     set_level(1);
     std::fprintf(stderr,
-        "[pp engage] %s locked: tgt base-rel (%+.2f,%+.2f,%+.2f) tts=%.2fs (clock tts0=%.2fs)\n",
-        sign > 0 ? "forehand" : "backhand", tgt_b[0], tgt_b[1], tgt_b[2], tts, planner_tts0_);
+        "[pp engage] %s %s: tgt base-rel (%+.2f,%+.2f,%+.2f) tts=%.2fs (clock tts0=%.2fs)\n",
+        sign > 0 ? "forehand" : "backhand",
+        (onnx_.obs_dim() == kObsDim110 && cfg_.stream_target) ? "engaged (streaming)" : "locked",
+        tgt_b[0], tgt_b[1], tgt_b[2], tts, planner_tts0_);
     set_planner_status_("engage");
+  }
+
+  // 110-D stream-until-contact (paper Fig. 3: the planner's prediction error converges to ~0
+  // at contact and the WBC consumes the stream — there is no lock-at-engage in HITTER).
+  // Refresh WHERE (pos/vel) from the latest valid command while the swing flies; the side and
+  // the swing clock (WHEN) stay engage-latched (training never varies tts mid-swing). Guards:
+  // fresh+valid, same side under the nearest-station heuristic (a planner re-side mid-swing
+  // is ignored), locked-side band membership, speed cap, and a tts floor mirroring training's
+  // midswing_resample_tts_floor so the final approach is not perturbed.
+  void StreamTargetStep_(std::uint64_t tick_idx) {
+    if (!racket_in_) return;
+    const auto snap = racket_in_->Latest();
+    if (!snap.has_valid || snap.invalid_after) return;
+    if (snap.valid_age_s > cfg_.command_timeout_s) return;
+    const std::uint64_t origin = swing_clock_origin_.load();
+    const double t = (tick_idx >= origin ? tick_idx - origin : 0) * cfg_.dt * swing_speed_.load();
+    if (planner_tts0_ - t < cfg_.stream_tts_floor_s) return;  // freeze near the strike
+    Vec3 pos_w = snap.cmd.pos_w;
+    Vec3 vel_w = snap.cmd.vel_w;
+    if (snap.cmd.frame_code == 1) {
+      const Vec4 base_yaw = yaw_quat(last_base_quat_w_);
+      pos_w = last_base_pos_ + quat_rotate(base_yaw, snap.cmd.pos_w);
+      vel_w = quat_rotate(base_yaw, snap.cmd.vel_w);
+    }
+    const int c = clip_id_from_swing_sign(planner_frozen_sign_);
+    const Vec2 tgt_xy(pos_w[0], pos_w[1]);
+    const Vec2 base_xy(last_base_pos_[0], last_base_pos_[1]);
+    if ((tgt_xy - reach_offset_clip_[1 - c] - base_xy).norm() <
+        (tgt_xy - reach_offset_clip_[c] - base_xy).norm())
+      return;  // nearest-station now prefers the OTHER side: keep the locked target
+    if (pos_w[2] < hp_z_band_[c][0] - cfg_.gate_z_margin ||
+        pos_w[2] > hp_z_band_[c][1] + cfg_.gate_z_margin)
+      return;
+    if (vel_w.norm() > cfg_.gate_speed_max) return;
+    planner_frozen_pos_w_ = pos_w;
+    planner_frozen_vel_w_ = vel_w;
   }
 
   // One-shot first-tick diagnostic dump (stderr). action = raw Isaac-order policy
@@ -1238,12 +1427,21 @@ class PpPolicy {
         {"projected_gravity", 164, 3}, {"base_target_pos_b", 167, 2},
         {"racket_target_pos_b(relFK)", 169, 3}, {"racket_target_vel_w", 172, 3},
         {"time_to_strike", 175, 1}, {"swing_type", 176, 1}};
+    // hitter_pure 110-D (HITTER Table-I exact): no reference stream, no swing_type;
+    // world-frame deltas + e_base,x. Matches training contract `hitter_pure`.
+    static const Blk blks110[] = {
+        {"base_ang_vel", 0, 3}, {"joint_pos_rel", 3, 31}, {"joint_vel", 34, 31},
+        {"actions(last)", 65, 31}, {"projected_gravity", 96, 3}, {"base_forward_xy", 99, 2},
+        {"base_target_delta_xy(world)", 101, 2}, {"racket_target_rel_base(world)", 103, 3},
+        {"racket_target_vel_w", 106, 3}, {"time_to_strike", 109, 1}};
     std::fprintf(stderr, " OBS blocks (%d-D):\n", (int)obs.size());
     const Blk* blks = (obs.size() == kObsDim175) ? blks175
                     : (obs.size() == kObsDim177) ? blks177
+                    : (obs.size() == kObsDim110) ? blks110
                                                  : blks180;
     const int nblk = (obs.size() == kObsDim175) ? (int)(sizeof(blks175) / sizeof(Blk))
                    : (obs.size() == kObsDim177) ? (int)(sizeof(blks177) / sizeof(Blk))
+                   : (obs.size() == kObsDim110) ? (int)(sizeof(blks110) / sizeof(Blk))
                                                 : (int)(sizeof(blks180) / sizeof(Blk));
     for (int i = 0; i < nblk; ++i)
       std::fprintf(stderr, "   %-24s [%3d:%3d] %s\n", blks[i].n, blks[i].lo, blks[i].lo + blks[i].len,
@@ -1293,10 +1491,16 @@ class PpPolicy {
   int swing_level_prev_ = 0;                          // ComputeCommand (driver thread) only
   int swing_dir_prev_ = 1;                            // detect f<->b switch -> restart swing at windup
   ClipLayout clip_;
-  // 177-D hitter_footwork only: per-clip reference base->racket reach at the strike frame.
-  // station_xy = racket_target_xy - reach_offset_clip_[clip]. Resolved in the ctor (ONNX
-  // metadata or refs fallback); Zero for 175/180 models (never read there).
+  // 177-D hitter_footwork + 110-D hitter_pure: per-clip station geometry.
+  // station_xy = racket_target_xy - reach_offset_clip_[clip]. 177: reference base->racket
+  // reach at the strike frame (ONNX metadata or refs fallback). 110: (fixed_plane_x,
+  // y_band_center) from the baked hitter_pure sampling boxes (≈ the same numbers by
+  // construction). Zero for 175/180 models (never read there).
   Vec2 reach_offset_clip_[2] = {Vec2::Zero(), Vec2::Zero()};
+  // 110-D hitter_pure only: trained per-clip target bands (engage gate + streaming gate).
+  // Defaults = the legacy shared gate; overwritten from ONNX metadata in the ctor.
+  Vec2 hp_y_band_[2] = {Vec2(-0.65, -0.15), Vec2(-0.05, 0.45)};
+  Vec2 hp_z_band_[2] = {Vec2(0.55, 1.40), Vec2(0.55, 1.40)};
   // 177-D hold-station anchor (driver thread only): the fixed WORLD station fed to the
   // base_target obs during level-0 holds (captured at hold entry; carried from the last
   // swing's station after a completed swing). Cleared on localization dropout and by

@@ -106,6 +106,15 @@ class HOPEPlannerNode(Node):
         self.declare_parameter("x_hit_offset", 0.67)
         self.declare_parameter("x_hit_min", -0.30)
         self.declare_parameter("x_hit_max", 0.30)   # table edge x=0 + racket reach margin
+        # HITTER-PURE decoupling (2026-07-07): the paper's virtual hit plane is FIXED (§IV-B,
+        # x = -1.37 m table frame) and the ROBOT walks to a commanded station behind it (Fig. 4);
+        # the adaptive plane above inverts that causality (plane chases the robot -> the
+        # documented "+x march"). For the 110-D hitter_pure deploy profile set this FALSE:
+        # robot_pose_topic keeps feeding /a3/base_pose_flat (the runner needs the live base),
+        # but x_hit stays the static parameter and the runner derives the station from the
+        # target (station_x = x_hit - 0.70, the trained plane offset). Default TRUE = legacy
+        # behavior for the 175/177 lineages.
+        self.declare_parameter("x_hit_follow_robot", True)
         # --- FLAT outputs for the AGI native C++ runner (--planner, the ONLY control path) ---
         # The C++ a3_deploy_onnx_ref_pingpong subscribes std_msgs/Float64MultiArray (it avoids
         # vendoring hope_msgs typesupport on aarch64). We MIRROR /racket/command as a flat array
@@ -135,6 +144,7 @@ class HOPEPlannerNode(Node):
         self._x_hit_offset = float(self.get_parameter("x_hit_offset").value)
         self._x_hit_min = float(self.get_parameter("x_hit_min").value)
         self._x_hit_max = float(self.get_parameter("x_hit_max").value)
+        self._x_hit_follow_robot = bool(self.get_parameter("x_hit_follow_robot").value)
         self._robot_x = None          # latest robot X (table frame); None -> static x_hit
         self._publish_flat = bool(self.get_parameter("publish_flat_cmd").value)
         self._marker_to_base = np.array(
@@ -263,10 +273,15 @@ class HOPEPlannerNode(Node):
                     self.flat_base_pub.publish(m)
 
             self.create_subscription(PoseStamped, robot_pose_topic, _robot_pose_cb, mocap_qos)
-            self.get_logger().info(
-                f"adaptive x_hit ON: robot pose from '{robot_pose_topic}', "
-                f"x_hit = clamp(robot_x + {self._x_hit_offset:.2f}, "
-                f"[{self._x_hit_min:.2f}, {self._x_hit_max:.2f}])")
+            if self._x_hit_follow_robot:
+                self.get_logger().info(
+                    f"adaptive x_hit ON: robot pose from '{robot_pose_topic}', "
+                    f"x_hit = clamp(robot_x + {self._x_hit_offset:.2f}, "
+                    f"[{self._x_hit_min:.2f}, {self._x_hit_max:.2f}])")
+            else:
+                self.get_logger().info(
+                    f"x_hit FIXED at {config.x_hit:.2f} (hitter_pure profile, paper §IV-B); "
+                    f"robot pose from '{robot_pose_topic}' feeds the base flat only")
 
         # Diagnostics at 10 Hz.
         self._n_received = 0
@@ -300,8 +315,9 @@ class HOPEPlannerNode(Node):
         p_ball = np.array([pose.position.x, pose.position.y, pose.position.z])
 
         # adaptive hit plane: track the live robot (see robot_pose_topic above). Mutating
-        # config.x_hit is safe — the predictor reads it per predict() call.
-        if self._robot_x is not None:
+        # config.x_hit is safe — the predictor reads it per predict() call. Disabled by
+        # x_hit_follow_robot=false (hitter_pure profile: FIXED plane, paper §IV-B).
+        if self._robot_x is not None and self._x_hit_follow_robot:
             self.planner.config.x_hit = float(
                 np.clip(self._robot_x + self._x_hit_offset, self._x_hit_min, self._x_hit_max))
 

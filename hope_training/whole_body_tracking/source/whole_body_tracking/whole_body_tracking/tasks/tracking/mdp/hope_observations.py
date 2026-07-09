@@ -150,6 +150,28 @@ def racket_target_normal_cmd(env: ManagerBasedRLEnv, command_name: str) -> torch
     return face_command_obs_vector(_cmd(env, command_name).target_normal_cmd)
 
 
+# --- HITTER Table-I exact actor terms (hitter_pure contract, 2026-07-07) ------------------- #
+# World-frame vectors + the explicit base forward vector e_base,x, exactly as the paper's actor
+# observation. NOT pre-rotated into the yaw-heading frame: the policy learns the rotation itself
+# (this is what lets it correct its facing toward the table — the heading-frame formulation loses
+# the yaw error entirely once the reference-orientation term is removed from the actor).
+def base_forward_xy(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Base forward unit vector e_base,x (world xy, 2). Deploy: IMU + yaw-align-at-engage."""
+    return _cmd(env, command_name).base_forward_xy()
+
+
+def base_target_delta_xy(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Target base position p̂_base,xy − p_base,xy (world frame, 2). Deploy: planner station −
+    mocap base position (same world frame; no rotation)."""
+    return _cmd(env, command_name).base_target_delta_xy_w()
+
+
+def racket_target_rel_base(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Target racket position relative to the base (world frame, 3; HITTER §V-B-1). Deploy:
+    planner racket target − mocap base position. A1: actor-visible (delayed/jittered) view."""
+    return _cmd(env, command_name).racket_target_rel_base_w()
+
+
 # --- privileged (critic) observations: desired normal + actual racket state --------------- #
 def racket_target_vel_w_live(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """TRUE live desired racket velocity (world). CRITIC/privileged term: the asymmetric critic

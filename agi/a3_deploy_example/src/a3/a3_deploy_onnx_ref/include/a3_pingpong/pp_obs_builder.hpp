@@ -1,4 +1,4 @@
-// 180/175/177-D observation builders. 180 ported from
+// 180/175/177/110-D observation builders. 180 ported from
 // hope_ws/.../hope_wbc_runner/obs_builder.py (build_obs). Layout (total 180):
 //   command(62) = ref joint_pos[31] + ref joint_vel[31]
 //   motion_anchor_pos_b(3), motion_anchor_ori_b(6)
@@ -7,8 +7,12 @@
 //   racket_target_vel_w(3), time_to_strike(1), swing_type(1)
 // 175 = deploy_parity (drops anchor_pos + base_target, racket target FK-relative);
 // 177 = hitter_footwork (the 175 layout + base_target_pos_b(2) re-inserted after
-// projected_gravity — the HITTER-style relative-Δ station footwork channel).
+// projected_gravity — the HITTER-style relative-Δ station footwork channel);
+// 110 = hitter_pure (2026-07-07, HITTER Table-I exact: NO reference stream, NO
+// swing_type, WORLD-frame target vectors + explicit base forward vector e_base,x).
 #pragma once
+
+#include <cmath>
 
 #include <Eigen/Dense>
 
@@ -20,6 +24,7 @@ namespace a3_pingpong {
 constexpr int kObsDim = 180;
 constexpr int kObsDim175 = 175;
 constexpr int kObsDim177 = 177;
+constexpr int kObsDim110 = 110;
 constexpr int kNumJoints = 31;
 constexpr int kAnchorTrackedIdx = 7;  // torso_Link in the 14-body tracked order
 
@@ -275,6 +280,72 @@ inline Eigen::VectorXd build_obs_177(const PpRefs& refs, const PpRobotState& sta
   obs[o++] = target.swing_sign;
 
   return obs;  // o == 177
+}
+
+// Assemble the 110-D "hitter_pure" observation (HITTER arXiv:2508.21043 Table I exact,
+// sized for the A3's 31 joints). Layout (training contract `hitter_pure`, verified by
+// scripts/verify_hitter_pure.py):
+//   base_ang_vel(3), joint_pos_rel(31), joint_vel(31), last_action(31),
+//   projected_gravity(3), base_forward_xy(2), base_target_delta_xy(2),
+//   racket_target_rel_base(3), racket_target_vel_w(3), time_to_strike(1)
+//
+// Differences from every other layout here:
+//   * NO reference stream (command/anchor blocks) and NO swing_type — the paper keeps the
+//     reference CRITIC-only and infers the swing side outside the policy (§V-B-3). PpRefs
+//     is therefore NOT a parameter; the reference clock is still used by the CALLER for
+//     time_to_strike and swing-side selection, it just never enters the observation.
+//   * Target vectors are WORLD-frame differences (NO yaw-heading rotation):
+//       base_target_delta_xy    = station_xy − base_pos_xy          (world)
+//       racket_target_rel_base  = target_pos_w − base_pos_w         (world, rel BASE not FK)
+//     plus the explicit base forward vector e_base,x (world xy of the base +x axis) that
+//     lets the policy do the rotation itself — this is what carries the yaw-facing signal
+//     once the reference-orientation term is gone. On hardware the quats are the
+//     yaw-align-at-engage IMU attitudes and positions are mocap/table frame; the operator
+//     faces the robot toward +x at engage (same assumption as every other layout).
+//   * Callers must set target.base_target_xy to the WORLD station. Mocap-dropout fallback
+//     is delta = 0 (station := current base xy), same contract as build_obs_177.
+inline Eigen::VectorXd build_obs_110(const PpRobotState& state,
+                                     const PpRacketTarget& target,
+                                     const Eigen::VectorXd& last_action,
+                                     const Eigen::VectorXd& default_q) {
+  Eigen::VectorXd obs(kObsDim110);
+  int o = 0;
+
+  // 1. base angular velocity (3), body frame
+  obs.segment<3>(o) = state.base_ang_vel_b; o += 3;
+
+  // 2/3. joint pos rel / joint vel (31 each)
+  obs.segment(o, kNumJoints) = state.q - default_q; o += kNumJoints;
+  obs.segment(o, kNumJoints) = state.qd; o += kNumJoints;
+
+  // 4. last action (31)
+  obs.segment(o, kNumJoints) = last_action; o += kNumJoints;
+
+  // 5. projected gravity (3), body frame
+  obs.segment<3>(o) = projected_gravity_body(state.base_quat_w); o += 3;
+
+  // 6. base forward vector e_base,x (2): world xy of the base +x axis, renormalized.
+  {
+    const Vec3 fwd = quat_rotate(state.base_quat_w, Vec3(1.0, 0.0, 0.0));
+    const double n = std::max(std::hypot(fwd[0], fwd[1]), 1e-6);
+    obs[o++] = fwd[0] / n;
+    obs[o++] = fwd[1] / n;
+  }
+
+  // 7. base target delta (2): station − base, WORLD xy (no rotation).
+  obs[o++] = target.base_target_xy[0] - state.base_pos_w[0];
+  obs[o++] = target.base_target_xy[1] - state.base_pos_w[1];
+
+  // 8. racket target relative to the BASE (3), WORLD frame (no rotation, not FK-relative).
+  obs.segment<3>(o) = target.pos_w - state.base_pos_w; o += 3;
+
+  // 9. racket target velocity, world (3)
+  obs.segment<3>(o) = target.vel_w; o += 3;
+
+  // 10. time_to_strike (1)
+  obs[o++] = target.time_to_strike;
+
+  return obs;  // o == 110
 }
 
 }  // namespace a3_pingpong

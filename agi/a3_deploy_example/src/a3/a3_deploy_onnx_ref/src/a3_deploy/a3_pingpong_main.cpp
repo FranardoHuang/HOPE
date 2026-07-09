@@ -180,29 +180,46 @@ void PrintObsDebugBlock(const a3_pingpong::PpPolicy::ObsDebug& d,
                         const std::string& planner_status = "") {
   if (!d.valid) return;
   const auto& o = d.obs;
-  const bool dp = (o.size() == a3_pingpong::kObsDim175);  // deploy_parity (175) vs full (180)
+  const long n = (long)o.size();
   const double omin = o.minCoeff(), omax = o.maxCoeff(), omean = o.mean();
   std::printf(" [obs] loc=%s oracle(en=%d fresh=%d age=%.3fs) sync_miss=%llu | dim=%ld "
               "obs[min/mean/max]=[%.3f %.3f %.3f]\n",
               d.oracle_enabled ? "oracle" : "non-oracle",
               d.oracle_enabled ? 1 : 0, d.oracle_fresh ? 1 : 0, d.oracle_age_s,
-              (unsigned long long)d.sync_miss, (long)o.size(), omin, omean, omax);
-  // 175-D deploy_parity DROPS motion_anchor_pos_b + base_target_pos_b and shifts everything after
-  // motion_anchor_ori_b down by 3, then by a further 2. Racket-target block start differs per layout.
-  if (!dp) {
-    const double anchor_pos_norm = o.segment<3>(62).norm();
-    std::printf("   motion_anchor_pos_b=[%+.4f %+.4f %+.4f] |.|=%.4f  base_target_pos_b=[%+.4f %+.4f]\n",
-                o[62], o[63], o[64], anchor_pos_norm, o[170], o[171]);
-  }
-  // racket_target_pos_b: full 180 -> o[172..174] (rel base); deploy 175 -> o[167..169] (rel racket FK).
-  const int rp = dp ? 167 : 172;  // racket_target_pos_b start (vel_w follows, then tts, swing)
+              (unsigned long long)d.sync_miss, n, omin, omean, omax);
   char src[64];
   if (planner_status.empty()) std::snprintf(src, sizeof src, "SCRIPTED target -- no live planner");
   else std::snprintf(src, sizeof src, "PLANNER: %s", planner_status.c_str());
-  std::printf("   racket_target_pos_b=[%+.4f %+.4f %+.4f]  racket_target_vel_w=[%+.3f %+.3f %+.3f]  "
-              "tts=%.3f swing=%+.0f(%s)  [%s]\n",
-              o[rp], o[rp + 1], o[rp + 2], o[rp + 3], o[rp + 4], o[rp + 5], o[rp + 6], o[rp + 7],
-              o[rp + 7] >= 0 ? "FOREHAND" : "BACKHAND", src);
+  // Per-layout goal-block slices. 2026-07-07 fix: this used to classify 175-vs-'everything
+  // else = 180' and indexed o[170..179] on a 177-D (and would on a 110-D) obs — OUT OF BOUNDS
+  // (Eigen UB in release). Every supported layout now has its own offsets; unknown dims print
+  // only the stats line above.
+  if (n == a3_pingpong::kObsDim110) {
+    // hitter_pure: [96:99] grav, [99:101] e_base,x, [101:103] Δstation(world),
+    // [103:106] racket rel base(world), [106:109] vel_w, [109] tts. No swing_type.
+    std::printf("   e_base_x=[%+.3f %+.3f]  base_target_dxy=[%+.4f %+.4f]  "
+                "racket_rel_base=[%+.4f %+.4f %+.4f]\n",
+                o[99], o[100], o[101], o[102], o[103], o[104], o[105]);
+    std::printf("   racket_target_vel_w=[%+.3f %+.3f %+.3f]  tts=%.3f  [%s]\n",
+                o[106], o[107], o[108], o[109], src);
+  } else if (n == a3_pingpong::kObsDim175 || n == a3_pingpong::kObsDim177 ||
+             n == a3_pingpong::kObsDim) {
+    const bool dp175 = (n == a3_pingpong::kObsDim175);
+    const bool hp177 = (n == a3_pingpong::kObsDim177);
+    if (!dp175 && !hp177) {  // 180 full: anchor_pos + base_target blocks exist
+      const double anchor_pos_norm = o.segment<3>(62).norm();
+      std::printf("   motion_anchor_pos_b=[%+.4f %+.4f %+.4f] |.|=%.4f  base_target_pos_b=[%+.4f %+.4f]\n",
+                  o[62], o[63], o[64], anchor_pos_norm, o[170], o[171]);
+    }
+    if (hp177)
+      std::printf("   base_target_pos_b=[%+.4f %+.4f]\n", o[167], o[168]);
+    // racket_target_pos_b start: 180 -> 172 (rel base); 175 -> 167 (rel FK); 177 -> 169 (rel FK).
+    const int rp = dp175 ? 167 : hp177 ? 169 : 172;
+    std::printf("   racket_target_pos_b=[%+.4f %+.4f %+.4f]  racket_target_vel_w=[%+.3f %+.3f %+.3f]  "
+                "tts=%.3f swing=%+.0f(%s)  [%s]\n",
+                o[rp], o[rp + 1], o[rp + 2], o[rp + 3], o[rp + 4], o[rp + 5], o[rp + 6], o[rp + 7],
+                o[rp + 7] >= 0 ? "FOREHAND" : "BACKHAND", src);
+  }
   if (action.size() == a3_pingpong::kNumJoints)
     std::printf("   action[min/mean/max]=[%+.3f %+.3f %+.3f] |a|=%.3f\n",
                 action.minCoeff(), action.mean(), action.maxCoeff(), action.norm());

@@ -167,6 +167,29 @@ def attach_onnx_metadata(env: ManagerBasedRLEnv, run_path: str, path: str, filen
                 metadata["ref_reach_offset_xy"] = ",".join(
                     f"{float(v):.6f}" for v in reach.reshape(-1).cpu().tolist()
                 )
+        # HITTER-PURE sampling geometry (2026-07-07): the 110-D deploy path derives the base
+        # station from the racket target the paper's way (§V-B-3 fh/bh heuristic ONLY computes
+        # p̂_base) as station_xy = racket_target_xy − (fixed_plane_x, band_center_y)[clip], and
+        # its engage/gate logic needs the TRAINED distribution, so bake the station-relative
+        # per-clip boxes + the independent station box. Format: per-clip flat
+        # "x_lo,x_hi,y_lo,y_hi,z_lo,z_hi" joined by ';' (clip 0 = forehand, 1 = backhand).
+        if getattr(rt_cfg, "target_mode", "") == "hitter_pure":
+            _ppc = getattr(rt_cfg, "racket_pos_range_per_clip", None)
+            _vpc = getattr(rt_cfg, "racket_vel_range_per_clip", None)
+            if _ppc is not None:
+                metadata["hitter_pure_pos_range_per_clip"] = ";".join(
+                    ",".join(f"{float(lo):.4f},{float(hi):.4f}" for (lo, hi) in clip_rng)
+                    for clip_rng in _ppc
+                )
+            if _vpc is not None:
+                metadata["hitter_pure_vel_range_per_clip"] = ";".join(
+                    ",".join(f"{float(lo):.4f},{float(hi):.4f}" for (lo, hi) in clip_rng)
+                    for clip_rng in _vpc
+                )
+            metadata["hitter_pure_base_target_range"] = ",".join(
+                f"{float(v):.4f}"
+                for v in (*rt_cfg.base_target_x_range, *rt_cfg.base_target_y_range)
+            )
     except (KeyError, ValueError):
         pass  # task without a racket_target command (plain tracking) — clock keys not needed
     actor_contract = infer_actor_observation_contract(env)

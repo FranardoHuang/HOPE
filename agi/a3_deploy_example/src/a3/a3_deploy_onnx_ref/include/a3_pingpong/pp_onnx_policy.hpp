@@ -27,12 +27,13 @@ class PpOnnxPolicy {
     so.SetIntraOpNumThreads(1);
     session_ = std::make_unique<Ort::Session>(env_, model_path.c_str(), so);
 
-    // detect obs input dim: 180 (full), 175 (deploy_parity) or 177 (hitter_footwork).
-    // The obs builder + buffers use obs_dim_.
+    // detect obs input dim: 180 (full), 175 (deploy_parity), 177 (hitter_footwork) or
+    // 110 (hitter_pure). The obs builder + buffers use obs_dim_.
     auto in0 = session_->GetInputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
     if (in0.size() != 2 ||
-        (in0[1] != kObsDim && in0[1] != kObsDim175 && in0[1] != kObsDim177))
-      throw std::runtime_error("ONNX obs input is not [1,180], [1,177] or [1,175]");
+        (in0[1] != kObsDim && in0[1] != kObsDim175 && in0[1] != kObsDim177 &&
+         in0[1] != kObsDim110))
+      throw std::runtime_error("ONNX obs input is not [1,180], [1,177], [1,175] or [1,110]");
     obs_dim_ = static_cast<int>(in0[1]);
 
     Ort::AllocatorWithDefaultOptions alloc;
@@ -86,6 +87,35 @@ class PpOnnxPolicy {
       const Eigen::VectorXd v = ToVec(reach_s);
       for (int i = 0; i + 1 < v.size(); i += 2) reach_offsets_.push_back(Vec2(v[i], v[i + 1]));
     }
+
+    // OPTIONAL hitter_pure sampling geometry (110-D models, 2026-07-07). Baked by
+    // utils/exporter.py when the training task ran target_mode=hitter_pure:
+    //   hitter_pure_pos_range_per_clip: "x_lo,x_hi,y_lo,y_hi,z_lo,z_hi;..." per clip,
+    //     STATION-RELATIVE x/y (x degenerate = the fixed striking plane, y = the swing
+    //     band), z ABSOLUTE above the floor.
+    //   hitter_pure_vel_range_per_clip: same 6-tuple format, world-frame velocity box.
+    //   hitter_pure_base_target_range: "x_lo,x_hi,y_lo,y_hi" — the independent trained
+    //     station box around the spawn (informational; deploy stations come from balls).
+    // PpPolicy derives the station from a racket target as
+    //   station_xy = target_xy − (x_plane, y_band_center)[clip]
+    // and gates engage against the trained z/vel envelopes.
+    const std::string hp_pos_s = LookupMetaOptional(md, alloc, "hitter_pure_pos_range_per_clip");
+    const std::string hp_vel_s = LookupMetaOptional(md, alloc, "hitter_pure_vel_range_per_clip");
+    const std::string hp_base_s = LookupMetaOptional(md, alloc, "hitter_pure_base_target_range");
+    auto parse_boxes = [](const std::string& s, std::vector<std::array<double, 6>>& out) {
+      std::stringstream ss(s);
+      std::string clip;
+      while (std::getline(ss, clip, ';')) {
+        const Eigen::VectorXd v = ToVec(clip);
+        if (v.size() == 6) out.push_back({v[0], v[1], v[2], v[3], v[4], v[5]});
+      }
+    };
+    if (!hp_pos_s.empty()) parse_boxes(hp_pos_s, hp_pos_boxes_);
+    if (!hp_vel_s.empty()) parse_boxes(hp_vel_s, hp_vel_boxes_);
+    if (!hp_base_s.empty()) {
+      const Eigen::VectorXd v = ToVec(hp_base_s);
+      if (v.size() == 4) hp_base_range_ = {v[0], v[1], v[2], v[3]};
+    }
   }
 
   int obs_dim() const { return obs_dim_; }
@@ -96,6 +126,12 @@ class PpOnnxPolicy {
   // Per-clip reference reach offsets (empty when the export predates the metadata key).
   bool has_reach_offsets() const { return !reach_offsets_.empty(); }
   const std::vector<Vec2>& reach_offsets() const { return reach_offsets_; }
+  // hitter_pure sampling geometry (empty on non-pure exports). Box layout per clip:
+  // {x_lo, x_hi, y_lo, y_hi, z_lo, z_hi} — pos boxes station-relative x/y + absolute z.
+  bool has_hitter_pure_boxes() const { return !hp_pos_boxes_.empty(); }
+  const std::vector<std::array<double, 6>>& hp_pos_boxes() const { return hp_pos_boxes_; }
+  const std::vector<std::array<double, 6>>& hp_vel_boxes() const { return hp_vel_boxes_; }
+  const std::array<double, 4>& hp_base_range() const { return hp_base_range_; }
 
   // Reference base->racket reach offset at a given time_step, computed from the baked refs:
   // blade world xy (ref pelvis pose + racket FK on the ref joints) minus ref pelvis xy. Same
@@ -198,6 +234,8 @@ class PpOnnxPolicy {
   std::vector<std::string> joint_names_, body_names_;
   std::vector<double> clip_seg_lengths_, clip_strike_phases_;  // empty on legacy exports
   std::vector<Vec2> reach_offsets_;  // per-clip ref base->racket reach; empty on old exports
+  std::vector<std::array<double, 6>> hp_pos_boxes_, hp_vel_boxes_;  // hitter_pure geometry
+  std::array<double, 4> hp_base_range_ = {0.0, 0.0, 0.0, 0.0};
   Eigen::VectorXd default_q_, action_scale_, kp_, kd_;
   std::vector<float> obs_f_;
   int obs_dim_ = kObsDim;  // detected from the model input at load (180 full / 175 deploy_parity)

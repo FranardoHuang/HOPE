@@ -1,0 +1,26 @@
+# HITTER-PURE (110-D) arena profile — overlay on hope_planner.yaml (2026-07-07).
+#
+# Design deltas vs the 175/177 legacy profile, all paper-driven (arXiv:2508.21043):
+#   * FIXED virtual hit plane (§IV-B: "predefined virtual hit plane"; the paper's robot
+#     WALKS to a commanded station behind the plane, Fig. 4). x_hit_follow_robot: false
+#     kills the adaptive plane-chases-robot coupling (the documented "+x march").
+#     robot_pose_topic is still REQUIRED — it feeds /a3/base_pose_flat, which the 110-D
+#     runner needs every tick for its world-frame deltas (base_target_delta_xy,
+#     racket_target_rel_base). 110 deploy is mocap-mandatory.
+#   * x_hit placement: pick per venue so the demanded strike stays reachable from a legal
+#     station: station_x = x_hit − 0.70 (the trained plane offset; the runner derives the
+#     station from the ONNX metadata boxes). With the robot starting at table x ≈ −0.5,
+#     x_hit = 0.20 puts the commanded station at −0.50 = the start position.
+#   * x_hit_offset 0.70 (was 0.67): the hitter_pure trained plane sits exactly 0.70 m in
+#     front of the commanded station (cfg/task/HOPEPingPongHitterPure.yaml pos_range_per_clip
+#     x: [0.70, 0.70] both clips). Only used if x_hit_follow_robot is ever re-enabled.
+#   * Everything else (ball physics, flats, z offset) inherits the venue values.
+#
+# Launch (arena):
+#   ros2 run hope_planner hope_planner_node --ros-args \
+#     --params-file config/hope_planner.yaml --params-file config/hope_planner.hitter_pure.yaml
+hope_planner:
+  ros__parameters:
+    x_hit_follow_robot: false
+    x_hit: 0.20
+    x_hit_offset: 0.70

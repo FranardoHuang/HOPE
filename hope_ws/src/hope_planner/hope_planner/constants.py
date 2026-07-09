@@ -69,7 +69,10 @@ class PlannerConfig:
     # Trajectory prediction
     dt_integrate: float = 0.001   # integration time step (s)
     max_predict_time: float = 2.0  # max forward prediction horizon (s)
-    bounce_z_tol: float = 0.005   # z threshold for bounce detection (m)
+    bounce_z_tol: float = 0.005   # legacy point-ball / bottom-of-ball threshold (m)
+    bounce_center_z_max: float = 0.05  # real mocap tracks the ball center: accept a local z-minimum
+                                  # below radius + sampling/occlusion margin as a bounce and clear
+                                  # the fit window, instead of fitting velocity across the contact.
     # Adaptive integration (远粗近细): 0.0 = OFF = the legacy fixed-dt Euler
     # path, byte-identical. When > dt_integrate, the predictor cruises with
     # RK4 steps of this size and drops to dt_integrate-sized Euler sub-steps

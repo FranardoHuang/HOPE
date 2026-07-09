@@ -892,3 +892,195 @@ class HOPEPingPongHitterAgibotA3EnvCfg(HOPEPingPongDeployParityAgibotA3EnvCfg):
         # the station, not the reach depth. Jitter ranges (base_target_*_range) train deliberate
         # station offsets (y-reach diversity); the yaml preset owns their spans.
         self.commands.racket_target.base_couple_mode = "reference_reach"
+
+
+##
+# HITTER-PURE variant (2026-07-07) — faithful reproduction of the paper's MDP, replacing the
+# accumulated HOPE machinery. Decision context: model_17400 (177-D hitter_footwork) deploys and
+# stands on hardware but swings on ~1/10 served balls and misses — the trained distribution is
+# clip-centered and narrow, the actor carries the 62-D reference stream (paper: CRITIC-only,
+# Table I), and the face-normal target was locked to the reference clip (paper §IV-C: the racket
+# plane is PERPENDICULAR TO ITS VELOCITY at impact). This variant re-aligns all three.
+#
+# vs the paper (arXiv:2508.21043), EXACT alignment:
+#   * Actor obs = Table I structure sized for the A3 (110-D): ang vel, gravity, e_base,x,
+#     Δbase target (world xy), racket target rel base (world), racket target vel (world),
+#     time-to-strike, q/q̇/a_last. NO reference joints, NO swing_type, NO anchor terms.
+#   * Separate commands (§V-B-1): base station sampled INDEPENDENTLY (paper Fig. 4: up to
+#     ±0.75-0.8 m, 1 cm arrival in <0.8 s); racket target on a plane FIXED relative to the
+#     commanded station (their 0.4 m on the G1; our A3 analog = the clips' blade reach 0.70 m),
+#     only y/z sampled, per-swing-type non-overlapping regions.
+#   * Normal target = velocity direction (§IV-C impact model) — the policy must LEARN the wrist
+#     orientation (initial error 18-110°; expected to learn slowly, do NOT "fix" it by moving
+#     the target back to the reference normal — that is how legal returns became 0%).
+#   * Reward = dense upper-body imitation + sparse goal (racket pos/vel/normal in the strike
+#     window; base position pre-strike only) + generic regularization. NO hold_ready, NO foot/
+#     stability shaping, NO HER replay, NO base_decel (paper has none of them).
+#   * 10 s episodes, multiple swings, swing type + targets resampled per swing, no hold phase.
+#
+# Deliberate departures (kept, with reasons):
+#   * stand_start_prob 0.25 + no-teleport wraps (deploy-honest entry/transition; paper does not
+#     document its reset scheme).
+#   * DR keeps PD ±15% / link mass ±15% (sim2real; paper fixes PD).
+#   * Tuned kernel widths from the 0625-0706 lineage (paper publishes no weights/stds).
+#
+# Deploy contract: 110-D `hitter_pure` — needs a NEW C++ obs builder + a planner that streams
+# (station, racket target, vel, tts) CONTINUOUSLY (no engage-lock). See actor_observation_contract.
+##
+
+
+@configclass
+class HOPEObservationsHitterPureCfg(HOPEObservationsCfg):
+    """HITTER Table-I actor (110-D, world-frame targets + e_base,x); critic unchanged (privileged)."""
+
+    @configclass
+    class HOPEPolicyHitterPureCfg(ObservationsCfg.PolicyCfg):
+        # --- remove every non-Table-I term from the BeyondMimic base actor ---
+        command = None  # 62-D reference joint stream: CRITIC-ONLY in HITTER (Table I)
+        motion_anchor_pos_b = None  # needs world base position; not in Table I
+        motion_anchor_ori_b = None  # reference-coupled orientation error; Table I uses e_base,x instead
+        base_lin_vel = None  # critic-only in HITTER (not measurable on hardware)
+        # --- Table I goal terms (appended after the inherited proprioception) ---
+        projected_gravity = ObsTerm(func=mdp.projected_gravity, noise=Unoise(n_min=-0.05, n_max=0.05))
+        base_forward_xy = ObsTerm(
+            func=mdp.base_forward_xy,
+            params={"command_name": "racket_target"},
+            noise=Unoise(n_min=-0.02, n_max=0.02),
+        )
+        base_target_delta_xy = ObsTerm(
+            func=mdp.base_target_delta_xy,
+            params={"command_name": "racket_target"},
+            noise=Unoise(n_min=-0.03, n_max=0.03),  # ~mocap base-position noise
+        )
+        racket_target_rel_base = ObsTerm(
+            func=mdp.racket_target_rel_base,
+            params={"command_name": "racket_target"},
+            noise=Unoise(n_min=-0.02, n_max=0.02),
+        )
+        racket_target_vel_w = ObsTerm(func=mdp.racket_target_vel_w, params={"command_name": "racket_target"})
+        time_to_strike = ObsTerm(func=mdp.time_to_strike, params={"command_name": "racket_target"})
+
+    @configclass
+    class HOPECriticHitterPureCfg(HOPEObservationsCfg.HOPECriticCfg):
+        # Table I checkmarks EVERY actor term in the critic column too — make the critic a strict
+        # actor superset (audit 2026-07-07): the inherited critic lacked projected_gravity and the
+        # world-frame goal view (it only had the yaw-heading-frame legacy accessors). Live,
+        # noise-free variants; the privileged heading-frame/FK extras above are kept.
+        projected_gravity = ObsTerm(func=mdp.projected_gravity)
+        base_forward_xy = ObsTerm(func=mdp.base_forward_xy, params={"command_name": "racket_target"})
+        base_target_delta_xy = ObsTerm(
+            func=mdp.base_target_delta_xy, params={"command_name": "racket_target"}
+        )
+        racket_target_rel_base = ObsTerm(
+            func=mdp.racket_target_rel_base, params={"command_name": "racket_target"}
+        )
+
+    policy: HOPEPolicyHitterPureCfg = HOPEPolicyHitterPureCfg()
+    critic: HOPECriticHitterPureCfg = HOPECriticHitterPureCfg()
+    # critic = HOPECriticCfg (reference joints, body poses T_B, base lin vel, time-left, live
+    # targets + actual racket FK state) + the actor's world-frame goal terms above — a strict
+    # superset of both the paper's critic and the actor. Privileged sim-side only, never deployed.
+
+
+@configclass
+class HOPEHitterPureRewardsCfg(RewardsCfg):
+    """HITTER §V-B-2 faithful reward stack: r = w_i·r_imitation + w_g·r_goal + w_r·r_regularization.
+
+    * r_imitation — dense, UPPER-BODY reference only (paper §V-A: B = bodies above the pelvis);
+      the base is steered by the GOAL terms, not imitation (motion_global_anchor_pos removed).
+    * r_goal — sparse, relatively high weights (paper): racket pos/vel/NORMAL tracking in the
+      strike window; base position tracking PRE-STRIKE only (gated inside the fn).
+    * r_regularization — generic energy/smoothness/safety only. NO hold_ready / foot shaping /
+      waist twist / strike-window stability / torque saturation — the paper has none of them.
+
+    Weights/stds are HOPE tuning (the paper publishes neither); the task YAML owns the numbers.
+    """
+
+    # --- imitation: upper-body only, swing-gated (hold refs are ready-stand; legs decoupled) ---
+    motion_global_anchor_pos = None  # base position is a GOAL (base_position), not imitation
+    motion_body_pos = RewTerm(func=mdp.motion_body_pos_swing_only, weight=1.0,
+        params={"command_name": "motion", "std": 0.3, "body_names": A3_UPPER_TRACKED})
+    motion_body_ori = RewTerm(func=mdp.motion_body_ori_swing_only, weight=1.0,
+        params={"command_name": "motion", "std": 0.4, "body_names": A3_UPPER_TRACKED})
+    motion_body_lin_vel = RewTerm(func=mdp.motion_global_body_linear_velocity_error_exp, weight=1.0,
+        params={"command_name": "motion", "std": 1.0, "body_names": A3_UPPER_TRACKED})
+    motion_body_ang_vel = RewTerm(func=mdp.motion_global_body_angular_velocity_error_exp, weight=1.0,
+        params={"command_name": "motion", "std": 3.14, "body_names": A3_UPPER_TRACKED})
+
+    # --- goal (sparse; strike-window / pre-strike gating lives inside the reward fns) ---
+    racket_position = RewTerm(func=mdp.racket_position_tracking_exp, weight=14.0,
+        params={"command_name": "racket_target", "std": 0.15})
+    racket_velocity = RewTerm(func=mdp.racket_velocity_tracking_exp, weight=14.0,
+        params={"command_name": "racket_target", "std": 0.6})
+    racket_normal = RewTerm(func=mdp.racket_normal_tracking_exp, weight=5.0,
+        params={"command_name": "racket_target", "std": 0.30})
+    base_position = RewTerm(func=mdp.base_position_tracking_exp, weight=2.0,
+        params={"command_name": "racket_target", "std": 0.20})
+    racket_strike_success = RewTerm(func=mdp.racket_strike_success, weight=5.0,
+        params={"command_name": "racket_target", "std_pos": 0.075, "std_vel": 0.5, "std_normal": 0.262})
+    # OFF by default (not in the paper). Declared as a fallback shaping knob: if from-scratch
+    # exploration cannot find the strike window over the wide station box, re-enable via
+    # task.rewards (racket_progress telescopes to distance-reduced; weight 0.0 = skipped).
+    racket_progress = RewTerm(func=mdp.racket_progress, weight=0.0, params={"command_name": "racket_target"})
+
+    # --- regularization (generic only) ---
+    joint_torques = RewTerm(func=mdp.joint_torques_l2, weight=-1.0e-5)
+    joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-1.0e-4)
+    upright = RewTerm(func=mdp.flat_orientation_l2, weight=-1.0)
+    base_ang_vel_xy = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
+    base_lin_vel_z = RewTerm(func=mdp.lin_vel_z_l2, weight=-0.5)
+    # (inherited & kept: motion_global_anchor_ori 0.5, action_rate_l2 -0.1, joint_limit -10,
+    #  undesired_contacts -0.1.)
+
+
+@configclass
+class HOPEPingPongHitterPureAgibotA3EnvCfg(HOPEPingPongAgibotA3EnvCfg):
+    """Faithful HITTER MDP on the A3 (110-D hitter_pure actor contract). Code defaults below MIRROR
+    cfg/task/HOPEPingPongHitterPure.yaml so eval/verify scripts that bypass train.py see the same
+    task — keep the two in sync (the YAML wins at train time)."""
+
+    obs_mode: str = "hitter_pure"
+    observations: HOPEObservationsHitterPureCfg = HOPEObservationsHitterPureCfg()
+    rewards: HOPEHitterPureRewardsCfg = HOPEHitterPureRewardsCfg()
+    terminations: HOPEDeployParityTerminationsCfg = HOPEDeployParityTerminationsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        # HITTER episode: 10 s, multiple swings, no hold phase (consecutive strikes train the
+        # between-swing recovery; deploy idle is the runner's static-stand handoff, not a policy
+        # state). stand_start_prob keeps the deploy entry in-distribution (min-hold 25 = 0.5 s to
+        # settle stand -> windup); post-swing buffer starts OFF (not in the paper).
+        self.episode_length_s = 10.0
+        self.commands.motion.hold_steps_range = (0, 0)
+        self.commands.motion.post_swing_start_prob = 0.0
+
+        # Mirror the YAML's DR exactly (audit 2026-07-07): the inherited HOPEEventCfg default is
+        # ±20%, but the pre-approved sim2real departure is ±15% — without this, every script that
+        # bypasses train.py's override layer (verify/eval/export) ran a different DR distribution.
+        self.events.randomize_pd_gains.params["stiffness_distribution_params"] = (0.85, 1.15)
+        self.events.randomize_pd_gains.params["damping_distribution_params"] = (0.85, 1.15)
+
+        C = self.commands.racket_target
+        C.target_mode = "hitter_pure"
+        C.normal_mode = "velocity"  # §IV-C: racket plane ⊥ velocity at impact (LEARNED, not ref-locked)
+        C.strike_phase_per_clip = (0.47, 0.333)  # blade-speed-peak re-plane (hopex clips, 2026-07-02)
+        C.strike_window_s = 0.12
+        C.clean_reference_strike_velocity = True
+        C.achieved_target_mix_prob = 0.0  # no HER in the paper
+        # Independent STATION box (world xy around the env origin; paper Fig. 4 goes to ±0.75-0.8 m —
+        # start at ±0.40 = the proven trained band, widen on resume once arrival is established).
+        C.base_target_x_range = (-0.10, 0.10)
+        C.base_target_y_range = (-0.40, 0.40)
+        # STATION-RELATIVE racket boxes: x = the FIXED striking plane (blade reach of both clips
+        # ≈ 0.70 m in front of the commanded station), y = per-swing non-overlapping bands centered
+        # on each clip's natural lateral reach (fh −0.409 / bh +0.185), z = absolute height bands
+        # centered on each clip's blade strike height (fh 0.82 / bh 1.03), half-width 0.15.
+        C.racket_pos_range_per_clip = (
+            ((0.70, 0.70), (-0.65, -0.15), (0.67, 0.97)),  # forehand
+            ((0.70, 0.70), (-0.05, 0.45), (0.88, 1.18)),   # backhand
+        )
+        # Blade-replaned per-clip velocity boxes (world frame, 2026-07-02 lineage).
+        C.racket_vel_range_per_clip = (
+            ((1.05, 2.05), (0.96, 1.96), (0.31, 1.11)),    # forehand
+            ((1.61, 2.61), (-1.21, -0.21), (0.00, 0.71)),  # backhand
+        )

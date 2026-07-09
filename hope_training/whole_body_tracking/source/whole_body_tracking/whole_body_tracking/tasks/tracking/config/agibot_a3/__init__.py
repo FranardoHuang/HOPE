@@ -77,3 +77,18 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
     },
 )
+
+# HOPE ping-pong WBC — HITTER-PURE faithful reproduction (2026-07-07, arXiv:2508.21043).
+# Actor = Table I exact (110-D hitter_pure: NO reference stream, NO swing_type, world-frame
+# targets + e_base,x); independent station sampling + station-relative fixed striking plane;
+# face-normal target = velocity direction (§IV-C); no hold / HER / foot shaping. Needs a NEW
+# C++ obs builder + continuously-streaming planner targets before deploy (see hope_env_cfg).
+gym.register(
+    id="HOPE-PingPong-HitterPure-AgibotA3-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": hope_env_cfg.HOPEPingPongHitterPureAgibotA3EnvCfg,
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
+    },
+)

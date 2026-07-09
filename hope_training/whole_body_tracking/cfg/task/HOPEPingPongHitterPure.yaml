@@ -1,0 +1,185 @@
+# =============================================================================
+# HOPE ping-pong WBC (Agibot A3) — HITTER-PURE faithful reproduction (2026-07-07).
+#
+# Selected with `task=HOPEPingPongHitterPure`. GOAL: reproduce the HITTER paper's MDP
+# (arXiv:2508.21043) exactly, then optimize — NOT the other way around. Decision context:
+# model_17400 (177-D hitter_footwork lineage) deploys and stands on hardware but swings on
+# ~1/10 served balls and misses the ball — three structural divergences from the paper were
+# identified (2026-07-07 review, papers/2508.21043v2.pdf read in full):
+#   1. actor obs carried the 62-D reference joint stream + swing_type — Table I keeps the
+#      reference CRITIC-ONLY and swing type out of the policy entirely (§V-B-3): the policy
+#      was clip-locked instead of goal-conditioned.
+#   2. target distribution was clip-centered and narrow (world-frame boxes around the demo
+#      strike point, station coupled to the target via reference_reach) — the paper samples
+#      the base station INDEPENDENTLY (Fig. 4: up to ±0.75-0.8 m, 1 cm arrival < 0.8 s) and
+#      fixes the striking plane RELATIVE to the commanded station, sampling only y/z.
+#   3. face-normal target was locked to the reference clip normal (trivially satisfied,
+#      never learned) — the paper's impact model (§IV-C) demands the racket plane be
+#      PERPENDICULAR TO ITS VELOCITY at impact; legal returns require a learned wrist.
+#
+# WHAT THIS TASK REMOVES (present in HOPEPingPongHitter, absent in the paper):
+#   hold phase + hold_ready, HER achieved-target replay, base_decel, foot_slip/foot_drag/
+#   waist-twist/prestrike-upright/strike-window stability shaping, arm_torque_saturation,
+#   reference_reach station coupling, 16 s episodes, swing_type + reference stream in actor.
+#
+# WHAT IT KEEPS (sim correctness / sim2real, NOT paper divergences):
+#   re-grounded hopex clips, blade re-plane strike phases (0.47/0.333), blade-FK velocity
+#   targets, implicit actuators + joint friction (robots/agibot_a3.py), DR (PD ±15% is a
+#   deliberate sim2real departure — paper fixes PD), tuned kernel widths (paper publishes
+#   no weights/stds), stand_start entries + no-teleport wraps (deploy-honest).
+#
+# DECLARED DEPARTURES from the paper's letter (audit 2026-07-07, kept on purpose):
+#   * imitation anchor = torso_Link and B excludes the pelvis (paper: pelvis anchor,
+#     B = pelvis+torso+arms). Whole-lineage A3 convention (A3_ANCHOR_BODY); the global
+#     torso-ori term carries the face-forward signal. Changing anchors mid-lineage risks
+#     regressions for a functionally-close difference.
+#   * generic base-stability regularizers kept (upright -1.0 / ang_vel_xy -0.05 /
+#     lin_vel_z -0.5): the paper's r_r is unspecified ("provides regularization"); these are
+#     our r_r choices, same family as action_rate/joint_limit. A/B-able by zeroing in code.
+#   * racket_position tracks the swing-through point (target_pos − target_vel·tts inside the
+#     ±0.12 s window), coinciding with p̂_racket exactly at tts=0. rewards.racket_position_static
+#     = true restores the literal point reading.
+#   * midswing_resample_prob stays 0.0 (paper samples targets once per swing and relies on
+#     generalization for the deploy-time streaming refinement). Set ~0.02 as a robustness rider
+#     if the streamed-deploy path shows mid-swing target updates are OOD.
+#
+# ACCEPTANCE ("reproduced") — mirror the paper's own evaluations:
+#   * Fig. 4 replica in sim: stations sampled over the box; time-to-1cm-arrival < 0.8 s
+#     mean, >= 94% success (widen the station box toward ±0.75 on resume once this holds).
+#   * strike composite (pos/vel/NORMAL — normal is now a real, learned component) on the
+#     wide station-relative boxes; rank checkpoints by eval_deterministic, not W&B rollout.
+#   * deploy gate: 26-ball protocol (paper: 96.2% hit / 92.3% return). Requires the R2
+#     deploy work first: 110-D C++ obs builder + planner streaming targets continuously
+#     (NO engage-lock — the paper's planner refines the command until contact, Fig. 3).
+#
+# SYNC NOTE: the code defaults in HOPEPingPongHitterPureAgibotA3EnvCfg.__post_init__ MIRROR
+# this file so verify/eval scripts that bypass train.py see the same task. Edit BOTH.
+# =============================================================================
+
+name: HOPEPingPongHitterPure
+gym_task: HOPE-PingPong-HitterPure-AgibotA3-v0
+experiment_name: agibot_a3_hope_hitter_pure
+actor_obs_contract: hitter_pure
+
+# Unified forehand+backhand policy (paper: one policy, swing type sampled per swing).
+# ⚠ registry :latest = the re-grounded hopex lineage (frame-0 pelvis yaw exactly 0) — see the
+# GROUNDING note in HOPEPingPongHitter.yaml before re-uploading clips.
+registry_name: ${oc.env:WANDB_REGISTRY_ORG,dongc_1-university-of-california-berkeley-org}/wandb-registry-motions/hope_forehand
+registry_name_2: ${oc.env:WANDB_REGISTRY_ORG,dongc_1-university-of-california-berkeley-org}/wandb-registry-motions/hope_backhand
+
+defaults:
+  - /base/env_base@_here_
+  - /base/sim_base@_here_
+  - /base/randomization_base@_here_
+  - _self_
+
+env:
+  # HITTER: 10 s episodes, multiple swings back-to-back (~4-5 swings/episode), target + swing
+  # type resampled on each clip wrap. (16 s was the long-hold ARM-A budget; no holds here.)
+  episode_length_s: 10.0
+
+# ---- swing-entry structure (MotionCommand) -----------------------------------
+motion:
+  # No teleport at clip wraps: the policy physically carries the body between consecutive
+  # swings (this IS the paper's "consecutive strikes ... reliable balance recovery").
+  wrap_teleport: false
+  # Deploy-honest entry: 25% of true resets start from the default STAND (paper does not
+  # document its reset scheme; this is a deliberate, cheap keep).
+  stand_start_prob: 0.25
+  stand_start_min_hold: 25
+  # NO hold phase (paper has none): the ONLY holds are the 0.5 s stand-start settle above.
+  # Deploy idle/waiting is the runner's static-stand handoff, not a trained policy state.
+  hold_steps_range: [0, 0]
+  post_swing_start_prob: 0.0
+  clip_switch_prob: 0.0
+
+# ---- reward weights / kernel std ---------------------------------------------
+# Structure = paper (§V-B-2): dense upper-body imitation + sparse high-weight goal + generic
+# regularization. Numbers = HOPE tuning lineage (paper publishes neither weights nor kernels):
+#   racket_position std 0.15  — operating-band bracket (0625/0703 anti-saturation lessons)
+#   racket_velocity std 0.6   — anti-plateau (0626: std 1.0 hands over the reward at 59% speed)
+#   racket_normal   std 0.30  — now a REAL learning signal (velocity-normal target): expect the
+#                               error to start 18-110° and fall SLOWLY; do not widen the box or
+#                               re-lock the target to the reference normal to make it look good.
+#   base_position   std 0.20  — live gradient over the 0-0.40 m station band (dead below ~0.18
+#                               at fresh 0.40 m stations; revisit with a fine kernel when chasing
+#                               the paper's 1 cm arrival).
+rewards:
+  racket_position_weight: 14.0
+  racket_position_std: 0.15
+  racket_velocity_weight: 14.0
+  racket_velocity_std: 0.6
+  racket_normal_weight: 5.0
+  racket_normal_std: 0.30
+  base_position_weight: 2.0
+  base_position_std: 0.20
+  # regularization (generic only — the paper has NO foot/stability/hold shaping)
+  joint_torques_weight: -0.00003
+  action_rate_weight: -0.10
+  joint_limit_weight: -10.0
+  undesired_contacts_weight: -0.1
+
+# ---- target sampling: HITTER §V-B-1 separate commands, paper-exact ------------
+racket:
+  # hitter_pure sampling order (hope_commands._sample_targets_hitter_pure):
+  #   1. base STATION sampled INDEPENDENTLY from base_target_*_range (a station BOX around the
+  #      env origin, not a jitter). Start ±0.40 y (the proven trained band); widen toward the
+  #      paper's ±0.75 on resume once arrival is established.
+  #   2. racket target on the striking plane FIXED RELATIVE TO THE STATION: pos_range_per_clip
+  #      is STATION-RELATIVE in this mode — x degenerate at 0.70 (both clips' blade reach ≈
+  #      0.699/0.706 m in front of the pelvis; the paper's "0.4 m" is a G1 number), y = per-swing
+  #      non-overlapping bands centered on each clip's natural lateral reach (fh −0.409 /
+  #      bh +0.185, half-width 0.25, 0.10 m gap at the fh/bh boundary), z = ABSOLUTE height
+  #      bands centered on each clip's blade strike height (fh 0.82 / bh 1.03, half-width 0.15).
+  #   3. velocity from vel_range_per_clip (blade-replaned, world frame), then the face-normal
+  #      target = velocity direction (normal_mode below; paper §IV-C impact model).
+  target_mode: hitter_pure
+  normal_mode: velocity
+  base_target_x_range: [-0.10, 0.10]
+  base_target_y_range: [-0.40, 0.40]
+  pos_range_per_clip:
+    forehand: {x: [0.70, 0.70], y: [-0.65, -0.15], z: [0.67, 0.97]}
+    backhand: {x: [0.70, 0.70], y: [-0.05,  0.45], z: [0.88, 1.18]}
+  vel_range_per_clip:
+    forehand: {x: [1.05, 2.05], y: [ 0.96, 1.96], z: [0.31, 1.11]}
+    backhand: {x: [1.61, 2.61], y: [-1.21, -0.21], z: [0.00, 0.71]}
+
+  # Strike timing: blade-speed-peak phases on the re-grounded hopex clips (re-planed 2026-07-02).
+  strike_phase: 0.47
+  strike_phase_per_clip: [0.47, 0.333]
+  strike_window_s: 0.12
+  strike_success_pos_thresh: 0.075
+  clean_reference_strike_velocity: true
+  clean_strike_vel_window: 2
+
+  # Paper convention: forehand on the paddle-arm side (right arm → -y), regions non-overlapping.
+  forehand_on_negative_y: true
+  mount_normal_axis: 1
+  mount_normal_sign: 1.0
+
+  # NO HER replay (paper samples fresh targets only).
+  achieved_target_mix_prob: 0.0
+  # NO adaptive sigma (fixed kernels for a clean, reproducible recipe).
+  adaptive_sigma: false
+
+  # ---- A1 target latency / mocap-degradation knobs (declared for CLI experiments; ALL OFF) ----
+  # The paper's planner refines the command until contact (Fig. 3) — once the R2 deploy side
+  # streams targets continuously, midswing_resample_prob becomes the training-side analog.
+  target_delay_steps: 0
+  target_jitter_pos_per_s: 0.0
+  target_jitter_vel_per_s: 0.0
+  target_noise_white: 0.0
+  target_noise_ar1_sigma: 0.0
+  target_noise_ar1_rho: 0.717
+  target_dropout_prob: 0.0
+  target_post_strike_dropout_s: 0.0
+  target_bias_per_swing: 0.0
+  midswing_resample_prob: 0.0
+  midswing_resample_tts_floor: 0.3
+
+# ---- domain randomization ------------------------------------------------------
+# Paper prose: mass/friction/restitution + perception noise; PD gains FIXED. PD ±15% kept as a
+# deliberate sim2real departure (AGI backend gain mismatch); link mass ±15%.
+domain_rand:
+  link_mass_range: [0.85, 1.15]
+  pd_gain_range: [0.85, 1.15]

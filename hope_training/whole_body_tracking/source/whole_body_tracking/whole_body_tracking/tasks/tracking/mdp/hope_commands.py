@@ -1116,6 +1116,79 @@ class RacketTargetCommand(CommandTerm):
         # Stage-1 question bank: overrides pos/vel + target_normal_cmd for these envs (no-op when off).
         self._apply_question_bank_targets(env_ids, origins, n)
 
+    def _sample_targets_hitter_pure(
+        self, env_ids: Sequence[int], origins: torch.Tensor, n: int, resample_base: bool = True
+    ):
+        """HITTER-faithful sampling (arXiv:2508.21043 §V-B-1 + §IV-C), 2026-07-07.
+
+        Order and frames follow the paper exactly:
+
+        1. BASE STATION first, sampled INDEPENDENTLY around the env origin (world frame) from
+           ``base_target_x_range`` / ``base_target_y_range`` (which are the STATION BOX here, not a
+           jitter — paper Fig. 4 evaluates initial station distances up to ±0.8 m).
+        2. RACKET TARGET on a striking plane FIXED RELATIVE TO THE COMMANDED STATION ("0.4 m in
+           front of the robot" on their G1; our A3 analog is the clips' blade reach x ≈ 0.70 m):
+           the per-clip ``racket_pos_range_per_clip`` boxes are interpreted as STATION-RELATIVE
+           x/y offsets (x degenerate = the fixed plane, y = the swing-side band) with z absolute
+           above the ground. Forehand/backhand y-bands must be non-overlapping (paper §V-B-1).
+        3. RACKET VELOCITY from the per-clip velocity boxes (world frame), then the target FACE
+           NORMAL from ``normal_mode``: "velocity" = the paper's §IV-C impact model ("the racket
+           plane is perpendicular to its velocity vector") — the policy must LEARN to orient the
+           blade; do NOT fall back to the reference-clip normal here (that made the normal term
+           trivially satisfied and is why deployed models could touch balls but not return them).
+
+        No HER replay, no reference_reach coupling, no curriculum in this mode.
+
+        ``resample_base=False`` (mid-swing refinement path): keep the CURRENT station and only
+        re-draw the racket target/velocity around it — the paper's Fig. 3 refinement converges on
+        WHERE the ball arrives; it never teleports the commanded stance mid-swing.
+        """
+        motion = self._motion()
+        if self._pos_range_per_clip_t is None or self._vel_range_per_clip_t is None:
+            raise RuntimeError(
+                "target_mode='hitter_pure' requires racket_pos_range_per_clip AND "
+                "racket_vel_range_per_clip (station-relative position boxes; see "
+                "HOPEPingPongHitterPure.yaml)."
+            )
+
+        # 1) independent base station (world xy, around the env origin).
+        if resample_base:
+            base_xy = origins[:, :2].clone()
+            base_xy[:, 0] += sample_uniform(*self.cfg.base_target_x_range, (n,), self.device)
+            base_xy[:, 1] += sample_uniform(*self.cfg.base_target_y_range, (n,), self.device)
+            self.base_target_pos_w[env_ids] = base_xy
+        else:
+            base_xy = self.base_target_pos_w[env_ids].clone()
+
+        # 2) racket target: per-clip STATION-RELATIVE box (x = fixed plane, y = swing band), z above ground.
+        if motion._multiseg:
+            clip = motion.clip_id[env_ids]
+        else:
+            clip = torch.zeros(n, dtype=torch.long, device=self.device)
+        rng_e = self._pos_range_per_clip_t[clip]                # (n, 3, 2): [env][x/y/z][lo/hi]
+        lo, hi = rng_e[..., 0], rng_e[..., 1]
+        off = lo + (hi - lo) * torch.rand(n, 3, device=self.device)
+        pos = origins.clone()
+        pos[:, 0] = base_xy[:, 0] + off[:, 0]
+        pos[:, 1] = base_xy[:, 1] + off[:, 1]
+        pos[:, 2] = origins[:, 2] + off[:, 2]
+        self.racket_target_pos_w[env_ids] = pos
+
+        # 3) racket velocity (world) + face normal from normal_mode (paper: velocity direction).
+        rng_v = self._vel_range_per_clip_t[clip]
+        lo_v, hi_v = rng_v[..., 0], rng_v[..., 1]
+        vel = lo_v + (hi_v - lo_v) * torch.rand(n, 3, device=self.device)
+        self.racket_target_vel_w[env_ids] = vel
+
+        if self.cfg.normal_mode == "sampled":
+            normal = torch.empty(n, 3, device=self.device)
+            normal[:, 0] = sample_uniform(*self.cfg.racket_normal_x_range, (n,), self.device)
+            normal[:, 1] = sample_uniform(*self.cfg.racket_normal_y_range, (n,), self.device)
+            normal[:, 2] = sample_uniform(*self.cfg.racket_normal_z_range, (n,), self.device)
+        else:  # "velocity" (paper §IV-C impact model)
+            normal = vel.clone()
+        self.racket_target_normal_w[env_ids] = normal / (torch.norm(normal, dim=-1, keepdim=True) + 1e-6)
+
     def _sample_targets_reference_perturbed(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
         """Target = this env's reference racket state @ strike + curriculum-scaled perturbation.
 
@@ -1235,10 +1308,13 @@ class RacketTargetCommand(CommandTerm):
         # fall if the env terminated before reaching the strike frame.
         self._count_swing_starts(env_ids, count_prestrike_falls=not self._resample_is_wrap)
 
-        # Desired racket pos/vel/normal — either independent box sampling (legacy) or coupled to the
-        # reference swing's strike state (reachable-by-construction; reimplement.md step 13 / rank 5).
+        # Desired racket pos/vel/normal — independent box sampling (legacy uniform), coupled to the
+        # reference swing's strike state (reference_perturbed), or HITTER-faithful station-first
+        # sampling (hitter_pure: base station independent, racket plane fixed relative to the station).
         if self.cfg.target_mode == "reference_perturbed":
             self._sample_targets_reference_perturbed(env_ids, origins, n)
+        elif self.cfg.target_mode == "hitter_pure":
+            self._sample_targets_hitter_pure(env_ids, origins, n)
         else:
             self._sample_targets_uniform(env_ids, origins, n)
 
@@ -1247,7 +1323,11 @@ class RacketTargetCommand(CommandTerm):
         # offset). Independent sampling used to fight the arm's reach (the base_position reward pulled
         # the base away from where the racket needed it). base_target_*_range is now a SMALL JITTER
         # around the coupled point. Legacy "uniform" mode keeps the old origin-relative sampling.
-        if self._question_bank is not None:
+        # hitter_pure sampled the station inside the sampler; question-bank tasks retain their
+        # fixed per-clip ready anchor. The two modes are deliberately mutually exclusive here.
+        if self.cfg.target_mode == "hitter_pure":
+            pass
+        elif self._question_bank is not None:
             # Stage-1/S2a BASE PIN: fixed per-clip ready anchor (the coupling evaluated ONCE with
             # the bank's fixed contact point — see _qb_base_anchor_off_xy), never the per-question
             # coupling below. Numerically identical while the question point is fixed (S1); becomes
@@ -1295,9 +1375,12 @@ class RacketTargetCommand(CommandTerm):
                 base_xy[:, 1] += (blend * racket_y_off).clamp(
                     -self.cfg.base_couple_max_offset, self.cfg.base_couple_max_offset
                 )
-        base_xy[:, 0] += sample_uniform(*self.cfg.base_target_x_range, (n,), self.device)
-        base_xy[:, 1] += sample_uniform(*self.cfg.base_target_y_range, (n,), self.device)
-        self.base_target_pos_w[env_ids] = base_xy
+        if self.cfg.target_mode != "hitter_pure":
+            # hitter_pure sampled the station inside the sampler; base_target_*_range was the
+            # station box there, NOT a jitter — adding it again would double-sample.
+            base_xy[:, 0] += sample_uniform(*self.cfg.base_target_x_range, (n,), self.device)
+            base_xy[:, 1] += sample_uniform(*self.cfg.base_target_y_range, (n,), self.device)
+            self.base_target_pos_w[env_ids] = base_xy
 
         # R10c 站位锚:常数 = env origin + 可配置偏移。每次 resample 重写同一常数(幂等,
         # 放这里只因 origins 在手);故意不带抖动、不跟 racket/base_target 耦合——它是"你该站在
@@ -1525,6 +1608,10 @@ class RacketTargetCommand(CommandTerm):
                 origins = self._env.scene.env_origins[ids]
                 if self.cfg.target_mode == "reference_perturbed":
                     self._sample_targets_reference_perturbed(ids, origins, len(ids))
+                elif self.cfg.target_mode == "hitter_pure":
+                    # Refinement re-draws WHERE around the UNCHANGED station (paper Fig. 3
+                    # convergence; the commanded stance never teleports mid-swing).
+                    self._sample_targets_hitter_pure(ids, origins, len(ids), resample_base=False)
                 else:
                     self._sample_targets_uniform(ids, origins, len(ids))
                 self._prev_racket_dist[ids] = torch.norm(
@@ -2532,6 +2619,29 @@ class RacketTargetCommand(CommandTerm):
         部署侧同 Hitter:mocap base 位置可算相对 Δ,掉 mocap 喂 Δ=0 优雅退化成"没漂"。"""
         return self._target_xy_err_b(self.station_anchor_pos_w)
 
+    # --- HITTER Table-I exact accessors (hitter_pure contract, 2026-07-07) ----------------------- #
+    # The paper expresses target vectors in the WORLD frame and gives the actor the base forward
+    # vector e_base,x separately (instead of pre-rotating into the heading frame). Deploy sources:
+    # position differences = planner target − mocap base position (both in the mocap/table world
+    # frame, no rotation needed); e_base,x = IMU orientation after the runner's yaw-align-at-engage.
+    def base_forward_xy(self) -> torch.Tensor:
+        """Base forward unit vector e_base,x, world-frame xy (HITTER Table I)."""
+        fwd = quat_apply(
+            self.base_quat_w,
+            torch.tensor([1.0, 0.0, 0.0], device=self.device).expand(self.num_envs, 3),
+        )[:, :2]
+        return fwd / (torch.norm(fwd, dim=-1, keepdim=True) + 1e-6)
+
+    def base_target_delta_xy_w(self) -> torch.Tensor:
+        """Target base position p̂_base,xy − p_base,xy, WORLD frame (HITTER Table I)."""
+        return self.base_target_pos_w - self.base_pos_w[:, :2]
+
+    def racket_target_rel_base_w(self) -> torch.Tensor:
+        """Target racket position relative to the base, WORLD frame (HITTER Table I / §V-B-1:
+        "the racket position relative to the base ... expressed in the world frame").
+        A1: reads the ACTOR-visible target view (delayed/jittered when the knobs are on)."""
+        return self.actor_racket_target_pos_w() - self.base_pos_w
+
     # ------------------------------------------------------------------ #
     # Debug visualization (no-op stubs; targets are world-frame buffers).
     # ------------------------------------------------------------------ #
@@ -2605,6 +2715,11 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # "reference_perturbed": target = the reference swing's racket state AT the strike frame (pos/vel/
     #   normal, computed by the same FK as the actual racket) + a curriculum-scaled uniform perturbation.
     #   Reachable by construction (a perfect imitator scores exactly); the *_range fields are ignored.
+    # "hitter_pure": HITTER-faithful (arXiv:2508.21043 §V-B-1 + §IV-C, 2026-07-07): base station sampled
+    #   INDEPENDENTLY from base_target_*_range (a STATION BOX, not jitter); racket target on a striking
+    #   plane FIXED RELATIVE to the commanded station (racket_pos_range_per_clip = STATION-RELATIVE x/y
+    #   offsets, z absolute); face-normal target from normal_mode ("velocity" = paper impact model) —
+    #   NEVER the reference-clip normal. No HER, no reference_reach coupling, no curriculum.
     target_mode: str = "reference_perturbed"
 
     # reference_perturbed perturbation (final half-extents; scaled 0->1 by the curriculum below).
