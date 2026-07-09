@@ -93,6 +93,25 @@ deterministic hash of each question's incoming velocity (question_split, ~80/20)
 partition — so a --split train bank and a --split exam bank are disjoint at ANY generation seeds.
 Exams are scored only on the exam split (docs/stage_curriculum_v1.md).
 
+STROKE GUARD (--stroke-guard {off,stats,enforce}, default stats; 快筛层落地,
+docs/research/stroke_interface_survey_2026-07-09.md §3.1)。人话:题要求的拍速 v* 越高、这条
+clip 触球前的拍面行程 L 越短,触球前需要的最低加速度 a_min = (v*²−v0²)/(2L) 就越高;a_min
+超过机器人实证做得到的拍点加速度包络 a_max(--stroke-budget-clips 实测 × --stroke-budget-scale,
+v4rg 对 ×1.5 = synthesize_timing 时间律工具一族的同一预算口径,只是量在拍点笛卡尔空间而非
+关节空间)= 该题在这条路径上**可证无时间律解**,不该发货。判据是松弛出来的必要条件 ⇒ 只能
+sound-reject;**PASS ≠ 可行**(平衡/力矩耦合/接触可行性全被松弛掉,survey §3.1 诚实边界 1)。
+  * v* = 该题需求拍速 |demanded_vel|(题库答案,不是 clip 标定速);v0 = 起步拍速(默认 0 =
+    ready 静止起步,时间律合成同口径)。
+  * L = L_deep:引拍最深帧 → 触球帧的拍面逐帧位移弧长和(行程账本 stroke_ledger_0709 口径,
+    survey §3.1 诚实边界 3 钉死的那种;实现直接复用 extend_stroke.deep_frame_and_L,单一实现)。
+    触球帧 = 本 bank 的 anchor 帧(annotated / train-candidate,与题目锚一致)。
+  * 分母法则(v1 默认 stats):守卫先并行统计不拦题——摘要行报 "stroke-guard would reject N"
+    给 franco 看数字拍板默认开关;--stroke-guard enforce 才真拦(拒发货并计入分母报表,照
+    net-rejected 先例);--stroke-guard off 完全关闭(不需要预算 clip)。
+  * fail-loud:stats/enforce 下算不出 L(引拍窗退化/相位缺登记)、v* 非有限、预算 clip 缺
+    body 数组,一律 SystemExit,绝不静默跳过——静默跳过会让分母悄悄变假。
+  * --phase-scan 模式不适用(它不发货题目,没有逐题 v*)。
+
 Run (Mac base env or pod venv; numpy+torch+yaml):
     python scripts/gen_stage1_questions.py \
         --clip forehand:/workspace/shared/motions/hope_forehand_hopex.npz \
@@ -325,6 +344,9 @@ def strike_state_from_clip(asp, name: str, path: str, annotations: dict,
         n_frames=int(info["T"]),
         anchor=anchor,
         anchor_phase=float(anchor_phase),
+        # full per-frame blade path (T,3) for the stroke guard's L_deep (positions are
+        # rally-yaw invariant; same racket_w array the contact anchor comes from)
+        blade_path=info["racket_w"].copy(),
     )
 
 
@@ -354,6 +376,160 @@ def question_split(v_in_row) -> str:
     key = np.round(np.asarray(v_in_row, dtype=np.float64), 4).tobytes()
     h = hashlib.blake2b(key, digest_size=8).digest()
     return "exam" if int.from_bytes(h, "big") / 2.0**64 < EXAM_FRAC else "train"
+
+
+# ---------------------------------------------------------------- stroke guard ---- #
+# 行程快筛守卫(survey 2026-07-09 §3.1 落地)— 模块 docstring 的 STROKE GUARD 节有人话版。
+_ES_MOD = None
+
+
+def _stroke_ledger():
+    """extend_stroke.py = THE stroke-ledger implementation (deep_frame_and_L, the
+    stroke_ledger_0709 L_deep 口径) — loaded lazily; numpy-only at import time."""
+    global _ES_MOD
+    if _ES_MOD is None:
+        _ES_MOD = _load_mod("s1_es", os.path.join(HERE, "extend_stroke.py"))
+    return _ES_MOD
+
+
+def blade_acc_envelope(paths):
+    """Per-clip peak blade-point Cartesian |acceleration| [m/s²] on the budget clips.
+
+    Blade convention = synthesize_timing.blade_positions (wrist body + mount FK from the
+    stored body arrays); differentiation = np.gradient twice at the clip's own fps (the
+    csv_to_npz velocity convention). This is the Cartesian blade-point counterpart of the
+    time-law family's joint-space |q̈| envelope — same budget PHILOSOPHY (实证"机器人做
+    得到"的包络), matched to a_min's units because a_min is a Cartesian quantity
+    (survey §3.1 honest boundary 2: until a dedicated tangential-acceleration calibration
+    exists, the guard's reject is only as sound as this envelope convention — recorded in
+    the bank meta so the caveat travels with the data). fail-loud on unreadable clips,
+    missing body arrays, non-finite positions, or too-few frames.
+    """
+    if not paths:
+        raise SystemExit("stroke-guard: empty budget clip list — nothing to calibrate a_max from")
+    es = _stroke_ledger()
+    per = {}
+    for p in paths:
+        try:
+            d = dict(np.load(p))
+        except Exception as exc:  # noqa: BLE001 — whatever np.load throws, name the file
+            raise SystemExit(f"stroke-guard: cannot read budget clip {p!r}: {exc}") from None
+        missing = [k for k in ("fps", "body_pos_w", "body_quat_w") if k not in d]
+        if missing:
+            raise SystemExit(
+                f"stroke-guard: budget clip {p!r} lacks {missing} — the stored body arrays "
+                f"(FK cache) are required to measure the blade-point acceleration envelope")
+        blade = es.st.blade_positions(d)
+        if blade.shape[0] < 5:
+            raise SystemExit(f"stroke-guard: budget clip {p!r} has only {blade.shape[0]} "
+                             f"frames — too short to differentiate twice")
+        if not np.isfinite(blade).all():
+            raise SystemExit(f"stroke-guard: budget clip {p!r} blade positions contain "
+                             f"non-finite values — refusing to calibrate a_max from it")
+        dt = 1.0 / float(np.asarray(d["fps"]).reshape(-1)[0])
+        acc = np.gradient(np.gradient(blade, dt, axis=0), dt, axis=0)
+        per[os.path.basename(p)] = float(np.linalg.norm(acc, axis=1).max())
+    return per
+
+
+def resolve_stroke_guard(mode, budget_clips, scale):
+    """(a_max [m/s²], per-clip envelope dict) — or (None, {}) when the guard is off.
+
+    a_max = max over the budget clips × scale, the SAME budget convention as
+    synthesize_timing (--budget-clips v4rg pair, --budget-scale 1.5). stats/enforce
+    WITHOUT budget clips refuses loudly: 统计模式也要有 a_max 才有数字,静默跳过会让
+    "若开拦会拦掉 N 题" 的分母悄悄变假。
+    """
+    if mode == "off":
+        return None, {}
+    if not budget_clips:
+        raise SystemExit(
+            f"--stroke-guard {mode} needs --stroke-budget-clips (e.g. the v4rg pair "
+            f"hope_forehand_v4rg_cal.npz hope_backhand_v4rg_cal.npz — the proven-executable "
+            f"envelope, same budget convention as the time-law tools); pass "
+            f"--stroke-guard off to generate without the guard")
+    per = blade_acc_envelope(budget_clips)
+    a_max = max(per.values()) * float(scale)
+    if not (np.isfinite(a_max) and a_max > 0.0):
+        raise SystemExit(f"stroke-guard: computed a_max {a_max!r} is not a positive finite "
+                         f"number — the budget clips look degenerate")
+    return a_max, per
+
+
+def stroke_disposition(mode, over_budget: bool) -> str:
+    """'ship' | 'flag' | 'reject' — 分母法则: stats 只计数不拦 (v1 default), enforce 才拦."""
+    if not over_budget or mode == "off":
+        return "ship"
+    return "reject" if mode == "enforce" else "flag"
+
+
+class StrokeGuard:
+    """快筛层 (survey §3.1): a_min = (v*²−v0²)/(2·L_deep) 必要条件下界 vs 拍点包络 a_max.
+
+    Sound-REJECT only: a_min > a_max ⇒ provably NO time law reaches v* on this clip path
+    (the bound holds for ANY tangential-acceleration profile — 匀加速只是取等的那支).
+    a_min ≤ a_max means nothing more than "not disproven": PASS ≠ feasible (balance,
+    torque coupling and contact feasibility are all relaxed away).
+    """
+
+    def __init__(self, clip: str, L_deep: float, deep_frame: int, contact_frame: int,
+                 a_max: float, v0: float = 0.0):
+        if not (np.isfinite(L_deep) and L_deep > 1e-6):
+            raise SystemExit(
+                f"{clip}: stroke-guard cannot price this clip — L_deep={L_deep!r} m from "
+                f"deep frame {deep_frame} to contact frame {contact_frame} (引拍行程退化/"
+                f"不存在); fix the clip / phase registry, or pass --stroke-guard off")
+        if not (np.isfinite(a_max) and a_max > 0.0):
+            raise SystemExit(f"{clip}: stroke-guard a_max={a_max!r} is not positive finite")
+        self.clip = clip
+        self.L_deep = float(L_deep)
+        self.deep_frame = int(deep_frame)
+        self.contact_frame = int(contact_frame)
+        self.a_max = float(a_max)
+        self.v0 = float(v0)
+        self.over_budget_count = 0
+
+    @classmethod
+    def from_blade_path(cls, clip: str, blade_path, contact_frame: int, a_max: float,
+                        v0: float = 0.0):
+        """Build from a clip's per-frame blade positions ((T,3), the analyzer racket_w
+        array; positions are rally-yaw invariant and arc length is rotation-invariant,
+        so no canonicalization is needed here). fail-loud on non-finite paths or a
+        contact frame with no run-up."""
+        blade = np.asarray(blade_path, dtype=np.float64)
+        if blade.ndim != 2 or blade.shape[1] != 3:
+            raise SystemExit(f"{clip}: stroke-guard expected a (T,3) blade path, "
+                             f"got shape {blade.shape}")
+        if not np.isfinite(blade).all():
+            raise SystemExit(f"{clip}: stroke-guard: blade path contains non-finite values "
+                             f"— cannot compute the stroke length L")
+        c = int(contact_frame)
+        if not (0 < c <= blade.shape[0] - 1):
+            raise SystemExit(f"{clip}: stroke-guard: contact frame {c} leaves no pre-contact "
+                             f"stroke to measure (T={blade.shape[0]})")
+        d, L = _stroke_ledger().deep_frame_and_L(blade, c)
+        return cls(clip, L, d, c, a_max, v0)
+
+    @property
+    def v_star_cap(self) -> float:
+        """Largest demanded speed this clip's stroke can ship under a_max [m/s]."""
+        return float(np.sqrt(2.0 * self.a_max * self.L_deep + self.v0 * self.v0))
+
+    def a_min(self, v_star: float) -> float:
+        """Necessary lower bound on pre-contact blade tangential acceleration [m/s²]."""
+        v = float(v_star)
+        if not np.isfinite(v):
+            raise SystemExit(f"{self.clip}: stroke-guard: non-finite demanded speed "
+                             f"v*={v_star!r} — the answer is corrupt, refusing to price it")
+        return (v * v - self.v0 * self.v0) / (2.0 * self.L_deep)
+
+    def check(self, v_star: float):
+        """(a_min, over_budget) for one question; counts over-budget hits on the guard."""
+        a = self.a_min(v_star)
+        over = bool(a > self.a_max)
+        if over:
+            self.over_budget_count += 1
+        return a, over
 
 
 def phase_scan(asp, name: str, path: str, annotations: dict, grip_block: dict, args) -> None:
@@ -482,6 +658,25 @@ def main() -> int:
                     help="keep only this side of the deterministic ~80/20 hash split on the "
                          "incoming-velocity bytes (exam questions are disjoint from training at "
                          "ANY seed); 'all' = no split (current behavior)")
+    # --- stroke guard (快筛层, survey 2026-07-09 §3.1 — see the module docstring) ---------
+    ap.add_argument("--stroke-guard", choices=("off", "stats", "enforce"), default="stats",
+                    help="行程快筛守卫: a_min=(v*²−v0²)/(2·L_deep) > a_max ⇒ 该题在这条 clip "
+                         "路径上可证无时间律解 (必要条件 sound-reject; PASS≠可行). "
+                         "'stats' (default, v1 分母法则) = 只统计不拦题, 摘要行报 '若开拦会拦掉 "
+                         "N 题' 供 franco 拍板; 'enforce' = 真拦 (拒发货并计入分母报表, 照 "
+                         "net-rejected 先例); 'off' = 完全关闭 (不需要预算 clip)")
+    ap.add_argument("--stroke-budget-clips", nargs="+", default=None,
+                    help="[stroke-guard] npz clips whose measured blade-point |acc| envelope "
+                         "defines a_max (e.g. the v4rg pair — the proven-executable floor; "
+                         "SAME budget convention as synthesize_timing --budget-clips, taken "
+                         "at the blade point because a_min is Cartesian). REQUIRED unless "
+                         "--stroke-guard off")
+    ap.add_argument("--stroke-budget-scale", type=float, default=1.5,
+                    help="[stroke-guard] a_max = envelope × this (default 1.5, the time-law "
+                         "family's --budget-scale 口径)")
+    ap.add_argument("--stroke-v0", type=float, default=0.0,
+                    help="[stroke-guard] blade speed at stroke start [m/s] (default 0 = ready "
+                         "静止起步, 时间律合成同口径)")
     # --- phase-scan mode (per-frame returnability under the clip's own swing-velocity cone) ---
     ap.add_argument("--phase-scan", action="store_true",
                     help="scan EVERY frame's returnability instead of building the bank; prints "
@@ -509,6 +704,16 @@ def main() -> int:
             phase_scan(asp, name, path, annotations, grip_block, args)
         return 0
 
+    # stroke guard a_max (v4rg 实证包络 × scale) — resolved ONCE, shared by every clip;
+    # fail-loud here (before any solving) when stats/enforce lacks budget clips.
+    stroke_a_max, stroke_env = resolve_stroke_guard(
+        args.stroke_guard, args.stroke_budget_clips, args.stroke_budget_scale)
+    if stroke_a_max is not None:
+        env_txt = ", ".join(f"{k} {v:.2f}" for k, v in stroke_env.items())
+        print(f"[stroke-guard] mode={args.stroke_guard}: blade-point |acc| envelope "
+              f"{{{env_txt}}} m/s² × {args.stroke_budget_scale:g} -> a_max = "
+              f"{stroke_a_max:.2f} m/s² (necessary-condition reject only; PASS != feasible)")
+
     planner = StrikeSpecPlanner()
     rng = np.random.default_rng(args.seed)
 
@@ -525,6 +730,16 @@ def main() -> int:
         _print_grip_summary(name, grip_desc, grip_rot, rally_yaw)
         st = strike_state_from_clip(asp, name, path, annotations, grip_rot, rally_yaw,
                                     anchor=args.anchor)
+        guard = None
+        if stroke_a_max is not None:
+            # L_deep on THIS clip's blade path with THIS bank's anchor as the contact frame
+            # (ledger 口径 via extend_stroke.deep_frame_and_L; fail-loud on degenerate strokes)
+            guard = StrokeGuard.from_blade_path(name, st["blade_path"], st["strike_frame"],
+                                                stroke_a_max, v0=args.stroke_v0)
+            print(f"[{name}] stroke-guard: L_deep = {guard.L_deep:.4f} m (deep frame "
+                  f"f{guard.deep_frame} -> contact f{guard.contact_frame}) -> shippable "
+                  f"demanded speed cap |v*| <= {guard.v_star_cap:.2f} m/s at a_max "
+                  f"{guard.a_max:.2f} m/s²")
         p_env = st["contact_pos_env"]
         p_hope = p_env + env2hope
         # Effective clip face for sign-alignment + NEW difficulty; raw wrist+Y proxy (no grip,
@@ -540,6 +755,7 @@ def main() -> int:
         sel = np.arange(args.n) if args.split == "all" else np.where(splits == args.split)[0]
         kept, normals, vels, diffs, residuals, landings, in_cone = [], [], [], [], [], [], []
         diffs_old = []
+        a_mins = []
         net_rejects = 0
         for i in sel:
             s = planner.solve(p_hope, v_in[i], None, landing_hope, args.speed_budget)
@@ -552,6 +768,16 @@ def main() -> int:
             if not s.clears_net:
                 net_rejects += 1
                 continue
+            # STROKE GUARD (survey §3.1): a_min = (v*²−v0²)/(2·L_deep) on the DEMANDED
+            # speed |s.v_r| vs the blade-point acceleration envelope — a necessary
+            # condition, so exceeding it PROVES no time law reaches v* on this path.
+            # stats mode (v1 default) counts what enforce WOULD drop but ships the
+            # question (分母法则: franco 看数字再拍板); enforce really drops it.
+            a_min_q = None
+            if guard is not None:
+                a_min_q, over = guard.check(float(np.linalg.norm(s.v_r)))
+                if stroke_disposition(args.stroke_guard, over) == "reject":
+                    continue
             kept.append(i)
             # Store the normal SIGN-ALIGNED to the clip's (calibrated) +Y red face: contact
             # physics is sign-agnostic (orient_normal flips internally) but the face-tracking
@@ -569,16 +795,33 @@ def main() -> int:
             ang = np.degrees(np.arccos(np.clip(
                 np.dot(s.v_r, cv) / (np.linalg.norm(s.v_r) * cs + 1e-12), -1, 1)))
             in_cone.append(bool(ang <= 25.0 and 0.6 * cs <= np.linalg.norm(s.v_r) <= 1.4 * cs))
+            if guard is not None:
+                a_mins.append(float(a_min_q))
 
         kept = np.array(kept, dtype=int)
         # The answerable-fraction denominator is the SELECTED split's question count, not args.n —
         # with --split the un-selected side is never solved, so args.n would understate the rate.
         rate = len(kept) / max(len(sel), 1)
         d = np.array(diffs)
+        # denominator report, net-rejected 先例: enforce mode really removed the questions;
+        # stats mode ships them and reports what WOULD have been removed (franco's number).
+        stroke_txt = ""
+        if guard is not None:
+            stroke_txt = (f", stroke-rejected {guard.over_budget_count}"
+                          if args.stroke_guard == "enforce" else
+                          f", stroke-guard would reject {guard.over_budget_count} "
+                          f"(stats mode, 不拦)")
         print(f"[{name}] anchor={args.anchor} phase {st['anchor_phase']:.3f} -> clip frame "
               f"{st['strike_frame']}/{st['n_frames']}, strike point env={np.round(p_env, 3)}, "
               f"split={args.split} (sampled {n_train} train / {n_exam} exam), "
-              f"solvable {len(kept)}/{len(sel)} = {rate:.0%}, net-rejected {net_rejects}")
+              f"solvable {len(kept)}/{len(sel)} = {rate:.0%}, net-rejected {net_rejects}"
+              f"{stroke_txt}")
+        if guard is not None and len(a_mins):
+            arr = np.asarray(a_mins)
+            print(f"  stroke-guard[{args.stroke_guard}]: kept-question a_min "
+                  f"med={np.median(arr):.2f} p90={np.percentile(arr, 90):.2f} "
+                  f"max={arr.max():.2f} m/s² vs a_max {guard.a_max:.2f} "
+                  f"(L_deep {guard.L_deep:.3f} m; necessary condition — PASS != feasible)")
         if rate < 0.5:
             print(f"  ** WARNING: solvability <50% — the fixed strike point is badly placed for "
                   f"this speed range; move the point / relax the budget instead of training on this **")
@@ -598,11 +841,25 @@ def main() -> int:
             residual_m=np.array(residuals), landing_xy_hope=np.array(landings),
             in_cone=np.array(in_cone, dtype=bool),
         )
+        if guard is not None:
+            # per-kept-question necessary lower bound [m/s²] — in stats mode this includes
+            # the over-budget (flagged) questions, so downstream can re-threshold offline
+            banks[name]["a_min"] = np.asarray(a_mins, dtype=np.float64)
         clip_meta[name] = dict(grip_mode=grip_mode, grip_desc=grip_desc,
                                rally_yaw_deg=rally_yaw, anchor=st["anchor"],
                                anchor_phase=st["anchor_phase"],
                                anchor_frame=st["strike_frame"], n_frames=st["n_frames"],
-                               net_rejects=net_rejects)
+                               net_rejects=net_rejects,
+                               stroke_guard=(None if guard is None else dict(
+                                   mode=args.stroke_guard,
+                                   L_deep_m=round(guard.L_deep, 4),
+                                   deep_frame=guard.deep_frame,
+                                   contact_frame=guard.contact_frame,
+                                   a_max_mps2=round(guard.a_max, 3),
+                                   v0_mps=args.stroke_v0,
+                                   v_star_cap_mps=round(guard.v_star_cap, 3),
+                                   over_budget=guard.over_budget_count,
+                                   enforced=args.stroke_guard == "enforce")))
         grip_any = grip_any or grip_mode in ("registry", "baked")
 
     # --- torch virtual-ball closed-loop self-test (trainer-side venue physics) ----------
@@ -655,7 +912,20 @@ def main() -> int:
                 vz_range=args.vz_range, landing_env=args.landing_env, near_x=args.near_x,
                 speed_budget=args.speed_budget, split=args.split, exam_frac=EXAM_FRAC,
                 grip=args.grip, grip_applied=bool(grip_any), rally_yaw_applied=True,
-                anchor=args.anchor, net_gate=True, clips=clip_meta)
+                anchor=args.anchor, net_gate=True,
+                stroke_guard=dict(
+                    mode=args.stroke_guard,
+                    budget_clips=[os.path.abspath(p)
+                                  for p in (args.stroke_budget_clips or [])],
+                    budget_scale=args.stroke_budget_scale,
+                    v0_mps=args.stroke_v0,
+                    a_max_mps2=(None if stroke_a_max is None else round(stroke_a_max, 3)),
+                    envelope_per_clip={k: round(v, 3) for k, v in stroke_env.items()},
+                    criterion="necessary-only sound-reject: a_min=(v*^2-v0^2)/(2*L_deep) > "
+                              "a_max (stroke_interface_survey_2026-07-09 §3.1); PASS != "
+                              "feasible; a_max = empirical blade-point Cartesian |acc| "
+                              "envelope x scale (survey honest boundary 2 applies)"),
+                clips=clip_meta)
     flat = {f"{n}/{k}": v for n, b in banks.items() for k, v in b.items()}
     # REAL json (audit round 2) — load_question_bank parses this and refuses banks whose
     # grip_applied / rally_yaw_applied flags are not both true (allow_legacy escape hatch).
