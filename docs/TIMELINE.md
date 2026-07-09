@@ -792,6 +792,30 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
   **合并后全套测试 172 全绿**(147 原有+6 记账加固+19 TOPP,数目严丝合缝);已推 origin,
   pod1 git 拉平(11 臂无恙)、pod2 无 GitHub key 走 rsync 拉平。
 
+### 07-09(午前)——franco 八条二批:key/误差调查/hitter 审计/topp-v2 复现(claude 执行)
+
+- 【franco】**pod 间 GitHub key 打通**:pod1 持久 deploy key(/workspace/.ssh_github)复制到 pod2
+  同位置+装入 /root/.ssh,git fetch 实测通;重启后 restore_root.sh 自动装回。
+- 【franco】**球轨迹预测误差调查开跑**(franco 发现:目标噪声一直是常数,没建模"越飞越近越准";
+  phase 2 关键):现状=A1 常数模型(延迟 40ms+白噪声 1.9mm+AR1 5.2mm);部署真值=50Hz 每 tick
+  全精度重解(2-3ms),误差自然收敛,大头在出手初期与弹跳。workflow 在跑:ball_mocap_0703
+  截断预测实验产"误差 vs 剩余飞行时间 × 速度档"实测曲线 + σ(剩余时间) 训练日程设计提案。
+- 【franco】**jiayi hitter 分支审计(11 提交)+ 第一档选择性合并**:真机 field 三件套(96040df:
+  mocap 毫米→米/规划器崩溃守卫/policy_z_offset 0.76m)+ 弹跳检测中心几何修复(850bfe0,
+  99 planner 测试绿);第二档 planner 通用安全改动待 g25/Gate3 回归;第三档(训练回滚/默认模型
+  更换/x_hit_follow_robot 翻转)与 main 审计结论冲突,周会对表——细目见 NOW 2real 冲刺包行。
+  110 契约链(baf6215)与今日 main 冲突面大(5 文件),不盲摘,随对表整体合。
+- 【franco】**topp-v2-0710 分支(Opus 平行作业)审计:算法成立、数字无凭据、产物灭失**。
+  synthesize_timing_v2 = 真·非均匀时间律(逐路径点拉伸密度 ρ(s),oracle 在环贪心),与已合并的
+  topp_budget_search 互补零冲突;**声称 CoP 剂量 bh 0.232→0.090 / fh 0.280→0.132(低于 v4rg
+  地板 0.167)——若复现则推翻"时序轴收官"**;但 npz/审计/题库在所有可达机器上不存在(疑似
+  灭失于旧 pod2),登记条目 status=unverified 指向不存在的报告。**pod1 重跑产线复现中**,
+  复现即改账+合并+发臂,不复现如实记 MISS。⚠ 制度教训:两个深夜会话平行作业得出互相矛盾的
+  战略结论且互不知情——NOW 认领制度对"研究结论"也要生效。
+- 【claude 自付学费】pull 套路里的盲 `git stash pop` 在 pod1 弹出 07-06 陈年 stash,给 train.py/
+  评估器留下冲突标记(watchdog 下一巡会跑挂);定向 restore 三文件复原,全部编译过,零窗口事故。
+  规矩入 runbook 运维杂项。
+
 ## 下周要对齐/拍板的事(2026-07-06 周会用)
 
 1. **契约日排期(franco + 全队)——升级为「177/179 拼桌」**:两条观测演化线在同一个 175 底座上

@@ -101,6 +101,12 @@ model_13599.pt ──play.py 原生导出(isaac venv,占一个 GPU 槽 ~4 分钟
 - pod 没装 git-lfs:commit/checkout/push 钩子会"假失败"——`-c core.hookspath=/dev/null`
   + `GIT_LFS_SKIP_SMUDGE=1`;pull 被挡的三层:本地脏文件(stash 或备份后 checkout)、
   LFS 钩子、**散落的未跟踪文件与新增文件同名**(挪走再拉)。
+- **共享检出上禁用盲 `git stash pop`(07-09 付费)**:pod 检出里躺着陈年 stash(07-06 两条);
+  "stash → pull → pop"套路在"本次无可 stash 内容"时,pop 会弹出**陈年 stash**,在 train.py/
+  评估器等活体文件上留冲突标记——watchdog 下一巡的复活/判卷就跑挂。规矩:pop 前先
+  `git stash list` 核对条目时间;要么用显式引用(`git stash pop stash@{0}` 且确认是自己刚存的),
+  要么树干净时干脆不 stash。修复=对 UU 文件 `git restore --staged --worktree`(pop 失败时
+  stash 自动保留,零丢失)。
 - CPU 池任务(出题/求解)记得 `OMP_NUM_THREADS=1`,不然 16 进程 × 默认线程把机器拖死。
 - 长任务一律 `setsid nohup ... &` + 日志文件;监视器轮询周期 ≥8 分钟,事件去重。
 - **后台任务卫生(franco 2026-07-06)**:一个目的一个监视器,目的消失立刻停;
