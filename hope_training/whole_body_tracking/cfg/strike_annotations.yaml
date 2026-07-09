@@ -608,3 +608,44 @@ clips:
     face_normal_reliable: true-calibrated
     grip_session: session_v5_oblique_hopex
     rally_yaw_deg: -40  # carried from hope_backhand_v5 lineage (same source video)
+
+  # v4rgsyn = v4rg 对两侧时间律合成 (人话: 把最健康的 v4rg 对拿来只重排时间轴 — 预算
+  # 就是它自己的实测包络 x1.5 默认 scale, 空间路径一帧不改; 泛化轴地板臂: v4rg 摔 0.02,
+  # 合成版若不伤它 = 时间律合成"无害性"证明, 若更好 = 普适管线直接证据).
+  # synthesize_timing.py v1 全默认旋钮 (--budget-scale 1.5, --ta-grid-s 0.005 默认扫描,
+  # 自预算 = v4rg fh+bh 对): fh T_a=0.010 s verdict ok, mean|acc| 1.086, run-up
+  # 1.32->1.34 s (x1.015), duration 2.80->4.28 s (x1.529); bh T_a=0.015 s verdict ok,
+  # mean|acc| 1.105, run-up 0.90->0.92 s (x1.022), duration 2.66->4.42 s (x1.662).
+  # 触球行逐位=源帧 (拍速 dev 0.00%, 拍面差 0.0 deg, 首帧 max|q̇| fh 0.007 / bh 0.034);
+  # audit 0 FAIL 0 WARN 双侧 (v5_height_fix/v4rgsyn/v4rgsyn_audit.md — 干净过源族口径).
+  # ⚠ SYNTHESIZED TIMELINE (时间律合成, 视频约定帧弃用): phase 是输出网格触球行
+  # (v4rgsyn/{fh,bh}_v4rgsyn.json), 不是视频帧约定.
+  hope_forehand_v4rgsyn_cal:
+    phase: 0.3131            # contact f67 of 215 (tool exact 0.313084)
+    status: unverified
+    annotator: claude (时间律合成 v4rg 自预算无害性臂, 触球行逐位=v4rg fh f66; franco 抽查待办)
+    date: 2026-07-09
+    method: robot-centric time-law synthesis (synthesize_timing.py v1) on the v4rg fh path,
+      all-default knobs (--budget-scale 1.5 self-budget = v4rg pair envelope, --ta-grid-s
+      0.005 scan) -> T_a=0.010 s verdict ok; contact row bitwise = source f66; clean blade
+      speed 2.2204 m/s preserved (dev 0.00%); mean|acc| 1.086
+    source: video-gvhmr + grip-calibrated (v4rg + synthesize_timing.py, report
+      v5_height_fix/v4rgsyn/fh_v4rgsyn.json)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: 40   # carried from hope_forehand_v4rg_cal (same source video)
+
+  hope_backhand_v4rgsyn_cal:
+    phase: 0.2081            # contact f46 of 222 (tool exact 0.208145)
+    status: unverified
+    annotator: claude (时间律合成 v4rg 自预算无害性臂, 触球行逐位=v4rg bh f45; franco 抽查待办)
+    date: 2026-07-09
+    method: robot-centric time-law synthesis (synthesize_timing.py v1) on the v4rg bh path,
+      all-default knobs (--budget-scale 1.5 self-budget = v4rg pair envelope, --ta-grid-s
+      0.005 scan) -> T_a=0.015 s verdict ok; contact row bitwise = source f45; clean blade
+      speed 2.2451 m/s preserved (dev 0.00%); mean|acc| 1.105
+    source: video-gvhmr + grip-calibrated (v4rg + synthesize_timing.py, report
+      v5_height_fix/v4rgsyn/bh_v4rgsyn.json)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: -40  # carried from hope_backhand_v4rg_cal (same source video)
