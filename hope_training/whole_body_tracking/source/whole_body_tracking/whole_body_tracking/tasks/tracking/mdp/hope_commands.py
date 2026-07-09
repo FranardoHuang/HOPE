@@ -209,6 +209,10 @@ class RacketTargetCommand(CommandTerm):
         # Unified multi-clip: per-clip strike phase as a [num_segments] tensor (built lazily once the
         # motion term is resolved). None until then; falls back to the scalar strike_phase.
         self._strike_phase_per_clip_t = None
+        # 每 clip 的击球面符号表([num_segments] 张量,懒构建:第一次用到时按加载的 clip 数 fail-loud
+        # 校验后落地)。None = cfg 表为空 = 全部 clip 用标量 mount_normal_sign(现役行为,逐位不变)。
+        # 病根见 cfg.mount_normal_sign_per_clip 的注释:正反手用拍子相反的两面,单一符号钉死反手拍面。
+        self._mount_sign_per_clip_t = None
         # Per-clip reference paddle FACE NORMAL at the strike frame ([num_segments, 3], built lazily). In
         # uniform mode the target normal is set to the imitated swing's actual paddle normal (which the
         # policy can achieve) — NOT the racket-velocity direction, which is ~18-110 deg off the +Y blade
@@ -754,6 +758,28 @@ class RacketTargetCommand(CommandTerm):
             )
         return spc
 
+    def _mount_signs_cfg(self, nseg: int) -> tuple:
+        """cfg.mount_normal_sign_per_clip validated against the loaded motion's segment count (fail-loud).
+
+        人话:每个 clip 的击球面符号表和实际加载的 clip 数对不上就当场报错(照 _strike_phases_cfg
+        先例),不悄悄退回标量符号凑合——那样反手又会被按错误的一面判分还不吭声。空表 = 全部 clip 用
+        标量 mount_normal_sign(文档化的默认,现役行为逐位不变)。符号只认 ±1:0 会把法向悄悄清零,
+        其他值会把"单位法向"变成带模长的向量,奖励核和角度误差全被污染,所以也当场报错。
+        """
+        mns = tuple(self.cfg.mount_normal_sign_per_clip)
+        if mns and len(mns) != nseg:
+            raise ValueError(
+                f"mount_normal_sign_per_clip has {len(mns)} entries but the loaded motion has {nseg} "
+                f"segment(s) — align it with the motion_file clip order, or set () to use "
+                f"mount_normal_sign={self.cfg.mount_normal_sign} for every clip"
+            )
+        if any(float(s) not in (1.0, -1.0) for s in mns):
+            raise ValueError(
+                f"mount_normal_sign_per_clip entries must be +1 or -1 (which paddle FACE strikes), "
+                f"got {mns}"
+            )
+        return mns
+
     def _strike_frame_for_clip(self, motion, clip_id: int) -> tuple[int, float, int, int]:
         """Return (global strike frame, phase, segment start, segment len) for one reference clip."""
         nseg = int(motion.num_segments)
@@ -813,6 +839,9 @@ class RacketTargetCommand(CommandTerm):
         W = max(1, int(self.cfg.clean_strike_vel_window))
         dt = float(self._env.step_dt)
         report_lines = []
+        # 每 clip 的击球面符号(空表 = 标量,现役行为不变)。参考拍面法向也要按 clip 翻面:诊断报表
+        # 和参考锁定的拍面目标(_ref_normal_per_clip)都从这里出,必须和判分的那一面(实际击球面)一致。
+        _mount_signs = self._mount_signs_cfg(nseg)
 
         for clip_id in range(nseg):
             strike_step, phase, seg_start, seg_len = self._strike_frame_for_clip(motion, clip_id)
@@ -827,7 +856,9 @@ class RacketTargetCommand(CommandTerm):
                 pos = wpos + offset_w
                 lin = wlin + torch.cross(wang, offset_w, dim=-1)
                 quat = quat_mul(wquat.unsqueeze(0), self._mount_quat[0:1]).squeeze(0)
-            normal = matrix_from_quat(quat.unsqueeze(0))[0, :, self.cfg.mount_normal_axis] * self.cfg.mount_normal_sign
+            # 击球面符号按 clip 取(正手一面、反手另一面);表为空用标量符号(现役行为逐位不变)。
+            _sgn = float(_mount_signs[clip_id]) if _mount_signs else float(self.cfg.mount_normal_sign)
+            normal = matrix_from_quat(quat.unsqueeze(0))[0, :, self.cfg.mount_normal_axis] * _sgn
 
             # --- clean reference strike velocity --------------------------------------------------
             # Recompute the strike target velocity from the FINAL racket FK position by a centered
@@ -1335,11 +1366,29 @@ class RacketTargetCommand(CommandTerm):
             self.racket_pos_w = wpos + offset_w
             self.racket_lin_vel_w = wlin + torch.cross(wang, offset_w, dim=-1)
             self.racket_quat_w = quat_mul(wquat, self._mount_quat)
-        # Face normal = chosen local axis of the racket frame, mapped to world.
+        # Face normal = chosen local axis of the racket frame, mapped to world, times the striking-FACE
+        # sign. 人话(franco 2026-07-09 拍板"哪面拍子超前就是哪面"):统一正反手策略里两个挥拍用的是
+        # 拍子相反的两面(正手=红面/+Y,反手=黑面/−Y),所以开了 mount_normal_sign_per_clip 时符号按
+        # 每个 env 的 clip_id 取;表为空(默认)走标量 mount_normal_sign,现役行为逐位不变(此时连
+        # _motion() 都不碰)。racket_normal 奖励(hope_rewards._normal_kernel_raw)和训练内拍面误差
+        # 指标(racket_normal_error_deg,_update_metrics)都读 self.racket_normal_w,一处修两处好。
         # TODO(asset): confirm mount_normal_axis/sign against pingpang_red_Link.STL (see hope-a3-racket-mount).
-        self.racket_normal_w = (
-            matrix_from_quat(self.racket_quat_w)[:, :, self.cfg.mount_normal_axis] * self.cfg.mount_normal_sign
-        )
+        axis_w = matrix_from_quat(self.racket_quat_w)[:, :, self.cfg.mount_normal_axis]
+        if self.cfg.mount_normal_sign_per_clip:
+            motion = self._motion()
+            if self._mount_sign_per_clip_t is None:
+                # 懒构建 + fail-loud:表长和加载 clip 数对不上当场报错(照 _strike_phases_cfg 先例)。
+                mns = self._mount_signs_cfg(int(motion.motion.num_segments))
+                self._mount_sign_per_clip_t = torch.tensor(
+                    [float(s) for s in mns], dtype=torch.float32, device=self.device
+                )
+            if motion._multiseg:
+                sign = self._mount_sign_per_clip_t[motion.clip_id].unsqueeze(-1)  # (num_envs, 1)
+            else:
+                sign = self._mount_sign_per_clip_t[0]  # 单 clip:表长已校验 = 1
+        else:
+            sign = self.cfg.mount_normal_sign
+        self.racket_normal_w = axis_w * sign
 
     def _compute_strike_timing(self):
         """Refresh time_to_strike / pre_strike / strike_window from the CURRENT motion phase.
@@ -2490,6 +2539,15 @@ class RacketTargetCommandCfg(CommandTermCfg):
     mount_quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
     mount_normal_axis: int = 1  # racket-local +Y is the face normal (red/hitting face; confirmed in Step 11)
     mount_normal_sign: float = 1.0  # +1 = red/forehand face; -1 = black/backhand face
+    # 每 clip 一个击球面符号(franco 2026-07-09 拍板:"哪面拍子超前就是哪面"——正反手各用固定的一面)。
+    # 病根(M3b 判死取证,= jiayi origin/hitter b7b7dfc 同病):统一正反手策略里两个挥拍用的是拍子
+    # 相反的两面(正手=红面/+Y,反手=黑面/−Y),单一标量符号让反手的拍面目标(normal_mode="velocity")
+    # 永不可达——+Y 面在反手挥拍里永远不超前,拍面误差被钉在 ~115-137°,综合成功清零(pos/vel 其实
+    # 都过),考卷 CF 换拍面=1.000 就是这个签名。设 (正手符号, 反手符号) 例 (1.0, -1.0),顺序 =
+    # motion_file 的 clip 顺序(同 strike_phase_per_clip)。空 () = 全部 clip 用标量 mount_normal_sign
+    # (默认,现役行为逐位不变)。表长和加载 clip 数不一致、或出现 ±1 以外的值,当场报错(fail-loud,
+    # 见 _mount_signs_cfg)。每个 clip 的建议符号用 scripts/suggest_face_sign.py 离线算(触球帧 n·v)。
+    mount_normal_sign_per_clip: tuple = ()
 
     # --- strike timing (fraction of the reference clip where the paddle meets the ball) ---
     strike_phase: float = 0.46  # HITTER clip: strike at frame 43/94 ≈ 0.46
