@@ -95,6 +95,16 @@ DEPENDENCIES
     PyYAML is used for --annotations IF installed; otherwise a built-in minimal
     parser extracts the two fields this tool needs (`phase`, `first_frame_exempt`).
 
+SISTER CHECK — SELF-COLLISION (L1, 2026-07-09, branch selfcol-check-0709)
+    This tool cannot see the robot's own geometry: it grades joints and feet, never
+    links passing through each other (franco 晚五: "判炸器不查自碰撞,v1 加深资产
+    可能自撞全绿"). That hole is covered by the sibling scripts/audit_self_collision.py,
+    which replays the clip in the vendor MJCF and grades interpenetration (racket-
+    vs-torso is its main item) plus the backswing racket/forearm-to-torso clearance.
+    It is a SEPARATE tier precisely because it needs mujoco + the MJCF, which this
+    L0 gate deliberately does not. Run BOTH before letting a stroke-deepened asset
+    (extend_stroke) anywhere near training.
+
 FUTURE WIRING (documented on purpose, NOT implemented — institutional fix "修c",
 pending franco sign-off; do not build these without it):
     * registry gate: cfg/strike_annotations.yaml gains a per-clip
