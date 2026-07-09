@@ -1077,6 +1077,25 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
   零梯度(M3b 型场景必须传 π);权重定标计 RewardManager dt 因子(−0.05 解析估算差 50×,实际档位
   −0.4 级,按台账实测校)。
 
+### 07-10(晨)——S1 修复落地续报:止损执行、冒烟 PASS、M3f/M2f3 点火、M2f 终判坐实"净伤害"
+
+- **止损执行(franco 拍板)**:R9t(pid 1013350)/R9u(1015015)/M3d_swing_flip_faceguide(1016416)
+  19:0x UTC SIGKILL,expected_arms.txt 摘名(备份 .bak_stoploss0709)。
+- **M2f 终判(AUTOJUDGE 16:30,model_16999)= 病根终档确认**:v4rg×翻转严格单变量把双侧拉坏——
+  正手拍面 20.3°(M2 基线 11.3°)/回球 0.33/0.14;反手拍面 28.8-30.3°(基线 9.7-10.1°)/回球
+  0.42/0.40;全侧回球 0.400/0.294(基线 0.647/0.529),CF 显著高于实测=失分在拍面通道。
+  **facesign 轴判决:未修约定的翻转旗标=净伤害。** 报告
+  `2026-07-09_07-34-05_s1w4_M2f_v4rg_facesign/judge/judge_report_model_16999_20260709_163019.md`。
+- **S1 修复(main `699b770`)冒烟 PASS**(pod1 gpu0,512×25):applied 含符号表落地 +
+  `[face] face_command kernel frame=+Y(A/bank)` 审计行;题库 A 约定卫兵静默通过(swing 卷
+  837/802 题);RESUMED M3c model_16999;25/25、model_17023 落盘、零 NaN;新指标
+  `face_cmd_normal_error_deg` 正常输出。
+- **验证臂点火(gpu0,已登记 expected_arms.txt + arm_cmds)**:M3f_swing_faceframe_fix
+  (pid 1038295,19:13:01)/ M2f3_v4rg_faceframe_fix(pid 1038976,19:14;wandb→tensorboard
+  与队列同构)。预注册与对照关系见 queue.md 07-09 19:13 收口条 + facesign_fix_design_0709.md §4;
+  热启带病档,前几百 iter 盯 value_loss/KL 与 face_cmd_normal_error_deg 下降曲线
+  (hope_rewards.racket_face_guidance HOT-RESTART note)。
+
 ## 下周要对齐/拍板的事(2026-07-06 周会用)
 
 1. **契约日排期(franco + 全队)——升级为「177/179 拼桌」**:两条观测演化线在同一个 175 底座上

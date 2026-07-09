@@ -564,6 +564,7 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 
 | Item | Priority | Owner | Branch | Status / next checkpoint |
 | --- | --- | --- | --- | --- |
+| **S1 face 修复验证臂 M3f / M2f3 在训**(pod1 gpu0,07-09 19:13/19:14 UTC 点火,热启 M3c/M2f model_16999 → 20999;M3f=swing×仅约定修复单变量,M2f3=v4rg×修复跨资产对照):预注册通过线 M3f 反手拍面 34°→≤20°@+1500 / ≤15°@+4000、pass 0/25→≥20/25;M2f3 反手拍面 29-30°→≤22°@+4000、回球回 M2 基线带;不达线出口=开修复版 faceguide −0.4(M3f-b)。新指标 face_cmd_normal_error_deg 直读 demanded 误差 | ★★★ | claude | main(`699b770` 合入) | 收卷 AUTOJUDGE 自动出卷;预注册=pod1 s1_wave4/facesign_fix_design_0709.md §4 + queue.md 07-09 19:13 收口条 |
 | HitterPure RallyFinal clean-base task: x-lock/lunge, settle/slip, backhand clearance, front-facing constraints + Isaac/AGI rally gates | ★★★ | codex for dongc1 | `hitter` | IN PROGRESS 2026-07-10: derive from `HOPEPingPongHitterPure.yaml`, explicitly exclude V5 hold-rhythm/lower-body-plant stack; next checkpoint = config/code/docs patch with static tests and reproducible ablation/eval commands |
 | 阶段1 第一波成对差初判(主攻/减观测/产品线锚已到线;只换题库/加权/两动作源在跑;反手换锚排队) | ★★★ | claude | `stage1-fixed-point` | **只看成对差,绝对分不作数(题库缺陷)**;正式结论等题库 v2 重跑 |
 | **加速度包络标定两件套(franco 07-09,时间律的下一层)**:①跟踪破裂标定(chirp/斜坡加压参考×现成跟踪策略,逐关节"边平衡边跟"真上限=判炸器 L1 升级);②贴限 vs 摊时消融(v5syn T_a 三档)——R9d 读数落地后一起排 | ★★★ | claude | — | 设计已入 research 时间律文档§六 |
