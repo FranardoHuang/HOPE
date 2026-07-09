@@ -204,13 +204,60 @@ struct PpPolicyConfig {
                                         // stations span ±0.40 vs spawn and up to ~0.8 m between
                                         // consecutive swings (paper Fig. 4 goes to ±0.75-0.8)
   double gate_z_margin = 0.05;          // slack around the per-clip trained z band (m)
+  // Per-clip trained VELOCITY box gate (2026-07-08, from the first rally-gate fall): the old
+  // |v|<=3.5 speed cap accepted a planner demand of (0.9,+0.18,0.7) — vy 0.18 vs the trained
+  // fh box [0.96,1.96] — and the swing executed on an out-of-distribution velocity command
+  // (follow-through charged +0.57 m off-station; trained follow-through drift is 0.01-0.02 m).
+  // Engage + mid-swing streaming now also require vel_w inside the per-clip
+  // hitter_pure_vel_range_per_clip metadata box, per axis, +- this margin (m/s).
+  // Raise via --vel-gate-margin if a venue's demanded returns sit just outside the box —
+  // but read the REJECT(110) vel print first: a far-out demand is a planner mistuning
+  // (delta_t_flight / target_land aim), not a gate problem.
+  double gate_vel_margin = 0.30;
   // STREAM-until-contact (paper Fig. 3: the planner refines the prediction to ~0 error at
   // contact; the paper's WBC consumes the stream — there is NO lock-at-engage). While a swing
   // flies, same-side commands passing the band gate keep updating WHERE (pos/vel); WHEN stays
   // the engage-latched clip clock (training never varies tts mid-swing — the training analog
   // of streaming WHERE is racket.midswing_resample_prob, whose tts floor this mirrors).
-  bool stream_target = true;            // 110-D models only; other contracts keep the lock
+  // ⚠ DEFAULT OFF (2026-07-08): the deployed baseline TRAINED with midswing_resample_prob
+  // = 0.0 (HOPEPingPongHitterPure.yaml:187) — for it, every mid-swing target update is an
+  // untrained obs transition, and streaming also moves the derived STATION mid-swing, which
+  // even the training-side resample contract holds fixed. Enable with --stream-target ONLY
+  // for a model actually trained with midswing_resample_prob > 0.
+  bool stream_target = false;           // 110-D models only; other contracts keep the lock
   double stream_tts_floor_s = 0.30;     // freeze the target inside the last 0.3 s before strike
+  // DEMO-ROBUSTNESS velocity mode (--vel-box-center, 2026-07-08): command the per-clip
+  // TRAINED BOX-CENTER velocity (== the reference swing's strike velocity, the manifold
+  // the policy is most robust on) instead of the planner's solved velocity. The planner
+  // still owns WHERE (pos) and WHEN (tts); only the outgoing-shot aim precision is given
+  // up (the return goes roughly where the human demo's returns went). Rationale: the
+  // planner's physically-solvable velocities intersect the trained box only near its
+  // low-z corner (rally-gate measurement: demanded vz 0.08-0.10 vs trained center 0.71),
+  // and off-center vel commands erode the swing margin in the stricter AGI sim.
+  bool vel_cmd_box_center = false;
+  // ENGAGE HEADING GATE (2026-07-08, rally run-3 fall): training swings always START facing
+  // ~+x (episode resets; reference clips yaw at most ±20° MID-swing and END back at ~0-6°),
+  // but a divergent follow-through can leave the real robot 30-70° off heading, and the
+  // 110-D obs are world-frame — an engage from a yawed stand is far outside the trained
+  // start distribution (measured: engage at ~-30° yaw -> |act| 58, 2 m sprint, violent
+  // fall). Refuse to engage while the (yaw-aligned) base heading is off by more than this;
+  // status shows "yawed". Recovery = the operator re-stand ('s' -> square the robot -> 'm').
+  double engage_yaw_max_deg = 20.0;
+  // Stricter heading bound for the STATIC-stand handoff (rally run 5: a +17° handoff —
+  // legal under the 20° engage gate — tipped ~3 s after the gains froze; the static stand
+  // needs a genuinely square stance, while an engage merely needs a near-trained start).
+  double static_handoff_yaw_max_deg = 10.0;
+  // MOTION-ENTRY SETTLE (2026-07-08): run 3 engaged a leftover in-flight serve on the SAME
+  // tick MOTION started (the robot was seconds off the stand-gain catch). Give the stand
+  // this long before the first engage of a MOTION session.
+  double engage_settle_s = 1.0;
+  // 110-D LEVEL-0 station semantics (2026-07-07 fix): false (nominal) = the 177-style
+  // fixed-world hold anchor — idle actively station-keeps, pulling the base back after every
+  // follow-through so displacement can NOT accumulate across swings (the Gate-2.5 P7 creep).
+  // true = the legacy Δ=0 idle (station := current base), kept ONLY for A/B: it let the robot
+  // free-creep between swings (12200 P7 fall) and diverges outright for hold-trained rally
+  // models (18000 P2 fall) — see the level-0 branch comment.
+  bool idle_station_dzero_110 = false;
   // YAW-ALIGN (hardware fix, 2026-07-02): the pelvis AND torso IMU yaws are NOT
   // world-referenced on the real robot (boot-to-boot drift; MDU captures show a constant
   // fictional -12/-15/-38.5 deg yaw error in motion_anchor_ori_b while training reset noise
@@ -233,15 +280,17 @@ struct PpPolicyConfig {
   // scripted TEST path.
   bool start_backhand = false;
   // Scripted racket TEST targets, PER CLIP, chosen inside the TRAINED sampling boxes.
-  // RE-SYNCED 2026-07-03 to the model_9000 generation (run 2026-07-03_02-01-17,
-  // cfg/task/HOPEPingPongDeployParity.yaml 2026-07-02 blade re-plane; same constants as
-  // mujoco_eval_onnx.py POS/VEL_RANGE_PER_CLIP):
-  //   clip0 forehand: pos x[0.58,0.78] y[-0.64,-0.24] z[0.72,0.92]  vel x[1.05,2.05] y[ 0.96, 1.96] z[0.31,1.11]
-  //   clip1 backhand: pos x[0.56,0.76] y[-0.07, 0.33] z[0.93,1.13]  vel x[1.61,2.61] y[-1.21,-0.21] z[0.00,0.71]
-  // Targets sit at the BOX CENTERS = each clip's reference BLADE strike state (fh (0.68,-0.44,0.82)
-  // vel (1.55,1.46,0.71); bh (0.66,0.13,1.03) vel (2.11,-0.71,0.36)). The previous values
-  // (fh/bh pos x=0.45, bh vel x=1.50) were the OLD explicitpd_ft-era boxes — 0.11-0.13 m BELOW the
-  // new x ranges = an OOD command obs on every tick of the swing.
+  // RE-SYNCED 2026-07-07 to the model_12200_hitterpure generation (HOPEPingPongHitterPure,
+  // run 2026-07-07_13-28-13; the 110-D hitter_pure contract). hitter_pure fixes the striking
+  // plane at x=0.70 RELATIVE to the station (both clips' blade reach ≈ 0.70) and samples only y/z:
+  //   clip0 forehand: pos x[0.70,0.70] y[-0.65,-0.15] z[0.67,0.97]  vel x[1.05,2.05] y[ 0.96, 1.96] z[0.31,1.11]
+  //   clip1 backhand: pos x[0.70,0.70] y[-0.05, 0.45] z[0.88,1.18]  vel x[1.61,2.61] y[-1.21,-0.21] z[0.00,0.71]
+  // Targets sit at the BOX CENTERS = each clip's reference BLADE strike state (fh (0.70,-0.40,0.82)
+  // vel (1.55,1.46,0.71); bh (0.70,0.20,1.03) vel (2.11,-0.71,0.36)); y-centers ≈ the ref reach
+  // (fh −0.409 / bh +0.185). The prior model_9000 values (x-plane 0.68/0.66) were 2-4 cm off the
+  // hitter_pure fixed 0.70 plane = a small OOD offset on the world racket_target_rel_base channel.
+  // (The 110-D ENGAGE gate z/vel bands come from ONNX hitter_pure_* metadata, not these constants;
+  // these feed only the SCRIPTED Gate 2/2.5 "ball".)
   // ⚠ model_9000 is a WALK-AND-STRIKE policy: with these world-fixed targets it turns ~84 deg and
   // displaces its base 0.4-0.65 m before contact (measured in the deploy-faithful MuJoCo gate).
   // That footwork only closes the loop when the localization source reports the REAL base motion
@@ -253,7 +302,7 @@ struct PpPolicyConfig {
   // pose the policy never recovers from — post-swing recovery is only trained near the
   // reference blade point). Fixed-x-plane / y-only strikes need the retrain rider
   // (base-relative fixed-reach-x target sampling), not a runner-side constant.
-  Vec3 racket_pos_w_clip[2] = {Vec3(0.68, -0.44, 0.82), Vec3(0.66, 0.13, 1.03)};
+  Vec3 racket_pos_w_clip[2] = {Vec3(0.70, -0.40, 0.82), Vec3(0.70, 0.20, 1.03)};
   Vec3 racket_vel_w_clip[2] = {Vec3(1.55, 1.46, 0.71), Vec3(2.11, -0.71, 0.36)};
   // sim2real localisation gap: no global base/torso pose -> nominal (matches
   // the Python wbc_runner shadow behavior). base orientation uses the real IMU.
@@ -398,6 +447,11 @@ class PpPolicy {
           reach_offset_clip_[c] = Vec2(b[0], 0.5 * (b[2] + b[3]));
           hp_y_band_[c] = Vec2(b[2], b[3]);
           hp_z_band_[c] = Vec2(b[4], b[5]);
+        }
+        if (onnx_.hp_vel_boxes().size() >= 2) {  // per-clip trained vel box -> engage/stream gate
+          hp_vel_box_[0] = onnx_.hp_vel_boxes()[0];
+          hp_vel_box_[1] = onnx_.hp_vel_boxes()[1];
+          hp_vel_box_set_ = true;
         }
         std::fprintf(stderr,
             "[pp] 110 hitter_pure: station geometry from ONNX boxes: plane_x=%.2f "
@@ -577,6 +631,24 @@ class PpPolicy {
   void rearm_yaw_align() {
     yaw_align_pending_.store(true);
     hold_station_set_ = false;
+    arm_quiet_ticks_ = 0;    // fresh MOTION entry: restart the arm-hold sustained-quiet clock
+    arm_hold_armed_ = true;  // ...and re-arm the pre-swing arm hold
+    // PLANNER-MODE swing-state reset (2026-07-08): SHADOW and MOTION run ComputeCommand on
+    // DIFFERENT clock domains (SHADOW = a free-running local counter, MOTION = the publish-
+    // gated driver tick). A swing engaged during a SHADOW preview leaves level 1 + a
+    // swing_clock_origin_ from the SHADOW clock; entering MOTION then resumes that phantom
+    // swing against an incoherent clock (tts frozen or deeply negative — engage locked out
+    // or an instant snap). Every SHADOW/MOTION entry from PASSIVE/PD_STAND must start from
+    // a clean stand: level 0, no engage latch, no stale rest timer. The next valid planner
+    // command re-engages normally. (Scripted mode is untouched — the operator owns level.)
+    if (cfg_.planner_mode) {
+      pending_swing_dir_.store(0);
+      rest_rearm_armed_.store(false);
+      level_.store(0);
+      planner_engaged_ = false;
+      planner_static_active_ = false;
+      planner_entry_pending_.store(true);  // restart the engage settle clock (engage_settle_s)
+    }
   }
 
   // Full-body gate: true => leg q_des is overwritten to nominal (NOT a full-body
@@ -631,6 +703,8 @@ class PpPolicy {
     // the EXISTING swing controls (set_swing_dir/set_level + freeze). Runs before the swing
     // clock logic so the 0->1 edge below resets the clock to the windup as usual. No-op in
     // the scripted/keyboard path (planner_mode == false).
+    if (cfg_.planner_mode && planner_entry_pending_.exchange(false))
+      planner_entry_tick_ = tick_idx;  // first tick of this SHADOW/MOTION session (settle clock)
     if (cfg_.planner_mode) PlannerEngageStep_(tick_idx);
     // Reset the swing clock to its windup on level 0->1 (release from hold) OR on a
     // forehand<->backhand switch. Either way the swing must (re)start from its WINDUP
@@ -657,6 +731,13 @@ class PpPolicy {
     const int swing_dir_now = swing_dir_.load();
     if ((swing_lvl_now == 1 && swing_level_prev_ != 1) || swing_dir_now != swing_dir_prev_)
       swing_clock_origin_.store(tick_idx);
+    // ANY 1->0 edge restarts the planner post-swing recovery clock, not just the normal
+    // completion path (which also sets it, idempotently). Without this, an EXTERNAL
+    // set_level(0) mid-swing (squat/tilt guard, operator key) leaves the clock stale from
+    // the PREVIOUS hold — post_recovery reads instantly true and the stiff static stand
+    // freezes onto a tilted, still-moving robot, skipping the policy recovery entirely.
+    if (cfg_.planner_mode && swing_lvl_now == 0 && swing_level_prev_ == 1)
+      planner_hold_start_tick_ = tick_idx;
     swing_level_prev_ = swing_lvl_now;
     swing_dir_prev_ = swing_dir_now;
     PpRacketTarget tg = ScriptedTarget(tick_idx);
@@ -887,7 +968,29 @@ class PpPolicy {
           projected_gravity_body(st.base_quat_w)[2] < -0.95 &&
           st.base_ang_vel_b.norm() < 0.4 &&
           (st.qd.size() == 0 || st.qd.cwiseAbs().maxCoeff() < 1.0);
-      const bool post_recovery = planner_have_hold_ &&
+      // NEAR-STATION guard (2026-07-08, from the rally-gate fall): never hand the stiff
+      // STATIC stand a robot that is parked far off its hold station — the walked stance
+      // is staggered/leaning and the official gains freeze it there (measured: forced
+      // switch at 0.83 m off-station -> tip). Off-station, the POLICY hold keeps actively
+      // walking home; the switch waits until it arrives. No-op when no anchor is set
+      // (dropout / pre-engage: near_station true -> legacy behavior).
+      const bool near_station = !hold_station_set_ ||
+          (Vec2(st.base_pos_w[0], st.base_pos_w[1]) - hold_station_w_).norm() < 0.3;
+      // ...and NEAR-HEADING (2026-07-08 rally run 4): the backhand follow-through can leave
+      // the robot yawed 35-55° (execution over-rotation; the reference ends at ~0°). The
+      // static stand FROZE that yawed/staggered stance and it tipped seconds later, while
+      // the POLICY hold both balances actively and — being the trained pre-strike state
+      // (which always faces +x in training) — is the only thing in the chain with a
+      // heading-restoring feedback loop. Off-heading: stay on the policy hold (g25-proven
+      // to 20 s); the engage heading gate keeps swings blocked until square.
+      const double hold_yaw = std::atan2(
+          2.0 * (st.base_quat_w[0] * st.base_quat_w[3] +
+                 st.base_quat_w[1] * st.base_quat_w[2]),
+          1.0 - 2.0 * (st.base_quat_w[2] * st.base_quat_w[2] +
+                       st.base_quat_w[3] * st.base_quat_w[3]));
+      const bool near_heading =
+          std::fabs(hold_yaw) < cfg_.static_handoff_yaw_max_deg * M_PI / 180.0;
+      const bool post_recovery = planner_have_hold_ && near_station && near_heading &&
           ((t_since > cfg_.hold_recover_s && upright_still) ||
            t_since > cfg_.hold_recover_s + 3.0);
       // STICKY: once static engages it stays until the next swing (level 1). A quiescence
@@ -899,6 +1002,10 @@ class PpPolicy {
           planner_static_active_ = true;
           planner_static_start_tick_ = tick_idx;
           planner_static_q0_ = state.q.size() == kNumJoints ? state.q : nominal_q_sdk_;
+          // The policy is out of control from here until the next engage: zero the
+          // last-action obs so the engage's first policy tick reads a training-style
+          // reset (stand start, zero prev action) instead of a seconds-stale action.
+          last_action_.setZero();
           if (planner_have_hold_)
             std::fprintf(stderr,
                 "[pp] post-swing recovery done -> STATIC official stand until next engage\n");
@@ -927,14 +1034,33 @@ class PpPolicy {
       if (planner_engaged_) {   // active swing -> frozen world target
         tg.pos_w = planner_frozen_pos_w_;
         tg.vel_w = planner_frozen_vel_w_;
+      } else if (onnx_.obs_dim() == kObsDim110) {
+        // 110 hitter_pure idle (2026-07-08 fix, from the first rally-gate fall): the hold
+        // target must be WORLD-FIXED at the hold-station anchor — the same obs family as
+        // the Gate-2.5-proven scripted hold (world-fixed box-center target + box-center
+        // vel; P2 held 20 s on it). The first design anchored it to the LIVE base (0.70
+        // ahead of wherever the robot is, re-anchored per tick): a moving carrot with NO
+        // positional feedback — racket_target_rel_base never closes however far the robot
+        // walks, and the rally gate measured the policy hold charging +0.83 m off-station
+        // in ~1 s on it (then the forced static handoff tipped from the walked stance).
+        // Anchoring at the station makes a forward drift SHORTEN the observed reach, so
+        // the trained pre-strike response pulls the robot back. Geometry is PER-SIDE
+        // (last swing side = the side the hold tts clamp already assumes): plane_x +
+        // y-band center at the anchor, z-band mid height, trained box-center velocity
+        // (the frozen streamed vel could be out-of-band — it is what the LAST swing flew).
+        const Vec4 base_yaw = yaw_quat(st.base_quat_w);
+        const int hc = clip_id_from_swing_sign(swing_dir_.load() >= 0 ? 1.0 : -1.0);
+        const Vec2 anchor_xy = hold_station_set_
+            ? hold_station_w_
+            : Vec2(st.base_pos_w[0], st.base_pos_w[1]);  // pre-anchor tick / dropout
+        const Vec3 off = quat_rotate(
+            base_yaw, Vec3(reach_offset_clip_[hc][0], reach_offset_clip_[hc][1], 0.0));
+        tg.pos_w = Vec3(anchor_xy[0] + off[0], anchor_xy[1] + off[1],
+                        0.5 * (hp_z_band_[hc][0] + hp_z_band_[hc][1]));
+        tg.vel_w = cfg_.racket_vel_w_clip[hc];
       } else {                  // idle/rest (incl. before the first engage) -> base-anchored hold
         const Vec4 base_yaw = yaw_quat(st.base_quat_w);
-        // 110 hitter_pure: idle ready racket sits on the TRAINED fixed plane (0.70 in front),
-        // not the 177-era 0.40 anchor (every pure training target lives at plane depth —
-        // x=0.40 would be an OOD hold obs for a goal-conditioned policy).
-        const double hold_x = (onnx_.obs_dim() == kObsDim110) ? reach_offset_clip_[0][0]
-                                                              : cfg_.hold_anchor_x_b;
-        Vec3 hb(hold_x, planner_hold_pos_b_engage_[1], 0.0);
+        Vec3 hb(cfg_.hold_anchor_x_b, planner_hold_pos_b_engage_[1], 0.0);
         tg.pos_w = st.base_pos_w + quat_rotate(base_yaw, hb);
         tg.pos_w[2] = planner_hold_z_w_;
         tg.vel_w = planner_frozen_vel_w_;
@@ -956,6 +1082,8 @@ class PpPolicy {
     // 1-2 m with ±0.1 m stations; live-station holds: model_17400 0 falls x 3 seeds).
     // Δ=0 remains ONLY the localization-dropout fallback (perfect_tracking / fabricated /
     // stale mocap/oracle), where any nonzero Δ would be fictional and chased open-loop.
+    // 2026-07-07: the fixed-world anchor now applies to 110-D hitter_pure TOO (it was Δ=0
+    // at idle — see the idle_station_dzero_110 branch below for the refuting evidence).
     if (onnx_.obs_dim() == kObsDim177 || onnx_.obs_dim() == kObsDim110) {
       const bool base_real =
           (cfg_.loc_mode == LocMode::kOracle && oracle_fresh_) ||
@@ -968,11 +1096,20 @@ class PpPolicy {
         tg.base_target_xy = Vec2(tg.pos_w[0], tg.pos_w[1]) - reach_offset_clip_[c];
         hold_station_w_ = tg.base_target_xy;  // post-swing hold recovers AT the strike station
         hold_station_set_ = true;
-      } else if (onnx_.obs_dim() == kObsDim110) {
-        // 110 idle: Δ=0 (station := current base) is IN-DISTRIBUTION for hitter_pure —
-        // the task trains NO hold phase and pays base_position pre-strike only, so idle
-        // never demands station-keeping from the policy. The 177 fixed-world-anchor hold
-        // semantics (below) exist for the hold-TRAINED lineage and do not transfer.
+      } else if (onnx_.obs_dim() == kObsDim110 && cfg_.idle_station_dzero_110) {
+        // LEGACY 110 idle: Δ=0 (station := current base). First design, justified as
+        // "hitter_pure trains NO hold so idle never demands station-keeping" — REFUTED by the
+        // 2026-07-07 Gate-2.5 evidence: with Δ=0 there is NO pull-back between swings, so the
+        // follow-through displacement ACCUMULATES across cycles against the world-fixed
+        // scripted target (the model_12200 P7 fall), and a hold-TRAINED rally model
+        // (model_18000) outright DIVERGES in it — walked +0.94 m THROUGH the target
+        // (racket_rel_base x +0.69 -> -0.27 while base_target_dxy pinned 0), yawed ~70°, obs
+        // blow-up, fell 12 s into the P2 hold. Training-side truth: hitter_pure stations are
+        // x ±0.10 / y ±0.40 with drift 0.01-0.02 m/swing — the policy NEVER trains forward
+        // locomotion; an unanchored idle walks it straight out of distribution (the observed
+        // pigeon-toed creep). Kept ONLY as a compile-time A/B fallback; the nominal 110 path
+        // is the 177-style fixed-world anchor below (idle at an anchor == "pre-strike at the
+        // station", which hitter_pure trains every swing).
         tg.base_target_xy = Vec2(st.base_pos_w[0], st.base_pos_w[1]);
       } else {
         if (!hold_station_set_) {  // fresh hold (pre-first-engage / after re-localization)
@@ -1207,13 +1344,18 @@ class PpPolicy {
     }
     // Late gate. 110: PER-CLIP (the backhand windup 0.87 s < the legacy 1.0 s constant —
     // a scalar gate would make backhand unreachable under the wait-for-tts semantics below);
-    // side is not chosen yet, so gate on the LOOSER clip here and re-check after side
-    // selection. Legacy contracts keep the scalar behavior unchanged.
+    // side is not chosen yet, so gate on the LOOSER (SHORTER-windup) clip here and re-check
+    // per-clip after side selection. ⚠ 2026-07-08 fix: this used windup_MAX, which made the
+    // pre-side cutoff min(1.0, 0.9*1.30)=1.0 s — ABOVE the backhand's whole engage window
+    // [0.9*0.87, 0.87] = [0.78, 0.87] s, so every backhand serve died here as too_late and
+    // the side-specific gate below never ran (backhand mathematically unreachable in planner
+    // mode). The pre-side cutoff must be the MIN of the per-clip cutoffs. Legacy contracts
+    // keep the scalar behavior unchanged.
     if (onnx_.obs_dim() == kObsDim110) {
-      const double windup_max = std::max(
+      const double windup_min = std::min(
           (clip_.strike_frame(0) - clip_.seg_start(0)) * clip_.step_dt,
           (clip_.strike_frame(1) - clip_.seg_start(1)) * clip_.step_dt);
-      if (tts < std::min(cfg_.engage_min_tts_s, 0.9 * windup_max)) {
+      if (tts < std::min(cfg_.engage_min_tts_s, 0.9 * windup_min)) {
         set_planner_status_("too_late"); return;
       }
     } else if (tts < cfg_.engage_min_tts_s) { set_planner_status_("too_late"); return; }
@@ -1230,6 +1372,29 @@ class PpPolicy {
     const Vec3 base_pos = last_base_pos_;
     const Vec4 base_yaw = yaw_quat(last_base_quat_w_);
     if (base_pos[2] < cfg_.base_low_z) { set_planner_status_("base_low"); return; }
+
+    // MOTION-entry settle: no engage for the first engage_settle_s of a session (see cfg).
+    if (tick_idx < planner_entry_tick_ +
+                       static_cast<std::uint64_t>(cfg_.engage_settle_s / std::max(cfg_.dt, 1e-6))) {
+      set_planner_status_("settling"); return;
+    }
+    // HEADING gate (see cfg.engage_yaw_max_deg): last_base_quat_w_ is yaw-aligned, so its yaw
+    // is the drift from the engage heading (~ world +x). Swinging from a yawed stand is OOD.
+    {
+      const double yaw = std::atan2(
+          2.0 * (last_base_quat_w_[0] * last_base_quat_w_[3] +
+                 last_base_quat_w_[1] * last_base_quat_w_[2]),
+          1.0 - 2.0 * (last_base_quat_w_[2] * last_base_quat_w_[2] +
+                       last_base_quat_w_[3] * last_base_quat_w_[3]));
+      if (std::fabs(yaw) > cfg_.engage_yaw_max_deg * M_PI / 180.0) {
+        if ((gate_warn_tick_++ % 100) == 0)
+          std::fprintf(stderr,
+              "[pp gate] REJECT yawed: base heading %+.0f deg off the engage heading "
+              "(max %.0f) — swings must start square; re-stand ('s', square, 'm') if this "
+              "persists\n", yaw * 180.0 / M_PI, cfg_.engage_yaw_max_deg);
+        set_planner_status_("yawed"); return;
+      }
+    }
 
     // Racket target -> policy WORLD frame. frame_code 0 = same world as the base (planner
     // table frame == mocap world). frame_code 1 = base_link-relative -> lift to world
@@ -1274,17 +1439,35 @@ class PpPolicy {
         const Vec2 station =
             Vec2(pos_w[0], pos_w[1]) - reach_offset_clip_[eng_clip];
         const double step = (station - Vec2(base_pos[0], base_pos[1])).norm();
+        // Per-clip trained VELOCITY box (metadata), per axis ± gate_vel_margin. A demand
+        // outside it is an obs the policy never trained a swing for — the 2026-07-08 rally
+        // fall executed vy=+0.18 against the fh box [0.96,1.96] and charged off-station.
+        // Moot under --vel-box-center (the demand is replaced by the box center anyway).
+        const bool vel_ok = cfg_.vel_cmd_box_center || !hp_vel_box_set_ ||
+                            vel_in_hp_box_(eng_clip, vel_w);
         ok = pos_w[2] >= hp_z_band_[eng_clip][0] - cfg_.gate_z_margin &&
              pos_w[2] <= hp_z_band_[eng_clip][1] + cfg_.gate_z_margin &&
              step <= cfg_.gate_station_step_max &&
-             vel_w.norm() <= cfg_.gate_speed_max;
+             vel_w.norm() <= cfg_.gate_speed_max && vel_ok;
         if (!ok && (gate_warn_tick_++ % 50) == 0) {
+          const auto& vb = hp_vel_box_[eng_clip];
           std::fprintf(stderr,
               "[pp gate] REJECT(110) %s z_w=%.2f (band[%.2f,%.2f]±%.2f) station_step=%.2f "
-              "(<=%.2f) |v|=%.2f (<=%.2f) tts=%.2f\n",
+              "(<=%.2f) |v|=%.2f (<=%.2f) vel=(%+.2f,%+.2f,%+.2f)%s tts=%.2f\n",
               sign > 0 ? "fh" : "bh", pos_w[2], hp_z_band_[eng_clip][0],
               hp_z_band_[eng_clip][1], cfg_.gate_z_margin, step, cfg_.gate_station_step_max,
-              vel_w.norm(), cfg_.gate_speed_max, tts);
+              vel_w.norm(), cfg_.gate_speed_max, vel_w[0], vel_w[1], vel_w[2],
+              vel_ok ? ""
+                     : (hp_vel_box_set_
+                            ? " OUT-OF-BAND"
+                            : ""),
+              tts);
+          if (!vel_ok)
+            std::fprintf(stderr,
+                "[pp gate]   trained vel box (clip %d): x[%.2f,%.2f] y[%.2f,%.2f] "
+                "z[%.2f,%.2f] ±%.2f — planner demand out of the trained envelope; retune "
+                "the planner (delta_t_flight / target_land aim), or --vel-gate-margin\n",
+                eng_clip, vb[0], vb[1], vb[2], vb[3], vb[4], vb[5], cfg_.gate_vel_margin);
         }
       } else {
         ok = tgt_b[0] >= cfg_.gate_x_lo && tgt_b[0] <= cfg_.gate_x_hi &&
@@ -1326,7 +1509,9 @@ class PpPolicy {
       planner_tts0_ = std::min(tts, max_tts0);
     }
     planner_frozen_pos_w_ = pos_w;
-    planner_frozen_vel_w_ = vel_w;
+    planner_frozen_vel_w_ = (onnx_.obs_dim() == kObsDim110 && cfg_.vel_cmd_box_center)
+                                ? cfg_.racket_vel_w_clip[eng_clip]
+                                : vel_w;
     planner_frozen_sign_ = sign;
     planner_hold_pos_b_engage_ = tgt_b;
     planner_hold_z_w_ = pos_w[2];
@@ -1374,8 +1559,20 @@ class PpPolicy {
         pos_w[2] > hp_z_band_[c][1] + cfg_.gate_z_margin)
       return;
     if (vel_w.norm() > cfg_.gate_speed_max) return;
+    // Same trained-vel-box membership as engage: a mid-swing refinement must not drag the
+    // velocity command out of the trained envelope (keep the engage-gated value instead).
+    if (!cfg_.vel_cmd_box_center && hp_vel_box_set_ && !vel_in_hp_box_(c, vel_w)) return;
     planner_frozen_pos_w_ = pos_w;
-    planner_frozen_vel_w_ = vel_w;
+    if (!cfg_.vel_cmd_box_center) planner_frozen_vel_w_ = vel_w;  // box-center mode: vel stays pinned
+  }
+
+  // vel_w inside the per-clip trained hitter_pure velocity box, per axis ± gate_vel_margin.
+  bool vel_in_hp_box_(int clip, const Vec3& v) const {
+    const auto& b = hp_vel_box_[clip];
+    const double m = cfg_.gate_vel_margin;
+    return v[0] >= b[0] - m && v[0] <= b[1] + m &&
+           v[1] >= b[2] - m && v[1] <= b[3] + m &&
+           v[2] >= b[4] - m && v[2] <= b[5] + m;
   }
 
   // One-shot first-tick diagnostic dump (stderr). action = raw Isaac-order policy
@@ -1501,6 +1698,10 @@ class PpPolicy {
   // Defaults = the legacy shared gate; overwritten from ONNX metadata in the ctor.
   Vec2 hp_y_band_[2] = {Vec2(-0.65, -0.15), Vec2(-0.05, 0.45)};
   Vec2 hp_z_band_[2] = {Vec2(0.55, 1.40), Vec2(0.55, 1.40)};
+  // Per-clip trained velocity boxes {x_lo,x_hi,y_lo,y_hi,z_lo,z_hi} from the ONNX
+  // hitter_pure_vel_range_per_clip metadata; gate engage + streaming when set.
+  std::array<double, 6> hp_vel_box_[2] = {{0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0}};
+  bool hp_vel_box_set_ = false;
   // 177-D hold-station anchor (driver thread only): the fixed WORLD station fed to the
   // base_target obs during level-0 holds (captured at hold entry; carried from the last
   // swing's station after a completed swing). Cleared on localization dropout and by
@@ -1553,6 +1754,9 @@ class PpPolicy {
   double planner_hold_z_w_ = 0.90;
   // post-swing recovery clock + static-stand blend state (driver thread only)
   std::uint64_t planner_hold_start_tick_ = 0;
+  // MOTION/SHADOW session start (engage settle clock); pending set by rearm_yaw_align.
+  std::uint64_t planner_entry_tick_ = 0;
+  std::atomic<bool> planner_entry_pending_{true};
   bool planner_static_active_ = false;
   std::uint64_t planner_static_start_tick_ = 0;
   Eigen::VectorXd planner_static_q0_;

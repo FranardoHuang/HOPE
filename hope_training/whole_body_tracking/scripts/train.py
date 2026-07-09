@@ -591,6 +591,10 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 )
             R.hold_ready.params["reach_mode"] = _hr_mode
             applied.append(f"rewards.hold_ready.params.reach_mode={_hr_mode}")
+        # CONTINUOUS RALLY (2026-07-07): positive braking kernel through the follow-through
+        # ((~pre_strike) & (~strike_window)) — arrests the walk-and-strike lunge momentum between
+        # swings (deploy Gate-2.5 P7 drift fall). Default weight 0.0 = OFF (plain HitterPure).
+        _set_reward(R, "post_strike_brake", _get(rw, "post_strike_brake_weight"), _get(rw, "post_strike_brake_std"), applied)
         # P2.4 PACE-style smooth deceleration (flag-gated, default weight 0.0 = OFF): pseudo base-speed
         # command proportional to the remaining planar racket->target error. REWARD-side only (the
         # frozen 175-D actor obs contract is untouched).
@@ -753,7 +757,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             ("arm_torque_saturation", "arm_torque_saturation_weight"),
             ("prestrike_upright", "prestrike_upright_weight"),
             # Foot discipline (jiayi hold-fall stack, 2026-07-05): hip yaw/roll + ankle roll held to
-            # the reference footwork. Cfg default 0.0 (merge-audit flag-off); jiayi lineages pin -0.3.
+            # the reference footwork. Cfg default 0.0 (merge-audit flag-off); jiayi lineages pin it.
             ("foot_orientation", "foot_orientation_weight"),
         ):
             _w = _get(rw, _key)

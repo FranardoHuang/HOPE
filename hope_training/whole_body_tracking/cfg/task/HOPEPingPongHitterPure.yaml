@@ -113,6 +113,11 @@ rewards:
   racket_normal_std: 0.30
   base_position_weight: 2.0
   base_position_std: 0.20
+  # foot discipline (2026-07-07 pigeon-toe fix): 0.0 = OFF (paper-faithful). The moving gait
+  # toe-ins (hip_yaw p95 0.94 rad vs ref envelope 0.41 — obs-CSV diag on model_12200); enable
+  # -0.3 (177-proven) on a resume: task.rewards.foot_orientation_weight=-0.3. Declared so the
+  # CLI can set it (Hydra struct mode).
+  foot_orientation_weight: 0.0
   # regularization (generic only — the paper has NO foot/stability/hold shaping)
   joint_torques_weight: -0.00003
   action_rate_weight: -0.10

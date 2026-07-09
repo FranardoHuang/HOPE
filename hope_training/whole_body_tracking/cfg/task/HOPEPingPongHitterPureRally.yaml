@@ -1,0 +1,175 @@
+# =============================================================================
+# HOPE ping-pong WBC (Agibot A3) — HITTER-PURE + CONTINUOUS RALLY (2026-07-07).
+#
+# ⚠⚠ POST-MORTEM (2026-07-07 evening) — READ BEFORE USING THIS TASK ⚠⚠
+# The premise this task was built on is REFUTED. The Gate-2.5 P7 fall it targeted was NOT a
+# training gap: it was the C++ runner's 110 idle feeding station Δ=0 (no pull-back between
+# swings → follow-through displacement accumulated against world-fixed scripted targets →
+# OOD forward creep → fall). Fixing that ONE branch (pp_policy.hpp idle-anchor, cfg flag
+# idle_station_dzero_110) took model_12200 from 8/9 to ORACLE 10/10 with ZERO retraining.
+# The first run of THIS task (model_18000, brake/hold weights 1.0) traded single-swing strike
+# 0.994→0.866 (vel-pass 0.99→0.92: post_strike_brake dampened swing commitment) and STILL
+# failed deploy (P4b) — archived, not deployed. See memory hope-rally-upgrade +
+# deploy-gate-fails-check-interface-first.
+# KEPT (default-off, Pure verified byte-identical) as tooling for FUTURE genuine multi-swing
+# robustness needs (e.g. widening stations toward the paper's ±0.75 m), with lessons: brake
+# weight ≤0.3, hold_ready reach 0.30, and gate any candidate on single-swing det ≥0.95 FIRST.
+#
+# Original goal (historical): keep HitterPure's single-swing striking ability and ADD
+# continuous-rally / post-strike-homing capability — consecutive alternating swings with
+# recovery holds between them.
+#
+# WHAT CHANGES vs HOPEPingPongHitterPure.yaml (EVERYTHING else is identical — same 110-D
+# hitter_pure contract, same station/plane/velocity boxes, same DR, same terminations, same
+# per-clip normal signs; a HitterPure checkpoint warm-resumes STRICTLY):
+#   1. hold_steps_range [0,0] -> [25,125]: a REAL 0.5-2.5 s recovery hold at EVERY clip wrap
+#      (existing ARM-A machinery — hold freezes tts POSITIVE at the windup value == the C++
+#      runner's idle/wait tts clamp; reference = ready stand + zero vel; imitation body pos/ori
+#      auto-zeroed via *_swing_only). The wrap resamples target+station+clip BEFORE the hold, so
+#      the NEXT station is visible throughout the hold and base_position (already pre_strike-gated
+#      = live during holds) becomes the post-strike homing carrot toward the NEXT station.
+#   2. episode_length_s 10 -> 16: ~3-4 swing+hold cycles per episode so drift must be cancelled
+#      WITHIN an episode, not absorbed by the reset.
+#   3. + post_strike_brake 1.0 (std 0.5): positive braking kernel through the follow-through
+#      ((~pre_strike) & (~strike_window)) — arrests the lunge momentum; cannot touch the strike
+#      (strike_window-protected) and closes exactly at the wrap. NO position target (that would
+#      fight the swing's momentum sink); NO speed-proportional income anywhere.
+#   4. + hold_ready 1.0 (std 1.5, reach 0.20, reach_mode station): the 177-proven settle term —
+#      stillness x planted feet, in_hold-gated, income only within 0.20 m of the commanded
+#      station (station-selective, not arm-gameable; the code defaults std 0.5/"racket" are
+#      dead/inverted — see HOPEPingPongHitter.yaml notes).
+#
+# WHAT DELIBERATELY DOES NOT CHANGE (v1 minimal; escalation knobs for later):
+#   * fh/bh alternation: the wrap already re-draws the clip 50/50 uniform (commands.py
+#     _adaptive_sampling) — random switching is trained; strict alternation is a subset.
+#   * base_decel stays OFF (its v_des is keyed to the RACKET->target error — freeze-income at a
+#     covered target; re-key to base->station before ever enabling).
+#   * No foot-slip/upright/bob additions: Pure already carries always-on upright -1.0 /
+#     ang_vel_xy -0.05 / lin_vel_z -0.5; hold_ready covers hold-phase stillness.
+#   * Boxes/station ranges unchanged: recovery must be learnable BEFORE widening reach (do not
+#     make reach and recovery harder simultaneously).
+#   * midswing_resample_prob stays 0.0 (paper); post_swing_start_prob stays 0.0 (every wrap in a
+#     16 s episode IS a post-swing entry already).
+#
+# METRICS (new, wandb + eval_deterministic): base_drift_per_swing / base_drift_fwd_per_swing
+# (EMA over COMPLETED swings), base_station_offset_at_swing_start (recovery debt at each windup),
+# post_strike_base_speed_xy (follow-through braking), base_dist_from_origin (cumulative drift).
+#
+# GATES ("rally candidate" = BOTH must hold):
+#   single-swing: eval_deterministic task=HOPEPingPongHitterPure checkpoint=<rally ckpt>
+#     -> composite >= 0.95 (baseline 0.9936 - small margin), pre_strike_fall <= 2%.
+#   continuous:   eval_deterministic task=HOPEPingPongHitterPureRally +steps=1500 +tail=1000
+#     task.env.episode_length_s=20 -> post_strike_fall_rate <= 1%, base_drift_fwd_per_swing
+#     <= ~0.10 m, base_dist_from_origin tail-mean <= ~0.35 m, composite >= 0.90.
+#   deploy: pp_gate25.sh --oracle must reach 9/9 (P7 was THE failing phase).
+#
+# SYNC NOTE: HOPEPingPongHitterPureRallyAgibotA3EnvCfg.__post_init__ MIRRORS this file. Edit BOTH.
+# =============================================================================
+
+name: HOPEPingPongHitterPureRally
+gym_task: HOPE-PingPong-HitterPureRally-AgibotA3-v0
+experiment_name: agibot_a3_hope_hitter_pure_rally
+actor_obs_contract: hitter_pure
+
+# Same re-grounded hopex clips as HitterPure (⚠ registry :latest = hopex lineage; see the
+# GROUNDING note in HOPEPingPongHitter.yaml before re-uploading clips).
+registry_name: ${oc.env:WANDB_REGISTRY_ORG,dongc_1-university-of-california-berkeley-org}/wandb-registry-motions/hope_forehand
+registry_name_2: ${oc.env:WANDB_REGISTRY_ORG,dongc_1-university-of-california-berkeley-org}/wandb-registry-motions/hope_backhand
+
+defaults:
+  - /base/env_base@_here_
+  - /base/sim_base@_here_
+  - /base/randomization_base@_here_
+  - _self_
+
+env:
+  # RALLY: 16 s, ~3-4 swing+hold cycles (swing ~2.7 s + hold 0.5-2.5 s) — drift must be
+  # cancelled within the episode.
+  episode_length_s: 16.0
+
+# ---- swing-entry structure (MotionCommand) -----------------------------------
+motion:
+  wrap_teleport: false
+  stand_start_prob: 0.25
+  stand_start_min_hold: 25
+  # THE structural rally change: 0.5-2.5 s recovery hold at EVERY wrap (and reset). Inside the
+  # deploy envelope (runner hold_recover_s 2.5 s policy-active; scripted P7 holds ~4.5 s).
+  hold_steps_range: [25, 125]
+  post_swing_start_prob: 0.0
+  clip_switch_prob: 0.0
+
+# ---- reward weights / kernel std ---------------------------------------------
+# Pure's proven numbers untouched; ONLY the two rally recovery terms are new income.
+rewards:
+  racket_position_weight: 14.0
+  racket_position_std: 0.15
+  racket_velocity_weight: 14.0
+  racket_velocity_std: 0.6
+  racket_normal_weight: 5.0
+  racket_normal_std: 0.30
+  base_position_weight: 2.0
+  base_position_std: 0.20
+  # rally recovery income (0.0 in HOPEPingPongHitterPure.yaml):
+  post_strike_brake_weight: 1.0
+  post_strike_brake_std: 0.5
+  hold_ready_weight: 1.0
+  hold_ready_std: 1.5
+  hold_ready_reach: 0.20
+  hold_ready_reach_mode: station
+  # foot discipline (2026-07-07 pigeon-toe fix): 0.0 = OFF (paper-faithful). The moving gait
+  # toe-ins (hip_yaw p95 0.94 rad vs ref envelope 0.41 — obs-CSV diag on model_12200); enable
+  # -0.3 (177-proven) on a resume: task.rewards.foot_orientation_weight=-0.3. Declared so the
+  # CLI can set it (Hydra struct mode).
+  foot_orientation_weight: 0.0
+  # regularization (unchanged)
+  joint_torques_weight: -0.00003
+  action_rate_weight: -0.10
+  joint_limit_weight: -10.0
+  undesired_contacts_weight: -0.1
+
+# ---- target sampling: identical to HOPEPingPongHitterPure.yaml ------------------
+racket:
+  target_mode: hitter_pure
+  normal_mode: velocity
+  base_target_x_range: [-0.10, 0.10]
+  base_target_y_range: [-0.40, 0.40]
+  pos_range_per_clip:
+    forehand: {x: [0.70, 0.70], y: [-0.65, -0.15], z: [0.67, 0.97]}
+    backhand: {x: [0.70, 0.70], y: [-0.05,  0.45], z: [0.88, 1.18]}
+  vel_range_per_clip:
+    forehand: {x: [1.05, 2.05], y: [ 0.96, 1.96], z: [0.31, 1.11]}
+    backhand: {x: [1.61, 2.61], y: [-1.21, -0.21], z: [0.00, 0.71]}
+
+  strike_phase: 0.47
+  strike_phase_per_clip: [0.47, 0.333]
+  strike_window_s: 0.12
+  strike_success_pos_thresh: 0.075
+  clean_reference_strike_velocity: true
+  clean_strike_vel_window: 2
+
+  forehand_on_negative_y: true
+  mount_normal_axis: 1
+  mount_normal_sign: 1.0
+  # Per-clip striking-face sign (fh red/+Y, bh black/−Y) — see HOPEPingPongHitterPure.yaml notes.
+  mount_normal_sign_per_clip: [1.0, -1.0]
+
+  achieved_target_mix_prob: 0.0
+  adaptive_sigma: false
+
+  # A1 latency/degradation knobs: ALL OFF (identical to Pure).
+  target_delay_steps: 0
+  target_jitter_pos_per_s: 0.0
+  target_jitter_vel_per_s: 0.0
+  target_noise_white: 0.0
+  target_noise_ar1_sigma: 0.0
+  target_noise_ar1_rho: 0.717
+  target_dropout_prob: 0.0
+  target_post_strike_dropout_s: 0.0
+  target_bias_per_swing: 0.0
+  midswing_resample_prob: 0.0
+  midswing_resample_tts_floor: 0.3
+
+# ---- domain randomization (identical to Pure) ------------------------------------
+domain_rand:
+  link_mass_range: [0.85, 1.15]
+  pd_gain_range: [0.85, 1.15]

@@ -1032,6 +1032,30 @@ class HOPEHitterPureRewardsCfg(RewardsCfg):
     # (inherited & kept: motion_global_anchor_ori 0.5, action_rate_l2 -0.1, joint_limit -10,
     #  undesired_contacts -0.1.)
 
+    # --- continuous-rally recovery terms (2026-07-07) — weight 0.0 = SKIPPED (RewardManager drops
+    # zero-weight terms), so plain HitterPure stays byte-identical / paper-faithful. The Rally
+    # variant (HOPEPingPongHitterPureRallyAgibotA3EnvCfg + its YAML) enables them:
+    #   post_strike_brake — positive braking kernel through the follow-through ((~pre_strike) &
+    #     (~strike_window)); arrests the walk-and-strike lunge momentum (deploy P7 drift fall).
+    #   hold_ready — the 177-proven settle term (stillness x planted feet), in_hold-gated with the
+    #     STATION reach gate (std 1.5 / reach 0.20 / "station": the YAML-proven numbers — the code
+    #     defaults std 0.5/reach "racket" are dead/arm-gameable, see HOPEPingPongHitter.yaml notes).
+    post_strike_brake = RewTerm(func=mdp.post_strike_brake, weight=0.0,
+        params={"command_name": "racket_target", "std": 0.5})
+    hold_ready = RewTerm(func=mdp.hold_ready, weight=0.0,
+        params={"command_name": "racket_target", "std": 1.5, "reach": 0.20, "reach_mode": "station"})
+    # Foot discipline (declared 2026-07-07 after the pigeon-toe diagnosis): with lower-body
+    # imitation absent (paper §V-A: B = above pelvis) the hip-yaw DOF are reward-free and the
+    # policy toe-ins HARD while stepping — obs-CSV quantification on model_12200 in the AGI sim:
+    # hip_yaw deviation p95 ±0.94 rad, max 1.69 (reference envelope ±0.41; ankle/hip_roll clean;
+    # standing clean — it is ONLY the moving gait). Same pathology foot_orientation_discipline
+    # was built for on 2026-07-05 (177 ran it at -0.3). Enable on a 12200 resume via
+    # task.rewards.foot_orientation_weight=-0.3; gate: single-swing det >= 0.99 AND g25 oracle
+    # 10/10 must both hold, then re-run the obs-CSV diag (hip_yaw p95 back inside ~0.41).
+    foot_orientation = RewTerm(func=mdp.foot_orientation_discipline, weight=0.0,
+        params={"command_name": "motion",
+                "asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_yaw_joint", ".*_hip_roll_joint", ".*_ankle_roll_joint"])})
+
 
 @configclass
 class HOPEPingPongHitterPureAgibotA3EnvCfg(HOPEPingPongAgibotA3EnvCfg):
@@ -1084,3 +1108,38 @@ class HOPEPingPongHitterPureAgibotA3EnvCfg(HOPEPingPongAgibotA3EnvCfg):
             ((1.05, 2.05), (0.96, 1.96), (0.31, 1.11)),    # forehand
             ((1.61, 2.61), (-1.21, -0.21), (0.00, 0.71)),  # backhand
         )
+
+
+@configclass
+class HOPEPingPongHitterPureRallyAgibotA3EnvCfg(HOPEPingPongHitterPureAgibotA3EnvCfg):
+    """CONTINUOUS-RALLY variant of HitterPure (2026-07-07). ⚠ POST-MORTEM: the Gate-2.5 P7 fall
+    this task targeted turned out to be the C++ runner's Δ=0-idle artifact, NOT a training gap —
+    fixed deploy-side (pp_policy.hpp idle-anchor; model_12200 = ORACLE 10/10 with ZERO
+    retraining). The first run of this task (model_18000, weights 1.0) traded single-swing strike
+    0.994→0.866 and still failed deploy (P4b) — archived, not deployed. KEPT default-off as
+    tooling for future genuine multi-swing robustness (e.g. station widening toward ±0.75 m);
+    see the YAML header post-mortem for the lessons (brake ≤0.3, hold_ready reach 0.30, gate any
+    candidate on single-swing det ≥0.95 FIRST).
+
+    Mechanics (all existing machinery, unchanged facts): same 110-D contract/boxes/DR/
+    terminations as Pure (strict warm-resume works); swing -> follow-through BRAKE -> 0.5-2.5 s
+    HOLD (settle at the NEXT station — the wrap resamples target+station+clip BEFORE the hold)
+    -> windup -> swing, 3-4 swings per 16 s episode, fh/bh 50/50 per wrap. Hold obs: tts frozen
+    POSITIVE at the windup value (== the runner's idle clamp), ready-stand reference, imitation
+    auto-zeroed (*_swing_only), base_position live toward the new station. Code defaults MIRROR
+    cfg/task/HOPEPingPongHitterPureRally.yaml — edit BOTH."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        # 16 s: ~3-4 swing+hold cycles per episode (swing ~2.7 s + hold 0.5-2.5 s) — enough
+        # consecutive cycles for drift to hurt WITHIN an episode, so the policy must learn to
+        # cancel it; 10 s gave only ~2 held cycles.
+        self.episode_length_s = 16.0
+        # THE structural change: a real recovery window at EVERY wrap (and reset). 25-125 steps =
+        # 0.5-2.5 s @50 Hz — inside the deploy envelope (runner hold_recover_s 2.5 s policy-active,
+        # scripted P7 holds ~4.5 s). Deliberately NOT longer: holds pay no goal income, so hold
+        # steps dilute strike-gradient sample efficiency.
+        self.commands.motion.hold_steps_range = (25, 125)
+        # Recovery income (weights mirror the Rally YAML; 0.0 in plain HitterPure):
+        self.rewards.post_strike_brake.weight = 1.0
+        self.rewards.hold_ready.weight = 1.0

@@ -92,3 +92,17 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
     },
 )
+
+# HITTER-PURE + CONTINUOUS RALLY (2026-07-07): same 110-D contract/boxes, adds the between-swing
+# hold/recovery window (0.5-2.5 s at every wrap), follow-through braking + hold settle income, and
+# 16 s episodes — targets the deploy Gate-2.5 P7 walked-forward drift fall. Warm-resume a
+# HitterPure checkpoint with checkpoint_path=... (strict load works; identical obs/critic layout).
+gym.register(
+    id="HOPE-PingPong-HitterPureRally-AgibotA3-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": hope_env_cfg.HOPEPingPongHitterPureRallyAgibotA3EnvCfg,
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
+    },
+)

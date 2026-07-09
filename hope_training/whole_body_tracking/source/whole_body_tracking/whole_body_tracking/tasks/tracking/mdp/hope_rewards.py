@@ -154,6 +154,35 @@ def base_position_tracking_exp(env: ManagerBasedRLEnv, command_name: str, std: f
     return raw * cmd.pre_strike.float()
 
 
+def post_strike_brake(env: ManagerBasedRLEnv, command_name: str, std: float) -> torch.Tensor:
+    """POSITIVE braking reward through the FOLLOW-THROUGH (2026-07-07 continuous-rally upgrade).
+
+    Deploy P7 failure mode: the walk-and-strike lunge carries base momentum past the strike; with
+    nothing positive active in the tts<0 segment (every goal term is pre_strike/strike_window gated)
+    the policy has no incentive to arrest it, and over consecutive swings the displacement
+    accumulates until a swing starts from an untrained stance and falls. This term pays
+    ``exp(-(|v_base_xy|/std)^2)`` ONLY in the follow-through window::
+
+        (~pre_strike) & (~strike_window)
+
+    i.e. from strike-window EXIT (tts < -strike_window_s) to the clip wrap — it can never touch the
+    strike itself (the swing's through-speed is strike_window-protected), and on the wrap step tts
+    snaps positive for the next swing so the window closes exactly at the wrap. During a post-wrap
+    HOLD, ``pre_strike`` is True (the hold freezes tts positive at the windup value), so braking
+    there is ``hold_ready``'s job (stillness x planted feet), not this term's. The window length is
+    clip-clocked (not policy-controllable), so the bounded positive income cannot be farmed by
+    prolonging it. Deliberately NO position target here: pulling toward any station mid-follow-
+    through fights the swing's natural momentum sink — position homing is ``base_position``'s job
+    once the next station appears at the wrap.
+    """
+    cmd = _cmd(env, command_name)
+    v_xy = torch.norm(cmd.robot.data.root_lin_vel_w[:, :2], dim=-1)
+    raw = torch.exp(-torch.square(v_xy / std))
+    gate = (~cmd.pre_strike) & (~cmd.strike_window)
+    _dbg_log(cmd, "post_strike_brake", raw, gate)
+    return raw * gate.float()
+
+
 def pre_strike_foot_slip(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Penalize horizontal foot speed WHILE the foot is in contact, BEFORE the strike only.
 

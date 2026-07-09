@@ -29,6 +29,8 @@ onnx:
   # composite 1.0 both clips, 0 falls; works WITHOUT mocap — the mocap-less fallback).
   # FALLBACK (no mocap, forehand-only): model_p4_deployparity.onnx (strikes in place;
   # needs --no-imu-yaw for its validated behavior).
+  # Keep the last hardware-shipped artifact as the default. HitterPure successors are selected
+  # explicitly only after their ONNX hash, restore path, rockchip build, and hardware G2 are recorded.
   model_path: ../../../../assets/a3_runtime/models/model_17400_hitter177.onnx
   # The pingpong runner runs its ONNX on the CPU via the bundled onnxruntime — on rockchip too.
   # no_rknn tells build_a3_deploy_pkg.sh NOT to auto-promote to the RKNN/NPU path (which would

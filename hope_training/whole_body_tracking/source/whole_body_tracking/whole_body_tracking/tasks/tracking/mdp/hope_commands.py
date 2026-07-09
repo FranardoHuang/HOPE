@@ -361,6 +361,24 @@ class RacketTargetCommand(CommandTerm):
         # env necessarily passed its strike frame alive).
         self._resample_is_wrap = False
 
+        # --- Rally drift accounting (2026-07-07 continuous-rally upgrade) -------------------------
+        # Deploy P7 failure mode: each walk-and-strike lunges forward; over consecutive swings the
+        # displacement ACCUMULATES until a swing starts from an untrained stance and falls. These
+        # track exactly that: per-swing base displacement (closed out at WRAPS = completed swings
+        # only), its forward (x) component (drift is directional: forward), and the base->station
+        # error at each swing start (how far the new station is when the swing begins — the recovery
+        # debt the previous swing left behind). Same EMA decay/denominator discipline as the exact
+        # accumulators; drift uses its own wrap-count denominator (resets don't close out a swing).
+        self._swing_start_base_xy = torch.zeros(self.num_envs, 2, device=self.device)
+        # Stamp lazily on the FIRST _update_metrics after a swing start: at reset time the cached
+        # base_pos_w still holds the PRE-reset pose (events teleport the root after the snapshot),
+        # so an eager stamp would book the teleport as drift of the episode's first swing.
+        self._swing_start_pending = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._drift_n_acc = 0.0
+        self._drift_sum_acc = 0.0
+        self._drift_fwd_sum_acc = 0.0
+        self._station_offset_start_sum_acc = 0.0
+
         # --- HER-style achieved-target replay buffers (see RacketTargetCommandCfg) -----------------
         # Per-clip ring buffers of the racket state the policy ACTUALLY produced at exact-strike frames:
         # position env-origin-relative (world minus env origin), velocity world. Written in
@@ -577,6 +595,12 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["strike_window_hit_rate"] = torch.zeros(self.num_envs, device=self.device)
         # Base-position error while the base target is active (pre-strike), held at its last value.
         self.metrics["base_pos_error_pre_strike"] = torch.zeros(self.num_envs, device=self.device)
+        # Rally drift metrics (2026-07-07): EMA-broadcast per-swing drift + per-step recovery signals.
+        self.metrics["base_drift_per_swing"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["base_drift_fwd_per_swing"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["base_station_offset_at_swing_start"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["post_strike_base_speed_xy"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["base_dist_from_origin"] = torch.zeros(self.num_envs, device=self.device)
         # Swing-quality detail at the most recent strike: actual paddle speed, per-axis position error,
         # and success at tighter/looser thresholds (5 cm / 10 cm) for a fuller accuracy distribution.
         self.metrics["racket_speed_at_strike"] = torch.zeros(self.num_envs, device=self.device)
@@ -1412,6 +1436,15 @@ class RacketTargetCommand(CommandTerm):
             _s = float(self.cfg.vb_spin_abs_max)
             self.vb_spin_in_w[env_ids] = sample_uniform(-_s, _s, (n, 3), self.device)
 
+        # Rally drift accounting: base->NEW-station error at swing start (the recovery debt the
+        # previous swing left). Wrap path only — at true resets base_pos_w still caches the
+        # pre-teleport pose (the lazy-stamp rationale in __init__), which would book the reset
+        # teleport as recovery debt. Denominator: _drift_n_acc (same wrap-only event count).
+        if self._resample_is_wrap and n > 0:
+            _ids_so = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+            _off = torch.norm(self.base_pos_w[_ids_so, :2] - self.base_target_pos_w[_ids_so], dim=-1)
+            self._station_offset_start_sum_acc += float(_off.sum())
+
         # Stamp the motion phase baseline for these envs so the per-swing wrap detector in
         # _update_command does not immediately re-trigger after this (e.g. reset-time) resample.
         self._prev_motion_steps[env_ids] = self._motion().time_steps[env_ids]
@@ -1735,6 +1768,21 @@ class RacketTargetCommand(CommandTerm):
         # _vb_book_strike_step). One-shot — consumed on transfer.
         self._rally_returned[env_ids_t] = self._rally_pending_return[env_ids_t]
         self._rally_pending_return[env_ids_t] = False
+
+        # Rally drift close-out: a WRAP means the previous swing ran to completion — book its base
+        # displacement (norm + forward component) from the swing-start stamp to the current base.
+        # True resets never close out (the swing was aborted/fallen; the teleport is not drift).
+        _ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        if not count_prestrike_falls:  # wrap path (see _resample_is_wrap)
+            _stamped = ~self._swing_start_pending[_ids_t]  # only swings whose start was stamped
+            if bool(_stamped.any()):
+                _d = self.base_pos_w[_ids_t, :2] - self._swing_start_base_xy[_ids_t]
+                self._drift_sum_acc += float((torch.norm(_d, dim=-1) * _stamped.float()).sum())
+                self._drift_fwd_sum_acc += float((_d[:, 0] * _stamped.float()).sum())
+                self._drift_n_acc += float(_stamped.sum())
+        # Stamp the NEW swing's start lazily (first _update_metrics after this resample): at reset
+        # time base_pos_w still caches the PRE-teleport pose.
+        self._swing_start_pending[_ids_t] = True
         if count_prestrike_falls:
             term = self._env.termination_manager.terminated[env_ids]
             pre = self.pre_strike[env_ids]
@@ -1799,6 +1847,22 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["base_speed_xy_prestrike"] = torch.where(
             self.pre_strike, base_speed_xy, torch.zeros_like(base_speed_xy)
         )
+        # Rally: planar base speed through the FOLLOW-THROUGH (strike-window exit -> wrap) — the
+        # braking window the post_strike_brake reward shapes. Held-write (carries the last
+        # in-window value between swings) so the tail-mean reads the typical post-strike speed.
+        _brake_win = (~self.pre_strike) & (~self.strike_window)
+        self.metrics["post_strike_base_speed_xy"] = torch.where(
+            _brake_win, base_speed_xy, self.metrics["post_strike_base_speed_xy"]
+        )
+        # Rally: cumulative displacement from the env origin (the P7 forward-drift accumulator).
+        self.metrics["base_dist_from_origin"] = torch.norm(
+            self.base_pos_w[:, :2] - self._env.scene.env_origins[:, :2], dim=-1
+        )
+        # Rally: lazy swing-start stamp (fresh base_pos_w — see __init__ rationale).
+        if bool(self._swing_start_pending.any()):
+            _pend = self._swing_start_pending
+            self._swing_start_base_xy[_pend] = self.base_pos_w[_pend, :2]
+            self._swing_start_pending.zero_()
         # --- foot footwork signals (slip² / velocity / drag); feet may STEP, so this is PENALTY-only ---
         if self._foot_idx_robot and self._contact_sensor is not None and self._foot_idx_contact:
             f_force = torch.norm(self._contact_sensor.data.net_forces_w[:, self._foot_idx_contact, :], dim=-1)
@@ -2084,6 +2148,10 @@ class RacketTargetCommand(CommandTerm):
         self._replay_n_acc = decay * self._replay_n_acc
         self._rally_starts_acc = decay * self._rally_starts_acc
         self._rally_returns_acc = decay * self._rally_returns_acc
+        self._drift_n_acc = decay * self._drift_n_acc
+        self._drift_sum_acc = decay * self._drift_sum_acc
+        self._drift_fwd_sum_acc = decay * self._drift_fwd_sum_acc
+        self._station_offset_start_sum_acc = decay * self._station_offset_start_sum_acc
         for _c in self._clip_names:
             self._swing_starts_acc_c[_c] = decay * self._swing_starts_acc_c[_c]
             self._prestrike_fall_acc_c[_c] = decay * self._prestrike_fall_acc_c[_c]
@@ -2255,6 +2323,14 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["pre_strike_fall_rate"][:] = min(self._prestrike_fall_acc / _s_denom, 1.0) if _s_enough else 0.0
         self.metrics["post_strike_fall_rate"][:] = (
             min(self._poststrike_fall_acc / _s_denom, 1.0) if _s_enough else 0.0
+        )
+        # Rally drift ratios: denominator = completed (wrapped) swings, NOT all starts.
+        _d_denom = max(self._drift_n_acc, 1e-6)
+        _d_enough = self._drift_n_acc >= float(self.cfg.exact_success_min_count)
+        self.metrics["base_drift_per_swing"][:] = (self._drift_sum_acc / _d_denom) if _d_enough else 0.0
+        self.metrics["base_drift_fwd_per_swing"][:] = (self._drift_fwd_sum_acc / _d_denom) if _d_enough else 0.0
+        self.metrics["base_station_offset_at_swing_start"][:] = (
+            (self._station_offset_start_sum_acc / _d_denom) if _d_enough else 0.0
         )
         # HER replay diagnostics: fraction of resampled targets drawn from the achieved buffer
         # (~achieved_target_mix_prob once the per-clip buffers pass achieved_min_fill).

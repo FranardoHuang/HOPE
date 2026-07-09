@@ -259,7 +259,7 @@ int main(int argc, char** argv) {
                  "       [--reference-playback|--mode reference-playback]"
                  " [--no-publish|--dry-run] [--warmup-sec S]\n"
                  "       [--planner] (LIVE planner: racket <- /racket/command_flat, base <- /a3/base_pose_flat over ros2;"
-                 " [--engage-min-tts S] [--cmd-timeout S] [--invalid-grace S])\n"
+                 " [--engage-min-tts S] [--cmd-timeout S] [--invalid-grace S] [--vel-gate-margin M])\n"
                  "       [--loc-mode fabricated|perfect_tracking|oracle|external_base]"
                  " [--perfect-tracking] [--oracle-pelvis] [--no-imu-yaw]\n"
                  "       [--oracle-shm PATH] [--oracle-max-age S]"
@@ -420,6 +420,14 @@ int main(int argc, char** argv) {
     pcfg.engage_min_tts_s = std::stod(Flag(argc, argv, "--engage-min-tts", "1.0"));
     pcfg.command_timeout_s = std::stod(Flag(argc, argv, "--cmd-timeout", "0.5"));
     pcfg.planner_invalid_grace_s = std::stod(Flag(argc, argv, "--invalid-grace", "0.25"));
+    // 110-D per-clip trained-velocity-box gate slack (m/s per axis); see PpPolicyConfig.
+    pcfg.gate_vel_margin = std::stod(Flag(argc, argv, "--vel-gate-margin", "0.30"));
+    // Mid-swing target streaming: OFF unless the model trained midswing_resample_prob > 0
+    // (the 13200 baseline trained 0.0 — see PpPolicyConfig::stream_target).
+    pcfg.stream_target = Has(argc, argv, "--stream-target");
+    // Demo-robustness vel mode: command the trained box-center velocity; planner keeps
+    // WHERE + WHEN (see PpPolicyConfig::vel_cmd_box_center).
+    pcfg.vel_cmd_box_center = Has(argc, argv, "--vel-box-center");
   }
   // YAW-ALIGN default ON (hardware fix: boot-drifted IMU yaw polluted motion_anchor_ori_b
   // by a constant -12..-38 deg in MDU captures -> the policy fought a fictional torso yaw
@@ -953,9 +961,12 @@ int main(int argc, char** argv) {
                     std::cout << "gain_scale=" << gain_scale.load() << "\n"; break;
           case ']': gain_scale.store(std::min(1.0, gain_scale.load() + 0.1));
                     std::cout << "gain_scale=" << gain_scale.load() << "\n"; break;
-          case ',': ppp->set_swing_speed(ppp->swing_speed() - 0.1);
-                    std::cout << "swing_speed=" << ppp->swing_speed() << "\n"; break;
-          case '.': ppp->set_swing_speed(ppp->swing_speed() + 0.1);
+          case ',':
+          case '.': // swing-speed rescales the in-flight clock RETROACTIVELY (t is scaled from
+                    // the engage origin): mid-swing it snaps tts and breaks the wait-until-tts
+                    // strike alignment. Planner mode owns the clock — ignore, like 0/1/f/b.
+                    if (planner_mode) { std::cout << "-> swing-speed key ignored (PLANNER owns the clock)\n"; break; }
+                    ppp->set_swing_speed(ppp->swing_speed() + (c == '.' ? 0.1 : -0.1));
                     std::cout << "swing_speed=" << ppp->swing_speed() << "\n"; break;
           case 'f': if (planner_mode) { std::cout << "-> f/b ignored (PLANNER picks the side)\n"; break; }
                     ppp->set_swing_dir(+1);

@@ -46,6 +46,19 @@ class HOPEPlannerNode(Node):
         self.declare_parameter("target_land_x", 2.055)
         self.declare_parameter("target_land_y", -0.7625)
         self.declare_parameter("delta_t_flight", 0.5)
+        # PER-SIDE aim/flight (2026-07-08, from the Gate-3 rally vel-gate finding): the two
+        # trained clips return in OPPOSITE cross-court directions (fh vy [+0.96,+1.96], bh vy
+        # [-1.21,-0.21] world), so NO single target_land_y makes both sides' demanded racket
+        # velocity land inside the trained boxes (best single aim = 5/10 sweep serves in-band;
+        # the C++ runner's vel gate correctly stands on the rest). When set (non-NaN) the aim
+        # and flight time switch per predicted arrival SIDE — fh if arrival_y - robot_y < -0.11
+        # (the trained band midpoint, mirroring the runner's nearest-station split). The side
+        # uses the LAST valid plan's intercept (one 300 Hz frame of lag; settles ~1.5 s before
+        # any engage). NaN (default) = legacy single aim; arena values live in the yaml.
+        self.declare_parameter("target_land_y_fh", float("nan"))
+        self.declare_parameter("target_land_y_bh", float("nan"))
+        self.declare_parameter("delta_t_flight_fh", float("nan"))
+        self.declare_parameter("delta_t_flight_bh", float("nan"))
         self.declare_parameter("drag_k", 0.1261)          # venue fit 2026-07-03 (configs/ball_physics_venue.yaml)
         self.declare_parameter("restitution_h", 0.64)     # no-spin grip equivalent (1 - a_t)
         self.declare_parameter("restitution_v", 0.9215)   # venue table e_n
@@ -146,6 +159,15 @@ class HOPEPlannerNode(Node):
         self._x_hit_max = float(self.get_parameter("x_hit_max").value)
         self._x_hit_follow_robot = bool(self.get_parameter("x_hit_follow_robot").value)
         self._robot_x = None          # latest robot X (table frame); None -> static x_hit
+        self._robot_y = None          # latest robot Y (table frame); side split for per-side aim
+        # per-side aim/flight (NaN = disabled); consumed in _poses_cb before the solve
+        self._land_y_fh = float(self.get_parameter("target_land_y_fh").value)
+        self._land_y_bh = float(self.get_parameter("target_land_y_bh").value)
+        self._dtf_fh = float(self.get_parameter("delta_t_flight_fh").value)
+        self._dtf_bh = float(self.get_parameter("delta_t_flight_bh").value)
+        self._per_side_aim = not (np.isnan(self._land_y_fh) and np.isnan(self._land_y_bh)
+                                  and np.isnan(self._dtf_fh) and np.isnan(self._dtf_bh))
+        self._last_intercept_y = None  # last valid plan's arrival y (side memory)
         self._publish_flat = bool(self.get_parameter("publish_flat_cmd").value)
         self._marker_to_base = np.array(
             [float(v) for v in self.get_parameter("marker_to_base_xyz").value])
@@ -258,6 +280,7 @@ class HOPEPlannerNode(Node):
             def _robot_pose_cb(msg: PoseStamped) -> None:
                 p = msg.pose.position
                 self._robot_x = float(p.x)
+                self._robot_y = float(p.y)
                 # Stream the base pose to the C++ runner (external_base localization). Apply the
                 # marker->base offset; the runner uses POSITION only (mocap is position-only) so
                 # the quaternion is informational. Publishes at the robot_pose_topic rate.
@@ -321,6 +344,17 @@ class HOPEPlannerNode(Node):
             self.planner.config.x_hit = float(
                 np.clip(self._robot_x + self._x_hit_offset, self._x_hit_min, self._x_hit_max))
 
+        # PER-SIDE aim/flight (see the parameter block): switch target_land_y/delta_t_flight
+        # by the last valid plan's arrival side. Mutating config is safe (read per solve).
+        if self._per_side_aim and self._robot_y is not None and self._last_intercept_y is not None:
+            fh = (self._last_intercept_y - self._robot_y) < -0.11
+            land_y = self._land_y_fh if fh else self._land_y_bh
+            dtf = self._dtf_fh if fh else self._dtf_bh
+            if not np.isnan(land_y):
+                self.planner.config.target_land[1] = land_y
+            if not np.isnan(dtf):
+                self.planner.config.delta_t_flight = dtf
+
         # CRASH GUARD (field 2026-07-07): garbage measurements (e.g. a mocap feed in
         # millimetres) made the outgoing-velocity solve raise FloatingPointError and
         # KILLED the node mid-demo. A planner glitch must degrade to "no command"
@@ -355,6 +389,7 @@ class HOPEPlannerNode(Node):
         self._last_tts = tts if tts is not None else float("nan")
         if cmd.valid:
             self._n_valid += 1
+            self._last_intercept_y = float(cmd.p_intercept[1])  # per-side aim memory
 
         if self.cmd_pub is not None:
             out = RacketCommand()

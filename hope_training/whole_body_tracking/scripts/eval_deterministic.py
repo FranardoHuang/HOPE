@@ -90,6 +90,14 @@ REPORT_ROWS = [
     ("base_target_offset_norm", "base_target_offset_norm"),
     ("base_pos_error", "base_pos_error"),
     ("base_pos_error_pre_strike", "base_pos_error_pre_strike"),
+    # CONTINUOUS RALLY drift gate (2026-07-07): per-swing displacement EMAs (completed swings only)
+    # + follow-through braking speed + cumulative drift from origin. Rally candidate thresholds:
+    # drift_fwd <= ~0.10 m/swing, dist_from_origin tail-mean <= ~0.35 m, post_strike_fall <= 1%.
+    ("base_drift_per_swing", "base_drift_per_swing"),
+    ("base_drift_fwd_per_swing", "base_drift_fwd_per_swing"),
+    ("base_station_offset_at_swing_start", "base_station_offset_at_swing_start"),
+    ("post_strike_base_speed_xy", "post_strike_base_speed_xy"),
+    ("base_dist_from_origin", "base_dist_from_origin"),
     ("base_roll_deg", "base_roll_deg"),
     ("base_pitch_deg", "base_pitch_deg"),
     ("foot_slip_speed", "foot_slip_speed"),

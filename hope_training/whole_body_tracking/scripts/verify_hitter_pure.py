@@ -23,6 +23,10 @@ from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--motion-file", nargs="+", required=True)
+# CONTINUOUS RALLY (2026-07-07): --rally gates the HitterPureRally variant instead — same
+# contract/sampling/normal checks, but EXPECTS the recovery machinery: hold_steps_range (25,125),
+# hold_ready/post_strike_brake weights 1.0, episode 16 s (code defaults MIRROR the Rally YAML).
+parser.add_argument("--rally", action="store_true")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 args.headless = True
@@ -38,7 +42,10 @@ from whole_body_tracking.tasks.tracking.actor_observation_contract import (
     validate_actor_observation_contract,
 )
 
-TASK = "HOPE-PingPong-HitterPure-AgibotA3-v0"
+RALLY = bool(args.rally)
+TASK = (
+    "HOPE-PingPong-HitterPureRally-AgibotA3-v0" if RALLY else "HOPE-PingPong-HitterPure-AgibotA3-v0"
+)
 NUM_ENVS = 16
 
 env_cfg = parse_env_cfg(TASK, device="cuda:0", num_envs=NUM_ENVS)
@@ -136,9 +143,12 @@ check(
     "racket_progress declared but OFF (weight 0.0)",
     "racket_progress" in active and float(rm.get_term_cfg("racket_progress").weight) == 0.0,
 )
+# NOTE (2026-07-07 rally upgrade): hold_ready + post_strike_brake are now DECLARED on the shared
+# Pure rewards cfg (weight 0.0 = skipped by the RewardManager, byte-identical training) so the
+# Rally variant can enable them — like racket_progress they are checked BY WEIGHT, not absence.
 must_absent = {
-    "hold_ready", "base_decel", "pre_strike_foot_slip", "foot_slip_sq",
-    "foot_velocity", "foot_drag", "foot_orientation", "arm_overreach", "arm_torque_saturation",
+    "base_decel", "pre_strike_foot_slip", "foot_slip_sq",
+    "foot_velocity", "foot_drag", "arm_overreach", "arm_torque_saturation",
     "prestrike_waist_twist", "prestrike_upright", "strike_upright", "strike_ang_vel",
     "strike_foot_vel", "strike_vbob", "motion_global_anchor_pos",
 }
@@ -151,15 +161,37 @@ must_present = {
 check("no hold/foot/HER-era reward terms", not (active & must_absent), str(sorted(active & must_absent)))
 check("goal+imitation+reg terms present", must_present <= active, str(sorted(must_present - active)))
 check("no HER replay", float(cmd.cfg.achieved_target_mix_prob) == 0.0)
+_w_brake = float(rm.get_term_cfg("post_strike_brake").weight) if "post_strike_brake" in active else None
+_w_hold = float(rm.get_term_cfg("hold_ready").weight) if "hold_ready" in active else None
+# foot_orientation (2026-07-07 pigeon-toe fix): declared weight-0 fallback knob on BOTH variants;
+# enabled per-run via task.rewards.foot_orientation_weight (verify sees the code default 0.0).
+_w_foot = float(rm.get_term_cfg("foot_orientation").weight) if "foot_orientation" in active else None
+check("foot_orientation declared (weight 0.0 default)", _w_foot == 0.0, str(_w_foot))
+if RALLY:
+    check("post_strike_brake ON (weight 1.0)", _w_brake == 1.0, str(_w_brake))
+    check("hold_ready ON (weight 1.0, station mode)",
+          _w_hold == 1.0 and rm.get_term_cfg("hold_ready").params.get("reach_mode") == "station",
+          f"w={_w_hold}")
+else:
+    check("post_strike_brake declared but OFF (weight 0.0)", _w_brake == 0.0, str(_w_brake))
+    check("hold_ready declared but OFF (weight 0.0)", _w_hold == 0.0, str(_w_hold))
 
-# 5) no hold phase (only stand-start settles allowed).
+# 5) hold structure: Pure = NO hold phase (only stand-start settles); Rally = 0.5-2.5 s recovery
+# hold at every wrap + 16 s episodes.
 hc = motion.hold_counter
-check(
-    "hold_counter <= stand_start_min_hold",
-    bool((hc <= int(motion.cfg.stand_start_min_hold)).all()),
-    f"max {int(hc.max())}",
-)
-check("hold_steps_range == (0, 0)", tuple(motion.cfg.hold_steps_range) == (0, 0), str(motion.cfg.hold_steps_range))
+if RALLY:
+    check("hold_steps_range == (25, 125)", tuple(motion.cfg.hold_steps_range) == (25, 125),
+          str(motion.cfg.hold_steps_range))
+    check("hold_counter <= 125", bool((hc <= 125).all()), f"max {int(hc.max())}")
+    check("episode_length_s == 16.0", float(env.unwrapped.cfg.episode_length_s) == 16.0,
+          str(env.unwrapped.cfg.episode_length_s))
+else:
+    check(
+        "hold_counter <= stand_start_min_hold",
+        bool((hc <= int(motion.cfg.stand_start_min_hold)).all()),
+        f"max {int(hc.max())}",
+    )
+    check("hold_steps_range == (0, 0)", tuple(motion.cfg.hold_steps_range) == (0, 0), str(motion.cfg.hold_steps_range))
 
 # 6) random steps -> finite 110-D obs.
 obs, _ = env.reset()
