@@ -101,6 +101,11 @@ model_13599.pt ──play.py 原生导出(isaac venv,占一个 GPU 槽 ~4 分钟
 - pod 没装 git-lfs:commit/checkout/push 钩子会"假失败"——`-c core.hookspath=/dev/null`
   + `GIT_LFS_SKIP_SMUDGE=1`;pull 被挡的三层:本地脏文件(stash 或备份后 checkout)、
   LFS 钩子、**散落的未跟踪文件与新增文件同名**(挪走再拉)。
+- **活 pod 上禁用 rsync `--delete-excluded`(07-09 付费,大额学费)**:给 pod2 增量同步 repo 时
+  `--exclude logs/ --delete-excluded` 把**目的端的 logs/ 整树删了**——热启存档和六个在跑臂的
+  run 目录(存档/env.yaml/tfevents)全灭,六臂随后全部僵死(R 态空转/GPU 0%/stdout 冻结),
+  只能杀掉从 13000 重发(损失 1-4.5h×6)。规矩:向运行中的 pod 同步**永不带任何 delete 类旗标**;
+  --exclude 的语义是"不传输",加 --delete-excluded 就成了"帮你把目的端也删了"。
 - **共享检出上禁用盲 `git stash pop`(07-09 付费)**:pod 检出里躺着陈年 stash(07-06 两条);
   "stash → pull → pop"套路在"本次无可 stash 内容"时,pop 会弹出**陈年 stash**,在 train.py/
   评估器等活体文件上留冲突标记——watchdog 下一巡的复活/判卷就跑挂。规矩:pop 前先
