@@ -202,6 +202,9 @@ if fatal:
 def fmt(v):
     if isinstance(v, bool):
         return "true" if v else "false"
+    if isinstance(v, (list, tuple)):
+        # 值加引号:EXPORT_CMD 经 bash -c 展开,裸 [..] 会被 glob/hydra 分词坑
+        return "'[" + ",".join(fmt(x) for x in v) + "]'"
     return repr(v) if isinstance(v, float) else str(v)
 
 ov = []
@@ -211,6 +214,11 @@ for key, src in (
     ("question_bank",          rt.get("question_bank")),
     ("face_command",           rt.get("face_command")),
     ("vb_spin_mode",           rt.get("vb_spin_mode")),
+    # 陪跑档:符号表进"导出环境"只为 ONNX 元数据保真(mount_normal_sign_per_clip /
+    # face_obs_convention 键;不搬 = CLI 配置臂的元数据写成空表 = 说谎)。设计决定
+    # (2026-07-09 单翻病定案):考卷 EXAM_CMD **刻意不传**符号表——bank 判分与 face obs
+    # 均为 +Y(A)约定,双侧不翻=判分正确;mjeval 侧另有互斥守卫拦手动误传。
+    ("mount_normal_sign_per_clip", rt.get("mount_normal_sign_per_clip")),
     ("adaptive_sigma",         rt.get("adaptive_sigma")),
     ("target_delay_steps",     rt.get("target_delay_steps")),
     ("target_noise_white",     rt.get("target_noise_white")),
