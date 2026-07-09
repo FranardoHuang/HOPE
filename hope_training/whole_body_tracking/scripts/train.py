@@ -271,6 +271,8 @@ _RACKET_KEYS = (
     # Stage-1 question bank (fixed contact point, inverse-solved face+velocity targets) + the
     # face-command reward re-anchor / +4 actor obs channel (normal + rho placeholder, 175->179).
     "question_bank", "face_command", "face_command_obs",
+    # R10c 站位锚观测(+2 actor 尾维,179->181;franco 2026-07-09"planner 的 p_base 应该加进去")
+    "station_obs", "station_anchor_offset_xy",
     # SHADOW physical ball + table (flag-gated, METRICS-ONLY engine-vs-analytic landing
     # cross-check; requires the virtual-ball task variant). shadow_ball.py.
     "shadow_ball", "shadow_table",
@@ -930,6 +932,15 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             # validate_actor_observation_contract stays a loud error on the frozen 175-D value.
             _fc_obs = _get(rk, "face_command_obs")
             if _fc_obs is not None and _as_bool(_fc_obs):
+                # 尾部顺序守卫:站位通道必须在拍面通道之后(179 前缀不变才有纯尾部扩列热启)。
+                # 若站位已先挂上(如 cfg 旗标开了 station_obs、拍面却走 YAML 覆盖),此时再挂
+                # 拍面会得到 175+站位2+拍面4 的错序布局——loud error,别让它静默开训。
+                if getattr(env_cfg.observations.policy, "station_anchor_err_b", None) is not None:
+                    raise _OverrideError(
+                        "[train.py] racket.face_command_obs enabling AFTER station_anchor_err_b is "
+                        "already attached would put the station channel BEFORE the face channel "
+                        "(layout != 179+station tail). Enable both via the same path (racket.station_obs "
+                        "+ racket.face_command_obs in the task YAML/CLI), not mixed cfg-flag/override.")
                 from isaaclab.managers import ObservationTermCfg as _ObsTerm
 
                 from whole_body_tracking.tasks.tracking import mdp as _mdp
@@ -940,6 +951,32 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                     env_cfg.face_command_obs = True  # keep the descriptive cfg field honest
                 applied.append(
                     "observations.policy.racket_target_normal_cmd(+4D face-command obs, 175->179)")
+            # R10c station_obs (+2 actor 尾维:世界系站位锚误差 = 出生点常数 − 当前 base XY,旋进
+            # base 系;franco 2026-07-09"就算不需要移动,它也是一个锚")。同 face_command_obs 时序:
+            # __post_init__ 已跑完,这里直接挂 ObsTerm(同名同尾部位置)。要求拍面通道已开——
+            # 单开=177 维且与 Hitter 177(站位在第 167 列)布局不同,评估器按维数认契约会静默
+            # 错位;R10c 的合法形状只有 181。锚点可用 racket.station_anchor_offset_xy 挪离出生点。
+            _st_obs = _get(rk, "station_obs")
+            if _st_obs is not None and _as_bool(_st_obs):
+                if getattr(env_cfg.observations.policy, "racket_target_normal_cmd", None) is None:
+                    raise _OverrideError(
+                        "[train.py] racket.station_obs=true requires the face channel already attached "
+                        "(racket.face_command_obs=true or env cfg face_command_obs): station alone would "
+                        "be an ambiguous 177-D layout (Hitter's 177 has the station at column 167, not "
+                        "the tail) — the evaluator resolves contracts by dim and would silently misread. "
+                        "R10c's only legal shape is 181 = 179 + station tail.")
+                from isaaclab.managers import ObservationTermCfg as _ObsTerm
+
+                from whole_body_tracking.tasks.tracking import mdp as _mdp
+
+                env_cfg.observations.policy.station_anchor_err_b = _ObsTerm(
+                    func=_mdp.station_anchor_err_b, params={"command_name": "racket_target"})
+                if hasattr(env_cfg, "station_obs"):
+                    env_cfg.station_obs = True  # keep the descriptive cfg field honest
+                applied.append(
+                    "observations.policy.station_anchor_err_b(+2D station-anchor obs, 179->181)")
+            _set_range(C, "station_anchor_offset_xy", _get(rk, "station_anchor_offset_xy"),
+                       applied, "racket_target")
             # SHADOW physical ball + table (METRICS-ONLY): a real PhysX ball flies each question
             # in, is struck via the same venue contact model, and lands under engine integration —
             # an online engine-vs-analytic cross-check of the vb landing prediction. The scene

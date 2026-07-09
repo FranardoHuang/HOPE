@@ -224,6 +224,13 @@ if motion.get("post_swing_start_prob") is not None:
     ov.append(f"++task.motion.post_swing_start_prob={fmt(motion['post_swing_start_prob'])}")
 if cfg.get("face_command_obs"):          # 顶层旗标:+4 obs 维(175->179),导错=checkpoint 加载即死
     ov.append("++task.racket.face_command_obs=true")
+if cfg.get("station_obs"):               # 顶层旗标:+2 obs 维(179->181,R10c 站位锚),导错同上即死
+    ov.append("++task.racket.station_obs=true")
+    sax = rt.get("station_anchor_offset_xy")
+    if sax is not None and [float(sax[0]), float(sax[1])] != [0.0, 0.0]:
+        # 陪跑档:锚点偏移只影响观测数值不影响维度,搬回去保持导出环境与训练同构
+        ov.append("'++task.racket.station_anchor_offset_xy=[%s,%s]'"
+                  % (repr(float(sax[0])), repr(float(sax[1]))))
 if cfg.get("physical_ball"):
     ov.append("++task.physical_ball=true")
 ov.append("task.actor_obs_contract=null")   # 扩列观测放行(179 臂;runbook 发射核对单第 5 条)

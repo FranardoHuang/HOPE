@@ -408,9 +408,9 @@ class OnnxPolicy:
         outs = [o.name for o in self.sess.get_outputs()]
         assert "obs" in ins and "time_step" in ins, f"unexpected ONNX inputs: {ins}"
         self.obs_dim = int(ins["obs"][1])
-        assert self.obs_dim in (175, 177, 179, 180), (
-            f"expected obs dim 180 (base), 175 (deploy_parity), 177 (hitter_footwork) "
-            f"or 179 (deploy_parity + face command), got {self.obs_dim}")
+        assert self.obs_dim in (175, 177, 179, 180, 181), (
+            f"expected obs dim 180 (base), 175 (deploy_parity), 177 (hitter_footwork), "
+            f"179 (deploy_parity + face command) or 181 (179 + station anchor), got {self.obs_dim}")
         # 175-D deploy_parity = 180-D MINUS motion_anchor_pos_b(3) and base_target_pos_b(2), with the
         # racket_target_pos_b term reframed relative to the CURRENT racket FK (not the base). See build_obs.
         # 177-D hitter_footwork = the 175-D layout PLUS base_target_pos_b(2) re-inserted after
@@ -418,8 +418,14 @@ class OnnxPolicy:
         # 179-D (stage 1, 2026-07-06) = 175-D + racket_target_normal_cmd tail: DEMANDED face normal
         # (3, world) + zero-filled rho placeholder (1) — the frozen contract-day 175->179 layout
         # (train.py face_command_obs appends the term LAST, so the 175 prefix is byte-identical).
-        self.deploy_parity = (self.obs_dim in (175, 179))
-        self.face_command = (self.obs_dim == 179)
+        # 181-D (R10c, 2026-07-09) = 179-D + station_anchor_err_b(2) tail: world-frame station anchor
+        # (spawn-point constant = env origin) minus current base XY, yaw-heading base frame — franco's
+        # "planner p_base 站位锚" (the anchor stays put while the trunk drifts, so the policy SEES the
+        # drift; contract deploy_parity_station181). Station-before-face is the CONTRACT-DAY layout;
+        # this tail order is the training-side pure-tail-pad transition (see actor_observation_contract).
+        self.deploy_parity = (self.obs_dim in (175, 179, 181))
+        self.face_command = (self.obs_dim in (179, 181))
+        self.station_obs = (self.obs_dim == 181)
         self.hitter = (self.obs_dim == 177)
         self.out_names = outs
         md = self.sess.get_modelmeta().custom_metadata_map
@@ -706,6 +712,11 @@ class RacketCommand:
         # the swing's SAMPLED station (deploy-faithful hold pins base_target_pos_w to the live base
         # for a Δ=0 obs, then restores this at swing start — see run_rollout)
         self.station_pos_w = np.zeros(2)
+        # 181-D station anchor (R10c): world-frame CONSTANT = env origin XY, exactly the training
+        # buffer (station_anchor_pos_w = env origin + offset, offset defaults 0). NOT resampled, NOT
+        # pinned during holds — it is the world anchor whose whole point is staying put while the
+        # trunk drifts. 人话:出生点常数,漂了这 2 维误差自己变大。
+        self.station_anchor_pos_w = np.asarray(origin[:2], np.float64).copy()
         self.swing_sign = 1.0
         self.time_to_strike = 0.0
 
@@ -807,9 +818,17 @@ class RacketCommand:
                           self.base_target_pos_w[1] - base_pos_w[1], 0.0])
         return quat_rotate_inverse(yaw_quat(base_quat_w), delta)[:2]
 
+    def station_anchor_err_b(self, base_pos_w, base_quat_w):
+        """181-D station-anchor channel: (world anchor − current base XY) in the yaw-heading base
+        frame — same math as base_target_pos_b, but against the CONSTANT spawn anchor (training:
+        RacketTargetCommand.station_anchor_err_b)."""
+        delta = np.array([self.station_anchor_pos_w[0] - base_pos_w[0],
+                          self.station_anchor_pos_w[1] - base_pos_w[1], 0.0])
+        return quat_rotate_inverse(yaw_quat(base_quat_w), delta)[:2]
+
 
 # =================================================================================================
-# Observation builder. Three contracts, detected from the ONNX obs dim:
+# Observation builder. Contracts, detected from the ONNX obs dim:
 #   180-D (base)           : full BeyondMimic obs (has motion_anchor_pos_b + base_target_pos_b, and
 #                            racket_target_pos_b is BASE-relative).
 #   175-D (deploy_parity)  : DROPS motion_anchor_pos_b(3) and base_target_pos_b(2), and reframes
@@ -818,9 +837,13 @@ class RacketCommand:
 #   177-D (hitter_footwork): the 175-D layout PLUS base_target_pos_b(2) re-inserted after
 #                            projected_gravity — a RELATIVE Δxy station channel in the yaw-heading
 #                            base frame (Δ=0 == "already at station"); racket reframe stays FK-rel.
+#   179-D (face command)   : 175-D + racket_target_normal_cmd(4) tail (demanded normal + rho=0).
+#   181-D (station anchor) : 179-D + station_anchor_err_b(2) tail — world spawn-constant anchor
+#                            minus current base XY, yaw-heading base frame (R10c; the anchor stays
+#                            put through holds/swings so trunk drift is visible to the policy).
 # =================================================================================================
 def build_obs(refs, robot: MujocoRobot, racket: RacketCommand, last_action, default_q,
-              deploy_parity=False, face_command=False, hitter=False):
+              deploy_parity=False, face_command=False, hitter=False, station=False):
     # robot base (pelvis = root) world pose
     base_pos_w = robot.body_pos(robot.pelvis_bid)
     base_quat_w = robot.body_quat(robot.pelvis_bid)
@@ -880,8 +903,14 @@ def build_obs(refs, robot: MujocoRobot, racket: RacketCommand, last_action, defa
             # reference, venue mode = the per-ball StrikeSpec demand) + zero rho placeholder.
             parts.append(racket.racket_target_normal_w)
             parts.append(np.zeros(1))
+        if station:
+            # 181-D station-anchor tail (R10c): AFTER the face channel — the 179 prefix must stay
+            # byte-identical (pure-tail pad warm start). Station without face has no legal shape
+            # (177 would collide with hitter_footwork's inserted-station layout).
+            assert face_command, "station channel requires the face channel (181 = 179 + 2)"
+            parts.append(racket.station_anchor_err_b(base_pos_w, base_quat_w))
         obs = np.concatenate(parts).astype(np.float64)
-        want = 179 if face_command else 175
+        want = 181 if station else (179 if face_command else 175)
         assert obs.shape == (want,), f"obs dim {obs.shape} != {want} (deploy_parity)"
     else:
         # 9. base_target_pos_b (2)
@@ -1220,7 +1249,8 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 racket.base_target_pos_w = robot.body_pos(robot.pelvis_bid)[:2].copy()
         obs, base_quat_w, ra_pos, ra_quat, refa_pos, refa_quat = build_obs(
             refs, robot, racket, last_action, policy.default_q, deploy_parity=policy.deploy_parity,
-            face_command=getattr(policy, "face_command", False), hitter=policy.hitter)
+            face_command=getattr(policy, "face_command", False), hitter=policy.hitter,
+            station=getattr(policy, "station_obs", False))
 
         mean = policy.action(obs, time_step)
         action = mean if noise_scale <= 0.0 else mean + noise_scale * std_vec * rng.standard_normal(31)
@@ -1901,6 +1931,7 @@ def main():
         177: "hitter_footwork: deploy_parity + base_target_pos_b(2) station Δxy after proj_grav",
         179: "deploy_parity + FACE COMMAND tail (demanded normal 3 + rho placeholder)",
         180: "base: full 180-D BeyondMimic obs",
+        181: "deploy_parity + face tail + STATION ANCHOR tail (spawn-constant world anchor Δxy 2)",
     }[policy.obs_dim]
     print(f"[mj-sim2sim] obs_dim={policy.obs_dim} ({contract_desc}) "
           f"joints={len(policy.joint_names)} "

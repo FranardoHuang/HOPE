@@ -13,7 +13,7 @@
 | 主检出 | /workspace/franco/nohope(main) | 评估器/工具从这里跑 |
 | S1 分支 worktree | /workspace/franco/nohope_s1(stage1-fixed-point) | 训练臂从这里跑;**PYTHONPATH 必须把 worktree 的 source 放最前**,否则 import 到主检出旧代码 |
 | 动作资产 | /workspace/shared/motions/*.npz | worktree 里 assets/agibot_a3 被 gitignore 全量忽略 → **新 worktree 要从主检出软链**(07-06) |
-| 观测扩列脚本 | /workspace/shared/pad_obs_cols.py(末尾追加)/ pad_obs_cols_insert.py(按位插列) | 存档跨观测维热启用;jiayi 的 177 是**插在第 167 列**不是末尾 |
+| 观测扩列脚本 | /workspace/shared/pad_obs_cols.py(末尾追加)/ pad_obs_cols_insert.py(按位插列);**末尾追加版 07-09 已收编进 repo**=`hope_training/whole_body_tracking/scripts/pad_obs_cols.py`(同源+CPU 单测) | 存档跨观测维热启用;jiayi 的 177 是**插在第 167 列**不是末尾;R10c 手术=`python pad_obs_cols.py src.pt dst.pt 179 181` |
 
 ## 发射核对单(每臂过一遍,过不了不点火;2026-07-06 立)
 
