@@ -2,6 +2,24 @@
 
 Use this file for short project-state updates that future humans and agents need to see. Keep detailed reasoning in the relevant gate doc.
 
+## 2026-07-09
+
+- RunPod pod2 GPU incident diagnosed and recorded in `docs/operations/run_on_runpod.md`: endpoint
+  `74.2.96.48` moved from port `16389` to `10473` after restart, and a newly opened endpoint
+  `16442` still had the same GPU UUIDs and host boot id with only a fresh container hostname. After
+  killing the only visible Isaac/Python training processes, `nvidia-smi` and `pmon` showed no
+  running processes and no container process held `/dev/nvidia*` fds, yet all three RTX 5090s
+  remained `P1`, 99-100% util, ~575 W, and ~1538 MiB used. GPU reset from inside the container is
+  unsupported (`nvidia-smi --gpu-reset -i 0,1,2` returns "not supported"). Conclusion:
+  host/GPU-driver no-PID full-load state, not project training load or a visible in-container
+  miner. Remedy is fresh host migration or RunPod host-side reset; another pod on the same
+  host-local volume can reproduce the same bad allocation.
+- Follow-up fresh endpoint `74.2.96.37:14746` was checked: it has a different host boot id,
+  different GPU UUIDs, and driver `590.48.01`, but still reports all three RTX 5090s at `P1`,
+  99-100% util, ~575 W, and no visible `nvidia-smi`/`pmon` processes or `/dev/nvidia*` fd owners.
+  This suggests a broader RunPod host/provider isolation problem on these RTX 5090 nodes, not just
+  one stale pod on `74.2.96.48`.
+
 ## 2026-07-05
 
 - Strike alignment closed out (yikang-driven round): corrected the RunPod v5 config mistake
@@ -804,4 +822,3 @@ rally_yaw 机制的免费红利:同一条 clip 旋转后天然服务任何打球
 
 搭车项(不占主线):R12「刹得住」专项考(并入 2b)、R17 位置奖励收紧(阶段 1 第二波搭车)、
 R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
-

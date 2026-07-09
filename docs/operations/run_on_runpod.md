@@ -124,6 +124,27 @@ that imports come from YOUR clone, and a real env build + step.
 
 ## Known Quirks
 
+- **No-PID 100% GPU / 575 W host-stuck state**: observed 2026-07-09 on the second RunPod
+  endpoint `74.2.96.48` (ports `16389`, `10473`, then a newly opened `16442`). Symptom: all three
+  visible RTX 5090s report
+  `P1`, `GPU-Util` 99-100%, about `574-575 W`, and about `1538 MiB` used, while `nvidia-smi`,
+  `nvidia-smi pmon`, `--query-compute-apps`, and container `/dev/nvidia*` fd scans show **no
+  running processes**. Killing the only visible Isaac/Python jobs cleared compute-app entries and
+  all device fds, but the 100%/575 W state persisted after waiting. `nvidia-smi --gpu-reset -i
+  0,1,2` returned `Resetting GPU ... is not supported` for all three cards. A pod/container restart
+  changed SSH port and container hostname but kept the same GPU UUIDs, so Stop/Start can leave the
+  same physical GPUs pinned in a bad host-driver state. The `16442` pod reproduced the same GPU
+  UUIDs and host boot id with a fresh container hostname, confirming that "new pod" can still mean
+  the same bad host/GPU allocation when RunPod keeps the volume/host locality. Treat this as a
+  RunPod host/GPU-driver issue, not as user training load. Before launching any job on a
+  new/restarted pod, run:
+  `nvidia-smi --query-gpu=index,uuid,pstate,utilization.gpu,memory.used,power.draw --format=csv`.
+  If the no-PID full-load state is present, migrate to a pod on a fresh host or ask RunPod support
+  for a host-side GPU/driver reset; do not burn time debugging project code.
+  Follow-up: a separate newly opened endpoint `74.2.96.37:14746` had a different host boot id,
+  different GPU UUIDs, and driver `590.48.01` (vs `580.126.09` on `74.2.96.48`), but showed the
+  same no-PID 99-100% / 575 W state. This broadens the issue from one bad allocation to a likely
+  RunPod provider/host-isolation problem for those RTX 5090 nodes.
 - **git-lfs**: the git-lfs filters are NOT configured globally (global gitconfig lives on the
   ephemeral disk). Each clone needs a one-time `git lfs install --local && git lfs pull` (persisted
   in the clone's own `.git/config` on `/workspace`; franco's clone done 2026-07-03). Symptom when
