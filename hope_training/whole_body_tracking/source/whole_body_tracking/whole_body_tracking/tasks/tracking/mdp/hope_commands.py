@@ -317,6 +317,12 @@ class RacketTargetCommand(CommandTerm):
         # for new/old comparison. 人话:改成"每拍打完才记账,回没回球和这一拍同时入同一本账"。
         self._rally_active = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._rally_returned = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        # Wrap-boundary parking latch (防御修 2026-07-09 取证副产品): a legal return whose strike
+        # fires on the SAME step a clip wraps belongs to the swing STARTING at that wrap (the motion
+        # term wraps before this term's metrics pass), but the OLD attempt is still unbooked at that
+        # moment. _vb_book_strike_step parks such returns here; _count_swing_starts books the ended
+        # attempt first, then hands the parked latch to the new attempt that owns it.
+        self._rally_pending_return = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._rally_starts_acc = 0.0
         self._rally_returns_acc = 0.0
         self._rally_starts_acc_c = {c: 0.0 for c in self._clip_names}
@@ -731,6 +737,23 @@ class RacketTargetCommand(CommandTerm):
             self._motion_term = self._env.command_manager.get_term(self.cfg.motion_command_name)
         return self._motion_term
 
+    def _strike_phases_cfg(self, nseg: int) -> tuple:
+        """cfg.strike_phase_per_clip validated against the loaded motion's segment count (fail-loud).
+
+        Empty tuple = use the scalar strike_phase for every clip (the documented default). Any OTHER
+        length means the per-clip table and the loaded clips no longer line up — every env would
+        strike at a wrong frame — so raise instead of silently falling back to the global phase.
+        人话:每个 clip 的击球点表和实际加载的 clip 数对不上就当场报错,不再悄悄用全局值凑合。
+        """
+        spc = tuple(self.cfg.strike_phase_per_clip)
+        if spc and len(spc) != nseg:
+            raise ValueError(
+                f"strike_phase_per_clip has {len(spc)} entries but the loaded motion has {nseg} "
+                f"segment(s) — align it with the motion_file clip order, or set () to use "
+                f"strike_phase={self.cfg.strike_phase} for every clip"
+            )
+        return spc
+
     def _strike_frame_for_clip(self, motion, clip_id: int) -> tuple[int, float, int, int]:
         """Return (global strike frame, phase, segment start, segment len) for one reference clip."""
         nseg = int(motion.num_segments)
@@ -738,8 +761,8 @@ class RacketTargetCommand(CommandTerm):
             raise IndexError(f"clip_id {clip_id} out of range for {nseg} segments")
         seg_start = int(motion.seg_start[clip_id].item())
         seg_len = int(motion.seg_len[clip_id].item())
-        spc = tuple(self.cfg.strike_phase_per_clip)
-        phase = float(spc[clip_id]) if spc and len(spc) == nseg else float(self.cfg.strike_phase)
+        spc = self._strike_phases_cfg(nseg)
+        phase = float(spc[clip_id]) if spc else float(self.cfg.strike_phase)
         strike_step = seg_start + round(phase * (seg_len - 1))
         return int(strike_step), phase, seg_start, seg_len
 
@@ -1337,12 +1360,12 @@ class RacketTargetCommand(CommandTerm):
             # Per-clip strike frame on the concatenated time axis: the contact phase differs per swing
             # (v2 blade re-plane: forehand 0.47, backhand 0.333), so resolve strike_step per env from its clip.
             if self._strike_phase_per_clip_t is None:
-                sp = tuple(self.cfg.strike_phase_per_clip)
-                if sp and len(sp) == ml.num_segments:
+                sp = self._strike_phases_cfg(int(ml.num_segments))
+                if sp:
                     self._strike_phase_per_clip_t = torch.tensor([float(x) for x in sp], device=self.device)
                 else:
                     self._strike_phase_per_clip_t = torch.full(
-                        (ml.num_segments,), float(self.cfg.strike_phase), device=self.device
+                        (int(ml.num_segments),), float(self.cfg.strike_phase), device=self.device
                     )
             clip = motion.clip_id
             seg_start = ml.seg_start[clip]
@@ -1557,7 +1580,11 @@ class RacketTargetCommand(CommandTerm):
                 self._rally_starts_acc_c[c] += float((ended & _csel).sum())
                 self._rally_returns_acc_c[c] += float((returned & _csel).sum())
         self._rally_active[env_ids_t] = True
-        self._rally_returned[env_ids_t] = False
+        # The NEW attempt starts with the parked wrap-boundary latch, not blank: a strike that
+        # fired on this very wrap step belongs to the attempt beginning here (see the guard in
+        # _vb_book_strike_step). One-shot — consumed on transfer.
+        self._rally_returned[env_ids_t] = self._rally_pending_return[env_ids_t]
+        self._rally_pending_return[env_ids_t] = False
         if count_prestrike_falls:
             term = self._env.termination_manager.terminated[env_ids]
             pre = self.pre_strike[env_ids]
@@ -1861,7 +1888,21 @@ class RacketTargetCommand(CommandTerm):
         self._vb_net_acc = decay * self._vb_net_acc + float((gate & net_clear).sum())
         self._vb_land_valid_acc = decay * self._vb_land_valid_acc + float((gate & land_valid).sum())
         self._vb_inb_acc = decay * self._vb_inb_acc + float(legal.sum())
-        self._rally_returned = self._rally_returned | legal
+        # Rally latch with a wrap-boundary guard: on the step a clip WRAPS, the motion term has
+        # already advanced to the NEW clip before this metrics pass, so a strike frame sitting at
+        # the swing's entry (strike phase ~0, or rsi_skip_settle_frames landing on the strike
+        # offset) fires exact_strike for the NEW attempt while the OLD attempt is still unbooked
+        # (_count_swing_starts only runs later, inside _update_command). Latching such a return
+        # into _rally_returned would credit it to the OLD rally (cross-rally leakage) AND lose it
+        # for the new one. Park it in _rally_pending_return instead; _count_swing_starts books the
+        # ended attempt first, then hands the parked latch to the attempt that owns it. Current
+        # clips strike mid-swing (phase 0.28-0.50) and never fire at the wrap step — defensive.
+        wrapped = getattr(self._motion(), "just_resampled", None)
+        if wrapped is None:
+            self._rally_returned = self._rally_returned | legal
+        else:
+            self._rally_returned = self._rally_returned | (legal & ~wrapped)
+            self._rally_pending_return = self._rally_pending_return | (legal & wrapped)
 
     def _rally_legacy_values(self) -> tuple[float, dict]:
         """OLD mixed-ledger rally readout (transition-period *_legacy curves + unit tests).

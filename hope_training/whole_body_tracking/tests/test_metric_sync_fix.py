@@ -17,6 +17,12 @@ below is the REAL shipped hope_commands.py / commands.py, not a re-derivation. C
 * timeout-cut swings (episode ends before the strike frame) count as failed attempts.
 * pairing details: an env's first-ever resample books nothing; the returned latch clears at the
   swing end (no cross-swing leakage); per-clip attribution via _prev_clip_id.
+* wrap-boundary strike parking (防御修 2026-07-09): a strike firing on the SAME step a clip wraps
+  (strike phase ~0 / settle-skip on the strike frame) books to the NEW attempt, never the old one.
+* END-TO-END multiseg wrap attribution: a REAL 2-clip MotionCommand drives real wraps through the
+  real racket _update_command (only target sampling shimmed) — per-clip starts/returns must match
+  the actual wrap history, including the phase-0 boundary case above. 人话:换拍记账全程走真代码,
+  不再手工塞 _prev_clip_id。
 * _vb_book_strike_step == the old inline EMA formulas value-for-value (refactor guard).
 * stagger_initial_clock: OFF (default) = no RNG consumed, hold/episode clocks byte-identical;
   ON = one-shot hold bias at each env's FIRST true reset only (wraps and later resets clean),
@@ -83,6 +89,7 @@ def _make_rally_cmd(n, clip_ids=None, multiseg=True):
     # NEW per-swing same-ledger rally state
     cmd._rally_active = torch.zeros(n, dtype=torch.bool)
     cmd._rally_returned = torch.zeros(n, dtype=torch.bool)
+    cmd._rally_pending_return = torch.zeros(n, dtype=torch.bool)
     cmd._rally_starts_acc = 0.0
     cmd._rally_returns_acc = 0.0
     cmd._rally_starts_acc_c = {0: 0.0, 1: 0.0}
@@ -217,6 +224,40 @@ def test_per_clip_attribution_uses_prev_clip_id():
     assert cmd._rally_returns_acc_c == {0: 2.0, 1: 1.0}
 
 
+def test_wrap_step_strike_books_to_new_attempt_not_old():
+    """Wrap-boundary guard (防御修 2026-07-09): a strike that fires on the SAME step a clip wraps
+    (strike phase ~0, or rsi_skip_settle_frames landing on the strike offset) belongs to the swing
+    STARTING at that wrap. Without the guard it latched into _rally_returned before the old attempt
+    booked — the OLD rally got the credit (cross-rally leakage) and the new one lost it."""
+    cmd = _make_rally_cmd(4)
+    ids = torch.arange(4)
+    cmd._count_swing_starts(ids, count_prestrike_falls=True)  # activate attempt #1 (books nothing)
+    # attempt #1 never returns; on its wrap step the NEW clip's strike fires immediately for
+    # envs 0/1 (just_resampled True), env 2 is a normal mid-swing strike, env 3 no strike.
+    cmd._motion().just_resampled = torch.tensor([True, True, False, False])
+    legal = torch.tensor([True, False, True, False])
+    cmd._vb_book_strike_step(DECAY, legal, legal, legal, legal, legal)
+    assert cmd._rally_returned.tolist() == [False, False, True, False]  # env0 parked, not latched
+    assert cmd._rally_pending_return.tolist() == [True, False, False, False]
+    cmd._count_swing_starts(ids[:2], count_prestrike_falls=False)  # the wrap books attempt #1
+    assert cmd._rally_starts_acc == 2.0 and cmd._rally_returns_acc == 0.0  # no leak to the old rally
+    assert bool(cmd._rally_returned[0])  # parked latch handed to the NEW attempt...
+    assert not bool(cmd._rally_pending_return.any())  # ...and consumed (one-shot)
+    cmd._count_swing_starts(ids[:1], count_prestrike_falls=False)  # env0's attempt #2 ends
+    assert cmd._rally_starts_acc == 3.0 and cmd._rally_returns_acc == 1.0  # the return lands HERE
+
+
+def test_vb_book_strike_step_without_wrap_signal_keeps_plain_or_latch():
+    """A motion command without just_resampled (e.g. plain single-clip stubs) degrades to the
+    original OR latch — no parking, no crash."""
+    cmd = _make_rally_cmd(3)
+    assert not hasattr(cmd._motion(), "just_resampled")
+    legal = torch.tensor([True, False, True])
+    cmd._vb_book_strike_step(DECAY, legal, legal, legal, legal, legal)
+    assert torch.equal(cmd._rally_returned, legal)
+    assert not bool(cmd._rally_pending_return.any())
+
+
 def test_rally_report_min_count_gate_and_values():
     clip = (torch.arange(200) >= 100).long()
     cmd = _make_rally_cmd(200, clip_ids=clip)
@@ -271,6 +312,113 @@ def test_legacy_values_min_count_gate():
     g, per = cmd._rally_legacy_values()
     assert g == pytest.approx(2.0)  # the legacy ratio CAN exceed 1 — that is the kept-for-对照 disease
     assert set(per) == {"forehand", "backhand"}
+
+
+# --------------------------------------------------------------------------------------------- #
+# REAL multiseg wrap -> per-clip attribution, end to end (no hand-stubbed _prev_clip_id)
+# --------------------------------------------------------------------------------------------- #
+@pytest.fixture(scope="module")
+def two_clips():
+    tmp = tempfile.mkdtemp(prefix="metric_sync_two_clips_")
+    return (
+        _write_motion_npz(os.path.join(tmp, "forehand.npz"), frames=20),
+        _write_motion_npz(os.path.join(tmp, "backhand.npz"), frames=15),
+    )
+
+
+def _make_wrap_rig(two_clips, strike_phase_per_clip, num_envs=8, seed=11):
+    """REAL MotionCommand (2 concatenated clips) + a rally harness whose _update_command /
+    _compute_strike_timing / _count_swing_starts are the REAL shipped racket methods — so the whole
+    wrap protocol (just_resampled detection, _recover_from_clip latch, _prev_clip_id snapshot
+    ordering, wrap-boundary return parking) runs as in training. Only _resample_command is shimmed
+    down to its accounting head (re-arm the exact latch + _count_swing_starts, hope_commands
+    L1170-1175): target/base sampling needs the full robot scene and is orthogonal to attribution.
+    """
+    torch.manual_seed(seed)
+    mcmd, robot = _make_motion_command(list(two_clips), num_envs=num_envs)
+    n_bodies = len(mcmd.cfg.body_names)
+    quat = torch.zeros(num_envs, n_bodies, 4)
+    quat[..., 0] = 1.0
+    robot.data.body_pos_w = torch.zeros(num_envs, n_bodies, 3)
+    robot.data.body_quat_w = quat
+    cmd = _make_rally_cmd(num_envs)
+    cmd._motion = lambda: mcmd
+    cmd.cfg.strike_phase = 0.5
+    cmd.cfg.strike_phase_per_clip = strike_phase_per_clip
+    cmd.cfg.strike_window_s = 0.1
+    cmd.cfg.strike_window_pos_s = None
+    cmd.cfg.strike_window_wide_s = None
+    cmd.cfg.midswing_resample_prob = 0.0
+    cmd._strike_phase_per_clip_t = None
+    cmd._env.step_dt = 0.02
+    cmd._prev_motion_steps = mcmd.time_steps.clone()
+    cmd._exact_fired = torch.zeros(num_envs, dtype=torch.bool)
+    cmd._resample_is_wrap = False
+    cmd._actor_view_active = False
+
+    def _resample_accounting_only(env_ids):
+        cmd._exact_fired[env_ids] = False
+        cmd._count_swing_starts(env_ids, count_prestrike_falls=not cmd._resample_is_wrap)
+
+    cmd._resample_command = _resample_accounting_only
+    ids = torch.arange(num_envs)
+    mcmd._resample_command(ids)  # true-reset birth: random clip, frame at seg_start, hold armed
+    cmd._resample_command(ids)   # manager reset: activates attempt #1 (books nothing)
+    return mcmd, cmd
+
+
+def _drive_wrap_rig(mcmd, cmd, legal_clip, steps):
+    """Per-step order mirrors training: motion term computes first (advance/wrap/resample), then the
+    racket metrics pass (REAL timing + REAL strike booking), then the racket _update_command (REAL
+    wrap booking). Ground truth is read off the REAL motion command — the clip an env was on BEFORE
+    the wrap is the clip its ended attempt must book to. decay=1.0 -> accumulators are exact counts.
+    Returns (expected starts per clip, expected returns per clip, forehand->backhand wrap count)."""
+    exp_starts = {0: 0.0, 1: 0.0}
+    exp_returns = {0: 0.0, 1: 0.0}
+    fh_to_bh = 0
+    for _ in range(steps):
+        clip_before = mcmd.clip_id.clone()
+        mcmd._update_command()
+        cmd._compute_strike_timing()
+        exact = cmd.time_to_strike.abs() <= (0.5 * cmd._env.step_dt + 1e-6)  # hope_commands exact_strike
+        legal = exact & (mcmd.clip_id == legal_clip)
+        if bool(exact.any()):  # _vb_evaluate returns early on strike-free steps
+            cmd._vb_book_strike_step(1.0, exact, legal, legal, legal, legal)
+        cmd._update_command()
+        for i in torch.where(mcmd.just_resampled)[0].tolist():
+            c = int(clip_before[i])
+            exp_starts[c] += 1.0
+            if c == legal_clip:  # every completed swing passes its own strike frame exactly once
+                exp_returns[c] += 1.0
+            if c == 0 and int(mcmd.clip_id[i]) == 1:
+                fh_to_bh += 1
+    return exp_starts, exp_returns, fh_to_bh
+
+
+def test_e2e_multiseg_wrap_attributes_ended_attempts_to_true_clip(two_clips):
+    """人话:真跑双 clip 动作库,让 env 自然换拍(wrap),验证"这拍记到哪个 clip 头上"全程走真代码
+    (_prev_clip_id 由真 _update_command 快照,不再手工塞)。正手拍必回球、反手拍必不回,账本上
+    每个 clip 的起拍数/回球数必须和真实换拍历史一根一根对得上。"""
+    mcmd, cmd = _make_wrap_rig(two_clips, strike_phase_per_clip=(0.47, 0.333))
+    exp_starts, exp_returns, _ = _drive_wrap_rig(mcmd, cmd, legal_clip=0, steps=160)
+    assert exp_starts[0] > 0 and exp_starts[1] > 0  # both clips actually exercised
+    assert cmd._rally_starts_acc == exp_starts[0] + exp_starts[1]
+    assert cmd._rally_returns_acc == exp_returns[0]
+    assert cmd._rally_starts_acc_c == exp_starts
+    assert cmd._rally_returns_acc_c == exp_returns
+    assert cmd._rally_returns_acc_c[1] == 0.0  # nothing ever leaks onto the backhand ledger
+
+
+def test_e2e_wrap_boundary_strike_no_cross_rally_leak(two_clips):
+    """人话:把反手击球点放在 clip 第 0 帧——换拍那一步新拍立刻击球(②防御修针对的边界)。回球必须
+    记给刚开始的新拍;修复前它会记给还没入账的上一拍(正手账本凭空多出回球)。"""
+    mcmd, cmd = _make_wrap_rig(two_clips, strike_phase_per_clip=(0.5, 0.0), seed=13)
+    exp_starts, exp_returns, fh_to_bh = _drive_wrap_rig(mcmd, cmd, legal_clip=1, steps=160)
+    assert fh_to_bh > 0  # the leaky transition (forehand ends, backhand strikes at entry) occurred
+    assert cmd._rally_returns_acc_c[0] == 0.0  # forehand never returns — no cross-rally credit
+    assert cmd._rally_starts_acc_c == exp_starts
+    assert cmd._rally_returns_acc_c == exp_returns  # every ended backhand attempt kept its return
+    assert cmd._rally_returns_acc == exp_starts[1]
 
 
 # --------------------------------------------------------------------------------------------- #

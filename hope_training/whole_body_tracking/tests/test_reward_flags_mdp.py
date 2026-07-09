@@ -309,6 +309,47 @@ def test_1c_default_masks_alias_legacy_window():
     assert rt.strike_window_wide is rt.strike_window
 
 
+def _timing_cmd_multiseg(spc):
+    """Multiseg twin of _timing_cmd: 2 segments (20 + 15 frames), per-clip strike phase table."""
+    rt = hope_commands_mod.RacketTargetCommand.__new__(hope_commands_mod.RacketTargetCommand)
+    rt.cfg = types.SimpleNamespace(
+        strike_phase=0.5, strike_phase_per_clip=spc, strike_window_s=0.12,
+        strike_window_pos_s=None, strike_window_wide_s=None)
+    rt._env = types.SimpleNamespace(step_dt=0.02)
+    rt.device = "cpu"
+    rt._strike_phase_per_clip_t = None
+    fake_ml = types.SimpleNamespace(
+        num_segments=2, seg_start=torch.tensor([0, 20]), seg_len=torch.tensor([20, 15]))
+    fake_motion = types.SimpleNamespace(
+        _multiseg=True, motion=fake_ml, retiming_active=False,
+        time_steps=torch.tensor([0, 25]), clip_id=torch.tensor([0, 1]))
+    rt._motion = lambda: fake_motion
+    return rt
+
+
+def test_strike_phase_per_clip_length_mismatch_fails_loud():
+    """人话:每 clip 击球点表和加载的 clip 数对不上,必须当场报错——以前会悄悄退回全局 strike_phase,
+    每个 env 都在错误帧上找击球点还不吭声(fail-loud 文化,取证副产品 2026-07-09)。"""
+    rt = _timing_cmd_multiseg((0.4, 0.5, 0.6))  # 3 entries, 2 loaded segments
+    with pytest.raises(ValueError, match="strike_phase_per_clip"):
+        rt._compute_strike_timing()
+    with pytest.raises(ValueError, match="strike_phase_per_clip"):
+        rt._strike_frame_for_clip(rt._motion().motion, 0)
+
+
+def test_strike_phase_per_clip_empty_falls_back_and_matched_table_is_used():
+    rt = _timing_cmd_multiseg(())  # () stays the documented "use global strike_phase" default
+    rt._compute_strike_timing()
+    assert torch.allclose(rt._strike_phase_per_clip_t, torch.tensor([0.5, 0.5]))
+    step, phase, seg_start, seg_len = rt._strike_frame_for_clip(rt._motion().motion, 1)
+    assert (step, phase, seg_start, seg_len) == (20 + round(0.5 * 14), 0.5, 20, 15)
+    rt2 = _timing_cmd_multiseg((0.4, 0.6))  # matched table is taken verbatim
+    rt2._compute_strike_timing()
+    assert torch.allclose(rt2._strike_phase_per_clip_t, torch.tensor([0.4, 0.6]))
+    step2, phase2, _, _ = rt2._strike_frame_for_clip(rt2._motion().motion, 0)
+    assert (step2, phase2) == (round(0.4 * 19), 0.4)
+
+
 def test_1c_rewards_gate_per_channel():
     n = 3
     pos_win = torch.tensor([True, False, False])
