@@ -1083,3 +1083,31 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    = jiayi b7b7dfc 修的"反手用拍另一面、单一法向符号永不可达"同病;M3c 前置=谨慎合
    `mount_normal_sign_per_clip`(与 main hope_commands.py 有冲突面)+ swing 反手题库按翻面重出
    + swing 会话握拍复核欠账(试产暂借 Rz5Rx40)。
+
+## 2026-07-09 深夜~07-10 凌晨:行程守卫落地+enforce 拍板、翻面"符号全错"改账(红队 S1)、pod1 掉卡止损、R10c 重点火
+
+1. **行程快筛守卫合 main 并翻 enforce 默认**(84c7cd3→e63312a,franco"可以"拍板)。出题器新增
+   `--stroke-guard {off,stats,enforce}`:题目需求拍速 v* 对 clip 触球前行程 L_deep 要求的最低加速度
+   a_min=(v*²−v0²)/(2L) 超过实证包络 a_max(v4rg 对 ×1.5)⇒ 可证无时间律解,拒发货(必要条件,
+   PASS≠可行)。**六对 v2 exam 卷离线审计全部 0 拦**——题库需求拍速 ≤2.87 m/s,远低于各 clip 行程
+   上限 4.67-7.85 m/s ⇒ 今天开拦零代价,phase 2/3 出快题自动保护。配套离线审计器
+   scripts/stroke_guard_bank_audit.py + 24 单测。
+2. **v5 反手暴力挥拍=模仿遗产(六卷审计的副产物,大杠杆)**:吓人的 a_min=11.67 用的是 clip 标定速
+   3.405 m/s(录像里的人挥多快),而题库对 v5 反手的需求只有 ≤1.96 m/s——**任务根本不要求那么快**。
+   降速重定时(synthesize_timing_v2 --strike-speed ≈2.2)题库覆盖一题不丢,a_min 直落 ~4.9 进 v4rg
+   健康带。v5syn-slow 资产/臂排队,等 facesign S1 修复落地后单变量上。
+3. **"反手拍面奖励符号全错实锤"改账(yikang agent 红队考证,S1 定案)**:题库反手 demanded normal
+   实测 dot(n,v̂)=−0.994 = 整条链(出题→obs→奖励→判卷)一直活在旧 +Y 约定里且**自洽**——约定是
+   规范场(gauge),全链一致就无病;`mount_normal_sign_per_clip` 只翻实测法向=**单侧翻面才是病**
+   (M2f 把健康 v4rg 反手 10°→34° 吸引子=实锤)。36-clip 符号表的物理事实(反手黑面击球)仍真,
+   但修法改为 S1:face 通道整体回 +Y 约定,helper 统一四个消费方,题库永不重出。07-09 的
+   `racket_face_guidance` 线性罚(死区解药)动机不受影响,但合修复时必须同走 S1 helper,
+   theta_max 对 >90° 起点传 π,定标计 RewardManager dt(差 50×)。卡 A 绿灯归 yikang agent 实现,
+   本值守不再碰 face 通道文件(07-10 撞车教训:130d1da 与红队诊断并行相撞)。
+4. **pod1 节点级掉卡事故+翻面三臂止损**:18:28:05 UTC gpu0/gpu2 同秒 CUDA 故障,R9t/R9u/M3d
+   阵亡(13235-13451/17000);9 分钟后发现,GPU 已自愈(ndev=3)。三臂全在 S1 病灶组合上
+   (红队已预注册证伪预测),掉卡=免费止损——**不复活**(M3c/M2f 存量证据足以裁定,不值 3 卡×10h)。
+   gpu0 留给修复验证臂 M3f/M2f3,gpu2 转 R10c。
+5. **R10c(站位锚观测)借势重点火**:fire_R10c_0710.sh 带 900s 超时+进程组清杀×4 重试,gpu2 冒烟
+   一次通过(首发 boot-spin ×3 未复发)。v4rg 底+R9 三旗标+station_obs(契约 deploy_parity_station181,
+   pad181 热启)。判据:反手接触恢复 M2 档 ⇒ 任务通道锚成立,phase 2 腿自由路线解锁。
