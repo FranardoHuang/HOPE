@@ -22,10 +22,16 @@ ALGORITHM(外层缩放扫描 + 内层 oracle 在环修复)
         邻域抬 ρ 压回 —— 速度按线性律(|q̇|∝1/ρ)、加速度/τ/摩擦按开方律(∝1/ρ²)、
         CoP 按固定收缩迭代。验收 = oracle 三剂量全过闸 且 窗外运动学零越界(硬边界)。
         修不动(剩余越界全被锁窗钉死 / 时长超守卫 / 迭代耗尽)= 该 γ 不可行。
-    外层:γ 从 1 起乘法下探(×compress-step);修完总时长还在缩就继续;不再缩/修不动
-        就在最后一对(好 γ, 坏 γ)之间做几步几何二分收尾。γ=1 都修不进预算 → 往上乘
-        (×expand-step)找第一个可行的 γ 再二分收尾;还没有 = fail loud(SystemExit)。
+    外层:γ 从 1 起乘法下探(×compress-step),把整条梯子扫到 γ 下界(梯子越过下界时
+        补探下界本身),全程不早停——修复后时长对 γ 非单调(bump 有过冲),平台期早停
+        会错过更短的可行解(对抗复核 2026-07-09 实锤:fh_v5hLs 1.66→1.50s、fh_v4rg
+        2.44→2.38s);修不动(不可行)才在最后一对(好 γ, 坏 γ)之间几何二分收尾。
+        γ=1 都修不进预算 → 往上乘(×expand-step)找第一个可行的 γ 再二分收尾,梯子
+        越过 γ 上界时补探上界本身;还没有 = fail loud(SystemExit)。
     收敛 = 预算内的最短总时长;全程记录候选,取全局最优(不信任单调性,见取舍)。
+    语义务必读对:输出的 min-time 是**本搜索族(乘法梯子 × 内层贪心修复)内的最短**,
+        是真 min-time 的上界——梯子点之间可能存在更短的可行解(非单调性所致),
+        要更紧的界加密 --compress-step / --refine-steps 换 oracle 调用量。
 
 取舍(为什么这么做,不是严格 TOPP / 凸优化):
     - 真逐点 TOPP 要求约束对 ṡ² 仿射闭式;CoP/摩擦锥经 mj_inverse 是黑盒,只能在环判卷
@@ -283,9 +289,10 @@ def mintime_search(data: dict, law: "v1.TimeLaw", judge: "v2.Judge", stem: str,
                    body_mode: str, fk_ctx, cop_gate: float, fric_gate: float,
                    tau_gate: float, max_inner: int, src_duration: float, half: float,
                    c: int, compress_step: float, expand_step: float, scale_min: float,
-                   scale_max: float, refine_steps: int, min_gain_s: float
-                   ) -> MinTimeResult:
-    """外层 γ 搜索。可行 = 内层修进预算;目标 = 预算内最短总时长(全局记最优)。"""
+                   scale_max: float, refine_steps: int) -> MinTimeResult:
+    """外层 γ 搜索。可行 = 内层修进预算;目标 = 预算内最短总时长(全局记最优)。
+    压缩侧把乘法梯子扫到 γ 下界(含下界收尾点)不早停:修复后时长对 γ 非单调,
+    平台期早停会错过更短可行解(0709 对抗复核实锤);上探侧梯子越界时补探上界本身。"""
     outer_trace: List[dict] = []
 
     def inner(g: float) -> InnerResult:
@@ -310,24 +317,38 @@ def mintime_search(data: dict, law: "v1.TimeLaw", judge: "v2.Judge", stem: str,
     best: Optional[InnerResult] = r1 if r1.feasible else None
 
     if r1.feasible:
-        # 下探压缩:健康动作在这里被加速;顶到预算/运动学边界就停
+        # 下探压缩:健康动作在这里被加速。整条梯子扫到 γ 下界(越过时补探下界本身),
+        # 全程记最优,不做平台期早停——修复后时长对 γ 非单调,早停会错过更短可行解
+        # (对抗复核 0709:fh_v5hLs 平台期弃 1.50s、fh_v4rg 守卫尾巴藏 2.38s)。
         good_g = 1.0
         g = compress_step
-        while g >= scale_min * (1.0 - 1e-9):
+        at_floor = False
+        while True:
+            if g < scale_min * (1.0 - 1e-9):
+                if at_floor or good_g <= scale_min * (1.0 + 1e-9):
+                    break
+                g, at_floor = scale_min, True        # 梯子越过下界:补探 γ=下界 收尾
             r = inner(g)
-            if r.feasible and r.duration_s < best.duration_s - min_gain_s:
-                best, good_g = r, g
+            if r.feasible:
+                if r.duration_s < best.duration_s - 1e-9:
+                    best = r                          # 全局最优(时长帧格量化,严格短=至少短 1 帧)
+                good_g = g
+                if at_floor:
+                    break
                 g *= compress_step
                 continue
-            if r.feasible:
-                break                                # 平台期:更小 γ 修完时长不再缩
             best = refine(g, good_g, best)           # 修不动:好坏之间二分收尾
             break
     else:
-        # γ=1 都修不进预算(病重):往上乘找第一个可行的 γ,再往回二分挤
+        # γ=1 都修不进预算(病重):往上乘找第一个可行的 γ,再往回二分挤;
+        # 梯子越过 γ 上界时补探上界本身(fail-loud 文案里的 --scale-max 才名副其实)
         prev = 1.0
         g = expand_step
-        while g <= scale_max * (1.0 + 1e-9):
+        while True:
+            if g > scale_max * (1.0 + 1e-9):
+                if prev >= scale_max * (1.0 - 1e-9):
+                    break
+                g = scale_max
             r = inner(g)
             if r.feasible:
                 best = refine(prev, g, r)
@@ -368,8 +389,7 @@ def mintime(data: dict, phase: float, vlim: np.ndarray, acc_budget: np.ndarray,
             compress_step: float = DEFAULT_COMPRESS_STEP,
             expand_step: float = DEFAULT_EXPAND_STEP,
             scale_min: float = DEFAULT_SCALE_MIN, scale_max: float = DEFAULT_SCALE_MAX,
-            refine_steps: int = DEFAULT_REFINE_STEPS,
-            min_gain_s: Optional[float] = None):
+            refine_steps: int = DEFAULT_REFINE_STEPS):
     """统一预算 min-time 重定时。返回 (out, MinTimeResult, law, meta)。"""
     # ---- 参数护栏(fail loud,不静默修正) --------------------------------------- #
     if not (0.0 < compress_step < 1.0):
@@ -390,8 +410,6 @@ def mintime(data: dict, phase: float, vlim: np.ndarray, acc_budget: np.ndarray,
     fps_src = float(np.asarray(data["fps"]).reshape(-1)[0])
     if fps_out is None:
         fps_out = fps_src
-    if min_gain_s is None:
-        min_gain_s = 1.0 / fps_out            # 改善不足 1 帧 = 噪声,不算赢
     c = v1.contact_frame(phase, T_src)
     s_end = float(T_src - 1)
     if not (0 < c < T_src - 1):
@@ -426,7 +444,7 @@ def mintime(data: dict, phase: float, vlim: np.ndarray, acc_budget: np.ndarray,
     res = mintime_search(data, law, judge, stem, vel_cap, acc_budget, fps_out,
                          body_mode, fk_ctx, cop_gate, fric_gate, tau_gate, max_inner,
                          src_duration, half, c, compress_step, expand_step,
-                         scale_min, scale_max, refine_steps, min_gain_s)
+                         scale_min, scale_max, refine_steps)
 
     meta = dict(T_src=T_src, J=J, fps_src=fps_src, fps_out=fps_out, c=c, s_end=s_end,
                 phase=phase, v_star=float(v_star), v_src_clean=v_src_clean, dpds=dpds,
@@ -436,7 +454,7 @@ def mintime(data: dict, phase: float, vlim: np.ndarray, acc_budget: np.ndarray,
                 cop_gate=cop_gate, fric_gate=fric_gate, tau_gate=tau_gate,
                 compress_step=compress_step, expand_step=expand_step,
                 scale_min=scale_min, scale_max=scale_max, refine_steps=refine_steps,
-                max_inner=max_inner, min_gain_s=min_gain_s)
+                max_inner=max_inner)
     return res.best.out, res, law, meta
 
 

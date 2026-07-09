@@ -4,12 +4,15 @@ Pure CPU, NO mujoco/torch:模块按文件路径加载,oracle 用确定性的桩(
 按关节速度打分——局部放慢 ⇒ |q̇|∝ṡ 下降 ⇒ 桩的"不可行"消退,和真剂量同向)。
 body_mode="interp",不需要 FK。
 
-Covered (task 2026-07-09 v3 spec ①-⑤):
+Covered (task 2026-07-09 v3 spec ①-⑤ + 对抗复核 0709 补①②):
   ① 健康 clip 被压缩(总时长 < γ=1 基线,方向=accelerated)且不破预算
   ② 病 clip 被放慢到预算内(剂量过闸,ρ>1,时长 > 健康同款)
   ③ 触球行逐位保真 + 拍速不降(压缩/放慢两个方向都查)
   ④ 运动学硬边界(URDF 速度限位×余量)拦住过度压缩
   ⑤ 预算收紧 → min-time 时长单调不减
+  ⑥ 外层梯子扫到 γ 下界含下界收尾点,best=全部可行探点的全局最短(对抗复核:
+     平台期早停曾错过更短可行解 fh_v5hLs 1.66→1.50s / 守卫尾巴 fh_v4rg 2.44→2.38s)
+  ⑦ 上探梯子越过 γ 上界时补探上界本身(fail-loud 文案里的 --scale-max 名副其实)
 
 Run:  python3 -m pytest hope_training/whole_body_tracking/tests/test_topp_mintime.py -q
 """
@@ -162,6 +165,28 @@ def test_tighter_budget_duration_monotone():
         durs.append(res.best.duration_s)
     assert durs[1] >= durs[0] - 1e-6                     # 收紧只会更慢,绝不更快
     assert durs[2] >= durs[1] - 1e-6
+
+
+# ---------------- ⑥ 外层全程扫描:到下界收尾点 + best=可行探点全局最短 ------------------ #
+def test_outer_ladder_full_scan_global_min():
+    data, phase = make_clip()
+    for judge in (stub_oracle(1e9), stub_oracle(1.2)):    # 健康 & 病 两种
+        out, res, law, meta = _run(data, phase, judge)
+        gammas = [t["gamma"] for t in res.outer_trace]
+        assert any(abs(g - v3.DEFAULT_SCALE_MIN) < 1e-9 for g in gammas), \
+            "梯子越过下界后必须补探 γ=scale_min 收尾点"
+        feas_durs = [t["duration_s"] for t in res.outer_trace if t["feasible"]]
+        assert abs(res.best.duration_s - min(feas_durs)) < 1e-9, \
+            "best 必须是全部可行探点的全局最短(平台期早停禁用)"
+
+
+# ---------------- ⑦ 上探梯子补探 scale_max 本身(fail-loud 名副其实) ------------------- #
+def test_expand_ladder_probes_scale_max():
+    data, phase = make_clip()
+    # vel_thresh 低到 RHO_MAX 也修不干净(1.875/40 > 0.01)→ 每个 γ 都不可行 → fail loud
+    with pytest.raises(SystemExit) as ei:
+        _run(data, phase, stub_oracle(vel_thresh=0.01), scale_max=2.0)
+    assert "γ=2.00" in str(ei.value)      # 报错声称的 --scale-max 必须真的探过
 
 
 # ------------------------------------------------------------------ fail loud --------- #
