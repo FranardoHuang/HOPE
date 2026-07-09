@@ -564,6 +564,7 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 
 | Item | Priority | Owner | Branch | Status / next checkpoint |
 | --- | --- | --- | --- | --- |
+| HitterPure RallyFinal clean-base task: x-lock/lunge, settle/slip, backhand clearance, front-facing constraints + Isaac/AGI rally gates | ★★★ | codex for dongc1 | `hitter` | IN PROGRESS 2026-07-10: derive from `HOPEPingPongHitterPure.yaml`, explicitly exclude V5 hold-rhythm/lower-body-plant stack; next checkpoint = config/code/docs patch with static tests and reproducible ablation/eval commands |
 | 阶段1 第一波成对差初判(主攻/减观测/产品线锚已到线;只换题库/加权/两动作源在跑;反手换锚排队) | ★★★ | claude | `stage1-fixed-point` | **只看成对差,绝对分不作数(题库缺陷)**;正式结论等题库 v2 重跑 |
 | **加速度包络标定两件套(franco 07-09,时间律的下一层)**:①跟踪破裂标定(chirp/斜坡加压参考×现成跟踪策略,逐关节"边平衡边跟"真上限=判炸器 L1 升级);②贴限 vs 摊时消融(v5syn T_a 三档)——R9d 读数落地后一起排 | ★★★ | claude | — | 设计已入 research 时间律文档§六 |
 | GMR 源头修复(pod GMR 分支 `hope-frame0-warmup`:warm-up/帧0/逐关节限位旗标)+ 判炸器(repo 分支 `motion-feasibility-audit` 已推 origin)——两分支待 franco 审;接线与 L6 重生成见队列 0.6/0.7 行 | ★★★ | claude | 两分支 | 已验证收口(TIMELINE 07-08);合入即防复发 |
