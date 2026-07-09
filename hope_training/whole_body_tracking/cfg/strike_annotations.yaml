@@ -649,3 +649,41 @@ clips:
     face_normal_reliable: true-calibrated
     grip_session: session_v5_oblique_hopex
     rally_yaw_deg: -40  # carried from hope_backhand_v4rg_cal (same source video)
+
+  # swingsyn = swing 对双侧时间律合成(泛化轴臂:时间律合成用在健康动作上"更好还是无害";
+  # swing 是判炸器双 PASS 的最干净资产)。默认 budget-scale 1.5 + 默认 ta-grid 0.005 下
+  # 双侧 verdict=budget_exceeded_irreducible -> 回落最温和三角 T_a=ta_max(fh 1.36 s /
+  # bh 2.04 s);判炸器双 PASS 0 FAIL 0 WARN。SYNTHESIZED TIMELINE:phase=phase_out,
+  # 视频约定帧弃用。registry main 待同步, 本 worktree 手工同步供 bank gen (2026-07-09)
+  hope_forehand_swingsyn_cal:
+    phase: 0.3665            # contact f70 of 192 (tool exact 0.366492) — SYNTHESIZED TIMELINE
+    status: unverified
+    annotator: claude (时间律合成, 触球行逐位=swing fh f36; franco 抽查待办)
+    date: 2026-07-09
+    method: robot-centric time-law synthesis (synthesize_timing.py v1) on
+      hope_forehand_swing_cal (source phase 0.371); contact row bitwise = source f36;
+      clean blade speed 2.640 m/s preserved (dev 0.00%); run-up 0.72 -> 1.40 s (x1.94),
+      duration 1.94 -> 3.82 s (x1.97); mean|acc| 2.49 -> 1.05; verdict
+      budget_exceeded_irreducible (v4rg budget, default scale 1.5) -> fallback T_a=ta_max 1.36 s
+    source: video-gvhmr + grip-calibrated (swing + synthesize_timing.py, report
+      v5_height_fix/swingsyn/fh_swingsyn.json)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: 40   # carried from hope_forehand_swing_cal lineage (same source video)
+
+  hope_backhand_swingsyn_cal:
+    phase: 0.4929            # contact f104 of 212 (tool exact 0.492891) — SYNTHESIZED TIMELINE
+    status: unverified
+    annotator: claude (时间律合成, 触球行逐位=swing bh f53 = M3b 训练锚 0.495; franco 抽查待办)
+    date: 2026-07-09
+    method: robot-centric time-law synthesis (synthesize_timing.py v1) on
+      hope_backhand_swing_cal (source phase 0.495 = M3b train anchor f53, NOT the 0.514
+      speed-peak convention); contact row bitwise = source f53; clean blade speed 1.725 m/s
+      preserved (dev 0.00%); run-up 1.06 -> 2.08 s (x1.96), duration 2.14 -> 4.22 s (x1.97);
+      mean|acc| 2.73 -> 1.17; verdict budget_exceeded_irreducible (v4rg budget, default
+      scale 1.5) -> fallback T_a=ta_max 2.04 s; post-contact decel_over_budget=True (util 1.10)
+    source: video-gvhmr + grip-calibrated (swing + synthesize_timing.py, report
+      v5_height_fix/swingsyn/bh_swingsyn.json)
+    face_normal_reliable: true-calibrated
+    grip_session: session_v5_oblique_hopex
+    rally_yaw_deg: -40  # carried from hope_backhand_swing_cal lineage (same source video)
