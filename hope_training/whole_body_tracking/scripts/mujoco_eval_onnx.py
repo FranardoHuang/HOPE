@@ -1841,10 +1841,12 @@ def main():
                         "per-clip constants from the reference clip's contact frame "
                         "(scripts/suggest_face_sign.py), NEVER derived from the live paddle velocity "
                         "at eval time. Default OFF = legacy single-face scoring, byte-identical to "
-                        "every score on the books. venue/bank demanded normals come from the "
-                        "ball/planner and are NOT flipped; a 179-D face-command model additionally "
-                        "sees the flipped reference normal in its obs tail (matches flag-ON "
-                        "training).")
+                        "every score on the books. The table serves the metric/reference channels "
+                        "ONLY (2026-07-09 face-frame ruling): it is REJECTED with --target-source "
+                        "bank (bank scoring/obs are +Y/A-frame on both sides) and with any 179/"
+                        "181-D face-obs model (the face lane is +Y/A-frame in training) — both "
+                        "exit 2. Legit use: boxes/venue scoring of non-face models on flipped-"
+                        "face clips.")
     p.add_argument("--hold-ref", choices=["clip", "stand"], default="clip",
                    help="multiswing pre-swing HOLD reference semantics. 'clip' (default, legacy) = "
                         "freeze the windup frame's raw clip reference — what pre-2026-07-05 "
@@ -1882,6 +1884,12 @@ def main():
     global STRIKE_PHASE_PER_CLIP, RACKET_POS_Z_RANGE, TERM_EE_POS_Z, POS_RANGE_PER_CLIP, VEL_RANGE_PER_CLIP
     global TERM_ANCHOR_POS_Z, TERM_ANCHOR_ORI, MOUNT_NORMAL_SIGN_PER_CLIP
     if args.mount_normal_sign_per_clip is not None:
+        # 互斥守卫①(2026-07-09 单翻病定案):bank 考卷按 +Y(A)约定双侧不翻判分(题库行原样
+        # 进 obs 与打分),传符号表 = 实测翻面 vs A 约定目标 = 反手拍面误差被打成 ~180°−x 的错判。
+        if args.target_source == "bank":
+            raise SystemExit("[FATAL] --mount-normal-sign-per-clip is incompatible with "
+                             "--target-source bank: bank scoring/obs are +Y(A)-frame on BOTH "
+                             "sides by design (双不翻;2026-07-09 face-frame 定案). Drop the flag.")
         _signs = tuple(float(s) for s in args.mount_normal_sign_per_clip)
         # fail-loud:符号表长度必须 = clip 数(照训练侧 _mount_signs_cfg / _strike_phases_cfg 先例),
         # 符号只认 ±1 —— 静默截断/回退会让某个 clip 按错误的一面判分还不吭声。
@@ -1926,6 +1934,15 @@ def main():
     print(f"[mj-sim2sim] onnx={args.onnx}")
     print(f"[mj-sim2sim] mjcf={args.mjcf}")
     policy = OnnxPolicy(args.onnx, obs_norm=("off" if args.no_obs_norm else args.obs_norm))
+    # 互斥守卫②(obs 维度触发,盖所有模式含 boxes/venue):face-obs 模型(179/181-D)的 face 通道
+    # 在训练里永远是 +Y(A)约定(bank 行原样进 obs;hope_rewards._face_pair)。开符号表会让 boxes/
+    # venue 的目标法向翻到击球面(B)喂进 obs = 训练没见过的镜像分布,判也判不对。按元数据可自省
+    # (exporter: face_obs_convention=mount_plusY_A),但守卫以实测 obs 维度为准,老模型也拦。
+    if policy.face_command and MOUNT_NORMAL_SIGN_PER_CLIP is not None:
+        raise SystemExit("[FATAL] --mount-normal-sign-per-clip with a face-obs model "
+                         f"(obs_dim={policy.obs_dim}): the face lane is +Y(A)-frame in training; "
+                         "flipping target normals here feeds the policy a mirrored face command "
+                         "it never saw. Drop the flag (all target sources).")
     contract_desc = {
         175: "deploy_parity: racket_target_pos_b relative to racket FK, no anchor_pos/base_target",
         177: "hitter_footwork: deploy_parity + base_target_pos_b(2) station Δxy after proj_grav",

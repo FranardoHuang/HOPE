@@ -133,6 +133,15 @@ class RacketTargetCommand(CommandTerm):
             # _clip_names (0=forehand, 1=backhand). Loud error on a missing/empty clip.
             self._question_bank = load_question_bank(cfg.question_bank, device=self.device)
             self.metrics["question_difficulty_deg"] = torch.zeros(self.num_envs, device=self.device)
+            # A-frame (+Y) guard runs lazily on the first bank application (the reference strike
+            # state is unresolved at __init__) — see _check_question_bank_face_frame.
+            self._qb_face_frame_checked = False
+            if cfg.face_command:
+                # Demanded-face tracking error (deg) in the face_command frame (raw +Y vs bank
+                # target). racket_normal_error_deg cannot see the M3c 单翻病: it measures vs the
+                # clip reference face and is flip-INVARIANT under the sign table (both sides carry
+                # the sign). This metric closes that observation blind spot in the training ledger.
+                self.metrics["face_cmd_normal_error_deg"] = torch.zeros(self.num_envs, device=self.device)
             # HER achieved-target replay is bank-incompatible: the bank override runs AFTER the HER
             # block in _sample_targets_uniform, so every replayed target would be clobbered — burned
             # RNG/compute and a lying achieved_replay_frac (the DeployParity yaml defaults the mix
@@ -162,6 +171,11 @@ class RacketTargetCommand(CommandTerm):
         self.racket_quat_w[:, 0] = 1.0
         self.racket_lin_vel_w = torch.zeros(self.num_envs, 3, device=self.device)
         self.racket_normal_w = torch.zeros(self.num_envs, 3, device=self.device)
+        # Raw (+Y, unsigned) twin of racket_normal_w — the face_command reward frame (_face_pair).
+        # Same unit-+Z pre-FK init as the signed twin (both are overwritten by the first
+        # _compute_racket_state; a degenerate zero "normal" would read as a silent 90°).
+        self.racket_normal_raw_w = torch.zeros(self.num_envs, 3, device=self.device)
+        self.racket_normal_raw_w[:, 2] = 1.0
         self.racket_normal_w[:, 2] = 1.0
 
         # --- Tier-1 virtual incoming ball (rewardDesign.md): per-swing sampled incoming state and
@@ -255,6 +269,7 @@ class RacketTargetCommand(CommandTerm):
         self._ref_racket_pos_rel_per_clip = None
         self._ref_racket_vel_w_per_clip = None
         self._ref_racket_normal_w_per_clip = None
+        self._ref_racket_normal_raw_w_per_clip = None
         self._ref_base_pos_rel_per_clip = None
         self._ref_reach_offset_xy_per_clip = None
 
@@ -865,6 +880,7 @@ class RacketTargetCommand(CommandTerm):
         pos_all = torch.zeros(nseg, 3, device=self.device)
         vel_all = torch.zeros(nseg, 3, device=self.device)
         nrm_all = torch.zeros(nseg, 3, device=self.device)
+        nrm_raw_all = torch.zeros(nseg, 3, device=self.device)
         base_all = torch.zeros(nseg, 3, device=self.device)
         reach_all = torch.zeros(nseg, 2, device=self.device)
         W = max(1, int(self.cfg.clean_strike_vel_window))
@@ -889,7 +905,8 @@ class RacketTargetCommand(CommandTerm):
                 quat = quat_mul(wquat.unsqueeze(0), self._mount_quat[0:1]).squeeze(0)
             # 击球面符号按 clip 取(正手一面、反手另一面);表为空用标量符号(现役行为逐位不变)。
             _sgn = float(_mount_signs[clip_id]) if _mount_signs else float(self.cfg.mount_normal_sign)
-            normal = matrix_from_quat(quat.unsqueeze(0))[0, :, self.cfg.mount_normal_axis] * _sgn
+            normal_raw = matrix_from_quat(quat.unsqueeze(0))[0, :, self.cfg.mount_normal_axis]
+            normal = normal_raw * _sgn
 
             # --- clean reference strike velocity --------------------------------------------------
             # Recompute the strike target velocity from the FINAL racket FK position by a centered
@@ -912,6 +929,8 @@ class RacketTargetCommand(CommandTerm):
             pos_all[clip_id] = pos.detach().clone()
             vel_all[clip_id] = lin.detach().clone()
             nrm_all[clip_id] = (normal / (torch.norm(normal) + 1e-6)).detach().clone()
+            # Raw (+Y/A-frame) twin — the question-bank A-frame guard compares against this one.
+            nrm_raw_all[clip_id] = (normal_raw / (torch.norm(normal_raw) + 1e-6)).detach().clone()
             # Reference base (root) at the strike — root is articulation body index 0 (same order the
             # motion arrays use). The base->racket horizontal offset couples base_target to racket_target.
             base_all[clip_id] = self._reference_body_state(motion, strike_step, 0)[0].detach().clone()
@@ -940,6 +959,7 @@ class RacketTargetCommand(CommandTerm):
         self._ref_racket_pos_rel_per_clip = pos_all
         self._ref_racket_vel_w_per_clip = vel_all
         self._ref_racket_normal_w_per_clip = nrm_all
+        self._ref_racket_normal_raw_w_per_clip = nrm_raw_all
         self._ref_base_pos_rel_per_clip = base_all
         self._ref_reach_offset_xy_per_clip = reach_all
         # Legacy single-clip fields (no in-file consumers besides diagnostics): mirror clip 0.
@@ -1271,6 +1291,8 @@ class RacketTargetCommand(CommandTerm):
         """
         if self._question_bank is None:
             return
+        if not self._qb_face_frame_checked:
+            self._check_question_bank_face_frame()
         motion = self._motion()
         if motion._multiseg:
             clip = motion.clip_id[env_ids]
@@ -1284,6 +1306,53 @@ class RacketTargetCommand(CommandTerm):
         self.target_normal_cmd[env_ids] = nrm
         # Held per env until its next resample; reset-mean reports the question difficulty mix.
         self.metrics["question_difficulty_deg"][env_ids] = diff
+
+    def _check_question_bank_face_frame(self):
+        """A-frame (+Y calibration) guard: every bank demanded normal must be same-side with the
+        RAW clip reference face (2026-07-09 单翻病防复发卫兵).
+
+        The face_command channel is +Y/A-frame end to end (bank rows, actor obs, reward measured
+        side — see hope_rewards._face_pair). gen_stage1_questions.py sign-aligns each demanded
+        normal to the raw +Y clip face, so ``dot(demanded, ref_raw) > 0`` holds for every valid
+        row (shipped banks: min 0.86). A bank regenerated in the striking-face ("B") convention —
+        the retired TIMELINE debt "题库按翻面重出", which must NEVER be completed — would flip the
+        backhand rows and silently re-create the M3c disease; this guard turns that into a loud
+        startup error instead. Runs once, lazily (the reference strike state resolves after
+        __init__); comparing against the runtime FK reference also couples the check to the
+        configured strike_phase_per_clip — a large phase drift shows up here as a shrinking
+        margin, which is a feature, not a bug.
+        """
+        self._ensure_reference_strike_state()
+        assert self._ref_racket_normal_raw_w_per_clip is not None
+        bank = self._question_bank
+        nseg = int(self._ref_racket_normal_raw_w_per_clip.shape[0])
+        for c in range(min(int(bank.counts.shape[0]), nseg)):
+            q = int(bank.counts[c])
+            if q <= 0:
+                continue
+            rows = bank.demanded_normal[c, :q]
+            ref_raw = self._ref_racket_normal_raw_w_per_clip[c]
+            d = torch.mv(rows, ref_raw)
+            min_d = float(d.min())
+            cname = self._clip_names.get(c, f"clip{c}")
+            if min_d <= 0.0:
+                raise ValueError(
+                    f"question bank {self.cfg.question_bank!r} clip {cname!r}: "
+                    f"{int((d <= 0).sum())}/{q} demanded normals are OPPOSITE the raw +Y clip "
+                    f"face (min dot = {min_d:.4f}). The face_command channel is +Y/A-frame by "
+                    f"design (hope_rewards._face_pair) — this bank looks regenerated in the "
+                    f"striking-face convention, which would silently re-create the M3c 单翻病. "
+                    f"Use an A-frame bank (gen_stage1_questions.py output); NEVER re-emit banks "
+                    f"in the flipped convention."
+                )
+            if min_d < 0.5:
+                print(
+                    f"[RacketTargetCommand] WARN question bank clip {cname}: min dot(demanded, "
+                    f"ref_raw_normal) = {min_d:.4f} < 0.5 — unusually far from the calibration "
+                    f"face; check strike_phase_per_clip vs the bank's anchor phase.",
+                    flush=True,
+                )
+        self._qb_face_frame_checked = True
 
     def _qb_base_anchor_off_xy(self) -> torch.Tensor:
         """Per-clip PINNED ready-anchor XY offset from the env origin ((C, 2); cached after the
@@ -1518,6 +1587,11 @@ class RacketTargetCommand(CommandTerm):
                 sign = self._mount_sign_per_clip_t[0]  # 单 clip:表长已校验 = 1
         else:
             sign = self.cfg.mount_normal_sign
+        # RAW (+Y calibration frame, "A" convention) normal, kept alongside the striking-face-signed
+        # one: the face_command reward channel pairs against +Y-frame question-bank targets and must
+        # read THIS buffer (hope_rewards._face_pair; 2026-07-09 单翻病定案). Sign table empty =>
+        # racket_normal_w == raw * 1.0, bitwise identical.
+        self.racket_normal_raw_w = axis_w
         self.racket_normal_w = axis_w * sign
 
     def _compute_strike_timing(self):
@@ -2206,6 +2280,11 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["racket_pos_error"] = pos_err
         self.metrics["racket_vel_error"] = vel_err
         self.metrics["racket_normal_error_deg"] = normal_err_deg
+        if self.cfg.face_command:
+            # Demanded-face error in the reward's own frame (raw +Y vs bank target, _face_pair):
+            # the M3c ~34° disease was invisible to racket_normal_error_deg (flip-invariant).
+            cos_cmd = torch.sum(self.racket_normal_raw_w * self.target_normal_cmd, dim=-1).clamp(-1.0, 1.0)
+            self.metrics["face_cmd_normal_error_deg"] = torch.acos(cos_cmd) * (180.0 / math.pi)
         self.metrics["base_pos_error"] = base_err
         self.metrics["time_to_strike_s"] = self.time_to_strike
         self.metrics["pre_strike_flag"] = self.pre_strike.float()

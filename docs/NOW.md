@@ -596,6 +596,7 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 
 | Item | Owner | Landed | Where |
 | --- | --- | --- | --- |
+| 单翻病定案+S1 face 约定修复:facesign 翻面只翻了实测侧,题库/obs/奖励仍 +Y 约定=反手 face 奖励最优点在错误平面(M3c/M2f 反手同收敛 ~34° 跨资产铁证);修复=_face_pair 统一 face 帧(exp 核/strike_success/face_guidance 实测侧改读未翻 raw 缓冲,S1≡S2 逐位等价、判卷链零改动)+双侧 B 卷卫兵+两道 mjeval 互斥守卫+face_cmd_normal_error_deg 指标+exporter 元数据;止损 R9t/R9u/M3d-live 三病灶臂;"题库按翻面重出"欠账否决关闭;232+11 tests 绿,双红队 APPROVE,现役配置字节等价 | claude(franco 拍板止损) | 2026-07-10 | main(face-frame-s1-0709);病因+设计=pod1 queue.md + s1_wave4/facesign_fix_design_0709.md;TIMELINE 07-10(凌晨二) |
 | judge.sh 单命令判卷链(判卷标准入口):env.yaml 自动解析动作对/相位/题库(train→exam 同源推导,解析不到 fail-loud 拒默认值)→ play.py 导出+sidecar → 双侧×双噪声档 bank 考卷(--qdes-clamp/--hold-ref stand 默认)→ md 报告落 run_dir/judge/;--dry-run 供机制检查 | claude | 2026-07-09 | main `66aced9` + runbook 判卷链节 |
 | watchdog AUTOJUDGE(收卷自动判卷):patrol_watchdog 巡到臂 DONE 即后台 judge.sh 出卷(M4 首单);顺带修终档 off-by-one(终档名 model_16999=0 起数,曾被当"未到 17000"反复复活 M3 四次) | claude | 2026-07-09 | pod patrol_watchdog.sh;patrol.log DONE/AUTOJUDGE 行 |
 | rally 上台率记账根治:per-swing 同刻入账(比值恒 ≤1 =真实回球率;旧口径 `_legacy` 过渡曲线)+ stagger_initial_clock 防同步旗标(默认关)+ 判读纪律(同步臂 EMA 取 ≥21 迭代均值,R4b/R5b/R6b 摔率重审);13 tests 绿,正确性修复豁免消融 | claude | 2026-07-09 | main `53d440e`(台账 `02196d2`) |

@@ -192,6 +192,24 @@ def attach_onnx_metadata(env: ManagerBasedRLEnv, run_path: str, path: str, filen
             )
     except (KeyError, ValueError):
         pass  # task without a racket_target command (plain tracking) — clock keys not needed
+    # Face-frame provenance (2026-07-09 单翻病定案): ship the striking-face sign table and the
+    # face-obs convention so eval/deploy can introspect the checkpoint instead of guessing. The
+    # face_command obs lane (179/181-D tail) is ALWAYS +Y/A-frame (bank rows verbatim); the sign
+    # table serves the metric/reference channels only (hope_rewards._face_pair). Empty string =
+    # table not configured (scalar sign path). Own narrow guard (NOT the shared try above): a
+    # malformed table must fail the export loudly, not silently ship a face model without its
+    # provenance keys — lying metadata is the exact failure this hunk exists to prevent.
+    # NOTE judge.sh must carry mount_normal_sign_per_clip into the EXPORT env for this key to be
+    # truthful on CLI-configured arms — it is in the export carry list, keep it there.
+    try:
+        rt_cfg2 = env.command_manager.get_term("racket_target").cfg
+    except KeyError:
+        rt_cfg2 = None  # plain-tracking task — no face channel, no keys
+    if rt_cfg2 is not None:
+        mns = getattr(rt_cfg2, "mount_normal_sign_per_clip", None) or ()
+        metadata["mount_normal_sign_per_clip"] = ",".join(f"{float(s):g}" for s in mns)
+        if bool(getattr(rt_cfg2, "face_command", False)):
+            metadata["face_obs_convention"] = "mount_plusY_A"
     actor_contract = infer_actor_observation_contract(env)
     if actor_contract is not None:
         metadata.update(

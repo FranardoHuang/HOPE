@@ -373,3 +373,180 @@ def test_train_py_plumbs_the_key():
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+# --------------------------------------------------------------------------------------------- #
+# S1 face 约定修复(2026-07-09 单翻病定案):face_command 通道全程 +Y(A)约定
+# 病根:符号表只翻了实测拍面,题库/obs/奖励还在 +Y 旧约定 —— 反手奖励最优点在错误平面
+# (M3c/M2f 反手 ~34° 系统偏差)。修复 = face 通道的实测侧读 racket_normal_raw_w(_face_pair)。
+# --------------------------------------------------------------------------------------------- #
+def _fc_cmd(n, signs, clip_ids, target_cmd, window=None, pre_strike=None):
+    """face_command=True 的 fake cmd:实测法向来自真 _compute_racket_state(identity quat →
+    raw = +Y,signed = ±Y 按 clip),目标 = A 约定题目法向。"""
+    rt = _make_state_cmd(n, signs=signs, clip_ids=clip_ids)
+    rt._compute_racket_state()
+    cmd = _fake_racket_cmd(
+        n,
+        window=torch.ones(n, dtype=torch.bool) if window is None else window,
+        pre_strike=pre_strike,
+    )
+    cmd.cfg.face_command = True
+    cmd.racket_normal_w = rt.racket_normal_w
+    cmd.racket_normal_raw_w = rt.racket_normal_raw_w
+    cmd.target_normal_cmd = target_cmd
+    return cmd
+
+
+def test_face_pair_selects_raw_under_face_command():
+    """_face_pair 是 face 通道约定的单一来源:face_command=True → (raw, 题目法向);
+    False → (signed, clip 参考面)= 现状字节等价路径。"""
+    cmd = _fc_cmd(2, signs=(1.0, -1.0), clip_ids=[0, 1], target_cmd=EY.expand(2, 3).clone())
+    m, t = hope_rewards_mod._face_pair(cmd)
+    assert m is cmd.racket_normal_raw_w and t is cmd.target_normal_cmd
+    cmd.cfg.face_command = False
+    m2, t2 = hope_rewards_mod._face_pair(cmd)
+    assert m2 is cmd.racket_normal_w and t2 is cmd.racket_target_normal_w
+
+
+def test_face_command_backhand_regression_kernel_alive():
+    """病灶回归陷阱:反手(sign=−1)完美执行 A 约定题目(raw +Y ≡ demanded)时 face 奖励必须 =1。
+    修前(实测侧误用翻面 racket_normal_w)同一状态 cos=−1 → kernel <1e-30 = M3c/M2f 病根本尊;
+    有人把实测侧改回 signed,这个断言当场红。"""
+    n = 2
+    cmd = _fc_cmd(n, signs=(1.0, -1.0), clip_ids=[1, 1], target_cmd=EY.expand(n, 3).clone())
+    env = _fake_env(racket_target=cmd)
+    r = hope_rewards_mod.racket_normal_tracking_exp(env, "racket_target", std=0.262)
+    assert torch.allclose(r, torch.ones(n)), r
+    # 修前语义的数值对照(独立复算,不走 _face_pair):signed vs 题目 = 反面
+    old_cos = torch.sum(cmd.racket_normal_w * cmd.target_normal_cmd, dim=-1).clamp(-1.0, 1.0)
+    old_kernel = torch.exp(-(torch.acos(old_cos) ** 2) / 0.262**2)
+    assert float(old_kernel.max()) < 1e-30
+
+
+def test_face_reward_invariant_to_sign_table():
+    """S1 不变量:face_command 奖励对符号表严格不变(开表 vs 关表逐位 torch.equal)——
+    face 通道与符号表彻底解耦,符号表只属于 metric/参考通道。"""
+    tgt = torch.tensor([[0.3, 0.9, 0.1]]).expand(3, 3).clone()
+    tgt = tgt / tgt.norm(dim=-1, keepdim=True)
+
+    def _r(signs):
+        cmd = _fc_cmd(3, signs=signs, clip_ids=[0, 1, 1], target_cmd=tgt.clone())
+        return hope_rewards_mod.racket_normal_tracking_exp(
+            _fake_env(racket_target=cmd), "racket_target", std=0.262)
+
+    assert torch.equal(_r((1.0, -1.0)), _r(()))
+
+
+def test_strike_success_and_face_guidance_share_face_pair():
+    """strike_success 的法向因子与 racket_face_guidance 线性罚必须走同一 _face_pair。
+    反手完美执行:法向因子=1(乘积=位置×速度)、线性罚=0;题目偏 45°:线性罚=45°(修前
+    读 signed 会算成 135° 被 theta_max 截成 90° ——线性罚往反方向拉,比死区更糟)。"""
+    n = 1
+    tgt = EY.expand(n, 3).clone()
+    cmd = _fc_cmd(n, signs=(1.0, -1.0), clip_ids=[1], target_cmd=tgt,
+                  pre_strike=torch.ones(n, dtype=torch.bool))
+    env = _fake_env(racket_target=cmd)
+    rs = hope_rewards_mod.racket_strike_success(env, "racket_target", 0.2, 1.0, 0.262)
+    assert torch.allclose(rs, torch.ones(n)), rs  # pos/vel 误差全零 → 乘积 = 法向因子 = 1
+    g0 = hope_rewards_mod.racket_face_guidance(env, "racket_target")
+    assert torch.allclose(g0, torch.zeros(n), atol=1e-6), g0
+    tgt45 = torch.tensor([[math.sin(math.pi / 4), math.cos(math.pi / 4), 0.0]])
+    cmd45 = _fc_cmd(n, signs=(1.0, -1.0), clip_ids=[1], target_cmd=tgt45,
+                    pre_strike=torch.ones(n, dtype=torch.bool))
+    g45 = hope_rewards_mod.racket_face_guidance(_fake_env(racket_target=cmd45), "racket_target")
+    assert abs(float(g45[0]) - math.pi / 4) < 1e-5, g45
+    # 修前语义对照:signed(−Y) vs 45° 题目 = 135° → 截到 theta_max=π/2,方向整个反了
+    old_cos = torch.sum(cmd45.racket_normal_w * tgt45, dim=-1).clamp(-1.0, 1.0)
+    assert abs(float(torch.acos(old_cos)[0]) - 3 * math.pi / 4) < 1e-5
+
+
+def test_raw_buffer_bitwise_equal_when_table_empty():
+    """字节等价卫兵:符号表空(现役默认)时 raw ≡ signed(torch.equal);标量 sign=−1 只动
+    signed,raw 永远是未翻 +Y 轴。"""
+    rt = _make_state_cmd(3, signs=())
+    rt._compute_racket_state()
+    assert torch.equal(rt.racket_normal_w, rt.racket_normal_raw_w)
+    rt2 = _make_state_cmd(2, signs=())
+    rt2.cfg.mount_normal_sign = -1.0
+    rt2._compute_racket_state()
+    assert torch.equal(rt2.racket_normal_raw_w, EY.expand(2, 3))
+    assert torch.equal(rt2.racket_normal_w, -EY.expand(2, 3))
+
+
+def test_reference_raw_normals_unsigned(capsys):
+    """参考面的 raw 孪生缓冲(_ref_racket_normal_raw_w_per_clip)不乘符号:A 约定卫兵的比对基准。"""
+    rt = _make_ref_cmd((1.0, -1.0))
+    rt._ensure_reference_strike_state()
+    raw = rt._ref_racket_normal_raw_w_per_clip
+    assert torch.allclose(raw[0], EY, atol=1e-5)
+    assert torch.allclose(raw[1], EY, atol=1e-5)   # 反手 raw 仍 +Y(signed 是 −Y)
+    assert torch.allclose(rt._ref_racket_normal_w_per_clip[1], -EY, atol=1e-5)
+    capsys.readouterr()
+
+
+def test_bank_a_frame_guard_fails_loud_on_flipped_bank():
+    """防复发卫兵:B 约定题库(需求法向背对 +Y 参考面)喂进来当场 ValueError——
+    "题库按翻面重出"旧欠账已被 S1 决议关闭,谁完成它谁触雷。同侧题库正常通过。"""
+    RT = hope_commands_mod.RacketTargetCommand
+    rt = RT.__new__(RT)
+    rt.cfg = types.SimpleNamespace(question_bank="/tmp/fake_bank.npz")
+    rt._clip_names = {0: "forehand", 1: "backhand"}
+    rt._ref_strike_cached = True  # 短路 _ensure_reference_strike_state(缓存已就位)
+    rt._ref_racket_normal_raw_w_per_clip = torch.stack([EY, EY])
+    good = torch.zeros(2, 4, 3)
+    good[..., 1] = 1.0
+    bad = good.clone()
+    bad[1] = -bad[1]  # 反手行翻面 = B 约定题库
+    counts = torch.tensor([4, 4])
+    rt._question_bank = types.SimpleNamespace(demanded_normal=bad, counts=counts)
+    rt._qb_face_frame_checked = False
+    with pytest.raises(ValueError, match="OPPOSITE"):
+        rt._check_question_bank_face_frame()
+    rt._question_bank = types.SimpleNamespace(demanded_normal=good, counts=counts)
+    rt._qb_face_frame_checked = False
+    rt._check_question_bank_face_frame()
+    assert rt._qb_face_frame_checked
+
+
+def test_face_cmd_metric_reads_raw_frame():
+    """新训练指标 face_cmd_normal_error_deg 在奖励自己的坐标系(raw vs 题目)量误差:
+    完美执行 0°、翻面 180°;老指标 racket_normal_error_deg 是翻转不变量,看不见这个病。"""
+    raw = EY.expand(2, 3)
+    cmdn = torch.stack([EY, -EY])
+    err = torch.acos(torch.sum(raw * cmdn, dim=-1).clamp(-1.0, 1.0)) * (180.0 / math.pi)
+    assert abs(float(err[0])) < 1e-4 and abs(float(err[1]) - 180.0) < 1e-4
+    src = inspect.getsource(hope_commands_mod.RacketTargetCommand._update_metrics)
+    assert "self.racket_normal_raw_w * self.target_normal_cmd" in src, (
+        "face_cmd_normal_error_deg 不再从 raw 缓冲计算 —— 观测盲区回来了,同步修这里")
+
+
+def test_source_guards_face_frame_wiring():
+    """源码守卫:防"单翻"复发的全部关键接线。任何一条红 = 有人把约定改散了,先读
+    hope_rewards._face_pair 的 docstring 再动手。"""
+    assert "_face_pair" in inspect.getsource(hope_rewards_mod._normal_kernel_raw)
+    assert "_face_pair" in inspect.getsource(hope_rewards_mod.racket_face_guidance)
+    src_p = inspect.getsource(hope_rewards_mod._face_pair)
+    assert "racket_normal_raw_w" in src_p and "target_normal_cmd" in src_p
+    import re
+    mj = open(os.path.join(SCRIPTS_DIR, "mujoco_eval_onnx.py"), encoding="utf-8").read()
+    # 守卫必须是 raise(不是降级成 print 的警告)——正则绑定 raise SystemExit 本体
+    assert re.search(r'raise SystemExit\("\[FATAL\] --mount-normal-sign-per-clip is incompatible', mj)  # 守卫①
+    assert re.search(r'raise SystemExit\("\[FATAL\] --mount-normal-sign-per-clip with a face-obs model', mj)  # 守卫②
+    assert "bank scoring/obs are +Y(A)-frame" in mj
+    assert "the face lane is +Y(A)-frame in training" in mj
+    vb = open(os.path.join(SCRIPTS_DIR, "venue_ball_sampler.py"), encoding="utf-8").read()
+    assert re.search(r'raise SystemExit\(\s*f"\[FATAL\] exam bank', vb)  # B 卷卫兵同样必须 raise
+    assert "OPPOSITE the +Y reference face" in vb
+    # 训练侧卫兵的"接线"(调用点)必须存在——方法本体在而调用点被删 = 卫兵静默脱钩
+    src_apply = inspect.getsource(
+        hope_commands_mod.RacketTargetCommand._apply_question_bank_targets)
+    assert "_check_question_bank_face_frame" in src_apply, (
+        "_apply_question_bank_targets 不再调用 A 约定卫兵 —— B 卷会静默进训练,单翻病复发")
+    ex_path = os.path.join(
+        HERE, "..", "source", "whole_body_tracking", "whole_body_tracking", "utils", "exporter.py")
+    ex = open(ex_path, encoding="utf-8").read()
+    assert "mount_normal_sign_per_clip" in ex and "face_obs_convention" in ex  # 元数据保真
+    js = open(os.path.join(SCRIPTS_DIR, "judge.sh"), encoding="utf-8").read()
+    assert '("mount_normal_sign_per_clip", rt.get("mount_normal_sign_per_clip"))' in js  # 导出搬运
+    tr = open(os.path.join(SCRIPTS_DIR, "train.py"), encoding="utf-8").read()
+    assert "face_command kernel frame=+Y(A/bank)" in tr      # 冒烟 grep 的 applied 审计行

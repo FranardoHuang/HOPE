@@ -79,15 +79,38 @@ def _vel_kernel_raw(cmd: RacketTargetCommand, std: float) -> torch.Tensor:
     return torch.exp(-error / std**2)
 
 
+def _face_pair(cmd: RacketTargetCommand) -> tuple[torch.Tensor, torch.Tensor]:
+    """(measured, target) face normals for EVERY face-channel term — the single source of the
+    face frame. Any new face reward/penalty MUST read through here, never pick buffers itself.
+
+    face_command=True (question-bank demanded normals): the bank is a +Y-calibration-frame ("A"
+    convention) product — gen_stage1_questions.py sign-aligns every demanded normal to the RAW +Y
+    clip face and has no notion of the striking-face sign table. So the measured side must be the
+    raw +Y axis (``racket_normal_raw_w``), NOT the striking-face-signed ``racket_normal_w``.
+    Pairing the signed normal against the bank target was the M3c/M2f 单翻病 (2026-07-09 病因定案):
+    on sign=-1 (backhand) clips the reward optimum sat ~180° from the physically correct face and
+    both arms converged to a ~34° systematic face error. A-vs-A is bitwise identical to flipping
+    both sides (dot(-a,-b) == dot(a,b)), so nothing is lost: the mount sign table keeps serving
+    the metric / reference / diagnostic channels (B convention) untouched.
+
+    face_command=False: unchanged clip-reference pairing (signed vs signed — both sides carry the
+    same per-clip sign, so this path is flip-invariant and byte-identical to the baseline).
+    """
+    if cmd.cfg.face_command:
+        return cmd.racket_normal_raw_w, cmd.target_normal_cmd
+    return cmd.racket_normal_w, cmd.racket_target_normal_w
+
+
 def _normal_kernel_raw(cmd: RacketTargetCommand, std: float) -> torch.Tensor:
     """UNGATED face-normal kernel (shared by racket_normal / racket_strike_success).
 
     Stage-1 face command: the reference is the DEMANDED (inverse-solved, question-bank) normal
     instead of the clip-locked reference normal. face_command=False keeps the old tensor read —
     byte-identical baseline. racket_strike_success re-anchors through this helper automatically.
+    The (measured, target) pair comes from ``_face_pair`` — see its docstring for the frame rules.
     """
-    target_normal = cmd.target_normal_cmd if cmd.cfg.face_command else cmd.racket_target_normal_w
-    cos_ang = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
+    measured, target_normal = _face_pair(cmd)
+    cos_ang = torch.sum(measured * target_normal, dim=-1).clamp(-1.0, 1.0)
     angle = torch.acos(cos_ang)
     return torch.exp(-(angle**2) / std**2)
 
@@ -348,15 +371,24 @@ def racket_face_guidance(
     in-window step (same active mask as ``racket_guidance``). The exp face kernel has ~zero
     gradient beyond ~3·std (M3c 卡在 33°、v5syn 反手起步 ~53° 都在死区里) — this linear term is
     the face-channel twin of the position guidance: a small constant "which way to turn the
-    blade" wage that never starves. Target selection mirrors ``_normal_kernel_raw`` (question-bank
-    demanded normal under face_command, clip reference normal otherwise); the achieved normal
-    buffer is the mount-sign-corrected one, so per-clip 翻面 (mount_normal_sign_per_clip) is
-    honored automatically. Returns POSITIVE radians — the RewTerm weight is NEGATIVE
+    blade" wage that never starves. The (measured, target) pair comes from ``_face_pair`` — the
+    SAME frame the exp kernel uses. It must, or the two face terms fight: the original inline pick
+    read the sign-flipped ``racket_normal_w`` against the A-frame bank target, so on sign=-1
+    (backhand) clips this linear term pulled the blade toward the WRONG face with live gradient —
+    worse than the dead exp kernel it was meant to rescue (2026-07-09 病因定案 + R9u/M3d-live
+    止损). Returns POSITIVE radians — the RewTerm weight is NEGATIVE
     (rewards.racket_face_guidance_weight; cfg default 0.0 = term skipped, byte-identical).
+    NOTE theta_max defaults to pi/2: rescues starting deeper than 90° (M3b-type 116° dead-zone
+    starts) must pass theta_max=pi, or the clamp zeroes the gradient exactly where it is needed.
+    HOT-RESTART note (M3c/M2f-type checkpoints onto the fixed frame): with weight != 0 this term
+    steps once at restart (pre-fix backhand read ~146°, clamped to the pi/2 constant with zero
+    gradient; post-fix it reads the true ~0.6 rad with live gradient — a one-off reward-level
+    shift of ~+0.98*|weight| per active step). Watch value_loss/KL and the new
+    face_cmd_normal_error_deg metric for the first few hundred iterations.
     人话:拍面反了 90° 时 exp 核一分钱梯度都不给,这里每一度都扣一点——把反面的拍子一路拉回来。"""
     cmd = _cmd(env, command_name)
-    target_normal = cmd.target_normal_cmd if cmd.cfg.face_command else cmd.racket_target_normal_w
-    cos_ang = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
+    measured, target_normal = _face_pair(cmd)
+    cos_ang = torch.sum(measured * target_normal, dim=-1).clamp(-1.0, 1.0)
     angle = torch.acos(cos_ang)
     active = cmd.pre_strike | cmd.strike_window
     return angle.clamp(max=float(theta_max)) * active.float()

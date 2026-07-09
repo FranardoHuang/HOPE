@@ -405,6 +405,33 @@ class BankExamSampler(VenueBallSampler):
         self.q_nrm = qb.demanded_normal.numpy().astype(np.float64)      # (C,Qmax,3)
         self.q_diff = qb.difficulty_deg.numpy().astype(np.float64)      # (C,Qmax)
         self.q_counts = [int(n) for n in qb.counts.numpy()]             # (C,)
+        # A-frame (+Y) guard (2026-07-09 单翻病防复发, mjeval 侧的孪生卫兵): every demanded
+        # normal must be same-side with the clip's +Y reference face. Bank exam scoring is
+        # A-vs-A by design (measured raw +Y vs bank rows verbatim; the striking-face sign table
+        # is REJECTED in bank mode upstream) — a bank re-emitted in the flipped ("B") convention
+        # would silently grade every backhand ~180° wrong. Training has the same guard
+        # (RacketTargetCommand._check_question_bank_face_frame); this one catches hand-passed
+        # --exam-bank files that never went through a training env. Shipped banks: min dot 0.86.
+        if ref_normal_per_clip is None:
+            print("[bank-exam] WARN: A-frame guard SKIPPED (no ref_normal_per_clip passed) — "
+                  "a flipped-convention bank would go undetected", flush=True)
+            ref_arr = None
+        else:
+            ref_arr = np.asarray(ref_normal_per_clip, np.float64).reshape(len(clip_names), 3)
+        if ref_arr is not None:
+            for c, name in enumerate(clip_names):
+                q = self.q_counts[c]
+                if q <= 0:
+                    continue
+                d = self.q_nrm[c, :q] @ ref_arr[c]
+                if float(d.min()) <= 0.0:
+                    raise SystemExit(
+                        f"[FATAL] exam bank {bank_path}: clip {name!r} has {int((d <= 0).sum())}/{q} "
+                        f"demanded normals OPPOSITE the +Y reference face (min dot {float(d.min()):.4f}) "
+                        f"— either a striking-face-convention ('B') bank, or the EVAL-side reference "
+                        f"was flipped (MOUNT_NORMAL_SIGN_PER_CLIP / --mount-normal-sign-per-clip): "
+                        f"check which side first. Bank scoring is +Y/A-frame by design; NEVER "
+                        f"re-emit banks in the flipped convention.")
         self.q_income = []
         for c, name in enumerate(clip_names):
             inc = np.asarray(data[f"{name}/incoming_vel"], np.float64).reshape(-1, 3)
