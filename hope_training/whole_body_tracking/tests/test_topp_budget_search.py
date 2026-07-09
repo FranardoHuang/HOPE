@@ -12,7 +12,9 @@
   * timing-irreducible 检测:构造姿态绑定的违规(触球后路径段,任何 T_a 都要经过)
     → 地板剂量 > 0、每档都带同样残余、reducible/irreducible 分开报告
   * fail-loud:缺登记相位 / budget_frac 出界 / 未知 npz key / 打分器缺字段 /
-    预警时间内无可行档 / 触球帧贴边 —— 全部拒跑
+    预警时间内无可行档 / 触球帧贴边 / annotations 文件不存在 —— 全部拒跑
+  * 对抗复核补测(2026-07-09):oracle 硬性通道(fz/腾空)兜底抬档;
+    地板自诊断 floor_is_min(违规住加速早段时 ta_max 端不是网格最小)
 
 Run:  python3 -m pytest hope_training/whole_body_tracking/tests/test_topp_budget_search.py -q
 """
@@ -211,6 +213,55 @@ def test_posture_violation_is_irreducible(tmp_path):
     floor_sec = rep["irreducible"]["sec_cop"]
     for cd in rep["candidates"]:
         assert cd["sec_cop"] == pytest.approx(floor_sec, abs=0.06)
+    # 收拍段对所有 T_a 一样 → ta_max 端就是全网格最小,自诊断旗必须为 True
+    assert rep["irreducible"]["floor_is_min"]
+
+
+class EarlyPathScorer:
+    """违规住在加速早段(q24 < thresh 的路径前段):T_a 越温和,起步越慢,
+    在违规区泡的秒数越多 → ta_max 端不是全网格最小 —— irreducible 地板定义的
+    已知盲区,报告必须打 floor_is_min=False 旗(读数偏高,按 grid_min_sec 解读)。"""
+    def __init__(self, thresh=0.3):
+        self.thresh = thresh
+
+    def __call__(self, npz_path, phase_out):
+        _, fps, q, _ = _acc_frames(npz_path)
+        viol = q[1:-1, 24] < self.thresh
+        s = _zero_scores()
+        s.update(dose_cop=float(viol.sum()) / max(len(viol), 1),
+                 sec_cop=float(viol.sum()) / fps)
+        return s
+
+
+def test_floor_not_minimal_flagged(tmp_path):
+    """早段违规:sec_cop 随 T_a 增(慢起步在违规区泡更久)→ 地板高于网格最小,
+    floor_is_min=False 且 grid_min_sec 给出真最小秒数。"""
+    data, phase = make_clip()
+    rep, _ = search(tmp_path, data, phase, EarlyPathScorer(0.3), mode="tight")
+    secs = [cd["sec_cop"] for cd in rep["candidates"]]
+    assert secs[-1] > secs[0] + 0.1                      # 前提成立:确实随 T_a 增
+    assert not rep["irreducible"]["floor_is_min"]
+    assert rep["irreducible"]["grid_min_sec"]["cop"] == pytest.approx(min(secs), abs=1e-4)
+
+
+class HardFailScorer:
+    """三剂量全零但 oracle_verdict=FAIL(fz/腾空硬性通道):剂量闸门必须被
+    oracle 兜底抬到 FAIL —— 不兜底会把"地面要拉着机器人"的候选放成 PASS。"""
+    def __call__(self, npz_path, phase_out):
+        s = _zero_scores()
+        s.update(oracle_verdict="FAIL")
+        return s
+
+
+def test_oracle_hard_fail_escalates_gate(tmp_path):
+    data, phase = make_clip()
+    rep, _ = search(tmp_path, data, phase, HardFailScorer(), mode="tight")
+    assert rep["selection"]["dose_gate_verdict"] == "FAIL"
+    assert rep["selection"]["gate_escalated_by_oracle"]
+    # 对照:不带 oracle_verdict 的假打分器不兜底,零剂量 = PASS
+    rep2, _ = search(tmp_path, data, phase, AccBinaryScorer(cap=1e9), mode="tight")
+    assert rep2["selection"]["dose_gate_verdict"] == "PASS"
+    assert not rep2["selection"]["gate_escalated_by_oracle"]
 
 
 def test_reducible_vs_irreducible_split(tmp_path):
@@ -301,5 +352,18 @@ def test_cli_annotation_without_stem_refused(tmp_path):
     with pytest.raises(SystemExit, match="phase"):
         tbs.main(["--input", str(src), "--output", str(tmp_path / "out.npz"),
                   "--annotations", str(ann),
+                  "--budget-frac", "0.7", "--mode", "tight",
+                  "--mjcf", "does_not_matter.xml", "--body-order", "nope.txt"])
+
+
+def test_cli_annotations_file_missing_refused(tmp_path):
+    """--annotations 路径打错(文件不存在)→ 说真实原因,不误报成"缺 phase"。
+    (oracle 的 load_annotations 对不存在的文件静默返回 {},必须在上游拦住。)"""
+    data, _ = make_clip()
+    src = tmp_path / "clip.npz"
+    np.savez(src, **data)
+    with pytest.raises(SystemExit, match="不存在"):
+        tbs.main(["--input", str(src), "--output", str(tmp_path / "out.npz"),
+                  "--annotations", str(tmp_path / "typo_ann.yaml"),
                   "--budget-frac", "0.7", "--mode", "tight",
                   "--mjcf", "does_not_matter.xml", "--body-order", "nope.txt"])

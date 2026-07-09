@@ -46,6 +46,9 @@ fail-loud
     1 = 有 timing-irreducible 残余但低于 oracle FAIL 闸门(WARN 级)
     2 = 选中档剂量过 oracle FAIL 闸门(时间律救不动,得动路径/姿态)
     其余错误 = SystemExit 带人话消息。
+    闸门口径:三剂量按本工具口径(τ 按 budget_frac 重算),再拿选中档的
+    oracle_verdict 兜底取严 —— oracle 的硬性通道(立力 fz≥0 / 腾空帧外力)
+    不在三剂量里,不兜底会漏掉 fz 硬 FAIL。
 
 USAGE(pod,mjeval venv:numpy + mujoco)
     /workspace/hope_mjeval_venv/bin/python \
@@ -156,8 +159,17 @@ class OracleScorer:
 
 
 # ------------------------------------------------------------------ 外环搜索 ----- #
+_GATE_SEV = {"PASS": 0, "WARN": 1, "FAIL": 2}
+
+
 def dose_gate_verdict(fo, dose_tau: float, dose_cop: float, dose_fric: float) -> str:
-    """oracle 校准的剂量闸门(τ 剂量这里已按 budget_frac 口径算)。"""
+    """oracle 校准的剂量闸门(τ 剂量这里已按 budget_frac 口径算)。
+
+    注意:三剂量覆盖不了 oracle 的硬性通道(立力 fz≥0 / 腾空帧外力≈0)。
+    生产打分器会带回 oracle_verdict,run_search 里以两者中更严的为准
+    (cop/摩擦两口径完全相同、τ 本工具只会更严 ⇒ oracle 只可能通过
+    fz/腾空把档位抬上去,不会反向放松)。
+    """
     if (dose_cop >= fo.DOSE_COP_FAIL or dose_tau >= fo.DOSE_TAU_FAIL
             or dose_fric >= fo.DOSE_FRIC_FAIL):
         return "FAIL"
@@ -166,13 +178,22 @@ def dose_gate_verdict(fo, dose_tau: float, dose_cop: float, dose_fric: float) ->
     return "PASS"
 
 
-def _irreducible_block(floor: dict, sec_tol: float) -> dict:
-    """时序不可约剂量块:最温和端(ta_max)候选的三剂量 = 时间律救不了的地板。"""
+def _irreducible_block(floor: dict, sec_tol: float, grid_min_sec: dict) -> dict:
+    """时序不可约剂量块:最温和端(ta_max)候选的三剂量 = 时间律救不了的地板。
+
+    自诊断 floor_is_min:地板定义在 ta_max 端,前提是"违规秒数随 T_a 变温和而
+    不增"(违规集中在触球窗/收拍段时成立)。若违规住在加速早段,更温和的 T_a
+    反而在那里泡更久 —— ta_max 端就不是全网格最小,此时报告网格最小秒数并打旗,
+    提醒 irreducible 读数偏高(它仍是 ta_max 端的真实残余,只是不是家族下界)。
+    """
     blk = dict(Ta_s=floor["Ta_s"])
     for k in CHECKS:
         blk[f"dose_{k}"] = round(floor[f"dose_{k}"], 4)
         blk[f"sec_{k}"] = round(floor[f"sec_{k}"], 4)
     blk["any_residue"] = any(floor[f"sec_{k}"] > sec_tol for k in CHECKS)
+    blk["grid_min_sec"] = {k: round(grid_min_sec[k], 4) for k in CHECKS}
+    blk["floor_is_min"] = all(
+        floor[f"sec_{k}"] <= grid_min_sec[k] + sec_tol for k in CHECKS)
     blk["note"] = ("时间放到最温和仍剩的违规=姿态/路径绑定,时间律救不了;"
                    "v5 家族的 CoP 预期落在这里")
     return blk
@@ -282,6 +303,13 @@ def run_search(data: dict, phase: float, budget_frac: float, mode: str, scorer,
 
     fo = load_feasibility_oracle()  # 只用 DOSE_* 闸门常数,CPU 可跑
     chosen_gate = dose_gate_verdict(fo, chosen["dose_tau"], chosen["dose_cop"], chosen["dose_fric"])
+    # oracle 硬性通道兜底:立力 fz≥0 / 腾空帧外力不在三剂量里(见 dose_gate_verdict
+    # docstring)。生产打分器带回的 oracle_verdict 若更严,以严的为准;假打分器
+    # 不带该字段 = 不兜底(纯 CPU 测试路径不受影响)。
+    _ov = chosen.get("oracle_verdict")
+    gate_escalated = _ov in _GATE_SEV and _GATE_SEV[_ov] > _GATE_SEV[chosen_gate]
+    if gate_escalated:
+        chosen_gate = _ov
 
     report = dict(
         tool="topp_budget_search.py (TOPP v2 v1: 外环 T_a 搜索 × oracle 打分)",
@@ -297,10 +325,13 @@ def run_search(data: dict, phase: float, budget_frac: float, mode: str, scorer,
                   min_cruise_s=min_cruise_s, post_hold_s=post_hold_s),
         candidates=cands,
         # 时序不可约剂量 = 最温和端(ta_max)仍剩的违规:时间律救不了的部分
-        irreducible=_irreducible_block(floor, sec_tol),
+        irreducible=_irreducible_block(
+            floor, sec_tol,
+            {k: min(cd[f"sec_{k}"] for cd in cands) for k in CHECKS}),
         selection=dict(chosen_Ta_s=chosen["Ta_s"], chosen_t_star_s=chosen["t_star_s"],
                        chosen_index=cands.index(chosen), n_acceptable=len(pool),
                        dose_gate_verdict=chosen_gate,
+                       gate_escalated_by_oracle=gate_escalated,
                        reducible_excess_sec=chosen["excess_sec"]),
         output=dict(frames=T_out, fps=float(fps_out), contact_frame=int(k_star),
                     phase_out=round(k_star / (T_out - 1), 6),
@@ -331,7 +362,9 @@ def report_md(rep: dict) -> str:
         f"sdot* = {a['sdot_star_frames_per_s']:.2f} frames/s;速度绝不降,只调时间",
         f"- 选中:T_a = **{sel['chosen_Ta_s']:.3f} s**(触球时刻 t* = "
         f"{sel['chosen_t_star_s']:.3f} s;可行档 {sel['n_acceptable']}/{g['n_candidates']};"
-        f"剂量闸门 {sel['dose_gate_verdict']})",
+        f"剂量闸门 {sel['dose_gate_verdict']}"
+        + ("——由 oracle 硬性通道(fz/腾空)抬档" if sel.get("gate_escalated_by_oracle") else "")
+        + ")",
         f"- 输出:{o['frames']} 帧 @ {o['fps']:.0f} fps;触球 f{o['contact_frame']} → "
         f"**phase_out {o['phase_out']:.4f}**;拍速保真 {o['blade_speed_clean_out_mps']:.3f} m/s"
         f"(偏差 {o['blade_speed_dev_frac'] * 100:.2f}%);拍面差 {o['face_normal_diff_deg']:.4f}°;"
@@ -344,6 +377,13 @@ def report_md(rep: dict) -> str:
         f"摩擦: 占比 {irr['dose_fric']:.3f} / {irr['sec_fric']:.2f} s",
         f"- 人话:{irr['note']}。residue={'有' if irr['any_residue'] else '无'}。"
         f"选中档相对地板的 reducible 超出(秒): {sel['reducible_excess_sec']}",
+    ]
+    if not irr.get("floor_is_min", True):
+        lines.append(
+            f"- ⚠ 地板自诊断:ta_max 端不是全网格最小秒数(网格最小 = "
+            f"{irr['grid_min_sec']})——违规住在加速早段,更温和反而泡得更久;"
+            f"irreducible 读数偏高,按网格最小口径另行解读。")
+    lines += [
         "",
         "## 候选表(τ 剂量按 budget_frac 口径;`*` = 选中档)",
         "",
@@ -378,6 +418,10 @@ def resolve_phase(args, stem: str) -> float:
     if args.phase is not None:
         return float(args.phase)
     if args.annotations:
+        if not Path(args.annotations).is_file():
+            # oracle 的 load_annotations 对不存在的文件静默返回 {},错误会被误报成
+            # "缺 stem 的 phase"——这里先把真实原因说清(fail-loud 不许误导)
+            raise SystemExit(f"annotations 文件不存在:{args.annotations} — 拒跑")
         fo = load_feasibility_oracle()
         ann = fo.load_annotations(args.annotations)
         entry = ann.get(stem)
