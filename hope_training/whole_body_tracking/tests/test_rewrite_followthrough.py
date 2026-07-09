@@ -22,6 +22,9 @@ Covered (franco 07-10 定向的设计法则,逐条):
     the (unchanged) end pose; blend mode moves ONLY β
   * fail-loud: forbidden joints (legs / waist pitch/roll), unknown npz keys, degenerate
     rewrite window, dirty source (self-collision inside the domain)
+  * 缝合契约: 派生速度只拼脏带 [lo-1, hi+1],带外行(含锁窗与末两帧)逐位保留源片
+    存量——即使源片速度不是 gradient(存量 joint_pos) 的产物(float64 母带出身);
+    changed 为空时输出六场与源片逐位相同;verify_output_contract fail-loud
 
 Run:  python3 -m pytest hope_training/whole_body_tracking/tests/test_rewrite_followthrough.py -q
 """
@@ -121,14 +124,15 @@ def run_search(q, plan, scorer, guards=None, **kw):
 
 # ------------------------------------------------------------------ windows / basis - #
 def test_rewrite_windows_v5hLs_numbers():
-    # the real target clip: T=59, phase 0.391 -> c=23; lock [0,25], support [26,57]
+    # the real target clip: T=59, phase 0.391 -> c=23; lock [0,25], support [26,56]
+    # (s1 = T-3: so3_derivative 末行拷贝的 stencil 读 q[T-3],那行必须留在域外)
     s0, s1 = rf.rewrite_windows(59, 23)
-    assert (s0, s1) == (26, 57)
+    assert (s0, s1) == (26, 56)
 
 
 def test_rewrite_windows_too_short_fails_loud():
     with pytest.raises(SystemExit, match="太靠片尾"):
-        rf.rewrite_windows(32, 25)      # support [28, 30] -> 2 frames < MIN_DOMAIN
+        rf.rewrite_windows(32, 25)      # support [28, 29] -> 1 frame < MIN_DOMAIN
 
 
 def test_bump_basis_c1_support_and_peaks():
@@ -401,3 +405,98 @@ def test_score_key_ordering():
     c1 = rf.Score(dose_cop=0.30, dose_fric=0.0, dose_tau=0.0, cop_area=1.0)
     c2 = rf.Score(dose_cop=0.30, dose_fric=0.0, dose_tau=0.0, cop_area=2.0)
     assert c1.key() < c2.key()                       # area is the continuous tie-break
+
+# ------------------------------------------------------------------ stitched rebuild -- #
+class StubFK:
+    """Pure-CPU linear FK stand-in: pelvis + one 'blade' body driven by shoulder pitch."""
+
+    def __init__(self):
+        self.names = ["pelvis_link", "blade_link"]
+
+    def body_names(self):
+        return self.names
+
+    def fk(self, base_pos, base_quat, jd):
+        v = float(jd["right_shoulder_pitch_joint"])
+        p = np.stack([base_pos,
+                      base_pos + np.array([0.3 * np.cos(v), 0.3 * np.sin(v), 0.5])])
+        half = 0.5 * v
+        q = np.stack([base_quat, np.array([np.cos(half), 0.0, 0.0, np.sin(half)])])
+        return p, q
+
+
+def make_npz_with_foreign_velocity_provenance(T_: int = T):
+    """Source npz whose velocity fields are NOT gradient(stored positions) bitwise —
+    模拟 float64 母带出身的源片(0710 对抗复核在 v5hLs 上实测差 4e-6)。"""
+    fk = StubFK()
+    q = make_q(T_).astype(np.float32)
+    base_pos = np.zeros((T_, 3)) + np.array([0.1, 0.2, 0.8])
+    base_quat = np.tile(np.array([1.0, 0.0, 0.0, 0.0]), (T_, 1))
+    bp = np.zeros((T_, 2, 3), np.float32)
+    bq = np.zeros((T_, 2, 4), np.float32)
+    for t in range(T_):
+        p, qm = fk.fk(base_pos[t], base_quat[t], dict(zip(NAMES, q[t].astype(np.float64))))
+        bp[t], bq[t] = p.astype(np.float32), qm.astype(np.float32)
+    dt = 1.0 / FPS
+    rng = np.random.default_rng(3)
+    noise = lambda shape: rng.uniform(-4e-6, 4e-6, shape)
+    jv = (np.gradient(q.astype(np.float64), dt, axis=0) + noise(q.shape)).astype(np.float32)
+    bl = (np.gradient(bp.astype(np.float64), dt, axis=0) + noise(bp.shape)).astype(np.float32)
+    ba = np.zeros((T_, 2, 3), np.float32) + noise((T_, 2, 3)).astype(np.float32)
+    data = dict(fps=np.array([50], np.int64), joint_pos=q, joint_vel=jv,
+                body_pos_w=bp, body_quat_w=bq, body_lin_vel_w=bl, body_ang_vel_w=ba)
+    assert not np.array_equal(np.gradient(q.astype(np.float64), dt, axis=0).astype(np.float32), jv)
+    return data, fk
+
+
+VEL_FIELDS = ("joint_vel", "body_lin_vel_w", "body_ang_vel_w")
+ALL_FIELDS = ("joint_pos", "body_pos_w", "body_quat_w") + VEL_FIELDS
+
+
+def test_rebuild_splices_velocities_only_in_dirty_band():
+    data, fk = make_npz_with_foreign_velocity_provenance()
+    q_src = np.asarray(data["joint_pos"], np.float64)
+    plan = make_plan(q_src, joints=["right_shoulder_pitch_joint"], mode="field", K=4)
+    cand = rf.replace(plan, coef=np.full(plan.coef.shape, 0.25))
+    q_out = cand.apply(q_src)
+    out, acc = rf.rebuild_npz_stitched(data, q_out, fk, [0, 1], plan.s0, plan.s1)
+    lo, hi = min(acc["changed_frames"]), max(acc["changed_frames"])
+    assert hi == plan.s1 - 1, "test must exercise the last rewritable row"
+    assert acc["vel_dirty_band"] == [lo - 1, hi + 1]
+    # 契约:脏带外(含锁窗与末两帧)六场逐位 = 源片,哪怕源片速度出处不同
+    for k in ALL_FIELDS:
+        assert np.array_equal(out[k][: lo - 1], np.asarray(data[k])[: lo - 1]), k
+        assert np.array_equal(out[k][hi + 2:], np.asarray(data[k])[hi + 2:]), k
+    for k in ("joint_pos", "body_pos_w", "body_quat_w"):   # pose 场更严:域外逐位
+        assert np.array_equal(out[k][: lo], np.asarray(data[k])[: lo]), k
+    # 末两帧(含 so3 末行拷贝)与锁窗必须逐位——0710 复核抓出的两处主病灶
+    for k in ALL_FIELDS:
+        assert np.array_equal(out[k][-2:], np.asarray(data[k])[-2:]), k
+        assert np.array_equal(out[k][: CONTACT + 3], np.asarray(data[k])[: CONTACT + 3]), k
+    # 带内:确为重算值(gradient of the NEW positions),不是源片存量
+    dt = 1.0 / FPS
+    jv_re = np.gradient(out["joint_pos"].astype(np.float64), dt, axis=0).astype(np.float32)
+    assert np.array_equal(out["joint_vel"][lo - 1: hi + 2], jv_re[lo - 1: hi + 2])
+    rep = rf.verify_output_contract(data, out, CONTACT, plan.s0, plan.s1)  # must not raise
+    assert rep["all_fields_bitwise_outside"]
+
+
+def test_rebuild_noop_is_bitwise_identity():
+    data, fk = make_npz_with_foreign_velocity_provenance()
+    q_src = np.asarray(data["joint_pos"], np.float64)
+    plan = make_plan(q_src, joints=["right_shoulder_pitch_joint"], mode="field")
+    out, acc = rf.rebuild_npz_stitched(data, q_src.copy(), fk, [0, 1], plan.s0, plan.s1)
+    assert acc["n_changed"] == 0 and acc["vel_dirty_band"] is None
+    for k in ALL_FIELDS:
+        assert np.array_equal(out[k], np.asarray(data[k])), f"{k} 无改动时必须逐位恒等"
+
+
+def test_verify_output_contract_catches_lock_leak():
+    data, fk = make_npz_with_foreign_velocity_provenance()
+    q_src = np.asarray(data["joint_pos"], np.float64)
+    plan = make_plan(q_src, joints=["right_shoulder_pitch_joint"], mode="field")
+    out, _ = rf.rebuild_npz_stitched(data, q_src.copy(), fk, [0, 1], plan.s0, plan.s1)
+    out["joint_vel"] = np.array(out["joint_vel"], copy=True)
+    out["joint_vel"][2, 0] += 1e-3                   # poison a lock-window velocity row
+    with pytest.raises(SystemExit, match="泄漏"):
+        rf.verify_output_contract(data, out, CONTACT, plan.s0, plan.s1)

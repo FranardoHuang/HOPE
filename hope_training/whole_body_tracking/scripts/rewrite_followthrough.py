@@ -18,7 +18,7 @@ scripts/feasibility_oracle.py(裁判)/ audit_self_collision.py(C 卡)。本工�
   2. 重写域 = [c+3, end];末帧姿态回到源片末帧(收拍到同一 ready)。
   3. 自由度 = 手臂链(肩三轴/肘/腕酌情)+ 腰偏航;冻结腰俯仰/侧滚 + 双腿
      (oracle 实测 τ binding + 支撑几何不许动),CoM 位移 < 2 cm 保险丝。
-  4. 接缝 C1:c+2 处与末帧处 q/q̇ 连续。做法:形变基元支撑端点取 s0=c+3、s1=T-2,
+  4. 接缝 C1:c+2 处与末帧处 q/q̇ 连续。做法:形变基元支撑端点取 s0=c+3、s1=T-3,
      端点值/斜率均为 0(双段 smoothstep 构造)——于是 c+2 的中心差分速度
      (q[c+3]-q[c+1])/2dt 和末帧的单侧差分 (q[E]-q[E-1])/dt 只读逐位行,q̇ 逐位保真。
   5. 逐帧 URDF 位置限位 fail-loud(源片既有饱和 grandfather,禁止推得更远)。
@@ -45,8 +45,9 @@ scripts/feasibility_oracle.py(裁判)/ audit_self_collision.py(C 卡)。本工�
     限位 → 自碰撞(C 在环)→ CoM 保险丝(xy < 2cm)→ 摩擦/τ 剂量不得劣于源片。
 
 输出
-  重写 npz:锁段与末帧行逐位 = 源片;重写域行由部署 MJCF FK 重算(root 逐帧冻结);
-  joint_vel / body 速度按 csv_to_npz 约定重差分。报告 json+md:逐候选剂量三列
+  重写 npz:锁窗 [0, c+2] 与末帧行全部六场逐位 = 源片(fail-loud 契约断言);重写域行由
+  部署 MJCF FK 重算(root 逐帧冻结);joint_vel / body 速度按 csv_to_npz 约定重差分,
+  只拼脏带 [lo-1, hi+1],带外速度行逐位保留存量。报告 json+md:逐候选剂量三列
   (CoP/摩擦/τ)+ 自碰撞 + CoM + 接缝残差,源/终局剂量对账(in-loop 与文件复核双列)。
 
 USAGE (pod, mjeval venv: numpy + mujoco)
@@ -111,10 +112,13 @@ def rewrite_windows(T: int, c: int) -> tuple[int, int]:
     """(s0, s1) support endpoints of the deformation. Frames touched: (s0, s1) EXCLUSIVE.
 
     s0 = c + 3 keeps the central-difference velocity at c+2 bitwise (it reads c+1, c+3);
-    s1 = T - 2 keeps the end pose AND its one-sided velocity (reads T-2, T-1) bitwise.
+    s1 = T - 3 keeps the end pose, its one-sided joint velocity (reads T-2, T-1) AND the
+    so3 tail row bitwise — csv_to_npz 的 so3_derivative 末行是"末内点中心差分"的拷贝,
+    stencil 读 q[T-3]/q[T-1];0710 对抗复核实测 s1=T-2 时末帧 body_ang_vel_w 差 1.8 rad/s,
+    "末帧逐位回 ready"在角速度场是假的,故把 T-3 行也留在域外。
     """
     s0 = c + LOCK_AFTER_CONTACT + 1
-    s1 = T - 2
+    s1 = T - 3
     if s1 - s0 < MIN_DOMAIN:
         raise SystemExit(
             f"rewrite domain too short: support [{s0}, {s1}] has {max(s1 - s0, 0)} frames "
@@ -598,8 +602,12 @@ def rebuild_npz_stitched(data: dict, q_out: np.ndarray, fkm, order_cols: list[in
     joint_pos rows outside (s0, s1) exclusive = source bitwise (强于 v1 的整片重算);
     body_pos/quat 同理逐位保留,重写行用部署 MJCF FK(root 逐帧冻结 = 源 root 行)重算,
     并对 FK 行做半球对齐(和相邻行同半球,否则 so3 差分会算出假 2π 角速度)。
-    joint_vel / body 速度按 csv_to_npz 约定 np.gradient / so3 中心差分整片重差分——
-    未触行的差分值只读逐位行,自动与源片口径一致。"""
+    joint_vel / body 速度按 csv_to_npz 约定 np.gradient / so3 中心差分重算,但只把
+    脏带 [min(changed)-1, max(changed)+1](= 差分 stencil 摸得到改动行的行)拼进输出,
+    带外速度行逐位保留源片存量——0710 对抗复核抓出:源片速度可能出自 float64 母带
+    (v5hLs 的 joint_vel ≠ gradient(存量 joint_pos),差 4e-6),整片重差分会把锁段行
+    换血成"同口径重算值",违反"未触行一根汗毛都不动"。脏带外逐位、脏带内重算,
+    两边都是构造性质;changed 为空时输出六场与源片逐位相同。"""
     fps = float(np.asarray(data["fps"]).reshape(-1)[0])
     dt = 1.0 / fps
     q_src = np.asarray(data["joint_pos"], dtype=np.float64)
@@ -626,10 +634,24 @@ def rebuild_npz_stitched(data: dict, q_out: np.ndarray, fkm, order_cols: list[in
         bp[t], bq[t] = row_p, row_q
 
     hemi_bad = int((np.sum(bq[1:] * bq[:-1], axis=-1) < 0.0).sum())
-    jv = np.gradient(jp.astype(np.float64), dt, axis=0).astype(np.float32)
-    bl = np.gradient(bp.astype(np.float64), dt, axis=0).astype(np.float32)
-    ba = np.stack([ctn.so3_derivative(bq[:, b].astype(np.float64), dt)
-                   for b in range(bq.shape[1])], axis=1).astype(np.float32)
+    # 派生速度:按 csv_to_npz 口径重算,但只把脏带拼进输出;带外行逐位 = 源片存量。
+    # gradient / so3 内点 stencil 半径 1 ⇒ 脏带 = [lo-1, hi+1]。so3 首/末行是内点拷贝
+    # (stencil 读 0/2 与 T-3/T-1),changed ⊂ (s0, s1)=(c+3, T-3) 保证拷贝行干净;assert 兜底。
+    jv = np.array(data["joint_vel"], dtype=np.float32, copy=True)
+    bl = np.array(data["body_lin_vel_w"], dtype=np.float32, copy=True)
+    ba = np.array(data["body_ang_vel_w"], dtype=np.float32, copy=True)
+    band = None
+    if changed:
+        lo, hi = min(changed), max(changed)
+        if lo - 1 < 1 or hi + 1 > jp.shape[0] - 2:
+            raise SystemExit("REWRITE BUG: derived-velocity dirty band touches clip edges "
+                             f"(band [{lo - 1}, {hi + 1}], T={jp.shape[0]})")
+        band = [lo - 1, hi + 1]
+        sl = slice(lo - 1, hi + 2)
+        jv[sl] = np.gradient(jp.astype(np.float64), dt, axis=0).astype(np.float32)[sl]
+        bl[sl] = np.gradient(bp.astype(np.float64), dt, axis=0).astype(np.float32)[sl]
+        ba[sl] = np.stack([ctn.so3_derivative(bq[:, b].astype(np.float64), dt)
+                           for b in range(bq.shape[1])], axis=1).astype(np.float32)[sl]
 
     # 缝合口径对账:对 s0 / s1(未触帧)也跑一次 FK,和存量行比 —— 若源片 body_* 不是
     # 本 MJCF FK 的产物,缝合处会有一个这个量级的台阶,必须记名。
@@ -643,9 +665,34 @@ def rebuild_npz_stitched(data: dict, q_out: np.ndarray, fkm, order_cols: list[in
            "joint_pos": jp, "joint_vel": jv, "body_pos_w": bp, "body_quat_w": bq,
            "body_lin_vel_w": bl, "body_ang_vel_w": ba}
     acc = dict(changed_frames=changed, n_changed=len(changed),
+               vel_dirty_band=band,
                hemi_flips=hemi_flips, hemi_bad_adjacent=hemi_bad,
                fk_vs_stored_at_seams_m=stitch_dev)
     return out, acc
+
+
+def verify_output_contract(data: dict, out: dict, c: int, s0: int, s1: int) -> dict:
+    """六场逐位契约(fail-loud,0710 对抗复核后加装):锁窗 [0, c+2] 与末帧所有场逐位;
+    pose 场改动只许在 (s0, s1) 内、派生速度场只许在 [s0, s1] 内(stencil 宽 1 行)。
+    这是缝合的构造性质——违反 = rebuild bug,拒绝出片。"""
+    lock_end = c + LOCK_AFTER_CONTACT
+    ranges = {}
+    for k, vel in (("joint_pos", False), ("body_pos_w", False), ("body_quat_w", False),
+                   ("joint_vel", True), ("body_lin_vel_w", True), ("body_ang_vel_w", True)):
+        d = np.asarray(data[k]) != np.asarray(out[k])
+        while d.ndim > 1:
+            d = d.any(axis=-1)
+        rows = np.flatnonzero(d)
+        ranges[k] = _ranges([int(r) for r in rows])
+        lo_ok, hi_ok = (s0, s1) if vel else (s0 + 1, s1 - 1)
+        if rows.size and (rows.min() < lo_ok or rows.max() > hi_ok):
+            raise SystemExit(f"REWRITE BUG: {k} 改动泄漏出契约行窗 [{lo_ok}, {hi_ok}] "
+                             f"(实际 [{rows.min()}, {rows.max()}]; lock_end={lock_end})")
+    if not np.array_equal(np.asarray(data["fps"]), np.asarray(out["fps"])):
+        raise SystemExit("REWRITE BUG: fps 被改写")
+    return dict(lock_rows=[0, lock_end], tail_pose_rows=[s1, np.asarray(data["joint_pos"]).shape[0] - 1],
+                pose_rows_allowed=[s0 + 1, s1 - 1], vel_rows_allowed=[s0, s1],
+                all_fields_bitwise_outside=True, changed_row_ranges=ranges)
 
 
 # ----------------------------------------------------------------------- reporting -- #
@@ -751,6 +798,8 @@ def report_md(rep: dict, md_candidate_cap: int = 500) -> str:
         f"(锁窗覆盖 ±2 模板行 ⇒ 逐位不变={rep['v_star']['bitwise']})",
         f"- 缝合口径: FK-vs-stored 缝帧偏差 {rep['stitch']['fk_vs_stored_at_seams_m'] * 1000:.3f} mm;"
         f"半球翻转 {rep['stitch']['hemi_flips']} 行,残留异向邻行 {rep['stitch']['hemi_bad_adjacent']}",
+        f"- 出片契约(fail-loud 已过): 锁窗 {rep['stitch']['contract']['lock_rows']} 与末帧六场逐位;"
+        f"速度脏带 {rep['stitch']['vel_dirty_band']},带外速度行逐位保留存量",
     ]
     if rep["notes"]:
         L += ["", "## WARN 记名", ""] + [f"- {n}" for n in rep["notes"]]
@@ -903,6 +952,7 @@ def main(argv=None) -> int:
     names = fkm.body_names()
     order_cols = [names.index(n) for n in order]
     out, acc = rebuild_npz_stitched(data, q_out, fkm, order_cols, s0, s1)
+    acc["contract"] = verify_output_contract(data, out, c, s0, s1)   # fail-loud before write
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     np.savez(args.output, **out)
 
