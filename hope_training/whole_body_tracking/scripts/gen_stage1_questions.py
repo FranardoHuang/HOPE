@@ -93,7 +93,7 @@ deterministic hash of each question's incoming velocity (question_split, ~80/20)
 partition — so a --split train bank and a --split exam bank are disjoint at ANY generation seeds.
 Exams are scored only on the exam split (docs/stage_curriculum_v1.md).
 
-STROKE GUARD (--stroke-guard {off,stats,enforce}, default stats; 快筛层落地,
+STROKE GUARD (--stroke-guard {off,stats,enforce}, default enforce; 快筛层落地,
 docs/research/stroke_interface_survey_2026-07-09.md §3.1)。人话:题要求的拍速 v* 越高、这条
 clip 触球前的拍面行程 L 越短,触球前需要的最低加速度 a_min = (v*²−v0²)/(2L) 就越高;a_min
 超过机器人实证做得到的拍点加速度包络 a_max(--stroke-budget-clips 实测 × --stroke-budget-scale,
@@ -105,9 +105,11 @@ sound-reject;**PASS ≠ 可行**(平衡/力矩耦合/接触可行性全被松弛
   * L = L_deep:引拍最深帧 → 触球帧的拍面逐帧位移弧长和(行程账本 stroke_ledger_0709 口径,
     survey §3.1 诚实边界 3 钉死的那种;实现直接复用 extend_stroke.deep_frame_and_L,单一实现)。
     触球帧 = 本 bank 的 anchor 帧(annotated / train-candidate,与题目锚一致)。
-  * 分母法则(v1 默认 stats):守卫先并行统计不拦题——摘要行报 "stroke-guard would reject N"
-    给 franco 看数字拍板默认开关;--stroke-guard enforce 才真拦(拒发货并计入分母报表,照
-    net-rejected 先例);--stroke-guard off 完全关闭(不需要预算 clip)。
+  * 分母法则(v1 先默认 stats 出统计;2026-07-10 franco 拍板翻 enforce 默认——六对 v2 exam
+    卷实测 0 拦,题库需求拍速 ≤2.9 m/s 远低于各 clip 行程上限 4.7-7.9 m/s,今天零代价,
+    phase 2/3 出快题时自动启动保护):enforce 真拦(拒发货并计入分母报表,照 net-rejected
+    先例);--stroke-guard stats 只统计不拦(摘要行报 "would reject N");off 完全关闭
+    (不需要预算 clip)。
   * fail-loud:stats/enforce 下算不出 L(引拍窗退化/相位缺登记)、v* 非有限、预算 clip 缺
     body 数组,一律 SystemExit,绝不静默跳过——静默跳过会让分母悄悄变假。
   * --phase-scan 模式不适用(它不发货题目,没有逐题 v*)。
@@ -659,12 +661,12 @@ def main() -> int:
                          "incoming-velocity bytes (exam questions are disjoint from training at "
                          "ANY seed); 'all' = no split (current behavior)")
     # --- stroke guard (快筛层, survey 2026-07-09 §3.1 — see the module docstring) ---------
-    ap.add_argument("--stroke-guard", choices=("off", "stats", "enforce"), default="stats",
+    ap.add_argument("--stroke-guard", choices=("off", "stats", "enforce"), default="enforce",
                     help="行程快筛守卫: a_min=(v*²−v0²)/(2·L_deep) > a_max ⇒ 该题在这条 clip "
                          "路径上可证无时间律解 (必要条件 sound-reject; PASS≠可行). "
-                         "'stats' (default, v1 分母法则) = 只统计不拦题, 摘要行报 '若开拦会拦掉 "
-                         "N 题' 供 franco 拍板; 'enforce' = 真拦 (拒发货并计入分母报表, 照 "
-                         "net-rejected 先例); 'off' = 完全关闭 (不需要预算 clip)")
+                         "'enforce' (default, franco 2026-07-10 拍板; 六卷实测 0 拦) = 真拦 "
+                         "(拒发货并计入分母报表, 照 net-rejected 先例); 'stats' = 只统计不拦, "
+                         "摘要行报 '若开拦会拦掉 N 题'; 'off' = 完全关闭 (不需要预算 clip)")
     ap.add_argument("--stroke-budget-clips", nargs="+", default=None,
                     help="[stroke-guard] npz clips whose measured blade-point |acc| envelope "
                          "defines a_max (e.g. the v4rg pair — the proven-executable floor; "

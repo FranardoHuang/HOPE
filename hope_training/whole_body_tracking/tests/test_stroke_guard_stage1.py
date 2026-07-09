@@ -12,8 +12,8 @@ Design under test = docs/research/stroke_interface_survey_2026-07-09.md §3.1:
     implementation in extend_stroke.deep_frame_and_L.
   * a_max = empirical blade-point Cartesian |acc| envelope over the budget clips × scale
     (the time-law family's v4rg×1.5 budget convention, taken at the blade point).
-  * v1 分母法则: default stats mode counts but does NOT drop (报"若开拦会拦掉 N 题");
-    only --stroke-guard enforce really drops; off disables entirely.
+  * v1 分母法则: stats mode counts but does NOT drop (报"若开拦会拦掉 N 题"); 07-10 franco
+    拍板默认翻 enforce(六卷 0 拦): enforce really drops; off disables entirely.
   * fail-loud: degenerate stroke / non-finite v* / missing budget data must raise, never
     silently skip (a silent skip falsifies the denominator report).
 
