@@ -205,6 +205,9 @@ def _fake_racket_cmd(n=4, window=None, window_pos=None, window_wide=None, pre_st
         racket_lin_vel_w=torch.zeros(n, 3),
         racket_target_vel_w=torch.zeros(n, 3),
         racket_normal_w=torch.tensor([[0.0, 0.0, 1.0]]).expand(n, 3).clone(),
+        # raw (+Y/A-frame) twin — face_command 通道读它(hope_rewards._face_pair);无符号表的
+        # 环境里 raw ≡ signed,fake 保持同值同语义。
+        racket_normal_raw_w=torch.tensor([[0.0, 0.0, 1.0]]).expand(n, 3).clone(),
         racket_target_normal_w=torch.tensor([[0.0, 0.0, 1.0]]).expand(n, 3).clone(),
         target_normal_cmd=torch.zeros(n, 3),
     )
@@ -397,6 +400,7 @@ def test_1c_strike_success_default_path_byte_identical_and_kernels_match():
     cmd.racket_pos_w = torch.tensor([[0.1, 0.0, 0.0], [0.1, 0.0, 0.0]])
     cmd.racket_lin_vel_w = torch.tensor([[0.5, 0.0, 0.0], [0.5, 0.0, 0.0]])
     cmd.racket_normal_w = torch.tensor([[0.0, 1.0, 0.0], [0.0, 1.0, 0.0]])
+    cmd.racket_normal_raw_w = cmd.racket_normal_w.clone()  # 无符号表:raw ≡ signed
     cmd.racket_target_normal_w = torch.tensor([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]])
     env = _fake_env(racket_target=cmd)
     rp = hope_rewards_mod.racket_position_tracking_exp(env, "racket_target", std=0.2)
@@ -469,6 +473,7 @@ def test_racket_face_guidance_clamp_mask_and_target_selection():
     # achieved normals: 0° / 180°(反面,应被 theta_max=pi/2 截断)/ 90° / 90°(mask 外不付钱)
     cmd.racket_normal_w = torch.tensor(
         [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0]])
+    cmd.racket_normal_raw_w = cmd.racket_normal_w.clone()  # 无符号表:raw ≡ signed(_face_pair 读 raw)
     cmd.target_normal_cmd = torch.tensor([[1.0, 0.0, 0.0]] * n)
     cmd.racket_target_normal_w = torch.tensor([[0.0, 0.0, 1.0]] * n)
     cmd.cfg.face_command = True

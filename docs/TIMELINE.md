@@ -1017,6 +1017,40 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
   假说直接验证)/ R9u=R9t+拍面引导罚 -0.4(死区解药首战)/ M3d=swing+翻面+拍面引导罚
   (M3c 的 33° 残差攻坚)。pod2 十一臂今夜(UTC)陆续到线早判。
 
+### 07-10(凌晨二)——单翻病定案:翻面机制"治了一半"的另一半病根找到并修复(S1 合入)
+
+- **判决翻案预警:07-10(凌晨)的"翻面机制成立"只对了一半。** M3c/M2f 四路取证+对抗复核定案
+  (逐击 CSV 镜像签名 + 代码链路逐行 + 跨资产同值铁证):`mount_normal_sign_per_clip=[1,-1]`
+  是**单翻**——只翻了训练实测拍面,face_command 的题库/obs/奖励仍在 +Y(A)约定,反手 face 奖励
+  最优点在错误平面(冲突角 167-180°,exp 核死区)。**跨资产铁证**:M3c(swing)与 M2f(v4rg 严格
+  单变量)反手都收敛到同一 ~33-34°,而 v4rg 不翻转基线反手才 9.7-10.1°——旗标把好资产拉坏到同一
+  吸引子 = 机制病非资产病。TIMELINE 前置欠账"swing 反手题库按翻面重出"**从未落实且已被否决关闭**
+  (生成器无机制;完成它反而复发本病,现有双侧卫兵触雷)。病因详账:pod1 queue.md「M3c/M2f
+  facesign 病因定案」;修复设计(含红队裁定):pod1 `/workspace/franco/s1_wave4/facesign_fix_design_0709.md`。
+- **止损(franco 拍板)**:R9t/R9u/M3d_swing_flip_faceguide 三臂(07-09 17:46-17:55 UTC 点火,
+  全在病灶组合;R9u/M3d 的 faceguide −0.4 在未修约定下**有活梯度地往错误一侧拉**)已 kill,
+  watchdog expected 名单同步摘除(备份 expected_arms.txt.bak_stoploss0709)。130d1da 的
+  `racket_face_guidance` 本体保留,接线已修(见下)。
+- **S1 修复合入(本条 commit)**:face 通道整体收敛到 +Y(A)约定——`hope_rewards._face_pair`
+  成为 face 帧唯一来源(exp 核/strike_success 法向因子/racket_face_guidance 三处统一;实测侧改读
+  新增的未翻缓冲 `racket_normal_raw_w`);数值上 S1≡S2 逐位相等(dot(−a,−b)≡dot(a,b)),题库/obs/
+  判卷链零改动 = "改一处对齐五处"。配套:①fail-loud 卫兵×4(训练 bank A 约定卫兵 + mjeval
+  BankExamSampler 孪生卫兵 + mjeval 符号表×bank / 符号表×face-obs 模型两道互斥守卫);②新训练
+  指标 `face_cmd_normal_error_deg`(34° 病此前在训练台账不可见);③exporter 元数据
+  `mount_normal_sign_per_clip`/`face_obs_convention` + judge.sh 导出搬运(元数据保真;EXAM 刻意
+  不传,注释写死设计意图);④测试 +10(病灶回归陷阱/开关表逐位等价/卫兵 raise 绑定/接线源码守卫),
+  全套 232+11 绿,现役配置字节等价(空表 raw≡signed torch.equal 级)。双红队 APPROVE(2 major
+  测试网加固已采纳:守卫断言绑定 raise、训练卫兵接线守卫)。
+- **验证臂(预注册,pod1)**:M3f=M3c 全同配置×修复代码(热启 M3c model_16999;faceguide=0 单变量),
+  通过线 反手拍面 med 33.98°→≤20°@+1500/≤15°@+4000、pass 0/25→≥20/25、回球≥基线−1 题(题数口径,
+  n=25 下百分比不可判);对照关系 M3f/M3c=约定修复净效应,M3c 16500→16999 平台(28.5°→33.9° 无改善)
+  为"多训不解决"的控制论证。M2f 收卷后补 M2f3(v4rg×修复,跨资产可重复性)。
+- **判读纪律更新**:M3c/M2f/R9t/R9u/M3d-live 的训练期 face 通道读数按"奖励最优点在错误平面"贴病
+  重读;exam 拍面数字本身有效(A/A 判分正确)但语义=带病训练结果;M3b 116-120° 改记"exp 核死区
+  证据"(其约定自洽,非符号病)。`racket_face_guidance` 用法更正:theta_max 默认 π/2 对 >90° 起点
+  零梯度(M3b 型场景必须传 π);权重定标计 RewardManager dt 因子(−0.05 解析估算差 50×,实际档位
+  −0.4 级,按台账实测校)。
+
 ## 下周要对齐/拍板的事(2026-07-06 周会用)
 
 1. **契约日排期(franco + 全队)——升级为「177/179 拼桌」**:两条观测演化线在同一个 175 底座上

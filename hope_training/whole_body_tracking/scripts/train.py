@@ -853,6 +853,13 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             if _mnspc is not None:
                 C.mount_normal_sign_per_clip = tuple(float(x) for x in _mnspc)
                 applied.append(f"racket_target.mount_normal_sign_per_clip={C.mount_normal_sign_per_clip}")
+                # 单翻病审计行(2026-07-09 定案):face_command 的奖励/obs/题库全在 +Y(A)约定,
+                # 符号表只作用于 metric/参考/诊断通道——冒烟机制检查 grep 这行确认语义没被改回去。
+                if bool(_get(rk, "face_command")) or bool(getattr(C, "face_command", False)):
+                    applied.append(
+                        "[face] face_command kernel frame=+Y(A/bank); "
+                        "mount sign applies to metric/ref channels only"
+                    )
             # reference_perturbed target sampling (rank 5): couple targets to the reference swing.
             _set_attr(C, "target_mode", _get(rk, "target_mode"), str, applied, "racket_target")
             _set_vec3(C, "ref_perturb_pos", _get(rk, "ref_perturb_pos"), applied, "racket_target")
