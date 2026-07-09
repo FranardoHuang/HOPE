@@ -311,6 +311,28 @@ def racket_guidance(env: ManagerBasedRLEnv, command_name: str, d_max: float = 0.
     return dist.clamp(max=float(d_max)) * active.float()
 
 
+def racket_face_guidance(
+    env: ManagerBasedRLEnv, command_name: str, theta_max: float = 1.5707963
+) -> torch.Tensor:
+    """Constant FACE-ANGLE guidance penalty (2026-07-10, M3c 死区解药): ``min(angle, theta_max)``
+    between the achieved mount normal and the demanded face normal, paid every pre-strike AND
+    in-window step (same active mask as ``racket_guidance``). The exp face kernel has ~zero
+    gradient beyond ~3·std (M3c 卡在 33°、v5syn 反手起步 ~53° 都在死区里) — this linear term is
+    the face-channel twin of the position guidance: a small constant "which way to turn the
+    blade" wage that never starves. Target selection mirrors ``_normal_kernel_raw`` (question-bank
+    demanded normal under face_command, clip reference normal otherwise); the achieved normal
+    buffer is the mount-sign-corrected one, so per-clip 翻面 (mount_normal_sign_per_clip) is
+    honored automatically. Returns POSITIVE radians — the RewTerm weight is NEGATIVE
+    (rewards.racket_face_guidance_weight; cfg default 0.0 = term skipped, byte-identical).
+    人话:拍面反了 90° 时 exp 核一分钱梯度都不给,这里每一度都扣一点——把反面的拍子一路拉回来。"""
+    cmd = _cmd(env, command_name)
+    target_normal = cmd.target_normal_cmd if cmd.cfg.face_command else cmd.racket_target_normal_w
+    cos_ang = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
+    angle = torch.acos(cos_ang)
+    active = cmd.pre_strike | cmd.strike_window
+    return angle.clamp(max=float(theta_max)) * active.float()
+
+
 def tracking_envelope_violation(
     env: ManagerBasedRLEnv, command_name: str, threshold: float, body_names: list[str]
 ) -> torch.Tensor:

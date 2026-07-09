@@ -331,7 +331,7 @@ _REWARD_KEYS = (
     # proximity power-gate for the face/velocity channels (reward_staged_design §② C2a)
     "face_gate_by_pos", "face_gate_radius",
     # constant guidance penalty toward the racket target (reward_staged_design §② B2)
-    "racket_guidance_weight",
+    "racket_guidance_weight", "racket_face_guidance_weight",
 )
 
 # YAML keys under `terminations:` (R-b envelope-termination softening, reward_staged_design §⑥;
@@ -728,6 +728,19 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _require(hasattr(R, "racket_guidance"), "rewards.racket_guidance")
             R.racket_guidance.weight = _gw
             applied.append(f"rewards.racket_guidance.weight={_gw}")
+        # Face-angle guidance penalty (2026-07-10): -w * min(angle, theta_max) — the face-channel
+        # twin of racket_guidance (exp 拍面核死区解药;翻面修复后 33-53° 残差全在 exp 零梯度带)。
+        # POSITIVE radians from the func, so the weight must be <= 0; 0.0 (cfg default) = skipped.
+        _fgw = _get(rw, "racket_face_guidance_weight")
+        if _fgw is not None:
+            _fgw = float(_fgw)
+            if _fgw > 0.0:
+                raise _OverrideError(
+                    f"[train.py] rewards.racket_face_guidance_weight must be <= 0 (penalty; the "
+                    f"term returns +min(angle, theta_max) radians), got {_fgw}")
+            _require(hasattr(R, "racket_face_guidance"), "rewards.racket_face_guidance")
+            R.racket_face_guidance.weight = _fgw
+            applied.append(f"rewards.racket_face_guidance.weight={_fgw}")
 
         # --- penalties / regularization (negative weights: energy + smoothness + safety) --------
         for _name, _key in (

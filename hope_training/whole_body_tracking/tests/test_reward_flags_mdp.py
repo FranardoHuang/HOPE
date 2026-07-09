@@ -456,6 +456,32 @@ def test_racket_guidance_clamp_and_mask():
     assert torch.allclose(r, torch.tensor([0.3, 0.5, 0.2, 0.0]))
 
 
+def test_racket_face_guidance_clamp_mask_and_target_selection():
+    """Face-angle guidance (M3c 死区解药): min(angle, theta_max) × (pre_strike|window) mask;
+    face_command=True 时目标取需求面(target_normal_cmd),False 时取 clip 参考面。"""
+    import math
+    n = 4
+    cmd = _fake_racket_cmd(
+        n,
+        window=torch.tensor([False, False, True, False]),
+        pre_strike=torch.tensor([True, True, False, False]),
+    )
+    # achieved normals: 0° / 180°(反面,应被 theta_max=pi/2 截断)/ 90° / 90°(mask 外不付钱)
+    cmd.racket_normal_w = torch.tensor(
+        [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0]])
+    cmd.target_normal_cmd = torch.tensor([[1.0, 0.0, 0.0]] * n)
+    cmd.racket_target_normal_w = torch.tensor([[0.0, 0.0, 1.0]] * n)
+    cmd.cfg.face_command = True
+    env = _fake_env(racket_target=cmd)
+    r = hope_rewards_mod.racket_face_guidance(env, "racket_target", theta_max=math.pi / 2)
+    assert torch.allclose(
+        r, torch.tensor([0.0, math.pi / 2, math.pi / 2, 0.0]), atol=1e-5), r
+    # face_command=False → 换 clip 参考面为目标:env0 的 achieved [1,0,0] vs [0,0,1] = 90°
+    cmd.cfg.face_command = False
+    r2 = hope_rewards_mod.racket_face_guidance(env, "racket_target", theta_max=math.pi / 2)
+    assert abs(float(r2[0]) - math.pi / 2) < 1e-5, r2
+
+
 # --------------------------------------------------------------------------------------------- #
 # R-b envelope violation indicator
 # --------------------------------------------------------------------------------------------- #

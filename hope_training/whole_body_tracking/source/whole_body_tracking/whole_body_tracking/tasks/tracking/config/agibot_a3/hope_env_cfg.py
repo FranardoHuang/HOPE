@@ -392,6 +392,14 @@ class HOPERewardsCfg(RewardsCfg):
     racket_guidance = RewTerm(
         func=mdp.racket_guidance, weight=0.0,
         params={"command_name": "racket_target", "d_max": 0.5})
+    # Face-angle guidance penalty (2026-07-10, M3c 死区解药): -w * min(angle(achieved_normal,
+    # demanded_normal), theta_max) every pre-strike + in-window step — the face-channel twin of
+    # racket_guidance. exp 拍面核在 ~3·std 外零梯度(翻面修复后 swing 33°/v5syn 反手 ~53° 全在
+    # 死区),这条线性罚把反面的拍子一路拉回来。Enable via rewards.racket_face_guidance_weight
+    # (NEGATIVE; 比值铁律同 racket_guidance: per-second cost <= 10-20% imitation income).
+    racket_face_guidance = RewTerm(
+        func=mdp.racket_face_guidance, weight=0.0,
+        params={"command_name": "racket_target", "theta_max": 1.5707963})
     # R-b envelope-as-penalty (§⑥): per-step indicator of the tracking-envelope violation that
     # normally TERMINATES (anchor_pos | ee_body_pos, both z>0.25 m vs the reference — identical
     # expressions/threshold/body list as TerminationsCfg after the A3 __post_init__ re-pin).
