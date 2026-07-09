@@ -34,6 +34,7 @@ import os
 import sys
 
 import numpy as np
+import pytest
 import torch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -49,6 +50,36 @@ def _load(path, name):
     sys.modules[name] = mod  # dataclass resolution needs the module registered during exec
     spec.loader.exec_module(mod)
     return mod
+
+
+# ------------------------------------------------------------------------------------------- #
+# pytest fixtures — the same modules main() loads for the direct-run path, so the file works
+# both ways: ``pytest test_physical_ball_helpers.py`` and ``python3 test_physical_ball_helpers.py``.
+# ------------------------------------------------------------------------------------------- #
+@pytest.fixture(scope="module")
+def pb():
+    return _load(os.path.join(MDP_DIR, "physical_ball.py"), "physical_ball_standalone")
+
+
+@pytest.fixture(scope="module")
+def vb():
+    return _load(os.path.join(MDP_DIR, "virtual_ball.py"), "virtual_ball_standalone")
+
+
+@pytest.fixture(scope="module")
+def sbmod():
+    return _load(os.path.join(MDP_DIR, "shadow_ball.py"), "shadow_ball_standalone")
+
+
+@pytest.fixture(scope="module")
+def cm():
+    return _load(CONTACT_MODEL_PATH, "contact_model_standalone")
+
+
+@pytest.fixture(scope="module")
+def pbmod(pb):
+    # the manager test takes the SAME physical_ball module (main() passes pb to it too)
+    return pb
 
 
 # Pure reverse-flight math is ISOLATED from the plane truncation by pushing the truncation
