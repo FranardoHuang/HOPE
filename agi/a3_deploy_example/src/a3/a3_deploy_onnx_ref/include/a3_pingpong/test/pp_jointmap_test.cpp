@@ -11,7 +11,7 @@ using namespace a3_pingpong;
 
 int main(int argc, char** argv) {
   if (argc < 2) { std::fprintf(stderr, "usage: %s policy.onnx\n", argv[0]); return 2; }
-  PpOnnxPolicy pol(argv[1]);
+  PpOnnxPolicy pol(argv[1], true);  // offline diagnostic: never publishes robot commands
   const auto& src = pol.joint_names();  // Isaac order
 
   std::array<int, 31> map{};

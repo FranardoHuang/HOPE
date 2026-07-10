@@ -16,7 +16,9 @@
 #include <atomic>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <csignal>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -25,6 +27,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include <termios.h>
@@ -35,13 +38,18 @@
 #include "a3_deploy/a3_policy_driver.hpp"
 #include "a3_pingpong/pp_policy.hpp"
 #include "a3_pingpong/pp_reference_playback.hpp"
+#include "a3_pingpong/pp_runtime_interlocks.hpp"
 #include "robot_io/a3_aimrt_backend.hpp"
 
 namespace {
 namespace fs = std::filesystem;
 
 std::atomic<bool> g_stop{false};
-void OnSig(int) { g_stop.store(true); }
+volatile std::sig_atomic_t g_signal_stop = 0;
+void OnSig(int) { g_signal_stop = 1; }
+bool StopRequested() {
+  return g_signal_stop != 0 || g_stop.load(std::memory_order_acquire);
+}
 
 enum class Mode { kPassive, kPdStand, kShadow, kMotion, kReferencePlayback };
 const char* ModeName(Mode m) {
@@ -53,6 +61,97 @@ const char* ModeName(Mode m) {
     case Mode::kReferencePlayback: return "REFERENCE_PLAYBACK";
   }
   return "?";
+}
+
+// Atomically bind the mode value to a monotonically increasing authorization generation.
+// A plain atomic<Mode> cannot tell the policy driver that MOTION -> PASSIVE happened while a
+// callback was running because both endpoints are publish-capable. Keeping both fields in one
+// atomic word also avoids the torn (new mode, old epoch) window of two separate atomics.
+class ModeState {
+ public:
+  struct Snapshot {
+    Mode mode;
+    std::uint64_t generation;
+    std::uint64_t token;
+  };
+
+  explicit ModeState(Mode initial) : state_(Encode_(initial, 0)) {}
+
+  Mode load(std::memory_order order = std::memory_order_seq_cst) const noexcept {
+    return static_cast<Mode>(state_.load(order) & kModeMask);
+  }
+
+  // Must be invoked only by A3PolicyDriver::CommitAuthorizationTransition once the driver exists.
+  // Keeping the primitive explicit makes accidental unsynchronised mode stores easy to audit.
+  void store_under_driver_lock(Mode next) noexcept {
+    std::uint64_t current = state_.load(std::memory_order_relaxed);
+    for (;;) {
+      const std::uint64_t generation = (current >> kModeBits) + 1;
+      const std::uint64_t desired = Encode_(next, generation);
+      if (state_.compare_exchange_weak(current, desired, std::memory_order_acq_rel,
+                                       std::memory_order_relaxed)) {
+        return;
+      }
+    }
+  }
+
+  std::uint64_t authorization_token() const noexcept {
+    return state_.load(std::memory_order_acquire);
+  }
+
+  Snapshot snapshot() const noexcept {
+    const std::uint64_t token = state_.load(std::memory_order_acquire);
+    return Snapshot{static_cast<Mode>(token & kModeMask), token >> kModeBits, token};
+  }
+
+ private:
+  static constexpr unsigned kModeBits = 8;
+  static constexpr std::uint64_t kModeMask = (std::uint64_t{1} << kModeBits) - 1;
+  static std::uint64_t Encode_(Mode mode, std::uint64_t generation) noexcept {
+    return (generation << kModeBits) | static_cast<std::uint64_t>(mode);
+  }
+
+  std::atomic<std::uint64_t> state_;
+};
+
+bool ValidateCommandLine(int argc, char** argv, std::string& error) {
+  static const std::unordered_set<std::string> value_flags = {
+      "--aimrt-cfg", "--ankle-gain-scale", "--cmd-timeout", "--command-deadline-ms",
+      "--engage-min-tts", "--effort-limit-ratio", "--gain-scale", "--invalid-grace", "--leg-clamp-rad",
+      "--hold-recover", "--leg-gain-scale", "--leg-smooth-alpha", "--level", "--loc-mode", "--mode",
+      "--model-path", "--motion-blend-sec", "--obs-csv", "--oracle-max-age",
+      "--oracle-shm", "--ref-amplitude", "--ref-frequency", "--ref-gain-scale",
+      "--ref-group", "--ref-max-err", "--ref-stale-ms", "--runtime-cfg",
+      "--squat-guard-rad", "--stand-kd", "--stand-kp", "--start", "--swing-rest",
+      "--swing-speed", "--tilt-guard", "--trace-csv", "--vel-gate-margin",
+      "--warmup-sec"};
+  static const std::unordered_set<std::string> switch_flags = {
+      "--auto-leg-hold", "--backhand", "--base-estimator", "--dry-run",
+      "--leg-stand-gains", "--legs-passive", "--no-fall-guard", "--no-imu-yaw",
+      "--no-publish", "--no-yaw-align", "--official-stand", "--oracle-pelvis",
+      "--perfect-tracking", "--planner", "--reference-playback", "--shadow-frozen-clock",
+      "--single-swing", "--stream-target", "--use-imu-yaw", "--vel-box-center",
+      "--waist-passive"};
+  std::unordered_set<std::string> seen;
+  for (int i = 1; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (value_flags.count(arg) == 0 && switch_flags.count(arg) == 0) {
+      error = "unknown or positional argument '" + arg + "'";
+      return false;
+    }
+    if (!seen.insert(arg).second) {
+      error = "duplicate argument '" + arg + "'";
+      return false;
+    }
+    if (value_flags.count(arg) != 0) {
+      if (i + 1 >= argc || std::string(argv[i + 1]).rfind("--", 0) == 0) {
+        error = "argument '" + arg + "' requires exactly one value";
+        return false;
+      }
+      ++i;
+    }
+  }
+  return true;
 }
 
 std::string Flag(int argc, char** argv, const char* name, const std::string& def) {
@@ -249,17 +348,30 @@ void PrintRefDiagBlock(const a3_pingpong::RefPlaybackDiagSnapshot& d) {
 
 int main(int argc, char** argv) {
   setvbuf(stdout, nullptr, _IOLBF, 0);  // line-buffer so status survives kill
+  if (std::signal(SIGINT, OnSig) == SIG_ERR ||
+      std::signal(SIGTERM, OnSig) == SIG_ERR) {
+    std::cerr << "failed to install SIGINT/SIGTERM handlers\n";
+    return 1;
+  }
+  std::string cli_error;
+  if (!ValidateCommandLine(argc, argv, cli_error)) {
+    std::cerr << "invalid command line: " << cli_error << "\n";
+    return 2;
+  }
   const std::string cfg_path = Flag(argc, argv, "--runtime-cfg", "");
   if (cfg_path.empty()) {
     std::cerr << "usage: " << argv[0]
               << " --runtime-cfg PATH [--aimrt-cfg PATH] [--start passive|pd_stand|shadow|motion]"
                  " [--level 0|1]\n"
                  "       [--backhand] [--legs-passive] [--waist-passive] [--auto-leg-hold]"
-                 " [--gain-scale F] [--swing-speed F] [--stand-kp K --stand-kd D]\n"
+                 " [--model-path PATH] [--gain-scale F] [--swing-speed F] [--stand-kp K --stand-kd D]\n"
                  "       [--reference-playback|--mode reference-playback]"
                  " [--no-publish|--dry-run] [--warmup-sec S]\n"
+                 "       [--command-deadline-ms MS] (must be >0 and shorter than one policy period)\n"
+                 "       [--effort-limit-ratio R] (0<R<=1; PD+measured effort safety envelope)\n"
                  "       [--planner] (LIVE planner: racket <- /racket/command_flat, base <- /a3/base_pose_flat over ros2;"
-                 " [--engage-min-tts S] [--cmd-timeout S] [--invalid-grace S] [--vel-gate-margin M])\n"
+                 " [--engage-min-tts S] [--cmd-timeout S] [--invalid-grace S]"
+                 " [--hold-recover S] [--vel-gate-margin M])\n"
                  "       [--loc-mode fabricated|perfect_tracking|oracle|external_base]"
                  " [--perfect-tracking] [--oracle-pelvis] [--no-imu-yaw]\n"
                  "       [--oracle-shm PATH] [--oracle-max-age S]"
@@ -270,11 +382,28 @@ int main(int argc, char** argv) {
   }
   const fs::path cfgdir = fs::path(cfg_path).parent_path();
   YAML::Node cfg = YAML::LoadFile(cfg_path);
+  const double configured_policy_hz = cfg["policy_driver"]["policy_hz"]
+                                          ? cfg["policy_driver"]["policy_hz"].as<double>()
+                                          : 50.0;
+  if (!std::isfinite(configured_policy_hz) || configured_policy_hz <= 0.0) {
+    std::cerr << "policy_driver.policy_hz must be finite and positive; got "
+              << configured_policy_hz << "\n";
+    return 2;
+  }
 
   const std::string run_mode = Flag(argc, argv, "--mode", "");
+  if (!run_mode.empty() && run_mode != "reference-playback") {
+    std::cerr << "--mode accepts only 'reference-playback'; use --start for staged runner modes\n";
+    return 2;
+  }
   const bool reference_playback_selected =
       Has(argc, argv, "--reference-playback") || run_mode == "reference-playback";
   const bool no_publish = Has(argc, argv, "--no-publish") || Has(argc, argv, "--dry-run");
+  const bool no_yaw_align = Has(argc, argv, "--no-yaw-align");
+  if (no_yaw_align && !no_publish) {
+    std::cerr << "--no-yaw-align is diagnostic-only and requires --no-publish/--dry-run\n";
+    return 2;
+  }
 
   // LIVE PLANNER mode (Path B): racket target from /racket/command_flat + mocap base pose
   // from /a3/base_pose_flat, both over the AimRT ros2 backend; body-drive stays iceoryx.
@@ -289,9 +418,13 @@ int main(int argc, char** argv) {
   if (planner_mode && aimrt_override_arg.empty())
     aimrt_override_arg = Resolve("a3_aimrt_config.pingpong_ros2body.yaml", cfgdir);
 
-  const std::string model_path =
-      Resolve(cfg["onnx"]["model_path"].as<std::string>(), cfgdir);
+  const std::string model_path = Resolve(
+      Flag(argc, argv, "--model-path", cfg["onnx"]["model_path"].as<std::string>()), cfgdir);
   const int level = std::stoi(Flag(argc, argv, "--level", "1"));
+  if (level != 0 && level != 1) {
+    std::cerr << "--level must be 0 or 1\n";
+    return 2;
+  }
   std::atomic<double> gain_scale{std::stod(Flag(argc, argv, "--gain-scale", "1.0"))};
   const double stand_kp = std::stod(Flag(argc, argv, "--stand-kp", "60"));
   const double stand_kd = std::stod(Flag(argc, argv, "--stand-kd", "4"));
@@ -303,6 +436,23 @@ int main(int argc, char** argv) {
   // Stretch the swing in real time (<1.0 = slower) so hardware actuators can
   // track it. Native (1.0) under-shoots and strains loudly on the real robot.
   const double swing_speed = std::stod(Flag(argc, argv, "--swing-speed", "1.0"));
+  if (!std::isfinite(swing_speed) || swing_speed < 0.05 || swing_speed > 2.0) {
+    std::cerr << "--swing-speed must be finite and within [0.05,2.0]\n";
+    return 2;
+  }
+  const double effort_limit_ratio = std::stod(
+      Flag(argc, argv, "--effort-limit-ratio", "1.0"));
+  if (!std::isfinite(effort_limit_ratio) || effort_limit_ratio <= 0.0 ||
+      effort_limit_ratio > 1.0) {
+    std::cerr << "--effort-limit-ratio must be finite in (0,1]; values above the model's "
+                 "actuator envelope are forbidden\n";
+    return 2;
+  }
+  if (planner_mode && std::fabs(swing_speed - 1.0) > 1e-12) {
+    std::cerr << "--planner requires --swing-speed 1.0: planner time_to_strike already owns "
+                 "physical time, so scaling the reference clock again makes contact late\n";
+    return 2;
+  }
 
   // ---- localization mode (A/B/C) + sim-only oracle config ----
   // yaml: obs_debug.{loc_mode,use_sim_oracle_pelvis_pose,oracle_shm_path,
@@ -323,6 +473,14 @@ int main(int argc, char** argv) {
   // for the sim closed-loop rehearsal, where sim ground truth plays the mocap role).
   const bool loc_mode_explicit = Has(argc, argv, "--loc-mode") ||
       Has(argc, argv, "--perfect-tracking") || Has(argc, argv, "--oracle-pelvis");
+  const int loc_selector_count = (Has(argc, argv, "--loc-mode") ? 1 : 0) +
+      (Has(argc, argv, "--perfect-tracking") ? 1 : 0) +
+      (Has(argc, argv, "--oracle-pelvis") ? 1 : 0);
+  if (loc_selector_count > 1) {
+    std::cerr << "choose exactly one localization selector: --loc-mode, --perfect-tracking, "
+                 "or --oracle-pelvis\n";
+    return 2;
+  }
   if (planner_mode && !loc_mode_explicit) loc_mode_s = "external_base";
   a3_pingpong::LocMode loc_mode = a3_pingpong::LocMode::kFabricated;
   if (loc_mode_s == "perfect_tracking" || loc_mode_s == "B" || loc_mode_s == "b")
@@ -341,15 +499,19 @@ int main(int argc, char** argv) {
                ? std::to_string(odbg["oracle_max_age_s"].as<double>()) : "0.1"));
   const std::string obs_csv_path = Flag(argc, argv, "--obs-csv", odbg_str("obs_csv", ""));
 
-  Mode default_mode = Has(argc, argv, "--start")
-                          ? ParseStartMode(Flag(argc, argv, "--start", ""), Mode::kPassive)
-                          : Mode::kPassive;
+  const std::string start_arg = Flag(argc, argv, "--start", "passive");
+  if (start_arg != "passive" && start_arg != "pd_stand" && start_arg != "shadow" &&
+      start_arg != "motion") {
+    std::cerr << "--start must be passive|pd_stand|shadow|motion\n";
+    return 2;
+  }
+  Mode default_mode = ParseStartMode(start_arg, Mode::kPassive);
   // Optional PD_STAND warmup: hold nominal for N s (robot settles upright),
   // then auto-switch to the requested mode. Matches a safe bring-up + lets a
   // non-interactive run reach MOTION from a stable stand.
   const double warmup_sec = std::stod(Flag(argc, argv, "--warmup-sec", "0"));
   const Mode target_mode = default_mode;
-  std::atomic<Mode> mode{warmup_sec > 0 ? Mode::kPdStand : default_mode};
+  ModeState mode{warmup_sec > 0 ? Mode::kPdStand : default_mode};
 
   // --- backend ---
   auto backend = std::make_unique<robot_io::A3AimrtBackend>();
@@ -391,8 +553,10 @@ int main(int argc, char** argv) {
   // 0.2-0.3 = moderate. Clamp to (0,1].
   pcfg.leg_smooth_alpha = std::min(1.0, std::max(0.02, std::stod(Flag(argc, argv, "--leg-smooth-alpha", "1.0"))));
   pcfg.swing_speed = swing_speed;
+  pcfg.dt = 1.0 / configured_policy_hz;
   pcfg.use_base_estimator = Has(argc, argv, "--base-estimator");  // leg-FK pelvis height (ground)
   pcfg.loc_mode = loc_mode;
+  pcfg.diagnostic_no_publish = no_publish;
   // DEFAULT ON since 2026-07-03: with yaw_align the base yaw is engage-relative (starts at
   // identity, tracks the robot's REAL turning) — matching training's rotate-by-current-yaw
   // target transform. Required for turning models (model_9000 turns ~84 deg by design).
@@ -420,6 +584,7 @@ int main(int argc, char** argv) {
     pcfg.engage_min_tts_s = std::stod(Flag(argc, argv, "--engage-min-tts", "1.0"));
     pcfg.command_timeout_s = std::stod(Flag(argc, argv, "--cmd-timeout", "0.5"));
     pcfg.planner_invalid_grace_s = std::stod(Flag(argc, argv, "--invalid-grace", "0.25"));
+    pcfg.hold_recover_s = std::stod(Flag(argc, argv, "--hold-recover", "2.5"));
     // 110-D per-clip trained-velocity-box gate slack (m/s per axis); see PpPolicyConfig.
     pcfg.gate_vel_margin = std::stod(Flag(argc, argv, "--vel-gate-margin", "0.30"));
     // Mid-swing target streaming: OFF unless the model trained midswing_resample_prob > 0
@@ -433,8 +598,15 @@ int main(int argc, char** argv) {
   // by a constant -12..-38 deg in MDU captures -> the policy fought a fictional torso yaw
   // error with legs/waist and fell during free-standing swings; no-op in sim). Opt out for
   // A/B debugging only.
-  pcfg.yaw_align = !Has(argc, argv, "--no-yaw-align");
-  auto pp = std::make_unique<a3_pingpong::PpPolicy>(model_path, pcfg);
+  pcfg.yaw_align = !no_yaw_align;
+  std::unique_ptr<a3_pingpong::PpPolicy> pp;
+  try {
+    pp = std::make_unique<a3_pingpong::PpPolicy>(model_path, pcfg);
+  } catch (const std::exception& e) {
+    std::cerr << "[pp PREFLIGHT] model/runtime contract rejected before backend start: "
+              << e.what() << "\n";
+    return 3;
+  }
 
   // ---- LIVE PLANNER input wiring (Path B) ----
   // Backend AimRT subscribers (set BEFORE Start()) push decoded Float64MultiArrays into
@@ -481,10 +653,16 @@ int main(int argc, char** argv) {
             << "\n";
   const Eigen::VectorXd stand_q =
       a3_pingpong::to_sdk_order(pp->onnx().default_q(), pp->isaac_to_sdk());
+  // ONNX metadata follows the model/Isaac joint order, while RobotState and
+  // RobotCommand use backend SDK slots.  Safety limits must be scattered by
+  // name exactly like q/kp/kd; applying them positionally checks the wrong
+  // actuator whenever the two orders differ.
+  const Eigen::VectorXd effort_limits_sdk =
+      pp->onnx().effort_limits().size() == a3_pingpong::kNumJoints
+          ? a3_pingpong::to_sdk_order(pp->onnx().effort_limits(), pp->isaac_to_sdk())
+          : Eigen::VectorXd{};
   a3_pingpong::RefPlaybackConfig rcfg;
-  rcfg.dt = cfg["policy_driver"]["policy_hz"]
-                ? 1.0 / cfg["policy_driver"]["policy_hz"].as<double>()
-                : 0.02;
+  rcfg.dt = 1.0 / configured_policy_hz;
   rcfg.amplitude_rad = std::stod(Flag(argc, argv, "--ref-amplitude", "0.05"));
   rcfg.frequency_hz = std::stod(Flag(argc, argv, "--ref-frequency", "0.10"));
   rcfg.gain_scale = std::stod(
@@ -511,6 +689,12 @@ int main(int argc, char** argv) {
 
   // --- optional per-tick CSV trace (every joint: des/q/qd/kp/kd) for offline diag ---
   const std::string trace_path = Flag(argc, argv, "--trace-csv", "");
+  if (!no_publish && (!trace_path.empty() || !obs_csv_path.empty())) {
+    std::cerr << "--trace-csv/--obs-csv perform synchronous file I/O in the policy callback and "
+                 "are therefore restricted to --no-publish/--dry-run until an async logger is "
+                 "available\n";
+    return 2;
+  }
   std::ofstream trace;
   if (!trace_path.empty()) {
     trace.open(trace_path);
@@ -612,9 +796,10 @@ int main(int argc, char** argv) {
   // do NOT snap through the ~1.5-2 rad stand->windup jump. Convex blend of two
   // in-range poses -> stays in range. 0 disables.
   const double motion_blend_sec = std::stod(Flag(argc, argv, "--motion-blend-sec", "0.5"));
-  const double policy_dt = cfg["policy_driver"]["policy_hz"]
-                               ? 1.0 / cfg["policy_driver"]["policy_hz"].as<double>() : 0.02;
+  const double policy_dt = 1.0 / configured_policy_hz;
   Mode prev_mode_for_blend = Mode::kPassive;       // driver-thread only (no race)
+  std::uint64_t prev_mode_generation = mode.snapshot().generation;
+  std::uint64_t prev_yaw_alignment_generation = pp->yaw_alignment_generation();
   std::uint64_t stand_enter_tick = 0;              // PD_STAND entry blend (2026-07-04)
   Eigen::VectorXd stand_blend_q_start;
   std::uint64_t motion_enter_tick = 0;
@@ -627,6 +812,23 @@ int main(int argc, char** argv) {
   // gains do NOT snap the legs on the 1->0 re-engage (the "jump").
   const bool auto_leg_hold = pcfg.auto_leg_hold;
 
+  // Filled immediately after driver construction and before StartDriver(). Every subsequent
+  // mode mutation is committed while holding the driver's backend-send mutex, making the mode
+  // generation change and its zero-gain barrier one linearizable transaction with SendCommand.
+  a3_deploy::A3PolicyDriver* driver_for_transitions = nullptr;
+  auto transition_mode = [&mode, &driver_for_transitions](Mode next) -> bool {
+    const auto mutate = [&mode, next]() noexcept { mode.store_under_driver_lock(next); };
+    bool ok = true;
+    if (driver_for_transitions) {
+      ok = driver_for_transitions->CommitAuthorizationTransition(mutate, true);
+    } else {
+      mutate();  // no driver/send path exists during construction
+    }
+    if (!ok) g_stop.store(true, std::memory_order_release);
+    return ok;
+  };
+  bool outer_hard_clamp_warned = false;  // driver-thread only
+
   // --- mode-aware CommandFn (reuses driver's RT loop + watchdog) ---
   a3_pingpong::PpPolicy* ppp = pp.get();
   a3_pingpong::PpReferencePlayback* refp = ref.get();
@@ -635,13 +837,20 @@ int main(int argc, char** argv) {
                      official_stand, auto_leg_hold, squat_guard_rad, tilt_guard, leg_stand_gains,
                      trace_ptr, obscsv_ptr, loc_mode_int,
                      &shadow_tick, shadow_free_clock, motion_blend_sec, policy_dt,
-                     &prev_mode_for_blend, &motion_enter_tick, &blend_q_start,
+                     &prev_mode_for_blend, &prev_mode_generation,
+                     &prev_yaw_alignment_generation,
+                     &motion_enter_tick, &blend_q_start,
                      &prev_level_for_blend, &prev_swing_dir_for_blend,
                      &stand_enter_tick, &stand_blend_q_start,
-                     fall_guard, fall_guard_gz, &fall_guard_ticks](
+                     &transition_mode, &outer_hard_clamp_warned,
+                     fall_guard, fall_guard_gz, &fall_guard_ticks,
+                     no_publish, effort_limit_ratio, effort_limits_sdk](
                         std::uint64_t tick, const robot_io::RobotState& st,
                         robot_io::RobotCommand& cmd) -> bool {
-    const Mode m = mode.load();
+    // Once SIGINT/SIGTERM/q is observed, no subsequent callback may enter a
+    // motion path—even if the status thread has not completed shutdown yet.
+    const auto mode_snapshot = mode.snapshot();
+    const Mode m = StopRequested() ? Mode::kPassive : mode_snapshot.mode;
     const int N = 31;
     bool publish = true;
     // Refresh the IMU-derived gravity diagnostic FIRST (every tick, every mode), so the squat/tilt
@@ -654,11 +863,20 @@ int main(int argc, char** argv) {
       const auto gfg = ppp->last_proj_grav();
       if (gfg[2] > fall_guard_gz) {
         if (++fall_guard_ticks >= 25) {  // ~0.5 s persistent at 50 Hz
-          mode.store(Mode::kPassive);
+          transition_mode(Mode::kPassive);
           fall_guard_ticks = 0;
           std::fprintf(stderr,
               "[pp SAFETY] FALL GUARD: gravZ=%+.2f > %.2f for 0.5 s -> PASSIVE (zero gains). "
               "Stand the robot up, then 's' -> 'm' to re-engage.\n", gfg[2], fall_guard_gz);
+          // Do not finish the old MOTION computation. The driver's authorization-token
+          // interlock will discard this callback and publish its independent zero-gain halt.
+          // Populate a safe command as defense in depth if this callback is reused elsewhere.
+          cmd.q_des = st.q.size() == N ? st.q : Eigen::VectorXd::Zero(N);
+          cmd.dq_des = Eigen::VectorXd::Zero(N);
+          cmd.tau_ff = Eigen::VectorXd::Zero(N);
+          cmd.kp = Eigen::VectorXd::Zero(N);
+          cmd.kd = Eigen::VectorXd::Zero(N);
+          return true;
         }
       } else {
         fall_guard_ticks = 0;
@@ -701,17 +919,42 @@ int main(int argc, char** argv) {
     const bool dir_just_changed = (cur_swing_dir != prev_swing_dir_for_blend);
     prev_level_for_blend = cur_level;
     prev_swing_dir_for_blend = cur_swing_dir;
-    const bool motion_just_entered = (m == Mode::kMotion && prev_mode_for_blend != Mode::kMotion);
-    const bool stand_just_entered = (m == Mode::kPdStand && prev_mode_for_blend != Mode::kPdStand);
-    const bool rearm_blend = motion_just_entered || level_just_changed || dir_just_changed;
-    if (rearm_blend) motion_enter_tick = tick;
+    // Generation catches ABA transitions between callbacks (MOTION->PD->MOTION can end with the
+    // same value but belongs to a new clock/authorization session).
+    const bool mode_generation_changed = mode_snapshot.generation != prev_mode_generation;
+    const bool motion_just_entered =
+        m == Mode::kMotion && (prev_mode_for_blend != Mode::kMotion || mode_generation_changed);
+    const bool stand_just_entered =
+        m == Mode::kPdStand && (prev_mode_for_blend != Mode::kPdStand || mode_generation_changed);
     // Re-capture the IMU yaw-align offsets whenever the POLICY (SHADOW/MOTION) engages
     // from a non-policy mode — the operator may have moved/turned the robot in between.
-    const bool policy_just_engaged =
+    const bool policy_session_changed =
         (m == Mode::kMotion || m == Mode::kShadow) &&
-        prev_mode_for_blend != Mode::kMotion && prev_mode_for_blend != Mode::kShadow;
-    if (policy_just_engaged) ppp->rearm_yaw_align();
+        (m != prev_mode_for_blend || mode_generation_changed);
+    if (policy_session_changed) {
+      shadow_tick = 0;
+      ppp->rearm_yaw_align();
+    }
     prev_mode_for_blend = m;
+    prev_mode_generation = mode_snapshot.generation;
+
+    // Yaw capture is a mode-independent publication barrier.  Update the mode-session bookkeeping
+    // before returning so a deferred capture is not rearmed on every tick.  The capture tick is
+    // zero gain; on the following tick the generation edge restarts the relevant pose blend from
+    // measured q, so time spent waiting upright/still never consumes the blend window.
+    const bool yaw_barrier = ppp->HandleYawAlignment(st, cmd);
+    if (yaw_barrier) {
+      publish = (m != Mode::kShadow);
+    } else {
+    const std::uint64_t yaw_generation = ppp->yaw_alignment_generation();
+    const bool yaw_alignment_changed =
+        yaw_generation != prev_yaw_alignment_generation;
+    prev_yaw_alignment_generation = yaw_generation;
+    const bool rearm_blend = motion_just_entered || level_just_changed || dir_just_changed ||
+        (yaw_alignment_changed && m == Mode::kMotion);
+    const bool rearm_stand_blend =
+        stand_just_entered || (yaw_alignment_changed && m == Mode::kPdStand);
+    if (rearm_blend) motion_enter_tick = tick;
     if (m == Mode::kPassive) {  // limp: hold current pose, zero gains
       cmd.q_des = st.q.size() == N ? st.q : Eigen::VectorXd::Zero(N);
       cmd.dq_des = Eigen::VectorXd::Zero(N);
@@ -734,7 +977,7 @@ int main(int argc, char** argv) {
       // same catapult class as the auto-leg-hold level drop, and the one transition the
       // MOTION-only blend below did not cover. Ramp q_des from the entry pose.
       if (motion_blend_sec > 1e-6 && st.q.size() == N) {
-        if (stand_just_entered) { stand_blend_q_start = st.q; stand_enter_tick = tick; }
+        if (rearm_stand_blend) { stand_blend_q_start = st.q; stand_enter_tick = tick; }
         if (stand_blend_q_start.size() == N) {
           const double elapsed = static_cast<double>(tick - stand_enter_tick) * policy_dt;
           const double a = std::min(1.0, std::max(0.0, elapsed / motion_blend_sec));
@@ -817,6 +1060,59 @@ int main(int argc, char** argv) {
         }
       }
     }
+    }
+    // Outer hardware safety clamp in SDK order.  This is intentionally outside PpPolicy so it
+    // protects PD_STAND, reference playback, blend interpolation and future command sources too;
+    // schema-v3 soft limits inside target_q remain the strategy/training-distribution clamp.
+    if (cmd.q_des.size() == N) {
+      const int hard_clamped = a3_pingpong::clamp_q_to_limits(cmd.q_des);
+      if (hard_clamped > 0 && !outer_hard_clamp_warned) {
+        outer_hard_clamp_warned = true;
+        std::fprintf(stderr,
+            "[pp SAFETY] outer SDK hard-limit clamp modified %d joint command(s); "
+            "inspect the active source/blend before continuing.\n",
+            hard_clamped);
+      }
+    }
+
+    // Command-envelope guard, applied after every gain/pose blend and immediately before the
+    // driver can publish.  This is not a continuous thermal model; it is the stricter invariant we
+    // can prove today: requested PD+feedforward effort and reported joint effort must stay within
+    // the per-joint actuator limits embedded from the training model.  The verbal 24/60 Nm figures
+    // are not reinterpreted here as continuous ratings.
+    if (publish && !no_publish && m != Mode::kPassive) {
+      const bool shapes_ok = st.q.size() == N && st.dq.size() == N &&
+          cmd.q_des.size() == N && cmd.dq_des.size() == N && cmd.tau_ff.size() == N &&
+          cmd.kp.size() == N && cmd.kd.size() == N && effort_limits_sdk.size() == N;
+      if (!shapes_ok) {
+        std::fprintf(stderr,
+            "[pp SAFETY] command envelope unavailable/incomplete in a publish-capable mode -> halt\n");
+        transition_mode(Mode::kPassive);
+        return false;
+      }
+      if (!a3_pingpong::MeasuredEffortFeedbackValid(st.tau_est, N)) {
+        std::fprintf(stderr,
+            "[pp SAFETY] measured effort feedback is missing or non-finite in a "
+            "publish-capable mode -> PASSIVE+halt\n");
+        transition_mode(Mode::kPassive);
+        return false;
+      }
+      for (int i = 0; i < N; ++i) {
+        const double limit = effort_limit_ratio * effort_limits_sdk[i];
+        const double requested = cmd.kp[i] * (cmd.q_des[i] - st.q[i]) +
+            cmd.kd[i] * (cmd.dq_des[i] - st.dq[i]) + cmd.tau_ff[i];
+        const double measured = st.tau_est[i];
+        if (!std::isfinite(requested) || std::fabs(requested) > limit ||
+            std::fabs(measured) > limit) {
+          std::fprintf(stderr,
+              "[pp SAFETY] effort envelope joint=%d requested=%+.2f measured=%+.2f "
+              "limit=%.2f (ratio %.2f) -> PASSIVE+halt\n",
+              i, requested, measured, limit, effort_limit_ratio);
+          transition_mode(Mode::kPassive);
+          return false;
+        }
+      }
+    }
     // --- CSV trace row (all modes; final post-gain command + measured state) ---
     if (trace_ptr) {
       auto& o = *trace_ptr;
@@ -838,19 +1134,52 @@ int main(int argc, char** argv) {
     return publish;
   };
 
+  if (StopRequested()) return 130;
   if (!backend->Start()) { std::cerr << "backend Start failed\n"; return 5; }
+  if (StopRequested()) {
+    backend->Stop();
+    return 130;
+  }
   std::cout << "[pingpong] backend started\n";
 
   a3_deploy::A3PolicyDriverOptions dopt;
-  dopt.policy_hz = cfg["policy_driver"]["policy_hz"]
-                       ? cfg["policy_driver"]["policy_hz"].as<double>() : 50.0;
+  dopt.policy_hz = configured_policy_hz;
+  const double yaml_deadline_ms = cfg["policy_driver"]["command_deadline_ms"]
+                                      ? cfg["policy_driver"]["command_deadline_ms"].as<double>()
+                                      : 15.0;
+  const double command_deadline_ms = std::stod(
+      Flag(argc, argv, "--command-deadline-ms", std::to_string(yaml_deadline_ms)));
+  const double policy_period_ms = 1000.0 / dopt.policy_hz;
+  if (!std::isfinite(dopt.policy_hz) || dopt.policy_hz <= 0.0 ||
+      !std::isfinite(command_deadline_ms) || command_deadline_ms <= 0.0 ||
+      command_deadline_ms >= policy_period_ms) {
+    std::cerr << "invalid policy_driver: policy_hz=" << dopt.policy_hz
+              << " command_deadline_ms=" << command_deadline_ms
+              << " (deadline must be >0 and < one policy period)\n";
+    backend->Stop();
+    return 2;
+  }
+  dopt.command_deadline_s = command_deadline_ms * 1.0e-3;
+  dopt.command_publish_expected = [&mode, no_publish]() {
+    return !no_publish && !StopRequested() &&
+           mode.load(std::memory_order_acquire) != Mode::kShadow;
+  };
+  dopt.command_authorization_token = [&mode]() {
+    return mode.authorization_token();
+  };
+  dopt.send_safe_halt_on_command_failure = !no_publish;
+  dopt.send_final_safe_halt_on_stop = !no_publish;
   a3_deploy::CommandFn cfn = command_fn;  // disambiguate the PolicyFn/CommandFn ctor
   a3_deploy::A3PolicyDriver driver(*backend, cfn, dopt);
-  if (!driver.StartDriver()) { std::cerr << "StartDriver failed\n"; backend->Stop(); return 6; }
-  std::cout << "[pingpong] driver started @ " << dopt.policy_hz << " Hz\n";
-
-  std::signal(SIGINT, OnSig);
-  std::signal(SIGTERM, OnSig);
+  driver_for_transitions = &driver;
+  if (!driver.StartDriver()) {
+    driver_for_transitions = nullptr;
+    std::cerr << "StartDriver failed\n";
+    backend->Stop();
+    return 6;
+  }
+  std::cout << "[pingpong] driver started @ " << dopt.policy_hz
+            << " Hz; command deadline=" << command_deadline_ms << " ms\n";
 
   // ---- consolidated bring-up CONFIG banner (one place to eyeball every knob) ----
   char leg_gain_banner[16];
@@ -923,16 +1252,16 @@ int main(int argc, char** argv) {
     tcsetattr(STDIN_FILENO, TCSANOW, &raw);
   }
   std::thread kb([&]() {
-    while (!g_stop.load()) {
+    while (!StopRequested()) {
       char c = 0;
       if (tty && read(STDIN_FILENO, &c, 1) == 1) {
         switch (c) {
-          case 'p': refp->Hold("operator_passive"); mode.store(Mode::kPassive);
+          case 'p': refp->Hold("operator_passive"); transition_mode(Mode::kPassive);
                     std::cout << "-> PASSIVE\n"; break;
-          case 's': refp->Hold("operator_pd_stand"); mode.store(Mode::kPdStand);
+          case 's': refp->Hold("operator_pd_stand"); transition_mode(Mode::kPdStand);
                     std::cout << "-> PD_STAND\n"; break;
-          case 'h': mode.store(Mode::kShadow); std::cout << "-> SHADOW (no publish)\n"; break;
-          case 'm': mode.store(Mode::kMotion); std::cout << "-> MOTION (PUBLISHING)\n"; break;
+          case 'h': transition_mode(Mode::kShadow); std::cout << "-> SHADOW (no publish)\n"; break;
+          case 'm': transition_mode(Mode::kMotion); std::cout << "-> MOTION (PUBLISHING)\n"; break;
           case '0':
           case '1':
           case '2':
@@ -945,12 +1274,17 @@ int main(int argc, char** argv) {
               const int gi = c - '0';
               refp->SetGroup(a3_pingpong::RefPlaybackGroupFromInt(gi));
               refp->Hold("group_selected_hold");
-              mode.store(Mode::kReferencePlayback);
+              transition_mode(Mode::kReferencePlayback);
               std::cout << "-> ref group " << gi << " ("
                         << a3_pingpong::RefPlaybackGroupName(refp->group())
                         << "), HOLD; press r to move\n";
             } else if (planner_mode) {
               std::cout << "-> level key ignored (PLANNER drives swing engage)\n";
+            } else if (a3_pingpong::ScriptedPhaseHotkeyBlocked(
+                           no_publish, mode.load() == Mode::kMotion, ppp->level())) {
+              std::cout << "[pp SAFETY] level key ignored: publish-capable scripted MOTION "
+                           "is mid-swing; use 'p' for an immediate safe abort, or wait for "
+                           "level 0 before changing phase\n";
             } else if (c == '0') {
               ppp->set_level(0); std::cout << "-> level 0 (hold)\n";
             } else if (c == '1') {
@@ -966,6 +1300,13 @@ int main(int argc, char** argv) {
                     // the engage origin): mid-swing it snaps tts and breaks the wait-until-tts
                     // strike alignment. Planner mode owns the clock — ignore, like 0/1/f/b.
                     if (planner_mode) { std::cout << "-> swing-speed key ignored (PLANNER owns the clock)\n"; break; }
+                    if (a3_pingpong::ScriptedPhaseHotkeyBlocked(
+                            no_publish, mode.load() == Mode::kMotion, ppp->level())) {
+                      std::cout << "[pp SAFETY] swing-speed key ignored: publish-capable "
+                                   "scripted MOTION is mid-swing; tune only at level 0 "
+                                   "(SHADOW/--no-publish remain available)\n";
+                      break;
+                    }
                     ppp->set_swing_speed(ppp->swing_speed() + (c == '.' ? 0.1 : -0.1));
                     std::cout << "swing_speed=" << ppp->swing_speed() << "\n"; break;
           case 'f': if (planner_mode) { std::cout << "-> f/b ignored (PLANNER picks the side)\n"; break; }
@@ -974,11 +1315,11 @@ int main(int argc, char** argv) {
           case 'b': if (planner_mode) { std::cout << "-> f/b ignored (PLANNER picks the side)\n"; break; }
                     ppp->set_swing_dir(-1);
                     std::cout << "-> swing dir = BACKHAND (scripted target +y, clip1)\n"; break;
-          case 'r': refp->Start(); mode.store(Mode::kReferencePlayback);
+          case 'r': refp->Start(); transition_mode(Mode::kReferencePlayback);
                     std::cout << "-> REFERENCE_PLAYBACK moving group="
                               << a3_pingpong::RefPlaybackGroupName(refp->group())
                               << "\n"; break;
-          case 'x': refp->Hold("operator_hold"); mode.store(Mode::kReferencePlayback);
+          case 'x': refp->Hold("operator_hold"); transition_mode(Mode::kReferencePlayback);
                     std::cout << "-> REFERENCE_PLAYBACK hold current pose\n"; break;
           case 'c': refp->ClearFault();
                     std::cout << "-> ref fault cleared; press r to move\n"; break;
@@ -1000,14 +1341,30 @@ int main(int argc, char** argv) {
   if (warming)
     std::printf("[pingpong] warmup: PD_STAND for %.1fs, then -> %s\n", warmup_sec,
                 ModeName(target_mode));
-  while (!g_stop.load()) {
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+  bool driver_faulted = false;
+  while (!StopRequested()) {
+    for (int i = 0; i < 100 && !StopRequested(); ++i) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      if (driver.CommandFaulted()) break;
+    }
+    if (driver.CommandFaulted()) {
+      driver_faulted = true;
+      g_stop.store(true, std::memory_order_release);
+      std::fprintf(stderr,
+                   "[pp SAFETY] command path fault latched: callback_fail=%llu "
+                   "deadline=%llu send_fail=%llu -> shutdown\n",
+                   (unsigned long long)driver.CommandFailureCount(),
+                   (unsigned long long)driver.DeadlineViolationCount(),
+                   (unsigned long long)driver.SendFailureCount());
+      break;
+    }
+    if (StopRequested()) break;
     const std::uint64_t ticks = driver.PolicyTickCount();
     const std::uint64_t halts = driver.SafeHaltCount();
     auto now = std::chrono::steady_clock::now();
     if (warming &&
         std::chrono::duration<double>(now - t_start).count() >= warmup_sec) {
-      mode.store(target_mode);
+      transition_mode(target_mode);
       warming = false;
       std::printf("[pingpong] warmup done -> %s\n", ModeName(target_mode));
     }
@@ -1088,10 +1445,17 @@ int main(int argc, char** argv) {
   }
 
   std::cout << "[pingpong] stopping...\n";
+  transition_mode(Mode::kPassive);
+  refp->Hold("process_shutdown");
   if (kb.joinable()) kb.join();
   if (tty) tcsetattr(STDIN_FILENO, TCSANOW, &old_tio);
-  driver.StopDriver();
+  const bool final_halt_ok = driver.StopDriver();
+  driver_for_transitions = nullptr;
   backend->Stop();
+  if (!final_halt_ok) {
+    std::cerr << "[pp SAFETY] final safe-halt exhausted retries; local delivery is unconfirmed. "
+                 "Keep the external E-stop engaged and inspect the backend/controller timeout.\n";
+  }
   std::cout << "[pingpong] done\n";
-  return 0;
+  return driver_faulted ? 7 : (final_halt_ok ? 0 : 8);
 }

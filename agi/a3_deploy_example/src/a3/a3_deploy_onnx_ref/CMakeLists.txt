@@ -972,6 +972,16 @@ target_link_directories(run_tests PRIVATE ${CUDA_LINK_DIRS})
 target_link_libraries(run_tests PRIVATE GTest::GTest GTest::Main ${EXE_LIBS})
 target_include_directories(run_tests PUBLIC ${EXE_INCLUDES})
 
+# `test_a3_publishers.cpp` exercises ROS serialization when the vendored A3
+# message types are enabled.  `HAS_A3_ROS_MSGS` arrives transitively from
+# a3_deploy_shared, but raw ROS include roots/libraries do not; wire the test
+# target exactly like the deploy executables or a ROS-enabled build fails at
+# <rclcpp/serialization.hpp> before any test can run.
+if(rclcpp_FOUND AND std_msgs_FOUND)
+  target_include_directories(run_tests PRIVATE ${ROS2_INCLUDE_DIRS})
+  target_link_libraries(run_tests PRIVATE ${ROS2_LIBS} pthread)
+endif()
+
 # A3 AimRT backend wiring (PR 7): only active when configure succeeded.
 if(A3_AIMRT_BACKEND_AVAILABLE)
   target_compile_definitions(run_tests PRIVATE ENABLE_A3_AIMRT_BACKEND=1)

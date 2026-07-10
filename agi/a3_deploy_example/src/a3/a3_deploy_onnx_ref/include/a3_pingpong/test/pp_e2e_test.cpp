@@ -15,7 +15,7 @@ using namespace a3_pingpong;
 
 int main(int argc, char** argv) {
   if (argc < 3) { std::fprintf(stderr, "usage: %s policy.onnx dump_out.txt\n", argv[0]); return 2; }
-  PpOnnxPolicy pol(argv[1]);
+  PpOnnxPolicy pol(argv[1], true);  // offline diagnostic: never publishes robot commands
   const int ts = 20;
 
   // fixed deterministic state/target (reproducible; checker reads them back)

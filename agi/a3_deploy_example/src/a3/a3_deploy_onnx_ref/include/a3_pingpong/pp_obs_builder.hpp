@@ -327,7 +327,8 @@ inline Eigen::VectorXd build_obs_110(const PpRobotState& state,
   // 6. base forward vector e_base,x (2): world xy of the base +x axis, renormalized.
   {
     const Vec3 fwd = quat_rotate(state.base_quat_w, Vec3(1.0, 0.0, 0.0));
-    const double n = std::max(std::hypot(fwd[0], fwd[1]), 1e-6);
+    // Match training exactly: fwd / (norm + 1e-6), not max(norm, eps).
+    const double n = std::hypot(fwd[0], fwd[1]) + 1e-6;
     obs[o++] = fwd[0] / n;
     obs[o++] = fwd[1] / n;
   }

@@ -9,7 +9,7 @@ onnx:
   # Keep the SOURCE config valid inside the repo tree: from src/.../config this resolves under
   # assets/a3_runtime/models/. During packaging, build_a3_deploy_pkg.sh copies the model into
   # dist/.../models/ and rewrites the packaged runtime cfg to `models/...`. The runner
-  # auto-detects obs dim from the ONNX input and builds obs 175 vs 180 accordingly.
+  # auto-detects obs dim from the ONNX input and builds obs 110/175/177/180 accordingly.
   #
   # CURRENT: model_17400_hitter177.onnx (2026-07-06, run 2026-07-06_00-56-46 model_17400) —
   # 177-D hitter_footwork (deploy_parity + base_target_pos_b(2) station channel), hopex
@@ -39,12 +39,19 @@ onnx:
 
 policy_driver:
   policy_hz: 50.0
+  # Independent command supervisor. At 50 Hz one period is 20 ms; if a
+  # publish-capable callback has not returned within 15 ms, latch a fault,
+  # issue zero-gain safe halt, and require a process restart. SHADOW and
+  # --no-publish remain diagnostic-only and never emit the supervisor halt.
+  command_deadline_ms: 15.0
 
 obs_debug:
-  # HARDWARE-SAFE default. fabricated synthesizes a fictional world-tracking error
-  # (the documented "deploy buzz" mode) and must NOT be used on hardware. The
-  # A/B/C rehearsal selects fabricated/oracle explicitly via --loc-mode.
-  loc_mode: perfect_tracking   # fabricated | perfect_tracking | oracle(sim-only)
+  # DIAGNOSTIC default only. With the default 177-D model, publish-capable startup now
+  # FAILS CLOSED in perfect_tracking because the required station channel would silently
+  # collapse to delta=0. `--planner` automatically selects external_base (live mocap);
+  # simulation must select oracle explicitly. perfect_tracking/fabricated are permitted
+  # for this 177 artifact only under process-wide --no-publish A/B diagnostics.
+  loc_mode: perfect_tracking   # fabricated | perfect_tracking | oracle(sim-only) | external_base
 
 backend:
   # PURE-iceoryx cfg (no ros2_plugin) to match the iceoryx-only sim cfg and avoid

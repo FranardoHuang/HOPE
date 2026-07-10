@@ -25,12 +25,13 @@
 //      [3..5]=pos_w(x,y,z)  [6..8]=vel_w(x,y,z)
 //      [9]=time_to_strike(s)  [10]=strike_time(s, informational)
 //      [11]=frame_code(0=world/table, 1=base_link)   (optional; default 0)
-//    BASE    /a3/base_pose_flat     (>=8 doubles)
+//    BASE    /a3/base_pose_flat     (>=9 doubles)
 //      [0]=schema(1)  [1]=valid(0/1)  [2..4]=pos(x,y,z)
 //      [5..8]=quat(w,x,y,z)
 #pragma once
 
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <ctime>
 #include <mutex>
@@ -40,9 +41,9 @@
 
 namespace a3_pingpong {
 
-inline double PpNowWallSec() {
+inline double PpNowMonotonicSec() {
   struct timespec ts {};
-  ::clock_gettime(CLOCK_REALTIME, &ts);
+  ::clock_gettime(CLOCK_MONOTONIC, &ts);
   return static_cast<double>(ts.tv_sec) + static_cast<double>(ts.tv_nsec) * 1e-9;
 }
 
@@ -65,22 +66,31 @@ class PpRacketTargetInput {
   // Fed from the AimRT subscriber thread. `a` is the decoded Float64MultiArray.
   void SetFromFlat(const std::vector<double>& a) {
     if (a.size() < 11) return;  // malformed -> ignore (last good value stands, ages out)
+    if (!std::isfinite(a[0]) || a[0] != 1.0 || !std::isfinite(a[1]) ||
+        (a[1] != 0.0 && a[1] != 1.0))
+      return;
     PpRacketMsg m;
     m.valid = a[1] != 0.0;
+    const double now = PpNowMonotonicSec();
+    if (!m.valid) {
+      std::lock_guard<std::mutex> lk(mu_);
+      last_invalid_wall_ = now;
+      any_ = true;
+      return;
+    }
+    for (size_t i = 2; i < 11; ++i)
+      if (!std::isfinite(a[i])) return;
+    if (a.size() >= 12 && (!std::isfinite(a[11]) || (a[11] != 0.0 && a[11] != 1.0)))
+      return;
     m.swing_sign = a[2] >= 0.0 ? 1.0 : -1.0;
     m.pos_w = Vec3(a[3], a[4], a[5]);
     m.vel_w = Vec3(a[6], a[7], a[8]);
     m.time_to_strike = a[9];
     m.strike_time = a[10];
     m.frame_code = a.size() >= 12 ? static_cast<int>(a[11]) : 0;
-    const double now = PpNowWallSec();
     std::lock_guard<std::mutex> lk(mu_);
-    if (m.valid) {
-      last_valid_ = m;
-      last_valid_wall_ = now;
-    } else {
-      last_invalid_wall_ = now;
-    }
+    last_valid_ = m;
+    last_valid_wall_ = now;
     any_ = true;
   }
 
@@ -93,7 +103,7 @@ class PpRacketTargetInput {
 
   Snapshot Latest() const {
     Snapshot s;
-    const double now = PpNowWallSec();
+    const double now = PpNowMonotonicSec();
     std::lock_guard<std::mutex> lk(mu_);
     if (last_valid_wall_ < 0.0) return s;  // no valid yet
     s.has_valid = true;
@@ -127,12 +137,21 @@ class PpBasePoseInput {
  public:
   void SetFromFlat(const std::vector<double>& a) {
     if (a.size() < 9) return;
+    if (!std::isfinite(a[0]) || a[0] != 1.0 || !std::isfinite(a[1]) ||
+        (a[1] != 0.0 && a[1] != 1.0))
+      return;
     const bool valid = a[1] != 0.0;
     if (!valid) return;  // invalid pose -> let the last good sample age out to stale
-    const double now = PpNowWallSec();
+    for (size_t i = 2; i < 9; ++i)
+      if (!std::isfinite(a[i])) return;
+    Vec4 quat(a[5], a[6], a[7], a[8]);
+    const double quat_norm = quat.norm();
+    if (!std::isfinite(quat_norm) || quat_norm < 1e-6) return;
+    quat /= quat_norm;
+    const double now = PpNowMonotonicSec();
     std::lock_guard<std::mutex> lk(mu_);
     pos_ = Vec3(a[2], a[3], a[4]);
-    quat_ = Vec4(a[5], a[6], a[7], a[8]);
+    quat_ = quat;
     stamp_wall_ = now;
     any_ = true;
   }
@@ -142,7 +161,7 @@ class PpBasePoseInput {
     if (stamp_wall_ < 0.0) return false;
     out.pos = pos_;
     out.quat = quat_;
-    out.age_s = PpNowWallSec() - stamp_wall_;
+    out.age_s = PpNowMonotonicSec() - stamp_wall_;
     return out.age_s >= 0.0 && out.age_s <= max_age_s;
   }
 

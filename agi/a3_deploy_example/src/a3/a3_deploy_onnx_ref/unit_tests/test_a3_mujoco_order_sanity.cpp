@@ -12,8 +12,12 @@
 
 #include <gtest/gtest.h>
 
+#include "a3_pingpong/pp_joint_map.hpp"
+#include "a3_pingpong/pp_racket_fk.hpp"
+#include "a3_pingpong/pp_runtime_interlocks.hpp"
 #include "robot_io/a3_layout_extra.hpp"
 
+#include <algorithm>
 #include <array>
 #include <string>
 #include <vector>
@@ -134,4 +138,57 @@ TEST(A3MujocoOrderSanity, PolicyToSdkIdxCoversAllNonNeckSlots) {
                               << " should appear exactly once";
     }
   }
+}
+
+TEST(A3MujocoOrderSanity, EffortEnvelopeScattersByJointNameNotPosition) {
+  const auto& sdk_names = a3_pingpong::backend_joint_order();
+  std::vector<std::string> source_names;
+  source_names.reserve(31);
+  Eigen::VectorXd source_effort(31);
+  // A deliberately nontrivial permutation (7 is coprime with 31). Unique values make a
+  // positional copy or use of the inverse map immediately visible at every SDK slot.
+  for (int source = 0; source < 31; ++source) {
+    source_names.push_back(sdk_names[(source * 7 + 3) % 31]);
+    source_effort[source] = 1000.0 + static_cast<double>(source);
+  }
+
+  std::array<int, 31> source_to_sdk{};
+  ASSERT_TRUE(a3_pingpong::build_src_to_sdk(source_names, source_to_sdk));
+  const Eigen::VectorXd sdk_effort =
+      a3_pingpong::to_sdk_order(source_effort, source_to_sdk);
+  ASSERT_EQ(sdk_effort.size(), 31);
+  for (int source = 0; source < 31; ++source) {
+    const int sdk = source_to_sdk[source];
+    ASSERT_EQ(sdk_names[sdk], source_names[source]);
+    EXPECT_DOUBLE_EQ(sdk_effort[sdk], source_effort[source]);
+  }
+
+  const auto right_elbow = std::find(
+      sdk_names.begin(), sdk_names.end(), "right_elbow_joint");
+  ASSERT_NE(right_elbow, sdk_names.end());
+  const int right_elbow_sdk = static_cast<int>(right_elbow - sdk_names.begin());
+  const auto right_elbow_source = std::find(
+      source_names.begin(), source_names.end(), "right_elbow_joint");
+  ASSERT_NE(right_elbow_source, source_names.end());
+  const int source_index =
+      static_cast<int>(right_elbow_source - source_names.begin());
+  EXPECT_DOUBLE_EQ(sdk_effort[right_elbow_sdk], source_effort[source_index]);
+
+  const Eigen::VectorXd round_trip =
+      a3_pingpong::from_sdk_order(sdk_effort, source_to_sdk);
+  EXPECT_TRUE(round_trip.isApprox(source_effort, 0.0));
+}
+
+TEST(A3MujocoOrderSanity, FormalRacketControlPointIsOfficialRedLinkOrigin) {
+  const auto& offset = a3_pingpong::racket_control_point_offset_wrist_m();
+  EXPECT_DOUBLE_EQ(offset[0], 0.21021);
+  EXPECT_DOUBLE_EQ(offset[1], 0.032078);
+  EXPECT_DOUBLE_EQ(offset[2], 0.032036);
+}
+
+TEST(A3MujocoOrderSanity, ScriptedPhaseHotkeysFailClosedOnlyForLiveMidSwingMotion) {
+  EXPECT_TRUE(a3_pingpong::ScriptedPhaseHotkeyBlocked(false, true, 1));
+  EXPECT_FALSE(a3_pingpong::ScriptedPhaseHotkeyBlocked(false, true, 0));
+  EXPECT_FALSE(a3_pingpong::ScriptedPhaseHotkeyBlocked(false, false, 1));  // SHADOW/PD/PASSIVE
+  EXPECT_FALSE(a3_pingpong::ScriptedPhaseHotkeyBlocked(true, true, 1));   // diagnostic no-publish
 }

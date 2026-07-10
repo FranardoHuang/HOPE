@@ -9,7 +9,16 @@ project(
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -ffast-math")
+
+# Safety code relies on IEEE NaN/Inf semantics (`std::isfinite`) to reject bad
+# robot state, planner payloads and commands.  `-ffast-math` implies
+# `-ffinite-math-only`; GCC may then constant-fold those guards to true.  The
+# old global flag made release builds publish-capable while their finite checks
+# were dead.  Keep the toolchain's normal per-config optimization and force
+# strict finite semantics for every deploy target.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  add_compile_options(-fno-fast-math -fno-finite-math-only)
+endif()
 
 message(STATUS "C++ Compiler: ${CMAKE_CXX_COMPILER}")
 message(STATUS "C++ Compiler ID: ${CMAKE_CXX_COMPILER_ID}")

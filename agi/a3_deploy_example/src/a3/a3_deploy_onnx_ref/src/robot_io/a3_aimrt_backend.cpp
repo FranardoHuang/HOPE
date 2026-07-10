@@ -655,6 +655,7 @@ A3AimrtBackend::ConsumeLatencyStatistics() {
 }
 
 void A3AimrtBackend::RegisterStateCallback(StateCallback cb) {
+  std::lock_guard<std::mutex> lk(state_cb_mtx_);
   user_cb_ = std::move(cb);
 }
 
@@ -680,6 +681,7 @@ void A3AimrtBackend::SetBasePoseTopic(std::string topic) {
 }
 
 void A3AimrtBackend::OnSyncState_(const RobotState& state) {
+  std::lock_guard<std::mutex> lk(state_cb_mtx_);
   if (user_cb_) user_cb_(state);
 }
 

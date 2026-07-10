@@ -202,6 +202,11 @@ TEST(A3AimrtBackend, EndToEndSampleInjectionTriggersStateCallback) {
       a3_sync::NeckSample  n{}; n.stamp = {t};
       a3_sync::ImuSample   p{}; p.stamp = {t};
       a3_sync::ImuSample   to{}; to.stamp = {t};
+      const a3_sync::TimestampNs recv{t};
+      w.recv_stamp = recv; l.recv_stamp = recv; a.recv_stamp = recv; n.recv_stamp = recv;
+      p.recv_stamp = recv; to.recv_stamp = recv;
+      w.source_stamp_valid = l.source_stamp_valid = a.source_stamp_valid =
+          n.source_stamp_valid = p.source_stamp_valid = to.source_stamp_valid = true;
       b.InjectWaistSample_ForTest(w);
       b.InjectLegSample_ForTest(l);
       b.InjectArmSample_ForTest(a);

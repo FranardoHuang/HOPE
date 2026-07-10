@@ -22,6 +22,14 @@
 
 namespace a3_pingpong {
 
+// Formal deployment identity of the controlled racket point.  Keep this exposed rather than
+// hiding it inside racket_pos_pelvis(): the schema-v3 ONNX loader compares its immutable training
+// metadata against this exact wrist-local point before a model is eligible to publish.
+inline const Vec3& racket_control_point_offset_wrist_m() {
+  static const Vec3 kOffset(0.21021, 0.032078, 0.032036);
+  return kOffset;
+}
+
 // URDF fixed-axis roll-pitch-yaw = Rz(yaw) * Ry(pitch) * Rx(roll).
 inline Mat3 rot_rpy(double roll, double pitch, double yaw) {
   const double cr = std::cos(roll), sr = std::sin(roll);
@@ -92,8 +100,6 @@ inline Vec3 racket_pos_pelvis(const Eigen::VectorXd& q) {
   // Fixed pingpang_red mount offset relative to right_wrist_yaw_Link
   // (right_hand_pingpang_joint is identity, so this is applied at the wrist_yaw
   // frame). Matches Isaac's pingpang_red_Link body pose.
-  static const Vec3 kMount(0.21021, 0.032078, 0.032036);
-
   Mat3 R = Mat3::Identity();
   Vec3 t = Vec3::Zero();
   for (const Joint& j : chain) {
@@ -103,7 +109,7 @@ inline Vec3 racket_pos_pelvis(const Eigen::VectorXd& q) {
     t = t + R * ti;
     R = R * Ri;
   }
-  return t + R * kMount;
+  return t + R * racket_control_point_offset_wrist_m();
 }
 
 }  // namespace a3_pingpong

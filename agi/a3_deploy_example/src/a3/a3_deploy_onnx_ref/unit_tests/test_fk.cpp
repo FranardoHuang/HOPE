@@ -3,16 +3,25 @@
 #include "../include/fk.hpp"
 #include "../include/motion_data_reader.hpp"
 
+#include <filesystem>
 #include <vector>
 #include <fstream>
 
 TEST(FK, TestFKAndGlobalVelocities) {
 
+    constexpr const char* kMotionDir = "reference/bones_072925_test/";
+    constexpr const char* kRobotXml = "a3/a3_29dof.xml";
+    if (!std::filesystem::is_directory(kMotionDir) ||
+        !std::filesystem::is_regular_file(kRobotXml)) {
+        GTEST_SKIP() << "optional FK reference assets are absent: "
+                     << kMotionDir << " and/or " << kRobotXml;
+    }
+
     // read some exapmle motion data:
     MotionDataReader motion_reader;
-    motion_reader.ReadFromCSV("reference/bones_072925_test/");
+    motion_reader.ReadFromCSV(kMotionDir);
 
-    RobotFK fk("a3/a3_29dof.xml");
+    RobotFK fk(kRobotXml);
 
     auto num_bodies = motion_reader.motions[0]->GetNumBodies();
     auto num_joints = motion_reader.motions[0]->GetNumJoints();

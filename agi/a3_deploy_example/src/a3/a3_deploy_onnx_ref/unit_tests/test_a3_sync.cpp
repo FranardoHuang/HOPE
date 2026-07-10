@@ -690,18 +690,8 @@ TEST(A3SyncLoop, ProducesAlignedFrames) {
   std::thread feeder([&] {
     while (!stop.load()) {
       const auto t = SystemNowNs();
-      WaistSample w{}; w.stamp = TimestampNs{t};
-      LegSample   l{}; l.stamp = TimestampNs{t};
-      ArmSample   a{}; a.stamp = TimestampNs{t};
-      NeckSample  n{}; n.stamp = TimestampNs{t};
-      ImuSample   p{}; p.stamp = TimestampNs{t};
-      ImuSample   to{}; to.stamp = TimestampNs{t};
-      loop.OnWaistState(w);
-      loop.OnLegState(l);
-      loop.OnArmState(a);
-      loop.OnNeckState(n);
-      loop.OnPelvisImu(p);
-      loop.OnTorsoImu(to);
+      InjectJointGroup(loop, t, t);
+      InjectImuGroup(loop, t, t);
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
   });
@@ -726,7 +716,7 @@ TEST(A3SyncLoop, ProducesAlignedFrames) {
   EXPECT_LE(snap.last_skew_ns, static_cast<std::int64_t>(5'000'000));
 }
 
-TEST(A3SyncLoop, HeldSamplesExpireWhenTooOld) {
+TEST(A3SyncLoop, StaleSamplesAreRejectedByMinSkewPair) {
   a3_sync::SyncConfig cfg;
   cfg.sync_hz            = 100.0;
   cfg.align_delay_ns     = 0;
@@ -739,47 +729,22 @@ TEST(A3SyncLoop, HeldSamplesExpireWhenTooOld) {
 
   A3SyncLoop loop(std::move(opt));
 
-  std::atomic<int> complete_frames{0};
-  std::atomic<int> incomplete_frames{0};
-
-  loop.RegisterStateCallback([&](const robot_io::RobotState& s) {
-    if (s.sync_complete) {
-      complete_frames.fetch_add(1);
-    } else {
-      incomplete_frames.fetch_add(1);
-    }
-  });
-
-  loop.Start();
-  EXPECT_TRUE(loop.Running());
-
   const auto t = SystemNowNs();
-  WaistSample w{}; w.stamp = TimestampNs{t};
-  LegSample   l{}; l.stamp = TimestampNs{t};
-  ArmSample   a{}; a.stamp = TimestampNs{t};
-  NeckSample  n{}; n.stamp = TimestampNs{t};
-  ImuSample   p{}; p.stamp = TimestampNs{t};
-  ImuSample   to{}; to.stamp = TimestampNs{t};
-  loop.OnWaistState(w);
-  loop.OnLegState(l);
-  loop.OnArmState(a);
-  loop.OnNeckState(n);
-  loop.OnPelvisImu(p);
-  loop.OnTorsoImu(to);
+  InjectJointGroup(loop, t, t);
+  InjectImuGroup(loop, t, t);
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(160));
-  loop.Stop();
+  std::int64_t phase_ns = 0;
+  std::int64_t latest_recv_ns = 0;
+  std::int64_t pair_skew_ns = 0;
+  EXPECT_TRUE(loop.EstimateAutoPhaseNs(
+      0, phase_ns, latest_recv_ns, pair_skew_ns));
 
-  EXPECT_GT(complete_frames.load(), 0);
-  EXPECT_GT(incomplete_frames.load(), 0);
-
-  const auto snap = loop.Statistics();
-  EXPECT_GT(snap.stale_waist, 0u);
-  EXPECT_GT(snap.stale_leg, 0u);
-  EXPECT_GT(snap.stale_arm, 0u);
-  EXPECT_GT(snap.stale_neck, 0u);
-  EXPECT_GT(snap.stale_pelvis_imu, 0u);
-  EXPECT_GT(snap.stale_torso_imu, 0u);
+  // MinSkewPair rejects expired candidates instead of emitting a partial
+  // RobotState.  This preserves the last complete q for the policy driver's
+  // independent deadline watchdog and safe-halt hold command.
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+  EXPECT_FALSE(loop.EstimateAutoPhaseNs(
+      0, phase_ns, latest_recv_ns, pair_skew_ns));
 }
 
 TEST(A3SyncLoop, FreshnessUsesReceiveStampWhenHeaderClockDiffers) {
@@ -804,18 +769,8 @@ TEST(A3SyncLoop, FreshnessUsesReceiveStampWhenHeaderClockDiffers) {
 
   const auto recv = SystemNowNs();
   constexpr std::int64_t kForeignClockStamp = 1'000'000'000;
-  WaistSample w{}; w.stamp = TimestampNs{kForeignClockStamp}; w.recv_stamp = TimestampNs{recv};
-  LegSample   l{}; l.stamp = TimestampNs{kForeignClockStamp}; l.recv_stamp = TimestampNs{recv};
-  ArmSample   a{}; a.stamp = TimestampNs{kForeignClockStamp}; a.recv_stamp = TimestampNs{recv};
-  NeckSample  n{}; n.stamp = TimestampNs{kForeignClockStamp}; n.recv_stamp = TimestampNs{recv};
-  ImuSample   p{}; p.stamp = TimestampNs{kForeignClockStamp}; p.recv_stamp = TimestampNs{recv};
-  ImuSample   to{}; to.stamp = TimestampNs{kForeignClockStamp}; to.recv_stamp = TimestampNs{recv};
-  loop.OnWaistState(w);
-  loop.OnLegState(l);
-  loop.OnArmState(a);
-  loop.OnNeckState(n);
-  loop.OnPelvisImu(p);
-  loop.OnTorsoImu(to);
+  InjectJointGroup(loop, kForeignClockStamp, recv);
+  InjectImuGroup(loop, kForeignClockStamp, recv);
 
   std::this_thread::sleep_for(std::chrono::milliseconds(40));
   loop.Stop();

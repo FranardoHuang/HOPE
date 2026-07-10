@@ -15,7 +15,7 @@ void BuildSafeHaltCommand(const Eigen::VectorXd& q_current,
   if (out.kp.size()     != N) out.kp.resize(N);
   if (out.kd.size()     != N) out.kd.resize(N);
 
-  if (q_current.size() == N) {
+  if (q_current.size() == N && q_current.allFinite()) {
     out.q_des = q_current;
   } else {
     out.q_des.setZero();

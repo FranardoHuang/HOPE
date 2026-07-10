@@ -8,10 +8,16 @@
 
 #include <onnxruntime_cxx_api.h>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstdio>
+#include <initializer_list>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "a3_pingpong/pp_obs_builder.hpp"
@@ -20,7 +26,8 @@ namespace a3_pingpong {
 
 class PpOnnxPolicy {
  public:
-  explicit PpOnnxPolicy(const std::string& model_path)
+  explicit PpOnnxPolicy(const std::string& model_path,
+                        bool allow_legacy_raw_diagnostic = false)
       : env_(ORT_LOGGING_LEVEL_WARNING, "pp_onnx"),
         mem_(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)) {
     Ort::SessionOptions so;
@@ -29,14 +36,27 @@ class PpOnnxPolicy {
 
     // detect obs input dim: 180 (full), 175 (deploy_parity), 177 (hitter_footwork) or
     // 110 (hitter_pure). The obs builder + buffers use obs_dim_.
-    auto in0 = session_->GetInputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
-    if (in0.size() != 2 ||
+    if (session_->GetInputCount() != 2)
+      throw std::runtime_error("ONNX must have exactly two inputs: obs and time_step");
+    const auto in0_info = session_->GetInputTypeInfo(0).GetTensorTypeAndShapeInfo();
+    auto in0 = in0_info.GetShape();
+    if (in0_info.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
+        in0.size() != 2 || in0[0] != 1 ||
         (in0[1] != kObsDim && in0[1] != kObsDim175 && in0[1] != kObsDim177 &&
          in0[1] != kObsDim110))
       throw std::runtime_error("ONNX obs input is not [1,180], [1,177], [1,175] or [1,110]");
     obs_dim_ = static_cast<int>(in0[1]);
 
     Ort::AllocatorWithDefaultOptions alloc;
+    const auto obs_name = session_->GetInputNameAllocated(0, alloc);
+    const auto time_name = session_->GetInputNameAllocated(1, alloc);
+    const auto in1_info = session_->GetInputTypeInfo(1).GetTensorTypeAndShapeInfo();
+    if (!obs_name || !time_name || std::string(obs_name.get()) != "obs" ||
+        std::string(time_name.get()) != "time_step" ||
+        in1_info.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
+        in1_info.GetShape() != std::vector<int64_t>({1, 1}))
+      throw std::runtime_error(
+          "ONNX input contract must be float obs[1,D], float time_step[1,1] in that order");
     auto md = session_->GetModelMetadata();
     joint_names_ = SplitCsv(LookupMeta(md, alloc, "joint_names"));
     body_names_ = SplitCsv(LookupMeta(md, alloc, "body_names"));
@@ -44,8 +64,258 @@ class PpOnnxPolicy {
     action_scale_ = ToVec(LookupMeta(md, alloc, "action_scale"));
     kp_ = ToVec(LookupMeta(md, alloc, "joint_stiffness"));
     kd_ = ToVec(LookupMeta(md, alloc, "joint_damping"));
-    if ((int)joint_names_.size() != kNumJoints || default_q_.size() != kNumJoints)
+    if ((int)joint_names_.size() != kNumJoints || default_q_.size() != kNumJoints ||
+        action_scale_.size() != kNumJoints || kp_.size() != kNumJoints ||
+        kd_.size() != kNumJoints)
       throw std::runtime_error("ONNX metadata joint count != 31");
+    if (std::unordered_set<std::string>(joint_names_.begin(), joint_names_.end()).size() !=
+        joint_names_.size())
+      throw std::runtime_error("ONNX metadata joint_names contains duplicates");
+
+    // Observation-normalization provenance is a deployment safety contract. This C++ runner has
+    // no sidecar normalization stage, so a policy trained with empirical normalization is runnable
+    // only when that transform is baked into the ONNX graph. Loading a raw actor here produces
+    // finite but meaningless commands, which is more dangerous than a shape error.
+    const std::string empirical_norm = LookupMetaOptional(md, alloc, "empirical_normalization");
+    const std::string trained_norm = LookupMetaOptional(md, alloc, "trained_with_obs_norm");
+    const std::string obs_norm_baked = LookupMetaOptional(md, alloc, "obs_norm_baked");
+    const std::string training_contract_exact =
+        LookupMetaOptional(md, alloc, "training_contract_exact");
+    const std::string schema = LookupMetaOptional(md, alloc, "hope_metadata_schema_version");
+    auto valid_bit = [](const std::string& s) { return s.empty() || s == "0" || s == "1"; };
+    if (!valid_bit(empirical_norm) || !valid_bit(trained_norm) || !valid_bit(obs_norm_baked) ||
+        !valid_bit(training_contract_exact))
+      throw std::runtime_error(
+          "ONNX normalization metadata must be 0|1: empirical_normalization='" + empirical_norm +
+          "' obs_norm_baked='" + obs_norm_baked + "'");
+    if (!trained_norm.empty() && trained_norm != empirical_norm)
+      throw std::runtime_error(
+          "ONNX trained_with_obs_norm and empirical_normalization metadata disagree");
+    if (obs_norm_baked == "1" && empirical_norm == "0")
+      throw std::runtime_error(
+          "ONNX normalization metadata contradicts itself: baked=1 but empirical=0");
+    const bool formal_contract = schema == "2";
+    if (!schema.empty() && schema != "1" && schema != "2")
+      throw std::runtime_error("unsupported HOPE ONNX metadata schema version '" + schema + "'");
+    if (!allow_legacy_raw_diagnostic && !formal_contract)
+      throw std::runtime_error(
+          "publish-capable ONNX requires hope_metadata_schema_version=2; legacy or missing "
+          "metadata is permitted only under process-wide --no-publish diagnostics");
+    if (formal_contract && obs_norm_baked != "1")
+      throw std::runtime_error(
+          "formal schema-v2/110-D ONNX must declare obs_norm_baked=1. This C++ runner has no "
+          "sidecar normalization stage; a raw actor is finite but behaviorally invalid. Re-export "
+          "with the checkpoint obs_norm_state_dict baked into the graph.");
+    if (formal_contract && empirical_norm != "1")
+      throw std::runtime_error(
+          "formal schema-v2/110-D ONNX must explicitly declare empirical_normalization=1; "
+          "missing/disabled normalization provenance is not accepted for hardware deployment");
+    if (formal_contract && !allow_legacy_raw_diagnostic &&
+        (trained_norm != "1" || training_contract_exact != "1"))
+      throw std::runtime_error(
+          "publish-capable formal ONNX requires trained_with_obs_norm=1 and "
+          "training_contract_exact=1; re-export from the checkpoint's immutable training contract");
+    if (!formal_contract && obs_norm_baked != "1") {
+      if (!allow_legacy_raw_diagnostic)
+        throw std::runtime_error(
+            "legacy ONNX has raw or unknown observation normalization provenance. It may only be "
+            "opened under process-wide --no-publish diagnostics; re-export as schema v2 with "
+            "obs_norm_baked=1 before any command-capable run.");
+      std::fprintf(stderr,
+          "[pp DIAGNOSTIC] legacy/raw ONNX normalization is untrusted; allowed only because "
+          "process-wide no-publish is active.\n");
+    }
+
+    // Schema-v2 describes the ONNX packaging/layout.  Formal hardware eligibility additionally
+    // requires the immutable schema-v3 *training* execution contract: exact checkpoint binding,
+    // decoder limits, and both clock rates.  A diagnostic no-publish process may inspect an older
+    // export with missing fields, but any field that is present must still be well-formed.
+    training_contract_schema_version_ =
+        LookupMetaOptional(md, alloc, "training_contract_schema_version");
+    training_contract_sha256_ = LookupMetaOptional(md, alloc, "training_contract_sha256");
+    source_checkpoint_sha256_ = LookupMetaOptional(md, alloc, "source_checkpoint_sha256");
+    const std::string qdes_clamp = LookupMetaOptional(md, alloc, "qdes_clamp");
+    const std::string physics_dt = LookupMetaOptional(md, alloc, "physics_step_dt_s");
+    const std::string policy_dt = LookupMetaOptional(md, alloc, "policy_step_dt_s");
+    const std::string decimation = LookupMetaOptional(md, alloc, "control_decimation");
+    const std::string qdes_limits =
+        LookupMetaOptional(md, alloc, "qdes_joint_pos_limits");
+    const std::string racket_control_point =
+        LookupMetaOptional(md, alloc, "racket_control_point_offset_wrist_m");
+
+    if (!training_contract_schema_version_.empty() &&
+        training_contract_schema_version_ != "1" &&
+        training_contract_schema_version_ != "2" &&
+        training_contract_schema_version_ != "3")
+      throw std::runtime_error(
+          "ONNX training_contract_schema_version must be one of diagnostic 1/2 or formal 3");
+    if (!training_contract_sha256_.empty() &&
+        !IsLowerHexSha256(training_contract_sha256_))
+      throw std::runtime_error(
+          "ONNX training_contract_sha256 must contain exactly 64 lowercase hex characters");
+    if (!source_checkpoint_sha256_.empty() &&
+        !IsLowerHexSha256(source_checkpoint_sha256_))
+      throw std::runtime_error(
+          "ONNX source_checkpoint_sha256 must contain exactly 64 lowercase hex characters");
+    if (!qdes_clamp.empty() && qdes_clamp != "0" && qdes_clamp != "1")
+      throw std::runtime_error("ONNX qdes_clamp metadata must be 0|1");
+    if (!physics_dt.empty()) physics_step_dt_s_ = ParsePositiveFinite(physics_dt, "physics_step_dt_s");
+    if (!policy_dt.empty()) policy_step_dt_s_ = ParsePositiveFinite(policy_dt, "policy_step_dt_s");
+    if (!decimation.empty())
+      control_decimation_ = ParseCanonicalPositiveInt(decimation, "control_decimation");
+    if (!qdes_limits.empty()) {
+      const Eigen::VectorXd flat = ToFiniteVecStrict(qdes_limits, "qdes_joint_pos_limits");
+      if (flat.size() != 2 * kNumJoints)
+        throw std::runtime_error(
+            "ONNX qdes_joint_pos_limits must contain 62 values in Isaac/action order");
+      qdes_soft_lo_.resize(kNumJoints);
+      qdes_soft_hi_.resize(kNumJoints);
+      for (int i = 0; i < kNumJoints; ++i) {
+        const double lo = flat[2 * i];
+        const double hi = flat[2 * i + 1];
+        if (!std::isfinite(lo) || !std::isfinite(hi) || !(lo < hi))
+          throw std::runtime_error(
+              "ONNX qdes_joint_pos_limits contains a non-finite or non-increasing pair at '" +
+              joint_names_[i] + "'");
+        if (default_q_[i] < lo || default_q_[i] > hi)
+          throw std::runtime_error(
+              "ONNX default_joint_pos lies outside qdes_joint_pos_limits at '" +
+              joint_names_[i] + "'");
+        qdes_soft_lo_[i] = lo;
+        qdes_soft_hi_[i] = hi;
+      }
+    }
+    bool racket_control_point_matches_runtime = false;
+    if (!racket_control_point.empty()) {
+      const Eigen::VectorXd recorded = ToFiniteVecStrict(
+          racket_control_point, "racket_control_point_offset_wrist_m");
+      if (recorded.size() != 3)
+        throw std::runtime_error(
+            "ONNX racket_control_point_offset_wrist_m must contain exactly three values");
+      const Vec3 expected = racket_control_point_offset_wrist_m();
+      constexpr double kControlPointToleranceM = 1e-9;
+      if ((recorded - expected).cwiseAbs().maxCoeff() > kControlPointToleranceM)
+        throw std::runtime_error(
+            "ONNX racket_control_point_offset_wrist_m does not match the C++ FK control point "
+            "(pingpang_red_Link origin); refusing a mixed wrist/racket contract");
+      racket_control_point_matches_runtime = true;
+    }
+    if (std::isfinite(physics_step_dt_s_) && std::isfinite(policy_step_dt_s_) &&
+        control_decimation_ > 0) {
+      const double reconstructed =
+          physics_step_dt_s_ * static_cast<double>(control_decimation_);
+      if (std::fabs(policy_step_dt_s_ - reconstructed) > 1e-12)
+        throw std::runtime_error(
+            "ONNX policy_step_dt_s does not equal physics_step_dt_s * control_decimation");
+    }
+
+    const bool schema3_complete =
+        training_contract_exact == "1" &&
+        training_contract_schema_version_ == "3" &&
+        IsLowerHexSha256(training_contract_sha256_) &&
+        IsLowerHexSha256(source_checkpoint_sha256_) &&
+        qdes_clamp == "1" && std::isfinite(physics_step_dt_s_) &&
+        std::isfinite(policy_step_dt_s_) && control_decimation_ > 0 &&
+        qdes_soft_lo_.size() == kNumJoints && racket_control_point_matches_runtime;
+    if (formal_contract && !allow_legacy_raw_diagnostic && !schema3_complete)
+      throw std::runtime_error(
+          "publish-capable schema-v2 ONNX requires an exact schema-v3 training contract: "
+          "training_contract_schema_version=3, valid contract/checkpoint SHA-256 values, "
+          "qdes_clamp=1 with 31 soft limit pairs, self-consistent execution timing, and an "
+          "FK-matched racket_control_point_offset_wrist_m");
+    has_schema3_execution_contract_ = schema3_complete;
+    if (allow_legacy_raw_diagnostic && formal_contract && !schema3_complete) {
+      std::fprintf(stderr,
+          "[pp DIAGNOSTIC] schema-v2 ONNX lacks a complete schema-v3 execution contract; "
+          "hardware publication is not eligible.\n");
+    }
+    const std::string effort_s = LookupMetaOptional(md, alloc, "joint_effort_limits");
+    if (!effort_s.empty()) effort_limits_ = ToVec(effort_s);
+    if (effort_limits_.size() != kNumJoints) {
+      if (!allow_legacy_raw_diagnostic)
+        throw std::runtime_error(
+            "publish-capable ONNX requires 31 joint_effort_limits so the runner can "
+            "reject commands whose requested PD effort exceeds the trained actuator envelope");
+      effort_limits_ = Eigen::VectorXd();
+      std::fprintf(stderr,
+          "[pp DIAGNOSTIC] ONNX lacks a 31-joint effort envelope; allowed only under no-publish.\n");
+    } else {
+      for (int i = 0; i < effort_limits_.size(); ++i)
+        if (!std::isfinite(effort_limits_[i]) || effort_limits_[i] <= 0.0)
+          throw std::runtime_error(
+              "ONNX joint_effort_limits contains a non-positive/non-finite value");
+    }
+
+    if (formal_contract) {
+      std::string expected_contract;
+      std::string expected_mode;
+      std::vector<std::string> expected_names;
+      std::vector<int> expected_dims;
+      if (obs_dim_ == kObsDim110) {
+        expected_contract = "hitter_pure";
+        expected_mode = "hitter_pure";
+        expected_names = {
+            "base_ang_vel", "joint_pos", "joint_vel", "actions", "projected_gravity",
+            "base_forward_xy", "base_target_delta_xy", "racket_target_rel_base",
+            "racket_target_vel_w", "time_to_strike"};
+        expected_dims = {3, 31, 31, 31, 3, 2, 2, 3, 3, 1};
+      } else if (obs_dim_ == kObsDim175) {
+        expected_contract = "deploy_parity";
+        expected_mode = "deploy_parity";
+        expected_names = {
+            "command", "motion_anchor_ori_b", "base_ang_vel", "joint_pos", "joint_vel",
+            "actions", "projected_gravity", "racket_target_pos_b", "racket_target_vel_w",
+            "time_to_strike", "swing_type"};
+        expected_dims = {62, 6, 3, 31, 31, 31, 3, 3, 3, 1, 1};
+      } else if (obs_dim_ == kObsDim177) {
+        expected_contract = "hitter_footwork";
+        expected_mode = "hitter_footwork";
+        expected_names = {
+            "command", "motion_anchor_ori_b", "base_ang_vel", "joint_pos", "joint_vel",
+            "actions", "projected_gravity", "base_target_pos_b", "racket_target_pos_b",
+            "racket_target_vel_w", "time_to_strike", "swing_type"};
+        expected_dims = {62, 6, 3, 31, 31, 31, 3, 2, 3, 3, 1, 1};
+      } else if (obs_dim_ == kObsDim) {
+        expected_contract = "full";
+        expected_mode = "full";
+        expected_names = {
+            "command", "motion_anchor_pos_b", "motion_anchor_ori_b", "base_ang_vel",
+            "joint_pos", "joint_vel", "actions", "projected_gravity", "base_target_pos_b",
+            "racket_target_pos_b", "racket_target_vel_w", "time_to_strike", "swing_type"};
+        expected_dims = {62, 3, 6, 3, 31, 31, 31, 3, 2, 3, 3, 1, 1};
+      }
+      const std::string contract = LookupMeta(md, alloc, "actor_obs_contract");
+      const std::string mode = LookupMeta(md, alloc, "actor_obs_mode");
+      const std::string total = LookupMeta(md, alloc, "actor_obs_total_dim");
+      const std::vector<std::string> names =
+          SplitCsv(LookupMeta(md, alloc, "observation_names"));
+      const Eigen::VectorXd dims = ToVec(LookupMeta(md, alloc, "actor_obs_term_dims"));
+      bool dims_match = dims.size() == static_cast<int>(expected_dims.size());
+      for (int i = 0; dims_match && i < dims.size(); ++i)
+        dims_match = std::isfinite(dims[i]) &&
+                     std::fabs(dims[i] - std::round(dims[i])) < 1e-9 &&
+                     static_cast<int>(std::lround(dims[i])) ==
+                         expected_dims[static_cast<size_t>(i)];
+      if (expected_names.empty() || contract != expected_contract || mode != expected_mode ||
+          total != std::to_string(obs_dim_) ||
+          names != expected_names || !dims_match)
+        throw std::runtime_error(
+            "formal ONNX observation layout metadata does not match the exact runner contract; "
+            "refusing a right-width/wrong-column deployment");
+    }
+
+    if (formal_contract) {
+      static const std::vector<std::string> expected_bodies = {
+          "pelvis_link", "left_hip_roll_Link", "left_knee_Link", "left_ankle_roll_Link",
+          "right_hip_roll_Link", "right_knee_Link", "right_ankle_roll_Link", "torso_Link",
+          "left_shoulder_roll_Link", "left_elbow_Link", "left_wrist_yaw_Link",
+          "right_shoulder_roll_Link", "right_elbow_Link", "right_wrist_yaw_Link"};
+      const std::string anchor = LookupMeta(md, alloc, "anchor_body_name");
+      if (body_names_ != expected_bodies || anchor != "torso_Link")
+        throw std::runtime_error(
+            "formal ONNX body_names/anchor do not match the runner's exact 14-body order "
+            "(torso_Link must be anchor index 7)");
+    }
 
     // ZERO-GAIN GUARD. These gains go verbatim into the published RobotCommand; a non-positive
     // kp/kd means that joint receives NO PD torque (limp). The 2026-07-02 explicitpd_ft export
@@ -53,6 +323,13 @@ class PpOnnxPolicy {
     // drive gains, which explicit actuators null -> the free-base robot collapsed. Fail fast
     // instead of silently deploying a torqueless robot.
     for (int i = 0; i < kNumJoints; ++i) {
+      if (!std::isfinite(default_q_[i]) || !std::isfinite(action_scale_[i]) ||
+          !std::isfinite(kp_[i]) || !std::isfinite(kd_[i]))
+        throw std::runtime_error("ONNX joint metadata contains a non-finite value at '" +
+                                 joint_names_[i] + "'");
+      if (action_scale_[i] <= 0.0)
+        throw std::runtime_error("ONNX action_scale must be positive for joint '" +
+                                 joint_names_[i] + "'");
       if (kp_[i] <= 0.0 || kd_[i] <= 0.0)
         throw std::runtime_error(
             "ONNX metadata has non-positive PD gain for joint '" + joint_names_[i] +
@@ -70,11 +347,19 @@ class PpOnnxPolicy {
     if (!seg_s.empty() && !pha_s.empty()) {
       const Eigen::VectorXd seg = ToVec(seg_s);
       const Eigen::VectorXd pha = ToVec(pha_s);
-      if (seg.size() == pha.size() && seg.size() >= 1) {
-        clip_seg_lengths_.assign(seg.data(), seg.data() + seg.size());
-        clip_strike_phases_.assign(pha.data(), pha.data() + pha.size());
+      if (seg.size() != pha.size() || seg.size() < 1)
+        throw std::runtime_error("ONNX clip layout lengths/phases have incompatible sizes");
+      for (int i = 0; i < seg.size(); ++i) {
+        if (!std::isfinite(seg[i]) || seg[i] <= 0.0 ||
+            std::fabs(seg[i] - std::round(seg[i])) > 1e-9 ||
+            !std::isfinite(pha[i]) || pha[i] < 0.0 || pha[i] > 1.0)
+          throw std::runtime_error("ONNX clip layout contains invalid length/phase");
       }
+      clip_seg_lengths_.assign(seg.data(), seg.data() + seg.size());
+      clip_strike_phases_.assign(pha.data(), pha.data() + pha.size());
     }
+    if (formal_contract && clip_seg_lengths_.size() != 2)
+      throw std::runtime_error("formal ONNX requires exactly two validated clip layouts");
 
     // OPTIONAL per-clip reference base->racket reach offset at the strike frame
     // (dx0,dy0,dx1,dy1,...). Baked by utils/exporter.py since 2026-07-06 for 177-D
@@ -114,7 +399,33 @@ class PpOnnxPolicy {
     if (!hp_vel_s.empty()) parse_boxes(hp_vel_s, hp_vel_boxes_);
     if (!hp_base_s.empty()) {
       const Eigen::VectorXd v = ToVec(hp_base_s);
-      if (v.size() == 4) hp_base_range_ = {v[0], v[1], v[2], v[3]};
+      if (v.size() != 4)
+        throw std::runtime_error("hitter_pure_base_target_range must contain exactly 4 values");
+      hp_base_range_ = {v[0], v[1], v[2], v[3]};
+    }
+    if (obs_dim_ == kObsDim110) {
+      if (hp_pos_boxes_.size() != 2 || hp_vel_boxes_.size() != 2)
+        throw std::runtime_error(
+            "formal 110-D ONNX requires exactly two position and velocity boxes");
+      auto valid_box = [](const std::array<double, 6>& b) {
+        for (double x : b)
+          if (!std::isfinite(x)) return false;
+        return b[0] <= b[1] && b[2] <= b[3] && b[4] <= b[5];
+      };
+      if (!valid_box(hp_pos_boxes_[0]) || !valid_box(hp_pos_boxes_[1]) ||
+          !valid_box(hp_vel_boxes_[0]) || !valid_box(hp_vel_boxes_[1]))
+        throw std::runtime_error("formal 110-D ONNX contains a non-finite/inverted box");
+      if (hp_base_s.empty() || !std::all_of(hp_base_range_.begin(), hp_base_range_.end(),
+                                            [](double x) { return std::isfinite(x); }) ||
+          hp_base_range_[0] > hp_base_range_[1] || hp_base_range_[2] > hp_base_range_[3])
+        throw std::runtime_error(
+            "formal 110-D ONNX requires a finite, ordered hitter_pure_base_target_range");
+      constexpr double kPlaneTolerance = 1e-6;
+      if (std::fabs(hp_pos_boxes_[0][0] - hp_pos_boxes_[0][1]) > kPlaneTolerance ||
+          std::fabs(hp_pos_boxes_[1][0] - hp_pos_boxes_[1][1]) > kPlaneTolerance ||
+          std::fabs(hp_pos_boxes_[0][0] - hp_pos_boxes_[1][0]) > kPlaneTolerance)
+        throw std::runtime_error(
+            "formal 110-D ONNX position boxes must share one degenerate fixed strike plane");
     }
   }
 
@@ -141,6 +452,8 @@ class PpOnnxPolicy {
     auto out = Run(Eigen::VectorXd::Zero(obs_dim_), time_step,
                    {"joint_pos", "body_pos_w", "body_quat_w"});
     const Eigen::VectorXd ref_q = Map(out[0], kNumJoints);
+    RequireShape(out[1], {1, 14, 3}, "body_pos_w");
+    RequireShape(out[2], {1, 14, 4}, "body_quat_w");
     const float* bp = out[1].GetTensorData<float>();  // [1,14,3]; tracked body 0 = pelvis
     const float* bq = out[2].GetTensorData<float>();  // [1,14,4]
     const Vec3 pelvis_pos(bp[0], bp[1], bp[2]);
@@ -154,6 +467,28 @@ class PpOnnxPolicy {
   const Eigen::VectorXd& action_scale() const { return action_scale_; }
   const Eigen::VectorXd& kp() const { return kp_; }
   const Eigen::VectorXd& kd() const { return kd_; }
+  const Eigen::VectorXd& effort_limits() const { return effort_limits_; }
+  bool has_schema3_execution_contract() const { return has_schema3_execution_contract_; }
+  double physics_step_dt_s() const { return physics_step_dt_s_; }
+  double policy_step_dt_s() const { return policy_step_dt_s_; }
+  int control_decimation() const { return control_decimation_; }
+  const std::string& training_contract_sha256() const {
+    return training_contract_sha256_;
+  }
+  const std::string& source_checkpoint_sha256() const {
+    return source_checkpoint_sha256_;
+  }
+  const Eigen::VectorXd& qdes_soft_lo() const { return qdes_soft_lo_; }
+  const Eigen::VectorXd& qdes_soft_hi() const { return qdes_soft_hi_; }
+
+  // Run the actor once before the backend/driver starts. ONNX Runtime may lazily allocate and
+  // compile kernels on the first actor invocation; doing that in the publish callback can trip
+  // the command deadline despite healthy steady-state inference.
+  void prewarm_actor() {
+    const Eigen::VectorXd action = mean_action(Eigen::VectorXd::Zero(obs_dim_), 0);
+    if (action.size() != kNumJoints || !action.allFinite())
+      throw std::runtime_error("ONNX actor prewarm returned an invalid action");
+  }
 
   // Reference motion at time_step (obs-independent side-outputs).
   PpRefs refs(int time_step) {
@@ -162,6 +497,8 @@ class PpOnnxPolicy {
     PpRefs r;
     r.joint_pos = Map(out[0], kNumJoints);
     r.joint_vel = Map(out[1], kNumJoints);
+    RequireShape(out[2], {1, 14, 3}, "body_pos_w");
+    RequireShape(out[3], {1, 14, 4}, "body_quat_w");
     const float* bp = out[2].GetTensorData<float>();  // [1,14,3]
     const float* bq = out[3].GetTensorData<float>();  // [1,14,4]
     r.anchor_pos_w = Vec3(bp[kAnchorTrackedIdx * 3 + 0], bp[kAnchorTrackedIdx * 3 + 1],
@@ -181,7 +518,16 @@ class PpOnnxPolicy {
 
   // target_q = default_q + action * action_scale (Isaac order).
   Eigen::VectorXd target_q(const Eigen::VectorXd& action) const {
-    return default_q_ + action.cwiseProduct(action_scale_);
+    if (action.size() != kNumJoints)
+      throw std::runtime_error("ONNX action output size != 31");
+    Eigen::VectorXd target = default_q_ + action.cwiseProduct(action_scale_);
+    // Strategy clamp: reproduce ClampedJointPositionAction's schema-v3 *soft* limits in the
+    // actor/action order.  The runner's SDK-order hard clamp remains a separate outer safety
+    // envelope and therefore also protects PD_STAND/reference-playback/non-policy commands.
+    if (qdes_soft_lo_.size() == kNumJoints && qdes_soft_hi_.size() == kNumJoints) {
+      target = target.cwiseMax(qdes_soft_lo_).cwiseMin(qdes_soft_hi_);
+    }
+    return target;
   }
 
  private:
@@ -201,10 +547,25 @@ class PpOnnxPolicy {
   }
 
   static Eigen::VectorXd Map(const Ort::Value& v, int n) {
+    if (!v.IsTensor()) throw std::runtime_error("ONNX output is not a tensor");
+    const auto info = v.GetTensorTypeAndShapeInfo();
+    if (info.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
+        info.GetElementCount() != static_cast<size_t>(n))
+      throw std::runtime_error("ONNX output tensor type/element count violates the contract");
     const float* p = v.GetTensorData<float>();
     Eigen::VectorXd out(n);
     for (int i = 0; i < n; ++i) out[i] = p[i];
     return out;
+  }
+  static void RequireShape(const Ort::Value& v, std::initializer_list<int64_t> expected,
+                           const char* name) {
+    if (!v.IsTensor())
+      throw std::runtime_error(std::string("ONNX output '") + name + "' is not a tensor");
+    const auto info = v.GetTensorTypeAndShapeInfo();
+    const std::vector<int64_t> want(expected);
+    if (info.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT || info.GetShape() != want)
+      throw std::runtime_error(std::string("ONNX output '") + name +
+                               "' has the wrong type/shape");
   }
   static std::string LookupMeta(Ort::ModelMetadata& md, Ort::AllocatorWithDefaultOptions& a,
                                 const char* key) {
@@ -227,6 +588,59 @@ class PpOnnxPolicy {
     for (size_t i = 0; i < t.size(); ++i) v[i] = std::stod(t[i]);
     return v;
   }
+  static Eigen::VectorXd ToFiniteVecStrict(const std::string& value, const char* key) {
+    const auto tokens = SplitCsv(value);
+    Eigen::VectorXd parsed(tokens.size());
+    for (size_t i = 0; i < tokens.size(); ++i) {
+      size_t consumed = 0;
+      try {
+        parsed[static_cast<int>(i)] = std::stod(tokens[i], &consumed);
+      } catch (const std::exception&) {
+        throw std::runtime_error(std::string("ONNX ") + key +
+                                 " contains a non-numeric value");
+      }
+      if (consumed != tokens[i].size() ||
+          !std::isfinite(parsed[static_cast<int>(i)]))
+        throw std::runtime_error(std::string("ONNX ") + key +
+                                 " contains a malformed or non-finite value");
+    }
+    return parsed;
+  }
+  static bool IsLowerHexSha256(const std::string& value) {
+    if (value.size() != 64) return false;
+    return std::all_of(value.begin(), value.end(), [](char c) {
+      return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+    });
+  }
+  static double ParsePositiveFinite(const std::string& value, const char* key) {
+    size_t consumed = 0;
+    double parsed = 0.0;
+    try {
+      parsed = std::stod(value, &consumed);
+    } catch (const std::exception&) {
+      throw std::runtime_error(std::string("ONNX ") + key +
+                               " metadata is not a finite positive number");
+    }
+    if (consumed != value.size() || !std::isfinite(parsed) || parsed <= 0.0)
+      throw std::runtime_error(std::string("ONNX ") + key +
+                               " metadata is not a finite positive number");
+    return parsed;
+  }
+  static int ParseCanonicalPositiveInt(const std::string& value, const char* key) {
+    size_t consumed = 0;
+    long parsed = 0;
+    try {
+      parsed = std::stol(value, &consumed, 10);
+    } catch (const std::exception&) {
+      throw std::runtime_error(std::string("ONNX ") + key +
+                               " metadata is not a canonical positive integer");
+    }
+    if (consumed != value.size() || parsed <= 0 ||
+        parsed > std::numeric_limits<int>::max() || value != std::to_string(parsed))
+      throw std::runtime_error(std::string("ONNX ") + key +
+                               " metadata is not a canonical positive integer");
+    return static_cast<int>(parsed);
+  }
 
   Ort::Env env_;
   Ort::MemoryInfo mem_;
@@ -236,7 +650,15 @@ class PpOnnxPolicy {
   std::vector<Vec2> reach_offsets_;  // per-clip ref base->racket reach; empty on old exports
   std::vector<std::array<double, 6>> hp_pos_boxes_, hp_vel_boxes_;  // hitter_pure geometry
   std::array<double, 4> hp_base_range_ = {0.0, 0.0, 0.0, 0.0};
-  Eigen::VectorXd default_q_, action_scale_, kp_, kd_;
+  Eigen::VectorXd default_q_, action_scale_, kp_, kd_, effort_limits_;
+  Eigen::VectorXd qdes_soft_lo_, qdes_soft_hi_;  // schema-v3 Isaac/action-order soft limits
+  std::string training_contract_schema_version_;
+  std::string training_contract_sha256_;
+  std::string source_checkpoint_sha256_;
+  double physics_step_dt_s_ = std::numeric_limits<double>::quiet_NaN();
+  double policy_step_dt_s_ = std::numeric_limits<double>::quiet_NaN();
+  int control_decimation_ = 0;
+  bool has_schema3_execution_contract_ = false;
   std::vector<float> obs_f_;
   int obs_dim_ = kObsDim;  // detected from the model input at load (180 full / 175 deploy_parity)
 };

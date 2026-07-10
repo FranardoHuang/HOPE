@@ -39,6 +39,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -141,6 +142,9 @@ struct PpPolicyConfig {
   // default on hardware. The A/B/C rehearsal selects fabricated explicitly via
   // --loc-mode. See LocMode + SIM_DEPLOY_REHEARSAL.md.
   LocMode loc_mode = LocMode::kPerfectTracking;  // A/B/C localization mode (see LocMode).
+  // Explicit process-wide no-publish diagnostics may inspect legacy/raw artifacts and the
+  // perfect-tracking dropout behavior. This must never be enabled for a publish-capable run.
+  bool diagnostic_no_publish = false;
   // DEFAULT FLIPPED TO TRUE (2026-07-03): with yaw_align (below, default on) the base yaw is
   // expressed relative to the ENGAGE heading — it starts at identity and then tracks the robot's
   // REAL turning, which is exactly what training saw (targets rotated by the current base yaw,
@@ -314,13 +318,42 @@ struct PpPolicyConfig {
 class PpPolicy {
  public:
   PpPolicy(const std::string& onnx_path, PpPolicyConfig cfg = {})
-      : onnx_(onnx_path), cfg_(cfg), level_(cfg.level),
+      : onnx_(onnx_path, cfg.diagnostic_no_publish), cfg_(cfg), level_(cfg.level),
         swing_speed_(cfg.swing_speed), swing_dir_(cfg.start_backhand ? -1 : 1),
         legs_passive_(cfg.legs_passive), waist_passive_(cfg.waist_passive),
         leg_clamp_rad_(cfg.leg_clamp_rad), leg_smooth_alpha_(cfg.leg_smooth_alpha),
         last_action_(Eigen::VectorXd::Zero(kNumJoints)) {
     if (!build_src_to_sdk(onnx_.joint_names(), isaac_to_sdk_))
       throw std::runtime_error("pingpong: ONNX joint_names do not map onto the backend layout");
+    if (!std::isfinite(cfg_.dt) || cfg_.dt <= 0.0)
+      throw std::runtime_error("pingpong: policy dt must be finite and positive");
+    if (!cfg_.yaw_align && !cfg_.diagnostic_no_publish)
+      throw std::runtime_error(
+          "pingpong: --no-yaw-align is diagnostic-only and requires process-wide --no-publish");
+    if (std::isfinite(onnx_.policy_step_dt_s()) &&
+        std::fabs(cfg_.dt - onnx_.policy_step_dt_s()) > 1e-12)
+      throw std::runtime_error(
+          "pingpong: runtime policy dt does not exactly match schema-v3 ONNX policy_step_dt_s");
+    if (!cfg_.diagnostic_no_publish && !onnx_.has_schema3_execution_contract())
+      throw std::runtime_error(
+          "pingpong: publish-capable runtime requires a complete schema-v3 ONNX execution "
+          "contract");
+    clip_.step_dt = cfg_.dt;
+    const bool station_actor =
+        onnx_.obs_dim() == kObsDim177 || onnx_.obs_dim() == kObsDim110;
+    if (station_actor && cfg_.loc_mode != LocMode::kOracle &&
+        cfg_.loc_mode != LocMode::kExternalBase) {
+      if (!cfg_.diagnostic_no_publish) {
+        throw std::runtime_error(
+            "pingpong: a 177-D/110-D station policy requires real, fresh base localization "
+            "(oracle in simulation or external_base/mocap on hardware). perfect_tracking/"
+            "fabricated silently collapse the station channel to delta=0; refusing a "
+            "publish-capable run. Use process-wide --no-publish only for diagnostics.");
+      }
+      std::fprintf(stderr,
+          "[pp DIAGNOSTIC] station policy without oracle/external base is permitted only because "
+          "process-wide no-publish is active; station observations are not deployment-valid.\n");
+    }
     // Planner-mode pre-engage hold target: seed pos/vel from the forehand box center (the
     // same in-training values the SCRIPTED hold uses) so the level-0 hold obs before the
     // first serve is on-manifold; each engage overwrites them with the frozen command.
@@ -497,6 +530,7 @@ class PpPolicy {
     }
     nominal_q_sdk_ = to_sdk_order(onnx_.default_q(), isaac_to_sdk_);  // nominal pose in SDK order
     leg_qdes_smooth_ = nominal_q_sdk_;  // seed the leg q_des EMA at nominal (no jump on first release)
+    yaw_align_pending_.store(cfg_.yaw_align, std::memory_order_release);
     // Official robust-stand PD gains (a3_pd_stand_*, 29-DOF policy view) scattered
     // to the 31 SDK slots via kA3PolicyToSdkIdx; neck slots get the fixed head PD.
     official_kp_sdk_ = Eigen::VectorXd::Zero(kNumJoints);
@@ -508,6 +542,7 @@ class PpPolicy {
     }
     for (int s : {kHeadSlot0, kHeadSlot1}) { official_kp_sdk_[s] = kHeadKp; official_kd_sdk_[s] = kHeadKd; }
     last_q_des_ = last_q_meas_ = last_qd_meas_ = Eigen::VectorXd::Zero(kNumJoints);
+    onnx_.prewarm_actor();  // before backend start; never pay cold-graph cost in MOTION
   }
 
   // Attach a SIM-ONLY oracle pelvis-pose source (shared by main; only consulted
@@ -629,10 +664,18 @@ class PpPolicy {
   // anchor so it re-captures at the robot's NEW spot (a stale anchor from before the
   // move would command a walk back to the old position).
   void rearm_yaw_align() {
-    yaw_align_pending_.store(true);
+    yaw_align_pending_.store(cfg_.yaw_align, std::memory_order_release);
+    yaw_align_defer_ticks_ = 0;
     hold_station_set_ = false;
-    arm_quiet_ticks_ = 0;    // fresh MOTION entry: restart the arm-hold sustained-quiet clock
-    arm_hold_armed_ = true;  // ...and re-arm the pre-swing arm hold
+    session_clock_reset_pending_.store(true);
+    rest_rearm_armed_.store(false);
+    rest_rearm_tick_ = 0;
+    last_tts_at_windup_ = true;
+    pending_swing_dir_.store(0);
+    swing_level_prev_ = level_.load();
+    swing_dir_prev_ = swing_dir_.load();
+    last_action_.setZero();
+    if (nominal_q_sdk_.size() == kNumJoints) leg_qdes_smooth_ = nominal_q_sdk_;
     // PLANNER-MODE swing-state reset (2026-07-08): SHADOW and MOTION run ComputeCommand on
     // DIFFERENT clock domains (SHADOW = a free-running local counter, MOTION = the publish-
     // gated driver tick). A swing engaged during a SHADOW preview leaves level 1 + a
@@ -642,13 +685,74 @@ class PpPolicy {
     // a clean stand: level 0, no engage latch, no stale rest timer. The next valid planner
     // command re-engages normally. (Scripted mode is untouched — the operator owns level.)
     if (cfg_.planner_mode) {
-      pending_swing_dir_.store(0);
-      rest_rearm_armed_.store(false);
       level_.store(0);
+      swing_level_prev_ = 0;
       planner_engaged_ = false;
+      planner_have_hold_ = false;
+      planner_tts0_ = 0.0;
       planner_static_active_ = false;
+      planner_static_start_tick_ = 0;
+      planner_hold_start_tick_ = 0;
+      planner_static_q0_.resize(0);
       planner_entry_pending_.store(true);  // restart the engage settle clock (engage_settle_s)
+      set_planner_status_("yaw_align_pending");
     }
+  }
+
+  std::uint64_t yaw_alignment_generation() const noexcept {
+    return yaw_alignment_generation_.load(std::memory_order_acquire);
+  }
+
+  // Global yaw-capture publication barrier.  Main calls this before dispatching *any* mode and
+  // ComputeCommand repeats it defensively for direct users.  While capture is pending, every mode
+  // emits an explicit finite zero-gain frame; neither an old yaw basis nor a partially captured
+  // basis can reach PD_STAND/reference/policy output.  The successful capture tick is also a
+  // zero-gain frame.  The next tick observes a new generation and re-arms its pose blend/clock.
+  bool HandleYawAlignment(const robot_io::RobotState& state,
+                          robot_io::RobotCommand& cmd) {
+    if (!cfg_.yaw_align || !yaw_align_pending_.load(std::memory_order_acquire)) return false;
+
+    cmd.q_des = state.q.size() == kNumJoints && state.q.allFinite()
+                    ? state.q
+                    : Eigen::VectorXd::Zero(kNumJoints);
+    cmd.dq_des = Eigen::VectorXd::Zero(kNumJoints);
+    cmd.tau_ff = Eigen::VectorXd::Zero(kNumJoints);
+    cmd.kp = Eigen::VectorXd::Zero(kNumJoints);
+    cmd.kd = Eigen::VectorXd::Zero(kNumJoints);
+
+    const Vec4 base_q = state.imu_quat_wxyz;
+    const Vec4 torso_q = state.has_secondary_imu ? state.sec_imu_quat_wxyz
+                                                 : cfg_.nominal_torso_quat_w;
+    const Vec3 gyro = state.imu_gyro;
+    const bool finite = base_q.allFinite() && torso_q.allFinite() && gyro.allFinite();
+    const double gz = finite
+        ? 2.0 * (base_q[1] * base_q[1] + base_q[2] * base_q[2]) - 1.0
+        : 1.0;
+    const double gyro_n = finite ? gyro.norm() : std::numeric_limits<double>::infinity();
+    if (!finite || gz > -0.95 || gyro_n > 0.5) {
+      if (++yaw_align_defer_ticks_ % 50 == 1) {
+        std::fprintf(stderr,
+            "[pp WARN] yaw-align PENDING: zero-gain barrier; robot not upright/still "
+            "(finite=%d gravZ=%+.2f |gyro|=%.2f).\n",
+            finite ? 1 : 0, gz, gyro_n);
+      }
+      return true;
+    }
+
+    yaw0_base_inv_ = quat_inv(yaw_quat(base_q));
+    yaw0_torso_inv_ = quat_inv(yaw_quat(torso_q));
+    yaw_align_defer_ticks_ = 0;
+    yaw_align_pending_.store(false, std::memory_order_release);
+    yaw_alignment_generation_.fetch_add(1, std::memory_order_acq_rel);
+    const auto yaw_deg = [](const Vec4& q) {
+      return std::atan2(2.0 * (q[0] * q[3] + q[1] * q[2]),
+                        1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3])) * 180.0 / M_PI;
+    };
+    std::fprintf(stderr,
+        "[pp] yaw-align captured behind zero-gain barrier: base_yaw=%+.1f deg "
+        "torso_yaw=%+.1f deg; active command/blend begins next tick.\n",
+        yaw_deg(base_q), yaw_deg(torso_q));
+    return true;
   }
 
   // Full-body gate: true => leg q_des is overwritten to nominal (NOT a full-body
@@ -699,6 +803,15 @@ class PpPolicy {
   // CommandFn body. Fills a full 31-slot RobotCommand (SDK order). Always valid.
   bool ComputeCommand(std::uint64_t tick_idx, const robot_io::RobotState& state,
                       robot_io::RobotCommand& cmd) {
+    if (HandleYawAlignment(state, cmd)) return true;
+    // Every SHADOW/MOTION session owns a different clock domain. Reset at the first callback
+    // after entry even in scripted mode; otherwise s -> m can resume an arbitrary mid-swing
+    // phase accumulated before PD_STAND and jump directly from stand to follow-through.
+    if (session_clock_reset_pending_.exchange(false)) {
+      swing_clock_origin_.store(tick_idx);
+      last_tts_at_windup_ = true;
+      last_action_.setZero();
+    }
     // LIVE PLANNER (Path B): decide engage/hold from the latest planner command and drive
     // the EXISTING swing controls (set_swing_dir/set_level + freeze). Runs before the swing
     // clock logic so the 0->1 edge below resets the clock to the windup as usual. No-op in
@@ -824,43 +937,9 @@ class PpPolicy {
     st.torso_quat_w = state.has_secondary_imu ? state.sec_imu_quat_wxyz
                                               : cfg_.nominal_torso_quat_w;
 
-    // YAW-ALIGN (see PpPolicyConfig::yaw_align). Capture each IMU's yaw on the first
-    // policy tick after (re)engage, then express every subsequent attitude relative to
-    // that entry heading. Fixes the boot-drift yaw polluting motion_anchor_ori_b and the
-    // racket-FK world conversion on hardware; no-op in sim where spawn yaw ~ 0.
+    // HandleYawAlignment() above captured both yaw offsets behind an explicit zero-gain
+    // publication barrier.  A non-pending tick may therefore only consume a complete pair.
     if (cfg_.yaw_align) {
-      if (yaw_align_pending_.load()) {
-        // UPRIGHT + STATIONARY GUARD (2026-07-04): capturing while the robot is tilted,
-        // turning, or fallen bakes a garbage offset into EVERY subsequent obs (yaw of a
-        // fallen quat is ill-defined; observed in the ROS runner: all base-relative
-        // targets rotated ~125 deg, magnitude untouched). Defer the capture until the
-        // robot is upright (proj gravity ~[0,0,-1]) and still (|gyro| small); warn while
-        // waiting so a hoisted/leaning engage is visible instead of silently wrong.
-        // body-frame gravity z from the raw base quat (w,x,y,z): R(q)^T·[0,0,-1] |_z
-        const double gz = 2.0 * (st.base_quat_w[1] * st.base_quat_w[1] +
-                                 st.base_quat_w[2] * st.base_quat_w[2]) - 1.0;
-        const double gyro_n = st.base_ang_vel_b.norm();
-        if (gz > -0.95 || gyro_n > 0.5) {
-          if (++yaw_align_defer_ticks_ % 50 == 1) {
-            std::fprintf(stderr,
-                "[pp WARN] yaw-align DEFERRED: robot not upright/still (gravZ=%+.2f "
-                "|gyro|=%.2f); stand the robot at its heading to capture.\n", gz, gyro_n);
-          }
-        } else {
-          yaw_align_pending_.store(false);
-          yaw_align_defer_ticks_ = 0;
-          yaw0_base_inv_ = quat_inv(yaw_quat(st.base_quat_w));
-          yaw0_torso_inv_ = quat_inv(yaw_quat(st.torso_quat_w));
-        const auto yaw_deg = [](const Vec4& q) {
-          return std::atan2(2.0 * (q[0] * q[3] + q[1] * q[2]),
-                            1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3])) * 180.0 / M_PI;
-        };
-        std::fprintf(stderr,
-            "[pp] yaw-align captured at policy engage: base_yaw=%+.1f deg torso_yaw=%+.1f deg "
-            "(subtracted from all subsequent IMU attitudes; robot heading at engage == clip +x)\n",
-            yaw_deg(st.base_quat_w), yaw_deg(st.torso_quat_w));
-        }
-      }
       st.base_quat_w = quat_mul(yaw0_base_inv_, st.base_quat_w);
       st.torso_quat_w = quat_mul(yaw0_torso_inv_, st.torso_quat_w);
     }
@@ -943,6 +1022,35 @@ class PpPolicy {
     }
     last_base_pos_ = st.base_pos_w;
     last_base_quat_w_ = st.base_quat_w;  // yaw-aligned; PlannerEngageStep_ gates on it next tick
+
+    // The 177-D footwork and 110-D HitterPure actors use station delta as a closed-loop
+    // balance/locomotion signal.
+    // If its required localization stream drops, do not run or publish the actor on a fictional
+    // delta=0 fallback. Publish a zero-gain frame immediately; a later fresh sample may re-arm.
+    const bool required_base_fresh =
+        (cfg_.loc_mode == LocMode::kOracle && oracle_fresh_) ||
+        (cfg_.loc_mode == LocMode::kExternalBase && base_fresh_);
+    if ((onnx_.obs_dim() == kObsDim177 || onnx_.obs_dim() == kObsDim110) &&
+        !required_base_fresh &&
+        !cfg_.diagnostic_no_publish) {
+      if ((required_base_warn_tick_++ % 100) == 0) {
+        std::fprintf(stderr,
+            "[pp SAFETY] station-policy localization is not fresh -> zero-gain halt; "
+            "MOTION remains blocked until oracle/external_base recovers.\n");
+      }
+      cmd.q_des = state.q.size() == kNumJoints && state.q.allFinite()
+                      ? state.q
+                      : Eigen::VectorXd::Zero(kNumJoints);
+      cmd.dq_des = Eigen::VectorXd::Zero(kNumJoints);
+      cmd.tau_ff = Eigen::VectorXd::Zero(kNumJoints);
+      cmd.kp = Eigen::VectorXd::Zero(kNumJoints);
+      cmd.kd = Eigen::VectorXd::Zero(kNumJoints);
+      // Never resume the interrupted clip at a random later phase if localization returns.
+      // Re-enter through a clean level-0/session/yaw capture and the normal planner settle gate.
+      level_.store(0);
+      rearm_yaw_align();
+      return true;
+    }
 
     // LIVE PLANNER static stand at level 0 — in TWO regimes:
     //   (a) pre-FIRST-engage (the Python runner's proven _stand-until-engage design;
@@ -1231,9 +1339,13 @@ class PpPolicy {
     // One-shot comprehensive FIRST-TICK debug dump (joint pos/vel, IMU/gravity,
     // full per-block obs stats, raw ONNX action stats, decoded q_des/kp/kd) for
     // bring-up + AGI staff review. Fires on the first policy tick only.
-    if (!dbg_done_) {
+    if (!dbg_done_ && cfg_.diagnostic_no_publish) {
       dbg_done_ = true;
       LogFirstTick(obs, action, q_sdk, kp_sdk, kd_sdk, st, state, time_step);
+    } else if (!dbg_done_) {
+      // Publishing callbacks are deadline-bound; the periodic status snapshot carries the
+      // required diagnostics without synchronous multi-line I/O in the command hot path.
+      dbg_done_ = true;
     }
 
     cmd.q_des = q_sdk;
@@ -1331,6 +1443,14 @@ class PpPolicy {
       return;
     }
     planner_engaged_ = false;  // level 0: idle/hold (ready-hold override uses planner_have_hold_)
+
+    // The previous session's yaw offsets are invalid until the upright/still capture lands.
+    // Engaging in this window freezes a target and picks a side in the old yaw frame; the next
+    // tick then rotates the observation frame under an active swing. Fail closed until capture.
+    if (cfg_.yaw_align && yaw_align_pending_.load(std::memory_order_acquire)) {
+      set_planner_status_("yaw_align_pending");
+      return;
+    }
 
     // Inter-swing rest: the completion path armed rest_rearm_tick_ (planner mode never
     // auto-re-arms; it is reused purely as a settle timer). Hold until it elapses.
@@ -1682,10 +1802,12 @@ class PpPolicy {
   double leg_smooth_alpha_ = 1.0;           // EMA low-pass on released leg q_des (1=off)
   Eigen::VectorXd leg_qdes_smooth_;         // EMA state for the leg q_des low-pass (seeded to nominal)
   std::atomic<std::uint64_t> swing_clock_origin_{0};  // tick offset; reset on each level->1 entry
+  std::atomic<bool> session_clock_reset_pending_{true};  // every SHADOW/MOTION entry
   std::uint64_t rest_rearm_tick_ = 0;                 // driver thread only
   std::atomic<bool> rest_rearm_armed_{false};         // cleared by any external set_level()
   // yaw-align state (see PpPolicyConfig::yaw_align / rearm_yaw_align)
   std::atomic<bool> yaw_align_pending_{true};
+  std::atomic<std::uint64_t> yaw_alignment_generation_{0};
   Vec4 yaw0_base_inv_ = Vec4(1.0, 0.0, 0.0, 0.0);     // driver thread only
   Vec4 yaw0_torso_inv_ = Vec4(1.0, 0.0, 0.0, 0.0);    // driver thread only
   int swing_level_prev_ = 0;                          // ComputeCommand (driver thread) only
@@ -1740,6 +1862,7 @@ class PpPolicy {
   std::shared_ptr<PpBasePoseInput> base_in_;        // written by AimRT subscriber thread
   bool base_fresh_ = false;             // a fresh external-base sample was used this tick
   std::uint64_t base_warn_tick_ = 0;    // repeat the stale-mocap warning every ~2 s
+  std::uint64_t required_base_warn_tick_ = 0;  // 177-D fail-closed warning throttle
   std::uint64_t gate_warn_tick_ = 0;    // throttle the target-gate rejection detail print
   bool planner_engaged_ = false;        // a planner swing is active (frozen target in flight)
   bool planner_have_hold_ = false;      // at least one swing engaged (diagnostic)

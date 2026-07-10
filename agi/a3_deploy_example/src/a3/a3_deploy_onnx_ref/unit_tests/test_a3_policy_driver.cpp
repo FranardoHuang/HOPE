@@ -11,13 +11,16 @@
 #include "a3_deploy/expand_to_backend.hpp"
 #include "a3_deploy/safe_halt.hpp"
 #include "a3_policy_parameters.hpp"
+#include "a3_pingpong/pp_runtime_interlocks.hpp"
 #include "robot_io/a3_aimrt_backend.hpp"
 #include "robot_io/a3_layout_extra.hpp"
 #include "robot_io/robot_io_backend.hpp"
 
 #include <atomic>
 #include <chrono>
+#include <limits>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -94,8 +97,23 @@ class CapturingBackend final : public robot_io::RobotIOBackend {
   }
 
   bool SendCommand(const RobotCommand& cmd) override {
+    const bool normal = cmd.kp.size() > 0 && !cmd.kp.isZero(0.0);
+    if (normal && block_normal_send_.load(std::memory_order_acquire)) {
+      normal_send_entered_.store(true, std::memory_order_release);
+      while (!release_normal_send_.load(std::memory_order_acquire))
+        std::this_thread::yield();
+    }
     std::lock_guard<std::mutex> lk(mu_);
     commands_.push_back(cmd);
+    if (throw_next_send_.exchange(false, std::memory_order_acq_rel)) {
+      throw std::runtime_error("injected SendCommand exception");
+    }
+    int remaining = fail_send_count_.load(std::memory_order_acquire);
+    while (remaining > 0 &&
+           !fail_send_count_.compare_exchange_weak(
+               remaining, remaining - 1, std::memory_order_acq_rel)) {
+    }
+    if (remaining > 0) return false;
     return true;
   }
 
@@ -116,13 +134,51 @@ class CapturingBackend final : public robot_io::RobotIOBackend {
     return commands_.empty() ? RobotCommand{} : commands_.back();
   }
 
+  void FailNextSend() { FailNextSends(1); }
+  void FailNextSends(int count) {
+    fail_send_count_.store(count, std::memory_order_release);
+  }
+  void ThrowNextSend() { throw_next_send_.store(true, std::memory_order_release); }
+  void BlockNormalSend() {
+    release_normal_send_.store(false, std::memory_order_release);
+    normal_send_entered_.store(false, std::memory_order_release);
+    block_normal_send_.store(true, std::memory_order_release);
+  }
+  bool NormalSendEntered() const {
+    return normal_send_entered_.load(std::memory_order_acquire);
+  }
+  void ReleaseNormalSend() {
+    release_normal_send_.store(true, std::memory_order_release);
+    block_normal_send_.store(false, std::memory_order_release);
+  }
+
  private:
   StateCallback cb_{};
   mutable std::mutex mu_;
   std::vector<RobotCommand> commands_;
+  std::atomic<int> fail_send_count_{0};
+  std::atomic<bool> throw_next_send_{false};
+  std::atomic<bool> block_normal_send_{false};
+  std::atomic<bool> normal_send_entered_{false};
+  std::atomic<bool> release_normal_send_{false};
 };
 
 }  // namespace
+
+TEST(PpRuntimeInterlocks, MeasuredEffortFeedbackMustBeCompleteAndFinite) {
+  Eigen::VectorXd tau = Eigen::VectorXd::Zero(robot_io::kA3Dof);
+  EXPECT_TRUE(a3_pingpong::MeasuredEffortFeedbackValid(tau, robot_io::kA3Dof));
+
+  tau.conservativeResize(robot_io::kA3Dof - 1);
+  EXPECT_FALSE(a3_pingpong::MeasuredEffortFeedbackValid(tau, robot_io::kA3Dof));
+
+  tau = Eigen::VectorXd::Zero(robot_io::kA3Dof);
+  tau[7] = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_FALSE(a3_pingpong::MeasuredEffortFeedbackValid(tau, robot_io::kA3Dof));
+
+  tau[7] = std::numeric_limits<double>::infinity();
+  EXPECT_FALSE(a3_pingpong::MeasuredEffortFeedbackValid(tau, robot_io::kA3Dof));
+}
 
 // =============================================================================
 // Part A — pure functions
@@ -230,6 +286,17 @@ TEST(BuildSafeHalt, WrongSizeInputYieldsZeros) {
     EXPECT_DOUBLE_EQ(cmd.kp[i], 0.0);
     EXPECT_DOUBLE_EQ(cmd.kd[i], 0.0);
   }
+}
+
+TEST(BuildSafeHalt, NonFiniteStateYieldsFiniteZeroPose) {
+  Eigen::VectorXd q = Eigen::VectorXd::Constant(31, 1.0);
+  q[7] = std::numeric_limits<double>::quiet_NaN();
+  RobotCommand cmd;
+  BuildSafeHaltCommand(q, cmd);
+  ASSERT_TRUE(cmd.q_des.allFinite());
+  EXPECT_TRUE(cmd.q_des.isZero(0.0));
+  EXPECT_TRUE(cmd.kp.isZero(0.0));
+  EXPECT_TRUE(cmd.kd.isZero(0.0));
 }
 
 // ---------------------------------------------------------------------------
@@ -620,6 +687,534 @@ TEST(A3PolicyDriver, SuppressesSafeHaltBeforeFirstCommandWhenConfigured) {
   EXPECT_GT(backend.CommandCount(), 1u);
 }
 
+TEST(A3PolicyDriver, InvalidCommandLatchesFaultAndPublishesSafeHalt) {
+  CapturingBackend backend;
+  ASSERT_TRUE(backend.Init(""));
+
+  auto invalid_command = [](std::uint64_t, const RobotState& state,
+                            RobotCommand& cmd) {
+    BuildSafeHaltCommand(state.q, cmd);
+    cmd.kp[0] = std::numeric_limits<double>::quiet_NaN();
+    return true;
+  };
+
+  A3PolicyDriverOptions opt;
+  opt.policy_hz = 200.0;
+  opt.watchdog.max_frame_age_ns = 500'000'000;
+  A3PolicyDriver driver(backend, a3_deploy::CommandFn(invalid_command), opt);
+  ASSERT_TRUE(driver.StartDriver());
+  backend.Emit(MakeState(true, true));
+
+  ASSERT_TRUE(WaitUntil([&] { return driver.CommandFaulted(); },
+                        std::chrono::milliseconds(100)));
+  driver.StopDriver();
+
+  EXPECT_EQ(driver.CommandFailureCount(), 1u);
+  EXPECT_EQ(driver.PolicyTickCount(), 0u);
+  ASSERT_GT(driver.SafeHaltCount(), 0u);
+  ASSERT_GT(backend.CommandCount(), 0u);
+  const auto last = backend.LastCommand();
+  EXPECT_TRUE(last.kp.isZero(0.0));
+  EXPECT_TRUE(last.kd.isZero(0.0));
+}
+
+TEST(A3PolicyDriver, CommandExceptionLatchesFaultInsteadOfTerminating) {
+  CapturingBackend backend;
+  ASSERT_TRUE(backend.Init(""));
+
+  auto throwing_command = [](std::uint64_t, const RobotState&,
+                             RobotCommand&) -> bool {
+    throw std::runtime_error("injected command callback exception");
+  };
+
+  A3PolicyDriverOptions opt;
+  opt.policy_hz = 200.0;
+  opt.watchdog.max_frame_age_ns = 500'000'000;
+  A3PolicyDriver driver(backend, a3_deploy::CommandFn(throwing_command), opt);
+  ASSERT_TRUE(driver.StartDriver());
+  backend.Emit(MakeState(true, true));
+
+  ASSERT_TRUE(WaitUntil([&] { return driver.CommandFaulted(); },
+                        std::chrono::milliseconds(100)));
+  driver.StopDriver();
+
+  EXPECT_EQ(driver.CommandFailureCount(), 1u);
+  EXPECT_EQ(driver.PolicyTickCount(), 0u);
+  EXPECT_GT(driver.SafeHaltCount(), 0u);
+}
+
+TEST(A3PolicyDriver, SendFailureLatchesFaultAndRetriesWithSafeHalt) {
+  CapturingBackend backend;
+  ASSERT_TRUE(backend.Init(""));
+
+  auto valid_command = [](std::uint64_t, const RobotState& state,
+                          RobotCommand& cmd) {
+    BuildSafeHaltCommand(state.q, cmd);
+    cmd.kp.setOnes();
+    cmd.kd.setOnes();
+    return true;
+  };
+
+  A3PolicyDriverOptions opt;
+  opt.policy_hz = 200.0;
+  opt.watchdog.max_frame_age_ns = 500'000'000;
+  A3PolicyDriver driver(backend, a3_deploy::CommandFn(valid_command), opt);
+  ASSERT_TRUE(driver.StartDriver());
+  backend.FailNextSend();
+  backend.Emit(MakeState(true, true));
+
+  ASSERT_TRUE(WaitUntil([&] { return driver.CommandFaulted(); },
+                        std::chrono::milliseconds(100)));
+  driver.StopDriver();
+
+  EXPECT_EQ(driver.SendFailureCount(), 1u);
+  EXPECT_EQ(driver.PolicyTickCount(), 0u);
+  ASSERT_GE(backend.CommandCount(), 2u);
+  EXPECT_TRUE(backend.LastCommand().kp.isZero(0.0));
+}
+
+TEST(A3PolicyDriver, SendExceptionLatchesFaultInsteadOfTerminating) {
+  CapturingBackend backend;
+  ASSERT_TRUE(backend.Init(""));
+
+  auto valid_command = [](std::uint64_t, const RobotState& state,
+                          RobotCommand& cmd) {
+    BuildSafeHaltCommand(state.q, cmd);
+    cmd.kp.setOnes();
+    return true;
+  };
+
+  A3PolicyDriverOptions opt;
+  opt.policy_hz = 200.0;
+  opt.watchdog.max_frame_age_ns = 500'000'000;
+  A3PolicyDriver driver(backend, a3_deploy::CommandFn(valid_command), opt);
+  ASSERT_TRUE(driver.StartDriver());
+  backend.ThrowNextSend();
+  backend.Emit(MakeState(true, true));
+
+  ASSERT_TRUE(WaitUntil([&] { return driver.CommandFaulted(); },
+                        std::chrono::milliseconds(100)));
+  driver.StopDriver();
+
+  EXPECT_EQ(driver.SendFailureCount(), 1u);
+  EXPECT_EQ(driver.PolicyTickCount(), 0u);
+  EXPECT_TRUE(backend.LastCommand().kp.isZero(0.0));
+}
+
+TEST(A3PolicyDriver, DeadlineSupervisorHaltsWhileCallbackIsBlocked) {
+  CapturingBackend backend;
+  ASSERT_TRUE(backend.Init(""));
+
+  std::atomic<bool> entered{false};
+  std::atomic<bool> release{false};
+  auto blocked_command = [&](std::uint64_t, const RobotState& state,
+                             RobotCommand& cmd) {
+    entered.store(true, std::memory_order_release);
+    while (!release.load(std::memory_order_acquire)) std::this_thread::yield();
+    BuildSafeHaltCommand(state.q, cmd);
+    return true;
+  };
+
+  A3PolicyDriverOptions opt;
+  opt.policy_hz = 200.0;
+  opt.watchdog.max_frame_age_ns = 500'000'000;
+  opt.command_deadline_s = 0.005;
+  opt.safe_halt_retry_period_s = 0.005;
+  opt.command_publish_expected = [] { return true; };
+  A3PolicyDriver driver(backend, a3_deploy::CommandFn(blocked_command), opt);
+  ASSERT_TRUE(driver.StartDriver());
+  backend.FailNextSend();  // first supervisor halt fails; the next retry must succeed
+  backend.Emit(MakeState(true, true));
+
+  ASSERT_TRUE(WaitUntil([&] { return entered.load(std::memory_order_acquire); },
+                        std::chrono::milliseconds(100)));
+  ASSERT_TRUE(WaitUntil([&] { return driver.SafeHaltCount() > 0; },
+                        std::chrono::milliseconds(100)));
+  EXPECT_GT(backend.CommandCount(), 0u)
+      << "the independent supervisor must halt before the callback returns";
+  release.store(true, std::memory_order_release);
+  driver.StopDriver();
+
+  EXPECT_EQ(driver.DeadlineViolationCount(), 1u);
+  EXPECT_GE(driver.SendFailureCount(), 1u);
+  EXPECT_EQ(driver.PolicyTickCount(), 0u);
+  EXPECT_GT(driver.SafeHaltCount(), 0u);
+}
+
+TEST(A3PolicyDriver, DeadlineSupervisorDoesNotPublishForIntentionalSkipMode) {
+  CapturingBackend backend;
+  ASSERT_TRUE(backend.Init(""));
+
+  std::atomic<bool> completed{false};
+  auto preview_command = [&](std::uint64_t, const RobotState& state,
+                             RobotCommand& cmd) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    BuildSafeHaltCommand(state.q, cmd);
+    completed.store(true, std::memory_order_release);
+    return false;
+  };
+
+  A3PolicyDriverOptions opt;
+  opt.policy_hz = 100.0;
+  opt.watchdog.max_frame_age_ns = 500'000'000;
+  opt.command_deadline_s = 0.005;
+  opt.command_publish_expected = [] { return false; };
+  A3PolicyDriver driver(backend, a3_deploy::CommandFn(preview_command), opt);
+  ASSERT_TRUE(driver.StartDriver());
+  backend.Emit(MakeState(true, true));
+
+  ASSERT_TRUE(WaitUntil([&] { return completed.load(std::memory_order_acquire); },
+                        std::chrono::milliseconds(100)));
+  driver.StopDriver();
+
+  EXPECT_FALSE(driver.CommandFaulted());
+  EXPECT_EQ(driver.DeadlineViolationCount(), 0u);
+  EXPECT_EQ(driver.PolicyTickCount(), 0u);
+  EXPECT_EQ(backend.CommandCount(), 0u);
+}
+
+TEST(A3PolicyDriver, PureShadowNeverPublishesOnStaleExceptionOrStop) {
+  CapturingBackend backend;
+  ASSERT_TRUE(backend.Init(""));
+
+  auto throwing_preview = [](std::uint64_t, const RobotState&, RobotCommand&) -> bool {
+    throw std::runtime_error("shadow preview failed");
+  };
+  A3PolicyDriverOptions opt;
+  opt.policy_hz = 200.0;
+  opt.watchdog.max_frame_age_ns = 500'000'000;
+  opt.command_deadline_s = 0.005;
+  opt.command_publish_expected = [] { return false; };
+  opt.send_final_safe_halt_on_stop = true;
+  A3PolicyDriver driver(backend, a3_deploy::CommandFn(throwing_preview), opt);
+  ASSERT_TRUE(driver.StartDriver());
+
+  backend.Emit(MakeState(false, false));
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  EXPECT_EQ(backend.CommandCount(), 0u) << "stale SHADOW state must not emit a halt";
+
+  backend.Emit(MakeState(true, true));
+  ASSERT_TRUE(WaitUntil([&] { return driver.CommandFaulted(); },
+                        std::chrono::milliseconds(100)));
+  EXPECT_TRUE(driver.StopDriver());
+
+  EXPECT_FALSE(driver.PublicationArmed());
+  EXPECT_EQ(driver.FinalSafeHaltCount(), 0u);
+  EXPECT_EQ(backend.CommandCount(), 0u);
+}
+
+TEST(A3PolicyDriver, PublishAuthorizationPredicateExceptionFailsClosed) {
+  CapturingBackend backend;
+  ASSERT_TRUE(backend.Init(""));
+
+  auto motion_command = [](std::uint64_t, const RobotState& state,
+                           RobotCommand& cmd) {
+    BuildSafeHaltCommand(state.q, cmd);
+    cmd.kp.setOnes();
+    cmd.kd.setOnes();
+    return true;
+  };
+  A3PolicyDriverOptions opt;
+  opt.policy_hz = 200.0;
+  opt.watchdog.max_frame_age_ns = 500'000'000;
+  opt.command_publish_expected = []() -> bool {
+    throw std::runtime_error("injected authorization predicate exception");
+  };
+  A3PolicyDriver driver(backend, a3_deploy::CommandFn(motion_command), opt);
+  ASSERT_TRUE(driver.StartDriver());
+  backend.Emit(MakeState(true, true));
+  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  driver.StopDriver();
+
+  EXPECT_TRUE(driver.CommandFaulted());
+  EXPECT_EQ(driver.CommandFailureCount(), 1u);
+  EXPECT_EQ(driver.PolicyTickCount(), 0u);
+  EXPECT_FALSE(driver.PublicationArmed());
+  EXPECT_EQ(backend.CommandCount(), 0u)
+      << "a broken authorization predicate must never fail open to a motion publish";
+}
+
+TEST(A3PolicyDriver, MotionToShadowDuringCallbackHaltsBeforeOldMotionCanReturn) {
+  CapturingBackend backend;
+  ASSERT_TRUE(backend.Init(""));
+
+  std::atomic<bool> publish_mode{true};
+  std::atomic<bool> entered{false};
+  std::atomic<bool> release{false};
+  std::atomic<int> calls{0};
+  auto blocked_command = [&](std::uint64_t, const RobotState& state,
+                             RobotCommand& cmd) {
+    if (calls.fetch_add(1, std::memory_order_acq_rel) != 0) return false;
+    entered.store(true, std::memory_order_release);
+    while (!release.load(std::memory_order_acquire)) std::this_thread::yield();
+    BuildSafeHaltCommand(state.q, cmd);
+    cmd.kp.setOnes();
+    return true;
+  };
+  A3PolicyDriverOptions opt;
+  opt.policy_hz = 100.0;
+  opt.watchdog.max_frame_age_ns = 500'000'000;
+  opt.command_publish_expected = [&] {
+    return publish_mode.load(std::memory_order_acquire);
+  };
+  A3PolicyDriver driver(backend, a3_deploy::CommandFn(blocked_command), opt);
+  ASSERT_TRUE(driver.StartDriver());
+  backend.Emit(MakeState(true, true));
+  ASSERT_TRUE(WaitUntil([&] { return entered.load(std::memory_order_acquire); },
+                        std::chrono::milliseconds(100)));
+
+  publish_mode.store(false, std::memory_order_release);
+  ASSERT_TRUE(WaitUntil([&] { return driver.SafeHaltCount() > 0; },
+                        std::chrono::milliseconds(100)))
+      << "publish->nonpublish edge must halt independently of the blocked callback";
+  // Re-enable publication before the old callback returns. A predicate-only final check would
+  // now pass and publish stale motion after the halt; halt_generation must still reject it.
+  publish_mode.store(true, std::memory_order_release);
+  release.store(true, std::memory_order_release);
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  driver.StopDriver();
+
+  EXPECT_EQ(driver.PolicyTickCount(), 0u);
+  ASSERT_EQ(backend.CommandCount(), 1u)
+      << "the pre-transition motion command must never follow the halt";
+  EXPECT_TRUE(backend.LastCommand().kp.isZero(0.0));
+  EXPECT_TRUE(backend.LastCommand().kd.isZero(0.0));
+}
+
+TEST(A3PolicyDriver, MotionToShadowBetweenCallbacksStillPublishesSafeHalt) {
+  CapturingBackend backend;
+  ASSERT_TRUE(backend.Init(""));
+
+  std::atomic<bool> publish_mode{true};
+  auto motion_command = [](std::uint64_t, const RobotState& state,
+                           RobotCommand& cmd) {
+    BuildSafeHaltCommand(state.q, cmd);
+    cmd.kp.setOnes();
+    cmd.kd.setOnes();
+    return true;
+  };
+  A3PolicyDriverOptions opt;
+  opt.policy_hz = 100.0;
+  opt.trigger_on_state = true;  // exactly one callback; the edge halt must be independent
+  opt.watchdog.max_frame_age_ns = 500'000'000;
+  opt.command_publish_expected = [&] {
+    return publish_mode.load(std::memory_order_acquire);
+  };
+  A3PolicyDriver driver(backend, a3_deploy::CommandFn(motion_command), opt);
+  ASSERT_TRUE(driver.StartDriver());
+  backend.Emit(MakeState(true, true));
+  ASSERT_TRUE(WaitUntil([&] { return driver.PolicyTickCount() == 1; },
+                        std::chrono::milliseconds(100)));
+  ASSERT_EQ(backend.CommandCount(), 1u);
+  EXPECT_TRUE((backend.LastCommand().kp.array() > 0.0).all());
+
+  publish_mode.store(false, std::memory_order_release);
+  ASSERT_TRUE(WaitUntil([&] { return driver.SafeHaltCount() > 0; },
+                        std::chrono::milliseconds(100)));
+  driver.StopDriver();
+
+  ASSERT_EQ(backend.CommandCount(), 2u);
+  EXPECT_TRUE(backend.LastCommand().kp.isZero(0.0));
+  EXPECT_TRUE(backend.LastCommand().kd.isZero(0.0));
+}
+
+TEST(A3PolicyDriver, AuthorizationChangeBetweenCallbackAndSendPublishesOnlySafeHalt) {
+  CapturingBackend backend;
+  ASSERT_TRUE(backend.Init(""));
+
+  std::atomic<std::uint64_t> authorization{10};
+  std::atomic<bool> entered{false};
+  std::atomic<bool> release{false};
+  std::atomic<int> calls{0};
+  auto blocked_motion = [&](std::uint64_t, const RobotState& state,
+                            RobotCommand& cmd) {
+    if (calls.fetch_add(1, std::memory_order_acq_rel) != 0) return false;
+    entered.store(true, std::memory_order_release);
+    while (!release.load(std::memory_order_acquire)) std::this_thread::yield();
+    BuildSafeHaltCommand(state.q, cmd);
+    cmd.kp.setOnes();
+    cmd.kd.setOnes();
+    return true;
+  };
+
+  A3PolicyDriverOptions opt;
+  opt.policy_hz = 100.0;
+  opt.watchdog.max_frame_age_ns = 500'000'000;
+  // Both the old and new modes are publish-capable. The boolean interlock therefore
+  // cannot see MOTION -> PASSIVE; only the generation token can reject the stale command.
+  opt.command_publish_expected = [] { return true; };
+  opt.command_authorization_token = [&] {
+    return authorization.load(std::memory_order_acquire);
+  };
+  A3PolicyDriver driver(backend, a3_deploy::CommandFn(blocked_motion), opt);
+  ASSERT_TRUE(driver.StartDriver());
+  backend.Emit(MakeState(true, true));
+  ASSERT_TRUE(WaitUntil([&] { return entered.load(std::memory_order_acquire); },
+                        std::chrono::milliseconds(100)));
+
+  authorization.fetch_add(1, std::memory_order_acq_rel);
+  release.store(true, std::memory_order_release);
+  ASSERT_TRUE(WaitUntil([&] { return driver.AuthorizationChangeCount() == 1; },
+                        std::chrono::milliseconds(100)));
+  driver.StopDriver();
+
+  EXPECT_FALSE(driver.CommandFaulted());
+  EXPECT_EQ(driver.PolicyTickCount(), 0u);
+  ASSERT_EQ(backend.CommandCount(), 1u);
+  EXPECT_TRUE(backend.LastCommand().kp.isZero(0.0));
+  EXPECT_TRUE(backend.LastCommand().kd.isZero(0.0));
+}
+
+TEST(A3PolicyDriver, CommittedTrueToTrueTransitionRejectsInflightOldCommand) {
+  CapturingBackend backend;
+  ASSERT_TRUE(backend.Init(""));
+
+  std::atomic<std::uint64_t> authorization{10};
+  std::atomic<bool> entered{false};
+  std::atomic<bool> release{false};
+  std::atomic<int> calls{0};
+  auto blocked_motion = [&](std::uint64_t, const RobotState& state,
+                            RobotCommand& cmd) {
+    if (calls.fetch_add(1, std::memory_order_acq_rel) != 0) return false;
+    entered.store(true, std::memory_order_release);
+    while (!release.load(std::memory_order_acquire)) std::this_thread::yield();
+    BuildSafeHaltCommand(state.q, cmd);
+    cmd.kp.setOnes();
+    cmd.kd.setOnes();
+    return true;
+  };
+
+  A3PolicyDriverOptions opt;
+  opt.policy_hz = 100.0;
+  opt.watchdog.max_frame_age_ns = 500'000'000;
+  opt.command_publish_expected = [] { return true; };  // both modes publish-capable
+  opt.command_authorization_token = [&] {
+    return authorization.load(std::memory_order_acquire);
+  };
+  A3PolicyDriver driver(backend, a3_deploy::CommandFn(blocked_motion), opt);
+  ASSERT_TRUE(driver.StartDriver());
+  backend.Emit(MakeState(true, true));
+  ASSERT_TRUE(WaitUntil([&] { return entered.load(std::memory_order_acquire); },
+                        std::chrono::milliseconds(100)));
+
+  ASSERT_TRUE(driver.CommitAuthorizationTransition(
+      [&] { authorization.fetch_add(1, std::memory_order_acq_rel); }));
+  ASSERT_EQ(backend.CommandCount(), 1u);
+  EXPECT_TRUE(backend.LastCommand().kp.isZero(0.0));
+  release.store(true, std::memory_order_release);
+  ASSERT_TRUE(WaitUntil([&] { return driver.AuthorizationChangeCount() == 1; },
+                        std::chrono::milliseconds(100)));
+  driver.StopDriver();
+
+  EXPECT_FALSE(driver.CommandFaulted());
+  EXPECT_EQ(driver.PolicyTickCount(), 0u);
+  ASSERT_EQ(backend.CommandCount(), 1u)
+      << "the old-authority command must not be published after the transition barrier";
+}
+
+TEST(A3PolicyDriver, CommittedTransitionOrdersHaltAfterAlreadyLinearizedCommand) {
+  CapturingBackend backend;
+  ASSERT_TRUE(backend.Init(""));
+
+  std::atomic<std::uint64_t> authorization{10};
+  auto motion = [](std::uint64_t, const RobotState& state, RobotCommand& cmd) {
+    BuildSafeHaltCommand(state.q, cmd);
+    cmd.kp.setOnes();
+    cmd.kd.setOnes();
+    return true;
+  };
+  A3PolicyDriverOptions opt;
+  opt.policy_hz = 100.0;
+  opt.trigger_on_state = true;
+  opt.watchdog.max_frame_age_ns = 500'000'000;
+  opt.command_publish_expected = [] { return true; };
+  opt.command_authorization_token = [&] {
+    return authorization.load(std::memory_order_acquire);
+  };
+  A3PolicyDriver driver(backend, a3_deploy::CommandFn(motion), opt);
+  ASSERT_TRUE(driver.StartDriver());
+  backend.BlockNormalSend();
+  backend.Emit(MakeState(true, true));
+  ASSERT_TRUE(WaitUntil([&] { return backend.NormalSendEntered(); },
+                        std::chrono::milliseconds(100)));
+
+  std::atomic<bool> transition_done{false};
+  bool transition_ok = false;
+  std::thread transition([&] {
+    transition_ok = driver.CommitAuthorizationTransition(
+        [&] { authorization.fetch_add(1, std::memory_order_acq_rel); });
+    transition_done.store(true, std::memory_order_release);
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_FALSE(transition_done.load(std::memory_order_acquire))
+      << "transition must wait for the in-progress backend send transaction";
+  backend.ReleaseNormalSend();
+  transition.join();
+  EXPECT_TRUE(transition_ok);
+  EXPECT_TRUE(transition_done.load(std::memory_order_acquire));
+  driver.StopDriver();
+
+  ASSERT_EQ(backend.CommandCount(), 2u);
+  EXPECT_TRUE(backend.LastCommand().kp.isZero(0.0));
+  EXPECT_TRUE(backend.LastCommand().kd.isZero(0.0));
+}
+
+TEST(A3PolicyDriver, StopPublishesExactlyOneFinalSafeHalt) {
+  CapturingBackend backend;
+  ASSERT_TRUE(backend.Init(""));
+  {
+    auto valid_command = [](std::uint64_t, const RobotState& state, RobotCommand& cmd) {
+      BuildSafeHaltCommand(state.q, cmd);
+      cmd.kp.setOnes();
+      return true;
+    };
+    A3PolicyDriverOptions opt;
+    opt.policy_hz = 100.0;
+    opt.trigger_on_state = true;
+    opt.send_final_safe_halt_on_stop = true;
+    A3PolicyDriver driver(backend, a3_deploy::CommandFn(valid_command), opt);
+    ASSERT_TRUE(driver.StartDriver());
+    backend.Emit(MakeState(true, true));
+    ASSERT_TRUE(WaitUntil([&] { return driver.PolicyTickCount() == 1; },
+                          std::chrono::milliseconds(100)));
+    EXPECT_TRUE(driver.StopDriver());
+    EXPECT_TRUE(driver.StopDriver());
+    EXPECT_EQ(driver.FinalSafeHaltCount(), 1u);
+  }
+
+  ASSERT_EQ(backend.CommandCount(), 2u)
+      << "explicit StopDriver plus destructor must be idempotent";
+  const auto last = backend.LastCommand();
+  EXPECT_TRUE(last.kp.isZero(0.0));
+  EXPECT_TRUE(last.kd.isZero(0.0));
+}
+
+TEST(A3PolicyDriver, FinalSafeHaltFailureRetriesAndIsReported) {
+  CapturingBackend backend;
+  ASSERT_TRUE(backend.Init(""));
+  auto valid_command = [](std::uint64_t, const RobotState& state, RobotCommand& cmd) {
+    BuildSafeHaltCommand(state.q, cmd);
+    cmd.kp.setOnes();
+    return true;
+  };
+  A3PolicyDriverOptions opt;
+  opt.policy_hz = 100.0;
+  opt.trigger_on_state = true;
+  opt.send_final_safe_halt_on_stop = true;
+  opt.final_safe_halt_max_attempts = 3;
+  opt.final_safe_halt_retry_period_s = 0.0;
+  A3PolicyDriver driver(backend, a3_deploy::CommandFn(valid_command), opt);
+  ASSERT_TRUE(driver.StartDriver());
+  backend.Emit(MakeState(true, true));
+  ASSERT_TRUE(WaitUntil([&] { return driver.PolicyTickCount() == 1; },
+                        std::chrono::milliseconds(100)));
+
+  backend.FailNextSends(3);
+  EXPECT_FALSE(driver.StopDriver());
+  EXPECT_EQ(driver.FinalSafeHaltCount(), 0u);
+  EXPECT_EQ(driver.SendFailureCount(), 3u);
+}
+
 // =============================================================================
 // Part B — A3PolicyDriver integration with A3AimrtBackend (OFF, sync-only)
 // =============================================================================
@@ -645,6 +1240,11 @@ void FeedSamples(A3AimrtBackend& b, std::atomic<bool>& stop) {
     a3_sync::NeckSample  n{}; n.stamp = {t};
     a3_sync::ImuSample   p{}; p.stamp = {t};
     a3_sync::ImuSample   to{}; to.stamp = {t};
+    const a3_sync::TimestampNs recv{t};
+    w.recv_stamp = recv; l.recv_stamp = recv; a.recv_stamp = recv; n.recv_stamp = recv;
+    p.recv_stamp = recv; to.recv_stamp = recv;
+    w.source_stamp_valid = l.source_stamp_valid = a.source_stamp_valid =
+        n.source_stamp_valid = p.source_stamp_valid = to.source_stamp_valid = true;
     b.InjectWaistSample_ForTest(w);
     b.InjectLegSample_ForTest(l);
     b.InjectArmSample_ForTest(a);

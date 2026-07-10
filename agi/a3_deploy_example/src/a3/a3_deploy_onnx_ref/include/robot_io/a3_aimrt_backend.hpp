@@ -23,6 +23,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -143,6 +144,10 @@ class A3AimrtBackend : public RobotIOBackend {
 #endif
   std::unique_ptr<a3_sync::A3SyncLoop> sync_loop_;
 
+  // Register/unregister is allowed while the sync loop is live. Holding this
+  // mutex through invocation makes unregister an in-flight barrier, so a
+  // driver's callback cannot run after StopDriver returns.
+  std::mutex state_cb_mtx_;
   StateCallback user_cb_{};
   TestCaptureFn test_capture_fn_{};
   TeleopFrameCallback teleop_frame_cb_{};
