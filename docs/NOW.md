@@ -583,7 +583,6 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 | Hitter 177-D 步法线(20k 从零 + 门禁) | ★★★ | dongc1(jiayi) | main(已合并) | 拉 main 后配方不变(yaml 钉住);新增:训练内上台率曲线可看 |
 | Sim2real 部署路:C++ `pp_policy.hpp --planner` 唯一控制路 | ★★★ | dongc1(jiayi) | main | 177-D 对齐 + parity PASS;next:MDU 硬件门 |
 | G07 mocap→runner 桥 + world→robot 变换设计(A2) | ★★ | dongc1(jiayi) | main | 设计文档 TODO |
-| **球物理 parity 测试对照物丢失(风险,07-10 数据对账发现)**:test_ball_physics_vs_record / test_ball_channel_vs_record 两测试的对照 = 场馆拟合期的 numpy 参照实现(老 Record 工作区 analysis/contact_model+flight_model 两个 .py),唯一副本随 yikang 外接盘重分区消失(git/pod/Mac 三处皆无)→ 两测试现在**所有机器都静默 skip**,torch 物理端口自 07-03 起无独立对拍。修复候选:①按 configs/ball_physics_venue.yaml 已定版常数重建参照实现(常数俱在,半天);②先把两测试改 fail-loud(test_oracle_present.py 同制度,防再次无声漂移) | ★★ | yikang | — | 重建 vs fail-loud 拍板 |
 
 ## Queued (priority order)
 
@@ -598,6 +597,7 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 
 | Item | Owner | Landed | Where |
 | --- | --- | --- | --- |
+| **球物理 parity 对照重建落地(关闭 Active 风险"对照物丢失";用户拍板:数据非重点,算法用现有数据验证)**:repo 内 fit 血统参照 hope_training/ball_physics_fit/reference_oracle.py 接管两 parity 测试默认对照(复刻丢失 API,数学=07-03 已入库拟合移植 contact_model/ballcore,g/半径/桌面参数走 venue yaml 真源,先于且独立于 torch 端口=真跨实现对拍);RECORD_DIR 显式设置但缺失 → raise 拒绝静默跳过(fail-loud 制度补齐,skip 只剩 torch/yaml 能力缺失);首轮 pod 对拍即抓真雷:移植版 contact_model 不归一化法向(管线内恒单位 n 从未暴露),参照层修复。验证闭环(pod,44d3379e8680):physics 测试 contact 1e-10/flight+landing 0 误差 ALL PASSED;channel 测试 C++ 厂商栈全链 ALL PASSED(对参照腿 2 bounce 误差 3e-8mm);fail-loud 反证 exit=1;stage4 held-out 验证用 pod 实测数据复算 vs 07-03 定版工件=浮点噪声级一致(flight median 77.4085mm、strike→landing flight_only 0.060m、onoff 100%)——定版常数在补齐数据上完整复现 | yikang(claude) | 2026-07-10 | 分支 stage1-fixed-point bc86995+f0ac2fb |
 | **venue 球数据安置对账+补传("原始数据只在 yikang 个人介质"单点拆除)**:pod /workspace/shared/ball_mocap_0703 现为完整主副本——9/9 take 的 C3D 到齐(正常/高球/颠球不转/颠球增旋 四个首次补传;**快速/kuaisu_000.c3d 修复 07-03 上传截断**[449MB→1.51GB,当时只传了 30%,extracted npz 不受影响]);/workspace/yikang/latest_data 镜像同步;07-09 新采集上架 shared/mocap_take_0709(Take_003 ulb+5×C3D,内容待审);11 个上传文件两端 md5 逐一核对全一致;yikang env.sh 接线 BALLFIT_DATA_ROOT,ballfit 管线 require_oracle pod 上全绿。遗留:原始 .tak/C3D 在 pod 之外仍只有 yikang 外接盘(6T 卷)一份 | yikang(claude) | 2026-07-10 | pod /workspace/shared |
 | 单翻病定案+S1 face 约定修复:facesign 翻面只翻了实测侧,题库/obs/奖励仍 +Y 约定=反手 face 奖励最优点在错误平面(M3c/M2f 反手同收敛 ~34° 跨资产铁证);修复=_face_pair 统一 face 帧(exp 核/strike_success/face_guidance 实测侧改读未翻 raw 缓冲,S1≡S2 逐位等价、判卷链零改动)+双侧 B 卷卫兵+两道 mjeval 互斥守卫+face_cmd_normal_error_deg 指标+exporter 元数据;止损 R9t/R9u/M3d-live 三病灶臂;"题库按翻面重出"欠账否决关闭;232+11 tests 绿,双红队 APPROVE,现役配置字节等价 | claude(franco 拍板止损) | 2026-07-10 | main(face-frame-s1-0709);病因+设计=pod1 queue.md + s1_wave4/facesign_fix_design_0709.md;TIMELINE 07-10(凌晨二) |
 | judge.sh 单命令判卷链(判卷标准入口):env.yaml 自动解析动作对/相位/题库(train→exam 同源推导,解析不到 fail-loud 拒默认值)→ play.py 导出+sidecar → 双侧×双噪声档 bank 考卷(--qdes-clamp/--hold-ref stand 默认)→ md 报告落 run_dir/judge/;--dry-run 供机制检查 | claude | 2026-07-09 | main `66aced9` + runbook 判卷链节 |
