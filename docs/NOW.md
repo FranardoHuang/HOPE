@@ -578,7 +578,7 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 | **拍面反解 torch 版上部署(franco 点名提上日程)**:训练内联的批量求解器搬进规划器,替换 0.3s LM;粗解先行+随球精化的节奏靠它 | ★★★ | claude(求解器)+ yikang(接线) | — | 部署链改动;先影子模式并跑对账 |
 | 预警分布实测(触球→粗/精目标) | ★★ | yikang+claude | — | CPU 活;数字回填预警窗课程档 |
 | 1j checkpoint 抽查流水线(自动导出+考卷) | ★★ | claude | — | 1a-0 已落地,可开工 |
-| pod 原生装 ROS2 Jazzy + 厂商仿真直编(pod=Ubuntu 24.04,不需要容器;Gate 3B/真球接线的 pod 后备) | ★★ | **yikang(07-10 认领接手 claude)** | — | 在 pod2(D9,空机)上实弹:装依赖→build.sh→跑通 Gate 3 冒烟;装法写 runbook。⚠ 知情项:repo 内 vendor MJCF 无 integrator 属性=显式 Euler(SIM_FIDELITY_NOTE 的修复未落),判读前先与 jiayi distrobox 实跑版对配置 |
+| pod 原生装 ROS2 Jazzy + 厂商仿真直编(pod=Ubuntu 24.04,不需要容器;Gate 3B/真球接线的 pod 后备) | ★★ | **yikang** | — | **✅ 冒烟已过(07-10,pod1)**:Jazzy 直装 + vendor sim(iceoryx ON)+ pingpong runner 全链原生编译,headless 冒烟 rate=50Hz/sync_miss=0/halts=0——distrobox 不再是唯一路径。装法+学费清单见 runbook「pod 原生 Gate 3 底座」;脚本在 pod1 /workspace/yikang/gate3/。⚠ 两知情项:①repo 内 vendor MJCF 无 integrator=显式 Euler(SIM_FIDELITY_NOTE 修复未落),行为级判读前与 jiayi distrobox 版对配置;②C++ runner 只认 175/177/180 维,S1 的 179 导出进不了(契约日实证)。下一步=hope_ws planner colcon 编译→--planner 闭环→Gate 3B 发球生成器/判分器 |
 | simtoreal2 → main 审计合并 | ★★★ | claude | main(本地 `305d0e8` + 镜像分支 `merge-simtoreal2-audit`) | **代码完成 2026-07-06**:84 CPU 测试全绿;待 franco 推 main / 合 PR;下一波点火前的机制检查 = 实弹验证 |
 | Hitter 177-D 步法线(20k 从零 + 门禁) | ★★★ | dongc1(jiayi) | main(已合并) | 拉 main 后配方不变(yaml 钉住);新增:训练内上台率曲线可看 |
 | Sim2real 部署路:C++ `pp_policy.hpp --planner` 唯一控制路 | ★★★ | dongc1(jiayi) | main | 177-D 对齐 + parity PASS;next:MDU 硬件门 |
