@@ -218,3 +218,36 @@ scripts/pp_planner_closedloop.sh + pp_planner_conductor.py 的路径移植版,se
 `--runtime-cfg …smoke175.yaml`,否则打包器找 17400 模型报错并**清掉 dist**;
 18. conductor 依赖 sim 源编 install 的 `mujoco_sim_msgs` overlay + 持久 reset publisher
 (逐次 `ros2 pub --once` 的 discovery 不可靠,jiayi 已踩过并写进 conductor 注释)。
+
+### wandb 取模型→pod 自导 ONNX→110-D 正卷全链(yikang 2026-07-11 凌晨)
+
+**模型交接件不用等人:jiayi 本地训练一直同步 wandb**——entity `BerkeleyPingPong`、项目
+`hope_wbc`(注意不是 dongc_1 entity 下的同名项目;用 `wandb.Api().viewer.teams` 才看得到)。
+run 文件里有全套 `model_*.pt`(footfix=4trve8lg、rallyfinal=63o1e21x、v2_fresh=njfc21an)。
+
+**pod 自导 ONNX 配方(110-D 世代,已验证)**:下载 .pt → 重建
+`logs/rsl_rl/<experiment>/<run>/` 目录结构 → hitter 分支代码 + `play.py
+task=HOPEPingPongHitterPure algo=ppo num_envs=2 checkpoint=… motion_file=/workspace/shared/motions/hope_{forehand,backhand}_hopex.npz
+algo.runner.empirical_normalization=false headless=true`。学费(19-22):
+
+19. **`empirical_normalization` 是死旗标**(ppo.yaml 注释白纸黑字):jiayi 环境 rsl_rl 3.1.2
+    的 shim 拦掉它,全谱系 checkpoint 无归一化状态、ONNX 全部 obs→Gemm 直连;pod 老版
+    rsl_rl 该旗标还活着,不带 `algo.runner.empirical_normalization=false` 加载必炸
+    KeyError obs_norm_state_dict。
+20. motion_file 错路径不会 fail-loud,会**静默掉进 wandb registry 兜底**(拉到错的动作对=
+    烤错元数据);正确路径=/workspace/shared/motions/(jiayi pod 克隆的 preprocessed 目录是空的)。
+21. 导出后回放循环崩溃(get_observations 返回 tuple,老版 IsaacLab API 差异)**不伤产物**——
+    "[INFO] Exported ONNX" 打印且元数据齐全即有效;验收 = onnx.load 查
+    `hitter_pure_pos_range_per_clip`/`clip_seg_lengths`/`clip_strike_phases`。
+22. **考卷必须配世代**:legacy pp_planner_closedloop(177 时代)对 110-D 模型 engage 恒 0
+    ——规划器 x_hit 偏移 0.67 vs 110-D 元数据拍面 0.51(x 带宽为零);110-D 正卷 =
+    `pp_gate3_rally.sh`(x_hit:=1.03 等参数内置,含 rcl 参数顺序防坑注释)+
+    `hope_planner.hitter_pure.yaml`(实机)。
+
+**13200_footfix08 的 Gate 3 首读数(此前文档标 PENDING)**:pod 移植版 pp_gate3_rally,
+13 PASS / 7 FAIL,3 发接回 1、摔 1、站位漂移 1.39m;PASS 侧=基建+站位语义全干净
+(baked reach-x +0.510 与元数据严丝合缝、station 误差 0.04/0.032m、0/483 tick 倾倒、
+sync_miss=0);FAIL 侧=|action|max 28.3、**击球朝向 26.2°/挥后朝向漂移/基速 p90 超标**
+——正是该世代文档已知的 heading-recovery 开放问题(RallyFinalV2 立项原因),非基建问题。
+工件:pod /workspace/yikang/gate3/rally_run.log、/tmp/pp_rally_report.json;
+跑法=`bash /workspace/yikang/gate3/pp_gate3_rally_pod.sh`。
