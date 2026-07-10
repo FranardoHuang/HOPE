@@ -1204,3 +1204,23 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    人/机器人时序、引拍+20/+40%与随挥、接触 v1/v2、拍速 `+-1/+-2`、旧盒/venue谱六轴;延长行程
    只有在 L 增、最低加速度降、力矩/平衡余量改善时才进 GPU。M0 修尺→M1 离线淘汰→M2 512-env
    机制冒烟→M3 配对信号→M4 ≤2赢家×3 seeds→M5 连续球/Phase,避免 V5 完美主义卡住 Phase。
+
+## 2026-07-11:本地 Phase-1 工作选择性并入,正式尺不倒退
+
+1. 【franco/Codex】**先完整保全、再按语义合并**——本地未提交工作完整保存为
+   `codex/integrate-local-ablation-20260711@30f4652`,先把陈旧本地 `main` 快进到
+   `ba998c4`,选择性移植发布前又重放到最新 `origin/main@caf4a4e`。逐文件复核发现旧 Isaac
+   正式卷用 `(clip,row)` 打包编号、正反手各自
+   顺序游标和训练 command 注入 exam split;现役正式卷用内容 SHA、不可变 schedule、逐 attempt
+   seed 且 command 只准 train split。两套合同机械拼接会启动失败或换题,所以旧 evaluator/
+   ledger/scorecard 不并主线,完整留作设计证据。状态:无本地工作丢失,正式 MuJoCo BankExam
+   仍是唯一入账尺。
+2. 【franco/Codex】**可独立成立的三块保留**——终档只读盘点器(只打印命令不执行)、从
+   `params/env.yaml` 冻结终止/时序的 fail-closed 合同、复现 Isaac 10 ms RK4 + 球心触台面的
+   NumPy 虚拟回球规格选择性进入主线;后两者在 schema-v3 Isaac adapter 接好前明确是 library-only,
+   不偷换生产 scorer。验证:35 passed/3 declared skips;现役 formal CPU 回归 74 passed;
+   planner 105 passed/2 optional skips。
+3. 【franco/Codex】**新消融只入队、不盲发训练**——NOW 增加同卷下的 2.2/3.4 m/s 任务拍速、
+   V4/V5/task-only 公共外部卷、受守卫的行程延长;保留 S1 三组公平续训、N1 真实时序误差三组、
+   R8 两旗标拆分。当前无训练/判卷在跑,下一步先做 M3f/M2/G1 每侧 10 题 schema-v3 canary;
+   只有 `ns=0` 存活臂补 50/侧、连续球、噪声与第二 seed。

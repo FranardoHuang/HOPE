@@ -168,6 +168,14 @@ dynamics equivalence.
 All key historical scores must be rerun after fresh export; retain old values
 only with an explicit `old scorer` label.
 
+The 2026-07-11 local Phase-1 snapshot also contained a NumPy
+`virtual_return_scorer.py` and a saved-run `termination_contract.py`.  They
+were retained as simulator-independent specifications only.  They are not
+wired into `mujoco_eval_onnx.py` or the venue sampler, so they do not alter the
+formal ruler described above.  Production parity remains a pending
+schema-v3-adapter gate, with explicit skipped integration assertions rather
+than an implicit fallback.
+
 ```bash
 python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_bank_exam_schedule.py \

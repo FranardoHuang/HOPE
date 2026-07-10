@@ -25,6 +25,16 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
+## 2026-07-11 现场状态
+
+- 当前没有训练或判卷任务在跑。上一波的历史证据见
+  [RunPod 训练审计](RUNPOD_TRAINING_AUDIT_2026-07-10.md)和
+  [第一阶段总结](PHASE1_SUMMARY_2026-07-10.md);旧百分比只作机制证据,不是新尺下的正式排名。
+- 还没有 accepted quality baseline。不给 30+ 历史臂盲补全表:先用 M3f/M2/G1
+  known-good/common/known-bad canary 验尺,再用单球 `ns=0` 筛候选,只给存活臂补连续球、噪声和第二 seed。
+- 本地旧 Phase-1 顺序题原型与现役 schema-v3 BankExam 不兼容,已保存在
+  `codex/integrate-local-ablation-20260711@30f4652`,不会机械并入主线。
+
 ## 北极星与尺子(franco 2026-07-06 定版;先读这节再看任何数字)
 
 - **北极星 = 回球率**(真球考试:场馆分布来球,虚拟回球合法落到对面台)。它动了才算真进步。
@@ -34,13 +44,13 @@ Rules:
 - **辅助 = 训练内击球率**(`virtual_hit_rate`:到点的击球机会里,真的碰到球的比例)。
 - **三合格率(composite)降级为诊断尺**:只用来定位"哪一项不达标",不再判臂生死
   (07-06 实例:拍面 25° 误差照样 79% 上台)。
-- **正式入账必须是 MuJoCo 考卷版**(换一套物理引擎重考);训练内数字只作过程监控,
-  报出来必须标注"训练内"。判卷细节见 runbook 判卷铁律。
-- **报数格式(franco 2026-07-08 定死,当晚扩为 2×2×2×2)**:任何臂的读数一律报全表——
-  **正手/反手 × 击球率/上台率 × Isaac 训练内/MuJoCo 考卷 × 单球固定点/连续击球**,十六格;
+- **正式入账**:MuJoCo schema-v3 BankExam 是现役转移裁决腿;Isaac 只有在
+  evaluator-owned 适配器消费同一内容 SHA/schedule 后才能作同题伴随腿。训练内曲线仍只作 proxy,必须标注"训练内"。
+- **报数格式(2026-07-11,24 个报告切面)**:任何臂的读数一律报——
+  **正手/反手 × 物理不摔/击球率/上台率 × Isaac/MuJoCo × 单球固定点/连续击球**;
+  这些是同一批 rollout 的派生切面,不是 24 个无关实验。
   单元格没有数字就写"未测/不适用",不许合并平均后只报一个数(反手瘫痪被 0.998 的全局
-  击球率盖住,就是这个格式缺失的直接代价)。连续击球协议(多球连打,部署仿真口径)两个
-  sim 的四格**现况=反手修好前不入账,需求先入档**;Isaac 连续击球版待物理发球时间线,
+  击球率盖住,就是这个格式缺失的直接代价)。连续击球的 12 个切面尚无正式入账卷;Isaac 连续击球版待物理发球时间线,
   MuJoCo 连续击球版=部署仿真考试/Gate 3B。
 - **选存档 = 训练内上台率的峰值附近**(旧规矩"选 composite 峰值"同步换尺),入账前 MuJoCo 复核。
 - **⚠ 口径补条(franco 07-09,fixE 终审教训)**:训练内上台率**报人一律用 rally 全分母口径**
@@ -594,6 +604,8 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 | 行程 | 原路径 / 引拍 +20%/+40% / 随挥 / 组合 | 加速和制动距离是否真正的瓶颈 |
 | 触球几何 | `site_colocated_v1` / `exact_face_contact_v2` | 旧的球心=拍心近似是否改变逐题排序 |
 | 拍速口径 | 触球帧 × `+-1`/`+-2` 帧差分 | 80 ms 平均拍速是否在替代真正的瞬时接触速度 |
+| 任务拍速 | 同路径/拍面下约 2.2 m/s / 3.4 m/s | V5 失败是专业路径不可迁移,还是当前 A3 被要求了过激拍速 |
+| 公共外部卷 | V4/V5/task-only 同一来球/落点表 | 动作自生题库是否把教师质量与考题难度混在一起 |
 | 来球谱 | 旧手工盒 / venue rebalanced 训练 / matchlike 考卷 | 结论能否覆盖真实场馆而不只是 2–5 m/s 人造题 |
 
 拍心/接触口径见 [racket_contact_geometry.md](interfaces/racket_contact_geometry.md),实验纸面与加速器见
@@ -608,7 +620,7 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
   等价;mass/inertia/COM、asset SHA、contact/solver 和 DR 分布尚未全部入合同。
 - C++ 可以在用户态线性化模式/发送/停机,但无法抢占一个已经卡死的 backend `SendCommand`,
   也没有 controller ACK/timeout;真机门仍 `Partial`。
-- Codex 可使用两台 RunPod 做源码、Linux/ROS/C++、Isaac 合同验证,但不查看、启停或调度那里的训练。
+- Codex 可使用两台 RunPod 做源码、Linux/ROS/C++、Isaac 合同验证;本轮不接管或恢复旧训练。
 
 ## Active
 
@@ -616,34 +628,32 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 | --- | --- | --- | --- | --- |
 | 全栈正确性尺+C++安全包+拍心/拍速合同收口 | ★★★ | **Codex** | `main` | 双 RunPod 源码验收已绿(portable/ROS C++、whole-body、planner);下一检查点=重出 fresh schema-v3 ONNX+修后考卷,旧判分器数字不入账 |
 | V5 专业动作可迁移性+Phase 加速器 | ★★★ | **Codex** | `main` | manifest+保守 halving 已就绪;下一检查点=验证触球帧/拍速口径,把行程/时间律报告接成 feasibility producer,再做 BankExam→scorecard adapter;两者完成前不自动发训练 |
-| **S1 face 修复验证臂 M3f / M2f3 在训**(pod1 gpu0,07-09 19:13/19:14 UTC 点火,热启 M3c/M2f model_16999 → 20999;M3f=swing×仅约定修复单变量,M2f3=v4rg×修复跨资产对照):预注册通过线 M3f 反手拍面 34°→≤20°@+1500 / ≤15°@+4000、pass 0/25→≥20/25;M2f3 反手拍面 29-30°→≤22°@+4000、回球回 M2 基线带;不达线出口=开修复版 faceguide −0.4(M3f-b)。新指标 face_cmd_normal_error_deg 直读 demanded 误差 | ★★★ | claude | main(`699b770` 合入) | 收卷 AUTOJUDGE 自动出卷;预注册=pod1 s1_wave4/facesign_fix_design_0709.md §4 + queue.md 07-09 19:13 收口条 |
+| Phase-1 schema-v3 Isaac 同题 adapter + 候选重排 | ★★★ | **Codex** | `main`;下一开发分支 `codex/schema-v3-isaac-adapter` | 先实现 evaluator-owned schedule/exam split,用 M3f/M2/G1 每侧 10 题 canary 验尺;通过后只给 `ns=0` 存活臂补 50/侧、连续球、噪声和第二 seed。旧 packed-ID 原型只作设计证据 |
 | HitterPure RallyFinal clean-base task: x-lock/lunge, settle/slip, backhand clearance, front-facing constraints + Isaac/AGI rally gates | ★★★ | codex for dongc1 | `hitter` | PATCH COMPLETE / GATES PENDING 2026-07-10: clean-base Final task, native move-settle-arm readiness, strict metadata/eval/gate plumbing and docs implemented; host tests + x86 build pass. Next = Isaac smoke/train/ablation, Final ONNX MuJoCo scores, then no-rescue AGI closed-loop with physical contact/landing evidence |
-| 阶段1 第一波成对差初判(主攻/减观测/产品线锚已到线;只换题库/加权/两动作源在跑;反手换锚排队) | ★★★ | claude | `stage1-fixed-point` | **只看成对差,绝对分不作数(题库缺陷)**;正式结论等题库 v2 重跑 |
 | **加速度包络标定两件套(franco 07-09,时间律的下一层)**:①跟踪破裂标定(chirp/斜坡加压参考×现成跟踪策略,逐关节"边平衡边跟"真上限=判炸器 L1 升级);②贴限 vs 摊时消融(v5syn T_a 三档)——R9d 读数落地后一起排 | ★★★ | claude | — | 设计已入 research 时间律文档§六 |
 | GMR 源头修复(pod GMR 分支 `hope-frame0-warmup`:warm-up/帧0/逐关节限位旗标)+ 判炸器(repo 分支 `motion-feasibility-audit` 已推 origin)——两分支待 franco 审;接线与 L6 重生成见队列 0.6/0.7 行 | ★★★ | claude | 两分支 | 已验证收口(TIMELINE 07-08);合入即防复发 |
 | 1b 奖励收入记账 | ★★★ | claude | main | 半天;进机制检查+判卷固定输出 |
 | 1c 击球窗分通道奖励(W2 门票) | ★★★ | claude | main(旗标默认关) | 半天-1 天;整包一臂 |
 | 1g 适配器 v2 变体库骨架(CPU) | ★★ | claude/franco | — | S1 保险 + S2 长杆,现在开工 |
 | 1d 难度课程 loader 窗口 | ★★ | yikang | `stage1-fixed-point` | **代码已落**(loader 难度开窗+train.py override 翻译层+推进速率修 bug,旗标默认关字节等价);yikang 07-10 转 vendor 链,后续臂搭车即可 |
-| D9 新 pod bring-up + **统一队列调度器**(一份队列清单→两台 pod 空槽自动派发;共享 /workspace,无需搬数据) | ★★★(第二台 3×5090 已拍板) | claude | — | 新 pod 到手即实弹;实测时长记 runbook |
+| D9 **双 Pod 终档/队列债** | ★★ | claude | — | 两台 pod 是独立磁盘,不共享 `/workspace`;pod2 十一臂有 16999 checkpoint 但旧导出/报告来自 16400。等 schema-v3 canary 绿后再补终档,不盲目恢复训练 |
 | 等待混合采样 + 目标揭示预警窗 + 等球姿态锚(设计四件套的①②④,旗标默认关) | ★★ | claude | main | 约 2 天代码;首臂搭巩固波 |
 | **拍面反解 torch 版上部署(franco 点名提上日程)**:训练内联的批量求解器搬进规划器,替换 0.3s LM;粗解先行+随球精化的节奏靠它 | ★★★ | claude(求解器)+ yikang(接线) | — | 部署链改动;先影子模式并跑对账 |
 | 预警分布实测(触球→粗/精目标) | ★★ | yikang+claude | — | CPU 活;数字回填预警窗课程档 |
 | 1j checkpoint 抽查流水线(自动导出+考卷) | ★★ | claude | — | 1a-0 已落地,可开工 |
 | pod 原生装 ROS2 Jazzy + 厂商仿真直编(pod=Ubuntu 24.04,不需要容器;Gate 3B/真球接线的 pod 后备) | ★★ | **yikang** | — | **✅ 冒烟全绿(07-10 晚收官,pod1)**:I/O 契约+推理路(shadow)+发布路/驱动/状态回流(摆动跟踪 0.02-0.08 rad 无熔断)+安全逻辑+reset 链路五关全过:Jazzy 直装 + vendor sim(iceoryx ON)+ pingpong runner 全链原生编译,headless 冒烟 rate=50Hz/sync_miss=0/halts=0——distrobox 不再是唯一路径。装法+学费清单见 runbook「pod 原生 Gate 3 底座」;脚本在 pod1 /workspace/yikang/gate3/。⚠ 三知情项:③**pingpong C++ 路径无 ±20 raw action clip**(仅 29-DOF decoder 有;出分布策略 raw 实测 48-52,仅靠 scale+关节限位兜底)——训练侧已剪部署侧缺口,契约日议题;PD_STAND 直立保持在显式 Euler 配置下 1s 塌掉=知情项①的实证,行为级判读前必须对齐配置;①repo 内 vendor MJCF 无 integrator=显式 Euler(SIM_FIDELITY_NOTE 修复未落),行为级判读前与 jiayi distrobox 版对配置;②C++ runner 只认 175/177/180 维,S1 的 179 导出进不了(契约日实证)。下一步=hope_ws planner colcon 编译→--planner 闭环→Gate 3B 发球生成器/判分器 |
-| simtoreal2 → main 审计合并 | ★★★ | claude | main(本地 `305d0e8` + 镜像分支 `merge-simtoreal2-audit`) | **代码完成 2026-07-06**:84 CPU 测试全绿;待 franco 推 main / 合 PR;下一波点火前的机制检查 = 实弹验证 |
 | Hitter 177-D 步法线(20k 从零 + 门禁) | ★★★ | dongc1(jiayi) | main(已合并) | 拉 main 后配方不变(yaml 钉住);新增:训练内上台率曲线可看 |
 | Sim2real 部署路:C++ `pp_policy.hpp --planner` 唯一控制路 | ★★★ | dongc1(jiayi) | main | 177-D 对齐 + parity PASS;next:MDU 硬件门 |
 | G07 mocap→runner 桥 + world→robot 变换设计(A2) | ★★ | dongc1(jiayi) | main | 设计文档 TODO |
 
 ## Queued (priority order)
 
-1. W2 奖励结构波(点火队列 队1;代码就绪即发)。
-2. S2a 出题器 point_mode box(yikang;S1 过线当天就要用)。
-3. 加固包组装(相位噪声代码 + A1v2 + 换招低剂量,整包)。
-4. A5 挥拍视频 30-50 条 + 拍面可测拍摄(场地日顺手)。
-5. A6 摔倒管理(guard 包络、recover 行为)。
-6. A3 执行器辨识(需专门真机时段)。
+1. S1 纯因果对照:同起点/同 +4000 的 old helper、S1-only、S1+guidance;只有 S1-only 仍留死区才加 guidance。
+2. N1 三组:场馆真实时间相关且逐渐收敛的预测误差 / 同幅值打乱时序 / 显式 confidence 或历史输入。
+3. R8 拆旗标:envelope-as-penalty 和 RSI stand-height 分开,不再用一臂猜两个因果。
+4. W2/S2a/加固包只在 schema-v3 canary 和 `ns=0` shortlist 后排,不抢尺子前面的算力。
+5. A5 挥拍视频 30-50 条 + 拍面可测拍摄(场地日顺手)。
+6. A6 摔倒管理 + A3 执行器辨识(需专门真机时段)。
 
 ## Done
 

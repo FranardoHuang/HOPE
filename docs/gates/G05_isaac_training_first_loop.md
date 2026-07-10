@@ -281,3 +281,39 @@ without a compatibility pass.
 
 Fresh formal artifacts must be exported from the current schema and current
 motion assets. Old ONNX files remain diagnostic only.
+
+## Phase-1 local integration audit 2026-07-11
+
+The local Phase-1 snapshot was preserved at
+`codex/integrate-local-ablation-20260711@30f4652`, but its formal Isaac
+evaluator was not merged.  It encodes question identity as packed
+`(clip,row)` integers, consumes separate per-side sequential cursors and tries
+to inject an exam bank into a command that the current schema-v3 stack
+correctly constrains to the train split.  That conflicts with the production
+content-addressed question IDs, immutable schedule and per-attempt seed.  With
+many vector environments it can also exhaust a small side bank during one
+reset.  These are protocol differences, not merge-conflict cosmetics.
+
+The production MuJoCo BankExam remains the only formal score path.  A future
+Isaac companion leg must be evaluator-owned and consume the same schema-v3
+exam split, content IDs, immutable schedule and attempt seeds without changing
+the training command.  Its first acceptance test is a fixed M3f/M2/G1 canary
+of ten questions per side.  Every report cell uses a fixed question prefix;
+if any prefix attempt is censored, the cell is invalid rather than filled by a
+later question.  Only `noise_scale=0` survivors proceed to 50 questions per
+side, continuous play, noise and a second seed.
+
+Three independent utilities were retained from the snapshot:
+
+- `scripts/audit_runpod_terminal_runs.py` inventories historical terminal
+  checkpoints and prints judge commands without executing them;
+- `scripts/termination_contract.py` freezes timing and termination semantics
+  from a saved run, but is library-only until the schema-v3 Isaac adapter uses
+  it;
+- `scripts/virtual_return_scorer.py` specifies the Isaac 10 ms RK4 scorer and
+  ball-centre contact plane, but does not yet replace the production venue or
+  MuJoCo score path.
+
+Their standalone tests are reproducible from `docs/operations/build_and_test.md`.
+The two production-adapter assertions stay explicitly skipped until those
+adapters exist; this gate therefore remains `Partial`.

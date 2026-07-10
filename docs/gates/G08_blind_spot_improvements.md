@@ -299,7 +299,9 @@ The preregistered axes are:
    rewrite and their combinations;
 4. historical site/ball-centre co-location vs versioned exact face contact;
 5. contact-frame and `+-1/+-2` velocity-window definition;
-6. legacy incoming box vs venue-rebalanced training and matchlike exam.
+6. matched task strike speed around 2.2 vs 3.4 m/s, holding path and face fixed;
+7. a common external question bank for task-only, V4 and V5 teachers;
+8. legacy incoming box vs venue-rebalanced training and matchlike exam.
 
 Path extensions enter GPU training only if offline evidence proves the
 original path is limiting and shows positive stroke-length, lower `a_min` and
@@ -314,3 +316,12 @@ See
 and `scripts/v5_ablation_accelerator.py`. Phase follows the V5 limit study, but
 does not wait for perfect imitation: it advances with the corrected ruler and
 uses task-driven lower body, per-question timing and position/spin curricula.
+
+The 2026-07-11 local-work audit also retained three causal follow-ups in the
+NOW queue, without authorizing a training launch: S1 old-helper/S1-only/
+S1+guidance continuations from the same checkpoint and budget; venue-shaped
+temporally correlated prediction error versus a shuffled control and an
+explicit confidence/history input; and separation of R8's envelope penalty
+from its RSI stand-height change.  These are paired ablations, not requests to
+complete every historical report cell.  The schema-v3 canary and
+`noise_scale=0` shortlist come first.

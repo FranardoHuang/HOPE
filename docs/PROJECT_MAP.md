@@ -82,6 +82,18 @@ Additional training config:
 
 - `hope_training/config/joint_order_agibot_a3.yaml`: current working 31-DOF A3 joint order for training/export alignment.
 - `hope_training/whole_body_tracking/setup_train_env.sh`: source this inside the GPU/Isaac environment before running training/eval commands.
+- `hope_training/whole_body_tracking/scripts/audit_runpod_terminal_runs.py`: read-only inventory of
+  historical terminal checkpoints and judge sidecars.  It prints explicit commands but never
+  launches, deletes or resumes a run.
+- `hope_training/whole_body_tracking/scripts/termination_contract.py`: simulator-independent,
+  fail-closed specification for freezing the termination/timing fields of a saved
+  `params/env.yaml`.  It is not yet wired into the production evaluator.
+- `hope_training/whole_body_tracking/scripts/virtual_return_scorer.py`: NumPy specification of the
+  Isaac RK4 virtual-return metric, including ball-centre table contact.  The production venue and
+  BankExam adapters remain pending.
+- `docs/RUNPOD_TRAINING_AUDIT_2026-07-10.md` and `docs/PHASE1_SUMMARY_2026-07-10.md`: historical
+  Phase-1 evidence and candidate closeout design.  They are not current launch authorization;
+  current ordering and acceptance authority stay in `docs/NOW.md` and the gate documents.
 
 ## External Reference Zone
 

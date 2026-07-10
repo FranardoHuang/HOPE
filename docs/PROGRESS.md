@@ -2,6 +2,35 @@
 
 Use this file for short project-state updates that future humans and agents need to see. Keep detailed reasoning in the relevant gate doc.
 
+## 2026-07-11
+
+- Moved the stale local `main` to `origin/main@ba998c4`, then rebased the
+  selective port onto the newer `origin/main@caf4a4e` Gate-3 update before
+  publication.  The previously uncommitted Phase-1 work is preserved intact on
+  `codex/integrate-local-ablation-20260711@30f4652`; no local work was lost.
+- Rejected a mechanical merge of that snapshot into the formal evaluator.  Its
+  packed row IDs, per-side sequential cursors and exam-bank injection conflict
+  with the current schema-v3 content IDs, immutable schedules and train-split
+  command contract.  Mixing the two would either fail at startup or compare
+  different questions across cells.
+- Selectively ported the historical RunPod evidence documents and three
+  simulator-independent utilities: a read-only terminal-checkpoint inventory,
+  a fail-closed termination-contract parser and an Isaac-compatible virtual
+  return scorer specification.  The latter two remain library-only until the
+  evaluator-owned schema-v3 Isaac adapter is implemented; they do not change
+  the production MuJoCo BankExam path.
+- Local verification passed: 35 standalone utility tests (3 declared skips),
+  74 formal BankExam/motion/racket/schema/V5 tests, and 105 planner tests
+  (2 optional skips).  A repository-wide whole-body collection is not a valid
+  host command because this Mac environment lacks the documented optional
+  Torch/Hydra stack; no dependency-only collection error was attributed to
+  this change.
+- Recorded the next experiments in `NOW.md`: common external questions,
+  2.2/3.4 m/s task-speed separation, guarded stroke extension, S1 continuation
+  controls, realistic temporal-error controls and split R8 flags.  No training
+  or judging job was running, so the next execution step is a small
+  M3f/M2/G1 schema-v3 canary rather than bulk historical reruns.
+
 ## 2026-07-10
 
 - Post-merge acceptance stayed green after incorporating the latest `main`:

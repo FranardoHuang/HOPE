@@ -101,6 +101,25 @@ Logs land in `/workspace/smoke_test/logs/`. The suite checks torch/numpy pins, r
 each 5090, venv isolation, dependency drift vs `freeze_baseline.txt`, Kit boot, task registration,
 that imports come from YOUR clone, and a real env build + step.
 
+## Read-Only Terminal-Checkpoint Inventory
+
+For historical Phase-1 runs, inventory terminal checkpoints and sidecars
+without launching, resuming, judging or deleting anything:
+
+```bash
+cd "$HOPE_WBT"
+python scripts/audit_runpod_terminal_runs.py \
+  --run-root logs/rsl_rl/agibot_a3_hope_virtualball \
+  --judge-steps 15000 --judge-gpu 0
+```
+
+The built-in map requires exactly one directory for each of the eleven known
+arms and fails on missing or duplicate matches.  Use `--arm LABEL=REGEX` only
+after auditing a renamed tree.  The script's `DRY-RUN` and `JUDGE` lines are
+printed instructions, not executed commands.  Current work does not authorize
+restoring old training; any later artifact recovery must first pass the
+schema-v3 canary and follow `NOW.md`.
+
 ## Hard Rules (summary — full list in the pod README)
 
 1. `/root/` is the ephemeral container disk (wiped on restart). Everything goes under `/workspace`.

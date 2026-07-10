@@ -42,6 +42,47 @@ Current known result:
 
 - 2026-06-26: selected planner math tests above, 16 passed.
 
+## Phase-1 Standalone Audit Specifications
+
+The following tests need neither Isaac nor MuJoCo.  They cover a read-only
+terminal-checkpoint inventory, saved-run termination-contract parsing and the
+NumPy specification of the Isaac virtual-return scorer:
+
+```bash
+python3 -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_audit_runpod_terminal_runs.py \
+  hope_training/whole_body_tracking/tests/test_termination_contract.py \
+  hope_training/whole_body_tracking/tests/test_virtual_return_scorer.py
+```
+
+The terminal audit only reads a run tree and prints shell-quoted `judge.sh`
+commands.  It never executes them.  The termination and scorer modules are
+currently library specifications, not production evaluator adapters.  Their
+two cross-module adapter assertions remain explicitly skipped until the
+evaluator-owned schema-v3 Isaac leg is implemented; a green standalone suite
+must not be reported as formal BankExam parity.
+
+Verified 2026-07-11 on the local macOS host:
+
+- standalone specifications: 35 passed, 3 skipped (two pending adapters and
+  optional Torch parity);
+- formal BankExam/motion/racket/schema/V5 CPU suite: 74 passed;
+- planner suite: 105 passed, 2 optional skips.
+
+Reproduce the 74-test formal CPU suite with:
+
+```bash
+python3 -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_bank_exam_schedule.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_eval_align_flags.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_eval_p0_contracts.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_ready_state_contract.py \
+  hope_training/whole_body_tracking/tests/test_motion_kinematics_contract.py \
+  hope_training/whole_body_tracking/tests/test_racket_geometry_contract.py \
+  hope_training/whole_body_tracking/tests/test_training_contract_schema3.py \
+  hope_training/whole_body_tracking/tests/test_v5_ablation_accelerator.py
+```
+
 ## ROS Workspace Build
 
 Run inside the intended ROS environment:
