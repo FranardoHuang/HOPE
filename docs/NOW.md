@@ -572,13 +572,13 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 | 1b 奖励收入记账 | ★★★ | claude | main | 半天;进机制检查+判卷固定输出 |
 | 1c 击球窗分通道奖励(W2 门票) | ★★★ | claude | main(旗标默认关) | 半天-1 天;整包一臂 |
 | 1g 适配器 v2 变体库骨架(CPU) | ★★ | claude/franco | — | S1 保险 + S2 长杆,现在开工 |
-| 1d 难度课程 loader 窗口 | ★★ | yikang | — | 确认现有 loader 可加窗;半天 |
+| 1d 难度课程 loader 窗口 | ★★ | yikang | `stage1-fixed-point` | **代码已落**(loader 难度开窗+train.py override 翻译层+推进速率修 bug,旗标默认关字节等价);yikang 07-10 转 vendor 链,后续臂搭车即可 |
 | D9 新 pod bring-up + **统一队列调度器**(一份队列清单→两台 pod 空槽自动派发;共享 /workspace,无需搬数据) | ★★★(第二台 3×5090 已拍板) | claude | — | 新 pod 到手即实弹;实测时长记 runbook |
 | 等待混合采样 + 目标揭示预警窗 + 等球姿态锚(设计四件套的①②④,旗标默认关) | ★★ | claude | main | 约 2 天代码;首臂搭巩固波 |
 | **拍面反解 torch 版上部署(franco 点名提上日程)**:训练内联的批量求解器搬进规划器,替换 0.3s LM;粗解先行+随球精化的节奏靠它 | ★★★ | claude(求解器)+ yikang(接线) | — | 部署链改动;先影子模式并跑对账 |
 | 预警分布实测(触球→粗/精目标) | ★★ | yikang+claude | — | CPU 活;数字回填预警窗课程档 |
 | 1j checkpoint 抽查流水线(自动导出+考卷) | ★★ | claude | — | 1a-0 已落地,可开工 |
-| pod 原生装 ROS2 Jazzy + 厂商仿真直编(pod=Ubuntu 24.04,不需要容器;Gate 3B/真球接线的 pod 后备) | ★★ | claude | — | 装依赖→build.sh→跑通 Gate 3 冒烟;装法写 runbook |
+| pod 原生装 ROS2 Jazzy + 厂商仿真直编(pod=Ubuntu 24.04,不需要容器;Gate 3B/真球接线的 pod 后备) | ★★ | **yikang(07-10 认领接手 claude)** | — | 在 pod2(D9,空机)上实弹:装依赖→build.sh→跑通 Gate 3 冒烟;装法写 runbook。⚠ 知情项:repo 内 vendor MJCF 无 integrator 属性=显式 Euler(SIM_FIDELITY_NOTE 的修复未落),判读前先与 jiayi distrobox 实跑版对配置 |
 | simtoreal2 → main 审计合并 | ★★★ | claude | main(本地 `305d0e8` + 镜像分支 `merge-simtoreal2-audit`) | **代码完成 2026-07-06**:84 CPU 测试全绿;待 franco 推 main / 合 PR;下一波点火前的机制检查 = 实弹验证 |
 | Hitter 177-D 步法线(20k 从零 + 门禁) | ★★★ | dongc1(jiayi) | main(已合并) | 拉 main 后配方不变(yaml 钉住);新增:训练内上台率曲线可看 |
 | Sim2real 部署路:C++ `pp_policy.hpp --planner` 唯一控制路 | ★★★ | dongc1(jiayi) | main | 177-D 对齐 + parity PASS;next:MDU 硬件门 |
