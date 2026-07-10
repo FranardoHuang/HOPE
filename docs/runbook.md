@@ -166,3 +166,32 @@ transport),不是策略稳定性——vendor sim 是显式 Euler PD,与真机(�
 **下一步接线(Gate 3B 方向)**:hope_ws planner(colcon 编译)→ `--planner` 模式
 (aimrt cfg 自动切 pingpong_ros2body 双插件)→ pp_planner_conductor.py 假球闭环;
 发球生成器按场馆物理采样 + 判分器(1l 行规格)。
+
+### 冒烟二级:推理路+发布路+驱动闭环(yikang 2026-07-10 晚,pod1;脚本 smoke2/3/5/7 同目录)
+
+一级冒烟(dry-run)只验了状态流方向;二级把剩下三条路全部实证,**冒烟目标全部达成**:
+
+| 路 | 证据 | 判定 |
+| --- | --- | --- |
+| 推理路(shadow) | ONNX 元数据全读对(clip 139/132、相位 0.470/0.333);动作有限无 NaN;ts 自由钟推进 | ✅ |
+| 发布路+驱动+状态回流 | 播放模式摆腰+右臂:moving=1、fault=0、跟踪误差 0.02-0.08 rad(限 0.3)持续 >12s,倒地/瞬移后两种姿态都过 | ✅ |
+| 安全逻辑 | FALL GUARD(gravZ>-0.5 持续 0.5s → PASSIVE)与 tracking fault(>0.3 rad 熔断)均真实触发且行为正确 | ✅(白送的保护逻辑验证) |
+| sim reset 链路(ROS2 debug 路) | scripts/reset_sim.sh → /sim/a3/reset 关键帧瞬移生效(gravZ 瞬间 -0.97) | ✅ |
+| PD_STAND 直立保持 | 接住直立后 1s 内塌掉(gravZ -0.97→-0.10) | ⚠ **不入冒烟判据**:与学费 9(显式 Euler 执行器)机制吻合,行为级留待与 jiayi 对配置后裁决;真机 backend=隐式 PD,note 预期真机反而稳 |
+
+**学费清单增补(11-15)**:
+
+11. 状态行语义(源码定案):`ticks/rate` 只数**已发布**命令(SHADOW 冻 0 是 by-design,ts 走的是
+    shadow 自由钟);`baseZ` 在 perfect-tracking 下是**参考值(假的)**,判摔只能看 `grav`(真 IMU);
+    `|act|/maxact` 是 ONNX 原始输出,`clamp` 数的是关节限位命中。
+12. **⚠ 安全级发现:pingpong C++ 路径没有 ±20 raw action clip**(只有非 pingpong 的 29-DOF
+    decoder 有,a3_action_decoder.cpp:12);出分布策略 raw action 实测飙到 48-52,只被
+    action_scale+关节限位兜住。训练侧 07-07 已加 ±20 clip,**部署侧缺口待补**(契约日议题)。
+13. 交互按键需要**真 TTY**(isatty 短路,管道被静默忽略)→ `printf 序列 | script -qec "…" /dev/null`;
+    按键 `0/1` 与挥拍档位键冲突,**不带 --reference-playback 旗标时数字键不是分组键**;
+    分组摆动测试用键 `5`(腰+右臂)最顺。
+14. 无人值守起步用 `--warmup-sec N`(先 PD_STAND N 秒再切目标模式);但 sim 先于 runner 起 ≈10s,
+    零命令期机器人已倒 → 热身从倒地开始必被 FALL GUARD 熔断。要直立起步:reset_sim.sh 瞬移
+    + 连按 's'(ros2 pub 时序不可控,靠 0.5s 保护宽限窗内的那一发接住)。
+15. 播放摆动的跟踪熔断阈 0.3 rad 是对的:倒地承重关节 25% 增益跟不住会正确熔断;
+    满增益(--ref-gain-scale 1.0)下腰+臂不承重段 0.02-0.08 rad 干净通过。
