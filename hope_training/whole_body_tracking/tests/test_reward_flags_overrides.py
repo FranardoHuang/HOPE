@@ -75,6 +75,7 @@ def _make_env_cfg(anchor_pos_none=True):
         racket_velocity=_Term(weight=10.0, params={"std": 1.0}),
         racket_normal=_Term(weight=5.0, params={"std": 0.30}),
         racket_guidance=_Term(weight=0.0, params={"command_name": "racket_target", "d_max": 0.5}),
+        racket_face_guidance=_Term(weight=0.0, params={"command_name": "racket_target", "theta_max": 1.5707963}),
         tracking_envelope=_Term(weight=0.0, params={"command_name": "motion", "threshold": 0.25}),
         motion_global_anchor_pos=None if anchor_pos_none else _Term(weight=0.5, params={"std": 0.3}),
         motion_global_anchor_ori=_Term(weight=0.5, params={"std": 0.4}),
@@ -274,6 +275,21 @@ def test_guidance_weight_set_and_sign_checked():
     assert any("racket_guidance.weight=-0.75" in a for a in applied)
     with pytest.raises(train_mod._OverrideError, match="must be <= 0"):
         _apply({"rewards": {"racket_guidance_weight": 0.5}})
+
+
+def test_face_guidance_weight_and_theta_max_wired():
+    env_cfg, applied = _apply({"rewards": {"racket_face_guidance_weight": -0.4,
+                                           "racket_face_guidance_theta_max": 3.14159265}})
+    assert env_cfg.rewards.racket_face_guidance.weight == -0.4
+    assert env_cfg.rewards.racket_face_guidance.params["theta_max"] == 3.14159265
+    assert any("racket_face_guidance.weight=-0.4" in a for a in applied)
+    assert any("racket_face_guidance.params.theta_max=3.14159265" in a for a in applied)
+    with pytest.raises(train_mod._OverrideError, match="must be <= 0"):
+        _apply({"rewards": {"racket_face_guidance_weight": 0.4}})
+    with pytest.raises(train_mod._OverrideError, match=r"in \(0, pi\]"):
+        _apply({"rewards": {"racket_face_guidance_theta_max": 3.5}})  # > pi: clamp would lie
+    with pytest.raises(train_mod._OverrideError, match=r"in \(0, pi\]"):
+        _apply({"rewards": {"racket_face_guidance_theta_max": 0.0}})  # zero: gradient dead everywhere
 
 
 # --------------------------------------------------------------------------------------------- #
