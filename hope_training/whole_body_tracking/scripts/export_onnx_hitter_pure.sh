@@ -38,7 +38,7 @@ echo "[export] launching play.py (setsid); ONNX -> $ONNX"
 
 setsid bash -c "cd '$PWD' && source setup_train_env.sh >/dev/null 2>&1 && \
   hope_isaac_py scripts/play.py task=HOPEPingPongHitterPure algo=ppo headless=true \
-  num_envs=2 checkpoint='$CKPT' 'motion_file=[$FH,$BH]'" >"$LOG" 2>&1 &
+  export_only=true num_envs=2 checkpoint='$CKPT' 'motion_file=[$FH,$BH]'" >"$LOG" 2>&1 &
 PGID=$!
 echo "[export] pgid=$PGID  (log: $LOG)"
 

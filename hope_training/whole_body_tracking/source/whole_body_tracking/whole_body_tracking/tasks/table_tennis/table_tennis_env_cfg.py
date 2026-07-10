@@ -454,6 +454,13 @@ class TableTennisEnvCfg(ManagerBasedRLEnvCfg):
     events: EventCfg = EventCfg()
     curriculum: CurriculumCfg = CurriculumCfg()
 
+    # Optional paddle FK contract. Robot specializations should name any
+    # directly exposed fixed paddle bodies and provide a wrist fallback for
+    # importers that merge massless fixed links into the parent articulation.
+    racket_body_candidates: tuple[str, ...] = ()
+    racket_wrist_body_name: str = ""
+    racket_site_offset_wrist_m: tuple[float, float, float] = (0.0, 0.0, 0.0)
+
     # Ball aerodynamics + code-driven spin-equation contacts (applied per physics substep by
     # TableTennisEnv). Enabled by default: the ball flies on the mocap-fitted drag + Magnus model and
     # bounces via the spin-equation contact model (PhysX restitution is neutralized — see

@@ -35,6 +35,11 @@ checkpoint_path: null
 # (actor loads by name; mismatched critic re-initializes — deliberate warm-start semantics).
 # Plain resume stays strict.
 checkpoint_tolerant: false
+# HitterPure geometry/face/clip/action contracts are compared against
+# <checkpoint-run>/params/training_contract.json before loading. Historical checkpoints predate the
+# sidecar; opting in here is a deliberate, logged representation transfer—not an ordinary resume.
+checkpoint_allow_missing_contract: false
+checkpoint_allow_contract_mismatch: false
 
 # logging
 logger: wandb           # wandb | tensorboard | neptune

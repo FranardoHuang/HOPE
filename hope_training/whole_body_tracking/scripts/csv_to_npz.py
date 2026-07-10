@@ -21,6 +21,8 @@ from pathlib import Path
 
 import numpy as np
 
+from motion_kinematics_contract import metadata_arrays
+
 from isaaclab.app import AppLauncher
 
 # add argparse arguments
@@ -418,6 +420,12 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene, joi
                 "body_ang_vel_w",
             ):
                 log[k] = np.stack(log[k], axis=0)
+
+            # Isaac Lab 2.1 body_pos_w is the link/actor origin while
+            # body_lin_vel_w is the COM-point velocity.  Record that point
+            # contract explicitly so schema-3 training never guesses a clip's
+            # velocity semantics from its filename or generator lineage.
+            log.update(metadata_arrays(body_names=robot.body_names))
 
             log = _apply_hope_frame_alignment(log)
 

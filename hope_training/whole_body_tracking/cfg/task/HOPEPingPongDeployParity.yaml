@@ -190,7 +190,8 @@ rewards:
   # the robot still refuses to step).
   # P2.4 (G08) PACE-style smooth deceleration — flag-gated, DEFAULT OFF. Pseudo base-velocity command
   # proportional to the remaining PLANAR racket->target error: v_des = clamp(v_gain*dist_xy, 0, v_max);
-  # reward = exp(-(|v_base_xy| - v_des)^2 / std^2), gated to pre_strike only. Far target -> pays for
+  # reward = exp(-(|v_base_xy| - v_des)^2 / std^2), gated to active pre_strike motion and OFF
+  # during the frozen hold (hold_ready owns hold stillness). Far target -> pays for
   # moving at v_max (cooperates with racket_progress); as the strike stance is reached v_des -> 0 and
   # the term pays for a CALM base — a smooth taper instead of the violent reactive rush (deploy-parity
   # safe: REWARD-side only, the frozen 175-D actor obs contract is untouched). weight 0.0 = term OFF
@@ -260,7 +261,7 @@ racket:
   # it LATE (transport + planning latency), NOISY (ball-prediction error that shrinks as the strike
   # approaches — SMASH Eq. 14 tts-decaying noise), and REFINED mid-swing (the planner re-plans
   # WHERE, not WHEN — PACE injects sensor delays for the same reason). Only the ACTOR-visible
-  # target view (pos/vel/swing_sign) is degraded: rewards, metrics, and the privileged critic
+  # target view (pos/vel/face-command/swing_sign) is degraded atomically: rewards, metrics, and the privileged critic
   # always use the true live target, and time_to_strike is never delayed (the swing clock is
   # generated robot-side by the runner, not by the mocap link).
   # ALL OFF by default (byte-identical baseline). Enable per-experiment, e.g.:
@@ -268,7 +269,7 @@ racket:
   #   task.racket.midswing_resample_prob=0.02
   # Watch: metrics target_delay_steps_in_effect (constant) + midswing_resample_count (per-step
   # refinement fraction, ~ prob * eligible fraction).
-  target_delay_steps: 0            # control steps (50 Hz) the actor sees target pos/vel/swing_sign late
+  target_delay_steps: 0            # 50 Hz steps the actor sees the atomic target message late
   target_jitter_pos_per_s: 0.0     # m: actor target pos noise std at tts>=1 s, decays ~ clamp(tts,0,1)
   target_noise_white: 0.0          # m: calibrated mocap white noise (venue fit: 0.0019); no tts decay
   target_noise_ar1_sigma: 0.0      # m: calibrated AR(1) colored noise marginal std (venue fit: 0.0052)

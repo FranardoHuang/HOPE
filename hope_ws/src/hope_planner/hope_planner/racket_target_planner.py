@@ -170,8 +170,12 @@ class RacketTargetPlanner:
         y_at_net = p_net[1]
         z_at_net = p_net[2]
 
-        y_net_min = -self.table.width - self.table.net_overhang
-        y_net_max = self.table.net_overhang
+        # Table Y span is [y_max - width, y_max]; the net extends overhang
+        # beyond BOTH edges in that same working frame.  Using an arena-only
+        # [-width, 0] band here silently misclassifies the shifted/centered sim
+        # table and sends the fallback solver through five futile retries.
+        y_net_min = self.table.y_max - self.table.width - self.table.net_overhang
+        y_net_max = self.table.y_max + self.table.net_overhang
 
         bypasses_posts = (y_at_net < y_net_min) or (y_at_net > y_net_max)
         if bypasses_posts:
@@ -209,18 +213,21 @@ class RacketTargetPlanner:
 
     def plan(self, strike: StrikeTarget) -> RacketCommand:
         """Compute racket target state for a valid return."""
+        p_land = self.config.target_land.copy()
+        # target_land stores the table-surface aim coordinate, but ball states
+        # are center positions. Physical contact is center z = radius.
+        p_land[2] = self.physics.radius
         if not strike.valid:
             return RacketCommand(
                 p_intercept=strike.p_ball, v_racket=np.zeros(3),
                 n_racket=np.array([1.0, 0.0, 0.0]), t_strike=strike.t_strike,
-                v_ball_outgoing=np.zeros(3), target_land=self.config.target_land.copy(),
+                v_ball_outgoing=np.zeros(3), target_land=p_land,
                 clears_net=False, bypasses_net_posts=False, valid=False,
                 num_bounces=strike.num_bounces,
             )
 
         p_strike = strike.p_ball
         v_incoming = strike.v_ball
-        p_land = self.config.target_land.copy()
 
         v_outgoing = self._compute_outgoing_velocity(
             p_strike, p_land, self.config.delta_t_flight

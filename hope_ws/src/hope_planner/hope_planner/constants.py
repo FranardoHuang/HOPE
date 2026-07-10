@@ -73,6 +73,19 @@ class PlannerConfig:
     bounce_center_z_max: float = 0.05  # real mocap tracks the ball center: accept a local z-minimum
                                   # below radius + sampling/occlusion margin as a bounce and clear
                                   # the fit window, instead of fitting velocity across the contact.
+    discontinuity_window: int = 3  # intervals on EACH side of a candidate velocity jump. At
+                                  # 300 Hz this compares two 10 ms secants and detects an impact
+                                  # after 10 ms while averaging down frame-to-frame mocap noise.
+    discontinuity_velocity_jump_mps: float = 3.0  # clear the polynomial window when the two
+                                  # secants differ by this much. Free-flight gravity+drag changes
+                                  # velocity by <~0.3 m/s over 20 ms, while venue racket impacts
+                                  # reverse/add several m/s; 3 m/s leaves an order-of-magnitude
+                                  # gap without waiting through the 103 ms fit window.
+    discontinuity_segment_spread_mps: float = 2.5  # each before/after segment must itself be
+                                  # velocity-consistent within this band. This prevents an impact
+                                  # hidden INSIDE one secant (or a one-frame position outlier) from
+                                  # being mistaken for a breakpoint several frames too early; the
+                                  # bound is ~2.5x the 300 Hz one-step venue mocap velocity-noise SD.
     # Adaptive integration (远粗近细): 0.0 = OFF = the legacy fixed-dt Euler
     # path, byte-identical. When > dt_integrate, the predictor cruises with
     # RK4 steps of this size and drops to dt_integrate-sized Euler sub-steps

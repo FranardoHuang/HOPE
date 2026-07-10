@@ -57,9 +57,10 @@ def batch_integrate_to_table_plane(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Batched twin of integrate_to_table_plane: M rows stepped together.
 
-    Fixed-dt mode uses the LEGACY Euler formula (same per-row arithmetic);
+    Fixed-dt mode uses the scalar Euler formula (same per-row arithmetic);
     with config.dt_integrate_coarse > dt the cruise is batched RK4 and rows
-    whose interval could contain the crossing are replayed scalar-fine.
+    whose interval could contain the physical ball-center contact crossing
+    (z = ball radius) are replayed scalar-fine.
     Returns (land_xy (M,2) with NaN for no-crossing, t_land (M,)).
     """
     dt = config.dt_integrate
@@ -72,6 +73,7 @@ def batch_integrate_to_table_plane(
     land = np.full((M, 2), np.nan)
     t_land = np.full(M, np.nan)
     active = np.ones(M, bool)
+    contact_z = float(physics.radius)
 
     def accel(Vx):
         sp = np.linalg.norm(Vx, axis=1, keepdims=True)
@@ -90,17 +92,20 @@ def batch_integrate_to_table_plane(
             A4 = accel(V4)
             Pn = P + (dt_c / 6.0) * (V + 2.0 * V2 + 2.0 * V3 + V4)
             Vn = V + (dt_c / 6.0) * (A1 + 2.0 * A2 + 2.0 * A3 + A4)
-            reach = P[:, 2] + np.minimum(np.minimum(V[:, 2], Vn[:, 2]), 0.0) * dt_c <= 0.0
-            flagged = active & (P[:, 2] > 0.0) & ((Pn[:, 2] <= 0.0) | reach)
+            reach = (
+                P[:, 2] + np.minimum(np.minimum(V[:, 2], Vn[:, 2]), 0.0) * dt_c
+                <= contact_z
+            )
+            flagged = active & (P[:, 2] > contact_z) & ((Pn[:, 2] <= contact_z) | reach)
             for i in np.where(flagged)[0]:
                 p, v, w = P[i].copy(), V[i].copy(), W[i]
                 for si in range(n_sub):
                     a = -k * np.linalg.norm(v) * v + g + k_m * cross3(w, v)
                     pn = p + v * dt + 0.5 * a * dt * dt
                     vn = v + a * dt
-                    if p[2] > 0.0 and pn[2] <= 0.0:
+                    if p[2] > contact_z and pn[2] <= contact_z:
                         dz = p[2] - pn[2]
-                        frac = p[2] / dz if dz > 1e-12 else 0.5
+                        frac = (p[2] - contact_z) / dz if dz > 1e-12 else 0.5
                         frac = float(np.clip(frac, 0.0, 1.0))
                         land[i] = (p + frac * (pn - p))[:2]
                         t_land[i] = t + si * dt + frac * dt
@@ -122,10 +127,14 @@ def batch_integrate_to_table_plane(
         Pn = P + V * dt + 0.5 * A * dt * dt
         Vn = V + A * dt
         t += dt
-        cross = active & (P[:, 2] > 0.0) & (Pn[:, 2] <= 0.0)
+        cross = active & (P[:, 2] > contact_z) & (Pn[:, 2] <= contact_z)
         if cross.any():
             dz = P[cross, 2] - Pn[cross, 2]
-            frac = np.where(dz > 1e-12, P[cross, 2] / np.maximum(dz, 1e-12), 0.5).clip(0.0, 1.0)
+            frac = np.where(
+                dz > 1e-12,
+                (P[cross, 2] - contact_z) / np.maximum(dz, 1e-12),
+                0.5,
+            ).clip(0.0, 1.0)
             land[cross] = P[cross, :2] + frac[:, None] * (Pn[cross, :2] - P[cross, :2])
             t_land[cross] = (t - dt) + frac * dt
             active[cross] = False

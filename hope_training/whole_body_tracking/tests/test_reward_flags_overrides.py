@@ -74,6 +74,14 @@ def _make_env_cfg(anchor_pos_none=True):
         racket_position=_Term(weight=14.0, params={"std": 0.2}),
         racket_velocity=_Term(weight=10.0, params={"std": 1.0}),
         racket_normal=_Term(weight=5.0, params={"std": 0.30}),
+        hold_ready=_Term(weight=0.0, params={"std": 1.5, "reach": 0.2, "reach_mode": "station"}),
+        post_strike_brake=_Term(weight=0.0, params={"std": 0.5}),
+        hold_heading=_Term(weight=0.0, params={"std": 0.6}),
+        foot_orientation=_Term(weight=0.0, params={"hold_gate": False}),
+        base_decel=_Term(
+            weight=0.0,
+            params={"command_name": "racket_target", "v_gain": 2.0, "v_max": 1.6, "std": 0.4},
+        ),
         racket_guidance=_Term(weight=0.0, params={"command_name": "racket_target", "d_max": 0.5}),
         tracking_envelope=_Term(weight=0.0, params={"command_name": "motion", "threshold": 0.25}),
         motion_global_anchor_pos=None if anchor_pos_none else _Term(weight=0.5, params={"std": 0.3}),
@@ -92,12 +100,19 @@ def _make_env_cfg(anchor_pos_none=True):
         strike_window_wide_s=None,
         strike_success_pos_thresh=0.075,
         track_envelope_violation=False,
+        target_mode="uniform",
+        midswing_resample_prob=0.0,
+        midswing_resample_tts_floor=0.3,
+        question_bank="",
+        question_bank_allow_legacy=False,
+        face_command=False,
     )
     motion = _NS(
         wrap_teleport=False,
         stand_start_prob=0.25,
         hold_steps_range=(0, 100),
         stand_start_min_hold=25,
+        stand_start_yaw_range=(0.0, 0.0),
         post_swing_start_prob=0.0,
         post_swing_buffer_size=4096,
         post_swing_min_fill=256,
@@ -154,6 +169,53 @@ def test_unknown_rewards_key_fails_loud():
         _apply({"rewards": {"face_gate_radiuss": 0.15}})  # typo'd key: must raise, never no-op
 
 
+def test_rally_v3_recovery_overrides_are_wired_and_validated():
+    env_cfg, applied = _apply({
+        "motion": {"stand_start_yaw_range": [-0.35, 0.35]},
+        "rewards": {
+            "post_strike_brake_weight": 0.0,
+            "post_strike_brake_std": 0.5,
+            "hold_heading_weight": 0.1,
+            "hold_heading_std": 0.6,
+            "foot_orientation_hold_gate": True,
+        },
+    })
+    assert env_cfg.commands.motion.stand_start_yaw_range == (-0.35, 0.35)
+    assert env_cfg.rewards.hold_heading.weight == pytest.approx(0.1)
+    assert env_cfg.rewards.hold_heading.params["std"] == pytest.approx(0.6)
+    assert env_cfg.rewards.foot_orientation.params["hold_gate"] is True
+    assert any("stand_start_yaw_range" in item for item in applied)
+
+
+@pytest.mark.parametrize("yaw_range", ([0.4, -0.4], [float("nan"), 0.4], [-4.0, 0.0]))
+def test_rally_v3_invalid_yaw_range_fails_loud(yaw_range):
+    with pytest.raises(train_mod._OverrideError, match="stand_start_yaw_range"):
+        _apply({"motion": {"stand_start_yaw_range": yaw_range}})
+
+
+def test_reward_std_must_be_positive():
+    with pytest.raises(train_mod._OverrideError, match="finite and > 0"):
+        _apply({"rewards": {"hold_heading_std": 0.0}})
+
+
+def test_question_bank_rejects_hitter_pure_target_mode():
+    with pytest.raises(train_mod._OverrideError, match="incompatible.*hitter_pure"):
+        _apply({"racket": {"question_bank": "/tmp/bank.npz", "target_mode": "hitter_pure"}})
+
+
+def test_question_bank_rejects_midswing_question_redraw():
+    with pytest.raises(train_mod._OverrideError, match="midswing_resample_prob"):
+        _apply({"racket": {"question_bank": "/tmp/bank.npz", "midswing_resample_prob": 0.01}})
+
+
+def test_question_bank_rejects_per_clip_retiming_even_when_values_are_one():
+    with pytest.raises(train_mod._OverrideError, match="speed_scale_per_clip"):
+        _apply({
+            "motion": {"speed_scale_per_clip": [1.0, 1.0]},
+            "racket": {"question_bank": "/tmp/bank.npz"},
+        })
+
+
 def test_all_real_task_yaml_keys_are_whitelisted():
     """Regression: the new task.rewards/_TERMINATION_KEYS whitelists must accept every key the
     real task YAMLs already set (otherwise the fail-loud check bricks existing tasks)."""
@@ -177,6 +239,47 @@ def test_all_real_task_yaml_keys_are_whitelisted():
             assert not unknown, f"{fn}: {node_key} keys {unknown} missing from the whitelist"
             checked += 1
     assert checked >= 4  # the four tasks with rewards blocks at minimum
+
+
+def test_virtual_ball_yaml_pins_outcome_dominant_effective_weights():
+    """The composed task must not inherit DeployParity's historical 14/10/5 by accident."""
+    yaml = pytest.importorskip("yaml")
+    path = os.path.join(CFG_TASK_DIR, "HOPEPingPongVirtualBall.yaml")
+    with open(path) as fh:
+        task = yaml.safe_load(fh)
+    rw = task["rewards"]
+    expected = {
+        "racket_position_weight": 4.0,
+        "racket_position_std": 0.075,
+        "racket_velocity_weight": 0.5,
+        "racket_velocity_std": 0.5,
+        "racket_normal_weight": 0.5,
+        "racket_normal_std": 0.262,
+        "foot_orientation_weight": 0.0,
+    }
+    assert {key: float(rw[key]) for key in expected} == expected
+
+    # Exercise the same train.py translation that Hydra's resolved task node enters. Starting
+    # from DeployParity-like 14/10/5 proves the child task actually wins, not merely that the
+    # keys are present in text.
+    env_cfg = _make_env_cfg()
+    env_cfg.rewards.racket_position.weight = 14.0
+    env_cfg.rewards.racket_position.params["std"] = 0.20
+    env_cfg.rewards.racket_velocity.weight = 10.0
+    env_cfg.rewards.racket_velocity.params["std"] = 1.0
+    env_cfg.rewards.racket_normal.weight = 5.0
+    env_cfg.rewards.racket_normal.params["std"] = 0.30
+    env_cfg.rewards.foot_orientation.weight = -0.3
+    env_cfg, _ = _apply({"rewards": rw}, env_cfg)
+    for term_name, prefix in (
+        ("racket_position", "racket_position"),
+        ("racket_velocity", "racket_velocity"),
+        ("racket_normal", "racket_normal"),
+    ):
+        term = getattr(env_cfg.rewards, term_name)
+        assert term.weight == pytest.approx(expected[f"{prefix}_weight"])
+        assert term.params["std"] == pytest.approx(expected[f"{prefix}_std"])
+    assert env_cfg.rewards.foot_orientation.weight == pytest.approx(0.0)
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -346,6 +449,7 @@ def test_rb_softens_envelope_and_wires_penalty_and_accounting():
     assert T.base_fell_tilt == "BASE_FELL_TILT_TERM"
     assert T.base_too_low == "BASE_TOO_LOW_TERM"
     assert env_cfg.rewards.tracking_envelope.weight == -1.0
+    assert env_cfg.rewards.tracking_envelope.params["ignore_hold"] is True
     assert env_cfg.commands.racket_target.track_envelope_violation is True
     assert any("envelope_as_penalty" in a for a in applied)
     assert any("tracking_envelope.weight=-1.0" in a for a in applied)
@@ -354,6 +458,7 @@ def test_rb_softens_envelope_and_wires_penalty_and_accounting():
 def test_rb_default_weight_is_minus_one():
     env_cfg, _ = _apply({"terminations": {"envelope_as_penalty": True}})
     assert env_cfg.rewards.tracking_envelope.weight == -1.0
+    assert env_cfg.rewards.tracking_envelope.params["ignore_hold"] is True
 
 
 def test_rb_guards():

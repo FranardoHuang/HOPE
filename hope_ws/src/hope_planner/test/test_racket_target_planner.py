@@ -51,7 +51,8 @@ def test_degenerate_sideways_and_reversed_normals_face_opponent():
 def test_outgoing_velocity_with_drag_lands_near_target():
     pl = _planner()
     p_strike = np.array([0.0, -0.7625, 0.3])
-    p_land = np.array([2.055, -0.7625, 0.0])
+    # Positions are ball-center positions: physical table contact is z=radius.
+    p_land = np.array([2.055, -0.7625, pl.physics.radius])
     dt = 0.55
     v_out = pl._compute_outgoing_velocity(p_strike, p_land, dt)
     p_end, _ = pl._integrate_free_flight(p_strike, v_out, dt)
@@ -65,6 +66,45 @@ def test_net_clearance_reported_correctly():
     clears_lo, _ = pl._check_net_clearance(p_strike, np.array([5.0, 0.0, -2.0]))
     assert clears_hi and not bypass_hi
     assert not clears_lo
+
+
+def test_net_post_band_tracks_shifted_table_y_max():
+    """The centered sim table must not inherit the arena-only [-width, 0] band."""
+    table = TableParams(y_max=0.80)
+    pl = RacketTargetPlanner(BallPhysics(k=0.0), PlannerConfig(), table)
+    p_strike = np.array([0.0, 0.50, 0.40])
+
+    # y=0.50 is inside the shifted net span [y_max-width-overhang,
+    # y_max+overhang], but outside the old hardcoded max y=overhang.
+    clears, bypasses = pl._check_net_clearance(
+        p_strike, np.array([4.0, 0.0, 2.0])
+    )
+    assert clears and not bypasses
+
+    # A trajectory beyond the shifted table's +Y post is still identified.
+    p_outside = np.array([0.0, table.y_max + table.net_overhang + 0.05, 0.40])
+    clears, bypasses = pl._check_net_clearance(
+        p_outside, np.array([4.0, 0.0, 2.0])
+    )
+    assert not clears and bypasses
+
+
+def test_plan_uses_ball_center_contact_height():
+    """The legacy command path must aim the center at z=R, not through z=0."""
+    pl = _planner()
+    cmd = pl.plan(_incoming_strike())
+    # plan may select a fallback flight time to clear the net; infer that time
+    # by checking the advertised target against the candidate set.
+    candidates = [pl.config.delta_t_flight, 0.4, 0.6, 0.35, 0.7, 0.3]
+    errors = []
+    for duration in candidates:
+        end, _ = pl._integrate_free_flight(
+            _incoming_strike().p_ball, cmd.v_ball_outgoing, duration
+        )
+        errors.append(np.linalg.norm(end - np.array([
+            cmd.target_land[0], cmd.target_land[1], pl.physics.radius,
+        ])))
+    assert min(errors) < 5e-4
 
 
 def test_invalid_strike_produces_valid_false():

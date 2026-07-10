@@ -54,6 +54,7 @@ from test_reward_flags_mdp import (  # noqa: E402  (installs the isaaclab stub, 
     _fake_env,
     _fake_racket_cmd,
     hope_commands_mod,
+    hope_observations_mod,
     hope_rewards_mod,
 )
 
@@ -75,7 +76,10 @@ def _make_state_cmd(n, signs, clip_ids=None, multiseg=True, num_segments=2):
     quat = torch.zeros(n, 1, 4)
     quat[..., 0] = 1.0  # identity — the stub matrix_from_quat returns eye(3), so axis 1 == +Y
     rt.robot = types.SimpleNamespace(data=types.SimpleNamespace(
-        body_pos_w=torch.zeros(n, 1, 3), body_quat_w=quat, body_lin_vel_w=torch.zeros(n, 1, 3)))
+        body_pos_w=torch.zeros(n, 1, 3), body_quat_w=quat,
+        body_lin_vel_w=torch.zeros(n, 1, 3), body_ang_vel_w=torch.zeros(n, 1, 3),
+        body_link_lin_vel_w=torch.zeros(n, 1, 3),
+        body_link_ang_vel_w=torch.zeros(n, 1, 3)))
     fake_motion = types.SimpleNamespace(
         _multiseg=multiseg,
         clip_id=torch.tensor(clip_ids if clip_ids is not None else [0] * n),
@@ -84,6 +88,32 @@ def _make_state_cmd(n, signs, clip_ids=None, multiseg=True, num_segments=2):
     rt._motion = lambda: fake_motion
     rt._mount_sign_per_clip_t = None
     return rt
+
+
+def test_racket_velocity_reads_link_point_not_legacy_com_velocity():
+    """IsaacLab 2.1 body_lin_vel_w 是 COM 点速度；body_link_lin_vel_w 才和 body_pos_w 同点。"""
+    rt = _make_state_cmd(2, signs=())
+    rt.robot.data.body_lin_vel_w[:] = torch.tensor([90.0, 91.0, 92.0])  # deliberately wrong point
+    rt.robot.data.body_link_lin_vel_w = torch.tensor(
+        [[[1.0, 2.0, 3.0]], [[4.0, 5.0, 6.0]]]
+    )
+    rt.robot.data.body_link_ang_vel_w = torch.zeros(2, 1, 3)
+    rt._compute_racket_state()
+    assert torch.equal(rt.racket_lin_vel_w, rt.robot.data.body_link_lin_vel_w[:, 0])
+
+
+def test_wrist_fallback_adds_omega_cross_r_to_link_origin_velocity():
+    rt = _make_state_cmd(1, signs=())
+    rt._racket_mode = "wrist_offset"
+    rt._wrist_body_index = 0
+    rt._mount_offset = torch.tensor([[0.2, 0.0, 0.0]])
+    rt._mount_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    rt.robot.data.body_lin_vel_w[:] = torch.tensor([90.0, 91.0, 92.0])
+    rt.robot.data.body_link_lin_vel_w = torch.tensor([[[1.0, 2.0, 3.0]]])
+    rt.robot.data.body_link_ang_vel_w = torch.tensor([[[0.0, 0.0, 10.0]]])
+    rt._compute_racket_state()
+    assert torch.allclose(rt.racket_pos_w, torch.tensor([[0.2, 0.0, 0.0]]))
+    assert torch.allclose(rt.racket_lin_vel_w, torch.tensor([[1.0, 4.0, 3.0]]))
 
 
 def test_default_empty_table_is_scalar_and_never_touches_motion():
@@ -174,8 +204,8 @@ def test_metric_formula_reads_the_same_buffer():
     assert torch.allclose(_err_deg(()), torch.full((2,), 180.0))
     assert torch.allclose(_err_deg((1.0, -1.0)), torch.zeros(2), atol=1e-4)
     src = inspect.getsource(hope_commands_mod.RacketTargetCommand._update_metrics)
-    assert "self.racket_normal_w * self.racket_target_normal_w" in src, (
-        "_update_metrics 不再从 racket_normal_w 计算拍面误差 —— per-clip 符号修复会失效,同步修这里")
+    assert "face_tracking_pair(self)" in src, (
+        "_update_metrics 不再通过共享 face pair 计算拍面误差 —— reward/metric 语义会分裂")
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -189,7 +219,7 @@ def _make_ref_cmd(signs):
     rt.cfg = types.SimpleNamespace(
         mount_normal_axis=1, mount_normal_sign=1.0, mount_normal_sign_per_clip=signs,
         strike_phase=0.5, strike_phase_per_clip=(), clean_strike_vel_window=2,
-        clean_reference_strike_velocity=False)
+        clean_reference_strike_velocity=True)
     rt._env = types.SimpleNamespace(step_dt=0.02)
     rt._racket_mode = "body"
     rt._racket_body_index = 1
@@ -498,11 +528,11 @@ def test_bank_a_frame_guard_fails_loud_on_flipped_bank():
     bad = good.clone()
     bad[1] = -bad[1]  # 反手行翻面 = B 约定题库
     counts = torch.tensor([4, 4])
-    rt._question_bank = types.SimpleNamespace(demanded_normal=bad, counts=counts)
+    rt._question_bank = types.SimpleNamespace(demanded_normal=bad, counts=counts, metadata={})
     rt._qb_face_frame_checked = False
     with pytest.raises(ValueError, match="OPPOSITE"):
         rt._check_question_bank_face_frame()
-    rt._question_bank = types.SimpleNamespace(demanded_normal=good, counts=counts)
+    rt._question_bank = types.SimpleNamespace(demanded_normal=good, counts=counts, metadata={})
     rt._qb_face_frame_checked = False
     rt._check_question_bank_face_frame()
     assert rt._qb_face_frame_checked
@@ -515,9 +545,26 @@ def test_face_cmd_metric_reads_raw_frame():
     cmdn = torch.stack([EY, -EY])
     err = torch.acos(torch.sum(raw * cmdn, dim=-1).clamp(-1.0, 1.0)) * (180.0 / math.pi)
     assert abs(float(err[0])) < 1e-4 and abs(float(err[1]) - 180.0) < 1e-4
-    src = inspect.getsource(hope_commands_mod.RacketTargetCommand._update_metrics)
-    assert "self.racket_normal_raw_w * self.target_normal_cmd" in src, (
-        "face_cmd_normal_error_deg 不再从 raw 缓冲计算 —— 观测盲区回来了,同步修这里")
+    src_pair = inspect.getsource(hope_commands_mod.face_tracking_pair)
+    src_metrics = inspect.getsource(hope_commands_mod.RacketTargetCommand._update_metrics)
+    assert "racket_normal_raw_w" in src_pair and "target_normal_cmd" in src_pair
+    assert "face_tracking_pair(self)" in src_metrics, (
+        "exact/composite 指标不再与拍面奖励共用 A-frame 配对")
+
+
+def test_face_tracking_pair_is_shared_reward_metric_contract():
+    cmd = types.SimpleNamespace(
+        cfg=types.SimpleNamespace(face_command=True),
+        racket_normal_raw_w=torch.stack([EY, EY]),
+        target_normal_cmd=torch.stack([EY, -EY]),
+        racket_normal_w=torch.stack([EY, -EY]),
+        racket_target_normal_w=torch.stack([EY, -EY]),
+    )
+    measured, target = hope_commands_mod.face_tracking_pair(cmd)
+    assert measured is cmd.racket_normal_raw_w and target is cmd.target_normal_cmd
+    cmd.cfg.face_command = False
+    measured, target = hope_commands_mod.face_tracking_pair(cmd)
+    assert measured is cmd.racket_normal_w and target is cmd.racket_target_normal_w
 
 
 def test_source_guards_face_frame_wiring():
@@ -525,8 +572,38 @@ def test_source_guards_face_frame_wiring():
     hope_rewards._face_pair 的 docstring 再动手。"""
     assert "_face_pair" in inspect.getsource(hope_rewards_mod._normal_kernel_raw)
     assert "_face_pair" in inspect.getsource(hope_rewards_mod.racket_face_guidance)
-    src_p = inspect.getsource(hope_rewards_mod._face_pair)
+    src_p = inspect.getsource(hope_commands_mod.face_tracking_pair)
     assert "racket_normal_raw_w" in src_p and "target_normal_cmd" in src_p
+    assert "face_tracking_pair(cmd)" in inspect.getsource(hope_rewards_mod._face_pair)
+
+
+def test_critic_face_pair_sees_the_same_random_command_without_resizing():
+    cmd = _fake_racket_cmd(2)
+    cmd.cfg.face_command = True
+    cmd.racket_normal_raw_w = torch.stack([EY, -EY])
+    cmd.racket_normal_w = -cmd.racket_normal_raw_w  # deliberately different signed/reference view
+    cmd.target_normal_cmd = torch.stack([-EY, EY])
+    cmd.racket_target_normal_w = cmd.racket_normal_w.clone()
+    env = _fake_env(racket_target=cmd)
+
+    assert torch.equal(
+        hope_observations_mod.racket_normal_w(env, "racket_target"),
+        cmd.racket_normal_raw_w,
+    )
+    assert torch.equal(
+        hope_observations_mod.racket_target_normal_w(env, "racket_target"),
+        cmd.target_normal_cmd,
+    )
+
+    cmd.cfg.face_command = False
+    assert torch.equal(
+        hope_observations_mod.racket_normal_w(env, "racket_target"),
+        cmd.racket_normal_w,
+    )
+    assert torch.equal(
+        hope_observations_mod.racket_target_normal_w(env, "racket_target"),
+        cmd.racket_target_normal_w,
+    )
     import re
     mj = open(os.path.join(SCRIPTS_DIR, "mujoco_eval_onnx.py"), encoding="utf-8").read()
     # 守卫必须是 raise(不是降级成 print 的警告)——正则绑定 raise SystemExit 本体
@@ -542,6 +619,11 @@ def test_source_guards_face_frame_wiring():
         hope_commands_mod.RacketTargetCommand._apply_question_bank_targets)
     assert "_check_question_bank_face_frame" in src_apply, (
         "_apply_question_bank_targets 不再调用 A 约定卫兵 —— B 卷会静默进训练,单翻病复发")
+    assert "self.vb_vel_in_w[env_ids] = incoming_vel" in src_apply
+    assert "self.vb_spin_in_w[env_ids] = incoming_spin" in src_apply
+    src_resample = inspect.getsource(hope_commands_mod.RacketTargetCommand._resample_command)
+    assert "self._question_bank is None" in src_resample, (
+        "bank 来球在同一 resample 末尾又被随机 virtual-ball 采样覆盖")
     ex_path = os.path.join(
         HERE, "..", "source", "whole_body_tracking", "whole_body_tracking", "utils", "exporter.py")
     ex = open(ex_path, encoding="utf-8").read()

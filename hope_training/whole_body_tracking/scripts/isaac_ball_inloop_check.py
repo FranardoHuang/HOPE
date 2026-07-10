@@ -71,9 +71,10 @@ def states_from_bank(bank_path: str, vb, prm, n_cap: int):
         vin = torch.tensor(np.asarray(z[f"{c}/incoming_vel"]), dtype=torch.float64)
         if not len(vin):
             continue
+        spin = torch.tensor(np.asarray(z[f"{c}/incoming_spin"]), dtype=torch.float64)
         dvel = torch.tensor(np.asarray(z[f"{c}/demanded_vel"]), dtype=torch.float64)
         dnrm = torch.tensor(np.asarray(z[f"{c}/demanded_normal"]), dtype=torch.float64)
-        v_plus, w_plus = vb.predict_paddle_contact(vin, dvel, dnrm, torch.zeros_like(vin), prm)
+        v_plus, w_plus = vb.predict_paddle_contact(vin, dvel, dnrm, spin, prm)
         p = torch.tensor(np.asarray(z[f"{c}/contact_pos_env"]), dtype=torch.float64)
         ps.append(p.expand(len(vin), 3).clone())
         vs.append(v_plus)

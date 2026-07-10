@@ -88,6 +88,27 @@ def test_out_of_bounds_box_contains_table():
     assert box["y"][0] < -geometry.TABLE_WIDTH and box["y"][1] > 0.0
 
 
+def test_phase_contact_uses_link_origin_velocity_not_com_velocity():
+    """The Phase environment must grade the same point it positions."""
+
+    source = open(os.path.join(_PKG, "table_tennis_env.py"), encoding="utf-8").read()
+    handle = source.split("def _handle_paddle", 1)[1].split("def _write_ball_velocity", 1)[0]
+    assert "body_link_lin_vel_w" in handle
+    assert "rd.body_lin_vel_w" not in handle
+    assert "body_link_ang_vel_w" in handle
+    assert "torch.cross" in handle
+
+
+def test_a3_phase_config_pins_official_wrist_site_fallback():
+    cfg_source = open(
+        os.path.join(_PKG, "config", "agibot_a3", "table_tennis_env_cfg.py"),
+        encoding="utf-8",
+    ).read()
+    assert "A3_MOUNT_OFFSET" in cfg_source
+    assert "self.racket_site_offset_wrist_m = A3_MOUNT_OFFSET" in cfg_source
+    assert "self.racket_wrist_body_name = A3_WRIST_BODY" in cfg_source
+
+
 def _run_ball_tests() -> int:
     try:
         import torch  # noqa: F401

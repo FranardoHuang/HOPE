@@ -14,6 +14,9 @@ motions are first-class inputs; the WandB motion registry is an optional sharing
 The legacy `scripts/rsl_rl/train.py --task=... --registry_name=...` still works too.
 """
 
+import hashlib
+import json
+import math
 import pathlib
 import sys
 
@@ -49,6 +52,21 @@ def _as_bool(x):
     return str(x).strip().lower() in ("true", "1", "yes")
 
 
+def _as_yaw_range(value):
+    if len(value) != 2:
+        raise _OverrideError("stand_start_yaw_range must contain exactly [lo, hi]")
+    lo, hi = (float(value[0]), float(value[1]))
+    if not (math.isfinite(lo) and math.isfinite(hi)) or lo > hi:
+        raise _OverrideError(
+            f"stand_start_yaw_range must be finite with lo <= hi, got {(lo, hi)}"
+        )
+    if abs(lo) > math.pi or abs(hi) > math.pi:
+        raise _OverrideError(
+            f"stand_start_yaw_range must stay within [-pi, pi], got {(lo, hi)}"
+        )
+    return (lo, hi)
+
+
 def _is_noneish(value) -> bool:
     if value is None:
         return True
@@ -70,6 +88,172 @@ def _configured_items(primary, secondary=None) -> list:
         else:
             items.append(secondary)
     return [item for item in items if not _is_noneish(item)]
+
+
+def _contract_value(value):
+    """Convert config values to stable JSON primitives without importing Isaac/Torch helpers."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (list, tuple, ListConfig)):
+        return [_contract_value(v) for v in value]
+    try:
+        return [_contract_value(v) for v in value]
+    except TypeError:
+        return str(value)
+
+
+def _sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _build_training_hard_contract(env, actor_contract) -> dict:
+    """Immutable actor/task facts that must match across a checkpoint resume.
+
+    Rewards, hold durations, terminations and optimizer settings are deliberately absent: they are
+    curriculum-mutable. Geometry, command meaning, clip identity and action processing are not.
+    """
+    from whole_body_tracking.utils.training_contract import (
+        TRAINING_CONTRACT_SCHEMA_VERSION,
+        runtime_execution_facts,
+    )
+
+    env_cfg = env.cfg
+    motion_cmd = env.command_manager.get_term("motion")
+    motion = motion_cmd.cfg
+    try:
+        racket_cmd = env.command_manager.get_term("racket_target")
+    except KeyError:
+        racket_cmd = None
+    racket = None if racket_cmd is None else racket_cmd.cfg
+    runtime_facts = runtime_execution_facts(env, actor_contract)
+    motion_files = motion.motion_file
+    if not isinstance(motion_files, (list, tuple, ListConfig)):
+        motion_files = [motion_files]
+    segment_lengths = runtime_facts["motion_segment_lengths"]
+    if len(motion_files) != len(segment_lengths):
+        raise RuntimeError(
+            "loaded motion file count does not match runtime segment count: "
+            f"files={len(motion_files)} segments={segment_lengths}"
+        )
+
+    def attr(obj, name, default=None):
+        return _contract_value(getattr(obj, name, default))
+
+    clips = []
+    for index, (path, segment_length) in enumerate(zip(motion_files, segment_lengths)):
+        absolute = str(pathlib.Path(path).resolve())
+        kinematics = runtime_facts["motion_kinematics_contracts"][index]
+        clip_fps = runtime_facts["motion_clip_fps"][index]
+        clips.append({
+            "index": index,
+            "basename": pathlib.Path(path).name,
+            "sha256": _sha256_file(absolute),
+            "segment_length": int(segment_length),
+            "fps": float(clip_fps),
+            "kinematics": kinematics,
+        })
+    question_bank = None
+    bank_path_cfg = str(getattr(racket, "question_bank", "") or "").strip()
+    if bank_path_cfg:
+        import numpy as np
+
+        validated_bank = getattr(racket_cmd, "_question_bank", None)
+        bank_path = str(
+            pathlib.Path(getattr(validated_bank, "source_path", bank_path_cfg)).resolve()
+        )
+        if not pathlib.Path(bank_path).is_file():
+            raise RuntimeError(f"training question bank does not exist: {bank_path}")
+        with np.load(bank_path) as bank_npz:
+            meta = None
+            if "meta_json" in bank_npz:
+                try:
+                    meta = json.loads(
+                        bytes(np.asarray(bank_npz["meta_json"], dtype=np.uint8)).decode("utf-8")
+                    )
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    meta = None
+        allow_legacy = bool(getattr(racket, "question_bank_allow_legacy", False))
+        if meta is None or int(meta.get("schema_version", 0)) != 3:
+            if not allow_legacy:
+                raise RuntimeError(
+                    "current training configuration requires a schema-v3 question bank"
+                )
+            question_bank = {
+                "sha256": _sha256_file(bank_path),
+                "schema_version": "legacy",
+                "split": "unknown",
+                "source_family_sha256": None,
+                "exact": False,
+            }
+        else:
+            if meta.get("split") != "train":
+                raise RuntimeError(
+                    f"training hard contract requires a train-split bank, got {meta.get('split')!r}"
+                )
+            family_sha = str(meta.get("source_family_sha256", "")).strip().lower()
+            if len(family_sha) != 64 or any(
+                ch not in "0123456789abcdef" for ch in family_sha
+            ):
+                raise RuntimeError("schema-v3 train bank has invalid source-family SHA")
+            question_bank = {
+                "sha256": _sha256_file(bank_path),
+                "schema_version": 3,
+                "split": "train",
+                "source_family_sha256": family_sha,
+                "exact": True,
+            }
+    return {
+        "schema_version": TRAINING_CONTRACT_SCHEMA_VERSION,
+        **runtime_facts,
+        "target_mode": attr(racket, "target_mode"),
+        "normal_mode": attr(racket, "normal_mode"),
+        "racket_pos_range_per_clip": attr(racket, "racket_pos_range_per_clip"),
+        "racket_vel_range_per_clip": attr(racket, "racket_vel_range_per_clip"),
+        "base_target_x_range": attr(racket, "base_target_x_range"),
+        "base_target_y_range": attr(racket, "base_target_y_range"),
+        "mount_normal_axis": attr(racket, "mount_normal_axis"),
+        "mount_normal_sign": attr(racket, "mount_normal_sign"),
+        "mount_normal_sign_per_clip": attr(racket, "mount_normal_sign_per_clip"),
+        "racket_control_point": (
+            "pingpang_red_Link_origin_v1" if racket is not None else None
+        ),
+        "racket_control_point_offset_wrist_m": attr(racket, "mount_offset"),
+        "strike_phase_per_clip": attr(racket, "strike_phase_per_clip"),
+        "episode_length_s": float(getattr(env_cfg, "episode_length_s")),
+        "motion_wrap_teleport": bool(getattr(motion, "wrap_teleport", False)),
+        "motion_hold_steps_range": attr(motion, "hold_steps_range"),
+        "motion_hold_reference": "stand",
+        "motion_stand_start_prob": attr(motion, "stand_start_prob"),
+        "motion_stand_start_min_hold": attr(motion, "stand_start_min_hold"),
+        "motion_stand_start_yaw_range": attr(motion, "stand_start_yaw_range"),
+        "motion_speed_scale_range": attr(motion, "speed_scale_range"),
+        "motion_speed_scale_per_clip": attr(motion, "speed_scale_per_clip"),
+        "motion_rsi_hold_root_stand_z": bool(getattr(motion, "rsi_hold_root_stand_z", False)),
+        "motion_clips": clips,
+        "question_bank": question_bank,
+    }
+
+
+def _contract_diff(expected, actual, prefix="") -> list[str]:
+    """Human-readable recursive diff for fail-loud resume errors."""
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        lines = []
+        for key in sorted(set(expected) | set(actual)):
+            child = f"{prefix}.{key}" if prefix else key
+            if key not in expected:
+                lines.append(f"{child}: checkpoint=<missing> current={actual[key]!r}")
+            elif key not in actual:
+                lines.append(f"{child}: checkpoint={expected[key]!r} current=<missing>")
+            else:
+                lines.extend(_contract_diff(expected[key], actual[key], child))
+        return lines
+    if expected != actual:
+        return [f"{prefix}: checkpoint={expected!r} current={actual!r}"]
+    return []
 
 
 def _normalize_registry_name(name) -> str:
@@ -202,8 +386,11 @@ def _set_reward(rewards, name, weight, std, applied):
         applied.append(f"rewards.{name}.weight={float(weight)}")
     if std is not None:
         _require("std" in term.params, f"rewards.{name}.params['std']")
-        term.params["std"] = float(std)
-        applied.append(f"rewards.{name}.params.std={float(std)}")
+        std_value = float(std)
+        if not math.isfinite(std_value) or std_value <= 0.0:
+            raise _OverrideError(f"rewards.{name}.std must be finite and > 0, got {std!r}")
+        term.params["std"] = std_value
+        applied.append(f"rewards.{name}.params.std={std_value}")
 
 
 def _check_unknown_keys(node, known, where):
@@ -270,7 +457,7 @@ _RACKET_KEYS = (
 
     # Stage-1 question bank (fixed contact point, inverse-solved face+velocity targets) + the
     # face-command reward re-anchor / +4 actor obs channel (normal + rho placeholder, 175->179).
-    "question_bank", "face_command", "face_command_obs",
+    "question_bank", "question_bank_allow_legacy", "face_command", "face_command_obs",
     # R10c 站位锚观测(+2 actor 尾维,179->181;franco 2026-07-09"planner 的 p_base 应该加进去")
     "station_obs", "station_anchor_offset_xy",
     # SHADOW physical ball + table (flag-gated, METRICS-ONLY engine-vs-analytic landing
@@ -283,6 +470,7 @@ _RACKET_KEYS = (
 # A8 post-swing initial-state buffer).
 _MOTION_KEYS = (
     "wrap_teleport", "stand_start_prob", "hold_steps_range", "stand_start_min_hold",
+    "stand_start_yaw_range",
     "post_swing_start_prob", "post_swing_buffer_size", "post_swing_min_fill", "post_swing_min_hold",
     # deploy-parity mid-swing clip switch (018467a added the yaml key + MotionCommandCfg field but not
     # this whitelist/translation, so every run of the task yaml raised in _check_unknown_keys).
@@ -312,6 +500,8 @@ _REWARD_KEYS = (
     "racket_normal_weight", "racket_normal_std",
     "base_position_weight", "base_position_std",
     "hold_ready_weight", "hold_ready_std", "hold_ready_reach", "hold_ready_reach_mode",
+    "post_strike_brake_weight", "post_strike_brake_std",
+    "hold_heading_weight", "hold_heading_std", "foot_orientation_hold_gate",
     "base_decel_weight", "base_decel_std", "base_decel_v_gain", "base_decel_v_max",
     # R16 / V1 wrist-mimic surgery (orientation 2026-07-04; linear velocity 2026-07-08 §③).
     "free_wrist_ori_mimic", "free_wrist_vel_mimic",
@@ -530,6 +720,8 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(M, "hold_steps_range", _get(mt, "hold_steps_range"),
                       lambda v: tuple(int(x) for x in v), applied, "commands.motion")
             _set_attr(M, "stand_start_min_hold", _get(mt, "stand_start_min_hold"), int, applied, "commands.motion")
+            _set_attr(M, "stand_start_yaw_range", _get(mt, "stand_start_yaw_range"),
+                      _as_yaw_range, applied, "commands.motion")
             _set_attr(M, "post_swing_start_prob", _get(mt, "post_swing_start_prob"), float, applied, "commands.motion")
             _set_attr(M, "post_swing_buffer_size", _get(mt, "post_swing_buffer_size"), int, applied, "commands.motion")
             _set_attr(M, "post_swing_min_fill", _get(mt, "post_swing_min_fill"), int, applied, "commands.motion")
@@ -595,6 +787,9 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
         # ((~pre_strike) & (~strike_window)) — arrests the walk-and-strike lunge momentum between
         # swings (deploy Gate-2.5 P7 drift fall). Default weight 0.0 = OFF (plain HitterPure).
         _set_reward(R, "post_strike_brake", _get(rw, "post_strike_brake_weight"), _get(rw, "post_strike_brake_std"), applied)
+        # Recovery from yawed holds. This is inert unless the task enables both a yawed
+        # stand-start distribution and a positive hold_heading weight.
+        _set_reward(R, "hold_heading", _get(rw, "hold_heading_weight"), _get(rw, "hold_heading_std"), applied)
         # P2.4 PACE-style smooth deceleration (flag-gated, default weight 0.0 = OFF): pseudo base-speed
         # command proportional to the remaining planar racket->target error. REWARD-side only (the
         # frozen 175-D actor obs contract is untouched).
@@ -605,6 +800,13 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 _require(hasattr(R, "base_decel"), "rewards.base_decel")
                 R.base_decel.params[_pk] = float(_bd)
                 applied.append(f"rewards.base_decel.params.{_pk}={float(_bd)}")
+        _foot_hold_gate = _get(rw, "foot_orientation_hold_gate")
+        if _foot_hold_gate is not None:
+            _require(hasattr(R, "foot_orientation"), "rewards.foot_orientation")
+            R.foot_orientation.params["hold_gate"] = _as_bool(_foot_hold_gate)
+            applied.append(
+                f"rewards.foot_orientation.params.hold_gate={_as_bool(_foot_hold_gate)}"
+            )
         # R16 (franco 2026-07-04): free the racket wrist from ORIENTATION mimic. Config-level only —
         # drop the racket-mount link from the body lists of the two orientation-imitation terms;
         # position / linear-velocity mimic keep the swing path, and the face orientation is then
@@ -935,12 +1137,27 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             # path (gen_stage1_questions.py); face_command re-anchors the racket_normal reward onto
             # the demanded normal (target_normal_cmd).
             _set_attr(C, "question_bank", _get(rk, "question_bank"), str, applied, "racket_target")
+            _set_attr(C, "question_bank_allow_legacy", _get(rk, "question_bank_allow_legacy"),
+                      _as_bool, applied, "racket_target")
             _set_attr(C, "face_command", _get(rk, "face_command"), _as_bool, applied, "racket_target")
             # Bank vs retiming: bank demanded velocities are ABSOLUTE physics answers (inverse-
             # solved racket velocity for a real incoming ball) — a swing replayed at speed s cannot
             # have its answer rescaled by s (the ball does not slow down). Same loud-fail pattern
             # as _check_unknown_keys: never let the combination start and silently train wrong.
             if str(getattr(C, "question_bank", "") or ""):
+                _target_mode = str(getattr(C, "target_mode", "uniform"))
+                if _target_mode == "hitter_pure":
+                    raise _OverrideError(
+                        "[train.py] racket.question_bank is incompatible with "
+                        "racket.target_mode=hitter_pure: the bank owns a fixed contact point and "
+                        "atomic incoming-ball/answer row, while HitterPure owns station-relative "
+                        "target sampling. Use uniform/reference_perturbed or drop the bank.")
+                _ms_prob = float(getattr(C, "midswing_resample_prob", 0.0))
+                if _ms_prob > 0.0:
+                    raise _OverrideError(
+                        "[train.py] racket.question_bank is incompatible with "
+                        f"racket.midswing_resample_prob={_ms_prob}: a redraw would change the "
+                        "question without rescheduling the same physical/shadow ball. Set it to 0.")
                 _ssr = tuple(float(x) for x in getattr(
                     getattr(env_cfg.commands, "motion", None), "speed_scale_range", (1.0, 1.0)))
                 if _ssr != (1.0, 1.0):
@@ -948,6 +1165,14 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                         f"[train.py] racket.question_bank is set but motion.speed_scale_range="
                         f"{_ssr}: bank demanded velocities are absolute physics answers; retiming "
                         "cannot scale them. Set motion.speed_scale_range: [1.0, 1.0] or drop the bank.")
+                _spc = getattr(getattr(env_cfg.commands, "motion", None),
+                               "speed_scale_per_clip", None)
+                if _spc is not None:
+                    raise _OverrideError(
+                        "[train.py] racket.question_bank is set but "
+                        f"motion.speed_scale_per_clip={tuple(float(x) for x in _spc)}: even a "
+                        "fixed per-clip clock activates retiming, while bank answers are absolute "
+                        "physics targets. Set motion.speed_scale_per_clip: null or drop the bank.")
             # face_command_obs (+4 actor dims: demanded normal (3) + zero-filled rho placeholder (1),
             # the contract-day 175 -> 179 layout): the obs groups were finalized in __post_init__
             # BEFORE overrides run, so setting env_cfg.face_command_obs here would be a silent
@@ -1096,6 +1321,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                     f"penalty replacing the removed terminations), got {_w}")
             _require(hasattr(env_cfg.rewards, "tracking_envelope"), "rewards.tracking_envelope")
             env_cfg.rewards.tracking_envelope.weight = _w
+            env_cfg.rewards.tracking_envelope.params["ignore_hold"] = True
             _require(hasattr(env_cfg, "commands") and hasattr(env_cfg.commands, "racket_target")
                      and hasattr(env_cfg.commands.racket_target, "track_envelope_violation"),
                      "commands.racket_target.track_envelope_violation (envelope accounting)")
@@ -1103,7 +1329,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             applied.append("terminations.anchor_pos=None terminations.ee_body_pos=None "
                            "(envelope_as_penalty: envelope no longer terminates)")
             applied.append(f"rewards.tracking_envelope.weight={_w} "
-                           "(+tracking_loss_rate/envelope_violated_frac accounting)")
+                           "ignore_hold=True (+tracking_loss_rate/envelope_violated_frac accounting)")
         elif _epw is not None:
             raise _OverrideError(
                 "[train.py] terminations.envelope_penalty_weight is set but envelope_as_penalty "
@@ -1199,10 +1425,15 @@ def _run(cfg):
     import whole_body_tracking  # noqa: F401
     import whole_body_tracking.tasks  # noqa: F401  -- registers the gym tasks
     from whole_body_tracking.tasks.tracking.actor_observation_contract import (
+        infer_actor_observation_contract,
         validate_actor_observation_contract,
     )
     from whole_body_tracking.utils.my_on_policy_runner import MotionOnPolicyRunner as OnPolicyRunner
     from whole_body_tracking.utils.ppo_cfg import runner_kwargs
+    from whole_body_tracking.utils.training_contract import (
+        require_checkpoint_contract_binding,
+        validate_schema3_contract,
+    )
 
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
@@ -1324,13 +1555,25 @@ def _run(cfg):
     render_mode = "rgb_array" if cfg.video else None
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)
     expected_contract = _get(cfg.task, "actor_obs_contract")
+    actor_contract = None
     if expected_contract is not None:
-        contract = validate_actor_observation_contract(env.unwrapped, str(expected_contract))
+        actor_contract = validate_actor_observation_contract(env.unwrapped, str(expected_contract))
         print(
             "[train.py] actor observation contract validated: "
-            f"{contract.name} ({contract.total_dim}D, obs_mode={contract.obs_mode})",
+            f"{actor_contract.name} ({actor_contract.total_dim}D, obs_mode={actor_contract.obs_mode})",
             flush=True,
         )
+    else:
+        actor_contract = infer_actor_observation_contract(env.unwrapped)
+
+    hard_contract = _build_training_hard_contract(env.unwrapped, actor_contract)
+    contract_path = os.path.join(log_dir, "params", "training_contract.json")
+    os.makedirs(os.path.dirname(contract_path), exist_ok=True)
+    with open(contract_path, "w", encoding="utf-8") as stream:
+        json.dump(hard_contract, stream, indent=2, sort_keys=True)
+        stream.write("\n")
+    hard_contract_sha256 = _sha256_file(contract_path)
+    print(f"[train.py] hard training contract: {contract_path}", flush=True)
     if cfg.video:
         env = gym.wrappers.RecordVideo(
             env,
@@ -1346,19 +1589,89 @@ def _run(cfg):
     # resolve_motion_sources already returned normalized 'collection:alias' refs (a bare collection name
     # is an HTTP 400). List-valued: the runner records ALL used clips, not just clip 0.
     runner_registry_name = motion_registries if motion_registries else None
+    # A checkpoint may claim formal schema-3 provenance only when it is fresh from this contract or
+    # resumes an already exact-bound schema-3 lineage. A legacy/mismatched warm-start remains useful,
+    # but every descendant checkpoint is permanently marked exact-ineligible; merely saving it beside
+    # a new JSON must never launder historical execution semantics.
+    ckpt = getattr(cfg, "checkpoint_path", None)
+    source_checkpoint = None
+    motion_kinematics_exact = bool(hard_contract["motion_kinematics_exact"])
+    contract_lineage_exact = ckpt is None and motion_kinematics_exact
+    if not motion_kinematics_exact:
+        print(
+            "[train.py] WARNING: one or more motion clips lack declared schema-2 COM-velocity/body-order "
+            "semantics; checkpoints from this run are formal-ineligible until the clips are "
+            "migrated/re-exported (see scripts/migrate_motion_kinematics.py).",
+            flush=True,
+        )
+    if ckpt is not None:
+        ckpt = os.path.abspath(str(ckpt))
+        if not os.path.isfile(ckpt):
+            raise FileNotFoundError(f"[train.py] checkpoint_path does not exist: {ckpt}")
+        source_checkpoint = torch.load(ckpt, map_location="cpu", weights_only=False)
+        prior_contract_path = os.path.join(os.path.dirname(ckpt), "params", "training_contract.json")
+        allow_missing = bool(getattr(cfg, "checkpoint_allow_missing_contract", False))
+        allow_mismatch = bool(getattr(cfg, "checkpoint_allow_contract_mismatch", False))
+        if not os.path.isfile(prior_contract_path):
+            message = (
+                f"[train.py] checkpoint has no hard training contract: {prior_contract_path}. "
+                "Tensor shapes cannot detect a changed HitterPure strike plane/box/face convention."
+            )
+            if getattr(actor_contract, "name", None) == "hitter_pure" and not allow_missing:
+                raise RuntimeError(
+                    message + " For a deliberately audited legacy warm-start, pass "
+                    "checkpoint_allow_missing_contract=true; the override is recorded in stdout."
+                )
+            print(message + " Continuing only because this is non-HitterPure or explicitly allowed.",
+                  flush=True)
+        else:
+            with open(prior_contract_path, encoding="utf-8") as stream:
+                prior_contract = json.load(stream)
+            diffs = _contract_diff(prior_contract, hard_contract)
+            if diffs and not allow_mismatch:
+                raise RuntimeError(
+                    "[train.py] checkpoint hard-contract mismatch; refusing a contaminated resume:\n  - "
+                    + "\n  - ".join(diffs)
+                    + "\nIf this is an intentional representation transfer rather than a resume, pass "
+                      "checkpoint_allow_contract_mismatch=true and use a new run name."
+                )
+            if diffs:
+                print("[train.py] WARNING: explicit hard-contract mismatch override:\n  - "
+                      + "\n  - ".join(diffs), flush=True)
+            else:
+                print(f"[train.py] checkpoint hard contract MATCH: {prior_contract_path}", flush=True)
+                try:
+                    validate_schema3_contract(prior_contract)
+                    require_checkpoint_contract_binding(
+                        source_checkpoint,
+                        schema=int(prior_contract["schema_version"]),
+                        sha256=_sha256_file(prior_contract_path),
+                    )
+                except ValueError as exc:
+                    print(
+                        "[train.py] WARNING: source checkpoint contract is not exact-bound; "
+                        f"descendants remain formal-ineligible: {exc}",
+                        flush=True,
+                    )
+                else:
+                    contract_lineage_exact = motion_kinematics_exact
+
     runner = OnPolicyRunner(
-        env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device, registry_name=runner_registry_name
+        env,
+        agent_cfg.to_dict(),
+        log_dir=log_dir,
+        device=agent_cfg.device,
+        registry_name=runner_registry_name,
+        training_contract_schema_version=int(hard_contract["schema_version"]),
+        training_contract_sha256=hard_contract_sha256,
+        training_contract_lineage_exact=contract_lineage_exact,
     )
     runner.add_git_repo_to_log(__file__)
 
     # Resume / curriculum hand-off: load weights+optimizer from a prior checkpoint and CONTINUE (the
     # iteration counter resumes from the checkpoint). Config changes in the task YAML (e.g. a tighter
     # racket_velocity_std) take effect immediately on the loaded policy — no fresh restart needed.
-    ckpt = getattr(cfg, "checkpoint_path", None)
     if ckpt is not None:
-        ckpt = os.path.abspath(str(ckpt))
-        if not os.path.isfile(ckpt):
-            raise FileNotFoundError(f"[train.py] checkpoint_path does not exist: {ckpt}")
         if bool(getattr(cfg, "checkpoint_tolerant", False)):
             # Warm-start ACROSS critic-layout changes (e.g. the 318-D pre-merge lineage into the
             # 316-D merged model, or deploy-parity ckpts into VirtualBall's critic): actor + std
@@ -1373,7 +1686,7 @@ def _run(cfg):
         else:
             # Warm-start checkpoints (e.g. make_hitter_warmstart.py) deliberately drop the
             # optimizer state because parameter shapes changed; a fresh optimizer is correct there.
-            has_optimizer = "optimizer_state_dict" in torch.load(ckpt, map_location="cpu", weights_only=False)
+            has_optimizer = "optimizer_state_dict" in source_checkpoint
             runner.load(ckpt, load_optimizer=has_optimizer)
             print(f"[train.py] RESUMED from checkpoint: {ckpt} (continuing at iteration "
                   f"{getattr(runner, 'current_learning_iteration', '?')}, "

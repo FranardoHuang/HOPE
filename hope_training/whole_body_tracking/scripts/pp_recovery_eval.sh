@@ -8,9 +8,10 @@
 # heading_recovery_expiry_yaw (added to eval_deterministic REPORT_ROWS) the load-bearing number.
 #
 # READ THE OUTPUT:
-#   heading_recovery_spawn_yaw (cond)   ~ mean |yaw| the holds START at (should be ~0.45 rad given +-0.9)
-#   heading_recovery_expiry_yaw (GATE)  ~ mean |yaw| when the swing ARMS after the hold.
-#   PASS (recovery works): expiry << spawn AND expiry < ~0.30 rad (deploy engage gate is 0.35 rad / 20 deg).
+#   heading_recovery_count              MUST reach exact_success_min_count before either mean counts.
+#   heading_recovery_spawn_yaw          ~ mean |yaw| the conditioned holds START at.
+#   heading_recovery_expiry_yaw         ~ mean |yaw| when the swing ARMS after the hold.
+#   PASS: count is sufficient, expiry << spawn, and expiry < ~0.30 rad.
 #   FAIL: expiry ~= spawn (no turning) or expiry > 0.30.
 # NB: Isaac does not reproduce the deploy over-rotation, so this is a PROXY — the decisive gate is
 #     pp_gate3_rally.sh (rescues==0). Also sanity-check composite here isn't wrecked by the yawed starts.

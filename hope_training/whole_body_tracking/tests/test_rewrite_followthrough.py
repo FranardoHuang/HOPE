@@ -424,6 +424,12 @@ class StubFK:
         q = np.stack([base_quat, np.array([np.cos(half), 0.0, 0.0, np.sin(half)])])
         return p, q
 
+    def fk_with_com(self, base_pos, base_quat, jd):
+        # Zero inertial offsets are sufficient for this pure-CPU seam test;
+        # production MjFK returns MuJoCo data.xipos as the third value.
+        p, q = self.fk(base_pos, base_quat, jd)
+        return p, q, p.copy()
+
 
 def make_npz_with_foreign_velocity_provenance(T_: int = T):
     """Source npz whose velocity fields are NOT gradient(stored positions) bitwise —
@@ -445,6 +451,7 @@ def make_npz_with_foreign_velocity_provenance(T_: int = T):
     ba = np.zeros((T_, 2, 3), np.float32) + noise((T_, 2, 3)).astype(np.float32)
     data = dict(fps=np.array([50], np.int64), joint_pos=q, joint_vel=jv,
                 body_pos_w=bp, body_quat_w=bq, body_lin_vel_w=bl, body_ang_vel_w=ba)
+    data.update(rf.metadata_arrays(body_names=["pelvis_link", "body_1"]))
     assert not np.array_equal(np.gradient(q.astype(np.float64), dt, axis=0).astype(np.float32), jv)
     return data, fk
 

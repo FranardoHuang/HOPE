@@ -278,25 +278,44 @@ def resample_at_s(data: dict, s_out: np.ndarray, fps_out: float,
     jv = np.gradient(jp.astype(np.float64), dt, axis=0).astype(np.float32)
 
     if body_mode == "fk":
-        fkm, cols = fk_ctx
+        fkm, cols, explicit_body_names = fk_ctx
         base_pos = v1._interp_rows(np.asarray(data["body_pos_w"], float)[:, 0], s_out)
         base_quat = v1._slerp_rows(np.asarray(data["body_quat_w"], float)[:, 0], s_out)
-        pos_all, quat_all = v1.ctn.fk_series(fkm, base_pos, base_quat,
-                                             jp.astype(np.float64), ISAAC_JOINT_NAMES)
+        pos_all, quat_all, com_all = v1.ctn.fk_series_with_com(
+            fkm, base_pos, base_quat, jp.astype(np.float64), ISAAC_JOINT_NAMES
+        )
         bp = pos_all[:, cols].astype(np.float32)
         bq = quat_all[:, cols].astype(np.float32)
+        velocity_path = com_all[:, cols].astype(np.float64)
+        velocity_point = "center_of_mass"
     elif body_mode == "interp":
         bp = v1._interp_rows(np.asarray(data["body_pos_w"], float), s_out).astype(np.float32)
         bq = v1._slerp_rows(np.asarray(data["body_quat_w"], float), s_out).astype(np.float32)
+        velocity_path = bp.astype(np.float64)
+        velocity_point = "link_origin"
+        explicit_body_names = None
     else:
         raise SystemExit(f"unknown --body-mode {body_mode!r}")
 
-    bl = np.gradient(bp.astype(np.float64), dt, axis=0).astype(np.float32)
+    bl = np.gradient(velocity_path, dt, axis=0).astype(np.float32)
     ba = np.stack([v1.ctn.so3_derivative(bq[:, b].astype(np.float64), dt)
                    for b in range(bq.shape[1])], axis=1).astype(np.float32)
-    return {"fps": np.array([int(round(fps_out))], dtype=np.int64),
-            "joint_pos": jp, "joint_vel": jv, "body_pos_w": bp, "body_quat_w": bq,
-            "body_lin_vel_w": bl, "body_ang_vel_w": ba}
+    try:
+        body_names = v1.resolve_body_names(
+            data,
+            explicit_body_names=explicit_body_names,
+            expected_count=bp.shape[1],
+        )
+    except ValueError as exc:
+        raise SystemExit(f"motion body-order contract: {exc}") from None
+
+    out = {"fps": np.array([int(round(fps_out))], dtype=np.int64),
+           "joint_pos": jp, "joint_vel": jv, "body_pos_w": bp, "body_quat_w": bq,
+           "body_lin_vel_w": bl, "body_ang_vel_w": ba}
+    out.update(v1.metadata_arrays(
+        body_names=body_names, body_lin_vel_point=velocity_point
+    ))
+    return out
 
 
 # ====================================================================================== #
@@ -684,7 +703,7 @@ def main(argv=None) -> int:
         fkm = v1.ctn.MjFK(args.mjcf, ISAAC_JOINT_NAMES)
         names = fkm.body_names()
         order = [ln.strip() for ln in open(args.body_order) if ln.strip()]
-        fk_ctx = (fkm, [names.index(n) for n in order])
+        fk_ctx = (fkm, [names.index(n) for n in order], tuple(order))
 
     judge = RealOracle(args.mjcf, args.body_order, args.mu, args.support_band,
                        workdir=args.oracle_workdir)

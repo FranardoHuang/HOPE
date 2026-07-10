@@ -19,9 +19,13 @@
 # continuous-rally / post-strike-homing capability — consecutive alternating swings with
 # recovery holds between them.
 #
-# WHAT CHANGES vs HOPEPingPongHitterPure.yaml (EVERYTHING else is identical — same 110-D
-# hitter_pure contract, same station/plane/velocity boxes, same DR, same terminations, same
-# per-clip normal signs; a HitterPure checkpoint warm-resumes STRICTLY):
+# LEGACY GEOMETRY WARNING (2026-07-10 audit): this archived v1 recipe retains the historical
+# 0.70 m strike plane and station-x ±0.10. Current HitterPure/V3 use 0.51 m and station-x=0.
+# Therefore it is NOT geometry-identical to current Pure, and a current checkpoint must not be
+# resumed here as if this were a curriculum stage. train.py's hard-contract guard now rejects that
+# silent transfer unless the operator explicitly overrides it.
+#
+# WHAT CHANGED vs the HISTORICAL 0.70-plane HitterPure recipe:
 #   1. hold_steps_range [0,0] -> [25,125]: a REAL 0.5-2.5 s recovery hold at EVERY clip wrap
 #      (existing ARM-A machinery — hold freezes tts POSITIVE at the windup value == the C++
 #      runner's idle/wait tts clamp; reference = ready stand + zero vel; imitation body pos/ori
@@ -95,6 +99,9 @@ motion:
   # THE structural rally change: 0.5-2.5 s recovery hold at EVERY wrap (and reset). Inside the
   # deploy envelope (runner hold_recover_s 2.5 s policy-active; scripted P7 holds ~4.5 s).
   hold_steps_range: [25, 125]
+  # Held RSI uses stand joints; lift the reference root to default stand z as well or the feet are
+  # born below the floor and PhysX depenetration corrupts the recovery sample.
+  rsi_hold_root_stand_z: true
   post_swing_start_prob: 0.0
   clip_switch_prob: 0.0
 
@@ -127,7 +134,7 @@ rewards:
   joint_limit_weight: -10.0
   undesired_contacts_weight: -0.1
 
-# ---- target sampling: identical to HOPEPingPongHitterPure.yaml ------------------
+# ---- target sampling: LEGACY 0.70-plane lineage (not current HitterPure/V3) ------
 racket:
   target_mode: hitter_pure
   normal_mode: velocity

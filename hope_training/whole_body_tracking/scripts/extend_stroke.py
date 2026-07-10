@@ -519,17 +519,29 @@ def rebuild_npz(data: dict, q_out: np.ndarray, fk_ctx) -> dict:
 
     base_pos = np.asarray(data["body_pos_w"], dtype=np.float64)[:, ROOT_BODY_COL]
     base_quat = np.asarray(data["body_quat_w"], dtype=np.float64)[:, ROOT_BODY_COL]
-    fkm, cols = fk_ctx
-    pos_all, quat_all = ctn.fk_series(fkm, base_pos, base_quat,
-                                      jp.astype(np.float64), ISAAC_JOINT_NAMES)
+    fkm, cols, explicit_body_names = fk_ctx
+    pos_all, quat_all, com_all = ctn.fk_series_with_com(
+        fkm, base_pos, base_quat, jp.astype(np.float64), ISAAC_JOINT_NAMES
+    )
     bp = pos_all[:, cols].astype(np.float32)
     bq = quat_all[:, cols].astype(np.float32)
-    bl = np.gradient(bp.astype(np.float64), dt, axis=0).astype(np.float32)
+    bl = np.gradient(com_all[:, cols].astype(np.float64), dt, axis=0).astype(np.float32)
     ba = np.stack([ctn.so3_derivative(bq[:, b].astype(np.float64), dt)
                    for b in range(bq.shape[1])], axis=1).astype(np.float32)
-    return {"fps": np.array([int(round(fps))], dtype=np.int64),
-            "joint_pos": jp, "joint_vel": jv, "body_pos_w": bp, "body_quat_w": bq,
-            "body_lin_vel_w": bl, "body_ang_vel_w": ba}
+    try:
+        body_names = st.resolve_body_names(
+            data,
+            explicit_body_names=explicit_body_names,
+            expected_count=bp.shape[1],
+        )
+    except ValueError as exc:
+        raise SystemExit(f"motion body-order contract: {exc}") from None
+
+    out = {"fps": np.array([int(round(fps))], dtype=np.int64),
+           "joint_pos": jp, "joint_vel": jv, "body_pos_w": bp, "body_quat_w": bq,
+           "body_lin_vel_w": bl, "body_ang_vel_w": ba}
+    out.update(st.metadata_arrays(body_names=body_names))
+    return out
 
 
 # ------------------------------------------------------------------- oracle ------ #
@@ -807,7 +819,7 @@ def main(argv=None) -> int:
     fkm = ctn.MjFK(args.mjcf, ISAAC_JOINT_NAMES)
     names = fkm.body_names()
     order = [ln.strip() for ln in open(args.body_order) if ln.strip()]
-    fk_ctx = (fkm, [names.index(n) for n in order])
+    fk_ctx = (fkm, [names.index(n) for n in order], tuple(order))
     out = rebuild_npz(data, q_out, fk_ctx)
     np.savez(args.output, **out)
     blade_out_npz = st.blade_positions(out)

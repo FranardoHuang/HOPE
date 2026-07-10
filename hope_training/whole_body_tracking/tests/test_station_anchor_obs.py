@@ -345,7 +345,7 @@ def test_build_obs_station_without_face_fails(mj, monkeypatch):
     r = _racket(mj)
     r.resample(0)
     robot = _FakeRobot([0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 0.0])
-    with pytest.raises(AssertionError, match="181 = 179 \\+ 2"):
+    with pytest.raises(SystemExit, match="station channel requires"):
         mj.build_obs(_fake_refs(mj), robot, r, np.zeros(31), np.zeros(31),
                      deploy_parity=True, face_command=False, station=True)
 

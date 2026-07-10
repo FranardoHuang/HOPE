@@ -89,14 +89,20 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import csv_to_npz_mujoco as ctn  # noqa: E402  (numpy-only at import time)
 from audit_motion_npz import ISAAC_JOINT_NAMES, parse_urdf_limits  # noqa: E402
+from racket_geometry_contract import RACKET_SITE_OFFSET_WRIST_M  # noqa: E402
+from motion_kinematics_contract import (  # noqa: E402
+    KINEMATICS_METADATA_KEYS,
+    metadata_arrays,
+    resolve_body_names,
+)
 
 KNOWN_KEYS = ("fps", "joint_pos", "joint_vel", "body_pos_w", "body_quat_w",
-              "body_lin_vel_w", "body_ang_vel_w")
+              "body_lin_vel_w", "body_ang_vel_w") + KINEMATICS_METADATA_KEYS
 
 # Blade conventions — MUST match analyze_strike_phase.py / RacketTargetCommand.
 RACKET_BODY = 31           # right_wrist_yaw_Link column in body_* arrays
 NORMAL_AXIS = 1            # blade face normal = wrist-frame +Y
-MOUNT_OFFSET = np.array([0.210211399202899, 0.0320784994676765, 0.0320358706296689])
+MOUNT_OFFSET = RACKET_SITE_OFFSET_WRIST_M
 CLEAN_VEL_WINDOW = 2       # training-parity clean strike velocity stencil (frames)
 
 
@@ -357,24 +363,40 @@ def resample(data: dict, law: TimeLaw, fps_out: float, body_mode: str = "interp"
     base_quat = _slerp_rows(np.asarray(data["body_quat_w"], dtype=np.float64)[:, 0], s)
 
     if body_mode == "fk":
-        fkm, cols = fk_ctx
-        pos_all, quat_all = ctn.fk_series(fkm, base_pos, base_quat,
-                                          jp.astype(np.float64), ISAAC_JOINT_NAMES)
+        fkm, cols, explicit_body_names = fk_ctx
+        pos_all, quat_all, com_all = ctn.fk_series_with_com(
+            fkm, base_pos, base_quat, jp.astype(np.float64), ISAAC_JOINT_NAMES
+        )
         bp = pos_all[:, cols].astype(np.float32)
         bq = quat_all[:, cols].astype(np.float32)
+        velocity_path = com_all[:, cols].astype(np.float64)
+        velocity_point = "center_of_mass"
     elif body_mode == "interp":
         bp = _interp_rows(np.asarray(data["body_pos_w"], dtype=np.float64), s).astype(np.float32)
         bq = _slerp_rows(np.asarray(data["body_quat_w"], dtype=np.float64), s).astype(np.float32)
+        velocity_path = bp.astype(np.float64)
+        velocity_point = "link_origin"
+        explicit_body_names = None
     else:
         raise SystemExit(f"unknown --body-mode {body_mode!r}")
 
-    bl = np.gradient(bp.astype(np.float64), dt, axis=0).astype(np.float32)
+    bl = np.gradient(velocity_path, dt, axis=0).astype(np.float32)
     ba = np.stack([ctn.so3_derivative(bq[:, b].astype(np.float64), dt)
                    for b in range(bq.shape[1])], axis=1).astype(np.float32)
+
+    try:
+        body_names = resolve_body_names(
+            data,
+            explicit_body_names=explicit_body_names,
+            expected_count=bp.shape[1],
+        )
+    except ValueError as exc:
+        raise SystemExit(f"motion body-order contract: {exc}") from None
 
     out = {"fps": np.array([int(round(fps_out))], dtype=np.int64),
            "joint_pos": jp, "joint_vel": jv, "body_pos_w": bp, "body_quat_w": bq,
            "body_lin_vel_w": bl, "body_ang_vel_w": ba}
+    out.update(metadata_arrays(body_names=body_names, body_lin_vel_point=velocity_point))
     return out, k_star, s
 
 
@@ -618,7 +640,7 @@ def main(argv=None) -> int:
         fkm = ctn.MjFK(args.mjcf, ISAAC_JOINT_NAMES)
         names = fkm.body_names()
         order = [ln.strip() for ln in open(args.body_order) if ln.strip()]
-        fk_ctx = (fkm, [names.index(n) for n in order])
+        fk_ctx = (fkm, [names.index(n) for n in order], tuple(order))
 
     data = dict(np.load(args.input))
     out, rep = synthesize(

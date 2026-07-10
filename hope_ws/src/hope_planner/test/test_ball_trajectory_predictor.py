@@ -50,6 +50,28 @@ def test_bounce_then_cross_hit_plane_path():
     assert strike.p_ball[2] > 0.0
 
 
+def test_bounce_uses_ball_center_contact_plane_in_both_event_paths():
+    """A 40 mm ball contacts a z=0 table when its centre is at z=20 mm."""
+    physics = BallPhysics(k=0.0, C_v=0.0, g=np.zeros(3))
+    config = PlannerConfig(dt_integrate=0.001, max_predict_time=0.001)
+    pred = BallTrajectoryPredictor(physics, config, TableParams())
+    p0 = np.array([0.5, -0.7625, 0.021])
+    v0 = np.array([0.0, 0.0, -2.0])
+
+    # Public fixed-dt path (the inline event implementation).
+    result = pred.predict(p0, v0, 0.0)
+    assert result.num_bounces == 1
+    assert np.isclose(result.p_ball[2], physics.radius)
+
+    # Adaptive path delegates its fine event replay to _step_with_events.
+    _, p1, _, _, _, bounces = pred._step_with_events(
+        p0.copy(), v0.copy(), np.zeros(3), 0.0, 0,
+        config.dt_integrate, False,
+    )
+    assert bounces == 1
+    assert np.isclose(p1[2], physics.radius)
+
+
 def test_bounce_outside_table_bounds_not_valid():
     pred = _predictor()
     on_table = np.array([1.0, -0.7625, -0.01])   # within bounds (expanded by radius)

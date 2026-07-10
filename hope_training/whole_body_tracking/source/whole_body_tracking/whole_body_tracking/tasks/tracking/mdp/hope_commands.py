@@ -47,10 +47,30 @@ from isaaclab.utils.math import (
 )
 
 from whole_body_tracking.tasks.tracking.mdp.commands import MotionCommand
-from whole_body_tracking.tasks.tracking.mdp.stage1_question_bank import load_question_bank, select_questions
+from whole_body_tracking.tasks.tracking.mdp.stage1_question_bank import (
+    load_question_bank,
+    select_questions,
+    validate_runtime_motion_contract,
+)
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
+
+# Holds starting beyond this yaw (rad) contribute to the conditioned recovery metric.
+# It sits just inside the deploy engage limit, so the metric measures states that matter.
+_RECOVERY_START_YAW_THRESHOLD = 0.30
+
+
+def face_tracking_pair(command: "RacketTargetCommand") -> tuple[torch.Tensor, torch.Tensor]:
+    """Return the measured/target normals used by every face reward and success metric.
+
+    Bank face commands live in the raw mount +Y/A frame. Non-bank tasks retain the signed
+    clip-reference pairing. Keeping this decision here prevents reward and reporting from
+    silently grading different faces.
+    """
+    if command.cfg.face_command:
+        return command.racket_normal_raw_w, command.target_normal_cmd
+    return command.racket_normal_w, command.racket_target_normal_w
 
 
 class RacketTargetCommand(CommandTerm):
@@ -75,10 +95,11 @@ class RacketTargetCommand(CommandTerm):
         else:
             self._racket_mode = "wrist_offset"
             self._racket_body_index = -1
-            assert cfg.wrist_body_name in self.robot.body_names, (
-                f"RacketTargetCommand: neither racket body '{cfg.racket_body_name}' nor wrist body "
-                f"'{cfg.wrist_body_name}' found on asset '{cfg.asset_name}'."
-            )
+            if cfg.wrist_body_name not in self.robot.body_names:
+                raise ValueError(
+                    f"RacketTargetCommand: neither racket body '{cfg.racket_body_name}' nor wrist "
+                    f"body '{cfg.wrist_body_name}' found on asset '{cfg.asset_name}'."
+                )
             self._wrist_body_index = self.robot.find_bodies(cfg.wrist_body_name, preserve_order=True)[0][0]
 
         self._mount_offset = torch.tensor(cfg.mount_offset, dtype=torch.float32, device=self.device).repeat(
@@ -128,10 +149,29 @@ class RacketTargetCommand(CommandTerm):
                 "without a bank target_normal_cmd stays zeros and the re-anchored racket_normal "
                 "reward is silently dead. Set racket.question_bank or drop face_command."
             )
+        if cfg.question_bank and cfg.target_mode == "hitter_pure":
+            raise ValueError(
+                "RacketTargetCommandCfg.question_bank is incompatible with "
+                "target_mode='hitter_pure': HitterPure samples a station-relative target, while "
+                "the Stage-1 bank defines a fixed contact point and an atomic incoming-ball/answer "
+                "row. Use target_mode='uniform' or 'reference_perturbed' for the bank."
+            )
+        if cfg.question_bank and float(cfg.midswing_resample_prob) > 0.0:
+            raise ValueError(
+                "RacketTargetCommandCfg.question_bank is incompatible with "
+                "midswing_resample_prob>0: a redraw would replace the incoming-ball/answer row "
+                "without rescheduling the physical/shadow ball. Disable mid-swing redraws for "
+                "bank experiments."
+            )
         if cfg.question_bank:
             # Loaded ONCE (numpy npz -> per-clip torch tensors on device); clip order matches
             # _clip_names (0=forehand, 1=backhand). Loud error on a missing/empty clip.
-            self._question_bank = load_question_bank(cfg.question_bank, device=self.device)
+            self._question_bank = load_question_bank(
+                cfg.question_bank,
+                device=self.device,
+                allow_legacy=bool(cfg.question_bank_allow_legacy),
+                expected_split=(None if cfg.question_bank_allow_legacy else "train"),
+            )
             self.metrics["question_difficulty_deg"] = torch.zeros(self.num_envs, device=self.device)
             # A-frame (+Y) guard runs lazily on the first bank application (the reference strike
             # state is unresolved at __init__) — see _check_question_bank_face_frame.
@@ -393,6 +433,20 @@ class RacketTargetCommand(CommandTerm):
         self._drift_sum_acc = 0.0
         self._drift_fwd_sum_acc = 0.0
         self._station_offset_start_sum_acc = 0.0
+        self._heading_expiry_sum_acc = 0.0
+        self._heading_expiry_n_acc = 0.0
+        self._recovery_spawn_sum_acc = 0.0
+        self._recovery_expiry_sum_acc = 0.0
+        self._recovery_n_acc = 0.0
+        self._previous_in_hold = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._hold_start_yaw = torch.zeros(self.num_envs, device=self.device)
+        # A true reset can replace one held state with another without a boolean falling/rising
+        # edge. Force a fresh stamp on the first metrics tick after every resample.
+        self._hold_edge_pending = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
 
         # --- HER-style achieved-target replay buffers (see RacketTargetCommandCfg) -----------------
         # Per-clip ring buffers of the racket state the policy ACTUALLY produced at exact-strike frames:
@@ -447,6 +501,11 @@ class RacketTargetCommand(CommandTerm):
             self._prev_pre_strike = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
             self._held_pos = torch.zeros(self.num_envs, 3, device=self.device)
             self._held_vel = torch.zeros(self.num_envs, 3, device=self.device)
+            # A planner command is one atomic message.  A dropped frame must therefore hold the
+            # face command and side selector together with position/velocity; holding only the
+            # first two used to expose question N+1's normal/sign next to question N's target.
+            self._held_normal = torch.zeros(self.num_envs, 3, device=self.device)
+            self._held_sign = torch.ones(self.num_envs, device=self.device)
         # The actor view is materialized (separate tensors) whenever latency OR jitter is on;
         # otherwise the delayed_* attributes ARE the live tensors (which are only ever index-assigned
         # after __init__, so the alias stays valid for the whole run).
@@ -465,16 +524,19 @@ class RacketTargetCommand(CommandTerm):
             _L = self._delay_steps + 1
             self._delay_buf_pos = torch.zeros(_L, self.num_envs, 3, device=self.device)
             self._delay_buf_vel = torch.zeros(_L, self.num_envs, 3, device=self.device)
+            self._delay_buf_normal = torch.zeros(_L, self.num_envs, 3, device=self.device)
             self._delay_buf_sign = torch.ones(_L, self.num_envs, device=self.device)
             self._delay_ptr = 0
         if self._actor_view_active:
             self.delayed_racket_target_pos_w = self.racket_target_pos_w.clone()
             self.delayed_racket_target_vel_w = self.racket_target_vel_w.clone()
+            self.delayed_target_normal_cmd = self.target_normal_cmd.clone()
             self.delayed_swing_sign = self.swing_sign.clone()
         else:
             # Flags off: zero-overhead aliases of the live tensors (byte-identical baseline).
             self.delayed_racket_target_pos_w = self.racket_target_pos_w
             self.delayed_racket_target_vel_w = self.racket_target_vel_w
+            self.delayed_target_normal_cmd = self.target_normal_cmd
             self.delayed_swing_sign = self.swing_sign
         # A1 metrics: per-step per-env redraw indicator (wandb reset-mean = per-step mid-swing
         # refinement fraction) + the constant delay-in-effect broadcast (refreshed every step in
@@ -614,6 +676,11 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["base_drift_per_swing"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["base_drift_fwd_per_swing"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["base_station_offset_at_swing_start"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["base_heading_abs_at_swing_start"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["base_heading_hold_expiry_count"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["heading_recovery_spawn_yaw"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["heading_recovery_expiry_yaw"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["heading_recovery_count"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["post_strike_base_speed_xy"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["base_dist_from_origin"] = torch.zeros(self.num_envs, device=self.device)
         # Swing-quality detail at the most recent strike: actual paddle speed, per-axis position error,
@@ -912,8 +979,8 @@ class RacketTargetCommand(CommandTerm):
             # Recompute the strike target velocity from the FINAL racket FK position by a centered
             # finite difference (clamped to this clip's segment), so it is consistent with the
             # position the policy actually tracks (the stored body_lin_vel_w is FD'd/interpolated and
-            # ~1 m/s inconsistent at the racket tip — see cfg docs). raw_lin = legacy single-frame
-            # stored velocity (kept for the flag-off path and the diagnostics).
+            # ~1 m/s inconsistent at the racket tip — see cfg docs). raw_lin is retained only as
+            # a diagnostic: the NPZ channel is a COM-point velocity and is not the controlled site.
             raw_lin = lin.detach().clone()
             fd1 = (
                 self._ref_racket_pos_at(motion, strike_step + 1, clip_start=seg_start, clip_end=seg_end)
@@ -923,8 +990,13 @@ class RacketTargetCommand(CommandTerm):
                 self._ref_racket_pos_at(motion, strike_step + W, clip_start=seg_start, clip_end=seg_end)
                 - self._ref_racket_pos_at(motion, strike_step - W, clip_start=seg_start, clip_end=seg_end)
             ) / (2.0 * W * dt)
-            if self.cfg.clean_reference_strike_velocity:
-                lin = clean_lin
+            if not self.cfg.clean_reference_strike_velocity:
+                raise RuntimeError(
+                    "clean_reference_strike_velocity=false is no longer a valid racket contract: "
+                    "motion body_lin_vel_w is a COM-point channel, not the URDF racket site. "
+                    "Use the point-consistent centered difference."
+                )
+            lin = clean_lin
 
             pos_all[clip_id] = pos.detach().clone()
             vel_all[clip_id] = lin.detach().clone()
@@ -1024,7 +1096,8 @@ class RacketTargetCommand(CommandTerm):
         if self._ref_normal_per_clip is not None:
             return
         self._ensure_reference_strike_state()
-        assert self._ref_racket_normal_w_per_clip is not None
+        if self._ref_racket_normal_w_per_clip is None:
+            raise RuntimeError("reference strike-state initialization produced no face normals")
         self._ref_normal_per_clip = self._ref_racket_normal_w_per_clip
 
     def _sample_targets_uniform(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
@@ -1240,9 +1313,10 @@ class RacketTargetCommand(CommandTerm):
         the policy no longer has to imitate one teacher strike while chasing a different sampled target.
         """
         self._ensure_reference_strike_state()
-        assert self._ref_racket_pos_rel_per_clip is not None
-        assert self._ref_racket_vel_w_per_clip is not None
-        assert self._ref_racket_normal_w_per_clip is not None
+        if (self._ref_racket_pos_rel_per_clip is None
+                or self._ref_racket_vel_w_per_clip is None
+                or self._ref_racket_normal_w_per_clip is None):
+            raise RuntimeError("reference strike-state initialization is incomplete")
         motion = self._motion()
         if motion._multiseg:
             clip = motion.clip_id[env_ids]
@@ -1286,8 +1360,9 @@ class RacketTargetCommand(CommandTerm):
         target_normal_cmd := demanded face normal. Runs at the END of BOTH sampling paths so every
         resample route (reset / clip wrap / mid-swing refinement) sees a bank target, and the
         downstream A1 delay/noise injectors act on it exactly like a box-sampled one.
-        racket_target_normal_w is deliberately LEFT on the clip reference normal (metrics + critic
-        obs unchanged); the face reward reads target_normal_cmd only when cfg.face_command is on.
+        ``racket_target_normal_w`` storage remains the clip-reference lane for provenance, while the
+        critic accessor, rewards and exact/composite metrics all use the shared face pair and see the
+        demanded A-frame normal when cfg.face_command is on.
         """
         if self._question_bank is None:
             return
@@ -1298,12 +1373,17 @@ class RacketTargetCommand(CommandTerm):
             clip = motion.clip_id[env_ids]
         else:
             clip = torch.zeros(n, dtype=torch.long, device=self.device)
-        pos, vel, nrm, diff = select_questions(
+        pos, incoming_vel, incoming_spin, vel, nrm, diff = select_questions(
             self._question_bank, clip, torch.rand(n, device=self.device)
         )
         self.racket_target_pos_w[env_ids] = origins + pos
         self.racket_target_vel_w[env_ids] = vel
         self.target_normal_cmd[env_ids] = nrm
+        # The inverse-solved answer and its incoming ball are one atomic question. These writes
+        # happen from the same selected row; the generic virtual-ball sampler below is disabled
+        # while a bank is active so it cannot replace question A's ball with question B.
+        self.vb_vel_in_w[env_ids] = incoming_vel
+        self.vb_spin_in_w[env_ids] = incoming_spin
         # Held per env until its next resample; reset-mean reports the question difficulty mix.
         self.metrics["question_difficulty_deg"][env_ids] = diff
 
@@ -1323,8 +1403,29 @@ class RacketTargetCommand(CommandTerm):
         margin, which is a feature, not a bug.
         """
         self._ensure_reference_strike_state()
-        assert self._ref_racket_normal_raw_w_per_clip is not None
+        if self._ref_racket_normal_raw_w_per_clip is None:
+            raise RuntimeError("reference strike-state initialization produced no raw face normals")
         bank = self._question_bank
+        if bank.metadata:
+            motion = self._motion()
+            files = (
+                [motion.cfg.motion_file]
+                if isinstance(motion.cfg.motion_file, str)
+                else list(motion.cfg.motion_file)
+            )
+            nseg = int(motion.motion.num_segments)
+            phases_cfg = self._strike_phases_cfg(nseg)
+            phases = (
+                [float(value) for value in phases_cfg]
+                if phases_cfg
+                else [float(self.cfg.strike_phase)] * nseg
+            )
+            validate_runtime_motion_contract(
+                bank.metadata,
+                files,
+                [int(value) for value in motion.motion.seg_len.tolist()],
+                phases,
+            )
         nseg = int(self._ref_racket_normal_raw_w_per_clip.shape[0])
         for c in range(min(int(bank.counts.shape[0]), nseg)):
             q = int(bank.counts[c])
@@ -1370,7 +1471,8 @@ class RacketTargetCommand(CommandTerm):
         contact = self._question_bank.contact_pos  # (C, 3), tracking-env frame
         if self.cfg.target_mode == "reference_perturbed":
             self._ensure_reference_strike_state()
-            assert self._ref_reach_offset_xy_per_clip is not None
+            if self._ref_reach_offset_xy_per_clip is None:
+                raise RuntimeError("reference strike-state initialization produced no reach offsets")
             # Single-clip runs cache one reach offset row; clamp the gather like the samplers do.
             idx = torch.arange(contact.shape[0], device=self.device).clamp_(
                 max=self._ref_reach_offset_xy_per_clip.shape[0] - 1
@@ -1391,6 +1493,12 @@ class RacketTargetCommand(CommandTerm):
         if len(env_ids) == 0:
             return
         n = len(env_ids)
+        env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        # A reset/wrap may replace one held state with another without a boolean edge. Force
+        # the next fresh metrics tick to stamp the new hold's yaw instead of reusing old state.
+        self._hold_edge_pending[env_ids_t] = True
+        self._previous_in_hold[env_ids_t] = False
+        self._hold_start_yaw[env_ids_t] = 0.0
         origins = self._env.scene.env_origins[env_ids]
         motion = self._motion()
         # R14: re-arm the one-shot exact-strike latch for the new swing.
@@ -1433,7 +1541,8 @@ class RacketTargetCommand(CommandTerm):
             base_xy = origins[:, :2] + self._qb_base_anchor_off_xy()[clip]
         elif self.cfg.target_mode == "reference_perturbed":
             self._ensure_reference_strike_state()
-            assert self._ref_reach_offset_xy_per_clip is not None
+            if self._ref_reach_offset_xy_per_clip is None:
+                raise RuntimeError("reference strike-state initialization produced no reach offsets")
             if motion._multiseg:
                 clip = motion.clip_id[env_ids]
             else:
@@ -1448,7 +1557,8 @@ class RacketTargetCommand(CommandTerm):
             # the box moves the STATION, not the reach depth. The jitter below (base_target_*_range)
             # trains the policy to strike with the station deliberately offset — y-reach diversity.
             self._ensure_reference_strike_state()
-            assert self._ref_reach_offset_xy_per_clip is not None
+            if self._ref_reach_offset_xy_per_clip is None:
+                raise RuntimeError("reference strike-state initialization produced no reach offsets")
             if motion._multiseg:
                 clip = motion.clip_id[env_ids]
             else:
@@ -1498,7 +1608,7 @@ class RacketTargetCommand(CommandTerm):
         # Tier-1 virtual incoming ball: one (v_in, omega_in) per swing. The ball's position at the
         # strike time is the racket target BY CONSTRUCTION (the sampler defines the ball to arrive
         # there), so only velocity + spin are sampled. Boxes stay inside the venue-fit envelope.
-        if self.cfg.virtual_ball or self.cfg.vb_metrics_only:
+        if (self.cfg.virtual_ball or self.cfg.vb_metrics_only) and self._question_bank is None:
             self.vb_vel_in_w[env_ids, 0] = sample_uniform(*self.cfg.vb_vel_x_range, (n,), self.device)
             self.vb_vel_in_w[env_ids, 1] = sample_uniform(*self.cfg.vb_vel_y_range, (n,), self.device)
             self.vb_vel_in_w[env_ids, 2] = sample_uniform(*self.cfg.vb_vel_z_range, (n,), self.device)
@@ -1524,19 +1634,12 @@ class RacketTargetCommand(CommandTerm):
         self._progress_reset_mask[env_ids] = True
 
         # A1 target latency: a TRUE reset (not an intra-episode wrap) starts a fresh "deploy
-        # session" — the runner latches the first planner target before the policy steps, so the
-        # actor-visible view (and the whole ring buffer) is backfilled with the fresh target: no
-        # cross-episode target leakage. Intra-episode WRAPS are deliberately NOT backfilled — the
-        # next swing's target reaching the actor `delay` steps late is exactly the latency modeled.
-        if self._actor_view_active and not self._resample_is_wrap:
-            ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
-            self.delayed_racket_target_pos_w[ids] = self.racket_target_pos_w[ids]
-            self.delayed_racket_target_vel_w[ids] = self.racket_target_vel_w[ids]
-            self.delayed_swing_sign[ids] = self.swing_sign[ids]
-            if self._delay_steps > 0:
-                self._delay_buf_pos[:, ids] = self.racket_target_pos_w[ids].unsqueeze(0)
-                self._delay_buf_vel[:, ids] = self.racket_target_vel_w[ids].unsqueeze(0)
-                self._delay_buf_sign[:, ids] = self.swing_sign[ids].unsqueeze(0)
+        # session".  Backfill the complete atomic planner message and clear every stateful sensor
+        # defect; otherwise a new episode can inherit the previous episode's held frame, dropout
+        # countdown, AR(1) error or per-swing bias.  Intra-episode wraps deliberately keep those
+        # dynamics: the next command reaching the actor late is the deployment effect being modeled.
+        if not self._resample_is_wrap:
+            self._reset_actor_target_state(env_ids)
 
         # SHADOW ball lifecycle: a resample (reset or wrap) starts these envs' next question —
         # back to the kinematic incoming path (metrics-only; no reward/obs effect).
@@ -1550,17 +1653,39 @@ class RacketTargetCommand(CommandTerm):
 
     def _compute_racket_state(self):
         data = self.robot.data
+        # Isaac Lab 2.1's legacy ``body_*`` state deliberately mixes frames:
+        # ``body_pos_w`` / ``body_quat_w`` are LINK/actor-frame quantities, but
+        # ``body_lin_vel_w`` is the COM-point velocity.  Racket position and
+        # velocity must describe the SAME rigid point.  Use the explicit link
+        # velocity buffers before applying the fixed wrist->site offset;
+        # otherwise the old formula adds omega x (link-origin->site) to a COM
+        # velocity and over-counts omega x (link-origin->COM), a measured
+        # 0.40/0.60 m/s error at the hopex forehand/backhand strike frames.
+        # The fallback keeps dependency-light unit stubs and pre-2.1 shims
+        # importable; the pinned Isaac Lab 2.1 runtime always exposes the link
+        # properties (formal runtime verification covers that contract).
         if self._racket_mode == "body":
             idx = self._racket_body_index
             self.racket_pos_w = data.body_pos_w[:, idx]
             self.racket_quat_w = data.body_quat_w[:, idx]
-            self.racket_lin_vel_w = data.body_lin_vel_w[:, idx]
+            if not hasattr(data, "body_link_lin_vel_w"):
+                raise RuntimeError(
+                    "RacketTargetCommand requires Isaac Lab body_link_lin_vel_w: body_pos_w is a "
+                    "link-origin position but body_lin_vel_w is a COM-point velocity. Falling back "
+                    "would silently corrupt racket speed. Use the pinned Isaac Lab 2.1 runtime."
+                )
+            self.racket_lin_vel_w = data.body_link_lin_vel_w[:, idx]
         else:
             widx = self._wrist_body_index
             wpos = data.body_pos_w[:, widx]
             wquat = data.body_quat_w[:, widx]
-            wlin = data.body_lin_vel_w[:, widx]
-            wang = data.body_ang_vel_w[:, widx]
+            if not hasattr(data, "body_link_lin_vel_w") or not hasattr(data, "body_link_ang_vel_w"):
+                raise RuntimeError(
+                    "RacketTargetCommand wrist FK requires body_link_{lin,ang}_vel_w; legacy "
+                    "body_lin_vel_w is a different rigid point and is not a safe fallback."
+                )
+            wlin = data.body_link_lin_vel_w[:, widx]
+            wang = data.body_link_ang_vel_w[:, widx]
             offset_w = quat_apply(wquat, self._mount_offset)
             self.racket_pos_w = wpos + offset_w
             self.racket_lin_vel_w = wlin + torch.cross(wang, offset_w, dim=-1)
@@ -1571,7 +1696,8 @@ class RacketTargetCommand(CommandTerm):
         # 每个 env 的 clip_id 取;表为空(默认)走标量 mount_normal_sign,现役行为逐位不变(此时连
         # _motion() 都不碰)。racket_normal 奖励(hope_rewards._normal_kernel_raw)和训练内拍面误差
         # 指标(racket_normal_error_deg,_update_metrics)都读 self.racket_normal_w,一处修两处好。
-        # TODO(asset): confirm mount_normal_axis/sign against pingpang_red_Link.STL (see hope-a3-racket-mount).
+        # Asset audit 2026-07-10 confirms local +Y is the red outer-face normal;
+        # see docs/interfaces/racket_contact_geometry.md.
         axis_w = matrix_from_quat(self.racket_quat_w)[:, :, self.cfg.mount_normal_axis]
         if self.cfg.mount_normal_sign_per_clip:
             motion = self._motion()
@@ -1744,13 +1870,17 @@ class RacketTargetCommand(CommandTerm):
         values, so a delayed read reproduces the prediction noise AS OF push time (what the mocap
         link actually emitted then). The TRUE live target is untouched — rewards, metrics, the
         privileged critic, and the achieved-target-replay write keep reading racket_target_pos_w /
-        racket_target_vel_w / swing_sign. time_to_strike is never delayed: the swing clock is
-        generated robot-side by the deploy runner, not by the mocap link.
+        racket_target_vel_w / target_normal_cmd / swing_sign.  The four actor-visible fields are
+        emitted atomically: delay and dropout can never mix two question rows. time_to_strike is
+        never delayed: the swing clock is generated robot-side by the deploy runner, not by the
+        mocap link.
         """
         if not self._actor_view_active:
             return  # default path: delayed_* alias the live tensors — nothing to compute, no RNG
         pos = self.racket_target_pos_w
         vel = self.racket_target_vel_w
+        normal = self.target_normal_cmd
+        sign = self.swing_sign
         if self._jitter_pos > 0.0 or self._jitter_vel > 0.0:
             scale = self.time_to_strike.clamp(0.0, 1.0).unsqueeze(-1)
             if self._jitter_pos > 0.0:
@@ -1784,25 +1914,63 @@ class RacketTargetCommand(CommandTerm):
             d3 = drop.unsqueeze(-1)
             pos = torch.where(d3, self._held_pos, pos)
             vel = torch.where(d3, self._held_vel, vel)
+            normal = torch.where(d3, self._held_normal, normal)
+            sign = torch.where(drop, self._held_sign, sign)
             self._held_pos.copy_(pos)
             self._held_vel.copy_(vel)
+            self._held_normal.copy_(normal)
+            self._held_sign.copy_(sign)
         if self._delay_steps > 0:
             # Write this step's (jittered) target into slot `w`; the next slot in the length-
             # (delay+1) ring was written exactly `delay` pushes ago — that is the actor's view.
             w = self._delay_ptr
             self._delay_buf_pos[w].copy_(pos)
             self._delay_buf_vel[w].copy_(vel)
-            self._delay_buf_sign[w].copy_(self.swing_sign)
+            self._delay_buf_normal[w].copy_(normal)
+            self._delay_buf_sign[w].copy_(sign)
             r = (w + 1) % (self._delay_steps + 1)
             self._delay_ptr = r
             self.delayed_racket_target_pos_w.copy_(self._delay_buf_pos[r])
             self.delayed_racket_target_vel_w.copy_(self._delay_buf_vel[r])
+            self.delayed_target_normal_cmd.copy_(self._delay_buf_normal[r])
             self.delayed_swing_sign.copy_(self._delay_buf_sign[r])
         else:
             # Jitter-only (delay==0): the actor view is live + this step's noise, no latency.
             self.delayed_racket_target_pos_w.copy_(pos)
             self.delayed_racket_target_vel_w.copy_(vel)
-            self.delayed_swing_sign.copy_(self.swing_sign)
+            self.delayed_target_normal_cmd.copy_(normal)
+            self.delayed_swing_sign.copy_(sign)
+
+    def _reset_actor_target_state(self, env_ids: Sequence[int]) -> None:
+        """Start a true episode with a fresh, internally consistent A1 sensor state.
+
+        The runner receives a complete planner command before its first policy step.  Mirror that
+        contract by replacing every delayed/held field with the newly sampled command and clearing
+        stochastic state that must not cross an episode boundary.  This helper is intentionally not
+        used on clip wraps, which are the within-session latency/dropout transitions A1 trains.
+        """
+        if not self._actor_view_active or len(env_ids) == 0:
+            return
+        ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        self.delayed_racket_target_pos_w[ids] = self.racket_target_pos_w[ids]
+        self.delayed_racket_target_vel_w[ids] = self.racket_target_vel_w[ids]
+        self.delayed_target_normal_cmd[ids] = self.target_normal_cmd[ids]
+        self.delayed_swing_sign[ids] = self.swing_sign[ids]
+        if self._mnoise_ar1_sigma > 0.0:
+            self._mnoise_ar1_state[ids] = 0.0
+        if self._a1v2_active:
+            self._swing_bias[ids] = 0.0
+            self._drop_cd[ids] = 0
+            self._prev_pre_strike[ids] = True
+            self._held_pos[ids] = self.racket_target_pos_w[ids]
+            self._held_vel[ids] = self.racket_target_vel_w[ids]
+            self._held_normal[ids] = self.target_normal_cmd[ids]
+            self._held_sign[ids] = self.swing_sign[ids]
+        if self._delay_steps > 0:
+            self._delay_buf_pos[:, ids] = self.racket_target_pos_w[ids].unsqueeze(0)
+            self._delay_buf_vel[:, ids] = self.racket_target_vel_w[ids].unsqueeze(0)
+            self._delay_buf_normal[:, ids] = self.target_normal_cmd[ids].unsqueeze(0)
+            self._delay_buf_sign[:, ids] = self.swing_sign[ids].unsqueeze(0)
 
     def _count_swing_starts(self, env_ids, count_prestrike_falls: bool) -> None:
         """UNCONDITIONAL swing accounting (Phase A wandb fix). Increment-only here; the decay is
@@ -1932,6 +2100,7 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["base_dist_from_origin"] = torch.norm(
             self.base_pos_w[:, :2] - self._env.scene.env_origins[:, :2], dim=-1
         )
+        self._update_hold_recovery_metrics(getattr(self._motion(), "in_hold", None))
         # Rally: lazy swing-start stamp (fresh base_pos_w — see __init__ rationale).
         if bool(self._swing_start_pending.any()):
             _pend = self._swing_start_pending
@@ -2007,6 +2176,44 @@ class RacketTargetCommand(CommandTerm):
             self.metrics["waist_twist_prestrike"] = torch.where(
                 self.pre_strike, self.waist_twist, torch.zeros(self.num_envs, device=self.device)
             )
+
+    def _update_hold_recovery_metrics(self, in_hold) -> None:
+        """Book heading recovery on true hold start/expiry edges.
+
+        A resample can replace a held state with another held state without a boolean transition;
+        ``_hold_edge_pending`` turns that into a fresh start while suppressing a false expiry. A
+        pending zero-length hold records neither edge. This helper is isolated for CPU boundary
+        tests because these ledger semantics are easy to regress inside the larger metrics pass.
+        """
+        if in_hold is None:
+            return
+        in_hold = in_hold.bool()
+        pending = self._hold_edge_pending
+        expired = self._previous_in_hold & ~in_hold & ~pending
+        if bool(expired.any()):
+            quat = self.base_quat_w[expired]
+            forward_x = 1.0 - 2.0 * (quat[:, 2] ** 2 + quat[:, 3] ** 2)
+            forward_y = 2.0 * (quat[:, 1] * quat[:, 2] + quat[:, 0] * quat[:, 3])
+            expiry_yaw = torch.atan2(forward_y, forward_x).abs()
+            self._heading_expiry_sum_acc += float(expiry_yaw.sum())
+            self._heading_expiry_n_acc += float(expired.sum())
+
+            spawn_yaw = self._hold_start_yaw[expired]
+            conditioned = spawn_yaw > _RECOVERY_START_YAW_THRESHOLD
+            if bool(conditioned.any()):
+                self._recovery_spawn_sum_acc += float(spawn_yaw[conditioned].sum())
+                self._recovery_expiry_sum_acc += float(expiry_yaw[conditioned].sum())
+                self._recovery_n_acc += float(conditioned.sum())
+
+        started = ((~self._previous_in_hold) | pending) & in_hold
+        if bool(started.any()):
+            quat = self.base_quat_w[started]
+            forward_x = 1.0 - 2.0 * (quat[:, 2] ** 2 + quat[:, 3] ** 2)
+            forward_y = 2.0 * (quat[:, 1] * quat[:, 2] + quat[:, 0] * quat[:, 3])
+            self._hold_start_yaw[started] = torch.atan2(forward_y, forward_x).abs()
+
+        self._previous_in_hold = in_hold.clone()
+        self._hold_edge_pending.zero_()
 
     def _vb_evaluate(self, exact_strike: torch.Tensor, pos_err: torch.Tensor):
         """Tier-1 at-strike virtual-ball evaluation (rewardDesign.md).
@@ -2226,6 +2433,11 @@ class RacketTargetCommand(CommandTerm):
         self._drift_sum_acc = decay * self._drift_sum_acc
         self._drift_fwd_sum_acc = decay * self._drift_fwd_sum_acc
         self._station_offset_start_sum_acc = decay * self._station_offset_start_sum_acc
+        self._heading_expiry_sum_acc = decay * self._heading_expiry_sum_acc
+        self._heading_expiry_n_acc = decay * self._heading_expiry_n_acc
+        self._recovery_spawn_sum_acc = decay * self._recovery_spawn_sum_acc
+        self._recovery_expiry_sum_acc = decay * self._recovery_expiry_sum_acc
+        self._recovery_n_acc = decay * self._recovery_n_acc
         for _c in self._clip_names:
             self._swing_starts_acc_c[_c] = decay * self._swing_starts_acc_c[_c]
             self._prestrike_fall_acc_c[_c] = decay * self._prestrike_fall_acc_c[_c]
@@ -2268,7 +2480,8 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["base_target_offset_norm"] = torch.norm(self.base_target_pos_w - origins[:, :2], dim=-1)
         pos_err = torch.norm(self.racket_pos_w - self.racket_target_pos_w, dim=-1)
         vel_err = torch.norm(self.racket_lin_vel_w - self.racket_target_vel_w, dim=-1)
-        cos_ang = torch.sum(self.racket_normal_w * self.racket_target_normal_w, dim=-1).clamp(-1.0, 1.0)
+        measured_normal, target_normal = face_tracking_pair(self)
+        cos_ang = torch.sum(measured_normal * target_normal, dim=-1).clamp(-1.0, 1.0)
         normal_err_deg = torch.acos(cos_ang) * (180.0 / math.pi)
         base_err = torch.norm(self.base_pos_w[:, :2] - self.base_target_pos_w, dim=-1)
         base_pos_rel = self.base_pos_w[:, :2] - origins[:, :2]
@@ -2281,10 +2494,8 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["racket_vel_error"] = vel_err
         self.metrics["racket_normal_error_deg"] = normal_err_deg
         if self.cfg.face_command:
-            # Demanded-face error in the reward's own frame (raw +Y vs bank target, _face_pair):
-            # the M3c ~34° disease was invisible to racket_normal_error_deg (flip-invariant).
-            cos_cmd = torch.sum(self.racket_normal_raw_w * self.target_normal_cmd, dim=-1).clamp(-1.0, 1.0)
-            self.metrics["face_cmd_normal_error_deg"] = torch.acos(cos_cmd) * (180.0 / math.pi)
+            # Backward-compatible explicit name for dashboards introduced with the face-frame fix.
+            self.metrics["face_cmd_normal_error_deg"] = normal_err_deg
         self.metrics["base_pos_error"] = base_err
         self.metrics["time_to_strike_s"] = self.time_to_strike
         self.metrics["pre_strike_flag"] = self.pre_strike.float()
@@ -2411,6 +2622,24 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["base_station_offset_at_swing_start"][:] = (
             (self._station_offset_start_sum_acc / _d_denom) if _d_enough else 0.0
         )
+        heading_denom = max(self._heading_expiry_n_acc, 1e-6)
+        heading_enough = self._heading_expiry_n_acc >= float(self.cfg.exact_success_min_count)
+        self.metrics["base_heading_abs_at_swing_start"][:] = (
+            self._heading_expiry_sum_acc / heading_denom if heading_enough else 0.0
+        )
+        self.metrics["base_heading_hold_expiry_count"][:] = self._heading_expiry_n_acc
+
+        recovery_denom = max(self._recovery_n_acc, 1e-6)
+        recovery_enough = self._recovery_n_acc >= float(self.cfg.exact_success_min_count)
+        self.metrics["heading_recovery_spawn_yaw"][:] = (
+            self._recovery_spawn_sum_acc / recovery_denom if recovery_enough else 0.0
+        )
+        self.metrics["heading_recovery_expiry_yaw"][:] = (
+            self._recovery_expiry_sum_acc / recovery_denom if recovery_enough else 0.0
+        )
+        # Consumers must gate on this count before interpreting a zero error; zero samples is
+        # "not measured", not perfect recovery.
+        self.metrics["heading_recovery_count"][:] = self._recovery_n_acc
         # HER replay diagnostics: fraction of resampled targets drawn from the achieved buffer
         # (~achieved_target_mix_prob once the per-clip buffers pass achieved_min_fill).
         self.metrics["achieved_replay_frac"][:] = (
@@ -2457,7 +2686,7 @@ class RacketTargetCommand(CommandTerm):
                 (_em.body_pos_relative_w[:, _bidx, -1] - _em.robot_body_pos_w[:, _bidx, -1]).abs() > _eth,
                 dim=-1,
             )
-            _viol = _anchor_viol | _body_viol
+            _viol = (_anchor_viol | _body_viol) & ~_em.in_hold
             _rising = _viol & ~self._prev_envelope_viol
             self._prev_envelope_viol = _viol
             self._tracking_loss_acc = decay * self._tracking_loss_acc + float(_rising.sum())
@@ -2756,6 +2985,10 @@ class RacketTargetCommand(CommandTerm):
         latency is on (the swing-type flag rides the same planner->runner message as the target)."""
         return self.delayed_swing_sign
 
+    def actor_target_normal_cmd(self) -> torch.Tensor:
+        """Actor-visible demanded face normal from the same atomic A1 message as pos/vel/sign."""
+        return self.delayed_target_normal_cmd
+
     def _target_xy_err_b(self, target_xy_w: torch.Tensor) -> torch.Tensor:
         """(world XY target − current base XY) rotated into the yaw-heading base frame — the shared
         math behind both station-style obs terms (Hitter base_target_pos_b / R10c station anchor)."""
@@ -2823,7 +3056,10 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # --- racket mount FK ---
     racket_body_name: str = "pingpang_red_Link"
     wrist_body_name: str = "right_wrist_yaw_Link"
-    mount_offset: tuple[float, float, float] = (0.210211399202899, 0.0320784994676765, 0.0320358706296689)
+    # Exact official pingpang_red_joint / MJCF right_racket-site transform.
+    # The old value came from pingbang_ball_joint and was 1.49 um away; tiny in
+    # magnitude, but it prevented a literal single-point Isaac/MuJoCo/C++ contract.
+    mount_offset: tuple[float, float, float] = (0.21021, 0.032078, 0.032036)
     # Fixed wrist->racket rotation (w, x, y, z); only used in the wrist_offset FK fallback. Identity
     # for the A3 ping-pong URDF (all mount joints are rpy=0). Set non-identity if the mount tilts the
     # paddle relative to the wrist frame.
@@ -2912,8 +3148,10 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # When True, the cached strike target velocity is recomputed from the FINAL racket FK position
     # (body_pos_w, the same FK as the actual racket) by a centered finite difference over +-window frames,
     # which is consistent with the position the policy actually tracks and rejects single-frame jitter.
-    # False keeps the legacy single-frame stored-velocity path.
-    clean_reference_strike_velocity: bool = False
+    # The legacy False path mixed a COM velocity with a link/site position and
+    # is now rejected at runtime; the field remains only to fail old configs
+    # loudly instead of silently changing their meaning.
+    clean_reference_strike_velocity: bool = True
     clean_strike_vel_window: int = 2  # half-window (frames) for the centered finite difference (try 2 or 3)
 
     # --- debug logging (sign verification + raw/gated reward kernels) ---
@@ -2977,12 +3215,12 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # (ball-prediction error that shrinks as the strike approaches — SMASH Eq. 14), and REFINED
     # mid-swing (the planner re-plans WHERE, not WHEN). PACE injects sensor delays for the same
     # reason. Without this, the mocap-closed-loop deployment faces out-of-distribution target
-    # dynamics. Scope: ONLY the ACTOR-visible target view (pos/vel/swing_sign) is degraded; rewards,
+    # dynamics. Scope: ONLY the ACTOR-visible target view (pos/vel/face-command/swing_sign) is degraded; rewards,
     # metrics, the privileged critic, and the achieved-target-replay write use the TRUE live target.
     # time_to_strike is NEVER delayed: the swing clock is generated robot-side by the deploy runner,
     # not by the mocap link. ALL defaults OFF => byte-identical baseline (delay==0 aliases the live
     # tensors; jitter==0 / prob==0 short-circuit before any RNG draw).
-    target_delay_steps: int = 0  # actor sees target pos/vel/swing_sign this many control steps (50 Hz) late
+    target_delay_steps: int = 0  # actor sees atomic pos/vel/face-command/swing_sign this many 50 Hz steps late
     # SMASH-style tts-decaying gaussian noise on the ACTOR-visible target, drawn ONCE per step on the
     # ring-buffer push (determinism within a step): per-step std = knob * clamp(time_to_strike, 0, 1),
     # i.e. the knob is the std at time_to_strike >= 1 s, decaying to 0 at the strike (prediction
@@ -3160,16 +3398,19 @@ class RacketTargetCommandCfg(CommandTermCfg):
 
     # --- Stage-1 question bank + face-command channel (defaults OFF; byte-identical baseline) -------
     # Path to an offline bank npz (scripts/gen_stage1_questions.py): per clip a FIXED contact point
-    # plus per-question inverse-solved racket velocity + face normal (the ANSWER to a sampled
-    # incoming ball). Non-empty -> every target resample (reset / wrap / mid-swing) OVERRIDES the
-    # sampled pos/vel with a bank row and writes target_normal_cmd; the A1 delay/noise injectors act
+    # plus an atomic incoming-ball + inverse-solved answer tuple. Non-empty -> every target
+    # resample (reset / wrap / mid-swing) OVERRIDES the sampled incoming velocity/spin and target
+    # pos/vel/normal from one bank row; the A1 delay/noise injectors act
     # downstream unchanged. Bank positions are tracking-env-frame (world = env_origin + pos).
     # Empty (default) = OFF: the sampling paths above run untouched, target_normal_cmd stays zeros.
     question_bank: str = ""
+    # Explicit reproducibility escape hatch for pre-schema-v2 banks. New research runs must
+    # keep this false so missing incoming-spin/provenance cannot be silently inferred.
+    question_bank_allow_legacy: bool = False
     # Re-anchor the racket_normal reward (and racket_strike_success through it) onto the demanded
     # target_normal_cmd instead of the clip-locked racket_target_normal_w (the clip-locked face is
-    # the 0%-return root cause — eval mode B 2026-07-05). Exact-strike normal metrics and the critic
-    # obs keep racket_target_normal_w either way. False (default) = old path byte-identical.
+    # the 0%-return root cause — eval mode B 2026-07-05). Exact/composite metrics use the same
+    # pairing as the reward; the critic reference lane remains unchanged. False = old path.
     face_command: bool = False
 
     # --- desired base XY target (offsets from the env origin, world frame, meters) ---

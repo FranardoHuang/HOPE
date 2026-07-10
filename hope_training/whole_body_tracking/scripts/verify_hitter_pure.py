@@ -134,6 +134,13 @@ check(
 ncos = torch.nn.functional.cosine_similarity(cmd.racket_target_normal_w, vel, dim=-1)
 check("normal ∥ velocity", bool((ncos > 0.9999).all()), f"min cos {ncos.min():.6f}")
 
+signs = tuple(float(x) for x in cmd._mount_signs_cfg(cmd._motion().motion.num_segments))
+check(
+    "opposite per-clip striking faces",
+    signs == (1.0, -1.0),
+    f"mount_normal_sign_per_clip={signs}",
+)
+
 # 4) reward stack audit. NOTE: zero-weight terms stay LISTED in active_terms (the RewardManager
 # skips them at compute time) — racket_progress is declared at 0.0 as a fallback knob, so it is
 # checked by weight, not absence.

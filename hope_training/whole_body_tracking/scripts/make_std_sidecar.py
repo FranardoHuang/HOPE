@@ -23,10 +23,29 @@ hope-motion-py310, which lacks torch).
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 
 import numpy as np
 import torch
+
+
+def _sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _normalizer_sha256(mean, std, eps, count) -> str:
+    digest = hashlib.sha256()
+    digest.update(np.asarray(mean, dtype="<f4").tobytes(order="C"))
+    digest.update(np.asarray(std, dtype="<f4").tobytes(order="C"))
+    digest.update(np.asarray([eps], dtype="<f4").tobytes())
+    digest.update(np.asarray([count], dtype="<i8").tobytes())
+    return digest.hexdigest()
 
 
 def _find_std(state_dict):
@@ -63,16 +82,42 @@ def main():
     sd = ckpt.get("model_state_dict", ckpt) if isinstance(ckpt, dict) else ckpt
     key, std = _find_std(sd)
     std = std.detach().cpu().numpy().reshape(-1).astype(np.float32)
+    if std.size == 0 or not np.isfinite(std).all() or np.any(std <= 0.0):
+        raise SystemExit("[FATAL] learned action std is empty, non-finite, or non-positive")
     if std.shape[0] != args.expect_dim:
         print(f"[WARN] std length {std.shape[0]} != expected {args.expect_dim} — check the checkpoint.")
 
     out = args.out or os.path.join(os.path.dirname(os.path.abspath(args.checkpoint)), "exported", "learned_std.npy")
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    np.save(out, std)
+    std_tmp = out + ".tmp.npy"
+    np.save(std_tmp, std)
+    os.replace(std_tmp, out)
+    checkpoint_sha256 = _sha256_file(args.checkpoint)
+    std_payload_sha256 = hashlib.sha256(
+        np.asarray(std, dtype="<f4").tobytes(order="C")
+    ).hexdigest()
+    std_manifest = {
+        "schema_version": 1,
+        "source_checkpoint_sha256": checkpoint_sha256,
+        "std_param_key": key,
+        "shape": list(std.shape),
+        "dtype": "float32",
+        "std_payload_sha256": std_payload_sha256,
+        "std_file_sha256": _sha256_file(out),
+    }
+    manifest_out = out + ".meta.json"
+    manifest_tmp = manifest_out + ".tmp"
+    with open(manifest_tmp, "w", encoding="utf-8") as stream:
+        json.dump(std_manifest, stream, sort_keys=True, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(manifest_tmp, manifest_out)
     print(f"[make_std_sidecar] checkpoint = {args.checkpoint}")
     print(f"[make_std_sidecar] std param  = '{key}'  shape={std.shape}  "
           f"mean={std.mean():.4f} min={std.min():.4f} max={std.max():.4f}")
     print(f"[make_std_sidecar] saved -> {out}")
+    print(f"[make_std_sidecar] bound -> {manifest_out} (checkpoint {checkpoint_sha256})")
 
     # --- actor obs EmpiricalNormalization stats -> obs_norm.npz (P0 fix 2026-07-04) ---------------
     # rsl_rl OnPolicyRunner (empirical_normalization=true) stores the running stats under
@@ -84,10 +129,38 @@ def main():
         mean = nsd["_mean"].detach().cpu().numpy().reshape(-1).astype(np.float32)
         nstd = nsd["_std"].detach().cpu().numpy().reshape(-1).astype(np.float32)
         count = int(nsd.get("count", torch.tensor(0)).item()) if "count" in nsd else 0
-        np.savez(norm_out, mean=mean, std=nstd, eps=np.float32(1e-2), count=np.int64(count))
+        eps = np.float32(1e-2)
+        if (
+            mean.size == 0
+            or mean.shape != nstd.shape
+            or not np.isfinite(mean).all()
+            or not np.isfinite(nstd).all()
+            or np.any(nstd <= 0.0)
+            or count <= 0
+        ):
+            raise SystemExit(
+                "[FATAL] invalid obs_norm_state_dict: mean/std must be same non-empty finite "
+                f"shape, std>0, count>0; mean={mean.shape} std={nstd.shape} count={count}"
+            )
+        state_sha256 = _normalizer_sha256(mean, nstd, eps, count)
+        norm_tmp = norm_out + ".tmp.npz"
+        np.savez(
+            norm_tmp,
+            mean=mean,
+            std=nstd,
+            eps=eps,
+            count=np.int64(count),
+            source_checkpoint_sha256=np.asarray(checkpoint_sha256),
+            normalizer_state_sha256=np.asarray(state_sha256),
+        )
+        os.replace(norm_tmp, norm_out)
         print(f"[make_std_sidecar] obs_norm   = dim {mean.shape[0]}  mean|max|={np.abs(mean).max():.3f} "
               f"std max={nstd.max():.3f}  count={count}")
         print(f"[make_std_sidecar] saved -> {norm_out}")
+        print(
+            f"[make_std_sidecar] binding    = checkpoint_sha256={checkpoint_sha256} "
+            f"normalizer_state_sha256={state_sha256}"
+        )
     else:
         print("[make_std_sidecar] WARNING: checkpoint has no obs_norm_state_dict — no obs_norm.npz "
               "written. Only correct if this run trained with empirical_normalization=false.")

@@ -35,8 +35,6 @@ from .table_tennis_env_cfg import TableTennisEnvCfg
 # Racket hit footprint: the A3 paddle is ~7.5 cm radius (hope_planner.constants.racket_radius). A hit is
 # registered when the ball centre comes within (this + ball radius) of the racket body origin.
 RACKET_CONTACT_RADIUS: float = 0.075
-# Candidate racket body names on the A3 articulation (the red hitting face), most specific first.
-_RACKET_BODY_CANDIDATES = ("pingpang_red_Link", "pingpang_black_Link", "right_racket", "pingbang_ball_Link")
 _CONTACT_EPS: float = 1e-3  # latch hysteresis (m)
 
 
@@ -101,27 +99,42 @@ class TableTennisEnv(ManagerBasedRLEnv):
         if not self._aero_cfg.enabled:
             return
 
-        # Locate the racket body on the robot (paddle-hit detection is optional — skip if absent).
+        # Locate the canonical racket site. Massless fixed paddle links may be
+        # merged by the URDF importer, so a robot specialization must also
+        # provide wrist + fixed-offset FK rather than silently disabling hits.
         try:
             robot = self.scene["robot"]
             self._robot = robot
-            self._racket_body_idx = next(
-                robot.body_names.index(name) for name in _RACKET_BODY_CANDIDATES if name in robot.body_names
-            )
+            candidates = tuple(self.cfg.racket_body_candidates)
+            direct = next((name for name in candidates if name in robot.body_names), None)
+            if direct is not None:
+                self._racket_mode = "body"
+                self._racket_body_idx = robot.body_names.index(direct)
+                source = direct
+            elif self.cfg.racket_wrist_body_name in robot.body_names:
+                self._racket_mode = "wrist_offset"
+                self._racket_body_idx = robot.body_names.index(self.cfg.racket_wrist_body_name)
+                self._racket_site_offset_wrist = torch.tensor(
+                    self.cfg.racket_site_offset_wrist_m, dtype=torch.float32, device=self.device
+                ).repeat(self.num_envs, 1)
+                source = f"{self.cfg.racket_wrist_body_name}+fixed_offset"
+            else:
+                raise StopIteration
             self._paddle_active = True
             import omni.log
 
             omni.log.info(
-                "[TableTennisEnv] paddle-hit + landing/net prediction ACTIVE; racket body "
-                f"'{robot.body_names[self._racket_body_idx]}' (idx {self._racket_body_idx}). "
+                "[TableTennisEnv] paddle-hit + landing/net prediction ACTIVE; racket FK "
+                f"'{source}' (body idx {self._racket_body_idx}). "
                 "If this line is absent, _paddle_active is False and the landing/pass_net rewards are zero."
             )
         except (KeyError, StopIteration):
             import omni.log
 
             omni.log.warn(
-                "[TableTennisEnv] no racket body found on the robot "
-                f"(looked for {_RACKET_BODY_CANDIDATES}); paddle-hit + landing prediction disabled."
+                "[TableTennisEnv] no racket body or configured wrist fallback found on the robot "
+                f"(bodies={tuple(self.cfg.racket_body_candidates)}, "
+                f"wrist={self.cfg.racket_wrist_body_name!r}); paddle-hit + landing prediction disabled."
             )
 
         try:
@@ -169,9 +182,38 @@ class TableTennisEnv(ManagerBasedRLEnv):
 
     def _handle_paddle(self, pos_h: torch.Tensor, lin_vel_w: torch.Tensor, ang_vel_w: torch.Tensor) -> None:
         rd = self._robot.data
-        racket_pos_w = rd.body_pos_w[:, self._racket_body_idx, :]
-        racket_quat_w = rd.body_quat_w[:, self._racket_body_idx, :]
-        racket_vel_w = rd.body_lin_vel_w[:, self._racket_body_idx, :]
+        # Isaac Lab 2.1 body_pos_w is a link-origin position, whereas the
+        # legacy body_lin_vel_w channel is a COM-point velocity.  Contact must
+        # use one rigid point on both sides; the tracking/V5 path follows the
+        # same contract.  Never silently fall back to the COM channel because
+        # omega x (link->COM) is material at ping-pong speeds.
+        if not hasattr(rd, "body_link_lin_vel_w"):
+            raise RuntimeError(
+                "TableTennisEnv paddle contact requires Isaac Lab body_link_lin_vel_w; "
+                "body_lin_vel_w is a different point and would corrupt impact velocity"
+            )
+        if self._racket_mode == "body":
+            racket_pos_w = rd.body_pos_w[:, self._racket_body_idx, :]
+            racket_quat_w = rd.body_quat_w[:, self._racket_body_idx, :]
+            racket_vel_w = rd.body_link_lin_vel_w[:, self._racket_body_idx, :]
+        else:
+            if not hasattr(rd, "body_link_ang_vel_w"):
+                raise RuntimeError(
+                    "TableTennisEnv wrist racket FK requires body_link_ang_vel_w"
+                )
+            wrist_pos_w = rd.body_pos_w[:, self._racket_body_idx, :]
+            racket_quat_w = rd.body_quat_w[:, self._racket_body_idx, :]
+            wrist_rot_w = matrix_from_quat(racket_quat_w)
+            offset_w = torch.bmm(
+                wrist_rot_w, self._racket_site_offset_wrist.unsqueeze(-1)
+            ).squeeze(-1)
+            racket_pos_w = wrist_pos_w + offset_w
+            racket_vel_w = (
+                rd.body_link_lin_vel_w[:, self._racket_body_idx, :]
+                + torch.cross(
+                    rd.body_link_ang_vel_w[:, self._racket_body_idx, :], offset_w, dim=-1
+                )
+            )
         # Paddle face normal = racket-local +Y (matches tracking RacketTargetCommand mount_normal_axis=1).
         face_normal = matrix_from_quat(racket_quat_w)[:, :, 1]
 

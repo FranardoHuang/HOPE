@@ -156,7 +156,7 @@ class BallTrajectoryPredictor:
         v0: np.ndarray,
         omega0: Optional[np.ndarray] = None,
     ) -> Optional[Tuple[np.ndarray, float]]:
-        """First DOWNWARD table-plane (z = 0) crossing of a post-strike flight.
+        """First physical table contact of a post-strike flight.
 
         Shares _flight_acceleration (drag + gravity + Magnus) and the Euler
         scheme with predict() so the strike-spec planner's landing forward
@@ -164,8 +164,10 @@ class BallTrajectoryPredictor:
         integrator to keep in sync. Spin is constant in flight (venue
         measurement: spin decay consistent with zero, fit report §11.2).
 
-        Returns (landing_xy, flight_time_s) or None if the ball never crosses
-        z = 0 from above within config.max_predict_time.
+        Positions are ball-CENTRE positions, so table contact occurs at
+        ``z = physics.radius`` (the lower edge is at the z=0 table surface).
+        Returns (landing_xy, flight_time_s) or None if the center never crosses
+        that contact plane from above within config.max_predict_time.
 
         With config.dt_integrate_coarse > dt_integrate the cruise phase uses
         RK4 steps of the coarse size and only intervals that can contain the
@@ -179,6 +181,7 @@ class BallTrajectoryPredictor:
         p = np.asarray(p0, dtype=float).copy()
         v = np.asarray(v0, dtype=float).copy()
         omega = np.zeros(3) if omega0 is None else np.asarray(omega0, dtype=float)
+        contact_z = float(self.physics.radius)
 
         t = 0.0
         for _ in range(max_steps):
@@ -186,9 +189,9 @@ class BallTrajectoryPredictor:
             p_new = p + v * dt + 0.5 * a * dt ** 2
             v_new = v + a * dt
             t += dt
-            if p[2] > 0.0 and p_new[2] <= 0.0:
+            if p[2] > contact_z and p_new[2] <= contact_z:
                 dz = p[2] - p_new[2]
-                frac = p[2] / dz if dz > 1e-12 else 0.5
+                frac = (p[2] - contact_z) / dz if dz > 1e-12 else 0.5
                 frac = float(np.clip(frac, 0.0, 1.0))
                 p_land = p + frac * (p_new - p)
                 return p_land[:2].copy(), (t - dt) + frac * dt
@@ -204,8 +207,8 @@ class BallTrajectoryPredictor:
         """Adaptive-dt twin of integrate_to_table_plane (远粗近细).
 
         RK4 cruise at dt_integrate_coarse; a coarse interval whose endpoints
-        straddle z = 0 (or whose descent could reach it: z + min(vz, 0)*dt_c
-        <= 0) is replayed from its start with the LEGACY Euler fine steps, so
+        straddle the ball-center contact plane ``z = radius`` (or whose descent
+        could reach it) is replayed from its start with the LEGACY Euler fine steps, so
         the returned crossing has the legacy interpolation resolution. If the
         fine replay does not actually cross, integration continues from the
         fine end state (never skips the event).
@@ -215,19 +218,20 @@ class BallTrajectoryPredictor:
         p = np.asarray(p0, dtype=float).copy()
         v = np.asarray(v0, dtype=float).copy()
         omega = np.zeros(3) if omega0 is None else np.asarray(omega0, dtype=float)
+        contact_z = float(self.physics.radius)
 
         t = 0.0
         while t < t_end - 1e-12:
             p_new, v_new = self._rk4_flight_step(p, v, omega, dt_c)
-            can_reach = p[2] + min(v[2], v_new[2], 0.0) * dt_c <= 0.0
-            if p[2] > 0.0 and (p_new[2] <= 0.0 or can_reach):
+            can_reach = p[2] + min(v[2], v_new[2], 0.0) * dt_c <= contact_z
+            if p[2] > contact_z and (p_new[2] <= contact_z or can_reach):
                 for i in range(n_sub):
                     a = self._flight_acceleration(v, omega)
                     p_n = p + v * dt_f + 0.5 * a * dt_f ** 2
                     v_n = v + a * dt_f
-                    if p[2] > 0.0 and p_n[2] <= 0.0:
+                    if p[2] > contact_z and p_n[2] <= contact_z:
                         dz = p[2] - p_n[2]
-                        frac = p[2] / dz if dz > 1e-12 else 0.5
+                        frac = (p[2] - contact_z) / dz if dz > 1e-12 else 0.5
                         frac = float(np.clip(frac, 0.0, 1.0))
                         p_land = p + frac * (p_n - p)
                         return p_land[:2].copy(), t + i * dt_f + frac * dt_f
@@ -268,14 +272,15 @@ class BallTrajectoryPredictor:
         v_post = v
         remaining_dt = dt
 
-        if p_new[2] < 0.0 and v_new[2] < 0.0:
+        contact_z = float(self.physics.radius)
+        if p_new[2] < contact_z and v_new[2] < 0.0:
             if self._is_on_table(p_new):
                 dz = p[2] - p_new[2]
-                frac = p[2] / dz if dz > 1e-9 else 0.5
+                frac = (p[2] - contact_z) / dz if dz > 1e-9 else 0.5
                 frac = np.clip(frac, 0.0, 1.0)
 
                 p_bounce = p + frac * (p_new - p)
-                p_bounce[2] = 0.0
+                p_bounce[2] = contact_z
                 v_at_bounce = v + a * (frac * dt)
 
                 if use_nakashima:
@@ -289,8 +294,10 @@ class BallTrajectoryPredictor:
                 v_new = v_post + a_post * remaining_dt
                 bounces += 1
                 bounce_this_step = True
-            else:
-                p_new[2] = max(p_new[2], 0.0)
+            # Outside the table footprint there is no z=0 collision plane:
+            # keep the free-flight state.  The dead-ball guard below will
+            # reject a sub-table hit-plane crossing without inventing a
+            # surface contact.
 
         if p_prev_x > x_hit and p_new[0] <= x_hit and v_new[0] < 0:
             if bounce_this_step:
@@ -334,8 +341,8 @@ class BallTrajectoryPredictor:
         """Adaptive-dt twin of predict() (远粗近细).
 
         RK4 cruise at dt_integrate_coarse; a coarse interval that could
-        contain an event — table reach (z + min(vz,0)*dt_c <= 0 or endpoint
-        below the plane) or a hit-plane straddle — is replayed from its start
+        contain an event — ball-centre reach of z=radius or a hit-plane
+        straddle — is replayed from its start
         with n_sub LEGACY fine Euler steps carrying the full bounce +
         crossing logic (_step_with_events), so events keep dt_integrate
         resolution. Fine replays that end without the event hand their end
@@ -355,9 +362,11 @@ class BallTrajectoryPredictor:
         elapsed = 0.0
         while elapsed < horizon - 1e-12:
             p_new, v_new = self._rk4_flight_step(p, v, omega, dt_c)
+            contact_z = float(self.physics.radius)
             near_table = (
-                p_new[2] < 0.0
-                or min(p[2], p_new[2]) + min(v[2], v_new[2], 0.0) * dt_c <= 0.0
+                p_new[2] < contact_z
+                or min(p[2], p_new[2])
+                + min(v[2], v_new[2], 0.0) * dt_c <= contact_z
             )
             straddles_hit = p[0] > x_hit >= p_new[0]
             if near_table or straddles_hit:
@@ -436,15 +445,16 @@ class BallTrajectoryPredictor:
             bounce_this_step = False
 
             # --- Bounce detection ---
-            if p_new[2] < 0.0 and v_new[2] < 0.0:
+            contact_z = float(self.physics.radius)
+            if p_new[2] < contact_z and v_new[2] < 0.0:
                 if self._is_on_table(p_new):
                     # Sub-step interpolation to find exact bounce time
                     dz = p[2] - p_new[2]
-                    frac = p[2] / dz if dz > 1e-9 else 0.5
+                    frac = (p[2] - contact_z) / dz if dz > 1e-9 else 0.5
                     frac = np.clip(frac, 0.0, 1.0)
 
                     p_bounce = p + frac * (p_new - p)
-                    p_bounce[2] = 0.0
+                    p_bounce[2] = contact_z
                     v_at_bounce = v + a * (frac * dt)
 
                     if use_nakashima:
@@ -459,8 +469,8 @@ class BallTrajectoryPredictor:
                     v_new = v_post + a_post * remaining_dt
                     bounces += 1
                     bounce_this_step = True
-                else:
-                    p_new[2] = max(p_new[2], 0.0)
+                # No table footprint means no table collision.  Preserve the
+                # free-flight state and let the dead-ball guard reject it.
 
             # --- Hitting plane crossing detection ---
             if p_prev_x > x_hit and p_new[0] <= x_hit and v_new[0] < 0:

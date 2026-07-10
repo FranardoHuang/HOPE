@@ -88,9 +88,9 @@ best suit robot returns). The two may legitimately differ (hopex clips are dry s
 latter exists). The scan therefore NEVER writes the registry: it prints suggested
 ``train_phase_candidates`` for a HUMAN to copy into the yaml as an independent field.
 
-TRAIN/EXAM SPLIT (--split {train,exam,all}, default all = current behavior): membership is a
-deterministic hash of each question's incoming velocity (question_split, ~80/20), NOT a seed/order
-partition — so a --split train bank and a --split exam bank are disjoint at ANY generation seeds.
+TRAIN/EXAM SPLIT (--split train|exam is required when writing): membership is a deterministic
+hash of each question's incoming velocity (question_split, ~80/20), NOT a seed/order partition —
+so a --split train bank and a --split exam bank are disjoint at ANY generation seeds.
 Exams are scored only on the exam split (docs/stage_curriculum_v1.md).
 
 STROKE GUARD (--stroke-guard {off,stats,enforce}, default enforce; 快筛层落地,
@@ -118,11 +118,20 @@ Run (Mac base env or pod venv; numpy+torch+yaml):
     python scripts/gen_stage1_questions.py \
         --clip forehand:/workspace/shared/motions/hope_forehand_hopex.npz \
         --clip backhand:/workspace/shared/motions/hope_backhand_hopex.npz \
-        --n 512 --out cfg/stage1_questions.npz
+        --stroke-budget-clips \
+          /workspace/shared/motions/hope_forehand_v4rg_cal.npz \
+          /workspace/shared/motions/hope_backhand_v4rg_cal.npz \
+        --n 512 --split train --out cfg/stage1_questions_train.npz
+
+Repeat with ``--split exam --out cfg/stage1_questions_exam.npz``. The two
+files use the same deterministic source-family split and must never share an
+output path. For a diagnostic bank without a proven stroke budget, say
+``--stroke-guard off`` explicitly; it is not equivalent to the formal recipe.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -363,6 +372,51 @@ def sample_incoming(rng, n, speed_lo, speed_hi, vy_max, vz_lo, vz_hi):
 
 
 EXAM_FRAC = 0.2  # deterministic hash-split target: ~80% train / ~20% exam
+SPLIT_ALGORITHM = "blake2b64-round1e-4-f64le-v1"
+SOURCE_FAMILY_CONTRACT = "stage1-source-family-v2"
+PHYSICS_CONTRACT_FILES = (
+    "configs/ball_physics_venue.yaml",
+    "hope_ws/src/hope_planner/hope_planner/constants.py",
+    "hope_ws/src/hope_planner/hope_planner/ball_contact.py",
+    "hope_ws/src/hope_planner/hope_planner/ball_trajectory_predictor.py",
+    "hope_ws/src/hope_planner/hope_planner/strike_spec_planner.py",
+    "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/"
+    "tasks/tracking/mdp/virtual_ball.py",
+    "hope_training/whole_body_tracking/scripts/venue_ball_sampler.py",
+)
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def canonical_sha256(value):
+    payload = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def physics_contract():
+    files = {}
+    for relative in PHYSICS_CONTRACT_FILES:
+        path = os.path.join(REPO, relative)
+        if not os.path.isfile(path):
+            raise SystemExit(f"physics contract file missing: {path}")
+        files[relative] = sha256_file(path)
+    return {"contract": "stage1-physics-runtime-v1", "files": files}
+
+
+def question_id(v_in_row) -> str:
+    row = np.round(np.asarray(v_in_row, dtype=np.float64), 4).astype("<f8", copy=False)
+    if row.shape != (3,) or not np.isfinite(row).all():
+        raise ValueError(f"incoming velocity row must be finite shape (3,), got {row!r}")
+    row[row == 0.0] = 0.0
+    return hashlib.blake2b(row.tobytes(order="C"), digest_size=8).hexdigest()
 
 
 def question_split(v_in_row) -> str:
@@ -373,11 +427,7 @@ def question_split(v_in_row) -> str:
     train bank and an exam bank generated at ANY seeds can never share a question — the exam is
     guaranteed disjoint from training.
     """
-    import hashlib
-
-    key = np.round(np.asarray(v_in_row, dtype=np.float64), 4).tobytes()
-    h = hashlib.blake2b(key, digest_size=8).digest()
-    return "exam" if int.from_bytes(h, "big") / 2.0**64 < EXAM_FRAC else "train"
+    return "exam" if int(question_id(v_in_row), 16) / 2.0**64 < EXAM_FRAC else "train"
 
 
 # ---------------------------------------------------------------- stroke guard ---- #
@@ -641,7 +691,8 @@ def main() -> int:
                     help="max |racket contact-point velocity| passed to the solver (m/s)")
     ap.add_argument("--out", default=os.path.join(WBT, "cfg", "stage1_questions.npz"))
     ap.add_argument("--no-check", action="store_true",
-                    help="skip the torch virtual-ball closed-loop self-test")
+                    help="legacy flag retained for a clear error: schema-v3 bank writes may not "
+                         "skip the torch virtual-ball closed-loop self-test")
     ap.add_argument("--grip", choices=("registry", "off"), default="registry",
                     help="apply the registry grip calibration (strike_annotations.yaml `grip:` "
                          "block: HUMAN blade = R_wrist @ Rz(alpha_z)Rx(beta_x) @ y_hat) to the "
@@ -656,10 +707,9 @@ def main() -> int:
                          "entry of the clip's independent `train_phase_candidates` registry "
                          "field (returnability-scan training-optimal frame; refuses with "
                          "SystemExit if the clip has no such field)")
-    ap.add_argument("--split", choices=("train", "exam", "all"), default="all",
-                    help="keep only this side of the deterministic ~80/20 hash split on the "
-                         "incoming-velocity bytes (exam questions are disjoint from training at "
-                         "ANY seed); 'all' = no split (current behavior)")
+    ap.add_argument("--split", choices=("train", "exam"), default=None,
+                    help="REQUIRED for bank generation: keep this side of the deterministic "
+                         "~80/20 content split. Omit only with --phase-scan, which writes no bank")
     # --- stroke guard (快筛层, survey 2026-07-09 §3.1 — see the module docstring) ---------
     ap.add_argument("--stroke-guard", choices=("off", "stats", "enforce"), default="enforce",
                     help="行程快筛守卫: a_min=(v*²−v0²)/(2·L_deep) > a_max ⇒ 该题在这条 clip "
@@ -706,6 +756,30 @@ def main() -> int:
             phase_scan(asp, name, path, annotations, grip_block, args)
         return 0
 
+    if args.split is None:
+        raise SystemExit("bank generation requires explicit --split train or --split exam")
+    if args.no_check:
+        raise SystemExit(
+            "schema-v3 banks require the torch closed-loop check; --no-check cannot write a bank"
+        )
+    finite_values = np.asarray(
+        list(args.speed_range) + [args.vy_max] + list(args.vz_range)
+        + list(args.landing_env) + [args.near_x, args.speed_budget,
+                                   args.stroke_budget_scale, args.stroke_v0],
+        dtype=np.float64,
+    )
+    if not np.isfinite(finite_values).all():
+        raise SystemExit("bank generation arguments must all be finite")
+    if (args.n <= 0 or args.speed_range[0] <= 0
+            or args.speed_range[0] > args.speed_range[1]
+            or args.vy_max < 0 or args.vz_range[0] > args.vz_range[1]
+            or args.speed_budget <= 0 or args.stroke_budget_scale <= 0
+            or args.stroke_v0 < 0):
+        raise SystemExit(
+            "invalid bank generation domain: require n>0, ordered ranges, positive speed "
+            "budget/guard scale, vy_max>=0 and stroke_v0>=0"
+        )
+
     # stroke guard a_max (v4rg 实证包络 × scale) — resolved ONCE, shared by every clip;
     # fail-loud here (before any solving) when stats/enforce lacks budget clips.
     stroke_a_max, stroke_env = resolve_stroke_guard(
@@ -724,9 +798,17 @@ def main() -> int:
 
     banks = {}
     clip_meta = {}
-    grip_any = False
+    clip_sources = {}
+    grip_applied_per_clip = {}
+    rally_yaw_applied_per_clip = {}
     for spec in args.clip:
         name, _, path = spec.partition(":")
+        if not name or not path:
+            raise SystemExit(f"invalid --clip {spec!r}; expected name:path.npz")
+        if name in banks:
+            raise SystemExit(f"duplicate --clip name {name!r}; clip order/id must be unambiguous")
+        if not os.path.isfile(path):
+            raise SystemExit(f"clip {name!r}: motion file does not exist: {path}")
         grip_rot, grip_desc, rally_yaw, grip_mode = resolve_grip_and_yaw(
             asp, name, path, annotations, grip_block, args.grip)
         _print_grip_summary(name, grip_desc, grip_rot, rally_yaw)
@@ -750,19 +832,33 @@ def main() -> int:
         cn_raw = st["clip_normal_raw"] / np.linalg.norm(st["clip_normal_raw"])
 
         v_in = sample_incoming(rng, args.n, *args.speed_range, args.vy_max, *args.vz_range)
+        # S1 is explicitly spin-blind. Keep the zero spin as a first-class row tensor so the
+        # solver, self-check, training sampler, physical ball and exam all consume one tuple.
+        incoming_spin = np.zeros_like(v_in)
         # Deterministic train/exam membership per question (hash of v_in — see question_split);
         # counted BEFORE solving so both counts and the answerable-fraction denominator are per split.
         splits = np.array([question_split(v) for v in v_in])
         n_train, n_exam = int((splits == "train").sum()), int((splits == "exam").sum())
-        sel = np.arange(args.n) if args.split == "all" else np.where(splits == args.split)[0]
+        sel = np.where(splits == args.split)[0]
         kept, normals, vels, diffs, residuals, landings, in_cone = [], [], [], [], [], [], []
         diffs_old = []
         a_mins = []
         net_rejects = 0
         for i in sel:
-            s = planner.solve(p_hope, v_in[i], None, landing_hope, args.speed_budget)
+            s = planner.solve(
+                p_hope, v_in[i], incoming_spin[i], landing_hope, args.speed_budget
+            )
             if s is None or s.residual_m > planner.TOL_M:
                 continue
+            solved_values = (
+                np.asarray(s.v_r), np.asarray(s.n), np.asarray(s.landing_xy),
+                np.asarray([s.residual_m]),
+            )
+            if any(not np.isfinite(value).all() for value in solved_values):
+                raise SystemExit(
+                    f"{name}: planner returned a non-finite solution for incoming row {i}; "
+                    "refusing to hide a solver/physics failure by dropping the question"
+                )
             # NET GATE: the solver ANNOTATES (clears_net computed post-solve, same venue
             # flight model) and the bank DECIDES — a converged answer whose return would
             # clip the net (center at x=net_x below net_height + ball radius) is not a
@@ -786,6 +882,10 @@ def main() -> int:
             # reward is sign-sensitive — the raw solver sign is arbitrary and could demand a
             # 180-deg flip.
             nn = s.n if np.dot(s.n, cn) >= 0 else -s.n
+            nn_norm = float(np.linalg.norm(nn))
+            if nn_norm < 1e-8:
+                raise SystemExit(f"{name}: planner returned a zero-length demanded normal")
+            nn = nn / nn_norm
             normals.append(nn)
             vels.append(s.v_r)
             residuals.append(s.residual_m)
@@ -801,6 +901,14 @@ def main() -> int:
                 a_mins.append(float(a_min_q))
 
         kept = np.array(kept, dtype=int)
+        if len(kept) == 0:
+            raise SystemExit(
+                f"{name}: no valid {args.split} questions survived solver/net/stroke gates; "
+                "refusing to write an empty clip bank"
+            )
+        kept_ids = [question_id(v_in[i]) for i in kept]
+        if len(kept_ids) != len(set(kept_ids)):
+            raise SystemExit(f"{name}: duplicate incoming questions after 1e-4 quantization")
         # The answerable-fraction denominator is the SELECTED split's question count, not args.n —
         # with --split the un-selected side is never solved, so args.n would understate the rate.
         rate = len(kept) / max(len(sel), 1)
@@ -837,8 +945,9 @@ def main() -> int:
                   f"p90={np.percentile(d, 90):.1f} max={d.max():.1f}  |  answers inside the "
                   f"clip swing-velocity cone (25deg/0.6-1.4x): {np.mean(in_cone):.0%}")
         banks[name] = dict(
-            contact_pos_env=p_env, clip_normal=st["clip_normal"], clip_vel=st["clip_vel"],
-            incoming_vel=v_in[kept], demanded_normal=np.array(normals),
+            contact_pos_env=p_env, clip_normal=cn, clip_vel=st["clip_vel"],
+            incoming_vel=v_in[kept], incoming_spin=incoming_spin[kept],
+            demanded_normal=np.array(normals),
             demanded_vel=np.array(vels), difficulty_deg=d,
             residual_m=np.array(residuals), landing_xy_hope=np.array(landings),
             in_cone=np.array(in_cone, dtype=bool),
@@ -847,10 +956,25 @@ def main() -> int:
             # per-kept-question necessary lower bound [m/s²] — in stats mode this includes
             # the over-budget (flagged) questions, so downstream can re-threshold offline
             banks[name]["a_min"] = np.asarray(a_mins, dtype=np.float64)
+        motion_sha = sha256_file(path)
+        clip_sources[name] = dict(
+            motion_basename=os.path.basename(path), motion_sha256=motion_sha,
+        )
         clip_meta[name] = dict(grip_mode=grip_mode, grip_desc=grip_desc,
+                               grip_rotation_matrix=(
+                                   None if grip_rot is None else np.round(
+                                       np.asarray(grip_rot, dtype=np.float64), 12
+                                   ).tolist()
+                               ),
                                rally_yaw_deg=rally_yaw, anchor=st["anchor"],
                                anchor_phase=st["anchor_phase"],
                                anchor_frame=st["strike_frame"], n_frames=st["n_frames"],
+                               contact_pos_env=np.round(p_env, 12).tolist(),
+                               clip_normal=np.round(cn, 12).tolist(),
+                               clip_vel=np.round(np.asarray(st["clip_vel"], dtype=np.float64), 12).tolist(),
+                               motion_basename=os.path.basename(path),
+                               motion_sha256=motion_sha,
+                               question_count=int(len(kept)),
                                net_rejects=net_rejects,
                                stroke_guard=(None if guard is None else dict(
                                    mode=args.stroke_guard,
@@ -862,9 +986,11 @@ def main() -> int:
                                    v_star_cap_mps=round(guard.v_star_cap, 3),
                                    over_budget=guard.over_budget_count,
                                    enforced=args.stroke_guard == "enforce")))
-        grip_any = grip_any or grip_mode in ("registry", "baked")
+        grip_applied_per_clip[name] = grip_mode in ("registry", "baked")
+        rally_yaw_applied_per_clip[name] = True
 
     # --- torch virtual-ball closed-loop self-test (trainer-side venue physics) ----------
+    validation_max_landing_error = 0.0
     if not args.no_check:
         import torch
         vb = _load_mod("s1_vb", os.path.join(
@@ -880,7 +1006,7 @@ def main() -> int:
             p0 = t(np.tile(b["contact_pos_env"], (N, 1)))
             v_plus, w_plus = vb.predict_paddle_contact(
                 t(b["incoming_vel"]), t(b["demanded_vel"]), t(b["demanded_normal"]),
-                torch.zeros(N, 3), prm)
+                t(b["incoming_spin"]), prm)
             land = vb.coarse_landing(
                 p0, v_plus, w_plus, prm,
                 surface_z=0.76 + prm.ball_radius,  # physical contact plane (surface + R)
@@ -888,6 +1014,8 @@ def main() -> int:
             tgt = torch.tensor(args.landing_env)
             err = torch.linalg.norm(land["land_xy"] - tgt, dim=-1)
             ok = land["land_valid"]
+            if not bool(torch.isfinite(err).all()):
+                raise SystemExit(f"{name}: torch closed-loop produced a non-finite landing error")
             # Independent NET cross-check: the numpy planner gate (spec.clears_net, Euler
             # @1 kHz) already rejected net-clippers; the torch venue physics (RK4, same
             # clearance expression as --phase-scan `legal`) must AGREE that every KEPT
@@ -897,10 +1025,22 @@ def main() -> int:
             net_ok = land["net_valid"] & (net_margin > 0.0)
             margin_txt = (f"min margin {float(net_margin[land['net_valid']].min()):+.3f} m"
                           if bool(land["net_valid"].any()) else "no net-plane crossing at all")
+            if int((~ok).sum()):
+                raise SystemExit(
+                    f"{name}: {int((~ok).sum())}/{N} KEPT answers have no valid torch-side "
+                    "landing; refusing to write a bank whose answers were not closed-loop verified"
+                )
             print(f"[{name}] torch closed-loop: landed {int(ok.sum())}/{N}, "
                   f"|err| med={err[ok].median():.3f} m  p90={err[ok].quantile(0.9):.3f} m  "
                   f"(planner residual med={np.median(b['residual_m'])*1000:.1f} mm)  |  "
                   f"net cleared {int(net_ok.sum())}/{N} ({margin_txt})")
+            max_err = float(err.max())
+            validation_max_landing_error = max(validation_max_landing_error, max_err)
+            if max_err > 0.10:
+                raise SystemExit(
+                    f"{name}: torch closed-loop max landing error {max_err:.3f} m exceeds "
+                    "the schema-v3 0.10 m answer-validity bound"
+                )
             if int((~net_ok).sum()):  # explicit raise — a bare assert vanishes under python -O
                 raise SystemExit(
                     f"{name}: {int((~net_ok).sum())}/{N} KEPT answers fail the torch-side net "
@@ -910,10 +1050,74 @@ def main() -> int:
     # grip_applied / rally_yaw_applied: SINGLE-APPLICATION flags — a bank with these set has
     # calibrated-face (registry-rotated or baked) and rally-canonicalized clip vectors already;
     # downstream must refuse to rotate again (see clips[...] for per-clip mode/yaw).
-    meta = dict(seed=args.seed, speed_range=args.speed_range, vy_max=args.vy_max,
+    all_grip_applied = bool(grip_applied_per_clip) and all(grip_applied_per_clip.values())
+    all_rally_yaw_applied = bool(rally_yaw_applied_per_clip) and all(
+        rally_yaw_applied_per_clip.values()
+    )
+    if not all_grip_applied or not all_rally_yaw_applied:
+        raise SystemExit(
+            "schema-v3 bank requires every clip to prove grip calibration and rally-yaw "
+            "canonicalization; --grip off is diagnostic-only and may not write a train/exam bank"
+        )
+    physics_path = os.path.join(REPO, "configs", "ball_physics_venue.yaml")
+    budget_sources = sorted(
+        ({"basename": os.path.basename(path), "sha256": sha256_file(path)}
+         for path in (args.stroke_budget_clips or [])),
+        key=lambda item: (item["basename"], item["sha256"]),
+    )
+    # Source family intentionally excludes seed, question count, output path and split. A train
+    # bank and exam bank are comparable iff this hash matches: same demonstrations/anchors,
+    # physics, sampling support and stroke feasibility contract, but disjoint question rows.
+    physics_contract_value = physics_contract()
+    source_family_contract = dict(
+        contract=SOURCE_FAMILY_CONTRACT,
+        stage="S1",
+        face_frame="mount_plusY_A",
+        incoming_spin_mode="zero",
+        split_algorithm=SPLIT_ALGORITHM,
+        clip_order=list(banks),
+        clips={name: dict(
+            motion_sha256=clip_sources[name]["motion_sha256"],
+            anchor_frame=int(clip_meta[name]["anchor_frame"]),
+            anchor_phase=float(clip_meta[name]["anchor_phase"]),
+            grip_mode=clip_meta[name]["grip_mode"],
+            grip_rotation_matrix=clip_meta[name]["grip_rotation_matrix"],
+            rally_yaw_deg=float(clip_meta[name]["rally_yaw_deg"]),
+            contact_pos_env=clip_meta[name]["contact_pos_env"],
+            clip_normal=clip_meta[name]["clip_normal"],
+            clip_vel=clip_meta[name]["clip_vel"],
+        ) for name in banks},
+        incoming=dict(speed_range=list(args.speed_range), vy_max=args.vy_max,
+                      vz_range=list(args.vz_range)),
+        landing_env=list(args.landing_env),
+        near_x=args.near_x,
+        table_surface_z=TABLE_SURFACE_Z,
+        speed_budget=args.speed_budget,
+        physics_sha256=sha256_file(physics_path),
+        physics_contract_sha256=canonical_sha256(physics_contract_value),
+        stroke_guard=dict(mode=args.stroke_guard, budget_scale=args.stroke_budget_scale,
+                          v0_mps=args.stroke_v0, budget_sources=budget_sources),
+    )
+    meta = dict(schema_version=3, stage="S1", face_frame="mount_plusY_A",
+                incoming_spin_mode="zero", spin_units="rad/s",
+                seed=args.seed, speed_range=args.speed_range, vy_max=args.vy_max,
                 vz_range=args.vz_range, landing_env=args.landing_env, near_x=args.near_x,
                 speed_budget=args.speed_budget, split=args.split, exam_frac=EXAM_FRAC,
-                grip=args.grip, grip_applied=bool(grip_any), rally_yaw_applied=True,
+                split_algorithm=SPLIT_ALGORITHM, clip_order=list(banks),
+                source_family_contract=source_family_contract,
+                source_family_sha256=canonical_sha256(source_family_contract),
+                physics_sha256=sha256_file(physics_path),
+                physics_contract=physics_contract_value,
+                physics_contract_sha256=canonical_sha256(physics_contract_value),
+                table_surface_z=TABLE_SURFACE_Z,
+                validation=dict(torch_closed_loop_pass=True,
+                                max_landing_error_m=validation_max_landing_error,
+                                landing_error_limit_m=0.10,
+                                net_clearance_all_pass=True),
+                grip=args.grip, grip_applied=all_grip_applied,
+                grip_applied_per_clip=grip_applied_per_clip,
+                rally_yaw_applied=all_rally_yaw_applied,
+                rally_yaw_applied_per_clip=rally_yaw_applied_per_clip,
                 anchor=args.anchor, net_gate=True,
                 stroke_guard=dict(
                     mode=args.stroke_guard,
@@ -932,8 +1136,10 @@ def main() -> int:
     # REAL json (audit round 2) — load_question_bank parses this and refuses banks whose
     # grip_applied / rally_yaw_applied flags are not both true (allow_legacy escape hatch).
     flat["meta_json"] = np.frombuffer(json.dumps(meta).encode("utf-8"), dtype=np.uint8)
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    np.savez(args.out, **flat)
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+    tmp_out = os.path.abspath(args.out) + ".tmp.npz"
+    np.savez(tmp_out, **flat)
+    os.replace(tmp_out, os.path.abspath(args.out))
     print(f"[bank] wrote {args.out}  (clips: {list(banks)})")
     return 0
 

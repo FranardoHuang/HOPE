@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 from isaaclab.utils.math import quat_rotate_inverse, yaw_quat
 
-from whole_body_tracking.tasks.tracking.mdp.hope_commands import RacketTargetCommand
+from whole_body_tracking.tasks.tracking.mdp.hope_commands import RacketTargetCommand, face_tracking_pair
 from whole_body_tracking.tasks.tracking.mdp.stage1_question_bank import face_command_obs_vector
 
 if TYPE_CHECKING:
@@ -147,7 +147,10 @@ def racket_target_normal_cmd(env: ManagerBasedRLEnv, command_name: str) -> torch
     retrain is needed later. NOT in the frozen 175-D contract — only wired into the actor when
     racket.face_command_obs is enabled. Normal is zeros when the question bank is off (the buffer
     always exists)."""
-    return face_command_obs_vector(_cmd(env, command_name).target_normal_cmd)
+    # The demanded normal rides the same planner message as target position/velocity and side.
+    # Reading the actor view is load-bearing when A1 delay/dropout is enabled: the former live read
+    # paired question N+1's face with question N's delayed/held position and velocity.
+    return face_command_obs_vector(_cmd(env, command_name).actor_target_normal_cmd())
 
 
 # --- HITTER Table-I exact actor terms (hitter_pure contract, 2026-07-07) ------------------- #
@@ -181,7 +184,13 @@ def racket_target_vel_w_live(env: ManagerBasedRLEnv, command_name: str) -> torch
 
 
 def racket_target_normal_w(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
-    return _cmd(env, command_name).racket_target_normal_w
+    """Reward-consistent desired face normal for the privileged critic.
+
+    In a face-command bank run this is the demanded +Y/A-frame normal; otherwise it is the
+    historical clip/reference target. The width stays 3-D, so actor-tail warm starts do not need a
+    critic resize, but the value function no longer misses the random command it is asked to value.
+    """
+    return face_tracking_pair(_cmd(env, command_name))[1]
 
 
 def racket_pos_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
@@ -196,8 +205,12 @@ def racket_lin_vel_w(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
 
 
 def racket_normal_w(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
-    """Actual racket face normal (FK), world frame. Privileged."""
-    return _cmd(env, command_name).racket_normal_w
+    """Reward-consistent actual face normal (FK), world frame, privileged.
+
+    This selects raw +Y in a face-command run and the historical per-clip signed face otherwise,
+    matching :func:`racket_target_normal_w` without changing the critic observation width.
+    """
+    return face_tracking_pair(_cmd(env, command_name))[0]
 
 
 def episode_time_left(env: ManagerBasedRLEnv) -> torch.Tensor:

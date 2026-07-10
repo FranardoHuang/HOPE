@@ -84,9 +84,11 @@ Numpy-only. hope_planner is imported lazily by path (repo layout is fixed:
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 import numpy as np
 
@@ -135,6 +137,168 @@ class VenueStrike:
     spec_speed: float             # |v_r| demanded (m/s)
     spec_iters: int               # LM iterations used by the solve
     tries: int                    # draws needed until a solvable ball (1 = first try)
+    # Formal BankExam provenance.  Non-bank venue draws keep the inert defaults below.
+    schedule_index: int = -1
+    bank_row: int = -1
+    question_id: str = ""
+    hold_steps: int = 0
+    attempt_seed: int = 0
+    schedule_sha256: str = ""
+    repeat: int = 0
+
+
+@dataclass(frozen=True)
+class BankExamScheduleItem:
+    """One immutable item on the formal exam paper.
+
+    ``question_id`` is clip-qualified because the same incoming velocity may legitimately appear
+    in both clips while demanding different racket answers.  ``repeat`` is currently zero (the
+    formal default asks every selected bank row once) and is explicit so future repeated trials can
+    derive independent attempt/action-noise seeds without changing the schedule schema.
+    """
+
+    schedule_index: int
+    clip: int
+    bank_row: int
+    question_id: str
+    hold_steps: int
+    attempt_seed: int
+    repeat: int = 0
+
+
+def _stable_attempt_seed(schedule_seed, clip, bank_row, question_id, repeat=0):
+    payload = (
+        f"bank-exam-attempt-v1\0{int(schedule_seed)}\0{int(clip)}\0{int(bank_row)}\0"
+        f"{question_id}\0{int(repeat)}"
+    ).encode("utf-8")
+    return int.from_bytes(hashlib.blake2b(payload, digest_size=8).digest(), "little")
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def atomic_bank_question_id(*, bank_sha256, clip, bank_row, incoming_vel, incoming_spin,
+                            demanded_vel, demanded_normal):
+    """Content address the complete atomic exam row, not merely its incoming velocity."""
+    digest = hashlib.sha256()
+    digest.update(b"bank-exam-question-v1\0")
+    digest.update(str(bank_sha256).encode("ascii"))
+    digest.update(np.asarray([int(clip), int(bank_row)], dtype="<i8").tobytes())
+    for value in (incoming_vel, incoming_spin, demanded_vel, demanded_normal):
+        row = np.asarray(value, dtype="<f8").reshape(3).copy()
+        if not np.isfinite(row).all():
+            raise ValueError("bank question contains a non-finite atomic vector")
+        row[row == 0.0] = 0.0  # canonicalize IEEE -0.0
+        digest.update(row.tobytes(order="C"))
+    return digest.hexdigest()
+
+
+def _stratified_quotas(counts, total):
+    """Deterministic proportional clip quotas, without replacement."""
+    counts = np.asarray(counts, dtype=np.int64)
+    total_available = int(counts.sum())
+    total = int(total)
+    if counts.ndim != 1 or counts.size == 0 or np.any(counts <= 0):
+        raise ValueError(f"positive one-dimensional question counts required, got {counts}")
+    if total <= 0 or total > total_available:
+        raise ValueError(
+            f"schedule size must be in [1,{total_available}], got {total}"
+        )
+    raw = total * counts.astype(np.float64) / float(total_available)
+    quotas = np.floor(raw).astype(np.int64)
+    quotas = np.minimum(quotas, counts)
+    remaining = total - int(quotas.sum())
+    # Largest remainder, stable clip-index tie break.  The loop also handles a saturated stratum.
+    order = sorted(range(len(counts)), key=lambda c: (-(raw[c] - quotas[c]), c))
+    while remaining:
+        progressed = False
+        for c in order:
+            if quotas[c] < counts[c]:
+                quotas[c] += 1
+                remaining -= 1
+                progressed = True
+                if remaining == 0:
+                    break
+        if not progressed:  # defensive; the total<=sum(counts) precondition should make this impossible
+            raise RuntimeError("cannot allocate stratified BankExam schedule")
+    return tuple(int(v) for v in quotas)
+
+
+def materialize_bank_exam_schedule(*, q_counts, clip_names, question_ids, hold_range,
+                                   schedule_seed, schedule_k=None, bank_sha256=""):
+    """Pre-materialize an immutable, no-wrap formal exam schedule.
+
+    The default includes every valid row exactly once.  ``schedule_k`` selects a fixed stratified
+    subset without replacement.  Per-clip rows are shuffled once from ``schedule_seed`` and then
+    round-robin interleaved, so every rollout/noise column consumes the identical paper.
+    """
+    counts = tuple(int(v) for v in q_counts)
+    if len(counts) != len(clip_names) or len(question_ids) != len(counts):
+        raise ValueError("clip/count/question-id schedule inputs have inconsistent lengths")
+    lo, hi = (int(hold_range[0]), int(hold_range[1]))
+    if not 0 <= lo <= hi:
+        raise ValueError(f"invalid hold range {hold_range}")
+    total_available = sum(counts)
+    selected_total = total_available if schedule_k is None else int(schedule_k)
+    quotas = _stratified_quotas(counts, selected_total)
+
+    root = np.random.SeedSequence(int(schedule_seed))
+    child_seeds = root.spawn(len(counts))
+    selected_rows = []
+    for c, (count, quota) in enumerate(zip(counts, quotas)):
+        ids = tuple(str(v) for v in question_ids[c])
+        if len(ids) != count:
+            raise ValueError(
+                f"clip {c} has {count} rows but {len(ids)} question ids"
+            )
+        rows = np.random.default_rng(child_seeds[c]).permutation(count)[:quota]
+        selected_rows.append(tuple(int(v) for v in rows))
+
+    items = []
+    for rank in range(max(quotas)):
+        for c, rows in enumerate(selected_rows):
+            if rank >= len(rows):
+                continue
+            row = rows[rank]
+            base_id = str(question_ids[c][row])
+            qualified_id = f"{clip_names[c]}:{base_id}"
+            attempt_seed = _stable_attempt_seed(
+                schedule_seed, c, row, qualified_id, repeat=0
+            )
+            hold_rng = np.random.default_rng(attempt_seed)
+            hold_steps = int(hold_rng.integers(lo, hi + 1))
+            items.append(BankExamScheduleItem(
+                schedule_index=len(items), clip=c, bank_row=row,
+                question_id=qualified_id, hold_steps=hold_steps,
+                attempt_seed=attempt_seed, repeat=0,
+            ))
+
+    if len(items) != selected_total:
+        raise RuntimeError(
+            f"materialized {len(items)} schedule items, expected {selected_total}"
+        )
+    keys = [(item.clip, item.bank_row, item.repeat) for item in items]
+    ids = [item.question_id for item in items]
+    if len(set(keys)) != len(keys) or len(set(ids)) != len(ids):
+        raise ValueError("formal BankExam schedule contains a duplicate row/question id")
+    payload = {
+        "schema_version": 1,
+        "bank_sha256": str(bank_sha256),
+        "schedule_seed": int(schedule_seed),
+        "schedule_k": int(selected_total),
+        "hold_range": [lo, hi],
+        "items": [asdict(item) for item in items],
+    }
+    schedule_sha = hashlib.sha256(json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")).hexdigest()
+    return tuple(items), schedule_sha
 
 
 @dataclass
@@ -194,9 +358,12 @@ class VenueBallSampler:
             landing_x_range = (self.net_x + LANDING_MIN_DEPTH, self.far_x - LANDING_FAR_MARGIN)
         self.landing_x_range = (float(landing_x_range[0]), float(landing_x_range[1]))
         self.landing_y_range = (float(landing_y_range[0]), float(landing_y_range[1]))
-        assert self.landing_x_range[0] > self.net_x, \
-            (f"landing x range {self.landing_x_range} reaches OUR half (net at x={self.net_x:.2f} "
-             f"env frame — the training virtual table sits at near_x={self.table_near_x})")
+        if not self.landing_x_range[0] > self.net_x:
+            raise ValueError(
+                f"landing x range {self.landing_x_range} reaches OUR half (net at "
+                f"x={self.net_x:.2f} env frame — the training virtual table sits at "
+                f"near_x={self.table_near_x})"
+            )
         self.fh_y_split = float(fh_y_split)
         self.speed_budget = float(speed_budget)
         self.max_tries = int(max_tries)
@@ -373,10 +540,19 @@ class BankExamSampler(VenueBallSampler):
     """
 
     def __init__(self, repo_root, ref_normal_per_clip, num_clips, bank_path,
-                 clip_names=("forehand", "backhand"), **kw):
+                 clip_names=("forehand", "backhand"), *, allow_legacy_bank=False,
+                 runtime_motion_files=None, runtime_segment_lengths=None,
+                 runtime_strike_phases=None, expected_source_family_sha256=None,
+                 schedule_seed=0, schedule_k=None, schedule_hold_range=(0, 100), **kw):
+        if not allow_legacy_bank and any(
+            key in kw for key in ("table_near_x", "table_surface_z")
+        ):
+            raise SystemExit(
+                "[FATAL] formal BankExam forbids table geometry overrides; geometry is bound by "
+                "the schema-v3 bank physics contract"
+            )
         super().__init__(repo_root=repo_root, ref_normal_per_clip=ref_normal_per_clip,
                          num_clips=num_clips, **kw)
-        import json
         if num_clips != len(clip_names):
             raise SystemExit(f"[FATAL] bank exam has {len(clip_names)} clips, eval replays "
                              f"{num_clips} — motion files must be the same pair the bank was "
@@ -392,15 +568,82 @@ class BankExamSampler(VenueBallSampler):
             _m = _ilu.module_from_spec(_sp)
             _sp.loader.exec_module(_m)
             load_question_bank = _m.load_question_bank
+            validate_runtime_motion_contract = _m.validate_runtime_motion_contract
         else:
             from whole_body_tracking.tasks.tracking.mdp.stage1_question_bank import (
                 load_question_bank,
+                validate_runtime_motion_contract,
             )
-        qb = load_question_bank(bank_path, device="cpu", clip_names=clip_names)
+        qb = load_question_bank(
+            bank_path, device="cpu", clip_names=clip_names,
+            allow_legacy=bool(allow_legacy_bank),
+            expected_split=(None if allow_legacy_bank else "exam"),
+        )
+        self.contract_exact = bool(qb.metadata)
+        if qb.metadata:
+            if qb.metadata.get("split") != "exam":
+                raise SystemExit(
+                    f"[FATAL] BankExam requires an exam-split bank, got "
+                    f"{qb.metadata.get('split')!r}"
+                )
+            runtime_args = (runtime_motion_files, runtime_segment_lengths, runtime_strike_phases)
+            if any(value is None for value in runtime_args):
+                raise SystemExit(
+                    "[FATAL] schema-v3 BankExam requires runtime motion files, segment lengths "
+                    "and strike phases; refusing a bank whose answer frame cannot be verified."
+                )
+            validate_runtime_motion_contract(
+                qb.metadata, list(runtime_motion_files), list(runtime_segment_lengths),
+                list(runtime_strike_phases),
+            )
+            actual_family = qb.metadata.get("source_family_sha256")
+            if expected_source_family_sha256 is None:
+                if not allow_legacy_bank:
+                    raise SystemExit(
+                        "[FATAL] ONNX lacks the trained Stage-1 source-family SHA; refusing an "
+                        "unbound formal exam. Use the explicit diagnostic escape hatch only to "
+                        "replay a historical model."
+                    )
+                self.contract_exact = False
+                print(
+                    "[bank-exam] WARNING: schema-v3 exam runtime is valid but the old ONNX has "
+                    "no train-family binding; evaluation_contract_exact=false",
+                    flush=True,
+                )
+            elif actual_family != expected_source_family_sha256:
+                raise SystemExit(
+                    f"[FATAL] exam-bank source family {actual_family!r} != trained model "
+                    f"{expected_source_family_sha256!r}"
+                )
+            bank_near_x = float(qb.metadata.get("near_x", np.nan))
+            bank_surface_z = float(qb.metadata.get("table_surface_z", np.nan))
+            if (not np.isfinite(bank_near_x) or not np.isfinite(bank_surface_z)
+                    or not np.isclose(self.table_near_x, bank_near_x, atol=1e-12, rtol=0.0)
+                    or not np.isclose(self.table_surface_z, bank_surface_z,
+                                      atol=1e-12, rtol=0.0)):
+                raise SystemExit(
+                    "[FATAL] BankExam table geometry disagrees with bank contract: "
+                    f"runtime near_x/surface_z=({self.table_near_x},{self.table_surface_z}), "
+                    f"bank=({bank_near_x},{bank_surface_z})"
+                )
+        else:
+            if not allow_legacy_bank:
+                raise SystemExit(
+                    "[FATAL] legacy BankExam needs the explicit diagnostic escape hatch"
+                )
+            self.contract_exact = False
+            print(
+                "[bank-exam] WARNING: legacy bank has no auditable split/source-family/motion "
+                "contract; evaluation_contract_exact=false",
+                flush=True,
+            )
         data = np.load(bank_path)
         self.bank_path = bank_path
+        self.bank_sha256 = _sha256_file(bank_path)
         self.clip_names = tuple(clip_names)
         self.q_contact = qb.contact_pos.numpy().astype(np.float64)      # (C,3)
+        self.q_income = qb.incoming_vel.numpy().astype(np.float64)      # (C,Qmax,3)
+        self.q_spin = qb.incoming_spin.numpy().astype(np.float64)       # (C,Qmax,3)
         self.q_vel = qb.demanded_vel.numpy().astype(np.float64)         # (C,Qmax,3)
         self.q_nrm = qb.demanded_normal.numpy().astype(np.float64)      # (C,Qmax,3)
         self.q_diff = qb.difficulty_deg.numpy().astype(np.float64)      # (C,Qmax)
@@ -432,57 +675,119 @@ class BankExamSampler(VenueBallSampler):
                         f"was flipped (MOUNT_NORMAL_SIGN_PER_CLIP / --mount-normal-sign-per-clip): "
                         f"check which side first. Bank scoring is +Y/A-frame by design; NEVER "
                         f"re-emit banks in the flipped convention.")
-        self.q_income = []
-        for c, name in enumerate(clip_names):
-            inc = np.asarray(data[f"{name}/incoming_vel"], np.float64).reshape(-1, 3)
-            if len(inc) != self.q_counts[c]:
-                raise SystemExit(f"[FATAL] bank {bank_path}: {name} incoming_vel rows "
-                                 f"{len(inc)} != question count {self.q_counts[c]}")
-            self.q_income.append(inc)
-        meta = json.loads(bytes(np.asarray(data["meta_json"], dtype=np.uint8)).decode("utf-8"))
+        if "meta_json" in data:
+            try:
+                meta = json.loads(
+                    bytes(np.asarray(data["meta_json"], dtype=np.uint8)).decode("utf-8")
+                )
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                meta = {}
+        else:
+            meta = {}
         self.bank_meta = meta
         land = meta.get("landing_env") or [2.555, 0.0]
         self.q_landing = np.asarray(land, np.float64).reshape(2)
-        # lazily shuffled with the rollout rng (deterministic per --seed); exhaust-then-wrap.
-        self._order = None
-        self._next = [0] * len(clip_names)
+        question_ids = [
+            tuple(
+                atomic_bank_question_id(
+                    bank_sha256=self.bank_sha256,
+                    clip=c,
+                    bank_row=row,
+                    incoming_vel=self.q_income[c, row],
+                    incoming_spin=self.q_spin[c, row],
+                    demanded_vel=self.q_vel[c, row],
+                    demanded_normal=self.q_nrm[c, row],
+                )
+                for row in range(self.q_counts[c])
+            )
+            for c in range(len(self.q_counts))
+        ]
+        self.schedule, self.schedule_sha256 = materialize_bank_exam_schedule(
+            q_counts=self.q_counts,
+            clip_names=self.clip_names,
+            question_ids=question_ids,
+            hold_range=schedule_hold_range,
+            schedule_seed=int(schedule_seed),
+            schedule_k=schedule_k,
+            bank_sha256=self.bank_sha256,
+        )
+        self.schedule_seed = int(schedule_seed)
+        self.schedule_k = len(self.schedule)
+        self.schedule_hold_range = tuple(int(v) for v in schedule_hold_range)
+        self._schedule_next = 0
+        self.selected = [0] * len(clip_names)
+        for item in self.schedule:
+            self.selected[item.clip] += 1
         self.asked = [0] * len(clip_names)
+        # Compatibility/audit field: a formal schedule is finite and wrapping is forbidden.
         self.wrapped = [0] * len(clip_names)
 
+    @property
+    def exhausted(self):
+        return self._schedule_next >= len(self.schedule)
+
+    @property
+    def remaining(self):
+        return len(self.schedule) - self._schedule_next
+
+    @property
+    def schedule_question_ids(self):
+        return tuple(item.question_id for item in self.schedule)
+
+    @property
+    def schedule_nominal_steps(self):
+        """Hold steps only; the evaluator adds the selected clip lengths to this value."""
+        return sum(item.hold_steps for item in self.schedule)
+
+    def rewind_schedule(self):
+        """Rewind to the immutable first item for a paired model/noise rollout."""
+        self._schedule_next = 0
+        self.asked = [0] * len(self.clip_names)
+        self.wrapped = [0] * len(self.clip_names)
+
     def sample(self, rng):
-        if self._order is None:
-            self._order = [rng.permutation(n) for n in self.q_counts]
-        rem = [max(n - self.asked[c], 0) for c, n in enumerate(self.q_counts)]
-        tot = sum(rem)
-        if tot > 0:
-            c = int(rng.choice(len(rem), p=np.asarray(rem, np.float64) / tot))
-        else:
-            c = int(rng.integers(len(self.q_counts)))
-        i = int(self._order[c][self._next[c]])
-        self._next[c] += 1
-        if self._next[c] >= self.q_counts[c]:
-            self._next[c] = 0
-            self.wrapped[c] += 1
+        del rng  # the paper was materialized at construction; rollout RNG consumption is irrelevant
+        if self.exhausted:
+            raise RuntimeError(
+                "formal BankExam schedule exhausted; wrapping/repeating questions is forbidden"
+            )
+        item = self.schedule[self._schedule_next]
+        self._schedule_next += 1
+        c, i = item.clip, item.bank_row
         self.asked[c] += 1
+        self.n_samples += 1
         v = self.q_vel[c, i]
         return VenueStrike(
             clip=c, ball_pos_w=self.q_contact[c].copy(),
-            ball_vel_w=self.q_income[c][i].copy(), ball_spin_w=np.zeros(3),
+            ball_vel_w=self.q_income[c, i].copy(), ball_spin_w=self.q_spin[c, i].copy(),
             intended_landing_xy=self.q_landing.copy(),
             target_pos_w=self.q_contact[c].copy(), target_vel_w=v.copy(),
             target_normal_w=self.q_nrm[c, i].copy(),
-            spec_speed=float(np.linalg.norm(v)), spec_iters=0, tries=1)
+            spec_speed=float(np.linalg.norm(v)), spec_iters=0, tries=1,
+            schedule_index=item.schedule_index, bank_row=i,
+            question_id=item.question_id, hold_steps=item.hold_steps,
+            attempt_seed=item.attempt_seed, schedule_sha256=self.schedule_sha256,
+            repeat=item.repeat)
 
     def denominator_report(self):
         """判卷分母法则 lines: per side — questions in the exam split (kept), how many were
         asked/wrapped this run, and the share of answers inside the 25-deg face cone."""
         lines = []
+        lines.append(
+            f"  evaluation_contract_exact={str(bool(self.contract_exact)).lower()}"
+        )
+        lines.append(
+            f"  immutable_schedule: K={len(self.schedule)} seed={self.schedule_seed} "
+            f"sha256={self.schedule_sha256} hold_range={self.schedule_hold_range} "
+            f"no_wrap=true"
+        )
         for c, name in enumerate(self.clip_names):
             n = self.q_counts[c]
             cone = float((self.q_diff[c, :n] <= 25.0).mean()) if n else float("nan")
             med = float(np.median(self.q_diff[c, :n])) if n else float("nan")
-            lines.append(f"  {name}: exam questions kept={n} asked={self.asked[c]} "
-                         f"wrapped={self.wrapped[c]}x | face-cone(<=25deg) share={cone:.1%} "
+            lines.append(f"  {name}: exam questions kept={n} scheduled={self.selected[c]} "
+                         f"asked={self.asked[c]} wrapped={self.wrapped[c]}x | "
+                         f"face-cone(<=25deg) share={cone:.1%} "
                          f"difficulty median={med:.1f}deg")
         g = self.bank_meta.get("grip", "?")
         lines.append(f"  meta: grip={g} grip_applied={self.bank_meta.get('grip_applied')} "

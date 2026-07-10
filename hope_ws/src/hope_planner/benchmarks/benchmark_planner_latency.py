@@ -64,11 +64,10 @@ SoC / pod numbers need a follow-up run of the SAME command there:
 
   /opt/anaconda3/bin/python3 hope_ws/src/hope_planner/benchmarks/benchmark_planner_latency.py --n 200 --seed 0
 
-(on the pod: the training venv python from repo root). The oracle scores the
-ball-center crossing of the plane z = ball radius ("physical" convention,
-virtual_ball docstring); the numpy planners aim at their legacy z = 0 plane,
-which charges them a real ~1 cm convention mismatch — visible, on purpose.
-`--oracle-plane surface` re-scores at z = 0 to isolate it.
+(on the pod: the training venv python from repo root). The oracle and numpy
+planners both score the physical ball-center contact plane z = ball radius.
+`--oracle-plane surface` is retained only as a historical counterfactual for
+quantifying the pre-2026-07-10 bare-surface convention bug.
 
 Run:
   /opt/anaconda3/bin/python3 hope_ws/src/hope_planner/benchmarks/benchmark_planner_latency.py --n 200
@@ -254,7 +253,7 @@ class VenueOracle:
 
     plane="radius": landing extracted at z = ball radius (ball CENTER when the
     ball physically touches the table — the venue extraction convention).
-    plane="surface": z = 0 (the numpy planners' legacy aim plane).
+    plane="surface": z = 0 (historical counterfactual; not physical contact).
     """
 
     def __init__(self, plane: str = "radius", h: float = 0.002, horizon: float = 1.2):

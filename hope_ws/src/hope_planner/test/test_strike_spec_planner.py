@@ -228,16 +228,17 @@ def test_integrate_to_table_plane_matches_drag_free_ballistics():
     out = pred.integrate_to_table_plane(p0, v0)
     assert out is not None
     xy, t_land = out
-    # z(t) = 0.5 + v_z t - g/2 t^2 = 0
+    # Ball-center contact: z(t) = radius, not z=0 (half-ball penetration).
     g = 9.81
-    t_exp = (v0[2] + np.sqrt(v0[2] ** 2 + 2.0 * g * p0[2])) / g
+    fall_height = p0[2] - phys.radius
+    t_exp = (v0[2] + np.sqrt(v0[2] ** 2 + 2.0 * g * fall_height)) / g
     assert abs(t_land - t_exp) < 2e-3
     assert np.allclose(xy, p0[:2] + v0[:2] * t_exp, atol=5e-3)
 
 
 def test_integrate_to_table_plane_none_when_never_crossing():
     pred = BallTrajectoryPredictor(PHYS, CFG, TAB)
-    # Launched from below the plane going down: never crosses z=0 from above.
+    # Launched below the center-contact plane going down: no downward crossing from above.
     out = pred.integrate_to_table_plane(
         np.array([0.0, 0.0, -0.1]), np.array([1.0, 0.0, -1.0])
     )

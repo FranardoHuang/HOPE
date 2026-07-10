@@ -1,4 +1,5 @@
-# HITTER-PURE (110-D) arena profile — overlay on hope_planner.yaml (2026-07-07).
+# HITTER-PURE (110-D) arena profile — overlay on hope_planner.yaml (2026-07-07;
+# geometry synchronized to the 0.51-plane task on 2026-07-10).
 #
 # Design deltas vs the 175/177 legacy profile, all paper-driven (arXiv:2508.21043):
 #   * FIXED virtual hit plane (§IV-B: "predefined virtual hit plane"; the paper's robot
@@ -8,12 +9,12 @@
 #     runner needs every tick for its world-frame deltas (base_target_delta_xy,
 #     racket_target_rel_base). 110 deploy is mocap-mandatory.
 #   * x_hit placement: pick per venue so the demanded strike stays reachable from a legal
-#     station: station_x = x_hit − 0.70 (the trained plane offset; the runner derives the
-#     station from the ONNX metadata boxes). With the robot starting at table x ≈ −0.5,
-#     x_hit = 0.20 puts the commanded station at −0.50 = the start position.
-#   * x_hit_offset 0.70 (was 0.67): the hitter_pure trained plane sits exactly 0.70 m in
-#     front of the commanded station (cfg/task/HOPEPingPongHitterPure.yaml pos_range_per_clip
-#     x: [0.70, 0.70] both clips). Only used if x_hit_follow_robot is ever re-enabled.
+#     station: station_x = x_hit − 0.51 (the trained plane offset; the runner derives the
+#     station from ONNX metadata). With the robot starting at table x ≈ −0.5, x_hit=0.01
+#     puts the commanded station at −0.50. This absolute value is a derived arena candidate,
+#     not a measured G8 calibration: verify the real marker/table transform before arming.
+#   * x_hit_offset 0.51: mirrors cfg/task/HOPEPingPongHitterPure.yaml. It remains inert while
+#     x_hit_follow_robot=false, but keeping it correct prevents a misleading diagnostic/config.
 #   * Everything else (ball physics, flats, z offset) inherits the venue values.
 #
 # Launch (arena):
@@ -22,5 +23,5 @@
 hope_planner:
   ros__parameters:
     x_hit_follow_robot: false
-    x_hit: 0.20
-    x_hit_offset: 0.70
+    x_hit: 0.01
+    x_hit_offset: 0.51

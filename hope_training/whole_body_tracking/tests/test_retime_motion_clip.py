@@ -65,12 +65,17 @@ def _synthetic_clip() -> dict:
     body_quat[:, :, 3] = np.sin(ang / 2)[:, None]
     body_lin = np.gradient(body_pos.astype(np.float64), dt, axis=0).astype(np.float32)
     body_ang = np.zeros((T, nb, 3), dtype=np.float32)
-    return {
+    data = {
         "fps": np.array([50], dtype=np.int64),
         "joint_pos": q, "joint_vel": dq,
         "body_pos_w": body_pos, "body_quat_w": body_quat,
         "body_lin_vel_w": body_lin, "body_ang_vel_w": body_ang,
     }
+    data.update(rt.metadata_arrays(
+        body_names=["pelvis_link", "body_1"],
+        body_lin_vel_point="link_origin",
+    ))
+    return data
 
 
 def _retime(data, **kw):

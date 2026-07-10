@@ -8,7 +8,7 @@
 #   ②isaac venv 里 play.py 原生导出 ONNX(认 "Exported ONNX policy to:" 成功行;
 #     02196d2 后导出成功仍有无害 tuple Traceback,不许拿它判死)+ make_std_sidecar 补两个 sidecar
 #   ③mjeval venv 里 mujoco_eval_onnx.py 考卷,双侧 × 双噪声档(ns=0 / 0.05)一次跑完,
-#     默认 --qdes-clamp 开 + --hold-ref stand(可用 --no-qdes-clamp / --hold-ref clip 覆盖)
+#     默认 --qdes-clamp 开 + --hold-ref auto(严格采用 schema-3 工件的训练语义)
 #   ④统一 md 报告(报告头=旗标状态+分母报表连抄,2×2 表:侧×噪声档)落到 run_dir/judge/
 #
 # 用法:
@@ -18,11 +18,12 @@
 # 选项:
 #   --dry-run                 只打印将执行的命令链(机制检查用),不动 GPU 不写文件
 #   --gpu N                   导出用哪张卡(缺省=自动挑显存余量最大的卡;错峰规矩见下)
-#   --steps N                 考卷步数(缺省 3000)
+#   --steps N                 仅安全步数上限(缺省 0=按固定题表 K×单题上界自动算;没完成K题即失败)
+#   --schedule-k K            固定分层抽 K 题且不放回(缺省空=exam bank 每题恰好一次)
 #   --seed N                  考卷种子(缺省 0)
 #   --noise-scales "A B"      噪声档(缺省 "0.0 0.05")
 #   --no-qdes-clamp           关限位剪切(缺省开;报告头照抄状态)
-#   --hold-ref clip|stand     等球段参考语义(缺省 stand=07-05 后代际;老代际传 clip)
+#   --hold-ref auto|clip|stand 等球段参考语义(缺省 auto=按 ONNX 训练合同;手传不一致会 fail)
 #   --motion-files FH BH      手传动作对(env.yaml 解析不到时必传)
 #   --strike-phases A B       手传相位对(env.yaml 解析不到时必传)
 #   --exam-bank PATH          手传 exam 卷(env.yaml 解析不到 question_bank 时必传)
@@ -54,8 +55,8 @@ note() { echo "[judge] $*"; }
 
 # ---------------------------------------------------------------- 参数解析
 RUN_DIR=""; CKPT=""
-DRY_RUN=0; GPU=""; STEPS=3000; SEED=0; NOISE_SCALES="0.0 0.05"
-QDES_CLAMP=1; HOLD_REF="stand"; TASK=""
+DRY_RUN=0; GPU=""; STEPS=0; SEED=0; NOISE_SCALES="0.0 0.05"; SCHEDULE_K=""
+QDES_CLAMP=1; HOLD_REF="auto"; TASK=""
 CLI_FH=""; CLI_BH=""; CLI_PH0=""; CLI_PH1=""; CLI_EXAM_BANK=""
 EXPORT_EXTRA=""; EXAM_EXTRA=""
 
@@ -64,6 +65,7 @@ while [ $# -gt 0 ]; do
     --dry-run)        DRY_RUN=1; shift ;;
     --gpu)            GPU=${2:?--gpu 需要参数}; shift 2 ;;
     --steps)          STEPS=${2:?}; shift 2 ;;
+    --schedule-k)     SCHEDULE_K=${2:?}; shift 2 ;;
     --seed)           SEED=${2:?}; shift 2 ;;
     --noise-scales)   NOISE_SCALES=${2:?}; shift 2 ;;
     --no-qdes-clamp)  QDES_CLAMP=0; shift ;;
@@ -84,7 +86,7 @@ done
 
 [ -n "$RUN_DIR" ] || die "用法: judge.sh <run_dir> [checkpoint.pt] [选项](--help 看全部)"
 RUN_DIR=$(cd "$RUN_DIR" 2>/dev/null && pwd) || die "run_dir 不存在: $RUN_DIR"
-case "$HOLD_REF" in clip|stand) ;; *) die "--hold-ref 只认 clip|stand" ;; esac
+case "$HOLD_REF" in auto|clip|stand) ;; *) die "--hold-ref 只认 auto|clip|stand" ;; esac
 
 # checkpoint 缺省 = 编号最大的 model_*.pt(rsl_rl 末迭代 0 起数:17000 轮的终档是 model_16999)
 if [ -z "$CKPT" ]; then
@@ -100,9 +102,10 @@ RUN_NAME=$(basename "$RUN_DIR")
 STAMP=$(date -u +%Y%m%d_%H%M%S)
 JUDGE_DIR="$RUN_DIR/judge/${CKPT_TAG}_${STAMP}"
 REPORT="$RUN_DIR/judge/judge_report_${CKPT_TAG}_${STAMP}.md"
-ONNX="$RUN_DIR/exported/policy.onnx"
-STD_NPY="$RUN_DIR/exported/learned_std.npy"
-OBS_NORM="$RUN_DIR/exported/obs_norm.npz"
+EXPORT_DIR="$JUDGE_DIR/exported"
+ONNX="$EXPORT_DIR/policy.onnx"
+STD_NPY="$EXPORT_DIR/learned_std.npy"
+OBS_NORM="$EXPORT_DIR/obs_norm.npz"
 
 # ---------------------------------------------------------------- ① 解析 env.yaml(fail-loud)
 ENV_YAML="$RUN_DIR/params/env.yaml"
@@ -279,16 +282,18 @@ if [ -z "$GPU" ]; then
 fi
 
 CLAMP_FLAG=""; [ "$QDES_CLAMP" = 1 ] && CLAMP_FLAG="--qdes-clamp"
+SCHEDULE_FLAG=""; [ -n "$SCHEDULE_K" ] && SCHEDULE_FLAG="--exam-schedule-k $SCHEDULE_K"
 QB_PY="$WBT_DIR/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/stage1_question_bank.py"
 [ -f "$QB_PY" ] || die "缺 stage1_question_bank.py: $QB_PY"
 
-EXPORT_CMD="cd '$WBT_DIR' && CUDA_VISIBLE_DEVICES=$GPU python scripts/play.py task=$TASK algo=ppo headless=true num_envs=2 checkpoint='$CKPT' $EXPORT_OVERRIDES $EXPORT_EXTRA"
-SIDECAR_CMD="python scripts/make_std_sidecar.py --checkpoint '$CKPT'"
+EXPORT_CMD="cd '$WBT_DIR' && CUDA_VISIBLE_DEVICES=$GPU python scripts/play.py task=$TASK algo=ppo headless=true export_only=true export_dir='$EXPORT_DIR' num_envs=2 checkpoint='$CKPT' $EXPORT_OVERRIDES $EXPORT_EXTRA"
+SIDECAR_CMD="python scripts/make_std_sidecar.py --checkpoint '$CKPT' --out '$STD_NPY'"
 EXAM_CMD="python scripts/mujoco_eval_onnx.py \
   --onnx '$ONNX' --std '$STD_NPY' \
   --motion-files '$MOTION_FH' '$MOTION_BH' \
   --strike-phase-per-clip $PH0 $PH1 \
   --target-source bank --exam-bank '$EXAM_BANK' \
+  $SCHEDULE_FLAG \
   $CLAMP_FLAG --hold-ref $HOLD_REF \
   --noise-scales $NOISE_SCALES --steps $STEPS --seed $SEED --out-dir '$JUDGE_DIR/exam' $EXAM_EXTRA"
 
@@ -298,16 +303,14 @@ note "task        = $TASK(experiment_name=$EXP_NAME 反查)"
 note "动作对      = $MOTION_FH | $MOTION_BH($SRC_MOTION)"
 note "相位对      = [$PH0, $PH1]($SRC_PHASES)"
 note "exam 卷     = $EXAM_BANK($SRC_BANK)"
-note "旗标        = qdes_clamp=$([ "$QDES_CLAMP" = 1 ] && echo ON || echo OFF) hold_ref=$HOLD_REF steps=$STEPS seed=$SEED ns=[$NOISE_SCALES]"
+note "旗标        = qdes_clamp=$([ "$QDES_CLAMP" = 1 ] && echo ON || echo OFF) hold_ref=$HOLD_REF steps_cap=$STEPS schedule_k=${SCHEDULE_K:-ALL} seed=$SEED ns=[$NOISE_SCALES]"
 
 if [ "$DRY_RUN" = 1 ]; then
   echo
   echo "===== DRY-RUN:将执行的命令链(不动 GPU 不写文件)====="
   echo "# ② 导出(isaac venv,gpu 占槽 ~4 分钟;认 'Exported ONNX policy to:' 行)"
   echo "source $JUDGE_ISAAC_ENV && export HYDRA_FULL_ERROR=1"
-  echo "rm -rf '$RUN_DIR/exported'   # 每 checkpoint 必重导,勿复用陈旧工件"
-  echo "setsid bash -c \"$EXPORT_CMD\" > $JUDGE_DIR/export_play.log 2>&1 &"
-  echo "#   (等 $ONNX 落盘 + 成功行,然后只杀该 setsid 进程组;tuple Traceback=已知无害)"
+  echo "$EXPORT_CMD > $JUDGE_DIR/export_play.log 2>&1"
   echo "$SIDECAR_CMD   # -> learned_std.npy + obs_norm.npz"
   echo
   echo "# ③ 考卷(mjeval venv,纯 CPU)"
@@ -323,23 +326,12 @@ mkdir -p "$JUDGE_DIR/exam"
 # ---------------------------------------------------------------- ② 原生导出 + sidecar(isaac venv)
 [ -f "$JUDGE_ISAAC_ENV" ] || die "isaac venv 入口不存在: $JUDGE_ISAAC_ENV(JUDGE_ISAAC_ENV 可覆盖)"
 note "② play.py 原生导出(isaac venv,gpu$GPU)…"
-rm -rf "$RUN_DIR/exported"
 (
   # shellcheck disable=SC1090
   source "$JUDGE_ISAAC_ENV" >/dev/null 2>&1
   export HYDRA_FULL_ERROR=1
-  setsid bash -c "$EXPORT_CMD" > "$JUDGE_DIR/export_play.log" 2>&1 &
-  PG=$!
-  echo "$PG" > "$JUDGE_DIR/export.pgid"
-  for i in $(seq 1 110); do
-    [ -f "$ONNX" ] && { echo "[judge] onnx 落盘 ~$((i*5))s"; sleep 8; break; }
-    kill -0 "$PG" 2>/dev/null || { echo "[judge] play.py 提前退出"; break; }
-    sleep 5
-  done
-  # 只杀自己 setsid 出来的进程组;严禁碰训练进程
-  kill -TERM -"$PG" 2>/dev/null; sleep 3; kill -KILL -"$PG" 2>/dev/null
-  exit 0
-)
+  eval "$EXPORT_CMD" > "$JUDGE_DIR/export_play.log" 2>&1
+) || { tail -30 "$JUDGE_DIR/export_play.log" >&2; die "play.py export-only 失败"; }
 if ! grep -aq "Exported ONNX policy to:" "$JUDGE_DIR/export_play.log"; then
   echo "[judge][FATAL] 导出失败:没等到 'Exported ONNX policy to:' 成功行" >&2
   echo "----- export_play.log 异常摘要(WARN|Error|Traceback)-----" >&2
@@ -348,9 +340,6 @@ if ! grep -aq "Exported ONNX policy to:" "$JUDGE_DIR/export_play.log"; then
   exit 1
 fi
 [ -f "$ONNX" ] || die "有成功行但 $ONNX 不存在?检查 $JUDGE_DIR/export_play.log"
-if grep -aq "AttributeError: 'tuple' object has no attribute 'to'" "$JUDGE_DIR/export_play.log"; then
-  note "导出日志里的 tuple Traceback=已知无害(02196d2,发生在导出成功之后的 play 循环)"
-fi
 note "onnx OK: $ONNX"
 
 note "make_std_sidecar(isaac venv)…"
@@ -423,9 +412,12 @@ def row_vals(label, section_start=None, section_end=None):
 flag_line   = grab1(r"MuJoCo sim-to-sim \|")
 phase_line  = grab1(r"strike_phase_per_clip in effect|OVERRIDE strike_phase_per_clip")
 obsnorm_line = grab1(r"obs normalization")
+episode_line = grab1(r"episode timeout:")
+contract_line = grab1(r"evaluation_contract_exact=")
 clamp_line  = grab1(r"q_des clamp", required=False)
 reset_line  = grab1(r"reset mode:")
 bank_line   = grab1(r"\[mj-sim2sim\]   bank: ")
+schedule_line = grab1(r"immutable_schedule: K=")
 
 # 分母报表(末尾 DENOMINATORS 块连抄)
 den = []
@@ -451,14 +443,16 @@ venue = {}
 for side in ("fh", "bh"):
     venue[side] = {
         "n":       row_vals(f"  {side}: n_strikes", VSEC, VEND),
-        "contact": row_vals(f"  {side}: contact_rate", VSEC, VEND),
-        "ret":     row_vals(f"  {side}: return_success", VSEC, VEND),
-        "cf_ret":  row_vals(f"  {side}: CF return_success", VSEC, VEND),
+        "attempts": row_vals(f"  {side}: attempts", VSEC, VEND),
+        "contact": row_vals(f"  {side}: contact/attempt", VSEC, VEND),
+        "ret":     row_vals(f"  {side}: return/attempt", VSEC, VEND),
+        "cf_ret":  row_vals(f"  {side}: CF return/attempt", VSEC, VEND),
     }
 overall = {
-    "contact": row_vals("contact_rate", VSEC, VEND),
-    "ret":     row_vals("RETURN SUCCESS (回球成功率)", VSEC, VEND),
-    "cf_ret":  row_vals("CF RETURN SUCCESS", VSEC, VEND),
+    "attempts": row_vals("attempts (all targets)", VSEC, VEND),
+    "contact": row_vals("CONTACT / ATTEMPT", VSEC, VEND),
+    "ret":     row_vals("RETURN SUCCESS / ATTEMPT", VSEC, VEND),
+    "cf_ret":  row_vals("CF RETURN / ATTEMPT", VSEC, VEND),
 }
 
 side_cn = {"fh": "正手", "bh": "反手"}
@@ -479,8 +473,11 @@ if clamp_line:
     out.append(clamp_line)
 out.append(phase_line)
 out.append(obsnorm_line)
+out.append(episode_line)
+out.append(contract_line)
 out.append(reset_line)
 out.append(bank_line)
+out.append(schedule_line)
 out.append("\`\`\`")
 out.append("")
 out.append("## 分母报表(判卷分母法则,连抄)")
@@ -491,16 +488,19 @@ out.append("\`\`\`")
 out.append("")
 out.append("## 考卷读数(侧 × 噪声档)")
 out.append("")
-out.append("| 侧 × 噪声 | 击数 | 接触率 | 回球成功率 | 拍面误差@exact | 拍位误差 | 拍速误差 |")
-out.append("|---|---|---|---|---|---|---|")
+out.append("| 侧 × 噪声 | 发球/尝试数 | 活到击球帧数 | 接触率(全尝试) | 回球率(全尝试) | 拍面误差@exact | 拍位误差 | 拍速误差 |")
+out.append("|---|---|---|---|---|---|---|---|")
 for side in ("fh", "bh"):
     for k, ns in enumerate(ns_labels):
-        out.append("| {} {} | {} | {} | {} | {}° | {}m | {}m/s |".format(
-            side_cn[side], ns, venue[side]["n"][k], venue[side]["contact"][k],
+        out.append("| {} {} | {} | {} | {} | {} | {}° | {}m | {}m/s |".format(
+            side_cn[side], ns, venue[side]["attempts"][k], venue[side]["n"][k],
+            venue[side]["contact"][k],
             venue[side]["ret"][k], per_clip[side]["normal_err"][k],
             per_clip[side]["pos_err"][k], per_clip[side]["vel_err"][k]))
 out.append("")
-out.append("- 全侧汇总:接触率 " + " / ".join(f"{ns}→{v}" for ns, v in zip(ns_labels, overall["contact"]))
+out.append("- 全侧汇总(发球/尝试全分母):尝试数 "
+           + " / ".join(f"{ns}→{v}" for ns, v in zip(ns_labels, overall["attempts"]))
+           + ";接触率 " + " / ".join(f"{ns}→{v}" for ns, v in zip(ns_labels, overall["contact"]))
            + ";回球成功率 " + " / ".join(f"{ns}→{v}" for ns, v in zip(ns_labels, overall["ret"])))
 out.append("- CF 对照(换成题目要求拍面重判):全侧 "
            + " / ".join(f"{ns}→{v}" for ns, v in zip(ns_labels, overall["cf_ret"]))

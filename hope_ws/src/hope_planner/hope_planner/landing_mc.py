@@ -9,8 +9,9 @@ Pipeline per sample (the exact deploy chain, using hope_planner's venue-fitted p
   3. perturb the command by the POLICY'S MEASURED execution error (vel-norm sigma, normal
      angle sigma, strike-point offset)
   4. forward contact model predict_paddle_contact() (same venue fit as training virtual_ball)
-  5. integrate outgoing flight (quadratic drag): net clearance at net_x, landing point at
-     z=0 (table surface) -> classify good / net / long / wide / short
+  5. integrate outgoing flight (quadratic drag): net clearance at net_x, landing when the
+     ball CENTER reaches z=radius (lower edge touches z=0 table) -> classify good / net /
+     long / wide / short
 """
 import numpy as np
 from hope_planner import BallPhysics, PlannerConfig, TableParams, RacketTargetPlanner
@@ -61,8 +62,12 @@ def land_point(p0, v0):
         if z_net is None and (p[0] - table.net_x) * (p2[0] - table.net_x) <= 0 and v[0] > 0:
             al = 0 if abs(p2[0] - p[0]) < 1e-12 else (table.net_x - p[0]) / (p2[0] - p[0])
             z_net = (p + al * (p2 - p))[2]
-        if p2[2] <= 0.0 and v2[2] < 0:
-            al = 0 if abs(p2[2] - p[2]) < 1e-12 else (0.0 - p[2]) / (p2[2] - p[2])
+        if p[2] > physics.radius and p2[2] <= physics.radius and v2[2] < 0:
+            al = (
+                0.0
+                if abs(p2[2] - p[2]) < 1e-12
+                else (physics.radius - p[2]) / (p2[2] - p[2])
+            )
             return p + al * (p2 - p), z_net
         p, v = p2, v2
     return None, z_net
@@ -83,7 +88,7 @@ def run(sig_v, sig_n_deg, sig_p, n_samples=4000, label=""):
         land, z_net = land_point(p_c, v_plus)
         if v_plus[0] <= 0.2 or land is None:
             stats["net"] += 1; continue
-        if z_net is not None and z_net <= table.net_height + 0.005:
+        if z_net is not None and z_net <= table.net_height + physics.radius:
             stats["net"] += 1; continue
         x, y = land[0], land[1]
         if x <= table.net_x:  stats["short"] += 1

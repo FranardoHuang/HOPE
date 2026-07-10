@@ -79,6 +79,42 @@ def test_lands_short_of_net_is_nan():
     assert np.isnan(margin)
 
 
+def test_same_step_net_crossing_is_ordered_against_center_contact_plane():
+    """When net and landing occur in one step, compare fractions against z=R.
+
+    Start at center z=3 cm with a 2 cm ball and descend 2 cm in one 0.1 s
+    step: physical contact is halfway through the step.  A net at x=4 cm is
+    crossed first; one at x=6 cm is reached only after the ball has landed.
+    The assertion is run through fixed and adaptive control flow.
+    """
+    physics = BallPhysics(
+        k=0.0,
+        g=np.zeros(3),
+        radius=0.02,
+    )
+    p0 = np.array([0.0, 0.0, 0.03])
+    v0 = np.array([1.0, 0.0, -0.2])
+    for coarse in (0.0, 0.2):
+        cfg = PlannerConfig(
+            dt_integrate=0.1,
+            dt_integrate_coarse=coarse,
+            max_predict_time=0.4,
+        )
+        before = BallTrajectoryPredictor(
+            physics, cfg, TableParams(net_x=0.04, net_height=0.0)
+        )
+        clears, margin = compute_net_clearance(p0, v0, None, before)
+        assert clears is True
+        assert margin > 0.0
+
+        after = BallTrajectoryPredictor(
+            physics, cfg, TableParams(net_x=0.06, net_height=0.0)
+        )
+        clears, margin = compute_net_clearance(p0, v0, None, after)
+        assert clears is False
+        assert np.isnan(margin)
+
+
 def test_struck_past_net_plane_is_nan():
     """No +x crossing exists when the strike point is already at/past the net."""
     clears, margin = compute_net_clearance(

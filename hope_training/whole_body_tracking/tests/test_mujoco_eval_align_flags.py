@@ -14,8 +14,8 @@ only. Covers:
 * stand_hold_refs: joint_pos -> default_q, joint_vel -> zeros, every other refs entry passes
   through as the SAME object, the input dict and the joint_vel array are NOT mutated (refs_table
   entries are shared across steps — mutation would poison later swings).
-* default-path wiring: run_rollout defaults are qdes_clamp=False / hold_ref="clip" and the CLI
-  defaults match (flags off == byte-identical legacy exam; every booked score stays comparable).
+* default-path wiring: run_rollout keeps its internal qdes_clamp=False / hold_ref="clip" fallback,
+  while the CLI resolves ``auto`` from artifact episode semantics before calling it.
 
 Run:  pytest hope_training/whole_body_tracking/tests/test_mujoco_eval_align_flags.py
   or: python3 hope_training/whole_body_tracking/tests/test_mujoco_eval_align_flags.py
@@ -111,7 +111,7 @@ def test_stand_hold_refs_replaces_joints_only_and_never_mutates():
 
 
 # ---------------------------------------------------------------------------------------------
-# default-path wiring (flags off == byte-identical legacy exam)
+# default-path wiring (legacy function fallback + artifact-aware CLI)
 # ---------------------------------------------------------------------------------------------
 def test_run_rollout_defaults_are_off():
     sig = inspect.signature(M.run_rollout)
@@ -124,9 +124,12 @@ def test_cli_defaults_are_off():
     # of running main (which would need mujoco + an ONNX). Defaults must be OFF/legacy.
     import re
     src = inspect.getsource(M)
-    # store_true => default False; --hold-ref must default to the legacy "clip"
-    m = re.search(r'add_argument\("--hold-ref",\s*choices=\["clip",\s*"stand"\],\s*default="clip"', src)
-    assert m, "--hold-ref must default to the legacy 'clip' semantics"
+    # store_true => default False; --hold-ref auto resolves from ONNX hold semantics.
+    m = re.search(
+        r'add_argument\("--hold-ref",\s*choices=\["auto",\s*"clip",\s*"stand"\],\s*default="auto"',
+        src,
+    )
+    assert m, "--hold-ref must default to artifact-aware 'auto' semantics"
     m = re.search(r'add_argument\("--qdes-clamp",\s*action="store_true"', src)
     assert m, "--qdes-clamp must be a store_true flag (default OFF)"
 

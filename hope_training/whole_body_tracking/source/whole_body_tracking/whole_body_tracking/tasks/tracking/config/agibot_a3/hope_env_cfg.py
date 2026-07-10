@@ -632,8 +632,22 @@ class HOPEDeployParityRewardsCfg(HOPERewardsCfg):
 
 @configclass
 class HOPEDeployParityTerminationsCfg(TerminationsCfg):
-    """Inherited reference-relative terminations + ABSOLUTE balance terminations, so a real fall/sink
-    ends the episode regardless of the reference clip (the actual deploy failure mode)."""
+    """Swing-only reference envelopes plus always-on absolute fall/sink guards."""
+
+    anchor_pos = DoneTerm(
+        func=mdp.bad_anchor_pos_z_only_hold_aware,
+        params={"command_name": "motion", "threshold": 0.25, "ignore_hold": True},
+    )
+    anchor_ori = DoneTerm(
+        func=mdp.bad_anchor_ori_hold_aware,
+        params={"asset_cfg": SceneEntityCfg("robot"), "command_name": "motion",
+                "threshold": 0.8, "ignore_hold": True},
+    )
+    ee_body_pos = DoneTerm(
+        func=mdp.bad_motion_body_pos_z_only_hold_aware,
+        params={"command_name": "motion", "threshold": 0.25,
+                "body_names": A3_FEET_BODIES + A3_HAND_BODIES, "ignore_hold": True},
+    )
 
     base_fell_tilt = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": 0.7})  # ~40 deg, absolute
     base_too_low = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": 0.5})
@@ -1002,9 +1016,9 @@ class HOPEHitterPureRewardsCfg(RewardsCfg):
         params={"command_name": "motion", "std": 0.3, "body_names": A3_UPPER_TRACKED})
     motion_body_ori = RewTerm(func=mdp.motion_body_ori_swing_only, weight=1.0,
         params={"command_name": "motion", "std": 0.4, "body_names": A3_UPPER_TRACKED})
-    motion_body_lin_vel = RewTerm(func=mdp.motion_global_body_linear_velocity_error_exp, weight=1.0,
+    motion_body_lin_vel = RewTerm(func=mdp.motion_body_lin_vel_swing_only, weight=1.0,
         params={"command_name": "motion", "std": 1.0, "body_names": A3_UPPER_TRACKED})
-    motion_body_ang_vel = RewTerm(func=mdp.motion_global_body_angular_velocity_error_exp, weight=1.0,
+    motion_body_ang_vel = RewTerm(func=mdp.motion_body_ang_vel_swing_only, weight=1.0,
         params={"command_name": "motion", "std": 3.14, "body_names": A3_UPPER_TRACKED})
 
     # --- goal (sparse; strike-window / pre-strike gating lives inside the reward fns) ---
@@ -1044,6 +1058,10 @@ class HOPEHitterPureRewardsCfg(RewardsCfg):
         params={"command_name": "racket_target", "std": 0.5})
     hold_ready = RewTerm(func=mdp.hold_ready, weight=0.0,
         params={"command_name": "racket_target", "std": 1.5, "reach": 0.20, "reach_mode": "station"})
+    # Hold-only heading restoration. Plain HitterPure keeps this at zero; RallyV3 pairs it
+    # with yawed stand starts so the policy sees and learns the deploy recovery state.
+    hold_heading = RewTerm(func=mdp.hold_heading, weight=0.0,
+        params={"command_name": "racket_target", "std": 0.6})
     # Foot discipline (declared 2026-07-07 after the pigeon-toe diagnosis): with lower-body
     # imitation absent (paper §V-A: B = above pelvis) the hip-yaw DOF are reward-free and the
     # policy toe-ins HARD while stepping — obs-CSV quantification on model_12200 in the AGI sim:
@@ -1054,7 +1072,49 @@ class HOPEHitterPureRewardsCfg(RewardsCfg):
     # 10/10 must both hold, then re-run the obs-CSV diag (hip_yaw p95 back inside ~0.41).
     foot_orientation = RewTerm(func=mdp.foot_orientation_discipline, weight=0.0,
         params={"command_name": "motion",
-                "asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_yaw_joint", ".*_hip_roll_joint", ".*_ankle_roll_joint"])})
+                "asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_yaw_joint", ".*_hip_roll_joint", ".*_ankle_roll_joint"]),
+                "hold_gate": False})
+
+
+@configclass
+class HOPEHitterPureTerminationsCfg(HOPEDeployParityTerminationsCfg):
+    """HitterPure reference envelopes are swing-only; absolute fall guards stay live.
+
+    Held RSI intentionally combines default-stand joints/root height with the next clip's
+    frozen windup body reference.  Applying the reference-relative torso/body/orientation
+    envelopes to that mixed state can terminate a valid reset before the actor reaches a
+    swing.  HitterPure's 110-D actor cannot observe the reference body stream, so these terms
+    are explicitly ignored during hold.  ``base_fell_tilt`` and ``base_too_low`` are inherited
+    unchanged and remain active on every step, including hold.
+    """
+
+    anchor_pos = DoneTerm(
+        func=mdp.bad_anchor_pos_z_only_hold_aware,
+        params={"command_name": "motion", "threshold": 0.25, "ignore_hold": True},
+    )
+    anchor_ori = DoneTerm(
+        func=mdp.bad_anchor_ori_hold_aware,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "command_name": "motion",
+            "threshold": 0.8,
+            "ignore_hold": True,
+        },
+    )
+    ee_body_pos = DoneTerm(
+        func=mdp.bad_motion_body_pos_z_only_hold_aware,
+        params={
+            "command_name": "motion",
+            "threshold": 0.25,
+            "body_names": [
+                "left_ankle_roll_link",
+                "right_ankle_roll_link",
+                "left_wrist_yaw_link",
+                "right_wrist_yaw_link",
+            ],
+            "ignore_hold": True,
+        },
+    )
 
 
 @configclass
@@ -1066,7 +1126,7 @@ class HOPEPingPongHitterPureAgibotA3EnvCfg(HOPEPingPongAgibotA3EnvCfg):
     obs_mode: str = "hitter_pure"
     observations: HOPEObservationsHitterPureCfg = HOPEObservationsHitterPureCfg()
     rewards: HOPEHitterPureRewardsCfg = HOPEHitterPureRewardsCfg()
-    terminations: HOPEDeployParityTerminationsCfg = HOPEDeployParityTerminationsCfg()
+    terminations: HOPEHitterPureTerminationsCfg = HOPEHitterPureTerminationsCfg()
 
     def __post_init__(self):
         super().__post_init__()
@@ -1087,6 +1147,9 @@ class HOPEPingPongHitterPureAgibotA3EnvCfg(HOPEPingPongAgibotA3EnvCfg):
         C = self.commands.racket_target
         C.target_mode = "hitter_pure"
         C.normal_mode = "velocity"  # §IV-C: racket plane ⊥ velocity at impact (LEARNED, not ref-locked)
+        # Unified forehand/backhand strikes with opposite physical paddle faces. This belongs in
+        # the code default as well as the YAML because verify/export paths bypass train.py.
+        C.mount_normal_sign_per_clip = (1.0, -1.0)
         C.strike_phase_per_clip = (0.47, 0.333)  # blade-speed-peak re-plane (hopex clips, 2026-07-02)
         C.strike_window_s = 0.12
         C.clean_reference_strike_velocity = True
@@ -1145,6 +1208,9 @@ class HOPEPingPongHitterPureRallyAgibotA3EnvCfg(HOPEPingPongHitterPureAgibotA3En
         # scripted P7 holds ~4.5 s). Deliberately NOT longer: holds pay no goal income, so hold
         # steps dilute strike-gradient sample efficiency.
         self.commands.motion.hold_steps_range = (25, 125)
+        # A held RSI birth commands default-stand joints. Keep its root at the default stand height
+        # too; using the windup crouch z puts the stand feet below the floor at reset.
+        self.commands.motion.rsi_hold_root_stand_z = True
         # Recovery income (weights mirror the Rally YAML; 0.0 in plain HitterPure):
         self.rewards.post_strike_brake.weight = 1.0
         self.rewards.hold_ready.weight = 1.0

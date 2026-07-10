@@ -16,10 +16,11 @@ are HOPE choices to be tuned, not paper-sourced values.
 
 from __future__ import annotations
 
+import math
 import torch
 from typing import TYPE_CHECKING
 
-from whole_body_tracking.tasks.tracking.mdp.hope_commands import RacketTargetCommand
+from whole_body_tracking.tasks.tracking.mdp.hope_commands import RacketTargetCommand, face_tracking_pair
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -30,16 +31,17 @@ def _cmd(env: ManagerBasedRLEnv, command_name: str) -> RacketTargetCommand:
 
 
 def _dbg_log(cmd: RacketTargetCommand, name: str, raw: torch.Tensor, mask: torch.Tensor) -> None:
-    """Log raw (pre-mask) and gated (post-mask) kernel values, held over the active mask.
+    """Log the current pre-mask kernel and its actual post-mask value.
 
-    No-op unless ``cmd.cfg.debug_reward_logging`` is set. The held value lets the reset-mean report the
-    in-window reward, and lets you see how much reward the time-gate is killing (gated vs raw) and whether
-    the raw kernel still has any gradient at the current error scale (raw ~0 => std too tight).
+    No-op unless ``cmd.cfg.debug_reward_logging`` is set.  The old implementation updated both
+    tensors only where ``mask`` was true, making ``dbg_*_gated`` identically equal to
+    ``dbg_*_raw`` and unable to reveal how often the gate removed income.  These diagnostics now
+    mirror the reward expression on every step: ``gated = raw * mask``.
     """
     if not cmd.cfg.debug_reward_logging:
         return
-    cmd.metrics[f"dbg_{name}_raw"] = torch.where(mask, raw, cmd.metrics[f"dbg_{name}_raw"])
-    cmd.metrics[f"dbg_{name}_gated"] = torch.where(mask, raw * mask.float(), cmd.metrics[f"dbg_{name}_gated"])
+    cmd.metrics[f"dbg_{name}_raw"] = raw
+    cmd.metrics[f"dbg_{name}_gated"] = raw * mask.float()
 
 
 def _window_pos(cmd: RacketTargetCommand) -> torch.Tensor:
@@ -96,9 +98,7 @@ def _face_pair(cmd: RacketTargetCommand) -> tuple[torch.Tensor, torch.Tensor]:
     face_command=False: unchanged clip-reference pairing (signed vs signed — both sides carry the
     same per-clip sign, so this path is flip-invariant and byte-identical to the baseline).
     """
-    if cmd.cfg.face_command:
-        return cmd.racket_normal_raw_w, cmd.target_normal_cmd
-    return cmd.racket_normal_w, cmd.racket_target_normal_w
+    return face_tracking_pair(cmd)
 
 
 def _normal_kernel_raw(cmd: RacketTargetCommand, std: float) -> torch.Tensor:
@@ -287,6 +287,27 @@ def hold_ready(
     return raw * near * in_hold.float()
 
 
+def hold_heading(
+    env: ManagerBasedRLEnv, command_name: str, std: float = 0.6
+) -> torch.Tensor:
+    """Reward re-squaring to world +x during a recovery hold.
+
+    A yawed stand-start distribution supplies the missing recovery states; this term is
+    deliberately zero outside ``in_hold`` so it cannot reshape the strike itself.
+    """
+    if not math.isfinite(float(std)) or float(std) <= 0.0:
+        raise ValueError(f"hold_heading std must be finite and > 0, got {std!r}")
+    cmd = _cmd(env, command_name)
+    in_hold = getattr(cmd._motion(), "in_hold", None)
+    if in_hold is None:
+        return torch.zeros(cmd.num_envs, device=cmd.device)
+    q = cmd.base_quat_w  # scalar-first (w, x, y, z)
+    forward_x = 1.0 - 2.0 * (q[:, 2] ** 2 + q[:, 3] ** 2)
+    forward_y = 2.0 * (q[:, 1] * q[:, 2] + q[:, 0] * q[:, 3])
+    yaw = torch.atan2(forward_y, forward_x)
+    return torch.exp(-torch.square(yaw) / std**2) * in_hold.float()
+
+
 def base_decel_tracking(
     env: ManagerBasedRLEnv, command_name: str, v_gain: float = 2.0, v_max: float = 1.6, std: float = 0.4
 ) -> torch.Tensor:
@@ -305,8 +326,10 @@ def base_decel_tracking(
     Far target -> v_des saturates at v_max and the term pays for MOVING (it cooperates with
     racket_progress instead of taxing the approach); as the strike stance is reached v_des -> 0 and the
     term pays for a CALM base — a smooth taper instead of the bang-bang rush-then-slam. Gated to
-    ``pre_strike`` ONLY: the strike swing and the post-strike recovery are untouched (post-strike the
-    distance to the OLD swung-through target would otherwise command a bogus speed-up). Base velocity
+    active ``pre_strike`` motion but explicitly OFF during the frozen pre-swing hold: ``hold_ready``
+    owns hold stillness, while paying ``base_decel``'s nonzero target speed there asks the base to move
+    and creates a contradictory objective. The strike swing and post-strike recovery are untouched
+    (post-strike the distance to the OLD swung-through target would otherwise command a bogus speed-up). Base velocity
     is the WORLD planar root velocity (same source as hold_ready); v_gain [1/s] is the P-gain of the
     pseudo velocity command, v_max [m/s] its cap, std [m/s] the kernel width. RewTerm weight is
     POSITIVE; default weight 0.0 = OFF (flag-gated via task.rewards.base_decel_weight)."""
@@ -315,7 +338,9 @@ def base_decel_tracking(
     v_des = (v_gain * planar_err).clamp(0.0, v_max)
     v_base = torch.norm(cmd.robot.data.root_lin_vel_w[:, :2], dim=-1)
     raw = torch.exp(-torch.square(v_base - v_des) / std**2)
-    return raw * cmd.pre_strike.float()
+    in_hold = getattr(cmd._motion(), "in_hold", None)
+    active = cmd.pre_strike if in_hold is None else (cmd.pre_strike & ~in_hold)
+    return raw * active.float()
 
 
 def racket_strike_success(
@@ -395,7 +420,8 @@ def racket_face_guidance(
 
 
 def tracking_envelope_violation(
-    env: ManagerBasedRLEnv, command_name: str, threshold: float, body_names: list[str]
+    env: ManagerBasedRLEnv, command_name: str, threshold: float, body_names: list[str],
+    ignore_hold: bool = False,
 ) -> torch.Tensor:
     """R-b envelope-as-penalty (reward_staged_design 2026-07-08 §⑥): per-step indicator of the
     tracking-envelope violation that used to TERMINATE the episode — the union of the two removed
@@ -413,6 +439,8 @@ def tracking_envelope_violation(
     viol = bad_anchor_pos_z_only(env, command_name, threshold) | bad_motion_body_pos_z_only(
         env, command_name, threshold, body_names
     )
+    if ignore_hold:
+        viol = _ignore_hold(env.command_manager.get_term(command_name), viol, True)
     return viol.float()
 
 
@@ -576,7 +604,8 @@ def strike_vertical_bob(env: ManagerBasedRLEnv, command_name: str) -> torch.Tens
 # the arm + waist joints teaches a swing that lives inside the torque envelope (the elbow was measured
 # at ~6.7x its 24 Nm limit in the failing trace). Uses ``data.computed_torque`` (Isaac copies each
 # actuator's PRE-clip computed_effort into it) and ``data.joint_effort_limits`` (the per-joint sim
-# limit written from effort_limit_sim). Both degrade to a 0 reward if unavailable, so it can never crash.
+# limit written from effort_limit_sim). This term is a hardware-envelope claim: when enabled, missing
+# indices/data or invalid limits MUST stop the run rather than reporting a counterfeit zero saturation.
 # ============================================================================================== #
 _TORQUE_SAT_JOINT_EXPR = [".*shoulder.*", ".*elbow.*", ".*wrist.*", "waist_.*_joint"]
 
@@ -588,9 +617,19 @@ def _torque_sat_joint_idx(env: ManagerBasedRLEnv, command_name: str):
     if idx is None:
         try:
             idx = list(cmd.robot.find_joints(_TORQUE_SAT_JOINT_EXPR)[0])
-        except Exception:
-            idx = []
-        cmd._torque_sat_joint_idx = idx  # cache (empty list means "unresolvable")
+        except Exception as exc:
+            raise RuntimeError(
+                "arm_torque_saturation could not resolve shoulder/elbow/wrist/waist joints"
+            ) from exc
+        if not idx:
+            raise RuntimeError(
+                "arm_torque_saturation resolved zero shoulder/elbow/wrist/waist joints"
+            )
+        if len(idx) != len(set(idx)):
+            raise RuntimeError(
+                f"arm_torque_saturation resolved duplicate joint indices: {idx}"
+            )
+        cmd._torque_sat_joint_idx = idx
     return cmd, idx
 
 
@@ -603,12 +642,32 @@ def arm_torque_saturation(env: ManagerBasedRLEnv, command_name: str) -> torch.Te
     data = cmd.robot.data
     tau = getattr(data, "computed_torque", None)
     lim = getattr(data, "joint_effort_limits", None)
-    if not idx or tau is None or lim is None:
-        z = torch.zeros(cmd.num_envs, device=cmd.device)
-        cmd.metrics["arm_torque_sat_frac"] = z
-        return z
+    if tau is None or lim is None:
+        raise RuntimeError(
+            "arm_torque_saturation requires robot.data.computed_torque (pre-clip) and "
+            "robot.data.joint_effort_limits; the active actuator backend exposes neither/both "
+            "incorrectly"
+        )
+    if tau.ndim != 2 or lim.ndim != 2 or tau.shape != lim.shape:
+        raise RuntimeError(
+            f"arm_torque_saturation expected matching [env,joint] tensors, got "
+            f"computed_torque={tuple(tau.shape)}, limits={tuple(lim.shape)}"
+        )
+    if max(idx) >= tau.shape[1]:
+        raise RuntimeError(
+            f"arm_torque_saturation joint index {max(idx)} exceeds tensor width {tau.shape[1]}"
+        )
     tau_a = torch.abs(tau[:, idx])
-    lim_a = lim[:, idx].clamp(min=1e-3)  # guard against a 0/inf limit
+    lim_a = lim[:, idx]
+    # The boolean checks synchronize a CUDA stream, so run the mechanism/data contract once,
+    # not at every 50-Hz reward evaluation. Later non-finite torques still propagate into the
+    # reward (and PPO's normal non-finite guard) rather than being converted into a fake zero.
+    if not getattr(cmd, "_torque_sat_contract_checked", False):
+        if not bool(torch.isfinite(tau_a).all()) or not bool(torch.isfinite(lim_a).all()):
+            raise RuntimeError("arm_torque_saturation received non-finite torque/effort-limit data")
+        if bool((lim_a <= 0.0).any()):
+            raise RuntimeError("arm_torque_saturation requires strictly positive effort limits")
+        cmd._torque_sat_contract_checked = True
     over = (tau_a / lim_a - 1.0).clamp(min=0.0)  # relu(ratio - 1): the un-deliverable fraction
     frac = over.mean(dim=-1)
     cmd.metrics["arm_torque_sat_frac"] = frac  # watch-metric: should fall toward 0 during fine-tune
@@ -638,7 +697,91 @@ def motion_body_ori_swing_only(env, command_name: str, std: float, body_names=No
                                                    window_scale, window_command_name)
     return torch.where(cmd.in_hold, torch.zeros_like(r), r)
 
-def foot_orientation_discipline(env, command_name: str, asset_cfg):
+
+def motion_body_lin_vel_swing_only(env, command_name: str, std: float, body_names=None,
+                                   window_scale: float = 1.0,
+                                   window_command_name: str | None = None):
+    """Body linear-velocity imitation with no income during a recovery hold.
+
+    ``MotionCommand.body_lin_vel_w`` correctly exposes a stationary (zero-velocity)
+    reference while held.  Paying the ordinary velocity kernel for that reference is still
+    wrong for HitterPure rally recovery, though: it rewards *remaining still* while
+    ``hold_heading`` asks the base/waist to turn back toward the table.  The video teacher is
+    an imitation prior for the swing, not a hold controller, so the whole term is silent in
+    hold just like the position/orientation terms above.
+    """
+    from .rewards import motion_global_body_linear_velocity_error_exp
+    cmd = env.command_manager.get_term(command_name)
+    r = motion_global_body_linear_velocity_error_exp(
+        env, command_name, std, body_names, window_scale, window_command_name
+    )
+    return torch.where(cmd.in_hold, torch.zeros_like(r), r)
+
+
+def motion_body_ang_vel_swing_only(env, command_name: str, std: float, body_names=None,
+                                   window_scale: float = 1.0,
+                                   window_command_name: str | None = None):
+    """Angular-velocity counterpart of :func:`motion_body_lin_vel_swing_only`."""
+    from .rewards import motion_global_body_angular_velocity_error_exp
+    cmd = env.command_manager.get_term(command_name)
+    r = motion_global_body_angular_velocity_error_exp(
+        env, command_name, std, body_names, window_scale, window_command_name
+    )
+    return torch.where(cmd.in_hold, torch.zeros_like(r), r)
+
+
+def _ignore_hold(command, value: torch.Tensor, ignore_hold: bool) -> torch.Tensor:
+    """Mask a reference-relative termination during hold, failing loud on a bad command.
+
+    The absolute fall guards remain separate termination terms.  This helper is deliberately
+    not a permissive ``getattr(..., False)`` fallback: configuring ``ignore_hold=True`` on a
+    command without an ``in_hold`` contract would silently reintroduce the reset-time bug.
+    """
+    if not ignore_hold:
+        return value
+    if not hasattr(command, "in_hold"):
+        raise RuntimeError("ignore_hold=True requires the command to expose an in_hold mask")
+    return value & ~command.in_hold.bool()
+
+
+def bad_anchor_pos_z_only_hold_aware(
+    env, command_name: str, threshold: float, ignore_hold: bool = False
+) -> torch.Tensor:
+    """Reference torso-height envelope with an explicit held-RSI exclusion."""
+    from .terminations import bad_anchor_pos_z_only
+    command = env.command_manager.get_term(command_name)
+    return _ignore_hold(
+        command, bad_anchor_pos_z_only(env, command_name, threshold), ignore_hold
+    )
+
+
+def bad_anchor_ori_hold_aware(
+    env, asset_cfg, command_name: str, threshold: float, ignore_hold: bool = False
+) -> torch.Tensor:
+    """Reference orientation envelope with an explicit held-RSI exclusion."""
+    from .terminations import bad_anchor_ori
+    command = env.command_manager.get_term(command_name)
+    return _ignore_hold(
+        command,
+        bad_anchor_ori(env, asset_cfg, command_name, threshold),
+        ignore_hold,
+    )
+
+
+def bad_motion_body_pos_z_only_hold_aware(
+    env, command_name: str, threshold: float, body_names=None,
+    ignore_hold: bool = False,
+) -> torch.Tensor:
+    """Reference body-height envelope with an explicit held-RSI exclusion."""
+    from .terminations import bad_motion_body_pos_z_only
+    command = env.command_manager.get_term(command_name)
+    return _ignore_hold(
+        command,
+        bad_motion_body_pos_z_only(env, command_name, threshold, body_names),
+        ignore_hold,
+    )
+
+def foot_orientation_discipline(env, command_name: str, asset_cfg, hold_gate: bool = False):
     """L1 deviation of the foot-orientation joints (hip yaw/roll, ankle roll) from the
     REFERENCE joint positions — hold-aware via commands.joint_pos (default stand during
     hold, clip footwork during swings). 2026-07-05: with no joint-level imitation in
@@ -646,10 +789,14 @@ def foot_orientation_discipline(env, command_name: str, asset_cfg):
     -1.13/+0.90 rad during swings/side-switches vs a reference envelope of ±0.41
     (Gate 2.5 diag) — the 'weird foot placement' at strike/switch. Use a NEGATIVE
     weight (penalty); keep it small so it disciplines feet without taxing the lunge.
+    When ``hold_gate`` is true, the term is zero during the recovery hold: otherwise the
+    square-stand joint reference penalizes the hip-yaw motion needed to re-square the base.
     """
     cmd = env.command_manager.get_term(command_name)
     asset = env.scene[asset_cfg.name]
     q = asset.data.joint_pos[:, asset_cfg.joint_ids]
     ref = cmd.joint_pos[:, asset_cfg.joint_ids]
-    return torch.sum(torch.abs(q - ref), dim=1)
-
+    penalty = torch.sum(torch.abs(q - ref), dim=1)
+    if hold_gate:
+        penalty = torch.where(cmd.in_hold, torch.zeros_like(penalty), penalty)
+    return penalty

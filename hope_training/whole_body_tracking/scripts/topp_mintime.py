@@ -713,7 +713,7 @@ def main(argv=None) -> int:
         fkm = v1.ctn.MjFK(args.mjcf, ISAAC_JOINT_NAMES)
         names = fkm.body_names()
         order = [ln.strip() for ln in open(args.body_order) if ln.strip()]
-        fk_ctx = (fkm, [names.index(n) for n in order])
+        fk_ctx = (fkm, [names.index(n) for n in order], tuple(order))
 
     judge = v2.RealOracle(args.mjcf, args.body_order, args.mu, args.support_band,
                           workdir=args.oracle_workdir)

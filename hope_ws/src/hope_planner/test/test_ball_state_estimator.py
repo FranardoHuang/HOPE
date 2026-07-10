@@ -87,6 +87,84 @@ def test_no_false_bounce_on_low_flat_or_monotonic_flight():
     assert len(est.t_buffer) == 12 and len(est2.t_buffer) == 6
 
 
+def test_racket_velocity_jump_discards_every_preimpact_sample():
+    """A hit away from the table reverses vx by several m/s.
+
+    The detector is deliberately delayed by only three 300 Hz frames so it can
+    compare two noise-averaging 10 ms secants.  On detection the polynomial
+    window must retain the contact position + post-hit tail, never the incoming
+    samples that would corrupt the first frozen planner command.
+    """
+    cfg = PlannerConfig(
+        discontinuity_window=3,
+        discontinuity_velocity_jump_mps=3.0,
+    )
+    est = BallStateEstimator(cfg)
+    dt = 1.0 / cfg.mocap_hz
+    t_hit = 8 * dt
+    p_hit = np.array([0.6, -0.4, 0.45])
+    v_before = np.array([-4.0, 0.2, -0.5])
+    v_after = np.array([5.0, -0.1, 1.0])
+
+    for i in range(9):
+        t = i * dt
+        est.push(t, p_hit + v_before * (t - t_hit))
+        assert not est.discontinuity_detected
+
+    detected = False
+    for j in range(1, 4):
+        t = t_hit + j * dt
+        est.push(t, p_hit + v_after * (j * dt))
+        detected = detected or est.discontinuity_detected
+
+    assert detected
+    assert est.discontinuity_detected
+    assert est.last_velocity_jump_mps > 8.0
+    assert len(est.t_buffer) == cfg.discontinuity_window + 1
+    assert est.t_buffer[0] == t_hit
+    assert all(t >= t_hit for t in est.t_buffer)
+    assert not est.ready
+
+    # Two more clean outgoing samples make a six-point post-impact-only fit.
+    for j in range(4, 6):
+        t = t_hit + j * dt
+        est.push(t, p_hit + v_after * (j * dt))
+    assert est.ready
+    _, v_est, _ = est.estimate()
+    assert np.allclose(v_est, v_after, atol=1e-6)
+
+
+def test_ballistic_acceleration_does_not_trigger_velocity_jump():
+    """Gravity changes two adjacent 10 ms secants by ~0.1 m/s, far below 3 m/s."""
+    cfg = PlannerConfig()
+    est = BallStateEstimator(cfg)
+    dt = 1.0 / cfg.mocap_hz
+    p0 = np.array([1.0, -0.4, 1.2])
+    v0 = np.array([-5.0, 0.4, 1.0])
+    g = np.array([0.0, 0.0, -9.81])
+    for i in range(25):
+        t = i * dt
+        est.push(t, p0 + v0 * t + 0.5 * g * t * t)
+        assert not est.discontinuity_detected
+    assert len(est.t_buffer) == 25
+
+
+def test_single_position_outlier_is_not_misclassified_as_a_hit():
+    """An isolated 5 cm marker glitch fails the within-segment consistency gate."""
+    cfg = PlannerConfig()
+    est = BallStateEstimator(cfg)
+    dt = 1.0 / cfg.mocap_hz
+    p0 = np.array([1.0, -0.4, 0.8])
+    velocity = np.array([-4.0, 0.2, 0.0])
+    for i in range(25):
+        p = p0 + velocity * (i * dt)
+        if i == 10:
+            p = p + np.array([0.05, 0.0, 0.0])
+        est.push(i * dt, p)
+        assert not est.discontinuity_detected
+    assert len(est.t_buffer) == 25
+
+
 def test_fewer_than_six_samples_not_ready():
     cfg = PlannerConfig()
     est = BallStateEstimator(cfg)

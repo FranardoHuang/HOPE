@@ -12,7 +12,13 @@ import copy
 
 from isaaclab.utils import configclass
 
-from whole_body_tracking.robots.agibot_a3 import AGIBOT_A3_ACTION_SCALE, AGIBOT_A3_CFG
+from whole_body_tracking.robots.agibot_a3 import (
+    A3_MOUNT_OFFSET,
+    A3_RACKET_BODY,
+    A3_WRIST_BODY,
+    AGIBOT_A3_ACTION_SCALE,
+    AGIBOT_A3_CFG,
+)
 from whole_body_tracking.tasks.table_tennis import geometry
 from whole_body_tracking.tasks.table_tennis.table_tennis_env_cfg import TableTennisEnvCfg
 
@@ -39,6 +45,13 @@ class AgibotA3TableTennisEnvCfg(TableTennisEnvCfg):
         # -X, set this to (0.0, 0.0, 0.0, 1.0) (180 deg about Z).
         robot.init_state.rot = (1.0, 0.0, 0.0, 0.0)
         self.scene.robot = robot
+
+        # Some URDF import settings preserve pingpang_red_Link as an
+        # articulation body; others merge its zero-mass fixed joint into the
+        # wrist. Both paths must reconstruct the identical canonical site.
+        self.racket_body_candidates = (A3_RACKET_BODY, "pingpang_black_Link", "pingbang_ball_Link")
+        self.racket_wrist_body_name = A3_WRIST_BODY
+        self.racket_site_offset_wrist_m = A3_MOUNT_OFFSET
 
         # Per-joint action scale (0.25 * effort / stiffness), matching the A3 deploy decoder.
         self.actions.joint_pos.scale = AGIBOT_A3_ACTION_SCALE

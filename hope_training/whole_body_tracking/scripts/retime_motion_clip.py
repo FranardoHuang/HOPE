@@ -65,9 +65,14 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import csv_to_npz_mujoco as ctn  # noqa: E402  (numpy-only at import time)
+from motion_kinematics_contract import (  # noqa: E402
+    KINEMATICS_METADATA_KEYS,
+    metadata_arrays,
+    resolve_body_names,
+)
 
 KNOWN_KEYS = ("fps", "joint_pos", "joint_vel", "body_pos_w", "body_quat_w",
-              "body_lin_vel_w", "body_ang_vel_w")
+              "body_lin_vel_w", "body_ang_vel_w") + KINEMATICS_METADATA_KEYS
 
 
 # ------------------------------------------------------------------ core math -- #
@@ -321,17 +326,31 @@ def search_min_budget(joint_pos, fps, phase, window_s, s_min, s_max, smooth_fram
 
 
 def rebuild_bodies_fk(mjcf: str, body_order_file: str, base_pos, base_quat, joint_pos):
-    """csv_to_npz_mujoco FK path: (T, nbody_sel, 3/4) in the stored column order."""
+    """Return link poses and COM positions in the stored body-column order."""
     from audit_motion_npz import ISAAC_JOINT_NAMES  # same-dir import, numpy-only
     fkm = ctn.MjFK(mjcf, ISAAC_JOINT_NAMES)
     names = fkm.body_names()
     with open(body_order_file) as fh:
         body_order = [ln.strip() for ln in fh if ln.strip()]
     cols = [names.index(n) for n in body_order]
-    pos_all, quat_all = ctn.fk_series(fkm, base_pos.astype(np.float64),
-                                      base_quat.astype(np.float64),
-                                      joint_pos.astype(np.float64), ISAAC_JOINT_NAMES)
-    return pos_all[:, cols], quat_all[:, cols]
+    pos_all, quat_all, com_all = ctn.fk_series_with_com(
+        fkm,
+        base_pos.astype(np.float64),
+        base_quat.astype(np.float64),
+        joint_pos.astype(np.float64),
+        ISAAC_JOINT_NAMES,
+    )
+    return pos_all[:, cols], quat_all[:, cols], com_all[:, cols]
+
+
+def read_body_order(path: str | None) -> tuple[str, ...] | None:
+    if path is None:
+        return None
+    with open(path) as fh:
+        names = tuple(line.strip() for line in fh if line.strip())
+    if not names or len(set(names)) != len(names):
+        raise SystemExit("[retime] --body-order must contain unique non-empty names")
+    return names
 
 
 def retime_clip(data: dict, phase: float, window_s: float, s_min: float, s_max: float,
@@ -384,10 +403,13 @@ def retime_clip(data: dict, phase: float, window_s: float, s_min: float, s_max: 
     if body_mode == "fk":
         if not (mjcf and body_order):
             raise SystemExit("[retime] --body-mode fk requires --mjcf and --body-order")
-        body_pos, body_quat = rebuild_bodies_fk(mjcf, body_order, base_pos, base_quat,
-                                                res["joint_pos"])
+        body_pos, body_quat, body_com = rebuild_bodies_fk(
+            mjcf, body_order, base_pos, base_quat, res["joint_pos"]
+        )
         body_pos = body_pos.astype(np.float32)
         body_quat = body_quat.astype(np.float32)
+        velocity_path = body_com.astype(np.float64)
+        velocity_point = "center_of_mass"
         # FK of bitwise window inputs must reproduce the stored rows (float32 floor)
         fk_window_pos_diff = float(np.abs(body_pos[win_out] - data["body_pos_w"][w0:w1 + 1]).max())
         qa, qb = body_quat[win_out], data["body_quat_w"][w0:w1 + 1]
@@ -395,15 +417,30 @@ def retime_clip(data: dict, phase: float, window_s: float, s_min: float, s_max: 
     elif body_mode == "interp":
         body_pos = lerp_rows(data["body_pos_w"], phi)
         body_quat = slerp_rows(data["body_quat_w"], phi)
+        # Interpolating stored link poses cannot reconstruct a COM path without
+        # the MJCF inertial offsets.  Mark this diagnostic-only output honestly;
+        # MotionLoader rejects it for formal training.
+        velocity_path = body_pos.astype(np.float64)
+        velocity_point = "link_origin"
     else:
         raise SystemExit(f"[retime] unknown --body-mode {body_mode}")
     # window rows: bitwise from source, whatever the body mode
     body_pos[win_out] = data["body_pos_w"][w0:w1 + 1]
     body_quat[win_out] = data["body_quat_w"][w0:w1 + 1]
 
-    body_lin = np.gradient(body_pos.astype(np.float64), dt, axis=0).astype(np.float32)
+    body_lin = np.gradient(velocity_path, dt, axis=0).astype(np.float32)
     body_ang = np.stack([ctn.so3_derivative(body_quat[:, b].astype(np.float64), dt)
                          for b in range(body_quat.shape[1])], axis=1).astype(np.float32)
+
+    explicit_body_names = read_body_order(body_order)
+    try:
+        body_names = resolve_body_names(
+            data,
+            explicit_body_names=explicit_body_names,
+            expected_count=body_pos.shape[1],
+        )
+    except ValueError as exc:
+        raise SystemExit(f"[retime] {exc}") from None
 
     out = {
         "fps": np.array(data["fps"]).reshape(-1).astype(np.int64),
@@ -414,6 +451,9 @@ def retime_clip(data: dict, phase: float, window_s: float, s_min: float, s_max: 
         "body_lin_vel_w": body_lin,
         "body_ang_vel_w": body_ang,
     }
+    out.update(metadata_arrays(
+        body_names=body_names, body_lin_vel_point=velocity_point
+    ))
 
     # --- verification --------------------------------------------------------- #
     assert np.array_equal(out["joint_pos"][win_out], q[w0:w1 + 1]), "window joint_pos not bitwise"
@@ -465,6 +505,8 @@ def retime_clip(data: dict, phase: float, window_s: float, s_min: float, s_max: 
             "window_joint_pos_bitwise": True,
             "window_body_rows_bitwise": True,
             "body_mode": body_mode,
+            "body_lin_vel_point": velocity_point,
+            "motion_command_exact": bool(velocity_point == "center_of_mass"),
             "fk_window_max_pos_diff_m": fk_window_pos_diff,
             "fk_window_max_quat_diff": fk_window_quat_diff,
             "contact_joint_vel_max_abs_diff": float(

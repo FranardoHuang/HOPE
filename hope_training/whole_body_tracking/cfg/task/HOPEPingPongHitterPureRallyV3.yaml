@@ -23,18 +23,19 @@
 # STRATEGY (anti-forgetting, mechanistic — not "hope the gate catches it"):
 #   * brake 0, hold_ready 0 (both are hold-adjacent income that competes with the swing; hold_ready
 #     also pays for ZERO angular velocity = directly fights the turn).
-#   * hold_heading is the ONLY new recovery income; RAMP it small->target across stages (this file =
-#     STAGE 1 at 0.10).
+#   * hold_heading is the ONLY new recovery income; ramp it small->target across separately named
+#     stages (this file is the conservative Stage-1 recipe at 0.10).
 #   * foot_orientation kept -0.8 for swings but HOLD-GATED OFF (code: hope_rewards.foot_orientation_
 #     discipline hold_gate).
-#   * yaw CURRICULUM: start at the known-safe RSI band +-0.2 (base_13200 already tolerates it), ramp
-#     +-0.35 -> +-0.6 -> +-0.9 ONLY after the precision gate holds. NEVER start at +-0.9 (v2's error).
+#   * yaw CURRICULUM: start at +-0.35, then +-0.6 -> +-0.9 ONLY after the precision gate holds.
+#     NEVER start at +-0.9 (v2's error).
 #   * trust region (CLI, not this file): entropy_coef 0.015 -> ~0.006, keep desired_kl 0.01 — keeps the
 #     policy near the 0.9931 base while it acquires recovery (rsl_rl PPO has adaptive-KL only).
 #   * episode 10 s (v2's 16 s dilutes the strike batch).
 #
-# WARM RESUME (strict) from model_13200_footfix08:
-#   logs/rsl_rl/agibot_a3_hope_hitter_pure/2026-07-07_22-31-59_footfix/model_13200.pt
+# WARM RESUME CONTRACT: use a 0.51-plane HitterPure checkpoint that passes G1 and record its
+# restore path/hash in the run ledger. Do NOT resume the historical 0.70-plane model_13200 into
+# this recipe: changing the plane and adding recovery at once destroys attribution.
 #
 # GATES (order = cheapest first; a candidate must clear ALL):
 #   G1 precision (HARD, the v2 killer — check FIRST, every ~200 iters):
@@ -74,12 +75,11 @@ motion:
   stand_start_prob: 0.25
   # v3: 50 (v2 25) — yawed stand starts get >=1.0 s to re-square before the clip arms.
   stand_start_min_hold: 50
-  # v3 STAGE 1 HEADING DR: +-0.2 rad (+-11 deg) == the RSI band base_13200 already tolerates, so
-  # Stage 1 is in-distribution and precision-safe. Ramp in later stages (see the runbook), NEVER
-  # start at +-0.9 (v2's flat +-0.9-from-iter-0 was the OOD hit).
+  # Stage 1 heading DR. Ramp only after G1 and the count-gated G2 recovery metric pass.
   stand_start_yaw_range: [-0.35, 0.35]
   # 0.5-2.5 s recovery hold at every wrap+reset — required so in_hold=True exists for hold_heading.
   hold_steps_range: [25, 125]
+  rsi_hold_root_stand_z: true
   post_swing_start_prob: 0.0
   clip_switch_prob: 0.0
 
@@ -105,9 +105,9 @@ rewards:
   hold_ready_std: 1.5
   hold_ready_reach: 0.30
   hold_ready_reach_mode: station
-  # v3 STAGE 1: hold_heading = the one recovery term, RAMPED. 0.10 now; -> 0.30 -> 0.50 as yaw widens
-  # (runbook). std 0.6 keeps slope ~1/rad across the injected band (0.35 is gradient-dead there).
-  hold_heading_weight: 1
+  # Stage 1: the only recovery term starts small. Later weights belong in separately recorded
+  # stage configs/runs, not as an undocumented edit to this baseline.
+  hold_heading_weight: 0.10
   hold_heading_std: 0.6
 
   # foot discipline: keep -0.8 for SWINGS (the 13200 toe-in fix this lineage depends on) but HOLD-GATE
@@ -129,9 +129,11 @@ racket:
   # the drift-then-fall in the G3 rally was the absence of this lock. Footwork is y-only.
   base_target_x_range: [0.0, 0.0]
   base_target_y_range: [-0.40, 0.40]
+  # Must match the base HitterPure task and ONNX metadata. The former 0.70 values made this
+  # purported x-locked recipe command a different striking geometry from its warm-start task.
   pos_range_per_clip:
-    forehand: {x: [0.70, 0.70], y: [-0.65, -0.15], z: [0.67, 0.97]}
-    backhand: {x: [0.70, 0.70], y: [-0.05,  0.45], z: [0.88, 1.18]}
+    forehand: {x: [0.51, 0.51], y: [-0.65, -0.15], z: [0.67, 0.97]}
+    backhand: {x: [0.51, 0.51], y: [-0.05,  0.45], z: [0.88, 1.18]}
   vel_range_per_clip:
     forehand: {x: [1.05, 2.05], y: [ 0.96, 1.96], z: [0.31, 1.11]}
     backhand: {x: [1.61, 2.61], y: [-1.21, -0.21], z: [0.00, 0.71]}

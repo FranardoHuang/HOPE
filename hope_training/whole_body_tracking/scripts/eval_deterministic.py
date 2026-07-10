@@ -98,6 +98,13 @@ REPORT_ROWS = [
     ("base_station_offset_at_swing_start", "base_station_offset_at_swing_start"),
     ("post_strike_base_speed_xy", "post_strike_base_speed_xy"),
     ("base_dist_from_origin", "base_dist_from_origin"),
+    # Heading recovery is meaningful only when the corresponding count reaches the command
+    # term's exact_success_min_count. A zero value with zero count means "not measured".
+    ("base_heading_hold_expiry_count", "base_heading_hold_expiry_count"),
+    ("base_heading_abs_at_swing_start", "base_heading_abs_at_swing_start"),
+    ("heading_recovery_count (gate first)", "heading_recovery_count"),
+    ("heading_recovery_spawn_yaw", "heading_recovery_spawn_yaw"),
+    ("heading_recovery_expiry_yaw", "heading_recovery_expiry_yaw"),
     ("base_roll_deg", "base_roll_deg"),
     ("base_pitch_deg", "base_pitch_deg"),
     ("foot_slip_speed", "foot_slip_speed"),
@@ -326,6 +333,7 @@ def main(cfg):
         traceback.print_exc()
         sys.stderr.flush()
         sys.stdout.flush()
+        raise
     finally:
         simulation_app.close()
 

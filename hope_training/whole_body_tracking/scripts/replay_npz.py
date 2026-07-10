@@ -96,7 +96,9 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     motion = MotionLoader(
         motion_file,
         torch.tensor([0], dtype=torch.long, device=sim.device),
-        sim.device,
+        articulation_body_names=robot.body_names,
+        selected_body_names=[robot.body_names[0]],
+        device=sim.device,
     )
     time_steps = torch.zeros(scene.num_envs, dtype=torch.long, device=sim.device)
 

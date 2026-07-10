@@ -136,7 +136,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # load previously trained model
     ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
-    ppo_runner.load(resume_path)
+    from whole_body_tracking.utils.ckpt_compat import load_actor_tolerant
+
+    trained_with_obs_norm = load_actor_tolerant(ppo_runner, resume_path)
 
     # obtain the trained policy for inference
     policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
@@ -144,14 +146,19 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # export policy to onnx/jit
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
 
-    export_motion_policy_as_onnx(
+    obs_norm_baked = export_motion_policy_as_onnx(
         env.unwrapped,
         ppo_runner.alg.policy,
-        normalizer=getattr(ppo_runner.alg.policy, "actor_obs_normalizer", None),
+        normalizer=ppo_runner.obs_normalizer if trained_with_obs_norm else None,
         path=export_model_dir,
         filename="policy.onnx",
     )
-    attach_onnx_metadata(env.unwrapped, args_cli.wandb_path if args_cli.wandb_path else "none", export_model_dir)
+    attach_onnx_metadata(
+        env.unwrapped, args_cli.wandb_path if args_cli.wandb_path else "none", export_model_dir,
+        obs_norm_baked=obs_norm_baked,
+        trained_with_obs_norm=trained_with_obs_norm,
+        source_checkpoint_path=resume_path,
+    )
     # reset environment
     obs, _ = env.get_observations()
     timestep = 0

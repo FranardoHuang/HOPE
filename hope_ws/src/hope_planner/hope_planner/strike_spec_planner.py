@@ -55,7 +55,7 @@ class StrikeSpec:
     # --- predicted outcome ---
     v_plus: np.ndarray        # outgoing ball velocity (m/s)
     omega_plus: np.ndarray    # outgoing ball spin (rad/s)
-    landing_xy: np.ndarray    # (2,) predicted first table-plane crossing (m)
+    landing_xy: np.ndarray    # (2,) predicted first physical table contact (ball center z=radius)
     landing_time: float       # flight time strike -> landing (s)
 
     # --- landing sensitivities (the control-precision budget) ---
@@ -98,7 +98,8 @@ def compute_net_clearance(
                          crosses the net plane in +x before landing / the prediction horizon
                          (then clears_net is False).
 
-    A net-plane crossing only counts if it happens BEFORE the first downward z=0 crossing;
+    A net-plane crossing only counts if it happens BEFORE the first downward
+    ball-center ``z=radius`` crossing;
     when both fall inside one Euler step the interpolation fractions order them.
 
     With predictor.config.dt_integrate_coarse > dt_integrate the cruise runs on RK4 steps
@@ -109,6 +110,7 @@ def compute_net_clearance(
     table = predictor.table
     net_x = table.net_x
     clear_z = table.net_height + predictor.physics.radius
+    contact_z = float(predictor.physics.radius)
     dt = predictor.config.dt_integrate
 
     p = np.asarray(p_strike, dtype=float).copy()
@@ -127,8 +129,8 @@ def compute_net_clearance(
             p_c, v_c = predictor._rk4_flight_step(p, v, omega, dt_c)
             event_possible = (
                 (p[0] < net_x <= p_c[0])
-                or p_c[2] <= 0.0
-                or min(p[2], p_c[2]) + min(v[2], v_c[2], 0.0) * dt_c <= 0.0
+                or p_c[2] <= contact_z
+                or min(p[2], p_c[2]) + min(v[2], v_c[2], 0.0) * dt_c <= contact_z
             )
             if not event_possible:
                 p, v = p_c, v_c
@@ -144,9 +146,12 @@ def compute_net_clearance(
                     dx = p_new[0] - p[0]
                     frac_net = float(np.clip((net_x - p[0]) / dx, 0.0, 1.0)) if dx > 1e-12 else 0.5
                 frac_land = None
-                if p[2] > 0.0 and p_new[2] <= 0.0:
+                if p[2] > contact_z and p_new[2] <= contact_z:
                     dz = p[2] - p_new[2]
-                    frac_land = float(np.clip(p[2] / dz, 0.0, 1.0)) if dz > 1e-12 else 0.5
+                    frac_land = (
+                        float(np.clip((p[2] - contact_z) / dz, 0.0, 1.0))
+                        if dz > 1e-12 else 0.5
+                    )
 
                 if frac_net is not None and (frac_land is None or frac_net <= frac_land):
                     z_at_net = p[2] + frac_net * (p_new[2] - p[2])
@@ -169,9 +174,12 @@ def compute_net_clearance(
             dx = p_new[0] - p[0]
             frac_net = float(np.clip((net_x - p[0]) / dx, 0.0, 1.0)) if dx > 1e-12 else 0.5
         frac_land = None
-        if p[2] > 0.0 and p_new[2] <= 0.0:
+        if p[2] > contact_z and p_new[2] <= contact_z:
             dz = p[2] - p_new[2]
-            frac_land = float(np.clip(p[2] / dz, 0.0, 1.0)) if dz > 1e-12 else 0.5
+            frac_land = (
+                float(np.clip((p[2] - contact_z) / dz, 0.0, 1.0))
+                if dz > 1e-12 else 0.5
+            )
 
         if frac_net is not None and (frac_land is None or frac_net <= frac_land):
             z_at_net = p[2] + frac_net * (p_new[2] - p[2])
@@ -292,7 +300,9 @@ class StrikeSpecPlanner:
         law ignores.
         """
         T = self.config.delta_t_flight
-        p_land = np.array([target_xy[0], target_xy[1], 0.0])
+        # p_ball is the ball CENTER; at physical table contact its lower edge
+        # reaches z=0 and its center is one radius above the surface.
+        p_land = np.array([target_xy[0], target_xy[1], self.physics.radius])
         v_out = (p_land - p_strike) / T - 0.5 * self.physics.g * T
 
         delta_v = v_out - v_ball

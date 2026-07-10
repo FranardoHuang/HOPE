@@ -7,7 +7,17 @@ from rsl_rl.runners.on_policy_runner import OnPolicyRunner
 
 from isaaclab_rl.rsl_rl import export_policy_as_onnx
 
-from whole_body_tracking.utils.exporter import attach_onnx_metadata, export_motion_policy_as_onnx
+from whole_body_tracking.utils.exporter import (
+    attach_onnx_metadata,
+    export_motion_policy_as_onnx,
+    is_empirical_normalizer,
+)
+from whole_body_tracking.utils.training_contract import (
+    CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY,
+    CHECKPOINT_CONTRACT_SCHEMA_KEY,
+    CHECKPOINT_CONTRACT_SHA_KEY,
+    TRAINING_CONTRACT_SCHEMA_VERSION,
+)
 
 
 class MyOnPolicyRunner(OnPolicyRunner):
@@ -19,39 +29,90 @@ class MyOnPolicyRunner(OnPolicyRunner):
 
             policy_path = path.split("model")[0]
             filename = policy_path.split("/")[-2] + ".onnx"
+            trained_with_obs_norm = bool(self.empirical_normalization)
+            normalizer = self.obs_normalizer if trained_with_obs_norm else None
             export_policy_as_onnx(
                 self.alg.policy,
-                normalizer=getattr(self.alg.policy, "actor_obs_normalizer", None),
+                normalizer=normalizer,
                 path=policy_path,
                 filename=filename,
             )
-            attach_onnx_metadata(self.env.unwrapped, wandb.run.name, path=policy_path, filename=filename)
+            attach_onnx_metadata(
+                self.env.unwrapped, wandb.run.name, path=policy_path, filename=filename,
+                obs_norm_baked=is_empirical_normalizer(normalizer),
+                trained_with_obs_norm=trained_with_obs_norm,
+                source_checkpoint_path=path,
+            )
             wandb.save(policy_path + filename, base_path=os.path.dirname(policy_path))
 
 
 class MotionOnPolicyRunner(OnPolicyRunner):
-    def __init__(self, env: VecEnv, train_cfg: dict, log_dir: str | None = None, device="cpu", registry_name=None):
+    def __init__(
+        self,
+        env: VecEnv,
+        train_cfg: dict,
+        log_dir: str | None = None,
+        device="cpu",
+        registry_name=None,
+        *,
+        training_contract_schema_version: int | None = None,
+        training_contract_sha256: str | None = None,
+        training_contract_lineage_exact: bool = False,
+    ):
         super().__init__(env, train_cfg, log_dir, device)
         self.registry_name = registry_name
+        self.training_contract_schema_version = training_contract_schema_version
+        self.training_contract_sha256 = training_contract_sha256
+        self.training_contract_lineage_exact = bool(training_contract_lineage_exact)
+        if (training_contract_schema_version is None) != (training_contract_sha256 is None):
+            raise ValueError("training contract schema and SHA256 must be supplied together")
+        if training_contract_schema_version is not None:
+            if int(training_contract_schema_version) != TRAINING_CONTRACT_SCHEMA_VERSION:
+                raise ValueError(
+                    f"unsupported training contract schema {training_contract_schema_version}; "
+                    f"expected {TRAINING_CONTRACT_SCHEMA_VERSION}"
+                )
+            digest = str(training_contract_sha256).strip().lower()
+            if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+                raise ValueError("training_contract_sha256 must be 64 lowercase hex characters")
+            self.training_contract_sha256 = digest
 
     def save(self, path: str, infos=None):
         """Save the model and training information."""
+        if self.training_contract_sha256 is not None:
+            if infos is None:
+                infos = {}
+            elif not isinstance(infos, dict):
+                raise TypeError("runner checkpoint infos must be a dict for contract binding")
+            else:
+                infos = dict(infos)
+            infos[CHECKPOINT_CONTRACT_SCHEMA_KEY] = int(
+                self.training_contract_schema_version
+            )
+            infos[CHECKPOINT_CONTRACT_SHA_KEY] = self.training_contract_sha256
+            infos[CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY] = (
+                1 if self.training_contract_lineage_exact else 0
+            )
         super().save(path, infos)
         if self.logger_type in ["wandb"]:
             import wandb
 
             policy_path = path.split("model")[0]
             filename = policy_path.split("/")[-2] + ".onnx"
-            # rsl_rl moved obs normalization onto the policy (actor_obs_normalizer); the runner no
-            # longer has self.obs_normalizer. Fall back to None (-> Identity in the exporter) if absent.
-            export_motion_policy_as_onnx(
+            trained_with_obs_norm = bool(self.empirical_normalization)
+            obs_norm_baked = export_motion_policy_as_onnx(
                 self.env.unwrapped,
                 self.alg.policy,
-                normalizer=getattr(self.alg.policy, "actor_obs_normalizer", None),
+                normalizer=self.obs_normalizer if trained_with_obs_norm else None,
                 path=policy_path,
                 filename=filename,
             )
-            attach_onnx_metadata(self.env.unwrapped, wandb.run.name, path=policy_path, filename=filename)
+            attach_onnx_metadata(
+                self.env.unwrapped, wandb.run.name, path=policy_path, filename=filename,
+                obs_norm_baked=obs_norm_baked,
+                trained_with_obs_norm=trained_with_obs_norm,
+                source_checkpoint_path=path,
+            )
             wandb.save(policy_path + filename, base_path=os.path.dirname(policy_path))
 
             # Link the input motion artifact(s) to this run (lineage bookkeeping only — a W&B API

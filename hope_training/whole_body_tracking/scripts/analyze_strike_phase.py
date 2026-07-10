@@ -55,6 +55,8 @@ import pathlib
 
 import numpy as np
 
+from racket_geometry_contract import RACKET_SITE_OFFSET_WRIST_M, rigid_point_velocity
+
 try:
     import yaml
 except ImportError:  # keep the script importable in minimal numpy-only shells
@@ -71,7 +73,7 @@ STRIKE_PLANE_X = 0.40      # HITTER fixed striking plane, 0.40 m in front of rob
 # Wrist -> blade-center mount transform. MUST match RacketTargetCommandCfg in
 # mdp/hope_commands.py (mount_offset / mount_quat). mount_quat is identity, so
 # only the position offset matters here.
-MOUNT_OFFSET = np.array([0.210211399202899, 0.0320784994676765, 0.0320358706296689])
+MOUNT_OFFSET = RACKET_SITE_OFFSET_WRIST_M
 # Training-parity clean strike velocity: centered FD of the blade FK position
 # over +-CLEAN_VEL_WINDOW frames (RacketTargetCommand clean_reference_strike_velocity).
 CLEAN_VEL_WINDOW = 2
@@ -164,7 +166,7 @@ def analyze(name, path, use_blade=True, grip_rot=None):
         # Blade point = wrist FK'd through the mount (matches RacketTargetCommand wrist_offset mode).
         offset_w = np.einsum("tij,j->ti", racket_R, MOUNT_OFFSET)          # (T,3)
         racket_w = P[:, RACKET_BODY] + offset_w                            # blade world pos
-        racket_v_w = V[:, RACKET_BODY] + np.cross(A[:, RACKET_BODY], offset_w)  # + omega x r
+        racket_v_w = rigid_point_velocity(V[:, RACKET_BODY], A[:, RACKET_BODY], offset_w)
     else:
         racket_w = P[:, RACKET_BODY]              # legacy: bare wrist point
         racket_v_w = V[:, RACKET_BODY]
@@ -176,14 +178,22 @@ def analyze(name, path, use_blade=True, grip_rot=None):
     lo = np.clip(np.arange(T) - W, 0, T - 1)
     hi = np.clip(np.arange(T) + W, 0, T - 1)
     clean_v_w = (racket_w[hi] - racket_w[lo]) / (2.0 * W / fps)
+    lo1 = np.clip(np.arange(T) - 1, 0, T - 1)
+    hi1 = np.clip(np.arange(T) + 1, 0, T - 1)
+    instant_fd_v_w = (racket_w[hi1] - racket_w[lo1]) / (2.0 / fps)
 
     # Express racket pos/vel/normal in the root (pelvis-yaw, origin at pelvis) frame.
     rel = racket_w - pelvis_xy                    # (T,3)
     racket_root = np.einsum("tij,tj->ti", np.transpose(Rroot, (0, 2, 1)), rel)
-    racket_v_root = np.einsum("tij,tj->ti", np.transpose(Rroot, (0, 2, 1)), racket_v_w)
+    # Stored body_lin_vel_w has two historical lineages (Isaac COM velocity vs
+    # old MuJoCo link-origin FD), so it cannot be the strike detector's truth
+    # without schema metadata.  Auto timing/direction always uses the centered
+    # FD of the SAME racket control-point position.  Keep racket_v_w in the
+    # returned diagnostics for raw cross-check/backward-compatible tooling.
+    racket_v_root = np.einsum("tij,tj->ti", np.transpose(Rroot, (0, 2, 1)), clean_v_w)
     normal_root = np.einsum("tij,tj->ti", np.transpose(Rroot, (0, 2, 1)), normal_w)
 
-    speed = np.linalg.norm(racket_v_w, axis=1)
+    speed = np.linalg.norm(clean_v_w, axis=1)
     vx = racket_v_root[:, 0]                       # along HOPE +X (forward)
     dist_plane = np.abs(racket_root[:, 0] - STRIKE_PLANE_X)
 
@@ -214,6 +224,7 @@ def analyze(name, path, use_blade=True, grip_rot=None):
         normal_root=normal_root, normal_w=normal_w, label=label, strike=auto_strike, auto_strike=auto_strike,
         fwd_peak=fwd_peak, speed_peak=int(np.argmax(speed)),
         racket_w=racket_w, racket_v_w=racket_v_w, clean_v_w=clean_v_w,
+        instant_fd_v_w=instant_fd_v_w,
         grip_applied=grip_rot is not None,
         point="blade" if use_blade else "wrist", annotation=None, annotation_key=None,
         annotation_phase=None, face_normal_reliable=True, selection_source="auto-unverified",
@@ -320,9 +331,19 @@ def report(info):
     print(f"      racket vx (+X)   = {info['vx'][s]:+.3f} m/s")
     print(f"      racket pos(root) = ({info['racket_root'][s,0]:+.3f}, {info['racket_root'][s,1]:+.3f}, {info['racket_root'][s,2]:+.3f})")
     print(f"      pos (WORLD)      = ({info['racket_w'][s,0]:+.3f}, {info['racket_w'][s,1]:+.3f}, {info['racket_w'][s,2]:+.3f})   <- YAML pos_range_per_clip center")
-    print(f"      vel (WORLD)      = ({info['racket_v_w'][s,0]:+.3f}, {info['racket_v_w'][s,1]:+.3f}, {info['racket_v_w'][s,2]:+.3f})")
+    print(f"      vel (stored diagnostic; point semantics may be legacy)"
+          f"= ({info['racket_v_w'][s,0]:+.3f}, {info['racket_v_w'][s,1]:+.3f}, {info['racket_v_w'][s,2]:+.3f})")
     print(f"      vel (WORLD,clean)= ({info['clean_v_w'][s,0]:+.3f}, {info['clean_v_w'][s,1]:+.3f}, {info['clean_v_w'][s,2]:+.3f})   "
           f"<- +-{CLEAN_VEL_WINDOW}-frame FD, training-parity; YAML vel_range_per_clip center")
+    v1 = info["instant_fd_v_w"][s]
+    v2 = info["clean_v_w"][s]
+    dv = float(np.linalg.norm(v1 - v2))
+    rel = dv / max(float(np.linalg.norm(v1)), 1.0e-9)
+    print(f"      vel (WORLD,+-1FD)= ({v1[0]:+.3f}, {v1[1]:+.3f}, {v1[2]:+.3f}); "
+          f"|clean-instant|={dv:.3f} m/s ({rel:.1%})")
+    if dv > 0.10 or rel > 0.05:
+        print("      ** SPEED-DEFINITION SENSITIVE: +-2 frames is an 80 ms average, not a "
+              "verified instantaneous contact speed; keep window/contact-time as an ablation axis. **")
     print(f"      dist to x=0.40   = {info['dist_plane'][s]:.3f} m")
     face_note = ""
     if not info.get("face_normal_reliable", True):

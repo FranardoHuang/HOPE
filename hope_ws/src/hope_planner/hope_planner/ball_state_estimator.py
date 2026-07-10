@@ -2,8 +2,8 @@
 
 Fits a 2nd-order polynomial to the most recent N position samples and
 differentiates analytically to obtain a smoothed position and velocity.
-The buffer is cleared on each detected table bounce so the polynomial
-never fits across the velocity discontinuity.
+The buffer is cleared on each detected table bounce or racket-impact-sized
+velocity jump so the polynomial never fits across a contact discontinuity.
 
 See HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md, Section 3.
 """
@@ -22,7 +22,9 @@ class BallStateEstimator:
     a least-squares polynomial fit to extract smoothed position and velocity.
 
     Bounce detection uses a three-sample pattern (descend -> contact -> rise)
-    to identify the actual table impact event and clear the buffer.
+    to identify a table impact. A second, geometry-independent detector compares
+    short secant velocities on either side of each candidate breakpoint; this
+    catches opponent/racket hits away from the table.
     """
 
     def __init__(self, config: PlannerConfig):
@@ -35,11 +37,71 @@ class BallStateEstimator:
         # enough measurements are collected.
         self._z_hist: List[Optional[float]] = [None, None, None]
         self._bounce_detected: bool = False
+        self._discontinuity_detected: bool = False
+        self._last_velocity_jump_mps: float = float("nan")
 
     def reset(self) -> None:
-        """Clear the estimation buffer (call on bounce detection)."""
+        """Clear the polynomial-fit buffer after a contact or stream reset."""
         self.t_buffer.clear()
         self.p_buffer.clear()
+        self._discontinuity_detected = False
+
+    def _velocity_discontinuity_tail(self) -> Optional[Tuple[List[float], List[np.ndarray], float]]:
+        """Return the post-jump tail when a contact-sized velocity jump is present.
+
+        For a candidate breakpoint, compare the displacement secant over ``k``
+        intervals before it with the secant over ``k`` intervals after it.  With
+        the default k=3 at 300 Hz these are two 10 ms averages.  Ballistic gravity
+        and venue drag change velocity by only a few tenths of a metre per second
+        over the combined 20 ms span; a racket impact changes it by several m/s.
+        The default 3 m/s threshold is therefore physical rather than a noise-fit
+        magic number.  Detection is delayed only k frames, and the returned tail
+        lets the caller discard every pre-impact sample while retaining the
+        already-observed post-impact samples.
+        """
+        k = int(getattr(self.config, "discontinuity_window", 3))
+        threshold = float(getattr(self.config, "discontinuity_velocity_jump_mps", 3.0))
+        max_spread = float(getattr(self.config, "discontinuity_segment_spread_mps", 2.5))
+        if (
+            k < 1
+            or not np.isfinite(threshold)
+            or threshold <= 0.0
+            or not np.isfinite(max_spread)
+            or max_spread <= 0.0
+        ):
+            return None
+        n_required = 2 * k + 1
+        if len(self.t_buffer) < n_required:
+            return None
+
+        ts = self.t_buffer[-n_required:]
+        ps = self.p_buffer[-n_required:]
+        dt_before = float(ts[k] - ts[0])
+        dt_after = float(ts[-1] - ts[k])
+        if dt_before <= 0.0 or dt_after <= 0.0:
+            return None
+
+        v_before = (ps[k] - ps[0]) / dt_before
+        v_after = (ps[-1] - ps[k]) / dt_after
+        jump = float(np.linalg.norm(v_after - v_before))
+        if not np.isfinite(jump) or jump < threshold:
+            return None
+
+        # Do not trigger on a candidate whose own before/after segment still
+        # contains the impact.  Per-interval velocities must agree with that
+        # segment's secant within the venue-noise allowance; otherwise wait for
+        # the centered breakpoint to acquire k genuinely post-impact frames.
+        before_dt = np.diff(np.asarray(ts[: k + 1], dtype=float))
+        after_dt = np.diff(np.asarray(ts[k:], dtype=float))
+        if np.any(before_dt <= 0.0) or np.any(after_dt <= 0.0):
+            return None
+        before_step_v = np.diff(np.asarray(ps[: k + 1]), axis=0) / before_dt[:, None]
+        after_step_v = np.diff(np.asarray(ps[k:]), axis=0) / after_dt[:, None]
+        before_spread = float(np.max(np.linalg.norm(before_step_v - v_before, axis=1)))
+        after_spread = float(np.max(np.linalg.norm(after_step_v - v_after, axis=1)))
+        if before_spread > max_spread or after_spread > max_spread:
+            return None
+        return list(ts[k:]), [p.copy() for p in ps[k:]], jump
 
     def push(self, t: float, p: np.ndarray) -> None:
         """Add a new position measurement.
@@ -51,6 +113,8 @@ class BallStateEstimator:
         p : np.ndarray, shape (3,)
             Ball position [x, y, z] in the HOPE canonical frame.
         """
+        self._discontinuity_detected = False
+
         # Update z history ring buffer
         self._z_hist[0] = self._z_hist[1]
         self._z_hist[1] = self._z_hist[2]
@@ -77,6 +141,20 @@ class BallStateEstimator:
         self.t_buffer.append(t)
         self.p_buffer.append(p.copy())
 
+        # A racket/opponent hit need not occur near the table, so the local-z
+        # bounce detector above cannot see it.  Test each centered breakpoint
+        # once k post-event samples exist, then keep only the breakpoint and
+        # post-event tail.  This prevents the first actionable plan after a hit
+        # from fitting one polynomial through both incoming and outgoing arcs.
+        discontinuity = self._velocity_discontinuity_tail()
+        if discontinuity is not None:
+            tail_t, tail_p, jump = discontinuity
+            self.reset()
+            self.t_buffer.extend(tail_t)
+            self.p_buffer.extend(tail_p)
+            self._discontinuity_detected = True
+            self._last_velocity_jump_mps = jump
+
         if len(self.t_buffer) > self.config.fit_window:
             self.t_buffer.pop(0)
             self.p_buffer.pop(0)
@@ -85,6 +163,16 @@ class BallStateEstimator:
     def bounce_detected(self) -> bool:
         """True if the most recent push() detected a table bounce."""
         return self._bounce_detected
+
+    @property
+    def discontinuity_detected(self) -> bool:
+        """True if the most recent push cleared a non-bounce velocity jump."""
+        return self._discontinuity_detected
+
+    @property
+    def last_velocity_jump_mps(self) -> float:
+        """Magnitude of the last detected before/after secant jump (m/s)."""
+        return self._last_velocity_jump_mps
 
     @property
     def ready(self) -> bool:

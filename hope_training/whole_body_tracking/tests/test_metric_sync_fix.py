@@ -94,6 +94,17 @@ def _make_rally_cmd(n, clip_ids=None, multiseg=True):
     cmd._rally_returns_acc = 0.0
     cmd._rally_starts_acc_c = {0: 0.0, 1: 0.0}
     cmd._rally_returns_acc_c = {0: 0.0, 1: 0.0}
+    cmd._swing_start_base_xy = torch.zeros(n, 2)
+    cmd._swing_start_pending = torch.zeros(n, dtype=torch.bool)
+    cmd._drift_n_acc = 0.0
+    cmd._drift_sum_acc = 0.0
+    cmd._drift_fwd_sum_acc = 0.0
+    cmd._station_offset_start_sum_acc = 0.0
+    cmd._heading_expiry_sum_acc = 0.0
+    cmd._heading_expiry_n_acc = 0.0
+    cmd._recovery_spawn_sum_acc = 0.0
+    cmd._recovery_expiry_sum_acc = 0.0
+    cmd._recovery_n_acc = 0.0
     clip_ids = torch.zeros(n, dtype=torch.long) if clip_ids is None else clip_ids
     cmd._prev_clip_id = clip_ids.clone()
     cmd._recover_from_clip = torch.full((n,), -1, dtype=torch.long)

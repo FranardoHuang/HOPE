@@ -5,6 +5,13 @@ Faithful port of scripts/csv_to_npz.py (same CSV layout, same 30->50 fps lerp/sl
 np.gradient / SO3 central-difference velocities, same HOPE-frame alignment via hope_frame_utils),
 with Isaac's articulation replay replaced by MuJoCo FK on the deploy MJCF.
 
+Kinematic point/body-order contract (schema 2): ``body_pos_w`` is the link/actor origin,
+while ``body_lin_vel_w`` is the center-of-mass velocity.  That mixed-looking
+pair is intentional and exactly matches Isaac Lab 2.1 ``ArticulationData`` /
+``MotionCommand``.  Older revisions differentiated ``body_pos_w`` and wrote a
+link-origin velocity instead; a perfect V5 pose then paid a spurious imitation
+tax (up to 0.99 m/s on the right wrist at the backhand strike).
+
 Isaac's npz body/joint ORDER is reproduced from two sources:
 - joint order: the donor ONNX metadata `joint_names` (the deploy contract, 31 names);
 - body order: discovered ONCE against a reference npz produced by the Isaac pipeline
@@ -30,6 +37,12 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hope_frame_utils import rotate_motion_to_hope_x  # noqa: E402
+from motion_kinematics_contract import (  # noqa: E402
+    BODY_LIN_VEL_POINT,
+    BODY_POS_POINT,
+    KINEMATICS_SCHEMA_VERSION,
+    metadata_arrays,
+)
 
 
 # ---------------------------------------------------------------- quaternion helpers (wxyz) --- #
@@ -183,6 +196,17 @@ class MjFK:
         self.mujoco.mj_forward(self.model, self.data)
         return self.data.xpos.copy(), self.data.xquat.copy()
 
+    def fk_with_com(self, base_pos, base_rot, dof_by_name):
+        """Return link pose plus world COM position for one frame.
+
+        MuJoCo ``xpos/xquat`` are body/link frames; ``xipos`` is the inertial
+        (center-of-mass) position.  Isaac Lab 2.1 exposes this exact split as
+        body_pos_w vs body_lin_vel_w, so new motion files differentiate xipos.
+        """
+
+        pos, quat = self.fk(base_pos, base_rot, dof_by_name)
+        return pos, quat, self.data.xipos.copy()
+
 
 def fk_series(fkm: MjFK, base_pos, base_rot, dof, dof_names):
     T = base_pos.shape[0]
@@ -193,6 +217,20 @@ def fk_series(fkm: MjFK, base_pos, base_rot, dof, dof_names):
         p, q = fkm.fk(base_pos[t], base_rot[t], dict(zip(dof_names, dof[t])))
         pos[t], quat[t] = p, q
     return pos, quat
+
+
+def fk_series_with_com(fkm: MjFK, base_pos, base_rot, dof, dof_names):
+    """Batched link poses and COM positions, preserving ``fk_series`` API."""
+
+    T = base_pos.shape[0]
+    nb = fkm.model.nbody
+    pos = np.zeros((T, nb, 3), dtype=np.float32)
+    quat = np.zeros((T, nb, 4), dtype=np.float32)
+    com = np.zeros((T, nb, 3), dtype=np.float32)
+    for t in range(T):
+        p, q, c = fkm.fk_with_com(base_pos[t], base_rot[t], dict(zip(dof_names, dof[t])))
+        pos[t], quat[t], com[t] = p, q, c
+    return pos, quat, com
 
 
 # ------------------------------------------------------------------- grip calibration -------- #
@@ -352,11 +390,14 @@ def main() -> int:
     else:
         dof_vel = dof_vel_csv[:, perm]
 
-    pos_all, quat_all = fk_series(fkm, base_pos, base_rot, dof, fkm.isaac_joint_names)
+    pos_all, quat_all, com_all = fk_series_with_com(
+        fkm, base_pos, base_rot, dof, fkm.isaac_joint_names
+    )
     body_pos = pos_all[:, cols]
     body_quat = quat_all[:, cols]
+    body_com = com_all[:, cols]
     dt = 1.0 / args.output_fps
-    body_lin = np.gradient(body_pos, dt, axis=0).astype(np.float32)
+    body_lin = np.gradient(body_com, dt, axis=0).astype(np.float32)
     body_ang = np.stack([so3_derivative(body_quat[:, b], dt) for b in range(body_quat.shape[1])], axis=1).astype(
         np.float32
     )
@@ -369,12 +410,16 @@ def main() -> int:
         "body_quat_w": body_quat.astype(np.float32),
         "body_lin_vel_w": body_lin,
         "body_ang_vel_w": body_ang,
+        **metadata_arrays(body_names=body_order),
     }
     if args.hope_frame == "on":
         log, report = rotate_motion_to_hope_x(log, theta_deg=None)
         print(f"[hope-frame] yaw {np.degrees(report.yaw_before_rad):+.2f} -> {np.degrees(report.yaw_after_rad):+.2f} deg")
     np.savez(args.output_file, **log)
-    print(f"[convert] {args.input_file} -> {args.output_file}: {dof.shape[0]} frames @ {args.output_fps} Hz")
+    print(
+        f"[convert] {args.input_file} -> {args.output_file}: {dof.shape[0]} frames @ {args.output_fps} Hz; "
+        f"kinematics_schema={KINEMATICS_SCHEMA_VERSION} pos={BODY_POS_POINT} lin_vel={BODY_LIN_VEL_POINT}"
+    )
     return 0
 
 

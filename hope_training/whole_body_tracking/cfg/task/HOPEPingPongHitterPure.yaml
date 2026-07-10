@@ -131,8 +131,8 @@ racket:
   #      env origin, not a jitter). Start ±0.40 y (the proven trained band); widen toward the
   #      paper's ±0.75 on resume once arrival is established.
   #   2. racket target on the striking plane FIXED RELATIVE TO THE STATION: pos_range_per_clip
-  #      is STATION-RELATIVE in this mode — x degenerate at 0.70 (both clips' blade reach ≈
-  #      0.699/0.706 m in front of the pelvis; the paper's "0.4 m" is a G1 number), y = per-swing
+  #      is STATION-RELATIVE in this mode — x degenerate at the audited 0.51 m plane (the former
+  #      0.70 m value exceeded the demo reach and induced a base lunge), y = per-swing
   #      non-overlapping bands centered on each clip's natural lateral reach (fh −0.409 /
   #      bh +0.185, half-width 0.25, 0.10 m gap at the fh/bh boundary), z = ABSOLUTE height
   #      bands centered on each clip's blade strike height (fh 0.82 / bh 1.03, half-width 0.15).
@@ -170,6 +170,10 @@ racket:
   forehand_on_negative_y: true
   mount_normal_axis: 1
   mount_normal_sign: 1.0
+  # Unified fh+bh uses opposite paddle faces. Without this table the backhand velocity-normal
+  # objective is geometrically unreachable (observed ~137 deg while pos/vel already pass).
+  # Order is motion_file order: [forehand red/+Y, backhand black/-Y].
+  mount_normal_sign_per_clip: [1.0, -1.0]
 
   # NO HER replay (paper samples fresh targets only).
   achieved_target_mix_prob: 0.0

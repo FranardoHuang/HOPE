@@ -53,10 +53,20 @@ def _load_module():
     return mod
 
 
-def _meta_bytes(grip_applied=True, rally_yaw_applied=True):
+def _meta_bytes(grip_applied=True, rally_yaw_applied=True, schema_version=2,
+                grip_per_clip=None, yaw_per_clip=None):
     """meta_json payload as the generator writes it (real JSON, loader-enforced flags)."""
-    return np.frombuffer(json.dumps({"grip_applied": grip_applied,
-                                     "rally_yaw_applied": rally_yaw_applied}).encode("utf-8"),
+    grip_per_clip = grip_per_clip or {"forehand": True, "backhand": True}
+    yaw_per_clip = yaw_per_clip or {"forehand": True, "backhand": True}
+    return np.frombuffer(json.dumps({"schema_version": schema_version,
+                                     "stage": "S1",
+                                     "face_frame": "mount_plusY_A",
+                                     "incoming_spin_mode": "zero",
+                                     "spin_units": "rad/s",
+                                     "grip_applied": grip_applied,
+                                     "grip_applied_per_clip": grip_per_clip,
+                                     "rally_yaw_applied": rally_yaw_applied,
+                                     "rally_yaw_applied_per_clip": yaw_per_clip}).encode("utf-8"),
                          dtype=np.uint8)
 
 
@@ -70,13 +80,14 @@ def _write_bank(path, forehand_q=3, backhand_q=2):
         "forehand/demanded_vel": rows(0, forehand_q, 100.0),
         "forehand/demanded_normal": rows(0, forehand_q, 1.0),
         "forehand/difficulty_deg": np.arange(forehand_q, dtype=np.float64) + 0.5,
+        "forehand/incoming_vel": rows(0, forehand_q, -3.0),
+        "forehand/incoming_spin": np.zeros((forehand_q, 3), dtype=np.float64),
         "backhand/contact_pos_env": np.array([0.52, -0.04, 1.05]),
         "backhand/demanded_vel": rows(1, backhand_q, 200.0),
         "backhand/demanded_normal": rows(1, backhand_q, 2.0),
         "backhand/difficulty_deg": np.arange(backhand_q, dtype=np.float64) + 20.5,
-        # extra generator keys the loader must ignore
-        "forehand/incoming_vel": rows(0, forehand_q, -3.0),
         "backhand/incoming_vel": rows(1, backhand_q, -3.0),
+        "backhand/incoming_spin": np.zeros((backhand_q, 3), dtype=np.float64),
     }
     np.savez(path, meta_json=_meta_bytes(), **flat)
     return flat
@@ -119,7 +130,7 @@ def flat(_bank_on_disk):
 
 @pytest.fixture
 def bank(qb, bank_path):
-    return qb.load_question_bank(bank_path)
+    return qb.load_question_bank(bank_path, allow_legacy=True)
 
 
 @pytest.fixture
@@ -129,9 +140,11 @@ def tmpdir(tmp_path):
 
 
 def test_load_shapes_keying_padding(qb, bank_path, flat):
-    bank = qb.load_question_bank(bank_path)
+    bank = qb.load_question_bank(bank_path, allow_legacy=True)
     # shared Q_max = 3 (forehand), per-clip counts kept
     assert bank.contact_pos.shape == (2, 3), bank.contact_pos.shape
+    assert bank.incoming_vel.shape == (2, 3, 3), bank.incoming_vel.shape
+    assert bank.incoming_spin.shape == (2, 3, 3), bank.incoming_spin.shape
     assert bank.demanded_vel.shape == (2, 3, 3), bank.demanded_vel.shape
     assert bank.demanded_normal.shape == (2, 3, 3), bank.demanded_normal.shape
     assert bank.difficulty_deg.shape == (2, 3), bank.difficulty_deg.shape
@@ -153,20 +166,25 @@ def test_select_fixed_point_and_matching_rows(qb, bank, flat):
     clip = torch.tensor([0, 0, 0, 1, 1, 1], dtype=torch.long)
     #                    q=0    q=1    q=2  |  q=0    q=1    q=1 (u->1 clamps below count=2)
     u = torch.tensor([0.0, 0.34, 0.99, 0.0, 0.51, 0.999999])
-    pos, vel, nrm, diff = qb.select_questions(bank, clip, u)
+    pos, incoming, spin, vel, nrm, diff = qb.select_questions(bank, clip, u)
     expected_q = [0, 1, 2, 0, 1, 1]
     names = ["forehand", "forehand", "forehand", "backhand", "backhand", "backhand"]
     for i, (name, q) in enumerate(zip(names, expected_q)):
         # position is ALWAYS the clip's fixed contact point, independent of q
         assert torch.allclose(pos[i], torch.tensor(flat[f"{name}/contact_pos_env"], dtype=torch.float32)), i
         # velocity and normal come from the SAME question row q
+        assert torch.allclose(incoming[i], torch.tensor(flat[f"{name}/incoming_vel"][q], dtype=torch.float32)), i
+        assert torch.allclose(spin[i], torch.tensor(flat[f"{name}/incoming_spin"][q], dtype=torch.float32)), i
         assert torch.allclose(vel[i], torch.tensor(flat[f"{name}/demanded_vel"][q], dtype=torch.float32)), i
         assert torch.allclose(nrm[i], torch.tensor(flat[f"{name}/demanded_normal"][q], dtype=torch.float32)), i
         assert abs(float(diff[i]) - float(flat[f"{name}/difficulty_deg"][q])) < 1e-6, i
     # padding is unreachable: every backhand draw stays below count 2
     u_sweep = torch.rand(512)
-    _, vel_b, _, _ = qb.select_questions(bank, torch.ones(512, dtype=torch.long), u_sweep)
+    _, incoming_b, spin_b, vel_b, _, _ = qb.select_questions(
+        bank, torch.ones(512, dtype=torch.long), u_sweep
+    )
     assert torch.all(vel_b[:, 0] >= 200.0), "a padding (zero) row leaked into backhand selection"
+    assert torch.all(incoming_b[:, 0] < 10.0) and torch.all(spin_b == 0.0)
     print("[ok] select: fixed contact point per clip, matching vel/normal/difficulty rows, no padding leak")
 
 
@@ -175,10 +193,12 @@ def test_loud_errors(qb, tmpdir):
     p1 = os.path.join(tmpdir, "missing_clip.npz")
     np.savez(p1, meta_json=_meta_bytes(),
              **{"forehand/contact_pos_env": np.zeros(3),
+                "forehand/incoming_vel": np.zeros((2, 3)),
+                "forehand/incoming_spin": np.zeros((2, 3)),
                 "forehand/demanded_vel": np.zeros((2, 3)),
                 "forehand/demanded_normal": np.zeros((2, 3))})
     try:
-        qb.load_question_bank(p1)
+        qb.load_question_bank(p1, allow_legacy=True)
         raise AssertionError("missing backhand clip did not raise")
     except KeyError:
         pass
@@ -186,13 +206,17 @@ def test_loud_errors(qb, tmpdir):
     p2 = os.path.join(tmpdir, "mismatched.npz")
     np.savez(p2, meta_json=_meta_bytes(),
              **{"forehand/contact_pos_env": np.zeros(3),
+                "forehand/incoming_vel": np.zeros((2, 3)),
+                "forehand/incoming_spin": np.zeros((2, 3)),
                 "forehand/demanded_vel": np.zeros((2, 3)),
                 "forehand/demanded_normal": np.zeros((3, 3)),
                 "backhand/contact_pos_env": np.zeros(3),
+                "backhand/incoming_vel": np.zeros((1, 3)),
+                "backhand/incoming_spin": np.zeros((1, 3)),
                 "backhand/demanded_vel": np.zeros((1, 3)),
                 "backhand/demanded_normal": np.zeros((1, 3))})
     try:
-        qb.load_question_bank(p2)
+        qb.load_question_bank(p2, allow_legacy=True)
         raise AssertionError("mismatched vel/normal shapes did not raise")
     except ValueError:
         pass
@@ -203,9 +227,13 @@ def test_loader_meta_enforcement(qb, tmpdir):
     """Banks without meta_json / non-JSON meta / flags not both true -> ValueError;
     allow_legacy=True is the explicit escape hatch (audit round 2)."""
     arrays = {"forehand/contact_pos_env": np.zeros(3),
+              "forehand/incoming_vel": np.ones((2, 3)),
+              "forehand/incoming_spin": np.zeros((2, 3)),
               "forehand/demanded_vel": np.ones((2, 3)),
               "forehand/demanded_normal": np.ones((2, 3)),
               "backhand/contact_pos_env": np.zeros(3),
+              "backhand/incoming_vel": np.ones((1, 3)),
+              "backhand/incoming_spin": np.zeros((1, 3)),
               "backhand/demanded_vel": np.ones((1, 3)),
               "backhand/demanded_normal": np.ones((1, 3))}
     cases = {
@@ -214,6 +242,9 @@ def test_loader_meta_enforcement(qb, tmpdir):
             repr({"grip_applied": True}).encode(), dtype=np.uint8)},
         "grip_off.npz": {"meta_json": _meta_bytes(grip_applied=False)},
         "no_rally.npz": {"meta_json": _meta_bytes(rally_yaw_applied=False)},
+        "old_schema.npz": {"meta_json": _meta_bytes(schema_version=1)},
+        "mixed_grip.npz": {"meta_json": _meta_bytes(
+            grip_per_clip={"forehand": True, "backhand": False})},
     }
     for fname, extra in cases.items():
         p = os.path.join(tmpdir, fname)
@@ -225,11 +256,188 @@ def test_loader_meta_enforcement(qb, tmpdir):
             pass
         bank = qb.load_question_bank(p, allow_legacy=True)   # explicit escape hatch loads
         assert bank.counts.tolist() == [2, 1]
-    # flags both true -> loads without the escape hatch
+    # Schema-v2 flags are no longer sufficient for a new run: v3 split/provenance/validation
+    # are mandatory. It remains loadable only through the explicit reproduction escape hatch.
     p_ok = os.path.join(tmpdir, "ok_meta.npz")
     np.savez(p_ok, meta_json=_meta_bytes(), **arrays)
-    assert qb.load_question_bank(p_ok).counts.tolist() == [2, 1]
+    with pytest.raises(ValueError, match="expected 3"):
+        qb.load_question_bank(p_ok)
+    assert qb.load_question_bank(p_ok, allow_legacy=True).counts.tolist() == [2, 1]
     print("[ok] loader meta: missing/repr/false-flag banks refused, allow_legacy escape hatch works")
+
+
+def _rows_for_split(qb, split, n, offset=0):
+    rows = []
+    i = int(offset)
+    while len(rows) < n:
+        row = np.array([-3.0 - 0.01 * i, 0.01 * i, -0.2], dtype=np.float64)
+        if qb.question_split(row) == split:
+            rows.append(row)
+        i += 1
+    return np.stack(rows)
+
+
+def _write_schema3_bank(path, qb, split="train", mutate_meta=None, mutate_arrays=None):
+    arrays = {}
+    clips = {}
+    clip_order = ["forehand", "backhand"]
+    for c, name in enumerate(("forehand", "backhand")):
+        incoming = _rows_for_split(qb, split, 3, offset=100 * c)
+        normal = np.tile(np.array([0.0, 1.0, 0.0]), (3, 1))
+        contact = np.array([0.5, -0.2 + 0.4 * c, 0.9])
+        clip_normal = np.array([0.0, 1.0, 0.0])
+        clip_vel = np.array([1.0, 0.1 * c, 0.2])
+        arrays.update({
+            f"{name}/contact_pos_env": contact,
+            f"{name}/clip_normal": clip_normal,
+            f"{name}/clip_vel": clip_vel,
+            f"{name}/incoming_vel": incoming,
+            f"{name}/incoming_spin": np.zeros((3, 3)),
+            f"{name}/demanded_vel": np.stack([
+                np.array([1.0 + i, 0.1 * c, 0.2]) for i in range(3)
+            ]),
+            f"{name}/demanded_normal": normal,
+            f"{name}/difficulty_deg": np.zeros(3),
+        })
+        clips[name] = {
+            "motion_basename": f"{name}.npz", "motion_sha256": "a" * 64,
+            "n_frames": 11, "anchor_frame": 5, "anchor_phase": 0.5,
+            "question_count": 3,
+            "grip_mode": "baked", "grip_rotation_matrix": None,
+            "rally_yaw_deg": 0.0,
+            "contact_pos_env": np.round(contact, 12).tolist(),
+            "clip_normal": np.round(clip_normal, 12).tolist(),
+            "clip_vel": np.round(clip_vel, 12).tolist(),
+        }
+    repo = qb.find_repo_root()
+    physics_sha = qb.sha256_file(os.path.join(repo, "configs", "ball_physics_venue.yaml"))
+    physics_contract = qb.runtime_physics_contract(repo)
+    physics_contract_sha = qb.canonical_sha256(physics_contract)
+    speed_range = [2.0, 5.0]
+    vy_max = 0.6
+    vz_range = [-2.0, 0.3]
+    landing_env = [0.4, 0.0]
+    near_x = -1.37
+    table_surface_z = 0.76
+    speed_budget = None
+    family = {
+        "contract": qb.SOURCE_FAMILY_CONTRACT, "stage": "S1",
+        "face_frame": "mount_plusY_A", "incoming_spin_mode": "zero",
+        "split_algorithm": qb.SPLIT_ALGORITHM,
+        "clip_order": clip_order,
+        "clips": {name: {
+            "motion_sha256": info["motion_sha256"],
+            "anchor_frame": info["anchor_frame"], "anchor_phase": info["anchor_phase"],
+            "grip_mode": info["grip_mode"],
+            "grip_rotation_matrix": info["grip_rotation_matrix"],
+            "rally_yaw_deg": info["rally_yaw_deg"],
+            "contact_pos_env": info["contact_pos_env"],
+            "clip_normal": info["clip_normal"],
+            "clip_vel": info["clip_vel"],
+        } for name, info in clips.items()},
+        "incoming": {"speed_range": speed_range, "vy_max": vy_max, "vz_range": vz_range},
+        "landing_env": landing_env,
+        "near_x": near_x,
+        "table_surface_z": table_surface_z,
+        "speed_budget": speed_budget,
+        "physics_sha256": physics_sha,
+        "physics_contract_sha256": physics_contract_sha,
+    }
+    meta = {
+        "schema_version": 3, "stage": "S1", "face_frame": "mount_plusY_A",
+        "incoming_spin_mode": "zero", "spin_units": "rad/s", "split": split,
+        "split_algorithm": qb.SPLIT_ALGORITHM, "clip_order": clip_order,
+        "speed_range": speed_range, "vy_max": vy_max, "vz_range": vz_range,
+        "landing_env": landing_env, "near_x": near_x,
+        "table_surface_z": table_surface_z, "speed_budget": speed_budget,
+        "source_family_contract": family,
+        "source_family_sha256": qb.canonical_sha256(family),
+        "physics_sha256": physics_sha,
+        "physics_contract": physics_contract,
+        "physics_contract_sha256": physics_contract_sha,
+        "validation": {"torch_closed_loop_pass": True, "net_clearance_all_pass": True,
+                       "max_landing_error_m": 0.01},
+        "grip_applied": True, "rally_yaw_applied": True,
+        "grip_applied_per_clip": {"forehand": True, "backhand": True},
+        "rally_yaw_applied_per_clip": {"forehand": True, "backhand": True},
+        "clips": clips,
+    }
+    if mutate_meta is not None:
+        mutate_meta(meta)
+    if mutate_arrays is not None:
+        mutate_arrays(arrays)
+    arrays["meta_json"] = np.frombuffer(json.dumps(meta).encode("utf-8"), dtype=np.uint8)
+    np.savez(path, **arrays)
+
+
+def test_schema3_split_provenance_and_closed_loop_fail_closed(qb, tmpdir):
+    assert qb.question_id(np.array([0.0, -0.0, 1.0])) == qb.question_id(
+        np.array([-0.0, 0.0, 1.0])
+    )
+    p = os.path.join(tmpdir, "train_v3.npz")
+    _write_schema3_bank(p, qb, split="train")
+    bank = qb.load_question_bank(p, expected_split="train")
+    assert bank.metadata["split"] == "train"
+    assert bank.source_path == os.path.abspath(p)
+    assert bank.counts.tolist() == [3, 3]
+    with pytest.raises(ValueError, match="caller requires 'exam'"):
+        qb.load_question_bank(p, expected_split="exam")
+
+    cases = {
+        "family_hash": (lambda m: m.__setitem__("source_family_sha256", "0" * 64), None,
+                        "source_family_contract/hash"),
+        "validation": (lambda m: m["validation"].__setitem__("max_landing_error_m", 0.11), None,
+                       "required finite <= 0.10"),
+        "anchor": (lambda m: m["clips"]["forehand"].__setitem__("anchor_frame", 4), None,
+                   "source-family provenance"),
+        "spin": (None, lambda a: a["forehand/incoming_spin"].__setitem__((0, 2), 1.0),
+                 "declares zero spin"),
+        "normal": (None, lambda a: a["forehand/demanded_normal"].__setitem__((0, 1), 2.0),
+                   "not unit length"),
+        "difficulty_range": (None, lambda a: a["forehand/difficulty_deg"].__setitem__(0, 181.0),
+                             "must lie in"),
+        "clip_normal": (None, lambda a: a["forehand/clip_normal"].__setitem__(1, 2.0),
+                        "must already be unit"),
+    }
+    for name, (mut_meta, mut_arrays, match) in cases.items():
+        bad = os.path.join(tmpdir, f"bad_{name}.npz")
+        _write_schema3_bank(bad, qb, mutate_meta=mut_meta, mutate_arrays=mut_arrays)
+        with pytest.raises((ValueError, KeyError), match=match):
+            qb.load_question_bank(bad, expected_split="train")
+
+    legacy = os.path.join(tmpdir, "legacy_v2.npz")
+    _write_bank(legacy)
+    with pytest.raises(ValueError, match="requires schema v3"):
+        qb.load_question_bank(legacy, allow_legacy=True, expected_split="train")
+
+
+def test_schema3_runtime_motion_and_phase_binding(qb, tmpdir):
+    files = []
+    clips = {}
+    for name, payload in (("forehand", b"motion-fh"), ("backhand", b"motion-bh")):
+        path = os.path.join(tmpdir, f"{name}.npz")
+        with open(path, "wb") as fh:
+            fh.write(payload)
+        files.append(path)
+        clips[name] = {
+            "motion_sha256": qb.sha256_file(path), "n_frames": 11,
+            "anchor_frame": 5,
+        }
+    meta = {"clip_order": ["forehand", "backhand"], "clips": clips}
+    qb.validate_runtime_motion_contract(meta, files, [11, 11], [0.5, 0.5])
+    # A one-clip backhand-only run used to fall through clip_id=0 and silently receive the
+    # forehand rows. Reversed two-clip loading was the same semantic corruption. Both must fail
+    # before the first question is selected.
+    with pytest.raises(ValueError, match="length mismatch"):
+        qb.validate_runtime_motion_contract(meta, [files[1]], [11], [0.5])
+    with pytest.raises(ValueError, match="loaded motion SHA"):
+        qb.validate_runtime_motion_contract(meta, list(reversed(files)), [11, 11], [0.5, 0.5])
+    with pytest.raises(ValueError, match="anchored at frame"):
+        qb.validate_runtime_motion_contract(meta, files, [11, 11], [0.4, 0.5])
+    with open(files[0], "ab") as fh:
+        fh.write(b"tampered")
+    with pytest.raises(ValueError, match="loaded motion SHA"):
+        qb.validate_runtime_motion_contract(meta, files, [11, 11], [0.5, 0.5])
 
 
 def test_face_command_obs_vector(qb):
@@ -437,7 +645,7 @@ def main():
         bank_path = os.path.join(tmpdir, "bank.npz")
         flat = _write_bank(bank_path)
         test_load_shapes_keying_padding(qb, bank_path, flat)
-        bank = qb.load_question_bank(bank_path)
+        bank = qb.load_question_bank(bank_path, allow_legacy=True)
         test_select_fixed_point_and_matching_rows(qb, bank, flat)
         test_loud_errors(qb, tmpdir)
         test_loader_meta_enforcement(qb, tmpdir)

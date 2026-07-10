@@ -23,6 +23,20 @@ from isaaclab.utils.math import (
     yaw_quat,
 )
 
+
+def _stand_start_yaw_samples(yaw_range, count: int, device):
+    """Return stand-start yaw samples, or ``None`` for the byte-identical [0, 0] default.
+
+    A degenerate non-zero range is a deterministic curriculum point, not an off switch.
+    Avoiding an RNG draw there also makes fixed-yaw evaluation exactly reproducible.
+    """
+    yaw_lo, yaw_hi = (float(yaw_range[0]), float(yaw_range[1]))
+    if yaw_lo == 0.0 and yaw_hi == 0.0:
+        return None
+    if yaw_lo == yaw_hi:
+        return torch.full((count,), yaw_lo, device=device)
+    return sample_uniform(yaw_lo, yaw_hi, (count,), device)
+
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
@@ -36,24 +50,226 @@ class MotionLoader:
     before: one segment spanning the whole motion, ``time_step_total`` unchanged.
     """
 
-    def __init__(self, motion_file, body_indexes: Sequence[int], device: str = "cpu"):
+    _KINEMATICS_SCHEMA = 2
+    _KINEMATICS_CORE_KEYS = (
+        "kinematics_schema_version", "body_pos_point", "body_lin_vel_point"
+    )
+    _KINEMATICS_BODY_NAMES_KEY = "body_names"
+
+    @staticmethod
+    def _meta_scalar(data, key: str) -> str:
+        raw = np.asarray(data[key]).reshape(-1)
+        if raw.size != 1:
+            raise ValueError(f"motion metadata {key} must be scalar, got {np.asarray(data[key]).shape}")
+        value = raw[0]
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+        return str(value)
+
+    @staticmethod
+    def _meta_body_names(data, key: str) -> tuple[str, ...]:
+        raw = np.asarray(data[key])
+        if raw.ndim != 1:
+            raise ValueError(f"motion metadata {key} must be one-dimensional, got {raw.shape}")
+        names = []
+        for value in raw.tolist():
+            if isinstance(value, bytes):
+                value = value.decode("utf-8")
+            names.append(str(value))
+        if not names or any(not name for name in names) or len(set(names)) != len(names):
+            raise ValueError(f"motion metadata {key} must contain unique non-empty names")
+        return tuple(names)
+
+    @staticmethod
+    def _fps_scalar(data, path: str) -> float:
+        raw = np.asarray(data["fps"])
+        if raw.size != 1:
+            raise ValueError(f"{path}: fps must be scalar, got shape {raw.shape}")
+        fps = float(raw.reshape(-1)[0])
+        if not math.isfinite(fps) or fps <= 0.0:
+            raise ValueError(f"{path}: fps must be finite and positive, got {fps!r}")
+        return fps
+
+    @staticmethod
+    def _validate_motion_array_shapes(
+        data, path: str, articulation_body_count: int
+    ) -> int:
+        """Validate the shared time axis and full-articulation body-column shape."""
+
+        expected_tail = {
+            "body_pos_w": (articulation_body_count, 3),
+            "body_quat_w": (articulation_body_count, 4),
+            "body_lin_vel_w": (articulation_body_count, 3),
+            "body_ang_vel_w": (articulation_body_count, 3),
+        }
+        arrays = {key: np.asarray(data[key]) for key in ("joint_pos", "joint_vel", *expected_tail)}
+        if arrays["joint_pos"].ndim != 2 or arrays["joint_vel"].shape != arrays["joint_pos"].shape:
+            raise ValueError(
+                f"{path}: joint_pos/joint_vel must have the same (T,J) shape, got "
+                f"{arrays['joint_pos'].shape}/{arrays['joint_vel'].shape}"
+            )
+        frame_count = int(arrays["joint_pos"].shape[0])
+        if frame_count <= 0:
+            raise ValueError(f"{path}: motion clip contains no frames")
+        for key, tail in expected_tail.items():
+            expected = (frame_count, *tail)
+            if arrays[key].shape != expected:
+                raise ValueError(f"{path}: {key} has shape {arrays[key].shape}, expected {expected}")
+        return frame_count
+
+    @classmethod
+    def _kinematics_contract(
+        cls, data, path: str, articulation_body_names: tuple[str, ...]
+    ) -> dict:
+        """Validate body point semantics without guessing from a filename.
+
+        Untagged historical Isaac clips remain loadable but exact-ineligible.
+        Untagged legacy MuJoCo/retime clips have a decisive content signature:
+        body_lin_vel_w == d(body_pos_w)/dt under meaningful angular motion.
+        Those are fail-closed because MotionCommand rewards COM velocity.
+        """
+
+        files = set(data.files)
+        present = [key in files for key in cls._KINEMATICS_CORE_KEYS]
+        if any(present) and not all(present):
+            raise ValueError(f"{path}: partial/malformed motion kinematics metadata")
+        if not any(present) and cls._KINEMATICS_BODY_NAMES_KEY in files:
+            raise ValueError(f"{path}: body_names exists without a kinematics schema")
+        if all(present):
+            schema_raw = np.asarray(data[cls._KINEMATICS_CORE_KEYS[0]]).reshape(-1)
+            if schema_raw.size != 1:
+                raise ValueError(
+                    f"{path}: kinematics_schema_version must be scalar, got "
+                    f"{np.asarray(data[cls._KINEMATICS_CORE_KEYS[0]]).shape}"
+                )
+            schema = int(schema_raw[0])
+            pos_point = cls._meta_scalar(data, cls._KINEMATICS_CORE_KEYS[1])
+            vel_point = cls._meta_scalar(data, cls._KINEMATICS_CORE_KEYS[2])
+            if schema not in (1, cls._KINEMATICS_SCHEMA) or pos_point != "link_origin":
+                raise ValueError(
+                    f"{path}: unsupported motion kinematics contract "
+                    f"schema={schema} pos={pos_point!r} vel={vel_point!r}"
+                )
+            if vel_point != "center_of_mass":
+                raise ValueError(
+                    f"{path}: body_lin_vel_point={vel_point!r}, but Isaac MotionCommand compares "
+                    "against COM velocity. Run scripts/migrate_motion_kinematics.py with an explicit "
+                    "--source-point; link-origin velocity must not enter formal training."
+                )
+            body_names = None
+            if cls._KINEMATICS_BODY_NAMES_KEY in files:
+                body_names = cls._meta_body_names(data, cls._KINEMATICS_BODY_NAMES_KEY)
+                if body_names != articulation_body_names:
+                    raise ValueError(
+                        f"{path}: body_names/order does not match the runtime articulation: "
+                        f"file={list(body_names)} runtime={list(articulation_body_names)}"
+                    )
+            if schema == cls._KINEMATICS_SCHEMA and body_names is None:
+                raise ValueError(f"{path}: schema-{schema} motion is missing body_names")
+            exact = schema == cls._KINEMATICS_SCHEMA and body_names is not None
+            return {
+                "schema_version": schema,
+                "body_pos_point": pos_point,
+                "body_lin_vel_point": vel_point,
+                "body_names": None if body_names is None else list(body_names),
+                "exact": exact,
+                "status": "declared_v2" if exact else "legacy_v1_unbound_body_order",
+            }
+
+        pos = np.asarray(data["body_pos_w"], dtype=np.float64)
+        lin = np.asarray(data["body_lin_vel_w"], dtype=np.float64)
+        ang = np.asarray(data["body_ang_vel_w"], dtype=np.float64)
+        fps = float(np.asarray(data["fps"]).reshape(-1)[0])
+        if pos.shape != lin.shape or ang.shape != lin.shape or len(pos) < 2 or fps <= 0.0:
+            raise ValueError(f"{path}: invalid legacy motion arrays for point-semantics audit")
+        link_fd = np.gradient(pos, 1.0 / fps, axis=0)
+        fd_max = float(np.max(np.abs(lin - link_fd)))
+        max_ang = float(np.max(np.linalg.norm(ang, axis=-1)))
+        if max_ang > 0.2 and fd_max <= 1.0e-4:
+            raise ValueError(
+                f"{path}: untagged body_lin_vel_w is numerically d(link-origin position)/dt "
+                f"(max residual {fd_max:.3e} m/s, max |omega| {max_ang:.2f} rad/s), but "
+                "MotionCommand rewards COM velocity. This is the pre-2026-07-10 V5/MuJoCo "
+                "converter signature. Migrate it explicitly with scripts/migrate_motion_kinematics.py "
+                "--source-point link_origin; refusing to train on the wrong point."
+            )
+        return {
+            "schema_version": None, "body_pos_point": None, "body_lin_vel_point": None,
+            "body_names": None,
+            "exact": False, "status": "legacy_unbound_assumed_com",
+            "link_fd_max_abs_mps": fd_max, "max_ang_radps": max_ang,
+        }
+
+    def __init__(
+        self,
+        motion_file,
+        body_indexes: Sequence[int],
+        *,
+        articulation_body_names: Sequence[str],
+        selected_body_names: Sequence[str],
+        device: str = "cpu",
+    ):
         files = [motion_file] if isinstance(motion_file, str) else list(motion_file)
-        assert len(files) >= 1, "MotionLoader needs at least one motion file"
+        if not files:
+            raise ValueError("MotionLoader needs at least one motion file")
+        articulation_names = tuple(str(name) for name in articulation_body_names)
+        selected_names = tuple(str(name) for name in selected_body_names)
+        if (not articulation_names or len(set(articulation_names)) != len(articulation_names)
+                or not selected_names or len(set(selected_names)) != len(selected_names)):
+            raise ValueError("runtime articulation/selected body names must be non-empty and unique")
+        indexes = [int(value) for value in (
+            body_indexes.detach().cpu().tolist()
+            if hasattr(body_indexes, "detach")
+            else list(body_indexes)
+        )]
+        if len(indexes) != len(selected_names):
+            raise ValueError(
+                f"selected body indexes/names disagree: {indexes} vs {list(selected_names)}"
+            )
+        if any(index < 0 or index >= len(articulation_names) for index in indexes):
+            raise ValueError(f"selected body index is outside articulation order: {indexes}")
+        resolved_selected = tuple(articulation_names[index] for index in indexes)
+        if resolved_selected != selected_names:
+            raise ValueError(
+                f"runtime selected body order mismatch: indexes resolve to {list(resolved_selected)}, "
+                f"configured={list(selected_names)}"
+            )
         jp, jv, bp, bq, bl, ba = [], [], [], [], [], []
         seg_lens = []
-        self.fps = None
+        self.kinematics_contracts = []
+        per_clip_fps = []
         for f in files:
-            assert os.path.isfile(f), f"Invalid file path: {f}"
+            if not os.path.isfile(f):
+                raise FileNotFoundError(f"Invalid motion file path: {f}")
             data = np.load(f)
-            if self.fps is None:
-                self.fps = data["fps"]
+            fps = self._fps_scalar(data, f)
+            per_clip_fps.append(fps)
+            frame_count = self._validate_motion_array_shapes(
+                data, f, len(articulation_names)
+            )
+            _kin = self._kinematics_contract(data, f, articulation_names)
+            self.kinematics_contracts.append(_kin)
+            if not _kin["exact"]:
+                print(
+                    f"[MotionLoader WARN] {f}: legacy motion lacks a schema-2 bound body order; "
+                    "allowed for checkpoint compatibility but formal lineage is exact-ineligible. "
+                    "Migrate/re-export the clip with kinematics schema 2. "
+                    f"audit={_kin}",
+                    flush=True,
+                )
             jp.append(torch.tensor(data["joint_pos"], dtype=torch.float32, device=device))
             jv.append(torch.tensor(data["joint_vel"], dtype=torch.float32, device=device))
             bp.append(torch.tensor(data["body_pos_w"], dtype=torch.float32, device=device))
             bq.append(torch.tensor(data["body_quat_w"], dtype=torch.float32, device=device))
             bl.append(torch.tensor(data["body_lin_vel_w"], dtype=torch.float32, device=device))
             ba.append(torch.tensor(data["body_ang_vel_w"], dtype=torch.float32, device=device))
-            seg_lens.append(jp[-1].shape[0])
+            seg_lens.append(frame_count)
+        first_fps = per_clip_fps[0]
+        if any(not math.isclose(value, first_fps, rel_tol=0.0, abs_tol=1.0e-12)
+               for value in per_clip_fps[1:]):
+            raise ValueError(f"motion clips have unequal fps values: {per_clip_fps}")
+        self.fps = first_fps
+        self.per_clip_fps = tuple(per_clip_fps)
         self.joint_pos = torch.cat(jp, dim=0)
         self.joint_vel = torch.cat(jv, dim=0)
         self._body_pos_w = torch.cat(bp, dim=0)
@@ -68,6 +284,7 @@ class MotionLoader:
         self.seg_start = torch.zeros(self.num_segments, dtype=torch.long, device=device)
         if self.num_segments > 1:
             self.seg_start[1:] = torch.cumsum(self.seg_len, dim=0)[:-1]
+        self.kinematics_contract_exact = all(item["exact"] for item in self.kinematics_contracts)
 
     @property
     def body_pos_w(self) -> torch.Tensor:
@@ -99,7 +316,21 @@ class MotionCommand(CommandTerm):
             self.robot.find_bodies(self.cfg.body_names, preserve_order=True)[0], dtype=torch.long, device=self.device
         )
 
-        self.motion = MotionLoader(self.cfg.motion_file, self.body_indexes, device=self.device)
+        self.motion = MotionLoader(
+            self.cfg.motion_file,
+            self.body_indexes,
+            articulation_body_names=self.robot.body_names,
+            selected_body_names=self.cfg.body_names,
+            device=self.device,
+        )
+        expected_fps = 1.0 / float(env.step_dt)
+        if not math.isfinite(expected_fps) or not math.isclose(
+            self.motion.fps, expected_fps, rel_tol=0.0, abs_tol=1.0e-9
+        ):
+            raise ValueError(
+                "motion fps must equal the policy rate exactly enough for one-frame-per-step "
+                f"playback: clips={list(self.motion.per_clip_fps)} policy_hz={expected_fps:.12g}"
+            )
         # GROUNDING preflight (2026-07-03): the actor obs consumes the RAW clip-world anchor quat,
         # and the racket-target boxes are planned in the +X-grounded frame — a clip that was never
         # re-grounded (frame-0 anchor yaw far from 0, e.g. registry v4 at ~+84 deg) trains a
@@ -230,8 +461,17 @@ class MotionCommand(CommandTerm):
 
     @property
     def in_hold(self) -> torch.Tensor:
-        """Bool mask: env is in the pre-swing hold (reference frozen at the swing's first frame)."""
-        return self.hold_counter > 0
+        """Bool mask for the *current control step's* pre-swing hold.
+
+        ``_update_command`` snapshots ``held`` and then decrements ``hold_counter``.  Looking only
+        at the post-decrement counter made the final frozen-reference step appear unheld to
+        rewards/terminations (an off-by-one reference death at release).  The metric stores that
+        snapshot; OR it with the counter so the contract is also correct immediately after a
+        reset/wrap resample, before the next update.
+        """
+        counter_hold = self.hold_counter > 0
+        metric_hold = self.metrics.get("in_hold")
+        return counter_hold if metric_hold is None else (counter_hold | metric_hold.bool())
 
     @property
     def joint_pos(self) -> torch.Tensor:
@@ -542,6 +782,9 @@ class MotionCommand(CommandTerm):
         # number of control steps ("the ball is not reaching yet"). Applies to resets AND wraps.
         lo, hi = self.cfg.hold_steps_range
         self.hold_counter[env_ids_t] = torch.randint(int(lo), int(hi) + 1, (len(env_ids_t),), device=self.device)
+        # A wrap can resample a new hold late inside _update_command. Publish its state now so
+        # downstream rewards/terminations on this same control step do not see the old swing mask.
+        self.metrics["in_hold"][env_ids_t] = (self.hold_counter[env_ids_t] > 0).float()
 
         # stagger (a): each env's FIRST true reset adds a uniform hold bias, spreading the swing/
         # strike phases of a same-instant reset cohort across ~one swing period. One-shot per env;
@@ -588,6 +831,15 @@ class MotionCommand(CommandTerm):
             default_root = self.robot.data.default_root_state[stand_ids].clone()
             default_root[:, :3] += self._env.scene.env_origins[stand_ids]
             default_root[:, 7:] = 0.0  # zero lin/ang velocity
+            # Optional heading-recovery curriculum: deploy follow-throughs can enter the
+            # recovery hold yawed, so square-only stand starts leave that state unseen.
+            yaw = _stand_start_yaw_samples(
+                self.cfg.stand_start_yaw_range, len(stand_ids), self.device
+            )
+            if yaw is not None:
+                zero = torch.zeros_like(yaw)
+                yaw_delta = quat_from_euler_xyz(zero, zero, yaw)
+                default_root[:, 3:7] = quat_mul(yaw_delta, default_root[:, 3:7])
             self.robot.write_root_state_to_sim(default_root, env_ids=stand_ids)
             self.robot.write_joint_state_to_sim(
                 self.robot.data.default_joint_pos[stand_ids],
@@ -605,6 +857,9 @@ class MotionCommand(CommandTerm):
             self.hold_counter[post_ids] = torch.clamp(
                 self.hold_counter[post_ids], min=int(self.cfg.post_swing_min_hold)
             )
+
+        # stand/post-start clamps may have promoted an initially zero draw to a real hold.
+        self.metrics["in_hold"][env_ids_t] = (self.hold_counter[env_ids_t] > 0).float()
 
         if len(rsi_ids) == 0:
             return
@@ -826,6 +1081,9 @@ class MotionCommandCfg(CommandTermCfg):
     hold_steps_range: tuple[int, int] = (0, 100)
     # Stand-started envs get at least this much hold (they must travel stand -> windup first).
     stand_start_min_hold: int = 25
+    # Uniform world-yaw perturbation (rad) for stand starts. Pair a nonzero range with a
+    # hold-only heading-recovery objective; (0, 0) preserves the legacy square start.
+    stand_start_yaw_range: tuple[float, float] = (0.0, 0.0)
     # --- A8 (Ace recipe): post-swing initial-state distribution ------------------------------
     # Fraction of TRUE episode resets initialized from a ring buffer of the policy's OWN
     # end-of-swing states (captured at every intra-episode clip wrap — envs that physically

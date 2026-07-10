@@ -52,9 +52,14 @@ def make_clip(T=81, contact=48, blade_step=0.02, joint_amp=3.0):
     bq[..., 0] = 1.0
     bl = np.gradient(bp.astype(np.float64), 1.0 / FPS, axis=0).astype(np.float32)
     ba = np.zeros_like(bp)
-    return {"fps": np.array([int(FPS)], dtype=np.int64), "joint_pos": q, "joint_vel": dq,
+    data = {"fps": np.array([int(FPS)], dtype=np.int64), "joint_pos": q, "joint_vel": dq,
             "body_pos_w": bp, "body_quat_w": bq, "body_lin_vel_w": bl,
-            "body_ang_vel_w": ba}, contact / (T - 1)
+            "body_ang_vel_w": ba}
+    data.update(v1.metadata_arrays(
+        body_names=[f"body_{index}" for index in range(NB)],
+        body_lin_vel_point="link_origin",
+    ))
+    return data, contact / (T - 1)
 
 
 LOOSE_VLIM = np.full(J, 100.0)

@@ -16,6 +16,8 @@ Gate: max FK error vs Isaac's actual pingpang_red_Link world pos < 1e-4 m.
 
 import numpy as np
 
+from racket_geometry_contract import RACKET_SITE_OFFSET_WRIST_M
+
 # ---------------------------------------------------------------------------
 # Rotation helpers (double precision, right-handed).
 # ---------------------------------------------------------------------------
@@ -70,7 +72,7 @@ _CHAIN = [
 
 # Fixed mount offset: pingpang_red_Link origin relative to right_wrist_yaw_Link
 # (right_hand_pingpang_joint is identity, so this is applied at wrist_yaw frame).
-_MOUNT = np.array([0.21021, 0.032078, 0.032036], dtype=np.float64)
+_MOUNT = RACKET_SITE_OFFSET_WRIST_M
 
 
 def racket_pos_pelvis(q_isaac_31) -> np.ndarray:

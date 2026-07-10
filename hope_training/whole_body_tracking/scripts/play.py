@@ -60,6 +60,8 @@ def _run_play(cfg, simulation_app):
     # R14 retiming is TRAIN-ONLY (export/replay must see the native-speed reference clock).
     if hasattr(env_cfg.commands, "motion") and hasattr(env_cfg.commands.motion, "speed_scale_range"):
         env_cfg.commands.motion.speed_scale_range = (1.0, 1.0)
+        if hasattr(env_cfg.commands.motion, "speed_scale_per_clip"):
+            env_cfg.commands.motion.speed_scale_per_clip = None
 
     agent_cfg = RslRlOnPolicyRunnerCfg(**runner_kwargs(OmegaConf.to_container(cfg.algo, resolve=True), str(cfg.task.experiment_name)))
     agent_cfg.device = str(cfg.device)
@@ -149,18 +151,31 @@ def _run_play(cfg, simulation_app):
     # needs the actor, so fall back to an actor-preserving partial load instead of dying.
     from whole_body_tracking.utils.ckpt_compat import load_actor_tolerant
 
-    load_actor_tolerant(ppo_runner, resume_path)
+    trained_with_obs_norm = load_actor_tolerant(ppo_runner, resume_path)
     policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
 
     # export the policy to ONNX next to the checkpoint (step 15)
-    export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    export_motion_policy_as_onnx(
+    export_model_dir = (
+        os.path.abspath(str(cfg.export_dir))
+        if cfg.get("export_dir", None)
+        else os.path.join(os.path.dirname(resume_path), "exported")
+    )
+    obs_norm_baked = export_motion_policy_as_onnx(
         env.unwrapped, ppo_runner.alg.policy,
-        normalizer=getattr(ppo_runner.alg.policy, "actor_obs_normalizer", None),
+        normalizer=ppo_runner.obs_normalizer if trained_with_obs_norm else None,
         path=export_model_dir, filename="policy.onnx",
     )
-    attach_onnx_metadata(env.unwrapped, str(wandb_path) if wandb_path else "none", export_model_dir)
+    attach_onnx_metadata(
+        env.unwrapped, str(wandb_path) if wandb_path else "none", export_model_dir,
+        obs_norm_baked=obs_norm_baked,
+        trained_with_obs_norm=trained_with_obs_norm,
+        source_checkpoint_path=resume_path,
+    )
     print(f"[INFO] Exported ONNX policy to: {export_model_dir}")
+
+    if bool(cfg.get("export_only", False)):
+        env.close()
+        return
 
     # Manual video capture: grab env.render() each step and encode to mp4 with imageio
     # (imageio-ffmpeg). Avoids gym RecordVideo's vec-env / flush quirks and reports exactly
@@ -226,6 +241,7 @@ def main(cfg):
         traceback.print_exc()
         sys.stderr.flush()
         sys.stdout.flush()
+        raise
     finally:
         simulation_app.close()
 

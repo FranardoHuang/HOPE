@@ -26,6 +26,8 @@ import argparse
 
 import numpy as np
 
+from motion_kinematics_contract import metadata_arrays
+
 from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser(description="Generate a static default-pose motion npz (no CSV, no wandb).")
@@ -112,6 +114,10 @@ def main():
         "body_lin_vel_w": np.zeros((T, B, 3), dtype=np.float32),
         "body_ang_vel_w": np.zeros((T, B, 3), dtype=np.float32),
     }
+    # Static zeros cannot reveal whether a velocity belongs to a link origin
+    # or its COM.  Declare the same schema-2 semantics as csv_to_npz.py rather
+    # than leaving this bootstrap clip permanently exact-ineligible.
+    log.update(metadata_arrays(body_names=robot.body_names))
 
     out = os.path.abspath(args_cli.output_file)
     os.makedirs(os.path.dirname(out), exist_ok=True)

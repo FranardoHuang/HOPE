@@ -84,6 +84,11 @@ import extend_stroke as es  # noqa: E402
 import synthesize_timing as st  # noqa: E402
 import audit_self_collision as asc  # noqa: E402  (mujoco import inside is guarded)
 from audit_motion_npz import ISAAC_JOINT_NAMES, _ranges, parse_urdf_limits  # noqa: E402
+from motion_kinematics_contract import (  # noqa: E402
+    KINEMATICS_METADATA_KEYS,
+    metadata_arrays,
+    read_metadata,
+)
 
 KNOWN_KEYS = st.KNOWN_KEYS
 LOCK_AFTER_CONTACT = 2          # lock [0, c+2]: contact row + clean-FD stencil rows c+1, c+2
@@ -255,6 +260,14 @@ def validate_npz(data: dict) -> tuple[np.ndarray, float]:
     q = np.asarray(data["joint_pos"], dtype=np.float64)
     if q.ndim != 2 or q.shape[1] != len(ISAAC_JOINT_NAMES):
         raise SystemExit(f"joint_pos shape {q.shape}, expected (T, {len(ISAAC_JOINT_NAMES)})")
+    meta = read_metadata(data)
+    if not meta.exact_motion_command_v2:
+        raise SystemExit(
+            "motion kinematics are not schema-2 link-pose/COM-velocity/body-order exact; "
+            "run migrate_motion_kinematics.py first (untagged files require an explicit "
+            "--source-point assertion). A stitched rewrite cannot safely mix an unknown "
+            "legacy velocity point with newly differentiated rows."
+        )
     fps = float(np.asarray(data["fps"]).reshape(-1)[0])
     return q, fps
 
@@ -595,8 +608,15 @@ class DoseScorer:
 
 
 # ----------------------------------------------------------------- npz reconstruction #
-def rebuild_npz_stitched(data: dict, q_out: np.ndarray, fkm, order_cols: list[int],
-                         s0: int, s1: int) -> tuple[dict, dict]:
+def rebuild_npz_stitched(
+    data: dict,
+    q_out: np.ndarray,
+    fkm,
+    order_cols: list[int],
+    s0: int,
+    s1: int,
+    body_order_names: list[str] | tuple[str, ...] | None = None,
+) -> tuple[dict, dict]:
     """Stitched rebuild: untouched rows stay BITWISE source; only rewritten rows get FK.
 
     joint_pos rows outside (s0, s1) exclusive = source bitwise (强于 v1 的整片重算);
@@ -620,6 +640,15 @@ def rebuild_npz_stitched(data: dict, q_out: np.ndarray, fkm, order_cols: list[in
     bq = np.array(data["body_quat_w"], dtype=np.float32, copy=True)
     base_pos = np.asarray(data["body_pos_w"], dtype=np.float64)[:, 0]
     base_quat = np.asarray(data["body_quat_w"], dtype=np.float64)[:, 0]
+
+    meta = read_metadata(data)
+    if not meta.exact_motion_command_v2:
+        raise SystemExit(
+            "stitched rebuild requires schema-2 COM velocities and bound body order; "
+            "migrate the source first"
+        )
+    if body_order_names is not None and tuple(body_order_names) != tuple(meta.body_names):
+        raise SystemExit("stitched rebuild body-order file disagrees with source schema body_names")
 
     hemi_flips = 0
     for t in changed:
@@ -649,7 +678,19 @@ def rebuild_npz_stitched(data: dict, q_out: np.ndarray, fkm, order_cols: list[in
         band = [lo - 1, hi + 1]
         sl = slice(lo - 1, hi + 2)
         jv[sl] = np.gradient(jp.astype(np.float64), dt, axis=0).astype(np.float32)[sl]
-        bl[sl] = np.gradient(bp.astype(np.float64), dt, axis=0).astype(np.float32)[sl]
+        # MotionCommand supervises Isaac's COM velocity, not link-origin
+        # velocity.  Reconstruct a COM-position path from the same q/root rows
+        # and differentiate that path before splicing the dirty band.  Using
+        # gradient(body_pos_w) here would silently reintroduce the legacy V5
+        # point mismatch inside the rewritten segment.
+        com_path = np.empty_like(bp, dtype=np.float64)
+        for t in range(jp.shape[0]):
+            _, _, com = fkm.fk_with_com(
+                base_pos[t], base_quat[t],
+                dict(zip(ISAAC_JOINT_NAMES, jp[t].astype(np.float64))),
+            )
+            com_path[t] = com[order_cols]
+        bl[sl] = np.gradient(com_path, dt, axis=0).astype(np.float32)[sl]
         ba[sl] = np.stack([ctn.so3_derivative(bq[:, b].astype(np.float64), dt)
                            for b in range(bq.shape[1])], axis=1).astype(np.float32)[sl]
 
@@ -664,6 +705,12 @@ def rebuild_npz_stitched(data: dict, q_out: np.ndarray, fkm, order_cols: list[in
     out = {"fps": np.array([int(round(fps))], dtype=np.int64),
            "joint_pos": jp, "joint_vel": jv, "body_pos_w": bp, "body_quat_w": bq,
            "body_lin_vel_w": bl, "body_ang_vel_w": ba}
+    # Preserve migration lineage, but replace the active schema declaration
+    # with the semantics of the arrays generated above.
+    for key in KINEMATICS_METADATA_KEYS:
+        if key in data:
+            out[key] = np.array(data[key], copy=True)
+    out.update(metadata_arrays(body_names=meta.body_names))
     acc = dict(changed_frames=changed, n_changed=len(changed),
                vel_dirty_band=band,
                hemi_flips=hemi_flips, hemi_bad_adjacent=hemi_bad,
@@ -902,6 +949,11 @@ def main(argv=None) -> int:
                          f"{data['body_pos_w'].shape[1]} bodies")
     if order[0] != "pelvis_link":
         raise SystemExit(f"body column 0 is {order[0]!r}, expected 'pelvis_link'")
+    source_body_names = read_metadata(data).body_names
+    if source_body_names is None or tuple(order) != tuple(source_body_names):
+        raise SystemExit(
+            "--body-order must exactly match the source schema-2 body_names before FK rewrite"
+        )
 
     # --- C 在环: self-collision gate on the rewrite domain ---------------------------
     sm = asc.load_selfcol_model(args.mjcf)
@@ -951,7 +1003,9 @@ def main(argv=None) -> int:
     fkm = ctn.MjFK(args.mjcf, ISAAC_JOINT_NAMES)
     names = fkm.body_names()
     order_cols = [names.index(n) for n in order]
-    out, acc = rebuild_npz_stitched(data, q_out, fkm, order_cols, s0, s1)
+    out, acc = rebuild_npz_stitched(
+        data, q_out, fkm, order_cols, s0, s1, body_order_names=order
+    )
     acc["contract"] = verify_output_contract(data, out, c, s0, s1)   # fail-loud before write
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     np.savez(args.output, **out)
