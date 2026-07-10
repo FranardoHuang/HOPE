@@ -75,6 +75,11 @@ the commands and diagnostic/exact boundary are in
 The historical M3f/M2/G1 canary must pass the explicit inexact flag in both
 simulators and remain non-bookable. A clean schedule/question-order match is a
 ruler acceptance test, not permission to rename those checkpoints exact.
+The CPU BankExam now locates its standalone question-bank loader from the
+checkout; it needs no Isaac task-package import and no manually exported
+`HOPE_STAGE1_QB`. A temporary diagnostic install of `toml==0.10.2` was made in
+Pod1's mjeval venv on 2026-07-11, but it is not a reproducible dependency and
+is not required on a fresh Pod.
 
 ## Layout And Per-User Convention
 

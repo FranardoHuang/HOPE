@@ -332,8 +332,8 @@ Three independent utilities were retained from the snapshot:
 
 The shared schedule and adapter tests are reproducible from
 `docs/operations/build_and_test.md`. Local verification on 2026-07-11 passed
-`67` adapter/audit tests with one optional Torch parity skip, `82` formal CPU
-contract tests, and `138` unique tests in their combined contract run with the
+`67` adapter/audit tests with one optional Torch parity skip, `84` formal CPU
+contract tests, and `140` unique tests in their combined contract run with the
 same one optional skip. M2's Isaac leg is now verified below; Pod M3f/G1 and
 the companion same-paper MuJoCo legs are still required, so this gate remains
 `Partial` and historical checkpoints remain diagnostic-only.
@@ -384,3 +384,13 @@ quota-10 paper then completed all 20 attempts with deterministic nonzero holds,
 This is successful runtime acceptance evidence for the historical M2 Isaac
 leg, but `evaluation_contract_exact=false`; M3f/G1 and the same-paper MuJoCo
 legs remain required before this gate can move beyond `Partial`.
+
+M2 then advanced to the fixed 50-per-side slice. The first execution was
+discarded because a concurrent task fast-forwarded the checkout during the
+cell, so its end-of-run source hashes could not prove the code that had been
+loaded. The rerun held `c69ff13` fixed and produced 100 finalized uncensored
+rows with the supplied schedule SHA
+`9d1a1d601b098f93ab151a9d9dfabf6a92a81b4b2896230bfebf7483e20324cd`:
+100/100 exact reaches and hits, 86/100 returns (forehand 36/50, backhand 50/50),
+no fall and no guard reset. Valid JSON SHA:
+`723322b469b105282506fd7b2536e79bf6cd24e338cecd50536296f773015a01`.

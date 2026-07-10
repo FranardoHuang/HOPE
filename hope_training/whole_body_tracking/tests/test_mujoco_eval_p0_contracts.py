@@ -42,6 +42,28 @@ def test_exact_strike_clock_is_post_step_and_holds_stay_pinned():
         M.post_step_time_to_strike(0.1, 0.0, clock_advances=True)
 
 
+def test_hold_protocol_scope_is_shared_by_main_and_rollout_and_bank_always_holds():
+    sampler = SimpleNamespace(schedule=())
+    assert M.training_hold_protocol_active(
+        reset_mode="multiswing", deploy_faithful_cfg=None, venue_sampler=None
+    )
+    assert M.training_hold_protocol_active(
+        reset_mode="teleport", deploy_faithful_cfg=None, venue_sampler=sampler
+    )
+    assert not M.training_hold_protocol_active(
+        reset_mode="multiswing", deploy_faithful_cfg={}, venue_sampler=None
+    )
+    assert not M.training_hold_protocol_active(
+        reset_mode="teleport", deploy_faithful_cfg=None, venue_sampler=None
+    )
+
+
+def test_bank_loader_resolves_standalone_module_without_isaac_package_import():
+    path = Path(M.stage1_question_bank_module_path(ROOT))
+    assert path.name == "stage1_question_bank.py"
+    assert path.is_file()
+
+
 def test_rollout_wires_post_step_clock_before_metrics_and_uses_separate_noise_rng():
     source = inspect.getsource(M.run_rollout)
     physics = source.index("robot.apply_pd_and_step")

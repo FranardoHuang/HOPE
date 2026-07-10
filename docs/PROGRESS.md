@@ -19,8 +19,8 @@ Use this file for short project-state updates that future humans and agents need
   hold-aware termination-contract v3, explicitly gated legacy train-bank
   loading/hold-guard overrides to historical diagnostics, and made tolerant
   checkpoint loading fail on missing actor keys. Local verification passed 67
-  adapter/audit tests with one optional Torch skip, 82 formal CPU tests, and
-  138 unique tests in
+  adapter/audit tests with one optional Torch skip, 84 formal CPU tests, and
+  140 unique tests in
   the combined run with the same optional skip. M2 now has an accepted
   diagnostic Isaac leg; M3f/G1 and the same-paper MuJoCo legs remain the next
   acceptance steps. No result has been promoted from old scorecards.
@@ -75,6 +75,23 @@ Use this file for short project-state updates that future humans and agents need
   finite `std>=0`, finite `eps>=0`, and elementwise `std+eps>0`; a regression
   accepts epsilon-protected zeros and rejects an unprotected zero divisor.
   No raw-observation bypass or partial score was used.
+- M2 advanced to the fixed 50-per-side Isaac slice. An initial 100-row run was
+  deliberately invalidated because another Pod task fast-forwarded the shared
+  checkout while the cell was live, making source provenance unprovable. The
+  clean rerun froze checkout `c69ff13`, matched schedule SHA
+  `9d1a1d60...324cd` and all ordered IDs, and emitted 100 finalized uncensored
+  rows: 100/100 exact reaches/hits, 86/100 returns, forehand 36/50 and backhand
+  50/50, with no falls or guard resets. Valid result JSON SHA:
+  `723322b4...15a01`. The invalidated directory is not evidence.
+- The M2 MuJoCo q1 startup next found two evaluator-only integration defects
+  before rollout: execution-contract assembly referenced a hold-protocol local
+  that existed only inside `run_rollout`, and the standalone CPU evaluator
+  depended on an ambient `HOPE_STAGE1_QB` variable to avoid importing the
+  Isaac task package. Hold semantics now come from one pure helper in both
+  scopes; BankExam resolves and SHA-binds the current checkout's standalone
+  loader automatically. Pod1 briefly received `toml==0.10.2` while diagnosing
+  the accidental package path, but the fixed evaluator does not require that
+  package or any additional Isaac dependency in the mjeval environment.
 - Moved the stale local `main` to `origin/main@ba998c4`, then rebased the
   selective port onto the newer `origin/main@caf4a4e` Gate-3 update before
   publication.  The previously uncommitted Phase-1 work is preserved intact on

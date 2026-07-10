@@ -151,6 +151,10 @@ atomic question IDs and an exact per-clip quota; both simulator legs must emit
 the same schedule SHA and ordered IDs. `hold_steps=H` means exactly `H` policy
 actions on the ready-stand reference followed by one action on raw clip frame
 0; this release-frame rule is hashed into the schedule artifact.
+For MuJoCo BankExam the execution contract also records the SHA of the exact
+standalone `stage1_question_bank.py` loader selected from the current checkout.
+This keeps exam validation independent of Isaac package imports and ambient
+`HOPE_STAGE1_QB` shell state.
 
 The Isaac companion evaluator does not add an actor term or change the action
 contract. It restores the saved train-split command, performs one nominal

@@ -51,8 +51,9 @@ model_13599.pt ──play.py 原生导出(isaac venv,占一个 GPU 槽 ~4 分钟
   噪声 std(learned_std.npy),缺前者模型吃未归一化观测必得 ~0 分,缺后者评估器直接 FATAL。
   一条命令齐活:`make_std_sidecar.py --checkpoint <model_N.pt>`(两个文件都落到 exported/)。
 - **bank 题源考卷(阶段 1 正式卷)**:`--target-source bank --exam-bank <schema-v3 exam npz>` +
-  显式 `--strike-phase-per-clip`;mjeval venv 下设 `HOPE_STAGE1_QB=<stage1_question_bank.py 路径>`
-  (绕过 isaaclab 包链);分母报表(kept/asked/锥内比例/难度中位)开头自动打印,入账连它一起抄。
+  显式 `--strike-phase-per-clip`;评估器会自动绑定当前 checkout 的
+  `stage1_question_bank.py`,mjeval venv 不需要 Isaac 包链,也不应手工设置
+  `HOPE_STAGE1_QB`;分母报表(kept/asked/锥内比例/难度中位)开头自动打印,入账连它一起抄。
 - **`--qdes-clamp` 建议一律开**(人话:考卷把动作剪到关节限位,跟训练和真机部署一个规矩;不开的话
   考卷是三方里唯一不剪的,会错放"骑剪切板"策略/错杀靠剪切的健康策略——fixE 复核 07-08 定的);
   开没开都会打在报告头(`qdes_clamp=ON/OFF`),入账时连状态一起抄。默认关=老读数可比性不破。

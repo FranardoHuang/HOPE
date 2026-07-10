@@ -519,6 +519,29 @@ def resolve_ready_state_mode(requested, *, target_source, deploy_faithful,
     return mode
 
 
+def training_hold_protocol_active(*, reset_mode, deploy_faithful_cfg, venue_sampler):
+    """One source of truth for hold-aware tracking guards in main and rollout scopes."""
+
+    multiswing = reset_mode == "multiswing" and deploy_faithful_cfg is None
+    bank_schedule = bool(
+        venue_sampler is not None and hasattr(venue_sampler, "schedule")
+    )
+    return bool(multiswing or bank_schedule)
+
+
+def stage1_question_bank_module_path(wbt_root):
+    """Return the standalone bank loader without importing the Isaac task package."""
+
+    path = os.path.join(
+        os.path.abspath(wbt_root),
+        "source", "whole_body_tracking", "whole_body_tracking", "tasks", "tracking", "mdp",
+        "stage1_question_bank.py",
+    )
+    if not os.path.isfile(path):
+        raise SystemExit(f"[FATAL] standalone stage1 question-bank loader not found: {path}")
+    return path
+
+
 def materialize_ready_state_contract(robot, refs_table, seg_start, mode, action_dim=31):
     """Exercise the real reset path once and return its content-addressed contract."""
     zero_action = np.zeros(int(action_dim), dtype=np.float64)
@@ -2459,7 +2482,9 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
     multiswing = (reset_mode == "multiswing") and (df is None)
     bank_schedule = bool(venue_sampler is not None and hasattr(venue_sampler, "schedule"))
     one_question_reset = bool(bank_schedule and bank_one_question_reset)
-    training_hold_protocol = bool(multiswing or bank_schedule)
+    training_hold_protocol = training_hold_protocol_active(
+        reset_mode=reset_mode, deploy_faithful_cfg=df, venue_sampler=venue_sampler
+    )
     require_contract(
         isinstance(ready_state_contract, dict)
         and is_sha256(ready_state_contract.get("sha256", "")),
@@ -4563,6 +4588,7 @@ def main():
     venue_sampler = None
     shared_schedule_artifact = None
     exam_bank_sha_before = None
+    stage1_qb_path = None
     if args.target_source == "bank":
         exam_bank_sha_before = sha256_file(args.exam_bank)
         formal_bank_fields_ok = (
@@ -4589,6 +4615,11 @@ def main():
                 "[mj-sim2sim] WARNING: ONNX has no immutable train-bank/checkpoint binding; "
                 "evaluation_contract_exact=false"
             )
+        stage1_qb_path = stage1_question_bank_module_path(wbt)
+        # The loader module itself is NumPy/Torch-only, but importing it through the task package
+        # pulls Isaac Lab. Bind the current checkout's standalone module explicitly so the CPU
+        # evaluator never depends on an ambient HOPE_STAGE1_QB shell variable.
+        os.environ["HOPE_STAGE1_QB"] = stage1_qb_path
         import venue_ball_sampler as _vbs   # sibling module (scripts/ is on sys.path, top of file)
         kw = {}
         if args.venue_table_near_x is not None:
@@ -4758,7 +4789,14 @@ def main():
                 if shared_schedule_artifact is not None
                 else "legacy-sampler-unspecified"
             ),
-            "tracking_guards_ignored_during_hold": bool(training_hold_protocol),
+            "tracking_guards_ignored_during_hold": training_hold_protocol_active(
+                reset_mode=reset_mode,
+                deploy_faithful_cfg=df_cfg,
+                venue_sampler=venue_sampler,
+            ),
+            "stage1_question_bank_loader_sha256": (
+                sha256_file(stage1_qb_path) if stage1_qb_path is not None else None
+            ),
             "episode_length_s": float(episode_length_s),
             "max_episode_control_steps": int(max_ep_len),
             "termination_anchor_pos_z_m": float(TERM_ANCHOR_POS_Z),

@@ -626,6 +626,12 @@ therefore requires finite `std>=0`, finite `eps>=0`, and elementwise
 `std+eps>0`; never delete the sidecar or feed raw observations to get around a
 normalization error.
 
+The BankExam entry point resolves the current checkout's dependency-light
+`stage1_question_bank.py` automatically, exports that exact path to the
+sampler process and binds the loader SHA into the execution contract. Do not
+install Isaac packages into the MuJoCo environment or rely on a stale
+`HOPE_STAGE1_QB` value.
+
 MuJoCo consumes the same paper and uses the same authoritative NumPy scorer:
 
 ```bash

@@ -190,7 +190,7 @@ the physics-hash-bound `venue_ball_sampler.py`:
   and are recorded as an inexact reason.
 
 Dependency-light verification on 2026-07-11 passed `67` adapter/audit tests
-with one optional Torch parity skip, `82` formal CPU contract tests and `138`
+with one optional Torch parity skip, `84` formal CPU contract tests and `140`
 unique tests in the combined contract run with the same optional skip. This is
 implementation evidence, not a gate pass:
 the shared-paper Pod canary and question-order/hash equality across both
@@ -207,6 +207,15 @@ under the saved `(obs-mean)/(std+eps)` implementation with `eps=1e-2`.
 MuJoCo now accepts finite non-negative std only when every `std+eps` divisor is
 strictly positive; negative/non-finite scales and unprotected zeros remain
 fatal. A rerun is required, and cross-simulator canary status remains pending.
+
+The next MuJoCo pre-rollout attempt exposed a main/rollout scope error in
+`training_hold_protocol` and an avoidable dependency on the shell variable
+`HOPE_STAGE1_QB`. One pure helper now derives hold-aware guard semantics in
+both scopes. BankExam also resolves the current checkout's dependency-light
+`stage1_question_bank.py` directly and records its SHA in the execution
+contract, rather than importing the Isaac task package or trusting ambient
+shell state. Both failures occurred before rollout and produced no score; the
+same-paper rerun remains required.
 
 ```bash
 python3 -m pytest -q \
