@@ -315,9 +315,11 @@ velocity errors — same weights, wrong baked references.)
 The deploy-faithful behavioral gate: nominal-stand start, no teleports, fall-only
 termination. **PASS = falls 0, completion 1.0 per clip, high composite.**
 
-> **[110-D baseline] Gate 1 training-side validation = Isaac `eval_deterministic`, NOT MuJoCo yet**
-> — the `mujoco_eval_onnx.py` 110-D branch is incomplete (asserts on 110-D obs). For `model_12200`
-> the deterministic (deploy-path, pure-mean) validation was run in Isaac:
+> **[110-D baseline] MuJoCo support is now implemented.** The historical `model_12200`
+> result below was nevertheless produced only by Isaac `eval_deterministic` and must not be
+> relabelled as a MuJoCo score. Fresh formal 110-D grading uses the immutable schedule, common
+> MJCF `stand` ready state, all-attempt denominator and schema-v3 model/plant contract. The
+> historical command was:
 > ```bash
 > hope_isaac_py scripts/eval_deterministic.py task=HOPEPingPongHitterPure algo=ppo headless=true \
 >   num_envs=256 +steps=1200 +tail=400 '+noise_scales=[0.0,0.05,0.1]' \
@@ -326,7 +328,7 @@ termination. **PASS = falls 0, completion 1.0 per clip, high composite.**
 > `model_12200` (baseline, 2026-07-07): composite **0.9936** (fh 0.996 / bh 0.992), pos err 2.4 cm,
 > vel err 0.18, pos/vel/normal pass all > 0.99, pre-strike fall 0.5 %, post 0.1 % — the best of the
 > 12000–12400 window (all clustered 0.982–0.994; it won on composite AND lowest fall rate). TODO:
-> finish the `mujoco_eval_onnx.py` 110-D branch so the cross-sim deploy-faithful gate also runs here.
+> re-export a fresh schema-v3 110-D artifact and run BankExam before promoting this lineage.
 >
 > **[x-LOCKED generation, 2026-07-08] The task itself is now x-plane-locked** —
 > `HOPEPingPongHitterPure.yaml` (+ the mirrored env-cfg default) pins `base_target_x_range: [0,0]`,
@@ -1144,7 +1146,7 @@ controller fights our runner over the motors. Robot supported per §9.2c's safet
 #  Re-square the robot to +x before EVERY 'm', not just the first — heading is load-bearing
 #  for the 110 world-frame obs, and `PLANNER: yawed` rejects until square. §7 findings.)
 taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --official-stand \
-  --gain-scale 0.4 --leg-gain-scale 1.0 --arm-hold-nominal --hold-recover 1.2 \
+  --gain-scale 0.4 --leg-gain-scale 1.0 --hold-recover 1.2 \
   --vel-box-center
 # --official-stand + --leg-gain-scale 1.0 are MANDATORY free-standing (knee gains — §9.7 STEP 5 notes)
 # stage: passive -> hoist checks -> 's' (STAND, real) -> keep still ~2 s (IMU yaw-align) -> 'm' (MOTION)
@@ -1183,7 +1185,7 @@ bash scripts/hal_ethercat/start_hal_ethercat.sh   # A3_P1D0 -> hal_ethercat_a3_p
 # --- terminal RUNNER (MDU) --- our runner is now the SOLE controller (then §9.2b Step 2 s->m + flats):
 cd /agibot/a3_deploy && export A3_TRANSPORT=iceoryx
 taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --official-stand \
-  --gain-scale 0.4 --leg-gain-scale 1.0 --arm-hold-nominal --hold-recover 1.2
+  --gain-scale 0.4 --leg-gain-scale 1.0 --hold-recover 1.2
 ```
 Restore the robot's normal stack afterwards: `sudo systemctl start agibot_pm`.
 
@@ -1472,7 +1474,7 @@ cd /agibot/software/v0 && bash scripts/hal_ethercat/start_hal_ethercat.sh   # A3
 ```bash
 cd /agibot/a3_deploy && export A3_TRANSPORT=iceoryx
 taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --official-stand \
-  --gain-scale 0.4 --leg-gain-scale 1.0 --arm-hold-nominal --hold-recover 1.2
+  --gain-scale 0.4 --leg-gain-scale 1.0 --hold-recover 1.2
 # ⚠ --official-stand is MANDATORY for free-standing: without it 's' uses --stand-kp 60
 #   (vs the official knee ~2000) → the KNEES BUCKLE and the robot cannot stand
 #   (field-confirmed 2026-07-07; main.cpp:709 picks the gain set on this flag).
@@ -1563,7 +1565,7 @@ source /agibot/software/v0/entry/env/env.sh
 cd /agibot/a3_deploy
 export A3_TRANSPORT=iceoryx
 taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --official-stand \
-  --gain-scale 0.4 --leg-gain-scale 1.0 --arm-hold-nominal --hold-recover 1.2
+  --gain-scale 0.4 --leg-gain-scale 1.0 --hold-recover 1.2
 ```
 
 **Then, in Terminal D (keyboard):**
@@ -1590,8 +1592,8 @@ taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --official-stand \
 | landing analysis (§7.5) | host | `hope_ws/src/hope_planner` | `python3 -m hope_planner.landing_mc` — on-table % from a checkpoint's exact errors (champion ≈ 98%; training thresholds only 67%) |
 | mocap + planner sanity (arena) | **HDU** (dom 232) | `~/hope_ws` | `export ROS_DOMAIN_ID=232` + `avatar_pro_hope_bridge.launch.py server:=192.168.10.100` + `hope_planner_node` (§9.2 steps 1-2; libVRPN + mocap route pending) |
 | ship to robot | host→MDU | `agi/a3_deploy_example` | `rsync ... dist/a3_deploy_rockchip/ agi@10.42.10.12:/agibot/a3_deploy/` |
-| run on robot (scripted) | MDU | `/agibot/a3_deploy` | `taskset -c 4-7 ./run_a3_pingpong.sh --start passive --legs-passive --gain-scale 0.4 --single-swing --arm-hold-nominal` (arm flag = 17400 pre-swing-hold twist cosmetics; g25-verified 10/10) |
-| run on robot (planner) | MDU | `/agibot/a3_deploy` | `taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --official-stand --gain-scale 0.4 --leg-gain-scale 1.0 --arm-hold-nominal --hold-recover 1.2` (§9.7 STEP 5; `--official-stand`+`--leg-gain-scale 1.0` mandatory free-standing — knees buckle without them, field 2026-07-07) |
+| run on robot (scripted) | MDU | `/agibot/a3_deploy` | `taskset -c 4-7 ./run_a3_pingpong.sh --start passive --legs-passive --gain-scale 0.4 --single-swing` |
+| run on robot (planner) | MDU | `/agibot/a3_deploy` | `taskset -c 4-7 ./run_a3_pingpong.sh --planner --start passive --official-stand --gain-scale 0.4 --leg-gain-scale 1.0 --hold-recover 1.2` (§9.7 STEP 5; `--official-stand`+`--leg-gain-scale 1.0` mandatory free-standing — knees buckle without them, field 2026-07-07) |
 | transition matrix (Gate 2.5) | hope | `agi/a3_deploy_example` | `bash scripts/pp_gate25.sh [--oracle]` (§6: shipped `model_17400_hitter177` = 10/10 oracle / 3/4 perfect_tracking; HitterPure candidates use the separate 110-D gate and must not replace the default without artifact provenance + hardware G2) |
 | hardware planner+control | HDU planner + MDU runner | §9.2 | (HDU dom 232) mocap → planner+flats → (MDU) `--planner --dry-run` (G2 ✅) → shadow `h` → ARM ritual + `m` (§9.2-9.3) |
 | hand-fed flats test (no mocap) | HDU pub + MDU runner | §9.2b | (HDU dom 232) `ros2 topic pub` the 2 flats → (MDU) `--planner --dry-run`+`h` iterate → real `s`→`m` strike; wiring verified 2026-07-07 |

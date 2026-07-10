@@ -2,15 +2,20 @@
 
 Status: Active (pod provisioned 2026-07-01/02; verified with a full smoke + 10-iteration train on 2026-07-03)
 
-The team shares one RunPod for Isaac training: 3× RTX 5090 (32 GB, sm_120), 128 cores, 1 TB RAM,
-500 GB persistent volume at `/workspace`. The live source of truth for pod-side rules is
+The team currently has two RunPod endpoints. The primary shared training pod has 3× RTX 5090
+(32 GB, sm_120), 128 cores, 1 TB RAM and a 500 GB persistent volume at `/workspace`. The live
+source of truth for pod-side rules is
 `/workspace/README_MULTIUSER.md` **on the pod** — read it after logging in; this file records how
 to get on, what is verified, and the repo-side conventions.
 
 ## Access
 
 ```bash
+# primary
 ssh root@162.43.172.171 -p 18333 -i ~/.ssh/id_ed25519_runpod
+
+# second endpoint (current 2026-07-10)
+ssh root@162.43.172.181 -p 13146 -i ~/.ssh/id_ed25519_runpod
 ```
 
 - Endpoint current as of 2026-07-04 (port history: 17424 → 15320 → 18333 across restarts; the key
@@ -26,6 +31,26 @@ ssh root@162.43.172.171 -p 18333 -i ~/.ssh/id_ed25519_runpod
   directory, not by account. Work ONLY under your own `/workspace/<name>/`.
 - The pod holds one GitHub deploy key (dongc1's) shared for pull/push; per-clone `user.name`/
   `user.email` are already set so commits are attributed correctly.
+
+### Source-only validation lane
+
+Codex may use either endpoint for isolated Linux/ROS/C++/Python/Isaac contract
+validation, but must not inspect, start, stop or schedule the training jobs it
+does not own. Put the validation checkout under a separate
+`/workspace/<name>/...` directory, force `CUDA_VISIBLE_DEVICES=''` for CPU
+tests, and do not reuse a live run directory. This boundary still permits
+compiler and Isaac Lab source inspection; it does not permit “checking how
+training is going”.
+
+2026-07-10 source-only acceptance, with no GPU or training-process access:
+
+- primary pod GCC 13 Release: 188 passed/4 skipped portable, 202 passed/4
+  skipped with ROS 2 Jazzy; runner/runtime probe built;
+- second pod: whole-body source suite 435 passed/4 optional-asset skips;
+  planner 107 passed;
+- the Release build exposed and closed the global `-ffast-math` NaN/Inf
+  safety failure. Reproducible commands are in
+  [build_and_test.md](build_and_test.md).
 
 ## Layout And Per-User Convention
 

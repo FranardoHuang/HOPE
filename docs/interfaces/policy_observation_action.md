@@ -1,6 +1,7 @@
 # Policy Observation And Action
 
-Status: Implemented (deploy-parity contract, sim-to-real verified 2026-07-02; realigned 2026-07-03)
+Status: Implemented for 110/175/177/180; 179/181 training/evaluation implemented but deploy wire
+is intentionally blocked pending the normal/station contract day (audited 2026-07-10).
 
 ## HITTER-Compatible Contract
 
@@ -55,6 +56,20 @@ Notes:
   comparison only; it depends on world-base-position terms and is not deploy-honest. The deploy
   runner still accepts 180-D ONNX for legacy checkpoints.
 
+### Other registered actor layouts
+
+| Dim | Contract | Delta / source | C++ publish status |
+| --- | --- | --- | --- |
+| 177 | `hitter_footwork` | 175 layout with `base_target_pos_b(2)` inserted after projected gravity; requires fresh external/oracle base localization. | Supported, but publication fails closed without fresh localization. |
+| 179 | `deploy_parity_face179` | Exact 175 prefix + tail `racket_target_normal_cmd(3), rho(1)`; demanded normal is the delayed atomic +Y/A-frame planner command. | Blocked: flat wire v1 carries no demanded normal/rho. |
+| 181 | `deploy_parity_station181` | Exact 179 prefix + tail `station_anchor_err_b(2)`. | Blocked: wire and the unique station/normal term order are not frozen. |
+| 110 | `hitter_pure` | HITTER Table-I style: 99-D proprio prefix + base forward(2), station delta(2), racket target rel base(3), target velocity(3), tts(1); no reference command or swing flag. | Supported; requires fresh localization and metadata-bound per-side station geometry. |
+
+Do not infer a contract from width alone. Formal consumers require the registered name, mode,
+ordered term names/dims and total dimension to agree. In particular, merely accepting 179/181 in
+the C++ input-shape whitelist would turn a right-width/wrong-columns model into a hardware command;
+the runner intentionally rejects them until flat-wire v2 and the 181 order are frozen together.
+
 ## Critic (privileged) Observation (implemented)
 
 The critic group is unchanged between full and deploy-parity (~318-D) and is never deployed. Base
@@ -74,8 +89,11 @@ The critic group is unchanged between full and deploy-parity (~318-D) and is nev
   `ExpandToBackend` view belongs to AGI's official reference runner, not the HOPE ping-pong path.
   See [joint_order_and_robot_state.md](joint_order_and_robot_state.md).
 - Decoder target = `action * action_scale + default_angle`, per-joint
-  `action_scale = 0.25 * effort_limit / stiffness`; q_des clamped to MJCF joint limits; published
-  as `{q_des, kp, kd}` to the implicit-PD backend (`dq_des = tau_ff = 0`).
+  `action_scale = 0.25 * effort_limit / stiffness`. The policy target first reproduces the
+  schema-3 training soft q-des limits in actor order; a separate outer SDK-order hard clamp protects
+  stand/reference/blend and future command sources. The runner publishes `{q_des, kp, kd}` to the
+  implicit-PD backend (`dq_des = tau_ff = 0`) only while its requested/measured effort envelope and
+  authorization generation remain valid.
 
 ## ONNX Metadata Contract
 
@@ -86,6 +104,45 @@ hard-validate at load and fail on any missing key, non-bijective joint map, obs 
 [1,175]/[1,180], or any kp/kd ≤ 0 (zero-gain guard): the C++ runner (`pp_onnx_policy.hpp`), the
 MuJoCo evaluator (`mujoco_eval_onnx.py`), and the contract diff tool
 (`scripts/inspect_a3_deploy_contract.py`).
+
+### Formal execution provenance (training-contract schema 3)
+
+`hope_metadata_schema_version=2` remains the ONNX packaging/layout schema. A distinct immutable
+`training_contract_schema_version=3` now binds the checkpoint and export to execution facts read
+from the instantiated environment, not copied from YAML comments:
+
+- articulation and action joint order (identity is required), default q, action scale and
+  `use_default_offset`;
+- per-joint actuator integration type, kp/kd, armature, effort/velocity
+  limits, PhysX friction backend/semantics/units, the 31 soft q-des limit pairs
+  and whether q-des clamp was active;
+- physics dt, policy dt and decimation (`policy_dt = physics_dt * decimation`);
+- exact actor term names/dims/history, articulation and tracked body
+  order/indices, anchor and motion segment lengths, per-clip FPS and the
+  schema-2 motion-kinematics contract;
+- task timing/target/bank facts needed to prevent exporting an old actor under a new evaluation
+  recipe.
+- the canonical racket-point identity and wrist-local offset. See
+  [racket_contact_geometry.md](racket_contact_geometry.md) for the distinction
+  between the URDF site, physical face centre and ball centre at contact.
+
+The adjacent `params/training_contract.json` is content-addressed; its SHA and schema are embedded
+in every newly saved checkpoint. Only a fresh schema-3 run or a resume from an exact SHA-bound
+schema-3 checkpoint can keep `training_contract_lineage_exact=1`. Legacy/missing/mismatch overrides
+remain diagnostic forever and cannot be “washed” into formal status by one continuation save.
+Native and standalone exporters verify checkpoint↔JSON binding, write
+`source_checkpoint_sha256`, and derive normalization truth from the actual graph/checkpoint.
+
+Publish-capable C++ and formal BankExam require: metadata schema 2, exact training schema 3,
+baked empirical normalization, self-consistent dt/decimation, `qdes_clamp=1`, 31 soft-limit pairs,
+and the source checkpoint/contract hashes. Older artifacts may only be opened under process-wide
+no-publish diagnostics.
+
+Formal evaluation additionally binds runtime facts that do not belong in the
+training ONNX: immutable question schedule, common MJCF `stand` ready-state,
+MJCF content and resolved MuJoCo execution-contract SHA. A teacher-reference
+reset or direct PhysX-friction-number proxy forces
+`evaluation_contract_exact=false`.
 
 ## Deploy-Available Signal Set
 
@@ -116,7 +173,8 @@ reward targets, and deploy compatibility here first.
 
 ## Contract Knobs
 
-- Control rate: 50 Hz, verified (sim dt 0.005 × decimation 4, `cfg/base/sim_base.yaml`).
+- Control rate is model metadata, currently 50 Hz (physics dt 0.005 × decimation 4). Formal
+  consumers reject a runtime rate that disagrees with the model instead of assuming 50 Hz.
 - Training target source: `target_mode: uniform` with per-clip 3-D position and velocity boxes
   centered on the reference blade strike state (`pos_range_per_clip` / `vel_range_per_clip` in
   `cfg/task/HOPEPingPongDeployParity.yaml`); `strike_phase_per_clip: [0.47, 0.333]` on the

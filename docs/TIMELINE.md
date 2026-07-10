@@ -1163,3 +1163,25 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    空间激进度的地板(降拍速重定时是下一把够得着的刀,等 S1)。
 3. **franco 拍板遗留**:arm5 终局 right_wrist_pitch τ 峰值利用率 1.30→2.21(τ 剂量不变)——峰值目前
    不是守卫项,要不要加另议。
+
+## 2026-07-10 白天:全栈尺子/拍心拍速/C++安全收口,V5→Phase 加速主线接管
+
+1. 【franco/Codex】**拍心与拍速重新审到资产底**——URDF `pingpang_red_Link`、MuJoCo
+   `right_racket`、Python/ONNX/C++ 统一到腕局部 `[0.210210,0.032078,0.032036] m`;红胶面积中心
+   仅差 1.264 mm。抓到旧 Isaac 速度把 link 原点位置和 COM 速度混用,在审计动作上误差正/反手约
+   0.401/0.598 m/s;已改为 link 同点速度+`omega×r`,缺属性即停。边界:现行题库仍把球心与 site
+   共点,红/黑面隐含 20.040/33.232 mm 近似;精确接触必须走 `exact_face_contact_v2` 成对消融,
+   不静默改旧卷。状态:代码/纯 CPU 22 tests 绿,实物 mount 标定仍待 G07。
+2. 【franco/Codex】**先修判卷尺再重判**——BankExam 改 immutable 同题表、噪声档同题序、一题一
+   `stand` reset、all-attempt 分母、正确 exact-strike 帧,并绑定 exam split/题表/MJCF/执行/plant SHA;
+   schema-v3 才能正式入账。动作 NPZ 升 schema2,再绑定完整 body order+逐 clip FPS,堵住同 shape
+   错列和 30/50Hz 静默错播。状态:旧正式数降级为“旧判分器”,须用新尺重跑。
+3. 【franco/Codex】**真机前安全包 Release 实弹验收**——模式/发送/zero barrier 线性化、独立 deadline
+   supervisor、NaN/Inf/力矩/qdes/定位/yaw/re-entry fail-closed。GCC13 真 Release 抓到全局
+   `-ffast-math` 会把 `isfinite` 优化没;移除后强制 strict finite。两台 RunPod只做源码验证,未查看/
+   启停训练:portable C++ 188+4 skip、ROS Jazzy 202+4 skip、whole-body 435+4 skip、planner 107 全绿。
+   仍拦真机:backend 已卡进 `SendCommand` 无法被用户态抢占,下游无 command ACK/timeout。
+4. 【franco/Codex】**V5 抢救不是无限调参,改成可证伪漏斗**——NOW 预注册老师(V4/V5/task-only)、
+   人/机器人时序、引拍+20/+40%与随挥、接触 v1/v2、拍速 `+-1/+-2`、旧盒/venue谱六轴;延长行程
+   只有在 L 增、最低加速度降、力矩/平衡余量改善时才进 GPU。M0 修尺→M1 离线淘汰→M2 512-env
+   机制冒烟→M3 配对信号→M4 ≤2赢家×3 seeds→M5 连续球/Phase,避免 V5 完美主义卡住 Phase。

@@ -199,6 +199,42 @@ hope_isaac_py scripts/train.py task=HOPEPingPongDeployParity algo=ppo headless=t
   num_envs=32 max_iterations=3 logger=tensorboard run_name=hope_local_unified_smoke
 ```
 
+### Motion kinematics schema 2 preflight
+
+Fresh formal runs require each NPZ to bind three facts: body positions are
+link origins, body linear velocities are COM-point velocities, and
+`body_names` gives the complete articulation column order. Every clip must
+also have one finite positive scalar FPS, all clips must share it, and it must
+equal the policy rate (`1 / env.step_dt`, currently 50 Hz). Schema 1 and
+untagged clips remain loadable only for diagnostic checkpoint compatibility;
+they cannot produce an exact schema-v3 checkpoint/ONNX.
+
+For MuJoCo conversion, discover the body order once against a trusted Isaac
+reference, then reuse the emitted file:
+
+```bash
+python scripts/csv_to_npz_mujoco.py \
+  --mjcf /path/to/a3_pingpong.xml --donor /path/to/policy.onnx \
+  --discover-map /path/to/trusted_isaac_motion.npz \
+  --body-order /path/to/body_order.txt
+```
+
+Migrate a legacy V5/MuJoCo clip whose stored velocity is the derivative of
+link position:
+
+```bash
+python scripts/migrate_motion_kinematics.py \
+  --input /path/to/legacy.npz --output /path/to/migrated_comv.npz \
+  --source-point link_origin --mjcf /path/to/a3_pingpong.xml \
+  --body-order /path/to/body_order.txt
+```
+
+For a legacy Isaac clip already carrying COM velocity, use
+`--source-point center_of_mass --body-order ...` and omit `--mjcf`. Never
+infer the point or body order from a filename. Interpolation-only retiming
+outputs are explicitly tagged `link_origin` and are not formal training
+inputs; use the FK output mode to regenerate COM velocity.
+
 `hydra`, `omegaconf`, and `rsl_rl` are NOT in the package `setup.py` `install_requires`; they must be importable from the Isaac Lab Python (provide via Isaac Lab itself or `HOPE_ISAAC_VENV_SITE`). Install the package into that Python:
 
 ```bash

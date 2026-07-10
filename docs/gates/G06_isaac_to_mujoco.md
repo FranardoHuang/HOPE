@@ -138,3 +138,40 @@ Not done:
 2. When the mocap→planner bridge lands, extend the MuJoCo rehearsal to consume live
    `/racket/command` targets instead of sampled planner-equivalents
    (`docs/operations/run_shared_interface_rehearsal.md`).
+
+## Audit update 2026-07-10: formal BankExam ruler
+
+The old headline scores are not a trustworthy promotion ruler. The evaluator
+had an exact-strike one-step offset, omitted pre-strike failures from its
+denominator, compared different question slices across noise columns and did
+not enforce the held-out split. These are now closed:
+
+- one immutable schedule with stable question IDs and per-attempt seeds;
+- all scheduled attempts remain in the denominator;
+- every noise/model column receives the same ordered questions;
+- train/exam split, motion SHA/order/frame and physics-source lineage are
+  fail-closed;
+- every formal attempt starts from the MJCF named `stand` keyframe with all
+  hidden state and last action reset; teacher-reference reset is diagnostic;
+- schedule, ready-state, MJCF and resolved execution-contract SHA are emitted
+  in summaries and attempt CSVs;
+- actuator integration, armature, ctrl/velocity limits and q-des contract come
+  from schema-v3 rather than observation width guesses.
+
+Non-zero PhysX joint friction has no exact MuJoCo `frictionloss` equivalent.
+Formal BankExam therefore refuses it. `--allow-inexact-contract` may run a
+direct-number proxy, but the result is stamped
+`evaluation_contract_exact=false` and cannot be booked. Here `exact` means the
+listed execution protocol is bound; it does not claim complete cross-engine
+dynamics equivalence.
+
+All key historical scores must be rerun after fresh export; retain old values
+only with an explicit `old scorer` label.
+
+```bash
+python3 -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_bank_exam_schedule.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_ready_state_contract.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_eval_p0_contracts.py \
+  hope_training/whole_body_tracking/tests/test_training_contract_schema3.py
+```

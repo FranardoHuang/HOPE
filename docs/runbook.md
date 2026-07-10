@@ -13,7 +13,7 @@
 | 主检出 | /workspace/franco/nohope(main) | 评估器/工具从这里跑 |
 | S1 分支 worktree | /workspace/franco/nohope_s1(stage1-fixed-point) | 训练臂从这里跑;**PYTHONPATH 必须把 worktree 的 source 放最前**,否则 import 到主检出旧代码 |
 | 动作资产 | /workspace/shared/motions/*.npz | worktree 里 assets/agibot_a3 被 gitignore 全量忽略 → **新 worktree 要从主检出软链**(07-06) |
-| 观测扩列脚本 | /workspace/shared/pad_obs_cols.py(末尾追加)/ pad_obs_cols_insert.py(按位插列);**末尾追加版 07-09 已收编进 repo**=`hope_training/whole_body_tracking/scripts/pad_obs_cols.py`(同源+CPU 单测) | 存档跨观测维热启用;jiayi 的 177 是**插在第 167 列**不是末尾;R10c 手术=`python pad_obs_cols.py src.pt dst.pt 179 181` |
+| 观测扩列脚本 | /workspace/shared/pad_obs_cols.py(末尾追加)/ pad_obs_cols_insert.py(按位插列);**末尾追加版 07-09 已收编进 repo**=`hope_training/whole_body_tracking/scripts/pad_obs_cols.py`(同源+CPU 单测) | 存档跨观测维热启用;jiayi 的 177 是**插在第 167 列**不是末尾;R10c 手术须从 repo 路径调用:`python hope_training/whole_body_tracking/scripts/pad_obs_cols.py src.pt dst.pt 179 181` |
 
 ## 发射核对单(每臂过一遍,过不了不点火;2026-07-06 立)
 
@@ -50,7 +50,7 @@ model_13599.pt ──play.py 原生导出(isaac venv,占一个 GPU 槽 ~4 分钟
 - **导出后先补两个 sidecar 再考**(07-07 实错):原生导出不产 obs 归一化(obs_norm.npz)和
   噪声 std(learned_std.npy),缺前者模型吃未归一化观测必得 ~0 分,缺后者评估器直接 FATAL。
   一条命令齐活:`make_std_sidecar.py --checkpoint <model_N.pt>`(两个文件都落到 exported/)。
-- **bank 题源考卷(阶段 1 正式卷)**:`--target-source bank --exam-bank <v2 exam npz>` +
+- **bank 题源考卷(阶段 1 正式卷)**:`--target-source bank --exam-bank <schema-v3 exam npz>` +
   显式 `--strike-phase-per-clip`;mjeval venv 下设 `HOPE_STAGE1_QB=<stage1_question_bank.py 路径>`
   (绕过 isaaclab 包链);分母报表(kept/asked/锥内比例/难度中位)开头自动打印,入账连它一起抄。
 - **`--qdes-clamp` 建议一律开**(人话:考卷把动作剪到关节限位,跟训练和真机部署一个规矩;不开的话

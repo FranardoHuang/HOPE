@@ -284,3 +284,33 @@ Not done:
    recording, and evaluate the `ball-physics-realistic` branch for merging.
 4. Run `scripts/sync_external_repos.sh` before using TTRL/PACE as a reference and record the
    commit.
+
+## V5 professional-transfer and Phase accelerator (2026-07-10)
+
+Codex owns this short-horizon research line and its NOW ordering. The question
+is whether professional-human path/contact geometry/proximal-to-distal order is
+a useful soft prior for A3, not whether A3 can copy every human joint sample.
+
+The preregistered axes are:
+
+1. task-only vs V4 soft teacher vs V5 professional soft teacher;
+2. human timing vs A3-retimed timing;
+3. original path vs guarded backswing extension (+20/+40%), follow-through
+   rewrite and their combinations;
+4. historical site/ball-centre co-location vs versioned exact face contact;
+5. contact-frame and `+-1/+-2` velocity-window definition;
+6. legacy incoming box vs venue-rebalanced training and matchlike exam.
+
+Path extensions enter GPU training only if offline evidence proves the
+original path is limiting and shows positive stroke-length, lower `a_min` and
+better torque margin. The accelerator materializes a content-addressed
+manifest, rejects hard-guard failures before training, uses a 512-env mechanism
+smoke, paired conservative halving at 4096 envs, and sends at most two recipes
+to a three-seed mature run. Research promotion is 50% all-attempt return rate;
+hardware candidacy is 80% plus safety/deployment gates.
+
+See
+[v5_professional_transfer_audit_2026-07-10.md](../research/v5_professional_transfer_audit_2026-07-10.md)
+and `scripts/v5_ablation_accelerator.py`. Phase follows the V5 limit study, but
+does not wait for perfect imitation: it advances with the corrected ruler and
+uses task-driven lower body, per-question timing and position/spin curricula.

@@ -103,3 +103,41 @@ hope_isaac_py scripts/play_table_tennis.py --enable_aero --headless --steps 300
 
 1. Load the same standing pose in MuJoCo and Isaac and compare FK.
 2. Clean or replace Isaac collision geometry so self-collision can be revisited.
+
+## Audit update 2026-07-10: racket point and plant semantics
+
+- The canonical racket control point is now one literal point across URDF,
+  MuJoCo, Python, ONNX metadata and C++: `pingpang_red_Link` / `right_racket`
+  at wrist-local `[0.210210, 0.032078, 0.032036] m`. The red rubber area
+  centroid is only `1.264 mm` away in-plane.
+- Isaac Lab 2.1 `body_pos_w` is a link-origin position but
+  `body_lin_vel_w` is a COM-point velocity. The old racket calculation mixed
+  them, producing about `0.401 m/s` forehand and `0.598 m/s` backhand error on
+  the audited V5/hopex poses. Tracking and the Phase table-tennis environment
+  now require `body_link_lin_vel_w`; wrist fallback uses the official offset
+  and `omega x r`. Missing link-point channels fail closed.
+- The Phase environment also reconstructs the site from
+  `right_wrist_yaw_Link` when the URDF importer merges the zero-mass fixed
+  paddle links, instead of silently disabling paddle contact.
+- Existing `AGIBOT_A3_CFG` friction values are not the documented constant
+  MuJoCo torques: Isaac Lab interprets them as dimensionless, load-dependent
+  PhysX coefficients. They are uncalibrated proxies. Do not claim
+  PhysX/MuJoCo plant equality from equal-looking numbers.
+- Exact physical ball contact is not yet the compatibility contract. Current
+  `site_colocated_v1` co-locates the ball centre with the site; centred rigid
+  contact would offset the ball centre by `20.040 mm` on the red face and
+  `33.232 mm` on the black face. Promote this only through the versioned
+  `exact_face_contact_v2` experiment described in
+  [racket_contact_geometry.md](../interfaces/racket_contact_geometry.md).
+
+Verification:
+
+```bash
+python3 -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_racket_geometry_contract.py \
+  hope_training/whole_body_tracking/tests/test_motion_kinematics_contract.py \
+  hope_training/whole_body_tracking/tests/test_table_tennis_geometry.py
+```
+
+Remaining G04 limits include rigid-body mass/inertia/COM and asset SHA parity,
+contact/solver parameters, DR distributions and calibrated joint friction.

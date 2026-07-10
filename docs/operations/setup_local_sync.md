@@ -55,6 +55,20 @@ Expected contents include heavy runtime assets that should not be committed in n
 - prebuilt libraries
 - full standalone MuJoCo/deploy runtime files
 
+For a direct source build, restore the vendor SDK under the active tree (the
+destination is git-ignored) and let the setup script fetch/locate ONNX Runtime:
+
+```bash
+rsync -a \
+  vendor_assets/agibot/a3_deploy_example_full/thirdparty/unitree_sdk2/ \
+  agi/a3_deploy_example/thirdparty/unitree_sdk2/
+source agi/a3_deploy_example/setup_a3_env.sh
+```
+
+If the handoff uses a different internal layout, locate its `unitree_sdk2`
+root and preserve that directory name at the destination. Do not copy the
+vendor bundle into git.
+
 Tracked deploy code lives separately at:
 
 ```text

@@ -55,6 +55,12 @@ forehand+backhand `HOPEPingPongDeployParity` task (175-D deploy-parity actor obs
 [gates/G05_isaac_training_first_loop.md](gates/G05_isaac_training_first_loop.md) for acceptance
 status.
 
+Stable cross-stack interface documents live under `docs/interfaces/`. In
+particular, `policy_observation_action.md` owns tensor/export semantics and
+`racket_contact_geometry.md` owns the URDF/MJCF racket site, rigid-point
+velocity and versioned physical-contact migration. Do not duplicate those
+constants in a gate narrative as a second source of truth.
+
 The same package now also contains a first-pass table-tennis physics/visualization task:
 
 - `source/whole_body_tracking/whole_body_tracking/tasks/tracking/`: motion-imitation and `HOPEPingPong` racket-target WBC training tasks.

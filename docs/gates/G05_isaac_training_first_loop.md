@@ -247,3 +247,37 @@ without a compatibility pass.
 3. Record exact local motion paths or registry artifacts, WandB run IDs when used, checkpoint paths, and ONNX export paths; evaluate the trained checkpoint/ONNX from the W&B run and record exact quality metrics and failure modes here.
 4. Watch the exact-strike pass rates (`strike_pos/vel/normal_pass_exact`, `strike_composite_success_exact`) during long training under the uniform default; if a run opts into `target_mode=reference_perturbed`, also watch `ref_perturb_scale`, since that mode widens the target distribution only through its success-gated curriculum.
 5. Run `scripts/sync_external_repos.sh` before using TTRL for comparison, and record the source commit for any extracted idea or config.
+
+## Audit update 2026-07-10: formal training lineage
+
+- Schema-v3 checkpoints/ONNX now bind instantiated action/joint order,
+  decoder, PD, actuator integration, armature, effort/velocity limits, PhysX
+  friction semantics, q-des limits, timing, observation/body layout, motion
+  lineage and the exact racket control point. Legacy or override resumes
+  cannot acquire an exact lineage merely by being re-exported.
+- Motion kinematics schema 2 now declares rigid-point semantics and binds the
+  complete articulation `body_names` column order. Isaac-compatible references
+  store link-origin positions and COM-point linear velocities; old V5/MuJoCo
+  files whose velocity is `d(link position)/dt` are rejected for formal use
+  until explicitly migrated. Schema 1 is exact-ineligible because it lacked
+  body order. `make_static_motion.py` also writes the full contract, because an
+  all-zero clip cannot reveal its point semantics from content.
+- Each clip FPS must be a finite positive scalar, every clip in a unified run
+  must match, and the result must equal `1/env.step_dt`; schema-v3 records the
+  per-clip FPS, full articulation order and selected-body index/name mapping.
+- Actual racket speed uses the link-origin channel and target speed is derived
+  from the same site-position path. `clean_reference_strike_velocity=false`
+  is rejected rather than falling back to a COM/site mixture.
+- A1 position/velocity/face/sign now traverse one atomic delay/drop message and
+  reset clears held/drop/bias state. VirtualBall explicitly pins the intended
+  `4/0.5/0.5` position/velocity/normal shaping and zero foot-orientation term;
+  historical 10/5 and `-0.3` runs retain their saved config provenance.
+- V5hLs target speed is still an `80 ms` (`+-2` frame at 50 Hz) average, not
+  verified instantaneous contact truth. Contact frame and `+-1/+-2` window are
+  preregistered ablations before a professional-transfer conclusion.
+- Existing A3 checkpoints inherit uncalibrated PhysX joint-friction
+  coefficients. The next formal wave needs zero-friction vs calibrated-
+  friction controls; do not silently rewrite old checkpoints.
+
+Fresh formal artifacts must be exported from the current schema and current
+motion assets. Old ONNX files remain diagnostic only.

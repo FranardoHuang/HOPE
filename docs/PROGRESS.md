@@ -2,6 +2,51 @@
 
 Use this file for short project-state updates that future humans and agents need to see. Keep detailed reasoning in the relevant gate doc.
 
+## 2026-07-10
+
+- Completed the full-stack audit closure and made the formal score path
+  fail-closed: BankExam now uses an immutable content-addressed question
+  schedule, identical questions across noise columns, one MJCF `stand` reset
+  per attempt, all-attempt denominators, exact-strike frame alignment, exam
+  split/motion/plant/execution hashes and non-zero exit on evaluation failure.
+  Historical scores from the old survivor denominator/late frame are not
+  formal and must be rerun.
+- Re-audited the racket point from the assets. URDF `pingpang_red_Link`, MuJoCo
+  `right_racket`, Python, ONNX and C++ now use wrist-local
+  `[0.210210, 0.032078, 0.032036] m`. The red rubber area centre is 1.264 mm
+  away. Fixed the material Isaac speed bug: link-origin position had been
+  combined with COM velocity, causing about 0.401/0.598 m/s error on the
+  audited forehand/backhand poses. Actual speed now uses link-origin velocity
+  and `omega x r`; target speed is same-site finite difference. Exact ball
+  contact remains a versioned experiment because current banks co-locate ball
+  centre and site (20.040 mm red / 33.232 mm black approximation).
+- Upgraded motion kinematics to schema 2: every NPZ binds full articulation
+  body-column order, link-position/COM-velocity point semantics and per-clip
+  FPS. Loaders verify body index/name mapping, equal clip rates and
+  `fps=1/env.step_dt`; legacy link-velocity clips require explicit MJCF/body-
+  order migration and cannot acquire exact lineage by re-export.
+- Closed deploy-side safety races and unsafe defaults: independent deadline
+  supervisor, linearized authorization/send/zero barrier, finite/effort/q-des
+  envelopes, localization/yaw/re-entry gates, strict CLI and schema-v3/racket-
+  point loader checks. A real GCC 13 Release build exposed that global
+  `-ffast-math` optimized away NaN/Inf checks; it is removed and compile-time
+  strict-finite guards are now mandatory. Controller ACK/timeout and a backend
+  call already blocked inside `SendCommand` remain external G07 blockers.
+- Corrected the planner table collision plane from ball-centre `z=0` to
+  `z=radius`, without inventing an infinite ground plane outside the table.
+  Added the V5 professional-transfer/Phase accelerator and preregistered
+  teacher, robot retiming, stroke-extension, exact-contact, speed-window and
+  venue-spectrum ablations in `NOW.md`; offline feasibility gates reduce each
+  side to at most two GPU candidates before paired signal runs.
+- Source-only verification used both RunPods without inspecting or controlling
+  training: portable C++ Release 188 passed/4 skipped, ROS 2 Jazzy Release 202
+  passed/4 skipped, whole-body Python 435 passed/4 optional-asset skips and
+  planner 107 passed. Local geometry/motion tests were 22 passed, formal
+  BankExam/training/V5 tests 53 passed and planner 105 passed/2 skipped.
+  Detailed decisions and boundaries are in
+  `research/full_stack_audit_closure_2026-07-10.md` and
+  `research/v5_professional_transfer_audit_2026-07-10.md`.
+
 ## 2026-07-09
 
 - RunPod pod2 GPU incident diagnosed and recorded in `docs/operations/run_on_runpod.md`: endpoint

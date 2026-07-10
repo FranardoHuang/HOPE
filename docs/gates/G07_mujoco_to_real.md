@@ -107,3 +107,43 @@ Not done:
    world→robot target transform design; rehearse in the shared-interface MuJoCo first.
 3. Close the backhand stand-entry training gap before enabling backhand on hardware.
 4. Define the first hardware quality metrics (hit rate on served balls) once the ball loop exists.
+
+## Audit update 2026-07-10: runtime safety package
+
+The publish path now fail-closes on mode races, missed deadlines and invalid
+state instead of relying on the policy thread to stop itself:
+
+- mode generation, command send and zero-gain barrier are linearized;
+- an independent deadline supervisor faults and retries the safe halt;
+- NaN/Inf, missing measured effort, requested/measured effort envelope breach,
+  soft/hard q-des breach and localization/yaw readiness block publishing;
+- MOTION/SHADOW re-entry resets clocks/latches; planner owns timing and forces
+  `swing_speed=1`; unsafe scripted hotkeys are blocked during a live swing;
+- formal ONNX must bind the exact wrist-to-racket point and schema-v3
+  execution contract; 179/181 still fail closed pending contract day.
+
+A RunPod Release build found that the former global `-ffast-math` optimized
+away `std::isfinite` safety checks. It has been removed, GNU/Clang builds force
+`-fno-fast-math -fno-finite-math-only`, and a compile-time header rejects any
+target that re-enables finite-only math. Release tests must remain part of the
+gate; debug-only tests are insufficient. Ubuntu 24.04/GCC 13 verification:
+portable Release `188 passed/4 skipped`, ROS 2 Jazzy Release `202 passed/4
+skipped`; the ping-pong runner and runtime probe linked. Reproduction commands
+and the direct-CMake `joint_msgs` library path are in
+[build_and_test.md](../operations/build_and_test.md).
+
+Torque mapping clarification: shoulder pitch/roll are `60 Nm`; shoulder yaw,
+elbow and wrist roll are `24 Nm`; wrist pitch/yaw are `6 Nm`. Future
+robot-centric strokes should preferentially use waist and shoulder
+pitch/roll, but these model limits are not substitutes for vendor continuous
+torque-speed-temperature curves.
+
+Still not solved:
+
+- a userspace watchdog cannot preempt a backend `SendCommand` already blocked
+  inside the call, and there is no downstream controller sequence ACK/timeout;
+- external-base orientation ownership (mocap world quaternion vs engage-
+  relative IMU yaw) is unresolved;
+- real mount calibration and 179/181 wire contract remain open.
+
+No real-robot command test was run in this audit. G07 remains `Partial`.

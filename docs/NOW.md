@@ -49,9 +49,11 @@ Rules:
   诊断辅尺。**历史数字重读规则(franco 07-09 追认)**:rally 口径 07-08 才实装——此前
   一切"训练内击球率/上台率"都是幸存者分母,**高摔臂上系统性虚高**,重读近似=原值×(1−该侧
   触球前摔率)(例:M1 现测 vrr 正手 0.790 vs rally 0.309;s1w3 主攻期中 0.78 折全分母
-  ≈0.62-0.65;fixE 0.8415→0.5255)。**MuJoCo 考卷口径不受此病**(摔=零击计败),历史入账
-  数字无需追改;残余小缺口=等球段摔不进 rally 分母(现状≈0,终极口径=Gate 3B 每发球分母)。判卷器新开关:`--qdes-clamp`(对齐训练/部署剪切,建议一律开)、`--hold-ref stand|clip`
-  (按代际选),移植中。
+  ≈0.62-0.65;fixE 0.8415→0.5255)。**旧 MuJoCo BankExam 也有幸存者分母病**:触球前摔倒/
+  guard reset 曾在出题后从分母消失;NOW 旧版写的“摔=零击计败、历史无需追改”是
+  错的。修后判卷器以 immutable schedule 的 **all attempts** 为分母,触球前失败留败卷;
+  所有关键历史入账需用修后尺重跑,旧数只能标“旧判分器”。`--qdes-clamp`、共同 `stand`
+  ready state、题表/MJCF/execution SHA 均是正式卷必填合同。
 - **⚠ rally 口径 07-09 记账根治(merge 53d440e;判读纪律随之更新)**:旧 rally 曲线分子分母
   两本账衰减节拍不同,4096 env 同刻 resume 排成同步大队列时比值能冲破 1(0.31→1.48 振荡,
   不是真进步)。新记账=每拍打完起拍数+是否回球同刻入同一本账,**恒 ≤1 且=真实回球率**;
@@ -96,6 +98,7 @@ Rules:
 | dongc1(jiayi) | Hitter 步法线 + 防摔修复栈;simtoreal2 谱系(已审计合并进 main)。**07-06 起在本地机器训练,不占云上算力池** |
 | yikang | Deployment; sim/env alignment; 出题器 |
 | claude (franco's agent) | Foundation: infrastructure, A/B experiments, doc/code hygiene |
+| Codex | NOW 主线收口;V5 专业迁移、Phase 加速、正式判卷/部署合同与跨链安全 |
 
 ## Run-Name Legend(人话对照表 — 报告里不再用裸字母)
 
@@ -352,7 +355,7 @@ hold-fall 缺陷——判卷预期照此校准;③ S1 wave-3 必须硬厂房发�
 
 | 顺序 | 类型 | 内容(人话) | 依赖 | 谁 |
 | --- | --- | --- | --- | --- |
-| 1a-0 | 开发 | **考卷工具补题源**(yikang 交接 07-06):`mujoco_eval_onnx.py` 加 `--target-source bank`——S1 判卷必须问 exam 卷的同源题(现有 boxes/venue-balls 都不是)。规格:装载走 `stage1_question_bank.load_question_bank`(强制校验烤入/转正标记,别绕过);逐题喂固定击球点 + 该题需求拍速 + **179 观测尾 4 维用该题需求拍面**(不是 clip 参考);输出连分母(可解率 kept/N + 锥内比例);网/界判据沿用现有常数。**✅ 已落地(07-07)**:救援分支合回 main(等球段站位语义保 main 新版),BankExamSampler 全功能(逐题出卷/耗尽重洗/需求拍面进 179 观测尾/分母法则报表/元数据守卫);pod 实跑通过(v5 标定 v2 考卷 + 减观测臂)。附带坑:原生导出不产 obs 归一化与 std sidecar,判卷前先跑 make_std_sidecar(已进 runbook) | — | claude |
+| 1a-0 | 开发 | **考卷工具补题源**(yikang 交接 07-06):`mujoco_eval_onnx.py` 加 `--target-source bank`——S1 判卷必须问 exam 卷的同源题(现有 boxes/venue-balls 都不是)。规格:装载走 `stage1_question_bank.load_question_bank`(强制校验烤入/转正标记,别绕过);逐题喂固定击球点 + 该题需求拍速 + **179 观测尾 4 维用该题需求拍面**(不是 clip 参考);输出连分母(可解率 kept/N + 锥内比例);网/界判据沿用现有常数。**✅ 已落地(07-07;07-10 重新加固)**:早版 BankExamSampler 是逐题出卷后“耗尽重洗”;现已由内容寻址的 immutable schedule、no-wrap、跨噪声档同题序和 all-attempt 分母替代。正式卷只收 schema-v3 exam split。附带坑:原生导出不产 obs 归一化与 std sidecar,判卷前先跑 make_std_sidecar(已进 runbook) | — | claude |
 | 1a | 判卷 | 第一波 8 臂按预注册分支判读(上表)。**S1 臂契约名已注册**(`deploy_parity_face179`,发射不再传 contract=null;导出器元数据即刻可用,契约日 181 时与站位 2 维一起换名) | 1a-0 + 各臂到线 | claude |
 | 1b | 开发 | **奖励收入记账**(半天;也是"A≈D"分支的排查工具) | 无 | claude |
 | 1c | 开发 | **击球窗分通道奖励**(SMASH 整包,W2 门票;旗标默认关) | 无 | claude |
@@ -560,10 +563,59 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
   全程纯算力 80-150 卡·时,6 卡下**墙钟 ≈ 2.5-3 天**,节拍器是判卷/拍板不是卡。
   钱:6 卡 × ~$1/h × 3 天 ≈ $400±。
 
+## Codex 接手的近期主线(2026-07-10,franco 授权负责 NOW)
+
+目标不是“把 V5 模仿得更像”,而是用可证伪实验回答:**专业人的路径、触球几何和
+发力顺序里,哪些能迁移给 A3,哪些必须由机器人按自己的力矩、速度、行程和平衡重解。**
+这条路走到底后再大力推 Phase;不用旧判分器、错初态或不同题表制造假结论。
+
+### 迭代顺序
+
+1. **M0 先修尺(正在收口)**:BankExam 同题 all-attempt 分母、同 `stand` 初态、一题一
+   reset、schema-v3 ONNX/动作/执行合同与 SHA 全绑定;新模型未过合同不能出正式分。
+2. **M1 离线先淘汰**:对原路径、引拍 +20%/+40%、随挥重写及组合只跑限位/自碰/
+   CoP/摩擦/力矩/速度守卫。**延长行程只有在原路径受限、L 真增加、`a_min` 真下降、
+   力矩余量真改善时才进 GPU**;否则不为“看起来更大”付训练费。
+3. **M2 机制冒烟**:512 env × 25 iter,只查能否启动、梯度/奖励是否活、是否出生即摔;
+   不拿短跑排冠军。
+4. **M3 配对信号档**:4096 env × 2000 iter,同题串行消除,不稳定小样本保留;每个轴保留
+   反面对照。
+5. **M4 成熟档**:最多 2 个配方、至少 3 seeds。研究升段线=all-attempt 回球率 50%;
+   真机候选线=80%+不摔+执行/安全门全过。两条线用途不同,不再争“唯一标准”。
+6. **M5/Phase**:单题胜者才进连续球 Gate 3B;然后推 Phase 的位置、旋转、连续和任务驱动
+   下半身,不让 V5 完美主义卡住 Phase,也不带病尺抢跑。
+
+### 预注册消融轴(不跑无语义的全笛卡尔积)
+
+| 轴 | 候选 | 回答什么 |
+| --- | --- | --- |
+| 老师 | task-only / V4 软先验 / V5 专业软先验 | 专业人是否提供任务约束外的可迁移信息 |
+| 时间 | 真人原时序 / A3 重定时 | 可迁移的是路径/顺序,还是真人绝对节奏 |
+| 行程 | 原路径 / 引拍 +20%/+40% / 随挥 / 组合 | 加速和制动距离是否真正的瓶颈 |
+| 触球几何 | `site_colocated_v1` / `exact_face_contact_v2` | 旧的球心=拍心近似是否改变逐题排序 |
+| 拍速口径 | 触球帧 × `+-1`/`+-2` 帧差分 | 80 ms 平均拍速是否在替代真正的瞬时接触速度 |
+| 来球谱 | 旧手工盒 / venue rebalanced 训练 / matchlike 考卷 | 结论能否覆盖真实场馆而不只是 2–5 m/s 人造题 |
+
+拍心/接触口径见 [racket_contact_geometry.md](interfaces/racket_contact_geometry.md),实验纸面与加速器见
+[v5_professional_transfer_audit_2026-07-10.md](research/v5_professional_transfer_audit_2026-07-10.md)。
+
+### 当前硬边界
+
+- 现有 A3 训练把 MuJoCo `frictionloss` 的 Nm 数字当成 Isaac/PhysX 无量纲、载荷相关的
+  joint-friction coefficient;语义不等价。新 Formal BankExam 遇非零系数必须 fail-closed;
+  直接数值 proxy 只能 diagnostic。旧 checkpoint 不能被洗白,下一批需做零摩擦/标定摩擦对照。
+- `exact` 目前只表示“判卷执行协议完整绑定”,不表示 PhysX↔MuJoCo 跨引擎动力学完全
+  等价;mass/inertia/COM、asset SHA、contact/solver 和 DR 分布尚未全部入合同。
+- C++ 可以在用户态线性化模式/发送/停机,但无法抢占一个已经卡死的 backend `SendCommand`,
+  也没有 controller ACK/timeout;真机门仍 `Partial`。
+- Codex 可使用两台 RunPod 做源码、Linux/ROS/C++、Isaac 合同验证,但不查看、启停或调度那里的训练。
+
 ## Active
 
 | Item | Priority | Owner | Branch | Status / next checkpoint |
 | --- | --- | --- | --- | --- |
+| 全栈正确性尺+C++安全包+拍心/拍速合同收口 | ★★★ | **Codex** | `main` | 双 RunPod 源码验收已绿(portable/ROS C++、whole-body、planner);下一检查点=重出 fresh schema-v3 ONNX+修后考卷,旧判分器数字不入账 |
+| V5 专业动作可迁移性+Phase 加速器 | ★★★ | **Codex** | `main` | manifest+保守 halving 已就绪;下一检查点=验证触球帧/拍速口径,把行程/时间律报告接成 feasibility producer,再做 BankExam→scorecard adapter;两者完成前不自动发训练 |
 | HitterPure RallyFinal clean-base task: x-lock/lunge, settle/slip, backhand clearance, front-facing constraints + Isaac/AGI rally gates | ★★★ | codex for dongc1 | `hitter` | IN PROGRESS 2026-07-10: derive from `HOPEPingPongHitterPure.yaml`, explicitly exclude V5 hold-rhythm/lower-body-plant stack; next checkpoint = config/code/docs patch with static tests and reproducible ablation/eval commands |
 | 阶段1 第一波成对差初判(主攻/减观测/产品线锚已到线;只换题库/加权/两动作源在跑;反手换锚排队) | ★★★ | claude | `stage1-fixed-point` | **只看成对差,绝对分不作数(题库缺陷)**;正式结论等题库 v2 重跑 |
 | **加速度包络标定两件套(franco 07-09,时间律的下一层)**:①跟踪破裂标定(chirp/斜坡加压参考×现成跟踪策略,逐关节"边平衡边跟"真上限=判炸器 L1 升级);②贴限 vs 摊时消融(v5syn T_a 三档)——R9d 读数落地后一起排 | ★★★ | claude | — | 设计已入 research 时间律文档§六 |
