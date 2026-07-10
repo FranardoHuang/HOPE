@@ -4,6 +4,11 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-10
 
+- Post-merge acceptance stayed green after incorporating the latest `main`:
+  81 formal geometry/exam/V5 contract tests, 105 planner tests (2 optional
+  skips), and 39 RunPod source-only Hydra override tests passed. Removed the
+  final strict-finite header whitespace defect caught by repository-wide
+  `git diff --check`; no runtime semantics changed.
 - Completed the full-stack audit closure and made the formal score path
   fail-closed: BankExam now uses an immutable content-addressed question
   schedule, identical questions across noise columns, one MJCF `stand` reset

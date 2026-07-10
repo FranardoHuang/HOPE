@@ -7,4 +7,3 @@
 #if defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__ != 0
 #error "A3 deploy safety runtime must not be compiled with -ffast-math/-ffinite-math-only"
 #endif
-
