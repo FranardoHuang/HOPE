@@ -585,6 +585,69 @@ hope_isaac_py scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 
   wandb_path="$WANDB_ENTITY/hope_wbc/<RUN_ID>" headless=false
 ```
 
+### Shared schema-v3 BankExam (Isaac + MuJoCo)
+
+Do not pass an exam bank through a training Hydra override.  The saved
+`RacketTargetCommand` continues to own its train-split bank; the evaluator loads
+the exam split independently and installs only the current immutable questions.
+
+Materialize one balanced paper first.  Both simulator cells must consume this
+exact JSON (same schedule SHA, question order, hold values and attempt seeds):
+
+```bash
+python scripts/materialize_bank_exam_schedule.py \
+  --exam-bank /abs/path/s1_<family>_v3_exam.npz \
+  --per-clip-quota 10 --schedule-seed 0 --hold-range 0 100 \
+  --output /abs/path/canary.schedule.json
+```
+
+Isaac single-ball cell (`K=20` creates one environment per immutable item):
+
+```bash
+hope_isaac_py scripts/isaac_bank_exam.py \
+  task=HOPEPingPongVirtualBall headless=true device=cuda:0 \
+  +run_dir=/abs/path/to/training_run \
+  checkpoint=/abs/path/to/training_run/model_16999.pt \
+  +exam_bank=/abs/path/s1_<family>_v3_exam.npz \
+  +schedule_json=/abs/path/canary.schedule.json \
+  +per_clip_quota=10 +schedule_seed=0 +noise_scale=0.0 \
+  +output_dir=/abs/path/isaac_canary
+```
+
+Historical M3f/M2/G1 checkpoints are ruler canaries, not formal lineage; add
+`+allow_inexact_contract=true` to Isaac and `--allow-inexact-contract` to
+MuJoCo, and keep the resulting `evaluation_contract_exact=false` label.
+Re-exporting or resuming an old checkpoint cannot turn it exact.
+
+MuJoCo consumes the same paper and uses the same authoritative NumPy scorer:
+
+```bash
+python scripts/mujoco_eval_onnx.py \
+  --onnx /abs/path/to/exported/policy.onnx \
+  --motion-files /abs/path/forehand.npz /abs/path/backhand.npz \
+  --target-source bank --exam-bank /abs/path/s1_<family>_v3_exam.npz \
+  --exam-schedule-json /abs/path/canary.schedule.json \
+  --noise-scales 0.0 --seed 0 --qdes-clamp --hold-ref stand \
+  --allow-inexact-contract \
+  --out-dir /abs/path/mujoco_canary
+```
+
+Omit both inexact flags for a fresh schema-v3 checkpoint/ONNX. The evaluator
+hashes the exam bank before and after loading; any mid-load replacement is
+fatal. The shared schedule installer is formal/fail-closed by default and
+accepts an inexact sampler only through the explicit historical diagnostic
+flag above.
+
+For a valid cell, the raw ledger must contain all `K` rows in schedule order.
+Physical falls, guard resets and episode timeouts remain failed attempts in the
+same denominator; an external step-cap truncation invalidates the whole cell.
+The versioned hold contract is `H` ready-stand policy actions followed by raw
+clip frame 0; it is part of the schedule SHA, not an evaluator-local guess.
+Before comparing rates, assert that Isaac and MuJoCo report the same bank SHA,
+schedule SHA and ordered question IDs.  Only the `noise_scale=0` canary
+survivors advance to 50 questions per side, continuous play and 5% action
+noise.
+
 ## First-Loop Rule
 
 Before setting a baseline quality target, record:

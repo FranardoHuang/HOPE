@@ -91,11 +91,16 @@ def load_actor_tolerant(runner, path: str) -> bool:
         keep = {k: v for k, v in sd.items() if k in cur and cur[k].shape == v.shape}
         dropped = sorted(set(sd) - set(keep))
         actor_dropped = [k for k in dropped if not k.startswith("critic")]
-        if actor_dropped:
+        actor_missing = sorted(
+            key for key in cur
+            if not key.startswith("critic") and key not in keep
+        )
+        if actor_dropped or actor_missing:
             # The mismatch is NOT confined to the critic — a partial load would silently corrupt the
             # actor. Re-raise the original strict error instead.
             raise RuntimeError(
-                f"checkpoint/actor shape mismatch (not just the critic): {actor_dropped}"
+                "checkpoint/actor key or shape mismatch (not just the critic): "
+                f"dropped_from_checkpoint={actor_dropped}, missing_from_checkpoint={actor_missing}"
             ) from e
         runner.alg.policy.load_state_dict(keep, strict=False)
         _validate_and_restore_actor_normalizer(runner, ckpt, restore=True)

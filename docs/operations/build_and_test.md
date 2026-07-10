@@ -42,34 +42,40 @@ Current known result:
 
 - 2026-06-26: selected planner math tests above, 16 passed.
 
-## Phase-1 Standalone Audit Specifications
+## Phase-1 BankExam Adapter And Audit Tests
 
-The following tests need neither Isaac nor MuJoCo.  They cover a read-only
-terminal-checkpoint inventory, saved-run termination-contract parsing and the
-NumPy specification of the Isaac virtual-return scorer:
+The following tests need neither a running Isaac instance nor MuJoCo. They
+cover the read-only terminal-checkpoint inventory, balanced shared schema-v3
+paper, evaluator-owned Isaac adapter, saved-run termination contract and the
+authoritative virtual-return scorer:
 
 ```bash
 python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_audit_runpod_terminal_runs.py \
+  hope_training/whole_body_tracking/tests/test_bank_exam_schedule.py \
+  hope_training/whole_body_tracking/tests/test_isaac_bank_exam_adapter.py \
   hope_training/whole_body_tracking/tests/test_termination_contract.py \
   hope_training/whole_body_tracking/tests/test_virtual_return_scorer.py
 ```
 
 The terminal audit only reads a run tree and prints shell-quoted `judge.sh`
-commands.  It never executes them.  The termination and scorer modules are
-currently library specifications, not production evaluator adapters.  Their
-two cross-module adapter assertions remain explicitly skipped until the
-evaluator-owned schema-v3 Isaac leg is implemented; a green standalone suite
-must not be reported as formal BankExam parity.
+commands. It never executes them. The remaining modules now exercise the
+production seams used by `isaac_bank_exam.py` and `mujoco_eval_onnx.py`:
+immutable content IDs/order, exact per-clip quota, strict artifact reload,
+nominal profile, tuple/mapping observation adaptation, all-attempt ledger,
+saved-run termination preflight and Torch/NumPy scorer parity when Torch is
+installed. A green dependency-light suite is implementation evidence; it is
+not a substitute for a same-paper Isaac/MuJoCo runtime canary.
 
 Verified 2026-07-11 on the local macOS host:
 
-- standalone specifications: 35 passed, 3 skipped (two pending adapters and
-  optional Torch parity);
-- formal BankExam/motion/racket/schema/V5 CPU suite: 74 passed;
+- adapter/audit suite: 63 passed, 1 optional Torch parity skip;
+- formal BankExam/motion/racket/schema/V5 CPU suite: 80 passed;
+- union of both groups plus the MuJoCo contract tests: 132 passed, 1 optional
+  Torch parity skip;
 - planner suite: 105 passed, 2 optional skips.
 
-Reproduce the 74-test formal CPU suite with:
+Reproduce the 80-test formal CPU suite with:
 
 ```bash
 python3 -m pytest -q \

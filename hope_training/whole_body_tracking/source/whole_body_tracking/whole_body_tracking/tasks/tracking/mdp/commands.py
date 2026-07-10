@@ -912,6 +912,64 @@ class MotionCommand(CommandTerm):
             env_ids=env_ids,
         )
 
+    def install_external_exam_timing(
+        self,
+        env_ids: Sequence[int],
+        clip_ids: torch.Tensor,
+        hold_steps: torch.Tensor,
+    ) -> None:
+        """Install one evaluator-owned, immutable BankExam item per environment.
+
+        This is deliberately a runtime seam rather than a config field: training still owns its
+        normal random clip/hold sampler, while the formal evaluator may replace the *current*
+        command only after it has independently validated an exam-split bank and schedule.  The
+        method does not reset robot state; callers must first perform the documented nominal-stand
+        reset and then refresh observations after installing both motion timing and racket targets.
+        """
+
+        raw_ids = torch.as_tensor(env_ids, device=self.device)
+        raw_clips = torch.as_tensor(clip_ids, device=self.device)
+        raw_holds = torch.as_tensor(hold_steps, device=self.device)
+        for name, value in (("env_ids", raw_ids), ("clip_ids", raw_clips),
+                            ("hold_steps", raw_holds)):
+            if value.dtype == torch.bool or value.is_floating_point() or value.is_complex():
+                raise ValueError(f"external exam {name} must use an integer dtype")
+        ids = raw_ids.to(dtype=torch.long).reshape(-1)
+        clips = raw_clips.to(dtype=torch.long).reshape(-1)
+        holds = raw_holds.to(dtype=torch.long).reshape(-1)
+        if len(ids) == 0 or len(ids) != len(clips) or len(ids) != len(holds):
+            raise ValueError(
+                "external exam timing requires equal, non-empty env/clip/hold vectors"
+            )
+        if len(torch.unique(ids)) != len(ids) or torch.any(ids < 0) or torch.any(ids >= self.num_envs):
+            raise ValueError("external exam env ids must be unique and in range")
+        if torch.any(clips < 0) or torch.any(clips >= int(self.motion.num_segments)):
+            raise ValueError("external exam clip ids are outside the loaded motion segments")
+        if torch.any(holds < 0):
+            raise ValueError("external exam hold steps must be non-negative")
+        if bool(self.cfg.stagger_initial_clock) or float(self.cfg.clip_switch_prob) != 0.0:
+            raise ValueError(
+                "external BankExam requires stagger_initial_clock=false and clip_switch_prob=0"
+            )
+        if self._speed_per_clip is not None or tuple(float(v) for v in self.cfg.speed_scale_range) != (1.0, 1.0):
+            raise ValueError(
+                "external BankExam currently requires native one-frame-per-step playback"
+            )
+
+        self.clip_id[ids] = clips
+        starts = self.motion.seg_start[clips]
+        self.time_steps[ids] = starts
+        self.time_steps_f[ids] = starts.float()
+        self.speed_scale[ids] = 1.0
+        self.hold_counter[ids] = holds
+        self.metrics["in_hold"][ids] = (holds > 0).float()
+        self.just_resampled[ids] = False
+        if hasattr(self, "time_left"):
+            self.time_left[ids] = float("inf")
+        if self._stagger_hold_pending is not None:
+            self._stagger_hold_pending[ids] = False
+        self._stagger_ep_pending = False
+
     def _update_command(self):
         # stagger (b): ONE-SHOT at the first step after construction (fresh run OR resume — both
         # are the same-instant cohort the metric-sync forensics caught): advance every env's

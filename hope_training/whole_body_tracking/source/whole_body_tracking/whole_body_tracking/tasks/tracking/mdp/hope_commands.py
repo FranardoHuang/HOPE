@@ -1387,6 +1387,133 @@ class RacketTargetCommand(CommandTerm):
         # Held per env until its next resample; reset-mean reports the question difficulty mix.
         self.metrics["question_difficulty_deg"][env_ids] = diff
 
+    def install_external_exam_questions(
+        self,
+        env_ids: Sequence[int],
+        exam_bank,
+        clip_ids: torch.Tensor,
+        bank_rows: torch.Tensor,
+    ) -> None:
+        """Atomically install evaluator-owned exam rows without changing the training bank.
+
+        ``cfg.question_bank`` and ``self._question_bank`` remain the saved *train* split.  A formal
+        evaluator independently loads/validates the exam split, materializes an immutable
+        content-addressed schedule, resets the environment to nominal stand, then calls this seam
+        once before the first actor observation.  There is intentionally no automatic cursor or
+        wrap behavior here: one environment answers one scheduled row, and any later resample is a
+        protocol violation handled by the evaluator ledger.
+        """
+
+        raw_ids = torch.as_tensor(env_ids, device=self.device)
+        raw_clips = torch.as_tensor(clip_ids, device=self.device)
+        raw_rows = torch.as_tensor(bank_rows, device=self.device)
+        for name, value in (("env_ids", raw_ids), ("clip_ids", raw_clips),
+                            ("bank_rows", raw_rows)):
+            if value.dtype == torch.bool or value.is_floating_point() or value.is_complex():
+                raise ValueError(f"external exam {name} must use an integer dtype")
+        ids = raw_ids.to(dtype=torch.long).reshape(-1)
+        clips = raw_clips.to(dtype=torch.long).reshape(-1)
+        rows = raw_rows.to(dtype=torch.long).reshape(-1)
+        if len(ids) == 0 or len(ids) != len(clips) or len(ids) != len(rows):
+            raise ValueError(
+                "external exam questions require equal, non-empty env/clip/row vectors"
+            )
+        if len(torch.unique(ids)) != len(ids) or torch.any(ids < 0) or torch.any(ids >= self.num_envs):
+            raise ValueError("external exam env ids must be unique and in range")
+        if float(self.cfg.midswing_resample_prob) != 0.0:
+            raise ValueError("external BankExam requires midswing_resample_prob=0")
+        metadata = getattr(exam_bank, "metadata", None)
+        if not isinstance(metadata, dict) or metadata.get("split") != "exam":
+            raise ValueError("external BankExam requires a validated schema-v3 exam split")
+        counts = exam_bank.counts.to(device=self.device, dtype=torch.long)
+        if torch.any(clips < 0) or torch.any(clips >= len(counts)):
+            raise ValueError("external exam clip ids are outside the exam bank")
+        if torch.any(rows < 0) or torch.any(rows >= counts[clips]):
+            raise ValueError("external exam row is outside its clip's validated question count")
+
+        motion = self._motion()
+        live_clips = motion.clip_id[ids] if motion._multiseg else torch.zeros_like(clips)
+        if not torch.equal(live_clips, clips):
+            raise ValueError(
+                "external exam motion clip must be installed before its atomic racket question"
+            )
+
+        # The same +Y/A-frame guard used by training, now against the independently loaded exam
+        # bank.  Checking all rows makes a bad regenerated bank fail before any score is emitted.
+        self._ensure_reference_strike_state()
+        ref_raw = self._ref_racket_normal_raw_w_per_clip
+        if ref_raw is None or ref_raw.shape[0] < len(counts):
+            raise RuntimeError("external exam could not resolve per-clip raw face normals")
+        demanded_all = exam_bank.demanded_normal.to(self.device)
+        for clip in range(len(counts)):
+            count = int(counts[clip])
+            dots = torch.mv(demanded_all[clip, :count], ref_raw[clip])
+            if float(dots.min()) <= 0.0:
+                raise ValueError(
+                    f"external exam clip {clip} contains a demanded normal opposite the +Y/A frame"
+                )
+
+        origins = self._env.scene.env_origins[ids]
+        contact = exam_bank.contact_pos.to(self.device)[clips]
+        incoming_vel = exam_bank.incoming_vel.to(self.device)[clips, rows]
+        incoming_spin = exam_bank.incoming_spin.to(self.device)[clips, rows]
+        demanded_vel = exam_bank.demanded_vel.to(self.device)[clips, rows]
+        demanded_normal = demanded_all[clips, rows]
+        difficulty = exam_bank.difficulty_deg.to(self.device)[clips, rows]
+
+        self.racket_target_pos_w[ids] = origins + contact
+        self.racket_target_vel_w[ids] = demanded_vel
+        # Formal diagnostics grade the demanded exam face even for legacy actors that had no
+        # face-command observation.  Face-command actors still read ``target_normal_cmd`` through
+        # the audited +Y/A-frame lane below.
+        self.racket_target_normal_w[ids] = demanded_normal
+        self.target_normal_cmd[ids] = demanded_normal
+        self.vb_vel_in_w[ids] = incoming_vel
+        self.vb_spin_in_w[ids] = incoming_spin
+        if "question_difficulty_deg" not in self.metrics:
+            self.metrics["question_difficulty_deg"] = torch.zeros(
+                self.num_envs, device=self.device
+            )
+        self.metrics["question_difficulty_deg"][ids] = difficulty
+
+        # Preserve the saved training task's station semantics while removing reset-time jitter.
+        if self.cfg.target_mode == "reference_perturbed":
+            if self._ref_reach_offset_xy_per_clip is None:
+                raise RuntimeError("external exam could not resolve reference reach offsets")
+            base_off = contact[:, :2] - self._ref_reach_offset_xy_per_clip[clips]
+        else:
+            base_off = torch.zeros_like(contact[:, :2])
+            blend = float(self.cfg.base_couple_blend)
+            if blend > 0.0:
+                base_off[:, 1] = (blend * contact[:, 1]).clamp(
+                    -self.cfg.base_couple_max_offset, self.cfg.base_couple_max_offset
+                )
+        self.base_target_pos_w[ids] = origins[:, :2] + base_off
+        self.station_anchor_pos_w[ids] = origins[:, :2] + torch.tensor(
+            self.cfg.station_anchor_offset_xy, dtype=torch.float32, device=self.device
+        )
+        self.swing_sign[ids] = torch.where(clips == 0, 1.0, -1.0)
+
+        self._exact_fired[ids] = False
+        self._prev_motion_steps[ids] = motion.time_steps[ids]
+        self.racket_progress[ids] = 0.0
+        self._progress_reset_mask[ids] = True
+        if hasattr(self, "time_left"):
+            self.time_left[ids] = float("inf")
+        self._prev_clip_id[ids] = clips
+        self._recover_from_clip[ids] = -1
+        self._rally_returned[ids] = False
+        self._rally_pending_return[ids] = False
+        # The reset sampled a training clip/question before the evaluator installed the exam item.
+        # Refresh actual racket FK and the actor-visible clock without advancing physics or either
+        # command clock; otherwise action 0 pairs the new question with zero/stale FK and TTS.
+        self._compute_racket_state()
+        self._compute_strike_timing()
+        self._prev_racket_dist[ids] = torch.norm(
+            self.racket_pos_w[ids] - self.racket_target_pos_w[ids], dim=-1
+        ).detach()
+        self._reset_actor_target_state(ids)
+
     def _check_question_bank_face_frame(self):
         """A-frame (+Y calibration) guard: every bank demanded normal must be same-side with the
         RAW clip reference face (2026-07-09 单翻病防复发卫兵).

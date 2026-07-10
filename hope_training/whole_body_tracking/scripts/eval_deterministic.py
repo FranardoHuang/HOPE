@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hydra
 from omegaconf import OmegaConf
 
+from isaac_bank_exam_adapter import policy_observation_tensor
 from train import _apply_task_overrides, _registry_clip_name
 
 
@@ -241,12 +242,13 @@ def _run(cfg, simulation_app):
         # buffers are "inference tensors", and reset()'s inplace writes are only legal in-mode.
         with torch.inference_mode():
             env.reset()
-            obs = env.get_observations().to(dev)
+            obs = policy_observation_tensor(env.get_observations(), device=dev)
         step = 0
         while simulation_app.is_running() and step < n_steps:
             with torch.inference_mode():
                 actions = policy(obs)
                 obs, _, dones, extras = env.step(actions.to(env.unwrapped.device))
+                obs = policy_observation_tensor(obs, device=dev)
             log = extras.get("log", {}) if isinstance(extras, dict) else {}
             for k, v in log.items():
                 if "Termination" in k:

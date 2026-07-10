@@ -4,6 +4,26 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-11
 
+- Implemented the evaluator-owned schema-v3 same-question path without
+  changing the physics-hash-bound `venue_ball_sampler.py`: balanced canonical
+  schedule JSON, strict content IDs/per-attempt seeds, Isaac post-reset atomic
+  exam injection, all-attempt ledger, and MuJoCo delegation to the common
+  10 ms RK4/ball-centre-plane return scorer. Historical checkpoint support is
+  an explicit diagnostic-only escape hatch and remains stamped
+  `evaluation_contract_exact=false`; formal installation stays fail-closed.
+- Added bank hash-before/load/hash-after guards, strict integer runtime IDs and
+  tuple/mapping observation normalization after cc's two old evaluators failed
+  on the Isaac wrapper tuple. The pre-Pod review also preserved nominal-joint
+  startup capture, refreshed racket FK/TTS before action 0, froze command
+  resampling, versioned the `H`-stand-actions-then-frame-0 release rule, added
+  hold-aware termination-contract v3, explicitly gated legacy train-bank
+  loading/hold-guard overrides to historical diagnostics, and made tolerant
+  checkpoint loading fail on missing actor keys. Local verification passed 63
+  adapter/audit tests with one optional Torch skip, 80 formal CPU tests, and
+  132 unique tests in
+  the combined run with the same optional skip. Pod same-paper runtime canary
+  remains the next acceptance step; no result has been promoted from old
+  scorecards.
 - Moved the stale local `main` to `origin/main@ba998c4`, then rebased the
   selective port onto the newer `origin/main@caf4a4e` Gate-3 update before
   publication.  The previously uncommitted Phase-1 work is preserved intact on

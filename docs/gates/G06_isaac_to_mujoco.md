@@ -170,11 +170,33 @@ only with an explicit `old scorer` label.
 
 The 2026-07-11 local Phase-1 snapshot also contained a NumPy
 `virtual_return_scorer.py` and a saved-run `termination_contract.py`.  They
-were retained as simulator-independent specifications only.  They are not
-wired into `mujoco_eval_onnx.py` or the venue sampler, so they do not alter the
-formal ruler described above.  Production parity remains a pending
-schema-v3-adapter gate, with explicit skipped integration assertions rather
-than an implicit fallback.
+were initially retained as simulator-independent specifications.  The current
+schema-v3 adapter branch now closes both production seams without modifying
+the physics-hash-bound `venue_ball_sampler.py`:
+
+- `mujoco_eval_onnx.py` delegates actual and counterfactual returns to the
+  NumPy 10 ms RK4/ball-centre-plane scorer and binds scorer source, venue YAML,
+  parameters and score spec into the execution contract;
+- `bank_exam_schedule.py` materializes a balanced, canonical JSON paper with
+  an exact per-clip quota, immutable content IDs, deterministic hold values and
+  per-attempt noise seeds. Its hashed release rule defines `H` ready-stand
+  actions followed by raw clip frame 0. MuJoCo accepts it with
+  `--exam-schedule-json`; Isaac consumes the same artifact;
+- `isaac_bank_exam.py` keeps the saved train bank untouched, installs one
+  evaluator-owned exam row per environment after a nominal-stand reset, emits
+  raw all-attempt JSON/CSV, and invalidates the whole cell on truncation.
+  Exact cells additionally verify the runtime train-bank schema/family/SHA;
+  historical legacy banks are allowed only in the explicit inexact canary lane
+  and are recorded as an inexact reason.
+
+Dependency-light verification on 2026-07-11 passed `63` adapter/audit tests
+with one optional Torch parity skip, `80` formal CPU contract tests and `132`
+unique tests in the combined contract run with the same optional skip. This is
+implementation evidence, not a gate pass:
+the shared-paper Pod canary and question-order/hash equality across both
+simulators are still pending.  M3f/M2/G1 predate exact schema-3 checkpoint
+binding, so their canary cells must say `evaluation_contract_exact=false`; only
+a fresh exact-lineage model can produce a bookable score.
 
 ```bash
 python3 -m pytest -q \

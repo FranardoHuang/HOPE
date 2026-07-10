@@ -138,7 +138,10 @@ TARGET SOURCE (--target-source, 2026-07-04): where the per-strike racket targets
                           like mode A (pos/vel/normal pass + composite) AND, for CONTACTED strikes
                           (training capture gate: pos_err < 0.095 m, approach > 0.3 m/s), the
                           virtual return of the ACHIEVED racket state vs the SAMPLED ball is
-                          rolled out (venue contact model + drag/Magnus flight) to a landing:
+                          scored by scripts/virtual_return_scorer.py: fitted contact + the Isaac
+                          metric's fixed-step RK4 drag/Magnus rollout to the ball-centre table
+                          plane. The scorer source, venue YAML, full score spec, and their hashes
+                          are bound into the execution contract and summary evidence. Therefore
                           the mode-B summary reports the landing-in-bounds/net-clear rate
                           ("回球成功率" headline) + median landing error vs the intended target,
                           and the strikes CSV gains ball/landing columns. Frames, geometry and v1
@@ -230,6 +233,13 @@ import sys as _sys
 
 _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from racket_fk_ref import racket_pos_pelvis  # noqa: E402
+import virtual_return_scorer as _virtual_return_scorer  # noqa: E402
+
+
+VIRTUAL_RETURN_SCORER_RELATIVE_PATH = (
+    "hope_training/whole_body_tracking/scripts/virtual_return_scorer.py"
+)
+BALL_PHYSICS_CONFIG_RELATIVE_PATH = "configs/ball_physics_venue.yaml"
 
 # -------------------------------------------------------------------------------------------------
 # Constants pulled from the verified training config (HOPEPingPong.yaml uniform-mode + RacketTargetCmd).
@@ -536,6 +546,7 @@ def build_evaluation_execution_contract(
     *, robot, policy, mjcf_sha256, evaluator_sha256, ready_state_contract,
     sim_dt, decimation, pd_mode, passive_damping_mode, frictionloss_mode,
     qdes_clamp, one_question_reset, plant_semantics=None, protocol_semantics=None,
+    virtual_return_scorer_contract=None,
 ):
     """Bind the actual common plant/protocol, excluding candidate identity and exam outcomes."""
     require_contract(is_sha256(mjcf_sha256), "execution contract requires a valid MJCF SHA")
@@ -590,6 +601,15 @@ def build_evaluation_execution_contract(
         "plant_semantics": dict(plant_semantics or {}),
         "protocol_semantics": dict(protocol_semantics or {}),
     }
+    if virtual_return_scorer_contract is not None:
+        scorer_contract = dict(virtual_return_scorer_contract)
+        scorer_sha = scorer_contract.pop("sha256", "")
+        require_contract(
+            is_sha256(scorer_sha)
+            and canonical_contract_sha256(scorer_contract) == scorer_sha,
+            "execution contract requires an internally consistent virtual-return scorer contract",
+        )
+        body["virtual_return_scorer_contract"] = dict(virtual_return_scorer_contract)
     body["sha256"] = canonical_contract_sha256(body)
     return body
 
@@ -616,6 +636,84 @@ def json_ready(value):
     if isinstance(value, (str, int, bool)) or value is None:
         return value
     return str(value)
+
+
+def build_virtual_return_scorer(repo_root, venue_sampler):
+    """Create the production scorer and a portable, content-addressed scoring contract.
+
+    ``venue_ball_sampler`` continues to own question/ball generation.  Scoring is evaluator-owned
+    and reads the repository's venue-fit YAML explicitly, so an environment override cannot change
+    a formal exam silently.  Paths are recorded separately in the result artifact; the hashed
+    contract uses repository-relative names and content hashes so it is stable across machines.
+    """
+
+    repo_root = os.path.abspath(os.fspath(repo_root))
+    source_path = os.path.abspath(_virtual_return_scorer.__file__)
+    expected_source_path = os.path.join(repo_root, VIRTUAL_RETURN_SCORER_RELATIVE_PATH)
+    config_path = os.path.join(repo_root, BALL_PHYSICS_CONFIG_RELATIVE_PATH)
+    require_contract(
+        os.path.isfile(source_path)
+        and os.path.isfile(expected_source_path)
+        and os.path.samefile(source_path, expected_source_path),
+        "virtual-return scorer import did not resolve to the repository-owned production source: "
+        f"imported={source_path}, expected={expected_source_path}",
+    )
+    require_contract(os.path.isfile(config_path), f"ball-physics config missing: {config_path}")
+
+    params = _virtual_return_scorer.load_venue_params(config_path)
+    spec = _virtual_return_scorer.VirtualReturnSpec(
+        table_surface_z=float(venue_sampler.table_surface_z),
+        net_x=float(venue_sampler.net_x),
+        far_x=float(venue_sampler.far_x),
+        half_width=float(venue_sampler.half_w),
+        net_height=float(venue_sampler.table.net_height),
+    )
+    scorer = _virtual_return_scorer.VirtualReturnScorer(params, spec)
+    physics_fields = (
+        "k_d", "k_m", "g", "ball_radius", "inertia_coeff", "paddle_a_t", "paddle_b_t",
+        "paddle_mu", "paddle_e_g1", "paddle_e_g2",
+    )
+    spec_fields = (
+        "table_surface_z", "net_x", "far_x", "half_width", "net_height", "capture_radius",
+        "min_approach_speed", "rollout_h", "rollout_steps",
+    )
+    contract = {
+        "schema_version": 1,
+        "kind": "hope_virtual_return_scorer_contract",
+        "implementation": "virtual_return_scorer.VirtualReturnScorer",
+        "source": {
+            "repo_relative_path": VIRTUAL_RETURN_SCORER_RELATIVE_PATH,
+            "sha256": sha256_file(source_path),
+        },
+        "physics_config": {
+            "repo_relative_path": BALL_PHYSICS_CONFIG_RELATIVE_PATH,
+            "sha256": sha256_file(config_path),
+        },
+        "physics_parameters": {
+            name: float(getattr(params, name)) for name in physics_fields
+        },
+        "score_spec": {
+            name: (int(getattr(spec, name)) if name == "rollout_steps"
+                   else float(getattr(spec, name)))
+            for name in spec_fields
+        },
+    }
+    contract["sha256"] = canonical_contract_sha256(contract)
+    return scorer, contract
+
+
+def score_virtual_return(scorer, strike, racket_pos_w, racket_vel_w, racket_normal_w, pos_err):
+    """Production adapter from a sampled exam strike to the authoritative scorer API."""
+
+    return scorer.score(
+        ball_vel=strike.ball_vel_w,
+        ball_spin=strike.ball_spin_w,
+        racket_pos=racket_pos_w,
+        racket_vel=racket_vel_w,
+        racket_normal=racket_normal_w,
+        pos_err=pos_err,
+        intended_landing_xy=strike.intended_landing_xy,
+    )
 
 
 def inspect_onnx_obs_normalization(onnx_path):
@@ -2343,6 +2441,7 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 viewer=None, realtime=True,
                 vel_ranges_per_clip=None, pos_ranges_per_clip=None, df=None,
                 reset_mode="teleport", hold_range=(0, 100), venue_sampler=None,
+                virtual_return_scorer=None,
                 switch_stress=0.0, qdes_clamp=False, hold_ref="clip", hp_cfg=None,
                 action_noise_rng=None, bank_one_question_reset=False,
                 ready_state_contract=None, mjcf_sha256="", execution_contract_sha256=""):
@@ -2377,6 +2476,10 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         )
     # --- mode B (venue-balls): per-rollout accumulators + the current swing's sampled ball -------
     require_contract(venue_sampler is None or df is None, "venue-balls + --deploy-faithful unsupported (v1)")
+    require_contract(
+        (venue_sampler is None) == (virtual_return_scorer is None),
+        "venue/bank sampling and authoritative virtual-return scoring must be enabled together",
+    )
     require_contract(
         not bank_schedule or not switch_stress,
         "immutable BankExam schedule is incompatible with switch stress",
@@ -2853,18 +2956,19 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 attempt_returned = False
                 if venue_sampler is not None and cur_venue_strike[0] is not None:
                     vs = cur_venue_strike[0]
-                    ret = venue_sampler.score_return(
-                        vs, racket_pos_w=robot.racket_pos(), racket_vel_w=act_vel_w,
-                        racket_normal_w=nrm, pos_err=pos_err)
+                    ret = score_virtual_return(
+                        virtual_return_scorer, vs, racket_pos_w=robot.racket_pos(),
+                        racket_vel_w=act_vel_w, racket_normal_w=nrm, pos_err=pos_err)
                     venue["all"].add(ret, tgt_speed)
                     venue[CLIP_NAMES[clip]].add(ret, tgt_speed)
                     attempt_hit = bool(ret.contacted)
                     attempt_returned = bool(ret.landed_ok)
                     # COUNTERFACTUAL: same achieved pos/vel/pos_err, DEMANDED normal swapped in —
                     # isolates the normal channel (deterministic rescore, no RNG involved).
-                    ret_cf = venue_sampler.score_return(
-                        vs, racket_pos_w=robot.racket_pos(), racket_vel_w=act_vel_w,
-                        racket_normal_w=vs.target_normal_w, pos_err=pos_err)
+                    ret_cf = score_virtual_return(
+                        virtual_return_scorer, vs, racket_pos_w=robot.racket_pos(),
+                        racket_vel_w=act_vel_w, racket_normal_w=vs.target_normal_w,
+                        pos_err=pos_err)
                     venue_cf["all"].add(ret_cf, tgt_speed)
                     venue_cf[CLIP_NAMES[clip]].add(ret_cf, tgt_speed)
                     lx = "" if math.isnan(ret.landing_xy[0]) else f"{ret.landing_xy[0]:.4f}"
@@ -3528,6 +3632,11 @@ def main():
                    help="[bank] fixed total number of stratified exam questions, sampled without "
                         "replacement when the immutable schedule is materialized. Default: every "
                         "exam-bank row exactly once.")
+    p.add_argument("--exam-schedule-json", default=None,
+                   help="[bank] shared balanced schema-v3 schedule artifact produced by the "
+                        "evaluator-owned BankExam adapter. The artifact is content-addressed, "
+                        "validated against the complete exam bank, and consumed unchanged by "
+                        "both MuJoCo and Isaac. Mutually exclusive with --exam-schedule-k.")
     p.add_argument("--exam-continuity-diagnostic", action="store_true",
                    help="[bank, DIAGNOSTIC ONLY] keep robot/action state across scheduled questions "
                         "instead of the formal one-question/one-reset ruler. Uses the same finite "
@@ -3661,9 +3770,15 @@ def main():
                              "(v1): the df swing scheduler owns its own resample path.")
         if args.exam_schedule_k is not None and args.exam_schedule_k <= 0:
             raise SystemExit("[FATAL] --exam-schedule-k must be a positive integer")
-    elif args.exam_schedule_k is not None or args.exam_continuity_diagnostic:
+        if args.exam_schedule_json and args.exam_schedule_k is not None:
+            raise SystemExit(
+                "[FATAL] --exam-schedule-json and --exam-schedule-k are mutually exclusive"
+            )
+    elif (args.exam_schedule_k is not None or args.exam_schedule_json
+          or args.exam_continuity_diagnostic):
         raise SystemExit(
-            "[FATAL] --exam-schedule-k/--exam-continuity-diagnostic require --target-source bank"
+            "[FATAL] --exam-schedule-k/--exam-schedule-json/"
+            "--exam-continuity-diagnostic require --target-source bank"
         )
     ready_state_mode = resolve_ready_state_mode(
         args.ready_state,
@@ -4389,45 +4504,9 @@ def main():
         "nonzero_physx_frictionloss_direct_number_proxy": friction_proxy,
         "formal_training_execution_metadata_validated": bool(formal_execution_contract_ok),
     }
-    execution_contract = build_evaluation_execution_contract(
-        robot=robot,
-        policy=policy,
-        mjcf_sha256=mjcf_sha256,
-        evaluator_sha256=sha256_file(os.path.abspath(__file__)),
-        ready_state_contract=ready_state_contract,
-        sim_dt=args.sim_dt,
-        decimation=args.decimation,
-        pd_mode=pd_mode,
-        passive_damping_mode=passive_damping_mode,
-        frictionloss_mode=frictionloss_mode,
-        qdes_clamp=qdes_clamp,
-        one_question_reset=bank_one_question_reset,
-        plant_semantics=plant_semantics,
-        protocol_semantics={
-            "target_source": args.target_source,
-            "reset_mode": reset_mode,
-            "hold_ref": hold_ref,
-            "hold_steps_range": [int(value) for value in hold_steps_range],
-            "episode_length_s": float(episode_length_s),
-            "max_episode_control_steps": int(max_ep_len),
-            "termination_anchor_pos_z_m": float(TERM_ANCHOR_POS_Z),
-            "termination_anchor_orientation_projected_gravity_z": float(TERM_ANCHOR_ORI),
-            "termination_end_effector_z_m": float(TERM_EE_POS_Z),
-            "absolute_fall_tilt_rad": float(DF_FALL_TILT_RAD),
-            "absolute_fall_root_z_min_m": float(DF_FALL_ROOT_Z_MIN),
-            "strike_position_error_threshold_m": float(STRIKE_POS_THRESH),
-            "strike_velocity_error_threshold_mps": float(STRIKE_VEL_THRESH),
-            "strike_normal_error_threshold_deg": float(STRIKE_NORMAL_THRESH_DEG),
-            "formal_bank_execution_metadata_validated": bool(formal_execution_contract_ok),
-        },
-    )
     print(
         f"[mj-sim2sim] ready-state mode={ready_state_contract['mode']} "
         f"sha256={ready_state_contract['sha256']}"
-    )
-    print(
-        f"[mj-sim2sim] mjcf_sha256={mjcf_sha256} "
-        f"execution_contract_sha256={execution_contract['sha256']}"
     )
 
     # GROUNDING check (2026-07-03): this gate's target boxes (POS/VEL_RANGE_PER_CLIP) and the
@@ -4481,7 +4560,10 @@ def main():
 
     # --- MODE B (venue-balls) sampler: lazy import so mode A never needs hope_planner ----------
     venue_sampler = None
+    shared_schedule_artifact = None
+    exam_bank_sha_before = None
     if args.target_source == "bank":
+        exam_bank_sha_before = sha256_file(args.exam_bank)
         formal_bank_fields_ok = (
             formal_execution_contract_ok
             and policy.stage1_question_bank_exact == "1"
@@ -4528,6 +4610,38 @@ def main():
             landing_x_range=args.venue_landing_x_range,
             landing_y_range=tuple(args.venue_landing_y_range),
             speed_budget=args.venue_speed_budget, max_tries=args.venue_max_tries, **kw)
+        exam_bank_sha_after = sha256_file(args.exam_bank)
+        require_contract(
+            exam_bank_sha_before == exam_bank_sha_after == venue_sampler.bank_sha256,
+            "exam bank changed while the validated arrays/sampler were being loaded: "
+            f"before={exam_bank_sha_before}, after={exam_bank_sha_after}, "
+            f"sampler={venue_sampler.bank_sha256}",
+        )
+        if args.exam_schedule_json:
+            import bank_exam_schedule as _bes
+
+            _question_ids = _bes.derive_sampler_question_ids(
+                venue_sampler, allow_inexact_contract=args.allow_inexact_contract
+            )
+            shared_schedule_artifact = _bes.load_schedule_artifact(
+                args.exam_schedule_json,
+                expected_bank_sha256=venue_sampler.bank_sha256,
+                expected_clip_names=venue_sampler.clip_names,
+                expected_question_ids=_question_ids,
+            )
+            _bes.install_schedule_on_sampler(
+                venue_sampler,
+                shared_schedule_artifact,
+                allow_inexact_contract=args.allow_inexact_contract,
+            )
+            hold_steps_range = tuple(shared_schedule_artifact.hold_range)
+            print(
+                "[mj-sim2sim] shared schema-v3 exam schedule installed: "
+                f"{os.path.abspath(args.exam_schedule_json)} "
+                f"K={len(venue_sampler.schedule)} "
+                f"quota={shared_schedule_artifact.per_clip_quota}/clip "
+                f"sha256={shared_schedule_artifact.schedule_sha256}"
+            )
         # A question either completes its hold+clip, or the episode timeout/fall finalizes it sooner.
         # Multiplying that proven per-attempt upper bound by K makes --steps a safety cap rather than
         # the experiment's denominator.  Explicit smaller caps are allowed only to fail loudly if K
@@ -4611,6 +4725,72 @@ def main():
               f"NOTE: human-height contacts, mostly ABOVE the trained strike boxes (realism test)")
         print(f"[mj-sim2sim]   v1 caveat: independent box sampling; the venue correlations "
               f"(corr(vx,vz)=-0.44 etc.) are NOT enforced, only the sign structure (vx<0)")
+
+    virtual_return_scorer = None
+    virtual_return_scorer_contract = None
+    if venue_sampler is not None:
+        virtual_return_scorer, virtual_return_scorer_contract = build_virtual_return_scorer(
+            repo, venue_sampler
+        )
+
+    execution_contract = build_evaluation_execution_contract(
+        robot=robot,
+        policy=policy,
+        mjcf_sha256=mjcf_sha256,
+        evaluator_sha256=sha256_file(os.path.abspath(__file__)),
+        ready_state_contract=ready_state_contract,
+        sim_dt=args.sim_dt,
+        decimation=args.decimation,
+        pd_mode=pd_mode,
+        passive_damping_mode=passive_damping_mode,
+        frictionloss_mode=frictionloss_mode,
+        qdes_clamp=qdes_clamp,
+        one_question_reset=bank_one_question_reset,
+        plant_semantics=plant_semantics,
+        protocol_semantics={
+            "target_source": args.target_source,
+            "reset_mode": reset_mode,
+            "hold_ref": hold_ref,
+            "hold_steps_range": [int(value) for value in hold_steps_range],
+            "exam_hold_semantics": (
+                shared_schedule_artifact.hold_semantics
+                if shared_schedule_artifact is not None
+                else "legacy-sampler-unspecified"
+            ),
+            "tracking_guards_ignored_during_hold": bool(training_hold_protocol),
+            "episode_length_s": float(episode_length_s),
+            "max_episode_control_steps": int(max_ep_len),
+            "termination_anchor_pos_z_m": float(TERM_ANCHOR_POS_Z),
+            "termination_anchor_orientation_projected_gravity_z": float(TERM_ANCHOR_ORI),
+            "termination_end_effector_z_m": float(TERM_EE_POS_Z),
+            "absolute_fall_tilt_rad": float(DF_FALL_TILT_RAD),
+            "absolute_fall_root_z_min_m": float(DF_FALL_ROOT_Z_MIN),
+            "strike_position_error_threshold_m": float(STRIKE_POS_THRESH),
+            "strike_velocity_error_threshold_mps": float(STRIKE_VEL_THRESH),
+            "strike_normal_error_threshold_deg": float(STRIKE_NORMAL_THRESH_DEG),
+            "formal_bank_execution_metadata_validated": bool(formal_execution_contract_ok),
+            "exam_schedule_schema_version": (
+                int(shared_schedule_artifact.schema_version)
+                if shared_schedule_artifact is not None else (1 if venue_sampler is not None else None)
+            ),
+            "exam_schedule_sha256": (
+                str(venue_sampler.schedule_sha256) if venue_sampler is not None else None
+            ),
+        },
+        virtual_return_scorer_contract=virtual_return_scorer_contract,
+    )
+    print(
+        f"[mj-sim2sim] mjcf_sha256={mjcf_sha256} "
+        f"execution_contract_sha256={execution_contract['sha256']}"
+    )
+    if virtual_return_scorer_contract is not None:
+        print(
+            "[mj-sim2sim] authoritative virtual-return scorer: "
+            f"contract_sha256={virtual_return_scorer_contract['sha256']} "
+            f"source_sha256={virtual_return_scorer_contract['source']['sha256']} "
+            f"physics_config_sha256="
+            f"{virtual_return_scorer_contract['physics_config']['sha256']}"
+        )
 
     # DIAGNOSTIC: per-clip eval target-velocity boxes (clip 0 = forehand, clip 1 = backhand). None ->
     # faithful baseline (single training box for both clips). num_clips>2 reuse the backhand box.
@@ -4803,7 +4983,9 @@ def main():
                           vel_ranges_per_clip=vel_ranges_per_clip,
                           pos_ranges_per_clip=pos_ranges_per_clip, df=df_cfg,
                           reset_mode=reset_mode, hold_range=hold_steps_range,
-                          venue_sampler=venue_sampler, switch_stress=args.switch_stress,
+                          venue_sampler=venue_sampler,
+                          virtual_return_scorer=virtual_return_scorer,
+                          switch_stress=args.switch_stress,
                           qdes_clamp=qdes_clamp, hold_ref=hold_ref, hp_cfg=hp_cfg,
                           action_noise_rng=action_noise_rng,
                           bank_one_question_reset=bank_one_question_reset,
@@ -4968,7 +5150,7 @@ def main():
     if venue_sampler is not None:
         print("\nMODE B — VENUE-BALL REALISM (incoming balls ~ venue matchlike spec; racket "
               "targets = StrikeSpec demands;\n         return landing = achieved racket state x "
-              "sampled ball through the venue contact+flight model)")
+              "sampled ball through the authoritative Isaac-parity virtual-return scorer)")
         print("-" * 92)
         print(f"{'metric':28s}" + "".join(cols))
 
@@ -5128,6 +5310,21 @@ def main():
             "path": os.path.abspath(__import__("venue_ball_sampler").__file__),
             "sha256": sha256_file(os.path.abspath(__import__("venue_ball_sampler").__file__)),
         }
+        input_artifacts["virtual_return_scorer_source"] = {
+            "path": os.path.abspath(_virtual_return_scorer.__file__),
+            "sha256": virtual_return_scorer_contract["source"]["sha256"],
+        }
+        input_artifacts["virtual_return_scorer_physics_config"] = {
+            "path": os.path.abspath(virtual_return_scorer.params.source_path),
+            "sha256": virtual_return_scorer_contract["physics_config"]["sha256"],
+        }
+        if args.exam_schedule_json:
+            input_artifacts["exam_schedule_artifact"] = {
+                "path": os.path.abspath(args.exam_schedule_json),
+                "sha256": sha256_file(args.exam_schedule_json),
+                "schedule_sha256": shared_schedule_artifact.schedule_sha256,
+                "schema_version": shared_schedule_artifact.schema_version,
+            }
         if getattr(venue_sampler, "bank_meta", None):
             input_artifacts["bank_physics_contract_sha256"] = venue_sampler.bank_meta.get(
                 "physics_contract_sha256"
@@ -5160,9 +5357,11 @@ def main():
             },
         },
     }
+    if virtual_return_scorer_contract is not None:
+        summary["virtual_return_scorer_contract"] = virtual_return_scorer_contract
+        summary["virtual_return_scorer_contract_sha256"] = virtual_return_scorer_contract["sha256"]
     if args.target_source == "bank":
-        summary["exam_schedule"] = {
-            "schema_version": 1,
+        schedule_runtime = {
             "sha256": venue_sampler.schedule_sha256,
             "bank_sha256": venue_sampler.bank_sha256,
             "seed": venue_sampler.schedule_seed,
@@ -5191,6 +5390,19 @@ def main():
                 for item in venue_sampler.schedule
             ],
         }
+        if shared_schedule_artifact is not None:
+            import bank_exam_schedule as _bes
+
+            schedule_runtime["schema_version"] = shared_schedule_artifact.schema_version
+            schedule_runtime["shared_artifact"] = _bes.artifact_document(
+                shared_schedule_artifact
+            )
+            schedule_runtime["artifact_path"] = os.path.abspath(args.exam_schedule_json)
+            schedule_runtime["artifact_file_sha256"] = sha256_file(args.exam_schedule_json)
+        else:
+            schedule_runtime["schema_version"] = 1
+            schedule_runtime["shared_artifact"] = None
+        summary["exam_schedule"] = schedule_runtime
     summary_tmp = summary_path + ".tmp"
     with open(summary_tmp, "w", encoding="utf-8") as stream:
         json.dump(json_ready(summary), stream, ensure_ascii=False, sort_keys=True, indent=2,

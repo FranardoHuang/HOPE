@@ -13,7 +13,7 @@ import yaml
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "termination_contract.py"
-ISAAC_EVALUATOR = SCRIPT.parent / "eval_deterministic.py"
+ISAAC_EVALUATOR = SCRIPT.parent / "isaac_bank_exam.py"
 SPEC = importlib.util.spec_from_file_location("termination_contract_tested", SCRIPT)
 termination = importlib.util.module_from_spec(SPEC)
 sys.modules["termination_contract_tested"] = termination
@@ -29,7 +29,10 @@ TRACKED = [
 ]
 
 
-def _document(*, envelope_as_penalty: bool = False, upper_only: bool = False):
+def _document(
+    *, envelope_as_penalty: bool = False, upper_only: bool = False,
+    hold_aware: bool = False,
+):
     terms = {
         "time_out": {
             "func": "isaaclab.envs.mdp.terminations:time_out",
@@ -75,6 +78,16 @@ def _document(*, envelope_as_penalty: bool = False, upper_only: bool = False):
             "time_out": False,
         },
     }
+    if hold_aware:
+        for name, function in (
+            ("anchor_pos", "bad_anchor_pos_z_only_hold_aware"),
+            ("anchor_ori", "bad_anchor_ori_hold_aware"),
+            ("ee_body_pos", "bad_motion_body_pos_z_only_hold_aware"),
+        ):
+            terms[name]["func"] = (
+                f"whole_body_tracking.tasks.tracking.mdp.hope_rewards:{function}"
+            )
+            terms[name]["params"]["ignore_hold"] = True
     if envelope_as_penalty:
         terms["anchor_pos"] = None
         terms["ee_body_pos"] = None
@@ -184,6 +197,33 @@ def test_upper_only_contract_keeps_wrist_guards_and_drops_ankles(tmp_path: Path)
     assert runtime["ee_body_pos_z"]["indices"] == [3, 4]
 
 
+def test_current_hold_aware_tracking_terms_are_frozen_and_suppressed_only_in_hold(
+    tmp_path: Path,
+):
+    env = _write(tmp_path / "env.yaml", _document(hold_aware=True))
+    contract = termination.build_termination_contract(env)
+    assert contract["schema"] == "hope.phase1.termination-contract.v3"
+    for name in termination.TRACKING_TERMS:
+        assert contract["terms"][name]["ignore_hold"] is True
+        assert contract["terms"][name]["function"].endswith("_hold_aware")
+    runtime = termination.runtime_termination_settings(contract, TRACKED)
+    assert termination.tracking_reset_reasons(
+        runtime,
+        anchor_pos_z_error=99.0,
+        anchor_ori_error=99.0,
+        ee_body_pos_z_errors=[99.0] * 4,
+        in_hold=True,
+    ) == []
+    assert termination.tracking_reset_reasons(
+        runtime,
+        anchor_pos_z_error=99.0,
+        anchor_ori_error=99.0,
+        ee_body_pos_z_errors=[99.0] * 4,
+        in_hold=False,
+    ) == ["anchor_pos", "anchor_ori", "ee_body_pos"]
+    termination.verify_runtime_env_cfg(contract, _runtime_cfg(_document(hold_aware=True)))
+
+
 @pytest.mark.parametrize(
     "mutate, match",
     [
@@ -200,6 +240,13 @@ def test_upper_only_contract_keeps_wrist_guards_and_drops_ankles(tmp_path: Path)
          "time_out must be false"),
         (lambda d: d["terminations"]["anchor_pos"]["params"].update({"threshold": True}),
          "YAML number"),
+        (lambda d: (
+            d["terminations"]["anchor_pos"].update({
+                "func": "whole_body_tracking.tasks.tracking.mdp.hope_rewards:"
+                        "bad_anchor_pos_z_only_hold_aware"
+            }),
+            d["terminations"]["anchor_pos"]["params"].update({"ignore_hold": False}),
+         ), "ignore_hold"),
         (lambda d: d["terminations"]["ee_body_pos"]["params"].update({"body_names": [3]}),
          "non-empty strings"),
         (lambda d: d["terminations"]["anchor_ori"]["params"].update(
@@ -314,13 +361,10 @@ def test_runtime_pickle_episode_and_function_identity_mismatches_fail(tmp_path: 
         termination.verify_runtime_env_cfg(contract, wrong_function)
 
 
-@pytest.mark.skip(
-    reason="schema-v3 Isaac BankExam adapter is not wired yet; termination_contract is library-only"
-)
 def test_isaac_formal_evaluator_checks_pickle_yaml_before_environment_construction():
     source = ISAAC_EVALUATOR.read_text()
     load = source.index("env_cfg = pickle.load(stream)")
-    parity = source.index("verify_runtime_env_cfg(saved_termination_contract, env_cfg)")
+    parity = source.index("verify_runtime_env_cfg(termination, env_cfg)")
     construct = source.index("env = gym.make(task_id")
     assert load < parity < construct
 

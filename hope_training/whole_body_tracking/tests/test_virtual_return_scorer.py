@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -15,7 +17,8 @@ SCRIPTS = ROOT / "hope_training" / "whole_body_tracking" / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from venue_ball_sampler import VenueBallSampler, VenueStrike  # noqa: E402
+import mujoco_eval_onnx as mujoco_eval  # noqa: E402
+from venue_ball_sampler import VenueStrike  # noqa: E402
 from virtual_return_scorer import (  # noqa: E402
     VirtualReturnScorer,
     VirtualReturnSpec,
@@ -46,6 +49,22 @@ GOLDEN = dict(
     ball_vel=np.array([-1.362673, -0.006527, -0.695381]),
     ball_spin=np.zeros(3),
 )
+
+
+def _strike() -> VenueStrike:
+    return VenueStrike(
+        clip=0,
+        ball_pos_w=GOLDEN["racket_pos"].copy(),
+        ball_vel_w=GOLDEN["ball_vel"].copy(),
+        ball_spin_w=GOLDEN["ball_spin"].copy(),
+        intended_landing_xy=np.array([2.45, -0.06]),
+        target_pos_w=GOLDEN["racket_pos"].copy(),
+        target_vel_w=GOLDEN["racket_vel"].copy(),
+        target_normal_w=GOLDEN["racket_normal"].copy(),
+        spec_speed=float(np.linalg.norm(GOLDEN["racket_vel"])),
+        spec_iters=0,
+        tries=1,
+    )
 
 
 def test_golden_contact_surface_net_and_opponent_outcome():
@@ -155,31 +174,47 @@ def test_regression_old_euler_bare_surface_was_about_16mm_wrong():
     assert error_m > 0.01
 
 
-@pytest.mark.skip(
-    reason="venue_ball_sampler still owns the production scorer; parity adapter is queued"
-)
-def test_venue_sampler_public_score_api_delegates_to_authoritative_scorer():
-    """Bank and venue exam paths both inherit the corrected scorer via the existing API."""
+def test_mujoco_production_path_delegates_to_authoritative_scorer():
+    """The evaluator, not the physics-hash-bound sampler, owns both production score calls."""
 
-    sampler = VenueBallSampler(
-        str(ROOT),
-        ref_normal_per_clip=np.array([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
-        num_clips=2,
+    sentinel = object()
+
+    class RecordingScorer:
+        def score(self, **kwargs):
+            self.kwargs = kwargs
+            return sentinel
+
+    scorer = RecordingScorer()
+    strike = _strike()
+    got = mujoco_eval.score_virtual_return(
+        scorer,
+        strike,
+        GOLDEN["racket_pos"],
+        GOLDEN["racket_vel"],
+        GOLDEN["racket_normal"],
+        pos_err=0.01,
     )
-    strike = VenueStrike(
-        clip=0,
-        ball_pos_w=GOLDEN["racket_pos"].copy(),
-        ball_vel_w=GOLDEN["ball_vel"].copy(),
-        ball_spin_w=GOLDEN["ball_spin"].copy(),
-        intended_landing_xy=np.array([2.45, -0.06]),
-        target_pos_w=GOLDEN["racket_pos"].copy(),
-        target_vel_w=GOLDEN["racket_vel"].copy(),
-        target_normal_w=GOLDEN["racket_normal"].copy(),
-        spec_speed=float(np.linalg.norm(GOLDEN["racket_vel"])),
-        spec_iters=0,
-        tries=1,
-    )
-    got = sampler.score_return(
+    assert got is sentinel
+    assert scorer.kwargs["ball_vel"] is strike.ball_vel_w
+    assert scorer.kwargs["ball_spin"] is strike.ball_spin_w
+    assert scorer.kwargs["racket_pos"] is GOLDEN["racket_pos"]
+    assert scorer.kwargs["racket_vel"] is GOLDEN["racket_vel"]
+    assert scorer.kwargs["racket_normal"] is GOLDEN["racket_normal"]
+    assert scorer.kwargs["pos_err"] == 0.01
+    assert scorer.kwargs["intended_landing_xy"] is strike.intended_landing_xy
+
+    production_source = inspect.getsource(mujoco_eval.run_rollout)
+    assert production_source.count("score_virtual_return(") == 2
+    assert "venue_sampler.score_return" not in production_source
+
+
+def test_mujoco_production_adapter_has_direct_result_parity():
+    """Actual and counterfactual adapters preserve every authoritative score field exactly."""
+
+    strike = _strike()
+    scorer = _scorer()
+    got = mujoco_eval.score_virtual_return(
+        scorer,
         strike,
         GOLDEN["racket_pos"],
         GOLDEN["racket_vel"],
@@ -202,6 +237,74 @@ def test_venue_sampler_public_score_api_delegates_to_authoritative_scorer():
     assert got.on_opponent == direct.on_opponent
     assert got.landed_ok == direct.landed_ok
     np.testing.assert_array_equal(got.landing_xy, direct.landing_xy)
+    np.testing.assert_array_equal(got.outgoing_vel, direct.outgoing_vel)
+    np.testing.assert_array_equal(got.outgoing_spin, direct.outgoing_spin)
+    assert got.approach_speed == direct.approach_speed
+    assert got.flight_time == direct.flight_time
+    assert got.net_z == direct.net_z
+    assert got.land_err == direct.land_err
+
+
+def test_production_scorer_contract_binds_source_config_and_score_spec():
+    sampler_geometry = SimpleNamespace(
+        table_surface_z=0.76,
+        net_x=1.87,
+        far_x=3.24,
+        half_w=0.7625,
+        table=SimpleNamespace(net_height=0.1525),
+    )
+    scorer, contract = mujoco_eval.build_virtual_return_scorer(ROOT, sampler_geometry)
+
+    body = dict(contract)
+    recorded_sha = body.pop("sha256")
+    assert mujoco_eval.canonical_contract_sha256(body) == recorded_sha
+    assert contract["source"]["repo_relative_path"].endswith("virtual_return_scorer.py")
+    assert contract["physics_config"]["repo_relative_path"] == "configs/ball_physics_venue.yaml"
+    assert contract["physics_config"]["sha256"] == mujoco_eval.sha256_file(
+        ROOT / "configs" / "ball_physics_venue.yaml"
+    )
+    assert contract["score_spec"]["rollout_h"] == 0.01
+    assert contract["score_spec"]["rollout_steps"] == 100
+    assert scorer.contact_plane_z == 0.78
+
+    robot = SimpleNamespace(
+        model=SimpleNamespace(
+            dof_damping=np.zeros(1),
+            dof_frictionloss=np.zeros(1),
+            dof_armature=np.zeros(1),
+            opt=SimpleNamespace(integrator=0),
+        ),
+        vadr=np.array([0]),
+        ctrl_lo=np.array([-1.0]),
+        ctrl_hi=np.array([1.0]),
+        soft_jnt_lo=np.array([-1.0]),
+        soft_jnt_hi=np.array([1.0]),
+    )
+    policy = SimpleNamespace(
+        obs_dim=1,
+        joint_names=("joint",),
+        default_q=np.zeros(1),
+        action_scale=np.ones(1),
+        kp=np.ones(1),
+        kd=np.ones(1),
+    )
+    execution = mujoco_eval.build_evaluation_execution_contract(
+        robot=robot,
+        policy=policy,
+        mjcf_sha256="a" * 64,
+        evaluator_sha256="b" * 64,
+        ready_state_contract={"mode": "test", "sha256": "c" * 64},
+        sim_dt=0.005,
+        decimation=4,
+        pd_mode="implicit",
+        passive_damping_mode="zero",
+        frictionloss_mode="zero",
+        qdes_clamp=True,
+        one_question_reset=True,
+        virtual_return_scorer_contract=contract,
+    )
+    assert execution["virtual_return_scorer_contract"] == contract
+    assert execution["sha256"] != recorded_sha
 
 
 def test_audited_training_callsite_still_uses_ball_center_plane():

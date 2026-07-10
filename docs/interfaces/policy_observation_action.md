@@ -139,9 +139,25 @@ and the source checkpoint/contract hashes. Older artifacts may only be opened un
 no-publish diagnostics.
 
 Formal evaluation additionally binds runtime facts that do not belong in the
-training ONNX: immutable question schedule, common MJCF `stand` ready-state,
-MJCF content and resolved MuJoCo execution-contract SHA. A teacher-reference
-reset or direct PhysX-friction-number proxy forces
+training ONNX: immutable question schedule, bank/source-family SHA, per-attempt
+noise seed and hold, ready-state hash, scorer/physics source and the resolved
+simulator execution contract. The schedule artifact contains content-addressed
+atomic question IDs and an exact per-clip quota; both simulator legs must emit
+the same schedule SHA and ordered IDs. `hold_steps=H` means exactly `H` policy
+actions on the ready-stand reference followed by one action on raw clip frame
+0; this release-frame rule is hashed into the schedule artifact.
+
+The Isaac companion evaluator does not add an actor term or change the action
+contract. It restores the saved train-split command, performs one nominal
+stand reset, then installs the evaluator-owned exam timing and the complete
+atomic row (contact, incoming velocity/spin, demanded velocity/normal) before
+re-reading the first actor observation. One environment owns one schedule
+item; there is no cursor, wrap or replacement question. Physical falls, guard
+resets and timeouts remain rows in the original denominator, while any
+external truncation invalidates the whole cell. The MuJoCo leg resets from the
+common MJCF `stand` keyframe and consumes the same artifact. A
+teacher-reference reset, direct PhysX-friction-number proxy or historical
+checkpoint without exact train-family binding forces
 `evaluation_contract_exact=false`.
 
 ## Deploy-Available Signal Set
