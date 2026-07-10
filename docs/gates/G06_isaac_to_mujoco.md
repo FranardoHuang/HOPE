@@ -233,6 +233,14 @@ next opportunity, a row counts only if it legally returns and naturally
 completes its swing. A post-strike guard preserves the return result but fails
 recovery. The final paper row is excluded from this product denominator.
 
+The completed q50 carry-state cells produced return-and-recover rates of
+70/99 for M3f and 30/99 for M2. Overall returns were 82/100 and 40/100; no
+absolute physical fall occurred, while tracking guards/timeouts remained
+failed opportunities. Summary SHAs are `091bd045...0e6ea` and
+`5658b7cc...b8774`. This is useful candidate ranking but remains an inexact
+continuity diagnostic; Isaac continuous and a fresh exact-lineage policy are
+still required for gate completion.
+
 ```bash
 python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_bank_exam_schedule.py \

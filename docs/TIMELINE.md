@@ -1230,5 +1230,6 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    均 `0/10`,因此卡在 canary。存活臂 50/侧 clean: M3f Isaac/MuJoCo `99/100 /
    91/100`,M2 `86/100 / 51/100`;两臂的 5% 动作噪声和第二评估 seed 也已补齐。
    全部历史臂仍 `evaluation_contract_exact=false`,不冒充正式基线;详细 SHA/逐侧表见
-   `PHASE1_SCHEMA3_RESULTS_2026-07-11.md`。MuJoCo 连续卷新增“上台且恢复到下一球”合取
-   指标;实体下一球时间线未接好前,Isaac 单题并行适配器不会被改名为连续球。
+   `PHASE1_SCHEMA3_RESULTS_2026-07-11.md`。MuJoCo 100 题 carry-state 连续卷:“上台且恢复到
+   下一球” M3f=`70/99`,M2=`30/99`,物理摔倒均 0,超时/跟踪 guard 不删分母。实体下一球
+   时间线未接好前,Isaac 单题并行适配器不会被改名为连续球。

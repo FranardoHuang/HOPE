@@ -110,6 +110,14 @@ Use this file for short project-state updates that future humans and agents need
   remain diagnostic-only. Isaac's one-env-per-question adapter is not
   continuous play and will not be mislabeled while its physical next-ball
   timeline remains unimplemented.
+- Completed the seed-0 q50 MuJoCo carry-state cells. M3f reached exact on
+  82/100, returned 82/100 and both returned+recovered into the scheduled next
+  opportunity on 70/99; M2 was 86/100, 40/100 and 30/99. There were no absolute
+  physical falls. M3f/M2 recorded 9/3 tracking guards and 20/30 episode
+  timeouts, all retained in the paper. Result SHAs are `091bd045...0e6ea` and
+  `5658b7cc...b8774`; full per-side/finalize counts are in the Phase-1 results
+  report. This closes the available MuJoCo continuous diagnostic, not the
+  still-missing Isaac physical next-ball timeline.
 - Moved the stale local `main` to `origin/main@ba998c4`, then rebased the
   selective port onto the newer `origin/main@caf4a4e` Gate-3 update before
   publication.  The previously uncommitted Phase-1 work is preserved intact on

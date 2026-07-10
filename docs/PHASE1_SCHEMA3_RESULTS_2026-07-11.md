@@ -97,6 +97,26 @@ hold and attempt seed. An early M2 q50 result was discarded and rerun because a
 parallel task moved the checkout during that cell; only the stable-checkout
 `723322b4...5a01` result above is evidence.
 
+## MuJoCo carry-state continuity diagnostic
+
+This is not the one-question ruler: `--exam-continuity-diagnostic` starts from
+the common stand state once, then carries physical state and last action across
+the same 100-row seed-0 paper. Episode timeout/guard recovery may reset an
+episode, but the failed opportunity stays in the paper denominator. The cell
+is always `evaluation_contract_exact=false`.
+
+| Candidate | Exact reach | Return FH / BH / all | Composite / attempt | Physical / guard | Episode timeouts | Recovered to next | Returned and recovered to next |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| M3f | 82/100 | 46/50 / 36/50 / 82/100 | 76/100 | 0 / 9 | 20 | 70/99 | 70/99 = 70.71% |
+| M2 | 86/100 | 6/50 / 34/50 / 40/100 | 25/100 | 0 / 3 | 30 | 66/99 | 30/99 = 30.30% |
+
+M3f recovered after 70 of the 81 returns that had a scheduled next row
+(`86.42%` conditional); M2 recovered after 30 of 39 (`76.92%`). The terminal
+paper row is intentionally absent from the 99-row product denominator. M3f
+summary SHA is `091bd04564970353f7fe2d38f7020b7b4f16d82cecbcbca1174db5e70f30e6ea`;
+M2 summary SHA is
+`5658b7cc1288bcbad456f61d3863e6a7eaa546a51ab0a711bf80bc7bf3db8774`.
+
 ## Current decision and remaining work
 
 M3f is the clear historical diagnostic winner; M2 remains the common baseline;
@@ -104,9 +124,8 @@ G1 is a useful known-bad backhand control. Cross-engine absolute rates differ,
 especially for M2 forehand, which is expected to remain an open parity issue
 until a fresh exact-lineage export binds the real execution/plant contract.
 
-The fixed-point single-question, noise and evaluation-seed slices are complete.
-MuJoCo carry-state continuity is diagnostic-only and is being run separately
-with a product `return_and_recover_rate`. Isaac continuous play still requires
+The fixed-point single-question, noise, evaluation-seed and MuJoCo carry-state
+diagnostic slices are complete. Isaac continuous play still requires
 the physical serve/next-ball timeline identified in `NOW.md`; the independent
 one-environment-per-question adapter must not be relabeled continuous.
 
