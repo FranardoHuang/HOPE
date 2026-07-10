@@ -156,6 +156,13 @@ standalone `stage1_question_bank.py` loader selected from the current checkout.
 This keeps exam validation independent of Isaac package imports and ambient
 `HOPE_STAGE1_QB` shell state.
 
+Carry-state BankExam is explicitly diagnostic. Its product continuity metric
+uses only scheduled rows that have a following paper item. A legal return plus
+natural clip completion counts as `returned_and_recovered_to_next`; a
+post-strike fall or tracking guard may retain `returned=true` but fails the
+recovery conjunct. The terminal paper row has no next opportunity and is not
+in this metric's denominator.
+
 The Isaac companion evaluator does not add an actor term or change the action
 contract. It restores the saved train-split command, performs one nominal
 stand reset, then installs the evaluator-owned exam timing and the complete

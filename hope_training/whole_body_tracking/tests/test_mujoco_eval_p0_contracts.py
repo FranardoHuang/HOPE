@@ -152,6 +152,25 @@ def test_attempt_summary_keeps_hold_deaths_in_unconditional_denominator():
     assert out["per_clip"]["backhand"]["n_attempts"] == 2
 
 
+def test_continuity_product_metric_keeps_return_but_fails_post_strike_recovery():
+    records = [
+        dict(returned=True, reason="completed"),
+        dict(returned=True, reason="fall_post_strike"),
+        dict(returned=False, reason="completed"),
+        # Terminal row has no scheduled next opportunity and is excluded from this denominator.
+        dict(returned=True, reason="completed"),
+    ]
+    out = M.summarize_continuity_records(records)
+    assert out == {
+        "n_opportunities_with_scheduled_next": 3,
+        "n_returned": 2,
+        "n_recovered_to_next": 2,
+        "n_returned_and_recovered_to_next": 1,
+        "return_and_recover_rate": pytest.approx(1 / 3),
+        "recover_rate_given_return": pytest.approx(1 / 2),
+    }
+
+
 def test_attempt_flags_never_mark_a_truncation_eligible():
     flags = M.attempt_ledger_flags(
         "truncated_pre_strike", ("rollout_step_budget",), scheduled_exam=True

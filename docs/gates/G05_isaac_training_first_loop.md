@@ -332,8 +332,8 @@ Three independent utilities were retained from the snapshot:
 
 The shared schedule and adapter tests are reproducible from
 `docs/operations/build_and_test.md`. Local verification on 2026-07-11 passed
-`67` adapter/audit tests with one optional Torch parity skip, `84` formal CPU
-contract tests, and `140` unique tests in their combined contract run with the
+`67` adapter/audit tests with one optional Torch parity skip, `85` formal CPU
+contract tests, and `141` unique tests in their combined contract run with the
 same one optional skip. M2's Isaac leg is now verified below; Pod M3f/G1 and
 the companion same-paper MuJoCo legs are still required, so this gate remains
 `Partial` and historical checkpoints remain diagnostic-only.
@@ -394,3 +394,14 @@ rows with the supplied schedule SHA
 100/100 exact reaches and hits, 86/100 returns (forehand 36/50, backhand 50/50),
 no fall and no guard reset. Valid JSON SHA:
 `723322b469b105282506fd7b2536e79bf6cd24e338cecd50536296f773015a01`.
+
+M3f and G1 completed the same quota-10 paper contract at fixed checkout
+`c69ff13`: M3f returned 20/20, while G1 returned 10/20 with backhand 0/10.
+Both had 20/20 exact reaches/hits, no physical falls or guards, complete
+uncensored ledgers, and exact bank/schedule/order equality. G1 stopped at the
+known-bad canary. M3f's 50/side clean result was 99/100 returns with one
+zero-hold forehand tracking guard; 5% action noise remained 99/100 and schedule
+seed 1 was 100/100. M2 was 86/100 clean, 85/100 at 5% noise and 91/100 on
+schedule seed 1. Full artifacts and hashes are recorded in
+`docs/PHASE1_SCHEMA3_RESULTS_2026-07-11.md`. These cells validate the runtime
+adapter but remain historical/inexact and cannot close this gate.

@@ -190,7 +190,7 @@ the physics-hash-bound `venue_ball_sampler.py`:
   and are recorded as an inexact reason.
 
 Dependency-light verification on 2026-07-11 passed `67` adapter/audit tests
-with one optional Torch parity skip, `84` formal CPU contract tests and `140`
+with one optional Torch parity skip, `85` formal CPU contract tests and `141`
 unique tests in the combined contract run with the same optional skip. This is
 implementation evidence, not a gate pass:
 the shared-paper Pod canary and question-order/hash equality across both
@@ -216,6 +216,22 @@ both scopes. BankExam also resolves the current checkout's dependency-light
 contract, rather than importing the Isaac task package or trusting ambient
 shell state. Both failures occurred before rollout and produced no score; the
 same-paper rerun remains required.
+
+That rerun and the full single-question diagnostic matrix are now complete.
+At quota 10, M3f/M2/G1 MuJoCo return was 17/20, 10/20 and 9/20; G1 backhand was
+0/10 in both engines. At quota 50, M3f returned 91/100 in MuJoCo versus 99/100
+in Isaac, while M2 returned 51/100 versus 86/100. Both survivors also completed
+the same-paper 5% action-noise and second evaluation-seed cells. Every ledger
+was complete and uncensored, and every cross-engine bank/schedule SHA and
+ordered ID check passed. All MuJoCo `fell` rows were tracking guards rather
+than absolute physical falls. The detailed per-side table and result hashes
+are in `docs/PHASE1_SCHEMA3_RESULTS_2026-07-11.md`.
+
+MuJoCo carry-state BankExam remains a separate inexact diagnostic. Its summary
+now includes `return_and_recover_rate`: among paper rows that have a scheduled
+next opportunity, a row counts only if it legally returns and naturally
+completes its swing. A post-strike guard preserves the return result but fails
+recovery. The final paper row is excluded from this product denominator.
 
 ```bash
 python3 -m pytest -q \

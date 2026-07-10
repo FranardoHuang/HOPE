@@ -880,6 +880,37 @@ def summarize_attempt_records(records, num_clips):
         for c in range(int(num_clips))
     }
     return summary
+
+
+def summarize_continuity_records(records):
+    """Product metric for a finite carry-state paper.
+
+    Every row except the terminal paper row has a scheduled next opportunity. A legal return only
+    counts as return-and-recover when the current swing reaches its natural clip completion; a
+    post-strike fall/guard may retain the return itself, but correctly fails recovery.
+    """
+
+    rows = list(records)
+    eligible = rows[:-1]
+    n = len(eligible)
+    n_returned = sum(bool(row.get("returned", False)) for row in eligible)
+    n_recovered = sum(str(row.get("reason", "")) == "completed" for row in eligible)
+    n_returned_and_recovered = sum(
+        bool(row.get("returned", False)) and str(row.get("reason", "")) == "completed"
+        for row in eligible
+    )
+    return {
+        "n_opportunities_with_scheduled_next": n,
+        "n_returned": n_returned,
+        "n_recovered_to_next": n_recovered,
+        "n_returned_and_recovered_to_next": n_returned_and_recovered,
+        "return_and_recover_rate": (
+            n_returned_and_recovered / n if n else float("nan")
+        ),
+        "recover_rate_given_return": (
+            n_returned_and_recovered / n_returned if n_returned else float("nan")
+        ),
+    }
 # --qdes-clamp soft-limit factor: Isaac ArticulationCfg soft_joint_pos_limit_factor (robots/
 # agibot_a3.py) — the training ClampedJointPositionAction clamps to soft_joint_pos_limits, which
 # Isaac derives by shrinking each joint's range by this factor about its midpoint.
@@ -3356,6 +3387,8 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
             ],
         }
     out["attempts"] = summarize_attempt_records(attempt_records, num_clips)
+    if bank_schedule and not one_question_reset:
+        out["continuity"] = summarize_continuity_records(attempt_records)
     if venue_sampler is not None:
         out["venue"] = dict(
             all=venue["all"].metrics(),

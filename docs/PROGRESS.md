@@ -19,8 +19,8 @@ Use this file for short project-state updates that future humans and agents need
   hold-aware termination-contract v3, explicitly gated legacy train-bank
   loading/hold-guard overrides to historical diagnostics, and made tolerant
   checkpoint loading fail on missing actor keys. Local verification passed 67
-  adapter/audit tests with one optional Torch skip, 84 formal CPU tests, and
-  140 unique tests in
+  adapter/audit tests with one optional Torch skip, 85 formal CPU tests, and
+  141 unique tests in
   the combined run with the same optional skip. M2 now has an accepted
   diagnostic Isaac leg; M3f/G1 and the same-paper MuJoCo legs remain the next
   acceptance steps. No result has been promoted from old scorecards.
@@ -92,6 +92,24 @@ Use this file for short project-state updates that future humans and agents need
   loader automatically. Pod1 briefly received `toml==0.10.2` while diagnosing
   the accidental package path, but the fixed evaluator does not require that
   package or any additional Isaac dependency in the mjeval environment.
+- Completed the historical same-paper single-question matrix. M3f/M2/G1
+  quota-10 returns were respectively Isaac `20/20`, `16/20`, `10/20` and
+  MuJoCo `17/20`, `10/20`, `9/20`; G1 backhand was `0/10` in both engines and
+  stopped at canary. M3f/M2 then completed 50/side clean, 5% action-noise and
+  second evaluation-seed slices in both engines. Clean q50 return was M3f
+  Isaac/MuJoCo `99/100` / `91/100`, versus M2 `86/100` / `51/100`; no cell had
+  an absolute physical fall, and all tracking guards remained in the raw
+  denominator. Full paper/result SHAs and per-side numbers are in
+  `PHASE1_SCHEMA3_RESULTS_2026-07-11.md`. All cells are historical diagnostics
+  with `evaluation_contract_exact=false`.
+- Added an explicit finite-paper continuity product metric for MuJoCo:
+  `return_and_recover_rate` counts a legal return only when that carry-state
+  swing naturally completes and the paper has a scheduled next opportunity.
+  A post-strike fall/guard keeps the return but fails recovery; the terminal
+  paper row is excluded because it has no next opportunity. Carry-state cells
+  remain diagnostic-only. Isaac's one-env-per-question adapter is not
+  continuous play and will not be mislabeled while its physical next-ball
+  timeline remains unimplemented.
 - Moved the stale local `main` to `origin/main@ba998c4`, then rebased the
   selective port onto the newer `origin/main@caf4a4e` Gate-3 update before
   publication.  The previously uncommitted Phase-1 work is preserved intact on

@@ -661,6 +661,15 @@ schedule SHA and ordered question IDs.  Only the `noise_scale=0` canary
 survivors advance to 50 questions per side, continuous play and 5% action
 noise.
 
+For the separate carry-state ruler, add `--exam-continuity-diagnostic` to the
+MuJoCo command and keep `--allow-inexact-contract`. It consumes the same finite
+paper but does not reset robot/action state between questions, always stamps
+the result inexact, and reports `continuity.return_and_recover_rate`. The
+denominator excludes only the terminal paper row, which has no scheduled next
+opportunity. Do not call the one-environment-per-question Isaac adapter a
+continuous test; its physical next-ball/serve timeline is a separate pending
+implementation.
+
 ## First-Loop Rule
 
 Before setting a baseline quality target, record:

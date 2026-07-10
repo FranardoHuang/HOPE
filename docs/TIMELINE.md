@@ -1224,3 +1224,11 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    V4/V5/task-only 公共外部卷、受守卫的行程延长;保留 S1 三组公平续训、N1 真实时序误差三组、
    R8 两旗标拆分。当前无训练/判卷在跑,下一步先做 M3f/M2/G1 每侧 10 题 schema-v3 canary;
    只有 `ns=0` 存活臂补 50/侧、连续球、噪声与第二 seed。
+4. 【franco/Codex】**schema-v3 Isaac 同题适配器实弹跑通并验尺**——新卷全程用内容 ID、
+   immutable schedule、all-attempt 分母和同一 virtual-return scorer。M3f/M2/G1
+   10/侧 Isaac 上台 `20/20,16/20,10/20`,MuJoCo `17/20,10/20,9/20`;G1 反手两引擎
+   均 `0/10`,因此卡在 canary。存活臂 50/侧 clean: M3f Isaac/MuJoCo `99/100 /
+   91/100`,M2 `86/100 / 51/100`;两臂的 5% 动作噪声和第二评估 seed 也已补齐。
+   全部历史臂仍 `evaluation_contract_exact=false`,不冒充正式基线;详细 SHA/逐侧表见
+   `PHASE1_SCHEMA3_RESULTS_2026-07-11.md`。MuJoCo 连续卷新增“上台且恢复到下一球”合取
+   指标;实体下一球时间线未接好前,Isaac 单题并行适配器不会被改名为连续球。
