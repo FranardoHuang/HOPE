@@ -257,6 +257,38 @@ def test_runtime_train_bank_loader_opens_legacy_only_for_explicit_diagnostic(tmp
     assert cfg.commands.racket_target.question_bank_allow_legacy is True
 
 
+def test_runtime_motion_loader_opens_link_origin_signature_only_for_diagnostic(
+    tmp_path: Path,
+):
+    motion_path = tmp_path / "legacy_link_velocity.npz"
+    time = np.arange(5, dtype=np.float32) / 50.0
+    pos = np.zeros((5, 1, 3), dtype=np.float32)
+    pos[:, 0, 0] = 2.0 * time
+    lin = np.gradient(pos, 1.0 / 50.0, axis=0)
+    ang = np.zeros_like(pos)
+    ang[:, 0, 2] = 1.0
+    np.savez(
+        motion_path,
+        fps=np.array([50]),
+        body_pos_w=pos,
+        body_lin_vel_w=lin,
+        body_ang_vel_w=ang,
+    )
+    cfg = SimpleNamespace(
+        commands=SimpleNamespace(
+            motion=SimpleNamespace(
+                motion_file=str(motion_path),
+                allow_legacy_link_origin_velocity=False,
+            )
+        )
+    )
+    with pytest.raises(A.IsaacBankExamError, match="formal BankExam refuses"):
+        A.configure_runtime_motion_loader(cfg, allow_legacy_diagnostic=False)
+    result = A.configure_runtime_motion_loader(cfg, allow_legacy_diagnostic=True)
+    assert result["legacy_override"] is True
+    assert cfg.commands.motion.allow_legacy_link_origin_velocity is True
+
+
 def test_action_noise_is_question_seeded_and_early_failure_cannot_shift_later_rows():
     schedule = _schedule()
     first = A.per_attempt_action_noise(schedule, n_steps=5, action_dim=3)

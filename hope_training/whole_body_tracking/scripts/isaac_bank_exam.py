@@ -39,6 +39,7 @@ from isaac_bank_exam_adapter import (  # noqa: E402
     apply_hold_aware_tracking_guard_profile,
     apply_nominal_eval_profile,
     canonical_sha256,
+    configure_runtime_motion_loader,
     configure_runtime_train_bank_loader,
     finite_or_none,
     per_attempt_action_noise,
@@ -254,6 +255,15 @@ def _run(cfg, simulation_app):
         raise IsaacBankExamError("noise_scale must be finite and non-negative")
 
     profile = apply_nominal_eval_profile(env_cfg, num_envs=num_envs)
+    motion_loader_profile = configure_runtime_motion_loader(
+        env_cfg, allow_legacy_diagnostic=allow_inexact
+    )
+    profile["runtime_motion_loader"] = motion_loader_profile
+    if motion_loader_profile["legacy_override"]:
+        inexact_reasons.append(
+            "saved runtime motions use untagged link-origin finite-difference velocities; "
+            "diagnostic replay preserves their historical command semantics"
+        )
     train_bank_loader_profile = configure_runtime_train_bank_loader(
         env_cfg, allow_legacy_diagnostic=allow_inexact
     )

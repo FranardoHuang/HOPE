@@ -139,3 +139,13 @@ def test_static_bootstrap_declares_schema_two_body_order_semantics():
     source = (SCRIPTS / "make_static_motion.py").read_text(encoding="utf-8")
     assert "from motion_kinematics_contract import metadata_arrays" in source
     assert "log.update(metadata_arrays(body_names=robot.body_names))" in source
+
+
+def test_legacy_link_velocity_runtime_escape_is_diagnostic_and_default_off():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "source" / "whole_body_tracking" / "whole_body_tracking"
+        / "tasks" / "tracking" / "mdp" / "commands.py"
+    ).read_text(encoding="utf-8")
+    assert "allow_legacy_link_origin_velocity: bool = False" in source
+    assert '"status": "legacy_link_origin_velocity_diagnostic_only"' in source

@@ -69,13 +69,13 @@ not a substitute for a same-paper Isaac/MuJoCo runtime canary.
 
 Verified 2026-07-11 on the local macOS host:
 
-- adapter/audit suite: 63 passed, 1 optional Torch parity skip;
-- formal BankExam/motion/racket/schema/V5 CPU suite: 80 passed;
-- union of both groups plus the MuJoCo contract tests: 132 passed, 1 optional
+- adapter/audit suite: 64 passed, 1 optional Torch parity skip;
+- formal BankExam/motion/racket/schema/V5 CPU suite: 81 passed;
+- union of both groups plus the MuJoCo contract tests: 134 passed, 1 optional
   Torch parity skip;
 - planner suite: 105 passed, 2 optional skips.
 
-Reproduce the 80-test formal CPU suite with:
+Reproduce the 81-test formal CPU suite with:
 
 ```bash
 python3 -m pytest -q \

@@ -119,7 +119,12 @@ class MotionLoader:
 
     @classmethod
     def _kinematics_contract(
-        cls, data, path: str, articulation_body_names: tuple[str, ...]
+        cls,
+        data,
+        path: str,
+        articulation_body_names: tuple[str, ...],
+        *,
+        allow_legacy_link_origin_velocity: bool = False,
     ) -> dict:
         """Validate body point semantics without guessing from a filename.
 
@@ -186,13 +191,25 @@ class MotionLoader:
         fd_max = float(np.max(np.abs(lin - link_fd)))
         max_ang = float(np.max(np.linalg.norm(ang, axis=-1)))
         if max_ang > 0.2 and fd_max <= 1.0e-4:
-            raise ValueError(
-                f"{path}: untagged body_lin_vel_w is numerically d(link-origin position)/dt "
-                f"(max residual {fd_max:.3e} m/s, max |omega| {max_ang:.2f} rad/s), but "
-                "MotionCommand rewards COM velocity. This is the pre-2026-07-10 V5/MuJoCo "
-                "converter signature. Migrate it explicitly with scripts/migrate_motion_kinematics.py "
-                "--source-point link_origin; refusing to train on the wrong point."
-            )
+            if not allow_legacy_link_origin_velocity:
+                raise ValueError(
+                    f"{path}: untagged body_lin_vel_w is numerically d(link-origin position)/dt "
+                    f"(max residual {fd_max:.3e} m/s, max |omega| {max_ang:.2f} rad/s), but "
+                    "MotionCommand rewards COM velocity. This is the pre-2026-07-10 V5/MuJoCo "
+                    "converter signature. Migrate it explicitly with "
+                    "scripts/migrate_motion_kinematics.py --source-point link_origin; refusing "
+                    "to train on the wrong point."
+                )
+            return {
+                "schema_version": None,
+                "body_pos_point": "link_origin",
+                "body_lin_vel_point": "link_origin",
+                "body_names": None,
+                "exact": False,
+                "status": "legacy_link_origin_velocity_diagnostic_only",
+                "link_fd_max_abs_mps": fd_max,
+                "max_ang_radps": max_ang,
+            }
         return {
             "schema_version": None, "body_pos_point": None, "body_lin_vel_point": None,
             "body_names": None,
@@ -208,6 +225,7 @@ class MotionLoader:
         articulation_body_names: Sequence[str],
         selected_body_names: Sequence[str],
         device: str = "cpu",
+        allow_legacy_link_origin_velocity: bool = False,
     ):
         files = [motion_file] if isinstance(motion_file, str) else list(motion_file)
         if not files:
@@ -247,7 +265,12 @@ class MotionLoader:
             frame_count = self._validate_motion_array_shapes(
                 data, f, len(articulation_names)
             )
-            _kin = self._kinematics_contract(data, f, articulation_names)
+            _kin = self._kinematics_contract(
+                data,
+                f,
+                articulation_names,
+                allow_legacy_link_origin_velocity=allow_legacy_link_origin_velocity,
+            )
             self.kinematics_contracts.append(_kin)
             if not _kin["exact"]:
                 print(
@@ -322,6 +345,9 @@ class MotionCommand(CommandTerm):
             articulation_body_names=self.robot.body_names,
             selected_body_names=self.cfg.body_names,
             device=self.device,
+            allow_legacy_link_origin_velocity=bool(
+                self.cfg.allow_legacy_link_origin_velocity
+            ),
         )
         expected_fps = 1.0 / float(env.step_dt)
         if not math.isfinite(expected_fps) or not math.isclose(
@@ -1113,6 +1139,9 @@ class MotionCommandCfg(CommandTermCfg):
     asset_name: str = MISSING
 
     motion_file: str = MISSING
+    # Historical diagnostic replay only. Formal paths migrate these untagged finite-difference
+    # link-origin velocities to the schema-2 COM-point contract instead of enabling this escape.
+    allow_legacy_link_origin_velocity: bool = False
     anchor_body_name: str = MISSING
     body_names: list[str] = MISSING
 

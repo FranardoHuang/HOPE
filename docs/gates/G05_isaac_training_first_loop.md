@@ -332,8 +332,19 @@ Three independent utilities were retained from the snapshot:
 
 The shared schedule and adapter tests are reproducible from
 `docs/operations/build_and_test.md`. Local verification on 2026-07-11 passed
-`63` adapter/audit tests with one optional Torch parity skip, `80` formal CPU
-contract tests, and `132` unique tests in their combined contract run with the
+`64` adapter/audit tests with one optional Torch parity skip, `81` formal CPU
+contract tests, and `134` unique tests in their combined contract run with the
 same one optional skip. Pod Isaac runtime and the M3f/M2/G1 10-per-side canary
 are still required, so this gate remains `Partial` and historical checkpoints
 remain diagnostic-only.
+
+The first M2 q1/side Kit smoke on Pod1 reached `gym.make` and then correctly
+failed on the current MotionLoader's link-origin-vs-COM guard: the historical
+v4rg `_cal` files are untagged and their `body_lin_vel_w` is numerically the
+finite difference of link-origin position. The exact path remains unchanged
+and still refuses those files. The historical evaluator now has a separate
+default-off `allow_legacy_link_origin_velocity` seam, enabled only after the
+explicit inexact preflight detects that content signature; the profile records
+motion paths/SHA and the resulting legacy command semantics. This preserves
+the checkpoint's old input meaning for ruler diagnosis without making the
+motion eligible for fresh training or a bookable score. A rerun is pending.

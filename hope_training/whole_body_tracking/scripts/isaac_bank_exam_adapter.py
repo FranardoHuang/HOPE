@@ -327,6 +327,66 @@ def configure_runtime_train_bank_loader(
     }
 
 
+def configure_runtime_motion_loader(
+    env_cfg: Any, *, allow_legacy_diagnostic: bool
+) -> dict[str, Any]:
+    """Open the decisive legacy link-origin velocity signature only for inexact replay."""
+
+    commands = getattr(env_cfg, "commands", None)
+    motion = getattr(commands, "motion", None)
+    if motion is None:
+        raise IsaacBankExamError("saved env cfg has no commands.motion")
+    raw_files = getattr(motion, "motion_file", None)
+    files = [raw_files] if isinstance(raw_files, str) else list(raw_files or ())
+    if not files:
+        raise IsaacBankExamError("saved motion command has no motion files")
+    audited = []
+    legacy_paths = []
+    for raw_path in files:
+        path = Path(str(raw_path)).expanduser().resolve()
+        if not path.is_file():
+            raise IsaacBankExamError(f"saved runtime motion does not exist: {path}")
+        try:
+            with np.load(path, allow_pickle=False) as payload:
+                declared = "kinematics_schema_version" in payload.files
+                suspected = False
+                residual = None
+                max_ang = None
+                if not declared:
+                    pos = np.asarray(payload["body_pos_w"], dtype=np.float64)
+                    lin = np.asarray(payload["body_lin_vel_w"], dtype=np.float64)
+                    ang = np.asarray(payload["body_ang_vel_w"], dtype=np.float64)
+                    fps = float(np.asarray(payload["fps"]).reshape(-1)[0])
+                    link_fd = np.gradient(pos, 1.0 / fps, axis=0)
+                    residual = float(np.max(np.abs(lin - link_fd)))
+                    max_ang = float(np.max(np.linalg.norm(ang, axis=-1)))
+                    suspected = max_ang > 0.2 and residual <= 1.0e-4
+        except (OSError, KeyError, ValueError) as exc:
+            raise IsaacBankExamError(f"cannot audit saved runtime motion {path}: {exc}") from exc
+        if suspected:
+            legacy_paths.append(str(path))
+        audited.append({
+            "path": str(path),
+            "sha256": sha256_file(path),
+            "kinematics_declared": declared,
+            "legacy_link_origin_signature": suspected,
+            "link_fd_max_abs_mps": residual,
+            "max_ang_radps": max_ang,
+        })
+    if legacy_paths and not allow_legacy_diagnostic:
+        raise IsaacBankExamError(
+            "formal BankExam refuses untagged link-origin velocity motions: "
+            + ", ".join(legacy_paths)
+        )
+    setattr(motion, "allow_legacy_link_origin_velocity", bool(legacy_paths))
+    return {
+        "schema": "hope.runtime-motion-loader-profile.v1",
+        "legacy_override": bool(legacy_paths),
+        "legacy_paths": legacy_paths,
+        "motions": audited,
+    }
+
+
 def per_attempt_action_noise(
     schedule: Sequence[Any], *, n_steps: int, action_dim: int
 ) -> np.ndarray:

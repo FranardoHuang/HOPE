@@ -18,12 +18,22 @@ Use this file for short project-state updates that future humans and agents need
   resampling, versioned the `H`-stand-actions-then-frame-0 release rule, added
   hold-aware termination-contract v3, explicitly gated legacy train-bank
   loading/hold-guard overrides to historical diagnostics, and made tolerant
-  checkpoint loading fail on missing actor keys. Local verification passed 63
-  adapter/audit tests with one optional Torch skip, 80 formal CPU tests, and
-  132 unique tests in
+  checkpoint loading fail on missing actor keys. Local verification passed 64
+  adapter/audit tests with one optional Torch skip, 81 formal CPU tests, and
+  134 unique tests in
   the combined run with the same optional skip. Pod same-paper runtime canary
   remains the next acceptance step; no result has been promoted from old
   scorecards.
+- Both clean Pod checkouts passed the adapter/audit suite with Torch enabled
+  (`64 passed` on each, so scorer parity did not skip). M2's new schema-v3 exam
+  bank passed 183/183 forehand and 188/188 backhand Torch closed-loop land/net
+  checks. The first q1/side Kit smoke then exposed the expected historical
+  motion provenance gap at `gym.make`: old `_cal` files store untagged
+  link-origin finite-difference velocity, while current exact MotionCommand
+  requires COM velocity. Added a content-detected, inexact-only loader escape
+  that preserves the old checkpoint input semantics and leaves formal training
+  fail-closed; the failed Kit PGID was terminated cleanly and its GPU/lock were
+  released before retry.
 - Moved the stale local `main` to `origin/main@ba998c4`, then rebased the
   selective port onto the newer `origin/main@caf4a4e` Gate-3 update before
   publication.  The previously uncommitted Phase-1 work is preserved intact on
