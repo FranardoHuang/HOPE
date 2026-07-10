@@ -332,8 +332,8 @@ Three independent utilities were retained from the snapshot:
 
 The shared schedule and adapter tests are reproducible from
 `docs/operations/build_and_test.md`. Local verification on 2026-07-11 passed
-`65` adapter/audit tests with one optional Torch parity skip, `81` formal CPU
-contract tests, and `135` unique tests in their combined contract run with the
+`66` adapter/audit tests with one optional Torch parity skip, `81` formal CPU
+contract tests, and `136` unique tests in their combined contract run with the
 same one optional skip. Pod Isaac runtime and the M3f/M2/G1 10-per-side canary
 are still required, so this gate remains `Partial` and historical checkpoints
 remain diagnostic-only.
@@ -353,3 +353,13 @@ gap: the old `RacketTargetCommandCfg` predates `rally_legacy_metrics`. The
 inexact path now fills only dataclass/configclass fields that have an explicit
 current default and records every filled field; exact evaluation refuses any
 such hydration. A rerun is pending.
+
+That rerun reached complete environment and policy construction before the
+historical checkpoint exposed four zero observation-normalizer `_std` entries.
+This is valid for the saved rsl_rl implementation because inference uses
+`(x - mean) / (std + eps)` and the configured `eps` is `1e-2`. The inference-
+only compatibility loader now accepts finite non-negative std values only when
+epsilon is finite and positive; it continues to reject negative/non-finite
+scales, zero/missing epsilon, dimension mismatch and missing actor state. This
+is covered by a CPU regression, but the q1 Pod cell remains unverified until
+the same schedule completes after redeployment.

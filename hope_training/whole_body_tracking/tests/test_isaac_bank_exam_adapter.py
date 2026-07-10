@@ -399,3 +399,59 @@ def test_tolerant_checkpoint_loader_rejects_actor_key_missing_from_checkpoint(mo
     )
     with pytest.raises(RuntimeError, match="missing_from_checkpoint=.*actor.weight"):
         CKPT.load_actor_tolerant(runner, "diagnostic.pt")
+
+
+def test_tolerant_checkpoint_loader_accepts_zero_std_only_with_positive_epsilon(
+    monkeypatch,
+):
+    class Tensor:
+        def __init__(self, values):
+            self.values = np.asarray(values)
+            self.shape = self.values.shape
+
+        def numel(self):
+            return self.values.size
+
+        def item(self):
+            return self.values.item()
+
+        def __ge__(self, other):
+            return self.values >= other
+
+    mean = Tensor([[0.0, 1.0, 2.0]])
+    std = Tensor([[1.0, 0.0, 3.0]])
+    count = Tensor(100)
+    checkpoint = {
+        "model_state_dict": {},
+        "obs_norm_state_dict": {"_mean": mean, "_std": std, "count": count},
+    }
+    fake_torch = SimpleNamespace(
+        all=np.all,
+        empty=lambda size: Tensor(np.empty(size)),
+        isfinite=lambda tensor: np.isfinite(tensor.values),
+        load=lambda *args, **kwargs: checkpoint,
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    class Normalizer:
+        eps = 1.0e-2
+
+        def state_dict(self):
+            return {"_mean": Tensor([[0.0, 0.0, 0.0]])}
+
+        def load_state_dict(self, state):
+            self.loaded = state
+
+    normalizer = Normalizer()
+    runner = SimpleNamespace(
+        empirical_normalization=True,
+        obs_normalizer=normalizer,
+        alg=SimpleNamespace(policy=SimpleNamespace()),
+        load=lambda path: None,
+    )
+    assert CKPT.load_actor_tolerant(runner, "diagnostic.pt") is True
+    assert normalizer.loaded is checkpoint["obs_norm_state_dict"]
+
+    normalizer.eps = 0.0
+    with pytest.raises(RuntimeError, match="eps=0.0"):
+        CKPT.load_actor_tolerant(runner, "diagnostic.pt")
