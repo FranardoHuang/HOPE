@@ -332,8 +332,8 @@ Three independent utilities were retained from the snapshot:
 
 The shared schedule and adapter tests are reproducible from
 `docs/operations/build_and_test.md`. Local verification on 2026-07-11 passed
-`64` adapter/audit tests with one optional Torch parity skip, `81` formal CPU
-contract tests, and `134` unique tests in their combined contract run with the
+`65` adapter/audit tests with one optional Torch parity skip, `81` formal CPU
+contract tests, and `135` unique tests in their combined contract run with the
 same one optional skip. Pod Isaac runtime and the M3f/M2/G1 10-per-side canary
 are still required, so this gate remains `Partial` and historical checkpoints
 remain diagnostic-only.
@@ -347,4 +347,9 @@ default-off `allow_legacy_link_origin_velocity` seam, enabled only after the
 explicit inexact preflight detects that content signature; the profile records
 motion paths/SHA and the resulting legacy command semantics. This preserves
 the checkpoint's old input meaning for ruler diagnosis without making the
-motion eligible for fresh training or a bookable score. A rerun is pending.
+motion eligible for fresh training or a bookable score. The next retry passed
+the motion and legacy-bank loaders, then found a normal Python pickle-evolution
+gap: the old `RacketTargetCommandCfg` predates `rally_legacy_metrics`. The
+inexact path now fills only dataclass/configclass fields that have an explicit
+current default and records every filled field; exact evaluation refuses any
+such hydration. A rerun is pending.

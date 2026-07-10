@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -287,6 +288,25 @@ def test_runtime_motion_loader_opens_link_origin_signature_only_for_diagnostic(
     result = A.configure_runtime_motion_loader(cfg, allow_legacy_diagnostic=True)
     assert result["legacy_override"] is True
     assert cfg.commands.motion.allow_legacy_link_origin_velocity is True
+
+
+def test_historical_config_hydration_uses_only_declared_defaults_and_is_inexact():
+    @dataclass
+    class Config:
+        required: int
+        later_default: bool = True
+
+    cfg = Config(required=3)
+    cfg.__dict__.pop("later_default")
+    with pytest.raises(A.IsaacBankExamError, match="missing field cfg.later_default"):
+        A.hydrate_missing_dataclass_defaults(
+            {"cfg": cfg}, allow_legacy_diagnostic=False
+        )
+    result = A.hydrate_missing_dataclass_defaults(
+        {"cfg": cfg}, allow_legacy_diagnostic=True
+    )
+    assert cfg.later_default is True
+    assert result["hydrated_fields"] == {"cfg": ["later_default"]}
 
 
 def test_action_noise_is_question_seeded_and_early_failure_cannot_shift_later_rows():

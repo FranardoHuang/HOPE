@@ -18,9 +18,9 @@ Use this file for short project-state updates that future humans and agents need
   resampling, versioned the `H`-stand-actions-then-frame-0 release rule, added
   hold-aware termination-contract v3, explicitly gated legacy train-bank
   loading/hold-guard overrides to historical diagnostics, and made tolerant
-  checkpoint loading fail on missing actor keys. Local verification passed 64
+  checkpoint loading fail on missing actor keys. Local verification passed 65
   adapter/audit tests with one optional Torch skip, 81 formal CPU tests, and
-  134 unique tests in
+  135 unique tests in
   the combined run with the same optional skip. Pod same-paper runtime canary
   remains the next acceptance step; no result has been promoted from old
   scorecards.
@@ -34,6 +34,11 @@ Use this file for short project-state updates that future humans and agents need
   that preserves the old checkpoint input semantics and leaves formal training
   fail-closed; the failed Kit PGID was terminated cleanly and its GPU/lock were
   released before retry.
+- M2 q1 retry 1 passed the new diagnostic motion/v2-bank loaders and exposed
+  the next historical pickle field gap (`rally_legacy_metrics`, added after the
+  run). Added inexact-only hydration from declared dataclass defaults with a
+  complete field list in the nominal profile; exact cells refuse hydration.
+  The second failed Kit PGID was also terminated cleanly before the next retry.
 - Moved the stale local `main` to `origin/main@ba998c4`, then rebased the
   selective port onto the newer `origin/main@caf4a4e` Gate-3 update before
   publication.  The previously uncommitted Phase-1 work is preserved intact on

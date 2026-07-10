@@ -42,6 +42,7 @@ from isaac_bank_exam_adapter import (  # noqa: E402
     configure_runtime_motion_loader,
     configure_runtime_train_bank_loader,
     finite_or_none,
+    hydrate_missing_dataclass_defaults,
     per_attempt_action_noise,
     policy_observation_tensor,
     ready_state_sha256,
@@ -254,7 +255,21 @@ def _run(cfg, simulation_app):
     if not np.isfinite(noise_scale) or noise_scale < 0.0:
         raise IsaacBankExamError("noise_scale must be finite and non-negative")
 
+    hydration_profile = hydrate_missing_dataclass_defaults(
+        {
+            "commands.motion": env_cfg.commands.motion,
+            "commands.racket_target": env_cfg.commands.racket_target,
+            "agent": agent_cfg,
+        },
+        allow_legacy_diagnostic=allow_inexact,
+    )
+    if hydration_profile["used"]:
+        inexact_reasons.append(
+            "historical config pickle lacked current defaulted fields: "
+            + json.dumps(hydration_profile["hydrated_fields"], sort_keys=True)
+        )
     profile = apply_nominal_eval_profile(env_cfg, num_envs=num_envs)
+    profile["historical_config_hydration"] = hydration_profile
     motion_loader_profile = configure_runtime_motion_loader(
         env_cfg, allow_legacy_diagnostic=allow_inexact
     )

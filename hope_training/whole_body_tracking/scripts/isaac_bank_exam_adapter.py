@@ -9,6 +9,8 @@ It imports neither Isaac nor Torch at module import time.
 from __future__ import annotations
 
 import csv
+import copy
+import dataclasses
 import hashlib
 import json
 import math
@@ -33,6 +35,41 @@ TRACKING_GUARD_FUNCTIONS = {
 
 class IsaacBankExamError(RuntimeError):
     """Fail-closed adapter/ledger error."""
+
+
+def hydrate_missing_dataclass_defaults(
+    objects: Mapping[str, Any], *, allow_legacy_diagnostic: bool
+) -> dict[str, Any]:
+    """Fill fields absent from historical pickles using only current declared defaults."""
+
+    hydrated: dict[str, list[str]] = {}
+    for label, obj in objects.items():
+        if not dataclasses.is_dataclass(obj):
+            raise IsaacBankExamError(f"{label} is not a dataclass/configclass instance")
+        present = vars(obj)
+        added = []
+        for field in dataclasses.fields(obj):
+            if field.name in present:
+                continue
+            if field.default is not dataclasses.MISSING:
+                value = copy.deepcopy(field.default)
+            elif field.default_factory is not dataclasses.MISSING:
+                value = field.default_factory()
+            else:
+                continue
+            if not allow_legacy_diagnostic:
+                raise IsaacBankExamError(
+                    f"formal BankExam refuses config pickle missing field {label}.{field.name}"
+                )
+            setattr(obj, field.name, value)
+            added.append(field.name)
+        if added:
+            hydrated[label] = sorted(added)
+    return {
+        "schema": "hope.historical-config-default-hydration.v1",
+        "hydrated_fields": hydrated,
+        "used": bool(hydrated),
+    }
 
 
 def sha256_file(path: str | os.PathLike[str]) -> str:
