@@ -195,3 +195,26 @@ transport),不是策略稳定性——vendor sim 是显式 Euler PD,与真机(�
     + 连按 's'(ros2 pub 时序不可控,靠 0.5s 保护宽限窗内的那一发接住)。
 15. 播放摆动的跟踪熔断阈 0.3 rad 是对的:倒地承重关节 25% 增益跟不住会正确熔断;
     满增益(--ref-gain-scale 1.0)下腰+臂不承重段 0.02-0.08 rad 干净通过。
+
+### Gate 3 闭环底座 pod 复活(yikang 2026-07-10 深夜;jiayi 编排移植版)
+
+**结论:全链首跑打通**——假球发布器 → 真规划器(**快解生产路径实弹**:replan 50 Hz/iter 6,
+落点解 land≈2.052m 正中)→ C++ runner `--planner` → 厂商 sim(iceoryx body-drive),
+`[pp engage] forehand/backhand locked … tts 传递正确`,conductor 状态机(验证站立后才按键)
+在 pod 上工作,PD 站立 z=1.05 站得住(**修正 smoke7 的初判:显式 Euler 下 PD_STAND 可站,
+之前塌是落地时序;fidelity note 的发散是 15200 老模型时代的事**)。
+
+**判卷级现状 = 1/3 FAIL,失败签名=档案级已知病**:跑的是 repo 仅有的 175D 冒烟模型
+(deployparity_175_20260703,07-03 导出 = **防摔修复栈之前的代际**),挥完摔(min_z 0.15)
+正是 Gate 2.5 点名的"post-swing hold = 175-era killers";`--no-imu-yaw` 复跑无改变。
+**要复现 jiayi 的 10/10 需要 model_17400_hitter177.onnx——repo/pod 都没有,只在 jiayi 本地,
+已列交接项**。
+
+**跑法(pod)**:`bash /workspace/yikang/gate3/pp_closedloop_pod.sh`(jiayi 原版
+scripts/pp_planner_closedloop.sh + pp_planner_conductor.py 的路径移植版,sed 换前缀 + xvfb 化)。
+**学费(16-18)**:16. hope_ws colcon 编译要先 `touch hope_ws/src/vrpn_mocap/COLCON_IGNORE`
+(hope_bringup 声明 vrpn_mocap 运行期依赖,闭环用不到但 colcon 要它的环境文件);
+17. smoke175 runtime cfg 是**工作树未跟踪文件**(src config 里),重打包必须显式
+`--runtime-cfg …smoke175.yaml`,否则打包器找 17400 模型报错并**清掉 dist**;
+18. conductor 依赖 sim 源编 install 的 `mujoco_sim_msgs` overlay + 持久 reset publisher
+(逐次 `ros2 pub --once` 的 discovery 不可靠,jiayi 已踩过并写进 conductor 注释)。
