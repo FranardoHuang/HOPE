@@ -119,3 +119,50 @@ model_13599.pt ──play.py 原生导出(isaac venv,占一个 GPU 槽 ~4 分钟
   全部还活着,攒到 9 个被 franco 抓包);**每次状态汇报时清点一遍**,报"几个活着、各干什么"。
 - GPU 槽位规则:≤2 真任务/卡;判断"空槽"用 `nvidia-smi --query-compute-apps`
   按卡计数(--id 过滤是好用的;07-06 误判其实是僵尸进程,见核对单第 1 条)。
+
+## pod 原生 Gate 3 底座:ROS2 Jazzy + 厂商 sim 直编(yikang 2026-07-10 实测跑通)
+
+vendor AimRT+MuJoCo 全链路(Gate 3/3B 的底座)在 pod1 原生编译并冒烟通过,
+distrobox 不再是唯一路径。三个脚本在 pod1 `/workspace/yikang/gate3/`:
+
+| 脚本 | 干什么 | 时长 | 何时跑 |
+| --- | --- | --- | --- |
+| `bootstrap_ros2_jazzy.sh` | apt 层:ROS2 Jazzy + 全部编译/运行依赖 | ~4 min | **每次 pod 重启后必须重跑**(apt 层随重启蒸发;/workspace 持久) |
+| `build_gate3.sh` | origin/main 干净 worktree(`gate3/nohope`)→ 编 vendor sim(iceoryx ON)→ 编 deploy runner → dist 补装 | 全量 ~20 min(128 核);增量分钟级 | 代码/依赖变了才需要 |
+| `smoke_gate3.sh` | headless 冒烟:xvfb 下起 sim(自拉 iox-roudi)→ runner `--dry-run` 40s | ~70 s | 每次重建后 |
+
+**判绿标准(smoke_runner.log)**:`rate=50.0Hz`(六路 /body_drive state 组帧满速)+
+`sync_miss=0` + `halts=0` + ticks 持续累计 + 结尾 `[pingpong] done` 干净退出;
+sim 侧 `AimRT startup completed`。冒烟验证的是 **I/O 契约**(obs→jointmap→decode→sync→
+transport),不是策略稳定性——vendor sim 是显式 Euler PD,与真机(隐式 PD-in-backend)
+不同侧,详见 `agi/a3_deploy_example/SIM_FIDELITY_NOTE_FOR_AGI.md` 与 MUJOCO_VALIDATION_RUNBOOK
+第 0 节。
+
+**学费清单(每条都付过)**:
+
+1. **libacl1-dev 缺失 = AimRT 静默关 iceoryx 插件**——sim 编"成功"但没有实时通道,
+   runner 端到生成器表达式才报错。装齐后必须**全清重编**(rm -rf build,缓存有鬼状态)。
+2. ROS 的 setup.bash / setup_a3_env.sh 与 `set -u` 不兼容(unbound variable)。
+3. vendor sim `build.sh` 默认 EXAMPLES=ON,`examples/hardware` 要拷 repo 里没有的
+   vendor 预编译目录 → 加 `-DAIMRT_MUJOCO_SIM_BUILD_EXAMPLES=OFF`(a3_pingpong 在
+   src/models 恒编,不受影响)。
+4. dev 包依赖(bootstrap 已含):libeigen3-dev、libzmq3-dev、libmsgpack-dev、
+   nlohmann-json3-dev、libacl1-dev、libncurses-dev。
+5. `thirdparty/onnxruntime` 与 `thirdparty/unitree_sdk2` 是 gitignored vendor payload:
+   前者 setup_a3_env.sh 自动下载(目录要先 mkdir,git 不追踪空目录);后者用本地空
+   INTERFACE stub 即可链过(A3 链不用 Unitree 符号;要做 G1 需找 jiayi 拿真包)。
+6. sim GUI 无条件 GLFW,pod 无显示栈 → `xvfb-run -a`(xvfb + libglx-mesa0)。
+7. **runner 只认 obs 175/177/180 维**(pp_onnx_policy.hpp 硬校验)——S1 的 179 维导出
+   进不了现役 C++ runner,这就是契约日 181 要解的;冒烟模型用 pod 现货 175D
+   deployparity 导出(dist 内如实命名 deployparity_175_20260703.onnx,别冒充 hitter177)。
+8. dist 补装两件(build_gate3.sh 第 5 步已自动化):wrapper 首选
+   `config/a3_runtime_config.pingpong.yaml`(软链到实际 cfg);`libonnxruntime.so.1*`
+   拷到 dist 根(wrapper 只把 SCRIPT_DIR 加进 LD_LIBRARY_PATH)。
+9. ⚠ 知情项:repo 里 vendor MJCF `<option>` 无 integrator 属性 = 显式 Euler
+   (SIM_FIDELITY_NOTE 建议的 implicitfast 修复未落在 tracked 拷贝);跑行为级判读前
+   先与 jiayi distrobox 实跑版对配置。
+10. pod2 的 IP/端口随重启变更,SSH 连不上先查 RunPod 控制台,别按旧地址重试浪费时间。
+
+**下一步接线(Gate 3B 方向)**:hope_ws planner(colcon 编译)→ `--planner` 模式
+(aimrt cfg 自动切 pingpong_ros2body 双插件)→ pp_planner_conductor.py 假球闭环;
+发球生成器按场馆物理采样 + 判分器(1l 行规格)。

@@ -616,20 +616,21 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 | --- | --- | --- | --- | --- |
 | 全栈正确性尺+C++安全包+拍心/拍速合同收口 | ★★★ | **Codex** | `main` | 双 RunPod 源码验收已绿(portable/ROS C++、whole-body、planner);下一检查点=重出 fresh schema-v3 ONNX+修后考卷,旧判分器数字不入账 |
 | V5 专业动作可迁移性+Phase 加速器 | ★★★ | **Codex** | `main` | manifest+保守 halving 已就绪;下一检查点=验证触球帧/拍速口径,把行程/时间律报告接成 feasibility producer,再做 BankExam→scorecard adapter;两者完成前不自动发训练 |
-| HitterPure RallyFinal clean-base task: x-lock/lunge, settle/slip, backhand clearance, front-facing constraints + Isaac/AGI rally gates | ★★★ | codex for dongc1 | `hitter` | IN PROGRESS 2026-07-10: derive from `HOPEPingPongHitterPure.yaml`, explicitly exclude V5 hold-rhythm/lower-body-plant stack; next checkpoint = config/code/docs patch with static tests and reproducible ablation/eval commands |
+| **S1 face 修复验证臂 M3f / M2f3 在训**(pod1 gpu0,07-09 19:13/19:14 UTC 点火,热启 M3c/M2f model_16999 → 20999;M3f=swing×仅约定修复单变量,M2f3=v4rg×修复跨资产对照):预注册通过线 M3f 反手拍面 34°→≤20°@+1500 / ≤15°@+4000、pass 0/25→≥20/25;M2f3 反手拍面 29-30°→≤22°@+4000、回球回 M2 基线带;不达线出口=开修复版 faceguide −0.4(M3f-b)。新指标 face_cmd_normal_error_deg 直读 demanded 误差 | ★★★ | claude | main(`699b770` 合入) | 收卷 AUTOJUDGE 自动出卷;预注册=pod1 s1_wave4/facesign_fix_design_0709.md §4 + queue.md 07-09 19:13 收口条 |
+| HitterPure RallyFinal clean-base task: x-lock/lunge, settle/slip, backhand clearance, front-facing constraints + Isaac/AGI rally gates | ★★★ | codex for dongc1 | `hitter` | PATCH COMPLETE / GATES PENDING 2026-07-10: clean-base Final task, native move-settle-arm readiness, strict metadata/eval/gate plumbing and docs implemented; host tests + x86 build pass. Next = Isaac smoke/train/ablation, Final ONNX MuJoCo scores, then no-rescue AGI closed-loop with physical contact/landing evidence |
 | 阶段1 第一波成对差初判(主攻/减观测/产品线锚已到线;只换题库/加权/两动作源在跑;反手换锚排队) | ★★★ | claude | `stage1-fixed-point` | **只看成对差,绝对分不作数(题库缺陷)**;正式结论等题库 v2 重跑 |
 | **加速度包络标定两件套(franco 07-09,时间律的下一层)**:①跟踪破裂标定(chirp/斜坡加压参考×现成跟踪策略,逐关节"边平衡边跟"真上限=判炸器 L1 升级);②贴限 vs 摊时消融(v5syn T_a 三档)——R9d 读数落地后一起排 | ★★★ | claude | — | 设计已入 research 时间律文档§六 |
 | GMR 源头修复(pod GMR 分支 `hope-frame0-warmup`:warm-up/帧0/逐关节限位旗标)+ 判炸器(repo 分支 `motion-feasibility-audit` 已推 origin)——两分支待 franco 审;接线与 L6 重生成见队列 0.6/0.7 行 | ★★★ | claude | 两分支 | 已验证收口(TIMELINE 07-08);合入即防复发 |
 | 1b 奖励收入记账 | ★★★ | claude | main | 半天;进机制检查+判卷固定输出 |
 | 1c 击球窗分通道奖励(W2 门票) | ★★★ | claude | main(旗标默认关) | 半天-1 天;整包一臂 |
 | 1g 适配器 v2 变体库骨架(CPU) | ★★ | claude/franco | — | S1 保险 + S2 长杆,现在开工 |
-| 1d 难度课程 loader 窗口 | ★★ | yikang | — | 确认现有 loader 可加窗;半天 |
+| 1d 难度课程 loader 窗口 | ★★ | yikang | `stage1-fixed-point` | **代码已落**(loader 难度开窗+train.py override 翻译层+推进速率修 bug,旗标默认关字节等价);yikang 07-10 转 vendor 链,后续臂搭车即可 |
 | D9 新 pod bring-up + **统一队列调度器**(一份队列清单→两台 pod 空槽自动派发;共享 /workspace,无需搬数据) | ★★★(第二台 3×5090 已拍板) | claude | — | 新 pod 到手即实弹;实测时长记 runbook |
 | 等待混合采样 + 目标揭示预警窗 + 等球姿态锚(设计四件套的①②④,旗标默认关) | ★★ | claude | main | 约 2 天代码;首臂搭巩固波 |
 | **拍面反解 torch 版上部署(franco 点名提上日程)**:训练内联的批量求解器搬进规划器,替换 0.3s LM;粗解先行+随球精化的节奏靠它 | ★★★ | claude(求解器)+ yikang(接线) | — | 部署链改动;先影子模式并跑对账 |
 | 预警分布实测(触球→粗/精目标) | ★★ | yikang+claude | — | CPU 活;数字回填预警窗课程档 |
 | 1j checkpoint 抽查流水线(自动导出+考卷) | ★★ | claude | — | 1a-0 已落地,可开工 |
-| pod 原生装 ROS2 Jazzy + 厂商仿真直编(pod=Ubuntu 24.04,不需要容器;Gate 3B/真球接线的 pod 后备) | ★★ | claude | — | 装依赖→build.sh→跑通 Gate 3 冒烟;装法写 runbook |
+| pod 原生装 ROS2 Jazzy + 厂商仿真直编(pod=Ubuntu 24.04,不需要容器;Gate 3B/真球接线的 pod 后备) | ★★ | **yikang** | — | **✅ 冒烟已过(07-10,pod1)**:Jazzy 直装 + vendor sim(iceoryx ON)+ pingpong runner 全链原生编译,headless 冒烟 rate=50Hz/sync_miss=0/halts=0——distrobox 不再是唯一路径。装法+学费清单见 runbook「pod 原生 Gate 3 底座」;脚本在 pod1 /workspace/yikang/gate3/。⚠ 两知情项:①repo 内 vendor MJCF 无 integrator=显式 Euler(SIM_FIDELITY_NOTE 修复未落),行为级判读前与 jiayi distrobox 版对配置;②C++ runner 只认 175/177/180 维,S1 的 179 导出进不了(契约日实证)。下一步=hope_ws planner colcon 编译→--planner 闭环→Gate 3B 发球生成器/判分器 |
 | simtoreal2 → main 审计合并 | ★★★ | claude | main(本地 `305d0e8` + 镜像分支 `merge-simtoreal2-audit`) | **代码完成 2026-07-06**:84 CPU 测试全绿;待 franco 推 main / 合 PR;下一波点火前的机制检查 = 实弹验证 |
 | Hitter 177-D 步法线(20k 从零 + 门禁) | ★★★ | dongc1(jiayi) | main(已合并) | 拉 main 后配方不变(yaml 钉住);新增:训练内上台率曲线可看 |
 | Sim2real 部署路:C++ `pp_policy.hpp --planner` 唯一控制路 | ★★★ | dongc1(jiayi) | main | 177-D 对齐 + parity PASS;next:MDU 硬件门 |
@@ -648,6 +649,8 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 
 | Item | Owner | Landed | Where |
 | --- | --- | --- | --- |
+| **球物理 parity 对照重建落地(关闭 Active 风险"对照物丢失";用户拍板:数据非重点,算法用现有数据验证)**:repo 内 fit 血统参照 hope_training/ball_physics_fit/reference_oracle.py 接管两 parity 测试默认对照(复刻丢失 API,数学=07-03 已入库拟合移植 contact_model/ballcore,g/半径/桌面参数走 venue yaml 真源,先于且独立于 torch 端口=真跨实现对拍);RECORD_DIR 显式设置但缺失 → raise 拒绝静默跳过(fail-loud 制度补齐,skip 只剩 torch/yaml 能力缺失);首轮 pod 对拍即抓真雷:移植版 contact_model 不归一化法向(管线内恒单位 n 从未暴露),参照层修复。验证闭环(pod,44d3379e8680):physics 测试 contact 1e-10/flight+landing 0 误差 ALL PASSED;channel 测试 C++ 厂商栈全链 ALL PASSED(对参照腿 2 bounce 误差 3e-8mm);fail-loud 反证 exit=1;stage4 held-out 验证用 pod 实测数据复算 vs 07-03 定版工件=浮点噪声级一致(flight median 77.4085mm、strike→landing flight_only 0.060m、onoff 100%)——定版常数在补齐数据上完整复现 | yikang(claude) | 2026-07-10 | 分支 stage1-fixed-point bc86995+f0ac2fb |
+| **venue 球数据安置对账+补传("原始数据只在 yikang 个人介质"单点拆除)**:pod /workspace/shared/ball_mocap_0703 现为完整主副本——9/9 take 的 C3D 到齐(正常/高球/颠球不转/颠球增旋 四个首次补传;**快速/kuaisu_000.c3d 修复 07-03 上传截断**[449MB→1.51GB,当时只传了 30%,extracted npz 不受影响]);/workspace/yikang/latest_data 镜像同步;07-09 新采集上架 shared/mocap_take_0709(Take_003 ulb+5×C3D,内容待审);11 个上传文件两端 md5 逐一核对全一致;yikang env.sh 接线 BALLFIT_DATA_ROOT,ballfit 管线 require_oracle pod 上全绿。遗留:原始 .tak/C3D 在 pod 之外仍只有 yikang 外接盘(6T 卷)一份 | yikang(claude) | 2026-07-10 | pod /workspace/shared |
 | 单翻病定案+S1 face 约定修复:facesign 翻面只翻了实测侧,题库/obs/奖励仍 +Y 约定=反手 face 奖励最优点在错误平面(M3c/M2f 反手同收敛 ~34° 跨资产铁证);修复=_face_pair 统一 face 帧(exp 核/strike_success/face_guidance 实测侧改读未翻 raw 缓冲,S1≡S2 逐位等价、判卷链零改动)+双侧 B 卷卫兵+两道 mjeval 互斥守卫+face_cmd_normal_error_deg 指标+exporter 元数据;止损 R9t/R9u/M3d-live 三病灶臂;"题库按翻面重出"欠账否决关闭;232+11 tests 绿,双红队 APPROVE,现役配置字节等价 | claude(franco 拍板止损) | 2026-07-10 | main(face-frame-s1-0709);病因+设计=pod1 queue.md + s1_wave4/facesign_fix_design_0709.md;TIMELINE 07-10(凌晨二) |
 | judge.sh 单命令判卷链(判卷标准入口):env.yaml 自动解析动作对/相位/题库(train→exam 同源推导,解析不到 fail-loud 拒默认值)→ play.py 导出+sidecar → 双侧×双噪声档 bank 考卷(--qdes-clamp/--hold-ref stand 默认)→ md 报告落 run_dir/judge/;--dry-run 供机制检查 | claude | 2026-07-09 | main `66aced9` + runbook 判卷链节 |
 | watchdog AUTOJUDGE(收卷自动判卷):patrol_watchdog 巡到臂 DONE 即后台 judge.sh 出卷(M4 首单);顺带修终档 off-by-one(终档名 model_16999=0 起数,曾被当"未到 17000"反复复活 M3 四次) | claude | 2026-07-09 | pod patrol_watchdog.sh;patrol.log DONE/AUTOJUDGE 行 |

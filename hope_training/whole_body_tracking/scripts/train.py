@@ -521,7 +521,7 @@ _REWARD_KEYS = (
     # proximity power-gate for the face/velocity channels (reward_staged_design §② C2a)
     "face_gate_by_pos", "face_gate_radius",
     # constant guidance penalty toward the racket target (reward_staged_design §② B2)
-    "racket_guidance_weight", "racket_face_guidance_weight",
+    "racket_guidance_weight", "racket_face_guidance_weight", "racket_face_guidance_theta_max",
 )
 
 # YAML keys under `terminations:` (R-b envelope-termination softening, reward_staged_design §⑥;
@@ -947,6 +947,18 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _require(hasattr(R, "racket_face_guidance"), "rewards.racket_face_guidance")
             R.racket_face_guidance.weight = _fgw
             applied.append(f"rewards.racket_face_guidance.weight={_fgw}")
+        # theta_max passthrough: the cfg default pi/2 zeroes the gradient exactly where a >90°
+        # dead-zone start needs it (G1 swingsyn bh enters at ~95°) — rescues must pin pi.
+        _fgt = _get(rw, "racket_face_guidance_theta_max")
+        if _fgt is not None:
+            _fgt = float(_fgt)
+            if not 0.0 < _fgt <= 3.1415926535897932:
+                raise _OverrideError(
+                    f"[train.py] rewards.racket_face_guidance_theta_max must be in (0, pi] "
+                    f"radians (pi = no clamp), got {_fgt}")
+            _require(hasattr(R, "racket_face_guidance"), "rewards.racket_face_guidance")
+            R.racket_face_guidance.params["theta_max"] = _fgt
+            applied.append(f"rewards.racket_face_guidance.params.theta_max={_fgt}")
 
         # --- penalties / regularization (negative weights: energy + smoothness + safety) --------
         for _name, _key in (
