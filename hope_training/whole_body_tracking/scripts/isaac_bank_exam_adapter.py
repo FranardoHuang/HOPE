@@ -37,6 +37,20 @@ class IsaacBankExamError(RuntimeError):
     """Fail-closed adapter/ledger error."""
 
 
+def find_repository_root(start: str | os.PathLike[str]) -> Path:
+    """Locate the checkout root from an evaluator script or directory path."""
+
+    resolved = Path(start).resolve()
+    candidates = (resolved, *resolved.parents) if resolved.is_dir() else resolved.parents
+    for candidate in candidates:
+        if (
+            (candidate / "configs" / "ball_physics_venue.yaml").is_file()
+            and (candidate / "hope_training" / "whole_body_tracking").is_dir()
+        ):
+            return candidate
+    raise IsaacBankExamError(f"cannot locate repository root above {resolved}")
+
+
 def hydrate_missing_dataclass_defaults(
     objects: Mapping[str, Any], *, allow_legacy_diagnostic: bool
 ) -> dict[str, Any]:

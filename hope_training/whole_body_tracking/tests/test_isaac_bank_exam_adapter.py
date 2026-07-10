@@ -186,6 +186,17 @@ def test_observation_adapter_handles_tuple_and_policy_mapping_and_rejects_unknow
         A.policy_observation_tensor({"critic": FakeTensor()})
 
 
+def test_repository_root_discovery_binds_checkout_level_provenance_paths():
+    repo = A.find_repository_root(MODULE)
+    assert repo == ROOT.parents[1]
+    assert (repo / "configs" / "ball_physics_venue.yaml").is_file()
+    assert (
+        repo
+        / "hope_training/whole_body_tracking/source/whole_body_tracking/"
+        "whole_body_tracking/tasks/tracking/mdp/virtual_ball.py"
+    ).is_file()
+
+
 def test_nominal_profile_disables_randomness_but_never_replaces_train_bank():
     cfg = _env_cfg()
     profile = A.apply_nominal_eval_profile(cfg, num_envs=20)

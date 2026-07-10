@@ -69,9 +69,9 @@ not a substitute for a same-paper Isaac/MuJoCo runtime canary.
 
 Verified 2026-07-11 on the local macOS host:
 
-- adapter/audit suite: 66 passed, 1 optional Torch parity skip;
+- adapter/audit suite: 67 passed, 1 optional Torch parity skip;
 - formal BankExam/motion/racket/schema/V5 CPU suite: 81 passed;
-- union of both groups plus the MuJoCo contract tests: 136 passed, 1 optional
+- union of both groups plus the MuJoCo contract tests: 137 passed, 1 optional
   Torch parity skip;
 - planner suite: 105 passed, 2 optional skips.
 

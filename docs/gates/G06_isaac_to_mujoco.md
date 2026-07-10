@@ -189,8 +189,8 @@ the physics-hash-bound `venue_ball_sampler.py`:
   historical legacy banks are allowed only in the explicit inexact canary lane
   and are recorded as an inexact reason.
 
-Dependency-light verification on 2026-07-11 passed `66` adapter/audit tests
-with one optional Torch parity skip, `81` formal CPU contract tests and `136`
+Dependency-light verification on 2026-07-11 passed `67` adapter/audit tests
+with one optional Torch parity skip, `81` formal CPU contract tests and `137`
 unique tests in the combined contract run with the same optional skip. This is
 implementation evidence, not a gate pass:
 the shared-paper Pod canary and question-order/hash equality across both

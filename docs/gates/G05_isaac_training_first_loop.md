@@ -332,8 +332,8 @@ Three independent utilities were retained from the snapshot:
 
 The shared schedule and adapter tests are reproducible from
 `docs/operations/build_and_test.md`. Local verification on 2026-07-11 passed
-`66` adapter/audit tests with one optional Torch parity skip, `81` formal CPU
-contract tests, and `136` unique tests in their combined contract run with the
+`67` adapter/audit tests with one optional Torch parity skip, `81` formal CPU
+contract tests, and `137` unique tests in their combined contract run with the
 same one optional skip. Pod Isaac runtime and the M3f/M2/G1 10-per-side canary
 are still required, so this gate remains `Partial` and historical checkpoints
 remain diagnostic-only.
@@ -363,3 +363,11 @@ epsilon is finite and positive; it continues to reject negative/non-finite
 scales, zero/missing epsilon, dimension mismatch and missing actor state. This
 is covered by a CPU regression, but the q1 Pod cell remains unverified until
 the same schedule completes after redeployment.
+
+The next identical-paper retry completed both Isaac attempts and failed only
+while assembling source provenance: a positional `Path.parents` index treated
+`.../hope_training` as the checkout root, producing a duplicated
+`hope_training/hope_training/.../virtual_ball.py` path. Repository discovery
+now uses the checkout's venue-physics and whole-body-tree markers, and a CPU
+test requires both hashed source paths to exist. The scorecard must still be
+regenerated; no partial in-memory result from the failed writer is accepted.

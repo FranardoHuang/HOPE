@@ -41,6 +41,7 @@ from isaac_bank_exam_adapter import (  # noqa: E402
     canonical_sha256,
     configure_runtime_motion_loader,
     configure_runtime_train_bank_loader,
+    find_repository_root,
     finite_or_none,
     hydrate_missing_dataclass_defaults,
     per_attempt_action_noise,
@@ -651,7 +652,7 @@ def _run(cfg, simulation_app):
             "training contract changed during evaluation; refusing mixed provenance"
         )
 
-    repo = Path(__file__).resolve().parents[2]
+    repo = find_repository_root(__file__)
     schedule_payload = artifact_document(schedule_artifact)
     metadata = {
         "evaluation_contract_exact": not inexact_reasons,
