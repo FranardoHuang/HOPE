@@ -619,6 +619,13 @@ Historical M3f/M2/G1 checkpoints are ruler canaries, not formal lineage; add
 MuJoCo, and keep the resulting `evaluation_contract_exact=false` label.
 Re-exporting or resuming an old checkpoint cannot turn it exact.
 
+For a raw normalized ONNX, the sidecar must reproduce the saved runner formula
+`(obs - mean) / (std + eps)`. Zero std entries are valid constant-feature
+statistics only when `eps` makes every divisor strictly positive. The loader
+therefore requires finite `std>=0`, finite `eps>=0`, and elementwise
+`std+eps>0`; never delete the sidecar or feed raw observations to get around a
+normalization error.
+
 MuJoCo consumes the same paper and uses the same authoritative NumPy scorer:
 
 ```bash

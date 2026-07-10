@@ -332,11 +332,11 @@ Three independent utilities were retained from the snapshot:
 
 The shared schedule and adapter tests are reproducible from
 `docs/operations/build_and_test.md`. Local verification on 2026-07-11 passed
-`67` adapter/audit tests with one optional Torch parity skip, `81` formal CPU
-contract tests, and `137` unique tests in their combined contract run with the
-same one optional skip. Pod Isaac runtime and the M3f/M2/G1 10-per-side canary
-are still required, so this gate remains `Partial` and historical checkpoints
-remain diagnostic-only.
+`67` adapter/audit tests with one optional Torch parity skip, `82` formal CPU
+contract tests, and `138` unique tests in their combined contract run with the
+same one optional skip. M2's Isaac leg is now verified below; Pod M3f/G1 and
+the companion same-paper MuJoCo legs are still required, so this gate remains
+`Partial` and historical checkpoints remain diagnostic-only.
 
 The first M2 q1/side Kit smoke on Pod1 reached `gym.make` and then correctly
 failed on the current MotionLoader's link-origin-vs-COM guard: the historical
@@ -352,7 +352,7 @@ the motion and legacy-bank loaders, then found a normal Python pickle-evolution
 gap: the old `RacketTargetCommandCfg` predates `rally_legacy_metrics`. The
 inexact path now fills only dataclass/configclass fields that have an explicit
 current default and records every filled field; exact evaluation refuses any
-such hydration. A rerun is pending.
+such hydration. The subsequent retries are recorded below.
 
 That rerun reached complete environment and policy construction before the
 historical checkpoint exposed four zero observation-normalizer `_std` entries.
@@ -361,8 +361,8 @@ This is valid for the saved rsl_rl implementation because inference uses
 only compatibility loader now accepts finite non-negative std values only when
 epsilon is finite and positive; it continues to reject negative/non-finite
 scales, zero/missing epsilon, dimension mismatch and missing actor state. This
-is covered by a CPU regression, but the q1 Pod cell remains unverified until
-the same schedule completes after redeployment.
+is covered by a CPU regression. The next two retries below close the remaining
+writer issue and regenerate the same q1 cell.
 
 The next identical-paper retry completed both Isaac attempts and failed only
 while assembling source provenance: a positional `Path.parents` index treated
@@ -371,3 +371,16 @@ while assembling source provenance: a positional `Path.parents` index treated
 now uses the checkout's venue-physics and whole-body-tree markers, and a CPU
 test requires both hashed source paths to exist. The scorecard must still be
 regenerated; no partial in-memory result from the failed writer is accepted.
+
+Retry 4 regenerated the q1 cell successfully at commit `a619aa4`. The result is
+valid and uncensored, with the exact bank SHA, schedule SHA
+`7809555811788675a26705deb9495159210c6f449b17aeb96161d73ecc34160a`
+and ordered question IDs from the supplied paper. Both `hold_steps=0` attempts
+were retained as guard-reset failures (0/2); nothing was replaced. The
+quota-10 paper then completed all 20 attempts with deterministic nonzero holds,
+20/20 exact reaches and hits, no falls/guards/censoring, and 16/20 returns
+(forehand 6/10, backhand 10/10). The JSON SHA is
+`e625a09c31931a5c4cdcd8118f96ddc351b9eb0f2cad59cf265f26107eb787fc`.
+This is successful runtime acceptance evidence for the historical M2 Isaac
+leg, but `evaluation_contract_exact=false`; M3f/G1 and the same-paper MuJoCo
+legs remain required before this gate can move beyond `Partial`.

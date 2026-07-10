@@ -19,11 +19,11 @@ Use this file for short project-state updates that future humans and agents need
   hold-aware termination-contract v3, explicitly gated legacy train-bank
   loading/hold-guard overrides to historical diagnostics, and made tolerant
   checkpoint loading fail on missing actor keys. Local verification passed 67
-  adapter/audit tests with one optional Torch skip, 81 formal CPU tests, and
-  137 unique tests in
-  the combined run with the same optional skip. Pod same-paper runtime canary
-  remains the next acceptance step; no result has been promoted from old
-  scorecards.
+  adapter/audit tests with one optional Torch skip, 82 formal CPU tests, and
+  138 unique tests in
+  the combined run with the same optional skip. M2 now has an accepted
+  diagnostic Isaac leg; M3f/G1 and the same-paper MuJoCo legs remain the next
+  acceptance steps. No result has been promoted from old scorecards.
 - Both clean Pod checkouts passed the adapter/audit suite with Torch enabled
   (`64 passed` on each, so scorer parity did not skip). M2's new schema-v3 exam
   bank passed 183/183 forehand and 188/188 backhand Torch closed-loop land/net
@@ -58,6 +58,23 @@ Use this file for short project-state updates that future humans and agents need
   that requires both scorer and venue-physics provenance files to resolve.
   The failed Kit process group was terminated exactly and all Pod1 GPU/lock
   checks were clean before the next identical-paper retry.
+- M2's identical q1 retry 4 produced a valid, uncensored two-attempt Isaac
+  scorecard at commit `a619aa4`; bank SHA `10917148...e5bb2`, schedule SHA
+  `78095558...60a`, and ordered question IDs match the immutable paper. Both
+  zero-hold attempts guard-reset before exact strike, so the all-attempt score
+  is 0/2. The actual quota-10 canary used deterministic holds `[56,97,...,100]`
+  and completed all 20 attempts without falls, guards or censoring: hit 20/20,
+  return 16/20, forehand 6/10, backhand 10/10. Its schedule SHA is
+  `29c590ae...d99c` and result JSON SHA is `e625a09c...787fc`; it remains
+  historical/inexact and is not a bookable formal score. M2 therefore advances
+  to the fixed 50-per-side diagnostic slice.
+- The matching M2 MuJoCo q1 preflight correctly refused the same historical
+  observation-normalizer sidecar because four `_std` entries are zero. This
+  sidecar also carries `eps=1e-2`, so the runtime divisor `std+eps` is strictly
+  positive. MuJoCo now applies the same semantic guard as the checkpoint path:
+  finite `std>=0`, finite `eps>=0`, and elementwise `std+eps>0`; a regression
+  accepts epsilon-protected zeros and rejects an unprotected zero divisor.
+  No raw-observation bypass or partial score was used.
 - Moved the stale local `main` to `origin/main@ba998c4`, then rebased the
   selective port onto the newer `origin/main@caf4a4e` Gate-3 update before
   publication.  The previously uncommitted Phase-1 work is preserved intact on

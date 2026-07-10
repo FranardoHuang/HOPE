@@ -190,13 +190,23 @@ the physics-hash-bound `venue_ball_sampler.py`:
   and are recorded as an inexact reason.
 
 Dependency-light verification on 2026-07-11 passed `67` adapter/audit tests
-with one optional Torch parity skip, `81` formal CPU contract tests and `137`
+with one optional Torch parity skip, `82` formal CPU contract tests and `138`
 unique tests in the combined contract run with the same optional skip. This is
 implementation evidence, not a gate pass:
 the shared-paper Pod canary and question-order/hash equality across both
 simulators are still pending.  M3f/M2/G1 predate exact schema-3 checkpoint
 binding, so their canary cells must say `evaluation_contract_exact=false`; only
 a fresh exact-lineage model can produce a bookable score.
+
+The M2 Isaac quota-10 leg has now passed runtime artifact validation: all 20
+scheduled rows are present and uncensored, its bank/schedule SHA and ordered
+IDs match the supplied paper, and its diagnostic return rate is 16/20. The
+matching MuJoCo q1 leg initially stopped before rollout because the historical
+`obs_norm.npz` has four zero std dimensions. They are valid constant features
+under the saved `(obs-mean)/(std+eps)` implementation with `eps=1e-2`.
+MuJoCo now accepts finite non-negative std only when every `std+eps` divisor is
+strictly positive; negative/non-finite scales and unprotected zeros remain
+fatal. A rerun is required, and cross-simulator canary status remains pending.
 
 ```bash
 python3 -m pytest -q \

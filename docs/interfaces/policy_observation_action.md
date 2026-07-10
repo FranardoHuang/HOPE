@@ -132,6 +132,11 @@ schema-3 checkpoint can keep `training_contract_lineage_exact=1`. Legacy/missing
 remain diagnostic forever and cannot be “washed” into formal status by one continuation save.
 Native and standalone exporters verify checkpoint↔JSON binding, write
 `source_checkpoint_sha256`, and derive normalization truth from the actual graph/checkpoint.
+For a non-baked normalized actor, the sidecar/runtime transform is exactly
+`(obs - mean) / (std + eps)`. Constant features may have `std=0`; validity
+requires finite non-negative std, finite non-negative epsilon, and a strictly
+positive `std+eps` divisor in every dimension. This numeric guard is shared by
+the Isaac checkpoint compatibility loader and MuJoCo sidecar path.
 
 Publish-capable C++ and formal BankExam require: metadata schema 2, exact training schema 3,
 baked empirical normalization, self-consistent dt/decimation, `qdes_clamp=1`, 31 soft-limit pairs,

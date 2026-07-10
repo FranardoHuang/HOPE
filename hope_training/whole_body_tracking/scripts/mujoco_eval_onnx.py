@@ -1570,10 +1570,11 @@ class OnnxPolicy:
                         f"{self.obs_dim} ({path}) — wrong observation contract/checkpoint?"
                     )
                 if (not np.isfinite(mean).all() or not np.isfinite(std).all() or
-                        np.any(std <= 0.0) or not math.isfinite(eps) or eps < 0.0):
+                        np.any(std < 0.0) or not math.isfinite(eps) or eps < 0.0 or
+                        np.any(std + eps <= 0.0)):
                     raise SystemExit(
-                        f"[FATAL] obs_norm sidecar must contain finite mean, positive finite std, "
-                        f"and finite eps>=0: {path}"
+                        f"[FATAL] obs_norm sidecar must contain finite mean, finite non-negative "
+                        f"std, and finite eps>=0 with std+eps>0: {path}"
                     )
                 if self.formal_schema and (count is None or count <= 0):
                     raise SystemExit(

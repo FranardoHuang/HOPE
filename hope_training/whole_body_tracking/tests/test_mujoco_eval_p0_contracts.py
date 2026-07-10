@@ -420,10 +420,10 @@ def _policy(monkeypatch, tmp_path, md, obs_norm="auto", graph_baked=False):
     return M.OnnxPolicy(str(tmp_path / "policy.onnx"), obs_norm=obs_norm)
 
 
-def _write_sidecar(path, *, std=1.0):
+def _write_sidecar(path, *, std=1.0, eps_value=1e-2):
     mean = np.zeros(175, np.float32)
     std_values = np.full(175, std, np.float32)
-    eps = np.float32(1e-2)
+    eps = np.float32(eps_value)
     count = np.int64(100)
     np.savez(
         path,
@@ -484,12 +484,31 @@ def test_schema3_requires_sidecar_hash_and_rejects_invalid_stats(monkeypatch, tm
     with pytest.raises(SystemExit, match=r"schema-v3\+ normalized raw ONNX requires"):
         _policy(monkeypatch, tmp_path, _metadata(schema="3", baked=False, empirical=True))
 
-    _write_sidecar(sidecar, std=0.0)
+    _write_sidecar(sidecar, std=-1.0)
     digest = hashlib.sha256(sidecar.read_bytes()).hexdigest()
-    with pytest.raises(SystemExit, match="positive finite std"):
+    with pytest.raises(SystemExit, match="finite non-negative std"):
         _policy(
             monkeypatch, tmp_path,
             _metadata(schema="3", baked=False, empirical=True, sidecar_sha=digest),
+        )
+
+
+def test_obs_normalizer_accepts_epsilon_protected_zero_std_and_rejects_zero_sum(
+        monkeypatch, tmp_path):
+    sidecar = tmp_path / "obs_norm.npz"
+    digest = _write_sidecar(sidecar, std=0.0, eps_value=1e-2)
+    policy = _policy(
+        monkeypatch, tmp_path,
+        _metadata(baked=False, empirical=True, sidecar_sha=digest),
+    )
+    assert np.all(policy.obs_std == 0.0)
+    assert policy.obs_eps == pytest.approx(1e-2)
+
+    digest = _write_sidecar(sidecar, std=0.0, eps_value=0.0)
+    with pytest.raises(SystemExit, match=r"std\+eps>0"):
+        _policy(
+            monkeypatch, tmp_path,
+            _metadata(baked=False, empirical=True, sidecar_sha=digest),
         )
 
 
