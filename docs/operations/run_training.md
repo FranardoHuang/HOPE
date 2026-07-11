@@ -361,9 +361,51 @@ worktrees, refuses stale failed state, and never signals a training process.
 overlap. Observation-normalizer sidecars preserve finite zero std
 dimensions only because the bound runtime divisor is `std + eps` with
 `eps=0.01`; negative/non-finite std or a non-positive divisor remains fatal.
+Before taking the Kit lock, `judge.sh` now activates the CPU evaluator and
+requires both the graph loader and runtime. The current Pods use
+`onnx==1.22.0` and `onnxruntime==1.27.0`:
+
+```bash
+/workspace/hope_mjeval_venv/bin/python -m pip install 'onnx==1.22.0'
+/workspace/hope_mjeval_venv/bin/python - <<'PY'
+import onnx, onnxruntime
+print(onnx.__version__, onnxruntime.__version__)
+PY
+```
+
+`onnxruntime` alone is insufficient because formal normalization preflight
+inspects and checks the graph through `onnx`. The exact A3 plant comparison
+permits only `1e-8` absolute armature serialization residue: Isaac metadata
+passes through float32 while MuJoCo parses the same MJCF decimals as float64
+(observed maximum `2.71e-9`). A material plant mismatch still fails closed.
 Long-run milestones, paired stopping rules and peak
 density are specified in
 `docs/research/phase1_ablation_acceleration_2026-07-11.md`.
+The first historical repair manifests intentionally produced a full clean plus
+5%-noise record. Do not copy that cost into every milestone. The fresh
+preflight retry manifests
+`configs/phase1_checkpoint_curve_fresh_retry_pod{1,2}_20260711.json` use one
+fixed clean (`ns=0`) schedule with `K=20` (10 questions per side) to establish
+direction. A stop or promotion still requires a separately pre-registered
+50-per-side clean paper; noise and full-paper cells are reserved for survivors.
+
+The ongoing original-arm milestones are frozen in
+`configs/phase1_checkpoint_curve_cadence_pod{1,2}_20260711.json`. A cadence
+worker may be started before later files exist:
+
+```bash
+python3 "$EVAL/hope_training/whole_body_tracking/scripts/phase1_checkpoint_curve_worker.py" \
+  --manifest "$EVAL/configs/phase1_checkpoint_curve_cadence_pod1_20260711.json" \
+  --judge-script "$EVAL/hope_training/whole_body_tracking/scripts/judge.sh" \
+  --state-dir /workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1 \
+  --max-active-cpu 6 --wait-for-checkpoints
+```
+
+In wait mode each pre-registered path must appear and keep the same size/mtime
+for five seconds before hashing. Before every launch the worker rechecks the
+judge SHA and both clean commits; it never scans arbitrary `model_*.pt` files
+or changes a running trainer. Jobs are ordered so paired causal milestones are
+consumed together and future fresh milestones follow every 2000 iterations.
 
 Schema 3 has two validation levels. Structural validation is sufficient to
 export a hash-bound diagnostic checkpoint whose motion is explicitly inexact;

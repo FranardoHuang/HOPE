@@ -1812,8 +1812,12 @@ class MujocoRobot:
         if bound_armature is not None:
             source = self.model.dof_armature[self.vadr].copy()
             if require_bound_plant_match:
+                # Isaac records this vector through float32 tensors while the MJCF parser
+                # exposes float64 values.  Accept only the sub-1e-8 round-trip residue; an
+                # exact zero tolerance would reject the same decimal plant after a harmless
+                # float32 serialization (observed max residue 2.71e-9 on A3).
                 require_contract(
-                    np.allclose(source, bound_armature, rtol=0.0, atol=1e-10),
+                    np.allclose(source, bound_armature, rtol=0.0, atol=1e-8),
                     "formal BankExam MJCF armature disagrees with training metadata: "
                     f"max_abs={float(np.max(np.abs(source - bound_armature))):.3g}",
                 )
@@ -4754,7 +4758,9 @@ def main():
             f"[mj-sim2sim] evaluation_contract_exact="
             f"{str(bool(policy.evaluation_contract_exact)).lower()}"
         )
-        for _ln in venue_sampler.denominator_report():
+        for _ln in venue_sampler.denominator_report(
+            evaluation_contract_exact=policy.evaluation_contract_exact
+        ):
             print(f"[mj-sim2sim] {_ln}")
     elif args.target_source == "venue-balls":
         if args.deploy_faithful:
@@ -5290,7 +5296,9 @@ def main():
         if hasattr(venue_sampler, "denominator_report"):
             print("-" * 92)
             print("DENOMINATORS (判卷分母法则 — return rates are meaningless without these):")
-            for _ln in venue_sampler.denominator_report():
+            for _ln in venue_sampler.denominator_report(
+                evaluation_contract_exact=policy.evaluation_contract_exact
+            ):
                 print(_ln)
         print("=" * 92)
 

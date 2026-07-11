@@ -79,8 +79,10 @@ exam-bank SHA、schedule SHA、evaluator commit、seed、实际 attempt 数及�
 
 ## 当前六卡的正确用法
 
-两台 Pod 各有三张 5090，广度阶段目标布局是 `4/4/4 + 4/4/4 = 24` 条训练。现有六条只占
-每卡一个槽，不能称为“跑满”。额外 18 条不能全部浪费成同配方重复；当前最小而高信息密度的矩阵是：
+两台 Pod 各有三张 5090，广度阶段目标布局是 `4/4/4 + 4/4/4 = 24` 个并发槽；本轮矩阵也恰好
+预注册 24 个实验。现有六条只占每卡一个槽，不能称为“跑满”。但“24 个预注册实验”不自动等于
+“任一时刻 24 个活进程”：先发臂若自然终档，实时并发要以 `.launch`、进程和 NOW 为准并从合法队首
+回填。额外 18 条不能全部浪费成同配方重复；当前最小而高信息密度的矩阵是：
 
 - legacy continuation：`2 motion families × 2 face pairings × 2 continuation seeds = 8` 条；
   seed 2 把 old/S1 所在 GPU 对调，以免 pairing 和 GPU 编号绑定。它们共享 historical parent，
@@ -98,6 +100,16 @@ fresh 四格缩写如下：
 | `LZ` | `legacy_signed_vs_A` | zero friction | face 主效应诊断；judge 必须标 inexact evaluation |
 | `LP` | `legacy_signed_vs_A` | declared non-zero plant | 双旧设置诊断；judge 必须标 inexact evaluation |
 
+四格不能只排四个均值。每个 seed 先做阻断内对比，再跨四个 seed 报 paired bootstrap 区间：
+
+- face 主效应：`0.5 × [(SZ - LZ) + (SP - LP)]`；
+- zero-plant 主效应：`0.5 × [(SZ - SP) + (LZ - LP)]`；
+- face×plant 交互：`(SZ - SP) - (LZ - LP)`。
+
+Pod、GPU 编号和启动 layer 一起写进 ledger，作为阻断/审计字段而不是训练变量；如果某个效应只在
+单一 GPU 或单一启动层出现，先按硬件/墙钟混杂处理，不宣布机制收益。四个 seed 的完整格点正是为了
+把这三种效应与 seed 噪声分开，而不是把 16 条 fresh 当成 16 次互不相关的排行榜尝试。
+
 `training-contract lineage exact` 与“是否是本轮 formal target”不是同一个概念：fresh schema-2 motion
 可使 provenance 精确绑定，但 legacy pairing 仍只能走 diagnostic judge；本轮只有 `SZ` 被预注册为
 formal target 格，其他三格是同 family 的因果尺。
@@ -111,6 +123,29 @@ formal target 格，其他三格是同 family 的因果尺。
 
 扩容后 checkpoint worker 只消费预注册里程碑，不对每个 `model_*.pt` 重复判卷。这样训练保存频率
 仍保持恢复能力，而 CPU/GPU 评测预算集中在能改变决策的节点上。
+`phase1_checkpoint_curve_worker.py --wait-for-checkpoints` 可以在里程碑出现前常驻，但只等待 manifest
+里的精确路径；文件大小/mtime 稳定后才 hash，并在每次导出前重验 judge、eval checkout 和 frozen
+training checkout。它不是“看到任何新文件就盲判”的目录 watcher。
+
+## 把判卷当调度器，而不是事后报告
+
+评测队列按“这次读数改变下一步决定的概率 × 能释放/避免的后续 GPU 小时 ÷ 判卷成本”排序，
+而不是按 checkpoint 文件出现的先后顺序排序。落地优先级是：
+
+1. 同一 `(family, seed, milestone)` 缺一边的 paired 对照；不齐对就没有因果差值；
+2. `SZ` formal target 的跨 seed 复现点；它决定是否值得进入完整双引擎门禁；
+3. 正好能确认斜率反转或止损条件的下一相邻里程碑；
+4. 已明显被支配的诊断格和 terminal 归档点。
+
+不同训练年龄的绝对分不直接互比，不能拿候选的峰值点对对照的谷值点。中间点可先用同一 immutable
+paper 的固定小配额作趋势筛选；任何停臂、晋级或正式结论仍需要预注册的 `50/侧` 判卷点。若小配额
+结论接近、置信区间跨零或与训练内 rally 曲线矛盾，就增加题量而不是擅自换卷。这样把 sequential
+testing 的成本花在不确定边界，而不是给显然相同或显然失败的臂反复跑满卷。
+
+卡池也按证据动态回填：四槽是并发目标，不是要求每条实验都活到 terminal。hard failure 释放的槽先
+补同一配对缺口；证据止损释放的槽补预注册下一 seed/格；没有合法队首时宁可短暂空槽，也不临时发一条
+无法回答问题的配方。独占卡只给已经由 paired checkpoint 曲线晋级的终审候选。CPU BankExam、训练
+内曲线归并和合同审计应尽量与 GPU 训练重叠，但所有 Kit scene-create 仍经过同一启动锁。
 
 ## 什么叫“加速成功”
 

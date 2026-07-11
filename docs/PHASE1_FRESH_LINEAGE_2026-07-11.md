@@ -248,6 +248,30 @@ MuJoCo BankExam on CPU with one BLAS/OpenMP thread. Worker state binds a clean e
 judge SHA, frozen training commit and checkpoint SHA. Full rationale, early-stop protection and peak-density rules are in
 [`phase1_ablation_acceleration_2026-07-11.md`](research/phase1_ablation_acceleration_2026-07-11.md).
 
+Two later preflights were also evaluator failures and are retained separately. The first reached
+MuJoCo only after ONNX and both sidecars succeeded, then found that
+`/workspace/hope_mjeval_venv` had `onnxruntime` without the `onnx` graph package. The corresponding
+workers/judges alone were stopped by their recorded PGIDs; both training checkouts and all six
+trainers were untouched. The archives are `initial_pod{1,2}_missing_onnx_pkg_4`. Both Pods now pin
+`onnx==1.22.0` (`ml_dtypes==0.5.4`), and `onnx.checker` plus ONNX Runtime accepted inputs
+`obs [1,179]` and `time_step [1,1]`.
+
+The next retry exposed a formal armature threshold below serialization precision. The same decimal
+A3 plant differs by at most `2.71e-9` after Isaac's float32 metadata path versus MuJoCo's float64
+XML path. The evaluator now accepts only an absolute `1e-8` round-trip residue and still fails any
+material plant mismatch. Fresh `0/1000/2000` rows from that attempt are pre-rollout records, not
+model scores. The causal rows completed because their historical plant is an explicit inexact
+diagnostic; their summary JSON is authoritative. A report-layer defect that printed the bank leg's
+exactness instead of final artifact exactness in `DENOMINATORS` is fixed so legacy reports also say
+`evaluation_contract_exact=false`.
+
+The corrected fresh retry is deliberately cheaper than the historical repair:
+`configs/phase1_checkpoint_curve_fresh_retry_pod{1,2}_20260711.json` freezes
+`ns=0`, `K=20` (10 questions per side) for `0/1000/2000`. It measures growth
+direction only. No arm may be stopped or promoted from that small paper; those
+decisions require the pre-registered 50-per-side clean schedule, and robustness
+noise is run only after a candidate survives.
+
 ## Remaining Gates
 
 1. Complete the layer-by-layer scale-out to 24 arms. After every layer verify PGID isolation, GPU/host

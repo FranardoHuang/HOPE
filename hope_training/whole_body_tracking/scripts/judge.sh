@@ -39,7 +39,8 @@
 #   - 严禁 kill 训练进程:本脚本只杀自己 setsid 出来的 play.py 进程组,别的谁都不碰。
 #   - 导出错峰由调用方保证:一次只跑一个 judge.sh,不与其他 Isaac 同秒点火(撞 CUDA 枚举)。
 #   - 每 checkpoint 必须重导出 + 重做 sidecar(先清旧 exported/,勿复用陈旧工件)。
-#   - isaac venv 没有 onnxruntime,考卷必须走 mjeval venv;反之 sidecar 需要 torch 走 isaac venv。
+#   - isaac venv 没有 onnxruntime,考卷必须走 mjeval venv;该 venv 同时需要 onnx(图检查)
+#     和 onnxruntime(推理),反之 sidecar 需要 torch 走 isaac venv。
 #   - 原型=pod /workspace/franco/s1_wave4/judge_final.sh(巡检班第 3 遍手搓,坑已踩平)。
 # =============================================================================
 set -u -o pipefail
@@ -489,6 +490,22 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
+# Fail before taking the Kit lock or spending GPU time.  ``onnxruntime`` alone is not enough:
+# the exact normalization/graph contract imports ``onnx`` for graph inspection and checker.
+[ -f "$JUDGE_MJEVAL_ACT" ] || die "mjeval venv 不存在: $JUDGE_MJEVAL_ACT(JUDGE_MJEVAL_ACT 可覆盖)"
+MJEVAL_DEPS=$(
+  (
+    # shellcheck disable=SC1090
+    source "$JUDGE_MJEVAL_ACT" >/dev/null 2>&1
+    python - <<'PY'
+import onnx
+import onnxruntime
+print(f"onnx={onnx.__version__} onnxruntime={onnxruntime.__version__}")
+PY
+  ) 2>&1
+) || die "mjeval venv 缺正式判卷依赖(必须同时 import onnx, onnxruntime): $MJEVAL_DEPS"
+note "mjeval deps OK: $MJEVAL_DEPS"
+
 mkdir -p "$JUDGE_DIR/exam"
 
 # ---------------------------------------------------------------- ② 原生导出 + sidecar(isaac venv)
@@ -536,7 +553,6 @@ grep -a "\[make_std_sidecar\]" "$JUDGE_DIR/sidecar.log"
 [ -f "$OBS_NORM" ] || note "⚠ 没生成 obs_norm.npz(仅 empirical_normalization=false 的臂才正常;报告里带出)"
 
 # ---------------------------------------------------------------- ③ 考卷(mjeval venv,纯 CPU)
-[ -f "$JUDGE_MJEVAL_ACT" ] || die "mjeval venv 不存在: $JUDGE_MJEVAL_ACT(JUDGE_MJEVAL_ACT 可覆盖)"
 note "③ mujoco_eval_onnx 考卷(mjeval venv,ns=[$NOISE_SCALES] × 双侧,steps=$STEPS)…"
 (
   # shellcheck disable=SC1090

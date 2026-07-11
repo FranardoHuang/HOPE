@@ -1092,3 +1092,13 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   evaluator/training commit、拒绝 stale failed state 并在失败前 drain CPU jobs；scale-out 层可核验
   跳过仍活的成功臂，也可用 `PHASE1_ONLY_ARM` 精确补剩余臂。相关纯 CPU 集为
   `68 passed, 1 optional Torch skip`。
+- 后续实跑再分离两个 evaluator-only 阻塞：mjeval venv 有 `onnxruntime` 却没有正式图检查需要的
+  `onnx`，两 Pod 已固定 `onnx==1.22.0` 并通过 graph checker/runtime；fresh exact plant 又因
+  float32 合同与 float64 MJCF 的 `2.71e-9` 舍入残差被旧 `1e-10` 门槛误拒。现只容许 `1e-8`
+  绝对序列化残差，真实 armature 偏差仍 fail-closed；含 cadence worker 的聚焦集
+  `88 passed, 1 optional skip`。这些均发生在 rollout 前，
+  保留为前置失败而不计模型分；judge 也会在占用 Kit/GPU 前检查两个 ONNX 包。
+- causal checkpoint 曲线已经用同一 immutable exam 证明“不能等终档”：M3-old 在 18k 达阶段峰值
+  后 19k 回落，而 M3-S1 继续上升；M2-old 同样在 18k 后回落，M2-S1 19k 仍高于 old。所有 causal
+  行都必须标 `evaluation_contract_exact=false`；同步修复了 Markdown 分母段误抄 bank-leg exactness
+  的报告 bug，JSON 与人读报告不再冲突。

@@ -1287,3 +1287,12 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    均强制 inexact；judge/trainer 共用 Kit lock；worker 不复用 stale log/state 且记录 clean eval
    commit；scale-out 部分成功可安全跳过/单臂补发。相关回归 `68 passed,1 optional skip`，修后
    全曲线 retry 待执行。
+11. 【franco/Codex】**早判实跑已经改变结论，顺手把评测前置与报告口径修到 fail-fast**——两 Pod
+   的 causal `17k/18k/19k` 同卷曲线全部跑完：M3-old 在 18k 从约 0.97 回落到 19k 的约 0.82，
+   M3-S1 却从约 0.90 升到约 0.96；M2-old 也在 18k 后回落，M2-S1 在 19k 仍明显更高。这是“不等
+   terminal、峰值 checkpoint 也保留”的直接数据。fresh 三点在 rollout 前被 evaluator 拦住：先是
+   mjeval 有 `onnxruntime` 没 `onnx`，再是同一 armature 经 float32/float64 后只有 `2.71e-9` 残差
+   却被 `1e-10` 阈值误拒；两 Pod 已装 `onnx==1.22.0` 并过 checker/runtime，judge 以后在占 Kit/GPU
+   前先 import 双依赖，armature 只放行 `1e-8` 序列化残差。另抓到 causal summary JSON 正确为
+   inexact、Markdown `DENOMINATORS` 却误写 true，已改成传播最终 evaluation flag。专项回归
+   `88 passed,1 optional skip`；所有失败批次保留但不算模型分，训练 checkout 未动、无真机命令。

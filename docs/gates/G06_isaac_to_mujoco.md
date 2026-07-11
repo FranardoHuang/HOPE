@@ -318,6 +318,17 @@ scorecard. `SP` remains a non-target plant ablation even when its bytes are
 fully reproducible. This prevents the 2x2 diagnostic grid from laundering a
 formal target label.
 
+The next checkpoint preflights closed two more evaluator-only blockers. The Pod CPU venv contained
+`onnxruntime` but not the `onnx` graph package required by formal inspection; both Pods now pin
+`onnx==1.22.0`, and the generated 179-D graphs pass checker and runtime. Fresh exact models then
+stopped before rollout because Isaac's float32 metadata representation of the same MJCF armature
+decimals differed by at most `2.71e-9`, while the comparison threshold was `1e-10`. The formal
+comparison now admits only `1e-8` absolute serialization residue and retains a material-mismatch
+failure test. A separate report fix propagates final artifact/escape exactness into the denominator
+section, so a legacy causal report can no longer display `true` while its summary JSON says `false`.
+These preserved attempts are not model scores. A corrected exact fresh BankExam is still required,
+so G06 remains `Partial`.
+
 ```bash
 python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_bank_exam_schedule.py \

@@ -769,12 +769,21 @@ class BankExamSampler(VenueBallSampler):
             attempt_seed=item.attempt_seed, schedule_sha256=self.schedule_sha256,
             repeat=item.repeat)
 
-    def denominator_report(self):
+    def denominator_report(self, *, evaluation_contract_exact=None):
         """判卷分母法则 lines: per side — questions in the exam split (kept), how many were
         asked/wrapped this run, and the share of answers inside the 25-deg face cone."""
         lines = []
+        # ``contract_exact`` describes only the bank/schedule leg.  The final evaluation flag
+        # also includes artifact lineage and any explicit diagnostic escape, so callers that
+        # own that final value must pass it through instead of letting this report overstate a
+        # legacy checkpoint as exact.
+        report_exact = (
+            self.contract_exact
+            if evaluation_contract_exact is None
+            else bool(evaluation_contract_exact)
+        )
         lines.append(
-            f"  evaluation_contract_exact={str(bool(self.contract_exact)).lower()}"
+            f"  evaluation_contract_exact={str(bool(report_exact)).lower()}"
         )
         lines.append(
             f"  immutable_schedule: K={len(self.schedule)} seed={self.schedule_seed} "

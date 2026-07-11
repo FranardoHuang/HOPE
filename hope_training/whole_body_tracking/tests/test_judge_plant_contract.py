@@ -172,3 +172,12 @@ def test_judge_keeps_legacy_missing_or_schema2_contract_on_default_plant(tmp_pat
     assert "task.plant.zero_joint_friction=true" not in schema2.stdout
     assert "legacy schema-2 contract" in schema2.stdout
     assert "--allow-inexact-contract" in schema2.stdout
+
+
+def test_judge_preflights_both_mjeval_graph_and_runtime_dependencies_before_export():
+    script = JUDGE.read_text(encoding="utf-8")
+    dep_check = script.index("import onnx\nimport onnxruntime")
+    kit_lock = script.index('exec 8>"$JUDGE_KIT_BOOT_LOCK"')
+    export_call = script.index('eval "$EXPORT_CMD"')
+    assert dep_check < kit_lock < export_call
+    assert "mjeval venv 缺正式判卷依赖" in script

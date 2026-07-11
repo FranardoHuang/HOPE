@@ -493,3 +493,13 @@ process. Both scale-out roles (three layers of three arms on each Pod) and all
 18 initial checkpoint jobs passed dry-run input/hash/path checks. Actual curve
 results, the corrected retry and the remaining 18 first-iteration contracts are still pending, so
 the gate remains `Partial`.
+
+The following retries reached the CPU evaluator and separated two more evaluator faults from
+training quality. Both Pod venvs had `onnxruntime` but not the `onnx` package required for formal
+graph checking; they now pin `onnx==1.22.0`, and checker plus runtime inference pass. Fresh exact
+checkpoints then failed before rollout on only `2.71e-9` armature disagreement caused by float32
+metadata versus float64 MJCF parsing. The formal gate now tolerates at most `1e-8` absolute
+serialization residue, with a regression that still rejects material plant differences. The six
+original trainers remained live and the frozen checkouts stayed clean. None of these evaluator
+failures is counted as a model result, and G05 remains `Partial` pending the corrected fresh curve
+and layer-by-layer scale-out proof.

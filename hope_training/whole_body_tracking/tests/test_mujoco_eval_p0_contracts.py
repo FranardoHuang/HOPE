@@ -356,6 +356,28 @@ def test_mujoco_robot_applies_bound_implicit_armature_effort_and_zero_friction(m
     assert model.opt.integrator == 7
 
 
+def test_mujoco_robot_accepts_float32_armature_roundtrip(monkeypatch):
+    # Training metadata originates in Isaac float32 tensors, while the same decimal values
+    # in MJCF are parsed as float64.  The exact gate must tolerate only that serialization
+    # residue (A3 max observed 2.71e-9), not a physically meaningful plant change.
+    bound = np.full(31, 0.06646569891, dtype=np.float64)
+    joint_names, body_names, model = _install_fake_mujoco(
+        monkeypatch, armature=bound.astype(np.float32).astype(np.float64)
+    )
+    robot = M.MujocoRobot(
+        "unused.xml", joint_names, body_names, 0.005,
+        keep_native_damping=False, keep_frictionloss=False,
+        pd_mode="implicit", kd_for_implicit=np.ones(31),
+        actuator_types=("implicit",) * 31,
+        joint_armature=bound,
+        joint_velocity_limits=np.full(31, 12.0),
+        joint_effort_limits=np.full(31, 24.0),
+        require_bound_plant_match=True,
+        allow_velocity_limit_proxy=False,
+    )
+    assert np.array_equal(model.dof_armature[robot.vadr], bound)
+
+
 def test_mujoco_robot_fails_mismatched_bound_armature_and_active_velocity_limit(monkeypatch):
     joint_names, body_names, _ = _install_fake_mujoco(
         monkeypatch, armature=0.02, step_velocity=13.0

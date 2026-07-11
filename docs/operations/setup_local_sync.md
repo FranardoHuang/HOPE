@@ -299,6 +299,11 @@ test ! -e "$EVAL_ASSET" && ln -s "$TRAIN_ASSET" "$EVAL_ASSET"
 
 The link is ignored and must be recreated on another Pod/worktree. A missing link causes Isaac
 scene creation to fail before export; do not classify that as a checkpoint failure.
+The detached evaluator also depends on the Pod-local
+`/workspace/hope_mjeval_venv`; restore/verify both `onnx==1.22.0` and
+`onnxruntime==1.27.0` with the command in `run_training.md`. Having only
+`onnxruntime` allows inference import but fails formal graph inspection after
+an otherwise successful GPU export.
 
 ```bash
 REMOTE='root@162.43.172.171'
@@ -318,7 +323,13 @@ rsync -a -e "$SSH" \
   "$LOCAL_ROOT/smokes/runtime_order_v2_motion/"
 rsync -a -e "$SSH" \
   "$REMOTE:/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/" \
-  "$LOCAL_ROOT/checkpoint_curves/"
+  "$LOCAL_ROOT/checkpoint_curves/pod1/"
+
+REMOTE2='root@162.43.172.181'
+SSH2='ssh -p 13146 -i ~/.ssh/id_ed25519_runpod'
+rsync -a -e "$SSH2" \
+  "$REMOTE2:/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/" \
+  "$LOCAL_ROOT/checkpoint_curves/pod2/"
 scp -P 18333 -i ~/.ssh/id_ed25519_runpod \
   "$REMOTE:/workspace/codexschema/phase1_fresh_20260711/assets/BUILD_RECORD.json" \
   "$REMOTE:/workspace/codexschema/phase1_fresh_20260711/assets/v4rg/OBSOLETE_DO_NOT_USE.json" \

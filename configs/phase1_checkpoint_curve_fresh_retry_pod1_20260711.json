@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "purpose": "fresh exact clean q10-per-side retry after evaluator-only preflight fixes",
+  "judge_script_sha256": "1a00702935096b063435c3f0bd23e75f76f13e1298c87310d1cec3c26cca8529",
+  "training_checkout": "/workspace/codexschema/nohope",
+  "expected_training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+  "jobs": [
+    {
+      "id": "fresh_SZ_seed1_0_clean_q10",
+      "run_dir": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-52-16_phase1_fresh_v3_S1_seed1",
+      "checkpoint": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-52-16_phase1_fresh_v3_S1_seed1/model_0.pt",
+      "gpu": 2,
+      "noise_scales": "0.0",
+      "extra_args": ["--schedule-k", "20"]
+    },
+    {
+      "id": "fresh_SZ_seed1_1000_clean_q10",
+      "run_dir": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-52-16_phase1_fresh_v3_S1_seed1",
+      "checkpoint": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-52-16_phase1_fresh_v3_S1_seed1/model_1000.pt",
+      "gpu": 2,
+      "noise_scales": "0.0",
+      "extra_args": ["--schedule-k", "20"]
+    },
+    {
+      "id": "fresh_SZ_seed1_2000_clean_q10",
+      "run_dir": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-52-16_phase1_fresh_v3_S1_seed1",
+      "checkpoint": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-52-16_phase1_fresh_v3_S1_seed1/model_2000.pt",
+      "gpu": 2,
+      "noise_scales": "0.0",
+      "extra_args": ["--schedule-k", "20"]
+    }
+  ]
+}

@@ -110,10 +110,35 @@ def main() -> int:
     parser.add_argument("--export-timeout-s", type=int, default=1200)
     parser.add_argument("--poll-s", type=float, default=5.0)
     parser.add_argument("--continue-on-pre-cpu-failure", action="store_true")
+    parser.add_argument(
+        "--wait-for-checkpoints",
+        action="store_true",
+        help="wait for each pre-registered checkpoint instead of failing when it is not yet saved",
+    )
+    parser.add_argument(
+        "--checkpoint-wait-timeout-s",
+        type=float,
+        default=0.0,
+        help="maximum wait per checkpoint; 0 means no deadline",
+    )
+    parser.add_argument("--checkpoint-poll-s", type=float, default=15.0)
+    parser.add_argument(
+        "--checkpoint-stable-s",
+        type=float,
+        default=5.0,
+        help="require size and mtime to stay unchanged before hashing a newly saved checkpoint",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    if args.max_active_cpu < 1 or args.export_timeout_s < 1 or args.poll_s <= 0:
+    if (
+        args.max_active_cpu < 1
+        or args.export_timeout_s < 1
+        or args.poll_s <= 0
+        or args.checkpoint_wait_timeout_s < 0
+        or args.checkpoint_poll_s <= 0
+        or args.checkpoint_stable_s < 0
+    ):
         parser.error("worker limits must be positive")
 
     manifest = load_manifest(args.manifest.resolve())
@@ -168,10 +193,58 @@ def main() -> int:
         job_id = job["id"]
         run_dir = Path(job["run_dir"])
         checkpoint = Path(job["checkpoint"])
-        if not run_dir.is_dir() or not checkpoint.is_file():
-            raise FileNotFoundError(f"job {job_id}: missing run/checkpoint")
+        wait_started = time.monotonic()
+        last_wait_note = 0.0
+        while not run_dir.is_dir() or not checkpoint.is_file():
+            if not args.wait_for_checkpoints or args.dry_run:
+                raise FileNotFoundError(f"job {job_id}: missing run/checkpoint")
+            failures += reap(active)
+            elapsed = time.monotonic() - wait_started
+            if (
+                args.checkpoint_wait_timeout_s > 0
+                and elapsed >= args.checkpoint_wait_timeout_s
+            ):
+                raise TimeoutError(
+                    f"job {job_id}: checkpoint did not appear within "
+                    f"{args.checkpoint_wait_timeout_s:g}s"
+                )
+            if elapsed - last_wait_note >= 300.0 or last_wait_note == 0.0:
+                print(
+                    f"[curve-worker] waiting for checkpoint {job_id}: {checkpoint}",
+                    flush=True,
+                )
+                last_wait_note = elapsed
+            time.sleep(args.checkpoint_poll_s)
         if checkpoint.parent.resolve() != run_dir.resolve():
             raise ValueError(f"job {job_id}: checkpoint must be directly inside run_dir")
+        if args.wait_for_checkpoints and args.checkpoint_stable_s > 0:
+            while True:
+                before = checkpoint.stat()
+                time.sleep(args.checkpoint_stable_s)
+                after = checkpoint.stat()
+                if (before.st_size, before.st_mtime_ns) == (
+                    after.st_size,
+                    after.st_mtime_ns,
+                ):
+                    break
+                print(
+                    f"[curve-worker] checkpoint still changing {job_id}; waiting for a stable save",
+                    flush=True,
+                )
+
+        # A long-lived cadence worker must not silently continue after either checkout or the
+        # judge script changes underneath it.  Revalidate immediately before every checkpoint.
+        if sha256(judge_script) != judge_sha:
+            raise RuntimeError("judge.sh changed while the checkpoint worker was waiting")
+        if git_output(eval_root, "rev-parse", "HEAD") != eval_commit or git_output(
+            eval_root, "status", "--porcelain"
+        ):
+            raise RuntimeError("evaluation worktree changed while the checkpoint worker was waiting")
+        if training_commit is not None:
+            if git_output(training_checkout, "rev-parse", "HEAD") != training_commit or git_output(
+                training_checkout, "status", "--porcelain"
+            ):
+                raise RuntimeError("training checkout changed while the checkpoint worker was waiting")
         checkpoint_sha = sha256(checkpoint)
 
         state_path = state_dir / f"{job_id}.json"
