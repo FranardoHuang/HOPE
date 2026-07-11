@@ -1697,3 +1697,13 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
   两项 guard 防静默引入。未来若采用，先给当前命名配方显式 `0.0`，再和 control/passive-head 做配对，
   并把它与 balance/recovery/ready reward 当同 phase mixture interaction 判；现役 reward/config
   相关回归 `88 passed`，未发训练臂（全量另有2个旧 MotionLoader/Path 非本改失败）。
+
+## 2026-07-12: Gate3 planner-policy 红队
+
+66. 【franco/Codex】**planner 小块先不合：host 全绿仍被配对反例否决**——`69418a9` 的选边只做
+   `intercept_y_world-base_y_world`，而 179 policy 用 yaw 旋转后的 base frame；yaw=10°、相对目标
+   `(0.67,0.02)` 时前者发 BH、后者 y=`-0.09665` 应发 FH，连带 `[+1,-1]` 拍面转换也会选错。
+   同时 2.6s 预测窗让约1.89s来球更早出现，但 179 没有 110 的 waiting gate，FH/BH 会约提前
+   `.59/1.01s` 进入 strike clock。发球双门还要同时绑定 owned runner fresh MOTION 与 owned planner
+   fresh readiness。147 pass/2 skip 不覆盖这些语义反例；分支退回修 base-yaw 选边、per-clip wait 和
+   双进程 readiness，main 未合、未启 sim/Pod/信号/真机。

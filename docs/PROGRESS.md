@@ -4,6 +4,27 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-12
 
+- Kept planner proposal `69418a9` out of main after independent red-team found
+  two planner-policy pairing faults. Its side selector used world-Y difference,
+  while the 179 policy selects in the yaw-rotated base frame; at only 10 degrees
+  yaw a concrete target changes from the proposed BH to the policy-correct FH,
+  which would also apply the wrong `[+1,-1]` face conversion. Separately, the
+  proposed 2.6-second prediction horizon exposed formal 179 commands earlier,
+  but 179 had no per-clip wait gate: an approximately 1.89-second arrival would
+  enter the FH/BH strike clock about 0.59/1.01 seconds too early. The future
+  serve contract must also wait for exact-owned, fresh planner readiness as well
+  as runner MOTION. The branch is being corrected with base-yaw selection,
+  metadata/per-clip 179 waiting and dual readiness ownership; passing host tests
+  did not override the semantic counterexamples. No simulator, Pod mutation,
+  signal or robot command ran.
+- Read-only full-pool audit at 06:54--06:56 CST again found both train/eval
+  checkouts clean at `6d93bcb...`/`46a0ce2...`, each Pod at 12 live plus 2
+  normal terminal arms and exactly four trainers per GPU. All 28 latest
+  checkpoints are stable, finite, iteration/contract/lineage exact; all 28 full
+  logs are free of NaN/Inf/Traceback/OOM/malloc/Killed/new exit markers. Ten
+  workers are exact-owned with no child judge/Kit, and 41/41 completed states
+  have rc0, correct checkpoint/sidecar binding and contract-correct exactness.
+  No action was required.
 - Selectively integrated yikang's small branch-only changes against
   `origin/main@b2067ba` without merging either old-base branch. The fit-lineage
   NumPy `reference_oracle` is now the default content-addressed port-parity

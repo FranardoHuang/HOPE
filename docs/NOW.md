@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 当下状态与团队 focus（2026-07-12 06:55 CST）
+## 当下状态与团队 focus（2026-07-12 07:12 CST）
 
 本节只做 roadmap 的当前入口；下面的实验结果、奖励/训练台账、长期路线和历史判决继续保留，
 不能用这份短报替代可复现实验记录。
@@ -36,9 +36,9 @@ Rules:
   转到 planner-policy 接缝、发球时序所有权、安全的 vendor backend first tick 和 D0 单拍闭环。
 - **刚得到什么**：face179 已在 Pod1 隔离 ROS/Jazzy+AimRT Release 下完成严格重导和生产预检：
   native `210 pass + 9 optional skip`，正确模型 rc0，去 metadata/缺 envelope/exact=0 均在 backend
-  前 rc3，错误导出不覆盖既有 ONNX；合并后本机再过 `52 pass + 1 optional skip`。这证明模型可安全
-  装载，不证明 vendor simulator/backend/击球已通过。04:45–04:54 满池只读巡检仍为两 Pod 各
-  `12 live + 2 terminal`、每 GPU 4 条，28/28 最新 checkpoint finite 且 contract/lineage 正确。
+  前 rc3，错误导出不覆盖既有 ONNX；合并后本机再过 `52 pass + 1 optional skip`。06:54–06:56
+  满池只读巡检仍为两 Pod 各 `12 live + 2 terminal`、每 GPU 4 条；28/28 checkpoint finite 且
+  contract/lineage 正确，完整日志无异常，10 workers 全活，41/41 已完成判卷 rc0/binding/exactness 正确。
 - **现在谁在 focus 什么**：
   - franco/Codex：满池 checkpoint 早判、planner-policy 成对 Gate3、vendor first tick/D0、
     Isaac↔MuJoCo 分层归因；同时守住动作/TOPP/连续恢复队列，不让长期轴阻塞最短 demo。
@@ -56,18 +56,22 @@ Rules:
   worst seed 仅 `20/100`，已正式判 seed-stability 失败。新 reference oracle 与 Torch 物理全表对拍
   通过，最大误差 `4.63e-9`；stand viewer 已纠正为生产 29-DOF PD、neck passive，不再伪称额外 head
   `40/2` 是生产合同。
+- **当前新 blocker**：planner 候选 `69418a9` 虽有 `147 pass + 2 skip`，仍被红队判 NO-MERGE。
+  它用 world-Y 选边而 policy 用 base-yaw frame，10° 就能把 FH/BH 选反；并且 2.6s 预测窗没有配套
+  179 per-clip wait，约1.89s来球会让 FH/BH strike clock 分别提前约 `.59/1.01s`。发球同步还必须
+  同时等 owned planner fresh-ready 与 owned runner fresh-MOTION，不能只看 runner 日志。
 - **代码交流状态**：recovery A/B/C、plan-only Gate3 源码门和严格 face179 模型合同已分别随
   `e10922a`、`b2067ba`、`8975043` 进入 main；face179 的 vendor 行为证据仍明确为 `Partial`。
-  yikang 的 oracle/stand 诊断随 `3df6ff5` 合入，head reward 明确留在未验证队列。planner 的
-  marker→base 旋转、解算节流/2.6s horizon、显式 side+hysteresis 与 fail-closed serve-sync 正在
-  独立红队做最终接缝审查；未验证功能不合 main。
+  yikang 的 oracle/stand 诊断随 `3df6ff5` 合入，head reward 明确留在未验证队列。planner 候选
+  尚未合入，正在修 base-yaw 显式 side、179 per-clip wait 和 planner+runner 双 readiness；
+  这些语义反例关闭并复审前，不因测试数量多就进入 main。
 - **几天内 demo 的最短闭环**：D0 先做 vendor MuJoCo 中可录屏的固定同卷 demo——真实
   planner 发题、production C++ runner、fresh SZ 的最佳 finite checkpoint，正/反手各一组
   physical returns；每个模型/planner/runtime/MJCF/题表都带 SHA。D0 不冒充连续实战。
   D1 再要求同一进程内 3–5 球 no-reset；恢复/reward mixture、四动作、TOPP 与标定 plant
   不阻塞 D0，但继续并行排队。任何真机 demo 仍受 G07 独立安全门约束，本阶段不发真机命令。
-- **未来 24 小时决策**：①审完并合 planner-policy 小块，重点核对 179 explicit side 的 Python→C++
-  接缝；②在可用 MuJoCo 环境补 stand 10 秒数值诊断，但它不阻塞 D0；③在隔离 Release 环境补 C++ 和
+- **未来 24 小时决策**：①修完并复审 planner-policy 三个配对点，再跑最新 main 的 C++ Release；
+  ②在可用 MuJoCo 环境补 stand 10 秒数值诊断，但它不阻塞 D0；③并行补原生 first-tick JSON 和
   source-only serve-sync 负门，随后只用新的精确进程所有权方案准备 vendor first tick；④能 first tick
   就立即跑 D0 小卷并录完整 ledger，不能则把失败精确归到 planner、policy、plant 或 runtime 一层。
   定期任务只做巡检；阶段结论统一更新本节，稳定时不刷聊天长报。

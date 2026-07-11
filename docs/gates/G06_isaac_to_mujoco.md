@@ -768,6 +768,7 @@ loop. Isaac stays training/diagnostic-only. A future first tick would close only
 prerequisite; only Agibot vendor MuJoCo Gate3/Gate3B behavior can promote a checkpoint. Full static
 operation and remaining blockers are in `docs/operations/run_gate3_first_tick_harness.md`. G06
 remains `Partial`.
+
 #### 2026-07-12 content-bound per-clip demanded-normal source gate
 
 Formal 179 export and loading now bind the raw-A normal distribution rather than accepting every
@@ -851,3 +852,26 @@ The content-addressed ledger is
 full Release build and strict model-only preflight gates. It did not start the vendor simulator,
 transport or backend, so first tick, planner-policy closed loop, self-hit, continuous stability and
 Gate3/Gate3B behavior remain open; G06 remains `Partial`.
+
+### Planner proposal held out by coordinate and clock pairing counterexamples (2026-07-12)
+
+The selective planner proposal at `69418a9` is **not merged** despite its green host suite. Its
+explicit schema-2 side was selected from `intercept_y_world - base_y_world`, whereas the C++ policy
+forms `tgt_b = R_yaw^-1 * (target_world - base_world)`. This changes decisions inside the allowed
+heading range: with base yaw 10 degrees and target delta `(0.67, 0.02) m`, the proposed selector
+chooses BH while policy-frame Y is `-0.09665 m` and requires FH. A wrong side also chooses the wrong
+clip before the formal face179 `[+1,-1]` physical-B-to-raw-A conversion. The correction must use
+the same normalized base-yaw frame and fail closed if orientation is missing or invalid.
+
+The proposal's `2.6 s` prediction horizon exposed a second policy-clock mismatch. Current formal
+179 clips have approximately 1.30 s FH and 0.88 s BH maximum in-training windup. Unlike 110, 179
+does not wait while a valid command is earlier than that clip window; it clamps and engages, so an
+approximately 1.89 s Gate3 arrival would put the FH/BH strike clocks about 0.59/1.01 s early. A
+formal fix needs selected-clip, metadata-bound waiting with continued freshness/revocation checks,
+or a preregistered serve schedule already inside the relevant windup window. Merely widening the
+planner horizon is not a demo fix.
+
+Finally, future serve release must bind both exact-owned runner fresh MOTION and exact-owned
+planner fresh readiness, including executable/argv/config and PID/PGID/start-ticks/log inode. A
+runner marker alone cannot prove the first planner command exists. The reviewed source remains
+outside main until these pairings and C++ tests close. No vendor runtime ran; G06 remains `Partial`.
