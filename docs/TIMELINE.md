@@ -46,6 +46,7 @@
 | 脚部姿态惩罚(foot_orientation:髋偏航/髋侧滚/踝侧滚贴参考,不许拧着脚打球) | jiayi | 07-05,07-06 旗标化 | 这些关节无奖励管辖,策略拧到 -1.13/+0.90 rad(参考包络 ±0.41)="怪脚打球" | ⏸ 默认权重 0;jiayi yaml 钉 -0.3;剂量消融 J2(他自己注释:窗口 [-0.5,-0.1]) | Gate 2.5 诊断数据;未做同批对照 |
 | 熵系数上调(entropy_coef 0.01→0.015,训练"乱试劲头"大一半) | jiayi | 07-06 旗标化 | 从零训新任务(177 维步法)可能需要更多探索 | ⏸ 全局退回 0.01;Hitter yaml 用任务级 algo 覆盖钉 0.015;消融 J1 | 无对照(他 07-06 才引入);**曾是全局默认改动,审计时退回** |
 | 训练内上台率主尺(virtual_return_rate 按机会算 + vb_metrics_only 只记分开关) | franco | 07-06 | 训练一直看三合格率,而它判不了"球回没回去"(拍面 25° 误差照样 79% 上台的实例) | ✅ 全谱系生效:训练主看上台率、击球率辅助、composite 降级诊断;**入账必须 MuJoCo 版** | main `305d0e8`;S1/产品线随机数流不变,jiayi 谱系开 metrics 后新旧跑不逐位可比(分布相同) |
+| 头部纪律(head_discipline:head_yaw/head_pitch 贴参考 0,复用 foot_orientation_discipline 的 L1 \|q−ref\|) | yikang | 07-11(移回 07-12) | head 是无奖励管辖 DOF,策略把 head_yaw park 在 -60° 软限整轮=「机器人朝右看」(njfc21an/model_9000 MuJoCo 诊断,参考 271 帧恒 0);同 07-07 pigeon-toe 同型病 | ⏸ 默认权重 0(**现役配方字节等价**);RallyFinalV2 白名单开 -0.5;**待入 rally 线 + 验证跑**(reward=franco lane) | MuJoCo 诊断 head_yaw p5=p95=-60.6° vs 参考 0;对抗复核机制链;分支 `yikang-linux-port-0711` `407a443`;**训练效果未验证** |
 
 **多人同项对齐点**:奖励相关实验统一走 NOW.md 的"梯子"制度(先 3 分钟机制检查 → 2000-4000 步信号档
 → 赢家才长跑),同种子同热启,**每批必带同批对照臂**;裁决口径(07-06 换装)= **MuJoCo 考卷回球率为主**,
@@ -1569,3 +1570,27 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    MPC reset/prepare 显式恢复，并从历史 reset 动态态训练；HITTER 在10秒多拍 episode 内统一学
    carry-state。故首轮把 explicit safe bridge vs learned recovery option 作为结构因子；只有统一
    option 必要才进 `2^3` + constant-budget mixture，ready 是下一拍 dexterity 集合而非死追第0帧。
+
+## 2026-07-12:公司 Linux 机改动移植回来(那台不让 push)
+
+- 【yikang】**把公司 Linux 电脑上的改动移植回本地并推分支**——那台机不让 push,用户让在本地复现。
+  拆出来三件里两件是真改动、一件是假象:
+  ①**head_discipline 奖励**(详见上方「奖励与训练开关台账」新行):head_yaw/head_pitch 是无奖励管辖
+  DOF(A3_UPPER_TRACKED 到腕即止、无 joint-space 项配 head_*、静态偏置在各正则项下付 ~0,
+  ClampedJointPositionAction 预剪使 joint_limit 从不触发),njfc21an/model_9000 MuJoCo 诊断把 head_yaw
+  park 在 -60° 软限(p5=p95=-60.6°)整轮=「机器人朝右看」病根(参考 271 帧恒 0、骨盆 yaw 干净);
+  与 07-07 pigeon-toe 同型病同型治——复用 `foot_orientation_discipline`(通用 L1 \|q−ref\|)套在头对、
+  参考两相位都是 0。默认权重 0.0=**现役配方逐字节等价**(RewardManager 丢零权项),RallyFinalV2 经
+  V2-only 白名单键开 -0.5,V1 冻结认证面不动。
+  ②`scripts/view_a3_stand.py`:纯 MuJoCo(免 AimRT/iceoryx 编译)A3 站姿 PD 查看器——载 vendor
+  a3_pingpong MJCF、复位到 `stand` keyframe、用生产 PD_STAND 增益(a3_policy_parameters.hpp)锁姿;
+  `--check` 跑 headless 10s 稳定门(骨盆 z 漂移 >0.15m 判 FAIL)、`--snapshot` 出一帧。
+  ③`node.py`(hope_planner):经核**与 origin/main 逐字节相同**——公司机本地 `main` 落后 origin(见
+  [[franco-remote-main-authority]]),`git diff main` 把 franco 跨线版误报成改动;**非本人改,已剔除**。
+- 依据/参考:head_discipline 补丁=`git format-patch`(catrunaround 作者,基 **hitter@`5c346ea`「more
+  ablation」**,三处基线 blob db6e589/b3c4467/16aba40 精确匹配 → `git am` 干净落地);"基于 main" 是
+  陈旧基线口误,实际基线在 hitter/rally 线。viewer=新增 134 行。
+- 效果/证据:三改文件 `py_compile` 全过;分支 diff = 4 文件 / +165(补丁 31 + viewer 134);node.py
+  正确排除。**训练效果未验证**(reward 未跑一臂,属 franco reward lane)。
+- 状态:已推 **origin/`yikang-linux-port-0711`**(基 hitter@5c346ea + 2 commit:`407a443` 奖励 / `6b10998`
+  viewer);**待 franco/Codex 审入 rally/hitter 线 + 一次 RallyFinalV2 −0.5 验证跑**确认头不再 park 软限。
