@@ -1,15 +1,27 @@
 {
   "schema_version": 1,
   "contract_id": "phase1-global-curve-worker-hardening-20260711-v1",
-  "purpose": "Replace the seven remaining original/scale-out legacy Phase-1 curve workers with the standalone screen-policy-hardened worker without touching trainers, judges, or either Git checkout.",
+  "purpose": "Replace the six still-live original/scale-out legacy Phase-1 curve workers with the standalone screen-policy-hardened worker without touching trainers, judges, or either Git checkout.",
   "simulation_only": true,
   "real_robot_commands_forbidden": true,
   "status": "preregistered_repo_only_not_deployed",
   "tracked_evidence": {
     "manual_launch_contract": "docs/operations/run_training.md launches original/scale-out workers with nohup setsid and records state_dir/worker.log, but does not create a launch-contract or worker.launch sidecar.",
     "sidecar_shape_rule": "Do not assume the causal-followup launch sidecar shape. First create a no-signal Pod attestation from the exact live /proc command, then require its explicit SHA-256 for validate/replace.",
-    "manifest_binding": "configs/phase1_scaleout_curve_bindings_20260711.json and the seven queue manifests below are the tracked queue/manifest evidence."
+    "manifest_binding": "configs/phase1_scaleout_curve_bindings_20260711.json and the six live queue manifests below are the tracked queue/manifest evidence."
   },
+  "out_of_live_replacement_scope": [
+    {
+      "queue_id": "cadence_causal_pod1",
+      "pod": "pod1",
+      "former_legacy_pid": 1394150,
+      "disposition": "naturally_exited_after_M3_terminal_completion",
+      "source_repo_manifest": "configs/phase1_checkpoint_curve_cadence_pod1_20260711.json",
+      "expected_manifest_sha256": "b51ddaa50eba3b06893740c2764e98c96d5fbb8751993e95e3f934602c6a36de",
+      "legacy_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1_46a0ce2",
+      "signal_policy": "No live worker remains; this completed queue must never be required or signalled by this transaction. Preserve and audit its terminal evidence separately."
+    }
+  ],
   "runtime": {
     "training_checkout": "/workspace/codexschema/nohope",
     "expected_training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
@@ -46,7 +58,6 @@
   "pods": {
     "pod1": {
       "queues": [
-        "cadence_causal_pod1",
         "cadence_fresh_pod1",
         "scaleout_causal_pod1",
         "scaleout_fresh_pod1"
@@ -61,18 +72,6 @@
     }
   },
   "queues": [
-    {
-      "queue_id": "cadence_causal_pod1",
-      "pod": "pod1",
-      "legacy_pid_hint": 1394150,
-      "source_repo_manifest": "configs/phase1_checkpoint_curve_cadence_pod1_20260711.json",
-      "runtime_manifest": "/workspace/codexschema/phase1_fresh_20260711/runtime_manifests/phase1_checkpoint_curve_cadence_pod1_20260711.json",
-      "expected_manifest_sha256": "b51ddaa50eba3b06893740c2764e98c96d5fbb8751993e95e3f934602c6a36de",
-      "legacy_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1_46a0ce2",
-      "legacy_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1_46a0ce2/worker.log",
-      "hardened_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1_46a0ce2_hardened_21e3015",
-      "hardened_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1_46a0ce2_hardened_21e3015/worker.log"
-    },
     {
       "queue_id": "cadence_fresh_pod1",
       "pod": "pod1",

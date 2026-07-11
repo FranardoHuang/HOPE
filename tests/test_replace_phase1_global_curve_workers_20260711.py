@@ -37,10 +37,9 @@ def config():
     return replacement.load_config(CONFIG)
 
 
-def test_config_binds_exact_reviewed_seven_workers_and_tracked_manifests():
+def test_config_binds_exact_reviewed_six_live_workers_and_natural_exit_exclusion():
     data = config()
     assert data["pods"]["pod1"]["queues"] == [
-        "cadence_causal_pod1",
         "cadence_fresh_pod1",
         "scaleout_causal_pod1",
         "scaleout_fresh_pod1",
@@ -51,11 +50,26 @@ def test_config_binds_exact_reviewed_seven_workers_and_tracked_manifests():
         "scaleout_fresh_pod2",
     ]
     assert {queue["legacy_pid_hint"] for queue in data["queues"]} == {
-        1394150, 1394810, 1380340, 1397266, 194276, 192815, 195085
+        1394810, 1380340, 1397266, 194276, 192815, 195085
     }
+    assert len(data["queues"]) == 6
     for queue in data["queues"]:
         source = ROOT / queue["source_repo_manifest"]
         assert file_sha(source) == queue["expected_manifest_sha256"]
+    exclusion = data["out_of_live_replacement_scope"]
+    assert exclusion == [{
+        "queue_id": "cadence_causal_pod1",
+        "pod": "pod1",
+        "former_legacy_pid": 1394150,
+        "disposition": "naturally_exited_after_M3_terminal_completion",
+        "source_repo_manifest": "configs/phase1_checkpoint_curve_cadence_pod1_20260711.json",
+        "expected_manifest_sha256": "b51ddaa50eba3b06893740c2764e98c96d5fbb8751993e95e3f934602c6a36de",
+        "legacy_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1_46a0ce2",
+        "signal_policy": "No live worker remains; this completed queue must never be required or signalled by this transaction. Preserve and audit its terminal evidence separately.",
+    }]
+    assert file_sha(ROOT / exclusion[0]["source_repo_manifest"]) == exclusion[0][
+        "expected_manifest_sha256"
+    ]
     evidence = data["tracked_evidence"]
     assert "does not create a launch-contract or worker.launch sidecar" in evidence[
         "manual_launch_contract"
@@ -76,10 +90,9 @@ def test_standalone_worker_is_exact_hardened_source_and_legacy_sha_differs():
         assert marker in source
 
 
-def test_all_seven_manifests_pass_screen_and_milestone_barrier_contracts():
+def test_all_six_live_manifests_pass_screen_and_milestone_barrier_contracts():
     data = config()
     expected_counts = {
-        "cadence_causal_pod1": 4,
         "cadence_fresh_pod1": 8,
         "scaleout_causal_pod1": 8,
         "scaleout_fresh_pod1": 63,
@@ -213,6 +226,14 @@ def test_exact_term_targets_only_registered_worker_pgids_and_never_kills(monkeyp
     monkeypatch.setattr(replacement, "assert_idle_exact_worker", audit_worker)
     monkeypatch.setattr(replacement, "process_alive", lambda pid: pid in alive)
     monkeypatch.setattr(replacement, "parse_proc_cmdline", lambda pid: commands[pid])
+    monkeypatch.setattr(replacement, "proc_children", lambda _pid: [])
+    monkeypatch.setattr(
+        replacement,
+        "process_table",
+        lambda: [
+            {"pid": pid, "pgid": pid, "ppid": 1, "args": "worker"} for pid in commands
+        ],
+    )
     signals = []
 
     def killpg(pid, sig):

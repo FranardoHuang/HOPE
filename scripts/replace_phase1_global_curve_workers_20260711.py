@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Harden the seven remaining Phase-1 original/scale-out curve workers.
+"""Harden the six still-live Phase-1 original/scale-out curve workers.
 
 These workers were launched manually with ``nohup setsid`` and therefore do
 not have the launch-contract sidecar used by the later causal-followup
@@ -143,8 +143,8 @@ def load_config(path: Path) -> dict[str, Any]:
     queues = data.get("queues")
     if not isinstance(runtime, dict) or not isinstance(pods, dict) or not isinstance(queues, list):
         raise ContractError("runtime/pods/queues have the wrong type")
-    if len(queues) != 7:
-        raise ContractError("global hardening must bind exactly seven legacy workers")
+    if len(queues) != 6:
+        raise ContractError("global hardening must bind exactly six live legacy workers")
     for key in ("expected_training_commit", "expected_eval_commit"):
         if not isinstance(runtime.get(key), str) or not GIT_SHA_RE.fullmatch(runtime[key]):
             raise ContractError(f"{key} must be a full lowercase Git SHA")
@@ -173,7 +173,23 @@ def load_config(path: Path) -> dict[str, Any]:
         if not Path(str(runtime.get(key, ""))).is_absolute():
             raise ContractError(f"runtime {key} must be an absolute template")
 
-    expected_pods = {"pod1": 4, "pod2": 3}
+    exclusions = data.get("out_of_live_replacement_scope")
+    if not isinstance(exclusions, list) or len(exclusions) != 1:
+        raise ContractError("config must record the one naturally completed excluded queue")
+    excluded = exclusions[0]
+    if (
+        not isinstance(excluded, dict)
+        or excluded.get("queue_id") != "cadence_causal_pod1"
+        or excluded.get("pod") != "pod1"
+        or excluded.get("former_legacy_pid") != 1394150
+        or excluded.get("disposition") != "naturally_exited_after_M3_terminal_completion"
+        or excluded.get("expected_manifest_sha256")
+        != "b51ddaa50eba3b06893740c2764e98c96d5fbb8751993e95e3f934602c6a36de"
+        or "never" not in str(excluded.get("signal_policy", ""))
+    ):
+        raise ContractError("cadence_causal_pod1 exclusion is not the frozen natural-exit record")
+
+    expected_pods = {"pod1": 3, "pod2": 3}
     by_id: dict[str, dict[str, Any]] = {}
     seen_paths: set[str] = set()
     for queue in queues:
@@ -226,8 +242,8 @@ def load_config(path: Path) -> dict[str, Any]:
             or len(set(names)) != expected_count
             or set(names) != {name for name, queue in by_id.items() if queue["pod"] == pod}
         ):
-            raise ContractError(f"{pod} queue list contradicts the seven queue records")
-    expected_hints = {1394150, 1394810, 1380340, 1397266, 194276, 192815, 195085}
+            raise ContractError(f"{pod} queue list contradicts the six live queue records")
+    expected_hints = {1394810, 1380340, 1397266, 194276, 192815, 195085}
     if {queue["legacy_pid_hint"] for queue in queues} != expected_hints:
         raise ContractError("legacy PID hints differ from the reviewed live inventory")
     return data
@@ -858,6 +874,23 @@ def exact_term_verified_workers(
         pid = snapshots[queue_id]["pid"]
         if not process_alive(pid) or parse_proc_cmdline(pid) != snapshots[queue_id]["command"]:
             raise ContractError(f"{queue_id}: identity changed before Pod-atomic TERM")
+    # Use one final shared process-table snapshot immediately before the tight
+    # TERM loop.  This closes the long gap that would otherwise exist between
+    # auditing queue 1 and auditing queue N on the same Pod.
+    rows = process_table()
+    for queue_id, snapshot in snapshots.items():
+        pid = snapshot["pid"]
+        children = proc_children(pid)
+        ppid_children = sorted(item["pid"] for item in rows if item["ppid"] == pid)
+        members = sorted(item["pid"] for item in rows if item["pgid"] == pid)
+        if children or ppid_children:
+            raise ContractError(
+                f"{queue_id}: worker gained child/judge before TERM; zero signals sent"
+            )
+        if members != [pid]:
+            raise ContractError(
+                f"{queue_id}: worker PGID changed before TERM; zero signals sent"
+            )
     stopped: dict[str, dict[str, Any]] = {}
     for audit in audits:
         queue_id = audit["queue"]["queue_id"]
