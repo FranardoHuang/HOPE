@@ -1,7 +1,8 @@
 # Fresh SZ model_2000 four-seed q50 stability paper
 
-Status: preregistered offline on 2026-07-11. This paper is checkpoint/seed-stability
-evidence only. It does not stop or promote any training arm, authorize deployment, close the
+Status: completed and archived on 2026-07-11; the preregistration preceded every new judge.
+This paper is checkpoint/seed-stability evidence only. It does not stop or promote any
+training arm, authorize deployment, close the
 calibrated-plant or recovery/continuous-rally gates, or authorize a real-robot command.
 The final behavior gate remains the AgiBot vendor MuJoCo Gate3/Gate3B path; Isaac is an
 accompanying diagnostic, not the primary acceptance instrument.
@@ -34,6 +35,37 @@ The preregistered stability checks are:
 These thresholds ask whether the checkpoint evidence is both useful and repeatable. They are
 not a deploy threshold. Pass closes only this model_2000 seed-stability question; failure keeps
 it open. Either outcome leaves all arms training unchanged.
+
+## Recorded result
+
+All four results reproduced the frozen exact paper with 100 uncensored attempts, 50 per side,
+matching schedule/question order, matching MuJoCo execution and ready-state hashes, finite
+checkpoint audits, and zero recorded physical falls:
+
+| seed | forehand | backhand | aggregate |
+| --- | ---: | ---: | ---: |
+| 1 | 33/50 | 50/50 | 83/100 |
+| 2 | 50/50 | 50/50 | 100/100 |
+| 3 | 50/50 | 50/50 | 100/100 |
+| 4 | 0/50 | 20/50 | 20/100 |
+
+The median aggregate rate was `0.915` and passed its `0.75` check. The worst seed was `0.20`,
+the best-minus-worst spread was `0.80`, and the worst seed/side rate was `0.00`; those three
+checks failed their preregistered `0.65`, `0.20`, and `0.50` limits. The formal outcome is
+`fail_seed_stability_checkpoint_evidence`. In particular, the three strong seeds may not be
+used to hide seed4. This is consistent with seed4's earlier direction-only q10 (`0.25`) and
+turns that warning into a full-paper stability failure.
+
+Archived evidence:
+
+- Pod1 result file SHA-256: `0e651edae4e0e237e51ed2445f36e8dcc6903dea6444ad532f13c2819128eedc`
+- Pod2 result file SHA-256: `ad1187a9a24707fe184a4751b73be05e43d46ac5596590ae3e598355f3c39bd4`
+- aggregate content SHA-256: `a756bf1d0e76d1016992ae241b935cf92b3c84ffd55fe503e7c199626d9c8ffd`
+- aggregate file SHA-256: `d856468fb93461be52498a24655b25993ce28f530f5989e61110e33421736e43`
+
+The recorded action is therefore: keep this seed-stability question open, continue every
+training arm unmodified, send no trainer/worker signal, and keep all downstream behavior,
+plant, recovery, deployment, and real-robot gates open.
 
 ## Content-addressed chain
 

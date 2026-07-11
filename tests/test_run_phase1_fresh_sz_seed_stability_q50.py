@@ -17,6 +17,16 @@ CONFIG_PATH = (
 PREREG_PATH = (
     ROOT / "configs" / "phase1_fresh_SZ_model2000_seed_stability_q50_prereg_20260711.json"
 )
+POD1_RESULT_PATH = (
+    ROOT / "configs" / "phase1_fresh_SZ_model2000_seed_stability_q50_pod1_result_20260711.json"
+)
+POD2_RESULT_PATH = (
+    ROOT / "configs" / "phase1_fresh_SZ_model2000_seed_stability_q50_pod2_result_20260711.json"
+)
+AGGREGATE_RESULT_PATH = ROOT / "configs" / (
+    "phase1_fresh_SZ_model2000_seed_stability_q50_"
+    "a756bf1d0e76d1016992ae241b935cf92b3c84ffd55fe503e7c199626d9c8ffd.json"
+)
 
 
 def _load_module(name: str, path: Path):
@@ -390,3 +400,61 @@ def test_runner_exposes_no_ssh_or_signal_control_surface():
         assert forbidden not in source
     assert "trainer_or_worker_signal_allowed\": False" in source
     assert "real_robot_authorized\": False" in source
+
+
+def test_archived_four_seed_result_is_exact_full_denominator_and_gate_fail():
+    config = R.load_execution_config(CONFIG_PATH)
+    prereg = _prereg()
+    config_for_results = dict(config)
+    config_for_results["_prereg_arms"] = prereg["arms"]
+    expected_pod_shas = {
+        "pod1": "0e651edae4e0e237e51ed2445f36e8dcc6903dea6444ad532f13c2819128eedc",
+        "pod2": "ad1187a9a24707fe184a4751b73be05e43d46ac5596590ae3e598355f3c39bd4",
+    }
+    pod1 = R.validate_pod_result(
+        POD1_RESULT_PATH,
+        expected_pod_shas["pod1"],
+        config_for_results,
+        R.sha256_file(PREREG_PATH),
+        pod="pod1",
+    )
+    pod2 = R.validate_pod_result(
+        POD2_RESULT_PATH,
+        expected_pod_shas["pod2"],
+        config_for_results,
+        R.sha256_file(PREREG_PATH),
+        pod="pod2",
+    )
+    assert {
+        seed: arm["returned_counts"]
+        for seed, arm in {**pod1["arms"], **pod2["arms"]}.items()
+    } == {
+        "seed1": {"aggregate": 83, "forehand": 33, "backhand": 50, "physical_falls": 0},
+        "seed2": {"aggregate": 100, "forehand": 50, "backhand": 50, "physical_falls": 0},
+        "seed3": {"aggregate": 100, "forehand": 50, "backhand": 50, "physical_falls": 0},
+        "seed4": {"aggregate": 20, "forehand": 0, "backhand": 20, "physical_falls": 0},
+    }
+
+    aggregate = json.loads(AGGREGATE_RESULT_PATH.read_text(encoding="utf-8"))
+    assert aggregate["content_sha256"] == (
+        "a756bf1d0e76d1016992ae241b935cf92b3c84ffd55fe503e7c199626d9c8ffd"
+    )
+    assert aggregate["content_sha256"] == R.canonical_sha256(aggregate["content"])
+    content = aggregate["content"]
+    assert content["status"] == "fail_seed_stability_checkpoint_evidence"
+    assert content["aggregate_return_rates"] == {
+        "seed1": 0.83,
+        "seed2": 1.0,
+        "seed3": 1.0,
+        "seed4": 0.2,
+    }
+    assert content["gate_checks"]["aggregate_rate_median"]["pass"] is True
+    assert content["gate_checks"]["aggregate_rate_min_seed"]["pass"] is False
+    assert content["gate_checks"]["aggregate_rate_max_minus_min"]["pass"] is False
+    assert content["gate_checks"]["every_seed_every_side_rate"]["pass"] is False
+    assert content["gate_pass"] is False
+    assert content["actions"]["training"] == "continue_all_arms_unmodified"
+    assert content["actions"]["seed_stability_gate"] == "keep_open"
+    assert content["actions"]["trainer_or_worker_signals"] == []
+    assert content["actions"]["stop_or_promote_authorized"] is False
+    assert content["actions"]["deploy_or_real_robot_authorized"] is False
