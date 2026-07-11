@@ -25,50 +25,49 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 当下状态与团队 focus（2026-07-12 05:20 CST）
+## 当下状态与团队 focus（2026-07-12 06:40 CST）
 
 本节只做 roadmap 的当前入口；下面的实验结果、奖励/训练台账、长期路线和历史判决继续保留，
 不能用这份短报替代可复现实验记录。
 
 - **现在解决什么**：把“智元 vendor MuJoCo runtime/plant + 我们自己的 planner + 我们自己的
-  policy”接成一条不会假绿的最短 demo 链。vendor 环境是裁判；planner 与 policy 都可升级，
-  但必须成对绑定版本并过同一题表。当前先修 179-D 反手 `physical face B -> raw mount A`
-  语义，以及 `--no-publish --model-preflight-only` 会错误放宽模型合同的假预检。
-- **刚得到什么**：04:45–04:54 只读巡检确认两 Pod 仍各 `12 live + 2 terminal`、每 GPU
-  恰 4 条；28/28 最新 checkpoint finite、iteration/contract/lineage 全对，最近日志无
-  NaN/OOM/提前退出，10 个 checkpoint worker 全活。跨引擎差异已定位两层：Isaac 当前是
-  analytic virtual-ball 高饱和判分器；同一 fresh model4000 前手击球位误差在 vendor MuJoCo/
-  Isaac 约为 `13.15/2.48 cm`，所以还存在真实闭环执行差异，不能靠改阈值解决。
+  policy”接成一条不会假绿、几天内可录屏的最短 demo 链。vendor 环境是裁判；planner 与 policy
+  都可升级，但必须成对绑定 exact SHA 并过同一题表。179-D 拍面/模型装载合同已收口，当前主阻塞
+  转到 planner-policy 接缝、发球时序所有权、安全的 vendor backend first tick 和 D0 单拍闭环。
+- **刚得到什么**：face179 已在 Pod1 隔离 ROS/Jazzy+AimRT Release 下完成严格重导和生产预检：
+  native `210 pass + 9 optional skip`，正确模型 rc0，去 metadata/缺 envelope/exact=0 均在 backend
+  前 rc3，错误导出不覆盖既有 ONNX；合并后本机再过 `52 pass + 1 optional skip`。这证明模型可安全
+  装载，不证明 vendor simulator/backend/击球已通过。04:45–04:54 满池只读巡检仍为两 Pod 各
+  `12 live + 2 terminal`、每 GPU 4 条，28/28 最新 checkpoint finite 且 contract/lineage 正确。
 - **现在谁在 focus 什么**：
-  - franco/Codex：满池 checkpoint 早判、179-D 拍面/strict preflight、planner-policy 成对
-    Gate3、跨引擎归因，以及 D0/D1 demo 收口；同时守住动作/TOPP/连续恢复的准入队列。
+  - franco/Codex：满池 checkpoint 早判、planner-policy 成对 Gate3、vendor first tick/D0、
+    Isaac↔MuJoCo 分层归因；同时守住动作/TOPP/连续恢复队列，不让长期轴阻塞最短 demo。
   - jiayi/dongc1：`origin/hitter` 上积累 HitterPure/V3 policy、planner 与 vendor rally 编排；
     最新值得移植的是发球等待 MOTION 同步、marker→base 旋转、solve cadence 和预测时域修复，
     但该提交混有旧配方/资产，当前只做小块移植，不整支合入。
   - yikang：`yikang-linux-port-0711` 的 head discipline 与 vendor stand 诊断、
-    `stage1-fixed-point` 的 reference-oracle/课程修复；目前代码仍是 branch evidence，main 只有
-    归属说明，待逐项测试后选择性合入。
+    `stage1-fixed-point` 的 reference-oracle/课程修复；正在把 viewer 改为读取生产 pose/Kp/Kd 并保持
+    neck passive，逐项测试后才选择性合入，不把旧 hitter 基线整支带回 main。
   - 动作库轨：Franco/v6/v7 十段已过内容寻址、GMR/grounding/自碰与身体余隙；当前由
     spatial-retarget 击球点适配推进，TOPP、2-vs-4 和 RL 等离线安全/可行性门后再占 GPU。
-- **最近值得团队同步的结果**：恢复/等待不再把三种 reward 单独相加，已冻结 A/B/C 结构轴，
-  结构失败后才做 `2^3` 交互和固定总预算 mixture；真实反手 bank 又证明 external face B 与
-  actor raw-A 不能混用；fresh SZ 四 seed 的 2k 正式卷虽中位高，但 worst seed `20/100`，
-  已正式判为 seed-stability 失败，不能只展示三个强 seed。
-- **代码交流状态**：recovery A/B/C 合同与 validator 已随 `e10922a/eac81e4` 进入 main；
-  yikang 最近在 main 的提交只合了 Gate3 归属说明，并没有合入
-  `head_discipline`、stand viewer 或 `reference_oracle` 法线修复。上述小改正在逐项审计和
-  选择性移植，禁止把旧基线整支硬并。face179 修正版通过本地 39 项回归，但红队发现 strict
-  preflight blocker；修完即合源码，vendor 行为证据仍明确记 `Partial`。
+- **最近值得团队同步的结果**：两轮红队先后抓出“反手 raw-A 符号被误判”和“no-publish 顺便
+  免模型合同”两个会制造假绿的问题，现都已闭环；恢复/等待不把三种 reward 单独相加，先做 A/B/C
+  结构轴，结构失败后才做 `2^3` 交互和固定总预算 mixture；fresh SZ 四 seed 的 2k 正式卷虽中位高，
+  worst seed 仅 `20/100`，已正式判 seed-stability 失败，不能只展示三个强 seed。
+- **代码交流状态**：recovery A/B/C、plan-only Gate3 源码门和严格 face179 模型合同已分别随
+  `e10922a`、`b2067ba`、`8975043` 进入 main；face179 的 vendor 行为证据仍明确为 `Partial`。
+  planner 的 marker→base 旋转、解算节流/2.6s horizon、显式 side+hysteresis 与 fail-closed serve-sync
+  正在独立分支做最终接缝审查；yikang 的 reward/viewer/oracle 仍按小块验证，未验证功能不合 main。
 - **几天内 demo 的最短闭环**：D0 先做 vendor MuJoCo 中可录屏的固定同卷 demo——真实
   planner 发题、production C++ runner、fresh SZ 的最佳 finite checkpoint，正/反手各一组
   physical returns；每个模型/planner/runtime/MJCF/题表都带 SHA。D0 不冒充连续实战。
   D1 再要求同一进程内 3–5 球 no-reset；恢复/reward mixture、四动作、TOPP 与标定 plant
   不阻塞 D0，但继续并行排队。任何真机 demo 仍受 G07 独立安全门约束，本阶段不发真机命令。
-- **未来 24 小时决策**：①拆开 no-publish 与 legacy-model 豁免并合 face179；②严格重导
-  exact SZ 179 ONNX，跑 vendor full Release/GTest/model preflight；③先查站姿 integrator/PD、
-  action clip、station/oracle localization 与 planner normal/target 是否和该 policy 一致；
-  ④能 first tick 就立即跑 D0 小卷并录完整 ledger，不能则把失败精确归到 planner、policy、
-  plant 或 runtime 中的一层。定期任务只做巡检；阶段结论统一更新本节，稳定时不刷聊天长报。
+- **未来 24 小时决策**：①审完并合 planner-policy 小块，重点核对 179 explicit side 的 Python→C++
+  接缝；②审完 yikang viewer，确保生产 neck-passive/PD 参数一致；③在隔离 Release 环境补 C++ 和
+  source-only serve-sync 负门，随后只用新的精确进程所有权方案准备 vendor first tick；④能 first tick
+  就立即跑 D0 小卷并录完整 ledger，不能则把失败精确归到 planner、policy、plant 或 runtime 一层。
+  定期任务只做巡检；阶段结论统一更新本节，稳定时不刷聊天长报。
 
 ## 详细现场证据（04:15 CST 基线；后续以短报为入口）
 
