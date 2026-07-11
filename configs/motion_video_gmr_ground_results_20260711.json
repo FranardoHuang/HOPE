@@ -1,0 +1,925 @@
+{
+  "schema_version": 1,
+  "status": "complete_grounding_diagnostic",
+  "scope": "ten diagnostic_video_betas GMR pickles grounded by one constant root-z translation against canonical A3 MuJoCo collision geoms at original discrete frames only",
+  "collected_utc": "2026-07-11T11:27:00Z",
+  "pod": "pod1",
+  "evidence_root": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded",
+  "collection_method": "read-only SSH collection with independent SHA-256 and byte-count recomputation for every output pickle and report",
+  "collection_cross_checks": {
+    "reports_found": 10,
+    "outputs_found": 10,
+    "report_sha_and_bytes_recomputed": true,
+    "output_sha_and_bytes_recomputed": true,
+    "all_reports_status_pass": true,
+    "all_reports_scope_match": true,
+    "all_reports_formal_eligible_false": true,
+    "all_report_inputs_match_source_manifest_sha_and_bytes": true,
+    "all_report_outputs_match_physical_sha_and_bytes": true,
+    "all_reports_bind_same_tool_sha256": true,
+    "all_reports_bind_same_mjcf_sha256": true,
+    "all_reports_bind_same_compiled_collision_sha256": true,
+    "all_reports_bind_same_collision_geom_set": true,
+    "all_reports_bind_same_31_joint_order": true,
+    "all_reports_frames_fps_finite_match_source_manifest": true,
+    "all_reports_preserve_required_invariants": true,
+    "all_reports_state_discrete_frame_only_limit": true
+  },
+  "source_gmr_manifest": {
+    "path": "configs/motion_video_gmr_results_20260711.json",
+    "sha256": "ed286ae72adc8dbb0c3221ac02b2705c0635c66ad133548880ee23f70fa4bdc6"
+  },
+  "body_shape_contract": "diagnostic_video_betas",
+  "canonical_betas": {
+    "status": "not_performed",
+    "canonical_betas_bound": false
+  },
+  "processing_contract": {
+    "tool": {
+      "repo_path": "scripts/ground_gmr_pkl.py",
+      "deployed_path": "/workspace/codexschema/motion_video_intake_20260711/gmr_tools/ground_gmr_pkl.py",
+      "sha256": "db5bd1670cd113ce6ada8b53a7d4b0e5e25f0cc51665983c4958146e99ce4591"
+    },
+    "mjcf": {
+      "repo_path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+      "deployed_path": "/workspace/codexschema/nohope/agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+      "sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97",
+      "bytes": 49107,
+      "compiled_kinematic_collision_sha256": "18e7f6ffbefba9dbd988f7c3cb9fb92b250777862fc25fa3d4a0b2ca0f8386e5",
+      "ground_geom": "floor",
+      "ground_z_m": 0.0
+    },
+    "collision_contract": {
+      "robot_root_body_id": 1,
+      "enabled_robot_geom_count": 37,
+      "enabled_robot_geom_ids": [
+        3,
+        9,
+        11,
+        13,
+        15,
+        17,
+        19,
+        21,
+        23,
+        24,
+        26,
+        29,
+        30,
+        32,
+        34,
+        36,
+        38,
+        40,
+        42,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        54,
+        56,
+        58,
+        61,
+        63,
+        65,
+        67,
+        69,
+        71,
+        74,
+        76,
+        78
+      ],
+      "surface_method": "analytic_primitive_support_or_compiled_mesh_vertices",
+      "visual_only_geoms_excluded": true
+    },
+    "joint_contract": {
+      "count": 31,
+      "model_joint_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ],
+      "names": [
+        "waist_yaw_joint",
+        "waist_roll_joint",
+        "waist_pitch_joint",
+        "head_yaw_joint",
+        "head_pitch_joint",
+        "left_shoulder_pitch_joint",
+        "left_shoulder_roll_joint",
+        "left_shoulder_yaw_joint",
+        "left_elbow_joint",
+        "left_wrist_roll_joint",
+        "left_wrist_pitch_joint",
+        "left_wrist_yaw_joint",
+        "right_shoulder_pitch_joint",
+        "right_shoulder_roll_joint",
+        "right_shoulder_yaw_joint",
+        "right_elbow_joint",
+        "right_wrist_roll_joint",
+        "right_wrist_pitch_joint",
+        "right_wrist_yaw_joint",
+        "left_hip_pitch_joint",
+        "left_hip_roll_joint",
+        "left_hip_yaw_joint",
+        "left_knee_joint",
+        "left_ankle_pitch_joint",
+        "left_ankle_roll_joint",
+        "right_hip_pitch_joint",
+        "right_hip_roll_joint",
+        "right_hip_yaw_joint",
+        "right_knee_joint",
+        "right_ankle_pitch_joint",
+        "right_ankle_roll_joint"
+      ],
+      "input_joint_names_present": false,
+      "interpretation": "A3_GMR_JOINT_NAMES",
+      "range_tolerance_rad": 1e-05
+    },
+    "grounding": {
+      "target_clearance_m": 1e-05,
+      "max_grounded_clearance_m": 0.001,
+      "translation": "one constant value added only to root_pos[:,2]",
+      "clearance_sampling": "original_discrete_frames_only",
+      "continuous_time_clearance_proven": false
+    }
+  },
+  "formal_eligible": false,
+  "remaining_gates": {
+    "canonical_betas": "not_performed",
+    "inter_frame_continuous_ground_clearance": "not_performed",
+    "self_collision": "not_performed",
+    "dynamics_and_balance_feasibility": "not_performed",
+    "table_net_swept_clearance": "not_performed",
+    "returnability": "not_performed",
+    "schema2_conversion_and_audit": "not_performed"
+  },
+  "formal_blockers": [
+    "all ten clips still use per-video diagnostic_video_betas rather than canonical A3-bound betas",
+    "clearance was checked only at original discrete frames, so inter-frame and continuous-time ground penetration remain untested",
+    "self-collision, dynamics/balance feasibility, table/net swept clearance and returnability have not passed",
+    "schema-2 conversion and schema-2 audit have not been performed"
+  ],
+  "results": [
+    {
+      "asset_id": "franco_forehand_block",
+      "status": "complete_grounding_diagnostic",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_queue_outputs/franco_forehand_block.diagnostic_video_betas.pkl",
+        "sha256": "0e7e674ecba2459b4db6d2c49fb8498a35db2fe8291782eadb7214933be39be5",
+        "bytes": 20062
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/franco_forehand_block.grounded.pkl",
+        "sha256": "cdbfaeebae26e55c43cf1313ddfd29fbf0a5fea2f8726fb9a42835f2f0bf2abf",
+        "bytes": 20022,
+        "physical_sha_and_bytes_recomputed": true
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/franco_forehand_block.grounding.json",
+        "sha256": "dade8898ca0040d437fc6ffc7312fe39a965aad163b36ffe78cdd73d82b1431e",
+        "bytes": 9469
+      },
+      "structure": {
+        "frames": 65,
+        "fps": 30.0,
+        "finite_elements": 2471,
+        "root_rotation_max_norm_error": 9.992007221626409e-16,
+        "dtypes": {
+          "dof_pos": "float64",
+          "root_pos": "float64",
+          "root_rot": "float64"
+        },
+        "shapes": {
+          "dof_pos": [65, 31],
+          "root_pos": [65, 3],
+          "root_rot": [65, 4]
+        }
+      },
+      "joint_contract": {
+        "count": 31,
+        "max_range_excess_rad": 0.0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.08414975109946435,
+          "maximum_of_frame_minima_m": -0.07727632254752678,
+          "minimum_frame": 2,
+          "minimum_geom_id": 65,
+          "minimum_geom_name": "left_ankle_roll_collision",
+          "minimum_body_id": 26,
+          "minimum_body_name": "left_ankle_roll_Link"
+        },
+        "shift": {
+          "requested_m": 0.08415975109946434,
+          "applied_min_m": 0.08415975109946439,
+          "applied_max_m": 0.08415975109946439,
+          "spread_m": 0.0
+        },
+        "after": {
+          "minimum_clearance_m": 9.999999999919795e-06,
+          "maximum_of_frame_minima_m": 0.006883428551937611,
+          "same_minimum_frame_geom_body": true
+        }
+      },
+      "invariants": {
+        "all_other_payload_fields_shallow_preserved": true,
+        "dof_position_exact": true,
+        "root_pos_dtype_preserved": true,
+        "root_rotation_exact": true,
+        "root_xy_exact": true,
+        "root_z_relative_trajectory_max_error_m": 0.0
+      },
+      "body_shape_contract": "diagnostic_video_betas",
+      "clearance_sampling": "original_discrete_frames_only",
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "franco_backhand_block",
+      "status": "complete_grounding_diagnostic",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_queue_outputs/franco_backhand_block.diagnostic_video_betas.pkl",
+        "sha256": "1303ed8c34b1edd7884a68ce78f3408be751423fdc153bd9e5f8d3cc21a2d710",
+        "bytes": 19454
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/franco_backhand_block.grounded.pkl",
+        "sha256": "b8c68a902d9096bbcc5f98f1d12dead57d26e1c200e83261b6c2f409a85a5d5d",
+        "bytes": 19414,
+        "physical_sha_and_bytes_recomputed": true
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/franco_backhand_block.grounding.json",
+        "sha256": "4350e5a7766ff999379f596bb4a2f55c048d4c4f2409a7ca547fb1faa3989d40",
+        "bytes": 9333
+      },
+      "structure": {
+        "frames": 63,
+        "fps": 30.0,
+        "finite_elements": 2395,
+        "root_rotation_max_norm_error": 8.881784197001252e-16,
+        "dtypes": {
+          "dof_pos": "float64",
+          "root_pos": "float64",
+          "root_rot": "float64"
+        },
+        "shapes": {
+          "dof_pos": [63, 31],
+          "root_pos": [63, 3],
+          "root_rot": [63, 4]
+        }
+      },
+      "joint_contract": {
+        "count": 31,
+        "max_range_excess_rad": 0.0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.08506299442982071,
+          "maximum_of_frame_minima_m": -0.07723022168382573,
+          "minimum_frame": 6,
+          "minimum_geom_id": 65,
+          "minimum_geom_name": "left_ankle_roll_collision",
+          "minimum_body_id": 26,
+          "minimum_body_name": "left_ankle_roll_Link"
+        },
+        "shift": {
+          "requested_m": 0.0850729944298207,
+          "applied_min_m": 0.08507299442982075,
+          "applied_max_m": 0.08507299442982075,
+          "spread_m": 0.0
+        },
+        "after": {
+          "minimum_clearance_m": 1.0000000000037756e-05,
+          "maximum_of_frame_minima_m": 0.007842772745995014,
+          "same_minimum_frame_geom_body": true
+        }
+      },
+      "invariants": {
+        "all_other_payload_fields_shallow_preserved": true,
+        "dof_position_exact": true,
+        "root_pos_dtype_preserved": true,
+        "root_rotation_exact": true,
+        "root_xy_exact": true,
+        "root_z_relative_trajectory_max_error_m": 0.0
+      },
+      "body_shape_contract": "diagnostic_video_betas",
+      "clearance_sampling": "original_discrete_frames_only",
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "franco_forehand_loop",
+      "status": "complete_grounding_diagnostic",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_queue_outputs/franco_forehand_loop.diagnostic_video_betas.pkl",
+        "sha256": "b8767dbacf8dadba371d0933755b7d812081f65c924a3c106567297b910ce889",
+        "bytes": 21582
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/franco_forehand_loop.grounded.pkl",
+        "sha256": "b6ebecda79bcf042542ad955e330a9979640fd29d958df9a9bd47331a3296ecd",
+        "bytes": 21542,
+        "physical_sha_and_bytes_recomputed": true
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/franco_forehand_loop.grounding.json",
+        "sha256": "c7aeb2e0029e4fe0628a2cf071983a2249d4a582be7848e6669c2dcd477c878b",
+        "bytes": 9779
+      },
+      "structure": {
+        "frames": 70,
+        "fps": 30.0,
+        "finite_elements": 2661,
+        "root_rotation_max_norm_error": 9.992007221626409e-16,
+        "dtypes": {
+          "dof_pos": "float64",
+          "root_pos": "float64",
+          "root_rot": "float64"
+        },
+        "shapes": {
+          "dof_pos": [70, 31],
+          "root_pos": [70, 3],
+          "root_rot": [70, 4]
+        }
+      },
+      "joint_contract": {
+        "count": 31,
+        "max_range_excess_rad": 0.0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.0828585746010495,
+          "maximum_of_frame_minima_m": -0.07585754815796399,
+          "minimum_frame": 64,
+          "minimum_geom_id": 65,
+          "minimum_geom_name": "left_ankle_roll_collision",
+          "minimum_body_id": 26,
+          "minimum_body_name": "left_ankle_roll_Link"
+        },
+        "shift": {
+          "requested_m": 0.0828685746010495,
+          "applied_min_m": 0.08286857460104946,
+          "applied_max_m": 0.08286857460104946,
+          "spread_m": 0.0
+        },
+        "after": {
+          "minimum_clearance_m": 9.999999999850406e-06,
+          "maximum_of_frame_minima_m": 0.007011026443085475,
+          "same_minimum_frame_geom_body": true
+        }
+      },
+      "invariants": {
+        "all_other_payload_fields_shallow_preserved": true,
+        "dof_position_exact": true,
+        "root_pos_dtype_preserved": true,
+        "root_rotation_exact": true,
+        "root_xy_exact": true,
+        "root_z_relative_trajectory_max_error_m": 0.0
+      },
+      "body_shape_contract": "diagnostic_video_betas",
+      "clearance_sampling": "original_discrete_frames_only",
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "franco_backhand_loop_a",
+      "status": "complete_grounding_diagnostic",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_queue_outputs/franco_backhand_loop_a.diagnostic_video_betas.pkl",
+        "sha256": "b9d1ae3a31b2cdda0458a1c949a85d2cf56b55176f9b0c7b49d2f2e24c582755",
+        "bytes": 21278
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/franco_backhand_loop_a.grounded.pkl",
+        "sha256": "4e48147083b946bc934efea41cf53b27fa7947dd935c2fb1a7c7d1f4d3a0689f",
+        "bytes": 21238,
+        "physical_sha_and_bytes_recomputed": true
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/franco_backhand_loop_a.grounding.json",
+        "sha256": "d2ccece7608fb2910ffa229e234f3e8819974d81336695f93bcc0b437a023356",
+        "bytes": 9668
+      },
+      "structure": {
+        "frames": 69,
+        "fps": 30.0,
+        "finite_elements": 2623,
+        "root_rotation_max_norm_error": 7.771561172376096e-16,
+        "dtypes": {
+          "dof_pos": "float64",
+          "root_pos": "float64",
+          "root_rot": "float64"
+        },
+        "shapes": {
+          "dof_pos": [69, 31],
+          "root_pos": [69, 3],
+          "root_rot": [69, 4]
+        }
+      },
+      "joint_contract": {
+        "count": 31,
+        "max_range_excess_rad": 0.0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.08715994746268714,
+          "maximum_of_frame_minima_m": -0.07547803160010809,
+          "minimum_frame": 1,
+          "minimum_geom_id": 65,
+          "minimum_geom_name": "left_ankle_roll_collision",
+          "minimum_body_id": 26,
+          "minimum_body_name": "left_ankle_roll_Link"
+        },
+        "shift": {
+          "requested_m": 0.08716994746268714,
+          "applied_min_m": 0.08716994746268714,
+          "applied_max_m": 0.08716994746268714,
+          "spread_m": 0.0
+        },
+        "after": {
+          "minimum_clearance_m": 9.9999999998851e-06,
+          "maximum_of_frame_minima_m": 0.011691915862579047,
+          "same_minimum_frame_geom_body": true
+        }
+      },
+      "invariants": {
+        "all_other_payload_fields_shallow_preserved": true,
+        "dof_position_exact": true,
+        "root_pos_dtype_preserved": true,
+        "root_rotation_exact": true,
+        "root_xy_exact": true,
+        "root_z_relative_trajectory_max_error_m": 0.0
+      },
+      "body_shape_contract": "diagnostic_video_betas",
+      "clearance_sampling": "original_discrete_frames_only",
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "franco_backhand_loop_b",
+      "status": "complete_grounding_diagnostic",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_queue_outputs/franco_backhand_loop_b.diagnostic_video_betas.pkl",
+        "sha256": "0c61b752ce13cf3094275ff3d1d731827ba0d3e44650f6dbc5cab0dd11412729",
+        "bytes": 27966
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/franco_backhand_loop_b.grounded.pkl",
+        "sha256": "3254ccb4fe3ccd24e3417b8e251ee7d1e135d59b63daf6fa44744d3bf85855c8",
+        "bytes": 27926,
+        "physical_sha_and_bytes_recomputed": true
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/franco_backhand_loop_b.grounding.json",
+        "sha256": "8b0992643db5c9b386e94f8b5babe761318bf26e294ffcd8243d0edb0c3233e9",
+        "bytes": 11035
+      },
+      "structure": {
+        "frames": 91,
+        "fps": 30.0,
+        "finite_elements": 3459,
+        "root_rotation_max_norm_error": 9.992007221626409e-16,
+        "dtypes": {
+          "dof_pos": "float64",
+          "root_pos": "float64",
+          "root_rot": "float64"
+        },
+        "shapes": {
+          "dof_pos": [91, 31],
+          "root_pos": [91, 3],
+          "root_rot": [91, 4]
+        }
+      },
+      "joint_contract": {
+        "count": 31,
+        "max_range_excess_rad": 0.0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.08489999220482566,
+          "maximum_of_frame_minima_m": -0.07800788994095698,
+          "minimum_frame": 44,
+          "minimum_geom_id": 65,
+          "minimum_geom_name": "left_ankle_roll_collision",
+          "minimum_body_id": 26,
+          "minimum_body_name": "left_ankle_roll_Link"
+        },
+        "shift": {
+          "requested_m": 0.08490999220482566,
+          "applied_min_m": 0.08490999220482565,
+          "applied_max_m": 0.08490999220482565,
+          "spread_m": 0.0
+        },
+        "after": {
+          "minimum_clearance_m": 9.999999999975306e-06,
+          "maximum_of_frame_minima_m": 0.006902102263868677,
+          "same_minimum_frame_geom_body": true
+        }
+      },
+      "invariants": {
+        "all_other_payload_fields_shallow_preserved": true,
+        "dof_position_exact": true,
+        "root_pos_dtype_preserved": true,
+        "root_rotation_exact": true,
+        "root_xy_exact": true,
+        "root_z_relative_trajectory_max_error_m": 0.0
+      },
+      "body_shape_contract": "diagnostic_video_betas",
+      "clearance_sampling": "original_discrete_frames_only",
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "franco_backhand_loop_c",
+      "status": "complete_grounding_diagnostic",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_queue_outputs/franco_backhand_loop_c.diagnostic_video_betas.pkl",
+        "sha256": "cf4a9834b51c940bb41cd39d370f6c42c44be6d16166c2d9322a838550dab397",
+        "bytes": 30094
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/franco_backhand_loop_c.grounded.pkl",
+        "sha256": "f08dd09ac85af78c683c10aa361be411baeb40be002a2e3affc95e540d70f193",
+        "bytes": 30054,
+        "physical_sha_and_bytes_recomputed": true
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/franco_backhand_loop_c.grounding.json",
+        "sha256": "25115863dd9cc338d3844f71855202a0a951e5742a54e22fbe3ee43da5f55b9d",
+        "bytes": 11467
+      },
+      "structure": {
+        "frames": 98,
+        "fps": 30.0,
+        "finite_elements": 3725,
+        "root_rotation_max_norm_error": 1.1102230246251565e-15,
+        "dtypes": {
+          "dof_pos": "float64",
+          "root_pos": "float64",
+          "root_rot": "float64"
+        },
+        "shapes": {
+          "dof_pos": [98, 31],
+          "root_pos": [98, 3],
+          "root_rot": [98, 4]
+        }
+      },
+      "joint_contract": {
+        "count": 31,
+        "max_range_excess_rad": 1.3877787807814457e-17
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.08513665808136611,
+          "maximum_of_frame_minima_m": -0.07547190293087568,
+          "minimum_frame": 0,
+          "minimum_geom_id": 65,
+          "minimum_geom_name": "left_ankle_roll_collision",
+          "minimum_body_id": 26,
+          "minimum_body_name": "left_ankle_roll_Link"
+        },
+        "shift": {
+          "requested_m": 0.08514665808136611,
+          "applied_min_m": 0.08514665808136612,
+          "applied_max_m": 0.08514665808136612,
+          "spread_m": 0.0
+        },
+        "after": {
+          "minimum_clearance_m": 1.0000000000003062e-05,
+          "maximum_of_frame_minima_m": 0.009674755150490447,
+          "same_minimum_frame_geom_body": true
+        }
+      },
+      "invariants": {
+        "all_other_payload_fields_shallow_preserved": true,
+        "dof_position_exact": true,
+        "root_pos_dtype_preserved": true,
+        "root_rotation_exact": true,
+        "root_xy_exact": true,
+        "root_z_relative_trajectory_max_error_m": 0.0
+      },
+      "body_shape_contract": "diagnostic_video_betas",
+      "clearance_sampling": "original_discrete_frames_only",
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "v6_forehand_block",
+      "status": "complete_grounding_diagnostic",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_queue_outputs/v6_forehand_block.diagnostic_video_betas.pkl",
+        "sha256": "ca97c556f7c554a7ee14da4a0db849b4bbc3add20f8d59e244ce248e260b3f54",
+        "bytes": 10942
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/v6_forehand_block.grounded.pkl",
+        "sha256": "628d41b2d7ba86f04dcbc2e2a38eaaf7632c2c064ae89f3c636fa15f45955a2b",
+        "bytes": 10902,
+        "physical_sha_and_bytes_recomputed": true
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/v6_forehand_block.grounding.json",
+        "sha256": "00e6ef92dde01940af4839cd64eb3617ffa9197831406b11974b7181ab1df2a6",
+        "bytes": 7667
+      },
+      "structure": {
+        "frames": 35,
+        "fps": 30.0,
+        "finite_elements": 1331,
+        "root_rotation_max_norm_error": 1.1102230246251565e-15,
+        "dtypes": {
+          "dof_pos": "float64",
+          "root_pos": "float64",
+          "root_rot": "float64"
+        },
+        "shapes": {
+          "dof_pos": [35, 31],
+          "root_pos": [35, 3],
+          "root_rot": [35, 4]
+        }
+      },
+      "joint_contract": {
+        "count": 31,
+        "max_range_excess_rad": 0.0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.08132114657492334,
+          "maximum_of_frame_minima_m": -0.07943275735253116,
+          "minimum_frame": 5,
+          "minimum_geom_id": 78,
+          "minimum_geom_name": "right_ankle_roll_collision",
+          "minimum_body_id": 32,
+          "minimum_body_name": "right_ankle_roll_Link"
+        },
+        "shift": {
+          "requested_m": 0.08133114657492334,
+          "applied_min_m": 0.08133114657492335,
+          "applied_max_m": 0.08133114657492335,
+          "spread_m": 0.0
+        },
+        "after": {
+          "minimum_clearance_m": 1.0000000000003062e-05,
+          "maximum_of_frame_minima_m": 0.0018983892223921814,
+          "same_minimum_frame_geom_body": true
+        }
+      },
+      "invariants": {
+        "all_other_payload_fields_shallow_preserved": true,
+        "dof_position_exact": true,
+        "root_pos_dtype_preserved": true,
+        "root_rotation_exact": true,
+        "root_xy_exact": true,
+        "root_z_relative_trajectory_max_error_m": 0.0
+      },
+      "body_shape_contract": "diagnostic_video_betas",
+      "clearance_sampling": "original_discrete_frames_only",
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "v6_backhand_block",
+      "status": "complete_grounding_diagnostic",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_queue_outputs/v6_backhand_block.diagnostic_video_betas.pkl",
+        "sha256": "2b9d3ee7fff3e8d9be028d2bc8430c65babbeddb9fe3b9d0c139321219447cc7",
+        "bytes": 10942
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/v6_backhand_block.grounded.pkl",
+        "sha256": "0dda32e1c7e6ad5400f96914217ee48719a79fd1ca7d9b657ac6e2164befe9f9",
+        "bytes": 10902,
+        "physical_sha_and_bytes_recomputed": true
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/v6_backhand_block.grounding.json",
+        "sha256": "ca20e8e37b995353a8371bf2621dc7ffa6e9efb569299f13db8bce0c31335ca4",
+        "bytes": 7661
+      },
+      "structure": {
+        "frames": 35,
+        "fps": 30.0,
+        "finite_elements": 1331,
+        "root_rotation_max_norm_error": 8.881784197001252e-16,
+        "dtypes": {
+          "dof_pos": "float64",
+          "root_pos": "float64",
+          "root_rot": "float64"
+        },
+        "shapes": {
+          "dof_pos": [35, 31],
+          "root_pos": [35, 3],
+          "root_rot": [35, 4]
+        }
+      },
+      "joint_contract": {
+        "count": 31,
+        "max_range_excess_rad": 0.0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.081899096802118,
+          "maximum_of_frame_minima_m": -0.07999874194936452,
+          "minimum_frame": 16,
+          "minimum_geom_id": 78,
+          "minimum_geom_name": "right_ankle_roll_collision",
+          "minimum_body_id": 32,
+          "minimum_body_name": "right_ankle_roll_Link"
+        },
+        "shift": {
+          "requested_m": 0.081909096802118,
+          "applied_min_m": 0.081909096802118,
+          "applied_max_m": 0.081909096802118,
+          "spread_m": 0.0
+        },
+        "after": {
+          "minimum_clearance_m": 9.999999999996123e-06,
+          "maximum_of_frame_minima_m": 0.001910354852753482,
+          "same_minimum_frame_geom_body": true
+        }
+      },
+      "invariants": {
+        "all_other_payload_fields_shallow_preserved": true,
+        "dof_position_exact": true,
+        "root_pos_dtype_preserved": true,
+        "root_rotation_exact": true,
+        "root_xy_exact": true,
+        "root_z_relative_trajectory_max_error_m": 0.0
+      },
+      "body_shape_contract": "diagnostic_video_betas",
+      "clearance_sampling": "original_discrete_frames_only",
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "v7_forehand_block",
+      "status": "complete_grounding_diagnostic",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_queue_outputs/v7_forehand_block.diagnostic_video_betas.pkl",
+        "sha256": "7a21c658de090dafcc1b2223636742dd0423e8406dc06a8a97d5e3afdc7cd3fa",
+        "bytes": 19758
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/v7_forehand_block.grounded.pkl",
+        "sha256": "f2d71779a6925bf70921efeef890442e4e0bb51a096191e9aa8729347c37a634",
+        "bytes": 19718,
+        "physical_sha_and_bytes_recomputed": true
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/v7_forehand_block.grounding.json",
+        "sha256": "0ef5ffab0108d45d0a8d56a9331eb09a857063b0a71b91cfc18b0a21895c3f35",
+        "bytes": 9415
+      },
+      "structure": {
+        "frames": 64,
+        "fps": 30.0,
+        "finite_elements": 2433,
+        "root_rotation_max_norm_error": 9.992007221626409e-16,
+        "dtypes": {
+          "dof_pos": "float64",
+          "root_pos": "float64",
+          "root_rot": "float64"
+        },
+        "shapes": {
+          "dof_pos": [64, 31],
+          "root_pos": [64, 3],
+          "root_rot": [64, 4]
+        }
+      },
+      "joint_contract": {
+        "count": 31,
+        "max_range_excess_rad": 0.0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.08072308877320576,
+          "maximum_of_frame_minima_m": -0.07733181421975804,
+          "minimum_frame": 62,
+          "minimum_geom_id": 78,
+          "minimum_geom_name": "right_ankle_roll_collision",
+          "minimum_body_id": 32,
+          "minimum_body_name": "right_ankle_roll_Link"
+        },
+        "shift": {
+          "requested_m": 0.08073308877320576,
+          "applied_min_m": 0.08073308877320573,
+          "applied_max_m": 0.08073308877320573,
+          "spread_m": 0.0
+        },
+        "after": {
+          "minimum_clearance_m": 9.999999999968368e-06,
+          "maximum_of_frame_minima_m": 0.003401274553447693,
+          "same_minimum_frame_geom_body": true
+        }
+      },
+      "invariants": {
+        "all_other_payload_fields_shallow_preserved": true,
+        "dof_position_exact": true,
+        "root_pos_dtype_preserved": true,
+        "root_rotation_exact": true,
+        "root_xy_exact": true,
+        "root_z_relative_trajectory_max_error_m": 0.0
+      },
+      "body_shape_contract": "diagnostic_video_betas",
+      "clearance_sampling": "original_discrete_frames_only",
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "v7_backhand_block",
+      "status": "complete_grounding_diagnostic",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_queue_outputs/v7_backhand_block.diagnostic_video_betas.pkl",
+        "sha256": "6c3370d5089d03db3e6d9953d37d2b7dc5969b69ce2827c96abc9e972a517179",
+        "bytes": 19758
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/v7_backhand_block.grounded.pkl",
+        "sha256": "79651bfa0df7bd40be4bc4a657f8ea6db26cfe61a57139214e0cf7a4d11d9028",
+        "bytes": 19718,
+        "physical_sha_and_bytes_recomputed": true
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_grounded/v7_backhand_block.grounding.json",
+        "sha256": "5ae8cd2d88411c0666a4ead96d530ce4e9cfcbe8fa7736750b7683ad464293fe",
+        "bytes": 9438
+      },
+      "structure": {
+        "frames": 64,
+        "fps": 30.0,
+        "finite_elements": 2433,
+        "root_rotation_max_norm_error": 1.1102230246251565e-15,
+        "dtypes": {
+          "dof_pos": "float64",
+          "root_pos": "float64",
+          "root_rot": "float64"
+        },
+        "shapes": {
+          "dof_pos": [64, 31],
+          "root_pos": [64, 3],
+          "root_rot": [64, 4]
+        }
+      },
+      "joint_contract": {
+        "count": 31,
+        "max_range_excess_rad": 0.0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.08254845541401618,
+          "maximum_of_frame_minima_m": -0.08119781696989911,
+          "minimum_frame": 58,
+          "minimum_geom_id": 78,
+          "minimum_geom_name": "right_ankle_roll_collision",
+          "minimum_body_id": 32,
+          "minimum_body_name": "right_ankle_roll_Link"
+        },
+        "shift": {
+          "requested_m": 0.08255845541401617,
+          "applied_min_m": 0.08255845541401619,
+          "applied_max_m": 0.08255845541401619,
+          "spread_m": 0.0
+        },
+        "after": {
+          "minimum_clearance_m": 1.0000000000010001e-05,
+          "maximum_of_frame_minima_m": 0.0013606384441170669,
+          "same_minimum_frame_geom_body": true
+        }
+      },
+      "invariants": {
+        "all_other_payload_fields_shallow_preserved": true,
+        "dof_position_exact": true,
+        "root_pos_dtype_preserved": true,
+        "root_rotation_exact": true,
+        "root_xy_exact": true,
+        "root_z_relative_trajectory_max_error_m": 0.0
+      },
+      "body_shape_contract": "diagnostic_video_betas",
+      "clearance_sampling": "original_discrete_frames_only",
+      "formal_eligible": false
+    }
+  ]
+}

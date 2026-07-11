@@ -76,9 +76,28 @@ root 且 31 hinge 顺序逐名相同。工具只纳入 robot subtree 中启用�
 解析 support、mesh 用 MuJoCo compiled vertices，逐源帧求最低 world-z，再只给
 `root_pos[:,2]` 加一个固定量。输出回读后必须保持 root XY/root quaternion/31 DoF 逐位不变、
 关节仍在 MJCF range、最差帧接近地面而不穿透/过度悬空；report 绑定 tool/input/output/MJCF 和
-compiled collision digest。真实 canonical `a3_pingpong.xml` 的 native MuJoCo 测试已通过，
-但这仍只审 30 Hz 离散帧，不是 inter-frame 连续 clearance 证明。当前 tracked pilot 尚待实际
-运行，所以后续门禁顺序没有缩短。
+compiled collision digest。真实 canonical `a3_pingpong.xml` 的 native MuJoCo 测试已通过。
+Pod1 随后对十条 diagnostic GMR 输出逐条运行了同一内容寻址工具，全部 no-clobber 完成；结果账本为
+`configs/motion_video_gmr_ground_results_20260711.json`。原始离散帧最深穿地范围为
+`8.072--8.716 cm`，逐条固定 root-z shift 后的全局最小余量均约 `10 um`；每条 output/report
+SHA、输入 GMR SHA、MJCF、tool 与 compiled-collision digest 都已交叉绑定。它们仍使用
+per-video betas，且这仍只审 30 Hz 离散帧，不是 inter-frame 连续 clearance 证明，所以后续
+门禁顺序没有缩短。
+
+体型归一化的上游 PT 也已完成，但仍是 diagnostic。工具
+`scripts/materialize_canonical_gvhmr_betas.py` 先对每个视频的 10 维 beta 逐维取中位数，再让十个
+视频等权取中位数，避免 35--98 帧的长度差给长片更多票。Pod1 CPU-only validate 和 no-clobber
+materialize 均通过，统一向量 SHA 为 `a03f1642...9cc6`；十份 save/reload 输出除
+`smpl_params_global.betas` 外的逐叶 semantic digest 均逐位相同。完整输入/output/tool/plan SHA 在
+`configs/motion_video_canonical_betas_result_20260711.json`。GMR 的
+`1.66 + 0.1*beta[0]` 只给出 `1.73066 m` 的内部 heuristic，不是实测身高，故
+`a3_calibrated=false/formal_eligible=false`。随后 source audit 作废了旧 prereg 中未绑定的
+“补六个零”猜测：clean `aabea2e` loader SHA `2737f472...5de2` 实际只取
+`betas[0].detach().cpu().numpy()[:10]`，zero padding=false。独立 body-shape-aware CPU queue 已
+10/10 重跑完成：全部 30Hz/31DoF/finite，warm-up 16--29 轮后 max|dq|<`1e-4`，且没有
+占用 GPU 或改 GMR/train checkout。账本为
+`configs/motion_video_canonical_gmr_results_20260711.json`。下一步是对这十条新输出重做
+no-clobber grounding 与稠密安全门，不是直接进 RL。
 
 | 组 | 语义动作 | 文件 | 时长 / 帧数 | 当前角色 |
 | --- | --- | --- | --- | --- |
@@ -338,12 +357,16 @@ heading 若单独开，必须同时给 yawed/post-swing 起始状态覆盖；仅
    全部通过帧数/shape/finite 结构审计。视觉质量和安全仍未被这个 pass 代替。
 3. 已完成：CPU-only diagnostic GMR 10/10；结构和 warm-up 均通过，但 body betas 非正式，
    且 pilot 暴露约 8 cm 穿地，未授权 schema-2 或 RL。
-4. 先完成单文件 ground/root 校准、canonical-betas 重跑和 schema-2，再做 L0/L1/逐帧
-   回球率，淘汰空间路径，不启动 RL。
-5. 对幸存路径做 native/TOPP 双资产和重复门禁。
-6. 泛化动态 clip catalog 与共同问题轴；先在 CPU/Isaac smoke 证明四动作身份、side sign、题目绑定。
-7. 先跑 family/候选/时间律小消融，再跑 2-vs-4；不把所有轴一次打包。
-8. 最后才进入 event-driven recovery R0–R4，并以 immutable Isaac/MuJoCo 连续门禁裁决。
+4. 已完成：十条 diagnostic GMR 的单文件 ground/root 校准与内容寻址账本；只证明离散源帧
+   近地不穿透，未改变 `diagnostic_video_betas`/formal-ineligible 状态。
+5. 已完成：十条 GVHMR PT 的同人等权 canonical-betas diagnostic materialize 和 canonical
+   GMR 10/10；没有实测身高，仍不是 A3 标定。现在先对新 GMR 重跑 grounding、inter-frame
+   连续地面/自碰/拍柄余隙/桌网 clearance、动力学与 schema-2；之后才做 L0/L1/逐帧回球率，
+   淘汰空间路径，不启动 RL。
+6. 对幸存路径做 native/TOPP 双资产和重复门禁。
+7. 泛化动态 clip catalog 与共同问题轴；先在 CPU/Isaac smoke 证明四动作身份、side sign、题目绑定。
+8. 先跑 family/候选/时间律小消融，再跑 2-vs-4；不把所有轴一次打包。
+9. 最后才进入 event-driven recovery R0–R4，并以 immutable Isaac/MuJoCo 连续门禁裁决。
 
 尚未完成的关键事实应始终写明：空挥素材没有真实接触真值；四动作 selector 未实现；任意时刻下一拍
 未通过；任何新动作均未获准真机执行。

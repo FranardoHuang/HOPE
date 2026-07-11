@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "status": "complete_diagnostic_canonical_betas_materialization",
+  "scope": "ten same-intake GVHMR results normalized to one equal-video-weight cohort-median beta vector; no GMR rerun, measured-height calibration, schema-2, training, or real-robot claim",
+  "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+  "plan": {
+    "path": "configs/motion_video_canonical_betas_prereg_20260711.json",
+    "sha256": "ec41e29f58b7029d5905edf029043f4f3c87c52bd95c9aa76d052e415e4b0dfe"
+  },
+  "source_results_manifest": {
+    "path": "configs/motion_video_gvhmr_results_20260711.json",
+    "sha256": "0aaee40d689033518f24e9667478142398ae370f3bbde73e1638c0bfb321fd86"
+  },
+  "tool": {
+    "path": "scripts/materialize_canonical_gvhmr_betas.py",
+    "sha256": "4775dc532d49ff212bb3276bb09a9af12447319f6207ea296f26dead1ab80c92"
+  },
+  "runtime": {
+    "pod": "pod1",
+    "cpu_only": true,
+    "CUDA_VISIBLE_DEVICES": "",
+    "python_executable": "/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10",
+    "python_version": "Python 3.10.20",
+    "pip_freeze_sha256": "56b0f8af9677b279bbb4925b6f49113f484dcb9ded1ed8d9bc56af71f304c694",
+    "output_root": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1"
+  },
+  "canonical_betas": {
+    "components": [
+      0.7066280245780945,
+      -0.3825218677520752,
+      0.9619556665420532,
+      -0.8379107713699341,
+      -0.2778695225715637,
+      -0.6008623838424683,
+      0.03957299888134003,
+      -0.657934308052063,
+      -0.05306008458137512,
+      0.030301377177238464
+    ],
+    "dtype": "torch.float32",
+    "vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+    "artifact": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/canonical_betas.json",
+      "bytes": 915,
+      "sha256": "f405ba45d7f2233d3735c2e6b59409203cc98b1e97deef00224e16f2c7c4cbf2"
+    },
+    "aggregation": "coordinatewise_median_of_per_video_coordinatewise_medians",
+    "gmr_loader_heuristic_height_m_not_calibration": 1.7306628024578095,
+    "measured_height_m": null,
+    "a3_calibrated": false,
+    "formal_eligible": false
+  },
+  "remote_completion_manifest": {
+    "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/materialization_manifest.json",
+    "bytes": 26857,
+    "sha256": "4043b34210b30be4151457623c3152ebd09650fb2caf587eb78359887a06bc2b"
+  },
+  "results": [
+    {
+      "asset_id": "franco_forehand_block",
+      "output_sha256": "9ee4174218023ccd59490022ea7a200c1a767d389e7ffef4e38a7bd9ae896167",
+      "output_bytes": 289746,
+      "non_beta_semantic_sha256": "6278c305fc985c5f94bb9fc8e090450c372f1d614290daf0bf44c7eacbbd6568"
+    },
+    {
+      "asset_id": "franco_backhand_block",
+      "output_sha256": "c68b021cebfaf0adb64bc94530a5a965fadd5b1a270595eb890b9591cc3bedf2",
+      "output_bytes": 280914,
+      "non_beta_semantic_sha256": "ccfd26304d0dde283c950e58259300ea1775987c381bde64534ca9438974e7c1"
+    },
+    {
+      "asset_id": "franco_forehand_loop",
+      "output_sha256": "bfdfeb88ec48efe8b5cfed4615e63da3b74b1d2c421cd82247327005d4d362c7",
+      "output_bytes": 311570,
+      "non_beta_semantic_sha256": "287bba0b29cc118e70b649a474d505feb27ac8d4d043a58d86f87dbb1ecb15f7"
+    },
+    {
+      "asset_id": "franco_backhand_loop_a",
+      "output_sha256": "b24bcca25260aa9dc23d9916934363e1a2c9b422a2fadc07b33f5d5b088154d4",
+      "output_bytes": 306706,
+      "non_beta_semantic_sha256": "67489f1bdd35aa4b9689552d545528ebf67b882020982b7e1d254546b27618d0"
+    },
+    {
+      "asset_id": "franco_backhand_loop_b",
+      "output_sha256": "ad0c1a2e5d1b09d04ff7be90c98c065fe9bf04da6b3d9340cded7588d426c48a",
+      "output_bytes": 402834,
+      "non_beta_semantic_sha256": "8867349cd911e3521f535b6a8ea90b0914819b3a361919d73539ab789df2d29a"
+    },
+    {
+      "asset_id": "franco_backhand_loop_c",
+      "output_sha256": "65dcd2b7c3a5346c572759fc32ba581d64177cffcca3235f8d6a64f7ffcf7cf3",
+      "output_bytes": 432914,
+      "non_beta_semantic_sha256": "eb8910a246bb791af24f15187da9eb45e70bbfe0f580e1038de408057f085e62"
+    },
+    {
+      "asset_id": "v6_forehand_block",
+      "output_sha256": "e95f52220c452757bc02269f700f6ff2bc84947c9c1abe8261955b610cf2e34c",
+      "output_bytes": 159250,
+      "non_beta_semantic_sha256": "d70c8a1082e9323fd402270db94e4a8180778f6b1be4f6c0ea5a865123c2dc57"
+    },
+    {
+      "asset_id": "v6_backhand_block",
+      "output_sha256": "0d630d0dd5ba980e6f25021257f82dd04297ea49859f8775828ea3956679a59b",
+      "output_bytes": 159250,
+      "non_beta_semantic_sha256": "f46dd79283f54acff5cd47610c9e329817d307d6bfabdea49c1c2ed484eb7a86"
+    },
+    {
+      "asset_id": "v7_forehand_block",
+      "output_sha256": "af31c9840972b01713a887839827460e1665663f972599b581ddfb939bf3da8c",
+      "output_bytes": 285586,
+      "non_beta_semantic_sha256": "8ce27d6d61d36b3c69c155ce31cb4887e52ea26152160a6ec73ef8d822d76e0d"
+    },
+    {
+      "asset_id": "v7_backhand_block",
+      "output_sha256": "584e384ae9e1612ff2d9c3d03fef8a5a7cd969246e2e38ca0642411cb584454b",
+      "output_bytes": 285586,
+      "non_beta_semantic_sha256": "ff95b141713210b7acaeab8a800d5d8a15f7eb89f17eb9a2682c8e6641975147"
+    }
+  ],
+  "invariants": {
+    "only_smpl_params_global_betas_changed": true,
+    "all_non_beta_semantic_digests_match_after_save_reload": true,
+    "all_outputs_use_the_same_canonical_vector": true,
+    "all_source_frame_beta_max_abs_deviation_from_video_median": 0.0,
+    "output_root_was_created_no_clobber": true,
+    "completion_manifest_was_published_last": true
+  },
+  "loader_observation_correction": {
+    "status": "historical_unbound_padding_hypothesis_revoked_by_exact_loader_source",
+    "historical_plan_field": "gmr_loader_observation.semantics",
+    "exact_loader_path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/utils/smpl.py",
+    "exact_loader_sha256": "2737f47207eb7298e747907ea2d11355d1280b680bc4e0fbce3080657e505de2",
+    "actual_selection": "smpl_params_global.betas[0].detach().cpu().numpy()[:10]",
+    "zero_padding": false,
+    "superseding_preregistration": {
+      "path": "configs/motion_video_canonical_gmr_prereg_20260711.json",
+      "sha256": "d165a60c575defba7bbb00441fdbbe196c6fcc89596f9eaec5508b56ffe1de02"
+    }
+  },
+  "next_gate": {
+    "canonical_gmr_rerun_status": "complete_diagnostic",
+    "result_manifest": "configs/motion_video_canonical_gmr_results_20260711.json",
+    "blockers": [
+      "run no-clobber grounding on the ten canonical-beta GMR outputs",
+      "repeat dense inter-frame collision, dynamics, table/net, returnability and schema-2 gates"
+    ]
+  }
+}
