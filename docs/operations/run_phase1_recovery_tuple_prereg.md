@@ -20,11 +20,11 @@ training source.
 
 - preregistration:
   `configs/phase1_recovery_tuple_abc_prereg_20260712.json`
-  (`sha256 39b97915bbb37bcf69e9a8a5eb87cb928bc1e7a6425c1f1555dd61c128b71e1a`)
+  (`sha256 ca7806df83b650546cf4406963bb231622a248c8e04e944991a371e44d810616`)
 - validator:
   `scripts/validate_phase1_recovery_tuple_prereg.py`
-  (`26034` bytes,
-  `sha256 3de8bf3039ba603d7171fb5956d824f7ba1a24f773bbae648604fdf19f9682d0`)
+  (`33854` bytes,
+  `sha256 c6d0e615dd1f356c28da701c8b13c937faa13f70f429c2550e26cb339e2e6991`)
 - tests: `tests/test_validate_phase1_recovery_tuple_prereg.py`
 
 The preregistration also verifies the immutable T0/T1 design/schedule files, exact training git
@@ -38,14 +38,14 @@ From the repository root:
 ```bash
 python3 scripts/validate_phase1_recovery_tuple_prereg.py \
   --prereg configs/phase1_recovery_tuple_abc_prereg_20260712.json \
-  --expected-prereg-sha256 39b97915bbb37bcf69e9a8a5eb87cb928bc1e7a6425c1f1555dd61c128b71e1a \
+  --expected-prereg-sha256 ca7806df83b650546cf4406963bb231622a248c8e04e944991a371e44d810616 \
   --mode design-check
 ```
 
 Pass output includes:
 
 ```json
-{"current_179_B_usable": false, "current_hybrid_formal": false, "formal_arms": ["A_explicit_bridge", "B_canonical_tuple", "C_previous_tuple"], "launch_authorized": false, "status": "pass_design_only", "vendor_gate3_final": true}
+{"current_179_B_usable": false, "current_hybrid_formal": false, "formal_arms": ["A_explicit_bridge", "B_canonical_tuple", "C_previous_tuple"], "launch_authorized": false, "status": "pass_design_only", "vendor_gate3_hard_prerequisite": true, "vendor_gate3b_final_behavior": true}
 ```
 
 Run the red-team regression:
@@ -54,14 +54,17 @@ Run the red-team regression:
 python3 -m pytest -q tests/test_validate_phase1_recovery_tuple_prereg.py
 ```
 
-The checked-in result is `20 passed`.
+The checked-in result is `50 passed`. It includes raw-JSON red teams for duplicate keys at top and
+nested levels, `NaN`/`Infinity`/overflowing numeric constants, exact preregistration identity/time/
+scope, strict JSON type identity, unknown top-level fields and unknown fields in each critical outer
+map.
 
 ## Expected Launch Failure
 
 ```bash
 python3 scripts/validate_phase1_recovery_tuple_prereg.py \
   --prereg configs/phase1_recovery_tuple_abc_prereg_20260712.json \
-  --expected-prereg-sha256 39b97915bbb37bcf69e9a8a5eb87cb928bc1e7a6425c1f1555dd61c128b71e1a \
+  --expected-prereg-sha256 ca7806df83b650546cf4406963bb231622a248c8e04e944991a371e44d810616 \
   --mode launch-check
 ```
 
@@ -70,12 +73,14 @@ design file. A future launch requires a new content-addressed manifest binding, 
 
 - immutable q10/q50 random-arrival and question schedules;
 - individual finite/iteration/lineage-bound 179-D checkpoints;
-- A bridge source, whole-trajectory safety certificate, and an executed-action versus shadow-policy
-  action/history handoff contract;
+- A bridge source, whole-trajectory safety certificate, fresh checkpoint set, actor handoff,
+  per-tick policy-ownership and PPO-rollout contracts;
 - B canonical tuple source, ready-set selector, and fresh checkpoints;
 - C coherent-tuple source and fresh checkpoints for any learned random-arrival claim;
 - a complete numeric ready/base/racket/target contract, not just a named `stand` pose;
-- same-family Isaac and Agibot vendor MuJoCo Gate3 continuous no-reset judges;
+- same-family Isaac continuous judge, Agibot vendor Gate3 same-C++/MJCF/plant/model first-tick and
+  continuous-stability judge, Gate3B random-arrival q50 behavior judge, and a shared Gate3/Gate3B
+  runtime contract;
 - racket/handle self-hit instrumentation and a semantics-correct calibrated plant.
 
 ## Checkpoint Interpretation
@@ -86,8 +91,36 @@ design file. A future launch requires a new content-addressed manifest binding, 
   and random reveal were not trained, so this is not a learned recovery result.
 - They cannot be used in B: the current training distribution contains neither the canonical
   zero-velocity tuple nor its neutral ready normal. B requires fresh training.
-- A fair A/B/C causal comparison is fresh exact and paired. No existing checkpoint may be renamed
-  `T1-trained` after the fact.
+- A fair A/B/C causal comparison is fresh exact and paired, including a fresh A checkpoint produced
+  under the bound bridge ownership/PPO contract. No existing checkpoint may be renamed `T1-trained`
+  after the fact.
+
+## A Bridge Policy Ownership And PPO Accounting
+
+Every A tick must log `actor_control_mask`, executed action, shadow-policy action, the action written
+to the actor's last-action observation, logprob validity and policy/entropy/value loss masks.
+
+- `actor_control_mask=1` only when the sampled policy action is the action actually executed. Its
+  PPO logprob must be for that exact action.
+- On a bridge-owned tick, the bridge output is executed and the shadow action is diagnostic only.
+  It has no valid logprob, and policy, entropy and value loss masks are all zero. Reconstructing a
+  policy logprob for either the bridge or shadow action is prohibited.
+- The last-action observation is a content-bound projection of the **executed** action into the
+  actor action coordinates. It is never silently the shadow action, zero or a stale actor action;
+  an inexact/unavailable projection fails closed.
+- Bridge rewards are real. They use the duration-correct `gamma^k` sum across the bridge segment and
+  collapse into the preceding actor-owned option transition. If the sequence continues, return/GAE
+  uses `gamma^duration` to bootstrap at the
+  next actor-controlled state; only a true simulator termination bootstraps zero. A deadline miss
+  or infeasible scheduled row is not a fake terminal. A bridge segment before the first actor tick
+  remains metric-only.
+
+All three arms use the same prebound simulator env-steps and scheduled rows per update, optimizer
+update count, actor-controlled sample count, minibatch size and epoch count. B/C surplus actor
+samples are selected by a prebound deterministic schedule that cannot read outcomes. If A cannot
+produce the fixed actor-sample count, the entire paired update fails: no padding, reuse or extra A
+environment steps. Raw actor ticks, bridge ticks, env-steps and opportunities are reported for every
+arm. Evaluation always retains every scheduled opportunity regardless of ownership/loss masks.
 
 ## Ready And Cross-Engine Boundary
 
@@ -99,9 +132,12 @@ contact position is environment-origin absolute while the actor sees target minu
 FK, the `4.16 cm` root-x difference does not automatically cancel. This is a hypothesis to isolate,
 not a proven cause of engine divergence.
 
-Final decisions use the same immutable random-arrival no-reset exam in Isaac first and the Agibot
-vendor MuJoCo Gate3 implementation last. q10 is directional screen only; q50 decides. Any engine
-disagreement blocks and triggers root-cause work rather than averaging two scores.
+Final decisions use three ordered layers. Isaac is the development/cross-engine precheck. Agibot
+vendor MuJoCo Gate3 then hard-gates the exact C++/MJCF/plant/model at first tick and across continuous
+stability. Only after that pass may Gate3B use the **same runtime contract** and immutable random-
+arrival q50 schedule to score first-strike non-regression and return quality; Gate3B is the final
+behavior arbiter. q10 is directional screen only. Any disagreement blocks and triggers root-cause
+work rather than averaging scores.
 
 ## Prohibited Actions
 

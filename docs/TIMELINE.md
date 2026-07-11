@@ -1541,7 +1541,8 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `1471093`）消费原 64 题，safety 与 v4 逐资产相等，但所有 motion/library exact 都是
    `0/64`、common support=0，故不判 2 或 4，也不写成动作无效。intrinsic 仅反手拉 B/C
    为 `32/32 @ .5444`、`27/32 @ .5155`，保留作 spatial-retarget 候选；TOPP 暂停到
-   schema-2/L0/L1/桌网/动力学，最终由智元 vendor MuJoCo Gate3/Gate3B 无 reset 主判。
+   schema-2/L0/L1/桌网/动力学，最终先过智元 vendor MuJoCo Gate3 runtime/stability，再由
+   Gate3B 共用 runtime 做 no-reset behavior 主判。
 4. 【franco/Codex】**4k 四 seed 同卷已预注册，但先把“必然不能整体过门”写清楚**——下一里程碑
    严格复用 2k 的 K100 file/semantic/question-order/bank bytes、SZ family、seed1--4 和
    `.75/.65/.20/.50` 门槛，不换卷不调分。已知 seed1 4k 同卷只有 `.50`，故四 seed
@@ -1569,6 +1570,10 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    不是 frame0。静态证据还记录 Isaac/vendor stand root-x 差 `4.16cm`、31 关节 L2
    `0.171845rad`，只作待隔离假设；正式卷须绑定完整 numeric ready/base/racket/target SHA。
    reward 暂冻结；只有结构失败才先归一化三项、做 `2^3` 交互，再固定总预算 mixture，安全/
-   自碰不可补偿。prereg SHA=`39b97915...b71e1a`、纯合同 `20 passed`；launch-check 因
-   schedule/bridge-handoff/fresh checkpoint/calibrated plant/Isaac+vendor Gate3 no-reset judge
-   等仍 null 而按设计失败。未动 C++、Gate3 worktree、Pod/GPU 或真机。
+   自碰不可补偿。红队复审后又补齐 A formal fresh PPO 所有权：只有真执行 actor sample 有 logprob，
+   bridge tick 三个 loss mask 全 0、真实 reward 折叠成 option return、last-action 只记 executed-action
+   精确投影；三臂 env-step/机会/update/actor-sample/minibatch 同预算，A 不足整对 fail。Gate3 改为同
+   C++/MJCF/plant/model first-tick+连续稳定硬前置，Gate3B 共用 runtime 做 random-arrival q50 最终行为主判。
+   JSON 全层拒 duplicate/NaN/Inf、数值/布尔别名和未知关键字段。prereg SHA=`ca7806df...d810616`、纯合同 `50 passed`；
+   launch-check 因 schedule/A-ownership-PPO-fresh/calibrated plant/Isaac/Gate3/Gate3B/shared-runtime 等仍 null
+   而按设计失败。未动 C++、Gate3 worktree、Pod/GPU 或真机。

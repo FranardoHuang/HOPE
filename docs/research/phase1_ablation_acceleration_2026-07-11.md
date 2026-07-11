@@ -241,8 +241,15 @@ episode 变长、tracking guard 软化、奖励修订或动作重定时若需要
 3. `R2`：只有 S1 表明 B/C 缺 learned shaping 且第一拍不退化时才解锁 reward 试验。
 
 这个次序避免了一个常见的伪加速：同时换 tuple、加 balance reward、加 ready reward 和改等待
-逻辑，最后虽然分数变了却不知道哪个机制有效。A 的外部 bridge 还要单独绑定 actor history 到底收到
-executed bridge action 还是 shadow-policy action；未绑定前不点火。
+逻辑，最后虽然分数变了却不知道哪个机制有效。A 的外部 bridge 要单独绑定逐 tick ownership：
+last-action 必须是 executed bridge action 到 actor 坐标的精确投影，shadow action 只诊断；只有真执行的
+actor sample 才有 logprob。bridge tick 的 policy/entropy/value loss mask 全 0，真实 bridge reward
+折叠回前一个 actor option transition，并在下一 actor state 或真终止处 bootstrap。未绑定前不点火。
+
+为防止 A 因 actor 少控制一段就暗中获得不同训练预算，S1 同时锁定每臂每 update 的 env-step、
+scheduled opportunities、optimizer update、actor-owned sample、minibatch 和 epoch。B/C 多出的
+actor sample 用预绑定、不看 outcome 的索引下采样；A 若不足固定样本数，整个 paired update fail，
+不 padding/复用/额外多跑。评测分母仍是全部预定机会，不跟 loss mask 缩水。
 
 ### 同一恢复阶段的三项 reward 为什么要看交互
 
@@ -259,8 +266,9 @@ OFAT 继续猜比例，而是：
 
 跌倒、自碰、桌网碰撞、执行器越界是约束，不是可以用击球分补偿的第四项 reward。正的 hold/brake
 survival income 仍禁止，避免通过 GAE 把“什么都不做”的收益传回击球段。q10 只筛方向，q50 才决定结构/
-混合；最终是同一智元 vendor MuJoCo Gate3 no-reset 卷主判，不在 Isaac/MuJoCo 之间平均。当前只完成设计
-合同与 `20 passed`，没有 GPU 或训练结果。
+混合；最终先由智元 vendor MuJoCo Gate3 在同 C++/MJCF/plant/model 上做 first-tick+连续稳定硬前置，
+再由共用同 runtime 的 Gate3B random-arrival q50 主判第一拍不退化与回球质量，不在 Isaac/MuJoCo 之间
+平均。当前只完成设计合同与 `50 passed`，没有 GPU 或训练结果。
 
 ## 什么叫“加速成功”
 

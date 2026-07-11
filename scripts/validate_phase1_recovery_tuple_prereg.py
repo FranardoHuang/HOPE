@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import subprocess
@@ -24,6 +25,59 @@ from typing import Any
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+
+EXPECTED_PREREGISTRATION_ID = "phase1-recovery-tuple-A-B-C-v1"
+EXPECTED_CREATED_UTC = "2026-07-11T19:28:17Z"
+EXPECTED_SCOPE = (
+    "separate post-swing recovery command semantics from reward mixing: compare an explicit "
+    "safe bridge, an actor-visible canonical recovery tuple, and a coherent complete "
+    "previous-question tuple under one immutable random-arrival no-reset exam"
+)
+EXPECTED_TOP_KEYS = {
+    "schema_version",
+    "preregistration_id",
+    "created_utc",
+    "status",
+    "scope",
+    "launch_authorized",
+    "real_robot_authorized",
+    "validator",
+    "prerequisites",
+    "audited_training_source",
+    "gate3_readonly_evidence",
+    "observed_training_semantics",
+    "rejected_current_hybrid",
+    "structural_axis",
+    "ready_set_contract",
+    "ready_state_static_evidence",
+    "frozen_structural_comparison",
+    "conditional_reward_followup",
+    "evaluation_contract",
+    "implementation_bindings",
+}
+EXPECTED_VALIDATOR_KEYS = {"repo_path", "bytes", "sha256"}
+EXPECTED_AUDITED_SOURCE_KEYS = {"commit", "note", "git_blobs"}
+EXPECTED_STRUCTURAL_AXIS_KEYS = {"stage_order", "arms", "current_179_checkpoint_compatibility"}
+EXPECTED_READY_KEYS = {
+    "ready_is_exact_motion_frame0",
+    "definition",
+    "required_conjuncts",
+    "selector",
+    "reachability_quantifier",
+    "empty_global_intersection_policy",
+    "transition_cells",
+}
+EXPECTED_REWARD_KEYS = {
+    "status",
+    "trigger",
+    "components",
+    "first_step",
+    "interaction_design",
+    "mixture_design_after_interactions_only",
+    "positive_brake_hold_survival_income_allowed",
+    "safety_as_reward_weight_allowed",
+    "single_strike_nonregression_gate",
+}
 
 EXPECTED_TRAINING_COMMIT = "d3cdbdfc2f6e30726aa197b7bca66496ee0d39e5"
 EXPECTED_GATE3_COMMIT = "1d46ef2cbb915efc135251f9b32f4ec25d0342ab"
@@ -116,6 +170,9 @@ REQUIRED_IMPLEMENTATION_BINDINGS = (
     "A_bridge_source",
     "A_bridge_trajectory_certificate",
     "A_actor_handoff_contract",
+    "A_bridge_policy_ownership_contract",
+    "A_bridge_ppo_rollout_contract",
+    "A_fresh_checkpoint_set",
     "B_canonical_tuple_source",
     "B_ready_set_selector",
     "B_fresh_checkpoint_set",
@@ -123,7 +180,9 @@ REQUIRED_IMPLEMENTATION_BINDINGS = (
     "C_fresh_checkpoint_set",
     "shared_training_hard_contract",
     "isaac_continuous_no_reset_judge",
-    "vendor_gate3_continuous_no_reset_judge",
+    "vendor_gate3_runtime_preflight_and_stability_judge",
+    "vendor_gate3b_continuous_no_reset_scoring_judge",
+    "gate3_gate3b_shared_runtime_contract",
     "canonical_ready_base_racket_target_numeric_contract",
     "ready_set_measurement",
     "racket_handle_self_hit_instrumentation",
@@ -157,9 +216,34 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ContractError(f"duplicate JSON key rejected: {key}")
+        value[key] = item
+    return value
+
+
+def _reject_nonfinite_constant(token: str) -> Any:
+    raise ContractError(f"non-finite JSON constant rejected: {token}")
+
+
+def _parse_finite_float(token: str) -> float:
+    value = float(token)
+    if not math.isfinite(value):
+        raise ContractError(f"non-finite JSON number rejected: {token}")
+    return value
+
+
 def read_json(path: Path, label: str) -> dict[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=_reject_nonfinite_constant,
+            parse_float=_parse_finite_float,
+        )
     except (OSError, json.JSONDecodeError) as exc:
         raise ContractError(f"cannot read {label} {path}: {exc}") from None
     if not isinstance(value, dict):
@@ -190,7 +274,7 @@ def verify_repo_binding(binding: Any, *, label: str, root: Path) -> Path:
         raise ContractError(f"{label}.repo_path must be a non-empty relative path")
     expected_sha = require_sha(binding.get("sha256"), f"{label}.sha256")
     expected_bytes = binding.get("bytes")
-    if not isinstance(expected_bytes, int) or expected_bytes <= 0:
+    if type(expected_bytes) is not int or expected_bytes <= 0:
         raise ContractError(f"{label}.bytes must be positive")
     path = (root / rel).resolve()
     try:
@@ -216,7 +300,7 @@ def verify_git_binding(binding: Any, *, label: str, root: Path) -> None:
         raise ContractError(f"{label}.repo_path must be relative")
     expected_sha = require_sha(binding.get("sha256"), f"{label}.sha256")
     expected_bytes = binding.get("bytes")
-    if not isinstance(expected_bytes, int) or expected_bytes <= 0:
+    if type(expected_bytes) is not int or expected_bytes <= 0:
         raise ContractError(f"{label}.bytes must be positive")
     data = git_bytes(root, commit, path)
     if len(data) != expected_bytes or sha256_bytes(data) != expected_sha:
@@ -229,16 +313,39 @@ def _require_map(value: Any, label: str) -> dict[str, Any]:
     return value
 
 
+def _require_exact_keys(value: dict[str, Any], expected: set[str], label: str) -> None:
+    actual = set(value)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        extra = sorted(actual - expected)
+        raise ContractError(f"{label} keyset changed: missing={missing} extra={extra}")
+
+
+def _strict_equal(actual: Any, expected: Any) -> bool:
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return set(actual) == set(expected) and all(
+            _strict_equal(actual[key], expected[key]) for key in expected
+        )
+    if isinstance(expected, list):
+        return len(actual) == len(expected) and all(
+            _strict_equal(a, b) for a, b in zip(actual, expected)
+        )
+    return bool(actual == expected)
+
+
 def validate_sources(prereg: dict[str, Any], root: Path) -> None:
     prereqs = _require_map(prereg.get("prerequisites"), "prerequisites")
     if set(prereqs) != set(EXPECTED_PREREQUISITES):
         raise ContractError("prerequisite set changed")
     for name, (path, size, digest) in EXPECTED_PREREQUISITES.items():
-        if prereqs[name] != {"repo_path": path, "bytes": size, "sha256": digest}:
+        if not _strict_equal(prereqs[name], {"repo_path": path, "bytes": size, "sha256": digest}):
             raise ContractError(f"{name} prerequisite binding changed")
         verify_repo_binding(prereqs[name], label=name, root=root)
 
     source = _require_map(prereg.get("audited_training_source"), "audited_training_source")
+    _require_exact_keys(source, EXPECTED_AUDITED_SOURCE_KEYS, "audited_training_source")
     if source.get("commit") != EXPECTED_TRAINING_COMMIT:
         raise ContractError("audited training commit changed")
     blobs = _require_map(source.get("git_blobs"), "audited_training_source.git_blobs")
@@ -251,7 +358,7 @@ def validate_sources(prereg: dict[str, Any], root: Path) -> None:
             "bytes": size,
             "sha256": digest,
         }
-        if blobs[name] != expected:
+        if not _strict_equal(blobs[name], expected):
             raise ContractError(f"training source binding changed for {name}")
         verify_git_binding(blobs[name], label=f"training {name}", root=root)
 
@@ -264,7 +371,7 @@ def validate_sources(prereg: dict[str, Any], root: Path) -> None:
         "worktree_was_read_only": True,
         "modified_by_this_work": False,
     }
-    if gate3 != expected_gate3:
+    if not _strict_equal(gate3, expected_gate3):
         raise ContractError("Gate3 read-only evidence binding changed")
     verify_git_binding(gate3, label="Gate3 pp_policy", root=root)
 
@@ -283,7 +390,7 @@ def validate_semantics(prereg: dict[str, Any]) -> None:
         "time_to_strike_latency": "not_delayed",
         "mixed_generation_tuple_seen_in_training": False,
     }
-    if observed != required:
+    if not _strict_equal(observed, required):
         raise ContractError("observed training tuple semantics changed")
 
     hybrid = _require_map(prereg.get("rejected_current_hybrid"), "rejected_current_hybrid")
@@ -298,24 +405,25 @@ def validate_semantics(prereg: dict[str, Any]) -> None:
         "parameter_tuning_can_make_formal": False,
         "separate_handoff_mismatch": "static_stand_handoff_zeroes_last_action_before_reengage",
     }
-    if hybrid != expected:
+    if not _strict_equal(hybrid, expected):
         raise ContractError("rejected hybrid finding changed")
 
 
 def validate_structural_axis(prereg: dict[str, Any]) -> None:
     axis = _require_map(prereg.get("structural_axis"), "structural_axis")
-    if axis.get("stage_order") != [
+    _require_exact_keys(axis, EXPECTED_STRUCTURAL_AXIS_KEYS, "structural_axis")
+    if not _strict_equal(axis.get("stage_order"), [
         "D0_current_checkpoint_A_vs_C_diagnostic_only",
         "S1_fresh_exact_A_B_C_paired_structure",
         "R2_conditional_reward_followup_only_after_structure",
-    ]:
+    ]):
         raise ContractError("structural stage order changed")
     arms = axis.get("arms")
     if not isinstance(arms, list) or tuple(arm.get("id") for arm in arms if isinstance(arm, dict)) != EXPECTED_ARMS:
         raise ContractError("ordered A/B/C arms changed")
 
     a, b, c = arms
-    if a != {
+    if not _strict_equal(a, {
         "id": "A_explicit_bridge",
         "controller": "content_bound_interruptible_safe_PD_or_trajectory_bridge",
         "recovery_target": "deterministic_projection_into_ready_set",
@@ -324,10 +432,49 @@ def validate_structural_axis(prereg: dict[str, Any]) -> None:
         "reveal_policy": "interrupt_or_replan_without_deadline_shift_else_count_infeasible",
         "physical_or_policy_state_reset": False,
         "last_action_or_history_zeroing_allowed": False,
+        "fresh_training_required_for_formal_comparison": True,
+        "policy_ownership": {
+            "required_tick_ledger": [
+                "actor_control_mask",
+                "executed_action",
+                "shadow_policy_action",
+                "last_action_observation",
+                "logprob_valid",
+                "policy_loss_mask",
+                "entropy_loss_mask",
+                "value_loss_mask",
+            ],
+            "actor_control_mask": "one_exactly_when_actor_sample_is_executed_else_zero",
+            "actor_owned_tick": "executed_action_equals_sampled_policy_action_and_logprob_matches_that_exact_action",
+            "bridge_owned_tick": "executed_action_is_bridge_output_shadow_action_is_diagnostic_only_and_has_no_logprob",
+            "last_action_observation": "exact_content_bound_executed_action_projection_never_shadow_zero_or_stale",
+            "executed_to_actor_action_projection_failure": "fail_closed",
+            "evaluation_ownership_matches_training": True,
+        },
+        "ppo_rollout": {
+            "actor_tick_loss_masks": {"policy": 1, "entropy": 1, "value": 1},
+            "bridge_tick_loss_masks": {"policy": 0, "entropy": 0, "value": 0},
+            "bridge_logprob": "absent_invalid_never_reconstructed_from_shadow_or_bridge_action",
+            "advantages_exist_on": "actor_controlled_ticks_only",
+            "bridge_rewards": "duration_correct_sum_gamma_pow_k_actual_rewards_into_preceding_actor_option_transition",
+            "ownership_boundary_bootstrap": "gamma_pow_duration_times_next_actor_state_value_if_not_true_terminal",
+            "true_termination_bootstrap": 0.0,
+            "deadline_miss_or_infeasible_is_bootstrap_terminal": False,
+            "bridge_without_preceding_actor": "metrics_only_until_first_actor_controlled_state",
+            "rollout_env_steps_per_update": "same_prebound_integer_all_arms",
+            "scheduled_opportunities_per_update": "same_materialized_rows_all_arms",
+            "optimizer_update_count": "same_all_arms",
+            "actor_controlled_samples_per_update": "same_prebound_integer_all_arms",
+            "minibatch_size_epochs": "same_all_arms",
+            "B_C_surplus_actor_samples": "deterministic_prebound_downsample_without_outcome_access",
+            "A_actor_sample_shortfall": "fail_entire_paired_update_no_padding_reuse_or_extra_env_steps",
+            "raw_exposure_reporting": "actor_ticks_bridge_ticks_env_steps_and_opportunities_per_arm",
+            "evaluation_denominator": "all_scheduled_opportunities_never_actor_or_loss_masked",
+        },
         "claim": "explicit_controller_baseline_not_learned_recovery",
-    }:
+    }):
         raise ContractError("A explicit bridge contract changed")
-    if b != {
+    if not _strict_equal(b, {
         "id": "B_canonical_tuple",
         "controller": "same_179_actor_through_recovery_and_next_swing",
         "recovery_tuple": [
@@ -341,9 +488,9 @@ def validate_structural_axis(prereg: dict[str, Any]) -> None:
         "ready_position_is_exact_frame0": False,
         "new_actor_observation_dimension_in_S1": False,
         "fresh_training_required": True,
-    }:
+    }):
         raise ContractError("B canonical tuple contract changed")
-    if c != {
+    if not _strict_equal(c, {
         "id": "C_previous_tuple",
         "controller": "same_179_actor_through_recovery_and_next_swing",
         "recovery_tuple": "complete_previous_pos_vel_normal_rho_side_tuple",
@@ -351,7 +498,7 @@ def validate_structural_axis(prereg: dict[str, Any]) -> None:
         "base_anchored_position_rewrite": False,
         "mixed_generation_fields": False,
         "fresh_training_required_for_learned_random_arrival_claim": True,
-    }:
+    }):
         raise ContractError("C previous tuple contract changed")
 
     compat = _require_map(axis.get("current_179_checkpoint_compatibility"), "current checkpoint compatibility")
@@ -375,12 +522,13 @@ def validate_structural_axis(prereg: dict[str, Any]) -> None:
         "current_checkpoint_may_be_relabeled_T1_trained": False,
         "unbound_checkpoint_path_or_SHA_may_run": False,
     }
-    if compat != expected_compat:
+    if not _strict_equal(compat, expected_compat):
         raise ContractError("current 179 checkpoint compatibility boundary changed")
 
 
 def validate_ready_set(prereg: dict[str, Any]) -> None:
     ready = _require_map(prereg.get("ready_set_contract"), "ready_set_contract")
+    _require_exact_keys(ready, EXPECTED_READY_KEYS, "ready_set_contract")
     if ready.get("ready_is_exact_motion_frame0") is not False:
         raise ContractError("ready must be a set, never exact frame 0")
     if ready.get("definition") != "conjunction_not_weighted_score":
@@ -425,7 +573,7 @@ def validate_ready_static_evidence(prereg: dict[str, Any], root: Path) -> None:
         "causal_status": "hypothesis_to_isolate_not_proven_root_cause",
         "complete_numeric_ready_base_racket_target_contract_bound": False,
     }
-    if evidence != expected:
+    if not _strict_equal(evidence, expected):
         raise ContractError("ready-state static evidence or causal boundary changed")
     verify_git_binding(evidence["isaac_robot_source"], label="Isaac ready source", root=root)
     verify_git_binding(evidence["vendor_stand_source"], label="vendor stand source", root=root)
@@ -445,19 +593,20 @@ def validate_frozen_and_reward(prereg: dict[str, Any]) -> None:
         "safety_is_noncompensable_gate": True,
         "all_scheduled_opportunities_denominator": True,
     }
-    if frozen != expected_frozen:
+    if not _strict_equal(frozen, expected_frozen):
         raise ContractError("non-treatment structural axes are not frozen")
 
     reward = _require_map(prereg.get("conditional_reward_followup"), "conditional_reward_followup")
+    _require_exact_keys(reward, EXPECTED_REWARD_KEYS, "conditional_reward_followup")
     if reward.get("status") != "not_authorized_until_structural_gate":
         raise ContractError("reward follow-up was prematurely authorized")
     if reward.get("trigger") != "B_or_C_fails_ready_set_acquisition_without_single_strike_regression":
         raise ContractError("reward follow-up trigger changed")
-    if reward.get("components") != [
+    if not _strict_equal(reward.get("components"), [
         "post_swing_balance_absorption_debt",
         "ready_set_potential_progress",
         "random_arrival_task_readiness",
-    ]:
+    ]):
         raise ContractError("recovery reward components changed")
     if reward.get("first_step") != "scale_normalize_each_component_on_frozen_rollouts":
         raise ContractError("reward scale normalization must precede ablation")
@@ -477,11 +626,19 @@ def validate_evaluation(prereg: dict[str, Any]) -> None:
     evaluation = _require_map(prereg.get("evaluation_contract"), "evaluation_contract")
     required = {
         "same_immutable_random_arrival_exam_for_all_arms": True,
-        "engines_in_order": ["Isaac", "Agibot_vendor_MuJoCo_Gate3"],
-        "vendor_gate3_is_final_arbiter": True,
+        "engines_in_order": [
+            "Isaac",
+            "Agibot_vendor_MuJoCo_Gate3_runtime_stability",
+            "Agibot_vendor_MuJoCo_Gate3B_behavior",
+        ],
+        "isaac_role": "development_and_cross_engine_precheck_not_final_behavior_arbiter",
+        "vendor_gate3_role": "hard_prerequisite_same_Cpp_MJCF_plant_model_first_tick_and_continuous_stability",
+        "vendor_gate3b_role": "final_behavior_arbiter_same_runtime_random_arrival_q50_first_strike_nonregression_and_return_quality",
+        "gate3b_may_run_without_gate3_pass": False,
+        "gate3_gate3b_same_runtime_contract_required": True,
         "mid_sequence_reset_or_teleport": False,
         "q10_role": "screen_only_directional_no_stop_no_promote_no_checkpoint_selection",
-        "q50_role": "decision_same_family_immutable",
+        "q50_role": "decision_same_family_immutable_consumed_by_gate3b_behavior",
         "opportunity_denominator": "all_scheduled_including_miss_infeasible_and_fall",
         "transition_cells": list(EXPECTED_TRANSITIONS),
         "report_peak_and_terminal_checkpoints": True,
@@ -490,7 +647,7 @@ def validate_evaluation(prereg: dict[str, Any]) -> None:
         "isaac_vendor_disagreement_policy": "block_and_root_cause_never_average",
         "real_robot_authorized": False,
     }
-    if evaluation != required:
+    if not _strict_equal(evaluation, required):
         raise ContractError("immutable no-reset evaluation contract changed")
 
 
@@ -501,14 +658,22 @@ def validate_prereg(path: Path, expected_sha256: str) -> dict[str, Any]:
     if actual != expected_sha256:
         raise ContractError(f"prereg SHA mismatch: {actual} != {expected_sha256}")
     prereg = read_json(path, "recovery tuple preregistration")
-    if prereg.get("schema_version") != 1:
+    _require_exact_keys(prereg, EXPECTED_TOP_KEYS, "preregistration top-level")
+    if type(prereg.get("schema_version")) is not int or prereg.get("schema_version") != 1:
         raise ContractError("recovery tuple prereg schema must remain 1")
+    if prereg.get("preregistration_id") != EXPECTED_PREREGISTRATION_ID:
+        raise ContractError("recovery tuple preregistration_id changed")
+    if prereg.get("created_utc") != EXPECTED_CREATED_UTC:
+        raise ContractError("recovery tuple created_utc changed")
     if prereg.get("status") != "preregistered_structure_only_launch_blocked":
         raise ContractError("recovery tuple prereg status changed")
+    if prereg.get("scope") != EXPECTED_SCOPE:
+        raise ContractError("recovery tuple scope changed")
     if prereg.get("launch_authorized") is not False or prereg.get("real_robot_authorized") is not False:
         raise ContractError("this design cannot authorize launch or real robot")
 
     validator = _require_map(prereg.get("validator"), "validator")
+    _require_exact_keys(validator, EXPECTED_VALIDATOR_KEYS, "validator")
     validator_path = verify_repo_binding(validator, label="validator", root=root)
     if validator_path != Path(__file__).resolve():
         raise ContractError("validator binding does not identify this script")
@@ -555,7 +720,8 @@ def main(argv: list[str] | None = None) -> int:
                 "formal_arms": list(EXPECTED_ARMS),
                 "current_hybrid_formal": False,
                 "current_179_B_usable": False,
-                "vendor_gate3_final": True,
+                "vendor_gate3_hard_prerequisite": True,
+                "vendor_gate3b_final_behavior": True,
             },
             sort_keys=True,
         )

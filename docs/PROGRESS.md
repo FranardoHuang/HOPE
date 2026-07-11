@@ -19,10 +19,19 @@ Use this file for short project-state updates that future humans and agents need
   now a launch blocker. The first paper freezes reward bytes/weights; only a
   structural failure may unlock normalized three-component `2^3` interactions
   and then a constant-total-budget mixture. Safety/self-hit is noncompensable.
-  The pure contract regression is `20 passed`; prereg SHA is
-  `39b97915...b71e1a`, and launch remains deliberately blocked on schedules,
-  bridge/handoff certificates, fresh checkpoints, calibrated plant and same-
-  paper Isaac/vendor Gate3 no-reset judges. See
+  A formal fresh PPO now has explicit ownership: only executed actor samples
+  have logprobs; bridge ticks mask policy/entropy/value loss, collapse actual
+  bridge rewards into option returns, and write exactly projected executed
+  actions—not shadow/zero/stale actions—to last-action history. A/B/C share
+  prebound env-step/opportunity/update/actor-sample/minibatch budgets; A
+  shortfall fails the pair and evaluation never shrinks its denominator.
+  Gate3 is the same-C++/MJCF/plant/model first-tick and continuous-stability hard
+  prerequisite; Gate3B reuses that runtime and is the random-arrival q50 final
+  behavior arbiter. Strict JSON parsing now rejects duplicate/non-finite values
+  at every depth plus unknown critical fields. The pure contract regression is
+  `50 passed`; prereg SHA is `ca7806df...d810616`, and launch remains blocked on
+  schedules, A bridge/handoff/ownership/PPO certificates and fresh checkpoint,
+  calibrated plant, separate Gate3/Gate3B judges and shared runtime. See
   `docs/operations/run_phase1_recovery_tuple_prereg.md`.
 - Preregistered the post-v5 spatial-retarget proposal screen without using a
   Pod/GPU or touching hardware. The contract screens all ten Franco/v6/v7
@@ -84,7 +93,8 @@ Use this file for short project-state updates that future humans and agents need
   backhand-loop B (`32/32`, phase .5444) and C (`27/32`, .5155) for explicit
   spatial retarget; none is TOPP-eligible.  TOPP is paused through
   spatial-retarget/schema-2/L0/L1/table-net/dynamics, and vendor MuJoCo
-  Gate3/Gate3B without reset remains the primary final motion/library gate.
+  Gate3 runtime/stability followed by Gate3B no-reset behavior scoring remains
+  the primary final motion/library gate.
   No RL, GPU, frozen training checkout or real robot was touched.
 - Completed canonical-GMR discrete grounding and the next CPU-only dense safety
   screen for all ten Franco/v6/v7 air swings. Across 654 source frames and

@@ -8,8 +8,8 @@
   "real_robot_authorized": false,
   "validator": {
     "repo_path": "scripts/validate_phase1_recovery_tuple_prereg.py",
-    "bytes": 26034,
-    "sha256": "3de8bf3039ba603d7171fb5956d824f7ba1a24f773bbae648604fdf19f9682d0"
+    "bytes": 33854,
+    "sha256": "c6d0e615dd1f356c28da701c8b13c937faa13f70f429c2550e26cb339e2e6991"
   },
   "prerequisites": {
     "event_timing_prereg": {
@@ -112,6 +112,53 @@
         "reveal_policy": "interrupt_or_replan_without_deadline_shift_else_count_infeasible",
         "physical_or_policy_state_reset": false,
         "last_action_or_history_zeroing_allowed": false,
+        "fresh_training_required_for_formal_comparison": true,
+        "policy_ownership": {
+          "required_tick_ledger": [
+            "actor_control_mask",
+            "executed_action",
+            "shadow_policy_action",
+            "last_action_observation",
+            "logprob_valid",
+            "policy_loss_mask",
+            "entropy_loss_mask",
+            "value_loss_mask"
+          ],
+          "actor_control_mask": "one_exactly_when_actor_sample_is_executed_else_zero",
+          "actor_owned_tick": "executed_action_equals_sampled_policy_action_and_logprob_matches_that_exact_action",
+          "bridge_owned_tick": "executed_action_is_bridge_output_shadow_action_is_diagnostic_only_and_has_no_logprob",
+          "last_action_observation": "exact_content_bound_executed_action_projection_never_shadow_zero_or_stale",
+          "executed_to_actor_action_projection_failure": "fail_closed",
+          "evaluation_ownership_matches_training": true
+        },
+        "ppo_rollout": {
+          "actor_tick_loss_masks": {
+            "policy": 1,
+            "entropy": 1,
+            "value": 1
+          },
+          "bridge_tick_loss_masks": {
+            "policy": 0,
+            "entropy": 0,
+            "value": 0
+          },
+          "bridge_logprob": "absent_invalid_never_reconstructed_from_shadow_or_bridge_action",
+          "advantages_exist_on": "actor_controlled_ticks_only",
+          "bridge_rewards": "duration_correct_sum_gamma_pow_k_actual_rewards_into_preceding_actor_option_transition",
+          "ownership_boundary_bootstrap": "gamma_pow_duration_times_next_actor_state_value_if_not_true_terminal",
+          "true_termination_bootstrap": 0.0,
+          "deadline_miss_or_infeasible_is_bootstrap_terminal": false,
+          "bridge_without_preceding_actor": "metrics_only_until_first_actor_controlled_state",
+          "rollout_env_steps_per_update": "same_prebound_integer_all_arms",
+          "scheduled_opportunities_per_update": "same_materialized_rows_all_arms",
+          "optimizer_update_count": "same_all_arms",
+          "actor_controlled_samples_per_update": "same_prebound_integer_all_arms",
+          "minibatch_size_epochs": "same_all_arms",
+          "B_C_surplus_actor_samples": "deterministic_prebound_downsample_without_outcome_access",
+          "A_actor_sample_shortfall": "fail_entire_paired_update_no_padding_reuse_or_extra_env_steps",
+          "raw_exposure_reporting": "actor_ticks_bridge_ticks_env_steps_and_opportunities_per_arm",
+          "evaluation_denominator": "all_scheduled_opportunities_never_actor_or_loss_masked"
+        },
         "claim": "explicit_controller_baseline_not_learned_recovery"
       },
       {
@@ -251,12 +298,17 @@
     "same_immutable_random_arrival_exam_for_all_arms": true,
     "engines_in_order": [
       "Isaac",
-      "Agibot_vendor_MuJoCo_Gate3"
+      "Agibot_vendor_MuJoCo_Gate3_runtime_stability",
+      "Agibot_vendor_MuJoCo_Gate3B_behavior"
     ],
-    "vendor_gate3_is_final_arbiter": true,
+    "isaac_role": "development_and_cross_engine_precheck_not_final_behavior_arbiter",
+    "vendor_gate3_role": "hard_prerequisite_same_Cpp_MJCF_plant_model_first_tick_and_continuous_stability",
+    "vendor_gate3b_role": "final_behavior_arbiter_same_runtime_random_arrival_q50_first_strike_nonregression_and_return_quality",
+    "gate3b_may_run_without_gate3_pass": false,
+    "gate3_gate3b_same_runtime_contract_required": true,
     "mid_sequence_reset_or_teleport": false,
     "q10_role": "screen_only_directional_no_stop_no_promote_no_checkpoint_selection",
-    "q50_role": "decision_same_family_immutable",
+    "q50_role": "decision_same_family_immutable_consumed_by_gate3b_behavior",
     "opportunity_denominator": "all_scheduled_including_miss_infeasible_and_fall",
     "transition_cells": [
       "forehand_to_forehand",
@@ -278,6 +330,9 @@
     "A_bridge_source": null,
     "A_bridge_trajectory_certificate": null,
     "A_actor_handoff_contract": null,
+    "A_bridge_policy_ownership_contract": null,
+    "A_bridge_ppo_rollout_contract": null,
+    "A_fresh_checkpoint_set": null,
     "B_canonical_tuple_source": null,
     "B_ready_set_selector": null,
     "B_fresh_checkpoint_set": null,
@@ -285,7 +340,9 @@
     "C_fresh_checkpoint_set": null,
     "shared_training_hard_contract": null,
     "isaac_continuous_no_reset_judge": null,
-    "vendor_gate3_continuous_no_reset_judge": null,
+    "vendor_gate3_runtime_preflight_and_stability_judge": null,
+    "vendor_gate3b_continuous_no_reset_scoring_judge": null,
+    "gate3_gate3b_shared_runtime_contract": null,
     "canonical_ready_base_racket_target_numeric_contract": null,
     "ready_set_measurement": null,
     "racket_handle_self_hit_instrumentation": null,

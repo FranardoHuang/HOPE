@@ -542,8 +542,17 @@ target position/velocity/normal/rho and observation result in both engines.
 
 All arms must consume the same immutable random-arrival rows, question order and deadlines, with no
 physical reset, teleport, last-action/history/noise reset, or replacement of infeasible rows. q10
-remains directional only; q50 is the decision paper. Isaac runs first, but the Agibot-provided
-vendor MuJoCo Gate3 implementation is the final arbiter. A discrepancy is blocked and root-caused,
-never averaged. The design-only validator is green (`20 passed`, prereg SHA
-`39b97915...b71e1a`), while launch remains intentionally blocked on exact runtime/judge/plant and
-safety bindings. See `docs/operations/run_phase1_recovery_tuple_prereg.md`; G06 remains `Partial`.
+remains directional only; q50 is the decision paper. The final MuJoCo path has two distinct gates:
+
+1. Gate3 is a hard runtime prerequisite. It binds the exact C++ runner, vendor MJCF, calibrated
+   plant and model, and must pass first-tick parity plus continuous stability.
+2. Gate3B may run only after Gate3 and must reuse the same runtime contract. It consumes the
+   immutable random-arrival q50 schedule and is the final behavior arbiter for first-strike
+   non-regression and return quality.
+
+Isaac remains the development/cross-engine precheck, not the final behavior vote. A discrepancy is
+blocked and root-caused, never averaged. The design-only validator is green (`50 passed`, prereg SHA
+`ca7806df...d810616`), while launch remains intentionally blocked on separate Gate3 runtime/
+stability and Gate3B scoring judges, their shared runtime contract, exact A policy-ownership/PPO
+accounting, calibrated plant and safety bindings. See
+`docs/operations/run_phase1_recovery_tuple_prereg.md`; G06 remains `Partial`.

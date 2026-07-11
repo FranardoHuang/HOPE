@@ -134,7 +134,8 @@ v5 随后实际消费同一张 64 题纸（full result SHA `c299b7a0...`），�
 `27/32 @ 0.5155`，A 仅 `1/32`；但 B/C 峰距最近 immutable question position 仍约
 `0.165/0.237m`。因此只保留 B/C 为显式 spatial-retarget 候选，不把 intrinsic 当命中率，
 也不从结果反调 frame。`TOPP=paused_until_spatial_retarget`；之后还要 schema-2/L0/L1、桌网、
-动力学与 TOPP 后复审，最终动作与 2-vs-4 由智元 vendor MuJoCo Gate3/Gate3B 主判且不允许 reset。
+动力学与 TOPP 后复审，最终动作与 2-vs-4 先过智元 vendor MuJoCo Gate3 runtime/stability，
+再由共用 runtime 的 Gate3B no-reset behavior 卷主判。
 小账本为 `configs/motion_video_gmr_phase_counterfactual_results_20260711.json`，完整坐标合同见
 `docs/interfaces/motion_gmr_hope_frame_contract.md`。
 
@@ -434,8 +435,13 @@ normal/rho = previous strike face tuple
 
 现有 179 checkpoint 可以给 A 做冻结 swing diagnostic，可以给 C 做 zero-shot 同代 tuple diagnostic，但两者
 都不能改名为“已学会随机来球恢复”。B 必须 fresh；A/B/C 的因果比较也必须 fresh exact paired。
-A 还有一个特别的交接问题：bridge 执行时 actor 不控制，但 actor history 下一刻需要什么 action。必须把
-实际 bridge action 和 shadow-policy action 的选择/映射内容绑定；直接清零 last action 不属于 no-reset 正式卷。
+A 还有一个特别的交接问题：bridge 执行时 actor 不控制，但 actor history 下一刻仍需要 action。合同现在
+固定为“实际 executed bridge action 到 actor-action 坐标的精确内容绑定投影”；shadow-policy action 只诊断，
+直接清零/保留 stale action 都不属于 no-reset 正式卷。逐 tick `actor_control_mask=1` 仅当 actor sample 真正
+执行，其 logprob 必须对应该执行 action；bridge tick 不伪造 logprob，policy/entropy/value loss mask 均为 0。
+真实 bridge reward 作为 option return 折叠到前一 actor transition，非真终止在下一 actor state bootstrap。三臂共用
+预绑定 env-step/机会/update/actor-sample/minibatch/epoch；B/C 多余样本按不读取结果的固定索引下采样，
+A 不足则整对 update fail，不补样或多跑；评测机会分母不缩。
 
 ready 也不能用一个名字代替数值。静态审计已发现 Isaac reset pelvis 为 `(0,0,1.0684)`，vendor
 MJCF `stand` 为 `(-0.0416378,0.000359049,1.06839)`；31 关节 L2 差 `0.171845 rad`，去掉头仍
@@ -445,7 +451,8 @@ MJCF `stand` 为 `(-0.0416378,0.000359049,1.06839)`；31 关节 L2 差 `0.171845
 
 与此相对，恢复 reward 仍留在结构证据之后。如果需要，平衡债、ready-set potential 和 random-arrival
 readiness 先归一化，再做配对 `2^3` 交互，最后才在固定总预算上混合。自碰/跌倒/桌网/执行器安全
-始终是不可补偿硬门。
+始终是不可补偿硬门。最终 MuJoCo 又分两层：Gate3 先硬验同 C++/MJCF/plant/model 的 first-tick 和连续稳定；
+Gate3B 才在共用 runtime 上消费 random-arrival q50，主判 first-strike non-regression 和 return quality。
 
 ### 任意时序测试
 
