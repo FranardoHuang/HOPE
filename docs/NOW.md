@@ -25,20 +25,21 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 2026-07-12 现场状态(01:06 CST 更新)
+## 2026-07-12 现场状态(02:03 CST 更新)
 
 - **Phase-1 仍是真满池**:四条原始续训自然终档后，四条独立预注册的因果缺边补进空槽；
   现在两 Pod 各 12 条 live trainer、每 GPU 恰好 4 条，加上 4 条 clean terminal，共 28 条
-  接受臂。GPU 约 `22.9–23.2/32.6 GiB`、util `89–97%`，host available RAM 约 `858/900 GiB`。
+  接受臂。GPU 约 `23/32.6 GiB`、util `77–97%`，两机 host available RAM 约 `963 GiB`、无 swap。
   LZ-seed3 首次 `malloc` 失败已保留，同配方 retry PGID `1354525` 是唯一接受臂。
 - 两 Pod 训练/eval checkout 均 clean 固定在 `6d93bcb` / `46a0ce2`；有训练存活就不对训练树
   pull/切换/修改。六个 global 里程碑 worker 已换成 hardened 版：Pod1
   `1432280/1432292/1432304`，Pod2 `200706/200718/200730`；四个因果补边 worker 为
   Pod1 `1416771/1416784`、Pod2 `198759/198771`。旧结果不洗账，五份已到存档重判
   rc0 并绑 manifest/job/job-contract SHA。禁止 broad kill，只管理记录的本臂/本 worker PGID。
-- 22:20 CST 再逐一读取 28 条接受臂的最新 checkpoint：文件名 iteration 与内嵌 iteration
-  全部一致，相邻 hard-contract SHA 全部匹配，fresh/causal lineage 分别全为 `1/0`，模型、
-  优化器与归一化 tensor 均 finite；无 child judge 在跑，worker 正等待下一批冻结里程碑。
+- 01:44–01:52 CST 再逐一读取 28 条接受臂的最新 checkpoint：每个 1,762,715 个浮点元素全
+  finite，文件名/内嵌 iteration、相邻 hard-contract SHA、fresh/causal lineage 全匹配；accepted
+  日志 NaN/Inf/Traceback/OOM/malloc/Killed 为0。每 Pod 5个 hardened worker 全活、无 child judge、
+  Kit lock 空闲；Pod1/2 当前 hardened 结果分别 16/16、15/15 保持正确 exactness 标签。
 - Pod1 的 SSH 映射约一小时 connect timeout；RunPod 控制台也未登录/无法只读确认，因此没有
   重启或重复发任务。23:45 CST SSH 恢复后的全审计显示训练未中断：仍为 12 live+2 terminal、
   4/4/4，所有 iteration 连续前进，错误 0，训练树 clean，五个 worker 全活。
@@ -66,8 +67,10 @@ Rules:
   猜测已撤销。共用体型版本的 CPU-only grounding 也已 10/10：只把固定 root-z 上移
   `6.73–9.74 cm`，其余 payload 逐 pickle bit-exact，最低点约留 `10 µm`。后续 654 源帧/
   5,162 个 240Hz 样本的地面危险、自碰、拍/柄距身体 `<5 mm` 危险和 `<20 mm` warning 都为0，
-  最薄余隙 `40.25 mm`。但 GMR→HOPE 桌位/mirror 未绑定，所以64题回球/phase/2-vs-4仍是
-  null；现在只解一个固定 HOPE 虚拟桌的 counterfactual frame，不冒充录制现场外参。
+  最薄余隙 `40.25 mm`。现在 canonical HOPE +X counterfactual frame/mirror 合同已冻结并真消费
+  原64题；所有 motion/library exact 都是 `0/64`、common support=0，所以 2-vs-4 仍无结论，
+  也不等于动作无效。反手拉 B/C intrinsic 为 `32/32@.5444`、`27/32@.5155`，保留给 spatial
+  retarget；当前瓶颈是击球点空间适配，不是 clip 长度，TOPP 暂停到 schema2/L0/L1/桌网/动力学门。
 - 连续时序缺口仍在：完整 clip-wrap+hold 同侧理论中位约 `3.75 s`；场馆 `1.903 s` 来自
   重叠 n=21、16/21 高球、2.5s 截尾，只证伪现役节奏，不作目标。T1 训练端核心已在
   `be5d7cf` 实现：仅 exact strike 后原子揭题、固定 deadline、miss 也消耗、全 carry-state。
@@ -88,12 +91,17 @@ Rules:
   源码门（attempt token、真实 served/contact/landing、完整 provenance，focused `63 pass/1 artifact skip`），
   但 clean-detached 100 题 runtime 和高速拍面 substep 几何尚未验证，所以不能拿当前 Isaac `.99`
   给 MuJoCo 塌陷洗白。
+- 179-D 到 Gate3 的 fail-closed 源码链已进 main：schema2 原子携带拍位/拍速/正X unit normal/
+  zero-rho，严格绑定 face/bank/SHA metadata，坏包/无解显式 `valid=0` revoke，正式 flat 先于可选
+  mirror 发布。Pod1 隔离 Release 已链接真实 ping-pong executable，focused 10/10、native
+  195 pass/4 optional skip、无 fast-math；这只关闭 offline vendor-source 门。ROS/AimRT full build、
+  formal 179 ONNX first tick、per-clip normal envelope、canonical recovery 和 vendor MuJoCo 行为卷仍 open。
 - **连续等待按一个耦合 phase 设计，不把三项单独过关相加**：上一拍卸载/恢复平衡、回到通用 ready、
   随机时刻接下一题会共享同一段状态与动作，因此先做机制/梯度冲突推理，再做有交互项的混合比例消融；
   单 reward 胜者只能筛项，不能宣称组合最优。终判仍用无 reset 的 Gate 3 连续卷。
-- 第一批已验证 Phase-1 基础设施已在 `main@83d7d56`；第二批正合并四-seed q50 冻结 runner 与
-  semantics-correct plant v1。运行中的 q50、动作 v5 64题、plant 标定和连续 rollout 不写成成功；
-  NOW 只保留 main 活板版本，feature 分支的旧 NOW 不回灌。
+- 已验证基础设施、plant/q50 证据、动作 frame/counterfactual screen 和 179 Gate3 source gate 已
+  收口到 `main@9d70763`；动作 2-vs-4、TOPP、plant 标定、formal first tick 与连续 Gate3 rollout
+  仍按 open gate 记账。NOW 只保留 main 活板版本，feature 分支的旧 NOW 不回灌。
 
 ### 14:00 CST 早期快照(仅历史，不用于进程管理)
 
