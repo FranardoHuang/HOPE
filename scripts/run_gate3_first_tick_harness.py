@@ -452,45 +452,59 @@ def _git(repo: Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
-def current_source_commit() -> str:
-    root = canonical_existing_path(
-        str(Path(__file__).resolve().parents[1]), "source_checkout", kind="directory"
-    )
+def inspect_clean_git_checkout(
+    name: str, raw_path: Any, expected_commit: str | None = None
+) -> dict[str, Any]:
+    root = canonical_existing_path(raw_path, f"{name}.path", kind="directory")
     top = canonical_existing_path(
         _git(root, "rev-parse", "--show-toplevel"),
-        "source_checkout.git_toplevel",
+        f"{name}.git_toplevel",
         kind="directory",
     )
     if top != root:
-        raise HarnessError(f"source checkout path is not its Git top-level: {root} != {top}")
-    return _git(root, "rev-parse", "HEAD")
+        raise HarnessError(f"{name}.path must equal git rev-parse --show-toplevel")
+    git_dir = canonical_existing_path(
+        _git(root, "rev-parse", "--absolute-git-dir"),
+        f"{name}.git_dir",
+        kind="directory",
+    )
+    git_common_dir = canonical_existing_path(
+        _git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"),
+        f"{name}.git_common_dir",
+        kind="directory",
+    )
+    head = _git(root, "rev-parse", "HEAD")
+    if not HEX40.fullmatch(head):
+        raise HarnessError(f"{name} HEAD is not a lowercase SHA-1: {head!r}")
+    status_text = _git(root, "status", "--porcelain=v1", "--untracked-files=all")
+    if (expected_commit is not None and head != expected_commit) or status_text:
+        raise HarnessError(
+            f"read-only {name} checkout changed: head={head} expected={expected_commit or head} "
+            f"dirty={bool(status_text)}"
+        )
+    return {
+        "path": str(root),
+        "commit": head,
+        "clean": True,
+        "git_toplevel": str(top),
+        "git_dir": str(git_dir),
+        "git_common_dir": str(git_common_dir),
+    }
+
+
+def validate_source_checkout() -> dict[str, Any]:
+    root = str(Path(__file__).resolve().parents[1])
+    return inspect_clean_git_checkout("source_checkout", root)
 
 
 def validate_read_only_checkout(name: str, spec: Mapping[str, Any]) -> dict[str, Any]:
     exact_keys(spec, {"path", "commit"}, f"read_only_checkouts.{name}")
-    path = canonical_existing_path(
-        spec["path"], f"read_only_checkouts.{name}.path", kind="directory"
-    )
     commit = spec["commit"]
     if not isinstance(commit, str) or not HEX40.fullmatch(commit):
         raise HarnessError(f"read_only_checkouts.{name}.commit must be lowercase SHA-1")
-    top = canonical_existing_path(
-        _git(path, "rev-parse", "--show-toplevel"),
-        f"read_only_checkouts.{name}.git_toplevel",
-        kind="directory",
+    return inspect_clean_git_checkout(
+        f"read_only_checkouts.{name}", spec["path"], expected_commit=commit
     )
-    if path != top:
-        raise HarnessError(
-            f"read_only_checkouts.{name}.path must equal git rev-parse --show-toplevel"
-        )
-    head = _git(path, "rev-parse", "HEAD")
-    status_text = _git(path, "status", "--porcelain=v1", "--untracked-files=all")
-    if head != commit or status_text:
-        raise HarnessError(
-            f"read-only {name} checkout changed: head={head} expected={commit} "
-            f"dirty={bool(status_text)}"
-        )
-    return {"path": str(path), "commit": head, "clean": True, "git_toplevel": str(top)}
 
 
 def _artifact_stat(path: Path) -> dict[str, Any]:
@@ -723,11 +737,11 @@ def validate_contract(data: dict[str, Any]) -> dict[str, Any]:
         raise HarnessError("created_utc must be an explicit UTC string")
     if not isinstance(data["source_commit"], str) or not HEX40.fullmatch(data["source_commit"]):
         raise HarnessError("source_commit must be lowercase SHA-1")
-    observed_source_commit = current_source_commit()
-    if data["source_commit"] != observed_source_commit:
+    source_checkout = validate_source_checkout()
+    if data["source_commit"] != source_checkout["commit"]:
         raise HarnessError(
             "source_commit changed: "
-            f"contract={data['source_commit']} checkout={observed_source_commit}"
+            f"contract={data['source_commit']} checkout={source_checkout['commit']}"
         )
     if not isinstance(data["harness_sha256"], str) or not HEX64.fullmatch(data["harness_sha256"]):
         raise HarnessError("harness_sha256 must be lowercase SHA-256")
@@ -800,6 +814,7 @@ def validate_contract(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "contract_id": data["contract_id"],
         "source_commit": data["source_commit"],
+        "source_checkout": source_checkout,
         "harness_sha256": data["harness_sha256"],
         "artifacts": artifacts,
         "read_only_checkouts": checkouts,
@@ -831,6 +846,7 @@ def build_plan(
         "status": "validated_static_plan_runtime_not_run",
         "contract": {"path": str(contract_path), "sha256": contract_sha},
         "source_commit": accepted["source_commit"],
+        "source_checkout": accepted["source_checkout"],
         "harness_sha256": accepted["harness_sha256"],
         "artifacts": accepted["artifacts"],
         "read_only_checkouts": accepted["read_only_checkouts"],
@@ -869,6 +885,46 @@ def build_plan(
     }
 
 
+def _declared_checkout_identities(plan: Mapping[str, Any]) -> list[tuple[str, Mapping[str, Any]]]:
+    content = plan["content"]
+    return [
+        ("source_checkout", content["source_checkout"]),
+        ("read_only_checkouts.training", content["read_only_checkouts"]["training"]),
+        ("read_only_checkouts.evaluation", content["read_only_checkouts"]["evaluation"]),
+    ]
+
+
+def reject_plan_output_inside_declared_checkouts(
+    output: Path, plan: Mapping[str, Any]
+) -> None:
+    protected: list[tuple[str, Path]] = []
+    for name, identity in _declared_checkout_identities(plan):
+        for field in ("path", "git_dir", "git_common_dir"):
+            protected.append((f"{name}.{field}", Path(identity[field])))
+    for owner, root in protected:
+        if is_under(output, root):
+            raise HarnessError(
+                "plan_output must be outside every declared Git root; "
+                f"{output} is under {owner}={root}"
+            )
+
+
+def revalidate_declared_checkouts(plan: Mapping[str, Any]) -> None:
+    for name, expected in _declared_checkout_identities(plan):
+        observed = inspect_clean_git_checkout(
+            name, expected["path"], expected_commit=expected["commit"]
+        )
+        if observed != expected:
+            raise HarnessError(f"{name} identity changed before plan-output write")
+
+
+def write_static_plan_no_clobber(output: Path, plan: Mapping[str, Any]) -> None:
+    target = canonical_output_path(str(output), "plan_output")
+    reject_plan_output_inside_declared_checkouts(target, plan)
+    revalidate_declared_checkouts(plan)
+    atomic_json_no_clobber(target, plan)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--contract", required=True, type=Path)
@@ -883,7 +939,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     plan = build_plan(contract_path, args.expected_contract_sha256, contract)
     if args.plan_output is not None:
         output = canonical_output_path(str(args.plan_output), "plan_output")
-        atomic_json_no_clobber(output, plan)
+        write_static_plan_no_clobber(output, plan)
         print(f"[gate3-first-tick] static plan written no-clobber: {output}")
     else:
         print(json.dumps(plan, indent=2, sort_keys=True, ensure_ascii=False))

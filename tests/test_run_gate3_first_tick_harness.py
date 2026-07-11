@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 import sys
 
@@ -39,6 +40,44 @@ def _write(path: Path, data: bytes, *, executable: bool = False) -> None:
 
 def _artifact(path: Path, *, executable: bool) -> dict:
     return {"path": str(path), "sha256": H.sha256_file(path), "executable": executable}
+
+
+def _git_write(repo: Path, *args: str) -> str:
+    env = {
+        "PATH": os.defpath,
+        "HOME": str(repo),
+        "LANG": "C",
+        "LC_ALL": "C",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+    }
+    completed = subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Gate3 Test",
+            "-c",
+            "user.email=gate3-test@example.invalid",
+            "-C",
+            str(repo),
+            *args,
+        ],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=env,
+    )
+    return completed.stdout.strip()
+
+
+def _init_real_git_repo(path: Path) -> str:
+    path.mkdir()
+    _git_write(path, "init", "--quiet")
+    (path / "tracked.txt").write_text("clean\n", encoding="utf-8")
+    _git_write(path, "add", "tracked.txt")
+    _git_write(path, "commit", "--quiet", "-m", "initial")
+    return _git_write(path, "rev-parse", "HEAD")
 
 
 def _contract(tmp_path: Path) -> dict:
@@ -159,7 +198,19 @@ def _contract(tmp_path: Path) -> dict:
 @pytest.fixture
 def contract_env(tmp_path: Path, monkeypatch):
     contract = _contract(tmp_path)
-    monkeypatch.setattr(H, "current_source_commit", lambda: "a" * 40)
+    source_path = str(ROOT)
+    monkeypatch.setattr(
+        H,
+        "validate_source_checkout",
+        lambda: {
+            "path": source_path,
+            "commit": "a" * 40,
+            "clean": True,
+            "git_toplevel": source_path,
+            "git_dir": source_path,
+            "git_common_dir": source_path,
+        },
+    )
     monkeypatch.setattr(
         H,
         "validate_read_only_checkout",
@@ -168,6 +219,8 @@ def contract_env(tmp_path: Path, monkeypatch):
             "commit": spec["commit"],
             "clean": True,
             "git_toplevel": spec["path"],
+            "git_dir": spec["path"],
+            "git_common_dir": spec["path"],
         },
     )
     return contract
@@ -185,6 +238,7 @@ def test_valid_contract_builds_plan_only_ledger(tmp_path: Path, contract_env: di
     assert content["runtime"]["execution_authorized"] is False
     assert content["runtime"]["components_started"] == []
     assert content["runtime"]["signals_sent"] == []
+    assert content["source_checkout"]["path"] == str(ROOT)
     assert content["actions"]["read_only_git_helpers_started"] is True
     assert content["actions"]["git_optional_locks"] is False
     assert content["actions"]["runner_started"] is False
@@ -350,11 +404,17 @@ def test_checkout_path_must_equal_git_toplevel(tmp_path: Path, monkeypatch):
     repo = tmp_path / "repo"
     nested = repo / "nested"
     nested.mkdir(parents=True)
+    git_dir = repo / ".git"
+    git_dir.mkdir()
     commit = "1" * 40
 
     def fake_git(_repo: Path, *args: str) -> str:
         if args == ("rev-parse", "--show-toplevel"):
             return str(repo)
+        if args == ("rev-parse", "--absolute-git-dir"):
+            return str(git_dir)
+        if args == ("rev-parse", "--path-format=absolute", "--git-common-dir"):
+            return str(git_dir)
         if args == ("rev-parse", "HEAD"):
             return commit
         if args == ("status", "--porcelain=v1", "--untracked-files=all"):
@@ -368,15 +428,22 @@ def test_checkout_path_must_equal_git_toplevel(tmp_path: Path, monkeypatch):
         "training", {"path": str(repo), "commit": commit}
     )
     assert accepted["path"] == accepted["git_toplevel"] == str(repo)
+    assert accepted["git_dir"] == accepted["git_common_dir"] == str(git_dir)
 
 
 def test_checkout_dirty_or_wrong_head_fails(tmp_path: Path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
+    git_dir = repo / ".git"
+    git_dir.mkdir()
 
     def fake_git(_repo: Path, *args: str) -> str:
         if args == ("rev-parse", "--show-toplevel"):
             return str(repo)
+        if args == ("rev-parse", "--absolute-git-dir"):
+            return str(git_dir)
+        if args == ("rev-parse", "--path-format=absolute", "--git-common-dir"):
+            return str(git_dir)
         if args == ("rev-parse", "HEAD"):
             return "2" * 40
         return " M changed"
@@ -420,6 +487,78 @@ def test_plan_output_rejects_symlink_parent(tmp_path: Path):
     linked.symlink_to(real)
     with pytest.raises(H.HarnessError, match="symlink component"):
         H.atomic_json_no_clobber(linked / "plan.json", {"plan": True})
+
+
+def _real_checkout_plan(tmp_path: Path) -> tuple[dict, dict[str, Path]]:
+    roots = {
+        "source": tmp_path / "source",
+        "training": tmp_path / "training",
+        "evaluation": tmp_path / "evaluation",
+    }
+    commits = {name: _init_real_git_repo(path) for name, path in roots.items()}
+    source = H.inspect_clean_git_checkout(
+        "source_checkout", str(roots["source"]), expected_commit=commits["source"]
+    )
+    training = H.validate_read_only_checkout(
+        "training", {"path": str(roots["training"]), "commit": commits["training"]}
+    )
+    evaluation = H.validate_read_only_checkout(
+        "evaluation", {"path": str(roots["evaluation"]), "commit": commits["evaluation"]}
+    )
+    return {
+        "schema_version": 2,
+        "content": {
+            "source_checkout": source,
+            "read_only_checkouts": {
+                "training": training,
+                "evaluation": evaluation,
+            },
+        },
+    }, roots
+
+
+def test_plan_output_rejects_real_source_train_eval_and_git_roots_without_dirtying(
+    tmp_path: Path,
+):
+    plan, roots = _real_checkout_plan(tmp_path)
+    identities = [
+        plan["content"]["source_checkout"],
+        plan["content"]["read_only_checkouts"]["training"],
+        plan["content"]["read_only_checkouts"]["evaluation"],
+    ]
+    forbidden = {
+        roots["source"] / "plan.json",
+        roots["training"] / "plan.json",
+        roots["evaluation"] / "plan.json",
+    }
+    for identity in identities:
+        forbidden.add(Path(identity["git_dir"]) / "plan.json")
+        forbidden.add(Path(identity["git_common_dir"]) / "plan.json")
+    for output in forbidden:
+        with pytest.raises(H.HarnessError, match="outside every declared Git root"):
+            H.write_static_plan_no_clobber(output, plan)
+        assert not output.exists()
+        for root in roots.values():
+            assert H._git(root, "status", "--porcelain=v1", "--untracked-files=all") == ""
+
+    external = tmp_path / "external"
+    external.mkdir()
+    allowed = external / "plan.json"
+    H.write_static_plan_no_clobber(allowed, plan)
+    assert json.loads(allowed.read_text(encoding="utf-8"))["schema_version"] == 2
+    for root in roots.values():
+        assert H._git(root, "status", "--porcelain=v1", "--untracked-files=all") == ""
+
+
+def test_external_plan_write_revalidates_checkout_cleanliness(tmp_path: Path):
+    plan, roots = _real_checkout_plan(tmp_path)
+    external = tmp_path / "external"
+    external.mkdir()
+    output = external / "plan.json"
+    (roots["training"] / "late-untracked.txt").write_text("race\n", encoding="utf-8")
+    with pytest.raises(H.HarnessError, match="checkout changed"):
+        H.write_static_plan_no_clobber(output, plan)
+    assert not output.exists()
 
 
 def test_contract_parser_uses_the_same_sha_bound_bytes(tmp_path: Path):
@@ -526,6 +665,10 @@ def test_legacy_audit_still_binds_fourteen_concrete_risks():
     assert "required_replacement_properties" not in audit
     assert any(
         "read-only Git helpers" in row for row in audit["plan_only_source_gate_properties"]
+    )
+    assert any(
+        "outside source/training/evaluation" in row
+        for row in audit["plan_only_source_gate_properties"]
     )
     assert any(
         "pidfd" in row for row in audit["unclosed_future_runtime_requirements"]

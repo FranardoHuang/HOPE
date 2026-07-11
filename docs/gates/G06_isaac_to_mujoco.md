@@ -661,9 +661,11 @@ closure. Every path must equal its resolved spelling and every component is chec
 so symlink ancestors fail. Training/eval paths must be clean exact-commit Git top-levels. Proposed
 argv arrays are fixed and passive/no-publish; `--flag=/abs`, unbound absolute paths, relative
 payloads and extra flags fail. The optional plan output uses fsynced temporary bytes plus atomic
-hard-link create and directory fsync; it never uses overwrite-capable `os.replace`. The ledger's
-runtime block is permanently `not_run`, with no components, signals, lock, behavior result or
-ownership token. Source tests pass `30` cases; no runtime was launched.
+hard-link create and directory fsync; it never uses overwrite-capable `os.replace`. It is rejected
+under the recorded source/train/eval worktrees or any Git dir/common dir, then all three clean Git
+identities are revalidated before an external write. The ledger's runtime block is permanently
+`not_run`, with no components, signals, lock, behavior result or ownership token. Source tests pass
+`32` cases; no runtime was launched.
 
 The plan explicitly keeps five runtime blockers null: current C++ lacks full
 `--first-tick-json`; exact process ownership still needs pidfd plus a cgroup/reviewed supervisor

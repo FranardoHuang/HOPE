@@ -14,13 +14,15 @@ Use this file for short project-state updates that future humans and agents need
   no symlink ancestor, core SHA bindings and exact proposed argv (rejecting
   `--flag=/abs`, unbound absolute and relative payloads). Plan output is a
   fsynced temp plus atomic hard-link no-replace transaction, including a tested
-  competing-create race. Runtime remains `not_run` with no token. Five blockers
+  competing-create race; source/train/eval worktrees and every Git dir/common
+  dir are forbidden destinations, and all three clean identities are rechecked
+  before an external write. Runtime remains `not_run` with no token. Five blockers
   stay explicit/null: native full `--first-tick-json`; pidfd+cgroup/supervisor
   startup handshake; PATH/LD/Python/AMENT and AimRT/transitive `.so`/plugin
   closure; parser-backed vendor-config→MJCF binding; and atomic runtime
   ledger/exact lock protocol. Static legacy audit still binds 14 old-launcher
   risks. Isaac is diagnostic only; vendor Gate3/Gate3B remains the arbiter.
-  Tests: `30 passed`; no sim/Kit/transport/runner/Pod/GPU/robot action. See
+  Tests: `32 passed`; no sim/Kit/transport/runner/Pod/GPU/robot action. See
   `docs/operations/run_gate3_first_tick_harness.md`.
 - Preregistered the post-v5 spatial-retarget proposal screen without using a
   Pod/GPU or touching hardware. The contract screens all ten Franco/v6/v7

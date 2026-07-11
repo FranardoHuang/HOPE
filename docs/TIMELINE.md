@@ -1606,10 +1606,11 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    process scan/runtime lock/trace consumer，只会以 `GIT_OPTIONAL_LOCKS=0` 启只读 Git helper，不启
    sim/Kit/transport/planner/runner、不发 signal。schema-2 强制 checkout=Git 顶层、路径全祖先无
    symlink、core SHA、固定 argv，拒 `--flag=/abs`/未绑定绝对/相对 payload；plan 输出用 fsync temp
-   + atomic hard-link，竞争创建也不覆盖。runtime 固定 `not_run`、无 token。五个 null blocker：
+   + atomic hard-link，竞争创建也不覆盖；source/train/eval worktree 及 Git dir/common dir 全禁写，
+   外部写前再核三仓 clean identity。runtime 固定 `not_run`、无 token。五个 null blocker：
    full `--first-tick-json`、pidfd+cgroup/supervisor handshake、PATH/LD/AimRT `.so`/plugin 完整闭包、
    parser-backed config→MJCF 语义绑定、runtime ledger+exact lock 原子协议。初态四格/engine-gap 四层
-   仍只 prereg/inexact/not-run；Isaac 仅诊断，智元 Gate3/Gate3B 才能晋级。`30 passed`，未碰
+   仍只 prereg/inexact/not-run；Isaac 仅诊断，智元 Gate3/Gate3B 才能晋级。`32 passed`，未碰
    sim/Kit/transport/runner/Pod/GPU/真机。
 
 ## 2026-07-12:公司 Linux 机改动移植回来(那台不让 push)

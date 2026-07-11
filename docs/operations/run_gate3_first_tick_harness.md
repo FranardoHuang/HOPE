@@ -13,7 +13,7 @@ checkpoint promotion still requires vendor behavior evidence.
 
 The content-bound static audit is
 `configs/gate3_legacy_process_audit_20260712.json` (SHA-256
-`46f58c951ae0efc5e81198d494b7e223a98e03c6ccbc2d8b79992ba308e272b5`). It binds the tracked
+`3dce92d777959b18d7fb0c0d38f3193e366f2aa030830d7fa48f4df3422010dc`). It binds the tracked
 `pp_gate3_rally.sh` and `pp_rally_conductor.py` bytes and records 14 concrete risks:
 
 | risk | old source | consequence |
@@ -44,7 +44,7 @@ closure, `/proc` snapshots alone are not a safe startup handshake, and a plan-on
 carry dormant signal/launch code. That commit must not be merged by itself.
 
 The corrected `scripts/run_gate3_first_tick_harness.py` (source SHA-256
-`a32d42131dff058fd05fb88696e9005dbf452c2591c9b28611159e646beb9d4c`) has only one
+`612f68bfdd7375838f38d4f89a25fcee5db1e2ce19eac7e55b60bdee47b4d680`) has only one
 operation: validate a schema-2 static contract and print or atomically create a plan ledger. There
 is no `--mode`, arming phrase, `Popen`, signal,
 runtime lock, process scan, `run_harness`, or first-tick consumer. Passing `--mode run` or the old
@@ -57,7 +57,8 @@ commits and cleanliness. Their environment is rebuilt rather than inherited:
 - `GIT_DIR`, `GIT_WORK_TREE`, and other ambient Git variables are absent;
 - `--no-optional-locks` is also passed on the command line; fsmonitor, untracked-cache and hooks are
   disabled, and global/system config, pagers and terminal prompting are disabled;
-- each declared checkout path must equal `git rev-parse --show-toplevel`, not a nested directory.
+- each source/training/evaluation checkout path must equal `git rev-parse --show-toplevel`, not a
+  nested directory; its absolute Git dir and common dir are also recorded.
 
 Accordingly, “starts no process” is not a correct description. The exact statement is: it starts
 only read-only Git helpers; it starts no sim/Kit/transport/planner/runner and sends no signal.
@@ -69,7 +70,8 @@ There is intentionally no checked-in machine-local instance. A schema-2 contract
 1. the source commit and exact plan-gate source SHA;
 2. absolute core paths plus SHA-256 for vendor sim/config/MJCF, planner binary/config, production
    runner/runtime-config/formal ONNX, and a proposed Kit executable;
-3. two clean, exact-commit Git worktree roots for training and evaluation;
+3. the clean source Git identity plus two clean, exact-commit Git worktree roots for training and
+   evaluation, including every worktree's Git dir/common dir;
 4. an explicit local-only environment proposal with hardware disabled;
 5. fixed proposed argv arrays: sim/config, planner/config, and passive production runner with
    `--planner --no-publish --start passive --first-tick-json {HARNESS_FIRST_TICK_JSON}`;
@@ -117,8 +119,11 @@ python3 scripts/run_gate3_first_tick_harness.py \
   --plan-output /absolute/external-control/gate3_first_tick_static_plan.json
 ```
 
-Without `--plan-output`, the plan is printed. With it, the parent directory must already exist and
-contain no symlink component. The writer:
+Without `--plan-output`, the plan is printed. With it, the parent directory must already exist,
+contain no symlink component, and be outside the source, training and evaluation worktree roots
+**and** all recorded Git dirs/common dirs. Location rejection happens before creating a temporary
+file. Immediately before an allowed external write, all three Git identities are compared again
+and all three worktrees must still be clean at their recorded commits. The writer then:
 
 1. creates a same-directory mode-0600 temporary file with exclusive create;
 2. writes and `fsync`s the complete bytes;
@@ -167,12 +172,14 @@ pytest -q tests/test_run_gate3_first_tick_harness.py
 python3 -m json.tool configs/gate3_legacy_process_audit_20260712.json >/dev/null
 ```
 
-Accepted local result: `30 passed`. Tests cover hard rejection of old runtime/arming CLI before any
+Accepted local result: `32 passed`. Tests cover hard rejection of old runtime/arming CLI before any
 mock process/signal, no runtime-supervisor symbols, `GIT_OPTIONAL_LOCKS=0`, exact Git top-level,
 symlink ancestors, SHA/path/environment fences, argv equals/absolute/relative bypasses, null
 dependency/semantic blockers, atomic link no-clobber including a competing-create race, and the 14
-legacy risks. The contract same-byte SHA/parser path and a mid-read mutation are also covered. No
-simulator, Kit, transport, planner, runner, Pod/GPU, or robot is invoked.
+legacy risks. Real Git repos prove source/train/eval/Git-dir outputs are rejected without a file or
+dirty status, an external output succeeds, and a late dirty checkout blocks the external write.
+The contract same-byte SHA/parser path and a mid-read mutation are also covered. No simulator, Kit,
+transport, planner, runner, Pod/GPU, or robot is invoked.
 
 Remaining work after source merge is exactly the five blockers above, followed by one separately
 reviewed no-publish first tick, per-clip normal/recovery gates, and vendor no-reset Gate3/Gate3B.

@@ -131,9 +131,10 @@
     "the only child commands are read-only Git helpers with GIT_OPTIONAL_LOCKS=0",
     "no simulator, Kit, transport, planner, runner, process scan, signal, or runtime lock path exists",
     "core artifact paths are canonical, reject every symlink ancestor, and are SHA-bound without claiming complete runtime closure",
-    "training and evaluation paths equal their clean exact-commit Git top-levels",
+    "source, training, and evaluation paths equal their clean exact-commit Git top-levels and record Git dir/common dir",
     "proposed argv rejects equals-form absolute paths, unbound absolute paths, and relative payloads",
     "the optional plan output uses fsynced temporary bytes plus atomic hard-link no-replace",
+    "plan output is outside source/training/evaluation worktrees and every Git dir/common dir, with clean identities revalidated before write",
     "the plan ledger records runtime status not_run and real robot authority false"
   ],
   "unclosed_future_runtime_requirements": [
