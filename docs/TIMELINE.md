@@ -1397,3 +1397,17 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    tool/input/output/MJCF/compiled-collision SHA；report 安装失败会按本次 output SHA 精确回滚。
    临时 native arm64 MuJoCo 3.10.0 对真实 `a3_pingpong.xml` 15 tests 全绿后已卸载。它尚未在
    tracked pilot 产出正式 report，且只证离散帧，inter-frame/动力学/桌网/schema-2 仍全开。
+26. 【franco/Codex】**因果三角四条缺边全部补槽，池子回到六卡各四臂**——重签 launcher 后四条
+   validate 均确认 train/eval clean、资产/工具 SHA 对、目标卡恰 3 unique trainer 且约 14.7GiB
+   free。随后每 Pod 一次一个 Kit boot，accepted trainer/worker PGID：Pod1 M3 S1-only g=0
+   seed1 `1409914/1410648`、seed2 `1411167/1412047`；Pod2 M2 S1+g=-.95 seed1
+   `196177/196753`、seed2 `197146/197939`。四条 emitted hard-contract 全对、首轮 17000 和 q10
+   均 rc0，池快照每卡 4 trainer、`23.1--23.8/32.6GiB`、util `88--95%`。17k inexact q10
+   aggregate 为 M3 `.60/.55`、M2 `.30/.30`，只记方向不裁决。
+27. 【franco/Codex】**首卷后再审 state，发现 live worker 还是 hardening 前的 46a0 版本**——四条
+   judge 命令、checkpoint、manifest 与 rc0 都正确，但 worker SHA `8b980359...` 不读
+   screen_policy，也不把 manifest/job/job-contract SHA 写入 state；checked-in 修正版是
+   `21e30153...`。已另做 Pod-atomic replacement：每 Pod 两 worker 必须 exact PGID、单成员、
+   无 child/judge、旧17k完整且 manifest 与 launch_contract SHA相同，才只 TERM 这两个 worker；
+   legacy state/log 永久保留，新 worker 只换脚本和全新 state dir并重判17k，三项 hard SHA全对
+   才完成 correction。trainer/judge 不在管理范围。本条时仅预注册，尚未发 TERM。

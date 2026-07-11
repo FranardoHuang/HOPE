@@ -552,6 +552,41 @@ would launder checkpoint lineage. New cadence starts at 17000. Every q10 job is
 screen-only and cannot stop/promote; the generated q50 file has no jobs and
 remains inactive until its preregistered paired-evidence trigger is recorded.
 
+The first followup 17k states were produced by eval `46a0ce2`'s legacy worker
+SHA `8b980359...`. Their commands/results are correct, but that worker predates
+the screen-policy/job-contract state binding. Replace only these four idle
+workers with the external hardened worker; do not switch or edit either Git
+worktree:
+
+```bash
+CONTROL=/workspace/codexschema/phase1_fresh_20260711/control/causal_followups_v1
+HARD_CONFIG="$CONTROL/phase1_curve_worker_hardening_20260711.json"
+HARD_TOOL="$CONTROL/replace_phase1_curve_workers_20260711.py"
+HARD_WORKER="$CONTROL/phase1_checkpoint_curve_worker_hardened_21e3015.py"
+test "$(sha256sum "$HARD_CONFIG" | awk '{print $1}')" = \
+  d270ebb2d2e3fe45510cc1638f64841e9715f0cdccdd9fc983a61e42d5655a58
+test "$(sha256sum "$HARD_TOOL" | awk '{print $1}')" = \
+  c27802224f82d073eff691b9f840abfdda2e4ef00340a9dff0485029a2572cd3
+test "$(sha256sum "$HARD_WORKER" | awk '{print $1}')" = \
+  21e301533328cad2a6684acced85fec6bb6854225eb18ca673247386f059f0eb
+
+/usr/bin/python3 "$HARD_TOOL" \
+  --config "$HARD_CONFIG" \
+  --expected-config-sha256 d270ebb2d2e3fe45510cc1638f64841e9715f0cdccdd9fc983a61e42d5655a58 \
+  --expected-tool-sha256 c27802224f82d073eff691b9f840abfdda2e4ef00340a9dff0485029a2572cd3 \
+  --pod pod1 validate
+```
+
+Use `pod2` separately. `validate` is read-only and must show both exact legacy
+worker PGIDs as single-member and childless. If either has a judge child, stop:
+the tool does not wait for or signal it. Only then replace the final word with
+`replace`. The Pod transaction rechecks both workers before its first signal,
+sends TERM only to those two exact worker PGIDs (never KILL), freezes the old
+17k state/sidecar/final log, starts the SHA-pinned standalone worker with the
+same manifest and a never-used state directory, and rejudges 17k. Completion
+requires rc=0 plus exact manifest/job/job-contract SHAs. It never manages a
+trainer or judge; old evidence remains immutable beside a correction sidecar.
+
 The current 10-second, no-wrap-teleport task does carry the robot state between
 clips, but its complete-clip timing is slower than the conservative venue
 A-B-A intervals. Do not claim that this pool proves arbitrary-time continuous

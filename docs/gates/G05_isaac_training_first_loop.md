@@ -651,9 +651,27 @@ wrong assets/tools, a fourth occupied GPU slot, reused run names or a live
 M3-old predecessor; it verifies each emitted hard-contract before starting an
 independent `17000/18000/19000/20000/20998` q10 worker. The original 16999
 parent is never copied beside the new sidecar or judged as the new contract.
-q10 remains direction-only and q50 is an inactive separate template. At this
-point the four followups are preregistered but not yet launched; no existing
-trainer has been signalled.
+q10 remains direction-only and q50 is an inactive separate template. After a
+read-only duplicate-PID fix and a second clean validation, all four followups
+launched without signalling an existing trainer. Accepted trainer/worker PGIDs
+are Pod1 M3 seed1 `1409914/1410648`, M3 seed2 `1411167/1412047`; Pod2 M2
+seed1 `196177/196753`, M2 seed2 `197146/197939`. All four emitted the expected
+family hard-contract SHA, reached 17000 with zero logged bad signatures, and
+restored the full pool to four trainers per GPU (24 live). Their first q10
+screens were M3 S1-only seed1/2 `0.60/0.55` aggregate and M2 S1+guidance
+seed1/2 `0.30/0.30`; these are inexact 10-per-side direction points only.
+
+The first 17k run also exposed a provenance gap before later milestones: the
+launcher had deliberately pinned eval checkout `46a0ce2`, whose worker SHA
+`8b980359...` predates the checked-in screen-policy/job-contract state fields.
+The four judge commands and rc=0 results match the immutable manifests, but
+their state JSON lacks manifest/job/job-contract SHAs. A separate replacement
+contract now requires both workers on one Pod to be alive, exact-PGID,
+childless and manifest-bound before any signal; it then TERM-signals only those
+workers, preserves the legacy evidence, starts standalone hardened worker
+`21e30153...` with a fresh state dir, and rejudges 17k before accepting the
+correction. Trainers/judges are out of scope. At this entry the replacement is
+preregistered but not yet applied.
 
 `SZ`'s target label is now explicitly scoped: it is the only current fresh
 cell whose zero-friction plant can be replayed with the same schema-v3

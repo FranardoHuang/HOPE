@@ -64,6 +64,23 @@ Use this file for short project-state updates that future humans and agents need
   allows one slot while four unique processes still fail closed. The config
   SHA is unchanged and the superseding launcher SHA is `ca69e1cb...`; the
   initially deployed `dca9b9df...` bytes are revoked before any launch.
+- Re-deployed launcher `ca69e1cb...`, passed all four read-only validations,
+  then launched the four exact causal followups. Accepted trainer/curve-worker
+  PGIDs are Pod1 `1409914/1410648` and `1411167/1412047`, Pod2
+  `196177/196753` and `197146/197939`. Every emitted hard-contract SHA matches
+  its M3/M2 S1 family, all four reached iteration 17000 with zero bad log
+  signatures, and the pool is again 24 live trainers at four per GPU
+  (`23.1--23.8/32.6 GiB`, `88--95%` snapshot). First inexact q10 aggregates
+  are M3 S1-only seed1/2 `0.60/0.55` and M2 S1+guidance seed1/2 `0.30/0.30`;
+  no decision is made from these 10-per-side screens.
+- Auditing those four state files found that eval `46a0ce2`'s worker predates
+  the checked-in screen-policy/job-contract SHA fields. Commands, checkpoints,
+  manifests and rc=0 results are intact, but reuse state is not hardened. Added
+  a Pod-atomic exact-worker replacement contract: it refuses any child/judge,
+  TERM-signals only the two verified legacy worker PGIDs, preserves old 17k
+  evidence, starts standalone worker `21e30153...` in fresh state dirs and
+  requires a rejudged 17k with all three hard SHAs. Trainers and judges are
+  never managed. The correction is preregistered but not yet applied here.
 - Corrected a live terminal-cadence deadlock: causal continuations save their
   final checkpoint at `20998`, while four manifests/workers were waiting for
   impossible `20999`. Pod2 M2-S1 terminal is recursively finite and its

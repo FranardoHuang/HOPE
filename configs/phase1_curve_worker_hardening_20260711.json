@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "contract_id": "phase1-curve-worker-hardening-20260711-v1",
+  "purpose": "Replace the four legacy Phase-1 followup curve workers with a standalone screen-policy-hardened worker, preserve the legacy 17k result, and require a fresh 17k state bound to manifest/job contracts.",
+  "simulation_only": true,
+  "real_robot_commands_forbidden": true,
+  "status": "preregistered_not_applied",
+  "runtime": {
+    "training_checkout": "/workspace/codexschema/nohope",
+    "expected_training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+    "eval_checkout": "/workspace/codexschema/nohope_eval_08e438e",
+    "expected_eval_commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+    "judge_relative_path": "hope_training/whole_body_tracking/scripts/judge.sh",
+    "judge_sha256": "1a00702935096b063435c3f0bd23e75f76f13e1298c87310d1cec3c26cca8529",
+    "legacy_worker_relative_path": "hope_training/whole_body_tracking/scripts/phase1_checkpoint_curve_worker.py",
+    "legacy_worker_sha256": "8b980359bf5dfdcc515ed9db07b457250ab671b67fceefa8a155c4225705e424",
+    "external_control_root": "/workspace/codexschema/phase1_fresh_20260711/control/causal_followups_v1",
+    "standalone_hardened_worker": "/workspace/codexschema/phase1_fresh_20260711/control/causal_followups_v1/phase1_checkpoint_curve_worker_hardened_21e3015.py",
+    "standalone_hardened_worker_sha256": "21e301533328cad2a6684acced85fec6bb6854225eb18ca673247386f059f0eb",
+    "worker_python": "/usr/bin/python3",
+    "old_worker_term_wait_seconds": 30,
+    "new_worker_startup_seconds": 2,
+    "hard_state_timeout_seconds": 2400,
+    "hard_state_poll_seconds": 5,
+    "transaction_sidecar_template": "/workspace/codexschema/phase1_fresh_20260711/control/causal_followups_v1/worker_hardening_{pod}.correction.json"
+  },
+  "replacement_contract": {
+    "pod_atomic_scope": "both followup workers registered on one Pod must pass read-only preflight before either old PGID is signalled",
+    "old_worker_requirements": [
+      "sidecar pid equals pgid and the exact process is alive",
+      "proc cmdline binds the legacy worker, exact manifest and exact old state_dir",
+      "the worker has no child process, no judge, and is the only member of its process group",
+      "the q10 manifest SHA equals the launch_contract binding",
+      "the legacy 17k state is complete rc=0 and lacks manifest/job contract SHA hardening fields"
+    ],
+    "signal_policy": "send SIGTERM only to each verified legacy worker's exact PGID; never wait on, signal, stop, or restart a trainer or judge",
+    "new_state_policy": "use a never-before-existing state_dir suffixed hardened_21e3015; the legacy state_dir/log/result remain immutable",
+    "restart_policy": "derive the new command from the old command by changing only worker script and state_dir; start_new_session requires new pid=pgid",
+    "acceptance": "fresh 17k completes rc=0 and records exact manifest_sha256, job_spec_sha256 and job_contract_sha256 before correction status becomes complete"
+  },
+  "pods": {
+    "pod1": {
+      "arms": [
+        "phase1_M3_S1_only_guidance0_seed1",
+        "phase1_M3_S1_only_guidance0_seed2"
+      ]
+    },
+    "pod2": {
+      "arms": [
+        "phase1_M2_S1_guidance_m095_seed1",
+        "phase1_M2_S1_guidance_m095_seed2"
+      ]
+    }
+  },
+  "arms": [
+    {
+      "run_name": "phase1_M3_S1_only_guidance0_seed1",
+      "pod": "pod1",
+      "artifact_run_dir": "/workspace/codexschema/phase1_fresh_20260711/runs/phase1_M3_S1_only_guidance0_seed1",
+      "first_job_id": "phase1_M3_S1_only_guidance0_seed1_17000_clean_q10"
+    },
+    {
+      "run_name": "phase1_M3_S1_only_guidance0_seed2",
+      "pod": "pod1",
+      "artifact_run_dir": "/workspace/codexschema/phase1_fresh_20260711/runs/phase1_M3_S1_only_guidance0_seed2",
+      "first_job_id": "phase1_M3_S1_only_guidance0_seed2_17000_clean_q10"
+    },
+    {
+      "run_name": "phase1_M2_S1_guidance_m095_seed1",
+      "pod": "pod2",
+      "artifact_run_dir": "/workspace/codexschema/phase1_fresh_20260711/runs/phase1_M2_S1_guidance_m095_seed1",
+      "first_job_id": "phase1_M2_S1_guidance_m095_seed1_17000_clean_q10"
+    },
+    {
+      "run_name": "phase1_M2_S1_guidance_m095_seed2",
+      "pod": "pod2",
+      "artifact_run_dir": "/workspace/codexschema/phase1_fresh_20260711/runs/phase1_M2_S1_guidance_m095_seed2",
+      "first_job_id": "phase1_M2_S1_guidance_m095_seed2_17000_clean_q10"
+    }
+  ],
+  "arm_relative_paths": {
+    "launch_contract": "launch_contract.json",
+    "manifest": "checkpoint_cadence_q10.json",
+    "legacy_worker_sidecar": "checkpoint_cadence_q10.worker.launch.json",
+    "legacy_worker_log": "checkpoint_cadence_q10.worker.log",
+    "legacy_state_dir": "checkpoint_cadence_q10_state",
+    "hardened_worker_sidecar": "checkpoint_cadence_q10.worker.hardened.launch.json",
+    "hardened_worker_log": "checkpoint_cadence_q10.worker.hardened.log",
+    "hardened_state_dir": "checkpoint_cadence_q10_state_hardened_21e3015",
+    "correction_sidecar": "checkpoint_cadence_q10.worker.hardening_correction.json"
+  }
+}
