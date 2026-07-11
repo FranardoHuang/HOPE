@@ -451,9 +451,11 @@ K=100 q50 paper.
 The MuJoCo q50 pair has now completed on one materialized schedule artifact:
 file SHA `69f73458...7f25`, semantic schedule SHA `949eb196...8fc0`, seed 0,
 50 attempts per side and zero censored rows. M3-old returned
-FH/BH/aggregate `31/50,11/50,42/100`, contact `89/100`, with 9 physical
-falls. M3-S1 returned `50/50,50/50,100/100`, contact `100/100`, with zero
-falls. The `+0.58` aggregate delta selects M3-S1 only within this same-family
+FH/BH/aggregate `31/50,11/50,42/100`, contact `89/100`. The original paired
+summary mislabeled the evaluator's `fell=9` union as nine physical falls; the
+raw ledger contains **one physical fall plus eight non-physical guard resets**.
+M3-S1 returned `50/50,50/50,100/100`, contact `100/100`, with zero such
+terminations. The `+0.58` aggregate delta selects M3-S1 only within this same-family
 terminal causal paper. Both checkpoint lineages and evaluator contracts remain
 inexact, and the result cannot authorize formal/deployment/hardware use. The
 first v1 execution judged only M3-old then fail-closed on a runner assumption
@@ -467,6 +469,22 @@ Isaac therefore gives delta `0.00`, not MuJoCo's `+0.58`. The engines disagree o
 legacy comparison: S1 may be selected only inside the MuJoCo evaluator/family, and no cross-engine,
 formal or deployment gate closes. Full hashes and three preserved fail-closed wrapper attempts are
 in `configs/phase1_M3_terminal_q50_isaac_result_20260711.json`.
+
+A question-aligned forensic pass now explains why neither Isaac companion can
+close a cross-engine gate. “Same question order” was not “same outcome
+instrument”: current Isaac scored a virtual analytic ball while MuJoCo scored
+ONNX execution plus physical contact/flight. For fresh SZ model 4000, mean FH
+racket-center error is `13.15 cm` in MuJoCo (all 50 exceed the frozen `9.5 cm`
+capture margin) but only `2.48 cm` in Isaac; model 2000 is `9.03/3.03 cm`.
+For M3-old BH, Isaac's analytic `orient_normal` erases the signed-face error:
+mean pre-orient normal error is `168.15 deg` versus M3-S1's `3.66 deg`, yet both
+receive `50/50`. The content-addressed forensic result SHA is
+`aff8f4e665d20bb76a56e079735f32b6766388ee05f61c51e93adeb568be45c9`.
+The follow-up 2x2 preregistration (Isaac/MuJoCo x physical/analytic) freezes the
+question order and thresholds and fails closed unless all four instrument cells
+exist; prereg SHA is `dd8fb0b93d2a809a2875682e9399717f856ac891a474ab214364b617176e6818`.
+It is runtime-blocked because current Isaac PhysicalBall is incoming-flight
+Phase A only, with no racket impulse or post-contact physical truth.
 
 The four causal-triangle refill workers initially used eval `46a0ce2`'s
 legacy state schema. Their commands/results were valid but omitted manifest,
@@ -511,9 +529,21 @@ retargeted CPU-only through clean GMR `aabea2e`; loader SHA
 `2737f472...5de2` consumes exactly ten beta components with no zero padding.
 All ten canonical GMR outputs are finite 30 Hz/31-DoF artifacts with
 frame-zero warm-up below `1e-4`; full hashes are in
-`configs/motion_video_canonical_gmr_results_20260711.json`. They have not yet
-run their new grounding/dense-safety gates, so they do not join Phase-1 exact
-lineage or enter RL.
+`configs/motion_video_canonical_gmr_results_20260711.json`. Canonical grounding
+then passed 10/10 by changing only fixed root-z, and the accepted v4 dense
+screen found zero ground danger, self-collision, `<5 mm` racket/body danger or
+`<20 mm` warning across 654 source frames and 5,162 samples at 240 Hz; minimum
+body clearance is `40.2466 mm`. Returnability remains deliberately null because
+the GMR-world to HOPE +X/table transform and mirror contract are not verified.
+Thus these paths still do not join Phase-1 exact lineage or enter RL.
+
+The first adjacent scale-out causal curve also demonstrates why q10 cannot be
+a decision paper. On the same K20 schedule `75aca567...51d7`, M2 seed2
+old/S1 aggregate changed from `.40/.60` at 18k to `.50/.40` at 19k. Both 19k
+checkpoints are finite and bind iteration, adjacent contract SHA and causal
+lineage. The crossing is preserved in
+`configs/phase1_M2_seed2_18k_19k_q10_curve_result_20260711.json`; both arms
+continue unchanged and no q50 is triggered.
 
 ## Continuous-Timing Boundary
 
@@ -522,13 +552,20 @@ continuous play. With the bound 141/134-frame motions, strike frames 66/45 and h
 the theoretical same-player strike interval is about `q10/median/q90=2.90/3.75/4.60 s` and cannot
 be shorter than 2.40 s. The conservative venue A-B-A audit (`n=21`) measured
 `1.757/1.903/3.356 s`; the opponent's next hit appears a median 0.951 s after ours, before the
-current clip-wrap installs a new task.
+current clip-wrap installs a new task. These are overlapping windows, 16/21
+come from high-ball practice and the 2.5 s leg filter right-censors the slow
+tail, so `1.903 s` is a falsification datum, not a target distribution.
 
 This is a contract boundary, not a reason to mutate the live 24-arm pool. A separate `T0/T1`
 timing/carry-state pair must compare complete-clip wrap against post-strike event-driven next-task
 installation, with a longer/opportunity-count episode and immutable interval schedule. The source
 SHA, reproducible filter, proposed contract fields and checkpoint metrics are in
 [`phase1_continuous_rally_timing_2026-07-11.md`](research/phase1_continuous_rally_timing_2026-07-11.md).
+The content-addressed preregistration uses a separate balanced engineering
+event grid rather than fitting that median. Its design-check passes and its
+launch-check intentionally fails on missing implementation/schedule/judge/
+self-hit/plant bindings; prereg SHA is
+`2e7c4a344c0f2f81f67fd1246e5a724eaef92570c45e830c85f298377f52289c`.
 
 Plant semantics form an independent deployment blocker. `SZ` is exact only for the current
 zero-friction execution protocol; `SP/LP` are historical direct-number proxies and cannot estimate a

@@ -50,6 +50,30 @@ Use this file for short project-state updates that future humans and agents need
   legacy pair has no cross-engine selection gate; no formal/deploy claim
   follows. Bindings are in
   `configs/phase1_M3_terminal_q50_isaac_result_20260711.json`.
+- Corrected and localized the cross-engine result instead of treating two
+  saturated Isaac scores as an engine vote. Fresh model 4000 FH has mean
+  racket-center error `13.15 cm` in MuJoCo versus `2.48 cm` in Isaac; M3-old
+  BH has `168.15 deg` signed-face error before Isaac's analytic
+  `orient_normal` erases the sign. The old M3 `physical_falls=9` label is also
+  corrected to one physical fall plus eight guard resets. A frozen-threshold
+  Isaac/MuJoCo x physical/analytic 2x2 now fails closed until Isaac provides
+  post-contact physical truth. Forensic and prereg result SHAs are
+  `aff8f4e6...45c9` and `dd8fb0b9...6818`.
+- Preregistered the independent T0/T1 event-timing axis without fitting the
+  weak venue median. The tracked aggregate binds raw strikes SHA `6ad3c459...`
+  but states that `n=21` overlaps, 16/21 samples are high-ball practice and the
+  2.5 s filter right-censors the tail; `1.903 s` is not a target. A balanced
+  engineering grid drives the future paper. Design validation passes, while
+  launch validation intentionally fails on missing scheduler/materializer,
+  continuous dual-engine judges, self-hit gate, fresh checkpoint, calibrated
+  plant and immutable schedule hashes. Prereg SHA is `2e7c4a34...2289c`.
+- The hardened Pod2 curve worker completed the same-paper M2 seed2 18k/19k
+  q10 pair. Old/S1 aggregate changed from `.40/.60` at 18k to `.50/.40` at
+  19k, reversing the tiny-screen ranking. Both 19k checkpoints are finite and
+  have matching filename/embedded iteration, adjacent-contract SHA and causal
+  lineage. This is screen-only evidence: both arms continue, no checkpoint is
+  promoted and no q50 is triggered. Ledger:
+  `configs/phase1_M2_seed2_18k_19k_q10_curve_result_20260711.json`.
 - Replaced the six remaining global curve workers with hardened
   `21e30153...` workers using only their exact legacy PGIDs. New PGIDs are
   Pod1 `1432280/1432292/1432304` and Pod2 `200706/200718/200730`; no trainer
@@ -68,8 +92,9 @@ Use this file for short project-state updates that future humans and agents need
   deployment. See `docs/research/phase1_plant_semantics_repair_2026-07-11.md`.
 - Completed the preregistered M3 terminal MuJoCo q50 on one immutable K=100
   schedule (`949eb196...`, 50 per side, no censored attempts). M3-old returned
-  FH/BH/aggregate `0.62/0.22/0.42` with 9 physical falls; M3-S1 returned
-  `1.00/1.00/1.00` with zero falls, aggregate delta `+0.58`. This selects S1
+  FH/BH/aggregate `0.62/0.22/0.42` with one physical fall plus eight guard
+  resets (the legacy `fell=9` union); M3-S1 returned `1.00/1.00/1.00` with
+  zero such terminations, aggregate delta `+0.58`. This selects S1
   only inside the legacy swing-family causal diagnostic. Both results remain
   inexact; the Isaac companion later failed to reproduce this ranking and all
   formal/deployment gates remain open. A first validator-shape failure is preserved and changed neither the

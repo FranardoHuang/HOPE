@@ -703,9 +703,11 @@ decision. Its ledger is `configs/phase1_M3_terminal_q10_pair_20260711.json`.
 The triggered shared-schedule MuJoCo q50 has since completed. Both terminal
 checkpoints consumed the same K=100 schedule semantic SHA
 `949eb196...8fc0`, 50 attempts per side, seed 0, no noise and no censored
-attempts. M3-old returned FH/BH/aggregate `31/50,11/50,42/100`, contacted
-`89/100` and recorded 9 physical falls; M3-S1 returned `50/50,50/50,100/100`,
-contacted `100/100` and had zero falls. The aggregate paired delta is `+0.58`.
+attempts. M3-old returned FH/BH/aggregate `31/50,11/50,42/100` and contacted
+`89/100`. The raw ledger resolves the summary's legacy `fell=9` union into
+**one physical fall plus eight non-physical guard resets**, not nine physical
+falls. M3-S1 returned `50/50,50/50,100/100`, contacted `100/100` and had zero
+such terminations. The aggregate paired delta is `+0.58`.
 This selects M3-S1 only inside this legacy swing-family causal diagnostic; both
 lineages and evaluations remain inexact and no formal/deployment/hardware
 promotion follows. The first runner attempt judged M3-old but rejected its
@@ -718,6 +720,26 @@ companion then scored both old and S1 at FH/BH/aggregate
 ranking, so the cross-engine causal gate stays open and S1 can be selected
 only inside that MuJoCo family/evaluator. Full companion hashes are in
 `configs/phase1_M3_terminal_q50_isaac_result_20260711.json`.
+
+The question-level forensic in
+`docs/research/phase1_cross_engine_saturation_forensic_2026-07-11.md` further
+shows that the two runs did not yet share an outcome instrument. Fresh model
+4000's FH racket-center error is `13.15 cm` in MuJoCo versus `2.48 cm` in
+Isaac, and Isaac's analytic face orientation erases M3-old's signed BH face
+error (`168.15 deg` before orientation). The cross-engine gate therefore stays
+open. A fail-closed 2x2 instrument-parity prereg now requires both physical and
+analytic cells from both engines without changing the frozen thresholds; its
+current blocker is missing Isaac post-contact physical truth.
+
+The independent continuous-timing axis is now content-addressed but remains
+launch-blocked. Its venue aggregate binds raw strikes SHA `6ad3c459...` and
+records the overlapping-window, 16/21 high-ball and 2.5 s right-censor limits;
+`1.903 s` is not used as a target. T0/T1 instead share a balanced engineering
+event grid and freeze motion/TOPP/plant/face/reward/2-vs-4. Design validation
+passes; launch validation must fail until the post-strike scheduler,
+materialized schedules, continuous Isaac/MuJoCo judges, self-hit instrument,
+fresh exact checkpoint and semantics-correct plant are all bound. Prereg SHA
+is `2e7c4a34...2289c`; no timing arm has launched.
 
 Natural terminal release also opens a separate second-wave causal paper rather
 than permission to mutate the frozen 24-arm matrix. The preregistration
@@ -739,6 +761,14 @@ family hard-contract SHA, reached 17000 with zero logged bad signatures, and
 restored the full pool to four trainers per GPU (24 live). Their first q10
 screens were M3 S1-only seed1/2 `0.60/0.55` aggregate and M2 S1+guidance
 seed1/2 `0.30/0.30`; these are inexact 10-per-side direction points only.
+
+The first adjacent scale-out pair reinforces that rule. On identical K20
+schedule `75aca567...51d7`, M2 seed2 old/S1 changed from `.40/.60` at 18k to
+`.50/.40` at 19k, reversing the small-paper order. Both 19k checkpoints are
+finite and bind iteration, adjacent hard-contract SHA and causal lineage.
+They continue unchanged; no stop, promotion or q50 trigger follows. The
+content-addressed curve ledger is
+`configs/phase1_M2_seed2_18k_19k_q10_curve_result_20260711.json`.
 
 The first 17k run also exposed a provenance gap before later milestones: the
 launcher had deliberately pinned eval checkout `46a0ce2`, whose worker SHA

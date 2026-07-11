@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "status": "complete_screen_only_no_decision",
+  "created_utc": "2026-07-11T15:06:00Z",
+  "scope": "M2 v4rg legacy continuation seed2, old pairing versus shared-plus-y pairing",
+  "training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+  "eval_commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+  "worker_manifest_sha256": "d6d540f8204c18ce5a7b4b90a23cdd8ba59d7a87e7c65da8328dbe3c782a088e",
+  "screen_contract": {
+    "evaluation_contract_exact": false,
+    "lineage": "causal",
+    "schedule_k": 20,
+    "attempts_per_side": 10,
+    "seed": 0,
+    "noise_scale": 0.0,
+    "immutable_schedule_sha256": "75aca567d8b3e3b74e81775ce31b46923f6e26fda5bfd530a4e304910f9051d7",
+    "q10_role": "screen_only",
+    "stop_authorized": false,
+    "promote_authorized": false,
+    "q50_triggered": false
+  },
+  "arms": {
+    "old": {
+      "run_name": "phase1_M2_old_pairing_seed2",
+      "face_command_pairing": "legacy_signed_vs_A",
+      "training_contract_sha256": "75af3b9d40ca12179b3adf16b893867b89da7d3dc514bb915710fd3931ca99dc",
+      "milestones": {
+        "18000": {
+          "checkpoint_sha256": "4d524d91a87be225a350c5488f5bd7d33203afbcf140b614edf6305e5640e83c",
+          "state_sha256": "98f1fc2b69cfa954a197892145ab0d0fed91ebeb2b79cb39bf584829c605d8a2",
+          "report_sha256": "ddd1debb56c4282643c89149ad723a4bcbdd5fbf622e94e00d365c40470e71ce",
+          "job_spec_sha256": "534982e16cc8d988a684e8bcb13348d7394ca7b80445c7e67e2e7b7c2ec37649",
+          "job_contract_sha256": "941f83b1c73ea4bd632c195d812cc73972c7205cea3f83d970354786e3f62874",
+          "returncode": 0,
+          "contact_rate": 1.0,
+          "return_rate": {"forehand": 0.0, "backhand": 0.8, "aggregate": 0.4}
+        },
+        "19000": {
+          "checkpoint_sha256": "a7fdca04baa6d094f02ded3e517a3d19aa1a38cdd1f450a4564136770119b9ed",
+          "state_sha256": "70ad773edc9af8cb7fb0a6e61055ae69da736416887c0d0298173e59ff5b3387",
+          "report_sha256": "a9fdf225580fd38cc6e311a4fbb71f23307d979730d5e823a8166d13d0ba1be4",
+          "job_spec_sha256": "003736b006d514814775905f5958924dad7a5236b1f2565055d8d547fdc9b01b",
+          "job_contract_sha256": "7174281209c10e87e53ddf37f1416d1e118b1f19dfc0a03b089af62a38dc7700",
+          "returncode": 0,
+          "checkpoint_filename_iteration": 19000,
+          "checkpoint_embedded_iteration": 19000,
+          "checkpoint_all_tensors_finite": true,
+          "checkpoint_contract_sha_matches_adjacent": true,
+          "checkpoint_lineage_exact": 0,
+          "contact_rate": 1.0,
+          "return_rate": {"forehand": 0.0, "backhand": 1.0, "aggregate": 0.5}
+        }
+      }
+    },
+    "S1": {
+      "run_name": "phase1_M2_S1_pairing_seed2",
+      "face_command_pairing": "shared_plus_y",
+      "training_contract_sha256": "7268eb38fbca6fe7d5c9fd67e8957bfd09e425a8c44c0307853b6f58f4dc28f2",
+      "milestones": {
+        "18000": {
+          "checkpoint_sha256": "b0cfc5735e5300f5cd6c9e9cd3d4228cc6aa213ec3424402274f870a725e5cab",
+          "state_sha256": "3208fa53404b1535f6b2a2e22e59f7a8e44c3ab1e95836ba9d2db01dd17d65b0",
+          "report_sha256": "ea3f323a3beb736a754c35c8905ef8e26c736f2e83bb01e7be18459f352fe8b6",
+          "job_spec_sha256": "57774823687eb3daa5272057d8255dbddc26438b93f065a2181579f44aa453d5",
+          "job_contract_sha256": "8ed554b0554a1d155e530d0a0e1c290d7bf3fa0e817821f1238c8922138a3ab6",
+          "returncode": 0,
+          "contact_rate": 1.0,
+          "return_rate": {"forehand": 0.2, "backhand": 1.0, "aggregate": 0.6}
+        },
+        "19000": {
+          "checkpoint_sha256": "926d6dd98a28357884f2b1cf68427b9ebd48e8586e15820d8d6fac87a131e54d",
+          "state_sha256": "b3d6c623886e7cbdc12db08b75c87d7b6ad3e324f68a789f93201e0a11d30b0a",
+          "report_sha256": "047ddd358eb866c741af01d8a1453cabfea6bb0af1b14646ed382da53cb4ba9b",
+          "job_spec_sha256": "d9ca434c08c8ae757d5faa16660de17d1aaf09a8d79f260a8eebc15b059422a8",
+          "job_contract_sha256": "bcc9ebde3ee3ded5e68ba2db13c470c37f976ee5fef7a0f38979c674ee44c27a",
+          "returncode": 0,
+          "checkpoint_filename_iteration": 19000,
+          "checkpoint_embedded_iteration": 19000,
+          "checkpoint_all_tensors_finite": true,
+          "checkpoint_contract_sha_matches_adjacent": true,
+          "checkpoint_lineage_exact": 0,
+          "contact_rate": 1.0,
+          "return_rate": {"forehand": 0.0, "backhand": 0.8, "aggregate": 0.4}
+        }
+      }
+    }
+  },
+  "paired_readout": {
+    "old_minus_S1_aggregate_at_18000": -0.2,
+    "old_minus_S1_aggregate_at_19000": 0.1,
+    "ranking_crossed_between_adjacent_q10_milestones": true,
+    "interpretation": "The 20-question direction screen is noisy enough to reverse the arm ordering between adjacent milestones. Preserve both curves and continue unchanged; do not stop, promote, or trigger q50 from this pair."
+  }
+}

@@ -1443,7 +1443,9 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
 33. 【franco/Codex】**M3 terminal q50 同卷裁决 S1 胜，但只在 causal family 内生效**——物化唯一
    K=100 卷，file SHA=`69f73458...7f25`、semantic SHA=`949eb196...8fc0`，每侧 50、seed0、
    零噪声、100 行原序且无 censored。M3-old FH/BH/aggregate=`31/50,11/50,42/100`、接触
-   `89/100`、physical fall=9；M3-S1=`50/50,50/50,100/100`、接触 `100/100`、fall=0，
+   `89/100`；旧 summary 把 `fell=9` 误写成九次 physical fall，逐题 raw ledger 实为
+   `1 physical fall + 8 guard reset`。M3-S1=`50/50,50/50,100/100`、接触 `100/100`、
+   两类终止均为0，
    aggregate delta=`+.58`。首版 runner 先判完 old 后因误猜真实 hard-contract/summary 字段层级
    fail closed，未启动 S1；v1 全保留。v2 只修 validator，重新物化得到逐字节同一 schedule 后两臂
    均通过严格账本。结果只能选择 legacy swing family 的 S1 terminal；lineage/eval 永远 inexact，
@@ -1494,3 +1496,18 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    64 题却不消费，coverage/selector 全为 null/blocked；必须先 schema2 +X reground/显式变换+
    mirror 证据。账本见 `motion_video_gmr_phase_safety_results_20260711.json`；不占 GPU、不改训练树、
    不触真机。
+41. 【franco/Codex】**“同题”不等于“同一判分仪器”，两组 Isaac 饱和已定位**——fresh 4k
+   前手 MuJoCo 拍心误差均值 `13.15 cm`（50/50 越过冻结 `9.5 cm` 接触窗），Isaac 同题仅
+   `2.48 cm`；M3-old 反手在 Isaac `orient_normal` 前的 signed-face 误差为 `168.15 deg`，
+   却被归一化后判满。故现 Isaac virtual outcome 不能给 MuJoCo physical outcome 关门。
+   forensic result SHA=`aff8f4e6...45c9`；下一步 2 engine x physical/analytic 四格缺一即拒绝，
+   当前硬卡 Isaac 无 post-contact physical truth，阈值不改。
+42. 【franco/Codex】**T0/T1 时序轴进入 fail-closed 队列，1.903 秒没有被偷冻成目标**——venue
+   aggregate 明写 `n=21` 滑窗重叠、16/21 高球、2.5s 截尾；只用来证伪现役理论中位
+   `3.75 s`，事件卷另用独立均衡 engineering grid。prereg SHA=`2e7c4a34...2289c`；
+   design-check 通过，launch-check 因 scheduler/外部 deadline/连续双引擎卷/自击门/plant/
+   immutable schedule 未绑定而按预期失败，当前绝不点火。
+43. 【franco/Codex】**M2 seed2 的相邻 q10 排名直接反转，再次证明不能拿小卷裁决**——同一
+   `75aca567...51d7` K20 卷上，18k old/S1=`.40/.60`，19k=`.50/.40`；old 方向上升、S1
+   回落且正手仍弱。两臂 checkpoint 19k finite、iter/contract/causal lineage 绑定通过；只保留
+   曲线并继续原配方，不停、不晋级、不触发 q50。

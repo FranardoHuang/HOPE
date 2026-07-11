@@ -413,8 +413,9 @@ The matching Pod1 M3 terminal pair is now also complete and finite. M3-old's
 `0.50/0.40/0.45`, while M3-S1 returned `1.00/1.00/1.00`; paired aggregate
 delta is `+0.55`. This triggered the separately frozen K=100 q50 paper. On
 that shared 50-per-side schedule, M3-old returned FH/BH/aggregate
-`0.62/0.22/0.42` with 9 physical falls, while M3-S1 returned
-`1.00/1.00/1.00` with zero falls. Aggregate delta is `+0.58`, so M3-S1 wins
+`0.62/0.22/0.42`; the raw ledger has one physical fall plus eight guard resets
+(the legacy summary's `fell=9` is their union), while M3-S1 returned
+`1.00/1.00/1.00` with zero such terminations. Aggregate delta is `+0.58`, so M3-S1 wins
 the MuJoCo terminal selection inside this same legacy swing-family causal
 paper. Both results remain `evaluation_contract_exact=false`. The same-paper
 Isaac companion then scored both cells `0.98/1.00/0.99` FH/BH/aggregate,
@@ -454,6 +455,26 @@ same-paper Isaac companion gave both checkpoints `0.98/1.00/0.99`
 FH/BH/aggregate, delta zero. The MuJoCo ranking is therefore not reproduced;
 the cross-engine checkpoint gate stays open. Companion hashes are in
 `configs/phase1_SZ_seed1_2000_vs_4000_q50_isaac_result_20260711.json`.
+
+Question-level forensics now localize both disagreements and prevent a false
+gate closure. Fresh model 4000's mean FH racket-center error is `13.15 cm` in
+MuJoCo, beyond the frozen `9.5 cm` contact margin on all 50 questions, versus
+`2.48 cm` in Isaac; model 2000 is `9.03/3.03 cm`. M3-old BH has mean signed
+normal error `168.15 deg`, but Isaac's analytic `orient_normal` removes the
+sign before scoring, while MuJoCo physical contact keeps the consequence.
+Thus same question bytes/order are necessary but not sufficient: current Isaac
+virtual outcome and MuJoCo physical outcome are different instruments. The
+forensic result is bound in
+`configs/phase1_cross_engine_saturation_forensic_result_20260711.json`.
+
+The next gate is preregistered as a strict 2x2: Isaac/MuJoCo x physical
+truth/analytic counterfactual, with the original K100 order and capture/speed
+thresholds frozen. Missing/duplicate/non-finite cells, changed order, or a
+virtual-only physical cell all fail closed. Numeric Isaac ready/base/racket,
+signed-face-before-orient and analytic state instrumentation is implemented,
+but Isaac PhysicalBall currently has incoming-flight Phase A only and no
+racket impulse/post-contact truth. Until Phase B and one content-addressed
+four-cell evidence manifest exist, G06 remains `Partial`.
 
 Run `python3 scripts/validate_phase1_queue_governance.py` before any curve
 manifest is copied or launched. The validator enforces the 142-job/24-slot
