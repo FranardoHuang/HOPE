@@ -53,9 +53,24 @@ def test_config_binds_exact_reviewed_six_live_workers_and_natural_exit_exclusion
         1394810, 1380340, 1397266, 194276, 192815, 195085
     }
     assert len(data["queues"]) == 6
+    observed_legacy = {
+        "cadence_fresh_pod1": "51bbbef708673efd804da47580cc2477c9eb42f3acae138e8d55adba72ff784e",
+        "scaleout_causal_pod1": "c8564617872259bdb04fba9b0887d149a6b555b159feb64a3d55b7007f1010bd",
+        "scaleout_fresh_pod1": "ec5573d5341cfceca8c5b4d0098fd16ddeef3df1aab096af4b21651d6abaa654",
+        "cadence_fresh_pod2": "92193cecc4811f97516de046e48be7749bc2ee939e668c7812d6b11769c21046",
+        "scaleout_causal_pod2": "cf3faf27a5a10bcf9f48d4c04de4943df02f7a7685350975d9c8f87319f6ed33",
+        "scaleout_fresh_pod2": "84ba5933dafd70e2ed82278e3a174a3a7b1788f570b24bc0c856cf8fad02bb1b",
+    }
     for queue in data["queues"]:
-        source = ROOT / queue["source_repo_manifest"]
-        assert file_sha(source) == queue["expected_manifest_sha256"]
+        source = ROOT / queue["source_repo_hardened_manifest"]
+        assert file_sha(source) == queue["expected_hardened_manifest_sha256"]
+        assert queue["expected_legacy_manifest_sha256"] == observed_legacy[
+            queue["queue_id"]
+        ]
+        assert queue["legacy_runtime_manifest"] != queue["hardened_runtime_manifest"]
+        assert "/control/global_curve_hardening_v1/manifests/" in queue[
+            "hardened_runtime_manifest"
+        ]
     exclusion = data["out_of_live_replacement_scope"]
     assert exclusion == [{
         "queue_id": "cadence_causal_pod1",
@@ -101,7 +116,9 @@ def test_all_six_live_manifests_pass_screen_and_milestone_barrier_contracts():
         "scaleout_fresh_pod2": 63,
     }
     for queue in data["queues"]:
-        manifest = json.loads((ROOT / queue["source_repo_manifest"]).read_text())
+        manifest = json.loads(
+            (ROOT / queue["source_repo_hardened_manifest"]).read_text()
+        )
         summary = replacement.validate_manifest(manifest, queue)
         assert summary["job_count"] == expected_counts[queue["queue_id"]]
         milestones = [group["iteration"] for group in summary["milestone_groups"]]
@@ -113,7 +130,7 @@ def test_all_six_live_manifests_pass_screen_and_milestone_barrier_contracts():
 def test_manifest_rejects_partial_or_wrong_milestone_barrier():
     data = config()
     queue = next(q for q in data["queues"] if q["queue_id"] == "scaleout_causal_pod1")
-    manifest = json.loads((ROOT / queue["source_repo_manifest"]).read_text())
+    manifest = json.loads((ROOT / queue["source_repo_hardened_manifest"]).read_text())
     broken = copy.deepcopy(manifest)
     broken["jobs"][1]["barrier_id"] = "causal_19000"
     with pytest.raises(replacement.ContractError, match="barrier/milestone mismatch|part"):
@@ -124,6 +141,70 @@ def test_manifest_rejects_partial_or_wrong_milestone_barrier():
         replacement.validate_manifest(broken, queue)
 
 
+def compact_legacy_from_hardened(
+    hardened: dict, *, drop_inexact_escape: bool, drop_metadata: bool = True
+) -> dict:
+    legacy = copy.deepcopy(hardened)
+    if drop_metadata:
+        legacy.pop("screen_policy", None)
+    for job in legacy["jobs"]:
+        if drop_metadata:
+            for key in (
+                "barrier_id",
+                "screen_only",
+                "evaluation_role",
+                "expected_evaluation_contract_exact",
+                "formal_target",
+                "training_seed",
+                "training_kind",
+                "training_family",
+                "face_command_pairing",
+                "zero_joint_friction",
+                "cell",
+            ):
+                job.pop(key, None)
+        if drop_inexact_escape:
+            job["extra_args"] = ["--schedule-k", "20"]
+    return legacy
+
+
+def test_compact_cadence_metadata_delta_is_compatible_but_still_rejudged():
+    data = config()
+    queue = next(q for q in data["queues"] if q["queue_id"] == "cadence_fresh_pod1")
+    hardened = json.loads((ROOT / queue["source_repo_hardened_manifest"]).read_text())
+    legacy = compact_legacy_from_hardened(hardened, drop_inexact_escape=False)
+    result = replacement.validate_legacy_manifest_compatibility(legacy, hardened, queue)
+    assert all(item["command_equivalent"] is True for item in result["jobs"])
+    assert {
+        item["completed_job_policy"] for item in result["jobs"]
+    } == {"preserve_legacy_then_rejudge_hardened_exactness_unproven"}
+
+
+def test_causal_missing_inexact_escape_is_compatible_only_with_hardened_rejudge():
+    data = config()
+    queue = next(q for q in data["queues"] if q["queue_id"] == "scaleout_causal_pod1")
+    hardened = json.loads((ROOT / queue["source_repo_hardened_manifest"]).read_text())
+    legacy = compact_legacy_from_hardened(
+        hardened, drop_inexact_escape=True, drop_metadata=False
+    )
+    assert hashlib.sha256(
+        (json.dumps(legacy, indent=2) + "\n").encode("utf-8")
+    ).hexdigest() == queue["expected_legacy_manifest_sha256"]
+    result = replacement.validate_legacy_manifest_compatibility(legacy, hardened, queue)
+    assert all(item["command_equivalent"] is False for item in result["jobs"])
+    assert {
+        item["completed_job_policy"] for item in result["jobs"]
+    } == {"preserve_legacy_then_rejudge_hardened_inexact"}
+    broken = copy.deepcopy(legacy)
+    broken["jobs"][0]["checkpoint"] = broken["jobs"][1]["checkpoint"]
+    with pytest.raises(replacement.ContractError, match="not exactly the missing inexact escape"):
+        replacement.validate_legacy_manifest_compatibility(broken, hardened, queue)
+    broken = copy.deepcopy(legacy)
+    broken["jobs"][0]["extra_args"] = ["--schedule-k", "10"]
+    with pytest.raises(replacement.ContractError, match="not exactly the missing inexact escape"):
+        replacement.validate_legacy_manifest_compatibility(broken, hardened, queue)
+
+
 def test_worker_command_is_semantically_checked_then_exactly_hash_bound(tmp_path):
     data = config()
     queue = dict(data["queues"][0])
@@ -131,7 +212,7 @@ def test_worker_command_is_semantically_checked_then_exactly_hash_bound(tmp_path
     judge = tmp_path / "judge.sh"
     command = [
         "python3", str(legacy),
-        "--manifest", queue["runtime_manifest"],
+        "--manifest", queue["legacy_runtime_manifest"],
         "--judge-script", str(judge),
         "--state-dir", queue["legacy_state_dir"],
         "--max-active-cpu", "6",
@@ -158,7 +239,7 @@ def test_relative_worker_argv_is_resolved_only_against_target_proc_cwd(tmp_path)
     judge = tmp_path / "judge.sh"
     command = [
         "python3", str(relative_worker),
-        "--manifest", queue["runtime_manifest"],
+        "--manifest", queue["legacy_runtime_manifest"],
         "--judge-script", str(judge),
         "--state-dir", queue["legacy_state_dir"],
         "--max-active-cpu", "6", "--wait-for-checkpoints",
@@ -183,7 +264,7 @@ def test_idle_worker_with_child_judge_fails_before_any_signal(monkeypatch, tmp_p
     judge = tmp_path / "judge.sh"
     command = [
         "python3", str(legacy),
-        "--manifest", queue["runtime_manifest"],
+        "--manifest", queue["legacy_runtime_manifest"],
         "--judge-script", str(judge),
         "--state-dir", queue["legacy_state_dir"],
         "--max-active-cpu", "6", "--wait-for-checkpoints",
@@ -312,34 +393,46 @@ def test_cwd_race_before_term_fails_with_zero_signals(monkeypatch):
     assert signals == []
 
 
-def make_completed_fixture(tmp_path: Path):
+def make_completed_fixture(tmp_path: Path, *, causal: bool = False):
     data = config()
-    manifest = json.loads(
-        (ROOT / "configs/phase1_checkpoint_curve_cadence_fresh_pod1_20260711.json").read_text()
+    queue_id = "scaleout_causal_pod1" if causal else "cadence_fresh_pod1"
+    queue = copy.deepcopy(next(q for q in data["queues"] if q["queue_id"] == queue_id))
+    hardened_manifest = json.loads(
+        (ROOT / queue["source_repo_hardened_manifest"]).read_text()
     )
-    job = copy.deepcopy(manifest["jobs"][0])
+    hardened_job = hardened_manifest["jobs"][0]
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    checkpoint = run_dir / "model_4000.pt"
+    iteration = replacement.checkpoint_iteration(hardened_job)
+    checkpoint = run_dir / f"model_{iteration}.pt"
     checkpoint.write_bytes(b"finite checkpoint")
-    job["run_dir"] = str(run_dir)
-    job["checkpoint"] = str(checkpoint)
+    hardened_job["run_dir"] = str(run_dir)
+    hardened_job["checkpoint"] = str(checkpoint)
+    legacy_manifest = compact_legacy_from_hardened(
+        hardened_manifest, drop_inexact_escape=causal, drop_metadata=not causal
+    )
+    legacy_job = legacy_manifest["jobs"][0]
+    compatibility = replacement.validate_legacy_manifest_compatibility(
+        legacy_manifest, hardened_manifest, queue
+    )["jobs"][0]
     judge = tmp_path / "judge.sh"
     judge.write_text("#!/bin/sh\n")
     state_dir = tmp_path / "legacy_state"
     state_dir.mkdir()
-    state_path = state_dir / f"{job['id']}.json"
-    log_path = state_dir / f"{job['id']}.log"
-    log_path.write_text("rc=0\n")
+    state_path = state_dir / f"{legacy_job['id']}.json"
+    log_path = state_dir / f"{legacy_job['id']}.log"
+    # The real legacy shape is an opaque judge log plus state identity; the
+    # hardening transaction binds the bytes and does not infer report exactness.
+    log_path.write_text("legacy judge completed rc=0\n")
     state = {
-        "id": job["id"],
+        "id": legacy_job["id"],
         "status": "complete",
         "returncode": 0,
         "pid": 456,
         "pgid": 456,
-        "command": replacement.expected_judge_command(job, judge.resolve()),
-        "run_dir": job["run_dir"],
-        "checkpoint": job["checkpoint"],
+        "command": replacement.expected_judge_command(legacy_job, judge.resolve()),
+        "run_dir": legacy_job["run_dir"],
+        "checkpoint": legacy_job["checkpoint"],
         "checkpoint_sha256": file_sha(checkpoint),
         "judge_script_sha256": data["runtime"]["judge_sha256"],
         "eval_root": data["runtime"]["eval_checkout"],
@@ -348,51 +441,116 @@ def make_completed_fixture(tmp_path: Path):
     }
     state_path.write_text(json.dumps(state))
     runtime_paths = {"judge": judge.resolve()}
-    return data, manifest, job, state_dir, state_path, log_path, runtime_paths
-
-
-def test_completed_legacy_state_is_strictly_validated_and_migrated(tmp_path, monkeypatch):
-    data, manifest, job, _state_dir, state_path, log_path, runtime_paths = (
-        make_completed_fixture(tmp_path)
+    return (
+        data,
+        queue,
+        legacy_manifest,
+        legacy_job,
+        hardened_manifest,
+        hardened_job,
+        compatibility,
+        state_path,
+        log_path,
+        runtime_paths,
     )
+
+
+def test_completed_cadence_state_is_attested_but_not_laundered_to_hard_complete(
+    tmp_path, monkeypatch
+):
+    (
+        data, queue, legacy_manifest, legacy_job, hardened_manifest, hardened_job,
+        compatibility, state_path, log_path, runtime_paths,
+    ) = make_completed_fixture(tmp_path)
     monkeypatch.setattr(replacement, "process_alive", lambda _pid: False)
-    manifest_sha = "a" * 64
     source = replacement.validate_completed_state(
-        state_path, log_path, job, manifest, manifest_sha, data, runtime_paths
+        state_path,
+        log_path,
+        legacy_job,
+        queue["expected_legacy_manifest_sha256"],
+        hardened_job,
+        hardened_manifest,
+        queue["expected_hardened_manifest_sha256"],
+        compatibility,
+        data,
+        runtime_paths,
     )
     new_state_dir = tmp_path / "new_state"
     new_state_dir.mkdir()
     audit = {
-        "queue": {"expected_manifest_sha256": manifest_sha},
-        "manifest": manifest,
+        "queue": queue,
+        "hardened_manifest": hardened_manifest,
         "outputs": {"new_state_dir": new_state_dir},
     }
-    migrated = replacement.migrate_completed_states(
-        audit, {"completed": [source]}, data
+    plan = replacement.migrate_completed_states(audit, {"completed": [source]}, data)
+    assert plan[0]["action"] == "preserve_legacy_evidence_and_rejudge_hardened"
+    assert plan[0]["legacy_hard_reuse_revoked"] is True
+    assert plan[0]["command_equivalent"] is True
+    assert plan[0]["source_state"]["sha256"] == file_sha(state_path)
+    assert plan[0]["source_log"]["sha256"] == file_sha(log_path)
+    assert not (new_state_dir / f"{hardened_job['id']}.json").exists()
+
+
+def test_completed_causal_18k_without_escape_is_forced_to_hardened_rejudge(
+    tmp_path, monkeypatch
+):
+    (
+        data, queue, _legacy_manifest, legacy_job, hardened_manifest, hardened_job,
+        compatibility, state_path, log_path, runtime_paths,
+    ) = make_completed_fixture(tmp_path, causal=True)
+    monkeypatch.setattr(replacement, "process_alive", lambda _pid: False)
+    source = replacement.validate_completed_state(
+        state_path,
+        log_path,
+        legacy_job,
+        queue["expected_legacy_manifest_sha256"],
+        hardened_job,
+        hardened_manifest,
+        queue["expected_hardened_manifest_sha256"],
+        compatibility,
+        data,
+        runtime_paths,
     )
-    assert len(migrated) == 1
-    state = json.loads(Path(migrated[0]["path"]).read_text())
-    assert state["manifest_sha256"] == manifest_sha
-    assert state["job_spec_sha256"] == replacement.canonical_sha256(job)
-    assert state["job_contract_sha256"] == replacement.canonical_sha256({
-        "screen_policy": manifest["screen_policy"], "job": job,
-    })
-    assert state["source_state"]["sha256"] == file_sha(state_path)
-    assert state["source_log"]["sha256"] == file_sha(log_path)
-    assert state["provenance_mode"] == "strict_legacy_state_attestation"
+    assert source["state"]["command"][-2:] == ["--schedule-k", "20"]
+    assert replacement.expected_judge_command(hardened_job, runtime_paths["judge"])[-2:] == [
+        "--exam-extra", "--allow-inexact-contract"
+    ]
+    new_state_dir = tmp_path / "new_state"
+    new_state_dir.mkdir()
+    audit = {
+        "queue": queue,
+        "hardened_manifest": hardened_manifest,
+        "outputs": {"new_state_dir": new_state_dir},
+    }
+    plan = replacement.migrate_completed_states(audit, {"completed": [source]}, data)
+    assert plan[0]["command_equivalent"] is False
+    assert plan[0]["legacy_completed_job_policy"] == (
+        "preserve_legacy_then_rejudge_hardened_inexact"
+    )
+    assert not (new_state_dir / f"{hardened_job['id']}.json").exists()
 
 
 def test_completed_state_with_partial_hard_fields_fails_closed(tmp_path, monkeypatch):
-    data, manifest, job, _state_dir, state_path, log_path, runtime_paths = (
-        make_completed_fixture(tmp_path)
-    )
+    (
+        data, queue, _legacy_manifest, legacy_job, hardened_manifest, hardened_job,
+        compatibility, state_path, log_path, runtime_paths,
+    ) = make_completed_fixture(tmp_path)
     state = json.loads(state_path.read_text())
     state["manifest_sha256"] = "a" * 64
     state_path.write_text(json.dumps(state))
     monkeypatch.setattr(replacement, "process_alive", lambda _pid: False)
-    with pytest.raises(replacement.ContractError, match="partially hardened"):
+    with pytest.raises(replacement.ContractError, match="unexpectedly emitted hard fields"):
         replacement.validate_completed_state(
-            state_path, log_path, job, manifest, "a" * 64, data, runtime_paths
+            state_path,
+            log_path,
+            legacy_job,
+            queue["expected_legacy_manifest_sha256"],
+            hardened_job,
+            hardened_manifest,
+            queue["expected_hardened_manifest_sha256"],
+            compatibility,
+            data,
+            runtime_paths,
         )
 
 
@@ -421,7 +579,7 @@ def test_attestation_binds_exact_evidence_and_rejects_live_change(tmp_path):
         )
 
 
-def test_hardened_command_changes_only_worker_and_new_state_dir(tmp_path):
+def test_hardened_command_changes_only_worker_manifest_and_new_state_dir(tmp_path):
     old = [
         "python3", "/eval/legacy.py",
         "--manifest", "/external/manifest.json",
@@ -430,13 +588,18 @@ def test_hardened_command_changes_only_worker_and_new_state_dir(tmp_path):
         "--max-active-cpu", "6", "--wait-for-checkpoints",
     ]
     new = replacement.derive_hardened_command(
-        old, Path("/external/hardened.py"), tmp_path / "new_state"
+        old,
+        Path("/external/hardened.py"),
+        Path("/external/hardened_manifest.json"),
+        tmp_path / "new_state",
     )
     assert new[1] == "/external/hardened.py"
-    assert replacement.parse_worker_options(new)["--manifest"] == "/external/manifest.json"
+    assert replacement.parse_worker_options(new)["--manifest"] == (
+        "/external/hardened_manifest.json"
+    )
     assert replacement.parse_worker_options(new)["--state-dir"] == str(tmp_path / "new_state")
     changes = [index for index, pair in enumerate(zip(old, new)) if pair[0] != pair[1]]
-    assert changes == [1, 7]
+    assert changes == [1, 3, 7]
 
 
 def test_tool_has_no_broad_or_real_hardware_actions():

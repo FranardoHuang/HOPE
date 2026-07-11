@@ -11,9 +11,10 @@ that attestation and recheck every live fact.
 The replacement is Pod-atomic at preflight: every registered worker on the
 selected Pod must be the sole member of its PGID and have no child/judge before
 any signal.  Replacement sends TERM only to those exact worker PGIDs, never
-KILL, preserves the legacy state/log tree, strictly attests completed jobs into
-a fresh state directory, and starts the SHA-pinned standalone hardened worker
-with the same manifest.  Trainers, judges, Git checkouts, and real hardware are
+KILL, preserves and revokes the legacy completed states as hard-reuse evidence,
+creates a fresh state directory, and starts the SHA-pinned standalone worker
+with a separately deployed hardened manifest.  The live legacy manifest is
+never overwritten.  Trainers, judges, Git checkouts, and real hardware are
 outside this tool's authority.
 """
 
@@ -206,12 +207,28 @@ def load_config(path: Path) -> dict[str, Any]:
             raise ContractError(f"unsafe/duplicate queue or Pod: {queue_id!r}/{pod!r}")
         if not isinstance(queue.get("legacy_pid_hint"), int) or queue["legacy_pid_hint"] <= 1:
             raise ContractError(f"{queue_id}: legacy_pid_hint must be a positive PID")
-        source = Path(str(queue.get("source_repo_manifest", "")))
+        source = Path(str(queue.get("source_repo_hardened_manifest", "")))
         if source.is_absolute() or ".." in source.parts or source.parts[:1] != ("configs",):
-            raise ContractError(f"{queue_id}: unsafe source_repo_manifest")
-        require_sha(queue.get("expected_manifest_sha256"), f"{queue_id} manifest")
+            raise ContractError(f"{queue_id}: unsafe source_repo_hardened_manifest")
+        require_sha(
+            queue.get("expected_legacy_manifest_sha256"), f"{queue_id} legacy manifest"
+        )
+        require_sha(
+            queue.get("expected_hardened_manifest_sha256"), f"{queue_id} hardened manifest"
+        )
+        delta_class = queue.get("legacy_manifest_delta_class")
+        expected_delta = (
+            "cadence_compact_governance_metadata_only"
+            if queue_id.startswith("cadence_fresh_")
+            else "causal_missing_inexact_escape_only"
+            if queue_id.startswith("scaleout_causal_")
+            else "byte_identical"
+        )
+        if delta_class != expected_delta:
+            raise ContractError(f"{queue_id}: legacy manifest delta class is not frozen")
         for key in (
-            "runtime_manifest",
+            "legacy_runtime_manifest",
+            "hardened_runtime_manifest",
             "legacy_state_dir",
             "legacy_worker_log",
             "hardened_state_dir",
@@ -224,6 +241,8 @@ def load_config(path: Path) -> dict[str, Any]:
             if normalized in seen_paths:
                 raise ContractError(f"{queue_id}: duplicate runtime path {normalized}")
             seen_paths.add(normalized)
+        if Path(queue["legacy_runtime_manifest"]) == Path(queue["hardened_runtime_manifest"]):
+            raise ContractError(f"{queue_id}: hardened manifest must not overwrite legacy bytes")
         old_state = Path(queue["legacy_state_dir"])
         new_state = Path(queue["hardened_state_dir"])
         if old_state == new_state:
@@ -362,6 +381,130 @@ def validate_manifest(manifest: dict[str, Any], queue: dict[str, Any]) -> dict[s
     }
 
 
+def validate_legacy_manifest_compatibility(
+    legacy: dict[str, Any], hardened: dict[str, Any], queue: dict[str, Any]
+) -> dict[str, Any]:
+    """Bind an observed legacy queue to the hardened paper without laundering it.
+
+    Legacy cadence manifests may omit governance metadata.  Legacy causal jobs
+    may also lack the explicit inexact escape now required by the hardened
+    manifest.  Only the latter changes the judge command and therefore forces
+    rejudgment; arbitrary command or job changes fail closed.
+    """
+
+    queue_id = queue["queue_id"]
+    delta_class = queue["legacy_manifest_delta_class"]
+    legacy_jobs = legacy.get("jobs")
+    hard_jobs = hardened["jobs"]
+    if legacy.get("schema_version") != 1 or not isinstance(legacy_jobs, list):
+        raise ContractError(f"{queue_id}: legacy manifest is not schema_version=1/jobs")
+    if len(legacy_jobs) != len(hard_jobs):
+        raise ContractError(f"{queue_id}: legacy/hardened job counts differ")
+    if delta_class == "byte_identical" and legacy != hardened:
+        raise ContractError(f"{queue_id}: byte-identical manifest contents differ")
+    if delta_class == "causal_missing_inexact_escape_only":
+        expected_legacy = json.loads(json.dumps(hardened))
+        for job in expected_legacy["jobs"]:
+            job["extra_args"] = ["--schedule-k", "20"]
+        if legacy != expected_legacy:
+            raise ContractError(
+                f"{queue_id}: causal legacy delta is not exactly the missing inexact escape"
+            )
+    for key in ("judge_script_sha256", "training_checkout", "expected_training_commit"):
+        if legacy.get(key) != hardened.get(key):
+            raise ContractError(f"{queue_id}: legacy/hardened top-level {key} differs")
+    legacy_policy = legacy.get("screen_policy")
+    hard_policy = hardened["screen_policy"]
+    if legacy_policy is not None:
+        if not isinstance(legacy_policy, dict):
+            raise ContractError(f"{queue_id}: legacy screen_policy is not an object")
+        for key, value in legacy_policy.items():
+            if key in hard_policy and hard_policy[key] != value:
+                raise ContractError(f"{queue_id}: legacy screen_policy contradicts {key}")
+
+    compatibility = []
+    metadata_keys = (
+        "barrier_id",
+        "screen_only",
+        "evaluation_role",
+        "expected_evaluation_contract_exact",
+        "formal_target",
+        "training_seed",
+        "training_kind",
+        "training_family",
+        "face_command_pairing",
+        "zero_joint_friction",
+        "cell",
+    )
+    for legacy_job, hard_job in zip(legacy_jobs, hard_jobs):
+        if not isinstance(legacy_job, dict):
+            raise ContractError(f"{queue_id}: legacy job is not an object")
+        if not set(legacy_job).issubset(hard_job):
+            raise ContractError(f"{queue_id}/{hard_job['id']}: legacy job has unknown fields")
+        job_id = hard_job["id"]
+        for key in ("id", "run_dir", "checkpoint", "gpu"):
+            if legacy_job.get(key) != hard_job.get(key):
+                raise ContractError(f"{queue_id}/{job_id}: legacy core field differs at {key}")
+        effective = (
+            ("seed", 0),
+            ("noise_scales", "0.0 0.05"),
+            ("hold_ref", "auto"),
+        )
+        for key, default in effective:
+            if legacy_job.get(key, default) != hard_job.get(key, default):
+                raise ContractError(f"{queue_id}/{job_id}: legacy effective {key} differs")
+        for key in metadata_keys:
+            if key in legacy_job and legacy_job[key] != hard_job.get(key):
+                raise ContractError(f"{queue_id}/{job_id}: legacy metadata contradicts {key}")
+        for key in set(legacy_job) & set(hard_job):
+            if key != "extra_args" and legacy_job[key] != hard_job[key]:
+                raise ContractError(f"{queue_id}/{job_id}: legacy common field differs at {key}")
+        legacy_args = legacy_job.get("extra_args", [])
+        hard_args = hard_job["extra_args"]
+        if not isinstance(legacy_args, list) or not all(
+            isinstance(value, str) for value in legacy_args
+        ):
+            raise ContractError(f"{queue_id}/{job_id}: legacy extra_args is not a string list")
+        if legacy_args == hard_args:
+            policy = "preserve_legacy_then_rejudge_hardened_exactness_unproven"
+            command_equivalent = True
+        elif (
+            legacy_args == ["--schedule-k", "20"]
+            and hard_args
+            == ["--schedule-k", "20", "--exam-extra", "--allow-inexact-contract"]
+            and hard_job.get("expected_evaluation_contract_exact") is False
+            and hard_job.get("formal_target") is False
+        ):
+            policy = "preserve_legacy_then_rejudge_hardened_inexact"
+            command_equivalent = False
+        else:
+            raise ContractError(
+                f"{queue_id}/{job_id}: unregistered legacy/hardened judge-argument delta"
+            )
+        compatibility.append({
+            "id": job_id,
+            "command_equivalent": command_equivalent,
+            "completed_job_policy": policy,
+            "legacy_job_spec_sha256": canonical_sha256(legacy_job),
+            "hardened_job_spec_sha256": canonical_sha256(hard_job),
+        })
+    if delta_class == "cadence_compact_governance_metadata_only" and not all(
+        item["command_equivalent"] for item in compatibility
+    ):
+        raise ContractError(f"{queue_id}: compact cadence changed a judge command")
+    if delta_class == "causal_missing_inexact_escape_only" and not all(
+        not item["command_equivalent"] for item in compatibility
+    ):
+        raise ContractError(f"{queue_id}: causal legacy command delta is incomplete")
+    return {
+        "job_count": len(compatibility),
+        "legacy_manifest_delta_class": delta_class,
+        "legacy_screen_policy_present": legacy_policy is not None,
+        "jobs": compatibility,
+        "compatibility_sha256": canonical_sha256(compatibility),
+    }
+
+
 def parse_proc_cmdline(pid: int) -> list[str]:
     raw = Path(f"/proc/{pid}/cmdline").read_bytes()
     return [item.decode("utf-8", errors="strict") for item in raw.split(b"\0") if item]
@@ -454,7 +597,7 @@ def validate_worker_command(
     if not required.issubset(options):
         raise ContractError(f"{queue['queue_id']}: command lacks required wait-worker options")
     exact_paths = {
-        "--manifest": Path(queue["runtime_manifest"]).resolve(),
+        "--manifest": Path(queue["legacy_runtime_manifest"]).resolve(),
         "--judge-script": runtime_paths["judge"],
         "--state-dir": Path(queue["legacy_state_dir"]).resolve(),
     }
@@ -559,65 +702,69 @@ def expected_judge_command(job: dict[str, Any], judge: Path) -> list[str]:
         "--hold-ref",
         str(job.get("hold_ref", "auto")),
     ]
-    command.extend(job["extra_args"])
+    command.extend(job.get("extra_args", []))
     return command
 
 
 def validate_completed_state(
-    state_path: Path, log_path: Path, job: dict[str, Any], manifest: dict[str, Any],
-    manifest_sha: str, config: dict[str, Any], runtime_paths: dict[str, Path],
+    state_path: Path, log_path: Path,
+    legacy_job: dict[str, Any], legacy_manifest_sha: str,
+    hardened_job: dict[str, Any], hardened_manifest: dict[str, Any],
+    hardened_manifest_sha: str, compatibility: dict[str, Any],
+    config: dict[str, Any], runtime_paths: dict[str, Path],
 ) -> dict[str, Any]:
-    state = load_json(state_path, f"completed state {job['id']}")
+    job_id = hardened_job["id"]
+    state = load_json(state_path, f"completed state {job_id}")
     if state.get("status") != "complete" or state.get("returncode") != 0:
-        raise ContractError(f"job {job['id']}: legacy state is not complete rc=0")
+        raise ContractError(f"job {job_id}: legacy state is not complete rc=0")
     if (
         not isinstance(state.get("pid"), int)
         or state["pid"] <= 1
         or state.get("pgid") != state["pid"]
     ):
-        raise ContractError(f"job {job['id']}: legacy judge state does not bind pid==pgid")
-    checkpoint = Path(job["checkpoint"])
+        raise ContractError(f"job {job_id}: legacy judge state does not bind pid==pgid")
+    checkpoint = Path(legacy_job["checkpoint"])
     if not checkpoint.is_file():
-        raise ContractError(f"job {job['id']}: completed checkpoint is missing")
+        raise ContractError(f"job {job_id}: completed checkpoint is missing")
     checkpoint_sha = sha256_file(checkpoint)
     expected = {
-        "id": job["id"],
-        "run_dir": job["run_dir"],
-        "checkpoint": job["checkpoint"],
+        "id": job_id,
+        "run_dir": legacy_job["run_dir"],
+        "checkpoint": legacy_job["checkpoint"],
         "checkpoint_sha256": checkpoint_sha,
         "judge_script_sha256": config["runtime"]["judge_sha256"],
         "eval_commit": config["runtime"]["expected_eval_commit"],
         "training_commit": config["runtime"]["expected_training_commit"],
-        "command": expected_judge_command(job, runtime_paths["judge"]),
+        "command": expected_judge_command(legacy_job, runtime_paths["judge"]),
     }
     for key, value in expected.items():
         if state.get(key) != value:
-            raise ContractError(f"job {job['id']}: completed state mismatch at {key}")
+            raise ContractError(f"job {job_id}: completed state mismatch at {key}")
     if not log_path.is_file():
-        raise ContractError(f"job {job['id']}: completed result log is missing")
+        raise ContractError(f"job {job_id}: completed result log is missing")
     hard_expected = {
-        "manifest_sha256": manifest_sha,
-        "job_spec_sha256": canonical_sha256(job),
+        "manifest_sha256": hardened_manifest_sha,
+        "job_spec_sha256": canonical_sha256(hardened_job),
         "job_contract_sha256": canonical_sha256({
-            "screen_policy": manifest["screen_policy"], "job": job,
+            "screen_policy": hardened_manifest["screen_policy"], "job": hardened_job,
         }),
     }
     present = [key for key in HARD_STATE_KEYS if key in state]
-    if present and set(present) != set(HARD_STATE_KEYS):
-        raise ContractError(f"job {job['id']}: partially hardened legacy state")
-    for key in present:
-        if state.get(key) != hard_expected[key]:
-            raise ContractError(f"job {job['id']}: existing {key} is wrong")
+    if present:
+        raise ContractError(
+            f"job {job_id}: exact legacy worker SHA unexpectedly emitted hard fields {present}"
+        )
     state_pid = state.get("pid")
     if isinstance(state_pid, int) and process_alive(state_pid):
         try:
             if parse_proc_cmdline(state_pid) == expected["command"]:
-                raise ContractError(f"job {job['id']}: completed state still has a live judge")
+                raise ContractError(f"job {job_id}: completed state still has a live judge")
         except (FileNotFoundError, ProcessLookupError):
             pass
     return {
-        "id": job["id"],
-        "job": job,
+        "id": job_id,
+        "legacy_job": legacy_job,
+        "hardened_job": hardened_job,
         "state": state,
         "state_path": str(state_path),
         "state_sha256": sha256_file(state_path),
@@ -625,20 +772,24 @@ def validate_completed_state(
         "log_sha256": sha256_file(log_path),
         "checkpoint_path": str(checkpoint),
         "checkpoint_sha256": checkpoint_sha,
+        "legacy_manifest_sha256": legacy_manifest_sha,
         "hard_expected": hard_expected,
-        "source_hardening": "already_hardened" if present else "strict_legacy_attestation",
+        "completed_job_policy": compatibility["completed_job_policy"],
+        "command_equivalent": compatibility["command_equivalent"],
+        "source_hardening": "exact_legacy_worker_state_attested",
     }
 
 
 def audit_legacy_states(
-    queue: dict[str, Any], manifest: dict[str, Any], manifest_sha: str,
+    queue: dict[str, Any], legacy_manifest: dict[str, Any],
+    hardened_manifest: dict[str, Any], compatibility: dict[str, Any],
     config: dict[str, Any], runtime_paths: dict[str, Path],
 ) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
     state_dir = Path(queue["legacy_state_dir"])
     worker_log = Path(queue["legacy_worker_log"])
     if not state_dir.is_dir() or not worker_log.is_file():
         raise ContractError(f"{queue['queue_id']}: legacy state dir/worker log is missing")
-    job_ids = {job["id"] for job in manifest["jobs"]}
+    job_ids = {job["id"] for job in legacy_manifest["jobs"]}
     unexpected = sorted(
         path.name for path in state_dir.glob("*.json")
         if path.name != "summary.json" and path.stem not in job_ids
@@ -647,16 +798,28 @@ def audit_legacy_states(
         raise ContractError(f"{queue['queue_id']}: unexpected legacy state files {unexpected}")
     completed = []
     pending = []
-    for job in manifest["jobs"]:
-        state_path = state_dir / f"{job['id']}.json"
-        log_path = state_dir / f"{job['id']}.log"
+    hard_by_id = {job["id"]: job for job in hardened_manifest["jobs"]}
+    compatibility_by_id = {item["id"]: item for item in compatibility["jobs"]}
+    for legacy_job in legacy_manifest["jobs"]:
+        job_id = legacy_job["id"]
+        state_path = state_dir / f"{job_id}.json"
+        log_path = state_dir / f"{job_id}.log"
         if not state_path.exists():
             if log_path.exists():
-                raise ContractError(f"job {job['id']}: orphan legacy result log")
-            pending.append(job["id"])
+                raise ContractError(f"job {job_id}: orphan legacy result log")
+            pending.append(job_id)
             continue
         completed.append(validate_completed_state(
-            state_path, log_path, job, manifest, manifest_sha, config, runtime_paths
+            state_path,
+            log_path,
+            legacy_job,
+            queue["expected_legacy_manifest_sha256"],
+            hard_by_id[job_id],
+            hardened_manifest,
+            queue["expected_hardened_manifest_sha256"],
+            compatibility_by_id[job_id],
+            config,
+            runtime_paths,
         ))
     summary_path = state_dir / "summary.json"
     summary = None
@@ -669,6 +832,7 @@ def audit_legacy_states(
             {key: item[key] for key in (
                 "id", "state_path", "state_sha256", "log_path", "log_sha256",
                 "checkpoint_path", "checkpoint_sha256", "source_hardening",
+                "completed_job_policy", "command_equivalent",
             )}
             for item in completed
         ],
@@ -696,20 +860,45 @@ def queue_output_paths(config: dict[str, Any], queue: dict[str, Any]) -> dict[st
 def audit_queue(
     queue: dict[str, Any], config: dict[str, Any], runtime_paths: dict[str, Path]
 ) -> dict[str, Any]:
-    manifest_path = Path(queue["runtime_manifest"]).resolve()
-    if not manifest_path.is_file() or sha256_file(manifest_path) != queue["expected_manifest_sha256"]:
-        raise ContractError(f"{queue['queue_id']}: runtime manifest is missing or wrong SHA")
-    manifest = load_json(manifest_path, f"{queue['queue_id']} manifest")
-    if manifest.get("judge_script_sha256") != config["runtime"]["judge_sha256"]:
-        raise ContractError(f"{queue['queue_id']}: manifest judge SHA differs from config")
-    if manifest.get("training_checkout") != config["runtime"]["training_checkout"]:
-        raise ContractError(f"{queue['queue_id']}: manifest training checkout differs from config")
-    if manifest.get("expected_training_commit") != config["runtime"]["expected_training_commit"]:
-        raise ContractError(f"{queue['queue_id']}: manifest training commit differs from config")
-    manifest_summary = validate_manifest(manifest, queue)
+    legacy_path = Path(queue["legacy_runtime_manifest"]).resolve()
+    hardened_path = Path(queue["hardened_runtime_manifest"]).resolve()
+    if (
+        not legacy_path.is_file()
+        or sha256_file(legacy_path) != queue["expected_legacy_manifest_sha256"]
+    ):
+        raise ContractError(f"{queue['queue_id']}: legacy runtime manifest has the wrong SHA")
+    if (
+        not hardened_path.is_file()
+        or sha256_file(hardened_path) != queue["expected_hardened_manifest_sha256"]
+    ):
+        raise ContractError(f"{queue['queue_id']}: hardened runtime manifest has the wrong SHA")
+    if not is_within(hardened_path, runtime_paths["control"]):
+        raise ContractError(f"{queue['queue_id']}: hardened manifest is outside control root")
+    if is_within(legacy_path, runtime_paths["control"]):
+        raise ContractError(f"{queue['queue_id']}: legacy manifest unexpectedly lives in control root")
+    legacy_manifest = load_json(legacy_path, f"{queue['queue_id']} legacy manifest")
+    hardened_manifest = load_json(hardened_path, f"{queue['queue_id']} hardened manifest")
+    if hardened_manifest.get("judge_script_sha256") != config["runtime"]["judge_sha256"]:
+        raise ContractError(f"{queue['queue_id']}: hardened manifest judge SHA differs")
+    if hardened_manifest.get("training_checkout") != config["runtime"]["training_checkout"]:
+        raise ContractError(f"{queue['queue_id']}: hardened manifest training checkout differs")
+    if (
+        hardened_manifest.get("expected_training_commit")
+        != config["runtime"]["expected_training_commit"]
+    ):
+        raise ContractError(f"{queue['queue_id']}: hardened manifest training commit differs")
+    hardened_summary = validate_manifest(hardened_manifest, queue)
+    compatibility = validate_legacy_manifest_compatibility(
+        legacy_manifest, hardened_manifest, queue
+    )
     process = assert_idle_exact_worker(queue, config, runtime_paths)
     completed, pending, state_evidence = audit_legacy_states(
-        queue, manifest, queue["expected_manifest_sha256"], config, runtime_paths
+        queue,
+        legacy_manifest,
+        hardened_manifest,
+        compatibility,
+        config,
+        runtime_paths,
     )
     outputs = queue_output_paths(config, queue)
     for label, path in outputs.items():
@@ -720,17 +909,26 @@ def audit_queue(
         "pod": queue["pod"],
         "pid_hint": queue["legacy_pid_hint"],
         "process": process,
-        "manifest": {
-            "path": str(manifest_path),
-            "sha256": queue["expected_manifest_sha256"],
-            "summary": manifest_summary,
+        "manifests": {
+            "legacy": {
+                "path": str(legacy_path),
+                "sha256": queue["expected_legacy_manifest_sha256"],
+            },
+            "hardened": {
+                "path": str(hardened_path),
+                "sha256": queue["expected_hardened_manifest_sha256"],
+                "summary": hardened_summary,
+            },
+            "compatibility": compatibility,
         },
         "legacy_states": state_evidence,
     }
     return {
         "queue": queue,
-        "manifest": manifest,
-        "manifest_summary": manifest_summary,
+        "legacy_manifest": legacy_manifest,
+        "hardened_manifest": hardened_manifest,
+        "hardened_manifest_summary": hardened_summary,
+        "compatibility": compatibility,
         "process": process,
         "completed": completed,
         "pending": pending,
@@ -955,10 +1153,28 @@ def freeze_legacy_queue(
 ) -> dict[str, Any]:
     queue = audit["queue"]
     completed, pending, evidence = audit_legacy_states(
-        queue, audit["manifest"], queue["expected_manifest_sha256"], config, runtime_paths
+        queue,
+        audit["legacy_manifest"],
+        audit["hardened_manifest"],
+        audit["compatibility"],
+        config,
+        runtime_paths,
     )
     worker_log = Path(queue["legacy_worker_log"])
     evidence["legacy_worker_log_sha256"] = sha256_file(worker_log)
+    evidence["manifests"] = {
+        "legacy": {
+            "path": queue["legacy_runtime_manifest"],
+            "sha256": queue["expected_legacy_manifest_sha256"],
+        },
+        "hardened": {
+            "path": queue["hardened_runtime_manifest"],
+            "sha256": queue["expected_hardened_manifest_sha256"],
+        },
+    }
+    for item in evidence["manifests"].values():
+        if sha256_file(Path(item["path"])) != item["sha256"]:
+            raise ContractError(f"manifest changed before legacy freeze: {item['path']}")
     return {"completed": completed, "pending": pending, "evidence": evidence}
 
 
@@ -978,57 +1194,55 @@ def verify_frozen_legacy(frozen: dict[str, Any]) -> None:
     summary = evidence.get("summary")
     if summary and sha256_file(Path(summary["path"])) != summary["sha256"]:
         raise ContractError(f"legacy summary changed after TERM: {summary['path']}")
+    for item in evidence["manifests"].values():
+        if sha256_file(Path(item["path"])) != item["sha256"]:
+            raise ContractError(f"manifest changed during replacement: {item['path']}")
 
 
 def migrate_completed_states(
     audit: dict[str, Any], frozen: dict[str, Any], config: dict[str, Any]
 ) -> list[dict[str, Any]]:
+    """Plan hardened rejudgment without creating a laundering skip state.
+
+    The exact legacy worker never wrote hard contract fields.  Even a
+    command-equivalent cadence result does not independently prove report
+    exactness, while causal 18k used a materially different command.  Preserve
+    both as SHA-bound evidence and leave their hard state paths absent so the
+    new worker must execute the hardened job.
+    """
+
     output = audit["outputs"]["new_state_dir"]
     records = []
     for source in frozen["completed"]:
-        job = source["job"]
-        hard = source["hard_expected"]
-        state = {
+        job = source["hardened_job"]
+        path = output / f"{job['id']}.json"
+        if path.exists():
+            raise ContractError(f"legacy job would incorrectly skip hardened rejudgment: {path}")
+        records.append({
             "id": job["id"],
-            "status": "complete",
-            "returncode": 0,
-            "command": source["state"]["command"],
-            "run_dir": job["run_dir"],
-            "checkpoint": job["checkpoint"],
-            "checkpoint_sha256": source["checkpoint_sha256"],
-            **hard,
-            "judge_script_sha256": config["runtime"]["judge_sha256"],
-            "eval_root": str(Path(config["runtime"]["eval_checkout"]).resolve()),
-            "eval_commit": config["runtime"]["expected_eval_commit"],
-            "training_commit": config["runtime"]["expected_training_commit"],
-            "provenance_mode": "strict_legacy_state_attestation",
+            "action": "preserve_legacy_evidence_and_rejudge_hardened",
+            "legacy_hard_reuse_revoked": True,
+            "legacy_completed_job_policy": source["completed_job_policy"],
+            "command_equivalent": source["command_equivalent"],
             "source_state": {
                 "path": source["state_path"], "sha256": source["state_sha256"],
             },
-            "source_log": {"path": source["log_path"], "sha256": source["log_sha256"]},
-            "attested_utc": utc_now(),
-        }
-        path = output / f"{job['id']}.json"
-        if path.exists():
-            raise ContractError(f"migrated state no-clobber failure: {path}")
-        atomic_json(path, state)
-        loaded = load_json(path, "migrated hardened state")
-        expected_hard = {
-            "manifest_sha256": audit["queue"]["expected_manifest_sha256"],
-            "job_spec_sha256": canonical_sha256(job),
-            "job_contract_sha256": canonical_sha256({
-                "screen_policy": audit["manifest"]["screen_policy"], "job": job,
-            }),
-        }
-        for key, expected in expected_hard.items():
-            if loaded.get(key) != expected:
-                raise ContractError(f"migrated job {job['id']}: {key} mismatch")
-        records.append({"id": job["id"], "path": str(path), "sha256": sha256_file(path)})
+            "source_log": {
+                "path": source["log_path"], "sha256": source["log_sha256"],
+            },
+            "legacy_command_sha256": canonical_sha256(source["state"]["command"]),
+            "hardened_command_sha256": canonical_sha256(
+                expected_judge_command(job, Path(config["runtime"]["eval_checkout"])
+                    / config["runtime"]["judge_relative_path"])
+            ),
+            "required_hard_state": source["hard_expected"],
+            "hardened_state_path_intentionally_absent": str(path),
+        })
     return records
 
 
 def derive_hardened_command(
-    old: list[str], hardened_worker: Path, new_state_dir: Path
+    old: list[str], hardened_worker: Path, hardened_manifest: Path, new_state_dir: Path
 ) -> list[str]:
     new = list(old)
     new[1] = str(hardened_worker)
@@ -1039,9 +1253,16 @@ def derive_hardened_command(
         raise ContractError("worker command has duplicate --state-dir")
     state_index = positions[0] + 1
     new[state_index] = str(new_state_dir)
-    changed = {1, state_index}
+    manifest_positions = [index for index, value in enumerate(new) if value == "--manifest"]
+    if len(manifest_positions) != 1:
+        raise ContractError("worker command has duplicate --manifest")
+    manifest_index = manifest_positions[0] + 1
+    new[manifest_index] = str(hardened_manifest)
+    changed = {1, state_index, manifest_index}
     if any(old[index] != new[index] for index in range(len(old)) if index not in changed):
-        raise ContractError("hardened command changed an option other than worker/state dir")
+        raise ContractError(
+            "hardened command changed an option other than worker/manifest/state dir"
+        )
     if old_state == str(new_state_dir):
         raise ContractError("hardened command reuses the legacy state dir")
     return new
@@ -1053,14 +1274,23 @@ def start_hardened_worker(
 ) -> tuple[subprocess.Popen[bytes], dict[str, Any]]:
     queue = audit["queue"]
     outputs = audit["outputs"]
+    for path_key, sha_key in (
+        ("legacy_runtime_manifest", "expected_legacy_manifest_sha256"),
+        ("hardened_runtime_manifest", "expected_hardened_manifest_sha256"),
+    ):
+        if sha256_file(Path(queue[path_key])) != queue[sha_key]:
+            raise ContractError(f"{queue['queue_id']}: manifest changed before hardened start")
     command = derive_hardened_command(
-        audit["process"]["command"], runtime_paths["hardened_worker"], outputs["new_state_dir"]
+        audit["process"]["command"],
+        runtime_paths["hardened_worker"],
+        Path(queue["hardened_runtime_manifest"]),
+        outputs["new_state_dir"],
     )
     if resolve_argv_path(
         parse_worker_options(command)["--manifest"],
         Path(audit["process"]["cwd"]),
         "--manifest",
-    ) != Path(queue["runtime_manifest"]).resolve():
+    ) != Path(queue["hardened_runtime_manifest"]).resolve():
         raise ContractError(f"{queue['queue_id']}: hardened command changed manifest")
     log_handle = outputs["new_worker_log"].open("xb", buffering=0)
     try:
@@ -1090,8 +1320,12 @@ def start_hardened_worker(
         "command_sha256": canonical_sha256(command),
         "cwd": audit["process"]["cwd"],
         "worker_sha256": config["runtime"]["standalone_hardened_worker_sha256"],
-        "manifest": queue["runtime_manifest"],
-        "manifest_sha256": queue["expected_manifest_sha256"],
+        "legacy_manifest": {
+            "path": queue["legacy_runtime_manifest"],
+            "sha256": queue["expected_legacy_manifest_sha256"],
+        },
+        "manifest": queue["hardened_runtime_manifest"],
+        "manifest_sha256": queue["expected_hardened_manifest_sha256"],
         "state_dir": str(outputs["new_state_dir"]),
         "log": str(outputs["new_worker_log"]),
         "source_attestation": {"path": str(attestation_path), "sha256": attestation_sha},
@@ -1102,6 +1336,10 @@ def start_hardened_worker(
     returncode = proc.poll()
     if returncode not in (None, 0):
         raise ContractError(f"{queue['queue_id']}: hardened worker exited rc={returncode}")
+    if sha256_file(Path(queue["hardened_runtime_manifest"])) != queue[
+        "expected_hardened_manifest_sha256"
+    ]:
+        raise ContractError(f"{queue['queue_id']}: hardened manifest changed during startup")
     sidecar["startup_status"] = "alive" if returncode is None else "complete_rc0"
     atomic_json(outputs["launch_sidecar"], sidecar)
     return proc, sidecar
@@ -1157,12 +1395,19 @@ def replace(
             correction = {
                 "schema_version": 1,
                 "contract_id": config["contract_id"],
-                "status": "complete_worker_replaced_completed_jobs_strictly_attested",
+                "status": "complete_worker_replaced_legacy_completed_jobs_require_hardened_rejudge",
                 "pod": pod,
                 "queue_id": queue_id,
-                "manifest": {
-                    "path": queue["runtime_manifest"],
-                    "sha256": queue["expected_manifest_sha256"],
+                "manifests": {
+                    "legacy_preserved": {
+                        "path": queue["legacy_runtime_manifest"],
+                        "sha256": queue["expected_legacy_manifest_sha256"],
+                    },
+                    "hardened_worker_input": {
+                        "path": queue["hardened_runtime_manifest"],
+                        "sha256": queue["expected_hardened_manifest_sha256"],
+                    },
+                    "compatibility": audit["compatibility"],
                 },
                 "source_attestation": {
                     "path": str(attestation_path), "sha256": attestation_sha,
@@ -1178,8 +1423,10 @@ def replace(
                         "path": str(audit["outputs"]["launch_sidecar"]),
                         "sha256": sha256_file(audit["outputs"]["launch_sidecar"]),
                     },
-                    "migrated_completed_states": migrated[queue_id],
-                    "pending_job_ids": frozen[queue_id]["pending"],
+                    "legacy_completed_jobs_preserved_for_rejudge": migrated[queue_id],
+                    "hardened_rejudge_or_pending_job_ids": [
+                        job["id"] for job in audit["hardened_manifest"]["jobs"]
+                    ],
                 },
                 "legacy_artifacts_preserved": True,
                 "completed_utc": utc_now(),
@@ -1190,7 +1437,7 @@ def replace(
                 "sha256": sha256_file(audit["outputs"]["correction_sidecar"]),
             }
         transaction.update(
-            status="complete_workers_replaced_completed_jobs_strictly_attested",
+            status="complete_workers_replaced_legacy_completed_jobs_require_hardened_rejudge",
             queues=corrections,
             completed_utc=utc_now(),
         )
