@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import numpy as np
@@ -102,3 +103,32 @@ def test_custom_warmup_regex_requires_named_groups_and_parses():
     assert result["rounds"] == 12
     with pytest.raises(AUDIT.ResultError, match="named groups"):
         AUDIT.parse_warmup_evidence("x", custom_regex=r"(?P<rounds>\d+)")
+
+
+def test_main_binds_explicit_canonical_body_shape_contract(tmp_path):
+    import pickle
+
+    result = tmp_path / "result.pkl"
+    log = tmp_path / "run.log"
+    report = tmp_path / "report.json"
+    with result.open("wb") as handle:
+        pickle.dump(_payload(), handle)
+    log.write_text("[warm-up] pass 7 max_dq=9e-5\n", encoding="utf-8")
+    contract = "diagnostic_same_performer_coordinatewise_median_betas_v1"
+    assert AUDIT.main(
+        [
+            "--result",
+            str(result),
+            "--expected-frames",
+            "5",
+            "--run-log",
+            str(log),
+            "--body-shape-contract",
+            contract,
+            "--json-out",
+            str(report),
+        ]
+    ) == 0
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["body_shape_contract"] == contract
+    assert payload["formal_eligible"] is False

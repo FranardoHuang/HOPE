@@ -359,6 +359,35 @@ Do not use them as canonical-betas motion assets. The first deeper replay also
 found about 8 cm of floor penetration, so root/ground calibration and repeated
 collision/dynamics/table-net gates are mandatory before schema-2 conversion.
 
+The body-shape-normalized rerun is a separate queue and lineage. The ten
+materialized cohort-median-beta PTs are bound by
+`configs/motion_video_canonical_gmr_prereg_20260711.json`; the exact GMR loader
+at clean commit `aabea2e` has SHA-256 `2737f472...5de2` and consumes
+`smpl_params_global.betas[0][:10]` without zero padding. The neutral SMPL-X
+NPZ used by that loader has SHA-256 `37602144...992`. Do not point the legacy
+`diagnostic_video_betas` queue at these PTs. The dedicated queue command shape
+is:
+
+```bash
+PLAN=configs/motion_video_canonical_gmr_prereg_20260711.json
+PLAN_SHA=$(sha256sum "$PLAN" | awk '{print $1}')
+CUDA_VISIBLE_DEVICES= PYTHONPATH=scripts \
+  /path/to/hope-motion-py310/bin/python \
+  scripts/run_motion_video_canonical_gmr_queue.py \
+  --plan "$PLAN" --expected-plan-sha256 "$PLAN_SHA"
+```
+
+The committed v1 plan is already consumed: its no-clobber output/state roots
+exist on Pod1, so the command above is documentary and must fail if repeated.
+A true reproduction must preregister new versioned output/state roots and bind
+the new plan SHA; never delete or overwrite the v1 evidence. The accepted v1
+run was CPU-only, completed 10/10 in 48.7 s, and every result passed 30 Hz,
+31-DoF finite structure plus frame-zero warm-up (`16--29` rounds, final
+`max|dq| < 1e-4`). The small binding ledger is
+`configs/motion_video_canonical_gmr_results_20260711.json`. These outputs are
+still uncalibrated diagnostics and must take their own no-clobber grounding,
+dense collision, dynamics and table/net gates before schema-2.
+
 Ground exactly one accepted diagnostic GMR pickle with explicit no-clobber
 paths. The command below is the Franco forehand-block pilot shape; use each
 row's own input SHA/frame count for other assets:

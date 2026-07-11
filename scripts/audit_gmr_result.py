@@ -3,8 +3,9 @@
 
 Passing this audit proves only a finite 30 Hz, 31-DoF structural result with
 the expected number of frames and a logged frame-zero IK warm-up convergence.
-The source still uses video-estimated body betas, so this result is never a
-formal motion-library or robot-safety acceptance.
+The caller must bind the exact body-shape lineage.  Neither the legacy
+per-video-beta lane nor the cohort-median-beta lane is a formal motion-library
+or robot-safety acceptance.
 """
 
 from __future__ import annotations
@@ -23,6 +24,12 @@ import numpy as np
 
 class ResultError(ValueError):
     """A GMR output or warm-up log violates the diagnostic contract."""
+
+
+BODY_SHAPE_CONTRACTS = (
+    "diagnostic_video_betas",
+    "diagnostic_same_performer_coordinatewise_median_betas_v1",
+)
 
 
 NUMBER_PATTERN = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
@@ -243,6 +250,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--warmup-threshold", type=float, default=1e-4)
     parser.add_argument("--warmup-max-rounds", type=int, default=200)
     parser.add_argument("--warmup-regex")
+    parser.add_argument(
+        "--body-shape-contract",
+        choices=BODY_SHAPE_CONTRACTS,
+        default="diagnostic_video_betas",
+        help=(
+            "explicit source-body-shape lineage; the default preserves the "
+            "legacy diagnostic queue contract"
+        ),
+    )
     parser.add_argument("--json-out", type=Path, required=True)
     args = parser.parse_args(argv)
 
@@ -253,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
         "result_path": str(result),
         "run_log_path": str(run_log),
         "expected_frames": args.expected_frames,
-        "body_shape_contract": "diagnostic_video_betas",
+        "body_shape_contract": args.body_shape_contract,
         "formal_eligible": False,
     }
     try:
