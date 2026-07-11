@@ -32,6 +32,7 @@ This gate is the sim-to-sim bridge before real deployment.
 - [../operations/run_training.md](../operations/run_training.md)
 - [../operations/run_deploy_dryrun.md](../operations/run_deploy_dryrun.md)
 - [../operations/run_shared_interface_rehearsal.md](../operations/run_shared_interface_rehearsal.md)
+- [../operations/run_gate3_first_tick_harness.md](../operations/run_gate3_first_tick_harness.md)
 
 ## Acceptance Criteria
 
@@ -636,3 +637,50 @@ The live training/eval checkouts remained clean at `6d93bcb...`/`46a0ce2...`, an
 process remained. This closes formal-model production loading only. First backend tick, per-clip
 normal envelope, canonical recovery tuple and full vendor MuJoCo Gate 3/Gate 3B behavior remain
 open, so G06 stays Partial.
+
+#### 2026-07-12 exact-PGID Gate3 first-tick source gate
+
+The historical `pp_gate3_rally.sh` launch command is no longer an approved formal launcher.
+Content-bound audit `configs/gate3_legacy_process_audit_20260712.json` records 14 concrete risks:
+eleven fuzzy `pkill -9` calls, conductor `pgrep -f` SIGSTOP/SIGCONT, no PID/PGID/starttime/token
+ledger or trap, hard-coded unbound workspaces, inherited ROS graph, destructive fixed `/tmp` and
+shared-memory cleanup, no formal-loader-first gate, publish-capable free-form runner args, a boot
+loop that proceeds after timeout, partial direct-PID cleanup, and no concurrency lock. The old
+scripts remain historical result provenance; do not invoke their cleanup to make a new run pass.
+
+The replacement `scripts/run_gate3_first_tick_harness.py` is default-plan and fail-closed. Its
+contract binds absolute non-symlink path+SHA pairs for vendor sim/config/MJCF, planner binary/config,
+production runner/runtime-config/formal ONNX and the exact Kit executable used for conflict
+detection. It also binds explicit ROS domain/RMW/local-only environment and clean read-only
+training/eval commits. Plan mode starts nothing. Future run mode needs the exact arming phrase,
+executes the accepted formal-179 no-publish loader before any component, then launches sim/planner/
+runner directly into separate owned sessions. The runner is forced passive with `--no-publish`.
+No process is found or killed by fuzzy name: TERM/KILL is permitted only for a recorded PGID after
+double `/proc` validation of ownership token, starttime and cmdline for every member. Exact foreign
+Kit/sim/planner/runner processes or locks cause refusal. Split stdout/stderr, rc, identities,
+signals and all hashes go to a unique no-clobber ledger. Source tests pass `25` cases; no runtime
+was launched.
+
+The first-tick evidence bar is deliberately higher than the existing debug summary. A passing
+ledger must bind full finite vendor `qpos[38]`, `qvel[37]`, base pose `[7]`, racket pose `[7]`,
+target tuple and formal observation `[179]`, with a file SHA, canonical whole-trace SHA and a
+separate canonical SHA for every field. Current production C++ has no `--first-tick-json` output;
+`--trace-csv`/`--obs-csv` do not provide that joint state. The new harness therefore requires the
+future flag and must fail at runtime until a separate reviewed C++ change implements it. This
+branch does not change C++, start vendor MuJoCo, touch transport, or authorize a robot.
+
+The ledger also freezes a ready-state hypothesis without turning it into a result. Fresh training
+starts at pelvis `(0,0,1.0684)` plus default q; vendor `stand` is
+`(-0.0416378,0.000359,1.06839)` with about `(-0.030,0.249,0.042) deg` rpy. Mapped joint L2 is
+`0.171845 rad`, dominated by head-yaw `-0.169416 rad`; excluding the head still leaves
+`0.028789 rad`. Because Stage-1 bank contact positions are env-origin absolute while 175/179 target
+position is relative to current racket FK, the `-4.16 cm` root-x shift need not cancel. It may
+contribute to the engine gap, but is not yet causal evidence. The preregistered same-K100
+vendor/root-only/joints-only/full-match four-cell diagnostic remains inexact and unrun; the formal
+vendor stand is unchanged.
+
+Every plan/ledger records the four-stage engine-gap ladder as not run with no inference authority:
+kinematic replay, open-loop action replay, external-observation closed loop, then native closed
+loop. Isaac stays training/diagnostic-only. First tick closes only a runtime prerequisite; only
+Agibot vendor MuJoCo Gate3/Gate3B behavior can promote a checkpoint. Full operation and remaining
+blocks are in `docs/operations/run_gate3_first_tick_harness.md`. G06 remains `Partial`.

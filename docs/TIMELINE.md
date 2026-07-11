@@ -1599,6 +1599,18 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    Release 三目标全链接，真实 SZ 2k ONNX test 1/1、native 205 pass/9 optional skip；无 no-publish
    preflight rc2，安全 preflight rc0 且输出 obs179/双 SHA、零 backend init/start。仅执行零观测 ONNX
    prewarm，无 driver/backend tick；normal envelope、canonical recovery、厂商 Gate3/Gate3B 继续 open。
+60. 【franco/Codex】**Gate3 启停从 broad kill 改为 exact-owned plan，但本次一个 runtime 都没启**——旧
+   `pp_gate3_rally.sh`/conductor 审计钉住 14 个风险：11 条 fuzzy `pkill -9`、`pgrep -f`后
+   SIGSTOP/CONT、无 trap/PID-PGID-starttime-token 账本、硬编码且无 SHA 的 sim/planner/runner/model、
+   固定 `/tmp`/通配 shm 清理、不先跑 formal loader，runner boot 超时后仍写 up。新 harness 默认
+   只 plan；未精确 arming 不能 run，即使 run 也强制 passive+`--no-publish`、只发自己记录
+   PGID 且 TERM/KILL 前两次核 starttime/cmdline/token。所有 vendor sim/config/MJCF、planner cfg、
+   runner/model、ROS domain/环境、train/eval clean commit 都绑绝对路径+SHA；外来 Kit/sim/runner/锁
+   只拒绝不清理。first tick 还必须产出 full qpos38/qvel37/base7/racket7/target/obs179 逐字段 SHA；
+   现役 C++ 无 `--first-tick-json`，故 runtime 按设计 fail closed。账本只预注册 vendor/root-only/
+   joints-only/full-match 同 K100 inexact 初态四格和 kinematic→open-loop→external-obs→native 四层诊断，
+   不下因果结论。Isaac 仅训练/诊断，智元 vendor Gate3/Gate3B behavior 才有晋级权。`25 passed`，
+   未碰 sim/Kit/transport/runner/Pod/GPU/真机。
 
 ## 2026-07-12:公司 Linux 机改动移植回来(那台不让 push)
 

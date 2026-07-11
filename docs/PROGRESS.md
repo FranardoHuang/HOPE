@@ -4,6 +4,24 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-12
 
+- Replaced the unsafe Gate3 launch *procedure* with a source-only, default-plan
+  exact-PID/PGID first-tick harness; no runtime was launched. Static audit binds
+  the old shell/conductor and 14 risks, including eleven fuzzy `pkill -9`
+  calls, conductor `pgrep -f` signalling, no trap/ownership ledger, unbound
+  hard-coded assets, destructive shared outputs, missing formal-loader-first
+  gate and a boot timeout that still proceeds. The new contract requires
+  absolute path+SHA for vendor sim/config/MJCF, planner, runner/runtime/model and
+  Kit conflict binary; explicit local ROS domain/environment; clean read-only
+  train/eval commits; exact lock/process conflict refusal; formal 179 loader
+  before components; passive runner `--no-publish`; and token/starttime/cmdline
+  validation before signalling only its own PGID. A pass also requires full
+  finite first-tick qpos38/qvel37/base7/racket7/target/obs179 with per-field
+  SHAs. The production runner lacks the required `--first-tick-json`, so runtime
+  remains fail-closed. The ledger freezes—not concludes—the vendor-vs-Isaac
+  ready-state four-cell hypothesis and four-stage engine-gap ladder. Isaac is
+  training/diagnostic only; vendor Gate3/Gate3B behavior remains the promotion
+  arbiter. Tests: `25 passed`; no sim/Kit/transport/runner/Pod/GPU/robot action.
+  See `docs/operations/run_gate3_first_tick_harness.md`.
 - Preregistered the post-v5 spatial-retarget proposal screen without using a
   Pod/GPU or touching hardware. The contract screens all ten Franco/v6/v7
   motions against every matching immutable question; B/C priority is ranking
