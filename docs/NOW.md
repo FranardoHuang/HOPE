@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 当下状态与团队 focus（2026-07-12 06:40 CST）
+## 当下状态与团队 focus（2026-07-12 06:55 CST）
 
 本节只做 roadmap 的当前入口；下面的实验结果、奖励/训练台账、长期路线和历史判决继续保留，
 不能用这份短报替代可复现实验记录。
@@ -45,26 +45,29 @@ Rules:
   - jiayi/dongc1：`origin/hitter` 上积累 HitterPure/V3 policy、planner 与 vendor rally 编排；
     最新值得移植的是发球等待 MOTION 同步、marker→base 旋转、solve cadence 和预测时域修复，
     但该提交混有旧配方/资产，当前只做小块移植，不整支合入。
-  - yikang：`yikang-linux-port-0711` 的 head discipline 与 vendor stand 诊断、
-    `stage1-fixed-point` 的 reference-oracle/课程修复；正在把 viewer 改为读取生产 pose/Kp/Kd 并保持
-    neck passive，逐项测试后才选择性合入，不把旧 hitter 基线整支带回 main。
+  - yikang：`stage1-fixed-point` 的 reference oracle 与 `yikang-linux-port-0711` stand viewer
+    已按当前 main 语义选择性合入；head reward 没有硬塞进现役配方，后续由命名配方+paired/mixture
+    验证决定。当前可继续提供 vendor/课程侧诊断和评审。
   - 动作库轨：Franco/v6/v7 十段已过内容寻址、GMR/grounding/自碰与身体余隙；当前由
     spatial-retarget 击球点适配推进，TOPP、2-vs-4 和 RL 等离线安全/可行性门后再占 GPU。
 - **最近值得团队同步的结果**：两轮红队先后抓出“反手 raw-A 符号被误判”和“no-publish 顺便
   免模型合同”两个会制造假绿的问题，现都已闭环；恢复/等待不把三种 reward 单独相加，先做 A/B/C
   结构轴，结构失败后才做 `2^3` 交互和固定总预算 mixture；fresh SZ 四 seed 的 2k 正式卷虽中位高，
-  worst seed 仅 `20/100`，已正式判 seed-stability 失败，不能只展示三个强 seed。
+  worst seed 仅 `20/100`，已正式判 seed-stability 失败。新 reference oracle 与 Torch 物理全表对拍
+  通过，最大误差 `4.63e-9`；stand viewer 已纠正为生产 29-DOF PD、neck passive，不再伪称额外 head
+  `40/2` 是生产合同。
 - **代码交流状态**：recovery A/B/C、plan-only Gate3 源码门和严格 face179 模型合同已分别随
   `e10922a`、`b2067ba`、`8975043` 进入 main；face179 的 vendor 行为证据仍明确为 `Partial`。
-  planner 的 marker→base 旋转、解算节流/2.6s horizon、显式 side+hysteresis 与 fail-closed serve-sync
-  正在独立分支做最终接缝审查；yikang 的 reward/viewer/oracle 仍按小块验证，未验证功能不合 main。
+  yikang 的 oracle/stand 诊断随 `3df6ff5` 合入，head reward 明确留在未验证队列。planner 的
+  marker→base 旋转、解算节流/2.6s horizon、显式 side+hysteresis 与 fail-closed serve-sync 正在
+  独立红队做最终接缝审查；未验证功能不合 main。
 - **几天内 demo 的最短闭环**：D0 先做 vendor MuJoCo 中可录屏的固定同卷 demo——真实
   planner 发题、production C++ runner、fresh SZ 的最佳 finite checkpoint，正/反手各一组
   physical returns；每个模型/planner/runtime/MJCF/题表都带 SHA。D0 不冒充连续实战。
   D1 再要求同一进程内 3–5 球 no-reset；恢复/reward mixture、四动作、TOPP 与标定 plant
   不阻塞 D0，但继续并行排队。任何真机 demo 仍受 G07 独立安全门约束，本阶段不发真机命令。
 - **未来 24 小时决策**：①审完并合 planner-policy 小块，重点核对 179 explicit side 的 Python→C++
-  接缝；②审完 yikang viewer，确保生产 neck-passive/PD 参数一致；③在隔离 Release 环境补 C++ 和
+  接缝；②在可用 MuJoCo 环境补 stand 10 秒数值诊断，但它不阻塞 D0；③在隔离 Release 环境补 C++ 和
   source-only serve-sync 负门，随后只用新的精确进程所有权方案准备 vendor first tick；④能 first tick
   就立即跑 D0 小卷并录完整 ledger，不能则把失败精确归到 planner、policy、plant 或 runtime 一层。
   定期任务只做巡检；阶段结论统一更新本节，稳定时不刷聊天长报。
