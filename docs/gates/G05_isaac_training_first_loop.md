@@ -887,7 +887,8 @@ instead of binding only its file SHA. Native Isaac export requires the live vali
 `QuestionBank`; the Isaac-free standalone path requires `--train-bank`, runs the same strict bank
 and motion-anchor loaders, and refuses to inherit any `stage1_*` envelope from a donor ONNX. For
 each clip independently (clip0 forehand, clip1 backhand), rows must be unit within `2e-4` and stay
-on the raw +Y/A-frame side of that clip's reference normal. The checkpoint contract and both
+strictly more than `1e-6` inside the raw +Y/A-frame reference hemisphere, exactly matching the C++
+runtime gate. A merely positive but `<=1e-6` row now fails export. The checkpoint contract and both
 exporters must also carry the exact sign table `[+1,-1]`; representability is
 `sign[clip] * raw_A.x > 1e-6`, not `raw_A.x > 0`. Therefore forehand raw A is positive-x and
 backhand raw A is negative-x, while the external schema-2 physical striking-face B remains
@@ -905,8 +906,13 @@ ONNX or Torch. The prospective real-bank fixture
 `configs/phase1_face179_real_bank_envelope_expectations_20260712.json` binds bank
 `2da2bd12...a0700`, family `b21c161a...28ad5`, `757/724` rows and expected cap minima
 `0.974278/0.972078`; those read-only statistics are export expectations, not behavior evidence.
-Host verification is `34 passed` for the contract/export group and `11 passed` for the planner
-wire. This closes an
+The standalone path now validates checkpoint binding, donor, both motion files, harvested buffers,
+bank and derived envelope before creating any graph output. It exports to an owned same-directory
+temporary file, checks the graph and metadata round trip, fsyncs it, then atomically replaces
+`policy.onnx`; validation/export failure preserves an existing final model and removes the temp.
+Behavioral tests cover successful replacement, injected failure and empty output. Host verification
+is `41 passed, 1 optional real-runner integration skip` for the focused contract/export/preflight
+group and `11 passed` for the planner wire. This closes an
 export/source prerequisite only. No envelope-bearing formal ONNX has yet been produced from the
 running Phase-1 artifacts, and no policy has passed vendor MuJoCo with the envelope, self-hit gate
 or recovery contract. G05 remains `Partial`.

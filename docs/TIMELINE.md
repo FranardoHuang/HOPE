@@ -1561,3 +1561,12 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `2da2bd12...a0700`/family `b21c161a...28ad5`、757/724 行和 cap minima `.974278/.972078`；standalone
    Isaac-free import 与 locale-independent SHA/float parser 均有回归门。旧 formal ONNX 仍需重导；
    fixture/source tests 不是 vendor MuJoCo、自击、恢复或连续 Gate3 通过。
+55. 【franco/Codex】**第二轮红队阻止 no-publish 给旧模型“顺便免检”**——原
+   `diagnostic_no_publish` 同时控制禁发和 ONNX legacy escape，导致 07-11 preflight/real-model test
+   只能保留 loader 生命周期+backend 顺序证据，publishable certificate 降级。现普通 no-publish/
+   dry-run/preflight 与 live publish 同门强制 schema2+exact complete schema3+179 envelope；旧模型另用
+   `--allow-legacy-model-diagnostic`，必须禁发且禁止 preflight。certificate 从解析值打印
+   publishable/exact/sign；三份临时坏模型(strip metadata/缺 envelope/exact=0)的 production-runner
+   负向脚本已落地，等新 ONNX/vendor binary 实跑。standalone 也改成全验证后同目录 temp+fsync+
+   atomic replace，失败保留旧模型；export/runtime reference dot 统一严格 `>1e-6`。host source gate
+   41 pass/1 optional integration skip，绝不写成 vendor Gate3 通过。

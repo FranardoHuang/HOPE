@@ -103,7 +103,7 @@ The positive-X check is only the physical-B wire invariant. Formal 179 exports a
 spherical-cap envelope in raw A, derived from the exact schema-3 train-bank bytes. Clip 0 is always
 `forehand`, clip 1 always `backhand`; their rows are never pooled. For each clip, every raw-A
 demanded normal must already be unit within `2e-4`, lie in the same open hemisphere as that clip's
-raw `mount_plusY_A` reference, and satisfy
+raw `mount_plusY_A` reference with `dot(row_A, reference_A) > 1e-6`, and satisfy
 `mount_normal_sign_per_clip[clip] * normal_A.x > 1e-6` so it has a representable opponent-facing B
 wire value. Thus forehand raw-A x is positive while backhand raw-A x is negative. The exporter
 normalizes those rows, forms the normalized vector sum
@@ -141,6 +141,13 @@ The prospective real-bank fixture
 `2da2bd12...a0700`, source family `b21c161a...28ad5`, row counts `757/724`, and the observed raw-A
 sign/range and cap statistics. It is a source-contract expectation for the next export, not a
 formal ONNX, Isaac result, vendor-MuJoCo result, collision proof or recovery result.
+
+Model publication state and model-contract strictness are separate. Plain `--no-publish`,
+`--dry-run`, and `--model-preflight-only` still require the same schema-2 packaging, exact complete
+schema-3 execution metadata and (for 179) envelope as live publication. Only explicit
+`--allow-legacy-model-diagnostic` relaxes legacy model loading; it requires no-publish and cannot
+be combined with model preflight. Therefore an accepted preflight certificate always reports
+parsed `publishable_model_contract=true` and `training_contract_exact=1`.
 
 ## Critic (privileged) Observation (implemented)
 

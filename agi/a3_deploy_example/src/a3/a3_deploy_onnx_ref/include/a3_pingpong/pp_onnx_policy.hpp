@@ -28,7 +28,7 @@ namespace a3_pingpong {
 class PpOnnxPolicy {
  public:
   explicit PpOnnxPolicy(const std::string& model_path,
-                        bool allow_legacy_raw_diagnostic = false)
+                        bool allow_legacy_model_diagnostic = false)
       : env_(ORT_LOGGING_LEVEL_WARNING, "pp_onnx"),
         mem_(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)) {
     Ort::SessionOptions so;
@@ -88,6 +88,7 @@ class PpOnnxPolicy {
     const std::string obs_norm_baked = LookupMetaOptional(md, alloc, "obs_norm_baked");
     const std::string training_contract_exact =
         LookupMetaOptional(md, alloc, "training_contract_exact");
+    training_contract_exact_ = training_contract_exact == "1";
     const std::string schema = LookupMetaOptional(md, alloc, "hope_metadata_schema_version");
     auto valid_bit = [](const std::string& s) { return s.empty() || s == "0" || s == "1"; };
     if (!valid_bit(empirical_norm) || !valid_bit(trained_norm) || !valid_bit(obs_norm_baked) ||
@@ -104,10 +105,10 @@ class PpOnnxPolicy {
     const bool formal_contract = schema == "2";
     if (!schema.empty() && schema != "1" && schema != "2")
       throw std::runtime_error("unsupported HOPE ONNX metadata schema version '" + schema + "'");
-    if (!allow_legacy_raw_diagnostic && !formal_contract)
+    if (!allow_legacy_model_diagnostic && !formal_contract)
       throw std::runtime_error(
           "publish-capable ONNX requires hope_metadata_schema_version=2; legacy or missing "
-          "metadata is permitted only under process-wide --no-publish diagnostics");
+          "metadata requires explicit --allow-legacy-model-diagnostic with --no-publish");
     if (formal_contract && obs_norm_baked != "1")
       throw std::runtime_error(
           "formal schema-v2/110-D ONNX must declare obs_norm_baked=1. This C++ runner has no "
@@ -117,26 +118,27 @@ class PpOnnxPolicy {
       throw std::runtime_error(
           "formal schema-v2/110-D ONNX must explicitly declare empirical_normalization=1; "
           "missing/disabled normalization provenance is not accepted for hardware deployment");
-    if (formal_contract && !allow_legacy_raw_diagnostic &&
+    if (formal_contract && !allow_legacy_model_diagnostic &&
         (trained_norm != "1" || training_contract_exact != "1"))
       throw std::runtime_error(
           "publish-capable formal ONNX requires trained_with_obs_norm=1 and "
           "training_contract_exact=1; re-export from the checkpoint's immutable training contract");
     if (!formal_contract && obs_norm_baked != "1") {
-      if (!allow_legacy_raw_diagnostic)
+      if (!allow_legacy_model_diagnostic)
         throw std::runtime_error(
             "legacy ONNX has raw or unknown observation normalization provenance. It may only be "
-            "opened under process-wide --no-publish diagnostics; re-export as schema v2 with "
-            "obs_norm_baked=1 before any command-capable run.");
+            "opened with explicit --allow-legacy-model-diagnostic plus --no-publish; re-export "
+            "as schema v2 with obs_norm_baked=1 before any command-capable run.");
       std::fprintf(stderr,
           "[pp DIAGNOSTIC] legacy/raw ONNX normalization is untrusted; allowed only because "
-          "process-wide no-publish is active.\n");
+          "--allow-legacy-model-diagnostic and process-wide no-publish are both active.\n");
     }
 
     // Schema-v2 describes the ONNX packaging/layout.  Formal hardware eligibility additionally
     // requires the immutable schema-v3 *training* execution contract: exact checkpoint binding,
-    // decoder limits, and both clock rates.  A diagnostic no-publish process may inspect an older
-    // export with missing fields, but any field that is present must still be well-formed.
+    // decoder limits, and both clock rates. Only the separate explicit legacy-model diagnostic
+    // escape may inspect an older export with missing fields; plain no-publish remains strict.
+    // Any field that is present must still be well-formed.
     training_contract_schema_version_ =
         LookupMetaOptional(md, alloc, "training_contract_schema_version");
     training_contract_sha256_ = LookupMetaOptional(md, alloc, "training_contract_sha256");
@@ -224,14 +226,14 @@ class PpOnnxPolicy {
         qdes_clamp == "1" && std::isfinite(physics_step_dt_s_) &&
         std::isfinite(policy_step_dt_s_) && control_decimation_ > 0 &&
         qdes_soft_lo_.size() == kNumJoints && racket_control_point_matches_runtime;
-    if (formal_contract && !allow_legacy_raw_diagnostic && !schema3_complete)
+    if (formal_contract && !allow_legacy_model_diagnostic && !schema3_complete)
       throw std::runtime_error(
           "publish-capable schema-v2 ONNX requires an exact schema-v3 training contract: "
           "training_contract_schema_version=3, valid contract/checkpoint SHA-256 values, "
           "qdes_clamp=1 with 31 soft limit pairs, self-consistent execution timing, and an "
           "FK-matched racket_control_point_offset_wrist_m");
     has_schema3_execution_contract_ = schema3_complete;
-    if (allow_legacy_raw_diagnostic && formal_contract && !schema3_complete) {
+    if (allow_legacy_model_diagnostic && formal_contract && !schema3_complete) {
       std::fprintf(stderr,
           "[pp DIAGNOSTIC] schema-v2 ONNX lacks a complete schema-v3 execution contract; "
           "hardware publication is not eligible.\n");
@@ -239,13 +241,14 @@ class PpOnnxPolicy {
     const std::string effort_s = LookupMetaOptional(md, alloc, "joint_effort_limits");
     if (!effort_s.empty()) effort_limits_ = ToVec(effort_s);
     if (effort_limits_.size() != kNumJoints) {
-      if (!allow_legacy_raw_diagnostic)
+      if (!allow_legacy_model_diagnostic)
         throw std::runtime_error(
             "publish-capable ONNX requires 31 joint_effort_limits so the runner can "
             "reject commands whose requested PD effort exceeds the trained actuator envelope");
       effort_limits_ = Eigen::VectorXd();
       std::fprintf(stderr,
-          "[pp DIAGNOSTIC] ONNX lacks a 31-joint effort envelope; allowed only under no-publish.\n");
+          "[pp DIAGNOSTIC] ONNX lacks a 31-joint effort envelope; allowed only by explicit "
+          "legacy-model diagnostic under no-publish.\n");
     } else {
       for (int i = 0; i < effort_limits_.size(); ++i)
         if (!std::isfinite(effort_limits_[i]) || effort_limits_[i] <= 0.0)
@@ -472,6 +475,13 @@ class PpOnnxPolicy {
         throw std::runtime_error(
             "formal 110-D ONNX position boxes must share one degenerate fixed strike plane");
     }
+    publishable_model_contract_ =
+        formal_contract && empirical_norm == "1" && trained_norm == "1" &&
+        obs_norm_baked == "1" && schema3_complete &&
+        effort_limits_.size() == kNumJoints;
+    if (!allow_legacy_model_diagnostic && !publishable_model_contract_)
+      throw std::runtime_error(
+          "publish-capable model contract did not survive complete parsed-metadata validation");
   }
 
   int obs_dim() const { return obs_dim_; }
@@ -514,6 +524,8 @@ class PpOnnxPolicy {
   const Eigen::VectorXd& kd() const { return kd_; }
   const Eigen::VectorXd& effort_limits() const { return effort_limits_; }
   bool has_schema3_execution_contract() const { return has_schema3_execution_contract_; }
+  bool training_contract_exact() const { return training_contract_exact_; }
+  bool publishable_model_contract() const { return publishable_model_contract_; }
   double physics_step_dt_s() const { return physics_step_dt_s_; }
   double policy_step_dt_s() const { return policy_step_dt_s_; }
   int control_decimation() const { return control_decimation_; }
@@ -719,6 +731,8 @@ class PpOnnxPolicy {
   double policy_step_dt_s_ = std::numeric_limits<double>::quiet_NaN();
   int control_decimation_ = 0;
   bool has_schema3_execution_contract_ = false;
+  bool training_contract_exact_ = false;
+  bool publishable_model_contract_ = false;
   PpFaceNormalEnvelope face_normal_envelope_{};  // mandatory and content-bound for 179-D only
   std::vector<float> obs_f_;
   int obs_dim_ = kObsDim;  // detected from the model input at load (180 full / 175 deploy_parity)

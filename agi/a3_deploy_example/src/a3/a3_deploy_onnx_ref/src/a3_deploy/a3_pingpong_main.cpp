@@ -126,7 +126,8 @@ bool ValidateCommandLine(int argc, char** argv, std::string& error) {
       "--swing-speed", "--tilt-guard", "--trace-csv", "--vel-gate-margin",
       "--warmup-sec"};
   static const std::unordered_set<std::string> switch_flags = {
-      "--auto-leg-hold", "--backhand", "--base-estimator", "--dry-run",
+      "--allow-legacy-model-diagnostic", "--auto-leg-hold", "--backhand",
+      "--base-estimator", "--dry-run",
       "--leg-stand-gains", "--legs-passive", "--no-fall-guard", "--no-imu-yaw",
       "--model-preflight-only", "--no-publish", "--no-yaw-align", "--official-stand",
       "--oracle-pelvis",
@@ -375,6 +376,8 @@ int main(int argc, char** argv) {
                  " [--no-publish|--dry-run] [--warmup-sec S]\n"
                  "       [--model-preflight-only] (requires no-publish; validates ONNX and exits"
                  " before backend Init)\n"
+                 "       [--allow-legacy-model-diagnostic] (requires no-publish; forbidden with"
+                 " model-preflight-only)\n"
                  "       [--command-deadline-ms MS] (must be >0 and shorter than one policy period)\n"
                  "       [--effort-limit-ratio R] (0<R<=1; PD+measured effort safety envelope)\n"
                  "       [--planner] (LIVE planner: racket <- /racket/command_flat, base <- /a3/base_pose_flat over ros2;"
@@ -408,8 +411,19 @@ int main(int argc, char** argv) {
       Has(argc, argv, "--reference-playback") || run_mode == "reference-playback";
   const bool no_publish = Has(argc, argv, "--no-publish") || Has(argc, argv, "--dry-run");
   const bool model_preflight_only = Has(argc, argv, "--model-preflight-only");
+  const bool allow_legacy_model_diagnostic =
+      Has(argc, argv, "--allow-legacy-model-diagnostic");
   if (model_preflight_only && !no_publish) {
     std::cerr << "--model-preflight-only requires --no-publish/--dry-run\n";
+    return 2;
+  }
+  if (allow_legacy_model_diagnostic && !no_publish) {
+    std::cerr << "--allow-legacy-model-diagnostic requires --no-publish/--dry-run\n";
+    return 2;
+  }
+  if (allow_legacy_model_diagnostic && model_preflight_only) {
+    std::cerr << "--allow-legacy-model-diagnostic is forbidden with --model-preflight-only; "
+                 "preflight certifies only the publishable model contract\n";
     return 2;
   }
   const bool no_yaw_align = Has(argc, argv, "--no-yaw-align");
@@ -562,6 +576,7 @@ int main(int argc, char** argv) {
   pcfg.use_base_estimator = Has(argc, argv, "--base-estimator");  // leg-FK pelvis height (ground)
   pcfg.loc_mode = loc_mode;
   pcfg.diagnostic_no_publish = no_publish;
+  pcfg.allow_legacy_model_diagnostic = allow_legacy_model_diagnostic;
   // DEFAULT ON since 2026-07-03: with yaw_align the base yaw is engage-relative (starts at
   // identity, tracks the robot's REAL turning) — matching training's rotate-by-current-yaw
   // target transform. Required for turning models (model_9000 turns ~84 deg by design).
@@ -613,16 +628,27 @@ int main(int argc, char** argv) {
     return 3;
   }
   if (model_preflight_only) {
+    if (!pp->onnx().publishable_model_contract() ||
+        !pp->onnx().training_contract_exact()) {
+      std::cerr << "[pp PREFLIGHT] parsed model is not publishable/exact; refusing certificate\n";
+      return 3;
+    }
     std::cout << "[pp PREFLIGHT] accepted; backend_not_initialized=true"
               << " obs_dim=" << pp->onnx().obs_dim()
+              << " publishable_model_contract="
+              << (pp->onnx().publishable_model_contract() ? "true" : "false")
+              << " training_contract_exact="
+              << (pp->onnx().training_contract_exact() ? "1" : "0")
               << " training_contract_sha256=" << pp->onnx().training_contract_sha256()
               << " source_checkpoint_sha256=" << pp->onnx().source_checkpoint_sha256();
     if (pp->onnx().obs_dim() == a3_pingpong::kObsDim179) {
       const auto& envelope = pp->onnx().face_normal_envelope();
+      const auto& mount_signs = envelope.mount_normal_signs;
       std::cout << " normal_envelope_payload_sha256=" << envelope.payload_sha256
                 << " normal_envelope_train_bank_sha256=" << envelope.train_bank_sha256
                 << " normal_envelope_source_family_sha256=" << envelope.source_family_sha256
-                << " normal_envelope_mount_normal_sign_per_clip=1,-1";
+                << " normal_envelope_mount_normal_sign_per_clip="
+                << mount_signs[0] << "," << mount_signs[1];
     }
     std::cout << "\n";
     return 0;

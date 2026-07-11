@@ -58,6 +58,9 @@ _NE = _load_light_module("standalone_stage1_normal_envelope", "stage1_normal_env
 FORMAL_CLIP_ORDER = _NE.FORMAL_CLIP_ORDER
 derive_stage1_normal_envelope = _NE.derive_stage1_normal_envelope
 
+_AO = _load_light_module("standalone_atomic_output", "atomic_output.py")
+atomic_output_path = _AO.atomic_output_path
+
 # A stdlib+NumPy subprocess probe used on machines that intentionally have no Isaac packages.
 # The formal export path below uses these exact file-loaded modules; passing this flag proves the
 # package __init__ was not touched before ONNX/Torch are imported.
@@ -439,20 +442,6 @@ def main() -> int:
         _require(np.isfinite(h[key]).all(), f"harvest {key} contains NaN/Inf")
     motion = {k: torch.as_tensor(h[k], dtype=torch.float32) for k in MOTION_KEYS}
 
-    os.makedirs(args.out, exist_ok=True)
-    out_path = os.path.join(args.out, "policy.onnx")
-    module = _StandaloneExporter(actor, normalizer, motion).eval()
-    torch.onnx.export(
-        module,
-        (torch.zeros(1, in_dim), torch.zeros(1, 1)),
-        out_path,
-        export_params=True,
-        opset_version=11,
-        input_names=["obs", "time_step"],
-        output_names=["actions", "joint_pos", "joint_vel", "body_pos_w", "body_quat_w", "body_lin_vel_w", "body_ang_vel_w"],
-        dynamic_axes={},
-    )
-
     donor_meta = {e.key: e.value for e in donor.metadata_props}
     for req in (
         "hope_metadata_schema_version", "joint_names", "joint_stiffness", "clip_seg_lengths",
@@ -661,12 +650,40 @@ def main() -> int:
     donor_meta["source_checkpoint_sha256"] = _sha256_file(args.ckpt)
     donor_meta["motion_harvest_donor_sha256"] = donor_sha256
 
-    model = onnx.load(out_path)
-    del model.metadata_props[:]
-    for k, v in donor_meta.items():
-        entry = model.metadata_props.add()
-        entry.key, entry.value = k, str(v)
-    onnx.save(model, out_path)
+    # Every checkpoint, donor, clip, harvest, bank, contract and envelope input has now been
+    # validated. Only now create an export artifact, always at a same-directory temporary path.
+    # A failed graph export/check/save leaves an existing policy.onnx byte-identical and removes
+    # the owned temporary file; successful installation is one fsync + atomic replace.
+    os.makedirs(args.out, exist_ok=True)
+    out_path = os.path.join(args.out, "policy.onnx")
+    module = _StandaloneExporter(actor, normalizer, motion).eval()
+    with atomic_output_path(out_path) as temporary_path:
+        torch.onnx.export(
+            module,
+            (torch.zeros(1, in_dim), torch.zeros(1, 1)),
+            str(temporary_path),
+            export_params=True,
+            opset_version=11,
+            input_names=["obs", "time_step"],
+            output_names=[
+                "actions", "joint_pos", "joint_vel", "body_pos_w", "body_quat_w",
+                "body_lin_vel_w", "body_ang_vel_w",
+            ],
+            dynamic_axes={},
+        )
+        model = onnx.load(temporary_path)
+        del model.metadata_props[:]
+        for key, value in donor_meta.items():
+            entry = model.metadata_props.add()
+            entry.key, entry.value = key, str(value)
+        onnx.checker.check_model(model)
+        onnx.save(model, temporary_path)
+        installed_candidate = onnx.load(temporary_path)
+        onnx.checker.check_model(installed_candidate)
+        installed_meta = {entry.key: entry.value for entry in installed_candidate.metadata_props}
+        _require(installed_meta == {key: str(value) for key, value in donor_meta.items()}, (
+            "temporary ONNX metadata round-trip disagrees before atomic install"
+        ))
 
     print(f"[standalone-export] SUCCESS {out_path} ({os.path.getsize(out_path)/1e6:.1f} MB)")
     print(f"[standalone-export] in_dim={in_dim} actions={actor[-1].out_features} "

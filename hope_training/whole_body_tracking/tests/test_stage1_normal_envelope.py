@@ -189,6 +189,35 @@ def test_envelope_rejects_cross_sign_rows_and_mismatched_bindings(tmp_path: Path
         )
 
 
+def test_envelope_rejects_row_inside_zero_but_outside_runtime_reference_margin(
+    tmp_path: Path,
+):
+    bank = tmp_path / "questions_train.npz"
+    _, family_sha, _ = _write_bank(bank)
+    with np.load(bank) as original:
+        arrays = {key: np.asarray(original[key]) for key in original.files}
+    reference = np.asarray(arrays["forehand/clip_normal"], dtype=np.float64)
+    reference /= np.linalg.norm(reference)
+    perpendicular = np.asarray([reference[1], -reference[0], 0.0], dtype=np.float64)
+    perpendicular /= np.linalg.norm(perpendicular)
+    row = perpendicular + 0.5e-6 * reference
+    row /= np.linalg.norm(row)
+    assert row[0] > 1e-6
+    assert 0.0 < float(row @ reference) <= float(NE.RUNTIME_DOT_TOLERANCE)
+    arrays["forehand/demanded_normal"] = arrays["forehand/demanded_normal"].copy()
+    arrays["forehand/demanded_normal"][0] = row
+    np.savez(bank, **arrays)
+    changed_sha = hashlib.sha256(bank.read_bytes()).hexdigest()
+
+    with pytest.raises(ValueError, match="row dot must be > 0.000001"):
+        NE.derive_stage1_normal_envelope(
+            bank,
+            expected_train_bank_sha256=changed_sha,
+            expected_source_family_sha256=family_sha,
+            mount_normal_sign_per_clip=(1.0, -1.0),
+        )
+
+
 def test_envelope_rejects_wrong_clip_order_and_non_unit_rows(tmp_path: Path):
     bank = tmp_path / "questions_train.npz"
     bank_sha, family_sha, _ = _write_bank(bank)
@@ -256,6 +285,16 @@ def test_both_export_paths_derive_from_exact_bank_and_runtime_gate_is_precommit(
     assert "load_question_bank(" in standalone
     assert "expected_split=\"train\"" in standalone
     assert "validate_runtime_motion_contract(" in standalone
+    standalone_main = standalone.split("def main() -> int:", 1)[1]
+    atomic_install = standalone_main.index("with atomic_output_path(out_path)")
+    for validation in (
+        "require_checkpoint_contract_binding(",
+        "_bind_schema3_donor_metadata(",
+        "validate_runtime_motion_contract(",
+        "derive_stage1_normal_envelope(",
+    ):
+        assert standalone_main.index(validation) < atomic_install
+    assert atomic_install < standalone_main.index("torch.onnx.export(")
 
     policy = (
         ROOT.parents[1]

@@ -558,8 +558,10 @@ ball. Therefore G06 remains Partial and Gate 3/Gate 3B remains open.
 
 The production runner now also has a fail-closed `--model-preflight-only` path. It requires
 `--no-publish` or `--dry-run`, constructs `PpPolicy` before any backend object is created, and on
-success emits the accepted observation width plus training-contract and source-checkpoint SHA-256
-before exiting. This safely separates “the formal 179 export is loadable under the production
+success emits parsed `publishable_model_contract=true`, `training_contract_exact=1`, the accepted
+observation width, and training-contract/source-checkpoint SHA-256 before exiting. No-publish is a
+transport/runtime diagnostic state, not permission to relax model metadata. This safely separates
+“the formal 179 export is loadable under the production
 metadata contract” from “the vendor backend has started.” The former still requires an isolated
 binary run with the formal candidate; the latter, first actor tick, normal-envelope/recovery
 contracts and Gate 3/Gate 3B behavior all remain open.
@@ -600,6 +602,13 @@ same ONNX is intentionally rejected by the stricter source below because it lack
 metadata. Re-export/rebuild, first backend tick, canonical recovery tuple and full vendor MuJoCo
 Gate 3/Gate 3B behavior remain open, so G06 stays Partial.
 
+Red-team follow-up downgrades the 2026-07-11 loader proof to lifetime/backend-order evidence only:
+at that source revision `diagnostic_no_publish` was also passed as the loader's legacy-contract
+escape, and the optional real-model test explicitly enabled it. The inspected model happened to
+declare exact lineage, but the run did not prove that no-publish and live-publish enforced the same
+parsed contract. The stricter source below removes that coupling; a new envelope-bearing model and
+rebuilt production binary must rerun the proof before publishable-model loading is closed again.
+
 #### 2026-07-12 content-bound per-clip demanded-normal source gate
 
 Formal 179 export and loading now bind the raw-A normal distribution rather than accepting every
@@ -608,7 +617,8 @@ opponent-facing physical-B unit vector. The train NPZ must be exact schema 3, sp
 the checkpoint contract. The contract and both exporters must carry the exact
 `mount_normal_sign_per_clip=[+1,-1]`. Each clip is processed alone: normalize raw-A rows only after
 the bank's `2e-4` unit check; require `sign[clip] * raw_A.x > 1e-6` for physical-B wire
-representability and a positive raw-A row/reference dot; normalize the row-vector sum; and save
+representability and `raw_A_row · reference_A > 1e-6`, the same open-hemisphere margin enforced at
+runtime; normalize the row-vector sum; and save
 the minimum row-to-center dot. This
 `per_clip_sign_preserving_spherical_mean_cap_v1` construction never averages forehand with
 backhand or opposite face signs.
@@ -639,3 +649,29 @@ A full vendor-dependency Release build and a freshly re-exported real 179 model 
 importantly, a spherical cap is an on-distribution envelope, not a collision or behavior proof:
 self-hit instrumentation, the recovery tuple and no-reset vendor MuJoCo Gate 3/Gate 3B remain
 open. G06 stays `Partial`.
+
+#### 2026-07-12 publishable-model and atomic-export hardening
+
+`PpPolicyConfig::diagnostic_no_publish` no longer reaches the ONNX contract escape. Plain
+`--no-publish`, `--dry-run` and `--model-preflight-only` now load with the same publishable
+schema-2 packaging, exact/complete schema-3 execution contract, normalization, effort envelope,
+registered layout and (for 179) full content-bound normal envelope required by a live publisher.
+The only legacy escape is `--allow-legacy-model-diagnostic`; CLI validation requires no-publish
+and rejects its combination with model-preflight before loading a model or constructing a backend.
+The optional real-model GTest now uses the strict constructor and requires parsed exact/schema-3/
+publishable flags plus the 179 envelope when applicable.
+
+The production preflight certificate is also derived rather than asserted by mode: it checks the
+parsed booleans, prints `publishable_model_contract=true training_contract_exact=1`, and prints the
+parsed envelope sign table. `verify_face179_preflight_failclosed.py` runs one valid model then
+creates temporary metadata-stripped, missing-envelope and `training_contract_exact=0` variants;
+each must exit nonzero with no backend marker, while legacy-diagnostic plus preflight must exit 2.
+The helper/unit source gate passes, but the real negative integration is intentionally skipped on
+this host because neither the rebuilt vendor runner nor a new envelope-bearing ONNX exists here.
+
+The standalone exporter now completes every checkpoint/donor/motion/harvest/bank/envelope check
+before creating a graph, writes only an owned same-directory temp, checks the ONNX and metadata
+round trip, fsyncs, and atomically replaces the destination. Failure tests prove an existing
+`policy.onnx` remains byte-identical and no temp remains. Focused host results are `41 passed` plus
+one skipped real runner/model integration; planner wire remains `11 passed`. This is source
+hardening, not a renewed vendor build/preflight or Gate 3 behavior result, so G06 remains Partial.

@@ -1031,7 +1031,9 @@ per-clip raw-A demanded-normal envelope from the bank bytes during metadata atta
 checkpoint contract, live export configuration and envelope payload must all agree on exact
 `mount_normal_sign_per_clip=[+1,-1]`. A raw-A row is wire-representable only when
 `sign[clip] * raw_A.x > 1e-6`: the external schema-2 physical-B normal remains positive-x, while
-the backhand actor/bank raw-A normal is negative-x. An older 179
+the backhand actor/bank raw-A normal is negative-x. Every row must also satisfy
+`raw_A_row · reference_A > 1e-6`, identical to the deploy runtime gate; a merely positive
+near-boundary dot fails export. An older 179
 ONNX that lacks the envelope metadata is intentionally rejected by the current C++ loader.
 
 The Isaac-free standalone exporter has the same rule and cannot copy the envelope from its donor.
@@ -1052,6 +1054,12 @@ envelope, then verifies the bank SHA against the checkpoint-side training contra
 exam bank, omit `--train-bank`, or reuse a donor's `stage1_*` labels for a 179 artifact.
 `--contract-import-smoke` is a dependency-light probe that exits before ONNX/Torch imports and
 asserts that neither `whole_body_tracking/__init__.py` nor Isaac modules were loaded.
+
+The standalone exporter validates the checkpoint contract/binding, donor, both motions, harvest,
+train bank and derived envelope before producing a graph. It writes a same-directory owned temp,
+checks the ONNX and metadata round trip, fsyncs, and atomically replaces `policy.onnx`. Any
+validation, export, checker or save failure leaves an existing final model byte-identical and
+removes the temp; do not replace this path with a direct write to the final filename.
 
 Headless video:
 

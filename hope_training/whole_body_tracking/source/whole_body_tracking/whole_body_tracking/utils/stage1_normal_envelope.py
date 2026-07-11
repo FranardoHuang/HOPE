@@ -226,10 +226,15 @@ def derive_stage1_normal_envelope(
                     "schema-2 wire cannot represent (sign[clip] * raw_A.x must be > 1e-6)"
                 )
             signed_dots = unit_rows @ unit_reference
-            if np.any(signed_dots <= 0.0):
+            # Export and runtime share one open-hemisphere margin. Accepting a bank row at a
+            # smaller positive dot than the C++ gate would create a training question the
+            # deployed actor can never receive.
+            reference_dot_min = float(RUNTIME_DOT_TOLERANCE)
+            if np.any(signed_dots <= reference_dot_min):
                 raise ValueError(
-                    f"normal-envelope clip {name!r} crosses the +Y/A-frame sign hemisphere; "
-                    "opposite faces must never be averaged"
+                    f"normal-envelope clip {name!r} is not inside the runtime raw +Y/A "
+                    f"reference hemisphere (row dot must be > {RUNTIME_DOT_TOLERANCE}); "
+                    "opposite faces must never be averaged; near-boundary rows are also rejected"
                 )
             vector_sum = unit_rows.sum(axis=0)
             vector_sum_norm = float(np.linalg.norm(vector_sum))

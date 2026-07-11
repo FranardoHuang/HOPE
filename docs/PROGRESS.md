@@ -1420,3 +1420,15 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   `11 passed`，另有 locale+BH 转换的 dependency-light C++ compile/run smoke。旧 SZ formal ONNX
   仍会被新 loader 拒绝；新 ONNX、full
   vendor build、first tick 与 Gate3 行为门全开，G05/G06 仍 Partial。
+- 179 merge 前第二轮红队又抓到一条 certificate blocker：`--no-publish` 同时被当成 legacy
+  model escape，导致旧 preflight/optional real-model test 没证明“禁发”和“合同放宽”相互独立。
+  修正版把两者拆开；普通 no-publish/dry-run/preflight 与 live publish 同样强制 schema2 packaging、
+  exact+complete schema3、normalization/effort/layout 和 179 envelope。旧模型只可显式带
+  `--allow-legacy-model-diagnostic`，且必须 no-publish、禁止和 preflight 并用。preflight 从解析值
+  断言并打印 `publishable_model_contract=true training_contract_exact=1` 和解析后的 sign。新增真实
+  runner optional 负向集成：strip metadata、删 envelope、exact=0 都须 backend 前 rc!=0；本机无
+  rebuilt vendor binary/新 envelope ONNX，因此只跑 helper/source gate，真实集成保持 skip/open。
+  standalone export 同时改为全输入先验后才写同目录 temp，ONNX+metadata round-trip 后 fsync/
+  atomic replace；失败不覆盖旧 `policy.onnx`、不留 temp。derive/runtime 的 reference 门统一为严格
+  `dot>1e-6`，近边界训练行有回归拒绝。focused host=`41 passed, 1 optional integration skip`，
+  planner wire=`11 passed`；这仍不是 vendor build/preflight/Gate3 行为通过。

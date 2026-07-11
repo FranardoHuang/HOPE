@@ -74,10 +74,13 @@ ROS control chain — historical), `agi/a3_deploy_example/PINGPONG_NEW_CHECKPOIN
 
 Before any 179-D Gate 3 attempt, run the production binary with
 `--planner --no-publish --model-preflight-only`. This mode validates the ONNX graph and the full
-metadata/lineage contract, prints the accepted observation width and bound SHA values, then exits
+metadata/lineage contract, prints parsed `publishable_model_contract=true`,
+`training_contract_exact=1`, the accepted observation width and bound SHA values, then exits
 before AimRT/backend initialization. `PpPolicy` does execute its deliberate zero-observation ONNX
 prewarm inference; no policy-driver/backend tick or transport starts. It is intentionally weaker
 than a no-publish first tick and does not replace the vendor MuJoCo Gate 3/Gate 3B run.
+No-publish alone never relaxes model metadata. `--allow-legacy-model-diagnostic` is the only legacy
+escape; it requires no-publish and is forbidden with model preflight.
 
 > **RETIRED 2026-07-04 — the python control chain.** The old "Path B" (hope_wbc_runner
 > + agibot_hardware_bridge driving `/body_drive` over ros2) is ABANDONED: closed-loop

@@ -142,9 +142,12 @@ struct PpPolicyConfig {
   // default on hardware. The A/B/C rehearsal selects fabricated explicitly via
   // --loc-mode. See LocMode + SIM_DEPLOY_REHEARSAL.md.
   LocMode loc_mode = LocMode::kPerfectTracking;  // A/B/C localization mode (see LocMode).
-  // Explicit process-wide no-publish diagnostics may inspect legacy/raw artifacts and the
-  // perfect-tracking dropout behavior. This must never be enabled for a publish-capable run.
+  // Process-wide no-publish controls runtime diagnostic relaxations and verbose first-tick
+  // logging only. It does NOT relax the ONNX/model contract.
   bool diagnostic_no_publish = false;
+  // Separate, explicit escape for inspecting a legacy model. The CLI requires no-publish and
+  // forbids this flag in model-preflight mode, so a preflight can never certify a relaxed model.
+  bool allow_legacy_model_diagnostic = false;
   // DEFAULT FLIPPED TO TRUE (2026-07-03): with yaw_align (below, default on) the base yaw is
   // expressed relative to the ENGAGE heading — it starts at identity and then tracks the robot's
   // REAL turning, which is exactly what training saw (targets rotated by the current base yaw,
@@ -318,11 +321,14 @@ struct PpPolicyConfig {
 class PpPolicy {
  public:
   PpPolicy(const std::string& onnx_path, PpPolicyConfig cfg = {})
-      : onnx_(onnx_path, cfg.diagnostic_no_publish), cfg_(cfg), level_(cfg.level),
+      : onnx_(onnx_path, cfg.allow_legacy_model_diagnostic), cfg_(cfg), level_(cfg.level),
         swing_speed_(cfg.swing_speed), swing_dir_(cfg.start_backhand ? -1 : 1),
         legs_passive_(cfg.legs_passive), waist_passive_(cfg.waist_passive),
         leg_clamp_rad_(cfg.leg_clamp_rad), leg_smooth_alpha_(cfg.leg_smooth_alpha),
         last_action_(Eigen::VectorXd::Zero(kNumJoints)) {
+    if (cfg_.allow_legacy_model_diagnostic && !cfg_.diagnostic_no_publish)
+      throw std::runtime_error(
+          "pingpong: legacy model diagnostics require process-wide no-publish");
     if (!build_src_to_sdk(onnx_.joint_names(), isaac_to_sdk_))
       throw std::runtime_error("pingpong: ONNX joint_names do not map onto the backend layout");
     if (!std::isfinite(cfg_.dt) || cfg_.dt <= 0.0)
@@ -334,7 +340,7 @@ class PpPolicy {
         std::fabs(cfg_.dt - onnx_.policy_step_dt_s()) > 1e-12)
       throw std::runtime_error(
           "pingpong: runtime policy dt does not exactly match schema-v3 ONNX policy_step_dt_s");
-    if (!cfg_.diagnostic_no_publish && !onnx_.has_schema3_execution_contract())
+    if (!cfg_.allow_legacy_model_diagnostic && !onnx_.has_schema3_execution_contract())
       throw std::runtime_error(
           "pingpong: publish-capable runtime requires a complete schema-v3 ONNX execution "
           "contract");
