@@ -203,6 +203,12 @@ PYTHONPATH="$REPO/hope_ws/src/hope_planner" python3 -m pytest -q \
   --gtest_filter='PpPlannerInput.*:PpFace179Wire.*' --gtest_color=no
 ```
 
+2026-07-11 isolated evidence at source commit `8d56ea86`: the Release target
+`a3_deploy_onnx_ref_pingpong` linked successfully, the focused filter passed 10/10 and the full
+native suite passed 195 with 4 optional-asset skips. This configure deliberately used
+`ENABLE_A3_ROS_MSGS=OFF` and `ENABLE_A3_AIMRT_BACKEND=OFF`; it is not the ROS/AimRT or MuJoCo
+runtime gate. See G06 for the content-addressed path and dependency/binary SHA values.
+
 Safety finite checks rely on IEEE NaN/Inf semantics. Verify Release did not
 re-introduce fast-math:
 

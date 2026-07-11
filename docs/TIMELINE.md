@@ -1533,4 +1533,8 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `deploy_parity_face179` term metadata、face/bank/SHA 谱系、planner mode、正 X unit normal，schema1
    不能 engage。坏 payload/no-solution 两条 wire 都主动发 finite `valid=0`，接收端对 active-face 后
    的 malformed/unknown 包记 revoke；观测严格是 175 逐位前缀+4尾部。现仅源码/单测，train-bank
-   normal envelope、canonical recovery、vendor x86 build、no-publish trace、Gate3 runtime 均未过。
+   normal envelope、canonical recovery、vendor full-dependency x86 build、no-publish trace、Gate3 runtime 均未过。
+49. 【franco/Codex】**179 vendor-source 离线 Release 门过，但不冒充 Gate3**——commit `8d56ea86`
+   以 archive 落到 Pod1 隔离路径，实际 `a3_deploy_onnx_ref_pingpong` 链接成功；focused 10/10、
+   native 195 pass/4 optional skip、78 compile rows 无 fast-math。此构建关闭 ROS/AimRT，未加载
+   formal 179 ONNX、未 tick vendor MuJoCo；full dependency/first-tick/Gate3B 继续 open。

@@ -1394,3 +1394,7 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   schema-3 train bank 与双 SHA 绑定；world normal 必须 unit、正 X，坏包/无解主动发 `valid=0`
   revoke，不能靠静默让旧命令多活。旧 schema1 默认不变；当前仅源码门，vendor build/runtime 未过。
   训练 bank 的 per-clip normal envelope 与 post-swing canonical recovery tuple 仍是正式 runtime blocker。
+- 179 vendor-source 离线门在隔离 Pod1 archive (`8d56ea86`) 通过：实际 ping-pong executable
+  Release 链接，focused C++ 10/10、全套 195 pass/4 optional-asset skip，78 条 compile command
+  无 fast-math；训练/eval checkout 未改。ROS/AimRT full-dependency、formal ONNX first tick 与厂商
+  MuJoCo Gate3/Gate3B 行为卷仍未过，G06 继续 Partial。

@@ -514,7 +514,8 @@ rho. Any malformed/unknown row after an active face tuple records `invalid_after
 turns a bad solve or payload into an explicit finite `valid=0` row on both wires, so silence cannot
 keep an old swing eligible for the longer command timeout. Schema 1 remains the default for
 existing models and cannot engage a 179 actor. This is not yet a gate result: the
-vendor x86 build, a no-publish first-tick parity trace, and full Gate 3 MuJoCo run are pending.
+vendor-source offline x86 build is recorded below, while a ROS/AimRT-enabled build, no-publish
+first-tick parity trace, and full Gate 3 MuJoCo run are pending.
 Active-swing fields are atomic. Post-swing recovery is not yet exact: the current Gate 3 runner
 combines a synthesized base-anchored hold position with the previous swing's velocity/normal,
 and no Phase-1 contract proves that hybrid tuple is on-distribution. A canonical recovery tuple
@@ -533,3 +534,20 @@ The same-policy Isaac/MuJoCo gap is localized in stages rather than one aggregat
 Each stage binds joint order, action scale/clamp, PD, dt/decimation, initial/ready state, signed face,
 contact/termination and vendor MJCF SHA. Gate 3/Gate 3B is the final behavioral leg; Isaac remains a
 training/diagnostic leg even if its score is higher.
+
+#### 2026-07-11 isolated vendor-source build evidence
+
+Source commit `8d56ea86f6450c198836969360bc133146934617` was archived into the isolated
+Pod1 path `/workspace/codexschema/gate3_face179_8d56ea8`; neither the live training checkout nor
+the eval checkout was changed. The local ONNX Runtime 1.19.2 archive used by the build has SHA-256
+`eb00c64e0041f719913c4080e0fed7d9963dc3aa9b54664df6036d8308dbcd33`. A Release configure with
+ROS messages and AimRT disabled built both `run_tests` and the actual
+`a3_deploy_onnx_ref_pingpong` executable. Focused `PpPlannerInput.*:PpFace179Wire.*` was 10/10;
+the full native suite was 195 passed / 4 skipped (only absent optional fixture/asset tests).
+The test binary SHA-256 was
+`1349038f5a3bd057026630f1fdcc9636cf68d5acef1041712911e2808140a1fe`; all 78 compile commands
+contained the finite-safety flags and none contained `-ffast-math` or `-ffinite-math-only`.
+
+This closes the offline vendor-source compile/test leg only. It does not exercise ROS/AimRT,
+load a formal 179 ONNX, tick the production backend, instantiate the vendor MuJoCo, or score a
+ball. Therefore G06 remains Partial and Gate 3/Gate 3B remains open.
