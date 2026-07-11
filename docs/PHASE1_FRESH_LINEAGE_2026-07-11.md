@@ -187,6 +187,9 @@ tests and the full dependency-supported union passed `153`. The three GPU lanes 
 reached a real `Learning iteration` marker. Their first saved checkpoints prove the intended
 lineage binding:
 
+The post-launch judge correction was verified separately at `08e438e` in a detached evaluation
+worktree (`154 passed`); the live training checkout remains untouched at `6d93bcb`.
+
 | Arm | First checkpoint | Embedded contract binding | Lineage exact |
 | --- | --- | --- | --- |
 | M3 old / S1 | each `model_17000.pt` | schema 3; SHA matches the corresponding sidecar | `0` |

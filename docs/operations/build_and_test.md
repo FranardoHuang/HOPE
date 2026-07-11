@@ -83,8 +83,8 @@ Verified later on 2026-07-11 against the current Phase-1 candidate implementatio
   Hydra test dependencies available.
 - after the diagnostic-export/judge contract review, the local dependency-light formal group is
   **90 passed** and the launch-commit Pod runs passed **130** Isaac/Hydra tests and **153** full
-  union tests. The subsequent source-first/inexact-judge regression expands the union to **153
-  passed, 1 optional Torch skip** locally; re-run it on the final Pod checkout after training.
+  union tests. The subsequent source-first/inexact-judge regression expands the union to **154
+  passed** in a detached Pod evaluation worktree while the live training checkout remains fixed.
 
 Reproduce the 122-test Isaac-dependent group on a prepared RunPod checkout:
 
