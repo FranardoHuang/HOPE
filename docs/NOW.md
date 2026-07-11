@@ -33,13 +33,21 @@ Rules:
   available。唯一一次 LZ-seed3 scene-start `malloc` 失败已保留，完全同配方的精确单臂
   retry 成功；不能把失败臂算成第 25 条。
 - 两 Pod 训练 checkout 均冻结在 clean `6d93bcb`，有任一训练存活就禁止 pull/改工作树；
-  detached evaluator 已更新到 clean `46a0ce2`。每 Pod 三条常驻 checkpoint worker 分别处理
-  original cadence / scaleout causal / scaleout fresh：Pod1 PGID
-  `1366304/1366306/1366308`，Pod2 `189565/189567/189569`。新增 18 臂共 142 个 clean q10
-  里程碑任务，不等 terminal 才判；只按这些精确 PGID 管理，禁止 broad kill。
-- fresh SZ exact clean-q10 已首次跑通增长曲线：seed1 的 `0/1k/2k=0.00/0.50/0.90`，seed2
-  `0.00/0.50/1.00`；这只证明方向，不能 stop/promote，决定仍需同卷 50/侧。causal 20k
+  detached evaluator 仍冻结在 clean `46a0ce2`。原始六臂的旧存档续训/从零训练、
+  新增 18 臂扩池的旧存档续训/从零训练已拆成独立后台判卷进程(worker)：
+  Pod1 PGID `1394150/1394810/1380340/1397266`；Pod2 的原始续训队已完成，其余
+  `194276/192815/195085`。新增 18 臂共 142 个每侧 10 题(clean q10)里程碑任务，
+  不等终档才判；只按这些精确 PGID 管理，禁止 broad kill。
+- 从零训练的 SZ(共用拍面+零摩擦、当前唯一合同精确格)clean-q10 已首次跑通增长曲线：
+  seed1 的 `0/1k/2k=0.00/0.50/0.90`，seed2
+  `0.00/0.50/1.00`；这只证明方向，不能停训/晋级，决定仍需同卷 50/侧。旧存档续训(causal)20k
   M3 old/S1=`0.45/1.00`，M2=`0.50/0.50`，全部仍是 inexact diagnostic。
+- 非零摩擦 SP 格已纠正为 inexact 诊断：PhysX 系数与 MuJoCo `frictionloss`
+  物理语义不同，不能因为共用拍面约定就冒充 exact。只有 SZ 是当前
+  跨引擎执行合同的 formal target；SZ q50 照常做，部署 plant/Gate3B 另等标定摩擦 SC。
+- Franco/v6/v7 十段空挥已完成内容寻址 intake 和 Pod1 GVHMR 10/10 结构重建；
+  帧数/shape/finite 全过且工具、权重、环境、输入输出 SHA 已入库。这不是 A3
+  安全验收；下一步是 GMR 诊断重定向、canonical body 形状、自碰/桌网余隙和逐帧回球可行性。
 - 连续时序有明确缺口：现役虽不传送并在同一 episode 连续换题，但完整 clip-wrap+hold 的同侧
   击球间隔理论中位约 `3.75 s`；场馆保守 A-B-A 样本中位 `1.903 s`，新题往往在旧 clip 播完前
   已出现。当前 24 臂不改合同，也不能写成“随时来下一球已通过”；后续另开 T0/T1 event-driven
@@ -175,6 +183,13 @@ Rules:
 | 预警时间(target reveal lead) | 从"策略第一次看到有效目标"到"必须触球"的时间。真机上=规划器出有效计划→击球;训练里现状=整个起手时长(正手 1.3s/反手 0.9s,v5 对 0.75/0.42s) |
 | 等待混合采样(hold mixture) | 等球时长大部分抽短档(保持击球密度)、小概率抽长档(覆盖长等待)——治"长等待稀释训练效率"(jiayi 均匀 [50,400] 把击球密度砍半的教训) |
 | checkpoint 抽查(MuJoCo 曲线) | 每个训练存档落盘后,后台自动导出+MuJoCo 考卷,攒出一条低频"考卷曲线"与 Isaac 高频曲线并排看——平时追 Isaac,节点看 MuJoCo |
+| q10 / q50 | q10=每侧 10 题的快速方向卷，只看有没有长进，不许停训/晋级；q50=每侧至少 50 题的同卷决策考试 |
+| SZ / SP / LZ / LP | 四个从零训练格：S=共用正反手拍面约定，L=旧的正反手异号约定；Z=零关节摩擦，P=历史非零摩擦。只有 SZ 是当前 exact/formal，其余只诊断 |
+| causal / fresh | causal=从旧存档接着练，能看方向但谱系不纯；fresh=从零训，才可能成为新正式谱系 |
+| carry-state | 下一拍直接继承上一拍结束时的真实身体状态，不传送、不 reset |
+| TOPP 重定时 | 不改挥拍的空间路径，只在关节速度/加速度/力矩/平衡约束下重排每段时间，把太长 clip 压到最短可行时间 |
+| 视频 intake / GVHMR / GMR | intake=按字节和 SHA 登记原视频；GVHMR=从单目视频估人体动作；GMR=把人体动作重定向成 A3 机器人关节轨迹 |
+| exact / formal target | exact=训练与判卷执行合同能逐项对上，不等于真机物理已对齐；formal target=本轮预先指定可进决策卷的格 |
 | Gate 3(jiayi 的全链路闭环) | **人话完整版:上真机前的"彩排考试"**。平时的判卷(bank 考卷)只考策略本身:直接把"这颗球要什么拍面/拍速"喂给策略,像开卷考。Gate 3 考的是**整条真机流水线**:在厂商官方 MuJoCo 仿真里,把真机上会跑的每个环节原样接起来——①发一颗(假)球 → ②**真正的规划器**看球算"该用什么拍面拍速" → ③**真机同款 C++ 运行器**把指令发给机器人 → ④仿真机器人执行。任何一环有 bug(时序、消息格式、坐标系)都会在这里暴露,而 bank 考卷看不见。jiayi 建的,现版判据="稳不稳"(接得上战、挥得完、不摔),已用 10 个固定落点各打一回合全过 |
 | Gate 3B(上台考版,**建设中,2real 最高优先**) | Gate 3 只判"稳",不判"打得好不好"。Gate 3B = Gate 3 底座 + 两处改造:①发球不再是固定 10 个点,改成**按当前训练阶段的来球分布随机采样**(考卷和课本同分布);②外挂一个判分器算**击球率/上台率**(Gate 3 用的是假球、没有拍球接触物理,所以判分器在击球瞬间取拍面的真实位姿/速度,套场馆标定的接触模型把球的落点推算出来)。它是**入账级最高档**的尺子=离真机最近的一次全链路模拟考;分工 jiayi 底座/接线、claude 采样器/判分器 |
 | 加固包 | 部署抗噪项打包测(相位噪声/感知毛病/减速塑形等):预期不涨分,判部署轴,整包过/整包拆 |
@@ -643,8 +658,8 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 | --- | --- | --- | --- | --- |
 | 全栈正确性尺+C++安全包+拍心/拍速合同收口 | ★★★ | **Codex** | `main` | 双 RunPod 源码验收已绿(portable/ROS C++、whole-body、planner);下一检查点=重出 fresh schema-v3 ONNX+修后考卷,旧判分器数字不入账 |
 | V5 专业动作可迁移性+Phase 加速器 | ★★★ | **Codex** | `main` | manifest+保守 halving 已就绪;下一检查点=验证触球帧/拍速口径,把行程/时间律报告接成 feasibility producer,再做 BankExam→scorecard adapter;两者完成前不自动发训练 |
-| 新动作库(Franco/v6/v7)+TOPP 最短可行时间+任意时刻下一拍恢复 | ★★★ | **Codex** | `codex/schema-v3-isaac-adapter` | 07-11 已发现 Downloads 三组共 10 段空挥并完成只读视频清点;不改现役 24 臂。下一检查点=落内容寻址 intake、同一 GVHMR→GMR→A3 管线、原始/重定时双重自碰撞与可行性审计、逐帧回球率找击球锚;随后先泛化动态 clip catalog/共同问题轴,再做 2 动作 vs 4 动作、native vs TOPP、clip-wrap vs event-driven ready/recovery 的配对消融。只做离线/仿真,未过安全门不进真机。 |
-| Phase-1 schema-v3 Isaac 同题 adapter + 候选重排 | ★★★ | **Codex** | `codex/schema-v3-isaac-adapter` | **满池训练+checkpoint 曲线运行中(07-11)**:24 条=`8 continuation + 16 fresh face×plant 2×2×4 seeds`，六卡均实测 4 条并发；所有首 checkpoint finite 且 SHA 绑定。causal 17/18/19k 已显示峰值/回落，证明不能等终档；fresh exact clean-q10 正重判。训练固定 clean `6d93bcb`，eval `fdc2d36`；causal/LZ/LP 永远 inexact，仅 SZ 是 formal target。下一检查点=完成 fresh 0/1k/2k 曲线并启动长期 cadence，再按 paired 证据选 q50/终审；完成前不报胜者 |
+| 新动作库(Franco/v6/v7)+TOPP 最短可行时间+任意时刻下一拍恢复 | ★★★ | **Codex** | `codex/schema-v3-isaac-adapter@e1ac63a` | 10 段空挥已完成内容寻址 intake 与 GVHMR 10/10 结构重建；尚未完成视觉质量、canonical body 形状、A3 安全和击球可行性验收。下一检查点=GMR 诊断链→schema-2→关节限位/自碰/桌网余隙→逐帧回球率；幸存者再做 native/TOPP、2 动作 vs 4 动作、完整 clip vs 事件驱动 recovery。只做离线/仿真，未过安全门不进真机。 |
+| Phase-1 schema-v3 Isaac 同题 adapter + 候选重排 | ★★★ | **Codex** | `codex/schema-v3-isaac-adapter@e1ac63a` | **满池训练+checkpoint 曲线运行中(07-11)**:24 条=`8 旧存档续训 + 16 从零训练`，六卡均实测 4 条并发；所有首 checkpoint finite 且 SHA 绑定。早判已显示峰值/回落，SZ seed1/2 的 0/1k/2k 增长已出；M2 终档 old/S1 q10=`0.40/0.35`，因卷小且谱系 inexact 不裁决。训练固定 clean `6d93bcb`，live eval `46a0ce2`；causal/SP/LZ/LP 都 inexact，仅 SZ 是 formal target。下一检查点=继续同卷里程碑曲线、SZ q50 与终档完整性；完成前不报胜者。 |
 | HitterPure RallyFinal clean-base task: x-lock/lunge, settle/slip, backhand clearance, front-facing constraints + Isaac/AGI rally gates | ★★★ | codex for dongc1 | `hitter` | PATCH COMPLETE / GATES PENDING 2026-07-10: clean-base Final task, native move-settle-arm readiness, strict metadata/eval/gate plumbing and docs implemented; host tests + x86 build pass. Next = Isaac smoke/train/ablation, Final ONNX MuJoCo scores, then no-rescue AGI closed-loop with physical contact/landing evidence |
 | **加速度包络标定两件套(franco 07-09,时间律的下一层)**:①跟踪破裂标定(chirp/斜坡加压参考×现成跟踪策略,逐关节"边平衡边跟"真上限=判炸器 L1 升级);②贴限 vs 摊时消融(v5syn T_a 三档)——R9d 读数落地后一起排 | ★★★ | claude | — | 设计已入 research 时间律文档§六 |
 | GMR 源头修复(pod GMR 分支 `hope-frame0-warmup`:warm-up/帧0/逐关节限位旗标)+ 判炸器(repo 分支 `motion-feasibility-audit` 已推 origin)——两分支待 franco 审;接线与 L6 重生成见队列 0.6/0.7 行 | ★★★ | claude | 两分支 | 已验证收口(TIMELINE 07-08);合入即防复发 |
