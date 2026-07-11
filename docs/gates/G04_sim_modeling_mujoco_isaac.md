@@ -141,3 +141,20 @@ python3 -m pytest -q \
 
 Remaining G04 limits include rigid-body mass/inertia/COM and asset SHA parity,
 contact/solver parameters, DR distributions and calibrated joint friction.
+
+## Audit update 2026-07-12: fit reference and stand diagnostic
+
+- The existing Torch ball-physics parity test no longer depends on a lost default Mac path. Its
+  default NumPy reference is reconstructed in-repo from the committed fit-lineage contact kernel
+  and venue YAML, and every run prints their content SHA tuple. Explicit missing `RECORD_DIR` and
+  zero/non-finite normals fail loudly. Seven dependency-light tests pass. A local Torch CPU
+  environment also reports `ALL PASSED`: table/paddle contact maximum error is below `4.63e-9`,
+  RK4 position error is zero at reported precision, and first-landing error is `0.000 mm`.
+- `scripts/view_a3_stand.py` now provides a root-source-bound plain-MuJoCo diagnostic for the vendor
+  MJCF. It parses production default pose/Kp/Kd from the tracked header, leaves neck joints passive
+  per the 29-DOF PD_STAND contract, and can report finite state, pelvis tilt/z and foot contacts.
+  Source/identity tests pass, but the 10-second run remains unrun here because MuJoCo is absent.
+  This does not change the MJCF/integrator and is not a Gate3 result.
+
+See `docs/research/yikang_selective_integration_20260712.md` and
+`docs/operations/run_deploy_dryrun.md`. G04 remains `Partial`.

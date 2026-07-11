@@ -26,7 +26,7 @@ and (b) produce spin.
 | What | Where | State |
 | --- | --- | --- |
 | v0 physics implementation (flight, table/paddle contact, landing predictor, PACE-style rewards, torch + C++ mirror) | branch `origin/ball-physics-realistic`, under `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/physics/` + `configs/ball_physics.yaml` | Code sound, architecture reusable; **constants fit on a different rig/table/ball**; paddle block never fit on racket data at all |
-| v0 fitting/analysis code | **Mac-local only**: `/Users/yyk956614/Desktop/Hope/Record` — `analysis/flight_model/simulator.py`, `analysis/contact_model/spin_equation.py`, `Record/qinghua/flights/PHYSICS_FIT.md`, `bounce_model/BOUNCE_MODEL.md` | NOT in the repo. The repo test `hope_training/whole_body_tracking/tests/test_ball_physics_vs_record.py` consumes it via `$RECORD_DIR` and **silently skips** when absent |
+| v0 fitting/analysis code | Historical full workspace was Mac-local at `/Users/yyk956614/Desktop/Hope/Record`; the surviving fit-lineage contact kernel is in `hope_training/ball_physics_fit/contact_model.py` and its test API is reconstructed by `reference_oracle.py` | The full raw workspace is still external, but the port-parity reference is now in-repo and content-addressed. `test_ball_physics_vs_record.py` uses it by default; an explicitly bad `$RECORD_DIR` fails loudly instead of skipping/falling back |
 | NEW venue dataset (the input to this guide) | collected 2026-07-03 at the venue: Avatar Pro rigid bodies on **both the ball and the racket** (first time racket data exists) | To be processed — that is what Section 4 is for |
 
 **The verdict in one paragraph** (details in Sections 1–3): the Sony Ace model family is the right
@@ -267,9 +267,12 @@ Stratified 70/30 split **by trial** within every set. Fit on 70%, report on 30%:
    metrics vs the acceptance thresholds, and an explicit **validity envelope** (the (Re, SR, v_n)
    box the fits cover — nothing outside it is validated; remember Sony's high-speed extrapolation
    failure).
-3. **Port the fitting code into the repo** (e.g. `hope_training/ball_physics_fit/`) so the team
-   is no longer dependent on the Mac-local Record workspace; make
-   `test_ball_physics_vs_record.py` fail loudly (not skip) when the oracle is missing.
+3. **Port the fitting code into the repo** (completed for the fit-lineage parity surface on
+   2026-07-12): `hope_training/ball_physics_fit/reference_oracle.py` reconstructs the historical
+   API from the committed NumPy contact kernel and venue YAML, prints their SHA tuple, and rejects
+   zero/non-finite normals. `test_ball_physics_vs_record.py` defaults to it; an explicit missing
+   `$RECORD_DIR` fails loudly. The raw venue dataset/full fitting workspace remains external and is
+   still required to refit parameters rather than merely verify port parity.
 4. Push the results branch; the RunPod side then wires the new yaml into Isaac/MuJoCo and starts
    the Tier-1 reward work (Section 5).
 

@@ -595,6 +595,31 @@ documented in
 `docs/operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md`; G06
 remains `Partial`.
 
+### Production-root-bound stand viewer is diagnostic, not Gate3 (2026-07-12)
+
+`yikang-linux-port-0711@6b10998` supplied a useful plain-MuJoCo stand viewer, but the original
+version retyped gains and assigned head gains `40/2` while describing them as production PD_STAND.
+The tracked production header instead defines a 29-DOF policy view and explicitly leaves the two
+neck slots passive. The selective port now parses the production pose/Kp/Kd arrays from
+`a3_policy_parameters.hpp` at runtime, requires every 29-DOF joint exactly once, leaves head yaw/
+pitch passive, and never modifies the vendor MJCF or integrator.
+
+Dependency-light `--identity-only` binds vendor `a3_pingpong.xml=2ab1cd31...3feb97` and the
+production parameter header `df73e3f6...c5c8d8`; four host-only parser/identity tests and pycompile
+pass. Those are root-source identities only; the MJCF's 74 transitive mesh assets are not yet an
+asset-closure hash and remain part of the formal runtime binding. With MuJoCo installed, `--check`
+records actual timestep/integrator; finite status for
+qpos/qvel/qacc/ctrl/actuator-force arrays; pelvis-z range/drift, maximum pelvis tilt and per-foot/
+both-foot floor-contact fractions. Its default
+thresholds are diagnostic tripwires, not Gate3 acceptance. The current Mac lacks the MuJoCo binding,
+so no 10-second numerical result, snapshot or plant claim is recorded.
+
+This tool starts no planner, policy, AimRT/backend, first tick, Gate3/Gate3B or hardware. It can
+localize a base MJCF/PD/integrator problem before policy evaluation, but it cannot promote a policy
+or explain the same-policy Isaac/MuJoCo gap alone. Instructions are in
+`docs/operations/run_deploy_dryrun.md`; selective-port evidence is in
+`docs/research/yikang_selective_integration_20260712.md`. G06 remains `Partial`.
+
 The production runner now also has a fail-closed `--model-preflight-only` path. It requires
 `--no-publish` or `--dry-run`, constructs `PpPolicy` before any backend object is created, and on
 success emits the accepted observation width plus training-contract and source-checkpoint SHA-256

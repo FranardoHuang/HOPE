@@ -4,6 +4,28 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-12
 
+- Selectively integrated yikang's small branch-only changes against
+  `origin/main@b2067ba` without merging either old-base branch. The fit-lineage
+  NumPy `reference_oracle` is now the default content-addressed port-parity
+  reference; zero/NaN/Inf normals and explicit missing `RECORD_DIR` fail loudly.
+  The vendor A3 stand viewer now parses production pose/Kp/Kd from the tracked
+  header, keeps the neck passive per its 29-DOF contract, binds MJCF/header SHA,
+  and reports finite state, pelvis tilt/z and foot contacts as a diagnostic only.
+  Host-only selective-port tests are `13 passed`; pycompile and
+  `--identity-only` pass. A local Torch CPU environment also passed the full
+  contact/table+paddle, RK4 and landing parity gate (`ALL PASSED`; max contact
+  errors below `4.63e-9`, flight/landing zero at reported precision). Current
+  reward/config coverage is `88 passed`; two unfiltered MDP tests expose an
+  unrelated pre-existing `Path` handling bug in `MotionLoader`. The 10-second
+  MuJoCo run remains uncredited because that binding is absent on this Mac. The old
+  `head_discipline=-0.5` FinalV2 patch was not ported: current main has neither
+  FinalV2 nor FinalV2Plus, and `origin/hitter` already has a passive-head V3
+  alternative plus a derived V2Plus reward-key contract. Two guards preserve
+  current behavior. Any future head reward must enter a named current recipe at
+  explicit `0.0`, then receive paired/mixture-interaction validation; no
+  training, Pod, sim runtime or hardware was touched. See
+  `docs/research/yikang_selective_integration_20260712.md`.
+
 - Preregistered the post-swing recovery command as a structural A/B/C axis,
   without changing C++, Gate3, a Pod/GPU or hardware. The source audit shows
   training/T1 only emits a complete old tuple or atomically installed complete
