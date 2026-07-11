@@ -4,6 +4,35 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-12
 
+- Preregistered the post-swing recovery command as a structural A/B/C axis,
+  without changing C++, Gate3, a Pod/GPU or hardware. The source audit shows
+  training/T1 only emits a complete old tuple or atomically installed complete
+  new tuple, while the current 179-D deploy idle path mixes a new live-base
+  position with the prior strike velocity and normal/rho; this is now explicit
+  OOD, not a tunable formal arm. A is a content-bound interruptible safe bridge,
+  B a canonical ready-set position/zero-velocity/neutral-normal tuple requiring
+  fresh training, and C a coherent previous tuple usable by current checkpoints
+  only for zero-shot diagnosis. Ready is a safety-and-next-task-reachability set,
+  never exact frame 0. A static bound audit records Isaac/vendor named-stand
+  pelvis x difference `4.16 cm` and 31-joint L2 `0.171845 rad` as a hypothesis,
+  not a proven engine root cause; a full numeric ready/base/racket/target SHA is
+  now a launch blocker. The first paper freezes reward bytes/weights; only a
+  structural failure may unlock normalized three-component `2^3` interactions
+  and then a constant-total-budget mixture. Safety/self-hit is noncompensable.
+  A formal fresh PPO now has explicit ownership: only executed actor samples
+  have logprobs; bridge ticks mask policy/entropy/value loss, collapse actual
+  bridge rewards into option returns, and write exactly projected executed
+  actions—not shadow/zero/stale actions—to last-action history. A/B/C share
+  prebound env-step/opportunity/update/actor-sample/minibatch budgets; A
+  shortfall fails the pair and evaluation never shrinks its denominator.
+  Gate3 is the same-C++/MJCF/plant/model first-tick and continuous-stability hard
+  prerequisite; Gate3B reuses that runtime and is the random-arrival q50 final
+  behavior arbiter. Strict JSON parsing now rejects duplicate/non-finite values
+  at every depth plus unknown critical fields. The pure contract regression is
+  `50 passed`; prereg SHA is `ca7806df...d810616`, and launch remains blocked on
+  schedules, A bridge/handoff/ownership/PPO certificates and fresh checkpoint,
+  calibrated plant, separate Gate3/Gate3B judges and shared runtime. See
+  `docs/operations/run_phase1_recovery_tuple_prereg.md`.
 - Preregistered the post-v5 spatial-retarget proposal screen without using a
   Pod/GPU or touching hardware. The contract screens all ten Franco/v6/v7
   motions against every matching immutable question; B/C priority is ranking
@@ -64,7 +93,8 @@ Use this file for short project-state updates that future humans and agents need
   backhand-loop B (`32/32`, phase .5444) and C (`27/32`, .5155) for explicit
   spatial retarget; none is TOPP-eligible.  TOPP is paused through
   spatial-retarget/schema-2/L0/L1/table-net/dynamics, and vendor MuJoCo
-  Gate3/Gate3B without reset remains the primary final motion/library gate.
+  Gate3 runtime/stability followed by Gate3B no-reset behavior scoring remains
+  the primary final motion/library gate.
   No RL, GPU, frozen training checkout or real robot was touched.
 - Completed canonical-GMR discrete grounding and the next CPU-only dense safety
   screen for all ten Franco/v6/v7 air swings. Across 654 source frames and

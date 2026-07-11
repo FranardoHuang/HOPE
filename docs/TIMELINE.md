@@ -1555,7 +1555,8 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `1471093`）消费原 64 题，safety 与 v4 逐资产相等，但所有 motion/library exact 都是
    `0/64`、common support=0，故不判 2 或 4，也不写成动作无效。intrinsic 仅反手拉 B/C
    为 `32/32 @ .5444`、`27/32 @ .5155`，保留作 spatial-retarget 候选；TOPP 暂停到
-   schema-2/L0/L1/桌网/动力学，最终由智元 vendor MuJoCo Gate3/Gate3B 无 reset 主判。
+   schema-2/L0/L1/桌网/动力学，最终先过智元 vendor MuJoCo Gate3 runtime/stability，再由
+   Gate3B 共用 runtime 做 no-reset behavior 主判。
 52. 【franco/Codex】**179-D 进 Gate 3 不再靠“加个维数白名单”**——新增 flat wire schema2，
    同一条消息原子携带拍位/拍速/世界系 demanded normal/zero rho；C++ 要求 exact
    `deploy_parity_face179` term metadata、face/bank/SHA 谱系、planner mode、正 X unit normal，schema1
@@ -1599,6 +1600,20 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    Release 三目标全链接，真实 SZ 2k ONNX test 1/1、native 205 pass/9 optional skip；无 no-publish
    preflight rc2，安全 preflight rc0 且输出 obs179/双 SHA、零 backend init/start。仅执行零观测 ONNX
    prewarm，无 driver/backend tick；normal envelope、canonical recovery、厂商 Gate3/Gate3B 继续 open。
+60. 【franco/Codex】**连续两拍先拆 recovery tuple 结构，当前混代 idle 不再冒充训练内分布**——
+   源码审计证明普通 wrap/T1 都只给“整套旧题”或 reveal 时“原子整套新题”；当前 179-D
+   vendor idle 却是新 live-base 位置 + 上一拍速度/法向/rho，另在 static handoff 清零
+   last-action，均非 no-reset 训练语义。新 A/B/C 预注册先比显式安全 bridge、canonical
+   ready tuple、完整上一题 tuple；现有 179 只可给 A/C 做 diagnostic，B 和任何 learned
+   random-arrival 声明要 fresh。ready 是安全且对所有下一动作/deadline 可达的集合，不是 frame0；
+   Isaac/vendor stand 的 `4.16cm` root-x 与 `0.171845rad` 关节 L2 只作待隔离假设。reward 只有结构
+   失败才先归一化三项、做 `2^3` 交互，再固定总预算 mixture，安全/自碰不可补偿。红队复审后又补齐
+   A formal fresh PPO 所有权：只有真执行 actor sample 有 logprob，bridge tick 三个 loss mask 全 0、
+   duration-correct option return、last-action 只记 executed-action 精确投影；三臂 env-step/机会/update/
+   actor-sample/minibatch 同预算，A 不足整对 fail。Gate3 是同 C++/MJCF/plant/model first-tick+连续稳定
+   硬前置，Gate3B 共用 runtime 做 random-arrival q50 最终行为主判。JSON 全层拒 duplicate/NaN/Inf、
+   数值/布尔别名和未知关键字段。prereg SHA=`ca7806df...d810616`，纯合同 `50 passed`；launch-check
+   因 24 项 schedule/A-ownership-PPO-fresh/plant/Isaac/Gate3/Gate3B/shared-runtime 绑定仍 null 而按设计失败。
 
 ## 2026-07-12:公司 Linux 机改动移植回来(那台不让 push)
 
