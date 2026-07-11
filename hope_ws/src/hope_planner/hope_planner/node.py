@@ -30,6 +30,10 @@ except ImportError:  # flat-only environment (e.g. the MDU)
 
 from .ball_kalman_estimator import BallKalmanEstimator
 from .constants import BallPhysics, PlannerConfig
+from .flat_command_wire import (
+    pack_invalid_racket_command_flat,
+    pack_racket_command_flat_fail_closed,
+)
 from .planner import HOPEPlanner
 from .strike_spec_planner import StrikeSpecPlanner
 
@@ -140,6 +144,11 @@ class HOPEPlannerNode(Node):
         self.declare_parameter("publish_flat_cmd", True)
         self.declare_parameter("racket_flat_topic", "/racket/command_flat")
         self.declare_parameter("base_flat_topic", "/a3/base_pose_flat")
+        # Schema 1 is the legacy pos/vel wire. Schema 2 atomically appends the
+        # demanded world-frame face normal and zero rho placeholder required by
+        # deploy_parity_face179. Keep the default at 1 for old 110/175/177/180
+        # runners; a 179-D Gate 3 launch must opt into 2 explicitly.
+        self.declare_parameter("racket_flat_schema", 1)
         # marker-cluster -> base_link offset (table frame). /P1/pose is the marker cluster; the
         # policy base is the pelvis. In sim (robot_pose_topic=/sim/a3/pelvis_pose) it is already
         # the pelvis, so [0,0,0]. Set per venue (mirrors hope_world_frame.yaml mocap_to_base_link / G8).
@@ -173,6 +182,9 @@ class HOPEPlannerNode(Node):
                                   and np.isnan(self._dtf_fh) and np.isnan(self._dtf_bh))
         self._last_intercept_y = None  # last valid plan's arrival y (side memory)
         self._publish_flat = bool(self.get_parameter("publish_flat_cmd").value)
+        self._racket_flat_schema = int(self.get_parameter("racket_flat_schema").value)
+        if self._racket_flat_schema not in (1, 2):
+            raise ValueError("racket_flat_schema must be 1 (legacy) or 2 (face179)")
         self._marker_to_base = np.array(
             [float(v) for v in self.get_parameter("marker_to_base_xyz").value])
         self._policy_z_offset = float(self.get_parameter("policy_z_offset").value)
@@ -314,7 +326,9 @@ class HOPEPlannerNode(Node):
 
         # Diagnostics at 10 Hz.
         self._n_received = 0
+        self._n_planner_valid = 0
         self._n_valid = 0
+        self._n_flat_contract_rejected = 0
         self._last_valid = False
         self._last_tts = float("nan")
         self.create_timer(0.1, self._publish_diagnostics)
@@ -388,63 +402,120 @@ class HOPEPlannerNode(Node):
         if cmd is None:
             self._last_valid = False
             self._last_tts = float("nan")
+            if self.flat_cmd_pub is not None and self._racket_flat_schema == 2:
+                fm = Float64MultiArray()
+                fm.data = pack_invalid_racket_command_flat(schema=2)
+                self.flat_cmd_pub.publish(fm)
+            if self.cmd_pub is not None and self._racket_flat_schema == 2:
+                out = RacketCommand()
+                out.header = msg.header
+                out.header.frame_id = "world"
+                out.normal.x = 1.0
+                out.valid = False
+                self.cmd_pub.publish(out)
             return
 
         self._last_valid = cmd.valid
         tts = self.planner.time_to_strike
         self._last_tts = tts if tts is not None else float("nan")
         if cmd.valid:
-            self._n_valid += 1
-            self._last_intercept_y = float(cmd.p_intercept[1])  # per-side aim memory
+            self._n_planner_valid += 1
+
+        # Validate the formal flat command before publishing either wire. If
+        # schema 2 is malformed, both outputs publish an explicit safe invalid
+        # row/message; the optional hope_msgs mirror must not claim validity
+        # after the official flat path revoked the command.
+        flat_data = None
+        flat_contract_error = None
+        if self.flat_cmd_pub is not None:
+            try:
+                flat_data, flat_contract_error = pack_racket_command_flat_fail_closed(
+                    schema=self._racket_flat_schema,
+                    valid=bool(cmd.valid),
+                    swing_sign=0.0,
+                    position_w=(
+                        float(cmd.p_intercept[0]),
+                        float(cmd.p_intercept[1]),
+                        float(cmd.p_intercept[2]) + self._policy_z_offset,
+                    ),
+                    velocity_w=cmd.v_racket,
+                    time_to_strike=(
+                        float(self._last_tts) if self._last_tts == self._last_tts else 0.0
+                    ),
+                    strike_time=float(cmd.t_strike),
+                    frame_code=0,
+                    normal_cmd_w=cmd.n_racket,
+                    rho=0.0,
+                )
+            except (IndexError, TypeError, ValueError, OverflowError) as exc:
+                if self._racket_flat_schema != 2:
+                    raise
+                flat_data = pack_invalid_racket_command_flat(schema=2)
+                flat_contract_error = str(exc)
+            if flat_contract_error is not None:
+                self._last_valid = False
+                self._n_flat_contract_rejected += 1
+                self.get_logger().error(
+                    "schema-2 racket command rejected; published valid=0 revocation instead: "
+                    f"{flat_contract_error}",
+                    throttle_duration_sec=2.0,
+                )
 
         if self.cmd_pub is not None:
             out = RacketCommand()
             out.header = msg.header
             out.header.frame_id = "world"
-            out.position.x = float(cmd.p_intercept[0])
-            out.position.y = float(cmd.p_intercept[1])
-            out.position.z = float(cmd.p_intercept[2]) + self._policy_z_offset
-            out.velocity.x = float(cmd.v_racket[0])
-            out.velocity.y = float(cmd.v_racket[1])
-            out.velocity.z = float(cmd.v_racket[2])
-            # RacketCommand.normal carries the unit face normal (Vector3), not an
-            # orientation. IK-based controllers that need a full quaternion can call
-            # quaternion_utils.normal_to_quaternion(cmd.n_racket, constrain_up=True).
-            out.normal.x = float(cmd.n_racket[0])
-            out.normal.y = float(cmd.n_racket[1])
-            out.normal.z = float(cmd.n_racket[2])
-            out.strike_time = float(cmd.t_strike)
-            out.time_to_strike = float(self._last_tts)
-            out.ball_velocity_outgoing.x = float(cmd.v_ball_outgoing[0])
-            out.ball_velocity_outgoing.y = float(cmd.v_ball_outgoing[1])
-            out.ball_velocity_outgoing.z = float(cmd.v_ball_outgoing[2])
-            out.valid = bool(cmd.valid)
-            out.clears_net = bool(cmd.clears_net)
-            out.bypasses_net_posts = bool(cmd.bypasses_net_posts)
-            out.predicted_bounces = int(cmd.num_bounces)
+            if flat_contract_error is not None:
+                # Canonical invalid mirror: finite zeros plus opponent-facing
+                # +X normal. Consumers see the same revocation as flat schema 2.
+                out.normal.x = 1.0
+                out.valid = False
+            else:
+                out.position.x = float(cmd.p_intercept[0])
+                out.position.y = float(cmd.p_intercept[1])
+                out.position.z = float(cmd.p_intercept[2]) + self._policy_z_offset
+                out.velocity.x = float(cmd.v_racket[0])
+                out.velocity.y = float(cmd.v_racket[1])
+                out.velocity.z = float(cmd.v_racket[2])
+                # RacketCommand.normal carries the unit face normal (Vector3), not an
+                # orientation. IK-based controllers that need a full quaternion can call
+                # quaternion_utils.normal_to_quaternion(cmd.n_racket, constrain_up=True).
+                out.normal.x = float(cmd.n_racket[0])
+                out.normal.y = float(cmd.n_racket[1])
+                out.normal.z = float(cmd.n_racket[2])
+                out.strike_time = float(cmd.t_strike)
+                out.time_to_strike = float(self._last_tts)
+                out.ball_velocity_outgoing.x = float(cmd.v_ball_outgoing[0])
+                out.ball_velocity_outgoing.y = float(cmd.v_ball_outgoing[1])
+                out.ball_velocity_outgoing.z = float(cmd.v_ball_outgoing[2])
+                out.valid = bool(cmd.valid)
+                out.clears_net = bool(cmd.clears_net)
+                out.bypasses_net_posts = bool(cmd.bypasses_net_posts)
+                out.predicted_bounces = int(cmd.num_bounces)
             self.cmd_pub.publish(out)
 
         # Mirror to the flat topic for the AGI C++ runner (--planner). swing_sign is left 0
         # (the runner derives the side from the base-relative target y); frame_code 0 = world.
+        # Schema 2 carries normal+rho in this SAME publication so a delayed face command can
+        # never be paired with a newer position/velocity command.
         if self.flat_cmd_pub is not None:
             fm = Float64MultiArray()
-            # [schema, valid, swing_sign, px, py, pz, vx, vy, vz, tts, strike_time, frame_code]
-            fm.data = [
-                1.0, 1.0 if cmd.valid else 0.0, 0.0,
-                float(cmd.p_intercept[0]), float(cmd.p_intercept[1]),
-                float(cmd.p_intercept[2]) + self._policy_z_offset,
-                float(cmd.v_racket[0]), float(cmd.v_racket[1]), float(cmd.v_racket[2]),
-                float(self._last_tts) if self._last_tts == self._last_tts else 0.0,
-                float(cmd.t_strike), 0.0,
-            ]
+            fm.data = flat_data
             self.flat_cmd_pub.publish(fm)
+
+        # `valid_commands` is the control-visible count, not merely a successful
+        # planner solve. A schema-2 payload rejected into valid=0 must never be
+        # reported as accepted while the C++ subscriber correctly revokes it.
+        if self._last_valid:
+            self._n_valid += 1
+            self._last_intercept_y = float(cmd.p_intercept[1])  # accepted per-side aim memory
 
         # Strike-spec solve AFTER the command publish so the solve latency
         # never delays the command itself. Legacy: 1 Hz throttle (scalar LM,
         # ~0.45 s). Fast (use_fast_strike_spec): replan every _spec_period
         # (default 40 Hz), warm-started from the previous solve, cached spec
         # served between solves, log throttled to 1 Hz.
-        if self._spec_planner is not None and cmd.valid and t >= self._spec_next_t:
+        if self._spec_planner is not None and self._last_valid and t >= self._spec_next_t:
             self._spec_next_t = t + (self._spec_period if self._use_fast_spec else 1.0)
             strike = self.planner.strike_target
             if strike is not None and strike.valid:
@@ -516,7 +587,12 @@ class HOPEPlannerNode(Node):
             status.message = "running; no valid strike"
         status.values = [
             KeyValue(key="poses_received", value=str(self._n_received)),
+            KeyValue(key="planner_valid_commands", value=str(self._n_planner_valid)),
             KeyValue(key="valid_commands", value=str(self._n_valid)),
+            KeyValue(
+                key="flat_contract_rejected",
+                value=str(self._n_flat_contract_rejected),
+            ),
             KeyValue(key="last_valid", value=str(self._last_valid)),
             KeyValue(key="time_to_strike_s", value=f"{self._last_tts:.4f}"),
         ]

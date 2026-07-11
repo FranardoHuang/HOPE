@@ -20,11 +20,15 @@
 //  never a wild swing and never a fictional base pose.
 //
 //  Flat wire layouts (indices are fixed; element [0] is a schema tag):
-//    RACKET  /racket/command_flat   (>=11 doubles)
+//    RACKET schema 1 /racket/command_flat   (>=11 doubles)
 //      [0]=schema(1)  [1]=valid(0/1)  [2]=swing_sign(+1 fore/-1 back)
 //      [3..5]=pos_w(x,y,z)  [6..8]=vel_w(x,y,z)
 //      [9]=time_to_strike(s)  [10]=strike_time(s, informational)
 //      [11]=frame_code(0=world/table, 1=base_link)   (optional; default 0)
+//    RACKET schema 2 face179                 (exactly 16 doubles)
+//      schema-1 prefix with mandatory frame_code at [11]
+//      [12..14]=demanded_normal_cmd (same frame as pos/vel)
+//      [15]=rho spin placeholder (Phase-1 requires exactly 0)
 //    BASE    /a3/base_pose_flat     (>=9 doubles)
 //      [0]=schema(1)  [1]=valid(0/1)  [2..4]=pos(x,y,z)
 //      [5..8]=quat(w,x,y,z)
@@ -56,6 +60,9 @@ struct PpRacketMsg {
   double time_to_strike = 0.0; // seconds from the message stamp to strike
   double strike_time = 0.0;    // absolute/relative strike time (informational)
   int frame_code = 0;          // 0 = world/table, 1 = base_link
+  bool has_face_command = false;
+  Vec3 normal_cmd = Vec3(1.0, 0.0, 0.0);  // frame per frame_code; unit vector
+  double rho = 0.0;             // reserved S3 spin lane; zero in Phase-1 schema 2
 };
 
 // A latest-value mailbox with per-validity timestamps. The engage logic needs
@@ -65,10 +72,40 @@ class PpRacketTargetInput {
  public:
   // Fed from the AimRT subscriber thread. `a` is the decoded Float64MultiArray.
   void SetFromFlat(const std::vector<double>& a) {
-    if (a.size() < 11) return;  // malformed -> ignore (last good value stands, ages out)
-    if (!std::isfinite(a[0]) || a[0] != 1.0 || !std::isfinite(a[1]) ||
-        (a[1] != 0.0 && a[1] != 1.0))
+    if (a.empty() || !std::isfinite(a[0])) {
+      RecordInvalidIfFaceActive();
       return;
+    }
+    if (a[0] != 1.0 && a[0] != 2.0) {
+      RecordInvalidIfFaceActive();
+      return;
+    }
+    const bool face179 = a[0] == 2.0;
+    // A packet that positively identifies itself as the formal face179 schema
+    // but fails any subsequent validation must revoke a preceding command. If
+    // it were merely ignored, a malformed live stream could keep an old swing
+    // eligible for command_timeout_s. Schema 1 retains its historical
+    // ignore-and-age-out behavior when no formal face command is active; a
+    // malformed downgrade cannot preserve a previously active face tuple.
+    const auto reject_malformed = [this, face179]() {
+      if (face179)
+        RecordInvalidNow();
+      else
+        RecordInvalidIfFaceActive();
+    };
+    if (a.size() < 2) {
+      reject_malformed();
+      return;
+    }
+    if ((!face179 && a.size() < 11) || (face179 && a.size() != 16)) {
+      reject_malformed();
+      return;
+    }
+    if (!std::isfinite(a[1]) ||
+        (a[1] != 0.0 && a[1] != 1.0)) {
+      reject_malformed();
+      return;
+    }
     PpRacketMsg m;
     m.valid = a[1] != 0.0;
     const double now = PpNowMonotonicSec();
@@ -78,16 +115,42 @@ class PpRacketTargetInput {
       any_ = true;
       return;
     }
-    for (size_t i = 2; i < 11; ++i)
-      if (!std::isfinite(a[i])) return;
-    if (a.size() >= 12 && (!std::isfinite(a[11]) || (a[11] != 0.0 && a[11] != 1.0)))
+    const size_t required = face179 ? 16 : 11;
+    for (size_t i = 2; i < required; ++i)
+      if (!std::isfinite(a[i])) {
+        reject_malformed();
+        return;
+      }
+    if (a.size() >= 12 && (!std::isfinite(a[11]) || (a[11] != 0.0 && a[11] != 1.0))) {
+      reject_malformed();
       return;
+    }
+    // Schema 1 keeps its historical yaw-heading interpretation of frame_code=1. The 179 tail
+    // adds a full 3D normal, for which literal base-link versus yaw-heading semantics have not
+    // been frozen; Phase-1 schema 2 is therefore world/table only.
+    if (face179 && a[11] != 0.0) {
+      reject_malformed();
+      return;
+    }
     m.swing_sign = a[2] >= 0.0 ? 1.0 : -1.0;
     m.pos_w = Vec3(a[3], a[4], a[5]);
     m.vel_w = Vec3(a[6], a[7], a[8]);
     m.time_to_strike = a[9];
     m.strike_time = a[10];
     m.frame_code = a.size() >= 12 ? static_cast<int>(a[11]) : 0;
+    if (face179) {
+      m.normal_cmd = Vec3(a[12], a[13], a[14]);
+      const double n = m.normal_cmd.norm();
+      constexpr double kUnitNormalTolerance = 1e-6;
+      constexpr double kOpponentFacingMinX = 1e-6;
+      if (!std::isfinite(n) || std::fabs(n - 1.0) > kUnitNormalTolerance ||
+          m.normal_cmd[0] <= kOpponentFacingMinX || a[15] != 0.0) {
+        reject_malformed();
+        return;
+      }
+      m.has_face_command = true;
+      m.rho = a[15];
+    }
     std::lock_guard<std::mutex> lk(mu_);
     last_valid_ = m;
     last_valid_wall_ = now;
@@ -103,9 +166,12 @@ class PpRacketTargetInput {
 
   Snapshot Latest() const {
     Snapshot s;
-    const double now = PpNowMonotonicSec();
     std::lock_guard<std::mutex> lk(mu_);
     if (last_valid_wall_ < 0.0) return s;  // no valid yet
+    // Read the clock only after acquiring the same lock used to publish a new
+    // valid timestamp. Taking it before the lock can pair an older `now` with
+    // a newer command and manufacture a negative age / longer TTS.
+    const double now = PpNowMonotonicSec();
     s.has_valid = true;
     s.cmd = last_valid_;
     s.valid_age_s = now - last_valid_wall_;
@@ -116,6 +182,22 @@ class PpRacketTargetInput {
   bool has_any() const { return any_.load(); }
 
  private:
+  void RecordInvalidNow() {
+    const double now = PpNowMonotonicSec();
+    std::lock_guard<std::mutex> lk(mu_);
+    last_invalid_wall_ = now;
+    any_ = true;
+  }
+
+  void RecordInvalidIfFaceActive() {
+    const double now = PpNowMonotonicSec();
+    std::lock_guard<std::mutex> lk(mu_);
+    if (last_valid_wall_ >= 0.0 && last_valid_.has_face_command) {
+      last_invalid_wall_ = now;
+      any_ = true;
+    }
+  }
+
   mutable std::mutex mu_;
   PpRacketMsg last_valid_{};
   double last_valid_wall_ = -1.0;

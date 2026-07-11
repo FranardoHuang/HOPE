@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "a3_pingpong/pp_obs_builder.hpp"
+#include "a3_pingpong/pp_face179_contract.hpp"
 
 namespace a3_pingpong {
 
@@ -34,17 +35,18 @@ class PpOnnxPolicy {
     so.SetIntraOpNumThreads(1);
     session_ = std::make_unique<Ort::Session>(env_, model_path.c_str(), so);
 
-    // detect obs input dim: 180 (full), 175 (deploy_parity), 177 (hitter_footwork) or
-    // 110 (hitter_pure). The obs builder + buffers use obs_dim_.
+    // detect obs input dim: 180 (full), 179 (deploy_parity_face179),
+    // 175 (deploy_parity), 177 (hitter_footwork) or 110 (hitter_pure).
     if (session_->GetInputCount() != 2)
       throw std::runtime_error("ONNX must have exactly two inputs: obs and time_step");
     const auto in0_info = session_->GetInputTypeInfo(0).GetTensorTypeAndShapeInfo();
     auto in0 = in0_info.GetShape();
     if (in0_info.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
         in0.size() != 2 || in0[0] != 1 ||
-        (in0[1] != kObsDim && in0[1] != kObsDim175 && in0[1] != kObsDim177 &&
+        (in0[1] != kObsDim && in0[1] != kObsDim179 && in0[1] != kObsDim175 && in0[1] != kObsDim177 &&
          in0[1] != kObsDim110))
-      throw std::runtime_error("ONNX obs input is not [1,180], [1,177], [1,175] or [1,110]");
+      throw std::runtime_error(
+          "ONNX obs input is not [1,180], [1,179], [1,177], [1,175] or [1,110]");
     obs_dim_ = static_cast<int>(in0[1]);
 
     Ort::AllocatorWithDefaultOptions alloc;
@@ -267,6 +269,14 @@ class PpOnnxPolicy {
             "actions", "projected_gravity", "racket_target_pos_b", "racket_target_vel_w",
             "time_to_strike", "swing_type"};
         expected_dims = {62, 6, 3, 31, 31, 31, 3, 3, 3, 1, 1};
+      } else if (obs_dim_ == kObsDim179) {
+        expected_contract = "deploy_parity_face179";
+        expected_mode = "deploy_parity";
+        expected_names = {
+            "command", "motion_anchor_ori_b", "base_ang_vel", "joint_pos", "joint_vel",
+            "actions", "projected_gravity", "racket_target_pos_b", "racket_target_vel_w",
+            "time_to_strike", "swing_type", "racket_target_normal_cmd"};
+        expected_dims = {62, 6, 3, 31, 31, 31, 3, 3, 3, 1, 1, 4};
       } else if (obs_dim_ == kObsDim177) {
         expected_contract = "hitter_footwork";
         expected_mode = "hitter_footwork";
@@ -302,6 +312,17 @@ class PpOnnxPolicy {
         throw std::runtime_error(
             "formal ONNX observation layout metadata does not match the exact runner contract; "
             "refusing a right-width/wrong-column deployment");
+      if (obs_dim_ == kObsDim179) {
+        ValidatePpFace179MetadataContract(PpFace179MetadataContract{
+            LookupMeta(md, alloc, "face_command_enabled"),
+            LookupMeta(md, alloc, "face_command_pairing"),
+            LookupMeta(md, alloc, "face_obs_convention"),
+            LookupMeta(md, alloc, "stage1_question_bank_exact"),
+            LookupMeta(md, alloc, "stage1_bank_schema_version"),
+            LookupMeta(md, alloc, "stage1_bank_split"),
+            LookupMeta(md, alloc, "stage1_train_bank_sha256"),
+            LookupMeta(md, alloc, "stage1_source_family_sha256")});
+      }
     }
 
     if (formal_contract) {

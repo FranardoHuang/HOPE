@@ -338,6 +338,10 @@ class PpPolicy {
       throw std::runtime_error(
           "pingpong: publish-capable runtime requires a complete schema-v3 ONNX execution "
           "contract");
+    if (onnx_.obs_dim() == kObsDim179 && !cfg_.planner_mode)
+      throw std::runtime_error(
+          "pingpong: a 179-D face-command policy requires --planner and flat wire schema 2; "
+          "scripted targets do not carry the demanded world-frame normal/rho atomically");
     clip_.step_dt = cfg_.dt;
     const bool station_actor =
         onnx_.obs_dim() == kObsDim177 || onnx_.obs_dim() == kObsDim110;
@@ -1177,6 +1181,14 @@ class PpPolicy {
         tg.vel_w = planner_frozen_vel_w_;
       }
     }
+    if (onnx_.obs_dim() == kObsDim179) {
+      // Pre-first-engage returns through the static-stand branch above. Every policy tick after
+      // an accepted engage uses the face command frozen from that same atomic planner message;
+      // post-swing recovery keeps it paired with the held target until the next engage.
+      tg.face_command_valid = planner_have_hold_;
+      tg.normal_cmd_w = planner_frozen_normal_w_;
+      tg.rho = planner_frozen_rho_;
+    }
 
     last_proj_grav_ = projected_gravity_body(st.base_quat_w);
 
@@ -1231,7 +1243,8 @@ class PpPolicy {
       }
     }
 
-    // 175-D deploy_parity vs 177-D hitter_footwork vs 180-D full (model_15200) vs 110-D
+    // 175-D deploy_parity vs 179-D deploy_parity_face179 vs 177-D hitter_footwork vs
+    // 180-D full (model_15200) vs 110-D
     // hitter_pure. Auto-selected from the loaded ONNX input dim. build_obs_175 drops
     // motion_anchor_pos_b + base_target_pos_b and reframes the racket target relative to the
     // CURRENT racket FK (pp_racket_fk.hpp) — no world base pos. build_obs_177 = the 175 layout
@@ -1242,6 +1255,8 @@ class PpPolicy {
         ? build_obs_110(st, tg, last_action_, onnx_.default_q())
         : (onnx_.obs_dim() == kObsDim175)
         ? build_obs_175(refs, st, tg, last_action_, onnx_.default_q(), cfg_.use_imu_yaw_for_targets)
+        : (onnx_.obs_dim() == kObsDim179)
+        ? build_obs_179(refs, st, tg, last_action_, onnx_.default_q(), cfg_.use_imu_yaw_for_targets)
         : (onnx_.obs_dim() == kObsDim177)
         ? build_obs_177(refs, st, tg, last_action_, onnx_.default_q(), cfg_.use_imu_yaw_for_targets)
         : build_obs_180(refs, st, tg, last_action_, onnx_.default_q(), cfg_.use_imu_yaw_for_targets);
@@ -1465,6 +1480,10 @@ class PpPolicy {
     if (snap.invalid_after && snap.valid_age_s > cfg_.planner_invalid_grace_s) {
       set_planner_status_("planner_invalid"); return;
     }
+    if (onnx_.obs_dim() == kObsDim179 && !snap.cmd.has_face_command) {
+      set_planner_status_("face_command_missing");
+      return;
+    }
     // Late gate. 110: PER-CLIP (the backhand windup 0.87 s < the legacy 1.0 s constant —
     // a scalar gate would make backhand unreachable under the wait-for-tts semantics below);
     // side is not chosen yet, so gate on the LOOSER (SHORTER-windup) clip here and re-check
@@ -1474,6 +1493,7 @@ class PpPolicy {
     // the side-specific gate below never ran (backhand mathematically unreachable in planner
     // mode). The pre-side cutoff must be the MIN of the per-clip cutoffs. Legacy contracts
     // keep the scalar behavior unchanged.
+    double candidate_tts0;
     if (onnx_.obs_dim() == kObsDim110) {
       const double windup_min = std::min(
           (clip_.strike_frame(0) - clip_.seg_start(0)) * clip_.step_dt,
@@ -1525,9 +1545,11 @@ class PpPolicy {
     // once the robot has turned).
     Vec3 pos_w = snap.cmd.pos_w;
     Vec3 vel_w = snap.cmd.vel_w;
+    Vec3 normal_w = snap.cmd.normal_cmd;
     if (snap.cmd.frame_code == 1) {
       pos_w = base_pos + quat_rotate(base_yaw, snap.cmd.pos_w);
       vel_w = quat_rotate(base_yaw, snap.cmd.vel_w);
+      normal_w = quat_rotate(base_yaw, snap.cmd.normal_cmd);
     }
 
     const Vec3 tgt_b = quat_rotate_inverse(base_yaw, pos_w - base_pos);
@@ -1623,19 +1645,37 @@ class PpPolicy {
         set_planner_status_("too_late"); return;
       }
       if (tts > max_tts0) { set_planner_status_("waiting_tts"); return; }
-      planner_tts0_ = tts;
+      candidate_tts0 = tts;
     } else {
       // ENGAGE: tts0 stored CLAMPED to the clip's windup length; DRIVES the swing clock
       // (ScriptedTarget planner branch: tts = tts0 - t). Mirrors wbc_runner's
       // `"tts0": min(tts, max_tts0)`; without the transfer every strike would be late by
       // (max_tts - planner_tts).
-      planner_tts0_ = std::min(tts, max_tts0);
+      candidate_tts0 = std::min(tts, max_tts0);
     }
+    const Vec3 candidate_vel_w =
+        (onnx_.obs_dim() == kObsDim110 && cfg_.vel_cmd_box_center)
+            ? cfg_.racket_vel_w_clip[eng_clip]
+            : vel_w;
+    if (onnx_.obs_dim() == kObsDim179) {
+      const double normal_norm = normal_w.norm();
+      if (!std::isfinite(normal_norm) || std::fabs(normal_norm - 1.0) > 1e-6 ||
+          !std::isfinite(snap.cmd.rho) || snap.cmd.rho != 0.0) {
+        set_planner_status_("face_command_invalid");
+        return;
+      }
+    }
+    // Transaction boundary: every validation above operates on locals. Commit the clock,
+    // position, velocity, side and face command together so a rejected schema-2 row cannot
+    // pair new reach data with the previous swing's normal during recovery.
+    planner_tts0_ = candidate_tts0;
     planner_frozen_pos_w_ = pos_w;
-    planner_frozen_vel_w_ = (onnx_.obs_dim() == kObsDim110 && cfg_.vel_cmd_box_center)
-                                ? cfg_.racket_vel_w_clip[eng_clip]
-                                : vel_w;
+    planner_frozen_vel_w_ = candidate_vel_w;
     planner_frozen_sign_ = sign;
+    if (onnx_.obs_dim() == kObsDim179) {
+      planner_frozen_normal_w_ = normal_w;
+      planner_frozen_rho_ = snap.cmd.rho;
+    }
     planner_hold_pos_b_engage_ = tgt_b;
     planner_hold_z_w_ = pos_w[2];
     planner_have_hold_ = true;
@@ -1739,6 +1779,12 @@ class PpPolicy {
         {"joint_pos_rel", 71, 31}, {"joint_vel", 102, 31}, {"actions(last)", 133, 31},
         {"projected_gravity", 164, 3}, {"racket_target_pos_b(relFK)", 167, 3},
         {"racket_target_vel_w", 170, 3}, {"time_to_strike", 173, 1}, {"swing_type", 174, 1}};
+    static const Blk blks179[] = {
+        {"command", 0, 62}, {"motion_anchor_ori_b", 62, 6}, {"base_ang_vel", 68, 3},
+        {"joint_pos_rel", 71, 31}, {"joint_vel", 102, 31}, {"actions(last)", 133, 31},
+        {"projected_gravity", 164, 3}, {"racket_target_pos_b(relFK)", 167, 3},
+        {"racket_target_vel_w", 170, 3}, {"time_to_strike", 173, 1}, {"swing_type", 174, 1},
+        {"racket_target_normal_cmd(world)+rho", 175, 4}};
     // hitter_footwork 177-D: the 175 layout + base_target_pos_b(2) station Δxy re-inserted
     // after projected_gravity; everything after it shifts up 2.
     static const Blk blks177[] = {
@@ -1756,10 +1802,12 @@ class PpPolicy {
         {"racket_target_vel_w", 106, 3}, {"time_to_strike", 109, 1}};
     std::fprintf(stderr, " OBS blocks (%d-D):\n", (int)obs.size());
     const Blk* blks = (obs.size() == kObsDim175) ? blks175
+                    : (obs.size() == kObsDim179) ? blks179
                     : (obs.size() == kObsDim177) ? blks177
                     : (obs.size() == kObsDim110) ? blks110
                                                  : blks180;
     const int nblk = (obs.size() == kObsDim175) ? (int)(sizeof(blks175) / sizeof(Blk))
+                   : (obs.size() == kObsDim179) ? (int)(sizeof(blks179) / sizeof(Blk))
                    : (obs.size() == kObsDim177) ? (int)(sizeof(blks177) / sizeof(Blk))
                    : (obs.size() == kObsDim110) ? (int)(sizeof(blks110) / sizeof(Blk))
                                                 : (int)(sizeof(blks180) / sizeof(Blk));
@@ -1874,6 +1922,8 @@ class PpPolicy {
   // training never saw); overwritten by each engage's frozen velocity.
   Vec3 planner_frozen_vel_w_ = Vec3::Zero();
   double planner_frozen_sign_ = 1.0;
+  Vec3 planner_frozen_normal_w_ = Vec3(1.0, 0.0, 0.0);
+  double planner_frozen_rho_ = 0.0;
   // base-rel target at engage (hold anchor); defaults = a centered, racket-reachable ready
   // stance so the pre-first-engage hold is safe even before any command arrives.
   Vec3 planner_hold_pos_b_engage_ = Vec3(0.40, 0.0, 0.0);

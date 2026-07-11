@@ -301,9 +301,11 @@ void PrintObsDebugBlock(const a3_pingpong::PpPolicy::ObsDebug& d,
                 o[99], o[100], o[101], o[102], o[103], o[104], o[105]);
     std::printf("   racket_target_vel_w=[%+.3f %+.3f %+.3f]  tts=%.3f  [%s]\n",
                 o[106], o[107], o[108], o[109], src);
-  } else if (n == a3_pingpong::kObsDim175 || n == a3_pingpong::kObsDim177 ||
+  } else if (n == a3_pingpong::kObsDim175 || n == a3_pingpong::kObsDim179 ||
+             n == a3_pingpong::kObsDim177 ||
              n == a3_pingpong::kObsDim) {
-    const bool dp175 = (n == a3_pingpong::kObsDim175);
+    const bool dp175 = (n == a3_pingpong::kObsDim175 || n == a3_pingpong::kObsDim179);
+    const bool face179 = (n == a3_pingpong::kObsDim179);
     const bool hp177 = (n == a3_pingpong::kObsDim177);
     if (!dp175 && !hp177) {  // 180 full: anchor_pos + base_target blocks exist
       const double anchor_pos_norm = o.segment<3>(62).norm();
@@ -318,6 +320,9 @@ void PrintObsDebugBlock(const a3_pingpong::PpPolicy::ObsDebug& d,
                 "tts=%.3f swing=%+.0f(%s)  [%s]\n",
                 o[rp], o[rp + 1], o[rp + 2], o[rp + 3], o[rp + 4], o[rp + 5], o[rp + 6], o[rp + 7],
                 o[rp + 7] >= 0 ? "FOREHAND" : "BACKHAND", src);
+    if (face179)
+      std::printf("   racket_target_normal_cmd_w=[%+.4f %+.4f %+.4f] rho=%+.4f\n",
+                  o[175], o[176], o[177], o[178]);
   }
   if (action.size() == a3_pingpong::kNumJoints)
     std::printf("   action[min/mean/max]=[%+.3f %+.3f %+.3f] |a|=%.3f\n",

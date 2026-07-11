@@ -192,6 +192,17 @@ cmake --build "$B" --target run_tests -j8
 "$B/runtime/run_tests" --gtest_color=no
 ```
 
+For the 179-D versioned planner wire, also run the dependency-light Python packer tests and the
+focused C++ schema/observation tests. These are source gates only; they do not run Gate 3 or a robot:
+
+```bash
+REPO="$(git -C "$AD" rev-parse --show-toplevel)"
+PYTHONPATH="$REPO/hope_ws/src/hope_planner" python3 -m pytest -q \
+  "$REPO/hope_ws/src/hope_planner/test/test_flat_command_wire.py"
+"$B/runtime/run_tests" \
+  --gtest_filter='PpPlannerInput.*:PpFace179Wire.*' --gtest_color=no
+```
+
 Safety finite checks rely on IEEE NaN/Inf semantics. Verify Release did not
 re-introduce fast-math:
 

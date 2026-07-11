@@ -500,3 +500,36 @@ mechanism, but the runtime gate remains closed until one clean-detached K100 led
 moving-blade substep audit exist. Plant semantics, ready-state, termination, observation/action
 runtime and signed racket-face measurements must remain separately bound so a score difference
 can be localized rather than hidden in one aggregate return rate.
+
+### Gate 3 face-command wire and engine-gap localization
+
+The 179-D Phase-1 policies cannot be tested by adding `179` to a shape whitelist. Their last four
+columns require the planner's demanded world-frame normal and a zero rho placeholder atomically
+paired with position/velocity. A versioned flat schema-2 publisher/receiver and exact
+`deploy_parity_face179` ONNX metadata path are now implemented in source. The loader additionally
+requires `face_command_enabled=1`, `shared_plus_y`, `mount_plusY_A`, an exact schema-3 train bank,
+train split and lowercase content/source-family SHA-256 bindings; width and term names alone are
+not enough. Schema-2 rows require a world-frame opponent-facing unit normal (`x>1e-6`) and zero
+rho. Any malformed/unknown row after an active face tuple records `invalid_after`; the publisher
+turns a bad solve or payload into an explicit finite `valid=0` row on both wires, so silence cannot
+keep an old swing eligible for the longer command timeout. Schema 1 remains the default for
+existing models and cannot engage a 179 actor. This is not yet a gate result: the
+vendor x86 build, a no-publish first-tick parity trace, and full Gate 3 MuJoCo run are pending.
+Active-swing fields are atomic. Post-swing recovery is not yet exact: the current Gate 3 runner
+combines a synthesized base-anchored hold position with the previous swing's velocity/normal,
+and no Phase-1 contract proves that hybrid tuple is on-distribution. A canonical recovery tuple
+or separately accepted vendor-MuJoCo recovery paper is required before continuous promotion.
+The positive-X invariant is also only a minimum sign/frame guard. A content-bound per-clip normal
+envelope from the exact training bank is not yet exported; until it exists, arbitrary positive-X
+normals and their self-collision consequences remain a Gate 3 runtime blocker.
+
+The same-policy Isaac/MuJoCo gap is localized in stages rather than one aggregate score:
+
+1. replay identical joint/racket trajectories kinematically to isolate geometry, frames and scorer;
+2. replay identical open-loop actions from a bound initial state to expose actuator/plant/integrator drift;
+3. run closed loop with identical externally supplied observation rows to isolate policy/runtime timing;
+4. only then compare each engine's native observation and physical contact in the full closed loop.
+
+Each stage binds joint order, action scale/clamp, PD, dt/decimation, initial/ready state, signed face,
+contact/termination and vendor MJCF SHA. Gate 3/Gate 3B is the final behavioral leg; Isaac remains a
+training/diagnostic leg even if its score is higher.

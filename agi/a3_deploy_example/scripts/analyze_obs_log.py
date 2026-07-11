@@ -44,14 +44,13 @@ WAIST_ROLL_DEFAULT = 0.0
 WAIST_ROLL_LIMIT = 0.34907  # +/- rad, A3 MJCF (pp_joint_limits.hpp slot 1)
 
 
-# obs block spans per contract (see pp_obs_builder.hpp / a3_pingpong_main.cpp blks175/blks180).
-# 180 = legacy FULL layout; 175 = deploy_parity (drops motion_anchor_pos_b[62:65] +
-# base_target_pos_b[170:172], racket target reframed relative to the racket FK).
+# obs block spans per contract (see pp_obs_builder.hpp / a3_pingpong_main.cpp).
+# 179 is the exact 175 prefix plus demanded world-frame face normal(3) and zero rho(1).
 def obs_blocks(n_obs_cols):
     if n_obs_cols == 180:
         return {"anchor_pos": (62, 65), "joint_pos_rel": (74, 105), "joint_vel": (105, 136),
                 "proj_grav": (167, 170), "racket_tgt": (172, 175), "tts": 178, "swing": 179}
-    if n_obs_cols == 175:
+    if n_obs_cols in (175, 179):
         return {"anchor_pos": None, "joint_pos_rel": (71, 102), "joint_vel": (102, 133),
                 "proj_grav": (164, 167), "racket_tgt": (167, 170), "tts": 173, "swing": 174}
     return None
@@ -174,9 +173,9 @@ def analyze_obs(label, path, rows, cols):
     n_obs_cols = sum(1 for c in cols if c.startswith("obs_"))
     has_act = any(c.startswith("act_") for c in cols)
 
-    # 1. obs dimension (175 deploy_parity or 180 full)
+    # 1. obs dimension (175 deploy_parity, 179 face-command, or 180 full)
     blocks = obs_blocks(n_obs_cols)
-    rep.check("obs_dim in (175,180)", "PASS" if blocks is not None else "FAIL",
+    rep.check("obs_dim in (175,179,180)", "PASS" if blocks is not None else "FAIL",
               f"found {n_obs_cols}")
     if blocks is None:
         rep.info(f"  ticks logged : {len(rows)}")
@@ -268,7 +267,7 @@ def analyze_obs(label, path, rows, cols):
     rkx = [v[0] for v in rk]
     rep.info(f"  racket_target_pos_b x: min={min(rkx):+.3f} max={max(rkx):+.3f}  "
              + ("(175-D: target RELATIVE TO RACKET FK; shrinks toward 0 through the swing)"
-                if OBS_DIM == 175 else
+                if OBS_DIM in (175, 179) else
                 "(180-D: forehand expects ~+0.4 FRONT; negative => yaw-frame wrong)"))
     sw = set(round(o[B_SWING]) for o in obs)
     rep.info(f"  swing_type values: {sorted(sw)}  (+1 forehand / -1 backhand)")

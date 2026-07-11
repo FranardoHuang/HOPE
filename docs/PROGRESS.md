@@ -1388,3 +1388,9 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   Isaac `.99` 不得覆盖 MuJoCo 的 checkpoint 排名与失衡证据。
 - 将 strike 后“恢复平衡 / 回 ready 集 / 随时接下一题”登记为同 phase 的耦合优化：先用 constraint、
   potential 与随机到达 probe 分责，再做 `2^3` 交互筛和固定总预算 mixture；不把三个单项胜者直接相加。
+- 开始补 Phase-1 179-D 到 vendor Gate 3 的前置接口：flat wire schema 2 将 position/velocity/
+  demanded-normal/zero-rho 原子发布，C++ 只在 exact `deploy_parity_face179` metadata + planner mode
+  下构造“175逐位前缀+4维尾部”。review 后再收紧为 face enabled/shared-plus-Y/A-frame、exact
+  schema-3 train bank 与双 SHA 绑定；world normal 必须 unit、正 X，坏包/无解主动发 `valid=0`
+  revoke，不能靠静默让旧命令多活。旧 schema1 默认不变；当前仅源码门，vendor build/runtime 未过。
+  训练 bank 的 per-clip normal envelope 与 post-swing canonical recovery tuple 仍是正式 runtime blocker。

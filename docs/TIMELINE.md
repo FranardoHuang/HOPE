@@ -1528,3 +1528,9 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
 47. 【franco/Codex】**第一批已验证 Phase-1 功能开始 merge main**——合并边界冻结在
    `612f54d`；main 侧 NOW 原样保留并补当前人话状态。四-seed q50、动作 v5 64题、plant 校准、
    连续双引擎 rollout 仍是 open gate，不随源码合并偷写成结果。
+48. 【franco/Codex】**179-D 进 Gate 3 不再靠“加个维数白名单”**——新增 flat wire schema2，
+   同一条消息原子携带拍位/拍速/世界系 demanded normal/zero rho；C++ 要求 exact
+   `deploy_parity_face179` term metadata、face/bank/SHA 谱系、planner mode、正 X unit normal，schema1
+   不能 engage。坏 payload/no-solution 两条 wire 都主动发 finite `valid=0`，接收端对 active-face 后
+   的 malformed/unknown 包记 revoke；观测严格是 175 逐位前缀+4尾部。现仅源码/单测，train-bank
+   normal envelope、canonical recovery、vendor x86 build、no-publish trace、Gate3 runtime 均未过。

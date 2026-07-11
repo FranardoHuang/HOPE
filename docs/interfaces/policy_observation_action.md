@@ -1,7 +1,8 @@
 # Policy Observation And Action
 
-Status: Implemented for 110/175/177/180; 179/181 training/evaluation implemented but deploy wire
-is intentionally blocked pending the normal/station contract day (audited 2026-07-10).
+Status: Implemented for 110/175/177/180. The 179 training/evaluation contract and versioned
+flat-wire/C++ source path are implemented, but vendor Gate 3 runtime evidence is still pending.
+The 181 deploy wire remains intentionally blocked pending the station/order contract day.
 
 ## HITTER-Compatible Contract
 
@@ -64,14 +65,42 @@ Notes:
 | Dim | Contract | Delta / source | C++ publish status |
 | --- | --- | --- | --- |
 | 177 | `hitter_footwork` | 175 layout with `base_target_pos_b(2)` inserted after projected gravity; requires fresh external/oracle base localization. | Supported, but publication fails closed without fresh localization. |
-| 179 | `deploy_parity_face179` | Exact 175 prefix + tail `racket_target_normal_cmd(3), rho(1)`; demanded normal is the delayed atomic +Y/A-frame planner command. | Blocked: flat wire v1 carries no demanded normal/rho. |
+| 179 | `deploy_parity_face179` | Exact 175 prefix + tail `racket_target_normal_cmd(3), rho(1)`; demanded normal is the delayed atomic +Y/A-frame planner command. | Source-supported only through flat wire schema 2; requires exact ONNX metadata and planner mode. Vendor Gate 3 build/runtime is pending, so not yet accepted. |
 | 181 | `deploy_parity_station181` | Exact 179 prefix + tail `station_anchor_err_b(2)`. | Blocked: wire and the unique station/normal term order are not frozen. |
 | 110 | `hitter_pure` | HITTER Table-I style: 99-D proprio prefix + base forward(2), station delta(2), racket target rel base(3), target velocity(3), tts(1); no reference command or swing flag. | Supported; requires fresh localization and metadata-bound per-side station geometry. |
 
 Do not infer a contract from width alone. Formal consumers require the registered name, mode,
-ordered term names/dims and total dimension to agree. In particular, merely accepting 179/181 in
-the C++ input-shape whitelist would turn a right-width/wrong-columns model into a hardware command;
-the runner intentionally rejects them until flat-wire v2 and the 181 order are frozen together.
+ordered term names/dims and total dimension to agree. The 179 C++ path accepts only
+`deploy_parity_face179` metadata and flat wire schema 2; it also binds face enabled,
+`shared_plus_y`, `mount_plusY_A`, exact schema-3 train split, train-bank SHA and source-family SHA.
+Schema 1 never fabricates the tail.
+Merely accepting 181 in an input-shape whitelist would still create a right-width/wrong-columns
+command, so 181 remains rejected until its unique station/normal order is frozen.
+
+### Flat racket-command wire
+
+Schema 1 remains the backward-compatible position/velocity wire for 110/175/177/180. Schema 2 is
+an explicit 16-double row: the same 12-value prefix with mandatory `frame_code`, followed by
+`normal_cmd[3]` and `rho`. Phase-1 schema 2 accepts only `frame_code=0` world/table rows: the old
+schema-1 code1 path is a yaw-heading transform, not a frozen full-3D base-link normal contract.
+The Phase-1 contract also requires an opponent-facing (`normal.x > 1e-6`) unit normal and
+exactly-zero rho. A malformed schema-2 row retains the last good tuple for diagnostics but records
+`invalid_after`, so the engage grace blocks it rather than letting the old tuple live for the full
+command timeout. Unknown/fractional rows received after an active schema-2 command do the same;
+schema-1 keeps its historical ignore-and-age behavior when no formal face command is active. A 179
+actor refuses to engage on schema 1. The planner publishes schema 1 by default for compatibility;
+a reviewed 179 Gate 3 launch must set `racket_flat_schema:=2`.
+
+The positive-X check is only the planner's minimum A-frame invariant. A train-bank-derived
+per-clip normal envelope/dot threshold is not yet exported and remains a vendor Gate 3 runtime
+blocker; source support must not be read as proof that every opponent-facing unit normal is
+on-distribution or self-collision safe.
+
+The active swing tuple is atomic, but the existing Gate 3 post-swing policy-recovery path
+synthesizes a base-anchored hold position while retaining the previous velocity/normal. Current
+Phase-1 training has no frozen contract proving that hybrid tuple is on-distribution. Therefore
+179 source support does not make recovery exact; a canonical recovery tuple or an independently
+accepted vendor-MuJoCo recovery gate is required before continuous or deploy claims.
 
 ## Critic (privileged) Observation (implemented)
 
