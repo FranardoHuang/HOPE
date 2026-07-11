@@ -322,9 +322,11 @@ The next checkpoint preflights closed two more evaluator-only blockers. The Pod 
 `onnxruntime` but not the `onnx` graph package required by formal inspection; both Pods now pin
 `onnx==1.22.0`, and the generated 179-D graphs pass checker and runtime. Fresh exact models then
 stopped before rollout because Isaac's float32 metadata representation of the same MJCF armature
-decimals differed by at most `2.71e-9`, while the comparison threshold was `1e-10`. The formal
-comparison now admits only `1e-8` absolute serialization residue and retains a material-mismatch
-failure test. A separate report fix propagates final artifact/escape exactness into the denominator
+decimals differed by at most `2.71e-9`, while the comparison threshold was `1e-10`. Passing that
+field exposed the same representation issue at the `118.2` ankle effort limit: float32 metadata is
+`118.199996948...` (`3.0517578e-6`, about 0.4 ULP). Formal plant comparison now requires exact
+float32-grid identity rather than a field-specific tolerance and tests both sides of the 0.5-ULP
+boundary plus next-grid rejection. A separate report fix propagates final artifact/escape exactness into the denominator
 section, so a legacy causal report can no longer display `true` while its summary JSON says `false`.
 These preserved attempts are not model scores. A corrected exact fresh BankExam is still required,
 so G06 remains `Partial`.

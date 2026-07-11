@@ -4,6 +4,7 @@
   "target_jobs_per_gpu": 4,
   "num_envs_per_job": 4096,
   "kit_boot_stagger_seconds": 75,
+  "runtime_status_source": "Pod-local runs/<run_name>/run.log.launch plus live PID/PGID; per-arm status below records preregistration-time state only",
   "design": {
     "legacy_continuations": "2 families x 2 face pairings x 2 continuation RNG seeds",
     "fresh": "2 face pairings x 2 plant settings x 4 independent from-scratch seeds",

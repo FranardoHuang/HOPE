@@ -258,8 +258,11 @@ trainers were untouched. The archives are `initial_pod{1,2}_missing_onnx_pkg_4`.
 
 The next retry exposed a formal armature threshold below serialization precision. The same decimal
 A3 plant differs by at most `2.71e-9` after Isaac's float32 metadata path versus MuJoCo's float64
-XML path. The evaluator now accepts only an absolute `1e-8` round-trip residue and still fails any
-material plant mismatch. Fresh `0/1000/2000` rows from that attempt are pre-rollout records, not
+XML path. A preliminary `1e-8` armature bound passed that field, then exact retry exposed the same
+issue at the `118.2` ankle effort limit (`118.199996948...` in training metadata; max difference
+`3.0517578e-6`). The final comparator uses exact float32-grid identity rather than a larger fixed
+tolerance: exact float64 matches pass, otherwise canonical float32 metadata and MJCF must map to
+the same grid point. Fresh `0/1000/2000` rows from these attempts are pre-rollout records, not
 model scores. The causal rows completed because their historical plant is an explicit inexact
 diagnostic; their summary JSON is authoritative. A report-layer defect that printed the bank leg's
 exactness instead of final artifact exactness in `DENOMINATORS` is fixed so legacy reports also say
@@ -279,6 +282,24 @@ The corrected fresh retry is deliberately cheaper than the historical repair:
 direction only. No arm may be stopped or promoted from that small paper; those
 decisions require the pre-registered 50-per-side clean schedule, and robustness
 noise is run only after a candidate survives.
+
+## Full-Pool Scale-Out Evidence
+
+All three scale-out layers are now accepted. Each of the six RTX 5090s ran four 4096-env trainers
+concurrently. Pod 1 used `23.24/23.06/23.17 GiB` on GPU 0/1/2 at `93/93/94%`; Pod 2 used
+`23.06/22.87/22.87 GiB` at `87/96/97%`. Host available memory was `840 GiB` and `904 GiB`.
+Every one of the 24 pre-registered experiments reached its first PPO iteration, wrote a finite
+first checkpoint, and matched the embedded `training_contract_sha256` to its adjacent contract.
+Fresh contract SHAs collapse exactly by cell as expected (for example `LZ=0f65930c...bb06` and
+`LP=b9feb4d5...123e`); `LZ/LP` training lineage remains structurally exact but their legacy pairing
+forces evaluation inexact.
+
+Pod 1's first `phase1_fresh_v3_LZ_seed3` boot aborted before a contract/iteration with
+`malloc(): invalid size (unsorted)`. Its preserved run log and launch-state SHAs are
+`d66a8043...951d` and `0f004c18...b768` under
+`phase1_fresh_v3_LZ_seed3_malloc_abort_1/`. No process survived and no host-memory pressure was
+present. The identical-command single-arm retry reached ready as PGID `1354525` and is the only
+accepted LZ seed 3. No broad process signal or training-checkout change was used.
 
 ## Remaining Gates
 

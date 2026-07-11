@@ -552,6 +552,30 @@ def final_denominator_report(sampler, *, evaluation_contract_exact):
     return lines
 
 
+def matches_training_float32_plant(source, bound):
+    """Return true only for plants identical at Isaac's recorded float32 precision.
+
+    Runtime facts originate in Isaac tensors while MJCF decimals are parsed directly into float64.
+    Exact float64 equality is always accepted.  Otherwise the bound metadata must itself be a
+    canonical float32 value and both sides must name the same float32 grid point.  This avoids
+    arbitrary per-field tolerances while still rejecting any change that crosses a training-
+    representable value.
+    """
+    source = np.asarray(source, dtype=np.float64)
+    bound = np.asarray(bound, dtype=np.float64)
+    if source.shape != bound.shape or not np.isfinite(source).all() or not np.isfinite(bound).all():
+        return False
+    source32 = source.astype(np.float32)
+    bound32 = bound.astype(np.float32)
+    return bool(
+        np.array_equal(source, bound)
+        or (
+            np.array_equal(bound, bound32.astype(np.float64))
+            and np.array_equal(source32, bound32)
+        )
+    )
+
+
 def stage1_question_bank_module_path(wbt_root):
     """Return the standalone bank loader without importing the Isaac task package."""
 
@@ -1829,12 +1853,8 @@ class MujocoRobot:
         if bound_armature is not None:
             source = self.model.dof_armature[self.vadr].copy()
             if require_bound_plant_match:
-                # Isaac records this vector through float32 tensors while the MJCF parser
-                # exposes float64 values.  Accept only the sub-1e-8 round-trip residue; an
-                # exact zero tolerance would reject the same decimal plant after a harmless
-                # float32 serialization (observed max residue 2.71e-9 on A3).
                 require_contract(
-                    np.allclose(source, bound_armature, rtol=0.0, atol=1e-8),
+                    matches_training_float32_plant(source, bound_armature),
                     "formal BankExam MJCF armature disagrees with training metadata: "
                     f"max_abs={float(np.max(np.abs(source - bound_armature))):.3g}",
                 )
@@ -1844,9 +1864,10 @@ class MujocoRobot:
             source_hi = self.model.actuator_ctrlrange[self.act_id, 1].copy()
             if require_bound_plant_match:
                 require_contract(
-                    np.allclose(source_lo, -bound_effort, rtol=0.0, atol=1e-9)
-                    and np.allclose(source_hi, bound_effort, rtol=0.0, atol=1e-9),
-                    "formal BankExam MJCF actuator ctrlrange disagrees with bound effort limits",
+                    matches_training_float32_plant(source_lo, -bound_effort)
+                    and matches_training_float32_plant(source_hi, bound_effort),
+                    "formal BankExam MJCF actuator ctrlrange disagrees with bound effort limits: "
+                    f"max_abs={float(max(np.max(np.abs(source_lo + bound_effort)), np.max(np.abs(source_hi - bound_effort)))):.3g}",
                 )
             self.model.actuator_ctrlrange[self.act_id, 0] = -bound_effort
             self.model.actuator_ctrlrange[self.act_id, 1] = bound_effort

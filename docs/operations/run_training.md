@@ -374,10 +374,12 @@ PY
 ```
 
 `onnxruntime` alone is insufficient because formal normalization preflight
-inspects and checks the graph through `onnx`. The exact A3 plant comparison
-permits only `1e-8` absolute armature serialization residue: Isaac metadata
-passes through float32 while MuJoCo parses the same MJCF decimals as float64
-(observed maximum `2.71e-9`). A material plant mismatch still fails closed.
+inspects and checks the graph through `onnx`. Exact A3 plant comparison uses
+no arbitrary fixed tolerance: exact float64 equality passes; otherwise the
+bound metadata must be a canonical finite float32 value and the MJCF value
+must map to the same float32 grid point. This accepts serialization-only
+armature (`2.71e-9`) and ankle-effort (`3.0517578e-6`, `118.2` versus
+`118.199996948...`) residues while a neighboring float32 value still fails.
 Do not put report-only formatting changes in `venue_ball_sampler.py`: that
 module's complete SHA is part of every schema-v3 bank physics contract. Final
 artifact exactness is overlaid by `mujoco_eval_onnx.py` while rendering the

@@ -498,8 +498,18 @@ The following retries reached the CPU evaluator and separated two more evaluator
 training quality. Both Pod venvs had `onnxruntime` but not the `onnx` package required for formal
 graph checking; they now pin `onnx==1.22.0`, and checker plus runtime inference pass. Fresh exact
 checkpoints then failed before rollout on only `2.71e-9` armature disagreement caused by float32
-metadata versus float64 MJCF parsing. The formal gate now tolerates at most `1e-8` absolute
-serialization residue, with a regression that still rejects material plant differences. The six
+metadata versus float64 MJCF parsing. A later retry found the analogous `3.0517578e-6` residue at
+the `118.2` ankle effort limit. The formal gate now compares exact float32 grid identity instead of
+using a fixed tolerance, with midpoint/next-grid regressions that reject material plant differences. The six
 original trainers remained live and the frozen checkouts stayed clean. None of these evaluator
 failures is counted as a model result, and G05 remains `Partial` pending the corrected fresh curve
 and layer-by-layer scale-out proof.
+
+The scale-out proof is now complete, although training/results are not. Both Pods reached four
+4096-env trainers on each of their three RTX 5090s. The full-pool snapshot used
+`22.9--23.2/32.6 GiB` per card at `87--97%` utilization, with `840/904 GiB` host RAM still
+available. All 24 accepted arms reached a first PPO iteration; every first checkpoint is finite and
+its embedded contract SHA matches the adjacent schema-3 sidecar. Pod 1 LZ seed 3 had one
+pre-contract scene-start `malloc` abort; its log/launch-state SHAs are retained, the process exited
+itself, and an unchanged single-arm retry (PGID `1354525`) passed. The failed boot is not a 25th
+experiment. G05 remains `Partial` because periodic curves and terminal verification are incomplete.

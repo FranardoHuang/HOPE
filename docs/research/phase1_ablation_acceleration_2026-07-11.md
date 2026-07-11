@@ -121,6 +121,10 @@ formal target 格，其他三格是同 family 的因果尺。
 仍活”的已成功臂。若较早臂已经自然结束，用 `PHASE1_ONLY_ARM=<run_name>` 精确补发剩余臂，
 不需要也不允许删除成功臂状态。
 
+本轮实测已复现旧容量规则：六张 5090 都达到四条 4096-env 并发，显存约
+`22.9–23.2/32.6 GiB`、util `87–97%`，host RAM 仍有大量余量。这个数字证明“4/卡可运行”，
+不等于以后任何配方都无条件塞四条；obs/asset/scene 变大时仍按 2→3→4 层逐层验收。
+
 扩容后 checkpoint worker 只消费预注册里程碑，不对每个 `model_*.pt` 重复判卷。这样训练保存频率
 仍保持恢复能力，而 CPU/GPU 评测预算集中在能改变决策的节点上。
 `phase1_checkpoint_curve_worker.py --wait-for-checkpoints` 可以在里程碑出现前常驻，但只等待 manifest

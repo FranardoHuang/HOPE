@@ -360,9 +360,10 @@ def test_mujoco_robot_accepts_float32_armature_roundtrip(monkeypatch):
     # Training metadata originates in Isaac float32 tensors, while the same decimal values
     # in MJCF are parsed as float64.  The exact gate must tolerate only that serialization
     # residue (A3 max observed 2.71e-9), not a physically meaningful plant change.
-    bound = np.full(31, 0.06646569891, dtype=np.float64)
+    source = np.full(31, 0.06646569891, dtype=np.float64)
+    bound = source.astype(np.float32).astype(np.float64)
     joint_names, body_names, model = _install_fake_mujoco(
-        monkeypatch, armature=bound.astype(np.float32).astype(np.float64)
+        monkeypatch, armature=source
     )
     robot = M.MujocoRobot(
         "unused.xml", joint_names, body_names, 0.005,
@@ -376,6 +377,53 @@ def test_mujoco_robot_accepts_float32_armature_roundtrip(monkeypatch):
         allow_velocity_limit_proxy=False,
     )
     assert np.array_equal(model.dof_armature[robot.vadr], bound)
+
+
+def test_mujoco_robot_accepts_float32_effort_roundtrip(monkeypatch):
+    # A3 ankle effort is 118.2 in MJCF and 118.199996948... after Isaac float32 storage.
+    bound = np.full(31, np.float32(118.2), dtype=np.float32).astype(np.float64)
+    joint_names, body_names, model = _install_fake_mujoco(
+        monkeypatch, armature=0.01, effort=118.2
+    )
+    robot = M.MujocoRobot(
+        "unused.xml", joint_names, body_names, 0.005,
+        keep_native_damping=False, keep_frictionloss=False,
+        pd_mode="implicit", kd_for_implicit=np.ones(31),
+        actuator_types=("implicit",) * 31,
+        joint_armature=np.full(31, 0.01),
+        joint_velocity_limits=np.full(31, 12.0),
+        joint_effort_limits=bound,
+        require_bound_plant_match=True,
+        allow_velocity_limit_proxy=False,
+    )
+    assert np.array_equal(model.actuator_ctrlrange[robot.act_id, 1], bound)
+
+
+def test_float32_plant_match_requires_canonical_bound_and_rejects_next_grid_value():
+    source = np.array([118.2, 0.06646569891], dtype=np.float64)
+    canonical = source.astype(np.float32).astype(np.float64)
+    assert M.matches_training_float32_plant(source, canonical)
+
+    noncanonical = canonical.copy()
+    noncanonical[0] += 1e-12
+    assert not M.matches_training_float32_plant(source, noncanonical)
+
+    assert M.matches_training_float32_plant(
+        np.array([0.01], dtype=np.float64), np.array([0.01], dtype=np.float64)
+    )
+
+    next_grid = canonical.copy()
+    next_grid[0] = np.nextafter(np.float32(canonical[0]), np.float32(np.inf)).item()
+    assert not M.matches_training_float32_plant(source, next_grid)
+
+    bound_one = np.array([1.0], dtype=np.float64)
+    ulp = float(np.nextafter(np.float32(1.0), np.float32(np.inf)) - np.float32(1.0))
+    assert M.matches_training_float32_plant(
+        np.array([1.0 + 0.49 * ulp]), bound_one
+    )
+    assert not M.matches_training_float32_plant(
+        np.array([1.0 + 0.51 * ulp]), bound_one
+    )
 
 
 def test_final_denominator_report_downgrades_bank_leg_for_inexact_artifact():

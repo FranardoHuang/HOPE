@@ -1293,12 +1293,21 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    terminal、峰值 checkpoint 也保留”的直接数据。fresh 三点在 rollout 前被 evaluator 拦住：先是
    mjeval 有 `onnxruntime` 没 `onnx`，再是同一 armature 经 float32/float64 后只有 `2.71e-9` 残差
    却被 `1e-10` 阈值误拒；两 Pod 已装 `onnx==1.22.0` 并过 checker/runtime，judge 以后在占 Kit/GPU
-   前先 import 双依赖，armature 只放行 `1e-8` 序列化残差。另抓到 causal summary JSON 正确为
+   前先 import 双依赖；当时的 `1e-8` armature 修复是前置台阶，最终 plant 比较见第 13 条。
+   另抓到 causal summary JSON 正确为
    inexact、Markdown `DENOMINATORS` 却误写 true，已改成传播最终 evaluation flag。专项回归
-   `88 passed,1 optional skip`；所有失败批次保留但不算模型分，训练 checkout 未动、无真机命令。
+   聚焦集最终扩到 `90 passed,1 optional skip`；所有失败批次保留但不算模型分，训练 checkout 未动、无真机命令。
 12. 【franco/Codex】**正式卷用自己的哈希门挡住一次“只改报告也污染物理尺”的实现错误**——首版
    denominator 修复放进 `venue_ball_sampler.py`，虽不改物理计算，却改变了 schema-v3 bank 绑定的
    整文件 SHA；fresh clean-q10 export 因此在 rollout 前 fail closed。sampler 已逐字恢复到
    `00e28e85...30cc`，final exact/inexact 只在外层 MuJoCo 报告器替换；traceback 后 Isaac shutdown
    卡住时仅 TERM 对应 judge PGID，训练臂零信号。失败目录保留且不计分，说明 immutable bank 的
    source hash 门真实生效。
+13. 【franco/Codex】**六卡四臂满池实测完成，plant exact 改成训练精度的逐位等价**——24 条接受臂
+   全部到首 iteration，每卡四条 4096-env 实测约 `22.9–23.2/32.6 GiB`、util `87–97%`，两 Pod
+   host available RAM `840/904 GiB`；24 个首 checkpoint 全 finite 且 SHA 绑定 hard contract。
+   Pod1 LZ-seed3 一次 scene-start malloc 自退，保留双 SHA 后完全同配方精确 retry 成功，失败臂不
+   冒充第 25 条。fresh exact 又抓到 effort 上限 `118.2` 在 float32 合同里是
+   `118.199996948...`（差 `3.0517578e-6≈0.4 ULP`）；不再继续放大固定 atol，改为 exact float64
+   相同或 canonical metadata 与 MJCF 落到同一 float32 grid，0.49 ULP 过、0.51 ULP/next-grid 拒。
+   这是训练实际数值精度的等价，不是放宽 plant 合同。
