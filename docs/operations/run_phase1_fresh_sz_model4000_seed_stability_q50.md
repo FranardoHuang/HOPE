@@ -1,0 +1,147 @@
+# Fresh SZ model_4000 four-seed matched q50 queue
+
+Status: preregistered and source-validated on 2026-07-12; no Pod audit, activation,
+q50 preparation, judge, trainer signal, or robot command has run. This queue exists to
+separate delayed seed4 learning from persistent seed4 weakness at the next matched
+checkpoint. It does not authorize a training change, checkpoint promotion, deployment, or
+hardware.
+
+The final behavioral arbiter remains the Agibot vendor MuJoCo Gate3/Gate3B runtime. This
+clean K100 MuJoCo paper is an earlier checkpoint/seed instrument, not a substitute for that
+gate.
+
+## Frozen question and known limitation
+
+The four fresh formal-target `SZ` seeds use `model_4000.pt` and the **byte-identical** K100
+paper used for the model-2000 stability result:
+
+- schedule file SHA-256 `66e89986a2b726d529179fcb4c745625ebed0380d59664caceefc55e86071cb3`;
+- schedule semantic SHA-256 `7dc6af822fb4130b8c324843f179d77f882d1326306bb19802b00f94447dff3e`;
+- question-order SHA-256 `b87e81a34ff2d31766e17345f0a8c9d77665b78874093e26bdae257e8ed21f91`;
+- exact-family exam-bank SHA-256 `d7db2568beee990ef1d64b2dce9f0ab56ca76377f8993d820b6388292d0f5096`;
+- 100 uncensored attempts, 50 per side, seed 0, noise 0, hold `[0,100]`, one-question
+  reset, no wrap, and no inexact escape.
+
+No new schedule may be materialized. Family, training recipe, hard contract, four seeds and
+the model-2000 stability thresholds are unchanged:
+
+| check | unchanged threshold |
+| --- | ---: |
+| four-seed median aggregate | `>= 0.75` |
+| worst-seed aggregate | `>= 0.65` |
+| best-minus-worst aggregate | `<= 0.20` |
+| every seed on every side | `>= 0.50` |
+
+Two facts were known before this preregistration. At model 2000, seeds 1--4 scored
+`.83/1.00/1.00/.20`, so the stability gate failed. Seed1 model 4000 had already scored
+`.50` aggregate (`FH=.00`, `BH=1.00`) on this exact paper. Therefore the model-4000
+four-seed **family stability gate is already mathematically unable to pass** the unchanged
+worst-seed threshold. This paper still answers the narrower, preregistered question:
+
+- seed4 supports delayed learning only if its 4k aggregate is at least `.65` and both sides
+  are at least `.50`—the same old thresholds, not hindsight-tuned ones;
+- otherwise seed4 weakness remains persistent through 4k;
+- even if seed4 recovers, do not claim the family is stable because known seed1 4k is `.50`.
+
+Seed1 may reuse its old model-4000 paper only after full raw-chain revalidation. Its known
+checkpoint SHA is `1a8fcf3d...e9071`; a different discovered SHA fails the readiness audit.
+
+## Content-bound source
+
+- preregistration:
+  `configs/phase1_fresh_SZ_model4000_seed_stability_q50_prereg_20260712.json`, SHA-256
+  `ca5ea90f8420ef4c96ee05881b25d062cc437faa97510babca45299afcabbff0`;
+- offline queue:
+  `configs/phase1_fresh_SZ_model4000_seed_stability_q50_queue_20260712.json`, SHA-256
+  `d4e69d91adfe7a42aee897c11b1b6d6bf7e5eaa7fb81d856b66cab7b3f7d3909`;
+- readiness validator:
+  `scripts/validate_phase1_fresh_sz_model4000_q50_queue.py`, SHA-256
+  `e763ecb9a822f7e1c2e9338749701fcd4bfea9f26f9b6fe5b4b189f8ca5a6cd3`;
+- bound fresh exact validator SHA-256
+  `3528250777a170791f39d8dd17716c2a7f8ca91416a3ffa8433ec5eb691ed9e0`.
+
+The readiness validator deliberately exposes only `validate-config`, `audit-pod`, and
+`activate`. It imports no process-control module and has no SSH, judge launch, kill, or
+signal path. The queue has `runtime_entrypoint=null`; an activation artifact does not start
+a judge. A later source-reviewed q50 runner must require that exact activation artifact.
+
+## Mandatory all-four barrier
+
+The queue remains runtime-ineligible until **both** Pod audits are content-bound and their
+union covers seed1/2/3/4 exactly. Every arm must satisfy all of the following:
+
+1. the path ends in `model_4000.pt` and the checkpoint embeds `iter=4000`;
+2. every floating tensor is finite;
+3. embedded schema version is 3 and `training_contract_lineage_exact=true`;
+4. embedded contract SHA equals the adjacent contract SHA
+   `3a3b3d95...b9972`;
+5. the adjacent hard contract remains fresh `SZ`: `shared_plus_y`, motion exact, schema-3
+   bank family exact, and 31/31 zero friction coefficients;
+6. both clean checkouts stay at training `6d93bcb...` and eval `46a0ce2...`;
+7. both Pod audits bind the same schedule file/semantic/question-order SHA.
+
+One Pod audit is explicitly insufficient and says
+`runtime_authorized_by_this_pod_audit=false`. Only `activate` can combine both audits; the
+result still says `judges_started=0` and only permits a future runner to prepare against
+those frozen checkpoint hashes. No trainer or checkpoint worker may receive a signal.
+
+## Validation now
+
+Run locally or in an isolated clean control copy; this performs no Pod access:
+
+```bash
+python3 scripts/validate_phase1_fresh_sz_model4000_q50_queue.py \
+  --queue configs/phase1_fresh_SZ_model4000_seed_stability_q50_queue_20260712.json \
+  --expected-queue-sha256 d4e69d91adfe7a42aee897c11b1b6d6bf7e5eaa7fb81d856b66cab7b3f7d3909 \
+  validate-config
+
+pytest -q tests/test_validate_phase1_fresh_sz_model4000_q50_queue.py
+```
+
+Accepted source verification on 2026-07-12: `20 passed`; committed config validation prints
+`PASS; no runtime`.
+
+## Future readiness audit and activation
+
+Do this only after the ordinary monitor reports every accepted model-4000 checkpoint present.
+Preserve the repo-like `configs/` and `scripts/` layout in an external clean control copy;
+do not alter either frozen training checkout.
+
+On Pod1, audit seed1/seed3. On Pod2, audit seed2/seed4. `$SOURCE_SCHEDULE` must point to the
+same pre-existing file bytes on both hosts, and `$QUEUE_SHA` is the queue SHA above:
+
+```bash
+python3 scripts/validate_phase1_fresh_sz_model4000_q50_queue.py \
+  --queue configs/phase1_fresh_SZ_model4000_seed_stability_q50_queue_20260712.json \
+  --expected-queue-sha256 "$QUEUE_SHA" \
+  audit-pod \
+  --pod pod1 \
+  --schedule-source "$SOURCE_SCHEDULE" \
+  --output /workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_model4000_seed_stability_q50_barrier_v1/pod1_ready_audit.json
+```
+
+Use the identical command with `--pod pod2` and the preregistered Pod2 output. These commands
+only hash and inspect checkpoints/contracts and write no-clobber readiness JSON; they start no
+judge. If any arm is absent, non-finite, wrong-iteration, wrong-lineage or wrong-contract, keep
+the failure output/log and wait—do not partially start the other seeds.
+
+After copying both immutable audits to one control host, combine them only with their observed
+file SHAs:
+
+```bash
+python3 scripts/validate_phase1_fresh_sz_model4000_q50_queue.py \
+  --queue configs/phase1_fresh_SZ_model4000_seed_stability_q50_queue_20260712.json \
+  --expected-queue-sha256 "$QUEUE_SHA" \
+  activate \
+  --pod1-audit "$POD1_AUDIT" \
+  --pod1-audit-sha256 "$POD1_AUDIT_SHA" \
+  --pod2-audit "$POD2_AUDIT" \
+  --pod2-audit-sha256 "$POD2_AUDIT_SHA" \
+  --output-dir /workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/activation
+```
+
+Do not improvise a judge command after activation. The next source change must provide and test
+an activation-consuming q50 runner, including full seed1 raw-chain reuse validation, serial
+per-Pod Kit-lock execution, exact PID/PGID recording, no-clobber state, exact-result validation
+and content-addressed aggregation. Until that code is reviewed and bound, the queue remains
+prepared but not runnable.

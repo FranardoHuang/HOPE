@@ -67,6 +67,13 @@ The recorded action is therefore: keep this seed-stability question open, contin
 training arm unmodified, send no trainer/worker signal, and keep all downstream behavior,
 plant, recovery, deployment, and real-robot gates open.
 
+The next matched milestone is separately preregistered at model 4000 in
+`docs/operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md`. It reuses these exact
+K100 bytes and thresholds. Because seed1 model 4000 was already known to score `0.50`, that
+paper can distinguish delayed versus persistent seed4 weakness but cannot retroactively pass
+four-seed family stability. Its all-four finite/iteration/contract/lineage activation barrier
+must pass before any new q50 runtime.
+
 ## Content-addressed chain
 
 The immutable inputs are:

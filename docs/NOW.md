@@ -85,6 +85,11 @@ Rules:
   exact、0 physical fall。预注册 median `.915` 过，但 worst `.20`、spread `.80`、worst-side
   `0` 均失败，正式结论 `fail_seed_stability_checkpoint_evidence`；2k 不能作稳定 baseline，
   不得用前三个强 seed 隐去 seed4。supervisor/child 已全退，trainer/worker 全活且零信号。
+- **4k 四 seed 只排了严格同卷队列，还没有启动判卷**：继续逐字节复用 2k 的 K100、四 seed、
+  SZ family 和原门槛；四个 checkpoint 未全部 finite/iter=4000/同 hard-contract/fresh lineage 前
+  无法生成 activation，且 activation 本身没有 judge 入口。已知 seed1 4k=`.50`，所以 family
+  stability 按原 worst-seed `.65` 门槛必然不过；该卷只区分 seed4 是晚熟还是持续弱，不能洗成
+  稳定 baseline。源码护栏 20 tests 通过，尚未做 Pod audit/activation/runtime。
 - **厂商 MuJoCo Gate 3 现在是最终裁决门，不是 Isaac**：它把假球→真规划器→同款 C++ runner→
   智元 A3 MuJoCo 串成部署闭环；候选首先要在这个版本保持平衡、完成挥拍/恢复且不靠人工 reset，
   再谈 Isaac 分数。Isaac/MuJoCo 同 policy 的巨大差异另作归因轴：现已完成 PhysicalBall Phase-B

@@ -4,6 +4,21 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-12
 
+- Preregistered the next matched fresh-SZ four-seed paper at `model_4000.pt`
+  without Pod access or runtime. It reuses the exact model-2000 K100 file,
+  semantic/order/bank hashes and unchanged stability thresholds. The offline
+  queue has no runtime entrypoint; its validator can only write per-Pod
+  checkpoint-readiness audits and combine them after seed1/2/3/4 are all
+  present, finite, embedded-iter 4000, adjacent-contract bound and fresh-lineage
+  exact. One Pod or three seeds can never activate it. Known seed1 4k is already
+  `.50` aggregate, so the overall 4k family-stability gate is precluded; the
+  honest question is whether seed4 rises from 2k `.20` to the unchanged `.65`
+  aggregate and `.50` per-side thresholds. Even a seed4 recovery cannot claim
+  family stability. Source validation passed `20` tests. Queue/prereg/validator
+  SHAs are `d4e69d91...d3909`, `ca5ea90f...bff0`, and
+  `e763ecb9...6cd3`; no Pod audit, activation, judge, signal or hardware action
+  ran. See
+  `docs/operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md`.
 - Closed the code-level half of the Phase-1 plant-semantics gap without touching
   any Pod trainer/worker or hardware. History audit confirms `f921c5b` copied
   the Agibot vendor MJCF's constant-`N*m` `frictionloss` decimals into
