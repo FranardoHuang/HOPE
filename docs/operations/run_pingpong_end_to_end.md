@@ -72,6 +72,12 @@ ROS control chain — historical), `agi/a3_deploy_example/PINGPONG_NEW_CHECKPOIN
   metadata, `--planner`, and planner parameter `racket_flat_schema:=2`; it has not yet passed a
   vendor Gate 3 runtime and is not a deploy baseline.
 
+Before any 179-D Gate 3 attempt, run the production binary with
+`--planner --no-publish --model-preflight-only`. This mode validates the ONNX graph and the full
+metadata/lineage contract, prints the accepted observation width and bound SHA values, then exits
+before AimRT/backend initialization. It is intentionally weaker than a no-publish first tick and
+does not replace the vendor MuJoCo Gate 3/Gate 3B run.
+
 > **RETIRED 2026-07-04 — the python control chain.** The old "Path B" (hope_wbc_runner
 > + agibot_hardware_bridge driving `/body_drive` over ros2) is ABANDONED: closed-loop
 > testing exposed a post-swing hold runaway (base-anchored hold carrot, no hold

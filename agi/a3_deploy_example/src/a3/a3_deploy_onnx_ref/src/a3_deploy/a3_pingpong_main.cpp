@@ -128,7 +128,8 @@ bool ValidateCommandLine(int argc, char** argv, std::string& error) {
   static const std::unordered_set<std::string> switch_flags = {
       "--auto-leg-hold", "--backhand", "--base-estimator", "--dry-run",
       "--leg-stand-gains", "--legs-passive", "--no-fall-guard", "--no-imu-yaw",
-      "--no-publish", "--no-yaw-align", "--official-stand", "--oracle-pelvis",
+      "--model-preflight-only", "--no-publish", "--no-yaw-align", "--official-stand",
+      "--oracle-pelvis",
       "--perfect-tracking", "--planner", "--reference-playback", "--shadow-frozen-clock",
       "--single-swing", "--stream-target", "--use-imu-yaw", "--vel-box-center",
       "--waist-passive"};
@@ -372,6 +373,8 @@ int main(int argc, char** argv) {
                  " [--model-path PATH] [--gain-scale F] [--swing-speed F] [--stand-kp K --stand-kd D]\n"
                  "       [--reference-playback|--mode reference-playback]"
                  " [--no-publish|--dry-run] [--warmup-sec S]\n"
+                 "       [--model-preflight-only] (requires no-publish; validates ONNX and exits"
+                 " before backend Init)\n"
                  "       [--command-deadline-ms MS] (must be >0 and shorter than one policy period)\n"
                  "       [--effort-limit-ratio R] (0<R<=1; PD+measured effort safety envelope)\n"
                  "       [--planner] (LIVE planner: racket <- /racket/command_flat, base <- /a3/base_pose_flat over ros2;"
@@ -404,6 +407,11 @@ int main(int argc, char** argv) {
   const bool reference_playback_selected =
       Has(argc, argv, "--reference-playback") || run_mode == "reference-playback";
   const bool no_publish = Has(argc, argv, "--no-publish") || Has(argc, argv, "--dry-run");
+  const bool model_preflight_only = Has(argc, argv, "--model-preflight-only");
+  if (model_preflight_only && !no_publish) {
+    std::cerr << "--model-preflight-only requires --no-publish/--dry-run\n";
+    return 2;
+  }
   const bool no_yaw_align = Has(argc, argv, "--no-yaw-align");
   if (no_yaw_align && !no_publish) {
     std::cerr << "--no-yaw-align is diagnostic-only and requires --no-publish/--dry-run\n";
@@ -518,14 +526,6 @@ int main(int argc, char** argv) {
   const Mode target_mode = default_mode;
   ModeState mode{warmup_sec > 0 ? Mode::kPdStand : default_mode};
 
-  // --- backend ---
-  auto backend = std::make_unique<robot_io::A3AimrtBackend>();
-  const std::string backend_cfg =
-      BuildBackendCfg(cfg["backend"], aimrt_override_arg, cfgdir, no_publish);
-  std::cout << "[pingpong] backend cfg: " << backend_cfg << "\n";
-  if (!backend->Init(backend_cfg)) { std::cerr << "backend Init failed\n"; return 1; }
-  std::cout << "[pingpong] A3AimrtBackend initialised; model=" << model_path << "\n";
-
   // --- our front-end ---
   a3_pingpong::PpPolicyConfig pcfg;
   // Planner mode MUST start idle (level 0): the swing level is driven ONLY by the engage
@@ -612,6 +612,23 @@ int main(int argc, char** argv) {
               << e.what() << "\n";
     return 3;
   }
+  if (model_preflight_only) {
+    std::cout << "[pp PREFLIGHT] accepted; backend_not_initialized=true"
+              << " obs_dim=" << pp->onnx().obs_dim()
+              << " training_contract_sha256=" << pp->onnx().training_contract_sha256()
+              << " source_checkpoint_sha256=" << pp->onnx().source_checkpoint_sha256()
+              << "\n";
+    return 0;
+  }
+
+  // Initialize the command backend only after the model and all metadata/runtime contracts pass.
+  // The preflight-only branch returns above and therefore cannot touch AimRT or publishing.
+  auto backend = std::make_unique<robot_io::A3AimrtBackend>();
+  const std::string backend_cfg =
+      BuildBackendCfg(cfg["backend"], aimrt_override_arg, cfgdir, no_publish);
+  std::cout << "[pingpong] backend cfg: " << backend_cfg << "\n";
+  if (!backend->Init(backend_cfg)) { std::cerr << "backend Init failed\n"; return 1; }
+  std::cout << "[pingpong] A3AimrtBackend initialised; model=" << model_path << "\n";
 
   // ---- LIVE PLANNER input wiring (Path B) ----
   // Backend AimRT subscribers (set BEFORE Start()) push decoded Float64MultiArrays into

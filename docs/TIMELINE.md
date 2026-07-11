@@ -1538,3 +1538,11 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    以 archive 落到 Pod1 隔离路径，实际 `a3_deploy_onnx_ref_pingpong` 链接成功；focused 10/10、
    native 195 pass/4 optional skip、78 compile rows 无 fast-math。此构建关闭 ROS/AimRT，未加载
    formal 179 ONNX、未 tick vendor MuJoCo；full dependency/first-tick/Gate3B 继续 open。
+50. 【franco/Codex】**把 179 正式模型加载和 backend 启动拆成两道门**——production runner 新增
+   `--model-preflight-only`，强制同时带 no-publish/dry-run；先构造并核验 PpPolicy，再打印 obs width、
+   training/source SHA 后退出。backend 构造与 Init 被移到早退之后，因此可以先验证模型而不碰
+   AimRT。正式 SZ ONNX 的隔离二进制实跑、first tick 和 Gate3/Gate3B 仍待完成。
+51. 【franco/Codex】**真实模型预检先抓到 loader 生命周期 UB，而不是把锅甩给 checkpoint**——
+   `TensorTypeAndShapeInfo` 借自已经析构的临时 `TypeInfo`，formal 179 与 175 模型都能触发
+   `length_error/bad_alloc`。修复为显式保留两个 input owner，并增加真实 ONNX optional test；旧失败
+   不计分，必须隔离重建和 formal candidate 实跑后才能关闭加载门。

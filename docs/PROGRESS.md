@@ -1398,3 +1398,9 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   Release 链接，focused C++ 10/10、全套 195 pass/4 optional-asset skip，78 条 compile command
   无 fast-math；训练/eval checkout 未改。ROS/AimRT full-dependency、formal ONNX first tick 与厂商
   MuJoCo Gate3/Gate3B 行为卷仍未过，G06 继续 Partial。
+- production runner 增加 fail-closed model-only preflight：必须 no-publish/dry-run，PpPolicy 的
+  ONNX/metadata/lineage 验证发生在任何 backend 构造/Init 之前；成功只打印 obs width 与两条谱系
+  SHA 并退出。它只关闭安全加载门，不等于 actor first tick、AimRT 或厂商 MuJoCo 行为门。
+- full-dependency 首次真实 ONNX 探针在 backend 前抓到通用 loader UB：shape-info 借自临时
+  `TypeInfo`，175/179 均可抛 `length_error/bad_alloc`。现保留 input0/input1 owner 生命周期并加真实
+  ONNX optional regression；失败探针不计模型失败，隔离 Release 重建/实跑仍是验收条件。

@@ -551,3 +551,19 @@ contained the finite-safety flags and none contained `-ffast-math` or `-ffinite-
 This closes the offline vendor-source compile/test leg only. It does not exercise ROS/AimRT,
 load a formal 179 ONNX, tick the production backend, instantiate the vendor MuJoCo, or score a
 ball. Therefore G06 remains Partial and Gate 3/Gate 3B remains open.
+
+The production runner now also has a fail-closed `--model-preflight-only` path. It requires
+`--no-publish` or `--dry-run`, constructs `PpPolicy` before any backend object is created, and on
+success emits the accepted observation width plus training-contract and source-checkpoint SHA-256
+before exiting. This safely separates “the formal 179 export is loadable under the production
+metadata contract” from “the vendor backend has started.” The former still requires an isolated
+binary run with the formal candidate; the latter, first actor tick, normal-envelope/recovery
+contracts and Gate 3/Gate 3B behavior all remain open.
+
+The first full-dependency probe found a common loader defect before any score was produced:
+`PpOnnxPolicy` chained `GetInputTypeInfo(...).GetTensorTypeAndShapeInfo()` through a temporary
+owner. The borrowed tensor-info handle was already dangling when its shape was read and real 175-
+and 179-D models could throw `length_error`/`bad_alloc`. The source now retains both input
+`TypeInfo` owners through all shape/type reads and adds an optional real-ONNX regression. This
+finding invalidates the failed loader attempt, not the model; isolated Release rebuild plus the
+formal-ONNX test and production preflight are required before marking the repair verified.
