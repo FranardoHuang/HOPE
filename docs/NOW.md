@@ -754,6 +754,7 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 | 1c 击球窗分通道奖励(W2 门票) | ★★★ | claude | main(旗标默认关) | 半天-1 天;整包一臂 |
 | 1g 适配器 v2 变体库骨架(CPU) | ★★ | claude/franco | — | S1 保险 + S2 长杆,现在开工 |
 | 1d 难度课程 loader 窗口 | ★★ | yikang | `stage1-fixed-point` | **代码已落**(loader 难度开窗+train.py override 翻译层+推进速率修 bug,旗标默认关字节等价);yikang 07-10 转 vendor 链,后续臂搭车即可 |
+| **head_discipline 奖励 + A3 stand 查看器**(公司 Linux 机改动移植,那台不让 push) | ★★ | **yikang** | `yikang-linux-port-0711` | 从公司机移回两件真改动(基 hitter@`5c346ea`=真实基线,不是 main):①**head_discipline 奖励**——head_yaw/head_pitch 是无奖励管辖 DOF(A3_UPPER_TRACKED 到腕即止、无 joint-space 项配 head_*、静态偏置在各正则项下付~0),njfc21an/model_9000 MuJoCo 诊断把头偏 park 在 -60° 软限(p5=p95=-60.6°)整轮=「机器人朝右看」病根(参考 271 帧恒 0);复用 foot_orientation_discipline(L1 \|q−ref\|)于头对,默认 0.0=**现役配方字节等价**,RallyFinalV2 白名单开 -0.5(同 07-07 pigeon-toe 同型病同型治)。②`scripts/view_a3_stand.py`——纯 MuJoCo(免 AimRT 编译)A3 站姿 PD 查看器(--check 10s 稳定门 / --snapshot)。③node.py 经核=origin/main 逐字节相同(公司机本地 main 落后 origin 的陈旧基线假象,非本人改)已剔除。已推;**待 franco/Codex 审入 rally/hitter 线 + 一次验证跑**(reward=franco lane,训练效果未验证) |
 | D9 **双 Pod 终档/队列债** | ★★ | claude | — | 两台 pod 是独立磁盘,不共享 `/workspace`;pod2 十一臂有 16999 checkpoint 但旧导出/报告来自 16400。等 schema-v3 canary 绿后再补终档,不盲目恢复训练 |
 | 等待混合采样 + 目标揭示预警窗 + 等球姿态锚(设计四件套的①②④,旗标默认关) | ★★ | claude | main | 约 2 天代码;首臂搭巩固波 |
 | **拍面反解 torch 版上部署(franco 点名提上日程)**:训练内联的批量求解器搬进规划器,替换 0.3s LM;粗解先行+随球精化的节奏靠它 | ★★★ | claude(求解器)+ yikang(接线) | — | 部署链改动;先影子模式并跑对账 |
