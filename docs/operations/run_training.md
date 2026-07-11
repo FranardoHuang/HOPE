@@ -566,14 +566,14 @@ HARD_WORKER="$CONTROL/phase1_checkpoint_curve_worker_hardened_21e3015.py"
 test "$(sha256sum "$HARD_CONFIG" | awk '{print $1}')" = \
   d270ebb2d2e3fe45510cc1638f64841e9715f0cdccdd9fc983a61e42d5655a58
 test "$(sha256sum "$HARD_TOOL" | awk '{print $1}')" = \
-  c27802224f82d073eff691b9f840abfdda2e4ef00340a9dff0485029a2572cd3
+  d0678af285af42e16ec133e8d739ff3ce3cec0e8e3e4e39a5a973c0cc1a621ad
 test "$(sha256sum "$HARD_WORKER" | awk '{print $1}')" = \
   21e301533328cad2a6684acced85fec6bb6854225eb18ca673247386f059f0eb
 
 /usr/bin/python3 "$HARD_TOOL" \
   --config "$HARD_CONFIG" \
   --expected-config-sha256 d270ebb2d2e3fe45510cc1638f64841e9715f0cdccdd9fc983a61e42d5655a58 \
-  --expected-tool-sha256 c27802224f82d073eff691b9f840abfdda2e4ef00340a9dff0485029a2572cd3 \
+  --expected-tool-sha256 d0678af285af42e16ec133e8d739ff3ce3cec0e8e3e4e39a5a973c0cc1a621ad \
   --pod pod1 validate
 ```
 

@@ -213,7 +213,6 @@ def test_audit_binds_launch_contract_manifest_sidecar_and_legacy_17k(tmp_path, m
         "pgid": 777,
         "command": command,
         "command_sha256": replacement.canonical_sha256(command),
-        "state_path": str(paths["legacy_worker_sidecar"]),
     }
     paths["legacy_worker_sidecar"].write_text(json.dumps(worker))
     paths["legacy_worker_log"].write_text("legacy result log\n")
@@ -221,7 +220,7 @@ def test_audit_binds_launch_contract_manifest_sidecar_and_legacy_17k(tmp_path, m
         "checkpoint_cadence_q10": {
             "path": str(paths["manifest"]), "sha256": file_sha(paths["manifest"]),
         },
-        "q10_worker": worker,
+        "q10_worker": {**worker, "state_path": str(paths["legacy_worker_sidecar"])},
     }))
     old_state_path = paths["legacy_state_dir"] / f"{arm['first_job_id']}.json"
     old_state_path.write_text(json.dumps({
@@ -240,6 +239,7 @@ def test_audit_binds_launch_contract_manifest_sidecar_and_legacy_17k(tmp_path, m
         data, arm, {"legacy_worker": legacy_worker, "judge": judge}
     )
     assert audit["manifest_sha256"] == file_sha(paths["manifest"])
+    assert "state_path" not in audit["old_sidecar"]
     assert audit["immutable_old"]["first_state"]["sha256"] == file_sha(old_state_path)
     assert "worker_log" not in audit["immutable_old"]
     assert audit["legacy_worker_log_path"] == str(paths["legacy_worker_log"])

@@ -81,6 +81,12 @@ Use this file for short project-state updates that future humans and agents need
   evidence, starts standalone worker `21e30153...` in fresh state dirs and
   requires a rejudged 17k with all three hard SHAs. Trainers and judges are
   never managed. The correction is preregistered but not yet applied here.
+- Its first Pod read-only validation also made zero signals and caught a
+  launcher-sidecar shape assumption: the returned worker record embeds
+  `state_path`, while the on-disk sidecar binds only pid/pgid/command/SHA.
+  Replacement tool `d0678af2...` now validates that real split explicitly;
+  all process/group/child gates remain unchanged and the superseded
+  `c2780222...` tool is revoked before any TERM.
 - Corrected a live terminal-cadence deadlock: causal continuations save their
   final checkpoint at `20998`, while four manifests/workers were waiting for
   impossible `20999`. Pod2 M2-S1 terminal is recursively finite and its

@@ -1411,3 +1411,9 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    无 child/judge、旧17k完整且 manifest 与 launch_contract SHA相同，才只 TERM 这两个 worker；
    legacy state/log 永久保留，新 worker 只换脚本和全新 state dir并重判17k，三项 hard SHA全对
    才完成 correction。trainer/judge 不在管理范围。本条时仅预注册，尚未发 TERM。
+28. 【franco/Codex】**replacement 第一次 validate 又零信号抓到真实 sidecar shape**——launcher
+   返回并嵌进 launch-contract 的 worker 对象带 `state_path`，磁盘 worker sidecar 本来只写
+   pid/pgid/command/command SHA；首版错误要求两者连 `state_path` 全等，故安全拒绝。修正版只比较
+   磁盘真实四字段，并要求 embedded `state_path` 精确指向该 sidecar；exact PGID、单成员、childless、
+   manifest/checkpoint/state 门一项没放宽。tool 从作废 `c2780222...` 重签为 `d0678af2...`，仍未
+   对四 worker 发任何 signal。

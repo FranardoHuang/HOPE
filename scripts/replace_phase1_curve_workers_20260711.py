@@ -288,7 +288,7 @@ def audit_arm(
         raise ContractError(f"{arm['run_name']} launch contract points to another manifest")
     if binding.get("sha256") != manifest_sha:
         raise ContractError(f"{arm['run_name']} manifest SHA differs from launch contract")
-    for key in ("pid", "pgid", "command", "command_sha256", "state_path"):
+    for key in ("pid", "pgid", "command", "command_sha256"):
         if old_sidecar.get(key) != embedded_worker.get(key):
             raise ContractError(f"{arm['run_name']} worker sidecar differs at {key}")
     pid = old_sidecar.get("pid")
@@ -306,8 +306,13 @@ def audit_arm(
         raise ContractError(f"{arm['run_name']} worker command changed its manifest")
     if Path(option_value(command, "--state-dir")).resolve() != paths["legacy_state_dir"].resolve():
         raise ContractError(f"{arm['run_name']} worker command changed its legacy state dir")
-    if Path(str(old_sidecar.get("state_path", ""))).resolve() != paths["legacy_worker_sidecar"].resolve():
-        raise ContractError(f"{arm['run_name']} sidecar path self-binding is wrong")
+    # start_q10_worker writes the process facts to the on-disk sidecar first,
+    # then adds state_path only to its returned object embedded in launch_contract.
+    # The disk sidecar intentionally has no self-referential state_path field.
+    if Path(str(embedded_worker.get("state_path", ""))).resolve() != paths[
+        "legacy_worker_sidecar"
+    ].resolve():
+        raise ContractError(f"{arm['run_name']} embedded worker state_path binding is wrong")
     old_first_state_path = paths["legacy_state_dir"] / f"{arm['first_job_id']}.json"
     old_first_state = load_json(old_first_state_path, "legacy 17k state")
     if old_first_state.get("status") != "complete" or old_first_state.get("returncode") != 0:
