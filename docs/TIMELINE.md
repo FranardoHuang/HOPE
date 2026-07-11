@@ -1555,3 +1555,13 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `0/64`、common support=0，故不判 2 或 4，也不写成动作无效。intrinsic 仅反手拉 B/C
    为 `32/32 @ .5444`、`27/32 @ .5155`，保留作 spatial-retarget 候选；TOPP 暂停到
    schema-2/L0/L1/桌网/动力学，最终由智元 vendor MuJoCo Gate3/Gate3B 无 reset 主判。
+52. 【franco/Codex】**179-D 进 Gate 3 不再靠“加个维数白名单”**——新增 flat wire schema2，
+   同一条消息原子携带拍位/拍速/世界系 demanded normal/zero rho；C++ 要求 exact
+   `deploy_parity_face179` term metadata、face/bank/SHA 谱系、planner mode、正 X unit normal，schema1
+   不能 engage。坏 payload/no-solution 两条 wire 都主动发 finite `valid=0`，接收端对 active-face 后
+   的 malformed/unknown 包记 revoke；观测严格是 175 逐位前缀+4尾部。现仅源码/单测，train-bank
+   normal envelope、canonical recovery、vendor full-dependency x86 build、no-publish trace、Gate3 runtime 均未过。
+53. 【franco/Codex】**179 vendor-source 离线 Release 门过，但不冒充 Gate3**——commit `8d56ea86`
+   以 archive 落到 Pod1 隔离路径，实际 `a3_deploy_onnx_ref_pingpong` 链接成功；focused 10/10、
+   native 195 pass/4 optional skip、78 compile rows 无 fast-math。此构建关闭 ROS/AimRT，未加载
+   formal 179 ONNX、未 tick vendor MuJoCo；full dependency/first-tick/Gate3B 继续 open。

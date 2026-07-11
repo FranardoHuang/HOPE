@@ -1,4 +1,4 @@
-// 180/175/177/110-D observation builders. 180 ported from
+// 180/179/175/177/110-D observation builders. 180 ported from
 // hope_ws/.../hope_wbc_runner/obs_builder.py (build_obs). Layout (total 180):
 //   command(62) = ref joint_pos[31] + ref joint_vel[31]
 //   motion_anchor_pos_b(3), motion_anchor_ori_b(6)
@@ -6,6 +6,7 @@
 //   projected_gravity(3), base_target_pos_b(2), racket_target_pos_b(3),
 //   racket_target_vel_w(3), time_to_strike(1), swing_type(1)
 // 175 = deploy_parity (drops anchor_pos + base_target, racket target FK-relative);
+// 179 = exact 175 prefix + demanded world-frame face normal(3) + zero rho(1);
 // 177 = hitter_footwork (the 175 layout + base_target_pos_b(2) re-inserted after
 // projected_gravity — the HITTER-style relative-Δ station footwork channel);
 // 110 = hitter_pure (2026-07-07, HITTER Table-I exact: NO reference stream, NO
@@ -13,6 +14,7 @@
 #pragma once
 
 #include <cmath>
+#include <stdexcept>
 
 #include <Eigen/Dense>
 
@@ -24,6 +26,7 @@ namespace a3_pingpong {
 constexpr int kObsDim = 180;
 constexpr int kObsDim175 = 175;
 constexpr int kObsDim177 = 177;
+constexpr int kObsDim179 = 179;
 constexpr int kObsDim110 = 110;
 constexpr int kNumJoints = 31;
 constexpr int kAnchorTrackedIdx = 7;  // torso_Link in the 14-body tracked order
@@ -59,6 +62,9 @@ struct PpRacketTarget {
   double swing_sign;          // +1 forehand / -1 backhand
   double time_to_strike;      // seconds
   Vec2 base_target_xy = Vec2::Zero();
+  bool face_command_valid = false;
+  Vec3 normal_cmd_w = Vec3(1.0, 0.0, 0.0);
+  double rho = 0.0;
 };
 
 // Assemble the 180-D observation (double precision; cast to float at the ONNX
@@ -204,6 +210,31 @@ inline Eigen::VectorXd build_obs_175(const PpRefs& refs, const PpRobotState& sta
   obs[o++] = target.swing_sign;
 
   return obs;  // o == 175
+}
+
+// Assemble the 179-D ``deploy_parity_face179`` observation. The first 175
+// values are byte-for-byte build_obs_175; the tail is the demanded face normal
+// in WORLD frame plus the reserved rho scalar. The planner wire must provide
+// this command atomically with position/velocity. A scripted/fabricated normal
+// is rejected instead of producing a right-width/wrong-semantics policy input.
+inline Eigen::VectorXd build_obs_179(const PpRefs& refs, const PpRobotState& state,
+                                     const PpRacketTarget& target,
+                                     const Eigen::VectorXd& last_action,
+                                     const Eigen::VectorXd& default_q,
+                                     bool use_base_yaw_for_targets = true) {
+  if (!target.face_command_valid)
+    throw std::invalid_argument("build_obs_179 requires an atomic planner face command");
+  const double norm = target.normal_cmd_w.norm();
+  if (!std::isfinite(norm) || std::fabs(norm - 1.0) > 1e-6)
+    throw std::invalid_argument("build_obs_179 face command is not a unit world vector");
+  if (!std::isfinite(target.rho) || target.rho != 0.0)
+    throw std::invalid_argument("build_obs_179 Phase-1 rho placeholder must be exactly zero");
+  Eigen::VectorXd obs(kObsDim179);
+  obs.head(kObsDim175) = build_obs_175(
+      refs, state, target, last_action, default_q, use_base_yaw_for_targets);
+  obs.segment<3>(kObsDim175) = target.normal_cmd_w;
+  obs[kObsDim175 + 3] = target.rho;
+  return obs;
 }
 
 // Assemble the 177-D "hitter_footwork" observation. Layout (total 177):

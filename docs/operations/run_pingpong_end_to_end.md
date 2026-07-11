@@ -66,8 +66,11 @@ ROS control chain — historical), `agi/a3_deploy_example/PINGPONG_NEW_CHECKPOIN
 - The ROS side is INPUT ONLY: mocap / fake ball + `hope_planner` (pure python; the
   flat topics are `std_msgs`). It contains no policy runner.
 - The ONNX auto-detects the obs contract by input dim (110 hitter_pure / 175 deploy_parity /
-  177 hitter_footwork / 180) and the clip layout + hitter_pure geometry boxes come from ONNX
+  177 hitter_footwork / 179 face-command / 180) and the clip layout + hitter_pure geometry boxes come from ONNX
   metadata. The baseline `model_13200_footfix08` is 110-D (as is its foundation `model_12200_hitterpure`).
+  The 179 path is source-gated only: it additionally requires exact `deploy_parity_face179`
+  metadata, `--planner`, and planner parameter `racket_flat_schema:=2`; it has not yet passed a
+  vendor Gate 3 runtime and is not a deploy baseline.
 
 > **RETIRED 2026-07-04 — the python control chain.** The old "Path B" (hope_wbc_runner
 > + agibot_hardware_bridge driving `/body_drive` over ros2) is ABANDONED: closed-loop
@@ -1276,10 +1279,30 @@ backend; hope_planner publishes both when `publish_flat_cmd:=true`, the default)
 /racket/command_flat  [schema=1, valid(0/1), swing_sign(ignored — side derives from
                        base-rel y), px,py,pz, vx,vy,vz, time_to_strike, strike_time,
                        frame_code(0=world/table, 1=base_link)]        (≥11 doubles)
+                       schema=2 face179 uses exactly 16 doubles: the same 12-value
+                       prefix + demanded_normal_cmd_w[3] + rho[1]. Phase-1 requires
+                       frame_code=0 (world/table) and rho exactly zero.
 /a3/base_pose_flat    [schema=1, valid(0/1), x,y,z, qw,qx,qy,qz]      (≥9 doubles)
                        ← the robot base in the SAME frame as the racket target
                        (arena: /P1/pose + marker_to_base_xyz; sim: /sim/a3/pelvis_pose)
 ```
+
+Schema 1 is the default and remains unchanged for current 110/175/177/180 baselines. A 179-D
+Gate 3 source rehearsal must launch `hope_planner` with `-p racket_flat_schema:=2`; the 179 runner
+then refuses schema 1, missing/non-unit/non-opponent-facing face commands, nonzero rho, scripted
+mode, or mismatched ONNX term/face/bank metadata. A bad/no-solution publisher row is converted to
+an exact finite `valid=0` schema-2 revocation; the receiver also marks malformed/unknown traffic
+after a live face tuple as `invalid_after`. Diagnostics report planner solves separately from
+control-valid rows and count flat-contract rejects. Do not use this on hardware: the vendor MuJoCo
+build and a content-addressed no-publish runtime ledger must pass first.
+
+The active swing uses one frozen schema-2 tuple. Post-swing recovery is still a known blocker:
+the current rally runner synthesizes a base-anchored hold position while carrying the last swing's
+velocity/normal, and the 179 training contract has not proven that hybrid observation. Until a
+canonical recovery tuple or matching vendor-MuJoCo recovery paper is accepted, use the 179 path
+only for wire/first-tick/single-swing diagnostics and do not report a continuous Gate 3 pass.
+The current positive-X normal guard is not a train-bank envelope: exporting and enforcing a
+content-bound per-clip normal/dot range remains required before a runtime pass.
 
 **Engage semantics** (port of the retired python runner's `_tick`; defaults, all
 CLI-tunable): a fresh

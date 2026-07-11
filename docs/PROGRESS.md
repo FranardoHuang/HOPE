@@ -1425,3 +1425,13 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   physical fall 全0。median 门通过但 worst/spread/worst-side 三门失败，正式登记
   `fail_seed_stability_checkpoint_evidence`。四臂继续，不停训、不挑 seed，等后续 matched milestone
   判断 seed4 晚熟还是结构敏感。
+- 开始补 Phase-1 179-D 到 vendor Gate 3 的前置接口：flat wire schema 2 将 position/velocity/
+  demanded-normal/zero-rho 原子发布，C++ 只在 exact `deploy_parity_face179` metadata + planner mode
+  下构造“175逐位前缀+4维尾部”。review 后再收紧为 face enabled/shared-plus-Y/A-frame、exact
+  schema-3 train bank 与双 SHA 绑定；world normal 必须 unit、正 X，坏包/无解主动发 `valid=0`
+  revoke，不能靠静默让旧命令多活。旧 schema1 默认不变；当前仅源码门，vendor build/runtime 未过。
+  训练 bank 的 per-clip normal envelope 与 post-swing canonical recovery tuple 仍是正式 runtime blocker。
+- 179 vendor-source 离线门在隔离 Pod1 archive (`8d56ea86`) 通过：实际 ping-pong executable
+  Release 链接，focused C++ 10/10、全套 195 pass/4 optional-asset skip，78 条 compile command
+  无 fast-math；训练/eval checkout 未改。ROS/AimRT full-dependency、formal ONNX first tick 与厂商
+  MuJoCo Gate3/Gate3B 行为卷仍未过，G06 继续 Partial。
