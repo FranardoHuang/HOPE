@@ -157,8 +157,9 @@ def _sha256_file(path: str) -> str:
 def _build_training_hard_contract(env, actor_contract) -> dict:
     """Immutable actor/task facts that must match across a checkpoint resume.
 
-    Rewards, hold durations, terminations and optimizer settings are deliberately absent: they are
-    curriculum-mutable. Geometry, command meaning, clip identity and action processing are not.
+    Reward weights, termination thresholds and optimizer settings are deliberately absent: they
+    are curriculum-mutable. Geometry, command meaning, clip identity, action processing, and every
+    field that can move a strike/reveal/deadline or actor-visible target in time are not.
     """
     from whole_body_tracking.utils.training_contract import (
         TRAINING_CONTRACT_SCHEMA_VERSION,
@@ -269,6 +270,25 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         ),
         "racket_control_point_offset_wrist_m": attr(racket, "mount_offset"),
         "strike_phase_per_clip": attr(racket, "strike_phase_per_clip"),
+        "racket_strike_phase": attr(racket, "strike_phase"),
+        "racket_strike_window_s": attr(racket, "strike_window_s"),
+        "racket_strike_window_pos_s": attr(racket, "strike_window_pos_s"),
+        "racket_strike_window_wide_s": attr(racket, "strike_window_wide_s"),
+        "racket_midswing_resample_prob": attr(racket, "midswing_resample_prob"),
+        "racket_midswing_resample_tts_floor": attr(
+            racket, "midswing_resample_tts_floor"
+        ),
+        "racket_target_delay_steps": attr(racket, "target_delay_steps"),
+        "racket_target_jitter_pos_per_s": attr(racket, "target_jitter_pos_per_s"),
+        "racket_target_jitter_vel_per_s": attr(racket, "target_jitter_vel_per_s"),
+        "racket_target_noise_white": attr(racket, "target_noise_white"),
+        "racket_target_noise_ar1_sigma": attr(racket, "target_noise_ar1_sigma"),
+        "racket_target_noise_ar1_rho": attr(racket, "target_noise_ar1_rho"),
+        "racket_target_dropout_prob": attr(racket, "target_dropout_prob"),
+        "racket_target_post_strike_dropout_s": attr(
+            racket, "target_post_strike_dropout_s"
+        ),
+        "racket_target_bias_per_swing": attr(racket, "target_bias_per_swing"),
         "episode_length_s": float(getattr(env_cfg, "episode_length_s")),
         "motion_wrap_teleport": bool(getattr(motion, "wrap_teleport", False)),
         "motion_hold_steps_range": attr(motion, "hold_steps_range"),
@@ -278,6 +298,19 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         "motion_stand_start_yaw_range": attr(motion, "stand_start_yaw_range"),
         "motion_speed_scale_range": attr(motion, "speed_scale_range"),
         "motion_speed_scale_per_clip": attr(motion, "speed_scale_per_clip"),
+        "motion_post_swing_start_prob": attr(motion, "post_swing_start_prob"),
+        "motion_post_swing_buffer_size": attr(motion, "post_swing_buffer_size"),
+        "motion_post_swing_min_fill": attr(motion, "post_swing_min_fill"),
+        "motion_post_swing_min_hold": attr(motion, "post_swing_min_hold"),
+        "motion_clip_switch_prob": attr(motion, "clip_switch_prob"),
+        "motion_rsi_skip_settle_frames": attr(motion, "rsi_skip_settle_frames"),
+        "motion_stagger_initial_clock": attr(motion, "stagger_initial_clock"),
+        "motion_stagger_hold_max_steps": attr(motion, "stagger_hold_max_steps"),
+        "motion_adaptive_kernel_size": attr(motion, "adaptive_kernel_size"),
+        "motion_adaptive_lambda": attr(motion, "adaptive_lambda"),
+        "motion_adaptive_uniform_ratio": attr(motion, "adaptive_uniform_ratio"),
+        "motion_adaptive_alpha": attr(motion, "adaptive_alpha"),
+        "motion_event_timing": motion_cmd.event_timing_hard_contract(),
         "motion_allow_legacy_link_origin_velocity": bool(
             getattr(motion, "allow_legacy_link_origin_velocity", False)
         ),
@@ -525,6 +558,10 @@ _MOTION_KEYS = (
     # deploy-parity mid-swing clip switch (018467a added the yaml key + MotionCommandCfg field but not
     # this whitelist/translation, so every run of the task yaml raised in _check_unknown_keys).
     "clip_switch_prob",
+    # T1 immutable post-strike event timing (blocked preregistration; code path is fail-closed and
+    # remains disabled unless a materialized schedule and its exact byte SHA are both supplied).
+    "event_timing_mode", "event_timing_schedule", "event_timing_schedule_sha256",
+    "event_timing_repeat",
     # P2.4/R14 per-swing reference playback speed range (retiming).
     "speed_scale_range",
     # 2026-07-08 backhand-fix ablation: fixed per-clip reference playback speed (e.g. [1.0, 0.8]).
@@ -818,6 +855,10 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(M, "post_swing_min_fill", _get(mt, "post_swing_min_fill"), int, applied, "commands.motion")
             _set_attr(M, "post_swing_min_hold", _get(mt, "post_swing_min_hold"), int, applied, "commands.motion")
             _set_attr(M, "clip_switch_prob", _get(mt, "clip_switch_prob"), float, applied, "commands.motion")
+            _set_attr(M, "event_timing_mode", _get(mt, "event_timing_mode"), str, applied, "commands.motion")
+            _set_attr(M, "event_timing_schedule", _get(mt, "event_timing_schedule"), str, applied, "commands.motion")
+            _set_attr(M, "event_timing_schedule_sha256", _get(mt, "event_timing_schedule_sha256"), str, applied, "commands.motion")
+            _set_attr(M, "event_timing_repeat", _get(mt, "event_timing_repeat"), _as_bool, applied, "commands.motion")
             _set_attr(M, "speed_scale_range", _get(mt, "speed_scale_range"),
                       lambda v: tuple(float(x) for x in v), applied, "commands.motion")
             # Backhand-fix ablation (2026-07-08): fixed per-clip reference playback speed.

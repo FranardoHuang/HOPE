@@ -49,6 +49,7 @@ from isaaclab.utils.math import (
 from whole_body_tracking.tasks.tracking.mdp.commands import MotionCommand
 from whole_body_tracking.tasks.tracking.mdp.stage1_question_bank import (
     load_question_bank,
+    question_id,
     select_questions,
     validate_runtime_motion_contract,
 )
@@ -139,6 +140,7 @@ class RacketTargetCommand(CommandTerm):
 
         # The motion command (resolved lazily on first update; not guaranteed to exist at __init__).
         self._motion_term: MotionCommand | None = None
+        self._event_timing_bound = False
         # Per-env motion phase at the last target resample; used to detect clip wraps (new swings).
         # Stamped on every resample so a reset-time resample is not double-triggered next step.
         self._prev_motion_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
@@ -877,7 +879,77 @@ class RacketTargetCommand(CommandTerm):
     def _motion(self) -> MotionCommand:
         if self._motion_term is None:
             self._motion_term = self._env.command_manager.get_term(self.cfg.motion_command_name)
+        if (
+            getattr(self._motion_term, "event_timing_enabled", False)
+            and not self._event_timing_bound
+            and hasattr(self, "_question_bank")
+        ):
+            self._bind_event_timing_contract()
         return self._motion_term
+
+    def _bind_event_timing_contract(self) -> None:
+        """Bind every immutable schedule row to this exact train bank and native clip timing."""
+
+        motion = self._motion_term
+        if motion is None or not motion.event_timing_enabled:
+            self._event_timing_bound = True
+            return
+        bank = self._question_bank
+        if bank is None:
+            raise ValueError("post_strike_t1 requires a schema-v3 train question bank")
+        metadata = getattr(bank, "metadata", None)
+        if (
+            not isinstance(metadata, dict)
+            or int(metadata.get("schema_version", 0)) != 3
+            or metadata.get("split") != "train"
+        ):
+            raise ValueError("post_strike_t1 requires a validated schema-v3 train-split bank")
+        if float(self.cfg.midswing_resample_prob) != 0.0:
+            raise ValueError("post_strike_t1 requires midswing_resample_prob=0")
+
+        schedule = motion.event_schedule
+        if schedule is None:
+            raise RuntimeError("post_strike_t1 has no loaded immutable schedule")
+        counts = bank.counts.to(device=self.device, dtype=torch.long)
+        for flat_index, row in enumerate(schedule.rows):
+            if row.clip_id >= len(counts) or row.bank_row >= int(counts[row.clip_id]):
+                raise ValueError(
+                    f"event schedule row {flat_index} references unavailable train-bank row "
+                    f"clip={row.clip_id} bank_row={row.bank_row}"
+                )
+            incoming = bank.incoming_vel[row.clip_id, row.bank_row].detach().cpu().numpy()
+            actual_id = question_id(incoming)
+            if actual_id != row.question_id:
+                raise ValueError(
+                    f"event schedule row {flat_index} question_id={row.question_id} does not "
+                    f"match train bank clip={row.clip_id} row={row.bank_row} id={actual_id}"
+                )
+
+        ml = motion.motion
+        nseg = int(ml.num_segments)
+        phases_cfg = self._strike_phases_cfg(nseg)
+        phases = (
+            [float(value) for value in phases_cfg]
+            if phases_cfg
+            else [float(self.cfg.strike_phase)] * nseg
+        )
+        files = (
+            [motion.cfg.motion_file]
+            if isinstance(motion.cfg.motion_file, str)
+            else list(motion.cfg.motion_file)
+        )
+        validate_runtime_motion_contract(
+            metadata,
+            files,
+            [int(value) for value in ml.seg_len.tolist()],
+            phases,
+        )
+        native_ticks = []
+        for clip_id in range(nseg):
+            strike_step, _, seg_start, _ = self._strike_frame_for_clip(ml, clip_id)
+            native_ticks.append(strike_step - seg_start)
+        motion.bind_event_native_strike_ticks(native_ticks)
+        self._event_timing_bound = True
 
     def _strike_phases_cfg(self, nseg: int) -> tuple:
         """cfg.strike_phase_per_clip validated against the loaded motion's segment count (fail-loud).
@@ -1412,6 +1484,86 @@ class RacketTargetCommand(CommandTerm):
         # Held per env until its next resample; reset-mean reports the question difficulty mix.
         self.metrics["question_difficulty_deg"][env_ids] = diff
 
+    def _install_event_training_questions(
+        self,
+        env_ids: Sequence[int] | torch.Tensor,
+        clip_ids: torch.Tensor,
+        bank_rows: torch.Tensor,
+    ) -> None:
+        """Install T1 train-bank rows without resetting physical, action, history, or noise state."""
+
+        if self._question_bank is None or not self._event_timing_bound:
+            raise RuntimeError("post_strike_t1 question-bank contract is not bound")
+        ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device).reshape(-1)
+        clips = torch.as_tensor(clip_ids, dtype=torch.long, device=self.device).reshape(-1)
+        rows = torch.as_tensor(bank_rows, dtype=torch.long, device=self.device).reshape(-1)
+        if len(ids) == 0 or len(ids) != len(clips) or len(ids) != len(rows):
+            raise ValueError("event question install requires equal, non-empty id/clip/row vectors")
+        motion = self._motion()
+        live_clips = motion.clip_id[ids] if motion._multiseg else torch.zeros_like(clips)
+        if not torch.equal(live_clips, clips):
+            raise RuntimeError("event motion and atomic train-bank question clips disagree")
+        counts = self._question_bank.counts.to(device=self.device, dtype=torch.long)
+        if (
+            torch.any(clips < 0)
+            or torch.any(clips >= len(counts))
+            or torch.any(rows < 0)
+            or torch.any(rows >= counts[clips])
+        ):
+            raise ValueError("event question install references an invalid train-bank row")
+        if not self._qb_face_frame_checked:
+            self._check_question_bank_face_frame()
+
+        origins = self._env.scene.env_origins[ids]
+        bank = self._question_bank
+        contact = bank.contact_pos[clips]
+        self.racket_target_pos_w[ids] = origins + contact
+        self.racket_target_vel_w[ids] = bank.demanded_vel[clips, rows]
+        demanded_normal = bank.demanded_normal[clips, rows]
+        self.racket_target_normal_w[ids] = demanded_normal
+        self.target_normal_cmd[ids] = demanded_normal
+        self.vb_vel_in_w[ids] = bank.incoming_vel[clips, rows]
+        self.vb_spin_in_w[ids] = bank.incoming_spin[clips, rows]
+        self.metrics["question_difficulty_deg"][ids] = bank.difficulty_deg[clips, rows]
+
+        # Bank training uses a pinned ready anchor.  Do not draw a fresh base jitter here: the
+        # immutable question row and its clip/deadline are installed as one deterministic message.
+        self.base_target_pos_w[ids] = origins[:, :2] + self._qb_base_anchor_off_xy()[clips]
+        self.station_anchor_pos_w[ids] = origins[:, :2] + torch.tensor(
+            self.cfg.station_anchor_offset_xy, dtype=torch.float32, device=self.device
+        )
+        self.swing_sign[ids] = torch.where(clips == 0, 1.0, -1.0)
+
+        # This is an intra-episode post-strike transition: close the previous swing's ledger and
+        # start the new one, but do not classify it as a pre-strike fall and do not reset session
+        # state.  _prev_clip_id still names the just-finished clip because MotionCommand publishes
+        # the new clip earlier in the same manager step.
+        if motion._multiseg:
+            self._recover_from_clip[ids] = self._prev_clip_id[ids]
+        self._resample_is_wrap = True
+        try:
+            self._count_swing_starts(ids, count_prestrike_falls=False)
+        finally:
+            self._resample_is_wrap = False
+        self._hold_edge_pending[ids] = True
+        self._previous_in_hold[ids] = False
+        self._hold_start_yaw[ids] = 0.0
+        self._exact_fired[ids] = False
+        self._prev_motion_steps[ids] = motion.time_steps[ids]
+        self._prev_racket_dist[ids] = torch.norm(
+            self.racket_pos_w[ids] - self.racket_target_pos_w[ids], dim=-1
+        ).detach()
+        self.racket_progress[ids] = 0.0
+        self._progress_reset_mask[ids] = True
+        if hasattr(self, "time_left"):
+            self.time_left[ids] = float("inf")
+        if self._shadow is not None:
+            self._shadow.on_resample(ids)
+        if self._physical is not None:
+            self._physical.on_resample(ids)
+        # Deliberately no _reset_actor_target_state(): _push_actor_target() advances the existing
+        # latency ring, AR(1) noise, dropout countdown and hold-last state below.
+
     def install_external_exam_questions(
         self,
         env_ids: Sequence[int],
@@ -1921,6 +2073,16 @@ class RacketTargetCommand(CommandTerm):
                 )
             else:
                 self.time_to_strike = (strike_step - motion.time_steps).float() * self._env.step_dt
+        if getattr(motion, "event_timing_enabled", False):
+            # For a successfully revealed T1 row, WHEN is owned by the immutable schedule rather
+            # than by the clip phase.  The native clip/hold pair is only the feasible trajectory
+            # used to arrive there; it may never move the deadline.  Pending, unavailable and
+            # infeasible rows keep their old clip timing but are masked out of exact grading below.
+            event_mask = motion.event_installed
+            scheduled_tts = (
+                motion.event_deadline_ticks_remaining.float() * self._env.step_dt
+            )
+            self.time_to_strike = torch.where(event_mask, scheduled_tts, self.time_to_strike)
         self.pre_strike = self.time_to_strike > 0.0
         _tts_abs = self.time_to_strike.abs()
         self.strike_window = _tts_abs <= self.cfg.strike_window_s
@@ -1943,6 +2105,17 @@ class RacketTargetCommand(CommandTerm):
         # (set this same step when it wrapped a swing) instead of a time_steps<prev heuristic — the latter
         # fails for the unified policy when a wrap jumps the index to a HIGHER concatenated segment start
         # (forehand->backhand). Targets for fresh episodes are sampled by the manager's reset.
+        event_ids = (
+            torch.where(motion.event_just_installed)[0]
+            if getattr(motion, "event_timing_enabled", False)
+            else torch.empty(0, dtype=torch.long, device=self.device)
+        )
+        if len(event_ids) > 0:
+            self._install_event_training_questions(
+                event_ids,
+                motion.event_current_clip_id[event_ids],
+                motion.event_current_bank_row[event_ids],
+            )
         wrapped = torch.where(motion.just_resampled)[0] if hasattr(motion, "just_resampled") else \
             torch.where(motion.time_steps < self._prev_motion_steps)[0]
         if len(wrapped) > 0:
@@ -2011,6 +2184,12 @@ class RacketTargetCommand(CommandTerm):
         # A1 target latency/jitter: refresh the ACTOR-visible target view once per step (no-op alias
         # when the knobs are off). Runs LAST so it sees this step's wrap/refinement target updates.
         self._push_actor_target()
+        # CommandTerm.compute() ran exact-strike metrics before this update.  Consume every due
+        # opportunity now regardless of whether the policy hit it, so a miss cannot pause or shift
+        # the immutable sequence.  MotionCommand will fail closed next step if this handoff is ever
+        # skipped, preventing a stale due row from being silently extended.
+        if getattr(motion, "event_timing_enabled", False):
+            motion.finalize_event_deadlines()
 
     def _push_actor_target(self):
         """A1: refresh the ACTOR-visible target view once per control step (latency + jitter).
@@ -2670,12 +2849,19 @@ class RacketTargetCommand(CommandTerm):
         # the ±strike_window_s window). Between strikes the held value carries to the next reset.
         in_win = self.strike_window
         exact_strike = torch.abs(self.time_to_strike) <= (0.5 * self._env.step_dt + 1e-6)
-        if self._motion().retiming_active:
+        motion = self._motion()
+        if motion.retiming_active:
             # R14: float32 clock drift can (~1e-4/swing) land two consecutive tts values inside the
             # ±dt/2 window; latch so one-shot consumers (vb rewards, exact EMAs, achieved-buffer
             # writes) fire once per swing. The latch re-arms at every target resample.
             exact_strike = exact_strike & ~self._exact_fired
             self._exact_fired = self._exact_fired | exact_strike
+        if getattr(motion, "event_timing_enabled", False):
+            # Unavailable/infeasible rows remain on the scheduler denominator but must not grade a
+            # stale previous target merely because its old clip happens to cross zero.  Before the
+            # first origin, the normal exact clip strike is accepted and is the sole arming event.
+            exact_strike = exact_strike & motion.event_exact_strike_allowed
+            motion.record_event_exact_strike(torch.where(exact_strike)[0])
         self.metrics["exact_strike_hit_rate"] = exact_strike.float()
 
         # --- DEBUG: swing-through sign verification (cfg.debug_reward_logging) -----------------------
