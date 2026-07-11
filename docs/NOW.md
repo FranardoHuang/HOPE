@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 2026-07-11 现场状态(22:20 CST 更新)
+## 2026-07-11 现场状态(23:58 CST 更新)
 
 - **Phase-1 仍是真满池**:四条原始续训自然终档后，四条独立预注册的因果缺边补进空槽；
   现在两 Pod 各 12 条 live trainer、每 GPU 恰好 4 条，加上 4 条 clean terminal，共 28 条
@@ -39,6 +39,9 @@ Rules:
 - 22:20 CST 再逐一读取 28 条接受臂的最新 checkpoint：文件名 iteration 与内嵌 iteration
   全部一致，相邻 hard-contract SHA 全部匹配，fresh/causal lineage 分别全为 `1/0`，模型、
   优化器与归一化 tensor 均 finite；无 child judge 在跑，worker 正等待下一批冻结里程碑。
+- Pod1 的 SSH 映射约一小时 connect timeout；RunPod 控制台也未登录/无法只读确认，因此没有
+  重启或重复发任务。23:45 CST SSH 恢复后的全审计显示训练未中断：仍为 12 live+2 terminal、
+  4/4/4，所有 iteration 连续前进，错误 0，训练树 clean，五个 worker 全活。
 - **checkpoint 早判已改变选择**:fresh SZ seed1 q10 从 2k `0.90` 回落到 4k `0.50`，触发
   同一 K100 正式卷。2k 正/反/总=`33/50,50/50,83/100`，4k=`0/50,50/50,50/100`，因此
   保留 2k 峰值，但整臂继续原配方训练。两者都 fresh/exact、zero physical fall，但每题都由
@@ -46,18 +49,27 @@ Rules:
   部署稳定。同题 Isaac 对 2k/4k 都给 `99/100`，完全平局；它没复现 MuJoCo 排名，
   所以跨引擎 checkpoint 门仍开。
 - M3 terminal 因果对在 MuJoCo K100 上 old/S1 总回球为 `.42/1.00`，但同题 Isaac 两者均
-  `.99`。引擎不同意，因此 S1 只能在该 MuJoCo causal family 内选，跨引擎/formal/deploy 门都没关。
+  `.99`。逐题 forensic 发现“同题”还不是“同判分仪器”：fresh 4k 前手拍心误差在 MuJoCo/
+  Isaac 为 `13.15/2.48 cm`；M3-old 反手 `168.15°` signed-face 错误被 Isaac 的
+  `orient_normal` 擦掉。旧 `9 physical falls` 也已纠正为 `1 physical fall+8 guard reset`。
+  新 2 engine×physical/analytic 四格缺一即拒绝，阈值不改；当前等 Isaac post-contact truth。
+- checkpoint 曲线继续不等 terminal：M3 seed2 old/S1 的 18k→19k 为 `.65/1.00→.85/.95`；
+  M2 seed2 为 `.40/.60→.50/.40`，小卷甚至反转排序。两组都只保留曲线、继续训练，不停/
+  晋级/q50。scale-out fresh 2k worker 已开始出 SP/LZ 等诊断格，SZ 正式格仍按同卷队列等待。
 - plant 矛盾已正面记账:SZ 只是“零摩擦执行协议可精确重放”，不是部署 plant；SP/LP
   是历史单位错配 proxy，不能当标定摩擦对照。新 SC 要求物理 latent model + PhysX/MuJoCo
   两个 adapter + fresh Z/C 配对 seed，现严格卡在 calibration evidence。
 - Franco/v6/v7 十段空挥已完成 intake、GVHMR 10/10、per-video-beta GMR 10/10+落地、
   “十段共用同一个中位体型参数”的 GMR 10/10。真实 loader 只取前 10 维，旧的“补六个零”
   猜测已撤销。共用体型版本的 CPU-only grounding 也已 10/10：只把固定 root-z 上移
-  `6.73–9.74 cm`，其余 payload 逐 pickle bit-exact，最低点约留 `10 µm`；现在才进入稠密
-  自碰/拍柄余隙/动力学/桌网和逐帧回球可行性。这些仍不是 A3/schema2/RL/真机安全验收。
-- 连续时序缺口仍在：完整 clip-wrap+hold 同侧理论中位约 `3.75 s`，场馆 A-B-A 保守样本
-  中位 `1.903 s`。当前臂只证 carry-state 慢节奏，不证任意时刻下一球；后续另开 T0/T1
-  event-driven timing 和显式 recovery/prepare 配对。
+  `6.73–9.74 cm`，其余 payload 逐 pickle bit-exact，最低点约留 `10 µm`。后续 654 源帧/
+  5,162 个 240Hz 样本的地面危险、自碰、拍/柄距身体 `<5 mm` 危险和 `<20 mm` warning 都为0，
+  最薄余隙 `40.25 mm`。但 GMR→HOPE 桌位/mirror 未绑定，所以64题回球/phase/2-vs-4仍是
+  null；现在只解一个固定 HOPE 虚拟桌的 counterfactual frame，不冒充录制现场外参。
+- 连续时序缺口仍在：完整 clip-wrap+hold 同侧理论中位约 `3.75 s`；场馆 `1.903 s` 来自
+  重叠 n=21、16/21 高球、2.5s 截尾，只证伪现役节奏，不作目标。T1 训练端核心已在
+  `be5d7cf` 实现：仅 exact strike 后原子揭题、固定 deadline、miss 也消耗、全 carry-state。
+  仍缺 materialized schedule、连续双引擎卷、自击门、fresh baseline 和标定 plant，未点火。
 - 已有第一个 isolated exact MuJoCo checkpoint baseline(2k=`.83`)，但还没有跨引擎+连续球+
   标定 plant 都通过的 accepted quality/deployment baseline。只对能改决策的同 family/seed/milestone
   做 q10 方向卷和 q50 决策卷。
@@ -697,8 +709,8 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 | --- | --- | --- | --- | --- |
 | 全栈正确性尺+C++安全包+拍心/拍速合同收口 | ★★★ | **Codex** | `main` | 双 RunPod 源码验收已绿(portable/ROS C++、whole-body、planner);下一检查点=重出 fresh schema-v3 ONNX+修后考卷,旧判分器数字不入账 |
 | V5 专业动作可迁移性+Phase 加速器 | ★★★ | **Codex** | `main` | manifest+保守 halving 已就绪;下一检查点=验证触球帧/拍速口径,把行程/时间律报告接成 feasibility producer,再做 BankExam→scorecard adapter;两者完成前不自动发训练 |
-| 新动作库(Franco/v6/v7)+TOPP 最短可行时间+任意时刻下一拍恢复 | ★★★ | **Codex** | `codex/schema-v3-isaac-adapter@2cf8686` | 10 段空挥已完成 intake、GVHMR、逐视频体型 GMR+落地、共用中位体型 GMR+grounding 10/10；旧的“loader 补六个零”猜测已撤销。现在跑稠密自碰/拍柄余隙+逐帧回球 phase 筛选；过门者才做 native/TOPP、2 动作 vs 4 动作、完整 clip vs event-driven recovery。仍无 schema2/RL/真机授权。 |
-| Phase-1 schema-v3 Isaac 同题 adapter + 候选重排 | ★★★ | **Codex** | `codex/schema-v3-isaac-adapter@2cf8686` | **24 live + 4 terminal，六卡每卡4条**。28/28 最新 checkpoint finite、iter/contract/lineage 绑定正确，十个 hardened worker 跟里程碑不等终档。fresh SZ seed1 MuJoCo exact q50 选 2k(`.83`)>4k(`.50`)，但同题 Isaac 两者都 `.99`；M3 causal MuJoCo 选 S1，Isaac 两臂也同为 `.99`。两组跨引擎排名都没复现，不 formal/deploy。训练/eval 固定 clean `6d93bcb`/`46a0ce2`；仅 SZ 是当前执行协议 formal target，plant/recovery/deploy 仍开。下一检查点=定位 Isaac 饱和与 MuJoCo 正手差异、scale-out 2k/causal 19k 曲线和终档完整性。 |
+| 新动作库(Franco/v6/v7)+TOPP 最短可行时间+任意时刻下一拍恢复 | ★★★ | **Codex** | `codex/schema-v3-isaac-adapter@bf19fca` | 10 段完成 intake→canonical GMR/grounding→240Hz稠密安全屏；5,162样本地面/自碰/拍柄身体危险均0，最薄40.25mm。回球/phase/2-vs-4 因 frame/mirror 未证保持 null；正在内容寻址固定HOPE虚拟桌 counterfactual frame，过门才做64题、TOPP与RL。T1核心已实现但连续卷/自击/plant未齐，不点火、不真机。 |
+| Phase-1 schema-v3 Isaac 同题 adapter + 候选重排 | ★★★ | **Codex** | `codex/schema-v3-isaac-adapter@bf19fca` | **24 live + 4 terminal，六卡每卡4条**。Pod1 SSH超时后恢复审计确认未中断；十个 hardened worker 正常。fresh SZ 2k(`.83`)>4k(`.50`)仍只是MuJoCo pair选择；forensic已定位Isaac虚拟判分/执行状态/拍面符号盲区，2×2 instrument门严格打开。M2/M3 18k/19k q10曲线已出且不裁决，fresh scale-out 2k正在自动判。训练/eval clean `6d93bcb`/`46a0ce2`；下一检查点=SZ seed3/4 2k曲线、Isaac physical truth、终档完整性。 |
 | HitterPure RallyFinal clean-base task: x-lock/lunge, settle/slip, backhand clearance, front-facing constraints + Isaac/AGI rally gates | ★★★ | codex for dongc1 | `hitter` | PATCH COMPLETE / GATES PENDING 2026-07-10: clean-base Final task, native move-settle-arm readiness, strict metadata/eval/gate plumbing and docs implemented; host tests + x86 build pass. Next = Isaac smoke/train/ablation, Final ONNX MuJoCo scores, then no-rescue AGI closed-loop with physical contact/landing evidence |
 | **加速度包络标定两件套(franco 07-09,时间律的下一层)**:①跟踪破裂标定(chirp/斜坡加压参考×现成跟踪策略,逐关节"边平衡边跟"真上限=判炸器 L1 升级);②贴限 vs 摊时消融(v5syn T_a 三档)——R9d 读数落地后一起排 | ★★★ | claude | — | 设计已入 research 时间律文档§六 |
 | GMR 源头修复(pod GMR 分支 `hope-frame0-warmup`:warm-up/帧0/逐关节限位旗标)+ 判炸器(repo 分支 `motion-feasibility-audit` 已推 origin)——两分支待 franco 审;接线与 L6 重生成见队列 0.6/0.7 行 | ★★★ | claude | 两分支 | 已验证收口(TIMELINE 07-08);合入即防复发 |
