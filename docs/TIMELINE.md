@@ -1258,7 +1258,7 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    相邻 hard contract 重放 31/31 零摩擦与 175/179/181 actor contract，并和 env flags 对账；
    hard contract/ONNX 新绑 `face_command_enabled`+pairing。专用 launcher 逐 hash 验输入、Kit
    boot 串行、首迭代后放锁、超时只清本臂 PGID；37 个契约回归绿，179D full smoke 待跑。
-9. 【franco/Codex】**179D 门过、六卡已跑满**——full smoke 合同 SHA `3a3b3d95...b9972`:
+9. 【franco/Codex】**179D 门过、六卡各一臂点火（后续纠偏：这不叫满池）**——full smoke 合同 SHA `3a3b3d95...b9972`:
    actor179、face enabled/shared、schema2 双动作、v3 train bank、31/31 零摩擦、formal validator
    全同意并干净退出。固定 `6d93bcb` 后 Pod1=M3 old/S1+fresh seed1，Pod2=M2 old/S1+fresh
    seed2；六臂均到首 PPO iteration、首 ckpt 的 sidecar SHA 绑定正确（续训 lineage=0，fresh=1），
@@ -1266,3 +1266,18 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    malloc abort（PGID 自退、非内存耗尽），原样 retry 绿且只收 retry。legacy exam 已冻结到 train
    bank 邻目录；judge diagnostic 自动带 inexact escape，fresh 不带，并强制当前 checkout PYTHONPATH。
    现阶段只报 running，不报结果；终档+同卷双引擎仍待完成。
+10. 【franco/Codex】**恢复 4/卡与 checkpoint 早判旧制度，并把“更快做消融”重新做成可执行规则**——
+   回查 `NOW`、旧 Pod `queue.md/patrol_watchdog_v2.sh` 坐实：4096-env 广度波目标 `4/4/4`，
+   四臂历史约 `22/32.6GB`、75 秒错峰；watchdog 明写 `16400` 早判“不用跑到最后才算数”。
+   当前六臂只是 `1/1/1+1/1/1`，且 run 的 `judge/` 全空，前述“跑满/终档后才判”均纠正。
+   新制度用 L0 合同→L1 512×25 机制冒烟→L2 里程碑同卷→L3 多 seed→L4 双引擎/Gate3B
+   漏斗；长跑每 1000–2000 iter 判一次、峰值 ±相邻 ckpt 加密，fresh 8k 前只 hard-stop。
+   24 臂采用 8 条 paired continuation + 16 条 fresh `face×plant` 2×2×4-seed 因子矩阵，
+   只把 `shared+zero(SZ)` 预注册为 formal target。两个 checkpoint worker 已分别以 PGID
+   `1332894/165860` 启动，先补 causal `17000/18000/19000` 与 fresh `0/1000/2000` 共 18 卷；
+   每 Pod 一次只做一个 Isaac export，进入 CPU MuJoCo 后流水并行。矩阵、worker、制度文档均已
+   dry-run：每 Pod scale-out `3+3+3` 命令、9 个 checkpoint 路径全部通过；24 臂尚在逐层点火，
+   不提前写成完成。首次实跑又抓到两项 evaluator 前置债：detached worktree 缺 ignored A3 URDF
+   链接，补成只指向冻结训练资产后，`play.py` 已写出 ONNX 但重定向 stdout 丢了成功握手行；两批
+   失败目录都保留且不入账。`judge.sh` 已强制 `PYTHONUNBUFFERED=1`，worker 改为首个 export
+   failure 即停，修后 retry 待执行。

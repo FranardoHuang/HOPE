@@ -499,6 +499,10 @@ note "② play.py 原生导出(isaac venv,gpu$GPU)…"
   # shellcheck disable=SC1091
   source "$WBT_DIR/setup_train_env.sh" >/dev/null 2>&1
   export PYTHONPATH="$HOPE_WBT_PYTHONPATH"
+  # play.py prints the required export-success handshake immediately before
+  # env.close().  Redirected Python stdout is otherwise block-buffered and
+  # Isaac shutdown can discard that line even though policy.onnx was written.
+  export PYTHONUNBUFFERED=1
   export HYDRA_FULL_ERROR=1
   eval "$EXPORT_CMD" > "$JUDGE_DIR/export_play.log" 2>&1
 ) || { tail -30 "$JUDGE_DIR/export_play.log" >&2; die "play.py export-only 失败"; }

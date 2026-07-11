@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "expected_training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+  "target_jobs_per_gpu": 4,
+  "num_envs_per_job": 4096,
+  "kit_boot_stagger_seconds": 75,
+  "design": {
+    "legacy_continuations": "2 families x 2 face pairings x 2 continuation RNG seeds",
+    "fresh": "2 face pairings x 2 plant settings x 4 independent from-scratch seeds",
+    "formal_target_cell": "SZ",
+    "cells": {
+      "SZ": {"face_command_pairing": "shared_plus_y", "zero_joint_friction": true},
+      "SP": {"face_command_pairing": "shared_plus_y", "zero_joint_friction": false},
+      "LZ": {"face_command_pairing": "legacy_signed_vs_A", "zero_joint_friction": true},
+      "LP": {"face_command_pairing": "legacy_signed_vs_A", "zero_joint_friction": false}
+    }
+  },
+  "arms": [
+    {"pod": "pod1", "gpu": 0, "layer": 1, "run_name": "phase1_M3_old_pairing", "kind": "continuation", "family": "swing", "seed": 1, "pairing": "legacy_signed_vs_A", "zero_joint_friction": false, "status": "live"},
+    {"pod": "pod1", "gpu": 1, "layer": 1, "run_name": "phase1_M3_S1_pairing", "kind": "continuation", "family": "swing", "seed": 1, "pairing": "shared_plus_y", "zero_joint_friction": false, "status": "live"},
+    {"pod": "pod1", "gpu": 2, "layer": 1, "run_name": "phase1_fresh_v3_SZ_seed1", "actual_run_name": "phase1_fresh_v3_S1_seed1", "kind": "fresh", "family": "v4rg_runtime_order_v3", "seed": 1, "cell": "SZ", "pairing": "shared_plus_y", "zero_joint_friction": true, "status": "live"},
+
+    {"pod": "pod1", "gpu": 0, "layer": 2, "run_name": "phase1_M3_S1_pairing_seed2", "kind": "continuation", "family": "swing", "seed": 2, "pairing": "shared_plus_y", "zero_joint_friction": false, "status": "planned"},
+    {"pod": "pod1", "gpu": 1, "layer": 2, "run_name": "phase1_M3_old_pairing_seed2", "kind": "continuation", "family": "swing", "seed": 2, "pairing": "legacy_signed_vs_A", "zero_joint_friction": false, "status": "planned"},
+    {"pod": "pod1", "gpu": 2, "layer": 2, "run_name": "phase1_fresh_v3_SP_seed1", "kind": "fresh", "family": "v4rg_runtime_order_v3", "seed": 1, "cell": "SP", "pairing": "shared_plus_y", "zero_joint_friction": false, "status": "planned"},
+
+    {"pod": "pod1", "gpu": 0, "layer": 3, "run_name": "phase1_fresh_v3_SZ_seed3", "kind": "fresh", "family": "v4rg_runtime_order_v3", "seed": 3, "cell": "SZ", "pairing": "shared_plus_y", "zero_joint_friction": true, "status": "planned"},
+    {"pod": "pod1", "gpu": 1, "layer": 3, "run_name": "phase1_fresh_v3_SP_seed3", "kind": "fresh", "family": "v4rg_runtime_order_v3", "seed": 3, "cell": "SP", "pairing": "shared_plus_y", "zero_joint_friction": false, "status": "planned"},
+    {"pod": "pod1", "gpu": 2, "layer": 3, "run_name": "phase1_fresh_v3_LZ_seed1", "kind": "fresh", "family": "v4rg_runtime_order_v3", "seed": 1, "cell": "LZ", "pairing": "legacy_signed_vs_A", "zero_joint_friction": true, "status": "planned"},
+
+    {"pod": "pod1", "gpu": 0, "layer": 4, "run_name": "phase1_fresh_v3_LP_seed3", "kind": "fresh", "family": "v4rg_runtime_order_v3", "seed": 3, "cell": "LP", "pairing": "legacy_signed_vs_A", "zero_joint_friction": false, "status": "planned"},
+    {"pod": "pod1", "gpu": 1, "layer": 4, "run_name": "phase1_fresh_v3_LZ_seed3", "kind": "fresh", "family": "v4rg_runtime_order_v3", "seed": 3, "cell": "LZ", "pairing": "legacy_signed_vs_A", "zero_joint_friction": true, "status": "planned"},
+    {"pod": "pod1", "gpu": 2, "layer": 4, "run_name": "phase1_fresh_v3_LP_seed1", "kind": "fresh", "family": "v4rg_runtime_order_v3", "seed": 1, "cell": "LP", "pairing": "legacy_signed_vs_A", "zero_joint_friction": false, "status": "planned"},
+
+    {"pod": "pod2", "gpu": 0, "layer": 1, "run_name": "phase1_M2_old_pairing", "kind": "continuation", "family": "v4rg_legacy", "seed": 1, "pairing": "legacy_signed_vs_A", "zero_joint_friction": false, "status": "live"},
+    {"pod": "pod2", "gpu": 1, "layer": 1, "run_name": "phase1_M2_S1_pairing", "kind": "continuation", "family": "v4rg_legacy", "seed": 1, "pairing": "shared_plus_y", "zero_joint_friction": false, "status": "live"},
+    {"pod": "pod2", "gpu": 2, "layer": 1, "run_name": "phase1_fresh_v3_SZ_seed2", "actual_run_name": "phase1_fresh_v3_S1_seed2", "kind": "fresh", "family": "v4rg_runtime_order_v3", "seed": 2, "cell": "SZ", "pairing": "shared_plus_y", "zero_joint_friction": true, "status": "live"},
+
+    {"pod": "pod2", "gpu": 0, "layer": 2, "run_name": "phase1_M2_S1_pairing_seed2", "kind": "continuation", "family": "v4rg_legacy", "seed": 2, "pairing": "shared_plus_y", "zero_joint_friction": false, "status": "planned"},
+    {"pod": "pod2", "gpu": 1, "layer": 2, "run_name": "phase1_M2_old_pairing_seed2", "kind": "continuation", "family": "v4rg_legacy", "seed": 2, "pairing": "legacy_signed_vs_A", "zero_joint_friction": false, "status": "planned"},
+    {"pod": "pod2", "gpu": 2, "layer": 2, "run_name": "phase1_fresh_v3_SP_seed2", "kind": "fresh", "family": "v4rg_runtime_order_v3", "seed": 2, "cell": "SP", "pairing": "shared_plus_y", "zero_joint_friction": false, "status": "planned"},
+
+    {"pod": "pod2", "gpu": 0, "layer": 3, "run_name": "phase1_fresh_v3_SP_seed4", "kind": "fresh", "family": "v4rg_runtime_order_v3", "seed": 4, "cell": "SP", "pairing": "shared_plus_y", "zero_joint_friction": false, "status": "planned"},
+    {"pod": "pod2", "gpu": 1, "layer": 3, "run_name": "phase1_fresh_v3_SZ_seed4", "kind": "fresh", "family": "v4rg_runtime_order_v3", "seed": 4, "cell": "SZ", "pairing": "shared_plus_y", "zero_joint_friction": true, "status": "planned"},
+    {"pod": "pod2", "gpu": 2, "layer": 3, "run_name": "phase1_fresh_v3_LZ_seed2", "kind": "fresh", "family": "v4rg_runtime_order_v3", "seed": 2, "cell": "LZ", "pairing": "legacy_signed_vs_A", "zero_joint_friction": true, "status": "planned"},
+
+    {"pod": "pod2", "gpu": 0, "layer": 4, "run_name": "phase1_fresh_v3_LZ_seed4", "kind": "fresh", "family": "v4rg_runtime_order_v3", "seed": 4, "cell": "LZ", "pairing": "legacy_signed_vs_A", "zero_joint_friction": true, "status": "planned"},
+    {"pod": "pod2", "gpu": 1, "layer": 4, "run_name": "phase1_fresh_v3_LP_seed4", "kind": "fresh", "family": "v4rg_runtime_order_v3", "seed": 4, "cell": "LP", "pairing": "legacy_signed_vs_A", "zero_joint_friction": false, "status": "planned"},
+    {"pod": "pod2", "gpu": 2, "layer": 4, "run_name": "phase1_fresh_v3_LP_seed2", "kind": "fresh", "family": "v4rg_runtime_order_v3", "seed": 2, "cell": "LP", "pairing": "legacy_signed_vs_A", "zero_joint_friction": false, "status": "planned"}
+  ]
+}

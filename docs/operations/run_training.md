@@ -306,6 +306,53 @@ motion diagnostic flag and remain `training_contract_exact=0`; the two fresh
 seeds use runtime-order schema-2 motion, a strict schema-v3 train bank, no
 checkpoint and `zero_joint_friction=true`.
 
+Those first six processes occupy the six cards but do **not** fill the measured
+breadth capacity. The 2026-07-08 rule is three to four 4096-env jobs per GPU;
+the 2026-07-11 Phase-1 target is 24 jobs. The scale-out roles are deliberately
+layered so each host can be audited at two, three and four jobs per card:
+
+```bash
+# Run this launcher from a detached/current control worktree, but point every
+# training command at the clean frozen 6d93bcb checkout.
+export PHASE1_REPO_ROOT=/workspace/codexschema/nohope
+export PHASE1_STAGGER_S=75
+
+bash scripts/launch_phase1_20260711.sh pod1_scaleout_2
+bash scripts/launch_phase1_20260711.sh pod1_scaleout_3
+bash scripts/launch_phase1_20260711.sh pod1_scaleout_4
+
+bash scripts/launch_phase1_20260711.sh pod2_scaleout_2
+bash scripts/launch_phase1_20260711.sh pod2_scaleout_3
+bash scripts/launch_phase1_20260711.sh pod2_scaleout_4
+```
+
+The two Pods may launch the same layer in parallel; one Pod still serializes its
+own three Kit boots. Verify all six new first iterations/contracts before
+starting the next layer. The authoritative assignment and run names are in
+`configs/phase1_scaleout_matrix_20260711.json`. Scale-out roles refuse a dirty
+checkout or a training commit other than
+`6d93bcb16c422a2f42748c2dc99432559653480b`.
+
+Do not wait for terminal checkpoints to discover whether an ablation works.
+The initial missing curves are frozen in
+`configs/phase1_checkpoint_curve_initial_pod{1,2}_20260711.json`. Run one worker
+per Pod from the detached evaluator worktree:
+
+```bash
+python3 scripts/phase1_checkpoint_curve_worker.py \
+  --manifest /abs/path/phase1_checkpoint_curve_initial_pod1_20260711.json \
+  --judge-script /workspace/codexschema/nohope_eval_08e438e/hope_training/whole_body_tracking/scripts/judge.sh \
+  --state-dir /workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/initial_pod1 \
+  --max-active-cpu 9
+```
+
+The worker starts the next judge only after the prior judge reaches its CPU-only
+MuJoCo phase. It sets OpenMP/MKL/OpenBLAS/NumExpr to one thread, records exact
+checkpoint and evaluator hashes, refuses duplicate live jobs, and never signals
+a training process. Long-run milestones, paired stopping rules and peak
+density are specified in
+`docs/research/phase1_ablation_acceleration_2026-07-11.md`.
+
 Schema 3 has two validation levels. Structural validation is sufficient to
 export a hash-bound diagnostic checkpoint whose motion is explicitly inexact;
 it never promotes the metadata exact flag. A checkpoint whose embedded lineage

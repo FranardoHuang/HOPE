@@ -214,12 +214,40 @@ explicit inexact evaluator escape; the fresh exact candidate does not. The judge
 forces the current checkout's `setup_train_env.sh`/source-first Python path rather than inheriting
 another user's checkout.
 
+## Capacity And Checkpoint-Curve Correction
+
+Occupying all six GPUs with one process each was not the established meaning of "full". The measured
+breadth rule is four 4096-env jobs per GPU (about 22--23 GiB on a 32.6-GiB 5090), 75-second serialized
+Kit boots, and checkpoint exams during training. The target is therefore
+`4/4/4 + 4/4/4 = 24` live arms, not six.
+
+The pre-registered scale-out matrix is
+[`configs/phase1_scaleout_matrix_20260711.json`](../configs/phase1_scaleout_matrix_20260711.json).
+It uses a second paired continuation seed for M3/M2 and a four-seed fresh 2x2 factorial over
+face pairing and plant friction. `SZ` (`shared_plus_y`, zero friction) is the formal target cell;
+the other fresh cells are causal diagnostics and cannot silently replace it. Guidance, N1, R8 and
+later-stage variables are not mixed into this matrix.
+
+The missing early curve is also being repaired. Causal `17000/18000/19000` and fresh `0/1000/2000`
+checkpoints are scheduled through the detached evaluator first; subsequent milestones follow the
+1000--2000 iteration policy. The first attempt exposed two evaluator preflight faults, not model
+failures: the detached worktrees lacked the ignored A3 asset link, then `play.py` wrote ONNX but its
+redirected success line was lost to stdout buffering. Both failed batches are retained; the asset
+links are now bound to the frozen training checkout and `judge.sh` forces unbuffered export output.
+One Isaac export runs per Pod at a time, while completed exports run MuJoCo BankExam on CPU with one
+BLAS/OpenMP thread. Full rationale, early-stop protection and peak-density rules are in
+[`phase1_ablation_acceleration_2026-07-11.md`](research/phase1_ablation_acceleration_2026-07-11.md).
+
 ## Remaining Gates
 
-1. Monitor all six immutable-checkout runs to terminal checkpoints; do not fast-forward either Pod
-   checkout while a local arm is alive.
-2. Verify terminal checkpoint iteration, sidecar SHA binding, lineage flag and finite parameters.
-3. Export every causal terminal as diagnostic and both fresh terminals as exact candidates, then
-   run the same immutable exam schedule in Isaac and MuJoCo. A legacy resume can never be promoted.
-4. Add completion/result hashes here and to G05/G06; only then decide whether the S1 guidance arm
-   is warranted.
+1. Complete the layer-by-layer scale-out to 24 arms. After every layer verify PGID isolation, GPU/host
+   capacity, hard-contract fields, first checkpoint binding and finite parameters; do not fast-forward
+   either frozen training checkout while a local arm is alive.
+2. Re-run and finish the pre-registered checkpoint curves after the two preserved evaluator
+   preflight failures. Compare old/S1 only within the same family, seed and
+   milestone; preserve peak checkpoints as well as terminal checkpoints.
+3. Verify every promoted checkpoint's iteration, sidecar SHA binding, lineage flag and finite parameters.
+4. Export causal checkpoints as diagnostic and the fresh `SZ` target seeds as formal candidates, then
+   run the same immutable exam schedule in Isaac and MuJoCo. A legacy resume/pairing can never be promoted.
+5. Add completion/result hashes here and to G05/G06; only then decide whether an S1 guidance arm is
+   warranted.

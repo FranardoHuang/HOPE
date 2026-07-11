@@ -290,6 +290,21 @@ current checkout's `setup_train_env.sh`, preventing another user's Pod checkout
 from supplying export code. Terminal export and same-paper Isaac/MuJoCo cells
 are still pending, so G06 remains `Partial`.
 
+The evaluation cadence is no longer terminal-only. Two checkpoint-curve
+workers attempted the missing causal `17000/18000/19000` and fresh
+`0/1000/2000` immutable BankExams. The first two attempts are preserved as
+evaluator preflight failures (missing ignored A3 asset link, then buffered
+export-success handshake despite an ONNX file), not booked model results. The
+links now resolve only to the frozen training assets and the retry uses
+unbuffered export output. Each Pod serializes the Isaac export phase;
+after an export reaches MuJoCo, CPU exams may overlap with
+`OMP_NUM_THREADS=MKL_NUM_THREADS=OPENBLAS_NUM_THREADS=1`. Every result directory
+is checkpoint-specific, so no old ONNX or normalizer is reused. The workers
+run from the detached evaluator while both training checkouts remain clean at
+`6d93bcb`. Diagnostic pairing/motion still receives the explicit inexact
+escape; the `SZ` target cell may not. No curve result is booked yet, and G06
+therefore remains `Partial`.
+
 ```bash
 python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_bank_exam_schedule.py \

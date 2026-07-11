@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "judge_script_sha256": "10c317a37f96c6f35b0f07be7aa791393b99f943128844c1356cf260fdfe8cf6",
+  "jobs": [
+    {
+      "id": "M2_old_17000",
+      "run_dir": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-51_phase1_M2_old_pairing",
+      "checkpoint": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-51_phase1_M2_old_pairing/model_17000.pt",
+      "gpu": 0
+    },
+    {
+      "id": "M2_S1_17000",
+      "run_dir": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-53-31_phase1_M2_S1_pairing",
+      "checkpoint": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-53-31_phase1_M2_S1_pairing/model_17000.pt",
+      "gpu": 1
+    },
+    {
+      "id": "fresh_SZ_seed2_0",
+      "run_dir": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-54-53_phase1_fresh_v3_S1_seed2",
+      "checkpoint": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-54-53_phase1_fresh_v3_S1_seed2/model_0.pt",
+      "gpu": 2
+    },
+    {
+      "id": "M2_old_18000",
+      "run_dir": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-51_phase1_M2_old_pairing",
+      "checkpoint": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-51_phase1_M2_old_pairing/model_18000.pt",
+      "gpu": 0
+    },
+    {
+      "id": "M2_S1_18000",
+      "run_dir": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-53-31_phase1_M2_S1_pairing",
+      "checkpoint": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-53-31_phase1_M2_S1_pairing/model_18000.pt",
+      "gpu": 1
+    },
+    {
+      "id": "fresh_SZ_seed2_1000",
+      "run_dir": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-54-53_phase1_fresh_v3_S1_seed2",
+      "checkpoint": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-54-53_phase1_fresh_v3_S1_seed2/model_1000.pt",
+      "gpu": 2
+    },
+    {
+      "id": "M2_old_19000",
+      "run_dir": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-51_phase1_M2_old_pairing",
+      "checkpoint": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-51_phase1_M2_old_pairing/model_19000.pt",
+      "gpu": 0
+    },
+    {
+      "id": "M2_S1_19000",
+      "run_dir": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-53-31_phase1_M2_S1_pairing",
+      "checkpoint": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-53-31_phase1_M2_S1_pairing/model_19000.pt",
+      "gpu": 1
+    },
+    {
+      "id": "fresh_SZ_seed2_2000",
+      "run_dir": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-54-53_phase1_fresh_v3_S1_seed2",
+      "checkpoint": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-54-53_phase1_fresh_v3_S1_seed2/model_2000.pt",
+      "gpu": 2
+    }
+  ]
+}

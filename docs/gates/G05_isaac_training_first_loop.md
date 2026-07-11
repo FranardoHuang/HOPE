@@ -463,3 +463,30 @@ inexact lineage for resumes and exact lineage for fresh runs. Within each M3
 or M2 pair, recursive contract diff reports only `face_command_pairing`.
 Training is still running and no terminal checkpoint or score exists, so G05
 remains `Partial`.
+
+### Phase-1 breadth and checkpoint-curve correction (2026-07-11)
+
+The first launch occupied six GPUs but ran only one 4096-env process per GPU.
+That is not the established breadth policy. Historical measured operation is
+four jobs per 5090 (about 22--23 GiB total), with serialized Kit boots and a
+75-second stagger. The reviewed scale-out is now 24 arms: a second paired
+continuation seed for each M3/M2 old-vs-S1 family plus a four-seed fresh 2x2
+factorial over face pairing and zero/non-zero plant. Only the fresh
+`shared_plus_y + zero-friction` (`SZ`) cell is the pre-registered formal target;
+the other cells are causal diagnostics. The exact assignment is tracked in
+`configs/phase1_scaleout_matrix_20260711.json`.
+
+Waiting for the terminal checkpoint was also contrary to the recorded
+checkpoint policy. The first curve workers target causal `17000/18000/19000`
+and fresh `0/1000/2000` checkpoints, with one Isaac export at a time per Pod
+and CPU MuJoCo exams allowed to overlap. Their first preflight found a missing
+ignored A3 asset link in each detached worktree; after linking the frozen
+training asset, a second preflight wrote ONNX but exposed a buffered/missing
+success handshake. Both batches are retained and neither is a checkpoint
+score. `judge.sh` now forces unbuffered export output for the retry. Later points follow
+the 1000--2000 iteration schedule and densify around a measured peak. The
+worker records checkpoint/evaluator hashes and never signals a training
+process. Both scale-out roles (three layers of three arms on each Pod) and all
+18 initial checkpoint jobs passed dry-run input/hash/path checks. Actual curve
+results, the corrected retry and the remaining 18 first-iteration contracts are still pending, so
+the gate remains `Partial`.

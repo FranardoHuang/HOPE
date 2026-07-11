@@ -1066,3 +1066,20 @@ rally_yaw 机制的免费红利:同一条 clip 旋转后天然服务任何打球
 
 搭车项(不占主线):R12「刹得住」专项考(并入 2b)、R17 位置奖励收紧(阶段 1 第二波搭车)、
 R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
+
+## 2026-07-11 — 恢复满池消融与 checkpoint 曲线
+
+- 纠正容量执行：六张 GPU 各一条训练只是占卡，不是历史规则里的“跑满”。旧 `queue.md` 和
+  `patrol_watchdog` 证实每张 5090 四条 4096-env 训练、约 22 GB、75 秒错峰；当前目标恢复为
+  `4/4/4 + 4/4/4 = 24` 条。
+- 新增 `docs/research/phase1_ablation_acceleration_2026-07-11.md`，固化机制冒烟、paired
+  checkpoint 曲线、多 seed、successive-halving/止损、峰值 checkpoint 和正式门禁的边界。
+- 新增 24 臂 manifest：8 条 M3/M2 paired continuations + 16 条 fresh `face pairing × plant`
+  2×2×4-seed 因子设计；`SZ` 是 formal target，其他格只提供因果诊断。
+- 扩展 `launch_phase1_20260711.sh` 为 Pod1/Pod2 三层 scale-out；新增 checkpoint curve worker，
+  保证同 Pod 只重叠 CPU 考卷、不重叠 Isaac export，并记录 checkpoint/evaluator SHA。
+- 两 Pod `/tmp` dry-run 通过：每层各三条新增训练命令、每 Pod 九个历史 checkpoint 均通过资产、
+  commit 和路径检查。随后启动初始 18 卷曲线 worker（Pod1 PGID `1332894`，Pod2 PGID `165860`）；
+  训练 checkout 未修改，未执行真机命令。首轮因 detached worktree 缺 ignored A3 asset link
+  全部在 scene create 前失败；补链接后的第二轮已写出 ONNX，但成功行被缓冲丢失而 fail-closed。
+  两批均保留、不入账；judge 改为 unbuffered，worker 改为首个 export failure 即停，待修后 retry。

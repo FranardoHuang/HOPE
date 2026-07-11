@@ -74,7 +74,9 @@ Rules:
   每个存档落盘后后台自动"导出+**bank 考卷**"(筛选级,纯 CPU 无规划器,~25 分钟)攒低频
   曲线;**判卷点/候选存档再过 Gate 3B 全链路考**(入账级最高档:假球→真规划器→C++ 运行器
   →厂商 MuJoCo 整条真机链,jiayi 的 Gate 3 改造版,见阶段 1 表 1l)。信号档臂到线考一次;
-  长跑每 1000-2000 步抽一个、峰值区加密。
+  长跑每 1000-2000 步抽一个、峰值区加密。**07-11 纠偏**:只监控训练存活、等 terminal
+  再判卷违反此规则;当前 Phase-1 必须补齐同题 checkpoint 曲线。完整抽查/止损/晋级制度见
+  [Phase-1 消融加速制度](research/phase1_ablation_acceleration_2026-07-11.md)。
 - 落地状态:`virtual_return_rate` 已实装(2026-07-06 merge);虚拟球任务天生就有,
   DeployParity/Hitter 通过"只记分不发奖励"开关(`vb_metrics_only`)也有了——**全谱系训练时
   都看得到上台率曲线**。注意该开关会改变随机数流:开了之后的新跑与旧跑不逐位可比
@@ -93,7 +95,7 @@ Rules:
 | --- | --- |
 | DeployParity training, 4096 envs, solo GPU | **~2.0-2.2 s/iter → 2000 it ≈ 1.2 h · 4000 ≈ 2.4 h · 8000 ≈ 4.7 h · 12000 ≈ 7 h · 20000 ≈ 12 h** |
 | Co-running 2 jobs on one GPU (measured) | each job ~20-25% slower, TOTAL throughput ≈ +37%; memory fine (2×~7 GB of 32 GB). **Stagger starts ≥60 s** |
-| 算力手册 FINAL | 4096 envs 定版;关键路径独占卡;~~广度实验最多 2 任务/卡;3 任务/卡不增反降 ✗~~ **franco 2026-07-08 深夜改规:消融波拉满 3-4 任务/卡**——"测得多"优先于单臂墙钟(单臂慢 25-45% 接受);独占仍留给跑到底/判卷关键臂 |
+| 算力手册 FINAL | 4096 envs 定版;关键路径独占卡;~~广度实验最多 2 任务/卡;3 任务/卡不增反降 ✗~~ **franco 2026-07-08 深夜改规:消融波拉满 3-4 任务/卡**——"测得多"优先于单臂墙钟(单臂慢 25-45% 接受);独占仍留给跑到底/判卷关键臂。**07-11 纠偏:六张卡各占一臂只是 1/1/1+1/1/1,不叫跑满;广度目标=4/4/4+4/4/4=24 臂** |
 | Kit boot + env build (per run) | ~2 min |
 | Mechanics check (512 envs, 25 it) | ~3 min |
 | ONNX export (play.py 原生路,占 GPU 槽) | ~4 min |
