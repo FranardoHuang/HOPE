@@ -176,9 +176,14 @@ def validate_prereg(config_path: Path, repo: Path) -> dict[str, Any]:
 
     blockers = config.get("runtime_blockers")
     if not isinstance(blockers, list) or not any(
-        isinstance(item, str) and "no racket impulse" in item for item in blockers
+        isinstance(item, str)
+        and "no clean-detached simulator run" in item
+        and "100 served/exact" in item
+        for item in blockers
     ):
-        raise ParityContractError("Isaac Phase-B physical-contact blocker must remain explicit")
+        raise ParityContractError(
+            "Isaac Phase-B clean-detached 100-row runtime blocker must remain explicit"
+        )
     return {
         "status": "valid_preregistered_runtime_blocked",
         "preregistration_sha256": sha256_file(config_path),

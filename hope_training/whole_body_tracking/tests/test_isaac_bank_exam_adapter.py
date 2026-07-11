@@ -236,6 +236,161 @@ def test_nominal_profile_rejects_unversioned_retiming():
         A.apply_nominal_eval_profile(cfg, num_envs=20)
 
 
+def test_phase_b_contract_binds_file_sources_target_and_evaluator_only_profile(tmp_path: Path):
+    source = tmp_path / "source.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    target = {
+        "checkpoint_sha256": "1" * 64,
+        "training_contract_sha256": "2" * 64,
+        "exam_bank_sha256": "3" * 64,
+        "schedule_file_sha256": "5" * 64,
+        "schedule_sha256": "4" * 64,
+        "question_id_order_sha256": "6" * 64,
+        "schedule_k": 100,
+        "per_clip_quota": 50,
+        "schedule_seed": 0,
+        "noise_scale": 0.0,
+        "fresh_lineage": True,
+        "evaluation_contract_exact": True,
+        "run_name": "unit_run",
+        "checkpoint_iteration": 2000,
+        "attempts_per_side": 50,
+        "plant_cell": "SZ_zero_friction_protocol_exact",
+    }
+    contract = {
+        "schema": A.PHASE_B_CONTRACT_SCHEMA,
+        "schema_version": 1,
+        "contract_id": "unit-phase-b",
+        "auto_start": False,
+        "runtime_validation_required": True,
+        "threshold_changes_allowed": False,
+        "legacy_virtual_score_changes_allowed": False,
+        "real_robot_authorized": False,
+        "phase_b_profile": {
+            "physical_ball": True,
+            "physical_ball_impulse": True,
+            "physical_ball_substep": 1,
+            "virtual_ball": True,
+            "event_timing_mode": "disabled",
+            "required_capability": A.PHASE_B_FULL_CAPABILITY,
+            "collision_authority": "code_only_ball_collider_disabled",
+            "physics_callback_required": True,
+            "contact_authority": "code_driven_blade_disc_and_venue_paddle_impulse",
+            "racket_contact_radius_m": 0.075,
+            "ball_radius_m": 0.02,
+            "impulse": "virtual_ball.predict_paddle_contact_bit_exact_delegation",
+            "post_contact_rollout": "physx_gravity_plus_deterministic_venue_aero_and_code_table_bounce",
+        },
+        "target": target,
+        "sources": {"unit": {"path": "source.py", "sha256": A.sha256_file(source)}},
+    }
+    path = tmp_path / "phase_b.json"
+    path.write_text(json.dumps(contract, sort_keys=True), encoding="utf-8")
+    loaded = A.load_and_validate_phase_b_contract(
+        path, expected_sha256=A.sha256_file(path), repository_root=tmp_path
+    )
+    A.validate_phase_b_pre_gym_target(
+        loaded,
+        checkpoint_sha256="1" * 64,
+        training_contract_sha256="2" * 64,
+        exam_bank_sha256="3" * 64,
+        schedule_file_sha256="5" * 64,
+        per_clip_quota=50,
+        schedule_seed=0,
+        noise_scale=0.0,
+        run_name="unit_run",
+        checkpoint_iteration=2000,
+    )
+    cfg = _env_cfg()
+    compatibility = A.prepare_phase_b_saved_config_compatibility(cfg, loaded)
+    assert compatibility["training_semantics_changed"] is False
+    assert set(compatibility["injected_missing_fields"]) == {
+        "event_timing_mode",
+        "event_timing_repeat",
+        "event_timing_schedule",
+        "event_timing_schedule_sha256",
+    }
+    capture = 0.095
+    minimum = 0.3
+    cfg.commands.racket_target.vb_capture_radius = capture
+    cfg.commands.racket_target.vb_min_approach_speed = minimum
+    profile = A.apply_phase_b_eval_profile(cfg, loaded)
+    racket = cfg.commands.racket_target
+    assert racket.virtual_ball is True and racket.physical_ball is True
+    assert racket.physical_ball_impulse is True and racket.physical_ball_substep == 1
+    assert racket.vb_capture_radius == capture and racket.vb_min_approach_speed == minimum
+    assert profile["legacy_virtual_thresholds_changed"] is False
+    A.validate_phase_b_runtime_target(
+        loaded,
+        checkpoint_sha256="1" * 64,
+        training_contract_sha256="2" * 64,
+        exam_bank_sha256="3" * 64,
+        schedule_file_sha256="5" * 64,
+        schedule_sha256="4" * 64,
+        question_id_order_sha256="6" * 64,
+        schedule_k=100,
+        per_clip_quota=50,
+        attempts_per_side=50,
+        schedule_seed=0,
+        noise_scale=0.0,
+        fresh_lineage=True,
+        evaluation_contract_exact=True,
+    )
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    with pytest.raises(A.IsaacBankExamError, match="source hash mismatch"):
+        A.load_and_validate_phase_b_contract(
+            path, expected_sha256=A.sha256_file(path), repository_root=tmp_path
+        )
+
+
+def test_phase_b_physical_truth_replacement_is_strict_and_rehashes_only_nested_truth():
+    pending = {
+        "available": False,
+        "capability": A.PHASE_B_FULL_CAPABILITY,
+        "reason": "pending",
+    }
+    document = A.strike_state_instrumentation_document(
+        observation_phase="exact_strike",
+        base_root_state_env=np.zeros(13),
+        racket_pos_env=np.zeros(3),
+        racket_lin_vel_world=np.zeros(3),
+        racket_face_normal_signed_pre_orient_world=np.array([1.0, 0.0, 0.0]),
+        racket_face_normal_raw_plus_y_world=np.array([1.0, 0.0, 0.0]),
+        analytic_face_normal_oriented_world=np.array([1.0, 0.0, 0.0]),
+        target_racket_pos_env=np.zeros(3),
+        target_racket_lin_vel_world=np.zeros(3),
+        target_face_normal_world=np.array([1.0, 0.0, 0.0]),
+        incoming_ball_lin_vel_world=np.array([-3.0, 0.0, 0.0]),
+        incoming_ball_spin_world=np.zeros(3),
+        analytic_available=True,
+        analytic_capture_gate=True,
+        analytic_net_clear=True,
+        analytic_on_opponent=True,
+        analytic_landing_valid=True,
+        analytic_landing_xy_env=np.array([2.5, 0.0]),
+        physical_truth=pending,
+    )
+    truth = {
+        "available": True,
+        "capability": A.PHASE_B_FULL_CAPABILITY,
+        "contacted": False,
+        "net_clear": False,
+        "landed_ok": False,
+        "returned": False,
+        "landing_xy_env_m": None,
+        "attempt_token": 0,
+        "served": True,
+        "exact_seen": True,
+        "contact_authority": "code_driven_blade_disc_and_venue_paddle_impulse",
+        "post_contact_rollout": "physx_gravity_plus_deterministic_venue_aero_and_code_table_bounce",
+    }
+    replaced = A.replace_instrumentation_physical_truth(document, truth)
+    assert replaced["physical_truth"] == truth and replaced["sha256"] != document["sha256"]
+    invalid = dict(truth, returned=True)
+    with pytest.raises(A.IsaacBankExamError, match="returned must equal"):
+        A.replace_instrumentation_physical_truth(document, invalid)
+
+
 def test_hold_aware_guard_profile_is_exact_by_default_and_legacy_override_is_labeled():
     legacy = SimpleNamespace(terminations=_terminations(aware=False))
     with pytest.raises(A.IsaacBankExamError, match="diagnostic-only"):

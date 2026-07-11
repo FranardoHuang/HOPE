@@ -1,0 +1,126 @@
+{
+  "schema": "hope.isaac-bank-exam.physical-truth-phase-b-contract.v1",
+  "schema_version": 1,
+  "contract_id": "phase1-fresh-SZ-seed1-model2000-isaac-physical-truth-phase-b-v1",
+  "status": "implementation_complete_runtime_unvalidated",
+  "scope": "Evaluator-only Isaac physical paddle contact and deterministic post-contact truth for the preregistered fresh SZ seed1 model_2000 cross-engine instrument-parity paper",
+  "auto_start": false,
+  "runtime_validation_required": true,
+  "threshold_changes_allowed": false,
+  "legacy_virtual_score_changes_allowed": false,
+  "real_robot_authorized": false,
+  "target": {
+    "run_name": "phase1_fresh_v3_S1_seed1",
+    "checkpoint_iteration": 2000,
+    "checkpoint_sha256": "99e8265960244e5be19176dc5f2d3b8b99e088d5d76d34d0f2cd1e1dd0c3ae4c",
+    "training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+    "exam_bank_sha256": "d7db2568beee990ef1d64b2dce9f0ab56ca76377f8993d820b6388292d0f5096",
+    "schedule_sha256": "7dc6af822fb4130b8c324843f179d77f882d1326306bb19802b00f94447dff3e",
+    "schedule_file_sha256": "66e89986a2b726d529179fcb4c745625ebed0380d59664caceefc55e86071cb3",
+    "question_id_order_sha256": "b87e81a34ff2d31766e17345f0a8c9d77665b78874093e26bdae257e8ed21f91",
+    "schedule_k": 100,
+    "per_clip_quota": 50,
+    "attempts_per_side": 50,
+    "schedule_seed": 0,
+    "noise_scale": 0.0,
+    "fresh_lineage": true,
+    "evaluation_contract_exact": true,
+    "plant_cell": "SZ_zero_friction_protocol_exact"
+  },
+  "phase_b_profile": {
+    "physical_ball": true,
+    "physical_ball_impulse": true,
+    "physical_ball_substep": 1,
+    "virtual_ball": true,
+    "event_timing_mode": "disabled",
+    "required_capability": "physical_paddle_contact_and_post_contact_flight_v1",
+    "physics_callback_required": true,
+    "collision_authority": "code_only_ball_collider_disabled",
+    "contact_authority": "code_driven_blade_disc_and_venue_paddle_impulse",
+    "racket_contact_radius_m": 0.075,
+    "ball_radius_m": 0.02,
+    "impulse": "virtual_ball.predict_paddle_contact_bit_exact_delegation",
+    "post_contact_rollout": "physx_gravity_plus_deterministic_venue_aero_and_code_table_bounce"
+  },
+  "legacy_virtual_contract": {
+    "scorecard_schema": "hope.isaac-bank-exam.v1",
+    "csv_columns_changed": false,
+    "legacy_hit_return_fields_remain_analytic": true,
+    "physical_truth_location": "attempts[*].instrumentation.physical_truth",
+    "capture_radius_m": 0.095,
+    "min_approach_speed_mps": 0.3,
+    "thresholds_changed": false,
+    "phase_b_disabled_behavior": "no manager_rider_no_phase_b_metrics_no_reward_or_observation_or_virtual_score_change"
+  },
+  "sources": {
+    "evaluator": {
+      "path": "hope_training/whole_body_tracking/scripts/isaac_bank_exam.py",
+      "sha256": "964c84843c469f82229a1e7d165fcc2b7f55ba51be3c6ebdb00b7458affdc1fa"
+    },
+    "adapter": {
+      "path": "hope_training/whole_body_tracking/scripts/isaac_bank_exam_adapter.py",
+      "sha256": "076cb67cefc6377f71da088f7c35fb7325d55127d9f16c9024437e05b7da13c5"
+    },
+    "command_fk": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/hope_commands.py",
+      "sha256": "5c6db5bd63c6bc36b48b428ff809312cceebdc1f968e9685c54bc32a4a73bd93"
+    },
+    "motion_command": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/commands.py",
+      "sha256": "648378535d3cc3d32ab3be14ce41007d377ea394baf209e0872545b26834a7ee"
+    },
+    "event_timing_disabled_axis": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/event_timing.py",
+      "sha256": "07adabda09d04c8c8b7ed02ea0255f3b4880201836e7bb3a0e45e234cfd06baa"
+    },
+    "physical_ball": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/physical_ball.py",
+      "sha256": "c15a9cf5705fe23f25c74f1ee8dec7ab060cd6a75a2aef096404eeb735a1d314"
+    },
+    "scene_attachment": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/config/agibot_a3/hope_env_cfg.py",
+      "sha256": "3802c715e1af620293970e1357d2a717cfb63b17e138aeafdaaf312ad57d810c"
+    },
+    "virtual_ball_contact_and_flight": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/virtual_ball.py",
+      "sha256": "3dc5237346004893141fe231dbf6a8bc1028e0328459411015366d72868c5ed4"
+    },
+    "shadow_ball_aero_and_crossing": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/shadow_ball.py",
+      "sha256": "3f1850092a5cbc1880f365207dadd765b2154312e805ad687301f3fb079e0ac8"
+    },
+    "table_geometry": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/geometry.py",
+      "sha256": "df71f12a21fedb4b8caed182906288f573b2f05c731441a5f529996baaf056b2"
+    },
+    "venue_ball_physics": {
+      "path": "configs/ball_physics_venue.yaml",
+      "sha256": "2e58221442665ddad7cc6dcc18d5c811dec1b0c47439b81c1c744b5148169a27"
+    }
+  },
+  "implementation_provenance": {
+    "phase_b_original_commit": "5d6d236",
+    "phase_b_adversarial_fix_commit": "7e3be78",
+    "current_port_note": "The prior manager was ported onto the current link-origin-correct, per-clip-face-aware FK and extended with explicit BankExam truth publication and fail-closed runtime capability metadata",
+    "runtime_checkout": "must_be_clean_detached_and_match_every_source_sha256",
+    "runtime_claim_now": false
+  },
+  "runtime_acceptance": {
+    "all_100_attempts_required": true,
+    "censored_attempts_allowed": false,
+    "physics_callback_degradation_allowed": false,
+    "pending_post_contact_landing_allowed": false,
+    "per_question_booleans": [
+      "served",
+      "exact_seen",
+      "contacted",
+      "net_clear",
+      "landed_ok",
+      "returned"
+    ],
+    "attempt_token_must_equal_schedule_index": true,
+    "returned_identity": "contacted_and_net_clear_and_landed_ok",
+    "simulator_dependent_test": "test_simulator_dependent_phase_b_scorecard_has_complete_physical_truth",
+    "gate_effect": "implementation alone does not close the 2x2 or authorize training/deployment/real_robot decisions"
+  }
+}

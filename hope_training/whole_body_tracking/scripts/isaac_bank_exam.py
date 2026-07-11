@@ -36,9 +36,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from isaac_bank_exam_adapter import (  # noqa: E402
     CROSS_ENGINE_INSTRUMENTATION_SCHEMA,
+    PHASE_B_FULL_CAPABILITY,
     IsaacBankExamError,
     apply_hold_aware_tracking_guard_profile,
     apply_nominal_eval_profile,
+    apply_phase_b_eval_profile,
     canonical_sha256,
     configure_runtime_motion_loader,
     configure_runtime_train_bank_loader,
@@ -49,10 +51,15 @@ from isaac_bank_exam_adapter import (  # noqa: E402
     per_attempt_action_noise,
     policy_observation_tensor,
     numeric_ready_state_document,
+    prepare_phase_b_saved_config_compatibility,
     ready_state_sha256,
+    replace_instrumentation_physical_truth,
     sha256_file,
     summarize_attempts,
     strike_state_instrumentation_document,
+    load_and_validate_phase_b_contract,
+    validate_phase_b_runtime_target,
+    validate_phase_b_pre_gym_target,
     write_scorecard,
 )
 
@@ -75,6 +82,46 @@ def _git_head(repo: Path) -> str | None:
         ).strip()
     except (OSError, subprocess.CalledProcessError):
         return None
+
+
+def _require_clean_detached_eval_checkout(repo: Path) -> str:
+    """Phase-B runtime evidence is admissible only from one clean detached checkout."""
+
+    try:
+        head = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=repo, text=True, stderr=subprocess.STDOUT
+        ).strip()
+        symbolic = subprocess.run(
+            ["git", "symbolic-ref", "-q", "HEAD"],
+            cwd=repo,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        dirty = subprocess.check_output(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=repo,
+            text=True,
+            stderr=subprocess.STDOUT,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise IsaacBankExamError(f"cannot audit Phase-B evaluation checkout: {exc}") from exc
+    if symbolic.returncode == 0:
+        raise IsaacBankExamError(
+            "Phase-B runtime evidence requires detached HEAD, not a mutable branch checkout"
+        )
+    if symbolic.returncode != 1:
+        raise IsaacBankExamError(
+            f"cannot determine whether Phase-B checkout is detached: {symbolic.stderr.strip()}"
+        )
+    if dirty.strip():
+        preview = dirty.strip().splitlines()[:12]
+        raise IsaacBankExamError(
+            "Phase-B runtime evidence requires a clean checkout; dirty entries="
+            + json.dumps(preview)
+        )
+    return head
 
 
 def _motion_files(motion_cmd) -> list[str]:
@@ -234,6 +281,27 @@ def _run(cfg, simulation_app):
     )
 
     allow_inexact = bool(_cfg(cfg, "allow_inexact_contract", False))
+    phase_b_requested = bool(_cfg(cfg, "instrument_physical_truth_phase_b", False))
+    if phase_b_requested and allow_inexact:
+        raise IsaacBankExamError(
+            "Phase-B physical truth is bound to the exact fresh paper; allow_inexact_contract "
+            "cannot be enabled in the same cell"
+        )
+    repo = find_repository_root(__file__)
+    phase_b_contract = None
+    if phase_b_requested:
+        phase_b_path = str(_cfg(cfg, "phase_b_contract", "")).strip()
+        phase_b_sha = str(_cfg(cfg, "expected_phase_b_contract_sha256", "")).strip()
+        if not phase_b_path or not phase_b_sha:
+            raise IsaacBankExamError(
+                "Phase-B requires +phase_b_contract=... and "
+                "+expected_phase_b_contract_sha256=..."
+            )
+        phase_b_contract = load_and_validate_phase_b_contract(
+            phase_b_path, expected_sha256=phase_b_sha, repository_root=repo
+        )
+        detached_head = _require_clean_detached_eval_checkout(repo)
+        phase_b_contract["_validated_binding"]["detached_git_head"] = detached_head
     (
         run_dir,
         checkpoint,
@@ -243,6 +311,11 @@ def _run(cfg, simulation_app):
         agent_cfg,
         checkpoint_obj,
     ) = _load_saved_run(cfg, torch)
+    phase_b_saved_config_compatibility = None
+    if phase_b_contract is not None:
+        phase_b_saved_config_compatibility = prepare_phase_b_saved_config_compatibility(
+            env_cfg, phase_b_contract
+        )
     termination_contract, training_contract, training_contract_sha, inexact_reasons = _contract_preflight(
         run_dir=run_dir,
         required=required,
@@ -266,6 +339,41 @@ def _run(cfg, simulation_app):
     noise_scale = float(_cfg(cfg, "noise_scale", 0.0))
     if not np.isfinite(noise_scale) or noise_scale < 0.0:
         raise IsaacBankExamError("noise_scale must be finite and non-negative")
+    phase_b_schedule_path = None
+    phase_b_schedule_file_sha = None
+    if phase_b_contract is not None:
+        checkpoint_parts = checkpoint.stem.split("_", 1)
+        if len(checkpoint_parts) != 2 or checkpoint_parts[0] != "model":
+            raise IsaacBankExamError(
+                f"Phase-B checkpoint filename must be model_<iteration>.pt: {checkpoint.name}"
+            )
+        try:
+            checkpoint_iteration = int(checkpoint_parts[1])
+        except ValueError as exc:
+            raise IsaacBankExamError(
+                f"Phase-B checkpoint filename has no integer iteration: {checkpoint.name}"
+            ) from exc
+        raw_schedule = str(_cfg(cfg, "schedule_json", "")).strip()
+        if not raw_schedule:
+            raise IsaacBankExamError("Phase-B requires the frozen supplied schedule_json")
+        phase_b_schedule_path = Path(raw_schedule).expanduser().resolve()
+        if not phase_b_schedule_path.is_file():
+            raise IsaacBankExamError(
+                f"Phase-B supplied schedule does not exist: {phase_b_schedule_path}"
+            )
+        phase_b_schedule_file_sha = sha256_file(phase_b_schedule_path)
+        validate_phase_b_pre_gym_target(
+            phase_b_contract,
+            checkpoint_sha256=checkpoint_sha,
+            training_contract_sha256=training_contract_sha,
+            exam_bank_sha256=sha256_file(exam_bank_path),
+            schedule_file_sha256=phase_b_schedule_file_sha,
+            per_clip_quota=quota,
+            schedule_seed=eval_seed,
+            noise_scale=noise_scale,
+            run_name=run_dir.name,
+            checkpoint_iteration=checkpoint_iteration,
+        )
 
     hydration_profile = hydrate_missing_dataclass_defaults(
         {
@@ -281,6 +389,30 @@ def _run(cfg, simulation_app):
             + json.dumps(hydration_profile["hydrated_fields"], sort_keys=True)
         )
     profile = apply_nominal_eval_profile(env_cfg, num_envs=num_envs)
+    if phase_b_contract is not None:
+        phase_b_profile = apply_phase_b_eval_profile(env_cfg, phase_b_contract)
+        phase_b_profile["saved_config_compatibility"] = phase_b_saved_config_compatibility
+        from whole_body_tracking.tasks.tracking.config.agibot_a3.hope_env_cfg import (
+            attach_physical_ball_scene,
+        )
+
+        attach_physical_ball_scene(env_cfg)
+        pb_scene = getattr(env_cfg.scene, "pb_ball", None)
+        collision = getattr(getattr(getattr(pb_scene, "spawn", None), "collision_props", None),
+                            "collision_enabled", None)
+        if collision is not False:
+            raise IsaacBankExamError(
+                "Phase-B contract requires the pb_ball collider disabled so code remains the "
+                "single ball/robot/table contact authority"
+            )
+        phase_b_profile["scene_attachment"] = {
+            "pb_ball": True,
+            "pb_table": getattr(env_cfg.scene, "pb_table", None) is not None,
+            "pb_ball_collision_enabled": False,
+        }
+        phase_b_profile.pop("sha256", None)
+        phase_b_profile["sha256"] = canonical_sha256(phase_b_profile)
+        profile["physical_truth_phase_b"] = phase_b_profile
     profile["historical_config_hydration"] = hydration_profile
     motion_loader_profile = configure_runtime_motion_loader(
         env_cfg, allow_legacy_diagnostic=allow_inexact
@@ -321,6 +453,11 @@ def _run(cfg, simulation_app):
         inexact_reasons.append(
             "legacy tracking guards were evaluator-overridden to ignore nominal ready-stand holds: "
             + ",".join(guard_profile["overridden_terms"])
+        )
+    if phase_b_contract is not None and inexact_reasons:
+        raise IsaacBankExamError(
+            "Phase-B fresh/exact paper accumulated inexact reasons before gym.make: "
+            + json.dumps(inexact_reasons)
         )
     env_cfg.seed = eval_seed
     env_cfg.sim.device = device
@@ -464,6 +601,30 @@ def _run(cfg, simulation_app):
         )
         write_schedule_artifact(schedule_artifact, schedule_path)
     schedule = schedule_artifact.items
+    if phase_b_contract is not None:
+        if sha256_file(phase_b_schedule_path) != phase_b_schedule_file_sha:
+            raise IsaacBankExamError(
+                "Phase-B supplied schedule changed while its semantic artifact was loaded"
+            )
+        question_order_sha = canonical_sha256(
+            [str(item.question_id) for item in schedule]
+        )
+        validate_phase_b_runtime_target(
+            phase_b_contract,
+            checkpoint_sha256=checkpoint_sha,
+            training_contract_sha256=training_contract_sha,
+            exam_bank_sha256=bank_sha,
+            schedule_file_sha256=phase_b_schedule_file_sha,
+            schedule_sha256=schedule_artifact.schedule_sha256,
+            question_id_order_sha256=question_order_sha,
+            schedule_k=len(schedule),
+            per_clip_quota=quota,
+            attempts_per_side=quota,
+            schedule_seed=eval_seed,
+            noise_scale=noise_scale,
+            fresh_lineage=training_contract is not None,
+            evaluation_contract_exact=not inexact_reasons,
+        )
 
     env = RslRlVecEnvWrapper(env)
     runner = MotionOnPolicyRunner(
@@ -535,14 +696,54 @@ def _run(cfg, simulation_app):
             "reason": "accepted nominal BankExam profile sets physical_ball=false",
         }
     else:
-        # The current PhysicalBallManager is explicitly Phase A: it realizes the incoming flight,
-        # disables robot collision, and applies no racket impulse.  Export this limitation rather
-        # than silently relabeling an incoming-flight probe as physical return truth.
-        physical_truth_capability = {
-            "available": False,
-            "capability": "incoming_flight_only_no_paddle_contact_phase_a",
-            "reason": "Isaac physical-ball Phase A has no racket impulse or post-contact truth",
-        }
+        runtime_physical = dict(physical_manager.cross_engine_truth_metadata)
+        if phase_b_contract is not None:
+            frozen_phase_b = phase_b_contract["phase_b_profile"]
+            if not runtime_physical.get("available") or runtime_physical.get(
+                "capability"
+            ) != PHASE_B_FULL_CAPABILITY:
+                raise IsaacBankExamError(
+                    "Phase-B physical cell lacks the required runtime capability: "
+                    f"{runtime_physical}"
+                )
+            if runtime_physical.get("aero_substep") != 1:
+                raise IsaacBankExamError("frozen Phase-B contract requires aero_substep=1")
+            runtime_binding = {
+                "physics_callback_required": runtime_physical.get(
+                    "physics_callback_active"
+                ),
+                "collision_authority": runtime_physical.get("collision_authority"),
+                "contact_authority": runtime_physical.get("contact_authority"),
+                "racket_contact_radius_m": runtime_physical.get(
+                    "racket_contact_radius_m"
+                ),
+                "ball_radius_m": runtime_physical.get("ball_radius_m"),
+                "post_contact_rollout": runtime_physical.get("post_contact_rollout"),
+            }
+            runtime_mismatches = {
+                key: (value, frozen_phase_b.get(key))
+                for key, value in runtime_binding.items()
+                if value != frozen_phase_b.get(key)
+            }
+            if runtime_mismatches:
+                raise IsaacBankExamError(
+                    f"Phase-B runtime metadata differs from frozen profile: {runtime_mismatches}"
+                )
+            physical_truth_capability = {
+                "available": False,
+                "capability": PHASE_B_FULL_CAPABILITY,
+                "reason": "physical outcome pending until the one-question attempt finalizes",
+            }
+        else:
+            # Phase A realizes only incoming flight. Export the limitation rather than silently
+            # relabeling it as physical return truth.
+            physical_truth_capability = {
+                "available": False,
+                "capability": "incoming_flight_only_no_paddle_contact_phase_a",
+                "reason": "Isaac physical-ball Phase A has no racket impulse or post-contact truth",
+            }
+    if phase_b_contract is not None and physical_manager is None:
+        raise IsaacBankExamError("Phase-B requested but no PhysicalBallManager was constructed")
     instrumentation_contract = {
         "schema": CROSS_ENGINE_INSTRUMENTATION_SCHEMA,
         "ready_state_numeric_sha256": ready_state_numeric["sha256"],
@@ -560,7 +761,11 @@ def _run(cfg, simulation_app):
             "min_approach_speed_mps": float(racket_cmd.cfg.vb_min_approach_speed),
             "thresholds_changed_for_instrument_parity": False,
         },
-        "physical_truth": physical_truth_capability,
+        "physical_truth": (
+            dict(physical_manager.cross_engine_truth_metadata)
+            if phase_b_contract is not None
+            else physical_truth_capability
+        ),
     }
     instrumentation_contract["sha256"] = canonical_sha256(instrumentation_contract)
 
@@ -568,8 +773,13 @@ def _run(cfg, simulation_app):
     clip_ids = torch.as_tensor([int(item.clip) for item in schedule], device=device)
     bank_rows = torch.as_tensor([int(item.bank_row) for item in schedule], device=device)
     holds = torch.as_tensor([int(item.hold_steps) for item in schedule], device=device)
+    attempt_tokens = torch.as_tensor(
+        [int(item.schedule_index) for item in schedule], dtype=torch.long, device=device
+    )
     motion_cmd.install_external_exam_timing(env_ids, clip_ids, holds)
     racket_cmd.install_external_exam_questions(env_ids, exam_bank, clip_ids, bank_rows)
+    if phase_b_contract is not None:
+        physical_manager.begin_external_exam_attempt(env_ids, attempt_tokens)
     with torch.inference_mode():
         obs = policy_observation_tensor(env.get_observations(), device=device)
 
@@ -748,6 +958,26 @@ def _run(cfg, simulation_app):
                     row["instrumentation"] = state_snapshot(
                         env_id, "termination_before_exact", analytic_available=False
                     )
+                if phase_b_contract is not None:
+                    physical_truth = physical_manager.cross_engine_physical_truth(
+                        env_id,
+                        expected_attempt_token=int(row["schedule_index"]),
+                        final=True,
+                    )
+                    if not physical_truth.get("available"):
+                        raise IsaacBankExamError(
+                            f"Phase-B attempt {env_id} has no final physical truth: "
+                            f"{physical_truth}"
+                        )
+                    if physical_truth.get("exact_seen") is not bool(row["reached_exact"]):
+                        raise IsaacBankExamError(
+                            f"Phase-B attempt {env_id} disagrees on exact-strike generation: "
+                            f"manager={physical_truth.get('exact_seen')}, "
+                            f"ledger={row['reached_exact']}"
+                        )
+                    row["instrumentation"] = replace_instrumentation_physical_truth(
+                        row["instrumentation"], physical_truth
+                    )
                 row["end_step"] = step
                 row["finalize_reason"] = reason
                 row["finalized"] = True
@@ -773,8 +1003,21 @@ def _run(cfg, simulation_app):
         raise IsaacBankExamError(
             "training contract changed during evaluation; refusing mixed provenance"
         )
+    if phase_b_contract is not None:
+        if sha256_file(phase_b_schedule_path) != phase_b_schedule_file_sha:
+            raise IsaacBankExamError("Phase-B supplied schedule changed during evaluation")
+        binding = phase_b_contract["_validated_binding"]
+        end_contract = load_and_validate_phase_b_contract(
+            binding["path"], expected_sha256=binding["sha256"], repository_root=repo
+        )
+        end_head = _require_clean_detached_eval_checkout(repo)
+        if end_head != binding["detached_git_head"]:
+            raise IsaacBankExamError(
+                "Phase-B detached HEAD changed during evaluation; refusing mixed provenance"
+            )
+        if end_contract["contract_id"] != phase_b_contract["contract_id"]:
+            raise IsaacBankExamError("Phase-B contract identity changed during evaluation")
 
-    repo = find_repository_root(__file__)
     schedule_payload = artifact_document(schedule_artifact)
     metadata = {
         "evaluation_contract_exact": not inexact_reasons,
@@ -813,6 +1056,14 @@ def _run(cfg, simulation_app):
             "ball_physics_yaml_sha256": sha256_file(repo / "configs/ball_physics_venue.yaml"),
         },
     }
+    if phase_b_contract is not None:
+        metadata["physical_truth_phase_b_contract"] = {
+            **dict(phase_b_contract["_validated_binding"]),
+            "contract_id": phase_b_contract["contract_id"],
+            "runtime_validated": True,
+            "legacy_virtual_score_fields_changed": False,
+            "legacy_virtual_thresholds_changed": False,
+        }
     document = write_scorecard(
         output_json=output_json,
         output_csv=output_csv,

@@ -363,9 +363,11 @@ def test_suggest_cli_unregistered_clip_is_fatal(tmp_path):
 def test_runtime_path_has_no_dynamic_sign():
     """franco 语义修正守卫:运行时(hope_commands)绝不能用当前拍速方向动态定符号——训练早期拍面
     可能整个反着,动态符号会把'反面'合法化。符号只能来自 cfg 常量表;n·v 只准出现在离线工具里。"""
-    src = inspect.getsource(hope_commands_mod.RacketTargetCommand._compute_racket_state)
-    assert "racket_lin_vel_w" not in src.split("axis_w")[-1], (
-        "_compute_racket_state 的符号选择读到了拍速 —— 违反'离线固定常量'拍板语义")
+    # Phase-B 物理回调也需要同一套 FK，所以纯计算现在在 _racket_fk，包装器只写缓冲。
+    src = inspect.getsource(hope_commands_mod.RacketTargetCommand._racket_fk)
+    sign_lane = src.split("axis_w =", 1)[1].split("return pos", 1)[0]
+    assert "lin_vel" not in sign_lane and "racket_lin_vel_w" not in sign_lane, (
+        "_racket_fk 的符号选择读到了拍速 —— 违反'离线固定常量'拍板语义")
     # 符号张量只从 cfg 表构建
     assert "mount_normal_sign_per_clip" in src and "_mount_signs_cfg" in src
 

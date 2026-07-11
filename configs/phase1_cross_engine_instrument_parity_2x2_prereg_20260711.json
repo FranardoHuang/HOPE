@@ -14,15 +14,23 @@
   "tools": {
     "validator": {
       "path": "scripts/validate_phase1_cross_engine_instrument_parity_2x2.py",
-      "sha256": "e688873c79c50d3f0414b93e2d1cf779b0ef220d870adc32f501c762f3f0fb5c"
+      "sha256": "eb1b2fa6b721689dd051bc1a0956c3cdea1bc6878f2306cd84059cd321cbf4e4"
     },
     "isaac_evaluator": {
       "path": "hope_training/whole_body_tracking/scripts/isaac_bank_exam.py",
-      "sha256": "10ffb0b5f70176ee99c6ec039787a87129cea923027953d16ded5be5e30481e4"
+      "sha256": "964c84843c469f82229a1e7d165fcc2b7f55ba51be3c6ebdb00b7458affdc1fa"
     },
     "isaac_adapter": {
       "path": "hope_training/whole_body_tracking/scripts/isaac_bank_exam_adapter.py",
-      "sha256": "54d70aa009aa3b4f4b6e1fee765c270d2fb1458b1fad2895b0b065caec7e82a2"
+      "sha256": "076cb67cefc6377f71da088f7c35fb7325d55127d9f16c9024437e05b7da13c5"
+    },
+    "isaac_phase_b_contract": {
+      "path": "configs/phase1_isaac_bank_exam_physical_truth_phase_b_contract_20260711.json",
+      "sha256": "1af7a0b3589d57bfbd2da0b8af6130641298b647e4d80e52b5ef673a84e5b376"
+    },
+    "isaac_physical_ball": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/physical_ball.py",
+      "sha256": "c15a9cf5705fe23f25c74f1ee8dec7ab060cd6a75a2aef096404eeb735a1d314"
     }
   },
   "source_commits": {
@@ -127,7 +135,7 @@
     "gate_closes_only_after_validator_accepts_all_four_content_addressed_cells": true
   },
   "runtime_blockers": [
-    "Isaac physical-ball Phase A has no racket impulse and no post-contact physical truth; Phase B physical paddle contact/flight instrumentation is required",
+    "Isaac Phase-B source and a content-addressed evaluator contract now exist locally, but no clean-detached simulator run has yet produced 100 served/exact, uncensored physical outcomes",
     "the newly instrumented Isaac evaluator has not been executed on the immutable q50 schedule",
     "accepted MuJoCo artifacts predate the normalized state schema and do not export a signed face-normal vector in the cell document",
     "no four-cell content-addressed evidence manifest exists"

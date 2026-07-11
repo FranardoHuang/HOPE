@@ -24,6 +24,8 @@ import numpy as np
 
 SCHEMA = "hope.isaac-bank-exam.v1"
 CROSS_ENGINE_INSTRUMENTATION_SCHEMA = "hope.cross-engine-state-instrumentation.v1"
+PHASE_B_CONTRACT_SCHEMA = "hope.isaac-bank-exam.physical-truth-phase-b-contract.v1"
+PHASE_B_FULL_CAPABILITY = "physical_paddle_contact_and_post_contact_flight_v1"
 TRACKING_GUARD_FUNCTIONS = {
     "anchor_pos": ("bad_anchor_pos_z_only", "bad_anchor_pos_z_only_hold_aware"),
     "anchor_ori": ("bad_anchor_ori", "bad_anchor_ori_hold_aware"),
@@ -113,6 +115,281 @@ def canonical_sha256(value: Any) -> str:
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def load_and_validate_phase_b_contract(
+    path: str | os.PathLike[str],
+    *,
+    expected_sha256: str,
+    repository_root: str | os.PathLike[str],
+) -> dict[str, Any]:
+    """Load the evaluator-only Phase-B contract and bind every local source fail-closed.
+
+    This helper is intentionally dependency-light and must run before ``gym.make``.  A caller
+    cannot enable the physical-truth rider with an unpinned config, a dirty source replacement,
+    a threshold-changing paper, or a contract that authorizes automatic/real-robot execution.
+    """
+
+    contract_path = Path(path).expanduser().resolve()
+    expected = str(expected_sha256).strip().lower()
+    if len(expected) != 64 or any(ch not in "0123456789abcdef" for ch in expected):
+        raise IsaacBankExamError("expected Phase-B contract SHA256 must be 64 lowercase hex chars")
+    if not contract_path.is_file():
+        raise IsaacBankExamError(f"Phase-B contract does not exist: {contract_path}")
+    actual = sha256_file(contract_path)
+    if actual != expected:
+        raise IsaacBankExamError(
+            f"Phase-B contract SHA mismatch: expected={expected}, actual={actual}"
+        )
+    try:
+        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise IsaacBankExamError(f"cannot parse Phase-B contract {contract_path}: {exc}") from exc
+    if not isinstance(contract, dict):
+        raise IsaacBankExamError("Phase-B contract root must be an object")
+    if not isinstance(contract.get("contract_id"), str) or not contract["contract_id"].strip():
+        raise IsaacBankExamError("Phase-B contract must declare a non-empty contract_id")
+    required_literals = {
+        "schema": PHASE_B_CONTRACT_SCHEMA,
+        "schema_version": 1,
+        "auto_start": False,
+        "runtime_validation_required": True,
+        "threshold_changes_allowed": False,
+        "legacy_virtual_score_changes_allowed": False,
+        "real_robot_authorized": False,
+    }
+    mismatches = {
+        key: (contract.get(key), value)
+        for key, value in required_literals.items()
+        if contract.get(key) != value
+    }
+    if mismatches:
+        raise IsaacBankExamError(f"invalid Phase-B contract invariants: {mismatches}")
+    profile = contract.get("phase_b_profile")
+    required_profile = {
+        "physical_ball": True,
+        "physical_ball_impulse": True,
+        "physical_ball_substep": 1,
+        "virtual_ball": True,
+        "required_capability": PHASE_B_FULL_CAPABILITY,
+        "collision_authority": "code_only_ball_collider_disabled",
+        "event_timing_mode": "disabled",
+        "physics_callback_required": True,
+        "contact_authority": "code_driven_blade_disc_and_venue_paddle_impulse",
+        "racket_contact_radius_m": 0.075,
+        "ball_radius_m": 0.02,
+        "impulse": "virtual_ball.predict_paddle_contact_bit_exact_delegation",
+        "post_contact_rollout": (
+            "physx_gravity_plus_deterministic_venue_aero_and_code_table_bounce"
+        ),
+    }
+    if not isinstance(profile, Mapping):
+        raise IsaacBankExamError("Phase-B contract has no phase_b_profile object")
+    profile_mismatches = {
+        key: (profile.get(key), value)
+        for key, value in required_profile.items()
+        if profile.get(key) != value
+    }
+    if profile_mismatches:
+        raise IsaacBankExamError(f"invalid frozen Phase-B profile: {profile_mismatches}")
+    if not isinstance(contract.get("target"), Mapping):
+        raise IsaacBankExamError("Phase-B contract has no target binding")
+    if contract["target"].get("plant_cell") != "SZ_zero_friction_protocol_exact":
+        raise IsaacBankExamError("Phase-B target must bind the formal SZ zero-friction plant cell")
+
+    repo = Path(repository_root).expanduser().resolve()
+    sources = contract.get("sources")
+    if not isinstance(sources, Mapping) or not sources:
+        raise IsaacBankExamError("Phase-B contract must bind a non-empty sources mapping")
+    for label, binding in sources.items():
+        if not isinstance(binding, Mapping):
+            raise IsaacBankExamError(f"Phase-B source {label!r} is not an object")
+        relative = Path(str(binding.get("path", "")))
+        declared = str(binding.get("sha256", "")).lower()
+        if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+            raise IsaacBankExamError(f"Phase-B source {label!r} path must be repo-relative")
+        source_path = (repo / relative).resolve()
+        try:
+            source_path.relative_to(repo)
+        except ValueError as exc:
+            raise IsaacBankExamError(f"Phase-B source {label!r} escapes repository root") from exc
+        if not source_path.is_file():
+            raise IsaacBankExamError(f"Phase-B source {label!r} does not exist: {source_path}")
+        if len(declared) != 64 or sha256_file(source_path) != declared:
+            raise IsaacBankExamError(
+                f"Phase-B source hash mismatch for {label!r}: {relative}"
+            )
+    contract["_validated_binding"] = {
+        "path": str(contract_path),
+        "sha256": actual,
+    }
+    return contract
+
+
+def prepare_phase_b_saved_config_compatibility(
+    env_cfg: Any, contract: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Install only contract-bound neutral fields absent from the pre-T1 exact pickle.
+
+    The fresh checkpoint predates the event-timing config fields now present in the evaluation
+    class.  Generic formal hydration must continue to reject missing fields, so Phase B gets one
+    narrow seam: the content-addressed contract requires the whole T1 axis disabled, and only
+    those four neutral values may be materialized before the generic audit.
+    """
+
+    if not isinstance(contract.get("_validated_binding"), Mapping):
+        raise IsaacBankExamError("Phase-B compatibility requires a hash-validated contract")
+    profile = contract.get("phase_b_profile")
+    if not isinstance(profile, Mapping) or profile.get("event_timing_mode") != "disabled":
+        raise IsaacBankExamError("Phase-B compatibility requires event_timing_mode=disabled")
+    motion = getattr(getattr(env_cfg, "commands", None), "motion", None)
+    if motion is None:
+        raise IsaacBankExamError("saved env cfg has no commands.motion")
+    neutral = {
+        "event_timing_mode": "disabled",
+        "event_timing_schedule": "",
+        "event_timing_schedule_sha256": "",
+        "event_timing_repeat": False,
+    }
+    present = vars(motion)
+    injected = []
+    for name, value in neutral.items():
+        if name in present:
+            if present[name] != value:
+                raise IsaacBankExamError(
+                    f"Phase-B paper requires neutral commands.motion.{name}={value!r}, "
+                    f"got {present[name]!r}"
+                )
+        else:
+            setattr(motion, name, value)
+            injected.append(name)
+    result = {
+        "schema": "hope.isaac-bank-exam.phase-b-saved-config-compatibility.v1",
+        "neutral_values": neutral,
+        "injected_missing_fields": sorted(injected),
+        "training_semantics_changed": False,
+    }
+    result["sha256"] = canonical_sha256(result)
+    return result
+
+
+def apply_phase_b_eval_profile(env_cfg: Any, contract: Mapping[str, Any]) -> dict[str, Any]:
+    """Enable the contract-bound evaluator rider on an already nominalized config copy."""
+
+    if contract.get("schema") != PHASE_B_CONTRACT_SCHEMA:
+        raise IsaacBankExamError("Phase-B profile requires a validated Phase-B contract")
+    binding = contract.get("_validated_binding")
+    if not isinstance(binding, Mapping) or not binding.get("sha256"):
+        raise IsaacBankExamError("Phase-B contract was not loaded through the hash validator")
+    commands = getattr(env_cfg, "commands", None)
+    racket = getattr(commands, "racket_target", None)
+    if racket is None:
+        raise IsaacBankExamError("saved env cfg has no commands.racket_target")
+    changes = {
+        "commands.racket_target.virtual_ball": True,
+        "commands.racket_target.physical_ball": True,
+        "commands.racket_target.physical_ball_impulse": True,
+        "commands.racket_target.physical_ball_substep": 1,
+    }
+    racket.virtual_ball = True
+    racket.physical_ball = True
+    # These are evaluator-only dynamic rider fields. Keeping them out of the serialized training
+    # config schema is what lets an exact pre-Phase-B checkpoint remain exact when the rider is
+    # disabled; their authority is this content-addressed evaluation contract.
+    racket.physical_ball_impulse = True
+    racket.physical_ball_substep = 1
+    if hasattr(env_cfg, "physical_ball"):
+        env_cfg.physical_ball = True
+        changes["physical_ball"] = True
+    result = {
+        "schema": "hope.isaac-bank-exam.phase-b-eval-profile.v1",
+        "contract_sha256": str(binding["sha256"]),
+        "changes": changes,
+        "legacy_virtual_thresholds_changed": False,
+        "legacy_virtual_score_fields_changed": False,
+        "runtime_validation_required": True,
+    }
+    result["sha256"] = canonical_sha256(result)
+    return result
+
+
+def validate_phase_b_pre_gym_target(
+    contract: Mapping[str, Any], *, checkpoint_sha256: str,
+    training_contract_sha256: str | None, exam_bank_sha256: str,
+    schedule_file_sha256: str, per_clip_quota: int,
+    schedule_seed: int, noise_scale: float, run_name: str,
+    checkpoint_iteration: int,
+) -> None:
+    """Check every target fact available without constructing Kit/PhysX."""
+
+    target = contract.get("target")
+    if not isinstance(target, Mapping):
+        raise IsaacBankExamError("Phase-B contract target is missing")
+    actual = {
+        "checkpoint_sha256": checkpoint_sha256,
+        "training_contract_sha256": training_contract_sha256,
+        "exam_bank_sha256": exam_bank_sha256,
+        "schedule_file_sha256": schedule_file_sha256,
+        "per_clip_quota": int(per_clip_quota),
+        "schedule_seed": int(schedule_seed),
+        "noise_scale": float(noise_scale),
+        "run_name": str(run_name),
+        "checkpoint_iteration": int(checkpoint_iteration),
+    }
+    mismatches = {
+        key: (actual[key], target.get(key))
+        for key in actual
+        if actual[key] != target.get(key)
+    }
+    if target.get("fresh_lineage") is not True or target.get(
+        "evaluation_contract_exact"
+    ) is not True:
+        mismatches["fresh_exact_required"] = (
+            (target.get("fresh_lineage"), target.get("evaluation_contract_exact")),
+            (True, True),
+        )
+    if mismatches:
+        raise IsaacBankExamError(
+            f"Phase-B pre-gym target differs from frozen paper: {mismatches}"
+        )
+
+
+def validate_phase_b_runtime_target(
+    contract: Mapping[str, Any], *, checkpoint_sha256: str,
+    training_contract_sha256: str | None, exam_bank_sha256: str,
+    schedule_file_sha256: str, schedule_sha256: str,
+    question_id_order_sha256: str, schedule_k: int,
+    per_clip_quota: int, attempts_per_side: int,
+    schedule_seed: int, noise_scale: float,
+    fresh_lineage: bool, evaluation_contract_exact: bool,
+) -> None:
+    """Refuse a runtime paper that differs from the target frozen in the Phase-B contract."""
+
+    target = contract.get("target")
+    if not isinstance(target, Mapping):
+        raise IsaacBankExamError("Phase-B contract target is missing")
+    actual = {
+        "checkpoint_sha256": checkpoint_sha256,
+        "training_contract_sha256": training_contract_sha256,
+        "exam_bank_sha256": exam_bank_sha256,
+        "schedule_file_sha256": schedule_file_sha256,
+        "schedule_sha256": schedule_sha256,
+        "question_id_order_sha256": question_id_order_sha256,
+        "schedule_k": int(schedule_k),
+        "per_clip_quota": int(per_clip_quota),
+        "attempts_per_side": int(attempts_per_side),
+        "schedule_seed": int(schedule_seed),
+        "noise_scale": float(noise_scale),
+        "fresh_lineage": bool(fresh_lineage),
+        "evaluation_contract_exact": bool(evaluation_contract_exact),
+    }
+    mismatches = {
+        key: (actual[key], target.get(key))
+        for key in actual
+        if actual[key] != target.get(key)
+    }
+    if mismatches:
+        raise IsaacBankExamError(f"Phase-B runtime target differs from frozen paper: {mismatches}")
 
 
 def finite_or_none(value: Any) -> Any:
@@ -542,6 +819,52 @@ def numeric_ready_state_document(
     return document
 
 
+def _validated_physical_truth(value: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise IsaacBankExamError("physical_truth must be an explicit capability mapping")
+    physical = dict(value)
+    if not isinstance(physical.get("available"), bool) or not isinstance(
+        physical.get("capability"), str
+    ):
+        raise IsaacBankExamError("physical_truth must declare boolean available and capability")
+    if physical["available"]:
+        required = ("contacted", "net_clear", "landed_ok", "returned", "served", "exact_seen")
+        if physical["capability"] != PHASE_B_FULL_CAPABILITY or any(
+            not isinstance(physical.get(key), bool) for key in required
+        ):
+            raise IsaacBankExamError("available physical truth lacks full paddle/contact outcome")
+        token = physical.get("attempt_token")
+        if isinstance(token, bool) or not isinstance(token, int) or token < 0:
+            raise IsaacBankExamError("available physical truth requires a non-negative attempt_token")
+        if physical["served"] is not True or physical["exact_seen"] is not True:
+            raise IsaacBankExamError("available physical truth requires served=true and exact_seen=true")
+        if physical.get("contact_authority") != (
+            "code_driven_blade_disc_and_venue_paddle_impulse"
+        ) or physical.get("post_contact_rollout") != (
+            "physx_gravity_plus_deterministic_venue_aero_and_code_table_bounce"
+        ):
+            raise IsaacBankExamError("available physical truth lacks frozen Phase-B provenance")
+        if physical["net_clear"] and not physical["contacted"]:
+            raise IsaacBankExamError("physical net_clear implies contacted")
+        if physical["landed_ok"] and not physical["contacted"]:
+            raise IsaacBankExamError("physical landed_ok implies contacted")
+        if physical["returned"] != (
+            physical["contacted"] and physical["net_clear"] and physical["landed_ok"]
+        ):
+            raise IsaacBankExamError("physical returned must equal contacted & net_clear & landed_ok")
+        landing = physical.get("landing_xy_env_m")
+        if physical["contacted"]:
+            array = np.asarray(landing, dtype=np.float64)
+            if array.shape != (2,) or not np.isfinite(array).all():
+                raise IsaacBankExamError("contacted physical truth requires finite landing_xy_env_m")
+        elif landing is not None:
+            raise IsaacBankExamError("no-contact physical truth must set landing_xy_env_m=null")
+    else:
+        if not isinstance(physical.get("reason"), str) or not physical["reason"]:
+            raise IsaacBankExamError("unavailable physical truth requires a reason")
+    return physical
+
+
 def strike_state_instrumentation_document(
     *,
     observation_phase: str,
@@ -568,22 +891,7 @@ def strike_state_instrumentation_document(
 
     if observation_phase not in ("exact_strike", "termination_before_exact"):
         raise IsaacBankExamError(f"unsupported instrumentation phase {observation_phase!r}")
-    if not isinstance(physical_truth, Mapping):
-        raise IsaacBankExamError("physical_truth must be an explicit capability mapping")
-    physical = dict(physical_truth)
-    if not isinstance(physical.get("available"), bool) or not isinstance(
-        physical.get("capability"), str
-    ):
-        raise IsaacBankExamError("physical_truth must declare boolean available and capability")
-    if physical["available"]:
-        required = ("contacted", "net_clear", "landed_ok", "returned")
-        if physical["capability"] != "physical_paddle_contact_and_post_contact_flight_v1" or any(
-            not isinstance(physical.get(key), bool) for key in required
-        ):
-            raise IsaacBankExamError("available physical truth lacks full paddle/contact outcome")
-    else:
-        if not isinstance(physical.get("reason"), str) or not physical["reason"]:
-            raise IsaacBankExamError("unavailable physical truth requires a reason")
+    physical = _validated_physical_truth(physical_truth)
 
     root = _numeric_array_document(base_root_state_env, field="strike.base_root_state", expected_size=13)
     document = {
@@ -653,6 +961,24 @@ def strike_state_instrumentation_document(
         },
         "physical_truth": physical,
     }
+    document["sha256"] = canonical_sha256(document)
+    return document
+
+
+def replace_instrumentation_physical_truth(
+    instrumentation: Mapping[str, Any], physical_truth: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Replace only the held Phase-B outcome and rebind the question-state content hash."""
+
+    if not isinstance(instrumentation, Mapping):
+        raise IsaacBankExamError("instrumentation must be an object")
+    document = copy.deepcopy(dict(instrumentation))
+    if document.get("schema") != CROSS_ENGINE_INSTRUMENTATION_SCHEMA or document.get(
+        "kind"
+    ) != "isaac_question_state":
+        raise IsaacBankExamError("physical truth can replace only an Isaac question-state document")
+    document["physical_truth"] = _validated_physical_truth(physical_truth)
+    document.pop("sha256", None)
     document["sha256"] = canonical_sha256(document)
     return document
 

@@ -147,13 +147,14 @@ def attach_shadow_ball_scene(env_cfg, *, shadow_table: bool) -> None:
 
 
 ##
-# PHYSICAL ball + table scene attachment — Phase A truth instrument (flag-gated, METRICS-ONLY;
-# physical_ball.py). Distinct from the shadow-ball entities so both instruments can coexist.
+# PHYSICAL ball + table scene attachment — Phase A/B truth instrument (flag-gated,
+# METRICS-ONLY; physical_ball.py). Distinct from the shadow-ball entities so both instruments
+# can coexist.
 ##
 
 
 def attach_physical_ball_scene(env_cfg) -> None:
-    """Attach the physical-ball scene entities for ``physical_ball=True`` (Phase A).
+    """Attach the physical-ball scene entities for ``physical_ball=True`` (Phase A/B).
 
     Adds to ``env_cfg.scene`` (per-env cloned assets via the ``{ENV_REGEX_NS}`` regex path, the
     table_tennis scene-builder pattern):
@@ -164,12 +165,11 @@ def attach_physical_ball_scene(env_cfg) -> None:
       assumption; the per-substep aero wrench supplies drag+Magnus — PhysX integrates gravity
       only; validated by scripts/isaac_ball_inloop_check.py, 17 mm systematic vs venue RK4).
       COLLIDER DISABLED + material restitution 0 (neutralized): PhysX never resolves the ball's
-      contacts — the fitted CODE-DRIVEN table bounce is the single bounce authority, and the ball
-      passes THROUGH the robot (one switch = the Phase A collision filter; the in-engine fitted
-      racket impulse is PHASE B). NOTE: scene-level PhysX CCD (the only CCD knob in this Isaac
-      Lab version, per table_tennis_env_cfg) is deliberately NOT enabled here — with the ball
-      contactless it protects nothing and would touch the robot's solver path; Phase B enables it
-      together with the collider.
+      contacts — the fitted CODE-DRIVEN table bounce is the single bounce authority. Phase A
+      passes through the robot; Phase B adds its own blade-disc scan and fitted venue impulse
+      while keeping the collider disabled, so PhysX cannot double-hit the ball. Scene-level CCD
+      remains off because every ball collision pair is filtered and the sign-crossing scan owns
+      anti-tunneling.
     * ``pb_table`` / ``pb_table_visual`` — the table_tennis static table-top collider (invisible
       cuboid) + visual USD mesh at the TRACKING task's virtual-table pose. FRAME RECONCILIATION:
       the table_tennis/HOPE frame has the near edge at x=0, y in [-TABLE_WIDTH, 0], surface z=0;
@@ -220,9 +220,10 @@ def attach_physical_ball_scene(env_cfg) -> None:
                 enable_gyroscopic_forces=False,
             ),
             mass_props=sim_utils.MassPropertiesCfg(mass=ball_m),
-            # Phase A collision filter: collider OFF -> no ball<->robot and no ball<->table PhysX
-            # contact (the fitted code-driven bounce owns the table). Restitution 0 documents the
-            # neutralization for Phase B, when the collider turns on for the racket impulse.
+            # Phase A/B collision filter: collider OFF -> no ball<->robot and no ball<->table
+            # PhysX contact. The fitted code-driven table bounce owns the table; Phase B keeps
+            # this filter and adds its own blade-disc scan/venue impulse. Restitution 0 is a
+            # belt-and-suspenders neutralization if a future asset accidentally gains a pair.
             collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=False),
             physics_material=tt_cfg._surface_material(0.0, mats.ball_static_friction, mats.ball_dynamic_friction),
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.95, 0.95, 0.95), roughness=0.4),

@@ -373,7 +373,12 @@ def _make_mock_world(n):
         num_envs=n,
         metrics={},
         cfg=types.SimpleNamespace(
-            vb_table_near_x=0.5, vb_table_surface_z=0.76, exact_success_decay=1.0
+            vb_table_near_x=0.5,
+            vb_table_surface_z=0.76,
+            exact_success_decay=1.0,
+            question_bank="",
+            vb_target_x=2.555,
+            vb_target_y=0.0,
         ),
         time_to_strike=torch.zeros(n),
         racket_target_pos_w=torch.zeros(n, 3),

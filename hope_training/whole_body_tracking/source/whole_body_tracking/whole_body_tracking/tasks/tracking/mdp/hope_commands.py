@@ -798,6 +798,16 @@ class RacketTargetCommand(CommandTerm):
         # from scripts/isaac_ball_inloop_check.py). Default OFF = byte-identical (no driver, no
         # scene entity, no physics callback, no metrics keys).
         self._shadow = None
+        # Mid-swing target refinement redraws the question without notifying a ball already in
+        # flight.  Combining the two would make the truth instrument measure a target jump rather
+        # than engine delivery, so fail before constructing either driver.
+        if float(getattr(cfg, "midswing_resample_prob", 0.0)) > 0.0 and (
+            cfg.shadow_ball or cfg.physical_ball
+        ):
+            raise ValueError(
+                "RacketTargetCommandCfg.midswing_resample_prob > 0 cannot be combined with "
+                "shadow_ball/physical_ball: the served ball would realize the old question."
+            )
         if cfg.shadow_ball:
             # The shadow ball mirrors the virtual-ball question stream (per-swing incoming
             # velocity/spin + the capture gate live in the vb machinery) — without it there is
@@ -822,6 +832,14 @@ class RacketTargetCommand(CommandTerm):
         # Default OFF = byte-identical (no manager, no scene entity, no physics callback, no metrics
         # keys, no RNG consumption — the serve is deterministic from the question).
         self._physical = None
+        if not cfg.physical_ball and (
+            getattr(cfg, "physical_ball_impulse", False)
+            or int(getattr(cfg, "physical_ball_substep", 1)) != 1
+        ):
+            raise ValueError(
+                "RacketTargetCommandCfg.physical_ball_impulse / physical_ball_substep require "
+                "physical_ball=True; Phase B rides on the truth instrument."
+            )
         if cfg.physical_ball:
             # The physical ball realizes the virtual-ball question stream (per-swing incoming
             # velocity/spin live in the vb machinery) — without it there is nothing to serve.
@@ -1955,7 +1973,16 @@ class RacketTargetCommand(CommandTerm):
         if self._physical is not None:
             self._physical.on_resample(env_ids)
 
-    def _compute_racket_state(self):
+    def _racket_fk(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Pure current articulation FK.
+
+        Returns ``(position, quaternion, link-point linear velocity, raw +Y normal, signed
+        striking-face normal)`` without rebinding any reward/observation-visible command buffer.
+        The Phase-B physics callback consumes these locals so enabling a metrics-only ball cannot
+        leak substep-fresh racket state into the policy or reward stream.
+        """
         data = self.robot.data
         # Isaac Lab 2.1's legacy ``body_*`` state deliberately mixes frames:
         # ``body_pos_w`` / ``body_quat_w`` are LINK/actor-frame quantities, but
@@ -1970,15 +1997,15 @@ class RacketTargetCommand(CommandTerm):
         # properties (formal runtime verification covers that contract).
         if self._racket_mode == "body":
             idx = self._racket_body_index
-            self.racket_pos_w = data.body_pos_w[:, idx]
-            self.racket_quat_w = data.body_quat_w[:, idx]
+            pos = data.body_pos_w[:, idx]
+            quat = data.body_quat_w[:, idx]
             if not hasattr(data, "body_link_lin_vel_w"):
                 raise RuntimeError(
                     "RacketTargetCommand requires Isaac Lab body_link_lin_vel_w: body_pos_w is a "
                     "link-origin position but body_lin_vel_w is a COM-point velocity. Falling back "
                     "would silently corrupt racket speed. Use the pinned Isaac Lab 2.1 runtime."
                 )
-            self.racket_lin_vel_w = data.body_link_lin_vel_w[:, idx]
+            lin_vel = data.body_link_lin_vel_w[:, idx]
         else:
             widx = self._wrist_body_index
             wpos = data.body_pos_w[:, widx]
@@ -1991,9 +2018,9 @@ class RacketTargetCommand(CommandTerm):
             wlin = data.body_link_lin_vel_w[:, widx]
             wang = data.body_link_ang_vel_w[:, widx]
             offset_w = quat_apply(wquat, self._mount_offset)
-            self.racket_pos_w = wpos + offset_w
-            self.racket_lin_vel_w = wlin + torch.cross(wang, offset_w, dim=-1)
-            self.racket_quat_w = quat_mul(wquat, self._mount_quat)
+            pos = wpos + offset_w
+            lin_vel = wlin + torch.cross(wang, offset_w, dim=-1)
+            quat = quat_mul(wquat, self._mount_quat)
         # Face normal = chosen local axis of the racket frame, mapped to world, times the striking-FACE
         # sign. 人话(franco 2026-07-09 拍板"哪面拍子超前就是哪面"):统一正反手策略里两个挥拍用的是
         # 拍子相反的两面(正手=红面/+Y,反手=黑面/−Y),所以开了 mount_normal_sign_per_clip 时符号按
@@ -2002,7 +2029,7 @@ class RacketTargetCommand(CommandTerm):
         # 指标(racket_normal_error_deg,_update_metrics)都读 self.racket_normal_w,一处修两处好。
         # Asset audit 2026-07-10 confirms local +Y is the red outer-face normal;
         # see docs/interfaces/racket_contact_geometry.md.
-        axis_w = matrix_from_quat(self.racket_quat_w)[:, :, self.cfg.mount_normal_axis]
+        axis_w = matrix_from_quat(quat)[:, :, self.cfg.mount_normal_axis]
         if self.cfg.mount_normal_sign_per_clip:
             motion = self._motion()
             if self._mount_sign_per_clip_t is None:
@@ -2021,8 +2048,18 @@ class RacketTargetCommand(CommandTerm):
         # one: the face_command reward channel pairs against +Y-frame question-bank targets and must
         # read THIS buffer (hope_rewards._face_pair; 2026-07-09 单翻病定案). Sign table empty =>
         # racket_normal_w == raw * 1.0, bitwise identical.
-        self.racket_normal_raw_w = axis_w
-        self.racket_normal_w = axis_w * sign
+        return pos, quat, lin_vel, axis_w, axis_w * sign
+
+    def _compute_racket_state(self):
+        # This remains the only writer of the command's racket-state buffers. Phase-B substep
+        # contact scans call _racket_fk() and keep its results local.
+        (
+            self.racket_pos_w,
+            self.racket_quat_w,
+            self.racket_lin_vel_w,
+            self.racket_normal_raw_w,
+            self.racket_normal_w,
+        ) = self._racket_fk()
 
     def _compute_strike_timing(self):
         """Refresh time_to_strike / pre_strike / strike_window from the CURRENT motion phase.
@@ -3666,8 +3703,9 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # swing's question incoming ball is realized physically — reverse-integrated venue-model
     # launch (arrives at the question contact point with the question incoming velocity exactly
     # at the strike frame), PhysX flight + per-substep venue aero wrench, CODE-DRIVEN fitted
-    # table bounce (venue contact.table params), robot pass-through (ball collider off — the
-    # in-engine fitted racket impulse is PHASE B, out of scope). Metrics: pb_serve_err_m /
+    # table bounce (venue contact.table params), robot pass-through unless the evaluator-only,
+    # content-addressed Phase-B rider sets ``physical_ball_impulse`` dynamically. Metrics:
+    # pb_serve_err_m /
     # pb_serve_vel_err at the exact-strike frame + serve/bounce/landing counts. PURE MEASUREMENT:
     # never read by rewards/observations/bank-target logic; consumes NO RNG; requires
     # virtual_ball=True (loud error otherwise). Full honesty notes: physical_ball.py docstring.
