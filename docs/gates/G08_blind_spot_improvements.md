@@ -268,8 +268,12 @@ Done:
 Not done:
 
 - The new P2.1/P2.4 mini-spec is not simulator-accepted yet. All ten videos
-  passed structural GVHMR reconstruction, but remain pre-GMR candidates with
-  no visual, robot-clearance, contact or returnability acceptance.
+  passed structural GVHMR reconstruction and CPU GMR retargeting, but the GMR
+  outputs deliberately retain per-video body betas and remain diagnostic.
+  The first canonical-MuJoCo replay found no sampled robot self-contact but
+  found `7.7--8.4 cm` floor penetration across every frame, so ground/root
+  calibration and all downstream robot-clearance, dynamics, contact and
+  returnability gates are still open.
 - The audit-derived items 1-4 are not yet scheduled; item 2 must land before/with the mocap
   bridge.
 
@@ -347,6 +351,11 @@ content audit -> GVHMR/GMR/schema-2 -> L0/self-collision/table-net clearance ->
 returnability phase scan -> TOPP and repeat gates -> dynamic clip catalog ->
 paired training -> T0/T1 recovery. The memory-gated Pod1 GVHMR queue completed
 10/10 structural reconstructions with full bindings tracked in
-`configs/motion_video_gvhmr_results_20260711.json`, but no reconstructed A3
-clip, four-action actor, recovery policy or hardware
+`configs/motion_video_gvhmr_results_20260711.json`. A separate CPU-only,
+bundle-bound GMR queue then completed 10/10 finite 30 Hz, 31-DoF diagnostic
+retargets; `configs/motion_video_gmr_results_20260711.json` records all
+input/output/log/audit hashes and keeps `formal_eligible=false`. The pilot's
+sampled zero-self-contact result is not promotion evidence because the root is
+still about 8 cm below the floor and table/net geometry was absent. No
+grounded schema-2 clip, four-action actor, recovery policy or hardware
 candidate exists yet. The mini-spec does not authorize real-robot testing.

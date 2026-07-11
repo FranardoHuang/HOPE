@@ -1,7 +1,7 @@
 # 新动作库、TOPP 与任意时刻下一拍
 
 日期：2026-07-11
-状态：设计已预注册；原视频 intake 已验证；Pod1 GVHMR 结构重建 10/10 完成；机器人动作重定向、仿真消融和门禁尚未完成
+状态：设计已预注册；原视频 intake 已验证；Pod1 GVHMR 结构重建与 diagnostic GMR 均 10/10 完成；ground/schema-2、正式体型、仿真消融和安全门禁尚未完成
 范围：仅离线处理与仿真。本文不授权任何真机动作。
 
 ## 结论先行
@@ -53,6 +53,23 @@ Python 环境/input/output SHA。输出还必须通过预期帧数、SMPL 参数
 `configs/motion_video_gvhmr_results_20260711.json`。`19000 MiB` 是开跑前采样门而不是 GPU 资源预留，
 所以 worker/judge 仍需持续监控，不把它写成绝对不会 OOM 的保证。
 
+随后使用 repo-owned `scripts/run_motion_video_gmr_queue.py` 在 CPU 串行完成
+10/10 GMR。队列从 10:33:20Z 到 10:34:12Z 运行，要求 GMR worktree clean
+HEAD `aabea2eee4be4bc16d4be17dac5ffa85e5a31539`，并验证包含该 commit 的
+source bundle；不允许 `--no-warmup` 或跳过速度约束。十条输出均为预期帧数、30 Hz、31 DoF、
+全 finite，frame-0 warm-up 为 17--28 轮且 final `max|dq| < 1e-4`。完整
+bindings 在 `configs/motion_video_gmr_results_20260711.json`。这一批沿用逐视频 GVHMR
+betas，故合同固定为 `diagnostic_video_betas`、`formal_eligible=false`；它证明管线和结构，
+不代替 canonical-betas 正式资产。
+
+对 Franco 正手挡做的更深只读 pilot 表明：GMR 与 canonical MJCF 的 31 关节顺序相同，
+关节位置均在限位内，30 Hz 差分最大速度 `8.45185 rad/s`（右肘）低于对应 URDF
+`15.70796 rad/s`，641 个离散/子步采样姿态中 robot self-contact 为 0。但末段仍有
+`0.23452 rad/s` 关节速度，不是严格静止 ready；MJCF 又不含 table/net，零自碰只是一张
+有限采样诊断。硬阻塞是 65/65 帧都有地面穿透，最低 collision geom 约
+`-0.0773..-0.0841 m`。必须先用单文件、内容寻址的固定 root-z 校准落地，再重跑关节/
+速度/加速度、连续碰撞、动力学和桌网门，禁止直接把当前 PKL 转成训练资产。
+
 | 组 | 语义动作 | 文件 | 时长 / 帧数 | 当前角色 |
 | --- | --- | --- | --- | --- |
 | Franco | 正手挡 | `forehand_dang.mp4` | 2.167 s / 65 | 四动作候选 |
@@ -81,7 +98,10 @@ Python 环境/input/output SHA。输出还必须通过预期帧数、SMPL 参数
 每个候选必须单独走完整链，不能先拼动作库再找问题：
 
 1. 使用同一 pinned GVHMR/GMR 和 canonical body betas，生成 SMPL-X 与 A3 retarget。
-2. 生成 50 Hz、31 关节、runtime body order、kinematics schema-2 NPZ，并重落地到 HOPE +X。
+   当前 per-video-betas GMR 只作管线诊断，不能冒充该正式步骤。
+2. 对单条 GMR 轨迹做内容寻址的 root/ground 校准并保存 before/after clearance 报告；
+   禁止目录扫描、原地覆盖或用共享最小值污染别的动作。随后生成 50 Hz、31 关节、runtime
+   body order、kinematics schema-2 NPZ，并重落地到 HOPE +X。
 3. 跑 `audit_motion_npz.py`：finite、关节位置/速度、加速度、首帧冷启动、foot skate、触球窗。
 4. 跑 vendor MJCF `audit_self_collision.py`：要求零自碰撞；另外记录球拍/手柄到头颈、胸腹、
    对侧手臂的最小余隙，不能只看碰撞布尔值。
@@ -306,11 +326,14 @@ heading 若单独开，必须同时给 yawed/post-swing 起始状态覆盖；仅
 1. 已完成：10 段视频内容寻址 intake、本机与 Pod1 staging 双重验证。
 2. 已完成：自然释放 GPU 槽后，按预定顺序串行跑完十段 GVHMR；
    全部通过帧数/shape/finite 结构审计。视觉质量和安全仍未被这个 pass 代替。
-3. GMR/A3 转换后先做 L0/L1/逐帧回球率，淘汰空间路径，不启动 RL。
-4. 对幸存路径做 native/TOPP 双资产和重复门禁。
-5. 泛化动态 clip catalog 与共同问题轴；先在 CPU/Isaac smoke 证明四动作身份、side sign、题目绑定。
-6. 先跑 family/候选/时间律小消融，再跑 2-vs-4；不把所有轴一次打包。
-7. 最后才进入 event-driven recovery R0–R4，并以 immutable Isaac/MuJoCo 连续门禁裁决。
+3. 已完成：CPU-only diagnostic GMR 10/10；结构和 warm-up 均通过，但 body betas 非正式，
+   且 pilot 暴露约 8 cm 穿地，未授权 schema-2 或 RL。
+4. 先完成单文件 ground/root 校准、canonical-betas 重跑和 schema-2，再做 L0/L1/逐帧
+   回球率，淘汰空间路径，不启动 RL。
+5. 对幸存路径做 native/TOPP 双资产和重复门禁。
+6. 泛化动态 clip catalog 与共同问题轴；先在 CPU/Isaac smoke 证明四动作身份、side sign、题目绑定。
+7. 先跑 family/候选/时间律小消融，再跑 2-vs-4；不把所有轴一次打包。
+8. 最后才进入 event-driven recovery R0–R4，并以 immutable Isaac/MuJoCo 连续门禁裁决。
 
 尚未完成的关键事实应始终写明：空挥素材没有真实接触真值；四动作 selector 未实现；任意时刻下一拍
 未通过；任何新动作均未获准真机执行。

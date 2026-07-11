@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "audit_id": "phase1-M3-S1-terminal-20998-20260711",
+  "audited_utc": "2026-07-11T10:29:27.673752Z",
+  "read_only": true,
+  "pod": {
+    "host": "162.43.172.171",
+    "ssh_port": 18333
+  },
+  "training_checkout": {
+    "path": "/workspace/codexschema/nohope",
+    "git_head": "6d93bcb16c422a2f42748c2dc99432559653480b",
+    "git_status_porcelain_lines": 0
+  },
+  "run": {
+    "name": "phase1_M3_S1_pairing",
+    "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-51-29_phase1_M3_S1_pairing",
+    "launcher_pid": 1311109,
+    "launcher_pgid": 1311109,
+    "process_alive_at_audit": false,
+    "exit_code_recorded": false,
+    "launch_sidecar": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/runs/phase1_M3_S1_pairing/run.log.launch",
+      "bytes": 3539,
+      "sha256": "5a8809d73916ae00e210013a5be7c287882a2b93153679bd6886a6ae2aa5b79d",
+      "started_utc": "2026-07-11T00:51:22Z",
+      "ready_utc": "2026-07-11T00:52:07Z"
+    },
+    "log": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/runs/phase1_M3_S1_pairing/run.log",
+      "bytes": 50146735,
+      "sha256": "5c1763b503f052f811d22287180e6cf2f491689eaa51e083266ccce79997bf7c",
+      "mtime_utc": "2026-07-11T09:27:15.608476645Z",
+      "learning_iteration_records": 4000,
+      "first_iteration": 16999,
+      "last_iteration": 20998,
+      "terminal_iteration_occurrences": 1,
+      "log_iteration_denominator": 20999
+    },
+    "checkpoint_20999_exists": false,
+    "bad_signature_counts": {
+      "traceback": 0,
+      "nan": 0,
+      "inf": 0,
+      "cuda_oom_or_out_of_memory": 0,
+      "malloc_failure": 0,
+      "segfault_abort_or_core": 0,
+      "killed": 0
+    },
+    "completion_evidence": "terminal checkpoint plus a contiguous 4000-record 16999..20998 iteration range, launcher absent, and zero bad signatures; the launcher did not preserve the OS exit code"
+  },
+  "checkpoint": {
+    "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-51-29_phase1_M3_S1_pairing/model_20998.pt",
+    "bytes": 7074119,
+    "sha256": "a924048810aebda864bbf1f7b156ef4c4aa2c60ec4d65da6ae8977833deaa21e",
+    "iter_field": 20998,
+    "max_checkpoint_iter": 20998,
+    "torch_load": {
+      "map_location": "cpu",
+      "weights_only": false,
+      "tensor_count": 76,
+      "tensor_elements": 1762717,
+      "floating_tensor_count": 74,
+      "floating_elements": 1762715,
+      "nonfinite_floating_elements": 0,
+      "dtype_counts": {
+        "torch.float32": 74,
+        "torch.int64": 2
+      }
+    }
+  },
+  "training_contract": {
+    "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-51-29_phase1_M3_S1_pairing/params/training_contract.json",
+    "bytes": 15598,
+    "sha256": "d3ff715e3f7ed38ceadbdead4d41726dd72ef624523cbd86b33da703e929d9ce",
+    "checkpoint_embedded_sha256": "d3ff715e3f7ed38ceadbdead4d41726dd72ef624523cbd86b33da703e929d9ce",
+    "schema_version": 3,
+    "structure_validator": "pass",
+    "lineage_exact": false,
+    "motion_kinematics_exact": false,
+    "question_bank_exact": true,
+    "question_bank_sha256": "96329c79f13e659c035bf65bafedf84123d23a3219b02ac78ae654aed930cf60",
+    "question_bank_source_family_sha256": "3344b610e230bc55a0eca5647cfb55f338a7635bd4bb4025a579fc347b05f3d7",
+    "face_command_pairing": "shared_plus_y",
+    "plant": {
+      "role": "historical_physx_nonzero_friction",
+      "semantic_kind": "load_dependent_spatial_force_coefficient",
+      "units": "dimensionless",
+      "coefficient_range": [0.10000000149, 2.42759990692]
+    }
+  },
+  "causal_parent": {
+    "path": "/workspace/codexschema/phase1_fresh_20260711/parents/M3c/model_16999.pt",
+    "bytes": 7073927,
+    "sha256": "46f0050589f3343d96f2e5c261b92224079b379e4da473be342b1bd0f0cf7ff1",
+    "iter_field": 16999,
+    "checkpoint_infos": null,
+    "adjacent_training_contract_exists": false,
+    "launch_checkpoint_allow_missing_contract": true,
+    "motion_sha256": {
+      "forehand": "1c53405f19733a34db4a2f10bd61b4768002afce0face83c492e12171bc3ddc9",
+      "backhand": "875c41db05f964e57221617b5b1ade6d64d161511e4107e3dc5fab726c52c15b"
+    }
+  },
+  "evaluation": {
+    "evaluation_contract_exact": false,
+    "terminal_checkpoint_judged": false,
+    "pending_on": "paired M3-old model_20998.pt before the immutable terminal q10 may start",
+    "screen_only": true,
+    "stop_or_promote_allowed": false
+  },
+  "verdict": "pass_terminal_checkpoint_integrity_causal_inexact"
+}

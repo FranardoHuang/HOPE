@@ -556,6 +556,29 @@ The queue ran outside the frozen Phase-1 checkout. Its queue-state SHA and all
 ten result/audit hashes are tracked in
 `configs/motion_video_gvhmr_results_20260711.json`.
 
+The next CPU-only stage is also complete as a **diagnostic**, not as a motion
+promotion. A repo-owned serial GMR queue required a clean source checkout at
+`aabea2eee4be4bc16d4be17dac5ffa85e5a31539` plus a verified recovery bundle,
+kept frame-zero warm-up enabled, and retargeted all 10/10 items to finite
+30 Hz, 31-DoF A3 pickles in 52 s. Every item converged below
+`max|dq| < 1e-4`; the exact source/output/log/audit/tool/environment bindings
+are in `configs/motion_video_gmr_results_20260711.json`. These outputs retain
+per-video GVHMR body betas and therefore carry
+`body_shape_contract=diagnostic_video_betas` and
+`formal_eligible=false` by construction.
+
+A deeper read-only replay of the Franco forehand-block pilot found useful and
+blocking evidence at once. Joint order matches the canonical 31-joint MJCF,
+all joint samples are inside limits, 30 Hz finite-difference speed stays below
+the URDF limits, and 641 sampled/interpolated canonical-MuJoCo poses reported
+zero robot self-contact. That finite-substep test is not a continuous
+collision certificate and the MJCF lacks table/net geometry. More
+importantly, all 65 frames penetrate the floor, with the lowest collision geom
+roughly `7.7--8.4 cm` below zero. The current root trajectory is therefore
+blocked on a content-addressed single-file ground/root calibration followed by
+repeat collision, dynamics and table/net clearance gates; it is not eligible
+for schema-2 promotion or RL yet.
+
 This is not yet a training result. The videos contain no ball/table/contact
 truth, their mirror/depth interpretation is unverified, and the three Franco
 backhand-loop recordings are candidates for one semantic action rather than
@@ -593,6 +616,21 @@ worker is PGID `194276`. Scale-out causal workers remain `1380340/192815`.
 The scale-out fresh workers were precisely replaced before their first 2k
 checkpoint to carry SP's explicit inexact evaluator escape; current PGIDs are
 `1397266/195085` (old childless `1366308/189569`).
+
+Pod1 M3-S1 has now reached the same terminal integrity point. Its accepted
+`model_20998.pt` has SHA-256
+`a924048810aebda864bbf1f7b156ef4c4aa2c60ec4d65da6ae8977833deaa21e`,
+contains `iter=20998`, and has zero non-finite values across 1,762,715 floating
+elements. The embedded schema-3 contract SHA matches the adjacent contract
+(`d3ff715e...29d9ce`), and the run log contains the contiguous 4,000 records
+`16999..20998` with no NaN/Inf/traceback/OOM/malloc/killed signature. The
+launcher did not persist an OS exit code, so the terminal checkpoint,
+contiguous log, absent process and zero error signatures are the recorded
+completion evidence. Its legacy-motion parent keeps this result causal and
+inexact. The immutable terminal q10 remains deliberately paired behind the
+still-running M3-old `20998`, so integrity is passed but evaluation is not yet
+claimed; the machine-readable audit is
+`configs/phase1_M3_S1_terminal_audit_20260711.json`.
 
 `SZ`'s target label is now explicitly scoped: it is the only current fresh
 cell whose zero-friction plant can be replayed with the same schema-v3

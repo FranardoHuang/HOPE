@@ -59,6 +59,15 @@ artifact rule. A derived action is not deployable merely because its source
 video is present: motion, self-collision, table/net clearance and simulator
 gates must still pass, and no raw video grants permission for a real-robot run.
 
+The diagnostic GMR run also depends on five local source commits not present
+in the observed public upstream. Its 282,953,810-byte recovery bundle remains
+under the ignored private processing root; git tracks only the verified commit,
+bundle byte count/SHA and small per-result bindings. Do not add the bundle or
+generated GMR pickles to normal git. Reproduction must `git bundle verify`,
+confirm that the bundle advertises the recorded commit, and require a clean
+checkout before processing; the exact restore path is in
+`docs/operations/setup_local_sync.md`.
+
 ## Agibot Deploy Assets
 
 The tracked deploy source is under:

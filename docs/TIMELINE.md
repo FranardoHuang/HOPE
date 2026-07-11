@@ -1359,3 +1359,18 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    两 Pod 都在 2k 存档出现前精确替换无 child 的 scale-out-fresh worker：
    `1366308 -> 1397266` / `189569 -> 195085`。这是 judge 合同/队列修正，
    不改 24 条训练配方。
+21. 【franco/Codex】**十段新视频的 diagnostic GMR 也 10/10 跑完，但 ground 门当场拦住晋级**——
+   repo-owned CPU 串行队列要求 clean GMR `aabea2e` 和可验证 source bundle，保留 frame-0
+   warm-up，于 10:33:20Z--10:34:12Z 产出十条预期帧数、30 Hz、31-DoF、全 finite A3 PKL；
+   warm-up 均在 17--28 轮达到 `max|dq|<1e-4`。每条 input/output/log/audit 及 bundle/tool/env
+   SHA 已进 `motion_video_gmr_results_20260711.json`，并因沿用逐视频 betas 明文标为
+   `diagnostic_video_betas`、formal-ineligible。Franco 正手挡的 canonical-MuJoCo 深审在 641
+   个采样姿态未见 robot self-contact，关节范围/速度也过初筛；但 65/65 帧都穿地，最深约
+   7.7--8.4 cm，末段也非严格静止 ready。故下一步是单文件 ground/root 校准、canonical-betas
+   重跑及连续碰撞/动力学/桌网门，绝不直接占 RL 槽。
+22. 【franco/Codex】**Pod1 M3-S1 终档完整性通过，判分继续等配对而不是抢跑**——真实终档
+   `model_20998.pt` SHA=`a9240488...aa21e`，内部 `iter=20998`，1,762,715 个浮点元素
+   non-finite=0；embedded/adjacent schema-3 contract SHA 相同，日志 4,000 条连续覆盖
+   `16999..20998` 且 NaN/Inf/Traceback/OOM/malloc/Killed 均为 0。launcher 没留 OS exit code，
+   已在 audit 中明说；legacy parent 令结果保持 causal/inexact。immutable terminal q10 要等
+   M3-old 同到 20998 才一起判，完整哈希在 `phase1_M3_S1_terminal_audit_20260711.json`。

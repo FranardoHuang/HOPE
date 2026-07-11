@@ -17,6 +17,25 @@ Use this file for short project-state updates that future humans and agents need
   `configs/motion_video_gvhmr_results_20260711.json`. This is structural GVHMR
   evidence only: no visual acceptance, A3 clip, training result or hardware
   approval is claimed.
+- Completed a second, CPU-only GMR diagnostic queue for the same ten videos.
+  The repo-owned worker required clean GMR commit `aabea2e` plus a verified
+  282,953,810-byte source bundle, preserved frame-zero warm-up, and produced
+  10/10 finite 30 Hz, 31-DoF pickles in 52 s. Full source/output/log/audit and
+  tool/environment bindings are in
+  `configs/motion_video_gmr_results_20260711.json`; every row is explicitly
+  `diagnostic_video_betas` and formal-ineligible. A deeper Franco-forehand
+  replay passed joint order/range/speed and found zero robot self-contact in
+  641 sampled poses, but all 65 frames penetrate the floor by roughly
+  7.7--8.4 cm. Ground/root calibration, canonical-betas rerun and repeated
+  continuous collision/dynamics/table-net gates now block schema-2 and RL.
+- Audited Pod1 M3-S1 at its real terminal `model_20998.pt`: all 1,762,715
+  floating elements are finite, the embedded/adjacent schema-3 contract SHA
+  matches, and the 4,000 log records are contiguous from 16999 through 20998
+  with zero bad signatures. The launcher did not preserve an OS exit code, so
+  that limitation is explicit. This is terminal-integrity evidence only,
+  remains causal/inexact, and its terminal q10 waits for the paired M3-old
+  `20998`; full hashes are in
+  `configs/phase1_M3_S1_terminal_audit_20260711.json`.
 - Corrected a live terminal-cadence deadlock: causal continuations save their
   final checkpoint at `20998`, while four manifests/workers were waiting for
   impossible `20999`. Pod2 M2-S1 terminal is recursively finite and its
