@@ -513,3 +513,29 @@ its embedded contract SHA matches the adjacent schema-3 sidecar. Pod 1 LZ seed 3
 pre-contract scene-start `malloc` abort; its log/launch-state SHAs are retained, the process exited
 itself, and an unchanged single-arm retry (PGID `1354525`) passed. The failed boot is not a 25th
 experiment. G05 remains `Partial` because periodic curves and terminal verification are incomplete.
+
+The first corrected formal curve is now real training evidence rather than an evaluator preflight.
+At clean q10 on the same immutable paper, fresh `SZ` seed 1 returned
+`0.00 -> 0.50 -> 0.90` at checkpoint `0/1000/2000`, and seed 2 returned
+`0.00 -> 0.50 -> 1.00`. All six jobs completed `rc=0` with exact schema-v3
+evaluation. This proves why checkpoints are tested during training, but the
+10-per-side prefix remains direction-only and cannot authorize stop/promotion.
+The original causal 20000 screens also completed: M3 old/S1 was `0.45/1.00`,
+while M2 old/S1 was `0.50/0.50`; causal results remain inexact diagnostics.
+
+Periodic coverage now extends to all 18 newly launched arms. Deterministically
+generated per-Pod causal/fresh manifests cover 142 additional clean q10 jobs,
+with milestone-major barriers and separate queues so a causal terminal does not
+block a fresh 2000-point screen. Generation and current worker compatibility
+pass locally (`7 passed` including the venue timing and existing worker tests).
+
+A separate audit found that the live pool is continuous only in the slow
+complete-clip sense. The bound motions plus hold produce same-player strike
+intervals around `2.90/3.75/4.60 s` (q10/median/q90), versus a conservative
+venue A-B-A sample at `1.757/1.903/3.356 s`. The next target currently appears
+only at clip wrap, later than the measured opponent-hit event. Therefore these
+24 arms cannot satisfy the arbitrary-time continuous-play acceptance item.
+They remain unchanged; an event-driven `T0/T1` timing pair, longer/opportunity-
+count episode and new hard-contract timing fields are specified in
+`docs/research/phase1_continuous_rally_timing_2026-07-11.md`. G05 remains
+`Partial` pending terminal/paired q50 evidence and that separate continuity lane.

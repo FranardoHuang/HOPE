@@ -151,6 +151,20 @@ testing 的成本花在不确定边界，而不是给显然相同或显然失败
 无法回答问题的配方。独占卡只给已经由 paired checkpoint 曲线晋级的终审候选。CPU BankExam、训练
 内曲线归并和合同审计应尽量与 GPU 训练重叠，但所有 Kit scene-create 仍经过同一启动锁。
 
+## 连续时序是一条独立因果轴
+
+“不传送地播完动作再换题”与“场馆节奏下随时收到下一题”不是同一个能力。2026-07-11 的保守
+A-B-A 场馆审计得到同一球员击球间隔 `q10/median/q90=1.757/1.903/3.356 s`；现役 fresh
+完整 clip-wrap + `hold U[0,2s]` 的理论混合分布约为 `2.90/3.75/4.60 s`。因此当前 24 臂继续只回答
+pairing×plant，不把 episode length、next-task timing 或 guard 改动混进去。
+
+消融加速的正确拆法是另开 `T0/T1` paired timing lane：T0 保持现役 clip-wrap，T1 只增加击球后
+event-driven next-task/carry-state；两臂共享同一 SZ 起点、题表、plant、seed 和预算。每个 checkpoint
+先过单球 q10 防精度遗忘，再过固定五拍连续小卷看第 2–5 拍斜率；任何 stop/promote 仍需要 q50。
+episode 变长、tracking guard 软化、奖励修订或动作重定时若需要，分别作为后续因素，不在 T1 首轮
+一起打开。完整数据口径、T1 事件合同和指标见
+[连续挥拍与任意来球时序审计](phase1_continuous_rally_timing_2026-07-11.md)。
+
 ## 什么叫“加速成功”
 
 不是“24 条都跑到终点”。满足以下四点才算：

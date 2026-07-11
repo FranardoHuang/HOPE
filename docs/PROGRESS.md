@@ -1112,3 +1112,14 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   每个首 checkpoint finite 且 SHA 与相邻 hard contract 一致。Pod1 LZ-seed3 一次 scene-start malloc
   自退，失败 log/state SHA=`d66a8043...951d/0f004c18...b768`；原配方单臂 retry PGID `1354525`
   成功，失败目录不计第 25 条。
+- fresh exact checkpoint 曲线终于通过完整 formal 链：SZ seed1 的 clean q10 在
+  `0/1000/2000` 为 `0.00/0.50/0.90`，seed2 为 `0.00/0.50/1.00`，六卷均 `rc=0`、
+  `evaluation_contract_exact=true`。这证明增长在 terminal 前可见，但 q10 仍禁止止损/晋级。
+  causal 20k 小卷 M3 old/S1=`0.45/1.00`，M2 old/S1=`0.50/0.50`，全部保留 inexact 标签。
+- 新增 scale-out checkpoint bindings、确定性 generator 和四份 per-Pod causal/fresh wait
+  manifest，覆盖 18 个新增臂、142 个 clean q10 里程碑任务；分队列避免 causal terminal 阻塞
+  fresh 早期点。相关 worker/generator/timing 测试 `7 passed`。
+- 对场馆 `strikes.json`（SHA `6ad3c459...52841`）做可复现 A-B-A 时序审计：保守连续样本
+  `n=21` 的同侧击球间隔 q10/median/q90=`1.757/1.903/3.356 s`，而现役完整 clip-wrap+hold
+  理论为 `2.90/3.75/4.60 s`。结论是现役只覆盖慢节奏无传送 carry-state，不覆盖任意时刻下一题；
+  24 臂不改合同，另设计只改变 event timing 的 T0/T1 配对和 30 s/12-opportunity 连续卷。

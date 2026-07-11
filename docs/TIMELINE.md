@@ -1311,3 +1311,10 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `118.199996948...`（差 `3.0517578e-6≈0.4 ULP`）；不再继续放大固定 atol，改为 exact float64
    相同或 canonical metadata 与 MJCF 落到同一 float32 grid，0.49 ULP 过、0.51 ULP/next-grid 拒。
    这是训练实际数值精度的等价，不是放宽 plant 合同。
+14. 【franco/Codex】**第一条 fresh exact 增长曲线跑通，同时确认现役连续时序偏慢**——同一
+   clean q10 卷上，SZ seed1 `0/1k/2k=0.00/0.50/0.90`，seed2=`0.00/0.50/1.00`，六格 formal
+   exact 全 `rc=0`；M3 20k old/S1=`0.45/1.00`、M2=`0.50/0.50`，继续只作 inexact 方向筛。
+   18 个新增臂已有确定生成的四队列 cadence（142 jobs），q10 明文禁止 stop/promote。另用 SHA
+   绑定的场馆 strikes 表抽保守连续 A-B-A `n=21`：同侧间隔中位 `1.903 s`，现役理论中位
+   `3.75 s`，且目标要等 clip 结束才更新。故不把“无传送慢节奏”冒充“随时来下一球”；24 臂冻结
+   不动，下一时序实验拆成 T0 完整 wrap 对 T1 击球后 event-driven carry-state。

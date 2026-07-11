@@ -86,6 +86,18 @@ Verified later on 2026-07-11 against the current Phase-1 candidate implementatio
   union tests. The subsequent source-first/inexact-judge regression expands the union to **154
   passed** in a detached Pod evaluation worktree while the live training checkout remains fixed.
 
+The scale-out cadence generator and venue A-B-A timing audit are dependency-light:
+
+```bash
+python3 -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_analyze_rally_intervals.py \
+  hope_training/whole_body_tracking/tests/test_generate_phase1_scaleout_curve_manifests.py \
+  hope_training/whole_body_tracking/tests/test_phase1_checkpoint_curve_worker.py
+python3 hope_training/whole_body_tracking/scripts/generate_phase1_scaleout_curve_manifests.py --check
+```
+
+Verified locally on 2026-07-11: `7 passed`; deterministic manifest check passed.
+
 Reproduce the 122-test Isaac-dependent group on a prepared RunPod checkout:
 
 ```bash

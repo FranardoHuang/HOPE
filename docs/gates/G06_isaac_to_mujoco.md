@@ -345,3 +345,22 @@ python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_mujoco_eval_p0_contracts.py \
   hope_training/whole_body_tracking/tests/test_training_contract_schema3.py
 ```
+
+The corrected float32-grid plant gate has now produced the first exact fresh
+MuJoCo checkpoint curve. On the same clean q10 paper, `SZ` seed 1 scored
+`0.00/0.50/0.90` and seed 2 `0.00/0.50/1.00` at `model_0/1000/2000`;
+all six reports say `evaluation_contract_exact=true`. At 2000 the side splits
+were FH/BH `0.80/1.00` and `1.00/1.00`. These are successful formal direction
+screens, not q50 acceptance cells. The 20000 causal rows stayed explicitly
+inexact: M3 old/S1 `0.45/1.00`, M2 old/S1 `0.50/0.50`.
+
+The current single-question BankExam also does not certify real continuous
+timing. Live training preserves state across natural clip wraps, but the
+complete-clip schedule is materially slower than the conservative venue A-B-A
+sample and installs the next target after the observed opponent-hit event.
+The future continuity gate must use the same immutable question **and interval**
+schedule in Isaac and MuJoCo, report per-opportunity carry-state failures, and
+retain zero resets/teleports. The reproducible timing audit and required metrics
+are in `docs/research/phase1_continuous_rally_timing_2026-07-11.md`. G06 remains
+`Partial` pending q50, Isaac same-paper companion results, terminal lineage
+verification, and event-driven continuity evaluation.

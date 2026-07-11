@@ -413,6 +413,42 @@ judge SHA and both clean commits; it never scans arbitrary `model_*.pt` files
 or changes a running trainer. Jobs are ordered so paired causal milestones are
 consumed together and future fresh milestones follow every 2000 iterations.
 
+The additional 18 scale-out arms have deterministic manifests generated from
+the actual run-directory bindings rather than hand-copied paths:
+
+```bash
+python3 hope_training/whole_body_tracking/scripts/generate_phase1_scaleout_curve_manifests.py --check
+```
+
+Run two independent wait queues per Pod so a causal terminal checkpoint cannot
+block an already-ready fresh milestone:
+
+```bash
+for queue in causal fresh; do
+  python3 "$EVAL/hope_training/whole_body_tracking/scripts/phase1_checkpoint_curve_worker.py" \
+    --manifest "$EVAL/configs/phase1_checkpoint_curve_scaleout_${queue}_pod1_20260711.json" \
+    --judge-script "$EVAL/hope_training/whole_body_tracking/scripts/judge.sh" \
+    --state-dir "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_${queue}_pod1" \
+    --max-active-cpu 6 --wait-for-checkpoints
+done
+```
+
+Use the matching `pod2` manifests on Pod 2. The four files cover exactly the
+18 newly launched arms and 142 clean q10 jobs: causal seed 2 at
+`18000/19000/20000/20999`, and fresh at `2000/4000/.../16000/16999`.
+They are milestone-major direction screens only. Their metadata explicitly
+sets `screen_only=true` and never authorizes stop/promotion; use a separately
+frozen q50 schedule for decisions. `SZ` is the only formal target, `SP` is an
+exact-replayable non-target plant diagnostic, and causal plus `LZ/LP` remain
+inexact diagnostics.
+
+The current 10-second, no-wrap-teleport task does carry the robot state between
+clips, but its complete-clip timing is slower than the conservative venue
+A-B-A intervals. Do not claim that this pool proves arbitrary-time continuous
+play, and do not change its live recipe. The offline reproduction command,
+timing gap and separate `T0/T1` event-driven design are in
+`docs/research/phase1_continuous_rally_timing_2026-07-11.md`.
+
 Schema 3 has two validation levels. Structural validation is sufficient to
 export a hash-bound diagnostic checkpoint whose motion is explicitly inexact;
 it never promotes the metadata exact flag. A checkpoint whose embedded lineage

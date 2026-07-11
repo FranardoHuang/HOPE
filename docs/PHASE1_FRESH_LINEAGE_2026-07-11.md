@@ -301,16 +301,59 @@ Pod 1's first `phase1_fresh_v3_LZ_seed3` boot aborted before a contract/iteratio
 present. The identical-command single-arm retry reached ready as PGID `1354525` and is the only
 accepted LZ seed 3. No broad process signal or training-checkout change was used.
 
+## First Exact Growth Curve And Ongoing Cadence
+
+The final float32-grid plant comparator cleared a single fresh `model_0` probe and then both
+pre-registered clean q10 retries completed at evaluator commit `c711a03`. All six fresh jobs
+(`seed 1/2 x 0/1000/2000`) returned `rc=0`, used the same exact schema-v3 exam schedule
+(`K=20`, 10 per side, seed 0), and emitted `evaluation_contract_exact=true`.
+
+The all-side return-rate direction was:
+
+| Fresh SZ seed | model 0 | model 1000 | model 2000 |
+| --- | ---: | ---: | ---: |
+| 1 | 0.00 | 0.50 | 0.90 |
+| 2 | 0.00 | 0.50 | 1.00 |
+
+At 2000, seed 1 was FH/BH `0.80/1.00` and seed 2 was `1.00/1.00`. This is the first successful
+formal checkpoint growth curve; it demonstrates useful growth well before terminal. It is still a
+small direction screen and cannot stop or promote an arm without the separately frozen q50 paper.
+
+The original causal arms also completed clean q10 at 20000. M3-S1 scored `1.00` versus M3-old
+`0.45`; M2-S1 and M2-old both scored `0.50` on this small prefix. All four remain diagnostic with
+`evaluation_contract_exact=false`. The long-lived original-arm workers then advanced to wait for
+fresh 4000 and causal terminal points.
+
+The additional 18 scale-out arms are now covered by deterministic manifests generated from their
+actual run directories. Four queues split causal/fresh per Pod: causal seed 2 at
+`18000/19000/20000/20999`, fresh at `2000/4000/.../16000/16999`. They cover 18 unique arms and
+142 clean q10 jobs. Milestone-major ordering keeps like-age comparisons together, while separate
+causal/fresh queues prevent a continuation terminal file from blocking an earlier fresh screen.
+The binding spec marks every job `screen_only`; q50 remains mandatory for a decision.
+
+## Continuous-Timing Boundary
+
+The current runs do carry the robot state across clip wraps, but they do not establish arbitrary-time
+continuous play. With the bound 141/134-frame motions, strike frames 66/45 and hold `U[0,100]`,
+the theoretical same-player strike interval is about `q10/median/q90=2.90/3.75/4.60 s` and cannot
+be shorter than 2.40 s. The conservative venue A-B-A audit (`n=21`) measured
+`1.757/1.903/3.356 s`; the opponent's next hit appears a median 0.951 s after ours, before the
+current clip-wrap installs a new task.
+
+This is a contract boundary, not a reason to mutate the live 24-arm pool. A separate `T0/T1`
+timing/carry-state pair must compare complete-clip wrap against post-strike event-driven next-task
+installation, with a longer/opportunity-count episode and immutable interval schedule. The source
+SHA, reproducible filter, proposed contract fields and checkpoint metrics are in
+[`phase1_continuous_rally_timing_2026-07-11.md`](research/phase1_continuous_rally_timing_2026-07-11.md).
+
 ## Remaining Gates
 
-1. Complete the layer-by-layer scale-out to 24 arms. After every layer verify PGID isolation, GPU/host
-   capacity, hard-contract fields, first checkpoint binding and finite parameters; do not fast-forward
-   either frozen training checkout while a local arm is alive.
-2. Re-run and finish the pre-registered checkpoint curves after the preserved evaluator
-   preflight failures. Compare old/S1 only within the same family, seed and
+1. Keep all 24 accepted arms and the four scale-out cadence queues under exact-PGID monitoring; do
+   not fast-forward either frozen training checkout while a local arm is alive.
+2. Finish the pre-registered checkpoint curves. Compare old/S1 only within the same family, seed and
    milestone; preserve peak checkpoints as well as terminal checkpoints.
 3. Verify every promoted checkpoint's iteration, sidecar SHA binding, lineage flag and finite parameters.
 4. Export causal checkpoints as diagnostic and the fresh `SZ` target seeds as formal candidates, then
    run the same immutable exam schedule in Isaac and MuJoCo. A legacy resume/pairing can never be promoted.
-5. Add completion/result hashes here and to G05/G06; only then decide whether an S1 guidance arm is
-   warranted.
+5. Add completion/result hashes here and to G05/G06; only then decide whether an S1 guidance arm or
+   the separate `T0/T1` continuous-timing pair is warranted.
