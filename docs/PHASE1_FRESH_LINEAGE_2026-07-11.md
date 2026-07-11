@@ -154,6 +154,11 @@ rather than task defaults. Finally, `face_command_enabled` joins `face_command_p
 contract and ONNX metadata, so a same-width reward/critic semantic change cannot pass as a resume.
 The focused contract/judge subset passed `37` tests.
 
+The first invocation of the full smoke stopped during Hydra composition, before Kit or a GPU was
+created: the one-off launcher used undeclared `task.decimation=4`. The declared composed path is
+`task.sim.decimation=4`; the launcher was corrected and the failed arm state retained as a
+pre-construction record rather than counted as a runtime smoke.
+
 ## Remaining Fresh-Lane Gates At Handoff
 
 1. Run the full 179-D, bank-bound, zero-friction Kit construction smoke and verify the emitted hard
