@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "pair_id": "phase1-M3-old-vs-S1-terminal-clean-q10",
+  "judged_utc": "2026-07-11T11:00:39Z",
+  "training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+  "eval_commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+  "eval_root": "/workspace/codexschema/nohope_eval_08e438e",
+  "judge_script_sha256": "1a00702935096b063435c3f0bd23e75f76f13e1298c87310d1cec3c26cca8529",
+  "exam_bank": {
+    "path": "/workspace/codexschema/phase1_fresh_20260711/assets/legacy/swing/s1_swing_schema3_exam.npz",
+    "bytes": 66286,
+    "sha256": "750f1df4ebaf851b96495c53ebbd083c06275f254ce19862f2e84183ec45cb0e"
+  },
+  "immutable_schedule": {
+    "sha256": "7a908142eb8b47d9cbc30bb599c690a5b61e9d1238e9c793bd143e44514ed614",
+    "schema_version": 1,
+    "schedule_k": 20,
+    "attempts_per_side": 10,
+    "seed": 0,
+    "noise_scale": 0.0,
+    "hold_steps_range": [0, 100],
+    "no_wrap": true,
+    "one_question_reset": true,
+    "execution_contract_sha256": "497c95235e658dbff012502a2c93ce86a2ec8b855cd608b09fdfe0cbcd91018f",
+    "mjcf_sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+  },
+  "worker_summary": {
+    "path": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1_46a0ce2/summary.json",
+    "bytes": 212,
+    "sha256": "650c0685be0e844a04dff72cd107c3175f155114e5dbe8a04d83d35f4aa1102e",
+    "status": "complete",
+    "failures": 0
+  },
+  "evaluation_contract_exact": false,
+  "causal": true,
+  "screen_only": true,
+  "stop_or_promote_allowed": false,
+  "cells": {
+    "M3_old": {
+      "run_name": "phase1_M3_old_pairing",
+      "checkpoint_iteration": 20998,
+      "checkpoint": {
+        "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-50_phase1_M3_old_pairing/model_20998.pt",
+        "bytes": 7074119,
+        "sha256": "320b77c9314d22683601bb8bd388c45a6e7b80df838924dd901c4710c94c417a"
+      },
+      "training_contract": {
+        "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-50_phase1_M3_old_pairing/params/training_contract.json",
+        "bytes": 15603,
+        "sha256": "7542c59b5d712c8f2e7c5a98e566f07ccafcac2e9e498e8f99056cccdc8d941b",
+        "checkpoint_embedded_sha256": "7542c59b5d712c8f2e7c5a98e566f07ccafcac2e9e498e8f99056cccdc8d941b",
+        "lineage_exact": false,
+        "face_command_pairing": "legacy_signed_vs_A"
+      },
+      "worker_state": {
+        "path": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1_46a0ce2/M3_old_20998_clean_q10.json",
+        "bytes": 1542,
+        "sha256": "034cf8d0fbc4e59d5194afee87e4eadc64812905cf1baf586dcb9c38b94bd6e2",
+        "status": "complete",
+        "returncode": 0
+      },
+      "worker_log": {
+        "path": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1_46a0ce2/M3_old_20998_clean_q10.log",
+        "bytes": 3460,
+        "sha256": "4c84a265718dff3b8420154a75962419522a8432e43513cbc32d96ed5a91894f"
+      },
+      "judge_report": {
+        "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-50_phase1_M3_old_pairing/judge/judge_report_model_20998_20260711_105938.md",
+        "bytes": 4717,
+        "sha256": "86f510d85e7daccb47a8d0fff4f7d742203681a85e16e1be8b87b167b50d20ab"
+      },
+      "exam_log": {
+        "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-50_phase1_M3_old_pairing/judge/model_20998_20260711_105938/exam.log",
+        "bytes": 12687,
+        "sha256": "2bf2078b2b63008ed08219c316aab8735434be23d3e5bbfe35cf551c53baf0a7"
+      },
+      "exam_summary": {
+        "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-50_phase1_M3_old_pairing/judge/model_20998_20260711_105938/exam/mujoco_sim2sim_summary.json",
+        "bytes": 63155,
+        "sha256": "937641efd664372fb04fb918a02b2b3af401317fb38e393b0c176fe1c5d0af1e"
+      },
+      "exam_attempt_ledger": {
+        "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-50_phase1_M3_old_pairing/judge/model_20998_20260711_105938/exam/mujoco_sim2sim_attempts.csv",
+        "bytes": 9236,
+        "sha256": "3106ef6b88d27eb340b8ff1ab69274a14a9f07c9be687035214525fd41e88a2b"
+      },
+      "attempts": {
+        "forehand": 10,
+        "backhand": 10,
+        "aggregate": 20
+      },
+      "returns": {
+        "forehand": "5/10",
+        "backhand": "4/10",
+        "aggregate": "9/20",
+        "forehand_rate": 0.5,
+        "backhand_rate": 0.4,
+        "aggregate_rate": 0.45
+      },
+      "evaluation_contract_exact": false,
+      "causal": true,
+      "screen_only": true
+    },
+    "M3_S1": {
+      "run_name": "phase1_M3_S1_pairing",
+      "checkpoint_iteration": 20998,
+      "checkpoint": {
+        "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-51-29_phase1_M3_S1_pairing/model_20998.pt",
+        "bytes": 7074119,
+        "sha256": "a924048810aebda864bbf1f7b156ef4c4aa2c60ec4d65da6ae8977833deaa21e"
+      },
+      "training_contract": {
+        "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-51-29_phase1_M3_S1_pairing/params/training_contract.json",
+        "bytes": 15598,
+        "sha256": "d3ff715e3f7ed38ceadbdead4d41726dd72ef624523cbd86b33da703e929d9ce",
+        "checkpoint_embedded_sha256": "d3ff715e3f7ed38ceadbdead4d41726dd72ef624523cbd86b33da703e929d9ce",
+        "lineage_exact": false,
+        "face_command_pairing": "shared_plus_y"
+      },
+      "worker_state": {
+        "path": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1_46a0ce2/M3_S1_20998_clean_q10.json",
+        "bytes": 1537,
+        "sha256": "b5923abea67539759d2bcbefe2fc1c2836fd6b6c7eaed81a68d98efe7be1cff5",
+        "status": "complete",
+        "returncode": 0
+      },
+      "worker_log": {
+        "path": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1_46a0ce2/M3_S1_20998_clean_q10.log",
+        "bytes": 3452,
+        "sha256": "4ed313cac57bc7093c71674ed39f1e7dac1c313110a42c0d637f357624020f13"
+      },
+      "judge_report": {
+        "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-51-29_phase1_M3_S1_pairing/judge/judge_report_model_20998_20260711_110008.md",
+        "bytes": 4707,
+        "sha256": "3a8c7e51bc1234d84f18b02b2f81e2be649f40cf3da82a7e27a47e00e1ca1b22"
+      },
+      "exam_log": {
+        "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-51-29_phase1_M3_S1_pairing/judge/model_20998_20260711_110008/exam.log",
+        "bytes": 12635,
+        "sha256": "dc89f85805b49a92b5ceb6e9cc863841e971e62c44a1943cc25463ccedba4685"
+      },
+      "exam_summary": {
+        "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-51-29_phase1_M3_S1_pairing/judge/model_20998_20260711_110008/exam/mujoco_sim2sim_summary.json",
+        "bytes": 62599,
+        "sha256": "2b5be2017a4f4b0eb0e83b2bea9e8c797dd222ef70cf6e5f8f9fca543dc1f856"
+      },
+      "exam_attempt_ledger": {
+        "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-51-29_phase1_M3_S1_pairing/judge/model_20998_20260711_110008/exam/mujoco_sim2sim_attempts.csv",
+        "bytes": 9201,
+        "sha256": "9fd383feb914cf1c812eac9128a66e15f1affb0356d202351cdc761c324aabd5"
+      },
+      "attempts": {
+        "forehand": 10,
+        "backhand": 10,
+        "aggregate": 20
+      },
+      "returns": {
+        "forehand": "10/10",
+        "backhand": "10/10",
+        "aggregate": "20/20",
+        "forehand_rate": 1.0,
+        "backhand_rate": 1.0,
+        "aggregate_rate": 1.0
+      },
+      "evaluation_contract_exact": false,
+      "causal": true,
+      "screen_only": true
+    }
+  },
+  "paired_delta_s1_minus_old": {
+    "forehand_rate": 0.5,
+    "backhand_rate": 0.6,
+    "aggregate_rate": 0.55
+  },
+  "q50_trigger": {
+    "numeric_threshold_abs_rate": 0.2,
+    "observed_terminal_aggregate_abs_delta": 0.55,
+    "same_milestone_matched_control_trigger_met": true,
+    "effect": "preregister_same-paper_q50",
+    "q50_started_by_this_result": false
+  },
+  "interpretation": "On the same immutable q10 schedule, terminal M3 S1 improves aggregate all-attempt return by 0.55 over M3 old and triggers a separately preregistered q50. Both cells remain causal, evaluation_contract_exact=false and screen-only; this q10 cannot stop, promote, claim formal acceptance, or select a deploy checkpoint."
+}

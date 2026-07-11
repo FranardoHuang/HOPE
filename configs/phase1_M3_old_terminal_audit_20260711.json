@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "audit_id": "phase1-M3-old-terminal-20998-20260711",
+  "audited_utc": "2026-07-11T11:03:42Z",
+  "read_only": true,
+  "signals_sent": 0,
+  "evaluation_started_by_this_audit": false,
+  "pod": {
+    "host": "162.43.172.171",
+    "ssh_port": 18333
+  },
+  "training_checkout": {
+    "path": "/workspace/codexschema/nohope",
+    "git_head": "6d93bcb16c422a2f42748c2dc99432559653480b",
+    "git_status_porcelain_lines": 0,
+    "clean": true,
+    "launch_provenance_capture": {
+      "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-50_phase1_M3_old_pairing/git/nohope.diff",
+      "bytes": 189,
+      "sha256": "69d26f1416328f56e270a5fa43cf70ce37c10edb6d73320c5308b08dec89d48f",
+      "recorded_clean": true
+    }
+  },
+  "run": {
+    "name": "phase1_M3_old_pairing",
+    "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-50_phase1_M3_old_pairing",
+    "launcher_pid": 1310472,
+    "launcher_pgid": 1310472,
+    "process_alive_at_audit": false,
+    "natural_exit_observed": true,
+    "exit_code_recorded": false,
+    "exit_code": null,
+    "exit_code_limitation": "run.log.launch records pid, pgid, command, start and ready timestamps but no OS exit status",
+    "launch_sidecar": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/runs/phase1_M3_old_pairing/run.log.launch",
+      "bytes": 3545,
+      "sha256": "093df0644637b7fd8f432cc7e92fba93c49dd2e9a43bf9cc36ed7ca468380726",
+      "started_utc": "2026-07-11T00:50:42Z",
+      "ready_utc": "2026-07-11T00:51:22Z"
+    },
+    "log": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/runs/phase1_M3_old_pairing/run.log",
+      "bytes": 50164914,
+      "sha256": "e91612661c3f58a07bb6458090d568f4b08338321df8ec20d2efeef8ea01c1d6",
+      "mtime_utc": "2026-07-11T10:59:32.232915373Z",
+      "learning_iteration_records": 4000,
+      "unique_learning_iterations": 4000,
+      "first_iteration": 16999,
+      "last_iteration": 20998,
+      "contiguous_expected_range": true,
+      "terminal_iteration_occurrences": 1,
+      "log_iteration_denominator": 20999
+    },
+    "checkpoint_20999_exists": false,
+    "bad_signature_counts": {
+      "traceback": 0,
+      "nan": 0,
+      "inf": 0,
+      "oom_token": 0,
+      "cuda_oom_or_out_of_memory": 0,
+      "malloc_failure": 0,
+      "segfault_abort_or_core": 0,
+      "killed": 0
+    },
+    "completion_evidence": "PGID 1310472 was observed alive through iteration 20997 and later absent without any signal; model_20998.pt exists; run.log contains exactly one contiguous 4000-record 16999..20998 range and no audited failure signature. The launcher did not preserve the OS exit code."
+  },
+  "checkpoint": {
+    "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-50_phase1_M3_old_pairing/model_20998.pt",
+    "bytes": 7074119,
+    "sha256": "320b77c9314d22683601bb8bd388c45a6e7b80df838924dd901c4710c94c417a",
+    "iter_field": 20998,
+    "max_checkpoint_iter": 20998,
+    "torch_load": {
+      "map_location": "cpu",
+      "weights_only": false,
+      "tensor_count": 76,
+      "tensor_elements": 1762717,
+      "floating_tensor_count": 74,
+      "floating_elements": 1762715,
+      "nonfinite_floating_elements": 0,
+      "all_floating_tensors_finite": true,
+      "dtype_counts": {
+        "torch.float32": 74,
+        "torch.int64": 2
+      }
+    },
+    "embedded_training_contract_binding": {
+      "training_contract_schema_version": 3,
+      "training_contract_sha256": "7542c59b5d712c8f2e7c5a98e566f07ccafcac2e9e498e8f99056cccdc8d941b",
+      "training_contract_lineage_exact": 0,
+      "binding_validator": "pass"
+    }
+  },
+  "training_contract": {
+    "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-50_phase1_M3_old_pairing/params/training_contract.json",
+    "bytes": 15603,
+    "sha256": "7542c59b5d712c8f2e7c5a98e566f07ccafcac2e9e498e8f99056cccdc8d941b",
+    "checkpoint_embedded_sha256": "7542c59b5d712c8f2e7c5a98e566f07ccafcac2e9e498e8f99056cccdc8d941b",
+    "schema_version": 3,
+    "structure_validator": "pass",
+    "lineage_exact": false,
+    "motion_kinematics_exact": false,
+    "question_bank_exact": true,
+    "question_bank_sha256": "96329c79f13e659c035bf65bafedf84123d23a3219b02ac78ae654aed930cf60",
+    "question_bank_source_family_sha256": "3344b610e230bc55a0eca5647cfb55f338a7635bd4bb4025a579fc347b05f3d7",
+    "question_bank_schema_version": 3,
+    "question_bank_split": "train",
+    "face_command_pairing": "legacy_signed_vs_A",
+    "motion_allow_legacy_link_origin_velocity": true,
+    "plant": {
+      "role": "historical_physx_nonzero_friction",
+      "semantic_kind": "load_dependent_spatial_force_coefficient",
+      "units": "dimensionless",
+      "coefficient_range": [0.10000000149011612, 2.4275999069213867]
+    }
+  },
+  "causal_parent": {
+    "path": "/workspace/codexschema/phase1_fresh_20260711/parents/M3c/model_16999.pt",
+    "bytes": 7073927,
+    "sha256": "46f0050589f3343d96f2e5c261b92224079b379e4da473be342b1bd0f0cf7ff1",
+    "iter_field": 16999,
+    "checkpoint_infos": null,
+    "adjacent_training_contract_exists": false,
+    "launch_checkpoint_allow_missing_contract": true,
+    "launch_checkpoint_allow_contract_mismatch": false
+  },
+  "assets": {
+    "motion_forehand": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/assets/legacy/swing/motions/hope_forehand_swing_cal.npz",
+      "bytes": 189170,
+      "sha256": "1c53405f19733a34db4a2f10bd61b4768002afce0face83c492e12171bc3ddc9",
+      "segment_length": 98,
+      "fps": 50.0,
+      "kinematics_exact": false
+    },
+    "motion_backhand": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/assets/legacy/swing/motions/hope_backhand_swing_cal.npz",
+      "bytes": 208290,
+      "sha256": "875c41db05f964e57221617b5b1ade6d64d161511e4107e3dc5fab726c52c15b",
+      "segment_length": 108,
+      "fps": 50.0,
+      "kinematics_exact": false
+    },
+    "question_bank": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/assets/legacy/swing/s1_swing_schema3_train.npz",
+      "bytes": 227948,
+      "sha256": "96329c79f13e659c035bf65bafedf84123d23a3219b02ac78ae654aed930cf60",
+      "schema_version": 3,
+      "source_family_sha256": "3344b610e230bc55a0eca5647cfb55f338a7635bd4bb4025a579fc347b05f3d7",
+      "exact": true
+    },
+    "strike_phase_per_clip": [0.371, 0.495]
+  },
+  "semantics": {
+    "family": "M3",
+    "arm": "old_pairing",
+    "causal": true,
+    "evaluation_contract_exact": false,
+    "inexact_reasons": [
+      "the causal parent predates an adjacent hard contract and has checkpoint infos=null",
+      "both motion clips are legacy link-origin-velocity diagnostics with motion_kinematics_exact=false",
+      "legacy_signed_vs_A is the historical face-command pairing",
+      "nonzero PhysX load-dependent joint-friction coefficients do not have an exact MuJoCo frictionloss equivalent"
+    ]
+  },
+  "evaluation": {
+    "performed_by_this_audit": false,
+    "judge_or_export_started_by_this_audit": false,
+    "existing_external_judge_artifacts_inspected": false,
+    "evaluation_contract_exact": false
+  },
+  "verdict": "pass_terminal_checkpoint_integrity_causal_inexact"
+}
