@@ -512,11 +512,13 @@ under perfect_tracking.)
 > only as historical behavior evidence. Do not use it for a new formal run. Static audit found
 > broad `pkill -9`, conductor `pgrep -f` signalling, no owned PID/PGID/trap, hard-coded unbound
 > paths, fixed `/tmp`/wildcard shared-memory cleanup, no formal-loader-first gate and a runner boot
-> loop that proceeds after timeout. Use the default-plan exact-PGID source procedure in
-> [run_gate3_first_tick_harness.md](run_gate3_first_tick_harness.md). That replacement still has
-> **no runtime result**: production `--first-tick-json` full-state output, a real machine-local
-> content contract and the vendor no-publish first-tick ledger remain open. It does not authorize
-> hardware, and a first tick will not replace the no-reset Gate3/Gate3B behavior paper.
+> loop that proceeds after timeout. Use the **plan-only** static source procedure in
+> [run_gate3_first_tick_harness.md](run_gate3_first_tick_harness.md). It has no runtime/arming,
+> launch, signal, process-scan or runtime-lock path; it only runs read-only Git helpers with
+> `GIT_OPTIONAL_LOCKS=0`. It explicitly leaves full `--first-tick-json`, pidfd+cgroup/supervisor
+> startup ownership, complete PATH/AimRT `.so`/plugin closure, parser-backed config→MJCF binding
+> and the runtime ledger/lock transaction blocked. It does not authorize a first tick or hardware,
+> and a future first tick will not replace the no-reset Gate3/Gate3B behavior paper.
 
 The closed loop runs the DEPLOY binary itself: fake_ball → REAL hope_planner (sim
 profile, publishes the flat topics) → C++ runner in `--planner` mode

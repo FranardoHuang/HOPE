@@ -638,7 +638,7 @@ process remained. This closes formal-model production loading only. First backen
 normal envelope, canonical recovery tuple and full vendor MuJoCo Gate 3/Gate 3B behavior remain
 open, so G06 stays Partial.
 
-#### 2026-07-12 exact-PGID Gate3 first-tick source gate
+#### 2026-07-12 Gate3 first-tick static plan gate (red-team corrected)
 
 The historical `pp_gate3_rally.sh` launch command is no longer an approved formal launcher.
 Content-bound audit `configs/gate3_legacy_process_audit_20260712.json` records 14 concrete risks:
@@ -648,26 +648,31 @@ shared-memory cleanup, no formal-loader-first gate, publish-capable free-form ru
 loop that proceeds after timeout, partial direct-PID cleanup, and no concurrency lock. The old
 scripts remain historical result provenance; do not invoke their cleanup to make a new run pass.
 
-The replacement `scripts/run_gate3_first_tick_harness.py` is default-plan and fail-closed. Its
-contract binds absolute non-symlink path+SHA pairs for vendor sim/config/MJCF, planner binary/config,
-production runner/runtime-config/formal ONNX and the exact Kit executable used for conflict
-detection. It also binds explicit ROS domain/RMW/local-only environment and clean read-only
-training/eval commits. Plan mode starts nothing. Future run mode needs the exact arming phrase,
-executes the accepted formal-179 no-publish loader before any component, then launches sim/planner/
-runner directly into separate owned sessions. The runner is forced passive with `--no-publish`.
-No process is found or killed by fuzzy name: TERM/KILL is permitted only for a recorded PGID after
-double `/proc` validation of ownership token, starttime and cmdline for every member. Exact foreign
-Kit/sim/planner/runner processes or locks cause refusal. Split stdout/stderr, rc, identities,
-signals and all hashes go to a unique no-clobber ledger. Source tests pass `25` cases; no runtime
-was launched.
+Red-team review rejected feature commit `1fc69d1` as mergeable runtime shape: it carried an armed
+future supervisor before dependency closure or a safe startup handshake existed. The corrected
+`scripts/run_gate3_first_tick_harness.py` is **plan-only**. It has no runtime option/arming phrase,
+direct process launcher, signal path, process scan, runtime lock or trace consumer. Old
+`--mode run`/arming arguments fail in argparse before any contract/Git work. Its only child commands
+are read-only Git queries with `GIT_OPTIONAL_LOCKS=0`; therefore “starts no process” is too broad,
+but it starts no sim/Kit/transport/planner/runner and sends no signal.
 
-The first-tick evidence bar is deliberately higher than the existing debug summary. A passing
-ledger must bind full finite vendor `qpos[38]`, `qvel[37]`, base pose `[7]`, racket pose `[7]`,
-target tuple and formal observation `[179]`, with a file SHA, canonical whole-trace SHA and a
-separate canonical SHA for every field. Current production C++ has no `--first-tick-json` output;
-`--trace-csv`/`--obs-csv` do not provide that joint state. The new harness therefore requires the
-future flag and must fail at runtime until a separate reviewed C++ change implements it. This
-branch does not change C++, start vendor MuJoCo, touch transport, or authorize a robot.
+Schema-2 validation binds core absolute path+SHA pairs, but does not call that set an exact runtime
+closure. Every path must equal its resolved spelling and every component is checked with `lstat`,
+so symlink ancestors fail. Training/eval paths must be clean exact-commit Git top-levels. Proposed
+argv arrays are fixed and passive/no-publish; `--flag=/abs`, unbound absolute paths, relative
+payloads and extra flags fail. The optional plan output uses fsynced temporary bytes plus atomic
+hard-link create and directory fsync; it never uses overwrite-capable `os.replace`. The ledger's
+runtime block is permanently `not_run`, with no components, signals, lock, behavior result or
+ownership token. Source tests pass `30` cases; no runtime was launched.
+
+The plan explicitly keeps five runtime blockers null: current C++ lacks full
+`--first-tick-json`; exact process ownership still needs pidfd plus a cgroup/reviewed supervisor
+startup handshake; PATH/LD/Python/AMENT directory manifests and AimRT/transitive `.so`/plugin
+closure are absent; separate vendor config/MJCF hashes do not prove parser-resolved semantics; and
+the atomic runtime ledger/exact lock transaction is undesigned. String containment in a config is
+not accepted as MJCF binding. Filling or deleting a blocker invalidates the static contract. A
+separate reviewed runtime implementation must close all five; this source never becomes runtime
+eligible by changing a flag.
 
 The ledger also freezes a ready-state hypothesis without turning it into a result. Fresh training
 starts at pelvis `(0,0,1.0684)` plus default q; vendor `stand` is
@@ -679,8 +684,9 @@ contribute to the engine gap, but is not yet causal evidence. The preregistered 
 vendor/root-only/joints-only/full-match four-cell diagnostic remains inexact and unrun; the formal
 vendor stand is unchanged.
 
-Every plan/ledger records the four-stage engine-gap ladder as not run with no inference authority:
+Every plan records the four-stage engine-gap ladder as not run with no inference authority:
 kinematic replay, open-loop action replay, external-observation closed loop, then native closed
-loop. Isaac stays training/diagnostic-only. First tick closes only a runtime prerequisite; only
-Agibot vendor MuJoCo Gate3/Gate3B behavior can promote a checkpoint. Full operation and remaining
-blocks are in `docs/operations/run_gate3_first_tick_harness.md`. G06 remains `Partial`.
+loop. Isaac stays training/diagnostic-only. A future first tick would close only a runtime
+prerequisite; only Agibot vendor MuJoCo Gate3/Gate3B behavior can promote a checkpoint. Full static
+operation and remaining blockers are in `docs/operations/run_gate3_first_tick_harness.md`. G06
+remains `Partial`.

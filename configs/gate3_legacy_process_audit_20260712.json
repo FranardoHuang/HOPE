@@ -127,15 +127,22 @@
       "consequence": "concurrent sessions are destroyed instead of being rejected fail-closed"
     }
   ],
-  "required_replacement_properties": [
-    "default plan mode starts no process",
-    "all artifacts and runtime environment are absolute/content-bound",
-    "formal 179 loader passes before any backend component starts",
-    "runtime requires an exact arming phrase and production runner --no-publish",
-    "each child gets a unique owned session/PGID and inherited ownership token",
-    "TERM/KILL follows double /proc starttime/cmdline/token validation for only the recorded PGID",
-    "existing exact Kit/sim/planner/runner process or lock causes refusal",
-    "every run uses a no-clobber directory with split stdout/stderr/rc/identity/SHA ledger",
-    "real robot authority remains false"
+  "plan_only_source_gate_properties": [
+    "the only child commands are read-only Git helpers with GIT_OPTIONAL_LOCKS=0",
+    "no simulator, Kit, transport, planner, runner, process scan, signal, or runtime lock path exists",
+    "core artifact paths are canonical, reject every symlink ancestor, and are SHA-bound without claiming complete runtime closure",
+    "training and evaluation paths equal their clean exact-commit Git top-levels",
+    "proposed argv rejects equals-form absolute paths, unbound absolute paths, and relative payloads",
+    "the optional plan output uses fsynced temporary bytes plus atomic hard-link no-replace",
+    "the plan ledger records runtime status not_run and real robot authority false"
+  ],
+  "unclosed_future_runtime_requirements": [
+    "production runner native full-state --first-tick-json output",
+    "pidfd plus cgroup or reviewed supervisor startup handshake",
+    "PATH/LD/Python/AMENT manifests and complete AimRT/transitive shared-object/plugin closure",
+    "parser-backed vendor config to MJCF semantic binding",
+    "reviewed atomic runtime ledger and exact-owned runtime lock protocol",
+    "formal 179 loader and passive no-publish first tick only after all prior requirements close",
+    "vendor Gate3/Gate3B behavior remains the only promotion authority"
   ]
 }
