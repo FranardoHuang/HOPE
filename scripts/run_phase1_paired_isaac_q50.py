@@ -11,6 +11,7 @@ causal/inexact and non-formal.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import csv
 import hashlib
 import importlib.util
@@ -818,6 +819,37 @@ def require_success_handshake(log_text: str, output_json: Path, output_csv: Path
         raise ContractError("Isaac evaluator success handshake is missing/ambiguous")
 
 
+def summarize_scorecard_attempts(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Recompute the adapter's all-attempt summary from the accepted raw denominator."""
+    def group(group_rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        count = lambda key: sum(row.get(key) is True for row in group_rows)
+        n = len(group_rows)
+        no_fall = n - count("physical_fall")
+        return {
+            "n_attempts": n,
+            "n_no_fall": no_fall,
+            "n_reached_exact": count("reached_exact"),
+            "n_hit": count("hit"),
+            "n_returned": count("returned"),
+            "n_guard_reset": count("guard_reset"),
+            "no_fall_rate": (no_fall / n) if n else None,
+            "exact_reach_rate": (count("reached_exact") / n) if n else None,
+            "hit_rate": (count("hit") / n) if n else None,
+            "return_rate": (count("returned") / n) if n else None,
+            "guard_reset_rate": (count("guard_reset") / n) if n else None,
+            "finalize_reason_counts": dict(
+                Counter(str(row.get("finalize_reason")) for row in group_rows)
+            ),
+        }
+
+    summary = group(rows)
+    summary["per_clip"] = {
+        "forehand": group([row for row in rows if row.get("clip") == 0]),
+        "backhand": group([row for row in rows if row.get("clip") == 1]),
+    }
+    return summary
+
+
 def validate_scorecard(
     *,
     json_path: Path,
@@ -842,6 +874,20 @@ def validate_scorecard(
     attempts = document.get("attempts")
     summary = document.get("summary", {})
     nominal_profile = document.get("nominal_eval_profile", {})
+    inexact_reasons = document.get("inexact_reasons")
+    has_checkpoint_contract_inexact_reason = (
+        isinstance(inexact_reasons, list)
+        and any(
+            isinstance(reason, str)
+            and reason.startswith("training/checkpoint contract:")
+            for reason in inexact_reasons
+        )
+    )
+    recomputed_summary = (
+        summarize_scorecard_attempts(attempts)
+        if isinstance(attempts, list) and len(attempts) == 100
+        else None
+    )
     expected_source_shas = {
         "evaluator_sha256": config["tools"]["evaluation"]["isaac_evaluator"]["sha256"],
         "adapter_sha256": config["tools"]["evaluation"]["isaac_adapter"]["sha256"],
@@ -853,8 +899,9 @@ def validate_scorecard(
         document.get("schema") != SCORECARD_SCHEMA
         or document.get("status") != "valid"
         or document.get("evaluation_contract_exact") is not False
-        or not isinstance(document.get("inexact_reasons"), list)
-        or not document["inexact_reasons"]
+        or not isinstance(inexact_reasons, list)
+        or not inexact_reasons
+        or not has_checkpoint_contract_inexact_reason
         or document.get("simulator") != "isaac"
         or document.get("protocol") != "single"
         or document.get("noise_scale") != 0.0
@@ -869,7 +916,10 @@ def validate_scorecard(
         or not HEX64.fullmatch(str(exam_bank.get("source_family_sha256", "")))
         or document.get("checkpoint")
         != {"path": arm["checkpoint_path"], "sha256": arm["checkpoint_sha256"]}
-        or document.get("training_contract_sha256") != arm["training_contract_sha256"]
+        # The evaluator intentionally clears this field when exact-lineage preflight fails.
+        # The wrapper independently binds checkpoint infos to the preregistered adjacent contract
+        # before and after each job, so a non-null scorecard field would be the wrong semantic lane.
+        or document.get("training_contract_sha256") is not None
         or not HEX64.fullmatch(str(document.get("ready_state_sha256", "")))
         or not isinstance(document.get("termination_contract_id"), str)
         or not document["termination_contract_id"]
@@ -880,6 +930,8 @@ def validate_scorecard(
         or summary.get("n_attempts") != 100
         or summary.get("per_clip", {}).get("forehand", {}).get("n_attempts") != 50
         or summary.get("per_clip", {}).get("backhand", {}).get("n_attempts") != 50
+        or recomputed_summary is None
+        or summary != recomputed_summary
         or not isinstance(attempts, list)
         or len(attempts) != 100
     ):
@@ -951,10 +1003,16 @@ def validate_scorecard(
         raise ContractError(f"Isaac {arm_name} CSV schema is invalid: {exc}") from exc
     if prereg_arm["checkpoint_sha256"] != arm["checkpoint_sha256"]:
         raise ContractError(f"Isaac {arm_name} checkpoint lost preregistration binding")
+    if (
+        prereg_arm["training_contract_sha256"] != arm["training_contract_sha256"]
+        or not HEX64.fullmatch(str(arm["training_contract_sha256"]))
+    ):
+        raise ContractError(f"Isaac {arm_name} hard contract lost preregistration binding")
     return {
         "run_name": arm["run_name"],
         "checkpoint_sha256": arm["checkpoint_sha256"],
         "training_contract_sha256": arm["training_contract_sha256"],
+        "scorecard_training_contract_sha256": None,
         "scorecard": {"path": str(json_path), "sha256": sha256_file(json_path)},
         "attempt_ledger": {"path": str(csv_path), "sha256": sha256_file(csv_path)},
         "schedule_sha256": runtime["shared_schedule"]["schedule_sha256"],

@@ -214,7 +214,7 @@ def _scorecard_document(config: dict, prereg: dict, runtime: dict, schedule: dic
                 "guard_reset": False,
                 "reached_exact": True,
                 "hit": True,
-                "returned": item["schedule_index"] % 3 == 0,
+                "returned": True,
                 "pos_error_m": 0.01,
                 "vel_error_mps": 0.2,
                 "normal_error_deg": 5.0,
@@ -223,15 +223,29 @@ def _scorecard_document(config: dict, prereg: dict, runtime: dict, schedule: dic
                 "net_clear": True,
             }
         )
-    per_clip = {
-        name: {"n_attempts": 50} for name in ("forehand", "backhand")
-    }
+    # Mirror the accepted real M3-old shape: one guard reset, no physical fall, 99 exact returns.
+    rows[42].update(
+        finalize_reason="guard_reset",
+        guard_reset=True,
+        reached_exact=False,
+        hit=False,
+        returned=False,
+        net_clear=False,
+        pos_error_m=None,
+        vel_error_mps=None,
+        normal_error_deg=None,
+        landing_x=None,
+        landing_y=None,
+    )
     tool = config["tools"]["evaluation"]
     return {
         "schema": R.SCORECARD_SCHEMA,
         "status": "valid",
         "evaluation_contract_exact": False,
-        "inexact_reasons": ["causal historical lineage"],
+        "inexact_reasons": [
+            "training/checkpoint contract: checkpoint lineage_exact=0",
+            "saved runtime motions use legacy link-origin velocities",
+        ],
         "simulator": "isaac",
         "protocol": "single",
         "noise_scale": 0.0,
@@ -249,7 +263,7 @@ def _scorecard_document(config: dict, prereg: dict, runtime: dict, schedule: dic
             "path": runtime["arms"][arm]["checkpoint_path"],
             "sha256": runtime["arms"][arm]["checkpoint_sha256"],
         },
-        "training_contract_sha256": runtime["arms"][arm]["training_contract_sha256"],
+        "training_contract_sha256": None,
         "termination_contract_id": "fixture-contract",
         "ready_state_sha256": ready,
         "nominal_eval_profile": {"sha256": "f" * 64},
@@ -261,7 +275,7 @@ def _scorecard_document(config: dict, prereg: dict, runtime: dict, schedule: dic
             "isaac_scorer_sha256": tool["isaac_scorer"]["sha256"],
             "ball_physics_yaml_sha256": tool["ball_physics_yaml"]["sha256"],
         },
-        "summary": {"n_attempts": 100, "per_clip": per_clip},
+        "summary": R.summarize_scorecard_attempts(rows),
         "attempts": rows,
     }
 
@@ -309,11 +323,50 @@ def test_scorecard_requires_same_k100_schedule_and_uncensored_all_attempt_ledger
     assert result["evaluation_contract_exact"] is False
     assert result["causal"] is True
     assert result["formal_target"] is False
+    assert result["training_contract_sha256"] == (
+        prereg["arms"]["M3_old"]["training_contract_sha256"]
+    )
+    assert result["scorecard_training_contract_sha256"] is None
+    assert result["summary"]["return_rate"] == 0.99
+    assert result["summary"]["n_guard_reset"] == 1
     assert len(result["question_id_order"]) == 100
 
+    document["training_contract_sha256"] = runtime["arms"]["M3_old"][
+        "training_contract_sha256"
+    ]
+    output, ledger = _write_scorecard(tmp_path, document)
+    with pytest.raises(R.ContractError, match="header/summary"):
+        R.validate_scorecard(
+            json_path=output,
+            csv_path=ledger,
+            arm_name="M3_old",
+            config=config,
+            prereg=prereg,
+            runtime=runtime,
+            tools={},
+        )
+
+    document["training_contract_sha256"] = None
+    document["inexact_reasons"] = ["legacy motion only"]
+    output, ledger = _write_scorecard(tmp_path, document)
+    with pytest.raises(R.ContractError, match="header/summary"):
+        R.validate_scorecard(
+            json_path=output,
+            csv_path=ledger,
+            arm_name="M3_old",
+            config=config,
+            prereg=prereg,
+            runtime=runtime,
+            tools={},
+        )
+
+    document["inexact_reasons"] = [
+        "training/checkpoint contract: checkpoint lineage_exact=0",
+        "saved runtime motions use legacy link-origin velocities",
+    ]
     document["attempts"][7]["censored"] = True
     output, ledger = _write_scorecard(tmp_path, document)
-    with pytest.raises(R.ContractError, match="censored|malformed"):
+    with pytest.raises(R.ContractError, match="header/summary|censored|malformed"):
         R.validate_scorecard(
             json_path=output,
             csv_path=ledger,
