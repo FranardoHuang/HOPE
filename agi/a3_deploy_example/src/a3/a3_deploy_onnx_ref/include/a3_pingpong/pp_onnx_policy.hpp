@@ -39,9 +39,13 @@ class PpOnnxPolicy {
     // 175 (deploy_parity), 177 (hitter_footwork) or 110 (hitter_pure).
     if (session_->GetInputCount() != 2)
       throw std::runtime_error("ONNX must have exactly two inputs: obs and time_step");
-    const auto in0_info = session_->GetInputTypeInfo(0).GetTensorTypeAndShapeInfo();
-    auto in0 = in0_info.GetShape();
-    if (in0_info.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
+    // TensorTypeAndShapeInfo borrows storage from TypeInfo in ONNX Runtime's C++ API. Keep the
+    // owning TypeInfo alive while reading element type and shape; chaining through a temporary
+    // leaves a dangling handle and has manifested as length_error/bad_alloc on real 175/179 models.
+    const auto in0_type_info = session_->GetInputTypeInfo(0);
+    const auto in0_tensor_info = in0_type_info.GetTensorTypeAndShapeInfo();
+    auto in0 = in0_tensor_info.GetShape();
+    if (in0_tensor_info.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
         in0.size() != 2 || in0[0] != 1 ||
         (in0[1] != kObsDim && in0[1] != kObsDim179 && in0[1] != kObsDim175 && in0[1] != kObsDim177 &&
          in0[1] != kObsDim110))
@@ -52,11 +56,12 @@ class PpOnnxPolicy {
     Ort::AllocatorWithDefaultOptions alloc;
     const auto obs_name = session_->GetInputNameAllocated(0, alloc);
     const auto time_name = session_->GetInputNameAllocated(1, alloc);
-    const auto in1_info = session_->GetInputTypeInfo(1).GetTensorTypeAndShapeInfo();
+    const auto in1_type_info = session_->GetInputTypeInfo(1);
+    const auto in1_tensor_info = in1_type_info.GetTensorTypeAndShapeInfo();
     if (!obs_name || !time_name || std::string(obs_name.get()) != "obs" ||
         std::string(time_name.get()) != "time_step" ||
-        in1_info.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
-        in1_info.GetShape() != std::vector<int64_t>({1, 1}))
+        in1_tensor_info.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
+        in1_tensor_info.GetShape() != std::vector<int64_t>({1, 1}))
       throw std::runtime_error(
           "ONNX input contract must be float obs[1,D], float time_step[1,1] in that order");
     auto md = session_->GetModelMetadata();

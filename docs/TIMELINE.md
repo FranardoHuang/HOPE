@@ -1587,6 +1587,18 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    SHA=`d8c918ac...5a9f`；本机未恢复 full v5 大结果，certificate 也未预注册，所以当前只有合同/
    工具验证，没有真资产 proposal 或晋级。精确 candidate 必须 schema-2+L0+vendor L1+整轨迹桌网
    `>=5mm`，再过动力学/Gate3B no-reset；TOPP/RL/真机均未开。
+57. 【franco/Codex】**把 179 正式模型加载和 backend 启动拆成两道门**——production runner 新增
+   `--model-preflight-only`，强制同时带 no-publish/dry-run；先构造并核验 PpPolicy，再打印 obs width、
+   training/source SHA 后退出。backend 构造与 Init 被移到早退之后，因此可以先验证模型而不碰
+   AimRT；first tick 和 Gate3/Gate3B 仍是后续门。
+58. 【franco/Codex】**真实模型预检先抓到 loader 生命周期 UB，而不是把锅甩给 checkpoint**——
+   `TensorTypeAndShapeInfo` 借自已经析构的临时 `TypeInfo`，formal 179 与 175 模型都能触发
+   `length_error/bad_alloc`。修复为显式保留两个 input owner，并增加真实 ONNX optional test；旧失败
+   不计分，必须隔离重建和 formal candidate 实跑后才能关闭加载门。
+59. 【franco/Codex】**formal 179 production loader 门过，但仍不冒充 Gate3**——ROS/AimRT-enabled
+   Release 三目标全链接，真实 SZ 2k ONNX test 1/1、native 205 pass/9 optional skip；无 no-publish
+   preflight rc2，安全 preflight rc0 且输出 obs179/双 SHA、零 backend init/start。仅执行零观测 ONNX
+   prewarm，无 driver/backend tick；normal envelope、canonical recovery、厂商 Gate3/Gate3B 继续 open。
 
 ## 2026-07-12:公司 Linux 机改动移植回来(那台不让 push)
 

@@ -1468,3 +1468,13 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   与 HITTER 的 10 s unified multi-strike actor 是两条不同可行路线。先在同一随机到达卷上比较
   explicit safe bridge 和 learned recovery option；只有统一 option 确有必要才做 `2^3` 与固定总预算
   mixture。ready 优化为可达集合/下一球 dexterity，不退化成单一第0帧；碰撞门覆盖 strike+recovery 全程。
+- production runner 增加 fail-closed model-only preflight：必须 no-publish/dry-run，PpPolicy 的
+  ONNX/metadata/lineage 验证发生在任何 backend 构造/Init 之前；成功只打印 obs width 与两条谱系
+  SHA 并退出。它只关闭安全加载门，不等于 actor first tick、AimRT 或厂商 MuJoCo 行为门。
+- full-dependency 首次真实 ONNX 探针在 backend 前抓到通用 loader UB：shape-info 借自临时
+  `TypeInfo`，175/179 均可抛 `length_error/bad_alloc`。现保留 input0/input1 owner 生命周期并加真实
+  ONNX optional regression；失败探针不计模型失败，隔离 Release 重建/实跑仍是验收条件。
+- 修复后的 ROS/AimRT-enabled isolated Release 已用 formal SZ 179 ONNX 关闭 production loader 门：
+  real-model test 1/1、全套 205 pass/9 optional skip/0 fail；缺 no-publish 时 rc2，安全 preflight
+  rc0 并精确打印 179/contract/checkpoint SHA，日志无 backend init/start。构造器仅做一次零观测
+  ONNX prewarm；first backend tick、normal envelope、canonical recovery 与 Gate3/Gate3B 仍 open。

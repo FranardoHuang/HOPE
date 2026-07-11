@@ -103,9 +103,10 @@ Rules:
   给 MuJoCo 塌陷洗白。
 - 179-D 到 Gate3 的 fail-closed 源码链已进 main：schema2 原子携带拍位/拍速/正X unit normal/
   zero-rho，严格绑定 face/bank/SHA metadata，坏包/无解显式 `valid=0` revoke，正式 flat 先于可选
-  mirror 发布。Pod1 隔离 Release 已链接真实 ping-pong executable，focused 10/10、native
-  195 pass/4 optional skip、无 fast-math；这只关闭 offline vendor-source 门。ROS/AimRT full build、
-  formal 179 ONNX first tick、per-clip normal envelope、canonical recovery 和 vendor MuJoCo 行为卷仍 open。
+  mirror 发布。修复通用 ONNX TypeInfo 生命周期 UB 后，Pod1 隔离 ROS/AimRT-enabled Release 三目标
+  已全链接，formal SZ 179 loader 1/1、native 205 pass/9 optional skip；安全 preflight rc0 精确输出
+  obs179/双 SHA，日志确认零 backend init/start。它只做零观测 ONNX prewarm，不是 backend first tick；
+  per-clip normal envelope、canonical recovery、first tick 和 vendor MuJoCo 行为卷仍 open。
 - **连续等待按一个耦合 phase 设计，不把三项单独过关相加**：上一拍卸载/恢复平衡、回到通用 ready、
   随机时刻接下一题会共享同一段状态与动作，因此先做机制/梯度冲突推理，再做有交互项的混合比例消融；
   单 reward 胜者只能筛项，不能宣称组合最优。先比较 Ace 式显式 safe bridge/prepare 与 HITTER 式
