@@ -1126,6 +1126,31 @@ opportunity. Do not call the one-environment-per-question Isaac adapter a
 continuous test; its physical next-ball/serve timeline is a separate pending
 implementation.
 
+### T1 post-strike event mode is source-ready, not launch-ready
+
+Commit `be5d7cf` adds the training-side scheduler and hard-contract fields;
+it does not authorize a T1 run. Do not invent a schedule JSON or point a live
+trainer at `event_timing_mode=post_strike_t1`. The frozen preregistration must
+continue to fail launch validation until a reviewed materializer, immutable
+screen/decision schedules, continuous judges, self-hit gate, fresh baseline
+and semantics-correct plant are rebound in a new launch preregistration.
+
+Dependency-light verification is:
+
+```bash
+/Users/Franco/opt/anaconda3/envs/fast/bin/python -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_event_timing_scheduler.py
+
+sha=$(shasum -a 256 configs/phase1_event_timing_t0_t1_prereg_20260711.json | awk '{print $1}')
+python3 scripts/validate_phase1_event_timing_prereg.py \
+  --prereg configs/phase1_event_timing_t0_t1_prereg_20260711.json \
+  --expected-prereg-sha256 "$sha" --mode design-check
+```
+
+Running the same validator with `--mode launch-check` must return 1 for the
+frozen preregistration. The runtime field/schema contract is documented in
+`docs/interfaces/t1_event_training_contract.md`.
+
 ## First-Loop Rule
 
 Before setting a baseline quality target, record:

@@ -1511,3 +1511,9 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `75aca567...51d7` K20 卷上，18k old/S1=`.40/.60`，19k=`.50/.40`；old 方向上升、S1
    回落且正手仍弱。两臂 checkpoint 19k finite、iter/contract/causal lineage 绑定通过；只保留
    曲线并继续原配方，不停、不晋级、不触发 q50。
+44. 【franco/Codex】**T1 训练端核心状态机落地，但队列仍严格不点火**——`be5d7cf` 只允许
+   accepted exact strike 后启动绝对 tick；同一步原子安装 train-bank row/native clip/精确 hold/
+   固定 deadline，miss/unavailable/infeasible 都按原时刻消耗，robot/last-action/history/noise
+   全 carry。全部 timing 字段和 schedule byte SHA 进 hard contract。尚缺 materializer、连续
+   Isaac/MuJoCo 卷、自击门、fresh exact baseline 和 semantics-correct plant；冻结 prereg 不回填，
+   必须新审 launch binding 后才能占 GPU。

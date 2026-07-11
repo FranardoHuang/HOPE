@@ -741,6 +741,14 @@ materialized schedules, continuous Isaac/MuJoCo judges, self-hit instrument,
 fresh exact checkpoint and semantics-correct plant are all bound. Prereg SHA
 is `2e7c4a34...2289c`; no timing arm has launched.
 
+The training-side core is now implemented at `be5d7cf`: only an accepted exact
+strike can arm the absolute event clock; reveal atomically installs the bank
+row/native clip/exact hold/fixed deadline, and misses or infeasible rows still
+consume the original opportunity without teleport/reset/history-noise reset.
+Every timing-changing field is in the hard contract. This does not mutate the
+frozen prereg or authorize launch; materialized schedules, continuous judges,
+self-hit instrumentation, fresh baseline and calibrated plant remain open.
+
 Natural terminal release also opens a separate second-wave causal paper rather
 than permission to mutate the frozen 24-arm matrix. The preregistration
 `configs/phase1_causal_followups_20260711.json` completes two

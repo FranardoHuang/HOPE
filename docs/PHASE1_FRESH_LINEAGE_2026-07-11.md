@@ -566,6 +566,13 @@ event grid rather than fitting that median. Its design-check passes and its
 launch-check intentionally fails on missing implementation/schedule/judge/
 self-hit/plant bindings; prereg SHA is
 `2e7c4a344c0f2f81f67fd1246e5a724eaef92570c45e830c85f298377f52289c`.
+The training-side state machine is now implemented at `be5d7cf`: post-strike
+arming, atomic bank-row/native-clip/fixed-deadline install, deadline consumption
+on miss/unavailable/infeasible and carry-state without robot/action/history
+reset are all covered by dependency-light tests and the checkpoint contract.
+This closes only one implementation binding; the frozen prereg is not mutated
+and no arm may launch until schedules, continuous judges, self-hit, fresh
+baseline and semantics-correct plant receive a new reviewed binding.
 
 Plant semantics form an independent deployment blocker. `SZ` is exact only for the current
 zero-friction execution protocol; `SP/LP` are historical direct-number proxies and cannot estimate a

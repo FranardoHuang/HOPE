@@ -67,6 +67,14 @@ Use this file for short project-state updates that future humans and agents need
   launch validation intentionally fails on missing scheduler/materializer,
   continuous dual-engine judges, self-hit gate, fresh checkpoint, calibrated
   plant and immutable schedule hashes. Prereg SHA is `2e7c4a34...2289c`.
+- Implemented the training-side T1 core at `be5d7cf`: exact-byte-bound event
+  schedules, post-strike-only arming, one-step atomic bank-row/clip/deadline
+  install, native clip plus exact hold, fixed deadlines and carry-state with
+  no robot/action/history/noise reset. Miss/unavailable/infeasible rows still
+  consume their scheduled opportunity, and all timing-changing fields enter
+  the hard contract. This is not launch-ready: materialized schedules,
+  continuous dual-engine judges, self-hit instrumentation, a fresh exact
+  baseline and semantics-correct plant remain unbound.
 - The hardened Pod2 curve worker completed the same-paper M2 seed2 18k/19k
   q10 pair. Old/S1 aggregate changed from `.40/.60` at 18k to `.50/.40` at
   19k, reversing the tiny-screen ranking. Both 19k checkpoints are finite and

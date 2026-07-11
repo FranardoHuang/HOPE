@@ -1,7 +1,8 @@
 # Phase-1 连续挥拍与任意来球时序审计（2026-07-11）
 
-Status: Audit complete; the current 24-arm pairing×plant pool remains unchanged. The proposed
-event-driven timing arm is not implemented or trained yet.
+Status: Audit complete; the current 24-arm pairing×plant pool remains unchanged. The fail-closed
+T1 core scheduler is implemented at `be5d7cf`, but no event schedule has been materialized and no
+T0/T1 arm is launch-authorized or trained.
 
 ## 结论
 
@@ -15,6 +16,19 @@ event-driven timing arm is not implemented or trained yet.
 - 不把它们的单球 checkpoint 曲线或自然 clip-wrap 指标写成“连续实战已通过”；
 - 另开只改变时序的 `T0/T1` 配对臂，先证明 event-driven next-task，再做更长 episode；
 - T1 仍先过单球保真门，避免用“更会恢复”掩盖第一拍精度下降。
+
+## 已实现的核心与仍未实现的卷
+
+`be5d7cf` 新增独立的 post-strike event path，不复用会清 actor history/noise 的单拍
+BankExam 安装接口：只有接受的 exact strike 才能启动绝对 tick；揭题时同一 command-manager
+step 原子安装显式 train-bank row、native clip、精确 hold 和固定 deadline。miss、unavailable、
+infeasible 都在原 deadline 消耗机会；不传送、不 reset robot/last-action/history/noise，也不把
+来球静默推迟。所有会改变 timing 的字段和 schedule byte SHA 都进入 hard contract。
+
+这只关闭训练端核心状态机缺口。原 prereg `2e7c4a34...2289c` 是冻结审计件，不回填 null；
+必须新建 launch prereg 并补齐 materialized screen/decision schedules、连续 Isaac/MuJoCo judge、
+self-hit instrumentation、fresh exact baseline 和 semantics-correct plant。上述绑定未齐前，
+`launch-check` 继续按设计失败，任何 Pod 都不得点火。
 
 ## 现役到底已经做了什么
 
