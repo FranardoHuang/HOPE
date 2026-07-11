@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 
 import pytest
 
@@ -96,3 +97,16 @@ def test_schema2_publisher_turns_bad_payload_into_exact_invalid_revocation():
     assert revoked[1] == 0.0
     assert revoked[11] == 0.0
     assert revoked[12:] == [1.0, 0.0, 0.0, 0.0]
+
+
+def test_formal_flat_publication_precedes_best_effort_custom_mirror():
+    node_source = (
+        Path(__file__).resolve().parents[1] / "hope_planner" / "node.py"
+    ).read_text(encoding="utf-8")
+    section = node_source.split(
+        "# The flat wire is the formal Gate-3 control path.", 1
+    )[1].split("# `valid_commands` is the control-visible count", 1)[0]
+    assert section.index("self.flat_cmd_pub.publish(fm)") < section.index(
+        "self.cmd_pub.publish(out)"
+    )
+    assert "except Exception as exc" in section

@@ -329,6 +329,7 @@ class HOPEPlannerNode(Node):
         self._n_planner_valid = 0
         self._n_valid = 0
         self._n_flat_contract_rejected = 0
+        self._n_custom_mirror_rejected = 0
         self._last_valid = False
         self._last_tts = float("nan")
         self.create_timer(0.1, self._publish_diagnostics)
@@ -461,47 +462,55 @@ class HOPEPlannerNode(Node):
                     throttle_duration_sec=2.0,
                 )
 
-        if self.cmd_pub is not None:
-            out = RacketCommand()
-            out.header = msg.header
-            out.header.frame_id = "world"
-            if flat_contract_error is not None:
-                # Canonical invalid mirror: finite zeros plus opponent-facing
-                # +X normal. Consumers see the same revocation as flat schema 2.
-                out.normal.x = 1.0
-                out.valid = False
-            else:
-                out.position.x = float(cmd.p_intercept[0])
-                out.position.y = float(cmd.p_intercept[1])
-                out.position.z = float(cmd.p_intercept[2]) + self._policy_z_offset
-                out.velocity.x = float(cmd.v_racket[0])
-                out.velocity.y = float(cmd.v_racket[1])
-                out.velocity.z = float(cmd.v_racket[2])
-                # RacketCommand.normal carries the unit face normal (Vector3), not an
-                # orientation. IK-based controllers that need a full quaternion can call
-                # quaternion_utils.normal_to_quaternion(cmd.n_racket, constrain_up=True).
-                out.normal.x = float(cmd.n_racket[0])
-                out.normal.y = float(cmd.n_racket[1])
-                out.normal.z = float(cmd.n_racket[2])
-                out.strike_time = float(cmd.t_strike)
-                out.time_to_strike = float(self._last_tts)
-                out.ball_velocity_outgoing.x = float(cmd.v_ball_outgoing[0])
-                out.ball_velocity_outgoing.y = float(cmd.v_ball_outgoing[1])
-                out.ball_velocity_outgoing.z = float(cmd.v_ball_outgoing[2])
-                out.valid = bool(cmd.valid)
-                out.clears_net = bool(cmd.clears_net)
-                out.bypasses_net_posts = bool(cmd.bypasses_net_posts)
-                out.predicted_bounces = int(cmd.num_bounces)
-            self.cmd_pub.publish(out)
-
-        # Mirror to the flat topic for the AGI C++ runner (--planner). swing_sign is left 0
-        # (the runner derives the side from the base-relative target y); frame_code 0 = world.
-        # Schema 2 carries normal+rho in this SAME publication so a delayed face command can
-        # never be paired with a newer position/velocity command.
+        # The flat wire is the formal Gate-3 control path. Publish it before
+        # touching the optional custom-message mirror: a conversion or DDS
+        # exception in hope_msgs must never suppress a fresh flat command or
+        # revocation and leave the previous face tuple alive.
         if self.flat_cmd_pub is not None:
             fm = Float64MultiArray()
             fm.data = flat_data
             self.flat_cmd_pub.publish(fm)
+
+        if self.cmd_pub is not None:
+            try:
+                out = RacketCommand()
+                out.header = msg.header
+                out.header.frame_id = "world"
+                if flat_contract_error is not None:
+                    # Canonical invalid mirror: finite zeros plus opponent-facing
+                    # +X normal. Consumers see the same revocation as flat schema 2.
+                    out.normal.x = 1.0
+                    out.valid = False
+                else:
+                    out.position.x = float(cmd.p_intercept[0])
+                    out.position.y = float(cmd.p_intercept[1])
+                    out.position.z = float(cmd.p_intercept[2]) + self._policy_z_offset
+                    out.velocity.x = float(cmd.v_racket[0])
+                    out.velocity.y = float(cmd.v_racket[1])
+                    out.velocity.z = float(cmd.v_racket[2])
+                    # RacketCommand.normal carries the unit face normal (Vector3), not an
+                    # orientation. IK-based controllers that need a full quaternion can call
+                    # quaternion_utils.normal_to_quaternion(cmd.n_racket, constrain_up=True).
+                    out.normal.x = float(cmd.n_racket[0])
+                    out.normal.y = float(cmd.n_racket[1])
+                    out.normal.z = float(cmd.n_racket[2])
+                    out.strike_time = float(cmd.t_strike)
+                    out.time_to_strike = float(self._last_tts)
+                    out.ball_velocity_outgoing.x = float(cmd.v_ball_outgoing[0])
+                    out.ball_velocity_outgoing.y = float(cmd.v_ball_outgoing[1])
+                    out.ball_velocity_outgoing.z = float(cmd.v_ball_outgoing[2])
+                    out.valid = bool(cmd.valid)
+                    out.clears_net = bool(cmd.clears_net)
+                    out.bypasses_net_posts = bool(cmd.bypasses_net_posts)
+                    out.predicted_bounces = int(cmd.num_bounces)
+                self.cmd_pub.publish(out)
+            except Exception as exc:  # optional mirror; formal flat already published above
+                self._n_custom_mirror_rejected += 1
+                self.get_logger().error(
+                    "optional RacketCommand mirror failed after formal flat publication: "
+                    f"{type(exc).__name__}: {exc}",
+                    throttle_duration_sec=2.0,
+                )
 
         # `valid_commands` is the control-visible count, not merely a successful
         # planner solve. A schema-2 payload rejected into valid=0 must never be
@@ -592,6 +601,10 @@ class HOPEPlannerNode(Node):
             KeyValue(
                 key="flat_contract_rejected",
                 value=str(self._n_flat_contract_rejected),
+            ),
+            KeyValue(
+                key="custom_mirror_rejected",
+                value=str(self._n_custom_mirror_rejected),
             ),
             KeyValue(key="last_valid", value=str(self._last_valid)),
             KeyValue(key="time_to_strike_s", value=f"{self._last_tts:.4f}"),

@@ -90,6 +90,8 @@ command timeout. Unknown/fractional rows received after an active schema-2 comma
 schema-1 keeps its historical ignore-and-age behavior when no formal face command is active. A 179
 actor refuses to engage on schema 1. The planner publishes schema 1 by default for compatibility;
 a reviewed 179 Gate 3 launch must set `racket_flat_schema:=2`.
+The formal flat row is published before the optional `hope_msgs/RacketCommand` mirror; mirror
+conversion/DDS failures are counted but cannot suppress a new formal row or revocation.
 
 The positive-X check is only the planner's minimum A-frame invariant. A train-bank-derived
 per-clip normal envelope/dot threshold is not yet exported and remains a vendor Gate 3 runtime
