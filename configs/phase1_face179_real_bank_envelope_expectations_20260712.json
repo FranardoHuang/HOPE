@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "purpose": "Content-bound prospective expectations for re-exporting the formal Phase-1 179-D train-normal envelope; not behavior evidence",
+  "source_asset_manifest": {
+    "path": "configs/phase1_fresh_v3_asset_manifest_20260711.json",
+    "sha256": "0c2a565d7b7040afdda97baecdaf2cea923beaf3cf9c45a574d218bb82386e46"
+  },
+  "ignored_train_bank_restore": {
+    "runbook": "docs/operations/setup_local_sync.md#phase-1-fresh-and-causal-bundle-2026-07-11",
+    "pod1_path": "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/s1_v4rg_runtime_order_schema3_train.npz",
+    "documented_local_path": "hope_training/whole_body_tracking/artifacts/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/s1_v4rg_runtime_order_schema3_train.npz"
+  },
+  "train_bank": {
+    "basename": "s1_v4rg_runtime_order_schema3_train.npz",
+    "sha256": "2da2bd1280c45944418d41fe5788d09d7c0ebb0ff7d34fa87c8dd0fcf16a0700",
+    "source_family_sha256": "b21c161a0240893a4a469136c2d5298c2ecfa9f2b4a8c6fb9493b679f3728ad5",
+    "schema_version": 3,
+    "split": "train",
+    "face_frame": "mount_plusY_A",
+    "clip_order": [
+      "forehand",
+      "backhand"
+    ]
+  },
+  "external_wire": {
+    "schema_version": 2,
+    "frame": "world_table_frame0",
+    "normal_semantics": "physical_striking_face_B_opponent_facing",
+    "normal_x_strict_min": 0.000001
+  },
+  "mount_normal_sign_per_clip": [
+    1.0,
+    -1.0
+  ],
+  "raw_A_envelope_algorithm": "per_clip_sign_preserving_spherical_mean_cap_v1",
+  "clips": {
+    "forehand": {
+      "clip_id": 0,
+      "row_count": 757,
+      "mount_normal_sign": 1.0,
+      "raw_A_x_range": [
+        0.5924,
+        0.8550
+      ],
+      "physical_B_x_range": [
+        0.5924,
+        0.8550
+      ],
+      "min_raw_A_row_dot_raw_A_reference": 0.90667,
+      "expected_cap_min_dot": 0.974278,
+      "expected_center_dot_raw_A_reference": 0.976114
+    },
+    "backhand": {
+      "clip_id": 1,
+      "row_count": 724,
+      "mount_normal_sign": -1.0,
+      "raw_A_x_range": [
+        -0.8888,
+        -0.6241
+      ],
+      "physical_B_x_range": [
+        0.6241,
+        0.8888
+      ],
+      "min_raw_A_row_dot_raw_A_reference": 0.85413,
+      "expected_cap_min_dot": 0.972078,
+      "expected_center_dot_raw_A_reference": 0.951542
+    }
+  },
+  "acceptance_notes": [
+    "All cap rows and references remain raw mount +Y/A-frame values.",
+    "Only the normal is multiplied by mount_normal_sign_per_clip when converting between physical wire B and actor/bank A; position and velocity are unchanged.",
+    "A real export must reproduce these prospective ranges/statistics from the exact bank bytes before model preflight.",
+    "This fixture is a source-contract check, not Isaac, vendor MuJoCo, self-hit, recovery, or Gate 3 behavior evidence."
+  ]
+}

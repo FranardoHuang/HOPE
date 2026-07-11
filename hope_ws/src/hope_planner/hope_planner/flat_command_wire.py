@@ -1,10 +1,13 @@
 """Versioned flat racket-command wire shared with the native A3 runner.
 
-Schema 1 is the deployed legacy position/velocity command.  Schema 2 appends the
-world-frame demanded racket normal and the reserved spin-rho scalar required by
-the 179-D ``deploy_parity_face179`` actor.  The current Phase-1 contract freezes
-rho to exactly zero; a future spin curriculum needs a new reviewed contract
-instead of silently assigning meaning to this placeholder.
+Schema 1 is the deployed legacy position/velocity command. Schema 2 appends the
+world-frame physical striking-face-B normal (opponent-facing +X) and reserved
+spin-rho scalar required by the 179-D ``deploy_parity_face179`` runner. After
+the runner selects the clip it multiplies only this normal by the frozen
+``mount_normal_sign_per_clip=[+1,-1]`` to recover the raw mount +Y/A command
+used by the train bank and actor. Position/velocity are never sign-flipped. The
+current Phase-1 contract freezes rho to exactly zero; a future spin curriculum
+needs a new reviewed contract instead of silently assigning meaning to it.
 """
 
 from __future__ import annotations
@@ -43,7 +46,7 @@ def pack_racket_command_flat(
     normal_cmd_w: Sequence[float] | None = None,
     rho: float = 0.0,
 ) -> list[float]:
-    """Build one canonical wire row and fail closed on ambiguous face data."""
+    """Build one canonical row; ``normal_cmd_w`` is physical face B, not raw mount A."""
 
     if schema not in (RACKET_FLAT_SCHEMA_V1, RACKET_FLAT_SCHEMA_V2_FACE179):
         raise ValueError(f"unsupported racket flat schema {schema}")

@@ -1558,8 +1558,8 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    schema-2/L0/L1/桌网/动力学，最终先过智元 vendor MuJoCo Gate3 runtime/stability，再由
    Gate3B 共用 runtime 做 no-reset behavior 主判。
 52. 【franco/Codex】**179-D 进 Gate 3 不再靠“加个维数白名单”**——新增 flat wire schema2，
-   同一条消息原子携带拍位/拍速/世界系 demanded normal/zero rho；C++ 要求 exact
-   `deploy_parity_face179` term metadata、face/bank/SHA 谱系、planner mode、正 X unit normal，schema1
+   同一条消息原子携带拍位/拍速/世界系物理击球面 B normal/zero rho；C++ 要求 exact
+   `deploy_parity_face179` term metadata、face/bank/SHA 谱系、planner mode、B 正 X unit normal，schema1
    不能 engage。坏 payload/no-solution 两条 wire 都主动发 finite `valid=0`，接收端对 active-face 后
    的 malformed/unknown 包记 revoke；观测严格是 175 逐位前缀+4尾部。现仅源码/单测，train-bank
    normal envelope、canonical recovery、vendor full-dependency x86 build、no-publish trace、Gate3 runtime 均未过。
@@ -1651,3 +1651,34 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
   正确排除。**训练效果未验证**(reward 未跑一臂,属 franco reward lane)。
 - 状态:已推 **origin/`yikang-linux-port-0711`**(基 hitter@5c346ea + 2 commit:`407a443` 奖励 / `6b10998`
   viewer);**待 franco/Codex 审入 rally/hitter 线 + 一次 RallyFinalV2 −0.5 验证跑**确认头不再 park 软限。
+
+## 2026-07-12: Gate3 face179 严格模型门
+
+62. 【franco/Codex】**179 envelope 首版被红队判 P0，不计完成**——`b5762fa` 虽把 exact schema3
+   train bytes 逐 clip 做 cap 并加自哈希 metadata，却把外部物理击球面 B 与 bank/actor 原始安装面 A
+   混成“所有 normal 都正 X”；真实反手 raw-A 本来就是负 X，因此首版会把正确反手拒绝。此发现
+   发生在新 formal ONNX/vendor runtime 前，没有错误行为结果入账。
+63. 【franco/Codex】**B-wire→A-actor 的 179 合同修正闭环**——schema2 继续只收 opponent-facing
+   `B.x>0`；checkpoint、native/standalone exporter、envelope payload/C++ loader 全链强制
+   `mount_normal_sign_per_clip=[+1,-1]`。已选 clip 后仅转换 `n_A=sign*n_B`，拍位/拍速不变；训练行
+   用 `sign*raw_A.x>1e-6`，runtime 同时过 raw-A reference hemisphere 与 cap。真实 bank fixture 绑定
+   `2da2bd12...a0700`/family `b21c161a...28ad5`、757/724 行和 cap minima `.974278/.972078`；standalone
+   Isaac-free import 与 locale-independent SHA/float parser 均有回归门。旧 formal ONNX 仍需重导；
+   fixture/source tests 不是 vendor MuJoCo、自击、恢复或连续 Gate3 通过。
+64. 【franco/Codex】**第二轮红队阻止 no-publish 给旧模型“顺便免检”**——原
+   `diagnostic_no_publish` 同时控制禁发和 ONNX legacy escape，导致 07-11 preflight/real-model test
+   只能保留 loader 生命周期+backend 顺序证据，publishable certificate 降级。现普通 no-publish/
+   dry-run/preflight 与 live publish 同门强制 schema2+exact complete schema3+179 envelope；旧模型另用
+   `--allow-legacy-model-diagnostic`，必须禁发且禁止 preflight。certificate 从解析值打印
+   publishable/exact/sign；三份临时坏模型(strip metadata/缺 envelope/exact=0)的 production-runner
+   负向脚本已落地，等新 ONNX/vendor binary 实跑。standalone 也改成全验证后同目录 temp+fsync+
+   atomic replace，失败保留旧模型；export/runtime reference dot 统一严格 `>1e-6`。host source gate
+   41 pass/1 optional integration skip，绝不写成 vendor Gate3 通过。
+65. 【franco/Codex】**真实 formal SZ 把严格 179 模型门补跑完，源码可合、行为门仍开**——Pod1
+   隔离 ROS/Jazzy+AimRT Release 从 exact `2fa35340` 增量重建；fresh SZ seed3 model2000 绑定
+   checkpoint `11f3a288...e77a5`、train bank `2da2bd12...a0700`、family `b21c161a...28ad5`，
+   新 ONNX=`0c428ddf...b7b155`、envelope=`df3fd8ae...08502e`。native 219 项=210 pass/9
+   optional skip/0 fail；严格正例 rc0 且 parsed publishable/exact/179/sign 全对、backend marker=0；
+   strip metadata/缺 envelope/exact=0 三负例均 rc3，legacy+preflight rc2。错误 exam-bank 导出
+   rc1 后 final SHA 不变、temp=0；824 compile rows 无 fast-math。证据 manifest 已入库。未启动
+   vendor simulator/transport/backend first tick，不能写成 Gate3/Gate3B 通过。

@@ -89,7 +89,13 @@ time it must be inferred from:
 Current (non-final) racket mount, from `robots/agibot_a3.py` / `HOPEPingPong.yaml`:
 
 - `A3_MOUNT_OFFSET = (0.210211399202899, 0.0320784994676765, 0.0320358706296689)` in the `right_wrist_yaw_Link` frame.
-- Racket-face normal = racket-local `+Y` (`mount_normal_axis = 1`, `mount_normal_sign = +1`).
+- Raw mount normal A = racket-local `+Y` (`mount_normal_axis = 1`, `mount_normal_sign = +1`). The
+  train bank and 179-D actor face tail remain in this A convention.
+- Flat-wire schema 2 carries the physical opponent-facing striking face B in world/table frame.
+  After clip selection, `n_A = s[clip] * n_B` with frozen `s=[+1,-1]` for
+  forehand/backhand; the inverse is identical. This conversion applies only to the normal, never
+  racket position or velocity. Consequently a valid backhand raw-A normal can have negative world
+  x while its physical-B wire normal must have positive world x.
 
 These values are current but NOT final and are expected to change after calibration.
 

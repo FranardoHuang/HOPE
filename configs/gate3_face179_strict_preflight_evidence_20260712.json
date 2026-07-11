@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "evidence_id": "gate3-face179-strict-preflight-formal-sz-seed3-model2000-20260712",
+  "status": "source_and_strict_model_preflight_verified_gate3_behavior_open",
+  "executed_utc": "2026-07-11T21:59:00Z/2026-07-11T22:19:00Z",
+  "hardware_authorized": false,
+  "simulator_started": false,
+  "backend_initialized": false,
+  "transport_started": false,
+  "source": {
+    "commit": "2fa35340b63f98c04c67c8b29c80939610fd86e9",
+    "tree": "299a2907229c1aaa4b581007c0ebe46cd914a011",
+    "branch": "codex/gate3-face179-wire",
+    "isolated_root": "/workspace/codexschema/gate3_face179_b5762fa",
+    "changed_file_overlay_hash_check": "19_of_19_match_local_commit_bytes"
+  },
+  "formal_input": {
+    "checkpoint_sha256": "11f3a2885ee2982569b420e63d29523fc413a4512dad374f62c6ddb4b3ec77a5",
+    "training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+    "train_bank_sha256": "2da2bd1280c45944418d41fe5788d09d7c0ebb0ff7d34fa87c8dd0fcf16a0700",
+    "source_family_sha256": "b21c161a0240893a4a469136c2d5298c2ecfa9f2b4a8c6fb9493b679f3728ad5",
+    "forehand_motion_sha256": "f2cb2d9f5d27cefbcee0b790000fcd979abaf02894d4fcad061ebca27f141687",
+    "backhand_motion_sha256": "1722553375cd28f9b2d567c01b1a5fc6bcd149fa12cadb20e5202a9153367534",
+    "exported_onnx_sha256": "0c428ddf9968b047acbe7bbd5a39069a8e661ab0421038ea3b635284deb7b155",
+    "normal_envelope_payload_sha256": "df3fd8ae90fc85d7c97332699cf2348fe1b510a08b15fb972201b21b9008502e",
+    "mount_normal_sign_per_clip": [
+      1,
+      -1
+    ],
+    "normal_envelope_row_counts": [
+      757,
+      724
+    ],
+    "normal_envelope_min_dots": [
+      0.9742777708912903,
+      0.9720784053766547
+    ]
+  },
+  "release_build": {
+    "platform": "RunPod Ubuntu 24.04 x86_64",
+    "compiler": "GNU C++ 13.3.0",
+    "build_type": "Release",
+    "ros": "Jazzy",
+    "aimrt": "1.6.0-enabled",
+    "run_tests_sha256": "0f8fbd119c4ac9ece6a12ad587d99bf17d6e047e096bbcd1f242f51452d9ca58",
+    "runner_sha256": "5068d8f6b34385ad928e31ee785b6793555f016142014d9aad000421071b01e5",
+    "runtime_probe_sha256": "8cf9b300829e8ed25368d589706694429d8afa1c43e2858f3a2e309e5bb236e0",
+    "compile_math_audit_sha256": "9c33b580acf3807578fb59799ccc2ec014645b03a4a311cb0e881d9990da3704",
+    "compile_entries": 824,
+    "unsafe_math_flags": []
+  },
+  "checks": {
+    "standalone_import_smoke": {
+      "result": "pass",
+      "whole_body_tracking_package_imported": false,
+      "isaac_modules_imported": false,
+      "onnx_torch_imported_before_smoke": false,
+      "log_sha256": "17171b4c5a65e86ec5dd2b1ed999efe501129f3de593326be1c293f6818830ac"
+    },
+    "native_full_suite": {
+      "tests": 219,
+      "passed": 210,
+      "skipped_optional_assets": 9,
+      "failed": 0,
+      "log_sha256": "22768e5721b62d52fb452e0dc6503c0ce90a86a92555bc339346a86ea9d91cde",
+      "json_sha256": "5ff1c6e96c9d47fcbec3cc80750b7a95ba7c45b3f24561d532e7278fc67b1dd5"
+    },
+    "strict_positive_preflight": {
+      "returncode": 0,
+      "publishable_model_contract": true,
+      "training_contract_exact": true,
+      "obs_dim": 179,
+      "backend_not_initialized": true,
+      "log_sha256": "9d94cf5e779036f5e563153ae2266f11f3b0494fe8a1f1c7015a84a6bb986de8"
+    },
+    "strict_negative_preflight": {
+      "metadata_stripped_returncode": 3,
+      "missing_envelope_returncode": 3,
+      "training_contract_inexact_returncode": 3,
+      "legacy_flag_with_preflight_returncode": 2,
+      "backend_markers_observed": false,
+      "summary_sha256": "fbac679a8c18dac4e51878da8473448bec6418950c49f961b887ae4f97df8cdd"
+    },
+    "atomic_export_failure_probe": {
+      "invalid_exam_as_train_returncode": 1,
+      "final_sha256_before": "0c428ddf9968b047acbe7bbd5a39069a8e661ab0421038ea3b635284deb7b155",
+      "final_sha256_after": "0c428ddf9968b047acbe7bbd5a39069a8e661ab0421038ea3b635284deb7b155",
+      "temporary_files_left": 0,
+      "log_sha256": "d31ccc9d7429f0d560c65f4ab8f89e24b9bfb0d6fc9150474117b820b5e64c24"
+    }
+  },
+  "claims_not_made": [
+    "vendor MuJoCo simulator started",
+    "backend first tick passed",
+    "planner-policy closed loop passed",
+    "Gate3 continuous stability passed",
+    "Gate3B physical return behavior passed",
+    "real robot authorized or commanded"
+  ]
+}

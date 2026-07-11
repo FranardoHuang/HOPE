@@ -525,14 +525,17 @@ instrument cells.
 ### Gate 3 face-command wire and engine-gap localization
 
 The 179-D Phase-1 policies cannot be tested by adding `179` to a shape whitelist. Their last four
-columns require the planner's demanded world-frame normal and a zero rho placeholder atomically
-paired with position/velocity. A versioned flat schema-2 publisher/receiver and exact
+columns require the actor's raw mount-A world-frame normal and a zero rho placeholder atomically
+paired with position/velocity. The external planner wire deliberately carries the physical,
+opponent-facing striking face B instead. A versioned flat schema-2 publisher/receiver and exact
 `deploy_parity_face179` ONNX metadata path are now implemented in source. The loader additionally
 requires `face_command_enabled=1`, `shared_plus_y`, `mount_plusY_A`, an exact schema-3 train bank,
 train split and lowercase content/source-family SHA-256 bindings; width and term names alone are
-not enough. Schema-2 rows require a world-frame opponent-facing unit normal (`x>1e-6`) and zero
-rho. Any malformed/unknown row after an active face tuple records `invalid_after`; the publisher
-turns a bad solve or payload into an explicit finite `valid=0` row on both wires, so silence cannot
+not enough. Schema-2 rows require a world-frame opponent-facing unit B normal (`B.x>1e-6`) and zero
+rho. After clip selection the runner applies exact `[+1,-1]` to the normal only to recover raw A;
+position and velocity are unchanged. Any malformed/unknown row after an active face tuple records
+`invalid_after`; the publisher turns a bad solve or payload into an explicit finite `valid=0` row
+on both wires, so silence cannot
 keep an old swing eligible for the longer command timeout. Schema 1 remains the default for
 existing models and cannot engage a 179 actor. This is not yet a gate result: the
 vendor-source offline x86 build is recorded below, while a ROS/AimRT-enabled build, no-publish
@@ -541,9 +544,10 @@ Active-swing fields are atomic. Post-swing recovery is not yet exact: the curren
 combines a synthesized base-anchored hold position with the previous swing's velocity/normal,
 and no Phase-1 contract proves that hybrid tuple is on-distribution. A canonical recovery tuple
 or separately accepted vendor-MuJoCo recovery paper is required before continuous promotion.
-The positive-X invariant is also only a minimum sign/frame guard. A content-bound per-clip normal
-envelope from the exact training bank is not yet exported; until it exists, arbitrary positive-X
-normals and their self-collision consequences remain a Gate 3 runtime blocker.
+The physical-B positive-X invariant is also only a minimum sign/frame guard. Source now exports
+and enforces a content-bound per-clip normal envelope from the exact training bank, as described below. A new
+envelope-bearing formal ONNX, self-hit evidence and vendor behavior gate are still absent, so this
+source guard must not be promoted into a Gate 3 result.
 
 The same-policy Isaac/MuJoCo gap is localized in stages rather than one aggregate score:
 
@@ -597,8 +601,10 @@ remains `Partial`.
 
 The production runner now also has a fail-closed `--model-preflight-only` path. It requires
 `--no-publish` or `--dry-run`, constructs `PpPolicy` before any backend object is created, and on
-success emits the accepted observation width plus training-contract and source-checkpoint SHA-256
-before exiting. This safely separates “the formal 179 export is loadable under the production
+success emits parsed `publishable_model_contract=true`, `training_contract_exact=1`, the accepted
+observation width, and training-contract/source-checkpoint SHA-256 before exiting. No-publish is a
+transport/runtime diagnostic state, not permission to relax model metadata. This safely separates
+“the formal 179 export is loadable under the production
 metadata contract” from “the vendor backend has started.” The former still requires an isolated
 binary run with the formal candidate; the latter, first actor tick, normal-envelope/recovery
 contracts and Gate 3/Gate 3B behavior all remain open.
@@ -634,9 +640,17 @@ The direct-CMake executable needed its build-tree TBB directory on `LD_LIBRARY_P
 runner stages TBB. `PpPolicy` construction performs one intended zero-observation ONNX prewarm
 inference, but no policy driver, backend tick, transport, simulator, Kit or command path started.
 The live training/eval checkouts remained clean at `6d93bcb...`/`46a0ce2...`, and no isolated
-process remained. This closes formal-model production loading only. First backend tick, per-clip
-normal envelope, canonical recovery tuple and full vendor MuJoCo Gate 3/Gate 3B behavior remain
-open, so G06 stays Partial.
+process remained. This closes the pre-envelope formal-model production loading proof only. The
+same ONNX is intentionally rejected by the stricter source below because it lacks the new envelope
+metadata. Re-export/rebuild, first backend tick, canonical recovery tuple and full vendor MuJoCo
+Gate 3/Gate 3B behavior remain open, so G06 stays Partial.
+
+Red-team follow-up downgrades the 2026-07-11 loader proof to lifetime/backend-order evidence only:
+at that source revision `diagnostic_no_publish` was also passed as the loader's legacy-contract
+escape, and the optional real-model test explicitly enabled it. The inspected model happened to
+declare exact lineage, but the run did not prove that no-publish and live-publish enforced the same
+parsed contract. The stricter source below removes that coupling; a new envelope-bearing model and
+rebuilt production binary must rerun the proof before publishable-model loading is closed again.
 
 ### Recovery tuple and named-ready mismatch are now explicit Gate3 blockers (2026-07-12)
 
@@ -729,3 +743,86 @@ loop. Isaac stays training/diagnostic-only. A future first tick would close only
 prerequisite; only Agibot vendor MuJoCo Gate3/Gate3B behavior can promote a checkpoint. Full static
 operation and remaining blockers are in `docs/operations/run_gate3_first_tick_harness.md`. G06
 remains `Partial`.
+#### 2026-07-12 content-bound per-clip demanded-normal source gate
+
+Formal 179 export and loading now bind the raw-A normal distribution rather than accepting every
+opponent-facing physical-B unit vector. The train NPZ must be exact schema 3, split `train`, ordered
+`forehand,backhand`, `shared_plus_y` and `mount_plusY_A`, with its bytes and source family matching
+the checkpoint contract. The contract and both exporters must carry the exact
+`mount_normal_sign_per_clip=[+1,-1]`. Each clip is processed alone: normalize raw-A rows only after
+the bank's `2e-4` unit check; require `sign[clip] * raw_A.x > 1e-6` for physical-B wire
+representability and `raw_A_row · reference_A > 1e-6`, the same open-hemisphere margin enforced at
+runtime; normalize the row-vector sum; and save
+the minimum row-to-center dot. This
+`per_clip_sign_preserving_spherical_mean_cap_v1` construction never averages forehand with
+backhand or opposite face signs.
+
+The ONNX carries envelope schema/frame/convention/pairing/algorithm, bank/runtime tolerances,
+clip order, the exact sign table, two centers, references, dot thresholds, row counts, and
+duplicated bank/family SHA
+bindings. A dependency-free C++ SHA-256 implementation recomputes the canonical metadata payload;
+the loader then rejects missing keys, a stale payload hash, bank/family mismatch, malformed or
+non-unit vectors, flipped centers, invalid thresholds/counts and wrong clip order. `PpPolicy`
+converts only the physical-B wire normal to A after selecting the clip, then checks both the raw-A
+reference hemisphere and selected cap before its engage transaction commits clock, position,
+velocity, side or normal. A positive-X physical-B unit vector whose converted raw A is outside the
+selected support sets `face_command_out_of_train_envelope` and cannot start a swing. Older 179
+ONNX files lack these
+mandatory keys and therefore fail closed even under model-only/no-publish loading. Other registered
+110/175/177/180 models retain their prior loader behavior.
+
+Host verification currently covers the Python derivation suite, Python exporter/contract suite,
+an Isaac-free standalone-import subprocess, locale-independent standard SHA-256/numeric parsing
+and a compiled dependency-light C++ parse/accept/reject smoke. The Python results are `34 passed`
+for contract/export and `11 passed` for the planner wire. The prospective real-bank fixture
+binds bank `2da2bd12...a0700`, source family `b21c161a...28ad5`, `757/724` rows, raw-A/B sign
+ranges and cap minima `0.974278/0.972078`; it is a read-only source-contract expectation, not a
+behavior result. The fixture does not contain the ignored NPZ: restore and SHA-check it using
+[setup_local_sync.md, Phase-1 fresh and causal bundle](../operations/setup_local_sync.md#phase-1-fresh-and-causal-bundle-2026-07-11).
+A full vendor-dependency Release build and freshly re-exported real 179 model now pass the strict
+model gate described below. A spherical cap is still only an on-distribution envelope, not a
+collision or behavior proof:
+self-hit instrumentation, the recovery tuple and no-reset vendor MuJoCo Gate 3/Gate 3B remain
+open. G06 stays `Partial`.
+
+#### 2026-07-12 publishable-model and atomic-export hardening
+
+`PpPolicyConfig::diagnostic_no_publish` no longer reaches the ONNX contract escape. Plain
+`--no-publish`, `--dry-run` and `--model-preflight-only` now load with the same publishable
+schema-2 packaging, exact/complete schema-3 execution contract, normalization, effort envelope,
+registered layout and (for 179) full content-bound normal envelope required by a live publisher.
+The only legacy escape is `--allow-legacy-model-diagnostic`; CLI validation requires no-publish
+and rejects its combination with model-preflight before loading a model or constructing a backend.
+The optional real-model GTest now uses the strict constructor and requires parsed exact/schema-3/
+publishable flags plus the 179 envelope when applicable.
+
+The production preflight certificate is also derived rather than asserted by mode: it checks the
+parsed booleans, prints `publishable_model_contract=true training_contract_exact=1`, and prints the
+parsed envelope sign table. `verify_face179_preflight_failclosed.py` runs one valid model then
+creates temporary metadata-stripped, missing-envelope and `training_contract_exact=0` variants;
+each must exit nonzero with no backend marker, while legacy-diagnostic plus preflight must exit 2.
+The helper/unit source gate passes locally; the real runner integration result is recorded below.
+
+The standalone exporter now completes every checkpoint/donor/motion/harvest/bank/envelope check
+before creating a graph, writes only an owned same-directory temp, checks the ONNX and metadata
+round trip, fsyncs, and atomically replaces the destination. Failure tests prove an existing
+`policy.onnx` remains byte-identical and no temp remains. Focused host results are `41 passed` plus
+one optional real runner/model integration skip; planner wire remains `11 passed`.
+
+The missing integration was then run on Pod1 from an isolated tree whose 19 changed files match
+exact source `2fa35340b63f98c04c67c8b29c80939610fd86e9` (tree
+`299a2907229c1aaa4b581007c0ebe46cd914a011`). ROS/Jazzy + AimRT 1.6 Release rebuilt all three
+targets. Fresh SZ seed3 model-2000 was re-exported from checkpoint `11f3a288...e77a5`, motions
+`f2cb2d9f...1687`/`17225533...7534` and train bank `2da2bd12...a0700`; the new ONNX is
+`0c428ddf...b7b155`, with envelope payload `df3fd8ae...08502e`. The native suite reports 219
+tests, 210 pass, 9 optional-asset skips and 0 failures. Strict production preflight exits 0 and
+prints parsed publishable/exact/179/sign/bank/family values with no backend marker. Graph-identical
+metadata-stripped, missing-envelope and exact=0 variants each exit 3 before backend; legacy plus
+preflight exits 2. An exam-bank-as-train failure preserves the existing ONNX SHA and leaves zero
+temp files. All 824 compile commands are free of fast/finite-only math flags.
+
+The content-addressed ledger is
+`configs/gate3_face179_strict_preflight_evidence_20260712.json`. This closes the corrected export,
+full Release build and strict model-only preflight gates. It did not start the vendor simulator,
+transport or backend, so first tick, planner-policy closed loop, self-hit, continuous stability and
+Gate3/Gate3B behavior remain open; G06 remains `Partial`.

@@ -98,6 +98,19 @@ Use this file for short project-state updates that future humans and agents need
   wiring, `SC` arm, simulator launch or real command exists. Updated prereg
   SHA is `2ad2caba...e2aa`; the prereg/compiler regression is `24 passed`, and
   the broader schema-3/override/judge/MuJoCo plant regression is `128 passed`.
+- Verified the corrected face179 export and strict production-model preflight in an isolated
+  Pod1 ROS/Jazzy + AimRT Release build at exact source `2fa35340`. The exact fresh SZ seed3
+  model-2000 checkpoint was re-exported with the real `757/724`-row train bank, `[+1,-1]`
+  B-to-A sign table and content-bound normal envelope; ONNX SHA is `0c428ddf...b7b155` and
+  envelope payload SHA is `df3fd8ae...08502e`. The complete native suite is 219 tests:
+  210 pass, 9 optional-asset skips and 0 failures. Strict preflight accepts the exact model
+  with `publishable_model_contract=true`, `training_contract_exact=1`, `obs_dim=179` and no
+  backend marker. Metadata-stripped, missing-envelope and exact=0 variants all fail rc3 before
+  backend, while legacy+preflight fails rc2. An invalid exam-as-train export leaves the existing
+  ONNX byte-identical and no temp file. Release compile audit found 824 entries and no unsafe
+  math flags. Evidence is bound in
+  `configs/gate3_face179_strict_preflight_evidence_20260712.json`. No simulator, transport,
+  backend tick or robot ran; Gate3/Gate3B behavior remains open.
 
 ## 2026-07-11
 
@@ -1507,7 +1520,7 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
 - 开始补 Phase-1 179-D 到 vendor Gate 3 的前置接口：flat wire schema 2 将 position/velocity/
   demanded-normal/zero-rho 原子发布，C++ 只在 exact `deploy_parity_face179` metadata + planner mode
   下构造“175逐位前缀+4维尾部”。review 后再收紧为 face enabled/shared-plus-Y/A-frame、exact
-  schema-3 train bank 与双 SHA 绑定；world normal 必须 unit、正 X，坏包/无解主动发 `valid=0`
+  schema-3 train bank 与双 SHA 绑定；wire 的物理击球面 B world normal 必须 unit、正 X，坏包/无解主动发 `valid=0`
   revoke，不能靠静默让旧命令多活。旧 schema1 默认不变；当前仅源码门，vendor build/runtime 未过。
   训练 bank 的 per-clip normal envelope 与 post-swing canonical recovery tuple 仍是正式 runtime blocker。
 - 179 vendor-source 离线门在隔离 Pod1 archive (`8d56ea86`) 通过：实际 ping-pong executable
@@ -1528,3 +1541,27 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   real-model test 1/1、全套 205 pass/9 optional skip/0 fail；缺 no-publish 时 rc2，安全 preflight
   rc0 并精确打印 179/contract/checkpoint SHA，日志无 backend init/start。构造器仅做一次零观测
   ONNX prewarm；first backend tick、normal envelope、canonical recovery 与 Gate3/Gate3B 仍 open。
+- 179 train-normal envelope 首版 `b5762fa` 被红队判 P0，不计完成：它把外部物理击球面 B 与
+  bank/actor 原始安装面 A 混成一个“全正 X”空间，会错误拒绝真实反手 raw-A。修正版冻结
+  schema-2 wire=`B/+X`、actor/bank=`raw mount +Y/A`，并从 checkpoint 合同到两条 exporter、
+  envelope 自哈希与 C++ loader 全链强制 `[+1,-1]`；选 clip 后只做 `n_A=sign*n_B`，位置/速度
+  不翻。训练行条件改成 `sign*raw_A.x>1e-6`，runtime 同时要求 raw-A reference hemisphere 与
+  cap。SHA 输出与浮点解析不受 process locale 影响，standalone file-level import smoke 证明不
+  执行 package `__init__`/Isaac。真实 bank 只读 fixture 绑定 `2da2bd12...a0700`、family
+  `b21c161a...28ad5`、`757/724` 行及 cap minima `0.974278/0.972078`；它是下一次重导的合同预期，
+  不是 ONNX/Isaac/MuJoCo/自击/恢复证据。host 回归为合同/export `34 passed`、planner wire
+  `11 passed`，另有 locale+BH 转换的 dependency-light C++ compile/run smoke。旧 SZ formal ONNX
+  仍会被新 loader 拒绝；新 ONNX、full
+  vendor build、first tick 与 Gate3 行为门全开，G05/G06 仍 Partial。
+- 179 merge 前第二轮红队又抓到一条 certificate blocker：`--no-publish` 同时被当成 legacy
+  model escape，导致旧 preflight/optional real-model test 没证明“禁发”和“合同放宽”相互独立。
+  修正版把两者拆开；普通 no-publish/dry-run/preflight 与 live publish 同样强制 schema2 packaging、
+  exact+complete schema3、normalization/effort/layout 和 179 envelope。旧模型只可显式带
+  `--allow-legacy-model-diagnostic`，且必须 no-publish、禁止和 preflight 并用。preflight 从解析值
+  断言并打印 `publishable_model_contract=true training_contract_exact=1` 和解析后的 sign。新增真实
+  runner optional 负向集成：strip metadata、删 envelope、exact=0 都须 backend 前 rc!=0；本机无
+  rebuilt vendor binary/新 envelope ONNX，因此只跑 helper/source gate，真实集成保持 skip/open。
+  standalone export 同时改为全输入先验后才写同目录 temp，ONNX+metadata round-trip 后 fsync/
+  atomic replace；失败不覆盖旧 `policy.onnx`、不留 temp。derive/runtime 的 reference 门统一为严格
+  `dot>1e-6`，近边界训练行有回归拒绝。focused host=`41 passed, 1 optional integration skip`，
+  planner wire=`11 passed`；这仍不是 vendor build/preflight/Gate3 行为通过。

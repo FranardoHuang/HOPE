@@ -208,6 +208,16 @@ focused C++ schema/observation tests. These are source gates only; they do not r
 REPO="$(git -C "$AD" rev-parse --show-toplevel)"
 PYTHONPATH="$REPO/hope_ws/src/hope_planner" python3 -m pytest -q \
   "$REPO/hope_ws/src/hope_planner/test/test_flat_command_wire.py"
+env -u PYTHONPATH python3 \
+  "$REPO/hope_training/whole_body_tracking/scripts/standalone_onnx_export.py" \
+  --contract-import-smoke
+python3 -m pytest -q \
+  "$REPO/hope_training/whole_body_tracking/tests/test_stage1_normal_envelope.py" \
+  "$REPO/hope_training/whole_body_tracking/tests/test_atomic_output.py" \
+  "$REPO/hope_training/whole_body_tracking/tests/test_training_contract_schema3.py" \
+  "$REPO/hope_training/whole_body_tracking/tests/test_export_obs_norm_contract.py"
+python3 -m pytest -q \
+  "$AD/tests/test_face179_preflight_failclosed.py"
 "$B/runtime/run_tests" \
   --gtest_filter='PpPlannerInput.*:PpFace179Wire.*' --gtest_color=no
 ```
@@ -230,14 +240,32 @@ AimRT backend. The switch is diagnostic-only and fails unless publishing is disa
   --planner --no-publish --model-preflight-only
 ```
 
-An accepted run exits zero and prints `backend_not_initialized=true`, `obs_dim`,
+An accepted run exits zero and prints parsed `publishable_model_contract=true`,
+`training_contract_exact=1`, `backend_not_initialized=true`, `obs_dim`,
 `training_contract_sha256`, and `source_checkpoint_sha256`. A 179-D actor additionally exercises
-the exact face-command/bank/source-family metadata checks and the existing planner-mode guard.
+the exact face-command/bank/source-family metadata checks, recomputes the train-normal-envelope
+payload SHA, validates its two sign-preserving spherical caps, and exercises the existing
+planner-mode guard. Missing any envelope field fails load; this means the pre-envelope SZ model
+used by the 2026-07-11 loader proof is expected to fail under the stricter source and must be
+re-exported from its exact train bank before this gate is rerun. An accepted 179 preflight also
+prints `normal_envelope_payload_sha256`, `normal_envelope_train_bank_sha256` and
+`normal_envelope_source_family_sha256`, plus
+`normal_envelope_mount_normal_sign_per_clip=1,-1`, so the loader ledger can be matched to the
+export ledger. The envelope is raw mount A; schema-2 input is opponent-facing physical B, and the
+runner converts only the normal with `[+1,-1]` after clip selection. The fixture
+`configs/phase1_face179_real_bank_envelope_expectations_20260712.json` binds the real train-bank/
+family SHA, `757/724` row counts and expected raw-A cap statistics for the re-export check; it is
+not a behavior fixture.
 The output must contain neither `backend cfg` nor `A3AimrtBackend initialised`. Omitting
 `--no-publish`/`--dry-run` exits 2 before model or backend initialization. This is a loader and
 metadata gate only. Constructing `PpPolicy` deliberately performs one zero-observation ONNX
 prewarm inference; it does not start the policy driver, tick a backend, connect ROS/AimRT,
 instantiate MuJoCo, or authorize robot commands.
+
+No-publish disables transport; it does not relax the model contract. The explicit legacy escape
+is `--allow-legacy-model-diagnostic`, which requires no-publish and is forbidden with
+`--model-preflight-only`. Thus neither plain no-publish nor preflight may open a metadata-stripped,
+inexact-schema3 or envelope-less 179 model.
 
 The real-model loader regression must be run with an exported ONNX, not just a synthetic header
 test. It guards the ONNX Runtime `TypeInfo`/`TensorTypeAndShapeInfo` owner lifetime:
@@ -245,12 +273,24 @@ test. It guards the ONNX Runtime `TypeInfo`/`TensorTypeAndShapeInfo` owner lifet
 ```bash
 A3_PP_ONNX_PATH=/absolute/path/to/policy.onnx \
   "$B/runtime/run_tests" \
-  --gtest_filter='PpOnnxPolicy.LoadsRealModelWithStableInputTypeInfoLifetime' \
+  --gtest_filter='PpOnnxPolicy.LoadsOnlyPublishableRealModelWithStableInputTypeInfoLifetime' \
   --gtest_color=no
 ```
 
 Without `A3_PP_ONNX_PATH` this one optional asset test skips. A real formal 179 export must pass it
 before the production preflight is credited.
+
+Then run the production-binary negative integration. It makes only temporary copies of the input
+ONNX and requires metadata-stripped, missing-envelope, and `training_contract_exact=0` variants to
+exit nonzero before any backend marker. It also requires legacy-diagnostic + preflight to fail CLI
+validation with rc2:
+
+```bash
+python3 "$AD/scripts/verify_face179_preflight_failclosed.py" \
+  --runner "$B/runtime/a3_deploy_onnx_ref_pingpong" \
+  --runtime-cfg "$AD/config/a3_runtime_config.pingpong.yaml" \
+  --model /absolute/path/to/envelope-bearing-policy.onnx
+```
 
 For a direct-CMake build, the runtime may also need the build-tree TBB directory (the package
 builder stages this dependency automatically):
@@ -259,7 +299,8 @@ builder stages this dependency automatically):
 export LD_LIBRARY_PATH="$B/gnu_13.3_cxx20_64_release:${LD_LIBRARY_PATH:-}"
 ```
 
-Verified in the isolated ROS/AimRT-enabled Release archive at source `a82eba6c` on 2026-07-11:
+Historical evidence in the isolated ROS/AimRT-enabled Release archive at source `a82eba6c` on
+2026-07-11:
 
 - all three targets (`run_tests`, production ping-pong runner and runtime probe) linked;
 - the formal SZ seed2 model-2000 ONNX SHA was `350b51cc...34cc2`;
@@ -269,8 +310,16 @@ Verified in the isolated ROS/AimRT-enabled Release archive at source `a82eba6c` 
 - planner + no-publish preflight: rc0, `obs_dim=179`, contract
   `3a3b3d95...b9972`, checkpoint `d920...5e22`, and no backend-init/start line.
 
-This closes the production binary's formal-model loading gate, not the backend first-tick or
-vendor MuJoCo Gate 3/Gate 3B behavior gate. Full content-addressed evidence is recorded in G06.
+That historical run remains loader-lifetime and backend-order evidence, but does not close the
+strict publishable-model gate: its no-publish bit also enabled the legacy loader escape and its
+model predates the envelope.
+
+The strict rerun is now complete at source `2fa35340` with formal SZ seed3 model-2000 ONNX
+`0c428ddf...b7b155`: native 219 tests = 210 pass, 9 optional skips, 0 fail; positive preflight rc0;
+the three metadata mutations rc3; legacy+preflight rc2; no backend marker; 824 compile commands
+without unsafe math. Exact inputs, binaries and logs are in
+`configs/gate3_face179_strict_preflight_evidence_20260712.json`. Proceed to backend first tick and
+vendor Gate 3/Gate 3B; do not reinterpret this model-only result as simulator behavior.
 
 Safety finite checks rely on IEEE NaN/Inf semantics. Verify Release did not
 re-introduce fast-math:

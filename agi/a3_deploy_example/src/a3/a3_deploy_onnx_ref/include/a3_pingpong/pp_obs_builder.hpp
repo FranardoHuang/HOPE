@@ -63,6 +63,8 @@ struct PpRacketTarget {
   double time_to_strike;      // seconds
   Vec2 base_target_xy = Vec2::Zero();
   bool face_command_valid = false;
+  // Raw mount +Y/A command expected by the 179 actor. PpPolicy converts the external physical-B
+  // schema-2 normal with mount_normal_sign_per_clip only after selecting forehand/backhand.
   Vec3 normal_cmd_w = Vec3(1.0, 0.0, 0.0);
   double rho = 0.0;
 };
@@ -213,10 +215,12 @@ inline Eigen::VectorXd build_obs_175(const PpRefs& refs, const PpRobotState& sta
 }
 
 // Assemble the 179-D ``deploy_parity_face179`` observation. The first 175
-// values are byte-for-byte build_obs_175; the tail is the demanded face normal
-// in WORLD frame plus the reserved rho scalar. The planner wire must provide
-// this command atomically with position/velocity. A scripted/fabricated normal
-// is rejected instead of producing a right-width/wrong-semantics policy input.
+// values are byte-for-byte build_obs_175; the tail is the demanded raw mount
+// +Y/A normal in WORLD frame plus the reserved rho scalar. The external planner
+// wire supplies physical striking-face B atomically with position/velocity;
+// PpPolicy applies clip sign [+1,-1] to the normal only before this builder.
+// A scripted/fabricated normal is rejected instead of producing a
+// right-width/wrong-semantics policy input.
 inline Eigen::VectorXd build_obs_179(const PpRefs& refs, const PpRobotState& state,
                                      const PpRacketTarget& target,
                                      const Eigen::VectorXd& last_action,

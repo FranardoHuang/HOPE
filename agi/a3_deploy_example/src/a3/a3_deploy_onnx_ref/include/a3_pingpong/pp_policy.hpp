@@ -142,9 +142,12 @@ struct PpPolicyConfig {
   // default on hardware. The A/B/C rehearsal selects fabricated explicitly via
   // --loc-mode. See LocMode + SIM_DEPLOY_REHEARSAL.md.
   LocMode loc_mode = LocMode::kPerfectTracking;  // A/B/C localization mode (see LocMode).
-  // Explicit process-wide no-publish diagnostics may inspect legacy/raw artifacts and the
-  // perfect-tracking dropout behavior. This must never be enabled for a publish-capable run.
+  // Process-wide no-publish controls runtime diagnostic relaxations and verbose first-tick
+  // logging only. It does NOT relax the ONNX/model contract.
   bool diagnostic_no_publish = false;
+  // Separate, explicit escape for inspecting a legacy model. The CLI requires no-publish and
+  // forbids this flag in model-preflight mode, so a preflight can never certify a relaxed model.
+  bool allow_legacy_model_diagnostic = false;
   // DEFAULT FLIPPED TO TRUE (2026-07-03): with yaw_align (below, default on) the base yaw is
   // expressed relative to the ENGAGE heading — it starts at identity and then tracks the robot's
   // REAL turning, which is exactly what training saw (targets rotated by the current base yaw,
@@ -318,11 +321,14 @@ struct PpPolicyConfig {
 class PpPolicy {
  public:
   PpPolicy(const std::string& onnx_path, PpPolicyConfig cfg = {})
-      : onnx_(onnx_path, cfg.diagnostic_no_publish), cfg_(cfg), level_(cfg.level),
+      : onnx_(onnx_path, cfg.allow_legacy_model_diagnostic), cfg_(cfg), level_(cfg.level),
         swing_speed_(cfg.swing_speed), swing_dir_(cfg.start_backhand ? -1 : 1),
         legs_passive_(cfg.legs_passive), waist_passive_(cfg.waist_passive),
         leg_clamp_rad_(cfg.leg_clamp_rad), leg_smooth_alpha_(cfg.leg_smooth_alpha),
         last_action_(Eigen::VectorXd::Zero(kNumJoints)) {
+    if (cfg_.allow_legacy_model_diagnostic && !cfg_.diagnostic_no_publish)
+      throw std::runtime_error(
+          "pingpong: legacy model diagnostics require process-wide no-publish");
     if (!build_src_to_sdk(onnx_.joint_names(), isaac_to_sdk_))
       throw std::runtime_error("pingpong: ONNX joint_names do not map onto the backend layout");
     if (!std::isfinite(cfg_.dt) || cfg_.dt <= 0.0)
@@ -334,7 +340,7 @@ class PpPolicy {
         std::fabs(cfg_.dt - onnx_.policy_step_dt_s()) > 1e-12)
       throw std::runtime_error(
           "pingpong: runtime policy dt does not exactly match schema-v3 ONNX policy_step_dt_s");
-    if (!cfg_.diagnostic_no_publish && !onnx_.has_schema3_execution_contract())
+    if (!cfg_.allow_legacy_model_diagnostic && !onnx_.has_schema3_execution_contract())
       throw std::runtime_error(
           "pingpong: publish-capable runtime requires a complete schema-v3 ONNX execution "
           "contract");
@@ -1657,11 +1663,38 @@ class PpPolicy {
         (onnx_.obs_dim() == kObsDim110 && cfg_.vel_cmd_box_center)
             ? cfg_.racket_vel_w_clip[eng_clip]
             : vel_w;
+    Vec3 normal_raw_a_w = normal_w;
     if (onnx_.obs_dim() == kObsDim179) {
+      // The schema-2 wire is the physical striking face B and is always opponent-facing +X.
+      // Training/bank/actor use raw mount +Y/A.  Convert only the normal after the clip is known:
+      // FH sign=+1, BH sign=-1. Position and velocity remain in the unchanged world/table frame.
       const double normal_norm = normal_w.norm();
       if (!std::isfinite(normal_norm) || std::fabs(normal_norm - 1.0) > 1e-6 ||
           !std::isfinite(snap.cmd.rho) || snap.cmd.rho != 0.0) {
         set_planner_status_("face_command_invalid");
+        return;
+      }
+      normal_raw_a_w = onnx_.face_normal_raw_a_from_wire_b(eng_clip, normal_w);
+      // Content-bound train-support gate.  The wire's x>0 invariant only proves an opponent-facing
+      // physical-B unit vector; it does not prove that the raw-A actor command is in this clip's
+      // training support. clip0/1 are frozen forehand/backhand in both bank and reference clock.
+      // Reject before the transaction boundary so an OOD normal cannot latch swing/side/target.
+      if (!onnx_.face_normal_within_training_envelope(eng_clip, normal_raw_a_w)) {
+        if ((gate_warn_tick_++ % 50) == 0) {
+          const auto& envelope = onnx_.face_normal_envelope();
+          std::fprintf(stderr,
+              "[pp gate] REJECT face normal outside %s train cap: clip=%d "
+              "wire_B=(%+.5f,%+.5f,%+.5f) raw_A=(%+.5f,%+.5f,%+.5f) "
+              "dot=%.8f need>=%.8f (tol=%.1e)\n",
+              eng_clip == 0 ? "forehand" : "backhand", eng_clip,
+              normal_w[0], normal_w[1], normal_w[2],
+              normal_raw_a_w[0], normal_raw_a_w[1], normal_raw_a_w[2],
+              envelope.Dot(
+                  eng_clip, normal_raw_a_w[0], normal_raw_a_w[1], normal_raw_a_w[2]),
+              envelope.min_dots[static_cast<std::size_t>(eng_clip)],
+              envelope.runtime_dot_tolerance);
+        }
+        set_planner_status_("face_command_out_of_train_envelope");
         return;
       }
     }
@@ -1673,7 +1706,7 @@ class PpPolicy {
     planner_frozen_vel_w_ = candidate_vel_w;
     planner_frozen_sign_ = sign;
     if (onnx_.obs_dim() == kObsDim179) {
-      planner_frozen_normal_w_ = normal_w;
+      planner_frozen_normal_w_ = normal_raw_a_w;
       planner_frozen_rho_ = snap.cmd.rho;
     }
     planner_hold_pos_b_engage_ = tgt_b;
@@ -1784,7 +1817,7 @@ class PpPolicy {
         {"joint_pos_rel", 71, 31}, {"joint_vel", 102, 31}, {"actions(last)", 133, 31},
         {"projected_gravity", 164, 3}, {"racket_target_pos_b(relFK)", 167, 3},
         {"racket_target_vel_w", 170, 3}, {"time_to_strike", 173, 1}, {"swing_type", 174, 1},
-        {"racket_target_normal_cmd(world)+rho", 175, 4}};
+        {"racket_target_normal_cmd_raw_A(world)+rho", 175, 4}};
     // hitter_footwork 177-D: the 175 layout + base_target_pos_b(2) station Δxy re-inserted
     // after projected_gravity; everything after it shifts up 2.
     static const Blk blks177[] = {

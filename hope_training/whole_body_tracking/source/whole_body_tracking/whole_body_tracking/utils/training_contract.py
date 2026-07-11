@@ -403,6 +403,24 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
         "legacy_signed_vs_A",
     ):
         raise ValueError("schema-3 face_command_pairing is invalid")
+    if contract.get("actor_obs_contract") == "deploy_parity_face179":
+        if contract.get("face_command_enabled") is not True:
+            raise ValueError("formal face179 schema-3 contract requires face_command_enabled=true")
+        if contract.get("face_command_pairing") != "shared_plus_y":
+            raise ValueError("formal face179 schema-3 contract requires shared_plus_y")
+        try:
+            raw_face_signs = contract["mount_normal_sign_per_clip"]
+            if any(isinstance(value, bool) for value in raw_face_signs):
+                raise ValueError
+            face_signs = tuple(float(value) for value in raw_face_signs)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "formal face179 schema-3 contract requires mount_normal_sign_per_clip=[+1,-1]"
+            ) from exc
+        if face_signs != (1.0, -1.0):
+            raise ValueError(
+                "formal face179 schema-3 contract requires mount_normal_sign_per_clip=[+1,-1]"
+            )
 
     joint_names = contract["joint_names"]
     if not isinstance(joint_names, (list, tuple)) or not joint_names:

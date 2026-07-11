@@ -23,22 +23,73 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
+import importlib.util
 import json
 import os
+import sys
 
 import numpy as np
+
+
+def _load_light_module(name: str, filename: str):
+    """Load one Isaac-free source file without executing whole_body_tracking/__init__.py."""
+    utils_dir = os.path.abspath(os.path.join(
+        os.path.dirname(__file__), "..", "source", "whole_body_tracking",
+        "whole_body_tracking", "utils",
+    ))
+    path = os.path.join(utils_dir, filename)
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load dependency-light contract module: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_TC = _load_light_module("standalone_training_contract", "training_contract.py")
+TRAINING_CONTRACT_SCHEMA_VERSION = _TC.TRAINING_CONTRACT_SCHEMA_VERSION
+checkpoint_claims_contract = _TC.checkpoint_claims_contract
+checkpoint_contract_lineage_exact = _TC.checkpoint_contract_lineage_exact
+require_checkpoint_contract_binding = _TC.require_checkpoint_contract_binding
+validate_schema3_contract = _TC.validate_schema3_contract
+validate_schema3_contract_structure = _TC.validate_schema3_contract_structure
+
+_NE = _load_light_module("standalone_stage1_normal_envelope", "stage1_normal_envelope.py")
+FORMAL_CLIP_ORDER = _NE.FORMAL_CLIP_ORDER
+derive_stage1_normal_envelope = _NE.derive_stage1_normal_envelope
+
+_AO = _load_light_module("standalone_atomic_output", "atomic_output.py")
+atomic_output_path = _AO.atomic_output_path
+
+# A stdlib+NumPy subprocess probe used on machines that intentionally have no Isaac packages.
+# The formal export path below uses these exact file-loaded modules; passing this flag proves the
+# package __init__ was not touched before ONNX/Torch are imported.
+if "--contract-import-smoke" in sys.argv:
+    imported_package = any(
+        name == "whole_body_tracking" or name.startswith("whole_body_tracking.")
+        for name in sys.modules
+    )
+    imported_isaac = any(
+        name == "isaaclab" or name.startswith(("isaaclab.", "omni.", "pxr."))
+        for name in sys.modules
+    )
+    imported_export_runtime = any(
+        name in ("onnx", "torch") or name.startswith(("onnx.", "torch."))
+        for name in sys.modules
+    )
+    print(
+        "[standalone-export-import] OK "
+        f"whole_body_tracking_package_imported={str(imported_package).lower()} "
+        f"isaac_modules_imported={str(imported_isaac).lower()} "
+        f"onnx_torch_imported={str(imported_export_runtime).lower()} "
+        f"training_schema={TRAINING_CONTRACT_SCHEMA_VERSION} "
+        f"envelope_schema={_NE.ENVELOPE_SCHEMA_VERSION}"
+    )
+    raise SystemExit(1 if imported_package or imported_isaac or imported_export_runtime else 0)
+
 import onnx
 import torch
 import torch.nn as nn
-
-from whole_body_tracking.utils.training_contract import (
-    TRAINING_CONTRACT_SCHEMA_VERSION,
-    checkpoint_claims_contract,
-    checkpoint_contract_lineage_exact,
-    require_checkpoint_contract_binding,
-    validate_schema3_contract,
-    validate_schema3_contract_structure,
-)
 
 MOTION_KEYS = ("joint_pos", "joint_vel", "body_pos_w", "body_quat_w", "body_lin_vel_w", "body_ang_vel_w")
 
@@ -55,6 +106,19 @@ def _sha256_file(path: str) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _load_stage1_question_bank_module():
+    """Load only the dependency-light bank module, bypassing the Isaac-heavy mdp package init."""
+    path = os.path.abspath(os.path.join(
+        os.path.dirname(__file__), "..", "source", "whole_body_tracking", "whole_body_tracking",
+        "tasks", "tracking", "mdp", "stage1_question_bank.py",
+    ))
+    spec = importlib.util.spec_from_file_location("standalone_stage1_question_bank", path)
+    _require(spec is not None and spec.loader is not None, "cannot load stage1_question_bank.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _csv(meta: dict[str, str], key: str) -> list[str]:
@@ -256,6 +320,10 @@ def main() -> int:
     p.add_argument("--bh", required=True)
     p.add_argument("--donor", required=True, help="same-task-config exported policy.onnx to copy metadata from")
     p.add_argument("--harvest", required=True, help="motion-buffer npz produced by harvest_onnx_motion.py from the donor")
+    p.add_argument(
+        "--train-bank",
+        help="exact schema-3 train NPZ; mandatory for a formal 179-D face export",
+    )
     p.add_argument("--out", required=True)
     p.add_argument("--run-path", default="standalone-export")
     p.add_argument("--bake-obs-norm", action="store_true",
@@ -373,20 +441,6 @@ def main() -> int:
         _require(h[key].shape[0] == sum(seg_lengths), f"harvest {key} frame count mismatch")
         _require(np.isfinite(h[key]).all(), f"harvest {key} contains NaN/Inf")
     motion = {k: torch.as_tensor(h[k], dtype=torch.float32) for k in MOTION_KEYS}
-
-    os.makedirs(args.out, exist_ok=True)
-    out_path = os.path.join(args.out, "policy.onnx")
-    module = _StandaloneExporter(actor, normalizer, motion).eval()
-    torch.onnx.export(
-        module,
-        (torch.zeros(1, in_dim), torch.zeros(1, 1)),
-        out_path,
-        export_params=True,
-        opset_version=11,
-        input_names=["obs", "time_step"],
-        output_names=["actions", "joint_pos", "joint_vel", "body_pos_w", "body_quat_w", "body_lin_vel_w", "body_ang_vel_w"],
-        dynamic_axes={},
-    )
 
     donor_meta = {e.key: e.value for e in donor.metadata_props}
     for req in (
@@ -516,11 +570,23 @@ def main() -> int:
                 "1" if bool(training_contract["face_command_enabled"]) else "0"
             )
         signs = training_contract.get("mount_normal_sign_per_clip")
+        checkpoint_mount_signs = None
         if signs is not None:
+            checkpoint_mount_signs = tuple(float(value) for value in signs)
             donor_meta["mount_normal_sign_per_clip"] = ",".join(
-                format(float(v), ".17g") for v in signs
+                format(value, ".17g") for value in checkpoint_mount_signs
             )
         bank_contract = training_contract.get("question_bank")
+        if actor_contract == "deploy_parity_face179":
+            _require(
+                donor_meta.get("mount_normal_sign_per_clip") == "1,-1",
+                "formal face179 standalone export requires checkpoint-contract "
+                "mount_normal_sign_per_clip=[+1,-1]",
+            )
+            _require(
+                bank_contract is not None,
+                "formal face179 standalone export requires an exact schema-3 train-bank binding",
+            )
         if bank_contract is not None:
             expected_bank = {
                 "schema_version": 3,
@@ -543,6 +609,38 @@ def main() -> int:
                 "stage1_source_family_sha256": bank_contract["source_family_sha256"],
                 "stage1_question_bank_exact": "1",
             })
+            if actor_contract == "deploy_parity_face179":
+                _require(
+                    bool(args.train_bank),
+                    "formal face179 standalone export requires --train-bank; donor metadata or "
+                    "the checkpoint-side JSON cannot substitute for the exact normal rows",
+                )
+                qb_module = _load_stage1_question_bank_module()
+                try:
+                    train_bank = qb_module.load_question_bank(
+                        os.path.abspath(args.train_bank),
+                        device="cpu",
+                        clip_names=FORMAL_CLIP_ORDER,
+                        allow_legacy=False,
+                        expected_split="train",
+                    )
+                    qb_module.validate_runtime_motion_contract(
+                        train_bank.metadata,
+                        [os.path.abspath(args.fh), os.path.abspath(args.bh)],
+                        seg_lengths,
+                        phases,
+                    )
+                except (KeyError, OSError, ValueError) as exc:
+                    raise SystemExit(f"[FATAL] invalid formal face179 --train-bank: {exc}") from exc
+                donor_meta.update(
+                    derive_stage1_normal_envelope(
+                        train_bank.source_path,
+                        expected_train_bank_sha256=bank_contract["sha256"],
+                        expected_source_family_sha256=bank_contract["source_family_sha256"],
+                        mount_normal_sign_per_clip=checkpoint_mount_signs,
+                        clip_order=FORMAL_CLIP_ORDER,
+                    )
+                )
     donor_meta["run_path"] = args.run_path
     # Always overwrite donor provenance. A no-bake re-export from a baked donor must clear the
     # old value or evaluators will skip the required sidecar.
@@ -552,12 +650,40 @@ def main() -> int:
     donor_meta["source_checkpoint_sha256"] = _sha256_file(args.ckpt)
     donor_meta["motion_harvest_donor_sha256"] = donor_sha256
 
-    model = onnx.load(out_path)
-    del model.metadata_props[:]
-    for k, v in donor_meta.items():
-        entry = model.metadata_props.add()
-        entry.key, entry.value = k, str(v)
-    onnx.save(model, out_path)
+    # Every checkpoint, donor, clip, harvest, bank, contract and envelope input has now been
+    # validated. Only now create an export artifact, always at a same-directory temporary path.
+    # A failed graph export/check/save leaves an existing policy.onnx byte-identical and removes
+    # the owned temporary file; successful installation is one fsync + atomic replace.
+    os.makedirs(args.out, exist_ok=True)
+    out_path = os.path.join(args.out, "policy.onnx")
+    module = _StandaloneExporter(actor, normalizer, motion).eval()
+    with atomic_output_path(out_path) as temporary_path:
+        torch.onnx.export(
+            module,
+            (torch.zeros(1, in_dim), torch.zeros(1, 1)),
+            str(temporary_path),
+            export_params=True,
+            opset_version=11,
+            input_names=["obs", "time_step"],
+            output_names=[
+                "actions", "joint_pos", "joint_vel", "body_pos_w", "body_quat_w",
+                "body_lin_vel_w", "body_ang_vel_w",
+            ],
+            dynamic_axes={},
+        )
+        model = onnx.load(temporary_path)
+        del model.metadata_props[:]
+        for key, value in donor_meta.items():
+            entry = model.metadata_props.add()
+            entry.key, entry.value = key, str(value)
+        onnx.checker.check_model(model)
+        onnx.save(model, temporary_path)
+        installed_candidate = onnx.load(temporary_path)
+        onnx.checker.check_model(installed_candidate)
+        installed_meta = {entry.key: entry.value for entry in installed_candidate.metadata_props}
+        _require(installed_meta == {key: str(value) for key, value in donor_meta.items()}, (
+            "temporary ONNX metadata round-trip disagrees before atomic install"
+        ))
 
     print(f"[standalone-export] SUCCESS {out_path} ({os.path.getsize(out_path)/1e6:.1f} MB)")
     print(f"[standalone-export] in_dim={in_dim} actions={actor[-1].out_features} "

@@ -50,8 +50,10 @@ Notes:
   only). `base_lin_vel` is critic-only. `swing_type` is included because the default task trains
   one unified forehand+backhand policy.
 - `task.racket.face_command_pairing` does not change the 175-D actor. For the 179/181 layouts,
-  `racket_target_normal_cmd` also always remains the delayed atomic bank command in the shared
-  +Y/A-frame convention. The selector never flips or relabels that actor command.
+  `racket_target_normal_cmd` always remains the delayed atomic bank command in the raw mount
+  +Y/A convention. The external schema-2 wire carries the physical striking face B; the 179
+  runner converts only that normal to A after clip selection. The selector never flips or
+  relabels the actor command itself.
 - Rationale for base-position freedom: the mocap DOES stream the robot base pose during play
   (300 Hz, `/P1/pose` — see the deploy-available signal set below), but that VRPN link is not
   bridged into the deploy runner, and independence from it is a deliberate robustness choice. The
@@ -65,7 +67,7 @@ Notes:
 | Dim | Contract | Delta / source | C++ publish status |
 | --- | --- | --- | --- |
 | 177 | `hitter_footwork` | 175 layout with `base_target_pos_b(2)` inserted after projected gravity; requires fresh external/oracle base localization. | Supported, but publication fails closed without fresh localization. |
-| 179 | `deploy_parity_face179` | Exact 175 prefix + tail `racket_target_normal_cmd(3), rho(1)`; demanded normal is the delayed atomic +Y/A-frame planner command. | Source-supported only through flat wire schema 2; requires exact ONNX metadata and planner mode. Vendor Gate 3 build/runtime is pending, so not yet accepted. |
+| 179 | `deploy_parity_face179` | Exact 175 prefix + tail `racket_target_normal_cmd(3), rho(1)`; actor tail is raw mount +Y/A after the runner converts the physical-B wire normal with the selected clip sign. | Flat wire schema 2 plus exact metadata/content-bound train-normal envelope/planner mode are mandatory. One envelope-bearing formal model has passed strict Release model preflight (`configs/gate3_face179_strict_preflight_evidence_20260712.json`), but no backend first tick or vendor Gate 3 behavior, so it is not yet a behavioral candidate. |
 | 181 | `deploy_parity_station181` | Exact 179 prefix + tail `station_anchor_err_b(2)`. | Blocked: wire and the unique station/normal term order are not frozen. |
 | 110 | `hitter_pure` | HITTER Table-I style: 99-D proprio prefix + base forward(2), station delta(2), racket target rel base(3), target velocity(3), tts(1); no reference command or swing flag. | Supported; requires fresh localization and metadata-bound per-side station geometry. |
 
@@ -80,11 +82,15 @@ command, so 181 remains rejected until its unique station/normal order is frozen
 ### Flat racket-command wire
 
 Schema 1 remains the backward-compatible position/velocity wire for 110/175/177/180. Schema 2 is
-an explicit 16-double row: the same 12-value prefix with mandatory `frame_code`, followed by
-`normal_cmd[3]` and `rho`. Phase-1 schema 2 accepts only `frame_code=0` world/table rows: the old
+an explicit 16-double row: the same 12-value prefix with mandatory `frame_code`, followed by the
+physical, opponent-facing striking-face-B `normal_cmd[3]` and `rho`. Phase-1 schema 2 accepts only
+`frame_code=0` world/table rows: the old
 schema-1 code1 path is a yaw-heading transform, not a frozen full-3D base-link normal contract.
-The Phase-1 contract also requires an opponent-facing (`normal.x > 1e-6`) unit normal and
-exactly-zero rho. A malformed schema-2 row retains the last good tuple for diagnostics but records
+The Phase-1 contract also requires `normal_B.x > 1e-6`, a unit B normal, and exactly-zero rho. Once
+the forehand/backhand clip is selected, the C++ runner computes
+`normal_A = mount_normal_sign_per_clip[clip] * normal_B` with the exact table `[+1,-1]`. Only the
+normal is transformed; position and velocity remain untouched in the world/table frame. A
+malformed schema-2 row retains the last good tuple for diagnostics but records
 `invalid_after`, so the engage grace blocks it rather than letting the old tuple live for the full
 command timeout. Unknown/fractional rows received after an active schema-2 command do the same;
 schema-1 keeps its historical ignore-and-age behavior when no formal face command is active. A 179
@@ -93,16 +99,55 @@ a reviewed 179 Gate 3 launch must set `racket_flat_schema:=2`.
 The formal flat row is published before the optional `hope_msgs/RacketCommand` mirror; mirror
 conversion/DDS failures are counted but cannot suppress a new formal row or revocation.
 
-The positive-X check is only the planner's minimum A-frame invariant. A train-bank-derived
-per-clip normal envelope/dot threshold is not yet exported and remains a vendor Gate 3 runtime
-blocker; source support must not be read as proof that every opponent-facing unit normal is
-on-distribution or self-collision safe.
+The positive-X check is only the physical-B wire invariant. Formal 179 exports add a per-clip
+spherical-cap envelope in raw A, derived from the exact schema-3 train-bank bytes. Clip 0 is always
+`forehand`, clip 1 always `backhand`; their rows are never pooled. For each clip, every raw-A
+demanded normal must already be unit within `2e-4`, lie in the same open hemisphere as that clip's
+raw `mount_plusY_A` reference with `dot(row_A, reference_A) > 1e-6`, and satisfy
+`mount_normal_sign_per_clip[clip] * normal_A.x > 1e-6` so it has a representable opponent-facing B
+wire value. Thus forehand raw-A x is positive while backhand raw-A x is negative. The exporter
+normalizes those rows, forms the normalized vector sum
+(`per_clip_sign_preserving_spherical_mean_cap_v1`), and records the minimum row-to-center dot as
+the cap boundary. This avoids the invalid operation of averaging opposite racket-face signs.
+
+The ONNX binds all of the following metadata into one canonical newline-delimited payload and
+recomputable SHA-256: envelope schema `1`, frame `world_table_frame0`, face convention
+`mount_plusY_A`, pairing `shared_plus_y`, algorithm, bank-row unit tolerance `0.0002`, runtime
+unit/dot tolerances `0.000001`, exact clip order, exact sign table `1,-1`, two centers, two
+reference normals, two minimum dots, two row counts, train-bank SHA and source-family SHA. The C++
+loader requires every field,
+recomputes the payload SHA, checks both embedded bank/family hashes against the existing formal
+179 metadata, and rejects malformed/non-unit/flipped caps or a sign-table disagreement. At planner
+engage it selects the clip, converts B to raw A, then requires both
+`dot(reference_A, normal_A) > 1e-6` and
+`dot(center_A, normal_A) + 1e-6 >= min_dot` before any target/clock/side/normal state is committed.
+Missing envelope metadata therefore makes earlier 179 ONNX files unloadable under the new source;
+they must be re-exported from the exact train bank. The other 110/175/177/180 layouts do not read
+these fields.
+
+This closes a source-level load/safety prerequisite only. A cap contains all train rows but is not
+a proof that every point inside the cap is dynamically safe, collision-free or successful in the
+vendor MuJoCo. Self-hit instrumentation, a canonical recovery tuple, a new envelope-bearing formal
+export and Gate 3/Gate 3B behavior evidence remain mandatory.
 
 The active swing tuple is atomic, but the existing Gate 3 post-swing policy-recovery path
 synthesizes a base-anchored hold position while retaining the previous velocity/normal. Current
 Phase-1 training has no frozen contract proving that hybrid tuple is on-distribution. Therefore
 179 source support does not make recovery exact; a canonical recovery tuple or an independently
 accepted vendor-MuJoCo recovery gate is required before continuous or deploy claims.
+
+The prospective real-bank fixture
+`configs/phase1_face179_real_bank_envelope_expectations_20260712.json` binds train bank
+`2da2bd12...a0700`, source family `b21c161a...28ad5`, row counts `757/724`, and the observed raw-A
+sign/range and cap statistics. It is a source-contract expectation for the next export, not a
+formal ONNX, Isaac result, vendor-MuJoCo result, collision proof or recovery result.
+
+Model publication state and model-contract strictness are separate. Plain `--no-publish`,
+`--dry-run`, and `--model-preflight-only` still require the same schema-2 packaging, exact complete
+schema-3 execution metadata and (for 179) envelope as live publication. Only explicit
+`--allow-legacy-model-diagnostic` relaxes legacy model loading; it requires no-publish and cannot
+be combined with model preflight. Therefore an accepted preflight certificate always reports
+parsed `publishable_model_contract=true` and `training_contract_exact=1`.
 
 ## Critic (privileged) Observation (implemented)
 
