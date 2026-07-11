@@ -412,6 +412,41 @@ R3 应先单独训练/判卷，再小学习率接回统一 actor。若必须同�
 heading 若单独开，必须同时给 yawed/post-swing 起始状态覆盖；仅有 reward 而 94% hold 本来就是正的，
 只会学“保持正”而不是“恢复正”。
 
+### 2026-07-12 命令 tuple 审计：R2/R3 之前先拒绝当前 hybrid
+
+现有 T1 训练代码会在 reveal 前保留整套上一拍题目，reveal 时再原子安装整套新的
+`position/velocity/normal/rho/side/incoming/base-anchor`。普通 wrap 也是整套换题，不会只换位置。
+但当前 vendor C++ 179-D idle 变成了：
+
+```text
+position = new live-base-anchored hold position
+velocity = previous strike velocity
+normal/rho = previous strike face tuple
+```
+
+而且 position 随 live base 每 tick 移动。这不是“上一拍 tuple”，也不是“canonical ready tuple”；是训练
+从未看到的混代命令。后续不在这条路上猜 anchor 和 reward，而是用
+`configs/phase1_recovery_tuple_abc_prereg_20260712.json` 固定三臂：
+
+- A：安全、可打断、deadline-aware 的外部 bridge 到 ready set；
+- B：actor 内完整 canonical tuple，含 ready-set 选位、零拍速、neutral normal、rho0 和 phase 语义；
+- C：整套 previous tuple 保留到下一题原子切换。
+
+现有 179 checkpoint 可以给 A 做冻结 swing diagnostic，可以给 C 做 zero-shot 同代 tuple diagnostic，但两者
+都不能改名为“已学会随机来球恢复”。B 必须 fresh；A/B/C 的因果比较也必须 fresh exact paired。
+A 还有一个特别的交接问题：bridge 执行时 actor 不控制，但 actor history 下一刻需要什么 action。必须把
+实际 bridge action 和 shadow-policy action 的选择/映射内容绑定；直接清零 last action 不属于 no-reset 正式卷。
+
+ready 也不能用一个名字代替数值。静态审计已发现 Isaac reset pelvis 为 `(0,0,1.0684)`，vendor
+MJCF `stand` 为 `(-0.0416378,0.000359049,1.06839)`；31 关节 L2 差 `0.171845 rad`，去掉头仍
+`0.028789 rad`。Stage-1 拍点是 env-origin 绝对坐标，179 位置观测是 target 减当前拍子 FK，所以
+`4.16 cm` root-x 差不会自动消失。这是待验的因果假设，不是已证根因；正式卷前要绑定两引擎
+完整 ready/base/joint/racket/target/obs 数值 SHA。
+
+与此相对，恢复 reward 仍留在结构证据之后。如果需要，平衡债、ready-set potential 和 random-arrival
+readiness 先归一化，再做配对 `2^3` 交互，最后才在固定总预算上混合。自碰/跌倒/桌网/执行器安全
+始终是不可补偿硬门。
+
 ### 任意时序测试
 
 建立与真实 A-B-A 间隔分布绑定的 event schedule，而不是均匀长 hold：

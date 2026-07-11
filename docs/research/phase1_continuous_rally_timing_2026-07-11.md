@@ -159,3 +159,43 @@ T0/T1 仍采用 checkpoint 漏斗，不等 terminal：
 
 已有 `return_and_recover_rate` 只证明自然播完完整 clip 后能进入下一题，不能证明 1.8–2.2 秒快速来球
 仍能接战。
+
+## 2026-07-12：T1 解决“何时出题”，不自动解决“两题之间给 actor 什么”
+
+对现有实现的逐行审计把这两个问题分开了。现在的训练语义始终保持题目 tuple 同代：
+
+- 普通 wrap 前，当前拍的 `position/velocity/normal/side` 整套不变；wrap 时整套换成下一题；
+- T1 在 reveal 前把旧 clip 夹在末帧，依然给整套旧题；reveal 的同一 command-manager step
+  原子写入新 clip、hold、位置、要求速度、拍面法向、来球、base anchor 和 side；
+- actor 的延迟/dropout ring 也把 pos/vel/normal/side 作为一个原子世代；T1 不 reset 机器人、
+  last action、history 或 noise state。
+
+当前 vendor Gate3 C++ 的 179-D idle 路径不同：每 tick 用 live base 重算一个新位置，却继续搭配上一拍
+的击球速度和法向/rho。这是训练中不存在的混代移动目标，故只标 `OOD diagnostic`，不是可以靠调
+anchor 变成正式结论的第四臂。静态交接还会把 last-action 清零，也不等价于 T1 carry-state。
+
+### 先比较三种结构，后决定是否需要 reward
+
+| 臂 | 击球后到 reveal 前的语义 | 现有 179 checkpoint |
+| --- | --- | --- |
+| A explicit bridge | 可打断、不挪 deadline 的安全 PD/轨迹桥进 ready set；actor 交接历史必须内容绑定 | 只可作为桥接证书后的冻结 swing diagnostic |
+| B canonical tuple | 同一 actor 原子接收 `ready-set position + zero velocity + neutral normal + rho0 + ready phase` | 不可用；当前训练没有这种 tuple，必须 fresh |
+| C previous tuple | 整套上一题原样保持到 reveal，然后整套切换 | 只可 zero-shot 同代 tuple diagnostic；学会任意来球的声明仍需 fresh |
+
+A 若在 actor 不控制时执行 bridge，下次交接究竟把“实际执行的 bridge action”还是“shadow actor
+action”写入历史，不能凭感觉二选一；在完整 handoff contract 出来前 A 也不得启动正式卷。B 的 ready
+位置是集合内确定性投影，不是死跟 frame 0；它要同时满足站位/直立/低速/支撑脚滑/执行器余量/
+自碰桌网余隙，且能在每个启用动作与随机 deadline 前安全启动。
+
+三臂首卷使用同一 immutable random-arrival 题顺、reveal tick、deadline、FF/FB/BF/BB 转手、plant、
+face、motion、reward bytes/比例/总预算、seed 和 checkpoint cadence；miss/infeasible/fall 都留在全机会分母。
+q10 只看方向，q50 才决策；同卷先过 Isaac，最后以智元 vendor MuJoCo Gate3 no-reset 主判。
+
+只有结构臂证明 B/C 无法获得 ready set 且第一拍未退化，才开三个同阶段 reward：收拍平衡债、
+ready-set potential、随机来球可接战性。先用冻结 rollout 归一化量纲，再做完整 `2^3` 开/关交互，只在
+确有交互时补 fixed-total-budget mixture。安全/自碰是不可补偿硬门，不允许用其他 reward 抵消。
+
+这套结构预注册在 `configs/phase1_recovery_tuple_abc_prereg_20260712.json`（SHA
+`39b97915...b71e1a`），20 个红队测试已通过。它仍是 launch-blocked 设计，没有 materialize schedule、没有训练也没有
+Gate3 连续成绩。复现命令见
+`docs/operations/run_phase1_recovery_tuple_prereg.md`。

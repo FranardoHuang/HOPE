@@ -1,0 +1,294 @@
+{
+  "schema_version": 1,
+  "preregistration_id": "phase1-recovery-tuple-A-B-C-v1",
+  "created_utc": "2026-07-11T19:28:17Z",
+  "status": "preregistered_structure_only_launch_blocked",
+  "scope": "separate post-swing recovery command semantics from reward mixing: compare an explicit safe bridge, an actor-visible canonical recovery tuple, and a coherent complete previous-question tuple under one immutable random-arrival no-reset exam",
+  "launch_authorized": false,
+  "real_robot_authorized": false,
+  "validator": {
+    "repo_path": "scripts/validate_phase1_recovery_tuple_prereg.py",
+    "bytes": 26034,
+    "sha256": "3de8bf3039ba603d7171fb5956d824f7ba1a24f773bbae648604fdf19f9682d0"
+  },
+  "prerequisites": {
+    "event_timing_prereg": {
+      "repo_path": "configs/phase1_event_timing_t0_t1_prereg_20260711.json",
+      "bytes": 16231,
+      "sha256": "2e7c4a344c0f2f81f67fd1246e5a724eaef92570c45e830c85f298377f52289c"
+    },
+    "event_timing_schedule_spec": {
+      "repo_path": "configs/phase1_event_timing_schedule_spec_20260711.json",
+      "bytes": 5813,
+      "sha256": "8477e3e60c9e9fe193fd82e2b79e94e2a3037e7d4b7a969b34b36ad7f1f96396"
+    }
+  },
+  "audited_training_source": {
+    "commit": "d3cdbdfc2f6e30726aa197b7bca66496ee0d39e5",
+    "note": "read-only source audit of the implemented T1 core and current 179-D atomic actor-target path; this preregistration changes no training source",
+    "git_blobs": {
+      "robot_config": {
+        "commit": "d3cdbdfc2f6e30726aa197b7bca66496ee0d39e5",
+        "repo_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py",
+        "bytes": 17640,
+        "sha256": "885626271940ae75c9b6c05bce347168fcb7fdb0d8ea7b1be0c5144a18169053"
+      },
+      "motion_command": {
+        "commit": "d3cdbdfc2f6e30726aa197b7bca66496ee0d39e5",
+        "repo_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/commands.py",
+        "bytes": 83784,
+        "sha256": "648378535d3cc3d32ab3be14ce41007d377ea394baf209e0872545b26834a7ee"
+      },
+      "racket_target_command": {
+        "commit": "d3cdbdfc2f6e30726aa197b7bca66496ee0d39e5",
+        "repo_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/hope_commands.py",
+        "bytes": 255691,
+        "sha256": "5c6db5bd63c6bc36b48b428ff809312cceebdc1f968e9685c54bc32a4a73bd93"
+      },
+      "event_timing": {
+        "commit": "d3cdbdfc2f6e30726aa197b7bca66496ee0d39e5",
+        "repo_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/event_timing.py",
+        "bytes": 25801,
+        "sha256": "07adabda09d04c8c8b7ed02ea0255f3b4880201836e7bb3a0e45e234cfd06baa"
+      },
+      "observations": {
+        "commit": "d3cdbdfc2f6e30726aa197b7bca66496ee0d39e5",
+        "repo_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/hope_observations.py",
+        "bytes": 12600,
+        "sha256": "edb4a11426b77c47a6878b042597520a35284221a3a2127c959d4f3a710e66e2"
+      },
+      "rewards": {
+        "commit": "d3cdbdfc2f6e30726aa197b7bca66496ee0d39e5",
+        "repo_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/hope_rewards.py",
+        "bytes": 47563,
+        "sha256": "dfe8cec3764f62f5fc13b312805ea28e21d73a1038aa7d9f3e8cdd649f211f7f"
+      }
+    }
+  },
+  "gate3_readonly_evidence": {
+    "commit": "1d46ef2cbb915efc135251f9b32f4ec25d0342ab",
+    "repo_path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/a3_pingpong/pp_policy.hpp",
+    "bytes": 120413,
+    "sha256": "8c9814c42ebea404f95ef74821a924776860d4aef8b8ba726ad3364a5f00eba4",
+    "worktree_was_read_only": true,
+    "modified_by_this_work": false
+  },
+  "observed_training_semantics": {
+    "natural_hold_reference": "default_stand_position_plus_zero_reference_velocity",
+    "natural_wrap_physical_state": "carry_no_teleport_when_wrap_teleport_false",
+    "natural_wrap_question_install": "complete_new_pos_vel_normal_side_tuple_atomically",
+    "post_strike_before_wrap": "complete_previous_swing_tuple_unchanged",
+    "T1_before_reveal": "complete_previous_swing_tuple_unchanged_while_final_clip_frame_clamped",
+    "T1_at_reveal": "complete_new_pos_vel_normal_side_incoming_base_anchor_tuple_atomically",
+    "T1_state_reset": "none_robot_last_action_history_noise_all_carry",
+    "actor_target_latency": "pos_vel_normal_side_share_one_atomic_delay_dropout_generation",
+    "time_to_strike_latency": "not_delayed",
+    "mixed_generation_tuple_seen_in_training": false
+  },
+  "rejected_current_hybrid": {
+    "idle_position_generation": "new_live_base_anchored_position",
+    "idle_velocity_generation": "previous_strike_velocity",
+    "idle_normal_generation": "previous_strike_normal_and_rho",
+    "position_motion": "moves_with_live_base_each_tick",
+    "training_equivalent": false,
+    "formal_arm_allowed": false,
+    "classification": "mixed_generation_tuple_and_moving_target_OOD",
+    "parameter_tuning_can_make_formal": false,
+    "separate_handoff_mismatch": "static_stand_handoff_zeroes_last_action_before_reengage"
+  },
+  "structural_axis": {
+    "stage_order": [
+      "D0_current_checkpoint_A_vs_C_diagnostic_only",
+      "S1_fresh_exact_A_B_C_paired_structure",
+      "R2_conditional_reward_followup_only_after_structure"
+    ],
+    "arms": [
+      {
+        "id": "A_explicit_bridge",
+        "controller": "content_bound_interruptible_safe_PD_or_trajectory_bridge",
+        "recovery_target": "deterministic_projection_into_ready_set",
+        "actor_role_during_bridge": "not_in_control_but_state_history_must_remain_continuous",
+        "action_history_semantics": "content_bound_executed_vs_policy_action_mapping_required_no_assumed_equivalence",
+        "reveal_policy": "interrupt_or_replan_without_deadline_shift_else_count_infeasible",
+        "physical_or_policy_state_reset": false,
+        "last_action_or_history_zeroing_allowed": false,
+        "claim": "explicit_controller_baseline_not_learned_recovery"
+      },
+      {
+        "id": "B_canonical_tuple",
+        "controller": "same_179_actor_through_recovery_and_next_swing",
+        "recovery_tuple": [
+          "ready_set_selected_racket_position",
+          "zero_desired_racket_velocity",
+          "neutral_ready_normal",
+          "rho_zero",
+          "ready_phase_semantics"
+        ],
+        "tuple_install": "atomic_at_recovery_entry_then_atomic_next_question_at_reveal",
+        "ready_position_is_exact_frame0": false,
+        "new_actor_observation_dimension_in_S1": false,
+        "fresh_training_required": true
+      },
+      {
+        "id": "C_previous_tuple",
+        "controller": "same_179_actor_through_recovery_and_next_swing",
+        "recovery_tuple": "complete_previous_pos_vel_normal_rho_side_tuple",
+        "tuple_install": "no_field_change_before_reveal_then_atomic_complete_next_question",
+        "base_anchored_position_rewrite": false,
+        "mixed_generation_fields": false,
+        "fresh_training_required_for_learned_random_arrival_claim": true
+      }
+    ],
+    "current_179_checkpoint_compatibility": {
+      "scope": "only_individually_finite_lineage_bound_179_atomic_question_checkpoints",
+      "A": {
+        "usable_now": "frozen_swing_subpolicy_diagnostic_after_bridge_and_handoff_cert",
+        "formal_ABC_causal_comparison_requires_fresh": true,
+        "learned_recovery_claim_allowed": false
+      },
+      "B": {
+        "usable_now": false,
+        "reason": "zero_velocity_neutral_normal_canonical_tuple_absent_from_current_training",
+        "fresh_retrain_required": true
+      },
+      "C": {
+        "usable_now": "zero_shot_coherent_tuple_diagnostic_only",
+        "reason_not_formal": "extended_post_clip_dwell_and_random_reveal_not_trained",
+        "fresh_retrain_required_for_learned_recovery_claim": true
+      },
+      "current_checkpoint_may_be_relabeled_T1_trained": false,
+      "unbound_checkpoint_path_or_SHA_may_run": false
+    }
+  },
+  "ready_set_contract": {
+    "ready_is_exact_motion_frame0": false,
+    "definition": "conjunction_not_weighted_score",
+    "required_conjuncts": [
+      "station_xy_yaw_tolerance",
+      "upright_height_and_gravity_projection",
+      "low_base_joint_and_racket_velocity",
+      "bilateral_support_contact_and_slip",
+      "joint_limit_torque_qdes_and_thermal_margin",
+      "self_table_net_and_ground_clearance",
+      "next_family_and_deadline_reachability"
+    ],
+    "selector": "deterministic_content_bound_projection_inside_set",
+    "reachability_quantifier": "every_enabled_next_motion_question_family_and_random_arrival_deadline_cell",
+    "empty_global_intersection_policy": "declare_family_ready_sets_and_explicit_transition_graph_or_fail_closed",
+    "transition_cells": [
+      "forehand_to_forehand",
+      "forehand_to_backhand",
+      "backhand_to_forehand",
+      "backhand_to_backhand"
+    ]
+  },
+  "ready_state_static_evidence": {
+    "isaac_robot_source": {
+      "commit": "d3cdbdfc2f6e30726aa197b7bca66496ee0d39e5",
+      "repo_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py",
+      "bytes": 17640,
+      "sha256": "885626271940ae75c9b6c05bce347168fcb7fdb0d8ea7b1be0c5144a18169053"
+    },
+    "vendor_stand_source": {
+      "commit": "1d46ef2cbb915efc135251f9b32f4ec25d0342ab",
+      "repo_path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+      "bytes": 49107,
+      "sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+    },
+    "isaac_reset_pelvis_xyz_m": [
+      0.0,
+      0.0,
+      1.0684
+    ],
+    "vendor_stand_pelvis_xyz_m": [
+      -0.0416378,
+      0.000359049,
+      1.06839
+    ],
+    "vendor_stand_rpy_deg_approx": [
+      -0.03,
+      0.249,
+      0.042
+    ],
+    "joint_31_l2_difference_rad": 0.171845,
+    "head_yaw_difference_rad": -0.169416,
+    "joint_l2_without_head_rad": 0.028789,
+    "root_x_difference_m": -0.0416378,
+    "stage1_contact_position_frame": "env_origin_absolute_world",
+    "actor_179_position_observation": "target_minus_current_racket_FK_then_yaw_frame",
+    "root_x_difference_automatically_cancels": false,
+    "causal_status": "hypothesis_to_isolate_not_proven_root_cause",
+    "complete_numeric_ready_base_racket_target_contract_bound": false
+  },
+  "frozen_structural_comparison": {
+    "immutable_random_arrival_schedule": "same_rows_order_reveal_ticks_deadlines_for_every_arm",
+    "question_bank_motion_face_plant": "same_content_SHAs",
+    "network_observation_action": "same_179_schema_no_new_phase_dimension_in_S1",
+    "reward_source_weights_and_total_budget": "same_bytes_and_values_no_new_recovery_income",
+    "seeds_optimizer_updates_batching_checkpoint_cadence": "paired_and_identical",
+    "episode_horizon": "same_30_seconds",
+    "mid_sequence_reset_teleport_last_action_history_noise_reset": false,
+    "deadline_shift_or_replacement": false,
+    "safety_is_noncompensable_gate": true,
+    "all_scheduled_opportunities_denominator": true
+  },
+  "conditional_reward_followup": {
+    "status": "not_authorized_until_structural_gate",
+    "trigger": "B_or_C_fails_ready_set_acquisition_without_single_strike_regression",
+    "components": [
+      "post_swing_balance_absorption_debt",
+      "ready_set_potential_progress",
+      "random_arrival_task_readiness"
+    ],
+    "first_step": "scale_normalize_each_component_on_frozen_rollouts",
+    "interaction_design": "full_2_pow_3_on_off_factorial_paired_seeds",
+    "mixture_design_after_interactions_only": "constant_total_budget_simplex_or_D_optimal",
+    "positive_brake_hold_survival_income_allowed": false,
+    "safety_as_reward_weight_allowed": false,
+    "single_strike_nonregression_gate": true
+  },
+  "evaluation_contract": {
+    "same_immutable_random_arrival_exam_for_all_arms": true,
+    "engines_in_order": [
+      "Isaac",
+      "Agibot_vendor_MuJoCo_Gate3"
+    ],
+    "vendor_gate3_is_final_arbiter": true,
+    "mid_sequence_reset_or_teleport": false,
+    "q10_role": "screen_only_directional_no_stop_no_promote_no_checkpoint_selection",
+    "q50_role": "decision_same_family_immutable",
+    "opportunity_denominator": "all_scheduled_including_miss_infeasible_and_fall",
+    "transition_cells": [
+      "forehand_to_forehand",
+      "forehand_to_backhand",
+      "backhand_to_forehand",
+      "backhand_to_backhand"
+    ],
+    "report_peak_and_terminal_checkpoints": true,
+    "self_hit_fall_table_net_contact": "hard_fail_not_reward_tradeoff",
+    "first_strike_nonregression_required": true,
+    "isaac_vendor_disagreement_policy": "block_and_root_cause_never_average",
+    "real_robot_authorized": false
+  },
+  "implementation_bindings": {
+    "immutable_random_arrival_screen_schedule": null,
+    "immutable_random_arrival_decision_schedule": null,
+    "immutable_question_schedule": null,
+    "current_179_checkpoint_inventory": null,
+    "A_bridge_source": null,
+    "A_bridge_trajectory_certificate": null,
+    "A_actor_handoff_contract": null,
+    "B_canonical_tuple_source": null,
+    "B_ready_set_selector": null,
+    "B_fresh_checkpoint_set": null,
+    "C_complete_tuple_source": null,
+    "C_fresh_checkpoint_set": null,
+    "shared_training_hard_contract": null,
+    "isaac_continuous_no_reset_judge": null,
+    "vendor_gate3_continuous_no_reset_judge": null,
+    "canonical_ready_base_racket_target_numeric_contract": null,
+    "ready_set_measurement": null,
+    "racket_handle_self_hit_instrumentation": null,
+    "semantics_correct_calibrated_plant": null
+  }
+}

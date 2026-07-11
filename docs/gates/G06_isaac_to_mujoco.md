@@ -518,3 +518,32 @@ Agibot vendor MuJoCo Gate3/Gate3B final gate. The frozen paper and barrier are
 documented in
 `docs/operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md`; G06
 remains `Partial`.
+
+### Recovery tuple and named-ready mismatch are now explicit Gate3 blockers (2026-07-12)
+
+The recovery A/B/C preregistration binds the read-only Gate3 policy blob at commit
+`1d46ef2cbb915efc135251f9b32f4ec25d0342ab`, SHA `8c9814c...0eba4`, and rejects its current idle
+179-D tuple as a formal train/deploy match: idle position is newly anchored to the live base while
+velocity and face normal/rho remain from the previous strike. Training produces only an all-old
+tuple before reveal or an atomically installed all-new tuple. The same runner also zeroes the
+actor's last-action observation during static-stand handoff; that intervention is not T1's
+carry-state contract and must be replaced or explicitly isolated before a no-reset score is valid.
+
+A second static audit prevents the word `stand` from hiding a different initial state. The bound
+Isaac reset pelvis is `(0,0,1.0684) m`; the vendor MJCF stand key is
+`(-0.0416378,0.000359049,1.06839) m` with approximate roll/pitch/yaw
+`(-0.030,0.249,0.042) deg`. The full 31-joint vectors differ by `0.171845 rad` L2, dominated by
+head-yaw `-0.169416 rad`; excluding the head still leaves `0.028789 rad`. Stage-1 contact positions
+are environment-origin absolute and the 179-D actor observes target minus current racket FK, so the
+`4.16 cm` root-x offset does not automatically cancel. These numbers define a causal hypothesis,
+not a proven root cause of the Isaac/vendor discrepancy. Formal A/B/C evaluation therefore blocks
+until one content-addressed numeric contract binds the exact ready base, joint vector, racket FK,
+target position/velocity/normal/rho and observation result in both engines.
+
+All arms must consume the same immutable random-arrival rows, question order and deadlines, with no
+physical reset, teleport, last-action/history/noise reset, or replacement of infeasible rows. q10
+remains directional only; q50 is the decision paper. Isaac runs first, but the Agibot-provided
+vendor MuJoCo Gate3 implementation is the final arbiter. A discrepancy is blocked and root-caused,
+never averaged. The design-only validator is green (`20 passed`, prereg SHA
+`39b97915...b71e1a`), while launch remains intentionally blocked on exact runtime/judge/plant and
+safety bindings. See `docs/operations/run_phase1_recovery_tuple_prereg.md`; G06 remains `Partial`.

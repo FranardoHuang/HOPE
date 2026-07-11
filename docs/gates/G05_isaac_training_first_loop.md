@@ -946,3 +946,53 @@ Queue/prereg/validator SHAs are `d4e69d91...d3909`, `ca5ea90f...bff0`, and
 `e763ecb9...6cd3`; commands and the future-runner boundary are in
 `docs/operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md`. G05
 remains `Partial`; no Pod audit, activation, runtime or hardware action has run.
+
+### Recovery tuple is now a structural axis, not a reward bundle (2026-07-12)
+
+A read-only audit of the implemented T1 source and the current vendor Gate3 runner found a concrete
+train/deploy mismatch. Natural wrap training installs one complete new
+`position/velocity/normal/side` question tuple; T1 keeps the complete previous tuple until reveal
+and then installs the complete next tuple atomically. Actor latency/dropout likewise carries all
+four fields as one generation. The current 179-D deploy recovery path instead feeds a **new,
+live-base-anchored position** together with the **previous strike velocity and previous strike
+normal/rho**. No bound training transition creates that mixed-generation moving target. It is now
+classified OOD and is not a formal arm; tuning its anchor does not repair the missing semantics.
+
+`configs/phase1_recovery_tuple_abc_prereg_20260712.json` freezes the replacement comparison at SHA
+`39b97915...b71e1a`:
+
+- A: an interruptible, content-bound safe PD/trajectory bridge into the ready set;
+- B: the same actor receives an atomic canonical tuple consisting of a ready-set-selected racket
+  position, zero desired velocity, neutral ready normal, rho zero and ready-phase semantics;
+- C: the actor retains the complete previous tuple until the atomic next-question reveal.
+
+Ready is a safety-and-reachability **set**, not equality to clip frame 0. It jointly requires station
+and upright tolerances, low base/joint/racket speed, stable contacts and slip, joint/torque/q-des
+margin, self/table/net/ground clearance, and a bounded safe start to every enabled next motion,
+question family and random-arrival deadline. If the global intersection is empty, the design must
+declare family-specific ready sets and an explicit transition graph rather than silently deleting
+hard questions.
+
+Existing finite, lineage-bound 179-D atomic-question checkpoints have only two narrow uses: A may
+reuse one as a frozen **swing diagnostic** after bridge/handoff certification; C may run a zero-shot
+coherent-tuple diagnostic. B requires fresh training because current checkpoints never saw the
+zero-velocity/neutral-normal canonical tuple. A fair A/B/C causal comparison is fresh exact and
+paired; C also needs fresh training before any learned random-arrival recovery claim. No old model
+may be relabelled T1-trained.
+
+The first structural paper freezes reward source/weights, total reward budget, motion, bank, face,
+plant, network, observation/action schema, seeds, optimizer and random-arrival rows. It prohibits
+mid-sequence robot/last-action/history/noise reset and deadline shifts. A's handoff remains blocked
+until a contract says exactly whether actor history receives executed bridge action or shadow
+policy action; neither is assumed equivalent. Only if B/C fail ready-set acquisition without
+single-strike regression may reward work begin: normalize balance-absorption debt, ready-set
+potential and random-arrival readiness on frozen rollouts; run paired full `2^3` presence/absence;
+then, only if interactions demand it, run a constant-total-budget mixture. Positive hold income is
+still prohibited, and safety/self-hit can never be offset by another reward.
+
+The pure-contract validator passes `20` red-team tests; `launch-check` deliberately fails because
+the schedules, checkpoint inventory, bridge and trajectory certificate, canonical tuple selector,
+fresh checkpoints, full numeric ready contract, two continuous judges, self-hit instrument and
+calibrated plant are not bound. Commands are in
+`docs/operations/run_phase1_recovery_tuple_prereg.md`. No simulator, Pod, GPU, C++, Gate3 worktree
+or robot was changed. G05 remains `Partial`.

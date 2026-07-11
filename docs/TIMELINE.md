@@ -1560,3 +1560,15 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `d8c918ac...5a9f`；本机未恢复 full v5 大结果，certificate 也未预注册，所以当前
    只有合同/工具验证，没有真资产 proposal 或晋级。后续精确 candidate 必须 schema-2+
    L0+vendor L1+整轨迹桌网 `>=5mm`，再过动力学/Gate3B no-reset；TOPP/RL/真机均未开。
+6. 【franco/Codex】**连续两拍先拆 recovery tuple 结构，当前混代 idle 不再冒充训练内分布——**
+   源码审计证明普通 wrap/T1 都只给“整套旧题”或 reveal 时“原子整套新题”；当前 179-D
+   vendor idle 却是新 live-base 位置 + 上一拍速度/法向/rho，另在 static handoff 清零
+   last-action，均非 no-reset 训练语义。新 A/B/C 预注册先比显式安全 bridge、canonical
+   ready tuple、完整上一题 tuple；现有 179 只可给 A/C 做 diagnostic，B 和任何 learned
+   random-arrival 声明要 fresh。ready 明确定义为安全且对所有下一动作/deadline 可达的集合，
+   不是 frame0。静态证据还记录 Isaac/vendor stand root-x 差 `4.16cm`、31 关节 L2
+   `0.171845rad`，只作待隔离假设；正式卷须绑定完整 numeric ready/base/racket/target SHA。
+   reward 暂冻结；只有结构失败才先归一化三项、做 `2^3` 交互，再固定总预算 mixture，安全/
+   自碰不可补偿。prereg SHA=`39b97915...b71e1a`、纯合同 `20 passed`；launch-check 因
+   schedule/bridge-handoff/fresh checkpoint/calibrated plant/Isaac+vendor Gate3 no-reset judge
+   等仍 null 而按设计失败。未动 C++、Gate3 worktree、Pod/GPU 或真机。
