@@ -26,7 +26,7 @@
     "execution_contract_id": "phase1-M3-old-vs-S1-terminal-clean-q50-execution-v2"
   },
   "tools": {
-    "runner_sha256": "ee5cca8a0556cbfe04bc5b661b9d43533f614a16dd7a7bd1f10dde6c6655af5a",
+    "runner_sha256": "f11251c8fbda6785838f3dfe649bbabbb28b676421aeac3435ca1249909babe6",
     "evaluation": {
       "isaac_evaluator": {
         "path": "hope_training/whole_body_tracking/scripts/isaac_bank_exam.py",

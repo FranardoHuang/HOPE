@@ -737,7 +737,28 @@ def build_command(
     ]
 
 
-def setup_environment(setup_script: Path) -> dict[str, str]:
+def isaac_workdir(config: dict[str, Any], tools: dict[str, Path]) -> Path:
+    eval_root = Path(config["checkouts"]["evaluation"]["path"]).resolve()
+    expected = (eval_root / "hope_training" / "whole_body_tracking").resolve()
+    actual = tools["isaac_evaluator"].resolve().parent.parent
+    if actual != expected or not expected.is_dir():
+        raise ContractError(
+            f"Isaac evaluator cwd must be the pinned eval WBT root: {actual} != {expected}"
+        )
+    return expected
+
+
+def setup_environment(setup_script: Path, *, eval_root: Path) -> dict[str, str]:
+    expected_wbt = (eval_root.resolve() / "hope_training" / "whole_body_tracking").resolve()
+    expected_setup = expected_wbt / "setup_train_env.sh"
+    if setup_script.resolve() != expected_setup or not setup_script.is_file():
+        raise ContractError(
+            f"setup_train_env.sh must come from the pinned eval WBT root: "
+            f"{setup_script} != {expected_setup}"
+        )
+    expected_source = (expected_wbt / "source" / "whole_body_tracking").resolve()
+    if not expected_source.is_dir():
+        raise ContractError(f"pinned eval source tree is missing: {expected_source}")
     try:
         raw = subprocess.check_output(
             [
@@ -759,6 +780,21 @@ def setup_environment(setup_script: Path) -> dict[str, str]:
         if not separator:
             raise ContractError("setup environment emitted a malformed entry")
         env[key.decode("utf-8")] = value.decode("utf-8")
+    hope_pythonpath = env.get("HOPE_WBT_PYTHONPATH", "")
+    components = hope_pythonpath.split(os.pathsep) if hope_pythonpath else []
+    if (
+        not components
+        or any(not value or not Path(value).is_absolute() for value in components)
+        or Path(components[0]).resolve() != expected_source
+    ):
+        raise ContractError(
+            "setup_train_env.sh must export a non-empty, all-absolute "
+            f"HOPE_WBT_PYTHONPATH with pinned eval source first: "
+            f"expected={expected_source}, actual={hope_pythonpath!r}"
+        )
+    # This is the exact semantic action performed by the shell-only ``hope_isaac_py`` function.
+    # The runner invokes the Python executable directly, so never inherit an ambient PYTHONPATH.
+    env["PYTHONPATH"] = hope_pythonpath
     env.update(
         HYDRA_FULL_ERROR="1",
         PYTHONUNBUFFERED="1",
@@ -772,6 +808,14 @@ def setup_environment(setup_script: Path) -> dict[str, str]:
 
 def _strict_bool(value: Any, expected: bool) -> bool:
     return value is expected
+
+
+def require_success_handshake(log_text: str, output_json: Path, output_csv: Path) -> None:
+    """Reject Hydra's possible rc=0 wrapper exit unless the evaluator itself finished."""
+    expected_json_line = f"[isaac-bank-exam] JSON {output_json}"
+    expected_csv_line = f"[isaac-bank-exam] CSV  {output_csv}"
+    if log_text.count(expected_json_line) != 1 or log_text.count(expected_csv_line) != 1:
+        raise ContractError("Isaac evaluator success handshake is missing/ambiguous")
 
 
 def validate_scorecard(
@@ -946,7 +990,9 @@ def run_pair(
         raise ContractError("run requires two non-negative GPUs in M3_old, M3_S1 order")
     state_dir = Path(runtime["state_dir"])
     state_dir.mkdir(parents=True, exist_ok=False)
-    env = setup_environment(tools["setup_train_env"])
+    eval_root = Path(config["checkouts"]["evaluation"]["path"])
+    workdir = isaac_workdir(config, tools)
+    env = setup_environment(tools["setup_train_env"], eval_root=eval_root)
     results = {}
     for index, name in enumerate(ARM_ORDER):
         try:
@@ -975,7 +1021,7 @@ def run_pair(
         with log_path.open("xb", buffering=0) as log:
             proc = subprocess.Popen(
                 command,
-                cwd=tools["isaac_evaluator"].parent.parent,
+                cwd=workdir,
                 env=env,
                 stdin=subprocess.DEVNULL,
                 stdout=log,
@@ -1017,10 +1063,10 @@ def run_pair(
             runtime["shared_schedule"]["file_sha256"],
         )
         text = log_path.read_text(encoding="utf-8", errors="replace")
-        expected_json_line = f"[isaac-bank-exam] JSON {output_json}"
-        expected_csv_line = f"[isaac-bank-exam] CSV  {output_csv}"
-        if text.count(expected_json_line) != 1 or text.count(expected_csv_line) != 1:
-            raise ContractError(f"Isaac {name} success handshake is missing/ambiguous")
+        try:
+            require_success_handshake(text, output_json, output_csv)
+        except ContractError as exc:
+            raise ContractError(f"Isaac {name}: {exc}") from exc
         results[name] = validate_scorecard(
             json_path=output_json,
             csv_path=output_csv,

@@ -92,6 +92,58 @@ def test_arm_maps_accept_canonical_sorted_json_but_not_missing_or_extra_keys():
         R.require_arm_map({**canonical, "M3_extra": {}}, "fixture")
 
 
+def test_direct_python_environment_uses_pinned_source_first_path_and_drops_ambient(
+    tmp_path: Path, monkeypatch,
+):
+    eval_root = tmp_path / "eval"
+    wbt = eval_root / "hope_training" / "whole_body_tracking"
+    source = wbt / "source" / "whole_body_tracking"
+    scripts = wbt / "scripts"
+    source.mkdir(parents=True)
+    scripts.mkdir()
+    setup = wbt / "setup_train_env.sh"
+    setup.write_text(
+        f'export HOPE_WBT_PYTHONPATH="{source}:/absolute/isaaclab"\n',
+        encoding="utf-8",
+    )
+    evaluator = scripts / "isaac_bank_exam.py"
+    evaluator.write_text("# fixture\n", encoding="utf-8")
+    config = _config()
+    config["checkouts"]["evaluation"]["path"] = str(eval_root)
+    tools = {"isaac_evaluator": evaluator}
+    assert R.isaac_workdir(config, tools) == wbt.resolve()
+
+    monkeypatch.setenv("PYTHONPATH", "/ambient/must-not-survive")
+    env = R.setup_environment(setup, eval_root=eval_root)
+    assert env["HOPE_WBT_PYTHONPATH"] == f"{source}:/absolute/isaaclab"
+    assert env["PYTHONPATH"] == env["HOPE_WBT_PYTHONPATH"]
+    assert "/ambient/must-not-survive" not in env["PYTHONPATH"]
+    assert env["PYTHONPATH"].split(":", 1)[0] == str(source)
+
+    setup.write_text(
+        'export HOPE_WBT_PYTHONPATH="/wrong/source:/absolute/isaaclab"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(R.ContractError, match="source first"):
+        R.setup_environment(setup, eval_root=eval_root)
+
+
+def test_rc_zero_without_evaluator_handshake_remains_a_failure(tmp_path: Path):
+    output_json = tmp_path / "score.json"
+    output_csv = tmp_path / "score.csv"
+    hydra_rc_zero_log = (
+        "Traceback (most recent call last):\n"
+        "ModuleNotFoundError: No module named 'whole_body_tracking'\n"
+    )
+    with pytest.raises(R.ContractError, match="handshake"):
+        R.require_success_handshake(hydra_rc_zero_log, output_json, output_csv)
+    success = (
+        f"[isaac-bank-exam] JSON {output_json}\n"
+        f"[isaac-bank-exam] CSV  {output_csv}\n"
+    )
+    R.require_success_handshake(success, output_json, output_csv)
+
+
 @pytest.mark.parametrize(
     "mutation",
     (
