@@ -333,6 +333,17 @@ evaluator's non-physical post-strike tracking guard (`guard_reset=true`, `physic
 this isolated one-question paper is not continuity or deploy-stability evidence. The complete
 binding is `configs/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json`.
 
+The byte-identical Isaac companion has also completed under fresh/exact
+semantics. Both model 2000 and model 4000 scored FH/BH/aggregate
+`49/50,50/50,99/100`, with 99 exact reaches, one guard reset and zero physical
+falls. Isaac therefore gives delta zero and does not reproduce MuJoCo's
+`+0.33` model-2000 advantage. The preregistered final tie-break names the
+earlier checkpoint only after a complete Isaac tie; that is not independent
+cross-engine support. Model 2000 remains the MuJoCo-selected checkpoint inside
+this frozen pair, the arm continues, and the cross-engine/formal deployment
+ranking gate stays open. Full runtime/scorecard/ledger hashes are in
+`configs/phase1_SZ_seed1_2000_vs_4000_q50_isaac_result_20260711.json`.
+
 The original causal arms also completed clean q10 at 20000. M3-S1 scored `1.00` versus M3-old
 `0.45`; M2-S1 and M2-old both scored `0.50` on this small prefix. All four remain diagnostic with
 `evaluation_contract_exact=false`. The long-lived original-arm workers then advanced to wait for

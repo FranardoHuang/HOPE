@@ -1479,3 +1479,9 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    GPU 不变。新产物还没重做 grounding/稠密自碰/拍柄余隙/动力学/桌网扫掠，所以
    仍是 diagnostic，不进 schema2/RL/真机。账本见
    `motion_video_canonical_gmr_results_20260711.json`。
+39. 【franco/Codex】**fresh exact 也出现 Isaac 饱和，2k>4k 的跨引擎排名门未关**——复用
+   MuJoCo 逐字节同一 K100 题序，Isaac 下 model2000 和 model4000 都是 FH/BH/aggregate=
+   `49/50,50/50,99/100`、99 exact reach、1 guard reset、0 physical fall，delta=0。MuJoCo 的
+   `83/100 vs 50/100` 分离没被复现；Isaac 最终“选”2k 只是预注册的完全平局
+   最后 tie-break，不是独立支持。2k 仍作 MuJoCo pair 内保留峰，整臂继续；跨引擎/
+   formal deploy 门不关。账本见 `phase1_SZ_seed1_2000_vs_4000_q50_isaac_result_20260711.json`。

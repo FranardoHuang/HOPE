@@ -21,6 +21,13 @@ Use this file for short project-state updates that future humans and agents need
   checkpoint-selection evidence only, not continuity/deployment evidence.
   Full hashes are in
   `configs/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json`.
+- Completed the byte-identical fresh SZ Isaac companion. Both 2000 and 4000
+  scored FH/BH/aggregate `0.98/1.00/0.99`, with one guard reset and zero
+  physical falls. This does not reproduce MuJoCo's `0.83` versus `0.50`
+  separation; Isaac's final earlier-checkpoint tie-break is not independent
+  ranking evidence. Model 2000 remains selected only inside the frozen MuJoCo
+  pair, the arm continues and the cross-engine/formal deployment gate remains
+  open. Ledger: `configs/phase1_SZ_seed1_2000_vs_4000_q50_isaac_result_20260711.json`.
 - Completed the M3 same-paper Isaac companion. M3-old and M3-S1 both scored
   FH/BH/aggregate `0.98/1.00/0.99`, delta zero, on the exact MuJoCo question
   order. This does not reproduce MuJoCo's `+0.58` S1 advantage, so the causal

@@ -658,6 +658,14 @@ continue the arm. Both cells' post-strike guard resets mean this is not a
 continuity/deploy gate. Full paths and hashes are in
 `configs/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json`.
 
+The completed fresh/exact Isaac companion consumed that same schedule file
+and semantic SHA. Both checkpoints scored `0.99` aggregate (`0.98/1.00` by
+side), one guard reset and zero physical falls; it does not reproduce the
+MuJoCo separation. Do not interpret the earlier-checkpoint final tie-break as
+cross-engine validation. Runtime-contract SHA is `63580328...b8120`, paired
+result SHA is `65c08723...c18e`, and the full bindings are in
+`configs/phase1_SZ_seed1_2000_vs_4000_q50_isaac_result_20260711.json`.
+
 The current 10-second, no-wrap-teleport task does carry the robot state between
 clips, but its complete-clip timing is slower than the conservative venue
 A-B-A intervals. Do not claim that this pool proves arbitrary-time continuous

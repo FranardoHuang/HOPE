@@ -759,6 +759,14 @@ questions ended through the non-physical post-strike guard; this is isolated
 checkpoint selection, not recovery or deployment evidence. Bindings are in
 `configs/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json`.
 
+The fresh/exact Isaac companion reused the byte-identical K=100 schedule and
+scored both checkpoints FH/BH/aggregate `0.98/1.00/0.99`, with one guard
+reset and no physical falls. It does not reproduce MuJoCo's `0.83` versus
+`0.50` ranking. The final earlier-checkpoint tie-break is only a rule for a
+complete Isaac tie, not cross-engine support. Model 2000 remains retained
+inside the MuJoCo pair; no cross-engine/formal deployment gate closes. See
+`configs/phase1_SZ_seed1_2000_vs_4000_q50_isaac_result_20260711.json`.
+
 The original cadence no longer serializes fresh milestones behind causal terminal.
 Each Pod now has independent original-causal and original-fresh manifests and
 state directories, matching the scale-out split. Current q10 manifests carry

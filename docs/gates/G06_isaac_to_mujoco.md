@@ -449,8 +449,11 @@ K=100, 50-per-side paper, model 2000 returned FH/BH/aggregate
 retained and the whole arm continues. Both evaluations are exact/fresh, but
 all attempts finalized through a non-physical post-strike guard, so this is
 not a continuous or deploy-stability gate. The result is bound in
-`configs/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json`; its fresh
-same-paper Isaac companion remains the next cross-engine check.
+`configs/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json`. Its fresh
+same-paper Isaac companion gave both checkpoints `0.98/1.00/0.99`
+FH/BH/aggregate, delta zero. The MuJoCo ranking is therefore not reproduced;
+the cross-engine checkpoint gate stays open. Companion hashes are in
+`configs/phase1_SZ_seed1_2000_vs_4000_q50_isaac_result_20260711.json`.
 
 Run `python3 scripts/validate_phase1_queue_governance.py` before any curve
 manifest is copied or launched. The validator enforces the 142-job/24-slot
