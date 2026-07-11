@@ -282,7 +282,9 @@ def verify_tools_and_runtime(plan: dict[str, Any]) -> tuple[Path, Path, Path]:
         if sha256_file(path) != binding["sha256"]:
             raise QueueError(f"{label} SHA mismatch: {path}")
     mjcf = verify_bound_file(plan["mjcf"], "canonical MJCF")
-    python = Path(plan["python_environment"]["executable"]).expanduser().resolve()
+    # Preserve the venv launcher path.  Resolving its symlink to /usr/bin/python
+    # drops pyvenv.cfg discovery and silently executes outside the bound venv.
+    python = Path(plan["python_environment"]["executable"]).expanduser().absolute()
     if not python.is_file():
         raise QueueError(f"bound Python executable is missing: {python}")
     version = subprocess.run(

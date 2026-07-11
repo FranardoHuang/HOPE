@@ -18,7 +18,7 @@ SPEC.loader.exec_module(QUEUE)
 
 
 def _tracked_plan() -> tuple[Path, dict]:
-    path = ROOT / "configs" / "motion_video_canonical_gmr_ground_prereg_20260711.json"
+    path = ROOT / "configs" / "motion_video_canonical_gmr_ground_prereg_v2_20260711.json"
     return path, json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -76,6 +76,40 @@ def test_plan_hash_body_shape_and_collision_semantics_fail_closed(tmp_path: Path
     path.write_text(json.dumps(plan), encoding="utf-8")
     with pytest.raises(QUEUE.QueueError, match="unique sorted geom ids"):
         QUEUE.validate_plan(path, QUEUE.sha256_file(path))
+
+
+def test_runtime_verifier_preserves_venv_launcher_symlink(tmp_path: Path):
+    python_link = tmp_path / "venv" / "bin" / "python"
+    python_link.parent.mkdir(parents=True)
+    python_link.symlink_to(Path(sys.executable).resolve())
+    version_result = __import__("subprocess").run(
+        [str(python_link), "--version"], capture_output=True, text=True, check=True
+    )
+    version = (version_result.stdout or version_result.stderr).strip()
+    mjcf = tmp_path / "model.xml"
+    mjcf.write_text("<mujoco/>", encoding="utf-8")
+    ground = ROOT / "scripts" / "ground_gmr_pkl.py"
+    plan = {
+        "queue_tool": {
+            "path": SCRIPT.name,
+            "bytes": SCRIPT.stat().st_size,
+            "sha256": QUEUE.sha256_file(SCRIPT),
+        },
+        "grounding_tool": {
+            "path": ground.name,
+            "bytes": ground.stat().st_size,
+            "sha256": QUEUE.sha256_file(ground),
+        },
+        "mjcf": {
+            "path": str(mjcf),
+            "bytes": mjcf.stat().st_size,
+            "sha256": QUEUE.sha256_file(mjcf),
+        },
+        "python_environment": {"executable": str(python_link), "version": version},
+    }
+    _, _, verified_python = QUEUE.verify_tools_and_runtime(plan)
+    assert verified_python == python_link.absolute()
+    assert verified_python != python_link.resolve()
 
 
 def test_source_manifest_verifier_binds_all_physical_inputs(tmp_path: Path):
