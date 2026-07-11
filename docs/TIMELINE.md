@@ -1550,3 +1550,9 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    Release 三目标全链接，真实 SZ 2k ONNX test 1/1、native 205 pass/9 optional skip；无 no-publish
    preflight rc2，安全 preflight rc0 且输出 obs179/双 SHA、零 backend init/start。仅执行零观测 ONNX
    prewarm，无 driver/backend tick；normal envelope、canonical recovery、厂商 Gate3/Gate3B 继续 open。
+53. 【franco/Codex】**179 法向不再只看正 X，按训练题库逐动作 fail closed**——两个 exporter 都从
+   exact schema3 train bytes 逐 clip 生成 sign-preserving spherical cap；frame/+Y-A convention/算法/
+   容差/center/reference/min-dot/count/bank+family SHA 全进自哈希 metadata。C++ loader 缺一字段、
+   改一字节、错 clip order/符号/单位都会拒绝；planner 在 engage transaction 前用 forehand/backhand
+   已选 clip 判 cap，正 X 但训练外 normal 不起拍。旧 formal ONNX 缺该合同会被新 loader 拒绝，需
+   重导；这只是 Gate3 加载/安全前置，不是 vendor MuJoCo behavior、自击或连续恢复通过。

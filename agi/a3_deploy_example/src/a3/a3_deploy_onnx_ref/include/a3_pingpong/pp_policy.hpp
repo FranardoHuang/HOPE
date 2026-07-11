@@ -1664,6 +1664,25 @@ class PpPolicy {
         set_planner_status_("face_command_invalid");
         return;
       }
+      // Content-bound train-support gate.  The wire's x>0 invariant only proves an opponent-facing
+      // unit vector; it does not prove that this clip ever trained on that orientation.  clip0/1
+      // are frozen forehand/backhand in both the bank and reference clock.  Reject before the
+      // transaction boundary so an out-of-envelope normal cannot latch a new swing/side/target.
+      if (!onnx_.face_normal_within_training_envelope(eng_clip, normal_w)) {
+        if ((gate_warn_tick_++ % 50) == 0) {
+          const auto& envelope = onnx_.face_normal_envelope();
+          std::fprintf(stderr,
+              "[pp gate] REJECT face normal outside %s train cap: clip=%d "
+              "normal=(%+.5f,%+.5f,%+.5f) dot=%.8f need>=%.8f (tol=%.1e)\n",
+              eng_clip == 0 ? "forehand" : "backhand", eng_clip,
+              normal_w[0], normal_w[1], normal_w[2],
+              envelope.Dot(eng_clip, normal_w[0], normal_w[1], normal_w[2]),
+              envelope.min_dots[static_cast<std::size_t>(eng_clip)],
+              envelope.runtime_dot_tolerance);
+        }
+        set_planner_status_("face_command_out_of_train_envelope");
+        return;
+      }
     }
     // Transaction boundary: every validation above operates on locals. Commit the clock,
     // position, velocity, side and face command together so a rejected schema-2 row cannot

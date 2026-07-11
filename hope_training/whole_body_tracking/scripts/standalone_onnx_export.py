@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
+import importlib.util
 import json
 import os
 
@@ -38,6 +39,10 @@ from whole_body_tracking.utils.training_contract import (
     require_checkpoint_contract_binding,
     validate_schema3_contract,
     validate_schema3_contract_structure,
+)
+from whole_body_tracking.utils.stage1_normal_envelope import (
+    FORMAL_CLIP_ORDER,
+    derive_stage1_normal_envelope,
 )
 
 MOTION_KEYS = ("joint_pos", "joint_vel", "body_pos_w", "body_quat_w", "body_lin_vel_w", "body_ang_vel_w")
@@ -55,6 +60,19 @@ def _sha256_file(path: str) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _load_stage1_question_bank_module():
+    """Load only the dependency-light bank module, bypassing the Isaac-heavy mdp package init."""
+    path = os.path.abspath(os.path.join(
+        os.path.dirname(__file__), "..", "source", "whole_body_tracking", "whole_body_tracking",
+        "tasks", "tracking", "mdp", "stage1_question_bank.py",
+    ))
+    spec = importlib.util.spec_from_file_location("standalone_stage1_question_bank", path)
+    _require(spec is not None and spec.loader is not None, "cannot load stage1_question_bank.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _csv(meta: dict[str, str], key: str) -> list[str]:
@@ -256,6 +274,10 @@ def main() -> int:
     p.add_argument("--bh", required=True)
     p.add_argument("--donor", required=True, help="same-task-config exported policy.onnx to copy metadata from")
     p.add_argument("--harvest", required=True, help="motion-buffer npz produced by harvest_onnx_motion.py from the donor")
+    p.add_argument(
+        "--train-bank",
+        help="exact schema-3 train NPZ; mandatory for a formal 179-D face export",
+    )
     p.add_argument("--out", required=True)
     p.add_argument("--run-path", default="standalone-export")
     p.add_argument("--bake-obs-norm", action="store_true",
@@ -521,6 +543,11 @@ def main() -> int:
                 format(float(v), ".17g") for v in signs
             )
         bank_contract = training_contract.get("question_bank")
+        if actor_contract == "deploy_parity_face179":
+            _require(
+                bank_contract is not None,
+                "formal face179 standalone export requires an exact schema-3 train-bank binding",
+            )
         if bank_contract is not None:
             expected_bank = {
                 "schema_version": 3,
@@ -543,6 +570,37 @@ def main() -> int:
                 "stage1_source_family_sha256": bank_contract["source_family_sha256"],
                 "stage1_question_bank_exact": "1",
             })
+            if actor_contract == "deploy_parity_face179":
+                _require(
+                    bool(args.train_bank),
+                    "formal face179 standalone export requires --train-bank; donor metadata or "
+                    "the checkpoint-side JSON cannot substitute for the exact normal rows",
+                )
+                qb_module = _load_stage1_question_bank_module()
+                try:
+                    train_bank = qb_module.load_question_bank(
+                        os.path.abspath(args.train_bank),
+                        device="cpu",
+                        clip_names=FORMAL_CLIP_ORDER,
+                        allow_legacy=False,
+                        expected_split="train",
+                    )
+                    qb_module.validate_runtime_motion_contract(
+                        train_bank.metadata,
+                        [os.path.abspath(args.fh), os.path.abspath(args.bh)],
+                        seg_lengths,
+                        phases,
+                    )
+                except (KeyError, OSError, ValueError) as exc:
+                    raise SystemExit(f"[FATAL] invalid formal face179 --train-bank: {exc}") from exc
+                donor_meta.update(
+                    derive_stage1_normal_envelope(
+                        train_bank.source_path,
+                        expected_train_bank_sha256=bank_contract["sha256"],
+                        expected_source_family_sha256=bank_contract["source_family_sha256"],
+                        clip_order=FORMAL_CLIP_ORDER,
+                    )
+                )
     donor_meta["run_path"] = args.run_path
     # Always overwrite donor provenance. A no-bake re-export from a baked donor must clear the
     # old value or evaluators will skip the required sidecar.

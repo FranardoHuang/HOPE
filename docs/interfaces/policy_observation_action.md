@@ -65,7 +65,7 @@ Notes:
 | Dim | Contract | Delta / source | C++ publish status |
 | --- | --- | --- | --- |
 | 177 | `hitter_footwork` | 175 layout with `base_target_pos_b(2)` inserted after projected gravity; requires fresh external/oracle base localization. | Supported, but publication fails closed without fresh localization. |
-| 179 | `deploy_parity_face179` | Exact 175 prefix + tail `racket_target_normal_cmd(3), rho(1)`; demanded normal is the delayed atomic +Y/A-frame planner command. | Source-supported only through flat wire schema 2; requires exact ONNX metadata and planner mode. Vendor Gate 3 build/runtime is pending, so not yet accepted. |
+| 179 | `deploy_parity_face179` | Exact 175 prefix + tail `racket_target_normal_cmd(3), rho(1)`; demanded normal is the delayed atomic +Y/A-frame planner command. | Source-supported only through flat wire schema 2; requires exact ONNX metadata, a content-bound per-clip train-normal envelope and planner mode. A new envelope-bearing model has not passed vendor Gate 3 behavior, so not yet accepted. |
 | 181 | `deploy_parity_station181` | Exact 179 prefix + tail `station_anchor_err_b(2)`. | Blocked: wire and the unique station/normal term order are not frozen. |
 | 110 | `hitter_pure` | HITTER Table-I style: 99-D proprio prefix + base forward(2), station delta(2), racket target rel base(3), target velocity(3), tts(1); no reference command or swing flag. | Supported; requires fresh localization and metadata-bound per-side station geometry. |
 
@@ -93,10 +93,32 @@ a reviewed 179 Gate 3 launch must set `racket_flat_schema:=2`.
 The formal flat row is published before the optional `hope_msgs/RacketCommand` mirror; mirror
 conversion/DDS failures are counted but cannot suppress a new formal row or revocation.
 
-The positive-X check is only the planner's minimum A-frame invariant. A train-bank-derived
-per-clip normal envelope/dot threshold is not yet exported and remains a vendor Gate 3 runtime
-blocker; source support must not be read as proof that every opponent-facing unit normal is
-on-distribution or self-collision safe.
+The positive-X check is only the planner's minimum A-frame invariant. Formal 179 exports now add a
+per-clip spherical-cap envelope derived from the exact schema-3 train-bank bytes. Clip 0 is always
+`forehand`, clip 1 always `backhand`; their rows are never pooled. For each clip, every demanded
+normal must already be unit within `2e-4` and lie in the same open hemisphere as that clip's raw
+`mount_plusY_A` reference; every train row must also satisfy the schema-2 opponent-facing
+`normal.x > 1e-6` rule. The exporter normalizes those rows, forms the normalized vector sum
+(`per_clip_sign_preserving_spherical_mean_cap_v1`), and records the minimum row-to-center dot as
+the cap boundary. This avoids the invalid operation of averaging opposite racket-face signs.
+
+The ONNX binds all of the following metadata into one canonical newline-delimited payload and
+recomputable SHA-256: envelope schema `1`, frame `world_table_frame0`, face convention
+`mount_plusY_A`, pairing `shared_plus_y`, algorithm, bank-row unit tolerance `0.0002`, runtime
+unit/dot tolerances `0.000001`, exact clip order, two centers, two reference normals, two minimum
+dots, two row counts, train-bank SHA and source-family SHA. The C++ loader requires every field,
+recomputes the payload SHA, checks both embedded bank/family hashes against the existing formal
+179 metadata, and rejects malformed/non-unit/flipped caps. At planner engage it selects the cap
+using the already frozen forehand/backhand clip id and rejects a normal when
+`dot(center, normal) + 1e-6 < min_dot`, before any target/clock/side/normal state is committed.
+Missing envelope metadata therefore makes earlier 179 ONNX files unloadable under the new source;
+they must be re-exported from the exact train bank. The other 110/175/177/180 layouts do not read
+these fields.
+
+This closes a source-level load/safety prerequisite only. A cap contains all train rows but is not
+a proof that every point inside the cap is dynamically safe, collision-free or successful in the
+vendor MuJoCo. Self-hit instrumentation, a canonical recovery tuple, a new envelope-bearing formal
+export and Gate 3/Gate 3B behavior evidence remain mandatory.
 
 The active swing tuple is atomic, but the existing Gate 3 post-swing policy-recovery path
 synthesizes a base-anchored hold position while retaining the previous velocity/normal. Current

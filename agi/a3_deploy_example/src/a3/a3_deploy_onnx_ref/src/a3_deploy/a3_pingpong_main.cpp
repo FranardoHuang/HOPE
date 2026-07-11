@@ -616,8 +616,14 @@ int main(int argc, char** argv) {
     std::cout << "[pp PREFLIGHT] accepted; backend_not_initialized=true"
               << " obs_dim=" << pp->onnx().obs_dim()
               << " training_contract_sha256=" << pp->onnx().training_contract_sha256()
-              << " source_checkpoint_sha256=" << pp->onnx().source_checkpoint_sha256()
-              << "\n";
+              << " source_checkpoint_sha256=" << pp->onnx().source_checkpoint_sha256();
+    if (pp->onnx().obs_dim() == a3_pingpong::kObsDim179) {
+      const auto& envelope = pp->onnx().face_normal_envelope();
+      std::cout << " normal_envelope_payload_sha256=" << envelope.payload_sha256
+                << " normal_envelope_train_bank_sha256=" << envelope.train_bank_sha256
+                << " normal_envelope_source_family_sha256=" << envelope.source_family_sha256;
+    }
+    std::cout << "\n";
     return 0;
   }
 

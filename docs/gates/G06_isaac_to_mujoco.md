@@ -520,9 +520,10 @@ Active-swing fields are atomic. Post-swing recovery is not yet exact: the curren
 combines a synthesized base-anchored hold position with the previous swing's velocity/normal,
 and no Phase-1 contract proves that hybrid tuple is on-distribution. A canonical recovery tuple
 or separately accepted vendor-MuJoCo recovery paper is required before continuous promotion.
-The positive-X invariant is also only a minimum sign/frame guard. A content-bound per-clip normal
-envelope from the exact training bank is not yet exported; until it exists, arbitrary positive-X
-normals and their self-collision consequences remain a Gate 3 runtime blocker.
+The positive-X invariant is also only a minimum sign/frame guard. Source now exports and enforces a
+content-bound per-clip normal envelope from the exact training bank, as described below. A new
+envelope-bearing formal ONNX, self-hit evidence and vendor behavior gate are still absent, so this
+source guard must not be promoted into a Gate 3 result.
 
 The same-policy Isaac/MuJoCo gap is localized in stages rather than one aggregate score:
 
@@ -591,6 +592,36 @@ The direct-CMake executable needed its build-tree TBB directory on `LD_LIBRARY_P
 runner stages TBB. `PpPolicy` construction performs one intended zero-observation ONNX prewarm
 inference, but no policy driver, backend tick, transport, simulator, Kit or command path started.
 The live training/eval checkouts remained clean at `6d93bcb...`/`46a0ce2...`, and no isolated
-process remained. This closes formal-model production loading only. First backend tick, per-clip
-normal envelope, canonical recovery tuple and full vendor MuJoCo Gate 3/Gate 3B behavior remain
-open, so G06 stays Partial.
+process remained. This closes the pre-envelope formal-model production loading proof only. The
+same ONNX is intentionally rejected by the stricter source below because it lacks the new envelope
+metadata. Re-export/rebuild, first backend tick, canonical recovery tuple and full vendor MuJoCo
+Gate 3/Gate 3B behavior remain open, so G06 stays Partial.
+
+#### 2026-07-12 content-bound per-clip demanded-normal source gate
+
+Formal 179 export and loading now bind the normal distribution rather than accepting every
+opponent-facing unit vector. The train NPZ must be exact schema 3, split `train`, ordered
+`forehand,backhand`, `shared_plus_y` and `mount_plusY_A`, with its bytes and source family matching
+the checkpoint contract. Each clip is processed alone: normalize rows only after the bank's
+`2e-4` unit check, reject any row across the clip reference hemisphere, normalize the row-vector
+sum, and save the minimum row-to-center dot. This
+`per_clip_sign_preserving_spherical_mean_cap_v1` construction never averages forehand with
+backhand or opposite face signs.
+
+The ONNX carries envelope schema/frame/convention/pairing/algorithm, bank/runtime tolerances,
+clip order, two centers, references, dot thresholds, row counts, and duplicated bank/family SHA
+bindings. A dependency-free C++ SHA-256 implementation recomputes the canonical metadata payload;
+the loader then rejects missing keys, a stale payload hash, bank/family mismatch, malformed or
+non-unit vectors, flipped centers, invalid thresholds/counts and wrong clip order. `PpPolicy`
+checks the command against the already selected clip's cap before its engage transaction commits
+clock, position, velocity, side or normal. A positive-X unit vector outside the selected cap sets
+`face_command_out_of_train_envelope` and cannot start a swing. Older 179 ONNX files lack these
+mandatory keys and therefore fail closed even under model-only/no-publish loading. Other registered
+110/175/177/180 models retain their prior loader behavior.
+
+Host verification currently covers the Python derivation suite, Python exporter/contract suite,
+standard SHA-256 vectors and a compiled dependency-light C++ parse/accept/reject smoke. A full
+vendor-dependency Release build and a freshly re-exported real 179 model are still required. More
+importantly, a spherical cap is an on-distribution envelope, not a collision or behavior proof:
+self-hit instrumentation, the recovery tuple and no-reset vendor MuJoCo Gate 3/Gate 3B remain
+open. G06 stays `Partial`.

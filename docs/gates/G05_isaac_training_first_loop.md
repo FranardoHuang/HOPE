@@ -879,3 +879,22 @@ training/T1 isolation. Focused host verification passed (`63 passed, 1 artifact-
 This is only a source gate: no Pod Isaac runtime result exists, a clean-detached 100-row ledger
 has not been produced, and moving-racket substep geometry is not yet quantified. G05 therefore
 remains `Partial`; existing analytic Isaac scores cannot be relabelled physical.
+
+### 2026-07-12 formal train-normal envelope export
+
+The 179-D export chain now consumes the demanded-normal rows of the exact schema-3 train bank
+instead of binding only its file SHA. Native Isaac export requires the live validated
+`QuestionBank`; the Isaac-free standalone path requires `--train-bank`, runs the same strict bank
+and motion-anchor loaders, and refuses to inherit any `stage1_*` envelope from a donor ONNX. For
+each clip independently (clip0 forehand, clip1 backhand), rows must be unit within `2e-4` and stay
+on the raw +Y/A-frame side of that clip's reference normal. The normalized per-clip row sum defines
+the spherical-cap center and the minimum row dot defines its boundary. The exporter records the
+frame, convention, algorithm, tolerances, centers, references, thresholds, row counts, train-bank
+SHA and source-family SHA in a canonical payload with its own SHA-256.
+
+Dependency-light Python verification covers all bank rows at the exported boundary, independent
+forehand/backhand signs, a positive-X but out-of-support normal, opposite-sign poisoning,
+non-unit rows, wrong clip order, bank/family mismatch and payload content binding. This closes an
+export/source prerequisite only. No envelope-bearing formal ONNX has yet been produced from the
+running Phase-1 artifacts, and no policy has passed vendor MuJoCo with the envelope, self-hit gate
+or recovery contract. G05 remains `Partial`.

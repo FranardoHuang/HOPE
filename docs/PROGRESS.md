@@ -1408,3 +1408,11 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   real-model test 1/1、全套 205 pass/9 optional skip/0 fail；缺 no-publish 时 rc2，安全 preflight
   rc0 并精确打印 179/contract/checkpoint SHA，日志无 backend init/start。构造器仅做一次零观测
   ONNX prewarm；first backend tick、normal envelope、canonical recovery 与 Gate3/Gate3B 仍 open。
+- 179 train-normal envelope 已完成源码端闭环：native/standalone exporter 都从 exact schema-3
+  train NPZ 按 clip0 正手/clip1 反手独立导出保符号球面均值 cap，metadata 把 frame/convention/
+  algorithm/tolerances/center/reference/min-dot/count 与 bank/family SHA 做二次 payload SHA。C++
+  loader 重算 SHA 并 fail-closed；planner 在 engage 原子提交前按已选 clip 拒绝 cap 外 normal。
+  Python derivation/恶意输入测试 `4 passed`，连同 schema3 suite 为 `24 passed`；标准 SHA 向量和
+  dependency-light C++ parse/边界 smoke 通过。旧 SZ formal ONNX 因缺 envelope 会被新 loader
+  有意拒绝，必须重导出。尚无新 ONNX/full vendor build/first tick/self-hit/recovery/Gate3 行为证据，
+  所以只关闭 source safety prerequisite，G05/G06 仍 Partial。

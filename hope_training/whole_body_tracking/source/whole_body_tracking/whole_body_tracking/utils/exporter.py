@@ -29,6 +29,10 @@ from whole_body_tracking.utils.training_contract import (
     validate_schema3_contract,
     validate_schema3_contract_structure,
 )
+from whole_body_tracking.utils.stage1_normal_envelope import (
+    FORMAL_CLIP_ORDER,
+    derive_stage1_normal_envelope,
+)
 
 
 def is_empirical_normalizer(normalizer: object | None) -> bool:
@@ -448,6 +452,7 @@ def attach_onnx_metadata(
     except KeyError:
         rt_cmd = None  # plain tracking task: no strike clock/geometry metadata
     current_question_bank_contract = None
+    validated_question_bank = None
     if rt_cmd is not None:
         rt_cfg = rt_cmd.cfg
         mount_offset = [float(value) for value in rt_cfg.mount_offset]
@@ -519,6 +524,7 @@ def attach_onnx_metadata(
                 raise ValueError(
                     "attach_onnx_metadata: question_bank configured but no validated QuestionBank"
                 )
+            validated_question_bank = qb
             bank_path = os.path.abspath(str(qb.source_path))
             if not os.path.isfile(bank_path):
                 raise ValueError(
@@ -623,6 +629,37 @@ def attach_onnx_metadata(
                     separators=(",", ":"),
                 ),
             }
+        )
+    if actor_contract is not None and actor_contract.name == "deploy_parity_face179":
+        required_bank = {
+            "stage1_question_bank_exact": "1",
+            "stage1_bank_schema_version": "3",
+            "stage1_bank_split": "train",
+            "face_command_enabled": "1",
+            "face_command_pairing": "shared_plus_y",
+            "face_obs_convention": "mount_plusY_A",
+        }
+        mismatch = {
+            key: (metadata.get(key), expected)
+            for key, expected in required_bank.items()
+            if metadata.get(key) != expected
+        }
+        if mismatch or validated_question_bank is None:
+            raise ValueError(
+                "attach_onnx_metadata: formal face179 export requires the live exact schema-3 "
+                f"train bank and shared +Y/A-frame face channel; mismatch={mismatch}"
+            )
+        # Read the exact NPZ rows again under a before/after content hash.  The command loader has
+        # already validated the full schema-3 physics/motion contract; this second pass derives the
+        # deploy gate from the same immutable bytes and prevents a filename/donor ONNX from
+        # inventing a wider normal distribution.
+        metadata.update(
+            derive_stage1_normal_envelope(
+                validated_question_bank.source_path,
+                expected_train_bank_sha256=metadata["stage1_train_bank_sha256"],
+                expected_source_family_sha256=metadata["stage1_source_family_sha256"],
+                clip_order=FORMAL_CLIP_ORDER,
+            )
         )
     if actor_contract is not None and actor_contract.name == "hitter_pure":
         required_hp = (

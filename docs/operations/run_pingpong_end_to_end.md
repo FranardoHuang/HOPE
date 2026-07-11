@@ -1303,13 +1303,23 @@ after a live face tuple as `invalid_after`. Diagnostics report planner solves se
 control-valid rows and count flat-contract rejects. Do not use this on hardware: the vendor MuJoCo
 build and a content-addressed no-publish runtime ledger must pass first.
 
+A formal 179 ONNX must also carry the content-bound per-clip train-normal envelope described in
+`docs/interfaces/policy_observation_action.md`. The loader verifies its payload SHA and exact
+train-bank/source-family bindings. At engage, the runner maps the selected sign to clip0 forehand
+or clip1 backhand and requires the world-frame unit normal to lie inside that clip's spherical cap;
+the check occurs before the atomic target/clock/side commit. A positive-X unit normal outside the
+trained cap is reported as `face_command_out_of_train_envelope` and does not start a swing. Models
+exported before this contract intentionally fail to load and must be re-exported from the exact
+schema-3 train bank. Model-only preflight prints the envelope payload/bank/family SHA triplet for
+the audit ledger; it still does not initialize a backend or prove behavior.
+
 The active swing uses one frozen schema-2 tuple. Post-swing recovery is still a known blocker:
 the current rally runner synthesizes a base-anchored hold position while carrying the last swing's
 velocity/normal, and the 179 training contract has not proven that hybrid observation. Until a
 canonical recovery tuple or matching vendor-MuJoCo recovery paper is accepted, use the 179 path
 only for wire/first-tick/single-swing diagnostics and do not report a continuous Gate 3 pass.
-The current positive-X normal guard is not a train-bank envelope: exporting and enforcing a
-content-bound per-clip normal/dot range remains required before a runtime pass.
+The envelope source gate is not a Gate 3 behavior pass: it neither proves all points inside the cap
+collision-free nor closes self-hit/recovery/vendor-MuJoCo stability. Keep those gates open.
 
 **Engage semantics** (port of the retired python runner's `_tick`; defaults, all
 CLI-tunable): a fresh

@@ -1024,6 +1024,29 @@ hope_isaac_py scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 
   headless=false
 ```
 
+For a formal 179-D face actor, keep the exact train bank configured in the export environment.
+The native exporter refuses to create a 179 ONNX unless the live bank is exact schema 3, split
+`train`, checkpoint/SHA-bound, `shared_plus_y`, and `mount_plusY_A`; it derives and hashes the
+per-clip demanded-normal envelope from the bank bytes during metadata attachment. An older 179
+ONNX that lacks the envelope metadata is intentionally rejected by the current C++ loader.
+
+The Isaac-free standalone exporter has the same rule and cannot copy the envelope from its donor.
+Pass the exact train NPZ explicitly:
+
+```bash
+python scripts/standalone_onnx_export.py \
+  --ckpt /abs/run/model_<N>.pt \
+  --fh /abs/forehand.npz --bh /abs/backhand.npz \
+  --donor /abs/same-config-donor/policy.onnx \
+  --harvest /abs/same-donor-harvest.npz \
+  --train-bank /abs/s1_<family>_v3_train.npz \
+  --out /abs/run/exported --run-path <label> --bake-obs-norm
+```
+
+This path runs the same schema-3 bank loader and motion/anchor validation before deriving the
+envelope, then verifies the bank SHA against the checkpoint-side training contract. Do not pass an
+exam bank, omit `--train-bank`, or reuse a donor's `stage1_*` labels for a 179 artifact.
+
 Headless video:
 
 ```bash

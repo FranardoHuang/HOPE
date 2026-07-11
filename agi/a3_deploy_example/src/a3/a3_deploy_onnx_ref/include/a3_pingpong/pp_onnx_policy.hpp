@@ -318,7 +318,7 @@ class PpOnnxPolicy {
             "formal ONNX observation layout metadata does not match the exact runner contract; "
             "refusing a right-width/wrong-column deployment");
       if (obs_dim_ == kObsDim179) {
-        ValidatePpFace179MetadataContract(PpFace179MetadataContract{
+        face_normal_envelope_ = ValidatePpFace179MetadataContract(PpFace179MetadataContract{
             LookupMeta(md, alloc, "face_command_enabled"),
             LookupMeta(md, alloc, "face_command_pairing"),
             LookupMeta(md, alloc, "face_obs_convention"),
@@ -326,7 +326,24 @@ class PpOnnxPolicy {
             LookupMeta(md, alloc, "stage1_bank_schema_version"),
             LookupMeta(md, alloc, "stage1_bank_split"),
             LookupMeta(md, alloc, "stage1_train_bank_sha256"),
-            LookupMeta(md, alloc, "stage1_source_family_sha256")});
+            LookupMeta(md, alloc, "stage1_source_family_sha256"),
+            PpFaceNormalEnvelopeMetadata{
+                LookupMeta(md, alloc, "stage1_normal_envelope_schema_version"),
+                LookupMeta(md, alloc, "stage1_normal_envelope_frame"),
+                LookupMeta(md, alloc, "stage1_normal_envelope_face_convention"),
+                LookupMeta(md, alloc, "stage1_normal_envelope_pairing"),
+                LookupMeta(md, alloc, "stage1_normal_envelope_algorithm"),
+                LookupMeta(md, alloc, "stage1_normal_envelope_bank_row_unit_tolerance"),
+                LookupMeta(md, alloc, "stage1_normal_envelope_runtime_unit_tolerance"),
+                LookupMeta(md, alloc, "stage1_normal_envelope_runtime_dot_tolerance"),
+                LookupMeta(md, alloc, "stage1_normal_envelope_clip_order"),
+                LookupMeta(md, alloc, "stage1_normal_envelope_centers"),
+                LookupMeta(md, alloc, "stage1_normal_envelope_reference_normals"),
+                LookupMeta(md, alloc, "stage1_normal_envelope_min_dots"),
+                LookupMeta(md, alloc, "stage1_normal_envelope_row_counts"),
+                LookupMeta(md, alloc, "stage1_normal_envelope_train_bank_sha256"),
+                LookupMeta(md, alloc, "stage1_normal_envelope_source_family_sha256"),
+                LookupMeta(md, alloc, "stage1_normal_envelope_payload_sha256")}});
       }
     }
 
@@ -506,6 +523,14 @@ class PpOnnxPolicy {
   }
   const Eigen::VectorXd& qdes_soft_lo() const { return qdes_soft_lo_; }
   const Eigen::VectorXd& qdes_soft_hi() const { return qdes_soft_hi_; }
+  const PpFaceNormalEnvelope& face_normal_envelope() const {
+    return face_normal_envelope_;
+  }
+  bool face_normal_within_training_envelope(int clip, const Vec3& normal_w) const {
+    return obs_dim_ == kObsDim179 &&
+           face_normal_envelope_.Allows(
+               clip, normal_w[0], normal_w[1], normal_w[2]);
+  }
 
   // Run the actor once before the backend/driver starts. ONNX Runtime may lazily allocate and
   // compile kernels on the first actor invocation; doing that in the publish callback can trip
@@ -685,6 +710,7 @@ class PpOnnxPolicy {
   double policy_step_dt_s_ = std::numeric_limits<double>::quiet_NaN();
   int control_decimation_ = 0;
   bool has_schema3_execution_contract_ = false;
+  PpFaceNormalEnvelope face_normal_envelope_{};  // mandatory and content-bound for 179-D only
   std::vector<float> obs_f_;
   int obs_dim_ = kObsDim;  // detected from the model input at load (180 full / 175 deploy_parity)
 };

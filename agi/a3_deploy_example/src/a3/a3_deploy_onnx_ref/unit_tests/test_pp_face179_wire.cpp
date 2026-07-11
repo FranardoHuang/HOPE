@@ -33,6 +33,31 @@ void MakeInputs(a3_pingpong::PpRefs& refs, a3_pingpong::PpRobotState& state,
   default_q = Eigen::VectorXd::Zero(a3_pingpong::kNumJoints);
 }
 
+a3_pingpong::PpFace179MetadataContract ValidFaceContract() {
+  const std::string sha(64, 'a');
+  a3_pingpong::PpFaceNormalEnvelopeMetadata envelope{
+      "1",
+      "world_table_frame0",
+      "mount_plusY_A",
+      "shared_plus_y",
+      "per_clip_sign_preserving_spherical_mean_cap_v1",
+      "0.0002",
+      "0.000001",
+      "0.000001",
+      "forehand,backhand",
+      "0.8,0.6,0;0.8,-0.6,0",
+      "0.8,0.6,0;0.8,-0.6,0",
+      "0.9,0.9",
+      "64,64",
+      sha,
+      sha,
+      ""};
+  envelope.payload_sha256 = a3_pingpong::PpSha256Hex(
+      a3_pingpong::BuildPpFaceNormalEnvelopePayload(envelope));
+  return {"1", "shared_plus_y", "mount_plusY_A", "1", "3", "train", sha, sha,
+          envelope};
+}
+
 TEST(PpFace179Wire, ObservationKeepsExact175PrefixAndAtomicFaceTail) {
   a3_pingpong::PpRefs refs;
   a3_pingpong::PpRobotState state;
@@ -71,9 +96,7 @@ TEST(PpFace179Wire, MissingFaceOrNonzeroRhoFailsClosed) {
 }
 
 TEST(PpFace179Wire, FormalMetadataRejectsEveryWrongSemanticField) {
-  const std::string sha(64, 'a');
-  a3_pingpong::PpFace179MetadataContract valid{
-      "1", "shared_plus_y", "mount_plusY_A", "1", "3", "train", sha, sha};
+  const auto valid = ValidFaceContract();
   EXPECT_NO_THROW(a3_pingpong::ValidatePpFace179MetadataContract(valid));
 
   auto wrong = valid;
@@ -100,6 +123,71 @@ TEST(PpFace179Wire, FormalMetadataRejectsEveryWrongSemanticField) {
   wrong = valid;
   wrong.source_family_sha256 = "short";
   EXPECT_THROW(a3_pingpong::ValidatePpFace179MetadataContract(wrong), std::invalid_argument);
+}
+
+TEST(PpFace179Wire, NormalEnvelopeRejectsMissingMalformedOrUnboundMetadata) {
+  const auto valid = ValidFaceContract();
+  auto wrong = valid;
+  wrong.normal_envelope = {};
+  EXPECT_THROW(a3_pingpong::ValidatePpFace179MetadataContract(wrong), std::invalid_argument);
+
+  wrong = valid;
+  wrong.normal_envelope.frame = "base_link";
+  EXPECT_THROW(a3_pingpong::ValidatePpFace179MetadataContract(wrong), std::invalid_argument);
+
+  wrong = valid;
+  wrong.normal_envelope.centers = "1,0,0";
+  wrong.normal_envelope.payload_sha256 = a3_pingpong::PpSha256Hex(
+      a3_pingpong::BuildPpFaceNormalEnvelopePayload(wrong.normal_envelope));
+  EXPECT_THROW(a3_pingpong::ValidatePpFace179MetadataContract(wrong), std::invalid_argument);
+
+  wrong = valid;
+  wrong.normal_envelope.centers = "nan,0.6,0;0.8,-0.6,0";
+  wrong.normal_envelope.payload_sha256 = a3_pingpong::PpSha256Hex(
+      a3_pingpong::BuildPpFaceNormalEnvelopePayload(wrong.normal_envelope));
+  EXPECT_THROW(a3_pingpong::ValidatePpFace179MetadataContract(wrong), std::invalid_argument);
+
+  wrong = valid;
+  wrong.normal_envelope.min_dots = "1.1,0.9";
+  wrong.normal_envelope.payload_sha256 = a3_pingpong::PpSha256Hex(
+      a3_pingpong::BuildPpFaceNormalEnvelopePayload(wrong.normal_envelope));
+  EXPECT_THROW(a3_pingpong::ValidatePpFace179MetadataContract(wrong), std::invalid_argument);
+
+  wrong = valid;
+  wrong.normal_envelope.row_counts = "64,0";
+  wrong.normal_envelope.payload_sha256 = a3_pingpong::PpSha256Hex(
+      a3_pingpong::BuildPpFaceNormalEnvelopePayload(wrong.normal_envelope));
+  EXPECT_THROW(a3_pingpong::ValidatePpFace179MetadataContract(wrong), std::invalid_argument);
+
+  wrong = valid;
+  wrong.normal_envelope.train_bank_sha256 = std::string(64, 'b');
+  wrong.normal_envelope.payload_sha256 = a3_pingpong::PpSha256Hex(
+      a3_pingpong::BuildPpFaceNormalEnvelopePayload(wrong.normal_envelope));
+  EXPECT_THROW(a3_pingpong::ValidatePpFace179MetadataContract(wrong), std::invalid_argument);
+
+  wrong = valid;
+  wrong.normal_envelope.min_dots = "0.8,0.9";  // stale payload hash must catch field edits first
+  EXPECT_THROW(a3_pingpong::ValidatePpFace179MetadataContract(wrong), std::invalid_argument);
+}
+
+TEST(PpFace179Wire, PlannerEnvelopeUsesSelectedClipAndRejectsOpponentFacingOodNormal) {
+  const auto envelope = a3_pingpong::ValidatePpFace179MetadataContract(ValidFaceContract());
+  EXPECT_TRUE(envelope.Allows(0, 0.8, 0.6, 0.0));
+  EXPECT_TRUE(envelope.Allows(1, 0.8, -0.6, 0.0));
+  EXPECT_FALSE(envelope.Allows(0, 0.8, -0.6, 0.0));
+  EXPECT_FALSE(envelope.Allows(1, 0.8, 0.6, 0.0));
+  // x>0 and unit length are necessary but no longer sufficient.
+  EXPECT_FALSE(envelope.Allows(0, 1.0, 0.0, 0.0));
+  EXPECT_FALSE(envelope.Allows(1, 1.0, 0.0, 0.0));
+  EXPECT_FALSE(envelope.Allows(2, 0.8, 0.6, 0.0));
+  EXPECT_FALSE(envelope.Allows(0, 0.8 * 1.001, 0.6 * 1.001, 0.0));
+}
+
+TEST(PpFace179Wire, MetadataShaUsesStandardSha256) {
+  EXPECT_EQ(a3_pingpong::PpSha256Hex(""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+  EXPECT_EQ(a3_pingpong::PpSha256Hex("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 }
 
 }  // namespace

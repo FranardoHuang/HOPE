@@ -199,6 +199,8 @@ focused C++ schema/observation tests. These are source gates only; they do not r
 REPO="$(git -C "$AD" rev-parse --show-toplevel)"
 PYTHONPATH="$REPO/hope_ws/src/hope_planner" python3 -m pytest -q \
   "$REPO/hope_ws/src/hope_planner/test/test_flat_command_wire.py"
+python3 -m pytest -q \
+  "$REPO/hope_training/whole_body_tracking/tests/test_stage1_normal_envelope.py"
 "$B/runtime/run_tests" \
   --gtest_filter='PpPlannerInput.*:PpFace179Wire.*' --gtest_color=no
 ```
@@ -223,7 +225,13 @@ AimRT backend. The switch is diagnostic-only and fails unless publishing is disa
 
 An accepted run exits zero and prints `backend_not_initialized=true`, `obs_dim`,
 `training_contract_sha256`, and `source_checkpoint_sha256`. A 179-D actor additionally exercises
-the exact face-command/bank/source-family metadata checks and the existing planner-mode guard.
+the exact face-command/bank/source-family metadata checks, recomputes the train-normal-envelope
+payload SHA, validates its two sign-preserving spherical caps, and exercises the existing
+planner-mode guard. Missing any envelope field fails load; this means the pre-envelope SZ model
+used by the 2026-07-11 loader proof is expected to fail under the stricter source and must be
+re-exported from its exact train bank before this gate is rerun. An accepted 179 preflight also
+prints `normal_envelope_payload_sha256`, `normal_envelope_train_bank_sha256` and
+`normal_envelope_source_family_sha256` so the loader ledger can be matched to the export ledger.
 The output must contain neither `backend cfg` nor `A3AimrtBackend initialised`. Omitting
 `--no-publish`/`--dry-run` exits 2 before model or backend initialization. This is a loader and
 metadata gate only. Constructing `PpPolicy` deliberately performs one zero-observation ONNX
