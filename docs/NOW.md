@@ -33,9 +33,17 @@ Rules:
   available。唯一一次 LZ-seed3 scene-start `malloc` 失败已保留，完全同配方的精确单臂
   retry 成功；不能把失败臂算成第 25 条。
 - 两 Pod 训练 checkout 均冻结在 clean `6d93bcb`，有任一训练存活就禁止 pull/改工作树；
-  detached evaluator 在 clean `fdc2d36`。fresh `0/1000/2000` 的 clean `10/侧` checkpoint
-  worker 正在跑(Pod1 PGID `1356942`、Pod2 `184312`)；后续 cadence manifest 已预注册
-  causal 20k/terminal 与 fresh 每 2k 点，不等 terminal 才判。
+  detached evaluator 已更新到 clean `46a0ce2`。每 Pod 三条常驻 checkpoint worker 分别处理
+  original cadence / scaleout causal / scaleout fresh：Pod1 PGID
+  `1366304/1366306/1366308`，Pod2 `189565/189567/189569`。新增 18 臂共 142 个 clean q10
+  里程碑任务，不等 terminal 才判；只按这些精确 PGID 管理，禁止 broad kill。
+- fresh SZ exact clean-q10 已首次跑通增长曲线：seed1 的 `0/1k/2k=0.00/0.50/0.90`，seed2
+  `0.00/0.50/1.00`；这只证明方向，不能 stop/promote，决定仍需同卷 50/侧。causal 20k
+  M3 old/S1=`0.45/1.00`，M2=`0.50/0.50`，全部仍是 inexact diagnostic。
+- 连续时序有明确缺口：现役虽不传送并在同一 episode 连续换题，但完整 clip-wrap+hold 的同侧
+  击球间隔理论中位约 `3.75 s`；场馆保守 A-B-A 样本中位 `1.903 s`，新题往往在旧 clip 播完前
+  已出现。当前 24 臂不改合同，也不能写成“随时来下一球已通过”；后续另开 T0/T1 event-driven
+  timing/carry-state 配对。
 - 还没有 accepted quality baseline。不给 30+ 历史臂盲补全表:先用 M3f/M2/G1
   known-good/common/known-bad canary 验尺,再用单球 `ns=0` 筛候选,只给存活臂补连续球、噪声和第二 seed。
 - 本地旧 Phase-1 顺序题原型与现役 schema-v3 BankExam 不兼容,已保存在
