@@ -405,3 +405,57 @@ The first corrected terminal MuJoCo q10 pair is preserved at M2-old/S1
 diagnostics and the prefix is too small to decide. Full result/checkpoint/report
 hashes are tracked in `configs/phase1_M2_terminal_q10_pair_20260711.json`;
 neither cell advances or stops without q50 and its Isaac companion.
+
+The matching Pod1 M3 terminal pair is now also complete and finite. M3-old's
+`model_20998.pt` has SHA `320b77c9...417a`, matches adjacent contract
+`7542c59b...d941b`, and carries causal/inexact lineage. On immutable schedule
+`7a908142...d614`, M3-old returned FH/BH/aggregate
+`0.50/0.40/0.45`, while M3-S1 returned `1.00/1.00/1.00`; paired aggregate
+delta is `+0.55`. This triggered the separately frozen K=100 q50 paper. On
+that shared 50-per-side schedule, M3-old returned FH/BH/aggregate
+`0.62/0.22/0.42` with 9 physical falls, while M3-S1 returned
+`1.00/1.00/1.00` with zero falls. Aggregate delta is `+0.58`, so M3-S1 wins
+the MuJoCo terminal selection inside this same legacy swing-family causal
+paper. Both results remain `evaluation_contract_exact=false`. The same-paper
+Isaac companion then scored both cells `0.98/1.00/0.99` FH/BH/aggregate,
+delta zero, on the identical question order. It does not reproduce the MuJoCo
+ranking, so cross-engine selection, continuity and calibrated plant remain
+open. Full terminal and paired bindings are in
+`configs/phase1_M3_old_terminal_audit_20260711.json` and
+`configs/phase1_M3_terminal_q10_pair_20260711.json`; q50 execution/result
+hashes are in `configs/phase1_M3_terminal_q50_result_20260711.json`; the Isaac
+ledger is `configs/phase1_M3_terminal_q50_isaac_result_20260711.json`.
+
+The four newly refilled causal workers have also been corrected from eval
+`46a0ce2`'s legacy state schema without changing their judge paper. Only the
+four exact, childless legacy worker PGIDs were TERM-signalled; hardened PGIDs
+are Pod1 `1416771/1416784` and Pod2 `198759/198771`. Each rejudged 17k state
+returned zero and now binds manifest, job spec, job contract, checkpoint,
+judge and both clean commits. Old state/log bytes remain immutable beside a
+content-addressed correction sidecar. This closes provenance for future
+milestones but does not change their causal `evaluation_contract_exact=false`
+status.
+
+The six older original/scale-out workers were independently hardened as well.
+Current PGIDs are Pod1 `1432280/1432292/1432304` and Pod2
+`200706/200718/200730`; no trainer or judge was signalled. Five available old
+states were rejudged rc=0 and now bind manifest, job and job-contract SHA.
+`configs/phase1_global_curve_worker_hardening_result_20260711.json` preserves
+the exact signal scope and all transaction hashes.
+
+Fresh SZ seed1 also closed its first exact checkpoint-selection q50. On one
+K=100, 50-per-side paper, model 2000 returned FH/BH/aggregate
+`0.66/1.00/0.83`, while model 4000 returned `0.00/1.00/0.50`; model 2000 is
+retained and the whole arm continues. Both evaluations are exact/fresh, but
+all attempts finalized through a non-physical post-strike guard, so this is
+not a continuous or deploy-stability gate. The result is bound in
+`configs/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json`; its fresh
+same-paper Isaac companion remains the next cross-engine check.
+
+Run `python3 scripts/validate_phase1_queue_governance.py` before any curve
+manifest is copied or launched. The validator enforces the 142-job/24-slot
+q10 screen contract and refuses q50 through the generic worker. Plant parity
+remains separate: SZ is only zero-friction protocol exact, while SP/LP are
+historical direct-number proxies. The repair contract is
+`docs/research/phase1_plant_semantics_repair_2026-07-11.md`, status
+`blocked_on_calibration_evidence`.

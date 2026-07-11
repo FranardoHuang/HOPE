@@ -89,7 +89,7 @@ exam-bank SHA、schedule SHA、evaluator commit、seed、实际 attempt 数及�
   seed 2 把 old/S1 所在 GPU 对调，以免 pairing 和 GPU 编号绑定。它们共享 historical parent，
   只能叫 continuation RNG 复现，不能叫独立 from-scratch seed；
 - fresh：`2 face pairings × 2 plant settings × 4 from-scratch seeds = 16` 条，形成平衡 2×2 因子
-  设计，可同时估计 face 主效应、plant 主效应和交互项；
+  设计，可同时估计 face 配置效应、legacy zero-toggle 配置效应和交互项；
 - 合计 `8 + 16 = 24`。不提前混入 guidance、N1、R8 或下一阶段变量。
 
 fresh 四格缩写如下：
@@ -97,14 +97,14 @@ fresh 四格缩写如下：
 | 格 | face pairing | plant | 用途 |
 | --- | --- | --- | --- |
 | `SZ` | `shared_plus_y` | 31/31 zero friction | 当前 schema-v3 跨引擎执行合同的 formal target；不是部署 plant 候选 |
-| `SP` | `shared_plus_y` | 历史 non-zero PhysX 系数 | plant 主效应诊断；**不是**语义修正的标定摩擦对照 |
+| `SP` | `shared_plus_y` | 历史 non-zero PhysX 系数 | legacy zero-toggle 配置诊断；**不是**语义修正的标定摩擦对照 |
 | `LZ` | `legacy_signed_vs_A` | zero friction | face 主效应诊断；judge 必须标 inexact evaluation |
 | `LP` | `legacy_signed_vs_A` | declared non-zero plant | 双旧设置诊断；judge 必须标 inexact evaluation |
 
 四格不能只排四个均值。每个 seed 先做阻断内对比，再跨四个 seed 报 paired bootstrap 区间：
 
 - face 主效应：`0.5 × [(SZ - LZ) + (SP - LP)]`；
-- zero-plant 主效应：`0.5 × [(SZ - SP) + (LZ - LP)]`；
+- legacy zero-toggle 配置效应：`0.5 × [(SZ - SP) + (LZ - LP)]`；
 - face×plant 交互：`(SZ - SP) - (LZ - LP)`。
 
 Pod、GPU 编号和启动 layer 一起写进 ledger，作为阻断/审计字段而不是训练变量；如果某个效应只在
@@ -114,8 +114,9 @@ Pod、GPU 编号和启动 layer 一起写进 ledger，作为阻断/审计字段�
 ### Plant 语义张力与必补的标定摩擦格
 
 `SZ` 成为当前 formal 格，只因为“全零”能在 PhysX 和 MuJoCo 中以同一语义精确重放。
-这不会抹掉 2026-07-07 的冻结探针：零摩擦策略换到有静摩擦厂房时，virtual hit
-`0.9997 -> 0.63`，跌倒 `0.27 -> 0.87`；摩擦是主因，q-des clamp 是次因。因此：
+这不会抹掉 2026-07-07 的历史观察：零摩擦策略换到有静摩擦厂房时，virtual hit
+`0.9997 -> 0.63`，跌倒 `0.27 -> 0.87`。但该次 raw artifact 未做 SHA 绑定，因而只能作为
+部署 blocker/待复现假设，不能冒充摩擦标定数据或用来拟合 adapter。因此：
 
 - `SZ` 可用来回答 face 合同/学习曲线在当前精确可重放 plant 上是否成立；
   q10 只看方向，仍必须用同 immutable schedule 做 q50 才能在这个 execution-contract
@@ -124,15 +125,23 @@ Pod、GPU 编号和启动 layer 一起写进 ledger，作为阻断/审计字段�
 - `SP/LP` 仍是“把 MuJoCo constant-Nm `frictionloss` 数字填成 PhysX 载荷相关系数”的
   历史配方，只能做旧 plant 诊断，不是 calibrated-friction arm。
 
-必补的新格暂称 `SC` (shared face + calibrated friction)，不从现在 24 臂中伪造。它的前置是：
+因此 `SZ-SP`/`LZ-LP` 不能解释成物理摩擦主效应；MuJoCo 对 `SP/LP` 只允许 inexact
+direct-number proxy。它们只回答“这组历史 zero-toggle 配置是否改变结果”，不回答哪个 engine
+更接近真机，也不证明旧数值有物理标定意义。
+
+必补的新格暂称 `SC` (shared face + calibrated friction)，不从现在 24 臂中伪造。具体合同已在
+`docs/research/phase1_plant_semantics_repair_2026-07-11.md` 与
+`configs/phase1_plant_semantics_repair_prereg_20260711.json` 预注册，当前状态为
+`blocked_on_calibration_evidence`。它的前置是：
 
 1. 对单关节做低速/零速、正反向、不同载荷的 breakaway/dynamic-friction 探针，分开
    PhysX coefficient 与 MuJoCo constant-Nm `frictionloss` 语义；
 2. 用 A3/AGI 可验证数据拟合一个版本化的摩擦模型，为两引擎分别实现 adapter；MuJoCo 不得
    再直接数值代入 `dof_frictionloss`；
 3. 把模型方程、参数、实例化逐关节值、源数据 SHA 和 engine adapter SHA 全部进 hard contract；
-4. 从零训 `SC` 至少两个 seeds，和 `SZ` 做 train/eval plant 2x2 冻结探针，复现或解除
-   07-07 的迁移跌倒证据；
+4. 最小训练轴固定 shared face，`Z/C x 2 fresh paired seeds = 4` 臂；每个 checkpoint 做
+   `4 policy x Z/C eval plant x Isaac/MuJoCo = 16` 个同题格，q10 只 screen、q50 决策，
+   复现或解除 07-07 的迁移阻断观察；
 5. `SC` 才有资格进入部署 plant 选择、连续实战卷和 Gate3B；`SZ` 的当前
    execution-contract q50 不被 SC 阻断。若两引擎仍不能语义对齐，如实标 inexact，
    不因“更像真机”就放宽 formal 标签。

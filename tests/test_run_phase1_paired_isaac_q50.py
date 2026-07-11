@@ -14,6 +14,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER_PATH = ROOT / "scripts" / "run_phase1_paired_isaac_q50.py"
 CONFIG_PATH = ROOT / "configs" / "phase1_M3_terminal_q50_isaac_companion_20260711.json"
+RESULT_PATH = ROOT / "configs" / "phase1_M3_terminal_q50_isaac_result_20260711.json"
 PREREG_PATH = ROOT / "configs" / "phase1_M3_terminal_q50_prereg_20260711.json"
 MUJOCO_RUNNER_PATH = ROOT / "scripts" / "run_phase1_paired_bank_q50.py"
 MUJOCO_CONFIG_PATH = ROOT / "configs" / "phase1_M3_terminal_q50_execution_20260711.json"
@@ -78,6 +79,45 @@ def test_static_companion_contract_is_bound_to_final_mujoco_runner_and_prereg():
     assert loaded == config
     assert prereg["jobs_started"] == 0
     assert mujoco["contract_id"] == config["mujoco_binding"]["execution_contract_id"]
+
+
+def test_accepted_isaac_pair_records_cross_engine_disagreement_without_promotion():
+    result = json.loads(RESULT_PATH.read_text(encoding="utf-8"))
+    assert result["status"] == "complete_causal_inexact_same_paper_isaac_pair"
+    assert result["accepted_execution"]["runner"]["sha256"] == R.sha256_file(
+        RUNNER_PATH
+    )
+    assert result["accepted_execution"]["config"]["sha256"] == R.sha256_file(
+        CONFIG_PATH
+    )
+    assert result["semantics"] == {
+        "causal": True,
+        "evaluation_contract_exact": False,
+        "formal_target": False,
+        "deploy_gate": False,
+    }
+    assert result["immutable_schedule"]["attempts"] == 100
+    assert result["immutable_schedule"]["attempts_per_side"] == 50
+    assert result["immutable_schedule"]["censored_attempts"] == 0
+    assert result["mujoco_binding"]["aggregate_delta_s1_minus_old"] == 0.58
+    for arm in ("M3_old", "M3_S1"):
+        row = result["isaac_arms"][arm]
+        assert row["scorecard_training_contract_sha256"] is None
+        assert len(row["training_contract_sha256"]) == 64
+        assert row["summary"]["forehand_return"] == 0.98
+        assert row["summary"]["backhand_return"] == 1.0
+        assert row["summary"]["aggregate_return"] == 0.99
+        assert row["summary"]["guard_resets"] == 1
+        assert row["summary"]["physical_falls"] == 0
+    assert result["paired_delta_s1_minus_old"]["aggregate_return"] == 0.0
+    judgment = result["cross_engine_judgment"]
+    assert judgment["status"] == "disagrees_no_cross_engine_selection_gate"
+    assert judgment["formal_or_deployment_promotion"] is False
+    assert [row["version"] for row in result["preserved_fail_closed_attempts"]] == [
+        "v1",
+        "v2",
+        "v3",
+    ]
 
 
 def test_arm_maps_accept_canonical_sorted_json_but_not_missing_or_extra_keys():

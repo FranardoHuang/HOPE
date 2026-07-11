@@ -581,10 +581,37 @@ implements the first step without directory scans or in-place edits: it binds
 the exact input and canonical MJCF SHAs, computes the lowest world-z support
 over enabled robot collision geoms at each source frame, applies one constant
 root-z translation, and emits a no-clobber pickle plus SHA-bound report. Real
-canonical-MJCF mesh tests pass, but the tracked Franco output has not yet been
-run through this tool in this entry. The tool only proves discrete-frame
-ground placement; inter-frame clearance and all later gates remain open, so
-the motion is not eligible for schema-2 promotion or RL yet.
+canonical-MJCF mesh tests pass. Pod1 then ran the tool no-clobber on all ten
+diagnostic GMR outputs. Original discrete-frame minima were
+`-0.08072..-0.08716 m`; every per-motion fixed root-z shift left a global
+minimum of about `10 um`. The ledger
+`configs/motion_video_gmr_ground_results_20260711.json` binds all ten
+input/output/report SHAs to tool `db5bd167...`, canonical MJCF
+`2ab1cd31...` and compiled collision digest `18e7f6ff...`. These remain
+per-video-betas diagnostics: inter-frame ground/self collision, dynamics,
+table/net clearance, canonical betas and all later gates remain open, so none
+is eligible for schema-2 promotion or RL yet.
+
+The upstream body-shape normalization is now materialized separately. A
+CPU-only no-clobber tool gives each of the ten videos one equal vote and writes
+one shared 10-D beta vector (SHA `a03f1642...9cc6`) into ten new GVHMR PTs;
+all non-beta semantic digests remain bit-exact after save/reload. The result is
+bound in `configs/motion_video_canonical_betas_result_20260711.json`. There is
+no measured performer height: GMR's `1.73066 m` value is explicitly only its
+beta heuristic, so the artifacts remain diagnostic, non-calibrated and
+formal-ineligible. The historical preregistration's unbound guess that the
+loader padded six zeros has been revoked: clean GMR `aabea2e` loader SHA
+`2737f472...5de2` actually selects
+`betas[0].detach().cpu().numpy()[:10]` with no padding.
+
+A body-shape-aware CPU-only no-clobber queue then retargeted all ten
+canonical-beta PTs in 48.7 s (PID/PGID `1442090`). All outputs are 30 Hz,
+31-DoF and finite; frame-zero warm-up converged in 16--29 rounds with final
+max `|dq|=6.88e-5..9.76e-5`. GMR remained clean and no GPU was allocated.
+Exact source/output/log/audit bindings are in
+`configs/motion_video_canonical_gmr_results_20260711.json`. These remain
+diagnostic: the ten new outputs still need independent no-clobber grounding
+and dense collision, racket/handle-to-body, dynamics and table/net gates.
 
 This is not yet a training result. The videos contain no ball/table/contact
 truth, their mirror/depth interpretation is unverified, and the three Franco
@@ -616,13 +643,14 @@ M2-S1 exited normally with `model_20998.pt` (`iter=20998`), not 20999; all
 `7268eb38...28f2`. Its schema-3 legacy-motion lineage is correctly inexact.
 The cadence and scale-out causal manifests now use 20998, with a generator
 regression. Only the affected waiting-worker PGIDs were replaced; fresh
-scale-out workers and training arms received no signal. After the later
-original-cadence split, Pod1 causal/fresh workers are PGID
-`1394150/1394810`; Pod2 causal completed after the terminal pair and its fresh
-worker is PGID `194276`. Scale-out causal workers remain `1380340/192815`.
-The scale-out fresh workers were precisely replaced before their first 2k
-checkpoint to carry SP's explicit inexact evaluator escape; current PGIDs are
-`1397266/195085` (old childless `1366308/189569`).
+scale-out workers and training arms received no signal. After the later split
+and global hardening transaction, the six current original/scale-out worker
+PGIDs are Pod1 `1432280/1432292/1432304` and Pod2
+`200706/200718/200730`. Only their recorded legacy worker PGIDs received
+TERM; trainers and judges received no signal. Five available old states were
+rejudged rc=0 under manifest/job/job-contract bindings rather than silently
+reused. The full transaction ledger is
+`configs/phase1_global_curve_worker_hardening_result_20260711.json`.
 
 Pod1 M3-S1 has now reached the same terminal integrity point. Its accepted
 `model_20998.pt` has SHA-256
@@ -634,11 +662,34 @@ elements. The embedded schema-3 contract SHA matches the adjacent contract
 launcher did not persist an OS exit code, so the terminal checkpoint,
 contiguous log, absent process and zero error signatures are the recorded
 completion evidence. Its legacy-motion parent keeps this result causal and
-inexact. M3-old has since naturally produced its own `model_20998.pt` and
-exited; the paired immutable terminal q10 is running while its read-only
-terminal-integrity audit is finalized, so no paired result is claimed yet. The
-M3-S1 machine-readable audit is
-`configs/phase1_M3_S1_terminal_audit_20260711.json`.
+inexact. M3-old has since naturally produced its own finite
+`model_20998.pt` and exited. Its checkpoint SHA is `320b77c9...417a`,
+embedded/adjacent contract SHA is `7542c59b...d941b`, and lineage remains
+causal/inexact; the complete audit is
+`configs/phase1_M3_old_terminal_audit_20260711.json`. The paired immutable
+terminal q10 then completed on schedule `7a908142...d614`: M3-old
+FH/BH/aggregate=`0.50/0.40/0.45`, M3-S1=`1.00/1.00/1.00`, aggregate delta
+`+0.55`. This is a 10-per-side direction screen, not a stop/promotion
+decision. Its ledger is `configs/phase1_M3_terminal_q10_pair_20260711.json`.
+
+The triggered shared-schedule MuJoCo q50 has since completed. Both terminal
+checkpoints consumed the same K=100 schedule semantic SHA
+`949eb196...8fc0`, 50 attempts per side, seed 0, no noise and no censored
+attempts. M3-old returned FH/BH/aggregate `31/50,11/50,42/100`, contacted
+`89/100` and recorded 9 physical falls; M3-S1 returned `50/50,50/50,100/100`,
+contacted `100/100` and had zero falls. The aggregate paired delta is `+0.58`.
+This selects M3-S1 only inside this legacy swing-family causal diagnostic; both
+lineages and evaluations remain inexact and no formal/deployment/hardware
+promotion follows. The first runner attempt judged M3-old but rejected its
+own wrong result-schema assumption before starting S1; that attempt is
+preserved. The corrected v2 reproduced the identical schedule bytes and reran
+both cells successfully. Full hashes and limitations are in
+`configs/phase1_M3_terminal_q50_result_20260711.json`. The same-paper Isaac
+companion then scored both old and S1 at FH/BH/aggregate
+`0.98/1.00/0.99`, delta zero. It does not reproduce MuJoCo's `+0.58`
+ranking, so the cross-engine causal gate stays open and S1 can be selected
+only inside that MuJoCo family/evaluator. Full companion hashes are in
+`configs/phase1_M3_terminal_q50_isaac_result_20260711.json`.
 
 Natural terminal release also opens a separate second-wave causal paper rather
 than permission to mutate the frozen 24-arm matrix. The preregistration
@@ -670,8 +721,14 @@ contract now requires both workers on one Pod to be alive, exact-PGID,
 childless and manifest-bound before any signal; it then TERM-signals only those
 workers, preserves the legacy evidence, starts standalone hardened worker
 `21e30153...` with a fresh state dir, and rejudges 17k before accepting the
-correction. Trainers/judges are out of scope. At this entry the replacement is
-preregistered but not yet applied.
+correction. Trainers/judges are out of scope. Both Pod transactions have now
+completed. Old childless workers were TERM-signalled only at the four exact
+PGIDs above; hardened worker PGIDs are Pod1 `1416771/1416784` and Pod2
+`198759/198771`. The correction-sidecar SHAs are respectively
+`2faf88de...ffe3`, `1d6f8ba3...bae9`, `0dd02fae...d165` and
+`45f4334d...0ad`. Rejudged 17k states returned rc=0 and bind manifest, job
+spec and job contract SHAs plus checkpoint, judge, clean training `6d93bcb...`
+and eval `46a0ce2...`; legacy state/log bytes remain preserved.
 
 `SZ`'s target label is now explicitly scoped: it is the only current fresh
 cell whose zero-friction plant can be replayed with the same schema-v3
@@ -686,8 +743,21 @@ contract hashes before deployment-plant, continuous-practical or Gate3B
 promotion. This does not block the same-schedule SZ q50 required for current
 execution-contract model selection. `SP` is explicitly judged inexact so its
 non-zero plant cannot fail the formal profile and block later SZ milestones.
-The current 24-arm training recipes remain unchanged; the reconciliation
-roadmap is in the Phase-1 acceleration research doc.
+The current 24-arm training recipes remain unchanged. The separately
+validated repair preregistration is in
+`docs/research/phase1_plant_semantics_repair_2026-07-11.md` and
+`configs/phase1_plant_semantics_repair_prereg_20260711.json`; it is currently
+`blocked_on_calibration_evidence`.
+
+That current execution-contract selection has already produced one early
+checkpoint result. Fresh SZ seed1 regressed on q10 from `0.90` at 2000 to
+`0.50` at 4000, then consumed one exact K=100 paper. Model 2000 returned
+FH/BH/aggregate `33/50,50/50,83/100`; model 4000 returned
+`0/50,50/50,50/100`. Model 2000 is retained, while the arm continues
+unmodified. Both cells were fresh/exact and had zero physical falls, but all
+questions ended through the non-physical post-strike guard; this is isolated
+checkpoint selection, not recovery or deployment evidence. Bindings are in
+`configs/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json`.
 
 The original cadence no longer serializes fresh milestones behind causal terminal.
 Each Pod now has independent original-causal and original-fresh manifests and
@@ -704,6 +774,13 @@ had not existed when the old combined Pod1 worker was replaced, whereas Pod2
 seed2 4000 had already been judged. The Pod1 fresh queue therefore starts at
 4000 and Pod2 at 6000. Only the childless Pod1 fresh worker was precisely
 restarted; no trainer or judge child received a signal.
+
+Before copying or launching any checked-in queue, run
+`python3 scripts/validate_phase1_queue_governance.py`. It validates all 142
+scale-out jobs and 24 cadence plan slots, requires K20/10-per-side q10
+screen-only semantics and milestone/barrier continuity, and rejects q50 from
+the generic worker. For one milestone-major runtime manifest, use
+`--manifest /absolute/path.json --require-readiness-barrier`.
 
 The corrected Pod2 terminal q10 has now finished: M2-old/S1 aggregate return
 is `0.40/0.35`, with FH `0/10` for both and BH `8/10` versus `7/10`. It is a

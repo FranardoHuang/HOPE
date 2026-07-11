@@ -321,6 +321,18 @@ At 2000, seed 1 was FH/BH `0.80/1.00` and seed 2 was `1.00/1.00`. This is the fi
 formal checkpoint growth curve; it demonstrates useful growth well before terminal. It is still a
 small direction screen and cannot stop or promote an arm without the separately frozen q50 paper.
 
+Seed 1 then supplied the first direct example of why the paper must be run before terminal. Its
+same-schedule q10 fell from `0.90` at model 2000 to `0.50` at model 4000, triggering the separately
+preregistered exact q50 without stopping the trainer. On one clean K=100 schedule (semantic SHA
+`7dc6af82...ff3e`, 50 per side), model 2000 returned FH/BH/aggregate
+`33/50,50/50,83/100`; model 4000 returned `0/50,50/50,50/100`. Both results are fresh lineage,
+`evaluation_contract_exact=true`, finite and bound to the same schema-3 contract
+`3a3b3d95...b9972`. Model 2000 is therefore the retained checkpoint inside this frozen pair, while
+the whole seed-1 arm continues unmodified. All 100 questions in both cells finalized through the
+evaluator's non-physical post-strike tracking guard (`guard_reset=true`, `physical_fall=false`), so
+this isolated one-question paper is not continuity or deploy-stability evidence. The complete
+binding is `configs/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json`.
+
 The original causal arms also completed clean q10 at 20000. M3-S1 scored `1.00` versus M3-old
 `0.45`; M2-S1 and M2-old both scored `0.50` on this small prefix. All four remain diagnostic with
 `evaluation_contract_exact=false`. The long-lived original-arm workers then advanced to wait for
@@ -414,6 +426,84 @@ report and summary hashes are in
 `configs/phase1_M2_terminal_q10_pair_20260711.json`; the M2-S1 terminal audit
 JSON has also been updated from unjudged to this preserved result.
 
+Pod1's M3 terminal pair is now closed to the same integrity level. M3-old
+`model_20998.pt` is finite, has SHA `320b77c9...417a`, embeds the same
+`7542c59b...d941b` SHA as its adjacent contract, and correctly retains
+lineage exact=`0`. The immutable terminal q10 schedule SHA is
+`7a908142...d614`; M3-old FH/BH/aggregate is `0.50/0.40/0.45`, while M3-S1
+is `1.00/1.00/1.00`, for paired aggregate delta `+0.55`. The machine-readable
+audit/result are `configs/phase1_M3_old_terminal_audit_20260711.json` and
+`configs/phase1_M3_terminal_q10_pair_20260711.json`. This q10 is
+direction-only and triggered, but did not replace, the preregistered shared
+K=100 q50 paper.
+
+The MuJoCo q50 pair has now completed on one materialized schedule artifact:
+file SHA `69f73458...7f25`, semantic schedule SHA `949eb196...8fc0`, seed 0,
+50 attempts per side and zero censored rows. M3-old returned
+FH/BH/aggregate `31/50,11/50,42/100`, contact `89/100`, with 9 physical
+falls. M3-S1 returned `50/50,50/50,100/100`, contact `100/100`, with zero
+falls. The `+0.58` aggregate delta selects M3-S1 only within this same-family
+terminal causal paper. Both checkpoint lineages and evaluator contracts remain
+inexact, and the result cannot authorize formal/deployment/hardware use. The
+first v1 execution judged only M3-old then fail-closed on a runner assumption
+about the real summary shape; v2 corrected only the validator, reproduced
+identical schedule bytes and ran both cells. The preserved failed-attempt and
+accepted paired-result hashes are in
+`configs/phase1_M3_terminal_q50_result_20260711.json`. A same-artifact Isaac
+companion has also completed. On the identical 100-question order, both M3-old and M3-S1 scored
+FH/BH/aggregate `0.98/1.00/0.99`, with 99 exact reaches, one guard reset and zero physical falls.
+Isaac therefore gives delta `0.00`, not MuJoCo's `+0.58`. The engines disagree on this causal
+legacy comparison: S1 may be selected only inside the MuJoCo evaluator/family, and no cross-engine,
+formal or deployment gate closes. Full hashes and three preserved fail-closed wrapper attempts are
+in `configs/phase1_M3_terminal_q50_isaac_result_20260711.json`.
+
+The four causal-triangle refill workers initially used eval `46a0ce2`'s
+legacy state schema. Their commands/results were valid but omitted manifest,
+job-spec and job-contract SHAs. A Pod-atomic correction verified both workers
+on each Pod as exact-PGID, single-member and childless, preserved their old
+state/logs, TERM-signalled only PGIDs `1410648/1412047` and
+`196753/197939`, then started standalone hardened worker `21e30153...` in
+fresh state directories. Current PGIDs are Pod1 `1416771/1416784` and Pod2
+`198759/198771`. All four rejudged 17k jobs returned rc=0 and now bind the
+manifest/job/job-contract/checkpoint/judge and clean train/eval commits; the
+correction-sidecar SHAs are `2faf88de...ffe3`, `1d6f8ba3...bae9`,
+`0dd02fae...d165`, and `45f4334d...0ad`.
+
+The six older global cadence workers were then hardened under a separate exact-PGID transaction.
+Only legacy worker PGIDs Pod1 `1394810/1380340/1397266` and Pod2
+`194276/192815/195085` received TERM; no trainer, judge or checkout was changed. Their replacements
+are Pod1 `1432280/1432292/1432304` and Pod2 `200706/200718/200730`, all running worker
+`21e30153...`. Five already-available legacy results were not trusted for hard reuse and were
+rejudged rc=0 under manifests that bind manifest/job/job-contract SHAs; causal commands explicitly
+retain the inexact escape. Attestation, transaction, correction, launch and rejudged-state hashes
+are in `configs/phase1_global_curve_worker_hardening_result_20260711.json`.
+
+Queue discipline is now checked before runtime as well as documented. Run
+`python3 scripts/validate_phase1_queue_governance.py` before copying or launching any curve
+manifest. The validator accounts for all 142 scale-out jobs and all 24 cadence plan slots, enforces
+q10 K=20/10-per-side screen-only semantics, checkpoint order and readiness barriers, and rejects
+q50 work from the generic curve worker. This does not retrofit a running process, but it prevents a
+tracked manifest or documented launch path from silently bypassing the preregistered discipline.
+
+The ten new air-swing diagnostic GMR paths also completed their first physical
+placement transform. Each was independently shifted in root-z using tool
+`db5bd167...` and canonical MJCF `2ab1cd31...`; original discrete-frame
+penetration was `8.072--8.716 cm`, and every output leaves about `10 um`
+minimum ground clearance. All input/output/report and compiled-collision
+bindings are in `configs/motion_video_gmr_ground_results_20260711.json`.
+This does not join the Phase-1 exact lineage: per-video betas, continuous
+collision, dynamics, table/net, returnability and schema-2 are still absent.
+
+The separate canonical-body-shape branch has now advanced beyond those
+per-video-beta diagnostics. Ten equal-video-weight canonical GVHMR PTs were
+retargeted CPU-only through clean GMR `aabea2e`; loader SHA
+`2737f472...5de2` consumes exactly ten beta components with no zero padding.
+All ten canonical GMR outputs are finite 30 Hz/31-DoF artifacts with
+frame-zero warm-up below `1e-4`; full hashes are in
+`configs/motion_video_canonical_gmr_results_20260711.json`. They have not yet
+run their new grounding/dense-safety gates, so they do not join Phase-1 exact
+lineage or enter RL.
+
 ## Continuous-Timing Boundary
 
 The current runs do carry the robot state across clip wraps, but they do not establish arbitrary-time
@@ -429,10 +519,18 @@ installation, with a longer/opportunity-count episode and immutable interval sch
 SHA, reproducible filter, proposed contract fields and checkpoint metrics are in
 [`phase1_continuous_rally_timing_2026-07-11.md`](research/phase1_continuous_rally_timing_2026-07-11.md).
 
+Plant semantics form an independent deployment blocker. `SZ` is exact only for the current
+zero-friction execution protocol; `SP/LP` are historical direct-number proxies and cannot estimate a
+physical friction main effect. The preregistered repair requires one physical latent friction model,
+separate PhysX/MuJoCo adapters and a fresh shared-face `Z/C x 2 seed` axis before any calibrated
+plant claim. See `docs/research/phase1_plant_semantics_repair_2026-07-11.md` and
+`configs/phase1_plant_semantics_repair_prereg_20260711.json`.
+
 ## Remaining Gates
 
-1. Keep all 24 accepted arms and the four scale-out cadence queues under exact-PGID monitoring; do
-   not fast-forward either frozen training checkout while a local arm is alive.
+1. Keep the 28 accepted arms (currently four terminal plus 24 live) and all
+   live cadence workers under exact-PGID monitoring; do not fast-forward either
+   frozen training checkout while a local arm is alive.
 2. Finish the pre-registered checkpoint curves. Compare old/S1 only within the same family, seed and
    milestone; preserve peak checkpoints as well as terminal checkpoints.
 3. Verify every promoted checkpoint's iteration, sidecar SHA binding, lineage flag and finite parameters.

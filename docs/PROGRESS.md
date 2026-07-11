@@ -4,6 +4,81 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-11
 
+- Completed CPU-only canonical-beta GMR for all ten new videos (`39b0a67`).
+  Exact clean loader `2737f472...5de2` consumes
+  `betas[0].detach().cpu().numpy()[:10]` with no padding, correcting the old
+  unbound six-zero hypothesis. All outputs are finite 30 Hz/31-DoF, warm-up
+  converged in 16--29 rounds below `1e-4`, and GMR stayed clean `aabea2e`
+  without GPU allocation. They remain diagnostic until the new outputs pass
+  no-clobber grounding and dense collision/dynamics/table-net gates; ledger is
+  `configs/motion_video_canonical_gmr_results_20260711.json`.
+- Completed fresh formal-target SZ seed1 model-2000 versus model-4000 exact
+  q50 after the q10 curve regressed `0.90 -> 0.50`. On one immutable K=100
+  paper, 2000 returned FH/BH/aggregate `0.66/1.00/0.83`; 4000 returned
+  `0.00/1.00/0.50`. Model 2000 is retained inside this pair, but the whole
+  arm continues unmodified. Both are exact/fresh and had zero physical falls;
+  every question used a non-physical post-strike guard reset, so the result is
+  checkpoint-selection evidence only, not continuity/deployment evidence.
+  Full hashes are in
+  `configs/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json`.
+- Completed the M3 same-paper Isaac companion. M3-old and M3-S1 both scored
+  FH/BH/aggregate `0.98/1.00/0.99`, delta zero, on the exact MuJoCo question
+  order. This does not reproduce MuJoCo's `+0.58` S1 advantage, so the causal
+  legacy pair has no cross-engine selection gate; no formal/deploy claim
+  follows. Bindings are in
+  `configs/phase1_M3_terminal_q50_isaac_result_20260711.json`.
+- Replaced the six remaining global curve workers with hardened
+  `21e30153...` workers using only their exact legacy PGIDs. New PGIDs are
+  Pod1 `1432280/1432292/1432304` and Pod2 `200706/200718/200730`; no trainer
+  or judge was signalled. Five available old results were rejudged rc=0 under
+  manifest/job/job-contract bindings. Full transactions are in
+  `configs/phase1_global_curve_worker_hardening_result_20260711.json`.
+- Added fail-closed queue-governance validation (`6f810b8`). It checks all
+  142 scale-out jobs and all 24 cadence plan slots, q10 K20/10-per-side
+  screen-only policy, barrier/milestone continuity, exact/inexact argv and
+  true parallel launch examples; q50 is rejected from the generic worker.
+  Run `python3 scripts/validate_phase1_queue_governance.py` before deployment.
+- Preregistered the plant-semantics repair (`69cdc3f`). SZ remains exact only
+  for the zero-friction execution protocol; SP/LP are historical unit-mismatched
+  proxies, not calibrated controls. A physical latent model, two engine
+  adapters and a fresh shared-face Z/C paired-seed axis now explicitly block
+  deployment. See `docs/research/phase1_plant_semantics_repair_2026-07-11.md`.
+- Completed the preregistered M3 terminal MuJoCo q50 on one immutable K=100
+  schedule (`949eb196...`, 50 per side, no censored attempts). M3-old returned
+  FH/BH/aggregate `0.62/0.22/0.42` with 9 physical falls; M3-S1 returned
+  `1.00/1.00/1.00` with zero falls, aggregate delta `+0.58`. This selects S1
+  only inside the legacy swing-family causal diagnostic. Both results remain
+  inexact; the Isaac companion later failed to reproduce this ranking and all
+  formal/deployment gates remain open. A first validator-shape failure is preserved and changed neither the
+  schedule nor checkpoints; accepted v2 hashes are in
+  `configs/phase1_M3_terminal_q50_result_20260711.json`.
+- Completed the exact-PGID correction of the four causal-followup curve
+  workers. Only legacy childless PGIDs `1410648/1412047` and
+  `196753/197939` received TERM; trainers and judges received no signal.
+  Hardened workers are Pod1 `1416771/1416784` and Pod2 `198759/198771`.
+  All four rejudged 17k jobs returned rc=0 and now bind manifest, job spec,
+  job contract, checkpoint, judge and both clean commits; the old state/logs
+  remain immutable beside correction sidecars.
+- Closed the Pod1 M3 terminal integrity/q10 pair. M3-old's finite
+  `model_20998.pt` has SHA `320b77c9...417a` and matches adjacent contract
+  `7542c59b...d941b`. On immutable schedule `7a908142...d614`, old versus S1
+  FH/BH/aggregate is `0.50/0.40/0.45` versus `1.00/1.00/1.00`, delta `+0.55`.
+  This causal/inexact q10 only triggers the separately preregistered K=100
+  q50; it does not select or promote a checkpoint.
+- Ran the content-addressed grounding transform for all ten diagnostic GMR
+  outputs on Pod1. Original discrete-frame penetration was
+  `8.072--8.716 cm`; each independent constant root-z shift leaves about
+  `10 um` minimum clearance. All input/output/report/tool/MJCF/collision
+  digests are bound in `configs/motion_video_gmr_ground_results_20260711.json`.
+  Per-video betas, inter-frame collision, dynamics, table/net, returnability
+  and schema-2 remain open, so no new motion entered RL or hardware.
+- A post-correction full-pool audit found 24 live trainers, exactly four per
+  GPU on both Pods, plus four clean terminals. Every latest checkpoint across
+  all 28 accepted runs had filename iteration equal to its embedded field,
+  zero non-finite values, matching checkpoint-to-adjacent-contract SHA and the
+  expected lineage flag; every accepted run log had zero
+  NaN/Inf/Traceback/OOM/malloc/killed signatures. Training/eval checkouts
+  remain clean at `6d93bcb...`/`46a0ce2...`.
 - Registered ten private Franco/v6/v7 air-swing recordings in a tracked
   content-addressed manifest and passed local plus Pod1 byte/hash/media audits.
   Added fail-loud intake, structural-result audit and memory-gated serial GVHMR

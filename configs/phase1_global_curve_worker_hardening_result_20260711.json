@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "status": "complete_six_global_curve_workers_hardened",
+  "scope": "Replace the six still-live original/scale-out checkpoint workers only; no trainer, judge, Git checkout, recipe, checkpoint, or real-robot mutation",
+  "contract_id": "phase1-global-curve-worker-hardening-20260711-v3",
+  "config": {
+    "path": "configs/phase1_global_curve_worker_hardening_20260711.json",
+    "sha256": "0c3d8a0d6c27207778eaa839c5c1b72f3babedd5eb9a0cf8033fcef5fe8461a5"
+  },
+  "tool": {
+    "path": "scripts/replace_phase1_global_curve_workers_20260711.py",
+    "sha256": "949e1e74c60d15042fd10b12dc2694583ae37471e86c7f44a6a6e7dd4d4bde49"
+  },
+  "hardened_worker": {
+    "path": "hope_training/whole_body_tracking/scripts/phase1_checkpoint_curve_worker.py",
+    "sha256": "21e301533328cad2a6684acced85fec6bb6854225eb18ca673247386f059f0eb"
+  },
+  "checkouts": {
+    "training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+    "eval_commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+    "both_clean_before_and_after": true
+  },
+  "signal_audit": {
+    "signal": "SIGTERM",
+    "exact_worker_pgids_only": [
+      1394810,
+      1380340,
+      1397266,
+      194276,
+      192815,
+      195085
+    ],
+    "sigkill_used": false,
+    "trainer_pgids_signalled": [],
+    "judge_pgids_signalled": [],
+    "real_robot_commands": false
+  },
+  "legacy_completed_job_policy": {
+    "hard_reuse_allowed": false,
+    "reason": "legacy state lacks the hardened manifest/job/job-contract binding, and two causal manifests also lacked the explicit inexact escape in their job spec",
+    "legacy_bytes_preserved": true,
+    "hardened_rejudged_jobs": 5
+  },
+  "pods": {
+    "pod1": {
+      "attestation_sha256": "0bfabbe734adc867c5a6c92560fad6919bcac3d69e6fae63daab3ef64c5a0c2e",
+      "transaction_sha256": "ec93e608410944bcf7878465a45b20394d0df1048cda6d9c8b662dc8e18435a5",
+      "queues": {
+        "cadence_fresh_pod1": {
+          "legacy_pgid": 1394810,
+          "hardened_pgid": 1432280,
+          "legacy_manifest_sha256": "51bbbef708673efd804da47580cc2477c9eb42f3acae138e8d55adba72ff784e",
+          "hardened_manifest_sha256": "180cb9f573a1f5ccb833389904d47f52622b88c3b9676ebe1587a68ddc9d5ff6",
+          "correction_sha256": "0c09d9b4e8a648df2ad59ce5497ade11c6b352c7a9de293987833acde8d8a676",
+          "launch_sha256": "73dcd10a291b51154f66db03b440a2f8feb96ae924b75e83b46b833807ef6ca0",
+          "rejudged_states": {
+            "fresh_SZ_seed1_4000_clean_q10": "932f4948abff0b6dd0d0d36f25e7fead1d70b6f7530046878b823fd1854226e0"
+          }
+        },
+        "scaleout_causal_pod1": {
+          "legacy_pgid": 1380340,
+          "hardened_pgid": 1432292,
+          "legacy_manifest_sha256": "c8564617872259bdb04fba9b0887d149a6b555b159feb64a3d55b7007f1010bd",
+          "hardened_manifest_sha256": "8d8de2fb7519717af865fd8de99f2e19dee673513f7f3c0892cb130090142c29",
+          "correction_sha256": "0c624d97dda99339a2038e17dc64645d4344fb80aff2160235105dba7caf6cdc",
+          "launch_sha256": "29b56c9bc9bfa9b464be4560c7e474dc9d238ff6520c5a8073fe68adea681dd7",
+          "rejudged_states": {
+            "M3_old_seed2_18000_clean_q10": "a87b3ab031e1fd3edd0a752b106e62529a63df31241c21f01be3f47a652af392",
+            "M3_S1_seed2_18000_clean_q10": "70c0f28f7ea8db593d2bf398d55568ce061899e686705cbb264cc63256bd8c1f"
+          }
+        },
+        "scaleout_fresh_pod1": {
+          "legacy_pgid": 1397266,
+          "hardened_pgid": 1432304,
+          "legacy_manifest_sha256": "ec5573d5341cfceca8c5b4d0098fd16ddeef3df1aab096af4b21651d6abaa654",
+          "hardened_manifest_sha256": "ec5573d5341cfceca8c5b4d0098fd16ddeef3df1aab096af4b21651d6abaa654",
+          "correction_sha256": "292e452339b59ce087634aa83d5ad036798174113574b93c669ee913c7cad107",
+          "launch_sha256": "47bfc60ca4ef7454c7b19bbf01f0c43bd172c7e316daf40027983267eaf1ec0a",
+          "rejudged_states": {}
+        }
+      }
+    },
+    "pod2": {
+      "attestation_sha256": "8d4915105d3b708621e84b6581ecd8dcea04fbc08559fd21c41fd1704522bf59",
+      "transaction_sha256": "7dca4e2e9c78073c64cf5fc92e15f0fd5b997d9b9975e7f94a4c4968a837305f",
+      "queues": {
+        "cadence_fresh_pod2": {
+          "legacy_pgid": 194276,
+          "hardened_pgid": 200706,
+          "legacy_manifest_sha256": "92193cecc4811f97516de046e48be7749bc2ee939e668c7812d6b11769c21046",
+          "hardened_manifest_sha256": "21c0e95f3656119933209605dae36c7ab930bf36064a583b71b4c6230e04c602",
+          "correction_sha256": "ad4093970c1ae611e2c1a0c29cf5ec657f8cd2684f51e6c298844ffb9ec3f41a",
+          "launch_sha256": "f5b3341983cbd13cf5ecec431ae36f059a24cd46071ccd02907744c8113d9eb7",
+          "rejudged_states": {}
+        },
+        "scaleout_causal_pod2": {
+          "legacy_pgid": 192815,
+          "hardened_pgid": 200718,
+          "legacy_manifest_sha256": "cf3faf27a5a10bcf9f48d4c04de4943df02f7a7685350975d9c8f87319f6ed33",
+          "hardened_manifest_sha256": "d6d540f8204c18ce5a7b4b90a23cdd8ba59d7a87e7c65da8328dbe3c782a088e",
+          "correction_sha256": "1b0c0694e2c2dd535fe12dc96e498c57450969609c9509428d9ec7ca124a0a59",
+          "launch_sha256": "de071651eddf1ffefb364e0225bd7cd132c721f48873d25b4dc0b79a7b9d44d2",
+          "rejudged_states": {
+            "M2_old_seed2_18000_clean_q10": "98f1fc2b69cfa954a197892145ab0d0fed91ebeb2b79cb39bf584829c605d8a2",
+            "M2_S1_seed2_18000_clean_q10": "3208fa53404b1535f6b2a2e22e59f7a8e44c3ab1e95836ba9d2db01dd17d65b0"
+          }
+        },
+        "scaleout_fresh_pod2": {
+          "legacy_pgid": 195085,
+          "hardened_pgid": 200730,
+          "legacy_manifest_sha256": "84ba5933dafd70e2ed82278e3a174a3a7b1788f570b24bc0c856cf8fad02bb1b",
+          "hardened_manifest_sha256": "84ba5933dafd70e2ed82278e3a174a3a7b1788f570b24bc0c856cf8fad02bb1b",
+          "correction_sha256": "85fefabedcbff4f5438d4d3e5a67c5695cd975ce8826921dad7176602f5a42bf",
+          "launch_sha256": "e5c8dc2d427e0e88e66de1035413466c631944135f0a6529b54bc68de07d285c",
+          "rejudged_states": {}
+        }
+      }
+    }
+  },
+  "postcondition": {
+    "all_six_hardened_workers_alive_after_startup": true,
+    "all_five_available_legacy_jobs_rejudged_rc0": true,
+    "all_rejudged_states_bind_manifest_job_and_job_contract_sha256": true,
+    "causal_rejudges_explicitly_allow_inexact_contract": true,
+    "trainer_pool_remained_24_live_four_per_gpu": true
+  }
+}

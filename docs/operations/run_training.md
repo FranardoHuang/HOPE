@@ -587,6 +587,77 @@ same manifest and a never-used state directory, and rejudges 17k. Completion
 requires rc=0 plus exact manifest/job/job-contract SHAs. It never manages a
 trainer or judge; old evidence remains immutable beside a correction sidecar.
 
+This one-time correction completed on 2026-07-11. Hardened worker PGIDs are
+Pod1 `1416771/1416784` and Pod2 `198759/198771`; correction-sidecar SHAs are
+`2faf88de...ffe3`, `1d6f8ba3...bae9`, `0dd02fae...d165`, and
+`45f4334d...0ad`. All four 17k jobs were rejudged rc=0 with manifest, job spec
+and job contract SHAs present. Do **not** rerun `replace`: its legacy-worker
+precondition is intentionally no longer true. For current monitoring, read
+each `checkpoint_cadence_q10.worker.hardened.launch.json` and manage only its
+recorded PGID.
+
+The six older global workers were separately replaced under
+`configs/phase1_global_curve_worker_hardening_result_20260711.json`. Their
+current PGIDs are Pod1 `1432280/1432292/1432304` and Pod2
+`200706/200718/200730`. Do not rerun that replacement transaction either;
+monitor the recorded launch sidecars and signal only an exact worker PGID if a
+later, separately authorized repair requires it.
+
+Before copying or launching any curve manifest, run:
+
+```bash
+python3 scripts/validate_phase1_queue_governance.py
+```
+
+For a separately supplied milestone-major manifest, validate it explicitly:
+
+```bash
+python3 scripts/validate_phase1_queue_governance.py \
+  --manifest /absolute/path/to/manifest.json \
+  --require-readiness-barrier
+```
+
+The validator requires q10 K=20/10 per side, screen-only/no-stop/no-promotion,
+ordered milestones and barriers. It rejects q50 from the generic worker; q50
+must use a preregistered paired runner.
+
+### Paired terminal q50 runner
+
+Do not turn a q10 trigger into an ad-hoc `judge.sh` command. The M3 terminal
+paper is executed by `scripts/run_phase1_paired_bank_q50.py`, which separates
+`prepare` (materialize one immutable schedule, start nothing) from `run`
+(require the prepared runtime-contract SHA and validate both complete ledgers).
+The accepted v2 bytes are runner
+`095e476fd36fb68d500cb39ea7f71f6fee9b729209187d51599582c72c22198b`
+and execution config
+`550ca88988c88e94e626aed3e489cbedf981d2b32cde1bab9601ebacae05988b`.
+It forces causal/inexact/non-formal semantics, K=100, 50 per side, one shared
+schedule JSON, exact question order and zero censored attempts. It never
+signals a process.
+
+The 2026-07-11 M3 paper is already complete; do not rerun its no-clobber state
+root. Schedule file SHA is `69f73458...7f25`, semantic schedule SHA is
+`949eb196...8fc0`, runtime-contract SHA is `ca7a688a...17b2`, and paired-result
+SHA is `e9bb07d3...f56e`. M3-old versus M3-S1 FH/BH/aggregate return was
+`0.62/0.22/0.42` versus `1.00/1.00/1.00`, with 9 versus 0 physical falls.
+The result selects S1 only in this same legacy swing-family causal paper and
+the completed Isaac companion does not reproduce the ranking: both old and S1
+score `0.99` aggregate on the same order. Therefore no cross-engine selection
+gate closes. Full paths, the preserved fail-closed attempts and all hashes are
+in `configs/phase1_M3_terminal_q50_result_20260711.json` and
+`configs/phase1_M3_terminal_q50_isaac_result_20260711.json`.
+
+The fresh exact wrapper is
+`scripts/run_phase1_fresh_exact_paired_bank_q50.py`. It additionally requires
+fresh lineage, a shared schema-3 hard-contract SHA and no inexact escape. The
+accepted seed1 model-2000/model-4000 state root is already complete and must
+not be reused. Runtime-contract SHA is `a756023d...4661`, schedule semantic
+SHA is `7dc6af82...ff3e`, and paired-result SHA is `b95ba6c4...0478`.
+Returns were `0.66/1.00/0.83` versus `0.00/1.00/0.50`; retain model 2000 but
+continue the arm. Both cells' post-strike guard resets mean this is not a
+continuity/deploy gate. Full paths and hashes are in
+`configs/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json`.
+
 The current 10-second, no-wrap-teleport task does carry the robot state between
 clips, but its complete-clip timing is slower than the conservative venue
 A-B-A intervals. Do not claim that this pool proves arbitrary-time continuous
