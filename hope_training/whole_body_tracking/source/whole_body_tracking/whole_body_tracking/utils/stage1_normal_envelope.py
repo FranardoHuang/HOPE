@@ -27,6 +27,7 @@ BANK_ROW_UNIT_TOLERANCE = "0.0002"
 RUNTIME_UNIT_TOLERANCE = "0.000001"
 RUNTIME_DOT_TOLERANCE = "0.000001"
 FORMAL_CLIP_ORDER = ("forehand", "backhand")
+FORMAL_MOUNT_NORMAL_SIGNS = (1.0, -1.0)
 
 _PAYLOAD_KEYS = (
     "stage1_normal_envelope_schema_version",
@@ -38,6 +39,7 @@ _PAYLOAD_KEYS = (
     "stage1_normal_envelope_runtime_unit_tolerance",
     "stage1_normal_envelope_runtime_dot_tolerance",
     "stage1_normal_envelope_clip_order",
+    "stage1_normal_envelope_mount_normal_sign_per_clip",
     "stage1_normal_envelope_centers",
     "stage1_normal_envelope_reference_normals",
     "stage1_normal_envelope_min_dots",
@@ -79,6 +81,7 @@ def derive_stage1_normal_envelope(
     *,
     expected_train_bank_sha256: str,
     expected_source_family_sha256: str,
+    mount_normal_sign_per_clip: Sequence[float],
     clip_order: Sequence[str] = FORMAL_CLIP_ORDER,
 ) -> dict[str, str]:
     """Derive a deterministic per-clip spherical cap from one exact train bank.
@@ -96,6 +99,15 @@ def derive_stage1_normal_envelope(
     if clip_order != FORMAL_CLIP_ORDER:
         raise ValueError(
             f"formal normal envelope requires clip order {FORMAL_CLIP_ORDER}, got {clip_order}"
+        )
+    try:
+        mount_signs = tuple(float(value) for value in mount_normal_sign_per_clip)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("formal normal envelope mount-normal sign table must be numeric") from exc
+    if mount_signs != FORMAL_MOUNT_NORMAL_SIGNS:
+        raise ValueError(
+            "formal normal envelope requires mount_normal_sign_per_clip=[+1,-1], got "
+            f"{mount_signs}"
         )
     before_sha = _sha256_file(path)
     if before_sha != expected_train_bank_sha256:
@@ -164,7 +176,7 @@ def derive_stage1_normal_envelope(
         min_dots: list[float] = []
         counts: list[int] = []
         clips_meta = metadata.get("clips") or {}
-        for name in clip_order:
+        for clip, name in enumerate(clip_order):
             normal_key = f"{name}/demanded_normal"
             reference_key = f"{name}/clip_normal"
             if normal_key not in data or reference_key not in data:
@@ -204,10 +216,14 @@ def derive_stage1_normal_envelope(
                 )
             unit_rows = rows / row_norms[:, None]
             unit_reference = reference / reference_norm
-            if np.any(unit_rows[:, 0] <= 1e-6):
+            # Bank/actor commands remain in raw mount +Y/A.  The external schema-2 wire is the
+            # physical striking face B and must be opponent-facing +X.  Therefore the representable
+            # condition is sign[clip] * n_A.x > 1e-6: FH raw A stays positive; BH raw A is negative
+            # and becomes positive only after the -1 striking-face conversion.
+            if np.any(mount_signs[clip] * unit_rows[:, 0] <= 1e-6):
                 raise ValueError(
-                    f"normal-envelope clip {name!r} contains a row the schema-2 world/table "
-                    "wire cannot represent (normal.x must be > 1e-6)"
+                    f"normal-envelope clip {name!r} contains a raw-A row the physical-B "
+                    "schema-2 wire cannot represent (sign[clip] * raw_A.x must be > 1e-6)"
                 )
             signed_dots = unit_rows @ unit_reference
             if np.any(signed_dots <= 0.0):
@@ -249,6 +265,7 @@ def derive_stage1_normal_envelope(
         "stage1_normal_envelope_runtime_unit_tolerance": RUNTIME_UNIT_TOLERANCE,
         "stage1_normal_envelope_runtime_dot_tolerance": RUNTIME_DOT_TOLERANCE,
         "stage1_normal_envelope_clip_order": ",".join(clip_order),
+        "stage1_normal_envelope_mount_normal_sign_per_clip": "1,-1",
         "stage1_normal_envelope_centers": vectors(centers),
         "stage1_normal_envelope_reference_normals": vectors(references),
         "stage1_normal_envelope_min_dots": ",".join(_float(value) for value in min_dots),

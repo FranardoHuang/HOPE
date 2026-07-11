@@ -621,7 +621,8 @@ int main(int argc, char** argv) {
       const auto& envelope = pp->onnx().face_normal_envelope();
       std::cout << " normal_envelope_payload_sha256=" << envelope.payload_sha256
                 << " normal_envelope_train_bank_sha256=" << envelope.train_bank_sha256
-                << " normal_envelope_source_family_sha256=" << envelope.source_family_sha256;
+                << " normal_envelope_source_family_sha256=" << envelope.source_family_sha256
+                << " normal_envelope_mount_normal_sign_per_clip=1,-1";
     }
     std::cout << "\n";
     return 0;

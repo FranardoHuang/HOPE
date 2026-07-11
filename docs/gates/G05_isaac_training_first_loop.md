@@ -887,14 +887,26 @@ instead of binding only its file SHA. Native Isaac export requires the live vali
 `QuestionBank`; the Isaac-free standalone path requires `--train-bank`, runs the same strict bank
 and motion-anchor loaders, and refuses to inherit any `stage1_*` envelope from a donor ONNX. For
 each clip independently (clip0 forehand, clip1 backhand), rows must be unit within `2e-4` and stay
-on the raw +Y/A-frame side of that clip's reference normal. The normalized per-clip row sum defines
-the spherical-cap center and the minimum row dot defines its boundary. The exporter records the
-frame, convention, algorithm, tolerances, centers, references, thresholds, row counts, train-bank
-SHA and source-family SHA in a canonical payload with its own SHA-256.
+on the raw +Y/A-frame side of that clip's reference normal. The checkpoint contract and both
+exporters must also carry the exact sign table `[+1,-1]`; representability is
+`sign[clip] * raw_A.x > 1e-6`, not `raw_A.x > 0`. Therefore forehand raw A is positive-x and
+backhand raw A is negative-x, while the external schema-2 physical striking-face B remains
+opponent-facing positive-x for both. The normalized per-clip raw-A row sum defines the
+spherical-cap center and the minimum row dot defines its boundary. The exporter records the
+frame, convention, algorithm, tolerances, exact sign table, centers, references, thresholds, row
+counts, train-bank SHA and source-family SHA in a canonical payload with its own SHA-256.
 
-Dependency-light Python verification covers all bank rows at the exported boundary, independent
-forehand/backhand signs, a positive-X but out-of-support normal, opposite-sign poisoning,
-non-unit rows, wrong clip order, bank/family mismatch and payload content binding. This closes an
+The external B normal is converted to A only after clip selection; position and velocity are not
+changed. Dependency-light Python verification covers all bank rows at the exported boundary,
+independent forehand/backhand signs, a physical-B positive-X but raw-A out-of-support normal,
+opposite-sign poisoning, non-unit rows, wrong clip order, bank/family mismatch and payload content
+binding. A subprocess smoke imports the standalone exporter without the package `__init__`, Isaac,
+ONNX or Torch. The prospective real-bank fixture
+`configs/phase1_face179_real_bank_envelope_expectations_20260712.json` binds bank
+`2da2bd12...a0700`, family `b21c161a...28ad5`, `757/724` rows and expected cap minima
+`0.974278/0.972078`; those read-only statistics are export expectations, not behavior evidence.
+Host verification is `34 passed` for the contract/export group and `11 passed` for the planner
+wire. This closes an
 export/source prerequisite only. No envelope-bearing formal ONNX has yet been produced from the
 running Phase-1 artifacts, and no policy has passed vendor MuJoCo with the envelope, self-hit gate
 or recovery contract. G05 remains `Partial`.

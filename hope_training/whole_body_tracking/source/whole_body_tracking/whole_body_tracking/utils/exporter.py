@@ -592,8 +592,9 @@ def attach_onnx_metadata(
     # Face-frame provenance (2026-07-09 单翻病定案): ship the striking-face sign table and the
     # face-obs convention so eval/deploy can introspect the checkpoint instead of guessing. The
     # face_command obs lane (179/181-D tail) is ALWAYS +Y/A-frame (bank rows verbatim); the sign
-    # table serves the metric/reference channels only (hope_rewards._face_pair). Empty string =
-    # table not configured (scalar sign path). Own narrow guard (NOT the shared try above): a
+    # table serves the metric/reference channels and the formal schema-2 physical-B -> raw-A
+    # deploy bridge. Empty string = table not configured (scalar sign path). Own narrow guard
+    # (NOT the shared try above): a
     # malformed table must fail the export loudly, not silently ship a face model without its
     # provenance keys — lying metadata is the exact failure this hunk exists to prevent.
     # NOTE judge.sh must carry mount_normal_sign_per_clip into the EXPORT env for this key to be
@@ -631,6 +632,17 @@ def attach_onnx_metadata(
             }
         )
     if actor_contract is not None and actor_contract.name == "deploy_parity_face179":
+        if (
+            training_contract_schema != TRAINING_CONTRACT_SCHEMA_VERSION
+            or training_contract is None
+        ):
+            raise ValueError(
+                "attach_onnx_metadata: formal face179 export requires a checkpoint-bound "
+                "schema-3 training contract"
+            )
+        checkpoint_mount_signs = tuple(
+            float(value) for value in training_contract["mount_normal_sign_per_clip"]
+        )
         required_bank = {
             "stage1_question_bank_exact": "1",
             "stage1_bank_schema_version": "3",
@@ -638,6 +650,7 @@ def attach_onnx_metadata(
             "face_command_enabled": "1",
             "face_command_pairing": "shared_plus_y",
             "face_obs_convention": "mount_plusY_A",
+            "mount_normal_sign_per_clip": "1,-1",
         }
         mismatch = {
             key: (metadata.get(key), expected)
@@ -658,6 +671,7 @@ def attach_onnx_metadata(
                 validated_question_bank.source_path,
                 expected_train_bank_sha256=metadata["stage1_train_bank_sha256"],
                 expected_source_family_sha256=metadata["stage1_source_family_sha256"],
+                mount_normal_sign_per_clip=checkpoint_mount_signs,
                 clip_order=FORMAL_CLIP_ORDER,
             )
         )

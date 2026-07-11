@@ -1529,8 +1529,8 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `612f54d`；main 侧 NOW 原样保留并补当前人话状态。四-seed q50、动作 v5 64题、plant 校准、
    连续双引擎 rollout 仍是 open gate，不随源码合并偷写成结果。
 48. 【franco/Codex】**179-D 进 Gate 3 不再靠“加个维数白名单”**——新增 flat wire schema2，
-   同一条消息原子携带拍位/拍速/世界系 demanded normal/zero rho；C++ 要求 exact
-   `deploy_parity_face179` term metadata、face/bank/SHA 谱系、planner mode、正 X unit normal，schema1
+   同一条消息原子携带拍位/拍速/世界系物理击球面 B normal/zero rho；C++ 要求 exact
+   `deploy_parity_face179` term metadata、face/bank/SHA 谱系、planner mode、B 正 X unit normal，schema1
    不能 engage。坏 payload/no-solution 两条 wire 都主动发 finite `valid=0`，接收端对 active-face 后
    的 malformed/unknown 包记 revoke；观测严格是 175 逐位前缀+4尾部。现仅源码/单测，train-bank
    normal envelope、canonical recovery、vendor full-dependency x86 build、no-publish trace、Gate3 runtime 均未过。
@@ -1550,9 +1550,14 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    Release 三目标全链接，真实 SZ 2k ONNX test 1/1、native 205 pass/9 optional skip；无 no-publish
    preflight rc2，安全 preflight rc0 且输出 obs179/双 SHA、零 backend init/start。仅执行零观测 ONNX
    prewarm，无 driver/backend tick；normal envelope、canonical recovery、厂商 Gate3/Gate3B 继续 open。
-53. 【franco/Codex】**179 法向不再只看正 X，按训练题库逐动作 fail closed**——两个 exporter 都从
-   exact schema3 train bytes 逐 clip 生成 sign-preserving spherical cap；frame/+Y-A convention/算法/
-   容差/center/reference/min-dot/count/bank+family SHA 全进自哈希 metadata。C++ loader 缺一字段、
-   改一字节、错 clip order/符号/单位都会拒绝；planner 在 engage transaction 前用 forehand/backhand
-   已选 clip 判 cap，正 X 但训练外 normal 不起拍。旧 formal ONNX 缺该合同会被新 loader 拒绝，需
-   重导；这只是 Gate3 加载/安全前置，不是 vendor MuJoCo behavior、自击或连续恢复通过。
+53. 【franco/Codex】**179 envelope 首版被红队判 P0，不计完成**——`b5762fa` 虽把 exact schema3
+   train bytes 逐 clip 做 cap 并加自哈希 metadata，却把外部物理击球面 B 与 bank/actor 原始安装面 A
+   混成“所有 normal 都正 X”；真实反手 raw-A 本来就是负 X，因此首版会把正确反手拒绝。此发现
+   发生在新 formal ONNX/vendor runtime 前，没有错误行为结果入账。
+54. 【franco/Codex】**B-wire→A-actor 的 179 合同修正闭环**——schema2 继续只收 opponent-facing
+   `B.x>0`；checkpoint、native/standalone exporter、envelope payload/C++ loader 全链强制
+   `mount_normal_sign_per_clip=[+1,-1]`。已选 clip 后仅转换 `n_A=sign*n_B`，拍位/拍速不变；训练行
+   用 `sign*raw_A.x>1e-6`，runtime 同时过 raw-A reference hemisphere 与 cap。真实 bank fixture 绑定
+   `2da2bd12...a0700`/family `b21c161a...28ad5`、757/724 行和 cap minima `.974278/.972078`；standalone
+   Isaac-free import 与 locale-independent SHA/float parser 均有回归门。旧 formal ONNX 仍需重导；
+   fixture/source tests 不是 vendor MuJoCo、自击、恢复或连续 Gate3 通过。

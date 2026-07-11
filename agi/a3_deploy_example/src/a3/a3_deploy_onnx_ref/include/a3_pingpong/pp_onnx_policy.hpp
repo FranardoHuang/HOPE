@@ -327,6 +327,7 @@ class PpOnnxPolicy {
             LookupMeta(md, alloc, "stage1_bank_split"),
             LookupMeta(md, alloc, "stage1_train_bank_sha256"),
             LookupMeta(md, alloc, "stage1_source_family_sha256"),
+            LookupMeta(md, alloc, "mount_normal_sign_per_clip"),
             PpFaceNormalEnvelopeMetadata{
                 LookupMeta(md, alloc, "stage1_normal_envelope_schema_version"),
                 LookupMeta(md, alloc, "stage1_normal_envelope_frame"),
@@ -337,6 +338,7 @@ class PpOnnxPolicy {
                 LookupMeta(md, alloc, "stage1_normal_envelope_runtime_unit_tolerance"),
                 LookupMeta(md, alloc, "stage1_normal_envelope_runtime_dot_tolerance"),
                 LookupMeta(md, alloc, "stage1_normal_envelope_clip_order"),
+                LookupMeta(md, alloc, "stage1_normal_envelope_mount_normal_sign_per_clip"),
                 LookupMeta(md, alloc, "stage1_normal_envelope_centers"),
                 LookupMeta(md, alloc, "stage1_normal_envelope_reference_normals"),
                 LookupMeta(md, alloc, "stage1_normal_envelope_min_dots"),
@@ -528,8 +530,15 @@ class PpOnnxPolicy {
   }
   bool face_normal_within_training_envelope(int clip, const Vec3& normal_w) const {
     return obs_dim_ == kObsDim179 &&
-           face_normal_envelope_.Allows(
+           face_normal_envelope_.AllowsRawA(
                clip, normal_w[0], normal_w[1], normal_w[2]);
+  }
+  Vec3 face_normal_raw_a_from_wire_b(int clip, const Vec3& normal_wire_b) const {
+    if (obs_dim_ != kObsDim179)
+      throw std::logic_error("physical-B to raw-A face conversion is 179-D only");
+    const auto converted = face_normal_envelope_.WireBToRawA(
+        clip, normal_wire_b[0], normal_wire_b[1], normal_wire_b[2]);
+    return Vec3(converted[0], converted[1], converted[2]);
   }
 
   // Run the actor once before the backend/driver starts. ONNX Runtime may lazily allocate and

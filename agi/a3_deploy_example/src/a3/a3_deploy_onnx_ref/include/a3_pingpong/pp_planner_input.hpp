@@ -27,7 +27,8 @@
 //      [11]=frame_code(0=world/table, 1=base_link)   (optional; default 0)
 //    RACKET schema 2 face179                 (exactly 16 doubles)
 //      schema-1 prefix with mandatory frame_code at [11]
-//      [12..14]=demanded_normal_cmd (same frame as pos/vel)
+//      [12..14]=physical striking-face B normal (same world/table frame as pos/vel,
+//               opponent-facing +X; converted per clip to raw mount +Y/A for actor input)
 //      [15]=rho spin placeholder (Phase-1 requires exactly 0)
 //    BASE    /a3/base_pose_flat     (>=9 doubles)
 //      [0]=schema(1)  [1]=valid(0/1)  [2..4]=pos(x,y,z)
@@ -61,7 +62,7 @@ struct PpRacketMsg {
   double strike_time = 0.0;    // absolute/relative strike time (informational)
   int frame_code = 0;          // 0 = world/table, 1 = base_link
   bool has_face_command = false;
-  Vec3 normal_cmd = Vec3(1.0, 0.0, 0.0);  // frame per frame_code; unit vector
+  Vec3 normal_cmd = Vec3(1.0, 0.0, 0.0);  // physical face B; world/table, unit, +X
   double rho = 0.0;             // reserved S3 spin lane; zero in Phase-1 schema 2
 };
 

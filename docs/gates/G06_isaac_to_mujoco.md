@@ -504,14 +504,17 @@ can be localized rather than hidden in one aggregate return rate.
 ### Gate 3 face-command wire and engine-gap localization
 
 The 179-D Phase-1 policies cannot be tested by adding `179` to a shape whitelist. Their last four
-columns require the planner's demanded world-frame normal and a zero rho placeholder atomically
-paired with position/velocity. A versioned flat schema-2 publisher/receiver and exact
+columns require the actor's raw mount-A world-frame normal and a zero rho placeholder atomically
+paired with position/velocity. The external planner wire deliberately carries the physical,
+opponent-facing striking face B instead. A versioned flat schema-2 publisher/receiver and exact
 `deploy_parity_face179` ONNX metadata path are now implemented in source. The loader additionally
 requires `face_command_enabled=1`, `shared_plus_y`, `mount_plusY_A`, an exact schema-3 train bank,
 train split and lowercase content/source-family SHA-256 bindings; width and term names alone are
-not enough. Schema-2 rows require a world-frame opponent-facing unit normal (`x>1e-6`) and zero
-rho. Any malformed/unknown row after an active face tuple records `invalid_after`; the publisher
-turns a bad solve or payload into an explicit finite `valid=0` row on both wires, so silence cannot
+not enough. Schema-2 rows require a world-frame opponent-facing unit B normal (`B.x>1e-6`) and zero
+rho. After clip selection the runner applies exact `[+1,-1]` to the normal only to recover raw A;
+position and velocity are unchanged. Any malformed/unknown row after an active face tuple records
+`invalid_after`; the publisher turns a bad solve or payload into an explicit finite `valid=0` row
+on both wires, so silence cannot
 keep an old swing eligible for the longer command timeout. Schema 1 remains the default for
 existing models and cannot engage a 179 actor. This is not yet a gate result: the
 vendor-source offline x86 build is recorded below, while a ROS/AimRT-enabled build, no-publish
@@ -520,8 +523,8 @@ Active-swing fields are atomic. Post-swing recovery is not yet exact: the curren
 combines a synthesized base-anchored hold position with the previous swing's velocity/normal,
 and no Phase-1 contract proves that hybrid tuple is on-distribution. A canonical recovery tuple
 or separately accepted vendor-MuJoCo recovery paper is required before continuous promotion.
-The positive-X invariant is also only a minimum sign/frame guard. Source now exports and enforces a
-content-bound per-clip normal envelope from the exact training bank, as described below. A new
+The physical-B positive-X invariant is also only a minimum sign/frame guard. Source now exports
+and enforces a content-bound per-clip normal envelope from the exact training bank, as described below. A new
 envelope-bearing formal ONNX, self-hit evidence and vendor behavior gate are still absent, so this
 source guard must not be promoted into a Gate 3 result.
 
@@ -599,29 +602,40 @@ Gate 3/Gate 3B behavior remain open, so G06 stays Partial.
 
 #### 2026-07-12 content-bound per-clip demanded-normal source gate
 
-Formal 179 export and loading now bind the normal distribution rather than accepting every
-opponent-facing unit vector. The train NPZ must be exact schema 3, split `train`, ordered
+Formal 179 export and loading now bind the raw-A normal distribution rather than accepting every
+opponent-facing physical-B unit vector. The train NPZ must be exact schema 3, split `train`, ordered
 `forehand,backhand`, `shared_plus_y` and `mount_plusY_A`, with its bytes and source family matching
-the checkpoint contract. Each clip is processed alone: normalize rows only after the bank's
-`2e-4` unit check, reject any row across the clip reference hemisphere, normalize the row-vector
-sum, and save the minimum row-to-center dot. This
+the checkpoint contract. The contract and both exporters must carry the exact
+`mount_normal_sign_per_clip=[+1,-1]`. Each clip is processed alone: normalize raw-A rows only after
+the bank's `2e-4` unit check; require `sign[clip] * raw_A.x > 1e-6` for physical-B wire
+representability and a positive raw-A row/reference dot; normalize the row-vector sum; and save
+the minimum row-to-center dot. This
 `per_clip_sign_preserving_spherical_mean_cap_v1` construction never averages forehand with
 backhand or opposite face signs.
 
 The ONNX carries envelope schema/frame/convention/pairing/algorithm, bank/runtime tolerances,
-clip order, two centers, references, dot thresholds, row counts, and duplicated bank/family SHA
+clip order, the exact sign table, two centers, references, dot thresholds, row counts, and
+duplicated bank/family SHA
 bindings. A dependency-free C++ SHA-256 implementation recomputes the canonical metadata payload;
 the loader then rejects missing keys, a stale payload hash, bank/family mismatch, malformed or
 non-unit vectors, flipped centers, invalid thresholds/counts and wrong clip order. `PpPolicy`
-checks the command against the already selected clip's cap before its engage transaction commits
-clock, position, velocity, side or normal. A positive-X unit vector outside the selected cap sets
-`face_command_out_of_train_envelope` and cannot start a swing. Older 179 ONNX files lack these
+converts only the physical-B wire normal to A after selecting the clip, then checks both the raw-A
+reference hemisphere and selected cap before its engage transaction commits clock, position,
+velocity, side or normal. A positive-X physical-B unit vector whose converted raw A is outside the
+selected support sets `face_command_out_of_train_envelope` and cannot start a swing. Older 179
+ONNX files lack these
 mandatory keys and therefore fail closed even under model-only/no-publish loading. Other registered
 110/175/177/180 models retain their prior loader behavior.
 
 Host verification currently covers the Python derivation suite, Python exporter/contract suite,
-standard SHA-256 vectors and a compiled dependency-light C++ parse/accept/reject smoke. A full
-vendor-dependency Release build and a freshly re-exported real 179 model are still required. More
+an Isaac-free standalone-import subprocess, locale-independent standard SHA-256/numeric parsing
+and a compiled dependency-light C++ parse/accept/reject smoke. The Python results are `34 passed`
+for contract/export and `11 passed` for the planner wire. The prospective real-bank fixture
+binds bank `2da2bd12...a0700`, source family `b21c161a...28ad5`, `757/724` rows, raw-A/B sign
+ranges and cap minima `0.974278/0.972078`; it is a read-only source-contract expectation, not a
+behavior result. The fixture does not contain the ignored NPZ: restore and SHA-check it using
+[setup_local_sync.md, Phase-1 fresh and causal bundle](../operations/setup_local_sync.md#phase-1-fresh-and-causal-bundle-2026-07-11).
+A full vendor-dependency Release build and a freshly re-exported real 179 model are still required. More
 importantly, a spherical cap is an on-distribution envelope, not a collision or behavior proof:
 self-hit instrumentation, the recovery tuple and no-reset vendor MuJoCo Gate 3/Gate 3B remain
 open. G06 stays `Partial`.

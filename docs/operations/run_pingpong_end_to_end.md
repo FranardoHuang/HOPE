@@ -1287,8 +1287,9 @@ backend; hope_planner publishes both when `publish_flat_cmd:=true`, the default)
                        base-rel y), px,py,pz, vx,vy,vz, time_to_strike, strike_time,
                        frame_code(0=world/table, 1=base_link)]        (≥11 doubles)
                        schema=2 face179 uses exactly 16 doubles: the same 12-value
-                       prefix + demanded_normal_cmd_w[3] + rho[1]. Phase-1 requires
-                       frame_code=0 (world/table) and rho exactly zero.
+                       prefix + physical_striking_face_B_normal_w[3] + rho[1].
+                       Phase-1 requires frame_code=0 (world/table), B.x>1e-6,
+                       a unit B normal and rho exactly zero.
 /a3/base_pose_flat    [schema=1, valid(0/1), x,y,z, qw,qx,qy,qz]      (≥9 doubles)
                        ← the robot base in the SAME frame as the racket target
                        (arena: /P1/pose + marker_to_base_xyz; sim: /sim/a3/pelvis_pose)
@@ -1303,12 +1304,19 @@ after a live face tuple as `invalid_after`. Diagnostics report planner solves se
 control-valid rows and count flat-contract rejects. Do not use this on hardware: the vendor MuJoCo
 build and a content-addressed no-publish runtime ledger must pass first.
 
+The schema-2 normal is physical striking face B, not the actor/bank's raw mount +Y/A normal. Once
+the runner has selected clip0 forehand or clip1 backhand, it computes
+`normal_A = [1,-1][clip] * normal_B`. It never applies that sign to position or velocity. Formal
+metadata must bind the same exact sign table in the checkpoint contract and normal-envelope
+payload; any disagreement fails model load.
+
 A formal 179 ONNX must also carry the content-bound per-clip train-normal envelope described in
 `docs/interfaces/policy_observation_action.md`. The loader verifies its payload SHA and exact
-train-bank/source-family bindings. At engage, the runner maps the selected sign to clip0 forehand
-or clip1 backhand and requires the world-frame unit normal to lie inside that clip's spherical cap;
-the check occurs before the atomic target/clock/side commit. A positive-X unit normal outside the
-trained cap is reported as `face_command_out_of_train_envelope` and does not start a swing. Models
+train-bank/source-family bindings. At engage, the runner selects clip0 forehand or clip1 backhand,
+uses its sign to convert physical B to raw A, and requires raw A to remain in both that clip's
+reference hemisphere and spherical cap. The check occurs before the atomic target/clock/side
+commit. A positive-X physical-B unit normal whose converted raw A is outside trained support is
+reported as `face_command_out_of_train_envelope` and does not start a swing. Models
 exported before this contract intentionally fail to load and must be re-exported from the exact
 schema-3 train bank. Model-only preflight prints the envelope payload/bank/family SHA triplet for
 the audit ledger; it still does not initialize a backend or prove behavior.

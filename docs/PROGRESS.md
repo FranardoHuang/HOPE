@@ -1391,7 +1391,7 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
 - 开始补 Phase-1 179-D 到 vendor Gate 3 的前置接口：flat wire schema 2 将 position/velocity/
   demanded-normal/zero-rho 原子发布，C++ 只在 exact `deploy_parity_face179` metadata + planner mode
   下构造“175逐位前缀+4维尾部”。review 后再收紧为 face enabled/shared-plus-Y/A-frame、exact
-  schema-3 train bank 与双 SHA 绑定；world normal 必须 unit、正 X，坏包/无解主动发 `valid=0`
+  schema-3 train bank 与双 SHA 绑定；wire 的物理击球面 B world normal 必须 unit、正 X，坏包/无解主动发 `valid=0`
   revoke，不能靠静默让旧命令多活。旧 schema1 默认不变；当前仅源码门，vendor build/runtime 未过。
   训练 bank 的 per-clip normal envelope 与 post-swing canonical recovery tuple 仍是正式 runtime blocker。
 - 179 vendor-source 离线门在隔离 Pod1 archive (`8d56ea86`) 通过：实际 ping-pong executable
@@ -1408,11 +1408,15 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   real-model test 1/1、全套 205 pass/9 optional skip/0 fail；缺 no-publish 时 rc2，安全 preflight
   rc0 并精确打印 179/contract/checkpoint SHA，日志无 backend init/start。构造器仅做一次零观测
   ONNX prewarm；first backend tick、normal envelope、canonical recovery 与 Gate3/Gate3B 仍 open。
-- 179 train-normal envelope 已完成源码端闭环：native/standalone exporter 都从 exact schema-3
-  train NPZ 按 clip0 正手/clip1 反手独立导出保符号球面均值 cap，metadata 把 frame/convention/
-  algorithm/tolerances/center/reference/min-dot/count 与 bank/family SHA 做二次 payload SHA。C++
-  loader 重算 SHA 并 fail-closed；planner 在 engage 原子提交前按已选 clip 拒绝 cap 外 normal。
-  Python derivation/恶意输入测试 `4 passed`，连同 schema3 suite 为 `24 passed`；标准 SHA 向量和
-  dependency-light C++ parse/边界 smoke 通过。旧 SZ formal ONNX 因缺 envelope 会被新 loader
-  有意拒绝，必须重导出。尚无新 ONNX/full vendor build/first tick/self-hit/recovery/Gate3 行为证据，
-  所以只关闭 source safety prerequisite，G05/G06 仍 Partial。
+- 179 train-normal envelope 首版 `b5762fa` 被红队判 P0，不计完成：它把外部物理击球面 B 与
+  bank/actor 原始安装面 A 混成一个“全正 X”空间，会错误拒绝真实反手 raw-A。修正版冻结
+  schema-2 wire=`B/+X`、actor/bank=`raw mount +Y/A`，并从 checkpoint 合同到两条 exporter、
+  envelope 自哈希与 C++ loader 全链强制 `[+1,-1]`；选 clip 后只做 `n_A=sign*n_B`，位置/速度
+  不翻。训练行条件改成 `sign*raw_A.x>1e-6`，runtime 同时要求 raw-A reference hemisphere 与
+  cap。SHA 输出与浮点解析不受 process locale 影响，standalone file-level import smoke 证明不
+  执行 package `__init__`/Isaac。真实 bank 只读 fixture 绑定 `2da2bd12...a0700`、family
+  `b21c161a...28ad5`、`757/724` 行及 cap minima `0.974278/0.972078`；它是下一次重导的合同预期，
+  不是 ONNX/Isaac/MuJoCo/自击/恢复证据。host 回归为合同/export `34 passed`、planner wire
+  `11 passed`，另有 locale+BH 转换的 dependency-light C++ compile/run smoke。旧 SZ formal ONNX
+  仍会被新 loader 拒绝；新 ONNX、full
+  vendor build、first tick 与 Gate3 行为门全开，G05/G06 仍 Partial。

@@ -4,8 +4,12 @@
 #pragma once
 
 #include <array>
+#include <cerrno>
+#include <charconv>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
+#include <locale.h>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -25,6 +29,7 @@ struct PpFaceNormalEnvelopeMetadata {
   std::string runtime_unit_tolerance;
   std::string runtime_dot_tolerance;
   std::string clip_order;
+  std::string mount_normal_sign_per_clip;
   std::string centers;
   std::string reference_normals;
   std::string min_dots;
@@ -43,6 +48,7 @@ struct PpFace179MetadataContract {
   std::string bank_split;
   std::string train_bank_sha256;
   std::string source_family_sha256;
+  std::string mount_normal_sign_per_clip;
   PpFaceNormalEnvelopeMetadata normal_envelope;
 };
 
@@ -51,6 +57,7 @@ struct PpFaceNormalEnvelope {
   std::array<std::array<double, 3>, 2> reference_normals{};
   std::array<double, 2> min_dots{};
   std::array<int, 2> row_counts{};
+  std::array<double, 2> mount_normal_signs{1.0, -1.0};
   double runtime_unit_tolerance = 0.0;
   double runtime_dot_tolerance = 0.0;
   std::string train_bank_sha256;
@@ -64,15 +71,25 @@ struct PpFaceNormalEnvelope {
     return center[0] * x + center[1] * y + center[2] * z;
   }
 
-  bool Allows(int clip, double x, double y, double z) const {
+  std::array<double, 3> WireBToRawA(int clip, double x, double y, double z) const {
+    if (clip < 0 || clip >= static_cast<int>(mount_normal_signs.size()))
+      throw std::out_of_range("formal face179 clip id is outside forehand/backhand mapping");
+    const double sign = mount_normal_signs[static_cast<std::size_t>(clip)];
+    return {sign * x, sign * y, sign * z};
+  }
+
+  bool AllowsRawA(int clip, double x, double y, double z) const {
     if (clip < 0 || clip >= static_cast<int>(centers.size()) ||
         !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z))
       return false;
     const double norm = std::sqrt(x * x + y * y + z * z);
     if (!std::isfinite(norm) || std::fabs(norm - 1.0) > runtime_unit_tolerance)
       return false;
-    return Dot(clip, x, y, z) + runtime_dot_tolerance >=
-           min_dots[static_cast<std::size_t>(clip)];
+    const auto& reference = reference_normals[static_cast<std::size_t>(clip)];
+    const double reference_dot = reference[0] * x + reference[1] * y + reference[2] * z;
+    return reference_dot > runtime_dot_tolerance &&
+           Dot(clip, x, y, z) + runtime_dot_tolerance >=
+               min_dots[static_cast<std::size_t>(clip)];
   }
 };
 
@@ -92,31 +109,80 @@ inline std::vector<std::string> PpEnvelopeSplit(const std::string& value, char d
   return result;
 }
 
-inline double PpEnvelopeFiniteDouble(const std::string& value, const char* field) {
-  std::size_t consumed = 0;
-  double parsed = 0.0;
-  try {
-    parsed = std::stod(value, &consumed);
-  } catch (const std::exception&) {
-    throw std::invalid_argument(std::string("formal face179 ") + field +
-                                " contains a non-numeric value");
+inline bool PpEnvelopePortableFiniteDouble(const std::string& value, double* output) {
+  // libc++ releases used by the macOS source-gate still omit floating-point from_chars. Keep a
+  // strict C-locale grammar fallback there; production libstdc++ uses std::from_chars below.
+  if (value.empty() || output == nullptr) return false;
+  std::size_t i = 0;
+  bool negative = false;
+  if (value[i] == '-') { negative = true; ++i; }
+  if (i == value.size()) return false;
+  bool have_digit = false;
+  while (i < value.size() && value[i] >= '0' && value[i] <= '9') {
+    have_digit = true;
+    ++i;
   }
-  if (consumed != value.size() || !std::isfinite(parsed))
+  if (i < value.size() && value[i] == '.') {
+    ++i;
+    while (i < value.size() && value[i] >= '0' && value[i] <= '9') {
+      have_digit = true;
+      ++i;
+    }
+  }
+  if (!have_digit) return false;
+  int exponent = 0;
+  bool exponent_negative = false;
+  if (i < value.size() && (value[i] == 'e' || value[i] == 'E')) {
+    ++i;
+    if (i < value.size() && (value[i] == '+' || value[i] == '-')) {
+      exponent_negative = value[i] == '-';
+      ++i;
+    }
+    const std::size_t exponent_begin = i;
+    while (i < value.size() && value[i] >= '0' && value[i] <= '9') {
+      if (exponent > 10000) return false;
+      exponent = exponent * 10 + static_cast<int>(value[i] - '0');
+      ++i;
+    }
+    if (i == exponent_begin) return false;
+  }
+  if (i != value.size()) return false;
+  (void)negative;
+  (void)exponent_negative;
+  const locale_t c_locale = newlocale(LC_NUMERIC_MASK, "C", nullptr);
+  if (c_locale == nullptr) return false;
+  errno = 0;
+  char* parsed_end = nullptr;
+  const double parsed = strtod_l(value.c_str(), &parsed_end, c_locale);
+  freelocale(c_locale);
+  if (errno == ERANGE || parsed_end != value.c_str() + value.size() || !std::isfinite(parsed))
+    return false;
+  *output = parsed;
+  return true;
+}
+
+inline double PpEnvelopeFiniteDouble(const std::string& value, const char* field) {
+  double parsed = 0.0;
+#if defined(_LIBCPP_VERSION)
+  const bool valid = PpEnvelopePortableFiniteDouble(value, &parsed);
+#else
+  const char* begin = value.data();
+  const char* end = begin + value.size();
+  const auto result = std::from_chars(begin, end, parsed, std::chars_format::general);
+  const bool valid = result.ec == std::errc{} && result.ptr == end && std::isfinite(parsed);
+#endif
+  if (!valid)
     throw std::invalid_argument(std::string("formal face179 ") + field +
                                 " contains a malformed/non-finite value");
   return parsed;
 }
 
 inline int PpEnvelopePositiveInt(const std::string& value, const char* field) {
-  std::size_t consumed = 0;
   long parsed = 0;
-  try {
-    parsed = std::stol(value, &consumed, 10);
-  } catch (const std::exception&) {
-    throw std::invalid_argument(std::string("formal face179 ") + field +
-                                " is not a canonical positive integer");
-  }
-  if (consumed != value.size() || parsed <= 0 ||
+  const char* begin = value.data();
+  const char* end = begin + value.size();
+  const auto result = std::from_chars(begin, end, parsed, 10);
+  if (result.ec != std::errc{} || result.ptr != end || parsed <= 0 ||
       parsed > std::numeric_limits<int>::max() || value != std::to_string(parsed))
     throw std::invalid_argument(std::string("formal face179 ") + field +
                                 " is not a canonical positive integer");
@@ -138,6 +204,8 @@ inline std::string BuildPpFaceNormalEnvelopePayload(
       << "stage1_normal_envelope_runtime_dot_tolerance="
       << c.runtime_dot_tolerance << '\n'
       << "stage1_normal_envelope_clip_order=" << c.clip_order << '\n'
+      << "stage1_normal_envelope_mount_normal_sign_per_clip="
+      << c.mount_normal_sign_per_clip << '\n'
       << "stage1_normal_envelope_centers=" << c.centers << '\n'
       << "stage1_normal_envelope_reference_normals=" << c.reference_normals << '\n'
       << "stage1_normal_envelope_min_dots=" << c.min_dots << '\n'
@@ -175,9 +243,11 @@ inline PpFaceNormalEnvelope ParsePpFaceNormalEnvelope(
       c.bank_row_unit_tolerance != "0.0002" ||
       c.runtime_unit_tolerance != "0.000001" ||
       c.runtime_dot_tolerance != "0.000001" ||
-      c.clip_order != "forehand,backhand")
+      c.clip_order != "forehand,backhand" ||
+      c.mount_normal_sign_per_clip != "1,-1")
     throw std::invalid_argument(
-        "formal face179 normal envelope has the wrong schema/frame/convention/algorithm/tolerance/clip order");
+        "formal face179 normal envelope has the wrong schema/frame/convention/algorithm/"
+        "tolerance/clip order/sign table");
   if (c.train_bank_sha256 != expected_train_bank_sha256 ||
       c.source_family_sha256 != expected_source_family_sha256)
     throw std::invalid_argument(
@@ -200,6 +270,7 @@ inline PpFaceNormalEnvelope ParsePpFaceNormalEnvelope(
       PpEnvelopeFiniteDouble(c.runtime_unit_tolerance, "runtime unit tolerance");
   result.runtime_dot_tolerance =
       PpEnvelopeFiniteDouble(c.runtime_dot_tolerance, "runtime dot tolerance");
+  result.mount_normal_signs = {1.0, -1.0};
   result.train_bank_sha256 = c.train_bank_sha256;
   result.source_family_sha256 = c.source_family_sha256;
   result.payload_sha256 = c.payload_sha256;
@@ -256,6 +327,12 @@ inline PpFaceNormalEnvelope ValidatePpFace179MetadataContract(
   if (!PpIsLowerHexSha256(c.source_family_sha256))
     throw std::invalid_argument(
         "formal face179 ONNX requires a lowercase stage1_source_family_sha256");
+  if (c.mount_normal_sign_per_clip != "1,-1")
+    throw std::invalid_argument(
+        "formal face179 ONNX requires mount_normal_sign_per_clip=1,-1");
+  if (c.normal_envelope.mount_normal_sign_per_clip != c.mount_normal_sign_per_clip)
+    throw std::invalid_argument(
+        "formal face179 normal envelope sign table disagrees with ONNX metadata");
   return ParsePpFaceNormalEnvelope(
       c.normal_envelope, c.train_bank_sha256, c.source_family_sha256);
 }

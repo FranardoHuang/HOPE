@@ -199,8 +199,12 @@ focused C++ schema/observation tests. These are source gates only; they do not r
 REPO="$(git -C "$AD" rev-parse --show-toplevel)"
 PYTHONPATH="$REPO/hope_ws/src/hope_planner" python3 -m pytest -q \
   "$REPO/hope_ws/src/hope_planner/test/test_flat_command_wire.py"
+env -u PYTHONPATH python3 \
+  "$REPO/hope_training/whole_body_tracking/scripts/standalone_onnx_export.py" \
+  --contract-import-smoke
 python3 -m pytest -q \
-  "$REPO/hope_training/whole_body_tracking/tests/test_stage1_normal_envelope.py"
+  "$REPO/hope_training/whole_body_tracking/tests/test_stage1_normal_envelope.py" \
+  "$REPO/hope_training/whole_body_tracking/tests/test_training_contract_schema3.py"
 "$B/runtime/run_tests" \
   --gtest_filter='PpPlannerInput.*:PpFace179Wire.*' --gtest_color=no
 ```
@@ -231,7 +235,13 @@ planner-mode guard. Missing any envelope field fails load; this means the pre-en
 used by the 2026-07-11 loader proof is expected to fail under the stricter source and must be
 re-exported from its exact train bank before this gate is rerun. An accepted 179 preflight also
 prints `normal_envelope_payload_sha256`, `normal_envelope_train_bank_sha256` and
-`normal_envelope_source_family_sha256` so the loader ledger can be matched to the export ledger.
+`normal_envelope_source_family_sha256`, plus
+`normal_envelope_mount_normal_sign_per_clip=1,-1`, so the loader ledger can be matched to the
+export ledger. The envelope is raw mount A; schema-2 input is opponent-facing physical B, and the
+runner converts only the normal with `[+1,-1]` after clip selection. The fixture
+`configs/phase1_face179_real_bank_envelope_expectations_20260712.json` binds the real train-bank/
+family SHA, `757/724` row counts and expected raw-A cap statistics for the re-export check; it is
+not a behavior fixture.
 The output must contain neither `backend cfg` nor `A3AimrtBackend initialised`. Omitting
 `--no-publish`/`--dry-run` exits 2 before model or backend initialization. This is a loader and
 metadata gate only. Constructing `PpPolicy` deliberately performs one zero-observation ONNX

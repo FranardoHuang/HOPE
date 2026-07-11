@@ -445,6 +445,9 @@ class HOPEPlannerNode(Node):
                     ),
                     strike_time=float(cmd.t_strike),
                     frame_code=0,
+                    # StrikeSpec exposes the physical opponent-facing contact face B. The C++
+                    # 179 runner converts B->raw mount +Y/A with the selected clip sign; do not
+                    # pre-flip here and never flip position/velocity.
                     normal_cmd_w=cmd.n_racket,
                     rho=0.0,
                 )

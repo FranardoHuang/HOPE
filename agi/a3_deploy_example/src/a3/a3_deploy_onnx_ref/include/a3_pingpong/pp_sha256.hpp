@@ -5,8 +5,6 @@
 
 #include <array>
 #include <cstdint>
-#include <iomanip>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -86,10 +84,16 @@ inline std::string PpSha256Hex(const std::string& input) {
     h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
   }
 
-  std::ostringstream out;
-  out << std::hex << std::setfill('0');
-  for (const std::uint32_t word : h) out << std::setw(8) << word;
-  return out.str();
+  // Handwritten lowercase hex is locale-independent.  std::ostringstream can inherit a global
+  // num_put facet with grouping, which would make a metadata digest process-locale dependent.
+  static constexpr char hex[] = "0123456789abcdef";
+  std::string out;
+  out.reserve(64);
+  for (const std::uint32_t word : h) {
+    for (int shift = 28; shift >= 0; shift -= 4)
+      out.push_back(hex[(word >> shift) & 0x0fU]);
+  }
+  return out;
 }
 
 }  // namespace a3_pingpong

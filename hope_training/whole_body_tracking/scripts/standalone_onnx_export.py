@@ -26,24 +26,67 @@ import hashlib
 import importlib.util
 import json
 import os
+import sys
 
 import numpy as np
+
+
+def _load_light_module(name: str, filename: str):
+    """Load one Isaac-free source file without executing whole_body_tracking/__init__.py."""
+    utils_dir = os.path.abspath(os.path.join(
+        os.path.dirname(__file__), "..", "source", "whole_body_tracking",
+        "whole_body_tracking", "utils",
+    ))
+    path = os.path.join(utils_dir, filename)
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load dependency-light contract module: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_TC = _load_light_module("standalone_training_contract", "training_contract.py")
+TRAINING_CONTRACT_SCHEMA_VERSION = _TC.TRAINING_CONTRACT_SCHEMA_VERSION
+checkpoint_claims_contract = _TC.checkpoint_claims_contract
+checkpoint_contract_lineage_exact = _TC.checkpoint_contract_lineage_exact
+require_checkpoint_contract_binding = _TC.require_checkpoint_contract_binding
+validate_schema3_contract = _TC.validate_schema3_contract
+validate_schema3_contract_structure = _TC.validate_schema3_contract_structure
+
+_NE = _load_light_module("standalone_stage1_normal_envelope", "stage1_normal_envelope.py")
+FORMAL_CLIP_ORDER = _NE.FORMAL_CLIP_ORDER
+derive_stage1_normal_envelope = _NE.derive_stage1_normal_envelope
+
+# A stdlib+NumPy subprocess probe used on machines that intentionally have no Isaac packages.
+# The formal export path below uses these exact file-loaded modules; passing this flag proves the
+# package __init__ was not touched before ONNX/Torch are imported.
+if "--contract-import-smoke" in sys.argv:
+    imported_package = any(
+        name == "whole_body_tracking" or name.startswith("whole_body_tracking.")
+        for name in sys.modules
+    )
+    imported_isaac = any(
+        name == "isaaclab" or name.startswith(("isaaclab.", "omni.", "pxr."))
+        for name in sys.modules
+    )
+    imported_export_runtime = any(
+        name in ("onnx", "torch") or name.startswith(("onnx.", "torch."))
+        for name in sys.modules
+    )
+    print(
+        "[standalone-export-import] OK "
+        f"whole_body_tracking_package_imported={str(imported_package).lower()} "
+        f"isaac_modules_imported={str(imported_isaac).lower()} "
+        f"onnx_torch_imported={str(imported_export_runtime).lower()} "
+        f"training_schema={TRAINING_CONTRACT_SCHEMA_VERSION} "
+        f"envelope_schema={_NE.ENVELOPE_SCHEMA_VERSION}"
+    )
+    raise SystemExit(1 if imported_package or imported_isaac or imported_export_runtime else 0)
+
 import onnx
 import torch
 import torch.nn as nn
-
-from whole_body_tracking.utils.training_contract import (
-    TRAINING_CONTRACT_SCHEMA_VERSION,
-    checkpoint_claims_contract,
-    checkpoint_contract_lineage_exact,
-    require_checkpoint_contract_binding,
-    validate_schema3_contract,
-    validate_schema3_contract_structure,
-)
-from whole_body_tracking.utils.stage1_normal_envelope import (
-    FORMAL_CLIP_ORDER,
-    derive_stage1_normal_envelope,
-)
 
 MOTION_KEYS = ("joint_pos", "joint_vel", "body_pos_w", "body_quat_w", "body_lin_vel_w", "body_ang_vel_w")
 
@@ -538,12 +581,19 @@ def main() -> int:
                 "1" if bool(training_contract["face_command_enabled"]) else "0"
             )
         signs = training_contract.get("mount_normal_sign_per_clip")
+        checkpoint_mount_signs = None
         if signs is not None:
+            checkpoint_mount_signs = tuple(float(value) for value in signs)
             donor_meta["mount_normal_sign_per_clip"] = ",".join(
-                format(float(v), ".17g") for v in signs
+                format(value, ".17g") for value in checkpoint_mount_signs
             )
         bank_contract = training_contract.get("question_bank")
         if actor_contract == "deploy_parity_face179":
+            _require(
+                donor_meta.get("mount_normal_sign_per_clip") == "1,-1",
+                "formal face179 standalone export requires checkpoint-contract "
+                "mount_normal_sign_per_clip=[+1,-1]",
+            )
             _require(
                 bank_contract is not None,
                 "formal face179 standalone export requires an exact schema-3 train-bank binding",
@@ -598,6 +648,7 @@ def main() -> int:
                         train_bank.source_path,
                         expected_train_bank_sha256=bank_contract["sha256"],
                         expected_source_family_sha256=bank_contract["source_family_sha256"],
+                        mount_normal_sign_per_clip=checkpoint_mount_signs,
                         clip_order=FORMAL_CLIP_ORDER,
                     )
                 )

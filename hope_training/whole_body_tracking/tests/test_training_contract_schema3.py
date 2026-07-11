@@ -296,6 +296,34 @@ def test_diagnostic_schema3_rejects_malformed_or_self_promoting_motion_facts():
         TC.validate_schema3_contract_structure(bad_face)
 
 
+def test_formal_face179_contract_freezes_shared_a_frame_and_striking_face_signs():
+    contract = _schema3_contract()
+    contract.update({
+        "actor_obs_contract": "deploy_parity_face179",
+        "face_command_enabled": True,
+        "face_command_pairing": "shared_plus_y",
+        "mount_normal_sign_per_clip": [1.0, -1.0],
+    })
+    TC.validate_schema3_contract_structure(contract)
+
+    for signs in (None, [1.0, 1.0], [-1.0, 1.0], [True, -1.0]):
+        broken = dict(contract)
+        if signs is None:
+            broken.pop("mount_normal_sign_per_clip")
+        else:
+            broken["mount_normal_sign_per_clip"] = signs
+        with pytest.raises(ValueError, match=r"mount_normal_sign_per_clip=\[\+1,-1\]"):
+            TC.validate_schema3_contract_structure(broken)
+
+    wrong_pair = dict(contract, face_command_pairing="legacy_signed_vs_A")
+    with pytest.raises(ValueError, match="requires shared_plus_y"):
+        TC.validate_schema3_contract_structure(wrong_pair)
+
+    disabled = dict(contract, face_command_enabled=False)
+    with pytest.raises(ValueError, match="requires face_command_enabled=true"):
+        TC.validate_schema3_contract_structure(disabled)
+
+
 @pytest.mark.parametrize(
     ("key", "value", "message"),
     [
