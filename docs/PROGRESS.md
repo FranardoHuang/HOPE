@@ -2,6 +2,25 @@
 
 Use this file for short project-state updates that future humans and agents need to see. Keep detailed reasoning in the relevant gate doc.
 
+## 2026-07-12
+
+- Closed the code-level half of the Phase-1 plant-semantics gap without touching
+  any Pod trainer/worker or hardware. History audit confirms `f921c5b` copied
+  the Agibot vendor MJCF's constant-`N*m` `frictionloss` decimals into
+  Isaac/PhysX's dimensionless load-dependent `friction` field; current `SP/LP`
+  preserve that legacy proxy and cannot estimate calibrated friction, while
+  `SZ` is formal only for the all-zero execution protocol. New plant-contract
+  v1 tooling requires explicit units, 31-joint order, one physical latent model,
+  independent engine fits/probes, evidence SHAs and an in-support requested
+  runtime envelope. It rejects every non-zero `dimensionless <-> N*m` numeric
+  conversion. The MuJoCo leg is pinned to the Agibot vendor Gate3/Gate3B MJCF
+  and runtime, including a raw 31-joint instantiation report; generic MuJoCo
+  BankExam cannot fill the final cell. The preregistration remains
+  `blocked_on_calibration_evidence`: no calibrated bytes, adapter runtime
+  wiring, `SC` arm, simulator launch or real command exists. Updated prereg
+  SHA is `2ad2caba...e2aa`; the prereg/compiler regression is `24 passed`, and
+  the broader schema-3/override/judge/MuJoCo plant regression is `128 passed`.
+
 ## 2026-07-11
 
 - Completed canonical-GMR discrete grounding and the next CPU-only dense safety

@@ -815,6 +815,20 @@ validated repair preregistration is in
 `configs/phase1_plant_semantics_repair_prereg_20260711.json`; it is currently
 `blocked_on_calibration_evidence`.
 
+The 2026-07-12 follow-up adds an offline plant-contract v1 compiler without
+changing any current trainer. It binds explicit units, the 31-joint order, one
+latent physical model, separate engine fit/probe evidence and a calibrated
+support envelope. Non-zero `dimensionless <-> N*m` conversion is impossible by
+construction; only exact zero crosses that helper boundary. Runtime preparation
+also rejects an out-of-support load/speed/temperature/pose request. The final
+MuJoCo adapter is required to target the Agibot vendor Gate3/Gate3B runtime and
+bind its MJCF, runtime source and 31-joint instantiation report; a generic
+MuJoCo wrapper cannot close this gate. Tests exercise the compiler only. No
+calibration artifact, runtime wiring or `SC` training arm exists, so G05 stays
+`Partial` and current `SZ/SP/LZ/LP` recipes are unchanged. Interface and
+commands are in `docs/interfaces/plant_semantics_contract.md` and
+`docs/operations/prepare_semantics_correct_plant.md`.
+
 That current execution-contract selection has already produced one early
 checkpoint result. Fresh SZ seed1 regressed on q10 from `0.90` at 2000 to
 `0.50` at 4000, then consumed one exact K=100 paper. Model 2000 returned

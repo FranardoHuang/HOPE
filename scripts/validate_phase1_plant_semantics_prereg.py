@@ -44,6 +44,10 @@ EXPECTED_READY_BINDINGS = {
     "latent_model_sha256",
     "physx_adapter_source_sha256",
     "mujoco_adapter_source_sha256",
+    "vendor_gate3_mjcf_sha256",
+    "vendor_gate3_runtime_source_sha256",
+    "vendor_gate3_plant_instantiation_report_sha256",
+    "vendor_gate3b_plant_eval_profile_sha256",
     "physx_runtime_probe_report_sha256",
     "mujoco_runtime_probe_report_sha256",
     "cross_engine_equivalence_report_sha256",
@@ -162,6 +166,8 @@ def validate_manifest(data: dict[str, Any]) -> None:
     required_source_suffixes = {
         "robots/agibot_a3.py",
         "utils/training_contract.py",
+        "utils/plant_contract.py",
+        "scripts/compile_semantics_correct_plant_contract.py",
         "scripts/train.py",
         "scripts/mujoco_eval_onnx.py",
         "scripts/judge.sh",
@@ -169,7 +175,7 @@ def validate_manifest(data: dict[str, Any]) -> None:
     }
     _require(
         all(any(path.endswith(suffix) for path in seen_paths) for suffix in required_source_suffixes),
-        "audited sources do not cover the training, contract, evaluator, judge and matrix seams",
+        "audited sources do not cover the training, plant compiler, evaluator, judge and matrix seams",
     )
 
     semantics = data["source_semantics"]
@@ -290,6 +296,22 @@ def validate_manifest(data: dict[str, Any]) -> None:
         "native_frictionloss_plus_damping",
         "versioned_explicit_generalized_friction_adapter",
     }, "unexpected MuJoCo adapter backends")
+    mujoco_adapter = adapters.get("mujoco", {})
+    _require(
+        mujoco_adapter.get("final_runtime_target")
+        == "agibot_vendor_mujoco_gate3_gate3b",
+        "the final MuJoCo target must remain the Agibot vendor Gate3/Gate3B runtime",
+    )
+    _require(
+        mujoco_adapter.get("vendor_mjcf_path")
+        == "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+        "the Agibot vendor Gate3/Gate3B MJCF path changed",
+    )
+    _require(
+        "standalone generic MuJoCo wrapper is development evidence only"
+        in str(mujoco_adapter.get("final_evidence_rule", "")),
+        "generic MuJoCo evidence cannot replace the vendor Gate3/Gate3B runtime",
+    )
     runtime_binding = adapters.get("runtime_binding")
     _require(isinstance(runtime_binding, list) and len(runtime_binding) >= 7,
              "adapter runtime binding is incomplete")
@@ -311,8 +333,8 @@ def validate_manifest(data: dict[str, Any]) -> None:
              "training factor must be ordered Z_zero/C_calibrated")
     _require(eval_plants == ["Z_zero", "C_calibrated"],
              "evaluation plant levels must be ordered Z_zero/C_calibrated")
-    _require(engines == ["isaac", "mujoco"],
-             "both Isaac and MuJoCo evaluation legs are mandatory")
+    _require(engines == ["isaac", "agibot_vendor_mujoco_gate3_gate3b"],
+             "both Isaac and Agibot vendor Gate3/Gate3B MuJoCo evaluation legs are mandatory")
     _require(isinstance(seeds, list) and len(seeds) >= 2 and len(set(seeds)) == len(seeds)
              and all(isinstance(seed, int) and seed > 0 for seed in seeds),
              "at least two unique positive paired seed blocks are required")
@@ -381,7 +403,10 @@ def validate_manifest(data: dict[str, Any]) -> None:
     _require(isinstance(fail_closed, list) and len(fail_closed) >= 10,
              "fail_closed_conditions are incomplete")
     joined_failures = "\n".join(str(value) for value in fail_closed)
-    for token in ("SP or LP", "copied numerically", "q10", "Isaac-only", "out-of-support", "NaN/Inf"):
+    for token in (
+        "SP or LP", "copied numerically", "q10", "Isaac-only", "out-of-support",
+        "NaN/Inf", "standalone generic MuJoCo adapter",
+    ):
         _require(token in joined_failures, f"fail_closed_conditions missing {token!r} guard")
 
     forbidden_parameter_keys = {
