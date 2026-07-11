@@ -34,6 +34,36 @@ questions:
 No current Phase-1 recipe, checkpoint, worker or Pod should be changed to make
 this statement true. The repair is the next independent plant axis.
 
+## Audited legacy path (code and history)
+
+The mismatch is not hypothetical. Its complete current path is:
+
+1. The Agibot vendor MJCF
+   `agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml`
+   stores per-hinge `frictionloss` values such as hip `1.1971`, knee `2.4276`
+   and wrist `0.1` in generalized torque (`N*m`).
+2. Commit `f921c5b` copied those same decimal values into
+   `ImplicitActuatorCfg.friction` in `robots/agibot_a3.py`, describing the
+   change at the time as an MJCF friction port. Isaac/PhysX consumes that field
+   as a dimensionless, load-dependent coefficient. Commit `d4603d4` later
+   documented the unit/law mismatch without changing legacy bytes.
+3. `task.plant.zero_joint_friction=false` (or absent) preserves those PhysX
+   coefficients. In the current factorial, this is the plant side of `SP/LP`;
+   `true` produces the exact-zero side `SZ/LZ`.
+4. Schema-3 now records the realized 31-vector together with
+   `backend=physx`, `semantics=load_dependent_spatial_force_coefficient` and
+   `units=dimensionless`. `judge.sh` can replay an exact all-zero vector; a
+   non-zero vector retains the default legacy plant and forces the diagnostic
+   escape.
+5. In `mujoco_eval_onnx.py`, automatic replay labels a non-zero schema-3 vector
+   `contract-proxy`, sets `evaluation_contract_exact=false`, and only then
+   assigns those numbers into `dof_frictionloss`. That assignment preserves a
+   historical diagnostic; it is explicitly not a conversion.
+
+Therefore `SZ-SP` and `LZ-LP` estimate the effect of a historical configuration
+toggle, not a calibrated physical friction main effect. `SP` cannot be renamed
+to `SC` even if its score is high.
+
 ## What the two engines mean
 
 | Runtime field | Physical meaning | Unit | Load dependence | Consequence |
@@ -156,6 +186,29 @@ adapter before environment construction, record the realized 31-joint plant,
 and require a new evaluator version. Merely adding optional JSON keys to an old
 contract is not sufficient.
 
+The dependency-light plant-contract v1 compiler is now implemented, but not
+wired into either runtime:
+
+- `whole_body_tracking/utils/plant_contract.py` defines a strict, unit-explicit,
+  content-addressed contract for one latent physical model and two separately
+  fitted adapters;
+- `scripts/compile_semantics_correct_plant_contract.py` binds/verifies the
+  canonical contract SHA and prepares an engine adapter only for a requested
+  load/speed/temperature/pose envelope contained in calibration support;
+- a non-zero `dimensionless <-> N*m` request raises; only identical units or an
+  exact all-zero vector can cross the helper boundary;
+- unknown keys, missing evidence SHA, NaN/Inf, wrong joint order, failed probe,
+  same fit report for both engines, unsupported backend or out-of-support
+  request all fail closed.
+
+The implemented MuJoCo adapter target is not a generic wrapper. Its contract
+must name `agibot_vendor_mujoco_gate3_gate3b`, bind the vendor MJCF as the
+asset, bind the Gate3/Gate3B runtime source, and carry a raw runtime
+instantiation report proving all 31 realized joint values. Standalone BankExam
+or generic MuJoCo probes are development evidence only; final plant evidence
+comes from the vendor Gate3/Gate3B runtime. No such bound artifact exists yet,
+so the preregistration remains `blocked_on_calibration_evidence`.
+
 ### P4: minimal high-information training axis
 
 Freeze shared face, one schema-2 motion family, one schema-3 train/exam family,
@@ -170,17 +223,18 @@ asset, solver or any non-plant hard-contract field; launch a contemporaneous
 fresh `Z` arm instead.
 
 At every accepted milestone, evaluate every policy under both `Z/C` plants in
-both engines: `4 policies x 2 eval plants x 2 engines = 16` cells, on the same
-immutable question order. `SP/LP` are excluded. The primary paired contrasts
-are:
+Isaac and the Agibot vendor Gate3/Gate3B MuJoCo runtime:
+`4 policies x 2 eval plants x 2 runtimes = 16` cells, on the same immutable
+question order. `SP/LP` are excluded. A standalone generic MuJoCo result cannot
+fill the vendor cells. The primary paired contrasts are:
 
 1. `C-train/C-eval - Z-train/C-eval`: does calibrated training fix deployment-
    plant quality and falls?
 2. `C-train/Z-eval - C-train/C-eval`: how plant-specific is the learned policy?
 3. `Z-train/C-eval - Z-train/Z-eval`: reproduce or resolve the 2026-07-07
    transfer failure under the repaired plant;
-4. Isaac minus MuJoCo for the identical policy, eval plant, seed, checkpoint and
-   schedule: does engine ranking agree?
+4. Isaac minus Agibot vendor Gate3/Gate3B MuJoCo for the identical policy, eval
+   plant, seed, checkpoint and schedule: does engine ranking agree?
 
 Checkpoint policy stays unchanged: q10 is screen-only and cannot stop/promote;
 q50 (100 questions, 50 per side) is the decision paper. Keep the best finite
@@ -199,6 +253,8 @@ Do not launch or promote `SC` if any of these is true:
 - any cell has missing raw rows, censoring, NaN/Inf, mixed papers or contract
   mismatch;
 - a result exists in only one engine;
+- a generic MuJoCo wrapper or BankExam is substituted for the content-addressed
+  vendor MJCF, Gate3/Gate3B runtime source and 31-joint instantiation report;
 - a probe or evaluation leaves the calibrated support envelope;
 - fresh `SC` lineage is claimed from a legacy/resumed checkpoint;
 - q10 is used to choose the plant.
@@ -214,9 +270,14 @@ python3 scripts/validate_phase1_plant_semantics_prereg.py \
   --verify-repository-baseline
 
 python3 -m pytest -q \
-  tests/test_validate_phase1_plant_semantics_prereg.py
+  tests/test_validate_phase1_plant_semantics_prereg.py \
+  hope_training/whole_body_tracking/tests/test_plant_contract_v1.py
 ```
 
 Expected current result: `PLANT_SEMANTICS_PREREG_OK`, status
 `blocked_on_calibration_evidence`, four minimum fresh training arms, sixteen
 paired evaluations per milestone, and `hardware_commands_authorized=false`.
+The 2026-07-12 vendor-target update has manifest SHA
+`2ad2cabafa1731a60fb0668a8c21eeb1235fdc1056f33a35f88a19d438d5e2aa`;
+the combined prereg/compiler regression passes 24 tests; the broader current
+schema-3/override/judge/MuJoCo plant regression passes 128 tests.

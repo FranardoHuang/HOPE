@@ -1528,3 +1528,17 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
 47. 【franco/Codex】**第一批已验证 Phase-1 功能开始 merge main**——合并边界冻结在
    `612f54d`；main 侧 NOW 原样保留并补当前人话状态。四-seed q50、动作 v5 64题、plant 校准、
    连续双引擎 rollout 仍是 open gate，不随源码合并偷写成结果。
+48. 【franco/Codex】**把旧 plant 路径钉到 commit 和运行字段**——`f921c5b` 把智元 vendor
+   MJCF 的 constant-`N*m` `frictionloss` 数字原样写入 PhysX dimensionless/load-dependent
+   `ImplicitActuatorCfg.friction`；schema-3 后来只把事实记录清楚，MuJoCo `contract-proxy`
+   仍只能作为 `evaluation_contract_exact=false` 的历史诊断。因此 `SZ` 只在全零 execution
+   protocol 下 formal，`SP/LP` 不是标定摩擦，现役 28 臂和 worker 全部未改。
+49. 【franco/Codex】**semantics-correct plant contract v1 可离线编译，但没有伪造校准通过**——
+   新编译器强制 31 关节顺序、显式单位、latent model/数据切分/阈值/双引擎独立 fit+probe SHA、
+   solver/asset/rate 和 calibration support；非零 `dimensionless <-> N*m` 转换直接拒绝，exact
+   zero 是唯一跨单位特例，out-of-support 也拒绝。MuJoCo 最终腿必须绑定智元 vendor
+   `a3_pingpong.xml`、Gate3/Gate3B runtime source 和 raw 31-joint 实例化报告；generic MuJoCo/
+   BankExam 只能做开发证据。当前没有 calibration bytes、runtime wiring 或 fresh `SC` 臂，prereg
+   继续 `blocked_on_calibration_evidence`；prereg SHA=`2ad2caba...e2aa`，专项 `24 passed`、
+   连同现役 schema3/override/judge/MuJoCo plant 回归 `128 passed`，
+   无 Pod/真机动作。

@@ -388,6 +388,19 @@ validate the evaluation contract but cannot clear sim-to-real parity.
 it cannot be booked and cannot block the later formal SZ jobs in the same
 milestone-major queue.
 
+The offline plant-contract v1 boundary now implements the fail-closed half of
+that closure plan. It refuses non-zero cross-unit numeric conversion, requires
+one content-addressed latent model plus independent PhysX/MuJoCo fit and probe
+reports, checks the canonical 31-joint order and rejects requested runtime
+envelopes outside calibrated load/speed/temperature/pose support. Crucially,
+the final MuJoCo leg is not a generic standalone evaluator: it must bind the
+Agibot vendor `a3_pingpong.xml`, the Gate3/Gate3B runtime source and a raw
+31-joint adapter-instantiation report. Current BankExam remains useful
+development/selection evidence but cannot substitute for that vendor-runtime
+cell. No calibration bytes, passed runtime probe, vendor instantiation report
+or fresh `SC` checkpoint exists; the compiler is not wired to either engine,
+so G06 remains `Partial`.
+
 Original causal terminal and original fresh exams now run in separate
 workers/state directories, so neither checkpoint-availability order can block
 the other. Q10 manifests declare the screen-only/no-promotion policy at both

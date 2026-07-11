@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 2026-07-12 现场状态(00:32 CST 更新)
+## 2026-07-12 现场状态(01:01 CST 更新)
 
 - **Phase-1 仍是真满池**:四条原始续训自然终档后，四条独立预注册的因果缺边补进空槽；
   现在两 Pod 各 12 条 live trainer、每 GPU 恰好 4 条，加上 4 条 clean terminal，共 28 条
@@ -57,8 +57,10 @@ Rules:
   M2 seed2 为 `.40/.60→.50/.40`，小卷甚至反转排序。两组都只保留曲线、继续训练，不停/
   晋级/q50。scale-out fresh 2k worker 已开始出 SP/LZ 等诊断格，SZ 正式格仍按同卷队列等待。
 - plant 矛盾已正面记账:SZ 只是“零摩擦执行协议可精确重放”，不是部署 plant；SP/LP
-  是历史单位错配 proxy，不能当标定摩擦对照。新 SC 要求物理 latent model + PhysX/MuJoCo
-  两个 adapter + fresh Z/C 配对 seed，现严格卡在 calibration evidence。
+  已定位为把 vendor MJCF 的 constant-Nm `frictionloss` 数字原样塞进 PhysX 无量纲/
+  load-dependent friction 的历史 proxy，不能当标定摩擦对照。新 v1 合同拒绝任何非零跨单位
+  数值转换，并强制最终 MuJoCo 腿绑定 vendor Gate3/Gate3B MJCF/runtime/31关节实例化报告；
+  新 SC 仍严格卡在真实 calibration evidence，尚无训练臂。
 - Franco/v6/v7 十段空挥已完成 intake、GVHMR 10/10、per-video-beta GMR 10/10+落地、
   “十段共用同一个中位体型参数”的 GMR 10/10。真实 loader 只取前 10 维，旧的“补六个零”
   猜测已撤销。共用体型版本的 CPU-only grounding 也已 10/10：只把固定 root-z 上移
@@ -75,9 +77,10 @@ Rules:
   做 q10 方向卷和 q50 决策卷。
 - **fresh 正式格四 seed 的 2k 小卷已齐，但只作方向信号**：同一 clean-q10 题表总回球率为
   seed1/2/3/4=`.90/1.00/1.00/.25`。seed4 是必须解释的稳定性离群点，不能据此停臂或挑 seed；
-  四个 2k checkpoint、相邻 schema-v3 hard-contract 与 finite tensor 已复核，正在冻结同一份
-  K100（每侧 50 题）正式卷。旧 seed1 结果仅在 checkpoint/evaluator/schedule/题序全部逐字段相同
-  时复用，否则重跑；所有 trainer 继续原配方。
+  四个 2k checkpoint、相邻 schema-v3 hard-contract 与 finite tensor 已复核，同一 K100
+  （每侧50题）卷已冻结并开跑。seed1 旧结果全链复验一致，复用 `83/100` 不重复 judge；
+  Pod1 supervisor `1472761` 顺序跑 seed3，Pod2 `210335` 顺序跑 seed2/4。只管理自身外部
+  judge/Kit lock，不向 trainer/worker 发信号；所有 trainer 继续原配方。
 - **厂商 MuJoCo Gate 3 现在是最终裁决门，不是 Isaac**：它把假球→真规划器→同款 C++ runner→
   智元 A3 MuJoCo 串成部署闭环；候选首先要在这个版本保持平衡、完成挥拍/恢复且不靠人工 reset，
   再谈 Isaac 分数。Isaac/MuJoCo 同 policy 的巨大差异另作归因轴：现已完成 PhysicalBall Phase-B
@@ -87,9 +90,9 @@ Rules:
 - **连续等待按一个耦合 phase 设计，不把三项单独过关相加**：上一拍卸载/恢复平衡、回到通用 ready、
   随机时刻接下一题会共享同一段状态与动作，因此先做机制/梯度冲突推理，再做有交互项的混合比例消融；
   单 reward 胜者只能筛项，不能宣称组合最优。终判仍用无 reset 的 Gate 3 连续卷。
-- 通过源码/合同/测试门的第一批 Phase-1 工作正在从 `codex/schema-v3-isaac-adapter@612f54d`
-  合并 main；未完成的四-seed q50、动作 v5 64题、plant 标定和连续 rollout 不写成成功。NOW 只保留
-  main 活板版本，feature 分支的旧 NOW 不回灌。
+- 第一批已验证 Phase-1 基础设施已在 `main@83d7d56`；第二批正合并四-seed q50 冻结 runner 与
+  semantics-correct plant v1。运行中的 q50、动作 v5 64题、plant 标定和连续 rollout 不写成成功；
+  NOW 只保留 main 活板版本，feature 分支的旧 NOW 不回灌。
 
 ### 14:00 CST 早期快照(仅历史，不用于进程管理)
 

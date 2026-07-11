@@ -265,6 +265,16 @@ zero friction. Use a paired fresh `zero_joint_friction=true` versus
 as-configured run when measuring the plant effect, and label the as-configured
 cell diagnostic until a physically calibrated PhysX/MuJoCo mapping exists.
 
+Do not use that binary flag to launch the future calibrated `SC` cell. The
+unit-explicit plant-contract v1 preparation and its evidence checklist are in
+[`prepare_semantics_correct_plant.md`](prepare_semantics_correct_plant.md).
+Current training has no `SC` adapter hook. A reviewed future launch must bind
+the prepared contract into the hard contract before `gym.make`; its final
+MuJoCo evidence must instantiate the adapter in the Agibot vendor
+Gate3/Gate3B runtime and bind the vendor MJCF/runtime/31-joint report. A
+generic MuJoCo wrapper or current `contract-proxy` result cannot fill that
+role.
+
 ### Serialized Kit boot for multi-GPU hosts
 
 Do not let several Isaac/Kit processes initialize concurrently on one Pod.

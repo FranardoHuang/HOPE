@@ -10,7 +10,7 @@
     "purpose": "define the evidence, adapter and paired experiment contract required before a semantics-correct calibrated-friction plant can become a fresh training and deployment candidate"
   },
   "repository_baseline": {
-    "git_commit": "8acfd3cc4aa7c666c16ce15502191ff7d19fc458",
+    "git_commit": "612f54dd67067e905247290645b0177faee7fdd1",
     "audited_sources": [
       {
         "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py",
@@ -21,8 +21,16 @@
         "sha256": "0078cdd9f8e8670652d24024056e3df51cb5929edc4088edf9ecdd001ef26ae2"
       },
       {
+        "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/utils/plant_contract.py",
+        "sha256": "7704187e3ddbb7f306dceac5bc823c8f97f5de3d0fb2e8a3c23762496f73dbd0"
+      },
+      {
+        "path": "scripts/compile_semantics_correct_plant_contract.py",
+        "sha256": "974721c108951f96f1f42753b9a78f8fa89f03f114de8583b90080de164033f7"
+      },
+      {
         "path": "hope_training/whole_body_tracking/scripts/train.py",
-        "sha256": "9a4b01002b459d1efa08d130d2b48e3af1ac24ee2c30a66e9064fc4cde09ce5f"
+        "sha256": "e5184d201ffb76cd2ddfc5724361f795886fac853da6172d15c550a73588e4a3"
       },
       {
         "path": "hope_training/whole_body_tracking/scripts/mujoco_eval_onnx.py",
@@ -173,7 +181,10 @@
         "native_frictionloss_plus_damping",
         "versioned_explicit_generalized_friction_adapter"
       ],
-      "acceptance": "measured resisting torque on every preregistered probe cell must satisfy the frozen fit and repeatability tolerances"
+      "acceptance": "measured resisting torque on every preregistered probe cell must satisfy the frozen fit and repeatability tolerances",
+      "final_runtime_target": "agibot_vendor_mujoco_gate3_gate3b",
+      "vendor_mjcf_path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+      "final_evidence_rule": "the vendor MJCF, engine-specific adapter, Gate3/Gate3B runtime source and a raw 31-joint runtime-instantiation report must all be content-addressed; a standalone generic MuJoCo wrapper is development evidence only"
     },
     "runtime_binding": [
       "engine name and exact version",
@@ -182,7 +193,9 @@
       "A3 asset SHA and actuated joint order",
       "latent-model SHA and support envelope",
       "adapter source SHA and instantiated per-joint parameters",
-      "probe schedule SHA and complete result SHA"
+      "probe schedule SHA and complete result SHA",
+      "Agibot vendor Gate3/Gate3B MJCF and runtime source SHA",
+      "Gate3 runtime 31-joint plant-instantiation report SHA"
     ],
     "cross_engine_acceptance": "both engines pass their physical-model holdout tolerance and their same-cell generalized-resistance difference passes the frozen cross-engine tolerance; parameter equality is neither required nor sufficient"
   },
@@ -209,7 +222,7 @@
       ],
       "engine_levels": [
         "isaac",
-        "mujoco"
+        "agibot_vendor_mujoco_gate3_gate3b"
       ]
     },
     "paired_seed_blocks": [
@@ -227,7 +240,7 @@
       "C_train_C_eval_minus_Z_train_C_eval within paired seed and engine",
       "C_train_Z_eval_minus_C_train_C_eval plant-transfer penalty",
       "Z_train_C_eval_minus_Z_train_Z_eval reproduction or resolution of the 2026-07-07 transfer failure",
-      "Isaac_minus_MuJoCo for each identical policy, eval plant, seed, checkpoint and question schedule"
+      "Isaac_minus_Agibot_vendor_Gate3_Gate3B_MuJoCo for each identical policy, eval plant, seed, checkpoint and question schedule"
     ]
   },
   "checkpoint_decision_contract": {
@@ -258,6 +271,10 @@
     "latent_model_sha256",
     "physx_adapter_source_sha256",
     "mujoco_adapter_source_sha256",
+    "vendor_gate3_mjcf_sha256",
+    "vendor_gate3_runtime_source_sha256",
+    "vendor_gate3_plant_instantiation_report_sha256",
+    "vendor_gate3b_plant_eval_profile_sha256",
     "physx_runtime_probe_report_sha256",
     "mujoco_runtime_probe_report_sha256",
     "cross_engine_equivalence_report_sha256",
@@ -276,6 +293,7 @@
     "adapter fitting cannot see held-out sessions or BankExam outcomes",
     "q10 cannot stop, promote or choose a plant",
     "Isaac-only or MuJoCo-only success cannot clear cross-engine or deployment claims",
+    "a standalone generic MuJoCo adapter or BankExam cannot substitute for the content-addressed Agibot vendor Gate3/Gate3B MJCF, runtime source and 31-joint plant-instantiation evidence",
     "out-of-support load, speed, pose or temperature cells cannot be silently extrapolated",
     "missing raw rows, censored attempts, NaN/Inf, contract SHA mismatch or mixed question schedules invalidate the complete cell"
   ]

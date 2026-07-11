@@ -148,6 +148,15 @@ Reproduce the complete 154-test union (use a Python environment with `pytest`, `
   hope_training/whole_body_tracking/tests/test_judge_plant_contract.py
 ```
 
+Validate the future semantics-correct plant preregistration and offline
+contract compiler without importing Isaac or launching a simulator:
+
+```bash
+python3 -m pytest -q \
+  tests/test_validate_phase1_plant_semantics_prereg.py \
+  hope_training/whole_body_tracking/tests/test_plant_contract_v1.py
+```
+
 ## ROS Workspace Build
 
 Run inside the intended ROS environment:

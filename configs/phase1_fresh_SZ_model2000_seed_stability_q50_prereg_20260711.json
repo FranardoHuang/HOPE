@@ -1,0 +1,264 @@
+{
+  "schema_version": 1,
+  "preregistration_id": "phase1-fresh-SZ-model2000-four-seed-clean-q50-stability-v1",
+  "created_utc": "2026-07-11T16:55:00Z",
+  "status": "preregistered_not_started",
+  "auto_activate": false,
+  "jobs_started": 0,
+  "runtime_state": null,
+  "scope": "Fresh formal-target SZ model_2000 seed1/2/3/4 on one immutable clean K100 MuJoCo paper; seed-stability and checkpoint evidence only, not a trainer stop, promotion, calibrated-plant, continuity, cross-instrument, deployment, or real-robot gate",
+  "q10_trigger": {
+    "role": "direction_only_trigger_for_same_paper_q50",
+    "screen_only": true,
+    "stop_or_promote_allowed": false,
+    "same_semantic_schedule_sha256": "1335858971689fed5caf7c70947a0741dcf35b51253f08e10d63e8d64ed8866a",
+    "observed_aggregate_return_rate": {
+      "seed1": 0.9,
+      "seed2": 1.0,
+      "seed3": 1.0,
+      "seed4": 0.25
+    },
+    "evidence": [
+      {
+        "seed": "seed1",
+        "pod": "pod1",
+        "state": {
+          "path": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/fresh_retry_pod1_clean_q10_c711a03/fresh_SZ_seed1_2000_clean_q10.json",
+          "sha256": "163335e112f34d107ae04dc6889e9fb50bf229f21d4aef9b70e65772a6b616fb"
+        },
+        "log": {
+          "path": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/fresh_retry_pod1_clean_q10_c711a03/fresh_SZ_seed1_2000_clean_q10.log",
+          "sha256": "d4a8af1ac19c881f5fbe153f532b4e6e88324c0fdefaf0022d0572270fcd61b3"
+        }
+      },
+      {
+        "seed": "seed2",
+        "pod": "pod2",
+        "state": {
+          "path": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/fresh_retry_pod2_clean_q10_c711a03/fresh_SZ_seed2_2000_clean_q10.json",
+          "sha256": "39c618709e1704acdc2f38c12ddfbb0e8e49a9b678765fe1caa5f5e07df5440a"
+        },
+        "log": {
+          "path": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/fresh_retry_pod2_clean_q10_c711a03/fresh_SZ_seed2_2000_clean_q10.log",
+          "sha256": "08fcdd34574e8cbca71b9b8dc1c08cbc1bbe1b1535c6ff30ec59eec914acd010"
+        }
+      },
+      {
+        "seed": "seed3",
+        "pod": "pod1",
+        "state": {
+          "path": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_fresh_pod1_46a0ce2_hardened_21e3015/fresh_SZ_seed3_2000_clean_q10.json",
+          "sha256": "925bf69acff2ae068873c436e1207f59a5668a944a0d1e59b3f4a919dee61fbe"
+        },
+        "log": {
+          "path": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_fresh_pod1_46a0ce2_hardened_21e3015/fresh_SZ_seed3_2000_clean_q10.log",
+          "sha256": "d4c9b1beb36cc27afcb91ead0112ddc514caffcc062fb421c9b4d89b4e926d57"
+        }
+      },
+      {
+        "seed": "seed4",
+        "pod": "pod2",
+        "state": {
+          "path": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_fresh_pod2_46a0ce2_hardened_21e3015/fresh_SZ_seed4_2000_clean_q10.json",
+          "sha256": "03c7030673b51ae063edf7596739432f7dbaa46052903467d140075617f530cb"
+        },
+        "log": {
+          "path": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_fresh_pod2_46a0ce2_hardened_21e3015/fresh_SZ_seed4_2000_clean_q10.log",
+          "sha256": "6c2d1431740a7fc06603ac33f080dfe054a01e942ba39cb373c746b31a2f54dc"
+        }
+      }
+    ]
+  },
+  "family": {
+    "cell": "SZ",
+    "name": "v4rg_runtime_order_v3",
+    "source_family_sha256": "b21c161a0240893a4a469136c2d5298c2ecfa9f2b4a8c6fb9493b679f3728ad5",
+    "face_command_pairing": "shared_plus_y",
+    "zero_joint_friction": true,
+    "checkpoint_iteration": 2000
+  },
+  "training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+  "eval_commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+  "tools": {
+    "runner_sha256": "f023c0debb013685af03922cb848438e8edf78081419440cdab0b8a6cccfa3ad",
+    "fresh_exact_validator_sha256": "3528250777a170791f39d8dd17716c2a7f8ca91416a3ffa8433ec5eb691ed9e0",
+    "judge_sha256": "1a00702935096b063435c3f0bd23e75f76f13e1298c87310d1cec3c26cca8529",
+    "mujoco_evaluator_sha256": "e4a9fa42ff0f7e68cebdf16f2e0c61299507496c6edc13546baeb3d576ecb20a"
+  },
+  "paper": {
+    "role": "four-seed fresh SZ model_2000 stability q50",
+    "exam_bank": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/s1_v4rg_runtime_order_schema3_exam.npz",
+      "bytes": 63968,
+      "sha256": "d7db2568beee990ef1d64b2dce9f0ab56ca76377f8993d820b6388292d0f5096",
+      "schema_version": 3,
+      "source_family_sha256": "b21c161a0240893a4a469136c2d5298c2ecfa9f2b4a8c6fb9493b679f3728ad5"
+    },
+    "schedule": {
+      "schema_version": 3,
+      "file_sha256": "66e89986a2b726d529179fcb4c745625ebed0380d59664caceefc55e86071cb3",
+      "semantic_sha256": "7dc6af822fb4130b8c324843f179d77f882d1326306bb19802b00f94447dff3e",
+      "question_id_order_sha256": "b87e81a34ff2d31766e17345f0a8c9d77665b78874093e26bdae257e8ed21f91",
+      "per_clip_quota": 50,
+      "schedule_k": 100,
+      "attempts_per_side": 50,
+      "schedule_seed": 0,
+      "hold_range": [0, 100],
+      "noise_scales": [0.0],
+      "one_question_reset": true,
+      "no_wrap": true,
+      "materialize_new_schedule_allowed": false,
+      "copy_identical_bytes_to_each_pod": true,
+      "allow_inexact_contract": false
+    },
+    "mjcf_sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97",
+    "seed": 0,
+    "noise_scales": [0.0],
+    "schedule_k": 100,
+    "attempts_per_side": 50,
+    "hold_ref": "auto",
+    "hold_steps_range": [0, 100],
+    "no_wrap": true,
+    "one_question_reset": true,
+    "allow_inexact_contract_required": false,
+    "expected_evaluation_contract_exact": true,
+    "reuse_independence": {
+      "source_preregistration": {
+        "path": "configs/phase1_SZ_seed1_2000_vs_4000_q50_prereg_20260711.json",
+        "sha256": "d0f39562069133923e34b431640578abe5f45b49c80a029addca30a10b45029f"
+      },
+      "source_result": {
+        "path": "configs/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json",
+        "sha256": "19d43fd0c507dd0aff985930b3c375cf1b72b1d8eff56f0d4a9934bdf09beeba"
+      },
+      "materialized_before_any_q50_outcome": true,
+      "selected_without_seed2_seed3_seed4_policy_or_outcome": true,
+      "new_materialization_forbidden": true
+    }
+  },
+  "arms": {
+    "seed1": {
+      "training_seed": 1,
+      "pod": "pod1",
+      "gpu": 2,
+      "run_name": "phase1_fresh_v3_S1_seed1",
+      "checkpoint_iteration": 2000,
+      "checkpoint_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-52-16_phase1_fresh_v3_S1_seed1/model_2000.pt",
+      "checkpoint_sha256": "99e8265960244e5be19176dc5f2d3b8b99e088d5d76d34d0f2cd1e1dd0c3ae4c",
+      "training_contract_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-52-16_phase1_fresh_v3_S1_seed1/params/training_contract.json",
+      "training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "checkpoint_embedded_training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "cell": "SZ",
+      "face_command_pairing": "shared_plus_y",
+      "zero_joint_friction": true,
+      "lineage_exact": true,
+      "execution_mode": "reuse_candidate_or_identical_rerun",
+      "job_status": "not_started",
+      "pid": null,
+      "pgid": null,
+      "result": null
+    },
+    "seed2": {
+      "training_seed": 2,
+      "pod": "pod2",
+      "gpu": 2,
+      "run_name": "phase1_fresh_v3_S1_seed2",
+      "checkpoint_iteration": 2000,
+      "checkpoint_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-54-53_phase1_fresh_v3_S1_seed2/model_2000.pt",
+      "checkpoint_sha256": "d920ce9fd977ac0e4d980efa3fe96c137b171084270eaeeb8e4a21346cb55e22",
+      "training_contract_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-54-53_phase1_fresh_v3_S1_seed2/params/training_contract.json",
+      "training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "checkpoint_embedded_training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "cell": "SZ",
+      "face_command_pairing": "shared_plus_y",
+      "zero_joint_friction": true,
+      "lineage_exact": true,
+      "execution_mode": "judge_required",
+      "job_status": "not_started",
+      "pid": null,
+      "pgid": null,
+      "result": null
+    },
+    "seed3": {
+      "training_seed": 3,
+      "pod": "pod1",
+      "gpu": 0,
+      "run_name": "phase1_fresh_v3_SZ_seed3",
+      "checkpoint_iteration": 2000,
+      "checkpoint_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_05-39-31_phase1_fresh_v3_SZ_seed3/model_2000.pt",
+      "checkpoint_sha256": "11f3a2885ee2982569b420e63d29523fc413a4512dad374f62c6ddb4b3ec77a5",
+      "training_contract_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_05-39-31_phase1_fresh_v3_SZ_seed3/params/training_contract.json",
+      "training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "checkpoint_embedded_training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "cell": "SZ",
+      "face_command_pairing": "shared_plus_y",
+      "zero_joint_friction": true,
+      "lineage_exact": true,
+      "execution_mode": "judge_required",
+      "job_status": "not_started",
+      "pid": null,
+      "pgid": null,
+      "result": null
+    },
+    "seed4": {
+      "training_seed": 4,
+      "pod": "pod2",
+      "gpu": 1,
+      "run_name": "phase1_fresh_v3_SZ_seed4",
+      "checkpoint_iteration": 2000,
+      "checkpoint_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_05-41-44_phase1_fresh_v3_SZ_seed4/model_2000.pt",
+      "checkpoint_sha256": "d4743b6524962e3b5e29a7a3badcbb77bbd85e172d03df769701e0f08e53ab9b",
+      "training_contract_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_05-41-44_phase1_fresh_v3_SZ_seed4/params/training_contract.json",
+      "training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "checkpoint_embedded_training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "cell": "SZ",
+      "face_command_pairing": "shared_plus_y",
+      "zero_joint_friction": true,
+      "lineage_exact": true,
+      "execution_mode": "judge_required",
+      "job_status": "not_started",
+      "pid": null,
+      "pgid": null,
+      "result": null
+    }
+  },
+  "gate_rule": {
+    "aggregate_rate_median_min": 0.75,
+    "aggregate_rate_min_seed_min": 0.65,
+    "aggregate_rate_max_minus_min_max": 0.2,
+    "every_seed_every_side_rate_min": 0.5,
+    "gate_scope": "seed_stability_checkpoint_evidence_only",
+    "failure_action": "continue_all_arms_unmodified_and_keep_seed_stability_open",
+    "pass_action": "record_model_2000_seed_stability_only_continue_all_arms_unmodified",
+    "stop_or_promote_authorized": false,
+    "deploy_or_real_robot_authorized": false
+  },
+  "formal_semantics": {
+    "fresh_lineage": true,
+    "evaluation_contract_exact": true,
+    "formal_target": true,
+    "purpose": "four_seed_model_2000_stability_checkpoint_evidence",
+    "training_mutation_allowed": false,
+    "trainer_or_worker_signal_allowed": false,
+    "whole_arm_stop_allowed": false,
+    "whole_arm_promote_allowed": false,
+    "deploy_gate": false,
+    "real_robot_authorized": false
+  },
+  "activation": {
+    "preregistered": true,
+    "authorized_to_start_only_after_committed_prereg_and_all_preflights": true,
+    "started_at_creation": false
+  },
+  "preflight_requirements": [
+    "This preregistration, runner, and execution config are committed before any new q50 judge starts",
+    "Both training checkouts remain clean at 6d93bcb16c422a2f42748c2dc99432559653480b and both independent evaluation checkouts remain clean at 46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+    "All four model_2000 checkpoints match their frozen SHA, embed iteration 2000, contain only finite floating tensors, and bind the same adjacent exact schema-3 hard-contract SHA",
+    "The hard contract is v4rg_runtime_order_v3, shared_plus_y, motion-kinematics exact, and 31-of-31 zero joint friction",
+    "The already materialized K100 schedule matches file SHA 66e89986..., semantic SHA 7dc6af82..., question-order SHA b87e81a3..., and exact-family exam-bank SHA d7db2568... before identical bytes are copied to either Pod state root",
+    "Seed1 prior q50 is reused only after its old runtime contract, schedule, paired result, checkpoint, report, summary, ledger, exactness, evaluator, and all denominators are revalidated; otherwise seed1 is rerun on identical schedule bytes",
+    "Each Pod runs its required judges sequentially through judge.sh and the shared Kit lock; no trainer/worker PID or PGID is signalled",
+    "Every accepted seed contains exactly 100 uncensored attempts, 50 per side, seed0, noise0, one-question reset, no wrap, no diagnostic inexact escape, and identical question order/runtime instrument hashes",
+    "Regardless of stability pass/fail, all training arms continue unmodified and cross-instrument, calibrated-plant, recovery/continuous-rally, deployment, and real-robot gates remain open"
+  ]
+}

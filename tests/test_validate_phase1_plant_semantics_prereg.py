@@ -121,7 +121,22 @@ def test_q10_cannot_become_a_stop_or_promotion_rule():
 def test_both_engine_legs_are_mandatory():
     data = _manifest()
     data["minimum_training_axis"]["evaluation_factors"]["engine_levels"] = ["isaac"]
-    with pytest.raises(MODULE.PlantPreregError, match="both Isaac and MuJoCo"):
+    with pytest.raises(MODULE.PlantPreregError, match="Agibot vendor Gate3/Gate3B"):
+        MODULE.validate_manifest(data)
+
+
+def test_generic_mujoco_cannot_replace_vendor_gate3_gate3b_target():
+    data = _manifest()
+    data["adapter_contract"]["mujoco"]["final_runtime_target"] = "generic_mujoco"
+    with pytest.raises(MODULE.PlantPreregError, match="final MuJoCo target"):
+        MODULE.validate_manifest(data)
+
+    data = _manifest()
+    data["minimum_training_axis"]["evaluation_factors"]["engine_levels"] = [
+        "isaac",
+        "mujoco",
+    ]
+    with pytest.raises(MODULE.PlantPreregError, match="Agibot vendor Gate3/Gate3B"):
         MODULE.validate_manifest(data)
 
 
