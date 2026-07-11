@@ -1383,3 +1383,9 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `17000/18000/19000/20000/20998` q10 worker；16999 绝不复制到新 sidecar 旁洗 lineage，q50
    只留 inactive 模板。M3 seed2 还只读等 PGID 1310472 正常终档，绝不 signal 前驱。本条记录时
    四臂仅预注册未启动，原池配方未改。
+24. 【franco/Codex】**四臂只读 validate 先抓到驱动重复 PID 行，零写入后修门再发**——两 Pod
+   的 `nvidia-smi --query-compute-apps=pid` 会把每个 trainer PID 返回两遍，首版容量门把真实
+   3 条误算成 6 条而全部 fail closed；没有 run 目录、trainer 或 worker 被创建。launcher 现先
+   对 PID 保序去重，再要求 unique compute `<4` 和 free>=5500MiB；重复的 3 unique 测试允许
+   第四槽，重复的 4 unique 仍拒绝。config SHA 不变，launcher 从作废的 `dca9b9df...` 重签为
+   `ca69e1cb...`，必须替换两 Pod 外置副本并重新 validate，禁止绕过容量门。

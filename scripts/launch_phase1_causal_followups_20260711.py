@@ -283,7 +283,19 @@ def gpu_capacity(gpu: int, max_before: int, minimum_free_mib: int) -> dict[str, 
         ["nvidia-smi", "-i", str(gpu), "--query-compute-apps=pid", "--format=csv,noheader,nounits"],
         text=True,
     ).splitlines()
-    compute_pids = [int(line.strip()) for line in pids_raw if line.strip().isdigit()]
+    # Some driver/nvidia-smi combinations repeat one compute PID (observed twice per
+    # trainer on the Phase-1 Pods).  Capacity is about unique processes, so preserve
+    # first-seen order while deduplicating before classifying trainers or enforcing 4/card.
+    compute_pids: list[int] = []
+    seen_compute_pids: set[int] = set()
+    for line in pids_raw:
+        if not line.strip().isdigit():
+            continue
+        pid = int(line.strip())
+        if pid in seen_compute_pids:
+            continue
+        seen_compute_pids.add(pid)
+        compute_pids.append(pid)
     trainer_pids: list[int] = []
     for pid in compute_pids:
         cmdline = Path(f"/proc/{pid}/cmdline")

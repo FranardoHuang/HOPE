@@ -516,7 +516,7 @@ LAUNCHER="$CONTROL/launch_phase1_causal_followups_20260711.py"
 test "$(sha256sum "$CONFIG" | awk '{print $1}')" = \
   050d6047fee280feb5754ec568c043fb20e468f81ef049b7420f90ec81a0efc8
 test "$(sha256sum "$LAUNCHER" | awk '{print $1}')" = \
-  dca9b9df1a8639e1a1c5d653785e36d0d62f299e69cbe089c86a1eb999fb9e6c
+  ca69e1cb90668060f150a518d9cee254f3883a80a07683c4fdfe1f3e4e071b08
 ```
 
 Run read-only validation first, one exact arm at a time:
@@ -525,7 +525,7 @@ Run read-only validation first, one exact arm at a time:
 /usr/bin/python3 "$LAUNCHER" \
   --config "$CONFIG" \
   --expected-config-sha256 050d6047fee280feb5754ec568c043fb20e468f81ef049b7420f90ec81a0efc8 \
-  --expected-launcher-sha256 dca9b9df1a8639e1a1c5d653785e36d0d62f299e69cbe089c86a1eb999fb9e6c \
+  --expected-launcher-sha256 ca69e1cb90668060f150a518d9cee254f3883a80a07683c4fdfe1f3e4e071b08 \
   --pod pod1 --arm phase1_M3_S1_only_guidance0_seed1 validate
 ```
 
@@ -538,6 +538,13 @@ the emitted hard-contract, materializes the five q10 jobs and starts one
 isolated checkpoint worker. On a post-start failure it may signal only those
 new, sidecar-and-`/proc`-bound PGIDs. It contains no broad kill, checkout
 mutation or real-robot path.
+
+On the first read-only Pod validation, this capacity gate correctly prevented
+all writes but exposed a driver reporting detail: `nvidia-smi` returned every
+compute PID twice. Launcher `ca69e1cb...` de-duplicates PID rows before
+counting unique compute/trainer processes; three unique trainers still allow
+the fourth slot, while four unique processes still fail closed. Do not deploy
+or authorize the superseded `dca9b9df...` launcher.
 
 The original `model_16999.pt` is only an SHA-bound parent reference. Never copy
 it into the new training run beside the new hard-contract sidecar: doing so

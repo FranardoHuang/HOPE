@@ -47,6 +47,13 @@ Use this file for short project-state updates that future humans and agents need
   Pod1 M3 seed2 has an additional read-only terminal gate on predecessor PGID
   `1310472`; no existing trainer is signalled. The four followups are
   preregistered but not yet launched in this entry.
+- The first four read-only causal-launch validations made no Pod writes and
+  caught duplicate PID rows from this driver's `nvidia-smi` compute query:
+  three unique trainers appeared as six rows. The launcher now de-duplicates
+  before the `<4` capacity gate; tests prove duplicated three-process output
+  allows one slot while four unique processes still fail closed. The config
+  SHA is unchanged and the superseding launcher SHA is `ca69e1cb...`; the
+  initially deployed `dca9b9df...` bytes are revoked before any launch.
 - Corrected a live terminal-cadence deadlock: causal continuations save their
   final checkpoint at `20998`, while four manifests/workers were waiting for
   impossible `20999`. Pod2 M2-S1 terminal is recursively finite and its

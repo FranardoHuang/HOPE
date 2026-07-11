@@ -224,6 +224,28 @@ def test_gpu_gate_refuses_a_four_process_gpu_before_any_launch(monkeypatch):
         launcher.gpu_capacity(0, 3, 5500)
 
 
+def test_gpu_gate_deduplicates_nvidia_smi_rows_and_allows_exactly_three(monkeypatch):
+    def fake_output(command, text=True, **_kwargs):
+        if "--query-gpu=memory.free" in command:
+            return "8000\n"
+        return "1346430\n1346430\n1349699\n1349699\n1354525\n1354525\n"
+
+    monkeypatch.setattr(launcher.subprocess, "check_output", fake_output)
+    capacity = launcher.gpu_capacity(0, 3, 5500)
+    assert capacity["compute_pids"] == [1346430, 1349699, 1354525]
+
+
+def test_gpu_gate_still_refuses_four_unique_pids_when_rows_are_duplicated(monkeypatch):
+    def fake_output(command, text=True, **_kwargs):
+        if "--query-gpu=memory.free" in command:
+            return "8000\n"
+        return "101\n101\n102\n102\n103\n103\n104\n104\n"
+
+    monkeypatch.setattr(launcher.subprocess, "check_output", fake_output)
+    with pytest.raises(launcher.ContractError, match="no fourth-process slot"):
+        launcher.gpu_capacity(0, 3, 5500)
+
+
 def test_exact_cleanup_refuses_nonisolated_state_without_signalling(tmp_path, monkeypatch):
     state = tmp_path / "run.log.launch"
     state.write_text("pid=123\npgid=456\ncommand=run_name=arm\n")
