@@ -1,0 +1,345 @@
+{
+  "schema_version": 1,
+  "preregistration_id": "phase1-event-timing-t0-vs-t1-v1",
+  "created_utc": "2026-07-11T14:30:00Z",
+  "status": "preregistered_blocked_on_implementation",
+  "scope": "fresh-exact paired causal axis comparing current natural full-clip carry-state timing (T0) with post-strike event-driven arbitrary-time next-task installation (T1), while motion/TOPP, plant, face, reward, network, question family, seeds, budgets, and evaluation papers remain frozen",
+  "launch_authorized": false,
+  "real_robot_authorized": false,
+  "validator": {
+    "repo_path": "scripts/validate_phase1_event_timing_prereg.py",
+    "bytes": 29547,
+    "sha256": "9a2e2dd7df86ab8c9255ecba64f2ea319d4c45f67beebf9850d80f25211d30f3"
+  },
+  "evidence": {
+    "venue_timing_aggregate": {
+      "repo_path": "configs/phase1_venue_timing_aggregate_20260711.json",
+      "bytes": 3828,
+      "sha256": "177a81c172f048f7c077cfc9d92e50e6f3e672ed68f05d30aef62071c2ccb322"
+    },
+    "engineering_schedule_spec": {
+      "repo_path": "configs/phase1_event_timing_schedule_spec_20260711.json",
+      "bytes": 5813,
+      "sha256": "8477e3e60c9e9fe193fd82e2b79e94e2a3037e7d4b7a969b34b36ad7f1f96396"
+    },
+    "venue_evidence_policy": {
+      "source_sha256": "6ad3c45959c94b6fdd4033130403c32e0f1b612a138738c12afa43a58f752841",
+      "accepted_overlapping_windows": 21,
+      "gaoqiu_windows": 16,
+      "max_each_leg_filter_s": 2.5,
+      "median_1_903_s_is_target": false,
+      "role": "biased external sanity check and falsifier of current-cadence equivalence only"
+    }
+  },
+  "baseline_source": {
+    "training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+    "role": "exact source used by the frozen live Phase-1 pool; read as git blobs only in this preregistration",
+    "git_blobs": [
+      {
+        "role": "motion scheduler and carry-state wrap implementation",
+        "commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+        "repo_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/commands.py",
+        "bytes": 70461,
+        "sha256": "0e6c89a9a5e6b39cb8dcba8b9cfdbfbcdda3c77f7e24a07f495158ba449dc042"
+      },
+      {
+        "role": "atomic racket question and clip-phase time-to-strike implementation",
+        "commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+        "repo_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/hope_commands.py",
+        "bytes": 244254,
+        "sha256": "64b2421888d2ae9660bd7b277f6d2816c8061118fd810cffda6a82d02a6cfd3c"
+      },
+      {
+        "role": "current Hitter carry-state and recovery knobs",
+        "commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+        "repo_path": "hope_training/whole_body_tracking/cfg/task/HOPEPingPongHitter.yaml",
+        "bytes": 39203,
+        "sha256": "ac1c79a38c044bb0f9540e746ea10e10ca295a769c3d9146379f2328f48dfcf3"
+      },
+      {
+        "role": "HitterPure native motion and reward baseline",
+        "commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+        "repo_path": "hope_training/whole_body_tracking/cfg/task/HOPEPingPongHitterPure.yaml",
+        "bytes": 12320,
+        "sha256": "36e8046f2f017cb5816dc6cf92a569c90534a547c00dd91ea8dc16dc21e09bb4"
+      },
+      {
+        "role": "MuJoCo full-clip and one-question evaluator baseline",
+        "commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+        "repo_path": "hope_training/whole_body_tracking/scripts/mujoco_eval_onnx.py",
+        "bytes": 312522,
+        "sha256": "d9c4d48cd2c2587bfbb0dd2ebe68aa3dd85f1e7ff3b114f4cda7d44ccc553a4e"
+      }
+    ]
+  },
+  "local_reference_commits": [
+    {
+      "commit": "c951d9dcc8b73c30c6a801afb00a01716ee81baa",
+      "role": "origin/jiayi tip and origin/hitter merge-base; historical single-task line, not the recovery continuation",
+      "mechanisms_reusable": true,
+      "causal_conclusion_reusable": false
+    },
+    {
+      "commit": "5c346eac588bb137a90b1a646e71ee44cc805a71",
+      "role": "observed origin/hitter tip with later mixed ablations",
+      "mechanisms_reusable": true,
+      "causal_conclusion_reusable": false
+    },
+    {
+      "commit": "baf62157f3db42e4851976fbc3d7a334f47bc919",
+      "role": "HitterPure ten-second no-teleport full-clip carry-state baseline",
+      "mechanisms_reusable": true,
+      "causal_conclusion_reusable": false
+    },
+    {
+      "commit": "287efc4cfd99b034d612c73668433d323c35f558",
+      "role": "A8 policy-owned post-swing state ring buffer and reset-start coverage",
+      "mechanisms_reusable": true,
+      "causal_conclusion_reusable": false
+    },
+    {
+      "commit": "5e975048d5086863d46095d301357d79d55a3c69",
+      "role": "mixed Rally-v1 package with long hold/episode plus positive brake/ready income; negative result is not brake-only causal evidence",
+      "mechanisms_reusable": true,
+      "causal_conclusion_reusable": false
+    },
+    {
+      "commit": "7c51b409202231dd487385e309538f59f21f2e5d",
+      "role": "ARM-A long-hold and post-swing recovery bundle",
+      "mechanisms_reusable": true,
+      "causal_conclusion_reusable": false
+    },
+    {
+      "commit": "b072561c6e5b1d6ab916b0e9ce3cab09e2ba3673",
+      "role": "local integration of HitterPure rally and recovery gates",
+      "mechanisms_reusable": true,
+      "causal_conclusion_reusable": false
+    },
+    {
+      "commit": "a269009b53fb0e102b65fca79db0b0b86bda4405",
+      "role": "local integration of fixed-station V3 mechanisms",
+      "mechanisms_reusable": true,
+      "causal_conclusion_reusable": false
+    }
+  ],
+  "observed_code_capability_gap": {
+    "event_driven_T1_supported": false,
+    "post_strike_only_event_trigger": false,
+    "atomic_next_question_install": false,
+    "external_deadline_independent_of_clip_phase": false,
+    "continuous_immutable_Isaac_judge": false,
+    "continuous_immutable_MuJoCo_judge": false,
+    "racket_handle_self_hit_gate": false,
+    "existing_motion_scheduler_triggers": [
+      "natural segment end",
+      "optional all-phase per-step Bernoulli clip_switch_prob"
+    ],
+    "existing_racket_scheduler_triggers": [
+      "MotionCommand.just_resampled at natural wrap or all-phase abort",
+      "optional midswing_resample_prob redraws WHERE only and keeps clip-phase WHEN"
+    ],
+    "existing_time_to_strike_source": "derived exclusively from current clip strike frame minus current clip clock, optionally divided by playback speed",
+    "existing_external_exam_capability": "install one current clip and hold vector after a nominal reset; explicitly rejects stagger, clip switching, and retiming; no multi-opportunity event ledger",
+    "existing_partial_mechanisms": {
+      "no_wrap_teleport_carry_state": true,
+      "random_pre_swing_hold": true,
+      "post_swing_state_ring_buffer_for_true_resets": true,
+      "all_phase_operator_abort": true,
+      "midswing_target_where_refinement": true,
+      "post_strike_event_schedule": false,
+      "immutable_reveal_and_deadline_ledger": false,
+      "ready_set_reachability": false
+    },
+    "required_implementation_behavior": [
+      "latch an accepted exact-strike opportunity as event clock zero without resetting simulator, last action, observation history, or noise state",
+      "read the next immutable schedule row and reveal only after strike",
+      "atomically install question_id, clip_id, demanded position/velocity/normal, reveal tick, and immutable strike deadline",
+      "drive time_to_strike from the external deadline rather than clip phase for T1 while keeping T0 natural-wrap behavior",
+      "count miss and infeasible rows on the all-scheduled denominator and continue without mid-sequence reset",
+      "emit the same immutable event ledger in Isaac and MuJoCo",
+      "measure racket and handle contact with protected robot bodies and fail the cell on any self-hit"
+    ]
+  },
+  "causal_axis": {
+    "only_treatment": "next_task_timing_semantics",
+    "arms": [
+      {
+        "id": "T0",
+        "role": "current structural control",
+        "install_trigger": "natural_full_clip_wrap",
+        "deadline_policy": "retain immutable event-paper deadline for scoring; never move it to the natural wrap",
+        "carry_state": true,
+        "mid_sequence_reset_or_teleport": false,
+        "claim_boundary": "slow full-clip carry-state only"
+      },
+      {
+        "id": "T1",
+        "role": "event-driven timing treatment",
+        "install_trigger": "post_strike_event_schedule",
+        "deadline_policy": "external immutable next-strike tick independent of the old clip phase; never delay or replace an infeasible row",
+        "carry_state": true,
+        "mid_sequence_reset_or_teleport": false,
+        "claim_boundary": "arbitrary-time readiness/recovery only if immutable q50 gates pass"
+      }
+    ],
+    "frozen_non_timing_axes": {
+      "motion_path_and_time_law": "same_native_v4rg_no_TOPP",
+      "motion_catalog": "same_two_clips_and_same_strike_phases",
+      "plant": "same_semantics_correct_plant",
+      "face_pairing": "same_shared_plus_y",
+      "reward": "byte_identical_no_new_recovery_income",
+      "positive_hold_or_brake_reward": "disabled_in_both_arms",
+      "network": "same_architecture",
+      "question_family": "same_fresh_exact_immutable_family",
+      "optimizer_and_budget": "same",
+      "seeds": "same_paired_seed_per_arm",
+      "checkpoint_cadence": "same",
+      "episode_horizon": "same_30_seconds",
+      "action_observation_noise": "same",
+      "wrap_teleport": false,
+      "stand_start_prob": 0.25,
+      "speed_scale_range": [
+        1.0,
+        1.0
+      ],
+      "clip_switch_prob": 0.0,
+      "midswing_resample_prob": 0.0,
+      "stagger_initial_clock": false,
+      "post_swing_start_prob": 0.25,
+      "hold_steps_range": [
+        0,
+        100
+      ],
+      "T1_event_install_draws_extra_random_hold": false
+    },
+    "prohibited_concurrent_changes": [
+      "TOPP or any motion spatial/time-law change",
+      "plant coefficient or semantics change",
+      "face-pairing change",
+      "new ready/recovery/brake/hold reward",
+      "new motion family or two-versus-four action catalog",
+      "network width or observation change unrelated to the event deadline contract",
+      "question-bank family or exam split change"
+    ]
+  },
+  "lineage_and_checkpoint_selection": {
+    "fresh_exact_only": true,
+    "allow_inexact_contract": false,
+    "causal_or_continuation_checkpoint_allowed": false,
+    "same_checkpoint_for_T0_T1": true,
+    "same_checkpoint_and_hard_contract_sha_required": true,
+    "timing_outcomes_may_select_baseline": false,
+    "baseline_selection_status": "pending_pre_timing_selection",
+    "baseline_selection_rule": "before any T0/T1 outcome, choose one fresh SZ checkpoint per seed using same-family exact single-swing immutable q50 in both Isaac and MuJoCo plus finite checkpoint/contract lineage; cross-engine disagreement blocks selection",
+    "independent_seeds_required": 2,
+    "formal_target_cell": "SZ",
+    "plant_requirement": "semantics-correct calibrated plant contract shared by both arms; legacy SP coefficients and frictionless SZ deployment claims are not accepted substitutes"
+  },
+  "implementation_bindings": {
+    "event_scheduler_source": null,
+    "training_hard_contract_schema": null,
+    "schedule_materializer": null,
+    "immutable_question_schedule": null,
+    "immutable_event_screen_schedule": null,
+    "immutable_event_decision_schedule": null,
+    "isaac_continuous_judge": null,
+    "mujoco_continuous_judge": null,
+    "self_hit_instrumentation": null,
+    "fresh_exact_baseline_checkpoint": null,
+    "semantics_correct_plant_contract": null
+  },
+  "checkpoint_and_decision_policy": {
+    "save_checkpoint_every_iterations": 1000,
+    "screen_milestones_iterations": "every_saved_checkpoint",
+    "q10_role": "screen_only",
+    "q10_questions_per_side": 10,
+    "q10_may_stop_or_promote": false,
+    "q10_may_select_checkpoint_or_arm": false,
+    "q10_live_arm_interruption_allowed": false,
+    "fixed_q50_milestones_iterations": [
+      2000,
+      4000,
+      8000,
+      12000,
+      "terminal"
+    ],
+    "q50_role": "decision",
+    "q50_questions_per_side": 50,
+    "q50_required": true,
+    "q50_schedule_may_depend_on_q10_outcome": false,
+    "terminal_only_selection": false,
+    "preserve_checkpoint_peaks": true,
+    "paired_comparison_key": "same seed, checkpoint milestone, question row, event row, engine, and plant",
+    "continue_training_after_screen_or_decision": true
+  },
+  "evaluation_contract": {
+    "engines": [
+      "Isaac",
+      "MuJoCo"
+    ],
+    "same_schedule_bytes_across_arms_and_engines": true,
+    "same_question_order": true,
+    "same_event_order": true,
+    "all_scheduled_opportunity_denominator": true,
+    "sequence_boundary_nominal_reset_only": true,
+    "mid_sequence_reset_or_teleport_allowed": false,
+    "miss_or_infeasible_replacement_allowed": false,
+    "physical_fall_censoring_allowed": false,
+    "self_hit_hard_failure": true,
+    "single_swing_gate_before_continuous_gate": true,
+    "metrics": [
+      "opportunity 1/2/3/4/5+ exact, contact, legal return, physical no-fall, and tracking-loss rates",
+      "FF/FB/BF/BB transition matrix by engineering timing cell",
+      "next_task_started / all scheduled opportunities",
+      "return_and_recover_and_start_next / all scheduled opportunities",
+      "deadline miss, ready time, ready margin, and infeasible count",
+      "first-failure-free opportunity count and legal-rally-length p10/p50",
+      "base drift, root tilt/height, foot slip, torque saturation, and q-des clamp",
+      "mid-sequence reset and teleport count",
+      "opportunity 2/3/4/5+ quality degradation relative to opportunity 1",
+      "racket/handle self-hit count and protected-region breakdown",
+      "paired Isaac minus MuJoCo deltas on identical rows"
+    ],
+    "decision_rule": {
+      "eligible_only_if_zero_self_hits_both_engines_all_seeds": true,
+      "eligible_only_if_zero_mid_sequence_resets_or_teleports": true,
+      "single_swing_q50_per_side_noninferiority_margin_absolute": -0.05,
+      "continuous_primary": "return_and_recover_and_start_next all-opportunity paired rate",
+      "continuous_primary_requires_T1_minus_T0_positive_each_seed_and_engine": true,
+      "continuous_primary_pooled_paired_bootstrap_95pct_lcb_gt_zero": true,
+      "physical_fall_rate_T1_minus_T0_max": 0.02,
+      "cross_engine_direction_must_agree": true,
+      "two_independent_seed_pairs_required": true,
+      "q10_can_satisfy_any_decision_clause": false
+    }
+  },
+  "queue": {
+    "status": "queued_blocked_no_launch",
+    "priority": "after current Phase-1 formal target accounting and after event scheduler/plant/evaluator contracts are implemented and reviewed",
+    "pod_accessed": false,
+    "live_training_checkout_accessed": false,
+    "training_started": false,
+    "evaluation_started": false,
+    "real_robot_accessed": false,
+    "unblock_requires": [
+      "new content-addressed preregistration with every implementation binding non-null",
+      "exact fresh SZ baseline checkpoint and semantics-correct plant selected before timing outcomes",
+      "materialized q10/q50 question+event schedules with immutable SHA-256",
+      "CPU/unit and Isaac smoke proving post-strike-only atomic installs and zero hidden state reset",
+      "MuJoCo/Isaac same-row dry run including self-hit instrumentation",
+      "independent code review"
+    ]
+  },
+  "prohibitions": [
+    "do not launch from this blocked preregistration",
+    "do not mutate a live training checkout or reuse the current 24-arm state directory",
+    "do not use clip_switch_prob as a substitute for post-strike event timing",
+    "do not use midswing_resample_prob as a substitute for deadline timing",
+    "do not freeze or weight toward the venue median 1.903 s",
+    "do not mix TOPP, new motions, plant, face, reward, or two-versus-four actions into this causal pair",
+    "do not let q10 stop, promote, select, or terminate an arm",
+    "do not use causal/inexact checkpoints or --allow-inexact-contract",
+    "do not hide self-hit, fall, miss, infeasible, reset, or deadline-shift rows",
+    "do not run any real-robot command"
+  ]
+}

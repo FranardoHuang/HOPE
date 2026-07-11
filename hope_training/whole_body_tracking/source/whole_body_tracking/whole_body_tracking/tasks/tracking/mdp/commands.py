@@ -23,6 +23,14 @@ from isaaclab.utils.math import (
     yaw_quat,
 )
 
+from whole_body_tracking.tasks.tracking.mdp.event_timing import (
+    EVENT_TIMING_MODE_DISABLED,
+    EVENT_TIMING_MODE_POST_STRIKE_T1,
+    EVENT_TIMING_MODES,
+    EventTimingScheduler,
+    load_event_schedule,
+)
+
 
 def _stand_start_yaw_samples(yaw_range, count: int, device):
     """Return stand-start yaw samples, or ``None`` for the byte-identical [0, 0] default.
@@ -119,7 +127,12 @@ class MotionLoader:
 
     @classmethod
     def _kinematics_contract(
-        cls, data, path: str, articulation_body_names: tuple[str, ...]
+        cls,
+        data,
+        path: str,
+        articulation_body_names: tuple[str, ...],
+        *,
+        allow_legacy_link_origin_velocity: bool = False,
     ) -> dict:
         """Validate body point semantics without guessing from a filename.
 
@@ -186,13 +199,25 @@ class MotionLoader:
         fd_max = float(np.max(np.abs(lin - link_fd)))
         max_ang = float(np.max(np.linalg.norm(ang, axis=-1)))
         if max_ang > 0.2 and fd_max <= 1.0e-4:
-            raise ValueError(
-                f"{path}: untagged body_lin_vel_w is numerically d(link-origin position)/dt "
-                f"(max residual {fd_max:.3e} m/s, max |omega| {max_ang:.2f} rad/s), but "
-                "MotionCommand rewards COM velocity. This is the pre-2026-07-10 V5/MuJoCo "
-                "converter signature. Migrate it explicitly with scripts/migrate_motion_kinematics.py "
-                "--source-point link_origin; refusing to train on the wrong point."
-            )
+            if not allow_legacy_link_origin_velocity:
+                raise ValueError(
+                    f"{path}: untagged body_lin_vel_w is numerically d(link-origin position)/dt "
+                    f"(max residual {fd_max:.3e} m/s, max |omega| {max_ang:.2f} rad/s), but "
+                    "MotionCommand rewards COM velocity. This is the pre-2026-07-10 V5/MuJoCo "
+                    "converter signature. Migrate it explicitly with "
+                    "scripts/migrate_motion_kinematics.py --source-point link_origin; refusing "
+                    "to train on the wrong point."
+                )
+            return {
+                "schema_version": None,
+                "body_pos_point": "link_origin",
+                "body_lin_vel_point": "link_origin",
+                "body_names": None,
+                "exact": False,
+                "status": "legacy_link_origin_velocity_diagnostic_only",
+                "link_fd_max_abs_mps": fd_max,
+                "max_ang_radps": max_ang,
+            }
         return {
             "schema_version": None, "body_pos_point": None, "body_lin_vel_point": None,
             "body_names": None,
@@ -208,6 +233,7 @@ class MotionLoader:
         articulation_body_names: Sequence[str],
         selected_body_names: Sequence[str],
         device: str = "cpu",
+        allow_legacy_link_origin_velocity: bool = False,
     ):
         files = [motion_file] if isinstance(motion_file, str) else list(motion_file)
         if not files:
@@ -247,7 +273,12 @@ class MotionLoader:
             frame_count = self._validate_motion_array_shapes(
                 data, f, len(articulation_names)
             )
-            _kin = self._kinematics_contract(data, f, articulation_names)
+            _kin = self._kinematics_contract(
+                data,
+                f,
+                articulation_names,
+                allow_legacy_link_origin_velocity=allow_legacy_link_origin_velocity,
+            )
             self.kinematics_contracts.append(_kin)
             if not _kin["exact"]:
                 print(
@@ -322,6 +353,9 @@ class MotionCommand(CommandTerm):
             articulation_body_names=self.robot.body_names,
             selected_body_names=self.cfg.body_names,
             device=self.device,
+            allow_legacy_link_origin_velocity=bool(
+                self.cfg.allow_legacy_link_origin_velocity
+            ),
         )
         expected_fps = 1.0 / float(env.step_dt)
         if not math.isfinite(expected_fps) or not math.isclose(
@@ -409,6 +443,74 @@ class MotionCommand(CommandTerm):
         if bool(getattr(self.cfg, "stagger_initial_clock", False)):
             self._stagger_hold_pending = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
             self._stagger_ep_pending = True
+        # T1 continuous timing is deliberately a separate, fail-closed command path.  It reuses
+        # native clip playback, exact pre-swing hold and no-wrap carry-state, but none of the
+        # random wrap/switch/retiming mechanisms.  The schedule bytes are verified before any
+        # event state exists; RacketTargetCommand later binds every immutable row to the loaded
+        # train bank and supplies the native strike offset for each clip.
+        self._event_timing_mode = str(
+            getattr(self.cfg, "event_timing_mode", EVENT_TIMING_MODE_DISABLED)
+        )
+        if self._event_timing_mode not in EVENT_TIMING_MODES:
+            raise ValueError(
+                f"event_timing_mode must be one of {EVENT_TIMING_MODES}, "
+                f"got {self._event_timing_mode!r}"
+            )
+        self._event_schedule = None
+        self._event_scheduler: EventTimingScheduler | None = None
+        self._event_native_strike_ticks: torch.Tensor | None = None
+        if self._event_timing_mode == EVENT_TIMING_MODE_POST_STRIKE_T1:
+            schedule_path = str(getattr(self.cfg, "event_timing_schedule", "") or "").strip()
+            schedule_sha = str(
+                getattr(self.cfg, "event_timing_schedule_sha256", "") or ""
+            ).strip()
+            if not schedule_path or not schedule_sha:
+                raise ValueError(
+                    "post_strike_t1 requires event_timing_schedule and its exact byte SHA-256"
+                )
+            if bool(getattr(self.cfg, "event_timing_repeat", False)):
+                raise ValueError(
+                    "post_strike_t1 rows may not repeat within an episode; materialize enough "
+                    "immutable rows and reset only at the sequence boundary"
+                )
+            if bool(self.cfg.wrap_teleport):
+                raise ValueError("post_strike_t1 requires wrap_teleport=false (carry state)")
+            if float(self.cfg.clip_switch_prob) != 0.0:
+                raise ValueError("post_strike_t1 requires clip_switch_prob=0")
+            if bool(self.cfg.stagger_initial_clock):
+                raise ValueError("post_strike_t1 requires stagger_initial_clock=false")
+            if self.retiming_active:
+                raise ValueError("post_strike_t1 requires native one-frame-per-step playback")
+            if int(getattr(self.cfg, "rsi_skip_settle_frames", 0)) != 0:
+                raise ValueError(
+                    "post_strike_t1 event installs require rsi_skip_settle_frames=0; skipping "
+                    "native clip frames would change immutable deadline feasibility"
+                )
+            self._event_schedule = load_event_schedule(schedule_path, schedule_sha)
+            actual_rate = 1.0 / float(env.step_dt)
+            if not math.isclose(
+                actual_rate,
+                float(self._event_schedule.policy_rate_hz),
+                rel_tol=0.0,
+                abs_tol=1.0e-9,
+            ):
+                raise ValueError(
+                    "event schedule policy rate does not match the instantiated control rate: "
+                    f"schedule={self._event_schedule.policy_rate_hz} runtime={actual_rate:.12g}"
+                )
+            bad_clips = sorted(
+                {row.clip_id for row in self._event_schedule.rows}
+                - set(range(int(self.motion.num_segments)))
+            )
+            if bad_clips:
+                raise ValueError(
+                    f"event schedule references unloaded motion clip ids {bad_clips}"
+                )
+            self._event_scheduler = EventTimingScheduler(
+                self._event_schedule,
+                num_envs=self.num_envs,
+                device=self.device,
+            )
         # A8: post-swing initial-state ring buffer (root state stored ORIGIN-RELATIVE in [:3] so a
         # snapshot from env B can seed env A; quats/velocities/joints are origin-invariant).
         # Tensors are allocated lazily at first capture (dof count comes from live robot data).
@@ -442,6 +544,13 @@ class MotionCommand(CommandTerm):
         self.metrics["sampling_top1_bin"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["motion_phase"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["in_hold"] = torch.zeros(self.num_envs, device=self.device)
+        if self._event_scheduler is not None:
+            self.metrics["event_timing_armed"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics["event_question_installed"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics["event_question_unavailable"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics["event_question_infeasible"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics["event_deadline_due"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics["event_opportunities_consumed"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_anchor_rot_deg"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_joint_pos_mean_abs"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_joint_pos_max_abs"] = torch.zeros(self.num_envs, device=self.device)
@@ -472,6 +581,122 @@ class MotionCommand(CommandTerm):
         counter_hold = self.hold_counter > 0
         metric_hold = self.metrics.get("in_hold")
         return counter_hold if metric_hold is None else (counter_hold | metric_hold.bool())
+
+    @property
+    def event_timing_enabled(self) -> bool:
+        return self._event_scheduler is not None
+
+    @property
+    def event_just_installed(self) -> torch.Tensor:
+        if self._event_scheduler is None:
+            return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        return self._event_scheduler.event_just_installed
+
+    @property
+    def event_installed(self) -> torch.Tensor:
+        if self._event_scheduler is None:
+            return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        return self._event_scheduler.row_installed
+
+    @property
+    def event_exact_strike_allowed(self) -> torch.Tensor:
+        if self._event_scheduler is None:
+            return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+        return self._event_scheduler.exact_strike_allowed
+
+    @property
+    def event_deadline_ticks_remaining(self) -> torch.Tensor:
+        if self._event_scheduler is None:
+            return torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        return self._event_scheduler.deadline_ticks_remaining
+
+    @property
+    def event_current_clip_id(self) -> torch.Tensor:
+        if self._event_scheduler is None:
+            return torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        return self._event_scheduler.current_clip_id
+
+    @property
+    def event_current_bank_row(self) -> torch.Tensor:
+        if self._event_scheduler is None:
+            return torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        return self._event_scheduler.current_bank_row
+
+    @property
+    def event_schedule(self):
+        return self._event_schedule
+
+    def event_timing_hard_contract(self) -> dict:
+        """Stable timing facts embedded in every checkpoint contract."""
+
+        if self._event_schedule is None:
+            return {"mode": EVENT_TIMING_MODE_DISABLED}
+        return {
+            "mode": EVENT_TIMING_MODE_POST_STRIKE_T1,
+            "schedule": self._event_schedule.hard_contract(),
+            "sequence_assignment": "env_id_mod_sequence_count_v1",
+            "repeat_within_episode": False,
+            "clock_origin": "accepted_exact_strike_opportunity",
+            "install_trigger": "immutable_post_strike_reveal_tick",
+            "deadline_origin": "previous_scheduled_deadline_after_first_origin",
+            "deadline_shift_allowed": False,
+            "miss_consumes_opportunity": True,
+            "carry_state": True,
+            "reset_robot_or_last_action_on_install": False,
+            "reset_history_or_noise_on_install": False,
+            "event_playback": "native_clip_start_plus_exact_hold_no_retime",
+        }
+
+    def bind_event_native_strike_ticks(
+        self, native_strike_ticks_by_clip: Sequence[int] | torch.Tensor
+    ) -> None:
+        """Bind RacketTargetCommand's audited per-clip strike frames exactly once."""
+
+        if self._event_scheduler is None:
+            return
+        raw = torch.as_tensor(native_strike_ticks_by_clip, device=self.device)
+        if raw.dtype == torch.bool or raw.is_floating_point() or raw.is_complex():
+            raise ValueError("event native strike ticks must use an integer dtype")
+        values = raw.to(dtype=torch.long).reshape(-1)
+        if len(values) != int(self.motion.num_segments) or torch.any(values <= 0):
+            raise ValueError(
+                "event native strike timing must contain one positive offset per motion clip"
+            )
+        if self._event_native_strike_ticks is not None:
+            if not torch.equal(self._event_native_strike_ticks, values):
+                raise RuntimeError("event native strike timing was rebound with different values")
+            return
+        self._event_native_strike_ticks = values.clone()
+
+    def record_event_exact_strike(self, env_ids: Sequence[int] | torch.Tensor) -> torch.Tensor:
+        if self._event_scheduler is None:
+            return torch.empty(0, dtype=torch.long, device=self.device)
+        return self._event_scheduler.record_exact_strike(env_ids)
+
+    def finalize_event_deadlines(self) -> torch.Tensor:
+        if self._event_scheduler is None:
+            return torch.empty(0, dtype=torch.long, device=self.device)
+        return self._event_scheduler.finalize_deadlines()
+
+    def _install_event_motion(self, step) -> None:
+        """Install clip/start/hold only; carry all physical and policy state across the event."""
+
+        ids = step.install_env_ids
+        if len(ids) == 0:
+            return
+        clips = step.install_clip_ids
+        holds = step.install_hold_steps
+        # Deliberately no _resample_command, adaptive sampling, simulator write, action write,
+        # history reset, or teleport here.  The current robot state and last action continue.
+        self.clip_id[ids] = clips
+        starts = self.motion.seg_start[clips]
+        self.time_steps[ids] = starts
+        self.time_steps_f[ids] = starts.float()
+        self.speed_scale[ids] = 1.0
+        self.hold_counter[ids] = holds
+        self.metrics["in_hold"][ids] = (holds > 0).float()
+        if hasattr(self, "time_left"):
+            self.time_left[ids] = float("inf")
 
     @property
     def joint_pos(self) -> torch.Tensor:
@@ -773,6 +998,11 @@ class MotionCommand(CommandTerm):
     def _resample_command(self, env_ids: Sequence[int]):
         if len(env_ids) == 0:
             return
+        # A true episode boundary starts the same immutable sequence from an unarmed ledger.  An
+        # intra-episode wrap before the initial origin is not a sequence boundary and must not
+        # rewrite scheduler time.  Once armed, T1 suppresses natural wraps entirely.
+        if self._event_scheduler is not None and not self._resampling_from_wrap:
+            self._event_scheduler.reset(env_ids)
         self._adaptive_sampling(env_ids)
 
         env_ids_t = env_ids if torch.is_tensor(env_ids) else torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
@@ -912,6 +1142,64 @@ class MotionCommand(CommandTerm):
             env_ids=env_ids,
         )
 
+    def install_external_exam_timing(
+        self,
+        env_ids: Sequence[int],
+        clip_ids: torch.Tensor,
+        hold_steps: torch.Tensor,
+    ) -> None:
+        """Install one evaluator-owned, immutable BankExam item per environment.
+
+        This is deliberately a runtime seam rather than a config field: training still owns its
+        normal random clip/hold sampler, while the formal evaluator may replace the *current*
+        command only after it has independently validated an exam-split bank and schedule.  The
+        method does not reset robot state; callers must first perform the documented nominal-stand
+        reset and then refresh observations after installing both motion timing and racket targets.
+        """
+
+        raw_ids = torch.as_tensor(env_ids, device=self.device)
+        raw_clips = torch.as_tensor(clip_ids, device=self.device)
+        raw_holds = torch.as_tensor(hold_steps, device=self.device)
+        for name, value in (("env_ids", raw_ids), ("clip_ids", raw_clips),
+                            ("hold_steps", raw_holds)):
+            if value.dtype == torch.bool or value.is_floating_point() or value.is_complex():
+                raise ValueError(f"external exam {name} must use an integer dtype")
+        ids = raw_ids.to(dtype=torch.long).reshape(-1)
+        clips = raw_clips.to(dtype=torch.long).reshape(-1)
+        holds = raw_holds.to(dtype=torch.long).reshape(-1)
+        if len(ids) == 0 or len(ids) != len(clips) or len(ids) != len(holds):
+            raise ValueError(
+                "external exam timing requires equal, non-empty env/clip/hold vectors"
+            )
+        if len(torch.unique(ids)) != len(ids) or torch.any(ids < 0) or torch.any(ids >= self.num_envs):
+            raise ValueError("external exam env ids must be unique and in range")
+        if torch.any(clips < 0) or torch.any(clips >= int(self.motion.num_segments)):
+            raise ValueError("external exam clip ids are outside the loaded motion segments")
+        if torch.any(holds < 0):
+            raise ValueError("external exam hold steps must be non-negative")
+        if bool(self.cfg.stagger_initial_clock) or float(self.cfg.clip_switch_prob) != 0.0:
+            raise ValueError(
+                "external BankExam requires stagger_initial_clock=false and clip_switch_prob=0"
+            )
+        if self._speed_per_clip is not None or tuple(float(v) for v in self.cfg.speed_scale_range) != (1.0, 1.0):
+            raise ValueError(
+                "external BankExam currently requires native one-frame-per-step playback"
+            )
+
+        self.clip_id[ids] = clips
+        starts = self.motion.seg_start[clips]
+        self.time_steps[ids] = starts
+        self.time_steps_f[ids] = starts.float()
+        self.speed_scale[ids] = 1.0
+        self.hold_counter[ids] = holds
+        self.metrics["in_hold"][ids] = (holds > 0).float()
+        self.just_resampled[ids] = False
+        if hasattr(self, "time_left"):
+            self.time_left[ids] = float("inf")
+        if self._stagger_hold_pending is not None:
+            self._stagger_hold_pending[ids] = False
+        self._stagger_ep_pending = False
+
     def _update_command(self):
         # stagger (b): ONE-SHOT at the first step after construction (fresh run OR resume — both
         # are the same-instant cohort the metric-sync forensics caught): advance every env's
@@ -941,10 +1229,48 @@ class MotionCommand(CommandTerm):
             self.metrics["playback_speed"] = self.speed_scale.clone()
         else:
             self.time_steps += (~held).long()
+        event_owned = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        if self._event_scheduler is not None:
+            native = self._event_native_strike_ticks
+            if native is None:
+                if bool(self._event_scheduler.armed.any()):
+                    raise RuntimeError(
+                        "post_strike_t1 armed before RacketTargetCommand bound native strike timing"
+                    )
+                # Before the first exact-strike origin no row can reveal and absolute scheduler
+                # time has no meaning.  RacketTargetCommand binds the real vector in the same
+                # command-manager step that can accept the initial exact strike.
+            else:
+                event_step = self._event_scheduler.advance(native)
+                self._install_event_motion(event_step)
+            event_owned = self._event_scheduler.armed
+            self.metrics["event_timing_armed"] = event_owned.float()
+            self.metrics["event_question_installed"] = (
+                self._event_scheduler.event_just_installed.float()
+            )
+            self.metrics["event_question_unavailable"] = (
+                self._event_scheduler.event_just_unavailable.float()
+            )
+            self.metrics["event_question_infeasible"] = (
+                self._event_scheduler.event_just_infeasible.float()
+            )
+            self.metrics["event_deadline_due"] = (
+                self._event_scheduler.deadline_just_due.float()
+            )
+            self.metrics["event_opportunities_consumed"] = (
+                self._event_scheduler.opportunities_consumed.float()
+            )
         if self._multiseg:
             # Wrap at the END of the env's current clip/segment, not the global concatenated end.
             seg_end = self.motion.seg_start[self.clip_id] + self.motion.seg_len[self.clip_id]
-            wrap_ids = torch.where(self.time_steps >= seg_end)[0]
+            # Once an exact-strike origin arms T1, natural clip completion is a carry-state wait,
+            # not permission to draw or teleport to another question.  Clamp the old reference at
+            # its final native frame until the immutable reveal installs the next clip.
+            clamp = event_owned & (self.time_steps >= seg_end)
+            if bool(clamp.any()):
+                self.time_steps[clamp] = seg_end[clamp] - 1
+                self.time_steps_f[clamp] = self.time_steps[clamp].float()
+            wrap_ids = torch.where((~event_owned) & (self.time_steps >= seg_end))[0]
             # DEPLOY-PARITY CLIP SWITCH (venue falls 2026-07-04): the runner's reference clock flips
             # clip_id whenever the planner re-sides the target — at an ARBITRARY mid-swing moment —
             # and the reference jumps to the new clip's first frame (pp_reference_clock.hpp clamps
@@ -962,7 +1288,13 @@ class MotionCommand(CommandTerm):
             else:
                 env_ids = wrap_ids
         else:
-            env_ids = torch.where(self.time_steps >= self.motion.time_step_total)[0]
+            clamp = event_owned & (self.time_steps >= self.motion.time_step_total)
+            if bool(clamp.any()):
+                self.time_steps[clamp] = int(self.motion.time_step_total) - 1
+                self.time_steps_f[clamp] = self.time_steps[clamp].float()
+            env_ids = torch.where(
+                (~event_owned) & (self.time_steps >= self.motion.time_step_total)
+            )[0]
             wrap_ids = env_ids
         self.just_resampled = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         if len(env_ids) > 0:
@@ -1055,6 +1387,9 @@ class MotionCommandCfg(CommandTermCfg):
     asset_name: str = MISSING
 
     motion_file: str = MISSING
+    # Historical diagnostic replay only. Formal paths migrate these untagged finite-difference
+    # link-origin velocities to the schema-2 COM-point contract instead of enabling this escape.
+    allow_legacy_link_origin_velocity: bool = False
     anchor_body_name: str = MISSING
     body_names: list[str] = MISSING
 
@@ -1098,6 +1433,15 @@ class MotionCommandCfg(CommandTermCfg):
     # Per-step per-env probability of an operator-style mid-swing clip switch (deploy parity —
     # see the venue-falls note in _update_command). 0.002 ~ one switch per ~3-4 swings. Default off.
     clip_switch_prob: float = 0.0
+    # T1 post-strike event timing.  Disabled is the byte-identical current scheduler.  The enabled
+    # path requires a materialized immutable schedule whose exact UTF-8 JSON bytes match the
+    # configured SHA-256; rows are assigned deterministically by env id and never repeat inside an
+    # episode.  It is intentionally incompatible with random clip switching, stagger, retiming,
+    # wrap teleport, and RSI frame skipping.
+    event_timing_mode: str = EVENT_TIMING_MODE_DISABLED
+    event_timing_schedule: str = ""
+    event_timing_schedule_sha256: str = ""
+    event_timing_repeat: bool = False
     # P2.4/R14 retiming: per-swing reference playback speed, uniform-sampled from this range at
     # every swing entry (wrap, mid-swing clip switch, and true reset). At speed s the clip clock
     # advances s frames per control step, reference velocities read ×s, time_to_strike runs ÷s,

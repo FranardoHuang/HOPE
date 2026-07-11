@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "report_id": "phase1-venue-aba-timing-aggregate-20260711-v1",
+  "status": "completed_prior_audit_aggregate_only",
+  "scope": "privacy-preserving aggregate of a conservative A-B-A strike-timing audit; evidence that the current full-clip cadence does not cover observed venue timing, not a fitted match-play distribution or T1 target schedule",
+  "source": {
+    "external_path": "/workspace/yikang/latest_data/analysis/segments/strikes.json",
+    "sha256": "6ad3c45959c94b6fdd4033130403c32e0f1b612a138738c12afa43a58f752841",
+    "bytes": null,
+    "tracked_in_git": false,
+    "source_rows": 154,
+    "raw_rows_or_take_ids_in_this_report": false,
+    "restore_required_for_reproduction": true
+  },
+  "tool": {
+    "repo_path": "hope_training/whole_body_tracking/scripts/analyze_rally_intervals.py",
+    "bytes": 7019,
+    "sha256": "4131af9139264ee96924d9ea1f6bbecd7fb4c3b8d56e3305887417829b678e36",
+    "test_repo_path": "hope_training/whole_body_tracking/tests/test_analyze_rally_intervals.py",
+    "test_bytes": 1678,
+    "test_sha256": "0febef13691ebfc328b50dcfc7de5bae2defdf5e1d13fc5c36852a3784abef07",
+    "command": [
+      "python3",
+      "hope_training/whole_body_tracking/scripts/analyze_rally_intervals.py",
+      "$BALLFIT_DATA_ROOT/analysis/segments/strikes.json",
+      "--max-leg-s",
+      "2.5",
+      "--summary-only"
+    ],
+    "quantile_method": "linear interpolation at q10/q50/q90"
+  },
+  "filter": {
+    "ordering": "within take by t_c",
+    "pattern": "three consecutive detected contacts A->B->A",
+    "max_each_leg_s": 2.5,
+    "excluded_take_prefixes": [
+      "dianqiu"
+    ],
+    "windowing": "overlapping sliding triples over consecutive detections"
+  },
+  "aggregate": {
+    "accepted_samples": 21,
+    "coarse_take_category_counts": {
+      "gaoqiu": 16,
+      "tantiao": 4,
+      "zhengchang": 1
+    },
+    "same_player_interval_s": {
+      "q10": 1.757,
+      "q50": 1.903,
+      "q90": 3.356
+    },
+    "self_to_opponent_s": {
+      "q10": 0.833,
+      "q50": 0.951,
+      "q90": 1.493
+    },
+    "opponent_to_self_s": {
+      "q10": 0.823,
+      "q50": 0.948,
+      "q90": 1.683
+    }
+  },
+  "known_biases": {
+    "overlapping_samples": true,
+    "samples_independent": false,
+    "effective_sample_size": "unknown_but_less_than_21",
+    "gaoqiu_share": 0.7619047619047619,
+    "high_ball_dominated": true,
+    "no_explicit_rally_id": true,
+    "detector_may_miss_contacts": true,
+    "max_leg_filter_right_censors_slow_legs": true,
+    "right_censor_threshold_s": 2.5,
+    "not_match_play_representative": true
+  },
+  "use_policy": {
+    "allowed": [
+      "reject the claim that the current theoretical 2.90/3.75/4.60 s full-clip cadence already covers the observed venue core",
+      "motivate a separately preregistered event-driven timing axis",
+      "serve as an explicitly biased external sanity check after an engineering schedule is frozen"
+    ],
+    "prohibited": [
+      "freeze 1.903 s or any reported quantile as the T1 target",
+      "fit a probability distribution or sampling weights from these 21 overlapping windows",
+      "claim an effective independent sample size of 21",
+      "claim match-play representativeness",
+      "use this report to change a frozen T0/T1 schedule after outcomes are visible"
+    ],
+    "median_1_903_s_is_target": false
+  },
+  "reproduction": {
+    "recomputed_in_this_turn": false,
+    "reason": "the raw external strikes JSON is intentionally not stored in git and was not accessed while preparing the T0/T1 preregistration",
+    "required_first_check": "sha256sum of restored strikes.json must equal source.sha256",
+    "expected_summary_only_output": {
+      "source_sha256": "6ad3c45959c94b6fdd4033130403c32e0f1b612a138738c12afa43a58f752841",
+      "source_rows": 154,
+      "accepted_samples": 21
+    }
+  }
+}

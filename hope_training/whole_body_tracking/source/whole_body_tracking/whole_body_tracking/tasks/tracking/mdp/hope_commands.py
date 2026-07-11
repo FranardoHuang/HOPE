@@ -49,6 +49,7 @@ from isaaclab.utils.math import (
 from whole_body_tracking.tasks.tracking.mdp.commands import MotionCommand
 from whole_body_tracking.tasks.tracking.mdp.stage1_question_bank import (
     load_question_bank,
+    question_id,
     select_questions,
     validate_runtime_motion_contract,
 )
@@ -60,16 +61,38 @@ if TYPE_CHECKING:
 # It sits just inside the deploy engage limit, so the metric measures states that matter.
 _RECOVERY_START_YAW_THRESHOLD = 0.30
 
+_FACE_COMMAND_PAIRINGS = ("shared_plus_y", "legacy_signed_vs_A")
+
+
+def _face_command_pairing(cfg: "RacketTargetCommandCfg") -> str:
+    """Return a validated face-command grading convention.
+
+    ``getattr`` preserves the historical default for small test doubles and old serialized
+    configuration objects; real environments also validate the field during command construction.
+    """
+    pairing = str(getattr(cfg, "face_command_pairing", "shared_plus_y"))
+    if pairing not in _FACE_COMMAND_PAIRINGS:
+        raise ValueError(
+            "face_command_pairing must be one of "
+            f"{_FACE_COMMAND_PAIRINGS}, got {pairing!r}"
+        )
+    return pairing
+
 
 def face_tracking_pair(command: "RacketTargetCommand") -> tuple[torch.Tensor, torch.Tensor]:
     """Return the measured/target normals used by every face reward and success metric.
 
-    Bank face commands live in the raw mount +Y/A frame. Non-bank tasks retain the signed
-    clip-reference pairing. Keeping this decision here prevents reward and reporting from
-    silently grading different faces.
+    Face-command targets always remain in the bank's A frame. ``shared_plus_y`` compares them to
+    raw mount +Y, while the explicit diagnostic ``legacy_signed_vs_A`` reproduces the historical
+    signed-measurement/A-target mismatch. Non-face tasks retain the signed clip-reference pair.
+    Keeping the selection here makes rewards, privileged observations, and metrics grade the same
+    convention.
     """
     if command.cfg.face_command:
-        return command.racket_normal_raw_w, command.target_normal_cmd
+        pairing = _face_command_pairing(command.cfg)
+        if pairing == "shared_plus_y":
+            return command.racket_normal_raw_w, command.target_normal_cmd
+        return command.racket_normal_w, command.target_normal_cmd
     return command.racket_normal_w, command.racket_target_normal_w
 
 
@@ -79,6 +102,9 @@ class RacketTargetCommand(CommandTerm):
     cfg: RacketTargetCommandCfg
 
     def __init__(self, cfg: RacketTargetCommandCfg, env: ManagerBasedRLEnv):
+        # Validate even when face_command is currently disabled: a typo must fail at environment
+        # construction instead of lying dormant until a later curriculum/override enables it.
+        _face_command_pairing(cfg)
         super().__init__(cfg, env)
 
         self.robot: Articulation = env.scene[cfg.asset_name]
@@ -114,6 +140,7 @@ class RacketTargetCommand(CommandTerm):
 
         # The motion command (resolved lazily on first update; not guaranteed to exist at __init__).
         self._motion_term: MotionCommand | None = None
+        self._event_timing_bound = False
         # Per-env motion phase at the last target resample; used to detect clip wraps (new swings).
         # Stamped on every resample so a reset-time resample is not double-triggered next step.
         self._prev_motion_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
@@ -771,6 +798,16 @@ class RacketTargetCommand(CommandTerm):
         # from scripts/isaac_ball_inloop_check.py). Default OFF = byte-identical (no driver, no
         # scene entity, no physics callback, no metrics keys).
         self._shadow = None
+        # Mid-swing target refinement redraws the question without notifying a ball already in
+        # flight.  Combining the two would make the truth instrument measure a target jump rather
+        # than engine delivery, so fail before constructing either driver.
+        if float(getattr(cfg, "midswing_resample_prob", 0.0)) > 0.0 and (
+            cfg.shadow_ball or cfg.physical_ball
+        ):
+            raise ValueError(
+                "RacketTargetCommandCfg.midswing_resample_prob > 0 cannot be combined with "
+                "shadow_ball/physical_ball: the served ball would realize the old question."
+            )
         if cfg.shadow_ball:
             # The shadow ball mirrors the virtual-ball question stream (per-swing incoming
             # velocity/spin + the capture gate live in the vb machinery) — without it there is
@@ -795,6 +832,14 @@ class RacketTargetCommand(CommandTerm):
         # Default OFF = byte-identical (no manager, no scene entity, no physics callback, no metrics
         # keys, no RNG consumption — the serve is deterministic from the question).
         self._physical = None
+        if not cfg.physical_ball and (
+            getattr(cfg, "physical_ball_impulse", False)
+            or int(getattr(cfg, "physical_ball_substep", 1)) != 1
+        ):
+            raise ValueError(
+                "RacketTargetCommandCfg.physical_ball_impulse / physical_ball_substep require "
+                "physical_ball=True; Phase B rides on the truth instrument."
+            )
         if cfg.physical_ball:
             # The physical ball realizes the virtual-ball question stream (per-swing incoming
             # velocity/spin live in the vb machinery) — without it there is nothing to serve.
@@ -852,7 +897,77 @@ class RacketTargetCommand(CommandTerm):
     def _motion(self) -> MotionCommand:
         if self._motion_term is None:
             self._motion_term = self._env.command_manager.get_term(self.cfg.motion_command_name)
+        if (
+            getattr(self._motion_term, "event_timing_enabled", False)
+            and not self._event_timing_bound
+            and hasattr(self, "_question_bank")
+        ):
+            self._bind_event_timing_contract()
         return self._motion_term
+
+    def _bind_event_timing_contract(self) -> None:
+        """Bind every immutable schedule row to this exact train bank and native clip timing."""
+
+        motion = self._motion_term
+        if motion is None or not motion.event_timing_enabled:
+            self._event_timing_bound = True
+            return
+        bank = self._question_bank
+        if bank is None:
+            raise ValueError("post_strike_t1 requires a schema-v3 train question bank")
+        metadata = getattr(bank, "metadata", None)
+        if (
+            not isinstance(metadata, dict)
+            or int(metadata.get("schema_version", 0)) != 3
+            or metadata.get("split") != "train"
+        ):
+            raise ValueError("post_strike_t1 requires a validated schema-v3 train-split bank")
+        if float(self.cfg.midswing_resample_prob) != 0.0:
+            raise ValueError("post_strike_t1 requires midswing_resample_prob=0")
+
+        schedule = motion.event_schedule
+        if schedule is None:
+            raise RuntimeError("post_strike_t1 has no loaded immutable schedule")
+        counts = bank.counts.to(device=self.device, dtype=torch.long)
+        for flat_index, row in enumerate(schedule.rows):
+            if row.clip_id >= len(counts) or row.bank_row >= int(counts[row.clip_id]):
+                raise ValueError(
+                    f"event schedule row {flat_index} references unavailable train-bank row "
+                    f"clip={row.clip_id} bank_row={row.bank_row}"
+                )
+            incoming = bank.incoming_vel[row.clip_id, row.bank_row].detach().cpu().numpy()
+            actual_id = question_id(incoming)
+            if actual_id != row.question_id:
+                raise ValueError(
+                    f"event schedule row {flat_index} question_id={row.question_id} does not "
+                    f"match train bank clip={row.clip_id} row={row.bank_row} id={actual_id}"
+                )
+
+        ml = motion.motion
+        nseg = int(ml.num_segments)
+        phases_cfg = self._strike_phases_cfg(nseg)
+        phases = (
+            [float(value) for value in phases_cfg]
+            if phases_cfg
+            else [float(self.cfg.strike_phase)] * nseg
+        )
+        files = (
+            [motion.cfg.motion_file]
+            if isinstance(motion.cfg.motion_file, str)
+            else list(motion.cfg.motion_file)
+        )
+        validate_runtime_motion_contract(
+            metadata,
+            files,
+            [int(value) for value in ml.seg_len.tolist()],
+            phases,
+        )
+        native_ticks = []
+        for clip_id in range(nseg):
+            strike_step, _, seg_start, _ = self._strike_frame_for_clip(ml, clip_id)
+            native_ticks.append(strike_step - seg_start)
+        motion.bind_event_native_strike_ticks(native_ticks)
+        self._event_timing_bound = True
 
     def _strike_phases_cfg(self, nseg: int) -> tuple:
         """cfg.strike_phase_per_clip validated against the loaded motion's segment count (fail-loud).
@@ -1387,6 +1502,213 @@ class RacketTargetCommand(CommandTerm):
         # Held per env until its next resample; reset-mean reports the question difficulty mix.
         self.metrics["question_difficulty_deg"][env_ids] = diff
 
+    def _install_event_training_questions(
+        self,
+        env_ids: Sequence[int] | torch.Tensor,
+        clip_ids: torch.Tensor,
+        bank_rows: torch.Tensor,
+    ) -> None:
+        """Install T1 train-bank rows without resetting physical, action, history, or noise state."""
+
+        if self._question_bank is None or not self._event_timing_bound:
+            raise RuntimeError("post_strike_t1 question-bank contract is not bound")
+        ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device).reshape(-1)
+        clips = torch.as_tensor(clip_ids, dtype=torch.long, device=self.device).reshape(-1)
+        rows = torch.as_tensor(bank_rows, dtype=torch.long, device=self.device).reshape(-1)
+        if len(ids) == 0 or len(ids) != len(clips) or len(ids) != len(rows):
+            raise ValueError("event question install requires equal, non-empty id/clip/row vectors")
+        motion = self._motion()
+        live_clips = motion.clip_id[ids] if motion._multiseg else torch.zeros_like(clips)
+        if not torch.equal(live_clips, clips):
+            raise RuntimeError("event motion and atomic train-bank question clips disagree")
+        counts = self._question_bank.counts.to(device=self.device, dtype=torch.long)
+        if (
+            torch.any(clips < 0)
+            or torch.any(clips >= len(counts))
+            or torch.any(rows < 0)
+            or torch.any(rows >= counts[clips])
+        ):
+            raise ValueError("event question install references an invalid train-bank row")
+        if not self._qb_face_frame_checked:
+            self._check_question_bank_face_frame()
+
+        origins = self._env.scene.env_origins[ids]
+        bank = self._question_bank
+        contact = bank.contact_pos[clips]
+        self.racket_target_pos_w[ids] = origins + contact
+        self.racket_target_vel_w[ids] = bank.demanded_vel[clips, rows]
+        demanded_normal = bank.demanded_normal[clips, rows]
+        self.racket_target_normal_w[ids] = demanded_normal
+        self.target_normal_cmd[ids] = demanded_normal
+        self.vb_vel_in_w[ids] = bank.incoming_vel[clips, rows]
+        self.vb_spin_in_w[ids] = bank.incoming_spin[clips, rows]
+        self.metrics["question_difficulty_deg"][ids] = bank.difficulty_deg[clips, rows]
+
+        # Bank training uses a pinned ready anchor.  Do not draw a fresh base jitter here: the
+        # immutable question row and its clip/deadline are installed as one deterministic message.
+        self.base_target_pos_w[ids] = origins[:, :2] + self._qb_base_anchor_off_xy()[clips]
+        self.station_anchor_pos_w[ids] = origins[:, :2] + torch.tensor(
+            self.cfg.station_anchor_offset_xy, dtype=torch.float32, device=self.device
+        )
+        self.swing_sign[ids] = torch.where(clips == 0, 1.0, -1.0)
+
+        # This is an intra-episode post-strike transition: close the previous swing's ledger and
+        # start the new one, but do not classify it as a pre-strike fall and do not reset session
+        # state.  _prev_clip_id still names the just-finished clip because MotionCommand publishes
+        # the new clip earlier in the same manager step.
+        if motion._multiseg:
+            self._recover_from_clip[ids] = self._prev_clip_id[ids]
+        self._resample_is_wrap = True
+        try:
+            self._count_swing_starts(ids, count_prestrike_falls=False)
+        finally:
+            self._resample_is_wrap = False
+        self._hold_edge_pending[ids] = True
+        self._previous_in_hold[ids] = False
+        self._hold_start_yaw[ids] = 0.0
+        self._exact_fired[ids] = False
+        self._prev_motion_steps[ids] = motion.time_steps[ids]
+        self._prev_racket_dist[ids] = torch.norm(
+            self.racket_pos_w[ids] - self.racket_target_pos_w[ids], dim=-1
+        ).detach()
+        self.racket_progress[ids] = 0.0
+        self._progress_reset_mask[ids] = True
+        if hasattr(self, "time_left"):
+            self.time_left[ids] = float("inf")
+        if self._shadow is not None:
+            self._shadow.on_resample(ids)
+        if self._physical is not None:
+            self._physical.on_resample(ids)
+        # Deliberately no _reset_actor_target_state(): _push_actor_target() advances the existing
+        # latency ring, AR(1) noise, dropout countdown and hold-last state below.
+
+    def install_external_exam_questions(
+        self,
+        env_ids: Sequence[int],
+        exam_bank,
+        clip_ids: torch.Tensor,
+        bank_rows: torch.Tensor,
+    ) -> None:
+        """Atomically install evaluator-owned exam rows without changing the training bank.
+
+        ``cfg.question_bank`` and ``self._question_bank`` remain the saved *train* split.  A formal
+        evaluator independently loads/validates the exam split, materializes an immutable
+        content-addressed schedule, resets the environment to nominal stand, then calls this seam
+        once before the first actor observation.  There is intentionally no automatic cursor or
+        wrap behavior here: one environment answers one scheduled row, and any later resample is a
+        protocol violation handled by the evaluator ledger.
+        """
+
+        raw_ids = torch.as_tensor(env_ids, device=self.device)
+        raw_clips = torch.as_tensor(clip_ids, device=self.device)
+        raw_rows = torch.as_tensor(bank_rows, device=self.device)
+        for name, value in (("env_ids", raw_ids), ("clip_ids", raw_clips),
+                            ("bank_rows", raw_rows)):
+            if value.dtype == torch.bool or value.is_floating_point() or value.is_complex():
+                raise ValueError(f"external exam {name} must use an integer dtype")
+        ids = raw_ids.to(dtype=torch.long).reshape(-1)
+        clips = raw_clips.to(dtype=torch.long).reshape(-1)
+        rows = raw_rows.to(dtype=torch.long).reshape(-1)
+        if len(ids) == 0 or len(ids) != len(clips) or len(ids) != len(rows):
+            raise ValueError(
+                "external exam questions require equal, non-empty env/clip/row vectors"
+            )
+        if len(torch.unique(ids)) != len(ids) or torch.any(ids < 0) or torch.any(ids >= self.num_envs):
+            raise ValueError("external exam env ids must be unique and in range")
+        if float(self.cfg.midswing_resample_prob) != 0.0:
+            raise ValueError("external BankExam requires midswing_resample_prob=0")
+        metadata = getattr(exam_bank, "metadata", None)
+        if not isinstance(metadata, dict) or metadata.get("split") != "exam":
+            raise ValueError("external BankExam requires a validated schema-v3 exam split")
+        counts = exam_bank.counts.to(device=self.device, dtype=torch.long)
+        if torch.any(clips < 0) or torch.any(clips >= len(counts)):
+            raise ValueError("external exam clip ids are outside the exam bank")
+        if torch.any(rows < 0) or torch.any(rows >= counts[clips]):
+            raise ValueError("external exam row is outside its clip's validated question count")
+
+        motion = self._motion()
+        live_clips = motion.clip_id[ids] if motion._multiseg else torch.zeros_like(clips)
+        if not torch.equal(live_clips, clips):
+            raise ValueError(
+                "external exam motion clip must be installed before its atomic racket question"
+            )
+
+        # The same +Y/A-frame guard used by training, now against the independently loaded exam
+        # bank.  Checking all rows makes a bad regenerated bank fail before any score is emitted.
+        self._ensure_reference_strike_state()
+        ref_raw = self._ref_racket_normal_raw_w_per_clip
+        if ref_raw is None or ref_raw.shape[0] < len(counts):
+            raise RuntimeError("external exam could not resolve per-clip raw face normals")
+        demanded_all = exam_bank.demanded_normal.to(self.device)
+        for clip in range(len(counts)):
+            count = int(counts[clip])
+            dots = torch.mv(demanded_all[clip, :count], ref_raw[clip])
+            if float(dots.min()) <= 0.0:
+                raise ValueError(
+                    f"external exam clip {clip} contains a demanded normal opposite the +Y/A frame"
+                )
+
+        origins = self._env.scene.env_origins[ids]
+        contact = exam_bank.contact_pos.to(self.device)[clips]
+        incoming_vel = exam_bank.incoming_vel.to(self.device)[clips, rows]
+        incoming_spin = exam_bank.incoming_spin.to(self.device)[clips, rows]
+        demanded_vel = exam_bank.demanded_vel.to(self.device)[clips, rows]
+        demanded_normal = demanded_all[clips, rows]
+        difficulty = exam_bank.difficulty_deg.to(self.device)[clips, rows]
+
+        self.racket_target_pos_w[ids] = origins + contact
+        self.racket_target_vel_w[ids] = demanded_vel
+        # Formal diagnostics grade the demanded exam face even for legacy actors that had no
+        # face-command observation.  Face-command actors still read ``target_normal_cmd`` through
+        # the audited +Y/A-frame lane below.
+        self.racket_target_normal_w[ids] = demanded_normal
+        self.target_normal_cmd[ids] = demanded_normal
+        self.vb_vel_in_w[ids] = incoming_vel
+        self.vb_spin_in_w[ids] = incoming_spin
+        if "question_difficulty_deg" not in self.metrics:
+            self.metrics["question_difficulty_deg"] = torch.zeros(
+                self.num_envs, device=self.device
+            )
+        self.metrics["question_difficulty_deg"][ids] = difficulty
+
+        # Preserve the saved training task's station semantics while removing reset-time jitter.
+        if self.cfg.target_mode == "reference_perturbed":
+            if self._ref_reach_offset_xy_per_clip is None:
+                raise RuntimeError("external exam could not resolve reference reach offsets")
+            base_off = contact[:, :2] - self._ref_reach_offset_xy_per_clip[clips]
+        else:
+            base_off = torch.zeros_like(contact[:, :2])
+            blend = float(self.cfg.base_couple_blend)
+            if blend > 0.0:
+                base_off[:, 1] = (blend * contact[:, 1]).clamp(
+                    -self.cfg.base_couple_max_offset, self.cfg.base_couple_max_offset
+                )
+        self.base_target_pos_w[ids] = origins[:, :2] + base_off
+        self.station_anchor_pos_w[ids] = origins[:, :2] + torch.tensor(
+            self.cfg.station_anchor_offset_xy, dtype=torch.float32, device=self.device
+        )
+        self.swing_sign[ids] = torch.where(clips == 0, 1.0, -1.0)
+
+        self._exact_fired[ids] = False
+        self._prev_motion_steps[ids] = motion.time_steps[ids]
+        self.racket_progress[ids] = 0.0
+        self._progress_reset_mask[ids] = True
+        if hasattr(self, "time_left"):
+            self.time_left[ids] = float("inf")
+        self._prev_clip_id[ids] = clips
+        self._recover_from_clip[ids] = -1
+        self._rally_returned[ids] = False
+        self._rally_pending_return[ids] = False
+        # The reset sampled a training clip/question before the evaluator installed the exam item.
+        # Refresh actual racket FK and the actor-visible clock without advancing physics or either
+        # command clock; otherwise action 0 pairs the new question with zero/stale FK and TTS.
+        self._compute_racket_state()
+        self._compute_strike_timing()
+        self._prev_racket_dist[ids] = torch.norm(
+            self.racket_pos_w[ids] - self.racket_target_pos_w[ids], dim=-1
+        ).detach()
+        self._reset_actor_target_state(ids)
+
     def _check_question_bank_face_frame(self):
         """A-frame (+Y calibration) guard: every bank demanded normal must be same-side with the
         RAW clip reference face (2026-07-09 单翻病防复发卫兵).
@@ -1651,7 +1973,16 @@ class RacketTargetCommand(CommandTerm):
         if self._physical is not None:
             self._physical.on_resample(env_ids)
 
-    def _compute_racket_state(self):
+    def _racket_fk(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Pure current articulation FK.
+
+        Returns ``(position, quaternion, link-point linear velocity, raw +Y normal, signed
+        striking-face normal)`` without rebinding any reward/observation-visible command buffer.
+        The Phase-B physics callback consumes these locals so enabling a metrics-only ball cannot
+        leak substep-fresh racket state into the policy or reward stream.
+        """
         data = self.robot.data
         # Isaac Lab 2.1's legacy ``body_*`` state deliberately mixes frames:
         # ``body_pos_w`` / ``body_quat_w`` are LINK/actor-frame quantities, but
@@ -1666,15 +1997,15 @@ class RacketTargetCommand(CommandTerm):
         # properties (formal runtime verification covers that contract).
         if self._racket_mode == "body":
             idx = self._racket_body_index
-            self.racket_pos_w = data.body_pos_w[:, idx]
-            self.racket_quat_w = data.body_quat_w[:, idx]
+            pos = data.body_pos_w[:, idx]
+            quat = data.body_quat_w[:, idx]
             if not hasattr(data, "body_link_lin_vel_w"):
                 raise RuntimeError(
                     "RacketTargetCommand requires Isaac Lab body_link_lin_vel_w: body_pos_w is a "
                     "link-origin position but body_lin_vel_w is a COM-point velocity. Falling back "
                     "would silently corrupt racket speed. Use the pinned Isaac Lab 2.1 runtime."
                 )
-            self.racket_lin_vel_w = data.body_link_lin_vel_w[:, idx]
+            lin_vel = data.body_link_lin_vel_w[:, idx]
         else:
             widx = self._wrist_body_index
             wpos = data.body_pos_w[:, widx]
@@ -1687,9 +2018,9 @@ class RacketTargetCommand(CommandTerm):
             wlin = data.body_link_lin_vel_w[:, widx]
             wang = data.body_link_ang_vel_w[:, widx]
             offset_w = quat_apply(wquat, self._mount_offset)
-            self.racket_pos_w = wpos + offset_w
-            self.racket_lin_vel_w = wlin + torch.cross(wang, offset_w, dim=-1)
-            self.racket_quat_w = quat_mul(wquat, self._mount_quat)
+            pos = wpos + offset_w
+            lin_vel = wlin + torch.cross(wang, offset_w, dim=-1)
+            quat = quat_mul(wquat, self._mount_quat)
         # Face normal = chosen local axis of the racket frame, mapped to world, times the striking-FACE
         # sign. 人话(franco 2026-07-09 拍板"哪面拍子超前就是哪面"):统一正反手策略里两个挥拍用的是
         # 拍子相反的两面(正手=红面/+Y,反手=黑面/−Y),所以开了 mount_normal_sign_per_clip 时符号按
@@ -1698,7 +2029,7 @@ class RacketTargetCommand(CommandTerm):
         # 指标(racket_normal_error_deg,_update_metrics)都读 self.racket_normal_w,一处修两处好。
         # Asset audit 2026-07-10 confirms local +Y is the red outer-face normal;
         # see docs/interfaces/racket_contact_geometry.md.
-        axis_w = matrix_from_quat(self.racket_quat_w)[:, :, self.cfg.mount_normal_axis]
+        axis_w = matrix_from_quat(quat)[:, :, self.cfg.mount_normal_axis]
         if self.cfg.mount_normal_sign_per_clip:
             motion = self._motion()
             if self._mount_sign_per_clip_t is None:
@@ -1717,8 +2048,18 @@ class RacketTargetCommand(CommandTerm):
         # one: the face_command reward channel pairs against +Y-frame question-bank targets and must
         # read THIS buffer (hope_rewards._face_pair; 2026-07-09 单翻病定案). Sign table empty =>
         # racket_normal_w == raw * 1.0, bitwise identical.
-        self.racket_normal_raw_w = axis_w
-        self.racket_normal_w = axis_w * sign
+        return pos, quat, lin_vel, axis_w, axis_w * sign
+
+    def _compute_racket_state(self):
+        # This remains the only writer of the command's racket-state buffers. Phase-B substep
+        # contact scans call _racket_fk() and keep its results local.
+        (
+            self.racket_pos_w,
+            self.racket_quat_w,
+            self.racket_lin_vel_w,
+            self.racket_normal_raw_w,
+            self.racket_normal_w,
+        ) = self._racket_fk()
 
     def _compute_strike_timing(self):
         """Refresh time_to_strike / pre_strike / strike_window from the CURRENT motion phase.
@@ -1769,6 +2110,16 @@ class RacketTargetCommand(CommandTerm):
                 )
             else:
                 self.time_to_strike = (strike_step - motion.time_steps).float() * self._env.step_dt
+        if getattr(motion, "event_timing_enabled", False):
+            # For a successfully revealed T1 row, WHEN is owned by the immutable schedule rather
+            # than by the clip phase.  The native clip/hold pair is only the feasible trajectory
+            # used to arrive there; it may never move the deadline.  Pending, unavailable and
+            # infeasible rows keep their old clip timing but are masked out of exact grading below.
+            event_mask = motion.event_installed
+            scheduled_tts = (
+                motion.event_deadline_ticks_remaining.float() * self._env.step_dt
+            )
+            self.time_to_strike = torch.where(event_mask, scheduled_tts, self.time_to_strike)
         self.pre_strike = self.time_to_strike > 0.0
         _tts_abs = self.time_to_strike.abs()
         self.strike_window = _tts_abs <= self.cfg.strike_window_s
@@ -1791,6 +2142,17 @@ class RacketTargetCommand(CommandTerm):
         # (set this same step when it wrapped a swing) instead of a time_steps<prev heuristic — the latter
         # fails for the unified policy when a wrap jumps the index to a HIGHER concatenated segment start
         # (forehand->backhand). Targets for fresh episodes are sampled by the manager's reset.
+        event_ids = (
+            torch.where(motion.event_just_installed)[0]
+            if getattr(motion, "event_timing_enabled", False)
+            else torch.empty(0, dtype=torch.long, device=self.device)
+        )
+        if len(event_ids) > 0:
+            self._install_event_training_questions(
+                event_ids,
+                motion.event_current_clip_id[event_ids],
+                motion.event_current_bank_row[event_ids],
+            )
         wrapped = torch.where(motion.just_resampled)[0] if hasattr(motion, "just_resampled") else \
             torch.where(motion.time_steps < self._prev_motion_steps)[0]
         if len(wrapped) > 0:
@@ -1859,6 +2221,12 @@ class RacketTargetCommand(CommandTerm):
         # A1 target latency/jitter: refresh the ACTOR-visible target view once per step (no-op alias
         # when the knobs are off). Runs LAST so it sees this step's wrap/refinement target updates.
         self._push_actor_target()
+        # CommandTerm.compute() ran exact-strike metrics before this update.  Consume every due
+        # opportunity now regardless of whether the policy hit it, so a miss cannot pause or shift
+        # the immutable sequence.  MotionCommand will fail closed next step if this handoff is ever
+        # skipped, preventing a stale due row from being silently extended.
+        if getattr(motion, "event_timing_enabled", False):
+            motion.finalize_event_deadlines()
 
     def _push_actor_target(self):
         """A1: refresh the ACTOR-visible target view once per control step (latency + jitter).
@@ -2518,12 +2886,19 @@ class RacketTargetCommand(CommandTerm):
         # the ±strike_window_s window). Between strikes the held value carries to the next reset.
         in_win = self.strike_window
         exact_strike = torch.abs(self.time_to_strike) <= (0.5 * self._env.step_dt + 1e-6)
-        if self._motion().retiming_active:
+        motion = self._motion()
+        if motion.retiming_active:
             # R14: float32 clock drift can (~1e-4/swing) land two consecutive tts values inside the
             # ±dt/2 window; latch so one-shot consumers (vb rewards, exact EMAs, achieved-buffer
             # writes) fire once per swing. The latch re-arms at every target resample.
             exact_strike = exact_strike & ~self._exact_fired
             self._exact_fired = self._exact_fired | exact_strike
+        if getattr(motion, "event_timing_enabled", False):
+            # Unavailable/infeasible rows remain on the scheduler denominator but must not grade a
+            # stale previous target merely because its old clip happens to cross zero.  Before the
+            # first origin, the normal exact clip strike is accepted and is the sole arming event.
+            exact_strike = exact_strike & motion.event_exact_strike_allowed
+            motion.record_event_exact_strike(torch.where(exact_strike)[0])
         self.metrics["exact_strike_hit_rate"] = exact_strike.float()
 
         # --- DEBUG: swing-through sign verification (cfg.debug_reward_logging) -----------------------
@@ -3328,8 +3703,9 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # swing's question incoming ball is realized physically — reverse-integrated venue-model
     # launch (arrives at the question contact point with the question incoming velocity exactly
     # at the strike frame), PhysX flight + per-substep venue aero wrench, CODE-DRIVEN fitted
-    # table bounce (venue contact.table params), robot pass-through (ball collider off — the
-    # in-engine fitted racket impulse is PHASE B, out of scope). Metrics: pb_serve_err_m /
+    # table bounce (venue contact.table params), robot pass-through unless the evaluator-only,
+    # content-addressed Phase-B rider sets ``physical_ball_impulse`` dynamically. Metrics:
+    # pb_serve_err_m /
     # pb_serve_vel_err at the exact-strike frame + serve/bounce/landing counts. PURE MEASUREMENT:
     # never read by rewards/observations/bank-target logic; consumes NO RNG; requires
     # virtual_ball=True (loud error otherwise). Full honesty notes: physical_ball.py docstring.
@@ -3412,6 +3788,9 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # the 0%-return root cause — eval mode B 2026-07-05). Exact/composite metrics use the same
     # pairing as the reward; the critic reference lane remains unchanged. False = old path.
     face_command: bool = False
+    # Reward/critic/metric face pairing. ``shared_plus_y`` is the production A-frame convention;
+    # ``legacy_signed_vs_A`` is an explicit diagnostic continuation of the pre-fix mismatch.
+    face_command_pairing: str = "shared_plus_y"
 
     # --- desired base XY target (offsets from the env origin, world frame, meters) ---
     base_target_x_range: tuple[float, float] = (-0.10, 0.10)

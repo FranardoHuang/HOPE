@@ -48,6 +48,9 @@ Notes:
 - Desired racket normal is NOT an actor observation (HITTER Table I: normal is a reward target
   only). `base_lin_vel` is critic-only. `swing_type` is included because the default task trains
   one unified forehand+backhand policy.
+- `task.racket.face_command_pairing` does not change the 175-D actor. For the 179/181 layouts,
+  `racket_target_normal_cmd` also always remains the delayed atomic bank command in the shared
+  +Y/A-frame convention. The selector never flips or relabels that actor command.
 - Rationale for base-position freedom: the mocap DOES stream the robot base pose during play
   (300 Hz, `/P1/pose` — see the deploy-available signal set below), but that VRPN link is not
   bridged into the deploy runner, and independence from it is a deliberate robustness choice. The
@@ -79,6 +82,20 @@ The critic group is unchanged between full and deploy-parity (~318-D) and is nev
 2, `racket_target_pos_b` 3, `racket_target_vel_w` 3, `racket_target_normal_w` 3, `time_to_strike`
 1, plus sim-only actual racket FK state `racket_pos_b` 3, `racket_lin_vel_w` 3, `racket_normal_w`
 3, and `episode_time_left` 1. Privileged sim-only info is allowed here by the training contract.
+
+When `face_command=true`, one validated selector keeps the face reward, privileged face
+observations, and exact/composite face metrics on the same measured/target pair:
+
+- `face_command_pairing: shared_plus_y` (default) compares raw mount +Y with the demanded
+  `target_normal_cmd` in the bank's +Y/A frame.
+- `face_command_pairing: legacy_signed_vs_A` compares the per-clip signed measured normal with the
+  same A-frame target. It intentionally reproduces the historical signed-measurement/A-target
+  mismatch and is diagnostic only; report such results with
+  `evaluation_contract_exact=false`.
+
+This selector changes training reward/critic/metric pairing, not actor observation meaning or the
+deploy wire. Unknown values fail during command construction. The selected value is bound into the
+schema-3 hard contract and ONNX/export metadata so old and corrected continuations cannot be mixed.
 
 ## Action
 
@@ -132,6 +149,11 @@ schema-3 checkpoint can keep `training_contract_lineage_exact=1`. Legacy/missing
 remain diagnostic forever and cannot be “washed” into formal status by one continuation save.
 Native and standalone exporters verify checkpoint↔JSON binding, write
 `source_checkpoint_sha256`, and derive normalization truth from the actual graph/checkpoint.
+For a non-baked normalized actor, the sidecar/runtime transform is exactly
+`(obs - mean) / (std + eps)`. Constant features may have `std=0`; validity
+requires finite non-negative std, finite non-negative epsilon, and a strictly
+positive `std+eps` divisor in every dimension. This numeric guard is shared by
+the Isaac checkpoint compatibility loader and MuJoCo sidecar path.
 
 Publish-capable C++ and formal BankExam require: metadata schema 2, exact training schema 3,
 baked empirical normalization, self-consistent dt/decimation, `qdes_clamp=1`, 31 soft-limit pairs,
@@ -139,9 +161,36 @@ and the source checkpoint/contract hashes. Older artifacts may only be opened un
 no-publish diagnostics.
 
 Formal evaluation additionally binds runtime facts that do not belong in the
-training ONNX: immutable question schedule, common MJCF `stand` ready-state,
-MJCF content and resolved MuJoCo execution-contract SHA. A teacher-reference
-reset or direct PhysX-friction-number proxy forces
+training ONNX: immutable question schedule, bank/source-family SHA, per-attempt
+noise seed and hold, ready-state hash, scorer/physics source and the resolved
+simulator execution contract. The schedule artifact contains content-addressed
+atomic question IDs and an exact per-clip quota; both simulator legs must emit
+the same schedule SHA and ordered IDs. `hold_steps=H` means exactly `H` policy
+actions on the ready-stand reference followed by one action on raw clip frame
+0; this release-frame rule is hashed into the schedule artifact.
+For MuJoCo BankExam the execution contract also records the SHA of the exact
+standalone `stage1_question_bank.py` loader selected from the current checkout.
+This keeps exam validation independent of Isaac package imports and ambient
+`HOPE_STAGE1_QB` shell state.
+
+Carry-state BankExam is explicitly diagnostic. Its product continuity metric
+uses only scheduled rows that have a following paper item. A legal return plus
+natural clip completion counts as `returned_and_recovered_to_next`; a
+post-strike fall or tracking guard may retain `returned=true` but fails the
+recovery conjunct. The terminal paper row has no next opportunity and is not
+in this metric's denominator.
+
+The Isaac companion evaluator does not add an actor term or change the action
+contract. It restores the saved train-split command, performs one nominal
+stand reset, then installs the evaluator-owned exam timing and the complete
+atomic row (contact, incoming velocity/spin, demanded velocity/normal) before
+re-reading the first actor observation. One environment owns one schedule
+item; there is no cursor, wrap or replacement question. Physical falls, guard
+resets and timeouts remain rows in the original denominator, while any
+external truncation invalidates the whole cell. The MuJoCo leg resets from the
+common MJCF `stand` keyframe and consumes the same artifact. A
+teacher-reference reset, direct PhysX-friction-number proxy or historical
+checkpoint without exact train-family binding forces
 `evaluation_contract_exact=false`.
 
 ## Deploy-Available Signal Set
@@ -185,6 +234,10 @@ reward targets, and deploy compatibility here first.
   (position, velocity, face normal), and the long-run distribution widens
   through success-gated perturbations. Either mode changes target generation
   only, not the observation/action tensor contract.
+- Face-command grading: `racket.face_command_pairing: shared_plus_y` is the production convention.
+  The explicit `legacy_signed_vs_A` value exists only for controlled historical diagnosis. In both
+  modes the actor's demanded normal, when present, remains the shared +Y/A-frame command; only the
+  reward/privileged-observation/metric pairing changes.
 - Clip wrap for HOPE ping-pong does not teleport the robot mid-episode: the
   target and reference clip/time resample, but the policy must physically carry
   the body between swings (`MotionCommandCfg.wrap_teleport` defaults to false;

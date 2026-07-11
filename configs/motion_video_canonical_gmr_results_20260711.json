@@ -1,0 +1,218 @@
+{
+  "schema_version": 1,
+  "status": "complete_diagnostic_canonical_gmr",
+  "scope": "ten cohort-median-beta GVHMR PTs retargeted serially on CPU through exact clean A3 GMR; structural and warm-up evidence only, with no grounding, collision, schema-2, training, TOPP, or robot claim",
+  "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+  "preregistration": {
+    "path": "configs/motion_video_canonical_gmr_prereg_20260711.json",
+    "sha256": "d165a60c575defba7bbb00441fdbbe196c6fcc89596f9eaec5508b56ffe1de02"
+  },
+  "runtime": {
+    "pod": "pod1",
+    "cpu_only": true,
+    "CUDA_VISIBLE_DEVICES": "",
+    "pid": 1442090,
+    "pgid": 1442090,
+    "started_utc": "2026-07-11T13:31:57.291965Z",
+    "completed_utc": "2026-07-11T13:32:46.016709Z",
+    "elapsed_seconds": 48.724744,
+    "queue_state": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_state_v1/queue_state.json",
+      "bytes": 4759,
+      "sha256": "7bb811b08c2f9f4d640221854f2507302dfae208b1992deca61f189a4b61ac76"
+    },
+    "launcher_log": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/canonical_gmr_control_v1/queue.launch.log",
+      "bytes": 1786,
+      "sha256": "04078e83527dd1dc755d63a4bce4cc5a5f8f92b5c478dbdd0686ef6fac4000a5"
+    },
+    "fatal_log_token_scan": "pass"
+  },
+  "source_materialization": {
+    "completion_manifest_sha256": "4043b34210b30be4151457623c3152ebd09650fb2caf587eb78359887a06bc2b",
+    "canonical_betas_artifact_sha256": "f405ba45d7f2233d3735c2e6b59409203cc98b1e97deef00224e16f2c7c4cbf2",
+    "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+    "gmr_height_heuristic_m_not_calibration": 1.7306628024578095
+  },
+  "gmr_contract": {
+    "commit": "aabea2eee4be4bc16d4be17dac5ffa85e5a31539",
+    "worktree_clean_before_and_after": true,
+    "source_bundle_sha256": "5b94af15f4a367dff8d7dc6c1cf14d26be6a649a25df6e1c1046b0e6ab72e2de",
+    "entrypoint_sha256": "a989edd8e0c9392d18bd0a439ed4f290f187a8f8daaaa049c992f79cb1d185da",
+    "loader_sha256": "2737f47207eb7298e747907ea2d11355d1280b680bc4e0fbce3080657e505de2",
+    "loader_selection": "smpl_params_global.betas[0].detach().cpu().numpy()[:10]",
+    "loader_zero_padding": false,
+    "neutral_smplx_model_sha256": "376021446ddc86e99acacd795182bbef903e61d33b76b9d8b359c2b0865bd992",
+    "python_version": "Python 3.10.20",
+    "pip_freeze_sha256": "56b0f8af9677b279bbb4925b6f49113f484dcb9ded1ed8d9bc56af71f304c694"
+  },
+  "tools": {
+    "queue_sha256": "07769d294e803243b1a908c290b0513c820e54520e0aabf3da72933b812ec55a",
+    "legacy_queue_dependency_sha256": "9b70ab80767e470309b7290ec9d7e43469cf9a5ea44ec988447e3f6219f7f05f",
+    "result_auditor_sha256": "7adca8eab4e168f0c8c505d77dabb000c9d29891594b8882e6aba95250469884"
+  },
+  "results": [
+    {
+      "asset_id": "franco_forehand_block",
+      "frames": 65,
+      "source_sha256": "9ee4174218023ccd59490022ea7a200c1a767d389e7ffef4e38a7bd9ae896167",
+      "output_path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/franco_forehand_block.diagnostic_cohort_median_betas.gmr.pkl",
+      "output_bytes": 20062,
+      "output_sha256": "befd20649b09f038ff2936f2b25e281e1995164dea804d4752715ac6af33dc2d",
+      "binding_sha256": "df241a0c0b8e76f8cae1a9995e9775790583a36173ded98682c3fed56c958c51",
+      "run_log_sha256": "ad6d3ceed8b7760b98b0e3ce799851f3737a0f8e17a1a71a88a106495ca74a32",
+      "structural_audit_sha256": "308b9dafe9ba6b59474283dad26188406e19c7b8ea81770c9af5716410facbc5",
+      "warmup_rounds": 21,
+      "warmup_max_dq": 0.0000875,
+      "finite_elements": 2471
+    },
+    {
+      "asset_id": "franco_backhand_block",
+      "frames": 63,
+      "source_sha256": "c68b021cebfaf0adb64bc94530a5a965fadd5b1a270595eb890b9591cc3bedf2",
+      "output_path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/franco_backhand_block.diagnostic_cohort_median_betas.gmr.pkl",
+      "output_bytes": 19454,
+      "output_sha256": "dd3c9500c0936aca002e5524ff2c96d8988d901ebf4136893dc626315f834984",
+      "binding_sha256": "e0d797aa1ff24c4b214c2555d8a7aedc1241d51de6d42cff3af3234e8bb454cb",
+      "run_log_sha256": "8ca41528f115759572559eecc113e7e4f4b36fecc65d2cbe1c00eccb0ecfd293",
+      "structural_audit_sha256": "8318bb94724acdea2a16453c35d2b294acd3b305f9356e4a06a67d18a13851d6",
+      "warmup_rounds": 20,
+      "warmup_max_dq": 0.0000707,
+      "finite_elements": 2395
+    },
+    {
+      "asset_id": "franco_forehand_loop",
+      "frames": 70,
+      "source_sha256": "bfdfeb88ec48efe8b5cfed4615e63da3b74b1d2c421cd82247327005d4d362c7",
+      "output_path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/franco_forehand_loop.diagnostic_cohort_median_betas.gmr.pkl",
+      "output_bytes": 21582,
+      "output_sha256": "497459ae3d7ec3508cf9b0c122acbb2a95cc1ab3f1a701fad1f80812378ae583",
+      "binding_sha256": "9aa8e2d0cc1e9466dcdc773434485ae3c3df8af41308a40b90a18fbc4bfe270e",
+      "run_log_sha256": "e2a17c94963919dcbf9de5c099f61e66499432ae84b93c461a0aaa9151762d14",
+      "structural_audit_sha256": "e47f04f15eed28b9e1acc55c6c09a31118c4cb5e3372185eb94a1a208b2410e8",
+      "warmup_rounds": 19,
+      "warmup_max_dq": 0.0000963,
+      "finite_elements": 2661
+    },
+    {
+      "asset_id": "franco_backhand_loop_a",
+      "frames": 69,
+      "source_sha256": "b24bcca25260aa9dc23d9916934363e1a2c9b422a2fadc07b33f5d5b088154d4",
+      "output_path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/franco_backhand_loop_a.diagnostic_cohort_median_betas.gmr.pkl",
+      "output_bytes": 21278,
+      "output_sha256": "64a1f401f712a31c47b52d17104385d6d9fabfd6f990164b606a624f0c2b683f",
+      "binding_sha256": "5ffd5fbfa72dda7f42aace3f767571e818aa525b672e0aee4f0e1bb415a8c102",
+      "run_log_sha256": "2f3d081bbdc9024588e964c92651d3e947a9f57810ad6a7d690ef3dd0829b37a",
+      "structural_audit_sha256": "8ceb69da4aea20839b22643e33c141b4e12b3dd47cf3f173a50e39991d465808",
+      "warmup_rounds": 16,
+      "warmup_max_dq": 0.0000782,
+      "finite_elements": 2623
+    },
+    {
+      "asset_id": "franco_backhand_loop_b",
+      "frames": 91,
+      "source_sha256": "ad0c1a2e5d1b09d04ff7be90c98c065fe9bf04da6b3d9340cded7588d426c48a",
+      "output_path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/franco_backhand_loop_b.diagnostic_cohort_median_betas.gmr.pkl",
+      "output_bytes": 27966,
+      "output_sha256": "d7a0a117e6f71b019b598d9c1e999f6e5333013b1ea06079060ebc58e28c845a",
+      "binding_sha256": "c040767aefe595959f5331c2de46bd8f90f2e5af503a5f3d14ef74e8e0e459b9",
+      "run_log_sha256": "d3bf10b3dc7665a1fd187122d8f4e6b78b47a26c5b5813b832645cc1a9b44872",
+      "structural_audit_sha256": "e51cf10fd729310175eaff0b1745d13c3cba72fc20e3c26c37027045cd7f444a",
+      "warmup_rounds": 21,
+      "warmup_max_dq": 0.0000688,
+      "finite_elements": 3459
+    },
+    {
+      "asset_id": "franco_backhand_loop_c",
+      "frames": 98,
+      "source_sha256": "65dcd2b7c3a5346c572759fc32ba581d64177cffcca3235f8d6a64f7ffcf7cf3",
+      "output_path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/franco_backhand_loop_c.diagnostic_cohort_median_betas.gmr.pkl",
+      "output_bytes": 30094,
+      "output_sha256": "e557e30b526a1ef28f21e07b7be64af16b5007d39011d44160d76dc7984f7ad6",
+      "binding_sha256": "e9e0e4d4f6e3a161c107dbd0988f48459a858d96be33c915b82e574d8a283a3b",
+      "run_log_sha256": "ffad26d5df7b6c2db42f6985d786191ee565301228454a30a1446ca9d1aa7377",
+      "structural_audit_sha256": "ef382eb12de869450a584d59d690f16d04385aa7e06b62ad98d825c5b99241e5",
+      "warmup_rounds": 17,
+      "warmup_max_dq": 0.0000821,
+      "finite_elements": 3725
+    },
+    {
+      "asset_id": "v6_forehand_block",
+      "frames": 35,
+      "source_sha256": "e95f52220c452757bc02269f700f6ff2bc84947c9c1abe8261955b610cf2e34c",
+      "output_path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/v6_forehand_block.diagnostic_cohort_median_betas.gmr.pkl",
+      "output_bytes": 10942,
+      "output_sha256": "69f23cef58c59a38c7321f8bd072d4ec58654a176ed8dab92a213b3f15793ae5",
+      "binding_sha256": "1d44fbe6c90eb822e5d513483cf8e150798303a9ff97ad8160e68cb1d06f209f",
+      "run_log_sha256": "5e4aba846bd97b184c3756713431d38c01135d8c107272a82ba22bd0f4f685c3",
+      "structural_audit_sha256": "9770abfd3f27684bb6a57492a49d79ad7e6050ccc2b019682f0dc697ddcc1aa2",
+      "warmup_rounds": 27,
+      "warmup_max_dq": 0.0000766,
+      "finite_elements": 1331
+    },
+    {
+      "asset_id": "v6_backhand_block",
+      "frames": 35,
+      "source_sha256": "0d630d0dd5ba980e6f25021257f82dd04297ea49859f8775828ea3956679a59b",
+      "output_path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/v6_backhand_block.diagnostic_cohort_median_betas.gmr.pkl",
+      "output_bytes": 10942,
+      "output_sha256": "9165f7ee163a6c581188adfbea584cb6c44d36ddccdb5d7a1c61235b83e223d6",
+      "binding_sha256": "d0b2dad152db4f11884ff1a76a292101300df400ffaf3fbd65c9dc9e9d1d9703",
+      "run_log_sha256": "620b4830a7e8e43b5f3e11f061d6e113f0595da8fa820b937ab6240b74e6b468",
+      "structural_audit_sha256": "cba161d94730f2fea35b699bfd2b516fcd0f6ef6dcaa8467a1f1fa51002baa0b",
+      "warmup_rounds": 27,
+      "warmup_max_dq": 0.0000712,
+      "finite_elements": 1331
+    },
+    {
+      "asset_id": "v7_forehand_block",
+      "frames": 64,
+      "source_sha256": "af31c9840972b01713a887839827460e1665663f972599b581ddfb939bf3da8c",
+      "output_path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/v7_forehand_block.diagnostic_cohort_median_betas.gmr.pkl",
+      "output_bytes": 19758,
+      "output_sha256": "b3051e04de99d34f0cb6644708d5a7a51686eb2fa33b93cd8c81001d3251dba8",
+      "binding_sha256": "f6322256c4314bd9c156a679d822da0878b5f75581eb17a435537c14c0dcec28",
+      "run_log_sha256": "0b7b30054e8f8bf4af70804a86c5620b5577cd8f4d0094ba842b4bcd290d4d1a",
+      "structural_audit_sha256": "b3bd9f31ddebcf32068803f4acf1df3531ee175b2de06f9d1091ff5153a63ae7",
+      "warmup_rounds": 28,
+      "warmup_max_dq": 0.0000854,
+      "finite_elements": 2433
+    },
+    {
+      "asset_id": "v7_backhand_block",
+      "frames": 64,
+      "source_sha256": "584e384ae9e1612ff2d9c3d03fef8a5a7cd969246e2e38ca0642411cb584454b",
+      "output_path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/v7_backhand_block.diagnostic_cohort_median_betas.gmr.pkl",
+      "output_bytes": 19758,
+      "output_sha256": "27921c745722726a90b7e70d05f8874903ec2f5f1e38e76a01c5e60b2f414881",
+      "binding_sha256": "a9343e9cf72db51cdc0e34475d315c4450394698c63a0c05dfdc09179ca083ba",
+      "run_log_sha256": "2fda48071253472fe613dd15c9ffe87d629376592dc21c4262604f1bd05ae22d",
+      "structural_audit_sha256": "cb96b110558a9c012fcd064ac90069902ff7eba7734bcb1a094f57fe36b06147",
+      "warmup_rounds": 29,
+      "warmup_max_dq": 0.0000976,
+      "finite_elements": 2433
+    }
+  ],
+  "invariants": {
+    "accepted_results": 10,
+    "all_expected_frames": true,
+    "all_30_hz_31_dof_finite": true,
+    "all_frame_zero_warmup_strict_lt_1e_4": true,
+    "all_sources_share_exact_canonical_vector": true,
+    "all_bind_exact_loader_entrypoint_body_model_and_clean_commit": true,
+    "no_gpu_allocation_by_queue": true,
+    "no_training_checkout_or_process_modified": true,
+    "formal_eligible": false
+  },
+  "next_gate": {
+    "status": "canonical_gmr_complete_grounding_and_safety_still_blocking",
+    "required": [
+      "run the existing content-addressed no-clobber grounding tool separately on all ten new canonical-beta GMR outputs",
+      "repeat dense/inter-frame self-collision, racket/handle-to-body clearance, dynamics and table/net swept-clearance gates",
+      "only then consider schema-2 conversion, phase scanning, TOPP, returnability or RL"
+    ]
+  },
+  "measured_height_m": null,
+  "a3_calibrated": false,
+  "formal_eligible": false
+}

@@ -43,6 +43,31 @@ Current ignored local asset roots:
 - `external_repos/IsaacLab/` when a local Isaac Lab source checkout is used for the training environment; record the tag/commit in the relevant gate doc.
 - `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` and other package-local copied/generated training assets; keep only the tiny `assets/__init__.py` path-helper and local `.gitignore` tracked so `whole_body_tracking.assets.ASSET_DIR` remains importable after a fresh clone.
 
+## User-Recorded Motion Videos
+
+Raw user-recorded motion videos are private, local-only inputs. Do not commit
+or publish the video bytes. Track only a small content-addressed manifest with
+the relative filename, byte count, SHA-256, media properties and intended
+semantic action. A private processing-Pod copy is allowed for this project,
+but it remains an ignored runtime asset and is not an artifact publication.
+
+The 2026-07-11 Franco/v6/v7 intake is bound by
+`configs/motion_video_intake_20260711.json`; the local restore and private Pod
+staging paths are recorded in `docs/operations/setup_local_sync.md`. Derived
+SMPL-X, CSV, NPZ, checkpoint and policy files follow the same ignored-heavy-
+artifact rule. A derived action is not deployable merely because its source
+video is present: motion, self-collision, table/net clearance and simulator
+gates must still pass, and no raw video grants permission for a real-robot run.
+
+The diagnostic GMR run also depends on five local source commits not present
+in the observed public upstream. Its 282,953,810-byte recovery bundle remains
+under the ignored private processing root; git tracks only the verified commit,
+bundle byte count/SHA and small per-result bindings. Do not add the bundle or
+generated GMR pickles to normal git. Reproduction must `git bundle verify`,
+confirm that the bundle advertises the recorded commit, and require a clean
+checkout before processing; the exact restore path is in
+`docs/operations/setup_local_sync.md`.
+
 ## Agibot Deploy Assets
 
 The tracked deploy source is under:

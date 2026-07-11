@@ -52,6 +52,35 @@ training is going”.
   safety failure. Reproducible commands are in
   [build_and_test.md](build_and_test.md).
 
+### Phase-1 same-paper evaluator lane (2026-07-11)
+
+The user explicitly authorized the current Codex task to inspect and control
+the Phase-1 evaluator jobs on both endpoints. The first audit found cc's old
+prototype `eval_deterministic.py` processes spinning on a tuple observation
+error and holding Kit resources, plus stale watchdog/export shells. Their exact
+process groups were terminated with `SIGTERM`; no unrelated training process
+was killed. Both pods then showed all six GPUs at `P8`, `0 MiB`, with no Kit
+cache-lock holder. This cleanup is operational evidence only, not a model
+score.
+
+Run the current evaluator from an isolated `/workspace/<name>/nohope` clone and
+store generated banks/schedules/ledgers under that user's persistent directory.
+Do not modify a historical run directory: it is an input artifact. Before each
+Isaac launch, repeat the process/GPU/cache-lock audit, obey the pod-wide
+one-Kit-boot rule, and verify the result by strict JSON/CSV artifacts rather
+than exit code alone. Use the same schedule JSON for the MuJoCo companion cell;
+the commands and diagnostic/exact boundary are in
+[run_training.md](run_training.md#shared-schema-v3-bankexam-isaac--mujoco).
+
+The historical M3f/M2/G1 canary must pass the explicit inexact flag in both
+simulators and remain non-bookable. A clean schedule/question-order match is a
+ruler acceptance test, not permission to rename those checkpoints exact.
+The CPU BankExam now locates its standalone question-bank loader from the
+checkout; it needs no Isaac task-package import and no manually exported
+`HOPE_STAGE1_QB`. A temporary diagnostic install of `toml==0.10.2` was made in
+Pod1's mjeval venv on 2026-07-11, but it is not a reproducible dependency and
+is not required on a fresh Pod.
+
 ## Layout And Per-User Convention
 
 ```

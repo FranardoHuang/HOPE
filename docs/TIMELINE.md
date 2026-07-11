@@ -1224,3 +1224,307 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    V4/V5/task-only 公共外部卷、受守卫的行程延长;保留 S1 三组公平续训、N1 真实时序误差三组、
    R8 两旗标拆分。当前无训练/判卷在跑,下一步先做 M3f/M2/G1 每侧 10 题 schema-v3 canary;
    只有 `ns=0` 存活臂补 50/侧、连续球、噪声与第二 seed。
+4. 【franco/Codex】**schema-v3 Isaac 同题适配器实弹跑通并验尺**——新卷全程用内容 ID、
+   immutable schedule、all-attempt 分母和同一 virtual-return scorer。M3f/M2/G1
+   10/侧 Isaac 上台 `20/20,16/20,10/20`,MuJoCo `17/20,10/20,9/20`;G1 反手两引擎
+   均 `0/10`,因此卡在 canary。存活臂 50/侧 clean: M3f Isaac/MuJoCo `99/100 /
+   91/100`,M2 `86/100 / 51/100`;两臂的 5% 动作噪声和第二评估 seed 也已补齐。
+   全部历史臂仍 `evaluation_contract_exact=false`,不冒充正式基线;详细 SHA/逐侧表见
+   `PHASE1_SCHEMA3_RESULTS_2026-07-11.md`。MuJoCo 100 题 carry-state 连续卷:“上台且恢复到
+   下一球” M3f=`70/99`,M2=`30/99`,物理摔倒均 0,超时/跟踪 guard 不删分母。实体下一球
+   时间线未接好前,Isaac 单题并行适配器不会被改名为连续球。
+5. 【franco/Codex】**历史主矩阵重排收口**——R5b 两 seed、G2、M2f3 因 MuJoCo 正手
+   `0/10` 停在 canary;R1b 两 seed 到 50/侧后 Isaac `95/100,90/100`,MuJoCo 却只
+   `15/100,17/100`(两者正手均 `3/50`),定案为跨引擎塌陷。C1 clean Isaac/MuJoCo
+   `96/100 / 50/100`,噪声 `96/100 / 48/100`,第二题序 `98/100 / 55/100`;连续卷
+   回球 `42/100`,且回球+恢复 `26/99`。M3f 仍是历史诊断第一,24 项正式成绩
+   仍无一个可入账。
+6. 【franco/Codex】**fresh formal plant 前置不再靠手改源码**——新增默认关的
+   `task.plant.zero_joint_friction`:只在显式 true 时于 `gym.make` 前把所有 A3 actuator
+   friction 置零,实例化全零向量照常进 schema-v3 training contract;缺省/
+   false 对历史 PhysX 配方逐位不变,旧 ckpt 续训仍不能洗白。独立 pod worktree
+   60 tests 绿,Hydra 拒绝拼错父路径,真环境还会再断言 31/31 摩擦系数精确为零;下一门=
+   迁移 schema-2 COM-速度动作+重出 schema-v3 train/exam bank+机制
+   smoke,过后才发从零 exact lineage。
+7. 【franco/Codex】**fresh 动作错列真机 smoke 抓现行、不是改标签糊过去**——首版把旧
+   `body_order_isaac.txt` 同时当 source/runtime order，Kit 在 hip yaw/roll 错列处 fail closed；
+   原产物隔离并留 `OBSOLETE_DO_NOT_USE.json`。迁移器新增 `--target-body-order`，按名字同步
+   重排 pose/quat/linvel/angvel 四数组后再做 link→COM。修后动作 schema2/50Hz/32-body，
+   v3 train/exam 同 family 且题目零交集，Torch/physics/loader 全绿，四 NPZ 均 0444；完整
+   SHA 在 `phase1_fresh_v3_asset_manifest_20260711.json`。
+8. 【franco/Codex】**六卡点火前把“训完却导不出”三洞堵死**——schema3 structural 与 formal
+   exact 校验拆开：legacy causal 后代只有 sidecar+ckpt SHA 完整绑定才可 diagnostic export，
+   `training_contract_exact` 永远 0；exact 声明仍强制 schema2 motion。judge 只从 checkpoint
+   相邻 hard contract 重放 31/31 零摩擦与 175/179/181 actor contract，并和 env flags 对账；
+   hard contract/ONNX 新绑 `face_command_enabled`+pairing。专用 launcher 逐 hash 验输入、Kit
+   boot 串行、首迭代后放锁、超时只清本臂 PGID；37 个契约回归绿，179D full smoke 待跑。
+9. 【franco/Codex】**179D 门过、六卡各一臂点火（后续纠偏：这不叫满池）**——full smoke 合同 SHA `3a3b3d95...b9972`:
+   actor179、face enabled/shared、schema2 双动作、v3 train bank、31/31 零摩擦、formal validator
+   全同意并干净退出。固定 `6d93bcb` 后 Pod1=M3 old/S1+fresh seed1，Pod2=M2 old/S1+fresh
+   seed2；六臂均到首 PPO iteration、首 ckpt 的 sidecar SHA 绑定正确（续训 lineage=0，fresh=1），
+   M3/M2 各 pair 的 hard contract 递归 diff 都只剩 pairing 一键。M2-S1 首 boot 在 scene create
+   malloc abort（PGID 自退、非内存耗尽），原样 retry 绿且只收 retry。legacy exam 已冻结到 train
+   bank 邻目录；judge diagnostic 自动带 inexact escape，fresh 不带，并强制当前 checkout PYTHONPATH。
+   现阶段只报 running，不报结果；终档+同卷双引擎仍待完成。
+10. 【franco/Codex】**恢复 4/卡与 checkpoint 早判旧制度，并把“更快做消融”重新做成可执行规则**——
+   回查 `NOW`、旧 Pod `queue.md/patrol_watchdog_v2.sh` 坐实：4096-env 广度波目标 `4/4/4`，
+   四臂历史约 `22/32.6GB`、75 秒错峰；watchdog 明写 `16400` 早判“不用跑到最后才算数”。
+   当前六臂只是 `1/1/1+1/1/1`，且 run 的 `judge/` 全空，前述“跑满/终档后才判”均纠正。
+   新制度用 L0 合同→L1 512×25 机制冒烟→L2 里程碑同卷→L3 多 seed→L4 双引擎/Gate3B
+   漏斗；长跑每 1000–2000 iter 判一次、峰值 ±相邻 ckpt 加密，fresh 8k 前只 hard-stop。
+   24 臂采用 8 条 paired continuation + 16 条 fresh `face×plant` 2×2×4-seed 因子矩阵，
+   只把 `shared+zero(SZ)` 预注册为 formal target。两个 checkpoint worker 已分别以 PGID
+   `1332894/165860` 启动，先补 causal `17000/18000/19000` 与 fresh `0/1000/2000` 共 18 卷；
+   每 Pod 一次只做一个 Isaac export，进入 CPU MuJoCo 后流水并行。矩阵、worker、制度文档均已
+   dry-run：每 Pod scale-out `3+3+3` 命令、9 个 checkpoint 路径全部通过；24 臂尚在逐层点火，
+   不提前写成完成。首次实跑又抓到两项 evaluator 前置债：detached worktree 缺 ignored A3 URDF
+   链接，补成只指向冻结训练资产后，`play.py` 已写出 ONNX 但重定向 stdout 丢了成功握手行；两批
+   失败目录都保留且不入账。`judge.sh` 已强制 `PYTHONUNBUFFERED=1`，worker 改为首个 export
+   failure 即停。再试已走到 sidecar，抓到 writer 与历史合同不一致：179D normalizer 的恒定特征
+   `[11,16,42,47]` 保存 `_std=0`，运行时用 `std+eps(0.01)` 合法，但 writer 错拒 `<=0`。
+   已改为 finite `std>=0 && std+eps>0`，负数仍 fail；两 Pod 真实 checkpoint smoke 都得到
+   `zeros=4`、同 normalizer SHA `e3efcfe8...b97f`。扩容前红队又封四洞：两引擎 explicit escape
+   均强制 inexact；judge/trainer 共用 Kit lock；worker 不复用 stale log/state 且记录 clean eval
+   commit；scale-out 部分成功可安全跳过/单臂补发。相关回归 `68 passed,1 optional skip`，修后
+   全曲线 retry 待执行。
+11. 【franco/Codex】**早判实跑已经改变结论，顺手把评测前置与报告口径修到 fail-fast**——两 Pod
+   的 causal `17k/18k/19k` 同卷曲线全部跑完：M3-old 在 18k 从约 0.97 回落到 19k 的约 0.82，
+   M3-S1 却从约 0.90 升到约 0.96；M2-old 也在 18k 后回落，M2-S1 在 19k 仍明显更高。这是“不等
+   terminal、峰值 checkpoint 也保留”的直接数据。fresh 三点在 rollout 前被 evaluator 拦住：先是
+   mjeval 有 `onnxruntime` 没 `onnx`，再是同一 armature 经 float32/float64 后只有 `2.71e-9` 残差
+   却被 `1e-10` 阈值误拒；两 Pod 已装 `onnx==1.22.0` 并过 checker/runtime，judge 以后在占 Kit/GPU
+   前先 import 双依赖；当时的 `1e-8` armature 修复是前置台阶，最终 plant 比较见第 13 条。
+   另抓到 causal summary JSON 正确为
+   inexact、Markdown `DENOMINATORS` 却误写 true，已改成传播最终 evaluation flag。专项回归
+   聚焦集最终扩到 `90 passed,1 optional skip`；所有失败批次保留但不算模型分，训练 checkout 未动、无真机命令。
+12. 【franco/Codex】**正式卷用自己的哈希门挡住一次“只改报告也污染物理尺”的实现错误**——首版
+   denominator 修复放进 `venue_ball_sampler.py`，虽不改物理计算，却改变了 schema-v3 bank 绑定的
+   整文件 SHA；fresh clean-q10 export 因此在 rollout 前 fail closed。sampler 已逐字恢复到
+   `00e28e85...30cc`，final exact/inexact 只在外层 MuJoCo 报告器替换；traceback 后 Isaac shutdown
+   卡住时仅 TERM 对应 judge PGID，训练臂零信号。失败目录保留且不计分，说明 immutable bank 的
+   source hash 门真实生效。
+13. 【franco/Codex】**六卡四臂满池实测完成，plant exact 改成训练精度的逐位等价**——24 条接受臂
+   全部到首 iteration，每卡四条 4096-env 实测约 `22.9–23.2/32.6 GiB`、util `87–97%`，两 Pod
+   host available RAM `840/904 GiB`；24 个首 checkpoint 全 finite 且 SHA 绑定 hard contract。
+   Pod1 LZ-seed3 一次 scene-start malloc 自退，保留双 SHA 后完全同配方精确 retry 成功，失败臂不
+   冒充第 25 条。fresh exact 又抓到 effort 上限 `118.2` 在 float32 合同里是
+   `118.199996948...`（差 `3.0517578e-6≈0.4 ULP`）；不再继续放大固定 atol，改为 exact float64
+   相同或 canonical metadata 与 MJCF 落到同一 float32 grid，0.49 ULP 过、0.51 ULP/next-grid 拒。
+   这是训练实际数值精度的等价，不是放宽 plant 合同。
+14. 【franco/Codex】**第一条 fresh exact 增长曲线跑通，同时确认现役连续时序偏慢**——同一
+   clean q10 卷上，SZ seed1 `0/1k/2k=0.00/0.50/0.90`，seed2=`0.00/0.50/1.00`，六格 formal
+   exact 全 `rc=0`；M3 20k old/S1=`0.45/1.00`、M2=`0.50/0.50`，继续只作 inexact 方向筛。
+   18 个新增臂已有确定生成的四队列 cadence（142 jobs），q10 明文禁止 stop/promote。另用 SHA
+   绑定的场馆 strikes 表抽保守连续 A-B-A `n=21`：同侧间隔中位 `1.903 s`，现役理论中位
+   `3.75 s`，且目标要等 clip 结束才更新。故不把“无传送慢节奏”冒充“随时来下一球”；24 臂冻结
+   不动，下一时序实验拆成 T0 完整 wrap 对 T1 击球后 event-driven carry-state。
+15. 【franco/Codex】**新动作库进入“先排队、先安全筛、再训练”轨道**——对 Downloads 中
+   Franco/v6/v7 共 10 段空挥做内容寻址 manifest，本机与 Pod1 字节/编码双验 10/10。
+   新 GVHMR 队列以 PID/PGID `1383735` 在 Pod1 通过 `19000 MiB` 启动门后运行，
+   于 09:27:50Z–09:37:16Z 按 Franco 正手挡 -> 其余 Franco -> v6/v7 串行完成 10/10；
+   失败即停并保留日志的纪律未触发，Phase-1 训练 checkout 未改。同时预注册 native/TOPP、反手拉 A/B/C
+   单动作位筛选、2-vs-4 等算力/等动作 exposure 双卷，以及 strike/absorb/recover/ready
+   的任意时刻下一拍状态机。现阶段已有 raw + GVHMR 结构输出；空挥无 contact truth，尚无 A3
+   动作、四动作策略或真机许可。
+16. 【franco/Codex】**终档文件名 off-by-one 让 cadence 永远等待，已现场修正**——Pod2 M2-S1
+   正常结束在 `20998/20999`，真终档是 `model_20998.pt` 且内部 `iter=20998`；全量
+   1,762,715 个浮点元素非 finite=0，ckpt 内嵌 SHA 与邻边 schema3 合同一致，lineage 仍为
+   causal/inexact。原 worker 错等永远不会出现的 `model_20999.pt`。只精确 TERM 了四个无 child
+   的 cadence/causal worker PGID，改成 20998 后以 `1380339/1380340` (Pod1)、
+   `192814/192815` (Pod2) 重启；所有 trainer 和 fresh worker 零信号。
+17. 【franco/Codex】**cc review 指出的 mixed-cadence 堵塞也继续拆掉**——原 seed1/2 的 causal
+   terminal 和 fresh 改成独立 manifest/worker/state，不再让终档挡住 fresh 曲线；
+   runbook 中伪并行的前台 `for` 循环改成 `nohup setsid` 双进程。q10 manifest 现在顶层和
+   每 job 都写 `screen_only=true/stop_or_promote_allowed=false`，新 worker 对缺失/矛盾配置 fail closed，
+   并把 screen-policy+job contract SHA 绑进完成态防止改参后静默复用旧卷；
+   仍然只有独立 q50 可以停/晋级。
+18. 【franco/Codex】**Pod2 纠正后的 M2 terminal q10 收到，但不用小卷强行裁决**——old/S1
+   全侧回球 `0.40/0.35`，正手都 `0/10`，反手 `8/10` 对 `7/10`；两条均 causal/inexact。
+   terminal 小卷没复现 S1 增益，但样本只 20 且正手全零，故不 stop/promote，继续等同卷
+   q50。ckpt/report/summary 全 SHA 已进 `phase1_M2_terminal_q10_pair_20260711.json`。
+19. 【franco/Codex】**新动作 GVHMR 10/10 结构重建完成，并补上 Pod1 4k 曲线缺口**——
+   Pod1 GPU1 自然释放后，PID/PGID `1383735` 于 09:27:50Z–09:37:16Z 串行完成
+   Franco/v6/v7 十段；预期帧数、SMPL shape 与 51,666 个元素全 finite，queue-state/
+   result/audit 及工具、权重、环境全 SHA 进
+   `motion_video_gvhmr_results_20260711.json`。这仍只是 GVHMR 结构 pass，未做视觉验收、
+   canonical-betas GMR、自碰或桌网余隙。同时审计发现 Pod1 seed1 `model_4000.pt`
+   在旧 worker 被替换时尚未存在，却被新 manifest 误标“已判”；现已把 4000 恢复为
+   fresh 队首，仅精确替换无 child 的 Pod1 fresh worker `1394151`→`1394810`，
+   Pod2 已判 4000 和所有 trainer 不动。
+20. 【franco/Codex】**SP 的 non-zero plant 不再被误写成 exact**——MuJoCo formal profile
+   对 non-zero PhysX friction 本来就 fail closed，而 scale-out fresh 队首恰是 SP 2k；若不修，
+   它会在第一卷退出并堵住后面 SZ。现将 SP 标成
+   `plant_diagnostic_non_target_inexact`，generator 仅对 inexact 任务显式加
+   `--allow-inexact-contract`；SZ 仍是唯一 exact/formal 格并必须做同卷 q50。
+   两 Pod 都在 2k 存档出现前精确替换无 child 的 scale-out-fresh worker：
+   `1366308 -> 1397266` / `189569 -> 195085`。这是 judge 合同/队列修正，
+   不改 24 条训练配方。
+21. 【franco/Codex】**十段新视频的 diagnostic GMR 也 10/10 跑完，但 ground 门当场拦住晋级**——
+   repo-owned CPU 串行队列要求 clean GMR `aabea2e` 和可验证 source bundle，保留 frame-0
+   warm-up，于 10:33:20Z--10:34:12Z 产出十条预期帧数、30 Hz、31-DoF、全 finite A3 PKL；
+   warm-up 均在 17--28 轮达到 `max|dq|<1e-4`。每条 input/output/log/audit 及 bundle/tool/env
+   SHA 已进 `motion_video_gmr_results_20260711.json`，并因沿用逐视频 betas 明文标为
+   `diagnostic_video_betas`、formal-ineligible。Franco 正手挡的 canonical-MuJoCo 深审在 641
+   个采样姿态未见 robot self-contact，关节范围/速度也过初筛；但 65/65 帧都穿地，最深约
+   7.7--8.4 cm，末段也非严格静止 ready。故下一步是单文件 ground/root 校准、canonical-betas
+   重跑及连续碰撞/动力学/桌网门，绝不直接占 RL 槽。
+22. 【franco/Codex】**Pod1 M3-S1 终档完整性通过，判分继续等配对而不是抢跑**——真实终档
+   `model_20998.pt` SHA=`a9240488...aa21e`，内部 `iter=20998`，1,762,715 个浮点元素
+   non-finite=0；embedded/adjacent schema-3 contract SHA 相同，日志 4,000 条连续覆盖
+   `16999..20998` 且 NaN/Inf/Traceback/OOM/malloc/Killed 均为 0。launcher 没留 OS exit code，
+   已在 audit 中明说；legacy parent 令结果保持 causal/inexact。immutable terminal q10 要等
+   M3-old 同到 20998 才一起判，完整哈希在 `phase1_M3_S1_terminal_audit_20260711.json`。
+23. 【franco/Codex】**空槽不乱塞重复臂，预注册成两个因果三角的四条缺边**——M3 现有
+   old-helper/S1+guidance 都带 `-0.95`，补 shared-face S1-only guidance=0 seed1/2；M2
+   现有 old-helper/S1-only 都是 guidance=0，补 S1+guidance=`-0.95` seed1/2。四臂从各自原
+   16999 parent 续 4000 update，仍是 causal/inexact。外置 launcher 以显式 config/script SHA
+   授权，重验 train `6d93bcb` / eval `46a0ce2` clean、全部资产/工具、每卡 `<4` compute 且
+   free>=5500MiB、run 名唯一，emitted hard-contract 通过后自动接
+   `17000/18000/19000/20000/20998` q10 worker；16999 绝不复制到新 sidecar 旁洗 lineage，q50
+   只留 inactive 模板。M3 seed2 还只读等 PGID 1310472 正常终档，绝不 signal 前驱。本条记录时
+   四臂仅预注册未启动，原池配方未改。
+24. 【franco/Codex】**四臂只读 validate 先抓到驱动重复 PID 行，零写入后修门再发**——两 Pod
+   的 `nvidia-smi --query-compute-apps=pid` 会把每个 trainer PID 返回两遍，首版容量门把真实
+   3 条误算成 6 条而全部 fail closed；没有 run 目录、trainer 或 worker 被创建。launcher 现先
+   对 PID 保序去重，再要求 unique compute `<4` 和 free>=5500MiB；重复的 3 unique 测试允许
+   第四槽，重复的 4 unique 仍拒绝。config SHA 不变，launcher 从作废的 `dca9b9df...` 重签为
+   `ca69e1cb...`，必须替换两 Pod 外置副本并重新 validate，禁止绕过容量门。
+25. 【franco/Codex】**约 8 cm 穿地有了单文件修复器，但 grounding 不冒充安全门**——新增
+   `ground_gmr_pkl.py`，每次只收一个 expected-SHA PKL + 一个 expected-SHA canonical MJCF，
+   禁止扫描/覆盖；绑定唯一 floating root、31 hinge 顺序和 robot subtree enabled collision geoms，
+   primitive 用解析 support、mesh 用 compiled vertices，逐 30 Hz 源帧求最低 world-z 后只加固定
+   root-z shift。回读要求 XY/quat/DoF 不变、range 合法、最差帧近地不穿透/不悬空，report 绑定
+   tool/input/output/MJCF/compiled-collision SHA；report 安装失败会按本次 output SHA 精确回滚。
+   临时 native arm64 MuJoCo 3.10.0 对真实 `a3_pingpong.xml` 15 tests 全绿后已卸载。它尚未在
+   tracked pilot 产出正式 report，且只证离散帧，inter-frame/动力学/桌网/schema-2 仍全开。
+26. 【franco/Codex】**因果三角四条缺边全部补槽，池子回到六卡各四臂**——重签 launcher 后四条
+   validate 均确认 train/eval clean、资产/工具 SHA 对、目标卡恰 3 unique trainer 且约 14.7GiB
+   free。随后每 Pod 一次一个 Kit boot，accepted trainer/worker PGID：Pod1 M3 S1-only g=0
+   seed1 `1409914/1410648`、seed2 `1411167/1412047`；Pod2 M2 S1+g=-.95 seed1
+   `196177/196753`、seed2 `197146/197939`。四条 emitted hard-contract 全对、首轮 17000 和 q10
+   均 rc0，池快照每卡 4 trainer、`23.1--23.8/32.6GiB`、util `88--95%`。17k inexact q10
+   aggregate 为 M3 `.60/.55`、M2 `.30/.30`，只记方向不裁决。
+27. 【franco/Codex】**首卷后再审 state，发现 live worker 还是 hardening 前的 46a0 版本**——四条
+   judge 命令、checkpoint、manifest 与 rc0 都正确，但 worker SHA `8b980359...` 不读
+   screen_policy，也不把 manifest/job/job-contract SHA 写入 state；checked-in 修正版是
+   `21e30153...`。已另做 Pod-atomic replacement：每 Pod 两 worker 必须 exact PGID、单成员、
+   无 child/judge、旧17k完整且 manifest 与 launch_contract SHA相同，才只 TERM 这两个 worker；
+   legacy state/log 永久保留，新 worker 只换脚本和全新 state dir并重判17k，三项 hard SHA全对
+   才完成 correction。trainer/judge 不在管理范围。本条时仅预注册，尚未发 TERM。
+28. 【franco/Codex】**replacement 第一次 validate 又零信号抓到真实 sidecar shape**——launcher
+   返回并嵌进 launch-contract 的 worker 对象带 `state_path`，磁盘 worker sidecar 本来只写
+   pid/pgid/command/command SHA；首版错误要求两者连 `state_path` 全等，故安全拒绝。修正版只比较
+   磁盘真实四字段，并要求 embedded `state_path` 精确指向该 sidecar；exact PGID、单成员、childless、
+   manifest/checkpoint/state 门一项没放宽。tool 从作废 `c2780222...` 重签为 `d0678af2...`，仍未
+   对四 worker 发任何 signal。
+29. 【franco/Codex】**四个 followup curve worker 原子替换完成，旧证据不洗账**——两个 Pod 都在
+   再次 clean preflight 后，仅向 childless legacy PGID `1410648/1412047`、`196753/197939`
+   发 TERM；trainer/judge 零信号。新 hardened worker PGID 为 Pod1 `1416771/1416784`、Pod2
+   `198759/198771`。四条 17k 重判均 rc0，state 现同时绑定 manifest/job spec/job contract、
+   checkpoint、judge 和 train/eval clean commit；旧 state/log 逐字节留存，correction sidecar SHA
+   为 `2faf88de.../1d6f8ba3.../0dd02fae.../45f4334d...`。
+30. 【franco/Codex】**M3 terminal 配对到齐，小卷看到大正差但不越级裁决**——M3-old
+   `model_20998.pt` SHA=`320b77c9...417a`，内部 iter=20998、全浮点 finite、embedded/adjacent
+   contract=`7542c59b...d941b`、lineage=causal/inexact。和 M3-S1 用同一 immutable schedule
+   `7a908142...d614` 判 q10：old FH/BH/aggregate `.50/.40/.45`，S1 `1/1/1`，delta `+.55`。
+   只触发独立 K=100 shared-schedule q50；q10 不停臂、不晋级。完整账本进
+   `phase1_M3_old_terminal_audit_20260711.json` 与 `phase1_M3_terminal_q10_pair_20260711.json`。
+31. 【franco/Codex】**十条 GMR grounding 全跑完，落地门闭合但安全门没偷关**——Pod1 逐条
+   no-clobber 运行 `ground_gmr_pkl.py`；原离散帧最深穿地 `8.072--8.716 cm`，各自动作只加一个
+   root-z 常量后全局最小余量约 `10 um`。十条 input/output/report、tool `db5bd167...`、canonical
+   MJCF `2ab1cd31...` 与 compiled collision digest 全进
+   `motion_video_gmr_ground_results_20260711.json`。仍是 per-video-betas/30Hz 离散诊断；
+   inter-frame、自碰、动力学、桌网、击球点、schema2、RL/真机一项未宣称通过。
+32. 【franco/Codex】**完整池巡检按 28 条接受臂而非旧六 PGID 做**——四条已自然终档，24 条 live
+   trainer 在两 Pod 各 12、每 GPU 恰 4。28 个最新 checkpoint 的文件迭代=内嵌 iter、非 finite=0、
+   checkpoint↔邻边 hard-contract SHA 全匹配，causal lineage=0/fresh lineage=1；全部接受日志的
+   NaN/Inf/Traceback/OOM/malloc/Killed 计数为 0。train/eval checkout 仍 clean 固定在
+   `6d93bcb...`/`46a0ce2...`，没有 pull、切树或广域信号。
+33. 【franco/Codex】**M3 terminal q50 同卷裁决 S1 胜，但只在 causal family 内生效**——物化唯一
+   K=100 卷，file SHA=`69f73458...7f25`、semantic SHA=`949eb196...8fc0`，每侧 50、seed0、
+   零噪声、100 行原序且无 censored。M3-old FH/BH/aggregate=`31/50,11/50,42/100`、接触
+   `89/100`；旧 summary 把 `fell=9` 误写成九次 physical fall，逐题 raw ledger 实为
+   `1 physical fall + 8 guard reset`。M3-S1=`50/50,50/50,100/100`、接触 `100/100`、
+   两类终止均为0，
+   aggregate delta=`+.58`。首版 runner 先判完 old 后因误猜真实 hard-contract/summary 字段层级
+   fail closed，未启动 S1；v1 全保留。v2 只修 validator，重新物化得到逐字节同一 schedule 后两臂
+   均通过严格账本。结果只能选择 legacy swing family 的 S1 terminal；lineage/eval 永远 inexact，
+   Isaac 同卷、fresh SZ、连续时序、标定 plant、部署/真机全未越级。账本见
+   `phase1_M3_terminal_q50_result_20260711.json`。
+34. 【franco/Codex】**M3 Isaac 同卷没有复现 MuJoCo 排名，跨引擎门不关**——两臂复用同一
+   K100 question order；Isaac 下 M3-old 和 M3-S1 均为 FH/BH/aggregate=`.98/1/.99`、99
+   exact reach、1 guard reset、0 physical fall，delta=`0`。MuJoCo 的 `+.58` 只能在 causal
+   legacy evaluator/family 内选 S1，不能说跨引擎、formal 或 deploy 通过。三次 wrapper
+   fail-closed 尝试与接受 v4 全部保留，账本见
+   `phase1_M3_terminal_q50_isaac_result_20260711.json`。
+35. 【franco/Codex】**六个 global curve worker 完成 hardening，五份旧结果重判不洗账**——只向
+   Pod1 `1394810/1380340/1397266`、Pod2 `194276/192815/195085` 发 TERM，trainer/judge
+   零信号。新 PGID 为 Pod1 `1432280/1432292/1432304`、Pod2 `200706/200718/200730`；
+   五个已到 checkpoint 全在 manifest/job/job-contract 绑定下重判 rc0，causal 显式保留
+   inexact escape。完整 attestation/transaction 进
+   `phase1_global_curve_worker_hardening_result_20260711.json`。
+36. 【franco/Codex】**fresh SZ seed1 正式 q50 实锤 2k 见峰，4k 正手崩掉**——q10
+   `.90 -> .50` 只负责触发；同一 exact K100 卷上，model2000 FH/BH/aggregate=
+   `33/50,50/50,83/100`，model4000=`0/50,50/50,50/100`。因此保留 2k checkpoint，但
+   整臂继续原配方训练，不停、不晋级。两者 exact/fresh、zero physical fall，但 200 题全部
+   是非物理 post-strike tracking guard 收尾；所以只证单拍 checkpoint 选择，不证连续恢复/
+   部署稳定。账本见 `phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json`。
+37. 【franco/Codex】**把两个“靠人记住”的制度变成 fail-closed 合同**——queue governance validator
+   审 142 个 scale-out job + 24 个 cadence 计划槽，强制 q10 K20/10每侧、screen-only、barrier/
+   milestone 连续与 exact/inexact argv，q50 必须走 paired runner。plant 语义也单独预注册：
+   SZ 只是 zero-friction execution exact，SP/LP 不是标定摩擦；新 SC 需 physical latent model +
+   双 engine adapter + fresh Z/C paired seeds，当前严格 blocked_on_calibration_evidence。
+38. 【franco/Codex】**canonical betas 真正进了 GMR，旧的“补六个零”猜测作废**——内容寻址
+   loader `2737f472...5de2` 实际取 `betas[0].detach().cpu().numpy()[:10]`，zero padding=false。
+   Pod1 CPU-only queue PID/PGID `1442090` 在 48.7s 内完成 10/10；全部 30Hz/31DoF/finite，
+   frame0 warm-up 16--29 轮、最终 max|dq|=`6.88e-5..9.76e-5`，GMR 保持 clean `aabea2e`、
+   GPU 不变。新产物还没重做 grounding/稠密自碰/拍柄余隙/动力学/桌网扫掠，所以
+   仍是 diagnostic，不进 schema2/RL/真机。账本见
+   `motion_video_canonical_gmr_results_20260711.json`。
+39. 【franco/Codex】**fresh exact 也出现 Isaac 饱和，2k>4k 的跨引擎排名门未关**——复用
+   MuJoCo 逐字节同一 K100 题序，Isaac 下 model2000 和 model4000 都是 FH/BH/aggregate=
+   `49/50,50/50,99/100`、99 exact reach、1 guard reset、0 physical fall，delta=0。MuJoCo 的
+   `83/100 vs 50/100` 分离没被复现；Isaac 最终“选”2k 只是预注册的完全平局
+   最后 tie-break，不是独立支持。2k 仍作 MuJoCo pair 内保留峰，整臂继续；跨引擎/
+   formal deploy 门不关。账本见 `phase1_SZ_seed1_2000_vs_4000_q50_isaac_result_20260711.json`。
+40. 【franco/Codex】**新动作稠密安全屏 10/10 过，但坐标证据不足就不假判击球点**——十条
+   canonical-beta GMR 先独立 root-z grounding，再以 8 子步/区间复查：654 源帧/
+   5162 个 240Hz 样本的地面危险、robot self-collision、拍面/拍柄-身体 `<5mm` 危险
+   和 `<20mm` warning 都是 0，最薄余隙为 Franco 反手拉 A 的 40.2466mm。拍心/拍面/
+   拍速均来自 vendor MJCF 官方 site/FK。但 root-z 不是 GMR-world→HOPE 桌球坐标，mirror 也
+   未验证；v2 所有 virtual-return/相位/2-vs-4 列因此作废，只保留与 v3/v4 相同的安全子树。接受 v4 冻结
+   64 题却不消费，coverage/selector 全为 null/blocked；必须先 schema2 +X reground/显式变换+
+   mirror 证据。账本见 `motion_video_gmr_phase_safety_results_20260711.json`；不占 GPU、不改训练树、
+   不触真机。
+41. 【franco/Codex】**“同题”不等于“同一判分仪器”，两组 Isaac 饱和已定位**——fresh 4k
+   前手 MuJoCo 拍心误差均值 `13.15 cm`（50/50 越过冻结 `9.5 cm` 接触窗），Isaac 同题仅
+   `2.48 cm`；M3-old 反手在 Isaac `orient_normal` 前的 signed-face 误差为 `168.15 deg`，
+   却被归一化后判满。故现 Isaac virtual outcome 不能给 MuJoCo physical outcome 关门。
+   forensic result SHA=`aff8f4e6...45c9`；下一步 2 engine x physical/analytic 四格缺一即拒绝，
+   当前硬卡 Isaac 无 post-contact physical truth，阈值不改。
+42. 【franco/Codex】**T0/T1 时序轴进入 fail-closed 队列，1.903 秒没有被偷冻成目标**——venue
+   aggregate 明写 `n=21` 滑窗重叠、16/21 高球、2.5s 截尾；只用来证伪现役理论中位
+   `3.75 s`，事件卷另用独立均衡 engineering grid。prereg SHA=`2e7c4a34...2289c`；
+   design-check 通过，launch-check 因 scheduler/外部 deadline/连续双引擎卷/自击门/plant/
+   immutable schedule 未绑定而按预期失败，当前绝不点火。
+43. 【franco/Codex】**M2 seed2 的相邻 q10 排名直接反转，再次证明不能拿小卷裁决**——同一
+   `75aca567...51d7` K20 卷上，18k old/S1=`.40/.60`，19k=`.50/.40`；old 方向上升、S1
+   回落且正手仍弱。两臂 checkpoint 19k finite、iter/contract/causal lineage 绑定通过；只保留
+   曲线并继续原配方，不停、不晋级、不触发 q50。
+44. 【franco/Codex】**T1 训练端核心状态机落地，但队列仍严格不点火**——`be5d7cf` 只允许
+   accepted exact strike 后启动绝对 tick；同一步原子安装 train-bank row/native clip/精确 hold/
+   固定 deadline，miss/unavailable/infeasible 都按原时刻消耗，robot/last-action/history/noise
+   全 carry。全部 timing 字段和 schedule byte SHA 进 hard contract。尚缺 materializer、连续
+   Isaac/MuJoCo 卷、自击门、fresh exact baseline 和 semantics-correct plant；冻结 prereg 不回填，
+   必须新审 launch binding 后才能占 GPU。
+45. 【franco/Codex】**最终裁决门改为智元 MuJoCo Gate 3，Isaac 降为训练/诊断腿**——仓库现有
+   Gate 3 是假球→真规划器→同款 C++ runner→厂商 A3 MuJoCo 的部署闭环；连续候选不得靠每拍
+   reset 或人工 rescue。PhysicalBall Phase-B 源码门已过 focused `63 pass/1 skip`，但 K100
+   runtime 与 moving-blade substep 尚缺，因此当前 Isaac `.99` 不给跨引擎门背书。
+46. 【franco/Codex】**恢复奖励改按同 phase 的交互问题设计**——上一拍卸载、回通用 ready、随机
+   下一题 readiness 先拆成不可补偿安全 constraint、ready-set potential 和随机到达 probe；若
+   phase gating 后仍重叠，再做等尺度 `2^3` 主效应/交互筛与固定总预算 mixture，不把单项赢家
+   直接相加。终判在无 reset Gate 3 连续卷。
+47. 【franco/Codex】**第一批已验证 Phase-1 功能开始 merge main**——合并边界冻结在
+   `612f54d`；main 侧 NOW 原样保留并补当前人话状态。四-seed q50、动作 v5 64题、plant 校准、
+   连续双引擎 rollout 仍是 open gate，不随源码合并偷写成结果。

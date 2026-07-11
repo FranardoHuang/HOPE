@@ -1,0 +1,977 @@
+{
+  "schema_version": 1,
+  "status": "complete_diagnostic_canonical_grounding",
+  "scope": "ten accepted canonical-beta A3 GMR pickles grounded serially on CPU by one constant root-z translation against the exact canonical MuJoCo collision model at original discrete frames only; no continuous-time, self-collision, dynamics, schema-2, training, TOPP, returnability, or robot claim",
+  "collected_utc": "2026-07-11T14:08:00Z",
+  "pod": "pod1",
+  "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+  "preregistration": {
+    "repo_path": "configs/motion_video_canonical_gmr_ground_prereg_v2_20260711.json",
+    "deployed_path": "/workspace/codexschema/motion_video_intake_20260711/canonical_ground_control_v2/motion_video_canonical_gmr_ground_prereg_v2_20260711.json",
+    "bytes": 10726,
+    "sha256": "3f1980d11f4bbfef54b142e58082360d385f28905c7e700472e532eb5abdf8a5"
+  },
+  "predecessor_attempt": {
+    "attempt_id": "motion-video-canonical-gmr-ground-20260711-v1",
+    "status": "failed_pre_output_preserved",
+    "plan_sha256": "6ab8e6f9be4e604fb782c50d54c662b7c86e0d28993e296a87d100157ca37385",
+    "failure_class": "launcher_environment_binding_bug",
+    "failure": "queue resolved the bound venv launcher symlink to /usr/bin/python3.10, dropping venv package discovery; NumPy import failed before any output or report was written",
+    "grounding_contract_changed": false,
+    "accepted_outputs": 0,
+    "output_root_file_count": 0,
+    "preserved_evidence": {
+      "launcher_log": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/canonical_ground_control_v1/queue.launch.log",
+        "bytes": 47,
+        "sha256": "99453d4b60e53ab5b159642cb2564195de16aa54d50c127912d540a862048a94"
+      },
+      "queue_state": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v1/queue_state.json",
+        "bytes": 3073,
+        "sha256": "9037ffc8a606fe1b08bb25de0867894477ee412e9912861f9d5777627e482963"
+      },
+      "failed_binding": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v1/bindings/franco_forehand_block.json",
+        "bytes": 2445,
+        "sha256": "abcd88d15e981e012918fe488530421186477f908cc804e0cf92e3dcbf4c817e"
+      },
+      "failed_child_log": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v1/logs/franco_forehand_block.log",
+        "bytes": 2212,
+        "sha256": "38b21b384a2ec7bb290e61abd3dd83ed2884611f571c6cd369ad5030b87300d0"
+      }
+    },
+    "retry_change": "preserve the bound /workspace/hope_isaac_venv/bin/python launcher path instead of resolving its symlink; all inputs, grounding thresholds, MJCF, compiled collision semantics, ordering, and CPU-only scope remain unchanged",
+    "preserved_evidence_physical_sha_and_bytes_recomputed": true,
+    "accepted_as_grounding_evidence": false
+  },
+  "source_lineage": {
+    "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+    "canonical_betas_artifact_sha256": "f405ba45d7f2233d3735c2e6b59409203cc98b1e97deef00224e16f2c7c4cbf2",
+    "materialization_manifest_sha256": "4043b34210b30be4151457623c3152ebd09650fb2caf587eb78359887a06bc2b",
+    "canonical_gmr_preregistration_sha256": "d165a60c575defba7bbb00441fdbbe196c6fcc89596f9eaec5508b56ffe1de02",
+    "canonical_gmr_result": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/canonical_ground_control_v2/motion_video_canonical_gmr_results_20260711.json",
+      "bytes": 12009,
+      "sha256": "e133946a36b7022a22d731068db89d32e4d3c85d52856f3106e062ea23c7303c"
+    },
+    "a3_calibrated": false,
+    "measured_height_m": null
+  },
+  "runtime": {
+    "cpu_only": true,
+    "CUDA_VISIBLE_DEVICES": "",
+    "started_utc": "2026-07-11T14:00:38.825790Z",
+    "completed_utc": "2026-07-11T14:00:45.909252Z",
+    "elapsed_seconds": 7.083462,
+    "control_root": "/workspace/codexschema/motion_video_intake_20260711/canonical_ground_control_v2",
+    "output_root": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2",
+    "state_root": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2",
+    "launcher_log": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/canonical_ground_control_v2/queue.launch.log",
+      "bytes": 1397,
+      "sha256": "b71c56fce1214cd65cf27c1cd801dcdab8b243324a82aaf2f9fcab31c91d7f68"
+    },
+    "queue_state": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/queue_state.json",
+      "bytes": 3398,
+      "sha256": "32a4166346e2b96c8c406ef73e931abfc00476366f2a27f762c6206f261d079d",
+      "status": "complete"
+    },
+    "read_only_checkouts_before_and_after": [
+      {
+        "label": "training",
+        "root": "/workspace/codexschema/nohope",
+        "head": "6d93bcb16c422a2f42748c2dc99432559653480b",
+        "clean_before": true,
+        "clean_after": true
+      },
+      {
+        "label": "gmr",
+        "root": "/workspace/franco/motion_work/GMR",
+        "head": "aabea2eee4be4bc16d4be17dac5ffa85e5a31539",
+        "clean_before": true,
+        "clean_after": true
+      }
+    ],
+    "gpu_observation": {
+      "method": "nvidia-smi point observations immediately before v1 launch and after v2 completion",
+      "before": [
+        {
+          "index": 0,
+          "uuid": "GPU-889b1712-8d89-0536-5c9e-e79aae30523d",
+          "memory_used_mib": 23244,
+          "memory_total_mib": 32607,
+          "utilization_percent": 95
+        },
+        {
+          "index": 1,
+          "uuid": "GPU-a8f7dd24-1162-15d4-2f22-7552ce2a6cb6",
+          "memory_used_mib": 23062,
+          "memory_total_mib": 32607,
+          "utilization_percent": 89
+        },
+        {
+          "index": 2,
+          "uuid": "GPU-473a79f3-8736-6c7f-c3db-290c6be385b8",
+          "memory_used_mib": 23174,
+          "memory_total_mib": 32607,
+          "utilization_percent": 91
+        }
+      ],
+      "after": [
+        {
+          "index": 0,
+          "uuid": "GPU-889b1712-8d89-0536-5c9e-e79aae30523d",
+          "memory_used_mib": 23244,
+          "memory_total_mib": 32607,
+          "utilization_percent": 96
+        },
+        {
+          "index": 1,
+          "uuid": "GPU-a8f7dd24-1162-15d4-2f22-7552ce2a6cb6",
+          "memory_used_mib": 23062,
+          "memory_total_mib": 32607,
+          "utilization_percent": 93
+        },
+        {
+          "index": 2,
+          "uuid": "GPU-473a79f3-8736-6c7f-c3db-290c6be385b8",
+          "memory_used_mib": 23174,
+          "memory_total_mib": 32607,
+          "utilization_percent": 97
+        }
+      ],
+      "memory_used_unchanged_mib": true,
+      "queue_or_ground_processes_after": 0,
+      "queue_environment_precluded_cuda": true
+    }
+  },
+  "processing_contract": {
+    "queue_tool": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/canonical_ground_control_v2/run_motion_video_canonical_gmr_ground_queue.py",
+      "bytes": 29149,
+      "sha256": "95ee3ff52b89257450daa1a35a22ca3833b122faf5b9f905fdc0bd7ef346a562"
+    },
+    "grounding_tool": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/canonical_ground_control_v2/ground_gmr_pkl.py",
+      "bytes": 35333,
+      "sha256": "db5bd1670cd113ce6ada8b53a7d4b0e5e25f0cc51665983c4958146e99ce4591"
+    },
+    "mjcf": {
+      "path": "/workspace/codexschema/nohope/agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+      "bytes": 49107,
+      "sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+    },
+    "compiled_collision_contract": {
+      "expected_sha256": "18e7f6ffbefba9dbd988f7c3cb9fb92b250777862fc25fa3d4a0b2ca0f8386e5",
+      "robot_root_body_id": 1,
+      "enabled_robot_geom_count": 37,
+      "enabled_robot_geom_ids": [
+        3,
+        9,
+        11,
+        13,
+        15,
+        17,
+        19,
+        21,
+        23,
+        24,
+        26,
+        29,
+        30,
+        32,
+        34,
+        36,
+        38,
+        40,
+        42,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        54,
+        56,
+        58,
+        61,
+        63,
+        65,
+        67,
+        69,
+        71,
+        74,
+        76,
+        78
+      ],
+      "surface_method": "analytic_primitive_support_or_compiled_mesh_vertices",
+      "visual_only_geoms_excluded": true,
+      "ground_geom": "floor",
+      "ground_z_m": 0
+    },
+    "joint_contract": {
+      "count": 31,
+      "order_interpretation": "A3_GMR_JOINT_NAMES bound by grounding_tool SHA-256",
+      "maximum_observed_range_excess_rad": 0,
+      "range_tolerance_rad": 0.00001
+    },
+    "grounding_contract": {
+      "expected_fps": 30,
+      "target_clearance_m": 0.00001,
+      "max_grounded_clearance_m": 0.001,
+      "numerical_tolerance_m": 5e-7,
+      "max_abs_shift_m": 0.25,
+      "quaternion_norm_tolerance": 0.000001,
+      "joint_range_tolerance_rad": 0.00001,
+      "translation": "one_constant_value_added_only_to_root_pos[:,2]",
+      "clearance_sampling": "original_discrete_frames_only",
+      "continuous_time_clearance_proven": false
+    }
+  },
+  "independent_postrun_audit": {
+    "method": "read-only independent SHA-256/byte recomputation plus unpickle comparison of every source/output pair; verified exact payload keys, all non-root_pos fields, root x/y, one constant root-z delta, finite arrays, report/state/log lineage, fatal log tokens, MJCF and compiled collision binding",
+    "accepted_results": 10,
+    "failed_results": 0,
+    "output_files_found": 20,
+    "bindings_found": 10,
+    "logs_found": 10,
+    "all_input_sha_and_bytes_recomputed": true,
+    "all_output_sha_and_bytes_recomputed": true,
+    "all_report_sha_and_bytes_recomputed": true,
+    "all_state_and_log_sha_and_bytes_recomputed": true,
+    "all_payload_keys_exact": true,
+    "all_non_root_pos_fields_exact": true,
+    "all_root_xy_exact": true,
+    "all_root_z_only_one_constant_shift": true,
+    "all_finite": true,
+    "all_fatal_log_token_scan_pass": true,
+    "all_reports_status_pass": true,
+    "all_reports_formal_eligible_false": true,
+    "all_reports_bind_same_tool_mjcf_and_compiled_collision_contract": true,
+    "all_reports_bind_exact_37_collision_geom_ids": true,
+    "max_applied_shift_spread_m": 0,
+    "max_root_z_relative_trajectory_error_m": 0,
+    "max_joint_range_excess_rad": 0
+  },
+  "aggregate": {
+    "before_minimum_clearance_range_m": [
+      -0.0973430292587712,
+      -0.06725777592166722
+    ],
+    "applied_constant_root_z_shift_range_m": [
+      0.06726777592166722,
+      0.0973530292587712
+    ],
+    "after_minimum_clearance_range_m": [
+      0.000009999999999843467,
+      0.000010000000000044695
+    ],
+    "after_maximum_of_frame_minima_range_m": [
+      0.0013415711262311225,
+      0.011719613158521575
+    ]
+  },
+  "results": [
+    {
+      "asset_id": "franco_forehand_block",
+      "status": "complete_diagnostic_canonical_grounding",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/franco_forehand_block.diagnostic_cohort_median_betas.gmr.pkl",
+        "bytes": 20062,
+        "sha256": "befd20649b09f038ff2936f2b25e281e1995164dea804d4752715ac6af33dc2d"
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_forehand_block.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 20022,
+        "sha256": "fb2d0593e40d46434014ab2f136f6e94dafc0be1a7447f6f43d708b9c02c946c"
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_forehand_block.grounding.json",
+        "bytes": 9552,
+        "sha256": "f9fb935e77316992dd81f4f4839912addc4de226ea3255a96c33e95ac72e8f43"
+      },
+      "state_binding": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/bindings/franco_forehand_block.json",
+        "bytes": 3461,
+        "sha256": "2e016b0793828826a631329c99bcd7dc638ce0af1f4b32f0de12f6da53814954"
+      },
+      "log": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/logs/franco_forehand_block.log",
+        "bytes": 93,
+        "sha256": "1250ff6b35f1997f1d9d8c9b4e3f0c166c16f52077de141842cbb6bcadc336ac"
+      },
+      "structure": {
+        "frames": 65,
+        "fps": 30,
+        "finite_elements": 2471,
+        "finite": true
+      },
+      "joint_contract": {
+        "max_range_excess_rad": 0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.08850770075347447,
+          "maximum_of_frame_minima_m": -0.08179901693893148,
+          "minimum_frame": 2,
+          "minimum_geom_id": 65,
+          "minimum_geom_name": "left_ankle_roll_collision",
+          "minimum_body_id": 26,
+          "minimum_body_name": "left_ankle_roll_Link"
+        },
+        "shift": {
+          "applied_constant_m": 0.08851770075347443,
+          "spread_m": 0
+        },
+        "after": {
+          "minimum_clearance_m": 0.000009999999999843467,
+          "maximum_of_frame_minima_m": 0.006718683814542839
+        }
+      },
+      "invariants": {
+        "payload_keys_exact": true,
+        "all_non_root_pos_fields_exact": true,
+        "root_xy_exact": true,
+        "root_rotation_exact": true,
+        "dof_position_exact": true,
+        "root_z_only_one_constant_shift": true,
+        "root_z_relative_trajectory_max_error_m": 0,
+        "fatal_log_token_scan": "pass"
+      },
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "franco_backhand_block",
+      "status": "complete_diagnostic_canonical_grounding",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/franco_backhand_block.diagnostic_cohort_median_betas.gmr.pkl",
+        "bytes": 19454,
+        "sha256": "dd3c9500c0936aca002e5524ff2c96d8988d901ebf4136893dc626315f834984"
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_block.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 19414,
+        "sha256": "a4d92b68b9d1fc1185d2cfc87a233bf5ef974538a2d2a3ee7faa58593aace9d4"
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_block.grounding.json",
+        "bytes": 9419,
+        "sha256": "9f1effcc137b80c07483263e5e016a5d71ea54182d442bff6d7c5bfa81bdef28"
+      },
+      "state_binding": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/bindings/franco_backhand_block.json",
+        "bytes": 3461,
+        "sha256": "fbf146e4af73e58e8716509e67d6d3fa7235328c8c209e7b1a56412a1d05d769"
+      },
+      "log": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/logs/franco_backhand_block.log",
+        "bytes": 93,
+        "sha256": "d2d22af9eecc4af8d8a1fcdde15ebcccaacd0eb31222c43f5927ab4034979fd8"
+      },
+      "structure": {
+        "frames": 63,
+        "fps": 30,
+        "finite_elements": 2395,
+        "finite": true
+      },
+      "joint_contract": {
+        "max_range_excess_rad": 0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.09440179157039794,
+          "maximum_of_frame_minima_m": -0.08662402253198001,
+          "minimum_frame": 6,
+          "minimum_geom_id": 65,
+          "minimum_geom_name": "left_ankle_roll_collision",
+          "minimum_body_id": 26,
+          "minimum_body_name": "left_ankle_roll_Link"
+        },
+        "shift": {
+          "applied_constant_m": 0.09441179157039792,
+          "spread_m": 0
+        },
+        "after": {
+          "minimum_clearance_m": 0.000009999999999982245,
+          "maximum_of_frame_minima_m": 0.007787769038417908
+        }
+      },
+      "invariants": {
+        "payload_keys_exact": true,
+        "all_non_root_pos_fields_exact": true,
+        "root_xy_exact": true,
+        "root_rotation_exact": true,
+        "dof_position_exact": true,
+        "root_z_only_one_constant_shift": true,
+        "root_z_relative_trajectory_max_error_m": 0,
+        "fatal_log_token_scan": "pass"
+      },
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "franco_forehand_loop",
+      "status": "complete_diagnostic_canonical_grounding",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/franco_forehand_loop.diagnostic_cohort_median_betas.gmr.pkl",
+        "bytes": 21582,
+        "sha256": "497459ae3d7ec3508cf9b0c122acbb2a95cc1ab3f1a701fad1f80812378ae583"
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_forehand_loop.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 21542,
+        "sha256": "d75d8f17e7b7cad3f06a47fbf01bdec194116996a155c6ab61e9d3eb0d84f6c8"
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_forehand_loop.grounding.json",
+        "bytes": 9860,
+        "sha256": "2235567931b27e3696709b0e2087e57672f25c5f0687f09f7bb35725927e5581"
+      },
+      "state_binding": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/bindings/franco_forehand_loop.json",
+        "bytes": 3451,
+        "sha256": "43bbd84e0bc2634034e1af3f7e7417a6eba4c50363a70d6be90e469e6295a101"
+      },
+      "log": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/logs/franco_forehand_loop.log",
+        "bytes": 93,
+        "sha256": "847a96a9c97a53a91a8a62d2375d5ec71a6dbee7f242e24de9af99f751c20284"
+      },
+      "structure": {
+        "frames": 70,
+        "fps": 30,
+        "finite_elements": 2661,
+        "finite": true
+      },
+      "joint_contract": {
+        "max_range_excess_rad": 0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.08591116644653443,
+          "maximum_of_frame_minima_m": -0.07897191951537347,
+          "minimum_frame": 64,
+          "minimum_geom_id": 65,
+          "minimum_geom_name": "left_ankle_roll_collision",
+          "minimum_body_id": 26,
+          "minimum_body_name": "left_ankle_roll_Link"
+        },
+        "shift": {
+          "applied_constant_m": 0.08592116644653447,
+          "spread_m": 0
+        },
+        "after": {
+          "minimum_clearance_m": 0.000010000000000044695,
+          "maximum_of_frame_minima_m": 0.006949246931161009
+        }
+      },
+      "invariants": {
+        "payload_keys_exact": true,
+        "all_non_root_pos_fields_exact": true,
+        "root_xy_exact": true,
+        "root_rotation_exact": true,
+        "dof_position_exact": true,
+        "root_z_only_one_constant_shift": true,
+        "root_z_relative_trajectory_max_error_m": 0,
+        "fatal_log_token_scan": "pass"
+      },
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "franco_backhand_loop_a",
+      "status": "complete_diagnostic_canonical_grounding",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/franco_backhand_loop_a.diagnostic_cohort_median_betas.gmr.pkl",
+        "bytes": 21278,
+        "sha256": "64a1f401f712a31c47b52d17104385d6d9fabfd6f990164b606a624f0c2b683f"
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_loop_a.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 21238,
+        "sha256": "3db5e5d6209c146a1ec3dddb2544be4a6adfdf8d985e1ffff82911063f384909"
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_loop_a.grounding.json",
+        "bytes": 9775,
+        "sha256": "fcb207bc538e6cbfd31ba94834f899e283ce75f453aa0c4d789c44bf74c33525"
+      },
+      "state_binding": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/bindings/franco_backhand_loop_a.json",
+        "bytes": 3471,
+        "sha256": "c89e464377702d450167fcff8db549329aa58285898b2b1947b522d5ae35636b"
+      },
+      "log": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/logs/franco_backhand_loop_a.log",
+        "bytes": 93,
+        "sha256": "e48a976f476fbee9c2398260fa2c0868b9114db0598ddcd1c44e5b92aac6225a"
+      },
+      "structure": {
+        "frames": 69,
+        "fps": 30,
+        "finite_elements": 2623,
+        "finite": true
+      },
+      "joint_contract": {
+        "max_range_excess_rad": 0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.0973430292587712,
+          "maximum_of_frame_minima_m": -0.08563341610024963,
+          "minimum_frame": 1,
+          "minimum_geom_id": 65,
+          "minimum_geom_name": "left_ankle_roll_collision",
+          "minimum_body_id": 26,
+          "minimum_body_name": "left_ankle_roll_Link"
+        },
+        "shift": {
+          "applied_constant_m": 0.0973530292587712,
+          "spread_m": 0
+        },
+        "after": {
+          "minimum_clearance_m": 0.000010000000000010001,
+          "maximum_of_frame_minima_m": 0.011719613158521575
+        }
+      },
+      "invariants": {
+        "payload_keys_exact": true,
+        "all_non_root_pos_fields_exact": true,
+        "root_xy_exact": true,
+        "root_rotation_exact": true,
+        "dof_position_exact": true,
+        "root_z_only_one_constant_shift": true,
+        "root_z_relative_trajectory_max_error_m": 0,
+        "fatal_log_token_scan": "pass"
+      },
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "franco_backhand_loop_b",
+      "status": "complete_diagnostic_canonical_grounding",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/franco_backhand_loop_b.diagnostic_cohort_median_betas.gmr.pkl",
+        "bytes": 27966,
+        "sha256": "d7a0a117e6f71b019b598d9c1e999f6e5333013b1ea06079060ebc58e28c845a"
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_loop_b.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 27926,
+        "sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e"
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_loop_b.grounding.json",
+        "bytes": 11112,
+        "sha256": "8bb15b4017e4ca2004b2105b411455f07645f6a06d412f7a8c34cf95a71982cb"
+      },
+      "state_binding": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/bindings/franco_backhand_loop_b.json",
+        "bytes": 3473,
+        "sha256": "a5d326728418da687dfea0784d423703d10245978484d48d6f7fe97afbef12d1"
+      },
+      "log": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/logs/franco_backhand_loop_b.log",
+        "bytes": 93,
+        "sha256": "e43ef167a199cf76345e0e528822556fb44a1aa87cda5772a0eb4de8f79e6573"
+      },
+      "structure": {
+        "frames": 91,
+        "fps": 30,
+        "finite_elements": 3459,
+        "finite": true
+      },
+      "joint_contract": {
+        "max_range_excess_rad": 0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.08989056847223191,
+          "maximum_of_frame_minima_m": -0.08310581974711602,
+          "minimum_frame": 44,
+          "minimum_geom_id": 65,
+          "minimum_geom_name": "left_ankle_roll_collision",
+          "minimum_body_id": 26,
+          "minimum_body_name": "left_ankle_roll_Link"
+        },
+        "shift": {
+          "applied_constant_m": 0.08990056847223193,
+          "spread_m": 0
+        },
+        "after": {
+          "minimum_clearance_m": 0.000009999999999912856,
+          "maximum_of_frame_minima_m": 0.006794748725115915
+        }
+      },
+      "invariants": {
+        "payload_keys_exact": true,
+        "all_non_root_pos_fields_exact": true,
+        "root_xy_exact": true,
+        "root_rotation_exact": true,
+        "dof_position_exact": true,
+        "root_z_only_one_constant_shift": true,
+        "root_z_relative_trajectory_max_error_m": 0,
+        "fatal_log_token_scan": "pass"
+      },
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "franco_backhand_loop_c",
+      "status": "complete_diagnostic_canonical_grounding",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/franco_backhand_loop_c.diagnostic_cohort_median_betas.gmr.pkl",
+        "bytes": 30094,
+        "sha256": "e557e30b526a1ef28f21e07b7be64af16b5007d39011d44160d76dc7984f7ad6"
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_loop_c.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 30054,
+        "sha256": "4eb40301a51346fd3ad6cae52b13e93ca91b135f9eb9b38e16f7d89e456e9cb6"
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_loop_c.grounding.json",
+        "bytes": 11510,
+        "sha256": "446ecd329e8a8fd2cf78608fe16c213de52c4f181f2db54570199fe4b32817ab"
+      },
+      "state_binding": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/bindings/franco_backhand_loop_c.json",
+        "bytes": 3471,
+        "sha256": "235478a4522d6939d796663a64668d0769440ad7fbe8b3c95ee74f0b72e6912d"
+      },
+      "log": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/logs/franco_backhand_loop_c.log",
+        "bytes": 93,
+        "sha256": "7f0fcdd2f50e62fcd3210da8c29d80908a2a9e6944c23d38b1cb447bebe726cf"
+      },
+      "structure": {
+        "frames": 98,
+        "fps": 30,
+        "finite_elements": 3725,
+        "finite": true
+      },
+      "joint_contract": {
+        "max_range_excess_rad": 0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.0923689409848425,
+          "maximum_of_frame_minima_m": -0.0826310025460796,
+          "minimum_frame": 0,
+          "minimum_geom_id": 65,
+          "minimum_geom_name": "left_ankle_roll_collision",
+          "minimum_body_id": 26,
+          "minimum_body_name": "left_ankle_roll_Link"
+        },
+        "shift": {
+          "applied_constant_m": 0.09237894098484245,
+          "spread_m": 0
+        },
+        "after": {
+          "minimum_clearance_m": 0.00000999999999994755,
+          "maximum_of_frame_minima_m": 0.009747938438762857
+        }
+      },
+      "invariants": {
+        "payload_keys_exact": true,
+        "all_non_root_pos_fields_exact": true,
+        "root_xy_exact": true,
+        "root_rotation_exact": true,
+        "dof_position_exact": true,
+        "root_z_only_one_constant_shift": true,
+        "root_z_relative_trajectory_max_error_m": 0,
+        "fatal_log_token_scan": "pass"
+      },
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "v6_forehand_block",
+      "status": "complete_diagnostic_canonical_grounding",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/v6_forehand_block.diagnostic_cohort_median_betas.gmr.pkl",
+        "bytes": 10942,
+        "sha256": "69f23cef58c59a38c7321f8bd072d4ec58654a176ed8dab92a213b3f15793ae5"
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/v6_forehand_block.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 10902,
+        "sha256": "bd6522ad7f3653620794ce1a4a06300bc3c98f698325e57cb121b53f61de1125"
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/v6_forehand_block.grounding.json",
+        "bytes": 7748,
+        "sha256": "cb7a1267bf8bb7fee96e3335919755b6188f88e5f0ae480da045440d2e8c9121"
+      },
+      "state_binding": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/bindings/v6_forehand_block.json",
+        "bytes": 3417,
+        "sha256": "c911c406d4d9c122020050ec08fc0be715ce9b61801ab9c263fb571cbd12577a"
+      },
+      "log": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/logs/v6_forehand_block.log",
+        "bytes": 93,
+        "sha256": "d1668b93abc4c5b261dd59dc60990ef9cc25493ce8ce6d93622d5b8b3e1f734d"
+      },
+      "structure": {
+        "frames": 35,
+        "fps": 30,
+        "finite_elements": 1331,
+        "finite": true
+      },
+      "joint_contract": {
+        "max_range_excess_rad": 0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.07691069851029844,
+          "maximum_of_frame_minima_m": -0.07506218656996216,
+          "minimum_frame": 5,
+          "minimum_geom_id": 78,
+          "minimum_geom_name": "right_ankle_roll_collision",
+          "minimum_body_id": 32,
+          "minimum_body_name": "right_ankle_roll_Link"
+        },
+        "shift": {
+          "applied_constant_m": 0.07692069851029848,
+          "spread_m": 0
+        },
+        "after": {
+          "minimum_clearance_m": 0.000009999999999919795,
+          "maximum_of_frame_minima_m": 0.001858511940336309
+        }
+      },
+      "invariants": {
+        "payload_keys_exact": true,
+        "all_non_root_pos_fields_exact": true,
+        "root_xy_exact": true,
+        "root_rotation_exact": true,
+        "dof_position_exact": true,
+        "root_z_only_one_constant_shift": true,
+        "root_z_relative_trajectory_max_error_m": 0,
+        "fatal_log_token_scan": "pass"
+      },
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "v6_backhand_block",
+      "status": "complete_diagnostic_canonical_grounding",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/v6_backhand_block.diagnostic_cohort_median_betas.gmr.pkl",
+        "bytes": 10942,
+        "sha256": "9165f7ee163a6c581188adfbea584cb6c44d36ddccdb5d7a1c61235b83e223d6"
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/v6_backhand_block.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 10902,
+        "sha256": "d26a96dc939d48b59c2de5fa74fc2ffda767f36f013637cfab30d3cce6609d55"
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/v6_backhand_block.grounding.json",
+        "bytes": 7752,
+        "sha256": "d29b03075a4bc1bd37d0e7bd30ba882aeffd7b3740b2bf7d94efb53f4d087ad8"
+      },
+      "state_binding": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/bindings/v6_backhand_block.json",
+        "bytes": 3416,
+        "sha256": "45273cb989f75cb538c7f3efbb9108a3bf23600a6179cfa873caa1f2e8a7b3c8"
+      },
+      "log": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/logs/v6_backhand_block.log",
+        "bytes": 93,
+        "sha256": "23c3b6cb6569ea5491ef7de7815d8072837360a56e65b82a30e2f99f879344fb"
+      },
+      "structure": {
+        "frames": 35,
+        "fps": 30,
+        "finite_elements": 1331,
+        "finite": true
+      },
+      "joint_contract": {
+        "max_range_excess_rad": 0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.08105537074992641,
+          "maximum_of_frame_minima_m": -0.0790602424819414,
+          "minimum_frame": 16,
+          "minimum_geom_id": 78,
+          "minimum_geom_name": "right_ankle_roll_collision",
+          "minimum_body_id": 32,
+          "minimum_body_name": "right_ankle_roll_Link"
+        },
+        "shift": {
+          "applied_constant_m": 0.08106537074992637,
+          "spread_m": 0
+        },
+        "after": {
+          "minimum_clearance_m": 0.00000999999999995449,
+          "maximum_of_frame_minima_m": 0.0020051282679849555
+        }
+      },
+      "invariants": {
+        "payload_keys_exact": true,
+        "all_non_root_pos_fields_exact": true,
+        "root_xy_exact": true,
+        "root_rotation_exact": true,
+        "dof_position_exact": true,
+        "root_z_only_one_constant_shift": true,
+        "root_z_relative_trajectory_max_error_m": 0,
+        "fatal_log_token_scan": "pass"
+      },
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "v7_forehand_block",
+      "status": "complete_diagnostic_canonical_grounding",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/v7_forehand_block.diagnostic_cohort_median_betas.gmr.pkl",
+        "bytes": 19758,
+        "sha256": "b3051e04de99d34f0cb6644708d5a7a51686eb2fa33b93cd8c81001d3251dba8"
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/v7_forehand_block.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 19718,
+        "sha256": "6b7738fe4f85a5aaea86c2a6d7db14c4af7f561a325f224594ac72fab98f1df4"
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/v7_forehand_block.grounding.json",
+        "bytes": 9497,
+        "sha256": "9ef1d98a91e50f777ac51dd13d12ff248c952feb57ddf43f26721df05ddbf578"
+      },
+      "state_binding": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/bindings/v7_forehand_block.json",
+        "bytes": 3417,
+        "sha256": "e6e976a061dcd5a6d31cd88deb00f6d2b230963add32bda5603aee00a76ceaa4"
+      },
+      "log": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/logs/v7_forehand_block.log",
+        "bytes": 93,
+        "sha256": "425d445a48dbef94aae513fb4f0a0eb483e83af925241c2f8632326f498ec684"
+      },
+      "structure": {
+        "frames": 64,
+        "fps": 30,
+        "finite_elements": 2433,
+        "finite": true
+      },
+      "joint_contract": {
+        "max_range_excess_rad": 0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.06725777592166722,
+          "maximum_of_frame_minima_m": -0.06383433173589993,
+          "minimum_frame": 62,
+          "minimum_geom_id": 78,
+          "minimum_geom_name": "right_ankle_roll_collision",
+          "minimum_body_id": 32,
+          "minimum_body_name": "right_ankle_roll_Link"
+        },
+        "shift": {
+          "applied_constant_m": 0.06726777592166722,
+          "spread_m": 0
+        },
+        "after": {
+          "minimum_clearance_m": 0.000009999999999996123,
+          "maximum_of_frame_minima_m": 0.0034334441857672843
+        }
+      },
+      "invariants": {
+        "payload_keys_exact": true,
+        "all_non_root_pos_fields_exact": true,
+        "root_xy_exact": true,
+        "root_rotation_exact": true,
+        "dof_position_exact": true,
+        "root_z_only_one_constant_shift": true,
+        "root_z_relative_trajectory_max_error_m": 0,
+        "fatal_log_token_scan": "pass"
+      },
+      "formal_eligible": false
+    },
+    {
+      "asset_id": "v7_backhand_block",
+      "status": "complete_diagnostic_canonical_grounding",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1/v7_backhand_block.diagnostic_cohort_median_betas.gmr.pkl",
+        "bytes": 19758,
+        "sha256": "27921c745722726a90b7e70d05f8874903ec2f5f1e38e76a01c5e60b2f414881"
+      },
+      "output": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/v7_backhand_block.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 19718,
+        "sha256": "2b5947a6b5b86ac280dba33c64cae94baa58fe660987af70b711bfb322381f5d"
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/v7_backhand_block.grounding.json",
+        "bytes": 9514,
+        "sha256": "cec60a1d100510e4cedd9a94556a458903b43227db9e4ab12310bdc76f74cfa0"
+      },
+      "state_binding": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/bindings/v7_backhand_block.json",
+        "bytes": 3417,
+        "sha256": "6184ede8f8305eca23f6949d297ac842cdf59ee8e897701034aac01134d40e36"
+      },
+      "log": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_ground_state_v2/logs/v7_backhand_block.log",
+        "bytes": 93,
+        "sha256": "fb595f06bb99227b8b4a60bdc9c3d6488f90c5917cd514d0e9c52520e642c607"
+      },
+      "structure": {
+        "frames": 64,
+        "fps": 30,
+        "finite_elements": 2433,
+        "finite": true
+      },
+      "joint_contract": {
+        "max_range_excess_rad": 0
+      },
+      "grounding": {
+        "before": {
+          "minimum_clearance_m": -0.07711138392581546,
+          "maximum_of_frame_minima_m": -0.07577981279958423,
+          "minimum_frame": 58,
+          "minimum_geom_id": 78,
+          "minimum_geom_name": "right_ankle_roll_collision",
+          "minimum_body_id": 32,
+          "minimum_body_name": "right_ankle_roll_Link"
+        },
+        "shift": {
+          "applied_constant_m": 0.07712138392581547,
+          "spread_m": 0
+        },
+        "after": {
+          "minimum_clearance_m": 0.000009999999999905917,
+          "maximum_of_frame_minima_m": 0.0013415711262311225
+        }
+      },
+      "invariants": {
+        "payload_keys_exact": true,
+        "all_non_root_pos_fields_exact": true,
+        "root_xy_exact": true,
+        "root_rotation_exact": true,
+        "dof_position_exact": true,
+        "root_z_only_one_constant_shift": true,
+        "root_z_relative_trajectory_max_error_m": 0,
+        "fatal_log_token_scan": "pass"
+      },
+      "formal_eligible": false
+    }
+  ],
+  "formal_eligible": false,
+  "remaining_gates": {
+    "inter_frame_continuous_ground_clearance": "not_performed",
+    "self_collision": "not_performed",
+    "racket_and_handle_to_body_swept_clearance": "not_performed",
+    "dynamics_and_balance_feasibility": "not_performed",
+    "table_and_net_swept_clearance": "not_performed",
+    "returnability": "not_performed",
+    "schema2_conversion_and_audit": "not_performed",
+    "training": "not_authorized_by_this_result",
+    "robot_execution": "prohibited"
+  },
+  "formal_blockers": [
+    "grounding is checked only at original discrete frames and does not prove continuous-time clearance",
+    "self-collision and racket/handle-to-body swept clearance are not tested",
+    "dynamics, balance, table/net swept clearance, and returnability are not tested",
+    "the outputs are not schema-2 and are not approved for training or robot execution"
+  ]
+}

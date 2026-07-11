@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "contract_id": "phase1-cross-engine-saturation-forensic-inputs-v1",
+  "scope": "Read-only, question_id-aligned forensics for the fresh exact SZ seed1 model_2000/model_4000 and causal inexact M3 old/S1 same-paper Isaac/MuJoCo pairs; no rescoring, threshold tuning, training mutation, deployment, or real-robot claim",
+  "source_bindings": {
+    "training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+    "evaluation_commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+    "paired_results": {
+      "fresh_mujoco": "b95ba6c4657e4b542ea3c5f08d02941c830ea48d71b56bb1a247ef7a46730478",
+      "fresh_isaac": "65c0872354343a3b05dd5b5e20bad6b3f3b04d46c38f576fe6a467b18788c18e",
+      "M3_mujoco": "e9bb07d3a88be4e61bc289980fc909c8e641785bee56bcc75d0e5081f250f56e",
+      "M3_isaac": "97195c2187f685657259ab7287cfa6bcded58d532d5e8703e53bb4c384e85281"
+    },
+    "runners": {
+      "fresh_mujoco": "3528250777a170791f39d8dd17716c2a7f8ca91416a3ffa8433ec5eb691ed9e0",
+      "shared_mujoco": "095e476fd36fb68d500cb39ea7f71f6fee9b729209187d51599582c72c22198b",
+      "fresh_isaac": "ed770e2ad8a204e602c9b1aa974cd09713cf7720338a564ec4c85aeddbd6142e",
+      "shared_isaac": "f5d0dce4a5f650981838779dfa472c881d63c28341437167e0eca9217f57e04e"
+    },
+    "evaluators": {
+      "mujoco": "e4a9fa42ff0f7e68cebdf16f2e0c61299507496c6edc13546baeb3d576ecb20a",
+      "isaac": "0225ca41ad96340187447334c8f3707229d54947e376be3c059435865b34a72e",
+      "isaac_adapter": "b9decc710a863ff24c73d6b750f22c6f6764c6023dfab286281c368dc7dc6af2",
+      "isaac_virtual_ball": "3dc5237346004893141fe231dbf6a8bc1028e0328459411015366d72868c5ed4",
+      "mujoco_virtual_return_scorer": "41fe2a07d161979b76eca3f7f58723381877ab8406095ebde2ead10a67d64d11",
+      "ball_physics_yaml": "2e58221442665ddad7cc6dcc18d5c811dec1b0c47439b81c1c744b5148169a27"
+    },
+    "scoring_semantics": {
+      "isaac_returned": "vb_fired AND vb_net_clear AND vb_on_opponent from analytic virtual contact/flight; the accepted nominal profile sets physical_ball=false",
+      "isaac_capture_gate": "exact_strike AND pos_error<0.095m AND oriented_approach_speed>0.3m/s; orient_normal makes signed face normals equivalent for analytic contact",
+      "mujoco_returned": "physical paddle contact followed by physical net-clear and legal opponent-table landing",
+      "mujoco_counterfactual": "the same analytic virtual scorer is also logged as cf_* at the MuJoCo strike state but does not replace the physical returned bit"
+    }
+  },
+  "pairs": [
+    {
+      "id": "fresh_SZ_seed1_model2000_vs_model4000",
+      "semantics": {
+        "fresh_lineage": true,
+        "evaluation_contract_exact": true,
+        "formal_target": true,
+        "plant_cell": "SZ_zero_friction_protocol_exact",
+        "decision_scope": "checkpoint_selection_only"
+      },
+      "arms": [
+        {
+          "name": "model_2000",
+          "artifacts": {
+            "mujoco_attempts": {
+              "path": "fresh/model_2000/mujoco_sim2sim_attempts.csv",
+              "sha256": "fa38932a79d8d4dbe495a53a19f8e847fd4079b0b0f32bc4d9c83d92e7d3d929"
+            },
+            "mujoco_strikes": {
+              "path": "fresh/model_2000/mujoco_sim2sim_strikes.csv",
+              "sha256": "376e6e603891bb93a4e21a13833bc9785cb27bfbb0f4766ffd678b249d38d7e7"
+            },
+            "mujoco_summary": {
+              "path": "fresh/model_2000/mujoco_sim2sim_summary.json",
+              "sha256": "2ced3ca6fb241581b0dd1c07c97c88b9257a9dc7ea1794a20a04ef060c712681"
+            },
+            "isaac_json": {
+              "path": "fresh/model_2000/isaac_clean_k100.json",
+              "sha256": "860a1da65e4aa2503967196258572ed895f56c87f8bb8ea3cf2f92e6cf8708d9"
+            },
+            "isaac_csv": {
+              "path": "fresh/model_2000/isaac_clean_k100.csv",
+              "sha256": "924536c215cabe6b97176901c3c781edf7ef0af09aa1d373692584180fbd08d3"
+            }
+          }
+        },
+        {
+          "name": "model_4000",
+          "artifacts": {
+            "mujoco_attempts": {
+              "path": "fresh/model_4000/mujoco_sim2sim_attempts.csv",
+              "sha256": "8f5b7e992fb3fd6297a2a83d378ace761bbb791bba41df3fb8efe63872dd760b"
+            },
+            "mujoco_strikes": {
+              "path": "fresh/model_4000/mujoco_sim2sim_strikes.csv",
+              "sha256": "8befc2dda55e420243b059fce4fde4e5989798d05a2f39bb8d76932217379af7"
+            },
+            "mujoco_summary": {
+              "path": "fresh/model_4000/mujoco_sim2sim_summary.json",
+              "sha256": "b8dd1d85e9c7650da3245653ddd1f54f446eb88f4d0e5f7870ead6ad6222bbe0"
+            },
+            "isaac_json": {
+              "path": "fresh/model_4000/isaac_clean_k100.json",
+              "sha256": "8ad63c70416bf003dc24be38207f274e6ef5887ca305055670720a4c91a372c2"
+            },
+            "isaac_csv": {
+              "path": "fresh/model_4000/isaac_clean_k100.csv",
+              "sha256": "24d364097b9961537a8cc4f4205571f94f0daa85c7fb749efb81fc892cfc5094"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "causal_M3_old_vs_S1",
+      "semantics": {
+        "fresh_lineage": false,
+        "evaluation_contract_exact": false,
+        "formal_target": false,
+        "decision_scope": "legacy_swing_family_diagnostic_only"
+      },
+      "arms": [
+        {
+          "name": "M3_old",
+          "artifacts": {
+            "mujoco_attempts": {
+              "path": "M3/M3_old/mujoco_sim2sim_attempts.csv",
+              "sha256": "3d028e3913fdfbbd3b9366378e4d372289898a2e2ae0558bcb22187c92005608"
+            },
+            "mujoco_strikes": {
+              "path": "M3/M3_old/mujoco_sim2sim_strikes.csv",
+              "sha256": "2efab433029a2253c5bded804d78cc8dab1116f95e2ad7e75d668f86f71fc1a4"
+            },
+            "mujoco_summary": {
+              "path": "M3/M3_old/mujoco_sim2sim_summary.json",
+              "sha256": "b704404578a152b807652137584b35970dfc9988508d5df03e7f5294e157a072"
+            },
+            "isaac_json": {
+              "path": "M3/M3_old/isaac_clean_k100.json",
+              "sha256": "3fcb6ec8a2d8303dcd1eeecedb0d3ffef6c0d66dfcf10c9d6fc5fcee4f5a3ae6"
+            },
+            "isaac_csv": {
+              "path": "M3/M3_old/isaac_clean_k100.csv",
+              "sha256": "bab0dd4065c8d97ff6bf70ead67a9cc203f60e201929f433d5c637567d3bacff"
+            }
+          }
+        },
+        {
+          "name": "M3_S1",
+          "artifacts": {
+            "mujoco_attempts": {
+              "path": "M3/M3_S1/mujoco_sim2sim_attempts.csv",
+              "sha256": "2c76b40ba0bf8d371b9be4a07cf0cc34d1544c4be5b187ae81fbd06d7a126f6b"
+            },
+            "mujoco_strikes": {
+              "path": "M3/M3_S1/mujoco_sim2sim_strikes.csv",
+              "sha256": "9f9db9d5ca044950c55fe269fb0bb13fd461babcb0b61823366586b48c782e8e"
+            },
+            "mujoco_summary": {
+              "path": "M3/M3_S1/mujoco_sim2sim_summary.json",
+              "sha256": "91fd14d20b4031f77267143287e9f8debbdbcbd6bd2c1c7c8db145d58ae4b631"
+            },
+            "isaac_json": {
+              "path": "M3/M3_S1/isaac_clean_k100.json",
+              "sha256": "c352551a6d86074f0ba74dd43166313a104c07369f8d25684db1623b42763f52"
+            },
+            "isaac_csv": {
+              "path": "M3/M3_S1/isaac_clean_k100.csv",
+              "sha256": "0bf608efa75d15f0c63e2fffafa9c149730311dc6ae361cf51105b69a9454c33"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

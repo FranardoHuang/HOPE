@@ -177,7 +177,7 @@ def test_motion_fps_and_body_order_are_formal_runtime_guards():
         "racket_control_point": "pingpang_red_Link_origin_v1",
         "racket_control_point_offset_wrist_m": [0.21021, 0.032078, 0.032036],
     }
-    with pytest.raises(ValueError, match="lacks exact schema-2 body order"):
+    with pytest.raises(ValueError, match="body_names do not match the runtime articulation"):
         TC.validate_schema3_contract(contract)
 
 
@@ -234,6 +234,25 @@ def _schema3_contract():
     }
 
 
+def _diagnostic_schema3_contract():
+    contract = _schema3_contract()
+    contract["motion_kinematics_contracts"] = [
+        {
+            "schema_version": None,
+            "body_pos_point": "link_origin",
+            "body_lin_vel_point": "link_origin",
+            "body_names": None,
+            "exact": False,
+            "status": "legacy_link_origin_velocity_diagnostic_only",
+            "link_fd_max_abs_mps": 1.0e-6,
+            "max_ang_radps": 2.0,
+        }
+        for _ in contract["motion_kinematics_contracts"]
+    ]
+    contract["motion_kinematics_exact"] = False
+    return contract
+
+
 def test_schema3_requires_every_execution_field_and_rejects_other_formal_versions():
     contract = _schema3_contract()
     TC.validate_schema3_contract(contract)
@@ -246,6 +265,35 @@ def test_schema3_requires_every_execution_field_and_rejects_other_formal_version
         TC.validate_schema3_contract({**contract, "schema_version": 2})
     with pytest.raises(ValueError, match="unsupported formal"):
         TC.validate_schema3_contract({**contract, "schema_version": 4})
+
+
+def test_diagnostic_schema3_is_structurally_valid_but_never_formal_exact():
+    contract = _diagnostic_schema3_contract()
+    TC.validate_schema3_contract_structure(contract)
+    with pytest.raises(ValueError, match="formal lineage requires motion_kinematics_exact=true"):
+        TC.validate_schema3_contract(contract)
+
+
+def test_diagnostic_schema3_rejects_malformed_or_self_promoting_motion_facts():
+    mismatch = _diagnostic_schema3_contract()
+    mismatch["motion_kinematics_exact"] = True
+    with pytest.raises(ValueError, match="disagrees with the per-clip"):
+        TC.validate_schema3_contract_structure(mismatch)
+
+    malformed = _diagnostic_schema3_contract()
+    malformed["motion_kinematics_contracts"][0].pop("status")
+    with pytest.raises(ValueError, match="status must be non-empty"):
+        TC.validate_schema3_contract_structure(malformed)
+
+    promoted = _diagnostic_schema3_contract()
+    promoted["motion_kinematics_contracts"][0]["exact"] = True
+    with pytest.raises(ValueError, match="claims exact without"):
+        TC.validate_schema3_contract_structure(promoted)
+
+    bad_face = _diagnostic_schema3_contract()
+    bad_face["face_command_enabled"] = "true"
+    with pytest.raises(ValueError, match="face_command_enabled must be boolean"):
+        TC.validate_schema3_contract_structure(bad_face)
 
 
 @pytest.mark.parametrize(
@@ -286,6 +334,11 @@ def test_checkpoint_binding_requires_sha_schema_and_exact_lineage():
         TC.require_checkpoint_contract_binding(inexact, schema=3, sha256=digest)
     with pytest.raises(ValueError, match="not bound"):
         TC.require_checkpoint_contract_binding(exact, schema=3, sha256="b" * 64)
+    assert TC.checkpoint_claims_contract(exact)
+    assert TC.checkpoint_claims_contract(
+        {"infos": {TC.CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY: 0}}
+    )
+    assert not TC.checkpoint_claims_contract({"infos": {}})
 
 
 def test_export_paths_do_not_promote_schema2_or_unknown_schemas():
@@ -311,6 +364,10 @@ def test_export_paths_do_not_promote_schema2_or_unknown_schemas():
         "joint_velocity_limits",
         "joint_friction_semantics",
         "racket_control_point_offset_wrist_m",
+        "face_command_enabled",
+        "face_command_pairing",
+        "motion_allow_legacy_link_origin_velocity",
+        "motion_kinematics_exact",
         "training_contract_schema_version",
         "training_contract_sha256",
         "source_checkpoint_sha256",
@@ -319,6 +376,18 @@ def test_export_paths_do_not_promote_schema2_or_unknown_schemas():
         assert field in standalone
     assert "_donor_activation" in standalone
     assert "donor graph has ambiguous activation operators" in standalone
+    for source in (exporter, standalone):
+        assert "validate_schema3_contract_structure" in source
+        assert "checkpoint_claims_contract" in source
+        assert "if training_contract_lineage_exact" in source
+
+
+def test_training_hard_contract_traces_face_pairing_and_legacy_motion_opt_in():
+    train = (ROOT / "scripts/train.py").read_text(encoding="utf-8")
+    assert '"face_command_enabled": bool(getattr(racket, "face_command", False))' in train
+    assert '"face_command_pairing": attr(racket, "face_command_pairing", "shared_plus_y")' in train
+    assert '"motion_allow_legacy_link_origin_velocity": bool(' in train
+    assert "contract_lineage_exact = ckpt is None and motion_kinematics_exact" in train
 
 
 def test_runner_embeds_schema_sha_and_lineage_in_checkpoint_infos():

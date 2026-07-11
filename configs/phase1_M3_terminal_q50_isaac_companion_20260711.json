@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "contract_id": "phase1-M3-old-vs-S1-terminal-clean-q50-isaac-companion-v1",
+  "status": "offline_runtime_contract_required",
+  "auto_start": false,
+  "preregistration_sha256": "4c5434511c8da8e6d65d1f82571eb8975a7ecf2baa9a4d0a98cd68cb045de12c",
+  "semantics": {
+    "causal": true,
+    "evaluation_contract_exact": false,
+    "formal_target": false,
+    "deploy_gate": false
+  },
+  "checkouts": {
+    "training": {
+      "path": "/workspace/codexschema/nohope",
+      "commit": "6d93bcb16c422a2f42748c2dc99432559653480b"
+    },
+    "evaluation": {
+      "path": "/workspace/codexschema/nohope_eval_08e438e",
+      "commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f"
+    }
+  },
+  "mujoco_binding": {
+    "runner_sha256": "095e476fd36fb68d500cb39ea7f71f6fee9b729209187d51599582c72c22198b",
+    "execution_config_sha256": "550ca88988c88e94e626aed3e489cbedf981d2b32cde1bab9601ebacae05988b",
+    "execution_contract_id": "phase1-M3-old-vs-S1-terminal-clean-q50-execution-v2"
+  },
+  "tools": {
+    "runner_sha256": "f5d0dce4a5f650981838779dfa472c881d63c28341437167e0eca9217f57e04e",
+    "evaluation": {
+      "isaac_evaluator": {
+        "path": "hope_training/whole_body_tracking/scripts/isaac_bank_exam.py",
+        "sha256": "0225ca41ad96340187447334c8f3707229d54947e376be3c059435865b34a72e"
+      },
+      "isaac_adapter": {
+        "path": "hope_training/whole_body_tracking/scripts/isaac_bank_exam_adapter.py",
+        "sha256": "b9decc710a863ff24c73d6b750f22c6f6764c6023dfab286281c368dc7dc6af2"
+      },
+      "schedule_module": {
+        "path": "hope_training/whole_body_tracking/scripts/bank_exam_schedule.py",
+        "sha256": "32721f018f6a35a42aa12ff0a7e48c0d9bc513d238988d953241ee625744b23b"
+      },
+      "isaac_scorer": {
+        "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/virtual_ball.py",
+        "sha256": "3dc5237346004893141fe231dbf6a8bc1028e0328459411015366d72868c5ed4"
+      },
+      "ball_physics_yaml": {
+        "path": "configs/ball_physics_venue.yaml",
+        "sha256": "2e58221442665ddad7cc6dcc18d5c811dec1b0c47439b81c1c744b5148169a27"
+      },
+      "setup_train_env": {
+        "path": "hope_training/whole_body_tracking/setup_train_env.sh",
+        "sha256": "88c1d7307ec90483712f7f3b0d8535179b88bb132a8a5a06111bff6872034214"
+      }
+    }
+  },
+  "paper": {
+    "schema_version": 3,
+    "schedule_k": 100,
+    "attempts_per_side": 50,
+    "per_clip_quota": 50,
+    "schedule_seed": 0,
+    "hold_range": [0, 100],
+    "noise_scale": 0.0,
+    "same_schedule_file_as_mujoco": true,
+    "no_wrap": true,
+    "allow_inexact_contract": true
+  },
+  "command": {
+    "isaac_python": "/workspace/hope_isaac_venv/bin/python",
+    "task": "HOPEPingPongVirtualBall",
+    "headless": true,
+    "output_stem": "isaac_clean_k100",
+    "max_parallel": 1
+  },
+  "arm_order": ["M3_old", "M3_S1"]
+}

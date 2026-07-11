@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "status": "complete",
+  "scope": "structural GVHMR reconstruction only; no visual-quality, robot-clearance, contact, or formal training acceptance",
+  "started_utc": "2026-07-11T09:27:50.236152Z",
+  "completed_utc": "2026-07-11T09:37:16.720760Z",
+  "pod": "pod1",
+  "gpu_physical_index": 1,
+  "queue_state_path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_state/queue_state.json",
+  "queue_state_sha256": "673b01d45093c9c488184e86ca0dbc4ba6fb6455837d25520fda43deeb1cc19a",
+  "processing_contract": {
+    "manifest_sha256": "6661f9ac3dba930835a8c241ecb4a779d62be0cbb9aa4d1712d5470db6c9b289",
+    "queue_tool_sha256": "4a86ba0f965875509272dfdce366d59ce19c0c9a984b8035c86ffdf2e61fbf76",
+    "result_auditor_sha256": "79383a3461a8bb2d47197cef4057c2baa9d878db76e1b468c77e7b9d98abdcbc",
+    "gvhmr_commit": "6ec3ca39336c50492c0fae65fba2fb831fc7d866",
+    "gvhmr_worktree_clean": true,
+    "gvhmr_dependency_tree": {
+      "root": "/workspace/franco/motion_work/GVHMR/inputs/checkpoints",
+      "files": 21,
+      "bytes": 7870569505,
+      "sha256": "33907642ec7e6400d0a6e34dca0bea4acc4bfb7cefc51a210b398d4e853ad06a"
+    },
+    "python_environment": {
+      "executable": "/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10",
+      "version": "Python 3.10.20",
+      "pip_freeze_sha256": "56b0f8af9677b279bbb4925b6f49113f484dcb9ded1ed8d9bc56af71f304c694"
+    },
+    "static_camera": true
+  },
+  "formal_eligible": false,
+  "formal_blockers": [
+    "visual reconstruction review not completed",
+    "canonical body betas/height are not yet bound",
+    "A3 retarget, L0, self-collision, table/net swept clearance and strike feasibility are not completed",
+    "rally yaw, grip rotation and contact truth are unverified for these air swings"
+  ],
+  "results": [
+    {
+      "asset_id": "franco_forehand_block",
+      "source_sha256": "15d73838a6fd190230985d5a8d7ac482697b6a3f5af0aaac985f0d0354595783",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/forehand_dang/hmr4d_results.pt",
+      "result_sha256": "8c8a971d9c02cbf16023c3aaa2d016648907e6df86463136fb430525c214ecb4",
+      "result_bytes": 290264,
+      "frames": 65,
+      "finite_elements": 5135,
+      "structural_audit_sha256": "a67a9ef6026ad25c753b9dd142fde4e5c08bfd6e6b65be14d6f0513d50eae920",
+      "structural_status": "pass"
+    },
+    {
+      "asset_id": "franco_backhand_block",
+      "source_sha256": "5193ac7897684654a459c23e026d989287280f4bd1ec03ee7f907d9ba1196802",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/backhand_dang/hmr4d_results.pt",
+      "result_sha256": "e8e6d2390b8c9512e418ea61b39de5df7cc175ac622230d83436debdeec8f1c6",
+      "result_bytes": 281112,
+      "frames": 63,
+      "finite_elements": 4977,
+      "structural_audit_sha256": "7195ec27c243db681bae76d1205e8cd2d131900f93e4beeb44a44a610792341d",
+      "structural_status": "pass"
+    },
+    {
+      "asset_id": "franco_forehand_loop",
+      "source_sha256": "d39db38aaeea78d07d11b50edf5ef02ff24c946f7d89625e3a34c3cddf4e7e55",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/forehand_la/hmr4d_results.pt",
+      "result_sha256": "a5b69892d74e97782edf48ec812d050b77dc84b47a72128cd61960c02086147c",
+      "result_bytes": 311768,
+      "frames": 70,
+      "finite_elements": 5530,
+      "structural_audit_sha256": "2ca9b817d273532acdd7a53fde9406611ddb50f4cbe6b034c117250291b0d4c2",
+      "structural_status": "pass"
+    },
+    {
+      "asset_id": "franco_backhand_loop_a",
+      "source_sha256": "818faab1bc1227d4dcc058dfd1f014d2edc5bfa229b539d5ee44d63238d997ad",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/backhand_la/hmr4d_results.pt",
+      "result_sha256": "186a5262723f06007b6f0a2aa8d4da08a04aea2ac50751820a051698a96c1a0c",
+      "result_bytes": 307672,
+      "frames": 69,
+      "finite_elements": 5451,
+      "structural_audit_sha256": "8f251bf983fbdad366b97b5f3a3fe4234b76631e5baf768a80ed03a9a8bcff02",
+      "structural_status": "pass"
+    },
+    {
+      "asset_id": "franco_backhand_loop_b",
+      "source_sha256": "73a9a68a7895ecfd337e318fe191ef1d40dc1cb5ffbcebe4af8e86ac72fdc85c",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/backhand_la2/hmr4d_results.pt",
+      "result_sha256": "8fd51458510f5b2cd0768e9d3cb3648aaf7ead2e752b1c02f160aa5f86ea0515",
+      "result_bytes": 403096,
+      "frames": 91,
+      "finite_elements": 7189,
+      "structural_audit_sha256": "fadd2ddd4bb8afb6ce284e58123c87c7ac8fd87f235fce57a5ccadbd0f6717b4",
+      "structural_status": "pass"
+    },
+    {
+      "asset_id": "franco_backhand_loop_c",
+      "source_sha256": "ba885bb03869b75edc62c80b106774b910c7d5e41e62c01f2052d87bbc034354",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/backhand_la3/hmr4d_results.pt",
+      "result_sha256": "a049e79028fc8c840bfa29bc192e3fe1759e31520c37ed26606e9d139949586f",
+      "result_bytes": 433176,
+      "frames": 98,
+      "finite_elements": 7742,
+      "structural_audit_sha256": "42eed419449fefda8ce5d5f10490e04cf359a10fda3c9b93412577481aecba41",
+      "structural_status": "pass"
+    },
+    {
+      "asset_id": "v6_forehand_block",
+      "source_sha256": "5016ef5d0bbb51bea243903fc7c8a1622ade7eb3fa2e9fcdbc404791ce8089d2",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/forehand_v6/hmr4d_results.pt",
+      "result_sha256": "49c1ab4e1efb8e3c8cf361fdfc0174a47ea082561b5acbd9e690f3fc40a9e836",
+      "result_bytes": 159448,
+      "frames": 35,
+      "finite_elements": 2765,
+      "structural_audit_sha256": "b2aec833de420fa9cd78f615135605075ce1d93ab7b86a059ae313d4c50f98a5",
+      "structural_status": "pass"
+    },
+    {
+      "asset_id": "v6_backhand_block",
+      "source_sha256": "996b1bd0a2d2fe5273b7faae5265469ced4959f98e8a39c91a242fb355e22a30",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/backhand_v6/hmr4d_results.pt",
+      "result_sha256": "9cb1e5c8f2019ec7c61370afae6c015ce3485e1be77e75d9443b5a648b98997e",
+      "result_bytes": 159448,
+      "frames": 35,
+      "finite_elements": 2765,
+      "structural_audit_sha256": "5892ca7f0e9ea4fce740ed17db8de846c2bfd2ddda12aa75c5a29680bb179056",
+      "structural_status": "pass"
+    },
+    {
+      "asset_id": "v7_forehand_block",
+      "source_sha256": "f3cbd8d9db77f24f1bf51f2988ad0e4d9bd82d013606198599ea6c5d8af95367",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/forehand_v7/hmr4d_results.pt",
+      "result_sha256": "7a1e12ee1bf9c55746af98da84619f5c1ef3dcc093f469663e8524fdd9c8da43",
+      "result_bytes": 286360,
+      "frames": 64,
+      "finite_elements": 5056,
+      "structural_audit_sha256": "7a001cf64447505a83b8348d77c6861d6d223588aaf175ef2ae720391663fd53",
+      "structural_status": "pass"
+    },
+    {
+      "asset_id": "v7_backhand_block",
+      "source_sha256": "9eb3e7a9c61ed97b49392fc65cd2430c5a63f4f794e9e64c79c51ff307eacb44",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/backhand_v7/hmr4d_results.pt",
+      "result_sha256": "91a02da98e9d933e782d49b256c80024d1ead549084d64653b810c5cc4068062",
+      "result_bytes": 286360,
+      "frames": 64,
+      "finite_elements": 5056,
+      "structural_audit_sha256": "d92535326dc62f75a69931a0af7d373e28e48351d9c59896426c681a57b8ef87",
+      "structural_status": "pass"
+    }
+  ]
+}

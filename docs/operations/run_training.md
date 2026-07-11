@@ -229,11 +229,467 @@ python scripts/migrate_motion_kinematics.py \
   --body-order /path/to/body_order.txt
 ```
 
+`--body-order` describes the source NPZ columns; it is not automatically the
+current articulation order. If a real Kit preflight reports a different
+runtime body order, capture that current order and rerun with
+`--target-body-order /path/to/current_runtime_body_order.txt`. The migration
+then permutes all four body pose/velocity arrays by body name before converting
+link-origin velocity to COM velocity. Never relabel the metadata without
+reordering the arrays.
+
 For a legacy Isaac clip already carrying COM velocity, use
 `--source-point center_of_mass --body-order ...` and omit `--mjcf`. Never
 infer the point or body order from a filename. Interpolation-only retiming
 outputs are explicitly tagged `link_origin` and are not formal training
 inputs; use the FK output mode to regenerate COM velocity.
+
+Fresh schema-v3 training must also choose the joint-friction plant explicitly.
+The checked-in A3 actuator config preserves historical, uncalibrated PhysX
+coefficients. Because those dimensionless/load-dependent values have no exact
+MuJoCo `frictionloss` equivalent, they remain a diagnostic control. Launch the
+cross-engine-exact zero-friction control from scratch with:
+
+```bash
+hope_isaac_py scripts/train.py task=HOPEPingPongVirtualBall algo=ppo \
+  task.plant.zero_joint_friction=true \
+  motion_file=/abs/path/forehand_schema2_comv.npz \
+  motion_file_2=/abs/path/backhand_schema2_comv.npz \
+  ++task.racket.question_bank=/abs/path/schema3_train.npz \
+  headless=true
+```
+
+The flag is absent/false by default and never changes an existing checkpoint.
+The saved `training_contract.json` records the expanded per-joint coefficients;
+any legacy warm-start remains exact-ineligible even when the new run selects
+zero friction. Use a paired fresh `zero_joint_friction=true` versus
+as-configured run when measuring the plant effect, and label the as-configured
+cell diagnostic until a physically calibrated PhysX/MuJoCo mapping exists.
+
+### Serialized Kit boot for multi-GPU hosts
+
+Do not let several Isaac/Kit processes initialize concurrently on one Pod.
+`scripts/launch_kit_training_locked.sh` holds the host boot lock only until a
+reliable log marker appears, launches the child in its own process group, and
+records the exact PID/PGID and command in `<log>.launch`. After the marker, the
+lock is released so already-booted training jobs may run concurrently:
+
+```bash
+source /workspace/codexschema/env.sh
+KIT_BOOT_MARKER='Learning iteration' KIT_BOOT_TIMEOUT_S=900 \
+  scripts/launch_kit_training_locked.sh /abs/path/arm/run.log \
+  env CUDA_VISIBLE_DEVICES=0 /workspace/hope_isaac_venv/bin/python \
+  scripts/train.py task=HOPEPingPongVirtualBall algo=ppo device=cuda:0 \
+  headless=true logger=tensorboard run_name=arm
+```
+
+For a `max_iterations=0` mechanism smoke, use a marker such as
+`[train.py] hard training contract:` instead. A process that exits before its
+required marker is a failed boot even when its exit code is zero. A boot
+timeout sends TERM, then KILL if necessary, only to the recorded arm PGID;
+never replace that cleanup with a broad `pkill`.
+
+The frozen 2026-07-11 Phase-1 recipes use
+`scripts/launch_phase1_20260711.sh`. It verifies every parent checkpoint,
+motion and train-bank SHA before invoking the locked launcher. Run the exact
+179-D construction gate first, then start the three lanes assigned to each
+Pod:
+
+```bash
+scripts/launch_phase1_20260711.sh smoke   # Pod 1; inspect contract, then wait for clean exit
+scripts/launch_phase1_20260711.sh pod1    # M3 old/S1 + fresh schema-v3 seed 1
+scripts/launch_phase1_20260711.sh pod2    # M2 old/S1 + fresh schema-v3 seed 2
+```
+
+Set `PHASE1_DRY_RUN=1` to validate inputs and print shell-escaped commands
+without starting Kit. The causal continuations deliberately use the legacy
+motion diagnostic flag and remain `training_contract_exact=0`; the two fresh
+seeds use runtime-order schema-2 motion, a strict schema-v3 train bank, no
+checkpoint and `zero_joint_friction=true`.
+
+Those first six processes occupy the six cards but do **not** fill the measured
+breadth capacity. The 2026-07-08 rule is three to four 4096-env jobs per GPU;
+the 2026-07-11 Phase-1 target is 24 jobs. The scale-out roles are deliberately
+layered so each host can be audited at two, three and four jobs per card:
+
+```bash
+# Run this launcher from a detached/current control worktree, but point every
+# training command at the clean frozen 6d93bcb checkout.
+export PHASE1_REPO_ROOT=/workspace/codexschema/nohope
+export PHASE1_STAGGER_S=75
+EVAL=/workspace/codexschema/nohope_eval_08e438e  # historical directory name; verify the live HEAD
+test -z "$(git -C "$EVAL" status --porcelain)"
+git -C "$EVAL" rev-parse HEAD
+
+bash "$EVAL/hope_training/whole_body_tracking/scripts/launch_phase1_20260711.sh" pod1_scaleout_2
+bash "$EVAL/hope_training/whole_body_tracking/scripts/launch_phase1_20260711.sh" pod1_scaleout_3
+bash "$EVAL/hope_training/whole_body_tracking/scripts/launch_phase1_20260711.sh" pod1_scaleout_4
+
+bash "$EVAL/hope_training/whole_body_tracking/scripts/launch_phase1_20260711.sh" pod2_scaleout_2
+bash "$EVAL/hope_training/whole_body_tracking/scripts/launch_phase1_20260711.sh" pod2_scaleout_3
+bash "$EVAL/hope_training/whole_body_tracking/scripts/launch_phase1_20260711.sh" pod2_scaleout_4
+```
+
+The two Pods may launch the same layer in parallel; one Pod still serializes its
+own three Kit boots. Verify all six new first iterations/contracts before
+starting the next layer. The authoritative assignment and run names are in
+`configs/phase1_scaleout_matrix_20260711.json`. Scale-out roles refuse a dirty
+checkout or a training commit other than
+`6d93bcb16c422a2f42748c2dc99432559653480b`.
+If a layer stops on its second/third boot, preserve that failed arm and rerun
+the same role: a still-live, command-identical ready arm is verified and
+skipped. If an earlier arm has already completed, use
+`PHASE1_ONLY_ARM=<exact_run_name>` to launch only the reviewed remaining arm.
+
+Do not wait for terminal checkpoints to discover whether an ablation works.
+The initial missing curves are frozen in
+`configs/phase1_checkpoint_curve_initial_pod{1,2}_20260711.json`. The following
+command is a **historical record only**; those manifests predate the mandatory
+screen-policy/job-contract schema and must not be passed to the checked-in new
+worker. Their successful/failed states are already preserved:
+
+```bash
+python3 "$EVAL/hope_training/whole_body_tracking/scripts/phase1_checkpoint_curve_worker.py" \
+  --manifest "$EVAL/configs/phase1_checkpoint_curve_initial_pod1_20260711.json" \
+  --judge-script "$EVAL/hope_training/whole_body_tracking/scripts/judge.sh" \
+  --state-dir /workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/initial_pod1 \
+  --max-active-cpu 9
+```
+
+The live 2026-07-11 paper deliberately remains on the clean detached evaluator
+commit and judge SHA below. The current branch has since hardened both worker
+and judge; mixing that latest `judge.sh` with manifests frozen to the old SHA
+is correctly rejected. Do not update the live manifest SHA in place.
+
+```bash
+EVAL=/workspace/codexschema/nohope_eval_08e438e
+RUNTIME_MANIFESTS=/workspace/codexschema/phase1_fresh_20260711/runtime_manifests
+test "$(git -C "$EVAL" rev-parse HEAD)" = 46a0ce24524fdb843e55fe82ba4c045f2adc090f
+test -z "$(git -C "$EVAL" status --porcelain)"
+test "$(sha256sum "$EVAL/hope_training/whole_body_tracking/scripts/judge.sh" | awk '{print $1}')" = \
+  1a00702935096b063435c3f0bd23e75f76f13e1298c87310d1cec3c26cca8529
+```
+
+The runtime manifest copies are the corrected 20998/split/SP-inexact files
+from this repository; copy and hash-check them **before** launching a worker,
+never while that worker is alive. This lets the historical clean evaluator run
+the corrected queue without editing its worktree.
+
+The worker starts the next judge only after the prior judge reaches its CPU-only
+MuJoCo phase. It sets OpenMP/MKL/OpenBLAS/NumExpr to one thread, records exact
+checkpoint and evaluator commit/hashes, requires clean frozen training/eval
+worktrees, refuses stale failed state, and never signals a training process.
+`judge.sh` shares the training launcher's Kit boot lock; only CPU exam phases
+overlap. Observation-normalizer sidecars preserve finite zero std
+dimensions only because the bound runtime divisor is `std + eps` with
+`eps=0.01`; negative/non-finite std or a non-positive divisor remains fatal.
+Before taking the Kit lock, `judge.sh` now activates the CPU evaluator and
+requires both the graph loader and runtime. The current Pods use
+`onnx==1.22.0` and `onnxruntime==1.27.0`:
+
+```bash
+/workspace/hope_mjeval_venv/bin/python -m pip install 'onnx==1.22.0'
+/workspace/hope_mjeval_venv/bin/python - <<'PY'
+import onnx, onnxruntime
+print(onnx.__version__, onnxruntime.__version__)
+PY
+```
+
+`onnxruntime` alone is insufficient because formal normalization preflight
+inspects and checks the graph through `onnx`. Exact A3 plant comparison uses
+no arbitrary fixed tolerance: exact float64 equality passes; otherwise the
+bound metadata must be a canonical finite float32 value and the MJCF value
+must map to the same float32 grid point. This accepts serialization-only
+armature (`2.71e-9`) and ankle-effort (`3.0517578e-6`, `118.2` versus
+`118.199996948...`) residues while a neighboring float32 value still fails.
+Do not put report-only formatting changes in `venue_ball_sampler.py`: that
+module's complete SHA is part of every schema-v3 bank physics contract. Final
+artifact exactness is overlaid by `mujoco_eval_onnx.py` while rendering the
+denominator report, leaving the bank/scorer source bytes immutable.
+Long-run milestones, paired stopping rules and peak
+density are specified in
+`docs/research/phase1_ablation_acceleration_2026-07-11.md`.
+The first historical repair manifests intentionally produced a full clean plus
+5%-noise record. Do not copy that cost into every milestone. The fresh
+preflight retry manifests
+`configs/phase1_checkpoint_curve_fresh_retry_pod{1,2}_20260711.json` use one
+fixed clean (`ns=0`) schedule with `K=20` (10 questions per side) to establish
+direction. A stop or promotion still requires a separately pre-registered
+50-per-side clean paper; noise and full-paper cells are reserved for survivors.
+
+The ongoing original-arm milestones are frozen in
+`configs/phase1_checkpoint_curve_cadence_pod{1,2}_20260711.json`. A cadence
+worker may be started before later files exist:
+
+```bash
+python3 "$EVAL/hope_training/whole_body_tracking/scripts/phase1_checkpoint_curve_worker.py" \
+  --manifest "$RUNTIME_MANIFESTS/phase1_checkpoint_curve_cadence_pod1_20260711.json" \
+  --judge-script "$EVAL/hope_training/whole_body_tracking/scripts/judge.sh" \
+  --state-dir /workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1 \
+  --max-active-cpu 6 --wait-for-checkpoints
+```
+
+In wait mode each pre-registered path must appear and keep the same size/mtime
+for five seconds before hashing. Before every launch the worker rechecks the
+judge SHA and both clean commits; it never scans arbitrary `model_*.pt` files
+or changes a running trainer. Jobs are ordered so paired causal milestones are
+consumed together and future fresh milestones follow every 2000 iterations.
+
+The additional 18 scale-out arms have deterministic manifests generated from
+the actual run-directory bindings rather than hand-copied paths:
+
+```bash
+python3 hope_training/whole_body_tracking/scripts/generate_phase1_scaleout_curve_manifests.py --check
+```
+
+Run two independent wait queues per Pod so a causal terminal checkpoint cannot
+block an already-ready fresh milestone:
+
+```bash
+for queue in causal fresh; do
+  state="/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_${queue}_pod1"
+  mkdir -p "$state"
+  nohup setsid python3 "$EVAL/hope_training/whole_body_tracking/scripts/phase1_checkpoint_curve_worker.py" \
+    --manifest "$RUNTIME_MANIFESTS/phase1_checkpoint_curve_scaleout_${queue}_pod1_20260711.json" \
+    --judge-script "$EVAL/hope_training/whole_body_tracking/scripts/judge.sh" \
+    --state-dir "$state" --max-active-cpu 6 --wait-for-checkpoints \
+    >"$state/worker.log" 2>&1 </dev/null &
+  pid=$!
+  printf 'queue=%s pid=%s pgid=%s\n' "$queue" "$pid" \
+    "$(ps -o pgid= -p "$pid" | tr -d ' ')"
+done
+```
+
+Do not add `wait` to that loop: both workers must remain independent. The
+original seed-1/2 cadence is split the same way. Its causal manifest remains
+`phase1_checkpoint_curve_cadence_podN_20260711.json`; the Pod1 fresh-only
+manifest starts at 4000, while Pod2 starts at 6000, each with a separate state
+directory. This prevents an original causal terminal from blocking later
+original `SZ` milestones.
+
+Use the matching `pod2` manifests on Pod 2. The four files cover exactly the
+18 newly launched arms and 142 clean q10 jobs: causal seed 2 at
+`18000/19000/20000/20998`, and fresh at `2000/4000/.../16000/16999`.
+They are milestone-major direction screens only. Their metadata explicitly
+sets `screen_only=true` and never authorizes stop/promotion; use a separately
+frozen q50 schedule for decisions. `SZ` is the only formal target, `SP` is an
+inexact non-target plant diagnostic (non-zero PhysX friction has no exact
+MuJoCo `frictionloss` equivalent), and causal plus `LZ/LP` remain inexact
+diagnostics. Generated inexact jobs carry only the whitelisted
+`--exam-extra --allow-inexact-contract` escape.
+
+The checked-in curve worker requires `screen_policy` on every manifest,
+requires `schedule_k == 2 * attempts_per_side`, compares that schedule (and
+optional seed/noise constants) with every job, and records both the complete
+manifest SHA and canonical screen-policy-plus-job contract SHA in state. Only
+the latter gates per-job reuse, so appending an unrelated later job does not
+invalidate a completed result; any change to that job or its screen policy is
+rejected rather than silently skipped. The historical `initial`/`fresh_retry`
+manifests predate this
+schema discipline; do not restart them with the new worker without first
+migrating them to an explicit screen policy and a new state directory. Current
+live workers remain on their pinned clean eval checkout until they exit; never
+edit that checkout underneath them.
+
+For continuations that resume at iteration 16999 and execute 4000 updates, the
+runner's terminal checkpoint is `model_20998.pt`; `model_20999.pt` is never
+written. Do not infer a terminal filename by adding 4000 to the resume label.
+The checked-in manifests and their deterministic generator encode 20998 and a
+regression rejects 20999.
+
+### Causal-triangle slot refill (2026-07-11)
+
+The four second-wave followups are frozen in
+`configs/phase1_causal_followups_20260711.json`. They fill only naturally idle
+trainer slots and do not edit the original 24 recipes: Pod1 GPU1/GPU0 run M3
+S1-only guidance-0 seed1/2; Pod2 GPU0/GPU1 run M2 S1+guidance-`-0.95`
+seed1/2. Pod1 M3 seed2 additionally requires exact predecessor PGID `1310472`
+to be absent plus a stable M3-old 20998 terminal. The gate is read-only and
+never signals that predecessor.
+
+Deploy the config and launcher under the external control root, never inside
+the live training checkout, then verify the bytes explicitly:
+
+```bash
+CONTROL=/workspace/codexschema/phase1_fresh_20260711/control/causal_followups_v1
+CONFIG="$CONTROL/phase1_causal_followups_20260711.json"
+LAUNCHER="$CONTROL/launch_phase1_causal_followups_20260711.py"
+test "$(sha256sum "$CONFIG" | awk '{print $1}')" = \
+  050d6047fee280feb5754ec568c043fb20e468f81ef049b7420f90ec81a0efc8
+test "$(sha256sum "$LAUNCHER" | awk '{print $1}')" = \
+  ca69e1cb90668060f150a518d9cee254f3883a80a07683c4fdfe1f3e4e071b08
+```
+
+Run read-only validation first, one exact arm at a time:
+
+```bash
+/usr/bin/python3 "$LAUNCHER" \
+  --config "$CONFIG" \
+  --expected-config-sha256 050d6047fee280feb5754ec568c043fb20e468f81ef049b7420f90ec81a0efc8 \
+  --expected-launcher-sha256 ca69e1cb90668060f150a518d9cee254f3883a80a07683c4fdfe1f3e4e071b08 \
+  --pod pod1 --arm phase1_M3_S1_only_guidance0_seed1 validate
+```
+
+Only after validation passes, replace the final `validate` with `launch`.
+Repeat with the arm's registered Pod; do not edit its GPU from the command
+line. The launcher rechecks clean train `6d93bcb...` and eval `46a0ce2...`,
+all artifact/tool SHAs, GPU compute/trainer count and free memory, atomically
+claims a never-used run directory, starts one isolated trainer PGID, validates
+the emitted hard-contract, materializes the five q10 jobs and starts one
+isolated checkpoint worker. On a post-start failure it may signal only those
+new, sidecar-and-`/proc`-bound PGIDs. It contains no broad kill, checkout
+mutation or real-robot path.
+
+On the first read-only Pod validation, this capacity gate correctly prevented
+all writes but exposed a driver reporting detail: `nvidia-smi` returned every
+compute PID twice. Launcher `ca69e1cb...` de-duplicates PID rows before
+counting unique compute/trainer processes; three unique trainers still allow
+the fourth slot, while four unique processes still fail closed. Do not deploy
+or authorize the superseded `dca9b9df...` launcher.
+
+The original `model_16999.pt` is only an SHA-bound parent reference. Never copy
+it into the new training run beside the new hard-contract sidecar: doing so
+would launder checkpoint lineage. New cadence starts at 17000. Every q10 job is
+screen-only and cannot stop/promote; the generated q50 file has no jobs and
+remains inactive until its preregistered paired-evidence trigger is recorded.
+
+The first followup 17k states were produced by eval `46a0ce2`'s legacy worker
+SHA `8b980359...`. Their commands/results are correct, but that worker predates
+the screen-policy/job-contract state binding. Replace only these four idle
+workers with the external hardened worker; do not switch or edit either Git
+worktree:
+
+```bash
+CONTROL=/workspace/codexschema/phase1_fresh_20260711/control/causal_followups_v1
+HARD_CONFIG="$CONTROL/phase1_curve_worker_hardening_20260711.json"
+HARD_TOOL="$CONTROL/replace_phase1_curve_workers_20260711.py"
+HARD_WORKER="$CONTROL/phase1_checkpoint_curve_worker_hardened_21e3015.py"
+test "$(sha256sum "$HARD_CONFIG" | awk '{print $1}')" = \
+  d270ebb2d2e3fe45510cc1638f64841e9715f0cdccdd9fc983a61e42d5655a58
+test "$(sha256sum "$HARD_TOOL" | awk '{print $1}')" = \
+  d0678af285af42e16ec133e8d739ff3ce3cec0e8e3e4e39a5a973c0cc1a621ad
+test "$(sha256sum "$HARD_WORKER" | awk '{print $1}')" = \
+  21e301533328cad2a6684acced85fec6bb6854225eb18ca673247386f059f0eb
+
+/usr/bin/python3 "$HARD_TOOL" \
+  --config "$HARD_CONFIG" \
+  --expected-config-sha256 d270ebb2d2e3fe45510cc1638f64841e9715f0cdccdd9fc983a61e42d5655a58 \
+  --expected-tool-sha256 d0678af285af42e16ec133e8d739ff3ce3cec0e8e3e4e39a5a973c0cc1a621ad \
+  --pod pod1 validate
+```
+
+Use `pod2` separately. `validate` is read-only and must show both exact legacy
+worker PGIDs as single-member and childless. If either has a judge child, stop:
+the tool does not wait for or signal it. Only then replace the final word with
+`replace`. The Pod transaction rechecks both workers before its first signal,
+sends TERM only to those two exact worker PGIDs (never KILL), freezes the old
+17k state/sidecar/final log, starts the SHA-pinned standalone worker with the
+same manifest and a never-used state directory, and rejudges 17k. Completion
+requires rc=0 plus exact manifest/job/job-contract SHAs. It never manages a
+trainer or judge; old evidence remains immutable beside a correction sidecar.
+
+This one-time correction completed on 2026-07-11. Hardened worker PGIDs are
+Pod1 `1416771/1416784` and Pod2 `198759/198771`; correction-sidecar SHAs are
+`2faf88de...ffe3`, `1d6f8ba3...bae9`, `0dd02fae...d165`, and
+`45f4334d...0ad`. All four 17k jobs were rejudged rc=0 with manifest, job spec
+and job contract SHAs present. Do **not** rerun `replace`: its legacy-worker
+precondition is intentionally no longer true. For current monitoring, read
+each `checkpoint_cadence_q10.worker.hardened.launch.json` and manage only its
+recorded PGID.
+
+The six older global workers were separately replaced under
+`configs/phase1_global_curve_worker_hardening_result_20260711.json`. Their
+current PGIDs are Pod1 `1432280/1432292/1432304` and Pod2
+`200706/200718/200730`. Do not rerun that replacement transaction either;
+monitor the recorded launch sidecars and signal only an exact worker PGID if a
+later, separately authorized repair requires it.
+
+Before copying or launching any curve manifest, run:
+
+```bash
+python3 scripts/validate_phase1_queue_governance.py
+```
+
+For a separately supplied milestone-major manifest, validate it explicitly:
+
+```bash
+python3 scripts/validate_phase1_queue_governance.py \
+  --manifest /absolute/path/to/manifest.json \
+  --require-readiness-barrier
+```
+
+The validator requires q10 K=20/10 per side, screen-only/no-stop/no-promotion,
+ordered milestones and barriers. It rejects q50 from the generic worker; q50
+must use a preregistered paired runner.
+
+### Paired terminal q50 runner
+
+Do not turn a q10 trigger into an ad-hoc `judge.sh` command. The M3 terminal
+paper is executed by `scripts/run_phase1_paired_bank_q50.py`, which separates
+`prepare` (materialize one immutable schedule, start nothing) from `run`
+(require the prepared runtime-contract SHA and validate both complete ledgers).
+The accepted v2 bytes are runner
+`095e476fd36fb68d500cb39ea7f71f6fee9b729209187d51599582c72c22198b`
+and execution config
+`550ca88988c88e94e626aed3e489cbedf981d2b32cde1bab9601ebacae05988b`.
+It forces causal/inexact/non-formal semantics, K=100, 50 per side, one shared
+schedule JSON, exact question order and zero censored attempts. It never
+signals a process.
+
+The 2026-07-11 M3 paper is already complete; do not rerun its no-clobber state
+root. Schedule file SHA is `69f73458...7f25`, semantic schedule SHA is
+`949eb196...8fc0`, runtime-contract SHA is `ca7a688a...17b2`, and paired-result
+SHA is `e9bb07d3...f56e`. M3-old versus M3-S1 FH/BH/aggregate return was
+`0.62/0.22/0.42` versus `1.00/1.00/1.00`, with 9 versus 0 physical falls.
+The result selects S1 only in this same legacy swing-family causal paper and
+the completed Isaac companion does not reproduce the ranking: both old and S1
+score `0.99` aggregate on the same order. Therefore no cross-engine selection
+gate closes. Full paths, the preserved fail-closed attempts and all hashes are
+in `configs/phase1_M3_terminal_q50_result_20260711.json` and
+`configs/phase1_M3_terminal_q50_isaac_result_20260711.json`.
+
+The fresh exact wrapper is
+`scripts/run_phase1_fresh_exact_paired_bank_q50.py`. It additionally requires
+fresh lineage, a shared schema-3 hard-contract SHA and no inexact escape. The
+accepted seed1 model-2000/model-4000 state root is already complete and must
+not be reused. Runtime-contract SHA is `a756023d...4661`, schedule semantic
+SHA is `7dc6af82...ff3e`, and paired-result SHA is `b95ba6c4...0478`.
+Returns were `0.66/1.00/0.83` versus `0.00/1.00/0.50`; retain model 2000 but
+continue the arm. Both cells' post-strike guard resets mean this is not a
+continuity/deploy gate. Full paths and hashes are in
+`configs/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json`.
+
+The completed fresh/exact Isaac companion consumed that same schedule file
+and semantic SHA. Both checkpoints scored `0.99` aggregate (`0.98/1.00` by
+side), one guard reset and zero physical falls; it does not reproduce the
+MuJoCo separation. Do not interpret the earlier-checkpoint final tie-break as
+cross-engine validation. Runtime-contract SHA is `63580328...b8120`, paired
+result SHA is `65c08723...c18e`, and the full bindings are in
+`configs/phase1_SZ_seed1_2000_vs_4000_q50_isaac_result_20260711.json`.
+
+The current 10-second, no-wrap-teleport task does carry the robot state between
+clips, but its complete-clip timing is slower than the conservative venue
+A-B-A intervals. Do not claim that this pool proves arbitrary-time continuous
+play, and do not change its live recipe. The offline reproduction command,
+timing gap and separate `T0/T1` event-driven design are in
+`docs/research/phase1_continuous_rally_timing_2026-07-11.md`.
+
+Schema 3 has two validation levels. Structural validation is sufficient to
+export a hash-bound diagnostic checkpoint whose motion is explicitly inexact;
+it never promotes the metadata exact flag. A checkpoint whose embedded lineage
+flag claims exactness must additionally pass the formal schema-2 motion/body
+order gate. Removing or moving `params/training_contract.json` is not an
+escape: a checkpoint that claims a binding while its adjacent sidecar is
+missing is rejected. `judge.sh` likewise reads only that adjacent sidecar to
+restore zero friction and the actor layout.
+
+For a diagnostic sidecar (`motion_kinematics_exact=false` or the explicit
+legacy face pairing), `judge.sh` adds `--allow-inexact-contract` to MuJoCo and
+prints that decision in its preflight. A fresh exact candidate receives no
+escape. Legacy schema-1/2 or missing-contract runs are also diagnostic. The
+Isaac export subprocess activates the requested venv and then sources this
+checkout's `setup_train_env.sh`, replacing `PYTHONPATH` with
+`HOPE_WBT_PYTHONPATH`; never let a user-specific Pod env select another
+checkout's task package.
 
 `hydra`, `omegaconf`, and `rsl_rl` are NOT in the package `setup.py` `install_requires`; they must be importable from the Isaac Lab Python (provide via Isaac Lab itself or `HOPE_ISAAC_VENV_SITE`). Install the package into that Python:
 
@@ -584,6 +1040,116 @@ From a WandB run:
 hope_isaac_py scripts/play.py task=HOPEPingPongDeployParity algo=ppo num_envs=2 \
   wandb_path="$WANDB_ENTITY/hope_wbc/<RUN_ID>" headless=false
 ```
+
+### Shared schema-v3 BankExam (Isaac + MuJoCo)
+
+Do not pass an exam bank through a training Hydra override.  The saved
+`RacketTargetCommand` continues to own its train-split bank; the evaluator loads
+the exam split independently and installs only the current immutable questions.
+
+Materialize one balanced paper first.  Both simulator cells must consume this
+exact JSON (same schedule SHA, question order, hold values and attempt seeds):
+
+```bash
+python scripts/materialize_bank_exam_schedule.py \
+  --exam-bank /abs/path/s1_<family>_v3_exam.npz \
+  --per-clip-quota 10 --schedule-seed 0 --hold-range 0 100 \
+  --output /abs/path/canary.schedule.json
+```
+
+Isaac single-ball cell (`K=20` creates one environment per immutable item):
+
+```bash
+hope_isaac_py scripts/isaac_bank_exam.py \
+  task=HOPEPingPongVirtualBall headless=true device=cuda:0 \
+  +run_dir=/abs/path/to/training_run \
+  checkpoint=/abs/path/to/training_run/model_16999.pt \
+  +exam_bank=/abs/path/s1_<family>_v3_exam.npz \
+  +schedule_json=/abs/path/canary.schedule.json \
+  +per_clip_quota=10 +schedule_seed=0 +noise_scale=0.0 \
+  +output_dir=/abs/path/isaac_canary
+```
+
+Historical M3f/M2/G1 checkpoints are ruler canaries, not formal lineage; add
+`+allow_inexact_contract=true` to Isaac and `--allow-inexact-contract` to
+MuJoCo, and keep the resulting `evaluation_contract_exact=false` label.
+Re-exporting or resuming an old checkpoint cannot turn it exact.
+
+For a raw normalized ONNX, the sidecar must reproduce the saved runner formula
+`(obs - mean) / (std + eps)`. Zero std entries are valid constant-feature
+statistics only when `eps` makes every divisor strictly positive. The loader
+therefore requires finite `std>=0`, finite `eps>=0`, and elementwise
+`std+eps>0`; never delete the sidecar or feed raw observations to get around a
+normalization error.
+
+The BankExam entry point resolves the current checkout's dependency-light
+`stage1_question_bank.py` automatically, exports that exact path to the
+sampler process and binds the loader SHA into the execution contract. Do not
+install Isaac packages into the MuJoCo environment or rely on a stale
+`HOPE_STAGE1_QB` value.
+
+MuJoCo consumes the same paper and uses the same authoritative NumPy scorer:
+
+```bash
+python scripts/mujoco_eval_onnx.py \
+  --onnx /abs/path/to/exported/policy.onnx \
+  --motion-files /abs/path/forehand.npz /abs/path/backhand.npz \
+  --target-source bank --exam-bank /abs/path/s1_<family>_v3_exam.npz \
+  --exam-schedule-json /abs/path/canary.schedule.json \
+  --noise-scales 0.0 --seed 0 --qdes-clamp --hold-ref stand \
+  --allow-inexact-contract \
+  --out-dir /abs/path/mujoco_canary
+```
+
+Omit both inexact flags for a fresh schema-v3 checkpoint/ONNX. The evaluator
+hashes the exam bank before and after loading; any mid-load replacement is
+fatal. The shared schedule installer is formal/fail-closed by default and
+accepts an inexact sampler only through the explicit historical diagnostic
+flag above.
+
+For a valid cell, the raw ledger must contain all `K` rows in schedule order.
+Physical falls, guard resets and episode timeouts remain failed attempts in the
+same denominator; an external step-cap truncation invalidates the whole cell.
+The versioned hold contract is `H` ready-stand policy actions followed by raw
+clip frame 0; it is part of the schedule SHA, not an evaluator-local guess.
+Before comparing rates, assert that Isaac and MuJoCo report the same bank SHA,
+schedule SHA and ordered question IDs.  Only the `noise_scale=0` canary
+survivors advance to 50 questions per side, continuous play and 5% action
+noise.
+
+For the separate carry-state ruler, add `--exam-continuity-diagnostic` to the
+MuJoCo command and keep `--allow-inexact-contract`. It consumes the same finite
+paper but does not reset robot/action state between questions, always stamps
+the result inexact, and reports `continuity.return_and_recover_rate`. The
+denominator excludes only the terminal paper row, which has no scheduled next
+opportunity. Do not call the one-environment-per-question Isaac adapter a
+continuous test; its physical next-ball/serve timeline is a separate pending
+implementation.
+
+### T1 post-strike event mode is source-ready, not launch-ready
+
+Commit `be5d7cf` adds the training-side scheduler and hard-contract fields;
+it does not authorize a T1 run. Do not invent a schedule JSON or point a live
+trainer at `event_timing_mode=post_strike_t1`. The frozen preregistration must
+continue to fail launch validation until a reviewed materializer, immutable
+screen/decision schedules, continuous judges, self-hit gate, fresh baseline
+and semantics-correct plant are rebound in a new launch preregistration.
+
+Dependency-light verification is:
+
+```bash
+/Users/Franco/opt/anaconda3/envs/fast/bin/python -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_event_timing_scheduler.py
+
+sha=$(shasum -a 256 configs/phase1_event_timing_t0_t1_prereg_20260711.json | awk '{print $1}')
+python3 scripts/validate_phase1_event_timing_prereg.py \
+  --prereg configs/phase1_event_timing_t0_t1_prereg_20260711.json \
+  --expected-prereg-sha256 "$sha" --mode design-check
+```
+
+Running the same validator with `--mode launch-check` must return 1 for the
+frozen preregistration. The runtime field/schema contract is documented in
+`docs/interfaces/t1_event_training_contract.md`.
 
 ## First-Loop Rule
 

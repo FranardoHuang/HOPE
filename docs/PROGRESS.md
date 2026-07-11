@@ -4,6 +4,425 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-11
 
+- Completed canonical-GMR discrete grounding and the next CPU-only dense safety
+  screen for all ten Franco/v6/v7 air swings. Across 654 source frames and
+  5,162 samples at 240 Hz, ground-danger, robot self-collision, racket/handle
+  clearance `<5 mm`, and clearance warning `<20 mm` counts are all zero; the
+  thinnest observed body margin is `40.2466 mm` on Franco backhand-loop A.
+  The screen uses the official MJCF racket site/face/generalized velocity, but
+  this is finite sampling, not a continuous-time certificate, and table/net
+  plus dynamics remain open. A v2 attempt scored venue questions before a
+  GMR-world→HOPE table transform and mirror contract existed; all of its
+  returnability/phase/2-vs-4 fields are revoked. Accepted v4 keeps only the
+  equal v2/v3/v4 safety subtree, freezes the 64-question paper without consuming it,
+  and writes all phase/coverage/selector fields as null/blocked. See
+  `configs/motion_video_gmr_phase_safety_results_20260711.json`; schema-2 +X
+  reground (or an independently verified transform) and mirror verification
+  now block returnability. No RL, GPU, training checkout or robot command was
+  touched.
+- Completed CPU-only canonical-beta GMR for all ten new videos (`39b0a67`).
+  Exact clean loader `2737f472...5de2` consumes
+  `betas[0].detach().cpu().numpy()[:10]` with no padding, correcting the old
+  unbound six-zero hypothesis. All outputs are finite 30 Hz/31-DoF, warm-up
+  converged in 16--29 rounds below `1e-4`, and GMR stayed clean `aabea2e`
+  without GPU allocation. They remain diagnostic until the new outputs pass
+  no-clobber grounding and dense collision/dynamics/table-net gates; ledger is
+  `configs/motion_video_canonical_gmr_results_20260711.json`.
+- Completed fresh formal-target SZ seed1 model-2000 versus model-4000 exact
+  q50 after the q10 curve regressed `0.90 -> 0.50`. On one immutable K=100
+  paper, 2000 returned FH/BH/aggregate `0.66/1.00/0.83`; 4000 returned
+  `0.00/1.00/0.50`. Model 2000 is retained inside this pair, but the whole
+  arm continues unmodified. Both are exact/fresh and had zero physical falls;
+  every question used a non-physical post-strike guard reset, so the result is
+  checkpoint-selection evidence only, not continuity/deployment evidence.
+  Full hashes are in
+  `configs/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json`.
+- Completed the byte-identical fresh SZ Isaac companion. Both 2000 and 4000
+  scored FH/BH/aggregate `0.98/1.00/0.99`, with one guard reset and zero
+  physical falls. This does not reproduce MuJoCo's `0.83` versus `0.50`
+  separation; Isaac's final earlier-checkpoint tie-break is not independent
+  ranking evidence. Model 2000 remains selected only inside the frozen MuJoCo
+  pair, the arm continues and the cross-engine/formal deployment gate remains
+  open. Ledger: `configs/phase1_SZ_seed1_2000_vs_4000_q50_isaac_result_20260711.json`.
+- Completed the M3 same-paper Isaac companion. M3-old and M3-S1 both scored
+  FH/BH/aggregate `0.98/1.00/0.99`, delta zero, on the exact MuJoCo question
+  order. This does not reproduce MuJoCo's `+0.58` S1 advantage, so the causal
+  legacy pair has no cross-engine selection gate; no formal/deploy claim
+  follows. Bindings are in
+  `configs/phase1_M3_terminal_q50_isaac_result_20260711.json`.
+- Corrected and localized the cross-engine result instead of treating two
+  saturated Isaac scores as an engine vote. Fresh model 4000 FH has mean
+  racket-center error `13.15 cm` in MuJoCo versus `2.48 cm` in Isaac; M3-old
+  BH has `168.15 deg` signed-face error before Isaac's analytic
+  `orient_normal` erases the sign. The old M3 `physical_falls=9` label is also
+  corrected to one physical fall plus eight guard resets. A frozen-threshold
+  Isaac/MuJoCo x physical/analytic 2x2 now fails closed until Isaac provides
+  post-contact physical truth. Forensic and prereg result SHAs are
+  `aff8f4e6...45c9` and `dd8fb0b9...6818`.
+- Preregistered the independent T0/T1 event-timing axis without fitting the
+  weak venue median. The tracked aggregate binds raw strikes SHA `6ad3c459...`
+  but states that `n=21` overlaps, 16/21 samples are high-ball practice and the
+  2.5 s filter right-censors the tail; `1.903 s` is not a target. A balanced
+  engineering grid drives the future paper. Design validation passes, while
+  launch validation intentionally fails on missing scheduler/materializer,
+  continuous dual-engine judges, self-hit gate, fresh checkpoint, calibrated
+  plant and immutable schedule hashes. Prereg SHA is `2e7c4a34...2289c`.
+- Implemented the training-side T1 core at `be5d7cf`: exact-byte-bound event
+  schedules, post-strike-only arming, one-step atomic bank-row/clip/deadline
+  install, native clip plus exact hold, fixed deadlines and carry-state with
+  no robot/action/history/noise reset. Miss/unavailable/infeasible rows still
+  consume their scheduled opportunity, and all timing-changing fields enter
+  the hard contract. This is not launch-ready: materialized schedules,
+  continuous dual-engine judges, self-hit instrumentation, a fresh exact
+  baseline and semantics-correct plant remain unbound.
+- The hardened Pod2 curve worker completed the same-paper M2 seed2 18k/19k
+  q10 pair. Old/S1 aggregate changed from `.40/.60` at 18k to `.50/.40` at
+  19k, reversing the tiny-screen ranking. Both 19k checkpoints are finite and
+  have matching filename/embedded iteration, adjacent-contract SHA and causal
+  lineage. This is screen-only evidence: both arms continue, no checkpoint is
+  promoted and no q50 is triggered. Ledger:
+  `configs/phase1_M2_seed2_18k_19k_q10_curve_result_20260711.json`.
+- Replaced the six remaining global curve workers with hardened
+  `21e30153...` workers using only their exact legacy PGIDs. New PGIDs are
+  Pod1 `1432280/1432292/1432304` and Pod2 `200706/200718/200730`; no trainer
+  or judge was signalled. Five available old results were rejudged rc=0 under
+  manifest/job/job-contract bindings. Full transactions are in
+  `configs/phase1_global_curve_worker_hardening_result_20260711.json`.
+- Added fail-closed queue-governance validation (`6f810b8`). It checks all
+  142 scale-out jobs and all 24 cadence plan slots, q10 K20/10-per-side
+  screen-only policy, barrier/milestone continuity, exact/inexact argv and
+  true parallel launch examples; q50 is rejected from the generic worker.
+  Run `python3 scripts/validate_phase1_queue_governance.py` before deployment.
+- Preregistered the plant-semantics repair (`69cdc3f`). SZ remains exact only
+  for the zero-friction execution protocol; SP/LP are historical unit-mismatched
+  proxies, not calibrated controls. A physical latent model, two engine
+  adapters and a fresh shared-face Z/C paired-seed axis now explicitly block
+  deployment. See `docs/research/phase1_plant_semantics_repair_2026-07-11.md`.
+- Completed the preregistered M3 terminal MuJoCo q50 on one immutable K=100
+  schedule (`949eb196...`, 50 per side, no censored attempts). M3-old returned
+  FH/BH/aggregate `0.62/0.22/0.42` with one physical fall plus eight guard
+  resets (the legacy `fell=9` union); M3-S1 returned `1.00/1.00/1.00` with
+  zero such terminations, aggregate delta `+0.58`. This selects S1
+  only inside the legacy swing-family causal diagnostic. Both results remain
+  inexact; the Isaac companion later failed to reproduce this ranking and all
+  formal/deployment gates remain open. A first validator-shape failure is preserved and changed neither the
+  schedule nor checkpoints; accepted v2 hashes are in
+  `configs/phase1_M3_terminal_q50_result_20260711.json`.
+- Completed the exact-PGID correction of the four causal-followup curve
+  workers. Only legacy childless PGIDs `1410648/1412047` and
+  `196753/197939` received TERM; trainers and judges received no signal.
+  Hardened workers are Pod1 `1416771/1416784` and Pod2 `198759/198771`.
+  All four rejudged 17k jobs returned rc=0 and now bind manifest, job spec,
+  job contract, checkpoint, judge and both clean commits; the old state/logs
+  remain immutable beside correction sidecars.
+- Closed the Pod1 M3 terminal integrity/q10 pair. M3-old's finite
+  `model_20998.pt` has SHA `320b77c9...417a` and matches adjacent contract
+  `7542c59b...d941b`. On immutable schedule `7a908142...d614`, old versus S1
+  FH/BH/aggregate is `0.50/0.40/0.45` versus `1.00/1.00/1.00`, delta `+0.55`.
+  This causal/inexact q10 only triggers the separately preregistered K=100
+  q50; it does not select or promote a checkpoint.
+- Ran the content-addressed grounding transform for all ten diagnostic GMR
+  outputs on Pod1. Original discrete-frame penetration was
+  `8.072--8.716 cm`; each independent constant root-z shift leaves about
+  `10 um` minimum clearance. All input/output/report/tool/MJCF/collision
+  digests are bound in `configs/motion_video_gmr_ground_results_20260711.json`.
+  Per-video betas, inter-frame collision, dynamics, table/net, returnability
+  and schema-2 remain open, so no new motion entered RL or hardware.
+- A post-correction full-pool audit found 24 live trainers, exactly four per
+  GPU on both Pods, plus four clean terminals. Every latest checkpoint across
+  all 28 accepted runs had filename iteration equal to its embedded field,
+  zero non-finite values, matching checkpoint-to-adjacent-contract SHA and the
+  expected lineage flag; every accepted run log had zero
+  NaN/Inf/Traceback/OOM/malloc/killed signatures. Training/eval checkouts
+  remain clean at `6d93bcb...`/`46a0ce2...`.
+- Registered ten private Franco/v6/v7 air-swing recordings in a tracked
+  content-addressed manifest and passed local plus Pod1 byte/hash/media audits.
+  Added fail-loud intake, structural-result audit and memory-gated serial GVHMR
+  queue/result-binding tools (`20 passed`)
+  plus a mini-spec for self-collision-safe strike-frame screening, native/TOPP
+  pairs, fair two-vs-four action selection and event-driven between-shot
+  recovery. Pod1 queue PID/PGID `1383735` used the first naturally released
+  GPU1 window and completed all ten reconstructions in 9m27s without touching
+  the frozen Phase-1 checkout. All expected frame counts and 51,666 SMPL
+  elements are finite; full input/output/tool/model/environment hashes are in
+  `configs/motion_video_gvhmr_results_20260711.json`. This is structural GVHMR
+  evidence only: no visual acceptance, A3 clip, training result or hardware
+  approval is claimed.
+- Completed a second, CPU-only GMR diagnostic queue for the same ten videos.
+  The repo-owned worker required clean GMR commit `aabea2e` plus a verified
+  282,953,810-byte source bundle, preserved frame-zero warm-up, and produced
+  10/10 finite 30 Hz, 31-DoF pickles in 52 s. Full source/output/log/audit and
+  tool/environment bindings are in
+  `configs/motion_video_gmr_results_20260711.json`; every row is explicitly
+  `diagnostic_video_betas` and formal-ineligible. A deeper Franco-forehand
+  replay passed joint order/range/speed and found zero robot self-contact in
+  641 sampled poses, but all 65 frames penetrate the floor by roughly
+  7.7--8.4 cm. Ground/root calibration, canonical-betas rerun and repeated
+  continuous collision/dynamics/table-net gates now block schema-2 and RL.
+- Added a single-file GMR grounding tool for that blocker. It requires exact
+  input and canonical-MJCF SHAs, refuses directory scans/overwrites, binds the
+  floating-root 31-joint order and enabled collision geoms, applies only one
+  constant root-z shift, and emits a no-clobber pickle/report with compiled
+  collision and tool/input/output hashes. Dependency-light tests pass with
+  MuJoCo cases skipped when absent; a temporary native arm64 MuJoCo 3.10.0
+  run passed all 15 tests against the real canonical A3 mesh model, after
+  which the temporary dependency was removed. No candidate output has yet
+  been promoted: the tool covers source frames only, not inter-frame
+  clearance, dynamics, table/net or schema-2.
+- Audited Pod1 M3-S1 at its real terminal `model_20998.pt`: all 1,762,715
+  floating elements are finite, the embedded/adjacent schema-3 contract SHA
+  matches, and the 4,000 log records are contiguous from 16999 through 20998
+  with zero bad signatures. The launcher did not preserve an OS exit code, so
+  that limitation is explicit. This is terminal-integrity evidence only,
+  remains causal/inexact, and its terminal q10 waits for the paired M3-old
+  `20998`; full hashes are in
+  `configs/phase1_M3_S1_terminal_audit_20260711.json`.
+- Preregistered the second-wave causal-triangle refill instead of improvising
+  on newly idle GPUs. Four 4,000-update causal/inexact arms fill the missing
+  M3 S1-only guidance-0 and M2 S1+guidance-`-0.95` edges at seed 1/2. A
+  content-addressed external launcher revalidates both frozen clean checkouts,
+  every input/tool SHA, exact GPU capacity and run-name absence, then verifies
+  the emitted hard-contract before auto-starting independent
+  `17k/18k/19k/20k/20998` q10 cadence. The 16999 parent remains an unjudged
+  legacy reference, q10 cannot stop/promote and q50 is an inactive template.
+  Pod1 M3 seed2 has an additional read-only terminal gate on predecessor PGID
+  `1310472`; no existing trainer is signalled. The four followups are
+  preregistered but not yet launched in this entry.
+- The first four read-only causal-launch validations made no Pod writes and
+  caught duplicate PID rows from this driver's `nvidia-smi` compute query:
+  three unique trainers appeared as six rows. The launcher now de-duplicates
+  before the `<4` capacity gate; tests prove duplicated three-process output
+  allows one slot while four unique processes still fail closed. The config
+  SHA is unchanged and the superseding launcher SHA is `ca69e1cb...`; the
+  initially deployed `dca9b9df...` bytes are revoked before any launch.
+- Re-deployed launcher `ca69e1cb...`, passed all four read-only validations,
+  then launched the four exact causal followups. Accepted trainer/curve-worker
+  PGIDs are Pod1 `1409914/1410648` and `1411167/1412047`, Pod2
+  `196177/196753` and `197146/197939`. Every emitted hard-contract SHA matches
+  its M3/M2 S1 family, all four reached iteration 17000 with zero bad log
+  signatures, and the pool is again 24 live trainers at four per GPU
+  (`23.1--23.8/32.6 GiB`, `88--95%` snapshot). First inexact q10 aggregates
+  are M3 S1-only seed1/2 `0.60/0.55` and M2 S1+guidance seed1/2 `0.30/0.30`;
+  no decision is made from these 10-per-side screens.
+- Auditing those four state files found that eval `46a0ce2`'s worker predates
+  the checked-in screen-policy/job-contract SHA fields. Commands, checkpoints,
+  manifests and rc=0 results are intact, but reuse state is not hardened. Added
+  a Pod-atomic exact-worker replacement contract: it refuses any child/judge,
+  TERM-signals only the two verified legacy worker PGIDs, preserves old 17k
+  evidence, starts standalone worker `21e30153...` in fresh state dirs and
+  requires a rejudged 17k with all three hard SHAs. Trainers and judges are
+  never managed. The correction is preregistered but not yet applied here.
+- Its first Pod read-only validation also made zero signals and caught a
+  launcher-sidecar shape assumption: the returned worker record embeds
+  `state_path`, while the on-disk sidecar binds only pid/pgid/command/SHA.
+  Replacement tool `d0678af2...` now validates that real split explicitly;
+  all process/group/child gates remain unchanged and the superseded
+  `c2780222...` tool is revoked before any TERM.
+- Corrected a live terminal-cadence deadlock: causal continuations save their
+  final checkpoint at `20998`, while four manifests/workers were waiting for
+  impossible `20999`. Pod2 M2-S1 terminal is recursively finite and its
+  checkpoint/contract SHA binding matches, while lineage remains correctly
+  causal/inexact. Updated deterministic manifests plus a regression and
+  replaced only the four waiting cadence/causal worker PGIDs; trainers and
+  fresh workers were untouched. Terminal paired q10 remains pending.
+- Reconciled the zero-friction formal label with the 2026-07-07 hard-plant
+  evidence. `SZ` is now explicitly only the current cross-engine execution-
+  contract target, not a sim-to-real candidate; `SP/LP` are historical unit-
+  mismatched non-zero diagnostics, not calibrated friction. Preregistered a
+  future measured `SC` plant with engine-specific friction adapters and a
+  train-plant x eval-plant transfer matrix before deployment/Gate3B promotion;
+  this does not block the current SZ q50 model-selection paper.
+- Corrected the live scale-out judge contract before its first checkpoint:
+  shared-face/non-zero-plant `SP` is inexact because PhysX friction has no
+  exact MuJoCo `frictionloss` meaning. Generated SP jobs now carry the explicit
+  diagnostic escape (as do causal/LZ/LP), while SZ remains exact and still
+  requires same-paper q50 for current model selection. This changes no trainer
+  recipe or checkpoint. Before either 2k file existed, only the childless
+  scale-out-fresh workers were precisely replaced: Pod1
+  `1366308 -> 1397266`, Pod2 `189569 -> 195085`.
+- Split the original-arm cadence into independent causal and fresh workers so
+  an unavailable terminal cannot block fresh screens; fixed the runbook
+  example to launch both workers concurrently instead of a foreground loop.
+  Current q10 manifests now carry top-level and per-job screen-only fields,
+  and the checked-in worker requires that policy, verifies its q10 schedule
+  against every job, records the full manifest SHA, and binds a canonical
+  screen-policy-plus-job contract SHA before a completed state may be reused.
+- Corrected one follow-on cadence omission found during review: Pod1 seed1's
+  `model_4000.pt` did not exist when the earlier worker was replaced, so it was
+  not previously judged. It is now the first job in the Pod1 fresh manifest;
+  only the childless stale fresh worker PGID `1394151` was replaced by
+  `1394810`. Pod2 seed2 4000 was already complete and was not changed.
+- Completed the corrected Pod2 M2 terminal q10: old/S1 aggregate return
+  `0.40/0.35`, both forehands `0/10`, backhands `8/10`/`7/10`. Both remain
+  causal/inexact direction screens; no stop/promotion is made before q50.
+  Added a machine-readable paired result with full checkpoint/report/summary
+  hashes and updated the M2-S1 terminal integrity audit to judged.
+
+- Completed the post-canary historical main matrix on the same immutable
+  schema-v3 paper. R5b seed 1/2, G2 and M2f3 stopped at q10 because MuJoCo
+  forehand returned `0/10`. R1b seed 1/2 advanced but confirmed a transfer
+  collapse at q50: Isaac `95/100` and `90/100` versus MuJoCo `15/100` and
+  `17/100`, with both MuJoCo forehands `3/50`. C1 survived at Isaac/MuJoCo
+  `96/100` / `50/100`, then completed 5% action noise (`96/100` / `48/100`),
+  schedule seed 1 (`98/100` / `55/100`) and MuJoCo carry-state continuity
+  (`42/100` returns, `26/99` return-and-recover). Every cell was uncensored,
+  order/hash checked and physical-fall free. M3f remains the strongest
+  historical diagnostic; all models remain exact-ineligible.
+- Added a default-off, fail-loud fresh-training plant control:
+  `task.plant.zero_joint_friction=true` zeros all A3 actuator friction before
+  `gym.make`, while absent/false preserves the historical uncalibrated PhysX
+  coefficients exactly. The instantiated per-joint vector flows into the
+  existing schema-v3 training contract; a legacy resume cannot become exact.
+  An isolated Pod worktree passed the reward/override and schema-3 contract
+  suite (`60 passed`); Hydra accepted the declared override and rejected a
+  misspelled parent. Training also asserts the instantiated contract contains
+  exactly 31 zero coefficients before the runner starts. Migrated schema-2
+  motions, matching schema-v3 banks and
+  the runtime mechanism smoke remain the launch prerequisites.
+- Closed the remaining fresh/causal launch inputs and export seams. A real Kit
+  smoke caught the legacy source body order being mislabeled as the live
+  articulation order; `migrate_motion_kinematics.py --target-body-order` now
+  permutes all four body arrays before link-origin-to-COM conversion. The
+  corrected runtime-order motion pair and its disjoint schema-v3 train/exam
+  banks passed strict loader, Torch, physics and family checks and are frozen
+  under the ignored Pod asset root; their reviewable hashes live in
+  `configs/phase1_fresh_v3_asset_manifest_20260711.json`. Schema-3 diagnostic
+  checkpoints can now export only when their structural sidecar and checkpoint
+  SHA binding are intact, while exact lineage still requires schema-2 motion;
+  judge replays zero friction and the 175/179/181 actor layout from the adjacent
+  hard contract. The contract also binds `face_command_enabled` and
+  `face_command_pairing`. Safe launchers serialize only Kit boot, record an
+  isolated PGID and pin the four causal plus two from-scratch recipes. The
+  dependency-light contract subset now passes `38` tests.
+- Passed the full 179-D fresh construction gate: actor/face selector, both
+  runtime-order schema-2 clips, strict schema-v3 bank, 31/31 zero friction and
+  the formal validator agree in hard contract SHA `3a3b3d95...b9972`. Then
+  launched all six 4096-env lanes at fixed Pod checkout `6d93bcb`: matched M3
+  old/S1, matched M2 old/S1 and fresh seeds 1/2. Every arm reached its first
+  PPO iteration. Recursive hard-contract diff shows each causal pair differs
+  only in `face_command_pairing`; first checkpoints bind the adjacent contract
+  with lineage `0` for four resumes and `1` for two fresh seeds. One M2-S1 Kit
+  boot aborted in malloc before construction; the unchanged single-arm retry
+  passed and the abort log is retained. Canonical legacy exam copies now sit
+  beside each train bank. Judge preflight also selects the explicit inexact
+  evaluator escape only for diagnostic contracts and forces the current
+  checkout's source-first Isaac environment. Training/evaluation remain in
+  progress; no final policy result is claimed.
+
+- Implemented the evaluator-owned schema-v3 same-question path without
+  changing the physics-hash-bound `venue_ball_sampler.py`: balanced canonical
+  schedule JSON, strict content IDs/per-attempt seeds, Isaac post-reset atomic
+  exam injection, all-attempt ledger, and MuJoCo delegation to the common
+  10 ms RK4/ball-centre-plane return scorer. Historical checkpoint support is
+  an explicit diagnostic-only escape hatch and remains stamped
+  `evaluation_contract_exact=false`; formal installation stays fail-closed.
+- Added bank hash-before/load/hash-after guards, strict integer runtime IDs and
+  tuple/mapping observation normalization after cc's two old evaluators failed
+  on the Isaac wrapper tuple. The pre-Pod review also preserved nominal-joint
+  startup capture, refreshed racket FK/TTS before action 0, froze command
+  resampling, versioned the `H`-stand-actions-then-frame-0 release rule, added
+  hold-aware termination-contract v3, explicitly gated legacy train-bank
+  loading/hold-guard overrides to historical diagnostics, and made tolerant
+  checkpoint loading fail on missing actor keys. Local verification passed 67
+  adapter/audit tests with one optional Torch skip, 85 formal CPU tests, and
+  141 unique tests in
+  the combined run with the same optional skip. M2 now has an accepted
+  diagnostic Isaac leg; M3f/G1 and the same-paper MuJoCo legs remain the next
+  acceptance steps. No result has been promoted from old scorecards.
+- Both clean Pod checkouts passed the adapter/audit suite with Torch enabled
+  (`64 passed` on each, so scorer parity did not skip). M2's new schema-v3 exam
+  bank passed 183/183 forehand and 188/188 backhand Torch closed-loop land/net
+  checks. The first q1/side Kit smoke then exposed the expected historical
+  motion provenance gap at `gym.make`: old `_cal` files store untagged
+  link-origin finite-difference velocity, while current exact MotionCommand
+  requires COM velocity. Added a content-detected, inexact-only loader escape
+  that preserves the old checkpoint input semantics and leaves formal training
+  fail-closed; the failed Kit PGID was terminated cleanly and its GPU/lock were
+  released before retry.
+- M2 q1 retry 1 passed the new diagnostic motion/v2-bank loaders and exposed
+  the next historical pickle field gap (`rally_legacy_metrics`, added after the
+  run). Added inexact-only hydration from declared dataclass defaults with a
+  complete field list in the nominal profile; exact cells refuse hydration.
+  The second failed Kit PGID was also terminated cleanly before the next retry.
+- M2 q1 retry 2 completed full environment, command, observation and actor/
+  critic construction, then stopped at checkpoint-normalizer validation. The
+  historical runner state has four zero `_std` entries, but its
+  `EmpiricalNormalization` divides by `std + eps` with finite positive
+  `eps=1e-2`, so those entries are valid constants rather than a divide-by-zero
+  artifact. The tolerant inference loader now accepts finite non-negative std
+  only when the configured epsilon is finite and positive; negative std,
+  non-finite values and missing/zero epsilon still fail closed. A dependency-
+  light regression covers both the accepted zero-std state and rejected zero
+  epsilon. The Kit cell itself remains pending until the identical q1 paper is
+  rerun after deploying this change.
+- M2 q1 retry 3 then ran both Isaac attempts through completion and reached
+  scorecard assembly. It exposed a provenance-only checkout-root error: the
+  script selected `.../hope_training` as the repository root and duplicated
+  that path while hashing `virtual_ball.py`. Replaced the positional parent
+  index with marker-based repository-root discovery and added a regression
+  that requires both scorer and venue-physics provenance files to resolve.
+  The failed Kit process group was terminated exactly and all Pod1 GPU/lock
+  checks were clean before the next identical-paper retry.
+- M2's identical q1 retry 4 produced a valid, uncensored two-attempt Isaac
+  scorecard at commit `a619aa4`; bank SHA `10917148...e5bb2`, schedule SHA
+  `78095558...60a`, and ordered question IDs match the immutable paper. Both
+  zero-hold attempts guard-reset before exact strike, so the all-attempt score
+  is 0/2. The actual quota-10 canary used deterministic holds `[56,97,...,100]`
+  and completed all 20 attempts without falls, guards or censoring: hit 20/20,
+  return 16/20, forehand 6/10, backhand 10/10. Its schedule SHA is
+  `29c590ae...d99c` and result JSON SHA is `e625a09c...787fc`; it remains
+  historical/inexact and is not a bookable formal score. M2 therefore advances
+  to the fixed 50-per-side diagnostic slice.
+- The matching M2 MuJoCo q1 preflight correctly refused the same historical
+  observation-normalizer sidecar because four `_std` entries are zero. This
+  sidecar also carries `eps=1e-2`, so the runtime divisor `std+eps` is strictly
+  positive. MuJoCo now applies the same semantic guard as the checkpoint path:
+  finite `std>=0`, finite `eps>=0`, and elementwise `std+eps>0`; a regression
+  accepts epsilon-protected zeros and rejects an unprotected zero divisor.
+  No raw-observation bypass or partial score was used.
+- M2 advanced to the fixed 50-per-side Isaac slice. An initial 100-row run was
+  deliberately invalidated because another Pod task fast-forwarded the shared
+  checkout while the cell was live, making source provenance unprovable. The
+  clean rerun froze checkout `c69ff13`, matched schedule SHA
+  `9d1a1d60...324cd` and all ordered IDs, and emitted 100 finalized uncensored
+  rows: 100/100 exact reaches/hits, 86/100 returns, forehand 36/50 and backhand
+  50/50, with no falls or guard resets. Valid result JSON SHA:
+  `723322b4...15a01`. The invalidated directory is not evidence.
+- The M2 MuJoCo q1 startup next found two evaluator-only integration defects
+  before rollout: execution-contract assembly referenced a hold-protocol local
+  that existed only inside `run_rollout`, and the standalone CPU evaluator
+  depended on an ambient `HOPE_STAGE1_QB` variable to avoid importing the
+  Isaac task package. Hold semantics now come from one pure helper in both
+  scopes; BankExam resolves and SHA-binds the current checkout's standalone
+  loader automatically. Pod1 briefly received `toml==0.10.2` while diagnosing
+  the accidental package path, but the fixed evaluator does not require that
+  package or any additional Isaac dependency in the mjeval environment.
+- Completed the historical same-paper single-question matrix. M3f/M2/G1
+  quota-10 returns were respectively Isaac `20/20`, `16/20`, `10/20` and
+  MuJoCo `17/20`, `10/20`, `9/20`; G1 backhand was `0/10` in both engines and
+  stopped at canary. M3f/M2 then completed 50/side clean, 5% action-noise and
+  second evaluation-seed slices in both engines. Clean q50 return was M3f
+  Isaac/MuJoCo `99/100` / `91/100`, versus M2 `86/100` / `51/100`; no cell had
+  an absolute physical fall, and all tracking guards remained in the raw
+  denominator. Full paper/result SHAs and per-side numbers are in
+  `PHASE1_SCHEMA3_RESULTS_2026-07-11.md`. All cells are historical diagnostics
+  with `evaluation_contract_exact=false`.
+- Added an explicit finite-paper continuity product metric for MuJoCo:
+  `return_and_recover_rate` counts a legal return only when that carry-state
+  swing naturally completes and the paper has a scheduled next opportunity.
+  A post-strike fall/guard keeps the return but fails recovery; the terminal
+  paper row is excluded because it has no next opportunity. Carry-state cells
+  remain diagnostic-only. Isaac's one-env-per-question adapter is not
+  continuous play and will not be mislabeled while its physical next-ball
+  timeline remains unimplemented.
+- Completed the seed-0 q50 MuJoCo carry-state cells. M3f reached exact on
+  82/100, returned 82/100 and both returned+recovered into the scheduled next
+  opportunity on 70/99; M2 was 86/100, 40/100 and 30/99. There were no absolute
+  physical falls. M3f/M2 recorded 9/3 tracking guards and 20/30 episode
+  timeouts, all retained in the paper. Result SHAs are `091bd045...0e6ea` and
+  `5658b7cc...b8774`; full per-side/finalize counts are in the Phase-1 results
+  report. This closes the available MuJoCo continuous diagnostic, not the
+  still-missing Isaac physical next-ball timeline.
 - Moved the stale local `main` to `origin/main@ba998c4`, then rebased the
   selective port onto the newer `origin/main@caf4a4e` Gate-3 update before
   publication.  The previously uncommitted Phase-1 work is preserved intact on
@@ -901,3 +1320,71 @@ rally_yaw 机制的免费红利:同一条 clip 旋转后天然服务任何打球
 
 搭车项(不占主线):R12「刹得住」专项考(并入 2b)、R17 位置奖励收紧(阶段 1 第二波搭车)、
 R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
+
+## 2026-07-11 — 恢复满池消融与 checkpoint 曲线
+
+- 纠正容量执行：六张 GPU 各一条训练只是占卡，不是历史规则里的“跑满”。旧 `queue.md` 和
+  `patrol_watchdog` 证实每张 5090 四条 4096-env 训练、约 22 GB、75 秒错峰；当前目标恢复为
+  `4/4/4 + 4/4/4 = 24` 条。
+- 新增 `docs/research/phase1_ablation_acceleration_2026-07-11.md`，固化机制冒烟、paired
+  checkpoint 曲线、多 seed、successive-halving/止损、峰值 checkpoint 和正式门禁的边界。
+- 新增 24 臂 manifest：8 条 M3/M2 paired continuations + 16 条 fresh `face pairing × plant`
+  2×2×4-seed 因子设计；`SZ` 是 formal target，其他格只提供因果诊断。
+- 扩展 `launch_phase1_20260711.sh` 为 Pod1/Pod2 三层 scale-out；新增 checkpoint curve worker，
+  保证同 Pod 只重叠 CPU 考卷、不重叠 Isaac export，并记录 checkpoint/evaluator SHA。
+- 两 Pod `/tmp` dry-run 通过：每层各三条新增训练命令、每 Pod 九个历史 checkpoint 均通过资产、
+  commit 和路径检查。随后启动初始 18 卷曲线 worker（Pod1 PGID `1332894`，Pod2 PGID `165860`）；
+  训练 checkout 未修改，未执行真机命令。首轮因 detached worktree 缺 ignored A3 asset link
+  全部在 scene create 前失败；补链接后的第二轮已写出 ONNX，但成功行被缓冲丢失而 fail-closed。
+  两批均保留、不入账；judge 改为 unbuffered，worker 改为首个 export failure 即停，待修后 retry。
+- 第三次 preflight 到达 `make_std_sidecar`，发现同一 179D normalizer 的四个恒定维保存 `_std=0`。
+  运行时合同为 `(obs-mean)/(std+0.01)`，所以零值有保护；writer 已与 runtime 对齐为允许 finite
+  non-negative std、继续拒绝负值/NaN/Inf/非正 divisor。两 Pod 真 checkpoint smoke 均通过且
+  normalizer state SHA 相同；新增文件级回归覆盖合法零值与负值 fail-closed。
+- 扩容前独立审查再封四个调度洞：Isaac/MuJoCo 的显式 inexact escape 现在都强制结果
+  `evaluation_contract_exact=false`；judge 与 trainer 共用 Kit boot lock；curve worker 绑定 clean
+  evaluator/training commit、拒绝 stale failed state 并在失败前 drain CPU jobs；scale-out 层可核验
+  跳过仍活的成功臂，也可用 `PHASE1_ONLY_ARM` 精确补剩余臂。相关纯 CPU 集为
+  `68 passed, 1 optional Torch skip`。
+- 后续实跑再分离两个 evaluator-only 阻塞：mjeval venv 有 `onnxruntime` 却没有正式图检查需要的
+  `onnx`，两 Pod 已固定 `onnx==1.22.0` 并通过 graph checker/runtime；fresh exact plant 又因
+  float32 合同与 float64 MJCF 的 `2.71e-9` 舍入残差被旧 `1e-10` 门槛误拒。初版 `1e-8`
+  armature 修复随后又在 ankle effort `118.2 -> 118.199996948...` 处被固定容差误杀；最终改为
+  exact float32-grid identity，不再逐字段猜 atol，跨 0.5 ULP/next-grid 仍 fail-closed；含 cadence worker 的聚焦集
+  `90 passed, 1 optional skip`。这些均发生在 rollout 前，
+  保留为前置失败而不计模型分；judge 也会在占用 Kit/GPU 前检查两个 ONNX 包。
+- causal checkpoint 曲线已经用同一 immutable exam 证明“不能等终档”：M3-old 在 18k 达阶段峰值
+  后 19k 回落，而 M3-S1 继续上升；M2-old 同样在 18k 后回落，M2-S1 19k 仍高于 old。所有 causal
+  行都必须标 `evaluation_contract_exact=false`；同步修复了 Markdown 分母段误抄 bank-leg exactness
+  的报告 bug，JSON 与人读报告不再冲突。
+- 首版报告修复误改了题库物理哈希覆盖的 `venue_ball_sampler.py`；formal preflight 正确拒绝
+  `changed files=['venue_ball_sampler.py']`。已把该文件逐字恢复到 `00e28e85...30cc`，最终 exactness
+  改写移到不参与 bank physics hash 的 MuJoCo evaluator 外层；只按两条 judge PGID 精确 TERM 掉
+  traceback 后卡住的 Isaac shutdown，训练未受信号。该批保留、不入账。
+- 满池扩容现已实测完成：两 Pod 六张卡均为四条 4096-env 训练，显存约 `22.9–23.2/32.6 GiB`，
+  GPU utilization 快照 `87–97%`，host available RAM `840/904 GiB`。24 条接受臂全部到首 iteration；
+  每个首 checkpoint finite 且 SHA 与相邻 hard contract 一致。Pod1 LZ-seed3 一次 scene-start malloc
+  自退，失败 log/state SHA=`d66a8043...951d/0f004c18...b768`；原配方单臂 retry PGID `1354525`
+  成功，失败目录不计第 25 条。
+- fresh exact checkpoint 曲线终于通过完整 formal 链：SZ seed1 的 clean q10 在
+  `0/1000/2000` 为 `0.00/0.50/0.90`，seed2 为 `0.00/0.50/1.00`，六卷均 `rc=0`、
+  `evaluation_contract_exact=true`。这证明增长在 terminal 前可见，但 q10 仍禁止止损/晋级。
+  causal 20k 小卷 M3 old/S1=`0.45/1.00`，M2 old/S1=`0.50/0.50`，全部保留 inexact 标签。
+- 新增 scale-out checkpoint bindings、确定性 generator 和四份 per-Pod causal/fresh wait
+  manifest，覆盖 18 个新增臂、142 个 clean q10 里程碑任务；分队列避免 causal terminal 阻塞
+  fresh 早期点。相关 worker/generator/timing 测试 `7 passed`。
+- 对场馆 `strikes.json`（SHA `6ad3c459...52841`）做可复现 A-B-A 时序审计：保守连续样本
+  `n=21` 的同侧击球间隔 q10/median/q90=`1.757/1.903/3.356 s`，而现役完整 clip-wrap+hold
+  理论为 `2.90/3.75/4.60 s`。结论是现役只覆盖慢节奏无传送 carry-state，不覆盖任意时刻下一题；
+  24 臂不改合同，另设计只改变 event timing 的 T0/T1 配对和 30 s/12-opportunity 连续卷。
+
+## 2026-07-12 — 第一批 Phase-1 功能收口到 main
+
+- 将截至 `codex/schema-v3-isaac-adapter@612f54d` 已通过源码/合同/测试门的工作合并 main：
+  schema-v3 判卷与曲线治理、满池/里程碑账本、T1 事件状态机核心、新动作 canonical/grounding/
+  稠密安全门、q10 fail-closed 归档器，以及 Isaac PhysicalBall Phase-B 源码机制。未完成的四-seed
+  q50、动作 64 题、plant 标定与连续 rollout 仍明确未通过。
+- 明确最终行为门以智元 A3 MuJoCo Gate 3/Gate 3B 为准；Isaac 是训练和归因伴随腿。现有同题
+  Isaac `.99` 不得覆盖 MuJoCo 的 checkpoint 排名与失衡证据。
+- 将 strike 后“恢复平衡 / 回 ready 集 / 随时接下一题”登记为同 phase 的耦合优化：先用 constraint、
+  potential 与随机到达 probe 分责，再做 `2^3` 交互筛和固定总预算 mixture；不把三个单项胜者直接相加。

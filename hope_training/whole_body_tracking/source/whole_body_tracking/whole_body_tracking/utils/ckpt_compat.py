@@ -10,6 +10,8 @@ use this helper — resuming training from a shape-mismatched checkpoint must st
 
 from __future__ import annotations
 
+import math
+
 
 def _validate_and_restore_actor_normalizer(runner, checkpoint: dict, *, restore: bool) -> bool:
     """Validate checkpoint/config normalization truth and optionally restore its state.
@@ -44,9 +46,17 @@ def _validate_and_restore_actor_normalizer(runner, checkpoint: dict, *, restore:
     count = state["count"]
     if not torch.isfinite(mean).all() or not torch.isfinite(std).all():
         raise RuntimeError("obs_norm_state_dict contains NaN/Inf")
-    if mean.numel() == 0 or mean.shape != std.shape or not torch.all(std > 0):
+    eps = float(getattr(normalizer, "eps", 0.0))
+    if (
+        mean.numel() == 0
+        or mean.shape != std.shape
+        or not torch.all(std >= 0)
+        or not math.isfinite(eps)
+        or eps <= 0.0
+    ):
         raise RuntimeError(
-            f"invalid obs normalizer shapes/scale: mean={tuple(mean.shape)} std={tuple(std.shape)}"
+            "invalid obs normalizer shapes/scale: "
+            f"mean={tuple(mean.shape)} std={tuple(std.shape)} eps={eps!r}"
         )
     if not torch.isfinite(count).all() or float(count.item()) <= 0.0:
         raise RuntimeError(f"invalid obs normalizer count: {count!r}")
@@ -91,11 +101,16 @@ def load_actor_tolerant(runner, path: str) -> bool:
         keep = {k: v for k, v in sd.items() if k in cur and cur[k].shape == v.shape}
         dropped = sorted(set(sd) - set(keep))
         actor_dropped = [k for k in dropped if not k.startswith("critic")]
-        if actor_dropped:
+        actor_missing = sorted(
+            key for key in cur
+            if not key.startswith("critic") and key not in keep
+        )
+        if actor_dropped or actor_missing:
             # The mismatch is NOT confined to the critic — a partial load would silently corrupt the
             # actor. Re-raise the original strict error instead.
             raise RuntimeError(
-                f"checkpoint/actor shape mismatch (not just the critic): {actor_dropped}"
+                "checkpoint/actor key or shape mismatch (not just the critic): "
+                f"dropped_from_checkpoint={actor_dropped}, missing_from_checkpoint={actor_missing}"
             ) from e
         runner.alg.policy.load_state_dict(keep, strict=False)
         _validate_and_restore_actor_normalizer(runner, ckpt, restore=True)

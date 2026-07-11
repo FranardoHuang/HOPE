@@ -107,6 +107,7 @@ def _make_env_cfg(anchor_pos_none=True):
         question_bank="",
         question_bank_allow_legacy=False,
         face_command=False,
+        face_command_pairing="shared_plus_y",
     )
     motion = _NS(
         wrap_teleport=False,
@@ -123,6 +124,7 @@ def _make_env_cfg(anchor_pos_none=True):
         speed_scale_per_clip=None,
         rsi_skip_settle_frames=0,
         rsi_hold_root_stand_z=False,
+        allow_legacy_link_origin_velocity=False,
     )
     observations = _NS(
         policy=_NS(command=_Term(func="generated_commands", params={"command_name": "motion"})),
@@ -136,12 +138,16 @@ def _make_env_cfg(anchor_pos_none=True):
         base_fell_tilt="BASE_FELL_TILT_TERM",
         base_too_low="BASE_TOO_LOW_TERM",
     )
+    actuators = {
+        "legs": _NS(friction={"hip": 1.2, "knee": 2.4}),
+        "arms": _NS(friction=0.1),
+    }
     return _NS(
         rewards=rewards,
         commands=_NS(motion=motion, racket_target=racket_target),
         observations=observations,
         terminations=terminations,
-        scene=_NS(env_spacing=2.5),
+        scene=_NS(env_spacing=2.5, robot=_NS(actuators=actuators)),
         episode_length_s=10.0,
         sim=_NS(dt=0.005),
         decimation=4,
@@ -168,6 +174,47 @@ def test_empty_task_applies_nothing():
 def test_unknown_rewards_key_fails_loud():
     with pytest.raises(train_mod._OverrideError, match="face_gate_radiuss"):
         _apply({"rewards": {"face_gate_radiuss": 0.15}})  # typo'd key: must raise, never no-op
+
+
+def test_zero_joint_friction_is_explicit_and_all_actuators_are_zeroed():
+    env_cfg, applied = _apply({"plant": {"zero_joint_friction": True}})
+    assert {act.friction for act in env_cfg.scene.robot.actuators.values()} == {0.0}
+    assert any("zero-friction plant control" in item for item in applied)
+
+
+def test_zero_joint_friction_false_is_byte_preserving_noop():
+    env_cfg, applied = _apply({"plant": {"zero_joint_friction": False}})
+    assert env_cfg.scene.robot.actuators["legs"].friction == {"hip": 1.2, "knee": 2.4}
+    assert env_cfg.scene.robot.actuators["arms"].friction == 0.1
+    assert applied == []
+
+
+def test_zero_joint_friction_fails_loud_on_bad_cfg_or_unknown_key():
+    with pytest.raises(train_mod._OverrideError, match="scene.robot.actuators"):
+        _apply({"plant": {"zero_joint_friction": True}}, _NS(scene=_NS()))
+    with pytest.raises(train_mod._OverrideError, match="zero_joint_frction"):
+        _apply({"plant": {"zero_joint_frction": True}})
+    with pytest.raises(train_mod._OverrideError, match="explicit boolean"):
+        _apply({"plant": {"zero_joint_friction": "treu"}})
+    with pytest.raises(train_mod._OverrideError, match="must be a mapping"):
+        _apply({"plant": True})
+
+
+def test_zero_joint_friction_runtime_contract_must_be_31_exact_zeros():
+    contract = {
+        "joint_names": [f"j{i}" for i in range(31)],
+        "joint_friction_coefficients": [0.0] * 31,
+    }
+    train_mod._require_zero_joint_friction_contract(contract)
+
+    bad = dict(contract)
+    bad["joint_friction_coefficients"] = [0.0] * 30 + [0.1]
+    with pytest.raises(RuntimeError, match="non-zero coefficients"):
+        train_mod._require_zero_joint_friction_contract(bad)
+
+    short = {"joint_names": ["j0"], "joint_friction_coefficients": [0.0]}
+    with pytest.raises(RuntimeError, match="exactly 31"):
+        train_mod._require_zero_joint_friction_contract(short)
 
 
 def test_rally_v3_recovery_overrides_are_wired_and_validated():
@@ -217,6 +264,40 @@ def test_question_bank_rejects_per_clip_retiming_even_when_values_are_one():
         })
 
 
+@pytest.mark.parametrize("pairing", ["shared_plus_y", "legacy_signed_vs_A"])
+def test_face_command_pairing_override_is_strict_and_audited(pairing):
+    env_cfg, applied = _apply({
+        "racket": {"face_command": True, "face_command_pairing": pairing}
+    })
+    assert env_cfg.commands.racket_target.face_command_pairing == pairing
+    if pairing == "shared_plus_y":
+        assert any("kernel frame=+Y(A/bank)" in item for item in applied)
+    else:
+        assert any("legacy_signed_vs_A" in item for item in applied)
+
+
+def test_face_command_pairing_unknown_value_fails_loud():
+    with pytest.raises(train_mod._OverrideError, match="face_command_pairing"):
+        _apply({"racket": {"face_command_pairing": "legacy-ish"}})
+
+
+def test_legacy_motion_velocity_override_requires_explicit_bool_and_marks_inexact():
+    env_cfg, applied = _apply({
+        "motion": {"allow_legacy_link_origin_velocity": True}
+    })
+    assert env_cfg.commands.motion.allow_legacy_link_origin_velocity is True
+    assert any("motion_kinematics_exact=false" in item for item in applied)
+
+    env_cfg, applied = _apply({
+        "motion": {"allow_legacy_link_origin_velocity": False}
+    })
+    assert env_cfg.commands.motion.allow_legacy_link_origin_velocity is False
+    assert not any("motion_kinematics_exact=false" in item for item in applied)
+
+    with pytest.raises(train_mod._OverrideError, match="explicit boolean"):
+        _apply({"motion": {"allow_legacy_link_origin_velocity": "treu"}})
+
+
 def test_all_real_task_yaml_keys_are_whitelisted():
     """Regression: the new task.rewards/_TERMINATION_KEYS whitelists must accept every key the
     real task YAMLs already set (otherwise the fail-loud check bricks existing tasks)."""
@@ -228,6 +309,7 @@ def test_all_real_task_yaml_keys_are_whitelisted():
         with open(os.path.join(CFG_TASK_DIR, fn)) as fh:
             doc = yaml.safe_load(fh) or {}
         for node_key, whitelist in (
+            ("plant", ("zero_joint_friction",)),
             ("rewards", train_mod._REWARD_KEYS),
             ("motion", train_mod._MOTION_KEYS),
             ("racket", train_mod._RACKET_KEYS),

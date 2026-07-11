@@ -1,0 +1,164 @@
+{
+  "schema_version": 1,
+  "schedule_spec_id": "phase1-event-timing-balanced-engineering-grid-v1",
+  "status": "preregistered_spec_not_materialized",
+  "scope": "deterministic balanced engineering stress grid for T0/T1 event timing; deliberately not fitted to the weak venue aggregate",
+  "policy_rate_hz": 50,
+  "timing_cells": [
+    {
+      "cell_id": "E0",
+      "reveal_ticks_after_prior_strike": 35,
+      "next_strike_ticks_after_prior_strike": 70
+    },
+    {
+      "cell_id": "E1",
+      "reveal_ticks_after_prior_strike": 50,
+      "next_strike_ticks_after_prior_strike": 90
+    },
+    {
+      "cell_id": "E2",
+      "reveal_ticks_after_prior_strike": 50,
+      "next_strike_ticks_after_prior_strike": 110
+    },
+    {
+      "cell_id": "E3",
+      "reveal_ticks_after_prior_strike": 65,
+      "next_strike_ticks_after_prior_strike": 140
+    },
+    {
+      "cell_id": "E4",
+      "reveal_ticks_after_prior_strike": 80,
+      "next_strike_ticks_after_prior_strike": 180
+    },
+    {
+      "cell_id": "E5",
+      "reveal_ticks_after_prior_strike": 100,
+      "next_strike_ticks_after_prior_strike": 220
+    }
+  ],
+  "timing_cell_seconds_derived_at_50_hz": [
+    {
+      "cell_id": "E0",
+      "reveal_s": 0.7,
+      "next_strike_s": 1.4,
+      "remaining_notice_s": 0.7
+    },
+    {
+      "cell_id": "E1",
+      "reveal_s": 1.0,
+      "next_strike_s": 1.8,
+      "remaining_notice_s": 0.8
+    },
+    {
+      "cell_id": "E2",
+      "reveal_s": 1.0,
+      "next_strike_s": 2.2,
+      "remaining_notice_s": 1.2
+    },
+    {
+      "cell_id": "E3",
+      "reveal_s": 1.3,
+      "next_strike_s": 2.8,
+      "remaining_notice_s": 1.5
+    },
+    {
+      "cell_id": "E4",
+      "reveal_s": 1.6,
+      "next_strike_s": 3.6,
+      "remaining_notice_s": 2.0
+    },
+    {
+      "cell_id": "E5",
+      "reveal_s": 2.0,
+      "next_strike_s": 4.4,
+      "remaining_notice_s": 2.4
+    }
+  ],
+  "cell_construction": {
+    "kind": "balanced_engineering_lattice",
+    "fit_to_venue_data": false,
+    "venue_quantiles_used_as_targets_or_weights": false,
+    "contains_1_903_s_target": false,
+    "rationale": "cover reveal events before, near, and after natural clip completion and deadlines below, overlapping, and above the current full-clip cadence without treating 21 overlapping venue windows as a population distribution"
+  },
+  "transition_cells": [
+    "forehand_to_forehand",
+    "forehand_to_backhand",
+    "backhand_to_forehand",
+    "backhand_to_backhand"
+  ],
+  "materialization": {
+    "order": "deterministic round-robin over timing_cell x transition_cell, then immutable question rows; no RNG at evaluation",
+    "screen_q10": {
+      "questions_per_side": 10,
+      "scheduled_opportunities": 20,
+      "sequence_length_opportunities": 10,
+      "sequence_count": 2,
+      "role": "screen_only",
+      "may_stop_or_promote": false
+    },
+    "decision_q50": {
+      "questions_per_side": 50,
+      "scheduled_opportunities": 100,
+      "sequence_length_opportunities": 10,
+      "sequence_count": 10,
+      "role": "decision",
+      "may_stop_or_promote": true
+    },
+    "balance_rule": "cell and transition counts may differ by at most one when the requested paper size is not divisible by 24",
+    "question_source": "one fresh exact immutable BankExam family shared byte-for-byte by T0/T1, Isaac, and MuJoCo",
+    "question_schedule_sha256": null,
+    "screen_schedule_sha256": null,
+    "decision_schedule_sha256": null,
+    "status": "blocked_until_fresh_exact_question_schedule_and_materializer_are_bound"
+  },
+  "event_semantics": {
+    "clock_origin": "accepted exact strike opportunity of the previous scheduled question",
+    "T0_install": "defer atomic next-task installation until natural full-clip wrap but retain the schedule's original reveal and strike deadline for scoring; never shift the deadline",
+    "T1_install": "at reveal tick atomically install question_id, clip_id, target position/velocity/normal, reveal tick, and immutable next-strike deadline",
+    "carry_state": true,
+    "reset_robot_or_last_action_on_install": false,
+    "reset_history_or_noise_state_on_install": false,
+    "mid_sequence_teleport_count_required": 0,
+    "deadline_shift_allowed": false,
+    "miss_policy": "count the scheduled opportunity as failed and continue the sequence without reset",
+    "infeasible_policy": "record infeasible on the all-opportunity denominator; do not delay, replace, or censor the row",
+    "physical_fall_or_guard_loss": "fail the current and all remaining opportunities in that sequence; reset is allowed only at the next immutable sequence boundary",
+    "sequence_boundary_reset": "one nominal reset before each sequence, identically for T0/T1 and both engines"
+  },
+  "horizon": {
+    "training_episode_length_s_shared": 30.0,
+    "evaluation_sequence_timeout_s": 60.0,
+    "minimum_scheduled_opportunities_per_training_episode": 5,
+    "decision_sequence_length_opportunities": 10,
+    "reason": "expose fifth-and-later opportunity debt in both arms; horizon is shared and therefore not the timing treatment"
+  },
+  "immutable_engine_contract": {
+    "engines": [
+      "Isaac",
+      "MuJoCo"
+    ],
+    "same_schedule_bytes": true,
+    "same_question_order": true,
+    "same_deadlines": true,
+    "same_all_opportunity_denominator": true,
+    "fresh_exact_only": true,
+    "allow_inexact_contract": false
+  },
+  "safety": {
+    "racket_or_handle_self_contact_allowed": false,
+    "protected_robot_regions": [
+      "head",
+      "neck",
+      "torso",
+      "opposite_arm",
+      "waist",
+      "legs"
+    ],
+    "self_hit_denominator": "all simulated control steps and all scheduled opportunities",
+    "any_self_hit_closes_cell": true,
+    "self_hit_may_be_hidden_by_reset": false,
+    "physical_falls_may_be_censored": false,
+    "real_robot_authorized": false
+  }
+}

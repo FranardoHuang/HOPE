@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "status": "complete_causal_inexact_mujoco_pair",
+  "scope": "M3 swing-family terminal old-face versus shared-face S1 causal q50; not a formal Phase-1, deployment, continuity, calibrated-plant, or cross-family claim",
+  "training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+  "eval_commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+  "source_preregistration": {
+    "path": "configs/phase1_M3_terminal_q50_prereg_20260711.json",
+    "sha256": "4c5434511c8da8e6d65d1f82571eb8975a7ecf2baa9a4d0a98cd68cb045de12c"
+  },
+  "source_q10_pair": {
+    "path": "configs/phase1_M3_terminal_q10_pair_20260711.json",
+    "sha256": "f0eb23dd41cfaf5315d12133731ae5af06c94b8cd3ffc123ce2dce4062cf6ba1"
+  },
+  "accepted_execution": {
+    "config": {
+      "path": "configs/phase1_M3_terminal_q50_execution_20260711.json",
+      "sha256": "550ca88988c88e94e626aed3e489cbedf981d2b32cde1bab9601ebacae05988b"
+    },
+    "runner": {
+      "path": "scripts/run_phase1_paired_bank_q50.py",
+      "sha256": "095e476fd36fb68d500cb39ea7f71f6fee9b729209187d51599582c72c22198b"
+    },
+    "state_root": "/workspace/codexschema/phase1_fresh_20260711/q50/M3_terminal_old_vs_S1_v2",
+    "runtime_contract_sha256": "ca7a688aea78e1660383ebbd601173af09faa84efc8aa063a9d7b85d50f817b2",
+    "paired_result": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/q50/M3_terminal_old_vs_S1_v2/paired_result.json",
+      "bytes": 188910,
+      "sha256": "e9bb07d3a88be4e61bc289980fc909c8e641785bee56bcc75d0e5081f250f56e"
+    }
+  },
+  "immutable_schedule": {
+    "path": "/workspace/codexschema/phase1_fresh_20260711/q50/M3_terminal_old_vs_S1_v2/shared_clean_k100.schedule.json",
+    "file_bytes": 20215,
+    "file_sha256": "69f73458d30afcf282473696116d9f149a4e476a426d329500633a9f6d5a7f25",
+    "semantic_sha256": "949eb1969f7d2c30a5f170382048232e62beeef10c1f6a76c2a00b159f6a8fc0",
+    "schedule_k": 100,
+    "attempts_per_side": 50,
+    "seed": 0,
+    "noise_scale": 0.0,
+    "hold_range": [
+      0,
+      100
+    ],
+    "one_question_reset": true,
+    "no_wrap": true,
+    "same_artifact_for_both_arms": true
+  },
+  "shared_runtime": {
+    "mjcf_sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97",
+    "execution_contract_sha256": "3a804dd27c384d3908a8d5d4bb863b7fb292b3feb52a600155d20ad95acb16a5",
+    "ready_state_mode": "mjcf_named_keyframe:stand:v1",
+    "ready_state_sha256": "3cbfe700abc54e0bde19f35c6245a14d09e6e68c74e9ba311bee8866a6837fc2",
+    "attempts_uncensored": true,
+    "question_order_exact": true
+  },
+  "arms": {
+    "M3_old": {
+      "run_name": "phase1_M3_old_pairing",
+      "face_command_pairing": "legacy_signed_vs_A",
+      "checkpoint_iteration": 20998,
+      "checkpoint_sha256": "320b77c9314d22683601bb8bd388c45a6e7b80df838924dd901c4710c94c417a",
+      "training_contract_sha256": "7542c59b5d712c8f2e7c5a98e566f07ccafcac2e9e498e8f99056cccdc8d941b",
+      "lineage_exact": false,
+      "evaluation_contract_exact": false,
+      "returns": {
+        "forehand": "31/50",
+        "backhand": "11/50",
+        "aggregate": "42/100",
+        "forehand_rate": 0.62,
+        "backhand_rate": 0.22,
+        "aggregate_rate": 0.42
+      },
+      "contact_rate_per_attempt": 0.89,
+      "physical_falls": 9,
+      "n_strikes": 93,
+      "state_sha256": "300b8d719f3d8dae294586ea83190f3e93a60e81f80b75f0c7727dbc8f71ccf3",
+      "runner_log_sha256": "266442e3c438fdb3b6068cf0a693464e14bca9dec5a00cca66b8fd952050df63",
+      "judge_report_sha256": "911fe82417e02f4eb7be654974b559e6660dbcea7b27ab8a906e223cbc5bcbc6",
+      "exam_summary_sha256": "b704404578a152b807652137584b35970dfc9988508d5df03e7f5294e157a072",
+      "attempt_ledger_sha256": "3d028e3913fdfbbd3b9366378e4d372289898a2e2ae0558bcb22187c92005608"
+    },
+    "M3_S1": {
+      "run_name": "phase1_M3_S1_pairing",
+      "face_command_pairing": "shared_plus_y",
+      "checkpoint_iteration": 20998,
+      "checkpoint_sha256": "a924048810aebda864bbf1f7b156ef4c4aa2c60ec4d65da6ae8977833deaa21e",
+      "training_contract_sha256": "d3ff715e3f7ed38ceadbdead4d41726dd72ef624523cbd86b33da703e929d9ce",
+      "lineage_exact": false,
+      "evaluation_contract_exact": false,
+      "returns": {
+        "forehand": "50/50",
+        "backhand": "50/50",
+        "aggregate": "100/100",
+        "forehand_rate": 1.0,
+        "backhand_rate": 1.0,
+        "aggregate_rate": 1.0
+      },
+      "contact_rate_per_attempt": 1.0,
+      "physical_falls": 0,
+      "n_strikes": 100,
+      "state_sha256": "49c842d7af667a943126dbe93b07d1675b0520af23a804c027a01f78f86ff037",
+      "runner_log_sha256": "c64e0387f6be1f46b71054918535c5b9f76df469e3f3abc9f8c3a77bbaf26a7f",
+      "judge_report_sha256": "2e5766584bae5415e872db5a4b1963c19b87e51fd36c8d5706e94effb1cb627b",
+      "exam_summary_sha256": "91fd14d20b4031f77267143287e9f8debbdbcbd6bd2c1c7c8db145d58ae4b631",
+      "attempt_ledger_sha256": "2c76b40ba0bf8d371b9be4a07cf0cc34d1544c4be5b187ae81fbd06d7a126f6b"
+    }
+  },
+  "paired_delta_s1_minus_old": {
+    "forehand_rate": 0.38,
+    "backhand_rate": 0.78,
+    "aggregate_rate": 0.58,
+    "contact_rate_per_attempt": 0.11,
+    "physical_falls": -9
+  },
+  "decision": {
+    "mujoco_same_family_terminal_selection": "M3_S1",
+    "reason": "On the preregistered shared 50-per-side paper, M3_S1 improves both sides, aggregate return, contact, and physical falls relative to M3_old.",
+    "requires_isaac_same_paper_companion": true,
+    "authorized_formal_promotion": false,
+    "authorized_deployment": false,
+    "authorized_real_robot": false
+  },
+  "preserved_validator_failure": {
+    "status": "judge_complete_but_pair_not_accepted",
+    "reason": "v1 assumed a non-existent adjacent hard-contract lineage_exact key, then assumed the evaluator's resolved ready-state spelling and runtime schedule fields lived at the wrong summary level; no S1 judge started in that attempt",
+    "state_root": "/workspace/codexschema/phase1_fresh_20260711/q50/M3_terminal_old_vs_S1_v1",
+    "schedule_file_sha256": "69f73458d30afcf282473696116d9f149a4e476a426d329500633a9f6d5a7f25",
+    "schedule_semantic_sha256": "949eb1969f7d2c30a5f170382048232e62beeef10c1f6a76c2a00b159f6a8fc0",
+    "runtime_contract_sha256": "c190b821d34d317a4ab38e518722a92c17dd463ffeecec05d95f81a43d8259b4",
+    "old_state_sha256": "8abec0f33d3ee29069b0e6f7f86ef8af26b290551e1663acb9bdb0c7f592ed4f",
+    "old_runner_log_sha256": "9121930ba8bec15103b7766d97a5a844cce9e60b94edfd1911e34e6e1ab6cbc2",
+    "old_judge_report_sha256": "63fee755645a1f71c304c1fa609975cba9a751eca71bcb45c8ced1176f448597",
+    "old_exam_summary_sha256": "1842f3b5ed8d811874a01f4218fac44c2f106304b845dcf4e606a9a6feaf37fc",
+    "old_attempt_ledger_sha256": "3d028e3913fdfbbd3b9366378e4d372289898a2e2ae0558bcb22187c92005608",
+    "retry_changed_schedule": false,
+    "retry_changed_checkpoint_or_recipe": false
+  }
+}

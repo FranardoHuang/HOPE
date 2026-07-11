@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "scaleout_matrix": "configs/phase1_scaleout_matrix_20260711.json",
+  "training_checkout": "/workspace/codexschema/nohope",
+  "expected_training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+  "judge_script_sha256": "1a00702935096b063435c3f0bd23e75f76f13e1298c87310d1cec3c26cca8529",
+  "training_log_root": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball",
+  "exam": {
+    "seed": 0,
+    "noise_scales": "0.0",
+    "schedule_k": 20,
+    "attempts_per_side": 10,
+    "screen_only": true,
+    "stop_or_promote_allowed": false,
+    "decision_followup": "same immutable schedule with at least 50 attempts per side"
+  },
+  "milestones": {
+    "continuation": [18000, 19000, 20000, 20998],
+    "fresh": [2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 16999]
+  },
+  "excluded_existing_run_names": [
+    "phase1_M3_old_pairing",
+    "phase1_M3_S1_pairing",
+    "phase1_fresh_v3_SZ_seed1",
+    "phase1_M2_old_pairing",
+    "phase1_M2_S1_pairing",
+    "phase1_fresh_v3_SZ_seed2"
+  ],
+  "companion_existing_fresh_manifests": {
+    "pod1": "configs/phase1_checkpoint_curve_cadence_fresh_pod1_20260711.json",
+    "pod2": "configs/phase1_checkpoint_curve_cadence_fresh_pod2_20260711.json"
+  },
+  "run_dir_basenames": {
+    "phase1_M3_S1_pairing_seed2": "2026-07-11_05-27-28_phase1_M3_S1_pairing_seed2",
+    "phase1_M3_old_pairing_seed2": "2026-07-11_05-29-34_phase1_M3_old_pairing_seed2",
+    "phase1_fresh_v3_SP_seed1": "2026-07-11_05-31-40_phase1_fresh_v3_SP_seed1",
+    "phase1_fresh_v3_SZ_seed3": "2026-07-11_05-39-31_phase1_fresh_v3_SZ_seed3",
+    "phase1_fresh_v3_SP_seed3": "2026-07-11_05-41-47_phase1_fresh_v3_SP_seed3",
+    "phase1_fresh_v3_LZ_seed1": "2026-07-11_05-43-57_phase1_fresh_v3_LZ_seed1",
+    "phase1_fresh_v3_LP_seed3": "2026-07-11_05-53-06_phase1_fresh_v3_LP_seed3",
+    "phase1_fresh_v3_LZ_seed3": "2026-07-11_05-57-09_phase1_fresh_v3_LZ_seed3",
+    "phase1_fresh_v3_LP_seed1": "2026-07-11_05-58-33_phase1_fresh_v3_LP_seed1",
+    "phase1_M2_S1_pairing_seed2": "2026-07-11_05-27-28_phase1_M2_S1_pairing_seed2",
+    "phase1_M2_old_pairing_seed2": "2026-07-11_05-29-34_phase1_M2_old_pairing_seed2",
+    "phase1_fresh_v3_SP_seed2": "2026-07-11_05-31-45_phase1_fresh_v3_SP_seed2",
+    "phase1_fresh_v3_SP_seed4": "2026-07-11_05-39-34_phase1_fresh_v3_SP_seed4",
+    "phase1_fresh_v3_SZ_seed4": "2026-07-11_05-41-44_phase1_fresh_v3_SZ_seed4",
+    "phase1_fresh_v3_LZ_seed2": "2026-07-11_05-43-55_phase1_fresh_v3_LZ_seed2",
+    "phase1_fresh_v3_LZ_seed4": "2026-07-11_05-53-06_phase1_fresh_v3_LZ_seed4",
+    "phase1_fresh_v3_LP_seed4": "2026-07-11_05-55-21_phase1_fresh_v3_LP_seed4",
+    "phase1_fresh_v3_LP_seed2": "2026-07-11_05-57-36_phase1_fresh_v3_LP_seed2"
+  }
+}

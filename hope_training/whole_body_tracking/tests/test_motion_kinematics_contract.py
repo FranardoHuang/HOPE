@@ -135,7 +135,60 @@ def test_center_of_mass_assertion_is_metadata_only_and_bit_preserving():
     assert contract.read_metadata(out).exact_motion_command_v2
 
 
+def test_migration_reorders_every_body_array_from_source_to_runtime_order():
+    data = _base_motion(T=3, B=2)
+    for index, key in enumerate(migrate.BODY_ARRAY_KEYS):
+        width = data[key].shape[-1]
+        data[key][:, 0] = np.arange(width, dtype=np.float32) + 10 * index
+        data[key][:, 1] = np.arange(width, dtype=np.float32) + 100 + 10 * index
+    joint_pos = data["joint_pos"].copy()
+
+    out, report = migrate.migrate_arrays(
+        data,
+        source_point="center_of_mass",
+        com_pos_b=None,
+        body_names=["old_first", "old_second"],
+        target_body_names=["old_second", "old_first"],
+    )
+
+    for key in migrate.BODY_ARRAY_KEYS:
+        np.testing.assert_array_equal(out[key][:, 0], data[key][:, 1])
+        np.testing.assert_array_equal(out[key][:, 1], data[key][:, 0])
+    np.testing.assert_array_equal(out["joint_pos"], joint_pos)
+    assert contract.read_metadata(out).body_names == ("old_second", "old_first")
+    assert report["body_order_reordered"] is True
+    assert report["body_permutation"] == [1, 0]
+
+
+def test_migration_rejects_target_body_order_that_is_not_a_permutation():
+    with pytest.raises(ValueError, match="must be a permutation"):
+        migrate.migrate_arrays(
+            _base_motion(T=3, B=2),
+            source_point="center_of_mass",
+            com_pos_b=None,
+            body_names=["a", "b"],
+            target_body_names=["a", "c"],
+        )
+
+
 def test_static_bootstrap_declares_schema_two_body_order_semantics():
     source = (SCRIPTS / "make_static_motion.py").read_text(encoding="utf-8")
     assert "from motion_kinematics_contract import metadata_arrays" in source
     assert "log.update(metadata_arrays(body_names=robot.body_names))" in source
+
+
+def test_legacy_link_velocity_runtime_escape_is_diagnostic_and_default_off():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "source" / "whole_body_tracking" / "whole_body_tracking"
+        / "tasks" / "tracking" / "mdp" / "commands.py"
+    ).read_text(encoding="utf-8")
+    assert "allow_legacy_link_origin_velocity: bool = False" in source
+    assert '"status": "legacy_link_origin_velocity_diagnostic_only"' in source
+
+    train = (Path(__file__).resolve().parents[1] / "scripts" / "train.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"allow_legacy_link_origin_velocity",' in train
+    assert "task.motion.allow_legacy_link_origin_velocity" in train
+    assert "motion_kinematics_exact=false and every descendant remains inexact" in train

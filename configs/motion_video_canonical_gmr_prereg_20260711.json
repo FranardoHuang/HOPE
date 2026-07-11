@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "plan_id": "motion-video-canonical-gmr-20260711-v1",
+  "status": "preregistered_not_executed",
+  "scope": "CPU-only no-clobber rerun of the ten materialized cohort-median-beta GVHMR PTs through the exact clean A3 GMR source; diagnostic only, with no grounding, schema-2, training, TOPP, or robot claim",
+  "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+  "source_materialization": {
+    "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+    "completion_manifest": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/materialization_manifest.json",
+      "bytes": 26857,
+      "sha256": "4043b34210b30be4151457623c3152ebd09650fb2caf587eb78359887a06bc2b"
+    },
+    "canonical_betas_artifact": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/canonical_betas.json",
+      "bytes": 915,
+      "sha256": "f405ba45d7f2233d3735c2e6b59409203cc98b1e97deef00224e16f2c7c4cbf2"
+    },
+    "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6"
+  },
+  "gmr_source_contract": {
+    "root": "/workspace/franco/motion_work/GMR",
+    "commit": "aabea2eee4be4bc16d4be17dac5ffa85e5a31539",
+    "worktree_must_be_clean": true,
+    "bundle": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_provenance/GMR_aabea2e.bundle",
+      "bytes": 282953810,
+      "sha256": "5b94af15f4a367dff8d7dc6c1cf14d26be6a649a25df6e1c1046b0e6ab72e2de"
+    },
+    "entrypoint": {
+      "path": "/workspace/franco/motion_work/GMR/scripts/gvhmr_to_robot.py",
+      "bytes": 7075,
+      "sha256": "a989edd8e0c9392d18bd0a439ed4f290f187a8f8daaaa049c992f79cb1d185da"
+    },
+    "loader": {
+      "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/utils/smpl.py",
+      "bytes": 13815,
+      "sha256": "2737f47207eb7298e747907ea2d11355d1280b680bc4e0fbce3080657e505de2"
+    },
+    "loader_semantics": {
+      "field": "smpl_params_global.betas",
+      "selection": "betas[0].detach().cpu().numpy()[:10]",
+      "selected_components": 10,
+      "zero_padding": false,
+      "height_formula_not_calibration": "1.66 + 0.1 * selected_betas[0]"
+    },
+    "neutral_smplx_model": {
+      "path": "/workspace/franco/motion_work/GMR/assets/body_models/smplx/SMPLX_NEUTRAL.npz",
+      "bytes": 108752058,
+      "sha256": "376021446ddc86e99acacd795182bbef903e61d33b76b9d8b359c2b0865bd992"
+    }
+  },
+  "tool_contract": {
+    "queue": {
+      "path": "scripts/run_motion_video_canonical_gmr_queue.py",
+      "bytes": 27646,
+      "sha256": "07769d294e803243b1a908c290b0513c820e54520e0aabf3da72933b812ec55a"
+    },
+    "legacy_queue_dependency": {
+      "path": "scripts/run_motion_video_gmr_queue.py",
+      "bytes": 24156,
+      "sha256": "9b70ab80767e470309b7290ec9d7e43469cf9a5ea44ec988447e3f6219f7f05f"
+    },
+    "result_auditor": {
+      "path": "scripts/audit_gmr_result.py",
+      "bytes": 11501,
+      "sha256": "7adca8eab4e168f0c8c505d77dabb000c9d29891594b8882e6aba95250469884"
+    }
+  },
+  "execution_contract": {
+    "cpu_only": true,
+    "CUDA_VISIBLE_DEVICES": "",
+    "OMP_NUM_THREADS": 8,
+    "MKL_NUM_THREADS": 8,
+    "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD": "1",
+    "robot": "agibot_a3",
+    "target_fps": 30,
+    "frame_zero_warmup_required": true,
+    "velocity_limit_during_ik": false,
+    "warmup_threshold_strict_lt": 0.0001,
+    "warmup_max_rounds": 200,
+    "python_environment": {
+      "executable": "/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10",
+      "version": "Python 3.10.20",
+      "pip_freeze_sha256": "56b0f8af9677b279bbb4925b6f49113f484dcb9ded1ed8d9bc56af71f304c694"
+    }
+  },
+  "output_contract": {
+    "output_root": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_v1",
+    "state_dir": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_state_v1",
+    "result_suffix": ".diagnostic_cohort_median_betas.gmr.pkl",
+    "output_root_must_not_exist": true,
+    "state_dir_must_not_exist": true,
+    "no_clobber": true,
+    "stop_on_first_failure": true
+  },
+  "processing_order": [
+    "franco_forehand_block",
+    "franco_backhand_block",
+    "franco_forehand_loop",
+    "franco_backhand_loop_a",
+    "franco_backhand_loop_b",
+    "franco_backhand_loop_c",
+    "v6_forehand_block",
+    "v6_backhand_block",
+    "v7_forehand_block",
+    "v7_backhand_block"
+  ],
+  "inputs": [
+    {
+      "asset_id": "franco_forehand_block",
+      "frames": 65,
+      "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/franco_forehand_block.diagnostic_cohort_median_betas.pt",
+        "bytes": 289746,
+        "sha256": "9ee4174218023ccd59490022ea7a200c1a767d389e7ffef4e38a7bd9ae896167"
+      }
+    },
+    {
+      "asset_id": "franco_backhand_block",
+      "frames": 63,
+      "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/franco_backhand_block.diagnostic_cohort_median_betas.pt",
+        "bytes": 280914,
+        "sha256": "c68b021cebfaf0adb64bc94530a5a965fadd5b1a270595eb890b9591cc3bedf2"
+      }
+    },
+    {
+      "asset_id": "franco_forehand_loop",
+      "frames": 70,
+      "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/franco_forehand_loop.diagnostic_cohort_median_betas.pt",
+        "bytes": 311570,
+        "sha256": "bfdfeb88ec48efe8b5cfed4615e63da3b74b1d2c421cd82247327005d4d362c7"
+      }
+    },
+    {
+      "asset_id": "franco_backhand_loop_a",
+      "frames": 69,
+      "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/franco_backhand_loop_a.diagnostic_cohort_median_betas.pt",
+        "bytes": 306706,
+        "sha256": "b24bcca25260aa9dc23d9916934363e1a2c9b422a2fadc07b33f5d5b088154d4"
+      }
+    },
+    {
+      "asset_id": "franco_backhand_loop_b",
+      "frames": 91,
+      "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/franco_backhand_loop_b.diagnostic_cohort_median_betas.pt",
+        "bytes": 402834,
+        "sha256": "ad0c1a2e5d1b09d04ff7be90c98c065fe9bf04da6b3d9340cded7588d426c48a"
+      }
+    },
+    {
+      "asset_id": "franco_backhand_loop_c",
+      "frames": 98,
+      "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/franco_backhand_loop_c.diagnostic_cohort_median_betas.pt",
+        "bytes": 432914,
+        "sha256": "65dcd2b7c3a5346c572759fc32ba581d64177cffcca3235f8d6a64f7ffcf7cf3"
+      }
+    },
+    {
+      "asset_id": "v6_forehand_block",
+      "frames": 35,
+      "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/v6_forehand_block.diagnostic_cohort_median_betas.pt",
+        "bytes": 159250,
+        "sha256": "e95f52220c452757bc02269f700f6ff2bc84947c9c1abe8261955b610cf2e34c"
+      }
+    },
+    {
+      "asset_id": "v6_backhand_block",
+      "frames": 35,
+      "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/v6_backhand_block.diagnostic_cohort_median_betas.pt",
+        "bytes": 159250,
+        "sha256": "0d630d0dd5ba980e6f25021257f82dd04297ea49859f8775828ea3956679a59b"
+      }
+    },
+    {
+      "asset_id": "v7_forehand_block",
+      "frames": 64,
+      "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/v7_forehand_block.diagnostic_cohort_median_betas.pt",
+        "bytes": 285586,
+        "sha256": "af31c9840972b01713a887839827460e1665663f972599b581ddfb939bf3da8c"
+      }
+    },
+    {
+      "asset_id": "v7_backhand_block",
+      "frames": 64,
+      "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/v7_backhand_block.diagnostic_cohort_median_betas.pt",
+        "bytes": 285586,
+        "sha256": "584e384ae9e1612ff2d9c3d03fef8a5a7cd969246e2e38ca0642411cb584454b"
+      }
+    }
+  ],
+  "measured_height_m": null,
+  "a3_calibrated": false,
+  "formal_eligible": false,
+  "formal_blockers": [
+    "the cohort-median beta vector is a same-intake diagnostic normalization, not measured performer height or A3 body calibration",
+    "GMR warm-up and finite structural audits do not prove grounding, inter-frame self-collision, dynamics, table/net clearance, strike feasibility, or returnability",
+    "mirror, rally yaw, grip rotation, strike phase, contact truth, transition-to-ready, schema-2, TOPP, and RL gates remain open",
+    "no output from this queue is authorized for real-robot execution"
+  ]
+}

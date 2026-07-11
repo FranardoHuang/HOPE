@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "contract_id": "phase1-M3-old-vs-S1-terminal-clean-q50-execution-v2",
+  "status": "offline_preregistered_not_prepared",
+  "auto_start": false,
+  "preregistration_sha256": "4c5434511c8da8e6d65d1f82571eb8975a7ecf2baa9a4d0a98cd68cb045de12c",
+  "semantics": {
+    "causal": true,
+    "evaluation_contract_exact": false,
+    "formal_target": false,
+    "deploy_gate": false
+  },
+  "checkouts": {
+    "training": {
+      "path": "/workspace/codexschema/nohope",
+      "commit": "6d93bcb16c422a2f42748c2dc99432559653480b"
+    },
+    "evaluation": {
+      "path": "/workspace/codexschema/nohope_eval_08e438e",
+      "commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f"
+    }
+  },
+  "tools": {
+    "runner_sha256": "095e476fd36fb68d500cb39ea7f71f6fee9b729209187d51599582c72c22198b",
+    "evaluation": {
+      "judge": {
+        "path": "hope_training/whole_body_tracking/scripts/judge.sh",
+        "sha256": "1a00702935096b063435c3f0bd23e75f76f13e1298c87310d1cec3c26cca8529"
+      },
+      "materialize_schedule": {
+        "path": "hope_training/whole_body_tracking/scripts/materialize_bank_exam_schedule.py",
+        "sha256": "fe2a4f694f8a1c5a69f42fafeeadaf848b440903385acfba7468073eef010937"
+      },
+      "schedule_module": {
+        "path": "hope_training/whole_body_tracking/scripts/bank_exam_schedule.py",
+        "sha256": "32721f018f6a35a42aa12ff0a7e48c0d9bc513d238988d953241ee625744b23b"
+      },
+      "mujoco_evaluator": {
+        "path": "hope_training/whole_body_tracking/scripts/mujoco_eval_onnx.py",
+        "sha256": "e4a9fa42ff0f7e68cebdf16f2e0c61299507496c6edc13546baeb3d576ecb20a"
+      }
+    }
+  },
+  "schedule": {
+    "schema_version": 3,
+    "per_clip_quota": 50,
+    "schedule_k": 100,
+    "attempts_per_side": 50,
+    "schedule_seed": 0,
+    "hold_range": [0, 100],
+    "noise_scales": [0.0],
+    "one_question_reset": true,
+    "no_wrap": true,
+    "same_artifact_for_both_arms": true,
+    "allow_inexact_contract": true
+  },
+  "runtime": {
+    "state_dir": "/workspace/codexschema/phase1_fresh_20260711/q50/M3_terminal_old_vs_S1_v2",
+    "checkpoint_python": "/workspace/hope_isaac_venv/bin/python",
+    "schedule_filename": "shared_clean_k100.schedule.json",
+    "runtime_contract_filename": "runtime_contract.prepared.json",
+    "paired_result_filename": "paired_result.json"
+  },
+  "arm_order": ["M3_old", "M3_S1"]
+}

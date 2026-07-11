@@ -179,6 +179,7 @@ _install_isaaclab_stub()
 _PKG = "whole_body_tracking.tasks.tracking.mdp"
 for _p in ("whole_body_tracking", "whole_body_tracking.tasks", "whole_body_tracking.tasks.tracking", _PKG):
     sys.modules.setdefault(_p, types.ModuleType(_p))
+_load(f"{_PKG}.event_timing", "event_timing.py")
 commands_mod = _load(f"{_PKG}.commands", "commands.py")
 rewards_mod = _load(f"{_PKG}.rewards", "rewards.py")
 terminations_mod = _load(f"{_PKG}.terminations", "terminations.py")

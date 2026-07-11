@@ -42,6 +42,40 @@ def test_exact_strike_clock_is_post_step_and_holds_stay_pinned():
         M.post_step_time_to_strike(0.1, 0.0, clock_advances=True)
 
 
+def test_hold_protocol_scope_is_shared_by_main_and_rollout_and_bank_always_holds():
+    sampler = SimpleNamespace(schedule=())
+    assert M.training_hold_protocol_active(
+        reset_mode="multiswing", deploy_faithful_cfg=None, venue_sampler=None
+    )
+    assert M.training_hold_protocol_active(
+        reset_mode="teleport", deploy_faithful_cfg=None, venue_sampler=sampler
+    )
+    assert not M.training_hold_protocol_active(
+        reset_mode="multiswing", deploy_faithful_cfg={}, venue_sampler=None
+    )
+    assert not M.training_hold_protocol_active(
+        reset_mode="teleport", deploy_faithful_cfg=None, venue_sampler=None
+    )
+
+
+def test_explicit_inexact_escape_can_never_produce_an_exact_bank_score():
+    assert M.bank_evaluation_contract_exact(
+        artifact_exact=True, schedule_exact=True, diagnostic_escape=False
+    )
+    assert not M.bank_evaluation_contract_exact(
+        artifact_exact=True, schedule_exact=True, diagnostic_escape=True
+    )
+    assert not M.bank_evaluation_contract_exact(
+        artifact_exact=False, schedule_exact=True, diagnostic_escape=False
+    )
+
+
+def test_bank_loader_resolves_standalone_module_without_isaac_package_import():
+    path = Path(M.stage1_question_bank_module_path(ROOT))
+    assert path.name == "stage1_question_bank.py"
+    assert path.is_file()
+
+
 def test_rollout_wires_post_step_clock_before_metrics_and_uses_separate_noise_rng():
     source = inspect.getsource(M.run_rollout)
     physics = source.index("robot.apply_pd_and_step")
@@ -128,6 +162,25 @@ def test_attempt_summary_keeps_hold_deaths_in_unconditional_denominator():
     assert out["finalize_reason_counts"]["fall_hold"] == 1
     assert out["per_clip"]["forehand"]["n_attempts"] == 2
     assert out["per_clip"]["backhand"]["n_attempts"] == 2
+
+
+def test_continuity_product_metric_keeps_return_but_fails_post_strike_recovery():
+    records = [
+        dict(returned=True, reason="completed"),
+        dict(returned=True, reason="fall_post_strike"),
+        dict(returned=False, reason="completed"),
+        # Terminal row has no scheduled next opportunity and is excluded from this denominator.
+        dict(returned=True, reason="completed"),
+    ]
+    out = M.summarize_continuity_records(records)
+    assert out == {
+        "n_opportunities_with_scheduled_next": 3,
+        "n_returned": 2,
+        "n_recovered_to_next": 2,
+        "n_returned_and_recovered_to_next": 1,
+        "return_and_recover_rate": pytest.approx(1 / 3),
+        "recover_rate_given_return": pytest.approx(1 / 2),
+    }
 
 
 def test_attempt_flags_never_mark_a_truncation_eligible():
@@ -303,6 +356,91 @@ def test_mujoco_robot_applies_bound_implicit_armature_effort_and_zero_friction(m
     assert model.opt.integrator == 7
 
 
+def test_mujoco_robot_accepts_float32_armature_roundtrip(monkeypatch):
+    # Training metadata originates in Isaac float32 tensors, while the same decimal values
+    # in MJCF are parsed as float64.  The exact gate must tolerate only that serialization
+    # residue (A3 max observed 2.71e-9), not a physically meaningful plant change.
+    source = np.full(31, 0.06646569891, dtype=np.float64)
+    bound = source.astype(np.float32).astype(np.float64)
+    joint_names, body_names, model = _install_fake_mujoco(
+        monkeypatch, armature=source
+    )
+    robot = M.MujocoRobot(
+        "unused.xml", joint_names, body_names, 0.005,
+        keep_native_damping=False, keep_frictionloss=False,
+        pd_mode="implicit", kd_for_implicit=np.ones(31),
+        actuator_types=("implicit",) * 31,
+        joint_armature=bound,
+        joint_velocity_limits=np.full(31, 12.0),
+        joint_effort_limits=np.full(31, 24.0),
+        require_bound_plant_match=True,
+        allow_velocity_limit_proxy=False,
+    )
+    assert np.array_equal(model.dof_armature[robot.vadr], bound)
+
+
+def test_mujoco_robot_accepts_float32_effort_roundtrip(monkeypatch):
+    # A3 ankle effort is 118.2 in MJCF and 118.199996948... after Isaac float32 storage.
+    bound = np.full(31, np.float32(118.2), dtype=np.float32).astype(np.float64)
+    joint_names, body_names, model = _install_fake_mujoco(
+        monkeypatch, armature=0.01, effort=118.2
+    )
+    robot = M.MujocoRobot(
+        "unused.xml", joint_names, body_names, 0.005,
+        keep_native_damping=False, keep_frictionloss=False,
+        pd_mode="implicit", kd_for_implicit=np.ones(31),
+        actuator_types=("implicit",) * 31,
+        joint_armature=np.full(31, 0.01),
+        joint_velocity_limits=np.full(31, 12.0),
+        joint_effort_limits=bound,
+        require_bound_plant_match=True,
+        allow_velocity_limit_proxy=False,
+    )
+    assert np.array_equal(model.actuator_ctrlrange[robot.act_id, 1], bound)
+
+
+def test_float32_plant_match_requires_canonical_bound_and_rejects_next_grid_value():
+    source = np.array([118.2, 0.06646569891], dtype=np.float64)
+    canonical = source.astype(np.float32).astype(np.float64)
+    assert M.matches_training_float32_plant(source, canonical)
+
+    noncanonical = canonical.copy()
+    noncanonical[0] += 1e-12
+    assert not M.matches_training_float32_plant(source, noncanonical)
+
+    assert M.matches_training_float32_plant(
+        np.array([0.01], dtype=np.float64), np.array([0.01], dtype=np.float64)
+    )
+
+    next_grid = canonical.copy()
+    next_grid[0] = np.nextafter(np.float32(canonical[0]), np.float32(np.inf)).item()
+    assert not M.matches_training_float32_plant(source, next_grid)
+
+    bound_one = np.array([1.0], dtype=np.float64)
+    ulp = float(np.nextafter(np.float32(1.0), np.float32(np.inf)) - np.float32(1.0))
+    assert M.matches_training_float32_plant(
+        np.array([1.0 + 0.49 * ulp]), bound_one
+    )
+    assert not M.matches_training_float32_plant(
+        np.array([1.0 + 0.51 * ulp]), bound_one
+    )
+
+
+def test_final_denominator_report_downgrades_bank_leg_for_inexact_artifact():
+    sampler = SimpleNamespace(
+        denominator_report=lambda: [
+            "  evaluation_contract_exact=true",
+            "  immutable_schedule: K=20",
+        ]
+    )
+    assert M.final_denominator_report(
+        sampler, evaluation_contract_exact=False
+    ) == [
+        "  evaluation_contract_exact=false",
+        "  immutable_schedule: K=20",
+    ]
+
+
 def test_mujoco_robot_fails_mismatched_bound_armature_and_active_velocity_limit(monkeypatch):
     joint_names, body_names, _ = _install_fake_mujoco(
         monkeypatch, armature=0.02, step_velocity=13.0
@@ -420,10 +558,10 @@ def _policy(monkeypatch, tmp_path, md, obs_norm="auto", graph_baked=False):
     return M.OnnxPolicy(str(tmp_path / "policy.onnx"), obs_norm=obs_norm)
 
 
-def _write_sidecar(path, *, std=1.0):
+def _write_sidecar(path, *, std=1.0, eps_value=1e-2):
     mean = np.zeros(175, np.float32)
     std_values = np.full(175, std, np.float32)
-    eps = np.float32(1e-2)
+    eps = np.float32(eps_value)
     count = np.int64(100)
     np.savez(
         path,
@@ -484,12 +622,31 @@ def test_schema3_requires_sidecar_hash_and_rejects_invalid_stats(monkeypatch, tm
     with pytest.raises(SystemExit, match=r"schema-v3\+ normalized raw ONNX requires"):
         _policy(monkeypatch, tmp_path, _metadata(schema="3", baked=False, empirical=True))
 
-    _write_sidecar(sidecar, std=0.0)
+    _write_sidecar(sidecar, std=-1.0)
     digest = hashlib.sha256(sidecar.read_bytes()).hexdigest()
-    with pytest.raises(SystemExit, match="positive finite std"):
+    with pytest.raises(SystemExit, match="finite non-negative std"):
         _policy(
             monkeypatch, tmp_path,
             _metadata(schema="3", baked=False, empirical=True, sidecar_sha=digest),
+        )
+
+
+def test_obs_normalizer_accepts_epsilon_protected_zero_std_and_rejects_zero_sum(
+        monkeypatch, tmp_path):
+    sidecar = tmp_path / "obs_norm.npz"
+    digest = _write_sidecar(sidecar, std=0.0, eps_value=1e-2)
+    policy = _policy(
+        monkeypatch, tmp_path,
+        _metadata(baked=False, empirical=True, sidecar_sha=digest),
+    )
+    assert np.all(policy.obs_std == 0.0)
+    assert policy.obs_eps == pytest.approx(1e-2)
+
+    digest = _write_sidecar(sidecar, std=0.0, eps_value=0.0)
+    with pytest.raises(SystemExit, match=r"std\+eps>0"):
+        _policy(
+            monkeypatch, tmp_path,
+            _metadata(baked=False, empirical=True, sidecar_sha=digest),
         )
 
 

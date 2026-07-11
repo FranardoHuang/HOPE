@@ -18,7 +18,7 @@ from typing import Any, Mapping, Sequence
 import yaml
 
 
-CONTRACT_SCHEMA = "hope.phase1.termination-contract.v2"
+CONTRACT_SCHEMA = "hope.phase1.termination-contract.v3"
 KNOWN_TERMS = (
     "time_out",
     "anchor_pos",
@@ -45,6 +45,18 @@ FUNCTION_IDENTITIES = {
     "bad_motion_body_pos_z_only": (
         "whole_body_tracking.tasks.tracking.mdp.terminations:bad_motion_body_pos_z_only",
         "whole_body_tracking.tasks.tracking.mdp.terminations.bad_motion_body_pos_z_only",
+    ),
+    "bad_anchor_pos_z_only_hold_aware": (
+        "whole_body_tracking.tasks.tracking.mdp.hope_rewards:bad_anchor_pos_z_only_hold_aware",
+        "whole_body_tracking.tasks.tracking.mdp.hope_rewards.bad_anchor_pos_z_only_hold_aware",
+    ),
+    "bad_anchor_ori_hold_aware": (
+        "whole_body_tracking.tasks.tracking.mdp.hope_rewards:bad_anchor_ori_hold_aware",
+        "whole_body_tracking.tasks.tracking.mdp.hope_rewards.bad_anchor_ori_hold_aware",
+    ),
+    "bad_motion_body_pos_z_only_hold_aware": (
+        "whole_body_tracking.tasks.tracking.mdp.hope_rewards:bad_motion_body_pos_z_only_hold_aware",
+        "whole_body_tracking.tasks.tracking.mdp.hope_rewards.bad_motion_body_pos_z_only_hold_aware",
     ),
     "bad_orientation": (
         "isaaclab.envs.mdp.terminations:bad_orientation",
@@ -174,6 +186,18 @@ def _function_matches(value: Any, expected: str, label: str) -> None:
         )
 
 
+def _function_choice(value: Any, expected: Sequence[str], label: str) -> str:
+    for name in expected:
+        identities = FUNCTION_IDENTITIES.get(name, ())
+        if isinstance(value, str) and value.strip() in identities:
+            return name
+    allowed = [identity for name in expected for identity in FUNCTION_IDENTITIES.get(name, ())]
+    raise TerminationContractError(
+        f"{label}.func must be one of {allowed}, got {value!r}; evaluator will not trust "
+        "a matching function-name suffix from another module"
+    )
+
+
 def _params(term: Mapping[str, Any], label: str) -> Mapping[str, Any]:
     value = term.get("params")
     if not isinstance(value, Mapping):
@@ -182,10 +206,10 @@ def _params(term: Mapping[str, Any], label: str) -> Mapping[str, Any]:
 
 
 def _tracking_term(
-    raw: Mapping[str, Any], name: str, function: str, *, body_names: bool = False,
+    raw: Mapping[str, Any], name: str, functions: Sequence[str], *, body_names: bool = False,
     require_robot_asset: bool = False,
 ) -> dict[str, Any]:
-    _function_matches(raw.get("func"), function, f"terminations.{name}")
+    function = _function_choice(raw.get("func"), functions, f"terminations.{name}")
     params = _params(raw, f"terminations.{name}")
     if params.get("command_name") != "motion":
         raise TerminationContractError(
@@ -203,7 +227,14 @@ def _tracking_term(
         "active": True,
         "function": function,
         "threshold": _finite_positive(params.get("threshold"), f"terminations.{name}.threshold"),
+        "ignore_hold": function.endswith("_hold_aware"),
     }
+    ignore_hold = params.get("ignore_hold", False)
+    if type(ignore_hold) is not bool or ignore_hold is not result["ignore_hold"]:
+        raise TerminationContractError(
+            f"terminations.{name}.params.ignore_hold must be "
+            f"{result['ignore_hold']!r} for function {function!r}, got {ignore_hold!r}"
+        )
     if body_names:
         names = params.get("body_names")
         if not isinstance(names, Sequence) or isinstance(names, (str, bytes)) or not names:
@@ -255,14 +286,19 @@ def _parse_terms(document: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
         if raw.get("time_out") is not False:
             raise TerminationContractError(f"terminations.{name}.time_out must be false")
         if name == "anchor_pos":
-            terms[name] = _tracking_term(raw, name, "bad_anchor_pos_z_only")
+            terms[name] = _tracking_term(
+                raw, name, ("bad_anchor_pos_z_only", "bad_anchor_pos_z_only_hold_aware")
+            )
         elif name == "anchor_ori":
             terms[name] = _tracking_term(
-                raw, name, "bad_anchor_ori", require_robot_asset=True
+                raw, name, ("bad_anchor_ori", "bad_anchor_ori_hold_aware"),
+                require_robot_asset=True
             )
         elif name == "ee_body_pos":
             terms[name] = _tracking_term(
-                raw, name, "bad_motion_body_pos_z_only", body_names=True
+                raw, name,
+                ("bad_motion_body_pos_z_only", "bad_motion_body_pos_z_only_hold_aware"),
+                body_names=True
             )
         elif name == "base_fell_tilt":
             _function_matches(raw.get("func"), "bad_orientation", f"terminations.{name}")
@@ -383,12 +419,15 @@ def _validate_normalized_terms(value: Any) -> None:
             f"termination contract terms must be exactly {list(KNOWN_TERMS)}, got {sorted(value)}"
         )
     expected_functions = {
-        "time_out": "time_out",
-        "anchor_pos": "bad_anchor_pos_z_only",
-        "anchor_ori": "bad_anchor_ori",
-        "ee_body_pos": "bad_motion_body_pos_z_only",
-        "base_fell_tilt": "bad_orientation",
-        "base_too_low": "root_height_below_minimum",
+        "time_out": ("time_out",),
+        "anchor_pos": ("bad_anchor_pos_z_only", "bad_anchor_pos_z_only_hold_aware"),
+        "anchor_ori": ("bad_anchor_ori", "bad_anchor_ori_hold_aware"),
+        "ee_body_pos": (
+            "bad_motion_body_pos_z_only",
+            "bad_motion_body_pos_z_only_hold_aware",
+        ),
+        "base_fell_tilt": ("bad_orientation",),
+        "base_too_low": ("root_height_below_minimum",),
     }
     value_fields = {
         "anchor_pos": "threshold",
@@ -416,13 +455,23 @@ def _validate_normalized_terms(value: Any) -> None:
                 )
             continue
         fields = {"active", "function", value_fields[name]}
+        if name in TRACKING_TERMS:
+            fields.add("ignore_hold")
         if name == "ee_body_pos":
             fields.add("body_names")
         _require_exact_keys(term, fields, f"terms.{name}")
-        if term.get("function") != expected_functions[name]:
+        if term.get("function") not in expected_functions[name]:
             raise TerminationContractError(
-                f"terms.{name}.function must be {expected_functions[name]!r}"
+                f"terms.{name}.function must be one of {expected_functions[name]!r}"
             )
+        if name in TRACKING_TERMS:
+            ignore_hold = term.get("ignore_hold")
+            expected_ignore = str(term.get("function")).endswith("_hold_aware")
+            if type(ignore_hold) is not bool or ignore_hold is not expected_ignore:
+                raise TerminationContractError(
+                    f"terms.{name}.ignore_hold must be {expected_ignore!r} for "
+                    f"function {term.get('function')!r}"
+                )
         _normalized_positive_float(term[value_fields[name]], f"terms.{name}.{value_fields[name]}")
         if name == "ee_body_pos":
             names = term["body_names"]
@@ -640,6 +689,10 @@ def runtime_termination_settings(
             float(terms["anchor_pos"]["threshold"])
             if terms["anchor_pos"]["active"] else None
         ),
+        "tracking_ignore_hold": {
+            name: bool(terms[name].get("ignore_hold", False))
+            for name in TRACKING_TERMS
+        },
         "anchor_ori": (
             float(terms["anchor_ori"]["threshold"])
             if terms["anchor_ori"]["active"] else None
@@ -666,19 +719,24 @@ def runtime_termination_settings(
 
 def tracking_reset_reasons(
     settings: Mapping[str, Any], *, anchor_pos_z_error: float,
-    anchor_ori_error: float, ee_body_pos_z_errors: Sequence[float]
+    anchor_ori_error: float, ee_body_pos_z_errors: Sequence[float],
+    in_hold: bool = False,
 ) -> list[str]:
     """Pure threshold application shared by CPU tests and the MuJoCo runtime."""
 
     reasons: list[str] = []
+    ignore = settings.get("tracking_ignore_hold", {})
     if settings.get("anchor_pos_z") is not None \
+            and not (in_hold and bool(ignore.get("anchor_pos", False))) \
             and float(anchor_pos_z_error) > float(settings["anchor_pos_z"]):
         reasons.append("anchor_pos")
     if settings.get("anchor_ori") is not None \
+            and not (in_hold and bool(ignore.get("anchor_ori", False))) \
             and float(anchor_ori_error) > float(settings["anchor_ori"]):
         reasons.append("anchor_ori")
     ee = settings.get("ee_body_pos_z")
-    if ee is not None and any(float(value) > float(ee["threshold"])
+    if ee is not None and not (in_hold and bool(ignore.get("ee_body_pos", False))) \
+            and any(float(value) > float(ee["threshold"])
                               for value in ee_body_pos_z_errors):
         reasons.append("ee_body_pos")
     return reasons

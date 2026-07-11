@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "contract_id": "phase1-fresh-SZ-seed1-model2000-vs-model4000-clean-q50-isaac-companion-v1",
+  "status": "offline_runtime_contract_required",
+  "auto_start": false,
+  "semantics": {
+    "fresh_lineage": true,
+    "evaluation_contract_exact": true,
+    "formal_target": true,
+    "checkpoint_selection_screen": true,
+    "whole_arm_stop_allowed": false,
+    "whole_arm_promote_allowed": false,
+    "deploy_gate": false,
+    "real_robot_authorized": false
+  },
+  "checkouts": {
+    "training": {
+      "path": "/workspace/codexschema/nohope",
+      "commit": "6d93bcb16c422a2f42748c2dc99432559653480b"
+    },
+    "evaluation": {
+      "path": "/workspace/codexschema/nohope_eval_08e438e",
+      "commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f"
+    }
+  },
+  "mujoco_binding": {
+    "execution_contract_id": "phase1-fresh-SZ-seed1-model2000-vs-model4000-clean-q50-execution-v1",
+    "execution_config": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/control/SZ_seed1_2000_vs_4000_q50_v1/phase1_SZ_seed1_2000_vs_4000_q50_execution_20260711.json",
+      "sha256": "8d9f044aae15f8fe6b4ea663f3b82ad93cd54aabf58139911ac4a53448462fdb"
+    },
+    "preregistration": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/control/SZ_seed1_2000_vs_4000_q50_v1/phase1_SZ_seed1_2000_vs_4000_q50_prereg_20260711.json",
+      "sha256": "d0f39562069133923e34b431640578abe5f45b49c80a029addca30a10b45029f"
+    },
+    "runtime_contract": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_exact_v1/runtime_contract.prepared.json",
+      "sha256": "a756023d5b2d57a51c473e5e79f21ec902668f343b6b60cd78636120d9534661"
+    },
+    "paired_result": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_exact_v1/paired_result.json",
+      "sha256": "b95ba6c4657e4b542ea3c5f08d02941c830ea48d71b56bb1a247ef7a46730478"
+    }
+  },
+  "tools": {
+    "runner_sha256": "ed770e2ad8a204e602c9b1aa974cd09713cf7720338a564ec4c85aeddbd6142e",
+    "fresh_mujoco_runner": {
+      "path": "run_phase1_fresh_exact_paired_bank_q50.py",
+      "sha256": "3528250777a170791f39d8dd17716c2a7f8ca91416a3ffa8433ec5eb691ed9e0"
+    },
+    "shared_mujoco_runner": {
+      "path": "run_phase1_paired_bank_q50.py",
+      "sha256": "095e476fd36fb68d500cb39ea7f71f6fee9b729209187d51599582c72c22198b"
+    },
+    "isaac_utility_runner": {
+      "path": "run_phase1_paired_isaac_q50.py",
+      "sha256": "f5d0dce4a5f650981838779dfa472c881d63c28341437167e0eca9217f57e04e"
+    },
+    "evaluation": {
+      "isaac_evaluator": {
+        "path": "hope_training/whole_body_tracking/scripts/isaac_bank_exam.py",
+        "sha256": "0225ca41ad96340187447334c8f3707229d54947e376be3c059435865b34a72e"
+      },
+      "isaac_adapter": {
+        "path": "hope_training/whole_body_tracking/scripts/isaac_bank_exam_adapter.py",
+        "sha256": "b9decc710a863ff24c73d6b750f22c6f6764c6023dfab286281c368dc7dc6af2"
+      },
+      "schedule_module": {
+        "path": "hope_training/whole_body_tracking/scripts/bank_exam_schedule.py",
+        "sha256": "32721f018f6a35a42aa12ff0a7e48c0d9bc513d238988d953241ee625744b23b"
+      },
+      "isaac_scorer": {
+        "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/virtual_ball.py",
+        "sha256": "3dc5237346004893141fe231dbf6a8bc1028e0328459411015366d72868c5ed4"
+      },
+      "ball_physics_yaml": {
+        "path": "configs/ball_physics_venue.yaml",
+        "sha256": "2e58221442665ddad7cc6dcc18d5c811dec1b0c47439b81c1c744b5148169a27"
+      },
+      "setup_train_env": {
+        "path": "hope_training/whole_body_tracking/setup_train_env.sh",
+        "sha256": "88c1d7307ec90483712f7f3b0d8535179b88bb132a8a5a06111bff6872034214"
+      }
+    }
+  },
+  "paper": {
+    "schema_version": 3,
+    "schedule_k": 100,
+    "attempts_per_side": 50,
+    "per_clip_quota": 50,
+    "schedule_seed": 0,
+    "hold_range": [0, 100],
+    "noise_scale": 0.0,
+    "same_schedule_file_as_mujoco": true,
+    "schedule_file_sha256": "66e89986a2b726d529179fcb4c745625ebed0380d59664caceefc55e86071cb3",
+    "schedule_semantic_sha256": "7dc6af822fb4130b8c324843f179d77f882d1326306bb19802b00f94447dff3e",
+    "one_question_reset": true,
+    "no_wrap": true,
+    "allow_inexact_contract": false
+  },
+  "command": {
+    "isaac_python": "/workspace/hope_isaac_venv/bin/python",
+    "task": "HOPEPingPongVirtualBall",
+    "headless": true,
+    "output_stem": "isaac_clean_k100",
+    "max_parallel": 1
+  },
+  "runtime": {
+    "state_dir": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_isaac_exact_v1",
+    "runtime_contract_filename": "runtime_contract.prepared.json",
+    "paired_result_filename": "isaac_paired_result.json"
+  },
+  "arm_order": ["model_2000", "model_4000"],
+  "selection_policy": {
+    "scope": "choose_only_between_model_2000_and_model_4000",
+    "primary": "higher_aggregate_all_attempt_return_count_out_of_100",
+    "tie_break_1": "higher_min_side_all_attempt_return_count_out_of_50",
+    "tie_break_2": "fewer_physical_falls_out_of_100",
+    "tie_break_3": "earlier_model_2000",
+    "may_select_checkpoint": true,
+    "may_stop_whole_arm": false,
+    "may_promote_whole_arm": false
+  }
+}

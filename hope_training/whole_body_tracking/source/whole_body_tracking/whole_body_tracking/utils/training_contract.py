@@ -372,7 +372,15 @@ def runtime_execution_facts(env, actor_contract) -> dict:
     }
 
 
-def validate_schema3_contract(contract: Mapping) -> None:
+def validate_schema3_contract_structure(contract: Mapping) -> None:
+    """Validate a schema-3 sidecar without promoting it to a formal-exact lineage.
+
+    Schema 3 binds the instantiated execution contract even for deliberately diagnostic runs
+    (for example, a causal continuation on an untagged legacy motion).  Those sidecars still need
+    complete, internally consistent runtime facts and an adjacent checkpoint hash binding; the
+    narrower :func:`validate_schema3_contract` adds the formal schema-2 motion requirement.
+    """
+
     if not isinstance(contract, Mapping):
         raise ValueError("training contract root must be an object")
     try:
@@ -387,6 +395,14 @@ def validate_schema3_contract(contract: Mapping) -> None:
     missing = [key for key in (*RUNTIME_EXECUTION_KEYS, *SCHEMA3_TASK_KEYS) if key not in contract]
     if missing:
         raise ValueError("schema-3 training contract missing execution facts: " + ", ".join(missing))
+    for key in ("face_command_enabled", "motion_allow_legacy_link_origin_velocity"):
+        if key in contract and not isinstance(contract[key], bool):
+            raise ValueError(f"schema-3 {key} must be boolean when present")
+    if "face_command_pairing" in contract and contract["face_command_pairing"] not in (
+        "shared_plus_y",
+        "legacy_signed_vs_A",
+    ):
+        raise ValueError("schema-3 face_command_pairing is invalid")
 
     joint_names = contract["joint_names"]
     if not isinstance(joint_names, (list, tuple)) or not joint_names:
@@ -512,24 +528,120 @@ def validate_schema3_contract(contract: Mapping) -> None:
     ):
         raise ValueError("schema-3 every motion clip fps must equal the policy rate")
     expected_body_order = articulation_body_names
+    clip_exact_flags = []
     for index, item in enumerate(kinematics):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"schema-3 motion kinematics clip {index} must be an object")
+        missing_item = [
+            key
+            for key in (
+                "schema_version",
+                "body_pos_point",
+                "body_lin_vel_point",
+                "body_names",
+                "exact",
+            )
+            if key not in item
+        ]
+        if missing_item:
+            raise ValueError(
+                f"schema-3 motion kinematics clip {index} is missing "
+                + ", ".join(missing_item)
+            )
+        if not isinstance(item["exact"], bool):
+            raise ValueError(f"schema-3 motion kinematics clip {index} exact must be boolean")
+        clip_exact = item["exact"] is True
+        clip_exact_flags.append(clip_exact)
         try:
-            item_schema = int(item.get("schema_version", 0)) if isinstance(item, Mapping) else 0
+            item_schema = (
+                None if item.get("schema_version") is None else int(item["schema_version"])
+            )
         except (TypeError, ValueError):
-            item_schema = 0
-        if (
-            not isinstance(item, Mapping)
-            or item_schema != 2
-            or item.get("body_pos_point") != "link_origin"
-            or item.get("body_lin_vel_point") != "center_of_mass"
-            or item.get("exact") is not True
-            or list(item.get("body_names") or []) != expected_body_order
+            raise ValueError(
+                f"schema-3 motion kinematics clip {index} has invalid schema_version"
+            )
+        if item_schema not in (None, 1, 2):
+            raise ValueError(
+                f"schema-3 motion kinematics clip {index} has unsupported schema_version "
+                f"{item_schema!r}"
+            )
+        pos_point = item.get("body_pos_point")
+        vel_point = item.get("body_lin_vel_point")
+        if pos_point not in (None, "link_origin") or vel_point not in (
+            None,
+            "link_origin",
+            "center_of_mass",
         ):
             raise ValueError(
-                f"schema-3 motion kinematics clip {index} lacks exact schema-2 body order"
+                f"schema-3 motion kinematics clip {index} has invalid point semantics"
             )
+        raw_body_names = item.get("body_names")
+        if raw_body_names is not None:
+            if not isinstance(raw_body_names, (list, tuple)):
+                raise ValueError(
+                    f"schema-3 motion kinematics clip {index} body_names must be an array or null"
+                )
+            item_body_names = [str(value) for value in raw_body_names]
+            if (
+                not item_body_names
+                or any(not value for value in item_body_names)
+                or len(set(item_body_names)) != len(item_body_names)
+                or item_body_names != expected_body_order
+            ):
+                raise ValueError(
+                    f"schema-3 motion kinematics clip {index} body_names do not match the "
+                    "runtime articulation"
+                )
+        status = item.get("status")
+        if (not clip_exact) and (not isinstance(status, str) or not status.strip()):
+            raise ValueError(
+                f"schema-3 motion kinematics clip {index} status must be non-empty"
+            )
+        if status is not None and (not isinstance(status, str) or not status.strip()):
+            raise ValueError(
+                f"schema-3 motion kinematics clip {index} status must be non-empty when present"
+            )
+        if clip_exact and (
+            item_schema != 2
+            or pos_point != "link_origin"
+            or vel_point != "center_of_mass"
+            or raw_body_names is None
+        ):
+            raise ValueError(
+                f"schema-3 motion kinematics clip {index} claims exact without an exact "
+                "schema-2 body order"
+            )
+        if not clip_exact and item_schema == 2:
+            raise ValueError(
+                f"schema-3 motion kinematics clip {index} is schema-2 but marked inexact"
+            )
+    motion_exact = contract["motion_kinematics_exact"]
+    if not isinstance(motion_exact, bool) or motion_exact != all(clip_exact_flags):
+        raise ValueError(
+            "schema-3 motion_kinematics_exact disagrees with the per-clip contracts"
+        )
+
+
+def validate_schema3_contract(contract: Mapping) -> None:
+    """Validate the formal-exact subset of the schema-3 execution contract."""
+
+    validate_schema3_contract_structure(contract)
     if contract["motion_kinematics_exact"] is not True:
         raise ValueError("schema-3 formal lineage requires motion_kinematics_exact=true")
+
+
+def checkpoint_claims_contract(checkpoint: Mapping) -> bool:
+    """Return whether checkpoint infos claim any adjacent training-contract binding."""
+
+    infos = checkpoint.get("infos") if isinstance(checkpoint, Mapping) else None
+    return isinstance(infos, Mapping) and any(
+        key in infos
+        for key in (
+            CHECKPOINT_CONTRACT_SCHEMA_KEY,
+            CHECKPOINT_CONTRACT_SHA_KEY,
+            CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY,
+        )
+    )
 
 
 def checkpoint_contract_binding(checkpoint: Mapping) -> tuple[int | None, str | None]:

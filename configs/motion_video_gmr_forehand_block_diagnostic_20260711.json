@@ -1,0 +1,230 @@
+{
+  "schema_version": 1,
+  "status": "complete_diagnostic_failure",
+  "asset_id": "franco_forehand_block",
+  "scope": "read-only kinematic and MuJoCo collision diagnostic of the accepted diagnostic_video_betas GMR queue output; not a schema-2, training, formal-safety, or real-robot acceptance",
+  "verdict": "fail_ground_before_schema2",
+  "formal_eligible": false,
+  "lineage": {
+    "source_gvhmr": {
+      "path": "/workspace/franco/motion_work/GVHMR/outputs/demo/forehand_dang/hmr4d_results.pt",
+      "sha256": "8c8a971d9c02cbf16023c3aaa2d016648907e6df86463136fb430525c214ecb4"
+    },
+    "accepted_gmr_queue_output": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_queue_outputs/franco_forehand_block.diagnostic_video_betas.pkl",
+      "sha256": "0e7e674ecba2459b4db6d2c49fb8498a35db2fe8291782eadb7214933be39be5",
+      "binding_path": "/workspace/codexschema/motion_video_intake_20260711/gmr_queue_state/bindings/franco_forehand_block.json",
+      "binding_sha256": "f2176247b9ef68628e2040e311c46dbffb92ab453f177bef40f4eafc6501edd6",
+      "audit_path": "/workspace/codexschema/motion_video_intake_20260711/gmr_queue_state/audits/franco_forehand_block.json",
+      "audit_sha256": "6fc5b40195a30364ab53233a2ff2989cceb69159463abd6f2ac14d405b75afd7",
+      "run_log_path": "/workspace/codexschema/motion_video_intake_20260711/gmr_queue_state/logs/franco_forehand_block.log",
+      "run_log_sha256": "4698666f4e3b892645638a9e6d8ea025e38a63b64939347cf9ae09cd9112d47b"
+    },
+    "gmr": {
+      "commit": "aabea2eee4be4bc16d4be17dac5ffa85e5a31539",
+      "body_shape_contract": "diagnostic_video_betas",
+      "retarget_mjcf_path": "/workspace/franco/motion_work/GMR/assets/agibot_a3/a3_mocap.xml",
+      "retarget_mjcf_sha256": "242235f5a0ef0b2b134cdf4c2514b39c04f8d70dc8cac6ca8781c6b7d40b68ca"
+    },
+    "canonical_mjcf": {
+      "path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+      "sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+    },
+    "urdf_limit_contract": {
+      "path": "agi/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf",
+      "sha256": "0d83529cf808e2e68036f8168bd8b7a1c9a97d9c536eb9a14981ea4105d6b9ae"
+    }
+  },
+  "joint_order_contract": {
+    "status": "exact_match",
+    "count": 31,
+    "tracked_path": "hope_training/config/joint_order_agibot_a3.yaml",
+    "tracked_sha256": "7748a134f362ce2ad6a3afe30234a7590133244dcabbaa5d990cda9776acb205",
+    "verified_sources": [
+      "GMR retarget MJCF hinge order",
+      "accepted GMR dof_pos column order",
+      "canonical MJCF hinge order after pelvis_free_joint"
+    ],
+    "names": [
+      "waist_yaw_joint",
+      "waist_roll_joint",
+      "waist_pitch_joint",
+      "head_yaw_joint",
+      "head_pitch_joint",
+      "left_shoulder_pitch_joint",
+      "left_shoulder_roll_joint",
+      "left_shoulder_yaw_joint",
+      "left_elbow_joint",
+      "left_wrist_roll_joint",
+      "left_wrist_pitch_joint",
+      "left_wrist_yaw_joint",
+      "right_shoulder_pitch_joint",
+      "right_shoulder_roll_joint",
+      "right_shoulder_yaw_joint",
+      "right_elbow_joint",
+      "right_wrist_roll_joint",
+      "right_wrist_pitch_joint",
+      "right_wrist_yaw_joint",
+      "left_hip_pitch_joint",
+      "left_hip_roll_joint",
+      "left_hip_yaw_joint",
+      "left_knee_joint",
+      "left_ankle_pitch_joint",
+      "left_ankle_roll_joint",
+      "right_hip_pitch_joint",
+      "right_hip_roll_joint",
+      "right_hip_yaw_joint",
+      "right_knee_joint",
+      "right_ankle_pitch_joint",
+      "right_ankle_roll_joint"
+    ]
+  },
+  "structural_audit": {
+    "status": "pass",
+    "frames": 65,
+    "dof": 31,
+    "fps": 30.0,
+    "shapes": {
+      "root_pos": [65, 3],
+      "root_rot": [65, 4],
+      "dof_pos": [65, 31]
+    },
+    "finite": true,
+    "finite_elements": 2471,
+    "root_rotation_convention": "xyzw",
+    "root_rotation_max_norm_error": 9.992007221626409e-16,
+    "warmup": {
+      "rounds": 22,
+      "final_max_dq_rad": 7.81e-05,
+      "threshold_strict_lt_rad": 0.0001,
+      "status": "pass"
+    }
+  },
+  "kinematic_audit": {
+    "calculation_contract": {
+      "numeric_dtype": "float64 after loading the accepted pickle",
+      "velocity": "first finite difference times 30 Hz",
+      "acceleration": "second finite difference times 30 Hz squared",
+      "root_rotation_endpoint": "sign-invariant shortest quaternion angle",
+      "position_and_velocity_limits": "exact named-joint limits parsed from the bound URDF"
+    },
+    "position_limits": {
+      "status": "pass",
+      "violation_elements": 0,
+      "minimum_signed_margin": {
+        "exact_recomputed_rad": 0.040620150344593875,
+        "approximate_prior_summary_rad": 0.0406203,
+        "approximate_prior_summary_precision": "approximate; retained for traceability rather than presented as the exact recomputation",
+        "frame": 26,
+        "joint_index": 30,
+        "joint": "right_ankle_roll_joint",
+        "position_rad": 0.308445700054272,
+        "lower_rad": -0.3490658503988659,
+        "upper_rad": 0.3490658503988659
+      }
+    },
+    "velocity_limits": {
+      "status": "pass",
+      "violation_elements": 0,
+      "maximum": {
+        "exact_rad_per_s": 8.451850092996589,
+        "display_approx_rad_per_s": 8.45185,
+        "interval_start_frame": 33,
+        "joint_index": 15,
+        "joint": "right_elbow_joint",
+        "urdf_limit_exact_rad_per_s": 15.707963267948966,
+        "urdf_limit_display_approx_rad_per_s": 15.70796,
+        "exact_limit_ratio": 0.5380614882288409,
+        "display_approx_limit_ratio": 0.5381
+      }
+    },
+    "acceleration": {
+      "status": "diagnostic_only",
+      "maximum_exact_rad_per_s2": 89.77406718270811,
+      "maximum_display_approx_rad_per_s2": 89.7741,
+      "interval_start_frame": 34,
+      "joint_index": 15,
+      "joint": "right_elbow_joint",
+      "limit_contract_available": false,
+      "reason": "the bound URDF supplies no acceleration limit"
+    },
+    "endpoint": {
+      "joint_delta_l2_exact_rad": 0.20065486314813177,
+      "joint_delta_l2_display_approx_rad": 0.20065,
+      "joint_delta_linf_exact_rad": 0.10424665744990902,
+      "joint_delta_linf_display_approx_rad": 0.10425,
+      "root_translation_delta_exact_m": 0.015180033109300684,
+      "root_translation_delta_display_approx_cm": 1.518,
+      "root_rotation_delta_exact_rad": 0.025219598211511127,
+      "root_rotation_delta_display_approx_rad": 0.02522,
+      "final_interval_max_joint_velocity_exact_rad_per_s": 0.2345191853811146,
+      "final_interval_max_joint_velocity_display_approx_rad_per_s": 0.23452,
+      "final_interval_max_joint_velocity_joint": "left_shoulder_yaw_joint",
+      "strict_static_ready": false
+    }
+  },
+  "mujoco_collision_audit": {
+    "engine": "MuJoCo mj_forward contact generation",
+    "canonical_mjcf_sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97",
+    "self_collision": {
+      "sampled_poses": 641,
+      "sampling": {
+        "source_frames": 65,
+        "subdivisions_per_adjacent_frame_interval": 10,
+        "joint_and_root_translation_interpolation": "linear",
+        "root_quaternion_interpolation": "shortest-arc slerp"
+      },
+      "robot_self_contact_poses": 0,
+      "robot_self_contact_events": 0,
+      "status": "finite_sample_pass_only",
+      "continuous_collision_proven": false
+    },
+    "scene_coverage": {
+      "table_present": false,
+      "net_present": false,
+      "table_net_clearance_evaluated": false,
+      "limitation": "the canonical MJCF used by this diagnostic contains neither table nor net"
+    },
+    "floor_penetration": {
+      "status": "fail",
+      "frames_with_penetration": 65,
+      "total_frames": 65,
+      "contact_distance_semantics": "negative MuJoCo contact.dist against the floor plane means penetration",
+      "per_frame_deepest_exact_range_m": {
+        "minimum": -0.08414975109946404,
+        "maximum": -0.07727632254752706
+      },
+      "per_frame_deepest_approximate_summary_range_m": [-0.08415, -0.0773],
+      "per_frame_deepest_exact_median_m": -0.0815178074817058,
+      "per_frame_deepest_approximate_summary_median_m": -0.0815,
+      "deepest_by_body": {
+        "left_ankle_roll_Link": {
+          "exact_m": -0.08414975109946404,
+          "display_approx_m": -0.08415
+        },
+        "right_ankle_roll_Link": {
+          "exact_m": -0.07570393266921124,
+          "display_approx_m": -0.07570
+        },
+        "left_lower_leg": {
+          "canonical_body_name": "left_knee_Link",
+          "exact_m": -0.027288578830696436,
+          "display_approx_m": -0.02729
+        },
+        "right_lower_leg": {
+          "canonical_body_name": "right_knee_Link",
+          "exact_m": -0.021451210352231714,
+          "display_approx_m": -0.02145
+        }
+      }
+    }
+  },
+  "decision": {
+    "verdict": "fail_ground_before_schema2",
+    "blocking_observation": "all 65 source frames penetrate the canonical floor by roughly 7.7 to 8.4 cm at the deepest collision geom",
+    "required_next_step": "perform a single-file content-addressed root-z/ground calibration, then rerun structural, joint, velocity, acceleration, endpoint, continuous collision, table/net clearance, and strike-feasibility gates",
+    "schema2_conversion_allowed_now": false,
+    "training_asset_allowed_now": false,
+    "real_robot_execution_allowed": false
+  }
+}

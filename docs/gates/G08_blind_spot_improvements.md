@@ -261,10 +261,22 @@ Done:
 - TTRL/PACE code locally available via `scripts/sync_external_repos.sh`;
   `HOPE-TableTennis-AgibotA3-v0` provides the candidate Isaac scene for ball/serve experiments;
   `ball-physics-realistic` branch holds spin-aware ball physics.
+- A first P2.1/P2.4 mini-spec now covers private Franco/v6/v7 motion intake,
+  native-vs-TOPP timing, two-vs-four action selection and arbitrary-time
+  strike/absorb/recover/ready transitions; see the 2026-07-11 section below.
 
 Not done:
 
-- No Phase 2 track has a written mini-spec yet.
+- The new P2.1/P2.4 mini-spec is not simulator-accepted yet. All ten videos
+  passed structural GVHMR reconstruction and CPU GMR retargeting, but the GMR
+  outputs deliberately retain per-video body betas and remain diagnostic.
+  The first canonical-MuJoCo replay found no sampled robot self-contact but
+  found `7.7--8.4 cm` floor penetration across every frame, so ground/root
+  calibration and all downstream robot-clearance, dynamics, contact and
+  returnability gates are still open. A single-file, SHA-bound, no-clobber
+  collision-geometry grounding tool is implemented and tested against the
+  real canonical MJCF, but no tracked candidate has yet passed its output
+  report or the required inter-frame re-audit.
 - The audit-derived items 1-4 are not yet scheduled; item 2 must land before/with the mocap
   bridge.
 
@@ -277,8 +289,8 @@ Not done:
 
 ## Next Steps
 
-1. Write the P2.1 mini-spec first (multi-swing episodes + initial-state-distribution variant) —
-   highest evidence, smallest change.
+1. Implement the P2.1 mini-spec's fail-loud preprocessing and ready-set
+   measurement gates before launching recovery RL.
 2. Schedule audit item 2 (frame-transform design) into the G07 mocap-bridge work.
 3. Start the P2.5 prerequisite chain: patterned ball + relay orientation forwarding + serve-corpus
    recording, and evaluate the `ball-physics-realistic` branch for merging.
@@ -325,3 +337,28 @@ explicit confidence/history input; and separation of R8's envelope penalty
 from its RSI stand-height change.  These are paired ablations, not requests to
 complete every historical report cell.  The schema-v3 canary and
 `noise_scale=0` shortlist come first.
+
+## Motion library, TOPP and arbitrary-time recovery mini-spec (2026-07-11)
+
+The scoped mini-spec is
+[motion_library_topp_recovery_2026-07-11.md](../research/motion_library_topp_recovery_2026-07-11.md).
+It records the exact ten-video intake, the high-risk self-collision regions,
+air-swing strike-phase limitation, native/TOPP paired contract, fair two-vs-
+four experiment, stable per-question selector and event-driven recovery
+state machine. It also distinguishes three backhand-loop recordings as one
+candidate group and keeps Franco/v6/v7 as separate ready-pose families until
+measured transition gates pass.
+
+The execution order is deliberately front-loaded with cheap falsification:
+content audit -> GVHMR/GMR/schema-2 -> L0/self-collision/table-net clearance ->
+returnability phase scan -> TOPP and repeat gates -> dynamic clip catalog ->
+paired training -> T0/T1 recovery. The memory-gated Pod1 GVHMR queue completed
+10/10 structural reconstructions with full bindings tracked in
+`configs/motion_video_gvhmr_results_20260711.json`. A separate CPU-only,
+bundle-bound GMR queue then completed 10/10 finite 30 Hz, 31-DoF diagnostic
+retargets; `configs/motion_video_gmr_results_20260711.json` records all
+input/output/log/audit hashes and keeps `formal_eligible=false`. The pilot's
+sampled zero-self-contact result is not promotion evidence because the root is
+still about 8 cm below the floor and table/net geometry was absent. No
+grounded schema-2 clip, four-action actor, recovery policy or hardware
+candidate exists yet. The mini-spec does not authorize real-robot testing.

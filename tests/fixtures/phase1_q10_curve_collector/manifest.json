@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "purpose": "dependency-light collector fixture; clean q10 direction screen only",
+  "queue": "causal",
+  "pod": "fixture",
+  "screen_policy": {
+    "seed": 0,
+    "noise_scales": "0.0",
+    "schedule_k": 20,
+    "attempts_per_side": 10,
+    "screen_only": true,
+    "stop_or_promote_allowed": false,
+    "decision_followup": "same immutable schedule with at least 50 attempts per side"
+  },
+  "judge_script_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "training_checkout": "/pod/training",
+  "expected_training_commit": "2222222222222222222222222222222222222222222222222222222222222222",
+  "jobs": [
+    {
+      "id": "fixture_old_seed2_19000_clean_q10",
+      "barrier_id": "causal_19000",
+      "run_dir": "/pod/runs/fixture_old_seed2",
+      "checkpoint": "/pod/runs/fixture_old_seed2/model_19000.pt",
+      "gpu": 0,
+      "seed": 0,
+      "noise_scales": "0.0",
+      "extra_args": [
+        "--schedule-k",
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
+      ],
+      "training_seed": 2,
+      "training_kind": "continuation",
+      "training_family": "fixture_family",
+      "face_command_pairing": "legacy_signed_vs_A",
+      "zero_joint_friction": false,
+      "evaluation_role": "causal_continuation_diagnostic",
+      "expected_evaluation_contract_exact": false,
+      "formal_target": false,
+      "screen_only": true
+    },
+    {
+      "id": "fixture_shared_seed2_19000_clean_q10",
+      "barrier_id": "causal_19000",
+      "run_dir": "/pod/runs/fixture_shared_seed2",
+      "checkpoint": "/pod/runs/fixture_shared_seed2/model_19000.pt",
+      "gpu": 1,
+      "seed": 0,
+      "noise_scales": "0.0",
+      "extra_args": [
+        "--schedule-k",
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
+      ],
+      "training_seed": 2,
+      "training_kind": "continuation",
+      "training_family": "fixture_family",
+      "face_command_pairing": "shared_plus_y",
+      "zero_joint_friction": false,
+      "evaluation_role": "causal_continuation_diagnostic",
+      "expected_evaluation_contract_exact": false,
+      "formal_target": false,
+      "screen_only": true
+    }
+  ]
+}

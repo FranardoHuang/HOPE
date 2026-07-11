@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "status": "complete_causal_inexact_same_paper_isaac_pair",
+  "scope": "Isaac companion on the exact same immutable K=100 question schedule as the completed M3 terminal MuJoCo pair; diagnostic only",
+  "training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+  "eval_commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+  "semantics": {
+    "causal": true,
+    "evaluation_contract_exact": false,
+    "formal_target": false,
+    "deploy_gate": false
+  },
+  "accepted_execution": {
+    "control_root": "/workspace/codexschema/phase1_fresh_20260711/control/M3_terminal_q50_isaac_v4",
+    "result_root": "/workspace/codexschema/phase1_fresh_20260711/q50/M3_terminal_old_vs_S1_isaac_v4",
+    "runner": {
+      "path": "scripts/run_phase1_paired_isaac_q50.py",
+      "sha256": "f5d0dce4a5f650981838779dfa472c881d63c28341437167e0eca9217f57e04e"
+    },
+    "config": {
+      "path": "configs/phase1_M3_terminal_q50_isaac_companion_20260711.json",
+      "sha256": "314646961cb94b0422fe1400582cd5b2712d50f38eedb9b1699e7f95e020f398"
+    },
+    "runtime_contract": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/control/M3_terminal_q50_isaac_v4/runtime_contract.prepared.json",
+      "sha256": "24282c314193b3efc67fd2740d3b54e3ba75a704cd868fa21ef5d1f1575ece7b"
+    },
+    "paired_result": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/q50/M3_terminal_old_vs_S1_isaac_v4/isaac_paired_result.json",
+      "sha256": "97195c2187f685657259ab7287cfa6bcded58d532d5e8703e53bb4c384e85281"
+    }
+  },
+  "immutable_schedule": {
+    "path": "/workspace/codexschema/phase1_fresh_20260711/q50/M3_terminal_old_vs_S1_v2/shared_clean_k100.schedule.json",
+    "file_sha256": "69f73458d30afcf282473696116d9f149a4e476a426d329500633a9f6d5a7f25",
+    "semantic_sha256": "949eb1969f7d2c30a5f170382048232e62beeef10c1f6a76c2a00b159f6a8fc0",
+    "attempts": 100,
+    "attempts_per_side": 50,
+    "seed": 0,
+    "noise_scale": 0.0,
+    "same_question_id_order_for_both_isaac_arms_and_mujoco": true,
+    "censored_attempts": 0
+  },
+  "mujoco_binding": {
+    "paired_result_path": "/workspace/codexschema/phase1_fresh_20260711/q50/M3_terminal_old_vs_S1_v2/paired_result.json",
+    "paired_result_sha256": "e9bb07d3a88be4e61bc289980fc909c8e641785bee56bcc75d0e5081f250f56e",
+    "M3_old_return": {
+      "forehand": 0.62,
+      "backhand": 0.22,
+      "aggregate": 0.42,
+      "physical_falls": 9
+    },
+    "M3_S1_return": {
+      "forehand": 1.0,
+      "backhand": 1.0,
+      "aggregate": 1.0,
+      "physical_falls": 0
+    },
+    "aggregate_delta_s1_minus_old": 0.58
+  },
+  "isaac_arms": {
+    "M3_old": {
+      "checkpoint_sha256": "320b77c9314d22683601bb8bd388c45a6e7b80df838924dd901c4710c94c417a",
+      "training_contract_sha256": "7542c59b5d712c8f2e7c5a98e566f07ccafcac2e9e498e8f99056cccdc8d941b",
+      "scorecard_training_contract_sha256": null,
+      "scorecard": {
+        "path": "/workspace/codexschema/phase1_fresh_20260711/q50/M3_terminal_old_vs_S1_isaac_v4/M3_old/isaac_clean_k100.json",
+        "sha256": "3fcb6ec8a2d8303dcd1eeecedb0d3ffef6c0d66dfcf10c9d6fc5fcee4f5a3ae6"
+      },
+      "attempt_ledger": {
+        "path": "/workspace/codexschema/phase1_fresh_20260711/q50/M3_terminal_old_vs_S1_isaac_v4/M3_old/isaac_clean_k100.csv",
+        "sha256": "bab0dd4065c8d97ff6bf70ead67a9cc203f60e201929f433d5c637567d3bacff"
+      },
+      "runner_log_sha256": "800019137f7057b6e0169cc38aa7b8f0e58b1613873a6b835e884dccc544e8ae",
+      "state_sha256": "22e72e6eb8446b781d6f90744269e3229ff5c49f042363ffd9c47585b4a26389",
+      "summary": {
+        "forehand_return": 0.98,
+        "backhand_return": 1.0,
+        "aggregate_return": 0.99,
+        "exact_reach": 0.99,
+        "hits": 99,
+        "guard_resets": 1,
+        "physical_falls": 0
+      }
+    },
+    "M3_S1": {
+      "checkpoint_sha256": "a924048810aebda864bbf1f7b156ef4c4aa2c60ec4d65da6ae8977833deaa21e",
+      "training_contract_sha256": "d3ff715e3f7ed38ceadbdead4d41726dd72ef624523cbd86b33da703e929d9ce",
+      "scorecard_training_contract_sha256": null,
+      "scorecard": {
+        "path": "/workspace/codexschema/phase1_fresh_20260711/q50/M3_terminal_old_vs_S1_isaac_v4/M3_S1/isaac_clean_k100.json",
+        "sha256": "c352551a6d86074f0ba74dd43166313a104c07369f8d25684db1623b42763f52"
+      },
+      "attempt_ledger": {
+        "path": "/workspace/codexschema/phase1_fresh_20260711/q50/M3_terminal_old_vs_S1_isaac_v4/M3_S1/isaac_clean_k100.csv",
+        "sha256": "0bf608efa75d15f0c63e2fffafa9c149730311dc6ae361cf51105b69a9454c33"
+      },
+      "runner_log_sha256": "e5dfccca3a94ac0c79c0cd4d055856b941910f02f80f5b60b6978dedbd7b87c5",
+      "state_sha256": "50e560056410ebc4aa4e2460a1876c7d095d50ce42d0e7e7ac66a7c66d3f40a7",
+      "summary": {
+        "forehand_return": 0.98,
+        "backhand_return": 1.0,
+        "aggregate_return": 0.99,
+        "exact_reach": 0.99,
+        "hits": 99,
+        "guard_resets": 1,
+        "physical_falls": 0
+      }
+    }
+  },
+  "paired_delta_s1_minus_old": {
+    "forehand_return": 0.0,
+    "backhand_return": 0.0,
+    "aggregate_return": 0.0,
+    "physical_falls": 0
+  },
+  "cross_engine_judgment": {
+    "status": "disagrees_no_cross_engine_selection_gate",
+    "observation": "MuJoCo separates M3-S1 from M3-old by +0.58 aggregate return, while Isaac saturates both at 0.99 on the same 100 question order.",
+    "inference": "The MuJoCo result can select S1 only inside that causal evaluator/family; the paired Isaac result does not reproduce the ranking and therefore does not close a cross-engine gate.",
+    "formal_or_deployment_promotion": false,
+    "next_gate": "localize the legacy inexact Isaac/MuJoCo plant/termination/ready-state discrepancy; formal model selection remains the fresh SZ exact paper"
+  },
+  "preserved_fail_closed_attempts": [
+    {
+      "version": "v1",
+      "runner_sha256": "a7245d2df3dc2f1ee64e996686d7edadddc71d0b46b276391cd498d1ef1ba86d",
+      "config_sha256": "17e995595038cbde342309f3397194a5681db6d8f882090cf956f11740f126b4",
+      "jobs_started": 0,
+      "failure": "validator incorrectly depended on canonical JSON object key order"
+    },
+    {
+      "version": "v2",
+      "runner_sha256": "ee5cca8a0556cbfe04bc5b661b9d43533f614a16dd7a7bd1f10dde6c6655af5a",
+      "config_sha256": "9a26b6de775c8fb9992ba8f3d9fed1a8c18c6f003543c728f5640c4e57a21c50",
+      "runtime_contract_sha256": "eb4dada3e0443ba7426dffef2aa47d040fb4472d63f137c2483168f9548603df",
+      "jobs_started": 1,
+      "accepted_results": 0,
+      "failure": "child PYTHONPATH did not apply the source-first setup environment; traceback was rejected despite evaluator rc=0"
+    },
+    {
+      "version": "v3",
+      "runner_sha256": "f11251c8fbda6785838f3dfe649bbabbb28b676421aeac3435ca1249909babe6",
+      "config_sha256": "4fc597dcfce7d5c5c42f8b890c5e0cd817e47813fa345cdf6634871010ab12d1",
+      "runtime_contract_sha256": "78f6b11d90b42195fed49f1019d367f023cb9f7771bc989b7c1e4d00bcd9e6e7",
+      "jobs_started": 1,
+      "accepted_results": 0,
+      "preserved_valid_scorecard_sha256": "3fcb6ec8a2d8303dcd1eeecedb0d3ffef6c0d66dfcf10c9d6fc5fcee4f5a3ae6",
+      "failure": "wrapper incorrectly required a non-null exact contract SHA inside an explicitly causal/inexact scorecard"
+    }
+  ]
+}

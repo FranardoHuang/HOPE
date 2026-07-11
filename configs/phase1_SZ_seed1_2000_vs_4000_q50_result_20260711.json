@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "status": "complete_fresh_exact_checkpoint_selection_screen",
+  "scope": "Fresh formal-target SZ seed1 model_2000 versus model_4000 on one immutable clean K=100 MuJoCo paper; checkpoint selection only, not an arm stop, arm promotion, continuity, calibrated-plant, deployment, or real-robot gate",
+  "training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+  "eval_commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+  "source_trigger": {
+    "kind": "same_run_q10_peak_to_later_regression",
+    "model_2000_aggregate_q10": 0.9,
+    "model_4000_aggregate_q10": 0.5,
+    "q10_used_for_decision": false,
+    "preregistration": {
+      "path": "configs/phase1_SZ_seed1_2000_vs_4000_q50_prereg_20260711.json",
+      "sha256": "d0f39562069133923e34b431640578abe5f45b49c80a029addca30a10b45029f"
+    }
+  },
+  "accepted_execution": {
+    "control_root": "/workspace/codexschema/phase1_fresh_20260711/control/SZ_seed1_2000_vs_4000_q50_v1",
+    "state_root": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_exact_v1",
+    "runner": {
+      "path": "scripts/run_phase1_fresh_exact_paired_bank_q50.py",
+      "sha256": "3528250777a170791f39d8dd17716c2a7f8ca91416a3ffa8433ec5eb691ed9e0"
+    },
+    "shared_runner": {
+      "path": "scripts/run_phase1_paired_bank_q50.py",
+      "sha256": "095e476fd36fb68d500cb39ea7f71f6fee9b729209187d51599582c72c22198b"
+    },
+    "config": {
+      "path": "configs/phase1_SZ_seed1_2000_vs_4000_q50_execution_20260711.json",
+      "sha256": "8d9f044aae15f8fe6b4ea663f3b82ad93cd54aabf58139911ac4a53448462fdb"
+    },
+    "runtime_contract": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_exact_v1/runtime_contract.prepared.json",
+      "sha256": "a756023d5b2d57a51c473e5e79f21ec902668f343b6b60cd78636120d9534661"
+    },
+    "paired_result": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_exact_v1/paired_result.json",
+      "sha256": "b95ba6c4657e4b542ea3c5f08d02941c830ea48d71b56bb1a247ef7a46730478"
+    },
+    "completed_utc": "2026-07-11T13:18:39Z"
+  },
+  "immutable_schedule": {
+    "path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_exact_v1/shared_clean_k100.schedule.json",
+    "file_sha256": "66e89986a2b726d529179fcb4c745625ebed0380d59664caceefc55e86071cb3",
+    "semantic_sha256": "7dc6af822fb4130b8c324843f179d77f882d1326306bb19802b00f94447dff3e",
+    "schedule_k": 100,
+    "attempts_per_side": 50,
+    "seed": 0,
+    "noise_scale": 0.0,
+    "hold_range": [0, 100],
+    "one_question_reset": true,
+    "no_wrap": true,
+    "same_artifact_for_both_checkpoints": true,
+    "censored_attempts": 0
+  },
+  "shared_runtime": {
+    "evaluation_contract_exact": true,
+    "fresh_lineage": true,
+    "formal_target": true,
+    "training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+    "mjcf_sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97",
+    "execution_contract_sha256": "97d6cf94d6e9291df87adbfc150fdebe30f1046a2c596d8bdc395504ba6b8f20",
+    "ready_state_sha256": "3cbfe700abc54e0bde19f35c6245a14d09e6e68c74e9ba311bee8866a6837fc2",
+    "question_order_exact": true,
+    "attempts_uncensored": true
+  },
+  "arms": {
+    "model_2000": {
+      "checkpoint_iteration": 2000,
+      "checkpoint_sha256": "99e8265960244e5be19176dc5f2d3b8b99e088d5d76d34d0f2cd1e1dd0c3ae4c",
+      "returns": {
+        "forehand": "33/50",
+        "backhand": "50/50",
+        "aggregate": "83/100",
+        "forehand_rate": 0.66,
+        "backhand_rate": 1.0,
+        "aggregate_rate": 0.83
+      },
+      "hits": 87,
+      "physical_falls": 0,
+      "guard_resets": 100,
+      "state_sha256": "d8ddb95aa67b8aae068569c16fa0a6847dc350e2c178f8cf141b930c10ea0fd6",
+      "runner_log_sha256": "3c4b196a4ecde484f29e1d09caeaca25bfc6a1a2bc9467ae791e18c76f6bd662",
+      "judge_report_sha256": "1b751d0cc6b4c0c55a38ecbdfa3b44460e99f22e57ccb6475c4802cde2a715fc",
+      "exam_summary_sha256": "2ced3ca6fb241581b0dd1c07c97c88b9257a9dc7ea1794a20a04ef060c712681",
+      "attempt_ledger_sha256": "fa38932a79d8d4dbe495a53a19f8e847fd4079b0b0f32bc4d9c83d92e7d3d929"
+    },
+    "model_4000": {
+      "checkpoint_iteration": 4000,
+      "checkpoint_sha256": "1a8fcf3de81775fdd003a8bbdcfd371c05b7168353daf19a8290a6d7c85e9071",
+      "returns": {
+        "forehand": "0/50",
+        "backhand": "50/50",
+        "aggregate": "50/100",
+        "forehand_rate": 0.0,
+        "backhand_rate": 1.0,
+        "aggregate_rate": 0.5
+      },
+      "hits": 50,
+      "physical_falls": 0,
+      "guard_resets": 100,
+      "state_sha256": "4f4b8d0fa9ee1c79ec60ce490a5d88e01a780093c9836f8a31de319eff30d1eb",
+      "runner_log_sha256": "e661ac85bc33de6b060b253a02fc7af99ef0d7e6dd90943e39add1fac6797638",
+      "judge_report_sha256": "13c7f6e6637c4389b5810af2bf6cba7143d06c390382bdc712e44c7a03aa4059",
+      "exam_summary_sha256": "b8dd1d85e9c7650da3245653ddd1f54f446eb88f4d0e5f7870ead6ad6222bbe0",
+      "attempt_ledger_sha256": "8f5b7e992fb3fd6297a2a83d378ace761bbb791bba41df3fb8efe63872dd760b"
+    }
+  },
+  "paired_delta_model_4000_minus_model_2000": {
+    "forehand_return_rate": -0.66,
+    "backhand_return_rate": 0.0,
+    "aggregate_return_rate": -0.33,
+    "hits": -37,
+    "physical_falls": 0
+  },
+  "selection": {
+    "selected_checkpoint": "model_2000",
+    "selected_iteration": 2000,
+    "selected_checkpoint_sha256": "99e8265960244e5be19176dc5f2d3b8b99e088d5d76d34d0f2cd1e1dd0c3ae4c",
+    "reason": "On the preregistered shared 50-per-side paper, model_2000 leads model_4000 by 33 aggregate returns and preserves a 33/50 forehand return rate while model_4000 falls to 0/50 forehand.",
+    "whole_arm_action": "continue_unmodified",
+    "whole_arm_stop_allowed": false,
+    "whole_arm_promote_allowed": false,
+    "deploy_gate": false,
+    "real_robot_authorized": false
+  },
+  "limitations": {
+    "guard_reset_interpretation": "Every scheduled question finalized through the evaluator's non-physical post-strike tracking guard (guard_reset=true, physical_fall=false). One-question-reset makes this valid for isolated checkpoint selection but it is not evidence of recovery, continuous rallies, or deploy stability.",
+    "plant_interpretation": "This is exact for the currently frozen zero-friction SZ formal evaluator. It does not resolve the calibrated-friction deployment axis or the legacy non-zero plant unit mismatch.",
+    "next_evidence": "Keep the seed1 arm running and preserve later q10/q50 peaks; require paired Isaac/MuJoCo and calibrated-plant/continuous-event gates before any deployment claim."
+  }
+}

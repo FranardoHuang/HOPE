@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "preregistration_id": "phase1-M3-old-vs-S1-terminal-clean-q50",
+  "created_utc": "2026-07-11T11:22:33Z",
+  "status": "preregistered_not_started",
+  "auto_activate": false,
+  "jobs_started": 0,
+  "runtime_state": null,
+  "source_trigger": {
+    "q10_pair_path": "configs/phase1_M3_terminal_q10_pair_20260711.json",
+    "q10_pair_sha256": "f0eb23dd41cfaf5315d12133731ae5af06c94b8cd3ffc123ce2dce4062cf6ba1",
+    "trigger_kind": "same_milestone_matched_control_abs_delta",
+    "threshold_abs_rate": 0.2,
+    "observed_terminal_aggregate_abs_delta": 0.55,
+    "trigger_met": true
+  },
+  "family": "M3",
+  "comparison": "S1_shared_plus_y_pairing_minus_old_legacy_signed_vs_A_pairing",
+  "training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+  "eval_commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+  "eval_root": "/workspace/codexschema/nohope_eval_08e438e",
+  "judge_script_sha256": "1a00702935096b063435c3f0bd23e75f76f13e1298c87310d1cec3c26cca8529",
+  "paper": {
+    "role": "same-family paired causal q50 diagnostic",
+    "exam_bank": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/assets/legacy/swing/s1_swing_schema3_exam.npz",
+      "bytes": 66286,
+      "sha256": "750f1df4ebaf851b96495c53ebbd083c06275f254ce19862f2e84183ec45cb0e"
+    },
+    "seed": 0,
+    "noise_scales": [0.0],
+    "schedule_k": 100,
+    "attempts_per_side": 50,
+    "hold_ref": "auto",
+    "hold_steps_range": [0, 100],
+    "no_wrap": true,
+    "one_question_reset": true,
+    "same_immutable_schedule_required_for_both_arms": true,
+    "schedule_materialization": {
+      "status": "not_materialized",
+      "sha256": null,
+      "rule": "materialize one K=100 seed=0 schedule from the bound exam bank, freeze its SHA, and supply that single shared artifact to both arms before either result is interpreted",
+      "independent_per_arm_schedule_generation_allowed": false
+    },
+    "mjcf_sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97",
+    "allow_inexact_contract_required": true,
+    "expected_evaluation_contract_exact": false
+  },
+  "arms": {
+    "M3_old": {
+      "run_name": "phase1_M3_old_pairing",
+      "checkpoint_iteration": 20998,
+      "checkpoint_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-50_phase1_M3_old_pairing/model_20998.pt",
+      "checkpoint_sha256": "320b77c9314d22683601bb8bd388c45a6e7b80df838924dd901c4710c94c417a",
+      "training_contract_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-50-50_phase1_M3_old_pairing/params/training_contract.json",
+      "training_contract_sha256": "7542c59b5d712c8f2e7c5a98e566f07ccafcac2e9e498e8f99056cccdc8d941b",
+      "checkpoint_embedded_training_contract_sha256": "7542c59b5d712c8f2e7c5a98e566f07ccafcac2e9e498e8f99056cccdc8d941b",
+      "face_command_pairing": "legacy_signed_vs_A",
+      "lineage_exact": false,
+      "job_status": "not_started",
+      "pid": null,
+      "pgid": null,
+      "result": null
+    },
+    "M3_S1": {
+      "run_name": "phase1_M3_S1_pairing",
+      "checkpoint_iteration": 20998,
+      "checkpoint_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-51-29_phase1_M3_S1_pairing/model_20998.pt",
+      "checkpoint_sha256": "a924048810aebda864bbf1f7b156ef4c4aa2c60ec4d65da6ae8977833deaa21e",
+      "training_contract_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-51-29_phase1_M3_S1_pairing/params/training_contract.json",
+      "training_contract_sha256": "d3ff715e3f7ed38ceadbdead4d41726dd72ef624523cbd86b33da703e929d9ce",
+      "checkpoint_embedded_training_contract_sha256": "d3ff715e3f7ed38ceadbdead4d41726dd72ef624523cbd86b33da703e929d9ce",
+      "face_command_pairing": "shared_plus_y",
+      "lineage_exact": false,
+      "job_status": "not_started",
+      "pid": null,
+      "pgid": null,
+      "result": null
+    }
+  },
+  "preflight_requirements": [
+    "both terminal checkpoint bytes and SHA values still match this preregistration",
+    "each adjacent schema-3 hard contract still matches the checkpoint embedded SHA binding",
+    "the detached eval worktree is clean at eval_commit 46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+    "one shared K=100 immutable schedule is materialized and content-addressed before either arm starts",
+    "both jobs use seed 0, noise scale 0.0, 50 attempts per side, the same exam bank and the same schedule artifact",
+    "both results retain evaluation_contract_exact=false and causal/inexact labels"
+  ],
+  "diagnostic_semantics": {
+    "causal": true,
+    "evaluation_contract_exact": false,
+    "formal_target": false,
+    "deploy_gate": false,
+    "decision_scope": [
+      "estimate the causal effect of shared_plus_y S1 pairing versus legacy_signed_vs_A old pairing within the frozen M3 continuation family",
+      "select between already frozen M3 causal checkpoints if paired q50 evidence and the preregistered peak-selection rules support it"
+    ],
+    "prohibited_claims": [
+      "formal Phase-1 acceptance",
+      "fresh-lineage exactness",
+      "Isaac-to-MuJoCo formal parity",
+      "deployment readiness",
+      "real-robot safety or performance"
+    ]
+  },
+  "activation": {
+    "preregistered": true,
+    "authorized_to_start_by_this_file": false,
+    "started_at_creation": false,
+    "note": "This file freezes the paired q50 contract only. A separate controlled action must verify preflight, materialize the shared schedule and start the jobs."
+  }
+}

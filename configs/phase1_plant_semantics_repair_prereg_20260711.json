@@ -1,0 +1,282 @@
+{
+  "schema_version": 1,
+  "preregistration_id": "phase1-plant-semantics-repair-v1",
+  "created_date": "2026-07-11",
+  "status": "blocked_on_calibration_evidence",
+  "scope": {
+    "changes_current_phase1_training": false,
+    "changes_current_phase1_evaluation": false,
+    "permits_real_robot_commands": false,
+    "purpose": "define the evidence, adapter and paired experiment contract required before a semantics-correct calibrated-friction plant can become a fresh training and deployment candidate"
+  },
+  "repository_baseline": {
+    "git_commit": "8acfd3cc4aa7c666c16ce15502191ff7d19fc458",
+    "audited_sources": [
+      {
+        "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py",
+        "sha256": "885626271940ae75c9b6c05bce347168fcb7fdb0d8ea7b1be0c5144a18169053"
+      },
+      {
+        "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/utils/training_contract.py",
+        "sha256": "0078cdd9f8e8670652d24024056e3df51cb5929edc4088edf9ecdd001ef26ae2"
+      },
+      {
+        "path": "hope_training/whole_body_tracking/scripts/train.py",
+        "sha256": "9a4b01002b459d1efa08d130d2b48e3af1ac24ee2c30a66e9064fc4cde09ce5f"
+      },
+      {
+        "path": "hope_training/whole_body_tracking/scripts/mujoco_eval_onnx.py",
+        "sha256": "e4a9fa42ff0f7e68cebdf16f2e0c61299507496c6edc13546baeb3d576ecb20a"
+      },
+      {
+        "path": "hope_training/whole_body_tracking/scripts/judge.sh",
+        "sha256": "5cec764d80fed779e3b13a17d12dbac4465b6df5e10c5810fee9866b2e4eab60"
+      },
+      {
+        "path": "configs/phase1_scaleout_matrix_20260711.json",
+        "sha256": "acc9cbb6b1a944bd496120a0c73e9c6a3799b5a93a1ee3b1d85034d8a67d387a"
+      }
+    ]
+  },
+  "source_semantics": {
+    "physx": {
+      "runtime_family": "Isaac Lab 2.1.0 legacy PhysX articulation joint-friction API",
+      "parameter": "ImplicitActuatorCfg.friction / PxArticulationJointReducedCoordinate.setFrictionCoefficient",
+      "units": "dimensionless",
+      "law": "available resisting joint force or torque is bounded by a coefficient times an approximation of transmitted spatial force; the solver may hold the axis at rest when the available impulse is sufficient",
+      "load_dependence": "transmitted_spatial_force_dependent",
+      "primary_sources": [
+        "https://isaac-sim.github.io/IsaacLab/v2.1.0/_modules/isaaclab/actuators/actuator_cfg.html",
+        "https://nvidia-omniverse.github.io/PhysX/physx/5.3.1/_api_build/class_px_articulation_joint_reduced_coordinate.html"
+      ]
+    },
+    "mujoco": {
+      "runtime_family": "MuJoCo joint friction-loss constraint",
+      "parameter": "joint.frictionloss / mjModel.dof_frictionloss",
+      "units": "generalized_force; N*m for the A3 scalar hinge joints",
+      "law": "load-independent dry-friction constraint that bounds the absolute generalized friction force; joint damping is a separate velocity-linear passive force",
+      "load_dependence": "load_independent",
+      "primary_sources": [
+        "https://mujoco.readthedocs.io/en/latest/XMLreference.html#body-joint",
+        "https://mujoco.readthedocs.io/en/latest/computation.html#friction-loss"
+      ]
+    },
+    "mapping_rule": {
+      "kind": "no_direct_numeric_mapping",
+      "same_number_allowed": false,
+      "required_method": "fit engine-specific adapters to one content-addressed physical latent model and accept them only on the same preregistered generalized-resistance probe grid",
+      "zero_special_case": "all-zero friction is the only currently implemented cross-engine friction setting with identical semantics"
+    }
+  },
+  "current_phase1_cells": {
+    "SZ": {
+      "face_command_pairing": "shared_plus_y",
+      "plant": "all_zero_joint_friction",
+      "current_bankexam_exact_eligible": true,
+      "plant_semantics_calibrated": false,
+      "deployment_candidate": false
+    },
+    "SP": {
+      "face_command_pairing": "shared_plus_y",
+      "plant": "legacy_direct_number_physx_proxy",
+      "current_bankexam_exact_eligible": false,
+      "plant_semantics_calibrated": false,
+      "deployment_candidate": false
+    },
+    "LZ": {
+      "face_command_pairing": "legacy_signed_vs_A",
+      "plant": "all_zero_joint_friction",
+      "current_bankexam_exact_eligible": false,
+      "plant_semantics_calibrated": false,
+      "deployment_candidate": false
+    },
+    "LP": {
+      "face_command_pairing": "legacy_signed_vs_A",
+      "plant": "legacy_direct_number_physx_proxy",
+      "current_bankexam_exact_eligible": false,
+      "plant_semantics_calibrated": false,
+      "deployment_candidate": false
+    }
+  },
+  "legacy_frozen_probe": {
+    "date": "2026-07-07",
+    "role": "directional_deployment_blocker_not_calibration_data",
+    "raw_artifact_sha256": null,
+    "zero_plant_virtual_hit": 0.9997,
+    "nonzero_legacy_plant_virtual_hit": 0.63,
+    "zero_plant_fall": 0.27,
+    "nonzero_legacy_plant_fall": 0.87,
+    "interpretation_limit": "preserves evidence that plant transfer matters; it neither validates the legacy coefficients nor estimates a calibrated model"
+  },
+  "calibration_protocol": {
+    "joint_population": "all 31 A3 actuated hinge joints, with preregistered grouping allowed only after group residual equivalence is demonstrated",
+    "measurement_target": "generalized resisting torque in N*m after subtracting gravity, commanded actuation, inertia and validated viscous terms",
+    "required_axes": {
+      "directions": [
+        "negative",
+        "positive"
+      ],
+      "velocity_regimes": [
+        "breakaway_from_rest",
+        "low_speed_sliding",
+        "nominal_speed_sliding"
+      ],
+      "minimum_distinct_load_conditions": 3,
+      "minimum_repetitions_per_cell": 5
+    },
+    "required_sample_fields": [
+      "joint_name",
+      "timestamp",
+      "joint_position_rad",
+      "joint_velocity_rad_s",
+      "joint_acceleration_rad_s2",
+      "commanded_or_measured_joint_torque_Nm",
+      "estimated_transmitted_load_Nm",
+      "load_estimator_uncertainty_Nm",
+      "direction",
+      "temperature_C",
+      "controller_mode",
+      "firmware_version",
+      "payload_and_pose_id",
+      "source_session_id"
+    ],
+    "split_rule": "split by complete source session before fitting; no time-adjacent samples from one sweep may cross train and holdout",
+    "threshold_rule": "freeze numeric fit, repeatability and cross-engine tolerances in a content-addressed threshold contract after repeatability characterization and before fitting adapters",
+    "real_robot_rule": "this preregistration authorizes no hardware command; collection requires the existing G07 dry-run, command-scaling, safe-halt and operator approvals, or a separately content-addressed vendor/bench dataset"
+  },
+  "latent_model_selection": {
+    "candidate_families": [
+      "constant_breakaway_plus_coulomb_plus_viscous",
+      "load_affine_breakaway_plus_coulomb_plus_viscous",
+      "monotone_load_table_breakaway_plus_coulomb_plus_viscous"
+    ],
+    "constraints": [
+      "static breakaway magnitude is finite and non-negative",
+      "dynamic Coulomb magnitude is finite, non-negative and no greater than static breakaway magnitude on the supported grid",
+      "viscous coefficient is finite and non-negative",
+      "positive and negative directions are fitted explicitly rather than sign-averaged",
+      "predictions outside the calibrated load, speed, pose or temperature support are out-of-contract"
+    ],
+    "selection_rule": "choose the simplest family within the preregistered holdout-error tolerance; freeze its parameters, covariance, support envelope and source split before adapter tuning",
+    "shared_model_rule": "PhysX and MuJoCo adapters must reference the same selected latent-model SHA but may not share engine parameter bytes unless independently fitted values happen to agree"
+  },
+  "adapter_contract": {
+    "physx": {
+      "allowed_backends": [
+        "native_transmitted_force_coefficient",
+        "versioned_explicit_generalized_friction_adapter"
+      ],
+      "acceptance": "measured resisting torque on every preregistered probe cell must satisfy the frozen fit and repeatability tolerances"
+    },
+    "mujoco": {
+      "allowed_backends": [
+        "native_frictionloss_plus_damping",
+        "versioned_explicit_generalized_friction_adapter"
+      ],
+      "acceptance": "measured resisting torque on every preregistered probe cell must satisfy the frozen fit and repeatability tolerances"
+    },
+    "runtime_binding": [
+      "engine name and exact version",
+      "solver and integrator settings",
+      "physics step and policy decimation",
+      "A3 asset SHA and actuated joint order",
+      "latent-model SHA and support envelope",
+      "adapter source SHA and instantiated per-joint parameters",
+      "probe schedule SHA and complete result SHA"
+    ],
+    "cross_engine_acceptance": "both engines pass their physical-model holdout tolerance and their same-cell generalized-resistance difference passes the frozen cross-engine tolerance; parameter equality is neither required nor sufficient"
+  },
+  "minimum_training_axis": {
+    "axis_id": "fresh_shared_face_zero_vs_calibrated_plant_v1",
+    "fixed": {
+      "face_command_pairing": "shared_plus_y",
+      "motion_family": "one immutable schema-2 family",
+      "question_family": "one immutable schema-3 train/exam family",
+      "reward_and_timing_recipe": "identical",
+      "training_commit_and_engine": "identical within each paired seed block"
+    },
+    "training_factor": {
+      "name": "train_plant",
+      "levels": [
+        "Z_zero",
+        "C_calibrated"
+      ]
+    },
+    "evaluation_factors": {
+      "eval_plant_levels": [
+        "Z_zero",
+        "C_calibrated"
+      ],
+      "engine_levels": [
+        "isaac",
+        "mujoco"
+      ]
+    },
+    "paired_seed_blocks": [
+      1,
+      2
+    ],
+    "minimum_from_scratch_training_arms": 4,
+    "evaluations_per_milestone": 16,
+    "existing_SZ_reuse_rule": "an existing SZ checkpoint is not the matched control if SC needs a different code, asset, solver or non-plant hard-contract field; launch a contemporaneous from-scratch Z control instead",
+    "excluded_cells": [
+      "SP",
+      "LP"
+    ],
+    "primary_contrasts": [
+      "C_train_C_eval_minus_Z_train_C_eval within paired seed and engine",
+      "C_train_Z_eval_minus_C_train_C_eval plant-transfer penalty",
+      "Z_train_C_eval_minus_Z_train_Z_eval reproduction or resolution of the 2026-07-07 transfer failure",
+      "Isaac_minus_MuJoCo for each identical policy, eval plant, seed, checkpoint and question schedule"
+    ]
+  },
+  "checkpoint_decision_contract": {
+    "screen_schedule_k": 10,
+    "decision_schedule_k": 100,
+    "decision_quota_per_side": 50,
+    "screen_only": true,
+    "q10_may_stop_or_promote": false,
+    "retain_best_finite_checkpoint": true,
+    "same_immutable_schedule_across_train_plant_and_engine": true,
+    "terminal_checkpoint_required_for_selection": false
+  },
+  "claim_labels": {
+    "training_lineage_exact": "fresh checkpoint, motion, bank and instantiated training hard contract are content-addressed; this alone says nothing about physical calibration",
+    "evaluation_protocol_exact": "immutable paper, denominator, reset and execution protocol are replayed exactly",
+    "plant_adapter_replay_exact": "a versioned adapter and latent model are replayed byte-for-byte inside their declared support envelope",
+    "cross_engine_plant_equivalence_passed": "both engine adapters pass the same physical and pairwise probe tolerances",
+    "deployment_plant_calibrated": "the latent model is fitted to accepted A3 or approved bench evidence with held-out validation",
+    "deployment_candidate": "all preceding labels plus paired SC-vs-Z training/evaluation evidence and the independent G07 safety gates pass"
+  },
+  "required_before_ready": [
+    "measurement_protocol_sha256",
+    "raw_calibration_dataset_manifest_sha256",
+    "repeatability_report_sha256",
+    "session_split_sha256",
+    "numeric_threshold_contract_sha256",
+    "latent_model_selection_report_sha256",
+    "latent_model_sha256",
+    "physx_adapter_source_sha256",
+    "mujoco_adapter_source_sha256",
+    "physx_runtime_probe_report_sha256",
+    "mujoco_runtime_probe_report_sha256",
+    "cross_engine_equivalence_report_sha256",
+    "a3_asset_sha256",
+    "joint_order_sha256",
+    "engine_versions_and_solver_contract_sha256",
+    "fresh_axis_runtime_manifest_sha256"
+  ],
+  "evidence_bindings": {},
+  "fail_closed_conditions": [
+    "status cannot become ready while any required_before_ready binding is missing, null or not a lowercase SHA-256",
+    "SP or LP cannot be renamed, reused or scored as the calibrated C plant",
+    "a non-zero PhysX coefficient cannot be copied numerically into MuJoCo frictionloss and called exact",
+    "current zero-only BankExam exact mode cannot score a non-zero SC adapter as exact without a new versioned evaluator and plant contract",
+    "legacy or resumed checkpoints cannot acquire fresh SC lineage",
+    "adapter fitting cannot see held-out sessions or BankExam outcomes",
+    "q10 cannot stop, promote or choose a plant",
+    "Isaac-only or MuJoCo-only success cannot clear cross-engine or deployment claims",
+    "out-of-support load, speed, pose or temperature cells cannot be silently extrapolated",
+    "missing raw rows, censored attempts, NaN/Inf, contract SHA mismatch or mixed question schedules invalidate the complete cell"
+  ]
+}

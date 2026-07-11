@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "plan_id": "motion-video-diagnostic-canonical-betas-20260711-v1",
+  "status": "preregistered_not_executed",
+  "scope": "offline content-addressed normalization of the ten GVHMR body-shape estimates; no GMR rerun, height calibration, A3 acceptance, training, or real-robot work",
+  "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+  "aggregation": {
+    "method": "coordinatewise_median_of_per_video_coordinatewise_medians",
+    "reason": "first reduce within each video, then give every video one equal vote so the 35-98 frame clip-length spread cannot weight the body-shape estimate",
+    "performer_group_id": "franco_user_recordings_20260711",
+    "same_performer_asserted": true,
+    "same_performer_assertion_basis": "direct 2026-07-11 user statement that the three Franco/v6/v7 sets were just recorded by the user",
+    "identity_scope": "this ten-video intake only; not a biometric identity claim",
+    "expected_inputs": 10,
+    "expected_beta_components": 10,
+    "source_shape_policy": "accept only (10,), (1,10), or (frames,10), preserve each source shape, and repeat the canonical vector over every row because the current GMR loader consumes row zero",
+    "storage_policy": "all ten sources must share one tensor/array storage kind and one dtype; quantize the cohort median once to that dtype",
+    "changed_field_allowlist": [
+      "smpl_params_global.betas"
+    ],
+    "all_other_fields": "bit-exact semantic digest before and after torch save/reload"
+  },
+  "source_results_manifest": {
+    "path": "configs/motion_video_gvhmr_results_20260711.json",
+    "sha256": "0aaee40d689033518f24e9667478142398ae370f3bbde73e1638c0bfb321fd86",
+    "status_required": "complete",
+    "formal_eligible_required": false
+  },
+  "execution_contract": {
+    "cpu_only": true,
+    "CUDA_VISIBLE_DEVICES": "",
+    "python_executable": "/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10",
+    "python_version": "Python 3.10.20",
+    "pip_freeze_sha256": "56b0f8af9677b279bbb4925b6f49113f484dcb9ded1ed8d9bc56af71f304c694"
+  },
+  "gmr_loader_observation": {
+    "semantics": "load_gvhmr_pred_file reads smpl_params_global.betas[0], pads six zeros to the ten beta components, passes the resulting 16-vector to neutral SMPL-X, and derives actual_human_height as 1.66 + 0.1 * beta[0]",
+    "consequence": "every materialized row must equal the canonical vector; the derived height is an upstream heuristic and is not measured height or A3 calibration",
+    "bound_gmr_commit_from_completed_diagnostic_queue": "aabea2eee4be4bc16d4be17dac5ffa85e5a31539",
+    "bound_gmr_entrypoint_sha256_from_completed_diagnostic_queue": "a989edd8e0c9392d18bd0a439ed4f290f187a8f8daaaa049c992f79cb1d185da",
+    "exact_on_pod_loader_sha256": null,
+    "current_repo_queue_compatibility": "incompatible: scripts/run_motion_video_gmr_queue.py hard-codes diagnostic_video_betas in output names, bindings and audits, so pointing it at these materialized PTs would create a false lineage label",
+    "rerun_status": "blocked_until_the_clean_on_pod_loader_file_is_hashed_and_its_first-row_semantics_are_reverified_and_a_new_body-shape-aware_queue_contract_is_preregistered"
+  },
+  "measured_height_m": null,
+  "a3_calibrated": false,
+  "formal_eligible": false,
+  "formal_blockers": [
+    "no measured performer height is bound; GMR's beta-zero height heuristic is not a calibration",
+    "the same-performer assertion is an intake provenance statement, not biometric or multi-camera body-shape truth",
+    "the exact on-Pod GMR loader source SHA is not yet bound to this preregistration",
+    "the existing GMR queue hard-codes diagnostic_video_betas and cannot safely label canonical-betas reruns",
+    "canonical-betas GMR reruns and their warm-up/finite/grounding/collision audits have not run",
+    "mirror, rally yaw, grip rotation, strike phase, contact truth, table/net clearance, returnability and transition-to-ready are unverified",
+    "schema-2 conversion, TOPP, RL training and all real-robot gates have not run"
+  ],
+  "output_contract": {
+    "output_root": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1",
+    "output_root_must_not_exist": true,
+    "result_suffix": ".diagnostic_cohort_median_betas.pt",
+    "canonical_betas_filename": "canonical_betas.json",
+    "completion_manifest_filename": "materialization_manifest.json",
+    "no_clobber": true,
+    "completion_manifest_published_last": true
+  },
+  "inputs": [
+    {
+      "asset_id": "franco_forehand_block",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/forehand_dang/hmr4d_results.pt",
+      "result_sha256": "8c8a971d9c02cbf16023c3aaa2d016648907e6df86463136fb430525c214ecb4",
+      "result_bytes": 290264,
+      "frames": 65
+    },
+    {
+      "asset_id": "franco_backhand_block",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/backhand_dang/hmr4d_results.pt",
+      "result_sha256": "e8e6d2390b8c9512e418ea61b39de5df7cc175ac622230d83436debdeec8f1c6",
+      "result_bytes": 281112,
+      "frames": 63
+    },
+    {
+      "asset_id": "franco_forehand_loop",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/forehand_la/hmr4d_results.pt",
+      "result_sha256": "a5b69892d74e97782edf48ec812d050b77dc84b47a72128cd61960c02086147c",
+      "result_bytes": 311768,
+      "frames": 70
+    },
+    {
+      "asset_id": "franco_backhand_loop_a",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/backhand_la/hmr4d_results.pt",
+      "result_sha256": "186a5262723f06007b6f0a2aa8d4da08a04aea2ac50751820a051698a96c1a0c",
+      "result_bytes": 307672,
+      "frames": 69
+    },
+    {
+      "asset_id": "franco_backhand_loop_b",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/backhand_la2/hmr4d_results.pt",
+      "result_sha256": "8fd51458510f5b2cd0768e9d3cb3648aaf7ead2e752b1c02f160aa5f86ea0515",
+      "result_bytes": 403096,
+      "frames": 91
+    },
+    {
+      "asset_id": "franco_backhand_loop_c",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/backhand_la3/hmr4d_results.pt",
+      "result_sha256": "a049e79028fc8c840bfa29bc192e3fe1759e31520c37ed26606e9d139949586f",
+      "result_bytes": 433176,
+      "frames": 98
+    },
+    {
+      "asset_id": "v6_forehand_block",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/forehand_v6/hmr4d_results.pt",
+      "result_sha256": "49c1ab4e1efb8e3c8cf361fdfc0174a47ea082561b5acbd9e690f3fc40a9e836",
+      "result_bytes": 159448,
+      "frames": 35
+    },
+    {
+      "asset_id": "v6_backhand_block",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/backhand_v6/hmr4d_results.pt",
+      "result_sha256": "9cb1e5c8f2019ec7c61370afae6c015ce3485e1be77e75d9443b5a648b98997e",
+      "result_bytes": 159448,
+      "frames": 35
+    },
+    {
+      "asset_id": "v7_forehand_block",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/forehand_v7/hmr4d_results.pt",
+      "result_sha256": "7a1e12ee1bf9c55746af98da84619f5c1ef3dcc093f469663e8524fdd9c8da43",
+      "result_bytes": 286360,
+      "frames": 64
+    },
+    {
+      "asset_id": "v7_backhand_block",
+      "result_path": "/workspace/franco/motion_work/GVHMR/outputs/demo/backhand_v7/hmr4d_results.pt",
+      "result_sha256": "91a02da98e9d933e782d49b256c80024d1ead549084d64653b810c5cc4068062",
+      "result_bytes": 286360,
+      "frames": 64
+    }
+  ]
+}

@@ -42,34 +42,79 @@ Current known result:
 
 - 2026-06-26: selected planner math tests above, 16 passed.
 
-## Phase-1 Standalone Audit Specifications
+## Phase-1 BankExam Adapter And Audit Tests
 
-The following tests need neither Isaac nor MuJoCo.  They cover a read-only
-terminal-checkpoint inventory, saved-run termination-contract parsing and the
-NumPy specification of the Isaac virtual-return scorer:
+The following tests need neither a running Isaac instance nor MuJoCo. They
+cover the read-only terminal-checkpoint inventory, balanced shared schema-v3
+paper, evaluator-owned Isaac adapter, saved-run termination contract and the
+authoritative virtual-return scorer:
 
 ```bash
 python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_audit_runpod_terminal_runs.py \
+  hope_training/whole_body_tracking/tests/test_bank_exam_schedule.py \
+  hope_training/whole_body_tracking/tests/test_isaac_bank_exam_adapter.py \
   hope_training/whole_body_tracking/tests/test_termination_contract.py \
   hope_training/whole_body_tracking/tests/test_virtual_return_scorer.py
 ```
 
 The terminal audit only reads a run tree and prints shell-quoted `judge.sh`
-commands.  It never executes them.  The termination and scorer modules are
-currently library specifications, not production evaluator adapters.  Their
-two cross-module adapter assertions remain explicitly skipped until the
-evaluator-owned schema-v3 Isaac leg is implemented; a green standalone suite
-must not be reported as formal BankExam parity.
+commands. It never executes them. The remaining modules now exercise the
+production seams used by `isaac_bank_exam.py` and `mujoco_eval_onnx.py`:
+immutable content IDs/order, exact per-clip quota, strict artifact reload,
+nominal profile, tuple/mapping observation adaptation, all-attempt ledger,
+saved-run termination preflight and Torch/NumPy scorer parity when Torch is
+installed. A green dependency-light suite is implementation evidence; it is
+not a substitute for a same-paper Isaac/MuJoCo runtime canary.
 
 Verified 2026-07-11 on the local macOS host:
 
-- standalone specifications: 35 passed, 3 skipped (two pending adapters and
-  optional Torch parity);
-- formal BankExam/motion/racket/schema/V5 CPU suite: 74 passed;
+- adapter/audit suite: 67 passed, 1 optional Torch parity skip;
+- formal BankExam/motion/racket/schema/V5 CPU suite: 85 passed;
+- union of both groups plus the MuJoCo contract tests: 141 passed, 1 optional
+  Torch parity skip;
 - planner suite: 105 passed, 2 optional skips.
 
-Reproduce the 74-test formal CPU suite with:
+Verified later on 2026-07-11 against the current Phase-1 candidate implementation:
+
+- Isaac-dependent face-pairing, strict override, schema-3, runtime-order migration, and Stage-1
+  wiring regression: **122 passed** on Pod 2 with the Isaac Python environment;
+- dependency-supported formal BankExam/adapter/MuJoCo union: **145 passed** with Torch and the
+  Hydra test dependencies available.
+- after the diagnostic-export/judge contract review, the local dependency-light formal group is
+  **90 passed** and the launch-commit Pod runs passed **130** Isaac/Hydra tests and **153** full
+  union tests. The subsequent source-first/inexact-judge regression expands the union to **154
+  passed** in a detached Pod evaluation worktree while the live training checkout remains fixed.
+
+The scale-out cadence generator and venue A-B-A timing audit are dependency-light:
+
+```bash
+python3 -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_analyze_rally_intervals.py \
+  hope_training/whole_body_tracking/tests/test_generate_phase1_scaleout_curve_manifests.py \
+  hope_training/whole_body_tracking/tests/test_phase1_checkpoint_curve_worker.py
+python3 hope_training/whole_body_tracking/scripts/generate_phase1_scaleout_curve_manifests.py --check
+```
+
+Verified locally on 2026-07-11: `7 passed`; deterministic manifest check passed.
+
+Reproduce the 122-test Isaac-dependent group on a prepared RunPod checkout:
+
+```bash
+/workspace/hope_isaac_venv/bin/python -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_face_sign_per_clip.py \
+  hope_training/whole_body_tracking/tests/test_reward_flags_overrides.py \
+  hope_training/whole_body_tracking/tests/test_training_contract_schema3.py \
+  hope_training/whole_body_tracking/tests/test_motion_kinematics_contract.py \
+  hope_training/whole_body_tracking/tests/test_stage1_wiring.py
+```
+
+This group proves that `shared_plus_y` and `legacy_signed_vs_A` select one consistent pair for
+reward, privileged observations and metrics; unknown selector/boolean values fail loudly; the
+selector and legacy-motion opt-in reach the hard contract/export/judge paths; and motion migration
+reorders all four body-indexed arrays into the explicit target order.
+
+Reproduce the current 90-test formal CPU group with:
 
 ```bash
 python3 -m pytest -q \
@@ -81,6 +126,26 @@ python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_racket_geometry_contract.py \
   hope_training/whole_body_tracking/tests/test_training_contract_schema3.py \
   hope_training/whole_body_tracking/tests/test_v5_ablation_accelerator.py
+```
+
+Reproduce the complete 154-test union (use a Python environment with `pytest`, `numpy`, `PyYAML`,
+`hydra-core`, and Torch installed):
+
+```bash
+/workspace/hope_mjeval_venv/bin/python -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_audit_runpod_terminal_runs.py \
+  hope_training/whole_body_tracking/tests/test_bank_exam_schedule.py \
+  hope_training/whole_body_tracking/tests/test_isaac_bank_exam_adapter.py \
+  hope_training/whole_body_tracking/tests/test_termination_contract.py \
+  hope_training/whole_body_tracking/tests/test_virtual_return_scorer.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_eval_align_flags.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_eval_p0_contracts.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_ready_state_contract.py \
+  hope_training/whole_body_tracking/tests/test_motion_kinematics_contract.py \
+  hope_training/whole_body_tracking/tests/test_racket_geometry_contract.py \
+  hope_training/whole_body_tracking/tests/test_training_contract_schema3.py \
+  hope_training/whole_body_tracking/tests/test_v5_ablation_accelerator.py \
+  hope_training/whole_body_tracking/tests/test_judge_plant_contract.py
 ```
 
 ## ROS Workspace Build

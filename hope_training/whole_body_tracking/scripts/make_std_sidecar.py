@@ -135,12 +135,16 @@ def main():
             or mean.shape != nstd.shape
             or not np.isfinite(mean).all()
             or not np.isfinite(nstd).all()
-            or np.any(nstd <= 0.0)
+            or not np.isfinite(eps)
+            or eps <= 0.0
+            or np.any(nstd < 0.0)
+            or np.any(nstd + eps <= 0.0)
             or count <= 0
         ):
             raise SystemExit(
                 "[FATAL] invalid obs_norm_state_dict: mean/std must be same non-empty finite "
-                f"shape, std>0, count>0; mean={mean.shape} std={nstd.shape} count={count}"
+                "shape, std>=0, eps>0, std+eps>0, count>0; "
+                f"mean={mean.shape} std={nstd.shape} eps={eps} count={count}"
             )
         state_sha256 = _normalizer_sha256(mean, nstd, eps, count)
         norm_tmp = norm_out + ".tmp.npz"
@@ -155,7 +159,8 @@ def main():
         )
         os.replace(norm_tmp, norm_out)
         print(f"[make_std_sidecar] obs_norm   = dim {mean.shape[0]}  mean|max|={np.abs(mean).max():.3f} "
-              f"std max={nstd.max():.3f}  count={count}")
+              f"std min={nstd.min():.3f} max={nstd.max():.3f} zeros={int(np.count_nonzero(nstd == 0.0))} "
+              f"eps={float(eps):.3f} count={count}")
         print(f"[make_std_sidecar] saved -> {norm_out}")
         print(
             f"[make_std_sidecar] binding    = checkpoint_sha256={checkpoint_sha256} "

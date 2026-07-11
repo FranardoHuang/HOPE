@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "status": "complete_fresh_exact_same_paper_isaac_pair",
+  "scope": "Fresh formal-target SZ seed1 model_2000 versus model_4000 Isaac companion on the byte-identical immutable clean K=100 MuJoCo paper; checkpoint-selection evidence only, not an arm stop, arm promotion, continuity, calibrated-plant, deployment, or real-robot gate",
+  "training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+  "eval_commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+  "semantics": {
+    "fresh_lineage": true,
+    "evaluation_contract_exact": true,
+    "formal_target": true,
+    "checkpoint_selection_screen": true,
+    "whole_arm_stop_allowed": false,
+    "whole_arm_promote_allowed": false,
+    "deploy_gate": false,
+    "real_robot_authorized": false
+  },
+  "accepted_execution": {
+    "control_root": "/workspace/codexschema/phase1_fresh_20260711/control/SZ_seed1_2000_vs_model4000_isaac_exact_v1",
+    "state_root": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_isaac_exact_v1",
+    "runner": {
+      "path": "scripts/run_phase1_fresh_exact_paired_isaac_q50.py",
+      "sha256": "ed770e2ad8a204e602c9b1aa974cd09713cf7720338a564ec4c85aeddbd6142e"
+    },
+    "config": {
+      "path": "configs/phase1_SZ_seed1_2000_vs_4000_q50_isaac_companion_20260711.json",
+      "sha256": "f765af3bc54941acdf1180af788fb5ab1fad182da5286836d4ddbba5ece643a4"
+    },
+    "runtime_contract": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/control/SZ_seed1_2000_vs_model4000_isaac_exact_v1/runtime_contract.prepared.json",
+      "sha256": "6358032870bc9cc35a3f62c1af982906b13aa34e8b9eb5907ec2db45983b8120"
+    },
+    "paired_result": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_isaac_exact_v1/isaac_paired_result.json",
+      "sha256": "65c0872354343a3b05dd5b5e20bad6b3f3b04d46c38f576fe6a467b18788c18e"
+    },
+    "wrapper_pid_pgid": 1445717,
+    "completed_utc": "2026-07-11T13:55:19Z"
+  },
+  "immutable_schedule": {
+    "path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_exact_v1/shared_clean_k100.schedule.json",
+    "file_sha256": "66e89986a2b726d529179fcb4c745625ebed0380d59664caceefc55e86071cb3",
+    "semantic_sha256": "7dc6af822fb4130b8c324843f179d77f882d1326306bb19802b00f94447dff3e",
+    "attempts": 100,
+    "attempts_per_side": 50,
+    "seed": 0,
+    "noise_scale": 0.0,
+    "hold_range": [0, 100],
+    "one_question_reset": true,
+    "no_wrap": true,
+    "same_file_and_question_id_order_for_both_isaac_arms_and_mujoco": true,
+    "censored_attempts": 0
+  },
+  "mujoco_binding": {
+    "paired_result": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_exact_v1/paired_result.json",
+      "sha256": "b95ba6c4657e4b542ea3c5f08d02941c830ea48d71b56bb1a247ef7a46730478"
+    },
+    "model_2000_return": {
+      "forehand": 0.66,
+      "backhand": 1.0,
+      "aggregate": 0.83,
+      "physical_falls": 0
+    },
+    "model_4000_return": {
+      "forehand": 0.0,
+      "backhand": 1.0,
+      "aggregate": 0.5,
+      "physical_falls": 0
+    },
+    "model_2000_minus_model_4000_aggregate_return_rate": 0.33,
+    "selected_checkpoint": "model_2000"
+  },
+  "isaac_arms": {
+    "model_2000": {
+      "checkpoint_iteration": 2000,
+      "checkpoint_sha256": "99e8265960244e5be19176dc5f2d3b8b99e088d5d76d34d0f2cd1e1dd0c3ae4c",
+      "training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "pid_pgid": 1446267,
+      "state_sha256": "5072233f14dfda6aa24c974932aeee82577eee83438a49c078713a3e50a8208a",
+      "runner_log_sha256": "be0dfc42be7213a433798283100c3387d0d58e85ba5e81c8c11380fea1fd8d80",
+      "scorecard": {
+        "path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_isaac_exact_v1/model_2000/isaac_clean_k100.json",
+        "sha256": "860a1da65e4aa2503967196258572ed895f56c87f8bb8ea3cf2f92e6cf8708d9"
+      },
+      "attempt_ledger": {
+        "path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_isaac_exact_v1/model_2000/isaac_clean_k100.csv",
+        "sha256": "924536c215cabe6b97176901c3c781edf7ef0af09aa1d373692584180fbd08d3"
+      },
+      "ready_state_sha256": "3120e1308eeaf6b4870cb27f5c0c5569e384b0494619bf66208745a54d43177e",
+      "nominal_eval_profile_sha256": "176052b3c946c2bc7d9315975d37036107287d75fb4cd3aa36a8f5888afac5dd",
+      "summary": {
+        "forehand_return": 0.98,
+        "backhand_return": 1.0,
+        "aggregate_return": 0.99,
+        "exact_reach": 0.99,
+        "hits": 99,
+        "guard_resets": 1,
+        "physical_falls": 0
+      }
+    },
+    "model_4000": {
+      "checkpoint_iteration": 4000,
+      "checkpoint_sha256": "1a8fcf3de81775fdd003a8bbdcfd371c05b7168353daf19a8290a6d7c85e9071",
+      "training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "pid_pgid": 1447281,
+      "state_sha256": "2cf5cbbc2f741c07caae359bb693bfa9940673d8b7d0e1a30d55b83052cedf13",
+      "runner_log_sha256": "f4610b7649c0de8ef308e0b0f08ae9481c73ad8e70eef3aa2dc6c76621752df2",
+      "scorecard": {
+        "path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_isaac_exact_v1/model_4000/isaac_clean_k100.json",
+        "sha256": "8ad63c70416bf003dc24be38207f274e6ef5887ca305055670720a4c91a372c2"
+      },
+      "attempt_ledger": {
+        "path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_isaac_exact_v1/model_4000/isaac_clean_k100.csv",
+        "sha256": "24d364097b9961537a8cc4f4205571f94f0daa85c7fb749efb81fc892cfc5094"
+      },
+      "ready_state_sha256": "3120e1308eeaf6b4870cb27f5c0c5569e384b0494619bf66208745a54d43177e",
+      "nominal_eval_profile_sha256": "176052b3c946c2bc7d9315975d37036107287d75fb4cd3aa36a8f5888afac5dd",
+      "summary": {
+        "forehand_return": 0.98,
+        "backhand_return": 1.0,
+        "aggregate_return": 0.99,
+        "exact_reach": 0.99,
+        "hits": 99,
+        "guard_resets": 1,
+        "physical_falls": 0
+      }
+    }
+  },
+  "paired_delta_model_2000_minus_model_4000": {
+    "forehand_return": 0.0,
+    "backhand_return": 0.0,
+    "aggregate_return": 0.0,
+    "physical_falls": 0
+  },
+  "cross_engine_judgment": {
+    "status": "ranking_not_reproduced_no_cross_engine_checkpoint_gate",
+    "observation": "MuJoCo separates model_2000 from model_4000 by +0.33 aggregate return on the shared 100-question order, while Isaac gives both checkpoints the identical 0.99 aggregate, 0.98/1.00 side split and zero-fall score.",
+    "tie_break_interpretation": "Isaac names model_2000 only because the preregistered final tie-break prefers the earlier checkpoint; this is not a strict reproduction of the MuJoCo ranking.",
+    "selection_interpretation": "MuJoCo still selects model_2000 inside this frozen fresh-SZ checkpoint pair, but the same-paper Isaac companion does not independently separate the checkpoints.",
+    "whole_arm_action": "continue_unmodified",
+    "formal_or_deployment_promotion": false,
+    "deploy_gate": false,
+    "real_robot_authorized": false,
+    "next_gate": "Localize why Isaac saturates both fresh exact checkpoints while MuJoCo loses model_4000 forehand returns; retain checkpoint curves and require calibrated-plant and continuous-event evidence before deployment."
+  },
+  "postflight": {
+    "all_json_decision_fields_finite": true,
+    "both_scorecards_evaluation_contract_exact": true,
+    "both_scorecards_training_contract_sha256_matches_shared_schema3_hard_contract": true,
+    "both_ledgers_uncensored_100_rows_50_per_side": true,
+    "training_checkout_clean_at_pinned_commit": true,
+    "evaluation_checkout_clean_at_pinned_commit": true,
+    "wrapper_and_both_judge_process_groups_exited": true,
+    "training_or_worker_process_signalled": false
+  }
+}

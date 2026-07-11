@@ -32,14 +32,15 @@
 #   --exam-extra "..."        追加给 mujoco_eval_onnx.py 的参数
 #
 # 环境变量(pod 缺省;别的机器可覆盖):
-#   JUDGE_ISAAC_ENV      isaac venv 入口脚本(缺省 /workspace/franco/env.sh)
+#   JUDGE_ISAAC_ENV      isaac venv 激活脚本(缺省 /workspace/hope_isaac_venv/bin/activate)
 #   JUDGE_MJEVAL_ACT     mjeval venv activate(缺省 /workspace/hope_mjeval_venv/bin/activate)
 #
 # 铁律(都付过学费,见 docs/runbook.md「判卷链」):
 #   - 严禁 kill 训练进程:本脚本只杀自己 setsid 出来的 play.py 进程组,别的谁都不碰。
 #   - 导出错峰由调用方保证:一次只跑一个 judge.sh,不与其他 Isaac 同秒点火(撞 CUDA 枚举)。
 #   - 每 checkpoint 必须重导出 + 重做 sidecar(先清旧 exported/,勿复用陈旧工件)。
-#   - isaac venv 没有 onnxruntime,考卷必须走 mjeval venv;反之 sidecar 需要 torch 走 isaac venv。
+#   - isaac venv 没有 onnxruntime,考卷必须走 mjeval venv;该 venv 同时需要 onnx(图检查)
+#     和 onnxruntime(推理),反之 sidecar 需要 torch 走 isaac venv。
 #   - 原型=pod /workspace/franco/s1_wave4/judge_final.sh(巡检班第 3 遍手搓,坑已踩平)。
 # =============================================================================
 set -u -o pipefail
@@ -47,8 +48,9 @@ set -u -o pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 WBT_DIR=$(dirname "$SCRIPT_DIR")
 
-JUDGE_ISAAC_ENV=${JUDGE_ISAAC_ENV:-/workspace/franco/env.sh}
+JUDGE_ISAAC_ENV=${JUDGE_ISAAC_ENV:-/workspace/hope_isaac_venv/bin/activate}
 JUDGE_MJEVAL_ACT=${JUDGE_MJEVAL_ACT:-/workspace/hope_mjeval_venv/bin/activate}
+JUDGE_KIT_BOOT_LOCK=${JUDGE_KIT_BOOT_LOCK:-/workspace/.kit_boot.lock}
 
 die() { echo "[judge][FATAL] $*" >&2; exit 1; }
 note() { echo "[judge] $*"; }
@@ -96,6 +98,8 @@ if [ -z "$CKPT" ]; then
   [ -n "$CKPT" ] || die "run_dir 里没有 model_*.pt: $RUN_DIR"
 fi
 [ -f "$CKPT" ] || die "checkpoint 不存在: $CKPT"
+CKPT_DIR=$(cd "$(dirname "$CKPT")" 2>/dev/null && pwd) || die "checkpoint 目录不存在: $CKPT"
+CKPT="$CKPT_DIR/$(basename "$CKPT")"
 CKPT_TAG=$(basename "$CKPT" .pt)
 RUN_NAME=$(basename "$RUN_DIR")
 
@@ -110,15 +114,25 @@ OBS_NORM="$EXPORT_DIR/obs_norm.npz"
 # ---------------------------------------------------------------- ① 解析 env.yaml(fail-loud)
 ENV_YAML="$RUN_DIR/params/env.yaml"
 [ -f "$ENV_YAML" ] || die "缺 $ENV_YAML —— 没有配置底稿无法保证导出与训练同配置,不判"
+TRAINING_CONTRACT="$CKPT_DIR/params/training_contract.json"
 
 PARSED=$(mktemp "${TMPDIR:-/tmp}/judge_parsed.XXXXXX.sh") || die "mktemp 失败"
 trap 'rm -f "$PARSED"' EXIT
 
-python3 - "$ENV_YAML" "$PARSED" "$CLI_FH" "$CLI_BH" "$CLI_PH0" "$CLI_PH1" "$CLI_EXAM_BANK" <<'PYEOF' || die "env.yaml 解析失败(上面有缺什么、该手传哪个旗标)"
-import os, shlex, sys
+python3 - "$ENV_YAML" "$PARSED" "$CLI_FH" "$CLI_BH" "$CLI_PH0" "$CLI_PH1" "$CLI_EXAM_BANK" "$TRAINING_CONTRACT" <<'PYEOF' || die "env.yaml/hard contract 解析失败(上面有缺什么、该手传哪个旗标)"
+import json, math, os, shlex, sys
 import yaml
 
-env_yaml, out_path, cli_fh, cli_bh, cli_ph0, cli_ph1, cli_bank = sys.argv[1:8]
+(
+    env_yaml,
+    out_path,
+    cli_fh,
+    cli_bh,
+    cli_ph0,
+    cli_ph1,
+    cli_bank,
+    training_contract_path,
+) = sys.argv[1:9]
 
 # env.yaml 是 env_cfg 的 dump,带 !!python/tuple / !!python/object 标签 —— 宽松加载,只取数据
 class Loose(yaml.SafeLoader):
@@ -140,6 +154,148 @@ cmds = cfg.get("commands") or {}
 motion = cmds.get("motion") or {}
 rt = cmds.get("racket_target") or {}
 fatal = []
+
+# --- plant contract: only schema-3 hard-contract bytes may turn on the binary zero-friction path ---
+# env.yaml contains the expanded actuator cfg but no trustworthy record of which task-level switch
+# produced it.  The checkpoint-adjacent hard contract binds the 31 instantiated coefficients.
+zero_joint_friction = False
+plant_src = "legacy/no schema-3 hard contract (task default false)"
+hard_actor_contract = None
+allow_inexact_contract = True
+contract_src = "legacy/no schema-3 hard contract: diagnostic evaluator escape required"
+if os.path.isfile(training_contract_path):
+    try:
+        with open(training_contract_path, encoding="utf-8") as f:
+            hard_contract = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        fatal.append(f"hard contract 无法解析: {training_contract_path}: {exc}")
+        hard_contract = None
+    if isinstance(hard_contract, dict):
+        try:
+            contract_schema = int(hard_contract.get("schema_version", 0))
+        except (TypeError, ValueError):
+            fatal.append("hard contract schema_version 非法")
+            contract_schema = 0
+        if contract_schema == 3:
+            known_actor_dims = {
+                "full": 180,
+                "deploy_parity": 175,
+                "deploy_parity_face179": 179,
+                "deploy_parity_station181": 181,
+                "hitter_footwork": 177,
+                "hitter_pure": 110,
+            }
+            hard_actor_contract = hard_contract.get("actor_obs_contract")
+            if hard_actor_contract not in known_actor_dims:
+                fatal.append(
+                    "schema-3 hard contract 的 actor_obs_contract 缺失/未知: "
+                    f"{hard_actor_contract!r}"
+                )
+            else:
+                try:
+                    hard_actor_dim = int(hard_contract.get("actor_obs_total_dim"))
+                except (TypeError, ValueError):
+                    fatal.append("schema-3 hard contract 的 actor_obs_total_dim 非法")
+                else:
+                    if hard_actor_dim != known_actor_dims[hard_actor_contract]:
+                        fatal.append(
+                            "schema-3 hard contract actor 名/维度不一致: "
+                            f"{hard_actor_contract}/{hard_actor_dim}D"
+                        )
+            friction = None
+            raw_friction = hard_contract.get("joint_friction_coefficients")
+            if not isinstance(raw_friction, list) or len(raw_friction) != 31:
+                fatal.append(
+                    "schema-3 hard contract 的 joint_friction_coefficients 必须是 31 维数组"
+                )
+            else:
+                try:
+                    if any(isinstance(value, bool) for value in raw_friction):
+                        raise ValueError
+                    friction = [float(value) for value in raw_friction]
+                except (TypeError, ValueError):
+                    fatal.append(
+                        "schema-3 hard contract 的 joint_friction_coefficients 必须是有限数值"
+                    )
+                    friction = None
+                if friction is not None:
+                    if any(not math.isfinite(value) or value < 0.0 for value in friction):
+                        fatal.append(
+                            "schema-3 hard contract 的 joint_friction_coefficients 含负数/NaN/Inf"
+                        )
+                    elif all(value == 0.0 for value in friction):
+                        zero_joint_friction = True
+                        plant_src = "schema-3 hard contract: 31/31 exact zero"
+                    elif all(value > 0.0 for value in friction):
+                        plant_src = "schema-3 hard contract: 31/31 non-zero; task default false"
+                    else:
+                        fatal.append(
+                            "schema-3 hard contract 是部分零/部分非零的混合 friction 向量; "
+                            "task.plant.zero_joint_friction 只能重放全零或已声明默认值,拒绝代理"
+                        )
+            motion_exact = hard_contract.get("motion_kinematics_exact")
+            if not isinstance(motion_exact, bool):
+                fatal.append("schema-3 hard contract 的 motion_kinematics_exact 必须是 bool")
+            else:
+                pairing = hard_contract.get("face_command_pairing", "shared_plus_y")
+                nonzero_friction = friction is not None and any(
+                    value != 0.0 for value in friction
+                )
+                allow_inexact_contract = (
+                    not motion_exact
+                    or pairing == "legacy_signed_vs_A"
+                    or nonzero_friction
+                )
+                contract_src = (
+                    "schema-3 diagnostic lineage: --allow-inexact-contract"
+                    if allow_inexact_contract
+                    else "schema-3 formal candidate: no diagnostic escape"
+                )
+        elif contract_schema in (1, 2):
+            plant_src = f"legacy schema-{contract_schema} contract; task default false"
+            allow_inexact_contract = True
+            contract_src = f"legacy schema-{contract_schema}: diagnostic evaluator escape required"
+        else:
+            fatal.append(f"hard contract schema_version={contract_schema} 不支持")
+    else:
+        fatal.append("hard contract 根节点必须是 object")
+
+# The observation tail is attached after the task cfg's __post_init__, so leaving the inherited
+# 175-D actor contract in place would make play.py fail (or null would defer the check).  Bind the
+# exact known layout from schema-3, with an env.yaml flag cross-check; legacy runs derive 179/181
+# from those persisted flags and retain null only for old non-face layouts.
+face_obs_flag = cfg.get("face_command_obs", False)
+station_obs_flag = cfg.get("station_obs", False)
+if not isinstance(face_obs_flag, bool) or not isinstance(station_obs_flag, bool):
+    fatal.append("env.yaml face_command_obs/station_obs 必须是 bool")
+    face_obs_flag = station_obs_flag = False
+if station_obs_flag and not face_obs_flag:
+    fatal.append("env.yaml station_obs=true 但 face_command_obs=false: 181D 布局不成立")
+flag_actor_contract = (
+    "deploy_parity_station181"
+    if station_obs_flag
+    else "deploy_parity_face179" if face_obs_flag else None
+)
+if hard_actor_contract is not None:
+    expected_face_flags = {
+        "deploy_parity_face179": (True, False),
+        "deploy_parity_station181": (True, True),
+    }
+    hard_flags = expected_face_flags.get(hard_actor_contract, (False, False))
+    if hard_flags != (face_obs_flag, station_obs_flag):
+        fatal.append(
+            "schema-3 hard contract actor 与 env.yaml 观测开关不一致: "
+            f"actor={hard_actor_contract}, face/station="
+            f"{face_obs_flag}/{station_obs_flag}"
+        )
+    actor_contract = hard_actor_contract
+    actor_src = "schema-3 hard contract + env.yaml flag cross-check"
+elif flag_actor_contract is not None:
+    actor_contract = flag_actor_contract
+    actor_src = "legacy env.yaml face/station flags"
+else:
+    actor_contract = None
+    actor_src = "legacy non-face layout; play/export runtime inference"
 
 # --- 动作对(必须成对;单 clip 臂不是本考卷的形状) ---
 if cli_fh and cli_bh:
@@ -213,9 +369,13 @@ def fmt(v):
 ov = []
 ov.append("'motion_file=[%s,%s]'" % (fh, bh))
 ov.append("'++task.racket.strike_phase_per_clip=[%s,%s]'" % (repr(ph[0]), repr(ph[1])))
+if zero_joint_friction:
+    # Declared by HOPEPingPongDeployParity and inherited tasks: no ++, so a wrong task/config fails.
+    ov.append("task.plant.zero_joint_friction=true")
 for key, src in (
     ("question_bank",          rt.get("question_bank")),
     ("face_command",           rt.get("face_command")),
+    ("face_command_pairing",   rt.get("face_command_pairing")),
     ("vb_spin_mode",           rt.get("vb_spin_mode")),
     # 陪跑档:符号表进"导出环境"只为 ONNX 元数据保真(mount_normal_sign_per_clip /
     # face_obs_convention 键;不搬 = CLI 配置臂的元数据写成空表 = 说谎)。设计决定
@@ -233,9 +393,14 @@ for key, src in (
         ov.append(f"++task.racket.{key}={fmt(src)}")
 if motion.get("post_swing_start_prob") is not None:
     ov.append(f"++task.motion.post_swing_start_prob={fmt(motion['post_swing_start_prob'])}")
-if cfg.get("face_command_obs"):          # 顶层旗标:+4 obs 维(175->179),导错=checkpoint 加载即死
+if motion.get("allow_legacy_link_origin_velocity") is not None:
+    ov.append(
+        "++task.motion.allow_legacy_link_origin_velocity="
+        + fmt(motion["allow_legacy_link_origin_velocity"])
+    )
+if face_obs_flag:                        # 顶层旗标:+4 obs 维(175->179),导错=checkpoint 加载即死
     ov.append("++task.racket.face_command_obs=true")
-if cfg.get("station_obs"):               # 顶层旗标:+2 obs 维(179->181,R10c 站位锚),导错同上即死
+if station_obs_flag:                     # 顶层旗标:+2 obs 维(179->181,R10c 站位锚),导错同上即死
     ov.append("++task.racket.station_obs=true")
     sax = rt.get("station_anchor_offset_xy")
     if sax is not None and [float(sax[0]), float(sax[1])] != [0.0, 0.0]:
@@ -244,7 +409,9 @@ if cfg.get("station_obs"):               # 顶层旗标:+2 obs 维(179->181,R10c
                   % (repr(float(sax[0])), repr(float(sax[1]))))
 if cfg.get("physical_ball"):
     ov.append("++task.physical_ball=true")
-ov.append("task.actor_obs_contract=null")   # 扩列观测放行(179 臂;runbook 发射核对单第 5 条)
+ov.append(
+    "task.actor_obs_contract=" + (actor_contract if actor_contract is not None else "null")
+)
 
 with open(out_path, "w") as f:
     def w(k, v):
@@ -253,6 +420,10 @@ with open(out_path, "w") as f:
     w("PH0", repr(ph[0])); w("PH1", repr(ph[1]))
     w("EXAM_BANK", exam_bank); w("TRAIN_BANK", train_bank or "")
     w("SRC_MOTION", mf_src); w("SRC_PHASES", ph_src); w("SRC_BANK", bank_src)
+    w("SRC_PLANT", plant_src)
+    w("SRC_ACTOR", actor_src + (f": {actor_contract}" if actor_contract else ""))
+    w("SRC_CONTRACT", contract_src)
+    w("ALLOW_INEXACT_CONTRACT", "1" if allow_inexact_contract else "0")
     w("EXPORT_OVERRIDES", " ".join(ov))
 print("[judge] env.yaml 解析 OK")
 PYEOF
@@ -283,6 +454,7 @@ fi
 
 CLAMP_FLAG=""; [ "$QDES_CLAMP" = 1 ] && CLAMP_FLAG="--qdes-clamp"
 SCHEDULE_FLAG=""; [ -n "$SCHEDULE_K" ] && SCHEDULE_FLAG="--exam-schedule-k $SCHEDULE_K"
+INEXACT_FLAG=""; [ "$ALLOW_INEXACT_CONTRACT" = 1 ] && INEXACT_FLAG="--allow-inexact-contract"
 QB_PY="$WBT_DIR/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/stage1_question_bank.py"
 [ -f "$QB_PY" ] || die "缺 stage1_question_bank.py: $QB_PY"
 
@@ -294,7 +466,7 @@ EXAM_CMD="python scripts/mujoco_eval_onnx.py \
   --strike-phase-per-clip $PH0 $PH1 \
   --target-source bank --exam-bank '$EXAM_BANK' \
   $SCHEDULE_FLAG \
-  $CLAMP_FLAG --hold-ref $HOLD_REF \
+  $CLAMP_FLAG $INEXACT_FLAG --hold-ref $HOLD_REF \
   --noise-scales $NOISE_SCALES --steps $STEPS --seed $SEED --out-dir '$JUDGE_DIR/exam' $EXAM_EXTRA"
 
 note "run_dir     = $RUN_DIR"
@@ -303,13 +475,16 @@ note "task        = $TASK(experiment_name=$EXP_NAME 反查)"
 note "动作对      = $MOTION_FH | $MOTION_BH($SRC_MOTION)"
 note "相位对      = [$PH0, $PH1]($SRC_PHASES)"
 note "exam 卷     = $EXAM_BANK($SRC_BANK)"
+note "plant       = $SRC_PLANT"
+note "actor       = $SRC_ACTOR"
+note "contract    = $SRC_CONTRACT"
 note "旗标        = qdes_clamp=$([ "$QDES_CLAMP" = 1 ] && echo ON || echo OFF) hold_ref=$HOLD_REF steps_cap=$STEPS schedule_k=${SCHEDULE_K:-ALL} seed=$SEED ns=[$NOISE_SCALES]"
 
 if [ "$DRY_RUN" = 1 ]; then
   echo
   echo "===== DRY-RUN:将执行的命令链(不动 GPU 不写文件)====="
   echo "# ② 导出(isaac venv,gpu 占槽 ~4 分钟;认 'Exported ONNX policy to:' 行)"
-  echo "source $JUDGE_ISAAC_ENV && export HYDRA_FULL_ERROR=1"
+  echo "source $JUDGE_ISAAC_ENV && source '$WBT_DIR/setup_train_env.sh' && export PYTHONPATH=\"\$HOPE_WBT_PYTHONPATH\" && export HYDRA_FULL_ERROR=1"
   echo "$EXPORT_CMD > $JUDGE_DIR/export_play.log 2>&1"
   echo "$SIDECAR_CMD   # -> learned_std.npy + obs_norm.npz"
   echo
@@ -321,14 +496,41 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
+# Fail before taking the Kit lock or spending GPU time.  ``onnxruntime`` alone is not enough:
+# the exact normalization/graph contract imports ``onnx`` for graph inspection and checker.
+[ -f "$JUDGE_MJEVAL_ACT" ] || die "mjeval venv 不存在: $JUDGE_MJEVAL_ACT(JUDGE_MJEVAL_ACT 可覆盖)"
+MJEVAL_DEPS=$(
+  (
+    # shellcheck disable=SC1090
+    source "$JUDGE_MJEVAL_ACT" >/dev/null 2>&1
+    python - <<'PY'
+import onnx
+import onnxruntime
+print(f"onnx={onnx.__version__} onnxruntime={onnxruntime.__version__}")
+PY
+  ) 2>&1
+) || die "mjeval venv 缺正式判卷依赖(必须同时 import onnx, onnxruntime): $MJEVAL_DEPS"
+note "mjeval deps OK: $MJEVAL_DEPS"
+
 mkdir -p "$JUDGE_DIR/exam"
 
 # ---------------------------------------------------------------- ② 原生导出 + sidecar(isaac venv)
 [ -f "$JUDGE_ISAAC_ENV" ] || die "isaac venv 入口不存在: $JUDGE_ISAAC_ENV(JUDGE_ISAAC_ENV 可覆盖)"
+command -v flock >/dev/null 2>&1 || die "缺 flock，无法与训练 Kit boot 共用全 Pod 启动锁"
+exec 8>"$JUDGE_KIT_BOOT_LOCK"
+note "等待全 Pod Kit boot 锁: $JUDGE_KIT_BOOT_LOCK"
+flock -x 8
 note "② play.py 原生导出(isaac venv,gpu$GPU)…"
 (
   # shellcheck disable=SC1090
   source "$JUDGE_ISAAC_ENV" >/dev/null 2>&1
+  # shellcheck disable=SC1091
+  source "$WBT_DIR/setup_train_env.sh" >/dev/null 2>&1
+  export PYTHONPATH="$HOPE_WBT_PYTHONPATH"
+  # play.py prints the required export-success handshake immediately before
+  # env.close().  Redirected Python stdout is otherwise block-buffered and
+  # Isaac shutdown can discard that line even though policy.onnx was written.
+  export PYTHONUNBUFFERED=1
   export HYDRA_FULL_ERROR=1
   eval "$EXPORT_CMD" > "$JUDGE_DIR/export_play.log" 2>&1
 ) || { tail -30 "$JUDGE_DIR/export_play.log" >&2; die "play.py export-only 失败"; }
@@ -341,11 +543,15 @@ if ! grep -aq "Exported ONNX policy to:" "$JUDGE_DIR/export_play.log"; then
 fi
 [ -f "$ONNX" ] || die "有成功行但 $ONNX 不存在?检查 $JUDGE_DIR/export_play.log"
 note "onnx OK: $ONNX"
+flock -u 8
 
 note "make_std_sidecar(isaac venv)…"
 (
   # shellcheck disable=SC1090
   source "$JUDGE_ISAAC_ENV" >/dev/null 2>&1
+  # shellcheck disable=SC1091
+  source "$WBT_DIR/setup_train_env.sh" >/dev/null 2>&1
+  export PYTHONPATH="$HOPE_WBT_PYTHONPATH"
   cd "$WBT_DIR" && eval "$SIDECAR_CMD"
 ) > "$JUDGE_DIR/sidecar.log" 2>&1 || { cat "$JUDGE_DIR/sidecar.log" >&2; die "sidecar 失败"; }
 grep -a "\[make_std_sidecar\]" "$JUDGE_DIR/sidecar.log"
@@ -353,7 +559,6 @@ grep -a "\[make_std_sidecar\]" "$JUDGE_DIR/sidecar.log"
 [ -f "$OBS_NORM" ] || note "⚠ 没生成 obs_norm.npz(仅 empirical_normalization=false 的臂才正常;报告里带出)"
 
 # ---------------------------------------------------------------- ③ 考卷(mjeval venv,纯 CPU)
-[ -f "$JUDGE_MJEVAL_ACT" ] || die "mjeval venv 不存在: $JUDGE_MJEVAL_ACT(JUDGE_MJEVAL_ACT 可覆盖)"
 note "③ mujoco_eval_onnx 考卷(mjeval venv,ns=[$NOISE_SCALES] × 双侧,steps=$STEPS)…"
 (
   # shellcheck disable=SC1090
