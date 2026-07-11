@@ -411,6 +411,30 @@ records all relevant SHAs. A pass covers only the discrete source frames. Run
 the later dense/inter-frame collision, dynamics and table/net gates before
 schema-2; never treat grounding as robot authorization.
 
+The accepted canonical-beta grounding and dense safety evidence is retained
+under the same private Pod1 root. Restore/copy the complete versioned trees,
+never a directory assembled by basename:
+
+```text
+/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/
+/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v4/
+/workspace/codexschema/motion_video_intake_20260711/phase_safety_v4/
+```
+
+Cross-check every grounded PKL and grounding report against
+`configs/motion_video_canonical_gmr_ground_results_20260711.json`. The full
+accepted safety result is
+`phase_safety_v4/phase_safety_result.json` (571,252 bytes, SHA-256
+`d2518f766720dabf979e2a95e5044fdf7fcc7d85b0622471b476888febf301d8`);
+the durable small summary is
+`configs/motion_video_gmr_phase_safety_results_20260711.json`. The earlier
+`phase_safety_v2` tree must also remain if auditing history: only its safety
+subtrees are accepted, while every virtual-return/phase/coverage field is
+revoked because no GMR-world to HOPE table transform was bound. Raw videos,
+GMR pickles and full result JSON remain private ignored artifacts; do not add
+them to git or a public registry. Schema-2 +X reground/explicit transform and
+mirror evidence remain required before using the frozen question paper.
+
 ### Venue strike timing table
 
 The continuous-rally timing audit uses the processed strike event table, not

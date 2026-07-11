@@ -1,0 +1,308 @@
+{
+  "schema_version": 1,
+  "status": "complete_dense_safety_returnability_blocked",
+  "scope": "accepted CPU-only 240 Hz dense-sampled ground/self-collision/racket-body safety and official-racket-state evidence for ten canonical-beta grounded GMR air swings; virtual-return phase ranking and 2-vs-4 coverage are explicitly not executed because the GMR-world to HOPE table frame and mirror contract are unverified",
+  "formal_eligible": false,
+  "robot_approved": false,
+  "contact_phase_truth": null,
+  "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+  "preregistration": {
+    "path": "configs/motion_video_gmr_phase_safety_prereg_20260711.json",
+    "bytes": 20544,
+    "sha256": "232cd9ef1a72381895b54c75cc87c82e991d9c605ea169e86605b3afb9e64e15"
+  },
+  "canonical_grounding_result": {
+    "path": "configs/motion_video_canonical_gmr_ground_results_20260711.json",
+    "bytes": 39438,
+    "sha256": "7a0cb2b34ff9f0d8f0cec1840fdb9b0d5c6d551dd35eb2574b5ab71b245e8e5b"
+  },
+  "accepted_runtime": {
+    "pod": "pod1",
+    "control_root": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v4",
+    "output_root": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_v4",
+    "pid": 1456864,
+    "pgid": 1456864,
+    "started_utc": "2026-07-11T14:57:57.960113556Z",
+    "completed_utc": "2026-07-11T14:58:06.365107477Z",
+    "elapsed_seconds_from_file_timestamps": 8.404994,
+    "cpu_only": true,
+    "CUDA_VISIBLE_DEVICES": "",
+    "OMP_NUM_THREADS": 1,
+    "MKL_NUM_THREADS": 1,
+    "result": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_v4/phase_safety_result.json",
+      "bytes": 571252,
+      "sha256": "d2518f766720dabf979e2a95e5044fdf7fcc7d85b0622471b476888febf301d8"
+    },
+    "run_log": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v4/run.log",
+      "bytes": 154,
+      "sha256": "a37cde307fe58bf57df233721732aeb3942f9e52be2605ecd155fedbc7416665"
+    },
+    "training_checkout": {
+      "root": "/workspace/codexschema/nohope",
+      "head": "6d93bcb16c422a2f42748c2dc99432559653480b",
+      "clean_after": true,
+      "modified_by_screen": false
+    },
+    "gpu_process_for_screen_after": false
+  },
+  "predecessor_attempts": [
+    {
+      "attempt": "v1_validate",
+      "status": "rejected_pre_execution",
+      "manifest_sha256": "30f01dbaf1edaecd1b0022fc3b5f05c9e88be94ad4ae4224bc04a101d65748c6",
+      "log": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v1/validation_attempt_v1.log",
+        "sha256": "77ffa48f054a7308ef82f2cb16a5eea8b2a1f531e747e1b1f3160e6d2a4f610a"
+      },
+      "failure": "cross-Python libm last-bit drift changed the unquantized deterministic question-paper semantic SHA",
+      "accepted_evidence": false,
+      "repair": "round every materialized question vector to 1e-12 before atomic question-id and paper hashing"
+    },
+    {
+      "attempt": "v2_run",
+      "status": "completed_but_returnability_revoked",
+      "manifest_sha256": "edeb1a270aba9e3ef530b3d31f674868ab53b0eb79ab96d520bc0bd7bfd3bbb1",
+      "result": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_v2/phase_safety_result.json",
+        "bytes": 775707,
+        "sha256": "4fcad6fe225656df54d8d448ef295b93c1f62a6dbd3473301ba00481441d7996"
+      },
+      "run_log": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v2/run.log",
+        "bytes": 154,
+        "sha256": "f1f43e2735e4191c293eb28fc6a2750b990684981756a54cff5579bdecf79d91"
+      },
+      "accepted_evidence": "dense safety subtree only; it is bit-equal to the accepted v3 safety subtree for all ten assets",
+      "revoked_evidence": "all virtual-return, phase-candidate, question-coverage, library selector and 2-vs-4 columns",
+      "revocation_reason": "venue questions were scored before a GMR-world to HOPE +X/table transform and mirror contract had been verified"
+    },
+    {
+      "attempt": "v3_run",
+      "status": "accepted_safety_predecessor",
+      "manifest_sha256": "ce95dc6d12a5f6d125c72e413ece8d8484386077f7910a163bb40ed1bd9461dc",
+      "result": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_v3/phase_safety_result.json",
+        "bytes": 571252,
+        "sha256": "9dd738715cbdd7bad170c11550f171b8adadab8b5b2480354dab4c8110dfc24c"
+      },
+      "accepted_evidence": "the complete disabled-returnability dense safety result",
+      "rerun_reason": "v4 hardens the future enabled-returnability path by validating and applying the explicit proper-rigid 4x4 transform and verified mirror mapping before scoring; current safety inputs and thresholds are unchanged",
+      "v3_safety_subtrees_equal_v4_for_all_assets": true
+    }
+  ],
+  "question_paper": {
+    "algorithm": "sha256-counter-balanced-side-box-isotropic-spin-rounded12-v1",
+    "questions": 64,
+    "questions_per_side_label": 32,
+    "semantic_sha256": "4dfa0548d898fa6456d09261216e26ff9547c1a9dca2da221835c3cfa25332c7",
+    "consumed_for_returnability": false,
+    "status": "frozen_but_blocked_on_frame_contract",
+    "formal_bank_exam": false
+  },
+  "frame_contract": {
+    "returnability_enabled": false,
+    "gmr_world_to_hope_table_transform_verified": false,
+    "gmr_world_to_hope_matrix_4x4": null,
+    "mirror_status": "unverified",
+    "required_before_enable": "schema-2 conversion plus HOPE +X reground, or an independently verified explicit 4x4 transform, and verified mirror semantics"
+  },
+  "safety_contract": {
+    "source_fps": 30,
+    "substeps_per_source_interval": 8,
+    "effective_sampling_hz": 240,
+    "interpolation": "root_xyz_linear_root_quaternion_shortest_arc_slerp_joint_position_linear",
+    "dense_sampling_is_continuous_time_certificate": false,
+    "ground_penetration_tolerance_m": 0.0005,
+    "self_collision_penetration_tolerance_m": 0.000001,
+    "hard_racket_body_clearance_m": 0.005,
+    "warning_racket_body_clearance_m": 0.02,
+    "clearance_groups": [
+      "head_neck",
+      "trunk",
+      "contralateral_arm",
+      "lower_body"
+    ]
+  },
+  "aggregate": {
+    "assets": 10,
+    "source_frames": 654,
+    "dense_samples": 5162,
+    "safe_source_frames": 654,
+    "unsafe_source_frames": 0,
+    "ground_dangerous_dense_samples": 0,
+    "self_collision_dangerous_dense_samples": 0,
+    "racket_body_clearance_dangerous_dense_samples": 0,
+    "racket_body_clearance_warning_dense_samples": 0,
+    "minimum_ground_clearance_m": 0.00000999999999951734,
+    "minimum_racket_body_clearance_m": 0.04024658203125,
+    "minimum_racket_body_clearance_asset": "franco_backhand_loop_a",
+    "phase_candidates_reported": false,
+    "question_coverage_reported": false,
+    "library_selector_reported": false,
+    "two_vs_four_decision_reported": false
+  },
+  "results": [
+    {
+      "asset_id": "franco_forehand_block",
+      "frames": 65,
+      "dense_frames": 513,
+      "safe_source_frames": 65,
+      "minimum_racket_body_clearance_m": 0.22760009765624997,
+      "minimum_clearance_group": "trunk",
+      "minimum_clearance_source_time_frames": 16.0,
+      "top_safe_speed_frame": 33,
+      "top_safe_speed_phase": 0.515625,
+      "top_safe_speed_mps": 2.0756411983643632,
+      "phase_and_coverage_status": "blocked_unverified_gmr_world_to_hope_table_frame"
+    },
+    {
+      "asset_id": "franco_backhand_block",
+      "frames": 63,
+      "dense_frames": 497,
+      "safe_source_frames": 63,
+      "minimum_racket_body_clearance_m": 0.22899169921874998,
+      "minimum_clearance_group": "trunk",
+      "minimum_clearance_source_time_frames": 49.0,
+      "top_safe_speed_frame": 26,
+      "top_safe_speed_phase": 0.41935483870967744,
+      "top_safe_speed_mps": 2.1870683085999247,
+      "phase_and_coverage_status": "blocked_unverified_gmr_world_to_hope_table_frame"
+    },
+    {
+      "asset_id": "franco_forehand_loop",
+      "frames": 70,
+      "dense_frames": 553,
+      "safe_source_frames": 70,
+      "minimum_racket_body_clearance_m": 0.16614990234375002,
+      "minimum_clearance_group": "lower_body",
+      "minimum_clearance_source_time_frames": 27.375,
+      "top_safe_speed_frame": 32,
+      "top_safe_speed_phase": 0.463768115942029,
+      "top_safe_speed_mps": 4.92988079650934,
+      "phase_and_coverage_status": "blocked_unverified_gmr_world_to_hope_table_frame"
+    },
+    {
+      "asset_id": "franco_backhand_loop_a",
+      "frames": 69,
+      "dense_frames": 545,
+      "safe_source_frames": 69,
+      "minimum_racket_body_clearance_m": 0.04024658203125,
+      "minimum_clearance_group": "lower_body",
+      "minimum_clearance_source_time_frames": 25.0,
+      "top_safe_speed_frame": 35,
+      "top_safe_speed_phase": 0.5147058823529411,
+      "top_safe_speed_mps": 6.423336074265649,
+      "phase_and_coverage_status": "blocked_unverified_gmr_world_to_hope_table_frame"
+    },
+    {
+      "asset_id": "franco_backhand_loop_b",
+      "frames": 91,
+      "dense_frames": 721,
+      "safe_source_frames": 91,
+      "minimum_racket_body_clearance_m": 0.14461669921875,
+      "minimum_clearance_group": "lower_body",
+      "minimum_clearance_source_time_frames": 39.0,
+      "top_safe_speed_frame": 52,
+      "top_safe_speed_phase": 0.5777777777777777,
+      "top_safe_speed_mps": 4.068049490353964,
+      "phase_and_coverage_status": "blocked_unverified_gmr_world_to_hope_table_frame"
+    },
+    {
+      "asset_id": "franco_backhand_loop_c",
+      "frames": 98,
+      "dense_frames": 777,
+      "safe_source_frames": 98,
+      "minimum_racket_body_clearance_m": 0.08397216796875001,
+      "minimum_clearance_group": "lower_body",
+      "minimum_clearance_source_time_frames": 42.0,
+      "top_safe_speed_frame": 55,
+      "top_safe_speed_phase": 0.5670103092783505,
+      "top_safe_speed_mps": 5.1292547506305075,
+      "phase_and_coverage_status": "blocked_unverified_gmr_world_to_hope_table_frame"
+    },
+    {
+      "asset_id": "v6_forehand_block",
+      "frames": 35,
+      "dense_frames": 273,
+      "safe_source_frames": 35,
+      "minimum_racket_body_clearance_m": 0.36968994140625,
+      "minimum_clearance_group": "lower_body",
+      "minimum_clearance_source_time_frames": 7.25,
+      "top_safe_speed_frame": 10,
+      "top_safe_speed_phase": 0.29411764705882354,
+      "top_safe_speed_mps": 2.758608807396966,
+      "phase_and_coverage_status": "blocked_unverified_gmr_world_to_hope_table_frame"
+    },
+    {
+      "asset_id": "v6_backhand_block",
+      "frames": 35,
+      "dense_frames": 273,
+      "safe_source_frames": 35,
+      "minimum_racket_body_clearance_m": 0.29197998046875007,
+      "minimum_clearance_group": "trunk",
+      "minimum_clearance_source_time_frames": 6.0,
+      "top_safe_speed_frame": 11,
+      "top_safe_speed_phase": 0.3235294117647059,
+      "top_safe_speed_mps": 1.6408513984106907,
+      "phase_and_coverage_status": "blocked_unverified_gmr_world_to_hope_table_frame"
+    },
+    {
+      "asset_id": "v7_forehand_block",
+      "frames": 64,
+      "dense_frames": 505,
+      "safe_source_frames": 64,
+      "minimum_racket_body_clearance_m": 0.36763916015625,
+      "minimum_clearance_group": "lower_body",
+      "minimum_clearance_source_time_frames": 20.0,
+      "top_safe_speed_frame": 24,
+      "top_safe_speed_phase": 0.38095238095238093,
+      "top_safe_speed_mps": 2.5791495356462715,
+      "phase_and_coverage_status": "blocked_unverified_gmr_world_to_hope_table_frame"
+    },
+    {
+      "asset_id": "v7_backhand_block",
+      "frames": 64,
+      "dense_frames": 505,
+      "safe_source_frames": 64,
+      "minimum_racket_body_clearance_m": 0.29168701171875,
+      "minimum_clearance_group": "trunk",
+      "minimum_clearance_source_time_frames": 18.0,
+      "top_safe_speed_frame": 23,
+      "top_safe_speed_phase": 0.36507936507936506,
+      "top_safe_speed_mps": 1.6171488341501694,
+      "phase_and_coverage_status": "blocked_unverified_gmr_world_to_hope_table_frame"
+    }
+  ],
+  "library_outputs": {
+    "franco_two_blocks": "blocked_unverified_gmr_world_to_hope_table_frame",
+    "franco_four_loop_a": "blocked_unverified_gmr_world_to_hope_table_frame",
+    "franco_four_loop_b": "blocked_unverified_gmr_world_to_hope_table_frame",
+    "franco_four_loop_c": "blocked_unverified_gmr_world_to_hope_table_frame",
+    "v6_two_blocks": "blocked_unverified_gmr_world_to_hope_table_frame",
+    "v7_two_blocks": "blocked_unverified_gmr_world_to_hope_table_frame"
+  },
+  "invariants": {
+    "all_ten_exact_canonical_grounded_inputs_and_reports_bound": true,
+    "all_654_source_frames_safe_under_dense_sample_propagation": true,
+    "all_5162_dense_samples_zero_ground_danger": true,
+    "all_5162_dense_samples_zero_robot_self_collision": true,
+    "all_5162_dense_samples_zero_racket_body_hard_or_warning_clearance": true,
+    "official_racket_site_position_face_and_generalized_velocity_finite": true,
+    "v2_v3_v4_safety_subtrees_equal_for_all_assets": true,
+    "returnability_not_executed_in_v3_or_v4": true,
+    "question_coverage_and_phase_candidates_null": true,
+    "all_library_coverage_and_selector_fields_null": true,
+    "no_gpu_allocation": true,
+    "no_training_checkout_modification": true
+  },
+  "remaining_blockers": [
+    "verify mirror semantics and the GMR-world to HOPE +X/table transform through schema-2 conversion plus reground or an independently checked explicit transform",
+    "rerun the same content-addressed 64-question paper only after the frame contract passes",
+    "table/net swept-volume, dynamics/balance, schema-2 L0/L1, TOPP re-audit and tracker feasibility remain separate gates",
+    "air swings contain no observed ball contact, so contact phase truth remains null",
+    "finite 240 Hz sampling is not a mathematical continuous-time collision certificate",
+    "no new motion is approved for RL promotion or any robot command"
+  ]
+}

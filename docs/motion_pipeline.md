@@ -58,6 +58,36 @@
    现役 backhand_v5_cal 被瞬态污染的落地(悬空 ~5.8cm)+ 还 reground 债;重生成后触球相位全部
    重标(如反手 v5 0.362→~0.391)、登记表/题库连锁重出,时机门=修C 收卷后 franco 拍。
 
+### canonical GMR 中间安全屏（2026-07-11）
+
+`screen_motion_gmr_phase_safety.py` 是 schema-2 之前的一道 CPU 快门，不是终审。它只接受
+内容寻址的显式清单，不扫目录；每条必须绑定 canonical-beta grounded GMR PKL、
+grounding report、MJCF 和所有工具/venue 配置 SHA。它在 vendor MJCF 里用官方
+`right_racket` site 取拍心和拍面，用 `mj_differentiatePos + mj_objectVelocity` 取拍心速度；
+对源轨迹作 8 子步/区间插值，地面穿透、任何 robot self-contact 或拍面/拍柄对头颈/
+躯干/对侧臂/下肢的余隙低于 5 mm 都会硬排除相邻源帧。20 mm 内另报 warning。
+
+本次十条 canonical GMR 的 654 个源帧/5162 个 240 Hz 样本全部没有上述危险，
+最薄拍-身余隙是 `40.2466 mm`。但这只是有限采样，不是连续时间证书；MJCF 也没有
+table/net geom。更关键的是，root-z grounding 并未证明 GMR world→HOPE +X/虚拟球桌变换，
+mirror status 仍未验证。所以工具的当前 v4 合同虽预先冻结 64 题，却强制
+`consumed_for_returnability=false`，所有击球相位、question coverage 和 2-vs-4 selector 均为
+`null/blocked`。一次过早评分的 v2 已保留但撤销全部回球列，只接受其与 v3/v4 相同的安全子树。
+详见 `configs/motion_video_gmr_phase_safety_results_20260711.json`。
+
+可复现命令在 Pod1 的独立 control bundle 内运行，不改 training checkout：
+
+```bash
+CUDA_VISIBLE_DEVICES= /workspace/hope_isaac_venv/bin/python \
+  screen_motion_gmr_phase_safety.py \
+  --manifest motion_video_gmr_phase_safety_prereg_20260711.json \
+  --expected-manifest-sha256 232cd9ef1a72381895b54c75cc87c82e991d9c605ea169e86605b3afb9e64e15 \
+  validate
+```
+
+只有 schema-2 + HOPE +X reground（或独立验证的显式 proper-rigid 4x4 transform）和 mirror 语义到齐后，
+才可将 `frame_contract.returnability_enabled` 改为 true 并用同一题纸重跑；禁止把速度峰帧当击球帧。
+
 当前资产:`hope_{forehand,backhand}_{v5,oblique,v4}_cal.npz`(v4=hopex 视频重跑;**hopex 资产
 与 v4_cal 同底片**——真源都是 raw_video_hopex/*_v4.mp4,动作组消融里两者不构成独立对照)。
 **swing 对试产件**(2026-07-08,修复版管线全链,判炸器双 PASS):

@@ -1485,3 +1485,12 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `83/100 vs 50/100` 分离没被复现；Isaac 最终“选”2k 只是预注册的完全平局
    最后 tie-break，不是独立支持。2k 仍作 MuJoCo pair 内保留峰，整臂继续；跨引擎/
    formal deploy 门不关。账本见 `phase1_SZ_seed1_2000_vs_4000_q50_isaac_result_20260711.json`。
+40. 【franco/Codex】**新动作稠密安全屏 10/10 过，但坐标证据不足就不假判击球点**——十条
+   canonical-beta GMR 先独立 root-z grounding，再以 8 子步/区间复查：654 源帧/
+   5162 个 240Hz 样本的地面危险、robot self-collision、拍面/拍柄-身体 `<5mm` 危险
+   和 `<20mm` warning 都是 0，最薄余隙为 Franco 反手拉 A 的 40.2466mm。拍心/拍面/
+   拍速均来自 vendor MJCF 官方 site/FK。但 root-z 不是 GMR-world→HOPE 桌球坐标，mirror 也
+   未验证；v2 所有 virtual-return/相位/2-vs-4 列因此作废，只保留与 v3/v4 相同的安全子树。接受 v4 冻结
+   64 题却不消费，coverage/selector 全为 null/blocked；必须先 schema2 +X reground/显式变换+
+   mirror 证据。账本见 `motion_video_gmr_phase_safety_results_20260711.json`；不占 GPU、不改训练树、
+   不触真机。

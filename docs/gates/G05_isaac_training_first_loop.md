@@ -613,6 +613,34 @@ Exact source/output/log/audit bindings are in
 diagnostic: the ten new outputs still need independent no-clobber grounding
 and dense collision, racket/handle-to-body, dynamics and table/net gates.
 
+The canonical-GMR grounding prerequisite has since completed independently for
+all ten inputs. Its content-addressed ledger is
+`configs/motion_video_canonical_gmr_ground_results_20260711.json`; every
+30 Hz source-row minimum is about `10 um` above the bound floor after one
+per-asset constant root-z translation. A separate CPU-only screen then replayed
+654 source rows as 5,162 finite samples at 240 Hz. It found zero ground-danger
+samples, zero robot self-interpenetrations, zero racket/handle-to-critical-body
+samples below the 5 mm hard threshold, and zero below the 20 mm warning
+threshold. The smallest observed body clearance was `40.2466 mm` in
+`franco_backhand_loop_a`. This is finite dense sampling, not a mathematical
+continuous-time certificate, and the canonical MJCF still has no table/net
+collision geometry.
+
+The same screen extracts the official vendor-MJCF `right_racket` site centre
+and local +Y face plus `mj_differentiatePos`/`mj_objectVelocity` site speed.
+It deliberately does **not** report a hit phase or motion-library coverage yet.
+Canonical grounding changed root z only; it did not bind GMR world to the HOPE
++X virtual-table frame, and intake mirror status remains unverified. A first v2
+result that scored venue questions anyway is preserved but all of its return,
+phase, selector and two-vs-four fields are revoked; only its safety subtree is
+accepted, and that subtree equals v3/v4 for all ten inputs. Accepted v4 freezes a
+64-question paper but records `consumed_for_returnability=false`, with every
+phase/coverage/selector field null and blocked. The preregistration and compact
+ledger are `configs/motion_video_gmr_phase_safety_prereg_20260711.json` and
+`configs/motion_video_gmr_phase_safety_results_20260711.json`. Schema-2 plus
+HOPE +X reground (or an independently verified proper-rigid transform) and mirror
+semantics must land before that paper can run. No motion entered RL or hardware.
+
 This is not yet a training result. The videos contain no ball/table/contact
 truth, their mirror/depth interpretation is unverified, and the three Franco
 backhand-loop recordings are candidates for one semantic action rather than

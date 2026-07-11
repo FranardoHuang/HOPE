@@ -4,6 +4,22 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-11
 
+- Completed canonical-GMR discrete grounding and the next CPU-only dense safety
+  screen for all ten Franco/v6/v7 air swings. Across 654 source frames and
+  5,162 samples at 240 Hz, ground-danger, robot self-collision, racket/handle
+  clearance `<5 mm`, and clearance warning `<20 mm` counts are all zero; the
+  thinnest observed body margin is `40.2466 mm` on Franco backhand-loop A.
+  The screen uses the official MJCF racket site/face/generalized velocity, but
+  this is finite sampling, not a continuous-time certificate, and table/net
+  plus dynamics remain open. A v2 attempt scored venue questions before a
+  GMR-world→HOPE table transform and mirror contract existed; all of its
+  returnability/phase/2-vs-4 fields are revoked. Accepted v4 keeps only the
+  equal v2/v3/v4 safety subtree, freezes the 64-question paper without consuming it,
+  and writes all phase/coverage/selector fields as null/blocked. See
+  `configs/motion_video_gmr_phase_safety_results_20260711.json`; schema-2 +X
+  reground (or an independently verified transform) and mirror verification
+  now block returnability. No RL, GPU, training checkout or robot command was
+  touched.
 - Completed CPU-only canonical-beta GMR for all ten new videos (`39b0a67`).
   Exact clean loader `2737f472...5de2` consumes
   `betas[0].detach().cpu().numpy()[:10]` with no padding, correcting the old

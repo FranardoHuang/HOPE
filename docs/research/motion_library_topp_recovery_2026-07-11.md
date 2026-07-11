@@ -1,7 +1,7 @@
 # 新动作库、TOPP 与任意时刻下一拍
 
 日期：2026-07-11
-状态：设计已预注册；原视频 intake 已验证；Pod1 GVHMR 结构重建与 diagnostic GMR 均 10/10 完成；ground/schema-2、正式体型、仿真消融和安全门禁尚未完成
+状态：设计已预注册；原视频 intake、canonical-beta GMR 和离散 grounding 均 10/10 完成；240 Hz 有限插值安全屏全部通过，但击球相位/回球覆盖/2-vs-4 selector 因 GMR-world→HOPE 桌球坐标和镜像语义未证而 fail-closed
 范围：仅离线处理与仿真。本文不授权任何真机动作。
 
 ## 结论先行
@@ -99,6 +99,27 @@ materialize 均通过，统一向量 SHA 为 `a03f1642...9cc6`；十份 save/rel
 `configs/motion_video_canonical_gmr_results_20260711.json`。下一步是对这十条新输出重做
 no-clobber grounding 与稠密安全门，不是直接进 RL。
 
+这个前置现已有两层独立证据。第一层
+`configs/motion_video_canonical_gmr_ground_results_20260711.json` 把十条 canonical-beta GMR
+各自加一个 root-z 常量，离散源帧的最小地面余量均约 `10 um`；这只证
+30 Hz 离散落地。第二层 `scripts/screen_motion_gmr_phase_safety.py` 对显式清单中每条轨迹做
+root quaternion shortest-arc SLERP 和关节线性插值，以 8 个子步/源帧区间（240 Hz）复查地面、
+全 robot self-contact，以及拍面/拍柄对头颈、躯干、对侧手臂和下肢的距离。十条共
+654 个源帧/5162 个稠密样本：地面危险 0、自碰 0、余隙 `<5 mm` 危险 0、`<20 mm`
+warning 0；全局最薄身体余隙是 Franco 反手拉 A 的 `40.2466 mm`。这仍是有限采样，
+不是数学上的连续时间证书，也没有 table/net geom 或动力学。
+
+屏全工具从 vendor MJCF 官方 `right_racket` site 逐帧取真实拍心/拍面，并用
+`mj_differentiatePos + mj_objectVelocity` 取拍心速度。但 canonical grounding 只改 root z，
+尚未证明 GMR world 到 HOPE +X/虚拟球桌的变换，intake 的 mirror status 也仍是 unverified。
+因此首次 v2 中生成的 virtual-return/覆盖列已全部作废，只保留其与 v3/v4 逐资产相等的
+safety subtree。接受的 v4 虽冻结了 64 题（semantic SHA `4dfa0548...`），但写明
+`consumed_for_returnability=false`；十条的 `top_training_phase_candidates/question_coverage`
+和全部 2-vs-4 selector 都是 `null/blocked`。完整证据链在
+`configs/motion_video_gmr_phase_safety_results_20260711.json`。必须先完成 schema-2 + HOPE +X
+reground（或给出独立验证的显式 proper-rigid 4x4 transform）和镜像语义，才能用同一题纸
+重跑相位与覆盖；v4 已把这个未来开关的验证和对位应用写进工具，但当前合同仍关闭。
+
 | 组 | 语义动作 | 文件 | 时长 / 帧数 | 当前角色 |
 | --- | --- | --- | --- | --- |
 | Franco | 正手挡 | `forehand_dang.mp4` | 2.167 s / 65 | 四动作候选 |
@@ -130,7 +151,8 @@ no-clobber grounding 与稠密安全门，不是直接进 RL。
    当前 per-video-betas GMR 只作管线诊断，不能冒充该正式步骤。
 2. 对单条 GMR 轨迹做内容寻址的 root/ground 校准并保存 before/after clearance 报告；
    禁止目录扫描、原地覆盖或用共享最小值污染别的动作。随后生成 50 Hz、31 关节、runtime
-   body order、kinematics schema-2 NPZ，并重落地到 HOPE +X。
+   body order、kinematics schema-2 NPZ，并重落地到 HOPE +X。现有 240 Hz GMR 安全屏可以提前
+   淘汰明显穿模，但不能代替这一坐标契约，也不能代替 schema-2 后的重审。
 3. 跑 `audit_motion_npz.py`：finite、关节位置/速度、加速度、首帧冷启动、foot skate、触球窗。
 4. 跑 vendor MJCF `audit_self_collision.py`：要求零自碰撞；另外记录球拍/手柄到头颈、胸腹、
    对侧手臂的最小余隙，不能只看碰撞布尔值。
@@ -359,10 +381,10 @@ heading 若单独开，必须同时给 yawed/post-swing 起始状态覆盖；仅
    且 pilot 暴露约 8 cm 穿地，未授权 schema-2 或 RL。
 4. 已完成：十条 diagnostic GMR 的单文件 ground/root 校准与内容寻址账本；只证明离散源帧
    近地不穿透，未改变 `diagnostic_video_betas`/formal-ineligible 状态。
-5. 已完成：十条 GVHMR PT 的同人等权 canonical-betas diagnostic materialize 和 canonical
-   GMR 10/10；没有实测身高，仍不是 A3 标定。现在先对新 GMR 重跑 grounding、inter-frame
-   连续地面/自碰/拍柄余隙/桌网 clearance、动力学与 schema-2；之后才做 L0/L1/逐帧回球率，
-   淘汰空间路径，不启动 RL。
+5. 已完成：十条 GVHMR PT 的同人等权 canonical-betas diagnostic materialize、canonical
+   GMR 10/10、独立离散 grounding 10/10，以及 240 Hz 有限插值地面/自碰/拍柄-身体安全屏。
+   没有实测身高，仍不是 A3 标定；桌网/动力学/schema-2 仍开。GMR-world→HOPE 桌球坐标和
+   mirror 未证，所以逐帧回球率、击球相位和 2-vs-4 覆盖已 fail-closed，不启动 RL。
 6. 对幸存路径做 native/TOPP 双资产和重复门禁。
 7. 泛化动态 clip catalog 与共同问题轴；先在 CPU/Isaac smoke 证明四动作身份、side sign、题目绑定。
 8. 先跑 family/候选/时间律小消融，再跑 2-vs-4；不把所有轴一次打包。
