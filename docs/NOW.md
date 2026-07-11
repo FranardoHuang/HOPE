@@ -27,9 +27,15 @@ Rules:
 
 ## 2026-07-11 现场状态
 
-- 当前没有训练或判卷任务在跑。上一波的历史证据见
-  [RunPod 训练审计](RUNPOD_TRAINING_AUDIT_2026-07-10.md)和
-  [第一阶段总结](PHASE1_SUMMARY_2026-07-10.md);旧百分比只作机制证据,不是新尺下的正式排名。
+- **Phase-1 已恢复满池(07-11 14:00 CST)**:两台 Pod 共六张 5090，每卡四条 4096-env
+  训练，`4/4/4 + 4/4/4 = 24` 条预注册实验均达首 PPO iteration。实测每卡约
+  `22.9–23.2/32.6 GiB`、GPU 利用率约 `87–97%`，host RAM 仍有 `840/904 GiB`
+  available。唯一一次 LZ-seed3 scene-start `malloc` 失败已保留，完全同配方的精确单臂
+  retry 成功；不能把失败臂算成第 25 条。
+- 两 Pod 训练 checkout 均冻结在 clean `6d93bcb`，有任一训练存活就禁止 pull/改工作树；
+  detached evaluator 在 clean `fdc2d36`。fresh `0/1000/2000` 的 clean `10/侧` checkpoint
+  worker 正在跑(Pod1 PGID `1356942`、Pod2 `184312`)；后续 cadence manifest 已预注册
+  causal 20k/terminal 与 fresh 每 2k 点，不等 terminal 才判。
 - 还没有 accepted quality baseline。不给 30+ 历史臂盲补全表:先用 M3f/M2/G1
   known-good/common/known-bad canary 验尺,再用单球 `ns=0` 筛候选,只给存活臂补连续球、噪声和第二 seed。
 - 本地旧 Phase-1 顺序题原型与现役 schema-v3 BankExam 不兼容,已保存在
@@ -93,7 +99,7 @@ Rules:
 | --- | --- |
 | DeployParity training, 4096 envs, solo GPU | **~2.0-2.2 s/iter → 2000 it ≈ 1.2 h · 4000 ≈ 2.4 h · 8000 ≈ 4.7 h · 12000 ≈ 7 h · 20000 ≈ 12 h** |
 | Co-running 2 jobs on one GPU (measured) | each job ~20-25% slower, TOTAL throughput ≈ +37%; memory fine (2×~7 GB of 32 GB). **Stagger starts ≥60 s** |
-| 算力手册 FINAL | 4096 envs 定版;关键路径独占卡;~~广度实验最多 2 任务/卡;3 任务/卡不增反降 ✗~~ **franco 2026-07-08 深夜改规:消融波拉满 3-4 任务/卡**——"测得多"优先于单臂墙钟(单臂慢 25-45% 接受);独占仍留给跑到底/判卷关键臂 |
+| 算力手册 FINAL | 4096 envs 定版;关键路径独占卡;~~广度实验最多 2 任务/卡;3 任务/卡不增反降 ✗~~ **franco 2026-07-08 深夜改规:消融波拉满 3-4 任务/卡**——"测得多"优先于单臂墙钟(单臂慢 25-45% 接受);独占仍留给跑到底/判卷关键臂。**07-11 现批复验**:每卡 4 条约 22.9–23.2 GiB、util 87–97%，六卡都已实跑，不再把一卡一条叫“跑满” |
 | Kit boot + env build (per run) | ~2 min |
 | Mechanics check (512 envs, 25 it) | ~3 min |
 | ONNX export (play.py 原生路,占 GPU 槽) | ~4 min |
@@ -629,7 +635,7 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 | --- | --- | --- | --- | --- |
 | 全栈正确性尺+C++安全包+拍心/拍速合同收口 | ★★★ | **Codex** | `main` | 双 RunPod 源码验收已绿(portable/ROS C++、whole-body、planner);下一检查点=重出 fresh schema-v3 ONNX+修后考卷,旧判分器数字不入账 |
 | V5 专业动作可迁移性+Phase 加速器 | ★★★ | **Codex** | `main` | manifest+保守 halving 已就绪;下一检查点=验证触球帧/拍速口径,把行程/时间律报告接成 feasibility producer,再做 BankExam→scorecard adapter;两者完成前不自动发训练 |
-| Phase-1 schema-v3 Isaac 同题 adapter + 候选重排 | ★★★ | **Codex** | `codex/schema-v3-isaac-adapter` | **六卡训练中(07-11)**:历史主矩阵/q50/稳健性/连续卷已收口,M3f 仍是历史诊断第一;fresh runtime-order schema2 动作+v3 bank+31/31 零摩擦的 179D smoke 已过。Pod1=M3 old/S1+fresh seed1,Pod2=M2 old/S1+fresh seed2,六臂均达首 PPO iter,固定训练 checkout `6d93bcb`,续训 lineage=0/fresh=1;pair 合同只差 pairing 一键。最新实现/证据 `fb2445e`;下一检查点=终档 SHA 绑定+同卷 Isaac/MuJoCo,完成前不报胜者 |
+| Phase-1 schema-v3 Isaac 同题 adapter + 候选重排 | ★★★ | **Codex** | `codex/schema-v3-isaac-adapter` | **满池训练+checkpoint 曲线运行中(07-11)**:24 条=`8 continuation + 16 fresh face×plant 2×2×4 seeds`，六卡均实测 4 条并发；所有首 checkpoint finite 且 SHA 绑定。causal 17/18/19k 已显示峰值/回落，证明不能等终档；fresh exact clean-q10 正重判。训练固定 clean `6d93bcb`，eval `fdc2d36`；causal/LZ/LP 永远 inexact，仅 SZ 是 formal target。下一检查点=完成 fresh 0/1k/2k 曲线并启动长期 cadence，再按 paired 证据选 q50/终审；完成前不报胜者 |
 | HitterPure RallyFinal clean-base task: x-lock/lunge, settle/slip, backhand clearance, front-facing constraints + Isaac/AGI rally gates | ★★★ | codex for dongc1 | `hitter` | PATCH COMPLETE / GATES PENDING 2026-07-10: clean-base Final task, native move-settle-arm readiness, strict metadata/eval/gate plumbing and docs implemented; host tests + x86 build pass. Next = Isaac smoke/train/ablation, Final ONNX MuJoCo scores, then no-rescue AGI closed-loop with physical contact/landing evidence |
 | **加速度包络标定两件套(franco 07-09,时间律的下一层)**:①跟踪破裂标定(chirp/斜坡加压参考×现成跟踪策略,逐关节"边平衡边跟"真上限=判炸器 L1 升级);②贴限 vs 摊时消融(v5syn T_a 三档)——R9d 读数落地后一起排 | ★★★ | claude | — | 设计已入 research 时间律文档§六 |
 | GMR 源头修复(pod GMR 分支 `hope-frame0-warmup`:warm-up/帧0/逐关节限位旗标)+ 判炸器(repo 分支 `motion-feasibility-audit` 已推 origin)——两分支待 franco 审;接线与 L6 重生成见队列 0.6/0.7 行 | ★★★ | claude | 两分支 | 已验证收口(TIMELINE 07-08);合入即防复发 |
