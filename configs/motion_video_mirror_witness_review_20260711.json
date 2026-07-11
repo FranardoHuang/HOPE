@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "status": "verified_not_mirrored",
+  "scope": "human visual review of content-addressed asymmetric background-text crops from all ten final intake MP4s",
+  "reviewer": "Codex visual audit for Franco",
+  "review_semantics": "Every bound midpoint crop shows the laundry-machine Chinese labels and control panels upright and unreflected. This verifies final-video pixel orientation only; the independent right-arm-dominant GMR check verifies retarget-side preservation.",
+  "witness_semantic_sha256": "09f33225f7cc4c3816eee152c6d6497619990d12d37876d50c4cc78368fe4cb7",
+  "private_pixels_committed": false,
+  "side_swap_required": false,
+  "assets": [
+    {
+      "asset_id": "franco_forehand_block",
+      "frame_index": 32,
+      "crop_rgb_sha256": "058dd7a744bed5ecbe2421003c97a4c58d4309b6beff413c12840171ce40ba0b",
+      "assertion": "upright_unreflected_chinese_glyphs",
+      "side_swap_required": false
+    },
+    {
+      "asset_id": "franco_backhand_block",
+      "frame_index": 31,
+      "crop_rgb_sha256": "b6c475554fffaa561f2d0767e038dc81e0dbeb684920437cc9edf074c562929c",
+      "assertion": "upright_unreflected_chinese_glyphs",
+      "side_swap_required": false
+    },
+    {
+      "asset_id": "franco_forehand_loop",
+      "frame_index": 35,
+      "crop_rgb_sha256": "262d22a9c8322e0bb3b032398b14b20ed35c7f337d1994e2873622e3016c72cd",
+      "assertion": "upright_unreflected_chinese_glyphs",
+      "side_swap_required": false
+    },
+    {
+      "asset_id": "franco_backhand_loop_a",
+      "frame_index": 34,
+      "crop_rgb_sha256": "436d870b45b75c91d53665857e72953309df99230ab37ce339cffc5dc61f618c",
+      "assertion": "upright_unreflected_chinese_glyphs",
+      "side_swap_required": false
+    },
+    {
+      "asset_id": "franco_backhand_loop_b",
+      "frame_index": 45,
+      "crop_rgb_sha256": "e56db4688aa5af924ae92c714a31e20bac5f6d19cc1a61928635d14f7bd24358",
+      "assertion": "upright_unreflected_chinese_glyphs",
+      "side_swap_required": false
+    },
+    {
+      "asset_id": "franco_backhand_loop_c",
+      "frame_index": 49,
+      "crop_rgb_sha256": "e9502e0e147e6c71b4cdc69d7a8f8e8e87a13f831657d6094def7fcd1562a493",
+      "assertion": "upright_unreflected_chinese_glyphs",
+      "side_swap_required": false
+    },
+    {
+      "asset_id": "v6_forehand_block",
+      "frame_index": 17,
+      "crop_rgb_sha256": "526d6def7aecda20b2afb14c57554b308b1136ab972b2fb4bb050d1580a4a1a6",
+      "assertion": "upright_unreflected_chinese_glyphs",
+      "side_swap_required": false
+    },
+    {
+      "asset_id": "v6_backhand_block",
+      "frame_index": 17,
+      "crop_rgb_sha256": "900c3d9fc805b76d20e02e4f640b78fe27898e611c2b044cc3d046f5bbf225ea",
+      "assertion": "upright_unreflected_chinese_glyphs",
+      "side_swap_required": false
+    },
+    {
+      "asset_id": "v7_forehand_block",
+      "frame_index": 32,
+      "crop_rgb_sha256": "84d6e65117c2fbc8cec3712bd461b9cbb016960b97d122a7b77709346fd8a4bb",
+      "assertion": "upright_unreflected_chinese_glyphs",
+      "side_swap_required": false
+    },
+    {
+      "asset_id": "v7_backhand_block",
+      "frame_index": 32,
+      "crop_rgb_sha256": "72684041b2416abfd34072f01565980a10b5d77071e247bfed01a7abbd01c346",
+      "assertion": "upright_unreflected_chinese_glyphs",
+      "side_swap_required": false
+    }
+  ],
+  "limitations": [
+    "reviewed crops are private and represented in git only by source-video, decoded-frame and crop hashes",
+    "this review does not observe a table, a ball, contact time, or camera extrinsic"
+  ]
+}

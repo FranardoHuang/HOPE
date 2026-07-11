@@ -1,7 +1,7 @@
 # 新动作库、TOPP 与任意时刻下一拍
 
 日期：2026-07-11
-状态：设计已预注册；原视频 intake、canonical-beta GMR 和离散 grounding 均 10/10 完成；240 Hz 有限插值安全屏全部通过，但击球相位/回球覆盖/2-vs-4 selector 因 GMR-world→HOPE 桌球坐标和镜像语义未证而 fail-closed
+状态：原视频、canonical-beta GMR、grounding 和 240 Hz 安全屏均 10/10；canonical counterfactual HOPE frame/mirror 已验并消费 64 题，但 exact coverage 全 0，2-vs-4 与 TOPP 暂停，B/C 只保留为 spatial-retarget/vendor Gate3 候选
 范围：仅离线处理与仿真。本文不授权任何真机动作。
 
 ## 结论先行
@@ -118,7 +118,25 @@ safety subtree。接受的 v4 虽冻结了 64 题（semantic SHA `4dfa0548...`�
 和全部 2-vs-4 selector 都是 `null/blocked`。完整证据链在
 `configs/motion_video_gmr_phase_safety_results_20260711.json`。必须先完成 schema-2 + HOPE +X
 reground（或给出独立验证的显式 proper-rigid 4x4 transform）和镜像语义，才能用同一题纸
-重跑相位与覆盖；v4 已把这个未来开关的验证和对位应用写进工具，但当前合同仍关闭。
+重跑相位与覆盖；v4 已把这个未来开关的验证和对位应用写进工具，但 v4 合同当时仍关闭。
+
+后续证据已经把这个开关**只对 canonical counterfactual table**打开。十条 final MP4 的 midpoint
+crop 里，洗衣机中文标签均为正常、未反射方向；GMR 的右/左臂相邻帧关节增量能量比最小仍约
+`9.98x`（预注册门 `5x`），所以 `verified_not_mirrored/no side swap` 可证。每条 proper-rigid
+变换只由 frame-0 pelvis heading/XY 与已审地面生成：root XY→原点、heading→+X、Z 不动；
+矩阵在看题前冻结，禁止按覆盖率再调 yaw/XY。标准桌仍是 near edge `0.5m`、surface `0.76m`，
+不是录制现场桌外参。frame result SHA 为 `e70492be...`。
+
+v5 随后实际消费同一张 64 题纸（full result SHA `c299b7a0...`），并复现 v4 十条 safety subtree。
+结果是所有 motion/library 的 exact zero-retarget coverage 都为 `0/64`，因此 common support=0，
+2-vs-4 没有可判分母。这个 0 表示固定题的位置、拍位与可回球状态没有在同一帧重合，**不等于动作
+无效**。把球仅诊断性搬到拍心后，Franco 反手拉 B 为 `32/32 @ phase 0.5444`，C 为
+`27/32 @ 0.5155`，A 仅 `1/32`；但 B/C 峰距最近 immutable question position 仍约
+`0.165/0.237m`。因此只保留 B/C 为显式 spatial-retarget 候选，不把 intrinsic 当命中率，
+也不从结果反调 frame。`TOPP=paused_until_spatial_retarget`；之后还要 schema-2/L0/L1、桌网、
+动力学与 TOPP 后复审，最终动作与 2-vs-4 由智元 vendor MuJoCo Gate3/Gate3B 主判且不允许 reset。
+小账本为 `configs/motion_video_gmr_phase_counterfactual_results_20260711.json`，完整坐标合同见
+`docs/interfaces/motion_gmr_hope_frame_contract.md`。
 
 | 组 | 语义动作 | 文件 | 时长 / 帧数 | 当前角色 |
 | --- | --- | --- | --- | --- |

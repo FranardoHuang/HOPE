@@ -66,8 +66,15 @@ def test_ready_prereg_is_content_addressed_and_crosschecks_canonical_grounding()
 
 def test_prereg_binds_exact_source_tools_and_two_vs_four_papers():
     plan = json.loads(PLAN.read_text(encoding="utf-8"))
+    # The v4 preregistration is immutable runtime history.  Its screen tool is
+    # intentionally the accepted v4 bytes; the live tool now contains the
+    # separately preregistered per-asset counterfactual-frame path.
+    assert plan["tool_contract"]["screen"] == {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v4/screen_motion_gmr_phase_safety.py",
+        "bytes": 69769,
+        "sha256": "3244c3ff395ad10809d478b9469cb867555be4cf397ace606834dc0de9f3e302",
+    }
     local_tools = {
-        "screen": SCREEN,
         "grounding_dependency": REPO / "scripts/ground_gmr_pkl.py",
         "self_collision_dependency": (
             REPO / "hope_training/whole_body_tracking/scripts/audit_self_collision.py"

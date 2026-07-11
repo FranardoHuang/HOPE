@@ -435,6 +435,27 @@ GMR pickles and full result JSON remain private ignored artifacts; do not add
 them to git or a public registry. Schema-2 +X reground/explicit transform and
 mirror evidence remain required before using the frozen question paper.
 
+The follow-up counterfactual frame/phase evidence is versioned separately:
+
+```text
+local ignored: vendor_assets/motion_video_intake_20260711/gmr_frame_contract_v1/
+Pod1 control:  /workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v5/
+Pod1 output:   /workspace/codexschema/motion_video_intake_20260711/phase_safety_v5/
+```
+
+Restore the exact ten grounded PKLs before reproducing the local frame audit;
+raw video and decoded mirror crops remain private.  The accepted full v5 result
+is `phase_safety_v5/phase_safety_result.json` (792,241 bytes, SHA-256
+`c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53`).
+Tracked small ledgers are
+`configs/motion_video_gmr_frame_contract_results_20260711.json` and
+`configs/motion_video_gmr_phase_counterfactual_results_20260711.json`.
+Do not restore v5 over v4 or rerun into either accepted output directory.  The
+scored table is only the canonical HOPE virtual table; capture-table pixels,
+extrinsic and real-returnability truth remain absent.  Reproduction commands
+and no-clobber checks are in
+`docs/operations/run_motion_gmr_counterfactual_screen.md`.
+
 ### Venue strike timing table
 
 The continuous-rally timing audit uses the processed strike event table, not

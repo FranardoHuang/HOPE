@@ -23,6 +23,20 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-11
 
+- Closed the ten-air-swing canonical counterfactual frame/mirror prerequisite
+  and actually consumed the frozen 64-question phase paper on Pod1 CPU-only.
+  Per-clip frame-0 pelvis transforms are proper-rigid, ground-preserving and
+  frozen before scoring; normal-direction Chinese background labels plus
+  >=9.98x right/left GMR arm-motion energy verify no mirror/no side swap.  This
+  is the standard HOPE virtual table, not a recovered capture table.  v5 result
+  `c299b7a0...` keeps all v4 safety subtrees equal but returns exact `0/64` for
+  every motion/library, so two-vs-four is inconclusive—not evidence that every
+  action is useless.  Intrinsic relocation-only evidence retains Franco
+  backhand-loop B (`32/32`, phase .5444) and C (`27/32`, .5155) for explicit
+  spatial retarget; none is TOPP-eligible.  TOPP is paused through
+  spatial-retarget/schema-2/L0/L1/table-net/dynamics, and vendor MuJoCo
+  Gate3/Gate3B without reset remains the primary final motion/library gate.
+  No RL, GPU, frozen training checkout or real robot was touched.
 - Completed canonical-GMR discrete grounding and the next CPU-only dense safety
   screen for all ten Franco/v6/v7 air swings. Across 654 source frames and
   5,162 samples at 240 Hz, ground-danger, robot self-collision, racket/handle
