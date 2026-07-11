@@ -1546,3 +1546,7 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `TensorTypeAndShapeInfo` 借自已经析构的临时 `TypeInfo`，formal 179 与 175 模型都能触发
    `length_error/bad_alloc`。修复为显式保留两个 input owner，并增加真实 ONNX optional test；旧失败
    不计分，必须隔离重建和 formal candidate 实跑后才能关闭加载门。
+52. 【franco/Codex】**formal 179 production loader 门过，但仍不冒充 Gate3**——ROS/AimRT-enabled
+   Release 三目标全链接，真实 SZ 2k ONNX test 1/1、native 205 pass/9 optional skip；无 no-publish
+   preflight rc2，安全 preflight rc0 且输出 obs179/双 SHA、零 backend init/start。仅执行零观测 ONNX
+   prewarm，无 driver/backend tick；normal envelope、canonical recovery、厂商 Gate3/Gate3B 继续 open。

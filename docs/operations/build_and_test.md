@@ -226,8 +226,9 @@ An accepted run exits zero and prints `backend_not_initialized=true`, `obs_dim`,
 the exact face-command/bank/source-family metadata checks and the existing planner-mode guard.
 The output must contain neither `backend cfg` nor `A3AimrtBackend initialised`. Omitting
 `--no-publish`/`--dry-run` exits 2 before model or backend initialization. This is a loader and
-metadata gate only: it does not tick the actor, connect ROS/AimRT, instantiate MuJoCo, or authorize
-robot commands.
+metadata gate only. Constructing `PpPolicy` deliberately performs one zero-observation ONNX
+prewarm inference; it does not start the policy driver, tick a backend, connect ROS/AimRT,
+instantiate MuJoCo, or authorize robot commands.
 
 The real-model loader regression must be run with an exported ONNX, not just a synthetic header
 test. It guards the ONNX Runtime `TypeInfo`/`TensorTypeAndShapeInfo` owner lifetime:
@@ -241,6 +242,26 @@ A3_PP_ONNX_PATH=/absolute/path/to/policy.onnx \
 
 Without `A3_PP_ONNX_PATH` this one optional asset test skips. A real formal 179 export must pass it
 before the production preflight is credited.
+
+For a direct-CMake build, the runtime may also need the build-tree TBB directory (the package
+builder stages this dependency automatically):
+
+```bash
+export LD_LIBRARY_PATH="$B/gnu_13.3_cxx20_64_release:${LD_LIBRARY_PATH:-}"
+```
+
+Verified in the isolated ROS/AimRT-enabled Release archive at source `a82eba6c` on 2026-07-11:
+
+- all three targets (`run_tests`, production ping-pong runner and runtime probe) linked;
+- the formal SZ seed2 model-2000 ONNX SHA was `350b51cc...34cc2`;
+- real-model loader regression: 1/1 pass;
+- full native suite: 205 pass / 9 optional-asset skips / 0 failures (214 total);
+- preflight without no-publish: rc2 before model/backend initialization;
+- planner + no-publish preflight: rc0, `obs_dim=179`, contract
+  `3a3b3d95...b9972`, checkpoint `d920...5e22`, and no backend-init/start line.
+
+This closes the production binary's formal-model loading gate, not the backend first-tick or
+vendor MuJoCo Gate 3/Gate 3B behavior gate. Full content-addressed evidence is recorded in G06.
 
 Safety finite checks rely on IEEE NaN/Inf semantics. Verify Release did not
 re-introduce fast-math:

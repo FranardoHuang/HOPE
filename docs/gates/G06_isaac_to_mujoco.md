@@ -567,3 +567,30 @@ and 179-D models could throw `length_error`/`bad_alloc`. The source now retains 
 `TypeInfo` owners through all shape/type reads and adds an optional real-ONNX regression. This
 finding invalidates the failed loader attempt, not the model; isolated Release rebuild plus the
 formal-ONNX test and production preflight are required before marking the repair verified.
+
+#### 2026-07-11 formal 179 production-loader gate
+
+The repair and model-only preflight are now verified in a second isolated archive,
+`/workspace/codexschema/gate3_face179_a82eba6`, from exact source
+`a82eba6c7dbfad0c6750b2ca5684f3f2f7b6ea6e` (tree `7d0452ea...354a`, archive SHA
+`7553dde0...c58`). The configure enabled both ROS messages and the AimRT backend; Release built
+`run_tests`, `a3_deploy_onnx_ref_pingpong` and `a3_policy_runtime_probe`. Their binary SHAs were
+`0aef44d2...3440c`, `1f0e13de...20cc` and `8cf9b300...36e0`. The formal SZ seed2 model-2000 ONNX
+was copied read-only into the archive and retained SHA `350b51cc...34cc2`.
+
+With `A3_PP_ONNX_PATH` bound to that model, the lifetime regression passed 1/1; the full suite was
+205 pass, 9 optional-asset skips and 0 failures (214 total). Without no-publish,
+`--model-preflight-only` exited 2 before model/backend initialization. With
+`--planner --no-publish --model-preflight-only`, it exited 0 and printed
+`backend_not_initialized=true`, `obs_dim=179`, training contract `3a3b3d95...b9972` and source
+checkpoint `d920...5e22`. Both stdout/stderr searches found no `backend cfg`, backend initialized or
+backend started line. Accepted/preflight and full-suite logs have SHAs `2962d653...b5f4` and
+`eb15d603...f64e`.
+
+The direct-CMake executable needed its build-tree TBB directory on `LD_LIBRARY_PATH`; the packaged
+runner stages TBB. `PpPolicy` construction performs one intended zero-observation ONNX prewarm
+inference, but no policy driver, backend tick, transport, simulator, Kit or command path started.
+The live training/eval checkouts remained clean at `6d93bcb...`/`46a0ce2...`, and no isolated
+process remained. This closes formal-model production loading only. First backend tick, per-clip
+normal envelope, canonical recovery tuple and full vendor MuJoCo Gate 3/Gate 3B behavior remain
+open, so G06 stays Partial.
