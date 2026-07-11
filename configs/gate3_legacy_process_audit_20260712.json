@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "audit_id": "gate3-legacy-rally-process-and-provenance-audit-v1",
+  "created_utc": "2026-07-12T02:00:00Z",
+  "source_commit": "024e5835d468241a29f6c29cebc20557df481660",
+  "scope": "static audit of the tracked legacy Gate3 shell/conductor only; no script, process, simulator, transport, Pod, GPU, or robot was run",
+  "legacy_shell": {
+    "path": "agi/a3_deploy_example/scripts/pp_gate3_rally.sh",
+    "sha256": "4d6353ad534d2fc9f154ee11b0df58285935cc0054b1a30fed9b51d43be7a56a"
+  },
+  "legacy_conductor": {
+    "path": "agi/a3_deploy_example/scripts/pp_rally_conductor.py",
+    "sha256": "1870978cfb06e2a3cd67d96aa3f3c3439a423cb11a3587df2820cdae346c8886"
+  },
+  "verdict": "legacy scripts are historical evidence only and are not an approved launcher for a new formal Gate3 run",
+  "risks": [
+    {
+      "id": "G3LEG-001",
+      "severity": "critical",
+      "file": "agi/a3_deploy_example/scripts/pp_gate3_rally.sh",
+      "lines": [23, 24, 25, 26, 27, 89, 90, 91, 92, 93, 94],
+      "evidence": "pkill -9 by fuzzy command pattern or global executable name is used at startup and shutdown",
+      "consequence": "unrelated Kit, simulator, planner, runner, ROS introspection, or another user's session can be killed without ownership proof"
+    },
+    {
+      "id": "G3LEG-002",
+      "severity": "critical",
+      "file": "agi/a3_deploy_example/scripts/pp_rally_conductor.py",
+      "lines": [229, 230, 231, 311, 312, 313, 314, 315, 316, 317, 318],
+      "evidence": "dropout stress discovers planners using pgrep -f and SIGSTOP/SIGCONT signals every fuzzy match",
+      "consequence": "the conductor can suspend or resume a planner it did not launch"
+    },
+    {
+      "id": "G3LEG-003",
+      "severity": "high",
+      "file": "agi/a3_deploy_example/scripts/pp_gate3_rally.sh",
+      "lines": [15, 35, 52, 64, 69],
+      "evidence": "set +e and background setsid launches do not retain PID/PGID, starttime, cmdline, or an ownership token",
+      "consequence": "partial launch failures continue and no later cleanup can prove process ownership"
+    },
+    {
+      "id": "G3LEG-004",
+      "severity": "high",
+      "file": "agi/a3_deploy_example/scripts/pp_gate3_rally.sh",
+      "lines": [15, 31, 40, 42, 59, 71, 76, 79, 88],
+      "evidence": "there is no EXIT/INT/TERM trap around the multi-process sequence",
+      "consequence": "an early failure or interrupt can leave simulator, planner, ball publisher, topic echo, runner, and iceoryx processes alive"
+    },
+    {
+      "id": "G3LEG-005",
+      "severity": "high",
+      "file": "agi/a3_deploy_example/scripts/pp_gate3_rally.sh",
+      "lines": [16, 17, 18, 80],
+      "evidence": "GEAR, DIST, WS, and SIM_INSTALL are hard-coded to one user's home/workspace",
+      "consequence": "the executed source/binary/config can differ silently from the reviewed checkout"
+    },
+    {
+      "id": "G3LEG-006",
+      "severity": "critical",
+      "file": "agi/a3_deploy_example/scripts/pp_gate3_rally.sh",
+      "lines": [31, 35, 42, 52, 59, 64, 79, 84, 85],
+      "evidence": "vendor sim binary/config/MJCF, planner YAML, runner binary/model, and conductor are not SHA-bound before execution",
+      "consequence": "a Gate3 score cannot establish which plant, planner, policy, or runtime bytes actually ran"
+    },
+    {
+      "id": "G3LEG-007",
+      "severity": "high",
+      "file": "agi/a3_deploy_example/scripts/pp_gate3_rally.sh",
+      "lines": [19, 20, 35, 52, 64, 69, 73, 74, 81, 82, 83],
+      "evidence": "ROS_DOMAIN_ID, RMW implementation, sourced overlays, and transport environment are inherited or hard-coded but not recorded/bound",
+      "consequence": "the run can join a foreign ROS graph or load different message/runtime libraries"
+    },
+    {
+      "id": "G3LEG-008",
+      "severity": "high",
+      "file": "agi/a3_deploy_example/scripts/pp_gate3_rally.sh",
+      "lines": [28, 35, 37, 40, 57, 67, 69, 77, 95, 98, 100, 110],
+      "evidence": "fixed /tmp outputs are deleted/overwritten and /dev/shm/iox1_0_* is removed by wildcard",
+      "consequence": "prior evidence is clobbered and unrelated shared-memory state can be destroyed"
+    },
+    {
+      "id": "G3LEG-009",
+      "severity": "high",
+      "file": "agi/a3_deploy_example/scripts/pp_gate3_rally.sh",
+      "lines": [37, 38, 39, 40, 71, 72, 73, 74],
+      "evidence": "readiness is inferred from loose log/topic text without recorded child identity, exit status, or content-addressed run directory",
+      "consequence": "stale/foreign output can satisfy a readiness check and failures lack a complete ledger"
+    },
+    {
+      "id": "G3LEG-010",
+      "severity": "critical",
+      "file": "agi/a3_deploy_example/scripts/pp_gate3_rally.sh",
+      "lines": [79, 84, 85],
+      "evidence": "the production formal --model-preflight-only loader gate is not executed before simulator/conductor runtime",
+      "consequence": "backend/runtime can start before the formal 179 metadata and model loader contract is proven"
+    },
+    {
+      "id": "G3LEG-011",
+      "severity": "critical",
+      "file": "agi/a3_deploy_example/scripts/pp_rally_conductor.py",
+      "lines": [121, 124, 125, 126, 127, 128, 129, 130],
+      "evidence": "runner is launched without --no-publish and PP_EXTRA_ARGS is an unrestricted environment-controlled flag list",
+      "consequence": "the legacy path is not a first-tick no-publish harness and can silently alter runtime behavior"
+    },
+    {
+      "id": "G3LEG-012",
+      "severity": "high",
+      "file": "agi/a3_deploy_example/scripts/pp_rally_conductor.py",
+      "lines": [139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151],
+      "evidence": "runner boot loop has no post-loop assertion and prints runner-up even when the marker never appeared",
+      "consequence": "the conductor can proceed after a 90-second failed boot as though the runner were ready"
+    },
+    {
+      "id": "G3LEG-013",
+      "severity": "high",
+      "file": "agi/a3_deploy_example/scripts/pp_rally_conductor.py",
+      "lines": [344, 345, 346, 347, 348, 349, 350],
+      "evidence": "timeout cleanup calls proc.kill on only the direct runner PID and does not validate or clean its owned process group",
+      "consequence": "descendants can leak, while the outer shell later compensates with unsafe broad pkill"
+    },
+    {
+      "id": "G3LEG-014",
+      "severity": "high",
+      "file": "agi/a3_deploy_example/scripts/pp_gate3_rally.sh",
+      "lines": [22, 23, 24, 25, 26, 27, 31],
+      "evidence": "no exclusive harness/Kit/simulator/runner lock or exact existing-process conflict gate precedes cleanup/launch",
+      "consequence": "concurrent sessions are destroyed instead of being rejected fail-closed"
+    }
+  ],
+  "plan_only_source_gate_properties": [
+    "the only child commands are read-only Git helpers with GIT_OPTIONAL_LOCKS=0",
+    "no simulator, Kit, transport, planner, runner, process scan, signal, or runtime lock path exists",
+    "core artifact paths are canonical, reject every symlink ancestor, and are SHA-bound without claiming complete runtime closure",
+    "source, training, and evaluation paths equal their clean exact-commit Git top-levels and record Git dir/common dir",
+    "proposed argv rejects equals-form absolute paths, unbound absolute paths, and relative payloads",
+    "the optional plan output uses fsynced temporary bytes plus atomic hard-link no-replace",
+    "plan output is outside source/training/evaluation worktrees and every Git dir/common dir, with clean identities revalidated before write",
+    "the plan ledger records runtime status not_run and real robot authority false"
+  ],
+  "unclosed_future_runtime_requirements": [
+    "production runner native full-state --first-tick-json output",
+    "pidfd plus cgroup or reviewed supervisor startup handshake",
+    "PATH/LD/Python/AMENT manifests and complete AimRT/transitive shared-object/plugin closure",
+    "parser-backed vendor config to MJCF semantic binding",
+    "reviewed atomic runtime ledger and exact-owned runtime lock protocol",
+    "formal 179 loader and passive no-publish first tick only after all prior requirements close",
+    "vendor Gate3/Gate3B behavior remains the only promotion authority"
+  ]
+}

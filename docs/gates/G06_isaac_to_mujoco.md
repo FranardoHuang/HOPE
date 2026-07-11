@@ -32,6 +32,7 @@ This gate is the sim-to-sim bridge before real deployment.
 - [../operations/run_training.md](../operations/run_training.md)
 - [../operations/run_deploy_dryrun.md](../operations/run_deploy_dryrun.md)
 - [../operations/run_shared_interface_rehearsal.md](../operations/run_shared_interface_rehearsal.md)
+- [../operations/run_gate3_first_tick_harness.md](../operations/run_gate3_first_tick_harness.md)
 
 ## Acceptance Criteria
 
@@ -674,3 +675,57 @@ blocked and root-caused, never averaged. The design-only validator is green (`50
 stability and Gate3B scoring judges, their shared runtime contract, exact A policy-ownership/PPO
 accounting, calibrated plant and safety bindings. See
 `docs/operations/run_phase1_recovery_tuple_prereg.md`; G06 remains `Partial`.
+### 2026-07-12 Gate3 first-tick static plan gate (red-team corrected)
+
+The historical `pp_gate3_rally.sh` launch command is no longer an approved formal launcher.
+Content-bound audit `configs/gate3_legacy_process_audit_20260712.json` records 14 concrete risks:
+eleven fuzzy `pkill -9` calls, conductor `pgrep -f` SIGSTOP/SIGCONT, no PID/PGID/starttime/token
+ledger or trap, hard-coded unbound workspaces, inherited ROS graph, destructive fixed `/tmp` and
+shared-memory cleanup, no formal-loader-first gate, publish-capable free-form runner args, a boot
+loop that proceeds after timeout, partial direct-PID cleanup, and no concurrency lock. The old
+scripts remain historical result provenance; do not invoke their cleanup to make a new run pass.
+
+Red-team review rejected feature commit `1fc69d1` as mergeable runtime shape: it carried an armed
+future supervisor before dependency closure or a safe startup handshake existed. The corrected
+`scripts/run_gate3_first_tick_harness.py` is **plan-only**. It has no runtime option/arming phrase,
+direct process launcher, signal path, process scan, runtime lock or trace consumer. Old
+`--mode run`/arming arguments fail in argparse before any contract/Git work. Its only child commands
+are read-only Git queries with `GIT_OPTIONAL_LOCKS=0`; therefore “starts no process” is too broad,
+but it starts no sim/Kit/transport/planner/runner and sends no signal.
+
+Schema-2 validation binds core absolute path+SHA pairs, but does not call that set an exact runtime
+closure. Every path must equal its resolved spelling and every component is checked with `lstat`,
+so symlink ancestors fail. Training/eval paths must be clean exact-commit Git top-levels. Proposed
+argv arrays are fixed and passive/no-publish; `--flag=/abs`, unbound absolute paths, relative
+payloads and extra flags fail. The optional plan output uses fsynced temporary bytes plus atomic
+hard-link create and directory fsync; it never uses overwrite-capable `os.replace`. It is rejected
+under the recorded source/train/eval worktrees or any Git dir/common dir, then all three clean Git
+identities are revalidated before an external write. The ledger's runtime block is permanently
+`not_run`, with no components, signals, lock, behavior result or ownership token. Source tests pass
+`32` cases; no runtime was launched.
+
+The plan explicitly keeps five runtime blockers null: current C++ lacks full
+`--first-tick-json`; exact process ownership still needs pidfd plus a cgroup/reviewed supervisor
+startup handshake; PATH/LD/Python/AMENT directory manifests and AimRT/transitive `.so`/plugin
+closure are absent; separate vendor config/MJCF hashes do not prove parser-resolved semantics; and
+the atomic runtime ledger/exact lock transaction is undesigned. String containment in a config is
+not accepted as MJCF binding. Filling or deleting a blocker invalidates the static contract. A
+separate reviewed runtime implementation must close all five; this source never becomes runtime
+eligible by changing a flag.
+
+The ledger also freezes a ready-state hypothesis without turning it into a result. Fresh training
+starts at pelvis `(0,0,1.0684)` plus default q; vendor `stand` is
+`(-0.0416378,0.000359,1.06839)` with about `(-0.030,0.249,0.042) deg` rpy. Mapped joint L2 is
+`0.171845 rad`, dominated by head-yaw `-0.169416 rad`; excluding the head still leaves
+`0.028789 rad`. Because Stage-1 bank contact positions are env-origin absolute while 175/179 target
+position is relative to current racket FK, the `-4.16 cm` root-x shift need not cancel. It may
+contribute to the engine gap, but is not yet causal evidence. The preregistered same-K100
+vendor/root-only/joints-only/full-match four-cell diagnostic remains inexact and unrun; the formal
+vendor stand is unchanged.
+
+Every plan records the four-stage engine-gap ladder as not run with no inference authority:
+kinematic replay, open-loop action replay, external-observation closed loop, then native closed
+loop. Isaac stays training/diagnostic-only. A future first tick would close only a runtime
+prerequisite; only Agibot vendor MuJoCo Gate3/Gate3B behavior can promote a checkpoint. Full static
+operation and remaining blockers are in `docs/operations/run_gate3_first_tick_harness.md`. G06
+remains `Partial`.

@@ -33,6 +33,26 @@ Use this file for short project-state updates that future humans and agents need
   schedules, A bridge/handoff/ownership/PPO certificates and fresh checkpoint,
   calibrated plant, separate Gate3/Gate3B judges and shared runtime. See
   `docs/operations/run_phase1_recovery_tuple_prereg.md`.
+- Red-team-corrected the Gate3 first-tick source gate to **plan-only**; feature
+  commit `1fc69d1` must not be merged alone because it carried a future runtime
+  supervisor before artifact closure/startup ownership were solved. The current
+  source has no runtime mode/arming, direct launcher, signal, process scan,
+  runtime lock or trace-consumer path. It starts only read-only Git helpers with
+  `GIT_OPTIONAL_LOCKS=0`; it starts no sim/Kit/transport/planner/runner and sends
+  no signal. Schema-2 requires Git top-level equality, canonical real paths with
+  no symlink ancestor, core SHA bindings and exact proposed argv (rejecting
+  `--flag=/abs`, unbound absolute and relative payloads). Plan output is a
+  fsynced temp plus atomic hard-link no-replace transaction, including a tested
+  competing-create race; source/train/eval worktrees and every Git dir/common
+  dir are forbidden destinations, and all three clean identities are rechecked
+  before an external write. Runtime remains `not_run` with no token. Five blockers
+  stay explicit/null: native full `--first-tick-json`; pidfd+cgroup/supervisor
+  startup handshake; PATH/LD/Python/AMENT and AimRT/transitive `.so`/plugin
+  closure; parser-backed vendor-config→MJCF binding; and atomic runtime
+  ledger/exact lock protocol. Static legacy audit still binds 14 old-launcher
+  risks. Isaac is diagnostic only; vendor Gate3/Gate3B remains the arbiter.
+  Tests: `32 passed`; no sim/Kit/transport/runner/Pod/GPU/robot action. See
+  `docs/operations/run_gate3_first_tick_harness.md`.
 - Preregistered the post-v5 spatial-retarget proposal screen without using a
   Pod/GPU or touching hardware. The contract screens all ten Franco/v6/v7
   motions against every matching immutable question; B/C priority is ranking

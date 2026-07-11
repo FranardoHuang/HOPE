@@ -508,6 +508,20 @@ under perfect_tracking.)
 
 ## 7. Gate 3 — planner + control closed-loop in MuJoCo (C++ `--planner`, sim)
 
+> **2026-07-12 launcher quarantine:** the tracked `pp_gate3_rally.sh` command below is retained
+> only as historical behavior evidence. Do not use it for a new formal run. Static audit found
+> broad `pkill -9`, conductor `pgrep -f` signalling, no owned PID/PGID/trap, hard-coded unbound
+> paths, fixed `/tmp`/wildcard shared-memory cleanup, no formal-loader-first gate and a runner boot
+> loop that proceeds after timeout. Use the **plan-only** static source procedure in
+> [run_gate3_first_tick_harness.md](run_gate3_first_tick_harness.md). It has no runtime/arming,
+> launch, signal, process-scan or runtime-lock path; it only runs read-only Git helpers with
+> `GIT_OPTIONAL_LOCKS=0`. Any plan output must be outside source/train/eval worktrees and their Git
+> dirs/common dirs; those clean identities are rechecked before the external atomic write. It
+> explicitly leaves full `--first-tick-json`, pidfd+cgroup/supervisor
+> startup ownership, complete PATH/AimRT `.so`/plugin closure, parser-backed config→MJCF binding
+> and the runtime ledger/lock transaction blocked. It does not authorize a first tick or hardware,
+> and a future first tick will not replace the no-reset Gate3/Gate3B behavior paper.
+
 The closed loop runs the DEPLOY binary itself: fake_ball → REAL hope_planner (sim
 profile, publishes the flat topics) → C++ runner in `--planner` mode
 (`external_base` localization from `/a3/base_pose_flat`) → AGI MuJoCo sim (iceoryx

@@ -1614,6 +1614,19 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    硬前置，Gate3B 共用 runtime 做 random-arrival q50 最终行为主判。JSON 全层拒 duplicate/NaN/Inf、
    数值/布尔别名和未知关键字段。prereg SHA=`ca7806df...d810616`，纯合同 `50 passed`；launch-check
    因 24 项 schedule/A-ownership-PPO-fresh/plant/Isaac/Gate3/Gate3B/shared-runtime 绑定仍 null 而按设计失败。
+61. 【franco/Codex】**Gate3 旧 broad-kill 路径已隔离；红队把新门收紧为真正 plan-only**——旧
+   `pp_gate3_rally.sh`/conductor 的 14 风险仍钉死（11 条 fuzzy `pkill -9`、`pgrep -f` 信号、无
+   trap/账本、无 SHA、固定 `/tmp`/通配 shm、runner 超时仍报 up）。红队判 feature `1fc69d1`
+   携带未来 runtime supervisor，不可单独 merge；现版已删完 run/arming/direct launcher/signal/
+   process scan/runtime lock/trace consumer，只会以 `GIT_OPTIONAL_LOCKS=0` 启只读 Git helper，不启
+   sim/Kit/transport/planner/runner、不发 signal。schema-2 强制 checkout=Git 顶层、路径全祖先无
+   symlink、core SHA、固定 argv，拒 `--flag=/abs`/未绑定绝对/相对 payload；plan 输出用 fsync temp
+   + atomic hard-link，竞争创建也不覆盖；source/train/eval worktree 及 Git dir/common dir 全禁写，
+   外部写前再核三仓 clean identity。runtime 固定 `not_run`、无 token。五个 null blocker：
+   full `--first-tick-json`、pidfd+cgroup/supervisor handshake、PATH/LD/AimRT `.so`/plugin 完整闭包、
+   parser-backed config→MJCF 语义绑定、runtime ledger+exact lock 原子协议。初态四格/engine-gap 四层
+   仍只 prereg/inexact/not-run；Isaac 仅诊断，智元 Gate3/Gate3B 才能晋级。`32 passed`，未碰
+   sim/Kit/transport/runner/Pod/GPU/真机。
 
 ## 2026-07-12:公司 Linux 机改动移植回来(那台不让 push)
 
