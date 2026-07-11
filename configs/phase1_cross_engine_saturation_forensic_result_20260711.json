@@ -1,0 +1,967 @@
+{
+  "analyzer": {
+    "path": "scripts/analyze_phase1_cross_engine_forensics.py",
+    "sha256": "077e3e48a5b63e2d93e8bffc327ee0b5b774ff772130c9c9cbddbc94c4086bf5"
+  },
+  "diagnosis": {
+    "causal_M3": {
+      "classification": "signed_face_information_erased_by_isaac_analytic_scorer_plus_physical_contact_outcome_gap",
+      "inference": "M3-old exposes the face-pairing defect in its signed normal metric, but the Isaac virtual contact path re-orients the normal toward the incoming ball before contact and therefore makes opposite face signs equivalent. MuJoCo physical contact preserves the distinction. The current Isaac return metric is structurally unable to reproduce this legacy face-pairing ranking.",
+      "primary_evidence": {
+        "M3_S1_backhand_isaac_mean_normal_error_deg": 3.664292944073677,
+        "M3_old_backhand_isaac_mean_normal_error_deg": 168.14729431152344,
+        "M3_old_mujoco_contact_but_net_fail_count": 47,
+        "M3_old_mujoco_counterfactual_legal_landing_count": 89,
+        "M3_old_mujoco_physical_return_count": 42
+      }
+    },
+    "common": {
+      "classification": "same_question_order_but_not_same_outcome_instrument",
+      "facts": [
+        "Both papers have exact question_id/order alignment and no censored attempts.",
+        "MuJoCo returned is based on physical contact/flight; Isaac returned is based on a capture gate plus analytic virtual contact/flight with physical_ball=false.",
+        "MuJoCo and Isaac use different engine-specific ready-state modes and hashes.",
+        "The fresh SZ paper holds the current zero-friction protocol exact, so plant friction cannot by itself explain its split."
+      ],
+      "gate_action": "Keep both cross-engine gates open. Do not tune a score threshold to force agreement. Add a same-instrument diagnostic (Isaac physical-ball truth and/or matched analytic counterfactual in both engines), export comparable numeric ready/base state, and preserve the physical MuJoCo result as the checkpoint selector until the causal axis is isolated."
+    },
+    "fresh_SZ": {
+      "classification": "engine_execution_divergence_at_capture_margin_plus_isaac_virtual_metric_ceiling",
+      "inference": "The same policy checkpoints reach materially different forehand strike states: model_4000 is wholly outside the MuJoCo 9.5 cm capture margin but comfortably inside it in Isaac. Isaac then scores an analytic virtual return rather than a physical collision. This is not repairable by changing a threshold and cannot be assigned to ball physics alone.",
+      "primary_evidence": {
+        "frozen_virtual_capture_radius_m": 0.095,
+        "model_2000_forehand_isaac_mean_position_error_m": 0.0302923749372059,
+        "model_2000_forehand_mujoco_mean_position_error_m": 0.09032448979591838,
+        "model_4000_forehand_isaac_mean_position_error_m": 0.02477521510148535,
+        "model_4000_forehand_isaac_virtual_hit_count": 49,
+        "model_4000_forehand_mujoco_hit_count": 0,
+        "model_4000_forehand_mujoco_mean_position_error_m": 0.131534693877551
+      },
+      "unresolved_causal_axes": [
+        "engine-specific ready-state mapping",
+        "articulation/actuator/contact dynamics between the two simulators",
+        "Isaac scorecard does not export per-question base state or physical-ball truth"
+      ]
+    }
+  },
+  "input_contract": {
+    "path": "/Users/Franco/Dropbox/\u4e52\u4e53/nohope/configs/phase1_cross_engine_saturation_forensic_inputs_20260711.json",
+    "sha256": "e074a7c4ff98d3e70e86a2a6e28ed71d7cbd391d15dc10b18a6477c94792747e"
+  },
+  "limitations": {
+    "causal_M3_paper_remains_evaluation_contract_inexact": true,
+    "isaac_base_state_not_exported": true,
+    "no_rescoring_or_threshold_change": true,
+    "no_simulator_or_training_process_started": true,
+    "ready_state_hash_schemas_are_engine_specific": true
+  },
+  "pairs": {
+    "causal_M3_old_vs_S1": {
+      "arms": {
+        "M3_S1": {
+          "base_and_termination": {
+            "isaac_base_state_observability": "not_recorded_in_accepted_scorecard_or_attempt_csv",
+            "mujoco_at_strike_base_position_mean_m": {
+              "x": 0.027971,
+              "y": -0.09217700000000001,
+              "z": 1.064387
+            },
+            "mujoco_run_level": {
+              "base_pitch_deg": 3.6485930837843146,
+              "base_roll_deg": 1.4175466655588165,
+              "foot_contact_fraction": 0.9572846158901229
+            },
+            "termination": {
+              "isaac_attempt_guard_reset_count": 1,
+              "isaac_attempt_physical_fall_count": 0,
+              "mujoco_attempt_guard_reset_count": 0,
+              "mujoco_attempt_physical_fall_count": 0,
+              "mujoco_summary_fell_union_count": 0,
+              "mujoco_summary_term_breakdown": {},
+              "summary_fell_is_physical_plus_guard_union": true
+            }
+          },
+          "continuous_at_strike": {
+            "backhand": {
+              "racket_normal_error_deg": {
+                "isaac_max": 6.659881591796875,
+                "isaac_mean": 3.664292944073677,
+                "isaac_min": 0.32625916600227356,
+                "mujoco_max": 11.915,
+                "mujoco_mean": 7.788100000000001,
+                "mujoco_min": 2.787,
+                "n_paired": 50,
+                "paired_mean_absolute_difference": 4.123807055926323
+              },
+              "racket_position_error_m": {
+                "isaac_max": 0.012535713613033295,
+                "isaac_mean": 0.007439723769202829,
+                "isaac_min": 0.003394415369257331,
+                "mujoco_max": 0.0583,
+                "mujoco_mean": 0.026934,
+                "mujoco_min": 0.0113,
+                "n_paired": 50,
+                "paired_mean_absolute_difference": 0.01949427623079717
+              },
+              "racket_velocity_error_mps": {
+                "isaac_max": 0.16455566883087158,
+                "isaac_mean": 0.09764519609510898,
+                "isaac_min": 0.04246452450752258,
+                "mujoco_max": 0.5373,
+                "mujoco_mean": 0.41331,
+                "mujoco_min": 0.2787,
+                "n_paired": 50,
+                "paired_mean_absolute_difference": 0.315664803904891
+              }
+            },
+            "forehand": {
+              "racket_normal_error_deg": {
+                "isaac_max": 4.3244524002075195,
+                "isaac_mean": 1.920753992333704,
+                "isaac_min": 0.5702692866325378,
+                "mujoco_max": 8.891,
+                "mujoco_mean": 5.289163265306122,
+                "mujoco_min": 1.381,
+                "n_paired": 49,
+                "paired_mean_absolute_difference": 3.3684092729724187
+              },
+              "racket_position_error_m": {
+                "isaac_max": 0.01881338097155094,
+                "isaac_mean": 0.012416291050612926,
+                "isaac_min": 0.005216395482420921,
+                "mujoco_max": 0.0488,
+                "mujoco_mean": 0.033287755102040816,
+                "mujoco_min": 0.0186,
+                "n_paired": 49,
+                "paired_mean_absolute_difference": 0.02087146405142789
+              },
+              "racket_velocity_error_mps": {
+                "isaac_max": 0.2076357752084732,
+                "isaac_mean": 0.13360629717306216,
+                "isaac_min": 0.07774998992681503,
+                "mujoco_max": 0.6014,
+                "mujoco_mean": 0.3542612244897959,
+                "mujoco_min": 0.1389,
+                "n_paired": 49,
+                "paired_mean_absolute_difference": 0.22065492731673378
+              }
+            }
+          },
+          "cross_engine_disagreement": {
+            "mujoco_0_isaac_1_question_causes": {},
+            "return_agreement_matrix": {
+              "mujoco_1_isaac_0": 1,
+              "mujoco_1_isaac_1": 99
+            }
+          },
+          "input_artifacts": {
+            "isaac_csv": {
+              "path": "M3/M3_S1/isaac_clean_k100.csv",
+              "sha256": "0bf608efa75d15f0c63e2fffafa9c149730311dc6ae361cf51105b69a9454c33"
+            },
+            "isaac_json": {
+              "path": "M3/M3_S1/isaac_clean_k100.json",
+              "sha256": "c352551a6d86074f0ba74dd43166313a104c07369f8d25684db1623b42763f52"
+            },
+            "mujoco_attempts": {
+              "path": "M3/M3_S1/mujoco_sim2sim_attempts.csv",
+              "sha256": "2c76b40ba0bf8d371b9be4a07cf0cc34d1544c4be5b187ae81fbd06d7a126f6b"
+            },
+            "mujoco_strikes": {
+              "path": "M3/M3_S1/mujoco_sim2sim_strikes.csv",
+              "sha256": "9f9db9d5ca044950c55fe269fb0bb13fd461babcb0b61823366586b48c782e8e"
+            },
+            "mujoco_summary": {
+              "path": "M3/M3_S1/mujoco_sim2sim_summary.json",
+              "sha256": "91fd14d20b4031f77267143287e9f8debbdbcbd6bd2c1c7c8db145d58ae4b631"
+            }
+          },
+          "name": "M3_S1",
+          "outcomes": {
+            "aggregate": {
+              "isaac": {
+                "n_guard_reset": 1,
+                "n_physical_fall": 0,
+                "n_reached_strike": 99,
+                "n_virtual_hit": 99,
+                "n_virtual_returned": 99
+              },
+              "mujoco": {
+                "n_counterfactual_contact": 100,
+                "n_counterfactual_legal_landing": 100,
+                "n_guard_reset": 0,
+                "n_hit": 100,
+                "n_physical_fall": 0,
+                "n_reached_strike": 100,
+                "n_returned": 100
+              },
+              "n_questions": 100
+            },
+            "backhand": {
+              "isaac": {
+                "n_guard_reset": 0,
+                "n_physical_fall": 0,
+                "n_reached_strike": 50,
+                "n_virtual_hit": 50,
+                "n_virtual_returned": 50
+              },
+              "mujoco": {
+                "n_counterfactual_contact": 50,
+                "n_counterfactual_legal_landing": 50,
+                "n_guard_reset": 0,
+                "n_hit": 50,
+                "n_physical_fall": 0,
+                "n_reached_strike": 50,
+                "n_returned": 50
+              },
+              "n_questions": 50
+            },
+            "forehand": {
+              "isaac": {
+                "n_guard_reset": 1,
+                "n_physical_fall": 0,
+                "n_reached_strike": 49,
+                "n_virtual_hit": 49,
+                "n_virtual_returned": 49
+              },
+              "mujoco": {
+                "n_counterfactual_contact": 50,
+                "n_counterfactual_legal_landing": 50,
+                "n_guard_reset": 0,
+                "n_hit": 50,
+                "n_physical_fall": 0,
+                "n_reached_strike": 50,
+                "n_returned": 50
+              },
+              "n_questions": 50
+            }
+          },
+          "plant_and_scorer": {
+            "isaac_evaluation_contract_exact": false,
+            "isaac_physical_ball": false,
+            "isaac_virtual_ball_outcome_recorded": true,
+            "mujoco_counterfactual_virtual_scorer_sha256": "190782e1be05c2e7b8795b046c1af31a500972c291b7b0165536bff039910ad8",
+            "mujoco_frictionloss_max": 0.0,
+            "mujoco_frictionloss_min": 0.0,
+            "mujoco_frictionloss_mode": "zero",
+            "mujoco_physical_ball_outcome_recorded": true
+          },
+          "question_id_order_sha256": "5b7e54ce2b42b9c4bfef18f7e326ddcb07235579c1aa374d8c21c7930a585eda",
+          "question_order_equal": true,
+          "ready_state": {
+            "byte_contract_equal": false,
+            "isaac": {
+              "mode": "isaac-default-stand",
+              "sha256": "3120e1308eeaf6b4870cb27f5c0c5569e384b0494619bf66208745a54d43177e"
+            },
+            "mujoco": {
+              "mode": "mjcf_named_keyframe:stand:v1",
+              "sha256": "3cbfe700abc54e0bde19f35c6245a14d09e6e68c74e9ba311bee8866a6837fc2"
+            }
+          }
+        },
+        "M3_old": {
+          "base_and_termination": {
+            "isaac_base_state_observability": "not_recorded_in_accepted_scorecard_or_attempt_csv",
+            "mujoco_at_strike_base_position_mean_m": {
+              "x": 0.1460268817204301,
+              "y": -0.05608064516129032,
+              "z": 1.0567064516129032
+            },
+            "mujoco_run_level": {
+              "base_pitch_deg": 3.3337438419391976,
+              "base_roll_deg": 1.4892986658987446,
+              "foot_contact_fraction": 0.915831043956044
+            },
+            "termination": {
+              "isaac_attempt_guard_reset_count": 1,
+              "isaac_attempt_physical_fall_count": 0,
+              "mujoco_attempt_guard_reset_count": 8,
+              "mujoco_attempt_physical_fall_count": 1,
+              "mujoco_summary_fell_union_count": 9,
+              "mujoco_summary_term_breakdown": {
+                "ee_body_pos": 9,
+                "fall_tilt": 1
+              },
+              "summary_fell_is_physical_plus_guard_union": true
+            }
+          },
+          "continuous_at_strike": {
+            "backhand": {
+              "racket_normal_error_deg": {
+                "isaac_max": 173.23281860351562,
+                "isaac_mean": 168.14729431152344,
+                "isaac_min": 164.29502868652344,
+                "mujoco_max": 32.035,
+                "mujoco_mean": 25.33758,
+                "mujoco_min": 15.166,
+                "n_paired": 50,
+                "paired_mean_absolute_difference": 142.80971431152344
+              },
+              "racket_position_error_m": {
+                "isaac_max": 0.020667916163802147,
+                "isaac_mean": 0.012772567244246602,
+                "isaac_min": 0.00706842727959156,
+                "mujoco_max": 0.0669,
+                "mujoco_mean": 0.041422,
+                "mujoco_min": 0.0128,
+                "n_paired": 50,
+                "paired_mean_absolute_difference": 0.028649432755753396
+              },
+              "racket_velocity_error_mps": {
+                "isaac_max": 0.1776842623949051,
+                "isaac_mean": 0.10367639571428298,
+                "isaac_min": 0.04609334096312523,
+                "mujoco_max": 0.5847,
+                "mujoco_mean": 0.326922,
+                "mujoco_min": 0.1301,
+                "n_paired": 50,
+                "paired_mean_absolute_difference": 0.22324560428571702
+              }
+            },
+            "forehand": {
+              "racket_normal_error_deg": {
+                "isaac_max": 2.950615406036377,
+                "isaac_mean": 1.5641767836752392,
+                "isaac_min": 0.5712977051734924,
+                "mujoco_max": 38.157,
+                "mujoco_mean": 13.707642857142858,
+                "mujoco_min": 8.458,
+                "n_paired": 42,
+                "paired_mean_absolute_difference": 12.143466073467618
+              },
+              "racket_position_error_m": {
+                "isaac_max": 0.023212730884552002,
+                "isaac_mean": 0.014093200653968822,
+                "isaac_min": 0.0043855095282197,
+                "mujoco_max": 0.2261,
+                "mujoco_mean": 0.057992857142857145,
+                "mujoco_min": 0.0309,
+                "n_paired": 42,
+                "paired_mean_absolute_difference": 0.04389965648888832
+              },
+              "racket_velocity_error_mps": {
+                "isaac_max": 0.26922500133514404,
+                "isaac_mean": 0.17568487922350565,
+                "isaac_min": 0.08317912369966507,
+                "mujoco_max": 1.7918,
+                "mujoco_mean": 0.26308571428571426,
+                "mujoco_min": 0.0231,
+                "n_paired": 42,
+                "paired_mean_absolute_difference": 0.13019910132260548
+              }
+            }
+          },
+          "cross_engine_disagreement": {
+            "mujoco_0_isaac_1_question_causes": {
+              "mujoco_no_physical_contact": 4,
+              "mujoco_no_strike": 7,
+              "mujoco_physical_contact_but_net_fail": 47
+            },
+            "return_agreement_matrix": {
+              "mujoco_0_isaac_1": 58,
+              "mujoco_1_isaac_0": 1,
+              "mujoco_1_isaac_1": 41
+            }
+          },
+          "input_artifacts": {
+            "isaac_csv": {
+              "path": "M3/M3_old/isaac_clean_k100.csv",
+              "sha256": "bab0dd4065c8d97ff6bf70ead67a9cc203f60e201929f433d5c637567d3bacff"
+            },
+            "isaac_json": {
+              "path": "M3/M3_old/isaac_clean_k100.json",
+              "sha256": "3fcb6ec8a2d8303dcd1eeecedb0d3ffef6c0d66dfcf10c9d6fc5fcee4f5a3ae6"
+            },
+            "mujoco_attempts": {
+              "path": "M3/M3_old/mujoco_sim2sim_attempts.csv",
+              "sha256": "3d028e3913fdfbbd3b9366378e4d372289898a2e2ae0558bcb22187c92005608"
+            },
+            "mujoco_strikes": {
+              "path": "M3/M3_old/mujoco_sim2sim_strikes.csv",
+              "sha256": "2efab433029a2253c5bded804d78cc8dab1116f95e2ad7e75d668f86f71fc1a4"
+            },
+            "mujoco_summary": {
+              "path": "M3/M3_old/mujoco_sim2sim_summary.json",
+              "sha256": "b704404578a152b807652137584b35970dfc9988508d5df03e7f5294e157a072"
+            }
+          },
+          "name": "M3_old",
+          "outcomes": {
+            "aggregate": {
+              "isaac": {
+                "n_guard_reset": 1,
+                "n_physical_fall": 0,
+                "n_reached_strike": 99,
+                "n_virtual_hit": 99,
+                "n_virtual_returned": 99
+              },
+              "mujoco": {
+                "n_counterfactual_contact": 89,
+                "n_counterfactual_legal_landing": 89,
+                "n_guard_reset": 8,
+                "n_hit": 89,
+                "n_physical_fall": 1,
+                "n_reached_strike": 93,
+                "n_returned": 42
+              },
+              "n_questions": 100
+            },
+            "backhand": {
+              "isaac": {
+                "n_guard_reset": 0,
+                "n_physical_fall": 0,
+                "n_reached_strike": 50,
+                "n_virtual_hit": 50,
+                "n_virtual_returned": 50
+              },
+              "mujoco": {
+                "n_counterfactual_contact": 50,
+                "n_counterfactual_legal_landing": 50,
+                "n_guard_reset": 0,
+                "n_hit": 50,
+                "n_physical_fall": 0,
+                "n_reached_strike": 50,
+                "n_returned": 11
+              },
+              "n_questions": 50
+            },
+            "forehand": {
+              "isaac": {
+                "n_guard_reset": 1,
+                "n_physical_fall": 0,
+                "n_reached_strike": 49,
+                "n_virtual_hit": 49,
+                "n_virtual_returned": 49
+              },
+              "mujoco": {
+                "n_counterfactual_contact": 39,
+                "n_counterfactual_legal_landing": 39,
+                "n_guard_reset": 8,
+                "n_hit": 39,
+                "n_physical_fall": 1,
+                "n_reached_strike": 43,
+                "n_returned": 31
+              },
+              "n_questions": 50
+            }
+          },
+          "plant_and_scorer": {
+            "isaac_evaluation_contract_exact": false,
+            "isaac_physical_ball": false,
+            "isaac_virtual_ball_outcome_recorded": true,
+            "mujoco_counterfactual_virtual_scorer_sha256": "190782e1be05c2e7b8795b046c1af31a500972c291b7b0165536bff039910ad8",
+            "mujoco_frictionloss_max": 0.0,
+            "mujoco_frictionloss_min": 0.0,
+            "mujoco_frictionloss_mode": "zero",
+            "mujoco_physical_ball_outcome_recorded": true
+          },
+          "question_id_order_sha256": "5b7e54ce2b42b9c4bfef18f7e326ddcb07235579c1aa374d8c21c7930a585eda",
+          "question_order_equal": true,
+          "ready_state": {
+            "byte_contract_equal": false,
+            "isaac": {
+              "mode": "isaac-default-stand",
+              "sha256": "3120e1308eeaf6b4870cb27f5c0c5569e384b0494619bf66208745a54d43177e"
+            },
+            "mujoco": {
+              "mode": "mjcf_named_keyframe:stand:v1",
+              "sha256": "3cbfe700abc54e0bde19f35c6245a14d09e6e68c74e9ba311bee8866a6837fc2"
+            }
+          }
+        }
+      },
+      "delta_M3_S1_minus_M3_old_return_count": {
+        "isaac": {
+          "aggregate": 0,
+          "backhand": 0,
+          "forehand": 0
+        },
+        "mujoco": {
+          "aggregate": 58,
+          "backhand": 39,
+          "forehand": 19
+        }
+      },
+      "question_id_order_sha256": "5b7e54ce2b42b9c4bfef18f7e326ddcb07235579c1aa374d8c21c7930a585eda",
+      "semantics": {
+        "decision_scope": "legacy_swing_family_diagnostic_only",
+        "evaluation_contract_exact": false,
+        "formal_target": false,
+        "fresh_lineage": false
+      }
+    },
+    "fresh_SZ_seed1_model2000_vs_model4000": {
+      "arms": {
+        "model_2000": {
+          "base_and_termination": {
+            "isaac_base_state_observability": "not_recorded_in_accepted_scorecard_or_attempt_csv",
+            "mujoco_at_strike_base_position_mean_m": {
+              "x": 0.11415800000000001,
+              "y": -0.000371,
+              "z": 1.059734
+            },
+            "mujoco_run_level": {
+              "base_pitch_deg": 3.1320609761134017,
+              "base_roll_deg": 0.7457531904636044,
+              "foot_contact_fraction": 0.9970508166969148
+            },
+            "termination": {
+              "isaac_attempt_guard_reset_count": 1,
+              "isaac_attempt_physical_fall_count": 0,
+              "mujoco_attempt_guard_reset_count": 100,
+              "mujoco_attempt_physical_fall_count": 0,
+              "mujoco_summary_fell_union_count": 100,
+              "mujoco_summary_term_breakdown": {
+                "ee_body_pos": 100
+              },
+              "summary_fell_is_physical_plus_guard_union": true
+            }
+          },
+          "continuous_at_strike": {
+            "backhand": {
+              "racket_normal_error_deg": {
+                "isaac_max": 10.205288887023926,
+                "isaac_mean": 4.9358508339524265,
+                "isaac_min": 0.08392937481403351,
+                "mujoco_max": 10.15,
+                "mujoco_mean": 4.97802,
+                "mujoco_min": 0.283,
+                "n_paired": 50,
+                "paired_mean_absolute_difference": 0.31204956102132797
+              },
+              "racket_position_error_m": {
+                "isaac_max": 0.0187970120459795,
+                "isaac_mean": 0.01137974445708096,
+                "isaac_min": 0.0037497933954000473,
+                "mujoco_max": 0.0438,
+                "mujoco_mean": 0.034910000000000004,
+                "mujoco_min": 0.0242,
+                "n_paired": 50,
+                "paired_mean_absolute_difference": 0.02353025554291904
+              },
+              "racket_velocity_error_mps": {
+                "isaac_max": 0.1882934421300888,
+                "isaac_mean": 0.10453578189015389,
+                "isaac_min": 0.031056448817253113,
+                "mujoco_max": 0.2504,
+                "mujoco_mean": 0.176528,
+                "mujoco_min": 0.0574,
+                "n_paired": 50,
+                "paired_mean_absolute_difference": 0.07229244010519982
+              }
+            },
+            "forehand": {
+              "racket_normal_error_deg": {
+                "isaac_max": 179.23255920410156,
+                "isaac_mean": 170.71745923100684,
+                "isaac_min": 161.76171875,
+                "mujoco_max": 173.759,
+                "mujoco_mean": 171.0940612244898,
+                "mujoco_min": 166.17,
+                "n_paired": 49,
+                "paired_mean_absolute_difference": 5.285586697325415
+              },
+              "racket_position_error_m": {
+                "isaac_max": 0.03493631258606911,
+                "isaac_mean": 0.0302923749372059,
+                "isaac_min": 0.02644931711256504,
+                "mujoco_max": 0.1,
+                "mujoco_mean": 0.09032448979591838,
+                "mujoco_min": 0.0796,
+                "n_paired": 49,
+                "paired_mean_absolute_difference": 0.06003211485871247
+              },
+              "racket_velocity_error_mps": {
+                "isaac_max": 0.6740245223045349,
+                "isaac_mean": 0.3839110516163768,
+                "isaac_min": 0.2476605623960495,
+                "mujoco_max": 0.9953,
+                "mujoco_mean": 0.6588428571428571,
+                "mujoco_min": 0.5066,
+                "n_paired": 49,
+                "paired_mean_absolute_difference": 0.2749318055264804
+              }
+            }
+          },
+          "cross_engine_disagreement": {
+            "mujoco_0_isaac_1_question_causes": {
+              "mujoco_no_physical_contact": 13,
+              "mujoco_physical_contact_but_net_fail": 4
+            },
+            "return_agreement_matrix": {
+              "mujoco_0_isaac_1": 17,
+              "mujoco_1_isaac_0": 1,
+              "mujoco_1_isaac_1": 82
+            }
+          },
+          "input_artifacts": {
+            "isaac_csv": {
+              "path": "fresh/model_2000/isaac_clean_k100.csv",
+              "sha256": "924536c215cabe6b97176901c3c781edf7ef0af09aa1d373692584180fbd08d3"
+            },
+            "isaac_json": {
+              "path": "fresh/model_2000/isaac_clean_k100.json",
+              "sha256": "860a1da65e4aa2503967196258572ed895f56c87f8bb8ea3cf2f92e6cf8708d9"
+            },
+            "mujoco_attempts": {
+              "path": "fresh/model_2000/mujoco_sim2sim_attempts.csv",
+              "sha256": "fa38932a79d8d4dbe495a53a19f8e847fd4079b0b0f32bc4d9c83d92e7d3d929"
+            },
+            "mujoco_strikes": {
+              "path": "fresh/model_2000/mujoco_sim2sim_strikes.csv",
+              "sha256": "376e6e603891bb93a4e21a13833bc9785cb27bfbb0f4766ffd678b249d38d7e7"
+            },
+            "mujoco_summary": {
+              "path": "fresh/model_2000/mujoco_sim2sim_summary.json",
+              "sha256": "2ced3ca6fb241581b0dd1c07c97c88b9257a9dc7ea1794a20a04ef060c712681"
+            }
+          },
+          "name": "model_2000",
+          "outcomes": {
+            "aggregate": {
+              "isaac": {
+                "n_guard_reset": 1,
+                "n_physical_fall": 0,
+                "n_reached_strike": 99,
+                "n_virtual_hit": 99,
+                "n_virtual_returned": 99
+              },
+              "mujoco": {
+                "n_counterfactual_contact": 87,
+                "n_counterfactual_legal_landing": 87,
+                "n_guard_reset": 100,
+                "n_hit": 87,
+                "n_physical_fall": 0,
+                "n_reached_strike": 100,
+                "n_returned": 83
+              },
+              "n_questions": 100
+            },
+            "backhand": {
+              "isaac": {
+                "n_guard_reset": 0,
+                "n_physical_fall": 0,
+                "n_reached_strike": 50,
+                "n_virtual_hit": 50,
+                "n_virtual_returned": 50
+              },
+              "mujoco": {
+                "n_counterfactual_contact": 50,
+                "n_counterfactual_legal_landing": 50,
+                "n_guard_reset": 50,
+                "n_hit": 50,
+                "n_physical_fall": 0,
+                "n_reached_strike": 50,
+                "n_returned": 50
+              },
+              "n_questions": 50
+            },
+            "forehand": {
+              "isaac": {
+                "n_guard_reset": 1,
+                "n_physical_fall": 0,
+                "n_reached_strike": 49,
+                "n_virtual_hit": 49,
+                "n_virtual_returned": 49
+              },
+              "mujoco": {
+                "n_counterfactual_contact": 37,
+                "n_counterfactual_legal_landing": 37,
+                "n_guard_reset": 50,
+                "n_hit": 37,
+                "n_physical_fall": 0,
+                "n_reached_strike": 50,
+                "n_returned": 33
+              },
+              "n_questions": 50
+            }
+          },
+          "plant_and_scorer": {
+            "isaac_evaluation_contract_exact": true,
+            "isaac_physical_ball": false,
+            "isaac_virtual_ball_outcome_recorded": true,
+            "mujoco_counterfactual_virtual_scorer_sha256": "190782e1be05c2e7b8795b046c1af31a500972c291b7b0165536bff039910ad8",
+            "mujoco_frictionloss_max": 0.0,
+            "mujoco_frictionloss_min": 0.0,
+            "mujoco_frictionloss_mode": "zero",
+            "mujoco_physical_ball_outcome_recorded": true
+          },
+          "question_id_order_sha256": "b87e81a34ff2d31766e17345f0a8c9d77665b78874093e26bdae257e8ed21f91",
+          "question_order_equal": true,
+          "ready_state": {
+            "byte_contract_equal": false,
+            "isaac": {
+              "mode": "isaac-default-stand",
+              "sha256": "3120e1308eeaf6b4870cb27f5c0c5569e384b0494619bf66208745a54d43177e"
+            },
+            "mujoco": {
+              "mode": "mjcf_named_keyframe:stand:v1",
+              "sha256": "3cbfe700abc54e0bde19f35c6245a14d09e6e68c74e9ba311bee8866a6837fc2"
+            }
+          }
+        },
+        "model_4000": {
+          "base_and_termination": {
+            "isaac_base_state_observability": "not_recorded_in_accepted_scorecard_or_attempt_csv",
+            "mujoco_at_strike_base_position_mean_m": {
+              "x": 0.119802,
+              "y": 0.013293,
+              "z": 1.0586
+            },
+            "mujoco_run_level": {
+              "base_pitch_deg": 3.7628685052464927,
+              "base_roll_deg": 0.5893260678665491,
+              "foot_contact_fraction": 0.994325441563322
+            },
+            "termination": {
+              "isaac_attempt_guard_reset_count": 1,
+              "isaac_attempt_physical_fall_count": 0,
+              "mujoco_attempt_guard_reset_count": 100,
+              "mujoco_attempt_physical_fall_count": 0,
+              "mujoco_summary_fell_union_count": 100,
+              "mujoco_summary_term_breakdown": {
+                "ee_body_pos": 100
+              },
+              "summary_fell_is_physical_plus_guard_union": true
+            }
+          },
+          "continuous_at_strike": {
+            "backhand": {
+              "racket_normal_error_deg": {
+                "isaac_max": 10.117114067077637,
+                "isaac_mean": 5.6830690741539005,
+                "isaac_min": 1.224772334098816,
+                "mujoco_max": 8.05,
+                "mujoco_mean": 4.31716,
+                "mujoco_min": 0.978,
+                "n_paired": 50,
+                "paired_mean_absolute_difference": 1.4228468299674986
+              },
+              "racket_position_error_m": {
+                "isaac_max": 0.03555983677506447,
+                "isaac_mean": 0.013169495416805148,
+                "isaac_min": 0.003686168696731329,
+                "mujoco_max": 0.0378,
+                "mujoco_mean": 0.025116,
+                "mujoco_min": 0.0122,
+                "n_paired": 50,
+                "paired_mean_absolute_difference": 0.012522561980322002
+              },
+              "racket_velocity_error_mps": {
+                "isaac_max": 0.16126859188079834,
+                "isaac_mean": 0.07748826082795858,
+                "isaac_min": 0.019875993952155113,
+                "mujoco_max": 0.2189,
+                "mujoco_mean": 0.143104,
+                "mujoco_min": 0.0613,
+                "n_paired": 50,
+                "paired_mean_absolute_difference": 0.07023577289682627
+              }
+            },
+            "forehand": {
+              "racket_normal_error_deg": {
+                "isaac_max": 174.75106811523438,
+                "isaac_mean": 168.96236528669084,
+                "isaac_min": 160.19337463378906,
+                "mujoco_max": 168.791,
+                "mujoco_mean": 164.8470612244898,
+                "mujoco_min": 160.551,
+                "n_paired": 49,
+                "paired_mean_absolute_difference": 5.325421105209663
+              },
+              "racket_position_error_m": {
+                "isaac_max": 0.03262384980916977,
+                "isaac_mean": 0.02477521510148535,
+                "isaac_min": 0.01748654805123806,
+                "mujoco_max": 0.1519,
+                "mujoco_mean": 0.131534693877551,
+                "mujoco_min": 0.1002,
+                "n_paired": 49,
+                "paired_mean_absolute_difference": 0.10675947877606566
+              },
+              "racket_velocity_error_mps": {
+                "isaac_max": 0.7391901612281799,
+                "isaac_mean": 0.49430827766048663,
+                "isaac_min": 0.3456648886203766,
+                "mujoco_max": 1.1627,
+                "mujoco_mean": 0.9417285714285715,
+                "mujoco_min": 0.7785,
+                "n_paired": 49,
+                "paired_mean_absolute_difference": 0.4474202937680848
+              }
+            }
+          },
+          "cross_engine_disagreement": {
+            "mujoco_0_isaac_1_question_causes": {
+              "mujoco_no_physical_contact": 49
+            },
+            "return_agreement_matrix": {
+              "mujoco_0_isaac_0": 1,
+              "mujoco_0_isaac_1": 49,
+              "mujoco_1_isaac_1": 50
+            }
+          },
+          "input_artifacts": {
+            "isaac_csv": {
+              "path": "fresh/model_4000/isaac_clean_k100.csv",
+              "sha256": "24d364097b9961537a8cc4f4205571f94f0daa85c7fb749efb81fc892cfc5094"
+            },
+            "isaac_json": {
+              "path": "fresh/model_4000/isaac_clean_k100.json",
+              "sha256": "8ad63c70416bf003dc24be38207f274e6ef5887ca305055670720a4c91a372c2"
+            },
+            "mujoco_attempts": {
+              "path": "fresh/model_4000/mujoco_sim2sim_attempts.csv",
+              "sha256": "8f5b7e992fb3fd6297a2a83d378ace761bbb791bba41df3fb8efe63872dd760b"
+            },
+            "mujoco_strikes": {
+              "path": "fresh/model_4000/mujoco_sim2sim_strikes.csv",
+              "sha256": "8befc2dda55e420243b059fce4fde4e5989798d05a2f39bb8d76932217379af7"
+            },
+            "mujoco_summary": {
+              "path": "fresh/model_4000/mujoco_sim2sim_summary.json",
+              "sha256": "b8dd1d85e9c7650da3245653ddd1f54f446eb88f4d0e5f7870ead6ad6222bbe0"
+            }
+          },
+          "name": "model_4000",
+          "outcomes": {
+            "aggregate": {
+              "isaac": {
+                "n_guard_reset": 1,
+                "n_physical_fall": 0,
+                "n_reached_strike": 99,
+                "n_virtual_hit": 99,
+                "n_virtual_returned": 99
+              },
+              "mujoco": {
+                "n_counterfactual_contact": 50,
+                "n_counterfactual_legal_landing": 50,
+                "n_guard_reset": 100,
+                "n_hit": 50,
+                "n_physical_fall": 0,
+                "n_reached_strike": 100,
+                "n_returned": 50
+              },
+              "n_questions": 100
+            },
+            "backhand": {
+              "isaac": {
+                "n_guard_reset": 0,
+                "n_physical_fall": 0,
+                "n_reached_strike": 50,
+                "n_virtual_hit": 50,
+                "n_virtual_returned": 50
+              },
+              "mujoco": {
+                "n_counterfactual_contact": 50,
+                "n_counterfactual_legal_landing": 50,
+                "n_guard_reset": 50,
+                "n_hit": 50,
+                "n_physical_fall": 0,
+                "n_reached_strike": 50,
+                "n_returned": 50
+              },
+              "n_questions": 50
+            },
+            "forehand": {
+              "isaac": {
+                "n_guard_reset": 1,
+                "n_physical_fall": 0,
+                "n_reached_strike": 49,
+                "n_virtual_hit": 49,
+                "n_virtual_returned": 49
+              },
+              "mujoco": {
+                "n_counterfactual_contact": 0,
+                "n_counterfactual_legal_landing": 0,
+                "n_guard_reset": 50,
+                "n_hit": 0,
+                "n_physical_fall": 0,
+                "n_reached_strike": 50,
+                "n_returned": 0
+              },
+              "n_questions": 50
+            }
+          },
+          "plant_and_scorer": {
+            "isaac_evaluation_contract_exact": true,
+            "isaac_physical_ball": false,
+            "isaac_virtual_ball_outcome_recorded": true,
+            "mujoco_counterfactual_virtual_scorer_sha256": "190782e1be05c2e7b8795b046c1af31a500972c291b7b0165536bff039910ad8",
+            "mujoco_frictionloss_max": 0.0,
+            "mujoco_frictionloss_min": 0.0,
+            "mujoco_frictionloss_mode": "zero",
+            "mujoco_physical_ball_outcome_recorded": true
+          },
+          "question_id_order_sha256": "b87e81a34ff2d31766e17345f0a8c9d77665b78874093e26bdae257e8ed21f91",
+          "question_order_equal": true,
+          "ready_state": {
+            "byte_contract_equal": false,
+            "isaac": {
+              "mode": "isaac-default-stand",
+              "sha256": "3120e1308eeaf6b4870cb27f5c0c5569e384b0494619bf66208745a54d43177e"
+            },
+            "mujoco": {
+              "mode": "mjcf_named_keyframe:stand:v1",
+              "sha256": "3cbfe700abc54e0bde19f35c6245a14d09e6e68c74e9ba311bee8866a6837fc2"
+            }
+          }
+        }
+      },
+      "delta_model_4000_minus_model_2000_return_count": {
+        "isaac": {
+          "aggregate": 0,
+          "backhand": 0,
+          "forehand": 0
+        },
+        "mujoco": {
+          "aggregate": -33,
+          "backhand": 0,
+          "forehand": -33
+        }
+      },
+      "question_id_order_sha256": "b87e81a34ff2d31766e17345f0a8c9d77665b78874093e26bdae257e8ed21f91",
+      "semantics": {
+        "decision_scope": "checkpoint_selection_only",
+        "evaluation_contract_exact": true,
+        "formal_target": true,
+        "fresh_lineage": true,
+        "plant_cell": "SZ_zero_friction_protocol_exact"
+      }
+    }
+  },
+  "schema_version": 1,
+  "scope": "Read-only, question_id-aligned forensics for the fresh exact SZ seed1 model_2000/model_4000 and causal inexact M3 old/S1 same-paper Isaac/MuJoCo pairs; no rescoring, threshold tuning, training mutation, deployment, or real-robot claim",
+  "source_bindings": {
+    "evaluation_commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+    "evaluators": {
+      "ball_physics_yaml": "2e58221442665ddad7cc6dcc18d5c811dec1b0c47439b81c1c744b5148169a27",
+      "isaac": "0225ca41ad96340187447334c8f3707229d54947e376be3c059435865b34a72e",
+      "isaac_adapter": "b9decc710a863ff24c73d6b750f22c6f6764c6023dfab286281c368dc7dc6af2",
+      "isaac_virtual_ball": "3dc5237346004893141fe231dbf6a8bc1028e0328459411015366d72868c5ed4",
+      "mujoco": "e4a9fa42ff0f7e68cebdf16f2e0c61299507496c6edc13546baeb3d576ecb20a",
+      "mujoco_virtual_return_scorer": "41fe2a07d161979b76eca3f7f58723381877ab8406095ebde2ead10a67d64d11"
+    },
+    "paired_results": {
+      "M3_isaac": "97195c2187f685657259ab7287cfa6bcded58d532d5e8703e53bb4c384e85281",
+      "M3_mujoco": "e9bb07d3a88be4e61bc289980fc909c8e641785bee56bcc75d0e5081f250f56e",
+      "fresh_isaac": "65c0872354343a3b05dd5b5e20bad6b3f3b04d46c38f576fe6a467b18788c18e",
+      "fresh_mujoco": "b95ba6c4657e4b542ea3c5f08d02941c830ea48d71b56bb1a247ef7a46730478"
+    },
+    "runners": {
+      "fresh_isaac": "ed770e2ad8a204e602c9b1aa974cd09713cf7720338a564ec4c85aeddbd6142e",
+      "fresh_mujoco": "3528250777a170791f39d8dd17716c2a7f8ca91416a3ffa8433ec5eb691ed9e0",
+      "shared_isaac": "f5d0dce4a5f650981838779dfa472c881d63c28341437167e0eca9217f57e04e",
+      "shared_mujoco": "095e476fd36fb68d500cb39ea7f71f6fee9b729209187d51599582c72c22198b"
+    },
+    "scoring_semantics": {
+      "isaac_capture_gate": "exact_strike AND pos_error<0.095m AND oriented_approach_speed>0.3m/s; orient_normal makes signed face normals equivalent for analytic contact",
+      "isaac_returned": "vb_fired AND vb_net_clear AND vb_on_opponent from analytic virtual contact/flight; the accepted nominal profile sets physical_ball=false",
+      "mujoco_counterfactual": "the same analytic virtual scorer is also logged as cf_* at the MuJoCo strike state but does not replace the physical returned bit",
+      "mujoco_returned": "physical paddle contact followed by physical net-clear and legal opponent-table landing"
+    },
+    "training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b"
+  },
+  "status": "complete_read_only_question_aligned_forensic"
+}
