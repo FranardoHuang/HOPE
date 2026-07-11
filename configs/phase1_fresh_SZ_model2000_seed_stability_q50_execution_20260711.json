@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "contract_id": "phase1-fresh-SZ-model2000-four-seed-clean-q50-stability-execution-v1",
+  "status": "offline_preregistered_not_prepared",
+  "auto_start": false,
+  "preregistration_sha256": "cf3ce857b1b1a688e808e4a85ea662b252e84d2ca32240c29ee1b08009aaeabd",
+  "semantics": {
+    "fresh_lineage": true,
+    "evaluation_contract_exact": true,
+    "formal_target": true,
+    "purpose": "four_seed_model_2000_stability_checkpoint_evidence",
+    "training_mutation_allowed": false,
+    "trainer_or_worker_signal_allowed": false,
+    "whole_arm_stop_allowed": false,
+    "whole_arm_promote_allowed": false,
+    "deploy_gate": false,
+    "real_robot_authorized": false
+  },
+  "checkouts": {
+    "training": {
+      "path": "/workspace/codexschema/nohope",
+      "commit": "6d93bcb16c422a2f42748c2dc99432559653480b"
+    },
+    "evaluation": {
+      "path": "/workspace/codexschema/nohope_eval_08e438e",
+      "commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f"
+    }
+  },
+  "tools": {
+    "runner_sha256": "f023c0debb013685af03922cb848438e8edf78081419440cdab0b8a6cccfa3ad",
+    "fresh_exact_validator": {
+      "path": "run_phase1_fresh_exact_paired_bank_q50.py",
+      "sha256": "3528250777a170791f39d8dd17716c2a7f8ca91416a3ffa8433ec5eb691ed9e0"
+    },
+    "evaluation": {
+      "judge": {
+        "path": "hope_training/whole_body_tracking/scripts/judge.sh",
+        "sha256": "1a00702935096b063435c3f0bd23e75f76f13e1298c87310d1cec3c26cca8529"
+      },
+      "materialize_schedule": {
+        "path": "hope_training/whole_body_tracking/scripts/materialize_bank_exam_schedule.py",
+        "sha256": "fe2a4f694f8a1c5a69f42fafeeadaf848b440903385acfba7468073eef010937"
+      },
+      "schedule_module": {
+        "path": "hope_training/whole_body_tracking/scripts/bank_exam_schedule.py",
+        "sha256": "32721f018f6a35a42aa12ff0a7e48c0d9bc513d238988d953241ee625744b23b"
+      },
+      "mujoco_evaluator": {
+        "path": "hope_training/whole_body_tracking/scripts/mujoco_eval_onnx.py",
+        "sha256": "e4a9fa42ff0f7e68cebdf16f2e0c61299507496c6edc13546baeb3d576ecb20a"
+      }
+    }
+  },
+  "schedule": {
+    "schema_version": 3,
+    "file_sha256": "66e89986a2b726d529179fcb4c745625ebed0380d59664caceefc55e86071cb3",
+    "semantic_sha256": "7dc6af822fb4130b8c324843f179d77f882d1326306bb19802b00f94447dff3e",
+    "question_id_order_sha256": "b87e81a34ff2d31766e17345f0a8c9d77665b78874093e26bdae257e8ed21f91",
+    "per_clip_quota": 50,
+    "schedule_k": 100,
+    "attempts_per_side": 50,
+    "schedule_seed": 0,
+    "hold_range": [
+      0,
+      100
+    ],
+    "noise_scales": [
+      0.0
+    ],
+    "one_question_reset": true,
+    "no_wrap": true,
+    "materialize_new_schedule_allowed": false,
+    "copy_identical_bytes_to_each_pod": true,
+    "allow_inexact_contract": false
+  },
+  "runtime": {
+    "checkpoint_python": "/workspace/hope_isaac_venv/bin/python",
+    "pod_state_dirs": {
+      "pod1": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_model2000_seed_stability_q50_pod1_v1",
+      "pod2": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_model2000_seed_stability_q50_pod2_v1"
+    },
+    "schedule_filename": "shared_clean_k100.schedule.json",
+    "runtime_contract_filename": "runtime_contract.prepared.json",
+    "pod_result_filename": "pod_result.json",
+    "aggregate_output_dir": "/workspace/codexschema/phase1_fresh_20260711/control/SZ_model2000_seed_stability_q50_v1/aggregate"
+  },
+  "pod_arm_order": {
+    "pod1": [
+      "seed1",
+      "seed3"
+    ],
+    "pod2": [
+      "seed2",
+      "seed4"
+    ]
+  },
+  "gate_rule": {
+    "aggregate_rate_median_min": 0.75,
+    "aggregate_rate_min_seed_min": 0.65,
+    "aggregate_rate_max_minus_min_max": 0.2,
+    "every_seed_every_side_rate_min": 0.5,
+    "gate_scope": "seed_stability_checkpoint_evidence_only",
+    "failure_action": "continue_all_arms_unmodified_and_keep_seed_stability_open",
+    "pass_action": "record_model_2000_seed_stability_only_continue_all_arms_unmodified",
+    "stop_or_promote_authorized": false,
+    "deploy_or_real_robot_authorized": false
+  },
+  "seed1_reuse": {
+    "allowed_only_after_full_revalidation": true,
+    "fallback": "rerun_seed1_on_identical_schedule",
+    "prior_runtime_contract": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_exact_v1/runtime_contract.prepared.json",
+      "sha256": "a756023d5b2d57a51c473e5e79f21ec902668f343b6b60cd78636120d9534661"
+    },
+    "prior_paired_result": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_exact_v1/paired_result.json",
+      "sha256": "b95ba6c4657e4b542ea3c5f08d02941c830ea48d71b56bb1a247ef7a46730478"
+    },
+    "prior_checked_result": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/control/SZ_model2000_seed_stability_q50_v1/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json",
+      "sha256": "19d43fd0c507dd0aff985930b3c375cf1b72b1d8eff56f0d4a9934bdf09beeba"
+    }
+  }
+}
