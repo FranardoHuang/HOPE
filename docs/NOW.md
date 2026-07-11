@@ -25,7 +25,10 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 现阶段短报（2026-07-12 05:10 CST）
+## 当下状态与团队 focus（2026-07-12 05:20 CST）
+
+本节只做 roadmap 的当前入口；下面的实验结果、奖励/训练台账、长期路线和历史判决继续保留，
+不能用这份短报替代可复现实验记录。
 
 - **现在解决什么**：把“智元 vendor MuJoCo runtime/plant + 我们自己的 planner + 我们自己的
   policy”接成一条不会假绿的最短 demo 链。vendor 环境是裁判；planner 与 policy 都可升级，
@@ -36,8 +39,23 @@ Rules:
   NaN/OOM/提前退出，10 个 checkpoint worker 全活。跨引擎差异已定位两层：Isaac 当前是
   analytic virtual-ball 高饱和判分器；同一 fresh model4000 前手击球位误差在 vendor MuJoCo/
   Isaac 约为 `13.15/2.48 cm`，所以还存在真实闭环执行差异，不能靠改阈值解决。
+- **现在谁在 focus 什么**：
+  - franco/Codex：满池 checkpoint 早判、179-D 拍面/strict preflight、planner-policy 成对
+    Gate3、跨引擎归因，以及 D0/D1 demo 收口；同时守住动作/TOPP/连续恢复的准入队列。
+  - jiayi/dongc1：`origin/hitter` 上积累 HitterPure/V3 policy、planner 与 vendor rally 编排；
+    最新值得移植的是发球等待 MOTION 同步、marker→base 旋转、solve cadence 和预测时域修复，
+    但该提交混有旧配方/资产，当前只做小块移植，不整支合入。
+  - yikang：`yikang-linux-port-0711` 的 head discipline 与 vendor stand 诊断、
+    `stage1-fixed-point` 的 reference-oracle/课程修复；目前代码仍是 branch evidence，main 只有
+    归属说明，待逐项测试后选择性合入。
+  - 动作库轨：Franco/v6/v7 十段已过内容寻址、GMR/grounding/自碰与身体余隙；当前由
+    spatial-retarget 击球点适配推进，TOPP、2-vs-4 和 RL 等离线安全/可行性门后再占 GPU。
+- **最近值得团队同步的结果**：恢复/等待不再把三种 reward 单独相加，已冻结 A/B/C 结构轴，
+  结构失败后才做 `2^3` 交互和固定总预算 mixture；真实反手 bank 又证明 external face B 与
+  actor raw-A 不能混用；fresh SZ 四 seed 的 2k 正式卷虽中位高，但 worst seed `20/100`，
+  已正式判为 seed-stability 失败，不能只展示三个强 seed。
 - **代码交流状态**：recovery A/B/C 合同与 validator 已随 `e10922a/eac81e4` 进入 main；
-  `origin/main@a6274be` 最新只合了 yikang 的 Gate3 归属说明，并没有合入
+  yikang 最近在 main 的提交只合了 Gate3 归属说明，并没有合入
   `head_discipline`、stand viewer 或 `reference_oracle` 法线修复。上述小改正在逐项审计和
   选择性移植，禁止把旧基线整支硬并。face179 修正版通过本地 39 项回归，但红队发现 strict
   preflight blocker；修完即合源码，vendor 行为证据仍明确记 `Partial`。
