@@ -899,3 +899,29 @@ is `0.40/0.35`, with FH `0/10` for both and BH `8/10` versus `7/10`. It is a
 causal/inexact 20-attempt direction screen, not evidence to kill S1 or select
 old; the immutable q50 follow-up remains required. Machine-readable hashes and
 the paired delta are in `configs/phase1_M2_terminal_q10_pair_20260711.json`.
+
+### Model-4000 four-seed matched paper preregistered (2026-07-12)
+
+The next fresh `SZ` milestone is now queued without touching a Pod. It freezes
+seed1/2/3/4 at `model_4000.pt`, the exact model-2000 K100 file bytes
+`66e89986...71cb3`, semantic SHA `7dc6af82...ff3e`, question order
+`b87e81a3...1f91`, and the same four stability thresholds. It cannot prepare
+or start a q50 judge: the queue has no runtime entrypoint, and its validator
+contains no SSH, process launch or signal surface. Pod1 must first produce a
+content-bound finite/iteration/contract/lineage readiness audit for seed1/3,
+Pod2 for seed2/4; only their exact four-seed union can create the mandatory
+activation artifact. Any absent/non-finite/wrong-iter/wrong-contract arm keeps
+the whole paper runtime-ineligible.
+
+The interpretation is deliberately narrower than “family stable.” Seed4 was
+`.20` at 2k; it supports delayed learning at 4k only if it reaches the unchanged
+`.65` aggregate and `.50` on both sides. But seed1 4k was already known before
+this preregistration to be `.50` aggregate (`FH=.00`, `BH=1.00`). Therefore the
+four-seed 4k stability gate is mathematically unable to pass its unchanged
+worst-seed threshold, even if seed4 recovers. This matched paper can diagnose
+the seed4 trajectory and full distribution; it cannot launder the family into
+a stable baseline or change training. Source validation passed `20` tests.
+Queue/prereg/validator SHAs are `d4e69d91...d3909`, `ca5ea90f...bff0`, and
+`e763ecb9...6cd3`; commands and the future-runner boundary are in
+`docs/operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md`. G05
+remains `Partial`; no Pod audit, activation, runtime or hardware action has run.

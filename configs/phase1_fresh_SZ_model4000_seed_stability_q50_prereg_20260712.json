@@ -1,0 +1,250 @@
+{
+  "schema_version": 1,
+  "preregistration_id": "phase1-fresh-SZ-model4000-four-seed-clean-q50-matched-stability-v1",
+  "created_utc": "2026-07-12T00:30:00Z",
+  "status": "preregistered_waiting_all_four_checkpoint_audits",
+  "auto_activate": false,
+  "jobs_started": 0,
+  "runtime_state": null,
+  "scope": "Fresh formal-target SZ model_4000 seed1/2/3/4 on the byte-identical model_2000 clean K100 MuJoCo paper; matched checkpoint/seed evidence only, not a trainer stop, promotion, calibrated-plant, continuity, cross-instrument, deployment, or real-robot gate",
+  "known_before_prereg": {
+    "model2000_four_seed": {
+      "aggregate_return_rates": {
+        "seed1": 0.83,
+        "seed2": 1.0,
+        "seed3": 1.0,
+        "seed4": 0.2
+      },
+      "gate_pass": false,
+      "status": "fail_seed_stability_checkpoint_evidence"
+    },
+    "model4000_seed1": {
+      "aggregate_return_rate": 0.5,
+      "forehand_return_rate": 0.0,
+      "backhand_return_rate": 1.0,
+      "consequence": "four_seed_overall_stability_gate_is_already_mathematically_unpassable"
+    }
+  },
+  "question": {
+    "primary": "Does seed4 meet the unchanged model_2000 per-seed and per-side thresholds at model_4000, supporting delayed learning rather than persistent seed4 weakness?",
+    "secondary": "What is the matched four-seed distribution at model_4000 on exactly the same K100 bytes?",
+    "forbidden_reinterpretation": "Seed4 recovery cannot establish family stability because seed1 model_4000 is already known to be below the unchanged 0.65 worst-seed threshold."
+  },
+  "family": {
+    "cell": "SZ",
+    "name": "v4rg_runtime_order_v3",
+    "source_family_sha256": "b21c161a0240893a4a469136c2d5298c2ecfa9f2b4a8c6fb9493b679f3728ad5",
+    "face_command_pairing": "shared_plus_y",
+    "zero_joint_friction": true,
+    "checkpoint_iteration": 4000
+  },
+  "training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+  "eval_commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+  "tools": {
+    "queue_validator_sha256": "e763ecb9a822f7e1c2e9338749701fcd4bfea9f26f9b6fe5b4b189f8ca5a6cd3",
+    "fresh_exact_validator_sha256": "3528250777a170791f39d8dd17716c2a7f8ca91416a3ffa8433ec5eb691ed9e0",
+    "judge_sha256": "1a00702935096b063435c3f0bd23e75f76f13e1298c87310d1cec3c26cca8529",
+    "mujoco_evaluator_sha256": "e4a9fa42ff0f7e68cebdf16f2e0c61299507496c6edc13546baeb3d576ecb20a"
+  },
+  "paper": {
+    "role": "four-seed fresh SZ model_4000 matched stability q50",
+    "exam_bank": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/s1_v4rg_runtime_order_schema3_exam.npz",
+      "bytes": 63968,
+      "sha256": "d7db2568beee990ef1d64b2dce9f0ab56ca76377f8993d820b6388292d0f5096",
+      "schema_version": 3,
+      "source_family_sha256": "b21c161a0240893a4a469136c2d5298c2ecfa9f2b4a8c6fb9493b679f3728ad5"
+    },
+    "schedule": {
+      "schema_version": 3,
+      "file_sha256": "66e89986a2b726d529179fcb4c745625ebed0380d59664caceefc55e86071cb3",
+      "semantic_sha256": "7dc6af822fb4130b8c324843f179d77f882d1326306bb19802b00f94447dff3e",
+      "question_id_order_sha256": "b87e81a34ff2d31766e17345f0a8c9d77665b78874093e26bdae257e8ed21f91",
+      "per_clip_quota": 50,
+      "schedule_k": 100,
+      "attempts_per_side": 50,
+      "schedule_seed": 0,
+      "hold_range": [
+        0,
+        100
+      ],
+      "noise_scales": [
+        0.0
+      ],
+      "one_question_reset": true,
+      "no_wrap": true,
+      "materialize_new_schedule_allowed": false,
+      "copy_identical_bytes_to_each_pod": true,
+      "allow_inexact_contract": false
+    },
+    "mjcf_sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97",
+    "seed": 0,
+    "noise_scales": [
+      0.0
+    ],
+    "schedule_k": 100,
+    "attempts_per_side": 50,
+    "hold_ref": "auto",
+    "hold_steps_range": [
+      0,
+      100
+    ],
+    "no_wrap": true,
+    "one_question_reset": true,
+    "allow_inexact_contract_required": false,
+    "expected_evaluation_contract_exact": true,
+    "reuse_independence": {
+      "source_model2000_preregistration": {
+        "path": "configs/phase1_fresh_SZ_model2000_seed_stability_q50_prereg_20260711.json",
+        "sha256": "cf3ce857b1b1a688e808e4a85ea662b252e84d2ca32240c29ee1b08009aaeabd"
+      },
+      "source_model2000_result": {
+        "path": "configs/phase1_fresh_SZ_model2000_seed_stability_q50_a756bf1d0e76d1016992ae241b935cf92b3c84ffd55fe503e7c199626d9c8ffd.json",
+        "file_sha256": "d856468fb93461be52498a24655b25993ce28f530f5989e61110e33421736e43",
+        "content_sha256": "a756bf1d0e76d1016992ae241b935cf92b3c84ffd55fe503e7c199626d9c8ffd"
+      },
+      "materialized_before_model2000_or_model4000_four_seed_outcomes": true,
+      "new_materialization_forbidden": true,
+      "same_exact_bytes_required": true
+    }
+  },
+  "arms": {
+    "seed1": {
+      "training_seed": 1,
+      "pod": "pod1",
+      "gpu": 2,
+      "run_name": "phase1_fresh_v3_S1_seed1",
+      "checkpoint_iteration": 4000,
+      "checkpoint_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-52-16_phase1_fresh_v3_S1_seed1/model_4000.pt",
+      "checkpoint_sha256": null,
+      "checkpoint_binding_stage": "discover_and_freeze_only_in_all_four_activation_artifact",
+      "training_contract_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-52-16_phase1_fresh_v3_S1_seed1/params/training_contract.json",
+      "training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "checkpoint_embedded_training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "cell": "SZ",
+      "face_command_pairing": "shared_plus_y",
+      "zero_joint_friction": true,
+      "lineage_exact": true,
+      "execution_mode": "reuse_candidate_after_full_revalidation",
+      "job_status": "not_started",
+      "pid": null,
+      "pgid": null,
+      "result": null
+    },
+    "seed2": {
+      "training_seed": 2,
+      "pod": "pod2",
+      "gpu": 2,
+      "run_name": "phase1_fresh_v3_S1_seed2",
+      "checkpoint_iteration": 4000,
+      "checkpoint_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-54-53_phase1_fresh_v3_S1_seed2/model_4000.pt",
+      "checkpoint_sha256": null,
+      "checkpoint_binding_stage": "discover_and_freeze_only_in_all_four_activation_artifact",
+      "training_contract_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-54-53_phase1_fresh_v3_S1_seed2/params/training_contract.json",
+      "training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "checkpoint_embedded_training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "cell": "SZ",
+      "face_command_pairing": "shared_plus_y",
+      "zero_joint_friction": true,
+      "lineage_exact": true,
+      "execution_mode": "judge_required",
+      "job_status": "not_started",
+      "pid": null,
+      "pgid": null,
+      "result": null
+    },
+    "seed3": {
+      "training_seed": 3,
+      "pod": "pod1",
+      "gpu": 0,
+      "run_name": "phase1_fresh_v3_SZ_seed3",
+      "checkpoint_iteration": 4000,
+      "checkpoint_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_05-39-31_phase1_fresh_v3_SZ_seed3/model_4000.pt",
+      "checkpoint_sha256": null,
+      "checkpoint_binding_stage": "discover_and_freeze_only_in_all_four_activation_artifact",
+      "training_contract_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_05-39-31_phase1_fresh_v3_SZ_seed3/params/training_contract.json",
+      "training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "checkpoint_embedded_training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "cell": "SZ",
+      "face_command_pairing": "shared_plus_y",
+      "zero_joint_friction": true,
+      "lineage_exact": true,
+      "execution_mode": "judge_required",
+      "job_status": "not_started",
+      "pid": null,
+      "pgid": null,
+      "result": null
+    },
+    "seed4": {
+      "training_seed": 4,
+      "pod": "pod2",
+      "gpu": 1,
+      "run_name": "phase1_fresh_v3_SZ_seed4",
+      "checkpoint_iteration": 4000,
+      "checkpoint_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_05-41-44_phase1_fresh_v3_SZ_seed4/model_4000.pt",
+      "checkpoint_sha256": null,
+      "checkpoint_binding_stage": "discover_and_freeze_only_in_all_four_activation_artifact",
+      "training_contract_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_05-41-44_phase1_fresh_v3_SZ_seed4/params/training_contract.json",
+      "training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "checkpoint_embedded_training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+      "cell": "SZ",
+      "face_command_pairing": "shared_plus_y",
+      "zero_joint_friction": true,
+      "lineage_exact": true,
+      "execution_mode": "judge_required",
+      "job_status": "not_started",
+      "pid": null,
+      "pgid": null,
+      "result": null
+    }
+  },
+  "gate_rule": {
+    "aggregate_rate_median_min": 0.75,
+    "aggregate_rate_min_seed_min": 0.65,
+    "aggregate_rate_max_minus_min_max": 0.2,
+    "every_seed_every_side_rate_min": 0.5,
+    "gate_scope": "seed_stability_checkpoint_evidence_only",
+    "failure_action": "continue_all_arms_unmodified_and_keep_seed_stability_open",
+    "pass_action": "record_model_4000_seed_stability_only_continue_all_arms_unmodified",
+    "stop_or_promote_authorized": false,
+    "deploy_or_real_robot_authorized": false
+  },
+  "interpretation_rule": {
+    "seed4_delayed_learning_supported_only_if": {
+      "aggregate_rate_min": 0.65,
+      "every_side_rate_min": 0.5,
+      "threshold_source": "unchanged_model2000_stability_gate"
+    },
+    "seed4_persistent_weakness_if": "either_unchanged_seed_level_threshold_fails",
+    "family_stable_claim_allowed": false,
+    "reason_family_claim_forbidden": "known_seed1_model4000_rate_0.50_is_below_0.65"
+  },
+  "formal_semantics": {
+    "fresh_lineage": true,
+    "evaluation_contract_exact": true,
+    "formal_target": true,
+    "purpose": "four_seed_model_4000_stability_checkpoint_evidence",
+    "training_mutation_allowed": false,
+    "trainer_or_worker_signal_allowed": false,
+    "whole_arm_stop_allowed": false,
+    "whole_arm_promote_allowed": false,
+    "deploy_gate": false,
+    "real_robot_authorized": false
+  },
+  "activation": {
+    "preregistered": true,
+    "all_four_ready_artifact_required": true,
+    "runtime_authorized_at_creation": false,
+    "started_at_creation": false
+  },
+  "preflight_requirements": [
+    "This preregistration, queue, and validator are committed before any new model_4000 four-seed q50 judge starts",
+    "Both training checkouts remain clean at 6d93bcb16c422a2f42748c2dc99432559653480b and both independent evaluation checkouts remain clean at 46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+    "Pod1 and Pod2 readiness audits together cover seed1/2/3/4 model_4000.pt exactly; every checkpoint filename and embedded iter equal 4000, all floating tensors are finite, and every checkpoint embeds the same adjacent schema-3 exact hard-contract SHA",
+    "The byte-identical K100 schedule retains file SHA 66e89986..., semantic SHA 7dc6af82..., question-order SHA b87e81a3..., and exact-family exam-bank SHA d7db2568... on both Pods",
+    "No q50 runtime is prepared or started until the validator combines both content-addressed Pod readiness audits into one all-four activation artifact",
+    "Seed1 model_4000 reuse remains only a candidate until its prior runtime contract, paired result, report, summary, ledger, checkpoint, hard contract, exactness, and denominators are fully revalidated",
+    "Any future q50 runner must require the exact all-four activation artifact and must still run each Pod serially through judge.sh plus the shared Kit lock",
+    "Regardless of the result, all training arms continue unmodified and vendor MuJoCo Gate3/Gate3B, calibrated-plant, recovery/continuous-rally, deployment, and real-robot gates remain open"
+  ]
+}

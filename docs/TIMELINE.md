@@ -1542,3 +1542,12 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `0/64`、common support=0，故不判 2 或 4，也不写成动作无效。intrinsic 仅反手拉 B/C
    为 `32/32 @ .5444`、`27/32 @ .5155`，保留作 spatial-retarget 候选；TOPP 暂停到
    schema-2/L0/L1/桌网/动力学，最终由智元 vendor MuJoCo Gate3/Gate3B 无 reset 主判。
+4. 【franco/Codex】**4k 四 seed 同卷已预注册，但先把“必然不能整体过门”写清楚**——下一里程碑
+   严格复用 2k 的 K100 file/semantic/question-order/bank bytes、SZ family、seed1--4 和
+   `.75/.65/.20/.50` 门槛，不换卷不调分。已知 seed1 4k 同卷只有 `.50`，故四 seed
+   family stability 数学上已不可能过 `.65` worst-seed 门；这一卷只能判 seed4 是否
+   从 2k `.20` 晚熟到旧门槛（aggregate `>=.65`、两侧均 `>=.50`），不能把它恢复写成
+   family 稳定。offline queue 没有 runtime entrypoint；Pod1 seed1/3 和 Pod2 seed2/4 必须全部
+   checkpoint finite、embedded iter=4000、同 adjacent hard-contract/精确 lineage，两份内容寻址审计
+   合并后才能生 activation。validator 无 SSH/judge/signal 入口，`20 passed`；queue/prereg/tool
+   SHA=`d4e69d91.../ca5ea90f.../e763ecb9...`。本条未触 Pod、未 activation、未跑 judge/真机。

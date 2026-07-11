@@ -496,3 +496,25 @@ remains separate: SZ is only zero-friction protocol exact, while SP/LP are
 historical direct-number proxies. The repair contract is
 `docs/research/phase1_plant_semantics_repair_2026-07-11.md`, status
 `blocked_on_calibration_evidence`.
+
+The next matched fresh checkpoint paper is also preregistered at model 4000,
+but it does not weaken this cross-engine gate. It reuses the **same K100 file
+bytes**, semantic schedule, question order, exact-family bank and 2k stability
+thresholds for all four `SZ` seeds. The offline queue cannot invoke a judge;
+it can only combine two read-only Pod checkpoint audits after all four
+`model_4000.pt` files are finite, embed iter 4000, bind the same adjacent
+schema-3 hard-contract SHA and retain exact fresh lineage. A future runner must
+consume the content-addressed activation artifact and still bind the current
+MuJoCo evaluator. Source verification is `20 passed`; no Pod/runtime action has
+occurred.
+
+This is seed/checkpoint evidence, not an engine-parity result. Known seed1 4k
+already returns only `.50` on this MuJoCo paper and scores `.99` in the analytic
+Isaac companion, so the four-seed stability gate cannot pass and the existing
+instrument disagreement remains. Seed4 at 4k can support “delayed learning”
+only against the unchanged `.65` aggregate/`.50` each-side thresholds; it
+cannot close family stability, physical Isaac truth, calibrated plant, or the
+Agibot vendor MuJoCo Gate3/Gate3B final gate. The frozen paper and barrier are
+documented in
+`docs/operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md`; G06
+remains `Partial`.
