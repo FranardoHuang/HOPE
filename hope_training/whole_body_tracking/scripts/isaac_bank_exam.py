@@ -35,6 +35,7 @@ from omegaconf import OmegaConf
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from isaac_bank_exam_adapter import (  # noqa: E402
+    CROSS_ENGINE_INSTRUMENTATION_SCHEMA,
     IsaacBankExamError,
     apply_hold_aware_tracking_guard_profile,
     apply_nominal_eval_profile,
@@ -47,9 +48,11 @@ from isaac_bank_exam_adapter import (  # noqa: E402
     hydrate_missing_dataclass_defaults,
     per_attempt_action_noise,
     policy_observation_tensor,
+    numeric_ready_state_document,
     ready_state_sha256,
     sha256_file,
     summarize_attempts,
+    strike_state_instrumentation_document,
     write_scorecard,
 )
 
@@ -515,6 +518,51 @@ def _run(cfg, simulation_app):
             f"nominal stand reset produced {len(set(ready_hashes))} distinct ready-state hashes"
         )
     ready_sha = ready_hashes[0]
+    joint_names = [str(name) for name in robot.joint_names]
+    ready_state_numeric = numeric_ready_state_document(
+        root[0], joints[0], joint_vel[0], joint_names=joint_names
+    )
+    if ready_state_numeric["legacy_ready_state_sha256"] != ready_sha:
+        raise IsaacBankExamError("numeric ready-state export disagrees with the accepted digest")
+
+    from whole_body_tracking.tasks.tracking.mdp import virtual_ball as virtual_ball_scorer
+
+    physical_manager = getattr(racket_cmd, "_physical", None)
+    if physical_manager is None:
+        physical_truth_capability = {
+            "available": False,
+            "capability": "disabled",
+            "reason": "accepted nominal BankExam profile sets physical_ball=false",
+        }
+    else:
+        # The current PhysicalBallManager is explicitly Phase A: it realizes the incoming flight,
+        # disables robot collision, and applies no racket impulse.  Export this limitation rather
+        # than silently relabeling an incoming-flight probe as physical return truth.
+        physical_truth_capability = {
+            "available": False,
+            "capability": "incoming_flight_only_no_paddle_contact_phase_a",
+            "reason": "Isaac physical-ball Phase A has no racket impulse or post-contact truth",
+        }
+    instrumentation_contract = {
+        "schema": CROSS_ENGINE_INSTRUMENTATION_SCHEMA,
+        "ready_state_numeric_sha256": ready_state_numeric["sha256"],
+        "per_question_state": {
+            "base_root_state": True,
+            "racket_position_velocity": True,
+            "signed_face_normal_before_orient_normal": True,
+            "raw_plus_y_face_normal": True,
+            "analytic_oriented_face_normal": True,
+            "incoming_ball_velocity_spin": True,
+        },
+        "analytic_counterfactual": {
+            "capability": "analytic_counterfactual_contact_and_flight_v1",
+            "capture_radius_m": float(racket_cmd.cfg.vb_capture_radius),
+            "min_approach_speed_mps": float(racket_cmd.cfg.vb_min_approach_speed),
+            "thresholds_changed_for_instrument_parity": False,
+        },
+        "physical_truth": physical_truth_capability,
+    }
+    instrumentation_contract["sha256"] = canonical_sha256(instrumentation_contract)
 
     env_ids = torch.arange(num_envs, dtype=torch.long, device=device)
     clip_ids = torch.as_tensor([int(item.clip) for item in schedule], device=device)
@@ -554,6 +602,7 @@ def _run(cfg, simulation_app):
             "landing_x": None,
             "landing_y": None,
             "net_clear": False,
+            "instrumentation": None,
         })
     active = torch.ones(num_envs, dtype=torch.bool, device=device)
     tm = base.termination_manager
@@ -594,7 +643,65 @@ def _run(cfg, simulation_app):
         exact = racket_cmd.metrics["exact_strike_hit_rate"].detach() > 0.5
         hit = racket_cmd.vb_fired.detach().bool()
         returned = hit & racket_cmd.vb_net_clear.detach().bool() & racket_cmd.vb_on_opponent.detach().bool()
-        for env_id in torch.where(active & exact)[0].detach().to("cpu").tolist():
+        exact_ids = torch.where(active & exact)[0]
+        if bool(exact_ids.numel()):
+            oriented_exact = virtual_ball_scorer.orient_normal(
+                racket_cmd.racket_normal_w[exact_ids],
+                racket_cmd.vb_vel_in_w[exact_ids],
+                racket_cmd.racket_lin_vel_w[exact_ids],
+            )
+            oriented_by_env = {
+                int(env_id): oriented_exact[offset]
+                for offset, env_id in enumerate(exact_ids.detach().to("cpu").tolist())
+            }
+        else:
+            oriented_by_env = {}
+
+        def state_snapshot(env_id: int, phase: str, *, analytic_available: bool) -> dict[str, Any]:
+            origin = base.scene.env_origins[env_id]
+            base_root = robot.data.root_state_w[env_id].detach().clone()
+            base_root[:3] -= origin
+            signed = racket_cmd.racket_normal_w[env_id]
+            if env_id in oriented_by_env:
+                oriented = oriented_by_env[env_id]
+            else:
+                oriented = virtual_ball_scorer.orient_normal(
+                    signed.unsqueeze(0),
+                    racket_cmd.vb_vel_in_w[env_id].unsqueeze(0),
+                    racket_cmd.racket_lin_vel_w[env_id].unsqueeze(0),
+                )[0]
+            target_normal = (
+                racket_cmd.target_normal_cmd[env_id]
+                if bool(getattr(racket_cmd.cfg, "face_command", False))
+                else racket_cmd.racket_target_normal_w[env_id]
+            )
+            return strike_state_instrumentation_document(
+                observation_phase=phase,
+                base_root_state_env=base_root.detach().to("cpu").numpy(),
+                racket_pos_env=(racket_cmd.racket_pos_w[env_id] - origin).detach().to("cpu").numpy(),
+                racket_lin_vel_world=racket_cmd.racket_lin_vel_w[env_id].detach().to("cpu").numpy(),
+                racket_face_normal_signed_pre_orient_world=signed.detach().to("cpu").numpy(),
+                racket_face_normal_raw_plus_y_world=racket_cmd.racket_normal_raw_w[env_id].detach().to("cpu").numpy(),
+                analytic_face_normal_oriented_world=oriented.detach().to("cpu").numpy(),
+                target_racket_pos_env=(racket_cmd.racket_target_pos_w[env_id] - origin).detach().to("cpu").numpy(),
+                target_racket_lin_vel_world=racket_cmd.racket_target_vel_w[env_id].detach().to("cpu").numpy(),
+                target_face_normal_world=target_normal.detach().to("cpu").numpy(),
+                incoming_ball_lin_vel_world=racket_cmd.vb_vel_in_w[env_id].detach().to("cpu").numpy(),
+                incoming_ball_spin_world=racket_cmd.vb_spin_in_w[env_id].detach().to("cpu").numpy(),
+                analytic_available=analytic_available,
+                analytic_capture_gate=bool(racket_cmd.vb_fired[env_id]) if analytic_available else False,
+                analytic_net_clear=bool(racket_cmd.vb_net_clear[env_id]) if analytic_available else False,
+                analytic_on_opponent=bool(racket_cmd.vb_on_opponent[env_id]) if analytic_available else False,
+                analytic_landing_valid=bool(racket_cmd.vb_landing_valid[env_id]) if analytic_available else False,
+                analytic_landing_xy_env=(
+                    racket_cmd.vb_landing_xy[env_id].detach().to("cpu").numpy()
+                    if analytic_available
+                    else np.zeros(2, dtype=np.float64)
+                ),
+                physical_truth=physical_truth_capability,
+            )
+
+        for env_id in exact_ids.detach().to("cpu").tolist():
             row = records[env_id]
             if row["reached_exact"]:
                 raise IsaacBankExamError(f"attempt {env_id} produced more than one exact-strike frame")
@@ -610,6 +717,9 @@ def _run(cfg, simulation_app):
                 row["landing_x"] = float(racket_cmd.vb_landing_xy[env_id, 0])
                 row["landing_y"] = float(racket_cmd.vb_landing_xy[env_id, 1])
             row["net_clear"] = bool(racket_cmd.vb_net_clear[env_id])
+            row["instrumentation"] = state_snapshot(
+                env_id, "exact_strike", analytic_available=True
+            )
 
         masks = _term_masks(tm, observed_terms, num_envs)
         done_list = dones.detach().to("cpu").bool().tolist()
@@ -634,6 +744,10 @@ def _run(cfg, simulation_app):
                 reason = "clip_complete"
             if reason is not None:
                 row = records[env_id]
+                if row["instrumentation"] is None:
+                    row["instrumentation"] = state_snapshot(
+                        env_id, "termination_before_exact", analytic_available=False
+                    )
                 row["end_step"] = step
                 row["finalize_reason"] = reason
                 row["finalized"] = True
@@ -682,6 +796,10 @@ def _run(cfg, simulation_app):
         "training_contract_sha256": training_contract_sha,
         "termination_contract_id": termination_contract["contract_id"],
         "ready_state_sha256": ready_sha,
+        "cross_engine_instrumentation": {
+            "contract": instrumentation_contract,
+            "ready_state": ready_state_numeric,
+        },
         "nominal_eval_profile": profile,
         "sources": {
             "git_head": _git_head(repo),

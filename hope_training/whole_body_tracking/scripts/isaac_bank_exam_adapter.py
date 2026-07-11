@@ -23,6 +23,7 @@ import numpy as np
 
 
 SCHEMA = "hope.isaac-bank-exam.v1"
+CROSS_ENGINE_INSTRUMENTATION_SCHEMA = "hope.cross-engine-state-instrumentation.v1"
 TRACKING_GUARD_FUNCTIONS = {
     "anchor_pos": ("bad_anchor_pos_z_only", "bad_anchor_pos_z_only_hold_aware"),
     "anchor_ori": ("bad_anchor_ori", "bad_anchor_ori_hold_aware"),
@@ -489,6 +490,171 @@ def ready_state_sha256(root_state: Any, joint_pos: Any, joint_vel: Any) -> str:
         digest.update(np.asarray(array.shape, dtype="<i8").tobytes())
         digest.update(array.tobytes(order="C"))
     return digest.hexdigest()
+
+
+def _numeric_array_document(value: Any, *, field: str, expected_size: int | None = None) -> dict[str, Any]:
+    array = np.asarray(value, dtype="<f8")
+    if not np.isfinite(array).all():
+        raise IsaacBankExamError(f"instrumentation {field} contains NaN/Inf")
+    if expected_size is not None and array.size != expected_size:
+        raise IsaacBankExamError(
+            f"instrumentation {field} has {array.size} values, expected {expected_size}"
+        )
+    array = array.copy()
+    array[array == 0.0] = 0.0
+    return {"shape": list(array.shape), "values": array.reshape(-1).tolist()}
+
+
+def numeric_ready_state_document(
+    root_state: Any,
+    joint_pos: Any,
+    joint_vel: Any,
+    *,
+    joint_names: Sequence[str],
+) -> dict[str, Any]:
+    """Export the exact numeric Isaac reset state behind the legacy ready-state digest."""
+
+    root = _numeric_array_document(root_state, field="ready.root_state", expected_size=13)
+    q = _numeric_array_document(joint_pos, field="ready.joint_pos")
+    qd = _numeric_array_document(joint_vel, field="ready.joint_vel")
+    names = [str(name) for name in joint_names]
+    if len(names) != len(set(names)) or len(names) != len(q["values"]):
+        raise IsaacBankExamError("ready-state joint names are duplicate or do not match joint_pos")
+    if len(qd["values"]) != len(names):
+        raise IsaacBankExamError("ready-state joint_vel does not match joint order")
+    document = {
+        "schema": CROSS_ENGINE_INSTRUMENTATION_SCHEMA,
+        "kind": "isaac_numeric_ready_state",
+        "coordinate_contract": {
+            "root_position": "environment_local_m",
+            "root_quaternion": "world_wxyz",
+            "root_linear_velocity": "world_mps",
+            "root_angular_velocity": "world_radps",
+            "joint_order": "explicit_joint_names",
+        },
+        "joint_names": names,
+        "root_state": root,
+        "joint_pos": q,
+        "joint_vel": qd,
+        "legacy_ready_state_sha256": ready_state_sha256(root_state, joint_pos, joint_vel),
+    }
+    document["sha256"] = canonical_sha256(document)
+    return document
+
+
+def strike_state_instrumentation_document(
+    *,
+    observation_phase: str,
+    base_root_state_env: Any,
+    racket_pos_env: Any,
+    racket_lin_vel_world: Any,
+    racket_face_normal_signed_pre_orient_world: Any,
+    racket_face_normal_raw_plus_y_world: Any,
+    analytic_face_normal_oriented_world: Any,
+    target_racket_pos_env: Any,
+    target_racket_lin_vel_world: Any,
+    target_face_normal_world: Any,
+    incoming_ball_lin_vel_world: Any,
+    incoming_ball_spin_world: Any,
+    analytic_available: bool,
+    analytic_capture_gate: bool,
+    analytic_net_clear: bool,
+    analytic_on_opponent: bool,
+    analytic_landing_valid: bool,
+    analytic_landing_xy_env: Any,
+    physical_truth: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build one finite, convention-explicit state snapshot without changing scorer behavior."""
+
+    if observation_phase not in ("exact_strike", "termination_before_exact"):
+        raise IsaacBankExamError(f"unsupported instrumentation phase {observation_phase!r}")
+    if not isinstance(physical_truth, Mapping):
+        raise IsaacBankExamError("physical_truth must be an explicit capability mapping")
+    physical = dict(physical_truth)
+    if not isinstance(physical.get("available"), bool) or not isinstance(
+        physical.get("capability"), str
+    ):
+        raise IsaacBankExamError("physical_truth must declare boolean available and capability")
+    if physical["available"]:
+        required = ("contacted", "net_clear", "landed_ok", "returned")
+        if physical["capability"] != "physical_paddle_contact_and_post_contact_flight_v1" or any(
+            not isinstance(physical.get(key), bool) for key in required
+        ):
+            raise IsaacBankExamError("available physical truth lacks full paddle/contact outcome")
+    else:
+        if not isinstance(physical.get("reason"), str) or not physical["reason"]:
+            raise IsaacBankExamError("unavailable physical truth requires a reason")
+
+    root = _numeric_array_document(base_root_state_env, field="strike.base_root_state", expected_size=13)
+    document = {
+        "schema": CROSS_ENGINE_INSTRUMENTATION_SCHEMA,
+        "kind": "isaac_question_state",
+        "observation_phase": observation_phase,
+        "coordinate_contract": {
+            "positions": "environment_local_m",
+            "linear_velocities": "world_mps",
+            "angular_velocities": "world_radps",
+            "face_normals": "world_unit_vector",
+            "base_quaternion": "world_wxyz",
+        },
+        "base": {"root_state": root},
+        "racket": {
+            "position_env_m": _numeric_array_document(
+                racket_pos_env, field="strike.racket_pos", expected_size=3
+            ),
+            "linear_velocity_world_mps": _numeric_array_document(
+                racket_lin_vel_world, field="strike.racket_vel", expected_size=3
+            ),
+            "face_normal_signed_pre_orient_world": _numeric_array_document(
+                racket_face_normal_signed_pre_orient_world,
+                field="strike.signed_face_normal",
+                expected_size=3,
+            ),
+            "face_normal_raw_plus_y_world": _numeric_array_document(
+                racket_face_normal_raw_plus_y_world,
+                field="strike.raw_face_normal",
+                expected_size=3,
+            ),
+            "analytic_face_normal_oriented_world": _numeric_array_document(
+                analytic_face_normal_oriented_world,
+                field="strike.oriented_face_normal",
+                expected_size=3,
+            ),
+        },
+        "target": {
+            "racket_position_env_m": _numeric_array_document(
+                target_racket_pos_env, field="strike.target_pos", expected_size=3
+            ),
+            "racket_linear_velocity_world_mps": _numeric_array_document(
+                target_racket_lin_vel_world, field="strike.target_vel", expected_size=3
+            ),
+            "face_normal_world": _numeric_array_document(
+                target_face_normal_world, field="strike.target_normal", expected_size=3
+            ),
+        },
+        "incoming_ball": {
+            "linear_velocity_world_mps": _numeric_array_document(
+                incoming_ball_lin_vel_world, field="strike.ball_vel", expected_size=3
+            ),
+            "spin_world_radps": _numeric_array_document(
+                incoming_ball_spin_world, field="strike.ball_spin", expected_size=3
+            ),
+        },
+        "analytic_counterfactual": {
+            "available": bool(analytic_available),
+            "capability": "analytic_counterfactual_contact_and_flight_v1",
+            "capture_gate": bool(analytic_capture_gate),
+            "net_clear": bool(analytic_net_clear),
+            "on_opponent": bool(analytic_on_opponent),
+            "landing_valid": bool(analytic_landing_valid),
+            "landing_xy_env_m": _numeric_array_document(
+                analytic_landing_xy_env, field="strike.analytic_landing", expected_size=2
+            ),
+        },
+        "physical_truth": physical,
+    }
+    document["sha256"] = canonical_sha256(document)
+    return document
 
 
 def _group(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:

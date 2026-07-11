@@ -1,0 +1,142 @@
+{
+  "schema": "hope.cross-engine-instrument-parity-prereg.v1",
+  "schema_version": 1,
+  "contract_id": "phase1-fresh-SZ-seed1-model2000-cross-engine-instrument-parity-2x2-v1",
+  "status": "preregistered_runtime_blocked",
+  "scope": "One immutable fresh exact SZ model_2000 paper across Isaac and MuJoCo, each measured by physical truth and the analytic counterfactual; instrument-localization prerequisite only, not training selection, calibrated-plant, continuity, deployment, or real-robot evidence",
+  "auto_start": false,
+  "threshold_changes_allowed": false,
+  "real_robot_authorized": false,
+  "forensic_input": {
+    "path": "configs/phase1_cross_engine_saturation_forensic_result_20260711.json",
+    "sha256": "aff8f4e665d20bb76a56e079735f32b6766388ee05f61c51e93adeb568be45c9"
+  },
+  "tools": {
+    "validator": {
+      "path": "scripts/validate_phase1_cross_engine_instrument_parity_2x2.py",
+      "sha256": "e688873c79c50d3f0414b93e2d1cf779b0ef220d870adc32f501c762f3f0fb5c"
+    },
+    "isaac_evaluator": {
+      "path": "hope_training/whole_body_tracking/scripts/isaac_bank_exam.py",
+      "sha256": "10ffb0b5f70176ee99c6ec039787a87129cea923027953d16ded5be5e30481e4"
+    },
+    "isaac_adapter": {
+      "path": "hope_training/whole_body_tracking/scripts/isaac_bank_exam_adapter.py",
+      "sha256": "54d70aa009aa3b4f4b6e1fee765c270d2fb1458b1fad2895b0b065caec7e82a2"
+    }
+  },
+  "source_commits": {
+    "training": "6d93bcb16c422a2f42748c2dc99432559653480b",
+    "forensic_evaluation": "46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+    "runtime_evaluation": "must_be_a_clean_detached_commit_containing_the_bound_instrumentation_sources"
+  },
+  "target": {
+    "run_name": "phase1_fresh_v3_S1_seed1",
+    "checkpoint_iteration": 2000,
+    "checkpoint_sha256": "99e8265960244e5be19176dc5f2d3b8b99e088d5d76d34d0f2cd1e1dd0c3ae4c",
+    "training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972",
+    "exam_bank_sha256": "d7db2568beee990ef1d64b2dce9f0ab56ca76377f8993d820b6388292d0f5096",
+    "fresh_lineage": true,
+    "evaluation_contract_exact": true,
+    "formal_target": true,
+    "plant_cell": "SZ_zero_friction_protocol_exact"
+  },
+  "schedule": {
+    "path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_exact_v1/shared_clean_k100.schedule.json",
+    "file_sha256": "66e89986a2b726d529179fcb4c745625ebed0380d59664caceefc55e86071cb3",
+    "semantic_sha256": "7dc6af822fb4130b8c324843f179d77f882d1326306bb19802b00f94447dff3e",
+    "question_id_order_sha256": "b87e81a34ff2d31766e17345f0a8c9d77665b78874093e26bdae257e8ed21f91",
+    "schedule_k": 100,
+    "attempts_per_side": 50,
+    "seed": 0,
+    "noise_scale": 0,
+    "hold_range": [
+      0,
+      100
+    ],
+    "one_question_reset": true,
+    "no_wrap": true,
+    "censored_attempts": 0
+  },
+  "analytic_threshold_contract": {
+    "schema": "hope.cross-engine-analytic-threshold-contract.v1",
+    "capture_radius_m": 0.095,
+    "min_approach_speed_mps": 0.3,
+    "normal_orientation": "orient_face_toward_incoming_relative_velocity_before_analytic_contact",
+    "net_and_table_geometry": "frozen_from_bank_exam_and_ball_physics_contract",
+    "ball_physics_yaml_sha256": "2e58221442665ddad7cc6dcc18d5c811dec1b0c47439b81c1c744b5148169a27",
+    "thresholds_changed_from_forensic": false,
+    "sha256": "90f67bdec1d6cfa39617c971ce75e84ad2973a1663b7effcbf599b9763fb3849"
+  },
+  "state_instrumentation_contract": {
+    "schema": "hope.cross-engine-state-instrumentation.v1",
+    "numeric_ready_state_required": true,
+    "per_question_fields": [
+      "base_root_state_environment_local",
+      "racket_position_environment_local",
+      "racket_linear_velocity_world",
+      "racket_face_normal_signed_pre_orient_world",
+      "racket_face_normal_raw_plus_y_world",
+      "analytic_face_normal_oriented_world",
+      "incoming_ball_linear_velocity_world",
+      "incoming_ball_spin_world"
+    ],
+    "finite_required": true,
+    "question_id_order_exact_required": true,
+    "physical_truth_definition": "physical paddle contact plus post-contact physical net/landing/return outcome",
+    "analytic_counterfactual_definition": "frozen capture gate plus analytic paddle contact and flight on the same measured strike state"
+  },
+  "cells": [
+    {
+      "engine": "isaac",
+      "instrument": "physical_truth",
+      "required": true,
+      "required_capability": "physical_paddle_contact_and_post_contact_flight_v1",
+      "same_schedule_required": true
+    },
+    {
+      "engine": "isaac",
+      "instrument": "analytic_counterfactual",
+      "required": true,
+      "required_capability": "analytic_counterfactual_contact_and_flight_v1",
+      "same_schedule_required": true
+    },
+    {
+      "engine": "mujoco",
+      "instrument": "physical_truth",
+      "required": true,
+      "required_capability": "physical_paddle_contact_and_post_contact_flight_v1",
+      "same_schedule_required": true
+    },
+    {
+      "engine": "mujoco",
+      "instrument": "analytic_counterfactual",
+      "required": true,
+      "required_capability": "analytic_counterfactual_contact_and_flight_v1",
+      "same_schedule_required": true
+    }
+  ],
+  "evidence_contract": {
+    "schema": "hope.cross-engine-instrument-parity-evidence.v1",
+    "cell_schema": "hope.cross-engine-instrument-cell.v1",
+    "all_four_cells_required": true,
+    "physical_cells_must_set_analytic_only_false": true,
+    "physical_cells_must_export_contact_net_landing_return_booleans_for_all_100_questions": true,
+    "analytic_cells_must_export_capture_net_on_opponent_return_booleans_for_all_100_questions": true,
+    "same_engine_physical_and_analytic_ready_state_sha_must_match": true,
+    "gate_closes_only_after_validator_accepts_all_four_content_addressed_cells": true
+  },
+  "runtime_blockers": [
+    "Isaac physical-ball Phase A has no racket impulse and no post-contact physical truth; Phase B physical paddle contact/flight instrumentation is required",
+    "the newly instrumented Isaac evaluator has not been executed on the immutable q50 schedule",
+    "accepted MuJoCo artifacts predate the normalized state schema and do not export a signed face-normal vector in the cell document",
+    "no four-cell content-addressed evidence manifest exists"
+  ],
+  "decision_rule": {
+    "instrument_parity_gate_closed_now": false,
+    "missing_or_virtual_only_physical_cell_action": "fail_closed",
+    "threshold_tuning_to_force_engine_agreement": "forbidden",
+    "training_or_checkpoint_action": "none",
+    "deployment_or_real_robot_action": "none"
+  }
+}
