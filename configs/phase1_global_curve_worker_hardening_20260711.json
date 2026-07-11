@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "contract_id": "phase1-global-curve-worker-hardening-20260711-v1",
+  "purpose": "Replace the seven remaining original/scale-out legacy Phase-1 curve workers with the standalone screen-policy-hardened worker without touching trainers, judges, or either Git checkout.",
+  "simulation_only": true,
+  "real_robot_commands_forbidden": true,
+  "status": "preregistered_repo_only_not_deployed",
+  "tracked_evidence": {
+    "manual_launch_contract": "docs/operations/run_training.md launches original/scale-out workers with nohup setsid and records state_dir/worker.log, but does not create a launch-contract or worker.launch sidecar.",
+    "sidecar_shape_rule": "Do not assume the causal-followup launch sidecar shape. First create a no-signal Pod attestation from the exact live /proc command, then require its explicit SHA-256 for validate/replace.",
+    "manifest_binding": "configs/phase1_scaleout_curve_bindings_20260711.json and the seven queue manifests below are the tracked queue/manifest evidence."
+  },
+  "runtime": {
+    "training_checkout": "/workspace/codexschema/nohope",
+    "expected_training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+    "eval_checkout": "/workspace/codexschema/nohope_eval_08e438e",
+    "expected_eval_commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+    "judge_relative_path": "hope_training/whole_body_tracking/scripts/judge.sh",
+    "judge_sha256": "1a00702935096b063435c3f0bd23e75f76f13e1298c87310d1cec3c26cca8529",
+    "legacy_worker_relative_path": "hope_training/whole_body_tracking/scripts/phase1_checkpoint_curve_worker.py",
+    "legacy_worker_sha256": "8b980359bf5dfdcc515ed9db07b457250ab671b67fceefa8a155c4225705e424",
+    "external_control_root": "/workspace/codexschema/phase1_fresh_20260711/control/global_curve_hardening_v1",
+    "standalone_hardened_worker": "/workspace/codexschema/phase1_fresh_20260711/control/global_curve_hardening_v1/phase1_checkpoint_curve_worker_hardened_21e3015.py",
+    "standalone_hardened_worker_sha256": "21e301533328cad2a6684acced85fec6bb6854225eb18ca673247386f059f0eb",
+    "worker_python": "/usr/bin/python3",
+    "worker_python_argv0_allowed": [
+      "python3",
+      "/usr/bin/python3"
+    ],
+    "required_max_active_cpu": 6,
+    "old_worker_term_wait_seconds": 30,
+    "new_worker_startup_seconds": 2,
+    "attestation_filename_prefix": "global_curve_live_",
+    "transaction_sidecar_template": "/workspace/codexschema/phase1_fresh_20260711/control/global_curve_hardening_v1/global_curve_hardening_{pod}.transaction.json",
+    "correction_sidecar_template": "/workspace/codexschema/phase1_fresh_20260711/control/global_curve_hardening_v1/{queue_id}.correction.json",
+    "hardened_launch_sidecar_template": "/workspace/codexschema/phase1_fresh_20260711/control/global_curve_hardening_v1/{queue_id}.hardened.launch.json"
+  },
+  "replacement_contract": {
+    "pod_atomic_scope": "Every registered legacy worker on one Pod must pass the same read-only preflight before any worker PGID is signalled.",
+    "live_identity": "PID hints are not authority. The attest phase must verify the exact legacy worker bytes, executable, manifest/state/judge command, pid=pgid, single-member group, and zero child/judge; validate/replace require the explicit attestation file SHA and recheck /proc.",
+    "manifest_policy": "Every manifest must have q10 screen_only=true, stop_or_promote_allowed=false, exact schedule/role arguments, monotonically contiguous milestone groups, stable run membership, and barrier IDs that are contiguous and match their milestone.",
+    "completed_job_policy": "A legacy complete rc=0 job may be carried into the fresh state directory only after checkpoint, state, exact judge command, judge/eval/training identity and result-log SHA validation. The migrated state records manifest/job/job-contract SHA plus source state/log SHA. Any failed, incomplete, contradictory, or live job fails closed.",
+    "signal_policy": "Send SIGTERM only to each attested exact legacy worker PGID; never SIGKILL, never signal a trainer or judge, and fail closed if any worker has a child.",
+    "new_state_policy": "Use a never-before-existing hardened_21e3015 state directory with the exact same manifest. Preserve every legacy state/log byte and write correction evidence only under the external control root."
+  },
+  "pods": {
+    "pod1": {
+      "queues": [
+        "cadence_causal_pod1",
+        "cadence_fresh_pod1",
+        "scaleout_causal_pod1",
+        "scaleout_fresh_pod1"
+      ]
+    },
+    "pod2": {
+      "queues": [
+        "cadence_fresh_pod2",
+        "scaleout_causal_pod2",
+        "scaleout_fresh_pod2"
+      ]
+    }
+  },
+  "queues": [
+    {
+      "queue_id": "cadence_causal_pod1",
+      "pod": "pod1",
+      "legacy_pid_hint": 1394150,
+      "source_repo_manifest": "configs/phase1_checkpoint_curve_cadence_pod1_20260711.json",
+      "runtime_manifest": "/workspace/codexschema/phase1_fresh_20260711/runtime_manifests/phase1_checkpoint_curve_cadence_pod1_20260711.json",
+      "expected_manifest_sha256": "b51ddaa50eba3b06893740c2764e98c96d5fbb8751993e95e3f934602c6a36de",
+      "legacy_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1_46a0ce2",
+      "legacy_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1_46a0ce2/worker.log",
+      "hardened_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1_46a0ce2_hardened_21e3015",
+      "hardened_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1_46a0ce2_hardened_21e3015/worker.log"
+    },
+    {
+      "queue_id": "cadence_fresh_pod1",
+      "pod": "pod1",
+      "legacy_pid_hint": 1394810,
+      "source_repo_manifest": "configs/phase1_checkpoint_curve_cadence_fresh_pod1_20260711.json",
+      "runtime_manifest": "/workspace/codexschema/phase1_fresh_20260711/runtime_manifests/phase1_checkpoint_curve_cadence_fresh_pod1_20260711.json",
+      "expected_manifest_sha256": "180cb9f573a1f5ccb833389904d47f52622b88c3b9676ebe1587a68ddc9d5ff6",
+      "legacy_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_fresh_pod1_46a0ce2",
+      "legacy_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_fresh_pod1_46a0ce2/worker.log",
+      "hardened_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_fresh_pod1_46a0ce2_hardened_21e3015",
+      "hardened_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_fresh_pod1_46a0ce2_hardened_21e3015/worker.log"
+    },
+    {
+      "queue_id": "scaleout_causal_pod1",
+      "pod": "pod1",
+      "legacy_pid_hint": 1380340,
+      "source_repo_manifest": "configs/phase1_checkpoint_curve_scaleout_causal_pod1_20260711.json",
+      "runtime_manifest": "/workspace/codexschema/phase1_fresh_20260711/runtime_manifests/phase1_checkpoint_curve_scaleout_causal_pod1_20260711.json",
+      "expected_manifest_sha256": "8d8de2fb7519717af865fd8de99f2e19dee673513f7f3c0892cb130090142c29",
+      "legacy_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod1_46a0ce2",
+      "legacy_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod1_46a0ce2/worker.log",
+      "hardened_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod1_46a0ce2_hardened_21e3015",
+      "hardened_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod1_46a0ce2_hardened_21e3015/worker.log"
+    },
+    {
+      "queue_id": "scaleout_fresh_pod1",
+      "pod": "pod1",
+      "legacy_pid_hint": 1397266,
+      "source_repo_manifest": "configs/phase1_checkpoint_curve_scaleout_fresh_pod1_20260711.json",
+      "runtime_manifest": "/workspace/codexschema/phase1_fresh_20260711/runtime_manifests/phase1_checkpoint_curve_scaleout_fresh_pod1_20260711.json",
+      "expected_manifest_sha256": "ec5573d5341cfceca8c5b4d0098fd16ddeef3df1aab096af4b21651d6abaa654",
+      "legacy_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_fresh_pod1_46a0ce2",
+      "legacy_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_fresh_pod1_46a0ce2/worker.log",
+      "hardened_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_fresh_pod1_46a0ce2_hardened_21e3015",
+      "hardened_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_fresh_pod1_46a0ce2_hardened_21e3015/worker.log"
+    },
+    {
+      "queue_id": "cadence_fresh_pod2",
+      "pod": "pod2",
+      "legacy_pid_hint": 194276,
+      "source_repo_manifest": "configs/phase1_checkpoint_curve_cadence_fresh_pod2_20260711.json",
+      "runtime_manifest": "/workspace/codexschema/phase1_fresh_20260711/runtime_manifests/phase1_checkpoint_curve_cadence_fresh_pod2_20260711.json",
+      "expected_manifest_sha256": "21c0e95f3656119933209605dae36c7ab930bf36064a583b71b4c6230e04c602",
+      "legacy_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_fresh_pod2_46a0ce2",
+      "legacy_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_fresh_pod2_46a0ce2/worker.log",
+      "hardened_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_fresh_pod2_46a0ce2_hardened_21e3015",
+      "hardened_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_fresh_pod2_46a0ce2_hardened_21e3015/worker.log"
+    },
+    {
+      "queue_id": "scaleout_causal_pod2",
+      "pod": "pod2",
+      "legacy_pid_hint": 192815,
+      "source_repo_manifest": "configs/phase1_checkpoint_curve_scaleout_causal_pod2_20260711.json",
+      "runtime_manifest": "/workspace/codexschema/phase1_fresh_20260711/runtime_manifests/phase1_checkpoint_curve_scaleout_causal_pod2_20260711.json",
+      "expected_manifest_sha256": "d6d540f8204c18ce5a7b4b90a23cdd8ba59d7a87e7c65da8328dbe3c782a088e",
+      "legacy_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod2_46a0ce2",
+      "legacy_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod2_46a0ce2/worker.log",
+      "hardened_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod2_46a0ce2_hardened_21e3015",
+      "hardened_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod2_46a0ce2_hardened_21e3015/worker.log"
+    },
+    {
+      "queue_id": "scaleout_fresh_pod2",
+      "pod": "pod2",
+      "legacy_pid_hint": 195085,
+      "source_repo_manifest": "configs/phase1_checkpoint_curve_scaleout_fresh_pod2_20260711.json",
+      "runtime_manifest": "/workspace/codexschema/phase1_fresh_20260711/runtime_manifests/phase1_checkpoint_curve_scaleout_fresh_pod2_20260711.json",
+      "expected_manifest_sha256": "84ba5933dafd70e2ed82278e3a174a3a7b1788f570b24bc0c856cf8fad02bb1b",
+      "legacy_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_fresh_pod2_46a0ce2",
+      "legacy_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_fresh_pod2_46a0ce2/worker.log",
+      "hardened_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_fresh_pod2_46a0ce2_hardened_21e3015",
+      "hardened_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_fresh_pod2_46a0ce2_hardened_21e3015/worker.log"
+    }
+  ]
+}
