@@ -315,6 +315,15 @@ escape: a checkpoint that claims a binding while its adjacent sidecar is
 missing is rejected. `judge.sh` likewise reads only that adjacent sidecar to
 restore zero friction and the actor layout.
 
+For a diagnostic sidecar (`motion_kinematics_exact=false` or the explicit
+legacy face pairing), `judge.sh` adds `--allow-inexact-contract` to MuJoCo and
+prints that decision in its preflight. A fresh exact candidate receives no
+escape. Legacy schema-1/2 or missing-contract runs are also diagnostic. The
+Isaac export subprocess activates the requested venv and then sources this
+checkout's `setup_train_env.sh`, replacing `PYTHONPATH` with
+`HOPE_WBT_PYTHONPATH`; never let a user-specific Pod env select another
+checkout's task package.
+
 `hydra`, `omegaconf`, and `rsl_rl` are NOT in the package `setup.py` `install_requires`; they must be importable from the Isaac Lab Python (provide via Isaac Lab itself or `HOPE_ISAAC_VENV_SITE`). Install the package into that Python:
 
 ```bash

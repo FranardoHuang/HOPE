@@ -32,7 +32,7 @@
 #   --exam-extra "..."        追加给 mujoco_eval_onnx.py 的参数
 #
 # 环境变量(pod 缺省;别的机器可覆盖):
-#   JUDGE_ISAAC_ENV      isaac venv 入口脚本(缺省 /workspace/franco/env.sh)
+#   JUDGE_ISAAC_ENV      isaac venv 激活脚本(缺省 /workspace/hope_isaac_venv/bin/activate)
 #   JUDGE_MJEVAL_ACT     mjeval venv activate(缺省 /workspace/hope_mjeval_venv/bin/activate)
 #
 # 铁律(都付过学费,见 docs/runbook.md「判卷链」):
@@ -47,7 +47,7 @@ set -u -o pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 WBT_DIR=$(dirname "$SCRIPT_DIR")
 
-JUDGE_ISAAC_ENV=${JUDGE_ISAAC_ENV:-/workspace/franco/env.sh}
+JUDGE_ISAAC_ENV=${JUDGE_ISAAC_ENV:-/workspace/hope_isaac_venv/bin/activate}
 JUDGE_MJEVAL_ACT=${JUDGE_MJEVAL_ACT:-/workspace/hope_mjeval_venv/bin/activate}
 
 die() { echo "[judge][FATAL] $*" >&2; exit 1; }
@@ -159,6 +159,8 @@ fatal = []
 zero_joint_friction = False
 plant_src = "legacy/no schema-3 hard contract (task default false)"
 hard_actor_contract = None
+allow_inexact_contract = True
+contract_src = "legacy/no schema-3 hard contract: diagnostic evaluator escape required"
 if os.path.isfile(training_contract_path):
     try:
         with open(training_contract_path, encoding="utf-8") as f:
@@ -228,8 +230,23 @@ if os.path.isfile(training_contract_path):
                             "schema-3 hard contract 是部分零/部分非零的混合 friction 向量; "
                             "task.plant.zero_joint_friction 只能重放全零或已声明默认值,拒绝代理"
                         )
+            motion_exact = hard_contract.get("motion_kinematics_exact")
+            if not isinstance(motion_exact, bool):
+                fatal.append("schema-3 hard contract 的 motion_kinematics_exact 必须是 bool")
+            else:
+                pairing = hard_contract.get("face_command_pairing", "shared_plus_y")
+                allow_inexact_contract = (
+                    not motion_exact or pairing == "legacy_signed_vs_A"
+                )
+                contract_src = (
+                    "schema-3 diagnostic lineage: --allow-inexact-contract"
+                    if allow_inexact_contract
+                    else "schema-3 formal candidate: no diagnostic escape"
+                )
         elif contract_schema in (1, 2):
             plant_src = f"legacy schema-{contract_schema} contract; task default false"
+            allow_inexact_contract = True
+            contract_src = f"legacy schema-{contract_schema}: diagnostic evaluator escape required"
         else:
             fatal.append(f"hard contract schema_version={contract_schema} 不支持")
     else:
@@ -397,6 +414,8 @@ with open(out_path, "w") as f:
     w("SRC_MOTION", mf_src); w("SRC_PHASES", ph_src); w("SRC_BANK", bank_src)
     w("SRC_PLANT", plant_src)
     w("SRC_ACTOR", actor_src + (f": {actor_contract}" if actor_contract else ""))
+    w("SRC_CONTRACT", contract_src)
+    w("ALLOW_INEXACT_CONTRACT", "1" if allow_inexact_contract else "0")
     w("EXPORT_OVERRIDES", " ".join(ov))
 print("[judge] env.yaml 解析 OK")
 PYEOF
@@ -427,6 +446,7 @@ fi
 
 CLAMP_FLAG=""; [ "$QDES_CLAMP" = 1 ] && CLAMP_FLAG="--qdes-clamp"
 SCHEDULE_FLAG=""; [ -n "$SCHEDULE_K" ] && SCHEDULE_FLAG="--exam-schedule-k $SCHEDULE_K"
+INEXACT_FLAG=""; [ "$ALLOW_INEXACT_CONTRACT" = 1 ] && INEXACT_FLAG="--allow-inexact-contract"
 QB_PY="$WBT_DIR/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/stage1_question_bank.py"
 [ -f "$QB_PY" ] || die "缺 stage1_question_bank.py: $QB_PY"
 
@@ -438,7 +458,7 @@ EXAM_CMD="python scripts/mujoco_eval_onnx.py \
   --strike-phase-per-clip $PH0 $PH1 \
   --target-source bank --exam-bank '$EXAM_BANK' \
   $SCHEDULE_FLAG \
-  $CLAMP_FLAG --hold-ref $HOLD_REF \
+  $CLAMP_FLAG $INEXACT_FLAG --hold-ref $HOLD_REF \
   --noise-scales $NOISE_SCALES --steps $STEPS --seed $SEED --out-dir '$JUDGE_DIR/exam' $EXAM_EXTRA"
 
 note "run_dir     = $RUN_DIR"
@@ -449,13 +469,14 @@ note "相位对      = [$PH0, $PH1]($SRC_PHASES)"
 note "exam 卷     = $EXAM_BANK($SRC_BANK)"
 note "plant       = $SRC_PLANT"
 note "actor       = $SRC_ACTOR"
+note "contract    = $SRC_CONTRACT"
 note "旗标        = qdes_clamp=$([ "$QDES_CLAMP" = 1 ] && echo ON || echo OFF) hold_ref=$HOLD_REF steps_cap=$STEPS schedule_k=${SCHEDULE_K:-ALL} seed=$SEED ns=[$NOISE_SCALES]"
 
 if [ "$DRY_RUN" = 1 ]; then
   echo
   echo "===== DRY-RUN:将执行的命令链(不动 GPU 不写文件)====="
   echo "# ② 导出(isaac venv,gpu 占槽 ~4 分钟;认 'Exported ONNX policy to:' 行)"
-  echo "source $JUDGE_ISAAC_ENV && export HYDRA_FULL_ERROR=1"
+  echo "source $JUDGE_ISAAC_ENV && source '$WBT_DIR/setup_train_env.sh' && export PYTHONPATH=\"\$HOPE_WBT_PYTHONPATH\" && export HYDRA_FULL_ERROR=1"
   echo "$EXPORT_CMD > $JUDGE_DIR/export_play.log 2>&1"
   echo "$SIDECAR_CMD   # -> learned_std.npy + obs_norm.npz"
   echo
@@ -475,6 +496,9 @@ note "② play.py 原生导出(isaac venv,gpu$GPU)…"
 (
   # shellcheck disable=SC1090
   source "$JUDGE_ISAAC_ENV" >/dev/null 2>&1
+  # shellcheck disable=SC1091
+  source "$WBT_DIR/setup_train_env.sh" >/dev/null 2>&1
+  export PYTHONPATH="$HOPE_WBT_PYTHONPATH"
   export HYDRA_FULL_ERROR=1
   eval "$EXPORT_CMD" > "$JUDGE_DIR/export_play.log" 2>&1
 ) || { tail -30 "$JUDGE_DIR/export_play.log" >&2; die "play.py export-only 失败"; }
@@ -492,6 +516,9 @@ note "make_std_sidecar(isaac venv)…"
 (
   # shellcheck disable=SC1090
   source "$JUDGE_ISAAC_ENV" >/dev/null 2>&1
+  # shellcheck disable=SC1091
+  source "$WBT_DIR/setup_train_env.sh" >/dev/null 2>&1
+  export PYTHONPATH="$HOPE_WBT_PYTHONPATH"
   cd "$WBT_DIR" && eval "$SIDECAR_CMD"
 ) > "$JUDGE_DIR/sidecar.log" 2>&1 || { cat "$JUDGE_DIR/sidecar.log" >&2; die "sidecar 失败"; }
 grep -a "\[make_std_sidecar\]" "$JUDGE_DIR/sidecar.log"

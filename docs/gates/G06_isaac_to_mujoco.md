@@ -275,8 +275,20 @@ flags. Face-command enabled state and pairing, legacy-motion permission and
 motion exactness flow into ONNX metadata. Thus a legacy causal export remains
 explicitly inexact while a future fresh zero-friction export can reach the
 formal MuJoCo plant check without a compose mismatch. The dependency-light
-contract/judge regression passed `37` tests. No fresh checkpoint or exact
-BankExam result exists yet, so this gate remains `Partial`.
+contract/judge regression now passes `38` tests. No terminal fresh checkpoint
+or exact BankExam result exists yet, so this gate remains `Partial`.
+
+The 179-D exact-construction smoke now proves the export inputs can coexist in
+one live contract: schema-2 runtime-order motion, schema-v3 bank, shared face
+pairing and a 31-zero plant. Both fresh seeds wrote `model_0.pt` with schema-3
+contract SHA `3a3b3d95...b9972` and embedded lineage exact `1`; the four causal
+`model_17000.pt` files bind their own sidecars with lineage `0`. `judge.sh`
+dry-run resolves the canonical adjacent exam banks and now adds
+`--allow-inexact-contract` only for diagnostic motion/pairing contracts, while
+fresh exact candidates receive no escape. It also resets `PYTHONPATH` from the
+current checkout's `setup_train_env.sh`, preventing another user's Pod checkout
+from supplying export code. Terminal export and same-paper Isaac/MuJoCo cells
+are still pending, so G06 remains `Partial`.
 
 ```bash
 python3 -m pytest -q \

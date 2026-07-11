@@ -1,8 +1,10 @@
 # Phase-1 Fresh Lineage And Causal Continuations (2026-07-11)
 
-Status: fresh assets audited and frozen read-only; the full 179-D Isaac construction smoke and all
-four causal continuations were still pending at this handoff. This is an evidence ledger, not a
-claim that G05 or G06 is done.
+Status: the full 179-D exact construction smoke passed. Four matched causal continuations and two
+independent fresh 17,000-iteration seeds are live across all six GPUs at fixed training checkout
+`6d93bcb16c422a2f42748c2dc99432559653480b`. Every arm reached its first PPO iteration and wrote a
+checkpoint whose embedded schema/SHA/lineage flag matches its adjacent hard contract. Training and
+formal evaluation are not complete, so this is not a claim that G05 or G06 is done.
 
 ## Scope And Lane Separation
 
@@ -89,10 +91,25 @@ The motion-only Kit smoke passed with the corrected bytes:
 - `ZERO_FRICTION_RUNTIME_OK`: all `31/31` instantiated PhysX friction coefficients were exactly
   `0.0`.
 
-This smoke used the 175-D deploy-parity actor and no question bank. It proves the corrected motion
-order and instantiated plant checks only. It does not replace the required full 179-D fresh smoke
-with the audited train bank, face-command observation, checkpoint binding, and resolved hard
-contract.
+This smoke used the 175-D deploy-parity actor and no question bank. It proved the corrected motion
+order and instantiated plant checks only.
+
+The subsequent full construction gate passed at checkout `6d93bcb`:
+
+- launcher evidence:
+  `/workspace/codexschema/phase1_fresh_20260711/runs/phase1_fresh_v3_179_smoke/`;
+- run log SHA-256:
+  `684ee92ca2abf7f1b9321f0842dd2df8eb1dbd4621f7afa5d9ce80eac2806092`;
+- run directory:
+  `logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-48-24_phase1_fresh_v3_179_smoke`;
+- hard-contract SHA-256:
+  `3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972`.
+
+The process exited cleanly after `max_iterations=0`. Independent formal validation confirmed the
+179-D `deploy_parity_face179` actor, `face_command_enabled=true`, `shared_plus_y`, both exact
+schema-2 motion contracts in the live articulation order, exact schema-v3 train bank SHA
+`2da2bd...a0700`/family `b21c161a...28ad5`, `motion_kinematics_exact=true`, the legacy-motion
+switch off, and exactly 31 zero PhysX friction coefficients.
 
 ## Recovered Legacy Causal Banks
 
@@ -113,18 +130,22 @@ historical exam-generation parameters. The bundle-level `BUILD_RECORD.json` SHA-
 
 These banks remain legacy-motion family artifacts. Continuations must set the explicit legacy
 motion diagnostic override and preserve `evaluation_contract_exact=false`.
+Read-only copies of the references now sit beside their train banks as
+`s1_swing_schema3_exam.npz` and `s1_v4rg_schema3_exam.npz`, with the table hashes above, so
+`judge.sh` can derive `train -> exam` without borrowing another family or requiring an ambient
+historical path.
 
 ## Four-Arm Causal Design
 
 Within each motion family, the only intended scientific variable is
 `task.racket.face_command_pairing`:
 
-| Arm | Resume checkpoint | Motion / train bank | Pairing | Status at handoff |
+| Arm | Resume checkpoint | Motion / train bank | Pairing | Live evidence |
 | --- | --- | --- | --- | --- |
-| M3-old | M3c `model_16999.pt`, SHA `46f0050589f3343d96f2e5c261b92224079b379e4da473be342b1bd0f0cf7ff1` | legacy swing / `96329c...cf60` | `legacy_signed_vs_A` | not launched |
-| M3-S1 | same M3c checkpoint | same legacy swing bank | `shared_plus_y` | not launched |
-| M2-old | M2f `model_16999.pt`, SHA `0ab05144ec1792db91d6e1e3c2ce79f46dae9507ed267b1470838bf998f0f012` | legacy v4rg / `dc6732...8d30a` | `legacy_signed_vs_A` | not launched |
-| M2-S1 | same M2f checkpoint | same legacy v4rg bank | `shared_plus_y` | not launched |
+| M3-old | M3c `model_16999.pt`, SHA `46f0050589f3343d96f2e5c261b92224079b379e4da473be342b1bd0f0cf7ff1` | legacy swing / `96329c...cf60` | `legacy_signed_vs_A` | Pod 1 PGID `1310472`; run `00-50-50`; contract `7542c59b...d941b` |
+| M3-S1 | same M3c checkpoint | same legacy swing bank | `shared_plus_y` | Pod 1 PGID `1311109`; run `00-51-29`; contract `d3ff715e...9d9ce` |
+| M2-old | M2f `model_16999.pt`, SHA `0ab05144ec1792db91d6e1e3c2ce79f46dae9507ed267b1470838bf998f0f012` | legacy v4rg / `dc6732...8d30a` | `legacy_signed_vs_A` | Pod 2 PGID `161096`; run `00-50-51`; contract `75af3b9d...a99dc` |
+| M2-S1 | same M2f checkpoint | same legacy v4rg bank | `shared_plus_y` | Pod 2 PGID `162194`; run `00-53-31`; contract `7268eb38...28f2` |
 
 The M3c and M2f checkpoint paths are recorded in
 [setup_local_sync.md](operations/setup_local_sync.md). Each pair keeps its checkpoint, motion,
@@ -152,18 +173,50 @@ export only when their complete structural sidecar and checkpoint SHA binding ag
 restores zero friction and the 175/179/181 actor layout from the checkpoint-adjacent hard contract
 rather than task defaults. Finally, `face_command_enabled` joins `face_command_pairing` in the hard
 contract and ONNX metadata, so a same-width reward/critic semantic change cannot pass as a resume.
-The focused contract/judge subset passed `37` tests.
+The focused contract/judge subset now passes `38` tests.
 
 The first invocation of the full smoke stopped during Hydra composition, before Kit or a GPU was
 created: the one-off launcher used undeclared `task.decimation=4`. The declared composed path is
 `task.sim.decimation=4`; the launcher was corrected and the failed arm state retained as a
 pre-construction record rather than counted as a runtime smoke.
 
-## Remaining Fresh-Lane Gates At Handoff
+## Six-GPU Launch Audit
 
-1. Run the full 179-D, bank-bound, zero-friction Kit construction smoke and verify the emitted hard
-   contract before starting training.
-2. Start the formal policy from scratch. A legacy resume, even with a new hard contract, can never
-   become exact.
-3. Record run directories, contract/checkpoint hashes, first-iteration evidence, completion state,
-   export hashes, and the same-paper Isaac/MuJoCo results in this ledger and the relevant gate docs.
+Both Pods passed the final source tests at the launch commit: the Isaac/Hydra group passed `130`
+tests and the full dependency-supported union passed `153`. The three GPU lanes on each host then
+reached a real `Learning iteration` marker. Their first saved checkpoints prove the intended
+lineage binding:
+
+| Arm | First checkpoint | Embedded contract binding | Lineage exact |
+| --- | --- | --- | --- |
+| M3 old / S1 | each `model_17000.pt` | schema 3; SHA matches the corresponding sidecar | `0` |
+| M2 old / S1 | each `model_17000.pt` | schema 3; SHA matches the corresponding sidecar | `0` |
+| fresh seed 1 / 2 | each `model_0.pt` | schema 3; SHA matches `3a3b3d...b9972` | `1` |
+
+The two M3 hard contracts differ only at `face_command_pairing`; the two M2 contracts also differ
+only at that key. This is a recursive JSON comparison, not a launch-command assumption. Fresh
+seed 1 runs on Pod 1 PGID `1311754` (`00-52-16`) and seed 2 on Pod 2 PGID `162836`
+(`00-54-53`); both use contract SHA `3a3b3d...b9972`, zero friction and exact motion/bank facts.
+
+One Pod 2 M2-S1 boot aborted at scene creation with `malloc(): invalid size (unsorted)` before a
+hard contract or PPO iteration. PGID `161672` exited by itself, GPU 1 was empty, and host memory
+was not exhausted. The preserved failed directory is
+`runs/phase1_M2_S1_pairing_malloc_abort_1/` (log SHA `c0e3f71c...b90a8`, launch-state SHA
+`d72908c1...544f`). An unchanged-command single-arm retry reached the first iteration and is the
+only accepted M2-S1 run.
+
+Read-only `judge.sh --dry-run` checks on M3-old, M2-S1 and fresh seed 1 resolve the correct motion
+pair, phase pair, adjacent exam bank, 179-D actor and plant replay. Diagnostic runs receive the
+explicit inexact evaluator escape; the fresh exact candidate does not. The judge environment also
+forces the current checkout's `setup_train_env.sh`/source-first Python path rather than inheriting
+another user's checkout.
+
+## Remaining Gates
+
+1. Monitor all six immutable-checkout runs to terminal checkpoints; do not fast-forward either Pod
+   checkout while a local arm is alive.
+2. Verify terminal checkpoint iteration, sidecar SHA binding, lineage flag and finite parameters.
+3. Export every causal terminal as diagnostic and both fresh terminals as exact candidates, then
+   run the same immutable exam schedule in Isaac and MuJoCo. A legacy resume can never be promoted.
+4. Add completion/result hashes here and to G05/G06; only then decide whether the S1 guidance arm
+   is warranted.

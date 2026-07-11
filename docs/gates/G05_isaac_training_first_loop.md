@@ -456,5 +456,10 @@ lineage still goes through the stronger schema-2 motion gate. The hard contract
 also binds whether face command is enabled and which face pairing is selected.
 `scripts/launch_phase1_20260711.sh` hashes every parent/motion/bank and pins the
 matched M3/M2 controls plus two fresh seeds. The full 179-D Kit construction
-smoke and first-iteration evidence are still pending, so G05 remains
-`Partial`.
+smoke has now passed with hard-contract SHA `3a3b3d95...b9972`. All four
+causal continuations and both fresh seeds reached their first PPO iteration at
+checkout `6d93bcb`; first checkpoints bind the matching schema-3 sidecar, with
+inexact lineage for resumes and exact lineage for fresh runs. Within each M3
+or M2 pair, recursive contract diff reports only `face_command_pairing`.
+Training is still running and no terminal checkpoint or score exists, so G05
+remains `Partial`.

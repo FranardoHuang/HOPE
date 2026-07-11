@@ -82,8 +82,9 @@ Verified later on 2026-07-11 against the current Phase-1 candidate implementatio
 - dependency-supported formal BankExam/adapter/MuJoCo union: **145 passed** with Torch and the
   Hydra test dependencies available.
 - after the diagnostic-export/judge contract review, the local dependency-light formal group is
-  **90 passed** and the expanded union (including plant/actor replay tests) is **152 passed, 1
-  optional Torch skip**. Re-run the Isaac-dependent group on the final Pod commit before launch.
+  **90 passed** and the launch-commit Pod runs passed **130** Isaac/Hydra tests and **153** full
+  union tests. The subsequent source-first/inexact-judge regression expands the union to **153
+  passed, 1 optional Torch skip** locally; re-run it on the final Pod checkout after training.
 
 Reproduce the 122-test Isaac-dependent group on a prepared RunPod checkout:
 
@@ -115,7 +116,7 @@ python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_v5_ablation_accelerator.py
 ```
 
-Reproduce the complete 153-test union (use a Python environment with `pytest`, `numpy`, `PyYAML`,
+Reproduce the complete 154-test union (use a Python environment with `pytest`, `numpy`, `PyYAML`,
 `hydra-core`, and Torch installed):
 
 ```bash

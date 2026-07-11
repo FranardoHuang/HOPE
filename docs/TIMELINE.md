@@ -1258,3 +1258,11 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    相邻 hard contract 重放 31/31 零摩擦与 175/179/181 actor contract，并和 env flags 对账；
    hard contract/ONNX 新绑 `face_command_enabled`+pairing。专用 launcher 逐 hash 验输入、Kit
    boot 串行、首迭代后放锁、超时只清本臂 PGID；37 个契约回归绿，179D full smoke 待跑。
+9. 【franco/Codex】**179D 门过、六卡已跑满**——full smoke 合同 SHA `3a3b3d95...b9972`:
+   actor179、face enabled/shared、schema2 双动作、v3 train bank、31/31 零摩擦、formal validator
+   全同意并干净退出。固定 `6d93bcb` 后 Pod1=M3 old/S1+fresh seed1，Pod2=M2 old/S1+fresh
+   seed2；六臂均到首 PPO iteration、首 ckpt 的 sidecar SHA 绑定正确（续训 lineage=0，fresh=1），
+   M3/M2 各 pair 的 hard contract 递归 diff 都只剩 pairing 一键。M2-S1 首 boot 在 scene create
+   malloc abort（PGID 自退、非内存耗尽），原样 retry 绿且只收 retry。legacy exam 已冻结到 train
+   bank 邻目录；judge diagnostic 自动带 inexact escape，fresh 不带，并强制当前 checkout PYTHONPATH。
+   现阶段只报 running，不报结果；终档+同卷双引擎仍待完成。

@@ -39,8 +39,21 @@ Use this file for short project-state updates that future humans and agents need
   hard contract. The contract also binds `face_command_enabled` and
   `face_command_pairing`. Safe launchers serialize only Kit boot, record an
   isolated PGID and pin the four causal plus two from-scratch recipes. The
-  dependency-light contract subset passed `37` tests; the full 179-D Kit smoke
-  remains the last pre-launch gate.
+  dependency-light contract subset now passes `38` tests.
+- Passed the full 179-D fresh construction gate: actor/face selector, both
+  runtime-order schema-2 clips, strict schema-v3 bank, 31/31 zero friction and
+  the formal validator agree in hard contract SHA `3a3b3d95...b9972`. Then
+  launched all six 4096-env lanes at fixed Pod checkout `6d93bcb`: matched M3
+  old/S1, matched M2 old/S1 and fresh seeds 1/2. Every arm reached its first
+  PPO iteration. Recursive hard-contract diff shows each causal pair differs
+  only in `face_command_pairing`; first checkpoints bind the adjacent contract
+  with lineage `0` for four resumes and `1` for two fresh seeds. One M2-S1 Kit
+  boot aborted in malloc before construction; the unchanged single-arm retry
+  passed and the abort log is retained. Canonical legacy exam copies now sit
+  beside each train bank. Judge preflight also selects the explicit inexact
+  evaluator escape only for diagnostic contracts and forces the current
+  checkout's source-first Isaac environment. Training/evaluation remain in
+  progress; no final policy result is claimed.
 
 - Implemented the evaluator-owned schema-v3 same-question path without
   changing the physics-hash-bound `venue_ball_sampler.py`: balanced canonical

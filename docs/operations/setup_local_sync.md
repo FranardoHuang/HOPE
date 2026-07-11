@@ -329,8 +329,10 @@ shasum -a 256 \
   assets/v4rg_runtime_order_v3/s1_v4rg_runtime_order_schema3_train.npz \
   assets/v4rg_runtime_order_v3/s1_v4rg_runtime_order_schema3_exam.npz \
   assets/legacy/v4rg/s1_v4rg_schema3_train.npz \
+  assets/legacy/v4rg/s1_v4rg_schema3_exam.npz \
   assets/legacy/v4rg/asset_manifest.json \
   assets/legacy/swing/s1_swing_schema3_train.npz \
+  assets/legacy/swing/s1_swing_schema3_exam.npz \
   assets/legacy/swing/asset_manifest.json \
   assets/BUILD_RECORD.json assets/OBSOLETE_DO_NOT_USE.json \
   checkpoints/M3c/model_16999.pt checkpoints/M2f/model_16999.pt
@@ -344,8 +346,10 @@ f2cb2d9f5d27cefbcee0b790000fcd979abaf02894d4fcad061ebca27f141687
 2da2bd1280c45944418d41fe5788d09d7c0ebb0ff7d34fa87c8dd0fcf16a0700
 d7db2568beee990ef1d64b2dce9f0ab56ca76377f8993d820b6388292d0f5096
 dc67326f5cf0e1a3e3a6ae89f43cbd8a9a3785c341ab2ae998e3edbd40f8d30a
+10917148ef251a4dabe387ea418b8907c26fe320b95d9ff874380d09f73e5bb2
 6ff25a94c2a5abb590e84415458a8958f749bb62f34f0890d7b7922891571a74
 96329c79f13e659c035bf65bafedf84123d23a3219b02ac78ae654aed930cf60
+750f1df4ebaf851b96495c53ebbd083c06275f254ce19862f2e84183ec45cb0e
 04751e0424458a85f033519ee033176169f5479013abe5a85a46bc1488970fbe
 95b9727489d1aa298e411e1ec589505b2c3da1720569fa0da33ddd10176c6032
 59ce1bcbe60e3ee594f3ccd4061690ee324de963b8fe84208a463190e03a3388

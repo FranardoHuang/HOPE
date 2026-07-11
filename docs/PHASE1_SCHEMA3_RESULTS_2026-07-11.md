@@ -218,6 +218,14 @@ M2f3 reproduce a zero-MuJoCo-forehand stop at q10.  Cross-engine absolute rates
 therefore remain an open parity issue until a fresh exact-lineage export binds
 the real execution/plant contract.
 
+That fresh lane is now live, not yet scored. The 179-D zero-friction/schema-2
+motion/schema-v3 bank construction gate passed, and two from-scratch seeds plus
+four matched face-pairing continuations reached their first PPO iteration at
+fixed checkout `6d93bcb`. This does not alter any historical table above.
+Launch contracts, paths and status are recorded in
+`PHASE1_FRESH_LINEAGE_2026-07-11.md`; terminal exports and same-paper results
+must be added before any fresh candidate is promoted.
+
 The fixed-point single-question, noise, evaluation-seed and MuJoCo carry-state
 diagnostic slices are complete. Isaac continuous play still requires
 the physical serve/next-ball timeline identified in `NOW.md`; the independent
