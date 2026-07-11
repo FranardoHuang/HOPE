@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "pair_id": "phase1-M2-old-vs-S1-terminal-clean-q10",
+  "judged_utc": "2026-07-11T09:38:25Z",
+  "training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+  "eval_commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+  "judge_script_sha256": "1a00702935096b063435c3f0bd23e75f76f13e1298c87310d1cec3c26cca8529",
+  "immutable_schedule_sha256": "75aca567d8b3e3b74e81775ce31b46923f6e26fda5bfd530a4e304910f9051d7",
+  "schedule_k": 20,
+  "attempts_per_side": 10,
+  "noise_scale": 0.0,
+  "evaluation_contract_exact": false,
+  "screen_only": true,
+  "stop_or_promote_allowed": false,
+  "cells": {
+    "M2_old": {
+      "checkpoint_iteration": 20998,
+      "checkpoint_sha256": "9957ec6650f9387c45d6f6d08b61f6f53a71eaac68429e736011c904347d5d94",
+      "forehand_return": "0/10",
+      "backhand_return": "8/10",
+      "aggregate_return_rate": 0.4,
+      "report_sha256": "ff8b6e9b2fa3c99d4752dc6b171ec615749c77a49c018e99840f6bcade713b34",
+      "summary_sha256": "eab96bd7e4452f960b868b09abf9984176bf959adf62d6b2d244681c20f223de"
+    },
+    "M2_S1": {
+      "checkpoint_iteration": 20998,
+      "checkpoint_sha256": "574ff6406d1eb7b55da1c0ed8305e80650f19331da4cd3b80d91db452baa0049",
+      "forehand_return": "0/10",
+      "backhand_return": "7/10",
+      "aggregate_return_rate": 0.35,
+      "report_sha256": "18300e6c91959f1f5ba0d6ad87caa902cdbd5cce6c49d7af18a7bf345978e313",
+      "summary_sha256": "d5d7902bc4b6fb0ff0e0acf68c7859c71d550d89e6c17e8fd9ac6c7a874524aa"
+    }
+  },
+  "paired_delta_s1_minus_old": -0.05,
+  "interpretation": "terminal q10 does not reproduce an S1 gain for M2; both forehands are 0/10; retain as an inexact direction screen and require q50 for any decision"
+}

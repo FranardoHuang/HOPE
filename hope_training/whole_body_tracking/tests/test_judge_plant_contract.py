@@ -110,9 +110,10 @@ def test_judge_replays_only_the_all_zero_schema3_plant(tmp_path):
     assert nonzero.returncode == 0, nonzero.stdout
     assert "task.plant.zero_joint_friction=true" not in nonzero.stdout
     assert "31/31 non-zero; task default false" in nonzero.stdout
+    assert "--allow-inexact-contract" in nonzero.stdout
 
 
-def test_judge_adds_diagnostic_escape_only_for_inexact_or_legacy_pairing(tmp_path):
+def test_judge_adds_diagnostic_escape_for_inexact_motion_pairing_or_plant(tmp_path):
     inexact_motion = _run_judge(
         tmp_path / "motion", [0.1] * 31, motion_exact=False
     )

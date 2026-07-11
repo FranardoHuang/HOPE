@@ -43,6 +43,22 @@ Current ignored local asset roots:
 - `external_repos/IsaacLab/` when a local Isaac Lab source checkout is used for the training environment; record the tag/commit in the relevant gate doc.
 - `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` and other package-local copied/generated training assets; keep only the tiny `assets/__init__.py` path-helper and local `.gitignore` tracked so `whole_body_tracking.assets.ASSET_DIR` remains importable after a fresh clone.
 
+## User-Recorded Motion Videos
+
+Raw user-recorded motion videos are private, local-only inputs. Do not commit
+or publish the video bytes. Track only a small content-addressed manifest with
+the relative filename, byte count, SHA-256, media properties and intended
+semantic action. A private processing-Pod copy is allowed for this project,
+but it remains an ignored runtime asset and is not an artifact publication.
+
+The 2026-07-11 Franco/v6/v7 intake is bound by
+`configs/motion_video_intake_20260711.json`; the local restore and private Pod
+staging paths are recorded in `docs/operations/setup_local_sync.md`. Derived
+SMPL-X, CSV, NPZ, checkpoint and policy files follow the same ignored-heavy-
+artifact rule. A derived action is not deployable merely because its source
+video is present: motion, self-collision, table/net clearance and simulator
+gates must still pass, and no raw video grants permission for a real-robot run.
+
 ## Agibot Deploy Assets
 
 The tracked deploy source is under:

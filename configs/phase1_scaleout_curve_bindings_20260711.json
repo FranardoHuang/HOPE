@@ -15,7 +15,7 @@
     "decision_followup": "same immutable schedule with at least 50 attempts per side"
   },
   "milestones": {
-    "continuation": [18000, 19000, 20000, 20999],
+    "continuation": [18000, 19000, 20000, 20998],
     "fresh": [2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 16999]
   },
   "excluded_existing_run_names": [
@@ -27,8 +27,8 @@
     "phase1_fresh_v3_SZ_seed2"
   ],
   "companion_existing_fresh_manifests": {
-    "pod1": "configs/phase1_checkpoint_curve_cadence_pod1_20260711.json",
-    "pod2": "configs/phase1_checkpoint_curve_cadence_pod2_20260711.json"
+    "pod1": "configs/phase1_checkpoint_curve_cadence_fresh_pod1_20260711.json",
+    "pod2": "configs/phase1_checkpoint_curve_cadence_fresh_pod2_20260711.json"
   },
   "run_dir_basenames": {
     "phase1_M3_S1_pairing_seed2": "2026-07-11_05-27-28_phase1_M3_S1_pairing_seed2",

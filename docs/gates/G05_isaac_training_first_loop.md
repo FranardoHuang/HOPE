@@ -539,3 +539,95 @@ They remain unchanged; an event-driven `T0/T1` timing pair, longer/opportunity-
 count episode and new hard-contract timing fields are specified in
 `docs/research/phase1_continuous_rally_timing_2026-07-11.md`. G05 remains
 `Partial` pending terminal/paired q50 evidence and that separate continuity lane.
+
+### New motion-library intake, TOPP and recovery lane (2026-07-11)
+
+Ten private Franco/v6/v7 air-swing videos are now registered by the tracked,
+content-addressed `configs/motion_video_intake_20260711.json`. Local and Pod1
+copies passed byte/hash/media validation. `scripts/audit_motion_video_intake.py`
+the structural `scripts/audit_gvhmr_result.py`, and the memory-gated
+`scripts/run_motion_video_gvhmr_queue.py` and the tracked result binding are covered by 20 dependency-light
+tests. Pod1 queue PID/PGID `1383735` completed all ten reconstructions after
+GPU1 naturally crossed the `19000 MiB` launch gate. It processed the Franco
+forehand-block item first, then the remaining Franco and v6/v7 clips, and was pinned to GVHMR `6ec3ca3`, a
+clean worktree, the full checkpoint/body-model tree and motion-Python freeze;
+each result matches the source frame count and finite SMPL tensor shapes.
+The queue ran outside the frozen Phase-1 checkout. Its queue-state SHA and all
+ten result/audit hashes are tracked in
+`configs/motion_video_gvhmr_results_20260711.json`.
+
+This is not yet a training result. The videos contain no ball/table/contact
+truth, their mirror/depth interpretation is unverified, and the three Franco
+backhand-loop recordings are candidates for one semantic action rather than
+three new action classes. Every candidate must pass A3 schema-2 conversion,
+finite/limit/endpoint checks, vendor-MJCF self-collision and racket/handle-to-
+body/table/net swept-clearance gates before returnability phase scanning.
+Native/TOPP v3 assets are then compared on the same spatial path and strike
+constraints, with both outputs re-audited.
+
+Formal two-vs-four-action training is blocked on a dynamic clip catalog and a
+shared global-question axis: current upper layers still encode two clips and
+sample clip before question. The preregistered comparison therefore has two
+separate fairness papers, equal total transitions and equal per-action
+exposure, plus common-action non-regression and a train-fitted frozen stable-
+action selector. Between-shot work uses strike/absorb/recover/ready states and
+a tolerant ready set rather than a dense reward back to an exact frame 0.
+Repository Hitter evidence warns that post-strike brake/ready rewards can
+propagate through GAE and damage the hit; recovery is first isolated as an
+option/bridge, then evaluated on event-driven T0/T1 timing. Full rationale,
+literature and stop/promote gates are in
+`docs/research/motion_library_topp_recovery_2026-07-11.md`. G05 remains
+`Partial`; no new motion is authorized for hardware.
+
+The first real continuation terminal also corrected a queue-index bug. Pod2
+M2-S1 exited normally with `model_20998.pt` (`iter=20998`), not 20999; all
+1,762,715 floating checkpoint elements are finite, checkpoint SHA is
+`574ff640...0049`, and embedded/adjacent contract SHA is
+`7268eb38...28f2`. Its schema-3 legacy-motion lineage is correctly inexact.
+The cadence and scale-out causal manifests now use 20998, with a generator
+regression. Only the affected waiting-worker PGIDs were replaced; fresh
+scale-out workers and training arms received no signal. After the later
+original-cadence split, Pod1 causal/fresh workers are PGID
+`1394150/1394810`; Pod2 causal completed after the terminal pair and its fresh
+worker is PGID `194276`. Scale-out causal workers remain `1380340/192815`.
+The scale-out fresh workers were precisely replaced before their first 2k
+checkpoint to carry SP's explicit inexact evaluator escape; current PGIDs are
+`1397266/195085` (old childless `1366308/189569`).
+
+`SZ`'s target label is now explicitly scoped: it is the only current fresh
+cell whose zero-friction plant can be replayed with the same schema-v3
+cross-engine execution semantics. It is **not** a deployment-plant or hardware
+candidate. The 2026-07-07 frozen probe already showed a zero-friction policy
+degrading from virtual hit `0.9997` to `0.63` and fall `0.27` to `0.87` when
+moved into the non-zero-friction plant. `SP/LP` do not resolve this: their
+PhysX values are the historical unit-mismatched copy of MuJoCo constant-Nm
+`frictionloss`, not calibrated friction. A new from-scratch `SC` cell requires
+measured friction semantics plus separate PhysX/MuJoCo adapters and hard-
+contract hashes before deployment-plant, continuous-practical or Gate3B
+promotion. This does not block the same-schedule SZ q50 required for current
+execution-contract model selection. `SP` is explicitly judged inexact so its
+non-zero plant cannot fail the formal profile and block later SZ milestones.
+The current 24-arm training recipes remain unchanged; the reconciliation
+roadmap is in the Phase-1 acceleration research doc.
+
+The original cadence no longer serializes fresh milestones behind causal terminal.
+Each Pod now has independent original-causal and original-fresh manifests and
+state directories, matching the scale-out split. Current q10 manifests carry
+both a fail-closed top-level screen policy and per-job `screen_only=true`; the
+checked-in worker rejects omissions/contradictions, verifies `schedule_k`, and
+binds a canonical screen-policy-plus-job contract SHA before a completed state
+can be reused (while recording the full manifest SHA for audit). This closes
+the documented silent parameter-reuse path while preserving the rule that only
+a separate q50 paper may stop or promote an arm.
+
+The split itself exposed a Pod-specific historical gap: seed1 `model_4000.pt`
+had not existed when the old combined Pod1 worker was replaced, whereas Pod2
+seed2 4000 had already been judged. The Pod1 fresh queue therefore starts at
+4000 and Pod2 at 6000. Only the childless Pod1 fresh worker was precisely
+restarted; no trainer or judge child received a signal.
+
+The corrected Pod2 terminal q10 has now finished: M2-old/S1 aggregate return
+is `0.40/0.35`, with FH `0/10` for both and BH `8/10` versus `7/10`. It is a
+causal/inexact 20-attempt direction screen, not evidence to kill S1 or select
+old; the immutable q50 follow-up remains required. Machine-readable hashes and
+the paired delta are in `configs/phase1_M2_terminal_q10_pair_20260711.json`.

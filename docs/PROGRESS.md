@@ -4,6 +4,59 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-11
 
+- Registered ten private Franco/v6/v7 air-swing recordings in a tracked
+  content-addressed manifest and passed local plus Pod1 byte/hash/media audits.
+  Added fail-loud intake, structural-result audit and memory-gated serial GVHMR
+  queue/result-binding tools (`20 passed`)
+  plus a mini-spec for self-collision-safe strike-frame screening, native/TOPP
+  pairs, fair two-vs-four action selection and event-driven between-shot
+  recovery. Pod1 queue PID/PGID `1383735` used the first naturally released
+  GPU1 window and completed all ten reconstructions in 9m27s without touching
+  the frozen Phase-1 checkout. All expected frame counts and 51,666 SMPL
+  elements are finite; full input/output/tool/model/environment hashes are in
+  `configs/motion_video_gvhmr_results_20260711.json`. This is structural GVHMR
+  evidence only: no visual acceptance, A3 clip, training result or hardware
+  approval is claimed.
+- Corrected a live terminal-cadence deadlock: causal continuations save their
+  final checkpoint at `20998`, while four manifests/workers were waiting for
+  impossible `20999`. Pod2 M2-S1 terminal is recursively finite and its
+  checkpoint/contract SHA binding matches, while lineage remains correctly
+  causal/inexact. Updated deterministic manifests plus a regression and
+  replaced only the four waiting cadence/causal worker PGIDs; trainers and
+  fresh workers were untouched. Terminal paired q10 remains pending.
+- Reconciled the zero-friction formal label with the 2026-07-07 hard-plant
+  evidence. `SZ` is now explicitly only the current cross-engine execution-
+  contract target, not a sim-to-real candidate; `SP/LP` are historical unit-
+  mismatched non-zero diagnostics, not calibrated friction. Preregistered a
+  future measured `SC` plant with engine-specific friction adapters and a
+  train-plant x eval-plant transfer matrix before deployment/Gate3B promotion;
+  this does not block the current SZ q50 model-selection paper.
+- Corrected the live scale-out judge contract before its first checkpoint:
+  shared-face/non-zero-plant `SP` is inexact because PhysX friction has no
+  exact MuJoCo `frictionloss` meaning. Generated SP jobs now carry the explicit
+  diagnostic escape (as do causal/LZ/LP), while SZ remains exact and still
+  requires same-paper q50 for current model selection. This changes no trainer
+  recipe or checkpoint. Before either 2k file existed, only the childless
+  scale-out-fresh workers were precisely replaced: Pod1
+  `1366308 -> 1397266`, Pod2 `189569 -> 195085`.
+- Split the original-arm cadence into independent causal and fresh workers so
+  an unavailable terminal cannot block fresh screens; fixed the runbook
+  example to launch both workers concurrently instead of a foreground loop.
+  Current q10 manifests now carry top-level and per-job screen-only fields,
+  and the checked-in worker requires that policy, verifies its q10 schedule
+  against every job, records the full manifest SHA, and binds a canonical
+  screen-policy-plus-job contract SHA before a completed state may be reused.
+- Corrected one follow-on cadence omission found during review: Pod1 seed1's
+  `model_4000.pt` did not exist when the earlier worker was replaced, so it was
+  not previously judged. It is now the first job in the Pod1 fresh manifest;
+  only the childless stale fresh worker PGID `1394151` was replaced by
+  `1394810`. Pod2 seed2 4000 was already complete and was not changed.
+- Completed the corrected Pod2 M2 terminal q10: old/S1 aggregate return
+  `0.40/0.35`, both forehands `0/10`, backhands `8/10`/`7/10`. Both remain
+  causal/inexact direction screens; no stop/promotion is made before q50.
+  Added a machine-readable paired result with full checkpoint/report/summary
+  hashes and updated the M2-S1 terminal integrity audit to judged.
+
 - Completed the post-canary historical main matrix on the same immutable
   schema-v3 paper. R5b seed 1/2, G2 and M2f3 stopped at q10 because MuJoCo
   forehand returned `0/10`. R1b seed 1/2 advanced but confirmed a transfer

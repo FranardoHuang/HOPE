@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "audit_id": "phase1-M2-S1-terminal-20998-20260711",
+  "audited_utc": "2026-07-11T08:57:00Z",
+  "read_only": true,
+  "pod": {
+    "host": "162.43.172.181",
+    "ssh_port": 13146
+  },
+  "training_checkout": {
+    "path": "/workspace/codexschema/nohope",
+    "git_head": "6d93bcb16c422a2f42748c2dc99432559653480b",
+    "git_status_porcelain_lines": 0
+  },
+  "run": {
+    "name": "phase1_M2_S1_pairing",
+    "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-53-31_phase1_M2_S1_pairing",
+    "launcher_pid": 162194,
+    "launcher_pgid": 162194,
+    "process_alive_at_audit": false,
+    "last_log_iteration": 20998,
+    "log_iteration_denominator": 20999,
+    "checkpoint_20999_exists": false,
+    "bad_signature_counts": {
+      "traceback": 0,
+      "nan": 0,
+      "cuda_oom_or_out_of_memory": 0,
+      "malloc_failure": 0,
+      "segfault_or_abort": 0
+    }
+  },
+  "checkpoint": {
+    "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-53-31_phase1_M2_S1_pairing/model_20998.pt",
+    "bytes": 7074119,
+    "sha256": "574ff6406d1eb7b55da1c0ed8305e80650f19331da4cd3b80d91db452baa0049",
+    "iter_field": 20998,
+    "torch_load": {
+      "map_location": "cpu",
+      "weights_only": false,
+      "tensor_count": 76,
+      "tensor_elements": 1762717,
+      "floating_tensor_count": 74,
+      "floating_elements": 1762715,
+      "nonfinite_floating_elements": 0
+    }
+  },
+  "training_contract": {
+    "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-53-31_phase1_M2_S1_pairing/params/training_contract.json",
+    "bytes": 15594,
+    "sha256": "7268eb38fbca6fe7d5c9fd67e8957bfd09e425a8c44c0307853b6f58f4dc28f2",
+    "checkpoint_embedded_sha256": "7268eb38fbca6fe7d5c9fd67e8957bfd09e425a8c44c0307853b6f58f4dc28f2",
+    "schema_version": 3,
+    "lineage_exact": false,
+    "motion_kinematics_exact": false,
+    "question_bank_exact": true,
+    "face_command_pairing": "shared_plus_y",
+    "plant": "historical_physx_nonzero_friction"
+  },
+  "evaluation": {
+    "evaluation_contract_exact": false,
+    "terminal_checkpoint_judged": true,
+    "judged_utc": "2026-07-11T09:38:25Z",
+    "eval_commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f",
+    "judge_script_sha256": "1a00702935096b063435c3f0bd23e75f76f13e1298c87310d1cec3c26cca8529",
+    "immutable_schedule_sha256": "75aca567d8b3e3b74e81775ce31b46923f6e26fda5bfd530a4e304910f9051d7",
+    "attempts": 20,
+    "forehand_return": "0/10",
+    "backhand_return": "7/10",
+    "aggregate_return_rate": 0.35,
+    "report_sha256": "18300e6c91959f1f5ba0d6ad87caa902cdbd5cce6c49d7af18a7bf345978e313",
+    "summary_sha256": "d5d7902bc4b6fb0ff0e0acf68c7859c71d550d89e6c17e8fd9ac6c7a874524aa",
+    "screen_only": true,
+    "stop_or_promote_allowed": false,
+    "reason": "causal terminal clean q10 is an inexact direction screen; q50 is required for decisions"
+  },
+  "verdict": "pass_terminal_checkpoint_integrity_causal_inexact"
+}

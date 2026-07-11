@@ -230,8 +230,10 @@ later-stage variables are not mixed into this matrix.
 
 Both Isaac and MuJoCo treat the explicit diagnostic escape as a one-way downgrade: it authorizes
 the run and forces `evaluation_contract_exact=false`. Thus `LZ/LP` cannot inherit a bookable label
-from otherwise exact fresh motion/checkpoint provenance. `SP` may retain exact reproducibility but
-remains a non-target plant ablation by pre-registration; only `SZ` is the formal target cell.
+from otherwise exact fresh motion/checkpoint provenance. `SP` is also explicitly inexact: its
+non-zero PhysX coefficient has no exact MuJoCo `frictionloss` equivalent, even though its face
+pairing is shared. Only `SZ` is the formal target cell. Generated SP/LZ/LP jobs pass the diagnostic
+escape explicitly so an inexact queue-head job cannot fail the formal profile and block later SZ.
 
 The missing early curve is also being repaired. Causal `17000/18000/19000` and fresh `0/1000/2000`
 checkpoints are scheduled through the detached evaluator first; subsequent milestones follow the
@@ -326,10 +328,91 @@ fresh 4000 and causal terminal points.
 
 The additional 18 scale-out arms are now covered by deterministic manifests generated from their
 actual run directories. Four queues split causal/fresh per Pod: causal seed 2 at
-`18000/19000/20000/20999`, fresh at `2000/4000/.../16000/16999`. They cover 18 unique arms and
+`18000/19000/20000/20998`, fresh at `2000/4000/.../16000/16999`. They cover 18 unique arms and
 142 clean q10 jobs. Milestone-major ordering keeps like-age comparisons together, while separate
 causal/fresh queues prevent a continuation terminal file from blocking an earlier fresh screen.
 The binding spec marks every job `screen_only`; q50 remains mandatory for a decision.
+
+The causal terminal index was corrected from the preregistered-but-impossible
+`20999` to the runner's actual final saved iteration `20998`. Read-only Pod2
+validation proved M2-S1 exited normally at `20998/20999`, checkpoint field
+`iter=20998`, with 1,762,715 floating elements all finite and the embedded
+contract SHA matching the adjacent schema-3 sidecar. The original cadence
+worker had been waiting for `model_20999.pt` forever. Only the exact cadence
+and causal-worker PGIDs were stopped; corrected runtime manifests now wait for
+`model_20998.pt`, while fresh workers and all trainers were untouched. This is
+a scheduler correction, not a recipe or evaluation-paper change.
+
+The full machine-readable audit is
+`configs/phase1_M2_S1_terminal_audit_20260711.json`. Reproduce its checkpoint,
+finite-tensor and adjacent-contract assertions on Pod2 with:
+
+```bash
+RUN=/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_00-53-31_phase1_M2_S1_pairing \
+/workspace/hope_isaac_venv/bin/python - <<'PY'
+import hashlib, json, os
+from collections.abc import Mapping
+from pathlib import Path
+import torch
+
+run = Path(os.environ["RUN"])
+checkpoint_path = run / "model_20998.pt"
+contract_path = run / "params" / "training_contract.json"
+checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+
+def tensors(value):
+    if torch.is_tensor(value):
+        yield value
+    elif isinstance(value, Mapping):
+        for child in value.values():
+            yield from tensors(child)
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            yield from tensors(child)
+
+all_tensors = list(tensors(checkpoint))
+floating = [value for value in all_tensors if torch.is_floating_point(value)]
+nonfinite = sum((~torch.isfinite(value)).sum().item() for value in floating)
+checkpoint_sha = hashlib.sha256(checkpoint_path.read_bytes()).hexdigest()
+contract_sha = hashlib.sha256(contract_path.read_bytes()).hexdigest()
+assert checkpoint["iter"] == 20998 and nonfinite == 0
+assert checkpoint["infos"]["training_contract_sha256"] == contract_sha
+assert not bool(checkpoint["infos"]["training_contract_lineage_exact"])
+print(json.dumps({
+    "checkpoint_sha256": checkpoint_sha,
+    "contract_sha256": contract_sha,
+    "tensor_count": len(all_tensors),
+    "floating_tensor_count": len(floating),
+    "floating_elements": sum(value.numel() for value in floating),
+    "nonfinite": nonfinite,
+}, sort_keys=True))
+PY
+```
+
+The original-arm cadence is also split into independent causal and fresh
+workers. `phase1_checkpoint_curve_cadence_podN_20260711.json` now contains
+only the 20000/20998 causal pair. The Pod1 fresh manifest begins at 4000
+because only 0/1000/2000 had preserved results when the earlier worker was
+replaced; the Pod2 fresh manifest begins at 6000 because its 4000 result was
+already preserved. Thus an old causal terminal cannot block either original
+fresh curve. All current q10
+manifests set top-level `screen_only=true`, `stop_or_promote_allowed=false`
+and repeat `screen_only=true` per job; the checked-in worker rejects an omitted
+or contradictory policy, requires each `--schedule-k` to equal the top-level
+q10 contract, records the complete manifest SHA, and binds the canonical
+screen-policy-plus-job contract SHA into completed state before skip/reuse.
+This guard does not turn q10
+into a decision paper; q50 remains separate.
+
+Pod2's corrected terminal q10 pair completed before the split: M2-old returned
+FH/BH `0/10, 8/10` (aggregate `0.40`), while M2-S1 returned `0/10, 7/10`
+(`0.35`) on schedule SHA `75aca567...51d7`. Both exports/judges returned zero
+and both remain `evaluation_contract_exact=false`. This small terminal prefix
+does not reproduce an S1 gain and both forehands are zero, but it is explicitly
+non-decisive; q50 is required before stopping or selecting. Full checkpoint,
+report and summary hashes are in
+`configs/phase1_M2_terminal_q10_pair_20260711.json`; the M2-S1 terminal audit
+JSON has also been updated from unjudged to this preserved result.
 
 ## Continuous-Timing Boundary
 

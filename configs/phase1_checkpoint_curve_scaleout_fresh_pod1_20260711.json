@@ -32,15 +32,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -55,7 +57,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -78,7 +82,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -124,15 +130,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -147,7 +155,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -170,7 +180,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -193,15 +205,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -216,7 +230,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -239,7 +255,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -285,15 +303,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -308,7 +328,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -331,7 +353,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -354,15 +378,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -377,7 +403,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -400,7 +428,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -446,15 +476,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -469,7 +501,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -492,7 +526,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -515,15 +551,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -538,7 +576,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -561,7 +601,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -607,15 +649,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -630,7 +674,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -653,7 +699,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -676,15 +724,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -699,7 +749,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -722,7 +774,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -768,15 +822,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -791,7 +847,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -814,7 +872,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -837,15 +897,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -860,7 +922,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -883,7 +947,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -929,15 +995,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -952,7 +1020,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -975,7 +1045,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -998,15 +1070,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -1021,7 +1095,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -1044,7 +1120,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -1090,15 +1168,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -1113,7 +1193,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -1136,7 +1218,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -1159,15 +1243,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -1182,7 +1268,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -1205,7 +1293,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -1251,15 +1341,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -1274,7 +1366,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -1297,7 +1391,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -1320,15 +1416,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -1343,7 +1441,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -1366,7 +1466,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 1,
       "training_kind": "fresh",
@@ -1412,15 +1514,17 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
       "training_family": "v4rg_runtime_order_v3",
       "face_command_pairing": "shared_plus_y",
       "zero_joint_friction": false,
-      "evaluation_role": "plant_diagnostic_non_target",
-      "expected_evaluation_contract_exact": true,
+      "evaluation_role": "plant_diagnostic_non_target_inexact",
+      "expected_evaluation_contract_exact": false,
       "formal_target": false,
       "screen_only": true,
       "cell": "SP"
@@ -1435,7 +1539,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -1458,7 +1564,9 @@
       "noise_scales": "0.0",
       "extra_args": [
         "--schedule-k",
-        "20"
+        "20",
+        "--exam-extra",
+        "--allow-inexact-contract"
       ],
       "training_seed": 3,
       "training_kind": "fresh",
@@ -1472,5 +1580,5 @@
       "cell": "LP"
     }
   ],
-  "existing_sz_companion_manifest": "configs/phase1_checkpoint_curve_cadence_pod1_20260711.json"
+  "existing_sz_companion_manifest": "configs/phase1_checkpoint_curve_cadence_fresh_pod1_20260711.json"
 }

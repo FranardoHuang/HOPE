@@ -342,8 +342,10 @@ skipped. If an earlier arm has already completed, use
 
 Do not wait for terminal checkpoints to discover whether an ablation works.
 The initial missing curves are frozen in
-`configs/phase1_checkpoint_curve_initial_pod{1,2}_20260711.json`. Run one worker
-per Pod from the detached evaluator worktree:
+`configs/phase1_checkpoint_curve_initial_pod{1,2}_20260711.json`. The following
+command is a **historical record only**; those manifests predate the mandatory
+screen-policy/job-contract schema and must not be passed to the checked-in new
+worker. Their successful/failed states are already preserved:
 
 ```bash
 python3 "$EVAL/hope_training/whole_body_tracking/scripts/phase1_checkpoint_curve_worker.py" \
@@ -352,6 +354,25 @@ python3 "$EVAL/hope_training/whole_body_tracking/scripts/phase1_checkpoint_curve
   --state-dir /workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/initial_pod1 \
   --max-active-cpu 9
 ```
+
+The live 2026-07-11 paper deliberately remains on the clean detached evaluator
+commit and judge SHA below. The current branch has since hardened both worker
+and judge; mixing that latest `judge.sh` with manifests frozen to the old SHA
+is correctly rejected. Do not update the live manifest SHA in place.
+
+```bash
+EVAL=/workspace/codexschema/nohope_eval_08e438e
+RUNTIME_MANIFESTS=/workspace/codexschema/phase1_fresh_20260711/runtime_manifests
+test "$(git -C "$EVAL" rev-parse HEAD)" = 46a0ce24524fdb843e55fe82ba4c045f2adc090f
+test -z "$(git -C "$EVAL" status --porcelain)"
+test "$(sha256sum "$EVAL/hope_training/whole_body_tracking/scripts/judge.sh" | awk '{print $1}')" = \
+  1a00702935096b063435c3f0bd23e75f76f13e1298c87310d1cec3c26cca8529
+```
+
+The runtime manifest copies are the corrected 20998/split/SP-inexact files
+from this repository; copy and hash-check them **before** launching a worker,
+never while that worker is alive. This lets the historical clean evaluator run
+the corrected queue without editing its worktree.
 
 The worker starts the next judge only after the prior judge reaches its CPU-only
 MuJoCo phase. It sets OpenMP/MKL/OpenBLAS/NumExpr to one thread, records exact
@@ -401,7 +422,7 @@ worker may be started before later files exist:
 
 ```bash
 python3 "$EVAL/hope_training/whole_body_tracking/scripts/phase1_checkpoint_curve_worker.py" \
-  --manifest "$EVAL/configs/phase1_checkpoint_curve_cadence_pod1_20260711.json" \
+  --manifest "$RUNTIME_MANIFESTS/phase1_checkpoint_curve_cadence_pod1_20260711.json" \
   --judge-script "$EVAL/hope_training/whole_body_tracking/scripts/judge.sh" \
   --state-dir /workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/cadence_pod1 \
   --max-active-cpu 6 --wait-for-checkpoints
@@ -425,22 +446,55 @@ block an already-ready fresh milestone:
 
 ```bash
 for queue in causal fresh; do
-  python3 "$EVAL/hope_training/whole_body_tracking/scripts/phase1_checkpoint_curve_worker.py" \
-    --manifest "$EVAL/configs/phase1_checkpoint_curve_scaleout_${queue}_pod1_20260711.json" \
+  state="/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_${queue}_pod1"
+  mkdir -p "$state"
+  nohup setsid python3 "$EVAL/hope_training/whole_body_tracking/scripts/phase1_checkpoint_curve_worker.py" \
+    --manifest "$RUNTIME_MANIFESTS/phase1_checkpoint_curve_scaleout_${queue}_pod1_20260711.json" \
     --judge-script "$EVAL/hope_training/whole_body_tracking/scripts/judge.sh" \
-    --state-dir "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_${queue}_pod1" \
-    --max-active-cpu 6 --wait-for-checkpoints
+    --state-dir "$state" --max-active-cpu 6 --wait-for-checkpoints \
+    >"$state/worker.log" 2>&1 </dev/null &
+  pid=$!
+  printf 'queue=%s pid=%s pgid=%s\n' "$queue" "$pid" \
+    "$(ps -o pgid= -p "$pid" | tr -d ' ')"
 done
 ```
 
+Do not add `wait` to that loop: both workers must remain independent. The
+original seed-1/2 cadence is split the same way. Its causal manifest remains
+`phase1_checkpoint_curve_cadence_podN_20260711.json`; the Pod1 fresh-only
+manifest starts at 4000, while Pod2 starts at 6000, each with a separate state
+directory. This prevents an original causal terminal from blocking later
+original `SZ` milestones.
+
 Use the matching `pod2` manifests on Pod 2. The four files cover exactly the
 18 newly launched arms and 142 clean q10 jobs: causal seed 2 at
-`18000/19000/20000/20999`, and fresh at `2000/4000/.../16000/16999`.
+`18000/19000/20000/20998`, and fresh at `2000/4000/.../16000/16999`.
 They are milestone-major direction screens only. Their metadata explicitly
 sets `screen_only=true` and never authorizes stop/promotion; use a separately
 frozen q50 schedule for decisions. `SZ` is the only formal target, `SP` is an
-exact-replayable non-target plant diagnostic, and causal plus `LZ/LP` remain
-inexact diagnostics.
+inexact non-target plant diagnostic (non-zero PhysX friction has no exact
+MuJoCo `frictionloss` equivalent), and causal plus `LZ/LP` remain inexact
+diagnostics. Generated inexact jobs carry only the whitelisted
+`--exam-extra --allow-inexact-contract` escape.
+
+The checked-in curve worker requires `screen_policy` on every manifest,
+requires `schedule_k == 2 * attempts_per_side`, compares that schedule (and
+optional seed/noise constants) with every job, and records both the complete
+manifest SHA and canonical screen-policy-plus-job contract SHA in state. Only
+the latter gates per-job reuse, so appending an unrelated later job does not
+invalidate a completed result; any change to that job or its screen policy is
+rejected rather than silently skipped. The historical `initial`/`fresh_retry`
+manifests predate this
+schema discipline; do not restart them with the new worker without first
+migrating them to an explicit screen policy and a new state directory. Current
+live workers remain on their pinned clean eval checkout until they exit; never
+edit that checkout underneath them.
+
+For continuations that resume at iteration 16999 and execute 4000 updates, the
+runner's terminal checkpoint is `model_20998.pt`; `model_20999.pt` is never
+written. Do not infer a terminal filename by adding 4000 to the resume label.
+The checked-in manifests and their deterministic generator encode 20998 and a
+regression rejects 20999.
 
 The current 10-second, no-wrap-teleport task does carry the robot state between
 clips, but its complete-clip timing is slower than the conservative venue

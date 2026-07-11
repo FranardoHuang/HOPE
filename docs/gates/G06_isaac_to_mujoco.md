@@ -364,3 +364,44 @@ retain zero resets/teleports. The reproducible timing audit and required metrics
 are in `docs/research/phase1_continuous_rally_timing_2026-07-11.md`. G06 remains
 `Partial` pending q50, Isaac same-paper companion results, terminal lineage
 verification, and event-driven continuity evaluation.
+
+The causal terminal cadence no longer waits for an impossible filename. The
+first normal M2-S1 completion proved that a continuation resumed at 16999 for
+4000 updates finishes/saves at iteration 20998. Its terminal checkpoint is
+finite and SHA-bound. The later paired terminal q10 judged M2-old/S1 at
+`0.40/0.35` aggregate (both forehands zero), but remains an inexact,
+non-decisive direction screen. Cadence and scale-out causal manifests now
+target `model_20998.pt`; the exact waiting-worker PGIDs were replaced without
+signalling trainers or fresh workers. This changes only checkpoint discovery,
+not the immutable exam or causal `evaluation_contract_exact=false` rule.
+
+Cross-engine exactness for `SZ` is deliberately narrow. All-zero friction is
+byte/semantics reproducible, but prior frozen-plant evidence says it is not a
+safe proxy for the deployment plant. Conversely, current `SP/LP` non-zero
+coefficients cannot be made exact by feeding the same numbers into MuJoCo
+`frictionloss`, because the physical meanings differ. G06 therefore has no
+deployment-qualified plant cell yet. Closure requires a measured, versioned
+friction model with engine-specific adapters, a fresh `SC` training cell and
+the full train-plant x eval-plant transfer matrix; until then, `SZ` scores can
+validate the evaluation contract but cannot clear sim-to-real parity.
+`SP` is consequently an inexact diagnostic, with an explicit evaluator escape;
+it cannot be booked and cannot block the later formal SZ jobs in the same
+milestone-major queue.
+
+Original causal terminal and original fresh exams now run in separate
+workers/state directories, so neither checkpoint-availability order can block
+the other. Q10 manifests declare the screen-only/no-promotion policy at both
+manifest and job level, and the checked-in `phase1_checkpoint_curve_worker.py`
+rejects omissions or contradictions, checks the schedule, and requires the
+same canonical screen-policy-plus-job contract SHA before reusing a completed
+state. This is an
+operational guard, not permission to
+book q10; q50 and the same-paper Isaac/MuJoCo pair remain the decision gate.
+Pod1 fresh starts at 4000 because that checkpoint had not existed when the old
+combined worker was replaced; Pod2 4000 was already handled and starts at 6000.
+
+The first corrected terminal MuJoCo q10 pair is preserved at M2-old/S1
+`0.40/0.35` aggregate (FH both `0/10`; BH `8/10`/`7/10`). Both are inexact
+diagnostics and the prefix is too small to decide. Full result/checkpoint/report
+hashes are tracked in `configs/phase1_M2_terminal_q10_pair_20260711.json`;
+neither cell advances or stops without q50 and its Isaac companion.

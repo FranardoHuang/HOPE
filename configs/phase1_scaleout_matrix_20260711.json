@@ -9,6 +9,10 @@
     "legacy_continuations": "2 families x 2 face pairings x 2 continuation RNG seeds",
     "fresh": "2 face pairings x 2 plant settings x 4 independent from-scratch seeds",
     "formal_target_cell": "SZ",
+    "formal_target_scope": "current schema-v3 cross-engine execution-contract exactness only; not a sim-to-real or hardware plant candidate",
+    "deployment_candidate_cell": null,
+    "deployment_candidate_blocker": "a semantics-correct calibrated-friction PhysX/MuJoCo plant adapter and fresh training cell do not yet exist",
+    "nonzero_cell_warning": "SP/LP preserve historical uncalibrated PhysX coefficients copied numerically from MuJoCo frictionloss; they are not calibrated-friction controls",
     "cells": {
       "SZ": {"face_command_pairing": "shared_plus_y", "zero_joint_friction": true},
       "SP": {"face_command_pairing": "shared_plus_y", "zero_joint_friction": false},

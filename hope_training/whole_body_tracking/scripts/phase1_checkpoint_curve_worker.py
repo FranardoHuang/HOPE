@@ -40,11 +40,42 @@ def atomic_json(path: Path, value: dict[str, Any]) -> None:
     os.replace(tmp, path)
 
 
+def canonical_sha256(value: Any) -> str:
+    encoded = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def load_manifest(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if data.get("schema_version") != 1 or not isinstance(data.get("jobs"), list):
         raise ValueError("manifest must be schema_version=1 with a jobs list")
     ids: set[str] = set()
+    screen_policy = data.get("screen_policy")
+    if (
+        not isinstance(screen_policy, dict)
+        or screen_policy.get("screen_only") is not True
+        or screen_policy.get("stop_or_promote_allowed") is not False
+    ):
+        raise ValueError(
+            "manifest requires screen_policy with screen_only=true and "
+            "stop_or_promote_allowed=false"
+        )
+    schedule_k = screen_policy.get("schedule_k")
+    attempts_per_side = screen_policy.get("attempts_per_side")
+    if (
+        not isinstance(schedule_k, int)
+        or isinstance(schedule_k, bool)
+        or schedule_k <= 0
+        or not isinstance(attempts_per_side, int)
+        or isinstance(attempts_per_side, bool)
+        or attempts_per_side <= 0
+        or schedule_k != 2 * attempts_per_side
+    ):
+        raise ValueError(
+            "screen_policy requires positive integer schedule_k == 2 * attempts_per_side"
+        )
     for raw in data["jobs"]:
         if not isinstance(raw, dict):
             raise ValueError("every manifest job must be an object")
@@ -59,6 +90,51 @@ def load_manifest(path: Path) -> dict[str, Any]:
         for key in ("run_dir", "checkpoint"):
             if not isinstance(raw.get(key), str) or not os.path.isabs(raw[key]):
                 raise ValueError(f"job {job_id}: {key} must be an absolute path")
+        if raw.get("screen_only") is not True:
+            raise ValueError(f"job {job_id}: screen-policy manifest requires screen_only=true")
+        extra_args = raw.get("extra_args")
+        if not isinstance(extra_args, list) or not all(isinstance(v, str) for v in extra_args):
+            raise ValueError(f"job {job_id}: extra_args must be a string list")
+        positions = [index for index, value in enumerate(extra_args) if value == "--schedule-k"]
+        if len(positions) != 1 or positions[0] + 1 >= len(extra_args):
+            raise ValueError(f"job {job_id}: requires exactly one --schedule-k value")
+        try:
+            job_schedule_k = int(extra_args[positions[0] + 1])
+        except ValueError:
+            raise ValueError(f"job {job_id}: --schedule-k must be an integer") from None
+        if job_schedule_k != schedule_k:
+            raise ValueError(
+                f"job {job_id}: --schedule-k={job_schedule_k} contradicts "
+                f"screen_policy.schedule_k={schedule_k}"
+            )
+        expected_exact = raw.get("expected_evaluation_contract_exact")
+        formal_target = raw.get("formal_target")
+        evaluation_role = raw.get("evaluation_role")
+        if not isinstance(expected_exact, bool):
+            raise ValueError(
+                f"job {job_id}: expected_evaluation_contract_exact must be bool"
+            )
+        if not isinstance(formal_target, bool):
+            raise ValueError(f"job {job_id}: formal_target must be bool")
+        if not isinstance(evaluation_role, str) or not evaluation_role:
+            raise ValueError(f"job {job_id}: evaluation_role must be a non-empty string")
+        if formal_target and not expected_exact:
+            raise ValueError(f"job {job_id}: an inexact job cannot be a formal target")
+        base_args = ["--schedule-k", str(schedule_k)]
+        diagnostic_args = base_args + ["--exam-extra", "--allow-inexact-contract"]
+        expected_args = base_args if expected_exact else diagnostic_args
+        if extra_args != expected_args:
+            raise ValueError(
+                f"job {job_id}: extra_args must be exactly {expected_args!r}; "
+                "arbitrary --exam-extra is forbidden"
+            )
+        if "seed" in screen_policy and raw.get("seed") != screen_policy["seed"]:
+            raise ValueError(f"job {job_id}: seed contradicts screen_policy.seed")
+        if (
+            "noise_scales" in screen_policy
+            and raw.get("noise_scales") != screen_policy["noise_scales"]
+        ):
+            raise ValueError(f"job {job_id}: noise_scales contradicts screen_policy.noise_scales")
     return data
 
 
@@ -141,7 +217,9 @@ def main() -> int:
     ):
         parser.error("worker limits must be positive")
 
-    manifest = load_manifest(args.manifest.resolve())
+    manifest_path = args.manifest.resolve()
+    manifest = load_manifest(manifest_path)
+    manifest_sha = sha256(manifest_path)
     judge_script = args.judge_script.resolve()
     if not judge_script.is_file():
         raise FileNotFoundError(f"judge script not found: {judge_script}")
@@ -191,6 +269,10 @@ def main() -> int:
 
     for job in manifest["jobs"]:
         job_id = job["id"]
+        job_spec_sha = canonical_sha256(job)
+        job_contract_sha = canonical_sha256(
+            {"screen_policy": manifest["screen_policy"], "job": job}
+        )
         run_dir = Path(job["run_dir"])
         checkpoint = Path(job["checkpoint"])
         wait_started = time.monotonic()
@@ -254,6 +336,7 @@ def main() -> int:
             if prior.get("status") == "complete" and prior.get("returncode") == 0:
                 if (
                     prior.get("checkpoint_sha256") == checkpoint_sha
+                    and prior.get("job_contract_sha256") == job_contract_sha
                     and prior.get("judge_script_sha256") == judge_sha
                     and prior.get("eval_commit") == eval_commit
                     and prior.get("training_commit") == training_commit
@@ -275,9 +358,7 @@ def main() -> int:
             "--noise-scales", str(job.get("noise_scales", "0.0 0.05")),
             "--hold-ref", str(job.get("hold_ref", "auto")),
         ]
-        extra_args = job.get("extra_args", [])
-        if not isinstance(extra_args, list) or not all(isinstance(v, str) for v in extra_args):
-            raise ValueError(f"job {job_id}: extra_args must be a string list")
+        extra_args = job["extra_args"]
         command.extend(extra_args)
 
         print("[curve-worker] launch " + shlex.join(command), flush=True)
@@ -305,6 +386,9 @@ def main() -> int:
             "run_dir": str(run_dir),
             "checkpoint": str(checkpoint),
             "checkpoint_sha256": checkpoint_sha,
+            "manifest_sha256": manifest_sha,
+            "job_spec_sha256": job_spec_sha,
+            "job_contract_sha256": job_contract_sha,
             "judge_script_sha256": judge_sha,
             "eval_root": str(eval_root),
             "eval_commit": eval_commit,

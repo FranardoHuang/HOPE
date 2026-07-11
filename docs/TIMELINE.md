@@ -1318,3 +1318,44 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    绑定的场馆 strikes 表抽保守连续 A-B-A `n=21`：同侧间隔中位 `1.903 s`，现役理论中位
    `3.75 s`，且目标要等 clip 结束才更新。故不把“无传送慢节奏”冒充“随时来下一球”；24 臂冻结
    不动，下一时序实验拆成 T0 完整 wrap 对 T1 击球后 event-driven carry-state。
+15. 【franco/Codex】**新动作库进入“先排队、先安全筛、再训练”轨道**——对 Downloads 中
+   Franco/v6/v7 共 10 段空挥做内容寻址 manifest，本机与 Pod1 字节/编码双验 10/10。
+   新 GVHMR 队列以 PID/PGID `1383735` 在 Pod1 通过 `19000 MiB` 启动门后运行，
+   于 09:27:50Z–09:37:16Z 按 Franco 正手挡 -> 其余 Franco -> v6/v7 串行完成 10/10；
+   失败即停并保留日志的纪律未触发，Phase-1 训练 checkout 未改。同时预注册 native/TOPP、反手拉 A/B/C
+   单动作位筛选、2-vs-4 等算力/等动作 exposure 双卷，以及 strike/absorb/recover/ready
+   的任意时刻下一拍状态机。现阶段已有 raw + GVHMR 结构输出；空挥无 contact truth，尚无 A3
+   动作、四动作策略或真机许可。
+16. 【franco/Codex】**终档文件名 off-by-one 让 cadence 永远等待，已现场修正**——Pod2 M2-S1
+   正常结束在 `20998/20999`，真终档是 `model_20998.pt` 且内部 `iter=20998`；全量
+   1,762,715 个浮点元素非 finite=0，ckpt 内嵌 SHA 与邻边 schema3 合同一致，lineage 仍为
+   causal/inexact。原 worker 错等永远不会出现的 `model_20999.pt`。只精确 TERM 了四个无 child
+   的 cadence/causal worker PGID，改成 20998 后以 `1380339/1380340` (Pod1)、
+   `192814/192815` (Pod2) 重启；所有 trainer 和 fresh worker 零信号。
+17. 【franco/Codex】**cc review 指出的 mixed-cadence 堵塞也继续拆掉**——原 seed1/2 的 causal
+   terminal 和 fresh 改成独立 manifest/worker/state，不再让终档挡住 fresh 曲线；
+   runbook 中伪并行的前台 `for` 循环改成 `nohup setsid` 双进程。q10 manifest 现在顶层和
+   每 job 都写 `screen_only=true/stop_or_promote_allowed=false`，新 worker 对缺失/矛盾配置 fail closed，
+   并把 screen-policy+job contract SHA 绑进完成态防止改参后静默复用旧卷；
+   仍然只有独立 q50 可以停/晋级。
+18. 【franco/Codex】**Pod2 纠正后的 M2 terminal q10 收到，但不用小卷强行裁决**——old/S1
+   全侧回球 `0.40/0.35`，正手都 `0/10`，反手 `8/10` 对 `7/10`；两条均 causal/inexact。
+   terminal 小卷没复现 S1 增益，但样本只 20 且正手全零，故不 stop/promote，继续等同卷
+   q50。ckpt/report/summary 全 SHA 已进 `phase1_M2_terminal_q10_pair_20260711.json`。
+19. 【franco/Codex】**新动作 GVHMR 10/10 结构重建完成，并补上 Pod1 4k 曲线缺口**——
+   Pod1 GPU1 自然释放后，PID/PGID `1383735` 于 09:27:50Z–09:37:16Z 串行完成
+   Franco/v6/v7 十段；预期帧数、SMPL shape 与 51,666 个元素全 finite，queue-state/
+   result/audit 及工具、权重、环境全 SHA 进
+   `motion_video_gvhmr_results_20260711.json`。这仍只是 GVHMR 结构 pass，未做视觉验收、
+   canonical-betas GMR、自碰或桌网余隙。同时审计发现 Pod1 seed1 `model_4000.pt`
+   在旧 worker 被替换时尚未存在，却被新 manifest 误标“已判”；现已把 4000 恢复为
+   fresh 队首，仅精确替换无 child 的 Pod1 fresh worker `1394151`→`1394810`，
+   Pod2 已判 4000 和所有 trainer 不动。
+20. 【franco/Codex】**SP 的 non-zero plant 不再被误写成 exact**——MuJoCo formal profile
+   对 non-zero PhysX friction 本来就 fail closed，而 scale-out fresh 队首恰是 SP 2k；若不修，
+   它会在第一卷退出并堵住后面 SZ。现将 SP 标成
+   `plant_diagnostic_non_target_inexact`，generator 仅对 inexact 任务显式加
+   `--allow-inexact-contract`；SZ 仍是唯一 exact/formal 格并必须做同卷 q50。
+   两 Pod 都在 2k 存档出现前精确替换无 child 的 scale-out-fresh worker：
+   `1366308 -> 1397266` / `189569 -> 195085`。这是 judge 合同/队列修正，
+   不改 24 条训练配方。

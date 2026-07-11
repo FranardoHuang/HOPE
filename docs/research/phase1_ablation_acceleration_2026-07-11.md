@@ -49,8 +49,9 @@ L0/L1 是 fail-closed 机制检查，不因“曲线看起来好”而豁免。L
 
 当前批次预注册抽查点：
 
-- `16999 -> 20999` causal continuations：`17000` 基线、`18000`、`19000`、`20000`、
-  terminal `20999`；所有 old/S1 配对必须在同一 checkpoint 点一起判；
+- `16999` 起步、执行 4000 次 causal continuation：`17000` 基线、`18000`、`19000`、
+  `20000`、terminal `20998`；RSL runner 的最后循环索引为 20998，不会写 `model_20999.pt`；
+  所有 old/S1 配对必须在同一 checkpoint 点一起判；
 - fresh from-scratch `0 -> 16999`：`0`、`1000`、`2000`，之后每 `2000` 一次直到
   `16000`，再判 terminal `16999`；`<8000` 的绝对低分只叫 immature，不能单凭低分杀掉 fresh；
 - 需要加密时用固定 schedule 的相邻 checkpoint，不重新抽一套更有利的题。
@@ -95,8 +96,8 @@ fresh 四格缩写如下：
 
 | 格 | face pairing | plant | 用途 |
 | --- | --- | --- | --- |
-| `SZ` | `shared_plus_y` | 31/31 zero friction | formal target candidate；四个从零 seeds 都保留 |
-| `SP` | `shared_plus_y` | declared non-zero plant | plant 主效应诊断；即使 provenance 可精确重放，也不替代 `SZ` 目标格 |
+| `SZ` | `shared_plus_y` | 31/31 zero friction | 当前 schema-v3 跨引擎执行合同的 formal target；不是部署 plant 候选 |
+| `SP` | `shared_plus_y` | 历史 non-zero PhysX 系数 | plant 主效应诊断；**不是**语义修正的标定摩擦对照 |
 | `LZ` | `legacy_signed_vs_A` | zero friction | face 主效应诊断；judge 必须标 inexact evaluation |
 | `LP` | `legacy_signed_vs_A` | declared non-zero plant | 双旧设置诊断；judge 必须标 inexact evaluation |
 
@@ -109,6 +110,32 @@ fresh 四格缩写如下：
 Pod、GPU 编号和启动 layer 一起写进 ledger，作为阻断/审计字段而不是训练变量；如果某个效应只在
 单一 GPU 或单一启动层出现，先按硬件/墙钟混杂处理，不宣布机制收益。四个 seed 的完整格点正是为了
 把这三种效应与 seed 噪声分开，而不是把 16 条 fresh 当成 16 次互不相关的排行榜尝试。
+
+### Plant 语义张力与必补的标定摩擦格
+
+`SZ` 成为当前 formal 格，只因为“全零”能在 PhysX 和 MuJoCo 中以同一语义精确重放。
+这不会抹掉 2026-07-07 的冻结探针：零摩擦策略换到有静摩擦厂房时，virtual hit
+`0.9997 -> 0.63`，跌倒 `0.27 -> 0.87`；摩擦是主因，q-des clamp 是次因。因此：
+
+- `SZ` 可用来回答 face 合同/学习曲线在当前精确可重放 plant 上是否成立；
+  q10 只看方向，仍必须用同 immutable schedule 做 q50 才能在这个 execution-contract
+  范围内做模型选择；
+- `SZ` 在标定摩擦格完成前不能晋级 sim-to-real、Gate3B 或真机候选；
+- `SP/LP` 仍是“把 MuJoCo constant-Nm `frictionloss` 数字填成 PhysX 载荷相关系数”的
+  历史配方，只能做旧 plant 诊断，不是 calibrated-friction arm。
+
+必补的新格暂称 `SC` (shared face + calibrated friction)，不从现在 24 臂中伪造。它的前置是：
+
+1. 对单关节做低速/零速、正反向、不同载荷的 breakaway/dynamic-friction 探针，分开
+   PhysX coefficient 与 MuJoCo constant-Nm `frictionloss` 语义；
+2. 用 A3/AGI 可验证数据拟合一个版本化的摩擦模型，为两引擎分别实现 adapter；MuJoCo 不得
+   再直接数值代入 `dof_frictionloss`；
+3. 把模型方程、参数、实例化逐关节值、源数据 SHA 和 engine adapter SHA 全部进 hard contract；
+4. 从零训 `SC` 至少两个 seeds，和 `SZ` 做 train/eval plant 2x2 冻结探针，复现或解除
+   07-07 的迁移跌倒证据；
+5. `SC` 才有资格进入部署 plant 选择、连续实战卷和 Gate3B；`SZ` 的当前
+   execution-contract q50 不被 SC 阻断。若两引擎仍不能语义对齐，如实标 inexact，
+   不因“更像真机”就放宽 formal 标签。
 
 `training-contract lineage exact` 与“是否是本轮 formal target”不是同一个概念：fresh schema-2 motion
 可使 provenance 精确绑定，但 legacy pairing 仍只能走 diagnostic judge；本轮只有 `SZ` 被预注册为

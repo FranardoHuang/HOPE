@@ -134,7 +134,7 @@ def _evaluation_metadata(arm: dict[str, Any]) -> tuple[str, bool, bool]:
     if cell == "SZ":
         return "formal_target", True, True
     if cell == "SP":
-        return "plant_diagnostic_non_target", True, False
+        return "plant_diagnostic_non_target_inexact", False, False
     if cell in {"LZ", "LP"}:
         return "legacy_pairing_diagnostic_inexact", False, False
     raise ValueError(f"unknown fresh cell: {cell}")
@@ -172,6 +172,11 @@ def _job(
     }
     if arm["kind"] == "fresh":
         result["cell"] = arm["cell"]
+    if not expected_exact:
+        # The pinned judge also derives this from legacy motion/pairing.  Keep
+        # it explicit so non-zero shared-pairing plant diagnostics (SP) cannot
+        # accidentally enter the formal MuJoCo profile or stop the queue.
+        result["extra_args"].extend(["--exam-extra", "--allow-inexact-contract"])
     return result
 
 

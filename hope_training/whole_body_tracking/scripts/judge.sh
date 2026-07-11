@@ -202,6 +202,7 @@ if os.path.isfile(training_contract_path):
                             "schema-3 hard contract actor 名/维度不一致: "
                             f"{hard_actor_contract}/{hard_actor_dim}D"
                         )
+            friction = None
             raw_friction = hard_contract.get("joint_friction_coefficients")
             if not isinstance(raw_friction, list) or len(raw_friction) != 31:
                 fatal.append(
@@ -237,8 +238,13 @@ if os.path.isfile(training_contract_path):
                 fatal.append("schema-3 hard contract 的 motion_kinematics_exact 必须是 bool")
             else:
                 pairing = hard_contract.get("face_command_pairing", "shared_plus_y")
+                nonzero_friction = friction is not None and any(
+                    value != 0.0 for value in friction
+                )
                 allow_inexact_contract = (
-                    not motion_exact or pairing == "legacy_signed_vs_A"
+                    not motion_exact
+                    or pairing == "legacy_signed_vs_A"
+                    or nonzero_friction
                 )
                 contract_src = (
                     "schema-3 diagnostic lineage: --allow-inexact-contract"

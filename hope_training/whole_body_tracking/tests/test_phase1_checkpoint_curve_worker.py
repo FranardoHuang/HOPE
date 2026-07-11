@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import subprocess
 import sys
 import time
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKER = ROOT / "scripts" / "phase1_checkpoint_curve_worker.py"
+SPEC = importlib.util.spec_from_file_location("phase1_checkpoint_curve_worker_unit", WORKER)
+assert SPEC is not None and SPEC.loader is not None
+WORKER_MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(WORKER_MODULE)
 
 
 def _git_repo(path: Path, files: dict[str, str]) -> str:
@@ -57,6 +64,12 @@ def test_worker_waits_for_a_stable_preregistered_checkpoint(tmp_path):
         json.dumps(
             {
                 "schema_version": 1,
+                "screen_policy": {
+                    "schedule_k": 20,
+                    "attempts_per_side": 10,
+                    "screen_only": True,
+                    "stop_or_promote_allowed": False,
+                },
                 "judge_script_sha256": hashlib.sha256(judge.read_bytes()).hexdigest(),
                 "training_checkout": str(training),
                 "expected_training_commit": training_commit,
@@ -68,6 +81,10 @@ def test_worker_waits_for_a_stable_preregistered_checkpoint(tmp_path):
                         "gpu": 0,
                         "noise_scales": "0.0",
                         "extra_args": ["--schedule-k", "20"],
+                        "evaluation_role": "formal_target",
+                        "expected_evaluation_contract_exact": True,
+                        "formal_target": True,
+                        "screen_only": True,
                     }
                 ],
             }
@@ -91,7 +108,11 @@ def test_worker_waits_for_a_stable_preregistered_checkpoint(tmp_path):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
-    time.sleep(0.15)
+    deadline = time.monotonic() + 5.0
+    while not state_dir.is_dir() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert state_dir.is_dir(), "worker did not finish preflight and enter its state directory"
+    time.sleep(0.1)
     run_dir.mkdir()
     checkpoint.write_bytes(b"first")
     time.sleep(0.03)
@@ -104,4 +125,95 @@ def test_worker_waits_for_a_stable_preregistered_checkpoint(tmp_path):
     state = json.loads((state_dir / "fresh_1000.json").read_text(encoding="utf-8"))
     assert state["status"] == "complete"
     assert state["command"][-2:] == ["--schedule-k", "20"]
+    assert state["manifest_sha256"] == hashlib.sha256(manifest.read_bytes()).hexdigest()
+    assert state["job_spec_sha256"] == WORKER_MODULE.canonical_sha256(
+        json.loads(manifest.read_text(encoding="utf-8"))["jobs"][0]
+    )
+    loaded = json.loads(manifest.read_text(encoding="utf-8"))
+    assert state["job_contract_sha256"] == WORKER_MODULE.canonical_sha256(
+        {"screen_policy": loaded["screen_policy"], "job": loaded["jobs"][0]}
+    )
     assert hashlib.sha256(checkpoint.read_bytes()).hexdigest() == state["checkpoint_sha256"]
+
+
+def test_screen_policy_is_fail_closed_per_job(tmp_path):
+    base = {
+        "schema_version": 1,
+        "screen_policy": {
+            "schedule_k": 20,
+            "attempts_per_side": 10,
+            "screen_only": True,
+            "stop_or_promote_allowed": False,
+        },
+        "jobs": [
+            {
+                "id": "q10",
+                "run_dir": "/tmp/run",
+                "checkpoint": "/tmp/run/model_1.pt",
+                "gpu": 0,
+                "extra_args": ["--schedule-k", "20"],
+                "evaluation_role": "formal_target",
+                "expected_evaluation_contract_exact": True,
+                "formal_target": True,
+                "screen_only": True,
+            }
+        ],
+    }
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(base), encoding="utf-8")
+    assert WORKER_MODULE.load_manifest(path)["jobs"][0]["screen_only"] is True
+
+    base["jobs"][0]["screen_only"] = False
+    path.write_text(json.dumps(base), encoding="utf-8")
+    with pytest.raises(ValueError, match="requires screen_only"):
+        WORKER_MODULE.load_manifest(path)
+
+    base["jobs"][0]["screen_only"] = True
+    base["screen_policy"]["stop_or_promote_allowed"] = True
+    path.write_text(json.dumps(base), encoding="utf-8")
+    with pytest.raises(ValueError, match="stop_or_promote_allowed=false"):
+        WORKER_MODULE.load_manifest(path)
+
+
+def test_screen_policy_cannot_be_omitted_or_disagree_with_job(tmp_path):
+    manifest = {
+        "schema_version": 1,
+        "screen_policy": {
+            "schedule_k": 20,
+            "attempts_per_side": 10,
+            "screen_only": True,
+            "stop_or_promote_allowed": False,
+        },
+        "jobs": [
+            {
+                "id": "q10",
+                "run_dir": "/tmp/run",
+                "checkpoint": "/tmp/run/model_1.pt",
+                "gpu": 0,
+                "extra_args": ["--schedule-k", "20"],
+                "evaluation_role": "formal_target",
+                "expected_evaluation_contract_exact": True,
+                "formal_target": True,
+                "screen_only": True,
+            }
+        ],
+    }
+    path = tmp_path / "manifest.json"
+
+    without_policy = dict(manifest)
+    without_policy.pop("screen_policy")
+    path.write_text(json.dumps(without_policy), encoding="utf-8")
+    with pytest.raises(ValueError, match="requires screen_policy"):
+        WORKER_MODULE.load_manifest(path)
+
+    manifest["jobs"][0]["extra_args"] = ["--schedule-k", "100"]
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="contradicts"):
+        WORKER_MODULE.load_manifest(path)
+
+    manifest["jobs"][0]["extra_args"] = [
+        "--schedule-k", "20", "--exam-extra", "--exam-schedule-k 100"
+    ]
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="arbitrary --exam-extra"):
+        WORKER_MODULE.load_manifest(path)
