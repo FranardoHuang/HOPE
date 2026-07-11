@@ -1389,3 +1389,11 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    对 PID 保序去重，再要求 unique compute `<4` 和 free>=5500MiB；重复的 3 unique 测试允许
    第四槽，重复的 4 unique 仍拒绝。config SHA 不变，launcher 从作废的 `dca9b9df...` 重签为
    `ca69e1cb...`，必须替换两 Pod 外置副本并重新 validate，禁止绕过容量门。
+25. 【franco/Codex】**约 8 cm 穿地有了单文件修复器，但 grounding 不冒充安全门**——新增
+   `ground_gmr_pkl.py`，每次只收一个 expected-SHA PKL + 一个 expected-SHA canonical MJCF，
+   禁止扫描/覆盖；绑定唯一 floating root、31 hinge 顺序和 robot subtree enabled collision geoms，
+   primitive 用解析 support、mesh 用 compiled vertices，逐 30 Hz 源帧求最低 world-z 后只加固定
+   root-z shift。回读要求 XY/quat/DoF 不变、range 合法、最差帧近地不穿透/不悬空，report 绑定
+   tool/input/output/MJCF/compiled-collision SHA；report 安装失败会按本次 output SHA 精确回滚。
+   临时 native arm64 MuJoCo 3.10.0 对真实 `a3_pingpong.xml` 15 tests 全绿后已卸载。它尚未在
+   tracked pilot 产出正式 report，且只证离散帧，inter-frame/动力学/桌网/schema-2 仍全开。

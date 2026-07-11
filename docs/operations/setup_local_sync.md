@@ -359,6 +359,29 @@ Do not use them as canonical-betas motion assets. The first deeper replay also
 found about 8 cm of floor penetration, so root/ground calibration and repeated
 collision/dynamics/table-net gates are mandatory before schema-2 conversion.
 
+Ground exactly one accepted diagnostic GMR pickle with explicit no-clobber
+paths. The command below is the Franco forehand-block pilot shape; use each
+row's own input SHA/frame count for other assets:
+
+```bash
+python3 scripts/ground_gmr_pkl.py \
+  --input /private/ignored/motion_video_intake_20260711/gmr_queue_outputs/franco_forehand_block.diagnostic_video_betas.pkl \
+  --expected-input-sha256 0e7e674ecba2459b4db6d2c49fb8498a35db2fe8291782eadb7214933be39be5 \
+  --output /private/ignored/motion_video_intake_20260711/gmr_grounded/franco_forehand_block.grounded.pkl \
+  --report /private/ignored/motion_video_intake_20260711/gmr_grounded/franco_forehand_block.grounding.json \
+  --mjcf agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml \
+  --expected-mjcf-sha256 2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97 \
+  --expected-frames 65
+```
+
+The output and report parents must already exist, and neither target may
+exist. The tool never scans a directory or overwrites an input. It uses enabled
+canonical collision geometry rather than body origins/COMs, applies one fixed
+root-z translation, verifies a near-ground non-penetrating source frame and
+records all relevant SHAs. A pass covers only the discrete source frames. Run
+the later dense/inter-frame collision, dynamics and table/net gates before
+schema-2; never treat grounding as robot authorization.
+
 ### Venue strike timing table
 
 The continuous-rally timing audit uses the processed strike event table, not

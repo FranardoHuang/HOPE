@@ -28,6 +28,16 @@ Use this file for short project-state updates that future humans and agents need
   641 sampled poses, but all 65 frames penetrate the floor by roughly
   7.7--8.4 cm. Ground/root calibration, canonical-betas rerun and repeated
   continuous collision/dynamics/table-net gates now block schema-2 and RL.
+- Added a single-file GMR grounding tool for that blocker. It requires exact
+  input and canonical-MJCF SHAs, refuses directory scans/overwrites, binds the
+  floating-root 31-joint order and enabled collision geoms, applies only one
+  constant root-z shift, and emits a no-clobber pickle/report with compiled
+  collision and tool/input/output hashes. Dependency-light tests pass with
+  MuJoCo cases skipped when absent; a temporary native arm64 MuJoCo 3.10.0
+  run passed all 15 tests against the real canonical A3 mesh model, after
+  which the temporary dependency was removed. No candidate output has yet
+  been promoted: the tool covers source frames only, not inter-frame
+  clearance, dynamics, table/net or schema-2.
 - Audited Pod1 M3-S1 at its real terminal `model_20998.pt`: all 1,762,715
   floating elements are finite, the embedded/adjacent schema-3 contract SHA
   matches, and the 4,000 log records are contiguous from 16999 through 20998

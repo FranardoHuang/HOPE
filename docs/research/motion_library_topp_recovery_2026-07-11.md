@@ -70,6 +70,16 @@ betas，故合同固定为 `diagnostic_video_betas`、`formal_eligible=false`；
 `-0.0773..-0.0841 m`。必须先用单文件、内容寻址的固定 root-z 校准落地，再重跑关节/
 速度/加速度、连续碰撞、动力学和桌网门，禁止直接把当前 PKL 转成训练资产。
 
+`scripts/ground_gmr_pkl.py` 已把这个校准步骤实现成 fail-loud 工具：一个显式 input、一个全新
+output、一个全新 report，input/MJCF 都要求 expected SHA；canonical MJCF 必须只有一个 floating
+root 且 31 hinge 顺序逐名相同。工具只纳入 robot subtree 中启用的 collision geom，primitive 用
+解析 support、mesh 用 MuJoCo compiled vertices，逐源帧求最低 world-z，再只给
+`root_pos[:,2]` 加一个固定量。输出回读后必须保持 root XY/root quaternion/31 DoF 逐位不变、
+关节仍在 MJCF range、最差帧接近地面而不穿透/过度悬空；report 绑定 tool/input/output/MJCF 和
+compiled collision digest。真实 canonical `a3_pingpong.xml` 的 native MuJoCo 测试已通过，
+但这仍只审 30 Hz 离散帧，不是 inter-frame 连续 clearance 证明。当前 tracked pilot 尚待实际
+运行，所以后续门禁顺序没有缩短。
+
 | 组 | 语义动作 | 文件 | 时长 / 帧数 | 当前角色 |
 | --- | --- | --- | --- | --- |
 | Franco | 正手挡 | `forehand_dang.mp4` | 2.167 s / 65 | 四动作候选 |

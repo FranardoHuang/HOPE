@@ -575,9 +575,16 @@ zero robot self-contact. That finite-substep test is not a continuous
 collision certificate and the MJCF lacks table/net geometry. More
 importantly, all 65 frames penetrate the floor, with the lowest collision geom
 roughly `7.7--8.4 cm` below zero. The current root trajectory is therefore
-blocked on a content-addressed single-file ground/root calibration followed by
-repeat collision, dynamics and table/net clearance gates; it is not eligible
-for schema-2 promotion or RL yet.
+blocked on ground/root calibration followed by repeat collision, dynamics and
+table/net clearance gates. A repo-owned `scripts/ground_gmr_pkl.py` now
+implements the first step without directory scans or in-place edits: it binds
+the exact input and canonical MJCF SHAs, computes the lowest world-z support
+over enabled robot collision geoms at each source frame, applies one constant
+root-z translation, and emits a no-clobber pickle plus SHA-bound report. Real
+canonical-MJCF mesh tests pass, but the tracked Franco output has not yet been
+run through this tool in this entry. The tool only proves discrete-frame
+ground placement; inter-frame clearance and all later gates remain open, so
+the motion is not eligible for schema-2 promotion or RL yet.
 
 This is not yet a training result. The videos contain no ball/table/contact
 truth, their mirror/depth interpretation is unverified, and the three Franco

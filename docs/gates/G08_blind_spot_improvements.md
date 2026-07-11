@@ -273,7 +273,10 @@ Not done:
   The first canonical-MuJoCo replay found no sampled robot self-contact but
   found `7.7--8.4 cm` floor penetration across every frame, so ground/root
   calibration and all downstream robot-clearance, dynamics, contact and
-  returnability gates are still open.
+  returnability gates are still open. A single-file, SHA-bound, no-clobber
+  collision-geometry grounding tool is implemented and tested against the
+  real canonical MJCF, but no tracked candidate has yet passed its output
+  report or the required inter-frame re-audit.
 - The audit-derived items 1-4 are not yet scheduled; item 2 must land before/with the mocap
   bridge.
 
