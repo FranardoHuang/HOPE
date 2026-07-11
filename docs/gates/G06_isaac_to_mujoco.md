@@ -513,3 +513,10 @@ mechanism, but the runtime gate remains closed until one clean-detached K100 led
 moving-blade substep audit exist. Plant semantics, ready-state, termination, observation/action
 runtime and signed racket-face measurements must remain separately bound so a score difference
 can be localized rather than hidden in one aggregate return rate.
+
+The exact model-2000 SZ paper now adds a separate transfer warning: MuJoCo K100 return across
+seeds 1/2/3/4 is `.83/1.00/1.00/.20`. This is not a plant fall signature (all physical-fall
+counts are zero); it is checkpoint/learning seed instability on the current single-strike paper.
+It blocks a stable Phase-1 checkpoint baseline before Gate 3. Do not average away seed 4, and do
+not attribute the variance to Isaac/MuJoCo until the same checkpoints have the registered physical
+instrument cells.

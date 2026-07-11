@@ -583,6 +583,22 @@ plant claim. See `docs/research/phase1_plant_semantics_repair_2026-07-11.md` and
 
 ## Remaining Gates
 
+### Four-seed exact model-2000 q50 stability result (2026-07-12)
+
+The pre-registered same-paper K100 result is complete and fails seed stability. Exact
+full-denominator returns for training seeds 1/2/3/4 are respectively
+`83/100`, `100/100`, `100/100`, and `20/100`; seed 4 is FH/BH=`0/50,20/50`.
+All four evaluations are fresh/exact and report zero physical falls. The pre-registered median
+gate passes at `.915`, while worst seed `.20 < .65`, spread `.80 > .20`, and worst side
+`0 < .50` fail. The accepted decision is therefore
+`fail_seed_stability_checkpoint_evidence`, not a three-good-seed promotion. The aggregate
+content SHA is `a756bf1d0e76d1016992ae241b935cf92b3c84ffd55fe503e7c199626d9c8ffd`;
+the content-addressed ledger is
+`configs/phase1_fresh_SZ_model2000_seed_stability_q50_a756bf1d0e76d1016992ae241b935cf92b3c84ffd55fe503e7c199626d9c8ffd.json`.
+All supervisors/children exited cleanly, and no trainer or resident curve worker was signalled.
+The four arms continue so later matched milestones can distinguish delayed learning from persistent
+seed sensitivity. This failure does not close plant, continuous, Gate 3, deploy, or robot gates.
+
 1. Keep the 28 accepted arms (currently four terminal plus 24 live) and all
    live cadence workers under exact-PGID monitoring; do not fast-forward either
    frozen training checkout while a local arm is alive.

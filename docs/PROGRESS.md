@@ -1407,3 +1407,7 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   Isaac `.99` 不得覆盖 MuJoCo 的 checkpoint 排名与失衡证据。
 - 将 strike 后“恢复平衡 / 回 ready 集 / 随时接下一题”登记为同 phase 的耦合优化：先用 constraint、
   potential 与随机到达 probe 分责，再做 `2^3` 交互筛和固定总预算 mixture；不把三个单项胜者直接相加。
+- fresh SZ model-2000 四 seed 同一 exact K100 已完成：`83/100,100/100,100/100,20/100`，
+  physical fall 全0。median 门通过但 worst/spread/worst-side 三门失败，正式登记
+  `fail_seed_stability_checkpoint_evidence`。四臂继续，不停训、不挑 seed，等后续 matched milestone
+  判断 seed4 晚熟还是结构敏感。

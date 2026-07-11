@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 2026-07-12 现场状态(01:01 CST 更新)
+## 2026-07-12 现场状态(01:06 CST 更新)
 
 - **Phase-1 仍是真满池**:四条原始续训自然终档后，四条独立预注册的因果缺边补进空槽；
   现在两 Pod 各 12 条 live trainer、每 GPU 恰好 4 条，加上 4 条 clean terminal，共 28 条
@@ -77,10 +77,11 @@ Rules:
   做 q10 方向卷和 q50 决策卷。
 - **fresh 正式格四 seed 的 2k 小卷已齐，但只作方向信号**：同一 clean-q10 题表总回球率为
   seed1/2/3/4=`.90/1.00/1.00/.25`。seed4 是必须解释的稳定性离群点，不能据此停臂或挑 seed；
-  四个 2k checkpoint、相邻 schema-v3 hard-contract 与 finite tensor 已复核，同一 K100
-  （每侧50题）卷已冻结并开跑。seed1 旧结果全链复验一致，复用 `83/100` 不重复 judge；
-  Pod1 supervisor `1472761` 顺序跑 seed3，Pod2 `210335` 顺序跑 seed2/4。只管理自身外部
-  judge/Kit lock，不向 trainer/worker 发信号；所有 trainer 继续原配方。
+  四个 2k checkpoint、相邻 schema-v3 hard-contract 与 finite tensor 已复核；同一 K100
+  （每侧50题）正式卷已完成：seed1/2/3/4=`83/100,100/100,100/100,20/100`，全部完整分母、
+  exact、0 physical fall。预注册 median `.915` 过，但 worst `.20`、spread `.80`、worst-side
+  `0` 均失败，正式结论 `fail_seed_stability_checkpoint_evidence`；2k 不能作稳定 baseline，
+  不得用前三个强 seed 隐去 seed4。supervisor/child 已全退，trainer/worker 全活且零信号。
 - **厂商 MuJoCo Gate 3 现在是最终裁决门，不是 Isaac**：它把假球→真规划器→同款 C++ runner→
   智元 A3 MuJoCo 串成部署闭环；候选首先要在这个版本保持平衡、完成挥拍/恢复且不靠人工 reset，
   再谈 Isaac 分数。Isaac/MuJoCo 同 policy 的巨大差异另作归因轴：现已完成 PhysicalBall Phase-B

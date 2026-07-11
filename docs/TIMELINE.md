@@ -1542,3 +1542,8 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    继续 `blocked_on_calibration_evidence`；prereg SHA=`2ad2caba...e2aa`，专项 `24 passed`、
    连同现役 schema3/override/judge/MuJoCo plant 回归 `128 passed`，
    无 Pod/真机动作。
+50. 【franco/Codex】**fresh SZ 2k 四 seed 正式卷判定“不稳定”，前三个强 seed 不得遮住离群点**——
+   同一 exact K100 上 seed1/2/3/4=`83/100,100/100,100/100,20/100`，seed4 正/反=`0/50,20/50`，
+   全部 zero physical fall。median `.915` 过，但 worst `.20`、spread `.80`、worst-side `0`
+   均过不了预注册门，正式结论 `fail_seed_stability_checkpoint_evidence`。supervisor/child 全退，
+   trainer/worker 全活且零信号；后续 matched milestone 区分晚熟与持续 seed 敏感。

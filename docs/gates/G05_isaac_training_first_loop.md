@@ -893,3 +893,10 @@ training/T1 isolation. Focused host verification passed (`63 passed, 1 artifact-
 This is only a source gate: no Pod Isaac runtime result exists, a clean-detached 100-row ledger
 has not been produced, and moving-racket substep geometry is not yet quantified. G05 therefore
 remains `Partial`; existing analytic Isaac scores cannot be relabelled physical.
+
+The fresh SZ model-2000 four-seed exact MuJoCo q50 is also complete. Seeds 1/2/3/4 return
+`83/100`, `100/100`, `100/100`, and `20/100`; seed 4 has FH/BH=`0/50,20/50`, with zero
+physical falls. Median `.915` passes, but the preregistered worst-seed, spread and worst-side
+criteria fail, so the checkpoint evidence is not seed-stable. All trainers continue unchanged;
+the result authorizes neither stopping nor promotion. Later same-milestone curves must determine
+whether seed 4 is delayed or persistently sensitive.
