@@ -645,8 +645,9 @@ binds bank `2da2bd12...a0700`, source family `b21c161a...28ad5`, `757/724` rows,
 ranges and cap minima `0.974278/0.972078`; it is a read-only source-contract expectation, not a
 behavior result. The fixture does not contain the ignored NPZ: restore and SHA-check it using
 [setup_local_sync.md, Phase-1 fresh and causal bundle](../operations/setup_local_sync.md#phase-1-fresh-and-causal-bundle-2026-07-11).
-A full vendor-dependency Release build and a freshly re-exported real 179 model are still required. More
-importantly, a spherical cap is an on-distribution envelope, not a collision or behavior proof:
+A full vendor-dependency Release build and freshly re-exported real 179 model now pass the strict
+model gate described below. A spherical cap is still only an on-distribution envelope, not a
+collision or behavior proof:
 self-hit instrumentation, the recovery tuple and no-reset vendor MuJoCo Gate 3/Gate 3B remain
 open. G06 stays `Partial`.
 
@@ -666,12 +667,28 @@ parsed booleans, prints `publishable_model_contract=true training_contract_exact
 parsed envelope sign table. `verify_face179_preflight_failclosed.py` runs one valid model then
 creates temporary metadata-stripped, missing-envelope and `training_contract_exact=0` variants;
 each must exit nonzero with no backend marker, while legacy-diagnostic plus preflight must exit 2.
-The helper/unit source gate passes, but the real negative integration is intentionally skipped on
-this host because neither the rebuilt vendor runner nor a new envelope-bearing ONNX exists here.
+The helper/unit source gate passes locally; the real runner integration result is recorded below.
 
 The standalone exporter now completes every checkpoint/donor/motion/harvest/bank/envelope check
 before creating a graph, writes only an owned same-directory temp, checks the ONNX and metadata
 round trip, fsyncs, and atomically replaces the destination. Failure tests prove an existing
 `policy.onnx` remains byte-identical and no temp remains. Focused host results are `41 passed` plus
-one skipped real runner/model integration; planner wire remains `11 passed`. This is source
-hardening, not a renewed vendor build/preflight or Gate 3 behavior result, so G06 remains Partial.
+one optional real runner/model integration skip; planner wire remains `11 passed`.
+
+The missing integration was then run on Pod1 from an isolated tree whose 19 changed files match
+exact source `2fa35340b63f98c04c67c8b29c80939610fd86e9` (tree
+`299a2907229c1aaa4b581007c0ebe46cd914a011`). ROS/Jazzy + AimRT 1.6 Release rebuilt all three
+targets. Fresh SZ seed3 model-2000 was re-exported from checkpoint `11f3a288...e77a5`, motions
+`f2cb2d9f...1687`/`17225533...7534` and train bank `2da2bd12...a0700`; the new ONNX is
+`0c428ddf...b7b155`, with envelope payload `df3fd8ae...08502e`. The native suite reports 219
+tests, 210 pass, 9 optional-asset skips and 0 failures. Strict production preflight exits 0 and
+prints parsed publishable/exact/179/sign/bank/family values with no backend marker. Graph-identical
+metadata-stripped, missing-envelope and exact=0 variants each exit 3 before backend; legacy plus
+preflight exits 2. An exam-bank-as-train failure preserves the existing ONNX SHA and leaves zero
+temp files. All 824 compile commands are free of fast/finite-only math flags.
+
+The content-addressed ledger is
+`configs/gate3_face179_strict_preflight_evidence_20260712.json`. This closes the corrected export,
+full Release build and strict model-only preflight gates. It did not start the vendor simulator,
+transport or backend, so first tick, planner-policy closed loop, self-hit, continuous stability and
+Gate3/Gate3B behavior remain open; G06 remains `Partial`.

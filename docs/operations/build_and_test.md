@@ -301,11 +301,16 @@ Historical evidence in the isolated ROS/AimRT-enabled Release archive at source 
 - planner + no-publish preflight: rc0, `obs_dim=179`, contract
   `3a3b3d95...b9972`, checkpoint `d920...5e22`, and no backend-init/start line.
 
-That run remains loader-lifetime and backend-order evidence, but no longer closes the strict
-publishable-model gate: its no-publish bit also enabled the legacy loader escape and its model
-predates the envelope. Rebuild current source, re-export the model, run the strict GTest, accepted
-preflight and negative integration above, then proceed to first tick and vendor Gate 3/Gate 3B.
-Full content-addressed history is recorded in G06.
+That historical run remains loader-lifetime and backend-order evidence, but does not close the
+strict publishable-model gate: its no-publish bit also enabled the legacy loader escape and its
+model predates the envelope.
+
+The strict rerun is now complete at source `2fa35340` with formal SZ seed3 model-2000 ONNX
+`0c428ddf...b7b155`: native 219 tests = 210 pass, 9 optional skips, 0 fail; positive preflight rc0;
+the three metadata mutations rc3; legacy+preflight rc2; no backend marker; 824 compile commands
+without unsafe math. Exact inputs, binaries and logs are in
+`configs/gate3_face179_strict_preflight_evidence_20260712.json`. Proceed to backend first tick and
+vendor Gate 3/Gate 3B; do not reinterpret this model-only result as simulator behavior.
 
 Safety finite checks rely on IEEE NaN/Inf semantics. Verify Release did not
 re-introduce fast-math:

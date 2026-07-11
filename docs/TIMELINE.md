@@ -1570,3 +1570,11 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    负向脚本已落地，等新 ONNX/vendor binary 实跑。standalone 也改成全验证后同目录 temp+fsync+
    atomic replace，失败保留旧模型；export/runtime reference dot 统一严格 `>1e-6`。host source gate
    41 pass/1 optional integration skip，绝不写成 vendor Gate3 通过。
+56. 【franco/Codex】**真实 formal SZ 把严格 179 模型门补跑完，源码可合、行为门仍开**——Pod1
+   隔离 ROS/Jazzy+AimRT Release 从 exact `2fa35340` 增量重建；fresh SZ seed3 model2000 绑定
+   checkpoint `11f3a288...e77a5`、train bank `2da2bd12...a0700`、family `b21c161a...28ad5`，
+   新 ONNX=`0c428ddf...b7b155`、envelope=`df3fd8ae...08502e`。native 219 项=210 pass/9
+   optional skip/0 fail；严格正例 rc0 且 parsed publishable/exact/179/sign 全对、backend marker=0；
+   strip metadata/缺 envelope/exact=0 三负例均 rc3，legacy+preflight rc2。错误 exam-bank 导出
+   rc1 后 final SHA 不变、temp=0；824 compile rows 无 fast-math。证据 manifest 已入库。未启动
+   vendor simulator/transport/backend first tick，不能写成 Gate3/Gate3B 通过。

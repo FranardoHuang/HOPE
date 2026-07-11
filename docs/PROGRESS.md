@@ -2,6 +2,22 @@
 
 Use this file for short project-state updates that future humans and agents need to see. Keep detailed reasoning in the relevant gate doc.
 
+## 2026-07-12
+
+- Verified the corrected face179 export and strict production-model preflight in an isolated
+  Pod1 ROS/Jazzy + AimRT Release build at exact source `2fa35340`. The exact fresh SZ seed3
+  model-2000 checkpoint was re-exported with the real `757/724`-row train bank, `[+1,-1]`
+  B-to-A sign table and content-bound normal envelope; ONNX SHA is `0c428ddf...b7b155` and
+  envelope payload SHA is `df3fd8ae...08502e`. The complete native suite is 219 tests:
+  210 pass, 9 optional-asset skips and 0 failures. Strict preflight accepts the exact model
+  with `publishable_model_contract=true`, `training_contract_exact=1`, `obs_dim=179` and no
+  backend marker. Metadata-stripped, missing-envelope and exact=0 variants all fail rc3 before
+  backend, while legacy+preflight fails rc2. An invalid exam-as-train export leaves the existing
+  ONNX byte-identical and no temp file. Release compile audit found 824 entries and no unsafe
+  math flags. Evidence is bound in
+  `configs/gate3_face179_strict_preflight_evidence_20260712.json`. No simulator, transport,
+  backend tick or robot ran; Gate3/Gate3B behavior remains open.
+
 ## 2026-07-11
 
 - Completed canonical-GMR discrete grounding and the next CPU-only dense safety

@@ -912,7 +912,9 @@ temporary file, checks the graph and metadata round trip, fsyncs it, then atomic
 `policy.onnx`; validation/export failure preserves an existing final model and removes the temp.
 Behavioral tests cover successful replacement, injected failure and empty output. Host verification
 is `41 passed, 1 optional real-runner integration skip` for the focused contract/export/preflight
-group and `11 passed` for the planner wire. This closes an
-export/source prerequisite only. No envelope-bearing formal ONNX has yet been produced from the
-running Phase-1 artifacts, and no policy has passed vendor MuJoCo with the envelope, self-hit gate
-or recovery contract. G05 remains `Partial`.
+group and `11 passed` for the planner wire. Pod1 subsequently produced an envelope-bearing formal
+SZ seed3 model-2000 ONNX (`0c428ddf...b7b155`) from the exact train bank and passed the full
+ROS/AimRT Release suite plus strict positive/negative production preflight; see
+`configs/gate3_face179_strict_preflight_evidence_20260712.json`. This closes an export/model-load
+prerequisite only. No policy has yet passed vendor MuJoCo backend first tick or behavior with the
+envelope, self-hit gate or recovery contract. G05 remains `Partial`.

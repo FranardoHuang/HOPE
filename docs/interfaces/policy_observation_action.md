@@ -67,7 +67,7 @@ Notes:
 | Dim | Contract | Delta / source | C++ publish status |
 | --- | --- | --- | --- |
 | 177 | `hitter_footwork` | 175 layout with `base_target_pos_b(2)` inserted after projected gravity; requires fresh external/oracle base localization. | Supported, but publication fails closed without fresh localization. |
-| 179 | `deploy_parity_face179` | Exact 175 prefix + tail `racket_target_normal_cmd(3), rho(1)`; actor tail is raw mount +Y/A after the runner converts the physical-B wire normal with the selected clip sign. | Source-supported only through flat wire schema 2; requires exact ONNX metadata, a content-bound per-clip train-normal envelope and planner mode. A new envelope-bearing model has not passed vendor Gate 3 behavior, so not yet accepted. |
+| 179 | `deploy_parity_face179` | Exact 175 prefix + tail `racket_target_normal_cmd(3), rho(1)`; actor tail is raw mount +Y/A after the runner converts the physical-B wire normal with the selected clip sign. | Flat wire schema 2 plus exact metadata/content-bound train-normal envelope/planner mode are mandatory. One envelope-bearing formal model has passed strict Release model preflight (`configs/gate3_face179_strict_preflight_evidence_20260712.json`), but no backend first tick or vendor Gate 3 behavior, so it is not yet a behavioral candidate. |
 | 181 | `deploy_parity_station181` | Exact 179 prefix + tail `station_anchor_err_b(2)`. | Blocked: wire and the unique station/normal term order are not frozen. |
 | 110 | `hitter_pure` | HITTER Table-I style: 99-D proprio prefix + base forward(2), station delta(2), racket target rel base(3), target velocity(3), tts(1); no reference command or swing flag. | Supported; requires fresh localization and metadata-bound per-side station geometry. |
 
