@@ -1233,3 +1233,28 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `PHASE1_SCHEMA3_RESULTS_2026-07-11.md`。MuJoCo 100 题 carry-state 连续卷:“上台且恢复到
    下一球” M3f=`70/99`,M2=`30/99`,物理摔倒均 0,超时/跟踪 guard 不删分母。实体下一球
    时间线未接好前,Isaac 单题并行适配器不会被改名为连续球。
+5. 【franco/Codex】**历史主矩阵重排收口**——R5b 两 seed、G2、M2f3 因 MuJoCo 正手
+   `0/10` 停在 canary;R1b 两 seed 到 50/侧后 Isaac `95/100,90/100`,MuJoCo 却只
+   `15/100,17/100`(两者正手均 `3/50`),定案为跨引擎塌陷。C1 clean Isaac/MuJoCo
+   `96/100 / 50/100`,噪声 `96/100 / 48/100`,第二题序 `98/100 / 55/100`;连续卷
+   回球 `42/100`,且回球+恢复 `26/99`。M3f 仍是历史诊断第一,24 项正式成绩
+   仍无一个可入账。
+6. 【franco/Codex】**fresh formal plant 前置不再靠手改源码**——新增默认关的
+   `task.plant.zero_joint_friction`:只在显式 true 时于 `gym.make` 前把所有 A3 actuator
+   friction 置零,实例化全零向量照常进 schema-v3 training contract;缺省/
+   false 对历史 PhysX 配方逐位不变,旧 ckpt 续训仍不能洗白。独立 pod worktree
+   60 tests 绿,Hydra 拒绝拼错父路径,真环境还会再断言 31/31 摩擦系数精确为零;下一门=
+   迁移 schema-2 COM-速度动作+重出 schema-v3 train/exam bank+机制
+   smoke,过后才发从零 exact lineage。
+7. 【franco/Codex】**fresh 动作错列真机 smoke 抓现行、不是改标签糊过去**——首版把旧
+   `body_order_isaac.txt` 同时当 source/runtime order，Kit 在 hip yaw/roll 错列处 fail closed；
+   原产物隔离并留 `OBSOLETE_DO_NOT_USE.json`。迁移器新增 `--target-body-order`，按名字同步
+   重排 pose/quat/linvel/angvel 四数组后再做 link→COM。修后动作 schema2/50Hz/32-body，
+   v3 train/exam 同 family 且题目零交集，Torch/physics/loader 全绿，四 NPZ 均 0444；完整
+   SHA 在 `phase1_fresh_v3_asset_manifest_20260711.json`。
+8. 【franco/Codex】**六卡点火前把“训完却导不出”三洞堵死**——schema3 structural 与 formal
+   exact 校验拆开：legacy causal 后代只有 sidecar+ckpt SHA 完整绑定才可 diagnostic export，
+   `training_contract_exact` 永远 0；exact 声明仍强制 schema2 motion。judge 只从 checkpoint
+   相邻 hard contract 重放 31/31 零摩擦与 175/179/181 actor contract，并和 env flags 对账；
+   hard contract/ONNX 新绑 `face_command_enabled`+pairing。专用 launcher 逐 hash 验输入、Kit
+   boot 串行、首迭代后放锁、超时只清本臂 PGID；37 个契约回归绿，179D full smoke 待跑。

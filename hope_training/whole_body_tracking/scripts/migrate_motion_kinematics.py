@@ -14,6 +14,15 @@ Example (legacy V5):
       --source-point link_origin --mjcf /path/a3_pingpong.xml \
       --body-order /path/body_order.txt
 
+If the source was written under an older articulation body order, bind that
+order with ``--body-order`` and pass the current runtime order separately:
+
+    python scripts/migrate_motion_kinematics.py \
+      --input legacy.npz --output reordered_comv.npz \
+      --source-point link_origin --mjcf /path/a3_pingpong.xml \
+      --body-order /path/source_body_order.txt \
+      --target-body-order /path/current_runtime_body_order.txt
+
 The output preserves every source field, converts link velocity with
 ``v_com = v_link + omega x R(q) r_link_to_com``, and records the source SHA and
 asserted source semantics.  It never overwrites the input.
@@ -40,6 +49,14 @@ from motion_kinematics_contract import (
     metadata_arrays,
     normalize_body_names,
     read_metadata,
+)
+
+
+BODY_ARRAY_KEYS = (
+    "body_pos_w",
+    "body_quat_w",
+    "body_lin_vel_w",
+    "body_ang_vel_w",
 )
 
 
@@ -77,16 +94,44 @@ def migrate_arrays(
     source_point: str,
     com_pos_b: np.ndarray | None,
     body_names: tuple[str, ...] | list[str],
+    target_body_names: tuple[str, ...] | list[str] | None = None,
 ) -> tuple[dict, dict]:
     """Pure array migration used by the CLI and tests."""
 
     if source_point not in ("link_origin", "center_of_mass"):
         raise ValueError(f"unsupported source point {source_point!r}")
     out = {key: np.array(value, copy=True) for key, value in data.items()}
+    old_source = np.asarray(out["body_lin_vel_w"], dtype=np.float64)
+    if old_source.ndim != 3:
+        raise ValueError(f"body_lin_vel_w must be (T,B,3), got {old_source.shape}")
+    source_names = normalize_body_names(body_names, expected_count=old_source.shape[1])
+    target_names = (
+        source_names
+        if target_body_names is None
+        else normalize_body_names(target_body_names, expected_count=old_source.shape[1])
+    )
+    if set(target_names) != set(source_names):
+        missing = sorted(set(source_names) - set(target_names))
+        extra = sorted(set(target_names) - set(source_names))
+        raise ValueError(
+            "target body order must be a permutation of the source order; "
+            f"missing={missing} extra={extra}"
+        )
+    permutation = np.asarray([source_names.index(name) for name in target_names], dtype=np.int64)
+    reordered = tuple(permutation.tolist()) != tuple(range(len(source_names)))
+    for key in BODY_ARRAY_KEYS:
+        if key not in out:
+            raise ValueError(f"motion is missing required body array {key!r}")
+        value = np.asarray(out[key])
+        if value.ndim < 2 or value.shape[1] != len(source_names):
+            raise ValueError(
+                f"{key} must have body axis 1 of length {len(source_names)}, got {value.shape}"
+            )
+        out[key] = np.take(value, permutation, axis=1)
+
     old = np.asarray(out["body_lin_vel_w"], dtype=np.float64)
     if old.ndim != 3:
         raise ValueError(f"body_lin_vel_w must be (T,B,3), got {old.shape}")
-    names = normalize_body_names(body_names, expected_count=old.shape[1])
     if source_point == "link_origin":
         if com_pos_b is None:
             raise ValueError("link_origin migration requires body COM offsets")
@@ -99,10 +144,12 @@ def migrate_arrays(
         out["body_lin_vel_w"] = converted.astype(np.asarray(data["body_lin_vel_w"]).dtype)
     else:
         converted = old
-    out.update(metadata_arrays(body_names=names))
+    out.update(metadata_arrays(body_names=target_names))
     delta = converted - old
     report = {
         "source_point": source_point,
+        "body_order_reordered": reordered,
+        "body_permutation": permutation.tolist(),
         "max_velocity_delta_mps": float(np.max(np.linalg.norm(delta, axis=-1))),
         "rms_velocity_delta_mps": float(np.sqrt(np.mean(delta * delta))),
     }
@@ -118,7 +165,11 @@ def main(argv=None) -> int:
     ap.add_argument("--mjcf", help="required for link_origin -> COM conversion")
     ap.add_argument(
         "--body-order",
-        help="NPZ body-column names; required for legacy files without schema-2 body_names",
+        help="source NPZ body-column names; required for legacy files without schema-2 body_names",
+    )
+    ap.add_argument(
+        "--target-body-order",
+        help="optional current runtime body order; reorders every body array by name before migration",
     )
     args = ap.parse_args(argv)
 
@@ -169,16 +220,31 @@ def main(argv=None) -> int:
             "[migrate-motion] legacy input has no bound body order; pass --body-order"
         )
 
+    target_body_names = (
+        _read_body_order(args.target_body_order) if args.target_body_order else body_names
+    )
+    if set(target_body_names) != set(body_names):
+        missing = sorted(set(body_names) - set(target_body_names))
+        extra = sorted(set(target_body_names) - set(body_names))
+        raise SystemExit(
+            "[migrate-motion] target body order must be a permutation of the source order; "
+            f"missing={missing} extra={extra}"
+        )
+
     com_pos = None
     if source_point == "link_origin":
         if not args.mjcf:
             raise SystemExit(
                 "[migrate-motion] link_origin conversion requires --mjcf"
             )
-        com_pos = _body_com_offsets(args.mjcf, body_names)
+        com_pos = _body_com_offsets(args.mjcf, target_body_names)
 
     out, report = migrate_arrays(
-        data, source_point=source_point, com_pos_b=com_pos, body_names=body_names
+        data,
+        source_point=source_point,
+        com_pos_b=com_pos,
+        body_names=body_names,
+        target_body_names=target_body_names,
     )
     out[MIGRATION_SOURCE_SHA256_KEY] = np.array(_sha256(src))
     out[MIGRATION_SOURCE_POINT_KEY] = np.array(source_point)
@@ -188,6 +254,7 @@ def main(argv=None) -> int:
     print(
         f"[migrate-motion] {src} -> {dst}; schema={KINEMATICS_SCHEMA_VERSION} "
         f"pos={BODY_POS_POINT} lin_vel={BODY_LIN_VEL_POINT}; source={source_point}; "
+        f"body_reordered={report['body_order_reordered']}; "
         f"max_delta={report['max_velocity_delta_mps']:.6f} m/s; "
         f"rms_delta={report['rms_velocity_delta_mps']:.6f} m/s; source_sha256={_sha256(src)}"
     )

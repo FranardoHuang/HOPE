@@ -60,16 +60,38 @@ if TYPE_CHECKING:
 # It sits just inside the deploy engage limit, so the metric measures states that matter.
 _RECOVERY_START_YAW_THRESHOLD = 0.30
 
+_FACE_COMMAND_PAIRINGS = ("shared_plus_y", "legacy_signed_vs_A")
+
+
+def _face_command_pairing(cfg: "RacketTargetCommandCfg") -> str:
+    """Return a validated face-command grading convention.
+
+    ``getattr`` preserves the historical default for small test doubles and old serialized
+    configuration objects; real environments also validate the field during command construction.
+    """
+    pairing = str(getattr(cfg, "face_command_pairing", "shared_plus_y"))
+    if pairing not in _FACE_COMMAND_PAIRINGS:
+        raise ValueError(
+            "face_command_pairing must be one of "
+            f"{_FACE_COMMAND_PAIRINGS}, got {pairing!r}"
+        )
+    return pairing
+
 
 def face_tracking_pair(command: "RacketTargetCommand") -> tuple[torch.Tensor, torch.Tensor]:
     """Return the measured/target normals used by every face reward and success metric.
 
-    Bank face commands live in the raw mount +Y/A frame. Non-bank tasks retain the signed
-    clip-reference pairing. Keeping this decision here prevents reward and reporting from
-    silently grading different faces.
+    Face-command targets always remain in the bank's A frame. ``shared_plus_y`` compares them to
+    raw mount +Y, while the explicit diagnostic ``legacy_signed_vs_A`` reproduces the historical
+    signed-measurement/A-target mismatch. Non-face tasks retain the signed clip-reference pair.
+    Keeping the selection here makes rewards, privileged observations, and metrics grade the same
+    convention.
     """
     if command.cfg.face_command:
-        return command.racket_normal_raw_w, command.target_normal_cmd
+        pairing = _face_command_pairing(command.cfg)
+        if pairing == "shared_plus_y":
+            return command.racket_normal_raw_w, command.target_normal_cmd
+        return command.racket_normal_w, command.target_normal_cmd
     return command.racket_normal_w, command.racket_target_normal_w
 
 
@@ -79,6 +101,9 @@ class RacketTargetCommand(CommandTerm):
     cfg: RacketTargetCommandCfg
 
     def __init__(self, cfg: RacketTargetCommandCfg, env: ManagerBasedRLEnv):
+        # Validate even when face_command is currently disabled: a typo must fail at environment
+        # construction instead of lying dormant until a later curriculum/override enables it.
+        _face_command_pairing(cfg)
         super().__init__(cfg, env)
 
         self.robot: Articulation = env.scene[cfg.asset_name]
@@ -3539,6 +3564,9 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # the 0%-return root cause — eval mode B 2026-07-05). Exact/composite metrics use the same
     # pairing as the reward; the critic reference lane remains unchanged. False = old path.
     face_command: bool = False
+    # Reward/critic/metric face pairing. ``shared_plus_y`` is the production A-frame convention;
+    # ``legacy_signed_vs_A`` is an explicit diagnostic continuation of the pre-fix mismatch.
+    face_command_pairing: str = "shared_plus_y"
 
     # --- desired base XY target (offsets from the env origin, world frame, meters) ---
     base_target_x_range: tuple[float, float] = (-0.10, 0.10)

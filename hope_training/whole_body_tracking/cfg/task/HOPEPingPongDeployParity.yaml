@@ -51,6 +51,13 @@ gym_task: HOPE-PingPong-DeployParity-AgibotA3-v0
 experiment_name: agibot_a3_hope_deploy_parity
 actor_obs_contract: deploy_parity
 
+# Fresh-lineage plant control. This declared node makes Hydra reject a misspelled parent/leaf when
+# callers use the documented override `task.plant.zero_joint_friction=true` (without `++`). False is
+# byte-identical to the checked-in historical actuator config; true zeros all actuator groups before
+# environment construction and is checked again against the instantiated 31-joint runtime contract.
+plant:
+  zero_joint_friction: false
+
 # wandb motion registry clips. UNIFIED HITTER policy: clip 0 = forehand (registry_name), clip 1 =
 # backhand (registry_name_2). MotionLoader concatenates them; clip_id selects which swing each env
 # imitates. Order must match racket.strike_phase_per_clip. Set registry_name_2: null for a single-swing

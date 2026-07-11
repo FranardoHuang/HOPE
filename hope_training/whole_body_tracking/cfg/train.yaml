@@ -26,6 +26,11 @@ motion_file_2: null     # optional 2nd local clip for unified HITTER policy; use
 registry_name: null     # falls back to task.registry_name when null
 registry_name_2: null   # optional 2nd clip for the unified HITTER policy (backhand); falls back to task.registry_name_2
 run_name: null
+# Optional fresh-lineage plant control. The checked-in A3 config keeps historical, uncalibrated
+# PhysX joint-friction coefficients. Set `task.plant.zero_joint_friction=true` to train the
+# zero-friction control that formal MuJoCo BankExam can reproduce exactly. Absent or false preserves
+# the configured plant byte-for-byte. Never use this to resume/launder a legacy checkpoint; the
+# schema-v3 contract records the instantiated per-joint coefficients.
 # Resume / curriculum hand-off: load model+optimizer from a prior run's checkpoint and CONTINUE training
 # (iteration counter + wandb step continue from the checkpoint). null -> fresh init. Use this to apply a
 # staged config change (e.g. tightening racket_velocity_std) WITHOUT throwing away progress:

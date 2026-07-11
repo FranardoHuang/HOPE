@@ -241,6 +241,43 @@ failed opportunities. Summary SHAs are `091bd045...0e6ea` and
 continuity diagnostic; Isaac continuous and a fresh exact-lineage policy are
 still required for gate completion.
 
+The historical main-matrix extension is also complete. At clean q50, R1b
+seed 1/2 returned only 15/100 and 17/100 in MuJoCo (both 3/50 forehand),
+despite 95/100 and 90/100 in Isaac, and stopped before robustness. C1 returned
+50/100 in MuJoCo versus 96/100 in Isaac and advanced. Its MuJoCo noise and
+second-schedule cells returned 48/100 and 55/100; its carry-state cell returned
+42/100 and both returned+recovered on 26/99 next-opportunity rows. No C1 cell
+had an absolute physical fall. M3f therefore remains the historical diagnostic
+leader (`91/100` clean and `70/99` continuity product), while all of these
+cells remain `evaluation_contract_exact=false`.
+
+The formal friction gap now has a training-side, fail-loud control rather than
+an undocumented source edit. Fresh runs may set
+`task.plant.zero_joint_friction=true`; `train.py` then zeros every actuator
+friction field before environment construction, and the existing schema-v3
+runtime fact collector records the expanded zero vector. The checked-in
+non-zero plant remains unchanged by default and is still diagnostic-only in
+this gate. Override/contract unit tests passed `60` tests in an isolated Pod
+worktree; the training entry also refuses to continue unless the instantiated
+contract contains exactly 31 aligned zero coefficients. This does not complete
+G06: a from-scratch schema-v3 checkpoint on
+migrated schema-2 motion, a bound train bank, export, and exact BankExam are
+still pending.
+
+The export/judge replay path now preserves the two new runtime controls instead
+of composing the default plant/layout after training. For a schema-3
+checkpoint, `judge.sh` reads the adjacent hard contract: exactly 31 zero
+friction coefficients restore `task.plant.zero_joint_friction=true`; the
+declared non-zero default remains false; partial-zero, malformed, negative or
+non-finite vectors fail closed. The same sidecar supplies the validated
+175/179/181 actor contract and is cross-checked against saved face/station
+flags. Face-command enabled state and pairing, legacy-motion permission and
+motion exactness flow into ONNX metadata. Thus a legacy causal export remains
+explicitly inexact while a future fresh zero-friction export can reach the
+formal MuJoCo plant check without a compose mismatch. The dependency-light
+contract/judge regression passed `37` tests. No fresh checkpoint or exact
+BankExam result exists yet, so this gate remains `Partial`.
+
 ```bash
 python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_bank_exam_schedule.py \

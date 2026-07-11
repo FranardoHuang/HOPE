@@ -33,9 +33,11 @@ import torch.nn as nn
 
 from whole_body_tracking.utils.training_contract import (
     TRAINING_CONTRACT_SCHEMA_VERSION,
+    checkpoint_claims_contract,
     checkpoint_contract_lineage_exact,
     require_checkpoint_contract_binding,
     validate_schema3_contract,
+    validate_schema3_contract_structure,
 )
 
 MOTION_KEYS = ("joint_pos", "joint_vel", "body_pos_w", "body_quat_w", "body_lin_vel_w", "body_ang_vel_w")
@@ -132,7 +134,20 @@ def _bind_schema3_donor_metadata(donor_meta: dict[str, str], contract: dict) -> 
         "joint_friction_backend": contract["joint_friction_backend"],
         "joint_friction_semantics": contract["joint_friction_semantics"],
         "joint_friction_units": contract["joint_friction_units"],
+        "motion_kinematics_exact": (
+            "1" if contract["motion_kinematics_exact"] else "0"
+        ),
     }
+    if "face_command_pairing" in contract:
+        exact_scalars["face_command_pairing"] = contract["face_command_pairing"]
+    if "face_command_enabled" in contract:
+        exact_scalars["face_command_enabled"] = (
+            "1" if contract["face_command_enabled"] else "0"
+        )
+    if "motion_allow_legacy_link_origin_velocity" in contract:
+        exact_scalars["motion_allow_legacy_link_origin_velocity"] = (
+            "1" if contract["motion_allow_legacy_link_origin_velocity"] else "0"
+        )
     for key, expected in exact_scalars.items():
         _require(str(donor_meta.get(key, "")) == str(expected), (
             f"donor metadata {key} != checkpoint training contract"
@@ -277,7 +292,7 @@ def main() -> int:
             raise SystemExit("[FATAL] invalid training-contract schema version")
         if contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION:
             try:
-                validate_schema3_contract(training_contract)
+                validate_schema3_contract_structure(training_contract)
                 require_checkpoint_contract_binding(
                     ckpt,
                     schema=contract_schema,
@@ -287,11 +302,32 @@ def main() -> int:
             except ValueError as exc:
                 raise SystemExit(f"[FATAL] {exc}") from exc
             training_contract_lineage_exact = checkpoint_contract_lineage_exact(ckpt)
-        elif contract_schema not in (1, 2):
+            if training_contract_lineage_exact:
+                try:
+                    validate_schema3_contract(training_contract)
+                except ValueError as exc:
+                    raise SystemExit(f"[FATAL] {exc}") from exc
+        elif contract_schema in (1, 2):
+            if checkpoint_claims_contract(ckpt):
+                try:
+                    require_checkpoint_contract_binding(
+                        ckpt,
+                        schema=contract_schema,
+                        sha256=training_contract_sha256,
+                        require_lineage_exact=False,
+                    )
+                except ValueError as exc:
+                    raise SystemExit(f"[FATAL] {exc}") from exc
+        else:
             raise SystemExit(
                 f"[FATAL] unsupported training-contract schema {contract_schema}; "
                 f"formal schema is {TRAINING_CONTRACT_SCHEMA_VERSION}"
             )
+    elif checkpoint_claims_contract(ckpt):
+        raise SystemExit(
+            "[FATAL] checkpoint claims a training-contract binding but the adjacent sidecar "
+            f"is missing: {training_contract_path}"
+        )
 
     # The existing export chain (play.py -> _OnnxPolicyExporter -> hardware/MuJoCo) bakes the RAW
     # actor with NO empirical normalizer — verified 2026-07-04 by zero-point matching a donor ONNX
@@ -456,12 +492,29 @@ def main() -> int:
             "motion_rsi_hold_root_stand_z": (
                 "1" if bool(training_contract["motion_rsi_hold_root_stand_z"]) else "0"
             ),
+            "face_command_pairing": str(
+                training_contract.get("face_command_pairing", "shared_plus_y")
+            ),
+            "motion_allow_legacy_link_origin_velocity": (
+                "1"
+                if bool(training_contract.get(
+                    "motion_allow_legacy_link_origin_velocity", False
+                ))
+                else "0"
+            ),
+            "motion_kinematics_exact": (
+                "1" if bool(training_contract["motion_kinematics_exact"]) else "0"
+            ),
             "clip_strike_phases": ",".join(format(v, ".17g") for v in phases),
             "motion_clip_sha256": ",".join(actual_hashes),
             "actor_obs_contract": actor_contract,
             "actor_obs_mode": expected_mode,
             "actor_obs_total_dim": str(in_dim),
         })
+        if "face_command_enabled" in training_contract:
+            donor_meta["face_command_enabled"] = (
+                "1" if bool(training_contract["face_command_enabled"]) else "0"
+            )
         signs = training_contract.get("mount_normal_sign_per_clip")
         if signs is not None:
             donor_meta["mount_normal_sign_per_clip"] = ",".join(

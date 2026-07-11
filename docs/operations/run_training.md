@@ -229,11 +229,91 @@ python scripts/migrate_motion_kinematics.py \
   --body-order /path/to/body_order.txt
 ```
 
+`--body-order` describes the source NPZ columns; it is not automatically the
+current articulation order. If a real Kit preflight reports a different
+runtime body order, capture that current order and rerun with
+`--target-body-order /path/to/current_runtime_body_order.txt`. The migration
+then permutes all four body pose/velocity arrays by body name before converting
+link-origin velocity to COM velocity. Never relabel the metadata without
+reordering the arrays.
+
 For a legacy Isaac clip already carrying COM velocity, use
 `--source-point center_of_mass --body-order ...` and omit `--mjcf`. Never
 infer the point or body order from a filename. Interpolation-only retiming
 outputs are explicitly tagged `link_origin` and are not formal training
 inputs; use the FK output mode to regenerate COM velocity.
+
+Fresh schema-v3 training must also choose the joint-friction plant explicitly.
+The checked-in A3 actuator config preserves historical, uncalibrated PhysX
+coefficients. Because those dimensionless/load-dependent values have no exact
+MuJoCo `frictionloss` equivalent, they remain a diagnostic control. Launch the
+cross-engine-exact zero-friction control from scratch with:
+
+```bash
+hope_isaac_py scripts/train.py task=HOPEPingPongVirtualBall algo=ppo \
+  task.plant.zero_joint_friction=true \
+  motion_file=/abs/path/forehand_schema2_comv.npz \
+  motion_file_2=/abs/path/backhand_schema2_comv.npz \
+  ++task.racket.question_bank=/abs/path/schema3_train.npz \
+  headless=true
+```
+
+The flag is absent/false by default and never changes an existing checkpoint.
+The saved `training_contract.json` records the expanded per-joint coefficients;
+any legacy warm-start remains exact-ineligible even when the new run selects
+zero friction. Use a paired fresh `zero_joint_friction=true` versus
+as-configured run when measuring the plant effect, and label the as-configured
+cell diagnostic until a physically calibrated PhysX/MuJoCo mapping exists.
+
+### Serialized Kit boot for multi-GPU hosts
+
+Do not let several Isaac/Kit processes initialize concurrently on one Pod.
+`scripts/launch_kit_training_locked.sh` holds the host boot lock only until a
+reliable log marker appears, launches the child in its own process group, and
+records the exact PID/PGID and command in `<log>.launch`. After the marker, the
+lock is released so already-booted training jobs may run concurrently:
+
+```bash
+source /workspace/codexschema/env.sh
+KIT_BOOT_MARKER='Learning iteration' KIT_BOOT_TIMEOUT_S=900 \
+  scripts/launch_kit_training_locked.sh /abs/path/arm/run.log \
+  env CUDA_VISIBLE_DEVICES=0 /workspace/hope_isaac_venv/bin/python \
+  scripts/train.py task=HOPEPingPongVirtualBall algo=ppo device=cuda:0 \
+  headless=true logger=tensorboard run_name=arm
+```
+
+For a `max_iterations=0` mechanism smoke, use a marker such as
+`[train.py] hard training contract:` instead. A process that exits before its
+required marker is a failed boot even when its exit code is zero. A boot
+timeout sends TERM, then KILL if necessary, only to the recorded arm PGID;
+never replace that cleanup with a broad `pkill`.
+
+The frozen 2026-07-11 Phase-1 recipes use
+`scripts/launch_phase1_20260711.sh`. It verifies every parent checkpoint,
+motion and train-bank SHA before invoking the locked launcher. Run the exact
+179-D construction gate first, then start the three lanes assigned to each
+Pod:
+
+```bash
+scripts/launch_phase1_20260711.sh smoke   # Pod 1; inspect contract, then wait for clean exit
+scripts/launch_phase1_20260711.sh pod1    # M3 old/S1 + fresh schema-v3 seed 1
+scripts/launch_phase1_20260711.sh pod2    # M2 old/S1 + fresh schema-v3 seed 2
+```
+
+Set `PHASE1_DRY_RUN=1` to validate inputs and print shell-escaped commands
+without starting Kit. The causal continuations deliberately use the legacy
+motion diagnostic flag and remain `training_contract_exact=0`; the two fresh
+seeds use runtime-order schema-2 motion, a strict schema-v3 train bank, no
+checkpoint and `zero_joint_friction=true`.
+
+Schema 3 has two validation levels. Structural validation is sufficient to
+export a hash-bound diagnostic checkpoint whose motion is explicitly inexact;
+it never promotes the metadata exact flag. A checkpoint whose embedded lineage
+flag claims exactness must additionally pass the formal schema-2 motion/body
+order gate. Removing or moving `params/training_contract.json` is not an
+escape: a checkpoint that claims a binding while its adjacent sidecar is
+missing is rejected. `judge.sh` likewise reads only that adjacent sidecar to
+restore zero friction and the actor layout.
 
 `hydra`, `omegaconf`, and `rsl_rl` are NOT in the package `setup.py` `install_requires`; they must be importable from the Isaac Lab Python (provide via Isaac Lab itself or `HOPE_ISAAC_VENV_SITE`). Install the package into that Python:
 

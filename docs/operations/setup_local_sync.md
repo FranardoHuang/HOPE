@@ -28,6 +28,9 @@ Small tracked runtime assets, such as the Purdue PACE table/net USD visual overl
 | `hope_training/motions/preprocessed/hope_forehand_v5.npz` and `hope_backhand_v5.npz` | Optional R15 ablation clips only; not product/default train or replay inputs | Team RunPod shared asset path `/workspace/shared/motions/hope_{forehand,backhand}_v5.npz` | G05 R15 v5 ablation |
 | `hope_training/motions/preprocessed/hope_forehand_hopex.npz` and `hope_backhand_hopex.npz` | Corrected HOPE +X reference swing clips for `task=HOPEPingPong*`, passed with `motion_file=...` / `motion_file_2=...` | Generated locally from the 2026-07-02 v4 motions with `scripts/reground_hope_frame.py`; ignored, not redistributable | Training (HOPEPingPong) |
 | `hope_training/whole_body_tracking/artifacts/bank_exam/<family>/` | Family-specific schema-v3 train/exam banks, immutable schedule JSON and raw evaluator scorecards | Regenerate from the exact ignored motion pair with `gen_stage1_questions.py` and `materialize_bank_exam_schedule.py`; never substitute another family's bank | G05/G06 BankExam |
+| RunPod `/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/` | Audited runtime-order schema-2 v4rg motions and same-family schema-v3 fresh train/exam banks | Generated on Pod 1 from the recorded legacy source motions using `migrate_motion_kinematics.py --target-body-order configs/a3_runtime_body_order.txt`; tracked manifest: [`configs/phase1_fresh_v3_asset_manifest_20260711.json`](../../configs/phase1_fresh_v3_asset_manifest_20260711.json) | G05 fresh formal training |
+| RunPod `/workspace/codexschema/phase1_fresh_20260711/assets/legacy/{v4rg,swing}/` | Recovered train banks for the controlled M2f/M3c face-pairing continuations only | Reproduced from each exact historical motion family; manifests prove byte-identical exam-parameter recovery and train/exam disjointness | G05/G06 legacy causal diagnosis |
+| RunPod historical M3c/M2f `model_16999.pt` checkpoints | Warm starts for the four-arm face-pairing comparison; never fresh-formal inputs | Existing ignored run trees under `/workspace/franco/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/` | G05/G06 legacy causal diagnosis |
 | `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` | Generated Isaac A3 ping-pong URDF asset | Rebuilt from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/` using `scripts/prepare_a3_isaac_asset.py` | G04/G05 |
 | Generated policy artifacts such as `hope_training/policies/*.onnx` | Exported policies for local eval/deploy handoff | Produced by `scripts/play.py` or training/eval export; store metadata in G05/G07 | G05/G07 when a specific policy is accepted |
 
@@ -267,6 +270,103 @@ hope_training/motions/
 ```
 
 If a generated policy, motion, or dataset is required to reproduce a result, record where it lives, how it was produced, and whether it is in WandB, local ignored storage, or a future artifact store.
+
+### Phase-1 fresh and causal bundle (2026-07-11)
+
+The canonical working copy is currently on Pod 1 at
+`/workspace/codexschema/phase1_fresh_20260711/`. It is ignored runtime evidence, not a durable
+artifact service. While that Pod copy is retained, restore the reproducibility subset into the
+normal ignored artifact root as follows:
+
+The launch-safe, read-only parent copies live at
+`/workspace/codexschema/phase1_fresh_20260711/parents/{M3c,M2f}/`; matching legacy motions are
+under `assets/legacy/{swing,v4rg}/motions/`. Pod 2 carries the M2f/v4rg subset plus the complete
+fresh v3 asset directory with identical hashes. The original historical run trees remain source
+evidence, but launchers use these canonical copies so a result directory cannot be mutated.
+
+```bash
+REMOTE='root@162.43.172.171'
+SSH='ssh -p 18333 -i ~/.ssh/id_ed25519_runpod'
+LOCAL_ROOT='hope_training/whole_body_tracking/artifacts/phase1_fresh_20260711'
+
+mkdir -p "$LOCAL_ROOT/assets" "$LOCAL_ROOT/smokes" \
+  "$LOCAL_ROOT/checkpoints/M3c" "$LOCAL_ROOT/checkpoints/M2f"
+rsync -a -e "$SSH" \
+  "$REMOTE:/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/" \
+  "$LOCAL_ROOT/assets/v4rg_runtime_order_v3/"
+rsync -a -e "$SSH" \
+  "$REMOTE:/workspace/codexschema/phase1_fresh_20260711/assets/legacy/" \
+  "$LOCAL_ROOT/assets/legacy/"
+rsync -a -e "$SSH" \
+  "$REMOTE:/workspace/codexschema/phase1_fresh_20260711/smokes/runtime_order_v2_motion/" \
+  "$LOCAL_ROOT/smokes/runtime_order_v2_motion/"
+scp -P 18333 -i ~/.ssh/id_ed25519_runpod \
+  "$REMOTE:/workspace/codexschema/phase1_fresh_20260711/assets/BUILD_RECORD.json" \
+  "$REMOTE:/workspace/codexschema/phase1_fresh_20260711/assets/v4rg/OBSOLETE_DO_NOT_USE.json" \
+  "$LOCAL_ROOT/assets/"
+scp -P 18333 -i ~/.ssh/id_ed25519_runpod \
+  "$REMOTE:/workspace/franco/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-09_07-28-14_s1w4_M3c_swing_facesign/model_16999.pt" \
+  "$LOCAL_ROOT/checkpoints/M3c/"
+scp -P 18333 -i ~/.ssh/id_ed25519_runpod \
+  "$REMOTE:/workspace/franco/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-09_07-34-05_s1w4_M2f_v4rg_facesign/model_16999.pt" \
+  "$LOCAL_ROOT/checkpoints/M2f/"
+```
+
+If the Pod copy is gone, the legacy banks may be regenerated only from the exact motions and
+commands recorded in their `asset_manifest.json`; restore the checkpoints from the retained
+historical run archive. The fresh v3 family may be regenerated only by repeating the explicit
+source-order-to-runtime-order migration and then generating both splits. Do not restore or
+regenerate from `assets/v4rg/`: that directory is quarantined. The suffixed v2 filenames were a
+fail-closed generator diagnostic and are not accepted bank inputs.
+
+Verify the restored payload before use:
+
+```bash
+cd hope_training/whole_body_tracking/artifacts/phase1_fresh_20260711
+shasum -a 256 \
+  assets/v4rg_runtime_order_v3/hope_forehand_v4rg_cal.npz \
+  assets/v4rg_runtime_order_v3/hope_backhand_v4rg_cal.npz \
+  assets/v4rg_runtime_order_v3/s1_v4rg_runtime_order_schema3_train.npz \
+  assets/v4rg_runtime_order_v3/s1_v4rg_runtime_order_schema3_exam.npz \
+  assets/legacy/v4rg/s1_v4rg_schema3_train.npz \
+  assets/legacy/v4rg/asset_manifest.json \
+  assets/legacy/swing/s1_swing_schema3_train.npz \
+  assets/legacy/swing/asset_manifest.json \
+  assets/BUILD_RECORD.json assets/OBSOLETE_DO_NOT_USE.json \
+  checkpoints/M3c/model_16999.pt checkpoints/M2f/model_16999.pt
+```
+
+Expected SHA-256 values, in that order:
+
+```text
+f2cb2d9f5d27cefbcee0b790000fcd979abaf02894d4fcad061ebca27f141687
+1722553375cd28f9b2d567c01b1a5fc6bcd149fa12cadb20e5202a9153367534
+2da2bd1280c45944418d41fe5788d09d7c0ebb0ff7d34fa87c8dd0fcf16a0700
+d7db2568beee990ef1d64b2dce9f0ab56ca76377f8993d820b6388292d0f5096
+dc67326f5cf0e1a3e3a6ae89f43cbd8a9a3785c341ab2ae998e3edbd40f8d30a
+6ff25a94c2a5abb590e84415458a8958f749bb62f34f0890d7b7922891571a74
+96329c79f13e659c035bf65bafedf84123d23a3219b02ac78ae654aed930cf60
+04751e0424458a85f033519ee033176169f5479013abe5a85a46bc1488970fbe
+95b9727489d1aa298e411e1ec589505b2c3da1720569fa0da33ddd10176c6032
+59ce1bcbe60e3ee594f3ccd4061690ee324de963b8fe84208a463190e03a3388
+46f0050589f3343d96f2e5c261b92224079b379e4da473be342b1bd0f0cf7ff1
+0ab05144ec1792db91d6e1e3c2ce79f46dae9507ed267b1470838bf998f0f012
+```
+
+Also verify tracked `configs/a3_runtime_body_order.txt` has SHA-256
+`1cdae4ba7c8d604428ee69ed4a3059e67fb195b22e1d0e294d509c4325809a3a`. The fresh train/exam
+banks must both report source-family SHA-256
+`b21c161a0240893a4a469136c2d5298c2ecfa9f2b4a8c6fb9493b679f3728ad5`, physics SHA-256
+`2e58221442665ddad7cc6dcc18d5c811dec1b0c47439b81c1c744b5148169a27`, physics-contract SHA-256
+`70242d798f5b97e1405df7dedfd22a5f81421c9c03127e71c254982236cfad35`, and disjoint train/exam
+content IDs. See [PHASE1_FRESH_LINEAGE_2026-07-11.md](../PHASE1_FRESH_LINEAGE_2026-07-11.md) for
+the incident record, smoke evidence, and exact-vs-diagnostic restrictions.
+
+The canonical tracked audit is
+[`configs/phase1_fresh_v3_asset_manifest_20260711.json`](../../configs/phase1_fresh_v3_asset_manifest_20260711.json),
+SHA-256 `0c2a565d7b7040afdda97baecdaf2cea923beaf3cf9c45a574d218bb82386e46`. Compare the restored NPZs
+against it rather than copying hashes from a shell transcript. Its `validation.frozen_mode=0444`
+matches the four audited remote NPZs.
 
 ## Expected Policy
 

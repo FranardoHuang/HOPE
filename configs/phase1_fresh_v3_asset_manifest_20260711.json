@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "purpose": "Phase-1 fresh exact-lineage v4rg motion and schema-v3 question-bank inputs",
+  "pod_root": "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3",
+  "source_family_id": "b21c161a0240893a4a469136c2d5298c2ecfa9f2b4a8c6fb9493b679f3728ad5",
+  "runtime_body_order": {
+    "repo_path": "configs/a3_runtime_body_order.txt",
+    "sha256": "1cdae4ba7c8d604428ee69ed4a3059e67fb195b22e1d0e294d509c4325809a3a",
+    "body_count": 32
+  },
+  "motions": {
+    "forehand": {
+      "basename": "hope_forehand_v4rg_cal.npz",
+      "sha256": "f2cb2d9f5d27cefbcee0b790000fcd979abaf02894d4fcad061ebca27f141687",
+      "source_sha256": "34f130101a539981e83545af83c27f5b5b512d2f2b475d6c6ee44161a3bd21e7",
+      "frames": 141,
+      "fps": 50.0,
+      "strike_phase": 0.471
+    },
+    "backhand": {
+      "basename": "hope_backhand_v4rg_cal.npz",
+      "sha256": "1722553375cd28f9b2d567c01b1a5fc6bcd149fa12cadb20e5202a9153367534",
+      "source_sha256": "d98a337a4131fb8073433e646e8a74c1e9782e04e9afde2a3879cda259b55ee7",
+      "frames": 134,
+      "fps": 50.0,
+      "strike_phase": 0.338
+    }
+  },
+  "question_banks": {
+    "train": {
+      "basename": "s1_v4rg_runtime_order_schema3_train.npz",
+      "sha256": "2da2bd1280c45944418d41fe5788d09d7c0ebb0ff7d34fa87c8dd0fcf16a0700",
+      "bytes": 216040,
+      "forehand_sampled": 810,
+      "forehand_kept": 757,
+      "backhand_sampled": 794,
+      "backhand_kept": 724
+    },
+    "exam": {
+      "basename": "s1_v4rg_runtime_order_schema3_exam.npz",
+      "sha256": "d7db2568beee990ef1d64b2dce9f0ab56ca76377f8993d820b6388292d0f5096",
+      "bytes": 63968,
+      "forehand_sampled": 190,
+      "forehand_kept": 183,
+      "backhand_sampled": 206,
+      "backhand_kept": 188
+    }
+  },
+  "physics": {
+    "implementation_sha256": "2e58221442665ddad7cc6dcc18d5c811dec1b0c47439b81c1c744b5148169a27",
+    "contract_sha256": "70242d798f5b97e1405df7dedfd22a5f81421c9c03127e71c254982236cfad35"
+  },
+  "tool_sha256": {
+    "migrate_motion_kinematics.py": "982bd37755fd55a73ca13be1ca4405e4b9e667e6cf13582d8642d0fcd87dc196",
+    "gen_stage1_questions.py": "36c788758318358d259aa9f947bf7f52379ea13f9f316a20ea75dbb27de06d75",
+    "stage1_question_bank.py": "47db31320c8a37ad95d082a179dcdfad45ca1b740696d54e22069fcdaab8b8b0"
+  },
+  "validation": {
+    "motion_schema": 2,
+    "body_position_point": "link_origin",
+    "body_linear_velocity_point": "center_of_mass",
+    "bank_schema": 3,
+    "torch_closed_loop_all_pass": true,
+    "net_clearance_all_pass": true,
+    "train_exam_question_ids_disjoint_per_clip": true,
+    "frozen_mode": "0444"
+  }
+}

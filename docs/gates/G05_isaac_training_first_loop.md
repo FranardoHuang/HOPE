@@ -405,3 +405,56 @@ seed 1 was 100/100. M2 was 86/100 clean, 85/100 at 5% noise and 91/100 on
 schedule seed 1. Full artifacts and hashes are recorded in
 `docs/PHASE1_SCHEMA3_RESULTS_2026-07-11.md`. These cells validate the runtime
 adapter but remain historical/inexact and cannot close this gate.
+
+### Phase-1 main-matrix closure and fresh-lineage preflight (2026-07-11)
+
+The historical main matrix now uses the accepted same-paper adapter rather
+than old scorecards. R1b (two policy seeds), R5b (two policy seeds), C1, G2
+and M2f3 completed ten clean questions per side in both simulators. R5b seed
+1/2, G2 and M2f3 stopped because MuJoCo forehand returned 0/10. R1b reached
+q50 but both policies collapsed to 3/50 MuJoCo forehand returns, versus 45/50
+and 40/50 in Isaac. C1 completed q50 clean, noise and second-schedule cells:
+Isaac clean was 46/50 forehand and 50/50 backhand; MuJoCo clean was 40/50 and
+10/50. All ledgers were complete and uncensored. The full tables and hashes
+are in `docs/PHASE1_SCHEMA3_RESULTS_2026-07-11.md`.
+
+C1 is therefore an additional historical diagnostic survivor, not a formal
+winner. M3f remains stronger in MuJoCo and carry-state continuity. Every
+checkpoint above still lacks schema-v3 training lineage and records
+`evaluation_contract_exact=false`.
+
+Fresh training also needs an explicit plant control. The default A3 config
+continues to preserve its historical, uncalibrated PhysX joint-friction
+coefficients. A new default-off `task.plant.zero_joint_friction=true` override
+zeros every actuator before `gym.make`, so the saved env and schema-v3
+training contract bind the actual all-zero vector that formal MuJoCo can
+reproduce. False/absent is a no-op, unknown keys and malformed booleans fail
+loud, and legacy warm-starts remain exact-ineligible. An isolated Pod worktree
+passed the override and schema-3 contract tests (`60 passed`); Hydra composition
+accepted the declared leaf and rejected a misspelled parent. The true Kit
+smoke additionally requires the post-`gym.make` 31/31-zero assertion to pass.
+The fresh
+migrated-motion/bank runtime smoke and training launch are still required, so
+this gate remains `Partial`.
+
+The motion preflight subsequently found and fixed a real body-column mismatch.
+The old source order cannot be reused as the live Isaac articulation order;
+the migration now takes `--target-body-order`, reorders all four body arrays by
+name, and only then converts link-origin velocity to COM velocity. The first
+incorrect outputs are quarantined. The corrected v4rg pair is schema 2 at
+50 Hz with the tracked 32-body runtime order. Its schema-v3 train/exam banks
+share family `b21c161a...28ad5`, have disjoint question IDs and passed every
+strict Torch/physics/loader check. Exact paths, counts and full hashes are in
+`docs/PHASE1_FRESH_LINEAGE_2026-07-11.md` and the tracked asset manifest.
+
+Pre-launch contract review also closed a diagnostic-export trap: a legacy
+continuation still writes a complete schema-3 execution sidecar, but its
+inexact motion must not be rejected before it can produce a diagnostic ONNX.
+The exporter now requires structural validation plus the checkpoint/sidecar
+SHA binding and emits `training_contract_exact=0`; a checkpoint claiming exact
+lineage still goes through the stronger schema-2 motion gate. The hard contract
+also binds whether face command is enabled and which face pairing is selected.
+`scripts/launch_phase1_20260711.sh` hashes every parent/motion/bank and pins the
+matched M3/M2 controls plus two fresh seeds. The full 179-D Kit construction
+smoke and first-iteration evidence are still pending, so G05 remains
+`Partial`.

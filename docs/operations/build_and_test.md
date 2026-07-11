@@ -75,7 +75,33 @@ Verified 2026-07-11 on the local macOS host:
   Torch parity skip;
 - planner suite: 105 passed, 2 optional skips.
 
-Reproduce the 85-test formal CPU suite with:
+Verified later on 2026-07-11 against the current Phase-1 candidate implementation:
+
+- Isaac-dependent face-pairing, strict override, schema-3, runtime-order migration, and Stage-1
+  wiring regression: **122 passed** on Pod 2 with the Isaac Python environment;
+- dependency-supported formal BankExam/adapter/MuJoCo union: **145 passed** with Torch and the
+  Hydra test dependencies available.
+- after the diagnostic-export/judge contract review, the local dependency-light formal group is
+  **90 passed** and the expanded union (including plant/actor replay tests) is **152 passed, 1
+  optional Torch skip**. Re-run the Isaac-dependent group on the final Pod commit before launch.
+
+Reproduce the 122-test Isaac-dependent group on a prepared RunPod checkout:
+
+```bash
+/workspace/hope_isaac_venv/bin/python -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_face_sign_per_clip.py \
+  hope_training/whole_body_tracking/tests/test_reward_flags_overrides.py \
+  hope_training/whole_body_tracking/tests/test_training_contract_schema3.py \
+  hope_training/whole_body_tracking/tests/test_motion_kinematics_contract.py \
+  hope_training/whole_body_tracking/tests/test_stage1_wiring.py
+```
+
+This group proves that `shared_plus_y` and `legacy_signed_vs_A` select one consistent pair for
+reward, privileged observations and metrics; unknown selector/boolean values fail loudly; the
+selector and legacy-motion opt-in reach the hard contract/export/judge paths; and motion migration
+reorders all four body-indexed arrays into the explicit target order.
+
+Reproduce the current 90-test formal CPU group with:
 
 ```bash
 python3 -m pytest -q \
@@ -87,6 +113,26 @@ python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_racket_geometry_contract.py \
   hope_training/whole_body_tracking/tests/test_training_contract_schema3.py \
   hope_training/whole_body_tracking/tests/test_v5_ablation_accelerator.py
+```
+
+Reproduce the complete 153-test union (use a Python environment with `pytest`, `numpy`, `PyYAML`,
+`hydra-core`, and Torch installed):
+
+```bash
+/workspace/hope_mjeval_venv/bin/python -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_audit_runpod_terminal_runs.py \
+  hope_training/whole_body_tracking/tests/test_bank_exam_schedule.py \
+  hope_training/whole_body_tracking/tests/test_isaac_bank_exam_adapter.py \
+  hope_training/whole_body_tracking/tests/test_termination_contract.py \
+  hope_training/whole_body_tracking/tests/test_virtual_return_scorer.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_eval_align_flags.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_eval_p0_contracts.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_ready_state_contract.py \
+  hope_training/whole_body_tracking/tests/test_motion_kinematics_contract.py \
+  hope_training/whole_body_tracking/tests/test_racket_geometry_contract.py \
+  hope_training/whole_body_tracking/tests/test_training_contract_schema3.py \
+  hope_training/whole_body_tracking/tests/test_v5_ablation_accelerator.py \
+  hope_training/whole_body_tracking/tests/test_judge_plant_contract.py
 ```
 
 ## ROS Workspace Build

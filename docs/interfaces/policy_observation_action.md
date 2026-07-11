@@ -48,6 +48,9 @@ Notes:
 - Desired racket normal is NOT an actor observation (HITTER Table I: normal is a reward target
   only). `base_lin_vel` is critic-only. `swing_type` is included because the default task trains
   one unified forehand+backhand policy.
+- `task.racket.face_command_pairing` does not change the 175-D actor. For the 179/181 layouts,
+  `racket_target_normal_cmd` also always remains the delayed atomic bank command in the shared
+  +Y/A-frame convention. The selector never flips or relabels that actor command.
 - Rationale for base-position freedom: the mocap DOES stream the robot base pose during play
   (300 Hz, `/P1/pose` — see the deploy-available signal set below), but that VRPN link is not
   bridged into the deploy runner, and independence from it is a deliberate robustness choice. The
@@ -79,6 +82,20 @@ The critic group is unchanged between full and deploy-parity (~318-D) and is nev
 2, `racket_target_pos_b` 3, `racket_target_vel_w` 3, `racket_target_normal_w` 3, `time_to_strike`
 1, plus sim-only actual racket FK state `racket_pos_b` 3, `racket_lin_vel_w` 3, `racket_normal_w`
 3, and `episode_time_left` 1. Privileged sim-only info is allowed here by the training contract.
+
+When `face_command=true`, one validated selector keeps the face reward, privileged face
+observations, and exact/composite face metrics on the same measured/target pair:
+
+- `face_command_pairing: shared_plus_y` (default) compares raw mount +Y with the demanded
+  `target_normal_cmd` in the bank's +Y/A frame.
+- `face_command_pairing: legacy_signed_vs_A` compares the per-clip signed measured normal with the
+  same A-frame target. It intentionally reproduces the historical signed-measurement/A-target
+  mismatch and is diagnostic only; report such results with
+  `evaluation_contract_exact=false`.
+
+This selector changes training reward/critic/metric pairing, not actor observation meaning or the
+deploy wire. Unknown values fail during command construction. The selected value is bound into the
+schema-3 hard contract and ONNX/export metadata so old and corrected continuations cannot be mixed.
 
 ## Action
 
@@ -217,6 +234,10 @@ reward targets, and deploy compatibility here first.
   (position, velocity, face normal), and the long-run distribution widens
   through success-gated perturbations. Either mode changes target generation
   only, not the observation/action tensor contract.
+- Face-command grading: `racket.face_command_pairing: shared_plus_y` is the production convention.
+  The explicit `legacy_signed_vs_A` value exists only for controlled historical diagnosis. In both
+  modes the actor's demanded normal, when present, remains the shared +Y/A-frame command; only the
+  reward/privileged-observation/metric pairing changes.
 - Clip wrap for HOPE ping-pong does not teleport the robot mid-episode: the
   target and reference clip/time resample, but the policy must physically carry
   the body between swings (`MotionCommandCfg.wrap_teleport` defaults to false;

@@ -4,6 +4,44 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-11
 
+- Completed the post-canary historical main matrix on the same immutable
+  schema-v3 paper. R5b seed 1/2, G2 and M2f3 stopped at q10 because MuJoCo
+  forehand returned `0/10`. R1b seed 1/2 advanced but confirmed a transfer
+  collapse at q50: Isaac `95/100` and `90/100` versus MuJoCo `15/100` and
+  `17/100`, with both MuJoCo forehands `3/50`. C1 survived at Isaac/MuJoCo
+  `96/100` / `50/100`, then completed 5% action noise (`96/100` / `48/100`),
+  schedule seed 1 (`98/100` / `55/100`) and MuJoCo carry-state continuity
+  (`42/100` returns, `26/99` return-and-recover). Every cell was uncensored,
+  order/hash checked and physical-fall free. M3f remains the strongest
+  historical diagnostic; all models remain exact-ineligible.
+- Added a default-off, fail-loud fresh-training plant control:
+  `task.plant.zero_joint_friction=true` zeros all A3 actuator friction before
+  `gym.make`, while absent/false preserves the historical uncalibrated PhysX
+  coefficients exactly. The instantiated per-joint vector flows into the
+  existing schema-v3 training contract; a legacy resume cannot become exact.
+  An isolated Pod worktree passed the reward/override and schema-3 contract
+  suite (`60 passed`); Hydra accepted the declared override and rejected a
+  misspelled parent. Training also asserts the instantiated contract contains
+  exactly 31 zero coefficients before the runner starts. Migrated schema-2
+  motions, matching schema-v3 banks and
+  the runtime mechanism smoke remain the launch prerequisites.
+- Closed the remaining fresh/causal launch inputs and export seams. A real Kit
+  smoke caught the legacy source body order being mislabeled as the live
+  articulation order; `migrate_motion_kinematics.py --target-body-order` now
+  permutes all four body arrays before link-origin-to-COM conversion. The
+  corrected runtime-order motion pair and its disjoint schema-v3 train/exam
+  banks passed strict loader, Torch, physics and family checks and are frozen
+  under the ignored Pod asset root; their reviewable hashes live in
+  `configs/phase1_fresh_v3_asset_manifest_20260711.json`. Schema-3 diagnostic
+  checkpoints can now export only when their structural sidecar and checkpoint
+  SHA binding are intact, while exact lineage still requires schema-2 motion;
+  judge replays zero friction and the 175/179/181 actor layout from the adjacent
+  hard contract. The contract also binds `face_command_enabled` and
+  `face_command_pairing`. Safe launchers serialize only Kit boot, record an
+  isolated PGID and pin the four causal plus two from-scratch recipes. The
+  dependency-light contract subset passed `37` tests; the full 179-D Kit smoke
+  remains the last pre-launch gate.
+
 - Implemented the evaluator-owned schema-v3 same-question path without
   changing the physics-hash-bound `venue_ball_sampler.py`: balanced canonical
   schedule JSON, strict content IDs/per-attempt seeds, Isaac post-reset atomic

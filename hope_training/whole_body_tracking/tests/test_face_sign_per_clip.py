@@ -421,6 +421,7 @@ def _fc_cmd(n, signs, clip_ids, target_cmd, window=None, pre_strike=None):
         pre_strike=pre_strike,
     )
     cmd.cfg.face_command = True
+    cmd.cfg.face_command_pairing = "shared_plus_y"
     cmd.racket_normal_w = rt.racket_normal_w
     cmd.racket_normal_raw_w = rt.racket_normal_raw_w
     cmd.target_normal_cmd = target_cmd
@@ -436,6 +437,62 @@ def test_face_pair_selects_raw_under_face_command():
     cmd.cfg.face_command = False
     m2, t2 = hope_rewards_mod._face_pair(cmd)
     assert m2 is cmd.racket_normal_w and t2 is cmd.racket_target_normal_w
+
+
+def test_face_command_pairing_default_is_existing_shared_plus_y_behavior():
+    assert hope_commands_mod.RacketTargetCommandCfg.face_command_pairing == "shared_plus_y"
+    cmd = _fc_cmd(
+        1, signs=(1.0, -1.0), clip_ids=[1], target_cmd=EY.expand(1, 3).clone()
+    )
+    # Old serialized/test-double cfgs without the new field inherit the production default.
+    del cmd.cfg.face_command_pairing
+    measured, target = hope_commands_mod.face_tracking_pair(cmd)
+    assert measured is cmd.racket_normal_raw_w
+    assert target is cmd.target_normal_cmd
+
+
+@pytest.mark.parametrize(
+    ("pairing", "measured_attr", "expected_reward", "expected_error_deg"),
+    [
+        ("shared_plus_y", "racket_normal_raw_w", 1.0, 0.0),
+        ("legacy_signed_vs_A", "racket_normal_w", 0.0, 180.0),
+    ],
+)
+def test_face_command_pairing_keeps_reward_observation_and_metric_consistent(
+    pairing, measured_attr, expected_reward, expected_error_deg
+):
+    cmd = _fc_cmd(
+        1, signs=(1.0, -1.0), clip_ids=[1], target_cmd=EY.expand(1, 3).clone()
+    )
+    cmd.cfg.face_command_pairing = pairing
+    env = _fake_env(racket_target=cmd)
+
+    measured, target = hope_commands_mod.face_tracking_pair(cmd)
+    assert measured is getattr(cmd, measured_attr)
+    assert target is cmd.target_normal_cmd
+    assert hope_observations_mod.racket_normal_w(env, "racket_target") is measured
+    assert hope_observations_mod.racket_target_normal_w(env, "racket_target") is target
+
+    reward = hope_rewards_mod.racket_normal_tracking_exp(
+        env, "racket_target", std=0.262
+    )
+    if expected_reward == 1.0:
+        assert torch.equal(reward, torch.ones_like(reward))
+    else:
+        assert float(reward.max()) < 1e-30
+    error_deg = torch.acos(
+        torch.sum(measured * target, dim=-1).clamp(-1.0, 1.0)
+    ) * (180.0 / math.pi)
+    assert float(error_deg[0]) == pytest.approx(expected_error_deg, abs=1e-4)
+    assert "face_tracking_pair(self)" in inspect.getsource(
+        hope_commands_mod.RacketTargetCommand._update_metrics
+    )
+
+
+def test_unknown_face_command_pairing_fails_during_command_construction():
+    cfg = types.SimpleNamespace(face_command=False, face_command_pairing="shared_plus_why")
+    with pytest.raises(ValueError, match="face_command_pairing"):
+        hope_commands_mod.RacketTargetCommand(cfg, types.SimpleNamespace())
 
 
 def test_face_command_backhand_regression_kernel_alive():
@@ -628,7 +685,9 @@ def test_critic_face_pair_sees_the_same_random_command_without_resizing():
         HERE, "..", "source", "whole_body_tracking", "whole_body_tracking", "utils", "exporter.py")
     ex = open(ex_path, encoding="utf-8").read()
     assert "mount_normal_sign_per_clip" in ex and "face_obs_convention" in ex  # 元数据保真
+    assert "face_command_pairing" in ex
     js = open(os.path.join(SCRIPTS_DIR, "judge.sh"), encoding="utf-8").read()
     assert '("mount_normal_sign_per_clip", rt.get("mount_normal_sign_per_clip"))' in js  # 导出搬运
+    assert '("face_command_pairing",   rt.get("face_command_pairing"))' in js
     tr = open(os.path.join(SCRIPTS_DIR, "train.py"), encoding="utf-8").read()
     assert "face_command kernel frame=+Y(A/bank)" in tr      # 冒烟 grep 的 applied 审计行

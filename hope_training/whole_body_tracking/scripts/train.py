@@ -52,6 +52,28 @@ def _as_bool(x):
     return str(x).strip().lower() in ("true", "1", "yes")
 
 
+def _as_explicit_bool(x, name: str) -> bool:
+    """Parse a safety/plant switch without turning a typo into an implicit ``False``."""
+    if isinstance(x, bool):
+        return x
+    value = str(x).strip().lower()
+    if value in ("true", "1", "yes"):
+        return True
+    if value in ("false", "0", "no"):
+        return False
+    raise _OverrideError(f"{name} must be an explicit boolean, got {x!r}")
+
+
+def _as_face_command_pairing(value) -> str:
+    pairing = str(value)
+    allowed = ("shared_plus_y", "legacy_signed_vs_A")
+    if pairing not in allowed:
+        raise _OverrideError(
+            f"task.racket.face_command_pairing must be one of {allowed}, got {pairing!r}"
+        )
+    return pairing
+
+
 def _as_yaw_range(value):
     if len(value) != 2:
         raise _OverrideError("stand_start_yaw_range must contain exactly [lo, hi]")
@@ -100,6 +122,28 @@ def _contract_value(value):
         return [_contract_value(v) for v in value]
     except TypeError:
         return str(value)
+
+
+def _require_zero_joint_friction_contract(contract: dict) -> None:
+    """Fail closed unless the instantiated runtime plant has 31 exact zero coefficients."""
+    names = contract.get("joint_names")
+    friction = contract.get("joint_friction_coefficients")
+    if not isinstance(names, list) or not isinstance(friction, list):
+        raise RuntimeError(
+            "zero-joint-friction runtime check requires joint_names and "
+            "joint_friction_coefficients lists"
+        )
+    if len(names) != 31 or len(friction) != len(names):
+        raise RuntimeError(
+            "zero-joint-friction runtime check requires exactly 31 aligned joints, got "
+            f"names={len(names)} friction={len(friction)}"
+        )
+    nonzero = [(name, value) for name, value in zip(names, friction) if float(value) != 0.0]
+    if nonzero:
+        raise RuntimeError(
+            "zero-joint-friction was requested but the instantiated PhysX plant contains "
+            f"non-zero coefficients: {nonzero}"
+        )
 
 
 def _sha256_file(path: str) -> str:
@@ -218,6 +262,8 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         "mount_normal_axis": attr(racket, "mount_normal_axis"),
         "mount_normal_sign": attr(racket, "mount_normal_sign"),
         "mount_normal_sign_per_clip": attr(racket, "mount_normal_sign_per_clip"),
+        "face_command_enabled": bool(getattr(racket, "face_command", False)),
+        "face_command_pairing": attr(racket, "face_command_pairing", "shared_plus_y"),
         "racket_control_point": (
             "pingpang_red_Link_origin_v1" if racket is not None else None
         ),
@@ -232,6 +278,9 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         "motion_stand_start_yaw_range": attr(motion, "stand_start_yaw_range"),
         "motion_speed_scale_range": attr(motion, "speed_scale_range"),
         "motion_speed_scale_per_clip": attr(motion, "speed_scale_per_clip"),
+        "motion_allow_legacy_link_origin_velocity": bool(
+            getattr(motion, "allow_legacy_link_origin_velocity", False)
+        ),
         "motion_rsi_hold_root_stand_z": bool(getattr(motion, "rsi_hold_root_stand_z", False)),
         "motion_clips": clips,
         "question_bank": question_bank,
@@ -457,7 +506,8 @@ _RACKET_KEYS = (
 
     # Stage-1 question bank (fixed contact point, inverse-solved face+velocity targets) + the
     # face-command reward re-anchor / +4 actor obs channel (normal + rho placeholder, 175->179).
-    "question_bank", "question_bank_allow_legacy", "face_command", "face_command_obs",
+    "question_bank", "question_bank_allow_legacy", "face_command", "face_command_pairing",
+    "face_command_obs",
     # R10c 站位锚观测(+2 actor 尾维,179->181;franco 2026-07-09"planner 的 p_base 应该加进去")
     "station_obs", "station_anchor_offset_xy",
     # SHADOW physical ball + table (flag-gated, METRICS-ONLY engine-vs-analytic landing
@@ -488,6 +538,9 @@ _MOTION_KEYS = (
     # first hold + episode clock so a same-instant 4096-env cohort stops timing out / swinging in
     # one synchronized wave (the EMA-metric oscillation disease). 人话:把所有 env 的节拍随机错开。
     "stagger_initial_clock", "stagger_hold_max_steps",
+    # Diagnostic-only opt-in for old motion npz files whose body velocity lives at link origin.
+    # Absent/false keeps the exact schema-v2 motion contract path unchanged.
+    "allow_legacy_link_origin_velocity",
 )
 
 # YAML keys under `rewards:` consumed by the rewards block of _apply_task_overrides below.
@@ -680,6 +733,44 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
     """
     applied = []
 
+    # Plant contract control. The checked-in A3 actuator config intentionally preserves the
+    # historical, uncalibrated PhysX joint-friction coefficients for legacy checkpoint lineage.
+    # A fresh schema-v3 run can opt into the only currently cross-engine-exact setting: every
+    # actuator friction coefficient is zero. This must happen before ``gym.make`` so the saved
+    # env config and runtime training contract both record the actual plant. False/absent is a
+    # byte-for-byte no-op; old checkpoints are never rewritten or silently laundered.
+    plant = _get(task, "plant")
+    if plant is not None:
+        try:
+            plant.keys()
+        except Exception as exc:
+            raise _OverrideError(
+                f"[train.py] task.plant must be a mapping, got {plant!r}"
+            ) from exc
+    _check_unknown_keys(plant, ("zero_joint_friction",), "task.plant")
+    zero_joint_friction = _get(plant, "zero_joint_friction")
+    if zero_joint_friction is not None and _as_explicit_bool(
+        zero_joint_friction, "task.plant.zero_joint_friction"
+    ):
+        scene = getattr(env_cfg, "scene", None)
+        robot = None if scene is None else getattr(scene, "robot", None)
+        actuators = None if robot is None else getattr(robot, "actuators", None)
+        _require(
+            isinstance(actuators, dict) and bool(actuators),
+            "scene.robot.actuators (task.plant.zero_joint_friction=true)",
+        )
+        missing = [name for name, actuator in actuators.items() if not hasattr(actuator, "friction")]
+        _require(
+            not missing,
+            "every scene.robot actuator exposes friction; missing=" + ",".join(missing),
+        )
+        for actuator in actuators.values():
+            actuator.friction = 0.0
+        applied.append(
+            "scene.robot.actuators[*].friction=0.0 "
+            "(explicit schema-v3 zero-friction plant control)"
+        )
+
     # env base (num_envs is applied earlier via parse_env_cfg). Read every value through _get so the
     # logic works on both OmegaConf nodes (runtime) and plain dicts (unit tests).
     env = _get(task, "env")
@@ -748,6 +839,21 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             # 人话:开了它,所有 env 的节拍被随机错开,摔率/完成率/上台率曲线不再集体振荡。
             _set_attr(M, "stagger_initial_clock", _get(mt, "stagger_initial_clock"), _as_bool, applied, "commands.motion")
             _set_attr(M, "stagger_hold_max_steps", _get(mt, "stagger_hold_max_steps"), int, applied, "commands.motion")
+            _set_attr(
+                M,
+                "allow_legacy_link_origin_velocity",
+                _get(mt, "allow_legacy_link_origin_velocity"),
+                lambda value: _as_explicit_bool(
+                    value, "task.motion.allow_legacy_link_origin_velocity"
+                ),
+                applied,
+                "commands.motion",
+            )
+            if bool(getattr(M, "allow_legacy_link_origin_velocity", False)):
+                applied.append(
+                    "[diagnostic] legacy link-origin motion velocity explicitly allowed; "
+                    "motion_kinematics_exact=false and every descendant remains inexact"
+                )
 
     rw = _get(task, "rewards")
     _check_unknown_keys(rw, _REWARD_KEYS, "task.rewards")
@@ -1071,13 +1177,6 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             if _mnspc is not None:
                 C.mount_normal_sign_per_clip = tuple(float(x) for x in _mnspc)
                 applied.append(f"racket_target.mount_normal_sign_per_clip={C.mount_normal_sign_per_clip}")
-                # 单翻病审计行(2026-07-09 定案):face_command 的奖励/obs/题库全在 +Y(A)约定,
-                # 符号表只作用于 metric/参考/诊断通道——冒烟机制检查 grep 这行确认语义没被改回去。
-                if bool(_get(rk, "face_command")) or bool(getattr(C, "face_command", False)):
-                    applied.append(
-                        "[face] face_command kernel frame=+Y(A/bank); "
-                        "mount sign applies to metric/ref channels only"
-                    )
             # reference_perturbed target sampling (rank 5): couple targets to the reference swing.
             _set_attr(C, "target_mode", _get(rk, "target_mode"), str, applied, "racket_target")
             _set_vec3(C, "ref_perturb_pos", _get(rk, "ref_perturb_pos"), applied, "racket_target")
@@ -1152,6 +1251,28 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(C, "question_bank_allow_legacy", _get(rk, "question_bank_allow_legacy"),
                       _as_bool, applied, "racket_target")
             _set_attr(C, "face_command", _get(rk, "face_command"), _as_bool, applied, "racket_target")
+            _set_attr(
+                C,
+                "face_command_pairing",
+                _get(rk, "face_command_pairing"),
+                _as_face_command_pairing,
+                applied,
+                "racket_target",
+            )
+            if bool(getattr(C, "face_command", False)):
+                pairing = _as_face_command_pairing(
+                    getattr(C, "face_command_pairing", "shared_plus_y")
+                )
+                if pairing == "shared_plus_y":
+                    applied.append(
+                        "[face] face_command kernel frame=+Y(A/bank); "
+                        "mount sign applies to metric/ref channels only"
+                    )
+                else:
+                    applied.append(
+                        "[diagnostic] face_command pairing=legacy_signed_vs_A; "
+                        "signed measured normal is graded against the A-frame bank target"
+                    )
             # Bank vs retiming: bank demanded velocities are ABSOLUTE physics answers (inverse-
             # solved racket velocity for a real incoming ball) — a swing replayed at speed s cannot
             # have its answer rescaled by s (the ball does not slow down). Same loud-fail pattern
@@ -1464,6 +1585,15 @@ def _run(cfg):
     _cfg_mod = sys.modules.get(type(env_cfg).__module__)
     print(f"[train.py] env cfg source: {type(env_cfg).__name__} <- {getattr(_cfg_mod, '__file__', '?')}", flush=True)
     applied = _apply_task_overrides(env_cfg, cfg.task, _registry_clip_name(cfg))
+    plant_cfg = _get(cfg.task, "plant")
+    zero_joint_friction_raw = _get(plant_cfg, "zero_joint_friction")
+    zero_joint_friction_requested = (
+        False
+        if zero_joint_friction_raw is None
+        else _as_explicit_bool(
+            zero_joint_friction_raw, "task.plant.zero_joint_friction"
+        )
+    )
     print(f"[train.py] applied {len(applied)} task override(s) from cfg/task/{_get(cfg.task, 'name', task_id)}.yaml:", flush=True)
     for _a in applied:
         print(f"[train.py]     {_a}", flush=True)
@@ -1579,6 +1709,13 @@ def _run(cfg):
         actor_contract = infer_actor_observation_contract(env.unwrapped)
 
     hard_contract = _build_training_hard_contract(env.unwrapped, actor_contract)
+    if zero_joint_friction_requested:
+        _require_zero_joint_friction_contract(hard_contract)
+        print(
+            "[train.py] ZERO_FRICTION_RUNTIME_OK: 31/31 instantiated PhysX joint "
+            "friction coefficients are exactly 0.0",
+            flush=True,
+        )
     contract_path = os.path.join(log_dir, "params", "training_contract.json")
     os.makedirs(os.path.dirname(contract_path), exist_ok=True)
     with open(contract_path, "w", encoding="utf-8") as stream:

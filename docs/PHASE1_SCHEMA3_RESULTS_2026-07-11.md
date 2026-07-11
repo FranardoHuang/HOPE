@@ -5,7 +5,11 @@
 The evaluator-owned schema-v3 paper now runs end to end in Isaac and MuJoCo.
 The known-good/common/known-bad canary separated M3f, M2 and G1 as expected,
 and M3f/M2 completed the 50-question-per-side clean, 5% action-noise and second
-evaluation-seed slices.
+evaluation-seed slices.  The subsequent historical main matrix also completed:
+R1b (two policy seeds), R5b (two policy seeds), C1, G2 and M2f3 all ran the
+same ten-per-side clean ruler; the non-zero-side survivors R1b and C1 then ran
+50 questions per side.  C1 additionally completed noise, second schedule seed
+and MuJoCo carry-state continuity.
 
 Every model in this report is historical. None has a schema-v3
 `training_contract.json` or exact checkpoint/train-bank/ONNX binding, so every
@@ -75,6 +79,79 @@ The second-seed semantic schedule SHAs are M3f
 `59a09efd5bdbb796673888553ea26fc58abd7d2f477b781aedf339d2c7735a96`
 and M2 `3ccce2c6392f9d786f3a3dc109bb735d6b8de4e29dfcfe01d34db9b11a630feb`.
 
+## Historical main-matrix rerank
+
+These cells use the same all-attempt ruler but remain inexact historical
+diagnostics.  R1b, R5b, C1 and M2f3 share the M2 v4rg exam bank and schedules.
+G2 uses its own v4rgsyn family bank, SHA
+`0840afa68741664dd80f0480f878dbbe7bac172a048894d43e3fe1fd35c75423`,
+with 181/190 forehand and 184/206 backhand rows kept and verified.  Its q10
+schedule SHA is
+`f977e1e2ba47e541a473f71eb45dce411150b529865649563fb50b57176e19bf`.
+
+### Clean ten-per-side screen
+
+The operational screen was side-preserving: a candidate with zero legal
+returns on either side in either simulator stopped at q10.  This is the same
+rule that stopped G1 above; an all-side average was not allowed to hide a dead
+side.
+
+| Candidate | Isaac return FH / BH | MuJoCo return FH / BH | MuJoCo composite FH / BH | MuJoCo physical / guard | Decision |
+|---|---:|---:|---:|---:|---|
+| R1b seed 1 | 10/10 / 10/10 | 1/10 / 1/10 | 0/10 / 0/10 | 0 / 0 | advance to q50 |
+| R1b seed 2 | 7/10 / 10/10 | 1/10 / 4/10 | 0/10 / 1/10 | 0 / 1 | advance to q50 |
+| R5b seed 1 | 6/10 / 10/10 | 0/10 / 6/10 | 0/10 / 6/10 | 0 / 12 | stop: MuJoCo FH zero |
+| R5b seed 2 | 8/10 / 10/10 | 0/10 / 10/10 | 0/10 / 6/10 | 0 / 2 | stop: MuJoCo FH zero |
+| C1 | 10/10 / 10/10 | 7/10 / 2/10 | 2/10 / 2/10 | 0 / 1 | advance to q50 |
+| G2 | 7/10 / 10/10 | 0/10 / 6/10 | 0/10 / 3/10 | 0 / 0 | stop: MuJoCo FH zero |
+| M2f3 | 7/10 / 10/10 | 0/10 / 10/10 | 0/10 / 5/10 | 0 / 10 | stop: MuJoCo FH zero |
+
+Every Isaac cell reached exact and hit on all 20 attempts.  R5b seed 1 reached
+exact on only 8/10 MuJoCo forehands because two attempts guard-reset before
+strike; every other MuJoCo q10 cell reached exact on all attempts.  All
+reported falls in this table are `ee_body_pos` tracking guards, not absolute
+physical falls.
+
+R8b/C2/C3/C4 did not join this comparison.  Their saved runs disable the
+anchor/EE tracking guards used by the matrix, so substituting the M2
+termination manifest would no longer reproduce their policy runtime while
+using their easier saved termination would make the cells incomparable.  They
+remain excluded pending a preregistered matched-termination retrain; no result
+was silently filled in.
+
+### Clean fifty-per-side confirmation
+
+| Candidate | Isaac return FH / BH / all | Isaac physical / guard | MuJoCo return FH / BH / all | MuJoCo composite FH / BH / all | MuJoCo physical / guard | Decision |
+|---|---:|---:|---:|---:|---:|---|
+| R1b seed 1 | 45/50 / 50/50 / 95/100 | 0 / 0 | 3/50 / 12/50 / 15/100 | 0/50 / 0/50 / 0/100 | 0 / 2 | stop: transfer collapse |
+| R1b seed 2 | 40/50 / 50/50 / 90/100 | 0 / 0 | 3/50 / 14/50 / 17/100 | 0/50 / 4/50 / 4/100 | 0 / 11 | stop: transfer collapse |
+| C1 | 46/50 / 50/50 / 96/100 | 0 / 0 | 40/50 / 10/50 / 50/100 | 16/50 / 10/50 / 26/100 | 0 / 9 | robustness slices |
+
+The larger paper shows that the two R1b q10 cells were not transferable
+survivors: both have only 3/50 MuJoCo forehand returns despite 40--45/50 in
+Isaac.  They stop after clean q50.  C1 preserves non-zero performance on both
+sides in both simulators and therefore receives the remaining diagnostic
+slices, but its MuJoCo backhand is only 10/50 and it does not displace M3f.
+
+### C1 robustness and continuity
+
+| Slice | Isaac return FH / BH / all | MuJoCo return FH / BH / all | MuJoCo composite all | MuJoCo physical / guard |
+|---|---:|---:|---:|---:|
+| same paper, action noise 0.05 | 46/50 / 50/50 / 96/100 | 37/50 / 11/50 / 48/100 | 22/100 | 0 / 6 |
+| clean, schedule seed 1 | 48/50 / 50/50 / 98/100 | 42/50 / 13/50 / 55/100 | 34/100 | 0 / 12 |
+
+C1's seed-1 schedule SHA is the same M2-family
+`3ccce2c6392f9d786f3a3dc109bb735d6b8de4e29dfcfe01d34db9b11a630feb`.
+All four single-question C1 ledgers contain exactly 100 uncensored rows and
+match the supplied order, bank row, content ID, hold and attempt seed.
+
+The C1 MuJoCo carry-state cell reached exact on 44/50 forehands and 48/50
+backhands, returned 23/50 and 19/50, and composited 11/50 and 17/50.  There
+were no physical falls; tracking guards were 23/0 and episode timeouts 9/8.
+Among the 99 rows with a scheduled next opportunity, 42 returned, 59
+recovered, and 26 did both: `26/99 = 26.26%`, or `26/42 = 61.90%`
+conditional on return.  This is materially below M3f's `70/99` product.
+
 ## Result artifact identities
 
 | Cell | Isaac JSON SHA | MuJoCo summary JSON SHA |
@@ -88,9 +165,22 @@ and M2 `3ccce2c6392f9d786f3a3dc109bb735d6b8de4e29dfcfe01d34db9b11a630feb`.
 | M2 q50 noise 0.05 | `04770a49...7f11` | `6446fb6c...dc0d` |
 | M2 q50 seed 1 | `3bd40d09...bc6f` | `4e76f03c...3b54` |
 | G1 q10 clean | `88587e35...f20e` | `e4243d93...93ef` |
+| R1b seed 1 q10 clean | `d719577d...1a6a` | `10befacb...7a32` |
+| R1b seed 2 q10 clean | `59bd6030...d6e7` | `7e75c3f...8e9e` |
+| R5b seed 1 q10 clean | `28b4c9cd...4793` | `9b9c5b9a...be3a` |
+| R5b seed 2 q10 clean | `d05f639d...7504` | `4c1dbbbf...93702` |
+| C1 q10 clean | `bca7abc1...bf03` | `21dc3214...04a` |
+| G2 q10 clean | `3595f684...b264` | `29940648...094f` |
+| M2f3 q10 clean | `3d27d05f...af04` | `6bcba7eb...eca4` |
+| R1b seed 1 q50 clean | `cfad6b12...43ad` | `787de3f2...333c` |
+| R1b seed 2 q50 clean | `9f2c26a1...f0f0` | `cb9975ac...af14` |
+| C1 q50 clean | `99fb2fba...1887` | `b2f9a1cc...871f` |
+| C1 q50 noise 0.05 | `d810424f...79dd` | `15688b5c...fb4` |
+| C1 q50 seed 1 | `5671847d...959b` | `fa05c3af...47a3` |
+| C1 continuity q50 | not applicable | `59c130e6...20df` |
 
 Full paths live under
-`/workspace/codexschema/phase1_schema3_20260711/{M3f,M2,G1}` on the
+`/workspace/codexschema/phase1_schema3_20260711/{M3f,M2,G1,shortlist}` on the
 corresponding Pod. JSON/CSV ledgers were independently reloaded and checked for
 complete schedule indices, no censoring, exact order, content ID, bank row,
 hold and attempt seed. An early M2 q50 result was discarded and rerun because a
@@ -119,10 +209,14 @@ M2 summary SHA is
 
 ## Current decision and remaining work
 
-M3f is the clear historical diagnostic winner; M2 remains the common baseline;
-G1 is a useful known-bad backhand control. Cross-engine absolute rates differ,
-especially for M2 forehand, which is expected to remain an open parity issue
-until a fresh exact-lineage export binds the real execution/plant contract.
+M3f remains the clear historical diagnostic winner; C1 is the only additional
+main-matrix candidate that survives q50 on both sides and both simulators, but
+its MuJoCo clean/continuity result is far below M3f.  M2 remains the common
+baseline; G1 is a useful known-bad backhand control.  R1b's two independent
+policies reproduce an Isaac-to-MuJoCo forehand collapse, while R5b, G2 and
+M2f3 reproduce a zero-MuJoCo-forehand stop at q10.  Cross-engine absolute rates
+therefore remain an open parity issue until a fresh exact-lineage export binds
+the real execution/plant contract.
 
 The fixed-point single-question, noise, evaluation-seed and MuJoCo carry-state
 diagnostic slices are complete. Isaac continuous play still requires

@@ -22,10 +22,12 @@ from whole_body_tracking.tasks.tracking.actor_observation_contract import (
 from whole_body_tracking.utils.training_contract import (
     TRAINING_CONTRACT_SCHEMA_VERSION,
     RUNTIME_EXECUTION_KEYS,
+    checkpoint_claims_contract,
     checkpoint_contract_lineage_exact,
     require_checkpoint_contract_binding,
     runtime_execution_facts,
     validate_schema3_contract,
+    validate_schema3_contract_structure,
 )
 
 
@@ -196,6 +198,9 @@ def attach_onnx_metadata(
         "anchor_body_index": runtime_facts["anchor_body_index"],
         "body_names": runtime_facts["body_names"],
         "body_indices": runtime_facts["body_indices"],
+        "motion_kinematics_exact": (
+            "1" if runtime_facts["motion_kinematics_exact"] else "0"
+        ),
         "physics_step_dt_s": format(runtime_facts["physics_step_dt_s"], ".17g"),
         "policy_step_dt_s": format(runtime_facts["policy_step_dt_s"], ".17g"),
         "control_decimation": runtime_facts["control_decimation"],
@@ -234,6 +239,7 @@ def attach_onnx_metadata(
                 f"attach_onnx_metadata: source checkpoint does not exist: {checkpoint_path}"
             )
         metadata["source_checkpoint_sha256"] = _sha256_file(checkpoint_path)
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         training_contract_path = os.path.join(
             os.path.dirname(checkpoint_path), "params", "training_contract.json"
         )
@@ -256,10 +262,7 @@ def attach_onnx_metadata(
                     "attach_onnx_metadata: invalid training-contract schema version"
                 ) from exc
             if training_contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION:
-                validate_schema3_contract(training_contract)
-                checkpoint = torch.load(
-                    checkpoint_path, map_location="cpu", weights_only=False
-                )
+                validate_schema3_contract_structure(training_contract)
                 try:
                     require_checkpoint_contract_binding(
                         checkpoint,
@@ -270,7 +273,23 @@ def attach_onnx_metadata(
                 except ValueError as exc:
                     raise ValueError(f"attach_onnx_metadata: {exc}") from exc
                 training_contract_lineage_exact = checkpoint_contract_lineage_exact(checkpoint)
-            elif training_contract_schema not in (1, 2):
+                if training_contract_lineage_exact:
+                    # An exact-lineage claim keeps the stronger formal motion/body-order gate.
+                    # Diagnostic schema-3 checkpoints remain fully bound but export with
+                    # training_contract_exact=0 instead of being promoted or rejected outright.
+                    validate_schema3_contract(training_contract)
+            elif training_contract_schema in (1, 2):
+                if checkpoint_claims_contract(checkpoint):
+                    try:
+                        require_checkpoint_contract_binding(
+                            checkpoint,
+                            schema=training_contract_schema,
+                            sha256=training_contract_sha256,
+                            require_lineage_exact=False,
+                        )
+                    except ValueError as exc:
+                        raise ValueError(f"attach_onnx_metadata: {exc}") from exc
+            else:
                 raise ValueError(
                     "attach_onnx_metadata: unsupported training-contract schema "
                     f"{training_contract_schema}; supported diagnostic schemas are 1/2 and "
@@ -278,6 +297,11 @@ def attach_onnx_metadata(
                 )
             metadata["training_contract_sha256"] = training_contract_sha256
             metadata["training_contract_schema_version"] = str(training_contract_schema)
+        elif checkpoint_claims_contract(checkpoint):
+            raise ValueError(
+                "attach_onnx_metadata: checkpoint claims a training-contract binding but the "
+                f"adjacent sidecar is missing: {training_contract_path}"
+            )
 
     # FAIL-FAST: a non-positive nominal gain means the export would deploy a limp joint (the
     # kp=kd=0 bug that felled the 2026-07-02 explicitpd_ft bring-up). Refuse to bake it.
@@ -413,6 +437,11 @@ def attach_onnx_metadata(
     )
     metadata["motion_rsi_hold_root_stand_z"] = (
         "1" if bool(getattr(motion_cfg, "rsi_hold_root_stand_z", False)) else "0"
+    )
+    metadata["motion_allow_legacy_link_origin_velocity"] = (
+        "1"
+        if bool(getattr(motion_cfg, "allow_legacy_link_origin_velocity", False))
+        else "0"
     )
     try:
         rt_cmd = env.command_manager.get_term("racket_target")
@@ -570,6 +599,12 @@ def attach_onnx_metadata(
     if rt_cfg2 is not None:
         mns = getattr(rt_cfg2, "mount_normal_sign_per_clip", None) or ()
         metadata["mount_normal_sign_per_clip"] = ",".join(f"{float(s):g}" for s in mns)
+        metadata["face_command_enabled"] = (
+            "1" if bool(getattr(rt_cfg2, "face_command", False)) else "0"
+        )
+        metadata["face_command_pairing"] = str(
+            getattr(rt_cfg2, "face_command_pairing", "shared_plus_y")
+        )
         if bool(getattr(rt_cfg2, "face_command", False)):
             metadata["face_obs_convention"] = "mount_plusY_A"
     if actor_contract is not None:
@@ -624,6 +659,10 @@ def attach_onnx_metadata(
             ),
             "question_bank": current_question_bank_contract,
         }
+        if "motion_allow_legacy_link_origin_velocity" in training_contract:
+            current_contract_facts["motion_allow_legacy_link_origin_velocity"] = bool(
+                getattr(motion_cfg, "allow_legacy_link_origin_velocity", False)
+            )
         if rt_cmd is not None:
             rt_cfg_contract = rt_cmd.cfg
             phases = getattr(rt_cmd.cfg, "strike_phase_per_clip", None)
@@ -642,6 +681,14 @@ def attach_onnx_metadata(
                 current_contract_facts[key] = _contract_value(
                     getattr(rt_cfg_contract, key, None)
                 )
+            if "face_command_pairing" in training_contract:
+                current_contract_facts["face_command_pairing"] = str(
+                    getattr(rt_cfg_contract, "face_command_pairing", "shared_plus_y")
+                )
+            if "face_command_enabled" in training_contract:
+                current_contract_facts["face_command_enabled"] = bool(
+                    getattr(rt_cfg_contract, "face_command", False)
+                )
         else:
             for key in (
                 "target_mode", "normal_mode", "racket_pos_range_per_clip",
@@ -651,6 +698,10 @@ def attach_onnx_metadata(
                 "strike_phase_per_clip",
             ):
                 current_contract_facts[key] = None
+            if "face_command_pairing" in training_contract:
+                current_contract_facts["face_command_pairing"] = "shared_plus_y"
+            if "face_command_enabled" in training_contract:
+                current_contract_facts["face_command_enabled"] = False
         keys_to_verify = (
             current_contract_facts.keys()
             if training_contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION

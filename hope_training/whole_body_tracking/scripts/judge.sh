@@ -96,6 +96,8 @@ if [ -z "$CKPT" ]; then
   [ -n "$CKPT" ] || die "run_dir 里没有 model_*.pt: $RUN_DIR"
 fi
 [ -f "$CKPT" ] || die "checkpoint 不存在: $CKPT"
+CKPT_DIR=$(cd "$(dirname "$CKPT")" 2>/dev/null && pwd) || die "checkpoint 目录不存在: $CKPT"
+CKPT="$CKPT_DIR/$(basename "$CKPT")"
 CKPT_TAG=$(basename "$CKPT" .pt)
 RUN_NAME=$(basename "$RUN_DIR")
 
@@ -110,15 +112,25 @@ OBS_NORM="$EXPORT_DIR/obs_norm.npz"
 # ---------------------------------------------------------------- ① 解析 env.yaml(fail-loud)
 ENV_YAML="$RUN_DIR/params/env.yaml"
 [ -f "$ENV_YAML" ] || die "缺 $ENV_YAML —— 没有配置底稿无法保证导出与训练同配置,不判"
+TRAINING_CONTRACT="$CKPT_DIR/params/training_contract.json"
 
 PARSED=$(mktemp "${TMPDIR:-/tmp}/judge_parsed.XXXXXX.sh") || die "mktemp 失败"
 trap 'rm -f "$PARSED"' EXIT
 
-python3 - "$ENV_YAML" "$PARSED" "$CLI_FH" "$CLI_BH" "$CLI_PH0" "$CLI_PH1" "$CLI_EXAM_BANK" <<'PYEOF' || die "env.yaml 解析失败(上面有缺什么、该手传哪个旗标)"
-import os, shlex, sys
+python3 - "$ENV_YAML" "$PARSED" "$CLI_FH" "$CLI_BH" "$CLI_PH0" "$CLI_PH1" "$CLI_EXAM_BANK" "$TRAINING_CONTRACT" <<'PYEOF' || die "env.yaml/hard contract 解析失败(上面有缺什么、该手传哪个旗标)"
+import json, math, os, shlex, sys
 import yaml
 
-env_yaml, out_path, cli_fh, cli_bh, cli_ph0, cli_ph1, cli_bank = sys.argv[1:8]
+(
+    env_yaml,
+    out_path,
+    cli_fh,
+    cli_bh,
+    cli_ph0,
+    cli_ph1,
+    cli_bank,
+    training_contract_path,
+) = sys.argv[1:9]
 
 # env.yaml 是 env_cfg 的 dump,带 !!python/tuple / !!python/object 标签 —— 宽松加载,只取数据
 class Loose(yaml.SafeLoader):
@@ -140,6 +152,125 @@ cmds = cfg.get("commands") or {}
 motion = cmds.get("motion") or {}
 rt = cmds.get("racket_target") or {}
 fatal = []
+
+# --- plant contract: only schema-3 hard-contract bytes may turn on the binary zero-friction path ---
+# env.yaml contains the expanded actuator cfg but no trustworthy record of which task-level switch
+# produced it.  The checkpoint-adjacent hard contract binds the 31 instantiated coefficients.
+zero_joint_friction = False
+plant_src = "legacy/no schema-3 hard contract (task default false)"
+hard_actor_contract = None
+if os.path.isfile(training_contract_path):
+    try:
+        with open(training_contract_path, encoding="utf-8") as f:
+            hard_contract = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        fatal.append(f"hard contract 无法解析: {training_contract_path}: {exc}")
+        hard_contract = None
+    if isinstance(hard_contract, dict):
+        try:
+            contract_schema = int(hard_contract.get("schema_version", 0))
+        except (TypeError, ValueError):
+            fatal.append("hard contract schema_version 非法")
+            contract_schema = 0
+        if contract_schema == 3:
+            known_actor_dims = {
+                "full": 180,
+                "deploy_parity": 175,
+                "deploy_parity_face179": 179,
+                "deploy_parity_station181": 181,
+                "hitter_footwork": 177,
+                "hitter_pure": 110,
+            }
+            hard_actor_contract = hard_contract.get("actor_obs_contract")
+            if hard_actor_contract not in known_actor_dims:
+                fatal.append(
+                    "schema-3 hard contract 的 actor_obs_contract 缺失/未知: "
+                    f"{hard_actor_contract!r}"
+                )
+            else:
+                try:
+                    hard_actor_dim = int(hard_contract.get("actor_obs_total_dim"))
+                except (TypeError, ValueError):
+                    fatal.append("schema-3 hard contract 的 actor_obs_total_dim 非法")
+                else:
+                    if hard_actor_dim != known_actor_dims[hard_actor_contract]:
+                        fatal.append(
+                            "schema-3 hard contract actor 名/维度不一致: "
+                            f"{hard_actor_contract}/{hard_actor_dim}D"
+                        )
+            raw_friction = hard_contract.get("joint_friction_coefficients")
+            if not isinstance(raw_friction, list) or len(raw_friction) != 31:
+                fatal.append(
+                    "schema-3 hard contract 的 joint_friction_coefficients 必须是 31 维数组"
+                )
+            else:
+                try:
+                    if any(isinstance(value, bool) for value in raw_friction):
+                        raise ValueError
+                    friction = [float(value) for value in raw_friction]
+                except (TypeError, ValueError):
+                    fatal.append(
+                        "schema-3 hard contract 的 joint_friction_coefficients 必须是有限数值"
+                    )
+                    friction = None
+                if friction is not None:
+                    if any(not math.isfinite(value) or value < 0.0 for value in friction):
+                        fatal.append(
+                            "schema-3 hard contract 的 joint_friction_coefficients 含负数/NaN/Inf"
+                        )
+                    elif all(value == 0.0 for value in friction):
+                        zero_joint_friction = True
+                        plant_src = "schema-3 hard contract: 31/31 exact zero"
+                    elif all(value > 0.0 for value in friction):
+                        plant_src = "schema-3 hard contract: 31/31 non-zero; task default false"
+                    else:
+                        fatal.append(
+                            "schema-3 hard contract 是部分零/部分非零的混合 friction 向量; "
+                            "task.plant.zero_joint_friction 只能重放全零或已声明默认值,拒绝代理"
+                        )
+        elif contract_schema in (1, 2):
+            plant_src = f"legacy schema-{contract_schema} contract; task default false"
+        else:
+            fatal.append(f"hard contract schema_version={contract_schema} 不支持")
+    else:
+        fatal.append("hard contract 根节点必须是 object")
+
+# The observation tail is attached after the task cfg's __post_init__, so leaving the inherited
+# 175-D actor contract in place would make play.py fail (or null would defer the check).  Bind the
+# exact known layout from schema-3, with an env.yaml flag cross-check; legacy runs derive 179/181
+# from those persisted flags and retain null only for old non-face layouts.
+face_obs_flag = cfg.get("face_command_obs", False)
+station_obs_flag = cfg.get("station_obs", False)
+if not isinstance(face_obs_flag, bool) or not isinstance(station_obs_flag, bool):
+    fatal.append("env.yaml face_command_obs/station_obs 必须是 bool")
+    face_obs_flag = station_obs_flag = False
+if station_obs_flag and not face_obs_flag:
+    fatal.append("env.yaml station_obs=true 但 face_command_obs=false: 181D 布局不成立")
+flag_actor_contract = (
+    "deploy_parity_station181"
+    if station_obs_flag
+    else "deploy_parity_face179" if face_obs_flag else None
+)
+if hard_actor_contract is not None:
+    expected_face_flags = {
+        "deploy_parity_face179": (True, False),
+        "deploy_parity_station181": (True, True),
+    }
+    hard_flags = expected_face_flags.get(hard_actor_contract, (False, False))
+    if hard_flags != (face_obs_flag, station_obs_flag):
+        fatal.append(
+            "schema-3 hard contract actor 与 env.yaml 观测开关不一致: "
+            f"actor={hard_actor_contract}, face/station="
+            f"{face_obs_flag}/{station_obs_flag}"
+        )
+    actor_contract = hard_actor_contract
+    actor_src = "schema-3 hard contract + env.yaml flag cross-check"
+elif flag_actor_contract is not None:
+    actor_contract = flag_actor_contract
+    actor_src = "legacy env.yaml face/station flags"
+else:
+    actor_contract = None
+    actor_src = "legacy non-face layout; play/export runtime inference"
 
 # --- 动作对(必须成对;单 clip 臂不是本考卷的形状) ---
 if cli_fh and cli_bh:
@@ -213,9 +344,13 @@ def fmt(v):
 ov = []
 ov.append("'motion_file=[%s,%s]'" % (fh, bh))
 ov.append("'++task.racket.strike_phase_per_clip=[%s,%s]'" % (repr(ph[0]), repr(ph[1])))
+if zero_joint_friction:
+    # Declared by HOPEPingPongDeployParity and inherited tasks: no ++, so a wrong task/config fails.
+    ov.append("task.plant.zero_joint_friction=true")
 for key, src in (
     ("question_bank",          rt.get("question_bank")),
     ("face_command",           rt.get("face_command")),
+    ("face_command_pairing",   rt.get("face_command_pairing")),
     ("vb_spin_mode",           rt.get("vb_spin_mode")),
     # 陪跑档:符号表进"导出环境"只为 ONNX 元数据保真(mount_normal_sign_per_clip /
     # face_obs_convention 键;不搬 = CLI 配置臂的元数据写成空表 = 说谎)。设计决定
@@ -233,9 +368,14 @@ for key, src in (
         ov.append(f"++task.racket.{key}={fmt(src)}")
 if motion.get("post_swing_start_prob") is not None:
     ov.append(f"++task.motion.post_swing_start_prob={fmt(motion['post_swing_start_prob'])}")
-if cfg.get("face_command_obs"):          # 顶层旗标:+4 obs 维(175->179),导错=checkpoint 加载即死
+if motion.get("allow_legacy_link_origin_velocity") is not None:
+    ov.append(
+        "++task.motion.allow_legacy_link_origin_velocity="
+        + fmt(motion["allow_legacy_link_origin_velocity"])
+    )
+if face_obs_flag:                        # 顶层旗标:+4 obs 维(175->179),导错=checkpoint 加载即死
     ov.append("++task.racket.face_command_obs=true")
-if cfg.get("station_obs"):               # 顶层旗标:+2 obs 维(179->181,R10c 站位锚),导错同上即死
+if station_obs_flag:                     # 顶层旗标:+2 obs 维(179->181,R10c 站位锚),导错同上即死
     ov.append("++task.racket.station_obs=true")
     sax = rt.get("station_anchor_offset_xy")
     if sax is not None and [float(sax[0]), float(sax[1])] != [0.0, 0.0]:
@@ -244,7 +384,9 @@ if cfg.get("station_obs"):               # 顶层旗标:+2 obs 维(179->181,R10c
                   % (repr(float(sax[0])), repr(float(sax[1]))))
 if cfg.get("physical_ball"):
     ov.append("++task.physical_ball=true")
-ov.append("task.actor_obs_contract=null")   # 扩列观测放行(179 臂;runbook 发射核对单第 5 条)
+ov.append(
+    "task.actor_obs_contract=" + (actor_contract if actor_contract is not None else "null")
+)
 
 with open(out_path, "w") as f:
     def w(k, v):
@@ -253,6 +395,8 @@ with open(out_path, "w") as f:
     w("PH0", repr(ph[0])); w("PH1", repr(ph[1]))
     w("EXAM_BANK", exam_bank); w("TRAIN_BANK", train_bank or "")
     w("SRC_MOTION", mf_src); w("SRC_PHASES", ph_src); w("SRC_BANK", bank_src)
+    w("SRC_PLANT", plant_src)
+    w("SRC_ACTOR", actor_src + (f": {actor_contract}" if actor_contract else ""))
     w("EXPORT_OVERRIDES", " ".join(ov))
 print("[judge] env.yaml 解析 OK")
 PYEOF
@@ -303,6 +447,8 @@ note "task        = $TASK(experiment_name=$EXP_NAME 反查)"
 note "动作对      = $MOTION_FH | $MOTION_BH($SRC_MOTION)"
 note "相位对      = [$PH0, $PH1]($SRC_PHASES)"
 note "exam 卷     = $EXAM_BANK($SRC_BANK)"
+note "plant       = $SRC_PLANT"
+note "actor       = $SRC_ACTOR"
 note "旗标        = qdes_clamp=$([ "$QDES_CLAMP" = 1 ] && echo ON || echo OFF) hold_ref=$HOLD_REF steps_cap=$STEPS schedule_k=${SCHEDULE_K:-ALL} seed=$SEED ns=[$NOISE_SCALES]"
 
 if [ "$DRY_RUN" = 1 ]; then
