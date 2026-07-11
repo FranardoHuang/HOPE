@@ -128,8 +128,12 @@ These are first-pass defaults chosen for a visibly correct scene; they need an i
 
 ## Verification status
 
-* `tests/test_ball_physics_vs_record.py` — the torch port (contact / flight / landing) matches the Record
-  numpy oracle to <1e-6 (contact ~1e-10, flight bit-exact, landing 0 mm). **Passing**, CPU-only.
+* `tests/test_ball_physics_vs_record.py` — the Torch port (contact / flight / landing) is checked
+  against the in-repo fit-lineage NumPy reference and prints the exact reference/kernel/venue-YAML
+  SHA tuple. The 2026-07-12 current-source CPU rerun passed (maximum contact error `4.63e-9`,
+  flight position error zero at reported precision, landing `0.000 mm`). Missing Torch is a
+  dependency skip, not a pass;
+  an explicitly bad `RECORD_DIR` and zero/non-finite normals fail loudly.
 * `tests/test_table_tennis_geometry.py` (frame/geometry + aero defaults + YAML consistency) — **passing**
   on a plain Python host (torch/YAML-dependent checks auto-skip if missing).
 * All modules pass `py_compile`.

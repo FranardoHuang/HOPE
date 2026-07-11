@@ -1081,3 +1081,33 @@ ROS/AimRT Release suite plus strict positive/negative production preflight; see
 `configs/gate3_face179_strict_preflight_evidence_20260712.json`. This closes an export/model-load
 prerequisite only. No policy has yet passed vendor MuJoCo backend first tick or behavior with the
 envelope, self-hit gate or recovery contract. G05 remains `Partial`.
+### Yikang branch changes were integrated by current-main semantics (2026-07-12)
+
+Three small changes were audited against `origin/main@b2067ba`; neither old-base branch was merged
+whole. The fit-lineage NumPy oracle from `stage1-fixed-point@bc86995/f0ac2fb` was accepted and
+hardened. The existing Torch parity test now defaults to that in-repo reference, emits the exact
+reference/contact-model/venue-YAML SHA tuple, and fails on an explicitly missing `RECORD_DIR`.
+Normal handling is scale-invariant and rejects zero/NaN/Inf instead of propagating NaNs. Seven
+dependency-light oracle tests pass. The full current-source Torch CPU parity gate also reports
+`ALL PASSED`: table/paddle contact errors are below `4.63e-9`, flight RK4 is exact at reported
+precision, and first-landing error is `0.000 mm`.
+
+The `head_discipline` diagnosis from `407a443` is retained as a candidate, but its code and `-0.5`
+weight were deliberately not ported. That commit is based on old `hitter@5c346ea` and enables a
+`HOPEPingPongHitterPureRallyFinalV2` recipe that does not exist on current main; FinalV2Plus also does
+not exist here. Importing the term/whitelist alone would create a stale, unnamed reward surface.
+Moreover, `origin/hitter@0fccc3c` has a passive-head FinalV3 action contract for the same symptom,
+and FinalV2Plus derives an exact reward-key set from FinalV2. A reward term must therefore be an
+explicit named-recipe decision, not accidental inheritance or silent stacking with passive-head.
+
+Two dependency-light guards verify that current main has neither the old FinalV2/FinalV2Plus recipe
+nor a silently exposed/enabled `head_discipline_weight`. No training was launched. If reward-side
+head discipline is adopted later, start from an explicit `0.0` current-line interface, compare it
+paired against unchanged control and passive-head, and treat its overlap with balance/recovery/
+ready-state rewards as a mixture interaction under fixed total budget. The old `-0.5` is a hypothesis,
+not a validated default. In the local Torch/Hydra environment, the current reward/config tests pass
+`88` relevant cases. The unfiltered suite has two additional failures in pre-existing
+`MotionLoader` handling of a single `Path` as an iterable; neither touches this diff or head rewards.
+Because no head code/config was changed, current reward bytes and behavior remain unchanged. Full
+audit and commands are in `docs/research/yikang_selective_integration_20260712.md`. G05 stays
+`Partial`.

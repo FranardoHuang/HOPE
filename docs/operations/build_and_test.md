@@ -363,3 +363,34 @@ Verified 2026-07-10 on Ubuntu 24.04/Jazzy/GCC 13:
 - ROS Release: 202 passed, 4 skipped; ping-pong runner and runtime probe linked;
 - unknown runner CLI arguments exit 2 before backend/model initialization;
 - skips were optional external CSV/FK/end-to-end fixtures, not safety tests.
+
+## Fit-lineage ball-physics parity
+
+The default NumPy reference is now in-repo and content-addressed. Run its dependency-light normal,
+lineage and fail-loud contract first, then the Torch parity test in an environment with Torch:
+
+```bash
+pytest -q \
+  hope_training/whole_body_tracking/tests/test_reference_oracle_contract.py
+python3 hope_training/whole_body_tracking/tests/test_ball_physics_vs_record.py
+```
+
+The second command prints SHA-256 for the reconstructed reference, fit-lineage contact model and
+venue YAML. Missing Torch/PyYAML/NumPy is an explicit dependency skip, not a parity pass. An
+explicit bad `RECORD_DIR` always fails and never falls back; leave it unset to use the in-repo
+reference. Zero/non-finite contact or table normals also fail instead of dividing to NaN. See
+`docs/research/yikang_selective_integration_20260712.md` for the port boundary and current evidence.
+
+## Vendor A3 stand diagnostic source gate
+
+The plain-MuJoCo viewer/checker has a dependency-light identity mode and host-only parser tests:
+
+```bash
+python3 -m py_compile scripts/view_a3_stand.py
+pytest -q tests/test_view_a3_stand.py
+python3 scripts/view_a3_stand.py --identity-only
+```
+
+This verifies source binding and production header parsing only. It starts no MuJoCo model,
+planner, policy, AimRT, Gate3/Gate3B or hardware. The numerical command and interpretation are in
+`run_deploy_dryrun.md`.

@@ -1,30 +1,51 @@
-"""Regression: the torch ball-physics port must match the Record numpy oracle.
+"""Regression: the Torch ball-physics port must match a fit-lineage reference.
 
 This is the load-bearing correctness gate for Task A/B4. It checks that
-``tasks/table_tennis/physics`` (torch, vectorized, runs inside the Isaac env) reproduces
-``Record/analysis/{contact_model/spin_equation,flight_model/simulator}`` (the fitted, validated numpy
-reference) to tight tolerance, for both the table-bounce and paddle-hit contact params, the flight
-integrator, and the first-bounce landing point.
+``tasks/table_tennis/physics`` (Torch, vectorized, runs inside the Isaac env) reproduces the
+fitted NumPy reference to tight tolerance for table/paddle contact, flight RK4 and first landing.
 
-Pure CPU, no Isaac Sim. Skips gracefully if torch / PyYAML / numpy / the Record folder are missing.
+The default is the in-repo reconstructed reference at
+``hope_training/ball_physics_fit/reference_oracle.py``.  It delegates only to the committed
+fit-lineage contact model and the venue YAML, not to the Torch code under test, and prints a
+content SHA tuple.  Setting ``RECORD_DIR`` explicitly selects the historical external layout; a
+bad explicit path fails loudly instead of silently skipping.
+
+Pure CPU, no Isaac Sim. Skips only if Torch / PyYAML / NumPy is unavailable.
 
 Run:  python tests/test_ball_physics_vs_record.py
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import json
 import os
 import sys
 
-_HERE = os.path.dirname(__file__)
+_HERE = os.path.dirname(os.path.abspath(__file__))
 _PHYS = os.path.join(
     os.path.dirname(_HERE),  # whole_body_tracking/
     "source", "whole_body_tracking", "whole_body_tracking", "tasks", "table_tennis", "physics",
 )
-_RECORD = os.environ.get("RECORD_DIR", "/Users/yyk956614/Desktop/Hope/Record")
-_FLIGHT_DIR = os.path.join(_RECORD, "analysis", "flight_model")
-_CONTACT_DIR = os.path.join(_RECORD, "analysis", "contact_model")
+_RECORD = os.environ.get("RECORD_DIR")
+_FLIGHT_DIR = os.path.join(_RECORD, "analysis", "flight_model") if _RECORD else None
+_CONTACT_DIR = os.path.join(_RECORD, "analysis", "contact_model") if _RECORD else None
+
+
+def _repo_root() -> str:
+    d = _HERE
+    while True:
+        if os.path.isfile(os.path.join(d, "configs", "ball_physics_venue.yaml")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            raise FileNotFoundError("configs/ball_physics_venue.yaml not found above tests/")
+        d = parent
+
+
+_ROOT = _repo_root()
+_REF_ORACLE = os.path.join(_ROOT, "hope_training", "ball_physics_fit", "reference_oracle.py")
 
 
 def _load(name: str, path: str):
@@ -36,20 +57,57 @@ def _load(name: str, path: str):
 
 
 def _deps_ok() -> str | None:
+    if _RECORD:
+        contact_py = os.path.join(_CONTACT_DIR, "spin_equation.py")
+        flight_py = os.path.join(_FLIGHT_DIR, "simulator.py")
+        if not (os.path.isfile(contact_py) and os.path.isfile(flight_py)):
+            raise FileNotFoundError(
+                f"$RECORD_DIR={_RECORD} is set but the oracle files are missing "
+                f"({contact_py}, {flight_py}); refusing to skip or fall back"
+            )
+    elif not os.path.isfile(_REF_ORACLE):
+        raise FileNotFoundError(f"in-repo reference missing: {_REF_ORACLE}")
     for m in ("torch", "numpy", "yaml"):
         try:
             importlib.import_module(m)
         except Exception:
             return f"{m} unavailable"
-    if not os.path.isdir(_CONTACT_DIR) or not os.path.isfile(os.path.join(_CONTACT_DIR, "spin_equation.py")):
-        return f"Record oracle not found at {_RECORD} (set $RECORD_DIR)"
     return None
+
+
+def _file_sha256(path: str) -> str:
+    with open(path, "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()
+
+
+def _load_reference():
+    """Return contact module, flight module and their exact content identity."""
+
+    if _RECORD:
+        contact_py = os.path.join(_CONTACT_DIR, "spin_equation.py")
+        flight_py = os.path.join(_FLIGHT_DIR, "simulator.py")
+        sys.path.insert(0, _CONTACT_DIR)
+        lineage = {
+            "schema_version": 1,
+            "external_record_dir": os.path.realpath(_RECORD),
+            "files_sha256": {
+                "spin_equation.py": _file_sha256(contact_py),
+                "simulator.py": _file_sha256(flight_py),
+            },
+        }
+        return (
+            _load("rec_spin_equation", contact_py),
+            _load("rec_simulator", flight_py),
+            lineage,
+        )
+    ref = _load("bpf_reference_oracle", _REF_ORACLE)
+    return ref, ref, ref.reference_lineage()
 
 
 def run() -> int:
     skip = _deps_ok()
     if skip:
-        print(f"[skip] ball-physics-vs-Record tests: {skip}")
+        print(f"[skip] ball-physics-vs-reference tests: {skip}")
         return 0
 
     import numpy as np
@@ -59,9 +117,9 @@ def run() -> int:
     dt64 = torch.double
 
     # --- load both sides -----------------------------------------------------
-    sys.path.insert(0, _CONTACT_DIR)  # simulator.py imports spin_equation from here
-    oracle_contact = _load("rec_spin_equation", os.path.join(_CONTACT_DIR, "spin_equation.py"))
-    oracle_sim = _load("rec_simulator", os.path.join(_FLIGHT_DIR, "simulator.py"))
+    oracle_contact, oracle_sim, lineage = _load_reference()
+    print(f"[info] reference = {'external $RECORD_DIR' if _RECORD else _REF_ORACLE}")
+    print(f"[info] reference_lineage = {json.dumps(lineage, sort_keys=True)}")
 
     params_mod = _load("phys_params", os.path.join(_PHYS, "params.py"))
     # spin_contact/flight/landing do `from .params import ...`; build a fake package so the relative

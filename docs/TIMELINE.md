@@ -1682,3 +1682,18 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    strip metadata/缺 envelope/exact=0 三负例均 rc3，legacy+preflight rc2。错误 exam-bank 导出
    rc1 后 final SHA 不变、temp=0；824 compile rows 无 fast-math。证据 manifest 已入库。未启动
    vendor simulator/transport/backend first tick，不能写成 Gate3/Gate3B 通过。
+## 2026-07-12:yikang 小改动选择性审入
+
+- 【Codex】没有把 `stage1-fixed-point` 或 `yikang-linux-port-0711` 的旧基线整支 merge。
+  `reference_oracle` 按当前 main API 移植并补了三道门：法向安全归一化、zero/NaN/Inf fail-loud、
+  reference/contact-model/venue-YAML 内容 SHA；host 合同 7 项通过，并在本机 `qai` Torch CPU 环境
+  完整通过 table/paddle contact、RK4、landing 对拍（最大误差 `4.63e-9`，flight/landing 报告为0）。
+- 【Codex】`view_a3_stand.py` 选择性审入但纠正了原声明：生产头文件是 29-DOF PD_STAND，neck
+  明确 passive，原脚本额外 head `40/2` 不能叫生产增益。新版直接解析生产 pose/Kp/Kd，绑定 vendor
+  MJCF/header SHA，数值模式记录 finite、pelvis tilt/z 和双脚接触；host 4 项+identity-only 通过，
+  本机无 MuJoCo，10 秒结果仍 `not_run`。它不改 integrator、不启 planner/policy/AimRT/Gate3/真机。
+- 【Codex】`head_discipline=-0.5` 没有硬塞进 main：补丁依赖当前不存在的 FinalV2，FinalV2Plus 还有
+  派生键集语义，`origin/hitter` 的 FinalV3 又已有 passive-head 同病异治。现役代码/配方保持逐字不变，
+  两项 guard 防静默引入。未来若采用，先给当前命名配方显式 `0.0`，再和 control/passive-head 做配对，
+  并把它与 balance/recovery/ready reward 当同 phase mixture interaction 判；现役 reward/config
+  相关回归 `88 passed`，未发训练臂（全量另有2个旧 MotionLoader/Path 非本改失败）。
