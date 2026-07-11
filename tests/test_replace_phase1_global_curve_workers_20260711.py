@@ -39,6 +39,7 @@ def config():
 
 def test_config_binds_exact_reviewed_six_live_workers_and_natural_exit_exclusion():
     data = config()
+    assert data["contract_id"] == "phase1-global-curve-worker-hardening-20260711-v3"
     assert data["pods"]["pod1"]["queues"] == [
         "cadence_fresh_pod1",
         "scaleout_causal_pod1",
@@ -53,6 +54,13 @@ def test_config_binds_exact_reviewed_six_live_workers_and_natural_exit_exclusion
         1394810, 1380340, 1397266, 194276, 192815, 195085
     }
     assert len(data["queues"]) == 6
+    by_id = {queue["queue_id"]: queue for queue in data["queues"]}
+    assert by_id["scaleout_causal_pod1"]["legacy_worker_log"].endswith(
+        "/scaleout_causal_pod1_46a0ce2/worker_terminal20998.log"
+    )
+    assert by_id["scaleout_causal_pod2"]["legacy_worker_log"].endswith(
+        "/scaleout_causal_pod2_46a0ce2/worker_terminal20998.log"
+    )
     observed_legacy = {
         "cadence_fresh_pod1": "51bbbef708673efd804da47580cc2477c9eb42f3acae138e8d55adba72ff784e",
         "scaleout_causal_pod1": "c8564617872259bdb04fba9b0887d149a6b555b159feb64a3d55b7007f1010bd",
@@ -276,6 +284,17 @@ def test_idle_worker_with_child_judge_fails_before_any_signal(monkeypatch, tmp_p
         replacement, "proc_executable", lambda _pid: Path(data["runtime"]["worker_python"])
     )
     monkeypatch.setattr(replacement, "proc_cwd", lambda _pid: tmp_path.resolve())
+    monkeypatch.setattr(
+        replacement,
+        "proc_stdio_log",
+        lambda _pid, _path: {
+            "path": str(Path(queue["legacy_worker_log"])),
+            "device": 1,
+            "inode": 2,
+            "fd1_path": str(Path(queue["legacy_worker_log"])),
+            "fd2_path": str(Path(queue["legacy_worker_log"])),
+        },
+    )
     monkeypatch.setattr(replacement, "proc_children", lambda _pid: [901])
     monkeypatch.setattr(
         replacement,
@@ -298,7 +317,11 @@ def test_pod_atomic_final_preflight_fails_second_worker_with_zero_signals(monkey
     audits = [
         {
             "queue": queue,
-            "process": {"command": ["python3", f"{index}.py"], "cwd": "/workspace"},
+            "process": {
+                "command": ["python3", f"{index}.py"],
+                "cwd": "/workspace",
+                "stdio_log": {"path": f"/logs/{index}.log", "device": 1, "inode": index},
+            },
         }
         for index, queue in enumerate(queues)
     ]
@@ -330,6 +353,10 @@ def test_exact_term_targets_only_registered_worker_pgids_and_never_kills(monkeyp
             "queue": queue,
             "process": {
                 "command": commands[queue["legacy_pid_hint"]], "cwd": "/workspace",
+                "stdio_log": {
+                    "path": queue["legacy_worker_log"], "device": 1,
+                    "inode": queue["legacy_pid_hint"],
+                },
             },
         }
         for queue in queues
@@ -338,12 +365,20 @@ def test_exact_term_targets_only_registered_worker_pgids_and_never_kills(monkeyp
 
     def audit_worker(queue, *_args, **_kwargs):
         pid = queue["legacy_pid_hint"]
-        return {"pid": pid, "pgid": pid, "command": commands[pid], "cwd": "/workspace"}
+        return {
+            "pid": pid, "pgid": pid, "command": commands[pid], "cwd": "/workspace",
+            "stdio_log": {"path": queue["legacy_worker_log"], "device": 1, "inode": pid},
+        }
 
     monkeypatch.setattr(replacement, "assert_idle_exact_worker", audit_worker)
     monkeypatch.setattr(replacement, "process_alive", lambda pid: pid in alive)
     monkeypatch.setattr(replacement, "parse_proc_cmdline", lambda pid: commands[pid])
     monkeypatch.setattr(replacement, "proc_cwd", lambda _pid: Path("/workspace"))
+    monkeypatch.setattr(
+        replacement,
+        "proc_stdio_log",
+        lambda pid, path: {"path": str(path), "device": 1, "inode": pid},
+    )
     monkeypatch.setattr(replacement, "proc_children", lambda _pid: [])
     monkeypatch.setattr(
         replacement,
@@ -374,13 +409,18 @@ def test_cwd_race_before_term_fails_with_zero_signals(monkeypatch):
     command = ["python3", "relative_worker.py"]
     audit = {
         "queue": queue,
-        "process": {"command": command, "cwd": "/workspace/original"},
+        "process": {
+            "command": command,
+            "cwd": "/workspace/original",
+            "stdio_log": {"path": queue["legacy_worker_log"], "device": 1, "inode": pid},
+        },
     }
     monkeypatch.setattr(
         replacement,
         "assert_idle_exact_worker",
         lambda *_args, **_kwargs: {
-            "pid": pid, "pgid": pid, "command": command, "cwd": "/workspace/original"
+            "pid": pid, "pgid": pid, "command": command, "cwd": "/workspace/original",
+            "stdio_log": {"path": queue["legacy_worker_log"], "device": 1, "inode": pid},
         },
     )
     monkeypatch.setattr(replacement, "process_alive", lambda _pid: True)
@@ -391,6 +431,70 @@ def test_cwd_race_before_term_fails_with_zero_signals(monkeypatch):
     with pytest.raises(replacement.ContractError, match="identity changed"):
         replacement.exact_term_verified_workers([audit], data, {})
     assert signals == []
+
+
+def test_stdio_log_rotation_race_before_term_fails_with_zero_signals(monkeypatch):
+    data = config()
+    queue = dict(data["queues"][0])
+    pid = queue["legacy_pid_hint"]
+    command = ["python3", "worker.py"]
+    original_log = {
+        "path": queue["legacy_worker_log"], "device": 7, "inode": 11,
+    }
+    audit = {
+        "queue": queue,
+        "process": {"command": command, "cwd": "/workspace", "stdio_log": original_log},
+    }
+    monkeypatch.setattr(
+        replacement,
+        "assert_idle_exact_worker",
+        lambda *_args, **_kwargs: {
+            "pid": pid, "pgid": pid, "command": command,
+            "cwd": "/workspace", "stdio_log": original_log,
+        },
+    )
+    monkeypatch.setattr(replacement, "process_alive", lambda _pid: True)
+    monkeypatch.setattr(replacement, "parse_proc_cmdline", lambda _pid: command)
+    monkeypatch.setattr(replacement, "proc_cwd", lambda _pid: Path("/workspace"))
+    monkeypatch.setattr(
+        replacement,
+        "proc_stdio_log",
+        lambda _pid, path: {"path": str(path), "device": 7, "inode": 12},
+    )
+    signals = []
+    monkeypatch.setattr(replacement.os, "killpg", lambda *args: signals.append(args))
+    with pytest.raises(replacement.ContractError, match="identity changed"):
+        replacement.exact_term_verified_workers([audit], data, {})
+    assert signals == []
+
+
+def test_frozen_worker_log_rejects_same_path_new_inode(tmp_path):
+    worker_log = tmp_path / "worker.log"
+    worker_log.write_text("legacy\n")
+    manifest_legacy = tmp_path / "legacy.json"
+    manifest_hard = tmp_path / "hard.json"
+    manifest_legacy.write_text("{}\n")
+    manifest_hard.write_text("{}\n")
+    identity = replacement.regular_file_identity(worker_log, "test worker log")
+    frozen = {
+        "evidence": {
+            "legacy_worker_log": str(worker_log),
+            "legacy_worker_log_identity": identity,
+            "legacy_worker_log_sha256": file_sha(worker_log),
+            "completed_jobs": [],
+            "summary": None,
+            "manifests": {
+                "legacy": {"path": str(manifest_legacy), "sha256": file_sha(manifest_legacy)},
+                "hardened": {"path": str(manifest_hard), "sha256": file_sha(manifest_hard)},
+            },
+        }
+    }
+    replacement.verify_frozen_legacy(frozen)
+    replacement_path = tmp_path / "replacement.log"
+    replacement_path.write_text("rotated\n")
+    replacement_path.replace(worker_log)
+    with pytest.raises(replacement.ContractError, match="inode changed"):
+        replacement.verify_frozen_legacy(frozen)
 
 
 def make_completed_fixture(tmp_path: Path, *, causal: bool = False):

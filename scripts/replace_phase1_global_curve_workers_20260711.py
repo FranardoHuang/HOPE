@@ -27,6 +27,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -518,6 +519,45 @@ def proc_cwd(pid: int) -> Path:
     return Path(f"/proc/{pid}/cwd").resolve(strict=True)
 
 
+def regular_file_identity(path: Path, label: str) -> dict[str, Any]:
+    resolved = path.resolve(strict=True)
+    info = resolved.stat()
+    if not stat.S_ISREG(info.st_mode):
+        raise ContractError(f"{label} is not a regular file: {resolved}")
+    return {
+        "path": str(resolved),
+        "device": info.st_dev,
+        "inode": info.st_ino,
+    }
+
+
+def proc_stdio_log(pid: int, configured_log: Path) -> dict[str, Any]:
+    expected = regular_file_identity(configured_log, "configured legacy worker log")
+    targets = {}
+    for fd in (1, 2):
+        fd_path = Path(f"/proc/{pid}/fd/{fd}")
+        resolved = fd_path.resolve(strict=True)
+        identity = regular_file_identity(fd_path, f"worker pid={pid} fd={fd}")
+        if resolved != Path(expected["path"]):
+            raise ContractError(
+                f"worker pid={pid} fd={fd} path differs from configured log: {resolved}"
+            )
+        if (identity["device"], identity["inode"]) != (
+            expected["device"], expected["inode"]
+        ):
+            raise ContractError(f"worker pid={pid} fd={fd} inode differs from configured log")
+        targets[str(fd)] = identity
+    if (targets["1"]["device"], targets["1"]["inode"]) != (
+        targets["2"]["device"], targets["2"]["inode"]
+    ):
+        raise ContractError(f"worker pid={pid} stdout/stderr do not share one log inode")
+    return {
+        **expected,
+        "fd1_path": targets["1"]["path"],
+        "fd2_path": targets["2"]["path"],
+    }
+
+
 def process_alive(pid: int) -> bool:
     path = Path(f"/proc/{pid}/stat")
     try:
@@ -632,6 +672,7 @@ def validate_worker_command(
 def assert_idle_exact_worker(
     queue: dict[str, Any], config: dict[str, Any], runtime_paths: dict[str, Path],
     expected_command: list[str] | None = None, expected_cwd: str | None = None,
+    expected_stdio_log: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     pid = queue["legacy_pid_hint"]
     if not process_alive(pid):
@@ -645,6 +686,9 @@ def assert_idle_exact_worker(
         raise ContractError(f"{queue['queue_id']}: /proc command changed from attestation")
     if expected_cwd is not None and cwd != Path(expected_cwd).resolve():
         raise ContractError(f"{queue['queue_id']}: /proc cwd changed from attestation")
+    stdio_log = proc_stdio_log(pid, Path(queue["legacy_worker_log"]))
+    if expected_stdio_log is not None and stdio_log != expected_stdio_log:
+        raise ContractError(f"{queue['queue_id']}: stdout/stderr log changed from attestation")
     if proc_executable(pid) != Path(config["runtime"]["worker_python"]).resolve():
         raise ContractError(f"{queue['queue_id']}: /proc executable is not the pinned Python")
     rows = process_table()
@@ -681,6 +725,7 @@ def assert_idle_exact_worker(
         "command": command,
         "command_sha256": canonical_sha256(command),
         "cwd": str(cwd),
+        "stdio_log": stdio_log,
         "python_executable": str(proc_executable(pid)),
         "children": [],
         "process_group_members": [pid],
@@ -1090,6 +1135,7 @@ def exact_term_verified_workers(
         audit["queue"]["queue_id"]: assert_idle_exact_worker(
             audit["queue"], config, runtime_paths,
             audit["process"]["command"], audit["process"]["cwd"],
+            audit["process"]["stdio_log"],
         )
         for audit in audits
     }
@@ -1100,6 +1146,8 @@ def exact_term_verified_workers(
             not process_alive(pid)
             or parse_proc_cmdline(pid) != snapshots[queue_id]["command"]
             or proc_cwd(pid) != Path(snapshots[queue_id]["cwd"]).resolve()
+            or proc_stdio_log(pid, Path(audit["queue"]["legacy_worker_log"]))
+            != snapshots[queue_id]["stdio_log"]
         ):
             raise ContractError(f"{queue_id}: identity changed before Pod-atomic TERM")
     # Use one final shared process-table snapshot immediately before the tight
@@ -1122,6 +1170,13 @@ def exact_term_verified_workers(
         if proc_cwd(pid) != Path(snapshot["cwd"]).resolve():
             raise ContractError(
                 f"{queue_id}: worker cwd changed before TERM; zero signals sent"
+            )
+        queue = next(
+            audit["queue"] for audit in audits if audit["queue"]["queue_id"] == queue_id
+        )
+        if proc_stdio_log(pid, Path(queue["legacy_worker_log"])) != snapshot["stdio_log"]:
+            raise ContractError(
+                f"{queue_id}: worker stdout/stderr log changed before TERM; zero signals sent"
             )
     stopped: dict[str, dict[str, Any]] = {}
     for audit in audits:
@@ -1149,7 +1204,8 @@ def exact_term_verified_workers(
 
 
 def freeze_legacy_queue(
-    audit: dict[str, Any], config: dict[str, Any], runtime_paths: dict[str, Path]
+    audit: dict[str, Any], stopped_process: dict[str, Any],
+    config: dict[str, Any], runtime_paths: dict[str, Path]
 ) -> dict[str, Any]:
     queue = audit["queue"]
     completed, pending, evidence = audit_legacy_states(
@@ -1161,6 +1217,15 @@ def freeze_legacy_queue(
         runtime_paths,
     )
     worker_log = Path(queue["legacy_worker_log"])
+    log_identity = regular_file_identity(worker_log, "post-TERM legacy worker log")
+    expected_log = stopped_process["stdio_log"]
+    if log_identity != {
+        key: expected_log[key] for key in ("path", "device", "inode")
+    }:
+        raise ContractError(
+            f"{queue['queue_id']}: legacy worker log rotated before post-TERM freeze"
+        )
+    evidence["legacy_worker_log_identity"] = log_identity
     evidence["legacy_worker_log_sha256"] = sha256_file(worker_log)
     evidence["manifests"] = {
         "legacy": {
@@ -1181,6 +1246,10 @@ def freeze_legacy_queue(
 def verify_frozen_legacy(frozen: dict[str, Any]) -> None:
     evidence = frozen["evidence"]
     worker_log = Path(evidence["legacy_worker_log"])
+    if regular_file_identity(worker_log, "frozen legacy worker log") != evidence[
+        "legacy_worker_log_identity"
+    ]:
+        raise ContractError(f"legacy worker log inode changed after TERM: {worker_log}")
     if sha256_file(worker_log) != evidence["legacy_worker_log_sha256"]:
         raise ContractError(f"legacy worker log changed after TERM: {worker_log}")
     for item in evidence["completed_jobs"]:
@@ -1368,7 +1437,12 @@ def replace(
         claim_new_state_dirs(audits)
         stopped = exact_term_verified_workers(audits, config, runtime_paths)
         frozen = {
-            audit["queue"]["queue_id"]: freeze_legacy_queue(audit, config, runtime_paths)
+            audit["queue"]["queue_id"]: freeze_legacy_queue(
+                audit,
+                stopped[audit["queue"]["queue_id"]],
+                config,
+                runtime_paths,
+            )
             for audit in audits
         }
         migrated = {

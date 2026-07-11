@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "contract_id": "phase1-global-curve-worker-hardening-20260711-v2",
+  "contract_id": "phase1-global-curve-worker-hardening-20260711-v3",
   "purpose": "Replace the six still-live original/scale-out legacy Phase-1 curve workers with the standalone screen-policy-hardened worker without touching trainers, judges, or either Git checkout.",
   "simulation_only": true,
   "real_robot_commands_forbidden": true,
@@ -49,7 +49,7 @@
   },
   "replacement_contract": {
     "pod_atomic_scope": "Every registered legacy worker on one Pod must pass the same read-only preflight before any worker PGID is signalled.",
-    "live_identity": "PID hints are not authority. The attest phase must verify the exact legacy worker bytes, executable, manifest/state/judge command, pid=pgid, single-member group, and zero child/judge; validate/replace require the explicit attestation file SHA and recheck /proc.",
+    "live_identity": "PID hints are not authority. The attest phase must verify exact legacy worker bytes, executable, manifest/state/judge command, pid=pgid, single-member group, zero child/judge, and /proc fd1=fd2 pointing to the configured regular-file log path/inode; validate/replace require the explicit attestation SHA and recheck cwd plus stdio through TERM/freeze.",
     "manifest_policy": "The external hardened manifest must byte-match the tracked config and pass q10 screen policy, exact schedule/role arguments, monotonic milestone groups and barrier checks. The live legacy manifest has its own observed SHA and must be semantically compatible job-for-job; it is never modified.",
     "completed_job_policy": "Validate every legacy complete rc=0 state against the legacy job and exact legacy judge command, but never seed a hard completed state from this legacy worker. Causal 18k lacks the required inexact escape; cadence 4k has an equivalent command but its legacy state does not prove report exactness. Preserve both as evidence and force hardened-manifest rejudgment.",
     "signal_policy": "Send SIGTERM only to each attested exact legacy worker PGID; never SIGKILL, never signal a trainer or judge, and fail closed if any worker has a child.",
@@ -98,7 +98,7 @@
       "expected_hardened_manifest_sha256": "8d8de2fb7519717af865fd8de99f2e19dee673513f7f3c0892cb130090142c29",
       "legacy_manifest_delta_class": "causal_missing_inexact_escape_only",
       "legacy_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod1_46a0ce2",
-      "legacy_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod1_46a0ce2/worker.log",
+      "legacy_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod1_46a0ce2/worker_terminal20998.log",
       "hardened_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod1_46a0ce2_hardened_21e3015",
       "hardened_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod1_46a0ce2_hardened_21e3015/worker.log"
     },
@@ -143,7 +143,7 @@
       "expected_hardened_manifest_sha256": "d6d540f8204c18ce5a7b4b90a23cdd8ba59d7a87e7c65da8328dbe3c782a088e",
       "legacy_manifest_delta_class": "causal_missing_inexact_escape_only",
       "legacy_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod2_46a0ce2",
-      "legacy_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod2_46a0ce2/worker.log",
+      "legacy_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod2_46a0ce2/worker_terminal20998.log",
       "hardened_state_dir": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod2_46a0ce2_hardened_21e3015",
       "hardened_worker_log": "/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/scaleout_causal_pod2_46a0ce2_hardened_21e3015/worker.log"
     },
