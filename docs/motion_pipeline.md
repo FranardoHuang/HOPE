@@ -97,6 +97,12 @@ L0/L1、桌网和动力学完成；最终由智元 vendor MuJoCo Gate3/Gate3B（
 `docs/interfaces/motion_gmr_hope_frame_contract.md` 和
 `configs/motion_video_gmr_phase_counterfactual_results_20260711.json`。
 
+v5 后的 spatial-retarget 不是“把动作整体拖到球上就算过”。预注册 v1 只能对整条
+motion 原子施加保地 SE(2)（R0 平移；R1 冻结小角度 yaw+平移），且全十动作都必须
+做同卷。它是 planner 站位要求，不是录制桌/相机外参。当前只能产 proposal；每个精确
+candidate 必须物化 schema-2，再重跑 L0、vendor-MJCF L1 和整轨迹桌网 `>=5mm` 门，才能
+继续动力学/TOPP。见 `docs/operations/run_motion_spatial_retarget_screen.md`。
+
 当前资产:`hope_{forehand,backhand}_{v5,oblique,v4}_cal.npz`(v4=hopex 视频重跑;**hopex 资产
 与 v4_cal 同底片**——真源都是 raw_video_hopex/*_v4.mp4,动作组消融里两者不构成独立对照)。
 **swing 对试产件**(2026-07-08,修复版管线全链,判炸器双 PASS):

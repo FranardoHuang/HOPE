@@ -1,7 +1,7 @@
 # 新动作库、TOPP 与任意时刻下一拍
 
 日期：2026-07-11
-状态：原视频、canonical-beta GMR、grounding 和 240 Hz 安全屏均 10/10；canonical counterfactual HOPE frame/mirror 已验并消费 64 题，但 exact coverage 全 0，2-vs-4 与 TOPP 暂停，B/C 只保留为 spatial-retarget/vendor Gate3 候选
+状态：原视频、canonical-beta GMR、grounding 和 240 Hz 安全屏均 10/10；canonical counterfactual HOPE frame/mirror 已验并消费 64 题，但 exact coverage 全 0；已预注册全十动作的原子 SE(2) spatial-retarget proposal 屏，真正晋级仍卡 schema-2/L0/L1/桌网，2-vs-4 与 TOPP 暂停
 范围：仅离线处理与仿真。本文不授权任何真机动作。
 
 ## 结论先行
@@ -137,6 +137,38 @@ v5 随后实际消费同一张 64 题纸（full result SHA `c299b7a0...`），�
 动力学与 TOPP 后复审，最终动作与 2-vs-4 由智元 vendor MuJoCo Gate3/Gate3B 主判且不允许 reset。
 小账本为 `configs/motion_video_gmr_phase_counterfactual_results_20260711.json`，完整坐标合同见
 `docs/interfaces/motion_gmr_hope_frame_contract.md`。
+
+### spatial retarget 不是反推录制桌外参
+
+v5 的 `0/64` 把下一问限定得很精确：不改人体/机器人动作的空间路径，只问“整条动作放在
+哪个安全站位、取哪个源帧，能否服务这道 immutable question”。新的
+`configs/motion_video_spatial_retarget_prereg_20260712.json` 因此只允许一个对全轨迹原子应用的
+保地 SE(2) 变换：R0 只平移，R1 只在预冻结 `[-10,-5,0,5,10] deg` 上旋转再平移；
+`z=0`、scale=1、`det(R)=+1`，禁止镜像、逐帧变换和关节修补。站位上界为平移范数
+`0.30 m`、`|x|<=0.20 m`、`|y|<=0.30 m`。它表示 planner 在 HOPE 标准虚拟桌下的站位请求，
+绝不表示从空挥视频恢复出了房间相机/球桌外参。
+
+搜索必须遍历十条 motion 与全 64 题；B/C 的 intrinsic 证据只能改报告排序，不能从卷中
+删掉其他动作。每个安全/拍速合格源帧先把整轨迹绕 HOPE root 旋转，再求使拍心与题目
+XY 重合的最小平移；Z 不能改，仍用原 capture radius 严格判定。反事实飞行从 immutable
+球位置开始，不从空挥房间的拍心点开始。工具
+`scripts/screen_motion_spatial_retarget.py` 已用 7 个纯 CPU 回归锁住十动作不可跳过、保地 proper-rigid、
+站位上界、side/安全帧和 fail-closed certificate。`candidate_id` 还绑源 motion SHA 与 full-v5
+result SHA，不允许同名/同帧跨资产复用证书；virtual scorer 实现、venue physics、`9.5 cm`
+capture、`0.3 m/s` approach 与 `10 ms x 100` rollout 也全部显式内容绑定。
+
+当前只允许生成 `proposal`，不允许“搜到就晋级”。准候选必须对精确 `candidate_id` 内容绑定：
+
+1. 整轨迹使用该原子变换后的 runtime-order schema-2 物化；
+2. L0 `audit_motion_npz.py` PASS；
+3. L1 vendor-MJCF `audit_self_collision.py` PASS；
+4. 整轨迹桌/网 swept-clearance 零硬失败且最小余隙 `>=5 mm`。
+
+当前 prereg 明确 `certificate_bundle_preregistered=false`，临时塞一个“通过证书”会被拒绝；必须另立
+新的内容寻址 prereg 才能消费证书。原子平面变换在数学上保持 z 和机器人内部距离，但
+schema-2 改变了 body order/速度语义，所以 L0/L1 仍不得继承旧 GMR 结果而必须重跑。随后的动力学/
+平衡仍是 TOPP/RL 之前的独立门。运行说明见
+`docs/operations/run_motion_spatial_retarget_screen.md`。
 
 | 组 | 语义动作 | 文件 | 时长 / 帧数 | 当前角色 |
 | --- | --- | --- | --- | --- |
@@ -403,10 +435,12 @@ heading 若单独开，必须同时给 yawed/post-swing 起始状态覆盖；仅
    GMR 10/10、独立离散 grounding 10/10，以及 240 Hz 有限插值地面/自碰/拍柄-身体安全屏。
    没有实测身高，仍不是 A3 标定；桌网/动力学/schema-2 仍开。GMR-world→HOPE 桌球坐标和
    mirror 未证，所以逐帧回球率、击球相位和 2-vs-4 覆盖已 fail-closed，不启动 RL。
-6. 对幸存路径做 native/TOPP 双资产和重复门禁。
-7. 泛化动态 clip catalog 与共同问题轴；先在 CPU/Isaac smoke 证明四动作身份、side sign、题目绑定。
-8. 先跑 family/候选/时间律小消融，再跑 2-vs-4；不把所有轴一次打包。
-9. 最后才进入 event-driven recovery R0–R4，并以 immutable Isaac/MuJoCo 连续门禁裁决。
+6. 已完成设计/工具验证：全十动作×64 题的原子 SE(2) spatial-retarget proposal 合同；
+   实际 proposal 运行待恢复 full v5 结果，晋级待 schema-2/L0/L1/桌网 candidate certificate。
+7. 对通过上述证书和动力学的幸存路径做 native/TOPP 双资产和重复门禁。
+8. 泛化动态 clip catalog 与共同问题轴；先在 CPU/Isaac smoke 证明四动作身份、side sign、题目绑定。
+9. 先跑 family/候选/时间律小消融，再跑 2-vs-4；不把所有轴一次打包。
+10. 最后才进入 event-driven recovery R0–R4，并以 immutable Isaac/MuJoCo 连续门禁裁决。
 
 尚未完成的关键事实应始终写明：空挥素材没有真实接触真值；四动作 selector 未实现；任意时刻下一拍
 未通过；任何新动作均未获准真机执行。

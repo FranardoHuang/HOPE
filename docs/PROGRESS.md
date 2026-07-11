@@ -4,6 +4,20 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-12
 
+- Preregistered the post-v5 spatial-retarget proposal screen without using a
+  Pod/GPU or touching hardware. The contract screens all ten Franco/v6/v7
+  motions against every matching immutable question; B/C priority is ranking
+  only. It permits one whole-motion, ground-preserving SE(2) station transform
+  (R0 translation; R1 frozen `[-10,-5,0,5,10] deg` yaw plus translation), with
+  no z/scale/reflection/joint/per-frame edit and no capture-extrinsic claim.
+  Station bounds are norm `0.30 m`, `|x|<=0.20 m`, `|y|<=0.30 m`. The pure-CPU
+  tool regression is `7 passed`; tracked contract validation passes at prereg
+  SHA `d8c918ac...5a9f`. The exact full v5 result is not restored locally and
+  candidate certificates are deliberately not preregistered, so no real-data
+  proposal/result or motion promotion is claimed. A candidate still requires
+  exact schema-2 materialization, L0, vendor-MJCF L1 and whole-path table/net
+  clearance `>=5 mm`, followed by dynamics/balance and vendor Gate3/Gate3B
+  no-reset. TOPP, RL and hardware remain blocked.
 - Preregistered the next matched fresh-SZ four-seed paper at `model_4000.pt`
   without Pod access or runtime. It reuses the exact model-2000 K100 file,
   semantic/order/bank hashes and unchanged stability thresholds. The offline

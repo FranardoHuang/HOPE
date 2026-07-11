@@ -65,6 +65,13 @@ exact `0/64`、common support `0`，所以 2-vs-4 不能据此判优。
 再做 schema-2、L0/L1、桌网 swept-volume、动力学/平衡；TOPP 后重复全套审计。动作与 2-vs-4
 最终以智元 vendor MuJoCo Gate3/Gate3B 为主门，**不允许 reset 掩盖动作之间的连续状态**。
 
+spatial-retarget v1 不修改本页已冻结的 GMR-world→HOPE 坐标变换，而是在该目标坐标内
+增加一个“站哪里用哪一帧”的规划变量。只允许一个原子应用到整条 motion 的保地
+SE(2)：绕 HOPE robot origin 旋转，再平移 XY；Z/scale/镜像/关节/逐帧修改一律禁止。它的
+transform 不是 capture extrinsic，也不能回填本页的 per-asset frame matrix。完整合同在
+`configs/motion_video_spatial_retarget_prereg_20260712.json`。没有 candidate-specific schema-2/L0/L1/
+桌网整轨迹证书的输出只能叫 proposal。
+
 ## 若要回答“录制现场真实桌位”
 
 现有空挥不足，必须另采标定段；不得从本轮 `0/64` 反推桌外参。最低采集规格：

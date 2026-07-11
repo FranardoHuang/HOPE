@@ -1551,3 +1551,12 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    checkpoint finite、embedded iter=4000、同 adjacent hard-contract/精确 lineage，两份内容寻址审计
    合并后才能生 activation。validator 无 SSH/judge/signal 入口，`20 passed`；queue/prereg/tool
    SHA=`d4e69d91.../ca5ea90f.../e763ecb9...`。本条未触 Pod、未 activation、未跑 judge/真机。
+5. 【franco/Codex】**空挥空间重定向先冻结“可以怎么移”，不拿站位当外参——**
+   v5 `0/64` 之后新屏遍历全十动作和每道同侧 immutable question；B/C 只优先
+   排序，不跳过其他空挥。每个候选只能对整条轨迹原子施加保地 SE(2)：R0
+   平移，R1 在 `[-10,-5,0,5,10]°` 上旋转再平移；禁 z/scale/镜像/改关节/逐帧补丁，
+   站位上界范数 `0.30m`、`|x|<=.20m`、`|y|<=.30m`。这只是 HOPE 虚拟桌下 planner
+   站位，不是录制房间 table/camera extrinsic。纯 CPU `7 passed`，prereg SHA=
+   `d8c918ac...5a9f`；本机未恢复 full v5 大结果，certificate 也未预注册，所以当前
+   只有合同/工具验证，没有真资产 proposal 或晋级。后续精确 candidate 必须 schema-2+
+   L0+vendor L1+整轨迹桌网 `>=5mm`，再过动力学/Gate3B no-reset；TOPP/RL/真机均未开。
