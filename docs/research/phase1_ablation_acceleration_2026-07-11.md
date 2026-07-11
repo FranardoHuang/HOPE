@@ -158,6 +158,31 @@ formal target 格，其他三格是同 family 的因果尺。
 里的精确路径；文件大小/mtime 稳定后才 hash，并在每次导出前重验 judge、eval checkout 和 frozen
 training checkout。它不是“看到任何新文件就盲判”的目录 watcher。
 
+### 第一池终档后的因果三角回填
+
+原 24 臂的配方和标签保持冻结；自然终档释放的槽由第二张、独立预注册纸回填，不把新变量
+伪装成原矩阵。`configs/phase1_causal_followups_20260711.json` 把之前混在结果里的两个因素拆成
+`old-helper / S1-only / S1+guidance` 三角：
+
+- M3/swing 现有 old-helper 与 S1+guidance 都是 guidance `-0.95`，故补 S1-only
+  guidance `0` 的 seed 1/2；
+- M2/v4rg 现有 old-helper 与 S1-only 都是 guidance `0`，故补 S1+guidance
+  `-0.95` 的 seed 1/2。
+
+四臂仍从各自原始 `model_16999.pt` 续训 4000 update，只改变上述 guidance 缺边与 seed。
+parent 只有原路径/SHA 引用，**绝不**复制到新 run 的 hard-contract sidecar 旁判卷，避免把旧
+checkpoint 洗成新合同 lineage。新臂只判 `17000/18000/19000/20000/20998`；每臂 launcher
+验证 emitted hard-contract 后自动启动独立 q10 worker。q10 仍是 10/侧方向纸，不能停臂或晋级；
+q50 是空 jobs 的 inactive template，只有预注册差值/峰终反转触发且同 family/seed 对照齐全后
+才另开。M3 seed2 还绑定旧 M3-old PGID `1310472` 的只读终档释放门，launcher 永远不 signal
+该前驱。
+
+外置 launcher 位于训练 checkout 之外，按配置/脚本显式 SHA 授权；启动前重验 frozen train/eval
+commit 与 clean 状态、全部父模型/动作/题库/Kit launcher/judge/worker SHA、目标 GPU 少于四个
+compute/trainer 且至少 `5500 MiB` 可用、run 名未存在。它以原子 mkdir 抢占单臂目录，并只对自己
+刚创建且由 sidecar+`/proc` 双重绑定的 trainer/worker PGID 做失败清理。这个回填提高因果信息密度，
+不改变 causal/inexact 标签，也不授权真机。
+
 ## 把判卷当调度器，而不是事后报告
 
 评测队列按“这次读数改变下一步决定的概率 × 能释放/避免的后续 GPU 小时 ÷ 判卷成本”排序，

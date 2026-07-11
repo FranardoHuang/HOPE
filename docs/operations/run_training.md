@@ -496,6 +496,55 @@ written. Do not infer a terminal filename by adding 4000 to the resume label.
 The checked-in manifests and their deterministic generator encode 20998 and a
 regression rejects 20999.
 
+### Causal-triangle slot refill (2026-07-11)
+
+The four second-wave followups are frozen in
+`configs/phase1_causal_followups_20260711.json`. They fill only naturally idle
+trainer slots and do not edit the original 24 recipes: Pod1 GPU1/GPU0 run M3
+S1-only guidance-0 seed1/2; Pod2 GPU0/GPU1 run M2 S1+guidance-`-0.95`
+seed1/2. Pod1 M3 seed2 additionally requires exact predecessor PGID `1310472`
+to be absent plus a stable M3-old 20998 terminal. The gate is read-only and
+never signals that predecessor.
+
+Deploy the config and launcher under the external control root, never inside
+the live training checkout, then verify the bytes explicitly:
+
+```bash
+CONTROL=/workspace/codexschema/phase1_fresh_20260711/control/causal_followups_v1
+CONFIG="$CONTROL/phase1_causal_followups_20260711.json"
+LAUNCHER="$CONTROL/launch_phase1_causal_followups_20260711.py"
+test "$(sha256sum "$CONFIG" | awk '{print $1}')" = \
+  050d6047fee280feb5754ec568c043fb20e468f81ef049b7420f90ec81a0efc8
+test "$(sha256sum "$LAUNCHER" | awk '{print $1}')" = \
+  dca9b9df1a8639e1a1c5d653785e36d0d62f299e69cbe089c86a1eb999fb9e6c
+```
+
+Run read-only validation first, one exact arm at a time:
+
+```bash
+/usr/bin/python3 "$LAUNCHER" \
+  --config "$CONFIG" \
+  --expected-config-sha256 050d6047fee280feb5754ec568c043fb20e468f81ef049b7420f90ec81a0efc8 \
+  --expected-launcher-sha256 dca9b9df1a8639e1a1c5d653785e36d0d62f299e69cbe089c86a1eb999fb9e6c \
+  --pod pod1 --arm phase1_M3_S1_only_guidance0_seed1 validate
+```
+
+Only after validation passes, replace the final `validate` with `launch`.
+Repeat with the arm's registered Pod; do not edit its GPU from the command
+line. The launcher rechecks clean train `6d93bcb...` and eval `46a0ce2...`,
+all artifact/tool SHAs, GPU compute/trainer count and free memory, atomically
+claims a never-used run directory, starts one isolated trainer PGID, validates
+the emitted hard-contract, materializes the five q10 jobs and starts one
+isolated checkpoint worker. On a post-start failure it may signal only those
+new, sidecar-and-`/proc`-bound PGIDs. It contains no broad kill, checkout
+mutation or real-robot path.
+
+The original `model_16999.pt` is only an SHA-bound parent reference. Never copy
+it into the new training run beside the new hard-contract sidecar: doing so
+would launder checkpoint lineage. New cadence starts at 17000. Every q10 job is
+screen-only and cannot stop/promote; the generated q50 file has no jobs and
+remains inactive until its preregistered paired-evidence trigger is recorded.
+
 The current 10-second, no-wrap-teleport task does carry the robot state between
 clips, but its complete-clip timing is slower than the conservative venue
 A-B-A intervals. Do not claim that this pool proves arbitrary-time continuous

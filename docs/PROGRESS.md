@@ -36,6 +36,17 @@ Use this file for short project-state updates that future humans and agents need
   remains causal/inexact, and its terminal q10 waits for the paired M3-old
   `20998`; full hashes are in
   `configs/phase1_M3_S1_terminal_audit_20260711.json`.
+- Preregistered the second-wave causal-triangle refill instead of improvising
+  on newly idle GPUs. Four 4,000-update causal/inexact arms fill the missing
+  M3 S1-only guidance-0 and M2 S1+guidance-`-0.95` edges at seed 1/2. A
+  content-addressed external launcher revalidates both frozen clean checkouts,
+  every input/tool SHA, exact GPU capacity and run-name absence, then verifies
+  the emitted hard-contract before auto-starting independent
+  `17k/18k/19k/20k/20998` q10 cadence. The 16999 parent remains an unjudged
+  legacy reference, q10 cannot stop/promote and q50 is an inactive template.
+  Pod1 M3 seed2 has an additional read-only terminal gate on predecessor PGID
+  `1310472`; no existing trainer is signalled. The four followups are
+  preregistered but not yet launched in this entry.
 - Corrected a live terminal-cadence deadlock: causal continuations save their
   final checkpoint at `20998`, while four manifests/workers were waiting for
   impossible `20999`. Pod2 M2-S1 terminal is recursively finite and its

@@ -627,10 +627,26 @@ elements. The embedded schema-3 contract SHA matches the adjacent contract
 launcher did not persist an OS exit code, so the terminal checkpoint,
 contiguous log, absent process and zero error signatures are the recorded
 completion evidence. Its legacy-motion parent keeps this result causal and
-inexact. The immutable terminal q10 remains deliberately paired behind the
-still-running M3-old `20998`, so integrity is passed but evaluation is not yet
-claimed; the machine-readable audit is
+inexact. M3-old has since naturally produced its own `model_20998.pt` and
+exited; the paired immutable terminal q10 is running while its read-only
+terminal-integrity audit is finalized, so no paired result is claimed yet. The
+M3-S1 machine-readable audit is
 `configs/phase1_M3_S1_terminal_audit_20260711.json`.
+
+Natural terminal release also opens a separate second-wave causal paper rather
+than permission to mutate the frozen 24-arm matrix. The preregistration
+`configs/phase1_causal_followups_20260711.json` completes two
+old-helper/S1-only/S1+guidance triangles with four arms: M3 gets missing
+S1-only guidance-0 seed 1/2; M2 gets missing S1+guidance-`-0.95` seed 1/2.
+All remain 4,000-update causal/inexact continuations. Their external
+content-addressed launcher refuses dirty/wrong train or eval checkouts,
+wrong assets/tools, a fourth occupied GPU slot, reused run names or a live
+M3-old predecessor; it verifies each emitted hard-contract before starting an
+independent `17000/18000/19000/20000/20998` q10 worker. The original 16999
+parent is never copied beside the new sidecar or judged as the new contract.
+q10 remains direction-only and q50 is an inactive separate template. At this
+point the four followups are preregistered but not yet launched; no existing
+trainer has been signalled.
 
 `SZ`'s target label is now explicitly scoped: it is the only current fresh
 cell whose zero-friction plant can be replayed with the same schema-v3

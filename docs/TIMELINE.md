@@ -1374,3 +1374,12 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `16999..20998` 且 NaN/Inf/Traceback/OOM/malloc/Killed 均为 0。launcher 没留 OS exit code，
    已在 audit 中明说；legacy parent 令结果保持 causal/inexact。immutable terminal q10 要等
    M3-old 同到 20998 才一起判，完整哈希在 `phase1_M3_S1_terminal_audit_20260711.json`。
+23. 【franco/Codex】**空槽不乱塞重复臂，预注册成两个因果三角的四条缺边**——M3 现有
+   old-helper/S1+guidance 都带 `-0.95`，补 shared-face S1-only guidance=0 seed1/2；M2
+   现有 old-helper/S1-only 都是 guidance=0，补 S1+guidance=`-0.95` seed1/2。四臂从各自原
+   16999 parent 续 4000 update，仍是 causal/inexact。外置 launcher 以显式 config/script SHA
+   授权，重验 train `6d93bcb` / eval `46a0ce2` clean、全部资产/工具、每卡 `<4` compute 且
+   free>=5500MiB、run 名唯一，emitted hard-contract 通过后自动接
+   `17000/18000/19000/20000/20998` q10 worker；16999 绝不复制到新 sidecar 旁洗 lineage，q50
+   只留 inactive 模板。M3 seed2 还只读等 PGID 1310472 正常终档，绝不 signal 前驱。本条记录时
+   四臂仅预注册未启动，原池配方未改。
