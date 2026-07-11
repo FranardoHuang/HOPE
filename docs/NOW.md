@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 2026-07-12 现场状态(03:14 CST 更新)
+## 2026-07-12 现场状态(04:15 CST 更新)
 
 - **Phase-1 仍是真满池**:四条原始续训自然终档后，四条独立预注册的因果缺边补进空槽；
   现在两 Pod 各 12 条 live trainer、每 GPU 恰好 4 条，加上 4 条 clean terminal，共 28 条
@@ -45,6 +45,10 @@ Rules:
   lineage=1/causal=0；接受日志的 word-boundary NaN/Inf/Traceback/OOM/malloc/Killed 仍为0。
   两 Pod 各12 live+2 terminal、每卡4条，十个登记 worker 均按精确 PGID 存活、无 child judge/Kit；
   GPU util `80–97%`、显存约 `22.9–23.2/32.6 GiB`，available RAM `958/964 GB`、swap 0。
+- 04:15 CST 再查仍为两 Pod 各 12 live+2 terminal、每卡 4 条；train/eval checkout 继续 clean
+  `6d93bcb`/`46a0ce2`，十个 worker 全活、无 child judge/Kit。逐臂最新 checkpoint 的文件名/
+  内嵌 iteration、finite、相邻 contract SHA 和 fresh/causal lineage 仍全匹配，最近 3 MB/臂异常词
+  为 0；GPU util `74–94%`、显存约 `22.9–23.2 GiB`，available RAM `905/919 GB`。未发信号。
 - Pod1 的 SSH 映射约一小时 connect timeout；RunPod 控制台也未登录/无法只读确认，因此没有
   重启或重复发任务。23:45 CST SSH 恢复后的全审计显示训练未中断：仍为 12 live+2 terminal、
   4/4/4，所有 iteration 连续前进，错误 0，训练树 clean，五个 worker 全活。
@@ -100,26 +104,32 @@ Rules:
   无法生成 activation，且 activation 本身没有 judge 入口。已知 seed1 4k=`.50`，所以 family
   stability 按原 worst-seed `.65` 门槛必然不过；该卷只区分 seed4 是晚熟还是持续弱，不能洗成
   稳定 baseline。源码护栏 20 tests 通过；当前 seed1/2 已越过4k，但 seed3/4 最新仅约
-  `2600/2800`，四臂 barrier 未齐，尚无 Pod readiness union/activation/runtime。
-- **厂商 MuJoCo Gate 3 现在是最终裁决门，不是 Isaac**：它把假球→真规划器→同款 C++ runner→
-  智元 A3 MuJoCo 串成部署闭环；候选首先要在这个版本保持平衡、完成挥拍/恢复且不靠人工 reset，
-  再谈 Isaac 分数。Isaac/MuJoCo 同 policy 的巨大差异另作归因轴：现已完成 PhysicalBall Phase-B
+  `2850/3060`，四臂 barrier 未齐，尚无 Pod readiness union/activation/runtime。
+- **最终裁决分两层，Isaac 不投最终票**：Gate3 绑定同一 C++ runner/vendor MJCF/标定 plant/model，
+  先过 first tick 与连续稳定硬前置；Gate3B 必须复用同 runtime，再用 immutable random-arrival q50
+  主判 first-strike non-regression、回球率和质量。候选要在智元 MuJoCo 里保持平衡、完成挥拍/恢复且
+  不靠人工 reset，不能用更高 Isaac 分数覆盖失败。Isaac/MuJoCo 同 policy 的巨大差异另作归因轴：
+  现已完成 PhysicalBall Phase-B
   源码门（attempt token、真实 served/contact/landing、完整 provenance，focused `63 pass/1 artifact skip`），
   但 clean-detached 100 题 runtime 和高速拍面 substep 几何尚未验证，所以不能拿当前 Isaac `.99`
   给 MuJoCo 塌陷洗白。
-- 179-D 到 Gate3 的 fail-closed 源码链已进 main：schema2 原子携带拍位/拍速/正X unit normal/
+- 179-D 到 Gate3 的 loader 源码链已进 main：schema2 原子携带拍位/拍速/正X unit normal/
   zero-rho，严格绑定 face/bank/SHA metadata，坏包/无解显式 `valid=0` revoke，正式 flat 先于可选
   mirror 发布。修复通用 ONNX TypeInfo 生命周期 UB 后，Pod1 隔离 ROS/AimRT-enabled Release 三目标
   已全链接，formal SZ 179 loader 1/1、native 205 pass/9 optional skip；安全 preflight rc0 精确输出
   obs179/双 SHA，日志确认零 backend init/start。它只做零观测 ONNX prewarm，不是 backend first tick；
-  per-clip normal envelope、canonical recovery、first tick 和 vendor MuJoCo 行为卷仍 open。
-- **连续等待按一个耦合 phase 设计，不把三项单独过关相加**：上一拍卸载/恢复平衡、回到通用 ready、
-  随机时刻接下一题会共享同一段状态与动作，因此先做机制/梯度冲突推理，再做有交互项的混合比例消融；
-  单 reward 胜者只能筛项，不能宣称组合最优。先比较 Ace 式显式 safe bridge/prepare 与 HITTER 式
-  unified recovery option；只有后者确有必要才扫 `2^3` 和固定总预算 mixture。终判仍用无 reset 的
-  Gate 3 连续卷。
+  但真实 formal train bank 暴露出尚未进 main 的拍面语义缺口：外部正 X normal 是 physical
+  striking-face B，179 actor 尾部却是 raw mount +Y/A；反手 raw bank 724/724 行 `x<0`。当前 main
+  尚缺按 clip `[+1,-1]` 的 B→A 转换，故旧 loader pass 不能外推为反手 engage。修复分支正在用真实
+  bank 重导、球冠+参考半球双门和 vendor full build 复核；canonical recovery、first tick 和行为卷仍 open。
+- **连续等待按一个耦合 phase 设计，不把三项单独过关相加**：A=显式 interruptible bridge、
+  B=actor-visible canonical ready tuple、C=完整上一题 tuple 的结构轴已进 main；当前混代 idle 和
+  static handoff 清零 last-action 都不是正式臂。A 还冻结了 executed-action→last-action 投影、逐 tick
+  ownership、loss mask、duration-correct option return 与三臂同 actor-sample/update 预算。只有结构
+  失败才把平衡债/ready potential/随机来球可接战性先归一化，做完整 `2^3`，再做固定总预算 mixture；
+  safety/self-hit 不可补偿。`50 passed`，但 24 项执行绑定仍 null，launch-check 必须失败。
 - 已验证基础设施、plant/q50 证据、4k 同卷护栏、动作 frame/空间 proposal screen、179 Gate3
-  source+formal loader gate 已收口到 `main@5255c6d`；动作 2-vs-4、TOPP、plant 标定、backend
+  source+formal loader gate 与 recovery 设计/校验已收口到 `main@e10922a`；动作 2-vs-4、TOPP、plant 标定、backend
   first tick 与连续 Gate3 rollout 仍按 open gate 记账。NOW 只保留 main 活板版本，feature 分支的
   旧 NOW 不回灌。
 
