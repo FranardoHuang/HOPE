@@ -629,7 +629,7 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 | --- | --- | --- | --- | --- |
 | 全栈正确性尺+C++安全包+拍心/拍速合同收口 | ★★★ | **Codex** | `main` | 双 RunPod 源码验收已绿(portable/ROS C++、whole-body、planner);下一检查点=重出 fresh schema-v3 ONNX+修后考卷,旧判分器数字不入账 |
 | V5 专业动作可迁移性+Phase 加速器 | ★★★ | **Codex** | `main` | manifest+保守 halving 已就绪;下一检查点=验证触球帧/拍速口径,把行程/时间律报告接成 feasibility producer,再做 BankExam→scorecard adapter;两者完成前不自动发训练 |
-| Phase-1 schema-v3 Isaac 同题 adapter + 候选重排 | ★★★ | **Codex** | `codex/schema-v3-isaac-adapter` | **实现中**: 先盘点两 pod/cc 现场,再实现 evaluator-owned schedule/exam split,用 M3f/M2/G1 每侧 10 题 canary 验尺;通过后只给 `ns=0` 存活臂补 50/侧、连续球、噪声和第二 seed。旧 packed-ID 原型只作设计证据 |
+| Phase-1 schema-v3 Isaac 同题 adapter + 候选重排 | ★★★ | **Codex** | `codex/schema-v3-isaac-adapter` | **六卡训练中(07-11)**:历史主矩阵/q50/稳健性/连续卷已收口,M3f 仍是历史诊断第一;fresh runtime-order schema2 动作+v3 bank+31/31 零摩擦的 179D smoke 已过。Pod1=M3 old/S1+fresh seed1,Pod2=M2 old/S1+fresh seed2,六臂均达首 PPO iter,固定训练 checkout `6d93bcb`,续训 lineage=0/fresh=1;pair 合同只差 pairing 一键。最新实现/证据 `fb2445e`;下一检查点=终档 SHA 绑定+同卷 Isaac/MuJoCo,完成前不报胜者 |
 | HitterPure RallyFinal clean-base task: x-lock/lunge, settle/slip, backhand clearance, front-facing constraints + Isaac/AGI rally gates | ★★★ | codex for dongc1 | `hitter` | PATCH COMPLETE / GATES PENDING 2026-07-10: clean-base Final task, native move-settle-arm readiness, strict metadata/eval/gate plumbing and docs implemented; host tests + x86 build pass. Next = Isaac smoke/train/ablation, Final ONNX MuJoCo scores, then no-rescue AGI closed-loop with physical contact/landing evidence |
 | **加速度包络标定两件套(franco 07-09,时间律的下一层)**:①跟踪破裂标定(chirp/斜坡加压参考×现成跟踪策略,逐关节"边平衡边跟"真上限=判炸器 L1 升级);②贴限 vs 摊时消融(v5syn T_a 三档)——R9d 读数落地后一起排 | ★★★ | claude | — | 设计已入 research 时间律文档§六 |
 | GMR 源头修复(pod GMR 分支 `hope-frame0-warmup`:warm-up/帧0/逐关节限位旗标)+ 判炸器(repo 分支 `motion-feasibility-audit` 已推 origin)——两分支待 franco 审;接线与 L6 重生成见队列 0.6/0.7 行 | ★★★ | claude | 两分支 | 已验证收口(TIMELINE 07-08);合入即防复发 |
@@ -649,7 +649,7 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 
 ## Queued (priority order)
 
-1. S1 纯因果对照:同起点/同 +4000 的 old helper、S1-only、S1+guidance;只有 S1-only 仍留死区才加 guidance。
+1. S1 纯因果对照:同起点/同 +4000 的 old helper 和 S1-only 已在 M3/M2 两 family 配对训练;只有终档 S1-only 仍留死区才加 S1+guidance,现在不抢卡。
 2. N1 三组:场馆真实时间相关且逐渐收敛的预测误差 / 同幅值打乱时序 / 显式 confidence 或历史输入。
 3. R8 拆旗标:envelope-as-penalty 和 RSI stand-height 分开,不再用一臂猜两个因果。
 4. W2/S2a/加固包只在 schema-v3 canary 和 `ns=0` shortlist 后排,不抢尺子前面的算力。
