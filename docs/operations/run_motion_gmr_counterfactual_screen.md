@@ -86,3 +86,8 @@ exact `0/64` 不是“动作无效”，只是 fixed-position zero-retarget 无�
 反手拉 B/C 为显式 spatial-retarget 候选；2-vs-4 继续暂停。TOPP 必须等空间重定向、schema-2、
 L0/L1、桌网与动力学门通过；最终动作/动作库选择由智元 vendor MuJoCo Gate3/Gate3B 主判，
 连续动作评测不允许 reset。
+
+下一步的全十动作×immutable question 原子 SE(2) proposal 屏已单独预注册；它不修改
+本轮 frame matrix，也不反推录制现场桌外参。恢复 full v5 大结果、运行 proposal 屏以及
+schema-2/L0/L1/桌网证书边界见
+`docs/operations/run_motion_spatial_retarget_screen.md`。

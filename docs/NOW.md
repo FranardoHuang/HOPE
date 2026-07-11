@@ -71,6 +71,11 @@ Rules:
   原64题；所有 motion/library exact 都是 `0/64`、common support=0，所以 2-vs-4 仍无结论，
   也不等于动作无效。反手拉 B/C intrinsic 为 `32/32@.5444`、`27/32@.5155`，保留给 spatial
   retarget；当前瓶颈是击球点空间适配，不是 clip 长度，TOPP 暂停到 schema2/L0/L1/桌网/动力学门。
+- **空间适配现在只开放安全的整轨 SE(2) proposal**：全十动作×同侧 64 题都在卷内；R0 只平移，
+  R1 只允许 `[-10,-5,0,5,10]°` 小角度旋转再平移，严禁改 z/尺度/镜像/关节或逐帧扭曲。
+  prereg/tool/scorer/source SHA 已自绑定，专项 7 tests 与旧 v5 合并回归通过；但本机没有 full v5
+  大结果，certificate 也故意未预注册，所以尚无真实 proposal/accepted motion。任何候选必须再过
+  exact schema2、L0、vendor L1、整轨桌网 `>=5mm` 和动力学，才可进入 TOPP/RL/Gate3。
 - 连续时序缺口仍在：完整 clip-wrap+hold 同侧理论中位约 `3.75 s`；场馆 `1.903 s` 来自
   重叠 n=21、16/21 高球、2.5s 截尾，只证伪现役节奏，不作目标。T1 训练端核心已在
   `be5d7cf` 实现：仅 exact strike 后原子揭题、固定 deadline、miss 也消耗、全 carry-state。

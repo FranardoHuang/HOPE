@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "plan_id": "motion-video-spatial-retarget-20260712-v1",
+  "status": "preregistered_proposal_ready_promotion_blocked",
+  "scope": "CPU-only all-ten-motion by-immutable-question bounded atomic SE2 phase/station proposal screen; no capture-table extrinsic, schema-2 acceptance, TOPP, RL, Gate3 pass or robot authorization",
+  "cpu_only": true,
+  "CUDA_VISIBLE_DEVICES": "",
+  "real_robot_commands_authorized": false,
+  "contact_phase_truth": null,
+  "capture_table_pose_observed": false,
+  "tool_contract": {
+    "path": "scripts/screen_motion_spatial_retarget.py",
+    "bytes": 32425,
+    "sha256": "22de25aa4f47767c4832438823a011e115f8bc93d390bd0317b583974a5483e1"
+  },
+  "predecessor": {
+    "full_v5_result": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_v5/phase_safety_result.json",
+      "bytes": 792241,
+      "sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53"
+    },
+    "compact_ledger": {
+      "path": "configs/motion_video_gmr_phase_counterfactual_results_20260711.json",
+      "bytes": 6774,
+      "sha256": "f8e9e3b68bdb36f12383869f82346c36fc4ea7adff8c53e8d4666e5c47d4eb87"
+    },
+    "question_semantic_sha256": "4dfa0548d898fa6456d09261216e26ff9547c1a9dca2da221835c3cfa25332c7",
+    "frame_evidence_sha256": "e70492becf5a2fae5ee74724d22f9ca9d2e874d535231e3ee6649f01669048f0",
+    "exact_zero_retarget_coverage_all_assets": true,
+    "interpretation": "zero fixed-position coverage is the reason to test explicit bounded station placement; it is not evidence that any motion is intrinsically invalid"
+  },
+  "asset_ids": [
+    "franco_forehand_block",
+    "franco_backhand_block",
+    "franco_forehand_loop",
+    "franco_backhand_loop_a",
+    "franco_backhand_loop_b",
+    "franco_backhand_loop_c",
+    "v6_forehand_block",
+    "v6_backhand_block",
+    "v7_forehand_block",
+    "v7_backhand_block"
+  ],
+  "candidate_priority": [
+    "franco_backhand_loop_b",
+    "franco_backhand_loop_c",
+    "franco_backhand_loop_a",
+    "all_other_assets_in_frozen_order"
+  ],
+  "candidate_priority_is_ranking_only": true,
+  "transform_contract": {
+    "group": "SE2_ground_preserving_proper_rigid",
+    "scope": "one_atomic_transform_for_entire_motion_question_candidate",
+    "rotation_origin": "canonical_HOPE_robot_origin",
+    "z_translation_m": 0.0,
+    "scale": 1.0,
+    "reflection_allowed": false,
+    "per_frame_transform_allowed": false,
+    "joint_edit_allowed": false,
+    "capture_extrinsic_claim": false,
+    "yaw_grid_deg": [
+      -10.0,
+      -5.0,
+      0.0,
+      5.0,
+      10.0
+    ],
+    "station_bounds_m": {
+      "max_translation_norm": 0.3,
+      "max_abs_x": 0.2,
+      "max_abs_y": 0.3
+    },
+    "semantics": "a planner station-placement requirement in the canonical counterfactual table, never a recovered pose of the room/camera/table used to record the air swing"
+  },
+  "search_contract": {
+    "tiers": {
+      "R0": {
+        "yaw_grid_deg": [
+          0.0
+        ],
+        "semantics": "translation_only"
+      },
+      "R1": {
+        "yaw_grid_deg": [
+          -10.0,
+          -5.0,
+          0.0,
+          5.0,
+          10.0
+        ],
+        "semantics": "bounded_yaw_plus_translation"
+      }
+    },
+    "phase_source": "every_v5_hard_safe_speed_eligible_source_frame",
+    "xy_alignment": "exact_question_xy_minimum_station_translation",
+    "z_alignment": "no_z_edit_strict_capture_radius_only",
+    "ball_state": "immutable_question_position_velocity_spin",
+    "motion_state": "vendor_MJCF_official_right_racket_site_position_velocity_local_plus_y_face_from_v5",
+    "rank_order": [
+      "smaller_translation_norm",
+      "smaller_absolute_yaw",
+      "larger_virtual_return_margin",
+      "larger_source_racket_body_clearance",
+      "earlier_frame",
+      "candidate_id"
+    ],
+    "max_reported_proposals_per_motion_question_tier": 16,
+    "report_truncation_semantics": "report-size limit only; zero reported/accepted is not a proof of global infeasibility"
+  },
+  "virtual_return_contract": {
+    "physics": {
+      "path": "configs/ball_physics_venue.yaml",
+      "bytes": 14554,
+      "sha256": "2e58221442665ddad7cc6dcc18d5c811dec1b0c47439b81c1c744b5148169a27"
+    },
+    "scorer_dependency": {
+      "path": "hope_training/whole_body_tracking/scripts/virtual_return_scorer.py",
+      "bytes": 13177,
+      "sha256": "41fe2a07d161979b76eca3f7f58723381877ab8406095ebde2ead10a67d64d11"
+    },
+    "table_geometry": {
+      "surface_z_m": 0.76,
+      "net_x_m": 1.87,
+      "far_x_m": 3.24,
+      "half_width_m": 0.7625,
+      "net_height_m": 0.1525
+    },
+    "scorer": "same_numpy_virtual_return_scorer_and_venue_constants_as_v5",
+    "capture_radius_m": 0.095,
+    "minimum_approach_speed_mps": 0.3,
+    "rollout_h_s": 0.01,
+    "rollout_steps": 100,
+    "ball_start_for_flight": "immutable_question_ball_position",
+    "capture_position_error": "norm(mapped_racket_site_minus_immutable_question_position); XY is exactly aligned and only unchanged Z residual remains"
+  },
+  "promotion_contract": {
+    "certificate_bundle_preregistered": false,
+    "required_candidate_certificates": [
+      "schema2_materialization",
+      "l0_static_motion",
+      "l1_vendor_mjcf_self_collision",
+      "table_net_swept_clearance"
+    ],
+    "certificate_scope": "exact candidate_id and the exact atomic transform applied to every row of the whole motion",
+    "minimum_table_net_clearance_m": 0.005,
+    "ground_self_collision_invariance": "proper planar rigid placement preserves z and internal distances, but schema-2 L0/L1 reruns are still mandatory because conversion/body-order/velocity semantics are new",
+    "dynamics_balance_gate_after_candidate_certificate": "still_required_before_TOPP_or_RL",
+    "topp": false,
+    "rl": false,
+    "real_robot": false,
+    "final_arbiter": "agibot_vendor_mujoco_gate3_gate3b_no_reset"
+  },
+  "current_blockers": [
+    "the content-bound 792241-byte full v5 result is not restored in this laptop checkout",
+    "the ten candidates are grounded GMR diagnostics rather than runtime-order schema-2 NPZ assets",
+    "no candidate-specific whole-trajectory table/net swept-clearance certificate exists",
+    "existing L0 and L1 tools must rerun on each exact materialized schema-2 candidate",
+    "dynamics/balance and final AgiBot vendor MuJoCo Gate3/Gate3B no-reset gates remain downstream"
+  ],
+  "decision_rules": [
+    "screen every asset; B/C priority changes report order only and never removes another motion",
+    "a virtual-return proposal without all four exact candidate certificates is not an accepted spatial retarget",
+    "do not infer the air-swing capture table or camera extrinsic from a proposal transform",
+    "do not start TOPP merely because a proposal has a shorter or better-looking phase",
+    "do not start RL or hardware from this screen"
+  ]
+}

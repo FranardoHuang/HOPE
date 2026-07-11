@@ -664,6 +664,27 @@ gates; final motion/library acceptance belongs to AgiBot vendor MuJoCo
 Gate3/Gate3B with no reset.  Compact ledger:
 `configs/motion_video_gmr_phase_counterfactual_results_20260711.json`.
 
+The next spatial step is now preregistered and mechanically checked, but has
+not been promoted or run against restored private evidence.  Plan
+`configs/motion_video_spatial_retarget_prereg_20260712.json` (SHA
+`d8c918ac...5a9f`) keeps all ten motions on every matching immutable question;
+the B/C intrinsic result affects ranking only.  R0 permits translation only;
+R1 permits the frozen yaw grid `[-10,-5,0,5,10] deg` plus translation.  Each is
+one ground-preserving proper SE(2) transform applied atomically to the entire
+motion: no z, scale, reflection, joint or per-frame edit, and no capture-table
+extrinsic claim.  The station envelope is norm `0.30 m`, `|x|<=0.20 m`,
+`|y|<=0.30 m`.  The CPU tool/test contract passes `7` tests and rejects skipped
+assets, unsafe/wrong-side frames, out-of-envelope stations, clobbering and
+incomplete certificates.  The laptop lacks the exact 792,241-byte full v5
+result, and the current manifest deliberately records
+`certificate_bundle_preregistered=false`; therefore it can produce only
+proposals after exact evidence restore.  Promotion requires candidate-bound
+runtime-order schema-2 materialization, L0 PASS, vendor-MJCF L1 PASS and a
+whole-trajectory table/net swept-clearance PASS with at least `5 mm` margin.
+Dynamics/balance, TOPP, RL and vendor Gate3/Gate3B no-reset remain downstream.
+No GPU, Pod, trainer or hardware was touched.  Reproduction and the restore
+boundary are in `docs/operations/run_motion_spatial_retarget_screen.md`.
+
 This is not yet a training result. The videos contain no ball/table/contact
 truth; final-pixel mirror status is now verified but monocular depth/capture-table
 extrinsic remain unverified, and the three Franco

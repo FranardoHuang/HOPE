@@ -456,6 +456,23 @@ extrinsic and real-returnability truth remain absent.  Reproduction commands
 and no-clobber checks are in
 `docs/operations/run_motion_gmr_counterfactual_screen.md`.
 
+The spatial-retarget proposal screen does not need another copy of the videos
+or GMR pickles, but it does require the **full** v5 JSON because the tracked
+compact ledger intentionally omits the 64 questions and per-source-frame racket
+states. Restore that one file into a new ignored local root, for example:
+
+```text
+/private/ignored/motion_video_intake_20260711/phase_safety_v5/phase_safety_result.json
+```
+
+It must be exactly 792,241 bytes with SHA-256
+`c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53`.
+Pass it through `--predecessor-result`; do not change the absolute historical
+path inside the tracked preregistration and do not overwrite accepted v5.
+Candidate-specific schema-2/L0/L1/table-net certificate artifacts do not yet
+exist and must not be fabricated from the compact ledger. See
+`docs/operations/run_motion_spatial_retarget_screen.md`.
+
 ### Venue strike timing table
 
 The continuous-rally timing audit uses the processed strike event table, not
