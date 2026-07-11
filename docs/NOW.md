@@ -25,7 +25,34 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 2026-07-12 现场状态(04:15 CST 更新)
+## 现阶段短报（2026-07-12 05:10 CST）
+
+- **现在解决什么**：把“智元 vendor MuJoCo runtime/plant + 我们自己的 planner + 我们自己的
+  policy”接成一条不会假绿的最短 demo 链。vendor 环境是裁判；planner 与 policy 都可升级，
+  但必须成对绑定版本并过同一题表。当前先修 179-D 反手 `physical face B -> raw mount A`
+  语义，以及 `--no-publish --model-preflight-only` 会错误放宽模型合同的假预检。
+- **刚得到什么**：04:45–04:54 只读巡检确认两 Pod 仍各 `12 live + 2 terminal`、每 GPU
+  恰 4 条；28/28 最新 checkpoint finite、iteration/contract/lineage 全对，最近日志无
+  NaN/OOM/提前退出，10 个 checkpoint worker 全活。跨引擎差异已定位两层：Isaac 当前是
+  analytic virtual-ball 高饱和判分器；同一 fresh model4000 前手击球位误差在 vendor MuJoCo/
+  Isaac 约为 `13.15/2.48 cm`，所以还存在真实闭环执行差异，不能靠改阈值解决。
+- **代码交流状态**：recovery A/B/C 合同与 validator 已随 `e10922a/eac81e4` 进入 main；
+  `origin/main@a6274be` 最新只合了 yikang 的 Gate3 归属说明，并没有合入
+  `head_discipline`、stand viewer 或 `reference_oracle` 法线修复。上述小改正在逐项审计和
+  选择性移植，禁止把旧基线整支硬并。face179 修正版通过本地 39 项回归，但红队发现 strict
+  preflight blocker；修完即合源码，vendor 行为证据仍明确记 `Partial`。
+- **几天内 demo 的最短闭环**：D0 先做 vendor MuJoCo 中可录屏的固定同卷 demo——真实
+  planner 发题、production C++ runner、fresh SZ 的最佳 finite checkpoint，正/反手各一组
+  physical returns；每个模型/planner/runtime/MJCF/题表都带 SHA。D0 不冒充连续实战。
+  D1 再要求同一进程内 3–5 球 no-reset；恢复/reward mixture、四动作、TOPP 与标定 plant
+  不阻塞 D0，但继续并行排队。任何真机 demo 仍受 G07 独立安全门约束，本阶段不发真机命令。
+- **未来 24 小时决策**：①拆开 no-publish 与 legacy-model 豁免并合 face179；②严格重导
+  exact SZ 179 ONNX，跑 vendor full Release/GTest/model preflight；③先查站姿 integrator/PD、
+  action clip、station/oracle localization 与 planner normal/target 是否和该 policy 一致；
+  ④能 first tick 就立即跑 D0 小卷并录完整 ledger，不能则把失败精确归到 planner、policy、
+  plant 或 runtime 中的一层。定期任务只做巡检；阶段结论统一更新本节，稳定时不刷聊天长报。
+
+## 详细现场证据（04:15 CST 基线；后续以短报为入口）
 
 - **Phase-1 仍是真满池**:四条原始续训自然终档后，四条独立预注册的因果缺边补进空槽；
   现在两 Pod 各 12 条 live trainer、每 GPU 恰好 4 条，加上 4 条 clean terminal，共 28 条
