@@ -194,6 +194,85 @@ def _validate_box(value: Any, label: str) -> tuple[float, float]:
     return lo, hi
 
 
+def _validate_proper_rigid_matrix(value: Any, label: str) -> np.ndarray:
+    transform = np.asarray(value, dtype=np.float64)
+    if transform.shape != (4, 4) or not np.isfinite(transform).all():
+        raise ScreenError(f"{label} must be a finite 4x4 matrix")
+    if not np.allclose(transform[3], [0.0, 0.0, 0.0, 1.0], atol=1e-12, rtol=0.0):
+        raise ScreenError(f"{label} bottom row must be [0,0,0,1]")
+    rotation = transform[:3, :3]
+    if not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-9, rtol=0.0):
+        raise ScreenError(f"{label} rotation must be orthonormal")
+    if not math.isclose(float(np.linalg.det(rotation)), 1.0, abs_tol=1e-9, rel_tol=0.0):
+        raise ScreenError(f"{label} must be a proper rigid rotation (det=+1)")
+    return transform
+
+
+def _crosscheck_frame_contract_evidence(
+    plan: dict[str, Any], evidence_path: Path
+) -> None:
+    evidence = _read_json(evidence_path, "frame-contract evidence")
+    if evidence.get("status") != "complete_verified_per_asset_hope_frame_and_not_mirrored":
+        raise ScreenError("frame-contract evidence is not a completed verified result")
+    frame = evidence.get("frame_contract")
+    mirror = evidence.get("mirror_contract")
+    if not isinstance(frame, dict) or not isinstance(mirror, dict):
+        raise ScreenError("frame-contract evidence lacks frame/mirror records")
+    if (
+        frame.get("status") != "verified"
+        or frame.get("transform_scope") != "per_asset"
+        or frame.get("gmr_world_to_hope_table_transform_verified") is not True
+    ):
+        raise ScreenError("frame-contract evidence does not verify per-asset transforms")
+    if (
+        frame.get("capture_table_pose_observed") is not False
+        or frame.get("target_table_pose_semantics")
+        != "canonical_counterfactual_HOPE_virtual_table_relative_to_robot_origin_not_capture_extrinsic"
+    ):
+        raise ScreenError("frame evidence must retain counterfactual-table semantics")
+    if mirror.get("status") != "verified_not_mirrored" or mirror.get("side_swap_required") is not False:
+        raise ScreenError("frame evidence does not verify no-mirror/no-side-swap semantics")
+    semantics = evidence.get("returnability_semantics")
+    if not isinstance(semantics, dict) or semantics.get("real_capture_table", {}).get("coverage") is not None:
+        raise ScreenError("frame evidence must keep real-capture returnability null")
+    eligibility = evidence.get("eligibility")
+    if not isinstance(eligibility, dict) or eligibility.get(
+        "immutable_64_question_returnability_phase_screen"
+    ) is not True:
+        raise ScreenError("frame evidence does not authorize the diagnostic question paper")
+
+    expected_ids = plan["expected_asset_ids"]
+    rows = evidence.get("assets")
+    if not isinstance(rows, list) or [row.get("asset_id") for row in rows] != expected_ids:
+        raise ScreenError("frame evidence must list every expected asset in exact order")
+    by_id = {row["asset_id"]: row for row in rows}
+    transforms = plan["frame_contract"]["per_asset_gmr_world_to_hope_matrix_4x4"]
+    input_by_id = {row["asset_id"]: row for row in plan["inputs"]}
+    for asset_id in expected_ids:
+        row = by_id[asset_id]
+        if row.get("mirror_status") != "verified_not_mirrored" or row.get("side_swap_required") is not False:
+            raise ScreenError(f"frame evidence mirror status changed for {asset_id}")
+        if row.get("transform", {}).get("matrix_4x4") != transforms[asset_id]:
+            raise ScreenError(f"frame evidence transform changed for {asset_id}")
+        if row.get("grounded_gmr", {}).get("sha256") != input_by_id[asset_id]["input"]["sha256"]:
+            raise ScreenError(f"frame evidence GMR SHA changed for {asset_id}")
+
+    table = evidence.get("source_semantics", {}).get("target_table")
+    schedule_table = plan["question_schedule"]["table_geometry"]
+    if not isinstance(table, dict):
+        raise ScreenError("frame evidence lacks target table geometry")
+    expected_table = {
+        "surface_z_m": schedule_table["surface_z_m"],
+        "net_x_m": schedule_table["net_x_m"],
+        "far_edge_x_m": schedule_table["far_x_m"],
+        "half_width_m": schedule_table["half_width_m"],
+        "net_height_m": schedule_table["net_height_m"],
+    }
+    for key, expected in expected_table.items():
+        if not math.isclose(float(table.get(key, math.nan)), float(expected), abs_tol=1e-12, rel_tol=0.0):
+            raise ScreenError(f"frame evidence table {key} changed")
+
+
 def validate_manifest(
     path: Path,
     expected_sha256: str,
@@ -367,16 +446,24 @@ def validate_manifest(
             raise ScreenError("returnability requires a verified GMR-world -> HOPE table transform")
         if frame_contract.get("mirror_status") not in ("verified_not_mirrored", "verified_mirrored"):
             raise ScreenError("returnability requires verified mirror status")
-        transform = np.asarray(frame_contract.get("gmr_world_to_hope_matrix_4x4"), dtype=np.float64)
-        if transform.shape != (4, 4) or not np.isfinite(transform).all():
-            raise ScreenError("enabled returnability requires a finite 4x4 frame transform")
-        if not np.allclose(transform[3], [0.0, 0.0, 0.0, 1.0], atol=1e-12, rtol=0.0):
-            raise ScreenError("frame transform bottom row must be [0,0,0,1]")
-        rotation = transform[:3, :3]
-        if not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-9, rtol=0.0):
-            raise ScreenError("frame transform rotation must be orthonormal")
-        if not math.isclose(float(np.linalg.det(rotation)), 1.0, abs_tol=1e-9, rel_tol=0.0):
-            raise ScreenError("frame transform must be a proper rigid rotation (det=+1)")
+        transform_scope = frame_contract.get("transform_scope", "global")
+        if transform_scope == "global":
+            _validate_proper_rigid_matrix(
+                frame_contract.get("gmr_world_to_hope_matrix_4x4"), "frame transform"
+            )
+        elif transform_scope == "per_asset":
+            if frame_contract.get("gmr_world_to_hope_matrix_4x4") is not None:
+                raise ScreenError("per-asset transform scope must not also provide a global matrix")
+            transforms = frame_contract.get("per_asset_gmr_world_to_hope_matrix_4x4")
+            if not isinstance(transforms, dict) or not transforms:
+                raise ScreenError("per-asset transform scope requires a non-empty transform mapping")
+            _binding(
+                plan.get("frame_contract_evidence"),
+                "frame_contract_evidence",
+                require_exists=verify_files,
+            )
+        else:
+            raise ScreenError(f"unsupported frame transform_scope {transform_scope!r}")
     else:
         if frame_contract.get("gmr_world_to_hope_table_transform_verified") is not False:
             raise ScreenError("blocked returnability must explicitly mark frame transform unverified")
@@ -396,6 +483,12 @@ def validate_manifest(
         or not all(isinstance(value, str) and SAFE_ID_RE.fullmatch(value) for value in expected_ids)
     ):
         raise ScreenError("expected_asset_ids must be ten unique safe ids")
+    if frame_contract["returnability_enabled"] and frame_contract.get("transform_scope") == "per_asset":
+        transforms = frame_contract["per_asset_gmr_world_to_hope_matrix_4x4"]
+        if list(transforms) != expected_ids:
+            raise ScreenError("per-asset frame transforms must list every expected asset in order")
+        for asset_id in expected_ids:
+            _validate_proper_rigid_matrix(transforms[asset_id], f"frame transform {asset_id}")
 
     inputs = plan.get("inputs")
     if not isinstance(inputs, list):
@@ -421,6 +514,9 @@ def validate_manifest(
                 grounding_manifest_binding, "canonical_grounding_result_manifest"
             )
             _crosscheck_canonical_grounding_result(plan, grounding_manifest_path)
+            if frame_contract["returnability_enabled"] and frame_contract.get("transform_scope") == "per_asset":
+                evidence_path = _verify_file(plan["frame_contract_evidence"], "frame_contract_evidence")
+                _crosscheck_frame_contract_evidence(plan, evidence_path)
 
     libraries = plan.get("libraries")
     if not isinstance(libraries, dict) or not libraries:
@@ -1003,12 +1099,19 @@ def apply_verified_frame_contract(
     normals: np.ndarray,
     velocities: np.ndarray,
     frame_contract: dict[str, Any],
+    *,
+    matrix_4x4: Any | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Map GMR-world racket state into the explicitly verified HOPE table frame."""
 
     if frame_contract.get("returnability_enabled") is not True:
         raise ScreenError("cannot apply a disabled returnability frame contract")
-    transform = np.asarray(frame_contract["gmr_world_to_hope_matrix_4x4"], dtype=np.float64)
+    transform = _validate_proper_rigid_matrix(
+        frame_contract["gmr_world_to_hope_matrix_4x4"]
+        if matrix_4x4 is None
+        else matrix_4x4,
+        "applied frame transform",
+    )
     rotation = transform[:3, :3]
     translation = transform[:3, 3]
     mapped_positions = np.asarray(positions, dtype=np.float64) @ rotation.T + translation
@@ -1037,8 +1140,17 @@ def score_asset(
     source_qpos = _qpos_from_payload(contract.binding, payload)
     fps = float(np.asarray(payload["fps"]).reshape(-1)[0])
     positions, normals, velocities = extract_source_racket_state(contract, source_qpos, fps)
+    matrix = None
+    if plan["frame_contract"].get("transform_scope") == "per_asset":
+        matrix = plan["frame_contract"]["per_asset_gmr_world_to_hope_matrix_4x4"][
+            row["asset_id"]
+        ]
     positions, normals, velocities = apply_verified_frame_contract(
-        positions, normals, velocities, plan["frame_contract"]
+        positions,
+        normals,
+        velocities,
+        plan["frame_contract"],
+        matrix_4x4=matrix,
     )
     speeds = np.linalg.norm(velocities, axis=1)
     effective_side = row["side"]
@@ -1157,6 +1269,12 @@ def score_asset(
         "action_slot": row["action_slot"],
         "body_shape_contract": row["body_shape_contract"],
         "contact_phase_truth": None,
+        "frame_transform_scope": plan["frame_contract"].get("transform_scope", "global"),
+        "frame_transform_matrix_4x4": (
+            matrix
+            if matrix is not None
+            else plan["frame_contract"]["gmr_world_to_hope_matrix_4x4"]
+        ),
         "frames": positions.shape[0],
         "fps": fps,
         "question_count_for_side": len(side_questions),
@@ -1472,6 +1590,7 @@ def run_screen(plan_path: Path, expected_sha256: str) -> dict[str, Any]:
             "consumed_for_returnability": bool(plan["frame_contract"]["returnability_enabled"]),
         },
         "frame_contract": plan["frame_contract"],
+        "frame_contract_evidence": plan.get("frame_contract_evidence"),
         "assets": results,
         "libraries": libraries,
         "library_comparisons": comparisons,
@@ -1479,10 +1598,11 @@ def run_screen(plan_path: Path, expected_sha256: str) -> dict[str, Any]:
             "racket_state": "vendor_MJCF_official_site_FK_and_generalized_velocity",
             "safety": "dense_sampled_not_mathematical_continuous_time_certificate",
             "exact_coverage": (
-                "zero_retarget_reference_path_lower_bound"
+                "canonical_counterfactual_HOPE_table_zero_retarget_reference_path_lower_bound"
                 if plan["frame_contract"]["returnability_enabled"]
                 else None
             ),
+            "real_capture_returnability": None,
             "intrinsic_returnability": (
                 "ball_relocated_to_each_candidate_site_diagnostic"
                 if plan["frame_contract"]["returnability_enabled"]
@@ -1496,6 +1616,7 @@ def run_screen(plan_path: Path, expected_sha256: str) -> dict[str, Any]:
         },
         "remaining_blockers": [
             "monocular air swings have no observed ball contact or paddle calibration truth",
+            "the scored table is the canonical counterfactual HOPE table; real-capture table returnability remains unsupported",
             "dense sampling is not a continuous-time collision certificate",
             "table/net swept-volume clearance and dynamics/balance feasibility are separate gates",
             "coverage does not include policy retargeting, planner reachability, uncertainty, or immutable exam",

@@ -1534,3 +1534,11 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    继续 `blocked_on_calibration_evidence`；prereg SHA=`2ad2caba...e2aa`，专项 `24 passed`、
    连同现役 schema3/override/judge/MuJoCo plant 回归 `128 passed`，
    无 Pod/真机动作。
+3. 【franco/Codex】**空挥坐标合同通过并真消费 64 题，但 0/64 让 2-vs-4 继续暂停**——十条
+   final MP4 的正常中文背景字与 GMR 最低 `9.98x` 右臂主导，独立证明 no-mirror/no-swap；
+   每条 frame-0 pelvis XY/heading 生成 det=+1 的 HOPE +X 矩阵，ground z 不动且看题前冻结。
+   这只定义 canonical counterfactual table，不是录制现场桌外参。Pod1 CPU v5（PGID
+   `1471093`）消费原 64 题，safety 与 v4 逐资产相等，但所有 motion/library exact 都是
+   `0/64`、common support=0，故不判 2 或 4，也不写成动作无效。intrinsic 仅反手拉 B/C
+   为 `32/32 @ .5444`、`27/32 @ .5155`，保留作 spatial-retarget 候选；TOPP 暂停到
+   schema-2/L0/L1/桌网/动力学，最终由智元 vendor MuJoCo Gate3/Gate3B 无 reset 主判。

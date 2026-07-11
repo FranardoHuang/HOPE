@@ -274,6 +274,57 @@ def test_verified_rigid_frame_transform_moves_points_but_only_rotates_vectors():
     assert np.allclose(v, [[-2.0, 0.0, 0.0]])
 
 
+def test_per_asset_frame_transform_override_is_applied_without_side_effects():
+    frame = {
+        "returnability_enabled": True,
+        "gmr_world_to_hope_matrix_4x4": None,
+        "transform_scope": "per_asset",
+    }
+    matrix = [
+        [0.0, 1.0, 0.0, 3.0],
+        [-1.0, 0.0, 0.0, 4.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    p, n, v = mod.apply_verified_frame_contract(
+        np.array([[1.0, 2.0, 3.0]]),
+        np.array([[1.0, 0.0, 0.0]]),
+        np.array([[0.0, 2.0, 0.0]]),
+        frame,
+        matrix_4x4=matrix,
+    )
+    assert np.allclose(p, [[5.0, 3.0, 3.0]])
+    assert np.allclose(n, [[0.0, -1.0, 0.0]])
+    assert np.allclose(v, [[2.0, 0.0, 0.0]])
+
+
+def test_enabled_per_asset_manifest_requires_every_proper_transform(tmp_path):
+    plan = _blocked_manifest(tmp_path)
+    evidence = tmp_path / "frame_evidence.json"
+    evidence.write_text("{}\n", encoding="utf-8")
+    identity = np.eye(4).tolist()
+    plan["frame_contract"] = {
+        "returnability_enabled": True,
+        "gmr_world_to_hope_table_transform_verified": True,
+        "gmr_world_to_hope_matrix_4x4": None,
+        "transform_scope": "per_asset",
+        "per_asset_gmr_world_to_hope_matrix_4x4": {
+            asset_id: identity for asset_id in EXPECTED_IDS
+        },
+        "mirror_status": "verified_not_mirrored",
+    }
+    plan["frame_contract_evidence"] = _file_binding(evidence)
+    path, digest = _write_manifest(tmp_path, plan)
+    assert mod.validate_manifest(
+        path, digest, require_ready=False, verify_files=False
+    )["frame_contract"]["transform_scope"] == "per_asset"
+
+    plan["frame_contract"]["per_asset_gmr_world_to_hope_matrix_4x4"].pop(EXPECTED_IDS[-1])
+    path, digest = _write_manifest(tmp_path, plan)
+    with pytest.raises(mod.ScreenError, match="every expected asset"):
+        mod.validate_manifest(path, digest, require_ready=False, verify_files=False)
+
+
 def test_library_envelope_and_two_vs_four_delta():
     questions = mod.build_questions(_schedule(count_per_side=1))
     fh, bh = questions

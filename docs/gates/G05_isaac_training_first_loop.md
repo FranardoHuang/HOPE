@@ -641,8 +641,32 @@ ledger are `configs/motion_video_gmr_phase_safety_prereg_20260711.json` and
 HOPE +X reground (or an independently verified proper-rigid transform) and mirror
 semantics must land before that paper can run. No motion entered RL or hardware.
 
+That diagnostic frame prerequisite has now passed without claiming a capture-table
+extrinsic.  Ten content-bound midpoint crops show upright, unreflected Chinese
+background labels; independently, every canonical GMR is right-arm dominant by
+at least `9.98x` versus the left arm (`5x` preregistered threshold).  Each clip's
+proper-rigid matrix is derived only from frame-0 pelvis XY/heading and the audited
+ground plane, mapping the root to the HOPE origin/+X while preserving z.  The
+matrix set was frozen before scoring.  The target is explicitly the standard
+counterfactual HOPE virtual table, not the room in which the air swings were
+recorded.  Evidence is in
+`configs/motion_video_gmr_frame_contract_results_20260711.json`.
+
+The v5 CPU runtime then consumed the unchanged 64-question paper (result SHA
+`c299b7a0...`) and reproduced every v4 dense-safety subtree.  Exact zero-retarget
+coverage is `0/64` for all motions and libraries, with zero common support, so it
+cannot choose two versus four actions and must not be paraphrased as "all motions
+are ineffective."  Intrinsic relocation-only evidence retains Franco backhand
+loop B (`32/32`, phase `0.5444`) and C (`27/32`, phase `0.5155`) as spatial-retarget
+candidates; A is `1/32`, all others zero.  None is TOPP-eligible yet.  TOPP remains
+paused until explicit spatial retarget, schema-2/L0/L1, table/net and dynamics
+gates; final motion/library acceptance belongs to AgiBot vendor MuJoCo
+Gate3/Gate3B with no reset.  Compact ledger:
+`configs/motion_video_gmr_phase_counterfactual_results_20260711.json`.
+
 This is not yet a training result. The videos contain no ball/table/contact
-truth, their mirror/depth interpretation is unverified, and the three Franco
+truth; final-pixel mirror status is now verified but monocular depth/capture-table
+extrinsic remain unverified, and the three Franco
 backhand-loop recordings are candidates for one semantic action rather than
 three new action classes. Every candidate must pass A3 schema-2 conversion,
 finite/limit/endpoint checks, vendor-MJCF self-collision and racket/handle-to-

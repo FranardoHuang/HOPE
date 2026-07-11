@@ -1,0 +1,1076 @@
+{
+  "CUDA_VISIBLE_DEVICES": "",
+  "assets": [
+    {
+      "asset_id": "franco_forehand_block",
+      "fps": 30.0,
+      "frames": 65,
+      "grounded_gmr": {
+        "bytes": 20022,
+        "sha256": "fb2d0593e40d46434014ab2f136f6e94dafc0be1a7447f6f43d708b9c02c946c"
+      },
+      "left_arm_motion_energy": 0.0365887293578637,
+      "mirror_status": "verified_not_mirrored",
+      "mirror_witness": {
+        "asset_id": "franco_forehand_block",
+        "crop_rgb_pixels": {
+          "height": 650,
+          "width": 550,
+          "x": 1350,
+          "y": 240
+        },
+        "crop_rgb_sha256": "058dd7a744bed5ecbe2421003c97a4c58d4309b6beff413c12840171ce40ba0b",
+        "crop_rgb_shape": [
+          650,
+          550,
+          3
+        ],
+        "decoded_rgb_sha256": "982ff9a57390bb915dd4ec405aae2804fb8395dff6d11e4dae6869cca0ac5a4c",
+        "decoded_rgb_shape": [
+          1080,
+          1920,
+          3
+        ],
+        "frame_count": 65,
+        "frame_index": 32,
+        "source_sha256": "15d73838a6fd190230985d5a8d7ac482697b6a3f5af0aaac985f0d0354595783"
+      },
+      "right_arm_motion_energy": 0.68514769578752,
+      "right_left_arm_motion_energy_ratio": 18.725648794367526,
+      "side_swap_required": false,
+      "transform": {
+        "ground_z_preserved": true,
+        "mapped_frame0_heading_yaw_rad": -8.399000581226229e-17,
+        "mapped_frame0_pelvis_forward": [
+          0.9913885115451444,
+          -8.326672684688674e-17,
+          0.13095350005365541
+        ],
+        "mapped_frame0_root_pos_m": [
+          0.0,
+          0.0,
+          0.9271725268127379
+        ],
+        "matrix_4x4": [
+          [
+            0.173599155321131,
+            0.984816395716374,
+            0.0,
+            0.022246650286854
+          ],
+          [
+            -0.984816395716374,
+            0.173599155321131,
+            0.0,
+            0.003577471060446
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_determinant": 0.9999999999999999,
+        "rotation_orthogonality_max_error": 1.1102230246251565e-16,
+        "source_frame0_heading_yaw_deg": 80.00285209085945,
+        "source_frame0_heading_yaw_rad": 1.396313179971527,
+        "source_frame0_pelvis_forward": [
+          0.17210420819931038,
+          0.97633566069451,
+          0.13095350005365541
+        ],
+        "source_frame0_root_pos_m": [
+          -0.0003388475429947544,
+          -0.022529911906540863,
+          0.9271725268127379
+        ]
+      }
+    },
+    {
+      "asset_id": "franco_backhand_block",
+      "fps": 30.0,
+      "frames": 63,
+      "grounded_gmr": {
+        "bytes": 19414,
+        "sha256": "a4d92b68b9d1fc1185d2cfc87a233bf5ef974538a2d2a3ee7faa58593aace9d4"
+      },
+      "left_arm_motion_energy": 0.024766980699268117,
+      "mirror_status": "verified_not_mirrored",
+      "mirror_witness": {
+        "asset_id": "franco_backhand_block",
+        "crop_rgb_pixels": {
+          "height": 650,
+          "width": 550,
+          "x": 1350,
+          "y": 240
+        },
+        "crop_rgb_sha256": "b6c475554fffaa561f2d0767e038dc81e0dbeb684920437cc9edf074c562929c",
+        "crop_rgb_shape": [
+          650,
+          550,
+          3
+        ],
+        "decoded_rgb_sha256": "9c10e2f488ca4ae59fe8c94ce745b76222808ce14547c1754db6597daee822e5",
+        "decoded_rgb_shape": [
+          1080,
+          1920,
+          3
+        ],
+        "frame_count": 63,
+        "frame_index": 31,
+        "source_sha256": "5193ac7897684654a459c23e026d989287280f4bd1ec03ee7f907d9ba1196802"
+      },
+      "right_arm_motion_energy": 0.7374079190905024,
+      "right_left_arm_motion_energy_ratio": 29.77383186285171,
+      "side_swap_required": false,
+      "transform": {
+        "ground_z_preserved": true,
+        "mapped_frame0_heading_yaw_rad": -2.8121357146774794e-17,
+        "mapped_frame0_pelvis_forward": [
+          0.9869927497013481,
+          -2.7755575615628914e-17,
+          0.16076477237558
+        ],
+        "mapped_frame0_root_pos_m": [
+          0.0,
+          0.0,
+          0.9255682484510687
+        ],
+        "matrix_4x4": [
+          [
+            0.087172777885238,
+            0.996193207563558,
+            0.0,
+            0.022047387300721
+          ],
+          [
+            -0.996193207563558,
+            0.087172777885238,
+            0.0,
+            0.003348903667833
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_determinant": 1.0,
+        "rotation_orthogonality_max_error": 0.0,
+        "source_frame0_heading_yaw_deg": 84.99902022946037,
+        "source_frame0_heading_yaw_rad": 1.4835127639733494,
+        "source_frame0_pelvis_forward": [
+          0.08603889974405632,
+          0.9832354731669624,
+          0.16076477237558
+        ],
+        "source_frame0_root_pos_m": [
+          0.0014142230905641773,
+          -0.0222553907090966,
+          0.9255682484510687
+        ]
+      }
+    },
+    {
+      "asset_id": "franco_forehand_loop",
+      "fps": 30.0,
+      "frames": 70,
+      "grounded_gmr": {
+        "bytes": 21542,
+        "sha256": "d75d8f17e7b7cad3f06a47fbf01bdec194116996a155c6ab61e9d3eb0d84f6c8"
+      },
+      "left_arm_motion_energy": 0.059044746880368926,
+      "mirror_status": "verified_not_mirrored",
+      "mirror_witness": {
+        "asset_id": "franco_forehand_loop",
+        "crop_rgb_pixels": {
+          "height": 650,
+          "width": 550,
+          "x": 1350,
+          "y": 240
+        },
+        "crop_rgb_sha256": "262d22a9c8322e0bb3b032398b14b20ed35c7f337d1994e2873622e3016c72cd",
+        "crop_rgb_shape": [
+          650,
+          550,
+          3
+        ],
+        "decoded_rgb_sha256": "9f7a2b3300ba1ce94bc553d38154eac062e4b0d7ef50df96fd9551c5affafdc3",
+        "decoded_rgb_shape": [
+          1080,
+          1920,
+          3
+        ],
+        "frame_count": 70,
+        "frame_index": 35,
+        "source_sha256": "d39db38aaeea78d07d11b50edf5ef02ff24c946f7d89625e3a34c3cddf4e7e55"
+      },
+      "right_arm_motion_energy": 0.8465206090330284,
+      "right_left_arm_motion_energy_ratio": 14.336933491275204,
+      "side_swap_required": false,
+      "transform": {
+        "ground_z_preserved": true,
+        "mapped_frame0_heading_yaw_rad": -2.798963686218338e-17,
+        "mapped_frame0_pelvis_forward": [
+          0.9916375747314283,
+          -2.7755575615628914e-17,
+          0.12905394368546377
+        ],
+        "mapped_frame0_root_pos_m": [
+          0.0,
+          0.0,
+          0.9195354292671404
+        ],
+        "matrix_4x4": [
+          [
+            0.202992960036511,
+            0.979180196989101,
+            0.0,
+            0.020923222303493
+          ],
+          [
+            -0.979180196989101,
+            0.202992960036511,
+            0.0,
+            0.003562571077213
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_determinant": 0.9999999999999999,
+        "rotation_orthogonality_max_error": 1.1102230246251565e-16,
+        "source_frame0_heading_yaw_deg": 78.28796599262795,
+        "source_frame0_heading_yaw_rad": 1.3663827712607084,
+        "source_frame0_pelvis_forward": [
+          0.2012954465781599,
+          0.9709918757673148,
+          0.12905394368546377
+        ],
+        "source_frame0_root_pos_m": [
+          -0.0007588677797147579,
+          -0.02121078178508507,
+          0.9195354292671404
+        ]
+      }
+    },
+    {
+      "asset_id": "franco_backhand_loop_a",
+      "fps": 30.0,
+      "frames": 69,
+      "grounded_gmr": {
+        "bytes": 21238,
+        "sha256": "3db5e5d6209c146a1ec3dddb2544be4a6adfdf8d985e1ffff82911063f384909"
+      },
+      "left_arm_motion_energy": 0.055826323211040155,
+      "mirror_status": "verified_not_mirrored",
+      "mirror_witness": {
+        "asset_id": "franco_backhand_loop_a",
+        "crop_rgb_pixels": {
+          "height": 650,
+          "width": 550,
+          "x": 1350,
+          "y": 240
+        },
+        "crop_rgb_sha256": "436d870b45b75c91d53665857e72953309df99230ab37ce339cffc5dc61f618c",
+        "crop_rgb_shape": [
+          650,
+          550,
+          3
+        ],
+        "decoded_rgb_sha256": "8944c16d23b22dd1b62dd48b56ab697b52e8bdd373e79c6ffde7547404e70b12",
+        "decoded_rgb_shape": [
+          1080,
+          1920,
+          3
+        ],
+        "frame_count": 69,
+        "frame_index": 34,
+        "source_sha256": "818faab1bc1227d4dcc058dfd1f014d2edc5bfa229b539d5ee44d63238d997ad"
+      },
+      "right_arm_motion_energy": 1.05607039653195,
+      "right_left_arm_motion_energy_ratio": 18.917068791001853,
+      "side_swap_required": false,
+      "transform": {
+        "ground_z_preserved": true,
+        "mapped_frame0_heading_yaw_rad": -4.26162581763246e-17,
+        "mapped_frame0_pelvis_forward": [
+          0.9769361554734696,
+          -4.163336342344337e-17,
+          0.21353160920275305
+        ],
+        "mapped_frame0_root_pos_m": [
+          0.0,
+          0.0,
+          0.9164191669621817
+        ],
+        "matrix_4x4": [
+          [
+            0.10845798923723,
+            0.994101033381727,
+            0.0,
+            0.021902587283253
+          ],
+          [
+            -0.994101033381727,
+            0.10845798923723,
+            0.0,
+            0.003688445818409
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_determinant": 1.0,
+        "rotation_orthogonality_max_error": 0.0,
+        "source_frame0_heading_yaw_deg": 83.77356696711459,
+        "source_frame0_heading_yaw_rad": 1.4621245697161098,
+        "source_frame0_pelvis_forward": [
+          0.10595653103580238,
+          0.9711732417041473,
+          0.21353160920275305
+        ],
+        "source_frame0_root_pos_m": [
+          0.0012911772238184808,
+          -0.022173426068890875,
+          0.9164191669621817
+        ]
+      }
+    },
+    {
+      "asset_id": "franco_backhand_loop_b",
+      "fps": 30.0,
+      "frames": 91,
+      "grounded_gmr": {
+        "bytes": 27926,
+        "sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e"
+      },
+      "left_arm_motion_energy": 0.032640973896768524,
+      "mirror_status": "verified_not_mirrored",
+      "mirror_witness": {
+        "asset_id": "franco_backhand_loop_b",
+        "crop_rgb_pixels": {
+          "height": 650,
+          "width": 550,
+          "x": 1350,
+          "y": 240
+        },
+        "crop_rgb_sha256": "e56db4688aa5af924ae92c714a31e20bac5f6d19cc1a61928635d14f7bd24358",
+        "crop_rgb_shape": [
+          650,
+          550,
+          3
+        ],
+        "decoded_rgb_sha256": "dc8e283fe09e160c1419579e8568558099c09c6a5d47a64bff752ca306fd4bd7",
+        "decoded_rgb_shape": [
+          1080,
+          1920,
+          3
+        ],
+        "frame_count": 91,
+        "frame_index": 45,
+        "source_sha256": "73a9a68a7895ecfd337e318fe191ef1d40dc1cb5ffbcebe4af8e86ac72fdc85c"
+      },
+      "right_arm_motion_energy": 0.6568852042145117,
+      "right_left_arm_motion_energy_ratio": 20.124558975844273,
+      "side_swap_required": false,
+      "transform": {
+        "ground_z_preserved": true,
+        "mapped_frame0_heading_yaw_rad": -5.665392156392174e-17,
+        "mapped_frame0_pelvis_forward": [
+          0.9798289279697162,
+          -5.551115123125783e-17,
+          0.1998381142668154
+        ],
+        "mapped_frame0_root_pos_m": [
+          0.0,
+          0.0,
+          0.912776075510316
+        ],
+        "matrix_4x4": [
+          [
+            0.083362727170947,
+            0.996519270119059,
+            0.0,
+            0.021027115218559
+          ],
+          [
+            -0.996519270119059,
+            0.083362727170947,
+            0.0,
+            0.004206871214327
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_determinant": 0.9999999999999999,
+        "rotation_orthogonality_max_error": 0.0,
+        "source_frame0_heading_yaw_deg": 85.21811812952491,
+        "source_frame0_heading_yaw_rad": 1.4873367437136813,
+        "source_frame0_pelvis_forward": [
+          0.08168121159654129,
+          0.9764184081419217,
+          0.1998381142668154
+        ],
+        "source_frame0_root_pos_m": [
+          0.002439350562828994,
+          -0.021304621767590775,
+          0.912776075510316
+        ]
+      }
+    },
+    {
+      "asset_id": "franco_backhand_loop_c",
+      "fps": 30.0,
+      "frames": 98,
+      "grounded_gmr": {
+        "bytes": 30054,
+        "sha256": "4eb40301a51346fd3ad6cae52b13e93ca91b135f9eb9b38e16f7d89e456e9cb6"
+      },
+      "left_arm_motion_energy": 0.054006585852349784,
+      "mirror_status": "verified_not_mirrored",
+      "mirror_witness": {
+        "asset_id": "franco_backhand_loop_c",
+        "crop_rgb_pixels": {
+          "height": 650,
+          "width": 550,
+          "x": 1350,
+          "y": 240
+        },
+        "crop_rgb_sha256": "e9502e0e147e6c71b4cdc69d7a8f8e8e87a13f831657d6094def7fcd1562a493",
+        "crop_rgb_shape": [
+          650,
+          550,
+          3
+        ],
+        "decoded_rgb_sha256": "1a61f8ad886981eafa8199980dca4e94c75f698e4d7076c84662aa6d10158725",
+        "decoded_rgb_shape": [
+          1080,
+          1920,
+          3
+        ],
+        "frame_count": 98,
+        "frame_index": 49,
+        "source_sha256": "ba885bb03869b75edc62c80b106774b910c7d5e41e62c01f2052d87bbc034354"
+      },
+      "right_arm_motion_energy": 0.8141358107244184,
+      "right_left_arm_motion_energy_ratio": 15.07475056746243,
+      "side_swap_required": false,
+      "transform": {
+        "ground_z_preserved": true,
+        "mapped_frame0_heading_yaw_rad": 5.658692056510413e-17,
+        "mapped_frame0_pelvis_forward": [
+          0.9809890815209036,
+          5.551115123125783e-17,
+          0.19406293292840365
+        ],
+        "mapped_frame0_root_pos_m": [
+          0.0,
+          0.0,
+          0.9206829509128562
+        ],
+        "matrix_4x4": [
+          [
+            0.129628631234912,
+            0.991562614242874,
+            0.0,
+            0.021732376759334
+          ],
+          [
+            -0.991562614242874,
+            0.129628631234912,
+            0.0,
+            0.00367975837448
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_determinant": 1.0,
+        "rotation_orthogonality_max_error": 0.0,
+        "source_frame0_heading_yaw_deg": 82.55186712952373,
+        "source_frame0_heading_yaw_rad": 1.4408018850790694,
+        "source_frame0_pelvis_forward": [
+          0.1271642718939484,
+          0.9727120982165832,
+          0.19406293292840365
+        ],
+        "source_frame0_root_pos_m": [
+          0.0008315725807872073,
+          -0.022026014354555156,
+          0.9206829509128562
+        ]
+      }
+    },
+    {
+      "asset_id": "v6_forehand_block",
+      "fps": 30.0,
+      "frames": 35,
+      "grounded_gmr": {
+        "bytes": 10902,
+        "sha256": "bd6522ad7f3653620794ce1a4a06300bc3c98f698325e57cb121b53f61de1125"
+      },
+      "left_arm_motion_energy": 0.0641161034502329,
+      "mirror_status": "verified_not_mirrored",
+      "mirror_witness": {
+        "asset_id": "v6_forehand_block",
+        "crop_rgb_pixels": {
+          "height": 650,
+          "width": 550,
+          "x": 1350,
+          "y": 240
+        },
+        "crop_rgb_sha256": "526d6def7aecda20b2afb14c57554b308b1136ab972b2fb4bb050d1580a4a1a6",
+        "crop_rgb_shape": [
+          650,
+          550,
+          3
+        ],
+        "decoded_rgb_sha256": "12e78ad942508e153a476b822de25ba12098e07fa723db905f44fb3364e8f52b",
+        "decoded_rgb_shape": [
+          1080,
+          1920,
+          3
+        ],
+        "frame_count": 35,
+        "frame_index": 17,
+        "source_sha256": "5016ef5d0bbb51bea243903fc7c8a1622ade7eb3fa2e9fcdbc404791ce8089d2"
+      },
+      "right_arm_motion_energy": 0.7790411679098733,
+      "right_left_arm_motion_energy_ratio": 12.150475870926362,
+      "side_swap_required": false,
+      "transform": {
+        "ground_z_preserved": true,
+        "mapped_frame0_heading_yaw_rad": -9.927293471942355e-17,
+        "mapped_frame0_pelvis_forward": [
+          0.9785599159454897,
+          -9.71445146547012e-17,
+          -0.20596235312492558
+        ],
+        "mapped_frame0_root_pos_m": [
+          0.0,
+          0.0,
+          0.9417546326093507
+        ],
+        "matrix_4x4": [
+          [
+            0.049730567557433,
+            0.998762669832236,
+            0.0,
+            0.0187716868546
+          ],
+          [
+            -0.998762669832236,
+            0.049730567557433,
+            0.0,
+            0.003528498430873
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_determinant": 0.9999999999999999,
+        "rotation_orthogonality_max_error": 1.1102230246251565e-16,
+        "source_frame0_heading_yaw_deg": 87.14947258797294,
+        "source_frame0_heading_yaw_rad": 1.5210452380366712,
+        "source_frame0_pelvis_forward": [
+          0.04866434000892317,
+          0.9773491142405256,
+          -0.20596235312492558
+        ],
+        "source_frame0_root_pos_m": [
+          0.002590605872027695,
+          -0.018923934309747682,
+          0.9417546326093507
+        ]
+      }
+    },
+    {
+      "asset_id": "v6_backhand_block",
+      "fps": 30.0,
+      "frames": 35,
+      "grounded_gmr": {
+        "bytes": 10902,
+        "sha256": "d26a96dc939d48b59c2de5fa74fc2ffda767f36f013637cfab30d3cce6609d55"
+      },
+      "left_arm_motion_energy": 0.055379655079689095,
+      "mirror_status": "verified_not_mirrored",
+      "mirror_witness": {
+        "asset_id": "v6_backhand_block",
+        "crop_rgb_pixels": {
+          "height": 650,
+          "width": 550,
+          "x": 1350,
+          "y": 240
+        },
+        "crop_rgb_sha256": "900c3d9fc805b76d20e02e4f640b78fe27898e611c2b044cc3d046f5bbf225ea",
+        "crop_rgb_shape": [
+          650,
+          550,
+          3
+        ],
+        "decoded_rgb_sha256": "a17231999464bbfffdab7a5f593b3cc726628affeae5ec346cfcca9985548fab",
+        "decoded_rgb_shape": [
+          1080,
+          1920,
+          3
+        ],
+        "frame_count": 35,
+        "frame_index": 17,
+        "source_sha256": "996b1bd0a2d2fe5273b7faae5265469ced4959f98e8a39c91a242fb355e22a30"
+      },
+      "right_arm_motion_energy": 0.693311925369483,
+      "right_left_arm_motion_energy_ratio": 12.519253223441625,
+      "side_swap_required": false,
+      "transform": {
+        "ground_z_preserved": true,
+        "mapped_frame0_heading_yaw_rad": -1.7954311697027946e-17,
+        "mapped_frame0_pelvis_forward": [
+          0.9661876797337563,
+          -1.734723475976807e-17,
+          -0.25783980982520954
+        ],
+        "mapped_frame0_root_pos_m": [
+          0.0,
+          0.0,
+          0.9372879227663993
+        ],
+        "matrix_4x4": [
+          [
+            0.006893316955597,
+            0.999976240808425,
+            0.0,
+            0.018496841499157
+          ],
+          [
+            -0.999976240808425,
+            0.006893316955597,
+            0.0,
+            0.002725568128795
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_determinant": 1.0000000000000002,
+        "rotation_orthogonality_max_error": 2.220446049250313e-16,
+        "source_frame0_heading_yaw_deg": 89.60503890360789,
+        "source_frame0_heading_yaw_rad": 1.5639029552455677,
+        "source_frame0_pelvis_forward": [
+          0.006660237914998035,
+          0.9661647238955763,
+          -0.25783980982520954
+        ],
+        "source_frame0_root_pos_m": [
+          0.002597998780368994,
+          -0.018515190234151747,
+          0.9372879227663993
+        ]
+      }
+    },
+    {
+      "asset_id": "v7_forehand_block",
+      "fps": 30.0,
+      "frames": 64,
+      "grounded_gmr": {
+        "bytes": 19718,
+        "sha256": "6b7738fe4f85a5aaea86c2a6d7db14c4af7f561a325f224594ac72fab98f1df4"
+      },
+      "left_arm_motion_energy": 0.0755500390797045,
+      "mirror_status": "verified_not_mirrored",
+      "mirror_witness": {
+        "asset_id": "v7_forehand_block",
+        "crop_rgb_pixels": {
+          "height": 650,
+          "width": 550,
+          "x": 1350,
+          "y": 240
+        },
+        "crop_rgb_sha256": "84d6e65117c2fbc8cec3712bd461b9cbb016960b97d122a7b77709346fd8a4bb",
+        "crop_rgb_shape": [
+          650,
+          550,
+          3
+        ],
+        "decoded_rgb_sha256": "c5074226f6eadc0e25659fc49c51f131bf6cb8f40ed8e293810d4201ba1f34b5",
+        "decoded_rgb_shape": [
+          1080,
+          1920,
+          3
+        ],
+        "frame_count": 64,
+        "frame_index": 32,
+        "source_sha256": "f3cbd8d9db77f24f1bf51f2988ad0e4d9bd82d013606198599ea6c5d8af95367"
+      },
+      "right_arm_motion_energy": 0.7543281289404683,
+      "right_left_arm_motion_energy_ratio": 9.984483636661789,
+      "side_swap_required": false,
+      "transform": {
+        "ground_z_preserved": true,
+        "mapped_frame0_heading_yaw_rad": 4.186191249499703e-17,
+        "mapped_frame0_pelvis_forward": [
+          0.9945404053964095,
+          4.163336342344337e-17,
+          -0.10435220186438424
+        ],
+        "mapped_frame0_root_pos_m": [
+          0.0,
+          0.0,
+          0.9434936223610545
+        ],
+        "matrix_4x4": [
+          [
+            0.124829221047235,
+            0.992178242843866,
+            0.0,
+            0.019406075795286
+          ],
+          [
+            -0.992178242843866,
+            0.124829221047235,
+            0.0,
+            0.004279527063211
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_determinant": 1.0,
+        "rotation_orthogonality_max_error": 1.1102230246251565e-16,
+        "source_frame0_heading_yaw_deg": 82.82910637717463,
+        "source_frame0_heading_yaw_rad": 1.4456406227663294,
+        "source_frame0_pelvis_forward": [
+          0.12414770410563492,
+          0.9867613518634354,
+          -0.10435220186438424
+        ],
+        "source_frame0_root_pos_m": [
+          0.0018236083166700357,
+          -0.019788496212812666,
+          0.9434936223610545
+        ]
+      }
+    },
+    {
+      "asset_id": "v7_backhand_block",
+      "fps": 30.0,
+      "frames": 64,
+      "grounded_gmr": {
+        "bytes": 19718,
+        "sha256": "2b5947a6b5b86ac280dba33c64cae94baa58fe660987af70b711bfb322381f5d"
+      },
+      "left_arm_motion_energy": 0.049580464822205,
+      "mirror_status": "verified_not_mirrored",
+      "mirror_witness": {
+        "asset_id": "v7_backhand_block",
+        "crop_rgb_pixels": {
+          "height": 650,
+          "width": 550,
+          "x": 1350,
+          "y": 240
+        },
+        "crop_rgb_sha256": "72684041b2416abfd34072f01565980a10b5d77071e247bfed01a7abbd01c346",
+        "crop_rgb_shape": [
+          650,
+          550,
+          3
+        ],
+        "decoded_rgb_sha256": "d09d4acb36ccee64d110c61148423ac848cb88b9b22734d3292bf1845e8937e6",
+        "decoded_rgb_shape": [
+          1080,
+          1920,
+          3
+        ],
+        "frame_count": 64,
+        "frame_index": 32,
+        "source_sha256": "9eb3e7a9c61ed97b49392fc65cd2430c5a63f4f794e9e64c79c51ff307eacb44"
+      },
+      "right_arm_motion_energy": 0.6646817399865135,
+      "right_left_arm_motion_energy_ratio": 13.406121591841764,
+      "side_swap_required": false,
+      "transform": {
+        "ground_z_preserved": true,
+        "mapped_frame0_heading_yaw_rad": 1.4042851827874612e-17,
+        "mapped_frame0_pelvis_forward": [
+          0.9882456909690873,
+          1.3877787807814457e-17,
+          -0.15287398170071803
+        ],
+        "mapped_frame0_root_pos_m": [
+          0.0,
+          0.0,
+          0.9404448927143313
+        ],
+        "matrix_4x4": [
+          [
+            0.11420688636978,
+            0.993456988050172,
+            0.0,
+            0.018933782306034
+          ],
+          [
+            -0.993456988050172,
+            0.11420688636978,
+            0.0,
+            0.004352167434606
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_determinant": 0.9999999999999999,
+        "rotation_orthogonality_max_error": 0.0,
+        "source_frame0_heading_yaw_deg": 83.44211840518457,
+        "source_frame0_heading_yaw_rad": 1.4563397010094306,
+        "source_frame0_pelvis_forward": [
+          0.11286446333393152,
+          0.9817795876037108,
+          -0.15287398170071803
+        ],
+        "source_frame0_root_pos_m": [
+          0.0021613228266980484,
+          -0.019306945833816265,
+          0.9404448927143313
+        ]
+      }
+    }
+  ],
+  "committed_task_source": {
+    "blob_oid": "5471feb2f29fe674779fc6a5cf2c827ca35cafd8",
+    "bytes": 244254,
+    "commit": "69afc387b2ef7bb65cf5ec310276aeae7aadc36e",
+    "content_sha256": "64b2421888d2ae9660bd7b277f6d2816c8061118fd810cffda6a82d02a6cfd3c",
+    "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/hope_commands.py"
+  },
+  "contact_phase_truth": null,
+  "cpu_only": true,
+  "eligibility": {
+    "canonical_counterfactual_hope_table_coverage": "eligible_pending_bound_screen_runtime",
+    "immutable_64_question_returnability_phase_screen": true,
+    "real_capture_returnability": null,
+    "real_robot": false,
+    "rl_training": false,
+    "schema2_conversion": false,
+    "topp": false
+  },
+  "frame_contract": {
+    "capture_table_pose_observed": false,
+    "gmr_world_to_hope_table_transform_verified": true,
+    "method": "per_asset_frame0_pelvis_xy_origin_heading_to_plus_x_v1",
+    "per_asset_transform_semantic_sha256": "5eb91bba6ec13d760b8084a82a43aaa53ab5b1427e9143ccde6e8d328e78015a",
+    "source_frame": "grounded canonical GMR/MuJoCo world, floor z=0",
+    "status": "verified",
+    "target_frame": "HOPE env-local robot origin, +X forward, +Y left, +Z up",
+    "target_table_pose": {
+      "center_y_m": 0.0,
+      "far_edge_x_m": 3.24,
+      "half_width_m": 0.7625,
+      "length_m": 2.74,
+      "near_edge_x_m": 0.5,
+      "net_height_m": 0.1525,
+      "net_x_m": 1.87,
+      "surface_z_m": 0.76,
+      "width_m": 1.525
+    },
+    "target_table_pose_semantics": "canonical_counterfactual_HOPE_virtual_table_relative_to_robot_origin_not_capture_extrinsic",
+    "transform_scope": "per_asset"
+  },
+  "mirror_contract": {
+    "minimum_required_right_left_arm_motion_energy_ratio": 5.0,
+    "review_bytes": 3535,
+    "review_path": "/Users/Franco/Dropbox/\u4e52\u4e53/nohope/configs/motion_video_mirror_witness_review_20260711.json",
+    "review_semantics": "Every bound midpoint crop shows the laundry-machine Chinese labels and control panels upright and unreflected. This verifies final-video pixel orientation only; the independent right-arm-dominant GMR check verifies retarget-side preservation.",
+    "review_sha256": "729ef33b12ed71b27a20011c17d7a31e7b44e808acc9e6f661e14d518b1d4fb5",
+    "side_swap_required": false,
+    "status": "verified_not_mirrored",
+    "witness_semantic_sha256": "09f33225f7cc4c3816eee152c6d6497619990d12d37876d50c4cc78368fe4cb7"
+  },
+  "real_robot_commands_authorized": false,
+  "remaining_blockers": [
+    "the videos are air swings: observed ball/contact phase remains null",
+    "the table pose is the bound canonical counterfactual HOPE table, not a recovered capture extrinsic",
+    "schema-2 conversion and L0/L1 audits have not run for these motions",
+    "table/net swept-volume, dynamics and balance gates remain open",
+    "TOPP and every post-retime safety/dynamics audit remain open"
+  ],
+  "returnability_semantics": {
+    "canonical_counterfactual_hope_table": "eligible for the already-frozen diagnostic question paper after applying only the pre-result frame-0 pelvis transform",
+    "real_capture_table": {
+      "coverage": null,
+      "status": "unsupported_no_table_ball_contact_or_camera_extrinsic_in_air_swing_video"
+    }
+  },
+  "schema_version": 1,
+  "scope": "CPU-only per-asset proper-rigid GMR-world to canonical HOPE +X/virtual-table normalization plus content-addressed final-video mirror review; air-swing contact truth null",
+  "source_bindings": {
+    "a3_mjcf": {
+      "bytes": 49107,
+      "path": "/Users/Franco/Dropbox/\u4e52\u4e53/nohope/agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+      "sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+    },
+    "canonical_grounding_result": {
+      "bytes": 39438,
+      "path": "/Users/Franco/Dropbox/\u4e52\u4e53/nohope/configs/motion_video_canonical_gmr_ground_results_20260711.json",
+      "sha256": "7a0cb2b34ff9f0d8f0cec1840fdb9b0d5c6d551dd35eb2574b5ab71b245e8e5b"
+    },
+    "hope_frame_interface": {
+      "bytes": 4729,
+      "path": "/Users/Franco/Dropbox/\u4e52\u4e53/nohope/hope_training/whole_body_tracking/scripts/hope_frame_utils.py",
+      "sha256": "0201fefbb7f67e29c5489f98e45746efaf2ea4bbad356218bd11e7a794acf7f2"
+    },
+    "intake_manifest": {
+      "bytes": 9537,
+      "path": "/Users/Franco/Dropbox/\u4e52\u4e53/nohope/configs/motion_video_intake_20260711.json",
+      "sha256": "6661f9ac3dba930835a8c241ecb4a779d62be0cbb9aa4d1712d5470db6c9b289"
+    },
+    "racket_geometry_interface": {
+      "bytes": 5065,
+      "path": "/Users/Franco/Dropbox/\u4e52\u4e53/nohope/docs/interfaces/racket_contact_geometry.md",
+      "sha256": "c10633120eff83632e473911d59c1c3e07ed3aafa53f4f1354c60c1b00eb1f43"
+    },
+    "table_geometry_source": {
+      "bytes": 10304,
+      "path": "/Users/Franco/Dropbox/\u4e52\u4e53/nohope/hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/geometry.py",
+      "sha256": "df71f12a21fedb4b8caed182906288f573b2f05c731441a5f529996baaf056b2"
+    }
+  },
+  "source_semantics": {
+    "a3_shoulder_y_m": {
+      "left": 0.148225,
+      "right": -0.148225
+    },
+    "capture_table_pose_observed": false,
+    "right_racket_face_axis": "site local +Y from bound racket geometry interface",
+    "right_racket_site_ancestors": [
+      "right_wrist_yaw_Link",
+      "right_wrist_pitch_Link",
+      "right_wrist_roll_Link",
+      "right_elbow_Link",
+      "right_shoulder_yaw_Link",
+      "right_shoulder_roll_Link",
+      "right_shoulder_pitch_Link",
+      "torso_Link",
+      "waist_roll_Link",
+      "waist_yaw_Link",
+      "pelvis_link"
+    ],
+    "right_racket_site_local_pos_m": [
+      0.21021,
+      0.032078,
+      0.032036
+    ],
+    "source_floor_z_m": 0.0,
+    "table_pose_semantics": "canonical_counterfactual_HOPE_virtual_table_relative_to_robot_origin_not_capture_extrinsic",
+    "target_axes": {
+      "x": "forward",
+      "y": "left",
+      "z": "up"
+    },
+    "target_table": {
+      "center_y_m": 0.0,
+      "far_edge_x_m": 3.24,
+      "half_width_m": 0.7625,
+      "length_m": 2.74,
+      "near_edge_x_m": 0.5,
+      "net_height_m": 0.1525,
+      "net_x_m": 1.87,
+      "surface_z_m": 0.76,
+      "width_m": 1.525
+    }
+  },
+  "status": "complete_verified_per_asset_hope_frame_and_not_mirrored",
+  "tool_contract": {
+    "audit": {
+      "bytes": 36811,
+      "path": "/Users/Franco/Dropbox/\u4e52\u4e53/nohope/scripts/audit_motion_gmr_frame_contract.py",
+      "sha256": "a463110a69a460edace57ca91178da4baa6eae8d04c90b87c4e06f7d1aa2c434"
+    }
+  }
+}

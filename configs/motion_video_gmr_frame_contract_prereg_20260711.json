@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "plan_id": "motion-video-gmr-frame-contract-20260711-v1",
+  "status": "preregistered_ready_for_cpu_audit",
+  "scope": "content-addressed per-asset proper-rigid canonical GMR-world to HOPE +X/virtual-table normalization and final-video mirror verification for ten air swings",
+  "cpu_only": true,
+  "CUDA_VISIBLE_DEVICES": "",
+  "real_robot_commands_authorized": false,
+  "contact_phase_truth": null,
+  "input_mode": "manifest_rows_only_no_directory_scan",
+  "tool_contract": {
+    "audit": {
+      "path": "/Users/Franco/Dropbox/乒乓/nohope/scripts/audit_motion_gmr_frame_contract.py",
+      "bytes": 36811,
+      "sha256": "a463110a69a460edace57ca91178da4baa6eae8d04c90b87c4e06f7d1aa2c434"
+    }
+  },
+  "source_bindings": {
+    "intake_manifest": {
+      "path": "/Users/Franco/Dropbox/乒乓/nohope/configs/motion_video_intake_20260711.json",
+      "bytes": 9537,
+      "sha256": "6661f9ac3dba930835a8c241ecb4a779d62be0cbb9aa4d1712d5470db6c9b289"
+    },
+    "canonical_grounding_result": {
+      "path": "/Users/Franco/Dropbox/乒乓/nohope/configs/motion_video_canonical_gmr_ground_results_20260711.json",
+      "bytes": 39438,
+      "sha256": "7a0cb2b34ff9f0d8f0cec1840fdb9b0d5c6d551dd35eb2574b5ab71b245e8e5b"
+    },
+    "a3_mjcf": {
+      "path": "/Users/Franco/Dropbox/乒乓/nohope/agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+      "bytes": 49107,
+      "sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+    },
+    "hope_frame_interface": {
+      "path": "/Users/Franco/Dropbox/乒乓/nohope/hope_training/whole_body_tracking/scripts/hope_frame_utils.py",
+      "bytes": 4729,
+      "sha256": "0201fefbb7f67e29c5489f98e45746efaf2ea4bbad356218bd11e7a794acf7f2"
+    },
+    "racket_geometry_interface": {
+      "path": "/Users/Franco/Dropbox/乒乓/nohope/docs/interfaces/racket_contact_geometry.md",
+      "bytes": 5065,
+      "sha256": "c10633120eff83632e473911d59c1c3e07ed3aafa53f4f1354c60c1b00eb1f43"
+    },
+    "table_geometry_source": {
+      "path": "/Users/Franco/Dropbox/乒乓/nohope/hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/geometry.py",
+      "bytes": 10304,
+      "sha256": "df71f12a21fedb4b8caed182906288f573b2f05c731441a5f529996baaf056b2"
+    }
+  },
+  "committed_task_source": {
+    "commit": "69afc387b2ef7bb65cf5ec310276aeae7aadc36e",
+    "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/hope_commands.py",
+    "blob_oid": "5471feb2f29fe674779fc6a5cf2c827ca35cafd8",
+    "bytes": 244254,
+    "content_sha256": "64b2421888d2ae9660bd7b277f6d2816c8061118fd810cffda6a82d02a6cfd3c"
+  },
+  "private_roots": {
+    "video_source_root": "/Users/Franco/Downloads",
+    "grounded_gmr_root": "/Users/Franco/Dropbox/乒乓/nohope/vendor_assets/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2"
+  },
+  "ffmpeg_executable": "/usr/local/bin/ffmpeg",
+  "expected_asset_ids": [
+    "franco_forehand_block",
+    "franco_backhand_block",
+    "franco_forehand_loop",
+    "franco_backhand_loop_a",
+    "franco_backhand_loop_b",
+    "franco_backhand_loop_c",
+    "v6_forehand_block",
+    "v6_backhand_block",
+    "v7_forehand_block",
+    "v7_backhand_block"
+  ],
+  "transform_contract": {
+    "method": "per_asset_frame0_pelvis_xy_origin_heading_to_plus_x_v1",
+    "source_ground_plane": "z=0 from bound canonical grounding result",
+    "target_axes": {
+      "x": "forward",
+      "y": "left",
+      "z": "up"
+    },
+    "position_rule": "map frame-0 A3 pelvis XY exactly to env origin; preserve grounded Z",
+    "heading_rule": "project frame-0 A3 pelvis local +X onto the ground and yaw it to target +X",
+    "proper_rotation_tolerance": 1e-09,
+    "heading_tolerance_rad": 1e-10,
+    "mapped_root_xy_tolerance_m": 1e-10,
+    "per_asset_required": true,
+    "reflection_forbidden": true
+  },
+  "target_table_contract": {
+    "pose_semantics": "canonical_counterfactual_HOPE_virtual_table_relative_to_robot_origin_not_capture_extrinsic",
+    "near_edge_x_m": 0.5,
+    "surface_z_m": 0.76,
+    "center_y_m": 0.0,
+    "length_m": 2.74,
+    "width_m": 1.525,
+    "net_height_m": 0.1525,
+    "capture_table_pose_observed": false
+  },
+  "mirror_contract": {
+    "witness_frame_rule": "floor(frame_count/2)",
+    "crop_rgb_pixels": {
+      "x": 1350,
+      "y": 240,
+      "width": 550,
+      "height": 650
+    },
+    "review_instruction": "For every content-bound final MP4, inspect the bound crop: the laundry-machine Chinese labels and control panels must be upright and unreflected; record crop SHA, frame and a no-side-swap assertion. Crops remain private.",
+    "review_assertion_required": "upright_unreflected_chinese_glyphs_in_bound_background_crop",
+    "minimum_right_left_arm_motion_energy_ratio": 5.0,
+    "energy_definition": "sum squared adjacent-frame joint deltas over the bound A3 left/right seven-DOF arm columns",
+    "accepted_status": "verified_not_mirrored",
+    "accepted_side_rule": "use intake forehand/backhand labels unchanged; no swap"
+  },
+  "output_contract": {
+    "result": "/Users/Franco/Dropbox/乒乓/nohope/vendor_assets/motion_video_intake_20260711/gmr_frame_contract_v1/frame_contract_result.json",
+    "no_clobber": true,
+    "private_witness_pixels_in_git": false
+  },
+  "eligibility_on_pass": {
+    "immutable_64_question_returnability_phase_screen": true,
+    "schema2_conversion": false,
+    "topp": false,
+    "rl_training": false,
+    "real_robot": false
+  },
+  "limitations": [
+    "the canonical table is a counterfactual target placement relative to the robot, not an observed capture table/camera extrinsic",
+    "air swings contain no observed ball, table contact, or strike-phase truth",
+    "the mirror review is content-addressed human visual evidence from asymmetric background text, paired with independent right-arm-dominant GMR evidence",
+    "schema-2, table/net swept-volume, dynamics/balance, TOPP and all post-retime gates remain separate"
+  ]
+}

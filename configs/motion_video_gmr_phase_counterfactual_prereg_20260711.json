@@ -1,0 +1,762 @@
+{
+  "schema_version": 1,
+  "plan_id": "motion-video-gmr-phase-safety-20260711-v1",
+  "status": "preregistered_ready_not_executed",
+  "execution_ready": true,
+  "scope": "CPU-only dense safety invariant recheck plus canonical-counterfactual HOPE-table 64-question phase/coverage screen for ten Franco/v6/v7 air swings; no real-capture returnability, schema-2, dynamics, TOPP, RL or robot claim",
+  "cpu_only": true,
+  "CUDA_VISIBLE_DEVICES": "",
+  "real_robot_commands_authorized": false,
+  "input_mode": "explicit_manifest_only_no_directory_scan",
+  "contact_phase_truth": null,
+  "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+  "formal_eligible": false,
+  "predecessor_attempt": {
+    "control_root": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v2",
+    "manifest_sha256": "edeb1a270aba9e3ef530b3d31f674868ab53b0eb79ab96d520bc0bd7bfd3bbb1",
+    "result": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_v2/phase_safety_result.json",
+      "bytes": 775707,
+      "sha256": "4fcad6fe225656df54d8d448ef295b93c1f62a6dbd3473301ba00481441d7996"
+    },
+    "run_log": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v2/run.log",
+      "bytes": 154,
+      "sha256": "f1f43e2735e4191c293eb28fc6a2750b990684981756a54cff5579bdecf79d91"
+    },
+    "accepted_evidence": "dense ground/self-collision/racket-body safety only",
+    "revoked_evidence": "all virtual-return phase and library coverage columns",
+    "revocation_reason": "the manifest did not bind a verified GMR-world to HOPE +X/table transform or mirror status, so venue questions were scored in an unverified frame"
+  },
+  "accepted_safety_predecessor": {
+    "control_root": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v4",
+    "manifest_sha256": "232cd9ef1a72381895b54c75cc87c82e991d9c605ea169e86605b3afb9e64e15",
+    "result": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_v4/phase_safety_result.json",
+      "bytes": 571252,
+      "sha256": "d2518f766720dabf979e2a95e5044fdf7fcc7d85b0622471b476888febf301d8"
+    },
+    "status": "accepted_dense_safety_returnability_blocked",
+    "rerun_reason": "the independently accepted frame/mirror contract now authorizes only the frozen canonical-counterfactual HOPE-table paper; safety inputs and thresholds remain unchanged"
+  },
+  "canonical_grounding_result_manifest": {
+    "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v5/motion_video_canonical_gmr_ground_results_20260711.json",
+    "bytes": 39438,
+    "sha256": "7a0cb2b34ff9f0d8f0cec1840fdb9b0d5c6d551dd35eb2574b5ab71b245e8e5b"
+  },
+  "tool_contract": {
+    "screen": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v5/screen_motion_gmr_phase_safety.py",
+      "bytes": 76200,
+      "sha256": "d3924b1a045efa08b77aee92da81633ed68a0fd05422da0a1543692452357b0f"
+    },
+    "grounding_dependency": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v5/ground_gmr_pkl.py",
+      "bytes": 35333,
+      "sha256": "db5bd1670cd113ce6ada8b53a7d4b0e5e25f0cc51665983c4958146e99ce4591"
+    },
+    "self_collision_dependency": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v5/audit_self_collision.py",
+      "bytes": 42940,
+      "sha256": "9d03267556cfccbc4759961f115e0a6f8fb6b6edbff26963a6cd730979d3602e"
+    },
+    "motion_audit_dependency": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v5/audit_motion_npz.py",
+      "bytes": 52811,
+      "sha256": "ec25fac291683461cd1e90173477429fc62eba5ab21e242a08eecd67ee647b1b"
+    },
+    "virtual_return_dependency": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v5/virtual_return_scorer.py",
+      "bytes": 13177,
+      "sha256": "41fe2a07d161979b76eca3f7f58723381877ab8406095ebde2ead10a67d64d11"
+    }
+  },
+  "mjcf": {
+    "path": "/workspace/codexschema/nohope/agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+    "bytes": 49107,
+    "sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97",
+    "compiled_kinematic_collision_sha256": "18e7f6ffbefba9dbd988f7c3cb9fb92b250777862fc25fa3d4a0b2ca0f8386e5"
+  },
+  "physics": {
+    "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v5/ball_physics_venue.yaml",
+    "bytes": 14554,
+    "sha256": "2e58221442665ddad7cc6dcc18d5c811dec1b0c47439b81c1c744b5148169a27"
+  },
+  "venue_distribution": {
+    "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v5/incoming_ball_venue.yaml",
+    "bytes": 4736,
+    "sha256": "c575eff9b1261ffdf8b433ca6976d7056c8bc77007c4e56cfd39e32bac3e7c25"
+  },
+  "dense_safety_contract": {
+    "substeps_per_source_interval": 8,
+    "effective_sampling_hz": 240,
+    "interpolation": "root_xyz_linear_root_quaternion_shortest_arc_slerp_joint_position_linear",
+    "dense_sampling_is_continuous_time_certificate": false,
+    "danger_propagation": "a dangerous dense sample hard-excludes both adjacent source frames",
+    "ground_penetration_tolerance_m": 0.0005,
+    "self_collision_penetration_tolerance_m": 1e-06,
+    "hard_racket_body_clearance_m": 0.005,
+    "warning_racket_body_clearance_m": 0.02,
+    "racket_collision_geoms": [
+      "right_racket_collision",
+      "right_racket_handle_collision"
+    ],
+    "racket_body_clearance_groups": {
+      "head_neck": [
+        "head_yaw_collision",
+        "head_pitch_collision"
+      ],
+      "trunk": [
+        "torso_collision",
+        "pelvis_collision"
+      ],
+      "contralateral_arm": [
+        "left_shoulder_pitch_collision",
+        "left_shoulder_roll_collision",
+        "left_shoulder_yaw_collision",
+        "left_elbow_collision",
+        "left_wrist_roll_collision_0",
+        "left_wrist_roll_collision_1",
+        "left_wrist_pitch_collision",
+        "left_wrist_yaw_collision",
+        "left_hand_collision"
+      ],
+      "lower_body": [
+        "left_hip_pitch_collision",
+        "left_hip_roll_collision",
+        "left_hip_yaw_collision",
+        "left_knee_collision",
+        "left_ankle_pitch_collision",
+        "left_ankle_roll_collision",
+        "right_hip_pitch_collision",
+        "right_hip_roll_collision",
+        "right_hip_yaw_collision",
+        "right_knee_collision",
+        "right_ankle_pitch_collision",
+        "right_ankle_roll_collision"
+      ]
+    }
+  },
+  "question_schedule": {
+    "algorithm": "sha256-counter-balanced-side-box-isotropic-spin-rounded12-v1",
+    "seed": "motion-video-phase-safety-venue-box-paper-20260711-v1",
+    "count_per_side": 32,
+    "sides": [
+      "forehand",
+      "backhand"
+    ],
+    "venue_contact_x_from_net_m": [
+      -1.5,
+      -0.92
+    ],
+    "venue_contact_z_above_table_m": [
+      0.22,
+      0.5
+    ],
+    "incoming_vx_mps": [
+      -2.85,
+      -0.82
+    ],
+    "incoming_vy_mps": [
+      -0.46,
+      0.31
+    ],
+    "incoming_vz_mps": [
+      -2.02,
+      0.49
+    ],
+    "spin_magnitude_radps": [
+      0.0,
+      34.0
+    ],
+    "forehand_contact_y_m": [
+      -0.35,
+      -0.155
+    ],
+    "backhand_contact_y_m": [
+      -0.155,
+      0.18
+    ],
+    "table_geometry": {
+      "surface_z_m": 0.76,
+      "net_x_m": 1.87,
+      "far_x_m": 3.24,
+      "half_width_m": 0.7625,
+      "net_height_m": 0.1525
+    },
+    "expected_semantic_sha256": "4dfa0548d898fa6456d09261216e26ff9547c1a9dca2da221835c3cfa25332c7",
+    "semantics": "side-balanced independent venue matchlike boxes with isotropic uniform-magnitude spin; correlations are not modeled, so this is diagnostic and not a formal BankExam"
+  },
+  "phase_selection_contract": {
+    "minimum_racket_speed_mps": 0.3,
+    "real_racket_center": "canonical MuJoCo right_racket site",
+    "real_racket_face": "canonical MuJoCo right_racket site local +Y in world",
+    "real_racket_speed": "mj_differentiatePos plus mj_objectVelocity at the official site",
+    "rank_order": [
+      "exact_return_count",
+      "intrinsic_return_count",
+      "median_exact_return_margin_m",
+      "dense_racket_body_clearance_m",
+      "earlier_frame"
+    ],
+    "exact_coverage_semantics": "canonical-counterfactual HOPE-table zero-retarget reference-path lower bound using the immutable question position; not real-capture returnability",
+    "intrinsic_semantics": "same question velocity/spin with the ball hypothetically relocated to the frame's official racket site",
+    "top_k": 3,
+    "contact_truth_claim": false
+  },
+  "frame_contract": {
+    "returnability_enabled": true,
+    "gmr_world_to_hope_table_transform_verified": true,
+    "gmr_world_to_hope_matrix_4x4": null,
+    "transform_scope": "per_asset",
+    "transform_method": "per_asset_frame0_pelvis_xy_origin_heading_to_plus_x_v1_frozen_before_question_scoring",
+    "per_asset_transform_semantic_sha256": "5eb91bba6ec13d760b8084a82a43aaa53ab5b1427e9143ccde6e8d328e78015a",
+    "per_asset_gmr_world_to_hope_matrix_4x4": {
+      "franco_forehand_block": [
+        [
+          0.173599155321131,
+          0.984816395716374,
+          0.0,
+          0.022246650286854
+        ],
+        [
+          -0.984816395716374,
+          0.173599155321131,
+          0.0,
+          0.003577471060446
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "franco_backhand_block": [
+        [
+          0.087172777885238,
+          0.996193207563558,
+          0.0,
+          0.022047387300721
+        ],
+        [
+          -0.996193207563558,
+          0.087172777885238,
+          0.0,
+          0.003348903667833
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "franco_forehand_loop": [
+        [
+          0.202992960036511,
+          0.979180196989101,
+          0.0,
+          0.020923222303493
+        ],
+        [
+          -0.979180196989101,
+          0.202992960036511,
+          0.0,
+          0.003562571077213
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "franco_backhand_loop_a": [
+        [
+          0.10845798923723,
+          0.994101033381727,
+          0.0,
+          0.021902587283253
+        ],
+        [
+          -0.994101033381727,
+          0.10845798923723,
+          0.0,
+          0.003688445818409
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "franco_backhand_loop_b": [
+        [
+          0.083362727170947,
+          0.996519270119059,
+          0.0,
+          0.021027115218559
+        ],
+        [
+          -0.996519270119059,
+          0.083362727170947,
+          0.0,
+          0.004206871214327
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "franco_backhand_loop_c": [
+        [
+          0.129628631234912,
+          0.991562614242874,
+          0.0,
+          0.021732376759334
+        ],
+        [
+          -0.991562614242874,
+          0.129628631234912,
+          0.0,
+          0.00367975837448
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "v6_forehand_block": [
+        [
+          0.049730567557433,
+          0.998762669832236,
+          0.0,
+          0.0187716868546
+        ],
+        [
+          -0.998762669832236,
+          0.049730567557433,
+          0.0,
+          0.003528498430873
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "v6_backhand_block": [
+        [
+          0.006893316955597,
+          0.999976240808425,
+          0.0,
+          0.018496841499157
+        ],
+        [
+          -0.999976240808425,
+          0.006893316955597,
+          0.0,
+          0.002725568128795
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "v7_forehand_block": [
+        [
+          0.124829221047235,
+          0.992178242843866,
+          0.0,
+          0.019406075795286
+        ],
+        [
+          -0.992178242843866,
+          0.124829221047235,
+          0.0,
+          0.004279527063211
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "v7_backhand_block": [
+        [
+          0.11420688636978,
+          0.993456988050172,
+          0.0,
+          0.018933782306034
+        ],
+        [
+          -0.993456988050172,
+          0.11420688636978,
+          0.0,
+          0.004352167434606
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    "mirror_status": "verified_not_mirrored",
+    "side_swap_required": false,
+    "source_frame": "grounded canonical GMR/MuJoCo world, floor z=0",
+    "required_target_frame": "HOPE env-local robot origin, +X forward, +Y left, +Z up",
+    "target_table_pose_semantics": "canonical_counterfactual_HOPE_virtual_table_relative_to_robot_origin_not_capture_extrinsic",
+    "capture_table_pose_observed": false,
+    "evidence_sha256": "e70492becf5a2fae5ee74724d22f9ca9d2e874d535231e3ee6649f01669048f0",
+    "anti_tuning_invariant": "yaw and XY are derived only from frame-0 pelvis pose and grounded floor before any question is scored; question outcomes cannot modify the transform"
+  },
+  "expected_asset_ids": [
+    "franco_forehand_block",
+    "franco_backhand_block",
+    "franco_forehand_loop",
+    "franco_backhand_loop_a",
+    "franco_backhand_loop_b",
+    "franco_backhand_loop_c",
+    "v6_forehand_block",
+    "v6_backhand_block",
+    "v7_forehand_block",
+    "v7_backhand_block"
+  ],
+  "inputs": [
+    {
+      "asset_id": "franco_forehand_block",
+      "collection": "franco",
+      "side": "forehand",
+      "stroke": "block",
+      "action_slot": "forehand_block",
+      "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+      "frames": 65,
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_forehand_block.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 20022,
+        "sha256": "fb2d0593e40d46434014ab2f136f6e94dafc0be1a7447f6f43d708b9c02c946c"
+      },
+      "grounding_report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_forehand_block.grounding.json",
+        "bytes": 9552,
+        "sha256": "f9fb935e77316992dd81f4f4839912addc4de226ea3255a96c33e95ac72e8f43"
+      }
+    },
+    {
+      "asset_id": "franco_backhand_block",
+      "collection": "franco",
+      "side": "backhand",
+      "stroke": "block",
+      "action_slot": "backhand_block",
+      "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+      "frames": 63,
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_block.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 19414,
+        "sha256": "a4d92b68b9d1fc1185d2cfc87a233bf5ef974538a2d2a3ee7faa58593aace9d4"
+      },
+      "grounding_report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_block.grounding.json",
+        "bytes": 9419,
+        "sha256": "9f1effcc137b80c07483263e5e016a5d71ea54182d442bff6d7c5bfa81bdef28"
+      }
+    },
+    {
+      "asset_id": "franco_forehand_loop",
+      "collection": "franco",
+      "side": "forehand",
+      "stroke": "loop",
+      "action_slot": "forehand_loop",
+      "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+      "frames": 70,
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_forehand_loop.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 21542,
+        "sha256": "d75d8f17e7b7cad3f06a47fbf01bdec194116996a155c6ab61e9d3eb0d84f6c8"
+      },
+      "grounding_report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_forehand_loop.grounding.json",
+        "bytes": 9860,
+        "sha256": "2235567931b27e3696709b0e2087e57672f25c5f0687f09f7bb35725927e5581"
+      }
+    },
+    {
+      "asset_id": "franco_backhand_loop_a",
+      "collection": "franco",
+      "side": "backhand",
+      "stroke": "loop",
+      "action_slot": "backhand_loop",
+      "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+      "frames": 69,
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_loop_a.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 21238,
+        "sha256": "3db5e5d6209c146a1ec3dddb2544be4a6adfdf8d985e1ffff82911063f384909"
+      },
+      "grounding_report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_loop_a.grounding.json",
+        "bytes": 9775,
+        "sha256": "fcb207bc538e6cbfd31ba94834f899e283ce75f453aa0c4d789c44bf74c33525"
+      }
+    },
+    {
+      "asset_id": "franco_backhand_loop_b",
+      "collection": "franco",
+      "side": "backhand",
+      "stroke": "loop",
+      "action_slot": "backhand_loop",
+      "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+      "frames": 91,
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_loop_b.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 27926,
+        "sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e"
+      },
+      "grounding_report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_loop_b.grounding.json",
+        "bytes": 11112,
+        "sha256": "8bb15b4017e4ca2004b2105b411455f07645f6a06d412f7a8c34cf95a71982cb"
+      }
+    },
+    {
+      "asset_id": "franco_backhand_loop_c",
+      "collection": "franco",
+      "side": "backhand",
+      "stroke": "loop",
+      "action_slot": "backhand_loop",
+      "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+      "frames": 98,
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_loop_c.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 30054,
+        "sha256": "4eb40301a51346fd3ad6cae52b13e93ca91b135f9eb9b38e16f7d89e456e9cb6"
+      },
+      "grounding_report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_loop_c.grounding.json",
+        "bytes": 11510,
+        "sha256": "446ecd329e8a8fd2cf78608fe16c213de52c4f181f2db54570199fe4b32817ab"
+      }
+    },
+    {
+      "asset_id": "v6_forehand_block",
+      "collection": "v6_dang",
+      "side": "forehand",
+      "stroke": "block",
+      "action_slot": "forehand_block",
+      "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+      "frames": 35,
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/v6_forehand_block.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 10902,
+        "sha256": "bd6522ad7f3653620794ce1a4a06300bc3c98f698325e57cb121b53f61de1125"
+      },
+      "grounding_report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/v6_forehand_block.grounding.json",
+        "bytes": 7748,
+        "sha256": "cb7a1267bf8bb7fee96e3335919755b6188f88e5f0ae480da045440d2e8c9121"
+      }
+    },
+    {
+      "asset_id": "v6_backhand_block",
+      "collection": "v6_dang",
+      "side": "backhand",
+      "stroke": "block",
+      "action_slot": "backhand_block",
+      "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+      "frames": 35,
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/v6_backhand_block.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 10902,
+        "sha256": "d26a96dc939d48b59c2de5fa74fc2ffda767f36f013637cfab30d3cce6609d55"
+      },
+      "grounding_report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/v6_backhand_block.grounding.json",
+        "bytes": 7752,
+        "sha256": "d29b03075a4bc1bd37d0e7bd30ba882aeffd7b3740b2bf7d94efb53f4d087ad8"
+      }
+    },
+    {
+      "asset_id": "v7_forehand_block",
+      "collection": "v7_dang",
+      "side": "forehand",
+      "stroke": "block",
+      "action_slot": "forehand_block",
+      "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+      "frames": 64,
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/v7_forehand_block.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 19718,
+        "sha256": "6b7738fe4f85a5aaea86c2a6d7db14c4af7f561a325f224594ac72fab98f1df4"
+      },
+      "grounding_report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/v7_forehand_block.grounding.json",
+        "bytes": 9497,
+        "sha256": "9ef1d98a91e50f777ac51dd13d12ff248c952feb57ddf43f26721df05ddbf578"
+      }
+    },
+    {
+      "asset_id": "v7_backhand_block",
+      "collection": "v7_dang",
+      "side": "backhand",
+      "stroke": "block",
+      "action_slot": "backhand_block",
+      "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+      "frames": 64,
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/v7_backhand_block.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 19718,
+        "sha256": "2b5947a6b5b86ac280dba33c64cae94baa58fe660987af70b711bfb322381f5d"
+      },
+      "grounding_report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/v7_backhand_block.grounding.json",
+        "bytes": 9514,
+        "sha256": "cec60a1d100510e4cedd9a94556a458903b43227db9e4ab12310bdc76f74cfa0"
+      }
+    }
+  ],
+  "libraries": {
+    "franco_two_blocks": [
+      "franco_forehand_block",
+      "franco_backhand_block"
+    ],
+    "franco_four_loop_a": [
+      "franco_forehand_block",
+      "franco_backhand_block",
+      "franco_forehand_loop",
+      "franco_backhand_loop_a"
+    ],
+    "franco_four_loop_b": [
+      "franco_forehand_block",
+      "franco_backhand_block",
+      "franco_forehand_loop",
+      "franco_backhand_loop_b"
+    ],
+    "franco_four_loop_c": [
+      "franco_forehand_block",
+      "franco_backhand_block",
+      "franco_forehand_loop",
+      "franco_backhand_loop_c"
+    ],
+    "v6_two_blocks": [
+      "v6_forehand_block",
+      "v6_backhand_block"
+    ],
+    "v7_two_blocks": [
+      "v7_forehand_block",
+      "v7_backhand_block"
+    ]
+  },
+  "library_comparisons": [
+    {
+      "baseline": "franco_two_blocks",
+      "candidate": "franco_four_loop_a"
+    },
+    {
+      "baseline": "franco_two_blocks",
+      "candidate": "franco_four_loop_b"
+    },
+    {
+      "baseline": "franco_two_blocks",
+      "candidate": "franco_four_loop_c"
+    },
+    {
+      "baseline": "franco_two_blocks",
+      "candidate": "v6_two_blocks"
+    },
+    {
+      "baseline": "franco_two_blocks",
+      "candidate": "v7_two_blocks"
+    }
+  ],
+  "output_contract": {
+    "result": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_v5/phase_safety_result.json",
+    "output_root_must_not_exist": true,
+    "no_clobber": true
+  },
+  "limitations": [
+    "all source videos are monocular air swings with no observed ball, table or contact phase",
+    "the scored table is the canonical counterfactual HOPE virtual table relative to the robot; real-capture table pose and returnability remain null/unsupported",
+    "the body-shape vector is a same-performer cohort diagnostic, not measured A3 calibration",
+    "240 Hz finite interpolation is not a mathematical continuous-time collision certificate",
+    "the canonical MJCF has no table/net collision geometry; table/net swept-volume clearance remains separate",
+    "question boxes ignore measured correlations and exact coverage is a zero-retarget reference-path lower bound, not policy or planner coverage",
+    "this diagnostic is not a formal BankExam and cannot promote a motion, checkpoint, TOPP asset or robot command"
+  ],
+  "frame_contract_evidence": {
+    "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v5/motion_video_gmr_frame_contract_results_20260711.json",
+    "bytes": 32511,
+    "sha256": "e70492becf5a2fae5ee74724d22f9ca9d2e874d535231e3ee6649f01669048f0"
+  }
+}

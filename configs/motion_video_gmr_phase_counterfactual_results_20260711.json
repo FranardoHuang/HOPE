@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "status": "complete_counterfactual_exact_coverage_zero_intrinsic_backhand_candidates_only",
+  "scope": "accepted CPU-only canonical-counterfactual HOPE-table 64-question phase/coverage screen for ten air swings; not real-capture returnability and not a vendor Gate3/Gate3B result",
+  "formal_eligible": false,
+  "robot_approved": false,
+  "contact_phase_truth": null,
+  "real_capture_returnability": null,
+  "preregistration": {
+    "path": "configs/motion_video_gmr_phase_counterfactual_prereg_20260711.json",
+    "bytes": 25830,
+    "sha256": "fee1b1f9a68fcc0323c1be5832db1b29bdc5f49421712c6f44506d16dae45529"
+  },
+  "frame_contract_evidence": {
+    "path": "configs/motion_video_gmr_frame_contract_results_20260711.json",
+    "bytes": 32511,
+    "sha256": "e70492becf5a2fae5ee74724d22f9ca9d2e874d535231e3ee6649f01669048f0",
+    "transform_scope": "per_asset_frame0_pelvis_xy_origin_heading_to_plus_x",
+    "capture_table_pose_observed": false,
+    "mirror_status": "verified_not_mirrored",
+    "side_swap_required": false
+  },
+  "runtime": {
+    "pod": "pod1",
+    "cpu_only": true,
+    "CUDA_VISIBLE_DEVICES": "",
+    "control_root": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v5",
+    "output_root": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_v5",
+    "pid": 1471093,
+    "pgid": 1471093,
+    "started_utc": "2026-07-11T16:48:10.560268707Z",
+    "completed_utc": "2026-07-11T16:54:12.901878Z",
+    "result": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_v5/phase_safety_result.json",
+      "bytes": 792241,
+      "sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53"
+    },
+    "run_log": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v5/run.log",
+      "bytes": 154,
+      "sha256": "afa715784f2b55e4b27eec655b619c065e8e66c51125cdcd2c42bde8b8ecb9b7"
+    },
+    "fatal_log_token_scan": "pass",
+    "matching_processes_after": [],
+    "training_checkout": {
+      "root": "/workspace/codexschema/nohope",
+      "head": "6d93bcb16c422a2f42748c2dc99432559653480b",
+      "clean_after": true,
+      "modified_by_screen": false
+    }
+  },
+  "question_paper": {
+    "questions": 64,
+    "questions_per_side": 32,
+    "semantic_sha256": "4dfa0548d898fa6456d09261216e26ff9547c1a9dca2da221835c3cfa25332c7",
+    "consumed_for_returnability": true,
+    "semantics": "canonical-counterfactual HOPE-table zero-retarget reference-path screen; not immutable formal BankExam and not real-capture returnability"
+  },
+  "safety_invariant": {
+    "equal_to_accepted_v4_for_all_ten_assets": true,
+    "source_frames": 654,
+    "dense_samples_240hz": 5162,
+    "unsafe_source_frames": 0,
+    "ground_dangerous_dense_samples": 0,
+    "robot_self_collision_dense_samples": 0,
+    "racket_body_clearance_below_5mm_dense_samples": 0,
+    "racket_body_clearance_below_20mm_warning_samples": 0
+  },
+  "assets": [
+    {
+      "asset_id": "franco_forehand_block",
+      "exact_question_coverage": 0,
+      "top_phase": 0.59375,
+      "top_intrinsic_return_count_of_32": 0
+    },
+    {
+      "asset_id": "franco_backhand_block",
+      "exact_question_coverage": 0,
+      "top_phase": 0.4838709677419355,
+      "top_intrinsic_return_count_of_32": 0
+    },
+    {
+      "asset_id": "franco_forehand_loop",
+      "exact_question_coverage": 0,
+      "top_phase": 0.4927536231884058,
+      "top_intrinsic_return_count_of_32": 0
+    },
+    {
+      "asset_id": "franco_backhand_loop_a",
+      "exact_question_coverage": 0,
+      "top_phase": 0.7058823529411765,
+      "top_frame": 48,
+      "top_intrinsic_return_count_of_32": 1,
+      "top_intrinsic_nearest_immutable_question_position_error_m": 0.7753906779042736
+    },
+    {
+      "asset_id": "franco_backhand_loop_b",
+      "exact_question_coverage": 0,
+      "top_phase": 0.5444444444444444,
+      "top_frame": 49,
+      "top_intrinsic_return_count_of_32": 32,
+      "top_intrinsic_nearest_immutable_question_position_error_m": 0.16493626759612773
+    },
+    {
+      "asset_id": "franco_backhand_loop_c",
+      "exact_question_coverage": 0,
+      "top_phase": 0.5154639175257731,
+      "top_frame": 50,
+      "top_intrinsic_return_count_of_32": 27,
+      "top_intrinsic_nearest_immutable_question_position_error_m": 0.2365045830958753
+    },
+    {
+      "asset_id": "v6_forehand_block",
+      "exact_question_coverage": 0,
+      "top_phase": 0.5,
+      "top_intrinsic_return_count_of_32": 0
+    },
+    {
+      "asset_id": "v6_backhand_block",
+      "exact_question_coverage": 0,
+      "top_phase": 0.47058823529411764,
+      "top_intrinsic_return_count_of_32": 0
+    },
+    {
+      "asset_id": "v7_forehand_block",
+      "exact_question_coverage": 0,
+      "top_phase": 0.47619047619047616,
+      "top_intrinsic_return_count_of_32": 0
+    },
+    {
+      "asset_id": "v7_backhand_block",
+      "exact_question_coverage": 0,
+      "top_phase": 0.4444444444444444,
+      "top_intrinsic_return_count_of_32": 0
+    }
+  ],
+  "library_result": {
+    "all_libraries_exact_coverage_returned": 0,
+    "all_libraries_exact_coverage_total": 64,
+    "franco_two_vs_four_common_support_count": 0,
+    "franco_two_vs_four_coverage_delta_count": 0,
+    "decision": "inconclusive_zero_common_support_do_not_prefer_two_or_four",
+    "warning": "0/64 means the frozen zero-retarget position and return conditions never coincided; it does not prove that the motion is intrinsically ineffective"
+  },
+  "candidate_decision": {
+    "franco_backhand_loop_b": "retain_first_intrinsic_candidate_for_explicit_spatial_retarget_and_vendor_Gate3",
+    "franco_backhand_loop_c": "retain_second_intrinsic_candidate_for_explicit_spatial_retarget_and_vendor_Gate3",
+    "franco_backhand_loop_a": "deprioritize_but_do_not_delete",
+    "all_other_motions": "no_positive_intrinsic_evidence_on_this_paper_do_not_promote_or_delete"
+  },
+  "eligibility": {
+    "topp": "paused_until_spatial_retarget_schema2_L0_L1_table_net_dynamics_and_vendor_Gate3",
+    "two_vs_four_selection": "paused_zero_common_support",
+    "rl_training": false,
+    "real_robot": false,
+    "vendor_mujoco_gate3_gate3b": "required_primary_final_motion_and_library_gate_no_reset"
+  },
+  "remaining_blockers": [
+    "define and preregister explicit spatial retarget rather than tuning yaw/XY from these question outcomes",
+    "convert candidates to schema-2 and rerun L0/L1 plus table/net swept-volume and dynamics/balance gates",
+    "run TOPP only after its prerequisites, then repeat every motion/safety/dynamics audit",
+    "judge final motion and two-vs-four candidates primarily in the AgiBot vendor MuJoCo Gate3/Gate3B path with no reset",
+    "air-swing contact truth and real-capture table returnability remain null"
+  ]
+}

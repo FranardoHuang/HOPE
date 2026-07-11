@@ -88,6 +88,15 @@ CUDA_VISIBLE_DEVICES= /workspace/hope_isaac_venv/bin/python \
 只有 schema-2 + HOPE +X reground（或独立验证的显式 proper-rigid 4x4 transform）和 mirror 语义到齐后，
 才可将 `frame_contract.returnability_enabled` 改为 true 并用同一题纸重跑；禁止把速度峰帧当击球帧。
 
+这个条件随后以**canonical counterfactual**方式满足，而不是伪造录制现场桌位：十条 final MP4 的
+正常方向中文背景字 + GMR 右臂主导共同验证 no-mirror/no-side-swap；每条矩阵只由 frame-0 pelvis
+heading/XY 与 ground z 生成，映到 HOPE robot origin/+X，题目结果不能反调矩阵。v5 实际消费
+64 题后，所有 zero-retarget exact coverage 都是 `0/64`，所以 2-vs-4 不可判；Franco 反手拉
+B/C 只有 intrinsic `32/32`、`27/32` 的候选证据。`TOPP` 暂停到显式 spatial retarget、schema-2、
+L0/L1、桌网和动力学完成；最终由智元 vendor MuJoCo Gate3/Gate3B（无 reset）主判。详见
+`docs/interfaces/motion_gmr_hope_frame_contract.md` 和
+`configs/motion_video_gmr_phase_counterfactual_results_20260711.json`。
+
 当前资产:`hope_{forehand,backhand}_{v5,oblique,v4}_cal.npz`(v4=hopex 视频重跑;**hopex 资产
 与 v4_cal 同底片**——真源都是 raw_video_hopex/*_v4.mp4,动作组消融里两者不构成独立对照)。
 **swing 对试产件**(2026-07-08,修复版管线全链,判炸器双 PASS):
