@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 2026-07-12 现场状态(02:03 CST 更新)
+## 2026-07-12 现场状态(03:14 CST 更新)
 
 - **Phase-1 仍是真满池**:四条原始续训自然终档后，四条独立预注册的因果缺边补进空槽；
   现在两 Pod 各 12 条 live trainer、每 GPU 恰好 4 条，加上 4 条 clean terminal，共 28 条
@@ -40,6 +40,11 @@ Rules:
   finite，文件名/内嵌 iteration、相邻 hard-contract SHA、fresh/causal lineage 全匹配；accepted
   日志 NaN/Inf/Traceback/OOM/malloc/Killed 为0。每 Pod 5个 hardened worker 全活、无 child judge、
   Kit lock 空闲；Pod1/2 当前 hardened 结果分别 16/16、15/15 保持正确 exactness 标签。
+- 03:05–03:13 CST 又做了一轮独立全量复核：28/28 最新 checkpoint 仍各有 1,762,715 个浮点、
+  non-finite=0、filename iter=embedded iter、checkpoint 内嵌 contract SHA=相邻 contract 文件 SHA、fresh
+  lineage=1/causal=0；接受日志的 word-boundary NaN/Inf/Traceback/OOM/malloc/Killed 仍为0。
+  两 Pod 各12 live+2 terminal、每卡4条，十个登记 worker 均按精确 PGID 存活、无 child judge/Kit；
+  GPU util `80–97%`、显存约 `22.9–23.2/32.6 GiB`，available RAM `958/964 GB`、swap 0。
 - Pod1 的 SSH 映射约一小时 connect timeout；RunPod 控制台也未登录/无法只读确认，因此没有
   重启或重复发任务。23:45 CST SSH 恢复后的全审计显示训练未中断：仍为 12 live+2 terminal、
   4/4/4，所有 iteration 连续前进，错误 0，训练树 clean，五个 worker 全活。
@@ -94,7 +99,8 @@ Rules:
   SZ family 和原门槛；四个 checkpoint 未全部 finite/iter=4000/同 hard-contract/fresh lineage 前
   无法生成 activation，且 activation 本身没有 judge 入口。已知 seed1 4k=`.50`，所以 family
   stability 按原 worst-seed `.65` 门槛必然不过；该卷只区分 seed4 是晚熟还是持续弱，不能洗成
-  稳定 baseline。源码护栏 20 tests 通过，尚未做 Pod audit/activation/runtime。
+  稳定 baseline。源码护栏 20 tests 通过；当前 seed1/2 已越过4k，但 seed3/4 最新仅约
+  `2600/2800`，四臂 barrier 未齐，尚无 Pod readiness union/activation/runtime。
 - **厂商 MuJoCo Gate 3 现在是最终裁决门，不是 Isaac**：它把假球→真规划器→同款 C++ runner→
   智元 A3 MuJoCo 串成部署闭环；候选首先要在这个版本保持平衡、完成挥拍/恢复且不靠人工 reset，
   再谈 Isaac 分数。Isaac/MuJoCo 同 policy 的巨大差异另作归因轴：现已完成 PhysicalBall Phase-B
