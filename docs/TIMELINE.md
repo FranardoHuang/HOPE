@@ -1565,3 +1565,7 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    以 archive 落到 Pod1 隔离路径，实际 `a3_deploy_onnx_ref_pingpong` 链接成功；focused 10/10、
    native 195 pass/4 optional skip、78 compile rows 无 fast-math。此构建关闭 ROS/AimRT，未加载
    formal 179 ONNX、未 tick vendor MuJoCo；full dependency/first-tick/Gate3B 继续 open。
+54. 【franco/Codex】**恢复先判结构、再判 reward 比例**——论文原文形成两端：Ace 单球 RL 后由
+   MPC reset/prepare 显式恢复，并从历史 reset 动态态训练；HITTER 在10秒多拍 episode 内统一学
+   carry-state。故首轮把 explicit safe bridge vs learned recovery option 作为结构因子；只有统一
+   option 必要才进 `2^3` + constant-budget mixture，ready 是下一拍 dexterity 集合而非死追第0帧。

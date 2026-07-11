@@ -98,7 +98,9 @@ Rules:
   formal 179 ONNX first tick、per-clip normal envelope、canonical recovery 和 vendor MuJoCo 行为卷仍 open。
 - **连续等待按一个耦合 phase 设计，不把三项单独过关相加**：上一拍卸载/恢复平衡、回到通用 ready、
   随机时刻接下一题会共享同一段状态与动作，因此先做机制/梯度冲突推理，再做有交互项的混合比例消融；
-  单 reward 胜者只能筛项，不能宣称组合最优。终判仍用无 reset 的 Gate 3 连续卷。
+  单 reward 胜者只能筛项，不能宣称组合最优。先比较 Ace 式显式 safe bridge/prepare 与 HITTER 式
+  unified recovery option；只有后者确有必要才扫 `2^3` 和固定总预算 mixture。终判仍用无 reset 的
+  Gate 3 连续卷。
 - 已验证基础设施、plant/q50 证据、动作 frame/counterfactual screen 和 179 Gate3 source gate 已
   收口到 `main@9d70763`；动作 2-vs-4、TOPP、plant 标定、formal first tick 与连续 Gate3 rollout
   仍按 open gate 记账。NOW 只保留 main 活板版本，feature 分支的旧 NOW 不回灌。

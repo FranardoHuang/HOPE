@@ -1435,3 +1435,7 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   Release 链接，focused C++ 10/10、全套 195 pass/4 optional-asset skip，78 条 compile command
   无 fast-math；训练/eval checkout 未改。ROS/AimRT full-dependency、formal ONNX first tick 与厂商
   MuJoCo Gate3/Gate3B 行为卷仍未过，G06 继续 Partial。
+- 恢复 reward 比例消融前新增结构门：Ace 的单球 RL + near-time-optimal MPC reset/learned prepare
+  与 HITTER 的 10 s unified multi-strike actor 是两条不同可行路线。先在同一随机到达卷上比较
+  explicit safe bridge 和 learned recovery option；只有统一 option 确有必要才做 `2^3` 与固定总预算
+  mixture。ready 优化为可达集合/下一球 dexterity，不退化成单一第0帧；碰撞门覆盖 strike+recovery 全程。

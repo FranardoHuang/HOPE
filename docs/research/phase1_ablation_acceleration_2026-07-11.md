@@ -252,6 +252,25 @@ ready 集、在未知到达时刻保持对下一题的低延迟可达性。它�
 4. 在冻结的 post-strike 轨迹上检查三个候选项的归一化尺度、到账区间、梯度 cosine 与重复信息。
    若用 phase gate 后职责基本不重叠，就优先采用顺序状态机，省掉无意义的比例扫。
 
+还要先把“结构选择”放到“比例选择”前面。现有论文给出两种不同且都成功的边界方案：
+
+- Ace 的击球 RL 按单球训练；每个 32 ms segment 同时生成可行的后续 reset plan，触球或碰撞风险
+  出现后由近时间最优 MPC 执行 recovery。reset 目标既可固定，也可由 prepare policy 根据下一球选择
+  高 dexterity 姿态；训练初态还从历史 reset plan 的动态终态采样。它证明“strike policy + 显式
+  recovery/prepare controller”是认真候选，而不是失败后的临时补丁；碰撞门必须检查 strike segment
+  **连同** reset trajectory ([Dürr et al., Nature 2026](https://www.nature.com/articles/s41586-026-10338-5))。
+- HITTER 走相反路线：10 s episode 内连续训练多拍，每拍完成后重采样正/反手、球拍和 base 目标；
+  dense imitation/regularization 贯穿 episode，拍位/拍速/拍面只在触球短窗，base-position reward
+  只在触球前，给击球后向下一目标转换留空间。它证明统一 actor 可以学出多拍 carry-state，但公开
+  合同仍是 swing 完成后换题，不等于任意 mid-recovery 到达
+  ([Su et al., HITTER 2025](https://arxiv.org/abs/2508.21043))。
+
+因此首轮结构因子应是 `explicit safe bridge/prepare` 对 `learned recovery option`，而不是直接扫三项
+reward 比例。若显式 bridge 已在同一随机到达卷上满足安全、ready latency 和下一拍回球率，就不必让
+strike actor 同时背三份信用；若它因状态/动作族覆盖不足失败，再进入统一 option 的 factorial/mixture。
+Ace 还把 reward 权重作为 skill state 并偏向采样稀疏/边界组合；这支持“条件化多目标策略”作为后续
+方向，但不能被引用成某个固定权重比已经最优。
+
 若仍有真实重叠，实验分两层。第一层用等梯度尺度的 `2^3` factorial（none、三个单项、三个
 两两组合、三项全开）和 paired seeds，回答主效应与交互项；单项胜出只表示该项值得保留，
 不表示组合最优。第二层只在存活组合上固定辅助 reward 总预算，做小型 simplex/D-optimal mixture，
