@@ -535,6 +535,23 @@ def bank_evaluation_contract_exact(*, artifact_exact, schedule_exact, diagnostic
     return bool(artifact_exact and schedule_exact and not diagnostic_escape)
 
 
+def final_denominator_report(sampler, *, evaluation_contract_exact):
+    """Render sampler denominators with the final artifact+schedule exactness.
+
+    ``venue_ball_sampler.py`` is part of the immutable bank physics hash, so evaluator-only
+    report correction belongs here.  Its first line describes only the bank leg and would
+    otherwise overstate a legacy artifact evaluated against a valid schema-3 paper.
+    """
+    lines = list(sampler.denominator_report())
+    expected_prefix = "  evaluation_contract_exact="
+    require_contract(
+        bool(lines) and lines[0].startswith(expected_prefix),
+        "BankExam denominator report no longer begins with evaluation exactness",
+    )
+    lines[0] = expected_prefix + str(bool(evaluation_contract_exact)).lower()
+    return lines
+
+
 def stage1_question_bank_module_path(wbt_root):
     """Return the standalone bank loader without importing the Isaac task package."""
 
@@ -4758,8 +4775,8 @@ def main():
             f"[mj-sim2sim] evaluation_contract_exact="
             f"{str(bool(policy.evaluation_contract_exact)).lower()}"
         )
-        for _ln in venue_sampler.denominator_report(
-            evaluation_contract_exact=policy.evaluation_contract_exact
+        for _ln in final_denominator_report(
+            venue_sampler, evaluation_contract_exact=policy.evaluation_contract_exact
         ):
             print(f"[mj-sim2sim] {_ln}")
     elif args.target_source == "venue-balls":
@@ -5296,8 +5313,8 @@ def main():
         if hasattr(venue_sampler, "denominator_report"):
             print("-" * 92)
             print("DENOMINATORS (判卷分母法则 — return rates are meaningless without these):")
-            for _ln in venue_sampler.denominator_report(
-                evaluation_contract_exact=policy.evaluation_contract_exact
+            for _ln in final_denominator_report(
+                venue_sampler, evaluation_contract_exact=policy.evaluation_contract_exact
             ):
                 print(_ln)
         print("=" * 92)

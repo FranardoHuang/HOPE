@@ -378,6 +378,10 @@ inspects and checks the graph through `onnx`. The exact A3 plant comparison
 permits only `1e-8` absolute armature serialization residue: Isaac metadata
 passes through float32 while MuJoCo parses the same MJCF decimals as float64
 (observed maximum `2.71e-9`). A material plant mismatch still fails closed.
+Do not put report-only formatting changes in `venue_ball_sampler.py`: that
+module's complete SHA is part of every schema-v3 bank physics contract. Final
+artifact exactness is overlaid by `mujoco_eval_onnx.py` while rendering the
+denominator report, leaving the bank/scorer source bytes immutable.
 Long-run milestones, paired stopping rules and peak
 density are specified in
 `docs/research/phase1_ablation_acceleration_2026-07-11.md`.

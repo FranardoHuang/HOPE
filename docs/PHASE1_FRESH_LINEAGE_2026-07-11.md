@@ -265,6 +265,14 @@ diagnostic; their summary JSON is authoritative. A report-layer defect that prin
 exactness instead of final artifact exactness in `DENOMINATORS` is fixed so legacy reports also say
 `evaluation_contract_exact=false`.
 
+The first implementation of that report-only correction touched
+`venue_ball_sampler.py`; formal export correctly rejected it because that module's complete bytes
+belong to the immutable bank physics hash. The failed clean-q10 retry was stopped only by its
+recorded judge PGIDs after the Isaac failure path hung during shutdown, then retained as
+`fresh_retry_pod{1,2}_clean_q10_de13800`. The sampler was restored byte-for-byte to SHA-256
+`00e28e85...30cc`; the final exactness rewrite now lives in `mujoco_eval_onnx.py`, outside the bank
+physics source set. This is another evaluator preflight, not a model score.
+
 The corrected fresh retry is deliberately cheaper than the historical repair:
 `configs/phase1_checkpoint_curve_fresh_retry_pod{1,2}_20260711.json` freezes
 `ns=0`, `K=20` (10 questions per side) for `0/1000/2000`. It measures growth

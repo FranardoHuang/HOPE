@@ -160,28 +160,6 @@ def test_sampler_cursor_is_finite_counts_samples_and_never_wraps():
         sampler.sample(None)
 
 
-def test_denominator_report_uses_final_evaluation_exactness_not_bank_leg_only():
-    sampler = V.BankExamSampler.__new__(V.BankExamSampler)
-    sampler.contract_exact = True
-    sampler.schedule = [object(), object()]
-    sampler.schedule_seed = 0
-    sampler.schedule_sha256 = "a" * 64
-    sampler.schedule_hold_range = (0, 100)
-    sampler.clip_names = ("forehand", "backhand")
-    sampler.q_counts = [1, 1]
-    sampler.selected = [1, 1]
-    sampler.asked = [1, 1]
-    sampler.wrapped = [0, 0]
-    sampler.q_diff = np.zeros((2, 1), dtype=np.float64)
-    sampler.bank_meta = {}
-    sampler.q_landing = np.array([2.5, 0.0], dtype=np.float64)
-
-    inherited = sampler.denominator_report()
-    downgraded = sampler.denominator_report(evaluation_contract_exact=False)
-    assert inherited[0] == "  evaluation_contract_exact=true"
-    assert downgraded[0] == "  evaluation_contract_exact=false"
-
-
 def _shared_inputs(counts=(6, 4)):
     names = ("forehand", "backhand")
     ids = tuple(

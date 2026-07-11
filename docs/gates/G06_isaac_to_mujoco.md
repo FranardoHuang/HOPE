@@ -329,6 +329,13 @@ section, so a legacy causal report can no longer display `true` while its summar
 These preserved attempts are not model scores. A corrected exact fresh BankExam is still required,
 so G06 remains `Partial`.
 
+Formal retry then proved why report code must not live in a physics-hashed module: changing only
+`BankExamSampler.denominator_report()` changed the complete `venue_ball_sampler.py` SHA, and the
+schema-v3 bank refused export before rollout. The sampler is restored byte-identically
+(`00e28e85...30cc`), while final artifact exactness is now substituted by the outer MuJoCo
+evaluator. Only the recorded judge PGIDs were terminated after Isaac's failed shutdown hung; no
+training process was signalled. This retained attempt is not a score.
+
 ```bash
 python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_bank_exam_schedule.py \

@@ -1102,3 +1102,7 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   后 19k 回落，而 M3-S1 继续上升；M2-old 同样在 18k 后回落，M2-S1 19k 仍高于 old。所有 causal
   行都必须标 `evaluation_contract_exact=false`；同步修复了 Markdown 分母段误抄 bank-leg exactness
   的报告 bug，JSON 与人读报告不再冲突。
+- 首版报告修复误改了题库物理哈希覆盖的 `venue_ball_sampler.py`；formal preflight 正确拒绝
+  `changed files=['venue_ball_sampler.py']`。已把该文件逐字恢复到 `00e28e85...30cc`，最终 exactness
+  改写移到不参与 bank physics hash 的 MuJoCo evaluator 外层；只按两条 judge PGID 精确 TERM 掉
+  traceback 后卡住的 Isaac shutdown，训练未受信号。该批保留、不入账。

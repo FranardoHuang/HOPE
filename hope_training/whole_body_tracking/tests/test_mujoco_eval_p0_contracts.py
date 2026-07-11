@@ -378,6 +378,21 @@ def test_mujoco_robot_accepts_float32_armature_roundtrip(monkeypatch):
     assert np.array_equal(model.dof_armature[robot.vadr], bound)
 
 
+def test_final_denominator_report_downgrades_bank_leg_for_inexact_artifact():
+    sampler = SimpleNamespace(
+        denominator_report=lambda: [
+            "  evaluation_contract_exact=true",
+            "  immutable_schedule: K=20",
+        ]
+    )
+    assert M.final_denominator_report(
+        sampler, evaluation_contract_exact=False
+    ) == [
+        "  evaluation_contract_exact=false",
+        "  immutable_schedule: K=20",
+    ]
+
+
 def test_mujoco_robot_fails_mismatched_bound_armature_and_active_velocity_limit(monkeypatch):
     joint_names, body_names, _ = _install_fake_mujoco(
         monkeypatch, armature=0.02, step_velocity=13.0

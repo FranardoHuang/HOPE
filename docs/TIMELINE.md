@@ -1296,3 +1296,9 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    前先 import 双依赖，armature 只放行 `1e-8` 序列化残差。另抓到 causal summary JSON 正确为
    inexact、Markdown `DENOMINATORS` 却误写 true，已改成传播最终 evaluation flag。专项回归
    `88 passed,1 optional skip`；所有失败批次保留但不算模型分，训练 checkout 未动、无真机命令。
+12. 【franco/Codex】**正式卷用自己的哈希门挡住一次“只改报告也污染物理尺”的实现错误**——首版
+   denominator 修复放进 `venue_ball_sampler.py`，虽不改物理计算，却改变了 schema-v3 bank 绑定的
+   整文件 SHA；fresh clean-q10 export 因此在 rollout 前 fail closed。sampler 已逐字恢复到
+   `00e28e85...30cc`，final exact/inexact 只在外层 MuJoCo 报告器替换；traceback 后 Isaac shutdown
+   卡住时仅 TERM 对应 judge PGID，训练臂零信号。失败目录保留且不计分，说明 immutable bank 的
+   source hash 门真实生效。
