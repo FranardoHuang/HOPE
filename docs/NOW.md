@@ -112,9 +112,10 @@ Rules:
   单 reward 胜者只能筛项，不能宣称组合最优。先比较 Ace 式显式 safe bridge/prepare 与 HITTER 式
   unified recovery option；只有后者确有必要才扫 `2^3` 和固定总预算 mixture。终判仍用无 reset 的
   Gate 3 连续卷。
-- 已验证基础设施、plant/q50 证据、动作 frame/counterfactual screen 和 179 Gate3 source gate 已
-  收口到 `main@9d70763`；动作 2-vs-4、TOPP、plant 标定、formal first tick 与连续 Gate3 rollout
-  仍按 open gate 记账。NOW 只保留 main 活板版本，feature 分支的旧 NOW 不回灌。
+- 已验证基础设施、plant/q50 证据、4k 同卷护栏、动作 frame/空间 proposal screen、179 Gate3
+  source+formal loader gate 已收口到 `main@5255c6d`；动作 2-vs-4、TOPP、plant 标定、backend
+  first tick 与连续 Gate3 rollout 仍按 open gate 记账。NOW 只保留 main 活板版本，feature 分支的
+  旧 NOW 不回灌。
 
 ### 14:00 CST 早期快照(仅历史，不用于进程管理)
 
