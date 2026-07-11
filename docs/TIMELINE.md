@@ -1280,4 +1280,10 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    不提前写成完成。首次实跑又抓到两项 evaluator 前置债：detached worktree 缺 ignored A3 URDF
    链接，补成只指向冻结训练资产后，`play.py` 已写出 ONNX 但重定向 stdout 丢了成功握手行；两批
    失败目录都保留且不入账。`judge.sh` 已强制 `PYTHONUNBUFFERED=1`，worker 改为首个 export
-   failure 即停，修后 retry 待执行。
+   failure 即停。再试已走到 sidecar，抓到 writer 与历史合同不一致：179D normalizer 的恒定特征
+   `[11,16,42,47]` 保存 `_std=0`，运行时用 `std+eps(0.01)` 合法，但 writer 错拒 `<=0`。
+   已改为 finite `std>=0 && std+eps>0`，负数仍 fail；两 Pod 真实 checkpoint smoke 都得到
+   `zeros=4`、同 normalizer SHA `e3efcfe8...b97f`。扩容前红队又封四洞：两引擎 explicit escape
+   均强制 inexact；judge/trainer 共用 Kit lock；worker 不复用 stale log/state 且记录 clean eval
+   commit；scale-out 部分成功可安全跳过/单臂补发。相关回归 `68 passed,1 optional skip`，修后
+   全曲线 retry 待执行。

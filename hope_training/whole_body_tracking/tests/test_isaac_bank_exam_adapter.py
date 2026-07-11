@@ -31,6 +31,18 @@ assert CKPT_SPEC.loader is not None
 CKPT_SPEC.loader.exec_module(CKPT)
 
 
+def test_legacy_face_pairing_is_always_an_inexact_isaac_diagnostic():
+    assert A.face_pairing_inexact_reason(
+        {"face_command_pairing": "shared_plus_y"}
+    ) is None
+    reason = A.face_pairing_inexact_reason(
+        {"face_command_pairing": "legacy_signed_vs_A"}
+    )
+    assert "diagnostic-only" in reason
+    with pytest.raises(A.IsaacBankExamError, match="unsupported"):
+        A.face_pairing_inexact_reason({"face_command_pairing": "unknown"})
+
+
 class FakeTensor:
     def __init__(self, value="obs"):
         self.value = value

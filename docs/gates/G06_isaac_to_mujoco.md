@@ -296,7 +296,11 @@ workers attempted the missing causal `17000/18000/19000` and fresh
 evaluator preflight failures (missing ignored A3 asset link, then buffered
 export-success handshake despite an ONNX file), not booked model results. The
 links now resolve only to the frozen training assets and the retry uses
-unbuffered export output. Each Pod serializes the Isaac export phase;
+unbuffered export output. A third preflight correctly reached sidecar creation
+and exposed the known four constant observation dimensions. The sidecar writer
+now preserves finite zero std only under its bound `eps=0.01` and still rejects
+negative/non-finite or non-positive divisors; both Pods reproduced the same
+four zeros with valid SHA-bound output. Each Pod serializes the Isaac export phase;
 after an export reaches MuJoCo, CPU exams may overlap with
 `OMP_NUM_THREADS=MKL_NUM_THREADS=OPENBLAS_NUM_THREADS=1`. Every result directory
 is checkpoint-specific, so no old ONNX or normalizer is reused. The workers
@@ -304,6 +308,15 @@ run from the detached evaluator while both training checkouts remain clean at
 `6d93bcb`. Diagnostic pairing/motion still receives the explicit inexact
 escape; the `SZ` target cell may not. No curve result is booked yet, and G06
 therefore remains `Partial`.
+
+The inexact escape is now a one-way result downgrade in both simulators. An
+exact-provenance fresh checkpoint evaluated with legacy face pairing (`LZ/LP`)
+is allowed only as a diagnostic and must emit
+`evaluation_contract_exact=false`; MuJoCo applies this when assembling the
+bank contract, and Isaac records the pairing as an inexact reason before its
+scorecard. `SP` remains a non-target plant ablation even when its bytes are
+fully reproducible. This prevents the 2x2 diagnostic grid from laundering a
+formal target label.
 
 ```bash
 python3 -m pytest -q \

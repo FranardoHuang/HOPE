@@ -58,6 +58,18 @@ def test_hold_protocol_scope_is_shared_by_main_and_rollout_and_bank_always_holds
     )
 
 
+def test_explicit_inexact_escape_can_never_produce_an_exact_bank_score():
+    assert M.bank_evaluation_contract_exact(
+        artifact_exact=True, schedule_exact=True, diagnostic_escape=False
+    )
+    assert not M.bank_evaluation_contract_exact(
+        artifact_exact=True, schedule_exact=True, diagnostic_escape=True
+    )
+    assert not M.bank_evaluation_contract_exact(
+        artifact_exact=False, schedule_exact=True, diagnostic_escape=False
+    )
+
+
 def test_bank_loader_resolves_standalone_module_without_isaac_package_import():
     path = Path(M.stage1_question_bank_module_path(ROOT))
     assert path.name == "stage1_question_bank.py"

@@ -1,6 +1,8 @@
 {
   "schema_version": 1,
-  "judge_script_sha256": "10c317a37f96c6f35b0f07be7aa791393b99f943128844c1356cf260fdfe8cf6",
+  "judge_script_sha256": "af084790f43c58e050810ab32869eaa6330a6a932c9a161438760bd33163bb0f",
+  "training_checkout": "/workspace/codexschema/nohope",
+  "expected_training_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
   "jobs": [
     {
       "id": "M3_old_17000",

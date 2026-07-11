@@ -72,6 +72,12 @@ def process_alive(pid: int) -> bool:
     return True
 
 
+def git_output(path: Path, *args: str) -> str:
+    return subprocess.check_output(
+        ["git", "-C", str(path), *args], text=True, stderr=subprocess.STDOUT
+    ).strip()
+
+
 def reap(active: list[dict[str, Any]], *, block: bool = False) -> int:
     failures = 0
     while True:
@@ -103,7 +109,7 @@ def main() -> int:
     parser.add_argument("--max-active-cpu", type=int, default=12)
     parser.add_argument("--export-timeout-s", type=int, default=1200)
     parser.add_argument("--poll-s", type=float, default=5.0)
-    parser.add_argument("--continue-on-export-failure", action="store_true")
+    parser.add_argument("--continue-on-pre-cpu-failure", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -114,9 +120,35 @@ def main() -> int:
     judge_script = args.judge_script.resolve()
     if not judge_script.is_file():
         raise FileNotFoundError(f"judge script not found: {judge_script}")
+    judge_sha = sha256(judge_script)
     expected_judge_sha = manifest.get("judge_script_sha256")
-    if expected_judge_sha and sha256(judge_script) != expected_judge_sha:
+    if expected_judge_sha and judge_sha != expected_judge_sha:
         raise RuntimeError("judge.sh SHA-256 does not match the frozen manifest")
+
+    eval_root = Path(git_output(judge_script.parent, "rev-parse", "--show-toplevel"))
+    eval_commit = git_output(eval_root, "rev-parse", "HEAD")
+    eval_dirty = git_output(eval_root, "status", "--porcelain")
+    if eval_dirty:
+        raise RuntimeError(f"refusing a dirty evaluation worktree: {eval_root}")
+
+    training_checkout_raw = manifest.get("training_checkout")
+    expected_training_commit = manifest.get("expected_training_commit")
+    training_commit = None
+    if training_checkout_raw is not None or expected_training_commit is not None:
+        if not isinstance(training_checkout_raw, str) or not os.path.isabs(training_checkout_raw):
+            raise ValueError("training_checkout must be an absolute path when a commit is pinned")
+        if not isinstance(expected_training_commit, str) or not re.fullmatch(
+            r"[0-9a-f]{40}", expected_training_commit
+        ):
+            raise ValueError("expected_training_commit must be a full lowercase Git SHA")
+        training_checkout = Path(training_checkout_raw)
+        training_commit = git_output(training_checkout, "rev-parse", "HEAD")
+        if training_commit != expected_training_commit:
+            raise RuntimeError(
+                f"training checkout commit mismatch: {training_commit} != {expected_training_commit}"
+            )
+        if git_output(training_checkout, "status", "--porcelain"):
+            raise RuntimeError(f"refusing a dirty training checkout: {training_checkout}")
 
     state_dir = args.state_dir.resolve()
     if not args.dry_run:
@@ -140,17 +172,28 @@ def main() -> int:
             raise FileNotFoundError(f"job {job_id}: missing run/checkpoint")
         if checkpoint.parent.resolve() != run_dir.resolve():
             raise ValueError(f"job {job_id}: checkpoint must be directly inside run_dir")
+        checkpoint_sha = sha256(checkpoint)
 
         state_path = state_dir / f"{job_id}.json"
         log_path = state_dir / f"{job_id}.log"
         if state_path.exists():
             prior = json.loads(state_path.read_text(encoding="utf-8"))
             if prior.get("status") == "complete" and prior.get("returncode") == 0:
-                print(f"[curve-worker] skip completed {job_id}", flush=True)
-                continue
+                if (
+                    prior.get("checkpoint_sha256") == checkpoint_sha
+                    and prior.get("judge_script_sha256") == judge_sha
+                    and prior.get("eval_commit") == eval_commit
+                    and prior.get("training_commit") == training_commit
+                ):
+                    print(f"[curve-worker] skip verified completed {job_id}", flush=True)
+                    continue
+                raise RuntimeError(f"completed job {job_id} no longer matches its frozen inputs")
             prior_pid = prior.get("pid")
             if isinstance(prior_pid, int) and process_alive(prior_pid):
                 raise RuntimeError(f"job {job_id} already has a live judge pid={prior_pid}")
+            raise RuntimeError(
+                f"job {job_id} has preserved non-success state; use a new/archive state directory"
+            )
 
         command = [
             "bash", str(judge_script), str(run_dir), str(checkpoint),
@@ -170,7 +213,7 @@ def main() -> int:
         while len(active) >= args.max_active_cpu:
             failures += reap(active, block=True)
 
-        log_handle = log_path.open("ab", buffering=0)
+        log_handle = log_path.open("wb", buffering=0)
         proc = subprocess.Popen(
             command,
             cwd=judge_script.parent.parent,
@@ -188,8 +231,11 @@ def main() -> int:
             "command": command,
             "run_dir": str(run_dir),
             "checkpoint": str(checkpoint),
-            "checkpoint_sha256": sha256(checkpoint),
-            "judge_script_sha256": sha256(judge_script),
+            "checkpoint_sha256": checkpoint_sha,
+            "judge_script_sha256": judge_sha,
+            "eval_root": str(eval_root),
+            "eval_commit": eval_commit,
+            "training_commit": training_commit,
             "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         atomic_json(state_path, state)
@@ -213,14 +259,18 @@ def main() -> int:
                 atomic_json(state_path, state)
                 print(f"[curve-worker] {job_id} failed before CPU phase rc={rc}", flush=True)
                 failures += 1
-                if not args.continue_on_export_failure:
+                if not args.continue_on_pre_cpu_failure:
+                    while active:
+                        failures += reap(active, block=True)
                     atomic_json(
                         state_dir / "summary.json",
                         {
                             "status": "failed",
                             "failures": failures,
                             "stopped_after": job_id,
-                            "reason": "export_failed_before_cpu_phase",
+                            "reason": "judge_failed_before_cpu_phase",
+                            "eval_commit": eval_commit,
+                            "training_commit": training_commit,
                             "finished_utc": time.strftime(
                                 "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
                             ),
@@ -245,6 +295,8 @@ def main() -> int:
     summary = {
         "status": "complete" if failures == 0 else "failed",
         "failures": failures,
+        "eval_commit": eval_commit,
+        "training_commit": training_commit,
         "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     atomic_json(state_dir / "summary.json", summary)

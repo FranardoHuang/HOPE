@@ -49,6 +49,7 @@ WBT_DIR=$(dirname "$SCRIPT_DIR")
 
 JUDGE_ISAAC_ENV=${JUDGE_ISAAC_ENV:-/workspace/hope_isaac_venv/bin/activate}
 JUDGE_MJEVAL_ACT=${JUDGE_MJEVAL_ACT:-/workspace/hope_mjeval_venv/bin/activate}
+JUDGE_KIT_BOOT_LOCK=${JUDGE_KIT_BOOT_LOCK:-/workspace/.kit_boot.lock}
 
 die() { echo "[judge][FATAL] $*" >&2; exit 1; }
 note() { echo "[judge] $*"; }
@@ -492,6 +493,10 @@ mkdir -p "$JUDGE_DIR/exam"
 
 # ---------------------------------------------------------------- ② 原生导出 + sidecar(isaac venv)
 [ -f "$JUDGE_ISAAC_ENV" ] || die "isaac venv 入口不存在: $JUDGE_ISAAC_ENV(JUDGE_ISAAC_ENV 可覆盖)"
+command -v flock >/dev/null 2>&1 || die "缺 flock，无法与训练 Kit boot 共用全 Pod 启动锁"
+exec 8>"$JUDGE_KIT_BOOT_LOCK"
+note "等待全 Pod Kit boot 锁: $JUDGE_KIT_BOOT_LOCK"
+flock -x 8
 note "② play.py 原生导出(isaac venv,gpu$GPU)…"
 (
   # shellcheck disable=SC1090
@@ -515,6 +520,7 @@ if ! grep -aq "Exported ONNX policy to:" "$JUDGE_DIR/export_play.log"; then
 fi
 [ -f "$ONNX" ] || die "有成功行但 $ONNX 不存在?检查 $JUDGE_DIR/export_play.log"
 note "onnx OK: $ONNX"
+flock -u 8
 
 note "make_std_sidecar(isaac venv)…"
 (

@@ -228,14 +228,24 @@ face pairing and plant friction. `SZ` (`shared_plus_y`, zero friction) is the fo
 the other fresh cells are causal diagnostics and cannot silently replace it. Guidance, N1, R8 and
 later-stage variables are not mixed into this matrix.
 
+Both Isaac and MuJoCo treat the explicit diagnostic escape as a one-way downgrade: it authorizes
+the run and forces `evaluation_contract_exact=false`. Thus `LZ/LP` cannot inherit a bookable label
+from otherwise exact fresh motion/checkpoint provenance. `SP` may retain exact reproducibility but
+remains a non-target plant ablation by pre-registration; only `SZ` is the formal target cell.
+
 The missing early curve is also being repaired. Causal `17000/18000/19000` and fresh `0/1000/2000`
 checkpoints are scheduled through the detached evaluator first; subsequent milestones follow the
 1000--2000 iteration policy. The first attempt exposed two evaluator preflight faults, not model
 failures: the detached worktrees lacked the ignored A3 asset link, then `play.py` wrote ONNX but its
-redirected success line was lost to stdout buffering. Both failed batches are retained; the asset
-links are now bound to the frozen training checkout and `judge.sh` forces unbuffered export output.
-One Isaac export runs per Pod at a time, while completed exports run MuJoCo BankExam on CPU with one
-BLAS/OpenMP thread. Full rationale, early-stop protection and peak-density rules are in
+redirected success line was lost to stdout buffering. The next preflight reached sidecar generation
+and exposed four valid constant observation features with saved `_std=0`; the writer incorrectly
+required `std>0` even though saved inference uses `(x-mean)/(std+0.01)`. Failed batches are retained;
+the asset links are now bound to the frozen training checkout, `judge.sh` forces unbuffered export
+output, and the writer accepts only finite `std>=0` with a strictly positive `std+eps` divisor.
+Both Pods reproduced exactly four protected zero dimensions and rejected negative scales in tests.
+One Isaac export runs per Pod at a time, shares the training Kit boot lock, and completed exports run
+MuJoCo BankExam on CPU with one BLAS/OpenMP thread. Worker state binds a clean evaluator commit,
+judge SHA, frozen training commit and checkpoint SHA. Full rationale, early-stop protection and peak-density rules are in
 [`phase1_ablation_acceleration_2026-07-11.md`](research/phase1_ablation_acceleration_2026-07-11.md).
 
 ## Remaining Gates
@@ -243,7 +253,7 @@ BLAS/OpenMP thread. Full rationale, early-stop protection and peak-density rules
 1. Complete the layer-by-layer scale-out to 24 arms. After every layer verify PGID isolation, GPU/host
    capacity, hard-contract fields, first checkpoint binding and finite parameters; do not fast-forward
    either frozen training checkout while a local arm is alive.
-2. Re-run and finish the pre-registered checkpoint curves after the two preserved evaluator
+2. Re-run and finish the pre-registered checkpoint curves after the preserved evaluator
    preflight failures. Compare old/S1 only within the same family, seed and
    milestone; preserve peak checkpoints as well as terminal checkpoints.
 3. Verify every promoted checkpoint's iteration, sidecar SHA binding, lineage flag and finite parameters.

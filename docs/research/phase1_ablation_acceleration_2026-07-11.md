@@ -18,6 +18,8 @@ relax any schema, lineage, exam, simulator, or robot-safety gate.
 - 训练 checkout 在任一本地 arm 存活时冻结，不 pull、不切 commit、不修改；评测从独立 detached
   worktree 运行；
 - 导出一次只启动一个 Kit 进程；MuJoCo BankExam 使用 CPU、`OMP_NUM_THREADS=1`，可与训练并行；
+- judge/export 与 training launcher 共用 `/workspace/.kit_boot.lock`；CPU 判卷可并行，不代表两个
+  Kit scene-create 可以重叠；
 - 不运行真机命令。Gate 3B 仍是候选终审，不是广度消融的日常筛子。
 
 ## 五级漏斗
@@ -56,6 +58,8 @@ L0/L1 是 fail-closed 机制检查，不因“曲线看起来好”而豁免。L
 每一条考卷曲线记录必须绑定：checkpoint path/SHA、相邻 hard-contract SHA、lineage exact flag、
 exam-bank SHA、schedule SHA、evaluator commit、seed、实际 attempt 数及原始 ledger。causal 后代永远
 标 diagnostic/inexact；只有 fresh schema-2 motion + zero-friction lineage 可以作为 exact candidate。
+显式 `--allow-inexact-contract` 只是一张“允许做诊断”的票，两套 evaluator 都必须因此强制
+`evaluation_contract_exact=false`，不能因底层 checkpoint lineage exact 而洗白 legacy pairing。
 
 ## 成对判读与止损
 
@@ -101,6 +105,9 @@ formal target 格，其他三格是同 family 的因果尺。
 每次先补一层（每卡从 1 条变 2 条），验收六卡显存、GPU、host RAM、日志和 contract，再补到
 3 条、4 条；每次 Kit boot 间隔 `75 s`。完整 GPU/seed 交叉布局记录在
 `configs/phase1_scaleout_matrix_20260711.json`，不靠口头记忆。
+一层中途失败时保留该臂目录；重跑同层只会跳过“命令逐字匹配、ready marker 存在且原 PID
+仍活”的已成功臂。若较早臂已经自然结束，用 `PHASE1_ONLY_ARM=<run_name>` 精确补发剩余臂，
+不需要也不允许删除成功臂状态。
 
 扩容后 checkpoint worker 只消费预注册里程碑，不对每个 `model_*.pt` 重复判卷。这样训练保存频率
 仍保持恢复能力，而 CPU/GPU 评测预算集中在能改变决策的节点上。

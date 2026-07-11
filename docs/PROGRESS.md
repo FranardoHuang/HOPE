@@ -1083,3 +1083,12 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   训练 checkout 未修改，未执行真机命令。首轮因 detached worktree 缺 ignored A3 asset link
   全部在 scene create 前失败；补链接后的第二轮已写出 ONNX，但成功行被缓冲丢失而 fail-closed。
   两批均保留、不入账；judge 改为 unbuffered，worker 改为首个 export failure 即停，待修后 retry。
+- 第三次 preflight 到达 `make_std_sidecar`，发现同一 179D normalizer 的四个恒定维保存 `_std=0`。
+  运行时合同为 `(obs-mean)/(std+0.01)`，所以零值有保护；writer 已与 runtime 对齐为允许 finite
+  non-negative std、继续拒绝负值/NaN/Inf/非正 divisor。两 Pod 真 checkpoint smoke 均通过且
+  normalizer state SHA 相同；新增文件级回归覆盖合法零值与负值 fail-closed。
+- 扩容前独立审查再封四个调度洞：Isaac/MuJoCo 的显式 inexact escape 现在都强制结果
+  `evaluation_contract_exact=false`；judge 与 trainer 共用 Kit boot lock；curve worker 绑定 clean
+  evaluator/training commit、拒绝 stale failed state 并在失败前 drain CPU jobs；scale-out 层可核验
+  跳过仍活的成功臂，也可用 `PHASE1_ONLY_ARM` 精确补剩余臂。相关纯 CPU 集为
+  `68 passed, 1 optional Torch skip`。

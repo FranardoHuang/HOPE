@@ -529,6 +529,12 @@ def training_hold_protocol_active(*, reset_mode, deploy_faithful_cfg, venue_samp
     return bool(multiswing or bank_schedule)
 
 
+def bank_evaluation_contract_exact(*, artifact_exact, schedule_exact, diagnostic_escape):
+    """An explicit inexact escape can authorize a run, never a bookable exact score."""
+
+    return bool(artifact_exact and schedule_exact and not diagnostic_escape)
+
+
 def stage1_question_bank_module_path(wbt_root):
     """Return the standalone bank loader without importing the Isaac task package."""
 
@@ -4725,9 +4731,16 @@ def main():
                 f"[mj-sim2sim] BankExam explicit --steps cap={args.steps}; K must complete or "
                 "evaluation exits nonzero"
             )
-        policy.evaluation_contract_exact = bool(
-            policy.evaluation_contract_exact and venue_sampler.contract_exact
+        policy.evaluation_contract_exact = bank_evaluation_contract_exact(
+            artifact_exact=policy.evaluation_contract_exact,
+            schedule_exact=venue_sampler.contract_exact,
+            diagnostic_escape=args.allow_inexact_contract,
         )
+        if args.allow_inexact_contract:
+            print(
+                "[mj-sim2sim] --allow-inexact-contract is diagnostic-only; "
+                "evaluation_contract_exact=false"
+            )
         print(f"[mj-sim2sim] MODE B — target source: EXAM BANK (official S1 paper; same-source "
               f"questions, loader meta guards enforced)")
         print(f"[mj-sim2sim]   bank: {args.exam_bank}")

@@ -482,8 +482,11 @@ and fresh `0/1000/2000` checkpoints, with one Isaac export at a time per Pod
 and CPU MuJoCo exams allowed to overlap. Their first preflight found a missing
 ignored A3 asset link in each detached worktree; after linking the frozen
 training asset, a second preflight wrote ONNX but exposed a buffered/missing
-success handshake. Both batches are retained and neither is a checkpoint
-score. `judge.sh` now forces unbuffered export output for the retry. Later points follow
+success handshake. The next preflight reached the normalizer sidecar and found
+four saved `_std=0` constant features. Runtime already evaluates them with
+`eps=0.01`; the writer now matches that contract (`std>=0`, `std+eps>0`) while
+negative/non-finite values remain fatal. All failed batches are retained and
+none is a checkpoint score. `judge.sh` now forces unbuffered export output for the retry. Later points follow
 the 1000--2000 iteration schedule and densify around a measured peak. The
 worker records checkpoint/evaluator hashes and never signals a training
 process. Both scale-out roles (three layers of three arms on each Pod) and all

@@ -37,6 +37,19 @@ class IsaacBankExamError(RuntimeError):
     """Fail-closed adapter/ledger error."""
 
 
+def face_pairing_inexact_reason(contract: Mapping[str, Any] | None) -> str | None:
+    """Return the diagnostic reason for a non-formal face pairing, if any."""
+
+    if not isinstance(contract, Mapping):
+        return None
+    pairing = contract.get("face_command_pairing", "shared_plus_y")
+    if pairing == "legacy_signed_vs_A":
+        return "face_command_pairing=legacy_signed_vs_A is diagnostic-only"
+    if pairing != "shared_plus_y":
+        raise IsaacBankExamError(f"unsupported face_command_pairing={pairing!r}")
+    return None
+
+
 def find_repository_root(start: str | os.PathLike[str]) -> Path:
     """Locate the checkout root from an evaluator script or directory path."""
 

@@ -142,27 +142,53 @@ base_recipe=(
   ++task.rewards.racket_face_guidance_weight=0.0
 )
 
+selected_arm_seen=0
+
 launch_arm() {
   local arm=$1 gpu=$2 marker=$3
   shift 3
   local run_dir="$artifact_root/runs/$arm"
   local log_file="$run_dir/run.log"
-  if [[ -e ${log_file}.launch ]]; then
-    echo "refusing duplicate launch; state already exists: ${log_file}.launch" >&2
-    exit 1
+  local state_file="${log_file}.launch"
+  local -a command=(
+    env CUDA_VISIBLE_DEVICES="$gpu" PYTHONUNBUFFERED=1
+    "$python_bin" scripts/train.py "${base_recipe[@]}" "$@"
+  )
+  if [[ -n ${PHASE1_ONLY_ARM:-} && $arm != "$PHASE1_ONLY_ARM" ]]; then
+    echo "PHASE1_FILTER_SKIP arm=$arm requested=$PHASE1_ONLY_ARM"
+    return 0
+  fi
+  selected_arm_seen=1
+  if [[ -e $state_file ]]; then
+    case "$role" in
+      pod1_scaleout_*|pod2_scaleout_*)
+        local recorded_command expected_command pid pgid
+        recorded_command=$(sed -n 's/^command=//p' "$state_file")
+        printf -v expected_command '%q ' "${command[@]}"
+        pid=$(sed -n 's/^pid=//p' "$state_file")
+        pgid=$(sed -n 's/^pgid=//p' "$state_file")
+        if [[ $pid =~ ^[1-9][0-9]*$ && $pgid == "$pid" \
+              && $recorded_command == "$expected_command" \
+              && -n $(sed -n 's/^ready_utc=//p' "$state_file") \
+              && -f $log_file && $(grep -Fc -- "$marker" "$log_file") -gt 0 ]] \
+              && kill -0 "$pid" 2>/dev/null; then
+          echo "PHASE1_READY_EXISTING arm=$arm pid=$pid pgid=$pgid command=verified"
+          return 0
+        fi
+        ;;
+    esac
+    echo "refusing duplicate/unverified launch state: $state_file" >&2
+    return 1
   fi
   mkdir -p "$run_dir"
   if [[ ${PHASE1_DRY_RUN:-0} == 1 ]]; then
     printf 'PHASE1_DRY_RUN arm=%q gpu=%q log=%q command=' "$arm" "$gpu" "$log_file"
-    printf '%q ' env CUDA_VISIBLE_DEVICES="$gpu" PYTHONUNBUFFERED=1 \
-      "$python_bin" scripts/train.py "${base_recipe[@]}" "$@"
+    printf '%q ' "${command[@]}"
     printf '\n'
     return 0
   fi
   KIT_BOOT_MARKER="$marker" KIT_BOOT_TIMEOUT_S=900 KIT_BOOT_POLL_S=5 \
-    "$locked_launcher" "$log_file" \
-    env CUDA_VISIBLE_DEVICES="$gpu" PYTHONUNBUFFERED=1 \
-    "$python_bin" scripts/train.py "${base_recipe[@]}" "$@"
+    "$locked_launcher" "$log_file" "${command[@]}"
 }
 
 launch_fresh_variant() {
@@ -214,7 +240,7 @@ launch_causal() {
 }
 
 stagger_scaleout() {
-  if [[ ${PHASE1_DRY_RUN:-0} != 1 ]]; then
+  if [[ ${PHASE1_DRY_RUN:-0} != 1 && -z ${PHASE1_ONLY_ARM:-} ]]; then
     sleep "${PHASE1_STAGGER_S:-75}"
   fi
 }
@@ -332,3 +358,8 @@ case "$role" in
     launch_fresh_variant phase1_fresh_v3_LP_seed2 2 2 17000 "Learning iteration" legacy_signed_vs_A false
     ;;
 esac
+
+if [[ -n ${PHASE1_ONLY_ARM:-} && $selected_arm_seen != 1 ]]; then
+  echo "PHASE1_ONLY_ARM did not match any arm in role $role: $PHASE1_ONLY_ARM" >&2
+  exit 2
+fi

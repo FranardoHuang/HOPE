@@ -41,6 +41,7 @@ from isaac_bank_exam_adapter import (  # noqa: E402
     canonical_sha256,
     configure_runtime_motion_loader,
     configure_runtime_train_bank_loader,
+    face_pairing_inexact_reason,
     find_repository_root,
     finite_or_none,
     hydrate_missing_dataclass_defaults,
@@ -180,6 +181,13 @@ def _contract_preflight(
             sha256=contract_sha,
             require_lineage_exact=True,
         )
+        pairing_reason = face_pairing_inexact_reason(contract)
+        if pairing_reason is not None:
+            if not allow_inexact:
+                raise IsaacBankExamError(
+                    f"{pairing_reason}; pass +allow_inexact_contract=true and keep the result non-bookable"
+                )
+            inexact_reasons.append(pairing_reason)
     except (OSError, ValueError) as exc:
         if not allow_inexact:
             raise IsaacBankExamError(
