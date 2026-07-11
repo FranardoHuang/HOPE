@@ -371,6 +371,10 @@ def proc_executable(pid: int) -> Path:
     return Path(f"/proc/{pid}/exe").resolve(strict=True)
 
 
+def proc_cwd(pid: int) -> Path:
+    return Path(f"/proc/{pid}/cwd").resolve(strict=True)
+
+
 def process_alive(pid: int) -> bool:
     path = Path(f"/proc/{pid}/stat")
     try:
@@ -424,14 +428,26 @@ def parse_worker_options(command: list[str]) -> dict[str, Any]:
     return options
 
 
+def resolve_argv_path(value: str, process_cwd: Path | None, label: str) -> Path:
+    path = Path(value)
+    if path.is_absolute():
+        return path.resolve()
+    if process_cwd is None:
+        raise ContractError(f"relative {label} requires the target process /proc cwd")
+    return (process_cwd / path).resolve()
+
+
 def validate_worker_command(
-    command: list[str], queue: dict[str, Any], config: dict[str, Any], runtime_paths: dict[str, Path]
+    command: list[str], queue: dict[str, Any], config: dict[str, Any],
+    runtime_paths: dict[str, Path], *, process_cwd: Path | None = None,
 ) -> dict[str, Any]:
     if len(command) < 3:
         raise ContractError(f"{queue['queue_id']}: worker command is too short")
     if command[0] not in config["runtime"]["worker_python_argv0_allowed"]:
         raise ContractError(f"{queue['queue_id']}: unregistered Python argv0 {command[0]!r}")
-    if Path(command[1]).resolve() != runtime_paths["legacy_worker"]:
+    if resolve_argv_path(command[1], process_cwd, "worker argv[1]") != runtime_paths[
+        "legacy_worker"
+    ]:
         raise ContractError(f"{queue['queue_id']}: command does not use the legacy worker")
     options = parse_worker_options(command)
     required = {"--manifest", "--judge-script", "--state-dir", "--max-active-cpu", "--wait-for-checkpoints"}
@@ -443,7 +459,7 @@ def validate_worker_command(
         "--state-dir": Path(queue["legacy_state_dir"]).resolve(),
     }
     for option, expected in exact_paths.items():
-        if Path(options[option]).resolve() != expected:
+        if resolve_argv_path(options[option], process_cwd, option) != expected:
             raise ContractError(f"{queue['queue_id']}: {option} changed from its registered path")
     try:
         max_active = int(options["--max-active-cpu"])
@@ -472,15 +488,20 @@ def validate_worker_command(
 
 def assert_idle_exact_worker(
     queue: dict[str, Any], config: dict[str, Any], runtime_paths: dict[str, Path],
-    expected_command: list[str] | None = None,
+    expected_command: list[str] | None = None, expected_cwd: str | None = None,
 ) -> dict[str, Any]:
     pid = queue["legacy_pid_hint"]
     if not process_alive(pid):
         raise ContractError(f"{queue['queue_id']}: hinted legacy worker pid={pid} is not alive")
     command = parse_proc_cmdline(pid)
-    validate_worker_command(command, queue, config, runtime_paths)
+    cwd = proc_cwd(pid)
+    validate_worker_command(
+        command, queue, config, runtime_paths, process_cwd=cwd
+    )
     if expected_command is not None and command != expected_command:
         raise ContractError(f"{queue['queue_id']}: /proc command changed from attestation")
+    if expected_cwd is not None and cwd != Path(expected_cwd).resolve():
+        raise ContractError(f"{queue['queue_id']}: /proc cwd changed from attestation")
     if proc_executable(pid) != Path(config["runtime"]["worker_python"]).resolve():
         raise ContractError(f"{queue['queue_id']}: /proc executable is not the pinned Python")
     rows = process_table()
@@ -502,7 +523,10 @@ def assert_idle_exact_worker(
     for item in rows:
         try:
             candidate = parse_proc_cmdline(item["pid"])
-            validate_worker_command(candidate, queue, config, runtime_paths)
+            candidate_cwd = proc_cwd(item["pid"])
+            validate_worker_command(
+                candidate, queue, config, runtime_paths, process_cwd=candidate_cwd
+            )
         except (ContractError, FileNotFoundError, ProcessLookupError, PermissionError, UnicodeError):
             continue
         matches.append(item["pid"])
@@ -513,6 +537,7 @@ def assert_idle_exact_worker(
         "pgid": pid,
         "command": command,
         "command_sha256": canonical_sha256(command),
+        "cwd": str(cwd),
         "python_executable": str(proc_executable(pid)),
         "children": [],
         "process_group_members": [pid],
@@ -865,14 +890,19 @@ def exact_term_verified_workers(
     # a child/judge, this comprehension raises and zero workers are signalled.
     snapshots = {
         audit["queue"]["queue_id"]: assert_idle_exact_worker(
-            audit["queue"], config, runtime_paths, audit["process"]["command"]
+            audit["queue"], config, runtime_paths,
+            audit["process"]["command"], audit["process"]["cwd"],
         )
         for audit in audits
     }
     for audit in audits:
         queue_id = audit["queue"]["queue_id"]
         pid = snapshots[queue_id]["pid"]
-        if not process_alive(pid) or parse_proc_cmdline(pid) != snapshots[queue_id]["command"]:
+        if (
+            not process_alive(pid)
+            or parse_proc_cmdline(pid) != snapshots[queue_id]["command"]
+            or proc_cwd(pid) != Path(snapshots[queue_id]["cwd"]).resolve()
+        ):
             raise ContractError(f"{queue_id}: identity changed before Pod-atomic TERM")
     # Use one final shared process-table snapshot immediately before the tight
     # TERM loop.  This closes the long gap that would otherwise exist between
@@ -890,6 +920,10 @@ def exact_term_verified_workers(
         if members != [pid]:
             raise ContractError(
                 f"{queue_id}: worker PGID changed before TERM; zero signals sent"
+            )
+        if proc_cwd(pid) != Path(snapshot["cwd"]).resolve():
+            raise ContractError(
+                f"{queue_id}: worker cwd changed before TERM; zero signals sent"
             )
     stopped: dict[str, dict[str, Any]] = {}
     for audit in audits:
@@ -1022,12 +1056,17 @@ def start_hardened_worker(
     command = derive_hardened_command(
         audit["process"]["command"], runtime_paths["hardened_worker"], outputs["new_state_dir"]
     )
-    if Path(parse_worker_options(command)["--manifest"]).resolve() != Path(queue["runtime_manifest"]).resolve():
+    if resolve_argv_path(
+        parse_worker_options(command)["--manifest"],
+        Path(audit["process"]["cwd"]),
+        "--manifest",
+    ) != Path(queue["runtime_manifest"]).resolve():
         raise ContractError(f"{queue['queue_id']}: hardened command changed manifest")
     log_handle = outputs["new_worker_log"].open("xb", buffering=0)
     try:
         proc = subprocess.Popen(
             command,
+            cwd=audit["process"]["cwd"],
             stdin=subprocess.DEVNULL,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
@@ -1049,6 +1088,7 @@ def start_hardened_worker(
         "pgid": pgid,
         "command": command,
         "command_sha256": canonical_sha256(command),
+        "cwd": audit["process"]["cwd"],
         "worker_sha256": config["runtime"]["standalone_hardened_worker_sha256"],
         "manifest": queue["runtime_manifest"],
         "manifest_sha256": queue["expected_manifest_sha256"],

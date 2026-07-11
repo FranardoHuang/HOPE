@@ -148,6 +148,33 @@ def test_worker_command_is_semantically_checked_then_exactly_hash_bound(tmp_path
         replacement.validate_worker_command(command, queue, data, runtime_paths)
 
 
+def test_relative_worker_argv_is_resolved_only_against_target_proc_cwd(tmp_path):
+    data = config()
+    queue = dict(data["queues"][0])
+    target_cwd = tmp_path / "eval_checkout"
+    target_cwd.mkdir()
+    relative_worker = Path("hope_training/whole_body_tracking/scripts/phase1_checkpoint_curve_worker.py")
+    legacy = (target_cwd / relative_worker).resolve()
+    judge = tmp_path / "judge.sh"
+    command = [
+        "python3", str(relative_worker),
+        "--manifest", queue["runtime_manifest"],
+        "--judge-script", str(judge),
+        "--state-dir", queue["legacy_state_dir"],
+        "--max-active-cpu", "6", "--wait-for-checkpoints",
+    ]
+    runtime_paths = {"legacy_worker": legacy, "judge": judge.resolve()}
+    replacement.validate_worker_command(
+        command, queue, data, runtime_paths, process_cwd=target_cwd
+    )
+    with pytest.raises(replacement.ContractError, match="does not use the legacy worker"):
+        replacement.validate_worker_command(
+            command, queue, data, runtime_paths, process_cwd=tmp_path / "changed_cwd"
+        )
+    with pytest.raises(replacement.ContractError, match="requires the target process /proc cwd"):
+        replacement.validate_worker_command(command, queue, data, runtime_paths)
+
+
 def test_idle_worker_with_child_judge_fails_before_any_signal(monkeypatch, tmp_path):
     data = config()
     queue = dict(data["queues"][0])
@@ -167,6 +194,7 @@ def test_idle_worker_with_child_judge_fails_before_any_signal(monkeypatch, tmp_p
     monkeypatch.setattr(
         replacement, "proc_executable", lambda _pid: Path(data["runtime"]["worker_python"])
     )
+    monkeypatch.setattr(replacement, "proc_cwd", lambda _pid: tmp_path.resolve())
     monkeypatch.setattr(replacement, "proc_children", lambda _pid: [901])
     monkeypatch.setattr(
         replacement,
@@ -187,7 +215,10 @@ def test_pod_atomic_final_preflight_fails_second_worker_with_zero_signals(monkey
     data = config()
     queues = [dict(data["queues"][0]), dict(data["queues"][1])]
     audits = [
-        {"queue": queue, "process": {"command": ["python3", f"{index}.py"]}}
+        {
+            "queue": queue,
+            "process": {"command": ["python3", f"{index}.py"], "cwd": "/workspace"},
+        }
         for index, queue in enumerate(queues)
     ]
     calls = []
@@ -214,18 +245,24 @@ def test_exact_term_targets_only_registered_worker_pgids_and_never_kills(monkeyp
         queue["legacy_pid_hint"]: ["python3", f"{queue['queue_id']}.py"] for queue in queues
     }
     audits = [
-        {"queue": queue, "process": {"command": commands[queue["legacy_pid_hint"]]}}
+        {
+            "queue": queue,
+            "process": {
+                "command": commands[queue["legacy_pid_hint"]], "cwd": "/workspace",
+            },
+        }
         for queue in queues
     ]
     alive = set(commands)
 
     def audit_worker(queue, *_args, **_kwargs):
         pid = queue["legacy_pid_hint"]
-        return {"pid": pid, "pgid": pid, "command": commands[pid]}
+        return {"pid": pid, "pgid": pid, "command": commands[pid], "cwd": "/workspace"}
 
     monkeypatch.setattr(replacement, "assert_idle_exact_worker", audit_worker)
     monkeypatch.setattr(replacement, "process_alive", lambda pid: pid in alive)
     monkeypatch.setattr(replacement, "parse_proc_cmdline", lambda pid: commands[pid])
+    monkeypatch.setattr(replacement, "proc_cwd", lambda _pid: Path("/workspace"))
     monkeypatch.setattr(replacement, "proc_children", lambda _pid: [])
     monkeypatch.setattr(
         replacement,
@@ -247,6 +284,32 @@ def test_exact_term_targets_only_registered_worker_pgids_and_never_kills(monkeyp
         (queues[1]["legacy_pid_hint"], signal.SIGTERM),
     ]
     assert all(item["signal"] == "SIGTERM" for item in stopped.values())
+
+
+def test_cwd_race_before_term_fails_with_zero_signals(monkeypatch):
+    data = config()
+    queue = dict(data["queues"][0])
+    pid = queue["legacy_pid_hint"]
+    command = ["python3", "relative_worker.py"]
+    audit = {
+        "queue": queue,
+        "process": {"command": command, "cwd": "/workspace/original"},
+    }
+    monkeypatch.setattr(
+        replacement,
+        "assert_idle_exact_worker",
+        lambda *_args, **_kwargs: {
+            "pid": pid, "pgid": pid, "command": command, "cwd": "/workspace/original"
+        },
+    )
+    monkeypatch.setattr(replacement, "process_alive", lambda _pid: True)
+    monkeypatch.setattr(replacement, "parse_proc_cmdline", lambda _pid: command)
+    monkeypatch.setattr(replacement, "proc_cwd", lambda _pid: Path("/workspace/changed"))
+    signals = []
+    monkeypatch.setattr(replacement.os, "killpg", lambda *args: signals.append(args))
+    with pytest.raises(replacement.ContractError, match="identity changed"):
+        replacement.exact_term_verified_workers([audit], data, {})
+    assert signals == []
 
 
 def make_completed_fixture(tmp_path: Path):
@@ -384,5 +447,6 @@ def test_tool_has_no_broad_or_real_hardware_actions():
     assert "git switch" not in source
     assert "os.killpg(pid, signal.SIGTERM)" in source
     assert "start_new_session=True" in source
+    assert 'cwd=audit["process"]["cwd"]' in source
     assert "real hardware" in source
     assert "child/judge" in source
