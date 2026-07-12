@@ -338,6 +338,71 @@ materialized`. The prepared contracts are:
   file SHA `dbecc102cdb388873c9369f60e3820a0f4c6949cc925cd5f3123731eec8d1c9b`,
   canonical content SHA `91a0070a73ec7cca877d85ba5340d3b5fa84900ad588a8f9f6b3e11563730794`.
 
+The exact Pod bytes, not reconstructed summaries, are relayed into git as:
+
+- `configs/phase1_fresh_SZ_model4000_seed_stability_q50_pod1_runtime_contract_prepared_20260713.json`;
+- `configs/phase1_fresh_SZ_model4000_seed_stability_q50_pod2_runtime_contract_prepared_20260713.json`.
+
+They contain no credentials, tokens or SSH material. Reproduce the file and canonical-content
+hashes offline with strict duplicate-key/nonfinite rejection:
+
+```bash
+python3 - <<'PY'
+import hashlib
+import json
+from pathlib import Path
+
+expected = {
+    Path("configs/phase1_fresh_SZ_model4000_seed_stability_q50_pod1_runtime_contract_prepared_20260713.json"): (
+        "pod1",
+        "2b76a5a917c0a5d88ab5eec6b984b3d4ed2faa07484804bb42551f310378201e",
+        "36e878f0f9a044b64a893845e07971c8bc5ba87117b7f39aa4bb8d8c9e85ba73",
+    ),
+    Path("configs/phase1_fresh_SZ_model4000_seed_stability_q50_pod2_runtime_contract_prepared_20260713.json"): (
+        "pod2",
+        "dbecc102cdb388873c9369f60e3820a0f4c6949cc925cd5f3123731eec8d1c9b",
+        "91a0070a73ec7cca877d85ba5340d3b5fa84900ad588a8f9f6b3e11563730794",
+    ),
+}
+
+def reject_duplicate(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+def reject_nonfinite(value):
+    raise ValueError(f"nonfinite JSON constant: {value}")
+
+for path, (pod, file_sha, content_sha) in expected.items():
+    raw = path.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == file_sha
+    document = json.loads(
+        raw, object_pairs_hook=reject_duplicate, parse_constant=reject_nonfinite
+    )
+    canonical = json.dumps(
+        document,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    assert hashlib.sha256(canonical).hexdigest() == content_sha
+    assert document["pod"] == pod
+    assert document["status"] == "prepared_not_started"
+    assert document["jobs_started"] == 0 and document["auto_start"] is False
+    assert document["trainer_or_worker_signal_allowed"] is False
+    assert document["real_robot_authorized"] is False
+    print(f"{pod}: file/content PASS")
+PY
+```
+
+This offline check proves the relayed bytes and dormant authorization fields only. A live runner
+`contract-check`, `_validate_runtime_contract`, checkpoint/checkout rehash and process/lock snapshot
+remain mandatory immediately before `run`.
+
 Both documents remain `prepared_not_started`, `jobs_started=0`, `auto_start=false`. A second
 runner `contract-check` and direct runtime-binding validation passed on each Pod. Train/eval were
 still clean at exact commits `6d93bcb16c422a2f42748c2dc99432559653480b` and

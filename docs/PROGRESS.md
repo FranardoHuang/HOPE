@@ -1750,6 +1750,9 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   `2b76a5a...8201e` / `36e878f0...5ba73`; Pod2 runtime file/content SHAs are
   `dbecc102...d1c9b` / `91a0070a...30794`. Both retain `prepared_not_started`, `jobs_started=0`
   and `auto_start=false`.
+- Relayed the exact two Pod JSON byte streams into matching tracked `configs/...pod{1,2}_...`
+  files. Local byte comparison, file SHA and strict canonical-content SHA verification all pass;
+  neither document contains a credential/token/SSH field.
 - Re-ran the ordinary `contract-check` and direct runtime-contract validator on both Pods. Frozen
   train/eval commits were exact and clean; all four local checkpoint SHAs matched, embedded iter
   was 4000, nonfinite count was zero, lineage was exact and the adjacent hard-contract SHA was

@@ -1760,8 +1760,10 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `prepared_not_started/jobs_started=0/auto_start=false`。随后两机 `contract-check` 与 direct runtime
    binding 均 PASS：train/eval exact clean，四 checkpoint SHA/iter4000/finite/lineage/contract 复核一致，
    K100 file/semantic/order 仍为 `66e899...71cb3`/`7dc6af...ff3e`/`b87e81...1f91`。child judge/
-   MuJoCo/play/Kit/lock holder 扫描全空；未 run、未 signal、未碰真机。正式 run 前须有 reviewed persistent
-   parent supervisor 承担两 seed 串行与 result 落盘，避免 SSH 断开遗失父控制器；G05/G06 仍 Partial。
+   MuJoCo/play/Kit/lock holder 扫描全空；两份 Pod 原始 JSON bytes 已原样 relay 到 tracked `configs/`，
+   本地 byte/file-SHA/canonical-SHA 复核全过且无 credential 字段。未 run、未 signal、未碰真机。正式 run
+   前须有 reviewed persistent parent supervisor 承担两 seed 串行与 result 落盘，避免 SSH 断开遗失父
+   控制器；G05/G06 仍 Partial。
 
 ## 2026-07-12:yikang 双线落地——拍面反解影子接线 + Gate3 谱系筛卷首轮
 
