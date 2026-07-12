@@ -860,7 +860,7 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 
 | Item | Priority | Owner | Branch | Status / next checkpoint |
 | --- | --- | --- | --- | --- |
-| **原生 MuJoCo 训练/微调后端 P0** | ★★★ | **Codex** | `main` | 路线已拍板；先从 `mujoco_eval_onnx.py` 抽引擎中立 single-env core + batched `rsl_rl VecEnv`，复用 vendor MJCF 而不走 AimRT 实时环。首个门=reset 首帧 obs、2 s action tape、reward/termination 四项与独立 C MuJoCo evaluator 对账；首个实验=同 checkpoint frozen A vs actor warm-start B，至少 2 seeds，同 K100，最终 vendor Gate3。门未过不启动训练；MJX/MJWarp 后置且不算 exact vendor plant。 |
+| **原生 MuJoCo 训练/微调后端 P0** | ★★★ | **Codex** | `codex/mujoco-training-preflight` | **已认领首票：trainer-v0 fail-closed preflight + parity canary**。先冻结 vendor MJCF/evaluator/source-checkpoint、reset 首帧 obs、2 s action tape、逐项 reward 与 termination 证据合同；缺任一独立证据或源码/资产 SHA 漂移即拒绝开训。下一票才从 `mujoco_eval_onnx.py` 抽引擎中立 single-env core + batched `rsl_rl VecEnv`，复用 vendor MJCF 而不走 AimRT 实时环。首个实验=同 checkpoint frozen A vs actor warm-start B，至少 2 seeds，同 K100，最终 vendor Gate3。门未过不启动训练；MJX/MJWarp 后置且不算 exact vendor plant。 |
 | 全栈正确性尺+C++安全包+拍心/拍速合同收口 | ★★★ | **Codex** | `main` | 双 RunPod 源码验收已绿(portable/ROS C++、whole-body、planner);下一检查点=重出 fresh schema-v3 ONNX+修后考卷,旧判分器数字不入账 |
 | V5 专业动作可迁移性+Phase 加速器 | ★★★ | **Codex** | `main` | manifest+保守 halving 已就绪;下一检查点=验证触球帧/拍速口径,把行程/时间律报告接成 feasibility producer,再做 BankExam→scorecard adapter;两者完成前不自动发训练 |
 | 新动作库(Franco/v6/v7)+TOPP 最短可行时间+任意时刻下一拍恢复 | ★★★ | **Codex** | `codex/schema-v3-isaac-adapter@bf19fca` | 10 段完成 intake→canonical GMR/grounding→240Hz稠密安全屏；5,162样本地面/自碰/拍柄身体危险均0，最薄40.25mm。回球/phase/2-vs-4 因 frame/mirror 未证保持 null；正在内容寻址固定HOPE虚拟桌 counterfactual frame，过门才做64题、TOPP与RL。T1核心已实现但连续卷/自击/plant未齐，不点火、不真机。 |
