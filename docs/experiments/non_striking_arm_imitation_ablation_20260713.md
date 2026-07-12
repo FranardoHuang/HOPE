@@ -22,7 +22,8 @@ curves are diagnostic.
 
 Stage A separates the direct mask effect from reward-budget reallocation:
 
-- A0: current whole-body imitation baseline;
+- A0: current upper-body imitation baseline (right striking arm plus left non-striking arm); the
+  existing lower-body imitation remains off;
 - A1: left-arm imitation removed, every other reward weight unchanged;
 - A2: left-arm imitation removed and the lost **measured baseline reward magnitude** restored to a
   fixed balance/ready budget, without increasing right-arm imitation.

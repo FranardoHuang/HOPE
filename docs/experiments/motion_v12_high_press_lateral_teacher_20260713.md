@@ -86,7 +86,8 @@ racket stroke.
 
 The minimum composition ablation is:
 
-- C0: current stroke teacher with no displacement-conditioned lower-body composition;
+- C0: current upper-body stroke teacher with lower-body imitation off and no
+  displacement-conditioned lower-body composition;
 - C1: event-aligned composed teacher at the recorded displacement;
 - C2: the same teacher conditioned on a frozen displacement grid including zero;
 - C3: only after C2 passes, compare independently recorded two-direction teachers with one
@@ -96,6 +97,10 @@ Naive "pad both to the longest clip and concatenate joints" is retained only as 
 control. It cannot enter RL if root ownership, foot contacts or whole-body safety fail. A TOPP
 on/off comparison holds the geometric path and contact anchors fixed and repeats every downstream
 gate after retiming.
+
+C1/C2 deliberately reintroduce a full-body teacher reward only after the lower-body reference has
+passed composition and dynamics gates. They must not be described as a small change to the current
+setting, whose lower-body imitation is already disabled.
 
 ## Acceptance and failure rules
 
