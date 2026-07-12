@@ -10,6 +10,8 @@ humanoid must achieve the commanded racket state via its own forward
 kinematics. See HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md.
 """
 
+import time
+
 import numpy as np
 import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
@@ -99,6 +101,31 @@ class HOPEPlannerNode(Node):
         self.declare_parameter("spec_dt_integrate_coarse", 0.02)  # adaptive cruise for the SPEC
                                                               # solve only (own config copy)
         self.declare_parameter("strike_spec_sensitivities", False)  # sensitivities on demand
+        # --- SHADOW spec solver (2026-07-12, flag-gated, DEFAULT OFF) ---
+        # use_shadow_solver=True (use_* prefix = the package's boolean-enable
+        # convention, matching use_kalman / use_fast_strike_spec) double-runs every
+        # per-tick fast strike-spec solve through a SECOND backend (shadow_solver.py)
+        # and reconciles the two — the promotion route for the torch batched solver,
+        # same pattern as use_kalman above ("shadow-run the EKF next to the polyfit
+        # estimator"): the planner still ACTS only on the production solve; the shadow
+        # result goes nowhere except diagnostics KeyValues and the optional CSV.
+        # A shadow exception is swallowed and counted, never a dead planner; a shadow
+        # slower than its wall budget self-disables permanently (ShadowHarness).
+        # NOTE: shadow mode is a VALIDATION mode — the double-run + CSV write are
+        # synchronous in _poses_cb, so it doubles solve-tick occupancy and
+        # shadow_log_path must be fast LOCAL disk (see shadow_solver.py docstring).
+        # Requires the fast spec path (publish_strike_spec + use_fast_strike_spec) —
+        # there is no per-tick solve to shadow otherwise. False (default)
+        # short-circuits before any backend is constructed or timed: the command
+        # path stays byte-identical.
+        self.declare_parameter("use_shadow_solver", False)
+        self.declare_parameter("shadow_solver_backend", "echo")  # "echo" = re-run the
+                                                       # production solver (pipeline
+                                                       # check, diff must be 0);
+                                                       # "torch" fail-louds at startup
+                                                       # until claude's solver lands
+        self.declare_parameter("shadow_log_path", "")  # reconciliation CSV (one row per
+                                                       # double-run); "" = no file written
         # Stage-2 adaptive integrator (EXISTING PlannerConfig.dt_integrate_coarse flag,
         # plumbed): 0.0 = OFF = legacy fixed-dt 1 kHz Euler, byte-identical. 0.02 cuts
         # Stage-2 predict ~3.9 ms -> ~1.0 ms per /poses tick (same benchmark). Only the
@@ -255,6 +282,44 @@ class HOPEPlannerNode(Node):
         self._spec_next_t = float("-inf")
         self._spec_log_next_t = float("-inf")
         self._spec_warm_q = None      # previous fast solve's q, warm start
+
+        # Flag-gated SHADOW solver harness (see the parameter block). None = off =
+        # the only new code on the hot path is `is not None` checks; the harness,
+        # backend and CSV recorder are never constructed.
+        self._shadow = None
+        self._shadow_problem_cls = None
+        self._n_shadow_node_errors = 0   # harness-call failures caught in _poses_cb
+        self._shadow_disabled_reason = None  # set when requested but not runnable —
+                                             # surfaced in diagnostics every cycle so a
+                                             # mis-launch is never fail-quiet (an empty
+                                             # CSV must not pass for "zero diffs")
+        if bool(self.get_parameter("use_shadow_solver").value):
+            if self._spec_planner is None or not self._use_fast_spec:
+                self._shadow_disabled_reason = "fast_spec_path_off"
+                self.get_logger().warning(
+                    "use_shadow_solver=True needs the per-tick fast spec path "
+                    "(publish_strike_spec:=true use_fast_strike_spec:=true); "
+                    "shadow DISABLED — nothing to reconcile against "
+                    "(diagnostics will carry shadow_backend=DISABLED(fast_spec_path_off)).")
+            else:
+                from .shadow_solver import ShadowHarness, ShadowProblem, make_backend
+
+                # NOTE: a torch backend request fail-louds HERE (NotImplementedError
+                # at construction) until claude's solver lands — by design, so a
+                # mis-launched shadow dies at startup instead of running echo-less.
+                backend = make_backend(
+                    str(self.get_parameter("shadow_solver_backend").value),
+                    physics=self._spec_planner.physics,
+                    config=self._spec_planner.config,
+                    table=self._spec_planner.table,
+                )
+                log_path = str(self.get_parameter("shadow_log_path").value) or None
+                self._shadow = ShadowHarness(backend, log_path)
+                self._shadow_problem_cls = ShadowProblem
+                self.get_logger().info(
+                    f"SHADOW spec solver ON: backend={backend.name}, "
+                    f"log={'off' if log_path is None else log_path} "
+                    "(production command path unaffected; diffs in diagnostics + CSV)")
 
         # Best-effort, depth-1 QoS for high-rate mocap topics (REP-2003 sensor style).
         mocap_qos = QoSProfile(
@@ -531,6 +596,42 @@ class HOPEPlannerNode(Node):
                 # Legacy command path is spin-blind -> omega None (zeros);
                 # promote to the EKF/spin estimate when that path lands.
                 if self._use_fast_spec:
+                    # SHADOW snapshot BEFORE the production solve: q0/max_iter must
+                    # capture the warm state the production solve consumes THIS tick
+                    # (the solve below overwrites _spec_warm_q). Copies, so neither
+                    # the backend nor the CSV can alias live planner state. Any
+                    # snapshot failure disables this tick's shadow only.
+                    # .active: once the harness wall-budget self-disable trips,
+                    # skip even the snapshot/timing cost.
+                    shadow_problem = None
+                    if self._shadow is not None and self._shadow.active:
+                        try:
+                            shadow_problem = self._shadow_problem_cls(
+                                t=t,
+                                p_ball=np.array(strike.p_ball, dtype=float),
+                                v_ball=np.array(strike.v_ball, dtype=float),
+                                omega_ball=None,
+                                target_land_xy=np.array(
+                                    self.planner.config.target_land[:2], dtype=float),
+                                racket_speed_budget=self._racket_speed_budget,
+                                max_iter=(self._spec_max_iter
+                                          if self._spec_warm_q is not None else None),
+                                q0=(None if self._spec_warm_q is None
+                                    else self._spec_warm_q.copy()),
+                                with_sensitivities=self._spec_sens,
+                                # explicit on purpose: the production call below
+                                # does not override tol_m (solver default TOL_M);
+                                # if it ever does, this snapshot must mirror it.
+                                tol_m=None,
+                            )
+                            t_solve0 = time.perf_counter()
+                        except Exception as exc:
+                            self._n_shadow_node_errors += 1
+                            shadow_problem = None
+                            self.get_logger().warning(
+                                f"shadow snapshot failed ({type(exc).__name__}: {exc}); "
+                                "production solve unaffected",
+                                throttle_duration_sec=5.0)
                     # Budget rule (measured, benchmark run_full_tick): the
                     # tight strike_spec_max_iter budget only converges FROM a
                     # warm start; a cold solve (first tick of a rally / after
@@ -545,6 +646,21 @@ class HOPEPlannerNode(Node):
                         q0=self._spec_warm_q,
                         with_sensitivities=self._spec_sens,
                     )
+                    # SHADOW double-run AFTER the production solve (its latency never
+                    # delays the cached-spec serving, same reasoning as the command
+                    # publish above). ShadowHarness.run() already never raises; the
+                    # belt-and-braces except is for harness-construction-level bugs —
+                    # a shadow can only cost us a counter, never the command path.
+                    if shadow_problem is not None:
+                        prod_wall = time.perf_counter() - t_solve0
+                        try:
+                            self._shadow.run(shadow_problem, self._last_spec, prod_wall)
+                        except Exception as exc:
+                            self._n_shadow_node_errors += 1
+                            self.get_logger().warning(
+                                f"shadow run failed ({type(exc).__name__}: {exc}); "
+                                "production solve unaffected",
+                                throttle_duration_sec=5.0)
                     if self._last_spec is not None:
                         sp = self._last_spec
                         self._spec_warm_q = np.array([
@@ -615,6 +731,35 @@ class HOPEPlannerNode(Node):
                 KeyValue(key="kf_vel_delta_mps", value=f"{self._kf_vel_delta:.4f}"),
                 KeyValue(key="kf_rejected", value=str(self._kf.rejected_count)),
             ]
+        if self._shadow is not None:
+            # One numeric metric per key (the kf_* / spec_* convention) so
+            # diagnostic_aggregator / plotjuggler can threshold and trend the
+            # counters; the per-field record lives in the shadow_log_path CSV.
+            d = self._shadow.last_diffs or {}
+            d_land = d.get("d_landing_xy_l2_m", float("nan"))
+            backend_v = self._shadow.backend.name
+            if not self._shadow.active:
+                backend_v += f":DISABLED({self._shadow.disabled_reason})"
+            status.values += [
+                KeyValue(key="shadow_backend", value=backend_v),
+                KeyValue(key="shadow_runs", value=str(self._shadow.n_runs)),
+                KeyValue(key="shadow_exc",
+                         value=str(self._shadow.n_shadow_exceptions)),
+                KeyValue(key="shadow_rec_fail",
+                         value=str(self._shadow.n_record_failures)),
+                KeyValue(key="shadow_over_budget",
+                         value=str(self._shadow.n_over_budget)),
+                KeyValue(key="shadow_node_exc",
+                         value=str(self._n_shadow_node_errors)),
+                KeyValue(key="shadow_last_d_land_m", value=f"{d_land:.3e}"),
+            ]
+        elif self._shadow_disabled_reason is not None:
+            # use_shadow_solver=True was requested but nothing is being
+            # reconciled — keep saying so on every cycle (fail-loud, so an
+            # empty CSV can never be mistaken for an all-zero-diff session).
+            status.values.append(KeyValue(
+                key="shadow_backend",
+                value=f"DISABLED({self._shadow_disabled_reason})"))
         if self._publish_strike_spec:
             s = self._last_spec
             if s is None:
