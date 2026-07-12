@@ -462,9 +462,9 @@ first enter `main`, and the deployed script/config hashes below must match that 
 The reviewed files are:
 
 - `scripts/run_phase1_q50_persistent_supervisor.py`, SHA-256
-  `72e6fc22dc11038069190f1749b8140ddf88475230c0219ed1c8d9eb54e9f14a`;
+  `9d38d2a04f9f068ef084ba8b3ebf7cef138517896d172ce25a797b2ff33bdf9a`;
 - `configs/phase1_fresh_SZ_model4000_seed_stability_q50_persistent_supervisor_20260713.json`,
-  SHA-256 `630a96b04d068cc3de60ac9f148796d0f1c96c04de4f6021a2f9d0e2502ee0e2`.
+  SHA-256 `a5e9eb7ff38ad13d9b7b8ad178b07ea7f0eff816964c5d2b76dcb643bef33c8b`.
 
 Deploy those two files, preserving their repository-relative `scripts/` and `configs/` paths, into
 one new no-clobber source root on each Pod. Do not put them in or modify the frozen train/eval
@@ -486,13 +486,19 @@ Before launch, run read-only inspection. `not_launched` is the only expected fir
 pins those exact bytes, and `--pod` selects the already-bound Pod entry rather than accepting free
 paths. These flags carry only the authority defined by the
 [persistent-supervisor definition](../DEFINITIONS.md#persistent-supervisor).
+Both public commands use `env -i` to discard the SSH shell's environment and reconstruct the exact
+fixed map in the supervisor config; the supervisor independently rejects any missing, extra or
+changed variable.
 
 ```bash
 SUPERVISOR="$SUP_SOURCE/scripts/run_phase1_q50_persistent_supervisor.py"
 SUP_CONFIG="$SUP_SOURCE/configs/phase1_fresh_SZ_model4000_seed_stability_q50_persistent_supervisor_20260713.json"
-SUP_CONFIG_SHA=630a96b04d068cc3de60ac9f148796d0f1c96c04de4f6021a2f9d0e2502ee0e2
+SUP_CONFIG_SHA=a5e9eb7ff38ad13d9b7b8ad178b07ea7f0eff816964c5d2b76dcb643bef33c8b
 
-/workspace/hope_isaac_venv/bin/python "$SUPERVISOR" \
+env -i HOME=/root LANG=C.UTF-8 LC_ALL=C.UTF-8 LOGNAME=root \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TMPDIR=/tmp TZ=UTC USER=root \
+  /workspace/hope_isaac_venv/bin/python "$SUPERVISOR" \
   --supervisor-config "$SUP_CONFIG" \
   --expected-supervisor-config-sha256 "$SUP_CONFIG_SHA" \
   inspect --pod pod1
@@ -505,7 +511,10 @@ A mismatch is fail-closed and must not be worked around with a new command line.
 Launch exactly once per Pod:
 
 ```bash
-/workspace/hope_isaac_venv/bin/python "$SUPERVISOR" \
+env -i HOME=/root LANG=C.UTF-8 LC_ALL=C.UTF-8 LOGNAME=root \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TMPDIR=/tmp TZ=UTC USER=root \
+  /workspace/hope_isaac_venv/bin/python "$SUPERVISOR" \
   --supervisor-config "$SUP_CONFIG" \
   --expected-supervisor-config-sha256 "$SUP_CONFIG_SHA" \
   launch --pod pod1
@@ -528,7 +537,7 @@ pytest -q \
   tests/test_validate_phase1_fresh_sz_model4000_q50_queue.py
 ```
 
-The accepted host result is `56 passed`. The launch-specific 16 tests cover parent exit/stall before
+The accepted host result is `57 passed`. The launch-specific 17 tests cover parent exit/stall before
 commit, child token timeout, duplicate/no-clobber launch, pre-existing result and artifact mismatch,
 exact live identity, reused-PID/executable/environment rejection, minimal terminal-result rejection
 and delegation to the original runner's full result validator. This macOS host has no Linux procfs,

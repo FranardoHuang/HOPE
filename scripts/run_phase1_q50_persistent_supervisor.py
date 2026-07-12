@@ -409,6 +409,21 @@ def _runner_environment(config: Mapping[str, Any]) -> dict[str, str]:
     return dict(config["environment"])
 
 
+def _require_invoking_environment(config: Mapping[str, Any]) -> None:
+    expected = dict(config["environment"])
+    observed = dict(os.environ)
+    if observed != expected:
+        missing = sorted(set(expected) - set(observed))
+        extra = sorted(set(observed) - set(expected))
+        changed = sorted(
+            key for key in set(expected).intersection(observed) if expected[key] != observed[key]
+        )
+        raise SupervisorError(
+            "invoking environment differs from fixed config: "
+            f"missing={missing} extra={extra} changed={changed}"
+        )
+
+
 def _require_pod_launch_ready(config: Mapping[str, Any], pod: str) -> None:
     binding = config["pods"][pod]
     if binding["launch_authorized"] is not True:
@@ -1018,6 +1033,7 @@ def launch(config_path: Path, expected_config_sha256: str, pod: str) -> dict[str
     if not sys.platform.startswith("linux"):
         raise SupervisorError("launch requires Linux procfs and detached-session semantics")
     config = load_supervisor_config(config_path, expected_config_sha256)
+    _require_invoking_environment(config)
     return _launch_loaded(config, pod)
 
 
@@ -1387,6 +1403,7 @@ def _inspect_loaded(
 
 def inspect(config_path: Path, expected_config_sha256: str, pod: str) -> dict[str, Any]:
     config = load_supervisor_config(config_path, expected_config_sha256)
+    _require_invoking_environment(config)
     return _inspect_loaded(config, pod)
 
 

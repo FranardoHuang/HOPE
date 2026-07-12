@@ -1256,7 +1256,7 @@ it revalidates all bytes, acknowledges commit and `execve`s the exact old runner
 success only after procfs shows the exact executable/argv/environment. Inspection rejects PID reuse
 and delegates terminal acceptance to the original runner's full result validator.
 
-The focused supervisor suite passes `16` cases; queue+consumer+supervisor together pass `56`. The
+The focused supervisor suite passes `17` cases; queue+consumer+supervisor together pass `57`. The
 host is macOS, so procfs behavior is covered through an injected identity seam and still needs one
 Linux fake-runner source smoke before any real q50 process. No Pod deployment, judge, simulator,
 training mutation, process-control action or hardware command ran. G05 remains `Partial`.

@@ -1132,7 +1132,7 @@ pre-existing result prevents launch. No retry, remote login, process-control, tr
 simulator, deployment or robot surface exists. The detailed contract and commands are in
 [the model-4000 q50 operation](../operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md#persistent-top-level-launch-source-gate).
 
-Supervisor tests pass `16`; combined queue/consumer/supervisor tests pass `56`. This is host source
+Supervisor tests pass `17`; combined queue/consumer/supervisor tests pass `57`. This is host source
 evidence only: Linux procfs has not yet been smoke-tested, the wrapper is not deployed, and no
 MuJoCo judge or score ran. It therefore closes neither the matched
 [q50/K100](../DEFINITIONS.md#q50-and-k100) result nor vendor Gate3/Gate3B. G06 remains `Partial`.

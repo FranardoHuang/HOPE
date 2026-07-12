@@ -36,7 +36,9 @@ The child command is constructed rather than accepted from the caller. Each Pod 
 binds the Python path, resolved executable path and binary SHA. The environment is a fixed config
 map, not inherited from SSH; interpreter/shell injection variables such as `PYTHONPATH`,
 `PYTHONHOME`, `LD_PRELOAD`, `BASH_ENV` and `ENV` are rejected. Exact argv and environment digests
-are written to both hello and immutable launch ledger.
+are written to both hello and immutable launch ledger. Both public commands also require their own
+invoking environment to equal that fixed map, so terminal inspection cannot import the bound runner
+under an SSH-provided `PYTHONPATH` or loader environment.
 
 ## Two-phase startup
 

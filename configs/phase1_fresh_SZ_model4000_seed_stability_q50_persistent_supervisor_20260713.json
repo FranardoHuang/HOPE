@@ -6,7 +6,7 @@
   "real_robot_authorized": false,
   "supervisor_source": {
     "path": "scripts/run_phase1_q50_persistent_supervisor.py",
-    "sha256": "72e6fc22dc11038069190f1749b8140ddf88475230c0219ed1c8d9eb54e9f14a"
+    "sha256": "9d38d2a04f9f068ef084ba8b3ebf7cef138517896d172ce25a797b2ff33bdf9a"
   },
   "environment": {
     "HOME": "/root",

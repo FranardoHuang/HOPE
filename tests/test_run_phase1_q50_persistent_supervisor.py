@@ -229,6 +229,16 @@ def test_public_surface_has_only_launch_and_inspect_and_source_has_no_control_ch
     assert "os.closerange(" in source
 
 
+def test_public_invocation_requires_the_exact_fixed_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _, config = _fixture(tmp_path)
+    with pytest.raises(S.SupervisorError, match="invoking environment differs"):
+        S._require_invoking_environment(config)
+    monkeypatch.setattr(os, "environ", dict(config["environment"]))
+    S._require_invoking_environment(config)
+
+
 def test_launch_observes_exact_exec_and_duplicate_is_no_clobber(tmp_path: Path):
     _, config = _fixture(tmp_path)
     launched = _launch(config)
