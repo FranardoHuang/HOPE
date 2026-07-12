@@ -17,6 +17,9 @@
   反面判绿，因此旧高分只作诊断。
 - 当前成绩卡是 **Python BankExam 单拍解析诊断，不是 Gate3**。2026-07-13 没有新增训练、
   仿真行为或真机成绩；下一项会改变阶段 1 判断的证据是修正拍面正负判分后的同卷结果。
+- 部署侧的 planner-policy exact tuple 源码已通过 portable Release 和 latest-main 本地回归；
+  这解决了同 tick base/target 因果配对与源码可构建问题，但 ROS/Jazzy/AimRT、backend first tick、
+  厂商 MuJoCo 行为和真机仍未运行。
 
 ## 1. 当前一套训练是怎样完整跑起来的
 
@@ -276,9 +279,13 @@ Isaac 的来球飞行真值仪和拍面接触源码已有材料，但拍面接�
 
 ## 7. 部署验证线：当前卡在哪里
 
-当前 179 维模型已经通过严格装载和负例拒绝，但还没有最终 ROS/Jazzy/AimRT 集成、厂商 MuJoCo
-首个有效控制周期或固定考卷行为记录。当前 `Gate3-D0` 只要求先完成一份单拍全链演示，不冒充
-连续对打，详见 [Gate3-D0 实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md)。
+当前 179 维模型已经通过严格装载和负例拒绝。planner 与 C++ policy 之间的 formal tuple 现已把
+shared epoch、command/base sequence、side、target 和最新 tick-start base 绑定到同一 actor gate；
+exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimRT，runner 没有执行，因此还没有
+最终 ROS/Jazzy/AimRT 集成、厂商 MuJoCo 首个有效控制周期或固定考卷行为记录。当前 `Gate3-D0`
+只要求先完成一份单拍全链演示，不冒充连续对打，详见
+[Gate3-D0 实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md)和
+[exact build 卷宗](experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md)。
 
 2026-07-11 的 `13 PASS / 7 FAIL` 来自旧 110 维模型：3 次发球只有 1 次合法回球，出现 1 次摔倒
 和明显漂移。它证明旧链曾执行，不是当前 179 维模型的 Gate3 结果。
@@ -297,8 +304,9 @@ Isaac 的来球飞行真值仪和拍面接触源码已有材料，但拍面接�
 
 ### 部署验证
 
-- **[2｜P0] 当前 179 维模型的 Gate3-D0 单拍全链。** 责任人 franco；执行者 Codex；下一证据：固定同卷
-  完成 planner → C++ runner → 厂商 MuJoCo 的首个有效周期和行为记录。[实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md)
+- **[2｜P0] 当前 179 维模型的 Gate3-D0 单拍全链。** 责任人 franco；执行者 Codex；exact source/build
+  前置已闭合，下一证据是固定同卷完成 owned planner → C++ runner → 厂商 MuJoCo 的首个 no-publish
+  有效周期和行为记录。[实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md)
 - **[8｜P1] Gate3 历史谱系复核。** 责任人 yikang；执行者 direct；下一证据：排除观测排列和
   击球平面混杂后的同运行链对照。
 

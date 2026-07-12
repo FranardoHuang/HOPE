@@ -57,13 +57,14 @@ Current relay config:
 - VRPN bridge launch default `update_freq` is aligned to the rig's 300 Hz
   (`hope_ws/src/hope_bringup/launch/avatar_pro_hope_bridge.launch.py`).
 
-Consumption status (2026-07-03): the ROS chain (relay → `hope_planner` → `/racket/command` →
-`hope_wbc_runner`) consumes these topics, but the C++ deploy runner does not subscribe to any mocap
-topic yet — deployed runs used scripted targets. The deployed 175-D actor observation deliberately
-consumes no mocap term (see
+Consumption status (updated 2026-07-13): the ROS chain (relay → `hope_planner`) consumes mocap.
+The C++ deploy runner does not subscribe to raw mocap, but its `--planner` source now subscribes to
+the planner's `/racket/command_flat` and `/a3/base_pose_flat` through AimRT ROS 2. This is source
+wiring only; the current exact-179 ROS/AimRT first tick and vendor behavior are unrun. The deployed
+175-D actor observation deliberately consumes no mocap term (see
 [policy_observation_action.md](policy_observation_action.md)); when the mocap→planner bridge
-lands, the HOPE-world → robot-frame target transform will still need the mocap base pose at the
-interface boundary.
+is used, the HOPE-world → robot-frame target transform still depends on the corrected base pose at
+the interface boundary.
 
 ## Base Link
 

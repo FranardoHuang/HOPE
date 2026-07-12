@@ -95,7 +95,8 @@ malformed schema-2 row retains the last good tuple for diagnostics but records
 command timeout. Unknown/fractional rows received after an active schema-2 command do the same;
 schema-1 keeps its historical ignore-and-age behavior when no formal face command is active. A 179
 actor refuses to engage on schema 1. The planner publishes schema 1 by default for compatibility;
-a reviewed 179 Gate 3 launch must set `racket_flat_schema:=2`.
+schema 2 remains the face-only prefix, while a reviewed formal 179 Gate3 launch must set
+`racket_flat_schema:=3` to add epoch/sequence/base-reference causality.
 The formal flat row is published before the optional `hope_msgs/RacketCommand` mirror; mirror
 conversion/DDS failures are counted but cannot suppress a new formal row or revocation.
 
@@ -373,3 +374,30 @@ reward targets, and deploy compatibility here first.
 ## Update Rule
 
 Any observation, action, scaling, normalization, latency, command frequency, or joint-order change must update this file and the relevant gate docs.
+
+## 2026-07-13 formal-179 planner/base transaction contract
+
+This changes deployment transport and engage safety, not the 179-D actor tensor, 31-D action
+tensor, normalization or checkpoint bytes.
+
+- Formal racket schema 3 has exact length 20. Besides valid/time/target/physical face-B/side, it
+  carries a shared `control_epoch`, strictly increasing racket command sequence, exact
+  `base_sequence_ref` and mapped source-monotonic time. After clip selection only the normal is
+  converted by frozen `[+1,-1]` into raw mount A; position and velocity are unchanged.
+- Formal base schema 2 has exact length 12 and carries valid pose, the same `control_epoch`, a
+  strictly increasing base sequence and mapped source time. Legacy sizes cannot follow a formal
+  stream; downgrade poisons the lease.
+- The C++ mailbox keeps at most 128 exact formal base rows. The referenced historical row proves
+  causal pairing only; latest tick-start base independently owns policy-frame side/target/yaw,
+  base-low, first observation, active abort and recovery safety.
+- Python and C++ share the finite workspace and source-time continuity bounds: x/y `[-3,+3] m`, z
+  `[0.4,1.5] m`, translation `0.05 + 8*dt` metres and quaternion shortest-angle
+  `0.15 + 12*dt` radians. Proven-old delayed rows are rejected before continuity comparison; a new
+  implausible row revokes without replacing the last good baseline.
+- Before every formal-179 actor call, including level-0 recovery/static hold, latest base must be
+  finite, fresh, plausible and at/above `base_low`. The latched engage epoch and base revocation
+  generation must remain usable after a swing; failure returns zero gain and re-arms.
+
+The guarantee is sampled at each actor call, not an asynchronous stop inside an already executing
+20 ms compute interval. These hard bounds still need vendor-trajectory validation, and this source
+contract is not a Gate3 runtime result.

@@ -13,8 +13,10 @@
 厂商 MuJoCo 固定考卷演示。它不是连续对打或真机证据。
 
 已完成：严格 face179 exporter/loader、真实 formal 模型正/负例预检、plan-only 源码门，以及显式标记为
-inexact 的 joined-source 诊断。默认关闭的 shadow-solver 接线已在 `main`。后续 planner tuple/epoch 候选仍在
-`main` 之外，合并前必须通过 exact Release/复核；它目前还不是主线前置条件。
+inexact 的 joined-source 诊断。默认关闭的 shadow-solver 接线和 formal shared-epoch/base-sequence
+planner-policy tuple 源码已经完成集成；exact `c0a8e46` portable Release 为 `233 passed + 5 optional
+skips + 0 failed`，latest-main host 回归也通过。详见
+[exact build 卷宗](EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md)。
 
 未完成：最终集成 ROS/Jazzy/AimRT Release、有明确所有权的 supervisor/publisher/fresh-ready ledger、
 由 parser 解析并绑定的 config/MJCF/runtime 闭包、49 项发球绑定、真实厂商 backend 首 tick 和固定考卷行为 ledger。

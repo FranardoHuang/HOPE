@@ -73,6 +73,28 @@ class HOPEPlanner:
         self._latest_command = command
         return command
 
+    def push_measurement(self, t: float, p_ball: np.ndarray) -> None:
+        """Ingest one measurement without solving or mutating cached output.
+
+        The ROS node uses this on cadence-rejected high-rate samples.  The
+        estimator keeps the full mocap window, while ``racket_command``,
+        ``strike_target`` and the command publication age remain unchanged.
+        """
+
+        self.estimator.push(t, p_ball)
+
+    def replan_latest(self) -> Optional[RacketCommand]:
+        """Re-run Stage 3 after an optional per-side aim change.
+
+        Stage 2 already established the current ball intercept and strike
+        timestamp, so this does not touch estimator state or the strike clock.
+        """
+
+        if self._latest_strike is None:
+            return self._latest_command
+        self._latest_command = self.target_planner.plan(self._latest_strike)
+        return self._latest_command
+
     @property
     def racket_command(self) -> Optional[RacketCommand]:
         return self._latest_command

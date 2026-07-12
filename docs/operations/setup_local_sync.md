@@ -75,6 +75,13 @@ rsync -a \
 source agi/a3_deploy_example/setup_a3_env.sh
 ```
 
+Verified 2026-07-13 from this standard handoff: the complete SDK canonical manifest contains 863
+entries and has SHA-256 `e8f808e92b9b73cbcde2803b34ef48bb329941e40cd20f7b73282a1195588c13`;
+`lib/x86_64/libunitree_sdk2.a` is `27,351,696` bytes with SHA-256
+`93ebabb2eca346892f23b9f78ece974a48091b44d745053e6911d3e294f74ec7`. A remote copy is accepted
+only after a no-clobber staging manifest matches the local source. Preserve an incomplete
+destination under another ignored name instead of overwriting it in place.
+
 If the handoff uses a different internal layout, locate its `unitree_sdk2`
 root and preserve that directory name at the destination. Do not copy the
 vendor bundle into git.

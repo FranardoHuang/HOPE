@@ -147,3 +147,17 @@ Still not solved:
 - real mount calibration and 179/181 wire contract remain open.
 
 No real-robot command test was run in this audit. G07 remains `Partial`.
+
+## Audit update 2026-07-13: exact planner-policy bytes pass portable Release
+
+Exact planner-policy source `c0a8e46` compiled and linked in a clean isolated Pod2 Ubuntu
+24.04/GCC 13 portable Release after restoring the documented private Unitree SDK. Focused
+planner/first-tick tests passed `40/40`; the complete native suite passed 233 tests with 5 explicit
+optional-asset skips and 0 failures. Both test and production runner binaries are content-addressed,
+and all 80 compile commands preserve strict finite math.
+
+This closes only the source/binary blocker. The production runner was not executed; ROS/AimRT
+Release, formal ONNX runtime loading, backend first tick, vendor simulator behavior and hardware
+remain open. See
+[the experiment record](../experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md). No real
+robot command ran; G07 remains `Partial`.

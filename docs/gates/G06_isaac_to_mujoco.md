@@ -1142,3 +1142,33 @@ Isaac–MuJoCo gap 只有部分可复现差异和候选来源已定位，整体�
 Legacy Gate3 diagnostic 与 current exact-179 Gate3
 属于两份独立实验记录，不能互相填充结果单元。本次纯文档迁移没有运行 evaluator、模拟器、backend、
 Pod 或真机，也不改变 G06 的 `Partial` 状态。
+
+#### 2026-07-13 exact formal tuple and portable Release integrated
+
+The earlier planner red-team candidates above are superseded by exact source `c0a8e46`. Formal
+racket schema 3 carries shared epoch, command sequence and exact `base_sequence_ref`; a bounded
+base history proves that causal reference, while side/target/yaw, base-low, observation, active
+abort and recovery use one latest tick-start base. Fixed-latency barriers no longer chase receive
+time, and Python/C++ share the same workspace and source-time continuity limits. Every formal actor
+path checks latest finite/fresh/plausible/base-low state and preserves the latched engage epoch plus
+base revocation generation across recovery.
+
+The 23 effective source/config/test paths were transplanted byte-for-byte onto latest main with
+manifest SHA-256 `8af1a2fc37dc912f41cb5609a687b481fbadbddc531ff4f430d6294796665fd3`;
+no source conflict was resolved semantically. Local planner/source is `180 passed, 2 optional
+skipped`; serve preregistration is `39 passed`; full root tests are `521 passed, 9 skipped`.
+Serve design-check passes only with all 49 runtime bindings blocked, and launch-check fails with 49
+`MISSING` lines.
+
+The same exact source passed isolated Pod2 Ubuntu 24.04/GCC 13 portable Release: focused
+`PpPlannerInput.*:PpFirstTickJson.*` `40/40`, complete native `233 passed + 5 optional skips + 0
+failed`, both test and production runner binaries linked, and all 80 compile commands retained
+strict finite math. This closes the exact source/binary merge blocker only. ROS/Jazzy/AimRT were
+disabled, the production runner was not executed, and formal ONNX runtime, backend first tick,
+vendor MuJoCo behavior, continuous stability and hardware remain unrun.
+
+The v2 joined-source ledger remains deliberately inexact: it has no common native MuJoCo sample
+sequence, executed binary/runtime closure or owned supervisor. The separate serve v4 design keeps
+49 runtime bindings null and cannot arm a publisher. Detailed hashes and reproduction are in
+[the exact build experiment](../experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) and
+[serve operation](../operations/run_gate3_serve_sync_prereg.md). G06 remains `Partial`.

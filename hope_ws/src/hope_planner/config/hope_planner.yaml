@@ -6,6 +6,12 @@ hope_planner:
     # "ball"). Confirm against your live stream: `ros2 topic echo /poses --once`
     # and count the ball's index. TODO: confirm against your live /poses.
     ball_pose_index: 0
+    # Planner runtime cadence/horizon. The arena defaults preserve legacy
+    # every-frame solves and the 2.0 s horizon; Gate3's sim overlay widens the
+    # horizon and decimates solves so 300 Hz ball callbacks cannot starve the
+    # independent base-pose callback.
+    max_predict_time: 2.0
+    solve_period_s: 0.0
     # Virtual hit plane X (m); ~0.0 = HOPE origin end of table. MUST be matched to the
     # ROBOT PLACEMENT: the current deploy_parity policy (model_11400/7500_hopex lineage)
     # strikes at base-relative x in [0.56, 0.78] (box center 0.67), so
@@ -35,6 +41,12 @@ hope_planner:
     x_hit_max: 0.35
     target_land_x: 2.055   # opponent half-center X (fixed by table geometry)
     target_land_y: -0.7625 # opponent half-center Y (fixed by table geometry)
+    # Planner-selected policy side from the CURRENT base-relative Stage-2
+    # intercept: +1 forehand below this split, -1 backhand above it. The 4 cm
+    # Schmitt band prevents clip chatter. Schema 2 requires the explicit side;
+    # it will fail closed until a corrected robot base pose is available.
+    swing_side_split_y: 0.0
+    swing_side_hysteresis_y: 0.04
     # Desired return flight time (s). ALIGNED to the current policy's racket-speed
     # envelope: the deploy_parity vel boxes cap at |v|≈3.0 m/s, and the required racket
     # speed ≈ (v_out + C_r·v_in)/(1+C_r) — at 0.5 s the demanded speed is ~4-6 m/s
@@ -71,6 +83,21 @@ hope_planner:
     publish_flat_cmd: true
     racket_flat_topic: "/racket/command_flat"
     base_flat_topic: "/a3/base_pose_flat"
+    # Formal planner/policy evidence uses only the production solve. Shadow is
+    # validation-only and must be explicitly re-preregistered before enabling.
+    use_shadow_solver: false
+    # Formal schema-3 source authority. These are exact ROS header contracts,
+    # not aliases: a mismatched ball revokes only the racket command; a
+    # mismatched base revokes localization and advances the control epoch.
+    # Arena relay and policy world currently both publish `world`.
+    use_sim_time: false
+    formal_source_clock_mode: "system"
+    formal_ball_source_frame_id: "world"
+    formal_base_source_frame_id: "world"
+    formal_common_frame_required: true
+    base_pose_max_age_s: 0.2
+    ball_source_stamp_max_age_s: 0.2
+    source_stamp_future_tolerance_s: 0.02
     # ⚠ VENUE FILL (same measurement as hope_world_frame.yaml mocap_to_base_link / G8):
     # P1 marker-cluster -> base_link offset (metres, base frame), applied to
     # robot_pose_topic before publishing the base flat. Arena /P1/pose is the MARKER

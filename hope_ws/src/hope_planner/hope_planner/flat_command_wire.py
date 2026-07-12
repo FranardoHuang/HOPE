@@ -8,6 +8,11 @@ the runner selects the clip it multiplies only this normal by the frozen
 used by the train bank and actor. Position/velocity are never sign-flipped. The
 current Phase-1 contract freezes rho to exactly zero; a future spin curriculum
 needs a new reviewed contract instead of silently assigning meaning to it.
+
+Formal Gate3 uses schema 3, which extends that face-B row with a shared
+base-control epoch, a strictly increasing command sequence, an exact
+base-sequence reference and a same-host monotonic source stamp. Those payload
+fields, rather than cross-topic receive order, define causality.
 """
 
 from __future__ import annotations
@@ -18,8 +23,15 @@ import math
 
 RACKET_FLAT_SCHEMA_V1 = 1
 RACKET_FLAT_SCHEMA_V2_FACE179 = 2
+RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH = 3
 RACKET_FLAT_V1_SIZE = 12
 RACKET_FLAT_V2_SIZE = 16
+RACKET_FLAT_V3_SIZE = 20
+BASE_FLAT_SCHEMA_V1 = 1
+BASE_FLAT_SCHEMA_V2_EPOCH = 2
+BASE_FLAT_V1_SIZE = 9
+BASE_FLAT_V2_SIZE = 12
+MAX_EXACT_FLOAT64_INTEGER = (1 << 53) - 1
 UNIT_NORMAL_TOL = 1.0e-6
 FACE_NORMAL_MIN_X = 1.0e-6
 
@@ -31,6 +43,18 @@ def _finite_vec3(value: Sequence[float], *, name: str) -> tuple[float, float, fl
     if not all(math.isfinite(v) for v in out):
         raise ValueError(f"{name} must be finite")
     return out  # type: ignore[return-value]
+
+
+def _exact_counter(value: int | float | None, *, name: str) -> int:
+    if value is None or isinstance(value, bool):
+        raise ValueError(f"{name} is required and must be an integer")
+    number = float(value)
+    if (not math.isfinite(number) or not number.is_integer()
+            or number < 0.0 or number > MAX_EXACT_FLOAT64_INTEGER):
+        raise ValueError(
+            f"{name} must be an exact integer in [0,{MAX_EXACT_FLOAT64_INTEGER}]"
+        )
+    return int(number)
 
 
 def pack_racket_command_flat(
@@ -45,16 +69,28 @@ def pack_racket_command_flat(
     frame_code: int = 0,
     normal_cmd_w: Sequence[float] | None = None,
     rho: float = 0.0,
+    control_epoch: int | float | None = None,
+    command_sequence: int | float | None = None,
+    base_sequence_ref: int | float | None = None,
+    source_monotonic_s: float | None = None,
 ) -> list[float]:
     """Build one canonical row; ``normal_cmd_w`` is physical face B, not raw mount A."""
 
-    if schema not in (RACKET_FLAT_SCHEMA_V1, RACKET_FLAT_SCHEMA_V2_FACE179):
+    face_schema = schema in (
+        RACKET_FLAT_SCHEMA_V2_FACE179,
+        RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+    )
+    if schema not in (
+        RACKET_FLAT_SCHEMA_V1,
+        RACKET_FLAT_SCHEMA_V2_FACE179,
+        RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+    ):
         raise ValueError(f"unsupported racket flat schema {schema}")
     if frame_code not in (0, 1):
         raise ValueError("frame_code must be 0 (world/table) or 1 (base_link)")
-    if schema == RACKET_FLAT_SCHEMA_V2_FACE179 and frame_code != 0:
+    if face_schema and frame_code != 0:
         raise ValueError(
-            "Phase-1 schema 2 requires world/table frame_code=0; 3D base-link normal semantics "
+            "formal face schemas require world/table frame_code=0; 3D base-link normal semantics "
             "are not frozen"
         )
     p = _finite_vec3(position_w, name="position_w")
@@ -62,6 +98,10 @@ def pack_racket_command_flat(
     scalars = (float(swing_sign), float(time_to_strike), float(strike_time))
     if not all(math.isfinite(x) for x in scalars):
         raise ValueError("swing_sign/time_to_strike/strike_time must be finite")
+    if face_schema and valid and scalars[0] not in (-1.0, 1.0):
+        raise ValueError(
+            "formal face schemas require an explicit swing_sign of +1 forehand or -1 backhand"
+        )
     row = [
         float(schema),
         1.0 if valid else 0.0,
@@ -76,25 +116,96 @@ def pack_racket_command_flat(
         return row
 
     if normal_cmd_w is None:
-        raise ValueError("schema 2 requires normal_cmd_w")
+        raise ValueError("face schemas require normal_cmd_w")
     n = _finite_vec3(normal_cmd_w, name="normal_cmd_w")
     norm = math.sqrt(sum(x * x for x in n))
     if abs(norm - 1.0) > UNIT_NORMAL_TOL:
         raise ValueError(
-            f"schema 2 normal_cmd_w must already be unit length within {UNIT_NORMAL_TOL:g}"
+            f"face-schema normal_cmd_w must already be unit length within {UNIT_NORMAL_TOL:g}"
         )
     if n[0] <= FACE_NORMAL_MIN_X:
         raise ValueError(
-            "schema 2 normal_cmd_w must be opponent-facing in the HOPE world/table frame "
+            "face-schema normal_cmd_w must be opponent-facing in the HOPE world/table frame "
             f"(x > {FACE_NORMAL_MIN_X:g})"
         )
     rho_f = float(rho)
     if not math.isfinite(rho_f) or rho_f != 0.0:
         raise ValueError("Phase-1 schema 2 rho placeholder must be finite and exactly zero")
-    return [*row, *n, rho_f]
+    face_row = [*row, *n, rho_f]
+    if schema == RACKET_FLAT_SCHEMA_V2_FACE179:
+        return face_row
+    epoch = _exact_counter(control_epoch, name="control_epoch")
+    sequence = _exact_counter(command_sequence, name="command_sequence")
+    base_ref = _exact_counter(base_sequence_ref, name="base_sequence_ref")
+    stamp = float(source_monotonic_s) if source_monotonic_s is not None else math.nan
+    if not math.isfinite(stamp) or stamp < 0.0:
+        raise ValueError("source_monotonic_s must be finite and non-negative")
+    return [*face_row, float(epoch), float(sequence), float(base_ref), stamp]
 
 
-def pack_invalid_racket_command_flat(*, schema: int) -> list[float]:
+def pack_base_pose_flat(
+    *,
+    schema: int,
+    valid: bool,
+    position_w: Sequence[float],
+    quaternion_wxyz: Sequence[float],
+    control_epoch: int | float | None = None,
+    base_sequence: int | float | None = None,
+    source_monotonic_s: float | None = None,
+) -> list[float]:
+    """Build one base-pose row; schema 2 carries the formal control epoch."""
+
+    if schema not in (BASE_FLAT_SCHEMA_V1, BASE_FLAT_SCHEMA_V2_EPOCH):
+        raise ValueError(f"unsupported base flat schema {schema}")
+    p = _finite_vec3(position_w, name="position_w")
+    if len(quaternion_wxyz) != 4:
+        raise ValueError("quaternion_wxyz must contain exactly four values")
+    q = tuple(float(v) for v in quaternion_wxyz)
+    if not all(math.isfinite(v) for v in q):
+        raise ValueError("quaternion_wxyz must be finite")
+    q_norm = math.sqrt(sum(v * v for v in q))
+    if q_norm < 1.0e-6:
+        raise ValueError("quaternion_wxyz norm must be at least 1e-6")
+    q = tuple(v / q_norm for v in q)
+    row = [float(schema), 1.0 if valid else 0.0, *p, *q]
+    if schema == BASE_FLAT_SCHEMA_V1:
+        return row
+    epoch = _exact_counter(control_epoch, name="control_epoch")
+    sequence = _exact_counter(base_sequence, name="base_sequence")
+    stamp = float(source_monotonic_s) if source_monotonic_s is not None else math.nan
+    if not math.isfinite(stamp) or stamp < 0.0:
+        raise ValueError("source_monotonic_s must be finite and non-negative")
+    return [*row, float(epoch), float(sequence), stamp]
+
+
+def pack_invalid_base_pose_flat(
+    *,
+    schema: int,
+    control_epoch: int | float | None = None,
+    base_sequence: int | float | None = None,
+    source_monotonic_s: float | None = None,
+) -> list[float]:
+    """Return a canonical finite base revocation for the selected schema."""
+
+    return pack_base_pose_flat(
+        schema=schema,
+        valid=False,
+        position_w=(0.0, 0.0, 0.0),
+        quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
+        control_epoch=control_epoch,
+        base_sequence=base_sequence,
+        source_monotonic_s=source_monotonic_s,
+    )
+
+
+def pack_invalid_racket_command_flat(
+    *,
+    schema: int,
+    control_epoch: int | float | None = None,
+    command_sequence: int | float | None = None,
+    base_sequence_ref: int | float | None = None,
+    source_monotonic_s: float | None = None,
+) -> list[float]:
     """Return an exact finite invalid row that safely revokes a live command."""
 
     if schema == RACKET_FLAT_SCHEMA_V1:
@@ -109,11 +220,26 @@ def pack_invalid_racket_command_flat(*, schema: int) -> list[float]:
             0.0, 0.0, 0.0,
             1.0, 0.0, 0.0, 0.0,
         ]
+    if schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+        epoch = _exact_counter(control_epoch, name="control_epoch")
+        sequence = _exact_counter(command_sequence, name="command_sequence")
+        base_ref = _exact_counter(base_sequence_ref, name="base_sequence_ref")
+        stamp = float(source_monotonic_s) if source_monotonic_s is not None else math.nan
+        if not math.isfinite(stamp) or stamp < 0.0:
+            raise ValueError("source_monotonic_s must be finite and non-negative")
+        return [
+            3.0, 0.0, 0.0,
+            0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0,
+            1.0, 0.0, 0.0, 0.0,
+            float(epoch), float(sequence), float(base_ref), stamp,
+        ]
     raise ValueError(f"unsupported racket flat schema {schema}")
 
 
 def pack_racket_command_flat_fail_closed(**kwargs) -> tuple[list[float], str | None]:
-    """Pack a command; formal schema-2 contract errors become an invalid row.
+    """Pack a command; formal face-contract errors become an invalid row.
 
     A bad planner payload must be visible to the subscriber as a revocation,
     not turn into a missing publication that leaves the previous face tuple
@@ -123,6 +249,16 @@ def pack_racket_command_flat_fail_closed(**kwargs) -> tuple[list[float], str | N
     try:
         return pack_racket_command_flat(**kwargs), None
     except (TypeError, ValueError, OverflowError) as exc:
-        if kwargs.get("schema") != RACKET_FLAT_SCHEMA_V2_FACE179:
+        schema = kwargs.get("schema")
+        if schema not in (
+            RACKET_FLAT_SCHEMA_V2_FACE179,
+            RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+        ):
             raise
-        return pack_invalid_racket_command_flat(schema=RACKET_FLAT_SCHEMA_V2_FACE179), str(exc)
+        return pack_invalid_racket_command_flat(
+            schema=schema,
+            control_epoch=kwargs.get("control_epoch"),
+            command_sequence=kwargs.get("command_sequence"),
+            base_sequence_ref=kwargs.get("base_sequence_ref"),
+            source_monotonic_s=kwargs.get("source_monotonic_s"),
+        ), str(exc)

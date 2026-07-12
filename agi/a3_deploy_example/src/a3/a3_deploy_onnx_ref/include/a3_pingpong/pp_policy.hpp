@@ -194,6 +194,10 @@ struct PpPolicyConfig {
   double engage_min_tts_s = 1.0;      // never START a swing later than this (deep-clip snap -> fall)
   double planner_invalid_grace_s = 0.25;  // a valid cmd still engages if an invalid arrived within this
   double command_timeout_s = 0.5;     // no fresh VALID command within this -> stand
+  // Formal schema-3 side consistency in the runner's actual policy target
+  // frame. These values must match the planner config and serve prereg SHA.
+  double planner_side_split_y = 0.0;
+  double planner_side_hysteresis_y = 0.04;
   double base_low_z = 0.7;            // base below this (fallen/crouched) -> refuse to engage
   double hold_anchor_x_b = 0.40;      // base-rel x of the ready-hold target between swings (racket-reach)
   // Post-swing hold budget: run the POLICY hold this long after a completed swing (it must
@@ -358,11 +362,17 @@ class PpPolicy {
           "contract");
     if (onnx_.obs_dim() == kObsDim179 && !cfg_.planner_mode)
       throw std::runtime_error(
-          "pingpong: a 179-D face-command policy requires --planner and flat wire schema 2; "
+          "pingpong: a 179-D face-command policy requires --planner and flat wire schema 3; "
           "scripted targets do not carry the demanded world-frame normal/rho atomically");
     if (cfg_.capture_first_tick && onnx_.obs_dim() != kObsDim179)
       throw std::runtime_error(
           "pingpong: first-tick source diagnostic supports deploy_parity_face179 only");
+    if (onnx_.obs_dim() == kObsDim179 &&
+        (!std::isfinite(cfg_.planner_side_split_y) ||
+         !std::isfinite(cfg_.planner_side_hysteresis_y) ||
+         cfg_.planner_side_hysteresis_y < 0.0))
+      throw std::runtime_error(
+          "pingpong: formal planner side split/hysteresis must be finite and non-negative");
     clip_.step_dt = cfg_.dt;
     const bool station_actor =
         onnx_.obs_dim() == kObsDim177 || onnx_.obs_dim() == kObsDim110;
@@ -743,6 +753,7 @@ class PpPolicy {
       level_.store(0);
       swing_level_prev_ = 0;
       planner_engaged_ = false;
+      planner_base_lease_latched_ = false;
       planner_have_hold_ = false;
       planner_tts0_ = 0.0;
       planner_static_active_ = false;
@@ -873,7 +884,25 @@ class PpPolicy {
     // the scripted/keyboard path (planner_mode == false).
     if (cfg_.planner_mode && planner_entry_pending_.exchange(false))
       planner_entry_tick_ = tick_idx;  // first tick of this SHADOW/MOTION session (settle clock)
-    if (cfg_.planner_mode) PlannerEngageStep_(tick_idx);
+    PlannerControlSnapshot planner_tick;
+    if (cfg_.planner_mode) {
+      planner_tick = CapturePlannerControlSnapshot_(state);
+      bool force_zero_gain = false;
+      PlannerEngageStep_(tick_idx, planner_tick, force_zero_gain);
+      if (force_zero_gain) {
+        // A formal active-base lease changed or latest localization became
+        // implausible. Do not execute the actor for even one extra sampled
+        // tick; publish zero gain and re-enter via yaw/settle gating.
+        cmd.q_des = state.q.size() == kNumJoints && state.q.allFinite()
+                        ? state.q
+                        : Eigen::VectorXd::Zero(kNumJoints);
+        cmd.dq_des = Eigen::VectorXd::Zero(kNumJoints);
+        cmd.tau_ff = Eigen::VectorXd::Zero(kNumJoints);
+        cmd.kp = Eigen::VectorXd::Zero(kNumJoints);
+        cmd.kd = Eigen::VectorXd::Zero(kNumJoints);
+        return true;
+      }
+    }
     // Reset the swing clock to its windup on level 0->1 (release from hold) OR on a
     // forehand<->backhand switch. Either way the swing must (re)start from its WINDUP
     // (tts -> clip start, matching the current near-stand body) rather than snap into the
@@ -1013,7 +1042,11 @@ class PpPolicy {
     switch (cfg_.loc_mode) {
       case LocMode::kOracle: {  // ===== C: SIMULATION ONLY (true MuJoCo pose) =====
         PpOracleSample s;
-        if (oracle_ && oracle_->Latest(s, cfg_.oracle_max_age_s)) {
+        const bool fresh = cfg_.planner_mode
+                               ? planner_tick.oracle_fresh
+                               : (oracle_ && oracle_->Latest(s, cfg_.oracle_max_age_s));
+        if (cfg_.planner_mode) s = planner_tick.oracle;
+        if (fresh) {
           st.base_pos_w = s.pos;       // true world pelvis position
           st.base_quat_w = s.quat;     // true world pelvis orientation
           oracle_fresh_ = true;
@@ -1048,7 +1081,11 @@ class PpPolicy {
         // Mocap is position-only, so take the real base POSITION and keep the yaw-aligned
         // IMU orientation (st.base_quat_w set above). Torso position follows the base by FK.
         PpBaseSample s;
-        if (base_in_ && base_in_->Latest(s, cfg_.external_base_max_age_s)) {
+        const bool fresh = cfg_.planner_mode
+                               ? planner_tick.base_fresh
+                               : (base_in_ && base_in_->Latest(s, cfg_.external_base_max_age_s));
+        if (cfg_.planner_mode) s = planner_tick.base;
+        if (fresh) {
           st.base_pos_w = s.pos;
           st.torso_pos_w = torso_pos_from_base(st.base_pos_w, st.base_quat_w, st.q);
           base_fresh_ = true;
@@ -1085,13 +1122,32 @@ class PpPolicy {
     const bool required_base_fresh =
         (cfg_.loc_mode == LocMode::kOracle && oracle_fresh_) ||
         (cfg_.loc_mode == LocMode::kExternalBase && base_fresh_);
-    if ((onnx_.obs_dim() == kObsDim177 || onnx_.obs_dim() == kObsDim110) &&
-        !required_base_fresh &&
+    // A completed swing still owns a frozen target/hold.  If localization
+    // revoked and recovered between two sampled level-0 ticks, a merely fresh
+    // latest base must not let that old recovery context reach the actor.
+    // Pre-first-engage has no latched context and is allowed to wait normally.
+    const bool formal179_recovery_lease_usable =
+        !planner_have_hold_ ||
+        (planner_base_lease_latched_ &&
+         PpFormalBaseLeaseUsable(
+             planner_tick.base, planner_tick.base_fresh,
+             planner_latched_base_epoch_,
+             planner_latched_base_revocation_generation_));
+    const bool formal179_base_fresh =
+        !cfg_.planner_mode || onnx_.obs_dim() != kObsDim179 ||
+        (planner_tick.base_fresh && planner_tick.base.has_formal_epoch &&
+         std::isfinite(planner_tick.base.pos[2]) &&
+         planner_tick.base.pos[2] >= cfg_.base_low_z &&
+         formal179_recovery_lease_usable);
+    if ((((onnx_.obs_dim() == kObsDim177 || onnx_.obs_dim() == kObsDim110) &&
+          !required_base_fresh) ||
+         (cfg_.planner_mode && onnx_.obs_dim() == kObsDim179 &&
+          (!required_base_fresh || !formal179_base_fresh))) &&
         !cfg_.diagnostic_no_publish) {
       if ((required_base_warn_tick_++ % 100) == 0) {
         std::fprintf(stderr,
-            "[pp SAFETY] station-policy localization is not fresh -> zero-gain halt; "
-            "MOTION remains blocked until oracle/external_base recovers.\n");
+            "[pp SAFETY] required localization/formal base epoch is not fresh -> "
+            "zero-gain halt; MOTION remains blocked until the full tuple recovers.\n");
       }
       cmd.q_des = state.q.size() == kNumJoints && state.q.allFinite()
                       ? state.q
@@ -1540,16 +1596,107 @@ class PpPolicy {
     if (planner_status_ != s) planner_status_ = s;
   }
 
+  struct PlannerControlSnapshot {
+    PpRacketTargetInput::Snapshot racket;
+    // `base` is always the tick-start latest closed-loop localization and is
+    // the only base allowed into gates/observations. `referenced_base` proves
+    // the racket row's exact causal provenance; history must never hide a
+    // newer fall/low-base sample from the actor.
+    PpBaseSample base;
+    PpBaseSample referenced_base;
+    PpOracleSample oracle;
+    Vec4 aligned_imu_quat_w = Vec4(1.0, 0.0, 0.0, 0.0);
+    std::shared_ptr<std::mutex> transaction_mu;
+    bool has_racket_input = false;
+    bool base_fresh = false;
+    bool referenced_base_fresh = false;
+    bool oracle_fresh = false;
+    bool input_pair_atomic = false;
+  };
+
+  PlannerControlSnapshot CapturePlannerControlSnapshot_(
+      const robot_io::RobotState& state) const {
+    PlannerControlSnapshot out;
+    out.aligned_imu_quat_w = state.imu_quat_wxyz;
+    if (cfg_.yaw_align)
+      out.aligned_imu_quat_w = quat_mul(yaw0_base_inv_, out.aligned_imu_quat_w);
+    const auto racket_tx = racket_in_ ? racket_in_->transaction_mutex() : nullptr;
+    const auto base_tx = base_in_ ? base_in_->transaction_mutex() : nullptr;
+    if (racket_tx && base_tx && racket_tx == base_tx) {
+      std::lock_guard<std::mutex> transaction_lk(*racket_tx);
+      out.transaction_mu = racket_tx;
+      out.input_pair_atomic = true;
+      out.has_racket_input = true;
+      out.racket = racket_in_->Latest();
+      out.base_fresh = base_in_->Latest(
+          out.base, cfg_.external_base_max_age_s) &&
+          base_in_->PosePlausible(out.base);
+      if (onnx_.obs_dim() == kObsDim179 && level_.load() != 1 &&
+          out.racket.has_valid && out.racket.cmd.has_formal_epoch) {
+        out.referenced_base_fresh = base_in_->ExactFormal(
+            out.racket.cmd.control_epoch,
+            out.racket.cmd.base_sequence_ref, out.referenced_base,
+            cfg_.external_base_max_age_s);
+      }
+    } else {
+      if (racket_in_) {
+        out.has_racket_input = true;
+        out.racket = racket_in_->Latest();
+      }
+      if (base_in_) {
+        out.base_fresh = base_in_->Latest(
+            out.base, cfg_.external_base_max_age_s) &&
+            base_in_->PosePlausible(out.base);
+        if (onnx_.obs_dim() == kObsDim179 && level_.load() != 1 &&
+            out.racket.has_valid && out.racket.cmd.has_formal_epoch) {
+          out.referenced_base_fresh = base_in_->ExactFormal(
+              out.racket.cmd.control_epoch,
+              out.racket.cmd.base_sequence_ref, out.referenced_base,
+              cfg_.external_base_max_age_s);
+        }
+      }
+    }
+    if (oracle_)
+      out.oracle_fresh = oracle_->Latest(out.oracle, cfg_.oracle_max_age_s);
+    return out;
+  }
+
   // Live-planner engage machine (Path B). Reproduces the PROVEN Python wbc_runner._tick:
   // while a swing runs, the target is FROZEN and the existing clock/completion owns it (no
   // mid-swing abort on planner flutter); at idle, gate a fresh VALID command (timeout /
   // invalid-grace / min-tts / base-low / reachability) and, if it passes, FREEZE the target
-  // and drive the EXISTING controls (set_swing_dir + set_level(1)). Uses the PREVIOUS tick's
-  // localized base (1-tick lag @50 Hz is negligible) so it can run before localization.
-  void PlannerEngageStep_(std::uint64_t tick_idx) {
+  // and drive the EXISTING controls (set_swing_dir + set_level(1)). Racket, formal base,
+  // oracle and current aligned IMU are captured once at the policy-tick boundary; engage,
+  // side/face/wait and the observation path consume that same snapshot.
+  void PlannerEngageStep_(std::uint64_t tick_idx,
+                          const PlannerControlSnapshot& tick,
+                          bool& force_zero_gain) {
     if (level_.load() == 1) {  // in flight
+      if (onnx_.obs_dim() == kObsDim179 &&
+          (!planner_base_lease_latched_ ||
+           !PpFormalBaseLeaseUsable(
+               tick.base, tick.base_fresh, planner_latched_base_epoch_,
+               planner_latched_base_revocation_generation_) ||
+           !std::isfinite(tick.base.pos[2]) ||
+           tick.base.pos[2] < cfg_.base_low_z)) {
+        // Base is closed-loop state, so staleness, loss of formal authority,
+        // an epoch change or *any* revoke edge invalidates the active actor
+        // at the next sampled policy tick. revocation_generation survives
+        // invalid->valid recovery between ticks, while an ordinary same-epoch
+        // refresh leaves it unchanged.
+        set_level(0);
+        rearm_yaw_align();
+        set_planner_status_("active_base_lease_revoked");
+        force_zero_gain = true;
+        return;
+      }
       // 110-D STREAMING (paper Fig. 3): keep consuming same-side refinements while the swing
       // flies. Every other contract keeps the proven frozen-target behavior.
+      // Deliberate asymmetry for formal 179: racket commands (including a
+      // malformed/revoked command) remain frozen for the current swing and only
+      // gate the next engage.  The base lease check above is an emergency halt
+      // because localization feeds closed-loop state; it is not a claim that
+      // mailbox malformed/revoke semantics abort a frozen racket trajectory.
       if (onnx_.obs_dim() == kObsDim110 && cfg_.stream_target) StreamTargetStep_(tick_idx);
       set_planner_status_("swinging");
       return;
@@ -1568,13 +1715,18 @@ class PpPolicy {
     // auto-re-arms; it is reused purely as a settle timer). Hold until it elapses.
     if (rest_rearm_armed_ && tick_idx < rest_rearm_tick_) { set_planner_status_("rest"); return; }
 
-    if (!racket_in_) { set_planner_status_("no_input"); return; }
-    const auto snap = racket_in_->Latest();
+    if (!tick.has_racket_input) { set_planner_status_("no_input"); return; }
+    const auto& snap = tick.racket;
     if (!snap.has_valid) { set_planner_status_("no_command"); return; }
 
     const double tts = snap.cmd.time_to_strike - snap.valid_age_s;  // decays since send
-    if (snap.valid_age_s > cfg_.command_timeout_s) { set_planner_status_("stale"); return; }
-    if (snap.invalid_after && snap.valid_age_s > cfg_.planner_invalid_grace_s) {
+    const auto freshness = EvaluatePpPlannerFreshness(
+        snap.valid_age_s, cfg_.command_timeout_s, snap.invalid_after,
+        cfg_.planner_invalid_grace_s, onnx_.obs_dim() == kObsDim179);
+    if (freshness == PpPlannerFreshnessDecision::kStale) {
+      set_planner_status_("stale"); return;
+    }
+    if (freshness == PpPlannerFreshnessDecision::kRevoked) {
       set_planner_status_("planner_invalid"); return;
     }
     if (onnx_.obs_dim() == kObsDim179 && !snap.cmd.has_face_command) {
@@ -1591,7 +1743,7 @@ class PpPolicy {
     // mode). The pre-side cutoff must be the MIN of the per-clip cutoffs. Legacy contracts
     // keep the scalar behavior unchanged.
     double candidate_tts0;
-    if (onnx_.obs_dim() == kObsDim110) {
+    if (onnx_.obs_dim() == kObsDim110 || onnx_.obs_dim() == kObsDim179) {
       const double windup_min = std::min(
           (clip_.strike_frame(0) - clip_.seg_start(0)) * clip_.step_dt,
           (clip_.strike_frame(1) - clip_.seg_start(1)) * clip_.step_dt);
@@ -1604,13 +1756,37 @@ class PpPolicy {
     // engage. Covers BOTH live-base modes: external_base (mocap) and oracle (sim GT) —
     // a stale-oracle run silently degrades to the reference pelvis, and engaging on that
     // fictional base would gate/aim against a position the robot is not at.
-    if ((cfg_.loc_mode == LocMode::kExternalBase && !base_fresh_) ||
-        (cfg_.loc_mode == LocMode::kOracle && !oracle_fresh_)) {
+    if ((cfg_.loc_mode == LocMode::kExternalBase && !tick.base_fresh) ||
+        (cfg_.loc_mode == LocMode::kOracle && !tick.oracle_fresh)) {
       set_planner_status_("no_base"); return;
     }
+    // Formal 179 keeps two base views. The exact referenced history entry
+    // proves racket causality; the tick-start latest base owns closed-loop
+    // localization, gates and the first actor observation. A normal B(n+1)
+    // therefore does not starve R(ref=n), but it can still block motion if the
+    // robot has fallen or changed authority. Schema-2 rows remain ineligible.
+    if (onnx_.obs_dim() == kObsDim179 &&
+        (!snap.cmd.has_formal_epoch || !tick.referenced_base_fresh ||
+         !tick.referenced_base.has_formal_epoch || !tick.base_fresh ||
+         !tick.base.has_formal_epoch ||
+         snap.cmd.control_epoch != tick.referenced_base.control_epoch ||
+         snap.cmd.base_sequence_ref != tick.referenced_base.base_sequence ||
+         snap.cmd.control_epoch != tick.base.control_epoch ||
+         tick.referenced_base.revocation_generation !=
+             tick.base.revocation_generation)) {
+      set_planner_status_("base_tuple_mismatch");
+      return;
+    }
 
-    const Vec3 base_pos = last_base_pos_;
-    const Vec4 base_yaw = yaw_quat(last_base_quat_w_);
+    Vec3 base_pos = last_base_pos_;
+    Vec4 base_quat = tick.aligned_imu_quat_w;
+    if (cfg_.loc_mode == LocMode::kExternalBase) {
+      base_pos = tick.base.pos;
+    } else if (cfg_.loc_mode == LocMode::kOracle) {
+      base_pos = tick.oracle.pos;
+      base_quat = tick.oracle.quat;
+    }
+    const Vec4 base_yaw = yaw_quat(base_quat);
     if (base_pos[2] < cfg_.base_low_z) { set_planner_status_("base_low"); return; }
 
     // MOTION-entry settle: no engage for the first engage_settle_s of a session (see cfg).
@@ -1618,14 +1794,12 @@ class PpPolicy {
                        static_cast<std::uint64_t>(cfg_.engage_settle_s / std::max(cfg_.dt, 1e-6))) {
       set_planner_status_("settling"); return;
     }
-    // HEADING gate (see cfg.engage_yaw_max_deg): last_base_quat_w_ is yaw-aligned, so its yaw
+    // HEADING gate (see cfg.engage_yaw_max_deg): the same-tick base quaternion is yaw-aligned,
     // is the drift from the engage heading (~ world +x). Swinging from a yawed stand is OOD.
     {
       const double yaw = std::atan2(
-          2.0 * (last_base_quat_w_[0] * last_base_quat_w_[3] +
-                 last_base_quat_w_[1] * last_base_quat_w_[2]),
-          1.0 - 2.0 * (last_base_quat_w_[2] * last_base_quat_w_[2] +
-                       last_base_quat_w_[3] * last_base_quat_w_[3]));
+          2.0 * (base_quat[0] * base_quat[3] + base_quat[1] * base_quat[2]),
+          1.0 - 2.0 * (base_quat[2] * base_quat[2] + base_quat[3] * base_quat[3]));
       if (std::fabs(yaw) > cfg_.engage_yaw_max_deg * M_PI / 180.0) {
         if ((gate_warn_tick_++ % 100) == 0)
           std::fprintf(stderr,
@@ -1651,6 +1825,25 @@ class PpPolicy {
 
     const Vec3 tgt_b = quat_rotate_inverse(base_yaw, pos_w - base_pos);
 
+    // Recheck the planner's explicit side against both its exact referenced
+    // base provenance and the current closed-loop base. The former catches a
+    // fabricated tuple; the latter prevents normal base motion from making a
+    // once-correct side unsafe by the sampled engage tick.
+    if (onnx_.obs_dim() == kObsDim179) {
+      const Vec4 referenced_base_yaw = yaw_quat(
+          tick.referenced_base.quat);
+      const Vec3 referenced_tgt_b = quat_rotate_inverse(
+          referenced_base_yaw, pos_w - tick.referenced_base.pos);
+      double referenced_sign = 0.0;
+      if (!resolve_planner_swing_sign(
+              true, snap.cmd.has_explicit_side, snap.cmd.swing_sign,
+              referenced_tgt_b[1], cfg_.planner_side_split_y,
+              cfg_.planner_side_hysteresis_y, referenced_sign)) {
+        set_planner_status_("side_provenance_inconsistent");
+        return;
+      }
+    }
+
     // Swing side. 110-D hitter_pure: the paper's §V-B-3 heuristic, implemented as
     // NEAREST-STATION — candidate station per side = target_xy − (plane_x, band_center_y),
     // pick the side needing the smaller step. The legacy y<0 split is WRONG for the pure
@@ -1665,8 +1858,20 @@ class PpPolicy {
       const double d_bh = (tgt_xy - reach_offset_clip_[1] - base_xy).norm();
       sign = (d_fh <= d_bh) ? 1.0 : -1.0;
     } else {
-      // BASE-RELATIVE y (raw world-y is always <0 in the table frame).
-      sign = swing_sign_from_target_y(tgt_b[1]);
+      // The formal 179/schema-3 tuple carries planner-selected side
+      // atomically. Legacy 175/177 contracts keep their base-relative-y
+      // inference so this change cannot silently re-side deployed actors.
+      if (!resolve_planner_swing_sign(
+              onnx_.obs_dim() == kObsDim179,
+              snap.cmd.has_explicit_side,
+              snap.cmd.swing_sign,
+              tgt_b[1],
+              cfg_.planner_side_split_y,
+              cfg_.planner_side_hysteresis_y,
+              sign)) {
+        set_planner_status_("side_command_inconsistent");
+        return;
+      }
     }
     const int eng_clip = clip_id_from_swing_sign(sign);
     const double max_tts0 =
@@ -1730,18 +1935,36 @@ class PpPolicy {
       if (!ok) { set_planner_status_("target_gate"); return; }
     }
 
-    // Strike-time alignment. 110: WAIT-until-tts (paper: the hit time comes from the
+    // Validate the formal face tuple before returning `waiting_tts`. The
+    // mailbox keeps the latest complete atomic command while waiting, and this
+    // whole freshness/side/target/face path is re-run every tick. A stale or
+    // revoked tuple can therefore never become eligible merely because its TTS
+    // later enters the windup window.
+    if (onnx_.obs_dim() == kObsDim179) {
+      const double normal_norm = normal_w.norm();
+      if (!std::isfinite(normal_norm) || std::fabs(normal_norm - 1.0) > 1e-6 ||
+          !std::isfinite(snap.cmd.rho) || snap.cmd.rho != 0.0) {
+        set_planner_status_("face_command_invalid");
+        return;
+      }
+    }
+
+    // Strike-time alignment. 110/179: WAIT-until-tts (paper: the hit time comes from the
     // virtual-plane crossing and the strike fires when the ball arrives). The legacy clamp
     // planner_tts0_ = min(tts, max_tts0) starts the clip early and lets the strike frame
     // fire (planner_tts − max_tts0) seconds BEFORE the ball (bh: >1 s early on a slow lob
     // = multi-decimeter miss). Wait at ready until the decaying tts enters the windup
     // window, then engage with the strike frame exactly on the predicted arrival. Per-clip
     // late gate re-check (side is now known).
-    if (onnx_.obs_dim() == kObsDim110) {
-      if (tts < std::min(cfg_.engage_min_tts_s, 0.9 * max_tts0)) {
+    if (onnx_.obs_dim() == kObsDim110 || onnx_.obs_dim() == kObsDim179) {
+      const auto timing = EvaluateExactWindupTts(
+          tts, cfg_.engage_min_tts_s, max_tts0);
+      if (timing == PpPlannerTtsDecision::kTooLate) {
         set_planner_status_("too_late"); return;
       }
-      if (tts > max_tts0) { set_planner_status_("waiting_tts"); return; }
+      if (timing == PpPlannerTtsDecision::kWaiting) {
+        set_planner_status_("waiting_tts"); return;
+      }
       candidate_tts0 = tts;
     } else {
       // ENGAGE: tts0 stored CLAMPED to the clip's windup length; DRIVES the swing clock
@@ -1789,28 +2012,96 @@ class PpPolicy {
         return;
       }
     }
-    // Transaction boundary: every validation above operates on locals. Commit the clock,
-    // position, velocity, side and face command together so a rejected schema-2 row cannot
-    // pair new reach data with the previous swing's normal during recovery.
-    planner_tts0_ = candidate_tts0;
-    planner_frozen_pos_w_ = pos_w;
-    planner_frozen_vel_w_ = candidate_vel_w;
-    planner_frozen_sign_ = sign;
+    double committed_tts = tts;
+    const auto commit_frozen = [&](double tts0) {
+      // Transaction boundary: clock, target, side, face and level become visible together.
+      planner_tts0_ = tts0;
+      planner_frozen_pos_w_ = pos_w;
+      planner_frozen_vel_w_ = candidate_vel_w;
+      planner_frozen_sign_ = sign;
+      if (onnx_.obs_dim() == kObsDim179) {
+        planner_frozen_normal_w_ = normal_raw_a_w;
+        planner_frozen_rho_ = snap.cmd.rho;
+      }
+      planner_hold_pos_b_engage_ = tgt_b;
+      planner_hold_z_w_ = pos_w[2];
+      planner_have_hold_ = true;
+      planner_engaged_ = true;
+      set_swing_dir(sign >= 0.0 ? 1 : -1);
+      set_level(1);
+    };
     if (onnx_.obs_dim() == kObsDim179) {
-      planner_frozen_normal_w_ = normal_raw_a_w;
-      planner_frozen_rho_ = snap.cmd.rho;
+      if (!tick.input_pair_atomic || !tick.transaction_mu || !racket_in_ || !base_in_) {
+        set_planner_status_("input_pair_not_atomic");
+        return;
+      }
+      // True linearization point: both subscriber callbacks take this same
+      // mutex. A normal latest-base refresh before this lock is allowed (it is
+      // next tick's closed-loop event), while the exact referenced history,
+      // authority/revoke generation and current latest plausibility are all
+      // rechecked under the lock before the level transition.
+      bool semantic_recheck_ran = false;
+      const bool committed = PpWithPlannerInputsIfUnchanged(
+          *racket_in_, snap.generation, *base_in_, snap.cmd.control_epoch,
+          snap.cmd.base_sequence_ref, cfg_.external_base_max_age_s,
+          [&](const PpBaseSample& exact_base,
+              const PpBaseSample& current_latest_base) {
+            semantic_recheck_ran = true;
+            const auto current_racket = racket_in_->Latest();
+            if (!current_racket.has_valid ||
+                !current_racket.cmd.has_formal_epoch ||
+                !exact_base.has_formal_epoch ||
+                !current_latest_base.has_formal_epoch ||
+                current_racket.cmd.control_epoch != exact_base.control_epoch ||
+                current_racket.cmd.base_sequence_ref != exact_base.base_sequence ||
+                current_racket.cmd.control_epoch !=
+                    current_latest_base.control_epoch ||
+                exact_base.revocation_generation !=
+                    current_latest_base.revocation_generation ||
+                !base_in_->PosePlausible(current_latest_base) ||
+                !std::isfinite(current_latest_base.pos[2]) ||
+                current_latest_base.pos[2] < cfg_.base_low_z) {
+              set_planner_status_("snapshot_stale_or_epoch_changed");
+              return false;
+            }
+            const auto current_freshness = EvaluatePpPlannerFreshness(
+                current_racket.valid_age_s, cfg_.command_timeout_s,
+                current_racket.invalid_after, cfg_.planner_invalid_grace_s, true);
+            committed_tts = current_racket.cmd.time_to_strike - current_racket.valid_age_s;
+            if (current_freshness != PpPlannerFreshnessDecision::kFresh ||
+                EvaluateExactWindupTts(
+                    committed_tts, cfg_.engage_min_tts_s, max_tts0) !=
+                    PpPlannerTtsDecision::kEngage) {
+              set_planner_status_("snapshot_timing_changed");
+              return false;
+            }
+            // Latch the exact base lease at the same linearization point as
+            // the frozen target and level transition.  A normal same-epoch
+            // refresh may advance `generation`; only epoch or the independent
+            // revocation generation invalidates an active swing.
+            planner_latched_base_epoch_ = current_latest_base.control_epoch;
+            planner_latched_base_revocation_generation_ =
+                current_latest_base.revocation_generation;
+            planner_base_lease_latched_ = true;
+            commit_frozen(committed_tts);
+            return true;
+          });
+      if (!committed) {
+        if (!semantic_recheck_ran) set_planner_status_("snapshot_changed");
+        return;
+      }
+    } else {
+      if (racket_in_ && !racket_in_->GenerationCurrent(snap.generation)) {
+        set_planner_status_("snapshot_changed");
+        return;
+      }
+      commit_frozen(candidate_tts0);
     }
-    planner_hold_pos_b_engage_ = tgt_b;
-    planner_hold_z_w_ = pos_w[2];
-    planner_have_hold_ = true;
-    planner_engaged_ = true;
-    set_swing_dir(sign >= 0.0 ? 1 : -1);
-    set_level(1);
     std::fprintf(stderr,
         "[pp engage] %s %s: tgt base-rel (%+.2f,%+.2f,%+.2f) tts=%.2fs (clock tts0=%.2fs)\n",
         sign > 0 ? "forehand" : "backhand",
         (onnx_.obs_dim() == kObsDim110 && cfg_.stream_target) ? "engaged (streaming)" : "locked",
-        tgt_b[0], tgt_b[1], tgt_b[2], tts, planner_tts0_);
+        tgt_b[0], tgt_b[1], tgt_b[2], committed_tts, planner_tts0_);
     set_planner_status_("engage");
   }
 
@@ -2037,6 +2328,9 @@ class PpPolicy {
   std::uint64_t required_base_warn_tick_ = 0;  // 177-D fail-closed warning throttle
   std::uint64_t gate_warn_tick_ = 0;    // throttle the target-gate rejection detail print
   bool planner_engaged_ = false;        // a planner swing is active (frozen target in flight)
+  bool planner_base_lease_latched_ = false;  // formal179 base lease captured atomically at engage
+  std::uint64_t planner_latched_base_epoch_ = 0;
+  std::uint64_t planner_latched_base_revocation_generation_ = 0;
   bool planner_have_hold_ = false;      // at least one swing engaged (diagnostic)
   double planner_tts0_ = 0.0;           // engage-time tts, clamped to the clip windup length;
                                         // seeds the swing clock so the strike meets the ball

@@ -1295,3 +1295,17 @@ tracking guard/reset 路径结束，其中包括 seed-4 的击球前 guard。这
 这里的击球/回球来自 `VirtualReturnScorer` 对拍状态的推演，不是 simulator 球-拍-台接触。
 seed-stability 判决仍为失败。本次文档迁移没有运行 Pod、模拟器、训练或真机动作；G05 仍为
 `Partial`。
+
+### 2026-07-13 formal tuple source integration boundary
+
+The accepted deployment repair changes planner transport and actor engage safety only: no reward,
+training recipe, observation/action dimension, checkpoint or active Pod arm changed. Formal racket
+schema 3 now references one exact formal base sequence, while closed-loop gates and the actor
+observation use latest tick-start base. Latest stale/low/implausible/epoch-changed or
+revocation-changed base blocks actor inference during active swing and recovery; ordinary valid
+same-epoch refresh remains legal.
+
+Exact source passed planner tests `180 passed, 2 optional skipped`, Pod2 portable Release focused
+`40/40` and native `233 passed, 5 optional skips, 0 failed`. These are source/binary results, not a
+new training setting or behavior score. The 179 actor still needs ROS/AimRT first tick and vendor
+MuJoCo behavior; G05 remains `Partial`.

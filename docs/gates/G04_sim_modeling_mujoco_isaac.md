@@ -180,3 +180,16 @@ post-processing. MJCF SHA alone does not prove equality; future contracts must b
 facts, mesh closure and runtime flags. Reproducible source commands and the two-profile table are in
 [the MuJoCo training-v0 preflight](../research/mujoco_training_v0_preflight_2026-07-12.md). No
 simulator ran and G04 remains `Partial`.
+
+## Audit update 2026-07-13: formal base plausibility source gate
+
+Planner and runner now share one source-bound gross-workspace and source-time continuity check
+before formal-179 inference: x/y `[-3,+3] m`, z `[0.4,1.5] m`, translation
+`0.05 + 8*dt` metres and quaternion shortest-angle `0.15 + 12*dt` radians. A new ordered
+implausible sample revokes the base lease, clears exact history and cannot replace the last good
+continuity baseline; proven-old delayed packets are discarded before comparison.
+
+These constants block finite teleport/glitch inputs but are not vendor-plant validation. They must
+be compared with content-addressed vendor MuJoCo pelvis trajectories before claiming they are
+neither too loose nor liveness-breaking. No Isaac asset, MJCF, contact parameter, trainer,
+checkpoint or hardware changed; G04 remains `Partial`.

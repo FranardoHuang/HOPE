@@ -67,6 +67,9 @@
 | `Gate3` | 上真机前的全链路彩排：在厂商 MuJoCo 中把 planner、真机同款 C++ runner、消息和机器人执行串起来，先看能否稳定走完。独立 BankExam 只测 policy 与自己的 Python 评估器/机器人动力学配方，不能替代 Gate3。 |
 | `Gate3B` | Gate3 的回球评分版：用当前阶段来球分布，并正式记击球率/上台率。它比“能稳定跑完”更近真机质量门。 |
 | `first tick` | vendor simulator、通信、planner 和 runner 真正启动后，第一个有效控制周期。只过源码检查或 model preflight 不算 first tick。 |
+| `portable Release` | 在 Linux 上用优化编译、但明确关闭 ROS 2 与 AimRT backend 的 C++ source/binary gate。它能证明 exact 源码可编译、链接并通过 native suite，不会启动 transport、simulator 或硬件。 |
+| `native suite` | 编进 C++ `run_tests` 可执行文件的测试集合。缺可选资产导致的 skip 必须单列，不能算 pass。 |
+| `AimRT` | 厂商部署 runner 使用的 middleware/backend 路径。AimRT 关闭的 portable Release 明确弱于 AimRT-enabled Release、backend first tick 和 Gate3 行为。 |
 | `Gate3-D0` | 本项目的“第 0 版最短部署仿真闭环”：固定同卷、planner + policy + C++ runner + vendor runtime 的单拍演示；不冒充连续对打。它是项目内部标签，不是行业通用术语。 |
 | `Trainer-v0` | native MuJoCo 训练的首卷。因现役 vendor main sim loop 没有球/球台/网，目前只能练单拍平衡与击球状态，不是 physical return 结果，也不阻塞几天内 `Gate3-D0`。它是并行候选训练轨；产物若晋级，仍须独立通过 Gate3/Gate3B。旧草案曾把它也叫 `D0`，从现行文档起停止这种重名。 |
 | `Recovery-D0` | recovery A/B/C 预注册的第 0 步：只用现有 179-D checkpoint 做 A bridge 与 C previous-tuple 的 zero-shot 诊断，不选型、不晋级。原 config 字段仍叫 `D0`，文档必须写全 `Recovery-D0`，避免与 `Gate3-D0` 混淆。 |

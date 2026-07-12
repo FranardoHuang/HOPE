@@ -33,8 +33,29 @@ except ImportError:  # flat-only environment (e.g. the MDU)
 from .ball_kalman_estimator import BallKalmanEstimator
 from .constants import BallPhysics, PlannerConfig
 from .flat_command_wire import (
+    BASE_FLAT_SCHEMA_V1,
+    BASE_FLAT_SCHEMA_V2_EPOCH,
+    RACKET_FLAT_SCHEMA_V2_FACE179,
+    RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+    pack_base_pose_flat,
     pack_invalid_racket_command_flat,
     pack_racket_command_flat_fail_closed,
+)
+from .node_runtime_contract import (
+    FormalBaseBarrierRejection,
+    FormalBasePosePlausibilityGuard,
+    FormalBaseSourceState,
+    FormalSourceFrameContract,
+    FormalWireCounters,
+    FormalWireExhaustion,
+    SolveCadence,
+    SourceStampGuard,
+    SwingSideSelector,
+    base_pose_is_fresh,
+    corrected_base_pose,
+    ros_source_to_monotonic,
+    ros_stamp_fields_to_seconds,
+    validate_formal_source_clock_mode,
 )
 from .planner import HOPEPlanner
 from .strike_spec_planner import StrikeSpecPlanner
@@ -52,19 +73,30 @@ class HOPEPlannerNode(Node):
         self.declare_parameter("target_land_x", 2.055)
         self.declare_parameter("target_land_y", -0.7625)
         self.declare_parameter("delta_t_flight", 0.5)
+        # Prediction horizon is a launch/profile parameter. Gate3's ~1.89 s
+        # arrivals need margin above the historical 2.0 s boundary because the
+        # earliest fit can briefly predict a later crossing.
+        self.declare_parameter("max_predict_time", 2.0)
+        # 0.0 preserves every-frame solves. Gate3 sets 0.033 s so a 300 Hz ball
+        # stream cannot starve the independent base-pose callback.
+        self.declare_parameter("solve_period_s", 0.0)
         # PER-SIDE aim/flight (2026-07-08, from the Gate-3 rally vel-gate finding): the two
         # trained clips return in OPPOSITE cross-court directions (fh vy [+0.96,+1.96], bh vy
         # [-1.21,-0.21] world), so NO single target_land_y makes both sides' demanded racket
         # velocity land inside the trained boxes (best single aim = 5/10 sweep serves in-band;
-        # the C++ runner's vel gate correctly stands on the rest). When set (non-NaN) the aim
-        # and flight time switch per predicted arrival SIDE — fh if arrival_y - robot_y < -0.11
-        # (the trained band midpoint, mirroring the runner's nearest-station split). The side
-        # uses the LAST valid plan's intercept (one 300 Hz frame of lag; settles ~1.5 s before
-        # any engage). NaN (default) = legacy single aim; arena values live in the yaml.
+        # the C++ runner's vel gate correctly stands on the rest). When set (non-NaN), aim and
+        # flight time switch from THIS Stage-2 intercept's corrected base-yaw Y, using the
+        # formal side Schmitt band below; Stage 3 is then rerun without estimator/strike-time
+        # lag. NaN (default) = legacy single aim; arena values live in the yaml.
         self.declare_parameter("target_land_y_fh", float("nan"))
         self.declare_parameter("target_land_y_bh", float("nan"))
         self.declare_parameter("delta_t_flight_fh", float("nan"))
         self.declare_parameter("delta_t_flight_bh", float("nan"))
+        # Explicit planner->policy side contract. The split is in base-yaw axes;
+        # default 0.0 preserves the legacy runtime y-sign decision away from
+        # the hysteresis band.
+        self.declare_parameter("swing_side_split_y", 0.0)
+        self.declare_parameter("swing_side_hysteresis_y", 0.04)
         self.declare_parameter("drag_k", 0.1261)          # venue fit 2026-07-03 (configs/ball_physics_venue.yaml)
         self.declare_parameter("restitution_h", 0.64)     # no-spin grip equivalent (1 - a_t)
         self.declare_parameter("restitution_v", 0.9215)   # venue table e_n
@@ -171,10 +203,18 @@ class HOPEPlannerNode(Node):
         self.declare_parameter("publish_flat_cmd", True)
         self.declare_parameter("racket_flat_topic", "/racket/command_flat")
         self.declare_parameter("base_flat_topic", "/a3/base_pose_flat")
-        # Schema 1 is the legacy pos/vel wire. Schema 2 atomically appends the
-        # demanded world-frame face normal and zero rho placeholder required by
-        # deploy_parity_face179. Keep the default at 1 for old 110/175/177/180
-        # runners; a 179-D Gate 3 launch must opt into 2 explicitly.
+        # Formal side must expire with the C++ external-base localization gate;
+        # receive-time monotonic age avoids trusting a stale/foreign ROS stamp.
+        self.declare_parameter("base_pose_max_age_s", 0.2)
+        self.declare_parameter("ball_source_stamp_max_age_s", 0.2)
+        self.declare_parameter("source_stamp_future_tolerance_s", 0.02)
+        self.declare_parameter("formal_source_clock_mode", "system")
+        self.declare_parameter("formal_ball_source_frame_id", "")
+        self.declare_parameter("formal_base_source_frame_id", "")
+        self.declare_parameter("formal_common_frame_required", True)
+        # Schema 1 is legacy. Schema 2 added the face tail but had no cross-topic
+        # causality. Formal Gate3/179 must opt into schema 3, whose payload binds
+        # a shared base-control epoch, strict sequence and source monotonic stamp.
         self.declare_parameter("racket_flat_schema", 1)
         # marker-cluster -> base_link offset (table frame). /P1/pose is the marker cluster; the
         # policy base is the pelvis. In sim (robot_pose_topic=/sim/a3/pelvis_pose) it is already
@@ -199,7 +239,10 @@ class HOPEPlannerNode(Node):
         self._x_hit_max = float(self.get_parameter("x_hit_max").value)
         self._x_hit_follow_robot = bool(self.get_parameter("x_hit_follow_robot").value)
         self._robot_x = None          # latest robot X (table frame); None -> static x_hit
-        self._robot_y = None          # latest robot Y (table frame); side split for per-side aim
+        self._robot_position_w = None
+        self._robot_quaternion_wxyz = None
+        self._formal_base_state = FormalBaseSourceState()
+        self._formal_base_pose_guard = FormalBasePosePlausibilityGuard()
         # per-side aim/flight (NaN = disabled); consumed in _poses_cb before the solve
         self._land_y_fh = float(self.get_parameter("target_land_y_fh").value)
         self._land_y_bh = float(self.get_parameter("target_land_y_bh").value)
@@ -207,11 +250,64 @@ class HOPEPlannerNode(Node):
         self._dtf_bh = float(self.get_parameter("delta_t_flight_bh").value)
         self._per_side_aim = not (np.isnan(self._land_y_fh) and np.isnan(self._land_y_bh)
                                   and np.isnan(self._dtf_fh) and np.isnan(self._dtf_bh))
-        self._last_intercept_y = None  # last valid plan's arrival y (side memory)
+        self._last_intercept_y = None  # last valid plan's arrival y (diagnostics)
+        self._side_selector = SwingSideSelector(
+            split_y=float(self.get_parameter("swing_side_split_y").value),
+            hysteresis_y=float(self.get_parameter("swing_side_hysteresis_y").value),
+        )
+        self._solve_cadence = SolveCadence(
+            period_s=float(self.get_parameter("solve_period_s").value)
+        )
         self._publish_flat = bool(self.get_parameter("publish_flat_cmd").value)
         self._racket_flat_schema = int(self.get_parameter("racket_flat_schema").value)
-        if self._racket_flat_schema not in (1, 2):
-            raise ValueError("racket_flat_schema must be 1 (legacy) or 2 (face179)")
+        if self._racket_flat_schema not in (1, 2, 3):
+            raise ValueError("racket_flat_schema must be 1 (legacy), 2 (face), or 3 (formal epoch)")
+        if self._racket_flat_schema in (2, 3) and not self._publish_flat:
+            raise ValueError("face racket schemas require publish_flat_cmd=true")
+        self._base_flat_schema = (
+            BASE_FLAT_SCHEMA_V2_EPOCH
+            if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH
+            else BASE_FLAT_SCHEMA_V1
+        )
+        self._wire_counters = FormalWireCounters()
+        self._base_pose_max_age_s = float(
+            self.get_parameter("base_pose_max_age_s").value
+        )
+        # Pure helper validates the launch parameter at startup.
+        base_pose_is_fresh(None, time.monotonic(), self._base_pose_max_age_s)
+        source_future_tolerance_s = float(
+            self.get_parameter("source_stamp_future_tolerance_s").value
+        )
+        self._base_source_guard = SourceStampGuard(
+            max_age_s=self._base_pose_max_age_s,
+            future_tolerance_s=source_future_tolerance_s,
+        )
+        self._ball_source_guard = SourceStampGuard(
+            max_age_s=float(self.get_parameter("ball_source_stamp_max_age_s").value),
+            future_tolerance_s=source_future_tolerance_s,
+        )
+        self._formal_source_frames = None
+        if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+            if not self.has_parameter("use_sim_time"):
+                raise ValueError(
+                    "formal schema 3 requires ROS to declare use_sim_time"
+                )
+            validate_formal_source_clock_mode(
+                self.get_parameter("use_sim_time").value,
+                self.get_parameter("formal_source_clock_mode").value,
+            )
+            self._formal_source_frames = FormalSourceFrameContract(
+                ball_frame_id=self.get_parameter(
+                    "formal_ball_source_frame_id"
+                ).value,
+                base_frame_id=self.get_parameter(
+                    "formal_base_source_frame_id"
+                ).value,
+                common_frame_required=self.get_parameter(
+                    "formal_common_frame_required"
+                ).value,
+            )
+        self._base_ready_cadence = SolveCadence(period_s=0.1)
         self._marker_to_base = np.array(
             [float(v) for v in self.get_parameter("marker_to_base_xyz").value])
         self._policy_z_offset = float(self.get_parameter("policy_z_offset").value)
@@ -227,6 +323,7 @@ class HOPEPlannerNode(Node):
             C_r=self.get_parameter("restitution_racket").value,
             use_kalman=bool(self.get_parameter("use_kalman").value),
             dt_integrate_coarse=float(self.get_parameter("dt_integrate_coarse").value),
+            max_predict_time=float(self.get_parameter("max_predict_time").value),
         )
         physics = BallPhysics(
             k=self.get_parameter("drag_k").value,
@@ -359,22 +456,155 @@ class HOPEPlannerNode(Node):
             from geometry_msgs.msg import PoseStamped
 
             def _robot_pose_cb(msg: PoseStamped) -> None:
+                received_now = time.monotonic()
+                # Expire the previous source-age lease before inspecting or
+                # admitting this callback's candidate. If this advances the
+                # epoch, a delayed pre-barrier source cannot immediately
+                # recover it merely because the DDS receive is new.
+                expired_this_callback = self._expire_formal_base_if_needed(received_now)
+                base_source_monotonic_s = received_now
+                base_source_stamp_s = None
+                if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+                    try:
+                        self._formal_source_frames.validate_base(msg.header.frame_id)
+                    except ValueError as exc:
+                        # A base-frame mismatch invalidates localization and
+                        # therefore owns a new control epoch. If source-age
+                        # expiry already advanced it above, do not double-step.
+                        self._revoke_formal_base(
+                            "base source frame_id rejected",
+                            force_epoch=not expired_this_callback,
+                        )
+                        self.get_logger().warning(
+                            f"base source frame_id rejected ({exc}); geometry suppressed",
+                            throttle_duration_sec=2.0,
+                        )
+                        return
+                    try:
+                        source_stamp_s = self._source_stamp_s(msg)
+                        base_source_stamp_s = source_stamp_s
+                        now_ros_s = self._now_ros_s()
+                        self._base_source_guard.validate(
+                            source_stamp_s, now_ros_s
+                        )
+                        base_source_monotonic_s = self._source_monotonic_from_ros(
+                            source_stamp_s,
+                            now_ros_s=now_ros_s,
+                            now_monotonic_s=received_now,
+                        )
+                        self._formal_base_state.validate_candidate(
+                            base_source_monotonic_s,
+                            now_monotonic_s=received_now,
+                            max_age_s=self._base_pose_max_age_s,
+                        )
+                    except ValueError as exc:
+                        barrier_only_rejection = isinstance(
+                            exc, FormalBaseBarrierRejection
+                        )
+                        self._revoke_formal_base(
+                            "stale/regressing robot marker source",
+                            force_epoch=(
+                                not expired_this_callback
+                                and not barrier_only_rejection
+                            ),
+                        )
+                        self.get_logger().warning(
+                            f"robot marker source stamp rejected ({exc})",
+                            throttle_duration_sec=2.0,
+                        )
+                        return
                 p = msg.pose.position
-                self._robot_x = float(p.x)
-                self._robot_y = float(p.y)
-                # Stream the base pose to the C++ runner (external_base localization). Apply the
-                # marker->base offset; the runner uses POSITION only (mocap is position-only) so
-                # the quaternion is informational. Publishes at the robot_pose_topic rate.
-                if self.flat_base_pub is not None:
-                    bx = float(p.x) + float(self._marker_to_base[0])
-                    by = float(p.y) + float(self._marker_to_base[1])
-                    bz = float(p.z) + float(self._marker_to_base[2]) + self._policy_z_offset
-                    q = msg.pose.orientation
-                    m = Float64MultiArray()
-                    # [schema, valid, x, y, z, qw, qx, qy, qz]
-                    m.data = [1.0, 1.0, bx, by, bz,
-                              float(q.w), float(q.x), float(q.y), float(q.z)]
-                    self.flat_base_pub.publish(m)
+                q = msg.pose.orientation
+                try:
+                    base_w, quat_wxyz = corrected_base_pose(
+                        (float(p.x), float(p.y), float(p.z)),
+                        (float(q.w), float(q.x), float(q.y), float(q.z)),
+                        self._marker_to_base,
+                        policy_z_offset=self._policy_z_offset,
+                    )
+                    if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+                        self._formal_base_pose_guard.validate(
+                            base_w, quat_wxyz, base_source_monotonic_s
+                        )
+                except ValueError as exc:
+                    # Do not keep using an older yaw frame after the newest
+                    # base sample proves unusable. Formal schema 3 publishes an
+                    # invalid revocation until a complete corrected pose lands.
+                    self._revoke_formal_base(
+                        "invalid robot marker pose",
+                        force_epoch=not expired_this_callback,
+                    )
+                    self.get_logger().warning(
+                        f"invalid robot marker pose ({exc}); base update suppressed",
+                        throttle_duration_sec=2.0,
+                    )
+                    return
+                # Adaptive x, side selection, and the published flat consume the
+                # exact same corrected base. The local marker->base offset must
+                # not be added directly in world axes after the robot turns.
+                bx, by, bz = (float(v) for v in base_w)
+                admission_now = time.monotonic()
+                # Recheck at the actual state-install boundary: geometry work
+                # must not let the prior lease age out between callback entry
+                # and candidate admission without advancing the epoch first.
+                expired_during_admission = self._expire_formal_base_if_needed(
+                    admission_now
+                )
+                expired_this_callback = (
+                    expired_this_callback or expired_during_admission
+                )
+                try:
+                    if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+                        self._formal_base_state.accept_source(
+                            base_source_monotonic_s,
+                            now_monotonic_s=admission_now,
+                            max_age_s=self._base_pose_max_age_s,
+                        )
+                    else:
+                        # Legacy face schema has no source stamp. Preserve its
+                        # receive-age behavior without weakening schema 3.
+                        self._formal_base_state.lease.accept(
+                            received_now,
+                            now_monotonic_s=admission_now,
+                            max_age_s=self._base_pose_max_age_s,
+                        )
+                except ValueError as exc:
+                    barrier_only_rejection = isinstance(
+                        exc, FormalBaseBarrierRejection
+                    )
+                    self._revoke_formal_base(
+                        "base source lease rejected",
+                        force_epoch=(
+                            not expired_this_callback
+                            and not barrier_only_rejection
+                        ),
+                    )
+                    self.get_logger().warning(
+                        f"base source lease rejected ({exc}); geometry suppressed",
+                        throttle_duration_sec=2.0,
+                    )
+                    return
+                if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+                    self._formal_base_pose_guard.commit(
+                        base_w, quat_wxyz, base_source_monotonic_s
+                    )
+                if base_source_stamp_s is not None:
+                    self._base_source_guard.commit(base_source_stamp_s)
+                self._robot_x = bx
+                self._robot_position_w = base_w.copy()
+                self._robot_quaternion_wxyz = quat_wxyz.copy()
+                self._publish_flat_base(
+                    valid=True,
+                    position_w=(bx, by, bz),
+                    quaternion_wxyz=tuple(float(v) for v in quat_wxyz),
+                    source_monotonic_s=base_source_monotonic_s,
+                )
+                # READY is tied to this exact mapped source stamp, not to its
+                # newly received callback. A source that ages out during the
+                # callback can therefore never announce receive-fresh READY.
+                self._emit_base_ready_from_new_sample(
+                    base_source_monotonic_s, time.monotonic()
+                )
 
             self.create_subscription(PoseStamped, robot_pose_topic, _robot_pose_cb, mocap_qos)
             if self._x_hit_follow_robot:
@@ -411,17 +641,315 @@ class HOPEPlannerNode(Node):
                 f"sensitivities {'per-solve' if self._spec_sens else 'off (on demand)'}"
             )
 
+    def _next_sequence(self, field: str) -> int:
+        try:
+            if field == "_racket_sequence":
+                return self._wire_counters.next_racket()
+            if field == "_base_sequence":
+                return self._wire_counters.next_base()
+            raise ValueError(f"unknown formal wire sequence field {field}")
+        except FormalWireExhaustion as exc:
+            self._publish_terminal_wire_exhaustion(str(exc))
+
+    def _advance_control_epoch(self) -> None:
+        try:
+            self._wire_counters.advance_epoch()
+        except FormalWireExhaustion as exc:
+            self._publish_terminal_wire_exhaustion(str(exc))
+
+    def _publish_terminal_wire_exhaustion(self, reason: str) -> None:
+        """Spend the reserved MAX counters on one terminal double revoke."""
+
+        epoch, racket_sequence, base_sequence = (
+            self._wire_counters.reserve_terminal_invalid()
+        )
+        stamp = time.monotonic()
+        errors = []
+        if self.flat_cmd_pub is not None:
+            try:
+                msg = Float64MultiArray()
+                msg.data = pack_invalid_racket_command_flat(
+                    schema=RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+                    control_epoch=epoch,
+                    command_sequence=racket_sequence,
+                    base_sequence_ref=base_sequence,
+                    source_monotonic_s=stamp,
+                )
+                self.flat_cmd_pub.publish(msg)
+            except Exception as exc:
+                errors.append(f"racket={type(exc).__name__}: {exc}")
+        if self.flat_base_pub is not None:
+            try:
+                msg = Float64MultiArray()
+                msg.data = pack_base_pose_flat(
+                    schema=BASE_FLAT_SCHEMA_V2_EPOCH,
+                    valid=False,
+                    position_w=(0.0, 0.0, 0.0),
+                    quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
+                    control_epoch=epoch,
+                    base_sequence=base_sequence,
+                    source_monotonic_s=stamp,
+                )
+                self.flat_base_pub.publish(msg)
+            except Exception as exc:
+                errors.append(f"base={type(exc).__name__}: {exc}")
+        detail = "; ".join(errors) if errors else "terminal double revoke published"
+        raise RuntimeError(f"{reason}; {detail}; runner restart is required")
+
+    def _source_stamp_s(self, msg) -> float:
+        return ros_stamp_fields_to_seconds(
+            msg.header.stamp.sec, msg.header.stamp.nanosec
+        )
+
+    def _now_ros_s(self) -> float:
+        return float(self.get_clock().now().nanoseconds) * 1.0e-9
+
+    def _source_monotonic_from_ros(
+        self, source_stamp_s: float, *, now_ros_s: float, now_monotonic_s: float
+    ) -> float:
+        # Same-host clock mapping: retain the source's age instead of granting
+        # a new freshness lease at planner publication time.
+        return ros_source_to_monotonic(
+            source_stamp_s, now_ros_s, now_monotonic_s
+        )
+
+    def _publish_flat_racket_invalid(self, source_monotonic_s: float | None = None) -> None:
+        if self.flat_cmd_pub is None:
+            return
+        kwargs = {"schema": self._racket_flat_schema}
+        if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+            kwargs.update(
+                control_epoch=self._wire_counters.control_epoch,
+                command_sequence=self._next_sequence("_racket_sequence"),
+                # Bind every racket event, including revocations, to the most
+                # recent base publication *attempt*. If that attempt failed or
+                # has not reached the subscriber yet, the runner sees a tuple
+                # mismatch instead of reusing its older base sample.
+                base_sequence_ref=self._wire_counters.base_sequence,
+                source_monotonic_s=(
+                    time.monotonic()
+                    if source_monotonic_s is None
+                    else float(source_monotonic_s)
+                ),
+            )
+        racket = Float64MultiArray()
+        racket.data = pack_invalid_racket_command_flat(**kwargs)
+        self.flat_cmd_pub.publish(racket)
+
+    def _publish_flat_base(
+        self, *, valid: bool, position_w=None, quaternion_wxyz=None,
+        source_monotonic_s: float | None = None,
+    ) -> None:
+        if self.flat_base_pub is None:
+            return
+        position_w = (0.0, 0.0, 0.0) if position_w is None else position_w
+        quaternion_wxyz = (
+            (1.0, 0.0, 0.0, 0.0) if quaternion_wxyz is None else quaternion_wxyz
+        )
+        kwargs = {
+            "schema": self._base_flat_schema,
+            "valid": valid,
+            "position_w": position_w,
+            "quaternion_wxyz": quaternion_wxyz,
+        }
+        if self._base_flat_schema == BASE_FLAT_SCHEMA_V2_EPOCH:
+            kwargs.update(
+                control_epoch=self._wire_counters.control_epoch,
+                base_sequence=self._next_sequence("_base_sequence"),
+                source_monotonic_s=(
+                    time.monotonic()
+                    if source_monotonic_s is None
+                    else float(source_monotonic_s)
+                ),
+            )
+        base = Float64MultiArray()
+        base.data = pack_base_pose_flat(**kwargs)
+        self.flat_base_pub.publish(base)
+
+    def _formal_base_is_fresh(self, now_monotonic_s: float) -> bool:
+        return self._formal_base_state.lease.fresh(
+            now_monotonic_s, self._base_pose_max_age_s
+        )
+
+    def _clear_formal_base_geometry(self) -> None:
+        self._robot_x = None
+        self._robot_position_w = None
+        self._robot_quaternion_wxyz = None
+        self._side_selector.sign = 0.0
+
+    def _publish_formal_revocation(self, reason: str) -> None:
+        """Publish canonical formal racket and base invalid rows.
+
+        The formal flat topics are the control plane. Clearing Python state is
+        not a revoke, and the optional custom message is published only after
+        both formal invalid rows have been attempted.
+        """
+
+        if self._racket_flat_schema not in (
+            RACKET_FLAT_SCHEMA_V2_FACE179,
+            RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+        ):
+            return
+        flat_errors = []
+        try:
+            self._publish_flat_racket_invalid()
+        except Exception as exc:
+            flat_errors.append(f"racket={type(exc).__name__}: {exc}")
+        try:
+            self._publish_flat_base(valid=False)
+        except Exception as exc:
+            flat_errors.append(f"base={type(exc).__name__}: {exc}")
+        if self.cmd_pub is not None:
+            try:
+                mirror = RacketCommand()
+                mirror.normal.x = 1.0
+                mirror.valid = False
+                self.cmd_pub.publish(mirror)
+            except Exception as exc:
+                self._n_custom_mirror_rejected += 1
+                self.get_logger().error(
+                    "optional RacketCommand revoke mirror failed after formal flat "
+                    f"publication: {type(exc).__name__}: {exc}",
+                    throttle_duration_sec=2.0,
+                )
+        self.get_logger().warning(
+            f"{reason}; formal racket/base epoch revoked",
+            throttle_duration_sec=2.0,
+        )
+        if flat_errors:
+            raise RuntimeError(
+                "formal dual-topic revocation attempted but failed: " + "; ".join(flat_errors)
+            )
+
+    def _revoke_formal_base(self, reason: str, *, force_epoch: bool = False) -> bool:
+        transitioned = self._formal_base_state.revoke(
+            time.monotonic(), force=force_epoch
+        )
+        self._clear_formal_base_geometry()
+        if transitioned:
+            if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+                self._advance_control_epoch()
+            self._publish_formal_revocation(reason)
+        return transitioned
+
+    def _expire_formal_base_if_needed(self, now_monotonic_s: float) -> bool:
+        if self._racket_flat_schema not in (
+            RACKET_FLAT_SCHEMA_V2_FACE179,
+            RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+        ) or not self._formal_base_state.expire_before_admission(
+            now_monotonic_s, self._base_pose_max_age_s
+        ):
+            return False
+        self._clear_formal_base_geometry()
+        if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+            self._advance_control_epoch()
+        self._publish_formal_revocation("corrected base pose stale")
+        return True
+
+    def _emit_base_ready_from_new_sample(
+        self, base_source_monotonic_s: float, now_monotonic_s: float
+    ) -> bool:
+        """Emit at most 10 Hz only while this exact source lease is fresh."""
+
+        if (self._racket_flat_schema not in (
+                RACKET_FLAT_SCHEMA_V2_FACE179,
+                RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+            ) or self.flat_cmd_pub is None
+                or not self._formal_base_state.ready_for_source(
+                    base_source_monotonic_s,
+                    now_monotonic_s,
+                    self._base_pose_max_age_s,
+                )
+                or not self._base_ready_cadence.admit(now_monotonic_s)):
+            return False
+        self.get_logger().info("HOPE planner READY: corrected base pose fresh")
+        return True
+
     def _poses_cb(self, msg: PoseArray) -> None:
         self._n_received += 1
-        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        if len(msg.poses) <= self._ball_index:
+        ball_source_monotonic_s = None
+        if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+            try:
+                self._formal_source_frames.validate_ball(msg.header.frame_id)
+            except ValueError as exc:
+                # Ball-frame failure revokes only the racket command. Base
+                # localization/epoch remains independently valid, and neither
+                # estimator may ingest a sample in the wrong frame.
+                self._last_valid = False
+                self._last_tts = float("nan")
+                self._publish_flat_racket_invalid()
+                self.get_logger().warning(
+                    f"ball source frame_id rejected ({exc}); formal racket command revoked",
+                    throttle_duration_sec=2.0,
+                )
+                return
+        try:
+            t = self._source_stamp_s(msg)
+        except ValueError as exc:
+            if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+                self._publish_flat_racket_invalid()
+            self.get_logger().warning(
+                f"ball source stamp fields rejected ({exc})",
+                throttle_duration_sec=2.0,
+            )
             return
+        if len(msg.poses) <= self._ball_index:
+            if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+                self._publish_flat_racket_invalid()
+            return
+        if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+            try:
+                now_ros_s = self._now_ros_s()
+                self._ball_source_guard.validate(float(t), now_ros_s)
+                now_monotonic_s = time.monotonic()
+                ball_source_monotonic_s = self._source_monotonic_from_ros(
+                    float(t),
+                    now_ros_s=now_ros_s,
+                    now_monotonic_s=now_monotonic_s,
+                )
+            except ValueError as exc:
+                self._last_valid = False
+                self._last_tts = float("nan")
+                self._publish_flat_racket_invalid(ball_source_monotonic_s)
+                self.get_logger().warning(
+                    f"ball source stamp rejected ({exc}); formal racket command revoked",
+                    throttle_duration_sec=2.0,
+                )
+                return
 
         # NOTE: PoseArray carries no names. Configure ball_pose_index to match
         # the ball's slot in the /poses ordering (the avatar_pro relay puts the
         # ball first), or swap this for a /tf lookup keyed on ball_rigid_body_name.
         pose = msg.poses[self._ball_index]
         p_ball = np.array([pose.position.x, pose.position.y, pose.position.z])
+        if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+            if not np.isfinite(p_ball).all():
+                self._last_valid = False
+                self._publish_flat_racket_invalid(ball_source_monotonic_s)
+                return
+            self._ball_source_guard.commit(float(t))
+
+        # Keep every 300 Hz measurement in both estimators, but only solve and
+        # publish on admitted cadence ticks. A skipped callback deliberately
+        # does not republish the cached command, so it cannot refresh stale
+        # data at the C++ subscriber.
+        try:
+            solve_now = self._solve_cadence.admit(t)
+        except ValueError as exc:
+            self.get_logger().warning(
+                f"invalid planner timestamp ({exc}); sample suppressed",
+                throttle_duration_sec=2.0,
+            )
+            return
+        if not solve_now:
+            self.planner.push_measurement(t, p_ball)
+            if self._kf is not None:
+                self._kf.push(t, p_ball)
+            return
+
+        # Detect expiry before cadence admission so a throttled ball solve can
+        # never delay the control-plane revoke.
+        self._expire_formal_base_if_needed(time.monotonic())
 
         # adaptive hit plane: track the live robot (see robot_pose_topic above). Mutating
         # config.x_hit is safe — the predictor reads it per predict() call. Disabled by
@@ -429,17 +957,6 @@ class HOPEPlannerNode(Node):
         if self._robot_x is not None and self._x_hit_follow_robot:
             self.planner.config.x_hit = float(
                 np.clip(self._robot_x + self._x_hit_offset, self._x_hit_min, self._x_hit_max))
-
-        # PER-SIDE aim/flight (see the parameter block): switch target_land_y/delta_t_flight
-        # by the last valid plan's arrival side. Mutating config is safe (read per solve).
-        if self._per_side_aim and self._robot_y is not None and self._last_intercept_y is not None:
-            fh = (self._last_intercept_y - self._robot_y) < -0.11
-            land_y = self._land_y_fh if fh else self._land_y_bh
-            dtf = self._dtf_fh if fh else self._dtf_bh
-            if not np.isnan(land_y):
-                self.planner.config.target_land[1] = land_y
-            if not np.isnan(dtf):
-                self.planner.config.delta_t_flight = dtf
 
         # CRASH GUARD (field 2026-07-07): garbage measurements (e.g. a mocap feed in
         # millimetres) made the outgoing-velocity solve raise FloatingPointError and
@@ -468,11 +985,12 @@ class HOPEPlannerNode(Node):
         if cmd is None:
             self._last_valid = False
             self._last_tts = float("nan")
-            if self.flat_cmd_pub is not None and self._racket_flat_schema == 2:
-                fm = Float64MultiArray()
-                fm.data = pack_invalid_racket_command_flat(schema=2)
-                self.flat_cmd_pub.publish(fm)
-            if self.cmd_pub is not None and self._racket_flat_schema == 2:
+            if self._racket_flat_schema in (
+                RACKET_FLAT_SCHEMA_V2_FACE179,
+                RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+            ):
+                self._publish_flat_racket_invalid(ball_source_monotonic_s)
+            if self.cmd_pub is not None and self._racket_flat_schema in (2, 3):
                 out = RacketCommand()
                 out.header = msg.header
                 out.header.frame_id = "world"
@@ -481,6 +999,48 @@ class HOPEPlannerNode(Node):
                 self.cmd_pub.publish(out)
             return
 
+        # Select the clip from THIS Stage-2 intercept and the corrected base,
+        # then optionally rerun Stage 3 if an opt-in per-side aim changed. A
+        # formal schema-3 command without a base/Stage-2 tuple keeps sign=0 and
+        # is revoked by the wire packer instead of guessing a clip.
+        swing_sign = 0.0
+        strike = self.planner.strike_target
+        if (cmd.valid and strike is not None and strike.valid
+                and self._robot_position_w is not None
+                and self._robot_quaternion_wxyz is not None):
+            intercept_w = np.asarray(strike.p_ball, dtype=float).copy()
+            intercept_w[2] += self._policy_z_offset
+            try:
+                swing_sign = self._side_selector.select(
+                    intercept_w,
+                    self._robot_position_w,
+                    self._robot_quaternion_wxyz,
+                )
+            except ValueError as exc:
+                self.get_logger().warning(
+                    f"invalid base-yaw side tuple ({exc}); formal command will be revoked",
+                    throttle_duration_sec=2.0,
+                )
+                swing_sign = 0.0
+            if self._per_side_aim and swing_sign in (-1.0, 1.0):
+                forehand = swing_sign > 0.0
+                land_y = self._land_y_fh if forehand else self._land_y_bh
+                dtf = self._dtf_fh if forehand else self._dtf_bh
+                aim_changed = False
+                if not np.isnan(land_y) and self.planner.config.target_land[1] != land_y:
+                    self.planner.config.target_land[1] = land_y
+                    aim_changed = True
+                if not np.isnan(dtf) and self.planner.config.delta_t_flight != dtf:
+                    self.planner.config.delta_t_flight = dtf
+                    aim_changed = True
+                if aim_changed:
+                    cmd = self.planner.replan_latest()
+                    if cmd is None:
+                        self._last_valid = False
+                        if self._racket_flat_schema in (2, 3):
+                            self._publish_flat_racket_invalid(ball_source_monotonic_s)
+                        return
+
         self._last_valid = cmd.valid
         tts = self.planner.time_to_strike
         self._last_tts = tts if tts is not None else float("nan")
@@ -488,17 +1048,25 @@ class HOPEPlannerNode(Node):
             self._n_planner_valid += 1
 
         # Validate the formal flat command before publishing either wire. If
-        # schema 2 is malformed, both outputs publish an explicit safe invalid
+        # a formal face command is malformed, both outputs publish a safe invalid
         # row/message; the optional hope_msgs mirror must not claim validity
         # after the official flat path revoked the command.
         flat_data = None
         flat_contract_error = None
         if self.flat_cmd_pub is not None:
+            formal_wire = {}
+            if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+                formal_wire = {
+                    "control_epoch": self._wire_counters.control_epoch,
+                    "command_sequence": self._next_sequence("_racket_sequence"),
+                    "base_sequence_ref": self._wire_counters.base_sequence,
+                    "source_monotonic_s": ball_source_monotonic_s,
+                }
             try:
                 flat_data, flat_contract_error = pack_racket_command_flat_fail_closed(
                     schema=self._racket_flat_schema,
                     valid=bool(cmd.valid),
-                    swing_sign=0.0,
+                    swing_sign=swing_sign,
                     position_w=(
                         float(cmd.p_intercept[0]),
                         float(cmd.p_intercept[1]),
@@ -515,17 +1083,21 @@ class HOPEPlannerNode(Node):
                     # pre-flip here and never flip position/velocity.
                     normal_cmd_w=cmd.n_racket,
                     rho=0.0,
+                    **formal_wire,
                 )
             except (IndexError, TypeError, ValueError, OverflowError) as exc:
-                if self._racket_flat_schema != 2:
+                if self._racket_flat_schema not in (2, 3):
                     raise
-                flat_data = pack_invalid_racket_command_flat(schema=2)
+                flat_data = pack_invalid_racket_command_flat(
+                    schema=self._racket_flat_schema,
+                    **formal_wire,
+                )
                 flat_contract_error = str(exc)
             if flat_contract_error is not None:
                 self._last_valid = False
                 self._n_flat_contract_rejected += 1
                 self.get_logger().error(
-                    "schema-2 racket command rejected; published valid=0 revocation instead: "
+                    "formal racket command rejected; published valid=0 revocation instead: "
                     f"{flat_contract_error}",
                     throttle_duration_sec=2.0,
                 )
@@ -546,7 +1118,7 @@ class HOPEPlannerNode(Node):
                 out.header.frame_id = "world"
                 if flat_contract_error is not None:
                     # Canonical invalid mirror: finite zeros plus opponent-facing
-                    # +X normal. Consumers see the same revocation as flat schema 2.
+                    # +X normal. Consumers see the same formal-flat revocation.
                     out.normal.x = 1.0
                     out.valid = False
                 else:
@@ -581,7 +1153,7 @@ class HOPEPlannerNode(Node):
                 )
 
         # `valid_commands` is the control-visible count, not merely a successful
-        # planner solve. A schema-2 payload rejected into valid=0 must never be
+        # planner solve. A formal payload rejected into valid=0 must never be
         # reported as accepted while the C++ subscriber correctly revokes it.
         if self._last_valid:
             self._n_valid += 1
@@ -699,6 +1271,9 @@ class HOPEPlannerNode(Node):
                     )
 
     def _publish_diagnostics(self) -> None:
+        # The timer expires the control lease but never manufactures READY from
+        # an older cached sample. READY is sample-driven in _robot_pose_cb.
+        self._expire_formal_base_if_needed(time.monotonic())
         arr = DiagnosticArray()
         arr.header.stamp = self.get_clock().now().to_msg()
         status = DiagnosticStatus()

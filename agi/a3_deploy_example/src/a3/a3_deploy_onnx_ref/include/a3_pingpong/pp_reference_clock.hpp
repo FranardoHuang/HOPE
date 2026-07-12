@@ -51,4 +51,52 @@ struct ClipLayout {
 inline double swing_sign_from_target_y(double target_y) { return target_y < 0.0 ? 1.0 : -1.0; }
 inline int clip_id_from_swing_sign(double swing_sign) { return swing_sign > 0.0 ? 0 : 1; }
 
+enum class PpPlannerTtsDecision { kTooLate, kWaiting, kEngage };
+
+inline PpPlannerTtsDecision EvaluateExactWindupTts(
+    double time_to_strike, double engage_min_tts_s,
+    double clip_max_windup_s) {
+  if (!std::isfinite(time_to_strike) ||
+      !std::isfinite(engage_min_tts_s) || engage_min_tts_s < 0.0 ||
+      !std::isfinite(clip_max_windup_s) || clip_max_windup_s <= 0.0) {
+    return PpPlannerTtsDecision::kTooLate;
+  }
+  const double late_cutoff = std::min(engage_min_tts_s, 0.9 * clip_max_windup_s);
+  if (time_to_strike < late_cutoff) return PpPlannerTtsDecision::kTooLate;
+  if (time_to_strike > clip_max_windup_s) return PpPlannerTtsDecision::kWaiting;
+  return PpPlannerTtsDecision::kEngage;
+}
+
+// Formal face179/schema-2 commands atomically bind side with position,
+// velocity, face normal, and TTS. Legacy actors retain their historical
+// base-relative-y inference. Returning false lets the policy stand rather than
+// guess if a formal packet somehow reaches it without an explicit +/-1 side.
+inline bool resolve_planner_swing_sign(bool require_explicit_side,
+                                       bool has_explicit_side,
+                                       double explicit_sign,
+                                       double target_y,
+                                       double split_y,
+                                       double hysteresis_y,
+                                       double& resolved_sign) {
+  if (!require_explicit_side) {
+    resolved_sign = swing_sign_from_target_y(target_y);
+    return true;
+  }
+  if (!has_explicit_side || !std::isfinite(explicit_sign) ||
+      (explicit_sign != -1.0 && explicit_sign != 1.0) ||
+      !std::isfinite(target_y) || !std::isfinite(split_y) ||
+      !std::isfinite(hysteresis_y) || hysteresis_y < 0.0) {
+    return false;
+  }
+  // The planner proposes the clip from mocap yaw, while the policy target
+  // frame is the runner's boot-yaw-aligned IMU. Outside the shared Schmitt
+  // overlap, a proposal inconsistent with the runner's actual observation
+  // basis is rejected. Inside [split-h, split+h], either proposal is an
+  // explicitly ambiguous overlap and remains subject to target/face gates.
+  if (target_y < split_y - hysteresis_y && explicit_sign != 1.0) return false;
+  if (target_y > split_y + hysteresis_y && explicit_sign != -1.0) return false;
+  resolved_sign = explicit_sign;
+  return true;
+}
+
 }  // namespace a3_pingpong

@@ -118,8 +118,9 @@ The production ping-pong runner now accepts `--first-tick-json ABS_PATH`, but on
 empty output value, legacy-model escape, model-only preflight, reference playback, warmup and
 PD_STAND/MOTION start before backend initialization. PASSIVE waits; SHADOW observes the first
 planner-engaged actor **candidate**. Constructor prewarm, yaw capture, waiting/invalid/recovery and
-idle rows do not consume the one-shot. This does not certify that the current planner tuple is a
-same-tick atomic snapshot: that planner fix is still NO-MERGE.
+idle rows do not consume the one-shot. The formal planner tuple source now binds shared epoch,
+command/base sequence and one tick-start base snapshot, but this joined diagnostic still cannot
+certify a common native simulator tick or executed runtime closure.
 
 The output schema is structurally diagnostic. Both the outer document and payload fix
 `evaluation_contract_exact=false`; the payload fixes
@@ -155,8 +156,10 @@ target candidate, joint/frame/layout metadata and per-payload/whole-payload SHAs
 <=3 cm position and <=0.02 projected-gravity disagreement. The native `right_racket` position must
 agree with the formal wrist control-point FK within 5 mm.
 
-`configs/gate3_first_tick_source_contract_20260712.json` hashes a reviewed source **subset** useful
-for auditing this instrumentation. It explicitly fixes `source_semantics_closure_exact=false` and
+Immutable v1 `configs/gate3_first_tick_source_contract_20260712.json` remains historical evidence.
+Current integrated bytes are bound by `configs/gate3_first_tick_source_contract_v2_20260712.json`,
+which hashes a reviewed source **subset** useful for auditing this instrumentation. It explicitly
+fixes `source_semantics_closure_exact=false` and
 does not claim parser-backed/transitive closure. Vendor config→MJCF parser resolution, publisher
 binary/config/transitive membership, full planner/wire/frame/backend adapters, exact process
 ownership, runtime ledger/lock and an actual backend tick all remain OPEN/null. No simulator,
@@ -246,14 +249,15 @@ pytest -q \
   tests/test_pp_first_tick_json_cpp.py
 ```
 
-Accepted host source result: `6 passed`. It covers kernel-locked whole-record transfer, nonzero
+Accepted host source result: `7 passed`. It covers kernel-locked whole-record transfer, nonzero
 native root linear velocity preservation, idle-not-consuming/planner-candidate capture, canonical
 exclusive paths, mode 0600, atomic no-replace payload output, per-vector SHA fields, and
 fail-closed nonfinite/fabricated-root-velocity/cross-source-skew/policy-base, odd generation,
 source-stamp regression and empty-output-flag cases. It also parses the output and proves all five
-exactness flags are fixed false and a formal-style consumer rejects it. The full
-ROS/Jazzy/AimRT Release build and `PpFirstTickJson.*` GTests have not run on this branch; that is an
-explicit open verification item, not an optional pass.
+exactness flags are fixed false and a formal-style consumer rejects it. The exact portable Release
+build, with ROS/AimRT disabled, passed focused `PpPlannerInput.*:PpFirstTickJson.*` `40/40` and the
+full native suite `233 passed, 5 optional skips`. ROS/Jazzy/AimRT-enabled Release and an actual
+first tick remain explicit open verification items.
 
-Remaining work after source merge is exactly the five blockers above, followed by one separately
+Remaining work after source/build integration is exactly the five blockers above, followed by one separately
 reviewed no-publish first tick, per-clip normal/recovery gates, and vendor no-reset Gate3/Gate3B.

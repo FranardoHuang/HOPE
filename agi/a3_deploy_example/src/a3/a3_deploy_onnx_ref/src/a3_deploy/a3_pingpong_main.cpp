@@ -24,6 +24,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -122,7 +123,8 @@ bool ValidateCommandLine(int argc, char** argv, std::string& error) {
       "--hold-recover", "--leg-gain-scale", "--leg-smooth-alpha", "--level", "--loc-mode", "--mode",
       "--model-path", "--motion-blend-sec", "--obs-csv", "--oracle-max-age",
       "--oracle-shm", "--ref-amplitude", "--ref-frequency", "--ref-gain-scale",
-      "--ref-group", "--ref-max-err", "--ref-stale-ms", "--runtime-cfg",
+      "--planner-side-hysteresis-y", "--planner-side-split-y", "--ref-group", "--ref-max-err",
+      "--ref-stale-ms", "--runtime-cfg",
       "--squat-guard-rad", "--stand-kd", "--stand-kp", "--start", "--swing-rest",
       "--swing-speed", "--tilt-guard", "--trace-csv", "--vel-gate-margin",
       "--warmup-sec", "--first-tick-json"};
@@ -386,6 +388,7 @@ int main(int argc, char** argv) {
                  "       [--effort-limit-ratio R] (0<R<=1; PD+measured effort safety envelope)\n"
                  "       [--planner] (LIVE planner: racket <- /racket/command_flat, base <- /a3/base_pose_flat over ros2;"
                  " [--engage-min-tts S] [--cmd-timeout S] [--invalid-grace S]"
+                 " [--planner-side-split-y Y] [--planner-side-hysteresis-y H]"
                  " [--hold-recover S] [--vel-gate-margin M])\n"
                  "       [--loc-mode fabricated|perfect_tracking|oracle|external_base]"
                  " [--perfect-tracking] [--oracle-pelvis] [--no-imu-yaw]\n"
@@ -652,6 +655,9 @@ int main(int argc, char** argv) {
     pcfg.engage_min_tts_s = std::stod(Flag(argc, argv, "--engage-min-tts", "1.0"));
     pcfg.command_timeout_s = std::stod(Flag(argc, argv, "--cmd-timeout", "0.5"));
     pcfg.planner_invalid_grace_s = std::stod(Flag(argc, argv, "--invalid-grace", "0.25"));
+    pcfg.planner_side_split_y = std::stod(Flag(argc, argv, "--planner-side-split-y", "0.0"));
+    pcfg.planner_side_hysteresis_y =
+        std::stod(Flag(argc, argv, "--planner-side-hysteresis-y", "0.04"));
     pcfg.hold_recover_s = std::stod(Flag(argc, argv, "--hold-recover", "2.5"));
     // 110-D per-clip trained-velocity-box gate slack (m/s per axis); see PpPolicyConfig.
     pcfg.gate_vel_margin = std::stod(Flag(argc, argv, "--vel-gate-margin", "0.30"));
@@ -768,8 +774,11 @@ int main(int argc, char** argv) {
   // thread-safe holders that PpPolicy reads on the 50 Hz driver thread. The racket topic
   // feeds the engage machine; the base topic feeds LocMode::kExternalBase.
   if (planner_mode) {
-    auto racket_in = std::make_shared<a3_pingpong::PpRacketTargetInput>();
-    auto base_in = std::make_shared<a3_pingpong::PpBasePoseInput>();
+    auto planner_transaction_mu = std::make_shared<std::mutex>();
+    auto racket_in =
+        std::make_shared<a3_pingpong::PpRacketTargetInput>(planner_transaction_mu);
+    auto base_in =
+        std::make_shared<a3_pingpong::PpBasePoseInput>(planner_transaction_mu);
     pp->SetRacketInput(racket_in);
     pp->SetBasePoseInput(base_in);
     backend->SetRacketTargetCallback(

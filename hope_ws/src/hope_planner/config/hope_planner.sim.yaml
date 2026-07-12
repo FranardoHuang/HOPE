@@ -9,8 +9,37 @@ hope_planner:
     # 双档粒度作废:快路径转正(整 tick 预测+反解 ~2ms 实测),每个策略 tick 全精度重算。
     publish_strike_spec: true
     use_fast_strike_spec: true
+    # Gate3 source/runtime contracts bind the production solver only. Enabling
+    # shadow changes callback timing and dependency closure, so it is fail-closed here.
+    use_shadow_solver: false
     strike_spec_rate_hz: 50.0
     dt_integrate_coarse: 0.02   # 自适应巡航步长;事件区间自动退回 1ms 细步(过网/弹跳/命中面)
+    # Gate3 long serves arrive around 1.89 s. Keep early-fit noise away from
+    # the old 2.0 s validity cliff, and solve at ~30 Hz so the 300 Hz ball
+    # callback cannot starve /sim/a3/pelvis_pose in a single-threaded executor.
+    # This horizon does not authorize early swing: formal179 waits until TTS
+    # enters the explicitly selected clip's metadata-derived windup window.
+    max_predict_time: 2.6
+    solve_period_s: 0.033
+    # Match C++ --external-base-max-age; stale yaw must revoke formal side.
+    base_pose_max_age_s: 0.2
+    ball_source_stamp_max_age_s: 0.2
+    source_stamp_future_tolerance_s: 0.02
+    use_sim_time: false
+    formal_source_clock_mode: "system"
+    # Producer-header authority is explicit even though the sim coordinates
+    # are numerically one world: fake_ball publishes `world`, while the vendor
+    # pose_sensor_ros2 config labels /sim/a3/pelvis_pose as `odom`.
+    formal_ball_source_frame_id: "world"
+    formal_base_source_frame_id: "odom"
+    # No planner TF/rigid transform is bound, so this intentional producer
+    # mismatch blocks formal schema-3 startup until one publisher is relabelled
+    # from the same numeric frame (preferred: fake_ball -> odom) or an exact
+    # transform contract is implemented.
+    formal_common_frame_required: true
+    # Formal 179 requires payload epoch/sequence/source-age causality. Schema 2
+    # remains parseable only for non-formal legacy rehearsal.
+    racket_flat_schema: 3
 
     # Ball physics MUST match fake_ball_publisher's defaults (drag 0.15 / rest 0.85) —
     # the base yaml keeps the arena-fit placeholders. Mismatch -> predicted ball dies
@@ -27,6 +56,7 @@ hope_planner:
     # with an x-locked policy because it hides the policy's own x drift.
     x_hit_follow_robot: true
     robot_pose_topic: "/sim/a3/pelvis_pose"
+    marker_to_base_xyz: [0.0, 0.0, 0.0]
     x_hit_offset: 0.67
     # clamp = the training-box regime: pin the plane inside a fixed window so post-lunge
     # regression stays the small trained back-step, never a long untrained walk-back.

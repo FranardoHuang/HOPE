@@ -70,9 +70,10 @@ ROS control chain — historical), `agi/a3_deploy_example/PINGPONG_NEW_CHECKPOIN
 - The ONNX auto-detects the obs contract by input dim (110 hitter_pure / 175 deploy_parity /
   177 hitter_footwork / 179 face-command / 180) and the clip layout + hitter_pure geometry boxes come from ONNX
   metadata. The baseline `model_13200_footfix08` is 110-D (as is its foundation `model_12200_hitterpure`).
-  The 179 path is source-gated only: it additionally requires exact `deploy_parity_face179`
-  metadata, `--planner`, and planner parameter `racket_flat_schema:=2`; it has not yet passed a
-  vendor Gate 3 runtime and is not a deploy baseline.
+  The 179 path has passed exact source/portable-build gates: it additionally requires exact
+  `deploy_parity_face179` metadata, `--planner`, and formal planner parameter
+  `racket_flat_schema:=3`; it has not yet passed a ROS/AimRT first tick or vendor Gate 3 runtime
+  and is not a deploy baseline.
 
 Before any 179-D Gate 3 attempt, run the production binary with
 `--planner --no-publish --model-preflight-only`. This mode validates the ONNX graph and the full
@@ -1309,13 +1310,18 @@ backend; hope_planner publishes both when `publish_flat_cmd:=true`, the default)
                        prefix + physical_striking_face_B_normal_w[3] + rho[1].
                        Phase-1 requires frame_code=0 (world/table), B.x>1e-6,
                        a unit B normal and rho exactly zero.
+                       schema=3 formal179 uses exactly 20 doubles: schema-2 prefix
+                       + shared control epoch + racket sequence + exact base-sequence
+                       reference + mapped source-monotonic time.
 /a3/base_pose_flat    [schema=1, valid(0/1), x,y,z, qw,qx,qy,qz]      (≥9 doubles)
                        ← the robot base in the SAME frame as the racket target
                        (arena: /P1/pose + marker_to_base_xyz; sim: /sim/a3/pelvis_pose)
+                       schema=2 formal base uses exactly 12 doubles and adds the
+                       shared epoch, base sequence and mapped source time.
 ```
 
 Schema 1 is the default and remains unchanged for current 110/175/177/180 baselines. A 179-D
-Gate 3 source rehearsal must launch `hope_planner` with `-p racket_flat_schema:=2`; the 179 runner
+Gate 3 source rehearsal must launch `hope_planner` with `-p racket_flat_schema:=3`; the 179 runner
 then refuses schema 1, missing/non-unit/non-opponent-facing face commands, nonzero rho, scripted
 mode, or mismatched ONNX term/face/bank metadata. A bad/no-solution publisher row is converted to
 an exact finite `valid=0` schema-2 revocation; the receiver also marks malformed/unknown traffic

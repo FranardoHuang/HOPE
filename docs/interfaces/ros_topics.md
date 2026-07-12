@@ -69,11 +69,25 @@ Defined in [RacketCommand.msg](../../hope_ws/src/hope_msgs/msg/RacketCommand.msg
 Planner ball selection note: `hope_planner` identifies the ball by PoseArray index 0 on `/poses`,
 not by rigid-body name; its `ball_rigid_body_name` parameter is currently unused.
 
+### Native deploy flat topics
+
+| Topic | Type | Contract |
+| --- | --- | --- |
+| `/racket/command_flat` | `std_msgs/Float64MultiArray` | Schema 1 is legacy 12-value position/velocity. Face schema 2 is exact16 with physical face-B normal and zero rho. Formal schema 3 is exact20 and adds shared control epoch, racket sequence, exact base-sequence reference and source-monotonic time; valid rows require explicit `swing_sign=+1/-1`. |
+| `/a3/base_pose_flat` | `std_msgs/Float64MultiArray` | Legacy schema 1 is exact9. Formal schema 2 is exact12 and adds shared control epoch, base sequence and source-monotonic time. Marker-local `marker_to_base_xyz` is quaternion-rotated before addition. |
+
+Formal schema 3 selects side from `(R_yaw(base)^-1 * (intercept_w-base_w)).y`, not raw world Y.
+Missing, stale, malformed or implausible base state publishes finite invalid rows on both topics;
+only a newer causal racket row may re-arm. Planner mocap yaw proposes side, while the C++ runner
+rejects a proposal inconsistent with its boot-aligned-IMU target geometry outside the explicit
+±`0.04 m` overlap. Human-readable READY logs are diagnostic only and cannot authorize a serve.
+
 ## Deploy Runtime Topics
 
-- `/racket/command` — consumed by `hope_wbc_runner` (the legacy 180-D Python runner); the C++
-  deploy runner (`a3_deploy_onnx_ref_pingpong`) does not subscribe to ROS mocap/planner topics yet
-  and runs scripted targets (see G07).
+- `/racket/command` — consumed by `hope_wbc_runner` (the legacy 180-D Python runner).
+- `/racket/command_flat` and `/a3/base_pose_flat` — consumed by the C++
+  `a3_deploy_onnx_ref_pingpong --planner` path through AimRT ROS 2 subscribers. Source wiring is
+  implemented; vendor first-tick/behavior evidence and hardware use remain separate open gates.
 - `/hope/estop` — hope_wbc_runner safety gate.
 - `/body_drive/*` — AGI backend command/state interface; on the MDU these run over iceoryx and are
   invisible to the ros2 CLI. A ros2/iceoryx transport mismatch presents as `rate=0` + safe-halt
@@ -87,6 +101,8 @@ Current planner QoS:
 | --- | --- | --- |
 | `/poses` | Planner subscription | best-effort, volatile, keep-last depth 1 |
 | `/racket/command` | Planner publication | reliable, volatile, keep-last depth 10 |
+| `/racket/command_flat` | Planner publication | reliable, volatile, keep-last depth 10 |
+| `/a3/base_pose_flat` | Planner publication | reliable, volatile, keep-last depth 10 |
 | `/planner/diagnostics` | Planner publication | default integer depth 1 |
 
 High-rate mocap data prefers low latency over reliable delivery because fresh samples replace old ones. `/racket/command` is a control setpoint, so it uses reliable delivery with a small keep-last queue. Confirm live compatibility with downstream controllers before hardware use.

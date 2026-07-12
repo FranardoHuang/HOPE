@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 
 import pytest
 
@@ -115,9 +116,26 @@ def test_formal_capture_gate_waits_for_planner_owned_target() -> None:
     assert "the first actor compute snapshot is unavailable" not in main
 
 
-def test_source_contract_hashes_bytes_and_keeps_runtime_null() -> None:
+def test_v1_source_contract_remains_immutable_historical_evidence() -> None:
+    path = ROOT / "configs/gate3_first_tick_source_contract_20260712.json"
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == (
+        "f51e42851a26390120e0603538e8892bb3127ff50de550637a0e17c50d64f4f3"
+    )
+    contract = json.loads(path.read_text())
+    for artifact in contract["tracked_artifacts"].values():
+        result = subprocess.run(
+            ["git", "show", f"7c0c385:{artifact['path']}"],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr.decode(errors="replace")
+        assert hashlib.sha256(result.stdout).hexdigest() == artifact["sha256"]
+
+
+def test_v2_source_contract_hashes_current_bytes_and_keeps_runtime_null() -> None:
     contract = json.loads(
-        (ROOT / "configs/gate3_first_tick_source_contract_20260712.json").read_text()
+        (ROOT / "configs/gate3_first_tick_source_contract_v2_20260712.json").read_text()
     )
     required_reviewed_subset = {
         "production_build_definition",
@@ -131,6 +149,20 @@ def test_source_contract_hashes_bytes_and_keeps_runtime_null() -> None:
         "native_state_bridge",
         "native_json_contract",
         "production_runner_entrypoint",
+        "formal_planner_input",
+        "formal_wire_encoder",
+        "formal_planner_node",
+        "formal_runtime_contract",
+    }
+    assert contract["schema_version"] == 2
+    assert contract["supersedes"] == {
+        "path": "configs/gate3_first_tick_source_contract_20260712.json",
+        "sha256": "f51e42851a26390120e0603538e8892bb3127ff50de550637a0e17c50d64f4f3",
+        "historical_source_commit": "7c0c385",
+        "rule": (
+            "v1 remains immutable historical evidence and is verified against its merge commit; "
+            "v2 binds current integrated source bytes"
+        ),
     }
     assert required_reviewed_subset <= set(contract["tracked_artifacts"])
     exactness = contract["exactness"]
@@ -140,6 +172,7 @@ def test_source_contract_hashes_bytes_and_keeps_runtime_null() -> None:
     assert exactness["source_binary_binding_exact"] is False
     assert exactness["source_semantics_closure_exact"] is False
     assert exactness["runtime_artifact_closure_exact"] is False
+    assert "formal tuple source is merged" in " ".join(exactness["inexact_reasons"])
     assert exactness["inexact_reasons"]
     for artifact in contract["tracked_artifacts"].values():
         data = (ROOT / artifact["path"]).read_bytes()

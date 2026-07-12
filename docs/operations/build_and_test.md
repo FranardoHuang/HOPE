@@ -409,10 +409,44 @@ pytest -q \
 ```
 
 The second pytest compiles and runs `tests/cpp/pp_first_tick_json_core_test.cpp` against the
-dependency-free production header. Current host result is `6 passed`. The production CMake glob
-also includes `unit_tests/test_pp_first_tick_json.cpp`; run it with the ROS/Jazzy Release command
-above before claiming a built runner. This branch has not performed that full build or started the
-state bridge/runner. The cases include odd-generation/source-stamp-regression rejection and assert
+dependency-free production header. Current host result is `7 passed`. The production CMake glob
+also includes `unit_tests/test_pp_first_tick_json.cpp`; the exact portable Release result below
+builds and runs that native test with ROS/AimRT disabled. The state bridge/runner itself was not
+started. The cases include odd-generation/source-stamp-regression rejection and assert
 that the reviewed source subset covers the named runner/policy/ONNX-loader/build/config/state-timing
 files while every runtime binding remains null. Parsed output must carry all exactness flags false,
 and a Gate3-style consumer rejects it. The source checks are not a vendor first tick or Gate3 result.
+
+## Formal-179 tuple, serve and exact portable Release (2026-07-13)
+
+Run the dependency-light source gates first:
+
+```bash
+PYTHONPATH=hope_ws/src/hope_planner python3 -m pytest -q \
+  hope_ws/src/hope_planner/test \
+  tests/test_planner_side_contract_source.py
+python3 -m pytest -q tests/test_gate3_serve_sync_prereg.py
+```
+
+Accepted latest-main integration results are planner/source `180 passed, 2 optional skipped` and
+serve `39 passed`. The serve design validator must return exit 0 with 49 explicit runtime blockers;
+launch-check must return exit 1 with exactly 49 `MISSING` bindings. Reproduction is in
+[run_gate3_serve_sync_prereg.md](run_gate3_serve_sync_prereg.md).
+
+Exact source `c0a8e46b0c0bec4d89040728a7fa64f064090432` also passed an isolated Pod2 Ubuntu
+24.04/GCC 13 portable Release. Restore the complete private Unitree SDK through
+[setup_local_sync.md](setup_local_sync.md); the tracked legacy subset is insufficient. The accepted
+build explicitly used `HAS_ROS2=0`, `ENABLE_A3_ROS_MSGS=OFF`,
+`ENABLE_A3_AIMRT_BACKEND=OFF` and `ENABLE_TRT_INFERENCE=OFF`, then built both `run_tests` and
+`a3_deploy_onnx_ref_pingpong`.
+
+Accepted results: focused `PpPlannerInput.*:PpFirstTickJson.*` `40/40`; complete native suite
+`233 passed, 5 optional-asset skips, 0 failed`; all 80 compile commands include `-O3`,
+`-fno-fast-math` and `-fno-finite-math-only`. Binary SHA-256 values are
+`89cb57da63eae58680c9c978b95d28103177af20cde23779f269e6c452c16921` for `run_tests` and
+`c89856f4c440be0b424abc30bde186b784a6b99546aa2f08c37e1fee32f376a9` for the runner.
+
+The runner was not executed. ROS/Jazzy/AimRT Release, formal ONNX loading in this exact binary,
+backend first tick, vendor MuJoCo behavior and hardware remain unrun. Exact dependency, command,
+binary and log hashes are in
+[the experiment record](../experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md).

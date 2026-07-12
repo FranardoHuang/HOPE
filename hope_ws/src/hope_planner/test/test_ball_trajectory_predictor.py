@@ -30,6 +30,29 @@ def test_ball_moving_away_produces_no_valid_command():
     assert not strike.valid
 
 
+def test_configured_horizon_keeps_long_gate3_arrival_inside_margin():
+    """The old 2.0 s boundary rejects a plausible early-fit 2.01 s arrival.
+
+    Gate3's nominal long serve is about 1.89 s; prediction noise during the
+    first fit can put it just beyond 2.0 s.  The sim launch therefore binds a
+    2.6 s horizon rather than relying on the dataclass default.
+    """
+
+    physics = BallPhysics(k=0.0, g=np.zeros(3))
+    p0 = np.array([2.01, -0.7625, 0.5])
+    v0 = np.array([-1.0, 0.0, 0.0])
+    short = BallTrajectoryPredictor(
+        physics, PlannerConfig(max_predict_time=2.0), TableParams()
+    ).predict(p0, v0, 0.0)
+    margin = BallTrajectoryPredictor(
+        physics, PlannerConfig(max_predict_time=2.6), TableParams()
+    ).predict(p0, v0, 0.0)
+
+    assert not short.valid
+    assert margin.valid
+    assert np.isclose(margin.t_strike, 2.01, atol=1.0e-9)
+
+
 def test_table_bounce_reverses_z_velocity():
     pred = _predictor()
     v_minus = np.array([2.0, 0.0, -3.0])

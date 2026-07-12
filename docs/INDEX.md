@@ -20,7 +20,9 @@
 当前一句话状态：仍在阶段 1 固定点训练。最接近正式目标的模型在四个独立初始化间极不稳定，
 拍面正负判分也未过诚实门；现有成绩只是每题重置的 Python BankExam 解析诊断，不是 `Gate3`。
 第 4000 次迭代后续卷只完成文件准备、尚未启动；原生 MuJoCo 训练仍只有不允许合入的预检候选；
-当前 179 维模型的厂商运行链行为、`Gate3B`、标定后机器人物理和新真机测试都没有结果。
+当前 planner-policy exact tuple 源码已通过 portable Release 与 latest-main 本地回归，但
+ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、标定后机器人物理和新真机测试
+也都没有结果。
 
 ## 按任务划分的最小阅读集
 
@@ -32,7 +34,7 @@
 | 原生 MuJoCo `Trainer-v0`/fine-tune | [MuJoCo 实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md) → [v0 preflight](research/mujoco_training_v0_preflight_2026-07-12.md) → [G06](gates/G06_isaac_to_mujoco.md) |
 | 评估/checkpoint 排名 | [Fresh 稳定性](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)或[历史尺](experiments/2026-07/EXP-P1-HISTORICAL-SCHEMA3.md) → [G06](gates/G06_isaac_to_mujoco.md) |
 | 拍面符号/解析判分复核 | [Face-sign forensic](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) → [术语：raw-A/physical-B](DEFINITIONS.md) → G05/G06 |
-| 当前 179-D `Gate3-D0` 演示 | [`Gate3-D0` 实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md) → [G06](gates/G06_isaac_to_mujoco.md) → [`run_gate3_first_tick_harness.md`](operations/run_gate3_first_tick_harness.md) |
+| 当前 179-D `Gate3-D0` 演示 | [`Gate3-D0` 实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md) → [exact planner-policy build](experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) → [G06](gates/G06_isaac_to_mujoco.md) → [`run_gate3_first_tick_harness.md`](operations/run_gate3_first_tick_harness.md) |
 | 恢复/等待/连续对打 | [NOW 连续能力](NOW.md#22-连续能力每个课程阶段都要另考) → [Recovery A/B/C](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md) → [T1 接口](interfaces/t1_event_training_contract.md) → G05/G06 |
 | 新动作/动作库 | [空间重定向实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) + [v12/高点拍压/横移老师设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md) → [G08](gates/G08_blind_spot_improvements.md) → 动作操作文档 |
 | Planner 或 ROS runtime | [G04](gates/G04_sim_modeling_mujoco_isaac.md) / [G06](gates/G06_isaac_to_mujoco.md) → [`run_planner.md`](operations/run_planner.md) → 下方接口文档 |
@@ -50,6 +52,7 @@
 | [`EXP-RECOVERY-TUPLE-ABC`](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md) | A/B/C 旧结构合同已验证；T0/T1/T2 与新 reward 次序仅完成文档设计，machine prereg 待同步 |
 | [`EXP-MOTION-SPATIAL-RETARGET`](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | 工具/静态 gate 通过；尚无晋级动作 |
 | [`EXP-GATE3-CURRENT179-D0`](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md) | 实验 blocked；`Gate3-D0` 严格模型 preflight 通过，当前行为尚未运行 |
+| [`EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD`](experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) | 实验 completed；exact 源码通过 portable Release 与 latest-main 回归，runtime gates 保持 open |
 | [v12/高点拍压/横移视频登记](experiments/motion_video_intake_v12_static_motion_20260713.md) | 7 段私有视频逐字节登记完成；没有动作处理、安全或行为结论 |
 | [v12/高点拍压/横移组合设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md) | 只有设计；没有 schema-2 动作、仿真或训练结果 |
 | [非击球臂模仿消融](experiments/non_striking_arm_imitation_ablation_20260713.md) | 只有设计；尚未运行配对实验 |
@@ -79,6 +82,7 @@
 | Fresh model-4000 q50 考卷 | [`run_phase1_fresh_sz_model4000_seed_stability_q50.md`](operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md) |
 | 恢复 preregistration | [`run_phase1_recovery_tuple_prereg.md`](operations/run_phase1_recovery_tuple_prereg.md) |
 | Gate3 首个有效周期 | [`run_gate3_first_tick_harness.md`](operations/run_gate3_first_tick_harness.md) |
+| Gate3 发球同步负向设计门 | [`run_gate3_serve_sync_prereg.md`](operations/run_gate3_serve_sync_prereg.md) |
 | 端到端乒乓链路 | [`run_pingpong_end_to_end.md`](operations/run_pingpong_end_to_end.md) |
 | 部署 dry-run | [`run_deploy_dryrun.md`](operations/run_deploy_dryrun.md) |
 | 语义正确的 plant | [`prepare_semantics_correct_plant.md`](operations/prepare_semantics_correct_plant.md) |
