@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 当下状态与团队 focus（2026-07-13 01:22 CST）
+## 当下状态与团队 focus（2026-07-13 01:30 CST）
 
 本节只做 roadmap 的当前入口；下面的实验结果、奖励/训练台账、长期路线和历史判决继续保留，
 不能用这份短报替代可复现实验记录。
@@ -99,7 +99,14 @@ Rules:
   该候选尚未合 main，因为最终集成 C++ 字节仍需一次隔离 Linux/ROS/Jazzy Release compile+full native；
   Pod2 exact clone 已 clean，但 ROS/Jazzy 路径不存在，portable 预检又缺 ORT 1.19.2 头文件，均在 CMake
   前 fail-fast；旧 component `235/5` 不能冒充组合证据。即使源码合 main，49 个 runtime binding、vendor
-  first tick 和 Gate3 行为仍是 OPEN。q50 readiness 已闭合，当前只需合法 prepare 后开卷。
+  first tick 和 Gate3 行为仍是 OPEN。q50 readiness/prepare 已闭合，当前只差 reviewed persistent
+  supervisor 后开卷。
+- **正手拍面短环（Human owner: franco；Executor: Codex；branch:
+  `Franco_codex/face-sign-forensic`）**：旧表述“所有 seed 正手都约 170°”不精确；model-2000
+  seed1/2/3 的 raw-A 正手误差是 `171.10/172.94/173.39°`，seed4 没有正手 exact strike，不能补成第四个
+  170°样本。现有同一击球态在 Isaac/MuJoCo 的有符号误差约 `170.72/171.09°`，而解析回球器会先
+  `orient_normal` 抹掉正负号；当前任务是把“策略实际 raw-A 反面”与“回球尺对符号失明”分开落证，
+  并给旧 q50 加不可忽略的 signed-face 诚实门。期间不改训练合同、不因高回球率晋级。
 - **代码交流状态**：recovery A/B/C、plan-only Gate3 源码门和严格 face179 模型合同已分别随
   `e10922a`、`b2067ba`、`8975043` 进入 main；face179 的 vendor 行为证据仍明确为 `Partial`。
   yikang 的 oracle/stand 诊断随 `3df6ff5` 合入，shadow solver 接线壳随 `7e31819` 合入，head reward
