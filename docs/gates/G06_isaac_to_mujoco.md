@@ -1113,3 +1113,16 @@ jobs started; the immediate child-judge/MuJoCo/play/Kit scan and Kit-lock holder
 The future foreground run needs a reviewed persistent top-level supervisor because it must retain
 serial ownership across both seeds and write the bound Pod result. No judge or simulator behavior
 exists yet, so G06 remains `Partial`.
+
+### 2026-07-13 trainer-preflight red team: authorization safe, source gate held
+
+Independent review of `codex/mujoco-training-preflight@6e5fce3` reproduced focused `63 passed`,
+top-level `468 passed, 9 skipped`, `valid_but_blocked`, and rc=2 for both `--require-ready` and
+certificate output. All seven authorization booleans remain false and no consumer/launcher exists,
+so the branch cannot currently start or bless training. It is nevertheless held from main for four
+P1 correctness gaps: the trace omits action-clamp/adapter state and uses only a tiny action tape;
+static source independence can be bypassed through aliases/exec; JSON duplicate keys and NaN are
+accepted; and MJCF `compiler strippath` is modeled incorrectly. The vendor scene still lacks
+collidable ball/table/net, so its v0 claim is restricted to no-ball balance/strike-state diagnostic.
+Fixing these source gates and measuring the preregistered N=1/8/32/64 throughput gate do not replace
+the independent exact vendor Gate3/Gate3B final vote. G06 remains `Partial`.

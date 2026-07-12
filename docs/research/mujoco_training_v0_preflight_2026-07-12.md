@@ -259,3 +259,25 @@ MJCF SHA `2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97`, no
 plant mutation and metrics/virtual-return code but no training reward interface, and a tolerant
 checkpoint loader that keeps every matching tensor rather than enforcing actor-only transfer. At
 this base, `ball_wiring_ancestor_rc=1` proves the separately tracked handoff is not in main.
+
+## 2026-07-13 decision and throughput continuation gate
+
+Franco approved native MuJoCo **feasibility and implementation** as a P0 capability track. This is
+not permission to delay the few-day D0: D0 remains the exact Agibot vendor Gate3 path with our
+planner and policy. Current evidence establishes a held-out return/strike-execution collapse, not a
+physical-balance collapse; matched physical-fall counts are zero. With no collidable ball/table/net,
+the current vendor scene can produce only no-ball balance/strike-state diagnostics.
+
+Before any CPU-Python long run, the first single-env core must bind CPU/model, core count, MuJoCo
+version, MJCF/effective-profile/source hashes and preregister the total transition budget. Benchmark
+`N=1/8/32/64` for both simulation-only and complete rollout plus one PPO update, recording physics
+steps/s, policy environment-steps/s, real-time factor, RSS, CPU use, scaling efficiency and PPO
+update time. Project the wall clock for control/fine-tune x two seeds. Continue that backend only if
+the complete paper fits inside 48 hours while retaining 30% reserve; otherwise move the hot path to
+C++/OpenMP or a separately parity-gated MJX/MJWarp backend. This throughput decision never replaces
+vendor Gate3 and does not block D0.
+
+Candidate preflight `6e5fce3` is held NO-MERGE until four negative-tested P1s close: action tape and
+trace coverage of clamp/runtime adapters, alias/exec static-source escapes, strict duplicate/nonfinite
+JSON parsing, and MJCF `compiler strippath` semantics. Its current authorization bits are correctly
+all false, so this hold is source correctness rather than evidence of an accidental launch.

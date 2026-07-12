@@ -1833,3 +1833,9 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    新 INDEX 固定 NOW→Gate→experiment→interface→operation 的权威顺序和按任务最小阅读集；experiment
    README 冻结 owner/input SHA/变量/分母/阈值/命令/限制模板，并明确不能授权 sim/signal/deploy/真机。
    G00/PROJECT_MAP 同步；只修文档入口，未改源码/配置/Pod/sim/真机。
+76. 【franco/Codex】**MuJoCo feasibility P0 正式划边界，preflight 首票红队 NO-MERGE**——franco
+   批准原生 MuJoCo 可行性/实现为 P0 能力轨，但不让它阻塞几天内 exact vendor Gate3 D0；现有证据是
+   return/strike execution 塌陷，matched physical fall 为零，不能夸成 balance 已退化。`6e5fce3`
+   的七授权位全 false、focused `63`/top-level `468+9skip`、ready/certificate rc2 均实证安全；仍抓出
+   action trace 不覆盖 clamp/adapter、source alias/exec 逃逸、JSON duplicate/NaN、MJCF strippath 四 P1，
+   修负测前不合 main。首个 core 加 N=1/8/32/64 吞吐门和 48h×70% paper 预算；未跑 VecEnv/PPO/Pod/sim/真机。

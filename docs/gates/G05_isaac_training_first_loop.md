@@ -1236,3 +1236,16 @@ source-checkpoint SHA. Its first one-shot D0 optimizes balance/strike-state only
 no physical ball/table/net, so it cannot book formal return evidence. Full reasoning and read-only
 commands are in [the MuJoCo training-v0 preflight](../research/mujoco_training_v0_preflight_2026-07-12.md).
 No code, config or training changed; G05 remains `Partial`.
+
+### 2026-07-13 MuJoCo-preflight red-team hold
+
+Franco explicitly approved native MuJoCo feasibility/implementation as a P0 capability track, but
+not as a prerequisite for the few-day D0 vendor Gate3 planner+policy demo. The matched paper shows
+return/strike execution collapse while physical-fall counts are zero; it does not establish a
+physical-balance collapse. Candidate `6e5fce3` remains **NO-MERGE** despite all authorization fields
+staying false: its small action tape does not exercise clamp/runtime-adapter boundaries, static
+source closure has alias/exec escapes, JSON accepts duplicate/nonfinite values, and MJCF closure
+mis-resolves `compiler strippath`. No VecEnv/PPO or training may start until those four P1s have
+negative tests. The first single-env core must also publish an N=1/8/32/64 throughput and scaling
+report against a preregistered transition budget; CPU-Python long training continues only if a
+two-arm/two-seed paper fits within 48 hours with 30% reserve. G05 remains `Partial`.

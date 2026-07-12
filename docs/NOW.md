@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 当下状态与团队 focus（2026-07-13 01:38 CST）
+## 当下状态与团队 focus（2026-07-13 02:02 CST）
 
 本节只做 roadmap 的当前入口；下面的实验结果、奖励/训练台账、长期路线和历史判决继续保留，
 不能用这份短报替代可复现实验记录。
@@ -59,8 +59,10 @@ Rules:
   **仍未 run/judge**，所以没有新分数。当前只差 reviewed persistent parent supervisor，防止 SSH 断开时
   丢掉两 seed 串行控制与最终 result；闭合后才启动并 aggregate。只判 seed4 是否晚熟，已知 seed1
   4k=`50/100` 使整族稳定门数学上不可能通过。
-- **训练后端路线决策（团队 2026-07-12 21:30）**：纯 Isaac/解析回球指标不再作为继续扩展
-  训练配方的依据；**原生 MuJoCo 训练/微调后端升为 P0**。第一步不是把单世界实时 AimRT vendor
+- **训练后端路线决策（franco 2026-07-13 明确批准边界）**：纯 Isaac/解析回球指标不再作为继续扩展
+  训练配方的依据；**原生 MuJoCo 训练/微调的可行性与实现升为 P0，但不阻塞几天内 D0**。已有证据是
+  回球/击球执行跨引擎塌陷；当前 matched paper 的 physical fall 近零，不能夸成“平衡也已证实退化”。
+  第一阶段不是把单世界实时 AimRT vendor
   runtime 当采样器，而是独立实现 native CPU `rsl_rl VecEnv`，不能和判卷器共用 observation/action/
   reward 代码制造共因假绿。只读 preflight 已确认当前 main 的 vendor MJCF 没有球/台/网，且 BankExam
   会改 dt/摩擦/solver/clamp；因此先分 `isaac_bank_parity_v1` 与 1 ms explicit-PD `vendor_gate3_v1`
@@ -68,7 +70,10 @@ Rules:
   tape 对拍冻结 Python evaluator；现 evaluator 没有训练 reward，逐项 reward 必须另写独立 replay oracle。
   warm start 只载 actor/distribution/actor-normalizer，critic/optimizer 必须 fresh；完整 engine/version/
   MJCF+mesh/effective-plant/runtime flags/obs/action/reward/reset/source checkpoint SHA 入新合同。
-  **MJX/MJWarp 只在原生 A/B 同卷有效后扩吞吐**；其结果不能冒充 vendor exact plant，最终票仍是
+  首个 single-env core 必须预注册总 transition budget，并对 `N=1/8/32/64` 报 sim-only 与完整
+  rollout+一次 PPO update 的 step/s、RTF、RSS/CPU、扩展效率和两臂×两 seed 预计墙钟；48 小时 paper
+  budget 还要留 30% 余量，超出就停止 CPU-Python 长跑，转 C++/OpenMP/MJX/MJWarp。加速后端只在
+  原生 A/B 同卷有效后扩吞吐；其结果不能冒充 vendor exact plant，最终票仍是
   不参与训练的 vendor Gate3/Gate3B。现有 Isaac 臂按已冻结 milestone 留证，但不再新增纯
   Isaac-only reward/teacher 扫描，也不默认把全部诊断臂烧到终档。
 - **现在谁在 focus 什么**：
@@ -103,6 +108,12 @@ Rules:
   前 fail-fast；旧 component `235/5` 不能冒充组合证据。即使源码合 main，49 个 runtime binding、vendor
   first tick 和 Gate3 行为仍是 OPEN。q50 readiness/prepare 已闭合，当前只差 reviewed persistent
   supervisor 后开卷。
+- **MuJoCo preflight 红队**：`codex/mujoco-training-preflight@6e5fce3` 的七个授权位确实全 false、
+  `--require-ready/--certificate-out` 都 fail closed，focused `63/63` 与顶层 `468/9` 通过；但当前
+  **NO-MERGE**。四个 P1 是 action tape 没覆盖 clamp/adapter 脉冲且 trace 缺关键状态、静态 source
+  closure 可被 alias/`os.execv` 绕过、JSON 接受 duplicate key/NaN、MJCF `compiler strippath` 路径解析错误。
+  修完负测前不合 main、不做 VecEnv/PPO；vendor 无球/台/网场景仍只允许 no-ball balance/strike-state
+  diagnostic，不能写 physical return。
 - **正手拍面短环（Human owner: franco；Executor: Codex；branch:
   `Franco_codex/face-sign-forensic`）**：旧表述“所有 seed 正手都约 170°”不精确；model-2000
   seed1/2/3 的 raw-A 正手误差是 `171.10/172.94/173.39°`，seed4 没有正手 exact strike，不能补成第四个
@@ -128,10 +139,10 @@ Rules:
   不阻塞 D0，但继续并行排队。任何真机 demo 仍受 G07 独立安全门约束，本阶段不发真机命令。
 - **未来 24 小时决策**：①给 Pod2 隔离验证树补 exact ORT 1.19.2 build dependency（或在已装 ROS 的
   Pod1 复用内容寻址缓存），对 `c0a8e46` 跑 exact Release/full-native，绿后立即合 main并刷新 source SHA；
-  同时按已绿 activation 执行两 Pod prepare→重查锁→串行 matched K100→aggregate；
+  同时把已 prepare 的两 Pod q50 经 reviewed persistent supervisor 重查锁→串行 matched K100→aggregate；
   ②在可用 MuJoCo 环境补 stand 10 秒数值诊断，但它不阻塞 D0；③按 serve v4 的 49 项缺口实现
   machine ACK/唯一 publisher/first-publish ledger，再只用新的精确进程所有权方案准备 vendor first tick；
-  同步冻结 MuJoCo trainer v0 合同与
+  同步修 MuJoCo preflight 四个 P1，再冻结 trainer v0 合同与带吞吐继续门的
   单环境 parity canary（先验收，不启动长跑），明确 actor warm-start、critic/optimizer fresh 和
   独立 K100/Gate3 判卷边界；自然释放的 GPU
   槽只接受已过 schema2/L0/整轨安全与动力学门的动作/TOPP 任务，未过门就保持空闲而不制造无效训练；④能 first tick
@@ -879,7 +890,7 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 
 | Item | Priority | Owner | Branch | Status / next checkpoint |
 | --- | --- | --- | --- | --- |
-| **原生 MuJoCo 训练/微调后端 P0** | ★★★ | **Codex** | `codex/mujoco-training-preflight@6e5fce3` | **首票已实现并推送，待审合入**：完整 MJCF closure + 2 s parity trace 合同 + source/objective/warm-start/physics trust 边界，focused `63 passed`。静态请求准确保留 11 blockers；stored audit、caller trace、certificate 都不能授权，physics/objective/loader/isolated-producer 四个 trusted 位及 smoke/formal/long 三个授权位全为 false。binary contact/net/landing 只叫 diagnostic，不冒充 Isaac dense net-height/landing-error/spin reward。没有 VecEnv/PPO/Pod/长训。**下一票已由 Codex 接续**：trusted isolated runner + `vendor_gate3_v1` single-env core（禁 child-process escape、记 runtime module closure），再做 evaluator action-tape 与独立 same-shape reward oracle；D0 仅 balance/strike-state，physical return 仍等 `mujoco-ball-wiring@4607410` vendor 验收。门未过不 PPO。 |
+| **原生 MuJoCo 训练/微调后端 P0** | ★★★ | **Codex** | `codex/mujoco-training-preflight@6e5fce3` | **红队 NO-MERGE，先修四个 P1**：authorization fail-closed 本身通过（focused `63`、顶层 `468/9`），但 action tape/trace 未覆盖 clamp adapter，source closure 有 alias/exec 绕过，JSON 未拒 duplicate/NaN，MJCF closure 错解 `strippath`。franco 批准的是 feasibility/implementation P0，不是让它阻塞 D0；首个 single-env core 后必须跑 N=1/8/32/64 吞吐门并证明两臂×两 seed 在 48h×70% 内，超时转加速后端。vendor scene 无球/台/网时只做 no-ball balance/strike-state diagnostic；门未过不 VecEnv/PPO/长训。 |
 | 全栈正确性尺+C++安全包+拍心/拍速合同收口 | ★★★ | **Codex** | `main` | 双 RunPod 源码验收已绿(portable/ROS C++、whole-body、planner);下一检查点=重出 fresh schema-v3 ONNX+修后考卷,旧判分器数字不入账 |
 | V5 专业动作可迁移性+Phase 加速器 | ★★★ | **Codex** | `main` | manifest+保守 halving 已就绪;下一检查点=验证触球帧/拍速口径,把行程/时间律报告接成 feasibility producer,再做 BankExam→scorecard adapter;两者完成前不自动发训练 |
 | 新动作库(Franco/v6/v7)+TOPP 最短可行时间+任意时刻下一拍恢复 | ★★★ | **Codex** | `codex/schema-v3-isaac-adapter@bf19fca` | 10 段完成 intake→canonical GMR/grounding→240Hz稠密安全屏；5,162样本地面/自碰/拍柄身体危险均0，最薄40.25mm。回球/phase/2-vs-4 因 frame/mirror 未证保持 null；正在内容寻址固定HOPE虚拟桌 counterfactual frame，过门才做64题、TOPP与RL。T1核心已实现但连续卷/自击/plant未齐，不点火、不真机。 |

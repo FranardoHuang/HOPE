@@ -1800,3 +1800,13 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   that experiment records never authorize simulation, process signals, deployment or hardware.
 - Updated G00 and PROJECT_MAP. This is documentation infrastructure only; no source, config, Pod,
   simulator or hardware behavior changed.
+
+## 2026-07-13 — MuJoCo P0 scope approved; preflight candidate held by four P1s
+
+- Recorded Franco's decision: native MuJoCo feasibility/implementation is P0, but the few-day D0
+  remains exact vendor Gate3 planner+policy and does not wait for a trainer.
+- Independent red team reproduced the candidate's fail-closed authorization (`63` focused,
+  `468/9` top-level, ready/certificate rc2) but held `6e5fce3` from main for action-trace coverage,
+  source-alias escape, strict JSON and MJCF `strippath` P1s.
+- Added the N=1/8/32/64 throughput/scaling and 48-hour-with-30%-reserve continuation rule. No
+  VecEnv, PPO, Pod mutation, simulator or hardware action ran; G05/G06 remain `Partial`.
