@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 当下状态与团队 focus（2026-07-12 07:12 CST）
+## 当下状态与团队 focus（2026-07-12 08:31 CST）
 
 本节只做 roadmap 的当前入口；下面的实验结果、奖励/训练台账、长期路线和历史判决继续保留，
 不能用这份短报替代可复现实验记录。
@@ -39,6 +39,8 @@ Rules:
   前 rc3，错误导出不覆盖既有 ONNX；合并后本机再过 `52 pass + 1 optional skip`。06:54–06:56
   满池只读巡检仍为两 Pod 各 `12 live + 2 terminal`、每 GPU 4 条；28/28 checkpoint finite 且
   contract/lineage 正确，完整日志无异常，10 workers 全活，41/41 已完成判卷 rc0/binding/exactness 正确。
+  08:29–08:31 每台各一次低频 SSH 复查均在握手超时，因此当前状态诚实标为“06:56 后未知”；没有
+  重连洪峰、重启、补发任务或信号，不能把连接失败误写成训练失败。
 - **现在谁在 focus 什么**：
   - franco/Codex：满池 checkpoint 早判、planner-policy 成对 Gate3、vendor first tick/D0、
     Isaac↔MuJoCo 分层归因；同时守住动作/TOPP/连续恢复队列，不让长期轴阻塞最短 demo。
