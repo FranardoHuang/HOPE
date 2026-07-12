@@ -1183,3 +1183,22 @@ training/fine-tuning is now a P0 implementation and promotion track recorded in 
 observation, action, reward, reset and export contracts must still be updated here when they change,
 and the exact fresh `SZ model_2000` checkpoint is the first handoff candidate. No backend code or
 training run exists yet, so G05 remains `Partial`.
+
+### 2026-07-12 MuJoCo-v0 handoff and warm-start correction
+
+The native-MuJoCo preflight keeps the 179-D Isaac actor as a source candidate but corrects the
+handoff semantics. `load_actor_tolerant()` is not suitable for the planned causal paper: its strict
+path restores the runner, while its fallback loads every shape-matching state tensor, including any
+matching critic tensor. The v0 loader must construct a seeded fresh critic/optimizer first, then
+load only the complete actor, action-distribution state and actor normalizer; tests must prove the
+critic is unchanged, optimizer state is empty and iteration is zero. The actor normalizer remains
+frozen for the initial v0 paper.
+
+The current schema-3 hard contract also deliberately omits reward weights, termination thresholds
+and optimizer settings. That remains valid for its existing curriculum purpose but is insufficient
+to identify a MuJoCo causal fine-tune. The new backend experiment contract must additionally bind
+those fields, reset/timeout semantics, effective MuJoCo profile, runtime action post-processing and
+source-checkpoint SHA. Its first one-shot D0 optimizes balance/strike-state only; the vendor MJCF has
+no physical ball/table/net, so it cannot book formal return evidence. Full reasoning and read-only
+commands are in [the MuJoCo training-v0 preflight](../research/mujoco_training_v0_preflight_2026-07-12.md).
+No code, config or training changed; G05 remains `Partial`.

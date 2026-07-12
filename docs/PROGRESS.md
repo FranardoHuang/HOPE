@@ -4,6 +4,14 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-12
 
+- Completed a read-only native-MuJoCo training-v0 preflight. The vendor MJCF has no ball/table/net
+  and its analytic `BallPhysics` is not wired into the simulator loop, so the 2--3 day D0 is limited
+  to one-shot balance/strike-state fine-tuning. The audit separates Isaac/BankExam parity from the
+  resolved 1 ms vendor Gate3 plant, replaces the nonexistent evaluator-reward parity claim with an
+  independent reward-replay oracle, and requires strict actor-only warm start into a fresh critic/
+  optimizer. `mujoco-ball-wiring@4607410` is recorded only as an unmerged, vendor-unverified handoff,
+  not current plant evidence. No code, config, simulator, Pod or hardware changed; G04/G05/G06
+  remain `Partial`.
 - Partially executed the fresh `SZ model_4000` q50 readiness barrier without
   starting a judge. Both Pods now have the exact reviewed control bundle and
   pre-existing K100 bytes at one absolute path. Pod2 seed2/4 passed its
@@ -1708,13 +1716,15 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   frozen Isaac milestones keep collecting evidence, but new Isaac-only reward/teacher sweeps move
   behind the MuJoCo training-backend canary.
 - The first route is a batched native C MuJoCo `rsl_rl VecEnv` loading the vendor A3 MJCF while
-  bypassing the single-world real-time AimRT/ROS/GUI loop. Before PPO, it must match the independent
-  evaluator on reset-first observation, a fixed short action tape, per-term reward and termination,
-  with engine/version/MJCF/mesh/plant/PD/dt/obs/action/reward/reset/source-checkpoint hashes bound.
+  bypassing the single-world real-time AimRT/ROS/GUI loop. Before PPO, reset-first observation and a
+  fixed short action tape must match the byte-frozen Python evaluator for each explicit plant
+  profile; per-term reward must match a separate reward-replay oracle. The full engine/version/
+  MJCF+mesh/effective-plant/PD/dt/obs/action/reward/reset/source-checkpoint contract is bound.
 - The first paper is the same exact fresh `SZ model_2000` source checkpoint: frozen control versus
   actor warm-start fine-tune, fresh critic/optimizer, equal budget, at least two seeds and an
   immutable held-out K100. Physical ball-racket-table/net contact and landing are mandatory for
-  formal return learning/scoring; analytic virtual return remains diagnostic.
+  formal return learning/scoring; analytic virtual return remains diagnostic. Current main lacks
+  those scene assets; `mujoco-ball-wiring@4607410` is an unmerged, vendor-unverified handoff only.
 - MJX/MJWarp is later throughput work with a separate parity burden. The independent vendor
   Gate3/Gate3B remains the final arbiter. This entry records a goal/priority decision only: no backend
   code, trainer, Pod process, simulator or hardware action ran; G05/G06 remain `Partial`.

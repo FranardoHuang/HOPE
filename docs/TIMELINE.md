@@ -1783,3 +1783,16 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
   (预检 fail-loud+只杀自己记录的 PID),共享 pod 一律用 safe 版。产物在 pod1
   /workspace/yikang/gate3/(dist cfg 已还原 13200)。状态:等 jiayi 三件(v2 obs 顺序/24100/
   v7 平面),Gate 3B 发球生成器/判分器为下一步(分工对表中)。
+
+## 2026-07-12: MuJoCo training-v0 只读 preflight
+
+- 【franco/Codex】**把 P0 从“方向”收成可实现且不可共因假绿的 2--3 天边界**——vendor
+  `a3_pingpong.xml` 只有地面/A3/球拍，无球/球台/网；`BallPhysics` 也未接入 `SimLoop`，因此 D0 只做
+  一次挥拍的平衡+击球状态 fine-tune，不冒充物理回球或连续回合。NOW 的
+  `mujoco-ball-wiring@4607410` 是未合 main、未过 vendor build/runtime 的交接件，独立验收前不能当
+  现役 plant。明确两套不等价 effective plant：
+  Isaac/BankExam parity 与 1 ms explicit-PD vendor Gate3；同 MJCF SHA 不能覆盖内存改参和 C++ runtime
+  action adapter。现役 Python evaluator 无训练 reward，故 reset/action tape 对拍仍独立冻结 evaluator，
+  reward 改由独立 replay oracle；trainer/judge 禁止共用实现。`load_actor_tolerant` 会保留匹配 critic，
+  v0 改为 actor/distribution/normalizer-only + fresh critic/optimizer。已写精确文件边界、三段 canary、
+  evaluator 隔离和 Day0/1/2 顺序；未改代码/配置、未跑 sim/Pod/真机，G04/G05/G06 保持 Partial。
