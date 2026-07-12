@@ -20,6 +20,18 @@ This file describes stable repository zones. Gates describe work over time; fold
 | `vendor_assets/` | Full local vendor/runtime payloads: models, sysroots, binaries | ignored |
 | `external_repos/` | Auto-synced local reference clones not yet promoted to formal dependencies | ignored |
 
+## Documentation Zones
+
+| Path | Role |
+| --- | --- |
+| `docs/gates/` | Acceptance state, reproducible evidence and blockers for G00--G08 |
+| `docs/experiments/` | One record per hypothesis/run/decision; never a competing priority queue or launch authority |
+| `docs/interfaces/` | Stable cross-component frames, messages, observations, actions and runtime contracts |
+| `docs/operations/` | Reproducible setup, build, test, training, evaluation and deployment commands |
+| `docs/research/` | Audits, source synthesis and design reasoning that have not by themselves passed a gate |
+
+Use `docs/INDEX.md` to enter these zones. `docs/NOW.md` remains the only current priority board.
+
 ## ROS Workspace
 
 `hope_ws` should remain one integration workspace with multiple packages:

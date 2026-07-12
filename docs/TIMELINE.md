@@ -1828,3 +1828,8 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    均只过 `0.30m` translation-norm 粗筛且仍是候选。正手先解约 `170deg` face 符号，挡类另用挡球题，
    不拿拉球题判死。schema-2→L0→vendor L1 self-hit→桌网整轨扫掠 `>=5mm` 只授予训练资格，
    不等于回台有效。只修文档解释，未重跑 screen、源码、Pod、sim 或真机。
+75. 【franco/Codex】**补回文档总索引与实验账模板**——`START_HERE.md` 已强制链接
+   `docs/INDEX.md`/`docs/experiments/README.md`，但 main 上两者不存在，导致每个分支自行猜路由。
+   新 INDEX 固定 NOW→Gate→experiment→interface→operation 的权威顺序和按任务最小阅读集；experiment
+   README 冻结 owner/input SHA/变量/分母/阈值/命令/限制模板，并明确不能授权 sim/signal/deploy/真机。
+   G00/PROJECT_MAP 同步；只修文档入口，未改源码/配置/Pod/sim/真机。

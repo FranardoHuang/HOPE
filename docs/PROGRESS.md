@@ -1791,3 +1791,12 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   No `run`, simulator, trainer signal or hardware action occurred. A reviewed persistent parent
   supervisor is required before future execution so the two serial seed judges and Pod-result
   finalization survive SSH loss. G05/G06 remain `Partial`.
+
+## 2026-07-13 — documentation router and experiment ledger restored
+
+- Added the missing `docs/INDEX.md` referenced by `START_HERE.md`, with task-to-gate/experiment/
+  interface/operation routing and explicit authority order.
+- Added `docs/experiments/README.md` with a minimal preregistration/result template and a clear rule
+  that experiment records never authorize simulation, process signals, deployment or hardware.
+- Updated G00 and PROJECT_MAP. This is documentation infrastructure only; no source, config, Pod,
+  simulator or hardware behavior changed.

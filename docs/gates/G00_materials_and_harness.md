@@ -43,6 +43,8 @@ This gate is about project structure, support materials, documentation, ignored 
 ## Acceptance Criteria
 
 - `docs/START_HERE.md` exists and points to all important docs.
+- `docs/INDEX.md` routes each common task to its minimal gate/experiment/interface/operation set,
+  and `docs/experiments/README.md` defines the experiment-record contract.
 - Every gate has a living document.
 - Git does not see heavyweight local assets by default.
 - Each local-only required asset has a documented path.
@@ -70,6 +72,9 @@ Done:
 - Host `podman` and `uidmap` are installed, `hope` exists from `docker.io/osrf/ros:jazzy-desktop-full`, and the first `hope` entry verified `ROS_DISTRO=jazzy`, Python `3.12.3`, and `/usr/bin/colcon`.
 - `.gitignore` now excludes `pw.txt` so local password scratch files do not enter git.
 - ROS workspace build verified inside the `hope` distrobox: `colcon build --packages-up-to hope_planner hope_wbc_runner` succeeds; the x86_64 deploy package builds via `agi/a3_deploy_example/scripts/build_a3_deploy_pkg.sh`.
+- The previously broken `START_HERE.md` links now resolve to a tracked one-stop `docs/INDEX.md` and
+  experiment-ledger template. Link existence and Markdown structure were checked on 2026-07-13;
+  this closes documentation routing only and does not change any runtime gate.
 
 Not done:
 
