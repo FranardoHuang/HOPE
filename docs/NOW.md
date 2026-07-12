@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 当下状态与团队 focus（2026-07-12 16:23 CST）
+## 当下状态与团队 focus（2026-07-12 17:01 CST）
 
 本节只做 roadmap 的当前入口；下面的实验结果、奖励/训练台账、长期路线和历史判决继续保留，
 不能用这份短报替代可复现实验记录。
@@ -45,12 +45,13 @@ Rules:
   job/job-contract/report/std-sidecar SHA、K20 单题 reset 与 exactness 标签全部正确，无 child judge 或
   judge Kit lock。GPU util Pod1=`92/95/95%`、Pod2=`90/83/96%`，RAM available 约 `914/922 GiB`、
   swap 0。旧口径“10 workers 全活”已正式弃用。
-- **4k matched 判卷状态**：四条 fresh SZ 的 `model_4000.pt` 已跨过训练里程碑，但预注册的
-  Pod1/Pod2 readiness audit、all-four activation artifact 都仍不存在；现有 queue 刻意固定
-  `auto_start=false`、`runtime_entrypoint=null`，也明确禁止临时拼 judge 命令。因此 4k 不是“在跑只是
-  没结果”，而是安全停在 activation consumer 缺口。下一步先提交并红队一个必须消费 exact activation、
-  逐 Pod 串行拿 Kit lock、no-clobber 记 PID/PGID/result/exactness 的 runner，再在同一 K100 跑四 seed；
-  它只判 seed4 是否晚熟，已知 seed1 4k=`50/100` 使整族稳定门数学上不可能通过。
+- **4k matched 判卷状态**：四条 fresh SZ 的 `model_4000.pt` 已跨过训练里程碑；exact activation
+  consumer 已随 main `7bc6d1f` 合入并通过顶层 `468 passed, 9 skipped`。它没有 SSH/信号面，固定
+  `auto_start=false`，必须先由 Pod1(seed1/3)、Pod2(seed2/4) 各生成 readiness audit，再合成 all-four
+  activation；每 Pod 串行拿共享 Kit lock，seed1 也重跑同一 K100，no-clobber 保存 PID=PGID/state/log/
+  result。**目前仍未做 Pod audit、activation 或 judge**，所以还没有新分数。下一步按已合 operation
+  执行 audit→activate→contract-check→prepare→run→aggregate；只判 seed4 是否晚熟，已知 seed1
+  4k=`50/100` 使整族稳定门数学上不可能通过。
 - **现在谁在 focus 什么**：
   - franco/Codex：满池 checkpoint 早判、planner-policy 成对 Gate3、vendor first tick/D0、
     Isaac↔MuJoCo 分层归因；同时守住动作/TOPP/连续恢复队列，不让长期轴阻塞最短 demo。
@@ -74,16 +75,15 @@ Rules:
   namespace/cgroup+pidfd、machine status、DISARMED ball 一次性 arm 和 no-replace ledger。
 - **当前新 blocker**：planner 仍判 **NO-MERGE**，但上一版五组 P1 已在 WIP 中逐项关闭：schema
   downgrade 会毒化、lease 改用映射后的 source clock、base/racket 带 shared epoch + exact
-  `base_sequence_ref`、active swing 绑定 revoke generation、ball/base `frame_id` 不一致会 fail closed；本机
-  planner/source 已复核 `164 pass + 2 skip`，隔离 Pod Release native 为 `229 pass + 5 optional skip`。
-  新一轮红队又抓到两个更深的 P1，正在修而未合：① base 已 inactive 时，新的坏 geometry 没推进
-  barrier/epoch，较旧但仍未超龄的 base 可能复活；② vendor pelvis 100 Hz、policy 50 Hz 时，C++ 只留
-  latest base 再要求 exact sequence，会把合法配对在下个 tick 前覆盖而系统性饿死。修法固定为有界
-  exact base history + 同 tick latest closed-loop 双快照：历史 base 只证明 command 因果，base-low/yaw/
-  side/gate/首帧 obs 与 active abort 都必须看最新 base，normal refresh 不制造饥饿，revoke 最迟在下一
-  sampled tick 零增益。serve-sync v4 已把人类日志 marker 永久降为 diagnostic-only，并列出 machine
-  `READY_NO_BALL`/`WAITING_BALL_READY`、nonce/ledger/frame/AimRT 等 35 项 runtime blocker；它也仍是
-  source-only 负门，不是 Gate3 READY。
+  `base_sequence_ref`、active swing 绑定 revoke generation、ball/base `frame_id` 不一致会 fail closed。
+  有界 exact base history + 同 tick latest closed-loop 双快照已消除 100Hz base/50Hz policy 的配对饥饿；
+  最新 planner/source 为 `168 pass + 2 skip`，隔离 Pod Release native 为
+  `235 pass + 5 optional skip`。但红队刚抓到 post-swing level-0 hold 仍可能让低 base 或 fast
+  revoke→recovery 穿进 actor，正把 base-low、绝对/连续性 plausibility、engaged epoch+revgen 提到所有
+  179 actor/hold 前的统一门，未闭前不合。serve-sync v4 也仍在红队：日志只作诊断、one-shot token/
+  吸收终态已有，但 ACK 还需把 base sequence 从“冻结值”改成 readiness anchor+同 epoch 单调 refresh，
+  并绑定 vendor backend 所有权、revoke generation 与合法 post-arm machine states；它仍是 source-only
+  负门，不是 Gate3 READY。
 - **代码交流状态**：recovery A/B/C、plan-only Gate3 源码门和严格 face179 模型合同已分别随
   `e10922a`、`b2067ba`、`8975043` 进入 main；face179 的 vendor 行为证据仍明确为 `Partial`。
   yikang 的 oracle/stand 诊断随 `3df6ff5` 合入，head reward 明确留在未验证队列。三版 planner
@@ -92,6 +92,8 @@ Rules:
   host source 测试通过；它把 outer/payload 及 planner/native/source/runtime 五类 exactness 永久写成
   false，并由 formal-style consumer 拒绝。vendor pose/twist/racket 没有共同 MuJoCo sample sequence，
   因此这次合并只增加可观测性与防伪护栏，不是 vendor first tick 或 Gate3 行为通过。
+  证据卫生修复随 `a08eb2e` 合入，旧 GMR ledger 不追写新 auditor SHA，plant v1 当前源码漂移按预期
+  fail closed；model-4000 activation consumer 随 `7bc6d1f` 合入，源码可运行不等于已经启动判卷。
 - **几天内 demo 的最短闭环**：D0 先做 vendor MuJoCo 中可录屏的固定同卷 demo——真实
   planner 发题、production C++ runner、fresh SZ 的最佳 finite checkpoint，正/反手各一组
   physical returns；每个模型/planner/runtime/MJCF/题表都带 SHA。D0 不冒充连续实战。
@@ -101,8 +103,8 @@ Rules:
   latest-base 低重心、跨 topic 乱序、history eviction 与快速撤销恢复，再复审 planner-policy 全状态机并
   跑最新 main C++ Release；
   ②在可用 MuJoCo 环境补 stand 10 秒数值诊断，但它不阻塞 D0；③并行补原生 first-tick JSON 和
-  source-only serve-sync 负门，随后只用新的精确进程所有权方案准备 vendor first tick；同时补完 4k
-  all-four activation consumer 并跑 matched K100；自然释放的 GPU
+  source-only serve-sync 负门，随后只用新的精确进程所有权方案准备 vendor first tick；同时按已合
+  consumer 生成 4k all-four activation 并跑 matched K100；自然释放的 GPU
   槽只接受已过 schema2/L0/整轨安全与动力学门的动作/TOPP 任务，未过门就保持空闲而不制造无效训练；④能 first tick
   就立即跑 D0 小卷并录完整 ledger，不能则把失败精确归到 planner、policy、plant 或 runtime 一层。
   定期任务只做巡检；阶段结论统一更新本节，稳定时不刷聊天长报。
