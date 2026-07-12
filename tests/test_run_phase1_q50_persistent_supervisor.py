@@ -43,11 +43,14 @@ def _sha(path: Path) -> str:
 
 def _runner_source() -> str:
     return r'''import json
+import os
+from pathlib import Path
 import time
 
 if __name__ == "__main__":
+    Path(os.environ["FAKE_RUNNER_MARKER"]).write_text("started\n")
     print("[fake-bound-runner] started", flush=True)
-    time.sleep(0.35)
+    time.sleep(0.6)
 else:
     def load_execution_config(path):
         return json.loads(path.read_text())
@@ -66,6 +69,9 @@ else:
             raise RuntimeError("full evidence absent")
         if content.get("pod") != pod:
             raise RuntimeError("wrong pod")
+        swap_to = content.get("swap_to_path")
+        if swap_to:
+            path.write_bytes(Path(swap_to).read_bytes())
         return content
 '''
 
@@ -91,6 +97,7 @@ def _fixture(tmp_path: Path, *, suffix: str = "a") -> tuple[Path, dict]:
         "sha256": _sha(Path(sys.executable)),
     }
     environment = {
+        "FAKE_RUNNER_MARKER": str(tmp_path / f"runner_started_{suffix}.marker"),
         "HOME": str(tmp_path),
         "LANG": "C",
         "PATH": "/usr/bin:/bin",
@@ -112,6 +119,7 @@ def _fixture(tmp_path: Path, *, suffix: str = "a") -> tuple[Path, dict]:
         "handshake": {
             "hello_timeout_seconds": 1,
             "commit_timeout_seconds": 1,
+            "exec_observation_seconds": 0.1,
             "poll_seconds": 0.01,
         },
         "pods": {
@@ -149,18 +157,22 @@ def _identity_reader(config: dict, pod: str):
             pgid = os.getpgid(pid)
         except ProcessLookupError:
             return None
-        acknowledged = (state_dir / "commit_ack.json").is_file()
+        runner_started = Path(config["environment"]["FAKE_RUNNER_MARKER"]).is_file()
         return {
             "pid": pid,
             "pgid": pgid,
             "state": "S",
             "start_ticks": pid * 1009,
-            "cmdline": S._runner_argv(config, pod) if acknowledged else [],
+            "cmdline": (
+                S._runner_argv(config, pod)
+                if runner_started
+                else [sys.executable, *sys.argv]
+            ),
             "executable_realpath": binding["python"]["resolved_path"],
             "executable_sha256": binding["python"]["sha256"],
             "environment_sha256": (
                 S._canonical_sha256(config["environment"])
-                if acknowledged
+                if runner_started
                 else "0" * 64
             ),
         }
@@ -191,13 +203,17 @@ def _wait_for(path: Path, timeout: float = 3.0) -> None:
     pytest.fail(f"timed out waiting for {path}")
 
 
-def _terminal_result(config: dict, pod: str, *, full: bool) -> dict:
+def _terminal_result(
+    config: dict, pod: str, *, full: bool, swap_to: Path | None = None
+) -> dict:
     content = {
         "pod": pod,
         "runtime_contract": config["pods"][pod]["runtime_contract"],
     }
     if full:
         content["full_evidence"] = "accepted_by_exact_bound_runner"
+    if swap_to is not None:
+        content["swap_to_path"] = str(swap_to)
     return {
         "schema_version": 1,
         "artifact_kind": "phase1_fresh_sz_model4000_q50_pod",
@@ -258,6 +274,33 @@ def test_launch_observes_exact_exec_and_duplicate_is_no_clobber(tmp_path: Path):
     os.waitpid(launched["pid"], 0)
 
 
+def test_timely_ack_can_be_pending_then_converge_to_exact_running(tmp_path: Path):
+    _, config = _fixture(tmp_path, suffix="post_ack_stall")
+    launched = _launch(config, child_after_ack_hook=lambda: time.sleep(0.4))
+    state_dir = Path(config["pods"]["pod1"]["state_dir"])
+    assert launched["status"] == "committed_pending_exec"
+    observation = json.loads((state_dir / "exec_observation.json").read_text())
+    assert observation["status"] == "committed_pending_exec"
+    assert observation["pid"] == observation["pgid"] == launched["pid"]
+    assert observation["observed_cmdline"] == [sys.executable, *sys.argv]
+    assert observation["observed_cmdline"] != S._runner_argv(config, "pod1")
+    assert observation["observed_executable_realpath"] == config["pods"]["pod1"][
+        "python"
+    ]["resolved_path"]
+    with pytest.raises(S.SupervisorError, match="no-clobber"):
+        _launch(config)
+
+    _wait_for(Path(config["environment"]["FAKE_RUNNER_MARKER"]))
+    converged = S._inspect_loaded(
+        config,
+        "pod1",
+        identity_reader=_identity_reader(config, "pod1"),
+        boot_id_reader=_boot_id,
+    )
+    assert converged["status"] == "running_exact"
+    os.waitpid(launched["pid"], 0)
+
+
 def test_preexisting_result_rejected_before_state_reservation(tmp_path: Path):
     _, config = _fixture(tmp_path)
     result = Path(config["pods"]["pod1"]["result_path"])
@@ -303,6 +346,28 @@ def test_minimal_terminal_result_is_rejected_by_exact_bound_runner(tmp_path: Pat
             identity_reader=lambda _pid: None,
             boot_id_reader=_boot_id,
         )
+
+
+def test_terminal_result_swap_during_bound_validation_is_rejected(tmp_path: Path):
+    _, config = _fixture(tmp_path, suffix="result_swap")
+    launched = _launch(config)
+    os.waitpid(launched["pid"], 0)
+    result_path = Path(config["pods"]["pod1"]["result_path"])
+    replacement = tmp_path / "replacement_result.json"
+    _write(replacement, _terminal_result(config, "pod1", full=True))
+    _write(
+        result_path,
+        _terminal_result(config, "pod1", full=True, swap_to=replacement),
+    )
+    frozen_sha = _sha(result_path)
+    with pytest.raises(S.SupervisorError, match="changed during bound validation"):
+        S._inspect_loaded(
+            config,
+            "pod1",
+            identity_reader=lambda _pid: None,
+            boot_id_reader=_boot_id,
+        )
+    assert _sha(result_path) != frozen_sha
 
 
 @pytest.mark.parametrize("field", ("start_ticks", "executable_sha256", "environment_sha256"))
@@ -363,7 +428,7 @@ def test_parent_stall_past_child_deadline_cannot_publish_ledger(tmp_path: Path):
 
 def test_rehash_delay_past_deadline_never_starts_bound_runner(tmp_path: Path):
     _, config = _fixture(tmp_path)
-    with pytest.raises(S.SupervisorError, match="exact exec was not observed"):
+    with pytest.raises(S.SupervisorError, match="did not acknowledge commit"):
         _launch(config, child_after_rehash_hook=lambda: time.sleep(1.1))
     state_dir = Path(config["pods"]["pod1"]["state_dir"])
     _wait_for(state_dir / "child_exit.json")

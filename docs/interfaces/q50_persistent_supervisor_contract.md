@@ -52,11 +52,15 @@ under an SSH-provided `PYTHONPATH` or loader environment.
    does it atomically publish an immutable launch ledger followed by a commit token that hashes both
    hello and ledger.
 4. The child times out and exits by itself if the token is absent. When the token is present, it
-   revalidates its identity, deadline, result absence and all bound bytes; after potentially slow
-   rehashes it checks deadline/identity/token again immediately before the no-clobber commit
-   acknowledgment, and repeats that check after acknowledgment immediately before `execve`.
-   Crossing the deadline at either point self-exits without running the consumer. The parent reports
-   success only after observing that exact executable, argv and fixed environment through procfs.
+   revalidates identity, result absence and all bound bytes; after potentially slow rehashes it
+   checks deadline/identity/token immediately before the no-clobber commit acknowledgment. A timely
+   validated acknowledgment is the irreversible commit point. After it, the child no longer uses
+   the commit deadline as a cancellation promise, but it still rechecks identity/token/ledger/result
+   absence immediately before `execve`.
+5. The parent observes exec for a separate bounded window. Exact executable/argv/environment yields
+   `running_exact`; otherwise it records and returns `committed_pending_exec`, never a launch error.
+   The fixed state directory still rejects every second launch. Later `inspect` converges pending to
+   exact running, a validated terminal result, or terminal failure.
 
 The parent never needs a cleanup operation. A parent crash before the token leaves no execution
 authority; the child self-exits after the configured timeout. A crash after the token leaves the
@@ -64,15 +68,17 @@ immutable ledger needed to inspect the detached runner.
 
 ## Read-only inspection
 
-For a live process, `inspect` requires the ledger boot id, PID, PGID, `/proc` start ticks,
-executable realpath/SHA, command line and environment digest to match exactly. This prevents a
-reused PID or same-argv different executable from being reported as the q50 runner. A child without
-an acknowledgment may only remain in `launch_committed_pre_exec` until its monotonic commit
-deadline; an acknowledged mismatch is immediately an error.
+For a live process, `inspect` requires the ledger boot id, PID, PGID, `/proc` start ticks and
+executable realpath/SHA to keep identifying the same child. Before acknowledgment it reports
+`token_published_pre_ack` only until the commit deadline. After acknowledgment, a non-runner
+command line is `committed_pending_exec`; exact runner argv plus the wrong environment is an error,
+while exact argv/environment is `running_exact`. This prevents a reused PID or same-argv different
+executable from being reported as the q50 runner without misclassifying a post-ack pre-exec stall.
 
-After process exit, `inspect` accepts completion only if the configured `pod_result.json` has a valid
-canonical content hash and exactly binds the Pod, runner/config/activation/runtime SHAs, arm order,
-and non-authority action record. Exit without that result is reported as
+After process exit, `inspect` freezes the configured `pod_result.json` bytes and SHA before invoking
+the original bound runner's complete validator with that exact SHA. It then rereads the file and
+requires byte/SHA stability, a valid canonical content hash, and exact equality between document
+content and validator-returned content. Exit without that result is reported as
 `terminal_without_result`; it is never relabelled successful from a return code or log alone.
 
 ## Verification and limitations
@@ -85,7 +91,9 @@ source for remote-login and process-control APIs. Config, hello, ledger, token, 
 terminal wrapper JSON all reject duplicate object keys and non-finite constants before semantic
 validation, so two conforming consumers cannot assign different meanings to one evidence file. A
 deterministic delayed-rehash regression crosses the deadline and asserts no acknowledgment, result
-or fake-runner marker exists.
+or fake-runner marker exists. A separate post-ack chdir stall produces `committed_pending_exec`,
+rejects a second launch, then converges through `inspect` to exact running. An A-to-B result swap
+during bound validation is rejected.
 
 This contract does not prove that an external Pod manager will preserve processes when it destroys
 an entire container or cgroup. It only removes ordinary SSH file-descriptor/session lifetime from

@@ -66,7 +66,7 @@ def _require_sha(where: str, value: Any) -> str:
     return value
 
 
-def _strict_object(path: Path) -> dict[str, Any]:
+def _strict_object_bytes(raw: bytes, where: str) -> dict[str, Any]:
     def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for key, value in pairs:
@@ -80,15 +80,23 @@ def _strict_object(path: Path) -> dict[str, Any]:
 
     try:
         value = json.loads(
-            path.read_text(encoding="utf-8"),
+            raw.decode("utf-8"),
             object_pairs_hook=reject_duplicates,
             parse_constant=reject_nonfinite,
         )
-    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
-        raise SupervisorError(f"cannot read strict JSON object {path}: {exc}") from exc
+    except (UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        raise SupervisorError(f"cannot parse strict JSON object {where}: {exc}") from exc
     if not isinstance(value, dict):
-        raise SupervisorError(f"JSON root must be an object: {path}")
+        raise SupervisorError(f"JSON root must be an object: {where}")
     return value
+
+
+def _strict_object(path: Path) -> dict[str, Any]:
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise SupervisorError(f"cannot read strict JSON object {path}: {exc}") from exc
+    return _strict_object_bytes(raw, str(path))
 
 
 def _exact_keys(value: Mapping[str, Any], expected: set[str], where: str) -> None:
@@ -297,11 +305,17 @@ def load_supervisor_config(
         raise SupervisorError("handshake must be an object")
     _exact_keys(
         handshake,
-        {"hello_timeout_seconds", "commit_timeout_seconds", "poll_seconds"},
+        {
+            "hello_timeout_seconds",
+            "commit_timeout_seconds",
+            "exec_observation_seconds",
+            "poll_seconds",
+        },
         "handshake",
     )
     hello_timeout = handshake["hello_timeout_seconds"]
     commit_timeout = handshake["commit_timeout_seconds"]
+    exec_observation = handshake["exec_observation_seconds"]
     poll = handshake["poll_seconds"]
     if (
         isinstance(hello_timeout, bool)
@@ -310,6 +324,9 @@ def load_supervisor_config(
         or isinstance(commit_timeout, bool)
         or not isinstance(commit_timeout, (int, float))
         or not 1 <= commit_timeout <= 120
+        or isinstance(exec_observation, bool)
+        or not isinstance(exec_observation, (int, float))
+        or not 0.05 <= exec_observation <= 30
         or isinstance(poll, bool)
         or not isinstance(poll, (int, float))
         or not 0.01 <= poll <= 0.5
@@ -546,6 +563,7 @@ def _child_wait_and_exec(
     identity_reader: IdentityReader,
     boot_id_reader: BootIdReader,
     after_rehash_hook: Callable[[], None] | None = None,
+    after_ack_hook: Callable[[], None] | None = None,
 ) -> None:
     try:
         os.setsid()
@@ -646,7 +664,7 @@ def _child_wait_and_exec(
         ):
             raise SupervisorError("launch ledger does not bind this child execution")
 
-        def require_commit_still_valid(stage: str) -> None:
+        def require_commit_still_valid(stage: str, *, enforce_deadline: bool) -> None:
             current_token = _strict_object(token_path)
             current = identity_reader(pid)
             if (
@@ -662,12 +680,15 @@ def _child_wait_and_exec(
                 or current.get("executable_sha256")
                 != identity.get("executable_sha256")
                 or boot_id_reader() != boot_id
-                or time.monotonic_ns() >= commit_deadline_monotonic_ns
+                or (
+                    enforce_deadline
+                    and time.monotonic_ns() >= commit_deadline_monotonic_ns
+                )
                 or result_path.exists()
             ):
                 raise SupervisorError(f"child commit invalid {stage}; refusing exec")
 
-        require_commit_still_valid("before rehash")
+        require_commit_still_valid("before rehash", enforce_deadline=True)
         for name, binding in bindings.items():
             if name == "supervisor_config":
                 continue
@@ -681,7 +702,12 @@ def _child_wait_and_exec(
             raise SupervisorError("supervisor config changed before exec")
         if after_rehash_hook is not None:
             after_rehash_hook()
-        require_commit_still_valid("after rehash before acknowledgment")
+        require_commit_still_valid(
+            "after rehash before acknowledgment", enforce_deadline=True
+        )
+        accepted_monotonic_ns = time.monotonic_ns()
+        if accepted_monotonic_ns >= commit_deadline_monotonic_ns:
+            raise SupervisorError("commit deadline crossed before acknowledgment")
         ack = {
             "schema_version": 1,
             "artifact_kind": "phase1_q50_supervisor_commit_ack",
@@ -691,10 +717,14 @@ def _child_wait_and_exec(
             "proc_start_ticks": identity["start_ticks"],
             "boot_id": boot_id,
             "token_sha256": _sha256_file(token_path),
-            "accepted_monotonic_ns": time.monotonic_ns(),
+            "accepted_monotonic_ns": accepted_monotonic_ns,
         }
         _atomic_json_no_clobber(ack_path, ack)
-        require_commit_still_valid("after acknowledgment before exec")
+        if after_ack_hook is not None:
+            after_ack_hook()
+        require_commit_still_valid(
+            "after acknowledgment before exec", enforce_deadline=False
+        )
         os.chdir(cwd)
         os.write(1, b"[q50-supervisor] commit accepted; exec exact bound runner\n")
         os.execve(argv[0], argv, environment)
@@ -767,6 +797,7 @@ def _launch_loaded(
     boot_id_reader: BootIdReader = _read_boot_id,
     after_hello_hook: Callable[[], None] | None = None,
     child_after_rehash_hook: Callable[[], None] | None = None,
+    child_after_ack_hook: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     if pod not in config["pods"]:
         raise SupervisorError(f"unknown Pod {pod!r}")
@@ -826,6 +857,7 @@ def _launch_loaded(
             identity_reader=identity_reader,
             boot_id_reader=boot_id_reader,
             after_rehash_hook=child_after_rehash_hook,
+            after_ack_hook=child_after_ack_hook,
         )
         os._exit(73)
     os.close(log_descriptor)
@@ -936,6 +968,7 @@ def _launch_loaded(
     ledger_path = state_dir / "launch_ledger.json"
     token_path = state_dir / "commit_token.json"
     ack_path = state_dir / "commit_ack.json"
+    observation_path = state_dir / "exec_observation.json"
     ledger = {
         "schema_version": 1,
         "artifact_kind": "phase1_q50_supervisor_launch_ledger",
@@ -955,6 +988,7 @@ def _launch_loaded(
         "hello": {"path": str(hello_path), "sha256": _sha256_file(hello_path)},
         "commit_token_path": str(token_path),
         "commit_ack_path": str(ack_path),
+        "exec_observation_path": str(observation_path),
         "log_path": str(log_path),
         "result_path": binding["result_path"],
         "arm_order": binding["arm_order"],
@@ -989,29 +1023,41 @@ def _launch_loaded(
         "ledger_sha256": _sha256_file(ledger_path),
     }
     _atomic_json_no_clobber(token_path, token)
-    observation_deadline = time.monotonic() + float(
-        config["handshake"]["hello_timeout_seconds"]
-    )
-    while time.monotonic() < observation_deadline:
+    ack: dict[str, Any] | None = None
+    while time.monotonic_ns() < deadline_monotonic_ns:
         if ack_path.is_file():
             ack = _strict_object(ack_path)
-            expected_ack = {
-                "schema_version": 1,
-                "artifact_kind": "phase1_q50_supervisor_commit_ack",
-                "pod": pod,
-                "pid": pid,
-                "pgid": pid,
-                "proc_start_ticks": start_ticks,
-                "boot_id": boot_id,
-                "token_sha256": _sha256_file(token_path),
-            }
-            if (
-                set(ack) != set(expected_ack) | {"accepted_monotonic_ns"}
-                or any(ack.get(key) != value for key, value in expected_ack.items())
-                or not isinstance(ack.get("accepted_monotonic_ns"), int)
-                or ack["accepted_monotonic_ns"] >= deadline_monotonic_ns
-            ):
-                raise SupervisorError("child commit acknowledgment is invalid")
+            break
+        time.sleep(float(config["handshake"]["poll_seconds"]))
+    if ack is None and ack_path.is_file():
+        ack = _strict_object(ack_path)
+    if ack is None:
+        raise SupervisorError("child did not acknowledge commit before its deadline")
+    expected_ack = {
+        "schema_version": 1,
+        "artifact_kind": "phase1_q50_supervisor_commit_ack",
+        "pod": pod,
+        "pid": pid,
+        "pgid": pid,
+        "proc_start_ticks": start_ticks,
+        "boot_id": boot_id,
+        "token_sha256": _sha256_file(token_path),
+    }
+    if (
+        set(ack) != set(expected_ack) | {"accepted_monotonic_ns"}
+        or any(ack.get(key) != value for key, value in expected_ack.items())
+        or not isinstance(ack.get("accepted_monotonic_ns"), int)
+        or ack["accepted_monotonic_ns"] >= deadline_monotonic_ns
+    ):
+        raise SupervisorError("child commit acknowledgment is invalid")
+
+    observation_deadline = time.monotonic() + float(
+        config["handshake"]["exec_observation_seconds"]
+    )
+    last_identity: dict[str, Any] | None = None
+    while time.monotonic() < observation_deadline:
+        last_identity = identity_reader(pid)
+        if last_identity is not None:
             try:
                 _require_live_identity(
                     pid=pid,
@@ -1025,25 +1071,63 @@ def _launch_loaded(
                     expected_environment_sha256=_canonical_sha256(environment),
                 )
             except SupervisorError:
-                time.sleep(float(config["handshake"]["poll_seconds"]))
-                continue
-            return {
-                "status": "running_exact",
-                "pod": pod,
-                "pid": pid,
-                "pgid": pid,
-                "proc_start_ticks": start_ticks,
-                "boot_id": boot_id,
-                "ledger_path": str(ledger_path),
-                "ledger_sha256": _sha256_file(ledger_path),
-                "commit_ack_sha256": _sha256_file(ack_path),
-                "log_path": str(log_path),
-                "result_path": binding["result_path"],
-            }
+                pass
+            else:
+                return {
+                    "status": "running_exact",
+                    "pod": pod,
+                    "pid": pid,
+                    "pgid": pid,
+                    "proc_start_ticks": start_ticks,
+                    "boot_id": boot_id,
+                    "ledger_path": str(ledger_path),
+                    "ledger_sha256": _sha256_file(ledger_path),
+                    "commit_ack_sha256": _sha256_file(ack_path),
+                    "log_path": str(log_path),
+                    "result_path": binding["result_path"],
+                }
         time.sleep(float(config["handshake"]["poll_seconds"]))
-    raise SupervisorError(
-        "commit token exists but exact exec was not observed; inspect preserved state"
-    )
+    observation = {
+        "schema_version": 1,
+        "artifact_kind": "phase1_q50_supervisor_exec_observation",
+        "status": "committed_pending_exec",
+        "pod": pod,
+        "pid": pid,
+        "pgid": pid,
+        "proc_start_ticks": start_ticks,
+        "boot_id": boot_id,
+        "commit_ack_sha256": _sha256_file(ack_path),
+        "observed_monotonic_ns": time.monotonic_ns(),
+        "process_present": last_identity is not None,
+        "observed_state": None if last_identity is None else last_identity.get("state"),
+        "observed_executable_realpath": (
+            None if last_identity is None else last_identity.get("executable_realpath")
+        ),
+        "observed_executable_sha256": (
+            None if last_identity is None else last_identity.get("executable_sha256")
+        ),
+        "observed_cmdline": None if last_identity is None else last_identity.get("cmdline"),
+        "observed_environment_sha256": (
+            None if last_identity is None else last_identity.get("environment_sha256")
+        ),
+        "result_present": result_path.is_file(),
+    }
+    _atomic_json_no_clobber(observation_path, observation)
+    return {
+        "status": "committed_pending_exec",
+        "pod": pod,
+        "pid": pid,
+        "pgid": pid,
+        "proc_start_ticks": start_ticks,
+        "boot_id": boot_id,
+        "ledger_path": str(ledger_path),
+        "ledger_sha256": _sha256_file(ledger_path),
+        "commit_ack_sha256": _sha256_file(ack_path),
+        "exec_observation_path": str(observation_path),
+        "exec_observation_sha256": _sha256_file(observation_path),
+        "log_path": str(log_path),
+        "result_path": binding["result_path"],
+    }
 
 
 def launch(config_path: Path, expected_config_sha256: str, pod: str) -> dict[str, Any]:
@@ -1061,6 +1145,7 @@ def _validate_preserved_ledger(
     ledger_path = state_dir / "launch_ledger.json"
     token_path = state_dir / "commit_token.json"
     ack_path = state_dir / "commit_ack.json"
+    observation_path = state_dir / "exec_observation.json"
     hello = _strict_object(hello_path)
     ledger = _strict_object(ledger_path)
     token = _strict_object(token_path)
@@ -1109,6 +1194,7 @@ def _validate_preserved_ledger(
             "hello",
             "commit_token_path",
             "commit_ack_path",
+            "exec_observation_path",
             "log_path",
             "result_path",
             "arm_order",
@@ -1162,6 +1248,7 @@ def _validate_preserved_ledger(
         "hello": {"path": str(hello_path), "sha256": _sha256_file(hello_path)},
         "commit_token_path": str(token_path),
         "commit_ack_path": str(ack_path),
+        "exec_observation_path": str(observation_path),
         "log_path": str(state_dir / "runner.stdout_stderr.log"),
         "result_path": binding["result_path"],
         "arm_order": binding["arm_order"],
@@ -1240,6 +1327,23 @@ def _validate_preserved_ledger(
 def _validate_terminal_result(
     path: Path, config: Mapping[str, Any], pod: str
 ) -> dict[str, Any]:
+    try:
+        frozen_bytes = path.read_bytes()
+    except OSError as exc:
+        raise SupervisorError(f"cannot freeze terminal result bytes: {exc}") from exc
+    frozen_sha256 = hashlib.sha256(frozen_bytes).hexdigest()
+    frozen_document = _strict_object_bytes(frozen_bytes, f"frozen terminal result {path}")
+    _exact_keys(
+        frozen_document,
+        {"schema_version", "artifact_kind", "content_sha256", "content"},
+        "frozen terminal result",
+    )
+    frozen_content = frozen_document["content"]
+    if (
+        not isinstance(frozen_content, dict)
+        or frozen_document["content_sha256"] != _canonical_sha256(frozen_content)
+    ):
+        raise SupervisorError("frozen terminal result canonical content hash is invalid")
     runner_path = Path(config["runner"]["path"])
     module_name = f"_q50_bound_result_validator_{config['runner']['sha256'][:16]}"
     try:
@@ -1261,16 +1365,20 @@ def _validate_terminal_result(
             queue,
             prereg_path,
         )
-        content = module._validate_pod_result(
+        validated_content = module._validate_pod_result(
             path,
-            _sha256_file(path),
+            frozen_sha256,
             execution,
             prereg,
             activation,
             config["execution_config"]["sha256"],
             pod=pod,
         )
-        if content.get("runtime_contract") != config["pods"][pod]["runtime_contract"]:
+        if (
+            not isinstance(validated_content, dict)
+            or validated_content.get("runtime_contract")
+            != config["pods"][pod]["runtime_contract"]
+        ):
             raise SupervisorError("bound runner accepted a different runtime contract")
     except SupervisorError:
         raise
@@ -1278,11 +1386,29 @@ def _validate_terminal_result(
         raise SupervisorError(
             f"exact bound-runner terminal validation failed: {type(exc).__name__}: {exc}"
         ) from exc
-    document = _strict_object(path)
+    try:
+        post_bytes = path.read_bytes()
+    except OSError as exc:
+        raise SupervisorError(f"cannot reread terminal result after validation: {exc}") from exc
+    post_sha256 = hashlib.sha256(post_bytes).hexdigest()
+    if post_sha256 != frozen_sha256 or post_bytes != frozen_bytes:
+        raise SupervisorError("terminal result bytes changed during bound validation")
+    post_document = _strict_object_bytes(post_bytes, f"post-validation terminal result {path}")
+    post_content = post_document.get("content")
+    if (
+        post_document != frozen_document
+        or not isinstance(post_content, dict)
+        or post_document.get("content_sha256") != _canonical_sha256(post_content)
+        or post_content != validated_content
+        or _canonical_sha256(post_content) != _canonical_sha256(validated_content)
+    ):
+        raise SupervisorError(
+            "terminal result document differs from exact bound-validator content"
+        )
     return {
         "path": str(path),
-        "sha256": _sha256_file(path),
-        "content_sha256": document["content_sha256"],
+        "sha256": frozen_sha256,
+        "content_sha256": frozen_document["content_sha256"],
     }
 
 
@@ -1357,16 +1483,27 @@ def _inspect_loaded(
             and identity.get("cmdline") == ledger["runner_argv"]
             and identity.get("environment_sha256") == ledger["environment_sha256"]
         )
+        if (
+            ledger["_commit_ack"] is not None
+            and identity.get("cmdline") == ledger["runner_argv"]
+            and identity.get("environment_sha256") != ledger["environment_sha256"]
+        ):
+            raise SupervisorError("exact runner argv has a different environment")
         now_monotonic_ns = time.monotonic_ns()
         if ledger["_commit_ack"] is None:
             if now_monotonic_ns >= ledger["commit_deadline_monotonic_ns"]:
                 raise SupervisorError("committed child lacks acknowledgment after deadline")
-        elif not exact_exec:
-            raise SupervisorError(
-                "acknowledged child does not have the exact runner argv/environment"
+        status = (
+            "running_exact"
+            if exact_exec
+            else (
+                "committed_pending_exec"
+                if ledger["_commit_ack"] is not None
+                else "token_published_pre_ack"
             )
+        )
         return {
-            "status": "running_exact" if exact_exec else "launch_committed_pre_exec",
+            "status": status,
             "pod": pod,
             "pid": ledger["pid"],
             "pgid": ledger["pgid"],
@@ -1374,6 +1511,11 @@ def _inspect_loaded(
             "boot_id": ledger["boot_id"],
             "runner_argv_sha256": ledger["runner_argv_sha256"],
             "environment_sha256": ledger["environment_sha256"],
+            "observed_state": identity.get("state"),
+            "observed_executable_realpath": identity.get("executable_realpath"),
+            "observed_executable_sha256": identity.get("executable_sha256"),
+            "observed_cmdline": identity.get("cmdline"),
+            "observed_environment_sha256": identity.get("environment_sha256"),
             "ledger": {"path": str(ledger_path), "sha256": _sha256_file(ledger_path)},
             "log": {
                 "path": ledger["log_path"],
