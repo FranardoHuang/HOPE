@@ -1,74 +1,60 @@
-# Non-striking-arm imitation ablation
+# 非击球臂模仿消融
 
-Status: Design
-Human owner: Franco
-Executor: Codex (design); runtime executor unassigned
-Branch: Franco_codex/new-motion-batch-20260713
+- 状态：`proposed`
+- 人类负责人：Franco
+- 执行者：Codex（设计）；运行时执行者：`UNASSIGNED`
+- 工作分支：`Franco_codex/new-motion-batch-20260713`
 
-## Question and decision scope
+## 问题与决策范围
 
-Test whether removing imitation from the non-striking left arm lets the right-handed A3 use that arm
-for balance without reducing strike/return performance or creating unsafe arm motion. This is a
-reward-mask question, not permission to remove self-collision, joint-limit, torque or halt guards.
+测试取消对非击球左臂的模仿后，右手 A3 是否能使用该手臂帮助平衡，同时不降低击球/回球表现，也不产生不安全的手臂动作。
+这是一个 reward mask 问题，不是移除自碰撞、关节限位、力矩或安全停机保护的许可。
 
-## Inputs and immutable bindings
+## 输入与不可变绑定
 
-No checkpoint/config is selected yet. Before launch, bind one accepted motion family, exact
-planner/policy/plant/runtime/MJCF, task-matched immutable paper, reward source, body/joint mask,
-same seeds and equal transitions. Vendor MuJoCo Gate3/Gate3B is the decision environment; Isaac
-curves are diagnostic.
+尚未选定 checkpoint/config。启动前必须绑定：一个已验收的动作族；精确的 planner/policy/plant/runtime/MJCF；
+与任务匹配的不可变考卷；reward 来源；身体/关节 mask；相同的随机种子；以及相等的交互步数。决策环境是厂商 MuJoCo
+[Gate3/Gate3B](../DEFINITIONS.md)；Isaac 曲线只用于诊断。
 
-## Design and controls
+## 设计与对照
 
-Stage A separates the direct mask effect from reward-budget reallocation:
+A 阶段将直接 mask 效应与 reward 预算再分配分开：
 
-- A0: current upper-body imitation baseline (right striking arm plus left non-striking arm); the
-  existing lower-body imitation remains off;
-- A1: left-arm imitation removed, every other reward weight unchanged;
-- A2: left-arm imitation removed and the lost **measured baseline reward magnitude** restored to a
-  fixed balance/ready budget, without increasing right-arm imitation.
+- A0：当前上半身模仿基线（右击球臂加左非击球臂）；现有下半身模仿保持关闭；
+- A1：取消左臂模仿，其他所有 reward 权重保持不变；
+- A2：取消左臂模仿，并将损失的“实测基线 reward 量级”恢复到固定的平衡/就绪预算中，但不增加右臂模仿。
 
-A1 answers the literal question; A2 asks whether the same shaping budget is better spent on
-balance/readiness. The lost magnitude must be estimated once from frozen A0 rollouts, not tuned per
-seed. Keep position/orientation/linear/angular imitation masks explicit; do not accidentally free
-only orientation and call the whole arm unimitated.
+A1 回答字面问题；A2 检验相同的塑形预算是否更适合花在平衡/就绪上。损失量级必须只从冻结的 A0 转轨中估计一次，
+不得按随机种子分别调整。位置/姿态/线速度/角速度模仿 mask 必须显式列出；不得意外地只释放姿态模仿，却声称整条手臂均未模仿。
 
-Always-on non-compensable terms remain: joint/torque/action bounds, self-collision, racket/handle to
-body/table/net clearance and fall/safe-halt logic. Log left-arm pose/action/jerk and clearance so a
-quiet reward cannot hide uncontrolled motion.
+以下不可补偿项始终开启：关节/力矩/动作边界、自碰撞、球拍/手柄与身体/球台/球网的间隙，以及摔倒/安全停机逻辑。
+记录左臂位姿/动作/加加速度和间隙，以免 reward 未报警却隐藏了不受控动作。
 
-Only if A1 or A2 survives does the mask enter the already designed balance-debt/ready-potential
-study. Use a small paired `mask x recovery-mixture` interaction first; do not launch a full weight
-grid. For any surviving mixture, keep total shaping budget fixed during the ratio simplex and test a
-second total-budget level so PPO reward-scale effects are not mistaken for component interaction.
+只有 A1 或 A2 存活后，mask 才进入已设计的平衡债/ready potential 研究。先做一个小型配对的
+`mask × 恢复混合` 交互实验；不要启动完整权重网格。对任何存活的混合方案，在比例单纯形实验中固定塑形总预算，并测试第二个总预算水平，
+避免把 [PPO](../DEFINITIONS.md) 对 reward 尺度的影响误认为组件交互。
 
-## Acceptance and failure rules
+## 验收与失败规则
 
-Use paired seeds and checkpoint cadence; no best-seed selection. A candidate needs vendor-MuJoCo
-non-inferiority on task-matched return and signed strike geometry, plus improvement in a frozen
-balance endpoint such as fall/guard-reset rate, pelvis/torso stability, support/contact margin or
-fifth-and-later-shot decay. Any new self-hit, hard-clearance breach, joint/torque violation or
-unstable free-arm oscillation rejects the candidate regardless of return score.
+使用配对随机种子和相同的 checkpoint 保存节奏；不得挑选表现最好的随机种子。候选方案必须在厂商 MuJoCo 中做到：与任务匹配的回球和有符号击球几何不劣于基线，
+且在一个冻结的平衡终点上取得改善；该终点可以是摔倒/guard-reset 率、骨盆/躯干稳定性、支撑/接触余量，或第五拍及之后的表现衰减。
+任何新的自碰撞、硬间隙突破、关节/力矩违规或自由手臂不稳定振荡，无论回球分数多高，都要拒绝该候选。
 
-Exact denominators and numeric non-inferiority margins remain open until an accepted baseline and
-vendor paper are bound; therefore this record stays `Design`.
+在绑定一个已验收基线和厂商考卷前，精确分母和数值非劣效界限仍待定；因此，本记录保持 `proposed` 状态。
 
-## Reproduction
+## 复现
 
-No run command exists yet. The eventual preregistration must materialize the left-arm body/joint
-mask and prove in a dependency-light unit test that only the intended imitation components change.
+尚无运行命令。未来的预注册必须将左臂身体/关节 mask 物化，并在一个尽量少依赖的单元测试中证明只有预期的模仿组件发生改变。
 
-## Results
+## 结果
 
-None. No config, training, simulator, Pod or hardware action has run.
+无。尚未运行任何 config、训练、仿真器、Pod 或硬件操作。
 
-## Limitations and claims not made
+## 局限与未宣称事项
 
-The free left arm may help angular-momentum control, but imitation removal alone does not provide a
-balance objective. Conversely, a balance benefit can interact with recovery/ready shaping, which is
-why the direct mask is screened before the small interaction paper.
+自由左臂可能有助于控制角动量，但只取消模仿并不会提供平衡目标。反过来，平衡收益可能与恢复/就绪塑形产生交互；
+这就是为什么要先筛查直接 mask，再做小型交互考卷。
 
-## Decision and next action
+## 决定与下一步
 
-Queue after one task-matched vendor-MuJoCo baseline exists. If the direct mask has no balance gain or
-harms return, stop; do not spend GPUs on reward-ratio sweeps.
+等待出现一个与任务匹配的厂商 MuJoCo 基线后再排队。如果直接 mask 没有带来平衡收益，或伤害回球，就停止；不要把 GPU 花在 reward 比例扫描上。

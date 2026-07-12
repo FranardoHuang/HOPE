@@ -4,7 +4,9 @@ HOPE is an open platform for humanoid robot table tennis, developed by [Hitch In
 
 This repository contains the **reference design documents**, early implementation code, and support materials for the HOPE system architecture, covering motion capture setup, model-based racket planning, reinforcement learning training, simulation, and deployment.
 
-For developer and agent navigation, start with [docs/START_HERE.md](docs/START_HERE.md). It indexes the current project gates, folder roles, asset policy, and update rules.
+开发者和 agent 先读 [docs/START_HERE.md](docs/START_HERE.md)，再使用一站式
+[docs/INDEX.md](docs/INDEX.md) 路由。索引为每类任务列出最小阅读集，人不需要再给
+agent 逐个指文件。
 
 ## About This Branch (`codex/integrate-support-materials`)
 
@@ -12,7 +14,7 @@ This branch turns the HOPE repo from a set of public reference-design documents 
 
 On top of `main`, it adds:
 
-1. **A documentation harness under [docs/](docs/)** — a hub rooted at [docs/START_HERE.md](docs/START_HERE.md): gated milestones ([docs/gates/](docs/gates/) G00–G08), per-task how-tos ([docs/operations/](docs/operations/)), interface contracts ([docs/interfaces/](docs/interfaces/)), plus [PROJECT_MAP](docs/PROJECT_MAP.md), [DEFINITIONS](docs/DEFINITIONS.md), [PROGRESS](docs/PROGRESS.md), [ASSET_POLICY](docs/ASSET_POLICY.md), and the [AGENTS.md](AGENTS.md) agent rules.
+1. **A documentation harness under [docs/](docs/)** — a hub rooted at [docs/START_HERE.md](docs/START_HERE.md): current setting/stage decisions in [NOW](docs/NOW.md), per-experiment records under [docs/experiments/](docs/experiments/), curated important mainline changes in [TIMELINE](docs/TIMELINE.md), gated milestones ([docs/gates/](docs/gates/) G00–G08), per-task how-tos ([docs/operations/](docs/operations/)), interface contracts ([docs/interfaces/](docs/interfaces/)), plus [PROJECT_MAP](docs/PROJECT_MAP.md), [DEFINITIONS](docs/DEFINITIONS.md), [PROGRESS](docs/PROGRESS.md), [ASSET_POLICY](docs/ASSET_POLICY.md), and the [AGENTS.md](AGENTS.md) agent rules.
 2. **Integrated A3 support materials** under [agi/](agi/): the A3 ping-pong URDF, a MuJoCo/AimRT sim example, and a tracked subset of the Agibot deployment package (the ~1.7 GB full payload is git-ignored — see *Assumptions & Limitations*).
 3. **A WBC training scaffold** under [hope_training/whole_body_tracking/](hope_training/whole_body_tracking/): a new A3 ping-pong task (`HOPE-PingPong-AgibotA3-v0`), a Hydra config tree, the `setup_train_env.sh` launcher, richer Weights & Biases telemetry, reference-coupled racket target sampling, and the reward-shaping `strike_success=0` fix.
 4. **External-reference auto-sync** ([scripts/sync_external_repos.sh](scripts/sync_external_repos.sh)) and an expanded `.gitignore` so heavy/vendor artifacts stay out of git.

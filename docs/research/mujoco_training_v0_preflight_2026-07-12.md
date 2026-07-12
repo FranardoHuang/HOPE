@@ -1,5 +1,8 @@
 # Native MuJoCo training v0 preflight (2026-07-12)
 
+> 术语更正：本文的 native MuJoCo 训练首卷现统一叫 `Trainer-v0`；只有固定同卷的
+> planner + policy + C++ runner + vendor runtime 部署仿真演示叫 `Gate3-D0`。不再共用裸 `D0`。
+
 Status: **design audited; implementation not started; G04/G05/G06 remain `Partial`**.
 
 This note turns the P0 priority decision into a minimum implementation boundary. It is a read-only
@@ -63,7 +66,7 @@ contract must hash the resolved values below, not only `a3_pingpong.xml`.
 
 | Field | `isaac_bank_parity_v1` | `vendor_gate3_v1` |
 | --- | --- | --- |
-| Purpose | Reproduce the current schema-3 Isaac/BankExam execution profile. | D0 training target and final deployment-simulator prerequisite. |
+| Purpose | Reproduce the current schema-3 Isaac/BankExam execution profile. | `Trainer-v0` target and final deployment-simulator prerequisite. |
 | Timestep/control | Current Phase-1 profile is 5 ms physics, four substeps per 20 ms actor tick. | Source MJCF is 1 ms; explicit PD is recomputed before every 1 ms `mj_step`. |
 | Passive terms | Formal zero-friction profile zeros native damping/frictionloss, then installs schema-bound actuator facts. | Preserve resolved vendor MJCF damping, frictionloss, armature and motor ctrl ranges. |
 | Integrator/PD | Isaac-style implicit joints put Kd in damping and use `implicitfast`; explicit joints follow schema. | MJCF default integrator plus vendor subscriber's explicit `Kp(qdes-q)+Kd(dqdes-dq)+tau`. |
@@ -184,7 +187,7 @@ descendant receives a new backend lineage and cannot inherit Isaac exactness.
   return scorer, normalizer drift, unbound runtime action post-processing and in-memory MJCF
   mutation as explicit common-mode false-green risks.
 
-## 2--3 day D0 sequence
+## 2--3 day `Trainer-v0` sequence
 
 1. **Day 0:** freeze `vendor_gate3_v1`, implement plant/179 observation/action adapter and pass the
    reset/action/reward canaries. Do not start PPO while any canary is red.
@@ -192,9 +195,9 @@ descendant receives a new backend lineage and cannot inherit Isaac exactness.
    finite PPO update, save/resume/export smoke, actor-only assertions and measured throughput.
 3. **Day 2:** run equal-budget frozen-source versus warm fine-tune with at least two seeds and
    frequent checkpoints. Use independent K20 screens and preregistered K100 decisions, then submit
-   the retained checkpoint to exact vendor Gate3 D0. One seed is smoke evidence only.
+   the retained checkpoint to exact vendor `Gate3-D0`. One seed is smoke evidence only.
 
-Use a one-shot D0 episode: named stand, random train-bank target and bounded hold, one complete clip
+Use a one-shot `Trainer-v0` episode: named stand, random train-bank target and bounded hold, one complete clip
 plus fixed follow-through, then terminate/reset. It makes no carry-state or continuous-rally claim.
 Physical ball, table/net scene integration and no-reset recovery follow after this baseline.
 
@@ -260,24 +263,21 @@ plant mutation and metrics/virtual-return code but no training reward interface,
 checkpoint loader that keeps every matching tensor rather than enforcing actor-only transfer. At
 this base, `ball_wiring_ancestor_rc=1` proves the separately tracked handoff is not in main.
 
-## 2026-07-13 decision and throughput continuation gate
+## 2026-07-13 决策与吞吐继续门
 
-Franco approved native MuJoCo **feasibility and implementation** as a P0 capability track. This is
-not permission to delay the few-day D0: D0 remains the exact Agibot vendor Gate3 path with our
-planner and policy. Current evidence establishes a held-out return/strike-execution collapse, not a
-physical-balance collapse; matched physical-fall counts are zero. With no collidable ball/table/net,
-the current vendor scene can produce only no-ball balance/strike-state diagnostics.
+franco 已批准 native MuJoCo **feasibility/implementation** 作为 P0 能力轨，但这不允许拖延
+几天内的 `Gate3-D0`：D0 仍是 exact Agibot vendor Gate3 上的自有 planner+policy 链。
+现有证据只证明留出卷的解析回球/击球执行塌陷；matched physical-fall 为零，不能声称物理平衡
+也已退化。当前 vendor scene 没有可碰撞球/台/网，只能产生无球 balance/strike-state diagnostic。
 
-Before any CPU-Python long run, the first single-env core must bind CPU/model, core count, MuJoCo
-version, MJCF/effective-profile/source hashes and preregister the total transition budget. Benchmark
-`N=1/8/32/64` for both simulation-only and complete rollout plus one PPO update, recording physics
-steps/s, policy environment-steps/s, real-time factor, RSS, CPU use, scaling efficiency and PPO
-update time. Project the wall clock for control/fine-tune x two seeds. Continue that backend only if
-the complete paper fits inside 48 hours while retaining 30% reserve; otherwise move the hot path to
-C++/OpenMP or a separately parity-gated MJX/MJWarp backend. This throughput decision never replaces
-vendor Gate3 and does not block D0.
+任何 CPU-Python 长跑之前，第一个 single-env core 必须绑定 CPU 型号、核数、MuJoCo 版本、
+MJCF/effective-profile/source SHA，并预注册总 transition budget。对 `N=1/8/32/64` 分别测
+sim-only 和完整 rollout+一次 PPO update，记录 physics step/s、policy env-step/s、RTF、RSS、
+CPU 使用率、扩展效率和 PPO update 时间，再推算对照/微调 × 两 seed 的墙钟。只有完整 paper
+能在 48 小时内完成且留 30% 余量，才继续该 backend；否则把热路径转到 C++/OpenMP，或另行经过
+parity 门的 MJX/MJWarp。吞吐门不替代 vendor Gate3，也不阻塞 `Gate3-D0`。
 
-Candidate preflight `6e5fce3` is held NO-MERGE until four negative-tested P1s close: action tape and
-trace coverage of clamp/runtime adapters, alias/exec static-source escapes, strict duplicate/nonfinite
-JSON parsing, and MJCF `compiler strippath` semantics. Its current authorization bits are correctly
-all false, so this hold is source correctness rather than evidence of an accidental launch.
+候选 preflight `6e5fce3` 在四个带负测的 red-team P1 关闭前保持 `NO-MERGE`：action tape/trace
+必须覆盖 clamp/runtime adapter；static source 不能被 alias/exec 绕过；JSON 必须拒 duplicate/
+nonfinite；MJCF `compiler strippath` 语义必须正确。当前授权位全 false 只说明不会误启动，
+不能抵消这些源码正确性缺口。

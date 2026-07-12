@@ -2,6 +2,10 @@
 
 Status: Research track (Phase 2 roadmap recorded 2026-07-03)
 
+> **命名提醒：** 本文件的 “Phase 2 Performance Roadmap” 是 2026-07-03 建立的宽泛性能研究桶，
+> 不是现行课程“阶段 2”的定义。2026-07-08 已把课程重排为阶段 1 固定点、阶段 2 虚拟球变到达
+> 状态、阶段 3 物理球进场；连续恢复和部署验证另列。当前定义与状态只看 [NOW](../NOW.md)。
+
 ## Goal
 
 Improve beyond the HITTER-compatible baseline by targeting weaknesses that can decide matches.
@@ -28,11 +32,9 @@ a table-tennis athletic stance). Everything downstream needs the real anchor:
 - P2.1 recovery must know what to recover TO;
 - P2.4 stitching is "ready → strike → ready" by definition;
 - backhand stand-entry and the deploy idle pose are the same stance;
-- PACE anchors its residual action space to a nominal ready pose (hand raised); SMASH's clips all
-  pass through prep/recovery phases; ACE uses a near-time-optimal reset MPC and an
-  incoming-ball/desired-landing-conditioned prepare reset target. ACE's fixed-installation,
-  non-free-standing robot does not validate humanoid balance recovery or arbitrary
-  mid-followthrough arrival.
+- PACE 把 residual action 锚在举手的 nominal ready pose；SMASH 的 clip 都经过准备/恢复阶段；
+  ACE 使用近时优的 reset MPC，并按来球和期望落点选择 prepare reset target。但 ACE 是固定安装、
+  非自由站立机器人，不能替代 humanoid 平衡恢复或挥拍中途随机来球的证据。
 
 Plan (v0 needs a source decision — franco): (a) record one short ready-stance video through the
 existing GVHMR→GMR pipeline (cheapest, consistent), (b) handcraft the joint pose, or (c) average
@@ -67,9 +69,8 @@ to build it.
   nominal ready pose → recovery emerges without a dedicated reward.
 - SMASH: every reference clip embeds a ~0.54 s recovery segment after contact plus a cyclic strike
   phase variable, making cycles chainable.
-- Ace (cheap alternative/complement): train single shots but sample dynamic episode initial states
-  from reset plans stored during earlier training episodes instead of always using a stationary
-  default state.
+- ACE（可借鉴但不能直接外推）：训练单拍时，可从早先训练 episode 保存的动态 reset plan 中采样
+  初始状态，而不是总从 stationary default state 开始。
 
 ### P2.2 Reference-motion orientation normalization
 
@@ -271,16 +272,15 @@ Done:
 
 Not done:
 
-- The new P2.1/P2.4 mini-spec is not simulator-accepted yet. All ten videos
-  passed structural GVHMR reconstruction and CPU GMR retargeting, but the GMR
-  outputs deliberately retain per-video body betas and remain diagnostic.
-  The first canonical-MuJoCo replay found no sampled robot self-contact but
-  found `7.7--8.4 cm` floor penetration across every frame, so ground/root
-  calibration and all downstream robot-clearance, dynamics, contact and
-  returnability gates are still open. A single-file, SHA-bound, no-clobber
-  collision-geometry grounding tool is implemented and tested against the
-  real canonical MJCF, but no tracked candidate has yet passed its output
-  report or the required inter-frame re-audit.
+- The new P2.1/P2.4 mini-spec is not simulator-accepted yet. All ten videos now
+  have canonical-beta GMR, content-bound root-z grounding and a dense 240 Hz
+  sampled ground/self/body-clearance screen: 5,162 samples show no ground
+  danger, self-collision, `<5 mm` body clearance failure or `<20 mm` warning.
+  This closes the earlier `7.7--8.4 cm` floor-penetration finding; it does not
+  promote a motion. The frozen canonical-frame 64-question screen returned
+  zero common support, so two-vs-four remains inconclusive. Exact schema-2
+  candidate materialization, spatial strike-point retarget, whole-path
+  table/net clearance, vendor L1 dynamics and Gate3/Gate3B remain open.
 - The audit-derived items 1-4 are not yet scheduled; item 2 must land before/with the mocap
   bridge.
 
@@ -303,9 +303,9 @@ Not done:
 
 ## V5 professional-transfer and Phase accelerator (2026-07-10)
 
-Codex owns this short-horizon research line and its NOW ordering. The question
-is whether professional-human path/contact geometry/proximal-to-distal order is
-a useful soft prior for A3, not whether A3 can copy every human joint sample.
+这条短期研究线的人类责任人是 franco，执行者是 Codex。要回答的问题是：
+专业人类的路径、接触几何和从近端到远端的发力顺序，能否成为 A3 有用的软先验；
+不是要证明 A3 能逐关节照抄人类动作。
 
 The preregistered axes are:
 
@@ -334,7 +334,7 @@ does not wait for perfect imitation: it advances with the corrected ruler and
 uses task-driven lower body, per-question timing and position/spin curricula.
 
 The 2026-07-11 local-work audit also retained three causal follow-ups in the
-NOW queue, without authorizing a training launch: S1 old-helper/S1-only/
+current feature/experiment registry, without authorizing a training launch: S1 old-helper/S1-only/
 S1+guidance continuations from the same checkpoint and budget; venue-shaped
 temporally correlated prediction error versus a shuffled control and an
 explicit confidence/history input; and separation of R8's envelope penalty
@@ -360,12 +360,13 @@ paired training -> T0/T1 recovery. The memory-gated Pod1 GVHMR queue completed
 10/10 structural reconstructions with full bindings tracked in
 `configs/motion_video_gvhmr_results_20260711.json`. A separate CPU-only,
 bundle-bound GMR queue then completed 10/10 finite 30 Hz, 31-DoF diagnostic
-retargets; `configs/motion_video_gmr_results_20260711.json` records all
-input/output/log/audit hashes and keeps `formal_eligible=false`. The pilot's
-sampled zero-self-contact result is not promotion evidence because the root is
-still about 8 cm below the floor and table/net geometry was absent. No
-grounded schema-2 clip, four-action actor, recovery policy or hardware
-candidate exists yet. The mini-spec does not authorize real-robot testing.
+  retargets; `configs/motion_video_gmr_results_20260711.json` records all
+  input/output/log/audit hashes and keeps `formal_eligible=false`. Later
+  canonical-beta grounding and dense safety evidence closes the discrete floor
+  penetration and sampled body-clearance prerequisites, as summarized above,
+  but there is still no promoted exact schema-2 clip, four-action actor,
+  recovery policy or hardware candidate. The mini-spec does not authorize
+  real-robot testing.
 
 Evidence immutability was rechecked on 2026-07-12. The original per-video-beta
 GMR result continues to bind the exact auditor SHA used to generate it; the
@@ -375,63 +376,51 @@ wrong extension as separate fail-closed errors, including dot-only names such
 as `..mp4`. These are provenance/diagnostic repairs only: no motion was
 promoted, no Pod job was launched and no hardware action was authorized.
 
-### Primary-source recovery/ready decision (2026-07-13)
+## 恢复与等待的原文审计结论（2026-07-13）
 
-The recovery literature was audited against the actual arbitrary-arrival
-question rather than cited as generic inspiration. ACE directly supports an
-interruptible near-time-optimal reset bridge plus a conditioned prepare pose;
-it does not contain free-standing humanoid balance. HITTER proves long real
-rallies and 10-second multi-swing training, but changes the task after a swing
-completes. SMASH preserves a preparation/recovery half-clip, cyclic phase and
-generation-boundary smoothness, but uses the Motion-VAE offline and does not
-publish a mid-followthrough reveal treatment. PACE uses a raised-hand nominal
-residual and up to five serves, not a randomized inter-stroke arrival paper.
-None of these sources proves arbitrary-time A3 recovery or vendor-MuJoCo
-Gate3B.
+这轮审计针对“上一拍尚未完全结束时，下一拍在任意时刻到来”这个具体问题逐项核对原文，
+不再把论文名当作笼统背书。ACE 支持可打断的近时优 reset bridge 和条件化 prepare pose，
+但没有自由站立 humanoid 的平衡债；HITTER 只在一拍完成后换题；SMASH 的 preparation/recovery
+半段、循环 phase 和边界平滑服务于离线扩库及 runtime motion matching；PACE 的五连发也不是
+挥拍中途随机揭题。因此这些工作都不能直接证明 A3 的任意时刻恢复或 vendor MuJoCo Gate3B。
 
-The research track therefore separates hard safety, dynamic balance debt,
-ready-set potential and random arrival. Arrival is first a schedule/state-
-coverage axis scored by the real next strike, not a third dense reward.
-`T0` keeps cycle-bound installation, `T1` changes only event-driven structure,
-and `T2` is a later learned-recovery increment. If T1 needs shaping, balance
-and ready start as a paired-seed `2^2`. A full `2^3` is permitted only after an
-independent readiness critic is locked on separate train/calibration splits and
-passes a one-shot critic-gate q50 disjoint from sealed formal Gate3B q50, without
-leaking the unrevealed task. A surviving three-term blend uses a seven-point fixed-
-budget simplex plus at least one second total-budget level; fixed total alone
-cannot identify PPO reward magnitude. Full primary links, non-analogy limits,
-T0/T1/T2 and q50 failure criteria are in
-[the continuous-rally timing audit](../research/phase1_continuous_rally_timing_2026-07-11.md).
-This is a design/literature result only; G05/G06 stay `Partial`, and no Pod,
-simulator or hardware run is authorized by it.
+现行设计把硬安全、动态平衡债、ready-set potential 和随机到球拆开。随机到球首先是
+环境/题目/截止时间轴，由真实下一拍评分，不是第三项 dense reward。T0 保持按完整周期换题；
+T1 只改成事件驱动结构并冻结 reward；T2 才允许 learned shaping。若 T1 仍失败，先用配对 seed
+做平衡债与 ready potential 的 `2^2`。只有一个不偷看未揭示题目的 readiness critic 在独立
+训练/校准集上锁定，并一次性通过与 sealed Gate3B q50 隔离的 critic-gate q50，才能扩成 `2^3`。
+存活三项再做七点固定总预算 simplex，并至少补一个第二总预算量级；只固定总量无法识别 PPO
+对 reward 绝对尺度的敏感性。完整原文、T0/T1/T2、非类比边界和 q50 失败条件见
+[连续挥拍时序审计](../research/phase1_continuous_rally_timing_2026-07-11.md)。这只是设计和文献证据，
+不增加 G05/G06 runtime credit，也不授权 Pod、simulator 或真机运行。现有 machine prereg、
+validator 和 operation 仍固定旧三 reward/full `2^3`；新设计尚未物化，必须另建内容寻址版本，
+不得改写旧证据或按旧合同点火。
 
-The motion-library screen has the same non-analogy rule. Its frozen-stance
-`0/64` means only that the old fixed questions did not intersect the motions at
-the same frame; it does not reject the motions. Effectiveness is defined over
-each motion's own safe contact-time manifold, a compatible incoming-ball/stroke
-question family, and a legal whole-trajectory `SE(2)` stance. Backhand-pull B
-(`frame 49`, intrinsic `32/32`, nearest old question `0.165 m`) and C
-(`frame 50`, `27/32`, `0.237 m`) remain candidates inside only the `0.30 m`
-translation-norm bound. Forehand scoring is blocked on the roughly `170 deg` face-sign ambiguity,
-and block motions require a block-specific paper rather than the pull paper.
-Schema-2, L0, vendor-L1 self-hit and full table/net swept clearance `>=5 mm`
-grant training eligibility only; they do not prove return effectiveness.
+动作库也采用同一条“不能靠类比晋级”的规则。冻结站位得到 `0/64`，只说明旧固定题没有在
+同一帧覆盖这些动作，不表示动作本身无效。有效性必须同时满足：动作自己的安全触球时空流形、
+适配的来球/动作题族，以及合法的整轨 `SE(2)` 站位。反手拉 B（frame 49，intrinsic `32/32`，
+最近旧题 `0.165 m`）和 C（frame 50，`27/32`，`0.237 m`）仍只是满足 `0.30 m` 平移范数粗界的
+候选；正手先解决约 `170°` 拍面符号歧义，挡球必须另出挡球题。schema-2、L0、vendor L1
+self-hit 和整轨桌网扫掠余量 `>=5 mm` 只授予训练资格，不证明回球有效。
 
-### 2026-07-13 compositional motion additions
+## 组合动作新增设计（2026-07-13）
 
-The metadata-only v12/static/motion intake adds three future axes without changing the active
-queue: a primary v12 block pair, a fifth high-press action for high contact points, and a
-displacement-conditioned lateral lower-body teacher. The last axis tests the hypothesis that one
-three-event step path can combine with multiple upper-body strokes; it does not assume the pelvis,
-torso and foot contacts are separable or that left/right reflection is valid. Event-anchored
-piecewise retiming, explicit root ownership and constrained whole-body seam solving precede TOPP.
-The recovery/closing step targets the source's initial relative foot-separation vector in the
-heading-aligned ground plane, preserving both stance width and fore-aft stagger instead of allowing
-the feet to finish narrowly together.
+新登记的 v12/高点拍压/横移动作给长期路线增加三条彼此独立的问题：v12 挡球是否在挡球专卷上
+胜过旧候选；高点拍压第五动作是否覆盖四动作库漏掉的高球；一个按横移距离条件化的下肢老师能否
+与多个上半身挥拍组合。素材标签只是人类假设，不是已测性能。
 
-The action selector still follows task coverage: each action must first pass its own compatible
-incoming-ball paper and whole-trajectory safety gates, then a train-fitted stable selector is judged
-on an immutable held-out split. A high-press clip is not evaluated on the old pull paper. A paired
-non-striking-left-arm imitation mask is also designed as a possible balance improvement, with hard
-safety always on and reward-budget interactions deferred until the direct effect survives. These
-are `Design` records, not accepted motions or training authorizations.
+横移动作先按准备、击球支撑和恢复三个事件分段；根平移/朝向和腿/足接触由下肢老师负责，上半身
+动作以骨盆相对坐标负责球拍目标，骨盆高度/倾角与躯干属于耦合变量。组合必须用受约束的全身求解
+保留有符号击球几何、支撑足和安全站距；不能直接“补到同长度后拼关节”，也不能假设左右镜像天然
+有效。TOPP 只在几何与接触先过门后用于重定时。
+
+动作选择仍按任务覆盖裁决：每个动作先在自己的来球题族和整轨安全门中合格，再用训练集拟合选择器，
+最后在不可变留出集上考试。非击球左臂模仿解除也是单独的配对消融，硬安全始终开启。这些都只是
+设计记录，不是动作采用或训练授权。
+
+## 文档路由更新（2026-07-12）
+
+G08 仍是长期 blind-spot 路线图。当前已采用 setting、阶段/小目标构成和 feature 决定统一放在
+[`docs/NOW.md`](../NOW.md)；动作/动作库/恢复实验的详细记录放在
+[`docs/experiments/`](../experiments/README.md)。本次文档修改没有运行模拟、训练或真机测试，
+也不改变 G08 的 gate 状态。

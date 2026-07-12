@@ -1,124 +1,95 @@
-# v12, fifth-action and displacement-conditioned lower-body teacher design
+# v12、第五动作与按位移条件化的下肢老师设计
 
-Status: Design
-Human owner: Franco
-Executor: Codex (design); runtime executor unassigned
-Branch: Franco_codex/new-motion-batch-20260713
+- 状态：`proposed`
+- 人类负责人：Franco
+- 执行者：Codex（设计）；运行时执行者：`UNASSIGNED`
+- 工作分支：`Franco_codex/new-motion-batch-20260713`
 
-## Question and decision scope
+## 问题与决策范围
 
-This record keeps three related but separately decidable questions:
+本记录保留三个相关但可分别决策的问题：
 
-1. Does the v12 forehand/backhand block pair beat the best earlier block candidate on a
-   block-specific paper?
-2. Does a backhand high-press action add safe return coverage for high balls that the four-action
-   library misses?
-3. Can one displacement-conditioned lateral-step teacher be composed with different upper-body
-   strokes without losing racket contact geometry, support-foot validity or balance?
+1. v12 正手/反手挡球动作对，能否在挡球专用考卷上胜过先前最好的挡球候选？
+2. 反手高点拍压能否安全覆盖现有四动作库漏掉的高球？
+3. 一个按位移条件化的横移下肢老师，能否与不同上肢挥拍组合，同时不丢失球拍接触几何、支撑足合法性或平衡？
 
-The exact raw-video intake is complete, but no processed motion or immutable behavioral paper
-exists. This record is therefore `Design`, not a preregistration or queue authorization.
+原始视频的精确登记已完成，但尚无处理后动作，也没有不可变的行为考卷。因此，本记录状态是
+`proposed`，而不是预注册或队列启动授权。
 
-## Inputs and immutable bindings
+## 输入与不可变绑定
 
-- raw intake: `configs/motion_video_intake_20260713.json`, SHA-256
-  `44b00b3c46c837d797990bc6f6255055c0ff83c1bb8643ca81f9707033ca304c`;
-- historical Franco/v6/v7 intake and safety/counterfactual ledgers remain separate generations;
-- final physical arbiter: exact Agibot vendor MuJoCo Gate3 for one shot and Gate3B for randomized
-  arrival; Isaac is training/diagnostic only.
+- 原始素材登记：`configs/motion_video_intake_20260713.json`，SHA-256 为
+  `44b00b3c46c837d797990bc6f6255055c0ff83c1bb8643ca81f9707033ca304c`；
+- 历史 Franco/v6/v7 素材登记以及安全/反事实台账仍属于独立世代；
+- 最终物理裁判：单拍使用 Agibot 厂商 MuJoCo 的精确
+  [Gate3](../DEFINITIONS.md)，随机到球使用 Gate3B；Isaac 只用于训练和诊断。
 
-Missing bindings before any run include canonical-beta GVHMR/GMR outputs, runtime-order schema-2
-NPZs, manually reviewed phase events, compatible question banks, selector train/exam split,
-vendor MJCF/runtime SHA and a fixed transition/seed budget.
+启动任何运行前仍缺少的绑定包括：canonical-beta GVHMR/GMR 输出、runtime-order
+[schema-2](../DEFINITIONS.md) NPZ、经人工复核的阶段事件、兼容的题库、选择器训练/考试划分、
+厂商 MJCF/runtime SHA，以及固定的交互步数/随机种子预算。
 
-## Design and controls
+## 设计与对照
 
-### v12 and the fifth high-press action
+### v12 与第五个高点拍压动作
 
-Process only the v12 pair as the new v-series primary candidate; "expected best" is a hypothesis.
-Compare it against the strongest safe earlier block candidate under the same block-specific incoming
-ball distribution, station envelope, per-side denominator, seeds and training budget. The forehand
-cell cannot promote until the signed-face honesty gate is closed.
+只处理 v12 正反手动作对，并把它作为新 v 系列的首要候选；“预计最好”只是假设。必须在相同的
+挡球专用来球分布、站位包络、每侧分母、随机种子和训练预算下，将它与早期最强的安全挡球候选比较。
+在有符号拍面诚实门关闭前，正手格不得晋级。
 
-The high-press action gets its own question family: high reachable contact points, a forward and
-downward-facing racket path, and legal net/table landing. It is not allowed to inherit a loop paper
-or to gain credit only from a kinematic counterfactual. Four-versus-five actions is tested only
-after all five candidates independently pass the same safety/dynamics gates. The stable selector
-is fit on a train split from incoming-ball features and chooses the action with the best conservative
-return estimate; the immutable exam split never supplies selector labels. Ball quality is future
-work and is not part of the first selector.
+高点拍压有自己的题族：手臂可及的高击球点、向前移动且拍面朝下的球拍路径，以及合法过网与落台。
+它不得沿用拉球考卷，也不得仅凭运动学反事实获得分数。只有当五个候选动作分别通过相同的安全与动力学门后，
+才测试四动作与五动作的对比。稳定选择器用来球特征的训练集拟合，并选择保守回球估计最高的动作；不可变考试集永不向选择器提供标签。
+球的质量属于后续工作，不纳入第一版选择器。
 
-### Lateral teacher composition
+### 横移老师的组合
 
-Every upper- and lower-body source is segmented into three event intervals: preparation/step,
-nominal strike support, and follow-through/recovery. Because the recordings are air motions, a
-human-reviewed nominal strike frame is only an alignment anchor until a task-specific contact
-manifold confirms it.
+每个上肢和下肢动作源都分成三个事件区间：准备/迈步、标称击球支撑、随挥/恢复。因为录像都是空挥动作，
+经人工复核的标称击球帧只是对齐锚点；在针对任务的接触流形确认它之前，不得将其视为真实击球帧。
 
-For each pre/post interval, use monotone event-anchored time maps. The composed interval duration is
-the longest **dynamically feasible** upper/lower duration, not merely the video with most frames.
-TOPP or another time-scaling solver may lengthen a fixed path under velocity/acceleration limits;
-it cannot repair a wrong foot-contact path, change stride distance or prove balance.
+每个前后区间使用由事件锚定的单调时间映射。组合区间的时长取动力学上可行的上肢/下肢时长中较长者，
+而不是简单选取帧数最多的视频。TOPP 或其他时间尺度求解器可在速度/加速度限制下延长固定路径；它不能修复错误的足接触路径、
+改变步幅，或证明平衡。
 
-Ownership at the seam is explicit:
+组合交界处的所有权必须明确：
 
-- the lower-body teacher owns world root translation/yaw, feet and leg joints/contact phases;
-- the upper-body stroke is represented pelvis-relative and owns the racket/contact objective;
-- pelvis height/roll/pitch and torso are coupled seam variables, resolved by constrained whole-body
-  IK/trajectory optimization rather than copied from both sources;
-- the strike anchor must preserve racket position/velocity/signed face while support-foot pose,
-  foot clearance/no-slip and a non-collapsed stance remain valid.
+- 下肢老师负责 world root 平移/偏航、双足、腿部关节和接触阶段；
+- 上肢挥拍以骨盆相对坐标表示，并负责球拍/接触目标；
+- 骨盆高度/滚转/俯仰以及躯干是耦合交界变量，由受约束的全身 IK/轨迹优化解决，不得同时从两个动作源直接复制；
+- 击球锚点必须保留球拍位置/速度/有符号拍面，同时保证支撑足姿态、抬足间隙/无滑移和不塌缩的站距均合法。
 
-The closing step does not target two absolute foot poses. For each candidate, estimate the initial
-heading-aligned horizontal left-to-right foot-separation vector from the first stable ready window
-(a robust median, not one noisy video frame). The terminal ready set restores that relative vector
-after removing common root translation/yaw. This preserves both lateral width and any intended
-fore-aft stagger even when the two feet do not start symmetrically. It applies only after recovery:
-the step and strike-support phases may change the separation. A hard minimum width/no-crossing
-guard remains active throughout, so a source whose initial stance is itself unsafe is rejected
-rather than canonized.
+收步不以两只脚的绝对位姿为目标。对每个候选，从第一个稳定的准备窗口估计初始、与朝向对齐的水平左脚到右脚分离向量；
+应使用稳健中位数，而不是一个有噪声的视频帧。终点准备集在去除公共 root 平移/偏航后恢复该相对向量。这样即使双脚的初始位置不对称，
+也能同时保留横向宽度和有意设置的前后错位。该要求只在恢复后适用：迈步和击球支撑阶段可以改变双脚分离向量。全程仍启用最小站宽/禁止交叉硬保护；
+如果动作源的初始站姿本身就不安全，应当拒绝该动作源，而不是把它定为标准。
 
-Lateral distance is a signed parameter of foot placements/root displacement, not a uniform scale
-of every joint or z coordinate. First measure the safe interval from each source candidate. Test
-independently recorded left/right paths before allowing reflection; a mirrored lower body must pass
-joint-map, asymmetry, self-collision and vendor dynamics checks and cannot mirror the right-hand
-racket stroke.
+横移距离是足落点/root 位移的有符号参数，不是对所有关节或 z 坐标做统一缩放。首先从每个动作源候选中测量安全区间。
+必须先测试分别录制的左移/右移路径，再允许反射；镜像下肢必须通过关节映射、非对称性、自碰撞和厂商动力学检查，且不得镜像右手球拍挥拍。
 
-The minimum composition ablation is:
+最小组合消融为：
 
-- C0: current upper-body stroke teacher with lower-body imitation off and no
-  displacement-conditioned lower-body composition;
-- C1: event-aligned composed teacher at the recorded displacement;
-- C2: the same teacher conditioned on a frozen displacement grid including zero;
-- C3: only after C2 passes, compare independently recorded two-direction teachers with one
-  mirror-derived family.
+- C0：当前上半身挥拍老师；下半身模仿保持关闭，不组合按位移条件化的下肢；
+- C1：按事件对齐的组合老师，使用录像中的原始位移；
+- C2：与 C1 相同的老师，但按包含零位移的冻结位移网格接受条件输入；
+- C3：只有 C2 通过后才进行，对比“左右两个方向分别录制的老师”与“从单方向镜像得到的老师族”。
 
-Naive "pad both to the longest clip and concatenate joints" is retained only as a falsification
-control. It cannot enter RL if root ownership, foot contacts or whole-body safety fail. A TOPP
-on/off comparison holds the geometric path and contact anchors fixed and repeats every downstream
-gate after retiming.
+朴素的“将两段都填充到最长视频并直接拼接关节”只保留为证伪对照。如果 root 所有权、足接触或全身安全失败，它不得进入 RL。
+TOPP 开/关对比必须固定几何路径和接触锚点，并在重定时后重复所有下游门。
 
-C1/C2 deliberately reintroduce a full-body teacher reward only after the lower-body reference has
-passed composition and dynamics gates. They must not be described as a small change to the current
-setting, whose lower-body imitation is already disabled.
+C1/C2 只有在下肢参考通过组合门和动力学门后，才重新引入全身老师 Reward。不得把它们描述成
+相对当前配方的微小改动，因为当前配方的下半身模仿已经关闭。
 
-## Acceptance and failure rules
+## 验收与失败规则
 
-Before any RL slot, every exact generated motion must pass runtime-order schema 2, L0 finite/limit/
-endpoint checks, vendor-MJCF L1 self/racket-handle clearance, full-trajectory table/net swept
-clearance of at least 5 mm, and vendor dynamics/foot-contact replay. Safety is non-compensable.
+进入任何 RL 时段前，每个精确生成的动作都必须通过：runtime-order schema 2；L0 的有限数/限位/端点检查；
+厂商 MJCF L1 的自碰撞及球拍手柄间隙检查；全轨迹桌/网扫掠间隙至少 5 mm；以及厂商动力学/足接触重放。安全不可用其他指标抵消。
 
-A lateral interface is accepted only if all preregistered displacements preserve the signed strike
-geometry and support constraints; isolated success at the recorded distance is not generalization.
-Every terminal recovery must also return to the candidate-bound initial foot-separation ready set;
-ending with a narrower closed stance is a failure even if the robot has not yet fallen.
-The composed teacher must improve lateral task coverage or balance without degrading common-station
-return beyond a frozen non-inferiority margin. The later four-versus-five decision requires unique
-held-out coverage, not merely a higher training reward.
+只有当所有预注册位移都保留有符号击球几何和支撑约束时，才接受这个横移接口；只在录制距离上成功，不等于泛化。每个终点恢复也必须回到绑定于候选初始双脚分离向量的准备集；
+即使机器人尚未摔倒，以更窄的合脚站姿结束也算失败。组合老师必须提高横移任务覆盖或平衡，同时不得超过冻结的非劣效界限，而损害常见站位上的回球。
+之后的四动作对五动作决策需要在留出集上有独有覆盖，而不能只有更高的训练 reward。
 
-## Reproduction
+## 复现
 
-Only the intake audit is executable now:
+目前只能执行素材登记审计：
 
 ```bash
 python3 scripts/audit_motion_video_intake.py \
@@ -126,23 +97,18 @@ python3 scripts/audit_motion_video_intake.py \
   --source-root /Users/Franco/Downloads
 ```
 
-GVHMR/GMR, event annotation, composition, papers and RL commands remain intentionally absent until
-their input/output hashes and no-clobber artifact roots are frozen.
+在 GVHMR/GMR、事件标注、组合、考卷和 RL 命令的输入/输出 hash 以及不覆盖产物根目录冻结前，有意不提供这些命令。
 
-## Results
+## 结果
 
-Design only. Seven raw videos passed intake; no efficacy, composition or simulator result exists.
+只有设计。七段原始视频已通过素材登记；没有效果、组合或仿真器结果。
 
-## Limitations and claims not made
+## 局限与未宣称事项
 
-Upper/lower motion independence is an engineering hypothesis. Pelvis/torso dynamics, angular
-momentum and foot contact couple them. TOPP provides path timing, not contact stability. One
-successful displacement does not prove continuous lateral generalization, and left/right symmetry
-is not assumed.
+上肢/下肢动作独立性只是工程假设。骨盆/躯干动力学、角动量和足接触会将它们耦合起来。TOPP 只提供路径时序，不提供接触稳定性。
+单个位移上成功不能证明连续横移泛化，也不预设左右对称。
 
-## Decision and next action
+## 决定与下一步
 
-After current P0 closures, run the cheap offline chain in priority order: v12 pair, high-press,
-then the four lateral candidates. Freeze task-specific papers only after their safe contact
-manifolds are measured. Do not allocate RL GPUs to any item that has not passed the full offline
-certificate chain.
+当前 [P0](../DEFINITIONS.md) 收口后，按以下顺序运行低成本离线链：v12 动作对、高点拍压，再到四个横移候选。
+只有在测得它们针对任务的安全接触流形后，才冻结对应考卷。任何未通过完整离线证书链的项目，都不得分配 RL GPU。

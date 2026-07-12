@@ -16,20 +16,19 @@ The current preregistration SHA is `bd90f6f2...0175`, validator SHA is
 This operation is simulator-only. It authorizes no real-robot command or deployment test and does
 not change, stop, promote, or restart a training arm.
 
-## Why This Paper Exists
+## 这张卷为什么存在
 
-The same 100 question IDs produced different rankings because the accepted MuJoCo score used a
-physical paddle/ball outcome while the Isaac score used analytic virtual contact and flight. A
-same schedule is not enough when the measurement instruments differ. The frozen 2x2 separates
-engine execution from instrument behavior:
+同一组 100 道题曾在两引擎里得到不同排名，但双方已有的回球列实际上都是解析判分，且引擎执行和
+判分仪器没有被干净拆开。尤其是当前 Python MuJoCo BankExam 没有仿真中的球拍—球接触：它只物理
+推进机器人，再把击球时的球拍状态交给 `VirtualReturnScorer`。因此“同一题序”不是物理一致性
+证据。冻结的 2×2 要补齐四个真实格子，分别解释引擎执行差异和判分仪器差异：
 
-| Engine | Physical truth | Analytic counterfactual |
+| 引擎 | 物理真值 | 解析对照 |
 | --- | --- | --- |
-| Isaac | required; currently blocked | required; instrumentation prepared, not run |
-| MuJoCo | required; old physical result exists but needs normalized cell output | required; old `cf_*` exists but needs normalized cell output |
+| Isaac | 必须补；Phase-B 只有源码，运行未验证 | 已有解析诊断仍需标准化、内容绑定的格子输出 |
+| MuJoCo | 必须补；当前 BankExam 没有物理格 | 已有 Python BankExam/`cf_*` 解析诊断仍需标准化、内容绑定的格子输出 |
 
-No row or column may substitute for another. In particular, an Isaac analytic return relabeled as
-"physical" fails closed.
+任一行或列都不能替代另一格。尤其是把 Isaac 解析回球改名成“物理回球”时，校验必须直接失败。
 
 ## Frozen Paper
 

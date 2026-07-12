@@ -1,6 +1,12 @@
 # Validate The Phase-1 Recovery-Tuple A/B/C Preregistration
 
-Status: design validation available; launch deliberately blocked
+状态：旧 A/B/C 结构设计可校验；launch 明确 blocked
+
+> 2026-07-13 阻塞说明：本文件绑定的 prereg/validator 仍把 random-arrival readiness 当第三项
+> reward，并强制 full `2^3`。最新文档设计已改为“随机到球先作为环境轴；平衡债/ready potential
+> 先做 `2^2`；第三 critic 独立校准并过隔离 q50 后才可选 `2^3`”。因此下面的 `design-check`
+> 只验证旧结构记录没有漂移，不证明新 reward 次序已经物化，也不授权实验。不得改写旧文件；
+> 必须另建并绑定新的 config、validator、测试和 SHA 后，才能更新本操作并考虑 launch。
 
 ## Purpose
 
@@ -149,7 +155,8 @@ This runbook does not authorize:
 - running a real-robot command;
 - adding recovery rewards before the A/B/C structural result.
 
-If structure later shows that learned shaping is necessary, normalize the three component scales
-on frozen rollouts, run a full paired `2^3` presence/absence design, and only then consider a
-constant-total-budget mixture. Safety and self-contact remain hard constraints and can never be
-compensated by another reward.
+若 T1 结构仍失败，现行文档设计要求先在冻结 rollout 上归一化平衡债与 ready-set potential，
+跑配对 seed 的 `2^2`。随机到球继续作为环境/题目轴；只有 readiness critic 独立训练/校准、
+不泄露未揭题信息，并一次性通过与 sealed Gate3B q50 隔离的 critic-gate q50，才可扩成 `2^3`。
+存活项的固定总预算 mixture 还必须补第二个总 reward 量级。安全与 self-contact 始终是硬约束，
+不能被其他 reward 抵消。由于本文件绑定的 machine contract 尚未同步，这一段仍不授权 launch。

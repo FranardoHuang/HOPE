@@ -1,46 +1,108 @@
-# Documentation Index
+# 工作文档索引
 
-This is the one-stop router after [START_HERE.md](START_HERE.md). Read the smallest set for the
-task at hand; do not treat a historical report or chat transcript as current launch authority.
+这是人和 agent 共用的一站式文档路由。按要求先读
+[`START_HERE.md`](START_HERE.md)，再读本文件，之后只打开与当前任务对应的那一行；不要遍历
+整个 `docs/` 目录，也不要把旧归档当成默认阅读材料。
 
-## Authority
+## 四个当前真源
 
-1. [NOW.md](NOW.md) is the main-only current work board and priority queue.
-2. [gates/](gates/) own acceptance state and blockers.
-3. [experiments/](experiments/README.md) own individual hypotheses, preregistration, runs and
-   decisions.
-4. [interfaces/](interfaces/) own cross-component contracts.
-5. [operations/](operations/) own reproducible commands.
-6. [PROGRESS.md](PROGRESS.md) and [TIMELINE.md](TIMELINE.md) record dated evidence and mainline
-   history; they do not authorize a run by themselves.
+| 要找什么 | 权威位置 |
+| --- | --- |
+| 当前完整训练流程、现行课程阶段、分动作成绩卡、横向连续能力和当前责任人 | [`NOW.md`](NOW.md) |
+| 实验假设、run、证据与采用/拒绝决定 | [`experiments/README.md`](experiments/README.md) |
+| 已进入 `main` 的重要能力和根因修复 | [`TIMELINE.md`](TIMELINE.md) |
+| Gate 状态与可复现验收 | [`gates/`](gates/) |
 
-## Route By Task
+遇到 `SZ`、`v4rg`、`q50`、`K100`、`Gate3-D0`、`E0–E5` 等缩写时，只看
+[术语与人话对照](DEFINITIONS.md)。每个 `run_name/flag` 第一次出现也必须带人话，
+不得要求读者去历史归档猜。
 
-| Task | Read first | Then read |
-| --- | --- | --- |
-| Current roadmap, owners and next checkpoint | [NOW.md](NOW.md) | affected gate and experiment record |
-| Start or interpret an experiment | [experiments/README.md](experiments/README.md) | affected gate, operation and immutable config under `../configs/` |
-| Isaac training or checkpoint monitoring | [G05](gates/G05_isaac_training_first_loop.md) | [run_training.md](operations/run_training.md), [run_on_runpod.md](operations/run_on_runpod.md) |
-| Isaac-to-MuJoCo / BankExam / Gate3 evidence | [G06](gates/G06_isaac_to_mujoco.md) | [policy contract](interfaces/policy_observation_action.md), relevant evaluation operation |
-| Planner or planner-policy pairing | [G06](gates/G06_isaac_to_mujoco.md) | [run_planner.md](operations/run_planner.md), [ROS topics](interfaces/ros_topics.md), [build_and_test.md](operations/build_and_test.md) |
-| Vendor C++ first tick or demo | [G06](gates/G06_isaac_to_mujoco.md) | [first-tick harness](operations/run_gate3_first_tick_harness.md), [end-to-end run](operations/run_pingpong_end_to_end.md) |
-| New motion, retarget, TOPP or 2-vs-4 | [G05](gates/G05_isaac_training_first_loop.md) and [G08](gates/G08_blind_spot_improvements.md) | [motion pipeline](motion_pipeline.md), [counterfactual screen](operations/run_motion_gmr_counterfactual_screen.md), [spatial retarget](operations/run_motion_spatial_retarget_screen.md) |
-| Continuous rally, recovery or random arrival | [G08](gates/G08_blind_spot_improvements.md) | [T1 contract](interfaces/t1_event_training_contract.md), [recovery prereg](operations/run_phase1_recovery_tuple_prereg.md) |
-| Frames, racket face, observation or action semantics | affected file in [interfaces/](interfaces/) | relevant gate and operation |
-| Restore ignored/local assets or environments | [setup_local_sync.md](operations/setup_local_sync.md) | [setup_environments.md](operations/setup_environments.md), [ASSET_POLICY.md](ASSET_POLICY.md) |
-| Real robot preparation | [G01](gates/G01_real_preparation.md) and [G07](gates/G07_mujoco_to_real.md) | [run_deploy_dryrun.md](operations/run_deploy_dryrun.md); never infer hardware authorization from another gate |
+当前一句话状态：仍在阶段 1 固定点训练。最接近正式目标的模型在四个独立初始化间极不稳定，
+拍面正负判分也未过诚实门；现有成绩只是每题重置的 Python BankExam 解析诊断，不是 `Gate3`。
+第 4000 次迭代后续卷只完成文件准备、尚未启动；原生 MuJoCo 训练仍只有不允许合入的预检候选；
+当前 179 维模型的厂商运行链行为、`Gate3B`、标定后机器人物理和新真机测试都没有结果。
 
-## Gates
+## 按任务划分的最小阅读集
 
-- [G00 — materials and harness](gates/G00_materials_and_harness.md)
-- [G01 — real preparation](gates/G01_real_preparation.md)
-- [G02 — data acquisition](gates/G02_data_acquisition.md)
-- [G03 — data processing and physics calibration](gates/G03_data_processing_and_physics_calibration.md)
-- [G04 — MuJoCo and Isaac modeling](gates/G04_sim_modeling_mujoco_isaac.md)
-- [G05 — Isaac training first loop](gates/G05_isaac_training_first_loop.md)
-- [G06 — Isaac-to-MuJoCo parity and vendor gate](gates/G06_isaac_to_mujoco.md)
-- [G07 — MuJoCo-to-real deployment](gates/G07_mujoco_to_real.md)
-- [G08 — blind-spot improvements](gates/G08_blind_spot_improvements.md)
+| 任务 | 只读这些文件 |
+| --- | --- |
+| 理解或修改训练 setting | [NOW 完整流程与当前阶段](NOW.md#1-当前一套训练是怎样完整跑起来的) → 相关实验 → [G05](gates/G05_isaac_training_first_loop.md) → [`run_training.md`](operations/run_training.md) |
+| 认领工作、排队或分配算力 | [NOW 唯一队列](NOW.md#统一工作队列唯一优先级账本) → [跑批作战手册](runbook.md#统一队列排序与算力纪律) → 对应实验 run table |
+| 新增/运行消融 | [`experiments/README.md`](experiments/README.md) + [模板](experiments/TEMPLATE.md) → [G05](gates/G05_isaac_training_first_loop.md) → 训练操作文档 |
+| 原生 MuJoCo `Trainer-v0`/fine-tune | [MuJoCo 实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md) → [v0 preflight](research/mujoco_training_v0_preflight_2026-07-12.md) → [G06](gates/G06_isaac_to_mujoco.md) |
+| 评估/checkpoint 排名 | [Fresh 稳定性](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)或[历史尺](experiments/2026-07/EXP-P1-HISTORICAL-SCHEMA3.md) → [G06](gates/G06_isaac_to_mujoco.md) |
+| 拍面符号/解析判分复核 | [Face-sign forensic](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) → [术语：raw-A/physical-B](DEFINITIONS.md) → G05/G06 |
+| 当前 179-D `Gate3-D0` 演示 | [`Gate3-D0` 实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md) → [G06](gates/G06_isaac_to_mujoco.md) → [`run_gate3_first_tick_harness.md`](operations/run_gate3_first_tick_harness.md) |
+| 恢复/等待/连续对打 | [NOW 连续能力](NOW.md#22-连续能力每个课程阶段都要另考) → [Recovery A/B/C](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md) → [T1 接口](interfaces/t1_event_training_contract.md) → G05/G06 |
+| 新动作/动作库 | [空间重定向实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) + [v12/高点拍压/横移老师设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md) → [G08](gates/G08_blind_spot_improvements.md) → 动作操作文档 |
+| Planner 或 ROS runtime | [G04](gates/G04_sim_modeling_mujoco_isaac.md) / [G06](gates/G06_isaac_to_mujoco.md) → [`run_planner.md`](operations/run_planner.md) → 下方接口文档 |
+| 真机/部署 | [G07](gates/G07_mujoco_to_real.md) → [`run_deploy_dryrun.md`](operations/run_deploy_dryrun.md)；安全 gate 通过前不得下发真机命令 |
+| 恢复 ignored/local 资产 | [`setup_local_sync.md`](operations/setup_local_sync.md) + [`ASSET_POLICY.md`](ASSET_POLICY.md) |
 
-When adding a new document category or changing a folder's role, update this file and
-[PROJECT_MAP.md](PROJECT_MAP.md) in the same branch.
+## 当前实验
+
+| ID | 简短状态 |
+| --- | --- |
+| [`EXP-P1-FRESH-SZ-STABILITY`](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 实验 blocked；model-2000 四 seed 稳定性失败；model-4000 两 Pod 已 prepare，但缺常驻父 supervisor、job 未启动、尚无分数 |
+| [`EXP-P1-FACE-SIGN-FORENSIC`](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) | raw-A 正手接近反号，解析 scorer 可能对 `n/-n` 失明；诚实门未通过 |
+| [`EXP-P1-HISTORICAL-SCHEMA3`](experiments/2026-07/EXP-P1-HISTORICAL-SCHEMA3.md) | 同题同卷尺已可用于诊断排名；所有历史模型仍为 inexact |
+| [`EXP-MUJOCO-NATIVE-TRAINING`](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md) | 实验 blocked；off-main preflight 为 `NO-MERGE`，四个正确性缺口未修；尚无 trusted backend、`VecEnv` 或 PPO smoke |
+| [`EXP-RECOVERY-TUPLE-ABC`](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md) | A/B/C 旧结构合同已验证；T0/T1/T2 与新 reward 次序仅完成文档设计，machine prereg 待同步 |
+| [`EXP-MOTION-SPATIAL-RETARGET`](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | 工具/静态 gate 通过；尚无晋级动作 |
+| [`EXP-GATE3-CURRENT179-D0`](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md) | 实验 blocked；`Gate3-D0` 严格模型 preflight 通过，当前行为尚未运行 |
+| [v12/高点拍压/横移视频登记](experiments/motion_video_intake_v12_static_motion_20260713.md) | 7 段私有视频逐字节登记完成；没有动作处理、安全或行为结论 |
+| [v12/高点拍压/横移组合设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md) | 只有设计；没有 schema-2 动作、仿真或训练结果 |
+| [非击球臂模仿消融](experiments/non_striking_arm_imitation_ablation_20260713.md) | 只有设计；尚未运行配对实验 |
+
+## Gate 索引
+
+| Gate | 范围 |
+| --- | --- |
+| [G00](gates/G00_materials_and_harness.md) | 材料与 harness |
+| [G01](gates/G01_real_preparation.md) | 真实环境准备 |
+| [G02](gates/G02_data_acquisition.md) | 数据采集 |
+| [G03](gates/G03_data_processing_and_physics_calibration.md) | 数据处理与物理标定 |
+| [G04](gates/G04_sim_modeling_mujoco_isaac.md) | MuJoCo/Isaac 建模 |
+| [G05](gates/G05_isaac_training_first_loop.md) | 训练闭环与 checkpoint lineage |
+| [G06](gates/G06_isaac_to_mujoco.md) | 跨引擎评估与 Gate3 前置条件 |
+| [G07](gates/G07_mujoco_to_real.md) | 部署与真机安全 |
+| [G08](gates/G08_blind_spot_improvements.md) | 动作/恢复/旋转/泛化的长期路线图 |
+
+## 操作索引
+
+| 操作 | 文件 |
+| --- | --- |
+| 构建与测试 | [`build_and_test.md`](operations/build_and_test.md) |
+| Isaac 训练 | [`run_training.md`](operations/run_training.md) |
+| 统一队列、排序与算力 | [`runbook.md`](runbook.md) |
+| 共享 RunPod 作业 | [`run_on_runpod.md`](operations/run_on_runpod.md) |
+| Fresh model-4000 q50 考卷 | [`run_phase1_fresh_sz_model4000_seed_stability_q50.md`](operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md) |
+| 恢复 preregistration | [`run_phase1_recovery_tuple_prereg.md`](operations/run_phase1_recovery_tuple_prereg.md) |
+| Gate3 首个有效周期 | [`run_gate3_first_tick_harness.md`](operations/run_gate3_first_tick_harness.md) |
+| 端到端乒乓链路 | [`run_pingpong_end_to_end.md`](operations/run_pingpong_end_to_end.md) |
+| 部署 dry-run | [`run_deploy_dryrun.md`](operations/run_deploy_dryrun.md) |
+| 语义正确的 plant | [`prepare_semantics_correct_plant.md`](operations/prepare_semantics_correct_plant.md) |
+| 动作空间重定向 | [`run_motion_spatial_retarget_screen.md`](operations/run_motion_spatial_retarget_screen.md) |
+| 本地/已忽略资产恢复 | [`setup_local_sync.md`](operations/setup_local_sync.md) |
+
+## 接口索引
+
+| 合同 | 文件 |
+| --- | --- |
+| Policy 观测/动作/导出 | [`policy_observation_action.md`](interfaces/policy_observation_action.md) |
+| 关节顺序与机器人状态 | [`joint_order_and_robot_state.md`](interfaces/joint_order_and_robot_state.md) |
+| 坐标系与坐标 | [`frames_and_coordinates.md`](interfaces/frames_and_coordinates.md) |
+| 球拍接触几何 | [`racket_contact_geometry.md`](interfaces/racket_contact_geometry.md) |
+| Plant 语义 | [`plant_semantics_contract.md`](interfaces/plant_semantics_contract.md) |
+| T1 事件/恢复时序 | [`t1_event_training_contract.md`](interfaces/t1_event_training_contract.md) |
+| ROS topic | [`ros_topics.md`](interfaces/ros_topics.md) |
+
+## 责任归属与更新规则
+
+“人类责任人”必须写人名；Claude/Codex 只写在“执行者”字段。运行前先更新对应实验记录；
+重要逻辑变化进入 `main` 后，只在 TIMELINE 更新一次；采用新 setting 或出现新的最佳候选成绩表后，
+更新 NOW。受影响的 gate 与 operation/interface 合同始终要同步更新。历史流水归档在
+[`experiments/archive/`](experiments/archive/README.md)，不作为默认阅读材料。
+
+`origin/main:docs/NOW.md` 是唯一运行态权威。feature 分支可以提交结构重构提案，
+但分支副本不算认领或改了优先级；合入前必须基于最新 main 复核三本账。

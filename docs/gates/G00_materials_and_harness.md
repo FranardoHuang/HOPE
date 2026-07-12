@@ -72,9 +72,8 @@ Done:
 - Host `podman` and `uidmap` are installed, `hope` exists from `docker.io/osrf/ros:jazzy-desktop-full`, and the first `hope` entry verified `ROS_DISTRO=jazzy`, Python `3.12.3`, and `/usr/bin/colcon`.
 - `.gitignore` now excludes `pw.txt` so local password scratch files do not enter git.
 - ROS workspace build verified inside the `hope` distrobox: `colcon build --packages-up-to hope_planner hope_wbc_runner` succeeds; the x86_64 deploy package builds via `agi/a3_deploy_example/scripts/build_a3_deploy_pkg.sh`.
-- The previously broken `START_HERE.md` links now resolve to a tracked one-stop `docs/INDEX.md` and
-  experiment-ledger template. Link existence and Markdown structure were checked on 2026-07-13;
-  this closes documentation routing only and does not change any runtime gate.
+- 此前失效的 `START_HERE.md` 链接现在指向已跟踪的一站式 `docs/INDEX.md` 和实验登记模板。
+  2026-07-13 已检查链接存在性与 Markdown 结构；这只闭合文档路由，不改变任何 runtime gate。
 
 Not done:
 

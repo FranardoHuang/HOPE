@@ -133,7 +133,7 @@ metrics 里 question_difficulty_deg 已在记录;loader 按最易 30% 开窗滚�
 | V1 手腕速度剔除 | `rewards.free_wrist_vel_mimic` | ~20 行 | 老师的手腕速度不再抄,答案速度独占手腕 |
 | V2 窗内模仿让位 | `rewards.motion_scale_in_window` | ~30-50 行 | 触球窗内老师闭嘴,听题目的 |
 | 分侧 hit 课程门(备选) | `rewards.face_gate_by_hitrate` | ~50 行 | 反手修复期的保险丝,防够不着还被拍面拉扯 |
-| 难度课程 loader 窗 | (1d,yikang+claude) | 半天 | 先做最容易 30% 的题,学动了滚动扩窗 |
+| 难度课程 loader 窗 | (1d；人类责任人：yikang；执行者：Claude) | 半天 | 先做最容易 30% 的题,学动了滚动扩窗 |
 | R-a actor 腿参考遮蔽(⑥) | `task.actor_leg_ref_mask` | ~30-40 行 | actor 眼里腿参考=站姿常数,critic 照旧全看(HITTER 结构) |
 | R-b 包络终止软化(⑥) | `rewards.envelope_soft` + `envelope_soft_weight`(两档) | ~80-120 行(含记账迁移) | 跟丢参考不再判死,改成站在违规区里每秒扣钱 |
 | R-c(i) RSI 跳过安定帧(⑥) | `motion.rsi_skip_settle_frames`(默认 0,先用 6) | ~15 行 | 出生别传送到 IK 瞬态帧上,从第 6 帧起手 |

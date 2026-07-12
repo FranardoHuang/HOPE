@@ -1066,6 +1066,11 @@ offline library generation and runtime motion matching; PACE's five serves are n
 mid-followthrough reveal. These systems motivate T0/T1/T2, but none proves this A3 policy, vendor
 MuJoCo plant or random-arrival contract. G05 therefore remains `Partial`.
 
+2026-07-13 的新 reward 次序目前仍是文档级设计：现有
+`phase1_recovery_tuple_abc_prereg_20260712.json` 与 validator 继续强制旧的三 reward/full `2^3`。
+它们未被追写，也不得冒充新设计的 E1 证据；必须生成新的内容寻址 prereg、validator 和测试后，
+才允许按“先 `2^2`、校准后可选 `2^3`”点火。这个同步缺口使 G05 继续为 `Partial`。
+
 The pure-contract validator passes `50` red-team tests, including nested duplicate-key, non-finite
 JSON, strict type identity, exact identity/time/scope and unknown-key rejection; `launch-check`
 deliberately fails because
@@ -1232,43 +1237,61 @@ The current schema-3 hard contract also deliberately omits reward weights, termi
 and optimizer settings. That remains valid for its existing curriculum purpose but is insufficient
 to identify a MuJoCo causal fine-tune. The new backend experiment contract must additionally bind
 those fields, reset/timeout semantics, effective MuJoCo profile, runtime action post-processing and
-source-checkpoint SHA. Its first one-shot D0 optimizes balance/strike-state only; the vendor MJCF has
+source-checkpoint SHA. Its first one-shot `Trainer-v0` optimizes balance/strike-state only; the vendor MJCF has
 no physical ball/table/net, so it cannot book formal return evidence. Full reasoning and read-only
 commands are in [the MuJoCo training-v0 preflight](../research/mujoco_training_v0_preflight_2026-07-12.md).
 No code, config or training changed; G05 remains `Partial`.
 
-### 2026-07-13 MuJoCo-preflight red-team hold
+### 2026-07-13 MuJoCo preflight 红队暂缓合入
 
-Franco explicitly approved native MuJoCo feasibility/implementation as a P0 capability track, but
-not as a prerequisite for the few-day D0 vendor Gate3 planner+policy demo. The matched paper shows
-return/strike execution collapse while physical-fall counts are zero; it does not establish a
-physical-balance collapse. Candidate `6e5fce3` remains **NO-MERGE** despite all authorization fields
-staying false: its small action tape does not exercise clamp/runtime-adapter boundaries, static
-source closure has alias/exec escapes, JSON accepts duplicate/nonfinite values, and MJCF closure
-mis-resolves `compiler strippath`. No VecEnv/PPO or training may start until those four P1s have
-negative tests. The first single-env core must also publish an N=1/8/32/64 throughput and scaling
-report against a preregistered transition budget; CPU-Python long training continues only if a
-two-arm/two-seed paper fits within 48 hours with 30% reserve. G05 remains `Partial`.
+franco 已明确批准 native MuJoCo feasibility/implementation 作为 P0 能力轨，但它不是几天内
+`Gate3-D0` vendor planner+policy 演示的前置。当前 matched paper 证明解析回球/击球执行跨引擎
+塌陷，而 physical-fall 计数接近零，不能夸成“平衡也已证明退化”。候选 `6e5fce3` 的七个授权位
+保持 false，focused 63 项与顶层 `468 passed, 9 skipped` 通过；但 action tape/trace 未覆盖
+clamp/runtime adapter、静态 source closure 有 alias/exec 逃逸、JSON 接受 duplicate/nonfinite、
+MJCF `compiler strippath` 解析错误。因此当前 `NO-MERGE`，四项必须先补负测并修正。
 
-### 2026-07-13 v12/high-press/lateral-teacher intake and non-striking-arm design
+第一个 single-env core 还必须对 N=1/8/32/64 分别报告 sim-only 和完整 rollout+一次 PPO update
+的 step/s、RTF、RSS/CPU 与扩展效率，并按预注册 transition budget 推算两臂×两 seed 墙钟。
+只有能在 48 小时内完成且留 30% 余量，才继续 CPU-Python 长训；否则转 C++/OpenMP 或另行过
+parity 门的 MJX/MJWarp。没有 `VecEnv`、PPO、训练、Pod、simulator 或真机行为证据，G05 仍为
+`Partial`。
 
-Seven new private recordings passed exact byte/hash/media intake under
-`configs/motion_video_intake_20260713.json`: a v12 forehand/backhand block pair, one backhand
-high-press fifth action and two candidates for each lateral direction. This is metadata/source
-evidence only. No file has passed GVHMR/GMR, runtime-order schema 2, L0, vendor L1, table/net,
-dynamics or task-matched return gates, and none is queued for RL.
+### 2026-07-13 v12、高点拍压、横移老师与非击球臂设计
 
-The lateral path is a displacement-conditioned lower-body teacher, not another stroke. Upper and
-lower motions will be aligned at preparation/nominal-strike/recovery events using monotone feasible
-time maps; root/pelvis/torso coupling and foot contacts require constrained whole-body composition.
-After the closing step, the terminal ready set restores the source's initial heading-aligned
-horizontal foot-separation vector, including any fore-aft stagger, rather than accepting a narrowed
-stance. TOPP may retime an accepted path but cannot make a wrong foot-contact path stable. v12 must
-beat an earlier block candidate on a block paper; the high-press action gets its own high-ball paper
-before four-versus-five selection.
+`configs/motion_video_intake_20260713.json` 已逐字节绑定 7 段新的私有视频：v12 正反手挡球、
+一个反手高点拍压第五动作，以及左右横移各两个下肢老师候选。7/7 文件核验与 11 项专项测试通过，
+但这只是素材/源码证据；没有任何文件完成 GVHMR/GMR、运行顺序 schema-2、L0、厂商 L1、桌网余隙、
+动力学或匹配题目的回球门，也没有候选进入 RL 队列。
 
-A separate design asks whether the left non-striking arm should lose imitation so it can assist
-balance. The minimum cells separate literal reward removal from fixed-budget reallocation, retain
-all hard safety terms, and only enter recovery-reward interaction tests after a direct paired-seed
-effect survives. Details are in the three 2026-07-13 experiment records under `docs/experiments/`.
-No config, training, Pod, simulator or hardware action ran; G05 remains `Partial`.
+横移素材被定义为“以横移距离为条件的下肢老师”，不是另一种挥拍。上下半身先按准备/击球支撑/
+恢复事件对齐，再明确根节点、骨盆、躯干和足接触的所有权，由受约束的全身求解处理耦合；TOPP
+只能给已接受路径重定时，不能把错误足接触变稳定。恢复终态要回到该素材初始的水平双脚相对向量，
+同时保留站距和前后错位。v12 必须在挡球专用考卷上赢过旧安全候选，高点拍压必须先过独立高球卷，
+之后才允许讨论四动作对五动作。
+
+另一个配对设计测试是否解除左侧非击球臂的模仿，让它参与平衡；“直接移除 Reward”和“固定总预算
+重新分配”必须分开，所有硬安全保持开启。三份记录见 [实验登记册](../experiments/README.md)。
+没有配置、训练、Pod、仿真或真机动作，G05 仍为 `Partial`。
+
+### 2026-07-12 文档路由与当前成绩表
+
+训练状态现在按职责拆分，不再复制到三份流水中：
+
+- [`docs/NOW.md`](../NOW.md) 负责当前完整训练流程、现行课程阶段、各主题的问题/解法/效果/差距，
+  以及最接近正式目标的逐动作单拍/连续成绩表；
+- [`docs/experiments/`](../experiments/README.md) 负责假设、冻结变量、run 表和决定；
+- [`docs/TIMELINE.md`](../TIMELINE.md) 只解释已经进入 `main` 的重要逻辑变化。
+
+全局优先级只看 [`docs/NOW.md`](../NOW.md) 的统一工作队列；GPU/Pod 不再各建影子队列。
+排序、Kit boot lock、关键路径独占与广度波 3–4 条/卡的适用条件统一见
+[跑批作战手册](../runbook.md#统一队列排序与算力纪律) 和
+[`run_on_runpod.md`](../operations/run_on_runpod.md)。本次只收口文档规则，没有改发射命令。
+
+当前 `SZ model_2000` 成绩表汇总四个 exact seed，没有隐藏 seed 4：正手单拍的
+无物理摔倒/解析击球/解析回球为 `200/200, 137/200, 133/200`；反手为
+`200/200, 170/200, 170/200`。连续格仍为 `未测`，因为每道 K100 题都通过非物理
+tracking guard/reset 路径结束，其中包括 seed-4 的击球前 guard。这是同一份既有结果，不是新实验；
+这里的击球/回球来自 `VirtualReturnScorer` 对拍状态的推演，不是 simulator 球-拍-台接触。
+seed-stability 判决仍为失败。本次文档迁移没有运行 Pod、模拟器、训练或真机动作；G05 仍为
+`Partial`。

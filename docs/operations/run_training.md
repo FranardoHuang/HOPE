@@ -1210,4 +1210,7 @@ Before setting a baseline quality target, record:
 6. Failure mode or first metric.
 7. Whether the run is only pipeline viability or an accepted quality baseline.
 
-Write the result to G05 and [../PROGRESS.md](../PROGRESS.md).
+把完整的设计/run/结果/决定写入
+[`../experiments/`](../experiments/README.md) 下对应的实验记录，并更新 G05；随后只在
+[`../PROGRESS.md`](../PROGRESS.md) 追加一条带链接的简短记录。如果已采用 setting 或逐动作
+成绩表发生变化，还要更新 [`../NOW.md`](../NOW.md)。

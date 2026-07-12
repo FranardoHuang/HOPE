@@ -6,7 +6,7 @@ This file describes stable repository zones. Gates describe work over time; fold
 
 | Path | Role | Git Policy |
 | --- | --- | --- |
-| `docs/` | Living project map, gates, interfaces, and operations | tracked |
+| `docs/` | Living current state, experiments, mainline narrative, gates, interfaces, and operations | tracked |
 | `papers/` | Source papers used as technical ground truth | tracked when license allows |
 | `mocap/` | Motion-capture setup, coordinates, and vendor notes | tracked |
 | `scripts/` | Repo maintenance helpers for local sync, asset preparation, and project hygiene | tracked |
@@ -20,17 +20,22 @@ This file describes stable repository zones. Gates describe work over time; fold
 | `vendor_assets/` | Full local vendor/runtime payloads: models, sysroots, binaries | ignored |
 | `external_repos/` | Auto-synced local reference clones not yet promoted to formal dependencies | ignored |
 
-## Documentation Zones
+## 文档状态分区
 
-| Path | Role |
-| --- | --- |
-| `docs/gates/` | Acceptance state, reproducible evidence and blockers for G00--G08 |
-| `docs/experiments/` | One record per hypothesis/run/decision; never a competing priority queue or launch authority |
-| `docs/interfaces/` | Stable cross-component frames, messages, observations, actions and runtime contracts |
-| `docs/operations/` | Reproducible setup, build, test, training, evaluation and deployment commands |
-| `docs/research/` | Audits, source synthesis and design reasoning that have not by themselves passed a gate |
+| 路径 | 职责 | 更新规则 |
+| --- | --- | --- |
+| `docs/INDEX.md` | 一站式任务路由与最小阅读集 | 新增权威文档、实验或操作文档时同步维护链接 |
+| `docs/DEFINITIONS.md` | 缩写、run/flag 和跨文档术语的人话真源 | 新术语先在此定义，再在现行文档使用 |
+| `docs/NOW.md` | 当前完整训练流程、现行课程阶段、各主题的问题/解法/效果/差距、分动作成绩卡与唯一工作队列 | 只有 `origin/main` 是运行态权威；不记录 PID/checkpoint 流水 |
+| `docs/experiments/` | 每个可证伪实验一份记录，包含冻结输入、run 表、结果和决定 | 实验详细真源 |
+| `docs/experiments/archive/` | 冻结的旧 NOW/TIMELINE/PROGRESS 流水 | 只读证据查询；永远不是当前权威 |
+| `docs/TIMELINE.md` | 已进入 `main` 的重要能力和根因修复摘要 | 不是 commit 清单，也不是日记 |
+| `docs/PROGRESS.md` | 链接到权威记录的简短日期兼容日志 | 每次变化只写几句话，不复制细节 |
+| `docs/gates/` | 验收标准、可复现命令、结果、限制和 gate 状态 | Gate 权威 |
+| `docs/interfaces/` | 跨栈 runtime 合同 | 合同变化时更新 |
+| `docs/operations/` | setup/build/test/train/deploy 操作步骤 | 命令或所需资产变化时更新 |
 
-Use `docs/INDEX.md` to enter these zones. `docs/NOW.md` remains the only current priority board.
+上述分区始终把人类责任归属与 agent 执行来源分开记录。
 
 ## ROS Workspace
 
@@ -59,10 +64,11 @@ Future packages should be added here when they are runtime ROS packages, for exa
 
 ## Training Zone
 
-`hope_training/whole_body_tracking` is the current Isaac/BeyondMimic training entry. The unified
-forehand+backhand `HOPEPingPongDeployParity` task (175-D deploy-parity actor obs; the 2026-07-01
-`train.py` blocker is fixed) produced the first hardware-deployed swing policy
-(`model_p4_deployparity.onnx`, 2026-07-02, forehand only). Sim2sim validation lives in
+`hope_training/whole_body_tracking` is the current Isaac/BeyondMimic training entry. The 175-D
+`HOPEPingPongDeployParity` path produced the first hardware-deployed swing policy
+(`model_p4_deployparity.onnx`, 2026-07-02, forehand only). The current formal research target is the
+179-D `deploy_parity_face179` fresh `SZ` setting documented in [NOW.md](NOW.md); it is not yet an
+accepted quality or deployment baseline. Sim2sim validation lives in
 `scripts/mujoco_eval_onnx.py`; the observation-contract references are
 `scripts/realsensor_obs_reference.py` / `scripts/verify_realsensor.py` /
 `REALSENSOR_OBS_REDESIGN.md`. There is still no accepted quality baseline; use

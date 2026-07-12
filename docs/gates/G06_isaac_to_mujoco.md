@@ -478,7 +478,7 @@ states were rejudged rc=0 and now bind manifest, job and job-contract SHA.
 the exact signal scope and all transaction hashes.
 
 Fresh SZ seed1 also closed its first exact checkpoint-selection q50. On one
-K=100, 50-per-side paper, model 2000 returned FH/BH/aggregate
+K=100, 50-per-side paper, the analytic virtual-return scorer gave model 2000 FH/BH/aggregate
 `0.66/1.00/0.83`, while model 4000 returned `0.00/1.00/0.50`; model 2000 is
 retained and the whole arm continues. Both evaluations are exact/fresh, but
 all attempts finalized through a non-physical post-strike guard, so this is
@@ -489,25 +489,26 @@ FH/BH/aggregate, delta zero. The MuJoCo ranking is therefore not reproduced;
 the cross-engine checkpoint gate stays open. Companion hashes are in
 `configs/phase1_SZ_seed1_2000_vs_4000_q50_isaac_result_20260711.json`.
 
-Question-level forensics now localize both disagreements and prevent a false
-gate closure. Fresh model 4000's mean FH racket-center error is `13.15 cm` in
-MuJoCo, beyond the frozen `9.5 cm` contact margin on all 50 questions, versus
+Question-level forensics localize reproducible state differences but do not yet establish their
+causes. Fresh model 4000's mean FH racket-center error is `13.15 cm` in
+MuJoCo, beyond the frozen `9.5 cm` analytic contact margin on all 50 questions, versus
 `2.48 cm` in Isaac; model 2000 is `9.03/3.03 cm`. M3-old BH has mean signed
-normal error `168.15 deg`, but Isaac's analytic `orient_normal` removes the
-sign before scoring, while MuJoCo physical contact keeps the consequence.
-Thus same question bytes/order are necessary but not sufficient: current Isaac
-virtual outcome and MuJoCo physical outcome are different instruments. The
-forensic result is bound in
+normal error `168.15 deg`, and the later face-sign audit shows that the analytic
+`VirtualReturnScorer` path may erase `n/-n` through `orient_normal`.
+The earlier wording “MuJoCo physical outcome” was wrong: this evaluator has no simulated ball
+contact and its incoming ball is visual-only. Both reported return cells are analytic outcomes
+derived from racket state. Thus same question bytes/order are necessary but not sufficient, while
+the exact engine/trajectory/scorer contribution remains unresolved. The forensic result is bound in
 `configs/phase1_cross_engine_saturation_forensic_result_20260711.json`.
 
 The next gate is preregistered as a strict 2x2: Isaac/MuJoCo x physical
 truth/analytic counterfactual, with the original K100 order and capture/speed
 thresholds frozen. Missing/duplicate/non-finite cells, changed order, or a
 virtual-only physical cell all fail closed. Numeric Isaac ready/base/racket,
-signed-face-before-orient and analytic state instrumentation is implemented,
-but Isaac PhysicalBall currently has incoming-flight Phase A only and no
-racket impulse/post-contact truth. Until Phase B and one content-addressed
-four-cell evidence manifest exist, G06 remains `Partial`.
+signed-face-before-orient and analytic state instrumentation is implemented.
+Isaac PhysicalBall Phase-B source implementation exists at `612f54d`, but it has no accepted Pod
+runtime, post-contact K100 ledger or content-addressed four-cell evidence manifest. Until those
+runtime cells exist, G06 remains `Partial`.
 
 Run `python3 scripts/validate_phase1_queue_governance.py` before any curve
 manifest is copied or launched. The validator enforces the 142-job/24-slot
@@ -553,10 +554,11 @@ instrument cells.
 
 The project has promoted native MuJoCo training/fine-tuning from undecided/evaluation-only to P0.
 This responds to repeated evidence that Isaac training metrics can stay high while held-out MuJoCo
-balance and return degrade. It does not make the training environment the final judge.
+strike execution and analytic return degrade. Matched physical-fall counts are zero, so balance
+degradation is not established. The decision does not make the training environment the final judge.
 
-The first backend independently implements the frozen meanings from
-`scripts/mujoco_eval_onnx.py`, wraps batched native MuJoCo state as an `rsl_rl VecEnv`, and loads the
+The first backend must independently implement the frozen meanings from
+`scripts/mujoco_eval_onnx.py`, must wrap batched native MuJoCo state as an `rsl_rl VecEnv`, and must load the
 vendor A3 MJCF while bypassing the single-world real-time AimRT/ROS/GUI loop. It must not import a
 shared observation/action/reward implementation from the evaluator, because shared mistakes would
 create a common-mode false green. Its training contract binds engine/version, MJCF plus mesh
@@ -578,7 +580,7 @@ analytic virtual return remains diagnostic. A future MJX/MJWarp path is throughp
 parity burden, not an exact-vendor label. Final promotion remains the unchanged vendor Gate3/Gate3B.
 
 The tracked vendor MJCF currently has no ball, table or net and the existing analytic `BallPhysics`
-driver is not wired into `MujocoSimModule::SimLoop()`. The 2--3 day D0 is therefore explicitly a
+driver is not wired into `MujocoSimModule::SimLoop()`. The 2--3 day `Trainer-v0` is therefore explicitly a
 one-shot balance/strike-state fine-tune, not a physical-return or continuous-rally claim. Actor warm
 start must load only actor/distribution/actor-normalizer state into a newly initialized critic and
 optimizer; current `load_actor_tolerant()` does not enforce that boundary.
@@ -588,7 +590,7 @@ until that independent gate closes.
 
 No MuJoCo `VecEnv`, PPO smoke, training run or result exists yet. This decision adds an implementation
 and acceptance path but does not close the engine gap; G06 remains `Partial`. The audited file
-boundary, canary tapes, evaluator isolation and D0 sequence are recorded in
+boundary, canary tapes, evaluator isolation and `Trainer-v0` sequence are recorded in
 [the MuJoCo training-v0 preflight](../research/mujoco_training_v0_preflight_2026-07-12.md).
 
 ### Gate 3 face-command wire and engine-gap localization
@@ -798,6 +800,10 @@ collapse, fifth-and-later opportunity decay, one-shot regression or Isaac/vendor
 fails promotion. Full sources and DOE boundaries are in
 `docs/research/phase1_continuous_rally_timing_2026-07-11.md`. No paper substitutes for the exact
 Gate3/Gate3B runtime result, so G06 remains `Partial`.
+
+上述 2026-07-13 reward 顺序只完成文档设计收紧。当前 machine prereg/validator 仍固定旧三项
+reward 和 full `2^3`；因此它们不能作为新顺序的机制证据，也不能用于 launch。需要新的内容寻址
+config、validator、测试和 operation 对账后才可解除这一阻塞，G06 仍为 `Partial`。
 
 ### 2026-07-12 Gate3 first-tick static plan gate (red-team corrected)
 
@@ -1101,28 +1107,38 @@ created activation file SHA `9dea76c2...ce704` with content SHA `eaa92ca2...aa4f
 four seeds and retaining `judges_started=0`. Source, K100, both audits and activation are present
 at the same absolute paths on both Pods. Both runner `contract-check` calls passed; immediate
 pre-run snapshots found no child judge, MuJoCo evaluator, play/Kit process or shared-lock holder.
-No `prepare`, judge or MuJoCo behavior ran, so this is readiness provenance rather than a score and
-G06 remains `Partial`.
 
-Both no-clobber runtime papers were then prepared without starting MuJoCo. Pod1's runtime file and
-canonical-content SHAs are `2b76a5a...8201e` and `36e878f0...5ba73`; Pod2's are
-`dbecc102...d1c9b` and `91a0070a...30794`. On both Pods the runner `contract-check` and direct
-runtime-binding validation passed against the same activation/K100, frozen clean checkouts and
-rehashed finite iteration-4000 checkpoints. Both papers remain `prepared_not_started` with zero
-jobs started; the immediate child-judge/MuJoCo/play/Kit scan and Kit-lock holder scan were empty.
-The future foreground run needs a reviewed persistent top-level supervisor because it must retain
-serial ownership across both seeds and write the bound Pod result. No judge or simulator behavior
-exists yet, so G06 remains `Partial`.
+Both Pod runtime contracts were subsequently created by no-clobber `prepare`. Pod1's file/content
+SHAs are `2b76a5a...8201e` / `36e878f0...5ba73`; Pod2's are
+`dbecc102...d1c9b` / `91a0070a...30794`. Direct binding validation rehashed both local checkpoints
+per Pod and confirmed iteration 4000, finite tensors, exact lineage, the shared hard-contract SHA,
+clean exact train/eval checkouts and an empty post-prepare process/lock snapshot. Both contracts
+remain `prepared_not_started`, `jobs_started=0`, `auto_start=false`; no `run`, judge, aggregate,
+score, signal or hardware action occurred. The remaining launch blocker is a reviewed persistent
+parent supervisor that retains serial two-seed ownership and final-result materialization after an
+SSH disconnect. This is execution-paper preparation rather than behavior evidence, so G06 remains
+`Partial`.
 
-### 2026-07-13 trainer-preflight red team: authorization safe, source gate held
+### 2026-07-13 MuJoCo trainer preflight 红队：授权安全，源码门暂缓
 
-Independent review of `codex/mujoco-training-preflight@6e5fce3` reproduced focused `63 passed`,
-top-level `468 passed, 9 skipped`, `valid_but_blocked`, and rc=2 for both `--require-ready` and
-certificate output. All seven authorization booleans remain false and no consumer/launcher exists,
-so the branch cannot currently start or bless training. It is nevertheless held from main for four
-P1 correctness gaps: the trace omits action-clamp/adapter state and uses only a tiny action tape;
-static source independence can be bypassed through aliases/exec; JSON duplicate keys and NaN are
-accepted; and MJCF `compiler strippath` is modeled incorrectly. The vendor scene still lacks
-collidable ball/table/net, so its v0 claim is restricted to no-ball balance/strike-state diagnostic.
-Fixing these source gates and measuring the preregistered N=1/8/32/64 throughput gate do not replace
-the independent exact vendor Gate3/Gate3B final vote. G06 remains `Partial`.
+独立复核确认 `codex/mujoco-training-preflight@6e5fce3` 的 focused `63 passed`、顶层
+`468 passed, 9 skipped`、`valid_but_blocked`，以及 `--require-ready`/certificate 输出均 rc=2。
+七个授权布尔值全为 false，也没有 consumer/launcher，所以当前分支不能启动或批准训练。
+但它仍因四个 red-team P1 正确性缺口被标为 `NO-MERGE`：trace 缺 action clamp/runtime adapter
+状态且 action tape 太小；静态 source independence 可经 alias/exec 绕过；JSON 未拒 duplicate key/NaN；
+MJCF `compiler strippath` 语义建错。vendor scene 仍无可碰撞球/台/网，因此 v0 只允许无球
+balance/strike-state diagnostic，不能记 physical return。
+
+修复这四个源码门后，第一个 single-env core 还要通过预注册的 N=1/8/32/64 吞吐继续门，并证明
+两臂×两 seed 在 48 小时内完成且留 30% 余量。这个门不替代独立 exact vendor Gate3/Gate3B，
+也不阻塞几天内 `Gate3-D0`。G06 仍为 `Partial`。
+
+### 2026-07-12 文档路由
+
+引擎/迁移现状只在 [`docs/NOW.md`](../NOW.md) 汇总一次，详细实验记录放在
+[`docs/experiments/`](../experiments/README.md)。经过筛选的
+[`docs/TIMELINE.md`](../TIMELINE.md) 只记录已经进入 `main` 的重要能力和根因修复，并明确说明
+Isaac–MuJoCo gap 只有部分可复现差异和候选来源已定位，整体因果归因与修复均未闭合。
+Legacy Gate3 diagnostic 与 current exact-179 Gate3
+属于两份独立实验记录，不能互相填充结果单元。本次纯文档迁移没有运行 evaluator、模拟器、backend、
+Pod 或真机，也不改变 G06 的 `Partial` 状态。

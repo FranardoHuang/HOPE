@@ -20,9 +20,11 @@ Written 2026-07-03; C++-only control path since 2026-07-04 (§0 retirement note)
 > — even to STRIKE**: its obs is world-frame + station-relative, so under `perfect_tracking` (the Δ=0
 > dropout fallback) the swing itself diverges (Gate 2.5 perfect_tracking only **2/5** — stand + hold
 > pass, swings fall). This is a STRONGER mocap requirement than the prior 177-D baseline (which could
-> at least strike-in-place). NOT yet run for this checkpoint: Gate 1 MuJoCo (the `mujoco_eval_onnx.py`
-> 110-D branch is incomplete), Gate 3 planner closed-loop, the rockchip build, and the hardware ship —
-> those steps below still show the prior baseline's results, flagged `[110-D: PENDING]`.
+> at least strike-in-place). 2026-07-11 更新：该 checkpoint 此后跑过一次 **legacy diagnostic**
+> Gate3 planner 闭环（`13 PASS / 7 FAIL`；3 次发球中 1 次合法回球，并出现 1 次摔倒和明显漂移），
+> 因此只能说明 Gate3 链路被执行过，不能写成 Gate3 已通过。Gate 1 的 110-D 分支、rockchip build
+> 和真机发布仍未完成。该结果不得填入独立的 current exact-179 Gate3 单元；详见
+> `docs/experiments/2026-07/EXP-GATE3-CURRENT179-D0.md`。
 > Prior baseline (177-D `model_17400_hitter177`, 2026-07-06) is retained below as the last
 > hardware-shipped generation and for the gate history.
 Companion docs: [run_sim2real_bridge.md](run_sim2real_bridge.md) (the RETIRED python

@@ -156,8 +156,11 @@ schema-v3 canary and follow `NOW.md`.
    `whole_body_tracking` into it. New common deps: announce, install, refresh
    `/workspace/smoke_test/freeze_baseline.txt`.
 3. Do not edit `/workspace/IsaacLab`; override behavior in your own code.
-4. One GPU per person by default; borrow only after `nvidia-smi` + a heads-up, via
-   `CUDA_VISIBLE_DEVICES=<n>`.
+4. 交互式/临时作业默认一人一张 GPU；借用前必须查 `nvidia-smi`、通知其他人，
+   并显式设置 `CUDA_VISIBLE_DEVICES=<n>`。这条不覆盖已在 [NOW 唯一队列](../NOW.md#统一工作队列唯一优先级账本)
+   登记的广度消融波：广度波在短测确认显存/利用率后可同卡并发 3–4 条同类
+   4096-env 任务；关键路径/长跑仍独占。日期化实测和完整约束只看
+   [跑批作战手册](../runbook.md#rtx-5090-实测算力手册)，不在本文建第二份优先级队列。
 5. WandB login is global and ephemeral (`/root/.netrc`); pass `WANDB_API_KEY=...` per run or use
    `logger=tensorboard`.
 

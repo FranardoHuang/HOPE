@@ -1,7 +1,8 @@
 # Phase-1 消融加速制度（2026-07-11）
 
-Status: Active. This is the scheduling and evidence policy for Phase-1 breadth runs. It does not
-relax any schema, lineage, exam, simulator, or robot-safety gate.
+状态：这是 Phase-1 广度实验内部的调度与证据制度，不放宽 schema、lineage、考卷、simulator
+或真机安全门。它只规定已由全局队列选中的实验内部如何排 run；现行全局优先级只看
+[`NOW`](../NOW.md#统一工作队列唯一优先级账本)。
 
 ## 目标不是“最快跑完一条”
 
@@ -234,7 +235,7 @@ episode 变长、tracking guard 软化、奖励修订或动作重定时若需要
 
 预注册 `configs/phase1_recovery_tuple_abc_prereg_20260712.json` 因此分三阶段：
 
-1. `D0`：只用内容绑定的现有 179 checkpoint 做 A explicit bridge 与 C complete-previous-tuple
+1. `Recovery-D0`（config 内阶段名仍为 `D0`；恢复实验第 0 步）：只用内容绑定的现有 179 checkpoint 做 A explicit bridge 与 C complete-previous-tuple
    的 zero-shot diagnostic；不选型、不晋级；
 2. `S1`：A/B/C 全部 fresh exact paired，共用相同 random-arrival 卷、题库、motion、face、plant、
    179 schema、现有 reward bytes/权重/总预算、seed、optimizer、update 和 checkpoint cadence；
