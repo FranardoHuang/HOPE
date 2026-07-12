@@ -232,6 +232,11 @@ def attach_onnx_metadata(
     metadata["episode_length_s"] = format(episode_length_s, ".17g")
     qdes_clamp = bool(runtime_facts["qdes_clamp"])
     metadata["qdes_clamp"] = "1" if qdes_clamp else "0"
+    # Only-when-true (key absent = unmasked/legacy): an R-a masked actor sees default-stand + zero
+    # velocity in its 24 leg command dims; an evaluator without the mask feeds live leg refs and
+    # silently misgrades. The evaluator hard-refuses on this key until it implements the mask.
+    if runtime_facts.get("actor_leg_ref_mask"):
+        metadata["actor_leg_ref_mask"] = "1"
     training_contract = None
     training_contract_schema = 0
     training_contract_sha256 = None
@@ -696,6 +701,10 @@ def attach_onnx_metadata(
         # an old actor.  The source checkpoint's training_contract.json is the authority.
         current_contract_facts = {
             **{key: runtime_facts[key] for key in RUNTIME_EXECUTION_KEYS},
+            # Only-when-true (absent = unmasked): masked and unmasked checkpoints must not share
+            # a training-contract hash — the mask changes what the actor's command dims mean,
+            # and mutable ONNX metadata alone cannot carry that provenance.
+            **({"actor_leg_ref_mask": True} if runtime_facts.get("actor_leg_ref_mask") else {}),
             "episode_length_s": episode_length_s,
             "motion_wrap_teleport": bool(motion_cfg.wrap_teleport),
             "motion_hold_steps_range": [int(v) for v in motion_cfg.hold_steps_range],
@@ -767,6 +776,17 @@ def attach_onnx_metadata(
             raise ValueError(
                 "attach_onnx_metadata: export environment disagrees with the source checkpoint's "
                 f"immutable training/evaluation contract: {mismatches}"
+            )
+        # keys_to_verify iterates the CURRENT facts, so a key that exists only in the stored
+        # contract is never compared: a masked checkpoint re-exported from an unmasked env would
+        # silently drop the actor_leg_ref_mask metadata (and with it the evaluator's refusal).
+        if training_contract.get("actor_leg_ref_mask") and not current_contract_facts.get(
+            "actor_leg_ref_mask"
+        ):
+            raise ValueError(
+                "attach_onnx_metadata: source checkpoint was trained with actor_leg_ref_mask "
+                "but the export environment is unmasked; re-export with "
+                "task.actor_leg_ref_mask=true so the mask provenance survives"
             )
         if (
             training_contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION

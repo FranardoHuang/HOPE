@@ -92,6 +92,12 @@ def generated_commands_actor_leg_masked(env: ManagerBasedRLEnv, command_name: st
     return out
 
 
+# Durable provenance marker read by training_contract.runtime_execution_facts: the hard contract
+# must record the mask even if this function is later renamed or wrapped (a missed detection
+# would let a masked checkpoint grade as unmasked — the exact silent misgrade R-a can cause).
+generated_commands_actor_leg_masked.actor_leg_ref_mask = True
+
+
 # --- actor (policy) observations: desired targets only ------------------------------------ #
 def racket_target_pos_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Desired racket pos rel-base (yaw frame). PRIVILEGED — uses world base position (`full` mode)."""

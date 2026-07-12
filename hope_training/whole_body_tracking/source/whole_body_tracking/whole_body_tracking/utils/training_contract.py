@@ -9,6 +9,7 @@ the exact actor layout) rather than only task-level configuration.
 
 from __future__ import annotations
 
+import functools
 import math
 from collections.abc import Mapping
 
@@ -332,7 +333,27 @@ def runtime_execution_facts(env, actor_contract) -> dict:
     qdes_clamp = bool(
         getattr(action, "_clamp_enabled", getattr(env.cfg.actions.joint_pos, "clamp", False))
     )
-    return {
+    # R-a actor leg-reference masking leaves the 62-D command layout untouched, so without this
+    # fact a masked run's contract is byte-indistinguishable from an unmasked one — and no
+    # evaluator implements the mask. Detect it from the swapped observation term (train.py wires
+    # task.actor_leg_ref_mask to mdp.generated_commands_actor_leg_masked). Key present only when
+    # True: unmasked contracts and their sha256 stay byte-identical. Detection unwraps partials
+    # and prefers the durable marker attribute stamped at the function definition, so a rename
+    # or wrapper cannot silently drop the fact (a miss would defeat the evaluator's refusal).
+    _cmd_term = getattr(
+        getattr(getattr(env.cfg, "observations", None), "policy", None), "command", None
+    )
+    _cmd_func = getattr(_cmd_term, "func", None)
+    while isinstance(_cmd_func, functools.partial):
+        _cmd_func = _cmd_func.func
+    actor_leg_ref_mask = bool(
+        _cmd_func is not None
+        and (
+            getattr(_cmd_func, "actor_leg_ref_mask", False)
+            or getattr(_cmd_func, "__name__", "") == "generated_commands_actor_leg_masked"
+        )
+    )
+    facts = {
         "articulation_joint_names": articulation_names,
         "action_joint_ids": ids,
         "joint_names": joint_names,
@@ -370,6 +391,9 @@ def runtime_execution_facts(env, actor_contract) -> dict:
         "motion_kinematics_contracts": kinematics_contracts,
         "motion_kinematics_exact": kinematics_exact,
     }
+    if actor_leg_ref_mask:
+        facts["actor_leg_ref_mask"] = True
+    return facts
 
 
 def validate_schema3_contract_structure(contract: Mapping) -> None:

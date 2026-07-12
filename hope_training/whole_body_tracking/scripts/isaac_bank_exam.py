@@ -483,9 +483,13 @@ def _run(cfg, simulation_app):
             f"history lengths are {history_lengths}"
         )
     if training_contract is not None:
+        # actor_leg_ref_mask is an optional only-when-true key outside RUNTIME_EXECUTION_KEYS
+        # (absent = unmasked); compare it explicitly, else a masked checkpoint graded through an
+        # unmasked env would pass this equality silently — the same mismatch the MuJoCo
+        # evaluator hard-refuses on.
         mismatches = {
             key: (training_contract.get(key), runtime_facts.get(key))
-            for key in RUNTIME_EXECUTION_KEYS
+            for key in (*RUNTIME_EXECUTION_KEYS, "actor_leg_ref_mask")
             if training_contract.get(key) != runtime_facts.get(key)
         }
         if mismatches:

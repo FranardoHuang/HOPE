@@ -134,6 +134,36 @@ def _env(*, joints=3, num_envs=2, action_ids=slice(None), policy_dt=0.02):
     )
 
 
+def test_actor_leg_ref_mask_fact_is_only_when_true_and_survives_partial_wrapping():
+    import functools
+
+    # Unmasked env (no observations cfg at all): key absent, ordering untouched.
+    facts = TC.runtime_execution_facts(_env(), _ActorContract())
+    assert "actor_leg_ref_mask" not in facts
+
+    def generated_commands_actor_leg_masked(env, command_name):  # name-based detection leg
+        raise NotImplementedError
+
+    env = _env()
+    env.cfg.observations = SimpleNamespace(
+        policy=SimpleNamespace(
+            command=SimpleNamespace(func=generated_commands_actor_leg_masked)
+        )
+    )
+    facts = TC.runtime_execution_facts(env, _ActorContract())
+    assert facts["actor_leg_ref_mask"] is True
+    assert tuple(k for k in facts if k != "actor_leg_ref_mask") == TC.RUNTIME_EXECUTION_KEYS
+
+    # Marker-attribute detection must survive a rename AND a functools.partial wrapper.
+    def renamed_masked_command(env, command_name):
+        raise NotImplementedError
+
+    renamed_masked_command.actor_leg_ref_mask = True
+    env.cfg.observations.policy.command.func = functools.partial(renamed_masked_command)
+    facts = TC.runtime_execution_facts(env, _ActorContract())
+    assert facts["actor_leg_ref_mask"] is True
+
+
 def test_runtime_contract_extracts_actual_execution_values():
     facts = TC.runtime_execution_facts(_env(), _ActorContract())
     assert tuple(facts) == TC.RUNTIME_EXECUTION_KEYS
