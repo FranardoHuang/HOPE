@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 当下状态与团队 focus（2026-07-12 15:29 CST）
+## 当下状态与团队 focus（2026-07-12 16:23 CST）
 
 本节只做 roadmap 的当前入口；下面的实验结果、奖励/训练台账、长期路线和历史判决继续保留，
 不能用这份短报替代可复现实验记录。
@@ -34,15 +34,17 @@ Rules:
   policy”接成一条不会假绿、几天内可录屏的最短 demo 链。vendor 环境是裁判；planner 与 policy
   都可升级，但必须成对绑定 exact SHA 并过同一题表。179-D 拍面/模型装载合同已收口，当前主阻塞
   转到 planner-policy 接缝、发球时序所有权、安全的 vendor backend first tick 和 D0 单拍闭环。
-- **刚得到什么**：14:08–14:48 两 Pod 低频只读全扫重新成功。训练/eval 仍 clean exact
-  `6d93bcb` / `46a0ce2`；28 条接受臂现按精确 PID 动态重算为 `17 live + 11 terminal`（Pod1
-  `9+5`，Pod2 `8+6`），28/28 最新 checkpoint 的文件迭代=内嵌迭代、tensor finite、相邻
-  hard-contract SHA 与 fresh/causal lineage 都正确，完整 run.log 无 NaN/Inf/Traceback/OOM/malloc/
-  Killed/early exit。Pod1 一条 guidance 臂已经写到 `20998` 终档但 PID 尚在，所以仍诚实记 live、
-  等下一轮确认自然退出；没有 signal/restart/补发。GPU util Pod1=`90/77/97%`、Pod2=`92/84/86%`，
-  RAM available 约 `914/921 GiB`、swap 0；当前每 Pod 两个 fresh checkpoint worker 活着，无 child
-  judge/Kit。旧 causal worker 随终档自然退出，下一轮仍需逐项复核其完成 state ledger，不能沿用旧
-  “10 workers 全活”口径。
+- **刚得到什么**：16:04–16:22 两 Pod 的低频分块只读全扫成功。训练/eval 仍 clean exact
+  `6d93bcb` / `46a0ce2`；28 条接受臂现在是 **16 条 fresh 在训练、12 条 continuation 已有
+  `20998` 终档**。进程快照仍有 17 个 trainer PID，是因为 Pod1 最后一条 guidance 已写完终档但
+  仍在自然清理；这不是第 17 条未终档臂，也没有被 signal/restart。28/28 最新 checkpoint 均满足
+  文件名迭代=内嵌迭代、1,762,715 个浮点全 finite、内嵌 contract SHA=相邻文件 SHA、fresh
+  lineage=1/continuation=0；接受日志无 NaN/Inf/Traceback/OOM/Killed/新 malloc/early exit。十个登记
+  worker 也按动态状态复核：4 个仍有 pending job 且 PID/PGID/command/manifest sidecar 精确存活，
+  6 个已清空各自队列后自然退出；累计 `68/68` hardened state（48 global + 20 causal）rc0、checkpoint/
+  job/job-contract/report/std-sidecar SHA、K20 单题 reset 与 exactness 标签全部正确，无 child judge 或
+  judge Kit lock。GPU util Pod1=`92/95/95%`、Pod2=`90/83/96%`，RAM available 约 `914/922 GiB`、
+  swap 0。旧口径“10 workers 全活”已正式弃用。
 - **4k matched 判卷状态**：四条 fresh SZ 的 `model_4000.pt` 已跨过训练里程碑，但预注册的
   Pod1/Pod2 readiness audit、all-four activation artifact 都仍不存在；现有 queue 刻意固定
   `auto_start=false`、`runtime_entrypoint=null`，也明确禁止临时拼 judge 命令。因此 4k 不是“在跑只是
@@ -70,15 +72,18 @@ Rules:
   旧 `pp_gate3_rally.sh`/conductor/run_sim 链不能修补复用：它先发球后起 runner、broad kill、复用
   RouDi/共享 `/tmp` 与 `/dev/shm`，且人类日志没有可证明的 fresh READY；新 D0 必须是私有
   namespace/cgroup+pidfd、machine status、DISARMED ball 一次性 arm 和 no-replace ledger。
-- **当前新 blocker**：planner 下一版仍判 **NO-MERGE**。它已经把 engage/side/face/wait/obs 放进同 tick
-  snapshot，并给 base/racket payload 加共享 epoch/sequence；本机回归 `155 pass + 2 skip`、隔离 Pod
-  ROS/Jazzy Release `220 pass + 5 optional skip`。但第二轮 fresh-clone 红队仍复现五组 P1：正式流接到
-  旧 schema 会降级却未毒化恢复屏障；invalid/revoke 仍有一处依赖两个 wall timestamp 严格大于；base
-  lease 用接收时刻而不是源时刻，可能把已经过龄的定位续命；active swing 没锁 engage epoch/base-revoke
-  generation，快速 invalid→recovery 可把撤销藏在两个 policy tick 之间；planner 未校验 ball/base 消息的
-  `frame_id` 却宣称 world frame。下一版必须补显式 revoked state、source-clock lease、active-base abort 和
-  frame authority；racket mid-swing 是冻结完成还是急停也要写成唯一合同。serve prereg 还须补齐
-  wire/mailbox/frame/yaml parser 依赖闭包，所以源码测试再多也不等于 Gate3 READY。
+- **当前新 blocker**：planner 仍判 **NO-MERGE**，但上一版五组 P1 已在 WIP 中逐项关闭：schema
+  downgrade 会毒化、lease 改用映射后的 source clock、base/racket 带 shared epoch + exact
+  `base_sequence_ref`、active swing 绑定 revoke generation、ball/base `frame_id` 不一致会 fail closed；本机
+  planner/source 已复核 `164 pass + 2 skip`，隔离 Pod Release native 为 `229 pass + 5 optional skip`。
+  新一轮红队又抓到两个更深的 P1，正在修而未合：① base 已 inactive 时，新的坏 geometry 没推进
+  barrier/epoch，较旧但仍未超龄的 base 可能复活；② vendor pelvis 100 Hz、policy 50 Hz 时，C++ 只留
+  latest base 再要求 exact sequence，会把合法配对在下个 tick 前覆盖而系统性饿死。修法固定为有界
+  exact base history + 同 tick latest closed-loop 双快照：历史 base 只证明 command 因果，base-low/yaw/
+  side/gate/首帧 obs 与 active abort 都必须看最新 base，normal refresh 不制造饥饿，revoke 最迟在下一
+  sampled tick 零增益。serve-sync v4 已把人类日志 marker 永久降为 diagnostic-only，并列出 machine
+  `READY_NO_BALL`/`WAITING_BALL_READY`、nonce/ledger/frame/AimRT 等 35 项 runtime blocker；它也仍是
+  source-only 负门，不是 Gate3 READY。
 - **代码交流状态**：recovery A/B/C、plan-only Gate3 源码门和严格 face179 模型合同已分别随
   `e10922a`、`b2067ba`、`8975043` 进入 main；face179 的 vendor 行为证据仍明确为 `Partial`。
   yikang 的 oracle/stand 诊断随 `3df6ff5` 合入，head reward 明确留在未验证队列。三版 planner
@@ -92,8 +97,9 @@ Rules:
   physical returns；每个模型/planner/runtime/MJCF/题表都带 SHA。D0 不冒充连续实战。
   D1 再要求同一进程内 3–5 球 no-reset；恢复/reward mixture、四动作、TOPP 与标定 plant
   不阻塞 D0，但继续并行排队。任何真机 demo 仍受 G07 独立安全门约束，本阶段不发真机命令。
-- **未来 24 小时决策**：①关闭 downgrade/revoke/source-age/active-base/frame 五组 P1，动态覆盖同 tick
-  stale/yaw、跨 topic 乱序与快速撤销恢复，再复审 planner-policy 全状态机并跑最新 main C++ Release；
+- **未来 24 小时决策**：①关闭 inactive-invalid barrier 与高频 exact-pair liveness 两组新 P1，动态覆盖
+  latest-base 低重心、跨 topic 乱序、history eviction 与快速撤销恢复，再复审 planner-policy 全状态机并
+  跑最新 main C++ Release；
   ②在可用 MuJoCo 环境补 stand 10 秒数值诊断，但它不阻塞 D0；③并行补原生 first-tick JSON 和
   source-only serve-sync 负门，随后只用新的精确进程所有权方案准备 vendor first tick；同时补完 4k
   all-four activation consumer 并跑 matched K100；自然释放的 GPU
