@@ -1760,7 +1760,9 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
   影子异常吞掉计数绝不影响发布命令,慢后端 wall_budget 0.25s×10 自禁,诊断逐键数值。
   效果/证据:测试 12(含负控:两组真不同解 diff 必须>0.1m,防对账器恒零假绿)+邻居回归 25 全过
   (Mac 零 rclpy 档;rclpy/colcon 级清单留 pod);对抗评审 8 发现(1 major=无负控)全部核实修复。
-  状态:已推 origin;等 claude 求解器本体+拍板对账容差/warm-start/omega 三个开问题。
+  状态:**已合 main(merge `7e31819`;用户拍板"分支上验证过的就合";合后 planner 零 rclpy 全集
+  130 passed;主线期间唯一动 node.py 的 4a4ec76=发布点注释,零语义交叉)**;等 claude 求解器本体
+  +拍板对账容差/warm-start/omega 三个开问题。
 - 【yikang】**Gate3 谱系筛卷首轮(满池全程 CPU;顺带拆一颗共享 pod 安全雷)**——解决"13200 之后
   无第二个模型过 Gate3"的谱系空白。满池下 play.py 导出路不可用,新配方=克隆 13200 正品 ONNX 图
   只换 actor initializer+按 run config 改 metadata(tools/swap_actor_export.py);数值对抗检查
