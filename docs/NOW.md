@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 当下状态与团队 focus（2026-07-13 01:30 CST）
+## 当下状态与团队 focus（2026-07-13 01:38 CST）
 
 本节只做 roadmap 的当前入口；下面的实验结果、奖励/训练台账、长期路线和历史判决继续保留，
 不能用这份短报替代可复现实验记录。
@@ -81,11 +81,13 @@ Rules:
   - yikang：reference oracle、stand viewer 与 default-off 的 shadow solver 接线壳均已选择性合 main；
     head reward 没有硬塞进现役配方。当前继续做 vendor Gate3 谱系筛卷与课程侧诊断；v2 obs 顺序、
     24100 交接模型和 v7 击球平面仍需与 jiayi 对齐后才可判分。
-  - 动作库轨：Franco/v6/v7 十段已过内容寻址、GMR/grounding/自碰与身体余隙；当前由
-    spatial-retarget 击球点适配推进，TOPP、2-vs-4 和 RL 等离线安全/可行性门后再占 GPU。
+  - 动作库轨：Franco/v6/v7 十段已过内容寻址、GMR/grounding/自碰与身体余隙；现按“每个动作自己的
+    安全触球流形 × 适配来球族 × 合法整轨 SE(2) 站位”推进，不再拿冻结站位 `0/64` 判动作死刑。
+    反手拉 B/C 先做重定位证书，挡球另出挡球题；TOPP、2-vs-4 和 RL 等离线门后再占 GPU。
 - **最近值得团队同步的结果**：两轮红队先后抓出“反手 raw-A 符号被误判”和“no-publish 顺便
-  免模型合同”两个会制造假绿的问题，现都已闭环；恢复/等待不把三种 reward 单独相加，先做 A/B/C
-  结构轴，结构失败后才做 `2^3` 交互和固定总预算 mixture；fresh SZ 四 seed 的 2k 正式卷虽中位高，
+  免模型合同”两个会制造假绿的问题，现都已闭环；恢复/等待文献与现役代码审计已随 `30484a2`
+  进入 main：硬安全常开，先把平衡债 D、ready potential R 与随机到球环境轴分开，首卷做 D/R `2^2`；
+  只有第三个 critic 已独立校准才升 `2^3`，随后再做固定总预算 mixture。fresh SZ 四 seed 的 2k 正式卷虽中位高，
   worst seed 仅 `20/100`，已正式判 seed-stability 失败。新 reference oracle 与 Torch 物理全表对拍
   通过，最大误差 `4.63e-9`；stand viewer 已纠正为生产 29-DOF PD、neck passive，不再伪称额外 head
   `40/2` 是生产合同。planner 第三版 `6aae7ac` 的 host `198 pass + 2 skip` 也被 fresh-clone 红队否决，
