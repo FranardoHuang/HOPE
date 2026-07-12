@@ -545,6 +545,7 @@ def _child_wait_and_exec(
     poll: float,
     identity_reader: IdentityReader,
     boot_id_reader: BootIdReader,
+    after_rehash_hook: Callable[[], None] | None = None,
 ) -> None:
     try:
         os.setsid()
@@ -644,17 +645,29 @@ def _child_wait_and_exec(
             or ledger.get("bindings") != bindings
         ):
             raise SupervisorError("launch ledger does not bind this child execution")
-        current = identity_reader(pid)
-        if (
-            current is None
-            or current.get("pgid") != pid
-            or current.get("start_ticks") != identity["start_ticks"]
-            or current.get("executable_realpath") != identity.get("executable_realpath")
-            or current.get("executable_sha256") != identity.get("executable_sha256")
-            or boot_id_reader() != boot_id
-            or time.monotonic_ns() >= commit_deadline_monotonic_ns
-        ):
-            raise SupervisorError("child identity changed before exec")
+
+        def require_commit_still_valid(stage: str) -> None:
+            current_token = _strict_object(token_path)
+            current = identity_reader(pid)
+            if (
+                current_token != expected_token
+                or _sha256_file(ledger_path) != expected_token["ledger_sha256"]
+                or current is None
+                or current.get("pid") != pid
+                or current.get("pgid") != pid
+                or current.get("state") == "Z"
+                or current.get("start_ticks") != identity["start_ticks"]
+                or current.get("executable_realpath")
+                != identity.get("executable_realpath")
+                or current.get("executable_sha256")
+                != identity.get("executable_sha256")
+                or boot_id_reader() != boot_id
+                or time.monotonic_ns() >= commit_deadline_monotonic_ns
+                or result_path.exists()
+            ):
+                raise SupervisorError(f"child commit invalid {stage}; refusing exec")
+
+        require_commit_still_valid("before rehash")
         for name, binding in bindings.items():
             if name == "supervisor_config":
                 continue
@@ -666,8 +679,9 @@ def _child_wait_and_exec(
             "supervisor_config"
         ]["sha256"]:
             raise SupervisorError("supervisor config changed before exec")
-        if result_path.exists():
-            raise SupervisorError("terminal result appeared before exec")
+        if after_rehash_hook is not None:
+            after_rehash_hook()
+        require_commit_still_valid("after rehash before acknowledgment")
         ack = {
             "schema_version": 1,
             "artifact_kind": "phase1_q50_supervisor_commit_ack",
@@ -680,6 +694,7 @@ def _child_wait_and_exec(
             "accepted_monotonic_ns": time.monotonic_ns(),
         }
         _atomic_json_no_clobber(ack_path, ack)
+        require_commit_still_valid("after acknowledgment before exec")
         os.chdir(cwd)
         os.write(1, b"[q50-supervisor] commit accepted; exec exact bound runner\n")
         os.execve(argv[0], argv, environment)
@@ -751,6 +766,7 @@ def _launch_loaded(
     identity_reader: IdentityReader = _read_proc_identity,
     boot_id_reader: BootIdReader = _read_boot_id,
     after_hello_hook: Callable[[], None] | None = None,
+    child_after_rehash_hook: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     if pod not in config["pods"]:
         raise SupervisorError(f"unknown Pod {pod!r}")
@@ -809,6 +825,7 @@ def _launch_loaded(
             poll=float(config["handshake"]["poll_seconds"]),
             identity_reader=identity_reader,
             boot_id_reader=boot_id_reader,
+            after_rehash_hook=child_after_rehash_hook,
         )
         os._exit(73)
     os.close(log_descriptor)

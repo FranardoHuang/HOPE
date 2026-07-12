@@ -1123,7 +1123,9 @@ runtime contract plus Python realpath/binary SHA for each Pod. A fixed no-clobbe
 contains child hello, immutable launch ledger, commit token, commit acknowledgment and combined log.
 The token is withheld until the parent verifies `PID=PGID`, Linux boot id/procfs start ticks,
 executable SHA, exact argv/fixed-environment digest and every artifact SHA; parent loss or stall
-before that token makes the child self-exit rather than start an unowned judge.
+before that token makes the child self-exit rather than start an unowned judge. Deadline, process
+identity and token/ledger binding are checked again after all rehashes and once more after the
+acknowledgment; crossing the deadline at either point forbids `execve`.
 
 Read-only `inspect` rehashes the complete closure. A live result requires the preserved PID, PGID,
 start ticks, executable, command line and environment digest to match; terminal acceptance is
@@ -1132,7 +1134,7 @@ pre-existing result prevents launch. No retry, remote login, process-control, tr
 simulator, deployment or robot surface exists. The detailed contract and commands are in
 [the model-4000 q50 operation](../operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md#persistent-top-level-launch-source-gate).
 
-Supervisor tests pass `17`; combined queue/consumer/supervisor tests pass `57`. This is host source
+Supervisor tests pass `18`; combined queue/consumer/supervisor tests pass `58`. This is host source
 evidence only: Linux procfs has not yet been smoke-tested, the wrapper is not deployed, and no
 MuJoCo judge or score ran. It therefore closes neither the matched
 [q50/K100](../DEFINITIONS.md#q50-and-k100) result nor vendor Gate3/Gate3B. G06 remains `Partial`.

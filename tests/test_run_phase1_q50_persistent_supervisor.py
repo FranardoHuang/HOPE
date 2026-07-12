@@ -361,6 +361,28 @@ def test_parent_stall_past_child_deadline_cannot_publish_ledger(tmp_path: Path):
     assert not (state_dir / "commit_token.json").exists()
 
 
+def test_rehash_delay_past_deadline_never_starts_bound_runner(tmp_path: Path):
+    _, config = _fixture(tmp_path)
+    with pytest.raises(S.SupervisorError, match="exact exec was not observed"):
+        _launch(config, child_after_rehash_hook=lambda: time.sleep(1.1))
+    state_dir = Path(config["pods"]["pod1"]["state_dir"])
+    _wait_for(state_dir / "child_exit.json")
+    hello = json.loads((state_dir / "child_hello.json").read_text())
+    try:
+        os.waitpid(hello["pid"], 0)
+    except ChildProcessError:
+        pass
+    child_exit = json.loads((state_dir / "child_exit.json").read_text())
+    assert child_exit["status"] == "child_setup_or_exec_failed"
+    assert "after rehash before acknowledgment" in child_exit["error"]
+    assert (state_dir / "launch_ledger.json").is_file()
+    assert (state_dir / "commit_token.json").is_file()
+    assert not (state_dir / "commit_ack.json").exists()
+    assert not Path(config["pods"]["pod1"]["result_path"]).exists()
+    log = (state_dir / "runner.stdout_stderr.log").read_text(encoding="utf-8")
+    assert "[fake-bound-runner] started" not in log
+
+
 def test_binding_mismatch_fails_before_state_reservation(tmp_path: Path):
     _, config = _fixture(tmp_path)
     runtime = Path(config["pods"]["pod1"]["runtime_contract"]["path"])

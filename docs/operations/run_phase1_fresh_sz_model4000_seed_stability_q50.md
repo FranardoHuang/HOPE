@@ -462,9 +462,9 @@ first enter `main`, and the deployed script/config hashes below must match that 
 The reviewed files are:
 
 - `scripts/run_phase1_q50_persistent_supervisor.py`, SHA-256
-  `9d38d2a04f9f068ef084ba8b3ebf7cef138517896d172ce25a797b2ff33bdf9a`;
+  `942817dff325865c99f7dda59b8a45d2fa8ed47b42d1ecd43e19922cf918e8fc`;
 - `configs/phase1_fresh_SZ_model4000_seed_stability_q50_persistent_supervisor_20260713.json`,
-  SHA-256 `a5e9eb7ff38ad13d9b7b8ad178b07ea7f0eff816964c5d2b76dcb643bef33c8b`.
+  SHA-256 `b7968a04710eeaa8522c743e5a315487395b026b6111dc1258075c303c08c518`.
 
 Deploy those two files, preserving their repository-relative `scripts/` and `configs/` paths, into
 one new no-clobber source root on each Pod. Do not put them in or modify the frozen train/eval
@@ -493,7 +493,7 @@ changed variable.
 ```bash
 SUPERVISOR="$SUP_SOURCE/scripts/run_phase1_q50_persistent_supervisor.py"
 SUP_CONFIG="$SUP_SOURCE/configs/phase1_fresh_SZ_model4000_seed_stability_q50_persistent_supervisor_20260713.json"
-SUP_CONFIG_SHA=a5e9eb7ff38ad13d9b7b8ad178b07ea7f0eff816964c5d2b76dcb643bef33c8b
+SUP_CONFIG_SHA=b7968a04710eeaa8522c743e5a315487395b026b6111dc1258075c303c08c518
 
 env -i HOME=/root LANG=C.UTF-8 LC_ALL=C.UTF-8 LOGNAME=root \
   PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
@@ -537,9 +537,10 @@ pytest -q \
   tests/test_validate_phase1_fresh_sz_model4000_q50_queue.py
 ```
 
-The accepted host result is `57 passed`. The launch-specific 17 tests cover parent exit/stall before
+The accepted host result is `58 passed`. The launch-specific 18 tests cover parent exit/stall before
 commit, child token timeout, duplicate/no-clobber launch, pre-existing result and artifact mismatch,
 exact live identity, reused-PID/executable/environment rejection, minimal terminal-result rejection
-and delegation to the original runner's full result validator. This macOS host has no Linux procfs,
+and delegation to the original runner's full result validator. A deterministic delayed-rehash test
+crosses the child deadline and proves there is no acknowledgment or runner start. This macOS host has no Linux procfs,
 so the tests inject the same identity-reader seam; an actual Linux source smoke that starts only a
 fake runner remains required before the real Pod q50 launch. No test starts a judge or simulator.

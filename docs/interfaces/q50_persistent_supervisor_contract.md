@@ -52,9 +52,11 @@ under an SSH-provided `PYTHONPATH` or loader environment.
    does it atomically publish an immutable launch ledger followed by a commit token that hashes both
    hello and ledger.
 4. The child times out and exits by itself if the token is absent. When the token is present, it
-   revalidates its identity, deadline, result absence and all bound bytes, writes a no-clobber commit
-   acknowledgment, then `execve`s the exact existing runner command. The parent reports success
-   only after observing that exact executable, argv and fixed environment through procfs.
+   revalidates its identity, deadline, result absence and all bound bytes; after potentially slow
+   rehashes it checks deadline/identity/token again immediately before the no-clobber commit
+   acknowledgment, and repeats that check after acknowledgment immediately before `execve`.
+   Crossing the deadline at either point self-exits without running the consumer. The parent reports
+   success only after observing that exact executable, argv and fixed environment through procfs.
 
 The parent never needs a cleanup operation. A parent crash before the token leaves no execution
 authority; the child self-exits after the configured timeout. A crash after the token leaves the
@@ -81,7 +83,9 @@ artifact mismatch, reused-PID/executable/environment mismatch, exact live inspec
 rejection and delegation to the original runner's full terminal-result validator. It also scans the
 source for remote-login and process-control APIs. Config, hello, ledger, token, acknowledgment and
 terminal wrapper JSON all reject duplicate object keys and non-finite constants before semantic
-validation, so two conforming consumers cannot assign different meanings to one evidence file.
+validation, so two conforming consumers cannot assign different meanings to one evidence file. A
+deterministic delayed-rehash regression crosses the deadline and asserts no acknowledgment, result
+or fake-runner marker exists.
 
 This contract does not prove that an external Pod manager will preserve processes when it destroys
 an entire container or cgroup. It only removes ordinary SSH file-descriptor/session lifetime from
