@@ -1707,3 +1707,8 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `.59/1.01s` 进入 strike clock。发球双门还要同时绑定 owned runner fresh MOTION 与 owned planner
    fresh readiness。147 pass/2 skip 不覆盖这些语义反例；分支退回修 base-yaw 选边、per-clip wait 和
    双进程 readiness，main 未合、未启 sim/Pod/信号/真机。
+67. 【franco/Codex】**planner `71b0b23` 仍 NO-MERGE**——独立红队证明 base stale/坏样本没有在
+   schema-2 控制面即时发布 revoke，formal 179 又错误继承 legacy `0.25 s` invalid grace；旧 command
+   可在 base 恢复后、自身 `0.5 s` timeout 前重新成熟。另有 mocap yaw 与 runner 启动归零 IMU yaw
+   ownership 不同，现有 helper 测试只验证同 quaternion 的理想情况。修复转为 formal immediate
+   revoke + runner policy-frame 一致性 fail-closed；未运行 backend/sim/Pod/真机。

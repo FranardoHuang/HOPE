@@ -4,6 +4,19 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-12
 
+- Kept follow-up planner candidate `71b0b23` out of main after a second
+  independent state-machine review. It fixes the earlier pure helper geometry,
+  selected-clip wait and dual readiness contract, but base staleness or a newly
+  malformed base sample only clears Python memory and does not immediately
+  publish a schema-2 invalid row. The old command can therefore survive inside
+  the C++ `0.5 s` timeout and become eligible after base recovery. Formal 179
+  also still inherits the legacy `0.25 s` invalid grace, so an explicit revoke
+  can be treated as fresh. Finally, planner side uses mocap yaw while the
+  external-base runner's policy frame uses boot-yaw-aligned IMU yaw; same-input
+  helper tests do not prove runtime ownership. The correction now requires
+  formal immediate revoke and a runner policy-frame side consistency gate,
+  with dynamic stale/malformed/recovery tests. No simulator, Pod process,
+  signal or robot command ran.
 - Kept planner proposal `69418a9` out of main after independent red-team found
   two planner-policy pairing faults. Its side selector used world-Y difference,
   while the 179 policy selects in the yaw-rotated base frame; at only 10 degrees

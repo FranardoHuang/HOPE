@@ -875,3 +875,27 @@ Finally, future serve release must bind both exact-owned runner fresh MOTION and
 planner fresh readiness, including executable/argv/config and PID/PGID/start-ticks/log inode. A
 runner marker alone cannot prove the first planner command exists. The reviewed source remains
 outside main until these pairings and C++ tests close. No vendor runtime ran; G06 remains `Partial`.
+
+#### Planner correction still held by revoke and yaw-ownership counterexamples (2026-07-12)
+
+The follow-up candidate `71b0b23` fixes the original pure helper geometry and adds selected-clip
+windup waiting plus a dual runner/planner readiness preregistration, but it is still **not merged**.
+Independent state-machine review found that a base sample ageing past `0.2 s`, or a newly malformed
+base sample, clears only the planner's in-process corrected-base tuple. Neither path immediately
+publishes a schema-2 invalid flat command. A previously valid racket tuple can consequently remain
+inside the C++ subscriber's `0.5 s` command timeout and become eligible again if base freshness
+returns before another admitted ball solve.
+
+Publishing an invalid row alone is insufficient for formal 179: the current runner applies the
+legacy `planner_invalid_grace_s=0.25` to every actor. A tuple explicitly revoked while waiting can
+therefore still be classified fresh during the grace interval. Formal schema 2 must revoke
+immediately; the historical grace may remain only for explicitly registered legacy contracts.
+
+The proposed Python selector also consumes the corrected mocap/pelvis quaternion, while
+`LocMode::kExternalBase` deliberately keeps the runner's boot-yaw-aligned IMU orientation and
+ignores the quaternion carried by `/a3/base_pose_flat` for the policy target frame. Passing the same
+quaternion to two pure helpers does not prove those runtime authorities coincide. Before merge, the
+runner must fail closed whenever the planner's proposed side disagrees with the runner's actual
+policy-frame geometry (with an explicit boundary rule), and dynamic tests must cover stale revoke,
+malformed-base revoke, revoke during windup waiting, recovery before timeout, and mismatched yaw
+authorities. No simulator, backend, Pod process or robot ran; G06 remains `Partial`.
