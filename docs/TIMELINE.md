@@ -19,6 +19,7 @@ Git 已经保存每个 commit 及其注释，因此本文件不复述 commit 流
 
 | 日期 | 重要变化 | 人类责任人 | 执行者 | 修复/澄清了什么 | main 证据 | 仍然缺什么 |
 | --- | --- | --- | --- | --- | --- | --- |
+| 2026-07-13 | formal planner-policy causal tuple 与 exact portable Release 集成 | franco | Codex | 旧候选会让跨 topic 的旧 target/base 重新配对，或在读取本 tick base 前 engage；现用 shared epoch、command/base sequence、最新 tick-start base 与 revocation generation 统一 actor gate，并让 exact 源码通过 strict-finite Release。 | `6d6b778`、[实验卷宗](experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) | ROS/Jazzy/AimRT、formal ONNX runtime、owned backend first tick、vendor MuJoCo 行为和硬件均未运行。 |
 | 2026-07-13 | native MuJoCo feasibility/implementation 升为 P0，且不阻塞 `Gate3-D0` | franco | Codex | Isaac 高分与 MuJoCo 解析回球差反复背离，因此停止优先扩 Isaac-only sweep；首卷只做无球平衡/击球状态。红队又冻结 action trace/clamp、alias/exec、strict JSON、MJCF `strippath` 四项正确性缺口，以及 N=1/8/32/64、48 h 留 30% 余量的吞吐门。 | `abaea9b`、`68c0c2a`（`af803e9`）、`7c5f45b` | off-main preflight 候选仍为 `NO-MERGE`；无 trainer、backend、PPO smoke、physical return 或连续结果。 |
 | 2026-07-13 | 文档总索引与实验登记骨架补回 main | franco | Codex | main 原本缺少统一 INDEX 和实验登记，任务路由分散在 Gate、operation 与聊天中；现补上一站式入口和实验最小字段。 | `3c7e507` | 该提交只有英文骨架，仍缺中文术语、完整实验卷宗和精简三本账。 |
 | 2026-07-12 | strict 179-D face model contract | franco | Codex | 关闭两条假绿：把 actor raw face A 与对手向 physical face B 混淆；no-publish 顺便绕过模型校验。现在 export/runtime 绑定 per-clip sign、bank envelope 和 exact metadata。 | `8975043` | real-model preflight 通过；vendor behavior、self-hit、recovery 未测。 |

@@ -181,7 +181,7 @@ The main-integration worktree started from exact `origin/main`
 base and three already matched. All 23 effective paths changed between the planner feature base
 `0239ecb` and validated candidate `c0a8e46` were restored byte-for-byte from `c0a8e46`; no source
 conflict or semantic merge was performed. Unrelated latest-main motion and q50-supervisor files
-were retained.
+were retained. The resulting source/docs integration commit is `6d6b778`.
 
 The sorted manifest format is one line per effective path,
 `<file SHA-256><two spaces><repo-relative path>`. Its 23-path SHA-256 is
