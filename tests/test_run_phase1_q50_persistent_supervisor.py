@@ -119,6 +119,7 @@ def _fixture(tmp_path: Path, *, suffix: str = "a") -> tuple[Path, dict]:
         "handshake": {
             "hello_timeout_seconds": 1,
             "commit_timeout_seconds": 1,
+            "ack_observation_seconds": 0.1,
             "exec_observation_seconds": 0.1,
             "poll_seconds": 0.01,
         },
@@ -385,13 +386,13 @@ def test_inspect_rejects_reused_or_different_live_process(tmp_path: Path, field:
             value[field] = "f" * 64
         return value
 
-    with pytest.raises(S.SupervisorError):
-        S._inspect_loaded(
-            config,
-            "pod2",
-            identity_reader=wrong,
-            boot_id_reader=_boot_id,
-        )
+    failed = S._inspect_loaded(
+        config,
+        "pod2",
+        identity_reader=wrong,
+        boot_id_reader=_boot_id,
+    )
+    assert failed["status"] == "committed_child_failed"
     os.waitpid(launched["pid"], 0)
 
 
@@ -424,28 +425,65 @@ def test_parent_stall_past_child_deadline_cannot_publish_ledger(tmp_path: Path):
         pass
     assert not (state_dir / "launch_ledger.json").exists()
     assert not (state_dir / "commit_token.json").exists()
+    assert not Path(config["environment"]["FAKE_RUNNER_MARKER"]).exists()
+    log = (state_dir / "runner.stdout_stderr.log").read_text(encoding="utf-8")
+    assert "[fake-bound-runner] started" not in log
 
 
-def test_rehash_delay_past_deadline_never_starts_bound_runner(tmp_path: Path):
-    _, config = _fixture(tmp_path)
-    with pytest.raises(S.SupervisorError, match="did not acknowledge commit"):
-        _launch(config, child_after_rehash_hook=lambda: time.sleep(1.1))
+def test_token_published_before_rehash_delay_is_irreversible_and_eventually_runs(
+    tmp_path: Path,
+):
+    _, config = _fixture(tmp_path, suffix="rehash_after_token")
+    launched = _launch(config, child_after_rehash_hook=lambda: time.sleep(1.1))
     state_dir = Path(config["pods"]["pod1"]["state_dir"])
-    _wait_for(state_dir / "child_exit.json")
-    hello = json.loads((state_dir / "child_hello.json").read_text())
-    try:
-        os.waitpid(hello["pid"], 0)
-    except ChildProcessError:
-        pass
-    child_exit = json.loads((state_dir / "child_exit.json").read_text())
-    assert child_exit["status"] == "child_setup_or_exec_failed"
-    assert "after rehash before acknowledgment" in child_exit["error"]
+    assert launched["status"] == "token_published_pending_ack"
     assert (state_dir / "launch_ledger.json").is_file()
     assert (state_dir / "commit_token.json").is_file()
     assert not (state_dir / "commit_ack.json").exists()
-    assert not Path(config["pods"]["pod1"]["result_path"]).exists()
+    with pytest.raises(S.SupervisorError, match="no-clobber"):
+        _launch(config)
+
+    _wait_for(Path(config["environment"]["FAKE_RUNNER_MARKER"]))
+    converged = S._inspect_loaded(
+        config,
+        "pod1",
+        identity_reader=_identity_reader(config, "pod1"),
+        boot_id_reader=_boot_id,
+    )
+    assert converged["status"] == "running_exact"
     log = (state_dir / "runner.stdout_stderr.log").read_text(encoding="utf-8")
-    assert "[fake-bound-runner] started" not in log
+    assert "[q50-supervisor][FATAL]" not in log
+    assert "[fake-bound-runner] started" in log
+    os.waitpid(launched["pid"], 0)
+
+
+def test_ack_atomic_publication_stall_is_pending_not_retryable_fatal(
+    tmp_path: Path,
+):
+    _, config = _fixture(tmp_path, suffix="ack_atomic_stall")
+    launched = _launch(
+        config,
+        child_ack_before_link_hook=lambda: time.sleep(1.15),
+    )
+    state_dir = Path(config["pods"]["pod1"]["state_dir"])
+    assert launched["status"] == "token_published_pending_ack"
+    assert (state_dir / "commit_token.json").is_file()
+    assert not (state_dir / "commit_ack.json").exists()
+    with pytest.raises(S.SupervisorError, match="no-clobber"):
+        _launch(config)
+
+    _wait_for(Path(config["environment"]["FAKE_RUNNER_MARKER"]))
+    converged = S._inspect_loaded(
+        config,
+        "pod1",
+        identity_reader=_identity_reader(config, "pod1"),
+        boot_id_reader=_boot_id,
+    )
+    assert converged["status"] == "running_exact"
+    log = (state_dir / "runner.stdout_stderr.log").read_text(encoding="utf-8")
+    assert "[q50-supervisor][FATAL]" not in log
+    assert "[fake-bound-runner] started" in log
+    os.waitpid(launched["pid"], 0)
 
 
 def test_binding_mismatch_fails_before_state_reservation(tmp_path: Path):

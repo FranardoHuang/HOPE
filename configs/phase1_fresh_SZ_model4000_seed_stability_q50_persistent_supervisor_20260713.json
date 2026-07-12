@@ -6,7 +6,7 @@
   "real_robot_authorized": false,
   "supervisor_source": {
     "path": "scripts/run_phase1_q50_persistent_supervisor.py",
-    "sha256": "615d247d6f7062f9199872df61e6d2648598e09e02b102102383caa0c34ea275"
+    "sha256": "35feeb4e181f579dc2fe65d8a88be4413dfc63073ea7b40b2d4688d7d377945c"
   },
   "environment": {
     "HOME": "/root",
@@ -35,6 +35,7 @@
   "handshake": {
     "hello_timeout_seconds": 15,
     "commit_timeout_seconds": 30,
+    "ack_observation_seconds": 2,
     "exec_observation_seconds": 2,
     "poll_seconds": 0.05
   },

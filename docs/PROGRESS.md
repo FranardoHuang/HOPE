@@ -1807,16 +1807,18 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   unchanged activation consumer. It binds the supervisor, existing runner/config/activation and
   each Pod's distinct prepared runtime-contract SHA; the child cannot execute until the parent
   validates `PID=PGID`, Linux boot id/procfs start ticks, executable SHA, exact argv/fixed-environment
-  digest and publishes an immutable no-clobber ledger plus commit token; success waits for the
-  child's commit acknowledgment and exact procfs exec identity.
+  digest and publishes an immutable no-clobber prepared ledger plus commit token. The durable token,
+  not later acknowledgment timing, is the irreversible commit point; independent bounded
+  observation reports `token_published_pending_ack`, `committed_pending_exec` or `running_exact`.
 - The public surface is only manual `launch` and read-only `inspect`. Parent loss before commit
   makes the detached child time out by itself; inspection rejects PID reuse and accepts completion
   only through the exact content-bound Pod result. There is no retry, remote-login, process-control,
   training, deployment, simulator or robot authority.
-- Supervisor-focused tests pass `20`; the queue+consumer+supervisor set passes `60`. A deterministic
-  delayed-rehash regression crosses the pre-ack deadline and proves no acknowledgment/runner start;
-  a post-ack stall returns pending, rejects restart and later converges to exact running. Terminal
-  result validation now freezes bytes/SHA and rejects an A-to-B swap during the bound validator.
+- Supervisor-focused tests pass `21`; the queue+consumer+supervisor set passes `61`. A deterministic
+  tokenless stall crosses the deadline and proves no token/runner start. Post-token delayed rehash,
+  a 1.15-second acknowledgment atomic-publication stall and post-ack delayed exec all return pending,
+  reject restart and later converge without a fatal-before-later-runner sequence. Terminal result
+  validation freezes bytes/SHA and rejects an A-to-B swap during the bound validator.
   This macOS host
   has no procfs, so one Linux fake-runner smoke remains required before Pod deployment. No wrapper,
   judge, simulator or hardware process ran; see the

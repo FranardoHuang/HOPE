@@ -462,9 +462,9 @@ first enter `main`, and the deployed script/config hashes below must match that 
 The reviewed files are:
 
 - `scripts/run_phase1_q50_persistent_supervisor.py`, SHA-256
-  `615d247d6f7062f9199872df61e6d2648598e09e02b102102383caa0c34ea275`;
+  `35feeb4e181f579dc2fe65d8a88be4413dfc63073ea7b40b2d4688d7d377945c`;
 - `configs/phase1_fresh_SZ_model4000_seed_stability_q50_persistent_supervisor_20260713.json`,
-  SHA-256 `02397e6bb69286fdd811ba6a4c703444a33ac34f9ec32acc84be35891b181985`.
+  SHA-256 `1ef6343b7c31f152eeb317c35e4bda1be8b17406a27d531fbc0fc0ce1ea76736`.
 
 Deploy those two files, preserving their repository-relative `scripts/` and `configs/` paths, into
 one new no-clobber source root on each Pod. Do not put them in or modify the frozen train/eval
@@ -493,7 +493,7 @@ changed variable.
 ```bash
 SUPERVISOR="$SUP_SOURCE/scripts/run_phase1_q50_persistent_supervisor.py"
 SUP_CONFIG="$SUP_SOURCE/configs/phase1_fresh_SZ_model4000_seed_stability_q50_persistent_supervisor_20260713.json"
-SUP_CONFIG_SHA=02397e6bb69286fdd811ba6a4c703444a33ac34f9ec32acc84be35891b181985
+SUP_CONFIG_SHA=1ef6343b7c31f152eeb317c35e4bda1be8b17406a27d531fbc0fc0ce1ea76736
 
 env -i HOME=/root LANG=C.UTF-8 LC_ALL=C.UTF-8 LOGNAME=root \
   PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
@@ -522,12 +522,14 @@ env -i HOME=/root LANG=C.UTF-8 LC_ALL=C.UTF-8 LOGNAME=root \
 
 The configured fixed state directory is created before the child exists, so a repeated launch is
 always rejected. If the SSH session drops before the command response, **do not launch again**.
-Reconnect and run `inspect`; the immutable ledger/token/ack distinguishes an exact live process,
-pre-commit timeout, committed-but-not-yet-observed exec, terminal validated result, and exit without
-result. A timely validated ack is irreversible: `committed_pending_exec` is neither running proof
-nor launch failure and never permits a retry. There is intentionally no cleanup command. Preserve a
-partial/failure state directory and its fixed log for diagnosis; a new attempt requires a reviewed
-v2 config and distinct state directory.
+Reconnect and run `inspect`; the immutable ledger, token and acknowledgment distinguish an exact
+live process, pre-token timeout, token-published pending acknowledgment, committed-but-not-yet-observed exec,
+terminal validated result, and committed child failure. The durable commit token is irreversible:
+both `token_published_pending_ack` and `committed_pending_exec` return zero, are neither running
+proof nor launch failure, and never permit a retry. A startup deadline only prevents tokenless work;
+it cannot cancel slow rehash, acknowledgment publication or exec after the token exists. There is
+intentionally no cleanup command. Preserve a partial/failure state directory and its fixed log for
+diagnosis; a new attempt requires a reviewed v2 config and distinct state directory.
 
 Verification that does not touch a Pod, simulator, or robot:
 
@@ -539,12 +541,14 @@ pytest -q \
   tests/test_validate_phase1_fresh_sz_model4000_q50_queue.py
 ```
 
-The accepted host result is `60 passed`. The launch-specific 20 tests cover parent exit/stall before
-commit, child token timeout, duplicate/no-clobber launch, pre-existing result and artifact mismatch,
-exact live identity, reused-PID/executable/environment rejection, minimal terminal-result rejection
-and delegation to the original runner's full result validator. A deterministic delayed-rehash test
-crosses the pre-ack deadline and proves there is no acknowledgment or runner start. A post-ack stall
-returns pending, refuses restart and later converges to running; a result A-to-B swap during validation
-is rejected. This macOS host has no Linux procfs,
+The accepted host result is `61 passed`. The launch-specific 21 tests cover parent exit/stall before
+token commit, child token timeout, duplicate/no-clobber launch, pre-existing result and artifact
+mismatch, exact live identity, reused-PID/executable/environment rejection, minimal terminal-result rejection
+and delegation to the original runner's full result validator. A deterministic tokenless stall
+crosses the startup deadline and proves there is no token or runner start. Delayed rehash and a real
+1.15-second acknowledgment atomic-publication stall both cross the old deadline after token commit,
+return pending with no retry authority, and later converge to running without a fatal-before-runner
+sequence. A post-ack stall returns pending with the same no-retry/convergence behavior; a result
+A-to-B swap during validation is rejected. This macOS host has no Linux procfs,
 so the tests inject the same identity-reader seam; an actual Linux source smoke that starts only a
 fake runner remains required before the real Pod q50 launch. No test starts a judge or simulator.
