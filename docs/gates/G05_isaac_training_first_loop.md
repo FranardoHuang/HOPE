@@ -1111,3 +1111,23 @@ not a validated default. In the local Torch/Hydra environment, the current rewar
 Because no head code/config was changed, current reward bytes and behavior remain unchanged. Full
 audit and commands are in `docs/research/yikang_selective_integration_20260712.md`. G05 stays
 `Partial`.
+
+### 2026-07-12 inexact first-actor-candidate observability boundary
+
+The deploy runner's new `--first-tick-json` diagnostic does not change training, the 179-D actor,
+actions, normalization, reward or any checkpoint. It records the first observed planner-engaged
+actor candidate; idle/wait/recovery rows cannot consume the capture. This is not an atomic planner
+snapshot or Gate3 certificate.
+
+Backend `RobotState` has joint q/dq and IMU state but no root linear velocity. The diagnostic reads
+the vendor pelvis-twist topic through a subscription-only sim sidecar instead of fabricating zero,
+and records observation base separately from the joined vendor-world base. Missing/stale/nonfinite,
+regressed headers and odd generations fail closed. ONNX Runtime loads the same stable bytes whose
+digest enters the JSON.
+
+The vendor topics have asynchronous publish-time stamps and no common MuJoCo sample sequence; the
+current planner also lacks merged same-tick snapshot/shared payload epoch semantics. Therefore the
+outer document and payload fix `evaluation_contract_exact=false`, with planner/native/source/runtime
+exactness fields all false. Dependency-light source tests pass `6` cases. No actor/model weights
+were evaluated and no Isaac or MuJoCo rollout ran. G05 remains `Partial`; this instrumentation
+cannot promote a checkpoint or repair the four-seed stability failure.

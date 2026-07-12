@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 当下状态与团队 focus（2026-07-12 14:48 CST）
+## 当下状态与团队 focus（2026-07-12 15:16 CST）
 
 本节只做 roadmap 的当前入口；下面的实验结果、奖励/训练台账、长期路线和历史判决继续保留，
 不能用这份短报替代可复现实验记录。
@@ -64,30 +64,30 @@ Rules:
   旧 `pp_gate3_rally.sh`/conductor/run_sim 链不能修补复用：它先发球后起 runner、broad kill、复用
   RouDi/共享 `/tmp` 与 `/dev/shm`，且人类日志没有可证明的 fresh READY；新 D0 必须是私有
   namespace/cgroup+pidfd、machine status、DISARMED ball 一次性 arm 和 no-replace ledger。
-- **当前新 blocker**：`6aae7ac` 仍判 **NO-MERGE**。第一，C++ 当前先用上一 tick 的
-  `base_fresh/last_base_quat` engage，之后才读取本 tick localization；base 已 stale/revoke 或 yaw 已越过
-  side band 时仍可能先锁拍。第二，base/racket 是两个 DDS topic，用本地 receive time 比 epoch 不证明
-  因果：`base invalid→base valid→延迟的旧 racket valid→racket invalid` 是合法交错，旧 tuple 仍会被误当
-  新。第三，serve prereg 漏绑真正实现 mailbox/wire/frame 的文件。修复必须让 engage/side/face/wait/obs
-  共用同 tick localization snapshot，并在两个 payload 中携带同一个 source epoch/sequence（或合成原子
-  topic）；不能再用 last-tick cache 或跨 topic 到达时间猜因果。下一版工作树已开始用同一 transaction
-  mutex 做双 mailbox capture/commit，并把 ROS header 年龄映射到 monotonic（不再用 publish time 续命），
-  当前 Python/source 回归 `154 pass + 2 skip`；但 counter exhaustion、跨 topic 全交错、native Release 和
-  fresh-clone 二次红队未完，所以仍不合 main。
+- **当前新 blocker**：planner 下一版仍判 **NO-MERGE**。它已经把 engage/side/face/wait/obs 放进同 tick
+  snapshot，并给 base/racket payload 加共享 epoch/sequence；本机回归 `155 pass + 2 skip`、隔离 Pod
+  ROS/Jazzy Release `220 pass + 5 optional skip`。但第二轮 fresh-clone 红队仍复现五组 P1：正式流接到
+  旧 schema 会降级却未毒化恢复屏障；invalid/revoke 仍有一处依赖两个 wall timestamp 严格大于；base
+  lease 用接收时刻而不是源时刻，可能把已经过龄的定位续命；active swing 没锁 engage epoch/base-revoke
+  generation，快速 invalid→recovery 可把撤销藏在两个 policy tick 之间；planner 未校验 ball/base 消息的
+  `frame_id` 却宣称 world frame。下一版必须补显式 revoked state、source-clock lease、active-base abort 和
+  frame authority；racket mid-swing 是冻结完成还是急停也要写成唯一合同。serve prereg 还须补齐
+  wire/mailbox/frame/yaml parser 依赖闭包，所以源码测试再多也不等于 Gate3 READY。
 - **代码交流状态**：recovery A/B/C、plan-only Gate3 源码门和严格 face179 模型合同已分别随
   `e10922a`、`b2067ba`、`8975043` 进入 main；face179 的 vendor 行为证据仍明确为 `Partial`。
   yikang 的 oracle/stand 诊断随 `3df6ff5` 合入，head reward 明确留在未验证队列。三版 planner
   候选 `69418a9/71b0b23/6aae7ac` 均未合入；per-clip wait 与双 readiness 已有可保留实现，但同 tick
-  snapshot 和 payload epoch 尚未闭环。first-tick feature 当前 38/38 host source 测试通过，但 vendor
-  pose/twist/racket 没有共同 MuJoCo sample sequence，只能标 `evaluation_contract_exact=false`，不能用
-  异步 header 假装 formal first tick。所有状态机/乱序反例关闭并复审前，不因测试数量多就进入 main。
+  snapshot 和 payload epoch 候选实现仍在红队。first-tick joined-source 诊断已随本轮合入 main，38/38
+  host source 测试通过；它把 outer/payload 及 planner/native/source/runtime 五类 exactness 永久写成
+  false，并由 formal-style consumer 拒绝。vendor pose/twist/racket 没有共同 MuJoCo sample sequence，
+  因此这次合并只增加可观测性与防伪护栏，不是 vendor first tick 或 Gate3 行为通过。
 - **几天内 demo 的最短闭环**：D0 先做 vendor MuJoCo 中可录屏的固定同卷 demo——真实
   planner 发题、production C++ runner、fresh SZ 的最佳 finite checkpoint，正/反手各一组
   physical returns；每个模型/planner/runtime/MJCF/题表都带 SHA。D0 不冒充连续实战。
   D1 再要求同一进程内 3–5 球 no-reset；恢复/reward mixture、四动作、TOPP 与标定 plant
   不阻塞 D0，但继续并行排队。任何真机 demo 仍受 G07 独立安全门约束，本阶段不发真机命令。
-- **未来 24 小时决策**：①把 formal wire 升为共享 epoch、把 localization snapshot 移到 engage 前，
-  动态覆盖同 tick stale/yaw 边界和跨 topic 乱序，再复审 planner-policy 全状态机并跑最新 main C++ Release；
+- **未来 24 小时决策**：①关闭 downgrade/revoke/source-age/active-base/frame 五组 P1，动态覆盖同 tick
+  stale/yaw、跨 topic 乱序与快速撤销恢复，再复审 planner-policy 全状态机并跑最新 main C++ Release；
   ②在可用 MuJoCo 环境补 stand 10 秒数值诊断，但它不阻塞 D0；③并行补原生 first-tick JSON 和
   source-only serve-sync 负门，随后只用新的精确进程所有权方案准备 vendor first tick；自然释放的 GPU
   槽只接受已过 schema2/L0/整轨安全与动力学门的动作/TOPP 任务，未过门就保持空闲而不制造无效训练；④能 first tick

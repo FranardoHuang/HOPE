@@ -92,9 +92,12 @@ by a second path spelling. These are only proposed argv bytes; no command is exe
 
 ## What it explicitly cannot prove
 
-Every accepted contract and plan must preserve these five blockers with `evidence: null`:
+Every accepted contract and plan must preserve these five blockers with `evidence: null` until a
+separately reviewed runtime run supplies the evidence. The diagnostic below implements useful
+plumbing for the first item, but lacks same-sample/planner/runtime exactness by construction, so
+runtime evidence remains null:
 
-1. **runner output:** production C++ still lacks native full
+1. **runner output:** production C++ must produce and runtime-verify native full
    qpos38/qvel37/base7/racket7/target/obs179 `--first-tick-json`;
 2. **process supervision:** no reviewed pidfd plus cgroup/supervisor startup handshake exists;
 3. **complete artifact closure:** PATH/LD_LIBRARY_PATH/PYTHONPATH/AMENT directory manifests,
@@ -107,6 +110,57 @@ Every accepted contract and plan must preserve these five blockers with `evidenc
 Therefore this source must not say “exact runtime,” “runtime eligible,” or “safe to launch.” Filling
 or deleting any blocker makes the schema-2 contract invalid. Closing them requires a separate
 reviewed runtime implementation; do not reactivate the deleted code in this plan gate.
+
+## Production first-tick joined-source diagnostic (implemented, not run)
+
+The production ping-pong runner now accepts `--first-tick-json ABS_PATH`, but only with
+`--no-publish`/`--dry-run`, a strict exact/publishable 179-D model and `--planner`. It rejects an
+empty output value, legacy-model escape, model-only preflight, reference playback, warmup and
+PD_STAND/MOTION start before backend initialization. PASSIVE waits; SHADOW observes the first
+planner-engaged actor **candidate**. Constructor prewarm, yaw capture, waiting/invalid/recovery and
+idle rows do not consume the one-shot. This does not certify that the current planner tuple is a
+same-tick atomic snapshot: that planner fix is still NO-MERGE.
+
+The output schema is structurally diagnostic. Both the outer document and payload fix
+`evaluation_contract_exact=false`; the payload fixes
+`planner_snapshot_exact=false`, `native_sample_alignment_exact=false`,
+`source_binary_binding_exact=false`, `source_semantics_closure_exact=false`, and
+`runtime_artifact_closure_exact=false`, with non-empty
+reasons. Gate3/Gate3B and checkpoint-promotion consumers must reject it. Closing those items later
+requires a new schema/version, never flipping these v1 fields to true.
+
+The runner reads the canonical non-symlink ONNX once under stable
+device/inode/size/mtime checks, hashes those bytes, and constructs ONNX Runtime from that exact
+buffer. This closes model load/hash TOCTOU for the diagnostic, but does not bind the built runner
+binary or transitive loader closure. No `source_commit` claim is emitted.
+
+`RobotState` has no root linear velocity, so the runner never zero-fills, integrates or estimates
+it. A subscription-only sim sidecar reads the existing vendor pelvis pose/twist and right-racket
+pose topics. It has no publisher/reset/command. Python uses kernel `flock(LOCK_EX)` plus one
+whole-record `pwrite`; C++ uses `flock(LOCK_SH)` plus one whole-record `pread`. The owned mode-0600
+file and JSON paths are canonical, non-symlink and exclusive; JSON uses fsynced temporary bytes plus
+hard-link no-replace.
+
+Finite/unit/fresh source records, strictly advancing topic stamps, positive even generations,
+<=20 ms native-header skew and <=30 ms RobotState/sidecar receipt join are required. These are
+proximity checks only. The tracked vendor publisher stamps each ROS message asynchronously at
+publish time and carries no shared MuJoCo sample sequence, so pelvis pose/twist/racket and
+RobotState may be adjacent but different simulator samples. The JSON therefore calls qpos/qvel a
+`closest_receipt_window_not_common_sim_tick` join and records every source/receipt stamp. A formal
+schema needs a publisher-side shared sample sequence and exact consumer match.
+
+The diagnostic records joined qpos38/qvel37/base7/racket7, the observed 179-vector, raw 31-D action,
+target candidate, joint/frame/layout metadata and per-payload/whole-payload SHAs. Observation base
+(external position + yaw-aligned IMU) is kept separate from vendor-world base; source checks require
+<=3 cm position and <=0.02 projected-gravity disagreement. The native `right_racket` position must
+agree with the formal wrist control-point FK within 5 mm.
+
+`configs/gate3_first_tick_source_contract_20260712.json` hashes a reviewed source **subset** useful
+for auditing this instrumentation. It explicitly fixes `source_semantics_closure_exact=false` and
+does not claim parser-backed/transitive closure. Vendor config→MJCF parser resolution, publisher
+binary/config/transitive membership, full planner/wire/frame/backend adapters, exact process
+ownership, runtime ledger/lock and an actual backend tick all remain OPEN/null. No simulator,
+backend, transport, Pod/GPU or hardware was started.
 
 ## Produce a static plan
 
@@ -180,6 +234,26 @@ legacy risks. Real Git repos prove source/train/eval/Git-dir outputs are rejecte
 dirty status, an external output succeeds, and a late dirty checkout blocks the external write.
 The contract same-byte SHA/parser path and a mid-read mutation are also covered. No simulator, Kit,
 transport, planner, runner, Pod/GPU, or robot is invoked.
+
+The native-output source gate adds dependency-light ABI/writer tests plus a C++ unit file that is
+picked up by the production `run_tests` glob:
+
+```bash
+python3 -m py_compile \
+  agi/a3_deploy_example/scripts/gate3_first_tick_state_bridge.py
+pytest -q \
+  tests/test_gate3_first_tick_state_bridge.py \
+  tests/test_pp_first_tick_json_cpp.py
+```
+
+Accepted host source result: `6 passed`. It covers kernel-locked whole-record transfer, nonzero
+native root linear velocity preservation, idle-not-consuming/planner-candidate capture, canonical
+exclusive paths, mode 0600, atomic no-replace payload output, per-vector SHA fields, and
+fail-closed nonfinite/fabricated-root-velocity/cross-source-skew/policy-base, odd generation,
+source-stamp regression and empty-output-flag cases. It also parses the output and proves all five
+exactness flags are fixed false and a formal-style consumer rejects it. The full
+ROS/Jazzy/AimRT Release build and `PpFirstTickJson.*` GTests have not run on this branch; that is an
+explicit open verification item, not an optional pass.
 
 Remaining work after source merge is exactly the five blockers above, followed by one separately
 reviewed no-publish first tick, per-clip normal/recovery gates, and vendor no-reset Gate3/Gate3B.

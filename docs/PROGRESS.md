@@ -1634,3 +1634,34 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   atomic replace；失败不覆盖旧 `policy.onnx`、不留 temp。derive/runtime 的 reference 门统一为严格
   `dot>1e-6`，近边界训练行有回归拒绝。focused host=`41 passed, 1 optional integration skip`，
   planner wire=`11 passed`；这仍不是 vendor build/preflight/Gate3 行为通过。
+
+## 2026-07-12 — joined-source first-tick 诊断
+
+- production runner 新增 no-publish-only `--first-tick-json` instrumentation：PASSIVE 等待，SHADOW
+  记录首个 observed planner-engaged actor candidate；idle/wait/invalid/recovery 不抢 one-shot。现役
+  planner 的 same-tick snapshot/shared payload epoch 仍 NO-MERGE，所以不再称 atomic/formal。
+- `RobotState` 没有 root linear velocity；subscription-only sim sidecar 从 vendor pelvis pose/twist/
+  right-racket topics 取值，无 publisher/reset/command/估算。kernel flock+whole-record pwrite/pread、
+  finite/unit/fresh、header 单调、正偶 generation、20ms header/30ms receipt join 均 fail-closed。
+- 红队确认 vendor publisher 使用异步 publish-time stamp、没有共同 MuJoCo sample sequence，故这些量
+  只是 closest-receipt join。outer+payload 固定 `evaluation_contract_exact=false`，planner/native/
+  source-binary/source-semantics/runtime-closure 五项也固定 false，并由测试中的 formal-style consumer
+  硬拒。
+- canonical ONNX 稳定 bytes 同时用于 SHA 和 ONNX Runtime session，关闭 model load/hash TOCTOU；不再
+  输出不可证明的 source commit。source ledger 明确只是 reviewed subset，
+  `source_semantics_closure_exact=false`，不是 parser-backed/transitive closure。
+- host diagnostic `6 passed`，连同 static plan 共 `38 passed`；ROS/AimRT Release GTest、vendor sim/
+  backend tick、config→MJCF parser、publisher/transitive、owned supervisor/runtime ledger 全 OPEN，
+  未碰 Pod/GPU/真机，G05/G06 保持 Partial。
+
+## 2026-07-12 — planner shared-epoch 二次红队仍 NO-MERGE
+
+- 新候选已经有 shared epoch/sequence、同 tick localization snapshot、共同 transaction mutex、
+  source-header→monotonic 映射；host `155 passed, 2 skipped`，隔离 ROS/Jazzy Release
+  `220 passed, 5 optional skips`。这些只说明实现方向前进，不是 Gate3 通过。
+- fresh review 仍复现五组 P1：formal 后旧 schema 降级未 poison；invalid 仍有 wall-time `>`；base lease
+  用 receive time 且 expiry 顺序可打印假 READY；active swing 未锁 engage epoch/base-revoke generation；
+  ball/base `frame_id` 未校验却宣称 world。racket mid-swing revoke 的继续冻结/急停语义也须唯一化。
+- 候选继续留在 feature worktree；未合 main、未启动 vendor backend/sim、未发 Pod signal/新任务、未碰真机。
+  prereg 仍需补 wire/mailbox/frame/yaml parser、monotonic host、唯一 publisher/domain、runner ACK 和
+  planner hot-restart session closure；G06 保持 Partial。

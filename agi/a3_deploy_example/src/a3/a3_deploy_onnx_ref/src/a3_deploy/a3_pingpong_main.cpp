@@ -36,6 +36,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include "a3_deploy/a3_policy_driver.hpp"
+#include "a3_pingpong/pp_first_tick_json.hpp"
 #include "a3_pingpong/pp_policy.hpp"
 #include "a3_pingpong/pp_reference_playback.hpp"
 #include "a3_pingpong/pp_runtime_interlocks.hpp"
@@ -124,7 +125,7 @@ bool ValidateCommandLine(int argc, char** argv, std::string& error) {
       "--ref-group", "--ref-max-err", "--ref-stale-ms", "--runtime-cfg",
       "--squat-guard-rad", "--stand-kd", "--stand-kp", "--start", "--swing-rest",
       "--swing-speed", "--tilt-guard", "--trace-csv", "--vel-gate-margin",
-      "--warmup-sec"};
+      "--warmup-sec", "--first-tick-json"};
   static const std::unordered_set<std::string> switch_flags = {
       "--allow-legacy-model-diagnostic", "--auto-leg-hold", "--backhand",
       "--base-estimator", "--dry-run",
@@ -376,6 +377,9 @@ int main(int argc, char** argv) {
                  " [--no-publish|--dry-run] [--warmup-sec S]\n"
                  "       [--model-preflight-only] (requires no-publish; validates ONNX and exits"
                  " before backend Init)\n"
+                 "       [--first-tick-json ABS_PATH] (inexact obs179 source diagnostic; requires"
+                 " no-publish; PASSIVE waits, SHADOW records the first planner-engaged actor"
+                 " candidate and exits)\n"
                  "       [--allow-legacy-model-diagnostic] (requires no-publish; forbidden with"
                  " model-preflight-only)\n"
                  "       [--command-deadline-ms MS] (must be >0 and shorter than one policy period)\n"
@@ -413,6 +417,13 @@ int main(int argc, char** argv) {
   const bool model_preflight_only = Has(argc, argv, "--model-preflight-only");
   const bool allow_legacy_model_diagnostic =
       Has(argc, argv, "--allow-legacy-model-diagnostic");
+  const bool first_tick_requested = Has(argc, argv, "--first-tick-json");
+  const std::string first_tick_output = Flag(argc, argv, "--first-tick-json", "");
+  const bool first_tick_enabled = first_tick_requested;
+  if (first_tick_requested && first_tick_output.empty()) {
+    std::cerr << "--first-tick-json requires a non-empty absolute output path\n";
+    return 2;
+  }
   if (model_preflight_only && !no_publish) {
     std::cerr << "--model-preflight-only requires --no-publish/--dry-run\n";
     return 2;
@@ -426,6 +437,24 @@ int main(int argc, char** argv) {
                  "preflight certifies only the publishable model contract\n";
     return 2;
   }
+  if (first_tick_enabled && !no_publish) {
+    std::cerr << "--first-tick-json requires --no-publish/--dry-run\n";
+    return 2;
+  }
+  if (first_tick_enabled && model_preflight_only) {
+    std::cerr << "--first-tick-json requires a real policy compute and is incompatible with "
+                 "--model-preflight-only\n";
+    return 2;
+  }
+  if (first_tick_enabled && allow_legacy_model_diagnostic) {
+    std::cerr << "--first-tick-json uses a strict schema-v3 model and forbids legacy-model "
+                 "diagnostics\n";
+    return 2;
+  }
+  if (first_tick_enabled && reference_playback_selected) {
+    std::cerr << "--first-tick-json is a ping-pong actor compute and forbids reference playback\n";
+    return 2;
+  }
   const bool no_yaw_align = Has(argc, argv, "--no-yaw-align");
   if (no_yaw_align && !no_publish) {
     std::cerr << "--no-yaw-align is diagnostic-only and requires --no-publish/--dry-run\n";
@@ -435,6 +464,11 @@ int main(int argc, char** argv) {
   // LIVE PLANNER mode (Path B): racket target from /racket/command_flat + mocap base pose
   // from /a3/base_pose_flat, both over the AimRT ros2 backend; body-drive stays iceoryx.
   const bool planner_mode = Has(argc, argv, "--planner");
+  if (first_tick_enabled && !planner_mode) {
+    std::cerr << "--first-tick-json is an obs179 planner-source diagnostic and requires "
+                 "--planner\n";
+    return 2;
+  }
 
   const std::string aimrt_override =
       Resolve(Flag(argc, argv, "--aimrt-cfg", ""), cfgdir);
@@ -525,6 +559,9 @@ int main(int argc, char** argv) {
       Flag(argc, argv, "--oracle-max-age", odbg["oracle_max_age_s"]
                ? std::to_string(odbg["oracle_max_age_s"].as<double>()) : "0.1"));
   const std::string obs_csv_path = Flag(argc, argv, "--obs-csv", odbg_str("obs_csv", ""));
+  const std::string first_tick_state_path = odbg_str(
+      "first_tick_state_shm_path",
+      a3_pingpong::first_tick::kDefaultNativeStatePath);
 
   const std::string start_arg = Flag(argc, argv, "--start", "passive");
   if (start_arg != "passive" && start_arg != "pd_stand" && start_arg != "shadow" &&
@@ -532,11 +569,21 @@ int main(int argc, char** argv) {
     std::cerr << "--start must be passive|pd_stand|shadow|motion\n";
     return 2;
   }
+  if (first_tick_enabled && start_arg != "passive" && start_arg != "shadow") {
+    std::cerr << "--first-tick-json permits --start passive (waits) or shadow (computes); "
+                 "PD_STAND/MOTION are not first-policy-tick evidence modes\n";
+    return 2;
+  }
   Mode default_mode = ParseStartMode(start_arg, Mode::kPassive);
   // Optional PD_STAND warmup: hold nominal for N s (robot settles upright),
   // then auto-switch to the requested mode. Matches a safe bring-up + lets a
   // non-interactive run reach MOTION from a stable stand.
   const double warmup_sec = std::stod(Flag(argc, argv, "--warmup-sec", "0"));
+  if (first_tick_enabled && warmup_sec != 0.0) {
+    std::cerr << "--first-tick-json forbids --warmup-sec; PASSIVE and SHADOW semantics must "
+                 "remain explicit\n";
+    return 2;
+  }
   const Mode target_mode = default_mode;
   ModeState mode{warmup_sec > 0 ? Mode::kPdStand : default_mode};
 
@@ -576,6 +623,7 @@ int main(int argc, char** argv) {
   pcfg.use_base_estimator = Has(argc, argv, "--base-estimator");  // leg-FK pelvis height (ground)
   pcfg.loc_mode = loc_mode;
   pcfg.diagnostic_no_publish = no_publish;
+  pcfg.capture_first_tick = first_tick_enabled;
   pcfg.allow_legacy_model_diagnostic = allow_legacy_model_diagnostic;
   // DEFAULT ON since 2026-07-03: with yaw_align the base yaw is engage-relative (starts at
   // identity, tracks the robot's REAL turning) — matching training's rotate-by-current-yaw
@@ -619,9 +667,26 @@ int main(int argc, char** argv) {
   // error with legs/waist and fell during free-standing swings; no-op in sim). Opt out for
   // A/B debugging only.
   pcfg.yaw_align = !no_yaw_align;
+  // The diagnostic must hash the exact bytes ONNX Runtime parses. Read and
+  // identity-check the model once, then construct the session from that same
+  // in-memory buffer; hashing the path only after Session construction would
+  // leave a load-vs-hash TOCTOU window.
+  std::string first_tick_model_bytes;
+  std::string first_tick_model_sha256;
+  if (first_tick_enabled) {
+    std::string error;
+    if (!a3_pingpong::first_tick::StableRegularFileBytesAndSha256(
+            model_path, first_tick_model_bytes, first_tick_model_sha256, error)) {
+      std::cerr << "[pp FIRST-TICK] model identity/read/hash rejected before backend Init: "
+                << error << "\n";
+      return 3;
+    }
+  }
   std::unique_ptr<a3_pingpong::PpPolicy> pp;
   try {
-    pp = std::make_unique<a3_pingpong::PpPolicy>(model_path, pcfg);
+    pp = std::make_unique<a3_pingpong::PpPolicy>(
+        model_path, pcfg,
+        first_tick_enabled ? &first_tick_model_bytes : nullptr);
   } catch (const std::exception& e) {
     std::cerr << "[pp PREFLIGHT] model/runtime contract rejected before backend start: "
               << e.what() << "\n";
@@ -652,6 +717,41 @@ int main(int argc, char** argv) {
     }
     std::cout << "\n";
     return 0;
+  }
+
+  // Inexact first-tick diagnostic resources are validated before backend Init. The output
+  // directory is pinned and the absent leaf reserved logically (actual create
+  // is atomic no-replace only after the first SHADOW actor compute). The
+  // sim-only state source is read-only and must already exist as an owned 0600
+  // regular file produced by gate3_first_tick_state_bridge.py.
+  a3_pingpong::first_tick::ExclusiveJsonSink first_tick_sink;
+  a3_pingpong::first_tick::NativeStateSource first_tick_source;
+  if (first_tick_enabled) {
+    if (pp->onnx().obs_dim() != a3_pingpong::kObsDim179 ||
+        !pp->onnx().publishable_model_contract() ||
+        !pp->onnx().training_contract_exact()) {
+      std::cerr << "[pp FIRST-TICK] diagnostic output requires an exact publishable 179-D "
+                   "model\n";
+      return 3;
+    }
+    std::string error;
+    if (!first_tick_sink.Prepare(first_tick_output, error)) {
+      std::cerr << "[pp FIRST-TICK] output path rejected before backend Init: "
+                << error << "\n";
+      return 3;
+    }
+    if (!first_tick_source.Open(first_tick_state_path, error)) {
+      std::cerr << "[pp FIRST-TICK] native state source rejected before backend Init: "
+                << error << "\n";
+      return 3;
+    }
+    std::cout << "[pp FIRST-TICK] armed no-publish inexact diagnostic: output="
+              << first_tick_sink.path() << " state_source=" << first_tick_source.path()
+              << " semantics="
+              << (start_arg == "passive"
+                      ? "PASSIVE waits without policy compute; transition to SHADOW explicitly"
+                      : "SHADOW first real actor compute")
+              << "\n";
   }
 
   // Initialize the command backend only after the model and all metadata/runtime contracts pass.
@@ -883,6 +983,8 @@ int main(int argc, char** argv) {
     return ok;
   };
   bool outer_hard_clamp_warned = false;  // driver-thread only
+  std::atomic<bool> first_tick_failed{false};
+  std::atomic<bool> first_tick_completed{false};
 
   // --- mode-aware CommandFn (reuses driver's RT loop + watchdog) ---
   a3_pingpong::PpPolicy* ppp = pp.get();
@@ -899,7 +1001,11 @@ int main(int argc, char** argv) {
                      &stand_enter_tick, &stand_blend_q_start,
                      &transition_mode, &outer_hard_clamp_warned,
                      fall_guard, fall_guard_gz, &fall_guard_ticks,
-                     no_publish, effort_limit_ratio, effort_limits_sdk](
+                     no_publish, effort_limit_ratio, effort_limits_sdk,
+                     first_tick_enabled, &first_tick_sink, &first_tick_source,
+                     &first_tick_failed, &first_tick_completed,
+                     first_tick_model_sha256, first_tick_state_path,
+                     model_path](
                         std::uint64_t tick, const robot_io::RobotState& st,
                         robot_io::RobotCommand& cmd) -> bool {
     // Once SIGINT/SIGTERM/q is observed, no subsequent callback may enter a
@@ -1049,6 +1155,114 @@ int main(int argc, char** argv) {
       const std::uint64_t clk = (shadow && shadow_free_clock) ? shadow_tick : tick;
       if (shadow && shadow_free_clock) ++shadow_tick;
       if (!ppp->ComputeCommand(clk, st, cmd)) return false;
+      if (first_tick_enabled) {
+        auto fail_first_tick = [&](const std::string& why) {
+          std::fprintf(stderr, "[pp FIRST-TICK] FAIL-CLOSED: %s; no JSON committed\n",
+                       why.c_str());
+          first_tick_failed.store(true, std::memory_order_release);
+          g_stop.store(true, std::memory_order_release);
+        };
+        if (!shadow) {
+          fail_first_tick("a policy compute occurred outside SHADOW");
+          return false;
+        }
+        a3_pingpong::PpPolicy::FirstTickCompute capture;
+        if (ppp->CopyFirstTickCompute(capture)) {
+        a3_pingpong::first_tick::NativeStateWire native;
+        std::string error;
+        if (!first_tick_source.Latest(native, error)) {
+          fail_first_tick(error);
+          return false;
+        }
+
+        a3_pingpong::first_tick::Evidence evidence;
+        evidence.model_path = model_path;
+        evidence.model_sha256 = first_tick_model_sha256;
+        evidence.training_contract_sha256 = ppp->onnx().training_contract_sha256();
+        evidence.source_checkpoint_sha256 = ppp->onnx().source_checkpoint_sha256();
+        evidence.native_state_path = first_tick_state_path;
+        evidence.policy_tick = capture.policy_tick;
+        evidence.robot_state_timestamp_ns = capture.robot_state_timestamp_ns;
+        evidence.robot_state_tick = capture.robot_state_tick;
+        evidence.robot_state_data_ready_ns = capture.robot_state_data_ready_ns;
+        evidence.robot_state_sync_ready_ns = capture.robot_state_sync_ready_ns;
+        evidence.robot_state_sync_complete = capture.robot_state_sync_complete;
+        evidence.robot_state_sync_aligned = capture.robot_state_sync_aligned;
+        evidence.robot_state_sync_skew_ns = capture.robot_state_sync_skew_ns;
+        evidence.policy_base_source_age_s = capture.policy_base_source_age_s;
+        evidence.reference_time_step = capture.reference_time_step;
+        evidence.native_state = native;
+        const auto& names = a3_pingpong::backend_joint_order();
+        evidence.joint_names.assign(names.begin(), names.end());
+        auto append_eigen = [](std::vector<double>& out, const Eigen::VectorXd& values) {
+          out.reserve(out.size() + static_cast<std::size_t>(values.size()));
+          for (Eigen::Index i = 0; i < values.size(); ++i) out.push_back(values[i]);
+        };
+        evidence.qpos.assign(native.base_position_world.begin(),
+                             native.base_position_world.end());
+        evidence.qpos.insert(evidence.qpos.end(), native.base_quaternion_wxyz.begin(),
+                             native.base_quaternion_wxyz.end());
+        append_eigen(evidence.qpos, capture.joint_q_sdk);
+        evidence.qvel.assign(native.base_linear_velocity_world.begin(),
+                             native.base_linear_velocity_world.end());
+        evidence.qvel.insert(evidence.qvel.end(),
+                             native.base_angular_velocity_world.begin(),
+                             native.base_angular_velocity_world.end());
+        append_eigen(evidence.qvel, capture.joint_qd_sdk);
+        evidence.base_pose.assign(evidence.qpos.begin(), evidence.qpos.begin() + 7);
+        evidence.policy_base_pose = {
+            capture.policy_state.base_pos_w[0], capture.policy_state.base_pos_w[1],
+            capture.policy_state.base_pos_w[2], capture.policy_state.base_quat_w[0],
+            capture.policy_state.base_quat_w[1], capture.policy_state.base_quat_w[2],
+            capture.policy_state.base_quat_w[3]};
+        evidence.racket_pose.assign(native.racket_position_world.begin(),
+                                    native.racket_position_world.end());
+        evidence.racket_pose.insert(evidence.racket_pose.end(),
+                                    native.racket_quaternion_wxyz.begin(),
+                                    native.racket_quaternion_wxyz.end());
+        const a3_pingpong::Vec3 native_base_pos(
+            native.base_position_world[0], native.base_position_world[1],
+            native.base_position_world[2]);
+        const a3_pingpong::Vec4 native_base_quat(
+            native.base_quaternion_wxyz[0], native.base_quaternion_wxyz[1],
+            native.base_quaternion_wxyz[2], native.base_quaternion_wxyz[3]);
+        const a3_pingpong::Vec3 racket_fk_world = native_base_pos +
+            a3_pingpong::mat_from_quat(native_base_quat) *
+                a3_pingpong::racket_pos_pelvis(capture.policy_state.q);
+        evidence.racket_fk_position_world = {
+            racket_fk_world[0], racket_fk_world[1], racket_fk_world[2]};
+        evidence.racket_fk_position_error_m =
+            (racket_fk_world - a3_pingpong::Vec3(
+                 native.racket_position_world[0], native.racket_position_world[1],
+                 native.racket_position_world[2])).norm();
+        append_eigen(evidence.obs, capture.obs);
+        append_eigen(evidence.action, capture.action);
+        evidence.target.position_world = {
+            capture.target.pos_w[0], capture.target.pos_w[1], capture.target.pos_w[2]};
+        evidence.target.velocity_world = {
+            capture.target.vel_w[0], capture.target.vel_w[1], capture.target.vel_w[2]};
+        evidence.target.normal_raw_mount_a_world = {
+            capture.target.normal_cmd_w[0], capture.target.normal_cmd_w[1],
+            capture.target.normal_cmd_w[2]};
+        evidence.target.rho = capture.target.rho;
+        evidence.target.time_to_strike = capture.target.time_to_strike;
+        evidence.target.swing_type = capture.target.swing_sign;
+        evidence.target.valid = capture.target.face_command_valid;
+        if (!first_tick_sink.Write(evidence, error)) {
+          fail_first_tick(error);
+          return false;
+        }
+        first_tick_completed.store(true, std::memory_order_release);
+        g_stop.store(true, std::memory_order_release);
+        std::fprintf(stderr,
+            "[pp FIRST-TICK] committed atomic no-replace SHADOW diagnostic: %s\n",
+            first_tick_sink.path().c_str());
+        return false;  // valid compute captured; deliberately publish nothing.
+        }
+        // An idle/waiting/recovery actor callback is not the first observed
+        // planner-engaged candidate and must not consume or fail the one-shot. Keep
+        // SHADOW running; a future supervisor owns the overall timeout.
+      }
       // per-group gain: legs (slots 19..30) by --leg-gain-scale so they can bear
       // weight on the ground; arms+waist by --gain-scale (gentle swing); neck keeps
       // its fixed PD (unscaled). leg_gain<0 => follow gain-scale (hoist / legacy).
@@ -1512,5 +1726,11 @@ int main(int argc, char** argv) {
                  "Keep the external E-stop engaged and inspect the backend/controller timeout.\n";
   }
   std::cout << "[pingpong] done\n";
+  if (first_tick_enabled &&
+      (first_tick_failed.load(std::memory_order_acquire) ||
+       !first_tick_completed.load(std::memory_order_acquire))) {
+    std::cerr << "[pp FIRST-TICK] diagnostic transaction did not complete\n";
+    return 9;
+  }
   return driver_faulted ? 7 : (final_halt_ok ? 0 : 8);
 }

@@ -743,8 +743,9 @@ identities are revalidated before an external write. The ledger's runtime block 
 `not_run`, with no components, signals, lock, behavior result or ownership token. Source tests pass
 `32` cases; no runtime was launched.
 
-The plan explicitly keeps five runtime blockers null: current C++ lacks full
-`--first-tick-json`; exact process ownership still needs pidfd plus a cgroup/reviewed supervisor
+The plan explicitly keeps five runtime blockers null: the production C++ full
+`--first-tick-json` needs verified same-sample runtime output (the source diagnostic below is
+structurally inexact and has not run); exact process ownership still needs pidfd plus a cgroup/reviewed supervisor
 startup handshake; PATH/LD/Python/AMENT directory manifests and AimRT/transitive `.so`/plugin
 closure are absent; separate vendor config/MJCF hashes do not prove parser-resolved semantics; and
 the atomic runtime ledger/exact lock transaction is undesigned. String containment in a config is
@@ -921,3 +922,64 @@ carried in both base and racket payloads (or one atomic combined topic), exact e
 and a single same-tick localization snapshot shared by engage, side/face gates, windup wait and
 the policy observation. The immutable prereg must also bind and parse the mailbox/wire/frame helper
 bytes it currently omits. No runtime, simulator, Pod mutation or robot ran; G06 remains `Partial`.
+
+#### Shared-epoch candidate still held by source-age and active-revoke counterexamples (2026-07-12)
+
+The next unmerged worktree adds schema-3 racket rows, schema-2 base rows, a shared source epoch and
+sequence, source-header-to-monotonic mapping, a common mailbox transaction mutex and a single
+localization snapshot reused by engage and observation. Its host suite reaches `155 passed, 2
+skipped`; an isolated ROS/Jazzy Release build reaches `220 passed, 5 optional skips`. These are
+useful source results, not merge authority.
+
+A second fresh review still reproduces five P1 groups. Once a formal stream is established, a
+recognized legacy-schema packet can downgrade state without poisoning pre-barrier recovery.
+Formal invalid state still has one receive-wall-time `>` dependency, so valid and invalid events
+sharing a clock tick need not revoke deterministically. The Python base lease is keyed to receive
+time rather than mapped source time, and expiry occurs after current-sample admission; an already
+old base can therefore calculate a command or print READY, then be rejected by the runner.
+
+Active formal 179 swings also fail to latch both the engage epoch and a base-revocation generation.
+An epoch change followed by fast recovery, or a local malformed base followed by same-epoch valid,
+can be hidden between two policy ticks while an E1 frozen target continues on newer localization.
+Base epoch/revocation changes are localization safety revokes and must abort/rearm even if ordinary
+racket flutter remains frozen in flight. The latter behavior must be stated once: current comments
+conflict over whether malformed racket input aborts an active swing.
+
+Finally, the planner advertises world/table frame codes but does not compare the incoming ball/base
+ROS `frame_id` to a configured formal authority. A fresh finite sample in a different frame can be
+relabeled as formal world. Exact schema-3 must bind and enforce both frame ids, or remain inexact
+behind a runtime publisher/header gate. The serve preregistration still omits wire/mailbox/frame
+helpers, merged-YAML parser semantics, same-host monotonic authority, unique publisher/domain and
+hot-restart session closure. The candidate remains **NO-MERGE** and G06 remains `Partial`.
+
+#### 2026-07-12 joined-source first-tick diagnostic
+
+The production runner now implements no-publish-only `--first-tick-json` instrumentation for a
+strict 179-D model. PASSIVE waits; SHADOW records the first observed planner-engaged actor candidate;
+idle/wait/invalid/recovery rows do not consume it. The output is canonical mode 0600, fsynced atomic
+hard-link no-replace and contains joined qpos38/qvel37/base7/racket7, target candidate, obs179,
+action31, layouts, clocks and content SHAs. It does not emit a source-commit claim.
+
+`RobotState` lacks root linear velocity, so a subscription-only sim sidecar reads the vendor pelvis
+pose/twist and right-racket pose topics without publisher/reset/command or estimation. Kernel
+`flock` plus whole-record `pwrite/pread`, freshness, finite/unit checks, strictly advancing stamps,
+positive even generations, 20 ms native-header skew and a 30 ms RobotState/sidecar receipt join are
+enforced. The observation base is recorded separately from joined vendor-world base and the native
+racket point must agree with formal FK within 5 mm.
+
+This is deliberately not a native same-tick snapshot. The tracked vendor publishers stamp messages
+asynchronously at publish time and expose no common MuJoCo sample sequence. The current planner also
+has known same-tick snapshot/shared payload epoch blockers. Both outer document and payload fix
+`evaluation_contract_exact=false`; planner/native/source-binary/source-semantics/runtime-closure
+exactness are fixed false with non-empty reasons. Gate3/Gate3B and promotion consumers must reject
+this v1 schema.
+
+The model path has no load/hash TOCTOU: stable canonical ONNX bytes are hashed and passed directly
+to ONNX Runtime. The checked-in ledger hashes only a reviewed source subset and fixes
+`source_semantics_closure_exact=false`; it is not parser-backed closure. Vendor config→MJCF parser
+resolution, publisher binary/config/transitive membership, planner/wire/frame/backend closure,
+owned supervisor/timeout, runtime ledger and actual backend first tick remain OPEN/null.
+
+Host source checks are `6 passed`; the combined static-plan+diagnostic tests are `38 passed`. No
+simulator, transport, backend, Kit, Pod/GPU or hardware ran. Full ROS/Jazzy/AimRT Release build and
+native GTest are also unrun. G06 remains `Partial`.

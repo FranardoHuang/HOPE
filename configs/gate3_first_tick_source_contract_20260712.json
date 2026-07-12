@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "contract_id": "gate3-first-tick-joined-source-diagnostic-v1",
+  "created_utc": "2026-07-12T00:50:47Z",
+  "scope": "content-bound reviewed-source subset for an inexact no-publish diagnostic; no simulator, backend, transport, planner, policy tick, Pod, GPU, or robot was run",
+  "verdict": "instrumentation can record finite obs/action plus closest-receipt joined native quantities, but it is structurally inexact and is not Gate3/Gate3B or promotion evidence",
+  "exactness": {
+    "evaluation_contract_exact": false,
+    "planner_snapshot_exact": false,
+    "native_sample_alignment_exact": false,
+    "source_binary_binding_exact": false,
+    "source_semantics_closure_exact": false,
+    "runtime_artifact_closure_exact": false,
+    "inexact_reasons": [
+      "vendor native ROS topics carry asynchronous publish-time stamps and no common MuJoCo sample sequence",
+      "same-tick planner snapshot plus shared payload epoch/sequence is not merged",
+      "the tracked artifacts below are a reviewed subset, not parser-backed transitive source closure",
+      "executed binary/config/publisher/transitive/runtime bindings remain null"
+    ]
+  },
+  "tracked_artifacts": {
+    "vendor_mjcf": {
+      "path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+      "sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+    },
+    "vendor_publisher_config": {
+      "path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/a3_pingpong_iceoryx_cfg.yaml",
+      "sha256": "48dfcb69542f41dc01b90f6f3e4f4a942e51b881a337110c0fcdf688be75a8bc"
+    },
+    "vendor_pose_twist_publisher_source": {
+      "path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/module/mujoco_sim_module/publisher/pose_twist_ros2_publisher.cc",
+      "sha256": "ef2db521740780140f7c7d53f3a528aceeae6358ba4ce2594c12bfc7f7d62cdb"
+    },
+    "vendor_pose_twist_publisher_header": {
+      "path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/module/mujoco_sim_module/publisher/pose_twist_ros2_publisher.h",
+      "sha256": "a11d4819b90fbdd8442d35f2a717082a09231538b11759e787e7cd6cda1ca9b1"
+    },
+    "production_build_definition": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/CMakeLists.txt",
+      "sha256": "3f500cfbedcd13a93446785e088c30a6b6b60cc4023405aba1a11e925c8a10c8"
+    },
+    "production_runtime_config": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml",
+      "sha256": "844f6eec122ec9f9eb5c18caba5e5dab4ea31e53b14fe0bf46dd73c0e3f35c42"
+    },
+    "production_policy_capture": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/a3_pingpong/pp_policy.hpp",
+      "sha256": "b1e39c470b45c59fb5682f8b0095a261c399d4b4195ccd8b701c522a6067c36e"
+    },
+    "production_onnx_loader": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/a3_pingpong/pp_onnx_policy.hpp",
+      "sha256": "cfa8e35cb4108f6ee318b52c73c9dbcce38b54df6b2c00afd85a810a6d381673"
+    },
+    "formal_racket_fk": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/a3_pingpong/pp_racket_fk.hpp",
+      "sha256": "8d0ce1a4e850b96be8ecbc9d2d4c39bed3367fada4459aa7b1f1506f8e83912a"
+    },
+    "production_sha256": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/a3_pingpong/pp_sha256.hpp",
+      "sha256": "406f61bdb50b5fceae2c2ff819fe516da1898b27610289b2f93ba257b4df122e"
+    },
+    "robot_state_interface": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/robot_io/robot_io_backend.hpp",
+      "sha256": "9c8ade30b76c8c10c8d4274ddf2c1c3dadb882a97516fb1e919298b5862ec1b9"
+    },
+    "robot_state_synchronizer": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/src/a3_sync/a3_sync_loop.cpp",
+      "sha256": "9e4f92d3d131658e5cd9b2f19aa146e9dc374d536eca0b102f3c693bcee72e2e"
+    },
+    "production_policy_driver": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/src/a3_deploy/a3_policy_driver.cpp",
+      "sha256": "0116cd16ab319943cbebbeba0d73fce6b805bc3212454810347566608c764cee"
+    },
+    "native_state_bridge": {
+      "path": "agi/a3_deploy_example/scripts/gate3_first_tick_state_bridge.py",
+      "sha256": "af90a081d4b864e777ef35238fb5c9a2fb16f0048d8b94633aca202d9a7164dc"
+    },
+    "native_json_contract": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/a3_pingpong/pp_first_tick_json.hpp",
+      "sha256": "51774aa820072419fe23fd20fed2bb5d3ffa0c2c74c6e93be4a970a286aff082"
+    },
+    "production_runner_entrypoint": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/src/a3_deploy/a3_pingpong_main.cpp",
+      "sha256": "a00f6dbc4715bcd4f86577432838dcfc05411accd16632de1bb29c1e9e05da94"
+    }
+  },
+  "semantic_chain": {
+    "base_pose": {
+      "topic": "/sim/a3/pelvis_pose",
+      "frame_id": "odom",
+      "message": "geometry_msgs/msg/PoseStamped",
+      "mjcf_sensors": ["pelvis_framepos", "pelvis_framequat"],
+      "objects": ["pelvis_site", "pelvis_site"]
+    },
+    "base_twist": {
+      "topic": "/sim/a3/pelvis_twist",
+      "frame_id": "odom",
+      "message": "geometry_msgs/msg/TwistStamped",
+      "mjcf_sensors": ["pelvis_framelinvel", "pelvis_frameangvel"],
+      "objects": ["pelvis_site", "pelvis_site"],
+      "linear_velocity_rule": "copy vendor framelinvel sensor; no zero fill, IMU integration, pose differentiation, or estimator"
+    },
+    "racket_pose": {
+      "topic": "/sim/a3/right_racket_pose",
+      "frame_id": "odom",
+      "message": "geometry_msgs/msg/PoseStamped",
+      "site_name": "right_racket",
+      "mjcf_sensors": ["right_racket_framepos", "right_racket_framequat"],
+      "wrist_local_site_offset_m": [0.21021, 0.032078, 0.032036],
+      "formal_control_point_offset_wrist_m": [0.21021, 0.032078, 0.032036],
+      "offsets_exactly_equal": true,
+      "runtime_consistency_gate": "native site position versus formal FK <= 0.005 m"
+    },
+    "publisher_copy_rule": "registered sensor addresses are copied from MuJoCo sensordata into PoseStamped/TwistStamped fields without runner-side estimation",
+    "publisher_stamp_semantics": "each async executor callback stamps system_clock at publish time; no common MuJoCo sample sequence is exposed"
+  },
+  "cross_process_contract": {
+    "wire_bytes": 256,
+    "writer": "kernel flock LOCK_EX plus one whole-record pwrite",
+    "reader": "kernel flock LOCK_SH plus one whole-record pread",
+    "topic_header_max_skew_ns": 20000000,
+    "body_sidecar_receive_join_max_skew_ns": 30000000,
+    "source_max_age_ns": 100000000,
+    "robot_state_requires": ["sync_complete=true", "sync_aligned=true", "finite q31", "finite dq31"],
+    "source_header_rule": "each topic stamp must advance strictly; replay/regression requires a fresh sidecar",
+    "sample_join_rule": "closest receipt within bounded windows only; not a common simulator tick and never formal",
+    "forbidden": ["cross-language mmap-fence proof", "base velocity zero placeholder", "base velocity estimator"]
+  },
+  "runtime_bindings": {
+    "executed_vendor_sim_binary_sha256": null,
+    "executed_vendor_config_sha256": null,
+    "parser_resolved_mjcf_path": null,
+    "parser_resolved_mjcf_sha256": null,
+    "loaded_publisher_shared_object_sha256": null,
+    "loaded_transitive_shared_objects": null,
+    "executed_bridge_source_sha256": null,
+    "production_runner_binary_sha256": null,
+    "actual_first_tick_json_sha256": null,
+    "runtime_exact": false
+  },
+  "verification": {
+    "dependency_light_tests": 6,
+    "ros_aimrt_release_build": "not_run",
+    "native_gtest": "not_run",
+    "vendor_first_tick": "not_run",
+    "gate3_gate3b": "not_run"
+  }
+}

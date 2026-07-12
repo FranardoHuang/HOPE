@@ -269,6 +269,53 @@ teacher-reference reset, direct PhysX-friction-number proxy or historical
 checkpoint without exact train-family binding forces
 `evaluation_contract_exact=false`.
 
+## Joined-source first-tick diagnostic JSON
+
+`a3_deploy_onnx_ref_pingpong --first-tick-json ABS_PATH` is a no-publish-only diagnostic interface,
+not a new actor observation and not Gate3 evidence. It observes the first 179-D actor candidate for
+which the current implementation reports planner engaged/hold; PASSIVE/no-command/wait/invalid/
+recovery rows do not count. Because the corrected same-tick planner snapshot and shared payload
+epoch are not merged, this predicate is not an atomic planner certificate.
+
+Both outer document and payload fix `evaluation_contract_exact=false`. The payload also fixes
+`planner_snapshot_exact=false`, `native_sample_alignment_exact=false`,
+`source_binary_binding_exact=false`, `source_semantics_closure_exact=false` and
+`runtime_artifact_closure_exact=false`, with non-empty
+reasons. Gate3/Gate3B or promotion consumers must reject v1. The diagnostic vector layout is:
+
+| field | size | frame/layout/source |
+| --- | ---: | --- |
+| `qpos` | 38 | closest-receipt joined vendor-world pelvis `xyz,wxyz`, then RobotState 31-joint positions |
+| `qvel` | 37 | closest-receipt joined vendor-world pelvis linear/angular velocity, then RobotState joints |
+| `base_pose` | 7 | joined vendor-world pelvis `xyz,wxyz`; byte-value equal to `qpos[0:7]` |
+| `racket_pose` | 7 | joined vendor `right_racket` site `xyz,wxyz` |
+| `target` | tuple | world-table position/velocity, raw mount +Y/A actor normal, rho=0, time, side and valid |
+| `obs` | 179 | exact `deploy_parity_face179` actor row |
+| `policy_action` | 31 | raw actor action before command decoding/neck/leg overrides |
+
+The actor row uses a different base orientation semantic from native qpos: external-base position
+plus yaw-aligned pelvis IMU. The JSON therefore carries `policy_observation_base_pose` separately,
+with its payload SHA, source age, distance to native base, projected-gravity difference and
+quaternion dot. Current source gates require <=3 cm position and <=0.02 tilt-vector disagreement;
+yaw can differ by design and is recorded, not silently equated. Joint q/dq come from the
+`RobotState` consumed by that actor candidate.
+
+Root linear velocity is never reconstructed from acceleration or filled with zero. It must come
+from vendor `pelvis_framelinvel`; missing/stale/skewed native pose/twist/racket input aborts without
+an artifact. Native topic source stamps must advance strictly during one sidecar lifetime and the
+C++ consumer accepts only positive even committed generations; replay/regression/reset cannot
+refresh old state. The tracked `right_racket` site offset equals the formal wrist control point, and its
+native position must match formal FK within 5 mm. The vendor ROS publishers use asynchronous
+publish-time stamps and expose no shared MuJoCo sample sequence, so the bounded 20/30 ms joins prove
+proximity only, never same-tick alignment.
+
+Every vector/target and the full canonical payload has a SHA-256. The envelope/model/training/
+checkpoint, joint names, frames, sync/receipt clocks and reviewed native-source subset are recorded;
+no exact source-commit/binary claim is emitted. ONNX Runtime parses the same stable file bytes whose
+SHA is recorded. Output is canonical-path, mode-0600, fsynced atomic no-replace. Parser-resolved
+config→MJCF, publisher/transitive artifacts and actual backend tick remain OPEN. Full details are in
+`docs/operations/run_gate3_first_tick_harness.md`.
+
 ## Deploy-Available Signal Set
 
 What the real system can observe (team contract, 2026-07):

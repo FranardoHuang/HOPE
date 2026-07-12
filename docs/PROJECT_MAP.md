@@ -10,6 +10,8 @@ This file describes stable repository zones. Gates describe work over time; fold
 | `papers/` | Source papers used as technical ground truth | tracked when license allows |
 | `mocap/` | Motion-capture setup, coordinates, and vendor notes | tracked |
 | `scripts/` | Repo maintenance helpers for local sync, asset preparation, and project hygiene | tracked |
+| `configs/` | Content-bound experiment, evidence, and interface contracts; small declarative configuration only | tracked |
+| `tests/` | Dependency-light repo-level contract/regression tests; `tests/cpp/` holds standalone C++ probes compiled by pytest without the vendor runtime | tracked |
 | `calib_bags/` | Small reference raw calibration recordings | tracked only for curated samples |
 | `calib_csv/` | Processed calibration CSVs, chunks, and plots | tracked only for curated samples |
 | `hope_ws/` | ROS 2 integration workspace | tracked source, ignored build/install/log |

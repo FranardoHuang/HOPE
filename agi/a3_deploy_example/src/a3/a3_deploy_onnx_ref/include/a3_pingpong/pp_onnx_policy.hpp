@@ -28,12 +28,20 @@ namespace a3_pingpong {
 class PpOnnxPolicy {
  public:
   explicit PpOnnxPolicy(const std::string& model_path,
-                        bool allow_legacy_model_diagnostic = false)
+                        bool allow_legacy_model_diagnostic = false,
+                        const std::string* exact_model_bytes = nullptr)
       : env_(ORT_LOGGING_LEVEL_WARNING, "pp_onnx"),
         mem_(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)) {
     Ort::SessionOptions so;
     so.SetIntraOpNumThreads(1);
-    session_ = std::make_unique<Ort::Session>(env_, model_path.c_str(), so);
+    if (exact_model_bytes != nullptr) {
+      if (exact_model_bytes->empty())
+        throw std::runtime_error("content-bound ONNX bytes must not be empty");
+      session_ = std::make_unique<Ort::Session>(
+          env_, exact_model_bytes->data(), exact_model_bytes->size(), so);
+    } else {
+      session_ = std::make_unique<Ort::Session>(env_, model_path.c_str(), so);
+    }
 
     // detect obs input dim: 180 (full), 179 (deploy_parity_face179),
     // 175 (deploy_parity), 177 (hitter_footwork) or 110 (hitter_pure).

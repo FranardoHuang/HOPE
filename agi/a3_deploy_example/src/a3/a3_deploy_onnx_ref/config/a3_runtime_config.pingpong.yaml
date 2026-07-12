@@ -52,6 +52,13 @@ obs_debug:
   # simulation must select oracle explicitly. perfect_tracking/fabricated are permitted
   # for this 177 artifact only under process-wide --no-publish A/B diagnostics.
   loc_mode: perfect_tracking   # fabricated | perfect_tracking | oracle(sim-only) | external_base
+  # Read-only, sim-only joined-source diagnostic sidecar used exclusively by
+  # --first-tick-json. Vendor topics lack a common sim-sample sequence, so this
+  # is never same-tick/formal evidence.
+  # The runner never creates this file and rejects symlinks, stale/partial
+  # records, non-0600 ownership, and cross-source timing skew. Normal runs do
+  # not open it. See scripts/gate3_first_tick_state_bridge.py.
+  first_tick_state_shm_path: /dev/shm/pp_gate3_first_tick_state_v1
 
 backend:
   # PURE-iceoryx cfg (no ros2_plugin) to match the iceoryx-only sim cfg and avoid
