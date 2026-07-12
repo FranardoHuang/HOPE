@@ -4,6 +4,16 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-13
 
+- Registered and locally verified seven new private motion videos without publishing their bytes:
+  v12 forehand/backhand blocks, one backhand high-press fifth action and four lateral-step teacher
+  candidates. Schema-2 intake now distinguishes stroke versus locomotion roles and rejects duplicate
+  JSON keys, nonfinite values and semantic role/action mismatches; exact audit passed 7/7 and the
+  focused suite passed 11 tests (`472 passed, 9 skipped` repository-wide). Added design records for
+  task-specific v12/high-press papers,
+  event-anchored displacement-conditioned whole-body composition, initial-foot-separation terminal
+  stance recovery, and a paired non-striking-left-arm imitation ablation. No Pod copy, GVHMR/GMR,
+  simulator, RL, NOW/TIMELINE or hardware action ran; G05 remains `Partial`.
+
 - Completed a docs-only primary-source audit of autonomous inter-stroke recovery. ACE supports an
   interruptible near-time-optimal reset bridge/conditioned prepare posture but has no free-standing
   humanoid balance debt; HITTER, SMASH and PACE do not publish an arbitrary mid-followthrough

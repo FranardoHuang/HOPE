@@ -1249,3 +1249,26 @@ mis-resolves `compiler strippath`. No VecEnv/PPO or training may start until tho
 negative tests. The first single-env core must also publish an N=1/8/32/64 throughput and scaling
 report against a preregistered transition budget; CPU-Python long training continues only if a
 two-arm/two-seed paper fits within 48 hours with 30% reserve. G05 remains `Partial`.
+
+### 2026-07-13 v12/high-press/lateral-teacher intake and non-striking-arm design
+
+Seven new private recordings passed exact byte/hash/media intake under
+`configs/motion_video_intake_20260713.json`: a v12 forehand/backhand block pair, one backhand
+high-press fifth action and two candidates for each lateral direction. This is metadata/source
+evidence only. No file has passed GVHMR/GMR, runtime-order schema 2, L0, vendor L1, table/net,
+dynamics or task-matched return gates, and none is queued for RL.
+
+The lateral path is a displacement-conditioned lower-body teacher, not another stroke. Upper and
+lower motions will be aligned at preparation/nominal-strike/recovery events using monotone feasible
+time maps; root/pelvis/torso coupling and foot contacts require constrained whole-body composition.
+After the closing step, the terminal ready set restores the source's initial heading-aligned
+horizontal foot-separation vector, including any fore-aft stagger, rather than accepting a narrowed
+stance. TOPP may retime an accepted path but cannot make a wrong foot-contact path stable. v12 must
+beat an earlier block candidate on a block paper; the high-press action gets its own high-ball paper
+before four-versus-five selection.
+
+A separate design asks whether the left non-striking arm should lose imitation so it can assist
+balance. The minimum cells separate literal reward removal from fixed-budget reallocation, retain
+all hard safety terms, and only enter recovery-reward interaction tests after a direct paired-seed
+effect survives. Details are in the three 2026-07-13 experiment records under `docs/experiments/`.
+No config, training, Pod, simulator or hardware action ran; G05 remains `Partial`.

@@ -43,6 +43,17 @@ See [interfaces/frames_and_coordinates.md](interfaces/frames_and_coordinates.md)
 - `Runtime asset`: model weights, ONNX/RKNN/TensorRT engine files, sysroots, prebuilt binaries, robot vendor packages.
 - `External reference`: upstream repos used for study or optional implementation paths.
 
+## Motion-Library Terms
+
+- `High press` / `高点拍压`: a right-handed backhand action intended to meet a high ball with a
+  forward-moving, downward-facing racket and drive it legally to the table. It is a separate action
+  class from a passive block or topspin loop and therefore needs its own incoming-ball paper.
+- `Lateral locomotion teacher` / `横移下肢老师`: a lower-body/root reference organized around
+  preparation-step, strike-support and recovery intervals, parameterized by signed lateral
+  displacement. It is not itself a forehand/backhand stroke.
+- `Non-striking arm` / `非击球臂`: for the current right-handed A3 stroke library, the left arm.
+  Removing its imitation reward never removes joint, torque, self-collision or safe-halt guards.
+
 ## Done
 
 A gate is `Done` only when it has:

@@ -59,6 +59,14 @@ artifact rule. A derived action is not deployable merely because its source
 video is present: motion, self-collision, table/net clearance and simulator
 gates must still pass, and no raw video grants permission for a real-robot run.
 
+The 2026-07-13 v12/static/motion intake is separately bound by
+`configs/motion_video_intake_20260713.json`. Its schema distinguishes stroke
+videos from lateral-locomotion teachers, so a lower-body teacher cannot be
+silently treated as a block clip. The seven raw MP4s stay under the user's
+private `${HOME}/Downloads/{v12,static,motion}` folders until an explicitly
+versioned private staging copy is made; intake verification grants no compute
+or simulator authorization.
+
 The diagnostic GMR run also depends on five local source commits not present
 in the observed public upstream. Its 282,953,810-byte recovery bundle remains
 under the ignored private processing root; git tracks only the verified commit,

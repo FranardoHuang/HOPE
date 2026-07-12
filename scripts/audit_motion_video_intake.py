@@ -28,7 +28,10 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 ASSET_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_]*$")
 OUTPUT_STEM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 SIDES = {"forehand", "backhand"}
-STROKES = {"block", "loop"}
+STROKES_V1 = {"block", "loop"}
+STROKES_V2 = STROKES_V1 | {"high_press"}
+ROLES_V2 = {"stroke", "lateral_locomotion_teacher"}
+MOVEMENT_DIRECTIONS = {"left", "right"}
 MEDIA_FIELDS = {
     "codec": "codec_name",
     "width": "width",
@@ -55,10 +58,35 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise IntakeError(f"duplicate JSON key: {key!r}")
+        result[key] = value
+    return result
+
+
+def _reject_nonfinite_constant(token: str) -> Any:
+    raise IntakeError(f"non-finite JSON constant: {token}")
+
+
+def _parse_finite_float(token: str) -> float:
+    value = float(token)
+    if not math.isfinite(value):
+        raise IntakeError(f"non-finite JSON number: {token}")
+    return value
+
+
 def load_manifest(path: Path) -> dict[str, Any]:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        data = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=_reject_nonfinite_constant,
+            parse_float=_parse_finite_float,
+        )
+    except (OSError, json.JSONDecodeError, IntakeError) as exc:
         raise IntakeError(f"cannot read manifest {path}: {exc}") from None
     validate_manifest(data)
     return data
@@ -78,8 +106,15 @@ def validate_manifest(data: dict[str, Any]) -> None:
         {"schema_version", "intake_id", "source_root_hint", "processing_order", "assets"},
         "manifest",
     )
-    if data["schema_version"] != 1:
-        raise IntakeError(f"unsupported schema_version={data['schema_version']!r}; expected 1")
+    schema_version = data["schema_version"]
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version not in {1, 2}
+    ):
+        raise IntakeError(
+            f"unsupported schema_version={schema_version!r}; expected 1 or 2"
+        )
     assets = data["assets"]
     if not isinstance(assets, list) or not assets:
         raise IntakeError("manifest assets must be a non-empty list")
@@ -92,14 +127,13 @@ def validate_manifest(data: dict[str, Any]) -> None:
         context = f"assets[{index}]"
         if not isinstance(asset, dict):
             raise IntakeError(f"{context} must be an object")
-        _required(
-            asset,
-            {
-                "id", "source_relpath", "sha256", "bytes", "collection", "side",
-                "stroke", "action_slot", "candidate_group", "candidate_rank", "media",
-            },
-            context,
-        )
+        required_asset_keys = {
+            "id", "source_relpath", "sha256", "bytes", "collection", "side",
+            "stroke", "action_slot", "candidate_group", "candidate_rank", "media",
+        }
+        if schema_version == 2:
+            required_asset_keys |= {"role", "movement_direction"}
+        _required(asset, required_asset_keys, context)
         asset_id = asset["id"]
         if not isinstance(asset_id, str) or not ASSET_ID_RE.fullmatch(asset_id):
             raise IntakeError(
@@ -129,24 +163,72 @@ def validate_manifest(data: dict[str, Any]) -> None:
         if expected_hash in seen_hashes:
             raise IntakeError(f"duplicate video sha256 {expected_hash}")
         seen_hashes.add(expected_hash)
-        if not isinstance(asset["bytes"], int) or asset["bytes"] <= 0:
+        if (
+            isinstance(asset["bytes"], bool)
+            or not isinstance(asset["bytes"], int)
+            or asset["bytes"] <= 0
+        ):
             raise IntakeError(f"{asset_id}: bytes must be a positive integer")
-        if asset["side"] not in SIDES or asset["stroke"] not in STROKES:
-            raise IntakeError(
-                f"{asset_id}: side/stroke must be one of {sorted(SIDES)}/{sorted(STROKES)}"
-            )
-        expected_slot = f"{asset['side']}_{asset['stroke']}"
-        if asset["action_slot"] != expected_slot:
-            raise IntakeError(
-                f"{asset_id}: action_slot={asset['action_slot']!r}, expected {expected_slot!r}"
-            )
+        if schema_version == 1:
+            if asset["side"] not in SIDES or asset["stroke"] not in STROKES_V1:
+                raise IntakeError(
+                    f"{asset_id}: side/stroke must be one of "
+                    f"{sorted(SIDES)}/{sorted(STROKES_V1)}"
+                )
+            expected_slot = f"{asset['side']}_{asset['stroke']}"
+            if asset["action_slot"] != expected_slot:
+                raise IntakeError(
+                    f"{asset_id}: action_slot={asset['action_slot']!r}, "
+                    f"expected {expected_slot!r}"
+                )
+        else:
+            role = asset["role"]
+            if role not in ROLES_V2:
+                raise IntakeError(f"{asset_id}: unsupported role {role!r}")
+            if role == "stroke":
+                if asset["side"] not in SIDES or asset["stroke"] not in STROKES_V2:
+                    raise IntakeError(
+                        f"{asset_id}: stroke role requires side/stroke in "
+                        f"{sorted(SIDES)}/{sorted(STROKES_V2)}"
+                    )
+                expected_slot = f"{asset['side']}_{asset['stroke']}"
+                if asset["action_slot"] != expected_slot:
+                    raise IntakeError(
+                        f"{asset_id}: action_slot={asset['action_slot']!r}, "
+                        f"expected {expected_slot!r}"
+                    )
+                if asset["movement_direction"] is not None:
+                    raise IntakeError(
+                        f"{asset_id}: stroke role must have movement_direction=null"
+                    )
+            else:
+                if asset["side"] is not None or asset["stroke"] is not None:
+                    raise IntakeError(
+                        f"{asset_id}: locomotion teacher must have side/stroke=null"
+                    )
+                if asset["action_slot"] != "lateral_step_teacher":
+                    raise IntakeError(
+                        f"{asset_id}: locomotion teacher action_slot must be "
+                        "'lateral_step_teacher'"
+                    )
+                if asset["movement_direction"] not in MOVEMENT_DIRECTIONS:
+                    raise IntakeError(
+                        f"{asset_id}: locomotion teacher movement_direction must be one of "
+                        f"{sorted(MOVEMENT_DIRECTIONS)}"
+                    )
 
         group = asset["candidate_group"]
         rank = asset["candidate_rank"]
         if (group is None) != (rank is None):
             raise IntakeError(f"{asset_id}: candidate_group and candidate_rank must be both set or null")
         if group is not None:
-            if not isinstance(group, str) or not group or not isinstance(rank, int) or rank <= 0:
+            if (
+                not isinstance(group, str)
+                or not group
+                or isinstance(rank, bool)
+                or not isinstance(rank, int)
+                or rank <= 0
+            ):
                 raise IntakeError(f"{asset_id}: invalid candidate group/rank")
             candidate_ranks.setdefault(group, []).append(rank)
 
@@ -154,9 +236,18 @@ def validate_manifest(data: dict[str, Any]) -> None:
         if not isinstance(media, dict):
             raise IntakeError(f"{asset_id}: media must be an object")
         _required(media, set(MEDIA_FIELDS) | {"duration_s"}, f"{asset_id}.media")
-        if not isinstance(media["frames"], int) or media["frames"] <= 1:
+        if (
+            isinstance(media["frames"], bool)
+            or not isinstance(media["frames"], int)
+            or media["frames"] <= 1
+        ):
             raise IntakeError(f"{asset_id}: media.frames must be an integer > 1")
-        if not math.isfinite(float(media["duration_s"])) or float(media["duration_s"]) <= 0.0:
+        if (
+            isinstance(media["duration_s"], bool)
+            or not isinstance(media["duration_s"], (int, float))
+            or not math.isfinite(float(media["duration_s"]))
+            or float(media["duration_s"]) <= 0.0
+        ):
             raise IntakeError(f"{asset_id}: media.duration_s must be positive and finite")
 
     for group, ranks in candidate_ranks.items():

@@ -63,6 +63,82 @@ def test_manifest_rejects_action_slot_mismatch():
         INTAKE.validate_manifest(_manifest(asset))
 
 
+def test_schema2_accepts_high_press_and_locomotion_teacher():
+    high_press = _asset("static/pai.mp4")
+    high_press.update(
+        id="backhand_high_press",
+        sha256="b" * 64,
+        side="backhand",
+        stroke="high_press",
+        action_slot="backhand_high_press",
+        role="stroke",
+        movement_direction=None,
+    )
+    locomotion = _asset("motion/left_step.mp4")
+    locomotion.update(
+        id="lateral_step_left",
+        sha256="c" * 64,
+        side=None,
+        stroke=None,
+        action_slot="lateral_step_teacher",
+        role="lateral_locomotion_teacher",
+        movement_direction="left",
+    )
+    manifest = _manifest(high_press)
+    manifest["schema_version"] = 2
+    manifest["assets"].append(locomotion)
+    manifest["processing_order"].append("lateral_step_left")
+    INTAKE.validate_manifest(manifest)
+
+
+def test_schema2_role_semantics_fail_closed():
+    asset = _asset("motion/left_step.mp4")
+    asset.update(
+        role="lateral_locomotion_teacher",
+        movement_direction="left",
+        side=None,
+        stroke=None,
+        action_slot="forehand_block",
+    )
+    manifest = _manifest(asset)
+    manifest["schema_version"] = 2
+    with pytest.raises(INTAKE.IntakeError, match="action_slot"):
+        INTAKE.validate_manifest(manifest)
+
+    asset["action_slot"] = "lateral_step_teacher"
+    asset["movement_direction"] = None
+    with pytest.raises(INTAKE.IntakeError, match="movement_direction"):
+        INTAKE.validate_manifest(manifest)
+
+
+def test_manifest_load_rejects_duplicate_keys_and_nonfinite(tmp_path):
+    duplicate = tmp_path / "duplicate.json"
+    duplicate.write_text('{"schema_version":1,"schema_version":2}')
+    with pytest.raises(INTAKE.IntakeError, match="duplicate JSON key"):
+        INTAKE.load_manifest(duplicate)
+
+    nonfinite = tmp_path / "nonfinite.json"
+    nonfinite.write_text('{"schema_version":NaN}')
+    with pytest.raises(INTAKE.IntakeError, match="non-finite JSON"):
+        INTAKE.load_manifest(nonfinite)
+
+    overflow = tmp_path / "overflow.json"
+    overflow.write_text('{"schema_version":1e999}')
+    with pytest.raises(INTAKE.IntakeError, match="non-finite JSON number"):
+        INTAKE.load_manifest(overflow)
+
+
+def test_manifest_rejects_non_integer_schema_version():
+    manifest = _manifest()
+    manifest["schema_version"] = True
+    with pytest.raises(INTAKE.IntakeError, match="unsupported schema_version"):
+        INTAKE.validate_manifest(manifest)
+
+    manifest["schema_version"] = []
+    with pytest.raises(INTAKE.IntakeError, match="unsupported schema_version"):
+        INTAKE.validate_manifest(manifest)
+
+
 def test_manifest_rejects_unsafe_asset_id_and_output_stem():
     asset = _asset()
     asset["id"] = "../escape"

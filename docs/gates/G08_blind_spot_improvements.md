@@ -416,3 +416,22 @@ translation-norm bound. Forehand scoring is blocked on the roughly `170 deg` fac
 and block motions require a block-specific paper rather than the pull paper.
 Schema-2, L0, vendor-L1 self-hit and full table/net swept clearance `>=5 mm`
 grant training eligibility only; they do not prove return effectiveness.
+
+### 2026-07-13 compositional motion additions
+
+The metadata-only v12/static/motion intake adds three future axes without changing the active
+queue: a primary v12 block pair, a fifth high-press action for high contact points, and a
+displacement-conditioned lateral lower-body teacher. The last axis tests the hypothesis that one
+three-event step path can combine with multiple upper-body strokes; it does not assume the pelvis,
+torso and foot contacts are separable or that left/right reflection is valid. Event-anchored
+piecewise retiming, explicit root ownership and constrained whole-body seam solving precede TOPP.
+The recovery/closing step targets the source's initial relative foot-separation vector in the
+heading-aligned ground plane, preserving both stance width and fore-aft stagger instead of allowing
+the feet to finish narrowly together.
+
+The action selector still follows task coverage: each action must first pass its own compatible
+incoming-ball paper and whole-trajectory safety gates, then a train-fitted stable selector is judged
+on an immutable held-out split. A high-press clip is not evaluated on the old pull paper. A paired
+non-striking-left-arm imitation mask is also designed as a possible balance improvement, with hard
+safety always on and reward-budget interactions deferred until the direct effect survives. These
+are `Design` records, not accepted motions or training authorizations.

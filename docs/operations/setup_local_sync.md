@@ -24,6 +24,7 @@ Small tracked runtime assets, such as the Purdue PACE table/net USD visual overl
 | `hope_training/GVHMR/inputs/checkpoints/` | GVHMR model checkpoints | License-gated: per GVHMR instructions | G05 motion references |
 | `hope_training/GVHMR/inputs/checkpoints/{dpvo,gvhmr,hmr2,vitpose,yolo}/` | GVHMR public pretrained weights restored on the current RunPod | Upstream GVHMR Google Drive hit quota; restored from public Hugging Face mirror `camenduru/GVHMR` on 2026-07-02 | G05 motion references |
 | `${HOME}/Downloads/{Franco,v6_dang,v7_dang}/*.mp4` | Ten private air-swing recordings for the 2026-07-11 shoulder-dominant/block/loop motion-library study | User recording; content-addressed metadata only in `configs/motion_video_intake_20260711.json`; do not publish raw bytes | G05/G08 motion-library, TOPP and recovery study |
+| `${HOME}/Downloads/{v12,static,motion}/*.mp4` | Seven private v12 block, backhand high-press and lateral-locomotion teacher recordings from 2026-07-13 | User recording; schema-2 content-addressed metadata only in `configs/motion_video_intake_20260713.json`; do not publish raw bytes | G05/G08 motion library, fifth-action and lateral composition studies |
 | RunPod `/workspace/codexschema/motion_video_intake_20260711/` | Private content-addressed copy, GVHMR outputs, logs and queue bindings for the same ten recordings | Manually copied from the exact local videos; ignored runtime evidence, not a durable artifact service | G05/G08 motion preprocessing |
 | RunPod `motion_video_intake_20260711/gmr_provenance/GMR_aabea2e.bundle` | Recovery bundle for the clean five-local-commit GMR diagnostic source used on 2026-07-11; 282,953,810 bytes, SHA-256 `5b94af15f4a367dff8d7dc6c1cf14d26be6a649a25df6e1c1046b0e6ab72e2de` | Copy from the exact Pod1 ignored evidence root or another verified backup; `git bundle verify` and require advertised commit `aabea2eee4be4bc16d4be17dac5ffa85e5a31539` | Reproducing the Franco/v6/v7 diagnostic GMR outputs |
 | WandB motion registry (`hope_forehand`/`hope_backhand` `.npz`) | Optional shared/internal reference swing clips for `task=HOPEPingPong` | Private/org-scoped WandB registry (not redistributable). The 2026-07-02 `hope_forehand:v4` / `hope_backhand:v4` artifacts contain canonical `motion.npz` but were rejected because they still face +Y; future verified uploads are pending | G05 registry-backed training |
@@ -327,6 +328,31 @@ visual-quality or safety promotion. A successful `hmr4d_results.pt` is
 only a reconstruction artifact; do not promote it to an A3 motion until the
 GMR/schema-2/L0/self-collision/table-net gates in
 `docs/research/motion_library_topp_recovery_2026-07-11.md` pass.
+
+### v12/static/lateral private motion-video intake (2026-07-13)
+
+Restore these folders without renaming or moving the source files:
+
+```text
+${HOME}/Downloads/v12/
+${HOME}/Downloads/static/
+${HOME}/Downloads/motion/
+```
+
+Verify all seven exact videos before any copy or processing:
+
+```bash
+python3 scripts/audit_motion_video_intake.py \
+  --manifest configs/motion_video_intake_20260713.json \
+  --source-root "$HOME/Downloads"
+```
+
+Schema 2 records v12 forehand/backhand blocks, one backhand high-press fifth
+action and four lateral-locomotion teacher candidates. It rejects a locomotion
+teacher mislabeled as a stroke. There is currently no accepted Pod staging
+root, GVHMR/GMR output, schema-2 NPZ, phase annotation or run queue for this
+generation. When processing is authorized, use a new versioned private root;
+never append these files to the accepted 2026-07-11 evidence tree.
 
 The 2026-07-11 CPU-only GMR diagnostic then completed 10/10 under a separate
 serial queue. Restore and verify the exact source bundle before reproducing it:
