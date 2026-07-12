@@ -783,6 +783,22 @@ blocked and root-caused, never averaged. The design-only validator is green (`50
 stability and Gate3B scoring judges, their shared runtime contract, exact A policy-ownership/PPO
 accounting, calibrated plant and safety bindings. See
 `docs/operations/run_phase1_recovery_tuple_prereg.md`; G06 remains `Partial`.
+
+The 2026-07-13 primary-source audit adds no runtime credit. ACE's near-time-optimal reset MPC is
+evidence for an interruptible bridge/prepare architecture, not for free-standing humanoid balance;
+HITTER samples the next task after swing completion; SMASH uses strike-centred recovery clips and
+cyclic phase but does not publish a mid-followthrough random-reveal comparison; PACE's five-serve
+episode is likewise not that treatment. Consequently G06 defines `T0` as cycle-bound install,
+`T1` as event-driven structure with frozen rewards, and `T2` as a later learned-shaping increment.
+Random arrival is first an immutable environment axis. Balance/ready shaping starts with paired
+`2^2`; a third readiness potential and `2^3` require separate critic train/calibration splits and a
+one-shot preregistered critic-gate q50 disjoint from sealed formal Gate3B q50, without hidden-future
+leakage. Any self-hit, reset/teleport/history clear, deadline shift/censoring, per-transition-cell
+collapse, fifth-and-later opportunity decay, one-shot regression or Isaac/vendor direction reversal
+fails promotion. Full sources and DOE boundaries are in
+`docs/research/phase1_continuous_rally_timing_2026-07-11.md`. No paper substitutes for the exact
+Gate3/Gate3B runtime result, so G06 remains `Partial`.
+
 ### 2026-07-12 Gate3 first-tick static plan gate (red-team corrected)
 
 The historical `pp_gate3_rally.sh` launch command is no longer an approved formal launcher.

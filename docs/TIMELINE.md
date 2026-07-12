@@ -1806,3 +1806,25 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
   reward 改由独立 replay oracle；trainer/judge 禁止共用实现。`load_actor_tolerant` 会保留匹配 critic，
   v0 改为 actor/distribution/normalizer-only + fresh critic/optimizer。已写精确文件边界、三段 canary、
   evaluator 隔离和 Day0/1/2 顺序；未改代码/配置、未跑 sim/Pod/真机，G04/G05/G06 保持 Partial。
+
+## 2026-07-13: 连续拍 recovery/ready primary-source 审计
+
+73. 【franco/Codex】**把“等待三 reward”收紧成结构、约束、potential 与环境轴**——逐项核对
+   ACE/HITTER/SMASH/PACE、DeepMimic/BeyondMimic、options/reset-policy/HER 与 reward-DOE 原文。
+   ACE 支持近时优、可打断 reset bridge 和 conditioned prepare，但没有自由站立 humanoid balance；
+   HITTER 只在 swing 完成后换题；SMASH 的 recovery/phase clip 用于离线扩库+runtime matching；PACE
+   五连发也不是 mid-followthrough reveal，故没有论文能替 A3 任意时刻下一题或 Gate3B 背书。新最小
+   阶梯=`T0` cycle-bound、`T1` event-driven 结构且冻结 reward、`T2` 才是 learned shaping；hard safety
+   不可补偿，balance debt 与 ready-set potential 先 paired-seed `2^2`，arrival 先是 immutable
+   environment/question axis。只有不泄露 future tuple 的 readiness critic 在独立 train/calibration split
+   锁定、一次性通过与 sealed formal Gate3B q50 隔离的 critic-gate q50，才扩 `2^3`；存活三项跑 7 点
+   fixed-budget simplex，并给 centre 第二总量水平。formal q50 只消费一次，同时硬判安全、
+   reset/censor、单拍退化、FF/FB/BF/BB/时序格塌陷、5+ 拍债务与 Isaac/vendor 反转。只改文档，未动
+   NOW/源码/Pod/sim/真机，G05/G06 仍 Partial。
+
+74. 【franco/Codex】**纠正 `0/64` 的动作有效性解释**——冻结站位旧题没有与动作在同帧相交，
+   不等于动作无效；正式有效性改为“每动作安全触球时空流形 × 适配 stroke/来球题族 × 合法整轨迹
+   `SE(2)` 站位”。反手拉 B=`frame49, intrinsic 32/32, 0.165m`，C=`frame50, 27/32, 0.237m`，
+   均只过 `0.30m` translation-norm 粗筛且仍是候选。正手先解约 `170deg` face 符号，挡类另用挡球题，
+   不拿拉球题判死。schema-2→L0→vendor L1 self-hit→桌网整轨扫掠 `>=5mm` 只授予训练资格，
+   不等于回台有效。只修文档解释，未重跑 screen、源码、Pod、sim 或真机。

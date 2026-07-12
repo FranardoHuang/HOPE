@@ -29,7 +29,10 @@ a table-tennis athletic stance). Everything downstream needs the real anchor:
 - P2.4 stitching is "ready → strike → ready" by definition;
 - backhand stand-entry and the deploy idle pose are the same stance;
 - PACE anchors its residual action space to a nominal ready pose (hand raised); SMASH's clips all
-  pass through prep/recovery phases; Ace learns a prepare policy per next-shot (far-term).
+  pass through prep/recovery phases; ACE uses a near-time-optimal reset MPC and an
+  incoming-ball/desired-landing-conditioned prepare reset target. ACE's fixed-installation,
+  non-free-standing robot does not validate humanoid balance recovery or arbitrary
+  mid-followthrough arrival.
 
 Plan (v0 needs a source decision — franco): (a) record one short ready-stance video through the
 existing GVHMR→GMR pipeline (cheapest, consistent), (b) handcraft the joint pose, or (c) average
@@ -64,8 +67,9 @@ to build it.
   nominal ready pose → recovery emerges without a dedicated reward.
 - SMASH: every reference clip embeds a ~0.54 s recovery segment after contact plus a cyclic strike
   phase variable, making cycles chainable.
-- Ace (cheap alternative/complement): train single swings but sample episode initial states from
-  the distribution of the policy's own post-swing/recovery states instead of always default-stand.
+- Ace (cheap alternative/complement): train single shots but sample dynamic episode initial states
+  from reset plans stored during earlier training episodes instead of always using a stationary
+  default state.
 
 ### P2.2 Reference-motion orientation normalization
 
@@ -370,3 +374,45 @@ that ledger. Intake validation now reports path escape, unsafe output stem and
 wrong extension as separate fail-closed errors, including dot-only names such
 as `..mp4`. These are provenance/diagnostic repairs only: no motion was
 promoted, no Pod job was launched and no hardware action was authorized.
+
+### Primary-source recovery/ready decision (2026-07-13)
+
+The recovery literature was audited against the actual arbitrary-arrival
+question rather than cited as generic inspiration. ACE directly supports an
+interruptible near-time-optimal reset bridge plus a conditioned prepare pose;
+it does not contain free-standing humanoid balance. HITTER proves long real
+rallies and 10-second multi-swing training, but changes the task after a swing
+completes. SMASH preserves a preparation/recovery half-clip, cyclic phase and
+generation-boundary smoothness, but uses the Motion-VAE offline and does not
+publish a mid-followthrough reveal treatment. PACE uses a raised-hand nominal
+residual and up to five serves, not a randomized inter-stroke arrival paper.
+None of these sources proves arbitrary-time A3 recovery or vendor-MuJoCo
+Gate3B.
+
+The research track therefore separates hard safety, dynamic balance debt,
+ready-set potential and random arrival. Arrival is first a schedule/state-
+coverage axis scored by the real next strike, not a third dense reward.
+`T0` keeps cycle-bound installation, `T1` changes only event-driven structure,
+and `T2` is a later learned-recovery increment. If T1 needs shaping, balance
+and ready start as a paired-seed `2^2`. A full `2^3` is permitted only after an
+independent readiness critic is locked on separate train/calibration splits and
+passes a one-shot critic-gate q50 disjoint from sealed formal Gate3B q50, without
+leaking the unrevealed task. A surviving three-term blend uses a seven-point fixed-
+budget simplex plus at least one second total-budget level; fixed total alone
+cannot identify PPO reward magnitude. Full primary links, non-analogy limits,
+T0/T1/T2 and q50 failure criteria are in
+[the continuous-rally timing audit](../research/phase1_continuous_rally_timing_2026-07-11.md).
+This is a design/literature result only; G05/G06 stay `Partial`, and no Pod,
+simulator or hardware run is authorized by it.
+
+The motion-library screen has the same non-analogy rule. Its frozen-stance
+`0/64` means only that the old fixed questions did not intersect the motions at
+the same frame; it does not reject the motions. Effectiveness is defined over
+each motion's own safe contact-time manifold, a compatible incoming-ball/stroke
+question family, and a legal whole-trajectory `SE(2)` stance. Backhand-pull B
+(`frame 49`, intrinsic `32/32`, nearest old question `0.165 m`) and C
+(`frame 50`, `27/32`, `0.237 m`) remain candidates inside only the `0.30 m`
+translation-norm bound. Forehand scoring is blocked on the roughly `170 deg` face-sign ambiguity,
+and block motions require a block-specific paper rather than the pull paper.
+Schema-2, L0, vendor-L1 self-hit and full table/net swept clearance `>=5 mm`
+grant training eligibility only; they do not prove return effectiveness.

@@ -2,6 +2,32 @@
 
 Use this file for short project-state updates that future humans and agents need to see. Keep detailed reasoning in the relevant gate doc.
 
+## 2026-07-13
+
+- Completed a docs-only primary-source audit of autonomous inter-stroke recovery. ACE supports an
+  interruptible near-time-optimal reset bridge/conditioned prepare posture but has no free-standing
+  humanoid balance debt; HITTER, SMASH and PACE do not publish an arbitrary mid-followthrough
+  random-reveal treatment. The design now separates non-compensable safety, dynamic balance debt,
+  ready-set potential and arrival as an immutable environment/question axis. The minimum ladder is
+  T0 cycle-bound control, T1 event-driven structure with frozen rewards, then optional T2 learned
+  shaping. If T1 fails, start with paired-seed balance/ready `2^2`; allow `2^3` only after a
+  non-leaking readiness critic is locked on separate train/calibration splits and passes a one-shot
+  critic-gate q50 disjoint from sealed formal Gate3B q50. A surviving blend uses a seven-point
+  fixed-budget simplex plus a second total-budget level. q50 failure rules cover safety, causal
+  resets/censoring, one-shot regression, transition/timing-cell collapse, fifth-and-later decay and
+  Isaac/vendor reversal. No code, config, NOW, simulator, Pod or hardware changed; G05/G06 remain
+  `Partial`. Details and primary links are in
+  `docs/research/phase1_continuous_rally_timing_2026-07-11.md`.
+
+- Corrected the new-motion interpretation without running a new screen: frozen-stance `0/64`
+  means the old fixed questions missed the motions, not that the motions are ineffective.
+  Effectiveness must combine each motion's safe contact-time manifold, a compatible stroke/ball
+  question family and a legal whole-trajectory `SE(2)` stance. Backhand-pull B/C remain candidates
+  (`frame 49`: intrinsic `32/32`, `0.165 m`; `frame 50`: `27/32`, `0.237 m`) within only the `0.30 m`
+  translation-norm bound. Forehand waits on the roughly `170 deg` face-sign ambiguity; blocks need a
+  block-specific paper. Schema-2/L0/vendor-L1 self-hit/table-net swept-clearance qualification is
+  only permission to train, not evidence of return effectiveness. No code, Pod, sim or hardware ran.
+
 ## 2026-07-12
 
 - Completed a read-only native-MuJoCo training-v0 preflight. The vendor MJCF has no ball/table/net
@@ -113,9 +139,13 @@ Use this file for short project-state updates that future humans and agents need
   never exact frame 0. A static bound audit records Isaac/vendor named-stand
   pelvis x difference `4.16 cm` and 31-joint L2 `0.171845 rad` as a hypothesis,
   not a proven engine root cause; a full numeric ready/base/racket/target SHA is
-  now a launch blocker. The first paper freezes reward bytes/weights; only a
-  structural failure may unlock normalized three-component `2^3` interactions
-  and then a constant-total-budget mixture. Safety/self-hit is noncompensable.
+  now a launch blocker. The first paper froze reward bytes/weights. This
+  historical prereg is refined by the 2026-07-13 audit above: random arrival
+  remains an environment axis; reward ablation starts with balance-debt/
+  ready-potential `2^2`, and a third factor is allowed only after separate
+  readiness-critic train/calibration plus a one-shot disjoint critic-gate q50;
+  formal Gate3B q50 remains sealed. Any surviving mixture also needs a second
+  total-magnitude level. Safety/self-hit is noncompensable.
   A formal fresh PPO now has explicit ownership: only executed actor samples
   have logprobs; bridge ticks mask policy/entropy/value loss, collapse actual
   bridge rewards into option returns, and write exactly projected executed

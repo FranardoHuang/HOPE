@@ -666,6 +666,15 @@ gates; final motion/library acceptance belongs to AgiBot vendor MuJoCo
 Gate3 runtime/stability first and Gate3B no-reset behavior scoring second.  Compact ledger:
 `configs/motion_video_gmr_phase_counterfactual_results_20260711.json`.
 
+The 2026-07-13 interpretation is stricter: motion effectiveness is the motion's
+own safe contact-time manifold crossed with a compatible incoming-ball/stroke
+question family and a legal whole-trajectory `SE(2)` stance. B (`frame 49`,
+`32/32`, nearest old question `0.165 m`) and C (`frame 50`, `27/32`, `0.237 m`)
+fit only the `0.30 m` translation-norm bound and remain candidates. Forehand waits on
+the roughly `170 deg` face-sign ambiguity, and block motions need a block-specific
+paper. Schema-2/L0/vendor-L1 self-hit/full table-net swept clearance `>=5 mm`
+grants training eligibility, not evidence of return effectiveness.
+
 The next spatial step is now preregistered and mechanically checked, but has
 not been promoted or run against restored private evidence.  Plan
 `configs/motion_video_spatial_retarget_prereg_20260712.json` (SHA
@@ -936,12 +945,15 @@ the paired delta are in `configs/phase1_M2_terminal_q10_pair_20260711.json`.
 ### 2026-07-12 reward-composition and PhysicalBall source boundary
 
 Post-strike balance recovery, convergence to a shared ready set and arbitrary-time next-task
-readiness occupy one phase and therefore must be tested for interaction. G05 does not accept
-three independently positive reward ablations as evidence that their sum is optimal. Safety
-remains a non-compensable constraint; ready shaping is potential progress to a set; next-task
-readiness is measured on a frozen randomized-arrival probe. If temporal gating does not remove
-overlap, use a scale-matched `2^3` interaction screen followed by a constant-budget mixture
-design, with paired seeds and checkpoint curves. The exact design is recorded in
+readiness occupy one phase and may interact, but the 2026-07-13 primary-source audit does not
+classify all three as rewards. G05 does not accept three independently positive reward ablations
+as evidence that their sum is optimal. Safety remains a non-compensable constraint; ready shaping
+is potential progress to a set; random arrival is first a frozen environment/question/deadline
+axis scored by the actual next strike. If T1 still needs shaping, run scale-matched balance/ready
+`2^2` with paired seed blocks. A full `2^3` is allowed only after an independent readiness critic
+is locked on separate train/calibration splits and passes a one-shot preregistered critic-gate q50
+that is disjoint from sealed formal Gate3B q50, without hidden-future leakage. Surviving terms use a
+constant-budget mixture plus a second total-budget level. The exact design is recorded in
 `docs/research/phase1_ablation_acceleration_2026-07-11.md`; no recovery arm has launched yet.
 
 Isaac PhysicalBall Phase-B now has a contract-bound source implementation at `612f54d` with
@@ -1037,10 +1049,22 @@ plant, network, observation/action schema, seeds, optimizer and random-arrival r
 mid-sequence robot/last-action/history/noise reset and deadline shifts. A's handoff remains blocked
 until the exact executed-bridge-action projection into actor history is content-bound; shadow,
 zero and stale action substitution are prohibited. Only if B/C fail ready-set acquisition without
-single-strike regression may reward work begin: normalize balance-absorption debt, ready-set
-potential and random-arrival readiness on frozen rollouts; run paired full `2^3` presence/absence;
-then, only if interactions demand it, run a constant-total-budget mixture. Positive hold income is
-still prohibited, and safety/self-hit can never be offset by another reward.
+single-strike regression may reward work begin. Random arrival remains an immutable environment
+axis and actual next-task objective. Normalize balance-absorption debt and ready-set potential on
+frozen rollouts, then run paired `2^2` presence/absence. A third readiness potential and full
+`2^3` require separate critic train/calibration splits, a one-shot disjoint critic-gate q50 and proof
+that no future tuple leaks before reveal; formal Gate3B q50 remains sealed. A
+constant-total-budget simplex may follow only for surviving components, and must include a second
+total-budget level because fixed total alone identifies proportions, not PPO reward magnitude.
+Positive hold income is still prohibited, and safety/self-hit can never be offset by another reward.
+
+The literature boundary is now explicit in
+`docs/research/phase1_continuous_rally_timing_2026-07-11.md`: ACE supports an interruptible
+near-time-optimal reset bridge and conditioned prepare posture but has no free-standing humanoid
+balance debt; HITTER changes tasks only after a swing completes; SMASH's phase/recovery clips feed
+offline library generation and runtime motion matching; PACE's five serves are not arbitrary
+mid-followthrough reveal. These systems motivate T0/T1/T2, but none proves this A3 policy, vendor
+MuJoCo plant or random-arrival contract. G05 therefore remains `Partial`.
 
 The pure-contract validator passes `50` red-team tests, including nested duplicate-key, non-finite
 JSON, strict type identity, exact identity/time/scope and unknown-key rejection; `launch-check`

@@ -251,24 +251,32 @@ scheduled opportunities、optimizer update、actor-owned sample、minibatch 和 
 actor sample 用预绑定、不看 outcome 的索引下采样；A 若不足固定样本数，整个 paired update fail，
 不 padding/复用/额外多跑。评测分母仍是全部预定机会，不跟 loss mask 缩水。
 
-### 同一恢复阶段的三项 reward 为什么要看交互
+### 同一恢复阶段先拆职责，再决定有几个 reward factor
 
 用户指出的三个职责——吸收上一拍平衡债、进入通用 ready set、在下一题随时 reveal 时可接战——
-确实发生在同一段状态分布上。它们不能默认相加：快速压低速度可能帮助平衡却损害临时转向；追单点
-ready 可能缩小下一动作可达集；task-readiness 又可能让机器人一直移动而无法 settle。因此 R2 不用单因素
-OFAT 继续猜比例，而是：
+确实发生在同一段状态分布上，但不等于它们都应成为 dense reward。快速压低速度可能帮助平衡却损害
+临时转向；追单点 ready 可能缩小下一动作可达集；task-readiness 又可能让机器人一直移动而无法
+settle。primary-source 审计把第三项先降为**环境/题表轴和真实下一拍目标**，因此 R2 不用 OFAT
+继续猜比例，也不默认直接开八格：
 
-1. 在同一批 frozen S1 rollout 上估计三项的自然尺度、方差和激活占比，先归一化量纲；
-2. 跑配对 seed 的全 `2^3` presence/absence 因子设计，直接估计主效应与二/三阶交互；
-3. 只当交互非零且组合值得优化，才在固定总 recovery-reward budget 上做 simplex 或 D-optimal
-   mixture，不让“加了更多总分”偷渡成方法改善；
-4. 每个 checkpoint 同时过冻结单拍 non-regression 与同一 no-reset random-arrival 连续卷。
+1. 先用随机 reveal/deadline 和真实下一拍 success 训练 T1；不为未 reveal 的真实 future tuple 发钱；
+2. T1 若仍需 shaping，在同一批 frozen rollout 上估计 balance-debt `D` 与 ready-set potential `R`
+   的自然尺度、方差、激活占比和梯度量级，先跑 paired-seed `2^2`；
+3. 只有独立 readiness critic 在 `critic_train` 拟合、在不重叠的 `critic_calibration` 锁定，并一次性
+   通过与最终 Gate3B formal q50 隔离的 prereg `critic_gate_q50`，且输入不泄露 hidden next task，
+   才把其题库期望/保守分位作为第三 factor，升级完整 `2^3`；formal q50 保持 sealed、只消费一次；
+4. 存活组合才在固定总 recovery-reward budget 上做 simplex/D-optimal mixture；fixed total 只识别
+   比例，至少给 centre 增加第二个总预算水平，检查 PPO 是否还受总量影响；
+5. 每个 checkpoint 同时过冻结单拍 non-regression 与同一 no-reset random-arrival 连续卷。
 
 跌倒、自碰、桌网碰撞、执行器越界是约束，不是可以用击球分补偿的第四项 reward。正的 hold/brake
 survival income 仍禁止，避免通过 GAE 把“什么都不做”的收益传回击球段。q10 只筛方向，q50 才决定结构/
-混合；最终先由智元 vendor MuJoCo Gate3 在同 C++/MJCF/plant/model 上做 first-tick+连续稳定硬前置，
+混合；每个 factorial cell 必须按 seed/block 复制，单 seed 只能筛 catastrophic interaction。最终先由
+智元 vendor MuJoCo Gate3 在同 C++/MJCF/plant/model 上做 first-tick+连续稳定硬前置，
 再由共用同 runtime 的 Gate3B random-arrival q50 主判第一拍不退化与回球质量，不在 Isaac/MuJoCo 之间
-平均。当前只完成设计合同与 `50 passed`，没有 GPU 或训练结果。
+平均。完整职责、论文边界、T0/T1/T2 和 DOE 依据见
+[连续挥拍与任意来球时序审计](phase1_continuous_rally_timing_2026-07-11.md)。当前只完成设计合同与
+`50 passed`，没有 GPU 或训练结果。
 
 ## 什么叫“加速成功”
 
@@ -299,15 +307,16 @@ ready 集、在未知到达时刻保持对下一题的低延迟可达性。它�
 还要先把“结构选择”放到“比例选择”前面。现有论文给出两种不同且都成功的边界方案：
 
 - Ace 的击球 RL 按单球训练；每个 32 ms segment 同时生成可行的后续 reset plan，触球或碰撞风险
-  出现后由近时间最优 MPC 执行 recovery。reset 目标既可固定，也可由 prepare policy 根据下一球选择
-  高 dexterity 姿态；训练初态还从历史 reset plan 的动态终态采样。它证明“strike policy + 显式
+  出现后由近时间最优 MPC 执行 recovery。reset 目标既可固定，也可由 prepare policy 根据
+  incoming-ball/期望落点选择有利于后续 contact 的高-dexterity 姿态；训练初态还从历史 reset plan 的
+  动态终态采样。它证明“strike policy + 显式
   recovery/prepare controller”是认真候选，而不是失败后的临时补丁；碰撞门必须检查 strike segment
   **连同** reset trajectory ([Dürr et al., Nature 2026](https://www.nature.com/articles/s41586-026-10338-5))。
 - HITTER 走相反路线：10 s episode 内连续训练多拍，每拍完成后重采样正/反手、球拍和 base 目标；
   dense imitation/regularization 贯穿 episode，拍位/拍速/拍面只在触球短窗，base-position reward
   只在触球前，给击球后向下一目标转换留空间。它证明统一 actor 可以学出多拍 carry-state，但公开
   合同仍是 swing 完成后换题，不等于任意 mid-recovery 到达
-  ([Su et al., HITTER 2025](https://arxiv.org/abs/2508.21043))。
+  ([Su et al., HITTER v2](https://arxiv.org/html/2508.21043v2))。
 
 因此首轮结构因子应是 `explicit safe bridge/prepare` 对 `learned recovery option`，而不是直接扫三项
 reward 比例。若显式 bridge 已在同一随机到达卷上满足安全、ready latency 和下一拍回球率，就不必让
@@ -315,10 +324,17 @@ strike actor 同时背三份信用；若它因状态/动作族覆盖不足失败
 Ace 还把 reward 权重作为 skill state 并偏向采样稀疏/边界组合；这支持“条件化多目标策略”作为后续
 方向，但不能被引用成某个固定权重比已经最优。
 
-若仍有真实重叠，实验分两层。第一层用等梯度尺度的 `2^3` factorial（none、三个单项、三个
-两两组合、三项全开）和 paired seeds，回答主效应与交互项；单项胜出只表示该项值得保留，
-不表示组合最优。第二层只在存活组合上固定辅助 reward 总预算，做小型 simplex/D-optimal mixture，
-比较比例而不同时改变总 reward；并把“顺序 phase gate”与“同窗混合”作为显式结构因子。
+若仍有真实重叠，实验分两层。第一层先用等梯度尺度的 `2^2` factorial
+`none/D/R/D+R` 和 paired seed blocks；只有 readiness critic 按独立 train/calibration split 锁定，
+再一次性通过与 formal 题纸隔离的 `critic_gate_q50` 才扩到
+`2^3`（none、三个单项、三个两两组合、三项全开），回答主效应与交互项。完整 `2^k` 每格必须复制，
+单项胜出只表示该项值得保留，不表示组合最优。第二层只在存活组合上固定辅助 reward 总预算；三项
+可先跑 7 点 simplex-centroid（三 vertex、三 50/50 edge、1/3--1/3--1/3 centre），并给 centre 至少
+再加一个总预算水平。否则 fixed-total 只能回答比例，不能证明总 shaping magnitude 最优。实验设计边界
+见 [NIST factorial](https://www.itl.nist.gov/div898/handbook/pri/section3/pri3332.htm)、
+[Scheffé simplex-centroid, 1963](https://doi.org/10.1111/j.2517-6161.1963.tb00506.x) 与
+[NIST mixture/process boundary](https://www.itl.nist.gov/div898/handbook/pri/section5/pri54.htm)。继续把
+“顺序 phase gate”与“同窗混合”作为显式结构因子。
 每个 checkpoint 报告：physical fall/guard reset、strike 后回 ready 的时间、base/heading/角动量
 残差、按 next-task delay 分桶的第二拍回球率与响应延迟，以及第 2--5 拍斜率。q10 仍只筛方向；
 最终必须在智元 MuJoCo Gate 3 的无 reset 连续卷上满足 `falls=0`、`rescues=0`、每次 engaged

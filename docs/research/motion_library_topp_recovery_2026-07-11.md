@@ -1,7 +1,7 @@
 # 新动作库、TOPP 与任意时刻下一拍
 
 日期：2026-07-11
-状态：原视频、canonical-beta GMR、grounding 和 240 Hz 安全屏均 10/10；canonical counterfactual HOPE frame/mirror 已验并消费 64 题，但 exact coverage 全 0；已预注册全十动作的原子 SE(2) spatial-retarget proposal 屏，真正晋级仍卡 schema-2/L0/L1/桌网，2-vs-4 与 TOPP 暂停
+状态：原视频、canonical-beta GMR、grounding 和 240 Hz 安全屏均 10/10；冻结站位在原 64 题上的 exact coverage 为 0，但这不是动作无效结论；反手拉 B/C 已给出 intrinsic phase 候选，正手 face 符号与挡球专用题族仍开；已预注册全十动作的原子 SE(2) spatial-retarget proposal 屏，训练资格仍卡 schema-2/L0/L1/桌网，行为有效性另判，2-vs-4 与 TOPP 暂停
 范围：仅离线处理与仿真。本文不授权任何真机动作。
 
 ## 结论先行
@@ -24,6 +24,9 @@
 5. 当前 24 条 Phase-1 是冻结合同的另一条轴，不把新视频、TOPP 或 recovery 偷换进去。新轴优先
    使用自然终档释放的 GPU 槽；若确需让路，顺序是先暂停非目标 plant 的 LZ/LP 诊断臂，绝不先停
    formal SZ，也不把中途改配方伪装成同一臂。
+6. **动作有效性不是固定站位上一张题纸的 `0/64`。** 正式定义必须同时搜索每个动作自身的最佳
+   触球帧/时空击球流形、与动作语义匹配的来球族，以及对整条轨迹原子应用且通过安全门的合法
+   `SE(2)` 站位。原 64 题只是一张冻结 placement diagnostic；拉球题不能判死挡球动作。
 
 ## 原始素材与可追溯入口
 
@@ -128,12 +131,21 @@ crop 里，洗衣机中文标签均为正常、未反射方向；GMR 的右/左�
 不是录制现场桌外参。frame result SHA 为 `e70492be...`。
 
 v5 随后实际消费同一张 64 题纸（full result SHA `c299b7a0...`），并复现 v4 十条 safety subtree。
-结果是所有 motion/library 的 exact zero-retarget coverage 都为 `0/64`，因此 common support=0，
-2-vs-4 没有可判分母。这个 0 表示固定题的位置、拍位与可回球状态没有在同一帧重合，**不等于动作
-无效**。把球仅诊断性搬到拍心后，Franco 反手拉 B 为 `32/32 @ phase 0.5444`，C 为
-`27/32 @ 0.5155`，A 仅 `1/32`；但 B/C 峰距最近 immutable question position 仍约
-`0.165/0.237m`。因此只保留 B/C 为显式 spatial-retarget 候选，不把 intrinsic 当命中率，
-也不从结果反调 frame。`TOPP=paused_until_spatial_retarget`；之后还要 schema-2/L0/L1、桌网、
+结果是所有 motion/library 的 exact zero-retarget coverage 都为 `0/64`，因此**这张固定站位题纸**的
+common support=0，2-vs-4 在该纸上没有可判分母。这个 0 只表示固定题的位置、拍位与可回球状态没有
+在同一帧重合，**不等于动作无效**。动作有效性必须按
+`自身最佳触球帧/时空击球流形 × 适配来球族 × 合法整轨迹 SE(2) 站位` 重判。把球仅诊断性搬到拍心后，
+Franco 反手拉 B 是 `frame 49, 32/32 @ phase 0.5444`，峰距最近 immutable question position
+`0.165 m`；C 是 `frame 50, 27/32 @ 0.5155`，最近距离 `0.237 m`。两者都小于已冻结的 `0.30 m`
+平移范数上界，所以保留 B/C 为 spatial-retarget 候选；这只过 norm 粗筛，尚未证明逐轴/yaw/安全，
+也不是回台率或晋级证书，A 仅 `1/32`。
+
+正手动作暂时不能由该表判有效/无效：候选拍面与题目 demanded face 存在约 `170 deg` 的方向差，
+必须先闭合 physical hitting face B、raw body/site A、mirror 与 normal sign 的唯一转换，再冻结正手题。
+挡类也必须消费挡球专用来球族/落点与拍速题，不能拿拉球题判死；原 64 题保留为坐标/placement
+诊断，不作为跨 stroke-family 的统一有效性卷。禁止从这些结果反调 frame 或只挑已知好题。
+
+`TOPP=paused_until_spatial_retarget`；之后还要 schema-2/L0/L1、桌网、
 动力学与 TOPP 后复审，最终动作与 2-vs-4 先过智元 vendor MuJoCo Gate3 runtime/stability，
 再由共用 runtime 的 Gate3B no-reset behavior 卷主判。
 小账本为 `configs/motion_video_gmr_phase_counterfactual_results_20260711.json`，完整坐标合同见
@@ -149,8 +161,10 @@ v5 的 `0/64` 把下一问限定得很精确：不改人体/机器人动作的�
 `0.30 m`、`|x|<=0.20 m`、`|y|<=0.30 m`。它表示 planner 在 HOPE 标准虚拟桌下的站位请求，
 绝不表示从空挥视频恢复出了房间相机/球桌外参。
 
-搜索必须遍历十条 motion 与全 64 题；B/C 的 intrinsic 证据只能改报告排序，不能从卷中
-删掉其他动作。每个安全/拍速合格源帧先把整轨迹绕 HOPE root 旋转，再求使拍心与题目
+现有 proposal 搜索仍必须遍历十条 motion 与全 64 题；它回答固定题的 placement 可行性，不能单独
+回答动作有效性。B/C 的 intrinsic 证据只能改报告排序，不能从卷中删掉其他动作。正式有效性 follow-up
+另为拉/挡等 stroke family 冻结适配的 incoming-ball/question strata，并在每个动作的安全触球时空流形
+上搜索；共同支持/覆盖只能在同一适配题族内比较。每个安全/拍速合格源帧先把整轨迹绕 HOPE root 旋转，再求使拍心与题目
 XY 重合的最小平移；Z 不能改，仍用原 capture radius 严格判定。反事实飞行从 immutable
 球位置开始，不从空挥房间的拍心点开始。工具
 `scripts/screen_motion_spatial_retarget.py` 已用 7 个纯 CPU 回归锁住十动作不可跳过、保地 proper-rigid、
@@ -164,6 +178,9 @@ capture、`0.3 m/s` approach 与 `10 ms x 100` rollout 也全部显式内容绑�
 2. L0 `audit_motion_npz.py` PASS；
 3. L1 vendor-MJCF `audit_self_collision.py` PASS；
 4. 整轨迹桌/网 swept-clearance 零硬失败且最小余隙 `>=5 mm`。
+
+这四项只授予**进入训练/动力学筛的资格**，不证明动作能击球、回台或优于别的动作；其中 vendor L1
+必须显式覆盖 robot self-hit，桌/网门必须审整轨迹 swept volume，而非只审候选触球帧。
 
 当前 prereg 明确 `certificate_bundle_preregistered=false`，临时塞一个“通过证书”会被拒绝；必须另立
 新的内容寻址 prereg 才能消费证书。原子平面变换在数学上保持 z 和机器人内部距离，但
@@ -348,10 +365,11 @@ Franco 组可先用四段第 0 帧的鲁棒中心构造 ready set；v6/v7 各自
 
 - **Ace** 并未让击球策略自己慢慢“学会收回来”。它的 rally policy 在仿真只按单球 episode
   训练；每个 32 ms segment 同时计算一条从 segment 终态回到静止 reset pose 的近时间最优 MPC
-  轨迹。击球后执行最新 reset trajectory 直到下一球。reset pose 可以固定，也可以由 prepare
-  network 根据下一球状态选择，以最大化下一拍 dexterity；训练初态还会采样历史 reset plan 的动态
+  轨迹。击球后执行最新 reset trajectory。reset pose 可以固定，也可以由 prepare network 根据
+  incoming-ball state 与期望落点选择，使随后 contact 更有 dexterity；训练初态还会采样历史 reset plan 的动态
   状态。这直接支持“击球技能 + 显式安全 recovery/prepare”分层，而不是把所有职责塞进一个长
-  clip ([Dürr et al., Nature 2026](https://www.nature.com/articles/s41586-026-10338-5))。
+  clip。Ace 没有自由站立 humanoid 的脚接触/CoM balance debt，故只作结构类比
+  ([Dürr et al., Nature 2026](https://www.nature.com/articles/s41586-026-10338-5))。
 - **HITTER** 直接训练 10 s 多拍 episode：每个 swing 完成后重采样正/反手、球拍和 base 目标；
   base-position reward 在触球前生效，论文解释为让策略在击球后准备转向下一目标。它证明多拍 carry
   state 可以得到长 rally，但公开描述仍是“完成 swing 后换题”，没有证明任意 mid-clip 来球
@@ -449,10 +467,16 @@ MJCF `stand` 为 `(-0.0416378,0.000359049,1.06839)`；31 关节 L2 差 `0.171845
 `4.16 cm` root-x 差不会自动消失。这是待验的因果假设，不是已证根因；正式卷前要绑定两引擎
 完整 ready/base/joint/racket/target/obs 数值 SHA。
 
-与此相对，恢复 reward 仍留在结构证据之后。如果需要，平衡债、ready-set potential 和 random-arrival
-readiness 先归一化，再做配对 `2^3` 交互，最后才在固定总预算上混合。自碰/跌倒/桌网/执行器安全
+与此相对，恢复 reward 仍留在结构证据之后。random-arrival 首先是不泄露 future tuple 的环境/题表轴
+和真实下一拍目标，不默认成为第三个 dense reward。如果 T1 仍需 shaping，先归一化平衡债与
+ready-set potential，做配对 `2^2`；只有独立 readiness critic 按 train/calibration split 锁定，并一次性
+通过与最终 Gate3B formal q50 隔离的 `critic_gate_q50`，才升级配对 `2^3`；formal q50 保持 sealed。
+最后的 fixed-budget mixture 还需给 centre 加第二总量水平，区分比例与总 shaping
+magnitude。自碰/跌倒/桌网/执行器安全
 始终是不可补偿硬门。最终 MuJoCo 又分两层：Gate3 先硬验同 C++/MJCF/plant/model 的 first-tick 和连续稳定；
 Gate3B 才在共用 runtime 上消费 random-arrival q50，主判 first-strike non-regression 和 return quality。
+primary-source 映射、不误类比边界、T0/T1/T2 与 q50 失败判据见
+[连续挥拍与任意来球时序审计](phase1_continuous_rally_timing_2026-07-11.md)。
 
 ### 任意时序测试
 
