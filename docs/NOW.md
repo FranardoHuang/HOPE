@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 当下状态与团队 focus（2026-07-12 15:16 CST）
+## 当下状态与团队 focus（2026-07-12 15:29 CST）
 
 本节只做 roadmap 的当前入口；下面的实验结果、奖励/训练台账、长期路线和历史判决继续保留，
 不能用这份短报替代可复现实验记录。
@@ -43,6 +43,12 @@ Rules:
   RAM available 约 `914/921 GiB`、swap 0；当前每 Pod 两个 fresh checkpoint worker 活着，无 child
   judge/Kit。旧 causal worker 随终档自然退出，下一轮仍需逐项复核其完成 state ledger，不能沿用旧
   “10 workers 全活”口径。
+- **4k matched 判卷状态**：四条 fresh SZ 的 `model_4000.pt` 已跨过训练里程碑，但预注册的
+  Pod1/Pod2 readiness audit、all-four activation artifact 都仍不存在；现有 queue 刻意固定
+  `auto_start=false`、`runtime_entrypoint=null`，也明确禁止临时拼 judge 命令。因此 4k 不是“在跑只是
+  没结果”，而是安全停在 activation consumer 缺口。下一步先提交并红队一个必须消费 exact activation、
+  逐 Pod 串行拿 Kit lock、no-clobber 记 PID/PGID/result/exactness 的 runner，再在同一 K100 跑四 seed；
+  它只判 seed4 是否晚熟，已知 seed1 4k=`50/100` 使整族稳定门数学上不可能通过。
 - **现在谁在 focus 什么**：
   - franco/Codex：满池 checkpoint 早判、planner-policy 成对 Gate3、vendor first tick/D0、
     Isaac↔MuJoCo 分层归因；同时守住动作/TOPP/连续恢复队列，不让长期轴阻塞最短 demo。
@@ -89,7 +95,8 @@ Rules:
 - **未来 24 小时决策**：①关闭 downgrade/revoke/source-age/active-base/frame 五组 P1，动态覆盖同 tick
   stale/yaw、跨 topic 乱序与快速撤销恢复，再复审 planner-policy 全状态机并跑最新 main C++ Release；
   ②在可用 MuJoCo 环境补 stand 10 秒数值诊断，但它不阻塞 D0；③并行补原生 first-tick JSON 和
-  source-only serve-sync 负门，随后只用新的精确进程所有权方案准备 vendor first tick；自然释放的 GPU
+  source-only serve-sync 负门，随后只用新的精确进程所有权方案准备 vendor first tick；同时补完 4k
+  all-four activation consumer 并跑 matched K100；自然释放的 GPU
   槽只接受已过 schema2/L0/整轨安全与动力学门的动作/TOPP 任务，未过门就保持空闲而不制造无效训练；④能 first tick
   就立即跑 D0 小卷并录完整 ledger，不能则把失败精确归到 planner、policy、plant 或 runtime 一层。
   定期任务只做巡检；阶段结论统一更新本节，稳定时不刷聊天长报。
