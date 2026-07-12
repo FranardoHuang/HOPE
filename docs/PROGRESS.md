@@ -4,6 +4,16 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-12
 
+- Partially executed the fresh `SZ model_4000` q50 readiness barrier without
+  starting a judge. Both Pods now have the exact reviewed control bundle and
+  pre-existing K100 bytes at one absolute path. Pod2 seed2/4 passed its
+  content-bound audit (file SHA `4f25786b...565f7`, embedded content SHA
+  `5df5f299...bdb11`); its byte-identical audit artifact is now checked in.
+  Pod1 seed1/3 did
+  not begin its audit because repeated low-frequency SSH attempts timed out
+  during handshake. Because one Pod audit is insufficient, activation,
+  prepare/run/aggregate, trainer signals, simulation and hardware all remain
+  untouched; G05/G06 stay `Partial`.
 - Repaired three repository-evidence regressions without laundering old
   results. Motion intake now distinguishes path escape, unsafe output stem and
   non-MP4 extension, with a regression for dot-only `..mp4`. The diagnostic

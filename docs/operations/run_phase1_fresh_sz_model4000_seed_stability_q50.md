@@ -1,8 +1,10 @@
 # Fresh SZ model_4000 four-seed matched q50 queue
 
 Status: preregistered, activation barrier source-validated, and activation-consuming runner
-source-validated on 2026-07-12; no Pod audit, activation, q50 preparation, judge, trainer
-signal, or robot command has run. This queue exists to
+source-validated on 2026-07-12. The identical external control bundle and K100 bytes are now
+present at the same absolute path on both Pods, and the Pod2 seed2/4 readiness audit passed;
+Pod1 seed1/3 remains unaudited after SSH handshake timeouts, so no activation, q50 preparation,
+judge, trainer signal, or robot command has run. This queue exists to
 separate delayed seed4 learning from persistent seed4 weakness at the next matched
 checkpoint. It does not authorize a training change, checkpoint promotion, deployment, or
 hardware.
@@ -114,6 +116,40 @@ pytest -q tests/test_run_phase1_fresh_sz_model4000_q50.py
 
 Accepted source verification on 2026-07-12: queue/barrier plus runner focused suite `40 passed`;
 committed queue validation prints `PASS; no runtime`. This is source evidence only.
+
+## Partial readiness execution (2026-07-12)
+
+The first fail-closed runtime step is partially complete:
+
+- both Pods have the exact seven-file source/config bundle at
+  `/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/source_d67310f`;
+- both Pods have the same pre-existing K100 bytes at
+  `/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/shared_clean_k100.schedule.json`;
+- all reviewed source/config hashes and schedule file/semantic/order hashes matched;
+- Pod2 seed2/seed4 produced `pod2_ready_audit.json`, file SHA-256
+  `4f25786b7524db848b9adebf5a8946bb8f82280ea8d1d5a1243ae85533f565f7` and embedded content
+  SHA-256 `5df5f2995149c168a90bce3cf662b53322d9fbca9da4b724b814821f2c9bdb11`; the exact bytes are
+  checked in as
+  `configs/phase1_fresh_SZ_model4000_seed_stability_q50_pod2_ready_audit_20260712.json` and the
+  local relay remains at `/private/tmp/phase1_model4000_activation_relay/pod2_ready_audit.json`.
+
+Pod1 accepted the source/K100 deployment, but each later `audit-pod` attempt stopped at SSH
+handshake timeout before a remote command began. Treat Pod1 process/checkpoint state for those
+attempts as unknown, not failed. Do not rerun Pod2, invent a second schedule path, activate from one
+audit, prepare or launch judges. Resume only the no-clobber Pod1 audit after a low-frequency clean
+connection, then combine both observed audit bytes exactly as described below.
+
+Verify the preserved Pod2 evidence without accessing a Pod:
+
+```bash
+A=configs/phase1_fresh_SZ_model4000_seed_stability_q50_pod2_ready_audit_20260712.json
+sha256sum "$A"
+jq -cS '.content' "$A" | tr -d '\n' | sha256sum
+```
+
+The two expected digests are respectively `4f25786b...565f7` and
+`5df5f299...bdb11`. This still cannot authorize `activate` without the separately observed Pod1
+artifact.
 
 ## Future readiness audit and activation
 

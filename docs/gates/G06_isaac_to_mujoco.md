@@ -1056,4 +1056,11 @@ Aggregation retains the unchanged model-2000 stability thresholds but fixes
 only permitted conclusion is delayed learning versus persistent weakness through 4k. This paper
 still does not answer the Isaac/MuJoCo physical-instrument gap, calibrated plant, recovery,
 continuous stability or Agibot vendor Gate3/Gate3B behavior. Focused queue+consumer tests pass
-`40`; no Pod audit, activation, MuJoCo judge or simulator ran. G06 remains `Partial`.
+`40`; at source merge no Pod audit, activation, MuJoCo judge or simulator had run.
+
+The first runtime readiness step is now partial, not a score. Both Pods hold the exact reviewed
+control bundle and immutable K100 bytes at one shared absolute path. Pod2 seed2/4 passed the
+content-bound checkpoint/contract/schedule audit (file SHA `4f25786b...565f7`, embedded content SHA
+`5df5f299...bdb11`); Pod1 seed1/3 remains unknown because SSH timed out before its audit command
+started. The all-four barrier therefore remains closed. No activation, prepare, MuJoCo/Kit judge,
+aggregate, signal or hardware action ran, and G06 remains `Partial`.

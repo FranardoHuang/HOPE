@@ -1165,8 +1165,15 @@ The aggregate cannot return a family-stable PASS: known-before-prereg seed1 mode
 below the unchanged `.65` worst-seed rule. It only classifies seed4 as delayed learning when 4k is
 at least `.65` aggregate and `.50` on both sides; otherwise weakness is persistent through 4k.
 Either outcome keeps all training unchanged and authorizes no promotion/deployment/hardware.
-Queue plus runner focused source tests pass `40` cases. No Pod readiness audit, activation,
-preparation or judge has run, so this is not training evidence and G05 remains `Partial`.
+Queue plus runner focused source tests pass `40` cases. At source merge no Pod readiness audit,
+activation, preparation or judge had run, so that result was not training evidence.
+
+The first readiness step is now partially executed without touching either training/eval
+checkout. Identical source/K100 control bytes were placed at one absolute path on both Pods, and
+Pod2 seed2/4 passed its content-bound audit (file SHA `4f25786b...565f7`, content SHA
+`5df5f299...bdb11`). Pod1 seed1/3 did not run its audit because SSH handshakes timed out before a
+remote command began. One-Pod evidence cannot activate the barrier: no prepare, judge, score,
+promotion, trainer signal or hardware command followed. G05 remains `Partial`.
 
 ### 2026-07-12 training-backend boundary
 

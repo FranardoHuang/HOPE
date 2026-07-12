@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 当下状态与团队 focus（2026-07-12 21:30 CST）
+## 当下状态与团队 focus（2026-07-12 23:10 CST）
 
 本节只做 roadmap 的当前入口；下面的实验结果、奖励/训练台账、长期路线和历史判决继续保留，
 不能用这份短报替代可复现实验记录。
@@ -49,9 +49,11 @@ Rules:
   consumer 已随 main `7bc6d1f` 合入并通过顶层 `468 passed, 9 skipped`。它没有 SSH/信号面，固定
   `auto_start=false`，必须先由 Pod1(seed1/3)、Pod2(seed2/4) 各生成 readiness audit，再合成 all-four
   activation；每 Pod 串行拿共享 Kit lock，seed1 也重跑同一 K100，no-clobber 保存 PID=PGID/state/log/
-  result。**目前仍未做 Pod audit、activation 或 judge**，所以还没有新分数。下一步按已合 operation
-  执行 audit→activate→contract-check→prepare→run→aggregate；只判 seed4 是否晚熟，已知 seed1
-  4k=`50/100` 使整族稳定门数学上不可能通过。
+  result。现在两 Pod 已在 train/eval 外放好同一绝对路径的 exact source bundle 与旧 K100 bytes；
+  Pod2 seed2/4 readiness audit 已通过（file `4f25786b...565f7`、content `5df5f299...bdb11`），
+  Pod1 seed1/3 因 SSH 握手超时尚未执行。**单 Pod 绝不 activation**，所以仍无新分数、无 judge。
+  下一步只补 no-clobber Pod1 audit，再执行 activate→contract-check→prepare→run→aggregate；只判
+  seed4 是否晚熟，已知 seed1 4k=`50/100` 使整族稳定门数学上不可能通过。
 - **训练后端路线决策（团队 2026-07-12 21:30）**：纯 Isaac/解析回球指标不再作为继续扩展
   训练配方的依据；**原生 MuJoCo 训练/微调后端升为 P0**。第一步不是把单世界实时 AimRT vendor
   runtime 当采样器，而是从现有 MuJoCo 判卷器抽出 batched `rsl_rl VecEnv`，加载同一 vendor A3
@@ -69,9 +71,9 @@ Rules:
   - jiayi/dongc1：`origin/hitter` 上积累 HitterPure/V3 policy、planner 与 vendor rally 编排；
     最新值得移植的是发球等待 MOTION 同步、marker→base 旋转、solve cadence 和预测时域修复，
     但该提交混有旧配方/资产，当前只做小块移植，不整支合入。
-  - yikang：`stage1-fixed-point` 的 reference oracle 与 `yikang-linux-port-0711` stand viewer
-    已按当前 main 语义选择性合入；head reward 没有硬塞进现役配方，后续由命名配方+paired/mixture
-    验证决定。当前可继续提供 vendor/课程侧诊断和评审。
+  - yikang：reference oracle、stand viewer 与 default-off 的 shadow solver 接线壳均已选择性合 main；
+    head reward 没有硬塞进现役配方。当前继续做 vendor Gate3 谱系筛卷与课程侧诊断；v2 obs 顺序、
+    24100 交接模型和 v7 击球平面仍需与 jiayi 对齐后才可判分。
   - 动作库轨：Franco/v6/v7 十段已过内容寻址、GMR/grounding/自碰与身体余隙；当前由
     spatial-retarget 击球点适配推进，TOPP、2-vs-4 和 RL 等离线安全/可行性门后再占 GPU。
 - **最近值得团队同步的结果**：两轮红队先后抓出“反手 raw-A 符号被误判”和“no-publish 顺便
@@ -84,22 +86,18 @@ Rules:
   旧 `pp_gate3_rally.sh`/conductor/run_sim 链不能修补复用：它先发球后起 runner、broad kill、复用
   RouDi/共享 `/tmp` 与 `/dev/shm`，且人类日志没有可证明的 fresh READY；新 D0 必须是私有
   namespace/cgroup+pidfd、machine status、DISARMED ball 一次性 arm 和 no-replace ledger。
-- **当前新 blocker**：planner 仍判 **NO-MERGE**，但上一版五组 P1 已在 WIP 中逐项关闭：schema
-  downgrade 会毒化、lease 改用映射后的 source clock、base/racket 带 shared epoch + exact
-  `base_sequence_ref`、active swing 绑定 revoke generation、ball/base `frame_id` 不一致会 fail closed。
-  有界 exact base history + 同 tick latest closed-loop 双快照已消除 100Hz base/50Hz policy 的配对饥饿；
-  最新 planner/source 为 `168 pass + 2 skip`，隔离 Pod Release native 为
-  `235 pass + 5 optional skip`。但红队刚抓到 post-swing level-0 hold 仍可能让低 base 或 fast
-  revoke→recovery 穿进 actor，正把 base-low、绝对/连续性 plausibility、engaged epoch+revgen 提到所有
-  179 actor/hold 前的统一门，未闭前不合。serve-sync v4 也仍在红队：日志只作诊断、one-shot token/
-  吸收终态已有，但 ACK 还需把 base sequence 从“冻结值”改成 readiness anchor+同 epoch 单调 refresh，
-  并绑定 vendor backend 所有权、revoke generation 与合法 post-arm machine states；它仍是 source-only
-  负门，不是 Gate3 READY。
+- **当前新 blocker**：formal tuple/sequence、latest-base 全 actor 门和 serve-sync v4 的 source P1 已在
+  候选 `6042d05` 收口，并与 main 的 default-off shadow solver 合并；host planner/source=
+  `180 pass + 2 skip`、顶层=`517 pass + 9 skip`，serve design rc0、launch rc1 精确 `49 MISSING`。
+  该候选尚未合 main，因为最终集成 C++ 字节仍需一次隔离 Linux/ROS/Jazzy Release compile+full native；
+  23:00 左右两 Pod 都在 SSH 握手阶段 timeout，远端命令未开始，故只记 unknown、不拿旧 component
+  `235/5` 冒充集成证据。即使合 main，49 个 runtime binding、vendor first tick 和 Gate3 行为仍是 OPEN。
+  q50 同样只缺 Pod1 audit；网络连通前不重启、不重复发任务、不单边激活。
 - **代码交流状态**：recovery A/B/C、plan-only Gate3 源码门和严格 face179 模型合同已分别随
   `e10922a`、`b2067ba`、`8975043` 进入 main；face179 的 vendor 行为证据仍明确为 `Partial`。
-  yikang 的 oracle/stand 诊断随 `3df6ff5` 合入，head reward 明确留在未验证队列。三版 planner
-  候选 `69418a9/71b0b23/6aae7ac` 均未合入；per-clip wait 与双 readiness 已有可保留实现，但同 tick
-  snapshot 和 payload epoch 候选实现仍在红队。first-tick joined-source 诊断已随本轮合入 main，38/38
+  yikang 的 oracle/stand 诊断随 `3df6ff5` 合入，shadow solver 接线壳随 `7e31819` 合入，head reward
+  明确留在未验证队列。三版旧 planner 候选 `69418a9/71b0b23/6aae7ac` 均未合入；当前整合候选
+  `6042d05` 已过 host 红队，等 exact Release 后才进 main。first-tick joined-source 诊断已随本轮合入 main，38/38
   host source 测试通过；它把 outer/payload 及 planner/native/source/runtime 五类 exactness 永久写成
   false，并由 formal-style consumer 拒绝。vendor pose/twist/racket 没有共同 MuJoCo sample sequence，
   因此这次合并只增加可观测性与防伪护栏，不是 vendor first tick 或 Gate3 行为通过。
@@ -110,12 +108,11 @@ Rules:
   physical returns；每个模型/planner/runtime/MJCF/题表都带 SHA。D0 不冒充连续实战。
   D1 再要求同一进程内 3–5 球 no-reset；恢复/reward mixture、四动作、TOPP 与标定 plant
   不阻塞 D0，但继续并行排队。任何真机 demo 仍受 G07 独立安全门约束，本阶段不发真机命令。
-- **未来 24 小时决策**：①关闭 inactive-invalid barrier 与高频 exact-pair liveness 两组新 P1，动态覆盖
-  latest-base 低重心、跨 topic 乱序、history eviction 与快速撤销恢复，再复审 planner-policy 全状态机并
-  跑最新 main C++ Release；
-  ②在可用 MuJoCo 环境补 stand 10 秒数值诊断，但它不阻塞 D0；③并行补原生 first-tick JSON 和
-  source-only serve-sync 负门，随后只用新的精确进程所有权方案准备 vendor first tick；同时按已合
-  consumer 生成 4k all-four activation 并跑 matched K100；同步冻结 MuJoCo trainer v0 合同与
+- **未来 24 小时决策**：①网络恢复后先对 `6042d05` 做 exact Release/full-native，绿后立即合 main
+  并刷新 source SHA；同一低频窗口只补 Pod1 q50 audit，all-four barrier 绿后再串行跑 matched K100；
+  ②在可用 MuJoCo 环境补 stand 10 秒数值诊断，但它不阻塞 D0；③按 serve v4 的 49 项缺口实现
+  machine ACK/唯一 publisher/first-publish ledger，再只用新的精确进程所有权方案准备 vendor first tick；
+  同步冻结 MuJoCo trainer v0 合同与
   单环境 parity canary（先验收，不启动长跑），明确 actor warm-start、critic/optimizer fresh 和
   独立 K100/Gate3 判卷边界；自然释放的 GPU
   槽只接受已过 schema2/L0/整轨安全与动力学门的动作/TOPP 任务，未过门就保持空闲而不制造无效训练；④能 first tick

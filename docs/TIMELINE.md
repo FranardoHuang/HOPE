@@ -1748,6 +1748,12 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    SSH/signal。每结果硬验 exact、50/侧、order/MJCF/execution/ready/checkpoint/contract/report/summary/
    ledger SHA；aggregate 只判 seed4 晚熟/持续弱，已知 seed1 4k=.50 永远禁止 family stable。focused
    `40 passed`；未做 Pod audit/activation/prepare/judge/sim/真机，G05/G06 继续 Partial。
+72. 【franco/Codex】**4k q50 barrier 只完成 Pod2，单边绝不偷激活**——两 Pod 已在 train/eval 外
+   物化同一绝对路径的 exact source bundle 与旧 K100 bytes，7 个 source/config SHA 及 schedule
+   file/semantic/order SHA 全对；Pod2 seed2/4 audit file=`4f25786b...565f7`、content=
+   `5df5f299...bdb11` 并已本地 immutable relay。Pod1 source 部署成功后，audit 的 SSH handshake
+   多次 timeout 且远端命令未开始，故记 unknown；没有 activation/prepare/judge/score/signal/真机，
+   等低频连通后只补 no-clobber Pod1 seed1/3 audit。
 
 ## 2026-07-12:yikang 双线落地——拍面反解影子接线 + Gate3 谱系筛卷首轮
 
