@@ -115,9 +115,9 @@ pytest -q tests/test_run_phase1_fresh_sz_model4000_q50.py
 Accepted source verification on 2026-07-12: queue/barrier plus runner focused suite `40 passed`;
 committed queue validation prints `PASS; no runtime`. This is source evidence only.
 
-## Partial readiness execution (2026-07-12)
+## Historical partial readiness execution (2026-07-12; superseded)
 
-The first fail-closed runtime step is partially complete:
+The first fail-closed runtime step was initially partial:
 
 - both Pods have the exact seven-file source/config bundle at
   `/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/source_d67310f`;
@@ -133,9 +133,10 @@ The first fail-closed runtime step is partially complete:
 
 Pod1 accepted the source/K100 deployment, but each later `audit-pod` attempt stopped at SSH
 handshake timeout before a remote command began. Treat Pod1 process/checkpoint state for those
-attempts as unknown, not failed. Do not rerun Pod2, invent a second schedule path, activate from one
-audit, prepare or launch judges. Resume only the no-clobber Pod1 audit after a low-frequency clean
-connection, then combine both observed audit bytes exactly as described below.
+attempts as unknown, not failed. At that time the correct action was to avoid rerunning Pod2,
+inventing a second schedule path or activating from one audit. This state was closed on 2026-07-13;
+the exact Pod1 audit and activation are recorded under **Materialized barrier evidence** below.
+Do not rerun the no-clobber audit/activation now that those files exist.
 
 Verify the preserved Pod2 evidence without accessing a Pod:
 
@@ -146,12 +147,14 @@ jq -cS '.content' "$A" | tr -d '\n' | sha256sum
 ```
 
 The two expected digests are respectively `4f25786b...565f7` and
-`5df5f299...bdb11`. This still cannot authorize `activate` without the separately observed Pod1
-artifact.
+`5df5f299...bdb11`. By itself this artifact could not authorize `activate`; the later exact Pod1
+artifact and union are the authority recorded below.
 
-## Future readiness audit and activation
+## Reproduction contract for readiness audit and activation
 
-Do this only after the ordinary monitor reports every accepted model-4000 checkpoint present.
+These commands define how the now-materialized evidence was produced. Do not rerun them against the
+existing no-clobber paths. For a new queue/version, run only after the ordinary monitor reports every
+accepted checkpoint present.
 Preserve the repo-like `configs/` and `scripts/` layout in an external clean control copy;
 do not alter either frozen training checkout.
 
