@@ -498,6 +498,13 @@ historical direct-number proxies. The repair contract is
 `docs/research/phase1_plant_semantics_repair_2026-07-11.md`, status
 `blocked_on_calibration_evidence`.
 
+The v1 plant preregistration's source snapshot is now explicitly historical at
+`d4ca566`; current strict-face179 `training_contract.py` bytes differ and the
+current-checkout verifier fails closed. No current Gate3/SC result may consume
+that stale snapshot. Re-preregistration of the complete current training,
+adapter, judge and vendor-runtime closure is required before this plant leg can
+advance; G06 remains `Partial`.
+
 ### 2026-07-12 final-engine priority
 
 The final behavioral arbiter is the Agibot-provided A3 MuJoCo deploy chain called Gate 3 in

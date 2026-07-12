@@ -75,6 +75,10 @@ def test_manifest_rejects_unsafe_asset_id_and_output_stem():
     with pytest.raises(INTAKE.IntakeError, match="filename stem"):
         INTAKE.validate_manifest(_manifest(asset))
 
+    asset = _asset("Franco/example.mov")
+    with pytest.raises(INTAKE.IntakeError, match=".mp4 extension"):
+        INTAKE.validate_manifest(_manifest(asset))
+
 
 def test_candidate_ranks_must_be_contiguous():
     first = _asset("Franco/a.mp4")

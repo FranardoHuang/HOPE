@@ -1734,3 +1734,9 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    不 poison，invalid 依赖 wall timestamp 严格递增，base source-age lease/expiry 顺序可制造假 READY，
    active swing 未锁 engage epoch 与 base revoke generation，ball/base `frame_id` 未校验却宣称 world。
    racket mid-swing revoke 语义也未唯一化；prereg/runtime closure 仍缺，未合 main、未启 sim/真机。
+70. 【franco/Codex】**修 test 但不洗历史账**——旧 per-video-beta GMR 结果继续绑定生成时 auditor
+   SHA，不追写成后来的 canonical-beta 工具；motion intake 将路径逃逸、危险 stem、错误扩展名分开
+   fail closed。plant v1 的八项源码 hash 实际首次同存于 `d4ca566`，故把误写的 training-only
+   `612f54d` baseline identity 纠正为该 commit；当前 strict-face179 `training_contract.py` 已漂移，
+   verifier 按预期 exit2，必须新 prereg 才能发 `SC`。未改旧结果/配方，未动 Pod/真机，G05/G06
+   保持 Partial。

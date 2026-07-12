@@ -362,3 +362,11 @@ sampled zero-self-contact result is not promotion evidence because the root is
 still about 8 cm below the floor and table/net geometry was absent. No
 grounded schema-2 clip, four-action actor, recovery policy or hardware
 candidate exists yet. The mini-spec does not authorize real-robot testing.
+
+Evidence immutability was rechecked on 2026-07-12. The original per-video-beta
+GMR result continues to bind the exact auditor SHA used to generate it; the
+later canonical-beta auditor extension is not retroactively substituted into
+that ledger. Intake validation now reports path escape, unsafe output stem and
+wrong extension as separate fail-closed errors, including dot-only names such
+as `..mp4`. These are provenance/diagnostic repairs only: no motion was
+promoted, no Pod job was launched and no hardware action was authorized.

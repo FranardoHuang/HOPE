@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib.util
 import json
 import subprocess
@@ -24,13 +25,26 @@ def _manifest():
     return json.loads(MANIFEST.read_text(encoding="utf-8"))
 
 
-def test_tracked_preregistration_and_repository_baseline_pass():
+def test_tracked_preregistration_and_declared_git_baseline_pass():
     data = _manifest()
     MODULE.validate_manifest(data)
-    MODULE.verify_repository_baseline(data, ROOT)
+    baseline = data["repository_baseline"]
+    for item in baseline["audited_sources"]:
+        result = subprocess.run(
+            ["git", "show", f"{baseline['git_commit']}:{item['path']}"],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr.decode(errors="replace")
+        assert hashlib.sha256(result.stdout).hexdigest() == item["sha256"]
 
 
-def test_cli_reports_blocked_contract_without_launching_anything():
+def test_current_checkout_drift_blocks_old_prereg_without_launching_anything():
+    data = _manifest()
+    with pytest.raises(MODULE.PlantPreregError, match="training_contract.py"):
+        MODULE.verify_repository_baseline(data, ROOT)
+
     result = subprocess.run(
         [sys.executable, str(SCRIPT), str(MANIFEST), "--verify-repository-baseline"],
         cwd=ROOT,
@@ -38,12 +52,9 @@ def test_cli_reports_blocked_contract_without_launching_anything():
         text=True,
         check=False,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "PLANT_SEMANTICS_PREREG_OK" in result.stdout
-    assert "status=blocked_on_calibration_evidence" in result.stdout
-    assert "minimum_training_arms=4" in result.stdout
-    assert "evaluations_per_milestone=16" in result.stdout
-    assert "hardware_commands_authorized=false" in result.stdout
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "PLANT_SEMANTICS_PREREG_FAIL" in result.stdout
+    assert "training_contract.py" in result.stdout
 
 
 @pytest.mark.parametrize("cell", ["SZ", "SP", "LZ", "LP"])

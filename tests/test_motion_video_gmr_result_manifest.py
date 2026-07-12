@@ -12,6 +12,9 @@ GMR_RESULT_PATH = ROOT / "configs" / "motion_video_gmr_results_20260711.json"
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 QUEUE_STATE_SHA256 = "ae147e9504396daf6990c6f2002f7fb9b27c1836fa195c7386840d45052992ee"
 SOURCE_BUNDLE_SHA256 = "5b94af15f4a367dff8d7dc6c1cf14d26be6a649a25df6e1c1046b0e6ab72e2de"
+DIAGNOSTIC_RESULT_AUDITOR_SHA256 = (
+    "a9b75cfe746bdb9d31426a2707733de364b1188368d10c263ca8947981881d92"
+)
 
 
 EXPECTED_REMOTE_EVIDENCE = {
@@ -154,7 +157,13 @@ def test_tracked_gmr_results_bind_queue_tools_source_bundle_and_gvhmr_inputs():
     assert contract["queue_tool_sha256"] == _sha256(
         ROOT / "scripts" / "run_motion_video_gmr_queue.py"
     )
-    assert contract["result_auditor_sha256"] == _sha256(
+    # This result is immutable evidence from the original per-video-beta lane.
+    # The later canonical-beta lane extended the auditor CLI, so requiring the
+    # historical result to equal today's tool bytes would silently rewrite its
+    # provenance.  Keep the recorded auditor SHA and let the newer result bind
+    # the newer tool independently.
+    assert contract["result_auditor_sha256"] == DIAGNOSTIC_RESULT_AUDITOR_SHA256
+    assert contract["result_auditor_sha256"] != _sha256(
         ROOT / "scripts" / "audit_gmr_result.py"
     )
     assert contract["gmr_source_bundle"] == {

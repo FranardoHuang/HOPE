@@ -110,15 +110,19 @@ def validate_manifest(data: dict[str, Any]) -> None:
         seen_ids.add(asset_id)
 
         rel = Path(str(asset["source_relpath"]))
-        if rel.is_absolute() or ".." in rel.parts or rel.suffix.lower() != ".mp4":
-            raise IntakeError(f"{asset_id}: source_relpath must be a safe relative .mp4 path")
+        if rel.is_absolute() or ".." in rel.parts:
+            raise IntakeError(f"{asset_id}: source_relpath must be a safe relative path")
+        # Check the output stem before the extension.  Hidden/dot-only names such
+        # as ``..mp4`` have no pathlib suffix, but their real safety failure is
+        # that the stem would escape or alias GVHMR/GMR output bindings.
+        if not OUTPUT_STEM_RE.fullmatch(rel.stem) or rel.stem in {".", ".."}:
+            raise IntakeError(f"{asset_id}: source filename stem is unsafe for GVHMR output")
+        if rel.suffix.lower() != ".mp4":
+            raise IntakeError(f"{asset_id}: source video must use the .mp4 extension")
         rel_text = rel.as_posix()
         if rel_text in seen_paths:
             raise IntakeError(f"duplicate source_relpath {rel_text!r}")
         seen_paths.add(rel_text)
-        if not OUTPUT_STEM_RE.fullmatch(rel.stem) or rel.stem in {".", ".."}:
-            raise IntakeError(f"{asset_id}: source filename stem is unsafe for GVHMR output")
-
         expected_hash = asset["sha256"]
         if not isinstance(expected_hash, str) or not SHA256_RE.fullmatch(expected_hash):
             raise IntakeError(f"{asset_id}: sha256 must be 64 lowercase hexadecimal characters")

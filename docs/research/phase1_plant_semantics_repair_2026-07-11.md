@@ -274,10 +274,15 @@ python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_plant_contract_v1.py
 ```
 
-Expected current result: `PLANT_SEMANTICS_PREREG_OK`, status
-`blocked_on_calibration_evidence`, four minimum fresh training arms, sixteen
-paired evaluations per milestone, and `hardware_commands_authorized=false`.
-The 2026-07-12 vendor-target update has manifest SHA
-`2ad2cabafa1731a60fb0668a8c21eeb1235fdc1056f33a35f88a19d438d5e2aa`;
-the combined prereg/compiler regression passes 24 tests; the broader current
-schema-3/override/judge/MuJoCo plant regression passes 128 tests.
+The first command now **must fail closed** on current main: strict face179
+validation changed `training_contract.py` after this v1 preregistration's
+audited source snapshot. The manifest's baseline identity was corrected from
+the training-only ancestor `612f54d` to `d4ca566`, the first commit at which all
+eight recorded source hashes coexist; no recorded source hash or experiment
+rule was changed. Tests prove those hashes against that Git object and separately
+prove that current checkout drift returns `PLANT_SEMANTICS_PREREG_FAIL` before
+any launch. A new reviewed preregistration must bind the then-current source
+closure before an `SC` arm may run. The corrected v1 manifest SHA is
+`4f0f0b2df5526e08222ad0bb72d705e11986a35684f7e29366cca243110a75c8`;
+its status remains `blocked_on_calibration_evidence`, and hardware commands
+remain unauthorized.
