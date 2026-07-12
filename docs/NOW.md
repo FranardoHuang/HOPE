@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 当下状态与团队 focus（2026-07-13 00:30 CST）
+## 当下状态与团队 focus（2026-07-13 01:22 CST）
 
 本节只做 roadmap 的当前入口；下面的实验结果、奖励/训练台账、长期路线和历史判决继续保留，
 不能用这份短报替代可复现实验记录。
@@ -52,9 +52,13 @@ Rules:
   result。现在两 Pod 已在 train/eval 外放好同一绝对路径的 exact source bundle 与旧 K100 bytes；
   Pod1 seed1/3、Pod2 seed2/4 audit 已分别通过（file `3fc325e1...247b8` / `4f25786b...565f7`）；
   exact union 已生成 activation（file `9dea76c2...ce704`、content `eaa92ca2...aa4fb`），两 Pod 同路径
-  同步并各自 `contract-check` PASS。三份 exact evidence 已入库。**仍未 prepare/run/judge**，所以没有
-  新分数。下一步按合同生成各 Pod runtime-contract 并重查 Kit 冲突后串行 run→aggregate；只判 seed4
-  是否晚熟，已知 seed1 4k=`50/100` 使整族稳定门数学上不可能通过。
+  同步并各自 `contract-check` PASS。三份 activation evidence 已入库。两 Pod 随后完成 no-clobber
+  `prepare`：runtime file/content SHA 分别为 Pod1 `2b76a5a...8201e`/`36e878f0...5ba73`、Pod2
+  `dbecc102...d1c9b`/`91a0070a...30794`；原始 JSON bytes 已入库并与 Pod 逐字节复核。两份合同仍是
+  `prepared_not_started/jobs_started=0/auto_start=false`，重查 checkpoint/lineage/checkout/Kit 冲突均绿，
+  **仍未 run/judge**，所以没有新分数。当前只差 reviewed persistent parent supervisor，防止 SSH 断开时
+  丢掉两 seed 串行控制与最终 result；闭合后才启动并 aggregate。只判 seed4 是否晚熟，已知 seed1
+  4k=`50/100` 使整族稳定门数学上不可能通过。
 - **训练后端路线决策（团队 2026-07-12 21:30）**：纯 Isaac/解析回球指标不再作为继续扩展
   训练配方的依据；**原生 MuJoCo 训练/微调后端升为 P0**。第一步不是把单世界实时 AimRT vendor
   runtime 当采样器，而是独立实现 native CPU `rsl_rl VecEnv`，不能和判卷器共用 observation/action/
