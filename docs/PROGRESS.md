@@ -1587,3 +1587,22 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   atomic replace；失败不覆盖旧 `policy.onnx`、不留 temp。derive/runtime 的 reference 门统一为严格
   `dot>1e-6`，近边界训练行有回归拒绝。focused host=`41 passed, 1 optional integration skip`，
   planner wire=`11 passed`；这仍不是 vendor build/preflight/Gate3 行为通过。
+
+## 2026-07-12 — joined-source first-tick 诊断
+
+- production runner 新增 no-publish-only `--first-tick-json` instrumentation：PASSIVE 等待，SHADOW
+  记录首个 observed planner-engaged actor candidate；idle/wait/invalid/recovery 不抢 one-shot。现役
+  planner 的 same-tick snapshot/shared payload epoch 仍 NO-MERGE，所以不再称 atomic/formal。
+- `RobotState` 没有 root linear velocity；subscription-only sim sidecar 从 vendor pelvis pose/twist/
+  right-racket topics 取值，无 publisher/reset/command/估算。kernel flock+whole-record pwrite/pread、
+  finite/unit/fresh、header 单调、正偶 generation、20ms header/30ms receipt join 均 fail-closed。
+- 红队确认 vendor publisher 使用异步 publish-time stamp、没有共同 MuJoCo sample sequence，故这些量
+  只是 closest-receipt join。outer+payload 固定 `evaluation_contract_exact=false`，planner/native/
+  source-binary/source-semantics/runtime-closure 五项也固定 false，并由测试中的 formal-style consumer
+  硬拒。
+- canonical ONNX 稳定 bytes 同时用于 SHA 和 ONNX Runtime session，关闭 model load/hash TOCTOU；不再
+  输出不可证明的 source commit。source ledger 明确只是 reviewed subset，
+  `source_semantics_closure_exact=false`，不是 parser-backed/transitive closure。
+- host diagnostic `6 passed`，连同 static plan 共 `38 passed`；ROS/AimRT Release GTest、vendor sim/
+  backend tick、config→MJCF parser、publisher/transitive、owned supervisor/runtime ledger 全 OPEN，
+  未碰 Pod/GPU/真机，G05/G06 保持 Partial。

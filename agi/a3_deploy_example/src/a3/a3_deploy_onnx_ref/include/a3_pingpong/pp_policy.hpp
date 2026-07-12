@@ -43,8 +43,10 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
 
 #include "a3_pingpong/pp_base_estimator.hpp"
+#include "a3_pingpong/pp_first_tick_json.hpp"
 #include "a3_pingpong/pp_joint_limits.hpp"
 #include "a3_pingpong/pp_joint_map.hpp"
 #include "a3_pingpong/pp_obs_builder.hpp"
@@ -145,6 +147,11 @@ struct PpPolicyConfig {
   // Process-wide no-publish controls runtime diagnostic relaxations and verbose first-tick
   // logging only. It does NOT relax the ONNX/model contract.
   bool diagnostic_no_publish = false;
+  // Capture the first planner-engaged actor candidate (not constructor prewarm,
+  // yaw barrier, PASSIVE/PD_STAND, or planner static hold) for the inexact
+  // --first-tick-json source diagnostic. The main runner permits this only
+  // process-wide no-publish; this is not a formal planner-snapshot certificate.
+  bool capture_first_tick = false;
   // Separate, explicit escape for inspecting a legacy model. The CLI requires no-publish and
   // forbids this flag in model-preflight mode, so a preflight can never certify a relaxed model.
   bool allow_legacy_model_diagnostic = false;
@@ -320,8 +327,10 @@ struct PpPolicyConfig {
 
 class PpPolicy {
  public:
-  PpPolicy(const std::string& onnx_path, PpPolicyConfig cfg = {})
-      : onnx_(onnx_path, cfg.allow_legacy_model_diagnostic), cfg_(cfg), level_(cfg.level),
+  PpPolicy(const std::string& onnx_path, PpPolicyConfig cfg = {},
+           const std::string* exact_model_bytes = nullptr)
+      : onnx_(onnx_path, cfg.allow_legacy_model_diagnostic, exact_model_bytes),
+        cfg_(cfg), level_(cfg.level),
         swing_speed_(cfg.swing_speed), swing_dir_(cfg.start_backhand ? -1 : 1),
         legs_passive_(cfg.legs_passive), waist_passive_(cfg.waist_passive),
         leg_clamp_rad_(cfg.leg_clamp_rad), leg_smooth_alpha_(cfg.leg_smooth_alpha),
@@ -329,6 +338,9 @@ class PpPolicy {
     if (cfg_.allow_legacy_model_diagnostic && !cfg_.diagnostic_no_publish)
       throw std::runtime_error(
           "pingpong: legacy model diagnostics require process-wide no-publish");
+    if (cfg_.capture_first_tick && !cfg_.diagnostic_no_publish)
+      throw std::runtime_error(
+          "pingpong: first-tick capture requires process-wide no-publish");
     if (!build_src_to_sdk(onnx_.joint_names(), isaac_to_sdk_))
       throw std::runtime_error("pingpong: ONNX joint_names do not map onto the backend layout");
     if (!std::isfinite(cfg_.dt) || cfg_.dt <= 0.0)
@@ -348,6 +360,9 @@ class PpPolicy {
       throw std::runtime_error(
           "pingpong: a 179-D face-command policy requires --planner and flat wire schema 2; "
           "scripted targets do not carry the demanded world-frame normal/rho atomically");
+    if (cfg_.capture_first_tick && onnx_.obs_dim() != kObsDim179)
+      throw std::runtime_error(
+          "pingpong: first-tick source diagnostic supports deploy_parity_face179 only");
     clip_.step_dt = cfg_.dt;
     const bool station_actor =
         onnx_.obs_dim() == kObsDim177 || onnx_.obs_dim() == kObsDim110;
@@ -604,6 +619,36 @@ class PpPolicy {
     return d;
   }
   const Eigen::VectorXd& last_obs_unsafe() const { return last_obs_; }
+
+  struct FirstTickCompute {
+    bool valid = false;
+    std::uint64_t policy_tick = 0;
+    std::int64_t robot_state_timestamp_ns = 0;
+    std::int64_t robot_state_tick = 0;
+    std::int64_t robot_state_data_ready_ns = 0;
+    std::int64_t robot_state_sync_ready_ns = 0;
+    bool robot_state_sync_complete = false;
+    bool robot_state_sync_aligned = false;
+    std::int64_t robot_state_sync_skew_ns = 0;
+    double policy_base_source_age_s = -1.0;
+    int reference_time_step = -1;
+    Eigen::VectorXd joint_q_sdk;
+    Eigen::VectorXd joint_qd_sdk;
+    Eigen::VectorXd obs;
+    Eigen::VectorXd action;
+    PpRobotState policy_state;
+    PpRacketTarget target;
+  };
+
+  // Copies the immutable first actor-compute snapshot. The source is written
+  // exactly once on the policy-driver thread and guarded for the main runner's
+  // no-publish JSON transaction.
+  bool CopyFirstTickCompute(FirstTickCompute& out) const {
+    std::lock_guard<std::mutex> lk(first_tick_mu_);
+    if (!first_tick_compute_.valid) return false;
+    out = first_tick_compute_;
+    return true;
+  }
 
   // --- live per-joint diagnostics (SDK order), read by the status thread ---
   struct DiagSnapshot {
@@ -1268,6 +1313,52 @@ class PpPolicy {
         : build_obs_180(refs, st, tg, last_action_, onnx_.default_q(), cfg_.use_imu_yaw_for_targets);
     { std::lock_guard<std::mutex> lk(obs_mu_); last_obs_ = obs; }  // for obs-debug
     const Eigen::VectorXd action = onnx_.mean_action(obs, time_step);
+    // "First tick" here means the first observed planner-engaged actor candidate, not the
+    // first callback or an idle/recovery actor row. Waiting/no-command/invalid
+    // planner states must not consume the one-shot. This observes the current
+    // planner_engaged_/hold tuple only; it does not certify same-tick snapshot
+    // linearization or a shared payload epoch, which remain explicit blockers.
+    const bool first_tick_candidate = cfg_.capture_first_tick &&
+        !first_tick_captured_ && first_tick::PlannerActorCandidateEligible(
+            onnx_.obs_dim(), cfg_.planner_mode, planner_engaged_,
+            planner_have_hold_, level_.load(), tg.face_command_valid,
+            tg.swing_sign, tg.rho);
+    if (first_tick_candidate) {
+      if (state.q.size() != kNumJoints || state.dq.size() != kNumJoints ||
+          !state.q.allFinite() || !state.dq.allFinite() || !obs.allFinite() ||
+          action.size() != kNumJoints || !action.allFinite() ||
+          !st.base_pos_w.allFinite() || !st.base_quat_w.allFinite() ||
+          !st.base_ang_vel_b.allFinite() || !tg.pos_w.allFinite() ||
+          !tg.vel_w.allFinite() || !tg.normal_cmd_w.allFinite() ||
+          !std::isfinite(tg.rho) || !std::isfinite(tg.time_to_strike) ||
+          !std::isfinite(tg.swing_sign)) {
+        throw std::runtime_error(
+            "pingpong: first actor compute is not a complete finite snapshot");
+      }
+      FirstTickCompute capture;
+      capture.valid = true;
+      capture.policy_tick = tick_idx;
+      capture.robot_state_timestamp_ns = state.timestamp_ns;
+      capture.robot_state_tick = state.tick;
+      capture.robot_state_data_ready_ns = state.state_data_ready_ns;
+      capture.robot_state_sync_ready_ns = state.state_sync_ready_ns;
+      capture.robot_state_sync_complete = state.sync_complete;
+      capture.robot_state_sync_aligned = state.sync_aligned;
+      capture.robot_state_sync_skew_ns = state.sync_skew_ns;
+      capture.policy_base_source_age_s = oracle_age_s_;
+      capture.reference_time_step = time_step;
+      capture.joint_q_sdk = state.q;
+      capture.joint_qd_sdk = state.dq;
+      capture.obs = obs;
+      capture.action = action;
+      capture.policy_state = st;
+      capture.target = tg;
+      {
+        std::lock_guard<std::mutex> lk(first_tick_mu_);
+        first_tick_compute_ = std::move(capture);
+      }
+      first_tick_captured_ = true;
+    }
     const Eigen::VectorXd tq_isaac = onnx_.target_q(action);
 
     Eigen::VectorXd q_sdk = to_sdk_order(tq_isaac, isaac_to_sdk_);
@@ -1973,6 +2064,11 @@ class PpPolicy {
   std::string planner_status_ = "init";
   mutable std::mutex obs_mu_;
   Eigen::VectorXd last_obs_;
+
+  // Formal first-tick capture; enabled only by --first-tick-json/no-publish.
+  mutable std::mutex first_tick_mu_;
+  FirstTickCompute first_tick_compute_;
+  bool first_tick_captured_ = false;  // policy-driver thread only
 
   // --- live diagnostics (written in ComputeCommand, read by status thread) ---
   mutable std::mutex diag_mu_;

@@ -394,3 +394,25 @@ python3 scripts/view_a3_stand.py --identity-only
 This verifies source binding and production header parsing only. It starts no MuJoCo model,
 planner, policy, AimRT, Gate3/Gate3B or hardware. The numerical command and interpretation are in
 `run_deploy_dryrun.md`.
+
+## Joined-source first-tick diagnostic source checks
+
+This gate tests the native state ABI and atomic JSON writer without ROS, AimRT, ONNX Runtime,
+MuJoCo or a robot:
+
+```bash
+python3 -m py_compile \
+  agi/a3_deploy_example/scripts/gate3_first_tick_state_bridge.py
+pytest -q \
+  tests/test_gate3_first_tick_state_bridge.py \
+  tests/test_pp_first_tick_json_cpp.py
+```
+
+The second pytest compiles and runs `tests/cpp/pp_first_tick_json_core_test.cpp` against the
+dependency-free production header. Current host result is `6 passed`. The production CMake glob
+also includes `unit_tests/test_pp_first_tick_json.cpp`; run it with the ROS/Jazzy Release command
+above before claiming a built runner. This branch has not performed that full build or started the
+state bridge/runner. The cases include odd-generation/source-stamp-regression rejection and assert
+that the reviewed source subset covers the named runner/policy/ONNX-loader/build/config/state-timing
+files while every runtime binding remains null. Parsed output must carry all exactness flags false,
+and a Gate3-style consumer rejects it. The source checks are not a vendor first tick or Gate3 result.

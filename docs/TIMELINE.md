@@ -1682,6 +1682,16 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    strip metadata/缺 envelope/exact=0 三负例均 rc3，legacy+preflight rc2。错误 exam-bank 导出
    rc1 后 final SHA 不变、temp=0；824 compile rows 无 fast-math。证据 manifest 已入库。未启动
    vendor simulator/transport/backend first tick，不能写成 Gate3/Gate3B 通过。
+66. 【franco/Codex】**first-tick 先做不可误记分的 joined-source 诊断**——production runner 新增
+   no-publish-only `--first-tick-json`；PASSIVE 等，SHADOW 只记录首个 observed planner-engaged actor
+   candidate，idle/wait/invalid/recovery 不抢 one-shot。`RobotState` 无 root linear velocity，故用
+   subscription-only sidecar 读 vendor pelvis pose/twist/racket，不补0/估算；flock+pwrite/pread、
+   finite/fresh/header 单调/正偶 generation/20ms header+30ms receipt join 全硬门。红队查明 vendor
+   topic 是异步 publish-time stamp、无共同 MuJoCo sample seq，现役 planner 也缺 same-tick snapshot/
+   shared epoch，因此 outer+payload 及 planner/native/source/runtime exactness 全固定 false，formal-style
+   consumer 硬拒。ONNX SHA/session 共用同一稳定 bytes；source ledger 只称 reviewed subset。host
+   diagnostic `6 passed`、连 static plan `38 passed`；parser/publisher/transitive/backend tick 全 OPEN，
+   未跑 ROS/AimRT build、sim/Pod/真机，G05/G06 继续 Partial。
 ## 2026-07-12:yikang 小改动选择性审入
 
 - 【Codex】没有把 `stage1-fixed-point` 或 `yikang-linux-port-0711` 的旧基线整支 merge。

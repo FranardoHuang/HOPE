@@ -743,8 +743,9 @@ identities are revalidated before an external write. The ledger's runtime block 
 `not_run`, with no components, signals, lock, behavior result or ownership token. Source tests pass
 `32` cases; no runtime was launched.
 
-The plan explicitly keeps five runtime blockers null: current C++ lacks full
-`--first-tick-json`; exact process ownership still needs pidfd plus a cgroup/reviewed supervisor
+The plan explicitly keeps five runtime blockers null: the production C++ full
+`--first-tick-json` needs verified same-sample runtime output (the source diagnostic below is
+structurally inexact and has not run); exact process ownership still needs pidfd plus a cgroup/reviewed supervisor
 startup handshake; PATH/LD/Python/AMENT directory manifests and AimRT/transitive `.so`/plugin
 closure are absent; separate vendor config/MJCF hashes do not prove parser-resolved semantics; and
 the atomic runtime ledger/exact lock transaction is undesigned. String containment in a config is
@@ -851,3 +852,35 @@ The content-addressed ledger is
 full Release build and strict model-only preflight gates. It did not start the vendor simulator,
 transport or backend, so first tick, planner-policy closed loop, self-hit, continuous stability and
 Gate3/Gate3B behavior remain open; G06 remains `Partial`.
+
+#### 2026-07-12 joined-source first-tick diagnostic
+
+The production runner now implements no-publish-only `--first-tick-json` instrumentation for a
+strict 179-D model. PASSIVE waits; SHADOW records the first observed planner-engaged actor candidate;
+idle/wait/invalid/recovery rows do not consume it. The output is canonical mode 0600, fsynced atomic
+hard-link no-replace and contains joined qpos38/qvel37/base7/racket7, target candidate, obs179,
+action31, layouts, clocks and content SHAs. It does not emit a source-commit claim.
+
+`RobotState` lacks root linear velocity, so a subscription-only sim sidecar reads the vendor pelvis
+pose/twist and right-racket pose topics without publisher/reset/command or estimation. Kernel
+`flock` plus whole-record `pwrite/pread`, freshness, finite/unit checks, strictly advancing stamps,
+positive even generations, 20 ms native-header skew and a 30 ms RobotState/sidecar receipt join are
+enforced. The observation base is recorded separately from joined vendor-world base and the native
+racket point must agree with formal FK within 5 mm.
+
+This is deliberately not a native same-tick snapshot. The tracked vendor publishers stamp messages
+asynchronously at publish time and expose no common MuJoCo sample sequence. The current planner also
+has known same-tick snapshot/shared payload epoch blockers. Both outer document and payload fix
+`evaluation_contract_exact=false`; planner/native/source-binary/source-semantics/runtime-closure
+exactness are fixed false with non-empty reasons. Gate3/Gate3B and promotion consumers must reject
+this v1 schema.
+
+The model path has no load/hash TOCTOU: stable canonical ONNX bytes are hashed and passed directly
+to ONNX Runtime. The checked-in ledger hashes only a reviewed source subset and fixes
+`source_semantics_closure_exact=false`; it is not parser-backed closure. Vendor config→MJCF parser
+resolution, publisher binary/config/transitive membership, planner/wire/frame/backend closure,
+owned supervisor/timeout, runtime ledger and actual backend first tick remain OPEN/null.
+
+Host source checks are `6 passed`; the combined static-plan+diagnostic tests are `38 passed`. No
+simulator, transport, backend, Kit, Pod/GPU or hardware ran. Full ROS/Jazzy/AimRT Release build and
+native GTest are also unrun. G06 remains `Partial`.
