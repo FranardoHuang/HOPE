@@ -4,6 +4,19 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-12
 
+- Kept third planner candidate `6aae7ac` out of main despite `198 passed, 2
+  skipped`. Fresh-clone review found that `ComputeCommand` still calls engage
+  before sampling this tick's localization, so a base that expired or a yaw
+  that crossed the side boundary can penetrate via last-tick state and latch a
+  swing. It also proved that comparing local receive timestamps across separate
+  base/racket DDS topics is not a causal epoch: an ordered base revoke/recovery
+  can be followed by a delayed pre-revoke racket valid before its invalid row,
+  falsely satisfying the timestamp check. The next correction must carry one
+  source epoch/sequence in both payloads (or use one atomic topic) and use one
+  same-tick localization snapshot for engage, side, face, wait and observation.
+  The serve prereg must additionally bind/parse the mailbox, wire and frame
+  helpers it actually depends on. No merge, simulator, Pod mutation, signal or
+  robot command occurred.
 - Kept follow-up planner candidate `71b0b23` out of main after a second
   independent state-machine review. It fixes the earlier pure helper geometry,
   selected-clip wait and dual readiness contract, but base staleness or a newly

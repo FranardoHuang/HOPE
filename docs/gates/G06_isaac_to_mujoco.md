@@ -899,3 +899,25 @@ runner must fail closed whenever the planner's proposed side disagrees with the 
 policy-frame geometry (with an explicit boundary rule), and dynamic tests must cover stale revoke,
 malformed-base revoke, revoke during windup waiting, recovery before timeout, and mismatched yaw
 authorities. No simulator, backend, Pod process or robot ran; G06 remains `Partial`.
+
+#### Third planner correction held by same-tick and cross-topic causality failures (2026-07-12)
+
+Candidate `6aae7ac` added dual flat revocation, immediate formal invalid, a base-receive epoch,
+runner-frame side consistency, sample-driven READY and stronger source/environment bindings. Its
+host suite is genuinely green at `198 passed, 2 skipped`, but it is still **not merged**.
+
+`ComputeCommand` invokes `PlannerEngageStep_` before it samples the current IMU/base mailbox. A
+previous tick with base age `0.199 s` can therefore leave `base_fresh=true`; on the next tick the
+sample may be stale or explicitly invalid, yet engage can latch level 1 before current localization
+is read. The same ordering makes the side check use `last_base_quat_w_` while the observation later
+uses the current IMU. A small yaw change can move `tgt_b.y` from the ambiguous band to the exclusive
+side region after the wrong clip has already latched.
+
+The receive-time epoch is also insufficient across two DDS topics. Per-topic ordering permits
+base invalid then base valid, followed by a delayed pre-revoke racket valid and only later the
+racket invalid. Because the old valid is received after the base invalid, a local timestamp
+comparison misclassifies it as post-epoch. Formal closure requires a single source epoch/sequence
+carried in both base and racket payloads (or one atomic combined topic), exact equality at engage,
+and a single same-tick localization snapshot shared by engage, side/face gates, windup wait and
+the policy observation. The immutable prereg must also bind and parse the mailbox/wire/frame helper
+bytes it currently omits. No runtime, simulator, Pod mutation or robot ran; G06 remains `Partial`.

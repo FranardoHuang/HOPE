@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 当下状态与团队 focus（2026-07-12 08:57 CST）
+## 当下状态与团队 focus（2026-07-12 10:48 CST）
 
 本节只做 roadmap 的当前入口；下面的实验结果、奖励/训练台账、长期路线和历史判决继续保留，
 不能用这份短报替代可复现实验记录。
@@ -39,8 +39,10 @@ Rules:
   前 rc3，错误导出不覆盖既有 ONNX；合并后本机再过 `52 pass + 1 optional skip`。06:54–06:56
   满池只读巡检仍为两 Pod 各 `12 live + 2 terminal`、每 GPU 4 条；28/28 checkpoint finite 且
   contract/lineage 正确，完整日志无异常，10 workers 全活，41/41 已完成判卷 rc0/binding/exactness 正确。
-  08:29–08:31 每台各一次低频 SSH 复查均在握手超时，因此当前状态诚实标为“06:56 后未知”；没有
-  重连洪峰、重启、补发任务或信号，不能把连接失败误写成训练失败。
+  09:55 Pod1 一次低频只读连接恢复：train 仍 clean `6d93bcb`，GPU util=`97/92/90%`、显存
+  `17.45/17.30/23.17 GiB`，RAM available `908 GiB`、swap 0；Pod2 同轮握手超时，随后 Pod1 第二次
+  完整进程盘点也超时。因此只能证明 Pod1 当时仍有健康负载，不能沿用旧 `12+2` 数量，也不能把
+  连接失败写成训练失败；没有重启、补发任务、改树或信号。
 - **现在谁在 focus 什么**：
   - franco/Codex：满池 checkpoint 早判、planner-policy 成对 Gate3、vendor first tick/D0、
     Isaac↔MuJoCo 分层归因；同时守住动作/TOPP/连续恢复队列，不让长期轴阻塞最短 demo。
@@ -57,27 +59,27 @@ Rules:
   结构轴，结构失败后才做 `2^3` 交互和固定总预算 mixture；fresh SZ 四 seed 的 2k 正式卷虽中位高，
   worst seed 仅 `20/100`，已正式判 seed-stability 失败。新 reference oracle 与 Torch 物理全表对拍
   通过，最大误差 `4.63e-9`；stand viewer 已纠正为生产 29-DOF PD、neck passive，不再伪称额外 head
-  `40/2` 是生产合同。planner 修正版 `71b0b23` 已关闭原 world-Y helper 与 per-clip wait 反例，
-  但新的独立红队又证明“源码写了 revoked”不等于控制面真的撤销，测试数量不能代替状态机反例。
-- **当前新 blocker**：planner 修正版 `71b0b23` 仍判 **NO-MERGE**。base 超过 `0.2 s` 后目前只清
-  Python 内存，diagnostics timer/坏 base sample 都没有立即在 schema-2 flat 发布 `valid=0`；旧 command
-  仍可在 C++ 的 `0.5 s` timeout 内复活。即使补发 invalid，formal 179 仍继承 legacy `0.25 s`
-  invalid grace，也会把明确撤销当 fresh。第三个缺口是 planner 用 mocap/pelvis yaw 选边，runner
-  实际用启动时归零的 IMU yaw 做 target frame；两边喂同一个 quaternion 的 helper test 没覆盖真实
-  ownership。修复必须做到 formal immediate revoke，并由 runner 对自身 policy frame 做选边一致性
-  fail-closed；旧 110/175/177 行为不静默改变。
+  `40/2` 是生产合同。planner 第三版 `6aae7ac` 的 host `198 pass + 2 skip` 也被 fresh-clone 红队否决，
+  再次证明 source-string/纯 helper 全绿不能代替真实 tick 与跨 topic 因果审计。
+- **当前新 blocker**：`6aae7ac` 仍判 **NO-MERGE**。第一，C++ 当前先用上一 tick 的
+  `base_fresh/last_base_quat` engage，之后才读取本 tick localization；base 已 stale/revoke 或 yaw 已越过
+  side band 时仍可能先锁拍。第二，base/racket 是两个 DDS topic，用本地 receive time 比 epoch 不证明
+  因果：`base invalid→base valid→延迟的旧 racket valid→racket invalid` 是合法交错，旧 tuple 仍会被误当
+  新。第三，serve prereg 漏绑真正实现 mailbox/wire/frame 的文件。修复必须让 engage/side/face/wait/obs
+  共用同 tick localization snapshot，并在两个 payload 中携带同一个 source epoch/sequence（或合成原子
+  topic）；不能再用 last-tick cache 或跨 topic 到达时间猜因果。
 - **代码交流状态**：recovery A/B/C、plan-only Gate3 源码门和严格 face179 模型合同已分别随
   `e10922a`、`b2067ba`、`8975043` 进入 main；face179 的 vendor 行为证据仍明确为 `Partial`。
-  yikang 的 oracle/stand 诊断随 `3df6ff5` 合入，head reward 明确留在未验证队列。两版 planner
-  候选 `69418a9/71b0b23` 均未合入；第二版虽补了 per-clip wait 和 planner+runner 双 readiness，
-  仍在修即时 revoke 与真实 yaw ownership。所有状态机反例关闭并复审前，不因测试数量多就进入 main。
+  yikang 的 oracle/stand 诊断随 `3df6ff5` 合入，head reward 明确留在未验证队列。三版 planner
+  候选 `69418a9/71b0b23/6aae7ac` 均未合入；per-clip wait 与双 readiness 已有可保留实现，但同 tick
+  snapshot 和 payload epoch 尚未闭环。所有状态机/乱序反例关闭并复审前，不因测试数量多就进入 main。
 - **几天内 demo 的最短闭环**：D0 先做 vendor MuJoCo 中可录屏的固定同卷 demo——真实
   planner 发题、production C++ runner、fresh SZ 的最佳 finite checkpoint，正/反手各一组
   physical returns；每个模型/planner/runtime/MJCF/题表都带 SHA。D0 不冒充连续实战。
   D1 再要求同一进程内 3–5 球 no-reset；恢复/reward mixture、四动作、TOPP 与标定 plant
   不阻塞 D0，但继续并行排队。任何真机 demo 仍受 G07 独立安全门约束，本阶段不发真机命令。
-- **未来 24 小时决策**：①先关闭 formal immediate-revoke 与真实 yaw ownership，再复审
-  planner-policy 全状态机并跑最新 main 的 C++ Release；
+- **未来 24 小时决策**：①把 formal wire 升为共享 epoch、把 localization snapshot 移到 engage 前，
+  动态覆盖同 tick stale/yaw 边界和跨 topic 乱序，再复审 planner-policy 全状态机并跑最新 main C++ Release；
   ②在可用 MuJoCo 环境补 stand 10 秒数值诊断，但它不阻塞 D0；③并行补原生 first-tick JSON 和
   source-only serve-sync 负门，随后只用新的精确进程所有权方案准备 vendor first tick；④能 first tick
   就立即跑 D0 小卷并录完整 ledger，不能则把失败精确归到 planner、policy、plant 或 runtime 一层。

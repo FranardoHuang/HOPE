@@ -1712,3 +1712,9 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    可在 base 恢复后、自身 `0.5 s` timeout 前重新成熟。另有 mocap yaw 与 runner 启动归零 IMU yaw
    ownership 不同，现有 helper 测试只验证同 quaternion 的理想情况。修复转为 formal immediate
    revoke + runner policy-frame 一致性 fail-closed；未运行 backend/sim/Pod/真机。
+68. 【franco/Codex】**planner `6aae7ac` 即使 `198 pass/2 skip` 仍 NO-MERGE**——C++ engage 发生在
+   本 tick localization 读取之前，仍会用上一 tick `base_fresh/yaw` 穿透 stale/revoke 或 side 边界；
+   base/racket 两个 DDS topic 的 receive-time 比较也不是因果 epoch，合法跨 topic 乱序能把 revoke 前
+   旧 valid 当成恢复后新 valid。下一版必须让 engage/side/face/wait/obs 共用同 tick snapshot，并在
+   两个 payload 携带共享 source epoch/sequence（或合并原子 topic）；prereg 同时补绑 mailbox/wire/frame
+   helper。未合 main，未启 backend/sim/Pod/真机。
