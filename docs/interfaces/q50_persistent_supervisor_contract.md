@@ -50,8 +50,10 @@ under an SSH-provided `PYTHONPATH` or loader environment.
    argv/environment digests, and every bound path/SHA.
 3. The parent independently verifies the live `PID=PGID`, start ticks and complete hello. Only then
    does it atomically publish an immutable prepared ledger followed by a commit token that hashes
-   both hello and ledger. Durable no-clobber publication of that token is the single irreversible
-   commit point.
+   both hello and ledger. The first possible visibility of the token's final no-clobber link is the
+   single irreversible no-retry point. A successful directory fsync supplies durability evidence;
+   if that fsync or any later parent-side observation/evidence write fails, the visible token still
+   forbids retry and the parent returns committed pending with best-effort error evidence.
 4. The child times out and exits by itself only while the token is absent. Once the token exists,
    the startup deadline has no cancellation meaning: the child revalidates identity, result absence
    and all bound bytes, publishes a no-clobber acknowledgment, then rechecks
@@ -102,8 +104,11 @@ one stalls the acknowledgment's atomic publication for 1.15 seconds. Both return
 `token_published_pending_ack`, reject a second launch, emit no fatal-before-later-runner sequence,
 and converge through `inspect` to exact running. A separate post-ack stall produces
 `committed_pending_exec` with the same no-retry/convergence property. An A-to-B result swap during
-bound validation is rejected. The focused suite has 21 cases; the queue, consumer and supervisor
-set has 61.
+bound validation is rejected. Two more deterministic regressions fail the token directory fsync
+after its final link and fail the parent observation write after its final link. Both return
+`token_published_pending_ack` with `retry_authorized=false`, preserve the no-clobber state, start no
+duplicate, and later converge through `inspect` without a parent or child fatal. The focused suite
+has 23 cases; the queue, consumer and supervisor set has 63.
 
 This contract does not prove that an external Pod manager will preserve processes when it destroys
 an entire container or cgroup. It only removes ordinary SSH file-descriptor/session lifetime from

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 import fcntl
 import hashlib
 import importlib.util
@@ -25,6 +26,28 @@ from typing import Any
 
 class SupervisorError(RuntimeError):
     """The launch contract or preserved process identity is invalid."""
+
+
+class AtomicPublicationError(SupervisorError):
+    """An atomic publication failed, with explicit final-link visibility."""
+
+    def __init__(self, path: Path, stage: str, *, linked: bool, cause: BaseException):
+        super().__init__(
+            f"atomic publication failed at {stage} for {path}; linked={linked}: "
+            f"{type(cause).__name__}: {cause}"
+        )
+        self.path = path
+        self.stage = stage
+        self.linked = linked
+
+
+@dataclass(frozen=True)
+class AtomicPublicationReceipt:
+    """Positive evidence that final-link publication and directory fsync returned."""
+
+    path: Path
+    linked: bool
+    directory_fsynced: bool
 
 
 IdentityReader = Callable[[int], dict[str, Any] | None]
@@ -121,13 +144,16 @@ def _atomic_json_no_clobber(
     value: Mapping[str, Any],
     *,
     before_link_hook: Callable[[], None] | None = None,
-) -> None:
-    """Publish canonical JSON atomically without ever replacing an existing file."""
+    after_link_hook: Callable[[], None] | None = None,
+    directory_fsync: Callable[[Path], None] | None = None,
+) -> AtomicPublicationReceipt:
+    """Publish canonical JSON and report whether the final link became visible."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
     nonce = secrets.token_hex(16)
     temporary = path.parent / f".{path.name}.{nonce}.tmp"
     payload = _canonical_bytes(dict(value)) + b"\n"
+    sync_directory = _fsync_directory if directory_fsync is None else directory_fsync
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         with os.fdopen(descriptor, "wb", closefd=True) as stream:
@@ -136,16 +162,64 @@ def _atomic_json_no_clobber(
             os.fsync(stream.fileno())
         if before_link_hook is not None:
             before_link_hook()
-        try:
-            os.link(temporary, path)
-        except FileExistsError as exc:
-            raise SupervisorError(f"no-clobber output already exists: {path}") from exc
-        _fsync_directory(path.parent)
-    finally:
+    except BaseException:
         try:
             temporary.unlink()
         except FileNotFoundError:
             pass
+        raise
+    linked = False
+    stage = "link"
+    try:
+        os.link(temporary, path)
+        linked = True
+        stage = "after_link_hook"
+        if after_link_hook is not None:
+            after_link_hook()
+        stage = "directory_fsync"
+        sync_directory(path.parent)
+        stage = "temporary_cleanup"
+        temporary.unlink()
+    except FileExistsError as exc:
+        if stage != "link":
+            try:
+                temporary.unlink()
+            except BaseException:
+                pass
+            raise AtomicPublicationError(
+                path,
+                stage,
+                linked=True,
+                cause=exc,
+            ) from exc
+        try:
+            temporary.unlink()
+        except BaseException:
+            pass
+        raise SupervisorError(f"no-clobber output already exists: {path}") from exc
+    except BaseException as exc:
+        if not linked:
+            try:
+                linked = path.is_file()
+            except BaseException:
+                pass
+        try:
+            temporary.unlink()
+        except BaseException:
+            pass
+        if linked:
+            raise AtomicPublicationError(
+                path,
+                stage,
+                linked=True,
+                cause=exc,
+            ) from exc
+        raise
+    return AtomicPublicationReceipt(
+        path=path,
+        linked=True,
+        directory_fsynced=True,
+    )
 
 
 def _resolve_source(config_path: Path, raw: Any) -> Path:
@@ -796,16 +870,18 @@ def _require_live_identity(
     return identity
 
 
-def _launch_loaded(
+def _launch_loaded_impl(
     config: Mapping[str, Any],
     pod: str,
     *,
+    commit_state: dict[str, bool],
     identity_reader: IdentityReader = _read_proc_identity,
     boot_id_reader: BootIdReader = _read_boot_id,
     after_hello_hook: Callable[[], None] | None = None,
     child_after_rehash_hook: Callable[[], None] | None = None,
     child_ack_before_link_hook: Callable[[], None] | None = None,
     child_after_ack_hook: Callable[[], None] | None = None,
+    token_directory_fsync: Callable[[Path], None] | None = None,
 ) -> dict[str, Any]:
     if pod not in config["pods"]:
         raise SupervisorError(f"unknown Pod {pod!r}")
@@ -1031,7 +1107,13 @@ def _launch_loaded(
         "hello_sha256": _sha256_file(hello_path),
         "ledger_sha256": _sha256_file(ledger_path),
     }
-    _atomic_json_no_clobber(token_path, token)
+    token_receipt = _atomic_json_no_clobber(
+        token_path,
+        token,
+        after_link_hook=lambda: commit_state.__setitem__("token_linked", True),
+        directory_fsync=token_directory_fsync,
+    )
+    commit_state["token_linked"] = token_receipt.linked
 
     def committed_observation(
         status: str,
@@ -1245,6 +1327,76 @@ def _launch_loaded(
         "committed_pending_exec",
         observed_identity=last_identity,
     )
+
+
+def _launch_loaded(
+    config: Mapping[str, Any],
+    pod: str,
+    *,
+    identity_reader: IdentityReader = _read_proc_identity,
+    boot_id_reader: BootIdReader = _read_boot_id,
+    after_hello_hook: Callable[[], None] | None = None,
+    child_after_rehash_hook: Callable[[], None] | None = None,
+    child_ack_before_link_hook: Callable[[], None] | None = None,
+    child_after_ack_hook: Callable[[], None] | None = None,
+    token_directory_fsync: Callable[[Path], None] | None = None,
+) -> dict[str, Any]:
+    """Launch once, never surfacing retry authority after token visibility."""
+
+    commit_state = {"token_linked": False}
+    try:
+        return _launch_loaded_impl(
+            config,
+            pod,
+            commit_state=commit_state,
+            identity_reader=identity_reader,
+            boot_id_reader=boot_id_reader,
+            after_hello_hook=after_hello_hook,
+            child_after_rehash_hook=child_after_rehash_hook,
+            child_ack_before_link_hook=child_ack_before_link_hook,
+            child_after_ack_hook=child_after_ack_hook,
+            token_directory_fsync=token_directory_fsync,
+        )
+    except BaseException as exc:
+        binding = config.get("pods", {}).get(pod, {})
+        state_dir = Path(str(binding.get("state_dir", "")))
+        token_path = state_dir / "commit_token.json"
+        token_may_be_visible = commit_state["token_linked"]
+        if isinstance(exc, AtomicPublicationError):
+            token_may_be_visible = token_may_be_visible or (
+                exc.linked and exc.path == token_path
+            )
+        if not token_may_be_visible:
+            raise
+
+        error_text = f"{type(exc).__name__}: {exc}"
+        evidence_path = state_dir / "parent_post_token_error.json"
+        try:
+            _diagnostic_no_clobber(
+                evidence_path,
+                {
+                    "schema_version": 1,
+                    "artifact_kind": "phase1_q50_supervisor_parent_post_token_error",
+                    "status": "committed_parent_observation_failed",
+                    "pod": pod,
+                    "token_path": str(token_path),
+                    "token_link_observed": True,
+                    "error": error_text,
+                    "observed_unix_ns": time.time_ns(),
+                },
+            )
+        except BaseException:
+            pass
+        return {
+            "status": "token_published_pending_ack",
+            "pod": pod,
+            "state_dir": str(state_dir),
+            "commit_token_path": str(token_path),
+            "retry_authorized": False,
+            "parent_observation_error": error_text,
+            "post_token_evidence_path": str(evidence_path),
+            "post_token_evidence_present": evidence_path.is_file(),
+        }
 
 
 def launch(config_path: Path, expected_config_sha256: str, pod: str) -> dict[str, Any]:

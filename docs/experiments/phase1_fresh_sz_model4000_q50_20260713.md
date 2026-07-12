@@ -23,8 +23,8 @@ live in the
 [model-4000 q50 operation](../operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md).
 The startup wrapper adds no evaluation variable. Its exact new bindings are:
 
-- supervisor source SHA `35feeb4e181f579dc2fe65d8a88be4413dfc63073ea7b40b2d4688d7d377945c`;
-- supervisor config SHA `1ef6343b7c31f152eeb317c35e4bda1be8b17406a27d531fbc0fc0ce1ea76736`;
+- supervisor source SHA `60a30f9bbef4de904da1ebfd45615b74f54a440ae1c8eb558819deaa795bf34b`;
+- supervisor config SHA `752d0ad24e5bb5a6d200bcf156a8f913b827ce5981caa349198e2154387c5385`;
 - all-four activation file SHA `9dea76c2a9039dc35f8f996fa112e0e28ee320cb9b7c7ec877be942e021ce704`;
 - Pod1 prepared runtime SHA `2b76a5a917c0a5d88ab5eec6b984b3d4ed2faa07484804bb42551f310378201e`;
 - Pod2 prepared runtime SHA `dbecc102cdb388873c9369f60e3820a0f4c6949cc925cd5f3123731eec8d1c9b`;
@@ -44,10 +44,11 @@ The unchanged rule classifies seed4 as delayed learning only at aggregate `>=.65
 `>=.50`; otherwise weakness is persistent through 4k. The family-stable claim is always false due
 to known seed1 4k aggregate `.50`. Any binding mismatch, pre-existing result, incomplete startup
 handshake, reused process identity, non-exact result or missing full bound-runner validation fails
-closed and preserves evidence. Durable atomic publication of the parent commit token is
-irreversible. Lack of immediate acknowledgment becomes `token_published_pending_ack`; a valid ack
-without immediate exact exec becomes `committed_pending_exec`. Both return zero, preserve the fixed
-state directory and never create retry authority, even after the old tokenless-startup deadline.
+closed and preserves evidence. First possible visibility of the parent commit token's final link is
+irreversible, even if the following directory fsync reports an error. Lack of immediate
+acknowledgment becomes `token_published_pending_ack`; a valid acknowledgment without immediate exact
+exec becomes `committed_pending_exec`. Both return zero, preserve the fixed state directory and
+never create retry authority, even after the old tokenless-startup deadline.
 
 ## Reproduction
 
@@ -57,12 +58,15 @@ The command has not run on either Pod.
 
 ## Results
 
-No q50 behavior result exists. Host supervisor tests pass `21`; queue+consumer+supervisor tests pass
-`61`. Tokenless deadline expiry cannot execute; delayed post-token rehash, a 1.15-second acknowledgment atomic
-publication stall and delayed post-ack exec all reject restart and later converge without a
-fatal-before-later-runner sequence. Terminal validation freezes bytes/SHA and rejects an A-to-B
+No q50 behavior result exists. Host supervisor tests pass `23`; queue+consumer+supervisor tests pass
+`63`. Tokenless deadline expiry cannot execute; delayed post-token rehash, a 1.15-second
+acknowledgment atomic-publication stall and delayed post-ack exec all reject restart and later
+converge without a fatal-before-later-runner sequence. Terminal validation freezes bytes/SHA and rejects an A-to-B
 replacement. Both runtime contracts remain `prepared_not_started`, `jobs_started=0`,
 `auto_start=false`.
+
+Two additional post-link failures cover token directory fsync and parent observation publication;
+both return committed pending with no retry authority and later inspect as exact running.
 
 ## Limitations and claims not made
 

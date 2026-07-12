@@ -486,6 +486,75 @@ def test_ack_atomic_publication_stall_is_pending_not_retryable_fatal(
     os.waitpid(launched["pid"], 0)
 
 
+def test_token_after_link_directory_fsync_error_is_committed_not_retryable(
+    tmp_path: Path,
+):
+    _, config = _fixture(tmp_path, suffix="token_dir_fsync_error")
+
+    def fail_directory_fsync(_path: Path) -> None:
+        raise OSError("injected token directory fsync failure after link")
+
+    launched = _launch(config, token_directory_fsync=fail_directory_fsync)
+    state_dir = Path(config["pods"]["pod1"]["state_dir"])
+    assert launched["status"] == "token_published_pending_ack"
+    assert launched["retry_authorized"] is False
+    assert "directory_fsync" in launched["parent_observation_error"]
+    assert (state_dir / "commit_token.json").is_file()
+    assert (state_dir / "parent_post_token_error.json").is_file()
+    with pytest.raises(S.SupervisorError, match="no-clobber"):
+        _launch(config)
+
+    _wait_for(Path(config["environment"]["FAKE_RUNNER_MARKER"]))
+    converged = S._inspect_loaded(
+        config,
+        "pod1",
+        identity_reader=_identity_reader(config, "pod1"),
+        boot_id_reader=_boot_id,
+    )
+    assert converged["status"] == "running_exact"
+    log = (state_dir / "runner.stdout_stderr.log").read_text(encoding="utf-8")
+    assert "[q50-supervisor][FATAL]" not in log
+    assert "[fake-bound-runner] started" in log
+    os.waitpid(converged["pid"], 0)
+
+
+def test_parent_observation_write_error_after_token_is_pending_not_fatal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _, config = _fixture(tmp_path, suffix="observation_write_error")
+    original_publish = S._atomic_json_no_clobber
+
+    def fail_after_observation_link(path: Path, value: dict, **kwargs):
+        receipt = original_publish(path, value, **kwargs)
+        if path.name == "exec_observation.json":
+            raise OSError("injected parent observation failure after link")
+        return receipt
+
+    monkeypatch.setattr(S, "_atomic_json_no_clobber", fail_after_observation_link)
+    launched = _launch(config, child_after_ack_hook=lambda: time.sleep(0.4))
+    state_dir = Path(config["pods"]["pod1"]["state_dir"])
+    assert launched["status"] == "token_published_pending_ack"
+    assert launched["retry_authorized"] is False
+    assert (state_dir / "commit_token.json").is_file()
+    assert (state_dir / "exec_observation.json").is_file()
+    with pytest.raises(S.SupervisorError, match="no-clobber"):
+        _launch(config)
+
+    _wait_for(Path(config["environment"]["FAKE_RUNNER_MARKER"]))
+    converged = S._inspect_loaded(
+        config,
+        "pod1",
+        identity_reader=_identity_reader(config, "pod1"),
+        boot_id_reader=_boot_id,
+    )
+    assert converged["status"] == "running_exact"
+    log = (state_dir / "runner.stdout_stderr.log").read_text(encoding="utf-8")
+    assert "[q50-supervisor][FATAL]" not in log
+    assert "[fake-bound-runner] started" in log
+    os.waitpid(converged["pid"], 0)
+
+
 def test_binding_mismatch_fails_before_state_reservation(tmp_path: Path):
     _, config = _fixture(tmp_path)
     runtime = Path(config["pods"]["pod1"]["runtime_contract"]["path"])
@@ -497,7 +566,9 @@ def test_binding_mismatch_fails_before_state_reservation(tmp_path: Path):
 
 def test_atomic_json_is_no_clobber(tmp_path: Path):
     path = tmp_path / "ledger.json"
-    S._atomic_json_no_clobber(path, {"value": 1})
+    receipt = S._atomic_json_no_clobber(path, {"value": 1})
+    assert receipt.linked is True
+    assert receipt.directory_fsynced is True
     with pytest.raises(S.SupervisorError, match="no-clobber"):
         S._atomic_json_no_clobber(path, {"value": 2})
     assert json.loads(path.read_text()) == {"value": 1}

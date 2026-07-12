@@ -1253,17 +1253,20 @@ SHA, exact argv/fixed-environment digest and the complete source/config/activati
 closure. The parent publishes an immutable ledger and commit token only after independently
 validating that identity. Without the token the child times out and exits by itself; after the token
 it revalidates all bytes and identity/token/ledger/result before acknowledgment and again before
-`execve`. Atomic token publication, not acknowledgment timing, is the irreversible commit point;
-the startup deadline only governs token absence. Independent acknowledgment and exec observation
+`execve`. First possible visibility of the token's final link, not acknowledgment timing or the
+following directory fsync, is the irreversible no-retry point; the startup deadline only governs
+token absence. Independent acknowledgment and exec observation
 windows return `token_published_pending_ack` or `committed_pending_exec` with return code zero when
 progress is not yet visible, while every second launch remains no-clobber rejected. Inspection
-rejects PID reuse
-and delegates terminal acceptance to the original runner's full result validator.
+rejects PID reuse and delegates terminal acceptance to the original runner's full result validator.
 
-The focused supervisor suite passes `21` cases; queue+consumer+supervisor together pass `61`. The
+The focused supervisor suite passes `23` cases; queue+consumer+supervisor together pass `63`. The
 suite includes tokenless deadline expiry, post-token delayed rehash, a 1.15-second acknowledgment
 atomic-publication stall, post-ack delayed exec and terminal-result A-to-B replacement. The three
 post-token stalls preserve no-retry authority and converge without a fatal-before-later-runner
-sequence. The host is macOS, so procfs behavior is covered through an injected identity seam and
-still needs one Linux fake-runner source smoke before any real q50 process. No Pod deployment, judge, simulator,
-training mutation, process-control action or hardware command ran. G05 remains `Partial`.
+sequence. Post-link token-directory-fsync and parent-observation-write failures also return
+committed pending, reject restart and later inspect as exact running; neither can escape as a
+retryable launch error. The host is macOS, so procfs behavior is covered through an injected
+identity seam and still needs one Linux fake-runner source smoke before any real q50 process. No Pod
+deployment, judge, simulator, training mutation, process-control action or hardware command ran.
+G05 remains `Partial`.
