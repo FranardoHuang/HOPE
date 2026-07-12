@@ -1675,3 +1675,19 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
 - 候选继续留在 feature worktree；未合 main、未启动 vendor backend/sim、未发 Pod signal/新任务、未碰真机。
   prereg 仍需补 wire/mailbox/frame/yaml parser、monotonic host、唯一 publisher/domain、runner ACK 和
   planner hot-restart session closure；G06 保持 Partial。
+
+## 2026-07-12 — fresh SZ model-4000 q50 activation consumer
+
+- Added a separate activation-consuming runner and execution contract without changing the frozen
+  model-4000 queue/preregistration/validator. Every command binds the exact all-four activation and
+  revalidates both Pod audits plus four finite iter-4000/exact-lineage/hard-contract records; a Pod
+  rehashes its own two live checkpoint/contract pairs again.
+- `prepare` is no-clobber and copies only the already-materialized K100 bytes. Each Pod runs two
+  seeds serially through the pinned `judge.sh` and shared Kit lock, records observed PID=PGID from
+  `start_new_session`, and preserves state/log on failure. Seed1 is always rerun; the runner has no
+  SSH or signal API and never touches a trainer/worker.
+- Exact Pod results require 50 attempts per side plus schedule/order, MJCF, execution/ready,
+  checkpoint/contract, report/summary/ledger SHA validation. Aggregate can only classify seed4
+  delayed-versus-persistent under unchanged thresholds and always forbids a family-stable claim
+  because known seed1 4k is `.50`. Focused queue+runner source tests pass `40`. No Pod audit,
+  activation, preparation, judge, simulator or hardware action ran; G05/G06 remain `Partial`.

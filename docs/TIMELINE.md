@@ -1740,3 +1740,11 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `612f54d` baseline identity 纠正为该 commit；当前 strict-face179 `training_contract.py` 已漂移，
    verifier 按预期 exit2，必须新 prereg 才能发 `SC`。未改旧结果/配方，未动 Pod/真机，G05/G06
    保持 Partial。
+71. 【franco/Codex】**model-4000 四 seed 同卷 runner 只把 activation 变成可审计执行权，不偷跑
+   Pod**——冻结 queue/prereg/validator 一字未改，另加 execution config+consumer；任何命令先验 exact
+   activation SHA/barrier、两 Pod audit 和四份 finite/iter4000/schema3/lineage/contract 记录，所在 Pod
+   再哈希本地两 checkpoint。prepare 只 copy 已物化 K100 且 no-clobber；Pod 内按 seed1→3、seed2→4
+   串行，seed1 也重跑；judge 用 shared Kit lock、setsid 后核 PID=PGID，失败留 state/log，runner 无
+   SSH/signal。每结果硬验 exact、50/侧、order/MJCF/execution/ready/checkpoint/contract/report/summary/
+   ledger SHA；aggregate 只判 seed4 晚熟/持续弱，已知 seed1 4k=.50 永远禁止 family stable。focused
+   `40 passed`；未做 Pod audit/activation/prepare/judge/sim/真机，G05/G06 继续 Partial。

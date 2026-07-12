@@ -1140,3 +1140,28 @@ outer document and payload fix `evaluation_contract_exact=false`, with planner/n
 exactness fields all false. Dependency-light source tests pass `6` cases. No actor/model weights
 were evaluated and no Isaac or MuJoCo rollout ran. G05 remains `Partial`; this instrumentation
 cannot promote a checkpoint or repair the four-seed stability failure.
+
+### 2026-07-12 model-4000 activation consumer source gate
+
+The previously runtime-free fresh `SZ` model-4000 queue now has a separate reviewed execution
+contract and activation-consuming runner without changing the frozen queue, preregistration or
+validator bytes. Every command requires the exact all-four activation file and caller-supplied SHA,
+then revalidates both content-addressed Pod audits and all four finite/iteration-4000/schema-3/
+exact-lineage/hard-contract records. A Pod also rehashes and re-audits its own two checkpoint files
+and adjacent contracts before it may prepare or run.
+
+Preparation is no-clobber and only copies the already-materialized K100 bytes; there is no schedule
+generation path. Pod1 is fixed to seed1 then seed3 and Pod2 to seed2 then seed4, serially. Seed1 is
+conservatively rerun on the same paper rather than reusing its previous score. Each judge uses the
+pinned `judge.sh`, the shared `/workspace/.kit_boot.lock`, a new session with observed PID=PGID and
+preserved state/log on failure. The runner has no SSH or signal API and cannot stop a trainer or
+worker. Result validation binds exactness, 50 attempts per side, question order, MJCF,
+execution/ready-state, checkpoint/contract and report/summary/attempt-ledger SHAs before a Pod
+result can exist.
+
+The aggregate cannot return a family-stable PASS: known-before-prereg seed1 model-4000 was `.50`,
+below the unchanged `.65` worst-seed rule. It only classifies seed4 as delayed learning when 4k is
+at least `.65` aggregate and `.50` on both sides; otherwise weakness is persistent through 4k.
+Either outcome keeps all training unchanged and authorizes no promotion/deployment/hardware.
+Queue plus runner focused source tests pass `40` cases. No Pod readiness audit, activation,
+preparation or judge has run, so this is not training evidence and G05 remains `Partial`.

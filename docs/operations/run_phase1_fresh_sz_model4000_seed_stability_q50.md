@@ -1,7 +1,8 @@
 # Fresh SZ model_4000 four-seed matched q50 queue
 
-Status: preregistered and source-validated on 2026-07-12; no Pod audit, activation,
-q50 preparation, judge, trainer signal, or robot command has run. This queue exists to
+Status: preregistered, activation barrier source-validated, and activation-consuming runner
+source-validated on 2026-07-12; no Pod audit, activation, q50 preparation, judge, trainer
+signal, or robot command has run. This queue exists to
 separate delayed seed4 learning from persistent seed4 weakness at the next matched
 checkpoint. It does not authorize a training change, checkpoint promotion, deployment, or
 hardware.
@@ -43,8 +44,10 @@ worst-seed threshold. This paper still answers the narrower, preregistered quest
 - otherwise seed4 weakness remains persistent through 4k;
 - even if seed4 recovers, do not claim the family is stable because known seed1 4k is `.50`.
 
-Seed1 may reuse its old model-4000 paper only after full raw-chain revalidation. Its known
-checkpoint SHA is `1a8fcf3d...e9071`; a different discovered SHA fails the readiness audit.
+The preregistration allowed seed1 reuse only after full raw-chain revalidation. The reviewed
+execution contract chooses the more conservative route: seed1 is rerun on the identical K100
+bytes and prior score reuse is rejected. Its known checkpoint SHA is `1a8fcf3d...e9071`; a
+different discovered SHA still fails the readiness audit.
 
 ## Content-bound source
 
@@ -58,12 +61,22 @@ checkpoint SHA is `1a8fcf3d...e9071`; a different discovered SHA fails the readi
   `scripts/validate_phase1_fresh_sz_model4000_q50_queue.py`, SHA-256
   `e763ecb9a822f7e1c2e9338749701fcd4bfea9f26f9b6fe5b4b189f8ca5a6cd3`;
 - bound fresh exact validator SHA-256
-  `3528250777a170791f39d8dd17716c2a7f8ca91416a3ffa8433ec5eb691ed9e0`.
+  `3528250777a170791f39d8dd17716c2a7f8ca91416a3ffa8433ec5eb691ed9e0`;
+- activation-consuming runner:
+  `scripts/run_phase1_fresh_sz_model4000_q50.py`, SHA-256
+  `de0abff6096efdea8ce78dbac6f3115d09e70be8ca0fc841a36be2cdbfbf6b85`;
+- independent execution contract:
+  `configs/phase1_fresh_SZ_model4000_seed_stability_q50_execution_20260712.json`, SHA-256
+  `3109acd41726ef1a3063637e2a565cb2f4abe8992bb96473940700981e7c4385`.
 
 The readiness validator deliberately exposes only `validate-config`, `audit-pod`, and
 `activate`. It imports no process-control module and has no SSH, judge launch, kill, or
 signal path. The queue has `runtime_entrypoint=null`; an activation artifact does not start
-a judge. A later source-reviewed q50 runner must require that exact activation artifact.
+a judge. The separate runner keeps that historical queue byte-identical and requires the exact
+activation path plus caller-supplied file SHA on every `contract-check`, `prepare`, `run`, and
+`aggregate` invocation. It revalidates both Pod audits and all four embedded finite/iteration/
+contract/lineage audits before accepting the activation. On a Pod it additionally rehashes and
+re-audits that Pod's two live checkpoint files and adjacent hard contracts.
 
 ## Mandatory all-four barrier
 
@@ -96,10 +109,11 @@ python3 scripts/validate_phase1_fresh_sz_model4000_q50_queue.py \
   validate-config
 
 pytest -q tests/test_validate_phase1_fresh_sz_model4000_q50_queue.py
+pytest -q tests/test_run_phase1_fresh_sz_model4000_q50.py
 ```
 
-Accepted source verification on 2026-07-12: `20 passed`; committed config validation prints
-`PASS; no runtime`.
+Accepted source verification on 2026-07-12: queue/barrier plus runner focused suite `40 passed`;
+committed queue validation prints `PASS; no runtime`. This is source evidence only.
 
 ## Future readiness audit and activation
 
@@ -140,8 +154,79 @@ python3 scripts/validate_phase1_fresh_sz_model4000_q50_queue.py \
   --output-dir /workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/activation
 ```
 
-Do not improvise a judge command after activation. The next source change must provide and test
-an activation-consuming q50 runner, including full seed1 raw-chain reuse validation, serial
-per-Pod Kit-lock execution, exact PID/PGID recording, no-clobber state, exact-result validation
-and content-addressed aggregation. Until that code is reviewed and bound, the queue remains
-prepared but not runnable.
+## Activation-consuming execution
+
+Do not improvise a judge command after activation. Deploy the runner, execution config, queue,
+preregistration, queue validator and pinned fresh helper together in the same repo-like external
+control copy. Do not modify either frozen train/eval checkout. The activation and both Pod audit
+files must remain at the absolute paths recorded inside the activation; copy the immutable bytes
+to each Pod control namespace when necessary. `$SOURCE_SCHEDULE` must be the exact absolute path
+recorded in `activation.content.shared_schedule.path`; a same-hash file at a different path is
+rejected rather than silently substituted.
+
+Set the content hashes from the reviewed source and the actual activation bytes:
+
+```bash
+CONFIG=configs/phase1_fresh_SZ_model4000_seed_stability_q50_execution_20260712.json
+CONFIG_SHA=3109acd41726ef1a3063637e2a565cb2f4abe8992bb96473940700981e7c4385
+RUNNER=scripts/run_phase1_fresh_sz_model4000_q50.py
+ACTIVATION=/absolute/path/from/activate/activation_<content-sha>.json
+ACTIVATION_SHA=$(sha256sum "$ACTIVATION" | awk '{print $1}')
+
+python3 "$RUNNER" \
+  --config "$CONFIG" --expected-config-sha256 "$CONFIG_SHA" \
+  --activation "$ACTIVATION" --expected-activation-sha256 "$ACTIVATION_SHA" \
+  contract-check --pod pod1 --schedule-source "$SOURCE_SCHEDULE"
+```
+
+Run the same read-only check for Pod2. It writes nothing and launches nothing. Only after it
+passes, prepare each Pod's fixed no-clobber state directory:
+
+```bash
+python3 "$RUNNER" \
+  --config "$CONFIG" --expected-config-sha256 "$CONFIG_SHA" \
+  --activation "$ACTIVATION" --expected-activation-sha256 "$ACTIVATION_SHA" \
+  prepare --pod pod1 --schedule-source "$SOURCE_SCHEDULE"
+```
+
+`prepare` copies—not materializes—the exact schedule bytes and writes
+`runtime_contract.activation_bound.prepared.json`. Record its observed SHA. `run` accepts only
+that exact runtime contract:
+
+```bash
+RUNTIME=/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_model4000_seed_stability_q50_pod1_v1/runtime_contract.activation_bound.prepared.json
+RUNTIME_SHA=$(sha256sum "$RUNTIME" | awk '{print $1}')
+
+python3 "$RUNNER" \
+  --config "$CONFIG" --expected-config-sha256 "$CONFIG_SHA" \
+  --activation "$ACTIVATION" --expected-activation-sha256 "$ACTIVATION_SHA" \
+  run --pod pod1 --runtime-contract "$RUNTIME" \
+  --expected-runtime-contract-sha256 "$RUNTIME_SHA"
+```
+
+Repeat for Pod2 with its configured runtime path. Each Pod runs exactly two arms serially
+(Pod1 seed1 then seed3; Pod2 seed2 then seed4). Seed1 is a fresh identical-paper judge, never a
+reused result. Every `judge.sh` child starts a new session, records exact PID=PGID, sets
+`JUDGE_KIT_BOOT_LOCK=/workspace/.kit_boot.lock`, and waits to completion before the next seed.
+The runner has no SSH or signal API. Any nonzero exit, missing report, or raw-chain validation
+failure leaves the per-seed state and log in place and prevents a Pod result.
+
+After copying the two immutable Pod-result JSON files to the configured control host, aggregate
+only with their observed file SHAs:
+
+```bash
+python3 "$RUNNER" \
+  --config "$CONFIG" --expected-config-sha256 "$CONFIG_SHA" \
+  --activation "$ACTIVATION" --expected-activation-sha256 "$ACTIVATION_SHA" \
+  aggregate \
+  --pod1-result "$POD1_RESULT" --pod1-result-sha256 "$POD1_RESULT_SHA" \
+  --pod2-result "$POD2_RESULT" --pod2-result-sha256 "$POD2_RESULT_SHA"
+```
+
+The Pod run revalidates `evaluation_contract_exact=true`, 100 uncensored rows, 50 per side,
+schedule/order, MJCF, execution/ready-state SHA, checkpoint/hard-contract SHA, report, summary
+and attempt-ledger bytes before writing its result. Aggregation rechecks the two result content
+hashes and all four bindings. It always reports `family_stable_claim_allowed=false` because the
+known pre-registered seed1 4k score is `.50`; it classifies seed4 as delayed learning only at
+aggregate `>=.65` and both sides `>=.50`, otherwise persistent weakness through 4k. Neither
+classification stops training, promotes a checkpoint, deploys, or authorizes hardware.
