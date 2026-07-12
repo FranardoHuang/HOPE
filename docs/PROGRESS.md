@@ -1691,3 +1691,20 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   delayed-versus-persistent under unchanged thresholds and always forbids a family-stable claim
   because known seed1 4k is `.50`. Focused queue+runner source tests pass `40`. No Pod audit,
   activation, preparation, judge, simulator or hardware action ran; G05/G06 remain `Partial`.
+
+## 2026-07-12 — MuJoCo training/fine-tune backend promoted to P0
+
+- The team promoted native MuJoCo training/fine-tuning from evaluation-only/undecided to P0. Existing
+  frozen Isaac milestones keep collecting evidence, but new Isaac-only reward/teacher sweeps move
+  behind the MuJoCo training-backend canary.
+- The first route is a batched native C MuJoCo `rsl_rl VecEnv` loading the vendor A3 MJCF while
+  bypassing the single-world real-time AimRT/ROS/GUI loop. Before PPO, it must match the independent
+  evaluator on reset-first observation, a fixed short action tape, per-term reward and termination,
+  with engine/version/MJCF/mesh/plant/PD/dt/obs/action/reward/reset/source-checkpoint hashes bound.
+- The first paper is the same exact fresh `SZ model_2000` source checkpoint: frozen control versus
+  actor warm-start fine-tune, fresh critic/optimizer, equal budget, at least two seeds and an
+  immutable held-out K100. Physical ball-racket-table/net contact and landing are mandatory for
+  formal return learning/scoring; analytic virtual return remains diagnostic.
+- MJX/MJWarp is later throughput work with a separate parity burden. The independent vendor
+  Gate3/Gate3B remains the final arbiter. This entry records a goal/priority decision only: no backend
+  code, trainer, Pod process, simulator or hardware action ran; G05/G06 remain `Partial`.

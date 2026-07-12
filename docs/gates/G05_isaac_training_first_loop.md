@@ -242,11 +242,13 @@ without a compatibility pass.
 
 ## Next Steps
 
-1. Re-run the unified `HOPEPingPongDeployParity` smoke and then the real unified forehand+backhand training run under the post-merge uniform-target defaults, from the corrected local `_hopex.npz` clips (`motion_file=`/`motion_file_2=`) or after uploading future verified registry artifacts and recording their aliases. Do not use the v5 R15 clips as product defaults.
-2. Set measurable acceptance metrics for first usable baseline: fall rate, racket error at strike, physical recovery after clip wrap, and command latency assumptions.
-3. Record exact local motion paths or registry artifacts, WandB run IDs when used, checkpoint paths, and ONNX export paths; evaluate the trained checkpoint/ONNX from the W&B run and record exact quality metrics and failure modes here.
-4. Watch the exact-strike pass rates (`strike_pos/vel/normal_pass_exact`, `strike_composite_success_exact`) during long training under the uniform default; if a run opts into `target_mode=reference_perturbed`, also watch `ref_perturb_scale`, since that mode widens the target distribution only through its success-gated curriculum.
-5. Run `scripts/sync_external_repos.sh` before using TTRL for comparison, and record the source commit for any extracted idea or config.
+1. Hand the best exact fresh `SZ model_2000` checkpoint and its 179-D contract to G06's native
+   MuJoCo training/fine-tune P0; do not substitute another Isaac-only sweep for that handoff.
+2. Re-run the unified `HOPEPingPongDeployParity` smoke and then the real unified forehand+backhand training run under the post-merge uniform-target defaults, from the corrected local `_hopex.npz` clips (`motion_file=`/`motion_file_2=`) or after uploading future verified registry artifacts and recording their aliases. Do not use the v5 R15 clips as product defaults.
+3. Set measurable acceptance metrics for first usable baseline: fall rate, racket error at strike, physical recovery after clip wrap, and command latency assumptions.
+4. Record exact local motion paths or registry artifacts, WandB run IDs when used, checkpoint paths, and ONNX export paths; evaluate the trained checkpoint/ONNX from the W&B run and record exact quality metrics and failure modes here.
+5. Watch the exact-strike pass rates (`strike_pos/vel/normal_pass_exact`, `strike_composite_success_exact`) during long training under the uniform default; if a run opts into `target_mode=reference_perturbed`, also watch `ref_perturb_scale`, since that mode widens the target distribution only through its success-gated curriculum.
+6. Run `scripts/sync_external_repos.sh` before using TTRL for comparison, and record the source commit for any extracted idea or config.
 
 ## Audit update 2026-07-10: formal training lineage
 
@@ -1165,3 +1167,12 @@ at least `.65` aggregate and `.50` on both sides; otherwise weakness is persiste
 Either outcome keeps all training unchanged and authorizes no promotion/deployment/hardware.
 Queue plus runner focused source tests pass `40` cases. No Pod readiness audit, activation,
 preparation or judge has run, so this is not training evidence and G05 remains `Partial`.
+
+### 2026-07-12 training-backend boundary
+
+G05 continues to own the Isaac first loop and its checkpoint lineage, but a higher Isaac training
+score or another Isaac-only reward/teacher sweep no longer counts as resolving G06. Native MuJoCo
+training/fine-tuning is now a P0 implementation and promotion track recorded in G06. Shared
+observation, action, reward, reset and export contracts must still be updated here when they change,
+and the exact fresh `SZ model_2000` checkpoint is the first handoff candidate. No backend code or
+training run exists yet, so G05 remains `Partial`.

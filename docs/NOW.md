@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 当下状态与团队 focus（2026-07-12 17:01 CST）
+## 当下状态与团队 focus（2026-07-12 21:30 CST）
 
 本节只做 roadmap 的当前入口；下面的实验结果、奖励/训练台账、长期路线和历史判决继续保留，
 不能用这份短报替代可复现实验记录。
@@ -52,9 +52,20 @@ Rules:
   result。**目前仍未做 Pod audit、activation 或 judge**，所以还没有新分数。下一步按已合 operation
   执行 audit→activate→contract-check→prepare→run→aggregate；只判 seed4 是否晚熟，已知 seed1
   4k=`50/100` 使整族稳定门数学上不可能通过。
+- **训练后端路线决策（团队 2026-07-12 21:30）**：纯 Isaac/解析回球指标不再作为继续扩展
+  训练配方的依据；**原生 MuJoCo 训练/微调后端升为 P0**。第一步不是把单世界实时 AimRT vendor
+  runtime 当采样器，而是从现有 MuJoCo 判卷器抽出 batched `rsl_rl VecEnv`，加载同一 vendor A3
+  MJCF/31-D action/179-D observation/PD/reset 语义，绕开 ROS、AimRT、GUI；先用 CPU 并行做同一
+  checkpoint 的 frozen-control vs actor warm-start fine-tune 配对 A/B。训练前必须逐项证明 reset 后首帧
+  observation、固定 action tape、reward、termination 与独立 C MuJoCo evaluator 一致，并把 engine、
+  MuJoCo version、MJCF/mesh、plant/PD/dt、obs/action/reward/reset 与输入 checkpoint SHA 写进新合同。
+  **MJX/MJWarp 只在原生 A/B 同卷有效后扩吞吐**；其结果不能冒充 vendor exact plant，最终票仍是
+  不参与训练的 vendor Gate3/Gate3B。现有 Isaac 臂按已冻结 milestone 留证，但不再新增纯
+  Isaac-only reward/teacher 扫描，也不默认把全部诊断臂烧到终档。
 - **现在谁在 focus 什么**：
   - franco/Codex：满池 checkpoint 早判、planner-policy 成对 Gate3、vendor first tick/D0、
-    Isaac↔MuJoCo 分层归因；同时守住动作/TOPP/连续恢复队列，不让长期轴阻塞最短 demo。
+    **MuJoCo 原生训练/微调 P0** + Isaac↔MuJoCo 分层归因；同时守住动作/TOPP/连续恢复队列，
+    不让长期轴阻塞最短 demo。
   - jiayi/dongc1：`origin/hitter` 上积累 HitterPure/V3 policy、planner 与 vendor rally 编排；
     最新值得移植的是发球等待 MOTION 同步、marker→base 旋转、solve cadence 和预测时域修复，
     但该提交混有旧配方/资产，当前只做小块移植，不整支合入。
@@ -104,7 +115,9 @@ Rules:
   跑最新 main C++ Release；
   ②在可用 MuJoCo 环境补 stand 10 秒数值诊断，但它不阻塞 D0；③并行补原生 first-tick JSON 和
   source-only serve-sync 负门，随后只用新的精确进程所有权方案准备 vendor first tick；同时按已合
-  consumer 生成 4k all-four activation 并跑 matched K100；自然释放的 GPU
+  consumer 生成 4k all-four activation 并跑 matched K100；同步冻结 MuJoCo trainer v0 合同与
+  单环境 parity canary（先验收，不启动长跑），明确 actor warm-start、critic/optimizer fresh 和
+  独立 K100/Gate3 判卷边界；自然释放的 GPU
   槽只接受已过 schema2/L0/整轨安全与动力学门的动作/TOPP 任务，未过门就保持空闲而不制造无效训练；④能 first tick
   就立即跑 D0 小卷并录完整 ledger，不能则把失败精确归到 planner、policy、plant 或 runtime 一层。
   定期任务只做巡检；阶段结论统一更新本节，稳定时不刷聊天长报。
@@ -850,6 +863,7 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 
 | Item | Priority | Owner | Branch | Status / next checkpoint |
 | --- | --- | --- | --- | --- |
+| **原生 MuJoCo 训练/微调后端 P0** | ★★★ | **Codex** | `main` | 路线已拍板；先从 `mujoco_eval_onnx.py` 抽引擎中立 single-env core + batched `rsl_rl VecEnv`，复用 vendor MJCF 而不走 AimRT 实时环。首个门=reset 首帧 obs、2 s action tape、reward/termination 四项与独立 C MuJoCo evaluator 对账；首个实验=同 checkpoint frozen A vs actor warm-start B，至少 2 seeds，同 K100，最终 vendor Gate3。门未过不启动训练；MJX/MJWarp 后置且不算 exact vendor plant。 |
 | 全栈正确性尺+C++安全包+拍心/拍速合同收口 | ★★★ | **Codex** | `main` | 双 RunPod 源码验收已绿(portable/ROS C++、whole-body、planner);下一检查点=重出 fresh schema-v3 ONNX+修后考卷,旧判分器数字不入账 |
 | V5 专业动作可迁移性+Phase 加速器 | ★★★ | **Codex** | `main` | manifest+保守 halving 已就绪;下一检查点=验证触球帧/拍速口径,把行程/时间律报告接成 feasibility producer,再做 BankExam→scorecard adapter;两者完成前不自动发训练 |
 | 新动作库(Franco/v6/v7)+TOPP 最短可行时间+任意时刻下一拍恢复 | ★★★ | **Codex** | `codex/schema-v3-isaac-adapter@bf19fca` | 10 段完成 intake→canonical GMR/grounding→240Hz稠密安全屏；5,162样本地面/自碰/拍柄身体危险均0，最薄40.25mm。回球/phase/2-vs-4 因 frame/mirror 未证保持 null；正在内容寻址固定HOPE虚拟桌 counterfactual frame，过门才做64题、TOPP与RL。T1核心已实现但连续卷/自击/plant未齐，不点火、不真机。 |

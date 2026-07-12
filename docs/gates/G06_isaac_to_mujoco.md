@@ -40,6 +40,17 @@ This gate is the sim-to-sim bridge before real deployment.
 - The exported deploy ONNX (not a re-export) runs in MuJoCo with the training observation rebuilt exactly.
 - Divergence sources are documented: contact, latency, actuator, timestep, observation delay, model mismatch.
 - Exact-strike metrics from Isaac are reproduced in MuJoCo and recorded per accepted checkpoint.
+- Before MuJoCo training starts, its vendor MJCF/options/timestep, 179-D observation and normalization,
+  31-D action decode/PD and reset state reproduce the independent C MuJoCo evaluator on a reset-first
+  observation and a fixed short action tape.
+- The MuJoCo `VecEnv` completes deterministic reset, finite rollout, at least one PPO update,
+  checkpoint resume and deploy export while recording measured throughput and a complete engine-bound
+  training contract.
+- Formal return training/scoring uses physical ball-racket-table/net contact and landing state;
+  analytic virtual return remains diagnostic and cannot promote a policy.
+- The first fine-tune paper is preregistered before launch: same source checkpoint, frozen control
+  versus warm-start fine-tune, equal budget, multiple seeds and an immutable held-out K100 with
+  per-side fall/hit/return. Final promotion still requires independent vendor Gate3/Gate3B.
 
 ## Current State
 
@@ -122,8 +133,10 @@ Not done:
   ONNX `clip_strike_phases` metadata > built-in legacy `(0.36, 0.50)` (plus a
   `clip_seg_lengths`-vs-npz mismatch warning). The `--onnx`/`--motion-files` defaults still point
   at a legacy run — pass current artifacts explicitly.
-- No decision recorded on MuJoCo as a training backend (currently it is a validation/dry-run stage
-  only).
+- **Decision recorded 2026-07-12:** native MuJoCo training/fine-tuning is now a P0 implementation
+  track; start with native CPU MuJoCo and measure the A3 workload before choosing an accelerated
+  backend. The current code remains validation/dry-run only, and vendor Gate3/Gate3B remains an
+  independent final arbiter.
 
 ## Risks
 
@@ -134,9 +147,13 @@ Not done:
 
 ## Next Steps
 
-1. Record the accepted sim2sim numbers for the shipped checkpoint (implicit cross-check + explicit
+1. Extract the evaluator contract into a trainable native MuJoCo `rsl_rl VecEnv`; pass the
+   reset/action-tape/reward/termination parity canary and one finite PPO smoke before any long run.
+2. Preregister and run the same-checkpoint frozen-control versus warm-start-fine-tune multi-seed
+   held-out K100 paper; do not let the training environment grade itself.
+3. Record the accepted sim2sim numbers for the shipped checkpoint (implicit cross-check + explicit
    clipped-PD gate + `--deploy-faithful` protocol) in this gate.
-2. When the mocap→planner bridge lands, extend the MuJoCo rehearsal to consume live
+4. When the mocap→planner bridge lands, extend the MuJoCo rehearsal to consume live
    `/racket/command` targets instead of sampled planner-equivalents
    (`docs/operations/run_shared_interface_rehearsal.md`).
 
@@ -509,8 +526,9 @@ advance; G06 remains `Partial`.
 
 The final behavioral arbiter is the Agibot-provided A3 MuJoCo deploy chain called Gate 3 in
 `docs/operations/run_pingpong_end_to_end.md`: fake ball -> real planner -> production-equivalent
-C++ runner -> vendor MuJoCo. Isaac remains the training engine and a diagnostic companion; an
-Isaac win cannot promote a checkpoint that fails Gate 3 balance, completion or recovery.
+C++ runner -> vendor MuJoCo. Isaac remains a fast training/diagnostic engine and native MuJoCo
+training/fine-tuning is now P0; a win inside either training engine cannot promote a checkpoint that
+fails Gate 3 balance, completion or recovery.
 Continuous candidates must run without between-serve simulation reset and eventually satisfy
 zero falls, zero operator rescues and complete recovery after every engaged swing. Gate 3B adds
 the immutable stage distribution and hit/return scoring, but it does not weaken Gate 3 stability.
@@ -528,6 +546,29 @@ counts are zero); it is checkpoint/learning seed instability on the current sing
 It blocks a stable Phase-1 checkpoint baseline before Gate 3. Do not average away seed 4, and do
 not attribute the variance to Isaac/MuJoCo until the same checkpoints have the registered physical
 instrument cells.
+
+### 2026-07-12 MuJoCo training/fine-tuning P0
+
+The project has promoted native MuJoCo training/fine-tuning from undecided/evaluation-only to P0.
+This responds to repeated evidence that Isaac training metrics can stay high while held-out MuJoCo
+balance and return degrade. It does not make the training environment the final judge.
+
+The first backend extracts an engine-neutral single-environment core from
+`scripts/mujoco_eval_onnx.py`, wraps batched native MuJoCo state as an `rsl_rl VecEnv`, and loads the
+same vendor A3 MJCF while bypassing the single-world real-time AimRT/ROS/GUI loop. Its training
+contract must bind engine/version, MJCF/mesh, plant/PD/integrator/dt, observation/action,
+reward/termination/reset, question bank and source checkpoint hashes. Training is blocked until a
+reset-first observation, fixed short action tape, per-term reward and termination agree with the
+independent C MuJoCo evaluator.
+
+The first causal paper uses one exact source checkpoint: frozen control versus actor warm-start
+fine-tune, fresh critic/optimizer, equal budget, at least two training seeds and an immutable held-out
+K100. Formal return learning/scoring requires physical ball-racket-table/net contact and landing;
+analytic virtual return remains diagnostic. A future MJX/MJWarp path is throughput work with its own
+parity burden, not an exact-vendor label. Final promotion remains the unchanged vendor Gate3/Gate3B.
+
+No MuJoCo `VecEnv`, PPO smoke, training run or result exists yet. This decision adds an implementation
+and acceptance path but does not close the engine gap; G06 remains `Partial`.
 
 ### Gate 3 face-command wire and engine-gap localization
 
