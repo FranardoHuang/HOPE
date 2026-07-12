@@ -73,6 +73,12 @@ CSV_COLUMNS = [
     "n_episodes", "fell_count", "mean_episode_length",
     "df_swing_starts", "df_swing_completions", "df_completion_rate", "df_falls",
     "df_mean_time_to_fall_s",
+    # protocol-provenance columns (appended so positional consumers of the older columns are
+    # unaffected): which regime actually graded this row. Without them a clamped and an
+    # unclamped row, or a stand-hold and a windup-hold row, are indistinguishable in the table.
+    "evaluation_contract_exact", "ready_state_mode", "qdes_clamp",
+    "hold_ref", "hold_ref_source", "strike_phase_source",
+    "self_contact_step_frac", "implicit_effort_peak_ratio",
 ]
 
 
@@ -156,6 +162,10 @@ def run_protocol(args, protocol: str, out_dir: pathlib.Path) -> dict:
         cmd += ["--strike-phase-per-clip", *[str(p) for p in args.strike_phase_per_clip]]
     if args.ee_term_z is not None:
         cmd += ["--ee-term-z", str(args.ee_term_z)]
+    if args.qdes_clamp:
+        cmd += ["--qdes-clamp"]
+    if args.hold_ref:
+        cmd += ["--hold-ref", args.hold_ref]
     for flag, vals in (("--pos-range-per-clip", args._pos_box12), ("--vel-range-per-clip", args._vel_box12)):
         if vals:
             cmd += [flag, *[str(v) for v in vals]]
@@ -170,6 +180,40 @@ def run_protocol(args, protocol: str, out_dir: pathlib.Path) -> dict:
 
     metrics = _parse_strikes_csv(out_dir / "mujoco_sim2sim_strikes.csv")
     metrics.update(_parse_stdout(proc.stdout))
+
+    # Protocol provenance from the child's summary JSON: which regime actually graded this row.
+    summary_path = out_dir / "mujoco_sim2sim_summary.json"
+    if summary_path.is_file():
+        try:
+            child = json.loads(summary_path.read_text())
+        except (OSError, ValueError) as exc:
+            print(f"[scoreboard] WARNING: unreadable {summary_path}: {exc}", flush=True)
+        else:
+            contract = child.get("execution_contract") or {}
+            proto_sem = contract.get("protocol_semantics") or {}
+            results = child.get("results") or []
+            effort = child.get("implicit_effort_limit_diagnostics") or {}
+            # Worst mode wins: a child run can carry several noise modes; surfacing only
+            # results[0] would report "clean" while another mode self-collided.
+            self_contact_fracs = [
+                r["self_contact_step_frac"] for r in results
+                if isinstance(r.get("self_contact_step_frac"), (int, float))
+            ]
+            metrics.update(
+                evaluation_contract_exact=child.get("evaluation_contract_exact"),
+                ready_state_mode=child.get("ready_state_mode"),
+                qdes_clamp=contract.get("qdes_clamp"),
+                hold_ref=proto_sem.get("hold_ref"),
+                hold_ref_source=proto_sem.get("hold_ref_source"),
+                strike_phase_source=proto_sem.get("strike_phase_source"),
+                self_contact_step_frac=(max(self_contact_fracs) if self_contact_fracs else None),
+                # Empty when the guard never armed (no bound schema-3 plant): 0.0 there would
+                # read as "measured clean" when nothing was measured.
+                implicit_effort_peak_ratio=(
+                    effort.get("peak_abs_torque_over_limit")
+                    if effort.get("limits_bound") else None
+                ),
+            )
     return metrics
 
 
@@ -186,6 +230,14 @@ def main() -> int:
     p.add_argument("--strike-phase-per-clip", nargs="+", type=float, default=None,
                    help="only for legacy ONNX without clip_strike_phases metadata")
     p.add_argument("--ee-term-z", type=float, default=None)
+    p.add_argument("--qdes-clamp", action="store_true",
+                   help="forward --qdes-clamp to every protocol leg (training clamps by default "
+                        "since 2026-07-06 and the C++ runner always has; default off keeps rows "
+                        "byte-identical to booked legacy scoreboard scores)")
+    p.add_argument("--hold-ref", choices=["auto", "clip", "stand"], default=None,
+                   help="forward --hold-ref to every protocol leg (pre-2026-07-11 exports lack "
+                        "motion_hold_reference metadata and silently fall back to the legacy "
+                        "windup-crouch hold; default None = omit the flag, current behavior)")
     p.add_argument("--task-yaml", type=pathlib.Path,
                    default=WBT / "cfg" / "task" / "HOPEPingPongDeployParity.yaml",
                    help="task YAML whose racket.pos_range_per_clip / vel_range_per_clip define the "
@@ -248,6 +300,14 @@ def main() -> int:
 
     board = args.out_root / "scoreboard.csv"
     new_file = not board.is_file()
+    if not new_file:
+        with open(board, newline="") as f:
+            existing_header = next(csv.reader(f), [])
+        if existing_header and existing_header != CSV_COLUMNS:
+            print(f"[scoreboard] WARNING: {board} was created with a different column set "
+                  f"({len(existing_header)} vs {len(CSV_COLUMNS)} columns); appended rows carry "
+                  "the new schema, so positional consumers must key on the header row of each "
+                  "era or use a fresh --out-root.")
     with open(board, "a", newline="") as f:
         w = csv.DictWriter(f, fieldnames=CSV_COLUMNS, extrasaction="ignore")
         if new_file:
