@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "contract_id": "phase1-fresh-SZ-model4000-four-seed-clean-q50-stability-execution-v1",
+  "status": "offline_activation_required_not_prepared",
+  "auto_start": false,
+  "source_bindings": {
+    "queue": {
+      "path": "configs/phase1_fresh_SZ_model4000_seed_stability_q50_queue_20260712.json",
+      "sha256": "d4e69d91adfe7a42aee897c11b1b6d6bf7e5eaa7fb81d856b66cab7b3f7d3909"
+    },
+    "preregistration": {
+      "path": "configs/phase1_fresh_SZ_model4000_seed_stability_q50_prereg_20260712.json",
+      "sha256": "ca5ea90f8420ef4c96ee05881b25d062cc437faa97510babca45299afcabbff0"
+    },
+    "queue_validator": {
+      "path": "scripts/validate_phase1_fresh_sz_model4000_q50_queue.py",
+      "sha256": "e763ecb9a822f7e1c2e9338749701fcd4bfea9f26f9b6fe5b4b189f8ca5a6cd3"
+    },
+    "fresh_helper": {
+      "path": "scripts/run_phase1_fresh_exact_paired_bank_q50.py",
+      "sha256": "3528250777a170791f39d8dd17716c2a7f8ca91416a3ffa8433ec5eb691ed9e0"
+    },
+    "runner": {
+      "path": "scripts/run_phase1_fresh_sz_model4000_q50.py",
+      "sha256": "de0abff6096efdea8ce78dbac6f3115d09e70be8ca0fc841a36be2cdbfbf6b85"
+    }
+  },
+  "semantics": {
+    "fresh_lineage": true,
+    "evaluation_contract_exact": true,
+    "formal_target": true,
+    "purpose": "four_seed_model_4000_stability_checkpoint_evidence",
+    "training_mutation_allowed": false,
+    "trainer_or_worker_signal_allowed": false,
+    "whole_arm_stop_allowed": false,
+    "whole_arm_promote_allowed": false,
+    "deploy_gate": false,
+    "real_robot_authorized": false
+  },
+  "checkouts": {
+    "training": {
+      "path": "/workspace/codexschema/nohope",
+      "commit": "6d93bcb16c422a2f42748c2dc99432559653480b"
+    },
+    "evaluation": {
+      "path": "/workspace/codexschema/nohope_eval_08e438e",
+      "commit": "46a0ce24524fdb843e55fe82ba4c045f2adc090f"
+    }
+  },
+  "evaluation_tools": {
+    "judge": {
+      "path": "hope_training/whole_body_tracking/scripts/judge.sh",
+      "sha256": "1a00702935096b063435c3f0bd23e75f76f13e1298c87310d1cec3c26cca8529"
+    },
+    "materialize_schedule": {
+      "path": "hope_training/whole_body_tracking/scripts/materialize_bank_exam_schedule.py",
+      "sha256": "fe2a4f694f8a1c5a69f42fafeeadaf848b440903385acfba7468073eef010937"
+    },
+    "schedule_module": {
+      "path": "hope_training/whole_body_tracking/scripts/bank_exam_schedule.py",
+      "sha256": "32721f018f6a35a42aa12ff0a7e48c0d9bc513d238988d953241ee625744b23b"
+    },
+    "mujoco_evaluator": {
+      "path": "hope_training/whole_body_tracking/scripts/mujoco_eval_onnx.py",
+      "sha256": "e4a9fa42ff0f7e68cebdf16f2e0c61299507496c6edc13546baeb3d576ecb20a"
+    }
+  },
+  "schedule": {
+    "schema_version": 3,
+    "file_sha256": "66e89986a2b726d529179fcb4c745625ebed0380d59664caceefc55e86071cb3",
+    "semantic_sha256": "7dc6af822fb4130b8c324843f179d77f882d1326306bb19802b00f94447dff3e",
+    "question_id_order_sha256": "b87e81a34ff2d31766e17345f0a8c9d77665b78874093e26bdae257e8ed21f91",
+    "per_clip_quota": 50,
+    "schedule_k": 100,
+    "attempts_per_side": 50,
+    "schedule_seed": 0,
+    "hold_range": [
+      0,
+      100
+    ],
+    "noise_scales": [
+      0.0
+    ],
+    "one_question_reset": true,
+    "no_wrap": true,
+    "materialize_new_schedule_allowed": false,
+    "copy_identical_bytes_to_each_pod": true,
+    "allow_inexact_contract": false
+  },
+  "activation": {
+    "required": true,
+    "artifact_kind": "phase1_fresh_sz_model4000_q50_all_four_activation",
+    "barrier_id": "fresh_SZ_model4000_all_four_ready_v1",
+    "status": "all_four_checkpoints_ready_judge_not_started",
+    "seed_order": [
+      "seed1",
+      "seed2",
+      "seed3",
+      "seed4"
+    ],
+    "activation_sha_bound_at_runtime": true
+  },
+  "runtime": {
+    "checkpoint_python": "/workspace/hope_isaac_venv/bin/python",
+    "pod_state_dirs": {
+      "pod1": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_model4000_seed_stability_q50_pod1_v1",
+      "pod2": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_model4000_seed_stability_q50_pod2_v1"
+    },
+    "schedule_filename": "shared_clean_k100.schedule.json",
+    "runtime_contract_filename": "runtime_contract.activation_bound.prepared.json",
+    "pod_result_filename": "pod_result.json",
+    "aggregate_output_dir": "/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/aggregate",
+    "kit_boot_lock": "/workspace/.kit_boot.lock",
+    "seed1_execution": "fresh_rerun_same_k100_no_reuse"
+  },
+  "pod_arm_order": {
+    "pod1": [
+      "seed1",
+      "seed3"
+    ],
+    "pod2": [
+      "seed2",
+      "seed4"
+    ]
+  },
+  "gate_rule": {
+    "aggregate_rate_median_min": 0.75,
+    "aggregate_rate_min_seed_min": 0.65,
+    "aggregate_rate_max_minus_min_max": 0.2,
+    "every_seed_every_side_rate_min": 0.5,
+    "gate_scope": "seed_stability_checkpoint_evidence_only",
+    "failure_action": "continue_all_arms_unmodified_and_keep_seed_stability_open",
+    "pass_action": "record_model_4000_seed_stability_only_continue_all_arms_unmodified",
+    "stop_or_promote_authorized": false,
+    "deploy_or_real_robot_authorized": false
+  },
+  "interpretation_rule": {
+    "known_seed1_model4000": {
+      "aggregate_return_rate": 0.5,
+      "forehand_return_rate": 0.0,
+      "backhand_return_rate": 1.0,
+      "family_gate_pass_possible": false
+    },
+    "seed4_delayed_learning_supported_only_if": {
+      "aggregate_rate_min": 0.65,
+      "every_side_rate_min": 0.5,
+      "threshold_source": "unchanged_model2000_stability_gate"
+    },
+    "family_stable_claim_allowed": false,
+    "reason_family_claim_forbidden": "known_seed1_model4000_rate_0.50_is_below_0.65"
+  }
+}

@@ -990,3 +990,29 @@ owned supervisor/timeout, runtime ledger and actual backend first tick remain OP
 Host source checks are `6 passed`; the combined static-plan+diagnostic tests are `38 passed`. No
 simulator, transport, backend, Kit, Pod/GPU or hardware ran. Full ROS/Jazzy/AimRT Release build and
 native GTest are also unrun. G06 remains `Partial`.
+
+### 2026-07-12 model-4000 matched-q50 execution source gate
+
+The fresh `SZ` model-4000 matched MuJoCo paper now has a source-reviewed consumer for the existing
+all-four activation barrier. It strictly pins queue, preregistration, queue validator, fresh exact
+result helper, itself and the four evaluation-tool files. It accepts no queue-only or one-Pod
+authorization: every command revalidates the activation content hash, exact barrier id, both Pod
+audit hashes, four checkpoint audit records and the immutable K100 file/semantic/order hashes.
+At runtime each Pod additionally rehashes its two local model-4000 checkpoints and reruns the
+finite/embedded iteration/contract/lineage audit.
+
+The execution contract does not call the schedule materializer and rejects a different path even
+when its bytes happen to match the paper audited into the activation. `prepare` creates an
+activation-bound no-clobber contract. `run` executes two serial pinned `judge.sh` children per Pod,
+sets the common Kit boot lock, verifies each new-session PID equals its PGID, waits for completion
+and preserves state/log on every failure without exposing any signal API. Seed1 is rerun, not
+reused. A result must reproduce `evaluation_contract_exact=true`, K100/50-per-side, schedule/order,
+vendor-development MJCF, execution/ready-state and checkpoint/hard-contract bindings; report,
+summary and raw attempt ledger are rehashed before the Pod result is written.
+
+Aggregation retains the unchanged model-2000 stability thresholds but fixes
+`family_stable_claim_allowed=false` because seed1 `.50` was known before preregistration. Seed4's
+only permitted conclusion is delayed learning versus persistent weakness through 4k. This paper
+still does not answer the Isaac/MuJoCo physical-instrument gap, calibrated plant, recovery,
+continuous stability or Agibot vendor Gate3/Gate3B behavior. Focused queue+consumer tests pass
+`40`; no Pod audit, activation, MuJoCo judge or simulator ran. G06 remains `Partial`.
