@@ -368,6 +368,34 @@ def test_atomic_json_is_no_clobber(tmp_path: Path):
     assert json.loads(path.read_text()) == {"value": 1}
 
 
+def test_production_config_parser_rejects_duplicate_key_and_nonfinite(tmp_path: Path):
+    original = PRODUCTION_CONFIG.read_text(encoding="utf-8")
+    duplicate = tmp_path / "duplicate-production-config.json"
+    duplicate.write_text(original.replace("{", '{"schema_version":1,', 1), encoding="utf-8")
+    with pytest.raises(S.SupervisorError, match="duplicate JSON key"):
+        S.load_supervisor_config(duplicate, _sha(duplicate))
+
+    nonfinite = tmp_path / "nonfinite-production-config.json"
+    nonfinite.write_text(original.replace("{", '{"poison":NaN,', 1), encoding="utf-8")
+    with pytest.raises(S.SupervisorError, match="non-finite JSON constant"):
+        S.load_supervisor_config(nonfinite, _sha(nonfinite))
+
+
+@pytest.mark.parametrize("artifact", ("launch_ledger.json", "commit_token.json"))
+def test_preserved_ledger_and_token_parser_reject_duplicate_keys(
+    tmp_path: Path, artifact: str
+):
+    _, config = _fixture(tmp_path, suffix=artifact)
+    launched = _launch(config)
+    state_dir = Path(config["pods"]["pod1"]["state_dir"])
+    path = state_dir / artifact
+    raw = path.read_text(encoding="utf-8")
+    path.write_text(raw.replace("{", '{"schema_version":1,', 1), encoding="utf-8")
+    with pytest.raises(S.SupervisorError, match="duplicate JSON key"):
+        S._validate_preserved_ledger(config, "pod1", state_dir)
+    os.waitpid(launched["pid"], 0)
+
+
 def test_exact_production_config_loads_through_checked_in_evidence_mirror():
     data = json.loads(PRODUCTION_CONFIG.read_text(encoding="utf-8"))
     remote_to_local = {

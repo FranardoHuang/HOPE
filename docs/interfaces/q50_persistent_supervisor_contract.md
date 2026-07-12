@@ -77,7 +77,9 @@ The focused host suite covers the no-clobber ledger/token/ack, duplicate launch 
 pre-existing result rejection, parent exit and parent stall before commit, child token timeout,
 artifact mismatch, reused-PID/executable/environment mismatch, exact live inspection, minimal-result
 rejection and delegation to the original runner's full terminal-result validator. It also scans the
-source for remote-login and process-control APIs.
+source for remote-login and process-control APIs. Config, hello, ledger, token, acknowledgment and
+terminal wrapper JSON all reject duplicate object keys and non-finite constants before semantic
+validation, so two conforming consumers cannot assign different meanings to one evidence file.
 
 This contract does not prove that an external Pod manager will preserve processes when it destroys
 an entire container or cgroup. It only removes ordinary SSH file-descriptor/session lifetime from

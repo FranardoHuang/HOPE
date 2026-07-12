@@ -67,9 +67,24 @@ def _require_sha(where: str, value: Any) -> str:
 
 
 def _strict_object(path: Path) -> dict[str, Any]:
+    def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key: {key}")
+            result[key] = value
+        return result
+
+    def reject_nonfinite(value: str) -> None:
+        raise ValueError(f"non-finite JSON constant: {value}")
+
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        value = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=reject_duplicates,
+            parse_constant=reject_nonfinite,
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         raise SupervisorError(f"cannot read strict JSON object {path}: {exc}") from exc
     if not isinstance(value, dict):
         raise SupervisorError(f"JSON root must be an object: {path}")

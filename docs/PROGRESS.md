@@ -1813,7 +1813,7 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   makes the detached child time out by itself; inspection rejects PID reuse and accepts completion
   only through the exact content-bound Pod result. There is no retry, remote-login, process-control,
   training, deployment, simulator or robot authority.
-- Supervisor-focused tests pass `13`; the queue+consumer+supervisor set passes `53`. This macOS host
+- Supervisor-focused tests pass `16`; the queue+consumer+supervisor set passes `56`. This macOS host
   has no procfs, so one Linux fake-runner smoke remains required before Pod deployment. No wrapper,
   judge, simulator or hardware process ran; see the
   [operation](operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md#persistent-top-level-launch-source-gate)
