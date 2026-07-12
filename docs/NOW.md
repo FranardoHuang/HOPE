@@ -25,7 +25,7 @@ Rules:
    Docs-only commits to main need no PR/review; everything else goes through branches.
 5. **不用黑话**:每个 run/flag 第一次出现必须带人话;新术语先进下面的术语表再用。
 
-## 当下状态与团队 focus（2026-07-12 23:10 CST）
+## 当下状态与团队 focus（2026-07-13 00:30 CST）
 
 本节只做 roadmap 的当前入口；下面的实验结果、奖励/训练台账、长期路线和历史判决继续保留，
 不能用这份短报替代可复现实验记录。
@@ -50,17 +50,20 @@ Rules:
   `auto_start=false`，必须先由 Pod1(seed1/3)、Pod2(seed2/4) 各生成 readiness audit，再合成 all-four
   activation；每 Pod 串行拿共享 Kit lock，seed1 也重跑同一 K100，no-clobber 保存 PID=PGID/state/log/
   result。现在两 Pod 已在 train/eval 外放好同一绝对路径的 exact source bundle 与旧 K100 bytes；
-  Pod2 seed2/4 readiness audit 已通过（file `4f25786b...565f7`、content `5df5f299...bdb11`），
-  Pod1 seed1/3 因 SSH 握手超时尚未执行。**单 Pod 绝不 activation**，所以仍无新分数、无 judge。
-  下一步只补 no-clobber Pod1 audit，再执行 activate→contract-check→prepare→run→aggregate；只判
-  seed4 是否晚熟，已知 seed1 4k=`50/100` 使整族稳定门数学上不可能通过。
+  Pod1 seed1/3、Pod2 seed2/4 audit 已分别通过（file `3fc325e1...247b8` / `4f25786b...565f7`）；
+  exact union 已生成 activation（file `9dea76c2...ce704`、content `eaa92ca2...aa4fb`），两 Pod 同路径
+  同步并各自 `contract-check` PASS。三份 exact evidence 已入库。**仍未 prepare/run/judge**，所以没有
+  新分数。下一步按合同生成各 Pod runtime-contract 并重查 Kit 冲突后串行 run→aggregate；只判 seed4
+  是否晚熟，已知 seed1 4k=`50/100` 使整族稳定门数学上不可能通过。
 - **训练后端路线决策（团队 2026-07-12 21:30）**：纯 Isaac/解析回球指标不再作为继续扩展
   训练配方的依据；**原生 MuJoCo 训练/微调后端升为 P0**。第一步不是把单世界实时 AimRT vendor
-  runtime 当采样器，而是从现有 MuJoCo 判卷器抽出 batched `rsl_rl VecEnv`，加载同一 vendor A3
-  MJCF/31-D action/179-D observation/PD/reset 语义，绕开 ROS、AimRT、GUI；先用 CPU 并行做同一
-  checkpoint 的 frozen-control vs actor warm-start fine-tune 配对 A/B。训练前必须逐项证明 reset 后首帧
-  observation、固定 action tape、reward、termination 与独立 C MuJoCo evaluator 一致，并把 engine、
-  MuJoCo version、MJCF/mesh、plant/PD/dt、obs/action/reward/reset 与输入 checkpoint SHA 写进新合同。
+  runtime 当采样器，而是独立实现 native CPU `rsl_rl VecEnv`，不能和判卷器共用 observation/action/
+  reward 代码制造共因假绿。只读 preflight 已确认当前 main 的 vendor MJCF 没有球/台/网，且 BankExam
+  会改 dt/摩擦/solver/clamp；因此先分 `isaac_bank_parity_v1` 与 1 ms explicit-PD `vendor_gate3_v1`
+  两套 effective plant。D0 v0 只承诺一次挥拍的平衡/击球状态微调，不冒充物理回球。reset/固定 action
+  tape 对拍冻结 Python evaluator；现 evaluator 没有训练 reward，逐项 reward 必须另写独立 replay oracle。
+  warm start 只载 actor/distribution/actor-normalizer，critic/optimizer 必须 fresh；完整 engine/version/
+  MJCF+mesh/effective-plant/runtime flags/obs/action/reward/reset/source checkpoint SHA 入新合同。
   **MJX/MJWarp 只在原生 A/B 同卷有效后扩吞吐**；其结果不能冒充 vendor exact plant，最终票仍是
   不参与训练的 vendor Gate3/Gate3B。现有 Isaac 臂按已冻结 milestone 留证，但不再新增纯
   Isaac-only reward/teacher 扫描，也不默认把全部诊断臂烧到终档。
@@ -87,29 +90,32 @@ Rules:
   RouDi/共享 `/tmp` 与 `/dev/shm`，且人类日志没有可证明的 fresh READY；新 D0 必须是私有
   namespace/cgroup+pidfd、machine status、DISARMED ball 一次性 arm 和 no-replace ledger。
 - **当前新 blocker**：formal tuple/sequence、latest-base 全 actor 门和 serve-sync v4 的 source P1 已在
-  候选 `6042d05` 收口，并与 main 的 default-off shadow solver 合并；host planner/source=
+  候选 `c0a8e46` 收口，并与 main 的 default-off shadow solver 合并；host planner/source=
   `180 pass + 2 skip`、顶层=`517 pass + 9 skip`，serve design rc0、launch rc1 精确 `49 MISSING`。
   该候选尚未合 main，因为最终集成 C++ 字节仍需一次隔离 Linux/ROS/Jazzy Release compile+full native；
-  23:00 左右两 Pod 都在 SSH 握手阶段 timeout，远端命令未开始，故只记 unknown、不拿旧 component
-  `235/5` 冒充集成证据。即使合 main，49 个 runtime binding、vendor first tick 和 Gate3 行为仍是 OPEN。
-  q50 同样只缺 Pod1 audit；网络连通前不重启、不重复发任务、不单边激活。
+  Pod2 exact clone 已 clean，但 ROS/Jazzy 路径不存在，portable 预检又缺 ORT 1.19.2 头文件，均在 CMake
+  前 fail-fast；旧 component `235/5` 不能冒充组合证据。即使源码合 main，49 个 runtime binding、vendor
+  first tick 和 Gate3 行为仍是 OPEN。q50 readiness 已闭合，当前只需合法 prepare 后开卷。
 - **代码交流状态**：recovery A/B/C、plan-only Gate3 源码门和严格 face179 模型合同已分别随
   `e10922a`、`b2067ba`、`8975043` 进入 main；face179 的 vendor 行为证据仍明确为 `Partial`。
   yikang 的 oracle/stand 诊断随 `3df6ff5` 合入，shadow solver 接线壳随 `7e31819` 合入，head reward
   明确留在未验证队列。三版旧 planner 候选 `69418a9/71b0b23/6aae7ac` 均未合入；当前整合候选
-  `6042d05` 已过 host 红队，等 exact Release 后才进 main。first-tick joined-source 诊断已随本轮合入 main，38/38
+  `c0a8e46` 已过 host 红队，等 exact Release 后才进 main。first-tick joined-source 诊断已随本轮合入 main，38/38
   host source 测试通过；它把 outer/payload 及 planner/native/source/runtime 五类 exactness 永久写成
   false，并由 formal-style consumer 拒绝。vendor pose/twist/racket 没有共同 MuJoCo sample sequence，
   因此这次合并只增加可观测性与防伪护栏，不是 vendor first tick 或 Gate3 行为通过。
   证据卫生修复随 `a08eb2e` 合入，旧 GMR ledger 不追写新 auditor SHA，plant v1 当前源码漂移按预期
-  fail closed；model-4000 activation consumer 随 `7bc6d1f` 合入，源码可运行不等于已经启动判卷。
+  fail closed；model-4000 activation consumer 随 `7bc6d1f` 合入，all-four activation 证据随
+  `06a65b4` 入库，但 judge 尚未启动。MuJoCo training-v0 只读 preflight 随 `68c0c2a` 合入，明确
+  当前 v0 不是物理回球训练。
 - **几天内 demo 的最短闭环**：D0 先做 vendor MuJoCo 中可录屏的固定同卷 demo——真实
   planner 发题、production C++ runner、fresh SZ 的最佳 finite checkpoint，正/反手各一组
   physical returns；每个模型/planner/runtime/MJCF/题表都带 SHA。D0 不冒充连续实战。
   D1 再要求同一进程内 3–5 球 no-reset；恢复/reward mixture、四动作、TOPP 与标定 plant
   不阻塞 D0，但继续并行排队。任何真机 demo 仍受 G07 独立安全门约束，本阶段不发真机命令。
-- **未来 24 小时决策**：①网络恢复后先对 `6042d05` 做 exact Release/full-native，绿后立即合 main
-  并刷新 source SHA；同一低频窗口只补 Pod1 q50 audit，all-four barrier 绿后再串行跑 matched K100；
+- **未来 24 小时决策**：①给 Pod2 隔离验证树补 exact ORT 1.19.2 build dependency（或在已装 ROS 的
+  Pod1 复用内容寻址缓存），对 `c0a8e46` 跑 exact Release/full-native，绿后立即合 main并刷新 source SHA；
+  同时按已绿 activation 执行两 Pod prepare→重查锁→串行 matched K100→aggregate；
   ②在可用 MuJoCo 环境补 stand 10 秒数值诊断，但它不阻塞 D0；③按 serve v4 的 49 项缺口实现
   machine ACK/唯一 publisher/first-publish ledger，再只用新的精确进程所有权方案准备 vendor first tick；
   同步冻结 MuJoCo trainer v0 合同与
@@ -860,7 +866,7 @@ strike_phase 唯一可信源,analyze_strike_phase 注释优先、拍速峰降级
 
 | Item | Priority | Owner | Branch | Status / next checkpoint |
 | --- | --- | --- | --- | --- |
-| **原生 MuJoCo 训练/微调后端 P0** | ★★★ | **Codex** | `codex/mujoco-training-preflight` | **已认领首票：trainer-v0 fail-closed preflight + parity canary**。先冻结 vendor MJCF/evaluator/source-checkpoint、reset 首帧 obs、2 s action tape、逐项 reward 与 termination 证据合同；缺任一独立证据或源码/资产 SHA 漂移即拒绝开训。下一票才从 `mujoco_eval_onnx.py` 抽引擎中立 single-env core + batched `rsl_rl VecEnv`，复用 vendor MJCF 而不走 AimRT 实时环。首个实验=同 checkpoint frozen A vs actor warm-start B，至少 2 seeds，同 K100，最终 vendor Gate3。门未过不启动训练；MJX/MJWarp 后置且不算 exact vendor plant。 |
+| **原生 MuJoCo 训练/微调后端 P0** | ★★★ | **Codex** | `codex/mujoco-training-preflight` | **只读 preflight 已随 `68c0c2a` 入库**：main MJCF 无球/台/网，BankExam profile≠vendor Gate3，evaluator 无训练 reward。首票必须冻结 `vendor_gate3_v1` runtime flags，独立实现 single-env core；reset/2s action tape 对冻结 evaluator，reward 对独立 replay oracle，actor-only warm start+fresh critic/optimizer。D0 只做一次挥拍 balance/strike-state；physical return 等 `mujoco-ball-wiring@4607410` 独立 vendor build/runtime 后再开。至少 2 seeds，同 K100，最终 vendor Gate3；门未过不 PPO。 |
 | 全栈正确性尺+C++安全包+拍心/拍速合同收口 | ★★★ | **Codex** | `main` | 双 RunPod 源码验收已绿(portable/ROS C++、whole-body、planner);下一检查点=重出 fresh schema-v3 ONNX+修后考卷,旧判分器数字不入账 |
 | V5 专业动作可迁移性+Phase 加速器 | ★★★ | **Codex** | `main` | manifest+保守 halving 已就绪;下一检查点=验证触球帧/拍速口径,把行程/时间律报告接成 feasibility producer,再做 BankExam→scorecard adapter;两者完成前不自动发训练 |
 | 新动作库(Franco/v6/v7)+TOPP 最短可行时间+任意时刻下一拍恢复 | ★★★ | **Codex** | `codex/schema-v3-isaac-adapter@bf19fca` | 10 段完成 intake→canonical GMR/grounding→240Hz稠密安全屏；5,162样本地面/自碰/拍柄身体危险均0，最薄40.25mm。回球/phase/2-vs-4 因 frame/mirror 未证保持 null；正在内容寻址固定HOPE虚拟桌 counterfactual frame，过门才做64题、TOPP与RL。T1核心已实现但连续卷/自击/plant未齐，不点火、不真机。 |
