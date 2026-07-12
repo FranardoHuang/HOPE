@@ -158,3 +158,25 @@ contact/solver parameters, DR distributions and calibrated joint friction.
 
 See `docs/research/yikang_selective_integration_20260712.md` and
 `docs/operations/run_deploy_dryrun.md`. G04 remains `Partial`.
+
+## Audit update 2026-07-12: MuJoCo training-v0 plant boundary
+
+A read-only P0 preflight found that the tracked vendor `a3_pingpong.xml` is a robot-dynamics scene,
+not a physical table-tennis scene: it contains the floor, A3 and `right_racket` site but no ball,
+table or net. The analytic `BallPhysics` source expects a `ball` mocap body, yet the current
+`MujocoSimModule::SimLoop()` neither owns nor steps that driver. A first native MuJoCo trainer can
+therefore target balance and strike-state tracking, but cannot claim physical hit, landing or return
+training until a separate instrumented scene/runtime closes those assets and contacts.
+The `mujoco-ball-wiring@4607410` item shown in `docs/NOW.md` is a separate handoff candidate, not
+current main: at this audited base it is not a main ancestor, and vendor build, QoS/transport, GUI
+and runtime behavior remain open. It can close the missing-scene prerequisite only after reviewed
+merge and independent contact/landing verification.
+
+The audit also separates two effective plants that can load the same MJCF bytes. Current formal
+BankExam may overwrite timestep, passive damping/frictionloss, actuator integration and q-des
+semantics to reproduce an Isaac schema-3 profile. Vendor Gate3 keeps the resolved 1 ms MJCF plant,
+recomputes explicit PD every simulator step and includes production hard-clamp/neck/runtime action
+post-processing. MJCF SHA alone does not prove equality; future contracts must bind resolved plant
+facts, mesh closure and runtime flags. Reproducible source commands and the two-profile table are in
+[the MuJoCo training-v0 preflight](../research/mujoco_training_v0_preflight_2026-07-12.md). No
+simulator ran and G04 remains `Partial`.

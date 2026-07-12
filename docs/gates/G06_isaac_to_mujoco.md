@@ -40,9 +40,10 @@ This gate is the sim-to-sim bridge before real deployment.
 - The exported deploy ONNX (not a re-export) runs in MuJoCo with the training observation rebuilt exactly.
 - Divergence sources are documented: contact, latency, actuator, timestep, observation delay, model mismatch.
 - Exact-strike metrics from Isaac are reproduced in MuJoCo and recorded per accepted checkpoint.
-- Before MuJoCo training starts, its vendor MJCF/options/timestep, 179-D observation and normalization,
-  31-D action decode/PD and reset state reproduce the independent C MuJoCo evaluator on a reset-first
-  observation and a fixed short action tape.
+- Before MuJoCo training starts, each explicit effective-plant profile reproduces a byte-frozen
+  Python MuJoCo evaluator on a reset-first 179-D observation and a fixed short 31-D action tape.
+  Per-term rewards must separately match an independent reward-replay oracle; the current evaluator
+  has no training-reward API.
 - The MuJoCo `VecEnv` completes deterministic reset, finite rollout, at least one PPO update,
   checkpoint resume and deploy export while recording measured throughput and a complete engine-bound
   training contract.
@@ -147,8 +148,9 @@ Not done:
 
 ## Next Steps
 
-1. Extract the evaluator contract into a trainable native MuJoCo `rsl_rl VecEnv`; pass the
-   reset/action-tape/reward/termination parity canary and one finite PPO smoke before any long run.
+1. Implement the frozen evaluator semantics independently in a native MuJoCo `rsl_rl VecEnv`; keep
+   trainer and evaluator imports separate, pass reset/action-tape parity plus an independent reward
+   replay canary, then require one finite PPO smoke before any long run.
 2. Preregister and run the same-checkpoint frozen-control versus warm-start-fine-tune multi-seed
    held-out K100 paper; do not let the training environment grade itself.
 3. Record the accepted sim2sim numbers for the shipped checkpoint (implicit cross-check + explicit
@@ -553,13 +555,21 @@ The project has promoted native MuJoCo training/fine-tuning from undecided/evalu
 This responds to repeated evidence that Isaac training metrics can stay high while held-out MuJoCo
 balance and return degrade. It does not make the training environment the final judge.
 
-The first backend extracts an engine-neutral single-environment core from
+The first backend independently implements the frozen meanings from
 `scripts/mujoco_eval_onnx.py`, wraps batched native MuJoCo state as an `rsl_rl VecEnv`, and loads the
-same vendor A3 MJCF while bypassing the single-world real-time AimRT/ROS/GUI loop. Its training
-contract must bind engine/version, MJCF/mesh, plant/PD/integrator/dt, observation/action,
-reward/termination/reset, question bank and source checkpoint hashes. Training is blocked until a
-reset-first observation, fixed short action tape, per-term reward and termination agree with the
-independent C MuJoCo evaluator.
+vendor A3 MJCF while bypassing the single-world real-time AimRT/ROS/GUI loop. It must not import a
+shared observation/action/reward implementation from the evaluator, because shared mistakes would
+create a common-mode false green. Its training contract binds engine/version, MJCF plus mesh
+closure, resolved plant/PD/integrator/dt, runtime action post-processing, observation/action,
+reward/termination/reset, question bank and source checkpoint hashes.
+
+The preflight identifies two non-equivalent profiles. `isaac_bank_parity_v1` reproduces the current
+schema-3 BankExam/Isaac profile; `vendor_gate3_v1` preserves the resolved 1 ms vendor plant, explicit
+per-step PD, hard joint limits, neck override and frozen runtime flags. Loading the same source MJCF
+does not make them equal because BankExam mutates the in-memory model. Reset/observation/action-tape
+parity is judged against the frozen Python evaluator for the named profile. Per-term reward is
+judged by a separate replay oracle: the evaluator records metrics and analytic virtual return but
+does not implement PPO training rewards, and no independent C reward evaluator was found.
 
 The first causal paper uses one exact source checkpoint: frozen control versus actor warm-start
 fine-tune, fresh critic/optimizer, equal budget, at least two training seeds and an immutable held-out
@@ -567,8 +577,19 @@ K100. Formal return learning/scoring requires physical ball-racket-table/net con
 analytic virtual return remains diagnostic. A future MJX/MJWarp path is throughput work with its own
 parity burden, not an exact-vendor label. Final promotion remains the unchanged vendor Gate3/Gate3B.
 
+The tracked vendor MJCF currently has no ball, table or net and the existing analytic `BallPhysics`
+driver is not wired into `MujocoSimModule::SimLoop()`. The 2--3 day D0 is therefore explicitly a
+one-shot balance/strike-state fine-tune, not a physical-return or continuous-rally claim. Actor warm
+start must load only actor/distribution/actor-normalizer state into a newly initialized critic and
+optimizer; current `load_actor_tolerant()` does not enforce that boundary.
+The separately tracked `mujoco-ball-wiring@4607410` handoff is not merged into this audited main and
+has not passed its vendor build/runtime acceptance; formal physical-return work cannot consume it
+until that independent gate closes.
+
 No MuJoCo `VecEnv`, PPO smoke, training run or result exists yet. This decision adds an implementation
-and acceptance path but does not close the engine gap; G06 remains `Partial`.
+and acceptance path but does not close the engine gap; G06 remains `Partial`. The audited file
+boundary, canary tapes, evaluator isolation and D0 sequence are recorded in
+[the MuJoCo training-v0 preflight](../research/mujoco_training_v0_preflight_2026-07-12.md).
 
 ### Gate 3 face-command wire and engine-gap localization
 
