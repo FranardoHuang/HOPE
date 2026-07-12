@@ -1748,3 +1748,30 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    SSH/signal。每结果硬验 exact、50/侧、order/MJCF/execution/ready/checkpoint/contract/report/summary/
    ledger SHA；aggregate 只判 seed4 晚熟/持续弱，已知 seed1 4k=.50 永远禁止 family stable。focused
    `40 passed`；未做 Pod audit/activation/prepare/judge/sim/真机，G05/G06 继续 Partial。
+
+## 2026-07-12:yikang 双线落地——拍面反解影子接线 + Gate3 谱系筛卷首轮
+
+- 【yikang】**拍面反解 torch 版上部署的接线壳落地(影子模式,NOW ★★★ 行的 yikang 分工)**——解决
+  "claude 求解器到手前接线侧零准备"的空窗;照包内 use_kalman 影子先例。分支
+  `yikang-shadow-solver-0712`(`e1429af`,基 main):shadow_solver.py 零 rclpy(SolverBackend 接口
+  +EchoBackend 重跑产品同款快解=对账管道自检 diff 恒 0+TorchBackend fail-loud 占位,I/O 契约钉在
+  docstring:ACCEPTANCE RULE=TOL_M 0.005/budget+1e-9、None 语义=后端自执行验收、构造期 config 消费
+  清单);node.py 纯增 +145/-0,`use_shadow_solver` 默认关=**字节等价**(False 短路于任何构造前),
+  影子异常吞掉计数绝不影响发布命令,慢后端 wall_budget 0.25s×10 自禁,诊断逐键数值。
+  效果/证据:测试 12(含负控:两组真不同解 diff 必须>0.1m,防对账器恒零假绿)+邻居回归 25 全过
+  (Mac 零 rclpy 档;rclpy/colcon 级清单留 pod);对抗评审 8 发现(1 major=无负控)全部核实修复。
+  状态:已推 origin;等 claude 求解器本体+拍板对账容差/warm-start/omega 三个开问题。
+- 【yikang】**Gate3 谱系筛卷首轮(满池全程 CPU;顺带拆一颗共享 pod 安全雷)**——解决"13200 之后
+  无第二个模型过 Gate3"的谱系空白。满池下 play.py 导出路不可用,新配方=克隆 13200 正品 ONNX 图
+  只换 actor initializer+按 run config 改 metadata(tools/swap_actor_export.py);数值对抗检查
+  128 组固定种子 obs 过 .pt(torch CPU)vs onnxruntime,max|diff|<4e-6 全过且先用正品自检管线。
+  读数:①njfc21an(v2_fresh)model_9000=**0P/12F**(0 engage、发球 z_w 全出 band、走位侧 5 发全倒、
+  max|last_action|=152.8)——判死前一个未排除混杂:obs 项顺序继承 13200 metadata,若 v2 树改过排序
+  =布局错位假读数(需 jiayi 给 observation_names;该 run 训练 hit_rate 本就 0.6-0.9% 且 crashed);
+  ②model_7900 峰值档已导出对拍过未考(一条命令可考);③24100 谱系 wandb 全项目不存在=jiayi 交接件;
+  ④v7 真身=nc9n1kt5(v3_v7approved,model_11500),但 v6 动作对+reach x=0.70 vs 考卷写死 0.51 平面
+  → 直接考=站位差 0.19m 假读数,需 harness 变体先对齐。**安全雷**:原 pp_gate3_rally.sh 用
+  `pkill -f` 模式杀,共享 pod 上差点误杀 Codex 的 cmake 构建;已建 **pp_gate3_rally_safe.sh**
+  (预检 fail-loud+只杀自己记录的 PID),共享 pod 一律用 safe 版。产物在 pod1
+  /workspace/yikang/gate3/(dist cfg 已还原 13200)。状态:等 jiayi 三件(v2 obs 顺序/24100/
+  v7 平面),Gate 3B 发球生成器/判分器为下一步(分工对表中)。
