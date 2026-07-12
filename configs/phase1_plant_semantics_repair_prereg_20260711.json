@@ -10,7 +10,7 @@
     "purpose": "define the evidence, adapter and paired experiment contract required before a semantics-correct calibrated-friction plant can become a fresh training and deployment candidate"
   },
   "repository_baseline": {
-    "git_commit": "612f54dd67067e905247290645b0177faee7fdd1",
+    "git_commit": "d4ca5667915e38cc7e94e99a663bb952e74e4fb0",
     "audited_sources": [
       {
         "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py",

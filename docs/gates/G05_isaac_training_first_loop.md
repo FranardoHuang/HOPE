@@ -861,6 +861,15 @@ validated repair preregistration is in
 `configs/phase1_plant_semantics_repair_prereg_20260711.json`; it is currently
 `blocked_on_calibration_evidence`.
 
+The 2026-07-12 provenance recheck corrected that v1 manifest's declared
+repository snapshot from training-only ancestor `612f54d` to `d4ca566`, the
+first commit containing all eight already-recorded source hashes. Current main
+has since changed `training_contract.py` for strict face179, so current-checkout
+verification now deliberately returns exit 2. This is an additional fail-closed
+prelaunch blocker: a new reviewed preregistration must bind current source bytes
+before any `SC` arm. It does not change the running `SZ/SP/LZ/LP` recipes, and
+G05 remains `Partial`.
+
 The 2026-07-12 follow-up adds an offline plant-contract v1 compiler without
 changing any current trainer. It binds explicit units, the 31-joint order, one
 latent physical model, separate engine fit/probe evidence and a calibrated

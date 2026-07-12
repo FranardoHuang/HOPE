@@ -4,6 +4,16 @@ Use this file for short project-state updates that future humans and agents need
 
 ## 2026-07-12
 
+- Repaired three repository-evidence regressions without laundering old
+  results. Motion intake now distinguishes path escape, unsafe output stem and
+  non-MP4 extension, with a regression for dot-only `..mp4`. The diagnostic
+  per-video-beta GMR ledger remains bound to its historical auditor SHA instead
+  of being rewritten to today's canonical-beta tool. The plant v1 manifest's
+  declared Git snapshot was corrected from `612f54d` to `d4ca566`, which is the
+  first commit containing all eight already-recorded source hashes; current
+  strict-face179 `training_contract.py` drift is now an expected fail-closed
+  exit 2 until a new preregistration binds current bytes. No experiment result,
+  recipe, Pod process or hardware state changed; G05/G06 stay `Partial`.
 - Kept third planner candidate `6aae7ac` out of main despite `198 passed, 2
   skipped`. Fresh-clone review found that `ComputeCommand` still calls engage
   before sampling this tick's localization, so a base that expired or a yaw

@@ -32,6 +32,14 @@ bindings:
 The 2026-07-07 zero/non-zero policy probe has no raw-artifact SHA and is not calibration input.
 The current `SP/LP` numbers are not adapter parameters. Do not copy them into a draft.
 
+The v1 preregistration is also source-stale by design on current main. Its eight
+source hashes are reproducible together at `d4ca566`, but the later strict
+face179 change modified `training_contract.py`. Therefore
+`validate_phase1_plant_semantics_prereg.py ... --verify-repository-baseline`
+must currently return exit 2. Do not edit hashes merely to regain green: create
+a new reviewed preregistration with the complete current closure before any
+semantics-correct `SC` launch.
+
 ## Draft rules
 
 Create a JSON object following plant-contract schema v1. Units are exact strings:
@@ -122,8 +130,10 @@ python3 -m pytest -q \
   tests/test_validate_phase1_plant_semantics_prereg.py
 ```
 
-The current expected state is: compiler tests pass; preregistration remains
-`blocked_on_calibration_evidence`; no `SC` arm or non-zero exact evaluator exists.
+The current expected state is: compiler and historical-snapshot tests pass;
+current-checkout baseline verification fails closed on `training_contract.py`;
+the preregistration remains `blocked_on_calibration_evidence`; no `SC` arm or
+non-zero exact evaluator exists.
 
 ## Runtime integration still required
 
