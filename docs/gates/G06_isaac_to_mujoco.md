@@ -1079,9 +1079,11 @@ still does not answer the Isaac/MuJoCo physical-instrument gap, calibrated plant
 continuous stability or Agibot vendor Gate3/Gate3B behavior. Focused queue+consumer tests pass
 `40`; at source merge no Pod audit, activation, MuJoCo judge or simulator had run.
 
-The first runtime readiness step is now partial, not a score. Both Pods hold the exact reviewed
-control bundle and immutable K100 bytes at one shared absolute path. Pod2 seed2/4 passed the
-content-bound checkpoint/contract/schedule audit (file SHA `4f25786b...565f7`, embedded content SHA
-`5df5f299...bdb11`); Pod1 seed1/3 remains unknown because SSH timed out before its audit command
-started. The all-four barrier therefore remains closed. No activation, prepare, MuJoCo/Kit judge,
-aggregate, signal or hardware action ran, and G06 remains `Partial`.
+The all-four barrier was then materialized outside train/eval on 2026-07-13 local time. Pod1's
+seed1/3 audit is `3fc325e1...247b8`; Pod2's seed2/4 audit is `4f25786b...565f7`. Their exact union
+created activation file SHA `9dea76c2...ce704` with content SHA `eaa92ca2...aa4fb`, covering all
+four seeds and retaining `judges_started=0`. Source, K100, both audits and activation are present
+at the same absolute paths on both Pods. Both runner `contract-check` calls passed; immediate
+pre-run snapshots found no child judge, MuJoCo evaluator, play/Kit process or shared-lock holder.
+No `prepare`, judge or MuJoCo behavior ran, so this is readiness provenance rather than a score and
+G06 remains `Partial`.

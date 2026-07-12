@@ -1728,3 +1728,18 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
 - MJX/MJWarp is later throughput work with a separate parity burden. The independent vendor
   Gate3/Gate3B remains the final arbiter. This entry records a goal/priority decision only: no backend
   code, trainer, Pod process, simulator or hardware action ran; G05/G06 remain `Partial`.
+
+## 2026-07-13 — model-4000 all-four activation materialized
+
+- Deployed the exact committed consumer bundle and byte-identical K100 schedule to one common
+  external-control path on both Pods without touching train/eval. Pod1 seed1/3 and Pod2 seed2/4
+  no-clobber readiness audits passed with file SHAs `3fc325e1...247b8` and
+  `4f25786b...565f7`.
+- The exact audit union produced activation file SHA `9dea76c2...ce704`, content SHA
+  `eaa92ca2...aa4fb`, with seed1--4 coverage and `judges_started=0`. Both audits and activation
+  were relayed and SHA-verified at the same absolute paths on both Pods; all three exact evidence
+  artifacts are now checked in.
+- Both Pods passed the activation-consuming `contract-check`. Immediate process/lock snapshots
+  showed no child judge, MuJoCo evaluator, play/Kit process or Kit-lock holder. No `prepare`, judge,
+  trainer signal, simulator or hardware action ran. The barrier is ready for explicit preparation;
+  G05/G06 remain `Partial` until behavior results exist.

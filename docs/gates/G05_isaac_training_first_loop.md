@@ -1168,12 +1168,13 @@ Either outcome keeps all training unchanged and authorizes no promotion/deployme
 Queue plus runner focused source tests pass `40` cases. At source merge no Pod readiness audit,
 activation, preparation or judge had run, so that result was not training evidence.
 
-The first readiness step is now partially executed without touching either training/eval
-checkout. Identical source/K100 control bytes were placed at one absolute path on both Pods, and
-Pod2 seed2/4 passed its content-bound audit (file SHA `4f25786b...565f7`, content SHA
-`5df5f299...bdb11`). Pod1 seed1/3 did not run its audit because SSH handshakes timed out before a
-remote command began. One-Pod evidence cannot activate the barrier: no prepare, judge, score,
-promotion, trainer signal or hardware command followed. G05 remains `Partial`.
+The barrier was subsequently materialized outside both frozen checkouts on 2026-07-13 local time.
+Pod1/Pod2 audit file SHAs are `3fc325e1...247b8` and `4f25786b...565f7`; their exact union produced
+activation file SHA `9dea76c2...ce704`, content SHA `eaa92ca2...aa4fb`. The immutable source,
+schedule, both audits and activation now occupy identical absolute paths on both Pods. Both
+activation-consuming `contract-check` calls passed, and the immediate snapshots contained no
+child judge, Kit process or Kit-lock holder. No `prepare`, rollout, score, trainer mutation or
+signal occurred. This closes only the all-four readiness barrier; G05 remains `Partial`.
 
 ### 2026-07-12 training-backend boundary
 

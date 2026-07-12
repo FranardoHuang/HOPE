@@ -1,10 +1,8 @@
 # Fresh SZ model_4000 four-seed matched q50 queue
 
-Status: preregistered, activation barrier source-validated, and activation-consuming runner
-source-validated on 2026-07-12. The identical external control bundle and K100 bytes are now
-present at the same absolute path on both Pods, and the Pod2 seed2/4 readiness audit passed;
-Pod1 seed1/3 remains unaudited after SSH handshake timeouts, so no activation, q50 preparation,
-judge, trainer signal, or robot command has run. This queue exists to
+Status: preregistered and activation-ready. Both Pod audits, the all-four activation and both
+read-only `contract-check` calls completed on 2026-07-13 local time; no q50 `prepare`, judge,
+trainer signal, or robot command has run. This queue exists to
 separate delayed seed4 learning from persistent seed4 weakness at the next matched
 checkpoint. It does not authorize a training change, checkpoint promotion, deployment, or
 hardware.
@@ -266,3 +264,58 @@ hashes and all four bindings. It always reports `family_stable_claim_allowed=fal
 known pre-registered seed1 4k score is `.50`; it classifies seed4 as delayed learning only at
 aggregate `>=.65` and both sides `>=.50`, otherwise persistent weakness through 4k. Neither
 classification stops training, promotes a checkpoint, deploys, or authorizes hardware.
+
+## Materialized barrier evidence (2026-07-13 local / 2026-07-12 UTC)
+
+The exact committed bundle is present on both Pods at:
+
+`/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/source_d67310f`
+
+The common immutable schedule is present on both Pods at:
+
+`/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/shared_clean_k100.schedule.json`
+
+Its SHA remains `66e89986...71cb3`; the bundle's queue/prereg/validator/helper/runner/config SHAs
+match the values above. Readiness artifacts are byte-identical at their recorded absolute paths
+on both Pods:
+
+- Pod1 seed1/seed3 audit:
+  `/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_model4000_seed_stability_q50_barrier_v1/pod1_ready_audit.json`,
+  file SHA `3fc325e1edce6b8e6570cfcbbd4308b168d4a646c2b098061cf4b155fcd247b8`,
+  content SHA `5f378181147fbd4780974ce9155d1561fd9c59da8aaed858b6b3c8daa2aaa1dd`;
+- Pod2 seed2/seed4 audit:
+  `/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_model4000_seed_stability_q50_barrier_v1/pod2_ready_audit.json`,
+  file SHA `4f25786b7524db848b9adebf5a8946bb8f82280ea8d1d5a1243ae85533f565f7`,
+  content SHA `5df5f2995149c168a90bce3cf662b53322d9fbca9da4b724b814821f2c9bdb11`.
+
+The all-four activation is:
+
+`/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/activation/activation_eaa92ca201c4cd85c81b190fc2aee3b01ec4f6a2e70383eca6637373f87aa4fb.json`
+
+Its file SHA is `9dea76c2a9039dc35f8f996fa112e0e28ee320cb9b7c7ec877be942e021ce704`
+and content SHA is `eaa92ca201c4cd85c81b190fc2aee3b01ec4f6a2e70383eca6637373f87aa4fb`.
+It covers seed1--4 exactly and records `judges_started=0`.
+
+The byte-identical Pod1 audit and activation are checked in at
+`configs/phase1_fresh_SZ_model4000_seed_stability_q50_pod1_ready_audit_20260713.json` and
+`configs/phase1_fresh_SZ_model4000_seed_stability_q50_activation_20260713.json`; the already
+preserved Pod2 audit remains
+`configs/phase1_fresh_SZ_model4000_seed_stability_q50_pod2_ready_audit_20260712.json`.
+
+Verify each preserved file and its embedded canonical content independently:
+
+```bash
+for A in \
+  configs/phase1_fresh_SZ_model4000_seed_stability_q50_pod1_ready_audit_20260713.json \
+  configs/phase1_fresh_SZ_model4000_seed_stability_q50_pod2_ready_audit_20260712.json \
+  configs/phase1_fresh_SZ_model4000_seed_stability_q50_activation_20260713.json; do
+  sha256sum "$A"
+  jq -cS '.content' "$A" | tr -d '\n' | sha256sum
+done
+```
+
+Both Pods passed the activation-consuming runner's `contract-check`. Immediately afterward each
+reported no child judge, MuJoCo evaluator, play/Kit process or holder of
+`/workspace/.kit_boot.lock`. This authorizes the next explicit `prepare` step under the frozen
+contract; it is not itself preparation or permission to bypass a fresh pre-run conflict check.
+No training/eval checkout was written and no signal was sent.
