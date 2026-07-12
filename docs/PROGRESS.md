@@ -1743,3 +1743,18 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   showed no child judge, MuJoCo evaluator, play/Kit process or Kit-lock holder. No `prepare`, judge,
   trainer signal, simulator or hardware action ran. The barrier is ready for explicit preparation;
   G05/G06 remain `Partial` until behavior results exist.
+
+## 2026-07-13 — model-4000 q50 runtime contracts prepared, judges not started
+
+- Ran the activation-bound no-clobber `prepare` once per Pod. Pod1 runtime file/content SHAs are
+  `2b76a5a...8201e` / `36e878f0...5ba73`; Pod2 runtime file/content SHAs are
+  `dbecc102...d1c9b` / `91a0070a...30794`. Both retain `prepared_not_started`, `jobs_started=0`
+  and `auto_start=false`.
+- Re-ran the ordinary `contract-check` and direct runtime-contract validator on both Pods. Frozen
+  train/eval commits were exact and clean; all four local checkpoint SHAs matched, embedded iter
+  was 4000, nonfinite count was zero, lineage was exact and the adjacent hard-contract SHA was
+  unchanged. The copied K100 file/semantic/order SHAs also re-matched.
+- Post-prepare scans found no child judge, MuJoCo evaluator, play/Kit process or Kit-lock holder.
+  No `run`, simulator, trainer signal or hardware action occurred. A reviewed persistent parent
+  supervisor is required before future execution so the two serial seed judges and Pod-result
+  finalization survive SSH loss. G05/G06 remain `Partial`.

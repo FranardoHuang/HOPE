@@ -1754,6 +1754,14 @@ python 控制链**(C++ 规划器路径成为唯一部署通路,删了整个旧 p
    `eaa92ca2...aa4fb`，仍写 `judges_started=0`；两 audit+activation 已同路径同步两机。Pod1/Pod2
    `contract-check` 均 PASS，随后的 child judge/MuJoCo/play/Kit/lock holder 全空。未 prepare、未 judge、
    未 signal、未碰 train/eval/真机；只关闭 readiness barrier，G05/G06 仍 Partial。
+73. 【franco/Codex】**两 Pod 的 model-4000 q50 已 prepare，但一条 judge 都没启动**——两个固定 state dir
+   均在确认不存在后由 no-clobber runner 创建；Pod1 runtime file/content=`2b76a5a...8201e`/
+   `36e878f0...5ba73`，Pod2=`dbecc102...d1c9b`/`91a0070a...30794`，都保持
+   `prepared_not_started/jobs_started=0/auto_start=false`。随后两机 `contract-check` 与 direct runtime
+   binding 均 PASS：train/eval exact clean，四 checkpoint SHA/iter4000/finite/lineage/contract 复核一致，
+   K100 file/semantic/order 仍为 `66e899...71cb3`/`7dc6af...ff3e`/`b87e81...1f91`。child judge/
+   MuJoCo/play/Kit/lock holder 扫描全空；未 run、未 signal、未碰真机。正式 run 前须有 reviewed persistent
+   parent supervisor 承担两 seed 串行与 result 落盘，避免 SSH 断开遗失父控制器；G05/G06 仍 Partial。
 
 ## 2026-07-12:yikang 双线落地——拍面反解影子接线 + Gate3 谱系筛卷首轮
 

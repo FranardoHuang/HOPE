@@ -1087,3 +1087,13 @@ at the same absolute paths on both Pods. Both runner `contract-check` calls pass
 pre-run snapshots found no child judge, MuJoCo evaluator, play/Kit process or shared-lock holder.
 No `prepare`, judge or MuJoCo behavior ran, so this is readiness provenance rather than a score and
 G06 remains `Partial`.
+
+Both no-clobber runtime papers were then prepared without starting MuJoCo. Pod1's runtime file and
+canonical-content SHAs are `2b76a5a...8201e` and `36e878f0...5ba73`; Pod2's are
+`dbecc102...d1c9b` and `91a0070a...30794`. On both Pods the runner `contract-check` and direct
+runtime-binding validation passed against the same activation/K100, frozen clean checkouts and
+rehashed finite iteration-4000 checkpoints. Both papers remain `prepared_not_started` with zero
+jobs started; the immediate child-judge/MuJoCo/play/Kit scan and Kit-lock holder scan were empty.
+The future foreground run needs a reviewed persistent top-level supervisor because it must retain
+serial ownership across both seeds and write the bound Pod result. No judge or simulator behavior
+exists yet, so G06 remains `Partial`.

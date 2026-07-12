@@ -1,8 +1,8 @@
 # Fresh SZ model_4000 four-seed matched q50 queue
 
-Status: preregistered and activation-ready. Both Pod audits, the all-four activation and both
-read-only `contract-check` calls completed on 2026-07-13 local time; no q50 `prepare`, judge,
-trainer signal, or robot command has run. This queue exists to
+Status: prepared but not started. Both Pod audits, the all-four activation, both read-only
+`contract-check` calls and both no-clobber `prepare` calls completed on 2026-07-13 local time;
+no q50 judge, trainer signal, or robot command has run. This queue exists to
 separate delayed seed4 learning from persistent seed4 weakness at the next matched
 checkpoint. It does not authorize a training change, checkpoint promotion, deployment, or
 hardware.
@@ -319,6 +319,63 @@ done
 
 Both Pods passed the activation-consuming runner's `contract-check`. Immediately afterward each
 reported no child judge, MuJoCo evaluator, play/Kit process or holder of
-`/workspace/.kit_boot.lock`. This authorizes the next explicit `prepare` step under the frozen
-contract; it is not itself preparation or permission to bypass a fresh pre-run conflict check.
-No training/eval checkout was written and no signal was sent.
+`/workspace/.kit_boot.lock`. That snapshot authorized the subsequent explicit `prepare` step under
+the frozen contract; it was not itself preparation or permission to bypass a fresh pre-run
+conflict check. No training/eval checkout was written and no signal was sent.
+
+## Prepared runtime contracts (2026-07-13 local)
+
+Both fixed state directories were absent immediately before `prepare`. The activation-consuming
+runner created each directory once and printed `no judge/signal; schedule bytes copied, never
+materialized`. The prepared contracts are:
+
+- Pod1:
+  `/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_model4000_seed_stability_q50_pod1_v1/runtime_contract.activation_bound.prepared.json`,
+  file SHA `2b76a5a917c0a5d88ab5eec6b984b3d4ed2faa07484804bb42551f310378201e`,
+  canonical content SHA `36e878f0f9a044b64a893845e07971c8bc5ba87117b7f39aa4bb8d8c9e85ba73`;
+- Pod2:
+  `/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_model4000_seed_stability_q50_pod2_v1/runtime_contract.activation_bound.prepared.json`,
+  file SHA `dbecc102cdb388873c9369f60e3820a0f4c6949cc925cd5f3123731eec8d1c9b`,
+  canonical content SHA `91a0070a73ec7cca877d85ba5340d3b5fa84900ad588a8f9f6b3e11563730794`.
+
+Both documents remain `prepared_not_started`, `jobs_started=0`, `auto_start=false`. A second
+runner `contract-check` and direct runtime-binding validation passed on each Pod. Train/eval were
+still clean at exact commits `6d93bcb16c422a2f42748c2dc99432559653480b` and
+`46a0ce24524fdb843e55fe82ba4c045f2adc090f`; all four checkpoint SHAs re-matched, each embedded
+iteration was 4000, each nonfinite count was zero, and lineage/adjacent hard-contract binding
+remained exact. The post-prepare snapshots contained no child judge, MuJoCo evaluator, play/Kit
+process or holder of the existing Kit-lock file.
+
+The exact future commands below are recorded, **not executed**:
+
+```bash
+SOURCE=/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/source_d67310f
+CONFIG="$SOURCE/configs/phase1_fresh_SZ_model4000_seed_stability_q50_execution_20260712.json"
+RUNNER="$SOURCE/scripts/run_phase1_fresh_sz_model4000_q50.py"
+ACT=/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/activation/activation_eaa92ca201c4cd85c81b190fc2aee3b01ec4f6a2e70383eca6637373f87aa4fb.json
+
+/workspace/hope_isaac_venv/bin/python "$RUNNER" \
+  --config "$CONFIG" \
+  --expected-config-sha256 3109acd41726ef1a3063637e2a565cb2f4abe8992bb96473940700981e7c4385 \
+  --activation "$ACT" \
+  --expected-activation-sha256 9dea76c2a9039dc35f8f996fa112e0e28ee320cb9b7c7ec877be942e021ce704 \
+  run --pod pod1 \
+  --runtime-contract /workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_model4000_seed_stability_q50_pod1_v1/runtime_contract.activation_bound.prepared.json \
+  --expected-runtime-contract-sha256 2b76a5a917c0a5d88ab5eec6b984b3d4ed2faa07484804bb42551f310378201e
+
+/workspace/hope_isaac_venv/bin/python "$RUNNER" \
+  --config "$CONFIG" \
+  --expected-config-sha256 3109acd41726ef1a3063637e2a565cb2f4abe8992bb96473940700981e7c4385 \
+  --activation "$ACT" \
+  --expected-activation-sha256 9dea76c2a9039dc35f8f996fa112e0e28ee320cb9b7c7ec877be942e021ce704 \
+  run --pod pod2 \
+  --runtime-contract /workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_model4000_seed_stability_q50_pod2_v1/runtime_contract.activation_bound.prepared.json \
+  --expected-runtime-contract-sha256 dbecc102cdb388873c9369f60e3820a0f4c6949cc925cd5f3123731eec8d1c9b
+```
+
+The top-level `run` process must use a reviewed persistent supervisor/session before execution.
+Although each judge child starts a new session, the foreground parent must wait, validate the
+first seed, launch the second seed and write the Pod result. An ephemeral SSH disconnect could
+therefore strand a child while losing the serial controller and result finalization. Record exact
+supervisor PID/PGID and a no-clobber supervisor log; do not add a signal surface or broad process
+management. A fresh pre-run runtime-binding and conflict/lock check remains mandatory.

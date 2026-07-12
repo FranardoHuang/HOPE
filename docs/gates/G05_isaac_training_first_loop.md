@@ -1176,6 +1176,15 @@ activation-consuming `contract-check` calls passed, and the immediate snapshots 
 child judge, Kit process or Kit-lock holder. No `prepare`, rollout, score, trainer mutation or
 signal occurred. This closes only the all-four readiness barrier; G05 remains `Partial`.
 
+Both Pod runtime contracts were subsequently created by the no-clobber `prepare` command. Pod1's
+file/content SHAs are `2b76a5a...8201e` / `36e878f0...5ba73`; Pod2's are
+`dbecc102...d1c9b` / `91a0070a...30794`. Direct runtime-binding validation rehashed the local two
+checkpoints per Pod and confirmed iteration 4000, finite tensors, exact lineage and the common
+hard-contract SHA; both train/eval checkouts remained exact and clean. Each contract still records
+`prepared_not_started`, `jobs_started=0`, `auto_start=false`, and the post-prepare process/lock
+snapshot was empty. No judge, score, rollout, signal or hardware action ran. This is execution
+paper preparation, not training evidence; G05 remains `Partial`.
+
 ### 2026-07-12 training-backend boundary
 
 G05 continues to own the Isaac first loop and its checkpoint lineage, but a higher Isaac training
