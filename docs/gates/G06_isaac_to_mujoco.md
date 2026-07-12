@@ -1113,3 +1113,26 @@ jobs started; the immediate child-judge/MuJoCo/play/Kit scan and Kit-lock holder
 The future foreground run needs a reviewed persistent top-level supervisor because it must retain
 serial ownership across both seeds and write the bound Pod result. No judge or simulator behavior
 exists yet, so G06 remains `Partial`.
+
+### 2026-07-13 persistent model-4000 q50 startup source gate
+
+A detached two-phase [persistent supervisor](../DEFINITIONS.md#persistent-supervisor) now closes
+the activation consumer's top-level SSH-lifetime gap without changing any evaluated bytes. Its
+caller-SHA-pinned config binds the existing consumer/config/activation and a distinct prepared
+runtime contract plus Python realpath/binary SHA for each Pod. A fixed no-clobber state directory
+contains child hello, immutable launch ledger, commit token, commit acknowledgment and combined log.
+The token is withheld until the parent verifies `PID=PGID`, Linux boot id/procfs start ticks,
+executable SHA, exact argv/fixed-environment digest and every artifact SHA; parent loss or stall
+before that token makes the child self-exit rather than start an unowned judge.
+
+Read-only `inspect` rehashes the complete closure. A live result requires the preserved PID, PGID,
+start ticks, executable, command line and environment digest to match; terminal acceptance is
+delegated to the unchanged runner's complete schedule/arms/lineage/count/report validator. A
+pre-existing result prevents launch. No retry, remote login, process-control, trainer/worker,
+simulator, deployment or robot surface exists. The detailed contract and commands are in
+[the model-4000 q50 operation](../operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md#persistent-top-level-launch-source-gate).
+
+Supervisor tests pass `13`; combined queue/consumer/supervisor tests pass `53`. This is host source
+evidence only: Linux procfs has not yet been smoke-tested, the wrapper is not deployed, and no
+MuJoCo judge or score ran. It therefore closes neither the matched
+[q50/K100](../DEFINITIONS.md#q50-and-k100) result nor vendor Gate3/Gate3B. G06 remains `Partial`.

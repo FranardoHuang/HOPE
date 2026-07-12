@@ -52,3 +52,19 @@ A gate is `Done` only when it has:
 3. Recorded inputs and outputs.
 4. Updated docs.
 5. Known limitations listed.
+
+## q50 and K100
+
+`q50` means a decision-grade evaluation with 50 uncensored attempts on each racket side. The two
+sides together form one `K100` paper: 100 fixed questions in a content-addressed order. A q50/K100
+result may select or reject a checkpoint only under its preregistered thresholds; the smaller q10
+screen is direction-only.
+
+## Persistent Supervisor
+
+A `persistent supervisor` is the manual, content-bound process wrapper that detaches one already
+reviewed long-running command from the invoking shell, records immutable process identity, and later
+checks that identity or a terminal result. In this repository it does not mean a general service
+manager: the q50 supervisor exposes only one no-clobber `launch` and read-only `inspect`, and has no
+process-control, retry, remote-login, simulator, training, deployment, or robot authority. Its exact
+contract is [the q50 persistent-supervisor interface](interfaces/q50_persistent_supervisor_contract.md).

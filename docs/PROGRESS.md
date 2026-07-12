@@ -1800,3 +1800,22 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   that experiment records never authorize simulation, process signals, deployment or hardware.
 - Updated G00 and PROJECT_MAP. This is documentation infrastructure only; no source, config, Pod,
   simulator or hardware behavior changed.
+
+## 2026-07-13 — model-4000 q50 persistent startup source gate
+
+- Added a two-phase [persistent supervisor](DEFINITIONS.md#persistent-supervisor) around the
+  unchanged activation consumer. It binds the supervisor, existing runner/config/activation and
+  each Pod's distinct prepared runtime-contract SHA; the child cannot execute until the parent
+  validates `PID=PGID`, Linux boot id/procfs start ticks, executable SHA, exact argv/fixed-environment
+  digest and publishes an immutable no-clobber ledger plus commit token; success waits for the
+  child's commit acknowledgment and exact procfs exec identity.
+- The public surface is only manual `launch` and read-only `inspect`. Parent loss before commit
+  makes the detached child time out by itself; inspection rejects PID reuse and accepts completion
+  only through the exact content-bound Pod result. There is no retry, remote-login, process-control,
+  training, deployment, simulator or robot authority.
+- Supervisor-focused tests pass `13`; the queue+consumer+supervisor set passes `53`. This macOS host
+  has no procfs, so one Linux fake-runner smoke remains required before Pod deployment. No wrapper,
+  judge, simulator or hardware process ran; see the
+  [operation](operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md#persistent-top-level-launch-source-gate)
+  and [interface contract](interfaces/q50_persistent_supervisor_contract.md). G05/G06 remain
+  `Partial`.

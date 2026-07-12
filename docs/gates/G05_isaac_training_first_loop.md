@@ -1236,3 +1236,27 @@ source-checkpoint SHA. Its first one-shot D0 optimizes balance/strike-state only
 no physical ball/table/net, so it cannot book formal return evidence. Full reasoning and read-only
 commands are in [the MuJoCo training-v0 preflight](../research/mujoco_training_v0_preflight_2026-07-12.md).
 No code, config or training changed; G05 remains `Partial`.
+
+### 2026-07-13 persistent q50 top-level startup source gate
+
+The model-4000 activation consumer now has a separate
+[persistent-supervisor contract](../interfaces/q50_persistent_supervisor_contract.md) for the one
+remaining process-lifetime gap: the consumer's top-level Python process could disappear with its
+invoking SSH shell while an already-detached judge child continued. The new wrapper exposes only a
+manual no-clobber `launch` and read-only `inspect`. It neither changes nor replaces the existing
+consumer, execution config, all-four activation, prepared runtime contracts, [q50/K100 paper](../DEFINITIONS.md#q50-and-k100),
+checkpoints, trainers, or workers.
+
+Before execution, the child creates a new session, redirects fixed stdio, closes inherited file
+descriptors and publishes a hello with `PID=PGID`, Linux boot id/procfs start ticks, bound executable
+SHA, exact argv/fixed-environment digest and the complete source/config/activation/runtime SHA
+closure. The parent publishes an immutable ledger and commit token only after independently
+validating that identity. Without the token the child times out and exits by itself; after the token
+it revalidates all bytes, acknowledges commit and `execve`s the exact old runner. The parent reports
+success only after procfs shows the exact executable/argv/environment. Inspection rejects PID reuse
+and delegates terminal acceptance to the original runner's full result validator.
+
+The focused supervisor suite passes `13` cases; queue+consumer+supervisor together pass `53`. The
+host is macOS, so procfs behavior is covered through an injected identity seam and still needs one
+Linux fake-runner source smoke before any real q50 process. No Pod deployment, judge, simulator,
+training mutation, process-control action or hardware command ran. G05 remains `Partial`.

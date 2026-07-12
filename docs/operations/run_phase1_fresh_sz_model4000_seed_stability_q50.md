@@ -444,3 +444,93 @@ first seed, launch the second seed and write the Pod result. An ephemeral SSH di
 therefore strand a child while losing the serial controller and result finalization. Record exact
 supervisor PID/PGID and a no-clobber supervisor log; do not add a signal surface or broad process
 management. A fresh pre-run runtime-binding and conflict/lock check remains mandatory.
+
+## Persistent top-level launch source gate
+
+The original activation consumer safely owns each child judge, but its top-level Python process
+was still attached to the invoking shell. A dropped SSH session could therefore lose the parent
+while a detached child judge continued. The separate
+[persistent supervisor](../DEFINITIONS.md#persistent-supervisor) closes that startup-ownership gap
+without changing the consumer/config/activation/runtime-contract bytes. Its exact interface and
+failure states are in
+[the persistent-supervisor contract](../interfaces/q50_persistent_supervisor_contract.md).
+
+This section is a source procedure only. The supervisor has **not** been deployed and has not
+started either Pod's [q50/K100](../DEFINITIONS.md#q50-and-k100) evaluation. The feature branch must
+first enter `main`, and the deployed script/config hashes below must match that merge exactly.
+
+The reviewed files are:
+
+- `scripts/run_phase1_q50_persistent_supervisor.py`, SHA-256
+  `abfc5b363774dae560bcf8a0c3d2f94f20cadd62402b62432580ec08f06b16c9`;
+- `configs/phase1_fresh_SZ_model4000_seed_stability_q50_persistent_supervisor_20260713.json`,
+  SHA-256 `ef4f6b9a7854764d8c12945b2926c835c45573b1ac9d5702f74f58ab2cadb28f`.
+
+Deploy those two files, preserving their repository-relative `scripts/` and `configs/` paths, into
+one new no-clobber source root on each Pod. Do not put them in or modify the frozen train/eval
+checkouts, and do not modify the already-bound `source_d67310f` consumer bundle:
+
+```bash
+SUP_SOURCE=/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/persistent_supervisor_v1/source
+test ! -e "$SUP_SOURCE"
+mkdir -p "$SUP_SOURCE/scripts" "$SUP_SOURCE/configs"
+cp --no-clobber scripts/run_phase1_q50_persistent_supervisor.py "$SUP_SOURCE/scripts/"
+cp --no-clobber configs/phase1_fresh_SZ_model4000_seed_stability_q50_persistent_supervisor_20260713.json "$SUP_SOURCE/configs/"
+sha256sum \
+  "$SUP_SOURCE/scripts/run_phase1_q50_persistent_supervisor.py" \
+  "$SUP_SOURCE/configs/phase1_fresh_SZ_model4000_seed_stability_q50_persistent_supervisor_20260713.json"
+```
+
+Before launch, run read-only inspection. `not_launched` is the only expected first response.
+`--supervisor-config` names the immutable wrapper contract, its `--expected-...-sha256` companion
+pins those exact bytes, and `--pod` selects the already-bound Pod entry rather than accepting free
+paths. These flags carry only the authority defined by the
+[persistent-supervisor definition](../DEFINITIONS.md#persistent-supervisor).
+
+```bash
+SUPERVISOR="$SUP_SOURCE/scripts/run_phase1_q50_persistent_supervisor.py"
+SUP_CONFIG="$SUP_SOURCE/configs/phase1_fresh_SZ_model4000_seed_stability_q50_persistent_supervisor_20260713.json"
+SUP_CONFIG_SHA=ef4f6b9a7854764d8c12945b2926c835c45573b1ac9d5702f74f58ab2cadb28f
+
+/workspace/hope_isaac_venv/bin/python "$SUPERVISOR" \
+  --supervisor-config "$SUP_CONFIG" \
+  --expected-supervisor-config-sha256 "$SUP_CONFIG_SHA" \
+  inspect --pod pod1
+```
+
+Use `pod2` on Pod2. The config loader rehashes the supervisor, existing runner/config/activation,
+bound Python realpath/binary, and that Pod's prepared runtime contract before reporting any state.
+A mismatch is fail-closed and must not be worked around with a new command line.
+
+Launch exactly once per Pod:
+
+```bash
+/workspace/hope_isaac_venv/bin/python "$SUPERVISOR" \
+  --supervisor-config "$SUP_CONFIG" \
+  --expected-supervisor-config-sha256 "$SUP_CONFIG_SHA" \
+  launch --pod pod1
+```
+
+The configured fixed state directory is created before the child exists, so a repeated launch is
+always rejected. If the SSH session drops before the command response, **do not launch again**.
+Reconnect and run `inspect`; the immutable ledger/token/ack distinguishes an exact live process,
+pre-commit timeout, terminal validated result, and exit without result. There is intentionally no
+cleanup command. Preserve a partial/failure state directory and its fixed log for diagnosis; a new
+attempt requires a reviewed v2 config and distinct state directory.
+
+Verification that does not touch a Pod, simulator, or robot:
+
+```bash
+python3 -m py_compile scripts/run_phase1_q50_persistent_supervisor.py
+pytest -q \
+  tests/test_run_phase1_q50_persistent_supervisor.py \
+  tests/test_run_phase1_fresh_sz_model4000_q50.py \
+  tests/test_validate_phase1_fresh_sz_model4000_q50_queue.py
+```
+
+The accepted host result is `53 passed`. The launch-specific 13 tests cover parent exit/stall before
+commit, child token timeout, duplicate/no-clobber launch, pre-existing result and artifact mismatch,
+exact live identity, reused-PID/executable/environment rejection, minimal terminal-result rejection
+and delegation to the original runner's full result validator. This macOS host has no Linux procfs,
+so the tests inject the same identity-reader seam; an actual Linux source smoke that starts only a
+fake runner remains required before the real Pod q50 launch. No test starts a judge or simulator.

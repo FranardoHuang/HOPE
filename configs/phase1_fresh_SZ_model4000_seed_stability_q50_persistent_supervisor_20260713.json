@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "contract_id": "phase1-fresh-SZ-model4000-q50-persistent-supervisor-v1",
+  "status": "manual_launch_only",
+  "auto_start": false,
+  "real_robot_authorized": false,
+  "supervisor_source": {
+    "path": "scripts/run_phase1_q50_persistent_supervisor.py",
+    "sha256": "abfc5b363774dae560bcf8a0c3d2f94f20cadd62402b62432580ec08f06b16c9"
+  },
+  "environment": {
+    "HOME": "/root",
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "LOGNAME": "root",
+    "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUNBUFFERED": "1",
+    "TMPDIR": "/tmp",
+    "TZ": "UTC",
+    "USER": "root"
+  },
+  "runner": {
+    "path": "/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/source_d67310f/scripts/run_phase1_fresh_sz_model4000_q50.py",
+    "sha256": "de0abff6096efdea8ce78dbac6f3115d09e70be8ca0fc841a36be2cdbfbf6b85"
+  },
+  "execution_config": {
+    "path": "/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/source_d67310f/configs/phase1_fresh_SZ_model4000_seed_stability_q50_execution_20260712.json",
+    "sha256": "3109acd41726ef1a3063637e2a565cb2f4abe8992bb96473940700981e7c4385"
+  },
+  "activation": {
+    "path": "/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/activation/activation_eaa92ca201c4cd85c81b190fc2aee3b01ec4f6a2e70383eca6637373f87aa4fb.json",
+    "sha256": "9dea76c2a9039dc35f8f996fa112e0e28ee320cb9b7c7ec877be942e021ce704"
+  },
+  "handshake": {
+    "hello_timeout_seconds": 15,
+    "commit_timeout_seconds": 30,
+    "poll_seconds": 0.05
+  },
+  "pods": {
+    "pod1": {
+      "launch_authorized": true,
+      "blocker": "",
+      "python": {
+        "path": "/workspace/hope_isaac_venv/bin/python",
+        "resolved_path": "/usr/bin/python3.10",
+        "sha256": "06630724486efc9d97db03c62949511584b896c110097153ef970f9294fd3ba0"
+      },
+      "runtime_contract": {
+        "path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_model4000_seed_stability_q50_pod1_v1/runtime_contract.activation_bound.prepared.json",
+        "sha256": "2b76a5a917c0a5d88ab5eec6b984b3d4ed2faa07484804bb42551f310378201e"
+      },
+      "state_dir": "/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/persistent_supervisor/pod1_v1",
+      "result_path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_model4000_seed_stability_q50_pod1_v1/pod_result.json",
+      "arm_order": [
+        "seed1",
+        "seed3"
+      ]
+    },
+    "pod2": {
+      "launch_authorized": true,
+      "blocker": "",
+      "python": {
+        "path": "/workspace/hope_isaac_venv/bin/python",
+        "resolved_path": "/usr/bin/python3.10",
+        "sha256": "06630724486efc9d97db03c62949511584b896c110097153ef970f9294fd3ba0"
+      },
+      "runtime_contract": {
+        "path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_model4000_seed_stability_q50_pod2_v1/runtime_contract.activation_bound.prepared.json",
+        "sha256": "dbecc102cdb388873c9369f60e3820a0f4c6949cc925cd5f3123731eec8d1c9b"
+      },
+      "state_dir": "/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/persistent_supervisor/pod2_v1",
+      "result_path": "/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_model4000_seed_stability_q50_pod2_v1/pod_result.json",
+      "arm_order": [
+        "seed2",
+        "seed4"
+      ]
+    }
+  }
+}
