@@ -1,0 +1,139 @@
+{
+  "schema_version": 2,
+  "contract_id": "gate3-first-tick-joined-source-diagnostic-v3",
+  "created_utc": "2026-07-13T12:45:00Z",
+  "scope": "content-bound reviewed-source subset for an inexact no-publish diagnostic after actor leg-reference mask provenance hardening; no simulator, backend, transport, planner, policy tick, Pod, GPU, or robot was run",
+  "verdict": "the ONNX loader now rejects ambiguous or unbound actor leg-reference mask provenance, but the joined native diagnostic remains structurally inexact and is not Gate3/Gate3B or promotion evidence",
+  "supersedes": {
+    "path": "configs/gate3_first_tick_source_contract_v2_20260712.json",
+    "sha256": "9b0208b56790f47680e9437754d43a04a0178274600af1518f64f31156c5d704",
+    "historical_source_commit": "6d6b778",
+    "rule": "v2 remains immutable historical evidence and is verified against its merge commit; v3 binds current integrated source bytes"
+  },
+  "inherited_semantic_contract": {
+    "path": "configs/gate3_first_tick_source_contract_20260712.json",
+    "sha256": "f51e42851a26390120e0603538e8892bb3127ff50de550637a0e17c50d64f4f3",
+    "fields": [
+      "semantic_chain",
+      "cross_process_contract"
+    ],
+    "unchanged": true
+  },
+  "exactness": {
+    "evaluation_contract_exact": false,
+    "planner_snapshot_exact": false,
+    "native_sample_alignment_exact": false,
+    "source_binary_binding_exact": false,
+    "source_semantics_closure_exact": false,
+    "runtime_artifact_closure_exact": false,
+    "inexact_reasons": [
+      "vendor native ROS topics carry asynchronous publish-time stamps and no common MuJoCo sample sequence",
+      "formal tuple and fail-closed model-provenance source are merged, but no executed planner/runner binary or runtime status ledger binds these reviewed bytes",
+      "the tracked artifacts below are a reviewed subset, not parser-backed transitive source closure",
+      "no fresh epoch-1 179-D ONNX has passed the real C++ runner preflight",
+      "executed binary/config/publisher/transitive/runtime bindings remain null"
+    ]
+  },
+  "tracked_artifacts": {
+    "vendor_mjcf": {
+      "path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+      "sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+    },
+    "vendor_publisher_config": {
+      "path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/a3_pingpong_iceoryx_cfg.yaml",
+      "sha256": "48dfcb69542f41dc01b90f6f3e4f4a942e51b881a337110c0fcdf688be75a8bc"
+    },
+    "vendor_pose_twist_publisher_source": {
+      "path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/module/mujoco_sim_module/publisher/pose_twist_ros2_publisher.cc",
+      "sha256": "ef2db521740780140f7c7d53f3a528aceeae6358ba4ce2594c12bfc7f7d62cdb"
+    },
+    "vendor_pose_twist_publisher_header": {
+      "path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/module/mujoco_sim_module/publisher/pose_twist_ros2_publisher.h",
+      "sha256": "a11d4819b90fbdd8442d35f2a717082a09231538b11759e787e7cd6cda1ca9b1"
+    },
+    "production_build_definition": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/CMakeLists.txt",
+      "sha256": "3f500cfbedcd13a93446785e088c30a6b6b60cc4023405aba1a11e925c8a10c8"
+    },
+    "production_runtime_config": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/config/a3_runtime_config.pingpong.yaml",
+      "sha256": "844f6eec122ec9f9eb5c18caba5e5dab4ea31e53b14fe0bf46dd73c0e3f35c42"
+    },
+    "production_policy_capture": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/a3_pingpong/pp_policy.hpp",
+      "sha256": "f91b1f5db4e35163abce6923567365bb177c094573de2740f443e3ada1b01de1"
+    },
+    "production_onnx_loader": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/a3_pingpong/pp_onnx_policy.hpp",
+      "sha256": "44127854b5efac449ff3a14003188e159f50b3b3d86deaa20345805fce413ae5"
+    },
+    "formal_planner_input": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/a3_pingpong/pp_planner_input.hpp",
+      "sha256": "1bb41836c532167ecf561c85d3c913d5ed6be590840214dfa747d5ace3c2eb2b"
+    },
+    "formal_wire_encoder": {
+      "path": "hope_ws/src/hope_planner/hope_planner/flat_command_wire.py",
+      "sha256": "052384884382fbaffeaf2263121956cf030cca6bb12791fa15ced3142e6a21b9"
+    },
+    "formal_planner_node": {
+      "path": "hope_ws/src/hope_planner/hope_planner/node.py",
+      "sha256": "52a70da3fbcefbd4365d87b3e31ffa6ef11e7a7dfe630b1d1a6bf9b07dcea75d"
+    },
+    "formal_runtime_contract": {
+      "path": "hope_ws/src/hope_planner/hope_planner/node_runtime_contract.py",
+      "sha256": "a1f367a19e1ace7584cde030d9b315a3a549aac2ecbf6aad8033eea6930f4d1e"
+    },
+    "formal_racket_fk": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/a3_pingpong/pp_racket_fk.hpp",
+      "sha256": "8d0ce1a4e850b96be8ecbc9d2d4c39bed3367fada4459aa7b1f1506f8e83912a"
+    },
+    "production_sha256": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/a3_pingpong/pp_sha256.hpp",
+      "sha256": "406f61bdb50b5fceae2c2ff819fe516da1898b27610289b2f93ba257b4df122e"
+    },
+    "robot_state_interface": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/robot_io/robot_io_backend.hpp",
+      "sha256": "9c8ade30b76c8c10c8d4274ddf2c1c3dadb882a97516fb1e919298b5862ec1b9"
+    },
+    "robot_state_synchronizer": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/src/a3_sync/a3_sync_loop.cpp",
+      "sha256": "9e4f92d3d131658e5cd9b2f19aa146e9dc374d536eca0b102f3c693bcee72e2e"
+    },
+    "production_policy_driver": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/src/a3_deploy/a3_policy_driver.cpp",
+      "sha256": "0116cd16ab319943cbebbeba0d73fce6b805bc3212454810347566608c764cee"
+    },
+    "native_state_bridge": {
+      "path": "agi/a3_deploy_example/scripts/gate3_first_tick_state_bridge.py",
+      "sha256": "af90a081d4b864e777ef35238fb5c9a2fb16f0048d8b94633aca202d9a7164dc"
+    },
+    "native_json_contract": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/a3_pingpong/pp_first_tick_json.hpp",
+      "sha256": "51774aa820072419fe23fd20fed2bb5d3ffa0c2c74c6e93be4a970a286aff082"
+    },
+    "production_runner_entrypoint": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/src/a3_deploy/a3_pingpong_main.cpp",
+      "sha256": "fc4ac19c57ccd3bbc7853785ec01a1d4c3b66666131de89f0f932c8c4f08b389"
+    }
+  },
+  "runtime_bindings": {
+    "executed_vendor_sim_binary_sha256": null,
+    "executed_vendor_config_sha256": null,
+    "parser_resolved_mjcf_path": null,
+    "parser_resolved_mjcf_sha256": null,
+    "loaded_publisher_shared_object_sha256": null,
+    "loaded_transitive_shared_objects": null,
+    "executed_bridge_source_sha256": null,
+    "production_planner_executable_sha256": null,
+    "production_runner_binary_sha256": null,
+    "actual_first_tick_json_sha256": null,
+    "runtime_exact": false
+  },
+  "verification": {
+    "dependency_light_tests": 7,
+    "ros_aimrt_release_build": "source-compatible_release_passed_elsewhere_not_bound_to_v2_runtime",
+    "native_gtest": "source-compatible_only; fresh_epoch1_real_runner_preflight_not_run",
+    "vendor_first_tick": "not_run",
+    "gate3_gate3b": "not_run"
+  }
+}

@@ -22,6 +22,7 @@
 
 #include "a3_pingpong/pp_obs_builder.hpp"
 #include "a3_pingpong/pp_face179_contract.hpp"
+#include "a3_pingpong/pp_sha256.hpp"
 
 namespace a3_pingpong {
 
@@ -98,6 +99,10 @@ class PpOnnxPolicy {
         LookupMetaOptional(md, alloc, "training_contract_exact");
     const std::string actor_leg_ref_mask =
         LookupMetaOptional(md, alloc, "actor_leg_ref_mask");
+    const std::string actor_leg_ref_mask_epoch =
+        LookupMetaOptional(md, alloc, "actor_leg_ref_mask_provenance_epoch");
+    const std::string actor_leg_ref_mask_binding =
+        LookupMetaOptional(md, alloc, "actor_leg_ref_mask_provenance_sha256");
     training_contract_exact_ = training_contract_exact == "1";
     const std::string schema = LookupMetaOptional(md, alloc, "hope_metadata_schema_version");
     auto valid_bit = [](const std::string& s) { return s.empty() || s == "0" || s == "1"; };
@@ -107,10 +112,9 @@ class PpOnnxPolicy {
           "ONNX boolean metadata must be 0|1: empirical_normalization='" + empirical_norm +
           "' obs_norm_baked='" + obs_norm_baked + "' actor_leg_ref_mask='" +
           actor_leg_ref_mask + "'");
-    if (actor_leg_ref_mask == "1")
+    if (!actor_leg_ref_mask_epoch.empty() && actor_leg_ref_mask_epoch != "1")
       throw std::runtime_error(
-          "ONNX was trained with actor_leg_ref_mask=1, but the C++ observation builder does not "
-          "implement the 12-leg command mask; refusing to feed live leg references");
+          "ONNX actor_leg_ref_mask_provenance_epoch must be 1 when present");
     if (!trained_norm.empty() && trained_norm != empirical_norm)
       throw std::runtime_error(
           "ONNX trained_with_obs_norm and empirical_normalization metadata disagree");
@@ -181,6 +185,46 @@ class PpOnnxPolicy {
         !IsLowerHexSha256(source_checkpoint_sha256_))
       throw std::runtime_error(
           "ONNX source_checkpoint_sha256 must contain exactly 64 lowercase hex characters");
+    if (!actor_leg_ref_mask_binding.empty() &&
+        !IsLowerHexSha256(actor_leg_ref_mask_binding))
+      throw std::runtime_error(
+          "ONNX actor_leg_ref_mask_provenance_sha256 must contain exactly 64 lowercase hex "
+          "characters");
+    if (actor_leg_ref_mask_epoch == "1") {
+      if (!IsLowerHexSha256(training_contract_sha256_) ||
+          !IsLowerHexSha256(source_checkpoint_sha256_))
+        throw std::runtime_error(
+            "epoch-1 actor leg-reference mask provenance requires valid training-contract and "
+            "source-checkpoint SHA-256 values");
+      const std::string mask_payload =
+          "actor_leg_ref_mask_provenance_epoch=1\nactor_leg_ref_mask=" +
+          std::string(actor_leg_ref_mask == "1" ? "1" : "0") +
+          "\ntraining_contract_sha256=" + training_contract_sha256_ +
+          "\nsource_checkpoint_sha256=" + source_checkpoint_sha256_ + "\n";
+      if (actor_leg_ref_mask_binding != PpSha256Hex(mask_payload))
+        throw std::runtime_error(
+            "ONNX actor leg-reference mask provenance is not content-bound to the training "
+            "contract and source checkpoint");
+      actor_leg_ref_mask_provenance_exact_ = true;
+    } else {
+      if (!actor_leg_ref_mask_binding.empty() || actor_leg_ref_mask == "1")
+        throw std::runtime_error(
+            "ONNX actor leg-reference mask/binding metadata requires provenance epoch=1");
+      actor_leg_ref_mask_provenance_exact_ = obs_dim_ == kObsDim110;
+    }
+    if (!actor_leg_ref_mask_provenance_exact_) {
+      if (!allow_legacy_model_diagnostic)
+        throw std::runtime_error(
+            "command-bearing ONNX lacks content-bound actor-leg-reference mask provenance; "
+            "historical masked and unmasked checkpoints are indistinguishable");
+      std::fprintf(stderr,
+          "[pp DIAGNOSTIC] actor leg-reference mask provenance is ambiguous; model is not "
+          "publishable.\n");
+    }
+    if (actor_leg_ref_mask == "1")
+      throw std::runtime_error(
+          "ONNX was trained with actor_leg_ref_mask=1, but the C++ observation builder does not "
+          "implement the 12-leg command mask; refusing to feed live leg references");
     if (!qdes_clamp.empty() && qdes_clamp != "0" && qdes_clamp != "1")
       throw std::runtime_error("ONNX qdes_clamp metadata must be 0|1");
     if (!physics_dt.empty()) physics_step_dt_s_ = ParsePositiveFinite(physics_dt, "physics_step_dt_s");
@@ -493,6 +537,7 @@ class PpOnnxPolicy {
     publishable_model_contract_ =
         formal_contract && empirical_norm == "1" && trained_norm == "1" &&
         obs_norm_baked == "1" && schema3_complete &&
+        actor_leg_ref_mask_provenance_exact_ &&
         effort_limits_.size() == kNumJoints;
     if (!allow_legacy_model_diagnostic && !publishable_model_contract_)
       throw std::runtime_error(
@@ -540,6 +585,9 @@ class PpOnnxPolicy {
   const Eigen::VectorXd& effort_limits() const { return effort_limits_; }
   bool has_schema3_execution_contract() const { return has_schema3_execution_contract_; }
   bool training_contract_exact() const { return training_contract_exact_; }
+  bool actor_leg_ref_mask_provenance_exact() const {
+    return actor_leg_ref_mask_provenance_exact_;
+  }
   bool publishable_model_contract() const { return publishable_model_contract_; }
   double physics_step_dt_s() const { return physics_step_dt_s_; }
   double policy_step_dt_s() const { return policy_step_dt_s_; }
@@ -747,6 +795,7 @@ class PpOnnxPolicy {
   int control_decimation_ = 0;
   bool has_schema3_execution_contract_ = false;
   bool training_contract_exact_ = false;
+  bool actor_leg_ref_mask_provenance_exact_ = false;
   bool publishable_model_contract_ = false;
   PpFaceNormalEnvelope face_normal_envelope_{};  // mandatory and content-bound for 179-D only
   std::vector<float> obs_f_;

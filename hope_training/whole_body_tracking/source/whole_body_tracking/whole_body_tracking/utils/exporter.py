@@ -20,8 +20,10 @@ from whole_body_tracking.tasks.tracking.actor_observation_contract import (
     removed_terms_vs_full,
 )
 from whole_body_tracking.utils.training_contract import (
+    ACTOR_LEG_REF_MASK_PROVENANCE_KEY,
     TRAINING_CONTRACT_SCHEMA_VERSION,
     RUNTIME_EXECUTION_KEYS,
+    bind_actor_leg_ref_mask_metadata,
     checkpoint_claims_contract,
     checkpoint_contract_lineage_exact,
     require_checkpoint_contract_binding,
@@ -156,8 +158,13 @@ def attach_onnx_metadata(
     *,
     obs_norm_baked: bool,
     trained_with_obs_norm: bool,
-    source_checkpoint_path: str | None = None,
+    source_checkpoint_path: str,
 ) -> None:
+    if source_checkpoint_path is None or not str(source_checkpoint_path).strip():
+        raise ValueError(
+            "attach_onnx_metadata: source_checkpoint_path is mandatory; runtime environment "
+            "facts cannot establish provenance for actor bytes"
+        )
     onnx_path = os.path.join(path, filename)
     actor_contract = infer_actor_observation_contract(env)
     runtime_facts = runtime_execution_facts(env, actor_contract)
@@ -238,11 +245,8 @@ def attach_onnx_metadata(
     metadata["episode_length_s"] = format(episode_length_s, ".17g")
     qdes_clamp = bool(runtime_facts["qdes_clamp"])
     metadata["qdes_clamp"] = "1" if qdes_clamp else "0"
-    # Only-when-true (key absent = unmasked/legacy): an R-a masked actor sees default-stand + zero
-    # velocity in its 24 leg command dims; an evaluator without the mask feeds live leg refs and
-    # silently misgrades. The evaluator hard-refuses on this key until it implements the mask.
-    if runtime_facts.get("actor_leg_ref_mask"):
-        metadata["actor_leg_ref_mask"] = "1"
+    # Mask/unmasked provenance may only come from the checkpoint-bound contract below. Runtime
+    # facts are used for equality checking, never to mint provenance for historical actor bytes.
     training_contract = None
     training_contract_schema = 0
     training_contract_sha256 = None
@@ -317,6 +321,9 @@ def attach_onnx_metadata(
                 "attach_onnx_metadata: checkpoint claims a training-contract binding but the "
                 f"adjacent sidecar is missing: {training_contract_path}"
             )
+        if training_contract is None:
+            # Never infer historical checkpoint semantics from the current export environment.
+            bind_actor_leg_ref_mask_metadata(metadata, None)
 
     # FAIL-FAST: a non-positive nominal gain means the export would deploy a limp joint (the
     # kp=kd=0 bug that felled the 2026-07-02 explicitpd_ft bring-up). Refuse to bake it.
@@ -707,10 +714,11 @@ def attach_onnx_metadata(
         # an old actor.  The source checkpoint's training_contract.json is the authority.
         current_contract_facts = {
             **{key: runtime_facts[key] for key in RUNTIME_EXECUTION_KEYS},
-            # Only-when-true (absent = unmasked): masked and unmasked checkpoints must not share
-            # a training-contract hash — the mask changes what the actor's command dims mean,
-            # and mutable ONNX metadata alone cannot carry that provenance.
-            **({"actor_leg_ref_mask": True} if runtime_facts.get("actor_leg_ref_mask") else {}),
+            **{
+                key: runtime_facts[key]
+                for key in (ACTOR_LEG_REF_MASK_PROVENANCE_KEY, "actor_leg_ref_mask")
+                if key in runtime_facts
+            },
             "episode_length_s": episode_length_s,
             "motion_wrap_teleport": bool(motion_cfg.wrap_teleport),
             "motion_hold_steps_range": [int(v) for v in motion_cfg.hold_steps_range],
@@ -794,9 +802,16 @@ def attach_onnx_metadata(
                 "but the export environment is unmasked; re-export with "
                 "task.actor_leg_ref_mask=true so the mask provenance survives"
             )
+        bind_actor_leg_ref_mask_metadata(
+            metadata,
+            training_contract
+            if training_contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION
+            else None,
+        )
         if (
             training_contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION
             and training_contract_lineage_exact
+            and training_contract.get("actor_leg_ref_mask") is not True
         ):
             metadata["training_contract_exact"] = "1"
 

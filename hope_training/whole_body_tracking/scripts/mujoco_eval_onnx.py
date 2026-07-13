@@ -1300,7 +1300,7 @@ def subtract_frame_transforms(t01, q01, t02, q02):
 # ONNX policy wrapper
 # =================================================================================================
 class OnnxPolicy:
-    def __init__(self, onnx_path, obs_norm="auto"):
+    def __init__(self, onnx_path, obs_norm="auto", *, allow_inexact_contract=False):
         import onnxruntime as ort
 
         self.sess = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
@@ -1450,11 +1450,64 @@ class OnnxPolicy:
         if qdes_meta_raw not in ("", "0", "1"):
             raise SystemExit("[FATAL] qdes_clamp metadata must be 0|1")
         self.qdes_clamp_meta = None if not qdes_meta_raw else qdes_meta_raw == "1"
+        actor_leg_ref_mask_raw = str(md.get("actor_leg_ref_mask", "")).strip()
+        if actor_leg_ref_mask_raw not in ("", "0", "1"):
+            raise SystemExit("[FATAL] actor_leg_ref_mask metadata must be 0|1")
+        mask_epoch_raw = str(md.get("actor_leg_ref_mask_provenance_epoch", "")).strip()
+        mask_binding_raw = str(md.get("actor_leg_ref_mask_provenance_sha256", "")).strip()
+        if mask_epoch_raw not in ("", "1"):
+            raise SystemExit(
+                "[FATAL] actor_leg_ref_mask_provenance_epoch metadata must be 1 when present"
+            )
+        if mask_binding_raw and (
+            len(mask_binding_raw) != 64
+            or any(ch not in "0123456789abcdef" for ch in mask_binding_raw)
+        ):
+            raise SystemExit(
+                "[FATAL] actor_leg_ref_mask_provenance_sha256 must be 64 lowercase hex characters"
+            )
+        if mask_epoch_raw == "1":
+            if not self.training_contract_sha256 or not self.source_checkpoint_sha256:
+                raise SystemExit(
+                    "[FATAL] epoch-1 actor leg-reference mask provenance requires valid "
+                    "training-contract and source-checkpoint SHA-256 values"
+                )
+            mask_payload = (
+                "actor_leg_ref_mask_provenance_epoch=1\n"
+                f"actor_leg_ref_mask={1 if actor_leg_ref_mask_raw == '1' else 0}\n"
+                f"training_contract_sha256={self.training_contract_sha256}\n"
+                f"source_checkpoint_sha256={self.source_checkpoint_sha256}\n"
+            )
+            expected_mask_binding = hashlib.sha256(mask_payload.encode("ascii")).hexdigest()
+            if mask_binding_raw != expected_mask_binding:
+                raise SystemExit(
+                    "[FATAL] actor leg-reference mask provenance is not content-bound to the "
+                    "training contract and source checkpoint"
+                )
+        elif mask_binding_raw or actor_leg_ref_mask_raw == "1":
+            raise SystemExit(
+                "[FATAL] actor leg-reference mask/binding metadata requires provenance epoch=1"
+            )
+        self.actor_leg_ref_mask_provenance_exact = self.hitter_pure or (
+            mask_epoch_raw == "1" and mask_binding_raw != ""
+        )
+        if not self.actor_leg_ref_mask_provenance_exact:
+            self.evaluation_contract_exact = False
+            if not allow_inexact_contract:
+                raise SystemExit(
+                    "[FATAL] command-bearing ONNX lacks actor_leg_ref_mask_provenance_epoch=1; "
+                    "historical masked and unmasked checkpoints are indistinguishable. Use "
+                    "--allow-inexact-contract only for a non-bookable diagnostic."
+                )
+            print(
+                "[mj-sim2sim] WARNING: actor leg-reference mask provenance is ambiguous; "
+                "explicit inexact diagnostic only"
+            )
         # R-a masked actors saw default-stand + zero velocity in 24 of their 62 command dims;
         # build_obs here feeds live leg references, so every observation of a masked checkpoint
         # is wrong on every path. Refuse outright until the mask is implemented in build_obs.
         require_contract(
-            str(md.get("actor_leg_ref_mask", "")).strip() in ("", "0"),
+            actor_leg_ref_mask_raw in ("", "0"),
             "checkpoint was trained with actor_leg_ref_mask (R-a: actor leg command dims = "
             "default stand + zero vel); this evaluator has no counterpart and would feed live "
             "leg references into 24 of the 62 command dims. No exam path can grade this "
@@ -4352,7 +4405,11 @@ def main():
 
     print(f"[mj-sim2sim] onnx={args.onnx}")
     print(f"[mj-sim2sim] mjcf={args.mjcf}")
-    policy = OnnxPolicy(args.onnx, obs_norm=("off" if args.no_obs_norm else args.obs_norm))
+    policy = OnnxPolicy(
+        args.onnx,
+        obs_norm=("off" if args.no_obs_norm else args.obs_norm),
+        allow_inexact_contract=args.allow_inexact_contract,
+    )
     velocity_points_label = (
         "ambiguous"
         if policy.motion_body_lin_vel_points is None

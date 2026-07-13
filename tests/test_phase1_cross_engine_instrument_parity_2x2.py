@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,11 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 PREREG = ROOT / "configs" / "phase1_cross_engine_instrument_parity_2x2_prereg_20260711.json"
+REVOCATION = (
+    ROOT
+    / "configs"
+    / "phase1_cross_engine_instrument_parity_2x2_revocation_20260713.json"
+)
 VALIDATOR_PATH = ROOT / "scripts" / "validate_phase1_cross_engine_instrument_parity_2x2.py"
 ADAPTER_PATH = ROOT / "hope_training" / "whole_body_tracking" / "scripts" / "isaac_bank_exam_adapter.py"
 
@@ -115,6 +121,11 @@ def cell_document(prereg, engine, instrument, question_order, *, virtual_only=Fa
 
 def synthetic_evidence(tmp_path: Path, validator, *, omit=None, virtual_only=None):
     prereg = json.loads(PREREG.read_text())
+    for name in ("validator", "isaac_evaluator", "isaac_adapter"):
+        spec = prereg["tools"][name]
+        spec["sha256"] = sha256(ROOT / spec["path"])
+    prereg["target"]["actor_leg_ref_mask_provenance_epoch"] = 1
+    prereg["target"]["actor_leg_ref_mask"] = False
     order = [f"forehand:{index:064x}" if index % 2 == 0 else f"backhand:{index:064x}" for index in range(100)]
     prereg["schedule"]["question_id_order_sha256"] = validator.canonical_sha256(order)
     config = tmp_path / "prereg.json"
@@ -243,12 +254,33 @@ def test_existing_scorecard_keeps_nested_instrumentation_json_only(tmp_path):
     assert "instrumentation" not in output_csv.read_text().splitlines()[0].split(",")
 
 
-def test_checked_in_preregistration_is_valid_but_gate_stays_open():
+def test_checked_in_preregistration_is_frozen_and_explicitly_revoked():
     validator = load_module(VALIDATOR_PATH, "instrument_parity_validator_prereg")
-    result = validator.validate_prereg(PREREG, ROOT)
-    assert result["status"] == "valid_preregistered_runtime_blocked"
+    assert sha256(PREREG) == (
+        "bd90f6f28ba578f452fe63184c7a0cafb4d8c511d478c3753c46b3bd58ba0175"
+    )
+    prereg = json.loads(PREREG.read_text())
+    for spec in (prereg["forensic_input"], *prereg["tools"].values()):
+        result = subprocess.run(
+            ["git", "show", f"612f54d:{spec['path']}"],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr.decode(errors="replace")
+        assert hashlib.sha256(result.stdout).hexdigest() == spec["sha256"]
+    with pytest.raises(validator.ParityContractError, match="revoked for the current exact lane"):
+        validator.validate_prereg(PREREG, ROOT)
+    result = validator.validate_revocation(REVOCATION, ROOT)
+    assert result["status"] == "revoked_for_current_exact_lane"
     assert result["instrument_parity_gate_closed"] is False
     assert result["preregistration_sha256"] == sha256(PREREG)
+    assert set(result["formal_recovery_requirements"]) == {
+        "post_epoch_checkpoint",
+        "new_preregistration",
+        "new_phase_b_contract",
+        "rerun_all_four_cells",
+    }
 
 
 def test_evidence_missing_one_cell_fails_closed(tmp_path):

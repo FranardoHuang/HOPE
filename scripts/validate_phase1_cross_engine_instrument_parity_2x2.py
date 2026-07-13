@@ -20,6 +20,12 @@ PREREG_SCHEMA = "hope.cross-engine-instrument-parity-prereg.v1"
 CELL_SCHEMA = "hope.cross-engine-instrument-cell.v1"
 EVIDENCE_SCHEMA = "hope.cross-engine-instrument-parity-evidence.v1"
 INSTRUMENTATION_SCHEMA = "hope.cross-engine-state-instrumentation.v1"
+REVOCATION_SCHEMA = "hope.cross-engine-instrument-parity-prereg-revocation.v1"
+REVOKED_PREREGISTRATIONS = {
+    "bd90f6f28ba578f452fe63184c7a0cafb4d8c511d478c3753c46b3bd58ba0175": (
+        "configs/phase1_cross_engine_instrument_parity_2x2_revocation_20260713.json"
+    ),
+}
 REQUIRED_CELLS = {
     "isaac:physical_truth",
     "isaac:analytic_counterfactual",
@@ -97,6 +103,12 @@ def finite_values(value: Any, *, size: int, field: str) -> list[float]:
 
 
 def validate_prereg(config_path: Path, repo: Path) -> dict[str, Any]:
+    config_sha = sha256_file(config_path)
+    if config_sha in REVOKED_PREREGISTRATIONS:
+        raise ParityContractError(
+            "preregistration is revoked for the current exact lane; see "
+            + REVOKED_PREREGISTRATIONS[config_sha]
+        )
     config = load_json(config_path)
     if config.get("schema") != PREREG_SCHEMA or config.get("schema_version") != 1:
         raise ParityContractError("unsupported instrument-parity preregistration schema")
@@ -130,8 +142,12 @@ def validate_prereg(config_path: Path, repo: Path) -> dict[str, Any]:
         or target.get("evaluation_contract_exact") is not True
         or target.get("plant_cell") != "SZ_zero_friction_protocol_exact"
         or target.get("checkpoint_iteration") != 2000
+        or target.get("actor_leg_ref_mask_provenance_epoch") != 1
+        or target.get("actor_leg_ref_mask") is not False
     ):
-        raise ParityContractError("2x2 target must remain the selected exact fresh SZ model_2000")
+        raise ParityContractError(
+            "2x2 target must be a selected exact, fresh, epoch-1 unmasked checkpoint"
+        )
     for field in ("checkpoint_sha256", "training_contract_sha256", "exam_bank_sha256"):
         require_hex(target.get(field), field=f"target.{field}")
     if (
@@ -190,6 +206,43 @@ def validate_prereg(config_path: Path, repo: Path) -> dict[str, Any]:
         "required_cells": sorted(REQUIRED_CELLS),
         "instrument_parity_gate_closed": False,
         "runtime_blockers": blockers,
+    }
+
+
+def validate_revocation(revocation_path: Path, repo: Path) -> dict[str, Any]:
+    revocation = load_json(revocation_path)
+    if (
+        revocation.get("schema") != REVOCATION_SCHEMA
+        or revocation.get("schema_version") != 1
+        or revocation.get("status") != "revoked_for_current_exact_lane"
+        or revocation.get("current_exact_lane_valid") is not False
+        or revocation.get("reason_code")
+        != "missing_actor_leg_ref_mask_provenance_epoch"
+    ):
+        raise ParityContractError("invalid instrument-parity preregistration revocation")
+    prereg = revocation.get("preregistration")
+    rider = revocation.get("isaac_phase_b_contract")
+    if not isinstance(prereg, Mapping) or not isinstance(rider, Mapping):
+        raise ParityContractError("revocation lacks preregistration/Phase-B bindings")
+    require_local_binding(repo, prereg, field="revocation.preregistration")
+    require_local_binding(repo, rider, field="revocation.isaac_phase_b_contract")
+    if prereg.get("sha256") not in REVOKED_PREREGISTRATIONS:
+        raise ParityContractError("revocation does not name a known frozen preregistration")
+    recovery = revocation.get("formal_recovery_requirements")
+    required_recovery = {
+        "post_epoch_checkpoint",
+        "new_preregistration",
+        "new_phase_b_contract",
+        "rerun_all_four_cells",
+    }
+    if not isinstance(recovery, list) or set(recovery) != required_recovery:
+        raise ParityContractError("revocation weakens formal recovery requirements")
+    return {
+        "status": "revoked_for_current_exact_lane",
+        "revocation_sha256": sha256_file(revocation_path),
+        "preregistration_sha256": prereg["sha256"],
+        "instrument_parity_gate_closed": False,
+        "formal_recovery_requirements": sorted(required_recovery),
     }
 
 
@@ -366,11 +419,19 @@ def validate_evidence(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", required=True, type=Path)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--config", type=Path)
+    source.add_argument("--revocation", type=Path)
     parser.add_argument("--evidence", type=Path)
     parser.add_argument("--artifact-root", type=Path)
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
+    if args.revocation is not None:
+        if args.evidence is not None or args.artifact_root is not None:
+            raise ParityContractError("--revocation cannot be combined with evidence arguments")
+        result = validate_revocation(args.revocation.resolve(), repo)
+        print(json.dumps(result, indent=2, sort_keys=True, allow_nan=False))
+        return 0
     if args.evidence is None:
         result = validate_prereg(args.config.resolve(), repo)
     else:

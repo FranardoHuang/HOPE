@@ -1,0 +1,48 @@
+{
+  "schema": "hope.cross-engine-instrument-parity-prereg-revocation.v1",
+  "schema_version": 1,
+  "created_utc": "2026-07-13T12:30:00Z",
+  "status": "revoked_for_current_exact_lane",
+  "current_exact_lane_valid": false,
+  "reason_code": "missing_actor_leg_ref_mask_provenance_epoch",
+  "scope": "Revokes only the current-exact identity of the frozen model_2000 2x2 preregistration and its Phase-B rider; the historical files remain immutable and may not be refreshed or relabeled",
+  "preregistration": {
+    "path": "configs/phase1_cross_engine_instrument_parity_2x2_prereg_20260711.json",
+    "sha256": "bd90f6f28ba578f452fe63184c7a0cafb4d8c511d478c3753c46b3bd58ba0175"
+  },
+  "isaac_phase_b_contract": {
+    "path": "configs/phase1_isaac_bank_exam_physical_truth_phase_b_contract_20260711.json",
+    "sha256": "1af7a0b3589d57bfbd2da0b8af6130641298b647e4d80e52b5ef673a84e5b376"
+  },
+  "revoked_target": {
+    "run_name": "phase1_fresh_v3_S1_seed1",
+    "checkpoint_iteration": 2000,
+    "checkpoint_sha256": "99e8265960244e5be19176dc5f2d3b8b99e088d5d76d34d0f2cd1e1dd0c3ae4c",
+    "training_contract_sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972"
+  },
+  "forensic_basis": {
+    "actor_observation_contains_command_62d": true,
+    "training_contract_has_actor_leg_ref_mask_provenance_epoch": false,
+    "checkpoint_infos_bind_mask_provenance": false,
+    "masked_and_unmasked_pre_epoch_checkpoints_are_formally_indistinguishable": true,
+    "metadata_backfill_allowed": false
+  },
+  "allowed_use": "historical_or_explicitly_inexact_nonbookable_diagnostic_only",
+  "forbidden_actions": [
+    "edit_or_refresh_the_frozen_preregistration",
+    "edit_or_refresh_the_frozen_phase_b_contract",
+    "backfill_onnx_metadata_to_restore_exactness",
+    "reuse_any_old_four_cell_result_as_current_exact_evidence"
+  ],
+  "formal_recovery_requirements": [
+    "post_epoch_checkpoint",
+    "new_preregistration",
+    "new_phase_b_contract",
+    "rerun_all_four_cells"
+  ],
+  "gate_effect": {
+    "instrument_parity_gate_closed": false,
+    "training_selection_changed": false,
+    "deployment_or_real_robot_authorized": false
+  }
+}

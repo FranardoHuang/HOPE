@@ -52,6 +52,7 @@ checkpoint_claims_contract = _TC.checkpoint_claims_contract
 checkpoint_contract_lineage_exact = _TC.checkpoint_contract_lineage_exact
 require_checkpoint_contract_binding = _TC.require_checkpoint_contract_binding
 bind_actor_leg_ref_mask_metadata = _TC.bind_actor_leg_ref_mask_metadata
+require_actor_leg_ref_mask_provenance = _TC.require_actor_leg_ref_mask_provenance
 resolve_motion_body_lin_vel_points = _TC.resolve_motion_body_lin_vel_points
 validate_schema3_contract = _TC.validate_schema3_contract
 validate_schema3_contract_structure = _TC.validate_schema3_contract_structure
@@ -371,6 +372,7 @@ def main() -> int:
         if contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION:
             try:
                 validate_schema3_contract_structure(training_contract)
+                require_actor_leg_ref_mask_provenance(training_contract)
                 require_checkpoint_contract_binding(
                     ckpt,
                     schema=contract_schema,
@@ -498,10 +500,7 @@ def main() -> int:
     # Donor metadata is never authority for observation semantics.  A schema-3 checkpoint may
     # legitimately use an older unmasked donor, while an unmasked/legacy checkpoint must not
     # inherit actor_leg_ref_mask=1 from a masked donor.
-    bind_actor_leg_ref_mask_metadata(
-        donor_meta,
-        training_contract if contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION else None,
-    )
+    bind_actor_leg_ref_mask_metadata(donor_meta, None)
     if contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION:
         _bind_schema3_donor_metadata(donor_meta, training_contract)
         donor_effort = [float(v) for v in donor_meta["joint_effort_limits"].split(",")]
@@ -671,6 +670,10 @@ def main() -> int:
     donor_meta["empirical_normalization"] = "1" if "obs_norm_state_dict" in ckpt else "0"
     donor_meta["trained_with_obs_norm"] = donor_meta["empirical_normalization"]
     donor_meta["source_checkpoint_sha256"] = _sha256_file(args.ckpt)
+    bind_actor_leg_ref_mask_metadata(
+        donor_meta,
+        training_contract if contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION else None,
+    )
     donor_meta["motion_harvest_donor_sha256"] = donor_sha256
 
     # Every checkpoint, donor, clip, harvest, bank, contract and envelope input has now been

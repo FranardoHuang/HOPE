@@ -10,11 +10,15 @@ the exact actor layout) rather than only task-level configuration.
 from __future__ import annotations
 
 import functools
+import hashlib
 import math
 from collections.abc import Mapping, MutableMapping
 
 
 TRAINING_CONTRACT_SCHEMA_VERSION = 3
+ACTOR_LEG_REF_MASK_PROVENANCE_EPOCH = 1
+ACTOR_LEG_REF_MASK_PROVENANCE_KEY = "actor_leg_ref_mask_provenance_epoch"
+ACTOR_LEG_REF_MASK_PROVENANCE_BINDING_KEY = "actor_leg_ref_mask_provenance_sha256"
 CHECKPOINT_CONTRACT_SCHEMA_KEY = "training_contract_schema_version"
 CHECKPOINT_CONTRACT_SHA_KEY = "training_contract_sha256"
 CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY = "training_contract_lineage_exact"
@@ -72,19 +76,119 @@ RUNTIME_EXECUTION_KEYS = (
 )
 
 
+def actor_leg_ref_mask_provenance_required(contract: Mapping) -> bool:
+    """Return whether the actor has the 62-D command term whose leg semantics may be masked."""
+
+    names = contract.get("actor_obs_term_names")
+    dims = contract.get("actor_obs_term_dims")
+    if not isinstance(names, (list, tuple)) or not isinstance(dims, (list, tuple)):
+        return False
+    return any(
+        str(name) == "command" and type(dim) is int and dim == 62
+        for name, dim in zip(names, dims)
+    )
+
+
+def require_actor_leg_ref_mask_provenance(contract: Mapping) -> None:
+    """Reject command-bearing contracts from before explicit mask/unmasked provenance existed."""
+
+    if not actor_leg_ref_mask_provenance_required(contract):
+        if contract.get("actor_leg_ref_mask") is True:
+            raise ValueError("actor_leg_ref_mask is invalid without a 62-D command term")
+        return
+    epoch = contract.get(ACTOR_LEG_REF_MASK_PROVENANCE_KEY)
+    if isinstance(epoch, bool) or type(epoch) is not int or epoch != ACTOR_LEG_REF_MASK_PROVENANCE_EPOCH:
+        raise ValueError(
+            "command-bearing training contract lacks actor_leg_ref_mask_provenance_epoch=1; "
+            "pre-epoch masked and unmasked checkpoints are indistinguishable"
+        )
+
+
+def actor_leg_ref_mask_provenance_payload(
+    *, training_contract_sha256: str, source_checkpoint_sha256: str, masked: bool
+) -> str:
+    """Build the stable payload binding mask semantics to one contract/checkpoint pair."""
+
+    contract_sha = str(training_contract_sha256).strip()
+    checkpoint_sha = str(source_checkpoint_sha256).strip()
+    for name, value in (
+        ("training_contract_sha256", contract_sha),
+        ("source_checkpoint_sha256", checkpoint_sha),
+    ):
+        if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
+            raise ValueError(f"{name} must be 64 lowercase hex characters")
+    if type(masked) is not bool:
+        raise ValueError("actor_leg_ref_mask provenance masked value must be boolean")
+    return (
+        f"actor_leg_ref_mask_provenance_epoch={ACTOR_LEG_REF_MASK_PROVENANCE_EPOCH}\n"
+        f"actor_leg_ref_mask={1 if masked else 0}\n"
+        f"training_contract_sha256={contract_sha}\n"
+        f"source_checkpoint_sha256={checkpoint_sha}\n"
+    )
+
+
+def actor_leg_ref_mask_provenance_sha256(
+    *, training_contract_sha256: str, source_checkpoint_sha256: str, masked: bool
+) -> str:
+    payload = actor_leg_ref_mask_provenance_payload(
+        training_contract_sha256=training_contract_sha256,
+        source_checkpoint_sha256=source_checkpoint_sha256,
+        masked=masked,
+    )
+    return hashlib.sha256(payload.encode("ascii")).hexdigest()
+
+
 def bind_actor_leg_ref_mask_metadata(
     metadata: MutableMapping[str, str], contract: Mapping | None
 ) -> None:
     """Replace donor mask provenance with the checkpoint contract's authoritative value.
 
-    The key is intentionally only-when-true: absence means an unmasked actor.  Clearing first is
-    essential for standalone exports, where a masked donor may otherwise contaminate an unmasked
-    checkpoint (or a legacy checkpoint with no formal contract).
+    The key is intentionally only-when-true, but absence means unmasked only beside epoch 1.
+    Clearing first is essential for standalone exports, where a donor may otherwise contaminate
+    a checkpoint or launder ambiguous pre-epoch provenance.
     """
 
     metadata.pop("actor_leg_ref_mask", None)
-    if contract is not None and contract.get("actor_leg_ref_mask") is True:
+    metadata.pop(ACTOR_LEG_REF_MASK_PROVENANCE_KEY, None)
+    metadata.pop(ACTOR_LEG_REF_MASK_PROVENANCE_BINDING_KEY, None)
+    if contract is None or not actor_leg_ref_mask_provenance_required(contract):
+        return
+    require_actor_leg_ref_mask_provenance(contract)
+    masked = contract.get("actor_leg_ref_mask") is True
+    metadata[ACTOR_LEG_REF_MASK_PROVENANCE_KEY] = str(ACTOR_LEG_REF_MASK_PROVENANCE_EPOCH)
+    metadata[ACTOR_LEG_REF_MASK_PROVENANCE_BINDING_KEY] = (
+        actor_leg_ref_mask_provenance_sha256(
+            training_contract_sha256=metadata.get("training_contract_sha256", ""),
+            source_checkpoint_sha256=metadata.get("source_checkpoint_sha256", ""),
+            masked=masked,
+        )
+    )
+    if masked:
         metadata["actor_leg_ref_mask"] = "1"
+        # Old consumers ignore unknown mask metadata. Keep the established exactness bit false so
+        # they also reject this unsupported observation semantics instead of publishing it.
+        metadata["training_contract_exact"] = "0"
+
+
+def _canonical_actor_leg_ref_mask_callables():
+    """Return the two exact command functions allowed to mint epoch-1 provenance."""
+
+    from isaaclab.envs.mdp import generated_commands
+    from whole_body_tracking.tasks.tracking.mdp.hope_observations import (
+        generated_commands_actor_leg_masked,
+    )
+
+    return (
+        (generated_commands, False),
+        (generated_commands_actor_leg_masked, True),
+    )
+
+
+def _classify_actor_leg_ref_mask_callable(func) -> bool | None:
+    for canonical, masked in _canonical_actor_leg_ref_mask_callables():
+        if func is canonical:
+            return masked
+    return None
 
 
 def resolve_motion_body_lin_vel_points(kinematics_contracts) -> tuple[str, ...]:
@@ -225,7 +329,9 @@ def _observation_history_lengths(env, names: list[str]) -> list[int]:
     return out
 
 
-def runtime_execution_facts(env, actor_contract) -> dict:
+def runtime_execution_facts(
+    env, actor_contract, *, allow_legacy_actor_leg_ref_mask_ambiguity: bool = False
+) -> dict:
     """Extract schema-3 execution facts from the instantiated, startup-initialized environment."""
     robot = env.scene["robot"]
     data = robot.data
@@ -387,26 +493,16 @@ def runtime_execution_facts(env, actor_contract) -> dict:
     qdes_clamp = bool(
         getattr(action, "_clamp_enabled", getattr(env.cfg.actions.joint_pos, "clamp", False))
     )
-    # R-a actor leg-reference masking leaves the 62-D command layout untouched, so without this
-    # fact a masked run's contract is byte-indistinguishable from an unmasked one — and no
-    # evaluator implements the mask. Detect it from the swapped observation term (train.py wires
-    # task.actor_leg_ref_mask to mdp.generated_commands_actor_leg_masked). Key present only when
-    # True: unmasked contracts and their sha256 stay byte-identical. Detection unwraps partials
-    # and prefers the durable marker attribute stamped at the function definition, so a rename
-    # or wrapper cannot silently drop the fact (a miss would defeat the evaluator's refusal).
+    # R-a masking leaves the 62-D layout unchanged, so both the true-only mask bit and an always
+    # present provenance epoch are needed: only epoch=1 + absent mask proves unmasked. Detection
+    # unwraps partials and accepts only the two canonical marked callables; an unknown wrapper may
+    # not silently mint epoch-1 provenance.
     _cmd_term = getattr(
         getattr(getattr(env.cfg, "observations", None), "policy", None), "command", None
     )
     _cmd_func = getattr(_cmd_term, "func", None)
     while isinstance(_cmd_func, functools.partial):
         _cmd_func = _cmd_func.func
-    actor_leg_ref_mask = bool(
-        _cmd_func is not None
-        and (
-            getattr(_cmd_func, "actor_leg_ref_mask", False)
-            or getattr(_cmd_func, "__name__", "") == "generated_commands_actor_leg_masked"
-        )
-    )
     facts = {
         "articulation_joint_names": articulation_names,
         "action_joint_ids": ids,
@@ -445,8 +541,17 @@ def runtime_execution_facts(env, actor_contract) -> dict:
         "motion_kinematics_contracts": kinematics_contracts,
         "motion_kinematics_exact": kinematics_exact,
     }
-    if actor_leg_ref_mask:
-        facts["actor_leg_ref_mask"] = True
+    if any(name == "command" and dim == 62 for name, dim in zip(obs_names, obs_dims)):
+        actor_leg_ref_mask = _classify_actor_leg_ref_mask_callable(_cmd_func)
+        if actor_leg_ref_mask is None and not allow_legacy_actor_leg_ref_mask_ambiguity:
+            raise RuntimeError(
+                "62-D actor command func is not one of the two canonical epoch-1 callables; "
+                "wrappers and copied provenance attributes are not authoritative"
+            )
+        if actor_leg_ref_mask is not None:
+            facts[ACTOR_LEG_REF_MASK_PROVENANCE_KEY] = ACTOR_LEG_REF_MASK_PROVENANCE_EPOCH
+        if actor_leg_ref_mask is True:
+            facts["actor_leg_ref_mask"] = True
     return facts
 
 
@@ -473,11 +578,45 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
     missing = [key for key in (*RUNTIME_EXECUTION_KEYS, *SCHEMA3_TASK_KEYS) if key not in contract]
     if missing:
         raise ValueError("schema-3 training contract missing execution facts: " + ", ".join(missing))
+    actor_names_raw = contract["actor_obs_term_names"]
+    actor_dims_raw = contract["actor_obs_term_dims"]
+    actor_history_raw = contract["observation_history_lengths"]
+    if (
+        not isinstance(actor_names_raw, (list, tuple))
+        or not isinstance(actor_dims_raw, (list, tuple))
+        or not isinstance(actor_history_raw, (list, tuple))
+        or not actor_names_raw
+        or len(actor_names_raw) != len(actor_dims_raw)
+        or len(actor_names_raw) != len(actor_history_raw)
+    ):
+        raise ValueError(
+            "schema-3 actor observation names/dims/history must be non-empty equal-length arrays"
+        )
+    if any(type(name) is not str or not name.strip() for name in actor_names_raw):
+        raise ValueError("schema-3 actor observation names must be non-empty strings")
+    if len(set(actor_names_raw)) != len(actor_names_raw):
+        raise ValueError("schema-3 actor observation names must be unique")
+    if any(type(dim) is not int or dim <= 0 for dim in actor_dims_raw):
+        raise ValueError("schema-3 actor observation dims must be positive integers")
+    if any(type(value) is not int or value <= 0 for value in actor_history_raw):
+        raise ValueError("schema-3 actor observation history lengths must be positive integers")
+    actor_total = contract["actor_obs_total_dim"]
+    if type(actor_total) is not int or actor_total != sum(actor_dims_raw):
+        raise ValueError("schema-3 actor_obs_total_dim must equal the sum of term dims")
     for key in ("face_command_enabled", "motion_allow_legacy_link_origin_velocity"):
         if key in contract and not isinstance(contract[key], bool):
             raise ValueError(f"schema-3 {key} must be boolean when present")
+    if ACTOR_LEG_REF_MASK_PROVENANCE_KEY in contract:
+        epoch = contract[ACTOR_LEG_REF_MASK_PROVENANCE_KEY]
+        if (
+            isinstance(epoch, bool)
+            or type(epoch) is not int
+            or epoch != ACTOR_LEG_REF_MASK_PROVENANCE_EPOCH
+        ):
+            raise ValueError("schema-3 actor_leg_ref_mask_provenance_epoch must be integer 1")
     if "actor_leg_ref_mask" in contract and contract["actor_leg_ref_mask"] is not True:
         raise ValueError("schema-3 actor_leg_ref_mask must be true when present")
+    require_actor_leg_ref_mask_provenance(contract)
     if "face_command_pairing" in contract and contract["face_command_pairing"] not in (
         "shared_plus_y",
         "legacy_signed_vs_A",

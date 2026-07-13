@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -32,8 +33,20 @@ VARIANTS = (
     "metadata_stripped",
     "missing_envelope",
     "training_contract_inexact",
+    "missing_actor_leg_ref_mask_provenance",
+    "missing_actor_leg_ref_mask_binding",
     "actor_leg_ref_mask_unsupported",
 )
+
+
+def actor_leg_ref_mask_binding(metadata: dict[str, str]) -> str:
+    payload = (
+        "actor_leg_ref_mask_provenance_epoch=1\n"
+        f"actor_leg_ref_mask={1 if metadata.get('actor_leg_ref_mask') == '1' else 0}\n"
+        f"training_contract_sha256={metadata.get('training_contract_sha256', '')}\n"
+        f"source_checkpoint_sha256={metadata.get('source_checkpoint_sha256', '')}\n"
+    )
+    return hashlib.sha256(payload.encode("ascii")).hexdigest()
 
 
 def mutate_metadata(metadata: dict[str, str], variant: str) -> dict[str, str]:
@@ -46,8 +59,13 @@ def mutate_metadata(metadata: dict[str, str], variant: str) -> dict[str, str]:
         result.pop("stage1_normal_envelope_payload_sha256", None)
     elif variant == "training_contract_inexact":
         result["training_contract_exact"] = "0"
+    elif variant == "missing_actor_leg_ref_mask_provenance":
+        result.pop("actor_leg_ref_mask_provenance_epoch", None)
+    elif variant == "missing_actor_leg_ref_mask_binding":
+        result.pop("actor_leg_ref_mask_provenance_sha256", None)
     elif variant == "actor_leg_ref_mask_unsupported":
         result["actor_leg_ref_mask"] = "1"
+        result["actor_leg_ref_mask_provenance_sha256"] = actor_leg_ref_mask_binding(result)
     else:
         raise ValueError(f"unknown preflight mutation variant: {variant}")
     return result
@@ -109,6 +127,14 @@ def run_suite(
         raise RuntimeError("integration baseline must be a 179-D ONNX")
     if metadata.get("training_contract_exact") != "1":
         raise RuntimeError("integration baseline must declare training_contract_exact=1")
+    if metadata.get("actor_leg_ref_mask_provenance_epoch") != "1":
+        raise RuntimeError(
+            "integration baseline must declare actor_leg_ref_mask_provenance_epoch=1"
+        )
+    if metadata.get("actor_leg_ref_mask_provenance_sha256") != actor_leg_ref_mask_binding(metadata):
+        raise RuntimeError(
+            "integration baseline actor leg-reference mask provenance is not content-bound"
+        )
     if not metadata.get("stage1_normal_envelope_payload_sha256"):
         raise RuntimeError("integration baseline must carry the formal normal envelope")
 

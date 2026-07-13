@@ -624,7 +624,19 @@ def _metadata(*, schema="2", baked=None, empirical=None, sidecar_sha=None,
         "anchor_body_name": M.ANCHOR_BODY,
         "observation_names": "legacy_175",
         "clip_seg_lengths": "10,20",
+        "actor_leg_ref_mask_provenance_epoch": "1",
+        "training_contract_sha256": "b" * 64,
+        "source_checkpoint_sha256": "a" * 64,
     }
+    mask_payload = (
+        "actor_leg_ref_mask_provenance_epoch=1\n"
+        "actor_leg_ref_mask=0\n"
+        f"training_contract_sha256={'b' * 64}\n"
+        f"source_checkpoint_sha256={'a' * 64}\n"
+    )
+    md["actor_leg_ref_mask_provenance_sha256"] = hashlib.sha256(
+        mask_payload.encode("ascii")
+    ).hexdigest()
     if baked is not None:
         md["obs_norm_baked"] = str(int(baked))
     if empirical is not None:
@@ -676,7 +688,10 @@ class _FakeSession:
         return SimpleNamespace(custom_metadata_map=self._md)
 
 
-def _policy(monkeypatch, tmp_path, md, obs_norm="auto", graph_baked=False):
+def _policy(
+    monkeypatch, tmp_path, md, obs_norm="auto", graph_baked=False,
+    allow_inexact_contract=False,
+):
     fake_ort = SimpleNamespace(InferenceSession=lambda *_args, **_kwargs: _FakeSession(md))
     monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
     monkeypatch.setattr(
@@ -684,7 +699,62 @@ def _policy(monkeypatch, tmp_path, md, obs_norm="auto", graph_baked=False):
         "inspect_onnx_obs_normalization",
         lambda _path: (graph_baked, "test graph inspection"),
     )
-    return M.OnnxPolicy(str(tmp_path / "policy.onnx"), obs_norm=obs_norm)
+    return M.OnnxPolicy(
+        str(tmp_path / "policy.onnx"),
+        obs_norm=obs_norm,
+        allow_inexact_contract=allow_inexact_contract,
+    )
+
+
+def test_actor_leg_ref_mask_epoch_is_required_for_command_models_and_mask_is_refused(
+    monkeypatch, tmp_path,
+):
+    epoch_only_backfill = _metadata(schema="", baked=True, empirical=True)
+    epoch_only_backfill.pop("actor_leg_ref_mask_provenance_sha256")
+    with pytest.raises(SystemExit, match="not content-bound"):
+        _policy(monkeypatch, tmp_path, epoch_only_backfill, graph_baked=True)
+
+    missing_bound_hashes = _metadata(schema="", baked=True, empirical=True)
+    missing_bound_hashes.pop("training_contract_sha256")
+    missing_bound_hashes.pop("source_checkpoint_sha256")
+    with pytest.raises(SystemExit, match="requires valid training-contract"):
+        _policy(monkeypatch, tmp_path, missing_bound_hashes, graph_baked=True)
+
+    md = _metadata(schema="", baked=True, empirical=True)
+    md.pop("actor_leg_ref_mask_provenance_epoch")
+    md.pop("actor_leg_ref_mask_provenance_sha256")
+    with pytest.raises(SystemExit, match="masked and unmasked checkpoints are indistinguishable"):
+        _policy(monkeypatch, tmp_path, md, graph_baked=True)
+
+    diagnostic = _policy(
+        monkeypatch,
+        tmp_path,
+        md,
+        graph_baked=True,
+        allow_inexact_contract=True,
+    )
+    assert diagnostic.actor_leg_ref_mask_provenance_exact is False
+    assert diagnostic.evaluation_contract_exact is False
+
+    md = _metadata(schema="", baked=True, empirical=True)
+    md["actor_leg_ref_mask"] = "1"
+    mask_payload = (
+        "actor_leg_ref_mask_provenance_epoch=1\n"
+        "actor_leg_ref_mask=1\n"
+        f"training_contract_sha256={'b' * 64}\n"
+        f"source_checkpoint_sha256={'a' * 64}\n"
+    )
+    md["actor_leg_ref_mask_provenance_sha256"] = hashlib.sha256(
+        mask_payload.encode("ascii")
+    ).hexdigest()
+    with pytest.raises(SystemExit, match="no counterpart"):
+        _policy(
+            monkeypatch,
+            tmp_path,
+            md,
+            graph_baked=True,
+            allow_inexact_contract=True,
+        )
 
 
 def _write_sidecar(path, *, std=1.0, eps_value=1e-2):

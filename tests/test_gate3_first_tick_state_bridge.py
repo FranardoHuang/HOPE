@@ -133,10 +133,12 @@ def test_v1_source_contract_remains_immutable_historical_evidence() -> None:
         assert hashlib.sha256(result.stdout).hexdigest() == artifact["sha256"]
 
 
-def test_v2_source_contract_hashes_current_bytes_and_keeps_runtime_null() -> None:
-    contract = json.loads(
-        (ROOT / "configs/gate3_first_tick_source_contract_v2_20260712.json").read_text()
+def test_v2_source_contract_remains_immutable_historical_evidence() -> None:
+    path = ROOT / "configs/gate3_first_tick_source_contract_v2_20260712.json"
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == (
+        "9b0208b56790f47680e9437754d43a04a0178274600af1518f64f31156c5d704"
     )
+    contract = json.loads(path.read_text())
     required_reviewed_subset = {
         "production_build_definition",
         "production_runtime_config",
@@ -175,12 +177,74 @@ def test_v2_source_contract_hashes_current_bytes_and_keeps_runtime_null() -> Non
     assert "formal tuple source is merged" in " ".join(exactness["inexact_reasons"])
     assert exactness["inexact_reasons"]
     for artifact in contract["tracked_artifacts"].values():
-        data = (ROOT / artifact["path"]).read_bytes()
-        assert hashlib.sha256(data).hexdigest() == artifact["sha256"]
+        result = subprocess.run(
+            ["git", "show", f"6d6b778:{artifact['path']}"],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr.decode(errors="replace")
+        assert hashlib.sha256(result.stdout).hexdigest() == artifact["sha256"]
     bindings = contract["runtime_bindings"]
     assert bindings["runtime_exact"] is False
     for key, value in bindings.items():
         if key != "runtime_exact":
             assert value is None
+    assert contract["verification"]["vendor_first_tick"] == "not_run"
+    assert contract["verification"]["gate3_gate3b"] == "not_run"
+
+
+def test_v3_source_contract_hashes_current_bytes_and_keeps_runtime_null() -> None:
+    contract = json.loads(
+        (ROOT / "configs/gate3_first_tick_source_contract_v3_20260713.json").read_text()
+    )
+    required_reviewed_subset = {
+        "production_build_definition",
+        "production_runtime_config",
+        "production_policy_capture",
+        "production_onnx_loader",
+        "production_sha256",
+        "robot_state_interface",
+        "robot_state_synchronizer",
+        "production_policy_driver",
+        "native_state_bridge",
+        "native_json_contract",
+        "production_runner_entrypoint",
+        "formal_planner_input",
+        "formal_wire_encoder",
+        "formal_planner_node",
+        "formal_runtime_contract",
+    }
+    assert contract["schema_version"] == 2
+    assert contract["supersedes"] == {
+        "path": "configs/gate3_first_tick_source_contract_v2_20260712.json",
+        "sha256": "9b0208b56790f47680e9437754d43a04a0178274600af1518f64f31156c5d704",
+        "historical_source_commit": "6d6b778",
+        "rule": (
+            "v2 remains immutable historical evidence and is verified against its merge commit; "
+            "v3 binds current integrated source bytes"
+        ),
+    }
+    assert required_reviewed_subset <= set(contract["tracked_artifacts"])
+    exactness = contract["exactness"]
+    assert all(
+        exactness[key] is False
+        for key in (
+            "evaluation_contract_exact",
+            "planner_snapshot_exact",
+            "native_sample_alignment_exact",
+            "source_binary_binding_exact",
+            "source_semantics_closure_exact",
+            "runtime_artifact_closure_exact",
+        )
+    )
+    assert "fresh epoch-1 179-D ONNX" in " ".join(exactness["inexact_reasons"])
+    for artifact in contract["tracked_artifacts"].values():
+        assert hashlib.sha256((ROOT / artifact["path"]).read_bytes()).hexdigest() == (
+            artifact["sha256"]
+        )
+    bindings = contract["runtime_bindings"]
+    assert bindings["runtime_exact"] is False
+    assert all(value is None for key, value in bindings.items() if key != "runtime_exact")
     assert contract["verification"]["vendor_first_tick"] == "not_run"
     assert contract["verification"]["gate3_gate3b"] == "not_run"
