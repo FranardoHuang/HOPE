@@ -19,10 +19,14 @@ signed-face 诚实门，挡球必须另出挡球题。
 
 2026-07-13 源码审计发现原 `d8c918ac...5a9f` prereg 绑定的旧 analytic scorer 会在
 `orient_normal` 中抹掉 `n/-n`；该 prereg 尚未执行，现已撤销而不追认。替代 manifest SHA 为
-`69bdeabc...9eb62`，绑定 scorer `9d01da15...0f5ec` 与 proposal tool
-`43eccb43...289b4`：每题按 forehand/backhand `[+1,-1]` 把 raw-A 映射到 physical-B，并在
+`0f757c8c...af66a`，绑定 scorer `9d01da15...0f5ec` 与 proposal tool
+`d053dd50...5259b`：每题按 forehand/backhand `[+1,-1]` 把 raw-A 映射到 physical-B，并在
 plane orientation 前要求有符号 hemisphere 与 B.x `>1e-6`。这只是 E1 量尺修正，没有重跑
 proposal，也没有改变任何动作的候选/晋级状态。
+
+首次对真实 v5 输入点火还抓到一个运行前验证器错误：接受结果把 `capture_table_pose_observed=false`
+放在 `frame_contract`，而 `frame_contract_evidence` 只保存 path/bytes/SHA；旧读取位置因此在生成任何
+proposal 前 fail closed。当前源码改为同时绑定 evidence SHA 和真实 contract 字段；缺失或 true 仍拒绝。
 
 下一步只允许在冻结边界内，对整段动作做一次保持接地的 SE(2) 变换；不允许修改 z、尺度、镜像、关节或逐帧轨迹。
 目前没有候选 certificate，也没有动作被推广。进入 TOPP/RL/Gate3 前仍需通过 exact schema-2、L0、厂商 L1、

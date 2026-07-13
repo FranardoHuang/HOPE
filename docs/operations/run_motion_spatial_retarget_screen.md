@@ -8,7 +8,7 @@ candidate phases/stations; it does not approve a motion.
 
 The preregistration is
 `configs/motion_video_spatial_retarget_prereg_20260712.json`, SHA-256
-`69bdeabc9b5a934143c52ec6a7fe28ab0a0be6573b2f14f0748e49063c69eb62`.
+`0f757c8c4abfc9bf5070b7db79f494fa1d97a45ddb222609898662eff63af66a`.
 The earlier `d8c918ac...5a9f` preregistration was never executed and is revoked: it bound the
 historical unsigned-plane scorer that cannot distinguish `n` from `-n`. Do not run or reconstruct
 that SHA.
@@ -18,9 +18,14 @@ but no motion is omitted.
 The proposal ID also binds the source-motion SHA and predecessor-result SHA, so
 the same asset name/frame cannot reuse a certificate after its bytes change.
 The scorer implementation is pinned at `9d01da15...0f5ec`, and the proposal tool at
-`43eccb43...289b4`, together with the
+`d053dd50...5259b`, together with the
 venue physics and explicit `9.5 cm` capture / `0.3 m/s` approach / `10 ms x 100`
 rollout constants.
+
+The 2026-07-13 runtime-input fix reads `capture_table_pose_observed=false` from the accepted
+result's `frame_contract`; `frame_contract_evidence` is only the content-addressed pointer.  The
+previous validator incorrectly required the claim on that pointer and rejected the real accepted
+artifact before screening.  Missing/true claims still fail closed.
 
 Returnability also binds the [signed-face contract](../interfaces/racket_contact_geometry.md):
 forehand/backhand map physical B to raw A with `[+1,-1]`; achieved and demanded raw-A normals must

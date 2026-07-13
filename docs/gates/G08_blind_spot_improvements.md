@@ -404,9 +404,12 @@ validator 和 operation 仍固定旧三 reward/full `2^3`；新设计尚未物�
 self-hit 和整轨桌网扫掠余量 `>=5 mm` 只授予训练资格，不证明回球有效。
 
 2026-07-13 的 `n/-n` 负控已证明旧动作 virtual-return scorer 对物理拍面符号失明。未执行的
-spatial-retarget prereg 因此从 `d8c918ac...5a9f` 重绑到 `69bdeabc...9eb62`，要求 raw-A、每侧
+spatial-retarget prereg 因此从 `d8c918ac...5a9f` 重绑到 `0f757c8c...af66a`，要求 raw-A、每侧
 `[+1,-1]` physical-B 与 pre-orient +X/hemisphere 门；这只修量尺。已完成的 v5 保留安全/frame
 子树，但回球/phase/library 列降为旧 unsigned-plane 诊断，不追认、不覆盖，也没有新动作晋级。
+真实 v5 输入首次点火又发现 contract 字段读取层级错误：外参未观测声明位于 `frame_contract`，不是
+仅含路径/SHA 的 `frame_contract_evidence`。修正后的 tool `d053dd50...5259b` 同时验证 evidence SHA
+和显式 false；缺失/true 仍 fail closed。该修复只解除运行前假拒绝，不增加动作行为 credit。
 
 ## 组合动作新增设计（2026-07-13）
 

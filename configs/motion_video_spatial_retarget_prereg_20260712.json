@@ -10,8 +10,8 @@
   "capture_table_pose_observed": false,
   "tool_contract": {
     "path": "scripts/screen_motion_spatial_retarget.py",
-    "bytes": 33513,
-    "sha256": "43eccb436ca4577674615a82b2c89f726b98db48087d7c1838174fca896289b4"
+    "bytes": 34152,
+    "sha256": "d053dd50bffcb17758fe61cb191e46fbc35c0033cb8b4d5d337723a734a5259b"
   },
   "predecessor": {
     "full_v5_result": {

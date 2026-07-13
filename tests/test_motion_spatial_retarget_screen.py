@@ -13,7 +13,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "screen_motion_spatial_retarget.py"
-MANIFEST_SHA256 = "69bdeabc9b5a934143c52ec6a7fe28ab0a0be6573b2f14f0748e49063c69eb62"
+MANIFEST_SHA256 = "0f757c8c4abfc9bf5070b7db79f494fa1d97a45ddb222609898662eff63af66a"
 SPEC = importlib.util.spec_from_file_location("screen_motion_spatial_retarget", SCRIPT)
 assert SPEC and SPEC.loader
 mod = importlib.util.module_from_spec(SPEC)
@@ -221,6 +221,9 @@ def _full_result(plan: dict) -> dict:
         "contact_phase_truth": None,
         "frame_contract_evidence": {
             "sha256": plan["predecessor"]["frame_evidence_sha256"],
+        },
+        "frame_contract": {
+            "evidence_sha256": plan["predecessor"]["frame_evidence_sha256"],
             "capture_table_pose_observed": False,
         },
         "question_schedule": {
@@ -238,7 +241,12 @@ def test_predecessor_rejects_table_pose_or_incomplete_asset_paper() -> None:
     questions, assets = mod.validate_predecessor_result(full, plan)
     assert len(questions) == 64 and len(assets) == 10
 
-    full["frame_contract_evidence"]["capture_table_pose_observed"] = True
+    full["frame_contract"]["capture_table_pose_observed"] = True
+    with pytest.raises(mod.RetargetError, match="capture-table"):
+        mod.validate_predecessor_result(full, plan)
+
+    full = _full_result(plan)
+    full["frame_contract"].pop("capture_table_pose_observed")
     with pytest.raises(mod.RetargetError, match="capture-table"):
         mod.validate_predecessor_result(full, plan)
 

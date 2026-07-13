@@ -371,9 +371,17 @@ def validate_predecessor_result(full_result: dict[str, Any], plan: dict[str, Any
         raise RetargetError("v5 predecessor must remain diagnostic/non-robot")
     if full_result.get("contact_phase_truth") is not None:
         raise RetargetError("v5 predecessor gained impossible contact truth")
-    frame = full_result.get("frame_contract_evidence")
-    if not isinstance(frame, dict) or frame.get("sha256") != plan["predecessor"]["frame_evidence_sha256"]:
+    frame_evidence = full_result.get("frame_contract_evidence")
+    expected_frame_sha = plan["predecessor"]["frame_evidence_sha256"]
+    if not isinstance(frame_evidence, dict) or frame_evidence.get("sha256") != expected_frame_sha:
         raise RetargetError("v5 frame evidence binding changed")
+    # The accepted v5 result keeps the content-addressed evidence reference separate from the
+    # interpreted frame contract.  Read the capture-extrinsic claim from the latter; requiring it
+    # on the evidence pointer rejects the real accepted artifact even though it explicitly records
+    # ``capture_table_pose_observed=false`` in ``frame_contract``.
+    frame = full_result.get("frame_contract")
+    if not isinstance(frame, dict) or frame.get("evidence_sha256") != expected_frame_sha:
+        raise RetargetError("v5 frame contract/evidence binding changed")
     if frame.get("capture_table_pose_observed") is not False:
         raise RetargetError("v5 predecessor must not claim capture-table pose")
     questions = _question_rows(full_result, plan["predecessor"]["question_semantic_sha256"])
