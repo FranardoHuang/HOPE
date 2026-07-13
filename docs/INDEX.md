@@ -69,7 +69,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | [S0/M0 exact donor canonical-beta](experiments/motion_canonical_beta_s0_m0_20260713.md) | 真实 `1+4` 条 PT 已在绑定 CPU runtime consume 且 non-beta bit-exact；只解锁 exact GMR prereg，A3 脚距仍全 null |
 | [S0/M0 exact GMR 与横移脚距](experiments/motion_exact_gmr_s0_m0_20260713.md) | E1 consumer/阈值/report-last 已冻结；tree/model SHA 已补，direct retarget XML order/site 与 import/Python path 仍由 16 项机器清单阻塞，尚未运行 |
 | [v12/高点拍压/横移组合设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md) | S0/M0 已完成 GVHMR 与 canonical-beta；没有 GMR/schema-2 动作、仿真或训练结果 |
-| [非击球臂模仿消融](experiments/non_striking_arm_imitation_ablation_20260713.md) | 只有设计；尚未运行配对实验 |
+| [非击球臂模仿消融](experiments/non_striking_arm_imitation_ablation_20260713.md) | E1：A0/A1 direct-mask machine prereg/plan-only runner 已完成；Pod runtime/训练/同卷判读尚未运行 |
 
 ## Gate 索引
 
@@ -91,6 +91,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | --- | --- |
 | 构建与测试 | [`build_and_test.md`](operations/build_and_test.md) |
 | Isaac 训练 | [`run_training.md`](operations/run_training.md) |
+| A0/A1 非击球臂模仿配对 | [`run_phase1_non_striking_arm_imitation_a01.md`](operations/run_phase1_non_striking_arm_imitation_a01.md) |
 | 统一队列、排序与算力 | [`runbook.md`](runbook.md) |
 | 共享 RunPod 作业 | [`run_on_runpod.md`](operations/run_on_runpod.md) |
 | Fresh model-4000 q50 考卷 | [`run_phase1_fresh_sz_model4000_seed_stability_q50.md`](operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md) |

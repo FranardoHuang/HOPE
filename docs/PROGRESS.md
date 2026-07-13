@@ -29,6 +29,15 @@
   [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-PAPER.md)与
   [操作](operations/run_phase1_signed_face_exam_k100.md)。
 
+- 非击球臂 A0/A1 直接 mask 已从设计升级为 E1 machine prereg：训练 override 同时只从位置/姿态/
+  线速度/角速度四条模仿 Reward 删除左 shoulder/elbow/wrist，并用负测证明右击球臂/躯干、reward
+  参数、关节/动作/力矩/接触/自碰/终止安全均不变；四项 post-override body list 已进入 checkpoint
+  hard contract，A0/A1 各绑不同 SHA，去掉该唯一字段后必须完全相同。两条 fresh seed17 长臂绑定同 motion/bank/
+  `4096 env × 1001 update`，默认 plan-only、root token 点火、no-clobber runtime/finalizer、
+  `+200/+500/+1000` 早判；A2 固定预算继续 blocked。专项合计 `71 passed`；尚未在 Pod 做 runtime
+  validate/训练/判卷或真机。见[实验](experiments/non_striking_arm_imitation_ablation_20260713.md)与
+  [操作](operations/run_phase1_non_striking_arm_imitation_a01.md)。
+
 - MuJoCo frame/evaluator integration 的独立红队 `NO-MERGE` 阻塞已逐项关闭并合入 main：bound implicit
   改为每 substep 执行 Isaac `clip(P-D)`；被动/无 effort-limit 代理 formal fail closed；自碰只认 pelvis
   机器人子树且 formal 首次即拒绝，动态球不误报；mask 供证只接受 canonical/严格空 partial；旧

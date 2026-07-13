@@ -60,7 +60,7 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 | [S0/M0 exact donor canonical-beta](motion_canonical_beta_s0_m0_20260713.md) | 能否给新五条 exact PT 注入旧 donor，同时保证 beta 外 save/reload bit-exact？ | Franco | Codex | runtime consumed | E2 | 真实 `1+4` 条 PT 已 materialize 且 non-beta bit-exact；只解锁 exact GMR prereg |
 | [S0/M0 exact GMR 与横移脚距](motion_exact_gmr_s0_m0_20260713.md) | 五条 canonical-beta PT 能否严格进入 A3 GMR，并拒绝横移末态收脚变窄？ | Franco | Codex | runtime blocked | E1 | 两份 batch 已预注册；shared runtime 仍缺 direct XML order/site 与 import/Python path 的 16 项只读证据，尚未运行 |
 | [v12/高点拍压/横移组合设计](motion_v12_high_press_lateral_teacher_20260713.md) | 新动作和横移下肢老师怎样进入各自题族与全身组合？ | franco | Codex | proposed | E0 | S0/M0 已到 canonical-beta；GMR 后的组合与行为仍只有设计 |
-| [非击球臂模仿消融](non_striking_arm_imitation_ablation_20260713.md) | 解除左臂模仿能否改善平衡且不破坏击球？ | franco | Codex | proposed | E0 | 配对实验尚未运行 |
+| [非击球臂模仿消融](non_striking_arm_imitation_ablation_20260713.md) | 解除左臂模仿能否改善平衡且不破坏击球？ | Franco | Codex | preregistered | E1 | A0/A1 exact direct-mask source/runner 已冻结；Pod runtime/训练/同卷判读尚未运行，A2 固定预算继续 blocked |
 
 新建记录使用 [TEMPLATE.md](TEMPLATE.md)。一个实验对应一个可证伪问题，不是一个 checkpoint；
 各 checkpoint 应作为记录中的表格行。

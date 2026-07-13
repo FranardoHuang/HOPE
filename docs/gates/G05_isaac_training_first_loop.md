@@ -1293,8 +1293,16 @@ parity 门的 MJX/MJWarp。没有 `VecEnv`、PPO、训练、Pod、simulator 或�
 
 另一个配对设计测试是否解除左侧非击球臂的模仿，让它参与平衡；“直接移除 Reward”和“固定总预算
 重新分配”必须分开，所有硬安全保持开启。三份记录见 [实验登记册](../experiments/README.md)。
-非击球臂仍没有配置或训练。S0/M0 有 Pod 离线结构结果，但没有 Isaac/MuJoCo 训练、仿真行为或真机动作，
-G05 仍为 `Partial`。
+后续 E1 source gate 已把 A0/A1 直接 mask 物化：四条 body-imitation Reward 都显式列出
+`body_names`，A1 只删左 shoulder/elbow/wrist，并保持 A0 的躯干/右击球臂、所有权重和硬安全不变；
+contract drift 与错误布尔值 fail closed。machine prereg 固定 fresh seed17、`4096 env × 1001 update`、
+`+200/+500/+1000`，默认 plan-only，Pod launch 需要 root 显式 token，claim/checkpoint/result 都
+no-clobber。checkpoint 内嵌 hard contract 还逐臂绑定 post-override 四项 body list；两臂 hard SHA
+必须不同，而删除该唯一字段后合同必须完全相同。源码/runner 共 `71 passed`，但 Pod
+`validate-runtime`、trainer、checkpoint 和同卷判读均
+尚未发生；A2 固定预算继续 blocked。详见[实验](../experiments/non_striking_arm_imitation_ablation_20260713.md)
+与[操作](../operations/run_phase1_non_striking_arm_imitation_a01.md)。S0/M0 有 Pod 离线结构结果，但没有
+Isaac/MuJoCo 训练、仿真行为或真机动作，G05 仍为 `Partial`。
 
 S0/M0 的 post-GVHMR machine handoff 已完成 exact runtime `consume`，输出分别是 4,970/9,242 bytes，
 SHA-256 `d57a93e0...a1054` / `60c55150...088ef`。下一层 canonical-beta 已拆成两份独立 no-clobber
