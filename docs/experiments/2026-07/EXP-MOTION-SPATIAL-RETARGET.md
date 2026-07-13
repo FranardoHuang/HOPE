@@ -65,5 +65,35 @@ candidate ID。20,084-byte tracked 结果
 另做内容绑定的主选物化与证书合同。host 选择器专项为 `13 passed`，全仓回归为
 `646 passed, 9 skipped`。
 
+## 2026-07-14：B/C 主选整轨站位实体化已实现，尚未发布产物
+
+两条主选现在各有独立、不可覆盖（[no-clobber](../../DEFINITIONS.md)）的预注册：
+
+- B `configs/motion_backhand_loop_b_se2_materialization_prereg_20260714.json`，SHA-256
+  `e016ca74...51aee`；只消费主选 `98e7b883...f3c14`；
+- C `configs/motion_backhand_loop_c_se2_materialization_prereg_20260714.json`，SHA-256
+  `27f938cd...9d454`；只消费主选 `aa0c86fd...af299`。
+
+共同 consumer `scripts/materialize_motion_spatial_se2.py`（SHA-256 `21ebbe68...87375`）先绑定
+Step-A（前一步确定性主选）结果 `8a80a409...8d2be`，再从 exact counterfactual registry
+`fee1b1f9...5529` 逐资产读取 grounded canonical-beta GMR 路径、bytes 与 SHA。它不会从 frozen
+ladder 自动取备选。B 对整轨应用平移 `[0.05035998433,-0.109155849041,0] m` 与 yaw `-5°`；C
+应用 `[0.157231187588,-0.157700713465,0] m` 与 yaw `-10°`。
+
+这是一个 proper、保地的整轨 [SE(2) 平面刚体变换](../../DEFINITIONS.md)：root position 做
+`Rz*p+t`，xyzw root quaternion 做 yaw quaternion 左乘；实际两份源没有 world velocity 字段，若
+未来 exact payload 出现显式 `root_{lin,ang}_vel_world`，只旋转而不平移。`dof_pos`、fps、Z、帧数、
+`local_body_pos` 和 `link_body_list` 保持 bit-exact；未知 payload 字段、任意 pickle global、非零 Z、
+镜像、关节/逐帧/TOPP 编辑均 fail closed。保存重载后再次做逆变换和全帧 root 刚体距离审计，报告最后
+发布。
+
+专项 `10 passed`，全仓 host tests 为 `656 passed, 9 skipped`；两份 exact 私有镜像源的只读
+`inspect` 也通过：B/C 最大 root position 逆误差分别
+`1.39e-17/2.08e-17`，quaternion 逆误差 `2.22e-16/1.11e-16`，全帧两两距离最大误差
+`3.47e-17/4.16e-17 m`，Z bit-exact。这里没有执行 `consume`，所以没有 materialized PKL/report、
+schema-2、L0、vendor L1、桌网整轨、动力学、simulator、训练或真机证据；证书仍为 `0`，状态继续
+promotion blocked。materialization 或内部失败必须停止该资产，不能跳 fallback；只有未来桌/网外部
+几何失败才回到已冻结 selector 的 `resolve`。
+
 权威资料：[G08](../../gates/G08_blind_spot_improvements.md) 和
 [操作文档](../../operations/run_motion_spatial_retarget_screen.md)。

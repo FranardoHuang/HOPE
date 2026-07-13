@@ -233,3 +233,21 @@ save/reload tests are `15 passed, 1 skipped`, with latest-main repository regres
 and copy donor `canonical_betas.json` SHA `f405ba45...4cbf2`.
 For M0, all A3 foot sites, initial/terminal `d_xy`, tolerances and pass result remain null until a
 separately preregistered exact GMR produces robot-coordinate evidence. G04 remains `Partial`.
+
+## Audit update 2026-07-14: B/C exact whole-motion SE(2) materializer
+
+Franco backhand-loop B/C rank-0 proposals now have two independent no-clobber preregistrations and
+one restricted-pickle CPU consumer. It binds the exact main selection ledger, then resolves each
+source path/SHA/bytes through the exact canonical-beta GMR registry. The only permitted spatial
+change is one proper ground-preserving [SE(2)](../DEFINITIONS.md) left action on the full floating
+root trajectory; root xyzw orientation is yaw-left-multiplied, root Z/fps/frame count/joints and
+non-spatial fields remain exact, and explicit world root velocities would rotate without
+translation. Unknown payload fields and non-NumPy pickle globals fail closed.
+
+Ten focused tests and the `656 passed, 9 skipped` host repository suite pass, including
+save/reload inverse, pairwise rigid-distance, grounding,
+mirror, unsafe-pickle, report-last and no-clobber negative controls. Read-only inspect of the two
+locally synced exact B/C private sources also passed with maximum inverse errors below `2.23e-16`
+and pairwise-distance error below `4.17e-17 m`. No output was consumed or published in this change;
+schema-2, L0, vendor L1, table/net clearance, dynamics, simulator, training and hardware remain
+unrun. G04 remains `Partial`.

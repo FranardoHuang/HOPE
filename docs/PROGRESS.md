@@ -11,6 +11,18 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-14
+
+- 反手拉 B/C 的 rank-0 主选已各有独立 no-clobber 整轨站位实体化 prereg（SHA
+  `e016ca74...51aee` / `27f938cd...9d454`）和 restricted-pickle consumer
+  `21ebbe68...87375`。consumer 只做冻结的 proper [SE(2)](DEFINITIONS.md)，验证 xyzw 左乘、
+  Z/fps/dof/non-spatial exact、可选 world velocity 同转、save/reload 逆变换、刚体距离和 report-last；
+  专项 `10 passed`、全仓 host tests `656 passed, 9 skipped`；两份 exact 私有源只读 inspect 的最大
+  逆误差 `<2.23e-16`。本次没有
+  consume/Pod/simulator/RL/真机，schema-2/L0/vendor L1/桌网/动力学仍未跑、证书仍为 0。见
+  [实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)与
+  [操作](operations/run_motion_spatial_retarget_screen.md)。
+
 ## 2026-07-13
 
 - 反手拉 B/C 的 22 条 signed 整轨 proposal 已收敛为 exactly one primary per asset：只把 3 组

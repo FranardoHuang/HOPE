@@ -466,6 +466,22 @@ foot-site mapping 和数值容差须在 GMR result acceptance 前另行预注册
 canonical-beta 的计划、运行边界与未来 A3 脚距 null contract 见
 [canonical-beta 卷宗](../experiments/motion_canonical_beta_s0_m0_20260713.md)。
 
+## 反手拉 B/C 主选整轨 SE(2) 实体化（2026-07-14）
+
+B/C rank-0 主选不再停在“待写 materializer”：两份独立 no-clobber prereg 精确绑定 selection result
+`8a80a409...8d2be`、各自 candidate/source SHA 和 counterfactual registry；同一 consumer 只把冻结的
+XY translation + yaw 作为 proper [SE(2) 平面刚体变换](../DEFINITIONS.md)原子应用到整条 floating-root
+轨迹。它不取 fallback、不改 Z/尺度/关节/逐帧/时间律，不运行 TOPP；xyzw orientation 按 yaw 左乘，
+若 exact payload 带显式 world root velocity 则一致旋转。受限 pickle loader、未知字段 fail-closed、
+save/reload 逆变换、刚体距离、保地、report-last/no-clobber 负测共 `10 passed`，全仓 host tests
+`656 passed, 9 skipped`。
+
+两份 exact 私有源的本地只读 inspect 已通过，但本变更未发布实体化产物，也未运行 schema-2、L0、
+vendor L1、桌网整轨、动力学、simulator/RL 或真机。因此证书仍为 0、G08 仍是 Research track；内部
+materialization 失败必须停止资产，只有后续外部桌/网失败才允许 selector 推进 frozen fallback。
+完整命令与边界见[空间重定位实验](../experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)和
+[操作文档](../operations/run_motion_spatial_retarget_screen.md)。
+
 ## 文档路由更新（2026-07-12）
 
 G08 仍是长期 blind-spot 路线图。当前已采用 setting、阶段/小目标构成和 feature 决定统一放在

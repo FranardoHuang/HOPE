@@ -141,6 +141,49 @@ and must use its exact stop code from the tracked selection contract. Unknown
 codes fail closed. A successful certificate stage continues the same
 candidate and does not call `resolve`.
 
+## Materialize the two frozen primaries without choosing a fallback
+
+This CPU-only step turns each selected whole-motion transform into a new GMR
+pickle. [`SE(2)`](../DEFINITIONS.md) means one proper yaw plus XY translation
+applied to every floating-root frame; it is not per-frame editing or TOPP.
+The B/C plans are independent and no-clobber. `static` reads repository files,
+`inspect` reads the exact private source without writing, and `consume` creates
+the motion first and publishes `materialization_report.json` last.
+
+```bash
+TOOL=scripts/materialize_motion_spatial_se2.py
+test "$(shasum -a 256 "$TOOL" | awk '{print $1}')" = \
+  21ebbe68d5d76acde90bb413f68928df9d87cb053275d9f0f46d36dbf1187375
+
+B_PLAN=configs/motion_backhand_loop_b_se2_materialization_prereg_20260714.json
+C_PLAN=configs/motion_backhand_loop_c_se2_materialization_prereg_20260714.json
+B_SHA=e016ca742dfebbd9726b03df1ad3cd7e75f19a07557e5e458e57e00088751aee
+C_SHA=27f938cd6016fcadada8c6ea806329279c379ccb77b5db99b8902275ebd9d454
+
+for row in "$B_PLAN:$B_SHA" "$C_PLAN:$C_SHA"; do
+  plan=${row%%:*}
+  sha=${row#*:}
+  test "$(shasum -a 256 "$plan" | awk '{print $1}')" = "$sha"
+  CUDA_VISIBLE_DEVICES= python3 "$TOOL" --prereg "$plan" \
+    --expected-prereg-sha256 "$sha" static
+  CUDA_VISIBLE_DEVICES= python3 "$TOOL" --prereg "$plan" \
+    --expected-prereg-sha256 "$sha" inspect
+done
+```
+
+Only after both no-write inspections pass may the operator run the same command
+with `consume`, one plan at a time. Before each consume, verify that its exact
+`output_contract.output_root` does not exist. A pre-existing root is not a
+resume point. The report's presence is the completion marker; absence means the
+output is incomplete and must not be consumed downstream.
+
+Do not change `candidate_id` or call selection `resolve` here. A materialization
+or internal verification failure stops that asset. Only a later independently
+recorded table/net external-geometry failure may advance the frozen fallback
+ladder. Passing this step still authorizes only a separate schema-2
+preregistration; L0, vendor L1, table/net clearance, dynamics, simulator,
+training, TOPP and hardware remain blocked.
+
 ## Promotion remains deliberately blocked
 
 The current manifest says `certificate_bundle_preregistered=false`; passing an

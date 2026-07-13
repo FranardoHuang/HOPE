@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "status": "preregistered_not_executed",
+  "asset_id": "franco_backhand_loop_b",
+  "human_name": "Franco 反手拉候选 B 主选整轨站位实体化",
+  "scope": "CPU-only exact whole-motion ground-preserving SE(2) materialization of the frozen B primary; no fallback selection, schema-2, simulator, training, TOPP or hardware",
+  "formal_eligible": false,
+  "training_authorized": false,
+  "hardware_authorized": false,
+  "schema2_materialized": false,
+  "consumer": {
+    "path": "scripts/materialize_motion_spatial_se2.py",
+    "sha256": "21ebbe68d5d76acde90bb413f68928df9d87cb053275d9f0f46d36dbf1187375"
+  },
+  "selection_result": {
+    "path": "configs/motion_backhand_loop_bc_proposal_selection_results_20260713.json",
+    "sha256": "8a80a409ca69e2fa73757b139b8496bb9cdda2e6a66d3fab48412051b408d2be"
+  },
+  "candidate_id": "98e7b883b29d302dc7a24fd3c564648c1f929ff2391e24e58558dcba58af3c14",
+  "source_registry": {
+    "path": "configs/motion_video_gmr_phase_counterfactual_prereg_20260711.json",
+    "sha256": "fee1b1f9a68fcc0323c1be5832db1b29bdc5f49421712c6f44506d16dae45529"
+  },
+  "source_motion": {
+    "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_loop_b.diagnostic_cohort_median_betas.grounded.pkl",
+    "bytes": 27926,
+    "sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e"
+  },
+  "transform": {
+    "semantics": "proper_atomic_whole_motion_ground_preserving_SE2_left_action_in_GMR_world",
+    "translation_w_m": [
+      0.05035998433,
+      -0.109155849041,
+      0.0
+    ],
+    "yaw_deg": -5.0,
+    "root_rotation_rule": "q_out_xyzw=q_yaw_xyzw_left_multiply_q_source_xyzw",
+    "root_position_rule": "p_out=Rz(yaw)*p_source+translation",
+    "world_vector_rule": "v_out=Rz(yaw)*v_source_no_translation",
+    "mirror": false,
+    "per_frame_edit": false,
+    "joint_edit": false,
+    "time_edit_or_topp": false
+  },
+  "payload_contract": {
+    "required_keys": [
+      "dof_pos",
+      "fps",
+      "link_body_list",
+      "local_body_pos",
+      "root_pos",
+      "root_rot"
+    ],
+    "optional_world_vector_fields": [
+      "root_ang_vel_world",
+      "root_lin_vel_world"
+    ],
+    "unknown_fields": "fail_closed",
+    "fps": 30,
+    "frames": 91,
+    "root_rotation_convention": "xyzw",
+    "local_body_pos": null,
+    "link_body_list": null,
+    "inverse_and_rigidity_tolerance": 1e-12
+  },
+  "fallback_policy": {
+    "automatic_fallback": false,
+    "materialization_or_internal_failure": "stop_this_asset",
+    "external_table_or_net_failure": "future_selector_resolve_only"
+  },
+  "output_contract": {
+    "output_root": "/workspace/codexschema/motion_video_intake_20260711/gmr_spatial_retarget_primary_v1/franco_backhand_loop_b_98e7b883b29d",
+    "motion_filename": "franco_backhand_loop_b.98e7b883b29d.se2.gmr.pkl",
+    "report_filename": "materialization_report.json",
+    "output_root_must_not_exist": true,
+    "no_clobber": true,
+    "report_published_last": true
+  },
+  "next_gate": {
+    "authorized": "schema2_materialization_preregistration_only",
+    "status": "blocked_schema2_L0_L1_table_net_dynamics_not_run"
+  }
+}

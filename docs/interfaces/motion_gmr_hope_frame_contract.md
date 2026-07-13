@@ -72,6 +72,14 @@ transform 不是 capture extrinsic，也不能回填本页的 per-asset frame ma
 `configs/motion_video_spatial_retarget_prereg_20260712.json`。没有 candidate-specific schema-2/L0/L1/
 桌网整轨迹证书的输出只能叫 proposal。
 
+2026-07-14 的 Step-B（主选轨迹实体化）把这条合同落成两份独立 prereg。对 column-vector 语义，
+位置为 `p_out = Rz(yaw) p_source + [tx,ty,0]`；GMR `root_rot` 是 xyzw，方向为
+`q_out = q_yaw ⊗ q_source`（左乘）。Z、fps、帧数、`dof_pos`、`local_body_pos`、
+`link_body_list` 不变；已登记但当前源中不存在的 `root_lin_vel_world/root_ang_vel_world` 若出现，
+只做 `Rz*v`，不加 translation。除此之外的未知 payload field fail closed，不能猜它是 local 还是
+world。保存重载后必须通过逆变换、全帧 root 两两距离和 Z bit-exact 复核。详细命令见
+[空间重定位操作](../operations/run_motion_spatial_retarget_screen.md)。该 PKL 仍不是 schema-2 motion。
+
 ## 若要回答“录制现场真实桌位”
 
 现有空挥不足，必须另采标定段；不得从本轮 `0/64` 反推桌外参。最低采集规格：
