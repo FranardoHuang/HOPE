@@ -47,11 +47,11 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 | [EXP-P1-HISTORICAL-SCHEMA3](2026-07/EXP-P1-HISTORICAL-SCHEMA3.md) | 新尺子能否区分历史候选？ | franco | Codex | completed | E4（诊断） | 尺子通过，候选仍为 inexact |
 | [EXP-MUJOCO-NATIVE-TRAINING](2026-07/EXP-MUJOCO-NATIVE-TRAINING.md) | 原生 MuJoCo 微调能否减少留出集迁移损失？ | franco | Codex | blocked | E1 | off-main preflight 为 `NO-MERGE`；四个正确性缺口未修；无 trainer/backend/PPO |
 | [EXP-RECOVERY-TUPLE-ABC](2026-07/EXP-RECOVERY-TUPLE-ABC.md) | 哪种连贯的击球后命令语义能够安全恢复？ | franco | Codex | blocked | E1 旧结构；E0 新次序 | 新 reward 次序尚未同步 machine prereg；无行为结果 |
-| [EXP-MOTION-SPATIAL-RETARGET](2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | 新空挥能否在不做不安全编辑的前提下放置到有效击球点？ | franco | Codex | preregistered | E1 | 无动作被推广 |
+| [EXP-MOTION-SPATIAL-RETARGET](2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | 新空挥能否在不做不安全编辑的前提下放置到有效击球点？ | franco | Codex | completed | E2 | B/C 有 `19/3` 个 proposal；证书 `0`，只进入物化/安全门，不推广动作 |
 | [EXP-GATE3-CURRENT179-D0](2026-07/EXP-GATE3-CURRENT179-D0.md) | 当前 exact 179 policy/planner/runtime 能否完成一份固定考卷？ | franco | Codex | blocked | E2 | 仅通过模型预检；行为实验缺 runtime 前置 |
 | [EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD](2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) | exact planner-policy 源码能否通过 portable Release，并无冲突地进入 latest main？ | franco | Codex | completed | E1 | adopt exact 源码；runtime/Gate3 行为仍未运行 |
 | [v12/高点拍压/横移视频登记](motion_video_intake_v12_static_motion_20260713.md) | 7 段私有新视频是否能按精确字节和语义角色登记？ | franco | Codex | completed | E1 | 7/7 登记通过；不授予动作安全或训练资格 |
-| [Franco 优先、static/motion GVHMR 预注册](motion_video_gvhmr_prereg_franco_static_motion_20260713.md) | 复用 Franco exact 结果后，static 与 motion 能否进入互不阻塞、no-clobber 的 GVHMR-only 小批？ | franco | Codex | preregistered | E1 | [S0/M0](../DEFINITIONS.md) 分别只含高点拍压/四条横移；v12 未授权，无 Pod/GPU/动作结果 |
+| [Franco 优先、static/motion GVHMR 预注册](motion_video_gvhmr_prereg_franco_static_motion_20260713.md) | 复用 Franco exact 结果后，static 与 motion 能否进入互不阻塞、no-clobber 的 GVHMR-only 小批？ | franco | Codex | completed | E2 | [S0/M0](../DEFINITIONS.md) `1/1 + 4/4` exact finite structural pass；无 GMR/schema-2/动作效果 |
 | [v12/高点拍压/横移组合设计](motion_v12_high_press_lateral_teacher_20260713.md) | 新动作和横移下肢老师怎样进入各自题族与全身组合？ | franco | Codex | proposed | E0 | 只有设计；没有处理后动作或行为证据 |
 | [非击球臂模仿消融](non_striking_arm_imitation_ablation_20260713.md) | 解除左臂模仿能否改善平衡且不破坏击球？ | franco | Codex | proposed | E0 | 配对实验尚未运行 |
 

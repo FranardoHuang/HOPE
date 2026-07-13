@@ -1,6 +1,6 @@
 # Franco 优先、static 与 motion 的 GVHMR 预注册
 
-- 状态：`preregistered`（S0/M0 runtime 尚未运行）
+- 状态：`completed`（S0/M0 的 GVHMR 结构批已完成；后续 GMR/schema-2 仍未运行）
 - 人类负责人：Franco
 - 执行者：Codex
 - 工作分支：`Franco_codex/motion-gvhmr-prereg-20260713`
@@ -54,7 +54,8 @@ checkpoint/body-model 树、固定 motion Python、`/usr/bin/nvidia-smi` 和结�
 逐字节建立 batch 私有、只读、no-clobber 快照，先后复核原 source 与快照的 inode、mtime、ctime、bytes
 和 SHA；GVHMR child 只读该快照路径，不再读可变 staging 路径。state/output 使用原子 no-clobber claim
 与跨 state lock。2026-07-11 旧 launcher 只保留 gzip 历史源码证据，不再是 `scripts/` 下的可执行入口。
-两批可在分别通过 exact attestation 后使用同一或不同 Pod 的空闲卡，但本分支没有做这一步。
+两批可在分别通过 exact attestation 后使用同一或不同 Pod 的空闲卡。2026-07-13 已在 Pod1 使用
+GPU 1/2 分别执行 S0/M0；每批只消费自己的私有快照，没有复用或覆盖旧 namespace。
 
 M0 的 GVHMR 输出只证明人体结构重建。未来机器人坐标合同必须去除公共 root 平移、对齐朝向，再要求末端
 左右脚水平分离向量回到该候选初始 ready window 的鲁棒向量，包含前后脚错位；更窄的“合脚”不能替代。
@@ -75,14 +76,23 @@ python3 -m pytest -q \
 ```
 
 2026-07-13：两份 static contract 均通过；聚焦套件 `50 passed`，仓库 `tests/` 为
-`573 passed, 9 skipped`。本分支没有复制视频到 Pod、生成 execution record、启动 GVHMR/GPU，亦无
-GMR、simulator、RL 或真机结果。
+`573 passed, 9 skipped`。随后两份 exact execution record 和 queue 都在 Pod1 完成：
+
+| 批次 | 输入 | 结构结果 | 结论 |
+| --- | --- | --- | --- |
+| S0：反手高点拍压 | `static_backhand_high_press` | `88/88` 帧，`6,952` 个所需 tensor 元素 finite | GVHMR structural pass |
+| M0：横移老师 | left-1 / left-2 / right-1 / right-2 | `105/105`、`97/97`、`82/82`、`96/96` 帧，合计 `30,020` 个所需 tensor 元素 finite | 4/4 GVHMR structural pass |
+
+结果总账为 `configs/motion_video_gvhmr_s0_m0_results_20260713.json`，SHA-256
+`08b5e8338ac07a20f18034811167c941fed7168703cad4308bc8b2f1e0569726`；它绑定 source、execution record、
+queue state、output、binding 与 structural audit 的逐文件 SHA。该通过只说明 SMPL-X 结构和有限数完整，
+没有 GMR、schema-2、脚接触/末态站距、桌网、自碰、动力学、simulator、RL 或真机结果。
 
 ## 下一步
 
-1. 独立复核并合入 exact S0/M0 安全基础设施；
-2. 仅在有空闲卡时分别 attestation，S0 与 M0 可独立启动；失败保留证据且不得覆盖重跑；
-3. 结构结果归档并人工看重建质量后，为 static 建高球/拍压专卷，为 motion 建机器人坐标站距与位移条件合同；
+1. 用新的 content-bound consumer 把五份 exact GVHMR 输出接到 canonical-beta/GMR；不得调用旧的十动作硬编码队列冒充新 lineage；
+2. 在机器人坐标中检查 static 的整轨安全，并检查 motion 的足接触、位移区间和末态初始脚距向量（含前后错位）；
+3. 为 static 建高球/拍压专卷，为 motion 建位移条件合同；结构结果不能提前当击球有效性；
 4. F1/F2 继续消费既有 Franco 结果；v12 只在上述主线有可比证据后作为 Jiayi 对照进入新版本合同。
 
 完整命令见[操作文档](../operations/run_motion_video_gvhmr_prereg.md)。

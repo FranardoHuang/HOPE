@@ -19,11 +19,32 @@
   `88/98`，但正手 raw-A 法向误差为 `172.33°/174.35°`，signed composite 都是
   `0/50`；这证明旧 scorer 的正手符号盲区，所以没有新 baseline 晋级。fresh 广度池
   最近 24 个 K20 格子又全部正手 signed composite=0，因此 16 臂已分两波全部保留证据并
-  停止；这不改写 q10/q50 合同。下一项会改变阶段 1
-  判断的证据是 `n/-n` 负控、修正 signed-face scorer 后的同卷结果。
+  停止；这不改写 q10/q50 合同。`n/-n` 负控和 signed-face source gate 已进入 main；下一项会改变
+  阶段 1 判断的证据是一个 seed 的四格机制 canary，以及修正 scorer 后的同卷结果。
 - 部署侧的 planner-policy exact tuple 源码已通过 portable Release 和 latest-main 本地回归；
   这解决了同 tick base/target 因果配对与源码可构建问题，但 ROS/Jazzy/AimRT、backend first tick、
   厂商 MuJoCo 行为和真机仍未运行。
+
+## 当下状态与团队 focus
+
+现在围绕“几天内做出可录屏、可解释的好球”并行推进三条最短链：把 Franco 五种用途动作和横移老师
+做成安全可训练候选；用一张卡四个不同因果格修正现役 policy 的拍面反号；把胜出 policy 连同我们的
+planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行为以厂商 MuJoCo 为准。
+
+- **最新可分享结果：** 反手拉 B/C 的 signed 整轨重定位已产生 `19/3` 个 bounded proposal，但证书仍为
+  `0`；高点拍压 S0 与四条横移 M0 已分别 `1/1 + 4/4` 通过 exact GVHMR 帧数/finite 结构审计。
+  这些只解锁下一层物化/GMR，不是“动作会打球”。
+- **当前运行态：** 上述三条短作业已自然结束，当前没有 trainer；GPU 不再用失败配方的重复 seed 填满。
+  正在做 launch 前静态闭包的是 S0/M0 post-GVHMR consumer，以及 signed-face 的 A/B/C/D 单-seed 漏斗；
+  哪个机器合同先通过就先占空闲卡/CPU，不等待另一条线。
+- **Franco focus：** 五种动作的用途、动作专属来球题族、空挥视觉锚点和横移终态站距语义；反手拉
+  B/C 先补证，高点拍压作为第五动作，v12 只作后续 Jiayi 对照。
+- **Jiayi focus：** v12/dang 路线与 planner-policy 契合；其候选必须在相同挡球专卷和厂商 MuJoCo 中
+  与 Franco 主线对照，不能用录制版本号直接晋级。
+- **Yikang focus：** 历史 Gate3 谱系复核与独立 physics/reference oracle；现有证据不替代当前 179-D
+  planner-policy tuple 的 vendor runtime 行为。
+- **Codex 执行：** exact 动作 lineage、B/C 候选证书、S0/M0 后处理、四格单-seed 漏斗和 main 账本；
+  每通过一层就合 main，不把多个未验层绑成一个大任务。
 
 ## 1. 当前一套训练是怎样完整跑起来的
 
@@ -89,8 +110,8 @@ policy 输出 31 个关节目标，PPO 根据 Reward 改进它，独立考卷再
 - **文件和接口对得上。** 当前动作、训练/考试题、179 维排列、checkpoint 和导出合同已经做
   内容绑定，不一致就拒绝继续；但合同一致只说明文件对上，不说明物理对上。
 - **判分不骗人。** 2k/4k 的正手原始拍面误差多在 165–174°，旧解析判分器又会
-  自动翻转法向；4k 已出现 parsed `48/50` 但 signed composite `0/50` 的同 checkpoint 反例。通过条件
-  是 `n/-n` 负控得到不同结果、保留有符号误差，并重跑同一考卷。详见
+  自动翻转法向；4k 已出现 parsed `48/50` 但 signed composite `0/50` 的同 checkpoint 反例。源码层
+  `n/-n` 负控和有符号误差已通过；行为通过条件仍要求 fresh canary 和同一考卷重跑。详见
   [拍面判分复核](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)。
 - **机器人物理能外推。** 当前零关节摩擦只便于复现；历史非零摩擦数字存在单位/语义问题。
   通过条件是从真实数据拟合共享动力学参数，再分别用 Isaac、MuJoCo 适配器和厂商运行时验证。
@@ -253,10 +274,11 @@ checkpoint SHA 与信号边界见
 **计划解法：** 用正向模拟生成不同来球的到达状态；每题先过动作接口可行性检查，再按题调整
 整身朝向、时序和拍面。
 
-**当前状态：** 整身旋转、时间律和动作静态安全筛已有部分工具。最新又完成了 7 段私有视频的精确
-登记：v12 正反手挡球、高点拍压第五动作、左右横移各两段下肢老师；它们都还没有经过 GVHMR/GMR、
-全身安全、动力学、训练或行为考卷。正式出题器、按题拍面/路径适配、站位与挥拍联合训练和留出卷
-均未完成，没有阶段 2 行为成绩。详见[动作空间重定位实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)
+**当前状态：** 整身旋转、时间律和动作静态安全筛已有部分工具。7 段私有新视频已精确登记；其中
+高点拍压第五动作和左右横移四候选已通过 GVHMR 结构门，v12 未执行。既有 Franco 反手拉 B/C 的
+signed 重定位产生 `19/3` 个 proposal，但还没有一个拿到 schema-2/L0/L1/桌网/动力学证书。
+正式出题器、按题拍面/路径适配、站位与挥拍联合训练和留出卷均未完成，没有阶段 2 行为成绩。
+详见[动作空间重定位实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)
 和[新动作组合设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md)。
 
 ### 5.3 观测
@@ -318,18 +340,26 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 队列按主题组织，方括号内数字是全局执行顺序。人类责任人只能写人，Codex/Claude 只写执行者；
 详细现状和命令留在对应实验记录。
 
+### 动作主线
+
+- **[1｜P0] Franco 五动作 + 横移老师。** 责任人 franco；执行者 Codex；下一证据：物化反手拉 B/C
+  proposal 并补 schema-2/L0/L1/桌网/动力学证书，同时把已 finite 的高点拍压 S0 与横移 M0 接到 exact
+  canonical-beta/GMR consumer。挡、拉、高点拍压各用自己的题族；先每个候选一个因果格，不把候选当
+  seed 重复。只有离线证书通过后才分配 RL GPU。
+  [旧动作实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)；
+  [新动作设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md)
+
 ### 尺子与阶段 1
 
-- **[1｜P0] 拍面正反与解析判分。** 责任人 franco；执行者 Codex；下一证据：先让同卷有符号拍面表、
-  `n/-n` 负控和修正 scorer 进入 `main`；随后用一个 seed 跑“热启动/从零 × 线性引导关/开”四个
-  机制单元到相对 checkpoint `+200/+500/+1000`。只有胜者连同匹配对照才解锁第二 seed，不再给
-  已失败配方复制四 seed。
+- **[2｜P0] 拍面正反与解析判分。** 责任人 franco；执行者 Codex；signed source gate 已进 main；
+  下一证据是用一个 seed 跑“热启动/从零 × 线性引导关/开”四个机制单元到相对 checkpoint
+  `+200/+500/+1000`。只有胜者连同匹配对照才解锁第二 seed，不再给已失败配方复制四 seed。
   [量尺实验](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)；
   [机制漏斗](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)
 
 ### 部署验证
 
-- **[2｜P0] 当前 179 维模型的 Gate3-D0 单拍全链。** 责任人 franco；执行者 Codex；exact source/build
+- **[3｜P0] 当前 179 维模型的 Gate3-D0 单拍全链。** 责任人 franco；执行者 Codex；exact source/build
   前置已闭合，下一证据是固定同卷完成 owned planner → C++ runner → 厂商 MuJoCo 的首个 no-publish
   有效周期和行为记录。[实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md)
 - **[7｜P1] Gate3 历史谱系复核。** 责任人 yikang；执行者 direct；下一证据：排除观测排列和
@@ -337,14 +367,10 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 
 ### 训练引擎与机器人物理
 
-- **[3｜P0] 原生 MuJoCo 训练候选。** 责任人 franco；执行者 Codex；下一证据：修正四个源码缺口
+- **[4｜P0] 原生 MuJoCo 训练候选。** 责任人 franco；执行者 Codex；下一证据：修正四个源码缺口
   后复核，再测单环境核心、并行吞吐和一次限预算 PPO 更新。[实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md)
 
-### 阶段 2、连续能力与动作
-
-- **[4｜P1] 变到达状态的动作适配与可行性门。** 责任人 franco；执行者 Codex；下一证据：动作
-  合同、离线安全、桌网余隙和厂商 MuJoCo 动力学同过。[旧动作实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)；
-  [新动作设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md)
+### 连续能力与后续接口
 - **[5｜P1] 等待/恢复结构卷。** 责任人 franco；执行者 Codex；下一证据：同步机器合同后，用冻结
   Reward 跑 `T0/T1` 配对连续卷。[实验](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md)
 - **[6｜P1] Hitter V3 规划器—policy 输入对齐。** 责任人 jiayi；执行者 direct；下一证据：旧观测

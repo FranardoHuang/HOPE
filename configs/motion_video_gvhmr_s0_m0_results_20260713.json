@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "result_id": "motion-video-gvhmr-s0-m0-pod1-20260713-v1",
+  "status": "complete_structural_only",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "source_commit": "882fea4285f0cf9a97ba79d79ae8af31d26ea1ed",
+  "scope": "exact Pod1 GVHMR reconstruction and finite structural audit for the static high-press S0 batch and four-candidate lateral M0 batch",
+  "formal_eligible": false,
+  "robot_approved": false,
+  "training_authorized": false,
+  "runtime": {
+    "pod_id": "pod1",
+    "gvhmr_root": "/workspace/franco/motion_work/GVHMR",
+    "gvhmr_commit": "6ec3ca39336c50492c0fae65fba2fb831fc7d866",
+    "gvhmr_worktree_clean": true,
+    "python": "/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10",
+    "python_version": "Python 3.10.20",
+    "queue_tool_sha256": "627aebcc0162de6600ecf6a152ab443886c3e40fb910ffc3538c67db81fe4358",
+    "source_consumption": "private_read_only_no_clobber_snapshot"
+  },
+  "batches": [
+    {
+      "batch_id": "static_high_press_s0_v1",
+      "human_name": "反手高点拍压单动作结构批",
+      "status": "complete",
+      "gpu_physical_index": 1,
+      "launcher_pid": 1728046,
+      "launcher_pgid": 1728046,
+      "started_utc": "2026-07-13T10:46:25.760822Z",
+      "completed_utc": "2026-07-13T10:47:18.950050Z",
+      "preregistration": {
+        "path": "configs/motion_video_gvhmr_prereg_20260713.json",
+        "sha256": "c610366e7e382b20f9b64b01a9c57b2722b72be501ada2aa16c24e350207f1ba"
+      },
+      "external_evidence": {
+        "execution_record": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_s0/control/gvhmr_execution_record_static_s0_v1.json",
+          "bytes": 5473,
+          "sha256": "adbf1774b9bca975346c6bbd65ebcb4be7f53f83f19e21fef555eade09400ce8"
+        },
+        "launcher_state": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_s0/control/launcher.state",
+          "bytes": 274,
+          "sha256": "e1935447a826e0b90a1f4c43f812b62b3f556d83481622ac658a4394ab2f20b0"
+        },
+        "queue_log": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_s0/control/queue.log",
+          "bytes": 386,
+          "sha256": "d47f4e1d83baea15dae3786fc3143c6d02100fc06ad58d8d41b3c54bd9614f7d"
+        },
+        "queue_state": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_s0/gvhmr_state_static_s0_v1/queue_state.json",
+          "bytes": 1907,
+          "sha256": "88f4957bec131bb079e2502aadc1c4af8ca0e4be689892bd8810cfa98df93607"
+        }
+      },
+      "assets": [
+        {
+          "asset_id": "static_backhand_high_press",
+          "human_name": "反手高点拍压",
+          "source_sha256": "5bd2bc46c615005b4b521352e8950d2e7a7d7d8d0e5613fe1ac1755ae6045657",
+          "expected_frames": 88,
+          "actual_frames": 88,
+          "finite_elements": 6952,
+          "output": {
+            "path": "/workspace/franco/motion_work/GVHMR/outputs/demo/pai/hmr4d_results.pt",
+            "bytes": 389976,
+            "sha256": "6259d64e457bcea4b9d1d8ef830d9cd4561b190fea79a2b0bdddd9eeea580b22"
+          },
+          "binding": {
+            "path": "/workspace/codexschema/motion_video_intake_20260713_s0/gvhmr_state_static_s0_v1/bindings/static_backhand_high_press.json",
+            "bytes": 3845,
+            "sha256": "87bad7238f93e3a3f5f3c217fdc0124347839fb8614ca5491610d2dca62c60af"
+          },
+          "structural_audit": {
+            "path": "/workspace/codexschema/motion_video_intake_20260713_s0/gvhmr_state_static_s0_v1/audits/static_backhand_high_press.json",
+            "bytes": 517,
+            "sha256": "10259f7ed85914ff294e3eb2df50716d29a9a8c610bb7ef897eca0dfafe5350e",
+            "status": "pass"
+          }
+        }
+      ]
+    },
+    {
+      "batch_id": "lateral_teachers_m0_v1",
+      "human_name": "左右横移四候选结构批",
+      "status": "complete",
+      "gpu_physical_index": 2,
+      "launcher_pid": 1729212,
+      "launcher_pgid": 1729212,
+      "started_utc": "2026-07-13T10:47:50.557885Z",
+      "completed_utc": "2026-07-13T10:50:56.349803Z",
+      "preregistration": {
+        "path": "configs/motion_video_gvhmr_motion_prereg_20260713.json",
+        "sha256": "19794d62446335c2d125564d9ea7ee77e59e1aed39f7aeef4b4039843dce0f08"
+      },
+      "external_evidence": {
+        "execution_record": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_m0/control/gvhmr_execution_record_lateral_m0_v1.json",
+          "bytes": 8992,
+          "sha256": "e40f90b7e84ebf804ca1ad9b99e6c1dc16f030eb72427645872c6f0378bfaa9c"
+        },
+        "launcher_state": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_m0/control/launcher.state",
+          "bytes": 275,
+          "sha256": "9afa6392edfb973010aa8474a6b9b6228bc8489d2f9ae9cee03ea616d152f3a4"
+        },
+        "queue_log": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_m0/control/queue.log",
+          "bytes": 1264,
+          "sha256": "b6c20bf7871f8bc9bc01af24f61f45119383ad10cc02cd9f14eb08138177a2ad"
+        },
+        "queue_state": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/queue_state.json",
+          "bytes": 5012,
+          "sha256": "31bc7cbebe5a34125317f2e7429216271370103dc6dd94798b8eb36323a0c336"
+        }
+      },
+      "terminal_stance_contract": "not evaluated by GVHMR; the robot-coordinate consumer must recover each clip's initial yaw-aligned left-to-right foot separation vector, including fore-aft stagger, and reject a narrower feet-together ending",
+      "assets": [
+        {
+          "asset_id": "lateral_step_left_1",
+          "human_name": "左移候选 1",
+          "source_sha256": "0d421f7f37dba1d4a9c033775a9cfc62d7221600a2a60ddd354d9b6009a3279f",
+          "expected_frames": 105,
+          "actual_frames": 105,
+          "finite_elements": 8295,
+          "output": {"path": "/workspace/franco/motion_work/GVHMR/outputs/demo/left_dang1/hmr4d_results.pt", "bytes": 463448, "sha256": "2873747a85cf570db50fd3d141124d328f882db367dbeb35b6ad1d4754423733"},
+          "binding": {"path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/bindings/lateral_step_left_1.json", "bytes": 4137, "sha256": "f4f87a21822e465b1042eb6a0b5816d3f2899c1e348491ab194c4388022f3901"},
+          "structural_audit": {"path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/audits/lateral_step_left_1.json", "bytes": 530, "sha256": "f03c647eeb3b57a7f5c3a857cde609db9b37b1d26299346faf06bb4040661ef0", "status": "pass"}
+        },
+        {
+          "asset_id": "lateral_step_left_2",
+          "human_name": "左移候选 2",
+          "source_sha256": "4074a8054d5814f640cd8c5e38188d7d70bb3ec1ce62068931dcf2b8fad52f9d",
+          "expected_frames": 97,
+          "actual_frames": 97,
+          "finite_elements": 7663,
+          "output": {"path": "/workspace/franco/motion_work/GVHMR/outputs/demo/left_dang2/hmr4d_results.pt", "bytes": 429208, "sha256": "e5db30adcb772e59d30eb7179588e1f8bbc66d2600a83fa8e31d238bb4b25db2"},
+          "binding": {"path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/bindings/lateral_step_left_2.json", "bytes": 4136, "sha256": "c783fa571f89fd1607a65975ecc682270efbc71af2427d326cd4ba1c32894a0f"},
+          "structural_audit": {"path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/audits/lateral_step_left_2.json", "bytes": 524, "sha256": "a66b307ab90ecdf51b67cda1d9447086a48bfb2e470bbb97e6abed3841f5a648", "status": "pass"}
+        },
+        {
+          "asset_id": "lateral_step_right_1",
+          "human_name": "右移候选 1",
+          "source_sha256": "3956084f9ceab180022c0d141fdfdd68ca4a5b0c5f8f34d3d1803de30b06beb5",
+          "expected_frames": 82,
+          "actual_frames": 82,
+          "finite_elements": 6478,
+          "output": {"path": "/workspace/franco/motion_work/GVHMR/outputs/demo/right_dang1/hmr4d_results.pt", "bytes": 363672, "sha256": "3a8ecc8c957c040161eef1257f638a4d22053b124a44f67fd2ad88bbeac7357e"},
+          "binding": {"path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/bindings/lateral_step_right_1.json", "bytes": 4144, "sha256": "ad0a6d962c1be21671f8731616ceb76ab529a9fd71ed1959602a7c8d6204fc67"},
+          "structural_audit": {"path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/audits/lateral_step_right_1.json", "bytes": 525, "sha256": "4878f82bdde5dbb3ea181fdce2623769cd6a8192d0410157cb72d831155b87bc", "status": "pass"}
+        },
+        {
+          "asset_id": "lateral_step_right_2",
+          "human_name": "右移候选 2",
+          "source_sha256": "24ea4e4244cb0a7b6a8e5e15dc9dfc83c0a1f9c0b26a4fc411fa0922559b7eb8",
+          "expected_frames": 96,
+          "actual_frames": 96,
+          "finite_elements": 7584,
+          "output": {"path": "/workspace/franco/motion_work/GVHMR/outputs/demo/right_dang2/hmr4d_results.pt", "bytes": 425304, "sha256": "45e532c00071c77b9096b3bba71a40d4507d8e7b429af985202bd436a1fac5f8"},
+          "binding": {"path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/bindings/lateral_step_right_2.json", "bytes": 4144, "sha256": "701e2c9eb3bb3bb97309a88bd63be2e71d057ca2b1493dca4cd4a3cdb01f8e6d"},
+          "structural_audit": {"path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/audits/lateral_step_right_2.json", "bytes": 525, "sha256": "5be5d024193c7ced5936f6f61563fad5383eaad741392789f2b54474f7c349fc", "status": "pass"}
+        }
+      ]
+    }
+  ],
+  "accepted_claims": [
+    "all five exact GVHMR outputs have the expected frame count and finite required tensors",
+    "each output is bound to its exact input source, preregistration, runtime and structural audit"
+  ],
+  "not_claimed": [
+    "visual reconstruction quality",
+    "canonical-beta or A3 GMR correctness",
+    "schema-2 motion validity",
+    "foot-contact or terminal stance recovery",
+    "self-collision, table or net clearance",
+    "dynamics, balance, strike effectiveness, TOPP, RL, Gate3, deployment or real-robot safety"
+  ]
+}

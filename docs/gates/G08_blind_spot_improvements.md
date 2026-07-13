@@ -406,7 +406,8 @@ self-hit 和整轨桌网扫掠余量 `>=5 mm` 只授予训练资格，不证明�
 2026-07-13 的 `n/-n` 负控已证明旧动作 virtual-return scorer 对物理拍面符号失明。未执行的
 spatial-retarget prereg 因此从 `d8c918ac...5a9f` 重绑到 `0f757c8c...af66a`，要求 raw-A、每侧
 `[+1,-1]` physical-B 与 pre-orient +X/hemisphere 门；这只修量尺。已完成的 v5 保留安全/frame
-子树，但回球/phase/library 列降为旧 unsigned-plane 诊断，不追认、不覆盖，也没有新动作晋级。
+子树，但回球/phase/library 列降为旧 unsigned-plane 诊断，不追认、不覆盖。修复后真实 v5 screen 已产生
+B/C `19/3` 个 bounded proposal，但全部缺候选证书，因此仍没有新动作晋级。
 真实 v5 输入首次点火又发现 contract 字段读取层级错误：外参未观测声明位于 `frame_contract`，不是
 仅含路径/SHA 的 `frame_contract_evidence`。修正后的 tool `d053dd50...5259b` 同时验证 evidence SHA
 和显式 false；缺失/true 仍 fail closed。该修复只解除运行前假拒绝，不增加动作行为 credit。
@@ -438,8 +439,10 @@ commit、完整权重树、Python、`nvidia-smi`、validator/argv、独立 stagi
 07-11 旧 launcher 仅保留为 gzip 历史源码证据，不是当前可执行入口。横移的机器人后续合同仍以首个准备窗口、朝向对齐后的
 双脚分离向量（含前后错位）为终点，不接受更窄合脚替代；GVHMR 本身不声称验证该条件。完整合同见
 [GVHMR 预注册实验](../experiments/motion_video_gvhmr_prereg_franco_static_motion_20260713.md)和
-[操作文档](../operations/run_motion_video_gvhmr_prereg.md)。截至本记录只有 host static/test 证据；没有
-Pod staging、GVHMR 输出、GMR、simulator、RL 或真机结果，所以 G08 状态不变，也没有动作晋级。
+[操作文档](../operations/run_motion_video_gvhmr_prereg.md)。随后 S0 `88/88` 帧、M0 四条
+`105/105、97/97、82/82、96/96` 帧已在 Pod1 通过 exact finite structural audit，详见
+`configs/motion_video_gvhmr_s0_m0_results_20260713.json`。尚无 canonical-beta/GMR、schema-2、足接触/
+末态脚距、simulator、RL 或真机结果，所以 G08 状态不变，也没有动作晋级。
 
 ## 文档路由更新（2026-07-12）
 

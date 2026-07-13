@@ -128,6 +128,10 @@ inode/mtime/ctime/bytes/SHA，所以 staging 路径即使被等长改写后恢�
 
 ## 5. 只读检查与结果边界
 
+2026-07-13 已接受一次 exact Pod1 执行：S0 在 GPU 1 完成，M0 在 GPU 2 完成；逐文件 SHA、帧数和
+finite 计数见 `configs/motion_video_gvhmr_s0_m0_results_20260713.json`。下面的 `inspect` 只读命令用于
+复核该次证据，不授予覆盖或重跑权限。
+
 S0 inspect：
 
 ```bash

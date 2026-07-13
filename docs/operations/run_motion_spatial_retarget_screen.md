@@ -90,6 +90,12 @@ contact residual.  A result with
 `status=complete_proposals_only_promotion_blocked` is the expected current
 outcome, not a failure and not an accepted motion.
 
+2026-07-13 的 accepted Pod1 proposal 文件为
+`/workspace/codexschema/motion_spatial_retarget_signed_a4bbbaa_v1/proposals.json`，225,920 bytes，
+SHA-256 `69c3db16fa78f526aef49f20eeafe0d7e5e3004c4ed27f5e2823bb3574e2465c`。它含 22 个
+certificate 前提案：B=19、C=3；accepted/certified 仍均为 0。tracked 摘要是
+`configs/motion_video_spatial_retarget_signed_results_20260713.json`。
+
 ## Promotion remains deliberately blocked
 
 The current manifest says `certificate_bundle_preregistered=false`; passing an

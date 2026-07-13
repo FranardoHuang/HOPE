@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "result_id": "motion-video-signed-spatial-retarget-pod1-20260713-v1",
+  "status": "complete_proposals_only_promotion_blocked",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "source_commit": "a4bbbaa590fbecbf6fe66114eaa1fa77777565d3",
+  "scope": "signed-face, whole-motion ground-preserving SE(2) proposal screen over the ten Franco/v6/v7 air swings and the immutable 64-question paper",
+  "formal_eligible": false,
+  "robot_approved": false,
+  "rl_authorized": false,
+  "topp_authorized": false,
+  "preregistration": {
+    "path": "configs/motion_video_spatial_retarget_prereg_20260712.json",
+    "sha256": "0f757c8c4abfc9bf5070b7db79f494fa1d97a45ddb222609898662eff63af66a"
+  },
+  "predecessor": {
+    "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_v5/phase_safety_result.json",
+    "bytes": 792241,
+    "sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53"
+  },
+  "external_evidence": {
+    "result": {
+      "path": "/workspace/codexschema/motion_spatial_retarget_signed_a4bbbaa_v1/proposals.json",
+      "bytes": 225920,
+      "sha256": "69c3db16fa78f526aef49f20eeafe0d7e5e3004c4ed27f5e2823bb3574e2465c"
+    },
+    "run_log": {
+      "path": "/workspace/codexschema/motion_spatial_retarget_signed_a4bbbaa_v1/run.log",
+      "bytes": 180,
+      "sha256": "2c709670f0d407cb0fb20911b229d5cf6914adb8f10159750a262d1000b6cbb7"
+    },
+    "launcher_state": {
+      "path": "/workspace/codexschema/motion_spatial_retarget_signed_a4bbbaa_v1/launch.state",
+      "bytes": 405,
+      "sha256": "af45d23c7364cbe0f22897d6e0bf80e6a6c7dd9c91edc714a1b168afee2a7066"
+    }
+  },
+  "screen_summary": {
+    "asset_count": 10,
+    "question_count": 64,
+    "cell_count": 640,
+    "capture_table_pose_observed": false,
+    "proposal_count_before_certificate": 22,
+    "accepted_candidate_count": 0,
+    "certified_candidate_count": 0
+  },
+  "proposal_breakdown": [
+    {
+      "asset_id": "franco_backhand_loop_b",
+      "human_name": "Franco 反手拉候选 B",
+      "nominal_visual_anchor_frame": 49,
+      "question_cells_with_proposals": 6,
+      "proposal_count_before_certificate": 19
+    },
+    {
+      "asset_id": "franco_backhand_loop_c",
+      "human_name": "Franco 反手拉候选 C",
+      "nominal_visual_anchor_frame": 50,
+      "question_cells_with_proposals": 2,
+      "proposal_count_before_certificate": 3
+    },
+    {
+      "asset_ids": [
+        "franco_forehand_block",
+        "franco_backhand_block",
+        "franco_forehand_loop",
+        "franco_backhand_loop_a",
+        "v6_forehand_block",
+        "v6_backhand_block",
+        "v7_forehand_block",
+        "v7_backhand_block"
+      ],
+      "human_name": "其余八条旧空挥",
+      "proposal_count_before_certificate": 0,
+      "interpretation": "this paper is not action-family-matched for every listed motion and zero proposals does not reject those action families"
+    }
+  ],
+  "accepted_claim": "B and C have bounded whole-motion SE(2) proposals worth materializing and checking",
+  "promotion_blocker": "no proposal has matching schema-2, L0, vendor L1, full-trajectory table/net clearance and dynamics certificates",
+  "not_claimed": [
+    "observed ball contact time",
+    "capture-to-table extrinsic calibration",
+    "safe A3 motion",
+    "action-family effectiveness",
+    "training eligibility, TOPP eligibility, Gate3 behavior or real-robot authorization"
+  ]
+}
