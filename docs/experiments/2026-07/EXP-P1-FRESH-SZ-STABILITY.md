@@ -42,6 +42,9 @@ PPO（批量策略优化）从零训练——能否在同一份不可变 MuJoCo 
   `dbecc102...d1c9b` / `91a0070a...30794`。
 - 两份 runtime contract 都保持 `prepared_not_started`、`jobs_started=0`、
   `auto_start=false`；再次核对四 checkpoint、K100 与 Kit 锁后仍无 child judge。
+- 一次性持久监督器的 source gate 已通过独立红队：P0/P1 均为 0，supervisor focused 为
+  `24 passed`，queue+consumer+supervisor 合计 `64 passed`。Linux `/proc` fake-runner 冒烟仍是
+  真实 q50 前置；详见[启动执行子记录](../phase1_fresh_sz_model4000_q50_20260713.md)。
 - 这只完成了执行纸面准备，不是行为成绩。尚未运行 `run`、judge、aggregate，
   也没有 trainer signal 或真机动作。
 
@@ -57,6 +60,7 @@ PPO（批量策略优化）从零训练——能否在同一份不可变 MuJoCo 
 - [Pod2 prepared runtime contract](../../../configs/phase1_fresh_SZ_model4000_seed_stability_q50_pod2_runtime_contract_prepared_20260713.json)
 - [Fresh lineage](../../PHASE1_FRESH_LINEAGE_2026-07-11.md)
 - [Model-4000 操作](../../operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md)
+- [持久启动执行子记录](../phase1_fresh_sz_model4000_q50_20260713.md)
 
-下一门：审核一个能在 SSH 断开后继续负责两 seed 串行与最终结果落盘的常驻父
-supervisor，然后才能按 seed1→3、seed2→4 运行同一 K100；结果只能判 seed4 晚熟或持续弱。
+下一门：先在 Linux 上用 fake runner 验证真实 `/proc` 身份闭环，再按 seed1→3、seed2→4
+运行同一 K100；结果只能判 seed4 晚熟或持续弱。

@@ -299,8 +299,9 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 
 - **[1｜P0] 拍面正反与解析判分。** 责任人 franco；执行者 Codex；下一证据：同卷有符号拍面表、
   `n/-n` 负控和修正后结果。[实验](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)
-- **[4｜P0] 第 4000 次迭代四初始化后续卷。** 责任人 franco；执行者 Codex；下一证据：审核常驻
-  作业管理程序后完成同一张 100 题卷。[实验](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)
+- **[4｜P0] 第 4000 次迭代四初始化后续卷。** 责任人 franco；执行者 Codex；持久监督器 source gate
+  已独立审绿，下一证据是 Linux fake-runner 冒烟后完成同一张 100 题卷。
+  [实验](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)
 
 ### 部署验证
 

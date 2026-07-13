@@ -45,7 +45,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 
 | ID | 简短状态 |
 | --- | --- |
-| [`EXP-P1-FRESH-SZ-STABILITY`](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 实验 blocked；model-2000 四 seed 稳定性失败；model-4000 两 Pod 已 prepare，但缺常驻父 supervisor、job 未启动、尚无分数 |
+| [`EXP-P1-FRESH-SZ-STABILITY`](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 实验 blocked；model-2000 四 seed 稳定性失败；model-4000 两 Pod 已 prepare，持久监督器 source gate 已审绿，但 Linux smoke/job 未启动、尚无分数 |
 | [`EXP-P1-FACE-SIGN-FORENSIC`](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) | raw-A 正手接近反号，解析 scorer 可能对 `n/-n` 失明；诚实门未通过 |
 | [`EXP-P1-HISTORICAL-SCHEMA3`](experiments/2026-07/EXP-P1-HISTORICAL-SCHEMA3.md) | 同题同卷尺已可用于诊断排名；所有历史模型仍为 inexact |
 | [`EXP-MUJOCO-NATIVE-TRAINING`](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md) | 实验 blocked；off-main preflight 为 `NO-MERGE`，四个正确性缺口未修；尚无 trusted backend、`VecEnv` 或 PPO smoke |
@@ -99,6 +99,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | 球拍接触几何 | [`racket_contact_geometry.md`](interfaces/racket_contact_geometry.md) |
 | Plant 语义 | [`plant_semantics_contract.md`](interfaces/plant_semantics_contract.md) |
 | T1 事件/恢复时序 | [`t1_event_training_contract.md`](interfaces/t1_event_training_contract.md) |
+| q50 持久启动与只读复核 | [`q50_persistent_supervisor_contract.md`](interfaces/q50_persistent_supervisor_contract.md) |
 | ROS topic | [`ros_topics.md`](interfaces/ros_topics.md) |
 
 ## 责任归属与更新规则

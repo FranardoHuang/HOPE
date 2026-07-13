@@ -444,3 +444,122 @@ first seed, launch the second seed and write the Pod result. An ephemeral SSH di
 therefore strand a child while losing the serial controller and result finalization. Record exact
 supervisor PID/PGID and a no-clobber supervisor log; do not add a signal surface or broad process
 management. A fresh pre-run runtime-binding and conflict/lock check remains mandatory.
+
+## Persistent top-level launch source gate
+
+The original activation consumer safely owns each child judge, but its top-level Python process
+was still attached to the invoking shell. A dropped SSH session could therefore lose the parent
+while a detached child judge continued. The separate
+[persistent supervisor](../DEFINITIONS.md#persistent-supervisor) closes that startup-ownership gap
+without changing the consumer/config/activation/runtime-contract bytes. Its exact interface and
+failure states are in
+[the persistent-supervisor contract](../interfaces/q50_persistent_supervisor_contract.md).
+
+This section is a source procedure only. The supervisor has **not** been deployed and has not
+started either Pod's [q50/K100](../DEFINITIONS.md#q50-and-k100) evaluation. The feature branch must
+first enter `main`, and the deployed script/config hashes below must match that merge exactly.
+
+The reviewed files are:
+
+- `scripts/run_phase1_q50_persistent_supervisor.py`, SHA-256
+  `fd565ca453d95712fa7045fec77e8fce29e93f0a13590d72311fcb7719ab800e`;
+- `configs/phase1_fresh_SZ_model4000_seed_stability_q50_persistent_supervisor_20260713.json`,
+  SHA-256 `d1a76a5756d32642136884b4414e9fad2b5a80a257bb9c6fdd9e61a1108f6050`.
+
+Deploy those two files, preserving their repository-relative `scripts/` and `configs/` paths, into
+one new no-clobber source root on each Pod. Do not put them in or modify the frozen train/eval
+checkouts, and do not modify the already-bound `source_d67310f` consumer bundle:
+
+```bash
+SUP_SOURCE=/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/persistent_supervisor_v1/source
+test ! -e "$SUP_SOURCE"
+mkdir -p "$SUP_SOURCE/scripts" "$SUP_SOURCE/configs"
+cp --no-clobber scripts/run_phase1_q50_persistent_supervisor.py "$SUP_SOURCE/scripts/"
+cp --no-clobber configs/phase1_fresh_SZ_model4000_seed_stability_q50_persistent_supervisor_20260713.json "$SUP_SOURCE/configs/"
+sha256sum \
+  "$SUP_SOURCE/scripts/run_phase1_q50_persistent_supervisor.py" \
+  "$SUP_SOURCE/configs/phase1_fresh_SZ_model4000_seed_stability_q50_persistent_supervisor_20260713.json"
+```
+
+Before launch, run read-only inspection. `not_launched` is the only expected first response.
+`--supervisor-config` names the immutable wrapper contract, its `--expected-...-sha256` companion
+pins those exact bytes, and `--pod` selects the already-bound Pod entry rather than accepting free
+paths. These flags carry only the authority defined by the
+[persistent-supervisor definition](../DEFINITIONS.md#persistent-supervisor).
+Both public commands use `env -i` to discard the SSH shell's environment and reconstruct the exact
+fixed map in the supervisor config; the supervisor independently rejects any missing, extra or
+changed variable.
+
+```bash
+SUPERVISOR="$SUP_SOURCE/scripts/run_phase1_q50_persistent_supervisor.py"
+SUP_CONFIG="$SUP_SOURCE/configs/phase1_fresh_SZ_model4000_seed_stability_q50_persistent_supervisor_20260713.json"
+SUP_CONFIG_SHA=d1a76a5756d32642136884b4414e9fad2b5a80a257bb9c6fdd9e61a1108f6050
+
+env -i HOME=/root LANG=C.UTF-8 LC_ALL=C.UTF-8 LOGNAME=root \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TMPDIR=/tmp TZ=UTC USER=root \
+  /workspace/hope_isaac_venv/bin/python "$SUPERVISOR" \
+  --supervisor-config "$SUP_CONFIG" \
+  --expected-supervisor-config-sha256 "$SUP_CONFIG_SHA" \
+  inspect --pod pod1
+```
+
+Use `pod2` on Pod2. The config loader rehashes the supervisor, existing runner/config/activation,
+bound Python realpath/binary, and that Pod's prepared runtime contract before reporting any state.
+A mismatch is fail-closed and must not be worked around with a new command line.
+
+Launch exactly once per Pod:
+
+```bash
+env -i HOME=/root LANG=C.UTF-8 LC_ALL=C.UTF-8 LOGNAME=root \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TMPDIR=/tmp TZ=UTC USER=root \
+  /workspace/hope_isaac_venv/bin/python "$SUPERVISOR" \
+  --supervisor-config "$SUP_CONFIG" \
+  --expected-supervisor-config-sha256 "$SUP_CONFIG_SHA" \
+  launch --pod pod1
+```
+
+The configured fixed state directory is created before the child exists, so a repeated launch is
+always rejected. If the SSH session drops before the command response, **do not launch again**.
+Reconnect and run `inspect`; the immutable ledger, token and acknowledgment distinguish an exact
+live process, pre-token timeout, token-published pending acknowledgment,
+committed-but-not-yet-observed exec, terminal validated result, and committed child failure. The
+commit token's final-link visibility is irreversible:
+both `token_published_pending_ack` and `committed_pending_exec` return zero, are neither running
+proof nor launch failure, and never permit a retry. A startup deadline only prevents tokenless work;
+it cannot cancel slow rehash, acknowledgment publication or exec after the token exists. There is
+intentionally no cleanup command. Preserve a partial/failure state directory and its fixed log for
+diagnosis; a new attempt requires a reviewed v2 config and distinct state directory.
+
+The final token link is the no-retry boundary even if its following directory fsync reports an
+error: the child may already consume the visible token. The launcher therefore returns
+`token_published_pending_ack` with `retry_authorized=false` and attempts a no-clobber
+`parent_post_token_error.json`. The same committed fallback covers any later parent-side hash,
+parse, observation or evidence-publication exception. Reconnect and use `inspect`; never infer
+retry authority from a parent-side exception after token visibility.
+
+Verification that does not touch a Pod, simulator, or robot:
+
+```bash
+python3 -m py_compile scripts/run_phase1_q50_persistent_supervisor.py
+pytest -q \
+  tests/test_run_phase1_q50_persistent_supervisor.py \
+  tests/test_run_phase1_fresh_sz_model4000_q50.py \
+  tests/test_validate_phase1_fresh_sz_model4000_q50_queue.py
+```
+
+The accepted host result is `64 passed`. The launch-specific 24 tests cover parent exit/stall before
+token commit, child token timeout, duplicate/no-clobber launch, pre-existing result and artifact
+mismatch, exact live identity, reused-PID/executable/environment rejection, minimal terminal-result
+rejection and delegation to the original runner's full result validator. A deterministic tokenless
+stall crosses the startup deadline and proves there is no token or runner start. Delayed rehash and
+a real 1.15-second acknowledgment atomic-publication stall both cross the old deadline after token commit,
+return pending with no retry authority, and later converge to running without a fatal-before-runner
+sequence. A post-ack stall returns pending with the same no-retry/convergence behavior; a result
+A-to-B swap during validation is rejected. The token-directory-fsync plus evidence-stat,
+token-temporary-cleanup and parent-observation-write regressions each fail after the token's final
+link, return committed pending without fatal/retry authority, reject a second launch and later
+inspect as exact running. This macOS host has no Linux procfs,
+so the tests inject the same identity-reader seam; an actual Linux source smoke that starts only a
+fake runner remains required before the real Pod q50 launch. No test starts a judge or simulator.

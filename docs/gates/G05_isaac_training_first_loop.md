@@ -1309,3 +1309,37 @@ Exact source passed planner tests `180 passed, 2 optional skipped`, Pod2 portabl
 `40/40` and native `233 passed, 5 optional skips, 0 failed`. These are source/binary results, not a
 new training setting or behavior score. The 179 actor still needs ROS/AimRT first tick and vendor
 MuJoCo behavior; G05 remains `Partial`.
+
+### 2026-07-13 persistent q50 top-level startup source gate
+
+The model-4000 activation consumer now has a separate
+[persistent-supervisor contract](../interfaces/q50_persistent_supervisor_contract.md) for the one
+remaining process-lifetime gap: the consumer's top-level Python process could disappear with its
+invoking SSH shell while an already-detached judge child continued. The new wrapper exposes only a
+manual no-clobber `launch` and read-only `inspect`. It neither changes nor replaces the existing
+consumer, execution config, all-four activation, prepared runtime contracts, [q50/K100 paper](../DEFINITIONS.md#q50-and-k100),
+checkpoints, trainers, or workers.
+
+Before execution, the child creates a new session, redirects fixed stdio, closes inherited file
+descriptors and publishes a hello with `PID=PGID`, Linux boot id/procfs start ticks, bound executable
+SHA, exact argv/fixed-environment digest and the complete source/config/activation/runtime SHA
+closure. The parent publishes an immutable ledger and commit token only after independently
+validating that identity. Without the token the child times out and exits by itself; after the token
+it revalidates all bytes and identity/token/ledger/result before acknowledgment and again before
+`execve`. First possible visibility of the token's final link, not acknowledgment timing or the
+following directory fsync, is the irreversible no-retry point; the startup deadline only governs
+token absence. Independent acknowledgment and exec observation
+windows return `token_published_pending_ack` or `committed_pending_exec` with return code zero when
+progress is not yet visible, while every second launch remains no-clobber rejected. Inspection
+rejects PID reuse and delegates terminal acceptance to the original runner's full result validator.
+
+The focused supervisor suite passes `24` cases; queue+consumer+supervisor together pass `64`. The
+suite includes tokenless deadline expiry, post-token delayed rehash, a 1.15-second acknowledgment
+atomic-publication stall, post-ack delayed exec and terminal-result A-to-B replacement. The three
+post-token stalls preserve no-retry authority and converge without a fatal-before-later-runner
+sequence. Post-link token-directory-fsync plus evidence-stat failure, token temporary-cleanup
+failure and parent-observation-write failure also return committed pending, reject restart and later
+inspect as exact running; none can escape as a retryable launch error. The host is macOS, so procfs behavior is covered through an injected
+identity seam and still needs one Linux fake-runner source smoke before any real q50 process. No Pod
+deployment, judge, simulator, training mutation, process-control action or hardware command ran.
+G05 remains `Partial`.

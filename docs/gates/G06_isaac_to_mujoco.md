@@ -1172,3 +1172,38 @@ sequence, executed binary/runtime closure or owned supervisor. The separate serv
 49 runtime bindings null and cannot arm a publisher. Detailed hashes and reproduction are in
 [the exact build experiment](../experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) and
 [serve operation](../operations/run_gate3_serve_sync_prereg.md). G06 remains `Partial`.
+
+### 2026-07-13 persistent model-4000 q50 startup source gate
+
+A detached two-phase [persistent supervisor](../DEFINITIONS.md#persistent-supervisor) now closes
+the activation consumer's top-level SSH-lifetime gap without changing any evaluated bytes. Its
+caller-SHA-pinned config binds the existing consumer/config/activation and a distinct prepared
+runtime contract plus Python realpath/binary SHA for each Pod. A fixed no-clobber state directory
+contains child hello, immutable launch ledger, commit token, commit acknowledgment and combined log.
+The token is withheld until the parent verifies `PID=PGID`, Linux boot id/procfs start ticks,
+executable SHA, exact argv/fixed-environment digest and every artifact SHA; parent loss or stall
+before that token makes the child self-exit rather than start an unowned judge. Deadline, process
+identity and token/ledger binding are checked before token publication. Atomic token final-link
+visibility is irreversible even if the following directory fsync fails; after it, slow rehash,
+acknowledgment publication and exec are pending committed work rather than deadline failure. The
+child still rechecks all bytes and
+identity/token/ledger/result before acknowledgment and before `execve`. Separate acknowledgment and
+exec-observation windows return `token_published_pending_ack` or `committed_pending_exec` with return
+code zero instead of creating retry authority when progress is not yet visible.
+
+Read-only `inspect` rehashes the complete closure. A live result requires the preserved PID, PGID,
+start ticks, executable, command line and environment digest to match; terminal acceptance is
+delegated to the unchanged runner's complete schedule/arms/lineage/count/report validator. A
+pre-existing result prevents launch. No retry, remote login, process-control, trainer/worker,
+simulator, deployment or robot surface exists. The detailed contract and commands are in
+[the model-4000 q50 operation](../operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md#persistent-top-level-launch-source-gate).
+
+Supervisor tests pass `24`; combined queue/consumer/supervisor tests pass `64`. Tokenless deadline
+expiry cannot execute; post-token delayed rehash, a 1.15-second acknowledgment atomic-publication
+stall and post-ack delayed exec all reject restart and later converge without a
+fatal-before-later-runner sequence. Terminal validation also freezes bytes/SHA and rejects an A-to-B
+replacement. Post-link token-directory-fsync plus evidence-stat failure, token temporary-cleanup
+failure and parent-observation-write failure are separately covered: all return committed pending,
+reject restart and later inspect as exact running without a fatal. This is host source evidence only: Linux procfs has not yet been smoke-tested, the wrapper is
+not deployed, and no MuJoCo judge or score ran. It therefore closes neither the matched
+[q50/K100](../DEFINITIONS.md#q50-and-k100) result nor vendor Gate3/Gate3B. G06 remains `Partial`.

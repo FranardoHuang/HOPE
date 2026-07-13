@@ -28,12 +28,13 @@
 | `schema-2 motion` | 动作资产的第 2 版数据合同，包含 runtime 所需的关节/刚体顺序与元数据。 |
 | `schema-3 bank` | 题库和判卷的第 3 版合同：训练题与考试题分开，题序、分母、动作和 SHA 可绑定。它不是 schema-2 motion 的升级同一件事。 |
 | `q10` | 每个动作/侧各 10 题的快速方向卷；只看有没有苗头，不许据此停训或晋级。 |
-| `q50` | 每个动作/侧至少 50 题的同卷决策考试。当本项目只考正手和反手时，合计通常是 100 次。 |
+| <a id="q50-and-k100"></a>`q50` | 每个动作/侧至少 50 题的同卷决策考试。当本项目只考正手和反手时，合计通常是 100 次。 |
 | `K100` | 当前一张具体的、100 行 immutable paper：正手 50 + 反手 50，共用固定 schedule/order，且不删失败尝试。`q50` 是考试协议类型，`K100` 是这次的具体卷，两者不是普遍同义词。`K100` 也不自动表示 exact，还必须核对题库 bytes、语义和分母。 |
 | Python `BankExam` | 仓库内的独立 policy 考试：Python 在 MuJoCo 中物理推进机器人，每题单独重置，再从击球时的球拍状态用解析模型推算接触和落台。它没有真实球拍—球碰撞，也不包含 planner、生产 C++ runner 或完整厂商运行链，因此不是 `Gate3/Gate3B`。 |
 | `readiness audit` | 开卷前的只读资格检查：核对 checkpoint、contract、题库/schedule 和本机路径，不启动 judge，不产生成绩。 |
 | `all-four activation` | 四 seed 同卷的启动授权文件：只有 Pod1/Pod2 readiness audit 和四份 checkpoint 全对上才能生成。它只允许下一步 `prepare`，不是 judge 已启动，更不是新分数。`judges_started=0` 就是还没有子判卷进程启动。 |
 | `prepared_not_started` | 两个 Pod 已按 activation 物化 no-clobber runtime contract 和 K100 路径，但 `jobs_started=0`、`auto_start=false`。这比 activation 多一步执行纸面，仍不是已开卷或有结果。 |
+| <a id="persistent-supervisor"></a>`persistent supervisor` / 持久监督器 | 对一条已审过的长任务做内容绑定、脱离调用 shell、无覆盖启动并只读复核身份的窄封装。本项目 q50 版本只有一次 `launch` 和只读 `inspect`，没有重试、信号、远程登录、训练、部署或真机权限；详见[接口合同](interfaces/q50_persistent_supervisor_contract.md)。 |
 | `no-clobber` | 只允许首次创建产物；目标路径已存在就拒绝，不会静默覆盖旧合同、日志或结果。 |
 | `NO-MERGE` | 该候选当前禁止合入 `main`。通常表示即使部分测试通过，仍有会制造错误证据或越权的明确缺口；修复并复核前不得把它当现行能力。 |
 | 解析击球/解析上台 | 没有在 simulator 里用真实球-拍-台-网接触重放，而是从触球时的拍位/拍速/拍面经解析接触模型推出击球和落台。它是诊断尺，不是 physical return。 |
