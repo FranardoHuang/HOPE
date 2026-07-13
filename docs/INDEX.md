@@ -53,12 +53,12 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | [`EXP-P1-FACE-PLANT-SCALEOUT`](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md) | 16 条 fresh 广度臂已分两波全部精确停止并保留证据；旧 face×plant 矩阵不能选 baseline |
 | [`EXP-P1-FRESH-SZ-STABILITY`](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 实验 completed/rejected；2k 与 4k 四 seed 稳定性都失败，seed4 持续弱；不晋级 baseline |
 | [`EXP-P1-FACE-SIGN-FORENSIC`](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) | `n/-n` 源码负控与 pre-orient physical-B 门已实现；fresh canary/修正后同卷未跑，旧分不晋级 |
-| [`EXP-P1-SIGNED-FACE-RESCUE-FUNNEL`](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md) | E3 partial：v6 A/B/C 已终档，D 在 runtime verified 前 boot timeout；v6r1 只补 D 且尚未启动，mixed L1/L2/判卷继续阻断 |
-| [`EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND`](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md) | E1 exam-v1 严格 profile 已冻结；真实 371 题 runtime rebind 未跑，新 schedule/judge 继续阻断 |
+| [`EXP-P1-SIGNED-FACE-RESCUE-FUNNEL`](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md) | E3 partial：foreign v8 A/B/C 串行前序终档，D 第四格第二次 pre-contract boot timeout；自动重试停止，L1 activation/L2/判卷继续阻断 |
+| [`EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND`](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md) | E2 数据门通过：真实 371 题逐字节 replay 并发布 exact bank/report；新 schedule/paper activation/judge 继续阻断 |
 | [`EXP-P1-HISTORICAL-SCHEMA3`](experiments/2026-07/EXP-P1-HISTORICAL-SCHEMA3.md) | 同题同卷尺已可用于诊断排名；所有历史模型仍为 inexact |
 | [`EXP-MUJOCO-NATIVE-TRAINING`](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md) | 实验 blocked；off-main preflight 为 `NO-MERGE`，四个正确性缺口未修；尚无 trusted backend、`VecEnv` 或 PPO smoke |
 | [`EXP-RECOVERY-TUPLE-ABC`](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md) | A/B/C 旧结构合同已验证；T0/T1/T2 与新 reward 次序仅完成文档设计，machine prereg 待同步 |
-| [`EXP-MOTION-SPATIAL-RETARGET`](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | B/C 主选已冻结并有 exact 整轨 SE(2) materializer/prereg；真实源只读 inspect 通过但尚未 consume，证书仍为 `0` |
+| [`EXP-MOTION-SPATIAL-RETARGET`](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | B/C 主选已在 Pod1 exact consume 整轨 SE(2)；仅解锁 schema-2 prereg，证书仍为 `0` |
 | [`EXP-GATE3-CURRENT179-D0`](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md) | 实验 blocked；`Gate3-D0` 严格模型 preflight 通过，当前行为尚未运行 |
 | [`EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD`](experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) | 实验 completed；exact 源码通过 portable Release 与 latest-main 回归，runtime gates 保持 open |
 | [v12/高点拍压/横移视频登记](experiments/motion_video_intake_v12_static_motion_20260713.md) | 7 段私有视频逐字节登记完成；没有动作处理、安全或行为结论 |

@@ -17,11 +17,24 @@
   `e016ca74...51aee` / `27f938cd...9d454`）和 restricted-pickle consumer
   `21ebbe68...87375`。consumer 只做冻结的 proper [SE(2)](DEFINITIONS.md)，验证 xyzw 左乘、
   Z/fps/dof/non-spatial exact、可选 world velocity 同转、save/reload 逆变换、刚体距离和 report-last；
-  专项 `10 passed`、全仓 host tests `656 passed, 9 skipped`；两份 exact 私有源只读 inspect 的最大
-  逆误差 `<2.23e-16`。本次没有
-  consume/Pod/simulator/RL/真机，schema-2/L0/vendor L1/桌网/动力学仍未跑、证书仍为 0。见
+  专项 `10 passed`、全仓 host tests `656 passed, 9 skipped`；两份 exact 私有源先 inspect，后在 Pod1
+  CPU-only runtime `consume`。B motion/report SHA 为 `27827912...ad6` / `a238c077...df3`，C 为
+  `0dd981a6...f48b` / `b3b93d2c...f67`，最大逆误差 `<2.23e-16`。没有 simulator/RL/真机，
+  schema-2/L0/vendor L1/桌网/动力学仍未跑、证书仍为 0，只解锁 schema-2 prereg。见
   [实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)与
   [操作](operations/run_motion_spatial_retarget_screen.md)。
+
+- signed-face exam bank 已在 Pod1 目标 runtime 完成 no-write validate 与独立 E2 发布：新 bank/report SHA
+  为 `60e1a7ad...d1ca` / `dd4332ed...ad0`，24 个非 metadata 数组未变，正/反手 `183/188` 题 old/new
+  output bytes 一致且 landing/net 全过。它只通过数据门；新 bank 绑定的 immutable schedule、paper
+  activation、L2/judge/formal score 仍阻断。见
+  [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md)。
+
+- signed-face foreign v8 使用新 source/manifest/launcher 串行跑过 A/B/C 前序，D 作为第四格又在
+  900 秒内未到 hard contract/runtime verified；exact-PGID wrapper cleanup 后 rc=124，没有学习、checkpoint
+  或 NaN/Inf/Traceback/OOM。继旧 v6 D 后这是第二次独立 pre-contract timeout，自动重试已停止，转入
+  boot 根因；四格 activation/L2/judge/第二 seed 全 false。最终 Pod1 审计为 0 trainer/worker/judge、
+  三张 GPU 空。见[机制漏斗](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)。
 
 - S0/M0 的下一层 exact GMR 已形成两份独立 no-clobber plan 与共享 consumer：五条 canonical-beta PT、
   converter argv、Python/pip、A3 model tree、两套 joint/body order 和 31-joint bijection 都是 required；M0

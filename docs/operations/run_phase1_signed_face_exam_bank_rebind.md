@@ -95,6 +95,15 @@ contact 与 flight tensor raw bytes、重跑 landing/net。只有这些全过后
 
 失败目录和 partial 必须原样保留供诊断。不能覆盖、删除或继续写；修复后只能新发 v2。
 
+### 已接受的 2026-07-14 E2 回执
+
+Pod1 已依次完成 no-write validate 和 `run`；不要删除输出目录后重跑 v1。发布的 63,643-byte bank SHA 为
+`60e1a7ade72eaf64e17a1b83795125551f08c6699c8a3cc3c269500d8e6cd1ca`，18,795-byte report SHA 为
+`dd4332edb47f1fb1f4d51ca00ceed612dbcadf9e395eb536c9b73bef9de69ad0`，report content SHA 为
+`7bdf4d6c2fccaf0b377e6bb76188c0b1d9abd1cd67cd322cbca2b1539a8a19d4`。24 个非 metadata 数组未变，
+正/反手 `183/188` 题 old/new output bytes 相同，landing/net 全过。小账见
+`configs/phase1_signed_face_exam_bank_rebind_results_20260714.json`。这只是 E2 数据门，不是 paper/judge。
+
 ## 5. 通过后仍然阻断的步骤
 
 新 metadata 会改变 bank 文件 SHA，而 question ID 把 bank SHA 作为输入，因此所有旧 schedule 都失效。

@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "ledger_id": "phase1-signed-face-v8-d-boot-failure-20260714-v1",
+  "status": "terminal_pre_contract_boot_timeout_automatic_retry_forbidden",
+  "recorded_local_date": "2026-07-14",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "scope": "Pod1 foreign signed-face v8 L1 serial cell D failure and directly bound predecessor receipt; no activation, L2, judge, deployment or hardware",
+  "source": {
+    "commit": "72418fff817d2d9beb9f764562b5a28e82a13044",
+    "tree": "8f99fe95bc7b1bc81dc3cacc112c0585dac87709",
+    "clean": true,
+    "worktree": "/workspace/codexschema/nohope_signed_face_rescue_claim_72418ff",
+    "bundle": {
+      "runtime_path": "/workspace/codexschema/staging/nohope_signed_face_source_72418ff_adf1c0be8a1e066f80dc96011c799d6eab99cc5e610a08d9234d6a6af4f1efc3.bundle",
+      "bytes": 2640446,
+      "sha256": "adf1c0be8a1e066f80dc96011c799d6eab99cc5e610a08d9234d6a6af4f1efc3",
+      "advertised_commit": "72418fff817d2d9beb9f764562b5a28e82a13044",
+      "prerequisite_commits": [
+        "e56028e63af77f4a0f4cde7514facd72f0ea3a57",
+        "6d93bcb16c422a2f42748c2dc99432559653480b"
+      ]
+    }
+  },
+  "control": {
+    "manifest_id": "phase1-signed-face-rescue-single-seed-funnel-20260713-v8",
+    "manifest_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v8/phase1_signed_face_rescue_funnel_prereg_v8_20260713.json",
+    "manifest_bytes": 21863,
+    "manifest_sha256": "f786da9f6f46c2bebba73edbf786a1c2cdf9eb2ecaa49820ffa56b9575ec8029",
+    "launcher_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v8/run_phase1_signed_face_rescue_funnel.py",
+    "launcher_bytes": 158209,
+    "launcher_sha256": "58e798fc7122e702195fe9f8c26ee8cb20874f78b8ab714165cb8281dafa6afa",
+    "locked_wrapper_path": "/workspace/codexschema/nohope_signed_face_rescue_claim_72418ff/hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh",
+    "locked_wrapper_bytes": 3170,
+    "locked_wrapper_sha256": "b250ec6d1cb3700bd45b7ede79e3d124125a0ae586a12dee16510b7cf647fa14"
+  },
+  "serial_context": {
+    "execution_mode": "serial_terminal_barrier",
+    "cell_order": [
+      "A",
+      "B",
+      "C",
+      "D"
+    ],
+    "d_launch_ordinal_zero_based": 3,
+    "v6_artifacts_adopted": false,
+    "v8_a_b_c_predecessors_reported_terminal": true,
+    "ledger_directly_archives_full_a_b_c_reaudit": false,
+    "direct_predecessor_receipt": {
+      "cell_id": "C",
+      "run_name": "phase1_signed_face_l1_v8_C_fresh_control_seed3",
+      "terminal_process_exit_observed": true,
+      "checkpoint_path": "/workspace/codexschema/nohope_signed_face_rescue_claim_72418ff/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-13_17-20-05_phase1_signed_face_l1_v8_C_fresh_control_seed3/model_24.pt",
+      "checkpoint_iteration": 24,
+      "checkpoint_sha256": "f7b0decbdf9897a5255c4417ac902f0064d1f8cf65ece94d6d90316e75c64f51",
+      "runtime_verified_sha256": "329785f6309bd66883d76eaf1fad0d365c32e5f365441f3e191d16929de885c1",
+      "launch_contract_sha256": "18868885eeea9b5f1ee739885f8f99a564d44126af923ba4f4a66cf15d6be1a2",
+      "launch_state_sha256": "945427f8a6c7e7b96bca74268ea4adcb6d7a76c5619e2baac6fb5260091a4dd7",
+      "training_contract_sha256": "dfc583d49362b86dcf3b90e92d0a847f64c14b6b5d71b5d70045c68baa3888a5",
+      "checkpoint_audit_sha256": "8b13bfdab9e196ee7e90792307b216e1ff857adfd942757607ff094b39287c8e"
+    }
+  },
+  "failed_cell": {
+    "cell_id": "D",
+    "run_name": "phase1_signed_face_l1_v8_D_fresh_guidance_seed3",
+    "stage": "l1",
+    "initialization": "fresh",
+    "causal_role": "fresh_guidance",
+    "training_seed": 3,
+    "expected_lineage_exact": true,
+    "gpu": 0,
+    "pid": 1782834,
+    "pgid": 1782834,
+    "started_utc": "2026-07-13T17:22:19Z",
+    "boot_timeout_s": 900,
+    "phase": "locked_boot",
+    "exit_code": 124,
+    "signal_scope": "exact_pgid",
+    "signal_sent_by_locked_wrapper": true,
+    "failure_kind": "timeout_before_hard_contract",
+    "launch_claim_sha256": "d7df6af47ea3725a4c5c03d05acdb815503bb4bbc754e35c3ea0ef776c0526c5"
+  },
+  "artifacts": {
+    "failure": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/runs/l1/phase1_signed_face_l1_v8_D_fresh_guidance_seed3/terminal_barrier_failure.json",
+      "bytes": 4785,
+      "sha256": "0e5bb13b072c2c1e029a93e9d2d037adbfc1d74da9e1c9450acea333173f98a9"
+    },
+    "launch_state": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/runs/l1/phase1_signed_face_l1_v8_D_fresh_guidance_seed3/run.log.launch",
+      "bytes": 3783,
+      "sha256": "80939e6df8184590df121f5edbf9f2de9188116438b6b328abd63152cdd2c90e"
+    },
+    "launch_contract": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/runs/l1/phase1_signed_face_l1_v8_D_fresh_guidance_seed3/launch_contract.json",
+      "bytes": 13169,
+      "sha256": "5649884dea8e1da690b51290a2eda583bca793ba36630883d48a350c2d192de5"
+    },
+    "run_log": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/runs/l1/phase1_signed_face_l1_v8_D_fresh_guidance_seed3/run.log",
+      "bytes": 34731,
+      "sha256": "5b2c91ac81963c1cef337ecdc3415e06fcfba4c410e21d72e721b8f3a530d43e"
+    }
+  },
+  "negative_evidence": {
+    "hard_contract_marker_present": false,
+    "runtime_verified_present": false,
+    "learning_iteration_present": false,
+    "checkpoint_present": false,
+    "training_log_directory_present": false,
+    "nan_present": false,
+    "inf_present": false,
+    "traceback_present": false,
+    "oom_present": false,
+    "malloc_failure_present": false,
+    "killed_marker_present": false
+  },
+  "decision": {
+    "l1_activation_materialized": false,
+    "l2_training_authorized": false,
+    "judge_authorized": false,
+    "second_seed_authorized": false,
+    "formal_score_authorized": false,
+    "deployment_authorized": false,
+    "hardware_authorized": false,
+    "automatic_retry_authorized": false,
+    "next_step": "boot_root_cause_before_any_new_versioned_attempt",
+    "reason": "This is the second independent D pre-contract Kit boot timeout after the archived v6 D timeout; another automatic recipe-identical retry would consume GPU without new causal information."
+  },
+  "final_pod1_audit": {
+    "trainer_count": 0,
+    "worker_count": 0,
+    "judge_count": 0,
+    "gpu_compute_process_count": 0,
+    "gpu_memory_process_count": 0,
+    "observed_utc": "2026-07-13T17:37:53Z"
+  }
+}

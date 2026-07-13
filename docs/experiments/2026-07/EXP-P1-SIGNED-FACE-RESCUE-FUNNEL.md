@@ -1,7 +1,7 @@
 # EXP-P1-SIGNED-FACE-RESCUE-FUNNEL：有符号拍面修复后的单-seed 机制漏斗
 
-状态：`v6_abc_terminal_d_boot_timeout_v6r1_single_cell_retry_preregistered`
-证据等级：E3 partial（v6 的 A/B/C 已实际训练到终档；D 未进入 runtime verified，v6r1 尚未启动）
+状态：`v8_abc_terminal_d_second_precontract_boot_timeout_retry_stopped`
+证据等级：E3 partial（v8 的 A/B/C 串行前序已终档；第四格 D 在 hard contract 前再次 boot timeout）
 人类负责人：franco  
 执行者：Codex  
 全局优先级：只继承 [`NOW` 队列第 1 项](../../NOW.md#统一工作队列唯一优先级账本)，本页不另建队列。
@@ -172,7 +172,8 @@ schema、split、source family 和 exact motion/frame/phase 合同。
 输出使用新 no-clobber 目录，旧 bank 不覆盖；先生成 bank，再写 completion report。新 train family SHA
 预注册为 `9603a178...9db`。该 train bank 即使通过也只解除 L1 发射阻塞；旧 exam 的 family SHA 会与它
 不同，所以在对应 exam bank 用同样证据完成 runtime 重绑定或重新生成之前，不能授权 L2 exact judge，
-也不能把这次重绑定冒充 signed-directional paper。exam 严格 rebind 已另行完成 E1 预注册，但尚未运行，
+也不能把这次重绑定冒充 signed-directional paper。exam 严格 rebind 已另行完成 E2 runtime 数据门，
+但新 bank 绑定的 schedule/paper activation 尚未物化，
 见 [`EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND`](EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md)。
 
 v1 的 no-write Pod preflight 又抓到一个跨 Python 版本的证据编码问题：`ast.dump` 在本机与 Pod Python
@@ -244,6 +245,26 @@ activation 同时绑定两套 config/launcher SHA 与 old-D→new-D retry lineag
 judge/L2/第二 seed/stop-promote 全 false，并记录 consumer 无直接 signal、冻结 wrapper 的 exact-PGID
 timeout cleanup policy 以及成功 D 路径未执行该 cleanup。当前只有 E1 工具/测试，v6r1 尚未实际运行。
 
+### v8 独立串行四格与第二次 D pre-contract timeout
+
+后续 foreign v8 不是把 v6/v6r1 只改运行名后继续。它使用 clean source
+`72418fff817d2d9beb9f764562b5a28e82a13044`（tree `8f99fe95...7709`）、全新 manifest/launcher
+`f786da9f...8029` / `58e798fc...6afa`，并明确 `v6_artifacts_adopted=false`。A/B/C/D 按 terminal barrier
+串行发射；A、B、C 前序实际运行并终档，D 是 zero-based ordinal `3` 的第四格。当前小账只完整归档 D
+失败和其直接 C 前序 receipt，不冒充对 A/B/C 的新一轮完整重审：C 的 `model_24.pt` SHA 为
+`f7b0decb...4f51`，finite/lineage1，hard-contract SHA `dfc583d4...888a5`，且自然退出。
+
+D 于 `2026-07-13T17:22:19Z` 以精确 `PID=PGID=1782834` 启动，900 秒内未出现 hard-contract marker、
+`runtime_verified.json`、learning iteration、checkpoint 或训练日志目录；日志也没有
+NaN/Inf/Traceback/OOM/malloc/Killed。frozen locked wrapper 只对该 PGID 做合同内 cleanup 并返回 124。
+failure/state/launch-contract/run-log SHA 分别为 `0e5bb13b...f98a9`、`80939e6d...c90e`、
+`5649884d...de5`、`5b2c91ac...d43e`。机器真源是
+[`phase1_signed_face_v8_d_boot_failure_20260714.json`](../../../configs/phase1_signed_face_v8_d_boot_failure_20260714.json)。
+
+这已是继旧 v6 D 之后第二次独立的 D pre-contract Kit boot timeout。没有新的根因证据前，自动换名或
+配方不变重试被拒绝；下一步是 boot root-cause，不是继续消耗 GPU。v8 没有四格 activation，L2、judge、
+第二 seed、部署和真机仍全部 false。最终只读审计为 Pod1 `0` trainer/worker/judge、三张 GPU 无 compute。
+
 ### 父合同扩展边界
 
 父 `model_13800.pt` SHA 冻结为 `478efa8d...d9e6`，嵌入/相邻 hard-contract SHA 均为
@@ -264,12 +285,15 @@ judge、部署或真机命令路径。
 - clean detached `50c49e5` epoch-1 训练 worktree和 exact ignored A3 资产已在 Pod1 建立；v1 audit 假拒绝、
   v2/v4/v5 pre-learning 失败与 v3 Kit 前假拒绝均已归档且未覆盖。v5 是旧题库 physics-contract 拒绝，
   没有 learning iteration/checkpoint；v2 rebound train bank/report 已正式发布。v6 A/B/C 已有终档，D
-  在 runtime verified 前 boot timeout；v6r1 只获准补 D，尚未启动。
-- L1 必须等 v6r1 D 自然终档并由 mixed finalizer 生成四格 completion/activation 证据。
+  在 runtime verified 前 boot timeout；当时只预注册了尚未启动的 v6r1 D-only 路径，现已由下述 v8
+  独立尝试取代并停止自动重试。
+- v6r1 计划已被独立 v8 串行尝试取代；v8 D 再次在合同前 timeout，因此仍无四格
+  completion/activation。禁止自动 retry，先做 boot root-cause。
 - 相对 `+1000` 的 immutable signed-face directional checkpoint paper 的 exact schedule/path/SHA 尚未
-  冻结。exam-v1 rebind 只有 E1 prereg，真实 371 题 replay/output SHA 与基于新 bank 的 schedule 都没有；
+  冻结。exam-v1 rebind 已完成 E2 真实 371 题 replay/output，但基于新 bank 的 schedule/paper activation
+  仍没有；
   manifest 明确 `l2.launch_authorized=false`。必须另发 reviewed v7 paper activation 后才能启动 L2。
   当前 launcher 也不启动 judge、不能自动晋级或购买第二 seed。
 
-当前只授权按运行手册进行仿真 v6r1 D 单格 runtime validate/launch/finalize；不授权再次启动原 v6 D，
-也不授权 L2、judge、第二 seed、部署或真机。
+当前不授权再次启动原 v6 D、v6r1 或 v8 D。只有 boot 根因闭环并形成新的内容绑定合同后，才可评审新的
+versioned attempt；也不授权 L2、judge、第二 seed、部署或真机。

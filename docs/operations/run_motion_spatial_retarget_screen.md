@@ -184,6 +184,17 @@ ladder. Passing this step still authorizes only a separate schema-2
 preregistration; L0, vendor L1, table/net clearance, dynamics, simulator,
 training, TOPP and hardware remain blocked.
 
+### Accepted 2026-07-14 runtime receipt
+
+Pod1 CPU-only `consume` has already completed for both plans; do not rerun into either no-clobber output root.
+B published a 27,927-byte motion SHA `278279125528c827e0a980389b040d54d16140620c59c67c878286be9d1c8ad6`
+and 4,051-byte report SHA `a238c077524586b2f1181cd24cb84ee29aa985ab274cfb43292f3159c0daadf3`.
+C published a 30,055-byte motion SHA `0dd981a6d29c0c5321c905d1591a59fbb79763de6e43d92d4d76aefdc29ff48b`
+and 4,068-byte report SHA `b3b93d2cdb0a288f04aed764e5fdca92182cee625715a953600439088f59ff67`.
+The tracked result ledger is
+`configs/motion_backhand_loop_bc_se2_materialization_results_20260714.json`. Restore private payloads by the
+exact paths/SHA in that ledger; never regenerate them merely because a local copy is absent.
+
 ## Promotion remains deliberately blocked
 
 The current manifest says `certificate_bundle_preregistered=false`; passing an

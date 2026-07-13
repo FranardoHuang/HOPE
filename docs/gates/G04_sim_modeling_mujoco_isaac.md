@@ -247,10 +247,12 @@ translation. Unknown payload fields and non-NumPy pickle globals fail closed.
 Ten focused tests and the `656 passed, 9 skipped` host repository suite pass, including
 save/reload inverse, pairwise rigid-distance, grounding,
 mirror, unsafe-pickle, report-last and no-clobber negative controls. Read-only inspect of the two
-locally synced exact B/C private sources also passed with maximum inverse errors below `2.23e-16`
-and pairwise-distance error below `4.17e-17 m`. No output was consumed or published in this change;
-schema-2, L0, vendor L1, table/net clearance, dynamics, simulator, training and hardware remain
-unrun. G04 remains `Partial`.
+exact B/C private sources passed, then Pod1 CPU-only `consume` published both motion/report pairs.
+B motion/report SHA is `27827912...ad6` / `a238c077...df3`; C is
+`0dd981a6...f48b` / `b3b93d2c...f67`; maximum inverse error is below `2.23e-16` and pairwise-distance
+error below `4.17e-17 m`. This only unlocks a separate schema-2 preregistration. L0, vendor L1,
+table/net clearance, dynamics, simulator, training and hardware remain unrun; certificate count is
+still zero. G04 remains `Partial`.
 
 For M0, the canonical-beta materialization still has null A3 stance fields. The downstream exact-GMR
 plan now freezes canonical foot sites and tolerances, while initial/terminal `d_xy` and pass remain

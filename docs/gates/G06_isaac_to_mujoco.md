@@ -1120,7 +1120,7 @@ parent supervisor that retains serial two-seed ownership and final-result materi
 SSH disconnect. This is execution-paper preparation rather than behavior evidence, so G06 remains
 `Partial`.
 
-### 2026-07-13 signed-face L1 混合收口仍不授权判卷
+### 2026-07-14 signed-face v8 再次在合同前阻断，不授权判卷
 
 Pod1 epoch-1 v6 的 A/B/C 已到终档，但 D 在产生 runtime verified/checkpoint 前 Kit boot timeout；因此
 不存在完整四格 L1 activation。新 [v6r1](../DEFINITIONS.md) 工具只允许 D 在配方不变、唯一
@@ -1132,10 +1132,11 @@ provenance。Python consumer 不直接发 signal；frozen locked wrapper 只允�
 training-log root 没有同 run-name suffix entry；终档只接受 `runtime_verified` 的 exact run dir，不从
 filesystem glob 猜“最新”目录。
 
-该 mixed activation 即使产生，也只证明 L1 发射/终档完整性。它硬编码
-`automatic_judge_launch=false`、`l2_training_launch_authorized=false`、`second_seed_authorized=false`；
-对应 signed directional exam family/paper 仍未完成，所以不能进入 Isaac/MuJoCo 同卷，更不能成为
-Gate3/Gate3B 或部署证据。v6r1 当前只有 E1 源码/测试、尚未运行，G06 保持 `Partial`。
+后续 foreign v8 不采用 v6 artifact，而以新 source/manifest/launcher 按 A/B/C/D terminal barrier 串行
+运行。A/B/C 前序已终档；D 作为第四格又在 900 秒内未产生 hard contract/runtime verified/checkpoint，
+exact-PGID wrapper cleanup 后 rc=124。它是继 v6 D 后第二次独立 pre-contract Kit boot timeout；自动
+retry 已停止，必须先做 boot root-cause。v8 没有四格 activation，且 L2/judge/第二 seed 均为 false，
+所以不能进入 Isaac/MuJoCo 同卷，更不能成为 Gate3/Gate3B 或部署证据。G06 保持 `Partial`。
 
 ### 2026-07-13 MuJoCo trainer preflight 红队：授权安全，源码门暂缓
 
@@ -1308,17 +1309,18 @@ landing/net 全过；这只是 E2 runtime data gate。train rebind 后 source-fa
 不能与它组成 exact 同 family 证据。对应 exam bank 还未同法重绑定/重生成，L2 directional paper 与
 judge 仍阻断，所以这项能力不构成 G06 或 Gate3 结果。
 
-### 2026-07-13 signed-face exam bank 独立重绑定预注册
+### 2026-07-14 signed-face exam bank E2 数据门完成
 
-exam 对应的严格数据门已完成 E1 实现与预注册，但**没有运行**。generalized consumer 仍 byte-exact
+exam 对应的严格数据门已完成 E2 runtime replay 与 no-clobber 发布。generalized consumer 仍 byte-exact
 接受历史 train-v2 manifest，同时新增一个封闭 exam-v1 profile：旧 exam path、`63,968` bytes、SHA
 `d7db2568...f5096`、split `exam`、正/反手 `183/188`、旧 family `b21c161a...8ad5` 和独立 no-clobber
 输出都不可替换；目标 physics/family 与已发布 train-v2 同为 `09dfe899...afb95` / `9603a178...a9db`。
-mutation/source-receipt/profile 回归为 `18 passed`。
+mutation/source-receipt/profile 回归为 `18 passed`。Pod1 目标 runtime 的 24 个非 metadata 数组未变，
+正/反手 `183/188` 道题 old/new output bytes 全相同并通过 landing/net；发布 bank/report SHA 为
+`60e1a7ad...d1ca` / `dd4332ed...ad0`。
 
-本分支没有访问 Pod、目标 Torch runtime 或真实 exam asset，也没有生成 rebound bank/report；因此证据仍为
-E1。即使后续 371 题 runtime replay 与 report-last 发布通过，新 bank SHA 也会改变 question ID，旧
-schedule 不得复用；必须从新 bank 重新冻结独立 schedule/paper activation 后才能启动 judge。详见
+新 bank SHA 改变 question ID，旧 schedule 不得复用；必须从新 bank 重新冻结独立 schedule/paper
+activation 后才能启动 judge。详见
 [实验卷宗](../experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md)与
 [运行手册](../operations/run_phase1_signed_face_exam_bank_rebind.md)。当前 L2、signed-face paper、G06 与
 Gate3 状态均不变，G06 保持 `Partial`。

@@ -1,0 +1,198 @@
+{
+  "schema_version": 1,
+  "ledger_id": "motion-backhand-loop-bc-se2-materialization-results-20260714-v1",
+  "status": "complete_exact_pair_materialized_certificate_blocked",
+  "recorded_local_date": "2026-07-14",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "scope": "CPU-only exact whole-motion SE(2) materialization of the frozen Franco backhand-loop B/C primaries; no schema-2, simulator, training, TOPP or hardware",
+  "source": {
+    "commit": "d543dcea673184e2ebad64b7af6b6260e0eb1e47",
+    "tree": "1aac12b9890d0b98d56f5e32066c478474c19732",
+    "clean_detached_worktree": true,
+    "worktree_path": "/workspace/codexschema/nohope_motion_se2_d543dce",
+    "bundle_sha256": "f3fbfc82bac93a7a4a8c4f94c5fc445b0e459460d66394df94fa89105f874c24"
+  },
+  "consumer": {
+    "path": "scripts/materialize_motion_spatial_se2.py",
+    "sha256": "21ebbe68d5d76acde90bb413f68928df9d87cb053275d9f0f46d36dbf1187375"
+  },
+  "selection_result": {
+    "path": "configs/motion_backhand_loop_bc_proposal_selection_results_20260713.json",
+    "sha256": "8a80a409ca69e2fa73757b139b8496bb9cdda2e6a66d3fab48412051b408d2be"
+  },
+  "runtime": {
+    "pod": "pod1",
+    "execution": "cpu_only",
+    "python_path": "/usr/bin/python3",
+    "python_version": "3.12.3",
+    "numpy_version": "2.1.2",
+    "cuda_visible_devices": "",
+    "isaac_imported": false,
+    "kit_started": false,
+    "simulator_started": false,
+    "trainer_started": false,
+    "real_robot_commands_executed": false
+  },
+  "assets": [
+    {
+      "asset_id": "franco_backhand_loop_b",
+      "completed_utc": "2026-07-13T17:33:41.506746Z",
+      "preregistration": {
+        "path": "configs/motion_backhand_loop_b_se2_materialization_prereg_20260714.json",
+        "sha256": "e016ca742dfebbd9726b03df1ad3cd7e75f19a07557e5e458e57e00088751aee"
+      },
+      "candidate_id": "98e7b883b29d302dc7a24fd3c564648c1f929ff2391e24e58558dcba58af3c14",
+      "source_motion": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_loop_b.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 27926,
+        "sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e"
+      },
+      "output_motion": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_spatial_retarget_primary_v1/franco_backhand_loop_b_98e7b883b29d/franco_backhand_loop_b.98e7b883b29d.se2.gmr.pkl",
+        "bytes": 27927,
+        "sha256": "278279125528c827e0a980389b040d54d16140620c59c67c878286be9d1c8ad6"
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_spatial_retarget_primary_v1/franco_backhand_loop_b_98e7b883b29d/materialization_report.json",
+        "bytes": 4051,
+        "sha256": "a238c077524586b2f1181cd24cb84ee29aa985ab274cfb43292f3159c0daadf3",
+        "status": "complete_exact_whole_motion_se2_materialization"
+      },
+      "transform": {
+        "semantics": "proper_atomic_whole_motion_ground_preserving_SE2_left_action_in_GMR_world",
+        "translation_w_m": [
+          0.05035998433,
+          -0.109155849041,
+          0.0
+        ],
+        "yaw_deg": -5.0,
+        "mirror": false,
+        "joint_edit": false,
+        "per_frame_edit": false,
+        "time_edit_or_topp": false
+      },
+      "structure": {
+        "frames": 91,
+        "fps": 30,
+        "root_rotation_convention": "xyzw",
+        "world_vector_fields_present": []
+      },
+      "invariants": {
+        "tolerance": 1e-12,
+        "proper_rotation_determinant": 1.0,
+        "root_position_inverse_max_abs_error": 1.3877787807814457e-17,
+        "root_quaternion_inverse_max_abs_error": 2.220446049250313e-16,
+        "root_pairwise_distance_max_abs_error_m": 3.469446951953614e-17,
+        "world_vector_inverse_max_abs_error": 0.0,
+        "root_z_bit_exact": true,
+        "dof_pos_bit_exact": true,
+        "fps_bit_exact": true,
+        "local_body_pos_bit_exact": true,
+        "link_body_list_bit_exact": true,
+        "no_mirror": true,
+        "no_resample_or_topp": true
+      },
+      "publication": {
+        "no_clobber": true,
+        "motion_mtime_ns": 1783964021500412068,
+        "report_mtime_ns": 1783964021506412062,
+        "report_written_after_motion_observed": true,
+        "completion_marker": "materialization_report.json"
+      },
+      "authorization": {
+        "formal_eligible": false,
+        "training_authorized": false,
+        "hardware_authorized": false,
+        "schema2_materialized": false,
+        "simulator_authorized": false,
+        "topp_authorized": false,
+        "fallback_advanced": false
+      }
+    },
+    {
+      "asset_id": "franco_backhand_loop_c",
+      "completed_utc": "2026-07-13T17:33:41.721489Z",
+      "preregistration": {
+        "path": "configs/motion_backhand_loop_c_se2_materialization_prereg_20260714.json",
+        "sha256": "27f938cd6016fcadada8c6ea806329279c379ccb77b5db99b8902275ebd9d454"
+      },
+      "candidate_id": "aa0c86fd350987bf30e56aebde9789bf9df430b0ec5c3c15cd235410794af299",
+      "source_motion": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_canonical_betas_grounded_v2/franco_backhand_loop_c.diagnostic_cohort_median_betas.grounded.pkl",
+        "bytes": 30054,
+        "sha256": "4eb40301a51346fd3ad6cae52b13e93ca91b135f9eb9b38e16f7d89e456e9cb6"
+      },
+      "output_motion": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_spatial_retarget_primary_v1/franco_backhand_loop_c_aa0c86fd3509/franco_backhand_loop_c.aa0c86fd3509.se2.gmr.pkl",
+        "bytes": 30055,
+        "sha256": "0dd981a6d29c0c5321c905d1591a59fbb79763de6e43d92d4d76aefdc29ff48b"
+      },
+      "report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_spatial_retarget_primary_v1/franco_backhand_loop_c_aa0c86fd3509/materialization_report.json",
+        "bytes": 4068,
+        "sha256": "b3b93d2cdb0a288f04aed764e5fdca92182cee625715a953600439088f59ff67",
+        "status": "complete_exact_whole_motion_se2_materialization"
+      },
+      "transform": {
+        "semantics": "proper_atomic_whole_motion_ground_preserving_SE2_left_action_in_GMR_world",
+        "translation_w_m": [
+          0.157231187588,
+          -0.157700713465,
+          0.0
+        ],
+        "yaw_deg": -10.0,
+        "mirror": false,
+        "joint_edit": false,
+        "per_frame_edit": false,
+        "time_edit_or_topp": false
+      },
+      "structure": {
+        "frames": 98,
+        "fps": 30,
+        "root_rotation_convention": "xyzw",
+        "world_vector_fields_present": []
+      },
+      "invariants": {
+        "tolerance": 1e-12,
+        "proper_rotation_determinant": 0.9999999999999999,
+        "root_position_inverse_max_abs_error": 2.0816681711721685e-17,
+        "root_quaternion_inverse_max_abs_error": 1.1102230246251565e-16,
+        "root_pairwise_distance_max_abs_error_m": 4.163336342344337e-17,
+        "world_vector_inverse_max_abs_error": 0.0,
+        "root_z_bit_exact": true,
+        "dof_pos_bit_exact": true,
+        "fps_bit_exact": true,
+        "local_body_pos_bit_exact": true,
+        "link_body_list_bit_exact": true,
+        "no_mirror": true,
+        "no_resample_or_topp": true
+      },
+      "publication": {
+        "no_clobber": true,
+        "motion_mtime_ns": 1783964021718411854,
+        "report_mtime_ns": 1783964021721411851,
+        "report_written_after_motion_observed": true,
+        "completion_marker": "materialization_report.json"
+      },
+      "authorization": {
+        "formal_eligible": false,
+        "training_authorized": false,
+        "hardware_authorized": false,
+        "schema2_materialized": false,
+        "simulator_authorized": false,
+        "topp_authorized": false,
+        "fallback_advanced": false
+      }
+    }
+  ],
+  "pair_decision": {
+    "materialized_motion_count": 2,
+    "certificate_count_before": 0,
+    "certificate_count_after": 0,
+    "accepted_motion_count": 0,
+    "only_unlocked_next_step": "schema2_materialization_preregistration",
+    "schema2_L0_vendor_L1_table_net_dynamics_unrun": true,
+    "private_motion_payloads_tracked_in_git": false
+  }
+}

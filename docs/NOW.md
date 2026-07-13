@@ -1,6 +1,6 @@
 # NOW — 当前训练流程、课程阶段与下一步
 
-最近复核：2026-07-13 CST。本页说明现在到底在训什么、整套训练怎样连起来、每个课程阶段在解决
+最近复核：2026-07-14 CST。本页说明现在到底在训什么、整套训练怎样连起来、每个课程阶段在解决
 什么问题，以及下一项工作为什么值得做。实验过程放在[实验登记册](experiments/README.md)，
 复现命令和 Gate 结果放在对应 [Gate](gates/) 与操作文档。
 
@@ -31,22 +31,25 @@
 做成安全可训练候选；用一张卡四个不同因果格修正现役 policy 的拍面反号；把胜出 policy 连同我们的
 planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行为以厂商 MuJoCo 为准。
 
-- **最新可分享结果：** 反手拉 B/C 的 signed 整轨重定位已产生 `19/3` 个 bounded proposal，但证书仍为
-  `0`；高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
+- **最新可分享结果：** 反手拉 B/C 的 rank-0 主选已在 Pod1 CPU-only runtime 完成 exact 整轨
+  SE(2) 实体化；motion/report SHA 已归档，但 schema-2/L0/vendor L1/桌网/动力学未跑，证书仍为 `0`，
+  只解锁 schema-2 预注册。高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
   canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。它们现在只解锁独立 exact GMR prereg，
   还不是“动作会打球”。
-- **当前运行态：** Pod1 当前没有 trainer/worker/judge，三张 GPU 无 compute；GPU 不再用失败配方的重复
-  seed 填满。signed-face L1 的 A/B/C 已产出 finite terminal，D 在首次 learning/hard-contract 前
-  900 秒 Kit boot timeout；旧 D claim 保留，四格 activation 未生成，正在准备唯一 run-name 变化的
-  no-clobber D 重试。exam bank 只有 E1 重绑定代码，尚未发布新 bank/paper，所以 L2/judge 仍阻断。
+- **当前运行态：** Pod1 最终只读审计为 `0` trainer/worker/judge，三张 GPU 无 compute。foreign v8 的
+  A/B/C 串行前序已终档；D 是第四格，900 秒内再次未到 hard contract/runtime verified，locked wrapper
+  只清理本臂 exact PGID 并返回 124。这是继旧 v6 D 后第二次 pre-contract Kit boot timeout，已停止
+  自动重试并转入 boot 根因。GPU 不要求用无新因果信息的重复 seed 填满，机制漏斗和动作专属门优先。
+  signed-face exam bank 已过 E2：371 题 old/new replay 逐字节一致并发布新 bank/report；但新 bank 绑定的
+  immutable schedule/paper activation 尚无，所以 L2/judge 仍阻断。
 - **Franco focus：** 五种动作的用途、动作专属来球题族、空挥视觉锚点和横移终态站距语义；反手拉
   B/C 先补证，高点拍压作为第五动作，v12 只作后续 Jiayi 对照。
 - **Jiayi focus：** v12/dang 路线与 planner-policy 契合；其候选必须在相同挡球专卷和厂商 MuJoCo 中
   与 Franco 主线对照，不能用录制版本号直接晋级。
 - **Yikang focus：** 历史 Gate3 谱系复核与独立 physics/reference oracle；现有证据不替代当前 179-D
   planner-policy tuple 的 vendor runtime 行为。
-- **Codex 执行：** exact 动作 lineage、B/C 每类只选一个候选的证书、S0/M0 exact GMR 前置、D 版本化重试、
-  exam 重绑定和 main 账本；
+- **Codex 执行：** exact 动作 lineage、B/C 每类只选一个候选的证书、S0/M0 exact GMR 前置、D boot 根因、
+  signed-face 新 exam 的 schedule/paper activation 和 main 账本；
   每通过一层就合 main，不把多个未验层绑成一个大任务。
 
 ## 1. 当前一套训练是怎样完整跑起来的

@@ -1,14 +1,27 @@
 # 运行 Phase-1 有符号拍面单-seed 机制漏斗
 
-状态：v1–v5 的学习前失败证据均已保留；v6 的 A/B/C 已到终档，D 在 runtime verified/checkpoint 前
-Kit boot timeout；只允许新的 [v6r1](../DEFINITIONS.md) D 单格补跑，尚未启动，G05/G06 仍为 `Partial`。
+状态：v1–v5 与 v6 D 的学习前失败证据均已保留；后续独立 foreign v8 的 A/B/C 串行前序已终档，D
+第四格再次在 hard contract/runtime verified 前 Kit boot timeout。自动重试已停止，G05/G06 仍为 `Partial`。
 
 本页运行 [`EXP-P1-SIGNED-FACE-RESCUE-FUNNEL`](../experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)
 冻结的四个因果格。`run_name` 是每条训练不可复用的运行名；`seed` 是随机初始化/采样种子；其他缩写见
 [术语与人话对照](../DEFINITIONS.md)。本操作只允许仿真训练，不运行 judge、部署或任何真实机器人命令。
 
-> 当前入口是下文“v6r1 D-only 补跑”，不是重新执行旧四格命令。原 v6 D 的 no-clobber claim 必须
-> 原样保留；不得删除、覆盖或用原 `run_name` 重试。
+> 当前没有可执行的 D retry 入口。下文 v6/v6r1 命令只保留历史复现与证据解释，不得再运行。原 v6、
+> v8 D 的 no-clobber claim 必须原样保留；只有 boot 根因闭环并评审新的内容绑定版本后才可发新尝试。
+
+## 2026-07-14 当前终态
+
+foreign v8 使用 clean `72418fff817d2d9beb9f764562b5a28e82a13044`、新 manifest/launcher SHA
+`f786da9f...8029` / `58e798fc...6afa`，不是只改名的 v6r1，也没有采用 v6 artifact。A/B/C 前序按
+terminal barrier 运行并终档；D 是第四格。D 的 `PID=PGID=1782834` 在 900 秒内未写 hard-contract
+marker、runtime verified、learning iteration 或 checkpoint，locked wrapper 仅精确清理该 PGID，rc=124。
+日志无 NaN/Inf/Traceback/OOM/malloc/Killed。完整小账是
+`configs/phase1_signed_face_v8_d_boot_failure_20260714.json`。
+
+这是继 v6 D 后第二次独立 pre-contract Kit boot timeout。不要再执行本页任何 launch/finalize 命令；
+下一步只允许只读 boot root-cause。最终 Pod1 审计为 0 trainer/worker/judge、三张 GPU 无 compute。exam
+E2 已发布，但新 bank 的 schedule/paper activation 尚无，因此即便 boot 修复，L2/judge 仍另行阻断。
 
 ## 已冻结的边界
 

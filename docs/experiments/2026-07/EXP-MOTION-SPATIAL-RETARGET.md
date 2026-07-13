@@ -1,10 +1,10 @@
 # EXP-MOTION-SPATIAL-RETARGET — 新动作能否到达有效击球点？
 
-- 状态：completed（proposal screen 与 B/C 确定性主选完成；promotion blocked）
+- 状态：completed（proposal screen、B/C 确定性主选与 exact SE(2) 实体化完成；promotion blocked）
 - 阶段/轴：课程阶段 2 / 动作适配与动作源
 - 人类负责人：franco
 - 执行者：Codex
-- 最高证据等级：E1
+- 最高证据等级：E2
 
 共享缩写见 [术语与人话对照](../../DEFINITIONS.md)。
 
@@ -65,7 +65,7 @@ candidate ID。20,084-byte tracked 结果
 另做内容绑定的主选物化与证书合同。host 选择器专项为 `13 passed`，全仓回归为
 `646 passed, 9 skipped`。
 
-## 2026-07-14：B/C 主选整轨站位实体化已实现，尚未发布产物
+## 2026-07-14：B/C 主选整轨站位已 exact 实体化
 
 两条主选现在各有独立、不可覆盖（[no-clobber](../../DEFINITIONS.md)）的预注册：
 
@@ -87,12 +87,16 @@ ladder 自动取备选。B 对整轨应用平移 `[0.05035998433,-0.109155849041
 镜像、关节/逐帧/TOPP 编辑均 fail closed。保存重载后再次做逆变换和全帧 root 刚体距离审计，报告最后
 发布。
 
-专项 `10 passed`，全仓 host tests 为 `656 passed, 9 skipped`；两份 exact 私有镜像源的只读
-`inspect` 也通过：B/C 最大 root position 逆误差分别
+专项 `10 passed`，全仓 host tests 为 `656 passed, 9 skipped`；两份 exact 私有镜像源先通过只读
+`inspect`，随后在 Pod1 的 CPU-only runtime 逐份 `consume` 并以 report-last 原子发布。B/C 最大 root position 逆误差分别
 `1.39e-17/2.08e-17`，quaternion 逆误差 `2.22e-16/1.11e-16`，全帧两两距离最大误差
-`3.47e-17/4.16e-17 m`，Z bit-exact。这里没有执行 `consume`，所以没有 materialized PKL/report、
-schema-2、L0、vendor L1、桌网整轨、动力学、simulator、训练或真机证据；证书仍为 `0`，状态继续
-promotion blocked。materialization 或内部失败必须停止该资产，不能跳 fallback；只有未来桌/网外部
+`3.47e-17/4.16e-17 m`，Z bit-exact。B 的 motion/report SHA 为 `27827912...ad6` / `a238c077...df3`，
+C 为 `0dd981a6...f48b` / `b3b93d2c...f67`；完整小账见
+[`motion_backhand_loop_bc_se2_materialization_results_20260714.json`](../../../configs/motion_backhand_loop_bc_se2_materialization_results_20260714.json)。
+
+这一步只证明冻结主选的整轨刚体搬家逐字节满足合同。它没有 schema-2、L0、vendor L1、桌网整轨、
+动力学、simulator、训练或真机证据；证书仍为 `0`，状态继续 promotion blocked，唯一解锁项是另立
+schema-2 materialization prereg。materialization 或内部失败必须停止该资产，不能跳 fallback；只有未来桌/网外部
 几何失败才回到已冻结 selector 的 `resolve`。
 
 权威资料：[G08](../../gates/G08_blind_spot_improvements.md) 和

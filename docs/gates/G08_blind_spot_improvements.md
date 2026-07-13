@@ -476,9 +476,11 @@ XY translation + yaw 作为 proper [SE(2) 平面刚体变换](../DEFINITIONS.md)
 save/reload 逆变换、刚体距离、保地、report-last/no-clobber 负测共 `10 passed`，全仓 host tests
 `656 passed, 9 skipped`。
 
-两份 exact 私有源的本地只读 inspect 已通过，但本变更未发布实体化产物，也未运行 schema-2、L0、
-vendor L1、桌网整轨、动力学、simulator/RL 或真机。因此证书仍为 0、G08 仍是 Research track；内部
-materialization 失败必须停止资产，只有后续外部桌/网失败才允许 selector 推进 frozen fallback。
+两份 exact 私有源先通过只读 inspect，随后在 Pod1 CPU-only runtime 完成 `consume`：B motion/report
+SHA 为 `27827912...ad6` / `a238c077...df3`，C 为 `0dd981a6...f48b` / `b3b93d2c...f67`。这只发布冻结的
+整轨 root 变换并解锁独立 schema-2 prereg；尚未运行 schema-2、L0、vendor L1、桌网整轨、动力学、
+simulator/RL 或真机。因此证书仍为 0、G08 仍是 Research track；内部 materialization 失败必须停止
+资产，只有后续外部桌/网失败才允许 selector 推进 frozen fallback。
 完整命令与边界见[空间重定位实验](../experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)和
 [操作文档](../operations/run_motion_spatial_retarget_screen.md)。
 

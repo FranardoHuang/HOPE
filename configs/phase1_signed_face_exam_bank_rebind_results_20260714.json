@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "ledger_id": "phase1-signed-face-exam-bank-rebind-results-20260714-v1",
+  "status": "complete_exact_e2_data_gate_schedule_and_judge_blocked",
+  "recorded_local_date": "2026-07-14",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "scope": "CPU/Torch runtime replay and no-clobber publication of the immutable Phase-1 exam bank under the current signed-face physics/source-family contract; no schedule, judge, training, simulator or hardware",
+  "source": {
+    "base_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+    "target_commit": "882fea4285f0cf9a97ba79d79ae8af31d26ea1ed",
+    "target_tree": "fc36d0fb7f1119ddb3320df5ba8744b2bae5847a",
+    "target_worktree": "/workspace/codexschema/nohope_signed_face_rescue_882fea4",
+    "target_worktree_clean": true,
+    "only_changed_physics_file": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/virtual_ball.py",
+    "only_added_top_level_function": "signed_face_hemisphere",
+    "preexisting_executable_ast_equal": true
+  },
+  "preregistration": {
+    "path": "configs/phase1_signed_face_exam_bank_rebind_prereg_20260713.json",
+    "runtime_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/exam_bank_rebind_v1/phase1_signed_face_exam_bank_rebind_prereg_20260713.json",
+    "sha256": "2153553abe105ace0ae8a90c174198e57b141379d9b3bfc76bdee8d52af7616a",
+    "manifest_id": "phase1-signed-face-schema3-exam-additive-physics-rebind-20260713-v1"
+  },
+  "consumer": {
+    "path": "scripts/rebind_stage1_question_bank_physics_contract.py",
+    "runtime_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/exam_bank_rebind_v1/rebind_stage1_question_bank_physics_contract.py",
+    "sha256": "cf8f6353a6b2a8d90aa7cbb960d5bdb9e681fb174458e088a9341ccda5b8e968"
+  },
+  "runtime": {
+    "pod": "pod1",
+    "python_version": "3.10.18",
+    "numpy_version": "1.26.4",
+    "torch_version": "2.7.0+cu128",
+    "simulation_only": true,
+    "trainer_started": false,
+    "judge_started": false,
+    "real_robot_commands_executed": false
+  },
+  "input_exam_bank": {
+    "path": "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/s1_v4rg_runtime_order_schema3_exam.npz",
+    "bytes": 63968,
+    "sha256": "d7db2568beee990ef1d64b2dce9f0ab56ca76377f8993d820b6388292d0f5096",
+    "split": "exam",
+    "question_counts": {
+      "forehand": 183,
+      "backhand": 188,
+      "total": 371
+    },
+    "source_family_sha256": "b21c161a0240893a4a469136c2d5298c2ecfa9f2b4a8c6fb9493b679f3728ad5"
+  },
+  "execution": {
+    "no_write_validation_passed": true,
+    "run_published": true,
+    "non_metadata_array_count": 24,
+    "all_non_metadata_arrays_finite": true,
+    "question_arrays_changed": false,
+    "legacy_load_used": false,
+    "runtime_motion_contract_valid": true,
+    "old_new_all_output_bytes_equal": {
+      "forehand": true,
+      "backhand": true
+    },
+    "landing_valid_count": {
+      "forehand": 183,
+      "backhand": 188
+    },
+    "net_clear_count": {
+      "forehand": 183,
+      "backhand": 188
+    },
+    "max_landing_error_m": {
+      "forehand": 0.004386161326084585,
+      "backhand": 0.004445675908636148
+    },
+    "min_net_margin_m": {
+      "forehand": 0.2586781641928183,
+      "backhand": 0.34185546204807593
+    }
+  },
+  "output": {
+    "bank": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_exam_bank_rebind_v1/s1_v4rg_runtime_order_schema3_exam_882fea4_rebound.npz",
+      "bytes": 63643,
+      "sha256": "60e1a7ade72eaf64e17a1b83795125551f08c6699c8a3cc3c269500d8e6cd1ca"
+    },
+    "report": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_exam_bank_rebind_v1/rebind_report.json",
+      "bytes": 18795,
+      "sha256": "dd4332edb47f1fb1f4d51ca00ceed612dbcadf9e395eb536c9b73bef9de69ad0",
+      "content_sha256": "7bdf4d6c2fccaf0b377e6bb76188c0b1d9abd1cd67cd322cbca2b1539a8a19d4",
+      "report_written_last": true
+    },
+    "physics_contract_sha256": "09dfe8999c54e36b258fe54b5ec3da5d9816ff3be3675963b919371d7f4afb95",
+    "source_family_sha256": "9603a1788eb17ce03598cdde4efff946039613cf61fcc686f90a385706dba9db"
+  },
+  "decision": {
+    "evidence_level": "E2",
+    "data_gate_passed": true,
+    "bank_adopted_as_exact_rebound_exam_input": true,
+    "immutable_schedule_materialized": false,
+    "paper_activation_materialized": false,
+    "judge_authorized": false,
+    "l2_training_authorized": false,
+    "formal_score_authorized": false,
+    "gate3_authorized": false,
+    "hardware_authorized": false,
+    "only_unlocked_next_step": "new_bank_bound_immutable_schedule_and_reviewed_paper_activation"
+  }
+}

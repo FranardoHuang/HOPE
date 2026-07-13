@@ -1,12 +1,12 @@
 # EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND — 旧考试题能否严格迁移到当前物理合同？
 
-- 状态：`preregistered`
+- 状态：`complete_exact_e2_data_gate_schedule_blocked`
 - 阶段/轴：阶段 1 / signed-face 判卷数据合同
 - 集成小目标：让训练题与考试题同时绑定当前源码 family，才允许后续冻结同题 schedule
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
-- 最高证据等级：[`E1`](../../DEFINITIONS.md)（源码、单元测试与静态合同）
+- 最高证据等级：[`E2`](../../DEFINITIONS.md)（真实 371 题 runtime replay 与 report-last 发布）
 - 创建日期/最后复核日期：2026-07-13
 
 本文的 [`schema-3 bank`](../../DEFINITIONS.md) 是训练题与考试题分离、并绑定内容 SHA 的第三版题库；
@@ -61,21 +61,25 @@ bytes 与旧 family。不能把任意 bank、split、计数或输出路径塞进
 | 运行（人话名 + `run_name`） | 状态 | 输入 | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
 | 双 profile consumer 单元/攻击测试（`host_exam_rebind_e1`） | completed | tracked synthetic banks + real Git pair | `18 passed` | 无 runtime artifact | 证明 profile 分流、train-v2 SHA 不变、exam mutation/bytes/no-clobber；只是 E1 |
-| exam no-write 前置（`exam_bank_rebind_v1_validate`） | not started | 冻结旧 exam + clean exact target repo | 未测 | 应无写入 | 本分支没有访问 Pod 或运行目标 Torch runtime |
-| exam 独立发布（`exam_bank_rebind_v1_run`） | not started | validate 同一输入 | 未测 | 独立 bank/report-last | 没有 output SHA，不能声称完成 |
+| exam no-write 前置（`exam_bank_rebind_v1_validate`） | completed | 冻结旧 exam + clean exact target repo | `validated_no_writes`，24 个非 metadata 数组 finite | 无写入 | Pod1 目标 runtime 通过，随后才运行发布 |
+| exam 独立发布（`exam_bank_rebind_v1_run`） | completed | validate 同一输入 | 371/371 old/new output bytes equal；landing/net 全过 | bank `60e1a7ad...d1ca`；report `dd4332ed...ad0` | E2 数据门通过；不含 schedule/judge/行为成绩 |
 
 ## 与判卷 schedule 的边界
 
 metadata 变化会让新 bank 文件 SHA 改变，而 `atomic_bank_question_id` 把 bank SHA 纳入每道题 ID；所以
-旧 immutable schedule 即使 bank row 相同也不能复用。exam rebind E2 成功后仍必须从**新输出 bank**
+旧 immutable schedule 即使 bank row 相同也不能复用。exam rebind E2 已成功，仍必须从**新输出 bank**
 重新 materialize 一份 no-clobber schedule，冻结 path、文件 SHA、semantic SHA、题序与 all-attempt 分母，
 再由独立 paper activation 消费。当前没有 schedule，也没有 judge、训练、MuJoCo/Isaac 或 Gate3 结果。
 
 ## 决定
 
-- 决定：`inconclusive`
-- 理由：严格 consumer 与 exam prereg 已完成 E1；真实旧 exam、目标 runtime 和 371 题 replay 尚未运行。
-- 是否已纳入当前 setting：`no`
-- 局限/下一个 gate：按[独立运行手册](../../operations/run_phase1_signed_face_exam_bank_rebind.md)完成 E2，
-  归档输出 bank/report SHA；随后另立 reviewed schedule/paper activation。此前 signed-face L2/judge 仍阻断，
-  G06 保持 `Partial`。
+- 决定：`adopt_exact_rebound_exam_bank_as_data_input_only`
+- 理由：Pod1 target runtime 以 `allow_legacy=false` 发布 63,643-byte bank SHA
+  `60e1a7ade72eaf64e17a1b83795125551f08c6699c8a3cc3c269500d8e6cd1ca`；18,795-byte report SHA
+  `dd4332edb47f1fb1f4d51ca00ceed612dbcadf9e395eb536c9b73bef9de69ad0`、content SHA
+  `7bdf4d6c...a19d4`。24 个非 metadata 数组未变，正/反手 `183/188` 题 old/new replay bytes 相同，
+  landing/net 全过。机器账本见
+  [`phase1_signed_face_exam_bank_rebind_results_20260714.json`](../../../configs/phase1_signed_face_exam_bank_rebind_results_20260714.json)。
+- 是否已纳入当前 setting：`data input adopted; training/paper setting unchanged`
+- 局限/下一个 gate：从新 bank 另立 no-clobber immutable schedule 和 reviewed paper activation；此前
+  signed-face L2/judge/formal score 仍阻断，G06 保持 `Partial`。

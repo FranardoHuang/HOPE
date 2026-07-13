@@ -1511,5 +1511,9 @@ checkpoint/finite/lineage 与 D 空 run-dir。这里的 signal 边界不是“�
 TERM→KILL；post-contract timeout 可能留下 live arm，只能按 state 的精确 `pid=pgid` 人工审计且不得
 自动二次启动。launch readiness 还会在 frozen RSL-RL log root 检查新 run-name suffix 匹配数为 0；
 已有目录、file、symlink 都阻断，finalizer 则只认 `runtime_verified` 的 exact path、不用 glob 猜目录。
-源码 focused 门已物化，但 v6r1 尚未运行；L2/judge/第二 seed 仍固定 false，所以 G05 仍为 `Partial`。
-操作仍见上面的 signed-face 漏斗运行手册。
+后续 foreign v8 使用 clean `72418fff` 与全新 manifest/launcher，`v6_artifacts_adopted=false`，按 terminal
+barrier 串行发射 A/B/C/D。A/B/C 前序已终档；D 是第四格，900 秒内再次未出现 hard-contract marker、
+runtime verified、learning iteration 或 checkpoint。locked wrapper 只对 `PID=PGID=1782834` 做精确
+cleanup 并返回 124；日志无 NaN/Inf/Traceback/OOM/malloc/Killed。因为这已是继 v6 D 后第二次独立
+pre-contract timeout，自动 retry 已停止，转入 boot 根因。没有四格 activation；L2/judge/第二 seed
+仍固定 false，所以 G05 仍为 `Partial`。操作仍见上面的 signed-face 漏斗运行手册。
