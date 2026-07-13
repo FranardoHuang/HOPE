@@ -211,6 +211,32 @@ def test_actor_leg_ref_mask_fact_uses_exact_callable_identity(monkeypatch):
     assert "actor_leg_ref_mask" not in legacy
 
 
+def test_actor_leg_ref_mask_rejects_partial_subclass_with_overridden_call(monkeypatch):
+    import functools
+
+    def canonical_unmasked(env, command_name):
+        raise NotImplementedError
+
+    def canonical_masked(env, command_name):
+        raise NotImplementedError
+
+    class SemanticOverridePartial(functools.partial):
+        def __call__(self, env, command_name):
+            return "different-command-semantics"
+
+    monkeypatch.setattr(
+        TC,
+        "_canonical_actor_leg_ref_mask_callables",
+        lambda: ((canonical_unmasked, False), (canonical_masked, True)),
+    )
+    disguised = SemanticOverridePartial(canonical_unmasked)
+    assert disguised.args == () and disguised.keywords == {}
+    assert disguised(None, "motion") == "different-command-semantics"
+    env, actor = _command_env(disguised)
+    with pytest.raises(RuntimeError, match="not one of the two canonical"):
+        TC.runtime_execution_facts(env, actor)
+
+
 @pytest.mark.parametrize("donor_value", [None, "0", "1"])
 def test_actor_leg_ref_mask_metadata_is_checkpoint_authoritative_and_only_when_true(donor_value):
     metadata = {

@@ -83,3 +83,17 @@ MuJoCo parity.
 Passing contract-v1 validation proves content-addressed adapter replay inside a calibrated support
 envelope. It does not prove policy quality, continuous-rally behavior, hardware safety or
 deployment readiness.
+
+## Evaluator self-contact honesty
+
+Isaac training disables robot self-collision, while the vendor MuJoCo model can resolve contacts
+between robot collision geoms. A formal MuJoCo BankExam therefore cannot remain exact after any
+such solver contact. The evaluator defines robot geoms as the explicit `pelvis_link` articulation
+subtree, excluding world/table/net, dynamic balls, mocap helpers and unrelated free bodies, and
+samples that set after **every physics substep**, not only at the policy/control rate. The first
+formal robot-pair contact fails closed immediately. Diagnostic lanes may continue, but must retain
+the number of physics substeps sampled, substeps with contact, total classified pairs, maximum
+penetration and worst pair; a transient contact cannot be erased by a clean final substep.
+
+This is an evaluator truthfulness rule, not a calibrated collision model and not evidence that the
+Isaac and vendor contact solvers are behaviorally equivalent.

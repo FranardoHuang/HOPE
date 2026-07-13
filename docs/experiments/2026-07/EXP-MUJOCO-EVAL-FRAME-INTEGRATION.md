@@ -31,7 +31,8 @@ pelvis COM→link-origin reset 与 link/IMU gyro frame 修复。本票只选择�
   不再降级 exact；保留任何 MuJoCo passive damping 或缺 effort limit 的 implicit 路径只能显式
   diagnostic，formal 构造直接 fail closed。
 - self-contact 只统计 `pelvis_link` articulation 子树内的两机器人 geom；球、桌网、mocap helper 和其他
-  free body 不算机器人自碰。formal BankExam 一旦出现机器人自碰立即失败；diagnostic 只记数且不改
+  free body 不算机器人自碰。分类在每个 MuJoCo physics substep 的 `mj_step` 后执行；formal BankExam
+  一旦出现机器人自碰立即失败，即使它在同一 control step 末已消失；diagnostic 累计全部 substep 且不改
   plant 物理。
 - diagnostic `teacher-reference` reset 只对显式 `center_of_mass` 速度做
   `v_origin = v_com - omega_world x (R_world_body * body_ipos)`；显式 `link_origin` 直写但不能因此获得
@@ -49,9 +50,9 @@ command-observation callable 的规范身份，并进入 canonical training cont
 - epoch 1 且没有 `actor_leg_ref_mask` 表示经过供证的 unmasked callable；
 - epoch 1 且 `actor_leg_ref_mask=1` 表示 masked callable。当前 MuJoCo/C++ 179 builder 不能等价构造该
   语义，因此正式 evaluator/loader 拒绝，不会把“非击球臂不模仿”的候选误判为普通 policy；
-- canonical callable 的**严格空** `functools.partial` 才会 unwrap 后按身份供证；任何 bound
-  args/kwargs、unknown wrapper、伪装 copy、noncanonical partial、缺 epoch 或 checkpoint↔contract
-  digest 不一致都不能成为 exact；
+- canonical callable 的**严格空且 exact built-in type** `functools.partial` 才会 unwrap 后按身份供证；
+  exact-type 规则逐层执行。任何 subclass（可覆写 `__call__`）、bound args/kwargs、unknown wrapper、
+  伪装 copy、noncanonical partial、缺 epoch 或 checkpoint↔contract digest 不一致都不能成为 exact；
 - standalone export 必须从 checkpoint 合同覆盖或清除 donor 的 mask/epoch，不能相信旧 donor metadata。
 
 禁止给旧 ONNX 后补 epoch/mask 来恢复 exactness：旧 checkpoint 没把该事实纳入 digest，事后 metadata
@@ -75,6 +76,15 @@ command-observation callable 的规范身份，并进入 canonical training cont
 5. scoreboard 遇旧 header 原先会把更宽新行直接追加，导致 CSV 错列。现于运行前和写入前双重校验，
    mismatch 不改一字节并要求新 output root/显式迁移。
 
+第二轮独立红队仍给出 `NO-MERGE`，并在同一候选分支继续关闭两项：
+
+6. `isinstance(x, functools.partial)` 会接受覆写 `__call__` 的 partial subclass；实测该对象实际执行
+   `different-command-semantics`，却曾能 mint epoch 1。现只允许每层 `type(x) is functools.partial`，并以
+   dependency-free subclass 负测锁死。
+7. 第一版机器人自碰只在一个 control step 的全部 `mj_step` 后扫描最终 contact，可能漏掉前几个
+   physics substep 中已经改变轨迹的短碰撞。现每个 `mj_step` 后立即扫描：formal 首碰即拒绝，diagnostic
+   保留完整 substep 汇总；dependency-free fake-step 测试证明第一 substep 碰撞、末步干净也不会消失。
+
 ## 验证
 
 本次选择性移植依次整合上游提交 `bebee04`、`3788fe7`、`50dabbd`、`57719ad`、`3f04890`，随后 merge
@@ -96,7 +106,7 @@ python3 -m pytest -q \
 python3 -m pytest -q tests
 ```
 
-当前集成树结果为 focused `144 passed, 2 skipped`、root suite `696 passed, 9 skipped`，`git diff
+当前集成树结果为 focused `147 passed, 2 skipped`、root suite `696 passed, 9 skipped`，`git diff
 --check` 与四个修改源码的 `py_compile` 均通过。两个 focused skip 都是当前 host 缺 `mujoco`：tiny
 effort/self-contact physics 模块和真实 A3 frame reset 各一项，因此这些 physics cases 不是本机行为通过。
 本机也缺 `torch`，`test_isaac_bank_exam_phase_b.py` 无法收集；direct rider 撤销的 dependency-light adapter

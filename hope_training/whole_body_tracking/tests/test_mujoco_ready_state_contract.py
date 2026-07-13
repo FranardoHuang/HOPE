@@ -233,6 +233,7 @@ def test_execution_contract_binds_actual_plant_and_ready_state():
     assert first["implicit_effort_execution_mode"] == "isaac_total_pd_clip_exact"
     assert first["implicit_effort_proxy_nonexact"] is False
     assert first["self_contact_policy"] == "fail_closed_on_pelvis_subtree_robot_pair"
+    assert first["self_contact_sampling"] == "every_physics_substep_after_mj_step"
     assert first["robot_body_ids"] == [1, 2]
     assert first["robot_geom_ids"] == [0, 2]
     robot.fail_on_self_contact = False

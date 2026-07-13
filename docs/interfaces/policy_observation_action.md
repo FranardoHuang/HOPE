@@ -232,11 +232,14 @@ from the instantiated environment, not copied from YAML comments:
 
 A command-bearing 62-D actor term additionally requires
 `actor_leg_ref_mask_provenance_epoch=1`. Only the exact canonical masked/unmasked callable, or a
-strictly empty `functools.partial` around it, may mint the epoch. Any bound positional/keyword
-argument, wrapper or copied marker is non-authoritative because it can change the configured
-command semantics. Epoch 1 plus absent `actor_leg_ref_mask` proves unmasked; epoch 1 plus the
-true-only `actor_leg_ref_mask=1` proves masked. The ONNX binding hashes that fact together with the
-training-contract and source-checkpoint SHA; old artifacts cannot acquire it by metadata backfill.
+strictly empty **exact built-in type** `functools.partial` around it, may mint the epoch. The
+exact-type rule is applied at every unwrap layer: a `partial` subclass can override `__call__`
+despite exposing canonical `.func` and empty args, so it is a wrapper and must be rejected. Any
+bound positional/keyword argument, wrapper or copied marker is likewise non-authoritative because
+it can change the configured command semantics. Epoch 1 plus absent `actor_leg_ref_mask` proves
+unmasked; epoch 1 plus the true-only `actor_leg_ref_mask=1` proves masked. The ONNX binding hashes
+that fact together with the training-contract and source-checkpoint SHA; old artifacts cannot
+acquire it by metadata backfill.
 
 The adjacent `params/training_contract.json` is content-addressed; its SHA and schema are embedded
 in every newly saved checkpoint. Only a fresh schema-3 run or a resume from an exact SHA-bound

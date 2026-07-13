@@ -853,6 +853,7 @@ def build_evaluation_execution_contract(
             if getattr(robot, "fail_on_self_contact", False)
             else "diagnostic_only_pelvis_subtree_robot_pair"
         ),
+        "self_contact_sampling": "every_physics_substep_after_mj_step",
         "robot_body_ids": np.flatnonzero(
             getattr(robot, "robot_body_mask", np.zeros(0, dtype=bool))
         ).astype(int).tolist(),
@@ -2183,6 +2184,13 @@ class MujocoRobot:
         self._effort_guard = None
         self.implicit_effort_execution_mode = "not_applicable"
         self.implicit_effort_proxy_nonexact = False
+        self.last_control_self_contact = {
+            "physics_substeps": 0,
+            "substeps_with_contact": 0,
+            "contact_count": 0,
+            "max_penetration_m": 0.0,
+            "worst_pair": "",
+        }
         self.data = mujoco.MjData(self.model)
 
         def named_id(obj_type, name, kind):
@@ -2543,8 +2551,17 @@ class MujocoRobot:
 
         Explicit joints and bound implicit joints both send the clipped total ``P-D`` through the
         motor.  Only an explicitly inexact, effort-unbound legacy implicit lane retains kd as
-        passive damping and sends P alone.
+        passive damping and sends P alone.  Robot-only self-contact is sampled after every
+        ``mj_step``: a collision that exists for only one physics substep has already changed the
+        trajectory and therefore must not disappear between control-rate observations.
         """
+        self.last_control_self_contact = {
+            "physics_substeps": 0,
+            "substeps_with_contact": 0,
+            "contact_count": 0,
+            "max_penetration_m": 0.0,
+            "worst_pair": "",
+        }
         for _ in range(decimation):
             q = self.data.qpos[self.qadr]
             qd = self.data.qvel[self.vadr]
@@ -2576,6 +2593,23 @@ class MujocoRobot:
                 )
             self.data.ctrl[self.act_id] = tau
             self.mj.mj_step(self.model, self.data)
+            summary = self.last_control_self_contact
+            summary["physics_substeps"] += 1
+            sc_count, sc_pen, sc_pair = self.self_contact_scan()
+            if sc_count:
+                summary["substeps_with_contact"] += 1
+                summary["contact_count"] += int(sc_count)
+                if sc_pen >= summary["max_penetration_m"]:
+                    summary["max_penetration_m"] = float(sc_pen)
+                    summary["worst_pair"] = str(sc_pair)
+                # Formal execution refuses at the first observed physics substep.  Diagnostic
+                # execution continues but retains the complete substep aggregate above.
+                enforce_self_contact_policy(
+                    fail_closed=self.fail_on_self_contact,
+                    count=sc_count,
+                    penetration_m=sc_pen,
+                    pair=sc_pair,
+                )
             if self.joint_velocity_limits is not None:
                 qd_after = self.data.qvel[self.vadr]
                 ratio = np.abs(qd_after) / self.joint_velocity_limits
@@ -3457,6 +3491,7 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
     # enabled_self_collisions=False), the vendor MJCF grades with it ON; count where the plants
     # actually diverge instead of guessing. Swing steps are the ones that can corrupt the strike.
     selfcon_steps, selfcon_contacts, selfcon_swing_steps = 0, 0, 0
+    selfcon_physics_substeps, selfcon_physics_total = 0, 0
     selfcon_max_pen, selfcon_worst_pair = 0.0, ""
     racket_err_acc, racket_err_n = 0.0, 0        # mean over the ±strike_window_s gate
     racket_exact_acc, racket_exact_n = 0.0, 0    # pos err at the EXACT strike frame (|tts| <= 0.5*step_dt)
@@ -3553,9 +3588,15 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         foot_c = robot.foot_contact_frac()
         roll_acc += abs(roll_d); pitch_acc += abs(pitch_d)
         torquemax_acc += torque_max; footc_acc += foot_c; n_acc += 1
-        sc_count, sc_pen, sc_pair = robot.self_contact_scan()
-        if sc_count:
+        sc_summary = robot.last_control_self_contact
+        selfcon_physics_total += int(sc_summary["physics_substeps"])
+        sc_substeps = int(sc_summary["substeps_with_contact"])
+        sc_count = int(sc_summary["contact_count"])
+        sc_pen = float(sc_summary["max_penetration_m"])
+        sc_pair = str(sc_summary["worst_pair"])
+        if sc_substeps:
             selfcon_steps += 1
+            selfcon_physics_substeps += sc_substeps
             selfcon_contacts += sc_count
             if clock_advances:
                 selfcon_swing_steps += 1
@@ -3952,6 +3993,11 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         torque_max_mean=torquemax_acc / max(n_acc, 1), foot_contact_frac=footc_acc / max(n_acc, 1),
         self_contact_step_frac=selfcon_steps / max(n_acc, 1),
         self_contact_steps=selfcon_steps, self_contact_swing_steps=selfcon_swing_steps,
+        self_contact_physics_substep_frac=(
+            selfcon_physics_substeps / max(selfcon_physics_total, 1)
+        ),
+        self_contact_physics_substeps=selfcon_physics_substeps,
+        self_contact_physics_substeps_total=selfcon_physics_total,
         self_contact_total=selfcon_contacts,
         self_contact_max_penetration_m=selfcon_max_pen,
         self_contact_worst_pair=selfcon_worst_pair,

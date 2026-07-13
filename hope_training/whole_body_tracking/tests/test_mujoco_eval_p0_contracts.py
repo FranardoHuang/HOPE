@@ -163,6 +163,79 @@ def test_formal_self_contact_policy_fails_and_diagnostic_policy_only_records():
         )
 
 
+def _fake_pd_robot_with_substep_contacts(samples, *, fail_closed):
+    samples = iter(samples)
+    step_count = [0]
+
+    def mj_step(_model, _data):
+        step_count[0] += 1
+
+    robot = SimpleNamespace(
+        data=SimpleNamespace(
+            qpos=np.zeros(1, dtype=np.float64),
+            qvel=np.zeros(1, dtype=np.float64),
+            ctrl=np.zeros(1, dtype=np.float64),
+        ),
+        model=object(),
+        mj=SimpleNamespace(mj_step=mj_step),
+        qadr=np.asarray([0]),
+        vadr=np.asarray([0]),
+        act_id=np.asarray([0]),
+        explicit_mask=np.asarray([True]),
+        ctrl_lo=np.asarray([-10.0]),
+        ctrl_hi=np.asarray([10.0]),
+        _effort_guard=None,
+        joint_velocity_limits=None,
+        fail_on_self_contact=bool(fail_closed),
+        self_contact_scan=lambda: next(samples),
+    )
+    return robot, step_count
+
+
+def test_formal_self_contact_refuses_the_first_transient_physics_substep():
+    robot, step_count = _fake_pd_robot_with_substep_contacts(
+        [(1, 0.002, "arm~torso"), (0, 0.0, "")], fail_closed=True
+    )
+    with pytest.raises(SystemExit, match="enabled_self_collisions=False"):
+        M.MujocoRobot.apply_pd_and_step(
+            robot,
+            np.zeros(1),
+            kp=np.zeros(1),
+            kd=np.zeros(1),
+            decimation=2,
+        )
+    assert step_count == [1]
+    assert robot.last_control_self_contact == {
+        "physics_substeps": 1,
+        "substeps_with_contact": 1,
+        "contact_count": 1,
+        "max_penetration_m": pytest.approx(0.002),
+        "worst_pair": "arm~torso",
+    }
+
+
+def test_diagnostic_self_contact_retains_transient_substep_after_final_state_is_clean():
+    robot, step_count = _fake_pd_robot_with_substep_contacts(
+        [(2, 0.003, "hand~hip"), (0, 0.0, ""), (0, 0.0, "")],
+        fail_closed=False,
+    )
+    M.MujocoRobot.apply_pd_and_step(
+        robot,
+        np.zeros(1),
+        kp=np.zeros(1),
+        kd=np.zeros(1),
+        decimation=3,
+    )
+    assert step_count == [3]
+    assert robot.last_control_self_contact == {
+        "physics_substeps": 3,
+        "substeps_with_contact": 1,
+        "contact_count": 2,
+        "max_penetration_m": pytest.approx(0.003),
+        "worst_pair": "hand~hip",
+    }
+
+
 def test_exact_strike_clock_is_post_step_and_holds_stay_pinned():
     dt = 0.02
     # An action selected one frame before contact produces the contact state after physics.
@@ -447,6 +520,7 @@ def _install_fake_mujoco(monkeypatch, *, armature=0.01, effort=24.0,
             self.qpos = np.zeros(38)
             self.qvel = np.zeros(37)
             self.ctrl = np.zeros(31)
+            self.ncon = 0
 
     obj = SimpleNamespace(
         mjOBJ_JOINT=1, mjOBJ_BODY=2, mjOBJ_ACTUATOR=3, mjOBJ_SITE=4,

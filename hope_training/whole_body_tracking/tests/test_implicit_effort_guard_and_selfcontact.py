@@ -68,6 +68,8 @@ def _hinge_robot(**overrides):
         allow_effort_limit_proxy=True,
         implicit_effort_execution_mode="isaac_total_pd_clip_exact",
         implicit_effort_proxy_nonexact=False,
+        fail_on_self_contact=False,
+        self_contact_scan=lambda: (0, 0.0, ""),
         joint_velocity_limits=None, velocity_limit_hit_count=0,
         velocity_limit_peak_ratio=0.0, allow_velocity_limit_proxy=True,
     )

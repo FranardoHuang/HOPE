@@ -501,7 +501,11 @@ def runtime_execution_facts(
         getattr(getattr(env.cfg, "observations", None), "policy", None), "command", None
     )
     _cmd_func = getattr(_cmd_term, "func", None)
-    while isinstance(_cmd_func, functools.partial):
+    # Only the exact built-in partial type is transparent.  ``functools.partial`` is subclassable,
+    # and a subclass may override ``__call__`` while keeping canonical ``.func`` plus empty
+    # ``args``/``keywords``.  Treating such an object as a plain partial would mint provenance for
+    # behavior that is not the canonical callable.  Apply the exact-type rule at every unwrap layer.
+    while type(_cmd_func) is functools.partial:
         if _cmd_func.args or _cmd_func.keywords:
             _cmd_func = None
             break
@@ -549,8 +553,8 @@ def runtime_execution_facts(
         if actor_leg_ref_mask is None and not allow_legacy_actor_leg_ref_mask_ambiguity:
             raise RuntimeError(
                 "62-D actor command func is not one of the two canonical epoch-1 callables; "
-                "wrappers, partials with bound args/kwargs, and copied provenance attributes "
-                "are not authoritative"
+                "wrappers, partial subclasses, partials with bound args/kwargs, and copied "
+                "provenance attributes are not authoritative"
             )
         if actor_leg_ref_mask is not None:
             facts[ACTOR_LEG_REF_MASK_PROVENANCE_KEY] = ACTOR_LEG_REF_MASK_PROVENANCE_EPOCH

@@ -17,11 +17,17 @@
   改为每 substep 执行 Isaac `clip(P-D)`；被动/无 effort-limit 代理 formal fail closed；自碰只认 pelvis
   机器人子树且 formal 首次即拒绝，动态球不误报；mask 供证只接受 canonical/严格空 partial；旧
   Phase-B rider direct loader 按内容 SHA 撤销；旧 scoreboard header 不再错列追加。候选已 merge 对齐
-  `origin/main@c48fdc2`；focused `144 passed, 2 skipped`、root `696 passed, 9 skipped`，两项 focused
+  `origin/main@c48fdc2`；第二轮修正后 focused `147 passed, 2 skipped`、root `696 passed, 9 skipped`，两项 focused
   skip 都因本机无 `mujoco`，不是 physics 通过。本机也无 `torch`，Phase-B Torch 套件未收集。没有改
   [NOW](NOW.md)/TIMELINE，也没有运行 Pod、Isaac、vendor backend、Gate3/Gate3B 或真机。测试和剩余
   optional-runtime 边界见
   [集成卷宗](experiments/2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md)；G04/G06 仍为 `Partial`。
+
+- 第二轮独立红队又抓到两个残余假绿并在候选分支修正：可覆写 `__call__` 的 partial subclass 曾能以
+  canonical `.func` 洗出 epoch 1，现逐层仅接受 exact built-in partial；自碰曾只看 control step 末态，
+  现每个 MuJoCo physics substep 后 formal 首碰即拒绝、diagnostic 完整累计。两项均有 dependency-free
+  攻击复现与负测；未运行 MuJoCo/Isaac/vendor/Gate3/真机，G04/G06 继续 `Partial`。见
+  [集成卷宗](experiments/2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md)。
 
 - 反手拉 B/C 的 rank-0 主选已各有独立 no-clobber 整轨站位实体化 prereg（SHA
   `e016ca74...51aee` / `27f938cd...9d454`）和 restricted-pickle consumer

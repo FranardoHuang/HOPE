@@ -474,8 +474,9 @@ python3 -m pytest -q \
   tests/test_phase1_cross_engine_instrument_parity_2x2.py
 ```
 
-It covers total-PD clipping sign/boundary quadrants, formal passive-proxy refusal, self-contact
-policy, mask-callable provenance, direct Phase-B revocation and no-mutation scoreboard header
+It covers total-PD clipping sign/boundary quadrants, formal passive-proxy refusal, physics-substep
+self-contact fail-closed/diagnostic accumulation, exact-built-in-partial mask-callable provenance,
+direct Phase-B revocation and no-mutation scoreboard header
 failure. The tiny physics and real-A3 frame/contact tests additionally require the optional
 `mujoco` Python package:
 

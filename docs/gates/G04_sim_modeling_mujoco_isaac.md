@@ -276,8 +276,11 @@ limit cannot realize this law and is diagnostic-only; formal construction fails 
 Self-contact classification is now the intersection of two geoms in the explicit `pelvis_link`
 articulation subtree. Dynamic balls, table/net bodies, mocap helpers and unrelated free bodies are
 excluded even though their MuJoCo body IDs are nonzero. Because Isaac training has self-collision
-disabled, formal BankExam fails on the first classified robot pair; diagnostic protocols only count
-it without mutating physics. These are source/contract corrections, not evidence that Isaac and
+disabled, classification now runs after every MuJoCo physics substep: formal BankExam fails on the
+first classified robot pair, including a transient pair gone by the final substep, while diagnostic
+protocols aggregate all substeps without mutating physics. The first control-rate-only implementation
+was rejected by a second red team because it could miss a short collision after that collision had
+already changed the trajectory. These are source/contract corrections, not evidence that Isaac and
 vendor MuJoCo contacts or integration are behaviorally equivalent. G04 remains `Partial`; see
 [the integration experiment](../experiments/2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md).
 

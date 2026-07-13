@@ -1390,10 +1390,20 @@ robot geom pairs and fails formal BankExam on any such pair. A dynamic-ball nega
 explicitly excluded.
 
 The same review closed three evidence-publication bypasses: command-mask provenance now accepts only
-canonical callables or strict empty partials; the revoked model-2000 Phase-B rider is denied directly
+canonical callables or strict empty built-in partials; the revoked model-2000 Phase-B rider is denied directly
 by content SHA even when a caller bypasses the 2x2 validator; and cumulative scoreboard CSVs refuse
 an old header rather than appending misaligned wider rows. The historical Phase-B launch command is
 now documented as forbidden and a replacement requires a post-epoch checkpoint/new rider/all four
 cells rerun. No new policy rollout, immutable K100, vendor backend, Gate3/Gate3B or robot result was
 produced, so G06 remains `Partial`. Full scope is in
 [the integration experiment](../experiments/2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md).
+
+A second independent review found two residual fail-open paths before merge. First, `isinstance`
+also accepted a `functools.partial` subclass whose overridden `__call__` executed different command
+semantics while `.func` still named the canonical function; provenance now unwraps only exact
+built-in partial objects at every layer. Second, self-contact was classified only after all physics
+substeps in a control step, so an earlier transient collision could affect dynamics and disappear
+before grading. Classification and formal refusal now happen after every `mj_step`, with diagnostic
+substep aggregates retained. Dependency-free negative tests reproduce both attacks; the optional
+real MuJoCo contact/frame modules remain separate runtime evidence rather than being inferred from
+those tests. G06 remains `Partial` pending an immutable behavior paper.
