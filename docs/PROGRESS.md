@@ -13,6 +13,14 @@
 
 ## 2026-07-13
 
+- 反手拉 B/C 的 22 条 signed 整轨 proposal 已收敛为 exactly one primary per asset：只把 3 组
+  `yaw=0` 的 R0/R1 逐字段同义项合并，随后按平移范数、偏航、回球余量、身体余隙、frame 和 ID
+  冻结完整备选顺序。主选 B=`98e7b883...f3c14`、C=`aa0c86fd...f299`；只有桌/网外部几何失败可换
+  下一位，schema-2/L0/vendor L1/内部动力学失败必须停止资产。专项 `13 passed`；没有物化、GMR、
+  simulator、训练或真机，证书仍为 0；全仓回归 `646 passed, 9 skipped`。见
+  [实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)与
+  [操作](operations/run_motion_spatial_retarget_screen.md)。
+
 - S0/M0 canonical-beta 已从 E1 计划升为 E2 runtime 结果：Pod1 的 clean detached `c3f58be` 用冻结
   Python `3.10.20` 在 CPU 上依次完成两批 `static/inspect/consume`。S0/M0 completion manifest SHA 为
   `964a7333...f1be3` / `5cef05f7...71a65`，共 `1+4` 条，五条 non-beta 内容 bit-exact，donor copy SHA

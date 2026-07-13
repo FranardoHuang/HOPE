@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "plan_id": "motion-backhand-loop-bc-proposal-selection-20260713-v1",
+  "status": "frozen_post_screen_selection_contract",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "scope": "CPU-only deterministic selection of exactly one primary and one frozen fallback ladder for each Franco backhand-loop B/C signed whole-motion proposal set; no GMR, schema-2 materialization, simulator, training, TOPP, Gate3 or hardware",
+  "formal_eligible": false,
+  "training_authorized": false,
+  "topp_authorized": false,
+  "hardware_authorized": false,
+  "consumer": {
+    "path": "scripts/select_motion_spatial_retarget_candidates.py",
+    "sha256": "014db7635c15b45b7d7cc7301c20a255b2a75da85c9f7868ceaeb9e71edc9e23"
+  },
+  "proposal_input": {
+    "bytes": 225920,
+    "sha256": "69c3db16fa78f526aef49f20eeafe0d7e5e3004c4ed27f5e2823bb3574e2465c",
+    "accepted_producer_path": "/workspace/codexschema/motion_spatial_retarget_signed_a4bbbaa_v1/proposals.json"
+  },
+  "tracked_screen_summary": {
+    "path": "configs/motion_video_spatial_retarget_signed_results_20260713.json",
+    "sha256": "7fde5725a9950b819c8385e8865cd125d1c629e73efbe7f1aed900069e384d4d"
+  },
+  "target_assets": [
+    {
+      "asset_id": "franco_backhand_loop_b",
+      "human_name": "Franco 反手拉候选 B",
+      "inclusive_frame_window": [
+        45,
+        53
+      ],
+      "expected_raw_proposals": 19,
+      "expected_unique_after_dedup": 16
+    },
+    {
+      "asset_id": "franco_backhand_loop_c",
+      "human_name": "Franco 反手拉候选 C",
+      "inclusive_frame_window": [
+        46,
+        54
+      ],
+      "expected_raw_proposals": 3,
+      "expected_unique_after_dedup": 3
+    }
+  ],
+  "deduplication": {
+    "scope": "yaw_deg==0 only",
+    "identity": "all proposal fields except candidate_id and tier must be identical",
+    "allowed_tier_pair": [
+      "R0",
+      "R1"
+    ],
+    "survivor": "R0",
+    "any_other_duplicate": "fail_closed"
+  },
+  "ranking": {
+    "ascending_lexicographic_fields": [
+      "translation_norm_m",
+      "abs_yaw_deg",
+      "negative_return_margin_m",
+      "negative_source_dense_racket_body_clearance_m",
+      "frame",
+      "candidate_id"
+    ],
+    "primary": "rank_0_exactly_one_per_asset",
+    "remaining": "immutable_fallback_ladder",
+    "numeric_rounding_before_sort": null
+  },
+  "fallback_policy": {
+    "advance_only_on": [
+      "external_geometry_table_or_net_clearance_failure"
+    ],
+    "stop_asset_no_fallback_on": [
+      "schema2_materialization_failure",
+      "l0_static_audit_failure",
+      "l1_vendor_self_collision_failure",
+      "internal_dynamics_or_balance_failure"
+    ],
+    "unknown_outcome": "fail_closed",
+    "success": "continue_same_candidate_to_next_certificate_stage",
+    "cross_asset_substitution": false
+  },
+  "output_contract": {
+    "selection_status": "complete_primary_pair_selected_certification_blocked",
+    "output_file_must_not_exist": true,
+    "no_clobber": true,
+    "primary_count": 2,
+    "materialization_authorized": false,
+    "promotion_authorized": false
+  },
+  "not_claimed": [
+    "observed physical ball contact or true contact frame",
+    "schema-2 materialization, L0, vendor L1, table/net clearance or dynamics pass",
+    "action-family effectiveness, training eligibility, Gate3 behavior or hardware safety"
+  ]
+}

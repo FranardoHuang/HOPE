@@ -96,6 +96,51 @@ SHA-256 `69c3db16fa78f526aef49f20eeafe0d7e5e3004c4ed27f5e2823bb3574e2465c`。它
 certificate 前提案：B=19、C=3；accepted/certified 仍均为 0。tracked 摘要是
 `configs/motion_video_spatial_retarget_signed_results_20260713.json`。
 
+## Select exactly one B and one C primary
+
+This post-screen selection is CPU-only. It does not rerun the scorer. The
+contract binds the exact 225,920-byte proposal file, removes only identical
+`yaw=0` aliases between the translation-only tier and the yaw-plus-translation
+tier (keeping the translation-only row), and then freezes both the primary and
+the remaining fallback order.
+
+```bash
+SELECT_PLAN=configs/motion_backhand_loop_bc_proposal_selection_prereg_20260713.json
+SELECT_PLAN_SHA=$(shasum -a 256 "$SELECT_PLAN" | awk '{print $1}')
+test "$SELECT_PLAN_SHA" = 691fd516477a8d7b56aa9fb562a76684e421f6050e447d707467ee267b0b9b8c
+
+CUDA_VISIBLE_DEVICES= python3 scripts/select_motion_spatial_retarget_candidates.py \
+  --prereg "$SELECT_PLAN" \
+  --expected-prereg-sha256 "$SELECT_PLAN_SHA" validate
+
+PROPOSALS=/workspace/codexschema/motion_spatial_retarget_signed_a4bbbaa_v1/proposals.json
+test "$(wc -c < "$PROPOSALS" | tr -d ' ')" = 225920
+test "$(shasum -a 256 "$PROPOSALS" | awk '{print $1}')" = \
+  69c3db16fa78f526aef49f20eeafe0d7e5e3004c4ed27f5e2823bb3574e2465c
+
+OUT=/private/ignored/motion_video_intake_20260712/spatial_retarget/bc_selection_v1.json
+test ! -e "$OUT"
+CUDA_VISIBLE_DEVICES= python3 scripts/select_motion_spatial_retarget_candidates.py \
+  --prereg "$SELECT_PLAN" \
+  --expected-prereg-sha256 "$SELECT_PLAN_SHA" select \
+  --proposals "$PROPOSALS" --output "$OUT"
+test "$(shasum -a 256 "$OUT" | awk '{print $1}')" = \
+  8a80a409ca69e2fa73757b139b8496bb9cdda2e6a66d3fab48412051b408d2be
+```
+
+The exact primaries are B `98e7b883...f3c14` and C
+`aa0c86fd...f299`. The result remains certificate-blocked and is byte-identical
+to `configs/motion_backhand_loop_bc_proposal_selection_results_20260713.json`.
+
+Do not hand-pick a later row. If and only if a selected candidate later fails
+the table/net external-geometry clearance, use `resolve` with outcome code
+`external_geometry_table_or_net_clearance_failure`; the command publishes a
+new no-clobber decision ledger. A schema-2 materialization, L0 static audit,
+vendor-L1 self-collision, or internal dynamics/balance failure stops that asset
+and must use its exact stop code from the tracked selection contract. Unknown
+codes fail closed. A successful certificate stage continues the same
+candidate and does not call `resolve`.
+
 ## Promotion remains deliberately blocked
 
 The current manifest says `certificate_bundle_preregistered=false`; passing an

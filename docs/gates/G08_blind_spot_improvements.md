@@ -412,6 +412,16 @@ B/C `19/3` 个 bounded proposal，但全部缺候选证书，因此仍没有新�
 仅含路径/SHA 的 `frame_contract_evidence`。修正后的 tool `d053dd50...5259b` 同时验证 evidence SHA
 和显式 false；缺失/true 仍 fail closed。该修复只解除运行前假拒绝，不增加动作行为 credit。
 
+这 22 条 proposal 的候选选择现已机械闭合，但证书门仍未闭合。确定性 consumer 在 B/C 名义 frame 窗内
+只合并 3 组 `yaw=0` 的 R0/R1 逐字段相同别名，然后按平移范数、偏航绝对值、回球余量、身体余隙、
+frame、candidate ID 冻结顺序。主选为 B `98e7b883...f3c14`（16 个唯一候选中的 rank 0）和 C
+`aa0c86fd...f299`（3 个中的 rank 0）。只有桌/网外部几何失败可沿 frozen ladder 前进；schema-2、L0、
+vendor L1 或内部动力学失败必须停止该资产。host 专项 `13 passed`，全仓回归
+`646 passed, 9 skipped`。没有 GMR、schema-2、simulator、训练或真机行为，因此 G08 状态仍为
+Research track，主选也不是晋级动作。完整 ledger 与命令见
+[空间重定位实验](../experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)和
+[操作文档](../operations/run_motion_spatial_retarget_screen.md)。
+
 ## 组合动作新增设计（2026-07-13）
 
 新登记的 v12/高点拍压/横移动作给长期路线增加三条彼此独立的问题：v12 挡球是否在挡球专卷上

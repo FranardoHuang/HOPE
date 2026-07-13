@@ -1,6 +1,6 @@
 # EXP-MOTION-SPATIAL-RETARGET — 新动作能否到达有效击球点？
 
-- 状态：completed（proposal screen 完成；promotion blocked）
+- 状态：completed（proposal screen 与 B/C 确定性主选完成；promotion blocked）
 - 阶段/轴：课程阶段 2 / 动作适配与动作源
 - 人类负责人：franco
 - 执行者：Codex
@@ -38,6 +38,32 @@ proposal 前 fail closed。当前源码改为同时绑定 evidence SHA 和真实
 厂商 L1、整轨桌网余隙和动力学证书，所以 `accepted_candidate_count=0`、`certified_candidate_count=0`，
 TOPP/RL/Gate3/真机权限全部为 false。下一步只能物化 B/C 候选并逐张补证；不允许修改 z、尺度、镜像、
 关节或逐帧轨迹。其他八条的 0 仍不能跨动作题族判失败，尤其挡球和高点拍压要用自己的题。
+
+## 2026-07-13：B/C 主选与备选顺序冻结
+
+22 个 proposal 不再全部物化。屏后选择合同
+`configs/motion_backhand_loop_bc_proposal_selection_prereg_20260713.json`（SHA-256
+`691fd516...b9b8c`）绑定上述 225,920-byte 输入和 consumer
+`scripts/select_motion_spatial_retarget_candidates.py`（SHA-256 `014db763...d9e23`）。它先按各动作的
+名义触球窗筛选 B frame `45–53`、C frame `46–54`，再只把 `yaw=0`、除 `candidate_id/tier` 外逐字段
+相同的“仅平移层/偏航加平移层”别名合并，并保留仅平移层。其他任何重复都 fail closed。
+
+每个动作随后按以下键做不舍入的字典序升序：平移范数、偏航绝对值、负回球余量、负身体余隙、frame、
+candidate ID。20,084-byte tracked 结果
+`configs/motion_backhand_loop_bc_proposal_selection_results_20260713.json`（SHA-256
+`8a80a409...8d2be`）选出 exactly one primary per asset：
+
+- B：19 条原始 proposal 中去掉 3 组 `yaw=0` 层级别名后剩 16；主选
+  `98e7b883...f3c14`，frame 49，平移 `[0.050360,-0.109156,0] m`、范数 `0.120213 m`、
+  yaw `-5°`；冻结 15 条备选。
+- C：3 条均唯一；主选 `aa0c86fd...f299`，frame 50，平移
+  `[0.157231,-0.157701,0] m`、范数 `0.222691 m`、yaw `-10°`；冻结 2 条备选。
+
+备选不是人工“再挑一次”。只有桌/网外部几何余隙失败可以前进一位；schema-2 物化、L0 静态审计、
+厂商 L1 自碰或内部动力学/平衡失败必须停止该动作。consumer 的 `resolve` 模式机械执行这一规则，未知
+原因 fail closed。选择 ledger 仍把 materialization/training/TOPP/hardware 全设为 false；下一步必须
+另做内容绑定的主选物化与证书合同。host 选择器专项为 `13 passed`，全仓回归为
+`646 passed, 9 skipped`。
 
 权威资料：[G08](../../gates/G08_blind_spot_improvements.md) 和
 [操作文档](../../operations/run_motion_spatial_retarget_screen.md)。

@@ -1,0 +1,463 @@
+{
+  "assets": [
+    {
+      "asset_id": "franco_backhand_loop_b",
+      "deduplicated_proposal_count": 16,
+      "fallback_ladder": [
+        {
+          "candidate_id": "83d7d03642e7ec2fef06241c58aa587e44755b13d3dbbcc5f0e426a1259774a9",
+          "frame": 48,
+          "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+          "question_id": "aca730d04f959d4b3d8331f83c677c8c584186bbff7ae16b0b77f4523e90d45e",
+          "rank": 1,
+          "return_margin_m": 0.057019815089,
+          "source_dense_racket_body_clearance_m": 0.26033935546875,
+          "source_motion_sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e",
+          "tier": "R1",
+          "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+          "translation_norm_m": 0.120252702634,
+          "translation_w_m": [
+            0.064075568541,
+            -0.101759687533,
+            0.0
+          ],
+          "yaw_deg": -10.0
+        },
+        {
+          "candidate_id": "958c62ed9985d4a7ee169d7ff5c978faed07a7b56b6c1f6aecfba6b2c81fe2f1",
+          "frame": 48,
+          "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+          "question_id": "aca730d04f959d4b3d8331f83c677c8c584186bbff7ae16b0b77f4523e90d45e",
+          "rank": 2,
+          "return_margin_m": 0.057019815089,
+          "source_dense_racket_body_clearance_m": 0.26033935546875,
+          "source_motion_sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e",
+          "tier": "R1",
+          "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+          "translation_norm_m": 0.158198126017,
+          "translation_w_m": [
+            0.088617904081,
+            -0.131047755233,
+            0.0
+          ],
+          "yaw_deg": -5.0
+        },
+        {
+          "candidate_id": "ccd348ccfe0fe46d43ff3cb527cf58a021cf50fcd0524abdcc2089ab65abb614",
+          "frame": 49,
+          "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+          "question_id": "aca730d04f959d4b3d8331f83c677c8c584186bbff7ae16b0b77f4523e90d45e",
+          "rank": 3,
+          "return_margin_m": 0.0503069712,
+          "source_dense_racket_body_clearance_m": 0.27630615234375,
+          "source_motion_sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e",
+          "tier": "R0",
+          "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+          "translation_norm_m": 0.158765567883,
+          "translation_w_m": [
+            0.075599129758,
+            -0.139611164042,
+            0.0
+          ],
+          "yaw_deg": 0.0
+        },
+        {
+          "candidate_id": "2eec8abe6be9b4344ce48a9102c5aabe1fdf2bbbc45e3f5a1df910e89c77c90d",
+          "frame": 49,
+          "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+          "question_id": "ee92b6885b8751d6c2d0825f18f064855e8a3af0c99c8e4e277f0e0fb4c3d0cc",
+          "rank": 4,
+          "return_margin_m": 0.051354647522,
+          "source_dense_racket_body_clearance_m": 0.27630615234375,
+          "source_motion_sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e",
+          "tier": "R1",
+          "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+          "translation_norm_m": 0.168854395006,
+          "translation_w_m": [
+            0.123367101227,
+            -0.115292519479,
+            0.0
+          ],
+          "yaw_deg": -5.0
+        },
+        {
+          "candidate_id": "246a11b195a8fe0ff7f2f3ce2cfdb0670e953554c2021c2295567b8aa7e8feae",
+          "frame": 48,
+          "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+          "question_id": "ee92b6885b8751d6c2d0825f18f064855e8a3af0c99c8e4e277f0e0fb4c3d0cc",
+          "rank": 5,
+          "return_margin_m": 0.055972138767,
+          "source_dense_racket_body_clearance_m": 0.26033935546875,
+          "source_motion_sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e",
+          "tier": "R1",
+          "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+          "translation_norm_m": 0.174451387815,
+          "translation_w_m": [
+            0.137082685438,
+            -0.107896357971,
+            0.0
+          ],
+          "yaw_deg": -10.0
+        },
+        {
+          "candidate_id": "3115937fd7fd2d0755b5e4403462bea78cfec6ae6ea9cb17369a5040db9bdf42",
+          "frame": 48,
+          "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+          "question_id": "aca730d04f959d4b3d8331f83c677c8c584186bbff7ae16b0b77f4523e90d45e",
+          "rank": 6,
+          "return_margin_m": 0.057019815089,
+          "source_dense_racket_body_clearance_m": 0.26033935546875,
+          "source_motion_sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e",
+          "tier": "R0",
+          "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+          "translation_norm_m": 0.195854143963,
+          "translation_w_m": [
+            0.115619471919,
+            -0.15808536751,
+            0.0
+          ],
+          "yaw_deg": 0.0
+        },
+        {
+          "candidate_id": "ae509d7d8c900f73ddea9d696b23d30984c2eabd806ee06bad90d5f3d35b16e5",
+          "frame": 49,
+          "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+          "question_id": "aca730d04f959d4b3d8331f83c677c8c584186bbff7ae16b0b77f4523e90d45e",
+          "rank": 7,
+          "return_margin_m": 0.0503069712,
+          "source_dense_racket_body_clearance_m": 0.27630615234375,
+          "source_motion_sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e",
+          "tier": "R1",
+          "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+          "translation_norm_m": 0.197056343302,
+          "translation_w_m": [
+            0.103396588218,
+            -0.167750850908,
+            0.0
+          ],
+          "yaw_deg": 5.0
+        },
+        {
+          "candidate_id": "a981c02926cfc7cd8f6b8a241bf63136ae05b211cffd76be6d241b90383aa8f1",
+          "frame": 48,
+          "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+          "question_id": "ee92b6885b8751d6c2d0825f18f064855e8a3af0c99c8e4e277f0e0fb4c3d0cc",
+          "rank": 8,
+          "return_margin_m": 0.055972138767,
+          "source_dense_racket_body_clearance_m": 0.26033935546875,
+          "source_motion_sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e",
+          "tier": "R1",
+          "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+          "translation_norm_m": 0.211995787819,
+          "translation_w_m": [
+            0.161625020978,
+            -0.137184425671,
+            0.0
+          ],
+          "yaw_deg": -5.0
+        },
+        {
+          "candidate_id": "dea15ea5ad70e0fd3ebef39825ae08d336a2686b81a55e25d4d2f6b8a0e64400",
+          "frame": 48,
+          "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+          "question_id": "3c909f827e4d9fcfe95797003fe761c81057317209108147d95025f2d06a93e1",
+          "rank": 9,
+          "return_margin_m": 0.031431281886,
+          "source_dense_racket_body_clearance_m": 0.26033935546875,
+          "source_motion_sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e",
+          "tier": "R1",
+          "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+          "translation_norm_m": 0.215818454465,
+          "translation_w_m": [
+            0.171564743613,
+            -0.13093182973,
+            0.0
+          ],
+          "yaw_deg": -10.0
+        },
+        {
+          "candidate_id": "20f893dd2470ff998525f7975be9052a89043ce61038f4cd494dd060b9813211",
+          "frame": 48,
+          "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+          "question_id": "aca730d04f959d4b3d8331f83c677c8c584186bbff7ae16b0b77f4523e90d45e",
+          "rank": 10,
+          "return_margin_m": 0.016740615408,
+          "source_dense_racket_body_clearance_m": 0.26033935546875,
+          "source_motion_sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e",
+          "tier": "R1",
+          "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+          "translation_norm_m": 0.233143394299,
+          "translation_w_m": [
+            0.144874773819,
+            -0.182666751809,
+            0.0
+          ],
+          "yaw_deg": 5.0
+        },
+        {
+          "candidate_id": "869c8c638fd9ddc89a98e923b30f9c4419c1eb12cc7b8ec1a3edc316704acd5e",
+          "frame": 49,
+          "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+          "question_id": "3b97408dc233ddf2888848f4b8e546bdc5addea18d515ca1c631cd8e1b855f8b",
+          "rank": 11,
+          "return_margin_m": 0.081442676056,
+          "source_dense_racket_body_clearance_m": 0.27630615234375,
+          "source_motion_sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e",
+          "tier": "R1",
+          "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+          "translation_norm_m": 0.233894191509,
+          "translation_w_m": [
+            0.163838762416,
+            -0.166923194169,
+            0.0
+          ],
+          "yaw_deg": -10.0
+        },
+        {
+          "candidate_id": "8b5c936fe292baa820a4fb492fcb94916401ffa6c6807beb2021f41c4468d7db",
+          "frame": 49,
+          "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+          "question_id": "aca730d04f959d4b3d8331f83c677c8c584186bbff7ae16b0b77f4523e90d45e",
+          "rank": 12,
+          "return_margin_m": 0.0503069712,
+          "source_dense_racket_body_clearance_m": 0.27630615234375,
+          "source_motion_sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e",
+          "tier": "R1",
+          "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+          "translation_norm_m": 0.234992608186,
+          "translation_w_m": [
+            0.133540804265,
+            -0.193360749633,
+            0.0
+          ],
+          "yaw_deg": 10.0
+        },
+        {
+          "candidate_id": "a2ee98dd2ee771609d8f5bf2907afd8d8344e134007052c72abcfb496d7f808b",
+          "frame": 48,
+          "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+          "question_id": "ee92b6885b8751d6c2d0825f18f064855e8a3af0c99c8e4e277f0e0fb4c3d0cc",
+          "rank": 13,
+          "return_margin_m": 0.055972138767,
+          "source_dense_racket_body_clearance_m": 0.26033935546875,
+          "source_motion_sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e",
+          "tier": "R0",
+          "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+          "translation_norm_m": 0.250097716415,
+          "translation_w_m": [
+            0.188626588816,
+            -0.164222037948,
+            0.0
+          ],
+          "yaw_deg": 0.0
+        },
+        {
+          "candidate_id": "0ef7b08af27aacd6548ad16afbc4d798d2bf0822f23513d293b0787f4bcb24b6",
+          "frame": 48,
+          "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+          "question_id": "3c909f827e4d9fcfe95797003fe761c81057317209108147d95025f2d06a93e1",
+          "rank": 14,
+          "return_margin_m": 0.031431281886,
+          "source_dense_racket_body_clearance_m": 0.26033935546875,
+          "source_motion_sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e",
+          "tier": "R1",
+          "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+          "translation_norm_m": 0.253235862441,
+          "translation_w_m": [
+            0.196107079153,
+            -0.16021989743,
+            0.0
+          ],
+          "yaw_deg": -5.0
+        },
+        {
+          "candidate_id": "79cf564b6b584c2d4832b6dc2c6eb25c4ebd524262fbe13ab3a2693aa829330c",
+          "frame": 49,
+          "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+          "question_id": "3b97408dc233ddf2888848f4b8e546bdc5addea18d515ca1c631cd8e1b855f8b",
+          "rank": 15,
+          "return_margin_m": 0.069231405319,
+          "source_dense_racket_body_clearance_m": 0.27630615234375,
+          "source_motion_sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e",
+          "tier": "R1",
+          "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+          "translation_norm_m": 0.272952690979,
+          "translation_w_m": [
+            0.186327509677,
+            -0.199462353968,
+            0.0
+          ],
+          "yaw_deg": -5.0
+        }
+      ],
+      "human_name": "Franco 反手拉候选 B",
+      "inclusive_frame_window": [
+        45,
+        53
+      ],
+      "raw_proposal_count": 19,
+      "selected_primary": {
+        "candidate_id": "98e7b883b29d302dc7a24fd3c564648c1f929ff2391e24e58558dcba58af3c14",
+        "frame": 49,
+        "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+        "question_id": "aca730d04f959d4b3d8331f83c677c8c584186bbff7ae16b0b77f4523e90d45e",
+        "rank": 0,
+        "return_margin_m": 0.0503069712,
+        "source_dense_racket_body_clearance_m": 0.27630615234375,
+        "source_motion_sha256": "90c23a8826397f13c39e5ca023c145c064dd5adfe49feb19043887897c60c17e",
+        "tier": "R1",
+        "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+        "translation_norm_m": 0.120212842082,
+        "translation_w_m": [
+          0.05035998433,
+          -0.109155849041,
+          0.0
+        ],
+        "yaw_deg": -5.0
+      },
+      "yaw_zero_r0_r1_aliases_removed": [
+        {
+          "removed_alias_candidate_id": "d6350ee77647c9a1d2a56c6dc0f5e75f9a40b921a6449a6db458cd13e21898fd",
+          "removed_tier": "R1",
+          "semantic_survivor_candidate_id": "3115937fd7fd2d0755b5e4403462bea78cfec6ae6ea9cb17369a5040db9bdf42",
+          "survivor_tier": "R0"
+        },
+        {
+          "removed_alias_candidate_id": "c88202e704703380a2636c9146a553400f69ed1ce73510af7af18bfbb235f459",
+          "removed_tier": "R1",
+          "semantic_survivor_candidate_id": "a2ee98dd2ee771609d8f5bf2907afd8d8344e134007052c72abcfb496d7f808b",
+          "survivor_tier": "R0"
+        },
+        {
+          "removed_alias_candidate_id": "78f2656a9785d77f7f1567ab445402c2ccb30ef9af412086e814b68e5387731f",
+          "removed_tier": "R1",
+          "semantic_survivor_candidate_id": "ccd348ccfe0fe46d43ff3cb527cf58a021cf50fcd0524abdcc2089ab65abb614",
+          "survivor_tier": "R0"
+        }
+      ]
+    },
+    {
+      "asset_id": "franco_backhand_loop_c",
+      "deduplicated_proposal_count": 3,
+      "fallback_ladder": [
+        {
+          "candidate_id": "c7090e816dcf74512507441dda2aec1323b786848f856f45dea7b01d78b0f6b3",
+          "frame": 50,
+          "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+          "question_id": "79fe18d409dbb407efcb43e7afa98e935fda664787bb2d629d3e0b37ec0d2c0a",
+          "rank": 1,
+          "return_margin_m": 0.022155694153,
+          "source_dense_racket_body_clearance_m": 0.3212036132812499,
+          "source_motion_sha256": "4eb40301a51346fd3ad6cae52b13e93ca91b135f9eb9b38e16f7d89e456e9cb6",
+          "tier": "R1",
+          "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+          "translation_norm_m": 0.263619211716,
+          "translation_w_m": [
+            0.16379571791,
+            -0.206557622905,
+            0.0
+          ],
+          "yaw_deg": -10.0
+        },
+        {
+          "candidate_id": "d027d18251e0a077675875308b9e8269c4b20b2ec7c9f58f2baaccca188abc17",
+          "frame": 50,
+          "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+          "question_id": "90cd4d6b815eca38f1c1973c13a13e44a04695e221c8d568a52a051a6cc92a04",
+          "rank": 2,
+          "return_margin_m": 0.015419859391,
+          "source_dense_racket_body_clearance_m": 0.3212036132812499,
+          "source_motion_sha256": "4eb40301a51346fd3ad6cae52b13e93ca91b135f9eb9b38e16f7d89e456e9cb6",
+          "tier": "R1",
+          "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+          "translation_norm_m": 0.267239965892,
+          "translation_w_m": [
+            0.179900547252,
+            -0.197618299933,
+            0.0
+          ],
+          "yaw_deg": -5.0
+        }
+      ],
+      "human_name": "Franco 反手拉候选 C",
+      "inclusive_frame_window": [
+        46,
+        54
+      ],
+      "raw_proposal_count": 3,
+      "selected_primary": {
+        "candidate_id": "aa0c86fd350987bf30e56aebde9789bf9df430b0ec5c3c15cd235410794af299",
+        "frame": 50,
+        "predecessor_full_result_sha256": "c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53",
+        "question_id": "90cd4d6b815eca38f1c1973c13a13e44a04695e221c8d568a52a051a6cc92a04",
+        "rank": 0,
+        "return_margin_m": 0.015419859391,
+        "source_dense_racket_body_clearance_m": 0.3212036132812499,
+        "source_motion_sha256": "4eb40301a51346fd3ad6cae52b13e93ca91b135f9eb9b38e16f7d89e456e9cb6",
+        "tier": "R1",
+        "transform_semantics": "atomic_whole_motion_ground_preserving_SE2",
+        "translation_norm_m": 0.222690730336,
+        "translation_w_m": [
+          0.157231187588,
+          -0.157700713465,
+          0.0
+        ],
+        "yaw_deg": -10.0
+      },
+      "yaw_zero_r0_r1_aliases_removed": []
+    }
+  ],
+  "consumer": {
+    "path": "scripts/select_motion_spatial_retarget_candidates.py",
+    "sha256": "014db7635c15b45b7d7cc7301c20a255b2a75da85c9f7868ceaeb9e71edc9e23"
+  },
+  "fallback_policy": {
+    "advance_only_on": [
+      "external_geometry_table_or_net_clearance_failure"
+    ],
+    "cross_asset_substitution": false,
+    "stop_asset_no_fallback_on": [
+      "schema2_materialization_failure",
+      "l0_static_audit_failure",
+      "l1_vendor_self_collision_failure",
+      "internal_dynamics_or_balance_failure"
+    ],
+    "success": "continue_same_candidate_to_next_certificate_stage",
+    "unknown_outcome": "fail_closed"
+  },
+  "formal_eligible": false,
+  "hardware_authorized": false,
+  "materialization_authorized": false,
+  "next_required_stage": "separately_preregistered_exact_candidate_materialization_and_certificates",
+  "not_claimed": [
+    "observed physical ball contact or true contact frame",
+    "schema-2 materialization, L0, vendor L1, table/net clearance or dynamics pass",
+    "action-family effectiveness, training eligibility, Gate3 behavior or hardware safety"
+  ],
+  "preregistration": {
+    "path": "configs/motion_backhand_loop_bc_proposal_selection_prereg_20260713.json",
+    "sha256": "691fd516477a8d7b56aa9fb562a76684e421f6050e447d707467ee267b0b9b8c"
+  },
+  "primary_count": 2,
+  "proposal_input": {
+    "bytes": 225920,
+    "sha256": "69c3db16fa78f526aef49f20eeafe0d7e5e3004c4ed27f5e2823bb3574e2465c"
+  },
+  "ranking": {
+    "ascending_lexicographic_fields": [
+      "translation_norm_m",
+      "abs_yaw_deg",
+      "negative_return_margin_m",
+      "negative_source_dense_racket_body_clearance_m",
+      "frame",
+      "candidate_id"
+    ],
+    "numeric_rounding_before_sort": null,
+    "primary": "rank_0_exactly_one_per_asset",
+    "remaining": "immutable_fallback_ladder"
+  },
+  "schema_version": 1,
+  "status": "complete_primary_pair_selected_certification_blocked",
+  "topp_authorized": false,
+  "training_authorized": false
+}
