@@ -1,7 +1,7 @@
 # EXP-P1-SIGNED-FACE-RESCUE-FUNNEL：有符号拍面修复后的单-seed 机制漏斗
 
-状态：`proposed`  
-证据等级：E0（只有设计，尚无新训练）  
+状态：`preregistered`  
+证据等级：E1（machine prereg/launcher 与静态攻击回归通过；尚无新训练）  
 人类负责人：franco  
 执行者：Codex  
 全局优先级：只继承 [`NOW` 队列第 1 项](../../NOW.md#统一工作队列唯一优先级账本)，本页不另建队列。
@@ -87,11 +87,44 @@ L2 的“值得买第二 seed”必须同时满足：
 这些阈值只决定是否购买复现，不是 accepted-baseline 阈值。L3 后仍须 q50、fresh stability、厂商
 MuJoCo Gate3/Gate3B 和连续卷；A/B 的热启动结果永远不能洗成 fresh 证据。
 
-## 发射前缺口
+## 2026-07-13 machine prereg
 
-- signed-face 修复尚未以最终 source SHA 进入 `main`；
-- machine prereg、validator、no-clobber launcher、四条完整 argv 和 checkpoint worker manifest 尚未物化；
-- 热启动父 checkpoint 的 Pod 路径需要重新只读核对；
-- 尚未决定相对 `+1000` 点小卷的 exact schedule 文件与 SHA。
+signed-face scorer 修复已进入训练源码 commit
+`882fea4285f0cf9a97ba79d79ae8af31d26ea1ed`。机器配置
+[`phase1_signed_face_rescue_funnel_prereg_20260713.json`](../../../configs/phase1_signed_face_rescue_funnel_prereg_20260713.json)
+和 fail-closed launcher
+[`run_phase1_signed_face_rescue_funnel.py`](../../../scripts/run_phase1_signed_face_rescue_funnel.py)
+已物化；操作真源见
+[运行手册](../../operations/run_phase1_signed_face_rescue_funnel.md)。最终文件 SHA 在运行手册中逐项冻结。
 
-以上任一缺口存在时保持 E0/`proposed`，不授权训练、judge、部署或真机。
+静态合同把 L1 固定为同卡四格 `512 env × 25 update`，L2 设计固定为
+`4096 env × 1001 update`；四格全部 seed 3，热启动里程碑为 `14000/14300/14800`，fresh 为
+`200/500/1000`。focused 攻击回归为 `21 passed`，覆盖重复/错误 seed、配方漂移、hot/fresh lineage
+洗白、未注册 hard-contract key、非零 friction、旧 face pairing、伪造/缺格 activation、半写
+no-clobber claim、缺失 Git checkout、未冻结 paper 时的 L2 启动和自动 judge 等拒绝路径。这是 E1
+源码证据，不是 Isaac 启动或学习结果。
+
+### 父合同扩展边界
+
+父 `model_13800.pt` SHA 冻结为 `478efa8d...d9e6`，嵌入/相邻 hard-contract SHA 均为
+`3a3b3d95...b9972`。当前源码已在该旧合同上增加 event timing、target cadence 等不可变字段；因此
+A/B **不能** strict exact resume。它们固定为 `checkpoint_allow_contract_mismatch=true` 的显式
+inexact representation transfer，launcher 要求新旧合同所有共同字段逐值相同，且只允许 manifest
+列出的 current-only key；后代 lineage 必须为 `0`。C/D 不读 checkpoint，lineage 必须为 `1`。
+四格 emitted hard-contract SHA 必须一致。这一处理没有把旧 checkpoint 洗成 fresh 证据。
+
+L1 只是一份 25-update launch-integrity smoke。四个 L1 terminal 都 finite、iteration/合同/lineage
+正确后，`finalize-l1` 才写 no-clobber completion/activation 证据；**该文件本身不能启动 L2**。SSH
+中断只允许复核并跳过完整 `runtime_verified` 格，半写/提前退出格保留证据并阻断自动重试。launcher
+没有信号路径、broad kill、judge、部署或真机命令。
+
+## 仍未关闭的发射/判卷缺口
+
+- 生产外部控制副本、clean detached `882fea4` 训练 worktree 与 Pod runtime `validate` 尚未在本记录中
+  归档；因此尚无 PID、GPU 或 checkpoint 结果。
+- L1 必须先实际运行并生成四格终档 completion/activation 证据。
+- 相对 `+1000` 的 immutable signed-face directional checkpoint paper 的 exact schedule/path/SHA 尚未
+  冻结。manifest 明确 `l2.launch_authorized=false`；必须另发 reviewed v2 paper activation 后才能启动
+  L2。当前 launcher 也不启动 judge、不能自动晋级或购买第二 seed。
+
+当前只授权按运行手册进行仿真 L1 runtime validate/launch；不授权 L2、judge、部署或真机。
