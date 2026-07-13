@@ -274,7 +274,7 @@ zero includes and 74 referenced meshes under closure SHA `e0381752...962de`. It 
 subset tied to exact donor ONNX SHA `0c428ddf...b7b155`; it is deliberately **not** a claim that the
 rows were re-extracted from the ONNX in this source gate.
 
-### Accepted read-only runtime inspection and review-gated consume activation
+### Accepted read-only runtime inspection; consume remains blocked
 
 The exact B/C private files and formal donor were restored without copying over either source or
 output root. The successful historical commands used the existing CPU runtime below, one asset at a
@@ -311,38 +311,71 @@ ONNX Runtime/MuJoCo `3.12.3/2.5.0/1.27.0/3.10.0`. B/C then returned rc=0 with `f
 `donor_exact=true`, and `no_write=true`. Source checkout `748b6d5fe24bfe58915c34d8dfe09f254f8e4957`
 was detached and clean before/after; both output roots were absent before/after.
 
-Validate the tracked runtime receipt and next-attempt activation from the reviewed source checkout:
+The original v1 activation SHA `366d59d5...d6337` is permanently rejected: direct invocation of
+the old materializer bypassed it, and deleting failure evidence could restore an apparent budget.
+Never execute that proposal or call the old materializer's `consume` command directly.
+
+The replacement v2 source gate is validated from the reviewed source checkout as follows. This is
+read-only and does not touch either private output root:
 
 ```bash
 RECEIPT=configs/motion_backhand_loop_bc_schema2_fk_runtime_inspection_receipt_20260714.json
 RECEIPT_SHA=8e2d2d2d7a4fe0779104456d3bcb32f03cfda82e831958216eefb0fb35b3fb61
 ACTIVATION=configs/motion_backhand_loop_bc_schema2_fk_consume_activation_20260714.json
-ACTIVATION_SHA=366d59d51d40111205aa8c8b43e7722218d522b8b568d25772eab1f46f2d6337
+ACTIVATION_SHA=72b22ccd0d691f170d96eba4e0067195a09160c04b12fe9180601115ab546ffb
 VALIDATOR=scripts/validate_motion_schema2_fk_consume_activation.py
-VALIDATOR_SHA=3c666f225d389a67a8ef9523004cce0aa6d76bd119cd5f249fa54e14a1c77d72
+VALIDATOR_SHA=3798122b110571b52909b7f8caedc00dc0898415ffc4653881bcee9dd8b3b536
+RUNNER=scripts/run_motion_schema2_fk_consume_once.py
+RUNNER_SHA=8e66e0508fec5fc3a973f15fd88c469a6da2ea911e0f3125a1229bdee898a447
 
 test "$(shasum -a 256 "$RECEIPT" | awk '{print $1}')" = "$RECEIPT_SHA"
 test "$(shasum -a 256 "$ACTIVATION" | awk '{print $1}')" = "$ACTIVATION_SHA"
 test "$(shasum -a 256 "$VALIDATOR" | awk '{print $1}')" = "$VALIDATOR_SHA"
+test "$(shasum -a 256 "$RUNNER" | awk '{print $1}')" = "$RUNNER_SHA"
 python3 "$VALIDATOR" \
-  --receipt "$RECEIPT" --expected-receipt-sha256 "$RECEIPT_SHA" \
   --activation "$ACTIVATION" --expected-activation-sha256 "$ACTIVATION_SHA" static
 python3 -m pytest -q tests/test_motion_backhand_loop_bc_schema2_fk_consume_activation.py
 ```
 
-Expected source result is `PASS static ... attempts_started=0 consume_not_run=true`; focused tests
-must report `28 passed`. The validator deliberately has no `consume` subcommand. The activation remains
-`review_required_not_consumed`: it binds the successful interpreter, exact checkout/tool/plans,
-donor, PKL/report lineage, output roots and full commands, but it does not run them.
+Expected source result is `PASS static schema=v2 runner_exact=true ... attempts_started=0
+pod_run=false`; focused tests report `28 passed`. They attack direct bypass, duplicate/no-replace
+claims, B/C concurrency, child and post-validation failures, deletion of the failure ledger,
+runtime/module-origin drift, attached/dirty source checkout, forged/missing NPZ lineage and
+completion ordering. The activation remains `review_required_runner_not_executed`; source review
+does not spend an attempt.
 
-Only after this branch is reviewed and merged may an operator use the activation's exact argv,
-serially. Immediately before each command, recheck the detached source commit/cleanliness, exact
-runtime and all input hashes, and require that that asset's output root does not exist. Starting the
-command spends that asset's sole authorized attempt. On any rc != 0, preserve evidence and stop that
-asset even if cleanup leaves the output root absent; do not automatically retry or advance the
-fallback ladder. On success, `schema2_fk_report.json` must be published last. This activation alone
-does not authorize L0/L1, table/net, dynamics, simulator, training, formal-motion or hardware work.
-No `consume` command in this section was run while creating the receipt/activation change.
+After the exact v2 source is reviewed and merged, an operator may first run either asset's read-only
+preflight. Use the same activation SHA and the bound venv; do not substitute system Python:
+
+```bash
+PY=/workspace/hope_mjeval_venv/bin/python
+ASSET=franco_backhand_loop_b  # or franco_backhand_loop_c
+"$PY" "$RUNNER" \
+  --activation "$ACTIVATION" --expected-activation-sha256 "$ACTIVATION_SHA" \
+  --asset "$ASSET" preflight
+```
+
+Only after that output is reviewed may the operator replace `preflight` by `run`. `run` serializes B
+and C under one shared exclusive lock, repeats all validation, then atomically publishes the
+per-asset claim **before** synchronously starting the exact historical child in a new session.
+Publication of that claim irreversibly spends the only attempt. Any child or output-validation
+failure keeps the claim, writes a permanent failure ledger, preserves stdout/stderr/return code and
+requires a new human-reviewed activation; deleting the failure ledger does not authorize retry.
+There is no cleanup-and-retry path. On success, the runner validates NPZ fields/content and publishes
+the success ledger last.
+
+Do not accept the new NPZ until this independent command passes:
+
+```bash
+"$PY" "$RUNNER" \
+  --activation "$ACTIVATION" --expected-activation-sha256 "$ACTIVATION_SHA" \
+  --asset "$ASSET" validate-result
+```
+
+`validate-result` requires claim → activation/receipt/runner/runtime → child capture → exact
+NPZ/report → completion-last lineage. Output bytes produced by a direct old-materializer invocation
+or without the success ledger are always rejected. No Pod `run` or private B/C consume was executed
+while creating this v2 source gate.
 
 A future completed schema-2 NPZ still is not an accepted motion. Its exact report must first be
 tracked, then a separate L0 audit decision can be made; vendor L1 self-collision and full-trajectory

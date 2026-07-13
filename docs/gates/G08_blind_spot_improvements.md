@@ -508,11 +508,14 @@ simulator/RL 或真机证据，证书仍为 0、G08 状态不变。
 domain exact，output roots 前后均不存在，checkout 仍 clean。tracked receipt SHA 为
 `8e2d2d2d...3fb61`。这只是 FK 的运行时前置：没有计算 151/163 帧 FK、没有 NPZ、没有 dynamics step。
 
-下一层 activation SHA `366d59d5...d6337` 仍为 `review_required_not_consumed`：B/C 各只有一次现有
-output root 的 no-clobber、串行、report-last consume 权限，失败停止该资产且不自动重试。当前两条
-`attempts_started=0`；L0/L1、桌网、动力学、simulator/RL、正式动作和硬件仍全部 false。focused source
-gate `28 passed`，会拒绝重试预算、并发、命令、解释器、lineage 或权限漂移；本次没有在 Pod
-consume，因此证书仍为 0、G08 仍是 Research track。
+下一层 v1 activation SHA `366d59d5...d6337` 因不能阻止 direct consume、失败清理后也不永久花掉
+attempt，保持 **NO-CONSUME**。替代的 v2 activation/validator/runner 分别为
+`72b22ccd...6ffb` / `3798122b...b536` / `8e66e050...a447`：atomic pre-child claim、B/C
+shared flock、失败后不可恢复预算、completion-last success、current/historical runtime lineage 复核和
+NPZ 内容级 schema-2/finite/body-order validator 已落源码。攻击负测含 bypass、并发、failure cleanup、
+runtime/module-origin drift、缺失/伪造 NPZ，专项 `28 passed`、连同 prereg `45 passed`。runner 仍未在
+Pod 执行，两个 output root absent、证书为 0；L0/L1、桌网、动力学、simulator/RL、正式动作和硬件仍
+全部 false，G08 仍是 Research track。
 
 S0/M0 的下一层 exact GMR 现已冻结成两批独立 machine plan。共享 consumer 不把 retarget body order 猜成
 canonical vendor body order，而是分开绑定两套 XML order，再用显式 31-joint bijection 接入 A3 FK。M0

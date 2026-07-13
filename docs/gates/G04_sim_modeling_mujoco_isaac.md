@@ -339,13 +339,20 @@ and the source checkout remained clean.
 The tracked receipt is
 `configs/motion_backhand_loop_bc_schema2_fk_runtime_inspection_receipt_20260714.json` SHA
 `8e2d2d2d...3fb61`. Inspection loaded and name-checked the vendor model but did not evaluate the
-151/163-frame FK trajectories, step dynamics, or write schema-2. The reviewed-next-step activation
-`366d59d5...d6337` is source-only and still records zero attempts started. It authorizes at most one
-serial no-clobber consume attempt per existing B/C output root, requires report-last publication,
-and forbids automatic retry after failure. The activation itself authorizes no L0/L1, table/net,
-dynamics, simulator, training, formal-motion or hardware action. No consume ran in this change;
-activation-focused tests are `28 passed`, combined prereg/activation tests are `45 passed`, and the
-latest-main repository suite is `822 passed, 10 skipped`. Schema-2 materialization and certificate
+151/163-frame FK trajectories, step dynamics, or write schema-2. The proposed v1 activation
+`366d59d5...d6337` remains a rejected **NO-CONSUME** negative result because direct old-materializer
+invocation bypassed it and failure cleanup did not permanently spend the attempt.
+
+The replacement v2 source gate is activation `72b22ccd...6ffb`, validator
+`3798122b...b536`, and runner `8e66e050...a447`. Before a child starts, the runner publishes an
+atomic no-replace per-asset claim; B/C share one exclusive lock, failures permanently keep the
+claim, and success is published last. Runtime preflight revalidates the current activation/
+receipt/runner plus exact detached-clean `748b6d5`, interpreter packages and module origins, all
+private inputs, donor and the vendor MJCF closure. Formal validation opens the NPZ and checks the
+exact schema-2 fields, shapes, finite float32 series, quaternion norms and 32-body order rather than
+trusting only its report hash. Bypass/concurrency/failure-spends-attempt/runtime-drift and missing-
+lineage attacks pass `28` focused tests (`45` with the prereg tests). This is source evidence only:
+the runner has not executed, output roots remain absent, and schema-2 materialization/certificate
 count remain zero, so G04 stays `Partial`.
 
 For M0, the canonical-beta materialization still has null A3 stance fields. The downstream exact-GMR

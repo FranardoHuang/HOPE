@@ -29,10 +29,11 @@
 - B/C schema-2/FK 的两次真实 no-write runtime inspection 已入严格 receipt：Pod1 detached
   `748b6d5` 前后 clean；默认 Python 因缺 `onnxruntime` rc=2 fail closed，现成
   `hope_mjeval_venv` 绑定 Python/NumPy/ONNX Runtime/MuJoCo `3.12.3/2.5.0/1.27.0/3.10.0` 后，
-  B/C `91/98` 帧分别 rc=0，donor/MJCF/name domain exact，两个 output root 仍不存在。下一层 activation
-  只给 B/C 各一次串行 no-clobber/report-last consume，`attempts_started=0`，失败不自动重试，L0/L1/
-  simulator/训练/真机均未授权；本分支未在 Pod consume。原 prereg + activation focused 为
-  `45 passed`，latest-main 仓内回归为 `822 passed, 10 skipped`。见
+  B/C `91/98` 帧分别 rc=0，donor/MJCF/name domain exact，两个 output root 仍不存在。可绕过且失败
+  不永久花预算的 v1 activation 已否决；v2 一次性 runner 源码门现以 atomic pre-child claim、B/C
+  shared flock、permanent failure/completion-last ledger、runtime/input 重验和 NPZ 内容级 lineage
+  validator 闭合，bypass/concurrency/failure-spends/runtime-drift 等专项 `28 passed`、连同 prereg
+  `45 passed`。runner 尚未在 Pod 执行、attempts 仍为 0；L0/L1/simulator/训练/真机均未授权。见
   [实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)、
   [G04](gates/G04_sim_modeling_mujoco_isaac.md)、[G08](gates/G08_blind_spot_improvements.md)和
   [操作](operations/run_motion_spatial_retarget_screen.md)。

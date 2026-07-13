@@ -1,6 +1,6 @@
 # EXP-MOTION-SPATIAL-RETARGET — 新动作能否到达有效击球点？
 
-- 状态：in progress（proposal screen、B/C 确定性主选、exact SE(2)、schema-2/FK source gate 与两条只读 runtime inspection 完成；consume 待审，promotion blocked）
+- 状态：in progress（两条只读 runtime inspection 完成；v1 consume activation 已否决；v2 一次性 runner 的源码门与攻击负测通过，但未在 Pod 执行，consume / promotion blocked）
 - 阶段/轴：课程阶段 2 / 动作适配与动作源
 - 人类负责人：franco
 - 执行者：Codex
@@ -175,17 +175,32 @@ consumer/plans、donor ONNX、两条 PKL/report、vendor `1 XML + 74 mesh` closu
 `inspect` 只 restricted-load 输入、重抽 donor metadata 并加载 vendor model/name domain。它没有对
 151/163 帧运行 FK、没有写 NPZ、没有推进 dynamics simulation，也没有 L0/L1/训练/真机结论。
 
-下一步一次性 activation 是
-`configs/motion_backhand_loop_bc_schema2_fk_consume_activation_20260714.json`（SHA-256
-`366d59d51d40111205aa8c8b43e7722218d522b8b568d25772eab1f46f2d6337`）。dependency-light validator
-`scripts/validate_motion_schema2_fk_consume_activation.py`（SHA-256
-`3c666f225d389a67a8ef9523004cce0aa6d76bd119cd5f249fa54e14a1c77d72`）只做 tracked source gate，
-没有 `consume` 子命令。activation 对 B/C 各给一个现有 output root 的一次 no-clobber attempt，串行、
-report-last；任一失败停止该资产、保留证据且不自动重试。当前 `attempts_started=0`、
-`schema2_materialized=false`，L0/L1、桌网、动力学、simulator、训练、正式动作和 hardware 权限全为 false。
-activation 专项为 `28 passed`，与原 prereg 合跑为 `45 passed`；最新 `origin/main@4e6e19b` 基线上的
-仓内回归为 `822 passed, 10 skipped`。本分支没有在 Pod 执行 consume；合入与人工审阅前不得执行
-activation 中的 runtime command。
+最初的 v1 提案 SHA `366d59d5...d6337` 已被红队否决：它允许绕开 activation 直接调用旧
+materializer，且失败清理后没有不可逆 claim，所以永远是 **NO-CONSUME** 负结果，不提供运行权限。
+
+替代的 v2 source gate 为：
+
+- activation：`configs/motion_backhand_loop_bc_schema2_fk_consume_activation_20260714.json`，
+  SHA-256 `72b22ccd0d691f170d96eba4e0067195a09160c04b12fe9180601115ab546ffb`；
+- dependency-light validator：`scripts/validate_motion_schema2_fk_consume_activation.py`，
+  SHA-256 `3798122b110571b52909b7f8caedc00dc0898415ffc4653881bcee9dd8b3b536`；
+- 一次性 runner：`scripts/run_motion_schema2_fk_consume_once.py`，
+  SHA-256 `8e66e0508fec5fc3a973f15fd88c469a6da2ea911e0f3125a1229bdee898a447`。
+
+runner 在 child 前用 atomic hard-link no-replace 发布每资产永久 claim；B/C 共用一个排他
+`flock`；同步 `setsid` child 的 stdout/stderr/return code 全量绑定。child 或 post-validation 失败都会
+保留 claim 并发布 failure ledger，删除 failure ledger 也不能恢复预算；成功只有在 exact output 内容复核
+后才最后发布 success ledger。每次 claim 前重新验证 activation、receipt、runner、validator、detached
+clean `748b6d5` checkout、解释器/包/module origins、plans、PKL/report、donor、MJCF closure 和
+body/joint order。formal validator 还会打开 NPZ，要求 11 个 exact 字段、schema-2、`151/163 × 31/32`
+形状、float32 finite time series、单位四元数以及 exact 32-body order；只有 report hash 而缺这些 lineage
+内容不能通过。旧 materializer 的 direct consume 永远不能形成正式结果。
+
+源码攻击负测覆盖 bypass、no-replace、B/C 并发、child failure 后永久花掉 attempt、failure cleanup、
+post-validation failure、runtime/module-origin drift、attached/dirty checkout、缺失/伪造 NPZ 与
+completion-last lineage；activation/runner 专项 `28 passed`，与原 prereg 合跑 `45 passed`。当前仍是
+`review_required_runner_not_executed`：`attempts_started=0`、两个 output root absent、Pod consume 未运行，
+L0/L1、桌网、动力学、simulator、训练、正式动作和 hardware 权限全为 false。
 
 权威资料：[G08](../../gates/G08_blind_spot_improvements.md) 和
 [操作文档](../../operations/run_motion_spatial_retarget_screen.md)。
