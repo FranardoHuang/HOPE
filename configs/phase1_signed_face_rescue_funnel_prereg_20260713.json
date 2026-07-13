@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "manifest_id": "phase1-signed-face-rescue-single-seed-funnel-20260713-v4",
+  "manifest_id": "phase1-signed-face-rescue-single-seed-funnel-20260713-v5",
   "purpose": "Run one seed across four distinct hot-start/fresh x face-guidance-off/on causal cells; buy another seed only after a paired mechanism win.",
   "status": "machine_preregistered_l1_authorized_l2_blocked_pending_signed_directional_paper",
   "simulation_only": true,
@@ -22,13 +22,24 @@
       "source/whole_body_tracking/whole_body_tracking/tasks/tracking/config/agibot_a3/hope_env_cfg.py": "3802c715e1af620293970e1357d2a717cfb63b17e138aeafdaaf312ad57d810c",
       "source/whole_body_tracking/whole_body_tracking/utils/training_contract.py": "604d007d4dd942e905cc183d827b3584010b2fc53b607a6061f7c521594234b7",
       "source/whole_body_tracking/whole_body_tracking/utils/my_on_policy_runner.py": "1bd645da9a5c79c1d97b329528837897714e32fd1b3bfcaa05e14aae1322b6e3"
+    },
+    "ignored_runtime_asset": {
+      "relative_path": "source/whole_body_tracking/whole_body_tracking/assets/agibot_a3",
+      "file_count": 46,
+      "total_file_bytes": 15378264,
+      "tree_content_sha256": "0137f59b1fe45e7d5f8fa731bedca905f5466bc98e8d1354081fe071d60426c6",
+      "restore_source_checkout": "/workspace/codexschema/nohope",
+      "restore_source_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+      "restore_source_relative_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3",
+      "target_must_be_gitignored": true,
+      "symlinks_forbidden": true
     }
   },
   "runtime": {
     "pod": "pod1",
     "gpu": 0,
     "artifact_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713",
-    "external_control_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v4",
+    "external_control_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v5",
     "source_asset_root": "/workspace/codexschema/phase1_fresh_20260711",
     "isaac_python": "/workspace/hope_isaac_venv/bin/python",
     "isaaclab_root": "/workspace/IsaacLab",
@@ -199,10 +210,10 @@
       "max_iterations": 25,
       "requires_activation": false,
       "run_names": {
-        "A": "phase1_signed_face_l1_v4_A_hot_control_seed3",
-        "B": "phase1_signed_face_l1_v4_B_hot_guidance_seed3",
-        "C": "phase1_signed_face_l1_v4_C_fresh_control_seed3",
-        "D": "phase1_signed_face_l1_v4_D_fresh_guidance_seed3"
+        "A": "phase1_signed_face_l1_v5_A_hot_control_seed3",
+        "B": "phase1_signed_face_l1_v5_B_hot_guidance_seed3",
+        "C": "phase1_signed_face_l1_v5_C_fresh_control_seed3",
+        "D": "phase1_signed_face_l1_v5_D_fresh_guidance_seed3"
       },
       "expected_terminal_checkpoint_iteration": {
         "A": 13824,
@@ -210,7 +221,7 @@
         "C": 24,
         "D": 24
       },
-      "activation_output": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v4/l1_activation.json"
+      "activation_output": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v5/l1_activation.json"
     },
     "l2": {
       "human_name": "4096-environment single-seed canary",
@@ -220,10 +231,10 @@
       "launch_authorized": false,
       "blocked_on": "immutable signed-face directional checkpoint paper path and SHA are not frozen",
       "run_names": {
-        "A": "phase1_signed_face_l2_v4_A_hot_control_seed3",
-        "B": "phase1_signed_face_l2_v4_B_hot_guidance_seed3",
-        "C": "phase1_signed_face_l2_v4_C_fresh_control_seed3",
-        "D": "phase1_signed_face_l2_v4_D_fresh_guidance_seed3"
+        "A": "phase1_signed_face_l2_v5_A_hot_control_seed3",
+        "B": "phase1_signed_face_l2_v5_B_hot_guidance_seed3",
+        "C": "phase1_signed_face_l2_v5_C_fresh_control_seed3",
+        "D": "phase1_signed_face_l2_v5_D_fresh_guidance_seed3"
       },
       "relative_milestones": [200, 500, 1000],
       "checkpoint_iterations": {

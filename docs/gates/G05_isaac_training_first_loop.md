@@ -1461,6 +1461,8 @@ finite，合同三元组实际位于 runner 的 `infos`。`control/v1` 保留未
 环境未传给 child；失败 claim/log 保留，B/C/D 未创建。v3 绑定 tracked setup 脚本、拒绝 local override，
 v3 因在 `SimulationApp` 前真正 import IsaacLab 而假拒绝；v4 改用 `find_spec` 只验证模块 origin 位于
 exact `882fea4` worktree，正式 import 留给 Kit boot。当前仍没有新 Isaac checkpoint 行为结果，
-不能把 E1 写成训练修复。
+不能把 E1 写成训练修复。v4 随后进入 Kit/scene 后发现 detached worktree 缺 Git-ignored A3
+URDF/mesh/config；失败 A claim 保留。v5 从 clean `6d93bcb` 恢复并同时绑定 source/target tree 的
+`46` files、`15,378,264` bytes 与 canonical SHA `0137f59b...26c6`，claim 前拒绝缺失/额外/symlink。
 复现命令、SSH 中断恢复和半写 claim 的 fail-closed 处置见
 [操作文档](../operations/run_phase1_signed_face_rescue_funnel.md)。

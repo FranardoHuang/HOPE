@@ -1217,17 +1217,18 @@ rules. Run it only through
 
 L1 is a `512 env × 25 update` launch-integrity smoke on one seed. Hot cells must save lineage `0`,
 fresh cells lineage `1`, and all four must emit one common hard-contract SHA. L2 is designed as
-`4096 env × 1001 update`, but v4 rejects every L2 validate/plan/launch before runtime writes until a
-separate immutable signed-face directional checkpoint paper path/SHA and reviewed v5 activation
+`4096 env × 1001 update`, but v5 rejects every L2 validate/plan/launch before runtime writes until a
+separate immutable signed-face directional checkpoint paper path/SHA and reviewed v6 activation
 exist. This launcher starts no judge, promotes no checkpoint and buys no additional seed.
 
 The first production preflight (`control/v1`) was rejected before any run claim because its audit
 looked only for top-level tensors and top-level contract keys. RSL-RL stores weights recursively and
 the contract tuple under checkpoint `infos`. The v2 launch then preserved a pre-learning A-cell
 failure because it did not pass the detached worktree's source-first Python environment to the
-child. v3 then overreached by importing IsaacLab before `SimulationApp`. Preserve v1/v2/v3; run only
-`control/v4`, whose recursive audit, deterministic environment SHA, non-executing exact-worktree
-module-origin check and frozen file hashes are recorded in the dedicated operation page.
+child. v3 then overreached by importing IsaacLab before `SimulationApp`; v4 proved the ignored A3
+asset does not follow a detached worktree. Preserve v1-v4; run only `control/v5`, whose recursive
+audit, deterministic environment, module-origin and exact restored-asset tree hashes are recorded in
+the dedicated operation page.
 
 ## First-Loop Rule
 

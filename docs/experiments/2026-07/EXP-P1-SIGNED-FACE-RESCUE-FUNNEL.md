@@ -1,7 +1,7 @@
 # EXP-P1-SIGNED-FACE-RESCUE-FUNNEL：有符号拍面修复后的单-seed 机制漏斗
 
-状态：`preregistered_v4_after_three_preserved_prelearning_failures`
-证据等级：E1（v4 machine prereg/launcher 与静态攻击回归通过；尚无新训练）
+状态：`preregistered_v5_after_four_preserved_prelearning_failures`
+证据等级：E1（v5 machine prereg/launcher 与静态攻击回归通过；尚无新训练）
 人类负责人：franco  
 执行者：Codex  
 全局优先级：只继承 [`NOW` 队列第 1 项](../../NOW.md#统一工作队列唯一优先级账本)，本页不另建队列。
@@ -137,6 +137,17 @@ v3 的确定性环境 SHA 和 source-first 路径已经正确，但 preflight �
 新 run。v4 保留 `control/v3`，用 `importlib.util.find_spec` 只解析 module origin、不执行包；正式 import
 仍由 locked Kit boot 在创建 `SimulationApp` 后完成。
 
+### v4 ignored A3 资产缺失与 v5 修正
+
+v4 已进入 `SimulationApp` 并成功加载项目包，但创建 scene 时发现 detached worktree 缺
+`assets/agibot_a3/urdf/model.urdf`。该目录被仓库 `.gitignore` 排除，正常 `git worktree add` 不会复制；
+因此 v4 A 仍在第一次 learning iteration/hard-contract marker 前退出，B/C/D 未创建，失败证据保留。
+
+v5 从 clean exact `6d93bcb` runtime checkout 恢复完整 A3 ignored tree 到 exact `882fea4` worktree，
+同时冻结 restore checkout/path 与 target path：`46` files、`15,378,264` file bytes、canonical tree SHA
+`0137f59b...26c6`。preflight 同时重算两棵树，拒绝 symlink、特殊/额外/缺失文件，并要求 target 确实被
+Git ignore、两个 checkout 均 clean。资产恢复不改变训练配方、源码 commit、seed、预算或 exactness。
+
 ### 父合同扩展边界
 
 父 `model_13800.pt` SHA 冻结为 `478efa8d...d9e6`，嵌入/相邻 hard-contract SHA 均为
@@ -153,11 +164,12 @@ L1 只是一份 25-update launch-integrity smoke。四个 L1 terminal 都 finite
 
 ## 仍未关闭的发射/判卷缺口
 
-- clean detached `882fea4` 训练 worktree 已在 Pod1 建立；v1 audit 假拒绝、v2 pre-learning import
-  失败与 v3 Kit 前假拒绝均已归档且未覆盖。v4 runtime `validate/launch` 尚未完成，因此仍无新 checkpoint。
+- clean detached `882fea4` 训练 worktree和 exact ignored A3 资产已在 Pod1 建立；v1 audit 假拒绝、
+  v2/v4 pre-learning 失败与 v3 Kit 前假拒绝均已归档且未覆盖。v5 runtime `validate/launch` 尚未完成，
+  因此仍无新 checkpoint。
 - L1 必须先实际运行并生成四格终档 completion/activation 证据。
 - 相对 `+1000` 的 immutable signed-face directional checkpoint paper 的 exact schedule/path/SHA 尚未
-  冻结。manifest 明确 `l2.launch_authorized=false`；必须另发 reviewed v5 paper activation 后才能启动
+  冻结。manifest 明确 `l2.launch_authorized=false`；必须另发 reviewed v6 paper activation 后才能启动
   L2。当前 launcher 也不启动 judge、不能自动晋级或购买第二 seed。
 
 当前只授权按运行手册进行仿真 L1 runtime validate/launch；不授权 L2、judge、部署或真机。

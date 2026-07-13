@@ -129,7 +129,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
         raise ContractError(f"cannot read manifest: {exc}") from exc
     if data.get("schema_version") != 1:
         raise ContractError("manifest schema_version must be 1")
-    if data.get("manifest_id") != "phase1-signed-face-rescue-single-seed-funnel-20260713-v4":
+    if data.get("manifest_id") != "phase1-signed-face-rescue-single-seed-funnel-20260713-v5":
         raise ContractError("unexpected manifest_id")
     if data.get("simulation_only") is not True or data.get("real_robot_commands_forbidden") is not True:
         raise ContractError("manifest must be simulation-only and explicitly forbid robot commands")
@@ -158,9 +158,30 @@ def load_manifest(path: Path) -> dict[str, Any]:
         if not isinstance(relative, str) or rel.is_absolute() or ".." in rel.parts:
             raise ContractError(f"unsafe critical source path: {relative!r}")
         require_sha(digest, f"critical source {relative}")
+    ignored_asset = source.get("ignored_runtime_asset")
+    if not isinstance(ignored_asset, dict):
+        raise ContractError("ignored_runtime_asset must be an object")
+    require_exact_keys(ignored_asset, {
+        "relative_path", "file_count", "total_file_bytes", "tree_content_sha256",
+        "restore_source_checkout", "restore_source_commit", "restore_source_relative_path",
+        "target_must_be_gitignored", "symlinks_forbidden",
+    }, "ignored runtime asset")
+    expected_asset = {
+        "relative_path": "source/whole_body_tracking/whole_body_tracking/assets/agibot_a3",
+        "file_count": 46,
+        "total_file_bytes": 15378264,
+        "tree_content_sha256": "0137f59b1fe45e7d5f8fa731bedca905f5466bc98e8d1354081fe071d60426c6",
+        "restore_source_checkout": "/workspace/codexschema/nohope",
+        "restore_source_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+        "restore_source_relative_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3",
+        "target_must_be_gitignored": True,
+        "symlinks_forbidden": True,
+    }
+    if ignored_asset != expected_asset:
+        raise ContractError("ignored A3 runtime asset contract changed")
 
     if runtime.get("pod") != "pod1" or runtime.get("gpu") != 0:
-        raise ContractError("v4 reserves exactly Pod1 GPU0")
+        raise ContractError("v5 reserves exactly Pod1 GPU0")
     if runtime.get("initial_gpu_must_have_zero_compute_processes") is not True:
         raise ContractError("the four-cell pool must start on an empty GPU")
     if runtime.get("maximum_trainers_on_gpu") != 4:
@@ -330,7 +351,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
     if evaluation.get("l2_training_launch_authorized") is not False:
         raise ContractError("L2 training launch must remain blocked")
     if evaluation.get("signed_directional_checkpoint_paper") is not None:
-        raise ContractError("v4 must not invent a signed directional checkpoint paper")
+        raise ContractError("v5 must not invent a signed directional checkpoint paper")
     return data
 
 
@@ -379,6 +400,75 @@ def verify_training_source(manifest: dict[str, Any]) -> tuple[Path, Path]:
         if not path.is_file() or sha256_file(path) != expected:
             raise ContractError(f"critical training source is missing or changed: {path}")
     return checkout, wbt
+
+
+def asset_tree_content(root: Path) -> dict[str, Any]:
+    if not root.is_dir() or root.is_symlink():
+        raise ContractError(f"ignored runtime asset root is missing or a symlink: {root}")
+    rows: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            raise ContractError(f"ignored runtime asset contains a symlink: {path}")
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            raise ContractError(f"ignored runtime asset contains a special entry: {path}")
+        rows.append({
+            "relative_path": path.relative_to(root).as_posix(),
+            "bytes": path.stat().st_size,
+            "sha256": sha256_file(path),
+        })
+    return {
+        "file_count": len(rows),
+        "total_file_bytes": sum(row["bytes"] for row in rows),
+        "tree_content_sha256": canonical_sha256({"files": rows}),
+    }
+
+
+def verify_ignored_runtime_asset(
+    manifest: dict[str, Any], checkout: Path, wbt: Path
+) -> dict[str, Any]:
+    spec = manifest["source"]["ignored_runtime_asset"]
+    target_candidate = wbt / spec["relative_path"]
+    if target_candidate.is_symlink():
+        raise ContractError("ignored runtime asset target root may not be a symlink")
+    target = target_candidate.resolve()
+    try:
+        target.relative_to(wbt.resolve())
+    except ValueError as exc:
+        raise ContractError("ignored runtime asset target escapes training worktree") from exc
+    restore_checkout = Path(spec["restore_source_checkout"]).resolve()
+    if git_output(restore_checkout, "rev-parse", "HEAD") != spec["restore_source_commit"]:
+        raise ContractError("ignored asset restore checkout commit changed")
+    if git_output(restore_checkout, "status", "--porcelain"):
+        raise ContractError("ignored asset restore checkout is dirty")
+    restore_candidate = restore_checkout / spec["restore_source_relative_path"]
+    if restore_candidate.is_symlink():
+        raise ContractError("ignored asset restore root may not be a symlink")
+    restore = restore_candidate.resolve()
+    target_content = asset_tree_content(target)
+    restore_content = asset_tree_content(restore)
+    expected = {
+        "file_count": spec["file_count"],
+        "total_file_bytes": spec["total_file_bytes"],
+        "tree_content_sha256": spec["tree_content_sha256"],
+    }
+    if target_content != expected or restore_content != expected:
+        raise ContractError("ignored A3 asset target/restore tree does not match preregistration")
+    target_relative = target.relative_to(checkout.resolve())
+    ignored = subprocess.run(
+        ["git", "-C", str(checkout), "check-ignore", "-q", str(target_relative)],
+        check=False,
+    )
+    if ignored.returncode != 0:
+        raise ContractError("restored A3 asset is not Git-ignored in the training checkout")
+    return {
+        "target_path": str(target),
+        "restore_source_path": str(restore),
+        **target_content,
+        "target_gitignored": True,
+        "symlinks_present": False,
+    }
 
 
 def build_training_environment(manifest: dict[str, Any], wbt: Path) -> dict[str, str]:
@@ -844,7 +934,7 @@ def runtime_preflight(
     if stage_name == "l2":
         raise ContractError(
             "L2 is blocked: freeze a separate immutable signed-face directional checkpoint "
-            "paper path/SHA and issue a reviewed v5 activation before launch"
+            "paper path/SHA and issue a reviewed v6 activation before launch"
         )
     checkout, wbt = verify_training_source(manifest)
     verify_production_locations(manifest, config_path, launcher_path, checkout)
@@ -858,6 +948,9 @@ def runtime_preflight(
     training_environment = build_training_environment(manifest, wbt)
     module_path = verify_training_module_resolution(python, wbt, training_environment)
     verified_inputs = verify_inputs(manifest, python)
+    verified_inputs["ignored_runtime_asset"] = verify_ignored_runtime_asset(
+        manifest, checkout, wbt
+    )
     if available_memory_mib() < runtime["minimum_host_available_memory_mib"]:
         raise ContractError("insufficient host memory for the four-cell pool")
 

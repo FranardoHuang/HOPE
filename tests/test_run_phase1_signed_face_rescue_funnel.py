@@ -38,13 +38,16 @@ def write_manifest(tmp_path: Path, value: dict) -> Path:
 
 def test_checked_manifest_is_exact_four_cell_single_seed_funnel():
     data = manifest()
-    assert data["manifest_id"].endswith("-v4")
-    assert data["runtime"]["external_control_root"].endswith("/control/v4")
+    assert data["manifest_id"].endswith("-v5")
+    assert data["runtime"]["external_control_root"].endswith("/control/v5")
     assert data["runtime"]["training_environment_sha256"] == (
         "ddaa0effe2ed5318cc8ce34efbbf5b4ee042572052ab57232291079f41bed743"
     )
     assert data["source"]["critical_files"]["setup_train_env.sh"] == (
         "88c1d7307ec90483712f7f3b0d8535179b88bb132a8a5a06111bff6872034214"
+    )
+    assert data["source"]["ignored_runtime_asset"]["tree_content_sha256"] == (
+        "0137f59b1fe45e7d5f8fa731bedca905f5466bc98e8d1354081fe071d60426c6"
     )
     assert [cell["cell_id"] for cell in data["cells"]] == ["A", "B", "C", "D"]
     assert data["shared_training_contract"]["training_seed"] == 3
@@ -318,6 +321,8 @@ def test_launcher_binds_source_first_environment_and_forbids_local_override():
     assert "importlib.util.find_spec('whole_body_tracking')" in source
     assert "import pathlib, whole_body_tracking" not in source
     assert 'environment = preflight["training_environment"].copy()' in source
+    assert "verify_ignored_runtime_asset" in source
+    assert '"target_gitignored": True' in source
 
 
 def test_l2_is_fail_closed_until_separate_signed_directional_paper_activation():

@@ -209,3 +209,13 @@ order, link-origin positions and COM-point velocities. M0 robot-coordinate foot 
 strike behavior are also unmeasured. Commands are in
 [`run_motion_post_gvhmr_exact.md`](../operations/run_motion_post_gvhmr_exact.md); G04 remains
 `Partial`.
+
+## Audit update 2026-07-13: detached Isaac A3 asset closure
+
+An exact Git worktree does not contain the ignored package-local A3 URDF/mesh/config tree. The
+signed-face L1 v4 launch exposed this before its first learning iteration. The v5 preflight now
+binds both the clean `6d93bcb` restore source and clean detached `882fea4` target to exactly 46
+regular files, 15,378,264 file bytes and canonical tree SHA `0137f59b...26c6`; symlinks, special,
+missing or extra files fail closed. Restore steps are in
+[`setup_local_sync.md`](../operations/setup_local_sync.md). This proves asset byte closure only,
+not Isaac/MuJoCo model equivalence or behavior; G04 remains `Partial`.

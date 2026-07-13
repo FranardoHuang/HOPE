@@ -137,6 +137,26 @@ Then verify all copied URDF mesh references resolve:
 python3 -c 'import pathlib, re, sys; urdf=pathlib.Path("hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/urdf/model.urdf"); refs=re.findall(r"filename=\"([^\"]+)\"", urdf.read_text()); missing=[r for r in refs if not (urdf.parent / r).resolve().exists()]; print(f"mesh_refs={len(refs)} missing={len(missing)}"); sys.exit(1 if missing else 0)'
 ```
 
+Detached training worktrees also omit this ignored tree. For the Pod1 signed-face L1 funnel, the
+reviewed restore source is the clean `6d93bcb16c422a2f42748c2dc99432559653480b` checkout and the
+destination is the clean detached `882fea4285f0cf9a97ba79d79ae8af31d26ea1ed` checkout. Only while
+no trainer uses either worktree, restore without deleting or overwriting an existing destination:
+
+```bash
+SOURCE=/workspace/codexschema/nohope/hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
+DEST_PARENT=/workspace/codexschema/nohope_signed_face_rescue_882fea4/hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets
+test ! -e "$DEST_PARENT/agibot_a3"
+mkdir -p "$DEST_PARENT"
+cp -a "$SOURCE" "$DEST_PARENT/"
+test -z "$(git -C /workspace/codexschema/nohope_signed_face_rescue_882fea4 status --porcelain)"
+```
+
+The accepted tree contains exactly `46` regular files and `15,378,264` file bytes; its canonical
+`{relative_path,bytes,sha256}` manifest SHA is
+`0137f59b1fe45e7d5f8fa731bedca905f5466bc98e8d1354081fe071d60426c6`. The v5 launcher recomputes
+that digest for both source and destination, requires the destination to remain Git-ignored, and
+rejects symlinks, special files, missing files and extra files before creating a run claim.
+
 6. Restore the motion-retargeting clones (both git-ignored, absent on a fresh clone) when working on the motion pipeline:
 
 ```bash

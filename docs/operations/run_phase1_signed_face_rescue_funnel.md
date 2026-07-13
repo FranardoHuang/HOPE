@@ -1,6 +1,6 @@
 # 运行 Phase-1 有符号拍面单-seed 机制漏斗
 
-状态：v1/v2/v3 的失败证据均已保留；v4 已修正 checkpoint、source-first 环境与 Kit 前模块解析边界，尚未启动训练，G05/G06 仍为 `Partial`。
+状态：v1–v4 的失败证据均已保留；v5 还绑定并恢复 exact ignored A3 资产，尚未启动训练，G05/G06 仍为 `Partial`。
 
 本页运行 [`EXP-P1-SIGNED-FACE-RESCUE-FUNNEL`](../experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)
 冻结的四个因果格。`run_name` 是每条训练不可复用的运行名；`seed` 是随机初始化/采样种子；其他缩写见
@@ -35,7 +35,7 @@
 ```bash
 SOURCE_COMMIT=882fea4285f0cf9a97ba79d79ae8af31d26ea1ed
 SOURCE=/workspace/codexschema/nohope_signed_face_rescue_882fea4
-CONTROL=/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v4
+CONTROL=/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v5
 ARTIFACT=/workspace/codexschema/phase1_signed_face_rescue_20260713
 
 git -C /workspace/codexschema/nohope worktree add --detach "$SOURCE" "$SOURCE_COMMIT"
@@ -62,8 +62,8 @@ LAUNCHER_SHA=$(sha256sum "$LAUNCHER" | awk '{print $1}')
 不要手改生产副本。commit 合入后以本页记录的最终 SHA 对账；如果不同，停止并回到源码审查，不能现场
 “更新期望值”。
 
-本版冻结值：manifest `2e22e799bba1282f0e1f27aac88a9bc79b8aa0c4fa7eaed01483db8a1937fad3`；
-launcher `ae53dd1d20c1087c77b98311235624ddc6baf9bc8fde1a75123893c295d3da3c`。
+本版冻结值：manifest `362e8237179b0de15522d522c675155db7b8a884b8b9bd01f83061973571f6a5`；
+launcher `cae16fddfee2eec073f0fb81099d07607f11d687f830ff28b7aa005c52fa32fd`。
 
 v1 文件保留在 `control/v1`，其 runtime `validate` 在创建任何 run claim 前 fail closed。根因不是父模型
 非有限：旧审计只遍历 checkpoint 顶层，而 RSL-RL 的浮点权重位于嵌套 state dict，合同 provenance
@@ -82,6 +82,12 @@ v3 的环境 SHA 正确，但 preflight 把路径检查写成了真正 import；
 导入 `omni.kit` 本来就会失败，所以 v3 也在 claim 前被拒绝。v4 保留该 control 证据，改用
 `importlib.util.find_spec` 只解析 `whole_body_tracking` 的 source path、不执行包；正式 import 仍由
 locked Kit boot 在 `SimulationApp` 之后完成。
+
+v4 随后越过 Python/Kit 环境，但在创建 Isaac scene 时发现 detached worktree 没有 Git-ignored 的 A3
+URDF/mesh/config 目录；A 格仍在第一次 learning iteration 前退出，失败 claim/log 原样保留。v5 按
+[本地资产恢复手册](setup_local_sync.md)从 clean exact `6d93bcb` checkout 复制到 ignored 目标，绑定
+`46` 文件、`15,378,264` bytes、canonical tree SHA `0137f59b...26c6`，拒绝 symlink/特殊文件/extra
+file，并在 claim 前同时复核 restore source 与 target tree；Git 工作树仍必须 clean。
 
 ## 2. 只读校验与四格命令复核
 
@@ -157,7 +163,7 @@ L1 完整，不代表 L2 已授权。
 
 ## 5. L2 当前 fail-closed
 
-当前 v4 对所有 `--stage l2 validate|plan|launch` 都在任何 runtime 写入前返回：
+当前 v5 对所有 `--stage l2 validate|plan|launch` 都在任何 runtime 写入前返回：
 `L2 is blocked`。原因不是缺 GPU，而是 immutable signed-face directional checkpoint paper 的
 schedule/path/SHA 尚未冻结。不得绕过 validator，也不得把 L1 completion 文件改名为 L2 授权。
 
@@ -169,7 +175,7 @@ schedule/path/SHA 尚未冻结。不得绕过 validator，也不得把 L1 comple
   --stage l2 validate
 ```
 
-后续必须提交 reviewed v5，把同一 immutable paper 的 path/SHA、判读合同和 activation closure 一起冻结，
+后续必须提交 reviewed v6，把同一 immutable paper 的 path/SHA、判读合同和 activation closure 一起冻结，
 才能讨论 L2。到那时每个预注册 checkpoint 仍须检查进程、GPU、RAM、完整日志中的
 NaN/Inf/Traceback/OOM/Killed、文件名与嵌入 iteration、tensor finite、checkpoint ↔ 相邻 hard-contract
 SHA/lineage；不要为填空闲卡复制第二 seed。

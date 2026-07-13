@@ -19,7 +19,9 @@
   证据且不改四格/seed/预算/L2 blocker。v2 随后在首格学习前因 exact worktree `PYTHONPATH` 未传给
   child 退出；失败 claim/log 保留，其他三格未创建。v3 绑定 tracked setup、拒绝 local override，并
   在 claim 前解析模块来源。v3 因在 `SimulationApp` 前真正 import IsaacLab 而假拒绝；v4 改用
-  `find_spec` 只验 exact module origin。专项 `23 passed`；v4 Pod launch 尚未记为完成。见
+  `find_spec` 只验 exact module origin。v4 再在 scene 构建时发现 ignored A3 资产缺失；失败 claim
+  保留，v5 从 clean `6d93bcb` 恢复并绑定 source/target `46` files、`15,378,264` bytes、tree SHA
+  `0137f59b...26c6`。专项 `23 passed`；v5 Pod launch 尚未记为完成。见
   [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)与
   [操作](operations/run_phase1_signed_face_rescue_funnel.md)。
 
