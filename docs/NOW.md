@@ -32,19 +32,21 @@
 planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行为以厂商 MuJoCo 为准。
 
 - **最新可分享结果：** 反手拉 B/C 的 rank-0 主选已在 Pod1 CPU-only runtime 完成 exact 整轨
-  SE(2) 实体化；motion/report SHA 已归档，但 schema-2/L0/vendor L1/桌网/动力学未跑，证书仍为 `0`，
-  只解锁 schema-2 预注册。高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
+  SE(2) 实体化；后续 schema-2/FK 源码门也已进入 `main` 并通过 `17` 项专项回归。它目前只解锁
+  逐资产 no-write runtime inspection，schema-2 物化、L0/vendor L1/桌网/动力学仍未跑，证书仍为 `0`。
+  高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
   canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。它们现在只解锁独立 exact GMR prereg，
   还不是“动作会打球”。
-- **当前运行态：** Pod1 最终只读审计为 `0` trainer/worker/judge，三张 GPU 无 compute。foreign v8 的
-  A/B/C 串行前序已终档；D 是第四格，900 秒内再次未到 hard contract/runtime verified，locked wrapper
-  只清理本臂 exact PGID 并返回 124。这是继旧 v6 D 后第二次 pre-contract Kit boot timeout，已停止
-  自动重试。只读根因账现把两次失败都收窄到 identical table USD 的 load→PhysX 交界；相邻 C 只需
-  `2.339/3.031 s` 越过，但第四进程、Carbonite residue、driver/filesystem 尚未分离。下一步仅有
-  D-first/ordinal-4 × host/private IPC 的 scene-only 诊断设计，尚无运行授权。GPU 不要求用无新因果
-  信息的重复 seed 填满，机制漏斗和动作专属门优先。
-  signed-face exam bank 已过 E2：371 题 old/new replay 逐字节一致并发布新 bank/report；但新 bank 绑定的
-  immutable schedule/paper activation 尚无，所以 L2/judge 仍阻断。
+- **当前运行态：** 2026-07-14 04:04 CST 只读审计时，Pod1/GPU0 上正在跑非击球臂消融的 A0
+  （保留左臂模仿对照，PGID `1811464`）：`211/1001` update，`model_200.pt` 文件名/内嵌迭代一致，
+  `1,762,717` 个 tensor 元素全 finite，fresh lineage=`1`，内嵌合同 SHA 与相邻 schema-3 hard contract
+  `14ef410b...29f1` 精确一致，日志未见 NaN/Traceback/OOM。原 launcher 在 A0 过 Kit 后把 schema-3
+  bank 绑定误当成 hard contract 的直接 physics leaf，因而假拒绝并未认领 A1；一次性 continuation
+  只允许验证现有 A0 后补发 A1，禁止重启 A0。Pod1 其余两卡、Pod2 三卡当时均无 compute，未见 Yikang
+  作业。当前资源上限由 Franco 定为 Pod1 每卡 `4` 个我们的 trainer、Pod2 每卡 `3` 个，为 Yikang
+  的最多一张卡留动态余量；空槽只给已过前置门的不同机制，不复制失败 seed。
+  signed-face exam bank 已过 E2：371 题 old/new replay 逐字节一致并发布新 bank/report；K100 paper
+  source gate 也已进入 main，但 private-bank consume 尚未运行，所以 schedule/activation/L2/judge 仍阻断。
 - **Franco focus：** 五种动作的用途、动作专属来球题族、空挥视觉锚点和横移终态站距语义；反手拉
   B/C 先补证，高点拍压作为第五动作，v12 只作后续 Jiayi 对照。
 - **Jiayi focus：** v12/dang 路线与 planner-policy 契合；其候选必须在相同挡球专卷和厂商 MuJoCo 中
