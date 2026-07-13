@@ -1290,3 +1290,18 @@ landing/net 全过；这只是 E2 runtime data gate。train rebind 后 source-fa
 `9603a178...a9db`；旧 immutable exam
 不能与它组成 exact 同 family 证据。对应 exam bank 还未同法重绑定/重生成，L2 directional paper 与
 judge 仍阻断，所以这项能力不构成 G06 或 Gate3 结果。
+
+### 2026-07-13 signed-face exam bank 独立重绑定预注册
+
+exam 对应的严格数据门已完成 E1 实现与预注册，但**没有运行**。generalized consumer 仍 byte-exact
+接受历史 train-v2 manifest，同时新增一个封闭 exam-v1 profile：旧 exam path、`63,968` bytes、SHA
+`d7db2568...f5096`、split `exam`、正/反手 `183/188`、旧 family `b21c161a...8ad5` 和独立 no-clobber
+输出都不可替换；目标 physics/family 与已发布 train-v2 同为 `09dfe899...afb95` / `9603a178...a9db`。
+mutation/source-receipt/profile 回归为 `18 passed`。
+
+本分支没有访问 Pod、目标 Torch runtime 或真实 exam asset，也没有生成 rebound bank/report；因此证据仍为
+E1。即使后续 371 题 runtime replay 与 report-last 发布通过，新 bank SHA 也会改变 question ID，旧
+schedule 不得复用；必须从新 bank 重新冻结独立 schedule/paper activation 后才能启动 judge。详见
+[实验卷宗](../experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md)与
+[运行手册](../operations/run_phase1_signed_face_exam_bank_rebind.md)。当前 L2、signed-face paper、G06 与
+Gate3 状态均不变，G06 保持 `Partial`。

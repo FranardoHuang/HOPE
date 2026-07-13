@@ -171,8 +171,9 @@ schema、split、source family 和 exact motion/frame/phase 合同。
 
 输出使用新 no-clobber 目录，旧 bank 不覆盖；先生成 bank，再写 completion report。新 train family SHA
 预注册为 `9603a178...9db`。该 train bank 即使通过也只解除 L1 发射阻塞；旧 exam 的 family SHA 会与它
-不同，所以在对应 exam bank 用同样证据重绑定或重新生成之前，不能授权 L2 exact judge，也不能把这次
-重绑定冒充 signed-directional paper。
+不同，所以在对应 exam bank 用同样证据完成 runtime 重绑定或重新生成之前，不能授权 L2 exact judge，
+也不能把这次重绑定冒充 signed-directional paper。exam 严格 rebind 已另行完成 E1 预注册，但尚未运行，
+见 [`EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND`](EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md)。
 
 v1 的 no-write Pod preflight 又抓到一个跨 Python 版本的证据编码问题：`ast.dump` 在本机与 Pod Python
 小版本间字段不同，导致相同 helper 源码的冻结 AST SHA 不同。v1 未创建输出 root，control 和错误原样
@@ -216,7 +217,8 @@ L1 只是一份 25-update launch-integrity smoke。四个 L1 terminal 都 finite
   尚未启动，因此仍无新 checkpoint。
 - L1 必须先实际运行并生成四格终档 completion/activation 证据。
 - 相对 `+1000` 的 immutable signed-face directional checkpoint paper 的 exact schedule/path/SHA 尚未
-  冻结。manifest 明确 `l2.launch_authorized=false`；必须另发 reviewed v7 paper activation 后才能启动
-  L2。当前 launcher 也不启动 judge、不能自动晋级或购买第二 seed。
+  冻结。exam-v1 rebind 只有 E1 prereg，真实 371 题 replay/output SHA 与基于新 bank 的 schedule 都没有；
+  manifest 明确 `l2.launch_authorized=false`。必须另发 reviewed v7 paper activation 后才能启动 L2。
+  当前 launcher 也不启动 judge、不能自动晋级或购买第二 seed。
 
 当前只授权按运行手册进行仿真 L1 runtime validate/launch；不授权 L2、judge、部署或真机。

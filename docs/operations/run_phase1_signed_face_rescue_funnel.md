@@ -109,8 +109,10 @@ mkdir -p "$REBIND_CONTROL"
 
 install -m 0444 configs/phase1_signed_face_bank_rebind_prereg_20260713.json \
   "$REBIND_CONTROL/phase1_signed_face_bank_rebind_prereg_20260713.json"
-install -m 0555 scripts/rebind_stage1_question_bank_physics_contract.py \
-  "$REBIND_CONTROL/rebind_stage1_question_bank_physics_contract.py"
+# 历史 train-v2 report 绑定 62dfbbfd7500db51437c4115f6fc2e9a5d86d9e4 中的旧 consumer。
+git show 62dfbbfd7500db51437c4115f6fc2e9a5d86d9e4:scripts/rebind_stage1_question_bank_physics_contract.py \
+  > "$REBIND_CONTROL/rebind_stage1_question_bank_physics_contract.py"
+chmod 0555 "$REBIND_CONTROL/rebind_stage1_question_bank_physics_contract.py"
 
 REBIND_CONFIG="$REBIND_CONTROL/phase1_signed_face_bank_rebind_prereg_20260713.json"
 REBIND_TOOL="$REBIND_CONTROL/rebind_stage1_question_bank_physics_contract.py"
@@ -139,6 +141,10 @@ no-write；`run` 会独占创建
 `.../assets/schema3_bank_rebind_v2/`，先写 bank、以目标 runtime 运行 exact motion contract 和 1481 题
 old/new bitwise contact/flight replay，再把 completion report 写在最后。目录已存在或只有 partial 时都
 拒绝覆盖；调查后必须发布新版本，不能删除后原名重跑。
+
+以上命令只用于复核历史 train-v2 control。当前 tracked consumer 已增加封闭的 exam-v1 profile，但原
+train manifest 仍 byte-exact 且兼容；不得用新 consumer SHA 改写已发布 train report。exam 独立迁移只按
+[exam-bank 运行手册](run_phase1_signed_face_exam_bank_rebind.md)执行。
 
 `validated_no_writes` 只说明输入和源码前置门通过，**不是**可消费的完成证据；只有 `run` 返回
 `published` 且 report-last 文件的内容/SHA 全部复核通过，v6 才能绑定该 bank。v6 launcher 还必须解析

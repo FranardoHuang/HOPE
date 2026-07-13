@@ -39,6 +39,143 @@ EXPECTED_PHYSICS_FILES = (
     "tasks/tracking/mdp/virtual_ball.py",
     "hope_training/whole_body_tracking/scripts/venue_ball_sampler.py",
 )
+TRAIN_V2_MANIFEST_ID = (
+    "phase1-signed-face-schema3-bank-additive-physics-rebind-20260713-v2"
+)
+EXAM_V1_MANIFEST_ID = (
+    "phase1-signed-face-schema3-exam-additive-physics-rebind-20260713-v1"
+)
+EXPECTED_ALLOWED_METADATA_LEAF_CHANGES = (
+    "physics_contract.files.hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/tasks/tracking/mdp/virtual_ball.py",
+    "physics_contract_sha256",
+    "source_family_contract.physics_contract_sha256",
+    "source_family_sha256",
+)
+EXPECTED_MOTION_SHA256 = {
+    "forehand": "f2cb2d9f5d27cefbcee0b790000fcd979abaf02894d4fcad061ebca27f141687",
+    "backhand": "1722553375cd28f9b2d567c01b1a5fc6bcd149fa12cadb20e5202a9153367534",
+}
+EXPECTED_MOTION_RUNTIME = {
+    "forehand": {
+        "path": (
+            "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/"
+            "hope_forehand_v4rg_cal.npz"
+        ),
+        "n_frames": 141,
+        "strike_phase": 0.471,
+    },
+    "backhand": {
+        "path": (
+            "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/"
+            "hope_backhand_v4rg_cal.npz"
+        ),
+        "n_frames": 134,
+        "strike_phase": 0.338,
+    },
+}
+EXPECTED_TOP_LEVEL_CONTRACT = {
+    "source_repo": "/workspace/codexschema/nohope_signed_face_rescue_882fea4",
+    "runtime_python": "/workspace/hope_isaac_venv/bin/python",
+    "base_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+    "target_commit": "882fea4285f0cf9a97ba79d79ae8af31d26ea1ed",
+    "target_source_family_sha256": (
+        "9603a1788eb17ce03598cdde4efff946039613cf61fcc686f90a385706dba9db"
+    ),
+}
+EXPECTED_PHYSICS_CONTRACT = {
+    "contract_name": "stage1-physics-runtime-v1",
+    "files": list(EXPECTED_PHYSICS_FILES),
+    "only_changed_file": (
+        "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/"
+        "tasks/tracking/mdp/virtual_ball.py"
+    ),
+    "base_changed_file_sha256": (
+        "3dc5237346004893141fe231dbf6a8bc1028e0328459411015366d72868c5ed4"
+    ),
+    "target_changed_file_sha256": (
+        "14113de40bc1119d1a49a46980d9cb50380a516fd1ae1f9fb469f20834ec23c8"
+    ),
+    "git_diff_sha256": "4f0ae2db7361d58eb0e8f7d4ea691beade0f6e8c5b64f0d194c0aa5a8ebc9499",
+    "allowed_added_top_level_function": "signed_face_hemisphere",
+    "allowed_added_function_source_sha256": (
+        "0a3f66d971be52ffe841b6d40d1a291765ebc7da7edce60205a3aee591a5ba3e"
+    ),
+    "target_physics_contract_sha256": (
+        "09dfe8999c54e36b258fe54b5ec3da5d9816ff3be3675963b919371d7f4afb95"
+    ),
+}
+EXPECTED_INVARIANT_SUPPORT_FILES = {
+    "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/"
+    "tasks/tracking/mdp/stage1_question_bank.py": (
+        "47db31320c8a37ad95d082a179dcdfad45ca1b740696d54e22069fcdaab8b8b0"
+    ),
+    "hope_training/whole_body_tracking/scripts/gen_stage1_questions.py": (
+        "36c788758318358d259aa9f947bf7f52379ea13f9f316a20ea75dbb27de06d75"
+    ),
+}
+MANIFEST_PROFILES: dict[str, dict[str, Any]] = {
+    TRAIN_V2_MANIFEST_ID: {
+        "source_bank": {
+            "path": (
+                "/workspace/codexschema/phase1_fresh_20260711/assets/"
+                "v4rg_runtime_order_v3/s1_v4rg_runtime_order_schema3_train.npz"
+            ),
+            "sha256": "2da2bd1280c45944418d41fe5788d09d7c0ebb0ff7d34fa87c8dd0fcf16a0700",
+            "schema_version": 3,
+            "split": "train",
+            "clip_order": ["forehand", "backhand"],
+            "question_counts": {"forehand": 757, "backhand": 724},
+            "motion_sha256": EXPECTED_MOTION_SHA256,
+            "motion_runtime": EXPECTED_MOTION_RUNTIME,
+            "physics_contract_sha256": (
+                "70242d798f5b97e1405df7dedfd22a5f81421c9c03127e71c254982236cfad35"
+            ),
+        },
+        "output": {
+            "root": (
+                "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/"
+                "schema3_bank_rebind_v2"
+            ),
+            "bank_basename": "s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz",
+            "report_basename": "rebind_report.json",
+            "root_must_not_exist": True,
+            "completion_report_written_last": True,
+        },
+    },
+    EXAM_V1_MANIFEST_ID: {
+        "source_bank": {
+            "path": (
+                "/workspace/codexschema/phase1_fresh_20260711/assets/"
+                "v4rg_runtime_order_v3/s1_v4rg_runtime_order_schema3_exam.npz"
+            ),
+            "bytes": 63_968,
+            "sha256": "d7db2568beee990ef1d64b2dce9f0ab56ca76377f8993d820b6388292d0f5096",
+            "schema_version": 3,
+            "split": "exam",
+            "clip_order": ["forehand", "backhand"],
+            "question_counts": {"forehand": 183, "backhand": 188},
+            "motion_sha256": EXPECTED_MOTION_SHA256,
+            "motion_runtime": EXPECTED_MOTION_RUNTIME,
+            "physics_contract_sha256": (
+                "70242d798f5b97e1405df7dedfd22a5f81421c9c03127e71c254982236cfad35"
+            ),
+            "source_family_sha256": (
+                "b21c161a0240893a4a469136c2d5298c2ecfa9f2b4a8c6fb9493b679f3728ad5"
+            ),
+        },
+        "output": {
+            "root": (
+                "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/"
+                "schema3_exam_bank_rebind_v1"
+            ),
+            "bank_basename": "s1_v4rg_runtime_order_schema3_exam_882fea4_rebound.npz",
+            "report_basename": "rebind_report.json",
+            "root_must_not_exist": True,
+            "completion_report_written_last": True,
+        },
+    },
+}
 
 
 class RebindError(RuntimeError):
@@ -77,6 +214,12 @@ def require_sha(value: Any, label: str) -> str:
     return value
 
 
+def require_exact_contract(actual: Any, expected: Any, label: str) -> None:
+    """Reject any mutation of a manifest field frozen by one named profile."""
+    if actual != expected:
+        raise RebindError(f"{label} differs from the frozen manifest profile")
+
+
 def load_manifest(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -84,9 +227,8 @@ def load_manifest(path: Path) -> dict[str, Any]:
         raise RebindError(f"cannot read rebind manifest: {exc}") from exc
     if value.get("schema_version") != 1:
         raise RebindError("rebind manifest schema_version must be 1")
-    if value.get("manifest_id") != (
-        "phase1-signed-face-schema3-bank-additive-physics-rebind-20260713-v2"
-    ):
+    profile = MANIFEST_PROFILES.get(value.get("manifest_id"))
+    if profile is None:
         raise RebindError("unexpected rebind manifest_id")
     if value.get("simulation_only") is not True or value.get("real_robot_commands_forbidden") is not True:
         raise RebindError("rebind must remain simulation-only and forbid robot commands")
@@ -102,6 +244,12 @@ def load_manifest(path: Path) -> dict[str, Any]:
     if not all(isinstance(item, dict) for item in (source_bank, physics, support, output)):
         raise RebindError("source_bank/physics_contract/invariant_support_files/output must be objects")
     require_sha(source_bank.get("sha256"), "source bank")
+    if "bytes" in source_bank and (
+        not isinstance(source_bank["bytes"], int)
+        or isinstance(source_bank["bytes"], bool)
+        or source_bank["bytes"] <= 0
+    ):
+        raise RebindError("source bank bytes must be one positive integer")
     require_sha(source_bank.get("physics_contract_sha256"), "source physics contract")
     for label in (
         "base_changed_file_sha256",
@@ -120,11 +268,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
         raise RebindError("only_changed_file is not a physics-contract file")
     if physics.get("allowed_added_top_level_function") != "signed_face_hemisphere":
         raise RebindError("only signed_face_hemisphere may be added")
-    expected_support = {
-        "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/"
-        "tasks/tracking/mdp/stage1_question_bank.py",
-        "hope_training/whole_body_tracking/scripts/gen_stage1_questions.py",
-    }
+    expected_support = set(EXPECTED_INVARIANT_SUPPORT_FILES)
     if set(support) != expected_support:
         raise RebindError("invariant support-file set changed")
     for relative, digest in support.items():
@@ -155,6 +299,19 @@ def load_manifest(path: Path) -> dict[str, Any]:
         candidate = Path(str(output.get(key, "")))
         if not candidate.name or candidate.name != str(output.get(key)) or candidate.is_absolute():
             raise RebindError(f"output {key} must be one safe basename")
+    for key, expected in EXPECTED_TOP_LEVEL_CONTRACT.items():
+        require_exact_contract(value.get(key), expected, key)
+    require_exact_contract(physics, EXPECTED_PHYSICS_CONTRACT, "physics_contract")
+    require_exact_contract(
+        support, EXPECTED_INVARIANT_SUPPORT_FILES, "invariant_support_files"
+    )
+    require_exact_contract(
+        value.get("allowed_metadata_leaf_changes"),
+        list(EXPECTED_ALLOWED_METADATA_LEAF_CHANGES),
+        "allowed_metadata_leaf_changes",
+    )
+    require_exact_contract(source_bank, profile["source_bank"], "source_bank")
+    require_exact_contract(output, profile["output"], "output")
     return value
 
 
@@ -309,7 +466,9 @@ def array_fingerprint(value: np.ndarray) -> dict[str, Any]:
     }
 
 
-def load_npz_stable(path: Path, expected_sha256: str) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+def load_npz_stable(
+    path: Path, expected_sha256: str, expected_bytes: int | None = None
+) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
     """Read one regular no-symlink NPZ through a stable descriptor."""
     try:
         if path.resolve(strict=True) != path:
@@ -322,6 +481,10 @@ def load_npz_stable(path: Path, expected_sha256: str) -> tuple[dict[str, np.ndar
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode):
             raise RebindError(f"input is not a regular file: {path}")
+        if expected_bytes is not None and before.st_size != expected_bytes:
+            raise RebindError(
+                f"input byte count mismatch: {path}: {before.st_size} != {expected_bytes}"
+            )
         digest = hashlib.sha256()
         while True:
             chunk = os.read(fd, 1024 * 1024)
@@ -399,7 +562,9 @@ def prepare_rebound_arrays(
     source_cfg = manifest["source_bank"]
     try:
         arrays, source_receipt = load_npz_stable(
-            Path(source_cfg["path"]), source_cfg["sha256"]
+            Path(source_cfg["path"]),
+            source_cfg["sha256"],
+            source_cfg.get("bytes"),
         )
     except Exception as exc:
         if isinstance(exc, RebindError):
@@ -429,6 +594,12 @@ def prepare_rebound_arrays(
         raise RebindError("source family contract/hash is internally inconsistent")
     if family.get("physics_contract_sha256") != old_contract_sha:
         raise RebindError("source family does not bind the source physics contract")
+    declared_source_family = source_cfg.get("source_family_sha256")
+    if (
+        declared_source_family is not None
+        and old_meta.get("source_family_sha256") != declared_source_family
+    ):
+        raise RebindError("source family SHA is not the preregistered value")
 
     for clip in source_cfg["clip_order"]:
         info = (old_meta.get("clips") or {}).get(clip) or {}
@@ -552,7 +723,9 @@ def verify_written_bank_identity(
     if canonical_sha256(written_meta) != bank_proof["new_metadata_sha256"]:
         raise RebindError("written bank metadata SHA differs from the audited new metadata")
     source_arrays, _ = load_npz_stable(
-        Path(manifest["source_bank"]["path"]), manifest["source_bank"]["sha256"]
+        Path(manifest["source_bank"]["path"]),
+        manifest["source_bank"]["sha256"],
+        manifest["source_bank"].get("bytes"),
     )
     source_meta = decode_metadata(source_arrays["meta_json"])
     differences = metadata_leaf_differences(source_meta, written_meta)

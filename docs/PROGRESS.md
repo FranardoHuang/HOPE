@@ -13,6 +13,14 @@
 
 ## 2026-07-13
 
+- signed-face exam bank 的独立严格重绑定已完成 E1 预注册：原 train-v2 manifest 保持 byte-exact，
+  generalized consumer 以封闭 profile 另行冻结旧 exam path/`63,968` bytes/SHA、split、`183/188` 题、
+  旧/目标 family 与独立 no-clobber output；mutation、source-byte receipt 和双 profile synthetic rebind 为
+  `18 passed`。本分支未访问 Pod 或目标 runtime，未生成 bank/report；真实 371 题 replay、从新 bank
+  重建 schedule 与 judge 仍阻断，G06 保持 `Partial`。见
+  [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md)与
+  [操作](operations/run_phase1_signed_face_exam_bank_rebind.md)。
+
 - signed-face v5 在 scene 构建后、第一次学习前被旧 schema-3 train-bank physics contract 正确拒绝；
   A claim/log 保留，B/C/D 未创建，没有 checkpoint。新增严格 no-clobber 重绑定 consumer：只允许一个
   冻结 helper 的加法式源码变化，要求所有问题数组 raw bytes 不变、metadata 精确四 leaf，并在目标
