@@ -28,29 +28,28 @@
 ## 当下状态与团队 focus
 
 现在围绕“几天内做出可录屏、可解释的好球”并行推进三条最短链：把 Franco 五种用途动作和横移老师
-做成安全可训练候选；用一张卡四个不同因果格修正现役 policy 的拍面反号；把胜出 policy 连同我们的
+做成安全可训练候选；把四个不同因果格先跨卡铺开以修正现役 policy 的拍面反号；把胜出 policy 连同我们的
 planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行为以厂商 MuJoCo 为准。
 
 - **最新可分享结果：** 反手拉 B/C 的 rank-0 主选已在 Pod1 CPU-only runtime 完成 exact 整轨
   SE(2) 实体化；后续 schema-2/FK 源码门也已进入 `main` 并通过 `17` 项专项回归。逐资产 no-write
   runtime inspection 又在 exact donor/私有 PKL 下通过：B/C 分别 `91/98` 帧，未写输出。一次性 consume
-  activation 仍待 review/合入，schema-2 物化、L0/vendor L1/桌网/动力学仍未跑，证书仍为 `0`。
+  runner/activation 已进入 `main` 并通过 latest-main 全回归；Pod 网络恢复后仍须先重验 absent 账本再
+  各执行一次，因此 schema-2 物化、L0/vendor L1/桌网/动力学仍未跑，证书仍为 `0`。
   高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
-  canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。它们现在只解锁独立 exact GMR prereg，
-  还不是“动作会打球”。
-- **当前运行态：** 2026-07-14 04:31 CST 只读审计时，Pod1/GPU0 的非击球臂单-seed 机制配对有两条
-  exact trainer。A0（保留左臂模仿对照）PID=PGID `1811464`，已到 `531/1001` 并写出 `model_500.pt`；
-  先前 `model_200.pt` 的文件名/内嵌迭代、`1,762,717` 个 finite tensor、fresh lineage=`1` 与
-  hard-contract SHA `14ef410b...29f1` 已绑定。A1（只解除左非击球臂模仿）经一次性
-  continuation 的 `validate-runtime` 全绿后成功启动，PID=PGID `1816234`、Kit ready、hard-contract SHA
-  `c85b52a...6b146`，当时到 `73/1001`、尚未写出 `model_100.pt`，不能作效果判断。GPU0 util `93%`、
-  约 `11.6 GiB`；Pod1 GPU1/2 与 Pod2 三卡无 compute，RAM/swap 正常。A0 保持 untouched，judge 未启动。
-  external
-  plan 另有一个只读相对路径 bug，在 write/claim 前失败且不影响已成功的绝对路径 runtime/launch；已被
-  recovery/launch/runtime 账绑定的 v1r1 bytes 不得修改，只能后续开新版本修。当前资源上限由 Franco
+  canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。exact GMR runtime source gate 也已进入
+  `main` 并通过全回归；Pod 上的 `inspect/consume` 尚未执行，所以还不是“动作会打球”。
+- **当前运行态：** 最近一次成功的 Pod1 只读审计为 2026-07-14 05:49 CST。GPU0 的非击球臂
+  single-seed 机制配对仍有两条 exact trainer：A0（保留左臂模仿对照）PID=PGID `1811464` 已接近
+  `1001` 终档，A1（只解除左非击球臂模仿）PID=PGID `1816234` 当时还约有 `33` 分钟；两者日志均未见
+  fatal。此后 Pod1/Pod2 的握手超时只记为 `UNKNOWN`，不能把 A0 写成已终档、把 A1 写成失败，二者都
+  禁止重启或重发。C2 已自然终档并通过 checkpoint finite/iteration/lineage/contract 取证；旧 verifier
+  把 `[1.0,-1.0]` 错按整数比较的假拒绝已由新的四文件 external mini-tree 修复并合入 `main`。D2 是
+  当前唯一可新增点火的 trainer，固定 Pod1/GPU2；只有重新连通后重验 C2、D2 absent、GPU2 与 Kit，且
+  `static-validate → plan → validate-runtime → attest` 全绿，才允许一次性启动，绝不重跑 C2。Franco
   定为 Pod1 每卡 `4` 个我们的 trainer、Pod2 每卡 `3` 个，为 Yikang 的最多一张卡留动态余量。新增任务
-  先跨六张可用 GPU 各放一条，再开始第二/第三轮，Pod1 才有第四轮；下一格是 Pod1 GPU1 的 C2、GPU2
-  的 D2，二者须先过 main/source/runtime 门。空槽只给已过前置门且有预注册早判的不同机制，不复制失败
+  先跨六张可用 GPU 各放一条，再开始第二/第三轮，Pod1 才有第四轮。空槽只给已过前置门且有预注册
+  早判的不同机制，不复制失败
   seed，也不拿未过动作安全门的任务凑数。
   signed-face exam bank 已过 E2：371 题 old/new replay 逐字节一致并发布新 bank/report；K100 paper
   也已从 exact bank 物化为 100 个唯一题、正反手各 50 的 schedule 和 paper-only activation。它尚未绑定
@@ -61,8 +60,9 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   与 Franco 主线对照，不能用录制版本号直接晋级。
 - **Yikang focus：** 历史 Gate3 谱系复核与独立 physics/reference oracle；现有证据不替代当前 179-D
   planner-policy tuple 的 vendor runtime 行为。
-- **Codex 执行：** exact 动作 lineage、B/C 每类只选一个候选的证书、S0/M0 exact GMR 前置、C2/D2
-  provenance L1、A0/A1 早判、signed-face checkpoint/judge execution contract 和 main 账本；
+- **Codex 执行：** exact 动作 lineage、B/C 每类只选一个候选的证书、S0/M0 exact GMR 前置、D2
+  provenance L1 与 A2/B2 热启动 source gate、A0/A1 早判、signed-face checkpoint/judge execution contract
+  和 main 账本；
   每通过一层就合 main，不把多个未验层绑成一个大任务。
 
 ## 1. 当前一套训练是怎样完整跑起来的
@@ -362,17 +362,18 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 
 ### 动作主线
 
-- **[1｜P0] Franco 五动作 + 横移老师。** 责任人 franco；执行者 Codex；下一证据：物化反手拉 B/C
-  proposal 并补 schema-2/L0/L1/桌网/动力学证书，同时把已 finite 的高点拍压 S0 与横移 M0 接到 exact
-  canonical-beta/GMR consumer。挡、拉、高点拍压各用自己的题族；先每个候选一个因果格，不把候选当
+- **[1｜P0] Franco 五动作 + 横移老师。** 责任人 franco；执行者 Codex；下一证据：一次性物化反手拉
+  B/C 的 schema-2/FK，并补 L0/L1/桌网/动力学证书；同时一次性完成已 finite 的高点拍压 S0 与横移 M0
+  exact GMR，再进入各自 schema-2。挡、拉、高点拍压各用自己的题族；先每个候选一个因果格，不把候选当
   seed 重复。只有离线证书通过后才分配 RL GPU。
   [旧动作实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)；
   [新动作设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md)
 
 ### 尺子与阶段 1
 
-- **[2｜P0] 拍面正反与解析判分。** 责任人 franco；执行者 Codex；signed source gate 已进 main；
-  下一证据是用一个 seed 跑“热启动/从零 × 线性引导关/开”四个机制单元到相对 checkpoint
+- **[2｜P0] 拍面正反与解析判分。** 责任人 franco；执行者 Codex；signed source gate 与 C2 终档已进
+  main 证据链；下一证据是完成 D2 L1 与 fresh C/D 成对账，再用一个 seed 跑“热启动/从零 × 线性引导
+  关/开”四个机制单元到相对 checkpoint
   `+200/+500/+1000`。只有胜者连同匹配对照才解锁第二 seed，不再给已失败配方复制四 seed。
   [量尺实验](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)；
   [机制漏斗](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)
