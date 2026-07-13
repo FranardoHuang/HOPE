@@ -1,0 +1,282 @@
+{
+  "schema_version": 1,
+  "ledger_id": "phase1-signed-face-v6-v8-boot-root-cause-readonly-20260714-v1",
+  "status": "failure_boundary_narrowed_root_cause_not_proven_retry_forbidden",
+  "recorded_local_date": "2026-07-14",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "scope": "Read-only postmortem of the archived Pod1 signed-face v6 and v8 L1 D boot timeouts; no Pod mutation, launch, signal, training, judge, deployment or hardware action",
+  "evidence_receipts": {
+    "diagnosis_report": {
+      "local_restore_path": "vendor_assets/phase1_signed_face_boot_root_cause_20260714/pod1_v6v8_readonly_diagnosis_20260714.md",
+      "bytes": 5955,
+      "sha256": "b54cb06a50bfa5f0994b1768beb995577b03a360eb4dfaefca13959c1c2d76af"
+    },
+    "inventory": {
+      "local_restore_path": "vendor_assets/phase1_signed_face_boot_root_cause_20260714/pod1_v6v8_attempt1_inventory_20260714.txt",
+      "bytes": 157048,
+      "sha256": "b18935129364cb342a4d3989caf56821bc0f5cb3dbae79c9a409e26d0e21cc1d"
+    },
+    "exact_archive": {
+      "local_restore_path": "vendor_assets/phase1_signed_face_boot_root_cause_20260714/pod1_v6v8_exact_evidence_20260714.tar",
+      "bytes": 8509440,
+      "entry_count": 47,
+      "sha256": "29dabc9e23fc7f4d4f1713a75bb9bc3be20009b19f90f51838a439d65e0283a6"
+    },
+    "system_snapshot": {
+      "local_restore_path": "vendor_assets/phase1_signed_face_boot_root_cause_20260714/pod1_v6v8_attempt3_system_20260714.txt",
+      "bytes": 60056,
+      "sha256": "02b78e2d4db982145e57d9bcbe82768799b2756b21636a031052c7a1b30d1e25"
+    }
+  },
+  "collection_contract": {
+    "successful_read_only_ssh_connections": 3,
+    "remote_file_written": false,
+    "remote_signal_sent": false,
+    "process_started_or_restarted": false,
+    "hardware_command_sent": false,
+    "audit_observed_utc": [
+      "2026-07-13T18:18:10Z",
+      "2026-07-13T18:22:48Z"
+    ]
+  },
+  "facts": {
+    "classification": "observed_or_byte_recomputed",
+    "run_shape": {
+      "v6": {
+        "a_last_iteration": "13824/13825",
+        "b_last_iteration": "13824/13825",
+        "c_last_iteration": "24/25",
+        "d_ready_utc_present": false,
+        "d_runtime_verified_present": false,
+        "d_hard_contract_present": false,
+        "d_learning_iteration_present": false
+      },
+      "v8": {
+        "a_last_iteration": "13824/13825",
+        "b_last_iteration": "13824/13825",
+        "c_last_iteration": "24/25",
+        "d_ready_utc_present": false,
+        "d_runtime_verified_present": false,
+        "d_hard_contract_present": false,
+        "d_learning_iteration_present": false
+      }
+    },
+    "table_asset": {
+      "v6_path": "/workspace/codexschema/nohope_signed_face_rescue_epoch1_50c49e5/hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/table_usd/table/configuration/ping_pong_table_urdf_base.usd",
+      "v8_path": "/workspace/codexschema/nohope_signed_face_rescue_claim_72418ff/hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/table_usd/table/configuration/ping_pong_table_urdf_base.usd",
+      "both_regular_files": true,
+      "bytes_each": 683433,
+      "v6_sha256": "c6fc99a804d60ea6db90931bb8edb3d324ed63fec767ffe6ced424ccf4ad2996",
+      "v8_sha256": "c6fc99a804d60ea6db90931bb8edb3d324ed63fec767ffe6ced424ccf4ad2996",
+      "byte_identical": true
+    },
+    "d_comparison": {
+      "normalized_training_argv_equal": true,
+      "v6_argv_token_count": 93,
+      "v8_argv_token_count": 94,
+      "only_versioned_differences": [
+        "run_name",
+        "v8_training_launch_claim_sha256"
+      ],
+      "recipe_fields_equal": [
+        "reward",
+        "seed",
+        "num_envs",
+        "source_assets",
+        "training_flags"
+      ],
+      "v6": {
+        "started_utc": "2026-07-13T14:19:27Z",
+        "pid": 1759428,
+        "pgid": 1759428,
+        "boot_timeout_s": 900,
+        "launch_state": {
+          "bytes": 3687,
+          "sha256": "4e1ab699aa3a6763a74c9680beba7b55cc3fb23675edb58f5282acd04497f350"
+        },
+        "launch_contract": {
+          "bytes": 9467,
+          "sha256": "f6dd2fd222ea3f67a65c7c5b2e1ea74ea5f5725a5546b601c4691b8786de0b63"
+        },
+        "run_log": {
+          "bytes": 34867,
+          "sha256": "baa02f52b645b29ec33a49c1117446591f8e3bfaf334d31cc7b7cb0decb93610"
+        },
+        "kit_log": {
+          "archive_path": "workspace/hope_isaac_venv/lib/python3.10/site-packages/omni/logs/Kit/Isaac-Sim/4.5/kit_20260713_141928.log",
+          "bytes": 738783,
+          "sha256": "5fd4472fb928a5efb09b9fdd480c954d1ee8f6eda3ca93759a0e297ea70d9dad",
+          "last_elapsed_ms": 11649,
+          "last_semantic_operation": "load_table_usd",
+          "physx_context_seen": false
+        }
+      },
+      "v8": {
+        "started_utc": "2026-07-13T17:22:19Z",
+        "pid": 1782834,
+        "pgid": 1782834,
+        "boot_timeout_s": 900,
+        "terminal_phase": "locked_boot",
+        "exit_code": 124,
+        "signal_scope": "exact_pgid",
+        "automatic_retry_forbidden": true,
+        "launch_state": {
+          "bytes": 3783,
+          "sha256": "80939e6df8184590df121f5edbf9f2de9188116438b6b328abd63152cdd2c90e"
+        },
+        "launch_contract": {
+          "bytes": 13169,
+          "sha256": "5649884dea8e1da690b51290a2eda583bca793ba36630883d48a350c2d192de5"
+        },
+        "run_log": {
+          "bytes": 34731,
+          "sha256": "5b2c91ac81963c1cef337ecdc3415e06fcfba4c410e21d72e721b8f3a530d43e"
+        },
+        "terminal_failure": {
+          "bytes": 4785,
+          "sha256": "0e5bb13b072c2c1e029a93e9d2d037adbfc1d74da9e1c9450acea333173f98a9"
+        },
+        "kit_log": {
+          "archive_path": "workspace/hope_isaac_venv/lib/python3.10/site-packages/omni/logs/Kit/Isaac-Sim/4.5/kit_20260713_172220.log",
+          "bytes": 736234,
+          "sha256": "1df5a336356da57806bf89fc03695de5ec6c7a6de4ba573891e643c37d6219e7",
+          "last_elapsed_ms": 10505,
+          "last_semantic_operation": "load_table_usd",
+          "physx_context_seen": false
+        }
+      }
+    },
+    "adjacent_c_boundary_controls": {
+      "v6": {
+        "kit_log_bytes": 758160,
+        "kit_log_sha256": "a1ae2ec6dcf90cdca023b6f6617e7579eb22f5edfd4b7d66d4750cf2a4495550",
+        "table_load_elapsed_ms": 11492,
+        "physx_context_elapsed_ms": 13831,
+        "table_to_physx_ms": 2339,
+        "last_iteration": "24/25",
+        "d_started_while_c_still_active": true
+      },
+      "v8": {
+        "kit_log_bytes": 758385,
+        "kit_log_sha256": "11afcb550a4f8f8b0f9ba9e82d9bba29b8cff0b487239e173a7bf36e8e31028d",
+        "table_load_elapsed_ms": 13112,
+        "physx_context_elapsed_ms": 16143,
+        "table_to_physx_ms": 3031,
+        "last_iteration": "24/25",
+        "clean_shutdown_utc": "2026-07-13T17:21:35Z",
+        "d_start_after_c_clean_shutdown_s": 44,
+        "serial_nonconcurrent_d_reproduction": true
+      }
+    },
+    "postmortem_capacity_snapshot": {
+      "temporal_scope": "postmortem_not_historical_failure_instant",
+      "trainer_worker_judge_kit_match_count": 0,
+      "visible_gpu_count": 3,
+      "gpu_utilization_percent_each": [
+        0,
+        0,
+        0
+      ],
+      "gpu_memory_mib_each": [
+        0,
+        0,
+        0
+      ],
+      "host_memory_total_tib": 1.0,
+      "host_memory_available_gib": 976,
+      "swap_bytes": 0,
+      "workspace_free_gib": 362,
+      "root_and_tmp_free_gib": 18,
+      "dev_shm_free_gib": 201,
+      "filesystem_inode_use_percent_max": 2,
+      "tmp_isaaclab_accumulated_gib": 8.8,
+      "kit_lock_regular_empty": true,
+      "kit_lock_holder_count": 0
+    },
+    "carbonite_shared_memory": {
+      "residual_pid_pairs_observed": [
+        1758211,
+        1759428,
+        1782834
+      ],
+      "mapped_meaning": {
+        "1758211": "v6_B_post_terminal_exact_pgid_cleanup",
+        "1759428": "v6_D_boot_timeout_cleanup",
+        "1782834": "v8_D_boot_timeout_cleanup"
+      },
+      "recent_clean_shutdown_cells_have_matching_residue": false,
+      "causal_conclusion": "unknown_correlation_only"
+    },
+    "non_discriminating_warnings": [
+      "cuda_bad_state_for_nonselected_devices",
+      "missing_libGLU.so.1",
+      "urdf_axis_warning"
+    ],
+    "kernel_evidence": {
+      "dmesg_readable": false,
+      "dmesg_error": "Operation not permitted",
+      "filtered_journal_nvrm_xid_oom_killed_segfault_match_count": 0,
+      "absence_proves_no_historical_kernel_event": false
+    }
+  },
+  "inferences": {
+    "classification": "reasoned_not_directly_observed",
+    "failure_boundary": {
+      "claim": "Both D processes stalled while composing or loading the table USD reference before the PhysX context and articulation initialization boundary.",
+      "confidence": "high",
+      "root_cause_proven": false
+    },
+    "learning_and_reward": {
+      "claim": "The evidence does not support PPO learning, signed-face reward, or D recipe failure because neither D reached a hard contract or learning iteration.",
+      "confidence": "high",
+      "root_cause_proven": false
+    },
+    "concurrency": {
+      "claim": "Concurrent earlier cells are not required for reproduction because v8 D failed 44 seconds after C clean shutdown.",
+      "confidence": "high",
+      "root_cause_proven": false
+    },
+    "capacity": {
+      "claim": "Persistent disk, inode, RAM, GPU-memory and shared-memory capacity exhaustion is disfavored by the postmortem snapshot.",
+      "confidence": "medium",
+      "historical_transient_excluded": false,
+      "root_cause_proven": false
+    },
+    "strongest_hypothesis_class": {
+      "claim": "Repeated fourth-process or accumulated Pod-state Kit scene-composition failure is the strongest current hypothesis class.",
+      "confidence": "medium",
+      "candidate_axes": [
+        "launch_ordinal",
+        "fresh_process_and_ipc_namespace",
+        "carbonite_lifetime_cleanup",
+        "table_usd_to_physx_transition"
+      ],
+      "root_cause_proven": false
+    }
+  },
+  "unknowns": {
+    "classification": "not_observed_or_not_identified",
+    "items": [
+      "No live D process remained for stack, proc, open-file, syscall or debugger inspection.",
+      "Kernel dmesg was unreadable; an absent filtered journal match does not exclude an historical transient.",
+      "Carbonite shared-memory residue may be a consequence of forced cleanup rather than a cause.",
+      "The evidence does not separate process-count state accumulation, a table-USD or PhysX race, filesystem delay, or transient driver state.",
+      "Control-root terminal ledgers were not collected because their paths were unknown before the final allowed SSH connection."
+    ]
+  },
+  "decision": {
+    "boot_root_cause_closed": false,
+    "automatic_retry_authorized": false,
+    "recipe_identical_retry_authorized": false,
+    "training_authorized": false,
+    "l1_activation_materialized": false,
+    "l2_authorized": false,
+    "judge_authorized": false,
+    "formal_score_authorized": false,
+    "deployment_authorized": false,
+    "hardware_authorized": false,
+    "next_step": "review_design_only_d_first_vs_ordinal4_fresh_namespace_diagnostic_prereg",
+    "diagnostic_prereg_path": "configs/phase1_signed_face_boot_diagnostic_prereg_20260714.json"
+  }
+}

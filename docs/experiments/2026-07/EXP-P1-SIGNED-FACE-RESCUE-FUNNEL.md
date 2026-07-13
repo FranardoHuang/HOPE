@@ -1,7 +1,7 @@
 # EXP-P1-SIGNED-FACE-RESCUE-FUNNEL：有符号拍面修复后的单-seed 机制漏斗
 
-状态：`v8_abc_terminal_d_second_precontract_boot_timeout_retry_stopped`
-证据等级：E3 partial（v8 的 A/B/C 串行前序已终档；第四格 D 在 hard contract 前再次 boot timeout）
+状态：`v6_v8_d_same_table_to_physx_boundary_root_cause_open_retry_stopped`
+证据等级：E3 partial（两次 D 都停在同一 table USD→PhysX 边界；根因尚未证明、retry 仍停止）
 人类负责人：franco  
 执行者：Codex  
 全局优先级：只继承 [`NOW` 队列第 1 项](../../NOW.md#统一工作队列唯一优先级账本)，本页不另建队列。
@@ -254,6 +254,42 @@ failure/state/launch-contract/run-log SHA 分别为 `0e5bb13b...f98a9`、`80939e
 这已是继旧 v6 D 之后第二次独立的 D pre-contract Kit boot timeout。没有新的根因证据前，自动换名或
 配方不变重试被拒绝；下一步是 boot root-cause，不是继续消耗 GPU。v8 没有四格 activation，L2、judge、
 第二 seed、部署和真机仍全部 false。最终只读审计为 Pod1 `0` trainer/worker/judge、三张 GPU 无 compute。
+
+### 只读根因审计：边界已收窄，根因仍开放
+
+三次低频只读 SSH 的报告、完整八个 run/Kit 日志归档、inventory 和 system snapshot 已由
+[`phase1_signed_face_boot_root_cause_results_20260714.json`](../../../configs/phase1_signed_face_boot_root_cause_results_20260714.json)
+逐字节绑定；四份外层证据 SHA 分别为 `b54cb06a...76af`、`b1893512...c1d`、
+`29dabc9e...3a6`、`02b78e2d...e25`。审计没有远端写入、signal、进程启动或真机动作。
+
+事实层结论比“卡在 Starting simulation”更窄：v6/v8 D 的 Kit log 都以加载
+`ping_pong_table_urdf_base.usd` 为最后一行，elapsed 分别为 `11.649/10.505 s`，均未看到随后
+`Physics using context`。两 worktree 的 table USD 都是 regular file，均为 `683,433` bytes、SHA
+`c6fc99a8...996`。相邻 C 用同一份各自 table bytes 从该行到 PhysX 只需 `2.339/3.031 s`，并都训练到
+`24/25`；v8 D 还在 C clean shutdown 后 `44 s` 才启动，因此并发的 A/B/C 不是复现所必需。两份 D
+argv 去掉 v8 新增的 launch-claim provenance 并规范化 versioned `run_name` 后逐 token 相同；这不是
+PPO、signed-face Reward 或已进入学习后的失败。
+
+审计时三张 GPU 均为 `0%/0 MiB`、host available memory `976 GiB`、`/workspace` free `362 GiB`、
+`/dev/shm` free `201 GiB`，所以**持续容量饱和**不符合事后快照；但这不是故障当时的采样，不能排除
+瞬时 driver/filesystem stall。v6 B、v6 D、v8 D 的 PID 对应 Carbonite shared-memory 残留只证明异常或
+精确 PGID cleanup 后存在相关性，不证明其导致卡住。`dmesg` 因权限被拒，journal 无匹配也不能证明
+历史 kernel 事件不存在。
+
+当前最强但仍属推断的类别是“第四个 Kit process 或累积 Pod state 在 table composition→PhysX 交界
+触发 hang”。新的
+[`phase1_signed_face_boot_diagnostic_prereg_20260714.json`](../../../configs/phase1_signed_face_boot_diagnostic_prereg_20260714.json)
+只登记一个 design-only `2×2`：D-first 对 ordinal-4，以及 host IPC 对每进程 private IPC namespace；
+后者只能靠 namespace teardown 回收本进程 Carbonite 对象，禁止 unlink host shared memory。probe 必须
+scene-boot-only，在第一条 PhysX marker 后退出，不得进入 learning/checkpoint。该设计没有 launcher，
+所有 execution/Pod/process/signal/training/retry/judge/deploy/hardware 权限均为 false；须另行审阅源码、
+静态测试和明确授权后才可运行。
+
+本次账本验证命令为
+`pytest -q tests/test_phase1_signed_face_boot_root_cause_ledger.py`（`8 passed`，含本机恢复证据的实际
+size/SHA 与 tar 47-entry 复算）以及最新 main 基线上的 `pytest -q tests`（`722 passed, 9 skipped`）。裸 `pytest -q`
+会收集 vendor/Isaac 子树并因本机缺 `zmq`、`torch`、`hydra` 在 collection 阶段失败；这不是本次账本
+回归失败，也没有以安装依赖或修改环境掩盖。
 
 ### 父合同扩展边界
 

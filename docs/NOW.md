@@ -39,7 +39,10 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
 - **当前运行态：** Pod1 最终只读审计为 `0` trainer/worker/judge，三张 GPU 无 compute。foreign v8 的
   A/B/C 串行前序已终档；D 是第四格，900 秒内再次未到 hard contract/runtime verified，locked wrapper
   只清理本臂 exact PGID 并返回 124。这是继旧 v6 D 后第二次 pre-contract Kit boot timeout，已停止
-  自动重试并转入 boot 根因。GPU 不要求用无新因果信息的重复 seed 填满，机制漏斗和动作专属门优先。
+  自动重试。只读根因账现把两次失败都收窄到 identical table USD 的 load→PhysX 交界；相邻 C 只需
+  `2.339/3.031 s` 越过，但第四进程、Carbonite residue、driver/filesystem 尚未分离。下一步仅有
+  D-first/ordinal-4 × host/private IPC 的 scene-only 诊断设计，尚无运行授权。GPU 不要求用无新因果
+  信息的重复 seed 填满，机制漏斗和动作专属门优先。
   signed-face exam bank 已过 E2：371 题 old/new replay 逐字节一致并发布新 bank/report；但新 bank 绑定的
   immutable schedule/paper activation 尚无，所以 L2/judge 仍阻断。
 - **Franco focus：** 五种动作的用途、动作专属来球题族、空挥视觉锚点和横移终态站距语义；反手拉

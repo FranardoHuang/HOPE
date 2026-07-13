@@ -1139,6 +1139,13 @@ exact-PGID wrapper cleanup 后 rc=124。它是继 v6 D 后第二次独立 pre-co
 retry 已停止，必须先做 boot root-cause。v8 没有四格 activation，且 L2/judge/第二 seed 均为 false，
 所以不能进入 Isaac/MuJoCo 同卷，更不能成为 Gate3/Gate3B 或部署证据。G06 保持 `Partial`。
 
+只读 postmortem 现已证明两个 D 的最后 Kit 语义操作都是加载 byte-identical table USD，且都未进入
+PhysX context；相邻 C 则分别在 `2.339/3.031 s` 越过同一边界。它只把 failure boundary 从泛称的
+“boot timeout”收窄，未证明第四进程、Carbonite cleanup、driver 或 filesystem 中的任一项是根因。
+结果 ledger 明确把 fact/inference/unknown 分开；`dmesg` 不可读，共享内存残留只记 correlation。
+计划中的 D-first/ordinal-4 与 fresh private IPC 对照仍是 [design-only prereg](../../configs/phase1_signed_face_boot_diagnostic_prereg_20260714.json)，
+不能运行训练、不能生成 L1 activation，也不能授权 Isaac/MuJoCo 判卷。G06 保持 `Partial`。
+
 ### 2026-07-13 MuJoCo trainer preflight 红队：授权安全，源码门暂缓
 
 独立复核确认 `codex/mujoco-training-preflight@6e5fce3` 的 focused `63 passed`、顶层

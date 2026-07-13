@@ -29,6 +29,15 @@
   攻击复现与负测；未运行 MuJoCo/Isaac/vendor/Gate3/真机，G04/G06 继续 `Partial`。见
   [集成卷宗](experiments/2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md)。
 
+- v6/v8 D 两次 pre-contract timeout 的三次低频只读审计已机器入账：两份 D 都以加载 byte-identical
+  table USD（`683,433` bytes，SHA `c6fc99a8...996`）为 Kit 最后一行且未到 PhysX；相邻 C 在
+  `2.339/3.031 s` 越过同一边界，v8 D 在 C clean shutdown 后 `44 s` 才启动。事后 GPU/RAM/disk/shm
+  非饱和只排弱持续容量耗尽；Carbonite 残留只记相关，`dmesg` 未获权限，根因仍未证明。已冻结
+  [结果 ledger](../configs/phase1_signed_face_boot_root_cause_results_20260714.json)与 design-only
+  `D-first/ordinal-4 × host/private IPC` [诊断 prereg](../configs/phase1_signed_face_boot_diagnostic_prereg_20260714.json)；
+  无 Pod/process/signal/training/retry/judge/部署/真机权限。专项 `8 passed`，最新 main 基线 host
+  `tests/` 回归 `722 passed, 9 skipped`。
+
 - 反手拉 B/C 的 rank-0 主选已各有独立 no-clobber 整轨站位实体化 prereg（SHA
   `e016ca74...51aee` / `27f938cd...9d454`）和 restricted-pickle consumer
   `21ebbe68...87375`。consumer 只做冻结的 proper [SE(2)](DEFINITIONS.md)，验证 xyzw 左乘、

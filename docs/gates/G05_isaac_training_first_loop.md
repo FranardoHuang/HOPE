@@ -1514,3 +1514,13 @@ runtime verified、learning iteration 或 checkpoint。locked wrapper 只对 `PI
 cleanup 并返回 124；日志无 NaN/Inf/Traceback/OOM/malloc/Killed。因为这已是继 v6 D 后第二次独立
 pre-contract timeout，自动 retry 已停止，转入 boot 根因。没有四格 activation；L2/judge/第二 seed
 仍固定 false，所以 G05 仍为 `Partial`。操作仍见上面的 signed-face 漏斗运行手册。
+
+后续三次只读审计把 v6/v8 D 的共同失败点收窄到 identical table USD 的 load→PhysX 交界；两份 D
+normalized argv 除 versioned run name 和 v8 launch-claim provenance 外相同，且都从未出现 hard contract
+或 learning。相邻 C 分别在 `2.339/3.031 s` 越过该边界，v8 D 又是在 C clean shutdown 后 `44 s`
+启动，所以这仍不是 reward/seed 学习结论，也不能用配方相同 retry 获得新信息。事后容量非饱和只
+降低持续资源耗尽的可能性；Carbonite residue、瞬时 driver/filesystem stall 与 ordinal-4 累积状态仍未
+分离。机器账见 [boot 结果 ledger](../../configs/phase1_signed_face_boot_root_cause_results_20260714.json)。
+下一份 `D-first × ordinal-4`、`host IPC × private IPC` 的 scene-only 诊断只有
+[design-only prereg](../../configs/phase1_signed_face_boot_diagnostic_prereg_20260714.json)，无 launcher/Pod/
+signal/training 权限。G05 继续 `Partial`。

@@ -230,6 +230,18 @@ missing or extra files fail closed. Restore steps are in
 [`setup_local_sync.md`](../operations/setup_local_sync.md). This proves asset byte closure only,
 not Isaac/MuJoCo model equivalence or behavior; G04 remains `Partial`.
 
+## Audit update 2026-07-14: repeated Kit boundary is table USD load before PhysX
+
+The byte-bound v6/v8 postmortem narrows both failed D launches to the same Isaac scene boundary:
+each Kit log ends on loading the same 683,433-byte table USD (SHA-256 `c6fc99a8...996`) and never
+prints the following PhysX-context line. The adjacent C controls cross the same boundary in
+2.339/3.031 seconds and reach iteration 24. This is evidence about scene composition order, not a
+model, reward or learning result. Postmortem capacity was ample, but historical transient driver or
+filesystem delay remains unknown; Carbonite shared-memory residue is correlation, not a proven
+cause, and `dmesg` was unreadable. The tracked [result ledger](../../configs/phase1_signed_face_boot_root_cause_results_20260714.json)
+and [design-only diagnostic prereg](../../configs/phase1_signed_face_boot_diagnostic_prereg_20260714.json)
+keep all launch and training permissions false. G04 remains `Partial`.
+
 ## Audit update 2026-07-13: S0/M0 exact donor canonical-beta materialization
 
 The two runtime handoffs have since completed at exact `4,970/9,242` bytes and SHA-256

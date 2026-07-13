@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "manifest_id": "phase1-signed-face-kit-boot-diagnostic-design-20260714-v1",
+  "status": "design_only_not_authorized_not_materialized",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "purpose": "Separate D cell identity from fourth-process accumulated state and test whether a fresh per-process IPC namespace with runtime-owned Carbonite teardown changes the table-USD-to-PhysX boot boundary.",
+  "evidence_input": {
+    "result_ledger_path": "configs/phase1_signed_face_boot_root_cause_results_20260714.json",
+    "result_ledger_id": "phase1-signed-face-v6-v8-boot-root-cause-readonly-20260714-v1",
+    "observed_failure_boundary": "table_usd_load_before_physx_context",
+    "historical_reproductions": 2
+  },
+  "design": {
+    "factorial": "2x2",
+    "factors": {
+      "launch_ordinal": [
+        "D_first_process",
+        "D_fourth_process_after_exact_A_B_C_scene_boot_preludes"
+      ],
+      "process_namespace_and_cleanup": [
+        "fresh_process_host_ipc_no_cleanup_mutation",
+        "fresh_process_private_ipc_namespace_runtime_owned_carbonite_teardown"
+      ]
+    },
+    "cells": [
+      {
+        "cell_id": "O1_H",
+        "launch_ordinal": 1,
+        "prelude_cells": [],
+        "ipc_namespace": "host",
+        "host_shared_memory_mutation_allowed": false
+      },
+      {
+        "cell_id": "O4_H",
+        "launch_ordinal": 4,
+        "prelude_cells": [
+          "A_scene_boot_only",
+          "B_scene_boot_only",
+          "C_scene_boot_only"
+        ],
+        "ipc_namespace": "host",
+        "host_shared_memory_mutation_allowed": false
+      },
+      {
+        "cell_id": "O1_I",
+        "launch_ordinal": 1,
+        "prelude_cells": [],
+        "ipc_namespace": "private_per_process",
+        "host_shared_memory_mutation_allowed": false
+      },
+      {
+        "cell_id": "O4_I",
+        "launch_ordinal": 4,
+        "prelude_cells": [
+          "A_scene_boot_only",
+          "B_scene_boot_only",
+          "C_scene_boot_only"
+        ],
+        "ipc_namespace": "private_per_process",
+        "host_shared_memory_mutation_allowed": false
+      }
+    ],
+    "probe_scope": {
+      "scene_boot_only": true,
+      "success_marker": "first Physics using context line after exact table USD load",
+      "learning_iteration_allowed": false,
+      "checkpoint_write_allowed": false,
+      "judge_allowed": false,
+      "same_table_asset_required": true,
+      "same_source_runtime_and_scene_contract_required": true,
+      "unique_no_clobber_probe_id_required": true,
+      "fresh_os_process_per_probe_required": true,
+      "exact_process_supervision_required": true,
+      "host_carbonite_unlink_forbidden": true,
+      "broad_signal_forbidden": true
+    },
+    "required_measurements": [
+      "source_runtime_scene_and_table_sha256",
+      "process_and_process_group_identity",
+      "process_ordinal_and_prelude_terminal_receipts",
+      "table_load_elapsed_ms",
+      "physx_context_elapsed_ms_or_timeout",
+      "owned_ipc_namespace_identity",
+      "carbonite_objects_before_after_and_owner",
+      "gpu_ram_disk_inode_dev_shm_snapshot_before_each_probe",
+      "kit_log_sha256_and_terminal_receipt"
+    ],
+    "decision_rules": {
+      "ordinal_supported": "At both namespace levels D-first reaches PhysX while ordinal-4 fails at the frozen boundary.",
+      "namespace_cleanup_supported": "At the same ordinal host-IPC fails while private-IPC reaches PhysX, with all other bound inputs equal.",
+      "interaction_supported": "Only ordinal-4 host-IPC fails while ordinal-4 private-IPC reaches PhysX and both D-first cells reach PhysX.",
+      "cell_identity_supported": "D fails as first process in both namespace levels while A/B/C exact scene probes reach PhysX under matched inputs.",
+      "inconclusive": "Any source, asset, scene, supervisor, probe-order, capacity or receipt mismatch; or any outcome not uniquely classified by the rules above."
+    }
+  },
+  "prerequisites_before_execution_review": [
+    "Materialize a reviewed scene-boot-only harness that exits immediately after the first PhysX context marker.",
+    "Bind exact source, Python, Isaac/Kit runtime, A3 asset tree, table USD and scene configuration bytes.",
+    "Use separate fresh container or equivalent identical base snapshot for each factorial cell.",
+    "Prove private IPC cleanup is namespace teardown only and cannot unlink host or another process's shared memory.",
+    "Use reviewed exact-PGID or pidfd supervision with no broad kill path.",
+    "Predeclare no-clobber paths and preserve every timeout log before any later cell.",
+    "Obtain a separate explicit execution approval after source and static tests are reviewed."
+  ],
+  "authorization": {
+    "execution_authorized": false,
+    "pod_access_authorized_by_this_manifest": false,
+    "process_launch_authorized": false,
+    "signal_authorized": false,
+    "training_authorized": false,
+    "retry_training_authorized": false,
+    "judge_authorized": false,
+    "deployment_authorized": false,
+    "hardware_authorized": false
+  }
+}

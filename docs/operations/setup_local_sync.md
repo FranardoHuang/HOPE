@@ -239,6 +239,26 @@ Restore the accepted exam E2 bank and `rebind_report.json` together under
 `configs/phase1_signed_face_exam_bank_rebind_results_20260714.json`. The report must remain the completion
 marker. This root does not contain the still-missing immutable schedule or paper activation.
 
+### Signed-face v6/v8 read-only boot postmortem evidence
+
+The tracked result ledger
+`configs/phase1_signed_face_boot_root_cause_results_20260714.json` depends on four ignored local
+postmortem files. They are preserved under the Dropbox-backed ignored `vendor_assets/` root rather
+than ephemeral `/private/tmp`. Restore them at the exact repository-relative no-clobber paths below;
+verify size and SHA before using the ledger to reproduce any byte-level statement:
+
+| Local path | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `vendor_assets/phase1_signed_face_boot_root_cause_20260714/pod1_v6v8_readonly_diagnosis_20260714.md` | 5,955 | `b54cb06a50bfa5f0994b1768beb995577b03a360eb4dfaefca13959c1c2d76af` |
+| `vendor_assets/phase1_signed_face_boot_root_cause_20260714/pod1_v6v8_attempt1_inventory_20260714.txt` | 157,048 | `b18935129364cb342a4d3989caf56821bc0f5cb3dbae79c9a409e26d0e21cc1d` |
+| `vendor_assets/phase1_signed_face_boot_root_cause_20260714/pod1_v6v8_exact_evidence_20260714.tar` | 8,509,440 | `29dabc9e23fc7f4d4f1713a75bb9bc3be20009b19f90f51838a439d65e0283a6` |
+| `vendor_assets/phase1_signed_face_boot_root_cause_20260714/pod1_v6v8_attempt3_system_20260714.txt` | 60,056 | `02b78e2d4db982145e57d9bcbe82768799b2756b21636a031052c7a1b30d1e25` |
+
+The tar has exactly 47 entries: all eight v6/v8 A/B/C/D run evidence directories plus their eight
+Kit logs. Extract only to a new local directory and preserve paths. This material is read-only
+postmortem evidence. It does not authorize Pod access, shared-memory cleanup, process launch,
+signal, retry training, judge, deployment or hardware. The paired diagnostic prereg is design-only.
+
 6. Restore the motion-retargeting clones (both git-ignored, absent on a fresh clone) when working on the motion pipeline:
 
 ```bash
