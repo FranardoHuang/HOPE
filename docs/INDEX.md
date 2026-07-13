@@ -57,6 +57,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | [`EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND`](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md) | E1 exam-v1 严格 profile 已冻结；真实 371 题 runtime rebind 未跑，新 schedule/judge 继续阻断 |
 | [`EXP-P1-HISTORICAL-SCHEMA3`](experiments/2026-07/EXP-P1-HISTORICAL-SCHEMA3.md) | 同题同卷尺已可用于诊断排名；所有历史模型仍为 inexact |
 | [`EXP-MUJOCO-NATIVE-TRAINING`](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md) | 实验 blocked；off-main preflight 为 `NO-MERGE`，四个正确性缺口未修；尚无 trusted backend、`VecEnv` 或 PPO smoke |
+| [`EXP-MUJOCO-EVAL-FRAME-INTEGRATION`](experiments/2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md) | evaluator parity guard、pelvis COM/link-origin、XBODY gyro 与 leg-mask provenance 已在 feature 集成回归；行为卷未跑 |
 | [`EXP-RECOVERY-TUPLE-ABC`](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md) | A/B/C 旧结构合同已验证；T0/T1/T2 与新 reward 次序仅完成文档设计，machine prereg 待同步 |
 | [`EXP-MOTION-SPATIAL-RETARGET`](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | B/C `19/3` 个 signed proposal 已确定性选出各 1 个主选并冻结备选顺序；证书仍为 `0`，尚无晋级动作 |
 | [`EXP-GATE3-CURRENT179-D0`](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md) | 实验 blocked；`Gate3-D0` 严格模型 preflight 通过，当前行为尚未运行 |

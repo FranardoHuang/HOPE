@@ -13,6 +13,12 @@
 
 ## 2026-07-13
 
+- 从现场 `50c49e5` 选择性移植 evaluator parity guard、pelvis COM→link-origin、XBODY gyro 与
+  `actor_leg_ref_mask` epoch 供证到最新 main 基线；没有吞入旧分支的 `NOW`/实验状态。combined focused
+  `115 passed, 2 skipped`，root suite `647 passed, 9 skipped`。这是 E1 source integration；没有新
+  K100、vendor backend、Gate3 或真机结果，跨引擎 gap 仍 inconclusive。见
+  [集成卷宗](experiments/2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md)。
+
 - 反手拉 B/C 的 22 条 signed 整轨 proposal 已收敛为 exactly one primary per asset：只把 3 组
   `yaw=0` 的 R0/R1 逐字段同义项合并，随后按平移范数、偏航、回球余量、身体余隙、frame 和 ID
   冻结完整备选顺序。主选 B=`98e7b883...f3c14`、C=`aa0c86fd...f299`；只有桌/网外部几何失败可换
