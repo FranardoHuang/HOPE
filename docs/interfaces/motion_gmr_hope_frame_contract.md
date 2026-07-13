@@ -83,3 +83,18 @@ transform 不是 capture extrinsic，也不能回填本页的 per-asset frame ma
 5. 至少两视角或 mocap/深度独立复核 chirality 与尺度；误差门预注册后才能生成 capture extrinsic。
 
 在这些材料到齐前，`real_capture_returnability=null`。
+
+## S0/M0 post-GVHMR 与横移末态站距合同（2026-07-13）
+
+`configs/motion_post_gvhmr_{s0,m0}_prereg_20260713.json` 把新五条 exact GVHMR output 与各自 execution
+record、final queue state、binding、structural audit 和 donor canonical-beta artifact 收成下一阶段的唯一
+输入。handoff 只允许另建 canonical-beta materialization；GMR 和 schema-2 仍必须按各自 exact source/body
+order/output 另做 prereg。schema-2 的位置点是 link origin，线速度点是 center of mass，且必须绑定
+runtime articulation body names；缺任一字段不能消费。
+
+M0 的“回到准备姿态”在 robot-coordinate GMR 后定义。每条 clip 去掉公共 root XY，并把 heading 对齐到
+该 clip 初始准备朝向；随后分别在人工绑定的 `ready_before` 与 `ready_after` 窗口对
+`d_xy = right_foot_xy - left_foot_xy` 求稳健中位数。acceptance 必须同时保留横向站距与前后脚错位，不能
+用双脚并拢、更窄站姿或绝对足位姿相等替代。foot-site mapping 与数值容差尚未预注册，因此当前没有
+M0 站距通过结果。S0 仍为无球空挥，不能消费拉球题或声称高点拍压有效。复现命令见
+[`run_motion_post_gvhmr_exact.md`](../operations/run_motion_post_gvhmr_exact.md)。

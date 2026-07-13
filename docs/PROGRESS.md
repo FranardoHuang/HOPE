@@ -13,6 +13,13 @@
 
 ## 2026-07-13
 
+- S0/M0 的五条 exact GVHMR 结果已增加 post-GVHMR no-clobber consumer：两份 prereg 同时绑定 tracked
+  summary、execution record、queue state、每条 binding/audit/PT 和 canonical-beta donor，host static
+  两批通过，专项 `8 passed`。runtime handoff 尚未消费，canonical-beta/GMR/schema-2 仍未运行；S0
+  禁止借用拉球题，M0 后续必须恢复含前后错位的初始二维脚间向量，双脚并拢不算成功。详见
+  [实验卷宗](experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md)与
+  [操作文档](operations/run_motion_post_gvhmr_exact.md)。
+
 - Franco 动作主线第一次从“排队”进入 runtime：Pod1 上 S0 高点拍压 `88/88` 帧、M0 四条横移
   `105/105、97/97、82/82、96/96` 帧全部通过 exact GVHMR finite structural audit；输入、execution
   record、queue、output、binding 和 audit SHA 已进入

@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "plan_id": "motion-post-gvhmr-static-high-press-s0-20260713-v1",
+  "status": "preregistered_not_executed",
+  "batch_kind": "s0_static_high_press",
+  "scope": "exact post-GVHMR lineage handoff for the single static high-press candidate; downstream stages remain blocked",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "formal_eligible": false,
+  "training_authorized": false,
+  "hardware_authorized": false,
+  "intake_sha256": "44b00b3c46c837d797990bc6f6255055c0ff83c1bb8643ca81f9707033ca304c",
+  "manual_event_review_sha256": "6a79dcc4528293728226192513f1d9ce5f266b35291a5504dea4559d7fc8049d",
+  "consumer": {
+    "path": "scripts/consume_motion_post_gvhmr_exact.py",
+    "sha256": "b90ca5e04ae8b0edc2b048712138d991d9c68340246238ecd17d28e2c8085d15"
+  },
+  "upstream_gvhmr": {
+    "tracked_result_summary": {
+      "path": "configs/motion_video_gvhmr_s0_m0_results_20260713.json",
+      "sha256": "08b5e8338ac07a20f18034811167c941fed7168703cad4308bc8b2f1e0569726"
+    },
+    "preregistration": {
+      "path": "configs/motion_video_gvhmr_prereg_20260713.json",
+      "sha256": "c610366e7e382b20f9b64b01a9c57b2722b72be501ada2aa16c24e350207f1ba"
+    },
+    "batch_id": "static_high_press_s0_v1",
+    "asset_ids": [
+      "static_backhand_high_press"
+    ],
+    "state_root": "/workspace/codexschema/motion_video_intake_20260713_s0/gvhmr_state_static_s0_v1",
+    "execution_record": {
+      "path": "/workspace/codexschema/motion_video_intake_20260713_s0/control/gvhmr_execution_record_static_s0_v1.json",
+      "bytes": 5473,
+      "sha256": "adbf1774b9bca975346c6bbd65ebcb4be7f53f83f19e21fef555eade09400ce8"
+    },
+    "queue_state": {
+      "path": "/workspace/codexschema/motion_video_intake_20260713_s0/gvhmr_state_static_s0_v1/queue_state.json",
+      "bytes": 1907,
+      "sha256": "88f4957bec131bb079e2502aadc1c4af8ca0e4be689892bd8810cfa98df93607"
+    },
+    "assets": [
+      {
+        "asset_id": "static_backhand_high_press",
+        "source_sha256": "5bd2bc46c615005b4b521352e8950d2e7a7d7d8d0e5613fe1ac1755ae6045657",
+        "frames": 88,
+        "ready_before_window_s": [
+          0.0,
+          0.833333
+        ],
+        "ready_after_window_s": [
+          2.0,
+          2.833333
+        ],
+        "output": {
+          "path": "/workspace/franco/motion_work/GVHMR/outputs/demo/pai/hmr4d_results.pt",
+          "bytes": 389976,
+          "sha256": "6259d64e457bcea4b9d1d8ef830d9cd4561b190fea79a2b0bdddd9eeea580b22"
+        },
+        "binding": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_s0/gvhmr_state_static_s0_v1/bindings/static_backhand_high_press.json",
+          "bytes": 3845,
+          "sha256": "87bad7238f93e3a3f5f3c217fdc0124347839fb8614ca5491610d2dca62c60af"
+        },
+        "structural_audit": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_s0/gvhmr_state_static_s0_v1/audits/static_backhand_high_press.json",
+          "bytes": 517,
+          "sha256": "10259f7ed85914ff294e3eb2df50716d29a9a8c610bb7ef897eca0dfafe5350e"
+        }
+      }
+    ]
+  },
+  "canonical_beta_donor": {
+    "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+    "same_performer_asserted_by_human_owner": true,
+    "reuse_semantics": "exact donor vector only; each new GVHMR PT still requires a separate no-clobber beta materialization and bit-exact non-beta audit",
+    "tracked_result_manifest": {
+      "path": "configs/motion_video_canonical_betas_result_20260711.json",
+      "sha256": "395d4e65ae878dd1c56ae41f433dbd0a1645c63e422be3e8b8aa1c725b70ea56"
+    },
+    "artifact": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/canonical_betas.json",
+      "bytes": 915,
+      "sha256": "f405ba45d7f2233d3735c2e6b59409203cc98b1e97deef00224e16f2c7c4cbf2"
+    },
+    "completion_manifest": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/materialization_manifest.json",
+      "bytes": 26857,
+      "sha256": "4043b34210b30be4151457623c3152ebd09650fb2caf587eb78359887a06bc2b"
+    },
+    "vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+    "new_batch_materialization_status": "not_run"
+  },
+  "semantic_guard": {
+    "motion_role": "fifth_action_backhand_high_ball_forward_downward_press",
+    "question_family": "separate_high_ball_high_press_paper_required_not_yet_preregistered",
+    "pull_or_loop_question_paper_allowed": false,
+    "observed_ball_contact": null,
+    "strike_effectiveness": null,
+    "claim_boundary": "GVHMR structural reconstruction only; no strike, return, safety, or behavior claim"
+  },
+  "downstream_gate": {
+    "ordered_stages": [
+      "canonical_beta_materialization",
+      "gmr_robot_retarget",
+      "schema2_robot_motion_export",
+      "l0_static_motion_audit",
+      "vendor_l1_and_dynamics"
+    ],
+    "next_authorized_stage": "canonical_beta_materialization_only",
+    "separate_exact_prereg_per_stage": true,
+    "statuses": {
+      "canonical_beta_materialization": "not_run",
+      "gmr_robot_retarget": "blocked_on_exact_canonical_beta_output",
+      "schema2_robot_motion_export": "blocked_on_exact_gmr_output_and_runtime_body_order",
+      "l0_static_motion_audit": "blocked_on_exact_schema2_npz",
+      "vendor_l1_and_dynamics": "blocked_on_l0_and_vendor_runtime_binding"
+    },
+    "gmr_runtime_availability": "external_private_dependency_not_verified_by_static_check",
+    "schema2_required_metadata": {
+      "kinematics_schema_version": 2,
+      "body_pos_point": "link_origin",
+      "body_lin_vel_point": "center_of_mass",
+      "body_names": "exact_runtime_articulation_order_required"
+    }
+  },
+  "handoff_output": {
+    "root": "/workspace/codexschema/motion_video_intake_20260713_s0/post_gvhmr_exact_v1",
+    "path": "/workspace/codexschema/motion_video_intake_20260713_s0/post_gvhmr_exact_v1/handoff.json",
+    "root_must_not_exist": true,
+    "no_clobber": true,
+    "write": "O_CREAT|O_EXCL_then_fsync",
+    "publish_after_all_validation": true
+  }
+}

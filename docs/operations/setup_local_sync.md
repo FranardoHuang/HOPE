@@ -359,8 +359,7 @@ action and four lateral-locomotion teacher candidates. It rejects a locomotion
 teacher mislabeled as a stroke. The two GVHMR-only queues have now completed on Pod1:
 S0 contains only `static/pai.mp4`; M0 contains only the four lateral candidates.
 They bind nominal air-swing event/ready
-windows, the exact runtime closure and separate versioned private roots, and have no
-post-GVHMR consumer. Follow
+windows and the exact runtime closure in separate versioned private roots. Follow
 [`run_motion_video_gvhmr_prereg.md`](run_motion_video_gvhmr_prereg.md) for the
 Pod copy, second byte/media audit and no-clobber execution record. Never append
 these files to the accepted 2026-07-11 evidence tree, and do not interpret the
@@ -370,6 +369,10 @@ Jiayi-route comparison and is not authorized by S0/M0. S0 and M0 are independent
 batches, while the four lateral assets are candidates rather than repeated seeds. Restore the complete
 S0/M0 state roots plus the five output PT files and verify every SHA in
 `configs/motion_video_gvhmr_s0_m0_results_20260713.json`; copying only the PT files loses the accepted lineage.
+The separate [post-GVHMR consumer](run_motion_post_gvhmr_exact.md) also needs the exact 2026-07-11
+`canonical_betas.json` and its `materialization_manifest.json`. Its two preregistrations bind every
+output/binding/audit plus the tracked summary and donor artifacts; static validation passes, but runtime handoff
+has not yet been consumed. Missing evidence must fail closed rather than be reconstructed from matching basenames.
 
 The 2026-07-11 CPU-only GMR diagnostic then completed 10/10 under a separate
 serial queue. Restore and verify the exact source bundle before reproducing it:

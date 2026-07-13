@@ -90,9 +90,12 @@ queue state、output、binding 与 structural audit 的逐文件 SHA。该通过
 
 ## 下一步
 
-1. 用新的 content-bound consumer 把五份 exact GVHMR 输出接到 canonical-beta/GMR；不得调用旧的十动作硬编码队列冒充新 lineage；
+1. 按 [post-GVHMR exact consumer](motion_post_gvhmr_s0_m0_handoff_20260713.md) 先把五份 exact
+   GVHMR 输出收成 immutable handoff，再另建 canonical-beta materialization；不得调用旧的十动作硬编码
+   队列冒充新 lineage；
 2. 在机器人坐标中检查 static 的整轨安全，并检查 motion 的足接触、位移区间和末态初始脚距向量（含前后错位）；
 3. 为 static 建高球/拍压专卷，为 motion 建位移条件合同；结构结果不能提前当击球有效性；
 4. F1/F2 继续消费既有 Franco 结果；v12 只在上述主线有可比证据后作为 Jiayi 对照进入新版本合同。
 
-完整命令见[操作文档](../operations/run_motion_video_gvhmr_prereg.md)。
+GVHMR 命令见[结构批操作文档](../operations/run_motion_video_gvhmr_prereg.md)；结果消费见
+[post-GVHMR 操作文档](../operations/run_motion_post_gvhmr_exact.md)。

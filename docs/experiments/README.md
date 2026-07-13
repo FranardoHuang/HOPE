@@ -52,6 +52,7 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 | [EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD](2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) | exact planner-policy 源码能否通过 portable Release，并无冲突地进入 latest main？ | franco | Codex | completed | E1 | adopt exact 源码；runtime/Gate3 行为仍未运行 |
 | [v12/高点拍压/横移视频登记](motion_video_intake_v12_static_motion_20260713.md) | 7 段私有新视频是否能按精确字节和语义角色登记？ | franco | Codex | completed | E1 | 7/7 登记通过；不授予动作安全或训练资格 |
 | [Franco 优先、static/motion GVHMR 预注册](motion_video_gvhmr_prereg_franco_static_motion_20260713.md) | 复用 Franco exact 结果后，static 与 motion 能否进入互不阻塞、no-clobber 的 GVHMR-only 小批？ | franco | Codex | completed | E2 | [S0/M0](../DEFINITIONS.md) `1/1 + 4/4` exact finite structural pass；无 GMR/schema-2/动作效果 |
+| [S0/M0 exact post-GVHMR handoff](motion_post_gvhmr_s0_m0_handoff_20260713.md) | 五条 exact GVHMR 结果能否无歧义进入 canonical-beta/GMR/schema-2 前置链？ | Franco | Codex | preregistered | E1（consumer）；上游 E2 | 完整 lineage 已冻结；runtime handoff 未消费，GMR/schema-2 仍 blocked |
 | [v12/高点拍压/横移组合设计](motion_v12_high_press_lateral_teacher_20260713.md) | 新动作和横移下肢老师怎样进入各自题族与全身组合？ | franco | Codex | proposed | E0 | 只有设计；没有处理后动作或行为证据 |
 | [非击球臂模仿消融](non_striking_arm_imitation_ablation_20260713.md) | 解除左臂模仿能否改善平衡且不破坏击球？ | franco | Codex | proposed | E0 | 配对实验尚未运行 |
 

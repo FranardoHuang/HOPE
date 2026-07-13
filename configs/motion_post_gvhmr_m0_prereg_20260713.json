@@ -1,0 +1,233 @@
+{
+  "schema_version": 1,
+  "plan_id": "motion-post-gvhmr-lateral-teachers-m0-20260713-v1",
+  "status": "preregistered_not_executed",
+  "batch_kind": "m0_lateral_teachers",
+  "scope": "exact post-GVHMR lineage handoff for four lateral-teacher candidates; robot stance and downstream stages remain blocked",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "formal_eligible": false,
+  "training_authorized": false,
+  "hardware_authorized": false,
+  "intake_sha256": "44b00b3c46c837d797990bc6f6255055c0ff83c1bb8643ca81f9707033ca304c",
+  "manual_event_review_sha256": "6a79dcc4528293728226192513f1d9ce5f266b35291a5504dea4559d7fc8049d",
+  "consumer": {
+    "path": "scripts/consume_motion_post_gvhmr_exact.py",
+    "sha256": "b90ca5e04ae8b0edc2b048712138d991d9c68340246238ecd17d28e2c8085d15"
+  },
+  "upstream_gvhmr": {
+    "tracked_result_summary": {
+      "path": "configs/motion_video_gvhmr_s0_m0_results_20260713.json",
+      "sha256": "08b5e8338ac07a20f18034811167c941fed7168703cad4308bc8b2f1e0569726"
+    },
+    "preregistration": {
+      "path": "configs/motion_video_gvhmr_motion_prereg_20260713.json",
+      "sha256": "19794d62446335c2d125564d9ea7ee77e59e1aed39f7aeef4b4039843dce0f08"
+    },
+    "batch_id": "lateral_teachers_m0_v1",
+    "asset_ids": [
+      "lateral_step_left_1",
+      "lateral_step_left_2",
+      "lateral_step_right_1",
+      "lateral_step_right_2"
+    ],
+    "state_root": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1",
+    "execution_record": {
+      "path": "/workspace/codexschema/motion_video_intake_20260713_m0/control/gvhmr_execution_record_lateral_m0_v1.json",
+      "bytes": 8992,
+      "sha256": "e40f90b7e84ebf804ca1ad9b99e6c1dc16f030eb72427645872c6f0378bfaa9c"
+    },
+    "queue_state": {
+      "path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/queue_state.json",
+      "bytes": 5012,
+      "sha256": "31bc7cbebe5a34125317f2e7429216271370103dc6dd94798b8eb36323a0c336"
+    },
+    "assets": [
+      {
+        "asset_id": "lateral_step_left_1",
+        "source_sha256": "0d421f7f37dba1d4a9c033775a9cfc62d7221600a2a60ddd354d9b6009a3279f",
+        "frames": 105,
+        "ready_before_window_s": [
+          0.0,
+          0.75
+        ],
+        "ready_after_window_s": [
+          2.75,
+          3.25
+        ],
+        "output": {
+          "path": "/workspace/franco/motion_work/GVHMR/outputs/demo/left_dang1/hmr4d_results.pt",
+          "bytes": 463448,
+          "sha256": "2873747a85cf570db50fd3d141124d328f882db367dbeb35b6ad1d4754423733"
+        },
+        "binding": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/bindings/lateral_step_left_1.json",
+          "bytes": 4137,
+          "sha256": "f4f87a21822e465b1042eb6a0b5816d3f2899c1e348491ab194c4388022f3901"
+        },
+        "structural_audit": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/audits/lateral_step_left_1.json",
+          "bytes": 530,
+          "sha256": "f03c647eeb3b57a7f5c3a857cde609db9b37b1d26299346faf06bb4040661ef0"
+        }
+      },
+      {
+        "asset_id": "lateral_step_left_2",
+        "source_sha256": "4074a8054d5814f640cd8c5e38188d7d70bb3ec1ce62068931dcf2b8fad52f9d",
+        "frames": 97,
+        "ready_before_window_s": [
+          0.0,
+          0.75
+        ],
+        "ready_after_window_s": [
+          2.5,
+          3.0
+        ],
+        "output": {
+          "path": "/workspace/franco/motion_work/GVHMR/outputs/demo/left_dang2/hmr4d_results.pt",
+          "bytes": 429208,
+          "sha256": "e5db30adcb772e59d30eb7179588e1f8bbc66d2600a83fa8e31d238bb4b25db2"
+        },
+        "binding": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/bindings/lateral_step_left_2.json",
+          "bytes": 4136,
+          "sha256": "c783fa571f89fd1607a65975ecc682270efbc71af2427d326cd4ba1c32894a0f"
+        },
+        "structural_audit": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/audits/lateral_step_left_2.json",
+          "bytes": 524,
+          "sha256": "a66b307ab90ecdf51b67cda1d9447086a48bfb2e470bbb97e6abed3841f5a648"
+        }
+      },
+      {
+        "asset_id": "lateral_step_right_1",
+        "source_sha256": "3956084f9ceab180022c0d141fdfdd68ca4a5b0c5f8f34d3d1803de30b06beb5",
+        "frames": 82,
+        "ready_before_window_s": [
+          0.0,
+          0.5
+        ],
+        "ready_after_window_s": [
+          2.0,
+          2.5
+        ],
+        "output": {
+          "path": "/workspace/franco/motion_work/GVHMR/outputs/demo/right_dang1/hmr4d_results.pt",
+          "bytes": 363672,
+          "sha256": "3a8ecc8c957c040161eef1257f638a4d22053b124a44f67fd2ad88bbeac7357e"
+        },
+        "binding": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/bindings/lateral_step_right_1.json",
+          "bytes": 4144,
+          "sha256": "ad0a6d962c1be21671f8731616ceb76ab529a9fd71ed1959602a7c8d6204fc67"
+        },
+        "structural_audit": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/audits/lateral_step_right_1.json",
+          "bytes": 525,
+          "sha256": "4878f82bdde5dbb3ea181fdce2623769cd6a8192d0410157cb72d831155b87bc"
+        }
+      },
+      {
+        "asset_id": "lateral_step_right_2",
+        "source_sha256": "24ea4e4244cb0a7b6a8e5e15dc9dfc83c0a1f9c0b26a4fc411fa0922559b7eb8",
+        "frames": 96,
+        "ready_before_window_s": [
+          0.0,
+          0.75
+        ],
+        "ready_after_window_s": [
+          2.5,
+          3.0
+        ],
+        "output": {
+          "path": "/workspace/franco/motion_work/GVHMR/outputs/demo/right_dang2/hmr4d_results.pt",
+          "bytes": 425304,
+          "sha256": "45e532c00071c77b9096b3bba71a40d4507d8e7b429af985202bd436a1fac5f8"
+        },
+        "binding": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/bindings/lateral_step_right_2.json",
+          "bytes": 4144,
+          "sha256": "701e2c9eb3bb3bb97309a88bd63be2e71d057ca2b1493dca4cd4a3cdb01f8e6d"
+        },
+        "structural_audit": {
+          "path": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1/audits/lateral_step_right_2.json",
+          "bytes": 525,
+          "sha256": "5be5d024193c7ced5936f6f61563fad5383eaad741392789f2b54474f7c349fc"
+        }
+      }
+    ]
+  },
+  "canonical_beta_donor": {
+    "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+    "same_performer_asserted_by_human_owner": true,
+    "reuse_semantics": "exact donor vector only; each new GVHMR PT still requires a separate no-clobber beta materialization and bit-exact non-beta audit",
+    "tracked_result_manifest": {
+      "path": "configs/motion_video_canonical_betas_result_20260711.json",
+      "sha256": "395d4e65ae878dd1c56ae41f433dbd0a1645c63e422be3e8b8aa1c725b70ea56"
+    },
+    "artifact": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/canonical_betas.json",
+      "bytes": 915,
+      "sha256": "f405ba45d7f2233d3735c2e6b59409203cc98b1e97deef00224e16f2c7c4cbf2"
+    },
+    "completion_manifest": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/materialization_manifest.json",
+      "bytes": 26857,
+      "sha256": "4043b34210b30be4151457623c3152ebd09650fb2caf587eb78359887a06bc2b"
+    },
+    "vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+    "new_batch_materialization_status": "not_run"
+  },
+  "semantic_guard": {
+    "motion_role": "signed_lateral_displacement_conditioned_lower_body_teacher",
+    "gvhmr_stance_result": null,
+    "terminal_stance_contract": {
+      "measurement_stage": "exact_robot_coordinate_gmr_before_schema2_promotion",
+      "heading_and_root_normalization": "remove common root XY translation and rotate heading to the candidate initial-ready frame",
+      "vector_definition": "d_xy = right_foot_xy - left_foot_xy",
+      "initial_reference": "coordinatewise robust median d_xy over the exact ready_before window",
+      "terminal_measurement": "coordinatewise robust median d_xy over the exact ready_after window",
+      "must_preserve_components": [
+        "lateral_separation",
+        "fore_aft_stagger"
+      ],
+      "feet_together_or_narrower_substitute_allowed": false,
+      "absolute_foot_pose_equality_required": false,
+      "numeric_tolerance_status": "must_be_preregistered_before_gmr_result_acceptance",
+      "failure_semantics": "missing foot-site mapping, missing numeric tolerance, or narrower terminal stance fails closed"
+    }
+  },
+  "downstream_gate": {
+    "ordered_stages": [
+      "canonical_beta_materialization",
+      "gmr_robot_retarget",
+      "schema2_robot_motion_export",
+      "l0_static_motion_audit",
+      "vendor_l1_and_dynamics"
+    ],
+    "next_authorized_stage": "canonical_beta_materialization_only",
+    "separate_exact_prereg_per_stage": true,
+    "statuses": {
+      "canonical_beta_materialization": "not_run",
+      "gmr_robot_retarget": "blocked_on_exact_canonical_beta_output",
+      "schema2_robot_motion_export": "blocked_on_exact_gmr_output_and_runtime_body_order",
+      "l0_static_motion_audit": "blocked_on_exact_schema2_npz",
+      "vendor_l1_and_dynamics": "blocked_on_l0_and_vendor_runtime_binding"
+    },
+    "gmr_runtime_availability": "external_private_dependency_not_verified_by_static_check",
+    "schema2_required_metadata": {
+      "kinematics_schema_version": 2,
+      "body_pos_point": "link_origin",
+      "body_lin_vel_point": "center_of_mass",
+      "body_names": "exact_runtime_articulation_order_required"
+    }
+  },
+  "handoff_output": {
+    "root": "/workspace/codexschema/motion_video_intake_20260713_m0/post_gvhmr_exact_v1",
+    "path": "/workspace/codexschema/motion_video_intake_20260713_m0/post_gvhmr_exact_v1/handoff.json",
+    "root_must_not_exist": true,
+    "no_clobber": true,
+    "write": "O_CREAT|O_EXCL_then_fsync",
+    "publish_after_all_validation": true
+  }
+}

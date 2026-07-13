@@ -1296,6 +1296,13 @@ parity 门的 MJX/MJWarp。没有 `VecEnv`、PPO、训练、Pod、simulator 或�
 非击球臂仍没有配置或训练。S0/M0 有 Pod 离线结构结果，但没有 Isaac/MuJoCo 训练、仿真行为或真机动作，
 G05 仍为 `Partial`。
 
+S0/M0 的 post-GVHMR machine handoff 已另行预注册并通过 host static/`8 passed`：它逐层绑定 tracked
+summary、execution record、queue state、binding、audit、PT 与 canonical-beta donor，但 runtime
+`consume` 尚未执行。它只解锁下一份 exact canonical-beta materialization，不直接解锁 GMR、schema-2 或
+RL。S0 仍不得借用拉球题或声称击球有效；M0 必须在 robot-coordinate GMR 后恢复初始二维脚间向量的
+横向站距和前后错位，双脚并拢不能通过。详见
+[实验记录](../experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md)。
+
 ### 2026-07-12 文档路由与当前成绩表
 
 训练状态现在按职责拆分，不再复制到三份流水中：

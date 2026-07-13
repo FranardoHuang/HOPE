@@ -444,6 +444,13 @@ commit、完整权重树、Python、`nvidia-smi`、validator/argv、独立 stagi
 `configs/motion_video_gvhmr_s0_m0_results_20260713.json`。尚无 canonical-beta/GMR、schema-2、足接触/
 末态脚距、simulator、RL 或真机结果，所以 G08 状态不变，也没有动作晋级。
 
+这五条结果的下一层已收成两份 exact post-GVHMR prereg：consumer 同时绑定 summary、queue/binding/audit/PT
+和 canonical-beta donor，static 与 `8` 项 red-team 测试通过，但 runtime handoff 尚未消费。S0 的
+`contact_truth`/效果继续为空且禁止借用拉球题；M0 的末态约束明确为去除公共 root、对齐 heading 后的
+`right_foot_xy - left_foot_xy` 初始/终态稳健向量，横向站距与前后错位都要保留，脚并拢不算成功。
+foot-site mapping 和数值容差须在 GMR result acceptance 前另行预注册。详见
+[post-GVHMR 卷宗](../experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md)。
+
 ## 文档路由更新（2026-07-12）
 
 G08 仍是长期 blind-spot 路线图。当前已采用 setting、阶段/小目标构成和 feature 决定统一放在

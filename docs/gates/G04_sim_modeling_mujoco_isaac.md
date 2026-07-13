@@ -193,3 +193,19 @@ These constants block finite teleport/glitch inputs but are not vendor-plant val
 be compared with content-addressed vendor MuJoCo pelvis trajectories before claiming they are
 neither too loose nor liveness-breaking. No Isaac asset, MJCF, contact parameter, trainer,
 checkpoint or hardware changed; G04 remains `Partial`.
+
+## Audit update 2026-07-13: S0/M0 post-GVHMR model handoff boundary
+
+The completed S0/M0 GVHMR structural outputs now have two independent, content-addressed
+post-GVHMR preregistrations. The consumer binds the tracked result summary, execution record,
+final queue state, every per-asset binding/audit/PT and the existing exact canonical-beta donor.
+Host static validation and eight red-team tests pass, including lineage mutation, extra binding,
+duplicate-key/non-finite JSON and no-clobber publication controls.
+
+This does not run GMR or create schema-2 motion. The next stage is only a separately
+preregistered canonical-beta materialization. GMR remains blocked on its ignored/private source,
+loader, SMPL-X and runtime closure; schema-2 remains blocked on exact GMR output plus runtime body
+order, link-origin positions and COM-point velocities. M0 robot-coordinate foot stance and S0
+strike behavior are also unmeasured. Commands are in
+[`run_motion_post_gvhmr_exact.md`](../operations/run_motion_post_gvhmr_exact.md); G04 remains
+`Partial`.
