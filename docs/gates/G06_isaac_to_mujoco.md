@@ -31,6 +31,7 @@ This gate is the sim-to-sim bridge before real deployment.
 
 - [../operations/run_training.md](../operations/run_training.md)
 - [../operations/run_deploy_dryrun.md](../operations/run_deploy_dryrun.md)
+- [../operations/run_phase1_signed_face_exam_k100.md](../operations/run_phase1_signed_face_exam_k100.md)
 - [../operations/run_shared_interface_rehearsal.md](../operations/run_shared_interface_rehearsal.md)
 - [../operations/run_gate3_first_tick_harness.md](../operations/run_gate3_first_tick_harness.md)
 
@@ -1332,6 +1333,28 @@ activation 后才能启动 judge。详见
 [实验卷宗](../experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md)与
 [运行手册](../operations/run_phase1_signed_face_exam_bank_rebind.md)。当前 L2、signed-face paper、G06 与
 Gate3 状态均不变，G06 保持 `Partial`。
+
+### 2026-07-14 signed-face K100 materializer/activation source gate
+
+E2 rebound bank 的下一层 paper source gate 已预注册并通过 host 静态/攻击回归。consumer 不接受旧
+schedule 输入；它只从 exact `63,643`-byte bank SHA `60e1a7ad...d1ca` 重新生成包含新 bank SHA 的原子
+question ID，并复用现有 schema-v3 deterministic schedule 算法冻结 seed `0`、hold `[0,100]`、每侧
+无放回 50 的 K100。所有 100 个 scheduled attempt 保持在分母；missing/invalid/reset 不能删除。
+
+paper 同时冻结 raw-A/physical-B signed 身份：clip order `forehand,backhand`、sign `[+1,-1]`，每个 target
+raw-A normal 必须 finite/unit，映射后的 opponent-facing physical-B 必须严格 `x>1e-6`；unsigned 或先
+`orient_normal` 再判身份的路径拒绝。旧 paper file/semantic/question-order receipt 均列入禁用表。
+output root 必须不存在，schedule 与 activation 都 no-replace，activation 最后写；partial root 不能续写。
+
+manifest/consumer SHA 为 `e401305d...e556` / `4e094bbe...ac6e`；mutation、旧 schedule、unsigned、
+重复题、单侧不足和 partial no-reuse 回归共 `14 passed`，latest-main root `747 passed, 10 skipped`，
+`static-validate` rc0。但本任务没有访问 Pod，
+本机也没有 exact private bank，因此 `consume` 未运行，materialized schedule/activation 的 file/semantic/
+order/content SHA 仍不存在。activation 即使未来生成也固定 trainer/judge/L2/第二 seed/晋级/部署/真机全
+false；后续还需独立 reviewed execution contract。详见
+[实验](../experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-PAPER.md)与
+[操作](../operations/run_phase1_signed_face_exam_k100.md)。没有新行为考卷，G06 继续 `Partial`。
+
 ### 2026-07-13 pelvis point/axis frame correction
 
 A focused frame audit found two concrete MuJoCo evaluator errors without finding a gross

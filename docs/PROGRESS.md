@@ -20,6 +20,15 @@
   [runtime result](../configs/mujoco_eval_optional_runtime_test_results_20260714.json)；该结果不包含 policy、
   vendor MJCF、Gate3、GPU 训练或真机，G04/G06 仍为 `Partial`。
 
+- signed-face E2 rebound exam bank 的下一层 immutable K100 source gate 已冻结：严格复用现有 schema-v3
+  schedule 算法，从 exact bank SHA 重建 question ID，seed0/hold0–100/每侧无放回50/全100次分母；raw-A
+  `[+1,-1]` physical-B 身份、旧纸拒绝、no-replace 和 activation-last 均 fail closed。专项攻击回归
+  `14 passed`、latest-main root `747 passed, 10 skipped`、`static-validate` rc0；本任务未访问 Pod，本机缺
+  exact private bank，所以 runtime `consume` 未跑，schedule/activation SHA 仍不存在，L2/judge/第二
+  seed/晋级全阻断。见
+  [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-PAPER.md)与
+  [操作](operations/run_phase1_signed_face_exam_k100.md)。
+
 - MuJoCo frame/evaluator integration 的独立红队 `NO-MERGE` 阻塞已逐项关闭并合入 main：bound implicit
   改为每 substep 执行 Isaac `clip(P-D)`；被动/无 effort-limit 代理 formal fail closed；自碰只认 pelvis
   机器人子树且 formal 首次即拒绝，动态球不误报；mask 供证只接受 canonical/严格空 partial；旧

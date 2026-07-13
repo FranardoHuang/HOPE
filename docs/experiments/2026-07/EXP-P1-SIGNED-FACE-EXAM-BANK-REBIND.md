@@ -67,9 +67,10 @@ bytes 与旧 family。不能把任意 bank、split、计数或输出路径塞进
 ## 与判卷 schedule 的边界
 
 metadata 变化会让新 bank 文件 SHA 改变，而 `atomic_bank_question_id` 把 bank SHA 纳入每道题 ID；所以
-旧 immutable schedule 即使 bank row 相同也不能复用。exam rebind E2 已成功，仍必须从**新输出 bank**
-重新 materialize 一份 no-clobber schedule，冻结 path、文件 SHA、semantic SHA、题序与 all-attempt 分母，
-再由独立 paper activation 消费。当前没有 schedule，也没有 judge、训练、MuJoCo/Isaac 或 Gate3 结果。
+旧 immutable schedule 即使 bank row 相同也不能复用。exam rebind E2 已成功；新的
+[signed-face K100 source gate](EXP-P1-SIGNED-FACE-EXAM-PAPER.md) 已冻结 no-clobber materializer、raw-A/
+physical-B signed contract、每侧 50 与 all-attempt 分母，但真实 private bank consume 尚未运行。当前仍没有
+materialized schedule/activation，也没有 judge、训练、MuJoCo/Isaac 或 Gate3 结果。
 
 ## 决定
 
@@ -81,5 +82,6 @@ metadata 变化会让新 bank 文件 SHA 改变，而 `atomic_bank_question_id` 
   landing/net 全过。机器账本见
   [`phase1_signed_face_exam_bank_rebind_results_20260714.json`](../../../configs/phase1_signed_face_exam_bank_rebind_results_20260714.json)。
 - 是否已纳入当前 setting：`data input adopted; training/paper setting unchanged`
-- 局限/下一个 gate：从新 bank 另立 no-clobber immutable schedule 和 reviewed paper activation；此前
+- 局限/下一个 gate：按新 [K100 运行手册](../../operations/run_phase1_signed_face_exam_k100.md)消费 exact
+  private bank 并归档 schedule/activation receipt；source/static 通过不能替代这次 runtime consume。此前
   signed-face L2/judge/formal score 仍阻断，G06 保持 `Partial`。

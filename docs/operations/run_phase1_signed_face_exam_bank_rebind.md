@@ -107,8 +107,11 @@ Pod1 已依次完成 no-write validate 和 `run`；不要删除输出目录后�
 ## 5. 通过后仍然阻断的步骤
 
 新 metadata 会改变 bank 文件 SHA，而 question ID 把 bank SHA 作为输入，因此所有旧 schedule 都失效。
-通过本页 E2 后还要从**新 bank**另行物化并冻结新的 immutable schedule，绑定 schedule path/file SHA、
-semantic SHA、题序、每侧分母和独立 activation。该 paper contract reviewed 前：
+通过本页 E2 后还要按
+[`run_phase1_signed_face_exam_k100.md`](run_phase1_signed_face_exam_k100.md)从**新 bank**另行物化并冻结
+新的 immutable schedule，绑定 schedule path/file SHA、semantic SHA、题序、每侧分母和独立 activation。
+该 consumer 已完成 source/static review，但真实 private bank consume 尚未运行；runtime paper contract
+reviewed 前：
 
 - 不得启动 L2 judge；
 - 不得把 train 与旧 exam 组合成 exact same-family 成绩；

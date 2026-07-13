@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "manifest_id": "phase1-signed-face-exam-k100-paper-activation-20260714-v1",
+  "purpose": "Rebuild one deterministic immutable 50-per-side K100 paper from the exact signed-face rebound exam bank and publish a paper-only activation after strict no-replace validation.",
+  "status": "source_reviewed_runtime_consume_not_run",
+  "recorded_local_date": "2026-07-14",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "simulation_only": true,
+  "real_robot_commands_forbidden": true,
+  "bank": {
+    "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_exam_bank_rebind_v1/s1_v4rg_runtime_order_schema3_exam_882fea4_rebound.npz",
+    "bytes": 63643,
+    "sha256": "60e1a7ade72eaf64e17a1b83795125551f08c6699c8a3cc3c269500d8e6cd1ca",
+    "schema_version": 3,
+    "split": "exam",
+    "clip_order": [
+      "forehand",
+      "backhand"
+    ],
+    "question_counts": {
+      "forehand": 183,
+      "backhand": 188
+    },
+    "physics_contract_sha256": "09dfe8999c54e36b258fe54b5ec3da5d9816ff3be3675963b919371d7f4afb95",
+    "source_family_sha256": "9603a1788eb17ce03598cdde4efff946039613cf61fcc686f90a385706dba9db",
+    "rebind_result": {
+      "path": "configs/phase1_signed_face_exam_bank_rebind_results_20260714.json",
+      "sha256": "5deb0aa1e7f7b45bcf15804368c4ef0ac2566779fda5a07a448e19453f29c549",
+      "runtime_report_sha256": "dd4332edb47f1fb1f4d51ca00ceed612dbcadf9e395eb536c9b73bef9de69ad0",
+      "runtime_report_content_sha256": "7bdf4d6c2fccaf0b377e6bb76188c0b1d9abd1cd67cd322cbca2b1539a8a19d4"
+    }
+  },
+  "source_bindings": {
+    "consumer": {
+      "path": "scripts/materialize_phase1_signed_face_exam_k100.py",
+      "sha256": "4e094bbebe525fb9cd756c3fa6eebe7436c72f94aba2a12ecd136f612761ac6e"
+    },
+    "schedule_module": {
+      "path": "hope_training/whole_body_tracking/scripts/bank_exam_schedule.py",
+      "sha256": "32721f018f6a35a42aa12ff0a7e48c0d9bc513d238988d953241ee625744b23b"
+    },
+    "bank_loader": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/stage1_question_bank.py",
+      "sha256": "47db31320c8a37ad95d082a179dcdfad45ca1b740696d54e22069fcdaab8b8b0"
+    },
+    "signed_face_scorer": {
+      "path": "hope_training/whole_body_tracking/scripts/virtual_return_scorer.py",
+      "sha256": "9d01da15a6f24166d4d185ede26a2bd29c9c61d02d15942beadb35b335e0f5ec"
+    },
+    "rebind_result": {
+      "path": "configs/phase1_signed_face_exam_bank_rebind_results_20260714.json",
+      "sha256": "5deb0aa1e7f7b45bcf15804368c4ef0ac2566779fda5a07a448e19453f29c549"
+    }
+  },
+  "signed_face_contract": {
+    "schema_version": 1,
+    "achieved_and_target_frame": "mount_plusY_A",
+    "external_frame": "physical_striking_face_B",
+    "physical_B_to_raw_A": "raw_A=mount_normal_sign_per_clip[clip]*physical_B",
+    "clip_order": [
+      "forehand",
+      "backhand"
+    ],
+    "mount_normal_sign_per_clip": [
+      1.0,
+      -1.0
+    ],
+    "signed_face_required": true,
+    "unsigned_or_oriented_plane_fallback_allowed": false,
+    "identity_checked_before_orient_normal": true,
+    "physical_B_min_x_strict": 1e-06,
+    "unit_normal_atol": 0.0002,
+    "identity_gate": "dot(achieved_raw_A,target_raw_A)>0_and_achieved_physical_B.x>1e-6_and_target_physical_B.x>1e-6_before_orient_normal"
+  },
+  "paper": {
+    "artifact_type": "bank-exam-schedule",
+    "bank_schema_version": 3,
+    "per_clip_quota": 50,
+    "schedule_k": 100,
+    "schedule_seed": 0,
+    "hold_range": [
+      0,
+      100
+    ],
+    "hold_semantics": "stand-policy-actions-then-raw-frame0-v1",
+    "no_wrap": true,
+    "repeat": 0,
+    "selection": "deterministic_hash_order_without_replacement_round_robin_v3",
+    "question_id_contract": "bank-exam-question-v1_includes_exact_rebound_bank_sha",
+    "question_ids_rebuilt_from_exact_bank": true,
+    "old_schedule_input_allowed": false,
+    "all_scheduled_attempts_in_denominator": true,
+    "missing_invalid_or_reset_attempts_count_as_failures": true,
+    "denominator": {
+      "aggregate": 100,
+      "forehand": 50,
+      "backhand": 50
+    },
+    "legacy_schedule_receipts_forbidden": [
+      {
+        "file_sha256": "66e89986a2b726d529179fcb4c745625ebed0380d59664caceefc55e86071cb3",
+        "semantic_sha256": "7dc6af822fb4130b8c324843f179d77f882d1326306bb19802b00f94447dff3e",
+        "question_id_order_sha256": "b87e81a34ff2d31766e17345f0a8c9d77665b78874093e26bdae257e8ed21f91"
+      }
+    ]
+  },
+  "output": {
+    "root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1",
+    "schedule_basename": "signed_face_exam_k100.schedule.json",
+    "activation_basename": "signed_face_exam_k100.activation.json",
+    "root_must_not_exist": true,
+    "schedule_write_no_replace": true,
+    "activation_written_last": true
+  },
+  "authorization": {
+    "paper_materialization_only": true,
+    "auto_start": false,
+    "trainer_started": false,
+    "judge_started": false,
+    "l2_training_authorized": false,
+    "second_seed_authorized": false,
+    "checkpoint_stop_or_promote_authorized": false,
+    "formal_score_authorized": false,
+    "gate3_authorized": false,
+    "deployment_authorized": false,
+    "real_robot_authorized": false
+  }
+}
