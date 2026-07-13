@@ -43,10 +43,13 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   single-seed 机制配对仍有两条 exact trainer：A0（保留左臂模仿对照）PID=PGID `1811464` 已接近
   `1001` 终档，A1（只解除左非击球臂模仿）PID=PGID `1816234` 当时还约有 `33` 分钟；两者日志均未见
   fatal。此后 Pod1/Pod2 的握手超时只记为 `UNKNOWN`，不能把 A0 写成已终档、把 A1 写成失败，二者都
-  禁止重启或重发。C2 已自然终档并通过 checkpoint finite/iteration/lineage/contract 取证；旧 verifier
-  把 `[1.0,-1.0]` 错按整数比较的假拒绝已由新的四文件 external mini-tree 修复并合入 `main`。D2 是
-  当前唯一可新增点火的 trainer，固定 Pod1/GPU2；只有重新连通后重验 C2、D2 absent、GPU2 与 Kit，且
-  `static-validate → plan → validate-runtime → attest` 全绿，才允许一次性启动，绝不重跑 C2。Franco
+  禁止重启或重发。C2 已自然终档并通过 checkpoint finite/iteration/lineage/contract 取证。四文件
+  external mini-tree 已修复旧 verifier 把 `[1.0,-1.0]` 错按整数比较的问题，但随后 latest-main 红队又
+  发现第二个 source 假拒绝：冻结 trainer 实际写出的 question-bank hard contract 只有五个字段，v1r1
+  却要求一个不存在的 `physics_contract_sha256`；旧单测 fixture 人工多放了该字段。D2 因此在
+  attestation/claim 前重新阻断，C2 绝不重跑；下一步必须用新版本分别校验五字段 runtime contract 与
+  bank metadata/source-family 的 physics 绑定。当前没有别的合法新 trainer，不能用旧 seed 或越级动作
+  填槽。Franco
   定为 Pod1 每卡 `4` 个我们的 trainer、Pod2 每卡 `3` 个，为 Yikang 的最多一张卡留动态余量。新增任务
   先跨六张可用 GPU 各放一条，再开始第二/第三轮，Pod1 才有第四轮。空槽只给已过前置门且有预注册
   早判的不同机制，不复制失败
@@ -61,8 +64,8 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
 - **Yikang focus：** 历史 Gate3 谱系复核与独立 physics/reference oracle；现有证据不替代当前 179-D
   planner-policy tuple 的 vendor runtime 行为。
 - **Codex 执行：** exact 动作 lineage、B/C 每类只选一个候选的证书、S0/M0 exact GMR 前置、D2
-  provenance L1 与 A2/B2 热启动 source gate、A0/A1 早判、signed-face checkpoint/judge execution contract
-  和 main 账本；
+  v1r2 provenance 修复与 A2/B2 热启动 source gate、A0/A1 早判、signed-face checkpoint/judge execution
+  contract 和 main 账本；
   每通过一层就合 main，不把多个未验层绑成一个大任务。
 
 ## 1. 当前一套训练是怎样完整跑起来的
@@ -372,7 +375,8 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 ### 尺子与阶段 1
 
 - **[2｜P0] 拍面正反与解析判分。** 责任人 franco；执行者 Codex；signed source gate 与 C2 终档已进
-  main 证据链；下一证据是完成 D2 L1 与 fresh C/D 成对账，再用一个 seed 跑“热启动/从零 × 线性引导
+  main 证据链；下一证据是先修复 v1r1 对真实五字段 train-bank contract 的假拒绝，再完成 D2 L1 与
+  fresh C/D 成对账，然后用一个 seed 跑“热启动/从零 × 线性引导
   关/开”四个机制单元到相对 checkpoint
   `+200/+500/+1000`。只有胜者连同匹配对照才解锁第二 seed，不再给已失败配方复制四 seed。
   [量尺实验](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)；
