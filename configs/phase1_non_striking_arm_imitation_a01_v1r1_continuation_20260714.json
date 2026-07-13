@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "manifest_id": "phase1-non-striking-arm-imitation-a0-a1-single-seed-20260714-v1r1-continuation",
+  "status": "machine_preregistered_one_time_a1_continuation_only",
+  "purpose": "Preserve the already-live A0 trainer after the v1 outer verifier falsely required physics_contract_sha256 inside the schema-3 training-contract question_bank object, attest that exact failure, and claim only the never-started A1 arm.",
+  "simulation_only": true,
+  "real_robot_commands_forbidden": true,
+  "automatic_retry_forbidden": true,
+  "a0_restart_forbidden": true,
+  "prior_control": {
+    "manifest_relative_path": "configs/phase1_non_striking_arm_imitation_a01_prereg_20260714.json",
+    "manifest_runtime_path": "/workspace/codexschema/phase1_non_striking_arm_20260714/control/v1/phase1_non_striking_arm_imitation_a01_prereg_20260714.json",
+    "manifest_sha256": "b2462527b6573ce6accaf8e626fe264c3da10e8994dba133d8f0aeaeed870506",
+    "launcher_relative_path": "scripts/run_phase1_non_striking_arm_imitation_a01.py",
+    "launcher_runtime_path": "/workspace/codexschema/phase1_non_striking_arm_20260714/control/v1/run_phase1_non_striking_arm_imitation_a01.py",
+    "launcher_sha256": "716279ec68ea1b1e22cc32e634e38cd9e81d4fc969b059d21ec7a1f8e081489f",
+    "manifest_id": "phase1-non-striking-arm-imitation-a0-a1-single-seed-20260714-v1",
+    "training_commit": "353a11419ae8589ed4a374ed97169cd7a50d50a3",
+    "training_tree": "184fcb296c09988a7d4b2f5b08168f1584b44b9d",
+    "exact_failure_message": "hard contract train-bank binding changed",
+    "exact_failure_line": "[non-striking-arm-a01] FATAL: hard contract train-bank binding changed",
+    "failure_reproduction_required": true
+  },
+  "a0_existing_evidence": {
+    "cell_id": "A0",
+    "run_name": "phase1_non_striking_arm_A0_full_imitation_seed17",
+    "arm_dir": "/workspace/codexschema/phase1_non_striking_arm_20260714/runs/diagnostic/phase1_non_striking_arm_A0_full_imitation_seed17",
+    "training_run_dir": "/workspace/codexschema/nohope_non_striking_arm_353a114/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-13_19-48-44_phase1_non_striking_arm_A0_full_imitation_seed17",
+    "pid": 1811464,
+    "pgid": 1811464,
+    "started_utc": "2026-07-13T19:48:35Z",
+    "ready_utc": "2026-07-13T19:49:15Z",
+    "launch_contract_sha256": "4c059aa610479a0aea86e437903daaf350f63c1a38f844fa23c517032d418153",
+    "launch_state_sha256": "045518bc488bdf5f80cc96a56ed6efa018785283eeb8e7c8f3bff2c27805a342",
+    "hard_contract_sha256": "14ef410be5bdcc341901b3678d5331a59af89382e07939ad2049210bf68c29f1",
+    "runtime_verified_must_be_absent": true,
+    "mask_log_marker_count": 0
+  },
+  "a1_continuation": {
+    "cell_id": "A1",
+    "run_name": "phase1_non_striking_arm_A1_left_arm_free_seed17",
+    "arm_dir": "/workspace/codexschema/phase1_non_striking_arm_20260714/runs/diagnostic/phase1_non_striking_arm_A1_left_arm_free_seed17",
+    "claim_must_be_absent_before_attestation": true,
+    "training_run_glob_must_be_absent_before_attestation": true,
+    "root_launch_confirmation": "ROOT_APPROVES_SIM_ONLY_A1_V1R1_CONTINUATION",
+    "launch_contract_basename": "launch_contract.json",
+    "launch_state_basename": "run.log.launch",
+    "training_log_basename": "run.log",
+    "runtime_verified_basename": "runtime_verified.json"
+  },
+  "schema3_bank_metadata": {
+    "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz",
+    "sha256": "3a9d8851c1c0b13ef82f58228ea1cf83213157c70d72daa514f1bed3a3885b71",
+    "schema_version": 3,
+    "split": "train",
+    "source_family_sha256": "9603a1788eb17ce03598cdde4efff946039613cf61fcc686f90a385706dba9db",
+    "physics_contract_sha256": "09dfe8999c54e36b258fe54b5ec3da5d9816ff3be3675963b919371d7f4afb95",
+    "source_family_contract_physics_must_match": true
+  },
+  "continuation_control": {
+    "runtime_root": "/workspace/codexschema/phase1_non_striking_arm_20260714/control/v1r1",
+    "recovery_attestation_basename": "a0_v1r1_recovery_attestation.json",
+    "paired_final_result_basename": "a0_a1_v1r1_checkpoint_result.json",
+    "manifest_basename": "phase1_non_striking_arm_imitation_a01_v1r1_continuation_20260714.json",
+    "launcher_basename": "run_phase1_non_striking_arm_imitation_a01_v1r1.py"
+  },
+  "continuation_invariants": {
+    "a0_must_be_live_and_exact_before_attestation": true,
+    "a0_must_remain_live_through_a1_runtime_verification": true,
+    "a0_launch_is_never_reissued": true,
+    "a1_is_the_only_new_claim": true,
+    "recovery_attestation_written_before_a1_claim": true,
+    "recovery_attestation_is_no_clobber": true,
+    "a1_launch_contract_binds_prior_and_continuation_control": true,
+    "bank_file_sha_and_metadata_physics_are_both_required": true,
+    "old_false_rejection_must_reproduce_exactly": true,
+    "corrected_verifier_accepts_only_actual_schema3_question_bank_fields": true,
+    "checkpoint_contract_and_lineage_checks_unchanged": true,
+    "judge_started": false,
+    "real_robot_commands_executed": false
+  }
+}

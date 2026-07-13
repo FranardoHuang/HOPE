@@ -69,7 +69,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | [S0/M0 exact donor canonical-beta](experiments/motion_canonical_beta_s0_m0_20260713.md) | 真实 `1+4` 条 PT 已在绑定 CPU runtime consume 且 non-beta bit-exact；只解锁 exact GMR prereg，A3 脚距仍全 null |
 | [S0/M0 exact GMR 与横移脚距](experiments/motion_exact_gmr_s0_m0_20260713.md) | E1 consumer/阈值/report-last 已冻结；tree/model SHA 已补，direct retarget XML order/site 与 import/Python path 仍由 16 项机器清单阻塞，尚未运行 |
 | [v12/高点拍压/横移组合设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md) | S0/M0 已完成 GVHMR 与 canonical-beta；没有 GMR/schema-2 动作、仿真或训练结果 |
-| [非击球臂模仿消融](experiments/non_striking_arm_imitation_ablation_20260713.md) | E1：A0/A1 direct-mask machine prereg/plan-only runner 已完成；Pod runtime/训练/同卷判读尚未运行 |
+| [非击球臂模仿消融](experiments/non_striking_arm_imitation_ablation_20260713.md) | Partial：A0 `model_200` finite/lineage/contract 已绑定；旧 verifier 假拒绝后 A1 absent，v1r1 只补 A1 的恢复门已就绪；尚无配对终档/同卷判读 |
 
 ## Gate 索引
 

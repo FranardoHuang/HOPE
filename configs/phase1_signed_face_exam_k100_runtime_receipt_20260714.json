@@ -1,0 +1,90 @@
+{
+  "receipt_id": "phase1-signed-face-exam-k100-runtime-receipt-20260714-v1",
+  "status": "paper_materialized_not_started",
+  "scope": "Pod1 CPU-only exact-bank consume receipt; no trainer, judge, simulator, promotion, deployment, or hardware authorization",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "source": {
+    "checkout": "/workspace/codexschema/nohope_schema2_fk_inspect_748b6d5",
+    "commit": "748b6d5fe24bfe58915c34d8dfe09f254f8e4957",
+    "clean_before_and_after": true,
+    "python": "/workspace/hope_isaac_venv/bin/python",
+    "manifest": {
+      "path": "configs/phase1_signed_face_exam_k100_activation_prereg_20260714.json",
+      "sha256": "e401305d4564def80677e6d881ef4afabde01d96ea7ea6aa08224d86835de556"
+    },
+    "consumer": {
+      "path": "scripts/materialize_phase1_signed_face_exam_k100.py",
+      "sha256": "4e094bbebe525fb9cd756c3fa6eebe7436c72f94aba2a12ecd136f612761ac6e"
+    },
+    "static_validate_passed": true,
+    "consume_passed": true
+  },
+  "input_bank": {
+    "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_exam_bank_rebind_v1/s1_v4rg_runtime_order_schema3_exam_882fea4_rebound.npz",
+    "bytes": 63643,
+    "sha256": "60e1a7ade72eaf64e17a1b83795125551f08c6699c8a3cc3c269500d8e6cd1ca",
+    "physics_contract_sha256": "09dfe8999c54e36b258fe54b5ec3da5d9816ff3be3675963b919371d7f4afb95",
+    "source_family_sha256": "9603a1788eb17ce03598cdde4efff946039613cf61fcc686f90a385706dba9db",
+    "question_counts": {
+      "forehand": 183,
+      "backhand": 188
+    }
+  },
+  "outputs": {
+    "root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1",
+    "schedule": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.schedule.json",
+      "bytes": 20237,
+      "file_sha256": "f2777dcd02080ba68b839c76ea9d3f14c938457c9bc01b5692fe86ae59157ec7",
+      "semantic_sha256": "3ca4bdba7f4acbe6f211d90e95305fc4a9459c118e4220c9683060c0a6723365",
+      "question_id_order_sha256": "09f778f2afd7888069ac75aabee3bf19deda015acbbad843ccdb70ca39548bd0",
+      "scheduled_attempts": 100,
+      "unique_question_ids": 100,
+      "selected_per_side": {
+        "forehand": 50,
+        "backhand": 50
+      },
+      "schedule_seed": 0,
+      "hold_range": [
+        0,
+        100
+      ],
+      "no_wrap": true
+    },
+    "activation": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.activation.json",
+      "bytes": 11620,
+      "file_sha256": "e0125b0e937655672e68ac79578c075e4cf8e99fc1cad5655bcb7e3e4a977bb4",
+      "content_sha256": "533beb03a13236eb93404b5c141f6459b08520060b0c2ed0b6dc4ee2e46db3d8",
+      "written_after_schedule_and_revalidation": true
+    }
+  },
+  "signed_face_contract": {
+    "raw_frame": "mount_plusY_A",
+    "physical_frame": "physical_striking_face_B",
+    "clip_order": [
+      "forehand",
+      "backhand"
+    ],
+    "mount_normal_sign_per_clip": [
+      1,
+      -1
+    ],
+    "unsigned_or_oriented_plane_fallback_allowed": false
+  },
+  "authorization": {
+    "paper_materialization_only": true,
+    "auto_start": false,
+    "trainer_started": false,
+    "judge_started": false,
+    "l2_training_authorized": false,
+    "second_seed_authorized": false,
+    "checkpoint_stop_or_promote_authorized": false,
+    "formal_score_authorized": false,
+    "gate3_authorized": false,
+    "deployment_authorized": false,
+    "real_robot_authorized": false
+  },
+  "next_required_contract": "A separate reviewed execution contract must bind an exact checkpoint and adjacent hard contract, lineage, evaluator source/runtime/MJCF/plant, and these exact schedule/activation receipts before any judge or L2 action."
+}

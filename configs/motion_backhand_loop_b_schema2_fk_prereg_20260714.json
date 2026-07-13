@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "plan_id": "motion-franco-backhand-loop-b-schema2-fk-20260714-v1",
+  "status": "preregistered_source_gate_pass_runtime_inspection_not_run",
+  "asset_id": "franco_backhand_loop_b",
+  "human_name": "Franco 反手拉候选 B exact schema-2/FK 实体化",
+  "scope": "exact private SE(2) B GMR pickle to independent no-clobber schema-2 NPZ; source gate only, no simulator/training/hardware",
+  "shared_runtime": {
+    "path": "configs/motion_backhand_loop_bc_schema2_fk_runtime_v1.json",
+    "bytes": 5503,
+    "sha256": "3d32b146e72029960ebf9cb2777f484804dafc87097e9cd3d0513dc277eed6e8"
+  },
+  "source_result_ledger": {
+    "path": "configs/motion_backhand_loop_bc_se2_materialization_results_20260714.json",
+    "bytes": 8144,
+    "sha256": "4e79924387e12a185338412a95497dae27c68f021d8d531cd8332d6494d9a4bb"
+  },
+  "source_motion": {
+    "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_spatial_retarget_primary_v1/franco_backhand_loop_b_98e7b883b29d/franco_backhand_loop_b.98e7b883b29d.se2.gmr.pkl",
+    "bytes": 27927,
+    "sha256": "278279125528c827e0a980389b040d54d16140620c59c67c878286be9d1c8ad6"
+  },
+  "source_materialization_report": {
+    "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_spatial_retarget_primary_v1/franco_backhand_loop_b_98e7b883b29d/materialization_report.json",
+    "bytes": 4051,
+    "sha256": "a238c077524586b2f1181cd24cb84ee29aa985ab274cfb43292f3159c0daadf3"
+  },
+  "source_structure": {
+    "frames": 91,
+    "input_fps": 30,
+    "expected_output_frames": 151,
+    "root_rotation": "xyzw",
+    "already_in_HOPE_frame": true
+  },
+  "output_contract": {
+    "output_root": "/workspace/codexschema/motion_video_intake_20260711/schema2_fk_primary_v1/franco_backhand_loop_b_98e7b883b29d",
+    "motion_filename": "franco_backhand_loop_b.98e7b883b29d.schema2_fk.npz",
+    "report_filename": "schema2_fk_report.json",
+    "output_root_must_not_exist": true,
+    "no_clobber": true,
+    "report_published_last": true
+  },
+  "authorization": {
+    "source_gate_pass": true,
+    "runtime_inspection_run": false,
+    "schema2_materialized": false,
+    "l0_authorized": false,
+    "vendor_l1_authorized": false,
+    "table_net_authorized": false,
+    "dynamics_authorized": false,
+    "simulator_authorized": false,
+    "training_authorized": false,
+    "formal_motion_authorized": false,
+    "hardware_authorized": false
+  },
+  "failure_policy": {
+    "source_or_internal_failure": "stop_this_asset_no_fallback",
+    "external_table_or_net_failure_after_schema2": "return_to_frozen_selector_only",
+    "automatic_retry_or_fallback": false
+  },
+  "next_gate": {
+    "authorized": "read_only_runtime_inspection_of_exact_pickle_donor_and_MJCF_only",
+    "after_inspection": "one_no_clobber_schema2_FK_materialization_then_L0_static_audit",
+    "status": "runtime_inspection_not_run"
+  }
+}

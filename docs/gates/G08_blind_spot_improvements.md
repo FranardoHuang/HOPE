@@ -494,6 +494,14 @@ B/C 私有 PKL，也没有跑
 FK/schema-2/L0/simulator/RL/真机，因此证书仍为 0；
 下一步仍是独立 content-bound B/C schema-2 prereg，而不是直接训练。
 
+该独立 prereg 的源码门现已完成：B/C 分别绑定 exact SE(2) PKL/report 与互不重叠的 no-clobber
+输出，公共合同绑定 restricted pickle、formal donor SHA/三行 metadata 期望、vendor MJCF 的 `1 XML +
+74 mesh` closure、31 关节映射、32 body order、30→50 Hz 和 link-origin pose/COM velocity。consumer
+只接受 `--hope_frame off`，因此不会把已在 HOPE frame 的 root 再转一次。专项为 `17 passed`，两份
+`static` 均未读取私有资产。donor metadata 仍只是绑定期望，不冒充 ONNX runtime receipt；下一门是
+逐资产只读 `inspect`，之后才允许一次 schema-2/FK consume。当前没有 FK/NPZ、L0/L1、桌网、动力学、
+simulator/RL 或真机证据，证书仍为 0、G08 状态不变。
+
 S0/M0 的下一层 exact GMR 现已冻结成两批独立 machine plan。共享 consumer 不把 retarget body order 猜成
 canonical vendor body order，而是分开绑定两套 XML order，再用显式 31-joint bijection 接入 A3 FK。M0
 四条候选的人工 ready windows 已展开为 exact 30 Hz sample indices；结果将同时报告初末前后脚错位和横向

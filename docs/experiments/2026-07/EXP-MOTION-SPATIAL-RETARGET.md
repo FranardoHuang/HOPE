@@ -1,6 +1,6 @@
 # EXP-MOTION-SPATIAL-RETARGET — 新动作能否到达有效击球点？
 
-- 状态：completed（proposal screen、B/C 确定性主选与 exact SE(2) 实体化完成；promotion blocked）
+- 状态：in progress（proposal screen、B/C 确定性主选、exact SE(2) 与 schema-2/FK source gate 完成；runtime inspection / promotion blocked）
 - 阶段/轴：课程阶段 2 / 动作适配与动作源
 - 人类负责人：franco
 - 执行者：Codex
@@ -123,6 +123,39 @@ simulator、RL 或真机。基于 `origin/main@5734dc8` 的 repo-level 回归为
 另立 no-clobber prereg，绑定 exact SE(2) PKL、restricted pickle、vendor MJCF/include/mesh、runtime body
 order、30→50 Hz、link-origin pose/COM velocity，并明确 B/C root 已在 HOPE frame、不得再旋转一次。当前证书
 仍为 `0`，promotion blocked 不变。
+
+## 2026-07-14：B/C schema-2/FK 独立预注册源码门
+
+关节列序纠错后的下一门现已按 B/C 两条独立计划落盘：B prereg SHA 为
+`3d71cc02c6ae68d0ecedf280e8341d763ad39ec0aac1757367c9719e761d33ae`，C 为
+`662b8c4c0851d2f6d9d5c23313dc0c27334528a2b5fb2b62ad90bc3447257e31`。它们分别绑定 accepted
+SE(2) motion/report 的 absolute path、bytes、SHA 和 candidate，不共享输出目录；B/C 从 `91/98`
+个 30 Hz frame 按冻结公式得到 `151/163` 个 50 Hz frame。source/internal failure 停止该资产，不能
+推进 fallback；只有未来外部桌网失败才回到 frozen selector。
+
+共享 runtime 合同 `configs/motion_backhand_loop_bc_schema2_fk_runtime_v1.json`（SHA
+`3d32b146e72029960ebf9cb2777f484804dafc87097e9cd3d0513dc277eed6e8`）绑定：
+
+- accepted restricted NumPy pickle loader 与精确 allowlist/字段集；
+- exact formal donor ONNX SHA `0c428ddf...b7b155` 及完整必需子集
+  `joint_names/articulation_joint_names/action_joint_ids`；
+- vendor MJCF `2ab1cd31...feb97` 与递归 include/external closure：本版 `1` 个 XML、`0` 个
+  include、`74` 个唯一 mesh，closure SHA `e0381752...962de`；
+- 31 关节 source→runtime permutation、32 个 runtime body column、30→50 Hz linear/SLERP
+  和 schema-2 的 link-origin `xpos` / COM `xipos` velocity 分工。
+
+consumer `scripts/materialize_motion_schema2_fk.py`（SHA `33cf23ee...caebd`）的 frame flag 只有
+`--hope_frame off` 一个合法值，避免对已经完成 SE(2) 的 HOPE root 二次旋转。两个 tracked `static`
+命令均通过；专项 `17 passed`，包含错误 frame/time/point/closure/donor/order、输出重叠、错误 SHA、
+duplicate JSON 的 fail-closed 负测；基于 `origin/main@7679b30` 的仓内 `tests/` 回归为
+`782 passed, 10 skipped`。此次没有读取
+私有 PKL/ONNX，没有导入或运行 MuJoCo FK，没有生成 NPZ，也没有 L0/L1/桌网/动力学/simulator/RL/
+真机结果。
+
+donor metadata 文件明确只是与 exact ONNX SHA 绑定的 required-subset 期望，不是已从该 ONNX 抽取的
+runtime receipt。下一门只能先按[操作文档](../../operations/run_motion_spatial_retarget_screen.md)逐资产
+执行 no-write `inspect`；它必须重抽 donor metadata、restricted-load exact PKL、加载 exact vendor model
+并保持输出根不存在。inspect 通过后才允许该资产一次 no-clobber `consume`，之后再做 L0。
 
 权威资料：[G08](../../gates/G08_blind_spot_improvements.md) 和
 [操作文档](../../operations/run_motion_spatial_retarget_screen.md)。

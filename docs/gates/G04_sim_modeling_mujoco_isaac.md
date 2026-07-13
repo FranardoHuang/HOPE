@@ -298,6 +298,34 @@ output, L0, simulator, training or hardware ran. A separate exact B/C prereg mus
 vendor MJCF closure, runtime body order, 30→50 Hz resampling, link-origin/COM-velocity convention and
 no-second-HOPE-rotation rule. G04 remains `Partial`.
 
+## Audit update 2026-07-14: B/C schema-2/FK source gate
+
+The previously open preregistration is now mechanically closed at source level. Independent B/C
+plans (`3d71cc02...d33ae` / `662b8c4c...57e31`) bind the accepted private SE(2) pickle and report
+paths, bytes and SHA, distinct no-clobber output roots, `91/98` input frames at 30 Hz and expected
+`151/163` schema-2 frames at 50 Hz. Their shared runtime contract (`3d32b146...ed6e8`) binds the
+restricted NumPy-pickle loader, GMR-to-runtime joint bijection, exact 32-body column order, schema-2
+point semantics, converter helpers and a canonical hash over the vendor MJCF plus all recursively
+included/external assets. The current model has one XML, zero includes and 74 unique referenced
+meshes; aggregate closure SHA is `e0381752...962de`.
+
+The consumer (`33cf23ee...caebd`) admits only `--hope_frame off`: both private roots already carry
+the accepted HOPE-frame SE(2), so a second rotation has no CLI representation. It freezes linear
+root/joint interpolation plus shortest-path quaternion SLERP, then records link origins from MuJoCo
+`xpos` and center-of-mass velocities from the gradient of `xipos`. The exact formal donor ONNX SHA
+is bound to the required three-row metadata expectation, but this source gate honestly records that
+the metadata was not re-extracted from the ONNX here. A later read-only `inspect` must hash that ONNX,
+extract and compare the rows, restricted-load each private pickle and load the vendor model before
+one no-clobber materialization may run.
+
+Focused dependency-light tests are `17 passed`; against `origin/main@7679b30`, the repository
+`tests/` suite is `782 passed, 10 skipped`. Both tracked `static` commands pass without reading private assets or importing
+MuJoCo/ONNX runtime. Negative tests cover closure/metadata/order/time/
+point/frame drift, B/C namespace overlap, duplicate JSON, wrong plan SHA and `--hope_frame on`.
+No FK, schema-2 output, L0/L1, simulator, training or hardware ran; certificate count stays zero and
+G04 remains `Partial`. See the [experiment](../experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)
+and [operation](../operations/run_motion_spatial_retarget_screen.md).
+
 For M0, the canonical-beta materialization still has null A3 stance fields. The downstream exact-GMR
 plan now freezes canonical foot sites and tolerances, while initial/terminal `d_xy` and pass remain
 null until robot-coordinate evidence exists. G04 remains `Partial`.

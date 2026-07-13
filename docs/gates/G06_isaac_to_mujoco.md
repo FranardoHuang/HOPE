@@ -1348,12 +1348,16 @@ output root 必须不存在，schedule 与 activation 都 no-replace，activatio
 
 manifest/consumer SHA 为 `e401305d...e556` / `4e094bbe...ac6e`；mutation、旧 schedule、unsigned、
 重复题、单侧不足和 partial no-reuse 回归共 `14 passed`，latest-main root `747 passed, 10 skipped`，
-`static-validate` rc0。但本任务没有访问 Pod，
-本机也没有 exact private bank，因此 `consume` 未运行，materialized schedule/activation 的 file/semantic/
-order/content SHA 仍不存在。activation 即使未来生成也固定 trainer/judge/L2/第二 seed/晋级/部署/真机全
-false；后续还需独立 reviewed execution contract。详见
+`static-validate` rc0。随后 Pod1 用 clean detached `748b6d5` source 成功执行单次 exact-bank consume：
+schedule 为 100 个唯一题、正反手各 50，file/semantic/question-order SHA 为 `f2777dcd...1ca` /
+`3ca4bdba...3365` / `09f778f2...bd0`；activation file/content SHA 为 `e0125b0e...bb4` /
+`533beb03...3d8`，并在 schedule 落盘复核后最后写入。runtime receipt 见
+[`phase1_signed_face_exam_k100_runtime_receipt_20260714.json`](../../configs/phase1_signed_face_exam_k100_runtime_receipt_20260714.json)。
+activation 固定 trainer/judge/L2/第二 seed/晋级/部署/真机全 false；后续还需独立 reviewed execution
+contract。详见
 [实验](../experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-PAPER.md)与
-[操作](../operations/run_phase1_signed_face_exam_k100.md)。没有新行为考卷，G06 继续 `Partial`。
+[操作](../operations/run_phase1_signed_face_exam_k100.md)。paper 已物化但没有 checkpoint/judge 行为，G06
+继续 `Partial`。
 
 ### 2026-07-13 pelvis point/axis frame correction
 
@@ -1450,10 +1454,12 @@ and G06 remains `Partial`.
 新的 [C2/D2 L1 source gate](G05_isaac_training_first_loop.md)修复的是训练 checkpoint 的证据身份：
 guidance weight 进入相邻 hard contract，outer claim/source/GPU lane 进入 checkpoint `infos`。它只准备在
 Pod1 GPU1/GPU2 买两条 fresh 25-update provenance smoke；当前没有 runtime contract、`model_24.pt`、
-ONNX export、immutable signed-face paper execution 或 MuJoCo 结果。
+ONNX export、immutable signed-face **policy** paper execution 或 MuJoCo 结果。K100 schedule/paper-only
+activation 已另行物化，但该 activation 明确把 trainer/L2/judge 全设为 false。
 
 launcher/finalizer 源码中不存在 activation、judge、L2、第二 seed 或 stop/promote mode；pair result 也把
 这些授权固定为 false。即使未来两个 L1 terminal 通过，也只能说明 source/claim/contract/finite/lineage
 闭合，不能说明 guidance 有效，更不能作为 Isaac/MuJoCo、vendor Gate3/Gate3B 或真机成绩。进入 L2
-之前还需独立、no-clobber 的 L1 result consumer 与 runtime-materialized immutable paper binding；启动
-judge 又需另一个 reviewed execution contract。G06 保持 `Partial`。
+之前还需独立、no-clobber 的 L1 result consumer，并把已物化 paper 的 exact receipt/SHA 纳入一个新的
+L2-only activation；当前 C2/D2 pair result 自己不能翻转该 paper activation 的 false 位。启动 judge
+又需另一个 reviewed execution contract。G06 保持 `Partial`。

@@ -4,6 +4,10 @@
 50 题，全部已排定 attempt 都留在分母。它只发布 schedule 和 paper-only activation，不启动 trainer、
 judge、Isaac、MuJoCo、vendor stack 或真机，也不授权 L2、第二 seed、checkpoint 晋级或停止。
 
+> 2026-07-14 运行态：v1 已在 Pod1 单次成功物化，原 output root 不得删除、覆盖或再次 consume。
+> schedule/activation exact receipt 见
+> [`phase1_signed_face_exam_k100_runtime_receipt_20260714.json`](../../configs/phase1_signed_face_exam_k100_runtime_receipt_20260714.json)。
+
 预注册与决定规则见
 [`EXP-P1-SIGNED-FACE-EXAM-PAPER`](../experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-PAPER.md)。
 私有 bank 恢复路径见 [`setup_local_sync.md`](setup_local_sync.md)。
@@ -90,6 +94,11 @@ question ID，并检查每行 raw-A demanded normal 为单位向量且按 `[+1,-
 成功状态只能是 `paper_materialized_not_started`。立即归档两文件的 path、bytes、file SHA、schedule
 semantic SHA、ordered question-ID SHA 和 activation content SHA。activation 仍必须显示 trainer/judge/L2/
 第二 seed/stop/promote/formal score/Gate3/deploy/real robot 全 false。
+
+接受的 v1 runtime 结果为：schedule `20,237` bytes，file/semantic/question-order SHA 分别为
+`f2777dcd...1ca` / `3ca4bdba...3365` / `09f778f2...bd0`；100 个 question ID 全唯一、正反手各 `50`。
+activation `11,620` bytes，file/content SHA 为 `e0125b0e...bb4` / `533beb03...3d8`，并在 schedule
+落盘复核后最后写入。该结果只允许复核/复制 exact bytes，**禁止重新执行本节 consume**。
 
 ## 4. fail-closed 与 partial 保全
 

@@ -32,27 +32,37 @@
 planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行为以厂商 MuJoCo 为准。
 
 - **最新可分享结果：** 反手拉 B/C 的 rank-0 主选已在 Pod1 CPU-only runtime 完成 exact 整轨
-  SE(2) 实体化；motion/report SHA 已归档，但 schema-2/L0/vendor L1/桌网/动力学未跑，证书仍为 `0`，
-  只解锁 schema-2 预注册。高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
+  SE(2) 实体化；后续 schema-2/FK 源码门也已进入 `main` 并通过 `17` 项专项回归。逐资产 no-write
+  runtime inspection 又在 exact donor/私有 PKL 下通过：B/C 分别 `91/98` 帧，未写输出。一次性 consume
+  activation 仍待 review/合入，schema-2 物化、L0/vendor L1/桌网/动力学仍未跑，证书仍为 `0`。
+  高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
   canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。它们现在只解锁独立 exact GMR prereg，
   还不是“动作会打球”。
-- **当前运行态：** Pod1 最终只读审计为 `0` trainer/worker/judge，三张 GPU 无 compute。foreign v8 的
-  A/B/C 串行前序已终档；D 是第四格，900 秒内再次未到 hard contract/runtime verified，locked wrapper
-  只清理本臂 exact PGID 并返回 124。这是继旧 v6 D 后第二次 pre-contract Kit boot timeout，已停止
-  自动重试。只读根因账现把两次失败都收窄到 identical table USD 的 load→PhysX 交界；相邻 C 只需
-  `2.339/3.031 s` 越过，但第四进程、Carbonite residue、driver/filesystem 尚未分离。下一步仅有
-  D-first/ordinal-4 × host/private IPC 的 scene-only 诊断设计，尚无运行授权。GPU 不要求用无新因果
-  信息的重复 seed 填满，机制漏斗和动作专属门优先。
-  signed-face exam bank 已过 E2：371 题 old/new replay 逐字节一致并发布新 bank/report；但新 bank 绑定的
-  immutable schedule/paper activation 尚无，所以 L2/judge 仍阻断。
+- **当前运行态：** 2026-07-14 04:31 CST 只读审计时，Pod1/GPU0 的非击球臂单-seed 机制配对有两条
+  exact trainer。A0（保留左臂模仿对照）PID=PGID `1811464`，已到 `531/1001` 并写出 `model_500.pt`；
+  先前 `model_200.pt` 的文件名/内嵌迭代、`1,762,717` 个 finite tensor、fresh lineage=`1` 与
+  hard-contract SHA `14ef410b...29f1` 已绑定。A1（只解除左非击球臂模仿）经一次性
+  continuation 的 `validate-runtime` 全绿后成功启动，PID=PGID `1816234`、Kit ready、hard-contract SHA
+  `c85b52a...6b146`，当时到 `73/1001`、尚未写出 `model_100.pt`，不能作效果判断。GPU0 util `93%`、
+  约 `11.6 GiB`；Pod1 GPU1/2 与 Pod2 三卡无 compute，RAM/swap 正常。A0 保持 untouched，judge 未启动。
+  external
+  plan 另有一个只读相对路径 bug，在 write/claim 前失败且不影响已成功的绝对路径 runtime/launch；已被
+  recovery/launch/runtime 账绑定的 v1r1 bytes 不得修改，只能后续开新版本修。当前资源上限由 Franco
+  定为 Pod1 每卡 `4` 个我们的 trainer、Pod2 每卡 `3` 个，为 Yikang 的最多一张卡留动态余量。新增任务
+  先跨六张可用 GPU 各放一条，再开始第二/第三轮，Pod1 才有第四轮；下一格是 Pod1 GPU1 的 C2、GPU2
+  的 D2，二者须先过 main/source/runtime 门。空槽只给已过前置门且有预注册早判的不同机制，不复制失败
+  seed，也不拿未过动作安全门的任务凑数。
+  signed-face exam bank 已过 E2：371 题 old/new replay 逐字节一致并发布新 bank/report；K100 paper
+  也已从 exact bank 物化为 100 个唯一题、正反手各 50 的 schedule 和 paper-only activation。它尚未绑定
+  checkpoint/evaluator execution contract，故 L2/judge/第二 seed/晋级仍阻断。
 - **Franco focus：** 五种动作的用途、动作专属来球题族、空挥视觉锚点和横移终态站距语义；反手拉
   B/C 先补证，高点拍压作为第五动作，v12 只作后续 Jiayi 对照。
 - **Jiayi focus：** v12/dang 路线与 planner-policy 契合；其候选必须在相同挡球专卷和厂商 MuJoCo 中
   与 Franco 主线对照，不能用录制版本号直接晋级。
 - **Yikang focus：** 历史 Gate3 谱系复核与独立 physics/reference oracle；现有证据不替代当前 179-D
   planner-policy tuple 的 vendor runtime 行为。
-- **Codex 执行：** exact 动作 lineage、B/C 每类只选一个候选的证书、S0/M0 exact GMR 前置、D boot 根因、
-  signed-face 新 exam 的 schedule/paper activation 和 main 账本；
+- **Codex 执行：** exact 动作 lineage、B/C 每类只选一个候选的证书、S0/M0 exact GMR 前置、C2/D2
+  provenance L1、A0/A1 早判、signed-face checkpoint/judge execution contract 和 main 账本；
   每通过一层就合 main，不把多个未验层绑成一个大任务。
 
 ## 1. 当前一套训练是怎样完整跑起来的
@@ -187,8 +197,9 @@ policy 输出 31 个关节目标，PPO 根据 Reward 改进它，独立考卷再
 
 **效果与差距：** 有的独立初始化达到 100/100，另一个只有 20/100。结果属于整套配方，不能归因
 到某一个 Reward 项。拍面尺和稳定性解决前冻结 Reward；理想状态还需用单变量配对证明各项贡献，
-并验证融合后不伤平衡和连续恢复。解除左侧非击球臂模仿、让它参与平衡是最新候选消融，尚未运行，
-不属于当前 Reward；见[非击球臂实验](experiments/non_striking_arm_imitation_ablation_20260713.md)。
+并验证融合后不伤平衡和连续恢复。解除左侧非击球臂模仿、让它参与平衡的单-seed A0/A1 配对正在运行，
+但尚无 paired milestone/同卷结果，不属于已采用 Reward；见
+[非击球臂实验](experiments/non_striking_arm_imitation_ablation_20260713.md)。
 
 ### 4.5 时序与连续：一拍结束后怎么办
 

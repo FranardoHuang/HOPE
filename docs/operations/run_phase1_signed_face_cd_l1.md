@@ -114,7 +114,13 @@ python3 "$LAUNCHER" --manifest "$CONFIG" --mode finalize-pair
 5. C2/D2 两份 hard contract 去掉 `racket_guidance_reward.signed_face.weight` 后逐值相同，原 SHA 必须不同。
 
 `finalize-pair` 只写 provenance-complete 的 L1 成对结果，仍固定 activation/judge/L2/第二 seed/晋级为
-false。后续任何行为判断都需要另行冻结同一 immutable signed-face paper 和 execution consumer。
+false。K100 paper 已另行物化，但其 paper-only activation 也固定 trainer/L2/judge=false；两份 false
+不能拼成授权。
+
+若 C2/D2 L1 全通过，最短的下一版本是一个独立 C2/D2-only L2 consumer：同时内容绑定本页 paired
+result 与 `phase1_signed_face_exam_k100_runtime_receipt_20260714.json`，再冻结同 source/runtime/GPU lane
+的 `4096 env × 1001 update`、`+200/+500/+1000` checkpoint/claim/finalizer。它仍不得自动启动 judge，
+也不得买第二 seed。当前 manifest/launcher 没有这些 mode，所以不能直接把 L1 输出传给 L2。
 
 ## 失败处置
 

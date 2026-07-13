@@ -355,7 +355,7 @@ shared Kit boot lock 仍串行；但 C2 写出 `runtime_verified` 后继续训�
 
 机器 prereg/launcher 的最终 SHA 见运行手册；专项静态/攻击测试
 `28 passed`，source launch-claim/thread-cap 测试 `28 passed`，reward/hard-contract override 测试
-`58 passed`，仓内 `tests/` 为 `793 passed, 10 skipped`。`static-validate` 与 plan rc0；本任务未连接
+`58 passed`，合入 `main@da9ba58` 后仓内 `tests/` 为 `822 passed, 10 skipped`。`static-validate` 与 plan rc0；本任务未连接
 Pod、未启动 Isaac/trainer/judge，也没有 runtime hard contract 或 checkpoint。因此当前裁决是：
 
 - **GO（待 root 审阅）：** 只允许按
@@ -365,5 +365,6 @@ Pod、未启动 Isaac/trainer/judge，也没有 runtime hard contract 或 checkp
   部署或真机。
 
 这个 source gate 不推翻旧四格 activation 缺失，也不证明 signed-face reward 有效；只有两条新 L1 真正
-终档后才能说明 provenance 闭合，行为结论仍须同一 immutable signed-face paper。实验继续
-`running/partial`。
+终档后才能说明 provenance 闭合。K100 paper 已在并行 main 工作中物化，但其 paper-only activation
+固定 trainer/L2/judge=false；下一版本仍须以 no-clobber consumer 同时绑定 C2/D2 pair result 与该 exact
+paper receipt，当前文件不能直接启动 L2。行为结论仍须后续同卷 execution。实验继续 `running/partial`。

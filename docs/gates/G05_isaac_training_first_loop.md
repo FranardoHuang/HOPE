@@ -1299,8 +1299,19 @@ contract drift 与错误布尔值 fail closed。machine prereg 固定 fresh seed
 `+200/+500/+1000`，默认 plan-only，Pod launch 需要 root 显式 token，claim/checkpoint/result 都
 no-clobber。checkpoint 内嵌 hard contract 还逐臂绑定 post-override 四项 body list；两臂 hard SHA
 必须不同，而删除该唯一字段后合同必须完全相同。源码/runner 共 `71 passed`，但 Pod
-`validate-runtime`、trainer、checkpoint 和同卷判读均
-尚未发生；A2 固定预算继续 blocked。详见[实验](../experiments/non_striking_arm_imitation_ablation_20260713.md)
+runtime 已形成一个受控 partial：A0 于 `2026-07-13T19:48:35Z` 以 PID=PGID `1811464` 启动，
+`19:49:15Z` ready；其 `model_200.pt` 已验证 embedded iter `200`、finite、fresh lineage `1` 并绑定
+hard-contract SHA `14ef410b...29f1`。旧 outer verifier 随后因把 schema-3 bank metadata 的 physics SHA
+错当 compact hard-record direct leaf 而精确假拒绝，故 A1 从未 claim。v1r1 source gate 现改为独立解析
+bank file/metadata、复现旧错误、先 attest 既有 A0 三份稳定 SHA，再且仅再 claim A1；A0 dead/drift、
+A1 预存在或 bank drift 都 fail closed，且禁止重跑 A0。v1r1 专项 `12 passed`，新旧 runner 合跑
+`30 passed`。现场 `validate-runtime` 全绿后，唯一一次 `launch-a1` 已成功：A1 PID=PGID `1816234`、
+Kit ready，emitted hard-contract SHA 为
+`c85b52a28ad64a667a7b522562842466270b3741591f6daf09afc1d0f7c6b146`；A0 PID=PGID `1811464`
+untouched。recovery/runtime receipt 已 no-clobber 写入，judge 未启动。external `--mode plan` 另暴露只读
+相对路径 bug：它在 external control 下误找 `control/configs` 并在任何写/claim 前失败；runtime/launch
+使用冻结绝对 v1 路径，不经过该分支。已绑定的 v1r1 bytes 不得修改，路径 bug 只能在新版本修。
+A1 milestone、配对终档和同卷判读仍未发生；A2 固定预算继续 blocked。详见[实验](../experiments/non_striking_arm_imitation_ablation_20260713.md)
 与[操作](../operations/run_phase1_non_striking_arm_imitation_a01.md)。S0/M0 有 Pod 离线结构结果，但没有
 Isaac/MuJoCo 训练、仿真行为或真机动作，G05 仍为 `Partial`。
 
@@ -1557,3 +1568,13 @@ seed/stop-promote/真机全为 false。复现见
 [运行手册](../operations/run_phase1_signed_face_cd_l1.md)和
 [实验卷宗](../experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)。因此这里只是可审阅的 E1
 source gate，G05 保持 `Partial`。
+
+### 2026-07-14 signed-face K100 paper runtime materialized
+
+Pod1 使用 clean detached `748b6d5` source 和 exact rebound exam bank `60e1a7ad...d1ca` 完成单次
+CPU-only consume。新 schedule 是 `100` 个唯一题、正反手各 `50`，file/semantic/question-order SHA 为
+`f2777dcd...1ca` / `3ca4bdba...3365` / `09f778f2...bd0`；最后写出的 paper-only activation
+file/content SHA 为 `e0125b0e...bb4` / `533beb03...3d8`。完整 receipt 见
+[`phase1_signed_face_exam_k100_runtime_receipt_20260714.json`](../../configs/phase1_signed_face_exam_k100_runtime_receipt_20260714.json)。
+它没有消费 checkpoint，也明确不授权 trainer、judge、L2、第二 seed、停止/晋级或部署；所以这不是
+Isaac 行为结果，G05 保持 `Partial`。

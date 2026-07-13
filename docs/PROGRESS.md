@@ -20,6 +20,21 @@
   见[实验](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)与
   [操作](operations/run_phase1_signed_face_cd_l1.md)。
 
+- Franco 将共享算力调度改为“先铺满卡、再叠并发”：保留已绑定运行原位不动，新任务先跨 Pod1/Pod2
+  六张可用 GPU 各放一个有独立科学问题和早判合同的单元，再开始第二、第三轮，Pod1 才有第四轮；
+  被他人占用、前置门未过或会破坏严格配对的卡跳过，不用重复 seed/失败配方补位。操作真源已同步到
+  [跑批作战手册](runbook.md#rtx-5090-实测算力手册)与
+  [RunPod 操作约束](operations/run_on_runpod.md#hard-rules-summary--full-list-in-the-pod-readme)。
+
+- B/C 独立 schema-2/FK prereg 的 source gate 已闭合：两份计划绑定 exact 私有 SE(2) PKL/report、
+  不重叠 no-clobber 输出与 `91/98@30 Hz -> 151/163@50 Hz`；共享合同绑定 restricted pickle、formal
+  donor SHA/三行 metadata 期望、vendor `1 XML + 74 mesh` closure、31-joint/32-body order，以及
+  link-origin pose/COM velocity。consumer 只接受 `--hope_frame off`。两份 `static` 与专项
+  `17 passed`，基于最新 `origin/main@7679b30` 的仓内回归 `782 passed, 10 skipped`；没有读取私有 PKL/ONNX、没有
+  FK/schema-2/L0/L1/simulator/RL/真机。下一步仅为逐资产
+  no-write runtime `inspect`。见[实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)和
+  [操作](operations/run_motion_spatial_retarget_screen.md)。
+
 - Pod2 CPU 补跑了 MuJoCo evaluator 两个此前因本机缺依赖而 skip 的 optional 模块。首次真实收集
   `2 failed, 8 passed`，定位为 synthetic fixture 把非等价执行路径当对照、把 welded child 当可碰
   articulation；只修夹具后，同一 production evaluator bytes 在 Python `3.12.3` / MuJoCo `3.10.0`
@@ -30,9 +45,11 @@
 - signed-face E2 rebound exam bank 的下一层 immutable K100 source gate 已冻结：严格复用现有 schema-v3
   schedule 算法，从 exact bank SHA 重建 question ID，seed0/hold0–100/每侧无放回50/全100次分母；raw-A
   `[+1,-1]` physical-B 身份、旧纸拒绝、no-replace 和 activation-last 均 fail closed。专项攻击回归
-  `14 passed`、latest-main root `747 passed, 10 skipped`、`static-validate` rc0；本任务未访问 Pod，本机缺
-  exact private bank，所以 runtime `consume` 未跑，schedule/activation SHA 仍不存在，L2/judge/第二
-  seed/晋级全阻断。见
+  `14 passed`、latest-main root `747 passed, 10 skipped`、`static-validate` rc0。随后 Pod1 的 clean detached
+  `748b6d5` source 完成单次 exact-bank consume：100 unique、50/侧；schedule file/semantic/order SHA
+  `f2777dcd...1ca` / `3ca4bdba...3365` / `09f778f2...bd0`，activation file/content SHA
+  `e0125b0e...bb4` / `533beb03...3d8`。这只把 paper 升为 E2 materialized；checkpoint execution contract、
+  L2/judge/第二 seed/晋级仍全阻断。见
   [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-PAPER.md)与
   [操作](operations/run_phase1_signed_face_exam_k100.md)。
 
@@ -41,8 +58,15 @@
   参数、关节/动作/力矩/接触/自碰/终止安全均不变；四项 post-override body list 已进入 checkpoint
   hard contract，A0/A1 各绑不同 SHA，去掉该唯一字段后必须完全相同。两条 fresh seed17 长臂绑定同 motion/bank/
   `4096 env × 1001 update`，默认 plan-only、root token 点火、no-clobber runtime/finalizer、
-  `+200/+500/+1000` 早判；A2 固定预算继续 blocked。专项合计 `71 passed`；尚未在 Pod 做 runtime
-  validate/训练/判卷或真机。见[实验](experiments/non_striking_arm_imitation_ablation_20260713.md)与
+  `+200/+500/+1000` 早判；A2 固定预算继续 blocked。Pod1 A0 已以 exact PID=PGID `1811464` 运行，
+  `model_200.pt` 的 iter/finite/fresh lineage/hard-contract SHA 绑定通过；旧 outer verifier 因错误要求 compact
+  bank record 直含 metadata physics SHA 而假拒绝，A1 当时从未 claim。一次性 v1r1 continuation 已补
+  `12 passed` 的 source gate：绑定 old+new control、复现旧错误、独立解析 bank metadata、先 attest 既有 A0，
+  再且仅再 claim A1；禁止重跑 A0，A0/A1 漂移或预存在均 fail closed。external `validate-runtime` 全绿后
+  A1 已以 PID=PGID `1816234` 越过 Kit ready，hard-contract SHA `c85b52a...6b146`；A0 `1811464`
+  untouched，judge 未启动。external plan 的相对路径 bug 在任何 write/claim 前失败且不影响绝对路径
+  runtime/launch；冻结 v1r1 bytes 不得修改，只在后续新版本修。尚无 A1 milestone、配对终档、同卷判读
+  或真机。见[实验](experiments/non_striking_arm_imitation_ablation_20260713.md)与
   [操作](operations/run_phase1_non_striking_arm_imitation_a01.md)。
 
 - MuJoCo frame/evaluator integration 的独立红队 `NO-MERGE` 阻塞已逐项关闭并合入 main：bound implicit

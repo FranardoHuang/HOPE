@@ -230,6 +230,79 @@ are already in the HOPE frame, that prereg must select `--hope_frame off`; a sec
 rotation is forbidden. Passing this source gate does not run forward kinematics, create schema-2,
 or authorize L0/L1/simulator/training/hardware.
 
+## Validate the independent B/C schema-2/FK source gate (2026-07-14)
+
+The separate preregistration now exists. [`FK`](../DEFINITIONS.md) means forward kinematics: here it
+will later evaluate the frozen joint/root trajectory in the vendor MuJoCo model, without stepping a
+dynamics simulation. The current command is `static` only: it reads tracked repository sources,
+derives the full MJCF include/external-file closure, and must not read either private pickle or an
+ONNX file.
+
+```bash
+TOOL=scripts/materialize_motion_schema2_fk.py
+TOOL_SHA=33cf23eecff514a0e89bfe245db5b63470c4cd1dc9a433d0b920dfd84b9caebd
+B_PLAN=configs/motion_backhand_loop_b_schema2_fk_prereg_20260714.json
+B_SHA=3d71cc02c6ae68d0ecedf280e8341d763ad39ec0aac1757367c9719e761d33ae
+C_PLAN=configs/motion_backhand_loop_c_schema2_fk_prereg_20260714.json
+C_SHA=662b8c4c0851d2f6d9d5c23313dc0c27334528a2b5fb2b62ad90bc3447257e31
+
+test "$(shasum -a 256 "$TOOL" | awk '{print $1}')" = "$TOOL_SHA"
+test "$(shasum -a 256 "$B_PLAN" | awk '{print $1}')" = "$B_SHA"
+test "$(shasum -a 256 "$C_PLAN" | awk '{print $1}')" = "$C_SHA"
+
+CUDA_VISIBLE_DEVICES= python3 "$TOOL" \
+  --prereg "$B_PLAN" --expected-prereg-sha256 "$B_SHA" \
+  --peer-prereg "$C_PLAN" --expected-peer-prereg-sha256 "$C_SHA" \
+  --hope_frame off static
+
+CUDA_VISIBLE_DEVICES= python3 "$TOOL" \
+  --prereg "$C_PLAN" --expected-prereg-sha256 "$C_SHA" \
+  --peer-prereg "$B_PLAN" --expected-peer-prereg-sha256 "$B_SHA" \
+  --hope_frame off static
+
+python3 -m pytest -q tests/test_motion_backhand_loop_bc_schema2_fk_prereg.py
+```
+
+Expected: two `PASS static ... pair_exact=true ... runtime_inspection=false` lines and
+`17 passed`. `--hope_frame off` means “the accepted SE(2) root is already in the HOPE world
+frame”; the parser has no `on` choice. B/C output roots are disjoint and must not exist.
+
+The shared runtime contract SHA is
+`3d32b146e72029960ebf9cb2777f484804dafc87097e9cd3d0513dc277eed6e8`. It binds one vendor XML,
+zero includes and 74 referenced meshes under closure SHA `e0381752...962de`. It also binds
+`configs/a3_schema2_fk_donor_metadata_v1.json`, but that file is an expected three-row metadata
+subset tied to exact donor ONNX SHA `0c428ddf...b7b155`; it is deliberately **not** a claim that the
+rows were re-extracted from the ONNX in this source gate.
+
+### Next gate: read-only runtime inspection, not yet executed
+
+Restore the exact B/C private files at the absolute paths already in each plan and locate the exact
+formal donor ONNX without copying over either source or output root. Then run `inspect`, one asset at
+a time. `inspect` hashes and restricted-loads the pickle, hashes the ONNX and re-extracts its required
+metadata, loads the content-bound vendor MJCF, verifies all joint/body names, and writes nothing.
+
+```bash
+DONOR=/absolute/path/to/exact/formal/policy.onnx
+test "$(shasum -a 256 "$DONOR" | awk '{print $1}')" = \
+  0c428ddf9968b047acbe7bbd5a39069a8e661ab0421038ea3b635284deb7b155
+
+CUDA_VISIBLE_DEVICES= python3 "$TOOL" \
+  --prereg "$B_PLAN" --expected-prereg-sha256 "$B_SHA" \
+  --peer-prereg "$C_PLAN" --expected-peer-prereg-sha256 "$C_SHA" \
+  --hope_frame off --donor "$DONOR" inspect
+
+CUDA_VISIBLE_DEVICES= python3 "$TOOL" \
+  --prereg "$C_PLAN" --expected-prereg-sha256 "$C_SHA" \
+  --peer-prereg "$B_PLAN" --expected-peer-prereg-sha256 "$B_SHA" \
+  --hope_frame off --donor "$DONOR" inspect
+```
+
+Do not substitute `consume` until both no-write inspections have their exact source/runtime receipt
+recorded. After inspection, each asset gets at most one no-clobber `consume`; its report is the final
+publication link. A completed schema-2 NPZ still is not an accepted motion: run L0 next, then vendor
+L1 self-collision and full-trajectory table/net clearance. Never advance B/C fallback for an
+internal schema-2/FK failure.
+
 ## Promotion remains deliberately blocked
 
 The current manifest says `certificate_bundle_preregistered=false`; passing an
