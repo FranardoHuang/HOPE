@@ -99,6 +99,11 @@ Not done:
   envelope, and prefer damped take-over behaviors to stiff position snaps.
 - IMU yaw drift silently corrupts any world-referenced quantity; the engage-time yaw-align must be
   re-verified whenever the boot sequence changes.
+- Vendor `SimReset` nonzero base twist is not frame-exact: `/sim/a3/pelvis_twist` publishes
+  link-origin linear and angular velocity in odom/world axes, while the subscriber copies world
+  angular velocity directly into MuJoCo body-local freejoint qvel and ignores `header.frame_id`.
+  Current named-keyframe flows use all-zero velocity and do not trigger it. Do not add a nonzero
+  absolute-twist reset to Gate3 until the ROS point/frame contract and a round-trip test are fixed.
 
 ## Next Steps
 

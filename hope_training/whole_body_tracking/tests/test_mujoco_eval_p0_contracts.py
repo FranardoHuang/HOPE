@@ -30,6 +30,78 @@ def _load_module():
 M = _load_module()
 
 
+@pytest.mark.parametrize(
+    ("metadata", "clip_count", "expected"),
+    [
+        ({"motion_body_lin_vel_points": "center_of_mass"}, 1, ("center_of_mass",)),
+        ({"motion_body_lin_vel_points": "link_origin"}, 1, ("link_origin",)),
+        (
+            {"motion_kinematics_exact": "0",
+             "motion_body_lin_vel_points": "center_of_mass,link_origin"},
+            2,
+            ("center_of_mass", "link_origin"),
+        ),
+        ({"motion_kinematics_exact": "1"}, 2, ("center_of_mass", "center_of_mass")),
+        ({"motion_kinematics_exact": "0"}, 2, None),
+        ({"motion_allow_legacy_link_origin_velocity": "1"}, 2, None),
+        ({}, None, None),
+    ],
+)
+def test_motion_metadata_resolves_explicit_per_clip_points_without_aggregate_guessing(
+    metadata, clip_count, expected
+):
+    assert M.motion_body_lin_vel_points_from_metadata(
+        metadata, clip_count=clip_count
+    ) == expected
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"motion_kinematics_exact": "true"},
+        {"motion_allow_legacy_link_origin_velocity": "false"},
+        {"motion_body_lin_vel_points": "center_of_mass,unknown"},
+    ],
+)
+def test_motion_metadata_rejects_noncanonical_velocity_point_flags(metadata):
+    with pytest.raises(ValueError, match="must be 0\\|1|unknown values"):
+        M.motion_body_lin_vel_points_from_metadata(metadata, clip_count=2)
+
+
+def test_teacher_reference_velocity_points_reject_ambiguous_and_wrong_clip_count():
+    with pytest.raises(ValueError, match="ambiguous"):
+        M.validated_motion_body_lin_vel_points(None, 2)
+    with pytest.raises(ValueError, match="count 1 != clip count 2"):
+        M.validated_motion_body_lin_vel_points(("center_of_mass",), 2)
+    assert M.validated_motion_body_lin_vel_points(
+        ("center_of_mass", "link_origin"), 2
+    ) == ("center_of_mass", "link_origin")
+
+
+def test_freejoint_origin_velocity_conversion_is_point_explicit_and_numpy_only():
+    quat = np.asarray([0.91, 0.17, -0.26, 0.28], dtype=np.float64)
+    quat /= np.linalg.norm(quat)
+    declared = np.asarray([0.72, -0.41, 0.19], dtype=np.float64)
+    omega = np.asarray([1.13, -0.67, 0.84], dtype=np.float64)
+    body_ipos = np.asarray([-0.003, 0.012, -0.127], dtype=np.float64)
+    expected_com = declared - np.cross(omega, M.mat_from_quat(quat) @ body_ipos)
+    np.testing.assert_allclose(
+        M.freejoint_origin_lin_vel_w(
+            declared, omega, quat, body_ipos, "center_of_mass"
+        ),
+        expected_com,
+        atol=1e-15,
+    )
+    np.testing.assert_array_equal(
+        M.freejoint_origin_lin_vel_w(
+            declared, omega, quat, body_ipos, "link_origin"
+        ),
+        declared,
+    )
+    with pytest.raises(ValueError, match="invalid root linear-velocity point"):
+        M.freejoint_origin_lin_vel_w(declared, omega, quat, body_ipos, "ambiguous")
+
+
 def test_exact_strike_clock_is_post_step_and_holds_stay_pinned():
     dt = 0.02
     # An action selected one frame before contact produces the contact state after physics.
@@ -276,19 +348,23 @@ def _install_fake_mujoco(monkeypatch, *, armature=0.01, effort=24.0,
                          step_velocity=None):
     joint_names = [f"joint_{index}" for index in range(31)]
     body_names = list(dict.fromkeys([*M.TRACKED_BODIES, *M.FEET_BODIES]))
-    joint_ids = {name: index for index, name in enumerate(joint_names)}
+    joint_ids = {name: index + 1 for index, name in enumerate(joint_names)}
     body_ids = {name: index for index, name in enumerate(body_names)}
     actuator_ids = {name + "_motor": index for index, name in enumerate(joint_names)}
     qadr = np.arange(7, 38, dtype=int)
     vadr = np.arange(6, 37, dtype=int)
     model = SimpleNamespace(
         opt=SimpleNamespace(timestep=0.0, integrator=0),
-        jnt_qposadr=qadr,
-        jnt_dofadr=vadr,
+        njnt=32,
+        jnt_qposadr=np.concatenate(([0], qadr)),
+        jnt_dofadr=np.concatenate(([0], vadr)),
+        jnt_type=np.concatenate(([0], np.full(31, 3, dtype=int))),
+        jnt_bodyid=np.concatenate(([body_ids["pelvis_link"]], np.ones(31, dtype=int))),
         actuator_ctrlrange=np.column_stack((
             np.full(31, -effort), np.full(31, effort),
         )),
-        jnt_range=np.column_stack((np.full(31, -2.0), np.full(31, 2.0))),
+        jnt_range=np.vstack((np.zeros((1, 2)),
+                             np.column_stack((np.full(31, -2.0), np.full(31, 2.0))))),
         dof_armature=np.zeros(37),
         dof_damping=np.full(37, 0.5),
         dof_frictionloss=np.full(37, 0.2),
@@ -326,6 +402,7 @@ def _install_fake_mujoco(monkeypatch, *, armature=0.01, effort=24.0,
         MjModel=SimpleNamespace(from_xml_path=lambda _path: model),
         MjData=_Data,
         mjtObj=obj,
+        mjtJoint=SimpleNamespace(mjJNT_FREE=0),
         mjtIntegrator=SimpleNamespace(mjINT_IMPLICITFAST=7),
         mj_name2id=name2id,
         mj_step=step,
@@ -333,6 +410,55 @@ def _install_fake_mujoco(monkeypatch, *, armature=0.01, effort=24.0,
     )
     monkeypatch.setitem(sys.modules, "mujoco", fake)
     return joint_names, body_names, model
+
+
+def _append_fake_freejoint(model, *, body_id):
+    model.jnt_qposadr = np.append(model.jnt_qposadr, 38)
+    model.jnt_dofadr = np.append(model.jnt_dofadr, 37)
+    model.jnt_type = np.append(model.jnt_type, 0)
+    model.jnt_bodyid = np.append(model.jnt_bodyid, int(body_id))
+    model.jnt_range = np.vstack((model.jnt_range, np.zeros((1, 2))))
+    model.njnt += 1
+
+
+def test_mujoco_robot_rejects_nonzero_pelvis_freejoint_addresses(monkeypatch):
+    joint_names, body_names, model = _install_fake_mujoco(monkeypatch)
+    model.jnt_dofadr[0] = 1
+    with pytest.raises(SystemExit, match="freejoint must start at qpos address 0"):
+        M.MujocoRobot(
+            "unused.xml", joint_names, body_names, 0.005,
+            keep_native_damping=False, keep_frictionloss=False,
+            pd_mode="explicit", actuator_types=("explicit",) * 31,
+        )
+
+
+def test_mujoco_robot_allows_other_free_bodies_but_requires_exactly_one_on_pelvis(monkeypatch):
+    joint_names, body_names, model = _install_fake_mujoco(monkeypatch)
+    _append_fake_freejoint(model, body_id=1)
+    robot = M.MujocoRobot(
+        "unused.xml", joint_names, body_names, 0.005,
+        keep_native_damping=False, keep_frictionloss=False,
+        pd_mode="explicit", actuator_types=("explicit",) * 31,
+    )
+    assert robot.root_free_jid == 0
+
+    joint_names, body_names, model = _install_fake_mujoco(monkeypatch)
+    _append_fake_freejoint(model, body_id=0)
+    with pytest.raises(SystemExit, match="pelvis_link must own exactly one freejoint, found 2"):
+        M.MujocoRobot(
+            "unused.xml", joint_names, body_names, 0.005,
+            keep_native_damping=False, keep_frictionloss=False,
+            pd_mode="explicit", actuator_types=("explicit",) * 31,
+        )
+
+    joint_names, body_names, model = _install_fake_mujoco(monkeypatch)
+    model.jnt_type[0] = 3
+    with pytest.raises(SystemExit, match="pelvis_link must own exactly one freejoint, found 0"):
+        M.MujocoRobot(
+            "unused.xml", joint_names, body_names, 0.005,
+            keep_native_damping=False, keep_frictionloss=False,
+            pd_mode="explicit", actuator_types=("explicit",) * 31,
+        )
 
 
 def test_mujoco_robot_applies_bound_implicit_armature_effort_and_zero_friction(monkeypatch):
@@ -497,6 +623,7 @@ def _metadata(*, schema="2", baked=None, empirical=None, sidecar_sha=None,
         "body_names": ",".join(M.TRACKED_BODIES),
         "anchor_body_name": M.ANCHOR_BODY,
         "observation_names": "legacy_175",
+        "clip_seg_lengths": "10,20",
     }
     if baked is not None:
         md["obs_norm_baked"] = str(int(baked))
@@ -511,6 +638,8 @@ def _metadata(*, schema="2", baked=None, empirical=None, sidecar_sha=None,
             "training_contract_schema_version": "2",
             "training_contract_sha256": "b" * 64,
             "source_checkpoint_sha256": "a" * 64,
+            "motion_kinematics_exact": "1",
+            "motion_body_lin_vel_points": "center_of_mass,center_of_mass",
             "actor_obs_contract": "deploy_parity",
             "actor_obs_mode": "deploy_parity",
             "actor_obs_total_dim": "175",
@@ -607,6 +736,43 @@ def test_schema2_normalization_truth_is_fail_closed_but_unbound_sidecar_is_marke
         ),
     )
     assert fully_bound.evaluation_contract_exact is True
+    assert fully_bound.motion_body_lin_vel_points == (
+        "center_of_mass", "center_of_mass",
+    )
+
+    legacy_exact_motion_md = _metadata(
+        baked=False, empirical=True, sidecar_sha=digest, training_exact=True
+    )
+    legacy_exact_motion_md.pop("motion_body_lin_vel_points")
+    legacy_exact_motion = _policy(monkeypatch, tmp_path, legacy_exact_motion_md)
+    assert legacy_exact_motion.motion_body_lin_vel_points == (
+        "center_of_mass", "center_of_mass",
+    )
+    assert legacy_exact_motion.evaluation_contract_exact is True
+
+    mixed_exact_claim_md = _metadata(
+        baked=False, empirical=True, sidecar_sha=digest, training_exact=True
+    )
+    mixed_exact_claim_md["motion_body_lin_vel_points"] = "center_of_mass,link_origin"
+    mixed_exact_claim = _policy(monkeypatch, tmp_path, mixed_exact_claim_md)
+    assert mixed_exact_claim.motion_body_lin_vel_points == (
+        "center_of_mass", "link_origin",
+    )
+    assert mixed_exact_claim.evaluation_contract_exact is False
+
+    wrong_point_count_md = _metadata(
+        baked=False, empirical=True, sidecar_sha=digest, training_exact=True
+    )
+    wrong_point_count_md["motion_body_lin_vel_points"] = "center_of_mass"
+    wrong_point_count = _policy(monkeypatch, tmp_path, wrong_point_count_md)
+    assert wrong_point_count.evaluation_contract_exact is False
+
+    ambiguous_motion = _policy(
+        monkeypatch, tmp_path,
+        _metadata(baked=False, empirical=True, sidecar_sha=digest),
+    )
+    assert ambiguous_motion.motion_body_lin_vel_points is None
+    assert ambiguous_motion.evaluation_contract_exact is False
 
     with pytest.raises(SystemExit, match="contradicts graph dataflow"):
         _policy(

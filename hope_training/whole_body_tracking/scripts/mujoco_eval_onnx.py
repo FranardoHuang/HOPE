@@ -422,6 +422,97 @@ FORMAL_READY_STATE_MODE = "mjcf_named_keyframe:stand:v1"
 TEACHER_REFERENCE_READY_STATE_MODE = "teacher_reference_clip_start:v1"
 CONTINUOUS_READY_STATE_MODE = "continuous_previous_question:v1"
 DEPLOY_NOMINAL_READY_STATE_MODE = "deploy_nominal_stand:v1"
+ROOT_LIN_VEL_POINT_CENTER_OF_MASS = "center_of_mass"
+ROOT_LIN_VEL_POINT_LINK_ORIGIN = "link_origin"
+ROOT_LIN_VEL_POINTS = (
+    ROOT_LIN_VEL_POINT_CENTER_OF_MASS,
+    ROOT_LIN_VEL_POINT_LINK_ORIGIN,
+)
+
+
+def motion_body_lin_vel_points_from_metadata(metadata, *, clip_count=None):
+    """Parse explicit per-clip points, with one narrow old-exact compatibility rule."""
+    exact = str(metadata.get("motion_kinematics_exact", "")).strip()
+    allow_legacy = str(
+        metadata.get("motion_allow_legacy_link_origin_velocity", "")
+    ).strip()
+    if exact not in ("", "0", "1"):
+        raise ValueError("motion_kinematics_exact metadata must be 0|1 when present")
+    if allow_legacy not in ("", "0", "1"):
+        raise ValueError(
+            "motion_allow_legacy_link_origin_velocity metadata must be 0|1 when present"
+        )
+    raw_points = str(metadata.get("motion_body_lin_vel_points", "")).strip()
+    if raw_points:
+        points = tuple(value.strip() for value in raw_points.split(","))
+        invalid = [value for value in points if value not in ROOT_LIN_VEL_POINTS]
+        if invalid:
+            raise ValueError(
+                "motion_body_lin_vel_points contains unknown values: "
+                + ", ".join(repr(value) for value in invalid)
+            )
+        return points
+    # Before per-clip metadata existed, an exact motion contract could only be schema-2 COM.
+    # Preserve that lineage when the clip count is independently known.  Inexact/missing aggregate
+    # truth cannot identify a point and remains ambiguous rather than being guessed as link-origin.
+    if exact == "1" and clip_count is not None:
+        try:
+            clip_count = int(clip_count)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("clip_count must be a positive integer") from exc
+        if clip_count <= 0:
+            raise ValueError("clip_count must be a positive integer")
+        return (ROOT_LIN_VEL_POINT_CENTER_OF_MASS,) * clip_count
+    return None
+
+
+def validated_motion_body_lin_vel_points(points, clip_count):
+    """Return a complete per-clip tuple or reject ambiguous/misaligned reset semantics."""
+    try:
+        clip_count = int(clip_count)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("clip_count must be a positive integer") from exc
+    if clip_count <= 0:
+        raise ValueError("clip_count must be a positive integer")
+    if points is None:
+        raise ValueError("motion body linear-velocity points are ambiguous")
+    if not isinstance(points, (list, tuple)):
+        raise ValueError("motion body linear-velocity points must be an array")
+    points = tuple(str(value) for value in points)
+    if len(points) != clip_count:
+        raise ValueError(
+            f"motion body linear-velocity point count {len(points)} != clip count {clip_count}"
+        )
+    invalid = [value for value in points if value not in ROOT_LIN_VEL_POINTS]
+    if invalid:
+        raise ValueError(
+            "motion body linear-velocity points contain unknown values: "
+            + ", ".join(repr(value) for value in invalid)
+        )
+    return points
+
+
+def freejoint_origin_lin_vel_w(
+    declared_lin_vel_w, root_ang_vel_w, root_quat_wxyz, body_ipos, declared_point
+):
+    """Convert one declared rigid-body point velocity to MuJoCo freejoint-origin velocity."""
+    lin = np.asarray(declared_lin_vel_w, dtype=np.float64)
+    ang = np.asarray(root_ang_vel_w, dtype=np.float64)
+    quat = np.asarray(root_quat_wxyz, dtype=np.float64)
+    ipos = np.asarray(body_ipos, dtype=np.float64)
+    if lin.shape != (3,) or ang.shape != (3,) or quat.shape != (4,) or ipos.shape != (3,):
+        raise ValueError(
+            f"invalid root kinematic shapes lin={lin.shape} ang={ang.shape} "
+            f"quat={quat.shape} body_ipos={ipos.shape}"
+        )
+    if not all(np.isfinite(value).all() for value in (lin, ang, quat, ipos)):
+        raise ValueError("root kinematics contain NaN/Inf")
+    if declared_point == ROOT_LIN_VEL_POINT_LINK_ORIGIN:
+        return lin.copy()
+    if declared_point == ROOT_LIN_VEL_POINT_CENTER_OF_MASS:
+        com_offset_w = mat_from_quat(quat) @ ipos
+        return lin - np.cross(ang, com_offset_w)
+    raise ValueError(f"invalid root linear-velocity point {declared_point!r}")
 
 
 def canonical_contract_sha256(value):
@@ -589,7 +680,9 @@ def stage1_question_bank_module_path(wbt_root):
     return path
 
 
-def materialize_ready_state_contract(robot, refs_table, seg_start, mode, action_dim=31):
+def materialize_ready_state_contract(
+    robot, refs_table, seg_start, mode, *, root_lin_vel_points, action_dim=31
+):
     """Exercise the real reset path once and return its content-addressed contract."""
     zero_action = np.zeros(int(action_dim), dtype=np.float64)
     if mode == FORMAL_READY_STATE_MODE:
@@ -597,8 +690,14 @@ def materialize_ready_state_contract(robot, refs_table, seg_start, mode, action_
         return robot.ready_state_snapshot(mode, zero_action)
     if mode != TEACHER_REFERENCE_READY_STATE_MODE:
         raise ValueError(f"unsupported ready-state mode {mode!r}")
+    try:
+        root_lin_vel_points = validated_motion_body_lin_vel_points(
+            root_lin_vel_points, len(np.asarray(seg_start).reshape(-1))
+        )
+    except ValueError as exc:
+        raise SystemExit(f"[FATAL] teacher-reference ready state: {exc}") from exc
     per_clip = []
-    for ts_value in np.asarray(seg_start, dtype=np.int64).reshape(-1):
+    for clip, ts_value in enumerate(np.asarray(seg_start, dtype=np.int64).reshape(-1)):
         ts = int(ts_value)
         refs = refs_table[ts]
         robot.reset_to_reference(
@@ -606,6 +705,7 @@ def materialize_ready_state_contract(robot, refs_table, seg_start, mode, action_
             root_quat=refs["body_quat_w"][ROOT_TRACKED_IDX],
             root_lin_w=refs["body_lin_vel_w"][ROOT_TRACKED_IDX],
             root_ang_w=refs["body_ang_vel_w"][ROOT_TRACKED_IDX],
+            root_lin_vel_point=root_lin_vel_points[clip],
             q_artic=refs["joint_pos"], qd_artic=refs["joint_vel"],
         )
         per_clip.append(robot.ready_state_snapshot(mode, zero_action))
@@ -1276,6 +1376,14 @@ class OnnxPolicy:
             raise SystemExit("[FATAL] training_contract_exact metadata must be 0|1")
         if self.training_contract_exact != "1":
             self.evaluation_contract_exact = False
+        self.motion_kinematics_exact_meta = str(
+            md.get("motion_kinematics_exact", "")
+        ).strip()
+        self.motion_allow_legacy_link_origin_velocity_meta = str(
+            md.get("motion_allow_legacy_link_origin_velocity", "")
+        ).strip()
+        if self.motion_kinematics_exact_meta != "1":
+            self.evaluation_contract_exact = False
         self.training_contract_schema_version = str(
             md.get("training_contract_schema_version", "")
         ).strip()
@@ -1506,6 +1614,42 @@ class OnnxPolicy:
         self.motion_clip_sha256 = tuple(
             v.strip() for v in md.get("motion_clip_sha256", "").split(",") if v.strip()
         )
+        clip_count_from_metadata = (
+            len(self.clip_seg_lengths)
+            if self.clip_seg_lengths is not None
+            else (len(self.motion_clip_sha256) or None)
+        )
+        try:
+            self.motion_body_lin_vel_points = motion_body_lin_vel_points_from_metadata(
+                md, clip_count=clip_count_from_metadata
+            )
+        except ValueError as exc:
+            raise SystemExit(f"[FATAL] {exc}") from exc
+        explicit_velocity_points = bool(str(md.get("motion_body_lin_vel_points", "")).strip())
+        self.motion_body_lin_vel_points_source = (
+            "explicit_per_clip_metadata"
+            if explicit_velocity_points
+            else (
+                "legacy_exact_all_com"
+                if self.motion_body_lin_vel_points is not None
+                else "ambiguous_legacy_metadata"
+            )
+        )
+        if (
+            self.motion_body_lin_vel_points is None
+            or (
+                clip_count_from_metadata is not None
+                and len(self.motion_body_lin_vel_points) != clip_count_from_metadata
+            )
+            or (
+                self.motion_kinematics_exact_meta == "1"
+                and any(
+                    point != ROOT_LIN_VEL_POINT_CENTER_OF_MASS
+                    for point in self.motion_body_lin_vel_points
+                )
+            )
+        ):
+            self.evaluation_contract_exact = False
         # per-clip reference base->racket reach offset at the strike frame (dx0,dy0,dx1,dy1,...).
         # Needed to derive the 177-D hitter base station from the racket target (base_couple_mode
         # reference_reach). Baked by utils/exporter.py since 2026-07-06; older 177 exports lack it —
@@ -1969,6 +2113,21 @@ class MujocoRobot:
         self.tracked_bid = np.array([bid(n) for n in body_names], int)
         self.pelvis_bid = bid("pelvis_link")
         self.torso_bid = bid(ANCHOR_BODY)
+        pelvis_free_jids = np.flatnonzero(
+            (np.asarray(self.model.jnt_type) == int(mujoco.mjtJoint.mjJNT_FREE))
+            & (np.asarray(self.model.jnt_bodyid) == self.pelvis_bid)
+        )
+        require_contract(
+            pelvis_free_jids.shape == (1,),
+            "pelvis_link must own exactly one freejoint, "
+            f"found {len(pelvis_free_jids)}",
+        )
+        self.root_free_jid = int(pelvis_free_jids[0])
+        require_contract(
+            int(self.model.jnt_qposadr[self.root_free_jid]) == 0
+            and int(self.model.jnt_dofadr[self.root_free_jid]) == 0,
+            "pelvis freejoint must start at qpos address 0 and qvel/dof address 0",
+        )
         self.racket_site = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "right_racket")
         self.feet_bid = [bid(n) for n in FEET_BODIES]
         self.feet_geoms = {g for g in range(self.model.ngeom)
@@ -2063,8 +2222,11 @@ class MujocoRobot:
     def pelvis_ang_vel_body(self):
         """Pelvis angular velocity in the pelvis BODY frame (== IMU gyro). Uses mj_objectVelocity."""
         res = np.zeros(6)
-        self.mj.mj_objectVelocity(self.model, self.data, self.mj.mjtObj.mjOBJ_BODY,
-                                  self.pelvis_bid, res, 1)  # flg_local=1 -> body frame
+        # mjOBJ_BODY + flg_local=1 uses the compiled INERTIAL-frame axes (body_iquat), which
+        # differ from the pelvis link axes when fullinertia has off-diagonal terms.  The policy
+        # contract and free-joint angular qvel use the link/body axes, represented by XBODY.
+        self.mj.mj_objectVelocity(self.model, self.data, self.mj.mjtObj.mjOBJ_XBODY,
+                                  self.pelvis_bid, res, 1)  # local XBODY -> pelvis link frame
         return res[:3].copy()   # [angular(3), linear(3)] -> angular
 
     def projected_gravity_body(self):
@@ -2106,7 +2268,10 @@ class MujocoRobot:
                     feet_in_contact.add(self.model.geom_bodyid[g])
         return len(feet_in_contact) / max(len(self.feet_bid), 1)
 
-    def reset_to_reference(self, root_pos, root_quat, root_lin_w, root_ang_w, q_artic, qd_artic):
+    def reset_to_reference(
+        self, root_pos, root_quat, root_lin_w, root_ang_w, root_lin_vel_point,
+        q_artic, qd_artic,
+    ):
         """Reference-state-init with a complete MuJoCo episode-state reset.
 
         Overwriting only ``qpos``/``qvel`` leaves solver and actuator history such as
@@ -2116,13 +2281,34 @@ class MujocoRobot:
         side hidden state while preserving the already-configured model (timestep, damping and
         friction choices); the requested reference state is then installed explicitly.
         """
+        require_contract(
+            root_lin_vel_point in ROOT_LIN_VEL_POINTS,
+            f"invalid teacher-reference root linear-velocity point {root_lin_vel_point!r}",
+        )
         self.mj.mj_resetData(self.model, self.data)
         self.data.qpos[0:3] = root_pos
         self.data.qpos[3:7] = root_quat
         self.data.qpos[self.qadr] = q_artic
-        # MuJoCo free-joint qvel: linear in WORLD frame, angular in the BODY frame.
+        # A declared COM-point motion follows Isaac Lab 2.1 semantics: root_lin_w is the pelvis
+        # COM velocity even though root_pos is the link origin.  MuJoCo's free-joint translational
+        # qvel belongs to the link origin, so undo the rigid-point shift only for that declared
+        # point.  Explicit link-origin clips (including legacy diagnostics) pass through unchanged.
+        # body_ipos is the body-local link-origin -> COM displacement; body_iquat only orients the
+        # inertia axes and must not rotate this point.
+        # root_quat is scalar-first wxyz and maps body -> world, matching both the motion schema
+        # and MuJoCo qpos.  root_ang_w is world-frame; MuJoCo free-joint angular qvel is body-frame.
         R = mat_from_quat(root_quat)
-        self.data.qvel[0:3] = root_lin_w
+        try:
+            root_origin_lin_w = freejoint_origin_lin_vel_w(
+                root_lin_w,
+                root_ang_w,
+                root_quat,
+                self.model.body_ipos[self.pelvis_bid],
+                root_lin_vel_point,
+            )
+        except ValueError as exc:
+            raise SystemExit(f"[FATAL] teacher-reference reset: {exc}") from exc
+        self.data.qvel[0:3] = root_origin_lin_w
         self.data.qvel[3:6] = R.T @ root_ang_w
         self.data.qvel[self.vadr] = qd_artic
         self.mj.mj_forward(self.model, self.data)
@@ -2704,7 +2890,8 @@ def _draw_markers(viewer, mujoco, racket, robot, ball_pos):
 # =================================================================================================
 def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_dt, decimation,
                 noise_scale, std_vec, n_steps, max_ep_len, rng, csv_writer, mode_label,
-                target_normal_per_clip, strike_csv_writer=None, attempt_csv_writer=None,
+                target_normal_per_clip, root_lin_vel_points,
+                strike_csv_writer=None, attempt_csv_writer=None,
                 viewer=None, realtime=True,
                 vel_ranges_per_clip=None, pos_ranges_per_clip=None, df=None,
                 reset_mode="teleport", hold_range=(0, 100), venue_sampler=None,
@@ -2952,6 +3139,13 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         return int(rng.integers(int(hold_range[0]), int(hold_range[1]) + 1))
 
     ready_mode = str(ready_state_contract["mode"])
+    if ready_mode == TEACHER_REFERENCE_READY_STATE_MODE:
+        try:
+            root_lin_vel_points = validated_motion_body_lin_vel_points(
+                root_lin_vel_points, num_clips
+            )
+        except ValueError as exc:
+            raise SystemExit(f"[FATAL] teacher-reference rollout: {exc}") from exc
     per_clip_ready_sha = {
         int(item["clip"]): str(item["ready_state_sha256"])
         for item in ready_state_contract.get("per_clip", [])
@@ -2970,6 +3164,7 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 root_quat=r["body_quat_w"][ROOT_TRACKED_IDX],
                 root_lin_w=r["body_lin_vel_w"][ROOT_TRACKED_IDX],
                 root_ang_w=r["body_ang_vel_w"][ROOT_TRACKED_IDX],
+                root_lin_vel_point=root_lin_vel_points[c],
                 q_artic=r["joint_pos"], qd_artic=r["joint_vel"],
             )
             expected_sha = per_clip_ready_sha.get(int(c), "")
@@ -4158,6 +4353,17 @@ def main():
     print(f"[mj-sim2sim] onnx={args.onnx}")
     print(f"[mj-sim2sim] mjcf={args.mjcf}")
     policy = OnnxPolicy(args.onnx, obs_norm=("off" if args.no_obs_norm else args.obs_norm))
+    velocity_points_label = (
+        "ambiguous"
+        if policy.motion_body_lin_vel_points is None
+        else ",".join(policy.motion_body_lin_vel_points)
+    )
+    print(
+        "[mj-sim2sim] motion body linear-velocity points: "
+        f"{velocity_points_label} "
+        f"(motion_kinematics_exact={policy.motion_kinematics_exact_meta or 'missing'}, "
+        f"source={policy.motion_body_lin_vel_points_source})"
+    )
     if ready_state_mode == TEACHER_REFERENCE_READY_STATE_MODE:
         policy.evaluation_contract_exact = False
         print(
@@ -4831,7 +5037,9 @@ def main():
         )
     else:
         ready_state_contract = materialize_ready_state_contract(
-            robot, refs_table, seg_start, ready_state_mode, action_dim=len(policy.joint_names)
+            robot, refs_table, seg_start, ready_state_mode,
+            root_lin_vel_points=policy.motion_body_lin_vel_points,
+            action_dim=len(policy.joint_names),
         )
     mjcf_sha256 = sha256_file(args.mjcf)
     friction_coefficients = getattr(policy, "joint_friction_coefficients", None)
@@ -5398,6 +5606,7 @@ def main():
         res = run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_dt,
                           args.decimation, ns, std_vec, args.steps, max_ep_len, rng, cw,
                           mode_label=f"ns={ns}", target_normal_per_clip=target_normal_per_clip,
+                          root_lin_vel_points=policy.motion_body_lin_vel_points,
                           strike_csv_writer=scw, attempt_csv_writer=acw,
                           viewer=viewer, realtime=not args.no_realtime,
                           vel_ranges_per_clip=vel_ranges_per_clip,

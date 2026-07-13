@@ -47,6 +47,8 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 | [EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND](2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md) | 旧 exam bank 能否只改四个 metadata leaf 严格迁移到当前 signed-face family？ | Franco | Codex | preregistered | E1 | exam-v1 profile、输入 bytes/family 与独立 no-clobber 输出已冻结；真实 371 题 runtime replay 未跑，schedule/judge 仍阻断 |
 | [EXP-P1-HISTORICAL-SCHEMA3](2026-07/EXP-P1-HISTORICAL-SCHEMA3.md) | 新尺子能否区分历史候选？ | franco | Codex | completed | E4（诊断） | 尺子通过，候选仍为 inexact |
 | [EXP-MUJOCO-NATIVE-TRAINING](2026-07/EXP-MUJOCO-NATIVE-TRAINING.md) | 原生 MuJoCo 微调能否减少留出集迁移损失？ | franco | Codex | blocked | E1 | off-main preflight 为 `NO-MERGE`；四个正确性缺口未修；无 trainer/backend/PPO |
+| [EXP-MUJOCO-EVAL-FRAME-INTEGRATION](2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md) | latest main 能否同时保留 signed-face、parity guards 与 pelvis point/frame 合同？ | yikang | Codex | running | E0 | 先做选择性源码集成与 combined regression；未授权 K100 |
+| [EXP-MUJOCO-PELVIS-FRAME-PARITY](2026-07/EXP-MUJOCO-PELVIS-FRAME-PARITY.md) | MuJoCo 倒下是否来自 pelvis 点/轴坐标错位？ | yikang | Codex | completed | E2 | adopt 两处 evaluator frame 修复；主因与 ready-state 因果仍 inconclusive |
 | [EXP-RECOVERY-TUPLE-ABC](2026-07/EXP-RECOVERY-TUPLE-ABC.md) | 哪种连贯的击球后命令语义能够安全恢复？ | franco | Codex | blocked | E1 旧结构；E0 新次序 | 新 reward 次序尚未同步 machine prereg；无行为结果 |
 | [EXP-MOTION-SPATIAL-RETARGET](2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | 新空挥能否在不做不安全编辑的前提下放置到有效击球点？ | franco | Codex | completed | E2 | B/C 有 `19/3` 个 proposal；证书 `0`，只进入物化/安全门，不推广动作 |
 | [EXP-GATE3-CURRENT179-D0](2026-07/EXP-GATE3-CURRENT179-D0.md) | 当前 exact 179 policy/planner/runtime 能否完成一份固定考卷？ | franco | Codex | blocked | E2 | 仅通过模型预检；行为实验缺 runtime 前置 |

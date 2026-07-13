@@ -25,6 +25,7 @@ from whole_body_tracking.utils.training_contract import (
     checkpoint_claims_contract,
     checkpoint_contract_lineage_exact,
     require_checkpoint_contract_binding,
+    resolve_motion_body_lin_vel_points,
     runtime_execution_facts,
     validate_schema3_contract,
     validate_schema3_contract_structure,
@@ -204,6 +205,11 @@ def attach_onnx_metadata(
         "body_indices": runtime_facts["body_indices"],
         "motion_kinematics_exact": (
             "1" if runtime_facts["motion_kinematics_exact"] else "0"
+        ),
+        "motion_body_lin_vel_points": list(
+            resolve_motion_body_lin_vel_points(
+                runtime_facts["motion_kinematics_contracts"]
+            )
         ),
         "physics_step_dt_s": format(runtime_facts["physics_step_dt_s"], ".17g"),
         "policy_step_dt_s": format(runtime_facts["policy_step_dt_s"], ".17g"),

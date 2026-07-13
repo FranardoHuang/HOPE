@@ -98,6 +98,9 @@ hope_isaac_py scripts/play_table_tennis.py --enable_aero --headless --steps 300
 - Differences in actuator model, contact, timestep, or joint order can break sim-to-sim transfer.
 - URDF import can lose inertial or collision fidelity.
 - Racket mount errors directly corrupt planner-to-WBC training.
+- The vendor ROS `SimReset` nonzero base-twist interface is not frame-exact: its odom/world angular
+  velocity is copied into body-local freejoint qvel. Named-keyframe zero-velocity reset is safe;
+  nonzero absolute-twist replay remains blocked pending a versioned point/frame contract and test.
 
 ## Next Steps
 
@@ -153,8 +156,10 @@ contact/solver parameters, DR distributions and calibrated joint friction.
 - `scripts/view_a3_stand.py` now provides a root-source-bound plain-MuJoCo diagnostic for the vendor
   MJCF. It parses production default pose/Kp/Kd from the tracked header, leaves neck joints passive
   per the 29-DOF PD_STAND contract, and can report finite state, pelvis tilt/z and foot contacts.
-  Source/identity tests pass, but the 10-second run remains unrun here because MuJoCo is absent.
-  This does not change the MJCF/integrator and is not a Gate3 result.
+  Source/identity tests pass. A 2026-07-13 local CPU rerun completed 10 seconds with finite state,
+  `1.816 mm` maximum pelvis-z drift, `0.311 deg` maximum tilt and both feet in contact for `100%`
+  of samples. This confirms the static vendor MJCF/axis/gravity/PD stand can remain upright; it
+  does not run the policy, change the MJCF/integrator, or constitute a Gate3 result.
 
 See `docs/research/yikang_selective_integration_20260712.md` and
 `docs/operations/run_deploy_dryrun.md`. G04 remains `Partial`.

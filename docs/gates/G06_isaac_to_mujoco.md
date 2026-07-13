@@ -1305,3 +1305,56 @@ schedule 不得复用；必须从新 bank 重新冻结独立 schedule/paper acti
 [实验卷宗](../experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md)与
 [运行手册](../operations/run_phase1_signed_face_exam_bank_rebind.md)。当前 L2、signed-face paper、G06 与
 Gate3 状态均不变，G06 保持 `Partial`。
+### 2026-07-13 pelvis point/axis frame correction
+
+A focused frame audit found two concrete MuJoCo evaluator errors without finding a gross
+`xyzw/wxyz`, Z-up, gravity-sign, joint-axis or joint-name permutation error.
+
+- Diagnostic `teacher-reference` reset copied the motion schema's pelvis-COM world linear velocity
+  directly into the freejoint translation, which is the pelvis link-origin world velocity. The A3
+  pelvis origin-to-COM offset is about `0.1273 m`; the corrected path applies
+  `v_origin = v_com - omega_world x (R_world_body * body_ipos)` only to a clip explicitly bound as
+  `center_of_mass`. Checkpoint-bound schema-3 native and standalone exports now carry
+  `motion_body_lin_vel_points` for every clip; explicitly bound `link_origin` clips retain direct
+  assignment and remain exact-ineligible. Schema 1/2 or contractless standalone re-exports strip
+  the field rather than inheriting an unproved donor claim.
+  Old exact schema-2 exports have one narrow all-COM compatibility rule. Missing/inexact aggregate
+  metadata cannot identify a point and now fails loudly before teacher-reference reset instead of
+  being guessed.
+- `base_ang_vel` used `mjOBJ_BODY` with local output. In MuJoCo that is expressed in the compiled
+  inertia-principal axes, not the pelvis link/IMU axes required by the actor and used for projected
+  gravity. The corrected read uses `mjOBJ_XBODY` with local output. The vendor A3 pelvis inertia
+  axes differ from the link axes by about `0.3315 deg`, so this is a real every-step observation
+  mismatch but not, by magnitude alone, evidence for the observed cross-engine strike gap.
+- The evaluator requires exactly one freejoint owned by `pelvis_link`, at qpos/dof address zero.
+  Other free bodies, such as a dynamic ball, remain permitted.
+
+A separate read-only audit found the analogous latent bug in the vendor ROS `SimReset` nonzero
+base-twist subscriber: its published twist is world/odom link-origin twist, but world angular
+velocity is copied directly into body-local freejoint qvel. Existing keyframe scripts and formal
+K100 send zero velocity, so this does not explain their behavior and is not changed in this Python
+evaluator ticket. The open G04/G07 interface contract is recorded in
+[`frames_and_coordinates.md`](../interfaces/frames_and_coordinates.md).
+
+The real `a3_pingpong.xml` regression uses nonzero orientation, three-axis angular velocity and COM
+velocity; it checks freejoint origin velocity, COM world velocity and the actor gyro frame. The
+focused reproduction is:
+
+```bash
+/Users/yyk956614/anaconda3/envs/backend/bin/python -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_mujoco_reference_reset_com_frame.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_eval_p0_contracts.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_ready_state_contract.py
+```
+
+This focused command passes `51` tests on the local CPU environment with the real MJCF test
+executed and zero skips; the formal CPU contract group passes `115` with zero skips, the complete
+contract union passes `183` with zero skips, and the repository's supported root `tests/` suite
+passes `554`.
+No policy rollout, Pod job, vendor backend or hardware ran. The reset correction does not change
+formal `stand-keyframe` K100 because that path starts with zero qvel; the gyro correction does
+affect its actor observation. The separately preregistered
+vendor/root-only/joints-only/full-match ready-state four-cell remains unrun, so these source fixes
+do not close the causal Isaac-to-MuJoCo gap. Full forensic scope and limitations are in
+[`EXP-MUJOCO-PELVIS-FRAME-PARITY`](../experiments/2026-07/EXP-MUJOCO-PELVIS-FRAME-PARITY.md);
+G06 remains `Partial`.

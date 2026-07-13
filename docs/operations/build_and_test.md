@@ -114,7 +114,7 @@ reward, privileged observations and metrics; unknown selector/boolean values fai
 selector and legacy-motion opt-in reach the hard contract/export/judge paths; and motion migration
 reorders all four body-indexed arrays into the explicit target order.
 
-Reproduce the current 90-test formal CPU group with:
+Reproduce the current 115-test formal CPU group with a Python environment containing MuJoCo:
 
 ```bash
 python3 -m pytest -q \
@@ -122,14 +122,19 @@ python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_mujoco_eval_align_flags.py \
   hope_training/whole_body_tracking/tests/test_mujoco_eval_p0_contracts.py \
   hope_training/whole_body_tracking/tests/test_mujoco_ready_state_contract.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_reference_reset_com_frame.py \
   hope_training/whole_body_tracking/tests/test_motion_kinematics_contract.py \
   hope_training/whole_body_tracking/tests/test_racket_geometry_contract.py \
   hope_training/whole_body_tracking/tests/test_training_contract_schema3.py \
   hope_training/whole_body_tracking/tests/test_v5_ablation_accelerator.py
 ```
 
-Reproduce the complete 154-test union (use a Python environment with `pytest`, `numpy`, `PyYAML`,
-`hydra-core`, and Torch installed):
+The accepted local result is `115 passed, 0 skipped`. Zero skips are required: the pelvis reset
+test must load the real `a3_pingpong.xml`; a host without the `mujoco` Python package has not tested
+the point/axis correction.
+
+Reproduce the complete 183-test union (use a Python environment with `pytest`, `numpy`, `PyYAML`,
+MuJoCo, and Torch installed):
 
 ```bash
 /workspace/hope_mjeval_venv/bin/python -m pytest -q \
@@ -141,12 +146,17 @@ Reproduce the complete 154-test union (use a Python environment with `pytest`, `
   hope_training/whole_body_tracking/tests/test_mujoco_eval_align_flags.py \
   hope_training/whole_body_tracking/tests/test_mujoco_eval_p0_contracts.py \
   hope_training/whole_body_tracking/tests/test_mujoco_ready_state_contract.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_reference_reset_com_frame.py \
   hope_training/whole_body_tracking/tests/test_motion_kinematics_contract.py \
   hope_training/whole_body_tracking/tests/test_racket_geometry_contract.py \
   hope_training/whole_body_tracking/tests/test_training_contract_schema3.py \
   hope_training/whole_body_tracking/tests/test_v5_ablation_accelerator.py \
   hope_training/whole_body_tracking/tests/test_judge_plant_contract.py
 ```
+
+Accepted local result: `183 passed, 0 skipped`. `judge.sh` launches `python3` subprocesses, so when
+invoking a venv Python by absolute path, also prepend that venv's `bin` directory to `PATH`; otherwise
+the subprocess can accidentally use a host Python without PyYAML.
 
 Validate the future semantics-correct plant preregistration and offline
 contract compiler without importing Isaac or launching a simulator:

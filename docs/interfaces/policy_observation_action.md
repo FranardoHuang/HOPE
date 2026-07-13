@@ -25,7 +25,7 @@ sources is codified and asserted in
 | --- | --- | --- | --- |
 | 0 | `command` | 62 | reference clip future joint pos/vel (baked into the ONNX) |
 | 1 | `motion_anchor_ori_b` | 6 | relative orientation ref-vs-robot (IMU + clip); no base position |
-| 2 | `base_ang_vel` | 3 | pelvis IMU gyro |
+| 2 | `base_ang_vel` | 3 | pelvis link/IMU-frame gyro; never the compiled inertia-principal axes |
 | 3 | `joint_pos` | 31 | joint encoders (q − default_q) |
 | 4 | `joint_vel` | 31 | joint encoders (dq) |
 | 5 | `actions` | 31 | previous action |
@@ -49,6 +49,10 @@ Notes:
 - Desired racket normal is NOT an actor observation (HITTER Table I: normal is a reward target
   only). `base_lin_vel` is critic-only. `swing_type` is included because the default task trains
   one unified forehand+backhand policy.
+- The MuJoCo implementation of `base_ang_vel` must use the pelvis link frame (`mjOBJ_XBODY` with
+  local output, or the numerically equivalent `R_pelvis^T * omega_world`). `mjOBJ_BODY` with local
+  output uses MuJoCo's compiled inertia-principal axes when `body_iquat` is non-identity; that is a
+  different frame from both the pelvis IMU and `projected_gravity`.
 - `task.racket.face_command_pairing` does not change the 175-D actor. For the 179/181 layouts,
   `racket_target_normal_cmd` always remains the delayed atomic bank command in the raw mount
   +Y/A convention. The external schema-2 wire carries the physical striking face B; the 179
@@ -269,6 +273,14 @@ common MJCF `stand` keyframe and consumes the same artifact. A
 teacher-reference reset, direct PhysX-friction-number proxy or historical
 checkpoint without exact train-family binding forces
 `evaluation_contract_exact=false`.
+
+For the diagnostic teacher-reference reset, the embedded motion's pelvis position is the link
+origin while a checkpoint-bound schema-3 export carries each clip's linear-velocity point in ONNX
+metadata as `motion_body_lin_vel_points`. A `center_of_mass` clip needs the rigid-point conversion recorded in
+`racket_contact_geometry.md`; a declared `link_origin` clip is assigned directly and remains
+exact-ineligible. Pre-field exact schema-2 exports are narrowly interpreted as all-COM. An old
+inexact/missing aggregate flag does not identify the velocity point and must fail before this reset,
+not silently select either branch. The formal `stand-keyframe` path does not consume motion qvel.
 
 ## Joined-source first-tick diagnostic JSON
 

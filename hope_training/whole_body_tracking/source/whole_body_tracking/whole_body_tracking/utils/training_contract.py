@@ -30,6 +30,7 @@ SCHEMA3_TASK_KEYS = (
 JOINT_FRICTION_BACKEND = "physx"
 JOINT_FRICTION_SEMANTICS = "load_dependent_spatial_force_coefficient"
 JOINT_FRICTION_UNITS = "dimensionless"
+MOTION_BODY_LIN_VEL_POINTS = ("center_of_mass", "link_origin")
 
 RUNTIME_EXECUTION_KEYS = (
     "articulation_joint_names",
@@ -84,6 +85,40 @@ def bind_actor_leg_ref_mask_metadata(
     metadata.pop("actor_leg_ref_mask", None)
     if contract is not None and contract.get("actor_leg_ref_mask") is True:
         metadata["actor_leg_ref_mask"] = "1"
+
+
+def resolve_motion_body_lin_vel_points(kinematics_contracts) -> tuple[str, ...]:
+    """Resolve the runtime linear-velocity point independently for every motion clip.
+
+    Declared COM/link-origin points are authoritative even for an inexact diagnostic contract.
+    The one historical null spelling ``legacy_unbound_assumed_com`` is known to have been loaded
+    through Isaac's COM-velocity channel, so it resolves to COM while its separate ``exact=False``
+    provenance remains unchanged.  No other null or unknown spelling is safe to guess.
+    """
+
+    if not isinstance(kinematics_contracts, (list, tuple)) or not kinematics_contracts:
+        raise ValueError("motion_kinematics_contracts must be a non-empty array")
+    resolved = []
+    for index, item in enumerate(kinematics_contracts):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"motion kinematics clip {index} must be an object")
+        point = item.get("body_lin_vel_point")
+        if point in MOTION_BODY_LIN_VEL_POINTS:
+            resolved.append(str(point))
+            continue
+        status = item.get("status")
+        if point is None and status == "legacy_unbound_assumed_com":
+            resolved.append("center_of_mass")
+            continue
+        if point is None:
+            raise ValueError(
+                f"motion kinematics clip {index} has unresolved null body_lin_vel_point "
+                f"for status {status!r}"
+            )
+        raise ValueError(
+            f"motion kinematics clip {index} has unknown body_lin_vel_point {point!r}"
+        )
+    return tuple(resolved)
 
 
 def _tolist(value):
@@ -341,6 +376,10 @@ def runtime_execution_facts(env, actor_contract) -> dict:
             "motion kinematics-contract count does not match segments: "
             f"{len(kinematics_contracts)} vs {len(segment_lengths)}"
         )
+    try:
+        resolve_motion_body_lin_vel_points(kinematics_contracts)
+    except ValueError as exc:
+        raise RuntimeError(f"unresolved motion velocity-point contract: {exc}") from exc
     kinematics_exact = bool(motion.motion.kinematics_contract_exact)
     if kinematics_exact != all(bool(item.get("exact", False)) for item in kinematics_contracts):
         raise RuntimeError("motion kinematics exact flag disagrees with per-clip contracts")
@@ -674,6 +713,7 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
             raise ValueError(
                 f"schema-3 motion kinematics clip {index} is schema-2 but marked inexact"
             )
+    resolve_motion_body_lin_vel_points(kinematics)
     motion_exact = contract["motion_kinematics_exact"]
     if not isinstance(motion_exact, bool) or motion_exact != all(clip_exact_flags):
         raise ValueError(

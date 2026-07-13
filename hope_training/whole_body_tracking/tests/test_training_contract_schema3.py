@@ -301,6 +301,39 @@ def _diagnostic_schema3_contract():
     return contract
 
 
+def test_per_clip_velocity_points_preserve_explicit_and_legacy_assumed_com_semantics():
+    contracts = [
+        {"body_lin_vel_point": "center_of_mass", "status": "declared_v2"},
+        {"body_lin_vel_point": None, "status": "legacy_unbound_assumed_com"},
+        {
+            "body_lin_vel_point": "link_origin",
+            "status": "legacy_link_origin_velocity_diagnostic_only",
+        },
+    ]
+    assert TC.resolve_motion_body_lin_vel_points(contracts) == (
+        "center_of_mass", "center_of_mass", "link_origin",
+    )
+
+    for bad in (
+        [{"body_lin_vel_point": None, "status": "unknown_legacy"}],
+        [{"body_lin_vel_point": "inertial_origin", "status": "declared"}],
+    ):
+        with pytest.raises(ValueError, match="unresolved null|unknown body_lin_vel_point"):
+            TC.resolve_motion_body_lin_vel_points(bad)
+
+
+def test_schema3_inexact_assumed_com_remains_structural_but_not_formal():
+    contract = _diagnostic_schema3_contract()
+    contract["motion_kinematics_contracts"][0]["body_lin_vel_point"] = None
+    contract["motion_kinematics_contracts"][0]["status"] = "legacy_unbound_assumed_com"
+    TC.validate_schema3_contract_structure(contract)
+    assert TC.resolve_motion_body_lin_vel_points(
+        contract["motion_kinematics_contracts"]
+    ) == ("center_of_mass", "link_origin")
+    with pytest.raises(ValueError, match="formal lineage requires"):
+        TC.validate_schema3_contract(contract)
+
+
 def test_schema3_requires_every_execution_field_and_rejects_other_formal_versions():
     contract = _schema3_contract()
     TC.validate_schema3_contract(contract)
@@ -455,6 +488,7 @@ def test_export_paths_do_not_promote_schema2_or_unknown_schemas():
         "face_command_enabled",
         "face_command_pairing",
         "motion_allow_legacy_link_origin_velocity",
+        "motion_body_lin_vel_points",
         "motion_kinematics_exact",
         "training_contract_schema_version",
         "training_contract_sha256",
@@ -464,6 +498,8 @@ def test_export_paths_do_not_promote_schema2_or_unknown_schemas():
         assert field in standalone
     assert "_donor_activation" in standalone
     assert "donor graph has ambiguous activation operators" in standalone
+    assert 'donor_meta["motion_body_lin_vel_points"] = ",".join(' in standalone
+    assert 'donor_meta.pop("motion_body_lin_vel_points", None)' in standalone
     for source in (exporter, standalone):
         assert "validate_schema3_contract_structure" in source
         assert "checkpoint_claims_contract" in source
