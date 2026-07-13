@@ -134,6 +134,163 @@ def _env(*, joints=3, num_envs=2, action_ids=slice(None), policy_dt=0.02):
     )
 
 
+def _command_env(command_func):
+    env = _env()
+    env.observation_manager.active_terms = {"policy": ["command"]}
+    env.observation_manager.group_obs_term_dim = {"policy": [(62,)]}
+    env.observation_manager.group_obs_dim = {"policy": (62,)}
+    env.observation_manager.cfg.policy = SimpleNamespace(
+        history_length=None,
+        to_dict=lambda: {"command": {"history_length": 0}},
+    )
+    env.cfg.observations = SimpleNamespace(
+        policy=SimpleNamespace(command=SimpleNamespace(func=command_func))
+    )
+    actor = SimpleNamespace(
+        name="deploy_parity",
+        obs_mode="deploy_parity",
+        total_dim=62,
+        terms=(_Term("command", 62),),
+    )
+    return env, actor
+
+
+def test_actor_leg_ref_mask_fact_uses_exact_callable_identity(monkeypatch):
+    import functools
+
+    def canonical_unmasked(env, command_name):
+        raise NotImplementedError
+
+    def canonical_masked(env, command_name):
+        raise NotImplementedError
+
+    monkeypatch.setattr(
+        TC,
+        "_canonical_actor_leg_ref_mask_callables",
+        lambda: ((canonical_unmasked, False), (canonical_masked, True)),
+    )
+    env, actor = _command_env(canonical_unmasked)
+    facts = TC.runtime_execution_facts(env, actor)
+    assert "actor_leg_ref_mask" not in facts
+    assert facts["actor_leg_ref_mask_provenance_epoch"] == 1
+
+    env.cfg.observations.policy.command.func = functools.partial(canonical_masked)
+    facts = TC.runtime_execution_facts(env, actor)
+    assert facts["actor_leg_ref_mask"] is True
+    assert tuple(
+        key
+        for key in facts
+        if key not in ("actor_leg_ref_mask_provenance_epoch", "actor_leg_ref_mask")
+    ) == TC.RUNTIME_EXECUTION_KEYS
+
+    # A partial carrying any bound argument is a different configured observation term.  Looking
+    # only at ``.func`` would launder it as the canonical callable and mint a false epoch-1 fact.
+    for nonempty_partial in (
+        functools.partial(canonical_unmasked, object()),
+        functools.partial(canonical_unmasked, command_name="different_command"),
+        functools.partial(functools.partial(canonical_masked), command_name="different_command"),
+    ):
+        env.cfg.observations.policy.command.func = nonempty_partial
+        with pytest.raises(RuntimeError, match="bound args/kwargs"):
+            TC.runtime_execution_facts(env, actor)
+
+    # functools.wraps copies marker-like attributes and names, but the wrapper is not authority.
+    @functools.wraps(canonical_masked)
+    def renamed_masked_command(env, command_name):
+        raise NotImplementedError
+
+    renamed_masked_command.actor_leg_ref_mask = True
+    renamed_masked_command.actor_leg_ref_mask_provenance_epoch = 1
+    env.cfg.observations.policy.command.func = renamed_masked_command
+    with pytest.raises(RuntimeError, match="not one of the two canonical"):
+        TC.runtime_execution_facts(env, actor)
+    legacy = TC.runtime_execution_facts(
+        env, actor, allow_legacy_actor_leg_ref_mask_ambiguity=True
+    )
+    assert "actor_leg_ref_mask_provenance_epoch" not in legacy
+    assert "actor_leg_ref_mask" not in legacy
+
+
+def test_actor_leg_ref_mask_rejects_partial_subclass_with_overridden_call(monkeypatch):
+    import functools
+
+    def canonical_unmasked(env, command_name):
+        raise NotImplementedError
+
+    def canonical_masked(env, command_name):
+        raise NotImplementedError
+
+    class SemanticOverridePartial(functools.partial):
+        def __call__(self, env, command_name):
+            return "different-command-semantics"
+
+    monkeypatch.setattr(
+        TC,
+        "_canonical_actor_leg_ref_mask_callables",
+        lambda: ((canonical_unmasked, False), (canonical_masked, True)),
+    )
+    disguised = SemanticOverridePartial(canonical_unmasked)
+    assert disguised.args == () and disguised.keywords == {}
+    assert disguised(None, "motion") == "different-command-semantics"
+    env, actor = _command_env(disguised)
+    with pytest.raises(RuntimeError, match="not one of the two canonical"):
+        TC.runtime_execution_facts(env, actor)
+
+
+@pytest.mark.parametrize("donor_value", [None, "0", "1"])
+def test_actor_leg_ref_mask_metadata_is_checkpoint_authoritative_and_only_when_true(donor_value):
+    metadata = {
+        "keep": "value",
+        "training_contract_exact": "1",
+        "training_contract_sha256": "b" * 64,
+        "source_checkpoint_sha256": "a" * 64,
+    }
+    if donor_value is not None:
+        metadata["actor_leg_ref_mask"] = donor_value
+
+    masked_contract = {
+        "actor_obs_term_names": ["command"],
+        "actor_obs_term_dims": [62],
+        "actor_leg_ref_mask_provenance_epoch": 1,
+        "actor_leg_ref_mask": True,
+    }
+    TC.bind_actor_leg_ref_mask_metadata(metadata, masked_contract)
+    assert metadata["actor_leg_ref_mask_provenance_epoch"] == "1"
+    assert metadata["actor_leg_ref_mask"] == "1"
+    assert metadata["training_contract_exact"] == "0"
+    assert metadata["actor_leg_ref_mask_provenance_sha256"] == (
+        TC.actor_leg_ref_mask_provenance_sha256(
+            training_contract_sha256="b" * 64,
+            source_checkpoint_sha256="a" * 64,
+            masked=True,
+        )
+    )
+
+    # Unmasked and legacy checkpoints clear any stale donor value. False is deliberately treated
+    # as absence here; the schema validator separately rejects serializing False in a contract.
+    unmasked_contract = dict(masked_contract)
+    unmasked_contract.pop("actor_leg_ref_mask")
+    metadata["training_contract_exact"] = "1"
+    TC.bind_actor_leg_ref_mask_metadata(metadata, unmasked_contract)
+    assert "actor_leg_ref_mask" not in metadata
+    assert metadata["actor_leg_ref_mask_provenance_epoch"] == "1"
+    assert metadata["training_contract_exact"] == "1"
+    assert metadata["actor_leg_ref_mask_provenance_sha256"] == (
+        TC.actor_leg_ref_mask_provenance_sha256(
+            training_contract_sha256="b" * 64,
+            source_checkpoint_sha256="a" * 64,
+            masked=False,
+        )
+    )
+    TC.bind_actor_leg_ref_mask_metadata(metadata, {})
+    assert "actor_leg_ref_mask" not in metadata
+    assert "actor_leg_ref_mask_provenance_epoch" not in metadata
+    assert "actor_leg_ref_mask_provenance_sha256" not in metadata
+    metadata["actor_leg_ref_mask"] = "1"
+    TC.bind_actor_leg_ref_mask_metadata(metadata, None)
+    assert "actor_leg_ref_mask" not in metadata
+
+
 def test_runtime_contract_extracts_actual_execution_values():
     facts = TC.runtime_execution_facts(_env(), _ActorContract())
     assert tuple(facts) == TC.RUNTIME_EXECUTION_KEYS
@@ -234,6 +391,20 @@ def _schema3_contract():
     }
 
 
+def _command_schema3_contract():
+    contract = _schema3_contract()
+    contract.update({
+        "actor_obs_contract": "deploy_parity",
+        "actor_obs_mode": "deploy_parity",
+        "actor_obs_total_dim": 62,
+        "actor_obs_term_names": ["command"],
+        "actor_obs_term_dims": [62],
+        "observation_history_lengths": [1],
+        "actor_leg_ref_mask_provenance_epoch": 1,
+    })
+    return contract
+
+
 def _diagnostic_schema3_contract():
     contract = _schema3_contract()
     contract["motion_kinematics_contracts"] = [
@@ -253,6 +424,39 @@ def _diagnostic_schema3_contract():
     return contract
 
 
+def test_per_clip_velocity_points_preserve_explicit_and_legacy_assumed_com_semantics():
+    contracts = [
+        {"body_lin_vel_point": "center_of_mass", "status": "declared_v2"},
+        {"body_lin_vel_point": None, "status": "legacy_unbound_assumed_com"},
+        {
+            "body_lin_vel_point": "link_origin",
+            "status": "legacy_link_origin_velocity_diagnostic_only",
+        },
+    ]
+    assert TC.resolve_motion_body_lin_vel_points(contracts) == (
+        "center_of_mass", "center_of_mass", "link_origin",
+    )
+
+    for bad in (
+        [{"body_lin_vel_point": None, "status": "unknown_legacy"}],
+        [{"body_lin_vel_point": "inertial_origin", "status": "declared"}],
+    ):
+        with pytest.raises(ValueError, match="unresolved null|unknown body_lin_vel_point"):
+            TC.resolve_motion_body_lin_vel_points(bad)
+
+
+def test_schema3_inexact_assumed_com_remains_structural_but_not_formal():
+    contract = _diagnostic_schema3_contract()
+    contract["motion_kinematics_contracts"][0]["body_lin_vel_point"] = None
+    contract["motion_kinematics_contracts"][0]["status"] = "legacy_unbound_assumed_com"
+    TC.validate_schema3_contract_structure(contract)
+    assert TC.resolve_motion_body_lin_vel_points(
+        contract["motion_kinematics_contracts"]
+    ) == ("center_of_mass", "link_origin")
+    with pytest.raises(ValueError, match="formal lineage requires"):
+        TC.validate_schema3_contract(contract)
+
+
 def test_schema3_requires_every_execution_field_and_rejects_other_formal_versions():
     contract = _schema3_contract()
     TC.validate_schema3_contract(contract)
@@ -265,6 +469,49 @@ def test_schema3_requires_every_execution_field_and_rejects_other_formal_version
         TC.validate_schema3_contract({**contract, "schema_version": 2})
     with pytest.raises(ValueError, match="unsupported formal"):
         TC.validate_schema3_contract({**contract, "schema_version": 4})
+
+
+@pytest.mark.parametrize("invalid", [False, None, 0, 1, "1"])
+def test_schema3_actor_leg_ref_mask_is_only_when_true(invalid):
+    contract = _command_schema3_contract()
+    contract["actor_leg_ref_mask"] = invalid
+    with pytest.raises(ValueError, match="actor_leg_ref_mask must be true when present"):
+        TC.validate_schema3_contract_structure(contract)
+
+    contract["actor_leg_ref_mask"] = True
+    TC.validate_schema3_contract_structure(contract)
+
+
+@pytest.mark.parametrize("invalid", [False, None, 0, 2, "1", 1.0])
+def test_schema3_command_contract_requires_exact_mask_provenance_epoch(invalid):
+    contract = _command_schema3_contract()
+    contract["actor_leg_ref_mask_provenance_epoch"] = invalid
+    with pytest.raises(ValueError, match="provenance_epoch"):
+        TC.validate_schema3_contract_structure(contract)
+
+    contract.pop("actor_leg_ref_mask_provenance_epoch")
+    with pytest.raises(ValueError, match="masked and unmasked checkpoints are indistinguishable"):
+        TC.validate_schema3_contract_structure(contract)
+
+
+@pytest.mark.parametrize(
+    ("updates", "message"),
+    [
+        ({"actor_obs_term_names": ["command", "command"],
+          "actor_obs_term_dims": [31, 31],
+          "observation_history_lengths": [1, 1]}, "names must be unique"),
+        ({"actor_obs_term_dims": [62.0]}, "dims must be positive integers"),
+        ({"actor_obs_term_dims": [True]}, "dims must be positive integers"),
+        ({"observation_history_lengths": [0]}, "history lengths must be positive integers"),
+        ({"actor_obs_total_dim": 61}, "must equal the sum"),
+        ({"actor_obs_term_names": ["command", "extra"]}, "equal-length arrays"),
+    ],
+)
+def test_schema3_actor_layout_cannot_bypass_mask_epoch(updates, message):
+    contract = _command_schema3_contract()
+    contract.update(updates)
+    with pytest.raises(ValueError, match=message):
+        TC.validate_schema3_contract_structure(contract)
 
 
 def test_diagnostic_schema3_is_structurally_valid_but_never_formal_exact():
@@ -381,6 +628,8 @@ def test_export_paths_do_not_promote_schema2_or_unknown_schemas():
     assert 'contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION' in standalone
     assert 'metadata["training_contract_exact"] = "1"' in exporter
     assert '"training_contract_exact": "1" if training_contract_lineage_exact else "0"' in standalone
+    assert "bind_actor_leg_ref_mask_metadata" in standalone
+    assert "bind_actor_leg_ref_mask_metadata" in exporter
     for field in (
         "qdes_joint_pos_limits",
         "physics_step_dt_s",
@@ -395,6 +644,7 @@ def test_export_paths_do_not_promote_schema2_or_unknown_schemas():
         "face_command_enabled",
         "face_command_pairing",
         "motion_allow_legacy_link_origin_velocity",
+        "motion_body_lin_vel_points",
         "motion_kinematics_exact",
         "training_contract_schema_version",
         "training_contract_sha256",
@@ -404,6 +654,10 @@ def test_export_paths_do_not_promote_schema2_or_unknown_schemas():
         assert field in standalone
     assert "_donor_activation" in standalone
     assert "donor graph has ambiguous activation operators" in standalone
+    assert 'donor_meta["motion_body_lin_vel_points"] = ",".join(' in standalone
+    assert 'donor_meta.pop("motion_body_lin_vel_points", None)' in standalone
+    assert "ACTOR_LEG_REF_MASK_PROVENANCE_KEY" in exporter
+    assert "bind_actor_leg_ref_mask_metadata" in standalone
     for source in (exporter, standalone):
         assert "validate_schema3_contract_structure" in source
         assert "checkpoint_claims_contract" in source
@@ -416,6 +670,19 @@ def test_training_hard_contract_traces_face_pairing_and_legacy_motion_opt_in():
     assert '"face_command_pairing": attr(racket, "face_command_pairing", "shared_plus_y")' in train
     assert '"motion_allow_legacy_link_origin_velocity": bool(' in train
     assert "contract_lineage_exact = ckpt is None and motion_kinematics_exact" in train
+    tracking_cfg = (
+        ROOT
+        / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/tracking_env_cfg.py"
+    ).read_text(encoding="utf-8")
+    observations = (
+        ROOT
+        / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/hope_observations.py"
+    ).read_text(encoding="utf-8")
+    contract_source = MODULE_PATH.read_text(encoding="utf-8")
+    assert "command = ObsTerm(func=mdp.generated_commands" in tracking_cfg
+    assert "def generated_commands_actor_leg_masked(" in observations
+    assert "from isaaclab.envs.mdp import generated_commands" in contract_source
+    assert "if func is canonical" in contract_source
 
 
 def test_runner_embeds_schema_sha_and_lineage_in_checkpoint_infos():

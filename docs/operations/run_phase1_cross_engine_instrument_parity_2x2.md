@@ -2,16 +2,17 @@
 
 ## Current Status
 
-`Preregistered / Phase-B source complete / runtime unvalidated`. Do not count or launch this
-paper from a training checkout. The prerequisite contract is
+`Revoked for the current exact lane / historical artifacts only`. Do not count or launch this
+paper from any checkout. The historical prerequisite contract is
 `configs/phase1_cross_engine_instrument_parity_2x2_prereg_20260711.json`; its validator must
-continue to report `instrument_parity_gate_closed=false` until all four real cells exist.
-The Isaac rider is separately frozen by
+reject it as revoked. The Isaac rider is separately frozen by
 `configs/phase1_isaac_bank_exam_physical_truth_phase_b_contract_20260711.json`. Source completion
-does not constitute simulator evidence: its `runtime_claim_now` remains false until a clean,
-detached evaluation checkout produces a complete scorecard.
-The current preregistration SHA is `bd90f6f2...0175`, validator SHA is
-`eb1b2fa6...f4e4`, and Phase-B rider-contract SHA is `1af7a0b3...b376`.
+never became simulator evidence, and that rider is now also rejected directly by the evaluator
+loader because its checkpoint predates explicit actor leg-reference mask provenance.
+The historical preregistration SHA is `bd90f6f2...0175`, and revoked Phase-B rider-contract SHA is
+`1af7a0b3...b376`. The immutable
+revocation receipt is
+`configs/phase1_cross_engine_instrument_parity_2x2_revocation_20260713.json`.
 
 This operation is simulator-only. It authorizes no real-robot command or deployment test and does
 not change, stop, promote, or restart a training arm.
@@ -25,12 +26,12 @@ not change, stop, promote, or restart a training arm.
 
 | 引擎 | 物理真值 | 解析对照 |
 | --- | --- | --- |
-| Isaac | 必须补；Phase-B 只有源码，运行未验证 | 已有解析诊断仍需标准化、内容绑定的格子输出 |
+| Isaac | 必须用新 post-epoch rider 补；旧 Phase-B 源码/合同已撤销 | 已有解析诊断仍需标准化、内容绑定的格子输出 |
 | MuJoCo | 必须补；当前 BankExam 没有物理格 | 已有 Python BankExam/`cf_*` 解析诊断仍需标准化、内容绑定的格子输出 |
 
 任一行或列都不能替代另一格。尤其是把 Isaac 解析回球改名成“物理回球”时，校验必须直接失败。
 
-## Frozen Paper
+## Historical Revoked Paper
 
 - target: fresh exact SZ seed1 `model_2000`, checkpoint SHA
   `99e82659...ae4c`, hard-contract SHA `3a3b3d95...b9972`;
@@ -116,45 +117,22 @@ the intentionally artifact-gated simulator acceptance test below. The broader
 unrelated existing `MotionLoader` single-`PosixPath` normalization defect in
 `test_reward_flags_mdp.py`, outside the Phase-B diff. No Isaac runtime result was produced.
 
-## Clean-Detached Isaac Phase-B Command
+## Historical Phase-B Command — Forbidden
 
-This command is **not** authorized on either live training checkout. Run it later only from a
-clean detached evaluation worktree whose files match every SHA in the Phase-B contract; keep all
-outputs outside that worktree. The frozen `PHASE_B_CONTRACT_SHA` is shown explicitly below.
+The former clean-detached command for rider SHA `1af7a0b3...b376` is intentionally no longer
+copy-pastable here. It is forbidden on training, evaluation, Pod and local simulator checkouts:
+the target checkpoint cannot distinguish masked from unmasked 62-D command observations, and a
+later metadata backfill cannot repair that missing training-time fact. The current adapter rejects
+the rider by content SHA before source/profile validation. Git history preserves the command only
+for forensic reconstruction; it is not launch authority.
 
-```bash
-PHASE_B_CONTRACT_SHA=1af7a0b3589d57bfbd2da0b8af6130641298b647e4d80e52b5ef673a84e5b376
-hope_isaac_py hope_training/whole_body_tracking/scripts/isaac_bank_exam.py \
-  task=HOPEPingPongVirtualBall headless=true device=cuda:0 \
-  +run_dir=/workspace/codexschema/phase1_fresh_20260711/runs/phase1_fresh_v3_S1_seed1 \
-  checkpoint=/workspace/codexschema/phase1_fresh_20260711/runs/phase1_fresh_v3_S1_seed1/model_2000.pt \
-  +exam_bank=/ABSOLUTE/PATH/TO/s1_v4rg_v3_exam.npz \
-  +schedule_json=/workspace/codexschema/phase1_fresh_20260711/q50/fresh_SZ_seed1_model2000_vs_model4000_exact_v1/shared_clean_k100.schedule.json \
-  +per_clip_quota=50 +schedule_seed=0 +noise_scale=0.0 \
-  +instrument_physical_truth_phase_b=true \
-  +phase_b_contract=/ABSOLUTE/DETACHED/REPO/configs/phase1_isaac_bank_exam_physical_truth_phase_b_contract_20260711.json \
-  +expected_phase_b_contract_sha256=${PHASE_B_CONTRACT_SHA} \
-  +output_dir=/workspace/codexschema/phase1_fresh_20260711/instrument_parity/isaac_phase_b
-```
+Recovery requires a post-provenance-epoch checkpoint, a new preregistration, a new Phase-B rider and
+all four cells rerun. No field in the frozen files may be edited or refreshed in place.
 
-The evaluator audits clean/detached state and all bound source hashes both before launch and after
-the last attempt. It refuses `allow_inexact_contract=true` in this cell. A successful process is
-still only the Isaac-physical quarter of the 2x2, not a closed parity gate.
-
-The checkpoint predates the T1 event-timing fields now present in the evaluator class. The bound
-profile permits only their neutral default materialization (`event_timing_mode=disabled`, empty
-schedule/SHA, no repeat); generic exact hydration remains strict for every other field. Any
-non-neutral T1 value invalidates this paper.
-
-The marked simulator-dependent acceptance check is intentionally skipped until that scorecard
-exists:
-
-```bash
-HOPE_PHASE_B_ISAAC_SCORECARD=/path/to/isaac_bank_exam.json \
-python3 -m pytest -q \
-  hope_training/whole_body_tracking/tests/test_isaac_bank_exam_phase_b.py \
-  -k simulator_dependent
-```
+Historical implementation note only: the revoked checkpoint also predates T1 event-timing fields,
+and its rider allowed one narrow neutral-default hydration. That compatibility seam does not
+override the content-SHA revocation and may not be exercised to produce a current scorecard. The
+old artifact-gated simulator acceptance test must remain unset for current work.
 
 ## Validate The Preregistration
 
@@ -165,13 +143,15 @@ python3 scripts/validate_phase1_cross_engine_instrument_parity_2x2.py \
   --config configs/phase1_cross_engine_instrument_parity_2x2_prereg_20260711.json
 ```
 
-The accepted pre-runtime output is `valid_preregistered_runtime_blocked` and
-`instrument_parity_gate_closed=false`. Any other current claim is an error.
+The accepted current outcome is a nonzero refusal containing `preregistration is revoked for the
+current exact lane`; no evidence or closed-gate JSON may be emitted. A successful validation of the
+old paper is an error.
 
 ## Runtime Evidence Contract
 
-After Isaac Phase B and the matching MuJoCo state export exist, run each cell from one clean,
-detached evaluation checkout containing the exact source hashes bound by the preregistration.
+After a replacement post-epoch paper and matching MuJoCo state export exist, run each cell from one
+clean, detached evaluation checkout containing the exact source hashes bound by the **new**
+preregistration.
 Do not mutate a live training checkout. Normalize each output to
 `hope.cross-engine-instrument-cell.v1`, preserving the raw source artifact SHA. Every cell must
 contain:
@@ -187,7 +167,7 @@ the four cell files relative to one external artifact root. Validate it with:
 
 ```bash
 python3 scripts/validate_phase1_cross_engine_instrument_parity_2x2.py \
-  --config configs/phase1_cross_engine_instrument_parity_2x2_prereg_20260711.json \
+  --config /path/to/new_post_epoch_preregistration.json \
   --evidence /path/to/instrument_parity_evidence.json \
   --artifact-root /path/to/instrument_parity_cells
 ```
@@ -199,10 +179,9 @@ state, non-finite state, or incomplete physical outcome raises an error and emit
 
 ## Runtime Blockers
 
-1. Run the locally completed Phase-B rider from a clean detached evaluation checkout on the frozen
-   q50 schedule; no accepted runtime scorecard contains it yet.
-2. Run the new Isaac numeric instrumentation on the frozen q50 schedule; no accepted runtime
-   scorecard contains it yet.
+1. Train/select a post-epoch checkpoint whose contract binds the command-observation mask fact.
+2. Freeze a new preregistration and a new Phase-B rider; never reuse the revoked rider or schedule
+   identity as current-exact evidence.
 3. Export/normalize MuJoCo's signed face-normal vector and complete state schema. The old strike
    ledger contains physical and `cf_*` outcomes but predates this state contract.
 4. Produce all four immutable cell artifacts and their evidence manifest.

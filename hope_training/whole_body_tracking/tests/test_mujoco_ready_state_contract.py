@@ -113,6 +113,81 @@ def test_teacher_reference_contract_is_a_set_not_a_false_common_state():
     assert aggregate["sha256"] not in (a["sha256"], b["sha256"])
 
 
+def test_ready_state_materialization_allows_ambiguous_formal_stand_but_not_teacher_reset():
+    class _Robot:
+        def __init__(self):
+            self.named_resets = []
+
+        def reset_to_named_keyframe(self, name):
+            self.named_resets.append(name)
+
+        def ready_state_snapshot(self, mode, _last_action):
+            return _snapshot(mode=mode)
+
+    robot = _Robot()
+    ready = M.materialize_ready_state_contract(
+        robot, refs_table=[], seg_start=np.array([0, 1]),
+        mode=M.FORMAL_READY_STATE_MODE,
+        root_lin_vel_points=None,
+        action_dim=2,
+    )
+    assert robot.named_resets == ["stand"]
+    assert ready["mode"] == M.FORMAL_READY_STATE_MODE
+
+    with pytest.raises(SystemExit, match="ambiguous"):
+        M.materialize_ready_state_contract(
+            robot, refs_table=[], seg_start=np.array([0, 1]),
+            mode=M.TEACHER_REFERENCE_READY_STATE_MODE,
+            root_lin_vel_points=None,
+            action_dim=2,
+        )
+    with pytest.raises(SystemExit, match="count 1 != clip count 2"):
+        M.materialize_ready_state_contract(
+            robot, refs_table=[], seg_start=np.array([0, 1]),
+            mode=M.TEACHER_REFERENCE_READY_STATE_MODE,
+            root_lin_vel_points=("center_of_mass",),
+            action_dim=2,
+        )
+
+
+def test_teacher_ready_state_materialization_uses_each_clips_declared_velocity_point():
+    refs = []
+    for clip in range(2):
+        body_pos = np.zeros((len(M.TRACKED_BODIES), 3), dtype=np.float64)
+        body_quat = np.zeros((len(M.TRACKED_BODIES), 4), dtype=np.float64)
+        body_quat[:, 0] = 1.0
+        refs.append({
+            "body_pos_w": body_pos,
+            "body_quat_w": body_quat,
+            "body_lin_vel_w": np.zeros_like(body_pos),
+            "body_ang_vel_w": np.zeros_like(body_pos),
+            "joint_pos": np.zeros(2),
+            "joint_vel": np.zeros(2),
+        })
+
+    class _Robot:
+        def __init__(self):
+            self.points = []
+
+        def reset_to_reference(self, **kwargs):
+            self.points.append(kwargs["root_lin_vel_point"])
+
+        def ready_state_snapshot(self, mode, _last_action):
+            return _snapshot(
+                mode=mode,
+                qpos=np.asarray([len(self.points)], dtype=np.float64),
+            )
+
+    robot = _Robot()
+    ready = M.materialize_ready_state_contract(
+        robot, refs, np.array([0, 1]), M.TEACHER_REFERENCE_READY_STATE_MODE,
+        root_lin_vel_points=("center_of_mass", "link_origin"),
+        action_dim=2,
+    )
+    assert robot.points == ["center_of_mass", "link_origin"]
+    assert len(ready["per_clip"]) == 2
+
+
 def test_execution_contract_binds_actual_plant_and_ready_state():
     model = SimpleNamespace(
         dof_damping=np.array([1.0, 2.0]),
@@ -127,6 +202,11 @@ def test_execution_contract_binds_actual_plant_and_ready_state():
         ctrl_hi=np.array([10.0, 20.0]),
         soft_jnt_lo=np.array([-1.0, -2.0]),
         soft_jnt_hi=np.array([1.0, 2.0]),
+        implicit_effort_execution_mode="isaac_total_pd_clip_exact",
+        implicit_effort_proxy_nonexact=False,
+        fail_on_self_contact=True,
+        robot_body_mask=np.array([False, True, True]),
+        robot_geom_mask=np.array([True, False, True]),
     )
     policy = SimpleNamespace(
         obs_dim=175,
@@ -150,5 +230,14 @@ def test_execution_contract_binds_actual_plant_and_ready_state():
 
     first = build()
     assert first == build()
+    assert first["implicit_effort_execution_mode"] == "isaac_total_pd_clip_exact"
+    assert first["implicit_effort_proxy_nonexact"] is False
+    assert first["self_contact_policy"] == "fail_closed_on_pelvis_subtree_robot_pair"
+    assert first["self_contact_sampling"] == "every_physics_substep_after_mj_step"
+    assert first["robot_body_ids"] == [1, 2]
+    assert first["robot_geom_ids"] == [0, 2]
+    robot.fail_on_self_contact = False
+    assert build()["sha256"] != first["sha256"]
+    robot.fail_on_self_contact = True
     model.dof_armature[1] += 0.01
     assert build()["sha256"] != first["sha256"]

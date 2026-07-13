@@ -100,6 +100,20 @@ Current (non-final) racket mount, from `robots/agibot_a3.py` / `HOPEPingPong.yam
 
 These values are current but NOT final and are expected to change after calibration.
 
+## Vendor MuJoCo `SimReset` Base Twist
+
+The vendor simulator publishes `/sim/a3/pelvis_twist` from a zero-offset `pelvis_site` with
+`frame_id=odom`. Its current numeric meaning is the pelvis **link-origin** linear velocity and
+angular velocity, with both vectors expressed in odom/world axes. This is not the motion NPZ's
+pelvis-COM linear-velocity convention.
+
+Nonzero `MODE_ABSOLUTE` twist reset is currently unsafe as a frame-exact interface:
+`SimResetRos2Subscriber::ApplyBaseTwist` copies the world angular vector directly into MuJoCo's
+body-local freejoint angular qvel and does not validate `header.frame_id` or state the linear-velocity
+point. The tracked keyframe reset path is unaffected because it writes an all-zero twist. Until a
+separate G04/G07 ticket freezes and tests the ROS contract, formal flows must use the named
+keyframe/zero-velocity reset and must not replay a nonzero `/sim/a3/pelvis_twist` row as raw qvel.
+
 ## Update Rule
 
 Any frame, axis, origin, static transform, or measured calibration change must update this file and the relevant gate doc.

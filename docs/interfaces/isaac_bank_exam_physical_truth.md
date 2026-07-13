@@ -2,9 +2,13 @@
 
 ## Status And Authority
 
-The interface is implemented locally and **runtime unvalidated**. It is simulator-only,
-evaluator-owned, and authorized by the content-addressed
-`configs/phase1_isaac_bank_exam_physical_truth_phase_b_contract_20260711.json`. It changes no
+The interface is implemented locally but has **no currently authorized exact rider**. It is
+simulator-only and evaluator-owned. The historical content-addressed rider
+`configs/phase1_isaac_bank_exam_physical_truth_phase_b_contract_20260711.json` is revoked by
+`configs/phase1_cross_engine_instrument_parity_2x2_revocation_20260713.json`: its checkpoint
+predates explicit actor leg-reference mask provenance. The direct loader rejects that rider by
+content SHA before source/profile validation, so bypassing the 2x2 validator cannot revive it.
+The mechanism changes no
 training recipe, frozen analytic threshold, actor observation, reward, reset, action, deployment
 message, or real-robot command.
 
@@ -14,9 +18,10 @@ Phase B is opt-in through all three evaluator arguments:
 - `phase_b_contract=/absolute/path/to/contract.json`;
 - `expected_phase_b_contract_sha256=<64 hex>`.
 
-Missing or mismatched arguments fail before simulator construction. The checkout must also be
-clean and detached. With the flag absent/false, the evaluator retains Phase A and virtual-v1
-behavior.
+Missing, mismatched or revoked arguments fail before simulator construction. The checkout must
+also be clean and detached. With the flag absent/false, the evaluator retains Phase A and
+virtual-v1 behavior. Formal recovery needs a post-provenance-epoch checkpoint and a newly frozen
+rider; the historical rider cannot be edited or metadata-backfilled.
 
 The frozen fresh checkpoint predates the four T1 event-timing config fields now present in the
 evaluation class. Generic exact-mode hydration still rejects all missing fields. The Phase-B

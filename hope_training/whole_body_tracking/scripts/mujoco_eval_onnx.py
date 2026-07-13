@@ -422,6 +422,171 @@ FORMAL_READY_STATE_MODE = "mjcf_named_keyframe:stand:v1"
 TEACHER_REFERENCE_READY_STATE_MODE = "teacher_reference_clip_start:v1"
 CONTINUOUS_READY_STATE_MODE = "continuous_previous_question:v1"
 DEPLOY_NOMINAL_READY_STATE_MODE = "deploy_nominal_stand:v1"
+ROOT_LIN_VEL_POINT_CENTER_OF_MASS = "center_of_mass"
+ROOT_LIN_VEL_POINT_LINK_ORIGIN = "link_origin"
+ROOT_LIN_VEL_POINTS = (
+    ROOT_LIN_VEL_POINT_CENTER_OF_MASS,
+    ROOT_LIN_VEL_POINT_LINK_ORIGIN,
+)
+
+
+def motion_body_lin_vel_points_from_metadata(metadata, *, clip_count=None):
+    """Parse explicit per-clip points, with one narrow old-exact compatibility rule."""
+    exact = str(metadata.get("motion_kinematics_exact", "")).strip()
+    allow_legacy = str(
+        metadata.get("motion_allow_legacy_link_origin_velocity", "")
+    ).strip()
+    if exact not in ("", "0", "1"):
+        raise ValueError("motion_kinematics_exact metadata must be 0|1 when present")
+    if allow_legacy not in ("", "0", "1"):
+        raise ValueError(
+            "motion_allow_legacy_link_origin_velocity metadata must be 0|1 when present"
+        )
+    raw_points = str(metadata.get("motion_body_lin_vel_points", "")).strip()
+    if raw_points:
+        points = tuple(value.strip() for value in raw_points.split(","))
+        invalid = [value for value in points if value not in ROOT_LIN_VEL_POINTS]
+        if invalid:
+            raise ValueError(
+                "motion_body_lin_vel_points contains unknown values: "
+                + ", ".join(repr(value) for value in invalid)
+            )
+        return points
+    # Before per-clip metadata existed, an exact motion contract could only be schema-2 COM.
+    # Preserve that lineage when the clip count is independently known.  Inexact/missing aggregate
+    # truth cannot identify a point and remains ambiguous rather than being guessed as link-origin.
+    if exact == "1" and clip_count is not None:
+        try:
+            clip_count = int(clip_count)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("clip_count must be a positive integer") from exc
+        if clip_count <= 0:
+            raise ValueError("clip_count must be a positive integer")
+        return (ROOT_LIN_VEL_POINT_CENTER_OF_MASS,) * clip_count
+    return None
+
+
+def validated_motion_body_lin_vel_points(points, clip_count):
+    """Return a complete per-clip tuple or reject ambiguous/misaligned reset semantics."""
+    try:
+        clip_count = int(clip_count)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("clip_count must be a positive integer") from exc
+    if clip_count <= 0:
+        raise ValueError("clip_count must be a positive integer")
+    if points is None:
+        raise ValueError("motion body linear-velocity points are ambiguous")
+    if not isinstance(points, (list, tuple)):
+        raise ValueError("motion body linear-velocity points must be an array")
+    points = tuple(str(value) for value in points)
+    if len(points) != clip_count:
+        raise ValueError(
+            f"motion body linear-velocity point count {len(points)} != clip count {clip_count}"
+        )
+    invalid = [value for value in points if value not in ROOT_LIN_VEL_POINTS]
+    if invalid:
+        raise ValueError(
+            "motion body linear-velocity points contain unknown values: "
+            + ", ".join(repr(value) for value in invalid)
+        )
+    return points
+
+
+def freejoint_origin_lin_vel_w(
+    declared_lin_vel_w, root_ang_vel_w, root_quat_wxyz, body_ipos, declared_point
+):
+    """Convert one declared rigid-body point velocity to MuJoCo freejoint-origin velocity."""
+    lin = np.asarray(declared_lin_vel_w, dtype=np.float64)
+    ang = np.asarray(root_ang_vel_w, dtype=np.float64)
+    quat = np.asarray(root_quat_wxyz, dtype=np.float64)
+    ipos = np.asarray(body_ipos, dtype=np.float64)
+    if lin.shape != (3,) or ang.shape != (3,) or quat.shape != (4,) or ipos.shape != (3,):
+        raise ValueError(
+            f"invalid root kinematic shapes lin={lin.shape} ang={ang.shape} "
+            f"quat={quat.shape} body_ipos={ipos.shape}"
+        )
+    if not all(np.isfinite(value).all() for value in (lin, ang, quat, ipos)):
+        raise ValueError("root kinematics contain NaN/Inf")
+    if declared_point == ROOT_LIN_VEL_POINT_LINK_ORIGIN:
+        return lin.copy()
+    if declared_point == ROOT_LIN_VEL_POINT_CENTER_OF_MASS:
+        com_offset_w = mat_from_quat(quat) @ ipos
+        return lin - np.cross(ang, com_offset_w)
+    raise ValueError(f"invalid root linear-velocity point {declared_point!r}")
+
+
+def isaac_total_pd_effort(proportional_effort, damping_effort, effort_limits):
+    """Return Isaac ImplicitActuator's bounded *total* PD drive effort.
+
+    Isaac clips ``P - D`` once, after both terms have been combined.  Clipping ``P`` first and
+    applying damping separately is not equivalent: either term can cancel the other before the
+    limit, and same-sign terms must share one common limit.  Keep this dependency-light helper
+    beside the frame helpers so the four sign/boundary quadrants are testable without MuJoCo.
+    """
+
+    proportional = np.asarray(proportional_effort, dtype=np.float64)
+    damping = np.asarray(damping_effort, dtype=np.float64)
+    limits = np.asarray(effort_limits, dtype=np.float64)
+    if proportional.shape != damping.shape or proportional.shape != limits.shape:
+        raise ValueError(
+            "PD effort terms and limits must have identical shapes: "
+            f"P={proportional.shape}, D={damping.shape}, limits={limits.shape}"
+        )
+    if not all(np.isfinite(value).all() for value in (proportional, damping, limits)):
+        raise ValueError("PD effort terms/limits contain NaN/Inf")
+    if np.any(limits <= 0.0):
+        raise ValueError("PD effort limits must be strictly positive")
+    return np.clip(proportional - damping, -limits, limits)
+
+
+def resolve_implicit_effort_execution(
+    *, has_implicit, effort_limits_bound, passive_damping, allow_inexact_proxy
+):
+    """Choose a truthful implicit-drive realization or reject an exact claim.
+
+    A MuJoCo passive damping column cannot implement Isaac's clipped total ``P-D`` drive: it is
+    applied outside the motor ctrlrange.  With bound limits and no extra passive damping we instead
+    send the already-clipped total effort through the motor.  Any retained passive damping, or an
+    unbound legacy implicit drive, is diagnostic-only and must never enter a formal score.
+    """
+
+    if not has_implicit:
+        return "not_applicable"
+    damping = np.asarray(passive_damping, dtype=np.float64)
+    if damping.ndim != 1 or not np.isfinite(damping).all() or np.any(damping < 0.0):
+        raise ValueError("implicit passive damping must be one finite non-negative vector")
+    if effort_limits_bound and not np.any(damping != 0.0):
+        return "isaac_total_pd_clip_exact"
+    if not allow_inexact_proxy:
+        reason = (
+            "retained MuJoCo passive damping lies outside the clipped motor effort"
+            if effort_limits_bound
+            else "implicit drive has no bound effort limits"
+        )
+        raise ValueError(
+            f"formal implicit effort execution unavailable: {reason}; "
+            "MuJoCo passive damping cannot realize Isaac clip(P-D,-L,L)"
+        )
+    return (
+        "total_pd_clip_plus_passive_damping_inexact"
+        if effort_limits_bound
+        else "legacy_unbounded_passive_damping_inexact"
+    )
+
+
+def enforce_self_contact_policy(*, fail_closed, count, penetration_m, pair):
+    """Apply the protocol decision after robot-only contact classification."""
+
+    count = int(count)
+    penetration_m = float(penetration_m)
+    if count < 0 or not math.isfinite(penetration_m) or penetration_m < 0.0:
+        raise ValueError("self-contact diagnostics must be finite and non-negative")
+    if fail_closed and count:
+        raise SystemExit(
+            "[FATAL] formal BankExam observed robot self-contact while the Isaac training "
+            "plant had enabled_self_collisions=False: "
+            f"pair={pair}, contacts={count}, penetration_m={penetration_m:.6g}"
+        )
 
 
 def canonical_contract_sha256(value):
@@ -589,7 +754,9 @@ def stage1_question_bank_module_path(wbt_root):
     return path
 
 
-def materialize_ready_state_contract(robot, refs_table, seg_start, mode, action_dim=31):
+def materialize_ready_state_contract(
+    robot, refs_table, seg_start, mode, *, root_lin_vel_points, action_dim=31
+):
     """Exercise the real reset path once and return its content-addressed contract."""
     zero_action = np.zeros(int(action_dim), dtype=np.float64)
     if mode == FORMAL_READY_STATE_MODE:
@@ -597,8 +764,14 @@ def materialize_ready_state_contract(robot, refs_table, seg_start, mode, action_
         return robot.ready_state_snapshot(mode, zero_action)
     if mode != TEACHER_REFERENCE_READY_STATE_MODE:
         raise ValueError(f"unsupported ready-state mode {mode!r}")
+    try:
+        root_lin_vel_points = validated_motion_body_lin_vel_points(
+            root_lin_vel_points, len(np.asarray(seg_start).reshape(-1))
+        )
+    except ValueError as exc:
+        raise SystemExit(f"[FATAL] teacher-reference ready state: {exc}") from exc
     per_clip = []
-    for ts_value in np.asarray(seg_start, dtype=np.int64).reshape(-1):
+    for clip, ts_value in enumerate(np.asarray(seg_start, dtype=np.int64).reshape(-1)):
         ts = int(ts_value)
         refs = refs_table[ts]
         robot.reset_to_reference(
@@ -606,6 +779,7 @@ def materialize_ready_state_contract(robot, refs_table, seg_start, mode, action_
             root_quat=refs["body_quat_w"][ROOT_TRACKED_IDX],
             root_lin_w=refs["body_lin_vel_w"][ROOT_TRACKED_IDX],
             root_ang_w=refs["body_ang_vel_w"][ROOT_TRACKED_IDX],
+            root_lin_vel_point=root_lin_vel_points[clip],
             q_artic=refs["joint_pos"], qd_artic=refs["joint_vel"],
         )
         per_clip.append(robot.ready_state_snapshot(mode, zero_action))
@@ -668,6 +842,24 @@ def build_evaluation_execution_contract(
         "velocity_limit_proxy_allowed": bool(
             getattr(robot, "allow_velocity_limit_proxy", True)
         ),
+        "implicit_effort_execution_mode": str(
+            getattr(robot, "implicit_effort_execution_mode", "unknown")
+        ),
+        "implicit_effort_proxy_nonexact": bool(
+            getattr(robot, "implicit_effort_proxy_nonexact", True)
+        ),
+        "self_contact_policy": (
+            "fail_closed_on_pelvis_subtree_robot_pair"
+            if getattr(robot, "fail_on_self_contact", False)
+            else "diagnostic_only_pelvis_subtree_robot_pair"
+        ),
+        "self_contact_sampling": "every_physics_substep_after_mj_step",
+        "robot_body_ids": np.flatnonzero(
+            getattr(robot, "robot_body_mask", np.zeros(0, dtype=bool))
+        ).astype(int).tolist(),
+        "robot_geom_ids": np.flatnonzero(
+            getattr(robot, "robot_geom_mask", np.zeros(0, dtype=bool))
+        ).astype(int).tolist(),
         "plant_semantics": dict(plant_semantics or {}),
         "protocol_semantics": dict(protocol_semantics or {}),
     }
@@ -1200,7 +1392,7 @@ def subtract_frame_transforms(t01, q01, t02, q02):
 # ONNX policy wrapper
 # =================================================================================================
 class OnnxPolicy:
-    def __init__(self, onnx_path, obs_norm="auto"):
+    def __init__(self, onnx_path, obs_norm="auto", *, allow_inexact_contract=False):
         import onnxruntime as ort
 
         self.sess = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
@@ -1276,6 +1468,14 @@ class OnnxPolicy:
             raise SystemExit("[FATAL] training_contract_exact metadata must be 0|1")
         if self.training_contract_exact != "1":
             self.evaluation_contract_exact = False
+        self.motion_kinematics_exact_meta = str(
+            md.get("motion_kinematics_exact", "")
+        ).strip()
+        self.motion_allow_legacy_link_origin_velocity_meta = str(
+            md.get("motion_allow_legacy_link_origin_velocity", "")
+        ).strip()
+        if self.motion_kinematics_exact_meta != "1":
+            self.evaluation_contract_exact = False
         self.training_contract_schema_version = str(
             md.get("training_contract_schema_version", "")
         ).strip()
@@ -1342,6 +1542,69 @@ class OnnxPolicy:
         if qdes_meta_raw not in ("", "0", "1"):
             raise SystemExit("[FATAL] qdes_clamp metadata must be 0|1")
         self.qdes_clamp_meta = None if not qdes_meta_raw else qdes_meta_raw == "1"
+        actor_leg_ref_mask_raw = str(md.get("actor_leg_ref_mask", "")).strip()
+        if actor_leg_ref_mask_raw not in ("", "0", "1"):
+            raise SystemExit("[FATAL] actor_leg_ref_mask metadata must be 0|1")
+        mask_epoch_raw = str(md.get("actor_leg_ref_mask_provenance_epoch", "")).strip()
+        mask_binding_raw = str(md.get("actor_leg_ref_mask_provenance_sha256", "")).strip()
+        if mask_epoch_raw not in ("", "1"):
+            raise SystemExit(
+                "[FATAL] actor_leg_ref_mask_provenance_epoch metadata must be 1 when present"
+            )
+        if mask_binding_raw and (
+            len(mask_binding_raw) != 64
+            or any(ch not in "0123456789abcdef" for ch in mask_binding_raw)
+        ):
+            raise SystemExit(
+                "[FATAL] actor_leg_ref_mask_provenance_sha256 must be 64 lowercase hex characters"
+            )
+        if mask_epoch_raw == "1":
+            if not self.training_contract_sha256 or not self.source_checkpoint_sha256:
+                raise SystemExit(
+                    "[FATAL] epoch-1 actor leg-reference mask provenance requires valid "
+                    "training-contract and source-checkpoint SHA-256 values"
+                )
+            mask_payload = (
+                "actor_leg_ref_mask_provenance_epoch=1\n"
+                f"actor_leg_ref_mask={1 if actor_leg_ref_mask_raw == '1' else 0}\n"
+                f"training_contract_sha256={self.training_contract_sha256}\n"
+                f"source_checkpoint_sha256={self.source_checkpoint_sha256}\n"
+            )
+            expected_mask_binding = hashlib.sha256(mask_payload.encode("ascii")).hexdigest()
+            if mask_binding_raw != expected_mask_binding:
+                raise SystemExit(
+                    "[FATAL] actor leg-reference mask provenance is not content-bound to the "
+                    "training contract and source checkpoint"
+                )
+        elif mask_binding_raw or actor_leg_ref_mask_raw == "1":
+            raise SystemExit(
+                "[FATAL] actor leg-reference mask/binding metadata requires provenance epoch=1"
+            )
+        self.actor_leg_ref_mask_provenance_exact = self.hitter_pure or (
+            mask_epoch_raw == "1" and mask_binding_raw != ""
+        )
+        if not self.actor_leg_ref_mask_provenance_exact:
+            self.evaluation_contract_exact = False
+            if not allow_inexact_contract:
+                raise SystemExit(
+                    "[FATAL] command-bearing ONNX lacks actor_leg_ref_mask_provenance_epoch=1; "
+                    "historical masked and unmasked checkpoints are indistinguishable. Use "
+                    "--allow-inexact-contract only for a non-bookable diagnostic."
+                )
+            print(
+                "[mj-sim2sim] WARNING: actor leg-reference mask provenance is ambiguous; "
+                "explicit inexact diagnostic only"
+            )
+        # R-a masked actors saw default-stand + zero velocity in 24 of their 62 command dims;
+        # build_obs here feeds live leg references, so every observation of a masked checkpoint
+        # is wrong on every path. Refuse outright until the mask is implemented in build_obs.
+        require_contract(
+            actor_leg_ref_mask_raw in ("", "0"),
+            "checkpoint was trained with actor_leg_ref_mask (R-a: actor leg command dims = "
+            "default stand + zero vel); this evaluator has no counterpart and would feed live "
+            "leg references into 24 of the 62 command dims. No exam path can grade this "
+            "artifact yet.",
+        )
         self.qdes_joint_pos_limits = None
         qdes_limits_raw = str(md.get("qdes_joint_pos_limits", "")).strip()
         if qdes_limits_raw:
@@ -1496,6 +1759,42 @@ class OnnxPolicy:
         self.motion_clip_sha256 = tuple(
             v.strip() for v in md.get("motion_clip_sha256", "").split(",") if v.strip()
         )
+        clip_count_from_metadata = (
+            len(self.clip_seg_lengths)
+            if self.clip_seg_lengths is not None
+            else (len(self.motion_clip_sha256) or None)
+        )
+        try:
+            self.motion_body_lin_vel_points = motion_body_lin_vel_points_from_metadata(
+                md, clip_count=clip_count_from_metadata
+            )
+        except ValueError as exc:
+            raise SystemExit(f"[FATAL] {exc}") from exc
+        explicit_velocity_points = bool(str(md.get("motion_body_lin_vel_points", "")).strip())
+        self.motion_body_lin_vel_points_source = (
+            "explicit_per_clip_metadata"
+            if explicit_velocity_points
+            else (
+                "legacy_exact_all_com"
+                if self.motion_body_lin_vel_points is not None
+                else "ambiguous_legacy_metadata"
+            )
+        )
+        if (
+            self.motion_body_lin_vel_points is None
+            or (
+                clip_count_from_metadata is not None
+                and len(self.motion_body_lin_vel_points) != clip_count_from_metadata
+            )
+            or (
+                self.motion_kinematics_exact_meta == "1"
+                and any(
+                    point != ROOT_LIN_VEL_POINT_CENTER_OF_MASS
+                    for point in self.motion_body_lin_vel_points
+                )
+            )
+        ):
+            self.evaluation_contract_exact = False
         # per-clip reference base->racket reach offset at the strike frame (dx0,dy0,dx1,dy1,...).
         # Needed to derive the 177-D hitter base station from the racket target (base_couple_mode
         # reference_reach). Baked by utils/exporter.py since 2026-07-06; older 177 exports lack it —
@@ -1850,7 +2149,8 @@ class MujocoRobot:
                  keep_frictionloss, pd_mode, kd_for_implicit=None, *, actuator_types=None,
                  joint_armature=None, joint_frictionloss_proxy=None,
                  joint_velocity_limits=None, joint_effort_limits=None,
-                 require_bound_plant_match=False, allow_velocity_limit_proxy=True):
+                 require_bound_plant_match=False, allow_velocity_limit_proxy=True,
+                 allow_effort_limit_proxy=True, fail_on_self_contact=False):
         import mujoco
 
         self.mj = mujoco
@@ -1872,6 +2172,25 @@ class MujocoRobot:
         self.allow_velocity_limit_proxy = bool(allow_velocity_limit_proxy)
         self.velocity_limit_hit_count = 0
         self.velocity_limit_peak_ratio = 0.0
+        # Isaac's ImplicitActuator clips TOTAL drive force P-D.  MuJoCo passive dof_damping is
+        # outside motor ctrlrange and therefore cannot reproduce that law.  A bound, zero-passive
+        # plant uses an explicit motor command clip(P-D,-L,L); legacy/passive variants are clearly
+        # diagnostic and a formal constructor rejects them before rollout.
+        self.allow_effort_limit_proxy = bool(allow_effort_limit_proxy)
+        self.fail_on_self_contact = bool(fail_on_self_contact)
+        self.effort_limit_hit_count = 0
+        self.effort_limit_peak_ratio = 0.0
+        self.kd_implicit = None
+        self._effort_guard = None
+        self.implicit_effort_execution_mode = "not_applicable"
+        self.implicit_effort_proxy_nonexact = False
+        self.last_control_self_contact = {
+            "physics_substeps": 0,
+            "substeps_with_contact": 0,
+            "contact_count": 0,
+            "max_penetration_m": 0.0,
+            "worst_pair": "",
+        }
         self.data = mujoco.MjData(self.model)
 
         def named_id(obj_type, name, kind):
@@ -1932,6 +2251,7 @@ class MujocoRobot:
                 )
             self.model.actuator_ctrlrange[self.act_id, 0] = -bound_effort
             self.model.actuator_ctrlrange[self.act_id, 1] = bound_effort
+        self.joint_effort_limits = bound_effort
         self.ctrl_lo = self.model.actuator_ctrlrange[self.act_id, 0].copy()
         self.ctrl_hi = self.model.actuator_ctrlrange[self.act_id, 1].copy()
 
@@ -1945,10 +2265,54 @@ class MujocoRobot:
         self.tracked_bid = np.array([bid(n) for n in body_names], int)
         self.pelvis_bid = bid("pelvis_link")
         self.torso_bid = bid(ANCHOR_BODY)
-        self.racket_site = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "right_racket")
+        pelvis_free_jids = np.flatnonzero(
+            (np.asarray(self.model.jnt_type) == int(mujoco.mjtJoint.mjJNT_FREE))
+            & (np.asarray(self.model.jnt_bodyid) == self.pelvis_bid)
+        )
+        require_contract(
+            pelvis_free_jids.shape == (1,),
+            "pelvis_link must own exactly one freejoint, "
+            f"found {len(pelvis_free_jids)}",
+        )
+        self.root_free_jid = int(pelvis_free_jids[0])
+        require_contract(
+            int(self.model.jnt_qposadr[self.root_free_jid]) == 0
+            and int(self.model.jnt_dofadr[self.root_free_jid]) == 0,
+            "pelvis freejoint must start at qpos address 0 and qvel/dof address 0",
+        )
+        self.racket_site = named_id(
+            mujoco.mjtObj.mjOBJ_SITE, "right_racket", "site"
+        )
         self.feet_bid = [bid(n) for n in FEET_BODIES]
         self.feet_geoms = {g for g in range(self.model.ngeom)
                            if self.model.geom_bodyid[g] in self.feet_bid}
+        # Self-contact means two geoms in the pelvis articulation subtree, not merely two geoms
+        # outside worldbody.  A dynamic ball, mocap body, or other free diagnostic object also has
+        # body_id != 0 and must not be mislabeled as robot self-collision.
+        self.robot_body_mask = np.zeros(self.model.nbody, dtype=bool)
+        for body_id in range(1, self.model.nbody):
+            cursor = int(body_id)
+            seen = set()
+            while cursor != 0 and cursor not in seen:
+                if cursor == self.pelvis_bid:
+                    self.robot_body_mask[body_id] = True
+                    break
+                seen.add(cursor)
+                cursor = int(self.model.body_parentid[cursor])
+            require_contract(cursor not in seen, "MJCF body parent graph contains a cycle")
+        require_contract(
+            self.robot_body_mask[self.pelvis_bid]
+            and np.all(self.robot_body_mask[self.tracked_bid])
+            and np.all(self.robot_body_mask[self.feet_bid])
+            and self.robot_body_mask[int(self.model.site_bodyid[self.racket_site])],
+            "tracked/feet/racket bodies must belong to the pelvis robot subtree",
+        )
+        self.robot_geom_mask = self.robot_body_mask[
+            np.asarray(self.model.geom_bodyid, dtype=int)
+        ]
+        require_contract(
+            bool(np.any(self.robot_geom_mask)), "pelvis robot subtree has no collision geoms"
+        )
 
         # Native viscous damping and dry friction are separate pieces of the plant. Isaac uses
         # actuator kd plus a PhysX load-dependent joint-friction coefficient, not MuJoCo's extra
@@ -1964,22 +2328,72 @@ class MujocoRobot:
             # the evaluation inexact; this assignment merely preserves the historical proxy.
             self.model.dof_frictionloss[self.vadr] = frictionloss_proxy
         if np.any(self.implicit_mask):
-            # Match Isaac's ImplicitActuator: the kd damping is integrated IMPLICITLY (stable + no
-            # under-shoot of fast swings at a 5 ms step). Put kd into the passive joint damping and
-            # use MuJoCo's implicitfast integrator; the control torque then applies kp only.
             require_contract(kd_for_implicit is not None, "implicit PD requires kd_for_implicit")
-            # ADD kd to whatever passive damping survives above (2026-07-05 fix): the old
-            # assignment OVERWROTE dof_damping, so --keep-passive + implicit silently lost
-            # the MJCF passive damping — the AGI plant has BOTH (passive + our commanded kd).
             kd_for_implicit = np.asarray(kd_for_implicit, np.float64)
             require_contract(
                 kd_for_implicit.shape == self.implicit_mask.shape,
                 "kd_for_implicit shape does not match actuator contract",
             )
-            self.model.dof_damping[self.vadr[self.implicit_mask]] += (
-                kd_for_implicit[self.implicit_mask]
+            passive_implicit = self.model.dof_damping[
+                self.vadr[self.implicit_mask]
+            ].copy()
+            try:
+                self.implicit_effort_execution_mode = resolve_implicit_effort_execution(
+                    has_implicit=True,
+                    effort_limits_bound=self.joint_effort_limits is not None,
+                    passive_damping=passive_implicit,
+                    allow_inexact_proxy=self.allow_effort_limit_proxy,
+                )
+            except ValueError as exc:
+                raise SystemExit(f"[FATAL] {exc}") from exc
+            self.implicit_effort_proxy_nonexact = not (
+                self.implicit_effort_execution_mode == "isaac_total_pd_clip_exact"
             )
+            if self.joint_effort_limits is None:
+                # Historical diagnostic only.  Bound runs never put actuator kd in passive damping
+                # because doing so would move it outside the total-effort clip.
+                self.model.dof_damping[self.vadr[self.implicit_mask]] += (
+                    kd_for_implicit[self.implicit_mask]
+                )
             self.model.opt.integrator = int(self.mj.mjtIntegrator.mjINT_IMPLICITFAST)
+            self.kd_implicit = kd_for_implicit
+        if self.joint_effort_limits is not None and np.any(self.implicit_mask):
+            impl_idx = np.flatnonzero(self.implicit_mask)
+            self._effort_guard = (
+                impl_idx,
+                self.joint_effort_limits[impl_idx],
+            )
+
+    def self_contact_scan(self):
+        """Count live contacts whose two geoms belong to the pelvis robot subtree.
+
+        MuJoCo has already honored the MJCF ``<contact><exclude>`` adjacency list and the
+        contype/conaffinity masks, so anything counted here is a self-collision the solver
+        actually resolved — a contact regime Isaac training never sees
+        (enabled_self_collisions=False).  The classifier deliberately excludes balls, table/net
+        bodies, mocap helpers and unrelated free bodies.  This method only reads state; the caller
+        decides whether the configured protocol records diagnostics or fails closed.
+        Returns (count, max_penetration_m, worst_pair).
+        """
+        ncon = self.data.ncon
+        if ncon == 0:
+            return 0, 0.0, ""
+        # Vectorized (hot path: runs every control step; a Python per-contact loop materializes
+        # an MjContact wrapper per contact).  Pair legality was already applied by MuJoCo's own
+        # broadphase (contype/conaffinity + MJCF <contact><exclude>); membership in the explicit
+        # pelvis-subtree geom set is the remaining classification.
+        g1 = self.data.contact.geom1[:ncon]
+        g2 = self.data.contact.geom2[:ncon]
+        robot_pair = self.robot_geom_mask[g1] & self.robot_geom_mask[g2]
+        count = int(np.count_nonzero(robot_pair))
+        if count == 0:
+            return 0, 0.0, ""
+        pen = np.where(robot_pair, np.maximum(0.0, -self.data.contact.dist[:ncon]), -1.0)
+        worst_i = int(np.argmax(pen))
+        w1, w2 = int(g1[worst_i]), int(g2[worst_i])
+        n1 = self.mj.mj_id2name(self.model, self.mj.mjtObj.mjOBJ_GEOM, w1) or f"geom{w1}"
+        n2 = self.mj.mj_id2name(self.model, self.mj.mjtObj.mjOBJ_GEOM, w2) or f"geom{w2}"
+        return count, float(max(pen[worst_i], 0.0)), f"{n1}~{n2}"
 
     # --- state reads (all returned in ARTICULATION order or world/body frame as named) ----------
     def q_artic(self):
@@ -1997,8 +2411,11 @@ class MujocoRobot:
     def pelvis_ang_vel_body(self):
         """Pelvis angular velocity in the pelvis BODY frame (== IMU gyro). Uses mj_objectVelocity."""
         res = np.zeros(6)
-        self.mj.mj_objectVelocity(self.model, self.data, self.mj.mjtObj.mjOBJ_BODY,
-                                  self.pelvis_bid, res, 1)  # flg_local=1 -> body frame
+        # mjOBJ_BODY + flg_local=1 uses the compiled INERTIAL-frame axes (body_iquat), which
+        # differ from the pelvis link axes when fullinertia has off-diagonal terms.  The policy
+        # contract and free-joint angular qvel use the link/body axes, represented by XBODY.
+        self.mj.mj_objectVelocity(self.model, self.data, self.mj.mjtObj.mjOBJ_XBODY,
+                                  self.pelvis_bid, res, 1)  # local XBODY -> pelvis link frame
         return res[:3].copy()   # [angular(3), linear(3)] -> angular
 
     def projected_gravity_body(self):
@@ -2040,7 +2457,10 @@ class MujocoRobot:
                     feet_in_contact.add(self.model.geom_bodyid[g])
         return len(feet_in_contact) / max(len(self.feet_bid), 1)
 
-    def reset_to_reference(self, root_pos, root_quat, root_lin_w, root_ang_w, q_artic, qd_artic):
+    def reset_to_reference(
+        self, root_pos, root_quat, root_lin_w, root_ang_w, root_lin_vel_point,
+        q_artic, qd_artic,
+    ):
         """Reference-state-init with a complete MuJoCo episode-state reset.
 
         Overwriting only ``qpos``/``qvel`` leaves solver and actuator history such as
@@ -2050,13 +2470,34 @@ class MujocoRobot:
         side hidden state while preserving the already-configured model (timestep, damping and
         friction choices); the requested reference state is then installed explicitly.
         """
+        require_contract(
+            root_lin_vel_point in ROOT_LIN_VEL_POINTS,
+            f"invalid teacher-reference root linear-velocity point {root_lin_vel_point!r}",
+        )
         self.mj.mj_resetData(self.model, self.data)
         self.data.qpos[0:3] = root_pos
         self.data.qpos[3:7] = root_quat
         self.data.qpos[self.qadr] = q_artic
-        # MuJoCo free-joint qvel: linear in WORLD frame, angular in the BODY frame.
+        # A declared COM-point motion follows Isaac Lab 2.1 semantics: root_lin_w is the pelvis
+        # COM velocity even though root_pos is the link origin.  MuJoCo's free-joint translational
+        # qvel belongs to the link origin, so undo the rigid-point shift only for that declared
+        # point.  Explicit link-origin clips (including legacy diagnostics) pass through unchanged.
+        # body_ipos is the body-local link-origin -> COM displacement; body_iquat only orients the
+        # inertia axes and must not rotate this point.
+        # root_quat is scalar-first wxyz and maps body -> world, matching both the motion schema
+        # and MuJoCo qpos.  root_ang_w is world-frame; MuJoCo free-joint angular qvel is body-frame.
         R = mat_from_quat(root_quat)
-        self.data.qvel[0:3] = root_lin_w
+        try:
+            root_origin_lin_w = freejoint_origin_lin_vel_w(
+                root_lin_w,
+                root_ang_w,
+                root_quat,
+                self.model.body_ipos[self.pelvis_bid],
+                root_lin_vel_point,
+            )
+        except ValueError as exc:
+            raise SystemExit(f"[FATAL] teacher-reference reset: {exc}") from exc
+        self.data.qvel[0:3] = root_origin_lin_w
         self.data.qvel[3:6] = R.T @ root_ang_w
         self.data.qvel[self.vadr] = qd_artic
         self.mj.mj_forward(self.model, self.data)
@@ -2106,17 +2547,69 @@ class MujocoRobot:
         )
 
     def apply_pd_and_step(self, target_q_artic, kp, kd, decimation):
-        """Hold target_q across `decimation` physics substeps, recomputing PD torque each substep.
-        explicit: tau = kp*(tgt-q) - kd*qd (full PD as motor force).
-        implicit: tau = kp*(tgt-q) only; kd is the passive joint damping integrated by implicitfast."""
+        """Hold target_q and recompute the declared actuator law every physics substep.
+
+        Explicit joints and bound implicit joints both send the clipped total ``P-D`` through the
+        motor.  Only an explicitly inexact, effort-unbound legacy implicit lane retains kd as
+        passive damping and sends P alone.  Robot-only self-contact is sampled after every
+        ``mj_step``: a collision that exists for only one physics substep has already changed the
+        trajectory and therefore must not disappear between control-rate observations.
+        """
+        self.last_control_self_contact = {
+            "physics_substeps": 0,
+            "substeps_with_contact": 0,
+            "contact_count": 0,
+            "max_penetration_m": 0.0,
+            "worst_pair": "",
+        }
         for _ in range(decimation):
             q = self.data.qpos[self.qadr]
             qd = self.data.qvel[self.vadr]
-            tau = kp * (target_q_artic - q)
+            proportional = kp * (target_q_artic - q)
+            damping = kd * qd
+            tau = proportional.copy()
             tau[self.explicit_mask] -= kd[self.explicit_mask] * qd[self.explicit_mask]
+            if self._effort_guard is not None:
+                impl_idx, effort_lim = self._effort_guard
+                total_implicit = isaac_total_pd_effort(
+                    proportional[impl_idx], damping[impl_idx], effort_lim
+                )
+                tau[impl_idx] = total_implicit
+                raw_ratio = np.abs(
+                    proportional[impl_idx] - damping[impl_idx]
+                ) / effort_lim
+                peak = float(np.max(raw_ratio))
+                self.effort_limit_peak_ratio = max(self.effort_limit_peak_ratio, peak)
+                effort_hit = raw_ratio > (1.0 + 1e-12)
+                self.effort_limit_hit_count += int(np.count_nonzero(effort_hit))
             tau = np.clip(tau, self.ctrl_lo, self.ctrl_hi)
+            if self._effort_guard is not None:
+                # The bound implicit motor ranges were validated against +/- effort_lim.  Refuse
+                # any future refactor or MJCF mutation that changes the exact command after total
+                # clipping; a passive-damping approximation is never accepted on the formal path.
+                require_contract(
+                    np.array_equal(tau[impl_idx], total_implicit),
+                    "MuJoCo implicit ctrlrange changed Isaac total-PD clipped effort",
+                )
             self.data.ctrl[self.act_id] = tau
             self.mj.mj_step(self.model, self.data)
+            summary = self.last_control_self_contact
+            summary["physics_substeps"] += 1
+            sc_count, sc_pen, sc_pair = self.self_contact_scan()
+            if sc_count:
+                summary["substeps_with_contact"] += 1
+                summary["contact_count"] += int(sc_count)
+                if sc_pen >= summary["max_penetration_m"]:
+                    summary["max_penetration_m"] = float(sc_pen)
+                    summary["worst_pair"] = str(sc_pair)
+                # Formal execution refuses at the first observed physics substep.  Diagnostic
+                # execution continues but retains the complete substep aggregate above.
+                enforce_self_contact_policy(
+                    fail_closed=self.fail_on_self_contact,
+                    count=sc_count,
+                    penetration_m=sc_pen,
+                    pair=sc_pair,
+                )
             if self.joint_velocity_limits is not None:
                 qd_after = self.data.qvel[self.vadr]
                 ratio = np.abs(qd_after) / self.joint_velocity_limits
@@ -2613,7 +3106,8 @@ def _draw_markers(viewer, mujoco, racket, robot, ball_pos):
 # =================================================================================================
 def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_dt, decimation,
                 noise_scale, std_vec, n_steps, max_ep_len, rng, csv_writer, mode_label,
-                target_normal_per_clip, strike_csv_writer=None, attempt_csv_writer=None,
+                target_normal_per_clip, root_lin_vel_points,
+                strike_csv_writer=None, attempt_csv_writer=None,
                 viewer=None, realtime=True,
                 vel_ranges_per_clip=None, pos_ranges_per_clip=None, df=None,
                 reset_mode="teleport", hold_range=(0, 100), venue_sampler=None,
@@ -2861,6 +3355,13 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         return int(rng.integers(int(hold_range[0]), int(hold_range[1]) + 1))
 
     ready_mode = str(ready_state_contract["mode"])
+    if ready_mode == TEACHER_REFERENCE_READY_STATE_MODE:
+        try:
+            root_lin_vel_points = validated_motion_body_lin_vel_points(
+                root_lin_vel_points, num_clips
+            )
+        except ValueError as exc:
+            raise SystemExit(f"[FATAL] teacher-reference rollout: {exc}") from exc
     per_clip_ready_sha = {
         int(item["clip"]): str(item["ready_state_sha256"])
         for item in ready_state_contract.get("per_clip", [])
@@ -2879,6 +3380,7 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 root_quat=r["body_quat_w"][ROOT_TRACKED_IDX],
                 root_lin_w=r["body_lin_vel_w"][ROOT_TRACKED_IDX],
                 root_ang_w=r["body_ang_vel_w"][ROOT_TRACKED_IDX],
+                root_lin_vel_point=root_lin_vel_points[c],
                 q_artic=r["joint_pos"], qd_artic=r["joint_vel"],
             )
             expected_sha = per_clip_ready_sha.get(int(c), "")
@@ -2985,6 +3487,12 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
     ep_lengths, term_reasons = [], []
     n_term_early = n_timeout = 0
     roll_acc, pitch_acc, torquemax_acc, footc_acc, n_acc = 0.0, 0.0, 0.0, 0.0, 0
+    # Self-collision diagnostics: Isaac trains with self-collision OFF (agibot_a3.py
+    # enabled_self_collisions=False), the vendor MJCF grades with it ON; count where the plants
+    # actually diverge instead of guessing. Swing steps are the ones that can corrupt the strike.
+    selfcon_steps, selfcon_contacts, selfcon_swing_steps = 0, 0, 0
+    selfcon_physics_substeps, selfcon_physics_total = 0, 0
+    selfcon_max_pen, selfcon_worst_pair = 0.0, ""
     racket_err_acc, racket_err_n = 0.0, 0        # mean over the ±strike_window_s gate
     racket_exact_acc, racket_exact_n = 0.0, 0    # pos err at the EXACT strike frame (|tts| <= 0.5*step_dt)
     racket_velerr_acc = 0.0                       # racket vel err at the exact strike frame (Isaac bottleneck)
@@ -3080,6 +3588,26 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         foot_c = robot.foot_contact_frac()
         roll_acc += abs(roll_d); pitch_acc += abs(pitch_d)
         torquemax_acc += torque_max; footc_acc += foot_c; n_acc += 1
+        sc_summary = robot.last_control_self_contact
+        selfcon_physics_total += int(sc_summary["physics_substeps"])
+        sc_substeps = int(sc_summary["substeps_with_contact"])
+        sc_count = int(sc_summary["contact_count"])
+        sc_pen = float(sc_summary["max_penetration_m"])
+        sc_pair = str(sc_summary["worst_pair"])
+        if sc_substeps:
+            selfcon_steps += 1
+            selfcon_physics_substeps += sc_substeps
+            selfcon_contacts += sc_count
+            if clock_advances:
+                selfcon_swing_steps += 1
+            if sc_pen >= selfcon_max_pen:
+                selfcon_max_pen, selfcon_worst_pair = sc_pen, sc_pair
+            enforce_self_contact_policy(
+                fail_closed=robot.fail_on_self_contact,
+                count=sc_count,
+                penetration_m=sc_pen,
+                pair=sc_pair,
+            )
         if hp_track:
             swing_now = (dfs["phase"] == "swing") if df is not None else \
                 (not multiswing or hold_left <= 0)
@@ -3463,6 +3991,16 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         term_breakdown=dict(rc), fell=fell,
         base_roll_deg=roll_acc / max(n_acc, 1), base_pitch_deg=pitch_acc / max(n_acc, 1),
         torque_max_mean=torquemax_acc / max(n_acc, 1), foot_contact_frac=footc_acc / max(n_acc, 1),
+        self_contact_step_frac=selfcon_steps / max(n_acc, 1),
+        self_contact_steps=selfcon_steps, self_contact_swing_steps=selfcon_swing_steps,
+        self_contact_physics_substep_frac=(
+            selfcon_physics_substeps / max(selfcon_physics_total, 1)
+        ),
+        self_contact_physics_substeps=selfcon_physics_substeps,
+        self_contact_physics_substeps_total=selfcon_physics_total,
+        self_contact_total=selfcon_contacts,
+        self_contact_max_penetration_m=selfcon_max_pen,
+        self_contact_worst_pair=selfcon_worst_pair,
         racket_pos_err_strike=(racket_err_acc / racket_err_n) if racket_err_n else float("nan"),
         racket_pos_err_exact=(racket_exact_acc / racket_exact_n) if racket_exact_n else float("nan"),
         racket_vel_err_exact=(racket_velerr_acc / racket_exact_n) if racket_exact_n else float("nan"),
@@ -3676,16 +4214,18 @@ def main():
     p.add_argument("--keep-passive", action="store_true",
                    help="DEPRECATED shorthand for --passive-damping mjcf --frictionloss mjcf")
     p.add_argument("--passive-damping", choices=["auto", "zero", "mjcf"], default="auto",
-                   help="native MJCF viscous joint damping. auto: zero (the actuator kd supplies "
-                        "the current training plant's viscous damping).")
+                   help="native MJCF viscous joint damping. auto: zero (bound actuator kd enters "
+                        "the clipped total-PD motor command, not passive damping).")
     p.add_argument("--frictionloss", choices=["auto", "zero", "mjcf"], default="auto",
                    help="MJCF constant-Nm dry joint friction. auto: schema-3 zero when the PhysX "
                         "coefficient is zero, otherwise a labelled direct-number diagnostic proxy; "
                         "legacy HitterPure keeps MJCF and other legacy contracts use zero.")
     p.add_argument("--pd-mode", choices=["auto", "explicit", "implicit"], default="auto",
-                   help="explicit: torque=kp*e-kd*qd. implicit: kp torque + kd as passive damping via "
-                        "MuJoCo implicitfast. auto: schema-3 per-joint actuator contract, otherwise "
-                        "implicit for legacy HitterPure and explicit for other legacy actors.")
+                   help="explicit: torque=clip(kp*e-kd*qd). bound implicit: the same Isaac total-PD "
+                        "clip through the motor with implicitfast integration; effort-unbound legacy "
+                        "implicit retains passive kd as an inexact diagnostic. auto: schema-3 per-"
+                        "joint actuator contract, otherwise implicit for legacy HitterPure and "
+                        "explicit for other legacy actors.")
     p.add_argument("--out-dir", default=None, help="where to write the CSV (default: ONNX run dir)")
     p.add_argument("--viewer", action="store_true",
                    help="launch the MuJoCo passive viewer to watch the robot (keeps all metric/CSV "
@@ -3792,6 +4332,12 @@ def main():
     p.add_argument("--no-obs-norm", action="store_true",
                    help="feed RAW obs even if an obs_norm.npz sidecar exists (legacy/broken behavior; "
                         "only correct for an export that already bakes the normalizer in).")
+    p.add_argument("--require-obs-norm-provenance", action="store_true",
+                   help="fail loud instead of warning when the normalizer state is unproven: a "
+                        "legacy export with neither metadata, nor a baked graph, nor a sidecar "
+                        "would silently run IDENTITY normalization and score ~0. Default off = "
+                        "byte-identical legacy behavior (warning only); recommended for CI and "
+                        "any run whose numbers will be compared across checkpoints.")
     p.add_argument("--reset-mode", choices=["auto", "teleport", "multiswing"], default="auto",
                    help="clip-wrap protocol for the training-like rollout. teleport = legacy RSI "
                         "generation (ref-state-init at every clip wrap, wrap_teleport=true era). "
@@ -4042,7 +4588,22 @@ def main():
 
     print(f"[mj-sim2sim] onnx={args.onnx}")
     print(f"[mj-sim2sim] mjcf={args.mjcf}")
-    policy = OnnxPolicy(args.onnx, obs_norm=("off" if args.no_obs_norm else args.obs_norm))
+    policy = OnnxPolicy(
+        args.onnx,
+        obs_norm=("off" if args.no_obs_norm else args.obs_norm),
+        allow_inexact_contract=args.allow_inexact_contract,
+    )
+    velocity_points_label = (
+        "ambiguous"
+        if policy.motion_body_lin_vel_points is None
+        else ",".join(policy.motion_body_lin_vel_points)
+    )
+    print(
+        "[mj-sim2sim] motion body linear-velocity points: "
+        f"{velocity_points_label} "
+        f"(motion_kinematics_exact={policy.motion_kinematics_exact_meta or 'missing'}, "
+        f"source={policy.motion_body_lin_vel_points_source})"
+    )
     if ready_state_mode == TEACHER_REFERENCE_READY_STATE_MODE:
         policy.evaluation_contract_exact = False
         print(
@@ -4129,6 +4690,19 @@ def main():
     if frictionloss_mode == "contract-proxy":
         policy.evaluation_contract_exact = False
     qdes_clamp = bool(args.qdes_clamp or policy.hitter_pure)
+    # Bank-trained checkpoints evaluated off-bank get targets drawn from a distribution they never
+    # trained on; the numbers are diagnostics, not BankExam-comparable scores. Label instead of
+    # letting the default boxes path silently read as in-distribution.
+    target_ood_for_bank_trained = bool(
+        args.target_source != "bank"
+        and (policy.stage1_question_bank_exact == "1"
+             or bool(policy.stage1_train_bank_sha256))
+    )
+    if target_ood_for_bank_trained:
+        print(f"[mj-sim2sim] WARNING: bank-trained checkpoint (stage1 train-bank metadata bound) "
+              f"evaluated with target_source={args.target_source}; targets are OOD vs the trained "
+              f"question-bank distribution — numbers are diagnostic, not comparable to BankExam "
+              f"scores.")
     formal_qdes_limits = None
     formal_execution_contract_ok = False
     if args.target_source == "bank":
@@ -4215,6 +4789,11 @@ def main():
                     "[FATAL] formal BankExam profile violation(s): "
                     + "; ".join(bank_profile_violations)
                 )
+            # The explicit diagnostic escape must not carry formal constructor behavior into a
+            # profile already known to differ.  This also lets passive-effort and velocity proxies
+            # run only under their clearly inexact diagnostics instead of being mistaken for a
+            # validated formal plant.
+            formal_execution_contract_ok = False
             policy.evaluation_contract_exact = False
             print(
                 "[mj-sim2sim] WARNING: diagnostic BankExam profile override(s): "
@@ -4285,6 +4864,15 @@ def main():
     elif args.no_obs_norm:
         print("[mj-sim2sim] obs normalization: OFF (--no-obs-norm)")
     else:
+        require_contract(
+            not args.require_obs_norm_provenance,
+            "--require-obs-norm-provenance: normalizer state unproven (no "
+            "empirical_normalization metadata, no baked graph evidence, no obs_norm.npz "
+            "sidecar). Running IDENTITY normalization would silently zero every metric for a "
+            "normalized-obs model. Create the sidecar with scripts/make_std_sidecar.py "
+            "--checkpoint <the model_<N>.pt the ONNX came from>, or drop the flag to "
+            "reproduce legacy warning-only behavior.",
+        )
         print("[mj-sim2sim] WARNING: obs normalization sidecar NOT FOUND (<onnx_dir>/obs_norm.npz). "
               "All known training runs use empirical_normalization=true while the export bakes the "
               "RAW actor — without the sidecar such a model is fed unnormalized obs and scores ~0 "
@@ -4297,6 +4885,7 @@ def main():
     if args.strike_phase_per_clip is None:
         if policy.clip_strike_phases:
             STRIKE_PHASE_PER_CLIP = policy.clip_strike_phases
+            strike_phase_source = "onnx_metadata"
             print(f"[mj-sim2sim] strike_phase_per_clip in effect: {STRIKE_PHASE_PER_CLIP} "
                   f"(from ONNX metadata clip_strike_phases)")
         else:
@@ -4305,10 +4894,18 @@ def main():
                     "[FATAL] 110-D ONNX lacks clip_strike_phases metadata. Re-export; the exact "
                     "strike frame is part of the trained contract and must not use a legacy guess."
                 )
+            strike_phase_source = "legacy_fallback"
+            # Today this is only implicitly non-exact via the schema<2 preflight; make the
+            # dependency explicit so a future schema>=2 export missing the key cannot slip
+            # through as an exact paper graded at the v1 strike frame.
+            policy.evaluation_contract_exact = False
             print(f"[mj-sim2sim] strike_phase_per_clip in effect: {STRIKE_PHASE_PER_CLIP} "
                   f"(built-in legacy fallback — no clip_strike_phases in ONNX metadata; pass "
-                  f"--strike-phase-per-clip to match the trained cfg if this is not a v1-clip model)")
+                  f"--strike-phase-per-clip to match the trained cfg if this is not a v1-clip "
+                  f"model). WARNING: v2 clips train at different phases; grading at the legacy "
+                  f"frame skews every exact-strike metric — evaluation_contract_exact=false")
     else:
+        strike_phase_source = "cli_override"
         print(f"[mj-sim2sim] strike_phase_per_clip in effect: {STRIKE_PHASE_PER_CLIP} (CLI override; "
               f"must match the model's training YAML)")
 
@@ -4345,6 +4942,12 @@ def main():
     else:
         hold_ref = "clip"
         hold_ref_source = "legacy evaluator fallback"
+        print("[mj-sim2sim] WARNING: hold_ref=clip is an UNVERIFIED legacy fallback — every "
+              "checkpoint trained on/after 2026-07-05 holds READY-STAND, but this export predates "
+              "the motion_hold_reference metadata (2026-07-11). A stand-generation policy graded "
+              "under frozen-windup hold references sees an out-of-distribution command block "
+              "every hold step; pass --hold-ref explicitly to pair the protocol with the "
+              "training generation.")
 
     reset_mode = args.reset_mode
     bank_one_question_reset = False
@@ -4435,6 +5038,11 @@ def main():
              else "OFF (legacy exam, byte-identical to booked scores; --qdes-clamp recommended "
                   "for new exams — training clamps by default since 2026-07-06 and the C++ "
                   "runner always has)"))
+    if policy.qdes_clamp_meta is True and not qdes_clamp:
+        print("[mj-sim2sim] WARNING: this checkpoint was trained WITH q_des clamping "
+              "(qdes_clamp=1 in training metadata) but this exam runs UNCLAMPED — scores are not "
+              "train/deploy parity; pass --qdes-clamp. (The formal BankExam path already refuses "
+              "this combination; only diagnostic/scoreboard paths reach here.)")
     if args.switch_stress > 0.0:
         if reset_mode != "multiswing":
             raise SystemExit("[FATAL] --switch-stress needs the multiswing protocol (got "
@@ -4617,6 +5225,8 @@ def main():
         joint_effort_limits=(policy.joint_effort_limits if bound_schema3_plant else None),
         require_bound_plant_match=formal_execution_contract_ok,
         allow_velocity_limit_proxy=not formal_execution_contract_ok,
+        allow_effort_limit_proxy=not formal_execution_contract_ok,
+        fail_on_self_contact=formal_execution_contract_ok,
     )
     if formal_qdes_limits is not None:
         robot.soft_jnt_lo, robot.soft_jnt_hi = (
@@ -4624,8 +5234,13 @@ def main():
         )
         print("[mj-sim2sim] q_des bounds: schema-3 training metadata (31x2), not MJCF reconstruction")
     print(f"[mj-sim2sim] PD mode: {pd_mode} [{actuator_source}]"
-          + ("  (implicit joints: kd as damping + implicitfast)"
+          + (f"  (implicit effort={robot.implicit_effort_execution_mode})"
              if "implicit" in resolved_actuator_types else ""))
+    print(
+        "[mj-sim2sim] self-contact: "
+        + ("formal fail-closed" if robot.fail_on_self_contact else "diagnostic only")
+        + " over pelvis-subtree robot geom pairs"
+    )
     print(f"[mj-sim2sim] plant: native_damping={passive_damping_mode}, "
           f"frictionloss={frictionloss_mode} [{plant_source}]")
     if frictionloss_mode == "contract-proxy":
@@ -4673,7 +5288,9 @@ def main():
         )
     else:
         ready_state_contract = materialize_ready_state_contract(
-            robot, refs_table, seg_start, ready_state_mode, action_dim=len(policy.joint_names)
+            robot, refs_table, seg_start, ready_state_mode,
+            root_lin_vel_points=policy.motion_body_lin_vel_points,
+            action_dim=len(policy.joint_names),
         )
     mjcf_sha256 = sha256_file(args.mjcf)
     friction_coefficients = getattr(policy, "joint_friction_coefficients", None)
@@ -4828,7 +5445,35 @@ def main():
                 shared_schedule_artifact,
                 allow_inexact_contract=args.allow_inexact_contract,
             )
-            hold_steps_range = tuple(shared_schedule_artifact.hold_range)
+            artifact_hold_range = tuple(int(v) for v in shared_schedule_artifact.hold_range)
+            # The shared paper's hold_range displaces the metadata-resolved value AFTER the
+            # hold-protocol contract check above ran, so re-check here: a paper minted with a
+            # legacy hold guess must not silently override the training distribution.
+            if artifact_hold_range != tuple(hold_steps_range):
+                if policy.motion_hold_steps_range_meta is not None and artifact_hold_range != tuple(
+                    policy.motion_hold_steps_range_meta
+                ):
+                    if not args.allow_inexact_contract:
+                        raise SystemExit(
+                            "[FATAL] shared exam schedule hold_range "
+                            f"{artifact_hold_range} disagrees with ONNX training metadata "
+                            f"{tuple(policy.motion_hold_steps_range_meta)}; the paper was minted "
+                            "for a different hold distribution. Re-materialize the schedule or "
+                            "use the diagnostic-only --allow-inexact-contract escape."
+                        )
+                    policy.evaluation_contract_exact = False
+                else:
+                    # Metadata-less lineage: the artifact silently swaps the hold distribution
+                    # the earlier hold-protocol resolution ran against — never bookable as exact.
+                    policy.evaluation_contract_exact = False
+                print(
+                    "[mj-sim2sim] WARNING: shared exam schedule hold_range "
+                    f"{artifact_hold_range} replaces resolved hold_steps_range "
+                    f"{tuple(hold_steps_range)} [{hold_range_source}]; "
+                    "evaluation_contract_exact=false"
+                )
+                hold_range_source = "exam schedule artifact"
+            hold_steps_range = artifact_hold_range
             print(
                 "[mj-sim2sim] shared schema-v3 exam schedule installed: "
                 f"{os.path.abspath(args.exam_schedule_json)} "
@@ -4967,9 +5612,13 @@ def main():
         plant_semantics=plant_semantics,
         protocol_semantics={
             "target_source": args.target_source,
+            "target_ood_for_bank_trained_checkpoint": bool(target_ood_for_bank_trained),
             "reset_mode": reset_mode,
             "hold_ref": hold_ref,
+            "hold_ref_source": hold_ref_source,
             "hold_steps_range": [int(value) for value in hold_steps_range],
+            "hold_steps_range_source": hold_range_source,
+            "strike_phase_source": strike_phase_source,
             "exam_hold_semantics": (
                 shared_schedule_artifact.hold_semantics
                 if shared_schedule_artifact is not None
@@ -5204,9 +5853,11 @@ def main():
         # with the same seed and a reset bank cursor.
         rng, action_noise_rng = paired_rollout_rngs(args.seed)
         print(f"\n[mj-sim2sim] >>> rollout noise_scale={ns}")
+        effort_hits_before = robot.effort_limit_hit_count
         res = run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_dt,
                           args.decimation, ns, std_vec, args.steps, max_ep_len, rng, cw,
                           mode_label=f"ns={ns}", target_normal_per_clip=target_normal_per_clip,
+                          root_lin_vel_points=policy.motion_body_lin_vel_points,
                           strike_csv_writer=scw, attempt_csv_writer=acw,
                           viewer=viewer, realtime=not args.no_realtime,
                           vel_ranges_per_clip=vel_ranges_per_clip,
@@ -5234,6 +5885,12 @@ def main():
                 res["exam_schedule"]["sha256"] == venue_sampler.schedule_sha256,
                 "paired BankExam rollout reported a different schedule SHA",
             )
+        # Per-mode delta: saturation is expected Isaac behavior now that MuJoCo executes the same
+        # total-PD clip.  Preserve the count without demoting an exact trajectory.
+        res["implicit_effort_limit_hits"] = (
+            robot.effort_limit_hit_count - effort_hits_before
+        )
+        res["implicit_effort_saturation_events"] = res["implicit_effort_limit_hits"]
         results.append(res)
     csv_f.close()
     strike_csv_f.close()
@@ -5253,6 +5910,27 @@ def main():
         for result in results:
             result["evaluation_contract_exact"] = False
 
+    implicit_effort_limit_diagnostics = {
+        "hit_count": int(robot.effort_limit_hit_count),
+        "saturation_event_count": int(robot.effort_limit_hit_count),
+        "peak_abs_unclipped_total_pd_over_limit": float(robot.effort_limit_peak_ratio),
+        # Backward-compatible field name; semantics are now explicitly the pre-clip total ratio.
+        "peak_abs_torque_over_limit": float(robot.effort_limit_peak_ratio),
+        # False = no bound schema-3 limits or no implicit dofs, so zero may mean unmeasured.
+        "limits_bound": bool(robot._effort_guard is not None),
+        "execution_mode": robot.implicit_effort_execution_mode,
+        "proxy_nonexact": bool(robot.implicit_effort_proxy_nonexact),
+        "saturation_matches_isaac_total_clip": bool(
+            robot._effort_guard is not None and not robot.implicit_effort_proxy_nonexact
+        ),
+    }
+    if implicit_effort_limit_diagnostics["proxy_nonexact"]:
+        # Formal construction rejects this case.  The explicit diagnostic escape remains
+        # non-bookable even if the sampled trajectory happened not to saturate.
+        policy.evaluation_contract_exact = False
+        for result in results:
+            result["evaluation_contract_exact"] = False
+
     # ---- summary table ----
     print("\n" + "=" * 92)
     print(f"MuJoCo sim-to-sim | {os.path.basename(args.onnx)} | {args.steps} steps | seed {args.seed}"
@@ -5264,6 +5942,18 @@ def main():
         f"hits={velocity_limit_diagnostics['hit_count']} "
         f"peak_ratio={velocity_limit_diagnostics['peak_abs_velocity_over_limit']:.6g} "
         f"proxy_clamp={str(velocity_limit_diagnostics['proxy_clamp_applied']).lower()}"
+    )
+    print(
+        "[mj-sim2sim] implicit total-torque vs effort limits: "
+        f"saturation_events={implicit_effort_limit_diagnostics['saturation_event_count']} "
+        "peak_unclipped_ratio="
+        f"{implicit_effort_limit_diagnostics['peak_abs_unclipped_total_pd_over_limit']:.6g} "
+        f"mode={implicit_effort_limit_diagnostics['execution_mode']}"
+        + (" (limits unbound/inactive)"
+           if not implicit_effort_limit_diagnostics["limits_bound"] else
+           "  WARNING: passive-damping proxy is diagnostic/non-exact"
+           if implicit_effort_limit_diagnostics["proxy_nonexact"] else
+           " (Isaac total-PD clipping executed exactly)")
     )
     print("-" * 92)
     cols = [f"{r['mode']:>16s}" for r in results]
@@ -5280,6 +5970,16 @@ def main():
     row("base_pitch_deg(|mean|)", "base_pitch_deg")
     row("torque_max(mean)", "torque_max_mean")
     row("foot_contact_frac", "foot_contact_frac")
+    row("self_contact_step_frac", "self_contact_step_frac")
+    print(f"{'  (swing steps w/ self-contact)':28s}"
+          + "".join(f"{r['self_contact_swing_steps']:16d}" for r in results))
+    print(f"{'  (max penetration m)':28s}"
+          + "".join(f"{r['self_contact_max_penetration_m']:16.4g}" for r in results))
+    for r in results:
+        if r["self_contact_worst_pair"]:
+            print(f"  [self-contact] {r['mode']}: worst pair {r['self_contact_worst_pair']} — "
+                  "Isaac trains with self-collision OFF; contacts here deflect the swing only in "
+                  "the MuJoCo plant")
     row("racket_err@window(m)", "racket_pos_err_strike")
     print("-" * 92)
     row("strike_composite_succ_exact", "strike_composite_success_exact")
@@ -5572,6 +6272,7 @@ def main():
         "execution_contract": execution_contract,
         "execution_contract_sha256": execution_contract["sha256"],
         "joint_velocity_limit_diagnostics": velocity_limit_diagnostics,
+        "implicit_effort_limit_diagnostics": implicit_effort_limit_diagnostics,
         "control_step_dt_s": step_dt,
         "arguments": vars(args),
         "input_artifacts": input_artifacts,

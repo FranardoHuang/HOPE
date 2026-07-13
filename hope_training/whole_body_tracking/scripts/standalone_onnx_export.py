@@ -51,6 +51,9 @@ TRAINING_CONTRACT_SCHEMA_VERSION = _TC.TRAINING_CONTRACT_SCHEMA_VERSION
 checkpoint_claims_contract = _TC.checkpoint_claims_contract
 checkpoint_contract_lineage_exact = _TC.checkpoint_contract_lineage_exact
 require_checkpoint_contract_binding = _TC.require_checkpoint_contract_binding
+bind_actor_leg_ref_mask_metadata = _TC.bind_actor_leg_ref_mask_metadata
+require_actor_leg_ref_mask_provenance = _TC.require_actor_leg_ref_mask_provenance
+resolve_motion_body_lin_vel_points = _TC.resolve_motion_body_lin_vel_points
 validate_schema3_contract = _TC.validate_schema3_contract
 validate_schema3_contract_structure = _TC.validate_schema3_contract_structure
 
@@ -150,6 +153,9 @@ def _require_exact_floats(meta: dict[str, str], key: str, expected) -> None:
 
 def _bind_schema3_donor_metadata(donor_meta: dict[str, str], contract: dict) -> None:
     """Prove and canonicalize every donor-sourced execution value against schema 3."""
+    motion_body_lin_vel_points = resolve_motion_body_lin_vel_points(
+        contract["motion_kinematics_contracts"]
+    )
     exact_csv = {
         "joint_names": contract["joint_names"],
         "articulation_joint_names": contract["articulation_joint_names"],
@@ -226,6 +232,11 @@ def _bind_schema3_donor_metadata(donor_meta: dict[str, str], contract: dict) -> 
 
     for key, values in exact_csv.items():
         donor_meta[key] = ",".join(str(value) for value in values)
+    # This field was introduced after the currently reusable donor graphs were produced.  Its
+    # authority is the content-bound checkpoint contract above, not an older donor that cannot
+    # attest it.  Bind it from that contract so old same-task donors remain usable without ever
+    # trusting or propagating their value.
+    donor_meta["motion_body_lin_vel_points"] = ",".join(motion_body_lin_vel_points)
     for key, values in numeric_csv.items():
         donor_meta[key] = csv_values(values)
     for key, value in exact_scalars.items():
@@ -361,6 +372,7 @@ def main() -> int:
         if contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION:
             try:
                 validate_schema3_contract_structure(training_contract)
+                require_actor_leg_ref_mask_provenance(training_contract)
                 require_checkpoint_contract_binding(
                     ckpt,
                     schema=contract_schema,
@@ -485,6 +497,10 @@ def main() -> int:
             raise SystemExit("[FATAL] invalid training-contract schema version")
         donor_meta["training_contract_schema_version"] = str(contract_schema)
         donor_meta["training_contract_sha256"] = str(training_contract_sha256)
+    # Donor metadata is never authority for observation semantics.  A schema-3 checkpoint may
+    # legitimately use an older unmasked donor, while an unmasked/legacy checkpoint must not
+    # inherit actor_leg_ref_mask=1 from a masked donor.
+    bind_actor_leg_ref_mask_metadata(donor_meta, None)
     if contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION:
         _bind_schema3_donor_metadata(donor_meta, training_contract)
         donor_effort = [float(v) for v in donor_meta["joint_effort_limits"].split(",")]
@@ -641,6 +657,12 @@ def main() -> int:
                         clip_order=FORMAL_CLIP_ORDER,
                     )
                 )
+    else:
+        # Older/no checkpoint contracts cannot prove per-clip point semantics.  Never propagate a
+        # donor's per-clip claim into a newly exported actor.  The evaluator may apply its narrow
+        # pre-field exact-schema-2 all-COM rule; all other old aggregate contracts stay ambiguous
+        # for teacher-reference reset while stand-keyframe diagnostics remain loadable.
+        donor_meta.pop("motion_body_lin_vel_points", None)
     donor_meta["run_path"] = args.run_path
     # Always overwrite donor provenance. A no-bake re-export from a baked donor must clear the
     # old value or evaluators will skip the required sidecar.
@@ -648,6 +670,10 @@ def main() -> int:
     donor_meta["empirical_normalization"] = "1" if "obs_norm_state_dict" in ckpt else "0"
     donor_meta["trained_with_obs_norm"] = donor_meta["empirical_normalization"]
     donor_meta["source_checkpoint_sha256"] = _sha256_file(args.ckpt)
+    bind_actor_leg_ref_mask_metadata(
+        donor_meta,
+        training_contract if contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION else None,
+    )
     donor_meta["motion_harvest_donor_sha256"] = donor_sha256
 
     # Every checkpoint, donor, clip, harvest, bank, contract and envelope input has now been

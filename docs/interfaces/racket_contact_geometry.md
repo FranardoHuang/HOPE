@@ -126,6 +126,24 @@ loaders reject the decisive link-velocity signature rather than guessing from
 a filename. Schema 1 remains readable only as exact-ineligible legacy input
 because it did not bind body order.
 
+That same point contract applies when a diagnostic teacher-reference state is installed in
+MuJoCo. If `O` is the pelvis link origin, `C` its rigid-body centre of mass,
+`r_W = R_WB * body_ipos[pelvis]`, and the motion supplies `v_C^W` and `omega^W`, the freejoint must
+receive:
+
+```text
+v_O^W = v_C^W - omega^W x r_W
+omega^B = R_WB^T * omega^W
+```
+
+The translation uses `body_ipos`; `body_iquat` only orients the inertia-principal axes and must not
+rotate the origin-to-COM offset. A checkpoint-bound schema-3 ONNX binds one
+`motion_body_lin_vel_points` entry per clip. A clip explicitly identified as link-origin velocity
+uses `v_O^W` directly and remains diagnostic; an old
+inexact/missing aggregate contract is ambiguous and cannot enter teacher-reference reset. The only
+pre-field compatibility is an exact schema-2 lineage, whose clips were all COM-valued. This reset
+rule does not affect the formal BankExam `stand-keyframe` path, whose initial qvel is zero.
+
 ## Reference contact-speed caveat
 
 `clean_reference_strike_velocity=true` differentiates the same site position

@@ -219,11 +219,13 @@ def _contract_preflight(
         contract_bytes = contract_path.read_bytes()
         contract = json.loads(contract_bytes.decode("utf-8"))
         from whole_body_tracking.utils.training_contract import (
+            require_actor_leg_ref_mask_provenance,
             require_checkpoint_contract_binding,
             validate_schema3_contract,
         )
 
         validate_schema3_contract(contract)
+        require_actor_leg_ref_mask_provenance(contract)
         contract_sha = hashlib.sha256(contract_bytes).hexdigest()
         require_checkpoint_contract_binding(
             checkpoint_obj,
@@ -276,6 +278,7 @@ def _run(cfg, simulation_app):
     )
     from whole_body_tracking.utils.my_on_policy_runner import MotionOnPolicyRunner
     from whole_body_tracking.utils.training_contract import (
+        ACTOR_LEG_REF_MASK_PROVENANCE_KEY,
         RUNTIME_EXECUTION_KEYS,
         runtime_execution_facts,
     )
@@ -475,7 +478,11 @@ def _run(cfg, simulation_app):
     env = gym.make(task_id, cfg=env_cfg, render_mode=None)
     base = env.unwrapped
     actor_contract = infer_actor_observation_contract(base)
-    runtime_facts = runtime_execution_facts(base, actor_contract)
+    runtime_facts = runtime_execution_facts(
+        base,
+        actor_contract,
+        allow_legacy_actor_leg_ref_mask_ambiguity=allow_inexact,
+    )
     history_lengths = tuple(int(value) for value in runtime_facts["observation_history_lengths"])
     if not history_lengths or any(value != 1 for value in history_lengths):
         raise IsaacBankExamError(
@@ -483,9 +490,16 @@ def _run(cfg, simulation_app):
             f"history lengths are {history_lengths}"
         )
     if training_contract is not None:
+        # These two fields are outside RUNTIME_EXECUTION_KEYS so historical schema-3 parsing can
+        # remain diagnostic. Exact papers require epoch=1; an allow-inexact legacy run records the
+        # missing/mismatched epoch instead of interpreting absence as unmasked.
         mismatches = {
             key: (training_contract.get(key), runtime_facts.get(key))
-            for key in RUNTIME_EXECUTION_KEYS
+            for key in (
+                *RUNTIME_EXECUTION_KEYS,
+                ACTOR_LEG_REF_MASK_PROVENANCE_KEY,
+                "actor_leg_ref_mask",
+            )
             if training_contract.get(key) != runtime_facts.get(key)
         }
         if mismatches:

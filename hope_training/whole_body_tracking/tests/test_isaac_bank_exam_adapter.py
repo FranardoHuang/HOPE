@@ -14,6 +14,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+REPO = ROOT.parents[1]
 MODULE = ROOT / "scripts" / "isaac_bank_exam_adapter.py"
 SPEC = importlib.util.spec_from_file_location("isaac_bank_exam_adapter_tested", MODULE)
 A = importlib.util.module_from_spec(SPEC)
@@ -29,6 +30,36 @@ CKPT_SPEC = importlib.util.spec_from_file_location("ckpt_compat_tested", CKPT_MO
 CKPT = importlib.util.module_from_spec(CKPT_SPEC)
 assert CKPT_SPEC.loader is not None
 CKPT_SPEC.loader.exec_module(CKPT)
+
+
+def test_revoked_phase_b_rider_is_rejected_by_direct_loader_before_source_validation():
+    rider = REPO / "configs/phase1_isaac_bank_exam_physical_truth_phase_b_contract_20260711.json"
+    rider_sha = A.sha256_file(rider)
+    assert rider_sha in A.REVOKED_PHASE_B_CONTRACTS
+    with pytest.raises(A.IsaacBankExamError, match="revoked for the current exact lane"):
+        A.load_and_validate_phase_b_contract(
+            rider, expected_sha256=rider_sha, repository_root=REPO
+        )
+
+
+def test_known_phase_b_revocation_fails_closed_when_receipt_is_absent(tmp_path: Path, monkeypatch):
+    rider = tmp_path / "rider.json"
+    rider.write_text("{}", encoding="utf-8")
+    rider_sha = A.sha256_file(rider)
+    monkeypatch.setattr(
+        A,
+        "REVOKED_PHASE_B_CONTRACTS",
+        {
+            rider_sha: {
+                "revocation_path": "configs/missing.json",
+                "revocation_sha256": "0" * 64,
+            }
+        },
+    )
+    with pytest.raises(A.IsaacBankExamError, match="missing, tampered, or semantically invalid"):
+        A.load_and_validate_phase_b_contract(
+            rider, expected_sha256=rider_sha, repository_root=tmp_path
+        )
 
 
 def test_legacy_face_pairing_is_always_an_inexact_isaac_diagnostic():

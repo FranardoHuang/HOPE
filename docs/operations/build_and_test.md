@@ -114,7 +114,7 @@ reward, privileged observations and metrics; unknown selector/boolean values fai
 selector and legacy-motion opt-in reach the hard contract/export/judge paths; and motion migration
 reorders all four body-indexed arrays into the explicit target order.
 
-Reproduce the current 90-test formal CPU group with:
+Reproduce the current 115-test formal CPU group with a Python environment containing MuJoCo:
 
 ```bash
 python3 -m pytest -q \
@@ -122,14 +122,19 @@ python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_mujoco_eval_align_flags.py \
   hope_training/whole_body_tracking/tests/test_mujoco_eval_p0_contracts.py \
   hope_training/whole_body_tracking/tests/test_mujoco_ready_state_contract.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_reference_reset_com_frame.py \
   hope_training/whole_body_tracking/tests/test_motion_kinematics_contract.py \
   hope_training/whole_body_tracking/tests/test_racket_geometry_contract.py \
   hope_training/whole_body_tracking/tests/test_training_contract_schema3.py \
   hope_training/whole_body_tracking/tests/test_v5_ablation_accelerator.py
 ```
 
-Reproduce the complete 154-test union (use a Python environment with `pytest`, `numpy`, `PyYAML`,
-`hydra-core`, and Torch installed):
+The accepted local result is `115 passed, 0 skipped`. Zero skips are required: the pelvis reset
+test must load the real `a3_pingpong.xml`; a host without the `mujoco` Python package has not tested
+the point/axis correction.
+
+Reproduce the complete 183-test union (use a Python environment with `pytest`, `numpy`, `PyYAML`,
+MuJoCo, and Torch installed):
 
 ```bash
 /workspace/hope_mjeval_venv/bin/python -m pytest -q \
@@ -141,12 +146,17 @@ Reproduce the complete 154-test union (use a Python environment with `pytest`, `
   hope_training/whole_body_tracking/tests/test_mujoco_eval_align_flags.py \
   hope_training/whole_body_tracking/tests/test_mujoco_eval_p0_contracts.py \
   hope_training/whole_body_tracking/tests/test_mujoco_ready_state_contract.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_reference_reset_com_frame.py \
   hope_training/whole_body_tracking/tests/test_motion_kinematics_contract.py \
   hope_training/whole_body_tracking/tests/test_racket_geometry_contract.py \
   hope_training/whole_body_tracking/tests/test_training_contract_schema3.py \
   hope_training/whole_body_tracking/tests/test_v5_ablation_accelerator.py \
   hope_training/whole_body_tracking/tests/test_judge_plant_contract.py
 ```
+
+Accepted local result: `183 passed, 0 skipped`. `judge.sh` launches `python3` subprocesses, so when
+invoking a venv Python by absolute path, also prepend that venv's `bin` directory to `PATH`; otherwise
+the subprocess can accidentally use a host Python without PyYAML.
 
 Validate the future semantics-correct plant preregistration and offline
 contract compiler without importing Isaac or launching a simulator:
@@ -450,3 +460,32 @@ The runner was not executed. ROS/Jazzy/AimRT Release, formal ONNX loading in thi
 backend first tick, vendor MuJoCo behavior and hardware remain unrun. Exact dependency, command,
 binary and log hashes are in
 [the experiment record](../experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md).
+
+## MuJoCo evaluator parity and evidence-publication source checks (2026-07-14)
+
+The dependency-light portion starts no simulator or robot command:
+
+```bash
+python3 -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_mujoco_eval_p0_contracts.py \
+  hope_training/whole_body_tracking/tests/test_training_contract_schema3.py \
+  hope_training/whole_body_tracking/tests/test_isaac_bank_exam_adapter.py \
+  hope_training/whole_body_tracking/tests/test_scoreboard_eval_contract.py \
+  tests/test_phase1_cross_engine_instrument_parity_2x2.py
+```
+
+It covers total-PD clipping sign/boundary quadrants, formal passive-proxy refusal, physics-substep
+self-contact fail-closed/diagnostic accumulation, exact-built-in-partial mask-callable provenance,
+direct Phase-B revocation and no-mutation scoreboard header
+failure. The tiny physics and real-A3 frame/contact tests additionally require the optional
+`mujoco` Python package:
+
+```bash
+python3 -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_implicit_effort_guard_and_selfcontact.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_reference_reset_com_frame.py
+```
+
+A module-level skip means the corresponding MuJoCo behavior did not run; never report dependency-
+light pass counts as a physics pass. None of these commands launches Isaac, vendor backend, Pod,
+Gate3/Gate3B or hardware.

@@ -13,6 +13,22 @@
 
 ## 2026-07-14
 
+- MuJoCo frame/evaluator integration 的独立红队 `NO-MERGE` 阻塞已逐项关闭并合入 main：bound implicit
+  改为每 substep 执行 Isaac `clip(P-D)`；被动/无 effort-limit 代理 formal fail closed；自碰只认 pelvis
+  机器人子树且 formal 首次即拒绝，动态球不误报；mask 供证只接受 canonical/严格空 partial；旧
+  Phase-B rider direct loader 按内容 SHA 撤销；旧 scoreboard header 不再错列追加。合入后 focused
+  `147 passed, 2 skipped`、当前 main 仓内 `tests/` 为 `714 passed, 9 skipped`；两项 focused skip 都因
+  本机无 `mujoco`，不是 physics 通过。本机也无 `torch`，Phase-B Torch 套件未收集。重要合同修复已记入
+  [TIMELINE](TIMELINE.md)；没有运行 Pod、Isaac、vendor backend、Gate3/Gate3B 或真机。测试和剩余
+  optional-runtime 边界见
+  [集成卷宗](experiments/2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md)；G04/G06 仍为 `Partial`。
+
+- 第二轮独立红队又抓到两个残余假绿并在候选分支修正：可覆写 `__call__` 的 partial subclass 曾能以
+  canonical `.func` 洗出 epoch 1，现逐层仅接受 exact built-in partial；自碰曾只看 control step 末态，
+  现每个 MuJoCo physics substep 后 formal 首碰即拒绝、diagnostic 完整累计。两项均有 dependency-free
+  攻击复现与负测；未运行 MuJoCo/Isaac/vendor/Gate3/真机，G04/G06 继续 `Partial`。见
+  [集成卷宗](experiments/2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md)。
+
 - 反手拉 B/C 的 rank-0 主选已各有独立 no-clobber 整轨站位实体化 prereg（SHA
   `e016ca74...51aee` / `27f938cd...9d454`）和 restricted-pickle consumer
   `21ebbe68...87375`。consumer 只做冻结的 proper [SE(2)](DEFINITIONS.md)，验证 xyzw 左乘、
@@ -52,6 +68,12 @@
   [exact GMR 卷宗](experiments/motion_exact_gmr_s0_m0_20260713.md)。
 
 ## 2026-07-13
+
+- 从现场 `50c49e5` 选择性移植 evaluator parity guard、pelvis COM→link-origin、XBODY gyro 与
+  `actor_leg_ref_mask` epoch 供证到最新 main 基线；没有吞入旧分支的 `NOW`/实验状态。combined focused
+  `115 passed, 2 skipped`，root suite `647 passed, 9 skipped`。这是 E1 source integration；没有新
+  K100、vendor backend、Gate3 或真机结果，跨引擎 gap 仍 inconclusive。见
+  [集成卷宗](experiments/2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md)。
 
 - 反手拉 B/C 的 22 条 signed 整轨 proposal 已收敛为 exactly one primary per asset：只把 3 组
   `yaw=0` 的 R0/R1 逐字段同义项合并，随后按平移范数、偏航、回球余量、身体余隙、frame 和 ID
@@ -188,6 +210,22 @@
   exact PGID 使用 KILL，没有 broad kill、worker/judge 信号或真机命令。这不是预注册 q10/q50
   阈值停止结论，旧 `screen_only`/`whole_arm_stop_allowed=false` 语义不变；完整曲线、PGID 和 checkpoint
   SHA 见[拍面×plant 广度实验](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md)。
+- MuJoCo pelvis 点/轴 frame 审计在 `codex/mujoco-com-reset-frame` 修正两处源码合同：每个
+  motion clip 显式声明 COM/link-origin 线速度点，teacher-reference 只对 COM 做 rigid-point
+  转换，含糊的旧 inexact 包拒绝 reset；actor `base_ang_vel` 从 MuJoCo inertia-principal axes
+  改为 pelvis link/IMU axes，并对 pelvis 自身恰好一个、零地址 freejoint fail-loud（不禁止球等
+  其他 free body）。真实 A3 MJCF 的 formal CPU group 为 `115 passed, 0 skipped`，完整合同 union
+  为 `183 passed, 0 skipped`，支持的根目录 `tests/` 为 `554 passed`；10 秒 plain-MuJoCo PD stand
+  为 `1.816 mm` z 漂移、`0.311 deg` 最大倾角、
+  双脚接触 `100%`。没有在 Pod/vendor backend/真机上运行 policy rollout；ready-state 四格仍未运行。
+  两轮独立 review 复核公式、MuJoCo BODY/XBODY/freejoint 语义、mixed/count 负控和 standalone
+  old-donor 兼容后均无 P0/P1/P2。
+  另登记 vendor ROS 非零 `SimReset` world-angular→body-qvel 的潜伏接口 bug，当前全零 keyframe
+  路径不触发。详见 [G06](gates/G06_isaac_to_mujoco.md) 和
+  [frame 合同](interfaces/frames_and_coordinates.md)。
+  同日只读复核用户给的两个 Pod：一台 SSH 握手连续 reset；另一台 3 张 RTX 5090 全空闲、无
+  train/eval 进程，`/workspace/franco/nohope` 停在 `16a94b1`，其未刷新的 `origin/main` 也仅到
+  `7b85546`。所以这两台当前都没有运行或验证本 ticket，不能把本地源码通过当成云上训练结果。
 - exact planner-policy tuple 源码已在 latest-main 集成候选中闭合：23 项有效源码/配置逐字节匹配
   `c0a8e46`，portable Release 为 focused `40/40`、native `233 passed + 5 optional skips`，主线本地
   回归为 planner `180 passed, 2 skipped`、serve `39 passed`、root `521 passed, 9 skipped`。这只关闭

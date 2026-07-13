@@ -65,15 +65,19 @@ Done (2026-06-27 → 2026-07-02, recorded 2026-07-03):
   `scripts/realsensor_obs_reference.py`), and reproduces Isaac's exact-strike metrics
   (pos/vel/normal pass, composite, hit-speed error, velocity attainment) with per-clip
   forehand/backhand breakdowns and per-step CSVs.
-- The dominant divergence source was isolated to actuator PD integration: with the same ONNX and
-  byte-identical `a3_pingpong.xml`, MuJoCo with `implicitfast` + kd in `dof_damping` (Isaac
-  `ImplicitActuator` equivalent) is stable with clean swings, while the AGI deploy sim's
+- Historical diagnostics implicated actuator PD integration: with the same ONNX and
+  byte-identical `a3_pingpong.xml`, MuJoCo with `implicitfast` + kd in `dof_damping` was stable with
+  clean swings, while the AGI deploy sim's
   explicit-Euler PD path (`joint_actuator_subscriber.cc`, MJCF without an integrator attribute,
   passive damping not zeroed) diverges within ~0.1 s. Switching only the PD integration moved
-  hit-speed error 0.61 → 0.31 m/s and velocity attainment 0.35 → 0.88. One-flag reproduction:
+  hit-speed error 0.61 → 0.31 m/s and velocity attainment 0.35 → 0.88. This comparison did **not**
+  prove Isaac equivalence because passive kd bypassed the total effort clip; the 2026-07-14 audit
+  below revokes that exactness interpretation while preserving the numbers as diagnostics.
+  Historical one-flag reproduction:
   `--pd-mode implicit` vs `--pd-mode explicit --keep-passive`. See
   `agi/a3_deploy_example/SIM_FIDELITY_NOTE_FOR_AGI.md`.
-- Current verdict stance (2026-07-02): implicit PD remains the Isaac-faithful cross-check, but the
+- Historical verdict stance (2026-07-02): implicit PD was treated as the Isaac-faithful cross-check,
+  but that label is superseded by the 2026-07-14 total-effort correction below. The
   binding pre-hardware gate is the AGI explicit clipped-PD MuJoCo run ("falls in MuJoCo = falls on
   the real robot"). The deployed policy was fine-tuned to survive it
   (`launch_explicitpd_ft.sh`, exported via `export_onnx_explicitpd.sh`).
@@ -1321,3 +1325,84 @@ activation 后才能启动 judge。详见
 [实验卷宗](../experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md)与
 [运行手册](../operations/run_phase1_signed_face_exam_bank_rebind.md)。当前 L2、signed-face paper、G06 与
 Gate3 状态均不变，G06 保持 `Partial`。
+### 2026-07-13 pelvis point/axis frame correction
+
+A focused frame audit found two concrete MuJoCo evaluator errors without finding a gross
+`xyzw/wxyz`, Z-up, gravity-sign, joint-axis or joint-name permutation error.
+
+- Diagnostic `teacher-reference` reset copied the motion schema's pelvis-COM world linear velocity
+  directly into the freejoint translation, which is the pelvis link-origin world velocity. The A3
+  pelvis origin-to-COM offset is about `0.1273 m`; the corrected path applies
+  `v_origin = v_com - omega_world x (R_world_body * body_ipos)` only to a clip explicitly bound as
+  `center_of_mass`. Checkpoint-bound schema-3 native and standalone exports now carry
+  `motion_body_lin_vel_points` for every clip; explicitly bound `link_origin` clips retain direct
+  assignment and remain exact-ineligible. Schema 1/2 or contractless standalone re-exports strip
+  the field rather than inheriting an unproved donor claim.
+  Old exact schema-2 exports have one narrow all-COM compatibility rule. Missing/inexact aggregate
+  metadata cannot identify a point and now fails loudly before teacher-reference reset instead of
+  being guessed.
+- `base_ang_vel` used `mjOBJ_BODY` with local output. In MuJoCo that is expressed in the compiled
+  inertia-principal axes, not the pelvis link/IMU axes required by the actor and used for projected
+  gravity. The corrected read uses `mjOBJ_XBODY` with local output. The vendor A3 pelvis inertia
+  axes differ from the link axes by about `0.3315 deg`, so this is a real every-step observation
+  mismatch but not, by magnitude alone, evidence for the observed cross-engine strike gap.
+- The evaluator requires exactly one freejoint owned by `pelvis_link`, at qpos/dof address zero.
+  Other free bodies, such as a dynamic ball, remain permitted.
+
+A separate read-only audit found the analogous latent bug in the vendor ROS `SimReset` nonzero
+base-twist subscriber: its published twist is world/odom link-origin twist, but world angular
+velocity is copied directly into body-local freejoint qvel. Existing keyframe scripts and formal
+K100 send zero velocity, so this does not explain their behavior and is not changed in this Python
+evaluator ticket. The open G04/G07 interface contract is recorded in
+[`frames_and_coordinates.md`](../interfaces/frames_and_coordinates.md).
+
+The real `a3_pingpong.xml` regression uses nonzero orientation, three-axis angular velocity and COM
+velocity; it checks freejoint origin velocity, COM world velocity and the actor gyro frame. The
+focused reproduction is:
+
+```bash
+/Users/yyk956614/anaconda3/envs/backend/bin/python -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_mujoco_reference_reset_com_frame.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_eval_p0_contracts.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_ready_state_contract.py
+```
+
+This focused command passes `51` tests on the local CPU environment with the real MJCF test
+executed and zero skips; the formal CPU contract group passes `115` with zero skips, the complete
+contract union passes `183` with zero skips, and the repository's supported root `tests/` suite
+passes `554`.
+No policy rollout, Pod job, vendor backend or hardware ran. The reset correction does not change
+formal `stand-keyframe` K100 because that path starts with zero qvel; the gyro correction does
+affect its actor observation. The separately preregistered
+vendor/root-only/joints-only/full-match ready-state four-cell remains unrun, so these source fixes
+do not close the causal Isaac-to-MuJoCo gap. Full forensic scope and limitations are in
+[`EXP-MUJOCO-PELVIS-FRAME-PARITY`](../experiments/2026-07/EXP-MUJOCO-PELVIS-FRAME-PARITY.md);
+G06 remains `Partial`.
+
+### 2026-07-14 evaluator parity red-team closure (source gate only)
+
+Independent review found that the first implicit-effort guard could miss saturation-equivalence
+errors when P and D cancel, and that the first self-contact counter treated every non-world dynamic
+body as robot. The corrected evaluator executes Isaac's total `clip(P-D)` law for bound zero-passive
+implicit joints, rejects passive/unbound proxies from formal status, classifies only pelvis-subtree
+robot geom pairs and fails formal BankExam on any such pair. A dynamic-ball negative control is
+explicitly excluded.
+
+The same review closed three evidence-publication bypasses: command-mask provenance now accepts only
+canonical callables or strict empty built-in partials; the revoked model-2000 Phase-B rider is denied directly
+by content SHA even when a caller bypasses the 2x2 validator; and cumulative scoreboard CSVs refuse
+an old header rather than appending misaligned wider rows. The historical Phase-B launch command is
+now documented as forbidden and a replacement requires a post-epoch checkpoint/new rider/all four
+cells rerun. No new policy rollout, immutable K100, vendor backend, Gate3/Gate3B or robot result was
+produced, so G06 remains `Partial`. Full scope is in
+[the integration experiment](../experiments/2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md).
+
+A second independent review found two residual fail-open paths before merge. First, `isinstance`
+also accepted a `functools.partial` subclass whose overridden `__call__` executed different command
+semantics while `.func` still named the canonical function; provenance now unwraps only exact
+built-in partial objects at every layer. Second, self-contact was classified only after all physics
+substeps in a control step, so an earlier transient collision could affect dynamics and disappear
+before grading. Classification and formal refusal now happen after every `mj_step`, with diagnostic
+substep aggregates retained. Dependency-free negative tests reproduce both attacks; the optional
+real MuJoCo contact/frame modules remain separate runtime evidence rather than being inferred from
+those tests. G06 remains `Partial` pending an immutable behavior paper.

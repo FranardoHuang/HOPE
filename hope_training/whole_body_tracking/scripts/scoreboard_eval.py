@@ -5,7 +5,8 @@ Runs `mujoco_eval_onnx.py` under three FIXED, fully deterministic protocols and 
 labeled row per protocol to a cumulative scoreboard CSV, so any two checkpoints are compared
 on identical target sequences (same seed => identical per-swing targets, clips, and dither):
 
-  implicit        --pd-mode implicit            Isaac-faithful cross-check (implicitfast + kd damping)
+  implicit        --pd-mode implicit            Isaac total-PD clip when schema-3 effort is bound;
+                                                unbound legacy passive-kd is diagnostic only
   explicit        --pd-mode explicit            AGI deploy-sim gate ("falls here = falls on the robot")
   deploy_faithful --pd-mode explicit --deploy-faithful
                                                 C++ runner episode protocol (stand start, hold,
@@ -47,8 +48,9 @@ PROTOCOLS = {
     "explicit": ["--pd-mode", "explicit", "--keep-passive"],
     "deploy_faithful": ["--pd-mode", "explicit", "--keep-passive", "--deploy-faithful"],
     # Structure-only variant: the runner episode protocol (stand start, hold, rest, no teleports)
-    # under the Isaac-faithful implicit actuator — separates "can it survive stand-entry multi-swing"
-    # (P2.1) from "can it survive the explicit clipped PD" (actuator robustness / explicitpd_ft).
+    # under the bound total-effort clip(P-D) actuator — separates "can it survive stand-entry
+    # multi-swing" (P2.1) from "can it survive the deploy explicit-PD path" (actuator robustness /
+    # explicitpd_ft).
     "deploy_faithful_implicit": ["--pd-mode", "implicit", "--deploy-faithful"],
 }
 
@@ -73,7 +75,60 @@ CSV_COLUMNS = [
     "n_episodes", "fell_count", "mean_episode_length",
     "df_swing_starts", "df_swing_completions", "df_completion_rate", "df_falls",
     "df_mean_time_to_fall_s",
+    # protocol-provenance columns (appended so positional consumers of the older columns are
+    # unaffected): which regime actually graded this row. Without them a clamped and an
+    # unclamped row, or a stand-hold and a windup-hold row, are indistinguishable in the table.
+    "evaluation_contract_exact", "ready_state_mode", "qdes_clamp",
+    "hold_ref", "hold_ref_source", "strike_phase_source",
+    "self_contact_step_frac", "implicit_effort_peak_ratio",
 ]
+
+
+class ScoreboardSchemaError(RuntimeError):
+    """Refuse an append that would make the cumulative CSV structurally ambiguous."""
+
+
+def validate_scoreboard_header(board: pathlib.Path) -> bool:
+    """Return whether a header must be created; reject every nonempty mismatched era.
+
+    A CSV has one header.  Appending wider rows below an old header does not create a new "era";
+    it corrupts the positional schema and hides the new provenance fields from ``DictReader``.
+    Call this once before expensive protocols and again on the append file descriptor.
+    """
+
+    if not board.is_file() or board.stat().st_size == 0:
+        return True
+    with board.open(newline="") as stream:
+        existing_header = next(csv.reader(stream), [])
+    if existing_header != CSV_COLUMNS:
+        raise ScoreboardSchemaError(
+            f"{board} header has {len(existing_header)} columns, expected "
+            f"{len(CSV_COLUMNS)}; use a fresh --out-root or explicitly migrate the old board"
+        )
+    return False
+
+
+def append_scoreboard_rows(board: pathlib.Path, rows) -> None:
+    """Append only beneath the exact current header, rechecking inside the write transaction."""
+
+    board.parent.mkdir(parents=True, exist_ok=True)
+    with board.open("a+", newline="") as stream:
+        stream.seek(0, 2)
+        new_file = stream.tell() == 0
+        if not new_file:
+            stream.seek(0)
+            existing_header = next(csv.reader(stream), [])
+            if existing_header != CSV_COLUMNS:
+                raise ScoreboardSchemaError(
+                    f"{board} header has {len(existing_header)} columns, expected "
+                    f"{len(CSV_COLUMNS)}; use a fresh --out-root or explicitly migrate the old board"
+                )
+        stream.seek(0, 2)
+        writer = csv.DictWriter(stream, fieldnames=CSV_COLUMNS, extrasaction="ignore")
+        if new_file:
+            writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
 
 
 def _sha12(path: pathlib.Path) -> str:
@@ -156,6 +211,10 @@ def run_protocol(args, protocol: str, out_dir: pathlib.Path) -> dict:
         cmd += ["--strike-phase-per-clip", *[str(p) for p in args.strike_phase_per_clip]]
     if args.ee_term_z is not None:
         cmd += ["--ee-term-z", str(args.ee_term_z)]
+    if args.qdes_clamp:
+        cmd += ["--qdes-clamp"]
+    if args.hold_ref:
+        cmd += ["--hold-ref", args.hold_ref]
     for flag, vals in (("--pos-range-per-clip", args._pos_box12), ("--vel-range-per-clip", args._vel_box12)):
         if vals:
             cmd += [flag, *[str(v) for v in vals]]
@@ -170,6 +229,40 @@ def run_protocol(args, protocol: str, out_dir: pathlib.Path) -> dict:
 
     metrics = _parse_strikes_csv(out_dir / "mujoco_sim2sim_strikes.csv")
     metrics.update(_parse_stdout(proc.stdout))
+
+    # Protocol provenance from the child's summary JSON: which regime actually graded this row.
+    summary_path = out_dir / "mujoco_sim2sim_summary.json"
+    if summary_path.is_file():
+        try:
+            child = json.loads(summary_path.read_text())
+        except (OSError, ValueError) as exc:
+            print(f"[scoreboard] WARNING: unreadable {summary_path}: {exc}", flush=True)
+        else:
+            contract = child.get("execution_contract") or {}
+            proto_sem = contract.get("protocol_semantics") or {}
+            results = child.get("results") or []
+            effort = child.get("implicit_effort_limit_diagnostics") or {}
+            # Worst mode wins: a child run can carry several noise modes; surfacing only
+            # results[0] would report "clean" while another mode self-collided.
+            self_contact_fracs = [
+                r["self_contact_step_frac"] for r in results
+                if isinstance(r.get("self_contact_step_frac"), (int, float))
+            ]
+            metrics.update(
+                evaluation_contract_exact=child.get("evaluation_contract_exact"),
+                ready_state_mode=child.get("ready_state_mode"),
+                qdes_clamp=contract.get("qdes_clamp"),
+                hold_ref=proto_sem.get("hold_ref"),
+                hold_ref_source=proto_sem.get("hold_ref_source"),
+                strike_phase_source=proto_sem.get("strike_phase_source"),
+                self_contact_step_frac=(max(self_contact_fracs) if self_contact_fracs else None),
+                # Empty when the guard never armed (no bound schema-3 plant): 0.0 there would
+                # read as "measured clean" when nothing was measured.
+                implicit_effort_peak_ratio=(
+                    effort.get("peak_abs_torque_over_limit")
+                    if effort.get("limits_bound") else None
+                ),
+            )
     return metrics
 
 
@@ -186,6 +279,14 @@ def main() -> int:
     p.add_argument("--strike-phase-per-clip", nargs="+", type=float, default=None,
                    help="only for legacy ONNX without clip_strike_phases metadata")
     p.add_argument("--ee-term-z", type=float, default=None)
+    p.add_argument("--qdes-clamp", action="store_true",
+                   help="forward --qdes-clamp to every protocol leg (training clamps by default "
+                        "since 2026-07-06 and the C++ runner always has; default off keeps rows "
+                        "byte-identical to booked legacy scoreboard scores)")
+    p.add_argument("--hold-ref", choices=["auto", "clip", "stand"], default=None,
+                   help="forward --hold-ref to every protocol leg (pre-2026-07-11 exports lack "
+                        "motion_hold_reference metadata and silently fall back to the legacy "
+                        "windup-crouch hold; default None = omit the flag, current behavior)")
     p.add_argument("--task-yaml", type=pathlib.Path,
                    default=WBT / "cfg" / "task" / "HOPEPingPongDeployParity.yaml",
                    help="task YAML whose racket.pos_range_per_clip / vel_range_per_clip define the "
@@ -201,6 +302,11 @@ def main() -> int:
     for m in args.motion_files:
         if not m.is_file():
             raise SystemExit(f"[scoreboard] motion file not found: {m}")
+    board = args.out_root / "scoreboard.csv"
+    try:
+        validate_scoreboard_header(board)
+    except ScoreboardSchemaError as exc:
+        raise SystemExit(f"[scoreboard] refusing schema-mismatched append: {exc}") from exc
 
     # In-distribution target boxes from the trained task YAML (racket.pos/vel_range_per_clip).
     args._pos_box12, args._vel_box12 = None, None
@@ -246,14 +352,16 @@ def main() -> int:
     label_dir.mkdir(parents=True, exist_ok=True)
     (label_dir / "summary.json").write_text(json.dumps(summary, indent=2))
 
-    board = args.out_root / "scoreboard.csv"
-    new_file = not board.is_file()
-    with open(board, "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=CSV_COLUMNS, extrasaction="ignore")
-        if new_file:
-            w.writeheader()
-        for protocol, metrics in summary["protocols"].items():
-            w.writerow({**meta, "protocol": protocol, **metrics})
+    try:
+        append_scoreboard_rows(
+            board,
+            (
+                {**meta, "protocol": protocol, **metrics}
+                for protocol, metrics in summary["protocols"].items()
+            ),
+        )
+    except ScoreboardSchemaError as exc:
+        raise SystemExit(f"[scoreboard] refusing schema-mismatched append: {exc}") from exc
 
     print(f"\n[scoreboard] label={args.label} onnx_sha12={meta['onnx_sha12']}")
     for protocol, m in summary["protocols"].items():

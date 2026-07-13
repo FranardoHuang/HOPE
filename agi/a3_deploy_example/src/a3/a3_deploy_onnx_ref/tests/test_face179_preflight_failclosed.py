@@ -20,9 +20,13 @@ SPEC.loader.exec_module(PF)
 def test_mutations_are_narrow_and_non_mutating():
     original = {
         "training_contract_exact": "1",
+        "training_contract_sha256": "b" * 64,
+        "source_checkpoint_sha256": "a" * 64,
+        "actor_leg_ref_mask_provenance_epoch": "1",
         "stage1_normal_envelope_payload_sha256": "a" * 64,
         "unrelated": "keep",
     }
+    original["actor_leg_ref_mask_provenance_sha256"] = PF.actor_leg_ref_mask_binding(original)
     assert PF.mutate_metadata(original, "metadata_stripped") == {}
     missing = PF.mutate_metadata(original, "missing_envelope")
     assert "stage1_normal_envelope_payload_sha256" not in missing
@@ -30,6 +34,18 @@ def test_mutations_are_narrow_and_non_mutating():
     inexact = PF.mutate_metadata(original, "training_contract_inexact")
     assert inexact["training_contract_exact"] == "0"
     assert inexact["stage1_normal_envelope_payload_sha256"] == "a" * 64
+    masked = PF.mutate_metadata(original, "actor_leg_ref_mask_unsupported")
+    assert masked["actor_leg_ref_mask"] == "1"
+    assert masked["training_contract_exact"] == "1"
+    assert masked["actor_leg_ref_mask_provenance_sha256"] == PF.actor_leg_ref_mask_binding(masked)
+    missing_mask_epoch = PF.mutate_metadata(
+        original, "missing_actor_leg_ref_mask_provenance"
+    )
+    assert "actor_leg_ref_mask_provenance_epoch" not in missing_mask_epoch
+    missing_mask_binding = PF.mutate_metadata(
+        original, "missing_actor_leg_ref_mask_binding"
+    )
+    assert "actor_leg_ref_mask_provenance_sha256" not in missing_mask_binding
     assert original["training_contract_exact"] == "1"
 
 
@@ -72,6 +88,11 @@ def test_no_publish_is_separate_from_legacy_model_relaxation_in_source():
     assert '" training_contract_exact="' in main
     assert "pp->onnx().training_contract_exact() ? \"1\" : \"0\"" in main
     assert "bool publishable_model_contract() const" in onnx
+    assert 'LookupMetaOptional(md, alloc, "actor_leg_ref_mask")' in onnx
+    assert 'LookupMetaOptional(md, alloc, "actor_leg_ref_mask_provenance_epoch")' in onnx
+    assert 'LookupMetaOptional(md, alloc, "actor_leg_ref_mask_provenance_sha256")' in onnx
+    assert "PpSha256Hex(mask_payload)" in onnx
+    assert "C++ observation builder does not" in onnx
     assert "allow_legacy_model_diagnostic && model_preflight_only" in main
 
 

@@ -28,6 +28,8 @@ def test_native_export_metadata_requires_explicit_obs_norm_truth():
     assert kwonly["obs_norm_baked"] is None, "obs_norm_baked must be a required keyword"
     assert "trained_with_obs_norm" in kwonly
     assert kwonly["trained_with_obs_norm"] is None
+    assert "source_checkpoint_path" in kwonly
+    assert kwonly["source_checkpoint_path"] is None
     assert '"obs_norm_baked": "1" if obs_norm_baked else "0"' in source
     assert '"trained_with_obs_norm": "1" if trained_with_obs_norm else "0"' in source
     assert '"empirical_normalization": "1" if trained_with_obs_norm else "0"' in source
@@ -54,6 +56,7 @@ def test_every_native_attach_call_passes_obs_norm_baked():
             calls += 1
             assert any(keyword.arg == "obs_norm_baked" for keyword in node.keywords), path
             assert any(keyword.arg == "trained_with_obs_norm" for keyword in node.keywords), path
+            assert any(keyword.arg == "source_checkpoint_path" for keyword in node.keywords), path
     assert calls == 4
 
 
@@ -72,6 +75,20 @@ def test_standalone_export_always_overwrites_donor_flag():
     source = _source(ROOT / "scripts/standalone_onnx_export.py")
     assert 'donor_meta["obs_norm_baked"] = "1" if args.bake_obs_norm else "0"' in source
     assert 'donor_meta["empirical_normalization"]' in source
+
+
+def test_mask_provenance_is_checkpoint_bound_before_any_exact_promotion():
+    exporter = _source(EXPORTER)
+    standalone = _source(ROOT / "scripts/standalone_onnx_export.py")
+    assert "facts cannot establish provenance for actor bytes" in exporter
+    assert "bind_actor_leg_ref_mask_metadata(metadata, runtime_facts)" not in exporter
+    assert exporter.index('metadata["source_checkpoint_sha256"]') < exporter.index(
+        "bind_actor_leg_ref_mask_metadata(\n            metadata,\n            training_contract"
+    )
+    assert 'training_contract.get("actor_leg_ref_mask") is not True' in exporter
+    assert standalone.rindex('donor_meta["source_checkpoint_sha256"]') < standalone.rindex(
+        "bind_actor_leg_ref_mask_metadata("
+    )
 
 
 def test_mujoco_consumer_implements_normalization_truth_table():
