@@ -41,7 +41,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | 拍面符号/解析判分复核 | [Face-sign forensic](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) → [术语：raw-A/physical-B](DEFINITIONS.md) → G05/G06 |
 | 当前 179-D `Gate3-D0` 演示 | [`Gate3-D0` 实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md) → [exact planner-policy build](experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) → [G06](gates/G06_isaac_to_mujoco.md) → [`run_gate3_first_tick_harness.md`](operations/run_gate3_first_tick_harness.md) |
 | 恢复/等待/连续对打 | [NOW 连续能力](NOW.md#22-连续能力每个课程阶段都要另考) → [Recovery A/B/C](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md) → [T1 接口](interfaces/t1_event_training_contract.md) → G05/G06 |
-| 新动作/动作库 | [空间重定向实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) + [Franco/高点拍压/横移老师设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md) → [S0/M0 exact GVHMR](experiments/motion_video_gvhmr_prereg_franco_static_motion_20260713.md) → [post-GVHMR handoff](experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md) → [canonical-beta](experiments/motion_canonical_beta_s0_m0_20260713.md) → [G08](gates/G08_blind_spot_improvements.md) → 动作操作文档 |
+| 新动作/动作库 | [空间重定向实验（含 B/C 主选 SE(2) 实体化）](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) + [Franco/高点拍压/横移老师设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md) → [S0/M0 exact GVHMR](experiments/motion_video_gvhmr_prereg_franco_static_motion_20260713.md) → [post-GVHMR handoff](experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md) → [canonical-beta](experiments/motion_canonical_beta_s0_m0_20260713.md) → [exact GMR/横移脚距](experiments/motion_exact_gmr_s0_m0_20260713.md) → [G08](gates/G08_blind_spot_improvements.md) → 动作操作文档 |
 | Planner 或 ROS runtime | [G04](gates/G04_sim_modeling_mujoco_isaac.md) / [G06](gates/G06_isaac_to_mujoco.md) → [`run_planner.md`](operations/run_planner.md) → 下方接口文档 |
 | 真机/部署 | [G07](gates/G07_mujoco_to_real.md) → [`run_deploy_dryrun.md`](operations/run_deploy_dryrun.md)；安全 gate 通过前不得下发真机命令 |
 | 恢复 ignored/local 资产 | [`setup_local_sync.md`](operations/setup_local_sync.md) + [`ASSET_POLICY.md`](ASSET_POLICY.md) |
@@ -53,19 +53,20 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | [`EXP-P1-FACE-PLANT-SCALEOUT`](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md) | 16 条 fresh 广度臂已分两波全部精确停止并保留证据；旧 face×plant 矩阵不能选 baseline |
 | [`EXP-P1-FRESH-SZ-STABILITY`](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 实验 completed/rejected；2k 与 4k 四 seed 稳定性都失败，seed4 持续弱；不晋级 baseline |
 | [`EXP-P1-FACE-SIGN-FORENSIC`](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) | `n/-n` 源码负控与 pre-orient physical-B 门已实现；fresh canary/修正后同卷未跑，旧分不晋级 |
-| [`EXP-P1-SIGNED-FACE-RESCUE-FUNNEL`](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md) | E2 bank runtime + E1 v6 launcher：新 train bank 已发布；四格 L1 未跑，L2/判卷继续阻断，不复制失败配方 seed |
+| [`EXP-P1-SIGNED-FACE-RESCUE-FUNNEL`](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md) | E3 partial：v6 A/B/C 已终档，D 在 runtime verified 前 boot timeout；v6r1 只补 D 且尚未启动，mixed L1/L2/判卷继续阻断 |
 | [`EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND`](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md) | E1 exam-v1 严格 profile 已冻结；真实 371 题 runtime rebind 未跑，新 schedule/judge 继续阻断 |
 | [`EXP-P1-HISTORICAL-SCHEMA3`](experiments/2026-07/EXP-P1-HISTORICAL-SCHEMA3.md) | 同题同卷尺已可用于诊断排名；所有历史模型仍为 inexact |
 | [`EXP-MUJOCO-NATIVE-TRAINING`](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md) | 实验 blocked；off-main preflight 为 `NO-MERGE`，四个正确性缺口未修；尚无 trusted backend、`VecEnv` 或 PPO smoke |
 | [`EXP-MUJOCO-EVAL-FRAME-INTEGRATION`](experiments/2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md) | evaluator parity guard、pelvis COM/link-origin、XBODY gyro 与 leg-mask provenance 已在 feature 集成回归；行为卷未跑 |
 | [`EXP-RECOVERY-TUPLE-ABC`](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md) | A/B/C 旧结构合同已验证；T0/T1/T2 与新 reward 次序仅完成文档设计，machine prereg 待同步 |
-| [`EXP-MOTION-SPATIAL-RETARGET`](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | B/C `19/3` 个 signed proposal 已确定性选出各 1 个主选并冻结备选顺序；证书仍为 `0`，尚无晋级动作 |
+| [`EXP-MOTION-SPATIAL-RETARGET`](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | B/C 主选已冻结并有 exact 整轨 SE(2) materializer/prereg；真实源只读 inspect 通过但尚未 consume，证书仍为 `0` |
 | [`EXP-GATE3-CURRENT179-D0`](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md) | 实验 blocked；`Gate3-D0` 严格模型 preflight 通过，当前行为尚未运行 |
 | [`EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD`](experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) | 实验 completed；exact 源码通过 portable Release 与 latest-main 回归，runtime gates 保持 open |
 | [v12/高点拍压/横移视频登记](experiments/motion_video_intake_v12_static_motion_20260713.md) | 7 段私有视频逐字节登记完成；没有动作处理、安全或行为结论 |
 | [Franco 优先、static/motion GVHMR 结果](experiments/motion_video_gvhmr_prereg_franco_static_motion_20260713.md) | Franco 六段复用旧 exact 结果；[S0/M0](DEFINITIONS.md) 已 `1/1 + 4/4` finite structural pass，v12 未执行；GMR/schema-2 未跑 |
 | [S0/M0 post-GVHMR exact handoff](experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md) | runtime handoff 已完成：S0/M0 exact SHA `d57a93e0...a1054` / `60c55150...088ef`；GMR/schema-2 未跑 |
 | [S0/M0 exact donor canonical-beta](experiments/motion_canonical_beta_s0_m0_20260713.md) | 真实 `1+4` 条 PT 已在绑定 CPU runtime consume 且 non-beta bit-exact；只解锁 exact GMR prereg，A3 脚距仍全 null |
+| [S0/M0 exact GMR 与横移脚距](experiments/motion_exact_gmr_s0_m0_20260713.md) | E1 consumer/阈值/report-last 已冻结；tree/model SHA 已补，direct retarget XML order/site 与 import/Python path 仍由 16 项机器清单阻塞，尚未运行 |
 | [v12/高点拍压/横移组合设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md) | S0/M0 已完成 GVHMR 与 canonical-beta；没有 GMR/schema-2 动作、仿真或训练结果 |
 | [非击球臂模仿消融](experiments/non_striking_arm_imitation_ablation_20260713.md) | 只有设计；尚未运行配对实验 |
 
@@ -100,10 +101,11 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | 端到端乒乓链路 | [`run_pingpong_end_to_end.md`](operations/run_pingpong_end_to_end.md) |
 | 部署 dry-run | [`run_deploy_dryrun.md`](operations/run_deploy_dryrun.md) |
 | 语义正确的 plant | [`prepare_semantics_correct_plant.md`](operations/prepare_semantics_correct_plant.md) |
-| 动作空间重定向 | [`run_motion_spatial_retarget_screen.md`](operations/run_motion_spatial_retarget_screen.md) |
+| 动作空间重定向、主选与整轨实体化 | [`run_motion_spatial_retarget_screen.md`](operations/run_motion_spatial_retarget_screen.md) |
 | 新视频离线 GVHMR | [`run_motion_video_gvhmr_prereg.md`](operations/run_motion_video_gvhmr_prereg.md) |
 | S0/M0 post-GVHMR exact 消费 | [`run_motion_post_gvhmr_exact.md`](operations/run_motion_post_gvhmr_exact.md) |
 | S0/M0 exact donor canonical-beta | [`run_motion_handoff_canonical_betas.md`](operations/run_motion_handoff_canonical_betas.md) |
+| S0/M0 exact GMR 与横移脚距 | [`run_motion_s0_m0_exact_gmr.md`](operations/run_motion_s0_m0_exact_gmr.md) |
 | 本地/已忽略资产恢复 | [`setup_local_sync.md`](operations/setup_local_sync.md) |
 
 ## 接口索引

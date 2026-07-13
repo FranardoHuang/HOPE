@@ -11,6 +11,26 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-14
+
+- 反手拉 B/C 的 rank-0 主选已各有独立 no-clobber 整轨站位实体化 prereg（SHA
+  `e016ca74...51aee` / `27f938cd...9d454`）和 restricted-pickle consumer
+  `21ebbe68...87375`。consumer 只做冻结的 proper [SE(2)](DEFINITIONS.md)，验证 xyzw 左乘、
+  Z/fps/dof/non-spatial exact、可选 world velocity 同转、save/reload 逆变换、刚体距离和 report-last；
+  专项 `10 passed`、全仓 host tests `656 passed, 9 skipped`；两份 exact 私有源只读 inspect 的最大
+  逆误差 `<2.23e-16`。本次没有
+  consume/Pod/simulator/RL/真机，schema-2/L0/vendor L1/桌网/动力学仍未跑、证书仍为 0。见
+  [实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)与
+  [操作](operations/run_motion_spatial_retarget_screen.md)。
+
+- S0/M0 的下一层 exact GMR 已形成两份独立 no-clobber plan 与共享 consumer：五条 canonical-beta PT、
+  converter argv、Python/pip、A3 model tree、两套 joint/body order 和 31-joint bijection 都是 required；M0
+  预冻结 exact 30 Hz ready sample、足点 FK、前后/横向二维脚距、3 cm component band 与独立 5 mm 防收窄门。
+  07-14 只读回执补齐 clean tree、model/mapping、关键 import 与 Python/pip SHA，但 direct retarget XML
+  order/site 段被传输截断；共享 runtime 以 16 项机器清单继续 blocked，两份 batch 已预注册且真实
+  `static` 均 rc=2。专项 `12 passed`、全仓 `645 passed, 9 skipped`；未运行 GMR/仿真/RL/真机。见
+  [exact GMR 卷宗](experiments/motion_exact_gmr_s0_m0_20260713.md)。
+
 ## 2026-07-13
 
 - 从现场 `50c49e5` 选择性移植 evaluator parity guard、pelvis COM→link-origin、XBODY gyro 与
@@ -41,6 +61,19 @@
   重建 schedule 与 judge 仍阻断，G06 保持 `Partial`。见
   [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md)与
   [操作](operations/run_phase1_signed_face_exam_bank_rebind.md)。
+
+- epoch-1 signed-face v6 的 A/B/C 已到终档，D 在 `runtime_verified`/checkpoint 前 Kit boot timeout；
+  旧 D launch/state/log SHA 与 dead PID/零 checkpoint 诊断、B 终档后 exact-PGID cleanup、`50c49e5`
+  source bundle 与 A/B/C checkpoint audit `62076758...d354` 都已冻结。新增 [v6r1](DEFINITIONS.md) D-only
+  no-clobber prereg/consumer：从 exact foreign v6 重建原 D argv，只允许 `run_name` 改名；启动前复核
+  source/runtime/bank/report/GPU/Kit lock。Python consumer 无直接 signal/第二次重试路径，但 frozen
+  wrapper 可在 pre-marker boot timeout 时仅清理本臂 exact PGID；post-contract timeout 留活臂时必须按
+  state PGID 人工审计。launch 另在 frozen training-log root 拒绝任何同 run-name suffix 的残留目录/
+  file/symlink；mixed finalizer 不 glob，只在 D 自然 `model_24.pt` finite/lineage1/合同一致后按
+  `runtime_verified` exact path 复核旧 A/B/C，并保持 L2/judge/第二 seed false。当前仅源码/专项测试，
+  v6r1 未运行。见
+  [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)与
+  [操作](operations/run_phase1_signed_face_rescue_funnel.md)。
 
 - signed-face v5 在 scene 构建后、第一次学习前被旧 schema-3 train-bank physics contract 正确拒绝；
   A claim/log 保留，B/C/D 未创建，没有 checkpoint。新增严格 no-clobber 重绑定 consumer：只允许一个

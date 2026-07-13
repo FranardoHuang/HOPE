@@ -72,6 +72,14 @@ transform 不是 capture extrinsic，也不能回填本页的 per-asset frame ma
 `configs/motion_video_spatial_retarget_prereg_20260712.json`。没有 candidate-specific schema-2/L0/L1/
 桌网整轨迹证书的输出只能叫 proposal。
 
+2026-07-14 的 Step-B（主选轨迹实体化）把这条合同落成两份独立 prereg。对 column-vector 语义，
+位置为 `p_out = Rz(yaw) p_source + [tx,ty,0]`；GMR `root_rot` 是 xyzw，方向为
+`q_out = q_yaw ⊗ q_source`（左乘）。Z、fps、帧数、`dof_pos`、`local_body_pos`、
+`link_body_list` 不变；已登记但当前源中不存在的 `root_lin_vel_world/root_ang_vel_world` 若出现，
+只做 `Rz*v`，不加 translation。除此之外的未知 payload field fail closed，不能猜它是 local 还是
+world。保存重载后必须通过逆变换、全帧 root 两两距离和 Z bit-exact 复核。详细命令见
+[空间重定位操作](../operations/run_motion_spatial_retarget_screen.md)。该 PKL 仍不是 schema-2 motion。
+
 ## 若要回答“录制现场真实桌位”
 
 现有空挥不足，必须另采标定段；不得从本轮 `0/64` 反推桌外参。最低采集规格：
@@ -95,14 +103,30 @@ runtime articulation body names；缺任一字段不能消费。
 M0 的“回到准备姿态”在 robot-coordinate GMR 后定义。每条 clip 去掉公共 root XY，并把 heading 对齐到
 该 clip 初始准备朝向；随后分别在人工绑定的 `ready_before` 与 `ready_after` 窗口对
 `d_xy = right_foot_xy - left_foot_xy` 求稳健中位数。acceptance 必须同时保留横向站距与前后脚错位，不能
-用双脚并拢、更窄站姿或绝对足位姿相等替代。foot-site mapping 与数值容差尚未预注册，因此当前没有
-M0 站距通过结果。S0 仍为无球空挥，不能消费拉球题或声称高点拍压有效。复现命令见
+用双脚并拢、更窄站姿或绝对足位姿相等替代。foot-site mapping 与数值容差已在下一层 exact-GMR
+machine plan 预注册，但 runtime closure 尚未完成，因此当前没有 M0 站距通过结果。S0 仍为无球空挥，不能
+消费拉球题或声称高点拍压有效。复现命令见
 [`run_motion_post_gvhmr_exact.md`](../operations/run_motion_post_gvhmr_exact.md)。
 
 post-GVHMR handoff 后的 canonical-beta 层进一步冻结在
 `configs/motion_canonical_betas_{s0,m0}_prereg_20260713.json`。它只将 exact donor 写进人体
 `smpl_params_global.betas`，不会生成 A3 足点。M0 的 ready windows、`d_xy` 定义、横向分离与前后错位两个
-必保留分量已经固定，但 `foot_site_mapping`、initial/terminal `d_xy`、component tolerance 和
-`stance_passed` 必须全部保持 `null`，producer 固定为未来另行预注册的 exact GMR。任一提前填值、额外
+必保留分量已经固定；canonical-beta 输出中的 `foot_site_mapping`、initial/terminal `d_xy` 和
+`stance_passed` 必须全部保持 `null`，component tolerance 只存在于后续 exact-GMR prereg，producer 固定为
+未来 exact GMR。任一提前填值、额外
 `passed` 字段或更窄/合脚替代都 fail closed。canonical-beta 复现入口见
 [`run_motion_handoff_canonical_betas.md`](../operations/run_motion_handoff_canonical_betas.md)。
+
+exact GMR 的下一层 machine contract 已在
+`configs/motion_exact_gmr_{s0,m0}_prereg_20260713.json` 冻结。两份 batch plan 已预注册，共享 runtime 因
+direct retarget XML order/site 段传输截断和 import/Python 路径闭包未齐而保持 blocked。它不再假定 retarget
+MJCF 与 canonical vendor MJCF body order 相同：两套 order 分开解析，只有 direct XML 证据到齐后才生成
+31 个 `dof_pos` 名称/index 到 canonical `qpos[7:38]` 的显式 bijection。M0 canonical FK 足点固定为
+vendor MJCF 的 `left_foot/right_foot` sites（各自 parent 为左右 `ankle_roll_Link`，local position 都是
+`[0.04,0,-0.067] m`）。
+
+窗口映射采用 `t_i=i/30 s` 的闭区间 exact sample list；去除共同 frame-0 root XY，并将 frame-0 pelvis
+local `+X` heading 转到 HOPE `+X` 后，分别报告 `right_foot_xy-left_foot_xy` 的前后 `x` 与横向 `y` median。
+运行前数值与 pass 仍全为 `null`。acceptance 预注册为两个 signed component 各 `0.03 m`，另加独立
+`5 mm` 最大横向收窄、初始绝对横向分离至少 `0.05 m` 和符号不翻转；因此落在 3 cm 分量带内的明显收脚
+也不能通过。详见 [`run_motion_s0_m0_exact_gmr.md`](../operations/run_motion_s0_m0_exact_gmr.md)。

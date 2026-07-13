@@ -238,3 +238,45 @@ save/reload tests are `15 passed, 1 skipped`, with latest-main repository regres
 and copy donor `canonical_betas.json` SHA `f405ba45...4cbf2`.
 For M0, all A3 foot sites, initial/terminal `d_xy`, tolerances and pass result remain null until a
 separately preregistered exact GMR produces robot-coordinate evidence. G04 remains `Partial`.
+
+## Audit update 2026-07-14: B/C exact whole-motion SE(2) materializer
+
+Franco backhand-loop B/C rank-0 proposals now have two independent no-clobber preregistrations and
+one restricted-pickle CPU consumer. It binds the exact main selection ledger, then resolves each
+source path/SHA/bytes through the exact canonical-beta GMR registry. The only permitted spatial
+change is one proper ground-preserving [SE(2)](../DEFINITIONS.md) left action on the full floating
+root trajectory; root xyzw orientation is yaw-left-multiplied, root Z/fps/frame count/joints and
+non-spatial fields remain exact, and explicit world root velocities would rotate without
+translation. Unknown payload fields and non-NumPy pickle globals fail closed.
+
+Ten focused tests and the `656 passed, 9 skipped` host repository suite pass, including
+save/reload inverse, pairwise rigid-distance, grounding,
+mirror, unsafe-pickle, report-last and no-clobber negative controls. Read-only inspect of the two
+locally synced exact B/C private sources also passed with maximum inverse errors below `2.23e-16`
+and pairwise-distance error below `4.17e-17 m`. No output was consumed or published in this change;
+schema-2, L0, vendor L1, table/net clearance, dynamics, simulator, training and hardware remain
+unrun. G04 remains `Partial`.
+
+For M0, the canonical-beta materialization still has null A3 stance fields. The downstream exact-GMR
+plan now freezes canonical foot sites and tolerances, while initial/terminal `d_xy` and pass remain
+null until robot-coordinate evidence exists. G04 remains `Partial`.
+
+## Audit update 2026-07-14: S0/M0 exact GMR source/model gate
+
+The next offline step now has two independent no-clobber batch plans and one shared runtime
+contract. The consumer binds each of the five exact canonical-beta PTs, clean ignored GMR
+commit/tree/bundle, converter/import/model closure, Python/pip, both retarget and canonical A3
+joint/body orders, and an explicit 31-name/index qpos bijection. The canonical vendor A3 FK model is
+bound as a 76-file tree, including `left_foot/right_foot` site identity and local positions. `inspect`
+does not create an output root; `consume` publishes completion last. Focused unit coverage is
+`12 passed`; repository regression is `645 passed, 9 skipped`.
+
+A 2026-07-14 read-only receipt recovered the exact GMR tree, retarget MJCF/mapping bytes and SHA,
+critical import SHA, Python binary SHA and normalized pip-freeze SHA. Direct retarget XML
+joint/body/site parser output was truncated, and several absolute import/Python paths remain
+unobserved. The two batch plans are preregistered, while the shared runtime keeps a machine-readable
+16-item `required_unresolved_evidence` list and remains
+`blocked_pending_exact_ignored_gmr_source_closure`. Both real `static` calls validate that receipt and
+then fail rc=2 at the same enumerated gaps. No GMR, FK result, schema-2, simulator, training or
+hardware ran; G04 remains `Partial`. See [the experiment](../experiments/motion_exact_gmr_s0_m0_20260713.md) and
+[operation](../operations/run_motion_s0_m0_exact_gmr.md).

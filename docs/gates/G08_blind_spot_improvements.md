@@ -461,10 +461,38 @@ handoff exact SHA 分别为 `d57a93e0...a1054` / `60c55150...088ef`。其后的 
 `964a7333...f1be3` / `5cef05f7...71a65`，non-beta 内容全 bit-exact。S0 的
 `contact_truth`/效果继续为空且禁止借用拉球题；M0 的末态约束明确为去除公共 root、对齐 heading 后的
 `right_foot_xy - left_foot_xy` 初始/终态稳健向量，横向站距与前后错位都要保留，脚并拢不算成功。
-foot-site mapping 和数值容差须在 GMR result acceptance 前另行预注册。详见
+foot-site mapping 和数值容差已由下段 exact-GMR plan 预注册，但尚无 runtime 结果。详见
 [post-GVHMR 卷宗](../experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md)。
 canonical-beta 的计划、运行边界与未来 A3 脚距 null contract 见
 [canonical-beta 卷宗](../experiments/motion_canonical_beta_s0_m0_20260713.md)。
+
+## 反手拉 B/C 主选整轨 SE(2) 实体化（2026-07-14）
+
+B/C rank-0 主选不再停在“待写 materializer”：两份独立 no-clobber prereg 精确绑定 selection result
+`8a80a409...8d2be`、各自 candidate/source SHA 和 counterfactual registry；同一 consumer 只把冻结的
+XY translation + yaw 作为 proper [SE(2) 平面刚体变换](../DEFINITIONS.md)原子应用到整条 floating-root
+轨迹。它不取 fallback、不改 Z/尺度/关节/逐帧/时间律，不运行 TOPP；xyzw orientation 按 yaw 左乘，
+若 exact payload 带显式 world root velocity 则一致旋转。受限 pickle loader、未知字段 fail-closed、
+save/reload 逆变换、刚体距离、保地、report-last/no-clobber 负测共 `10 passed`，全仓 host tests
+`656 passed, 9 skipped`。
+
+两份 exact 私有源的本地只读 inspect 已通过，但本变更未发布实体化产物，也未运行 schema-2、L0、
+vendor L1、桌网整轨、动力学、simulator/RL 或真机。因此证书仍为 0、G08 仍是 Research track；内部
+materialization 失败必须停止资产，只有后续外部桌/网失败才允许 selector 推进 frozen fallback。
+完整命令与边界见[空间重定位实验](../experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)和
+[操作文档](../operations/run_motion_spatial_retarget_screen.md)。
+
+S0/M0 的下一层 exact GMR 现已冻结成两批独立 machine plan。共享 consumer 不把 retarget body order 猜成
+canonical vendor body order，而是分开绑定两套 XML order，再用显式 31-joint bijection 接入 A3 FK。M0
+四条候选的人工 ready windows 已展开为 exact 30 Hz sample indices；结果将同时报告初末前后脚错位和横向
+分离，并用独立 5 mm narrowing 门阻止“落在 3 cm ready band 内但实际收脚”的假通过。S0 仍保持
+contact/effect 为 null、禁止借用拉球题。
+
+2026-07-14 只读补证已经取回 exact tree、model/mapping、关键 import 与 Python/pip SHA；但 retarget XML
+joint/body/site parser 输出被传输截断，另有绝对路径/runtime origin 尚未观察。两份 batch plan 已预注册，
+共享 runtime 用 16 项 `required_unresolved_evidence` 保持 blocked；两次真实 `static` 都在同一清单 rc=2，
+没有运行 GMR、schema-2、安全、动力学、RL 或真机。见
+[exact GMR 卷宗](../experiments/motion_exact_gmr_s0_m0_20260713.md)。G08 状态不变。
 
 ## 文档路由更新（2026-07-12）
 

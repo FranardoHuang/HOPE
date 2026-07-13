@@ -1301,10 +1301,28 @@ SHA-256 `d57a93e0...a1054` / `60c55150...088ef`。下一层 canonical-beta 已�
 计划；consumer 只注入旧 exact donor，其他 PT leaf 必须 save/reload bit-exact。host 新旧专项为
 `15 passed, 1 skipped`；真实 canonical-beta `inspect/consume` 也已在绑定 Pod1 CPU runtime 完成，S0/M0
 completion manifest SHA 为 `964a7333...f1be3` / `5cef05f7...71a65`，五条 non-beta 内容 bit-exact。
-这只解锁另建 exact GMR prereg，不直接解锁 schema-2 或 RL。S0 仍不得借用拉球题或声称击球有效；M0 的 A3
-foot-site、初末二维脚间向量、容差和 pass 当前全部为 null，必须由 robot-coordinate GMR 产生，双脚
+这只解锁另建 exact GMR prereg，不直接解锁 schema-2 或 RL。S0 仍不得借用拉球题或声称击球有效；M0 的
+canonical foot-site 与容差现已由 exact-GMR prereg 冻结，初末二维脚间向量和 pass 仍为 null，必须由
+robot-coordinate GMR 产生，双脚
 并拢不能通过。详见 [handoff 记录](../experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md)与
 [canonical-beta 记录](../experiments/motion_canonical_beta_s0_m0_20260713.md)。
+
+### 2026-07-14 S0/M0 exact GMR prereg boundary
+
+The five canonical-beta PTs now have separate S0/M0 exact-GMR machine plans, but they do not yet
+authorize a training asset. The CPU consumer freezes the old GMR argv, exact source/runtime/model
+closure and report-last publication. M0 additionally freezes exact 30 Hz ready-window sample lists,
+canonical A3 foot FK and both components of `right_foot_xy-left_foot_xy`; a finish narrowed by more
+than 5 mm fails independently of the 3 cm component band. S0 contact/effect remains null and cannot
+borrow a loop paper.
+
+The 2026-07-14 read-only receipt recovered the exact GMR tree plus most model/import/Python hashes,
+but direct retarget XML joint/body/site output was transport-truncated and the remaining paths are
+enumerated in the shared runtime's 16-item `required_unresolved_evidence`. Both batch plans are
+preregistered; the shared runtime stays blocked, and both real static validations deliberately fail
+rc=2 at that same list. No GMR output exists. Schema-2, L0/L1, dynamics and RL remain blocked; no
+trainer or hardware command ran. G05 remains `Partial`; details are in
+[the experiment](../experiments/motion_exact_gmr_s0_m0_20260713.md).
 
 ### 2026-07-12 文档路由与当前成绩表
 
@@ -1478,5 +1496,20 @@ bank rebind consumer：先证明七个 physics 文件只有一个 helper 定义�
 runtime 的 exact motion contract 和 1481 题 old/new contact/flight bytes 相同。Pod1 已正式发布并复核
 bank SHA `3a9d8851...5b71` 与 report SHA `9fffed03...bb37`：24 数组未变，正/反手 `757/724` 题的
 旧/新输出 raw bytes 相同，landing/net 全过。v6 又把 report closure 及唯一允许的父旧 bank→当前新
-bank common-field transition 写入 preflight；其他父/新共同字段仍逐值相同。v6 L1 尚未启动，所以
-G05 仍为 `Partial`；操作仍见上面的 signed-face 漏斗运行手册。
+bank common-field transition 写入 preflight；其他父/新共同字段仍逐值相同。
+
+实际 epoch-1 v6 后续在 clean `50c49e5` source 上启动：A/B/C 到终档，checkpoint 迭代分别为
+`13824/13824/24`，lineage `0/0/1`，共同 hard-contract SHA `dfc583d4...888a5`；D 在
+`runtime_verified`/checkpoint 前 Kit boot timeout。其旧 launch/state/log 与 timeout 诊断已按 exact SHA
+冻结，PID 已死且旧 claim 不覆盖。新 [v6r1](../DEFINITIONS.md) 只允许 D 单格用新 `run_name` 补跑；
+consumer 必须从 exact foreign v6 launcher 重建原 argv，并证明唯一命令差异是 `run_name`，随后才在
+GPU0/Kit lock 都空时写新的 no-clobber claim。混合 finalizer 只有在 D 自然终档 `24`、finite、lineage1、
+合同仍为 `dfc583d4...888a5` 后，才重审旧 A/B/C 和 B 的 exact-PGID terminal cleanup，写同时绑定两套
+config/launcher 的 completion。原始 checkpoint audit `62076758...d354` 还绑定 A/B/C 的 exact
+checkpoint/finite/lineage 与 D 空 run-dir。这里的 signal 边界不是“全程零 signal”：Python consumer
+不直接发 signal，但 frozen locked wrapper 可在 pre-marker boot timeout 时仅对该隔离 PGID 执行
+TERM→KILL；post-contract timeout 可能留下 live arm，只能按 state 的精确 `pid=pgid` 人工审计且不得
+自动二次启动。launch readiness 还会在 frozen RSL-RL log root 检查新 run-name suffix 匹配数为 0；
+已有目录、file、symlink 都阻断，finalizer 则只认 `runtime_verified` 的 exact path、不用 glob 猜目录。
+源码 focused 门已物化，但 v6r1 尚未运行；L2/judge/第二 seed 仍固定 false，所以 G05 仍为 `Partial`。
+操作仍见上面的 signed-face 漏斗运行手册。

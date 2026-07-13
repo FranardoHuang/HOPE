@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "manifest_id": "phase1-signed-face-rescue-d-single-cell-retry-20260713-v6r1",
+  "purpose": "Retry only the fresh-guidance D cell after its pre-runtime Kit boot timeout, then finalize one mixed L1 record from immutable v6 A/B/C evidence plus the v6r1 D terminal.",
+  "status": "machine_preregistered_single_cell_retry_not_launched",
+  "simulation_only": true,
+  "real_robot_commands_forbidden": true,
+  "direct_signals_by_retry_tool_forbidden": true,
+  "locked_launcher_exact_pgid_boot_timeout_cleanup_allowed": true,
+  "broad_signals_forbidden": true,
+  "automatic_second_retry_forbidden": true,
+  "automatic_judge_launch": false,
+  "l2_training_launch_authorized": false,
+  "second_seed_authorized": false,
+  "foreign_v6": {
+    "manifest_id": "phase1-signed-face-rescue-single-seed-funnel-20260713-v6",
+    "config_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6/phase1_signed_face_rescue_funnel_prereg_v6_20260713.json",
+    "config_sha256": "97779cee50819ae6ff34d62f6f3c2aed6b13c360b1bf7f0d075aec1f07feebf2",
+    "launcher_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6/run_phase1_signed_face_rescue_funnel.py",
+    "launcher_sha256": "9463f228b26e0a2af548dc749b42428cc3dd1a6379c9d11448e854cfa9d85052",
+    "training_commit": "50c49e58a9413ec6ac1c3ed2565d9a78acdb5e64",
+    "training_checkout": "/workspace/codexschema/nohope_signed_face_rescue_epoch1_50c49e5",
+    "expected_hard_contract_sha256": "dfc583d49362b86dcf3b90e92d0a847f64c14b6b5d71b5d70045c68baa3888a5",
+    "source_recovery_bundle": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/source_50c49e5.bundle",
+      "sha256": "2a794e2c0f9c4adefd5194d94c404bbdf137cf5368f9c2c2aedf2bc50cc0a39e",
+      "advertised_commit": "50c49e58a9413ec6ac1c3ed2565d9a78acdb5e64",
+      "required_prerequisite_commit": "882fea4285f0cf9a97ba79d79ae8af31d26ea1ed"
+    },
+    "source_git_evidence": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/source_50c49e5_git_evidence.txt",
+      "sha256": "12dc839fc76217cd714cfd8ef8f61c42c7e8231cce2b218f34fd42da4a008c99"
+    }
+  },
+  "retry_authority": {
+    "classification": "versioned_single_cell_retry_after_pre_runtime_boot_timeout",
+    "cell_id": "D",
+    "causal_role": "fresh_guidance",
+    "initialization": "fresh",
+    "training_seed": 3,
+    "face_guidance_weight": -0.4,
+    "expected_lineage_exact": true,
+    "old_run_name": "phase1_signed_face_l1_v6_D_fresh_guidance_seed3",
+    "new_run_name": "phase1_signed_face_l1_v6r1_D_fresh_guidance_seed3",
+    "num_envs": 512,
+    "max_iterations": 25,
+    "expected_terminal_checkpoint_iteration": 24,
+    "old_claim_must_remain_immutable": true,
+    "only_command_change_allowed": "run_name",
+    "old_failed_training_run_dir": "/workspace/codexschema/nohope_signed_face_rescue_epoch1_50c49e5/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-13_14-19-36_phase1_signed_face_l1_v6_D_fresh_guidance_seed3",
+    "old_outer_evidence": {
+      "launch_contract": {
+        "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/runs/l1/phase1_signed_face_l1_v6_D_fresh_guidance_seed3/launch_contract.json",
+        "sha256": "f6dd2fd222ea3f67a65c7c5b2e1ea74ea5f5725a5546b601c4691b8786de0b63"
+      },
+      "launch_state": {
+        "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/runs/l1/phase1_signed_face_l1_v6_D_fresh_guidance_seed3/run.log.launch",
+        "sha256": "4e1ab699aa3a6763a74c9680beba7b55cc3fb23675edb58f5282acd04497f350"
+      },
+      "training_log": {
+        "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/runs/l1/phase1_signed_face_l1_v6_D_fresh_guidance_seed3/run.log",
+        "sha256": "baa02f52b645b29ec33a49c1117446591f8e3bfaf334d31cc7b7cb0decb93610"
+      },
+      "timeout_diagnostic": {
+        "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/d_timeout_diagnostic.txt",
+        "sha256": "ae7de7a37329eddfaa264adb99f9a38c0b7ead33579d5b1dac0d63f4a74b5a0c"
+      },
+      "original_pid": 1759428,
+      "runtime_verified_must_be_absent": true,
+      "all_model_checkpoints_must_be_absent": true
+    }
+  },
+  "original_terminal_cells": {
+    "A": {
+      "run_name": "phase1_signed_face_l1_v6_A_hot_control_seed3",
+      "initialization": "hot_parent",
+      "expected_lineage_exact": false,
+      "expected_terminal_checkpoint_iteration": 13824,
+      "checkpoint_path": "/workspace/codexschema/nohope_signed_face_rescue_epoch1_50c49e5/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-13_14-18-05_phase1_signed_face_l1_v6_A_hot_control_seed3/model_13824.pt",
+      "checkpoint_sha256": "a1fbb766b2f642e39a4d9d8ce2f89134d6e0c6c1f4202ff7cf94a44f95068d2e",
+      "checkpoint_bytes": 7074119,
+      "launch_contract_sha256": "d1e5193650585f5d69aa9777f6430fd1477b13e8668e6fef06d5baa0bc1b8d0c",
+      "runtime_verified_sha256": "5babae6c06d0c1c7a3d27c340655e8814dc8b861c56f41a18323c236b62a80c6",
+      "launch_state_sha256": "4d0a60c2f05c00c6f3960f1f05c168c81bad49e811c778007efdc88394d7dfca",
+      "training_log_sha256": "c54317512f5faa8fc04e24920b85dbea476e043996d90c3cc0bc4daeff78c049"
+    },
+    "B": {
+      "run_name": "phase1_signed_face_l1_v6_B_hot_guidance_seed3",
+      "initialization": "hot_parent",
+      "expected_lineage_exact": false,
+      "expected_terminal_checkpoint_iteration": 13824,
+      "checkpoint_path": "/workspace/codexschema/nohope_signed_face_rescue_epoch1_50c49e5/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-13_14-18-28_phase1_signed_face_l1_v6_B_hot_guidance_seed3/model_13824.pt",
+      "checkpoint_sha256": "c73f59dcfc34a0425f20611117ce3fc1ca97c61681fe3a29b3d2cb4b17620f3d",
+      "checkpoint_bytes": 7074119,
+      "launch_contract_sha256": "c6365d9fb91dafc8a4de69fd43face332b1d74bb7ead29d6084dfe720dbc8b81",
+      "runtime_verified_sha256": "a53e768920f50e9dc63532bc5ff30759bf738f11591dca9166383f0ad2963851",
+      "launch_state_sha256": "795e691e6ef060c3d9137bdd21be77bca3573d73669a6cabddcef63691ef9737",
+      "training_log_sha256": "c0aafa6f9e8617c74ec49d00016cde4e95e747fc7dc3943a6eff229883436add",
+      "post_terminal_exact_pgid_action": {
+        "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/b_kill_action.txt",
+        "sha256": "cf619541487f6fb87182df0dd33b73e09c79ab9b1a30037a40901208bcddcafe",
+        "pgid": 1758211,
+        "classification": "post_terminal_hung_process_exact_pgid_cleanup"
+      }
+    },
+    "C": {
+      "run_name": "phase1_signed_face_l1_v6_C_fresh_control_seed3",
+      "initialization": "fresh",
+      "expected_lineage_exact": true,
+      "expected_terminal_checkpoint_iteration": 24,
+      "checkpoint_path": "/workspace/codexschema/nohope_signed_face_rescue_epoch1_50c49e5/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-13_14-19-00_phase1_signed_face_l1_v6_C_fresh_control_seed3/model_24.pt",
+      "checkpoint_sha256": "5ce4de67965a4d9eeba259689ef228cb8fab0cb90cf969fc3a5d859d2ec66b11",
+      "checkpoint_bytes": 7073617,
+      "launch_contract_sha256": "c6f7bdd4c2607977df9fec728f9b79d9b44e806a458c45e544b6c804b8afe7fc",
+      "runtime_verified_sha256": "6cc11b32ea18e443edf8aabab4a18544b58c60dfad1f5454923b7569920670c7",
+      "launch_state_sha256": "ae13b0ab73e7f48f361ba7b545124f3bd0fdfe4d7a362e209b33b4c4511a9505",
+      "training_log_sha256": "0c16db463ac007d511da6220c2946c70b3b5dba6ee450ef265ea2efdc08c576a"
+    }
+  },
+  "original_l1_checkpoint_audit": {
+    "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/l1_checkpoint_audit.jsonl",
+    "sha256": "620767581cb47dda23843822129b09c66507b0cdc887e283d619d4b51fb0d354",
+    "required_cells": ["A", "B", "C", "D"],
+    "d_run_dirs_must_be_empty": true
+  },
+  "runtime": {
+    "pod": "pod1",
+    "gpu": 0,
+    "artifact_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713",
+    "training_log_root": "/workspace/codexschema/nohope_signed_face_rescue_epoch1_50c49e5/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball",
+    "retry_training_run_dir_glob_suffix": "_phase1_signed_face_l1_v6r1_D_fresh_guidance_seed3",
+    "control_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1",
+    "config_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1/phase1_signed_face_d_retry_prereg_v6r1_20260713.json",
+    "launcher_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1/run_phase1_signed_face_d_retry.py",
+    "launch_contract_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1/d_retry_launch_contract.json",
+    "training_log_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1/run.log",
+    "launch_state_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1/run.log.launch",
+    "runtime_verified_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1/runtime_verified.json",
+    "mixed_activation_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1/l1_mixed_activation.json",
+    "kit_lock_path": "/workspace/.kit_boot.lock",
+    "kit_boot_marker": "[train.py] hard training contract:",
+    "locked_launcher_sha256": "b250ec6d1cb3700bd45b7ede79e3d124125a0ae586a12dee16510b7cf647fa14",
+    "kit_boot_timeout_seconds": 900,
+    "post_contract_ready_timeout_seconds": 900,
+    "post_contract_timeout_requires_manual_exact_state_pgid_audit": true,
+    "poll_seconds": 5,
+    "minimum_free_gpu_memory_mib": 4500,
+    "gpu_must_be_empty_before_launch": true,
+    "kit_lock_must_be_free_before_launch": true,
+    "control_outputs_are_no_clobber": true
+  },
+  "mixed_finalizer": {
+    "required_sources": {
+      "A": "original_v6",
+      "B": "original_v6",
+      "C": "original_v6",
+      "D": "v6r1_single_cell_retry"
+    },
+    "required_lineage_exact": {
+      "A": false,
+      "B": false,
+      "C": true,
+      "D": true
+    },
+    "all_four_hard_contract_sha256_must_equal": "dfc583d49362b86dcf3b90e92d0a847f64c14b6b5d71b5d70045c68baa3888a5",
+    "all_checkpoints_must_be_finite": true,
+    "retry_d_must_exit_naturally_after_iteration_24": true,
+    "automatic_judge_launch": false,
+    "l2_training_launch_authorized": false,
+    "second_seed_authorized": false,
+    "stop_or_promote_authorized": false
+  }
+}
