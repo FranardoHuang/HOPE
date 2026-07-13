@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "manifest_id": "phase1-signed-face-schema3-bank-additive-physics-rebind-20260713-v1",
+  "manifest_id": "phase1-signed-face-schema3-bank-additive-physics-rebind-20260713-v2",
   "purpose": "Rebind one immutable schema-3 Stage-1 train bank to commit 882fea4 only after proving that the sole physics-contract change is one unused additive signed-face helper and that every question array is unchanged.",
   "simulation_only": true,
   "real_robot_commands_forbidden": true,
@@ -56,7 +56,7 @@
     "target_changed_file_sha256": "14113de40bc1119d1a49a46980d9cb50380a516fd1ae1f9fb469f20834ec23c8",
     "git_diff_sha256": "4f0ae2db7361d58eb0e8f7d4ea691beade0f6e8c5b64f0d194c0aa5a8ebc9499",
     "allowed_added_top_level_function": "signed_face_hemisphere",
-    "allowed_added_function_ast_sha256": "cb7af7e0ba0675b1084ffd40c793a78c3f62d9c540f1db6da17b451d798ee01b",
+    "allowed_added_function_source_sha256": "0a3f66d971be52ffe841b6d40d1a291765ebc7da7edce60205a3aee591a5ba3e",
     "target_physics_contract_sha256": "09dfe8999c54e36b258fe54b5ec3da5d9816ff3be3675963b919371d7f4afb95"
   },
   "invariant_support_files": {
@@ -71,7 +71,7 @@
     "source_family_sha256"
   ],
   "output": {
-    "root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v1",
+    "root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2",
     "bank_basename": "s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz",
     "report_basename": "rebind_report.json",
     "root_must_not_exist": true,

@@ -1,6 +1,6 @@
 # EXP-P1-SIGNED-FACE-RESCUE-FUNNEL：有符号拍面修复后的单-seed 机制漏斗
 
-状态：`v5_prelearning_physics_contract_rejection_bank_rebind_v1_preregistered`
+状态：`v5_prelearning_physics_contract_rejection_bank_rebind_v2_preregistered`
 证据等级：E1（五次学习前失败均保留；题库严格重绑定源码与攻击回归通过，尚无新训练）
 人类负责人：franco  
 执行者：Codex  
@@ -161,7 +161,7 @@ checkpoint 之前被 schema-3 loader 正确拒绝。旧 train bank 绑定的 `vi
 和 consumer
 [`rebind_stage1_question_bank_physics_contract.py`](../../../scripts/rebind_stage1_question_bank_physics_contract.py)
 要求：七个物理合同文件只允许 `virtual_ball.py` 改动；冻结 Git diff 与新增
-`signed_face_hemisphere` 的 AST，移除该唯一新函数后旧/新 executable AST 必须完全相同；题库生成器和
+`signed_face_hemisphere` 的源码片段 SHA，移除该唯一新函数后旧/新 executable AST 必须完全相同；题库生成器和
 loader 在两个 commit 间逐字节相同；全部非 metadata 数组保持 key/order、dtype、shape 和 C-order raw
 bytes SHA；metadata 只能改四个 leaf。发布前还要在同一目标 Torch runtime 对 1481 道 train 题逐 tensor
 比较旧/新 contact 与 flight 输出原始 bytes，重跑 landing/net 门，并以 `allow_legacy=false` 同时验证
@@ -171,6 +171,11 @@ schema、split、source family 和 exact motion/frame/phase 合同。
 预注册为 `9603a178...9db`。该 train bank 即使通过也只解除 L1 发射阻塞；旧 exam 的 family SHA 会与它
 不同，所以在对应 exam bank 用同样证据重绑定或重新生成之前，不能授权 L2 exact judge，也不能把这次
 重绑定冒充 signed-directional paper。
+
+v1 的 no-write Pod preflight 又抓到一个跨 Python 版本的证据编码问题：`ast.dump` 在本机与 Pod Python
+小版本间字段不同，导致相同 helper 源码的冻结 AST SHA 不同。v1 未创建输出 root，control 和错误原样
+保留。v2 改为冻结跨版本稳定的 helper 原始源码片段 SHA；“在同一执行 Python 中移除 helper 后旧/新
+AST 相等”仍保留，因此没有放宽源码门，也没有改变题库、输出语义或训练配方。
 
 ### 父合同扩展边界
 

@@ -101,7 +101,7 @@ v5 随后成功创建 scene，但 schema-3 loader 发现旧 train bank 的 physi
 helper 未被旧题生成/回放路径消费”这一种 metadata-only 重绑定；否则必须重新生成题库。
 
 ```bash
-REBIND_CONTROL=/workspace/codexschema/phase1_signed_face_rescue_20260713/control/bank_rebind_v1
+REBIND_CONTROL=/workspace/codexschema/phase1_signed_face_rescue_20260713/control/bank_rebind_v2
 mkdir -p "$REBIND_CONTROL"
 
 install -m 0444 configs/phase1_signed_face_bank_rebind_prereg_20260713.json \
@@ -128,10 +128,10 @@ REBIND_TOOL_SHA=$(sha256sum "$REBIND_TOOL" | awk '{print $1}')
 ```
 
 本版冻结 SHA：rebind manifest
-`3cd012f11f900d5b37305730b386865f61ea9badcbdd6b50648f364e30498c49`；consumer
-`ac4cdb951f38c8b5f8aed96a7733f00468496e9d9d5fad275c6add9677b739a5`。`validate` 必须
+`5b22a6dd3c41ba1abd44e631e408ed73ada2ac66fc7ff86dc62d48f69ff2ad29`；consumer
+`c9296d1770cf589296ebcb0216c8bf510f62f5ebfe958fd52e373a75ecb0824e`。`validate` 必须
 no-write；`run` 会独占创建
-`.../assets/schema3_bank_rebind_v1/`，先写 bank、以目标 runtime 运行 exact motion contract 和 1481 题
+`.../assets/schema3_bank_rebind_v2/`，先写 bank、以目标 runtime 运行 exact motion contract 和 1481 题
 old/new bitwise contact/flight replay，再把 completion report 写在最后。目录已存在或只有 partial 时都
 拒绝覆盖；调查后必须发布新版本，不能删除后原名重跑。
 
@@ -143,6 +143,11 @@ report 中的 target commit、physics SHA `09dfe899...afb95`、family SHA `9603a
 成功后把输出 bank 和 report 的完整 SHA 冻结到新的 v6 funnel manifest/control/run names，再运行
 本页后续步骤。v5 manifest 不得现场改写。train bank 重绑定不能授权 L2/judge：对应 exam bank 尚未有
 相同 target family 证据，且 signed directional checkpoint paper 仍未冻结。
+
+历史 `control/bank_rebind_v1` 的 no-write preflight 因 `ast.dump` 跨 Python 小版本字段不稳定而拒绝；它
+没有创建 output root。v1 文件/输出原样保留，禁止覆盖。v2 仅把冻结证据改成 helper 原始源码片段 SHA，
+并继续在同一运行 Python 内要求移除 helper 后旧/新 AST 完全相同；其余数组、metadata、runtime replay
+和 no-clobber 门都不变。
 
 ## 2. 只读校验与四格命令复核
 

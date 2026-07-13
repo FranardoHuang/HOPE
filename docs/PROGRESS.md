@@ -17,7 +17,9 @@
   A claim/log 保留，B/C/D 未创建，没有 checkpoint。新增严格 no-clobber 重绑定 consumer：只允许一个
   冻结 helper 的加法式源码变化，要求所有问题数组 raw bytes 不变、metadata 精确四 leaf，并在目标
   runtime 重跑 exact motion contract 与 1481 题 old/new bitwise physics replay。专项连同 launcher 为
-  `28 passed`；Pod 尚未物化新 bank/v6 L1，旧 exam family 也未重绑定，故 L2/judge 继续阻断。见
+  `28 passed`。v1 no-write Pod preflight 又抓到 Python 小版本相关的 `ast.dump` SHA 假拒绝，v2 改用
+  helper 原始源码片段 SHA、仍保留同 runtime AST 等价门；尚未物化新 bank/v6 L1，旧 exam family 也未
+  重绑定，故 L2/judge 继续阻断。见
   [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)与
   [操作](operations/run_phase1_signed_face_rescue_funnel.md)。
 

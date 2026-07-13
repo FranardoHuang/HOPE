@@ -85,7 +85,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
     if value.get("schema_version") != 1:
         raise RebindError("rebind manifest schema_version must be 1")
     if value.get("manifest_id") != (
-        "phase1-signed-face-schema3-bank-additive-physics-rebind-20260713-v1"
+        "phase1-signed-face-schema3-bank-additive-physics-rebind-20260713-v2"
     ):
         raise RebindError("unexpected rebind manifest_id")
     if value.get("simulation_only") is not True or value.get("real_robot_commands_forbidden") is not True:
@@ -107,7 +107,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
         "base_changed_file_sha256",
         "target_changed_file_sha256",
         "git_diff_sha256",
-        "allowed_added_function_ast_sha256",
+        "allowed_added_function_source_sha256",
         "target_physics_contract_sha256",
     ):
         require_sha(physics.get(label), label)
@@ -253,9 +253,13 @@ def prove_additive_source_change(manifest: Mapping[str, Any]) -> dict[str, Any]:
     ]
     if len(additions) != 1 or additions[0].decorator_list:
         raise RebindError(f"target must add exactly one undecorated top-level {name} function")
-    added_ast_sha = sha256_bytes(ast.dump(additions[0], include_attributes=False).encode("utf-8"))
-    if added_ast_sha != physics["allowed_added_function_ast_sha256"]:
-        raise RebindError("added function AST SHA mismatch")
+    target_text = target_bytes[expected_changed].decode("utf-8")
+    added_source = ast.get_source_segment(target_text, additions[0])
+    if added_source is None:
+        raise RebindError("cannot recover the added function source segment")
+    added_source_sha = sha256_bytes(added_source.encode("utf-8"))
+    if added_source_sha != physics["allowed_added_function_source_sha256"]:
+        raise RebindError("added function source-segment SHA mismatch")
     new_tree.body = [node for node in new_tree.body if node is not additions[0]]
     if ast.dump(old_tree, include_attributes=False) != ast.dump(new_tree, include_attributes=False):
         raise RebindError("pre-existing virtual-ball executable AST changed")
@@ -271,7 +275,7 @@ def prove_additive_source_change(manifest: Mapping[str, Any]) -> dict[str, Any]:
         "only_changed_file": expected_changed,
         "git_diff_sha256": sha256_bytes(diff),
         "added_top_level_function": name,
-        "added_function_ast_sha256": added_ast_sha,
+        "added_function_source_sha256": added_source_sha,
         "preexisting_executable_ast_equal": True,
         "target_physics_contract": current_contract,
         "target_physics_contract_sha256": canonical_sha256(current_contract),
