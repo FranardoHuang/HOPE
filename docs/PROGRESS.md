@@ -27,7 +27,7 @@
   bijection。direct retarget XML 的 site inventory 精确为空、左右 foot site absent；consumer 不再错误要求
   canonical vendor 足点出现在 retarget XML，M0 stance 仍只用 vendor MJCF 做 FK。shared runtime SHA
   `cb9b01b9...0d45`，两份 host `static` 均 `PASS`；canonical-site 冒充、新 site/非 absent、runtime drift
-  负测在专项 `13 passed`，基于最新 main 的仓内 `tests/` 为 `851 passed, 10 skipped`。未连接 Pod、读取私有 PT、运行
+  负测在专项 `13 passed`，基于最新 main 的仓内 `tests/` 为 `867 passed, 10 skipped`。未连接 Pod、读取私有 PT、运行
   `inspect/consume`、GMR、仿真、训练或真机；见
   [exact GMR 卷宗](experiments/motion_exact_gmr_s0_m0_20260713.md)与
   [操作](operations/run_motion_s0_m0_exact_gmr.md)。

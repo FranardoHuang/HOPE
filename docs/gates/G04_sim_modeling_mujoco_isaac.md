@@ -393,7 +393,7 @@ commit/tree/bundle, converter/import/model closure, Python/pip, both retarget an
 joint/body orders, and an explicit 31-name/index qpos bijection. The canonical vendor A3 FK model is
 bound as a 76-file tree, including `left_foot/right_foot` site identity and local positions. `inspect`
 does not create an output root; `consume` publishes completion last. Focused unit coverage is
-`13 passed`; latest-main repository `tests/` regression is `851 passed, 10 skipped`.
+`13 passed`; latest-main repository `tests/` regression is `867 passed, 10 skipped`.
 
 A 2026-07-14 follow-up recovered all 16 exact GMR source/runtime facts. Direct retarget XML binds
 31 hinges and 32 bodies but has an exactly empty site inventory; `left_foot/right_foot` are absent.

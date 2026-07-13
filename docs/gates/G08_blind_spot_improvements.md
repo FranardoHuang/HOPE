@@ -528,7 +528,7 @@ origin、direct retarget 31-joint/32-body preorder 与 31-index bijection 都已
 inventory 精确为空，`left_foot/right_foot` 都 absent；consumer 已改为拒绝 canonical vendor sites 冒充
 retarget sites，M0 stance 仍只在绑定的 canonical vendor MJCF 上做 FK。两份 batch plan 与 shared runtime
 均为 `preregistered_not_executed`，两次 host `static` 均 `PASS`，专项 `13 passed`、仓内 `tests/` 回归
-`851 passed, 10 skipped`。
+`867 passed, 10 skipped`。
 
 这只解除 source/static blocker；本分支没有连接 Pod、读取私有 PT、运行 runtime `inspect/consume`、GMR、
 schema-2、安全、动力学、RL 或真机。见

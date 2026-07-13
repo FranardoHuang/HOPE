@@ -94,7 +94,7 @@ S0 的 `observed_ball_contact` 与 `strike_effectiveness` 在 GMR 后仍必须�
 python3 -m pytest -q tests/test_run_motion_s0_m0_exact_gmr.py
 ```
 
-当前专项为 `13 passed`，基于最新 main 的仓内 `tests/` 回归为 `851 passed, 10 skipped`；两份真实 batch plan 的 `static`
+当前专项为 `13 passed`，基于最新 main 的仓内 `tests/` 回归为 `867 passed, 10 skipped`；两份真实 batch plan 的 `static`
 都为 `PASS`。新增负测覆盖 canonical site 冒充
 retarget、retarget site 突然出现、左右 absent 被改写、joint-order runtime drift；原有 no-clobber、失败无
 completion、成功 report-last 继续通过。
