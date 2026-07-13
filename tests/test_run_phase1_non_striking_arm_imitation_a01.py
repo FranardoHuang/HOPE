@@ -39,7 +39,7 @@ def test_checked_manifest_is_exact_two_cell_single_seed_direct_mask():
     cells = M.cell_map(data)
     assert tuple(cells) == ("A0", "A1")
     assert data["source"]["expected_training_commit"] == (
-        "c3e7efa1caba7f7974af1d96d0479d9ca54dae37"
+        "353a11419ae8589ed4a374ed97169cd7a50d50a3"
     )
     assert data["shared_training_contract"]["training_seed"] == 17
     assert data["shared_training_contract"]["initialization"] == "fresh"
@@ -157,3 +157,87 @@ def test_source_contains_no_broad_process_signal_or_robot_command():
     assert 'subprocess.Popen(["ros2"' not in text
     assert "scripts/run_deploy" not in text
     assert '"joint_command"=' not in text
+
+
+def minimal_hard_contract(data: dict, cell_id: str) -> dict:
+    shared = data["shared_training_contract"]
+    return {
+        "schema_version": 3,
+        "actor_obs_contract": shared["actor_observation_contract"],
+        "actor_obs_total_dim": shared["actor_observation_dim"],
+        "face_command_pairing": shared["face_command_pairing"],
+        "mount_normal_sign_per_clip": shared["mount_normal_sign_per_clip"],
+        "strike_phase_per_clip": shared["strike_phase_per_clip"],
+        "motion_kinematics_exact": True,
+        "motion_allow_legacy_link_origin_velocity": False,
+        "motion_event_timing": {"mode": "disabled"},
+        "motion_imitation_body_names": copy.deepcopy(M.cell_map(data)[cell_id]["body_names"]),
+        "joint_names": [f"j{i}" for i in range(31)],
+        "action_joint_ids": list(range(31)),
+        "joint_friction_coefficients": [0.0] * 31,
+        "motion_clips": [
+            {"sha256": data["inputs"]["forehand_motion"]["sha256"]},
+            {"sha256": data["inputs"]["backhand_motion"]["sha256"]},
+        ],
+        "question_bank": {
+            "sha256": data["inputs"]["schema3_train_bank"]["sha256"],
+            "physics_contract_sha256": data["inputs"]["schema3_train_bank"]["physics_contract_sha256"],
+            "source_family_sha256": data["inputs"]["schema3_train_bank"]["source_family_sha256"],
+            "schema_version": 3,
+            "split": "train",
+            "exact": True,
+        },
+    }
+
+
+def write_contract(tmp_path: Path, name: str, value: dict) -> Path:
+    path = tmp_path / name
+    path.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+    return path
+
+
+def test_each_cell_hard_contract_binds_its_post_override_body_names(tmp_path):
+    data = manifest()
+    contracts = {}
+    shas = {}
+    for cell_id in M.CELL_IDS:
+        path = write_contract(tmp_path, f"{cell_id}.json", minimal_hard_contract(data, cell_id))
+        digest, contract = M.verify_hard_contract(path, data, cell_id)
+        shas[cell_id] = digest
+        contracts[cell_id] = contract
+        assert contract["motion_imitation_body_names"] == M.cell_map(data)[cell_id]["body_names"]
+    assert shas["A0"] != shas["A1"]
+    M.verify_pair_contracts_differ_only_by_imitation_body_names(contracts)
+
+
+def test_hard_contract_rejects_missing_swapped_or_forged_body_mask(tmp_path):
+    data = manifest()
+    missing = minimal_hard_contract(data, "A0")
+    missing.pop("motion_imitation_body_names")
+    with pytest.raises(M.ContractError, match="motion_imitation_body_names"):
+        M.verify_hard_contract(write_contract(tmp_path, "missing.json", missing), data, "A0")
+
+    swapped = minimal_hard_contract(data, "A0")
+    swapped["motion_imitation_body_names"] = M.cell_map(data)["A1"]["body_names"]
+    with pytest.raises(M.ContractError, match="A0 hard contract"):
+        M.verify_hard_contract(write_contract(tmp_path, "swapped.json", swapped), data, "A0")
+
+    forged = minimal_hard_contract(data, "A1")
+    forged["motion_imitation_body_names"]["motion_body_pos"].append("left_elbow_Link")
+    with pytest.raises(M.ContractError, match="A1 hard contract"):
+        M.verify_hard_contract(write_contract(tmp_path, "forged.json", forged), data, "A1")
+
+
+def test_pair_contract_comparison_rejects_any_second_difference():
+    data = manifest()
+    contracts = {cell: minimal_hard_contract(data, cell) for cell in M.CELL_IDS}
+    M.verify_pair_contracts_differ_only_by_imitation_body_names(contracts)
+    contracts["A1"]["episode_length_s"] = 11.0
+    with pytest.raises(M.ContractError, match="outside motion_imitation_body_names"):
+        M.verify_pair_contracts_differ_only_by_imitation_body_names(contracts)
+
+
+def test_checkpoint_audit_code_reads_embedded_hard_contract_identity():
+    assert "training_contract_schema_version" in M.CHECKPOINT_AUDIT
+    assert "training_contract_sha256" in M.CHECKPOINT_AUDIT
+    assert "training_contract_lineage_exact" in M.CHECKPOINT_AUDIT

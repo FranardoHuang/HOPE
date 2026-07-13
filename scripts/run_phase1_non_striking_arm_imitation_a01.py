@@ -585,7 +585,9 @@ def locate_training_run(wbt: Path, run_name: str, timeout_s: int = 60) -> Path:
     raise ContractError(f"training run directory/contract did not materialize: {run_name}")
 
 
-def verify_hard_contract(path: Path, manifest: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+def verify_hard_contract(
+    path: Path, manifest: dict[str, Any], cell_id: str
+) -> tuple[str, dict[str, Any]]:
     try:
         contract = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -604,6 +606,11 @@ def verify_hard_contract(path: Path, manifest: dict[str, Any]) -> tuple[str, dic
     for key, wanted in expected.items():
         if contract.get(key) != wanted:
             raise ContractError(f"emitted hard contract {key} changed")
+    expected_body_names = cell_map(manifest)[cell_id]["body_names"]
+    if contract.get("motion_imitation_body_names") != expected_body_names:
+        raise ContractError(
+            f"{cell_id} hard contract motion_imitation_body_names changed or is missing"
+        )
     if contract.get("motion_event_timing") != {"mode": "disabled"}:
         raise ContractError("T1 timing was unexpectedly enabled")
     if len(contract.get("joint_names", [])) != 31 or len(contract.get("action_joint_ids", [])) != 31:
@@ -626,6 +633,29 @@ def verify_hard_contract(path: Path, manifest: dict[str, Any]) -> tuple[str, dic
     if bank.get("schema_version") != 3 or bank.get("split") != "train" or bank.get("exact") is not True:
         raise ContractError("hard contract train bank is not exact schema3/train")
     return sha256_file(path), contract
+
+
+def verify_pair_contracts_differ_only_by_imitation_body_names(
+    contracts: dict[str, dict[str, Any]],
+) -> None:
+    """Prove A0/A1 structural identity after removing the one preregistered mask fact."""
+
+    if set(contracts) != set(CELL_IDS):
+        raise ContractError("paired hard-contract comparison requires exactly A0 and A1")
+    normalized = {}
+    masks = {}
+    for cell_id in CELL_IDS:
+        value = json.loads(json.dumps(contracts[cell_id], allow_nan=False))
+        if "motion_imitation_body_names" not in value:
+            raise ContractError(f"{cell_id} hard contract lacks motion_imitation_body_names")
+        masks[cell_id] = value.pop("motion_imitation_body_names")
+        normalized[cell_id] = value
+    if masks["A0"] == masks["A1"]:
+        raise ContractError("A0/A1 hard contracts did not encode distinct body masks")
+    if normalized["A0"] != normalized["A1"]:
+        raise ContractError(
+            "A0/A1 hard contracts differ outside motion_imitation_body_names"
+        )
 
 
 def verify_mask_log(log_path: Path, cell_id: str) -> list[str]:
@@ -734,7 +764,7 @@ def launch(manifest: dict[str, Any], manifest_path: Path, launcher_path: Path, r
             raise ContractError(f"{cell_id} launcher did not record isolated pid==pgid")
         run_dir = locate_training_run(preflight["wbt"], cell["run_name"])
         hard_path = run_dir / "params/training_contract.json"
-        hard_sha, _ = verify_hard_contract(hard_path, manifest)
+        hard_sha, _ = verify_hard_contract(hard_path, manifest, cell_id)
         markers = verify_mask_log(log_path, cell_id)
         verified = {
             "artifact_kind": "phase1_non_striking_arm_a01_runtime_verified",
@@ -764,6 +794,7 @@ def finalize(manifest: dict[str, Any], manifest_path: Path, launcher_path: Path)
     run_root = Path(runtime["run_root"])
     results = {}
     hard_shas = set()
+    hard_contracts: dict[str, dict[str, Any]] = {}
     for cell_id in CELL_IDS:
         cell = cell_map(manifest)[cell_id]
         arm_dir = run_root / cell["run_name"]
@@ -793,10 +824,11 @@ def finalize(manifest: dict[str, Any], manifest_path: Path, launcher_path: Path)
         verify_mask_log(log_path, cell_id)
         run_dir = Path(verified["training_run_dir"])
         hard_path = run_dir / "params/training_contract.json"
-        hard_sha, _ = verify_hard_contract(hard_path, manifest)
+        hard_sha, hard_contract = verify_hard_contract(hard_path, manifest, cell_id)
         if hard_sha != verified.get("hard_contract_sha256"):
             raise ContractError(f"{cell_id} hard contract changed after launch")
         hard_shas.add(hard_sha)
+        hard_contracts[cell_id] = hard_contract
         milestones = []
         for iteration in manifest["shared_training_contract"]["relative_checkpoint_milestones"]:
             checkpoint = run_dir / f"model_{iteration}.pt"
@@ -841,11 +873,17 @@ def finalize(manifest: dict[str, Any], manifest_path: Path, launcher_path: Path)
         result_path = arm_dir / runtime["final_result_basename"]
         write_json_exclusive(result_path, result)
         results[cell_id] = {"path": str(result_path), "sha256": sha256_file(result_path), **result}
-    if len(hard_shas) != 1:
-        raise ContractError("paired cells emitted different structural hard contracts")
+    if len(hard_shas) != 2:
+        raise ContractError(
+            "A0/A1 checkpoints must have distinct hard-contract SHAs for distinct body masks"
+        )
+    verify_pair_contracts_differ_only_by_imitation_body_names(hard_contracts)
     return {
         "status": "paired_checkpoints_finite_bound_judging_still_blocked",
-        "common_hard_contract_sha256": next(iter(hard_shas)),
+        "hard_contract_sha256_by_cell": {
+            cell_id: results[cell_id]["hard_contract_sha256"] for cell_id in CELL_IDS
+        },
+        "only_hard_contract_difference": "motion_imitation_body_names",
         "cells": results,
     }
 
