@@ -220,14 +220,16 @@ missing or extra files fail closed. Restore steps are in
 [`setup_local_sync.md`](../operations/setup_local_sync.md). This proves asset byte closure only,
 not Isaac/MuJoCo model equivalence or behavior; G04 remains `Partial`.
 
-## Audit update 2026-07-13: S0/M0 exact donor canonical-beta preregistration
+## Audit update 2026-07-13: S0/M0 exact donor canonical-beta materialization
 
 The two runtime handoffs have since completed at exact `4,970/9,242` bytes and SHA-256
 `d57a93e0...a1054` / `60c55150...088ef`. A separate canonical-beta consumer is now preregistered:
 it reuses the audited historical PT replacement/save-reload primitives but injects the old exact
 same-performer donor instead of recomputing a new cohort median. Host static plus synthetic
 save/reload tests are `15 passed, 1 skipped`, with latest-main repository regression
-`620 passed, 9 skipped`;
-real S0/M0 canonical-beta consume is not yet run.
+`620 passed, 9 skipped`; the bound Pod1 CPU runtime has now completed
+`static -> inspect -> consume` for the real one-plus-four PTs. S0/M0 completion manifests are
+`964a7333...f1be3` / `5cef05f7...71a65`; all five outputs preserve every non-beta leaf bit-exact
+and copy donor `canonical_betas.json` SHA `f405ba45...4cbf2`.
 For M0, all A3 foot sites, initial/terminal `d_xy`, tolerances and pass result remain null until a
 separately preregistered exact GMR produces robot-coordinate evidence. G04 remains `Partial`.

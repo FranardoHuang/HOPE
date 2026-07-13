@@ -441,13 +441,14 @@ commit、完整权重树、Python、`nvidia-smi`、validator/argv、独立 stagi
 [GVHMR 预注册实验](../experiments/motion_video_gvhmr_prereg_franco_static_motion_20260713.md)和
 [操作文档](../operations/run_motion_video_gvhmr_prereg.md)。随后 S0 `88/88` 帧、M0 四条
 `105/105、97/97、82/82、96/96` 帧已在 Pod1 通过 exact finite structural audit，详见
-`configs/motion_video_gvhmr_s0_m0_results_20260713.json`。尚无 canonical-beta/GMR、schema-2、足接触/
-末态脚距、simulator、RL 或真机结果，所以 G08 状态不变，也没有动作晋级。
+`configs/motion_video_gvhmr_s0_m0_results_20260713.json`。canonical-beta 后来已完成，但尚无 GMR、
+schema-2、足接触/末态脚距、simulator、RL 或真机结果，所以 G08 状态不变，也没有动作晋级。
 
 这五条结果的下一层已收成两份 exact post-GVHMR handoff，并完成 runtime no-clobber consume；S0/M0
 handoff exact SHA 分别为 `d57a93e0...a1054` / `60c55150...088ef`。其后的 canonical-beta 也已拆成两份
 独立 prereg：只允许注入旧 exact donor，禁止重新聚合新五条；host 新旧专项 `15 passed, 1 skipped`，
-真实 PT 尚未 consume。S0 的
+真实一加四条 PT 已在绑定 Pod1 CPU runtime 完成 `inspect/consume`，completion manifest SHA 为
+`964a7333...f1be3` / `5cef05f7...71a65`，non-beta 内容全 bit-exact。S0 的
 `contact_truth`/效果继续为空且禁止借用拉球题；M0 的末态约束明确为去除公共 root、对齐 heading 后的
 `right_foot_xy - left_foot_xy` 初始/终态稳健向量，横向站距与前后错位都要保留，脚并拢不算成功。
 foot-site mapping 和数值容差须在 GMR result acceptance 前另行预注册。详见

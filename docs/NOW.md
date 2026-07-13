@@ -32,18 +32,21 @@
 planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行为以厂商 MuJoCo 为准。
 
 - **最新可分享结果：** 反手拉 B/C 的 signed 整轨重定位已产生 `19/3` 个 bounded proposal，但证书仍为
-  `0`；高点拍压 S0 与四条横移 M0 已分别 `1/1 + 4/4` 通过 exact GVHMR 帧数/finite 结构审计。
-  这些只解锁下一层物化/GMR，不是“动作会打球”。
-- **当前运行态：** 上述三条短作业已自然结束，当前没有 trainer；GPU 不再用失败配方的重复 seed 填满。
-  正在做 launch 前静态闭包的是 S0/M0 post-GVHMR consumer，以及 signed-face 的 A/B/C/D 单-seed 漏斗；
-  哪个机器合同先通过就先占空闲卡/CPU，不等待另一条线。
+  `0`；高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
+  canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。它们现在只解锁独立 exact GMR prereg，
+  还不是“动作会打球”。
+- **当前运行态：** Pod1 当前没有 trainer/worker/judge，三张 GPU 无 compute；GPU 不再用失败配方的重复
+  seed 填满。signed-face L1 的 A/B/C 已产出 finite terminal，D 在首次 learning/hard-contract 前
+  900 秒 Kit boot timeout；旧 D claim 保留，四格 activation 未生成，正在准备唯一 run-name 变化的
+  no-clobber D 重试。exam bank 只有 E1 重绑定代码，尚未发布新 bank/paper，所以 L2/judge 仍阻断。
 - **Franco focus：** 五种动作的用途、动作专属来球题族、空挥视觉锚点和横移终态站距语义；反手拉
   B/C 先补证，高点拍压作为第五动作，v12 只作后续 Jiayi 对照。
 - **Jiayi focus：** v12/dang 路线与 planner-policy 契合；其候选必须在相同挡球专卷和厂商 MuJoCo 中
   与 Franco 主线对照，不能用录制版本号直接晋级。
 - **Yikang focus：** 历史 Gate3 谱系复核与独立 physics/reference oracle；现有证据不替代当前 179-D
   planner-policy tuple 的 vendor runtime 行为。
-- **Codex 执行：** exact 动作 lineage、B/C 候选证书、S0/M0 后处理、四格单-seed 漏斗和 main 账本；
+- **Codex 执行：** exact 动作 lineage、B/C 每类只选一个候选的证书、S0/M0 exact GMR 前置、D 版本化重试、
+  exam 重绑定和 main 账本；
   每通过一层就合 main，不把多个未验层绑成一个大任务。
 
 ## 1. 当前一套训练是怎样完整跑起来的

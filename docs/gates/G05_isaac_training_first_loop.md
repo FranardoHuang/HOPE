@@ -1299,8 +1299,9 @@ G05 仍为 `Partial`。
 S0/M0 的 post-GVHMR machine handoff 已完成 exact runtime `consume`，输出分别是 4,970/9,242 bytes，
 SHA-256 `d57a93e0...a1054` / `60c55150...088ef`。下一层 canonical-beta 已拆成两份独立 no-clobber
 计划；consumer 只注入旧 exact donor，其他 PT leaf 必须 save/reload bit-exact。host 新旧专项为
-`15 passed, 1 skipped`，但真实 canonical-beta `inspect/consume` 尚未运行。即使该层通过，也只解锁
-另建 exact GMR prereg，不直接解锁 schema-2 或 RL。S0 仍不得借用拉球题或声称击球有效；M0 的 A3
+`15 passed, 1 skipped`；真实 canonical-beta `inspect/consume` 也已在绑定 Pod1 CPU runtime 完成，S0/M0
+completion manifest SHA 为 `964a7333...f1be3` / `5cef05f7...71a65`，五条 non-beta 内容 bit-exact。
+这只解锁另建 exact GMR prereg，不直接解锁 schema-2 或 RL。S0 仍不得借用拉球题或声称击球有效；M0 的 A3
 foot-site、初末二维脚间向量、容差和 pass 当前全部为 null，必须由 robot-coordinate GMR 产生，双脚
 并拢不能通过。详见 [handoff 记录](../experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md)与
 [canonical-beta 记录](../experiments/motion_canonical_beta_s0_m0_20260713.md)。

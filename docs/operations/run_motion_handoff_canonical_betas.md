@@ -99,3 +99,8 @@ root 必须原先不存在。consumer 先在 private staging 完成全部 save/r
 
 完成后只允许新建并审查 exact GMR prereg。旧 GMR queue/consumer 不接受这个新 result status/suffix；不得手工
 把新 PT 塞进旧队列。GMR 前仍无 schema-2、安全、动作效果或训练资格。
+
+2026-07-13 的第一次正式运行已按上述顺序完成。S0/M0 completion manifest SHA 分别为
+`964a7333...f1be3` / `5cef05f7...71a65`，结果数为 `1/4`；五条 non-beta 内容全 bit-exact，donor copy
+SHA 均为 `f405ba45...4cbf2`。这些值只用于识别这次已完成输出；后续不得删除 output root 或用同一
+prereg 覆盖重跑。

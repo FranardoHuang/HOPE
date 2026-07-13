@@ -1,9 +1,9 @@
 # S0/M0 exact donor canonical-beta materialization
 
-- 状态：`preregistered`
+- 状态：`runtime_consumed_exact_gmr_still_blocked`
 - 人类负责人：Franco
 - 执行者：Codex
-- 证据等级：E1（consumer、静态合同与合成 save/reload）；上游 handoff 为 E2
+- 证据等级：E2（绑定 runtime 的真实五条 PT 已完成 inspect/consume）；尚无 GMR/机器人行为
 
 共享缩写见[术语与人话对照](../DEFINITIONS.md)。本记录只回答：已经完整绑定的
 [`S0`](../DEFINITIONS.md) 单条高点拍压和 [`M0`](../DEFINITIONS.md) 四条横移老师，能否逐条注入旧 Franco
@@ -88,10 +88,19 @@ python3 -m pytest -q \
 non-beta bit-exact save/reload、donor byte copy、no-clobber、handoff/window 篡改和 M0 假脚距/假通过拒绝。
 合入 signed-face v6 后在最新 main 重放，完整 `tests/` 回归为 `620 passed, 9 skipped`。
 
-真实 `inspect/consume` 尚未在绑定的 motion Python 环境执行，所以本实验仍是 `preregistered`，没有新五条
-canonical-beta PT。运行入口见[操作文档](../operations/run_motion_handoff_canonical_betas.md)。
+2026-07-13 Pod1 CPU 结果：在 clean detached `c3f58beb2c8da2536c5ac8d181cbb2fdfc0c0630` 和冻结的
+Python `3.10.20` runtime 中，S0/M0 均依次通过 `static -> inspect -> consume`，没有运行 GMR、GPU trainer
+或真机。S0 completion manifest SHA 为
+`964a733313d6efe2e1c5074061519a114389befec7ee0567fd6d7b9ac00f1be3`，含 1 条结果；M0 为
+`5cef05f7f4a0b901529d294998df34c6cfc4d8baa09ffb2befe9651c69071a65`，含 4 条结果。五条均
+`non_beta_bit_exact=true`，两批 `canonical_betas.json` 都逐字节等于 donor，SHA 为
+`f405ba45d7f2233d3735c2e6b59409203cc98b1e97deef00224e16f2c7c4cbf2`；
+`formal_eligible/training_authorized/hardware_authorized` 仍全为 false。M0 的 foot mapping、初末二维脚距、
+容差和 `stance_passed` 继续为 null，说明这一层没有把“收脚变窄”提前记成通过。复核时目标 worktree
+仍 clean、三张 GPU 无 compute。运行入口和私有制品恢复路径见
+[操作文档](../operations/run_motion_handoff_canonical_betas.md)。
 
 ## 决定边界
 
-采用这两份计划作为 S0/M0 唯一 canonical-beta 入口。成功 consume 只会把下一步改成“可另建 exact GMR
-prereg”；它不会直接授权 GMR、schema-2、L0/L1、TOPP、RL、Gate3 或真机。
+采用上述五份 canonical-beta PT 作为 S0/M0 下一层 exact GMR prereg 的唯一输入。consume 已完成，但它只把
+下一步改成“可另建 exact GMR prereg”；它不会直接授权 GMR、schema-2、L0/L1、TOPP、RL、Gate3 或真机。

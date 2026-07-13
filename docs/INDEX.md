@@ -64,8 +64,8 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | [v12/高点拍压/横移视频登记](experiments/motion_video_intake_v12_static_motion_20260713.md) | 7 段私有视频逐字节登记完成；没有动作处理、安全或行为结论 |
 | [Franco 优先、static/motion GVHMR 结果](experiments/motion_video_gvhmr_prereg_franco_static_motion_20260713.md) | Franco 六段复用旧 exact 结果；[S0/M0](DEFINITIONS.md) 已 `1/1 + 4/4` finite structural pass，v12 未执行；GMR/schema-2 未跑 |
 | [S0/M0 post-GVHMR exact handoff](experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md) | runtime handoff 已完成：S0/M0 exact SHA `d57a93e0...a1054` / `60c55150...088ef`；GMR/schema-2 未跑 |
-| [S0/M0 exact donor canonical-beta](experiments/motion_canonical_beta_s0_m0_20260713.md) | 两份独立 prereg 与 consumer static/合成 save-reload 已通过；真实 PT 尚未 consume，A3 脚距仍全 null |
-| [v12/高点拍压/横移组合设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md) | S0/M0 只有 GVHMR 结构通过；没有 schema-2 动作、仿真或训练结果 |
+| [S0/M0 exact donor canonical-beta](experiments/motion_canonical_beta_s0_m0_20260713.md) | 真实 `1+4` 条 PT 已在绑定 CPU runtime consume 且 non-beta bit-exact；只解锁 exact GMR prereg，A3 脚距仍全 null |
+| [v12/高点拍压/横移组合设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md) | S0/M0 已完成 GVHMR 与 canonical-beta；没有 GMR/schema-2 动作、仿真或训练结果 |
 | [非击球臂模仿消融](experiments/non_striking_arm_imitation_ablation_20260713.md) | 只有设计；尚未运行配对实验 |
 
 ## Gate 索引

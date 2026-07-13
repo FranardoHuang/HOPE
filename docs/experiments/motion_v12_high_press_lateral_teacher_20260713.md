@@ -122,6 +122,6 @@ GVHMR 的 Pod 命令及边界见
 ## 决定与下一步
 
 先消费既有 Franco exact 结果：反手拉 B/C 已得到 19/3 个 bounded SE(2) proposal，下一步补候选证书；
-其他三类分别进入适配题族。S0/M0 的 GVHMR 已完成，下一步另建 canonical-beta/GMR consumer；v12 后排为
+其他三类分别进入适配题族。S0/M0 的 GVHMR 与 canonical-beta 已完成，下一步另建 exact GMR consumer；v12 后排为
 Jiayi 路线对照。候选不做 seed 式重复。只有测得动作针对任务的安全接触流形后，
 才冻结对应考卷。任何未通过完整离线证书链的项目，都不得分配 RL GPU。
