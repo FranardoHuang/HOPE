@@ -484,6 +484,16 @@ simulator/RL 或真机。因此证书仍为 0、G08 仍是 Research track；内�
 完整命令与边界见[空间重定位实验](../experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)和
 [操作文档](../operations/run_motion_spatial_retarget_screen.md)。
 
+schema-2 前置源码审计随后闭环了一个会把 B/C 31 维关节列静默打乱的合同矛盾：GMR `dof_pos` 与
+runtime/schema-2 `joint_pos` 不是同序。现在两份明确命名、内容绑定的表和双向 permutation 是唯一真源；
+旧 YAML 与 `AGIBOT_A3_JOINT_NAMES` 只允许镜像 GMR source order。converter 直接消费新合同；历史 L0
+auditor 因 executed prereg 的源码 SHA 绑定保持 byte-exact，其 runtime target literal 改由 validator AST
+复核。完整 ONNX metadata gate 对重复/缺失/额外/错序/错误长度/partial metadata/非 finite 负测为
+`12 passed`，基于 `origin/main@5734dc8` 的 repo-level 回归为 `733 passed, 10 skipped`。这没有消费
+B/C 私有 PKL，也没有跑
+FK/schema-2/L0/simulator/RL/真机，因此证书仍为 0；
+下一步仍是独立 content-bound B/C schema-2 prereg，而不是直接训练。
+
 S0/M0 的下一层 exact GMR 现已冻结成两批独立 machine plan。共享 consumer 不把 retarget body order 猜成
 canonical vendor body order，而是分开绑定两套 XML order，再用显式 31-joint bijection 接入 A3 FK。M0
 四条候选的人工 ready windows 已展开为 exact 30 Hz sample indices；结果将同时报告初末前后脚错位和横向

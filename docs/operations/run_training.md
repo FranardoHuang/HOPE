@@ -210,14 +210,22 @@ untagged clips remain loadable only for diagnostic checkpoint compatibility;
 they cannot produce an exact schema-v3 checkpoint/ONNX.
 
 For MuJoCo conversion, discover the body order once against a trusted Isaac
-reference, then reuse the emitted file:
+reference, then reuse the emitted file. The GMR source `dof_pos` and runtime
+`joint_pos` orders are intentionally different; the converter validates their
+content-bound bijection and requires complete donor ONNX `joint_names`,
+`articulation_joint_names`, and identity `action_joint_ids` metadata:
 
 ```bash
 python scripts/csv_to_npz_mujoco.py \
   --mjcf /path/to/a3_pingpong.xml --donor /path/to/policy.onnx \
+  --joint-order-contract configs/a3_joint_order_bijection_v1.json \
   --discover-map /path/to/trusted_isaac_motion.npz \
   --body-order /path/to/body_order.txt
 ```
+
+Run `python scripts/a3_joint_order_contract.py` first. A successful source gate
+still prints `schema2_materialization_authorized=false`; each new private motion
+family needs its own content-bound/no-clobber conversion preregistration.
 
 Migrate a legacy V5/MuJoCo clip whose stored velocity is the derivative of
 link position:

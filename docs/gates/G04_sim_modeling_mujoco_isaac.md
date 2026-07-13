@@ -19,7 +19,8 @@ This gate is about robot model correctness, not RL performance.
 
 - Validated MuJoCo model.
 - Validated Isaac asset.
-- Shared joint names and joint order.
+- Shared joint-name set plus explicit content-bound mappings between GMR, runtime articulation and
+  backend order domains.
 - Shared racket mount definition.
 - Sim model limitations.
 
@@ -57,7 +58,9 @@ Done:
 - On 2026-06-25, this harness restored the ignored package-local A3 Isaac asset under `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/` materials and rewrote URDF mesh paths to local `../meshes/` references. Host verification found `86` mesh references and `0` missing files.
 - The branch now includes an A3 Isaac/BeyondMimic robot config using the Agibot-provided ping-pong URDF path, official joint/body names, deploy-transcribed PD gains, standing pose, and action-scale logic.
 - `scripts/prepare_a3_isaac_asset.py` now prepares the generated Isaac asset from `agi/URDF/A3T2.5-URDF-std-pingpang/` and verifies the prepared `model.urdf` by parsing all mesh references. The check rejects stale `package://.../meshes` references, verifies every `../meshes/...` file exists, and requires `right_hand_pingpang_Link.STL`, `pingpang_red_Link.STL`, `pingpang_black_Link.STL`, and `pingbang_ball_Link.STL`.
-- A working 31-DOF joint-order YAML exists at `hope_training/config/joint_order_agibot_a3.yaml`.
+- The two distinct 31-DOF column domains are explicit: GMR `dof_pos` and runtime/schema-2
+  `joint_pos` have content-bound tables and a fail-closed bijection. The legacy YAML mirrors only
+  the GMR source order; see the [joint-order interface](../interfaces/joint_order_and_robot_state.md).
 - `reimplement.md` records that the A3 task registers and the env launches headless with finite rewards on the copied A3 ping-pong URDF asset.
 - `origin/train_1` adds `HOPE-TableTennis-AgibotA3-v0`, a HOPE-frame Isaac Lab table/net/ball/A3 scene with modular geometry constants, optional drag and Magnus force hooks, table/net/floor contact materials, 400 Hz physics, CCD enabled, ball serve reset, and placeholder returner rewards.
 - The table-tennis scene now includes a tracked Purdue PACE table/net USD visual overlay under `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/table_usd/`. Physics still comes from invisible cuboid colliders; the USD is visual-only.
@@ -275,6 +278,25 @@ B motion/report SHA is `27827912...ad6` / `a238c077...df3`; C is
 error below `4.17e-17 m`. This only unlocks a separate schema-2 preregistration. L0, vendor L1,
 table/net clearance, dynamics, simulator, training and hardware remain unrun; certificate count is
 still zero. G04 remains `Partial`.
+
+## Audit update 2026-07-14: GMR-to-runtime joint-order source gate
+
+The pre-schema-2 audit found and removed a false shared-order claim. GMR pickle/CSV `dof_pos` uses
+the controller/MJCF order, while Isaac articulation, schema-2 NPZ `joint_pos` and exact ONNX actions
+use an interleaved runtime order. Two tracked order tables plus
+`configs/a3_joint_order_bijection_v1.json` now bind file/name SHAs and both 31-element permutations.
+The validator also parses the legacy YAML and Python source-order mirrors without importing Isaac,
+and requires complete ONNX `joint_names`, `articulation_joint_names` and identity `action_joint_ids`.
+Duplicate/missing/extra/wrong-length names, declared permutation drift, partial/wrong-order metadata,
+bad array shape, duplicate JSON keys and NaN/Inf all fail closed; focused tests are `12 passed`, and
+the dependency-light repo suite on `origin/main@5734dc8` is `733 passed, 10 skipped`.
+
+`csv_to_npz_mujoco.py` now consumes this contract directly. The historical L0 auditor remains
+byte-exact because an executed prereg binds its source SHA; the validator AST-checks its target-order
+literal instead. This is source-only: no B/C private asset, MuJoCo forward kinematics, schema-2
+output, L0, simulator, training or hardware ran. A separate exact B/C prereg must still bind the
+vendor MJCF closure, runtime body order, 30→50 Hz resampling, link-origin/COM-velocity convention and
+no-second-HOPE-rotation rule. G04 remains `Partial`.
 
 For M0, the canonical-beta materialization still has null A3 stance fields. The downstream exact-GMR
 plan now freezes canonical foot sites and tolerances, while initial/terminal `d_xy` and pass remain

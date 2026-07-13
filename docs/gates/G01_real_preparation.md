@@ -56,7 +56,9 @@ Done:
 - Existing `hope_bringup` launch/config already expects `vrpn_mocap`.
 - Motion-capture reference docs define frame conventions and ChingMu conversion notes.
 - A3 deploy docs and source support are present.
-- Current working A3 joint order exists at `hope_training/config/joint_order_agibot_a3.yaml`.
+- A3 GMR/controller and runtime articulation orders now have distinct content-bound tables and an
+  explicit bijection. The legacy `joint_order_agibot_a3.yaml` mirrors only GMR/controller order;
+  see `docs/interfaces/joint_order_and_robot_state.md` before labeling runtime columns.
 - `avatar_pro_vrpn.yaml` currently defaults the robot input rigid-body labels to `ppp2`/`ppp3` after one observed rig, while the relayed HOPE topics remain `/P1/pose` and `/P2/pose`; live G01 verification must record the actual CMTracker labels before relying on them.
 - Mocap play-time contract confirmed with the team (2026-07): ChingMu over VRPN streams the robot base (pelvis) pose plus the ball position at 300 Hz during play; the relay publishes the ball as position-only `PointStamped` (spin measurement is planned for the physics-modeling phase).
 - `colcon build --packages-up-to hope_planner hope_wbc_runner` verified inside the `hope` distrobox; the x86_64 deploy package builds via `agi/a3_deploy_example/scripts/build_a3_deploy_pkg.sh`.

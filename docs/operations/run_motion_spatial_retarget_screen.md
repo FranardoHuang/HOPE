@@ -195,6 +195,41 @@ The tracked result ledger is
 `configs/motion_backhand_loop_bc_se2_materialization_results_20260714.json`. Restore private payloads by the
 exact paths/SHA in that ledger; never regenerate them merely because a local copy is absent.
 
+## B/C schema-2 joint-order source gate (2026-07-14)
+
+Before writing or running the separate B/C schema-2 preregistration, validate the tracked
+[GMR](../DEFINITIONS.md) `dof_pos` → runtime articulation `joint_pos` mapping:
+
+```bash
+python3 hope_training/whole_body_tracking/scripts/a3_joint_order_contract.py
+python3 -m pytest -q tests/test_a3_joint_order_contract.py
+```
+
+Expected JSON contains `bijection_valid=true`, `source_equals_target=false`, and
+`schema2_materialization_authorized=false`; focused tests currently report `12 passed`. The source
+and target tables are respectively `configs/a3_gmr_dof_pos_joint_order.txt` and
+`configs/a3_runtime_articulation_joint_order.txt`. Their byte/name SHAs and both permutations are
+bound in `configs/a3_joint_order_bijection_v1.json`.
+The current contract/validator/converter SHA-256 values are respectively
+`b09987ff...4815`, `8f01d20d...1ae9`, and `a151a691...7f04`; any prereg must bind full hashes rather
+than these display abbreviations.
+
+For a future exact donor metadata receipt, serialize the ONNX custom metadata map as JSON and add:
+
+```bash
+python3 hope_training/whole_body_tracking/scripts/a3_joint_order_contract.py \
+  --metadata-json /absolute/path/to/content_bound_onnx_metadata.json
+```
+
+All three metadata rows are mandatory: `joint_names`, `articulation_joint_names`, and
+`action_joint_ids`; partial legacy metadata must fail. `csv_to_npz_mujoco.py` now consumes the same
+contract through `--joint-order-contract` and no longer carries its own GMR list. Do not run that
+converter on B/C until a separate no-clobber prereg binds the exact SE(2) PKL, donor metadata,
+vendor MJCF/include/mesh closure, runtime body order and output path. Because B/C root trajectories
+are already in the HOPE frame, that prereg must select `--hope_frame off`; a second automatic
+rotation is forbidden. Passing this source gate does not run forward kinematics, create schema-2,
+or authorize L0/L1/simulator/training/hardware.
+
 ## Promotion remains deliberately blocked
 
 The current manifest says `certificate_bundle_preregistered=false`; passing an

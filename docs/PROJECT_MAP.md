@@ -100,7 +100,10 @@ Ball-physics fitting (2026-07-03):
 
 Additional training config:
 
-- `hope_training/config/joint_order_agibot_a3.yaml`: current working 31-DOF A3 joint order for training/export alignment.
+- `configs/a3_{gmr_dof_pos,runtime_articulation}_joint_order.txt` plus
+  `configs/a3_joint_order_bijection_v1.json`: the two distinct, content-bound 31-DOF column orders
+  and their exact mapping. `hope_training/config/joint_order_agibot_a3.yaml` is a legacy mirror of
+  only the GMR source order, not the training/runtime order.
 - `hope_training/whole_body_tracking/setup_train_env.sh`: source this inside the GPU/Isaac environment before running training/eval commands.
 - `hope_training/whole_body_tracking/scripts/audit_runpod_terminal_runs.py`: read-only inventory of
   historical terminal checkpoints and judge sidecars.  It prints explicit commands but never

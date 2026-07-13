@@ -157,13 +157,17 @@ The project originally treated A3-specific assets as the largest external blocke
 - A3 MuJoCo/AimRT simulation materials: `agi/A3_MuJoCo_Sim/`.
 - A3 deploy documentation and source: `agi/code_deployment/` and `agi/code_deployment/a3_deploy_example/`.
 - Full local deploy payload, including heavy runtime assets: `vendor_assets/agibot/a3_deploy_example_full/`.
-- Current working joint order for training/export alignment: `hope_training/config/joint_order_agibot_a3.yaml`.
+- Joint order is domain-specific: GMR `dof_pos` uses
+  `configs/a3_gmr_dof_pos_joint_order.txt`, while Isaac/schema-2/ONNX runtime columns use
+  `configs/a3_runtime_articulation_joint_order.txt`; the content-bound bijection is
+  `configs/a3_joint_order_bijection_v1.json`. The legacy YAML mirrors only the GMR order.
 - Isaac/BeyondMimic A3 robot config and deploy-transcribed PD/action-scale values: `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py`.
 
 What remains blocked is not "do we have any A3 model"; it is hardware and cross-runtime verification:
 
 - Exact `base_link` physical interpretation and measured mocap-marker to `base_link` transform.
-- Confirmation that the hardware SDK joint-state and joint-command order matches the project YAML.
+- Confirmation of hardware SDK joint-state order and its explicit name mapping to the tracked
+  runtime/command domains; do not assume it positionally equals the legacy GMR YAML.
 - A3 control SDK / AimDK / ROS 2 runtime behavior on the actual robot.
 - Hardware E-stop, soft-stop, standby, and recovery procedure.
 - Safe low-gain command path from exported policy targets to A3 joint commands.
@@ -177,7 +181,7 @@ How to get and verify the A3 placeholders:
 | `A3_URDF`, `A3_MJCF`, or `A3_USD` | Current project source: `agi/URDF/` and `agi/A3_MuJoCo_Sim/`; request updates from Agibot if these change. | Open the model in ROS/Isaac/MuJoCo and confirm the robot height is about `1.73 m` and the joint count matches the A3 documentation. |
 | `base_link` name | Read the root or pelvis frame name in the A3 URDF, or ask Agibot for the official control-frame name. | Run `ros2 topic echo /joint_states --once` and confirm the SDK documentation uses the same body frame in its examples. |
 | `base_link` height | Put the robot in the official standing calibration pose on level ground. Measure from the floor to the `base_link` origin if the origin is physically marked. If it is not marked, compute it from the robot model by FK in the standing pose. | In simulation, publish `world -> base_link`; the Z value should match the measured standing height within a few centimeters. |
-| Joint names and joint order | Current working order: `hope_training/config/joint_order_agibot_a3.yaml`; verify against SDK/API before hardware. | Compare the order in four places: `/joint_states`, the training config, ONNX metadata, and the hardware command message. They must match exactly. |
+| Joint names and joint order | Use the two domain-specific tracked tables and `a3_joint_order_bijection_v1.json`; verify SDK/API before hardware. | Compare names and validate explicit mappings across `/joint_states`, GMR, schema-2/ONNX and the command message. Do not require positional equality between different domains. |
 | PD gains / impedance | Current training values are transcribed from Agibot deploy materials in `robots/agibot_a3.py`; still verify safe hardware startup behavior. | In low-gain standby, command tiny joint motions and confirm there is no buzzing, overshoot, or unexpected motion. |
 | E-stop and standby API | Get the exact hardware E-stop wiring, software stop service/topic, and standby command from the A3 manual. | Time a stop test with logs or high-speed video. The required upper-body and gait stop time is below `200 ms`. |
 
@@ -2075,7 +2079,10 @@ Required code changes:
    - `ROBOT_BASE_DICT`
    - `VIEWER_CAM_DISTANCE_DICT`
 4. `gvhmr_to_robot.py` must accept `--robot agibot_a3`.
-5. `joint_order_agibot_a3.yaml` must store the 31 hinge-joint order from `a3_mocap.xml`. Reuse this same order for training, ONNX export, and the hardware bridge.
+5. `joint_order_agibot_a3.yaml` and `configs/a3_gmr_dof_pos_joint_order.txt` store the 31 hinge-joint
+   order from `a3_mocap.xml`. Before schema-2/ONNX, apply and validate
+   `configs/a3_joint_order_bijection_v1.json`; runtime columns use
+   `configs/a3_runtime_articulation_joint_order.txt`, not the GMR order.
 
 Sanity check:
 
@@ -2225,7 +2232,9 @@ Step 10 passes when:
 1. If GMR cannot find the robot, fix `params.py` and `gvhmr_to_robot.py`.
 2. If the model fails to compile, fix `convert_urdf_to_mjcf.py` or the source URDF path.
 3. If a limb is twisted, edit the quaternion offset in `smplx_to_a3.json`, then rerun 10.4 and 10.5.
-4. If joint order later mismatches the SDK, update only `hope_training/config/joint_order_agibot_a3.yaml` and propagate that one shared order everywhere else.
+4. If an order later mismatches its named domain, update the corresponding content-bound table and
+   regenerate/review the bijection. Never propagate one positional order into all domains. Any
+   backend change re-triggers dry-run/hardware verification.
 
 ### 10.7 Handoff to Step 11
 
@@ -4835,7 +4844,7 @@ calibration run, or Agibot.
 | Value | Where it will be used | How to get it |
 |-------|----------------------|---------------|
 | A3 URDF/MJCF/USD + meshes | GMR retarget, sim training, FK | Current source: `agi/URDF/` and `agi/A3_MuJoCo_Sim/`; request updated assets from Agibot when they change. |
-| Joint name list + joint order | planner->WBC, ONNX export, bridge | Current working source: `hope_training/config/joint_order_agibot_a3.yaml`; verify against hardware SDK before real commands. |
+| Joint name list + joint order | planner->WBC, ONNX export, bridge | GMR source and runtime target tables plus `configs/a3_joint_order_bijection_v1.json`; verify each explicit SDK mapping before real commands. |
 | Joint limits, link inertials, gear ratios | sim fidelity, safety limits | Current source: Agibot URDF/MJCF materials; verify when model revisions arrive. |
 | Default PD gains / impedance | WBC training + `agibot_hardware_bridge` | Current training source: Agibot deploy transcription in `robots/agibot_a3.py`; verify on hardware before increasing gains. |
 | `base_link` name + standing height | world-frame FK chain | Current sim source: A3 URDF and `robots/agibot_a3.py`; still measure/verify against the real robot. |

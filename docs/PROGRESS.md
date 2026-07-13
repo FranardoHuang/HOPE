@@ -38,6 +38,17 @@
   无 Pod/process/signal/training/retry/judge/部署/真机权限。专项 `8 passed`，最新 main 基线 host
   `tests/` 回归 `722 passed, 9 skipped`。
 
+- B/C schema-2 前置审计纠正了关节列序合同：GMR `dof_pos` 与 Isaac/runtime `joint_pos` 的 31 个
+  名字相同但顺序不同。新增两份内容绑定的 order 真源、双向 permutation、旧 mirror 与完整 ONNX metadata
+  fail-closed validator；converter 改读合同，历史 L0 auditor 保持已被运行账本绑定的 byte-exact 源码、
+  由 validator AST 复核其 target mirror。重复/缺失/额外/错序/错误长度/partial
+  metadata/duplicate JSON key/NaN 负测专项 `12 passed`，基于 `origin/main@5734dc8` 的 repo 回归
+  `733 passed, 10 skipped`。未读私有 B/C 资产、未跑
+  FK/schema-2/simulator/RL/真机，证书仍
+  为 0；见[空间重定向实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)、
+  [关节接口](interfaces/joint_order_and_robot_state.md)与
+  [操作](operations/run_motion_spatial_retarget_screen.md)。
+
 - 反手拉 B/C 的 rank-0 主选已各有独立 no-clobber 整轨站位实体化 prereg（SHA
   `e016ca74...51aee` / `27f938cd...9d454`）和 restricted-pickle consumer
   `21ebbe68...87375`。consumer 只做冻结的 proper [SE(2)](DEFINITIONS.md)，验证 xyzw 左乘、

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+  "expected_joint_count": 31,
+  "source_order": {
+    "name": "gmr_dof_pos",
+    "semantics": "GMR A3 pickle/CSV dof_pos column order",
+    "path": "configs/a3_gmr_dof_pos_joint_order.txt",
+    "file_sha256": "4872c21385b6711b30f91ee6f036793aa27c3cc999a44f52aec598a6394d7f82",
+    "names_sha256": "de31551353c01a364848d7ee50992749cc36e18448390ab6932099a2ca660059"
+  },
+  "target_order": {
+    "name": "runtime_articulation_joint_pos",
+    "semantics": "Isaac/runtime articulation, schema-2 NPZ joint_pos, and exact ONNX action column order",
+    "path": "configs/a3_runtime_articulation_joint_order.txt",
+    "file_sha256": "5181da217c9fdd6928c965613e4f053ce437d232d590f1ffc61487fb429dd87c",
+    "names_sha256": "8421b2b5ac638bd6013ad82c534f9bd782e718e496f17bd8f97fbd9b9c82ee50"
+  },
+  "target_from_source_indices": [
+    19, 25, 0, 20, 26, 1, 21, 27, 2, 22, 28, 3, 5, 12, 23, 29, 4, 6, 13, 24, 30, 7, 14, 8, 15, 9, 16, 10, 17, 11, 18
+  ],
+  "source_from_target_indices": [
+    2, 5, 8, 11, 16, 12, 17, 21, 23, 25, 27, 29, 13, 18, 22, 24, 26, 28, 30, 0, 3, 6, 9, 14, 19, 1, 4, 7, 10, 15, 20
+  ],
+  "legacy_mirrors": [
+    {
+      "kind": "yaml_list",
+      "path": "hope_training/config/joint_order_agibot_a3.yaml",
+      "field": "joint_order",
+      "must_equal": "gmr_dof_pos"
+    },
+    {
+      "kind": "python_literal_list",
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py",
+      "field": "AGIBOT_A3_JOINT_NAMES",
+      "must_equal": "gmr_dof_pos"
+    },
+    {
+      "kind": "python_literal_list",
+      "path": "hope_training/whole_body_tracking/scripts/audit_motion_npz.py",
+      "field": "ISAAC_JOINT_NAMES",
+      "must_equal": "runtime_articulation_joint_pos"
+    }
+  ],
+  "runtime_metadata_contract": {
+    "required_keys": [
+      "joint_names",
+      "articulation_joint_names",
+      "action_joint_ids"
+    ],
+    "joint_names_must_equal": "runtime_articulation_joint_pos",
+    "articulation_joint_names_must_equal": "runtime_articulation_joint_pos",
+    "action_joint_ids_must_equal": "identity_0_to_30"
+  },
+  "status": {
+    "source_gate_pass_can_authorize_schema2_materialization": false,
+    "schema2_materialization_run": false,
+    "fk_run": false,
+    "l0_run": false,
+    "simulator_run": false,
+    "training_run": false,
+    "hardware_run": false,
+    "next_gate": "separate content-bound B/C GMR-PKL to schema-2 preregistration with exact MJCF/body order and no second HOPE-frame rotation"
+  }
+}

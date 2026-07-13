@@ -1,118 +1,140 @@
 # Joint Order And Robot State
 
-Status: Working source exists; backend command order hardware-verified (2026-07-03): `pp_joint_map` checked slot-for-slot against AGI `robot_io::MakeA3Layout31()` (bijection — see `agi/a3_deploy_example/PINGPONG_DEPLOY_ALIGNMENT.md:137-139`), joint limits clamped from the MJCF, staged PASSIVE→PD_STAND→SHADOW→MOTION bring-up used on the MDU
+Status: two distinct 31-DOF order domains are now explicit and content-bound. The source-only
+bijection gate passes on tracked files; no B/C [schema-2 motion](../DEFINITIONS.md) was created and no
+simulator or hardware command ran. Backend command scattering was previously verified on hardware
+(2026-07-03) against AGI `robot_io::MakeA3Layout31()`.
 
 ## Goal
 
-Maintain one accepted joint and robot-state contract across:
+Preserve the joint *names* across GMR, MuJoCo, Isaac, policy export and deployment while mapping each
+ordered column domain explicitly. Equal name sets do not imply equal column order.
 
-- A3 URDF
-- MuJoCo model
-- Isaac asset
-- training config
-- exported policy
-- deployment runtime
-- hardware SDK messages
+The old statement that GMR `dof_pos`, training/ONNX and SDK “must share” one array order was false.
+GMR writes controller/MJCF order; Isaac runtime and schema-2 `joint_pos` use the interleaved
+articulation order. Silent copying between them scrambles all 31 joints.
 
-## Current Working Joint Order
+## Two source-of-truth tables
 
-The current working 31-DOF A3 order is stored in:
+Both tables are newline-delimited exact URDF joint names. Their raw file bytes and canonical name-list
+SHA-256 values are bound by
+[`a3_joint_order_bijection_v1.json`](../../configs/a3_joint_order_bijection_v1.json).
 
-- `hope_training/config/joint_order_agibot_a3.yaml`
+| Domain | Human meaning | Tracked source of truth | Columns |
+| --- | --- | --- | --- |
+| `gmr_dof_pos` | [GMR](../DEFINITIONS.md) A3 pickle/CSV `dof_pos`; also the legacy controller/backend layout | [`a3_gmr_dof_pos_joint_order.txt`](../../configs/a3_gmr_dof_pos_joint_order.txt) | 31 |
+| `runtime_articulation_joint_pos` | Isaac articulation, schema-2 NPZ `joint_pos`/`joint_vel`, exact ONNX policy/action order | [`a3_runtime_articulation_joint_order.txt`](../../configs/a3_runtime_articulation_joint_order.txt) | 31 |
 
-It is used as the current training/export alignment source. Before real hardware commands, verify it against:
+The legacy [`joint_order_agibot_a3.yaml`](../../hope_training/config/joint_order_agibot_a3.yaml) and
+`AGIBOT_A3_JOINT_NAMES` remain mirrors of **only** `gmr_dof_pos`. The validator parses both mirrors
+without importing Isaac and rejects drift. The YAML's old embedded “training/ONNX/SDK must share”
+comment is known false but is retained byte-exact because completed content-bound GMR ledgers bind
+that file as `1,099` bytes / SHA `7748a134...b205`; this interface and the new contract supersede
+the prose without rewriting historical evidence.
 
-1. A3 SDK command message order.
-2. A3 runtime joint-state order.
-3. ONNX metadata/export order.
-4. MuJoCo and Isaac articulation order mappings.
+`audit_motion_npz.py::ISAAC_JOINT_NAMES` is a byte-frozen mirror of the runtime target order because
+an executed v4 safety prereg binds that whole tool at SHA `ec25fac2...47b1b`. Rewriting it would
+falsify history, so the new validator parses its literal with AST and rejects disagreement instead.
 
-### Explicit 31-DOF Order
+### GMR source order (`dof_pos`)
 
-The 31 actuated DOF, in the exact order of [`joint_order_agibot_a3.yaml`](../../hope_training/config/joint_order_agibot_a3.yaml) (every name is suffixed `_joint`):
+| Index | Joint | Index | Joint |
+| --- | --- | --- | --- |
+| 0 | `waist_yaw_joint` | 16 | `right_wrist_roll_joint` |
+| 1 | `waist_roll_joint` | 17 | `right_wrist_pitch_joint` |
+| 2 | `waist_pitch_joint` | 18 | `right_wrist_yaw_joint` |
+| 3 | `head_yaw_joint` | 19 | `left_hip_pitch_joint` |
+| 4 | `head_pitch_joint` | 20 | `left_hip_roll_joint` |
+| 5 | `left_shoulder_pitch_joint` | 21 | `left_hip_yaw_joint` |
+| 6 | `left_shoulder_roll_joint` | 22 | `left_knee_joint` |
+| 7 | `left_shoulder_yaw_joint` | 23 | `left_ankle_pitch_joint` |
+| 8 | `left_elbow_joint` | 24 | `left_ankle_roll_joint` |
+| 9 | `left_wrist_roll_joint` | 25 | `right_hip_pitch_joint` |
+| 10 | `left_wrist_pitch_joint` | 26 | `right_hip_roll_joint` |
+| 11 | `left_wrist_yaw_joint` | 27 | `right_hip_yaw_joint` |
+| 12 | `right_shoulder_pitch_joint` | 28 | `right_knee_joint` |
+| 13 | `right_shoulder_roll_joint` | 29 | `right_ankle_pitch_joint` |
+| 14 | `right_shoulder_yaw_joint` | 30 | `right_ankle_roll_joint` |
+| 15 | `right_elbow_joint` |  |  |
 
-| Index | Joint name |
-| --- | --- |
-| 0 | `waist_yaw_joint` |
-| 1 | `waist_roll_joint` |
-| 2 | `waist_pitch_joint` |
-| 3 | `head_yaw_joint` |
-| 4 | `head_pitch_joint` |
-| 5 | `left_shoulder_pitch_joint` |
-| 6 | `left_shoulder_roll_joint` |
-| 7 | `left_shoulder_yaw_joint` |
-| 8 | `left_elbow_joint` |
-| 9 | `left_wrist_roll_joint` |
-| 10 | `left_wrist_pitch_joint` |
-| 11 | `left_wrist_yaw_joint` |
-| 12 | `right_shoulder_pitch_joint` |
-| 13 | `right_shoulder_roll_joint` |
-| 14 | `right_shoulder_yaw_joint` |
-| 15 | `right_elbow_joint` |
-| 16 | `right_wrist_roll_joint` |
-| 17 | `right_wrist_pitch_joint` |
-| 18 | `right_wrist_yaw_joint` |
-| 19 | `left_hip_pitch_joint` |
-| 20 | `left_hip_roll_joint` |
-| 21 | `left_hip_yaw_joint` |
-| 22 | `left_knee_joint` |
-| 23 | `left_ankle_pitch_joint` |
-| 24 | `left_ankle_roll_joint` |
-| 25 | `right_hip_pitch_joint` |
-| 26 | `right_hip_roll_joint` |
-| 27 | `right_hip_yaw_joint` |
-| 28 | `right_knee_joint` |
-| 29 | `right_ankle_pitch_joint` |
-| 30 | `right_ankle_roll_joint` |
+### Runtime target order (`joint_pos`)
 
-This order originates from the `<joint>` hinge order in the GMR `a3_mocap.xml` (the order GMR writes `dof_pos`, which training, ONNX export, and the SDK must all share). It is confirmed byte-for-order identical to `AGIBOT_A3_JOINT_NAMES` in [`robots/agibot_a3.py`](../../hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py). VERIFY against the real A3 SDK (`ros2 topic echo /joint_states --once`) before deployment.
+This is the order independently tabulated from exported ONNX metadata and the Isaac action contract
+in `agi/a3_deploy_example/PINGPONG_DEPLOY_ALIGNMENT.md` section 4.
 
-### 31-DOF Training vs 29-DOF Deploy
+| Target index | Joint | GMR source index |
+| --- | --- | --- |
+| 0 | `left_hip_pitch_joint` | 19 |
+| 1 | `right_hip_pitch_joint` | 25 |
+| 2 | `waist_yaw_joint` | 0 |
+| 3 | `left_hip_roll_joint` | 20 |
+| 4 | `right_hip_roll_joint` | 26 |
+| 5 | `waist_roll_joint` | 1 |
+| 6 | `left_hip_yaw_joint` | 21 |
+| 7 | `right_hip_yaw_joint` | 27 |
+| 8 | `waist_pitch_joint` | 2 |
+| 9 | `left_knee_joint` | 22 |
+| 10 | `right_knee_joint` | 28 |
+| 11 | `head_yaw_joint` | 3 |
+| 12 | `left_shoulder_pitch_joint` | 5 |
+| 13 | `right_shoulder_pitch_joint` | 12 |
+| 14 | `left_ankle_pitch_joint` | 23 |
+| 15 | `right_ankle_pitch_joint` | 29 |
+| 16 | `head_pitch_joint` | 4 |
+| 17 | `left_shoulder_roll_joint` | 6 |
+| 18 | `right_shoulder_roll_joint` | 13 |
+| 19 | `left_ankle_roll_joint` | 24 |
+| 20 | `right_ankle_roll_joint` | 30 |
+| 21 | `left_shoulder_yaw_joint` | 7 |
+| 22 | `right_shoulder_yaw_joint` | 14 |
+| 23 | `left_elbow_joint` | 8 |
+| 24 | `right_elbow_joint` | 15 |
+| 25 | `left_wrist_roll_joint` | 9 |
+| 26 | `right_wrist_roll_joint` | 16 |
+| 27 | `left_wrist_pitch_joint` | 10 |
+| 28 | `right_wrist_pitch_joint` | 17 |
+| 29 | `left_wrist_yaw_joint` | 11 |
+| 30 | `right_wrist_yaw_joint` | 18 |
 
-Training emits 31 actions (one per actuated DOF above). The HOPE ping-pong deploy runner (`a3_deploy_onnx_ref_pingpong` under `agi/a3_deploy_example/`) consumes the full 31-action ONNX; the 2 neck joints (`head_yaw_joint`, `head_pitch_joint`, indices 3 and 4) are overridden post-decode to `q=0`, `kp=40`, `kd=2`. The 29-DOF policy-I/O view driven via `ExpandToBackend` is AGI's official reference runner path, not the HOPE ping-pong runner.
+The machine permutation means `runtime[..., i] = gmr[..., target_from_source_indices[i]]`. Its
+inverse is also stored and checked. Duplicate, missing, extra, malformed or wrong-length names;
+non-bijective indices; mirror drift; and wrong-order or partial ONNX metadata all fail closed.
 
-- Per-joint `action_scale = 0.25 * effort_limit / stiffness`, exactly matching the deploy `a3_action_scale`.
-- Decoder target = `action * action_scale + default_angle`.
-- PD gains in [`robots/agibot_a3.py`](../../hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py) (`a3_kps` / `a3_kds` / `a3_default_angles`) are the official Agibot values from `a3_policy_parameters.hpp`.
+## Source gate and conversion boundary
 
-## Required Hardware Verification Table
+Run the tracked source gate from repository root:
 
-Fill this table before real commands:
+```bash
+python3 hope_training/whole_body_tracking/scripts/a3_joint_order_contract.py
+python3 -m pytest -q tests/test_a3_joint_order_contract.py
+```
 
-The YAML source order is confirmed (training/export, identical to `AGIBOT_A3_JOINT_NAMES`). The SDK command field order is verified (2026-07-03): the `pp_joint_map` backend order was checked slot-for-slot against AGI `robot_io::MakeA3Layout31()` — a bijection (`agi/a3_deploy_example/PINGPONG_DEPLOY_ALIGNMENT.md:137-139`). Deploy joint limits are clamped from the MJCF. The `/joint_states` state field column remains hardware-TBD.
+The MuJoCo converter now consumes the same contract instead of a private hard-coded list. The
+byte-frozen L0 auditor remains unchanged but its literal target table is checked as a contract
+mirror. A donor ONNX must expose all three fields: `joint_names`, `articulation_joint_names`, and identity
+`action_joint_ids=0..30`; partial legacy metadata is rejected. `audit_motion_npz.py` resolves its
+default NPZ joint labels from that validated byte-frozen mirror.
 
-| Index | Joint name | YAML source | SDK command field | State field | Limits source | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| 0 | `waist_yaw_joint` | confirmed (`joint_order_agibot_a3.yaml` row 0) | verified (`MakeA3Layout31` bijection) | TBD | MJCF (clamped in deploy runner) | |
-| 1 | `waist_roll_joint` | confirmed (row 1) | verified (`MakeA3Layout31` bijection) | TBD | MJCF (clamped in deploy runner) | |
-| 2 | `waist_pitch_joint` | confirmed (row 2) | verified (`MakeA3Layout31` bijection) | TBD | MJCF (clamped in deploy runner) | |
-| 3 | `head_yaw_joint` | confirmed (row 3) | verified (`MakeA3Layout31` bijection) | TBD | MJCF (clamped in deploy runner) | Neck output overridden post-decode (q=0, kp=40, kd=2) |
-| 4 | `head_pitch_joint` | confirmed (row 4) | verified (`MakeA3Layout31` bijection) | TBD | MJCF (clamped in deploy runner) | Neck output overridden post-decode (q=0, kp=40, kd=2) |
-| 5-30 | See [explicit 31-DOF order](#explicit-31-dof-order) | confirmed (rows 5-30) | verified (`MakeA3Layout31` bijection) | TBD | MJCF (clamped in deploy runner) | |
+Passing this gate authorizes **no** B/C materialization. The next preregistration must separately
+bind exact B/C SE(2) pickle bytes, restricted-pickle semantics, the vendor MJCF/include/mesh closure,
+[`a3_runtime_body_order.txt`](../../configs/a3_runtime_body_order.txt), 30→50 Hz resampling, MuJoCo
+forward kinematics, link-origin positions plus center-of-mass velocities, and the fact that the B/C
+roots are already in the HOPE frame (therefore no second frame rotation). It must publish output
+last and remain no-clobber.
 
-## Robot State Contract
+## Policy/runtime/backend scattering
 
-The deployment and policy runtime must agree on:
+Training emits 31 actions in runtime target order. The HOPE deploy runner decodes those actions and
+name-scatters to the AGI backend layout; it does not depend on positional equality. Neck joints are
+overridden after decode to `q=0`, `kp=40`, `kd=2`. The previous 2026-07-03 slot-for-slot check proved
+the backend map against `MakeA3Layout31`; it did not prove that GMR and Isaac columns were equal.
 
-- joint positions
-- joint velocities
-- previous action
-- base angular velocity
-- projected gravity
-- base pose or base forward vector
-- policy clock or time-to-strike fields
+The runtime robot state must additionally agree on joint positions/velocities, previous action,
+base angular velocity, projected gravity, base pose/heading and policy clock. See
+[`policy_observation_action.md`](policy_observation_action.md).
 
-See [policy_observation_action.md](policy_observation_action.md).
+## Hardware boundary
 
-## Current Materials
-
-- A3 URDF materials: `agi/URDF/`
-- A3 deploy source: `agi/a3_deploy_example` (tracked; HOPE ping-pong runner `a3_deploy_onnx_ref_pingpong`)
-- RobotIOBackend guide: `agi/code_deployment/RobotIOBackend 架构与策略适配指南.md`
-- Isaac robot config and PD/action-scale source: `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py`
-
-## Blocking Rule
-
-Do not run real joint commands until this document is filled from verified model and SDK sources.
-
-Satisfied for the current deploy path (2026-07-03): before the first real joint commands, the `pp_joint_map` backend order was verified slot-for-slot against AGI `robot_io::MakeA3Layout31()` — a checked bijection (`agi/a3_deploy_example/PINGPONG_DEPLOY_ALIGNMENT.md:137-139`) — joint limits were clamped from the MJCF, and a staged PASSIVE→PD_STAND→SHADOW→MOTION bring-up was used on the MDU. Any change to the joint map, ONNX action layout, or backend layout re-triggers this rule.
+No real command is authorized by this source correction. Any change to either ordered table, the
+permutation, ONNX action metadata or backend layout re-triggers dry-run and hardware verification.
+The `/joint_states` field order remains hardware-TBD; do not infer it from command order.

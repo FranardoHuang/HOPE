@@ -99,5 +99,30 @@ C 为 `0dd981a6...f48b` / `b3b93d2c...f67`；完整小账见
 schema-2 materialization prereg。materialization 或内部失败必须停止该资产，不能跳 fallback；只有未来桌/网外部
 几何失败才回到已冻结 selector 的 `resolve`。
 
+## 2026-07-14：schema-2 前置关节列序合同纠错
+
+在写 B/C schema-2 consumer 前，源码审计确认旧接口文档把两种不同列序错误写成同序：GMR PKL/CSV
+`dof_pos` 是腰/头/臂/腿的 controller/MJCF 顺序；Isaac articulation、schema-2 NPZ `joint_pos` 与 ONNX
+action 则是从左右髋开始的 interleaved runtime 顺序。现有 `csv_to_npz_mujoco.py` 实际做过重排，
+`audit_motion_npz.py` 也把 runtime 顺序另抄了一份，所以问题是合同与重复真源失真，不是已证明的 B/C
+输出错序；B/C 还没有 schema-2 输出可追认。
+
+修正后两份明确命名的表
+`configs/a3_gmr_dof_pos_joint_order.txt` / `configs/a3_runtime_articulation_joint_order.txt` 由
+`configs/a3_joint_order_bijection_v1.json` 绑定原始文件 SHA、canonical names SHA、双向 31 项 permutation、
+旧 YAML/Python source-order mirror 与完整 runtime metadata 条件。合同/validator/converter SHA 分别为
+`b09987ff...4815` / `8f01d20d...1ae9` / `a151a691...7f04`。source gate 对重复、缺失、额外、长度、
+声明 permutation 漂移、duplicate JSON key、wrong-order/partial ONNX metadata 和 NaN/Inf 均 fail closed，
+专项 `12 passed`。
+MuJoCo converter 已改读同一合同；历史 L0 auditor 因 executed v4 prereg 绑定整份源码 SHA 而保持
+byte-exact，新 validator 用 AST 复核其 runtime target literal。没有运行私有资产、forward kinematics、
+simulator、RL 或真机。基于 `origin/main@5734dc8` 的 repo-level 回归为
+`733 passed, 10 skipped`；缺少可选 runtime 依赖的无边界全目录 pytest 不作为本 source gate 的通过声明。
+
+这个 source gate 仍把 `source_gate_pass_can_authorize_schema2_materialization=false` 写死。B/C 下一步必须
+另立 no-clobber prereg，绑定 exact SE(2) PKL、restricted pickle、vendor MJCF/include/mesh、runtime body
+order、30→50 Hz、link-origin pose/COM velocity，并明确 B/C root 已在 HOPE frame、不得再旋转一次。当前证书
+仍为 `0`，promotion blocked 不变。
+
 权威资料：[G08](../../gates/G08_blind_spot_improvements.md) 和
 [操作文档](../../operations/run_motion_spatial_retarget_screen.md)。

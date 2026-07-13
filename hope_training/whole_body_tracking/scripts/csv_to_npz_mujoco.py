@@ -13,7 +13,8 @@ link-origin velocity instead; a perfect V5 pose then paid a spurious imitation
 tax (up to 0.99 m/s on the right wrist at the backhand strike).
 
 Isaac's npz body/joint ORDER is reproduced from two sources:
-- joint order: the donor ONNX metadata `joint_names` (the deploy contract, 31 names);
+- joint order: the content-bound A3 source/target bijection plus complete donor
+  ONNX metadata (`joint_names`, `articulation_joint_names`, `action_joint_ids`);
 - body order: discovered ONCE against a reference npz produced by the Isaac pipeline
   (``--discover-map``), by matching FK body trajectories to reference columns; the resulting
   name list is then passed to conversions via ``--body-order`` (or baked after discovery).
@@ -42,6 +43,12 @@ from motion_kinematics_contract import (  # noqa: E402
     BODY_POS_POINT,
     KINEMATICS_SCHEMA_VERSION,
     metadata_arrays,
+)
+from a3_joint_order_contract import (  # noqa: E402
+    DEFAULT_CONTRACT as DEFAULT_JOINT_ORDER_CONTRACT,
+    load_contract as load_joint_order_contract,
+    reorder_source_to_target,
+    validate_runtime_metadata,
 )
 
 
@@ -99,44 +106,14 @@ def so3_derivative(rotations: np.ndarray, dt: float) -> np.ndarray:
 
 
 # ------------------------------------------------------------------------- CSV + resampling --- #
-# CSV DOF-column order (GMR retarget output) — AGIBOT_A3_JOINT_NAMES in robots/agibot_a3.py.
-CSV_JOINT_NAMES = [
-    "waist_yaw_joint",
-    "waist_roll_joint",
-    "waist_pitch_joint",
-    "head_yaw_joint",
-    "head_pitch_joint",
-    "left_shoulder_pitch_joint",
-    "left_shoulder_roll_joint",
-    "left_shoulder_yaw_joint",
-    "left_elbow_joint",
-    "left_wrist_roll_joint",
-    "left_wrist_pitch_joint",
-    "left_wrist_yaw_joint",
-    "right_shoulder_pitch_joint",
-    "right_shoulder_roll_joint",
-    "right_shoulder_yaw_joint",
-    "right_elbow_joint",
-    "right_wrist_roll_joint",
-    "right_wrist_pitch_joint",
-    "right_wrist_yaw_joint",
-    "left_hip_pitch_joint",
-    "left_hip_roll_joint",
-    "left_hip_yaw_joint",
-    "left_knee_joint",
-    "left_ankle_pitch_joint",
-    "left_ankle_roll_joint",
-    "right_hip_pitch_joint",
-    "right_hip_roll_joint",
-    "right_hip_yaw_joint",
-    "right_knee_joint",
-    "right_ankle_pitch_joint",
-    "right_ankle_roll_joint",
-]
-
-
 def load_and_resample(csv_path: str, input_fps: int, output_fps: int):
     motion = np.loadtxt(csv_path, delimiter=",").astype(np.float32)
+    if motion.ndim != 2 or motion.shape[0] < 2 or motion.shape[1] != 38:
+        raise ValueError("GMR CSV must be finite (T>=2, 7 root + 31 dof_pos columns)")
+    if not np.isfinite(motion).all():
+        raise ValueError("GMR CSV contains NaN/Inf")
+    if input_fps <= 0 or output_fps <= 0:
+        raise ValueError("input/output fps must be positive")
     base_pos_in = motion[:, :3]
     base_rot_in = motion[:, 3:7][:, [3, 0, 1, 2]]  # xyzw -> wxyz
     dof_in = motion[:, 7:]
@@ -321,6 +298,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--mjcf", required=True)
     ap.add_argument("--donor", required=True, help="exported policy.onnx carrying joint_names metadata")
+    ap.add_argument(
+        "--joint-order-contract",
+        default=DEFAULT_JOINT_ORDER_CONTRACT,
+        help="content-bound GMR dof_pos -> runtime articulation bijection",
+    )
     ap.add_argument("--discover-map", help="reference npz: discover+validate Isaac body order, then exit")
     ap.add_argument("--body-order", help="file with MJ body names in Isaac column order (from --discover-map)")
     ap.add_argument("--input_file")
@@ -335,9 +317,10 @@ def main() -> int:
 
     import onnxruntime as ort
 
+    joint_contract = load_joint_order_contract(args.joint_order_contract)
     meta = ort.InferenceSession(args.donor, providers=["CPUExecutionProvider"]).get_modelmeta().custom_metadata_map
-    isaac_joints = [s.strip() for s in meta["joint_names"].strip("[]").replace("'", "").split(",")]
-    assert len(isaac_joints) == 31, f"expected 31 joints, got {len(isaac_joints)}"
+    validate_runtime_metadata(meta, joint_contract)
+    isaac_joints = list(joint_contract.target_names)
     fkm = MjFK(args.mjcf, isaac_joints)
 
     if args.discover_map:
@@ -378,17 +361,15 @@ def main() -> int:
     base_pos, base_rot, base_lin, base_ang, dof_csv, dof_vel_csv = load_and_resample(
         args.input_file, args.input_fps, args.output_fps
     )
-    # CSV dof order -> Isaac dof order
-    csv_idx = {n: i for i, n in enumerate(CSV_JOINT_NAMES)}
-    perm = [csv_idx[n] for n in fkm.isaac_joint_names]
-    dof = dof_csv[:, perm]
+    # Content-bound GMR source order -> runtime/Isaac articulation order.
+    dof = reorder_source_to_target(dof_csv, joint_contract)
     if args.grip_rot is not None:
         dof = apply_grip_rotation(fkm, base_pos, base_rot, dof, fkm.isaac_joint_names,
                                   args.grip_rot[0], args.grip_rot[1])
         # wrist columns changed -> re-differentiate ALL joint velocities from the baked dof
         dof_vel = np.gradient(dof, 1.0 / args.output_fps, axis=0).astype(np.float32)
     else:
-        dof_vel = dof_vel_csv[:, perm]
+        dof_vel = reorder_source_to_target(dof_vel_csv, joint_contract)
 
     pos_all, quat_all, com_all = fk_series_with_com(
         fkm, base_pos, base_rot, dof, fkm.isaac_joint_names
@@ -418,7 +399,8 @@ def main() -> int:
     np.savez(args.output_file, **log)
     print(
         f"[convert] {args.input_file} -> {args.output_file}: {dof.shape[0]} frames @ {args.output_fps} Hz; "
-        f"kinematics_schema={KINEMATICS_SCHEMA_VERSION} pos={BODY_POS_POINT} lin_vel={BODY_LIN_VEL_POINT}"
+        f"kinematics_schema={KINEMATICS_SCHEMA_VERSION} pos={BODY_POS_POINT} lin_vel={BODY_LIN_VEL_POINT}; "
+        f"joint_order_contract={joint_contract.contract_id}"
     )
     return 0
 

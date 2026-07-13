@@ -50,7 +50,7 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 | [EXP-MUJOCO-EVAL-FRAME-INTEGRATION](2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md) | latest main 能否同时保留 signed-face、parity guards 与 pelvis point/frame 合同？ | yikang | Codex | source integrated, pending main | E1 | focused `115 passed, 2 skipped`、root `647 passed, 9 skipped`；未授权 K100 |
 | [EXP-MUJOCO-PELVIS-FRAME-PARITY](2026-07/EXP-MUJOCO-PELVIS-FRAME-PARITY.md) | MuJoCo 倒下是否来自 pelvis 点/轴坐标错位？ | yikang | Codex | completed | E2 | adopt 两处 evaluator frame 修复；主因与 ready-state 因果仍 inconclusive |
 | [EXP-RECOVERY-TUPLE-ABC](2026-07/EXP-RECOVERY-TUPLE-ABC.md) | 哪种连贯的击球后命令语义能够安全恢复？ | franco | Codex | blocked | E1 旧结构；E0 新次序 | 新 reward 次序尚未同步 machine prereg；无行为结果 |
-| [EXP-MOTION-SPATIAL-RETARGET](2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | 新空挥能否在不做不安全编辑的前提下放置到有效击球点？ | franco | Codex | completed | E2 | B/C 主选已 exact SE(2) 实体化；证书 `0`，只解锁 schema-2 prereg，不推广动作 |
+| [EXP-MOTION-SPATIAL-RETARGET](2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | 新空挥能否在不做不安全编辑的前提下放置到有效击球点？ | franco | Codex | completed | E2 | B/C 主选已 exact SE(2)；GMR→runtime 关节列序 source gate 已闭环，证书 `0`，schema-2 仍须另行 prereg |
 | [EXP-GATE3-CURRENT179-D0](2026-07/EXP-GATE3-CURRENT179-D0.md) | 当前 exact 179 policy/planner/runtime 能否完成一份固定考卷？ | franco | Codex | blocked | E2 | 仅通过模型预检；行为实验缺 runtime 前置 |
 | [EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD](2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) | exact planner-policy 源码能否通过 portable Release，并无冲突地进入 latest main？ | franco | Codex | completed | E1 | adopt exact 源码；runtime/Gate3 行为仍未运行 |
 | [v12/高点拍压/横移视频登记](motion_video_intake_v12_static_motion_20260713.md) | 7 段私有新视频是否能按精确字节和语义角色登记？ | franco | Codex | completed | E1 | 7/7 登记通过；不授予动作安全或训练资格 |
