@@ -13,8 +13,8 @@
   "hardware_authorized": false,
   "runtime_contract": {
     "path": "configs/motion_s0_m0_exact_gmr_runtime_20260713.json",
-    "bytes": 12950,
-    "sha256": "25e21b3c829642453c6e22afb3a4e97c4d0d4ffba7886099082e25b3380c9563"
+    "bytes": 16691,
+    "sha256": "cb9b01b9effabda669a4b9cce736de319f6808eec31465993b42446b70d80d45"
   },
   "source_materialization": {
     "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
@@ -68,7 +68,6 @@
     "completion_manifest_published_last": true
   },
   "formal_blockers": [
-    "shared exact-GMR runtime has unresolved direct retarget XML/import/Python evidence and cannot pass static",
     "air swing has no observed ball contact or strike-effect truth",
     "S0 requires its own high-ball high-press paper and may not borrow a loop paper",
     "schema-2, L0/L1, table/net swept clearance, dynamics and balance are untested",

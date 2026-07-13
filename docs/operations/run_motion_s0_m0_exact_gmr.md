@@ -3,20 +3,18 @@
 本操作只处理 [`S0/M0`](../DEFINITIONS.md) canonical-beta PT 到 A3 [GMR](../DEFINITIONS.md) 的 CPU 离线
 阶段。S0 是第五种反手高点拍压空挥；M0 是四条左右横移老师候选。它不运行 schema-2、仿真、
 [TOPP](../DEFINITIONS.md)、RL、Gate3 或真机。设计与
-当前阻塞见[实验卷宗](../experiments/motion_exact_gmr_s0_m0_20260713.md)。
+当前 source/static 状态见[实验卷宗](../experiments/motion_exact_gmr_s0_m0_20260713.md)。
 
-## 0. 当前阻塞
+## 0. 当前状态与边界
 
-两份 batch plan 已是 `preregistered_not_executed`；共享 runtime 仍是
-`blocked_pending_exact_ignored_gmr_source_closure`。2026-07-14 的只读回执已绑定 tree OID、retarget
-MJCF/mapping bytes/SHA、关键 import SHA、Python binary SHA 和规范化 pip-freeze SHA，但 direct retarget XML
-的 joint/body/site parser 段被传输截断。另缺 import/mapping 的完整绝对路径、三个 eager-import 文件 binding、
-Python path/bytes、完整 pip origin string 与 `xrobot_utils` resolution。
+两份 batch plan 与共享 runtime 均为 `preregistered_not_executed`。16 项只读 closure 已绑定 exact GMR
+commit/tree、十二个 runtime 文件、direct retarget XML 的 31-joint/32-body preorder、显式 qpos bijection、
+Python/pip 与 `xrobot_utils=absent`；两份 host `static` 已通过。
 
-机器真源 `configs/motion_s0_m0_exact_gmr_runtime_20260713.json` 的
-`required_unresolved_evidence` 含 16 个 JSON pointer 和下一条只读 probe。不得抄 canonical 32-body 列表填
-retarget XML，不得使用历史 31-joint 列表冒充 direct parser receipt。补齐并 code review 后，只把共享 runtime
-切为 `preregistered_not_executed`，移除 blocked-only receipt/list，重算全部 binding，下面 runtime 命令才适用。
+direct retarget `a3_mocap.xml` 的完整 site inventory 是空列表，且 `left_foot/right_foot` 明确 absent；不得抄
+canonical vendor MJCF 的足点去伪造 retarget site。M0 脚距只在 canonical vendor MJCF 的 `left_foot` 与
+`right_foot` 上做 FK。当前仍未运行 ignored runtime `inspect`、私有 PT、converter 或 `consume`，所以没有
+GMR 输出，也未解锁 schema-2/训练/真机。
 
 ## 1. Host static
 
@@ -33,9 +31,9 @@ python3 scripts/run_motion_s0_m0_exact_gmr.py \
 python3 -m pytest -q tests/test_run_motion_s0_m0_exact_gmr.py
 ```
 
-`static` 只读 Git 中的 prereg/tool/A3 tracked model tree，不访问私有 PT 或 ignored GMR。当前预期是两次均
-以 rc=2 打印同一份 `required_unresolved_evidence`；若它输出 `PASS` 反而是错误。补齐 closure 后才应分别
-输出 `PASS static`。
+`static` 只读 Git 中的 prereg/tool/A3 tracked model tree，不访问私有 PT 或 ignored GMR。当前预期是两次
+分别输出 `PASS static s0_static_high_press` 与 `PASS static m0_lateral_teachers`；任何 binding、site absence、
+31-index bijection 或 tool SHA 漂移都必须 fail closed。
 
 ## 2. Runtime inspect（不写）
 
@@ -43,7 +41,7 @@ python3 -m pytest -q tests/test_run_motion_s0_m0_exact_gmr.py
 
 ```bash
 export CUDA_VISIBLE_DEVICES=
-PY=/exact/path/from-reviewed-runtime-contract/python
+PY=/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10
 
 "$PY" scripts/run_motion_s0_m0_exact_gmr.py \
   --plan "$S0" --expected-plan-sha256 "$S0_SHA" inspect
@@ -51,11 +49,15 @@ PY=/exact/path/from-reviewed-runtime-contract/python
   --plan "$M0" --expected-plan-sha256 "$M0_SHA" inspect
 ```
 
-`inspect` 验 commit/tree/clean status、bundle、converter/import/model closure、Python/pip、canonical-beta
-completion 与五条 exact PT，并确认各自 output root 不存在。它设置 `PYTHONDONTWRITEBYTECODE=1`，不创建
-output/state/report。S0/M0 分开 inspect，一批失败不改变另一批。
+`inspect` 验 commit/tree/clean status、bundle、converter/import/model closure、direct retarget 的空 site
+inventory、Python/pip、canonical-beta completion 与五条 exact PT，并确认各自 output root 不存在。它设置
+`PYTHONDONTWRITEBYTECODE=1`，不创建 output/state/report。S0/M0 分开 inspect，一批失败不改变另一批。
+本次 source 闭环没有执行这两条命令；必须在 code review 后另行运行并记录结果。
 
 ## 3. 一次性 consume
+
+只有相应 batch 的只读 `inspect` 已通过、且输出 root 仍不存在时，才可授权以下命令。本次 source 闭环
+**没有执行** `consume`。
 
 ```bash
 "$PY" scripts/run_motion_s0_m0_exact_gmr.py \

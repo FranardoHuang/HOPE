@@ -1,9 +1,9 @@
 # S0/M0 exact GMR 与横移末态脚距
 
-- 状态：`blocked`
+- 状态：`preregistered_not_executed`（source/static gate 通过；runtime `inspect/consume` 未运行）
 - 人类负责人：Franco
 - 执行者：Codex
-- 证据等级：E1（consumer、blocked-runtime schema 与 mutation/no-clobber 测试）；尚无 GMR 输出
+- 证据等级：E1（exact runtime closure、两份 static plan 与 mutation/no-clobber 测试）；尚无 GMR 输出
 
 共享缩写见[术语与人话对照](../DEFINITIONS.md)。本卷只回答：已经完成 exact donor canonical-beta 的
 [`S0`](../DEFINITIONS.md) 高点拍压与 [`M0`](../DEFINITIONS.md) 四条横移老师，能否在不混批、不覆盖旧制品
@@ -33,30 +33,30 @@ Python `3.10.20`、规范化 `pip freeze --all` 以及 `numpy/torch/mujoco/smplx
 路径是优化式 converter，没有 checkpoint CLI 或 checkpoint runtime read；机器合同因此明确冻结空
 checkpoint 集，而不是伪造一个模型权重。
 
-2026-07-14 的低频只读网络复核已取回 clean GMR tree
-`dc32626643e1a35820ec3ccf00e4d20b590d77cf`、retarget MJCF `19741` bytes/SHA、mapping
-`3581` bytes/SHA、四个关键 import 文件的 bytes/SHA、Python binary SHA 与按逐字节排序规范化的
-`pip freeze --all` SHA。原始回执为 `5621` bytes、SHA
-`32c90a8882be02e5bd7260a8531f1cc0c5b212e88663c3f5e3a7a8aec13c8236`。
+2026-07-14 的第二轮低频只读复核把 16 项缺口全部变成 exact 字段：clean GMR tree 仍为
+`dc32626643e1a35820ec3ccf00e4d20b590d77cf`；package init、motion retarget、params、kinematics、viewer、
+data loader 与 neck retarget 七个 import module 都绑定 realpath/bytes/SHA；`smplx_to_a3.json` 的 exact path
+为 `general_motion_retargeting/ik_configs/smplx_to_a3.json`。Python 是非 symlink regular file
+`/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10`，`17,331,920` bytes、SHA
+`dd9eb336...aa55`；完整 pip origin string 与规范化 `pip freeze --all` SHA `97c66009...18ff` 已绑定，
+`importlib.util.find_spec("xrobot_utils")` 明确为 absent。
 
-同一次 XML parser 的 body/site 段落落入传输截断区，因此不能把 tracked canonical 32-body order 或历史
-31-joint order抄进 retarget XML 字段。回执也没有返回四个已知 import 文件的绝对路径、三个 eager-import
-模块的文件 binding、mapping 绝对路径、Python executable path/bytes、完整 `pip --version` origin string
-和 `xrobot_utils` resolution。两份 batch plan 已冻结为 `preregistered_not_executed`，共享 runtime 仍明确为
-`blocked_pending_exact_ignored_gmr_source_closure`；其 `required_unresolved_evidence` 逐 JSON pointer 列出
-16 项只读补证。`static` 先验证回执/schema/tool binding，再以 rc=2 列出缺口，不能称为 ready 或启动。
-当前 shared runtime SHA 是 `25e21b3c...c9563`；S0/M0 batch plan SHA 分别为
-`cce033f6...6e3a9` / `58b48f48...1c64a`。
+两份 batch plan 与 shared runtime 均为 `preregistered_not_executed`；blocked-only 本地 receipt 和
+`required_unresolved_evidence` 已删除。shared runtime SHA 为 `cb9b01b9...0d45`，S0/M0 plan SHA 分别为
+`a5c65e9e...8917` / `137b38c9...a4bc`。两次 host `static` 都输出 `PASS`；这只解除 source/static blocker，
+不是 ignored runtime、私有 PT 或 converter 行为已经通过。
 
 ## 31 关节、两套 body order 与足点
 
-GMR `dof_pos[:,31]` 到 tracked canonical A3 `qpos[7:38]` 最终必须使用逐 index、逐 name 的显式
-bijection。retarget MJCF 与 canonical vendor MJCF 的 body order 必须分别冻结，不能假定名字相同；当前
-retarget order/bijection 仍为空值，正是阻塞项。`inspect` 将各自解析 XML 后再验 31 关节 bijection。
-canonical A3 FK 还绑定整个 76 文件 model tree，而不只绑定顶层 XML。
+GMR `dof_pos[:,31]` 到 tracked canonical A3 `qpos[7:38]` 使用逐 index、逐 name 的显式 bijection。direct
+retarget XML 解析得到 31 个 hinge 和 32 个 body；本次名字/顺序恰与 canonical 列表相同，但两份证据仍各自
+绑定，不能因为结果相同就互相替代。`inspect` 将重读 exact XML 并逐项复核；canonical A3 FK 还绑定整个
+76 文件 vendor model tree，而不只绑定顶层 XML。
 
-retarget XML 的足点 name/parent/local position 也必须单独直读并绑定；它们不能从 canonical 值反推，也不
-要求与 canonical 足点逐字相等。下面的末态站距只在绑定的 canonical vendor model 上做 FK。
+一个重要负结果是：direct `a3_mocap.xml` 的完整 site inventory 精确为空，`left_foot/right_foot` 都 absent。
+旧 consumer 强迫 retarget XML 拥有 canonical 足点，会造成假阻塞；现在 source 合同明确绑定空 inventory 与
+左右 absent，任何后来出现的 site 都算 runtime drift。下面的末态站距只在绑定的 canonical vendor model
+上做 FK；mutation test 明确禁止把 vendor 足点抄进 retarget 字段。
 
 M0 足点固定为 canonical vendor MJCF：
 
@@ -94,9 +94,11 @@ S0 的 `observed_ball_contact` 与 `strike_effectiveness` 在 GMR 后仍必须�
 python3 -m pytest -q tests/test_run_motion_s0_m0_exact_gmr.py
 ```
 
-当前专项为 `12 passed`，全仓为 `645 passed, 9 skipped`。两份真实 batch plan 的 `static` 都按预期 rc=2，
-并逐项打印同一份 unresolved 列表。
+当前专项为 `13 passed`，基于最新 main 的仓内 `tests/` 回归为 `851 passed, 10 skipped`；两份真实 batch plan 的 `static`
+都为 `PASS`。新增负测覆盖 canonical site 冒充
+retarget、retarget site 突然出现、左右 absent 被改写、joint-order runtime drift；原有 no-clobber、失败无
+completion、成功 report-last 继续通过。
 
-下一次网络窗口只允许补齐机器清单里的字段、移除 blocked-only receipt/list、把共享 runtime 切为
-`preregistered_not_executed`、重算 tool/runtime/plan SHA 并重新运行 `static`；在 source review 之前不得运行
-`inspect/consume`。完整命令见[操作文档](../operations/run_motion_s0_m0_exact_gmr.md)。
+下一步只允许在 code review 后用绑定的 CPU runtime 分别运行只读 `inspect`；本分支不连 Pod、不读取私有
+PT、也不执行 `consume`。`inspect` 通过后才可另行授权两个 no-clobber batch 的一次性 consume。完整命令见
+[操作文档](../operations/run_motion_s0_m0_exact_gmr.md)。

@@ -1335,12 +1335,12 @@ canonical A3 foot FK and both components of `right_foot_xy-left_foot_xy`; a fini
 than 5 mm fails independently of the 3 cm component band. S0 contact/effect remains null and cannot
 borrow a loop paper.
 
-The 2026-07-14 read-only receipt recovered the exact GMR tree plus most model/import/Python hashes,
-but direct retarget XML joint/body/site output was transport-truncated and the remaining paths are
-enumerated in the shared runtime's 16-item `required_unresolved_evidence`. Both batch plans are
-preregistered; the shared runtime stays blocked, and both real static validations deliberately fail
-rc=2 at that same list. No GMR output exists. Schema-2, L0/L1, dynamics and RL remain blocked; no
-trainer or hardware command ran. G05 remains `Partial`; details are in
+The 2026-07-14 follow-up bound all 16 exact source/runtime facts. Direct retarget XML has the bound
+31-joint/32-body order but an exactly empty site inventory; canonical vendor foot sites cannot be
+substituted into retarget evidence and remain exclusive to M0 stance FK. Both batch plans and shared
+runtime are `preregistered_not_executed`; both host static validations pass. Runtime
+`inspect/consume` and GMR outputs still do not exist. Schema-2, L0/L1, dynamics and RL remain blocked;
+no trainer or hardware command ran. G05 remains `Partial`; details are in
 [the experiment](../experiments/motion_exact_gmr_s0_m0_20260713.md).
 
 ### 2026-07-12 文档路由与当前成绩表

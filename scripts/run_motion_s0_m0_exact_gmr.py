@@ -30,7 +30,6 @@ GIT_OID = re.compile(r"^[0-9a-f]{40}$")
 SAFE_ASSET_ID = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 BODY_SHAPE_CONTRACT = "diagnostic_same_performer_coordinatewise_median_betas_v1"
 PLAN_STATUS = "preregistered_not_executed"
-BLOCKED_RUNTIME_STATUS = "blocked_pending_exact_ignored_gmr_source_closure"
 MATERIALIZATION_STATUS = "complete_exact_donor_beta_materialization"
 EXPECTED_BATCHES = {
     "s0_static_high_press": ["static_backhand_high_press"],
@@ -223,7 +222,8 @@ def _validate_source_contract(plan: dict[str, Any]) -> None:
         "checkpoint_contract",
         "retarget_joint_order",
         "retarget_body_order",
-        "retarget_foot_site_mapping",
+        "retarget_site_inventory",
+        "retarget_foot_site_absence",
         "joint_bijection_to_canonical",
     }
     if set(source) != expected_source_keys:
@@ -256,25 +256,17 @@ def _validate_source_contract(plan: dict[str, Any]) -> None:
     if set(retarget_joints) != set(canonical_joints):
         raise ContractError("GMR retarget and canonical A3 joint-name sets differ")
     _require_string_list(source.get("retarget_body_order"), "ignored_gmr_source.retarget_body_order")
-    retarget_sites = source.get("retarget_foot_site_mapping")
-    if not isinstance(retarget_sites, dict) or set(retarget_sites) != {"left", "right"}:
-        raise ContractError("GMR retarget foot-site mapping must bind left and right")
-    for side, row in retarget_sites.items():
-        if (
-            not isinstance(row, dict)
-            or set(row) != {"site", "parent_body", "local_pos_m"}
-            or not isinstance(row["site"], str)
-            or not row["site"]
-            or not isinstance(row["parent_body"], str)
-            or not row["parent_body"]
-            or not isinstance(row["local_pos_m"], list)
-            or len(row["local_pos_m"]) != 3
-            or not all(
-                isinstance(value, (int, float)) and math.isfinite(value)
-                for value in row["local_pos_m"]
-            )
-        ):
-            raise ContractError(f"GMR retarget {side} foot-site mapping is malformed")
+    # The exact clean GMR retarget XML has no sites at all.  This is an
+    # observed source fact, not a gap to fill from the separate vendor MJCF.
+    # M0 stance FK deliberately uses a3_robot_contract.foot_site_mapping only.
+    if source.get("retarget_site_inventory") != []:
+        raise ContractError("GMR retarget site inventory must remain exactly empty")
+    expected_absence = {
+        "left": {"site": "left_foot", "absent": True},
+        "right": {"site": "right_foot", "absent": True},
+    }
+    if source.get("retarget_foot_site_absence") != expected_absence:
+        raise ContractError("GMR retarget left/right foot-site absence contract changed")
     bijection = source.get("joint_bijection_to_canonical")
     if not isinstance(bijection, list) or len(bijection) != 31:
         raise ContractError("ignored GMR source must bind an explicit 31-joint bijection")
@@ -560,13 +552,6 @@ def validate_plan(plan_path: Path, expected_plan_sha256: str, repo_root: Path) -
     runtime_binding = require_binding(plan.get("runtime_contract"), "runtime_contract")
     runtime_path = verify_regular_file(runtime_binding, "shared exact-GMR runtime contract", root=repo_root)
     runtime = read_json(runtime_path, "shared exact-GMR runtime contract")
-    if runtime.get("schema_version") == 1 and runtime.get("status") == BLOCKED_RUNTIME_STATUS:
-        _validate_blocked_runtime(runtime, repo_root)
-        unresolved = runtime["required_unresolved_evidence"]
-        raise ContractError(
-            "shared exact-GMR runtime is intentionally blocked; unresolved exact evidence: "
-            + ", ".join(item["json_pointer"] for item in unresolved)
-        )
     if runtime.get("schema_version") != 1 or runtime.get("status") != PLAN_STATUS:
         raise ContractError("shared exact-GMR runtime contract is not executable schema 1")
     if set(runtime) != {
@@ -684,121 +669,6 @@ def validate_plan(plan_path: Path, expected_plan_sha256: str, repo_root: Path) -
     return plan
 
 
-def _validate_blocked_runtime(runtime: dict[str, Any], repo_root: Path | None = None) -> None:
-    """Validate the machine-readable negative space of an incomplete closure.
-
-    This deliberately does not make a blocked runtime executable.  It prevents
-    a partial network receipt from being mistaken for a ready plan while still
-    making the exact missing reads testable and reviewable.
-    """
-
-    expected_keys = {
-        "schema_version",
-        "status",
-        "scope",
-        "tool_contract",
-        "ignored_gmr_source",
-        "a3_robot_contract",
-        "execution_contract",
-        "closure_evidence_receipt",
-        "required_unresolved_evidence",
-    }
-    if set(runtime) != expected_keys:
-        raise ContractError("blocked shared runtime field closure changed")
-    tool = runtime.get("tool_contract")
-    if not isinstance(tool, dict) or set(tool) != {"consumer", "result_auditor"}:
-        raise ContractError("blocked runtime tool closure changed")
-    require_binding(tool.get("consumer"), "blocked tool_contract.consumer")
-    require_binding(tool.get("result_auditor"), "blocked tool_contract.result_auditor")
-    if repo_root is not None:
-        for name in ("consumer", "result_auditor"):
-            verify_regular_file(
-                tool[name], f"blocked tool_contract.{name}", root=repo_root
-            )
-    source = runtime.get("ignored_gmr_source")
-    if not isinstance(source, dict):
-        raise ContractError("blocked runtime ignored_gmr_source must be a mapping")
-    if not isinstance(source.get("root"), str) or not Path(source["root"]).is_absolute():
-        raise ContractError("blocked runtime GMR root must be absolute")
-    require_git_oid(source.get("commit"), "blocked runtime GMR commit")
-    require_git_oid(source.get("tree_oid"), "blocked runtime GMR tree")
-    require_binding(source.get("recovery_bundle"), "blocked runtime GMR recovery bundle")
-    files = source.get("runtime_files")
-    if not isinstance(files, dict) or set(files) != set(REQUIRED_GMR_RUNTIME_FILES):
-        raise ContractError("blocked runtime GMR file closure changed")
-    for name, binding in files.items():
-        if not isinstance(binding, dict) or set(binding) != {"path", "bytes", "sha256"}:
-            raise ContractError(f"blocked GMR runtime file {name} binding shape changed")
-        if binding["path"] is not None and not isinstance(binding["path"], str):
-            raise ContractError(f"blocked GMR runtime file {name} path is malformed")
-        if binding["bytes"] is not None and (
-            not isinstance(binding["bytes"], int) or binding["bytes"] <= 0
-        ):
-            raise ContractError(f"blocked GMR runtime file {name} bytes are malformed")
-        if binding["sha256"] is not None:
-            require_sha(binding["sha256"], f"blocked GMR runtime file {name} sha256")
-    if source.get("retarget_joint_order") != [] or source.get("retarget_body_order") != []:
-        raise ContractError("truncated retarget XML orders must remain empty while blocked")
-    if source.get("retarget_foot_site_mapping") is not None:
-        raise ContractError("truncated retarget XML foot sites must remain null while blocked")
-    if source.get("joint_bijection_to_canonical") != []:
-        raise ContractError("retarget/canonical bijection must remain empty while blocked")
-    _validate_robot_contract(runtime)
-    execution = runtime.get("execution_contract")
-    if not isinstance(execution, dict):
-        raise ContractError("blocked runtime execution_contract must be a mapping")
-    python = execution.get("python_environment")
-    if not isinstance(python, dict):
-        raise ContractError("blocked runtime python_environment must be a mapping")
-    if python.get("executable") is not None or python.get("executable_bytes") is not None:
-        raise ContractError("unobserved Python path/bytes must remain null while blocked")
-    require_sha(python.get("executable_sha256"), "blocked Python executable SHA")
-    require_sha(python.get("pip_freeze_sha256"), "blocked Python pip-freeze SHA")
-    if python.get("pip_version") is not None or python.get("xrobot_utils_resolution") is not None:
-        raise ContractError("unobserved Python pip/module resolution must remain null while blocked")
-    receipt = runtime.get("closure_evidence_receipt")
-    if receipt != {
-        "capture_path": "/private/tmp/pod_network_exam_gmr_evidence_20260714.md",
-        "bytes": 5621,
-        "sha256": "32c90a8882be02e5bd7260a8531f1cc0c5b212e88663c3f5e3a7a8aec13c8236",
-        "audit_utc": "2026-07-13T16:08:48Z/2026-07-13T16:28:00Z",
-        "read_only": True,
-    }:
-        raise ContractError("blocked runtime closure evidence receipt changed")
-    unresolved = runtime.get("required_unresolved_evidence")
-    if not isinstance(unresolved, list) or not unresolved:
-        raise ContractError("blocked runtime must enumerate unresolved exact evidence")
-    pointers: list[str] = []
-    for index, item in enumerate(unresolved):
-        if (
-            not isinstance(item, dict)
-            or set(item) != {"json_pointer", "reason", "next_read_only_probe"}
-            or not all(isinstance(item[field], str) and item[field] for field in item)
-        ):
-            raise ContractError(f"malformed required_unresolved_evidence[{index}]")
-        pointers.append(item["json_pointer"])
-    expected_pointers = [
-        "/ignored_gmr_source/runtime_files/package_init/path",
-        "/ignored_gmr_source/runtime_files/motion_retarget/path",
-        "/ignored_gmr_source/runtime_files/params/path",
-        "/ignored_gmr_source/runtime_files/kinematics_model/path",
-        "/ignored_gmr_source/runtime_files/robot_motion_viewer",
-        "/ignored_gmr_source/runtime_files/data_loader",
-        "/ignored_gmr_source/runtime_files/neck_retarget",
-        "/ignored_gmr_source/runtime_files/smplx_to_a3_mapping/path",
-        "/ignored_gmr_source/retarget_joint_order",
-        "/ignored_gmr_source/retarget_body_order",
-        "/ignored_gmr_source/retarget_foot_site_mapping",
-        "/ignored_gmr_source/joint_bijection_to_canonical",
-        "/execution_contract/python_environment/executable",
-        "/execution_contract/python_environment/executable_bytes",
-        "/execution_contract/python_environment/pip_version",
-        "/execution_contract/python_environment/xrobot_utils_resolution",
-    ]
-    if pointers != expected_pointers or len(pointers) != len(set(pointers)):
-        raise ContractError("blocked runtime unresolved evidence list changed")
-
-
 def verify_tool_contract(plan: dict[str, Any], repo_root: Path) -> None:
     paths = {
         "consumer": Path(__file__).resolve(),
@@ -851,6 +721,32 @@ def _xml_names_and_sites(path: Path) -> tuple[list[str], list[str], dict[str, di
                     "local_pos_m": [float(value) for value in (site.get("pos") or "0 0 0").split()],
                 }
     return joints, bodies, sites
+
+
+def verify_retarget_xml_evidence(
+    source: dict[str, Any],
+    joints: list[str],
+    bodies: list[str],
+    sites: dict[str, dict[str, Any]],
+) -> None:
+    """Match direct retarget-XML facts without borrowing vendor-MJCF sites."""
+
+    if joints != source["retarget_joint_order"]:
+        raise ContractError("GMR A3 retarget MJCF joint order mismatch")
+    if bodies != source["retarget_body_order"]:
+        raise ContractError("GMR A3 retarget MJCF body order mismatch")
+    inventory = [
+        {"site": name, **sites[name]}
+        for name in sorted(sites)
+    ]
+    if inventory != source["retarget_site_inventory"]:
+        raise ContractError(
+            "GMR A3 retarget MJCF site inventory drifted; canonical sites cannot substitute"
+        )
+    for side in ("left", "right"):
+        absence = source["retarget_foot_site_absence"][side]
+        if absence["absent"] is not True or absence["site"] in sites:
+            raise ContractError(f"GMR A3 retarget {side} foot site is not exactly absent")
 
 
 def verify_a3_orders_and_sites(plan: dict[str, Any], repo_root: Path, canonical_mjcf: Path) -> None:
@@ -918,18 +814,7 @@ def verify_gmr_source(plan: dict[str, Any]) -> dict[str, Path]:
     retarget_joints, retarget_bodies, retarget_sites = _xml_names_and_sites(
         paths["a3_retarget_mjcf"]
     )
-    if retarget_joints != source["retarget_joint_order"]:
-        raise ContractError("GMR A3 retarget MJCF joint order mismatch")
-    if retarget_bodies != source["retarget_body_order"]:
-        raise ContractError("GMR A3 retarget MJCF body order mismatch")
-    for side in ("left", "right"):
-        expected = source["retarget_foot_site_mapping"][side]
-        actual = retarget_sites.get(expected["site"])
-        if actual != {
-            "parent_body": expected["parent_body"],
-            "local_pos_m": expected["local_pos_m"],
-        }:
-            raise ContractError(f"GMR A3 retarget {side} foot site mismatch")
+    verify_retarget_xml_evidence(source, retarget_joints, retarget_bodies, retarget_sites)
     return paths
 
 

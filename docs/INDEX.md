@@ -67,7 +67,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | [Franco 优先、static/motion GVHMR 结果](experiments/motion_video_gvhmr_prereg_franco_static_motion_20260713.md) | Franco 六段复用旧 exact 结果；[S0/M0](DEFINITIONS.md) 已 `1/1 + 4/4` finite structural pass，v12 未执行；GMR/schema-2 未跑 |
 | [S0/M0 post-GVHMR exact handoff](experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md) | runtime handoff 已完成：S0/M0 exact SHA `d57a93e0...a1054` / `60c55150...088ef`；GMR/schema-2 未跑 |
 | [S0/M0 exact donor canonical-beta](experiments/motion_canonical_beta_s0_m0_20260713.md) | 真实 `1+4` 条 PT 已在绑定 CPU runtime consume 且 non-beta bit-exact；只解锁 exact GMR prereg，A3 脚距仍全 null |
-| [S0/M0 exact GMR 与横移脚距](experiments/motion_exact_gmr_s0_m0_20260713.md) | E1 consumer/阈值/report-last 已冻结；tree/model SHA 已补，direct retarget XML order/site 与 import/Python path 仍由 16 项机器清单阻塞，尚未运行 |
+| [S0/M0 exact GMR 与横移脚距](experiments/motion_exact_gmr_s0_m0_20260713.md) | E1 source/static gate 已通过；16 项 exact runtime closure、retarget 空 site inventory 与 canonical-only M0 stance 已绑定，两份 host static PASS；runtime inspect/consume 尚未运行 |
 | [v12/高点拍压/横移组合设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md) | S0/M0 已完成 GVHMR 与 canonical-beta；没有 GMR/schema-2 动作、仿真或训练结果 |
 | [非击球臂模仿消融](experiments/non_striking_arm_imitation_ablation_20260713.md) | Partial：A0 `model_200` finite/lineage/contract 已绑定；旧 verifier 假拒绝后 A1 absent，v1r1 只补 A1 的恢复门已就绪；尚无配对终档/同卷判读 |
 

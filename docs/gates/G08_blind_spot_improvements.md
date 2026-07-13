@@ -523,10 +523,15 @@ canonical vendor body order，而是分开绑定两套 XML order，再用显式 
 分离，并用独立 5 mm narrowing 门阻止“落在 3 cm ready band 内但实际收脚”的假通过。S0 仍保持
 contact/effect 为 null、禁止借用拉球题。
 
-2026-07-14 只读补证已经取回 exact tree、model/mapping、关键 import 与 Python/pip SHA；但 retarget XML
-joint/body/site parser 输出被传输截断，另有绝对路径/runtime origin 尚未观察。两份 batch plan 已预注册，
-共享 runtime 用 16 项 `required_unresolved_evidence` 保持 blocked；两次真实 `static` 都在同一清单 rc=2，
-没有运行 GMR、schema-2、安全、动力学、RL 或真机。见
+2026-07-14 第二轮低频只读补证已闭合原 16 项 exact runtime 清单：七个 import module、mapping、Python/pip
+origin、direct retarget 31-joint/32-body preorder 与 31-index bijection 都已绑定。direct retarget XML 的 site
+inventory 精确为空，`left_foot/right_foot` 都 absent；consumer 已改为拒绝 canonical vendor sites 冒充
+retarget sites，M0 stance 仍只在绑定的 canonical vendor MJCF 上做 FK。两份 batch plan 与 shared runtime
+均为 `preregistered_not_executed`，两次 host `static` 均 `PASS`，专项 `13 passed`、仓内 `tests/` 回归
+`851 passed, 10 skipped`。
+
+这只解除 source/static blocker；本分支没有连接 Pod、读取私有 PT、运行 runtime `inspect/consume`、GMR、
+schema-2、安全、动力学、RL 或真机。见
 [exact GMR 卷宗](../experiments/motion_exact_gmr_s0_m0_20260713.md)。G08 状态不变。
 
 ## 文档路由更新（2026-07-12）

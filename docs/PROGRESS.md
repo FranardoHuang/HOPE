@@ -22,6 +22,16 @@
   [face-sign 实验](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)与
   [操作](operations/run_phase1_signed_face_cd_l1.md)。
 
+- S0 高点拍压与 M0 横移老师的 shared exact-GMR source/static blocker 已闭环：16 项低频只读证据绑定
+  clean GMR tree、七个 import module、mapping、Python/pip、direct 31-joint/32-body order 与显式 qpos
+  bijection。direct retarget XML 的 site inventory 精确为空、左右 foot site absent；consumer 不再错误要求
+  canonical vendor 足点出现在 retarget XML，M0 stance 仍只用 vendor MJCF 做 FK。shared runtime SHA
+  `cb9b01b9...0d45`，两份 host `static` 均 `PASS`；canonical-site 冒充、新 site/非 absent、runtime drift
+  负测在专项 `13 passed`，基于最新 main 的仓内 `tests/` 为 `851 passed, 10 skipped`。未连接 Pod、读取私有 PT、运行
+  `inspect/consume`、GMR、仿真、训练或真机；见
+  [exact GMR 卷宗](experiments/motion_exact_gmr_s0_m0_20260713.md)与
+  [操作](operations/run_motion_s0_m0_exact_gmr.md)。
+
 - Franco 将共享算力调度改为“先铺满卡、再叠并发”：保留已绑定运行原位不动，新任务先跨 Pod1/Pod2
   六张可用 GPU 各放一个有独立科学问题和早判合同的单元，再开始第二、第三轮，Pod1 才有第四轮；
   被他人占用、前置门未过或会破坏严格配对的卡跳过，不用重复 seed/失败配方补位。操作真源已同步到

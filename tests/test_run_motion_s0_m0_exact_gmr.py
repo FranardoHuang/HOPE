@@ -97,27 +97,76 @@ def test_tracked_m0_stance_prereg_and_mutations_fail_closed():
         GMR._validate_m0_stance(shifted, shifted["inputs"])
 
 
-def test_blocked_runtime_receipt_is_machine_readable_and_rejects_substitution():
+def test_exact_runtime_closure_rejects_canonical_site_substitution_and_false_presence():
     runtime = json.loads(
         (ROOT / "configs" / "motion_s0_m0_exact_gmr_runtime_20260713.json").read_text(
             encoding="utf-8"
         )
     )
-    GMR._validate_blocked_runtime(runtime, ROOT)
+    GMR._validate_source_contract(runtime)
+    GMR._validate_execution_contract(runtime)
+    source = runtime["ignored_gmr_source"]
+    assert source["retarget_site_inventory"] == []
+    assert source["retarget_foot_site_absence"] == {
+        "left": {"site": "left_foot", "absent": True},
+        "right": {"site": "right_foot", "absent": True},
+    }
+    assert runtime["a3_robot_contract"]["foot_site_mapping"]["left"]["site"] == "left_foot"
 
-    # The tracked/canonical A3 order is useful evidence but may not be copied
-    # into the retarget XML field whose direct parser output was truncated.
+    # Vendor/canonical sites exist, but the exact direct retarget XML inventory
+    # is empty.  Copying them across the source boundary must fail closed.
     substituted = copy.deepcopy(runtime)
-    substituted["ignored_gmr_source"]["retarget_joint_order"] = substituted[
-        "a3_robot_contract"
-    ]["joint_order"]
-    with pytest.raises(GMR.ContractError, match="must remain empty"):
-        GMR._validate_blocked_runtime(substituted)
+    substituted["ignored_gmr_source"]["retarget_site_inventory"] = [
+        {
+            "site": "left_foot",
+            "parent_body": "left_ankle_roll_Link",
+            "local_pos_m": [0.04, 0.0, -0.067],
+        }
+    ]
+    with pytest.raises(GMR.ContractError, match="site inventory.*exactly empty"):
+        GMR._validate_source_contract(substituted)
 
-    hidden_gap = copy.deepcopy(runtime)
-    hidden_gap["required_unresolved_evidence"].pop()
-    with pytest.raises(GMR.ContractError, match="unresolved evidence list"):
-        GMR._validate_blocked_runtime(hidden_gap)
+    claimed_present = copy.deepcopy(runtime)
+    claimed_present["ignored_gmr_source"]["retarget_foot_site_absence"]["left"][
+        "absent"
+    ] = False
+    with pytest.raises(GMR.ContractError, match="absence contract"):
+        GMR._validate_source_contract(claimed_present)
+
+
+def test_direct_retarget_runtime_drift_and_new_site_fail_closed():
+    runtime = json.loads(
+        (ROOT / "configs" / "motion_s0_m0_exact_gmr_runtime_20260713.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    source = runtime["ignored_gmr_source"]
+    GMR.verify_retarget_xml_evidence(
+        source,
+        source["retarget_joint_order"],
+        source["retarget_body_order"],
+        {},
+    )
+
+    with pytest.raises(GMR.ContractError, match="joint order mismatch"):
+        GMR.verify_retarget_xml_evidence(
+            source,
+            list(reversed(source["retarget_joint_order"])),
+            source["retarget_body_order"],
+            {},
+        )
+    with pytest.raises(GMR.ContractError, match="site inventory drifted"):
+        GMR.verify_retarget_xml_evidence(
+            source,
+            source["retarget_joint_order"],
+            source["retarget_body_order"],
+            {
+                "left_foot": {
+                    "parent_body": "left_ankle_roll_Link",
+                    "local_pos_m": [0.04, 0.0, -0.067],
+                }
+            },
+        )
 
 
 @pytest.mark.parametrize(
@@ -127,11 +176,13 @@ def test_blocked_runtime_receipt_is_machine_readable_and_rejects_substitution():
         "motion_exact_gmr_m0_prereg_20260713.json",
     ],
 )
-def test_tracked_batch_plans_fail_at_bound_runtime_gap(name):
+def test_tracked_batch_plans_pass_static_contract_after_runtime_closure(name):
     plan = ROOT / "configs" / name
     expected_sha = GMR.sha256_file(plan)
-    with pytest.raises(GMR.ContractError, match="intentionally blocked.*retarget_body_order"):
-        GMR.validate_plan(plan, expected_sha, ROOT)
+    validated = GMR.validate_plan(plan, expected_sha, ROOT)
+    assert validated["status"] == GMR.PLAN_STATUS
+    assert validated["ignored_gmr_source"]["retarget_site_inventory"] == []
+    assert all("unresolved direct retarget" not in item for item in validated["formal_blockers"])
 
 
 def test_write_json_exclusive_is_no_clobber(tmp_path):

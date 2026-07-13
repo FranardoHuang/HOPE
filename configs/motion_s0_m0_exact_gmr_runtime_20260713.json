@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "status": "blocked_pending_exact_ignored_gmr_source_closure",
+  "status": "preregistered_not_executed",
   "scope": "shared CPU-only source, runtime, converter, A3 model, joint/body-order and foot-site contract for the independent S0 and M0 exact GMR batches",
   "tool_contract": {
     "consumer": {
       "path": "scripts/run_motion_s0_m0_exact_gmr.py",
-      "bytes": 71005,
-      "sha256": "f37aeebd2d0c6a7c4de0699aff1553a42c62c1ea4a07a6fbb1925ff104aff5bf"
+      "bytes": 64240,
+      "sha256": "4c32deeef1faee9744c13914cfe9ebc49738007f5faf0860c1c1a656544c5a5e"
     },
     "result_auditor": {
       "path": "scripts/audit_gmr_result.py",
@@ -31,7 +31,7 @@
         "sha256": "a989edd8e0c9392d18bd0a439ed4f290f187a8f8daaaa049c992f79cb1d185da"
       },
       "package_init": {
-        "path": null,
+        "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/__init__.py",
         "bytes": 641,
         "sha256": "eb7a658704164e03cf182bc57f863c7dc01f87b49c463cecc5c2f3f5d58b5502"
       },
@@ -41,34 +41,34 @@
         "sha256": "2737f47207eb7298e747907ea2d11355d1280b680bc4e0fbce3080657e505de2"
       },
       "motion_retarget": {
-        "path": null,
+        "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/motion_retarget.py",
         "bytes": 20549,
         "sha256": "67de733e0114794d901c298a49bcb1cfda7bf03a833394766284a01eacc52c5f"
       },
       "params": {
-        "path": null,
+        "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/params.py",
         "bytes": 4963,
         "sha256": "7c5a7a9bff70dd9826a41dbc80ec6d5342a1ded77b735558345203633f32e901"
       },
       "kinematics_model": {
-        "path": null,
+        "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/kinematics_model.py",
         "bytes": 10910,
         "sha256": "f4b69a6876cfc967383555cc82220077f768a8246eac5ae6d29e680ae9bdb1b1"
       },
       "robot_motion_viewer": {
-        "path": null,
-        "bytes": null,
-        "sha256": null
+        "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/robot_motion_viewer.py",
+        "bytes": 5846,
+        "sha256": "6d5ee44d80de6e411bc0a7fc9c2ca162cabc597d21a8c747e1045c3c6accc991"
       },
       "data_loader": {
-        "path": null,
-        "bytes": null,
-        "sha256": null
+        "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/data_loader.py",
+        "bytes": 673,
+        "sha256": "48d2857fe856124509295a57678655c6301e1e36d0109bf15962b648ff61c635"
       },
       "neck_retarget": {
-        "path": null,
-        "bytes": null,
-        "sha256": null
+        "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/neck_retarget.py",
+        "bytes": 2023,
+        "sha256": "dfc439e5244ee2bb1cc5358fd1f3f35a20740696eb4844fe6b51733212382886"
       },
       "neutral_smplx_model": {
         "path": "/workspace/franco/motion_work/GMR/assets/body_models/smplx/SMPLX_NEUTRAL.npz",
@@ -81,7 +81,7 @@
         "sha256": "242235f5a0ef0b2b134cdf4c2514b39c04f8d70dc8cac6ca8781c6b7d40b68ca"
       },
       "smplx_to_a3_mapping": {
-        "path": null,
+        "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/ik_configs/smplx_to_a3.json",
         "bytes": 3581,
         "sha256": "262b398629183f9f861d4780fa5ac5308bed5d851e62f365ff369cc39854a011"
       }
@@ -91,10 +91,272 @@
       "semantic": "checkpoint_free_optimization_converter; GVHMR inference is already frozen in each input PT",
       "evidence": "bound converter/import closure has no checkpoint CLI argument or runtime checkpoint read"
     },
-    "retarget_joint_order": [],
-    "retarget_body_order": [],
-    "retarget_foot_site_mapping": null,
-    "joint_bijection_to_canonical": []
+    "retarget_joint_order": [
+      "waist_yaw_joint",
+      "waist_roll_joint",
+      "waist_pitch_joint",
+      "head_yaw_joint",
+      "head_pitch_joint",
+      "left_shoulder_pitch_joint",
+      "left_shoulder_roll_joint",
+      "left_shoulder_yaw_joint",
+      "left_elbow_joint",
+      "left_wrist_roll_joint",
+      "left_wrist_pitch_joint",
+      "left_wrist_yaw_joint",
+      "right_shoulder_pitch_joint",
+      "right_shoulder_roll_joint",
+      "right_shoulder_yaw_joint",
+      "right_elbow_joint",
+      "right_wrist_roll_joint",
+      "right_wrist_pitch_joint",
+      "right_wrist_yaw_joint",
+      "left_hip_pitch_joint",
+      "left_hip_roll_joint",
+      "left_hip_yaw_joint",
+      "left_knee_joint",
+      "left_ankle_pitch_joint",
+      "left_ankle_roll_joint",
+      "right_hip_pitch_joint",
+      "right_hip_roll_joint",
+      "right_hip_yaw_joint",
+      "right_knee_joint",
+      "right_ankle_pitch_joint",
+      "right_ankle_roll_joint"
+    ],
+    "retarget_body_order": [
+      "pelvis_link",
+      "waist_yaw_Link",
+      "waist_roll_Link",
+      "torso_Link",
+      "head_yaw_Link",
+      "head_pitch_Link",
+      "left_shoulder_pitch_Link",
+      "left_shoulder_roll_Link",
+      "left_shoulder_yaw_Link",
+      "left_elbow_Link",
+      "left_wrist_roll_Link",
+      "left_wrist_pitch_Link",
+      "left_wrist_yaw_Link",
+      "right_shoulder_pitch_Link",
+      "right_shoulder_roll_Link",
+      "right_shoulder_yaw_Link",
+      "right_elbow_Link",
+      "right_wrist_roll_Link",
+      "right_wrist_pitch_Link",
+      "right_wrist_yaw_Link",
+      "left_hip_pitch_Link",
+      "left_hip_roll_Link",
+      "left_hip_yaw_Link",
+      "left_knee_Link",
+      "left_ankle_pitch_Link",
+      "left_ankle_roll_Link",
+      "right_hip_pitch_Link",
+      "right_hip_roll_Link",
+      "right_hip_yaw_Link",
+      "right_knee_Link",
+      "right_ankle_pitch_Link",
+      "right_ankle_roll_Link"
+    ],
+    "retarget_site_inventory": [],
+    "retarget_foot_site_absence": {
+      "left": {
+        "site": "left_foot",
+        "absent": true
+      },
+      "right": {
+        "site": "right_foot",
+        "absent": true
+      }
+    },
+    "joint_bijection_to_canonical": [
+      {
+        "gmr_dof_index": 0,
+        "gmr_joint": "waist_yaw_joint",
+        "canonical_qpos_index": 7,
+        "canonical_joint": "waist_yaw_joint"
+      },
+      {
+        "gmr_dof_index": 1,
+        "gmr_joint": "waist_roll_joint",
+        "canonical_qpos_index": 8,
+        "canonical_joint": "waist_roll_joint"
+      },
+      {
+        "gmr_dof_index": 2,
+        "gmr_joint": "waist_pitch_joint",
+        "canonical_qpos_index": 9,
+        "canonical_joint": "waist_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 3,
+        "gmr_joint": "head_yaw_joint",
+        "canonical_qpos_index": 10,
+        "canonical_joint": "head_yaw_joint"
+      },
+      {
+        "gmr_dof_index": 4,
+        "gmr_joint": "head_pitch_joint",
+        "canonical_qpos_index": 11,
+        "canonical_joint": "head_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 5,
+        "gmr_joint": "left_shoulder_pitch_joint",
+        "canonical_qpos_index": 12,
+        "canonical_joint": "left_shoulder_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 6,
+        "gmr_joint": "left_shoulder_roll_joint",
+        "canonical_qpos_index": 13,
+        "canonical_joint": "left_shoulder_roll_joint"
+      },
+      {
+        "gmr_dof_index": 7,
+        "gmr_joint": "left_shoulder_yaw_joint",
+        "canonical_qpos_index": 14,
+        "canonical_joint": "left_shoulder_yaw_joint"
+      },
+      {
+        "gmr_dof_index": 8,
+        "gmr_joint": "left_elbow_joint",
+        "canonical_qpos_index": 15,
+        "canonical_joint": "left_elbow_joint"
+      },
+      {
+        "gmr_dof_index": 9,
+        "gmr_joint": "left_wrist_roll_joint",
+        "canonical_qpos_index": 16,
+        "canonical_joint": "left_wrist_roll_joint"
+      },
+      {
+        "gmr_dof_index": 10,
+        "gmr_joint": "left_wrist_pitch_joint",
+        "canonical_qpos_index": 17,
+        "canonical_joint": "left_wrist_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 11,
+        "gmr_joint": "left_wrist_yaw_joint",
+        "canonical_qpos_index": 18,
+        "canonical_joint": "left_wrist_yaw_joint"
+      },
+      {
+        "gmr_dof_index": 12,
+        "gmr_joint": "right_shoulder_pitch_joint",
+        "canonical_qpos_index": 19,
+        "canonical_joint": "right_shoulder_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 13,
+        "gmr_joint": "right_shoulder_roll_joint",
+        "canonical_qpos_index": 20,
+        "canonical_joint": "right_shoulder_roll_joint"
+      },
+      {
+        "gmr_dof_index": 14,
+        "gmr_joint": "right_shoulder_yaw_joint",
+        "canonical_qpos_index": 21,
+        "canonical_joint": "right_shoulder_yaw_joint"
+      },
+      {
+        "gmr_dof_index": 15,
+        "gmr_joint": "right_elbow_joint",
+        "canonical_qpos_index": 22,
+        "canonical_joint": "right_elbow_joint"
+      },
+      {
+        "gmr_dof_index": 16,
+        "gmr_joint": "right_wrist_roll_joint",
+        "canonical_qpos_index": 23,
+        "canonical_joint": "right_wrist_roll_joint"
+      },
+      {
+        "gmr_dof_index": 17,
+        "gmr_joint": "right_wrist_pitch_joint",
+        "canonical_qpos_index": 24,
+        "canonical_joint": "right_wrist_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 18,
+        "gmr_joint": "right_wrist_yaw_joint",
+        "canonical_qpos_index": 25,
+        "canonical_joint": "right_wrist_yaw_joint"
+      },
+      {
+        "gmr_dof_index": 19,
+        "gmr_joint": "left_hip_pitch_joint",
+        "canonical_qpos_index": 26,
+        "canonical_joint": "left_hip_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 20,
+        "gmr_joint": "left_hip_roll_joint",
+        "canonical_qpos_index": 27,
+        "canonical_joint": "left_hip_roll_joint"
+      },
+      {
+        "gmr_dof_index": 21,
+        "gmr_joint": "left_hip_yaw_joint",
+        "canonical_qpos_index": 28,
+        "canonical_joint": "left_hip_yaw_joint"
+      },
+      {
+        "gmr_dof_index": 22,
+        "gmr_joint": "left_knee_joint",
+        "canonical_qpos_index": 29,
+        "canonical_joint": "left_knee_joint"
+      },
+      {
+        "gmr_dof_index": 23,
+        "gmr_joint": "left_ankle_pitch_joint",
+        "canonical_qpos_index": 30,
+        "canonical_joint": "left_ankle_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 24,
+        "gmr_joint": "left_ankle_roll_joint",
+        "canonical_qpos_index": 31,
+        "canonical_joint": "left_ankle_roll_joint"
+      },
+      {
+        "gmr_dof_index": 25,
+        "gmr_joint": "right_hip_pitch_joint",
+        "canonical_qpos_index": 32,
+        "canonical_joint": "right_hip_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 26,
+        "gmr_joint": "right_hip_roll_joint",
+        "canonical_qpos_index": 33,
+        "canonical_joint": "right_hip_roll_joint"
+      },
+      {
+        "gmr_dof_index": 27,
+        "gmr_joint": "right_hip_yaw_joint",
+        "canonical_qpos_index": 34,
+        "canonical_joint": "right_hip_yaw_joint"
+      },
+      {
+        "gmr_dof_index": 28,
+        "gmr_joint": "right_knee_joint",
+        "canonical_qpos_index": 35,
+        "canonical_joint": "right_knee_joint"
+      },
+      {
+        "gmr_dof_index": 29,
+        "gmr_joint": "right_ankle_pitch_joint",
+        "canonical_qpos_index": 36,
+        "canonical_joint": "right_ankle_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 30,
+        "gmr_joint": "right_ankle_roll_joint",
+        "canonical_qpos_index": 37,
+        "canonical_joint": "right_ankle_roll_joint"
+      }
+    ]
   },
   "a3_robot_contract": {
     "canonical_mjcf": {
@@ -213,15 +475,20 @@
     "warmup_max_rounds": 200,
     "timeout_seconds_per_asset": 900,
     "python_environment": {
-      "executable": null,
-      "executable_bytes": null,
+      "executable": "/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10",
+      "executable_bytes": 17331920,
       "executable_sha256": "dd9eb3366f895f5ed70ae0240dda1956269448cfbd270092aee9a65de55caa55",
       "version": "Python 3.10.20",
-      "pip_version": null,
+      "pip_version": "pip 26.1.2 from /workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/pip (python 3.10)",
       "pip_freeze_command": "python -m pip freeze --all",
       "pip_freeze_normalization": "strip nonempty lines; bytewise sort; join LF; append one LF; sha256",
       "pip_freeze_sha256": "97c660095745b1057e25763f28ed9fd7c9af09f65b226fdefced66b4896a18ff",
-      "xrobot_utils_resolution": null
+      "xrobot_utils_resolution": {
+        "status": "absent",
+        "origin": null,
+        "bytes": null,
+        "sha256": null
+      }
     },
     "required_imports": ["numpy", "torch", "mujoco", "smplx", "scipy"],
     "converter_argv_template": [
@@ -234,94 +501,5 @@
       "--save_path",
       "{output}"
     ]
-  },
-  "closure_evidence_receipt": {
-    "capture_path": "/private/tmp/pod_network_exam_gmr_evidence_20260714.md",
-    "bytes": 5621,
-    "sha256": "32c90a8882be02e5bd7260a8531f1cc0c5b212e88663c3f5e3a7a8aec13c8236",
-    "audit_utc": "2026-07-13T16:08:48Z/2026-07-13T16:28:00Z",
-    "read_only": true
-  },
-  "required_unresolved_evidence": [
-    {
-      "json_pointer": "/ignored_gmr_source/runtime_files/package_init/path",
-      "reason": "receipt bound bytes and SHA but omitted the absolute source path",
-      "next_read_only_probe": "realpath the imported general_motion_retargeting package __init__.py"
-    },
-    {
-      "json_pointer": "/ignored_gmr_source/runtime_files/motion_retarget/path",
-      "reason": "receipt bound bytes and SHA but omitted the absolute source path",
-      "next_read_only_probe": "resolve general_motion_retargeting.motion_retarget.__file__"
-    },
-    {
-      "json_pointer": "/ignored_gmr_source/runtime_files/params/path",
-      "reason": "receipt bound bytes and SHA but omitted the absolute source path",
-      "next_read_only_probe": "resolve general_motion_retargeting.params.__file__"
-    },
-    {
-      "json_pointer": "/ignored_gmr_source/runtime_files/kinematics_model/path",
-      "reason": "receipt bound bytes and SHA but omitted the absolute source path",
-      "next_read_only_probe": "resolve general_motion_retargeting.kinematics_model.__file__"
-    },
-    {
-      "json_pointer": "/ignored_gmr_source/runtime_files/robot_motion_viewer",
-      "reason": "eager package import was observed but no exact path, bytes or SHA was returned",
-      "next_read_only_probe": "resolve and hash general_motion_retargeting.robot_motion_viewer.__file__"
-    },
-    {
-      "json_pointer": "/ignored_gmr_source/runtime_files/data_loader",
-      "reason": "eager package import was observed but no exact path, bytes or SHA was returned",
-      "next_read_only_probe": "resolve and hash general_motion_retargeting.data_loader.__file__"
-    },
-    {
-      "json_pointer": "/ignored_gmr_source/runtime_files/neck_retarget",
-      "reason": "eager package import was observed but no exact path, bytes or SHA was returned",
-      "next_read_only_probe": "resolve and hash general_motion_retargeting.neck_retarget.__file__"
-    },
-    {
-      "json_pointer": "/ignored_gmr_source/runtime_files/smplx_to_a3_mapping/path",
-      "reason": "receipt bound bytes and SHA but omitted the absolute mapping path",
-      "next_read_only_probe": "resolve the agibot_a3 mapping path selected by params.py"
-    },
-    {
-      "json_pointer": "/ignored_gmr_source/retarget_joint_order",
-      "reason": "direct retarget XML parser output was truncated; tracked runtime order is not a substitute",
-      "next_read_only_probe": "emit compact canonical JSON from direct a3_mocap.xml preorder parsing"
-    },
-    {
-      "json_pointer": "/ignored_gmr_source/retarget_body_order",
-      "reason": "direct retarget XML parser output was truncated; canonical model body order is not a substitute",
-      "next_read_only_probe": "emit compact canonical JSON from direct a3_mocap.xml preorder parsing"
-    },
-    {
-      "json_pointer": "/ignored_gmr_source/retarget_foot_site_mapping",
-      "reason": "direct retarget XML site name, parent and local position were truncated",
-      "next_read_only_probe": "emit left/right foot site name, parent body and local pos from direct a3_mocap.xml parsing"
-    },
-    {
-      "json_pointer": "/ignored_gmr_source/joint_bijection_to_canonical",
-      "reason": "cannot freeze index-name bijection before direct retarget XML joint preorder is known",
-      "next_read_only_probe": "compare direct retarget XML joint preorder against tracked canonical A3 order"
-    },
-    {
-      "json_pointer": "/execution_contract/python_environment/executable",
-      "reason": "receipt bound Python version and binary SHA but omitted the exact executable path",
-      "next_read_only_probe": "emit sys.executable realpath from the exact successful motion environment"
-    },
-    {
-      "json_pointer": "/execution_contract/python_environment/executable_bytes",
-      "reason": "receipt bound Python binary SHA but omitted file size",
-      "next_read_only_probe": "stat the exact sys.executable regular file"
-    },
-    {
-      "json_pointer": "/execution_contract/python_environment/pip_version",
-      "reason": "receipt recorded pip 26.1.2 but not the full pip --version origin string",
-      "next_read_only_probe": "capture python -m pip --version verbatim"
-    },
-    {
-      "json_pointer": "/execution_contract/python_environment/xrobot_utils_resolution",
-      "reason": "package init attempts xrobot_utils but its resolved presence, origin or expected absence was not captured",
-      "next_read_only_probe": "record importlib.util.find_spec('xrobot_utils') origin or exact absent marker"
-    }
-  ]
+  }
 }

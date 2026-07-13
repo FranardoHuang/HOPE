@@ -566,15 +566,15 @@ in `configs/motion_exact_gmr_{s0,m0}_prereg_20260713.json`. The shared runtime
 contract additionally requires the ignored GMR commit **and tree OID**, exact
 `a3_mocap.xml`, exact SMPL-X-to-A3 mapping, neutral SMPL-X NPZ, recovery bundle,
 Python/pip closure and independently parsed retarget joint/body/site order. A
-2026-07-14 read-only receipt recovered the exact tree and most file/runtime
-hashes, but its direct XML body/site output was transport-truncated and several
-absolute paths/origins remain unknown. The exact 16-field follow-up is the
-`required_unresolved_evidence` array in
-`configs/motion_s0_m0_exact_gmr_runtime_20260713.json`; both batch-plan
-`static` calls deliberately fail rc=2 at that list and no GMR command is
-authorized. Once those fields are filled and reviewed, follow
-[`run_motion_s0_m0_exact_gmr.md`](run_motion_s0_m0_exact_gmr.md); never infer
-the ignored retarget body order from the tracked canonical vendor MJCF.
+2026-07-14 follow-up recovered all 16 exact file/runtime facts. Direct
+`a3_mocap.xml` has 31 hinge joints and 32 bodies in the separately bound order,
+but its site inventory is exactly empty and `left_foot/right_foot` are absent;
+never copy canonical vendor sites into that retarget inventory. Both batch-plan
+`static` calls now pass. Restore every absolute binding from
+`configs/motion_s0_m0_exact_gmr_runtime_20260713.json`, then follow
+[`run_motion_s0_m0_exact_gmr.md`](run_motion_s0_m0_exact_gmr.md) for the
+separate read-only runtime `inspect`; no `consume` is implied by source/static
+success.
 
 Ground exactly one accepted diagnostic GMR pickle with explicit no-clobber
 paths. The command below is the Franco forehand-block pilot shape; use each

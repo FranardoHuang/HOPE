@@ -393,14 +393,13 @@ commit/tree/bundle, converter/import/model closure, Python/pip, both retarget an
 joint/body orders, and an explicit 31-name/index qpos bijection. The canonical vendor A3 FK model is
 bound as a 76-file tree, including `left_foot/right_foot` site identity and local positions. `inspect`
 does not create an output root; `consume` publishes completion last. Focused unit coverage is
-`12 passed`; repository regression is `645 passed, 9 skipped`.
+`13 passed`; latest-main repository `tests/` regression is `851 passed, 10 skipped`.
 
-A 2026-07-14 read-only receipt recovered the exact GMR tree, retarget MJCF/mapping bytes and SHA,
-critical import SHA, Python binary SHA and normalized pip-freeze SHA. Direct retarget XML
-joint/body/site parser output was truncated, and several absolute import/Python paths remain
-unobserved. The two batch plans are preregistered, while the shared runtime keeps a machine-readable
-16-item `required_unresolved_evidence` list and remains
-`blocked_pending_exact_ignored_gmr_source_closure`. Both real `static` calls validate that receipt and
-then fail rc=2 at the same enumerated gaps. No GMR, FK result, schema-2, simulator, training or
-hardware ran; G04 remains `Partial`. See [the experiment](../experiments/motion_exact_gmr_s0_m0_20260713.md) and
+A 2026-07-14 follow-up recovered all 16 exact GMR source/runtime facts. Direct retarget XML binds
+31 hinges and 32 bodies but has an exactly empty site inventory; `left_foot/right_foot` are absent.
+The consumer now rejects copying canonical vendor sites into retarget evidence, while M0 stance FK
+continues to use the separately bound canonical model. The two batch plans and shared runtime are
+`preregistered_not_executed`, and both host `static` calls pass. No runtime `inspect/consume`, GMR,
+FK result, schema-2, simulator, training or hardware ran; G04 remains `Partial`. See
+[the experiment](../experiments/motion_exact_gmr_s0_m0_20260713.md) and
 [operation](../operations/run_motion_s0_m0_exact_gmr.md).
