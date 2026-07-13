@@ -40,8 +40,8 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 
 | ID | 问题 | 人类负责人 | 执行者 | 状态 | 证据 | 决定 |
 | --- | --- | --- | --- | --- | --- | --- |
-| [EXP-P1-FACE-PLANT-SCALEOUT](2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md) | 拍面×plant 广度矩阵哪些方向值得继续购买迭代？ | franco | Codex | running | E4（诊断） | 负责人运营裁剪 8 臂、保留 8 臂；不是 q10 正式判死或 setting 晋级 |
-| [EXP-P1-FRESH-SZ-STABILITY](2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 最接近正式 setting 的方案在不同 seed/checkpoint 间是否稳定？ | franco | Codex | blocked | model-2000：E4；model-4000：E1 启动门 | model-2000 稳定性失败；model-4000 持久监督器 source gate 已审绿，Linux smoke/job 未启动 |
+| [EXP-P1-FACE-PLANT-SCALEOUT](2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md) | 拍面×plant 广度矩阵哪些方向值得继续购买迭代？ | franco | Codex | completed/rejected | E4（诊断） | 16 臂已全部保留证据并停止；24/24 最近格的正手 signed composite=0，旧矩阵不能选 baseline |
+| [EXP-P1-FRESH-SZ-STABILITY](2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 最接近正式 setting 的方案在不同 seed/checkpoint 间是否稳定？ | franco | Codex | completed/rejected | model-2000/4000：E4 diagnostic | 2k 与 4k 稳定性都失败；seed4 持续弱，旧 parsed 正手分被 signed-face 反例推翻 |
 | [EXP-P1-FACE-SIGN-FORENSIC](2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) | 高解析上台率是否隐去了拍面反号？ | franco | Codex | running | E4（诊断） | signed-face 诚实门未通过，不晋级旧分数 |
 | [EXP-P1-HISTORICAL-SCHEMA3](2026-07/EXP-P1-HISTORICAL-SCHEMA3.md) | 新尺子能否区分历史候选？ | franco | Codex | completed | E4（诊断） | 尺子通过，候选仍为 inexact |
 | [EXP-MUJOCO-NATIVE-TRAINING](2026-07/EXP-MUJOCO-NATIVE-TRAINING.md) | 原生 MuJoCo 微调能否减少留出集迁移损失？ | franco | Codex | blocked | E1 | off-main preflight 为 `NO-MERGE`；四个正确性缺口未修；无 trainer/backend/PPO |

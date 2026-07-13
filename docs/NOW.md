@@ -12,13 +12,15 @@
 - **当前仍在课程阶段 1：题目使用固定目标站位、固定击球位置和无旋正反手。** 来球速度会变化，
   policy 的下半身没有锁死；训练中动作可以不传送地重复，但这不等于连续不同来球。现有可信
   成绩只有每题重置的单拍，连续格仍未测。
-- 最接近正式目标的是从随机初始化训练到第 2000 次迭代的零关节摩擦配方。四个独立初始化在
-  每份 100 题中的解析合法落台数为 `83、100、100、20`，稳定性失败；正手拍面判分还可能把
-  反面判绿，因此旧高分只作诊断。
-- 当前成绩卡是 **Python BankExam 单拍解析诊断，不是 Gate3**。2026-07-13 没有新增可晋级的
-  仿真行为或真机成绩；fresh 广度池已完成一次运营裁剪：16 臂中 8 臂在保留并验证最新
-  checkpoint 后精确停止，另外 8 臂继续。它不改变 q10/q50 的科学判决规则。下一项会改变阶段 1
-  判断的证据仍是修正拍面正负判分后的同卷结果。
+- 最接近正式目标的零关节摩擦配方已在第 2000 与 4000 次迭代各跑完四个独立
+  初始化同卷。2k 为 `83、100、100、20`；4k 为 `50、88、98、0`，稳定性在两个
+  milestone 都失败。4k seed4 有 21 次物理 root fall，不是晚熟。
+- 当前成绩卡是 **Python BankExam 单拍解析诊断，不是 Gate3**。4k seed2/3 的旧分虽是
+  `88/98`，但正手 raw-A 法向误差为 `172.33°/174.35°`，signed composite 都是
+  `0/50`；这证明旧 scorer 的正手符号盲区，所以没有新 baseline 晋级。fresh 广度池
+  最近 24 个 K20 格子又全部正手 signed composite=0，因此 16 臂已分两波全部保留证据并
+  停止；这不改写 q10/q50 合同。下一项会改变阶段 1
+  判断的证据是 `n/-n` 负控、修正 signed-face scorer 后的同卷结果。
 - 部署侧的 planner-policy exact tuple 源码已通过 portable Release 和 latest-main 本地回归；
   这解决了同 tick base/target 因果配对与源码可构建问题，但 ROS/Jazzy/AimRT、backend first tick、
   厂商 MuJoCo 行为和真机仍未运行。
@@ -86,7 +88,8 @@ policy 输出 31 个关节目标，PPO 根据 Reward 改进它，独立考卷再
 
 - **文件和接口对得上。** 当前动作、训练/考试题、179 维排列、checkpoint 和导出合同已经做
   内容绑定，不一致就拒绝继续；但合同一致只说明文件对上，不说明物理对上。
-- **判分不骗人。** 当前正手原始拍面误差约 171–173°，旧解析判分器又会自动翻转法向。通过条件
+- **判分不骗人。** 2k/4k 的正手原始拍面误差多在 165–174°，旧解析判分器又会
+  自动翻转法向；4k 已出现 parsed `48/50` 但 signed composite `0/50` 的同 checkpoint 反例。通过条件
   是 `n/-n` 负控得到不同结果、保留有符号误差，并重跑同一考卷。详见
   [拍面判分复核](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)。
 - **机器人物理能外推。** 当前零关节摩擦只便于复现；历史非零摩擦数字存在单位/语义问题。
@@ -211,12 +214,24 @@ policy 输出 31 个关节目标，PPO 根据 Reward 改进它，独立考卷再
 - 正手 66.5% 低于约 80% 的正式候选目标；反手平均 85% 也因最差初始化只有 40% 且拍面尺有问题
   不能晋级。当前也没有可信的拍面 p90、毕业用落点误差或连续成绩。
 
-第 4000 次迭代的后续卷尚无新行为结果，详见
-[稳定性实验](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)。
+第 4000 次迭代的后续卷已完成：
 
-2026-07-13 的运行态是：formal `SZ` seed1/2/4 与五条反复塌陷的诊断臂已按负责人运营决定停止，
-formal seed3 和七条诊断臂继续。停止前均保留 finite、schema-3、fresh-lineage checkpoint，并只向
-各自登记 PGID 发信号。该动作释放算力，不构成 q10 正式判死、setting 晋级或新成绩；完整曲线、
+| Seed | 解析合法落台 | 正手 / 反手 | 正手 signed composite | 物理 root fall |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | `50/100` | `0/50` / `50/50` | `0/50` | 0 |
+| 2 | `88/100` | `38/50` / `50/50` | `0/50` | 0 |
+| 3 | `98/100` | `48/50` / `50/50` | `0/50` | 0 |
+| 4 | `0/100` | `0/50` / `0/50` | 无正手 strike | 21 |
+
+稳定门的 median/worst/spread/worst-side 全失败；详见
+[稳定性实验](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)。这张表同时说明为什么不能只看
+旧解析落台数选 seed。
+
+2026-07-13 的运行态是：16 条 fresh 广度臂已分两波全部按负责人运营决定停止。第二波前
+重验最新 checkpoint 的迭代、76 tensor/`1,762,715` 浮点值 finite、schema-3、fresh lineage 和
+相邻合同 SHA，且确认 24/24 最近 K20 格的正手 signed composite 都为 0。只向各自登记
+PGID 发信号，无 broad kill/judge/真机命令；两 Pod GPU 已空。该动作不构成 q10 阈值正式判死或
+setting 晋级；完整曲线、
 checkpoint SHA 与信号边界见
 [拍面×plant 广度矩阵](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md)。
 
@@ -307,17 +322,13 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 
 - **[1｜P0] 拍面正反与解析判分。** 责任人 franco；执行者 Codex；下一证据：同卷有符号拍面表、
   `n/-n` 负控和修正后结果。[实验](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)
-- **[4｜P0] 第 4000 次迭代四初始化后续卷。** 责任人 franco；执行者 Codex；持久监督器 source gate
-  已独立审绿，下一证据是 Linux fake-runner 冒烟后，用停止前已内容绑定的四份 checkpoint 完成
-  同一张 100 题卷；trainer 停止不改变这份卷的输入。
-  [实验](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)
 
 ### 部署验证
 
 - **[2｜P0] 当前 179 维模型的 Gate3-D0 单拍全链。** 责任人 franco；执行者 Codex；exact source/build
   前置已闭合，下一证据是固定同卷完成 owned planner → C++ runner → 厂商 MuJoCo 的首个 no-publish
   有效周期和行为记录。[实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md)
-- **[8｜P1] Gate3 历史谱系复核。** 责任人 yikang；执行者 direct；下一证据：排除观测排列和
+- **[7｜P1] Gate3 历史谱系复核。** 责任人 yikang；执行者 direct；下一证据：排除观测排列和
   击球平面混杂后的同运行链对照。
 
 ### 训练引擎与机器人物理
@@ -327,12 +338,12 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 
 ### 阶段 2、连续能力与动作
 
-- **[5｜P1] 变到达状态的动作适配与可行性门。** 责任人 franco；执行者 Codex；下一证据：动作
+- **[4｜P1] 变到达状态的动作适配与可行性门。** 责任人 franco；执行者 Codex；下一证据：动作
   合同、离线安全、桌网余隙和厂商 MuJoCo 动力学同过。[旧动作实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)；
   [新动作设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md)
-- **[6｜P1] 等待/恢复结构卷。** 责任人 franco；执行者 Codex；下一证据：同步机器合同后，用冻结
+- **[5｜P1] 等待/恢复结构卷。** 责任人 franco；执行者 Codex；下一证据：同步机器合同后，用冻结
   Reward 跑 `T0/T1` 配对连续卷。[实验](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md)
-- **[7｜P1] Hitter V3 规划器—policy 输入对齐。** 责任人 jiayi；执行者 direct；下一证据：旧观测
+- **[6｜P1] Hitter V3 规划器—policy 输入对齐。** 责任人 jiayi；执行者 direct；下一证据：旧观测
   排列、训练第 24100 次迭代 checkpoint 归属和第 7 版击球平面三项来源对齐。
 
 队列排序与算力规则见[跑批作战手册](runbook.md#统一队列排序与算力纪律)。完整实验索引只在

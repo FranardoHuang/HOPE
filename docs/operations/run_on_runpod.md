@@ -179,8 +179,13 @@ kill -KILL -- "-$PGID"
 ```
 
 严禁 `pkill`、`killall`、`pgrep -f` 后批量发信号或任何 broad pattern kill。真实机器人进程不在本节
-授权范围内。2026-07-13 的 8 臂实际记录见
+授权范围内。2026-07-13 分两波停止全部 16 条 fresh 广度臂的实际记录见
 [Phase-1 拍面×plant 广度实验](../experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md)。
+第二波额外产出并入库两份 no-clobber pre-stop audit，绑定进程组成员、launch/log SHA、
+最新 checkpoint 迭代/SHA/finite 与 checkpoint↔相邻合同。TERM 未退出时，只在 Kit lock
+无 holder、进程组只含 trainer/git helper 后向同一 exact PGID 发 KILL。两 Pod 最终
+无 trainer、GPU 0 MiB/0%，train/eval checkout 仍 clean exact。与已停 trainer 对应的四个等待型
+fresh curve worker 在 childless/lock-free 复核后也只按各自 PGID TERM 退出。
 
 ## Hard Rules (summary — full list in the pod README)
 

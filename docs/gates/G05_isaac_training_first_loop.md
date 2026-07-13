@@ -1350,8 +1350,9 @@ G05 remains `Partial`.
 
 负责人明确批准把已显示持续塌陷的 fresh 运行停止，以便把算力换给
 [NOW 唯一队列](../NOW.md#统一工作队列唯一优先级账本)中更靠前且前置已满足的工作。16 条
-fresh 广度臂中精确停止 8 条：formal `SZ` seed1/2/4，以及诊断格 `SP` seed1/4、`LZ` seed1、
-`LP` seed1/2；其余 8 条继续运行。详细 q10 曲线、已知 q50、PGID、最后 checkpoint 与 SHA 见
+fresh 广度臂中首先精确停止 8 条：formal `SZ` seed1/2/4，以及诊断格 `SP` seed1/4、`LZ` seed1、
+`LP` seed1/2；其余 8 条当时继续，后来按本节下方的 signed-face 取证再停止。详细 q10 曲线、
+已知 q50、PGID、最后 checkpoint 与 SHA 见
 [拍面×plant 广度实验](../experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md)。
 
 这是负责人在结果出现后作出的**算力运营决定**，不是发射前预注册的统计停止规则。历史 manifest
@@ -1366,3 +1367,28 @@ seed”，不得隐藏已停止 seed，也不得用它给任何 setting 晋级�
 向 worker/judge 或真机发信号。formal 四 seed 的 model-4000 checkpoint 早已内容绑定并通过
 readiness，所以已准备 K100 后续卷输入不变。这个运行处置不新增质量成绩，也不关闭训练稳定性、
 signed-face 或连续能力门；G05 保持 `Partial`。
+
+model-4000 与剩余臂的 signed 切面随后使这个运营决定扩展到全部 16 臂：剩余臂最近
+24/24 K20 格的正手 signed composite 均为 0，无论 shared 还是 legacy face 都不分离。第二波
+也在 no-clobber checkpoint/log/contract 审计后只按精确 PGID 停止；两 Pod 无 trainer、GPU 已空。
+这仍是负责人事后算力决定，不是 q10 阈值的预注册 stop rule。详见
+[广度实验](../experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md)。
+
+### 2026-07-13 model-4000 四 seed matched q50 稳定性失败
+
+已准备的 fresh `SZ model_4000` 同卷在 Linux fake-runner 冒烟后，经过内容绑定的一次性
+supervisor 在两 Pod 完成 seed1→3 与 seed2→4 串行判卷。两份 Pod result 均为
+`terminal_result_validated`，最终无残留 supervisor/child judge/q50 Kit-lock holder。正式
+aggregate file/content SHA 为 `1ba88e39...d195` / `226e6050...648d`，独立 canonical 复算通过。
+
+四 seed 旧 parsed return 为 `.50/.88/.98/.00`，median `.69 < .75`，worst `.00 < .65`，
+spread `.98 > .20`，minimum-side `.00 < .50`，四项冻结门全失败。seed4 为
+`0/100`且有 21 次 `fall_root_z`，因此归类为“持续弱到 4k”而非晚熟。该失衡是
+seed4 特定结果，其他三 seed 物理 root fall 为 0。
+
+同一结果又证明旧解析分不能作 baseline selector：seed2/3 正手 raw-A signed normal 误差
+`172.33°/174.35°`，signed strike composite 都是 `0/50`，但 parsed return 仍为
+`38/50` 与 `48/50`。所以不会晋级最佳 seed，也不再用相同 `SZ` 续训买晋级证据；
+下一步是 `n/-n` 负控、signed-face scorer 修正和同卷复判。这仍是每题重置的
+Python BankExam，不是 physical ball、连续恢复或厂商 Gate3/Gate3B；G05 保持 `Partial`。
+详细证据见 [Fresh SZ 稳定性实验](../experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)。

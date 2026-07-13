@@ -13,11 +13,19 @@
 
 ## 2026-07-13
 
-- Phase-1 fresh 广度池完成一次负责人批准的运营裁剪：16 臂中 8 臂在保留日志并验证最后
+- Fresh `SZ model_4000` 四 seed 同一 K100 已通过 Linux fake-runner 冒烟、两 Pod 一次性持久
+  启动和正式 aggregate 完成：`50/88/98/0`，median `.69`、worst `.00`、spread `.98`、
+  worst-side `.00`，四项稳定门全失败；seed4 有 21 次 root fall，判为持续弱而非晚熟。
+  seed2/3 正手 parsed `38/50,48/50` 但 signed composite 均 `0/50`，法向误差
+  `172.33°/174.35°`，所以旧高分不晋级。aggregate file/content SHA 为
+  `1ba88e39...d195` / `226e6050...648d`；详见
+  [稳定性实验](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)。
+- Phase-1 fresh 广度池分两波完成负责人批准的运营收口：16 臂已全部在保留日志并验证最后
   checkpoint 的迭代、`1,762,715` 个浮点元素 finite、schema-3、fresh lineage 与相邻合同 SHA 后，
-  只按各自登记 PGID 停止；8 臂继续。TERM 未退出时仅在确认无 live child/Kit-lock holder 后对同一
+  只按各自登记 PGID 停止。第二波前又确认 24/24 最近 K20 格的正手 signed composite 都为 0；
+  TERM 未退出时仅在确认无 live child/Kit-lock holder 后对同一
   exact PGID 使用 KILL，没有 broad kill、worker/judge 信号或真机命令。这不是预注册 q10/q50
-  停止结论，旧 `screen_only`/`whole_arm_stop_allowed=false` 语义不变；完整曲线、PGID 和 checkpoint
+  阈值停止结论，旧 `screen_only`/`whole_arm_stop_allowed=false` 语义不变；完整曲线、PGID 和 checkpoint
   SHA 见[拍面×plant 广度实验](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md)。
 - exact planner-policy tuple 源码已在 latest-main 集成候选中闭合：23 项有效源码/配置逐字节匹配
   `c0a8e46`，portable Release 为 focused `40/40`、native `233 passed + 5 optional skips`，主线本地

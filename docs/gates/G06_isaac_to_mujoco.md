@@ -1211,8 +1211,9 @@ not deployed, and no MuJoCo judge or score ran. It therefore closes neither the 
 
 ### 2026-07-13 Phase-1 trainer 裁剪不改变 MuJoCo 证据门
 
-16 条 fresh 广度臂中的 8 条已按负责人后续运营决定精确停止并保留最新 finite、schema-3、
-fresh-lineage checkpoint；8 条继续。formal `SZ` seed1/2/4 trainer 虽已停止，但 model-4000
+16 条 fresh 广度臂中的前 8 条已按负责人后续运营决定精确停止并保留最新 finite、schema-3、
+fresh-lineage checkpoint；其余 8 条在后续 signed-face 取证后也已停止。formal `SZ` seed1/2/4 trainer
+虽在首波停止，但 model-4000
 四 seed checkpoint 在此之前已经通过 all-four readiness 并进入两 Pod 的
 `prepared_not_started` K100 runtime contract，因此后续 matched q50 输入没有变化。
 
@@ -1220,3 +1221,26 @@ fresh-lineage checkpoint；8 条继续。formal `SZ` seed1/2/4 trainer 虽已停
 q50 `whole_arm_stop_allowed=false` 合同。停止运行不能替代 signed-face 诚实门、同一 checkpoint
 跨引擎归因、厂商 runtime `Gate3/Gate3B` 或标定 plant。运行与证据边界详见
 [拍面×plant 广度实验](../experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md)；G06 保持 `Partial`。
+
+model-4000 取证后，剩余 8 臂的最近 24 个 K20 格又全部出现正手 signed composite=0，
+法向误差 `164.4°–175.2°`，而 parsed return 可达 1.0。负责人因此批准第二波精确停臂；
+现在 16 条 fresh 广度 trainer 均已保留证据并停止，无残留 judge/Kit 且两 Pod GPU 为空。
+这只使得“修 signed-face 后再训”成为明确顺序，不会关闭跨引擎或 Gate3/Gate3B；G06 保持
+`Partial`。
+
+### 2026-07-13 model-4000 matched q50 结果与拍面仪器失真
+
+内容绑定的 Linux supervisor 冒烟、两 Pod 判卷和单次 aggregate 已完成。Pod1/Pod2 result
+file SHA 为 `02d0e58d...645d` / `d31323a6...4e6f`；aggregate file/content SHA 为
+`1ba88e39...d195` / `226e6050...648d`。四 seed parsed rate `.50/.88/.98/.00` 使预注册稳定门
+的 median/worst/spread/worst-side 四项全失败，seed4 为 21 次物理 root fall 且 `0/100`，
+因此不支持 4k 晚熟。
+
+这份卷更重要的 G06 证据是同 checkpoint 内部的仪器矛盾：seed2/3 解析正手 return
+`38/50` / `48/50`，但 raw-A 有符号法向差 `172.33°/174.35°`，位置+速度+法向复合
+命中均为 `0/50`。因此旧 `orient_normal` 解析回台分已被实证为正手符号盲区，
+不得作为跨引擎或部署晋级证据。需先用 `n/-n` 负控修表、重跑同卷，再以同一
+checkpoint 进行 kinematic replay → open-loop action → external-observation closed-loop → native
+closed-loop 归因。该 Python BankExam 仍不是 Agibot vendor Gate3/Gate3B runtime，所以 G06 保持
+`Partial`。详见 [稳定性实验](../experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) 和
+[拍面符号取证](../experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)。

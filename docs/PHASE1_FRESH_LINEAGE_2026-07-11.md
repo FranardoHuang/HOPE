@@ -589,9 +589,11 @@ plant claim. See `docs/research/phase1_plant_semantics_repair_2026-07-11.md` and
 After q50 and repeated q10 milestones were available, franco explicitly approved stopping clearly
 collapsed runs so the released GPUs could take higher-priority work. This post-result operational
 decision stopped formal `SZ` seed1/2/4 and diagnostic `SP` seed1/4, `LZ` seed1, `LP` seed1/2.
-Formal `SZ` seed3 and seven diagnostic arms remain live. It is not a preregistered statistical stop,
-does not change q10 `screen_only=true`, and does not rewrite either model-2000 or model-4000 q50
-`whole_arm_stop_allowed=false`.
+Formal `SZ` seed3 and seven diagnostic arms initially remained live. After the model-4000 paper and
+a read-only review of their latest 24 K20 cells showed forehand signed composite `0` in every cell,
+franco approved a second operational wave stopping those remaining eight as well. This is not a
+preregistered K20 statistical stop, does not change q10 `screen_only=true`, and does not rewrite
+either model-2000 or model-4000 q50 `whole_arm_stop_allowed=false`.
 
 Before each exact-PGID signal, the latest checkpoint/log/adjacent contract were retained and
 verified for filename/embedded iteration equality, 1,762,715 finite floating elements, schema 3,
@@ -600,6 +602,16 @@ no live child or Kit-lock holder did the operator send KILL to the same recorded
 pattern signal, worker/judge signal, checkout mutation or real-robot command occurred. Full PGID,
 checkpoint SHA and curve evidence is in
 [`EXP-P1-FACE-PLANT-SCALEOUT`](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md).
+
+Before the second wave, two no-clobber audits revalidated all eight current process groups, latest
+checkpoint filename/embedded iteration, 76 tensors with 1,762,715 finite floating elements,
+schema-3/fresh lineage and embedded-to-adjacent contract SHA. Their file SHAs are
+`aca8e4f4...f5a3` and `773940ac...7b86`. TERM was ignored; after proving each group contained only
+its trainer/git helpers and the Kit lock had no holder, only PGIDs
+`1348951/1349699/1353018/1354525` and `177630/179908/181685/182286` received KILL. All disappeared;
+both Pods returned to zero GPU use with clean exact train/eval checkouts. Four now-useless,
+childless fresh curve workers then exited by exact-PGID TERM. No broad signal, new judge, checkout
+mutation or robot command occurred.
 
 ## Remaining Gates
 
@@ -621,13 +633,44 @@ distinguish delayed learning from persistent seed sensitivity. A separate 2026-0
 later stopped seed1/2/4 while preserving their checkpoints; this was not authorized by, and does not
 rewrite, the q50 paper. This failure does not close plant, continuous, Gate 3, deploy, or robot gates.
 
-1. Keep the 8 remaining live fresh arms and all live cadence workers under exact-PGID monitoring;
-   retain the 12 terminal and 8 operationally stopped run artifacts; do not fast-forward either
-   frozen training checkout while a local arm is alive.
-2. Finish the pre-registered checkpoint curves. Compare old/S1 only within the same family, seed and
-   milestone; preserve peak checkpoints as well as terminal checkpoints.
-3. Verify every promoted checkpoint's iteration, sidecar SHA binding, lineage flag and finite parameters.
-4. Export causal checkpoints as diagnostic and the fresh `SZ` target seeds as formal candidates, then
-   run the same immutable exam schedule in Isaac and MuJoCo. A legacy resume/pairing can never be promoted.
-5. Add completion/result hashes here and to G05/G06; only then decide whether an S1 guidance arm or
-   the separate `T0/T1` continuous-timing pair is warranted.
+### Four-seed exact model-4000 q50 stability result (2026-07-13)
+
+The unchanged K100 was consumed through the reviewed exact-once Linux supervisor after its
+fake-runner `/proc` smoke. Pod1 evaluated seed1 then seed3; Pod2 evaluated seed2 then seed4. Both
+results reached `terminal_result_validated`, and all supervisor/child-judge processes exited. The
+Pod result file/content SHAs are `02d0e58d...645d` / `7bb91fd0...f238` and
+`d31323a6...4e6f` / `eafd7b20...1899`.
+
+The single formal aggregate has file SHA `1ba88e39...d195` and content SHA
+`226e6050...648d`. Full-denominator parsed rates for seeds 1/2/3/4 are
+`.50/.88/.98/.00`; median `.69`, minimum `.00`, spread `.98` and minimum side `.00` all fail the
+unchanged stability thresholds. Seed4 has FH/BH=`0/50,0/50` and 21 physical `fall_root_z`
+terminations, so it is `persistent_weakness_through_model4000`, not delayed learning. The other
+three seeds have zero physical root falls; do not generalize seed4's balance failure to the family.
+
+The same bound result also invalidates the old parsed score as a promotion instrument. Seed2/3
+forehand parsed return is `38/50` / `48/50`, but raw-A signed normal error is
+`172.33 deg` / `174.35 deg` and signed position+velocity+normal composite success is `0/50` for
+both. Seed1 is directionally identical (`164.86 deg`, signed `0/50`). Therefore neither high parsed
+seed is a baseline candidate; the next evidence is an `n/-n` negative control, signed scorer repair
+and same-paper rerun. Checked-in immutable results are linked from
+[`EXP-P1-FRESH-SZ-STABILITY`](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md).
+
+The aggregate's frozen `continue_all_arms_unmodified` field only proves that the q50 contract owns
+no signal surface. It does not overwrite the separate human-owner resource disposition recorded
+above. This result still does not close physical-ball, continuous, calibrated-plant, Gate3,
+deployment or robot gates.
+
+1. Retain all terminal and 16 operationally stopped fresh artifacts plus both stop-audit records.
+   Both frozen checkouts are still clean/exact; do not reuse their paths for a new recipe without a
+   separate reviewed launch contract.
+2. Do not purchase another `SZ` seed/milestone as promotion evidence until the signed-face negative
+   control and corrected same-paper scorer are complete. Existing checkpoint curves remain
+   diagnostic and must retain peak as well as terminal artifacts.
+3. Verify every future candidate checkpoint's iteration, sidecar SHA binding, lineage flag and finite
+   parameters before any corrected evaluation.
+4. Export causal checkpoints only as diagnostic. A fresh target checkpoint may become formal only
+   after signed-face honesty, then must run the same immutable exam in Isaac/MuJoCo and eventually
+   the vendor Gate3/Gate3B runtime. A legacy resume/pairing can never be promoted.
+5. Keep `T0/T1` continuity, semantics-correct plant and new-motion/TOPP work as separate axes; this
+   failed single-strike paper does not select their reward or action design.

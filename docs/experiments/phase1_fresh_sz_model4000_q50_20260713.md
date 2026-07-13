@@ -1,7 +1,6 @@
 # Fresh SZ model-4000 four-seed matched q50
 
-Status: preregistered; runtime prepared; source review passed; execution blocked on Linux
-fake-runner smoke
+Status: completed; Linux smoke passed; both Pod results and aggregate terminal-validated
 
 Human owner: Franco
 
@@ -54,31 +53,76 @@ never create retry authority, even after the old tokenless-startup deadline.
 
 Source tests and the exact future deployment/inspection/launch commands are in the
 [persistent top-level launch section](../operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md#persistent-top-level-launch-source-gate).
-The command has not run on either Pod.
+The exact commands were later run once per Pod through the reviewed persistent supervisor. The
+runtime evidence and result hashes are recorded below and in the operation document.
 
 ## Results
 
-No q50 behavior result exists. Host supervisor tests pass `24`; queue+consumer+supervisor tests pass
-`64`. Tokenless deadline expiry cannot execute; delayed post-token rehash, a 1.15-second
+Host supervisor tests pass `24`; queue+consumer+supervisor tests pass `64`. Tokenless deadline
+expiry cannot execute; delayed post-token rehash, a 1.15-second
 acknowledgment atomic-publication stall and delayed post-ack exec all reject restart and later
 converge without a fatal-before-later-runner sequence. Terminal validation freezes bytes/SHA and rejects an A-to-B
-replacement. Both runtime contracts remain `prepared_not_started`, `jobs_started=0`,
-`auto_start=false`.
+replacement.
 
 Three additional post-link failures cover token directory fsync plus unreadable evidence stat,
 token temporary cleanup and parent observation publication; all return committed pending with no
 retry authority and later inspect as exact running.
 
+The required Linux `/proc` smoke then started only a four-second fake runner. Immediate inspection
+proved exact live PID/PGID, executable, argv and environment identity. Its later
+`committed_child_failed` is the expected negative result because the fake runner deliberately wrote
+no Pod result; it started no judge, Kit process or simulator.
+
+The formal launch used the same supervisor source/config SHA on both Pods. Pod1 supervisor
+PID=PGID `1705148` owned seed1 then seed3; Pod2 PID=PGID `302176` owned seed2 then seed4. Both later
+inspected as `terminal_result_validated`, with no remaining supervisor, child judge or q50 Kit-lock
+holder. The immutable Pod results are:
+
+- Pod1 file/content SHA `02d0e58d...645d` / `7bb91fd0...f238`;
+- Pod2 file/content SHA `d31323a6...4e6f` / `eafd7b20...1899`.
+
+One formal aggregate was then produced on Pod2 after relaying Pod1's exact result bytes into a new
+no-clobber control path. Aggregate file/content SHA are
+`1ba88e39e8395b8edce9365475404eafa660d4bf1b61d640a21d1d7cbb75d195` /
+`226e6050c3789ebbc3145d84ca40225ab0fe9e1b868143de8ea80ad5caab648d`.
+Independent canonical-JSON recomputation and fixed-value assertions passed.
+
+| seed | parsed aggregate | parsed forehand | parsed backhand | physical root falls |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 50/100 | 0/50 | 50/50 | 0 |
+| 2 | 88/100 | 38/50 | 50/50 | 0 |
+| 3 | 98/100 | 48/50 | 50/50 | 0 |
+| 4 | 0/100 | 0/50 | 0/50 | 21 |
+
+The unchanged gate observes median `.69 < .75`, worst seed `.00 < .65`, spread
+`.98 > .20`, and minimum side `.00 < .50`; all four checks fail. Seed4 is therefore
+`persistent_weakness_through_model4000`, not delayed learning. This particular balance failure is
+seed4-specific; the other three checkpoints recorded zero physical root falls.
+
+The signed-face diagnostic independently blocks promotion of the apparently high seed2/3 parsed
+scores. Their forehand raw-A normal error is `172.33°/174.35°`, and signed position+velocity+normal
+composite success is `0/50` for both despite parsed returns `38/50` and `48/50`. Seed1 shows the same
+direction (`164.86°`, signed `0/50`). Thus the old orient-normal parser is evidence of a blind
+instrument, not a baseline selector.
+
 ## Limitations and claims not made
 
-The host is macOS and has no Linux procfs. A Linux fake-runner smoke and fresh review are still
-required before deployment. The supervisor cannot guarantee survival if an external manager
+The supervisor cannot guarantee survival if an external manager
 destroys the whole container/cgroup, and it does not repair pre-existing evaluation-tool closure or
-hash-check-to-open TOCTOU. Nothing here is a MuJoCo score, Gate3/Gate3B result, deployment result, or
-real-robot permission.
+hash-check-to-open TOCTOU. The result is a Python BankExam MuJoCo diagnostic, not physical-ball
+truth, vendor Gate3/Gate3B, deployment evidence or real-robot permission.
 
 ## Decision and next action
 
-Keep the experiment preregistered and dormant. Fresh review found no P0/P1; next run the no-judge
-Linux fake-runner smoke. Only after that gate passes may the exact one-shot `launch` be
-considered; any ambiguous SSH response must be followed by `inspect`, never a second launch.
+Close this matched checkpoint experiment as a failed stability gate. Do not expand or promote the
+`SZ` family from these parsed scores. The next measurement action is the signed-face `n/-n`
+negative control, scorer correction and same-paper rerun; final behavior still requires vendor
+Gate3/Gate3B. The aggregate's frozen `continue_all_arms_unmodified` action expresses that this q50
+contract has no process-signal authority; it does not undo the separate human-owner resource
+decision that had already stopped seed1/2/4 trainers.
+
+Checked-in immutable evidence:
+
+- `configs/phase1_fresh_SZ_model4000_seed_stability_q50_pod1_result_20260713.json`;
+- `configs/phase1_fresh_SZ_model4000_seed_stability_q50_pod2_result_20260713.json`;
+- `configs/phase1_fresh_SZ_model4000_seed_stability_q50_aggregate_result_20260713.json`.

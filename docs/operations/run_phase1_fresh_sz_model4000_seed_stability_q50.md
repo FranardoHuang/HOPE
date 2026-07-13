@@ -1,9 +1,9 @@
 # Fresh SZ model_4000 four-seed matched q50 queue
 
-Status: prepared but not started. Both Pod audits, the all-four activation, both read-only
-`contract-check` calls and both no-clobber `prepare` calls completed on 2026-07-13 local time;
-no q50 judge or robot command has run, and those readiness/prepare transactions did not signal a
-trainer. This queue exists to
+Status: completed with failed seed-stability result. Both Pod audits, the all-four activation,
+read-only `contract-check`, no-clobber `prepare`, Linux fake-runner smoke, two exact-once Pod runs
+and one formal aggregate completed on 2026-07-13. No robot command ran and no transaction signalled
+a trainer. This queue exists to
 separate delayed seed4 learning from persistent seed4 weakness at the next matched
 checkpoint. It does not authorize a training change, checkpoint promotion, deployment, or
 hardware.
@@ -11,8 +11,8 @@ hardware.
 Later runtime note (2026-07-13): a separate human-owner resource decision stopped the live
 seed1/2/4 trainers after preserving later checkpoints. It did not come from this q50 contract and
 does not change `whole_arm_stop_allowed=false`. The four `model_4000.pt` inputs had already been
-content-bound by the readiness audits, remain on disk and are unchanged, so this prepared paper is
-still runnable after the already-reviewed supervisor passes its required Linux fake-runner smoke.
+content-bound by the readiness audits, remained on disk and were unchanged when the reviewed
+supervisor consumed the prepared paper.
 Exact stop evidence is in
 [EXP-P1-FACE-PLANT-SCALEOUT](../experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md).
 
@@ -412,15 +412,18 @@ This offline check proves the relayed bytes and dormant authorization fields onl
 `contract-check`, `_validate_runtime_contract`, checkpoint/checkout rehash and process/lock snapshot
 remain mandatory immediately before `run`.
 
-Both documents remain `prepared_not_started`, `jobs_started=0`, `auto_start=false`. A second
-runner `contract-check` and direct runtime-binding validation passed on each Pod. Train/eval were
+Both immutable preparation documents retain their historical `prepared_not_started`,
+`jobs_started=0`, `auto_start=false` fields; the later supervisor ledger and Pod result, not a
+mutation of these files, prove execution. A second runner `contract-check` and direct
+runtime-binding validation passed on each Pod. Train/eval were
 still clean at exact commits `6d93bcb16c422a2f42748c2dc99432559653480b` and
 `46a0ce24524fdb843e55fe82ba4c045f2adc090f`; all four checkpoint SHAs re-matched, each embedded
 iteration was 4000, each nonfinite count was zero, and lineage/adjacent hard-contract binding
 remained exact. The post-prepare snapshots contained no child judge, MuJoCo evaluator, play/Kit
 process or holder of the existing Kit-lock file.
 
-The exact future commands below are recorded, **not executed**:
+The exact commands below were later executed once through the persistent supervisor. They are
+preserved for audit; do not run them again against the no-clobber v1 state:
 
 ```bash
 SOURCE=/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/source_d67310f
@@ -464,10 +467,10 @@ without changing the consumer/config/activation/runtime-contract bytes. Its exac
 failure states are in
 [the persistent-supervisor contract](../interfaces/q50_persistent_supervisor_contract.md).
 
-This section is a source procedure only. The supervisor source gate is in `main`, but the wrapper
-has **not** been deployed and has not started either Pod's
-[q50/K100](../DEFINITIONS.md#q50-and-k100) evaluation. A Linux fake-runner smoke remains mandatory,
-and the eventual deployed script/config hashes below must match `main` exactly.
+This section records both the accepted source procedure and its completed runtime use. The wrapper
+was deployed outside frozen train/eval checkouts, first passed a Linux fake-runner smoke, then
+started each Pod's [q50/K100](../DEFINITIONS.md#q50-and-k100) evaluation exactly once. The deployed
+script/config hashes below matched `main` exactly.
 
 The reviewed files are:
 
@@ -571,5 +574,48 @@ A-to-B swap during validation is rejected. The token-directory-fsync plus eviden
 token-temporary-cleanup and parent-observation-write regressions each fail after the token's final
 link, return committed pending without fatal/retry authority, reject a second launch and later
 inspect as exact running. This macOS host has no Linux procfs,
-so the tests inject the same identity-reader seam; an actual Linux source smoke that starts only a
-fake runner remains required before the real Pod q50 launch. No test starts a judge or simulator.
+so the tests inject the same identity-reader seam; the separate Linux smoke and formal launch that
+later closed this runtime prerequisite are recorded below. No host test starts a judge or simulator.
+
+## Linux smoke, formal run and aggregate evidence (2026-07-13)
+
+The isolated Pod2 smoke root was
+`/workspace/codexschema/phase1_fresh_20260711/control/q50_supervisor_linux_smoke_88c8629_v1`.
+Its exact config SHA was `5e5056a4...e931`. The wrapper reported `running_exact` for fake-runner
+PID=PGID `302063`, including exact `/proc` start ticks, executable, argv and environment. The fake
+runner exited after four seconds without writing a Pod result, so the later
+`committed_child_failed` is the intended negative outcome; no judge, Kit process or simulator ran.
+
+The formal supervisor source/config SHAs were
+`fd565ca453d95712fa7045fec77e8fce29e93f0a13590d72311fcb7719ab800e` and
+`d1a76a5756d32642136884b4414e9fad2b5a80a257bb9c6fdd9e61a1108f6050`.
+One launch per Pod returned `running_exact`:
+
+- Pod1 supervisor PID=PGID `1705148`, procfs start ticks `275921862`, then seed1/seed3 serially;
+- Pod2 supervisor PID=PGID `302176`, procfs start ticks `535869202`, then seed2/seed4 serially.
+
+Both later inspected as `terminal_result_validated`; no supervisor or child judge remained and the
+Kit lock had no q50 holder. The Pod result file/content SHAs are:
+
+- Pod1 `02d0e58d...645d` / `7bb91fd0...f238`;
+- Pod2 `d31323a6...4e6f` / `eafd7b20...1899`.
+
+After relaying Pod1's exact result bytes into a new no-clobber control path on Pod2, the old
+activation consumer's `aggregate` subcommand was executed once with both caller-supplied result
+SHAs. It revalidated the all-four activation, result content hashes, four arm bindings, shared
+schedule/order/MJCF/execution/ready-state fields and wrote:
+
+`/workspace/codexschema/phase1_fresh_20260711/control/SZ_model4000_seed_stability_q50_v1/aggregate/phase1_fresh_SZ_model4000_seed_stability_q50_226e6050c3789ebbc3145d84ca40225ab0fe9e1b868143de8ea80ad5caab648d.json`
+
+The aggregate file SHA is
+`1ba88e39e8395b8edce9365475404eafa660d4bf1b61d640a21d1d7cbb75d195`; canonical content SHA is
+`226e6050c3789ebbc3145d84ca40225ab0fe9e1b868143de8ea80ad5caab648d`.
+Independent offline recomputation passed. Observed seed rates are `.50/.88/.98/.00`; median `.69`,
+worst `.00`, spread `.98` and minimum side `.00` all fail the unchanged thresholds. Seed4 is
+`persistent_weakness_through_model4000` and recorded 21 physical root falls.
+
+The aggregate intentionally preserves the frozen action `continue_all_arms_unmodified` because the
+q50 contract owns no process signal. It is not a statement that every trainer remained live: the
+separate human-owner resource decision had already stopped seed1/2/4 and did not derive authority
+from this result. The checked-in Pod results and aggregate are linked from the
+[stability experiment](../experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md).

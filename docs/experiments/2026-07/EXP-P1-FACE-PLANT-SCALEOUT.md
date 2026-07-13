@@ -1,6 +1,6 @@
 # EXP-P1-FACE-PLANT-SCALEOUT — 拍面语义 × plant 广度矩阵
 
-- 状态：`running`
+- 状态：`completed/rejected`（全部 16 条 fresh 训练臂已保留证据并按负责人运营决定停止）
 - 阶段/轴：阶段 1 固定点；拍面语义 × 关节摩擦执行配方 × seed
 - 集成小目标：先找出能跨 seed、跨 milestone 保持正反手单拍方向的配方，再进入可信 q50 与最终
   厂商 MuJoCo `Gate3/Gate3B`
@@ -62,20 +62,20 @@
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
 | 正式共用拍面+零摩擦 `SZ` | 1 | .90 | .50 | .65 | .25 | .00 | .00 | 2k `83/100`；4k `50/100` | 停止 |
 | 正式共用拍面+零摩擦 `SZ` | 2 | 1.00 | .90 | .50 | .00 | .00 | .00 | 2k `100/100` | 停止 |
-| 正式共用拍面+零摩擦 `SZ` | 3 | 1.00 | 1.00 | .50 | .00 | — | — | 2k `100/100` | 继续 |
+| 正式共用拍面+零摩擦 `SZ` | 3 | 1.00 | 1.00 | .50 | .00 | — | — | 2k `100/100`；4k `98/100`，但正手 signed composite `0/50` | 第二波停止 |
 | 正式共用拍面+零摩擦 `SZ` | 4 | .25 | .00 | .00 | .00 | — | — | 2k `20/100` | 停止 |
 | 共用拍面+历史非零摩擦诊断 `SP` | 1 | .00 | .00 | .00 | .00 | — | — | 未测 | 停止 |
-| 共用拍面+历史非零摩擦诊断 `SP` | 2 | 1.00 | .60 | .55 | .90 | — | — | 未测 | 继续 |
-| 共用拍面+历史非零摩擦诊断 `SP` | 3 | 1.00 | 1.00 | .75 | 1.00 | — | — | 未测 | 继续 |
+| 共用拍面+历史非零摩擦诊断 `SP` | 2 | 1.00 | .60 | .55 | .90 | — | — | 未测 | 第二波停止 |
+| 共用拍面+历史非零摩擦诊断 `SP` | 3 | 1.00 | 1.00 | .75 | 1.00 | — | — | 未测 | 第二波停止 |
 | 共用拍面+历史非零摩擦诊断 `SP` | 4 | .00 | .00 | .00 | .00 | — | — | 未测 | 停止 |
 | 旧异号拍面+零摩擦诊断 `LZ` | 1 | .50 | .50 | .50 | .50 | — | — | 未测；正手始终 0、反手始终 1 | 停止 |
-| 旧异号拍面+零摩擦诊断 `LZ` | 2 | 1.00 | 1.00 | .50 | .60 | — | — | 未测 | 继续 |
-| 旧异号拍面+零摩擦诊断 `LZ` | 3 | 1.00 | .80 | .75 | .55 | — | — | 未测 | 继续 |
-| 旧异号拍面+零摩擦诊断 `LZ` | 4 | .90 | .95 | .65 | .95 | — | — | 未测 | 继续 |
+| 旧异号拍面+零摩擦诊断 `LZ` | 2 | 1.00 | 1.00 | .50 | .60 | — | — | 未测 | 第二波停止 |
+| 旧异号拍面+零摩擦诊断 `LZ` | 3 | 1.00 | .80 | .75 | .55 | — | — | 未测 | 第二波停止 |
+| 旧异号拍面+零摩擦诊断 `LZ` | 4 | .90 | .95 | .65 | .95 | — | — | 未测 | 第二波停止 |
 | 旧异号拍面+历史非零摩擦诊断 `LP` | 1 | .00 | .00 | .00 | .00 | — | — | 未测 | 停止 |
 | 旧异号拍面+历史非零摩擦诊断 `LP` | 2 | .50 | .50 | .50 | .50 | — | — | 未测；正手始终 0、反手始终 1 | 停止 |
-| 旧异号拍面+历史非零摩擦诊断 `LP` | 3 | .60 | 1.00 | .65 | 1.00 | — | — | 未测 | 继续 |
-| 旧异号拍面+历史非零摩擦诊断 `LP` | 4 | 1.00 | .70 | .95 | 1.00 | — | — | 未测 | 继续 |
+| 旧异号拍面+历史非零摩擦诊断 `LP` | 3 | .60 | 1.00 | .65 | 1.00 | — | — | 未测 | 第二波停止 |
+| 旧异号拍面+历史非零摩擦诊断 `LP` | 4 | 1.00 | .70 | .95 | 1.00 | — | — | 未测 | 第二波停止 |
 
 seed1/seed2 的 0k/1k formal q10 另有 `0/.50` 与 `0/.50`，这里只从所有 fresh 格都可比较的 2k
 列起表。曲线显示强烈的 seed × 拍面/plant 交互与 milestone 回落；在 signed-face 诚实门通过前，
@@ -99,19 +99,52 @@ seed1/seed2 的 0k/1k formal q10 另有 `0/.50` 与 `0/.50`，这里只从所有
 才向该臂已登记 PGID 发送 KILL；没有使用 `pkill/killall` 或模式匹配信号。之后复核被停 PGID 已
 消失，未向剩余接受臂、worker、judge 或任何真机进程发信号。
 
-停止后仍运行的 8 臂为 Pod1 的 `SZ seed3 / SP seed3 / LP seed3 / LZ seed3`，以及 Pod2 的
-`SP seed2 / LZ seed2 / LZ seed4 / LP seed4`。其中 Pod1 `LZ seed3` 只承认 malloc 失败后成功重试的
-PGID `1354525`；旧失败尝试不参与结果。
+第一波停止后曾仍运行 8 臂：Pod1 的 `SZ seed3 / SP seed3 / LP seed3 / LZ seed3`，
+以及 Pod2 的 `SP seed2 / LZ seed2 / LZ seed4 / LP seed4`。其中 Pod1 `LZ seed3` 只承认 malloc
+失败后成功重试的 PGID `1354525`；旧失败尝试不参与结果。下节记录它们的第二波
+证据收口；现在 16 臂均已停止。
+
+## 2026-07-13 第二波：符号失真后停止剩余 8 臂
+
+model-4000 K100 完成后，对剩余臂最近三个已有 K20 milestone 做了不运行新 judge 的
+横向取证。共 24/24 个格子的正手 raw-A signed composite 都为 `0`，法向误差为
+`164.4°–175.2°`；但旧 parsed return 可达 `1.0`。同期反手法向通常为 `2.9°–12.3°`，
+composite 为 `.7–1.0`。`SZ/SP` 的 shared face 与 `LZ/LP` 的 legacy face 都同样反号，
+因此继续长训不能分离 face/plant 效应；必须先修复训练目标/Reward 与 scorer 的共同符号链。
+
+| Pod / PGID | 运行 | 最后 checkpoint | checkpoint SHA-256 | 验证 |
+| --- | --- | --- | --- | --- |
+| Pod1 / `1348951` | `SZ seed3` | `model_13800.pt` | `478efa8d163ec53dbade328c5de18947f6c068df78cbadff8e46a29844bdc9e6` | formal contract exact; schema3; lineage1; finite |
+| Pod1 / `1349699` | `SP seed3` | `model_13800.pt` | `611fecc2087a52cb2b7602d6932d10fb3becf9cd0389bfcf6507ccea8d08d5fb` | `SP` contract exact; schema3; lineage1; finite |
+| Pod1 / `1353018` | `LP seed3` | `model_13800.pt` | `cbb157bce2aba4df816e58ed4126b6ee744fc776039ea2466a8849f38fb48bcd` | `LP` contract exact; schema3; lineage1; finite |
+| Pod1 / `1354525` | `LZ seed3` accepted retry | `model_13600.pt` | `fe5b06cf70c1f2ee2923d75dcd7da06df841ba487b9247e0798a68b7121fec53` | `LZ` contract exact; schema3; lineage1; finite |
+| Pod2 / `177630` | `SP seed2` | `model_10400.pt` | `6d205edbf4cab838ccbdae5cbd353102c148fd1c3fda54eb561f81e1917e2f06` | `SP` contract exact; schema3; lineage1; finite |
+| Pod2 / `179908` | `LZ seed2` | `model_10400.pt` | `2852ac7ed3394871cddbf5044e0bf861e0c3ed504de6737efe5858410c2c0dad` | `LZ` contract exact; schema3; lineage1; finite |
+| Pod2 / `181685` | `LZ seed4` | `model_14300.pt` | `bc872a4e356015520ed8c126d4785dafe9f8843b44ae4e7d13c0eac6a33a79d2` | `LZ` contract exact; schema3; lineage1; finite |
+| Pod2 / `182286` | `LP seed4` | `model_14400.pt` | `ee9539f1a8a711ac557d08cdcbac67ce067a4315637515ef74feee2978c8b2be` | `LP` contract exact; schema3; lineage1; finite |
+
+两份 no-clobber 停臂前审计的 file SHA 为 `aca8e4f4...f5a3` / `773940ac...7b86`。每臂都验证
+文件名迭代=内嵌迭代、76 个 tensor、`1,762,715` 个浮点值且 nonfinite=0、schema3、
+fresh lineage1、内嵌合同 SHA=相邻合同 SHA，并保留 launch/log SHA。完整日志的
+NaN/Traceback/OOM/malloc/bad_alloc/Killed/segfault 均为 0。TERM 后 trainer 仍存活；确认
+进程组只有 trainer 与它的 git helper，且 Kit lock 无 holder 后，只对上表精确 PGID 发 KILL。
+最终八组均消失，两 Pod 三卡均回到 0 MiB/0% GPU，train/eval 仍 clean exact
+`6d93bcb` / `46a0ce2`。没有 broad signal、新 judge、checkout 修改或真机命令。
+
+与已停 trainer 对应、且无 child/Kit holder 的四个等待型 fresh curve worker 也随后按精确
+PGID `1432280/1432304` 与 `200706/200730` TERM 退出；它们没有产生新分或信号传播。
 
 ## 决定
 
-- 科学决定：`inconclusive`。q10 不会把任何格晋级或正式 reject；formal `SZ` 已知不具 seed
-  稳定性，signed-face 与厂商 MuJoCo 门仍未通过。
-- Runtime 决定：停止上表 8 臂并保留全部已产 checkpoint/log/contract；剩余 8 臂继续，释放槽位
-  按 [NOW 唯一队列](../../NOW.md#统一工作队列唯一优先级账本)重新分配。
+- 科学决定：`rejected_as_baseline_selector`。formal `SZ` 在 2k/4k 都不具 seed 稳定性；
+  24/24 最近诊断格的正手 signed composite 为 0，所以这个旧 scorer 下的 face×plant 矩阵
+  不能选 baseline。这不是用 q10 阈值正式 reject 单臂，而是 q50 失败+符号尺失真后的
+  家族级结论。
+- Runtime 决定：两波合计停止全部 16 臂并保留 checkpoint/log/contract/审计；释放槽位只分配给
+  [NOW 唯一队列](../../NOW.md#统一工作队列唯一优先级账本)中已经通过离线门的工作。
 - 是否已纳入当前 setting：`no`。现役 setting 没有改变；只是部分 run 不再继续购买迭代。
-- 下一个 gate：先完成已准备的 formal `SZ model_4000` 同一 K100 后续卷和 signed-face 诚实门；
-  之后才判断 checkpoint/family，不把运营停止反推成预注册结论。
+- 下一个 gate：K100 已完成；现在先修正训练目标/Reward/scorer 的 signed-face 符号链，
+  跑 `n/-n` 负控与同卷复判，再启动新训练。不把两波运营停止反推成旧 q10 预注册结论。
 
 ## 复现与证据
 
@@ -126,5 +159,9 @@ PGID `1354525`；旧失败尝试不参与结果。
 - model-4000 后续卷：[稳定性实验](EXP-P1-FRESH-SZ-STABILITY.md)与
   [操作文档](../../operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md)。
 - 精确信号与 checkpoint 验证流程：[共享 RunPod 操作](../../operations/run_on_runpod.md#已登记-phase-1-实验臂的算力释放)。
+- [Pod1 第二波停臂前审计](../../../configs/phase1_remaining_fresh_arms_pre_stop_audit_pod1_20260713.json)
+  file SHA `aca8e4f445026d7f7a36619233df48e01c346f8d22bc75d2aa092e6b67e0f5a3`。
+- [Pod2 第二波停臂前审计](../../../configs/phase1_remaining_fresh_arms_pre_stop_audit_pod2_20260713.json)
+  file SHA `773940accc8bfb8f9d28a6bbac9e61dc2583db649bffc845e1130ce15efc7b86`。
 
 本记录没有执行真实机器人命令，也不授权任何真机动作。
