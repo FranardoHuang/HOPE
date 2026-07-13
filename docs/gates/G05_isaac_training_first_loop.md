@@ -1478,5 +1478,18 @@ bank rebind consumer：先证明七个 physics 文件只有一个 helper 定义�
 runtime 的 exact motion contract 和 1481 题 old/new contact/flight bytes 相同。Pod1 已正式发布并复核
 bank SHA `3a9d8851...5b71` 与 report SHA `9fffed03...bb37`：24 数组未变，正/反手 `757/724` 题的
 旧/新输出 raw bytes 相同，landing/net 全过。v6 又把 report closure 及唯一允许的父旧 bank→当前新
-bank common-field transition 写入 preflight；其他父/新共同字段仍逐值相同。v6 L1 尚未启动，所以
-G05 仍为 `Partial`；操作仍见上面的 signed-face 漏斗运行手册。
+bank common-field transition 写入 preflight；其他父/新共同字段仍逐值相同。
+
+实际 epoch-1 v6 后续在 clean `50c49e5` source 上启动：A/B/C 到终档，checkpoint 迭代分别为
+`13824/13824/24`，lineage `0/0/1`，共同 hard-contract SHA `dfc583d4...888a5`；D 在
+`runtime_verified`/checkpoint 前 Kit boot timeout。其旧 launch/state/log 与 timeout 诊断已按 exact SHA
+冻结，PID 已死且旧 claim 不覆盖。新 [v6r1](../DEFINITIONS.md) 只允许 D 单格用新 `run_name` 补跑；
+consumer 必须从 exact foreign v6 launcher 重建原 argv，并证明唯一命令差异是 `run_name`，随后才在
+GPU0/Kit lock 都空时写新的 no-clobber claim。混合 finalizer 只有在 D 自然终档 `24`、finite、lineage1、
+合同仍为 `dfc583d4...888a5` 后，才重审旧 A/B/C 和 B 的 exact-PGID terminal cleanup，写同时绑定两套
+config/launcher 的 completion。原始 checkpoint audit `62076758...d354` 还绑定 A/B/C 的 exact
+checkpoint/finite/lineage 与 D 空 run-dir。这里的 signal 边界不是“全程零 signal”：Python consumer
+不直接发 signal，但 frozen locked wrapper 可在 pre-marker boot timeout 时仅对该隔离 PGID 执行
+TERM→KILL；post-contract timeout 可能留下 live arm，只能按 state 的精确 `pid=pgid` 人工审计且不得
+自动二次启动。源码 focused 门已物化，但 v6r1 尚未运行；L2/judge/第二 seed 仍固定 false，所以 G05
+仍为 `Partial`。操作仍见上面的 signed-face 漏斗运行手册。

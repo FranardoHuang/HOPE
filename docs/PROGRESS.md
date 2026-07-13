@@ -36,6 +36,17 @@
   [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md)与
   [操作](operations/run_phase1_signed_face_exam_bank_rebind.md)。
 
+- epoch-1 signed-face v6 的 A/B/C 已到终档，D 在 `runtime_verified`/checkpoint 前 Kit boot timeout；
+  旧 D launch/state/log SHA 与 dead PID/零 checkpoint 诊断、B 终档后 exact-PGID cleanup、`50c49e5`
+  source bundle 与 A/B/C checkpoint audit `62076758...d354` 都已冻结。新增 [v6r1](DEFINITIONS.md) D-only
+  no-clobber prereg/consumer：从 exact foreign v6 重建原 D argv，只允许 `run_name` 改名；启动前复核
+  source/runtime/bank/report/GPU/Kit lock。Python consumer 无直接 signal/第二次重试路径，但 frozen
+  wrapper 可在 pre-marker boot timeout 时仅清理本臂 exact PGID；post-contract timeout 留活臂时必须按
+  state PGID 人工审计。mixed finalizer 只在 D 自然 `model_24.pt` finite/lineage1/合同一致后复核旧 A/B/C，
+  并保持 L2/judge/第二 seed false。当前仅源码/专项测试，v6r1 未运行。见
+  [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)与
+  [操作](operations/run_phase1_signed_face_rescue_funnel.md)。
+
 - signed-face v5 在 scene 构建后、第一次学习前被旧 schema-3 train-bank physics contract 正确拒绝；
   A claim/log 保留，B/C/D 未创建，没有 checkpoint。新增严格 no-clobber 重绑定 consumer：只允许一个
   冻结 helper 的加法式源码变化，要求所有问题数组 raw bytes 不变、metadata 精确四 leaf，并在目标

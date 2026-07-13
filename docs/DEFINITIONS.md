@@ -20,6 +20,7 @@
 | `VecEnv` | vectorized environment，并行推进多个仿真环境的训练接口。只有配置或 preflight 时，不能写成 `VecEnv` backend 已实现。 |
 | `seed` | 随机种子。配方不变、只换 seed，用来看训练是否稳定，不许只挑最好的 seed。机制尚未成立时先用一个阻断 seed；第二 seed 只给胜者和匹配对照，`3–4` seed 只给正式候选。所有已运行 seed 仍须全量报告。 |
 | signed-face 漏斗 `L1 / L2 / L3` | 该实验内部的三层证据购买：L1=`512 env × 25 update` 四格发射/合同冒烟；L2=`4096 env × 1001 update` 单-seed 机制 canary；L3=胜者与匹配对照通过预注册门后才购买第二 seed。它们不是下方 `E1/E2/E3` 证据等级，也不是课程 Stage。 |
+| signed-face `v6r1` | `v6 retry 1`：原 v6 的 A/B/C 已到终档、D 在产生 `runtime_verified`/checkpoint 前 Kit boot 超时后，为 **D 单格**另发的新版本运行名与 no-clobber 控制目录。它不改 seed、配方、预算或 D 的因果角色，也不是第二 seed；唯一训练命令变化只能是 `run_name`。Python consumer 不直接发 signal；冻结 Kit wrapper 只可在 pre-marker boot timeout 时按其既有逻辑对该隔离 PGID 做 TERM→KILL。 |
 | `checkpoint` / `ckpt` | 训练到某个迭代时保存的模型存档，例如 `model_2000.pt`。 |
 | `lineage` / 谱系 | 从初始模型、代码、资产到 checkpoint 的来源链。来源混了就不能声称严格单变量。 |
 | `PID / PGID` | `PID` 是单个进程编号；`PGID` 是进程组编号。管理长任务时只能从经核对的 launch sidecar 读取 exact 数值并检查组成员，不能用相似命令行模式猜所有权。 |

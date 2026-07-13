@@ -1,7 +1,7 @@
 # EXP-P1-SIGNED-FACE-RESCUE-FUNNEL：有符号拍面修复后的单-seed 机制漏斗
 
-状态：`v6_preregistered_with_published_rebound_train_bank_l1_not_started`
-证据等级：E2（目标 runtime 已发布并复核新 train bank；v6 L1 尚未启动）
+状态：`v6_abc_terminal_d_boot_timeout_v6r1_single_cell_retry_preregistered`
+证据等级：E3 partial（v6 的 A/B/C 已实际训练到终档；D 未进入 runtime verified，v6r1 尚未启动）
 人类负责人：franco  
 执行者：Codex  
 全局优先级：只继承 [`NOW` 队列第 1 项](../../NOW.md#统一工作队列唯一优先级账本)，本页不另建队列。
@@ -194,6 +194,51 @@ manifest/consumer SHA、24 数组、四-leaf metadata、exact motion gate 和两
 `2da2bd.../b21c16...` 过渡到新 `3a9d88.../9603a1...`；其他全部共同字段仍逐值相同。A/B 因该显式
 变化继续是 lineage `0`，C/D fresh 才是 `1`。
 
+### epoch-1 v6 实际 L1 与 D-only v6r1
+
+实际 Pod1 L1 使用后续集成出的 clean source commit
+`50c49e58a9413ec6ac1c3ed2565d9a78acdb5e64`，它把 unmasked command observation 的 provenance
+epoch 与上述 bank rebind 合到同一源码。该 commit 尚不在当前仓库对象库；exact 恢复 bundle SHA 为
+`2a794e2c...0a39e`，运行时外部 v6 manifest/launcher SHA 分别为
+`97779cee...eebf2` / `9463f228...85052`。这些是忽略资产/外部控制依赖，不得用仓库中旧
+`882fea4` v6 文件假冒，恢复方法见[本地同步手册](../../operations/setup_local_sync.md)。这是一个必须
+显式处理的 **同 manifest ID、不同 source/control SHA collision**：两套都叫
+`phase1-signed-face-rescue-single-seed-funnel-20260713-v6`，但实际 epoch-1 绑定
+`50c49e5` + `97779cee...eebf2` / `9463f228...85052`，当前 tracked 文件绑定 `882fea4` 且 bytes 不同；
+consumer 必须按 SHA 选择前者，不能只按名字选控制。
+
+v6 的 A/B/C 已到预注册终档：A/B 为 `model_13824.pt`、lineage `0/0`，C 为 `model_24.pt`、lineage
+`1`；三格 checkpoint SHA 分别为 `a1fbb766...68d2e`、`c73f59dc...20f3d`、
+`5ce4de67...66b11`，三格 emitted hard-contract SHA 均为 `dfc583d4...888a5`。原始 A/B/C finite/lineage
+审计与 D 空 run-dir 行共同冻结在 `l1_checkpoint_audit.jsonl`，SHA `62076758...d354`。B 在终档
+checkpoint 已稳定后仍卡住，
+只对其记录的 PGID `1758211` 做过一次精确终止；action 证据 SHA `cf619541...dcafe`，不是 broad kill。
+D 的 outer launch contract/state/log SHA 分别为 `f6dd2fd2...e0b63`、`4e1ab699...f350`、
+`baa02f52...3610`；PID `1759428` 已不存在，`runtime_verified.json` 与任何 `model_*.pt` 都未产生。
+timeout 诊断 SHA `ae7de7a3...b5a0c` 表明它只走到 Kit/scene boot，尚未出现 hard-contract marker 或
+learning iteration。因此不能删除旧 D claim 后原名重跑，也不能把 A/B/C 三格写成完整 L1。
+
+新 machine prereg
+[`phase1_signed_face_d_retry_prereg_20260713.json`](../../../configs/phase1_signed_face_d_retry_prereg_20260713.json)
+与 consumer
+[`run_phase1_signed_face_d_retry.py`](../../../scripts/run_phase1_signed_face_d_retry.py)把这次例外收窄为
+[v6r1](../../DEFINITIONS.md) D 单格：加载并校验 exact foreign v6 控制，调用它重建原 D argv，再证明
+新 argv **只有一个** `run_name` 项从 `phase1_signed_face_l1_v6_D_fresh_guidance_seed3` 变为
+`phase1_signed_face_l1_v6r1_D_fresh_guidance_seed3`。启动前还须复核旧失败三件套、dead PID、无旧
+checkpoint、clean exact source、runtime closure、bank/report、GPU0 空和 Kit lock 空；新
+`control/v6r1` 全部 no-clobber。Python consumer 没有直接 signal API；但它调用的 frozen
+`launch_kit_training_locked.sh` 在 pre-marker boot timeout 时会只对 state 中该隔离 PGID 做
+TERM→KILL，这是合同允许的精确 cleanup，不能写成“零 signal”。旧 D claim 不改不删，失败后也不自动
+给第二次重试权限。若 wrapper 已返回 ready、但后续 hard-contract/first-iteration 等待超时，trainer
+可能仍存活；只允许按 `run.log.launch` 的精确 `pid=pgid` 人工审计，不得自动再发 D。
+
+混合 finalizer 只有在新 D 自然记录 `Learning iteration 24/25`、进程退出、`model_24.pt` finite、
+lineage `1` 且 hard-contract SHA 仍为 `dfc583d4...888a5` 时，才重新逐项审计旧 A/B/C 终档和 B 的
+exact-PGID action，并写一份 A/B/C=`original_v6`、D=`v6r1_single_cell_retry` 的 no-clobber activation。
+activation 同时绑定两套 config/launcher SHA 与 old-D→new-D retry lineage；它明确保持
+judge/L2/第二 seed/stop-promote 全 false，并记录 consumer 无直接 signal、冻结 wrapper 的 exact-PGID
+timeout cleanup policy 以及成功 D 路径未执行该 cleanup。当前只有 E1 工具/测试，v6r1 尚未实际运行。
+
 ### 父合同扩展边界
 
 父 `model_13800.pt` SHA 冻结为 `478efa8d...d9e6`，嵌入/相邻 hard-contract SHA 均为
@@ -204,21 +249,22 @@ inexact representation transfer；launcher 只允许 `question_bank` 按上述 o
 checkpoint，lineage 必须为 `1`。
 四格 emitted hard-contract SHA 必须一致。这一处理没有把旧 checkpoint 洗成 fresh 证据。
 
-L1 只是一份 25-update launch-integrity smoke。四个 L1 terminal 都 finite、iteration/合同/lineage
-正确后，`finalize-l1` 才写 no-clobber completion/activation 证据；**该文件本身不能启动 L2**。SSH
-中断只允许复核并跳过完整 `runtime_verified` 格，半写/提前退出格保留证据并阻断自动重试。launcher
-没有信号路径、broad kill、judge、部署或真机命令。
+L1 只是一份 25-update launch-integrity smoke。原 v6 已因 D 的 pre-runtime timeout 不能再用
+`finalize-l1`；只有上述 D-only v6r1 自然终档并通过 mixed finalizer，才可能写完整 L1 completion。
+**该文件本身仍不能启动 L2**。半写/提前退出格保留证据并阻断自动重试；v6r1 没有信号、broad kill、
+judge、部署或真机命令路径。
 
 ## 仍未关闭的发射/判卷缺口
 
-- clean detached `882fea4` 训练 worktree和 exact ignored A3 资产已在 Pod1 建立；v1 audit 假拒绝、
+- clean detached `50c49e5` epoch-1 训练 worktree和 exact ignored A3 资产已在 Pod1 建立；v1 audit 假拒绝、
   v2/v4/v5 pre-learning 失败与 v3 Kit 前假拒绝均已归档且未覆盖。v5 是旧题库 physics-contract 拒绝，
-  没有 learning iteration/checkpoint；v2 rebound train bank/report 已正式发布并绑定到 v6，但 v6 L1
-  尚未启动，因此仍无新 checkpoint。
-- L1 必须先实际运行并生成四格终档 completion/activation 证据。
+  没有 learning iteration/checkpoint；v2 rebound train bank/report 已正式发布。v6 A/B/C 已有终档，D
+  在 runtime verified 前 boot timeout；v6r1 只获准补 D，尚未启动。
+- L1 必须等 v6r1 D 自然终档并由 mixed finalizer 生成四格 completion/activation 证据。
 - 相对 `+1000` 的 immutable signed-face directional checkpoint paper 的 exact schedule/path/SHA 尚未
   冻结。exam-v1 rebind 只有 E1 prereg，真实 371 题 replay/output SHA 与基于新 bank 的 schedule 都没有；
   manifest 明确 `l2.launch_authorized=false`。必须另发 reviewed v7 paper activation 后才能启动 L2。
   当前 launcher 也不启动 judge、不能自动晋级或购买第二 seed。
 
-当前只授权按运行手册进行仿真 L1 runtime validate/launch；不授权 L2、judge、部署或真机。
+当前只授权按运行手册进行仿真 v6r1 D 单格 runtime validate/launch/finalize；不授权再次启动原 v6 D，
+也不授权 L2、judge、第二 seed、部署或真机。
