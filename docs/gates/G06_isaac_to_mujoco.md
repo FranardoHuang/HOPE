@@ -1275,7 +1275,8 @@ directional checkpoint paper path/SHA 尚未冻结，manifest 明确 `l2.launch_
 `automatic_judge_launch=false`。源码/攻击回归 `23 passed` 不构成 Isaac/MuJoCo 行为或 Gate3 结果。
 Pod 首次 v1 preflight 的 checkpoint 假拒绝已根因到“顶层扫描/顶层 provenance”错误；v2 递归审计
 嵌套 tensor，并只接受 runner 写在 `checkpoint["infos"]` 的合同字段。v2 首格又在学习前暴露 detached
-worktree 的 source-first 环境没有传入 child；v3 用确定性环境 SHA 和 exact-worktree import smoke 在
-claim 前关闭该发射缝。两项修复都没有缩小 Isaac–MuJoCo 行为差，也没有启动 judge；
+worktree 的 source-first 环境没有传入 child；v3 又因在 `SimulationApp` 前真正 import IsaacLab 而
+假拒绝。v4 用确定性环境 SHA 与不执行包的 exact-worktree `find_spec` 在 claim 前关闭发射缝。上述
+修复都没有缩小 Isaac–MuJoCo 行为差，也没有启动 judge；
 操作见 [signed-face 漏斗运行手册](../operations/run_phase1_signed_face_rescue_funnel.md)，G06 保持
 `Partial`。

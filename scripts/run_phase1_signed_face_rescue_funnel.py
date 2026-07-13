@@ -129,7 +129,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
         raise ContractError(f"cannot read manifest: {exc}") from exc
     if data.get("schema_version") != 1:
         raise ContractError("manifest schema_version must be 1")
-    if data.get("manifest_id") != "phase1-signed-face-rescue-single-seed-funnel-20260713-v3":
+    if data.get("manifest_id") != "phase1-signed-face-rescue-single-seed-funnel-20260713-v4":
         raise ContractError("unexpected manifest_id")
     if data.get("simulation_only") is not True or data.get("real_robot_commands_forbidden") is not True:
         raise ContractError("manifest must be simulation-only and explicitly forbid robot commands")
@@ -160,7 +160,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
         require_sha(digest, f"critical source {relative}")
 
     if runtime.get("pod") != "pod1" or runtime.get("gpu") != 0:
-        raise ContractError("v3 reserves exactly Pod1 GPU0")
+        raise ContractError("v4 reserves exactly Pod1 GPU0")
     if runtime.get("initial_gpu_must_have_zero_compute_processes") is not True:
         raise ContractError("the four-cell pool must start on an empty GPU")
     if runtime.get("maximum_trainers_on_gpu") != 4:
@@ -330,7 +330,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
     if evaluation.get("l2_training_launch_authorized") is not False:
         raise ContractError("L2 training launch must remain blocked")
     if evaluation.get("signed_directional_checkpoint_paper") is not None:
-        raise ContractError("v3 must not invent a signed directional checkpoint paper")
+        raise ContractError("v4 must not invent a signed directional checkpoint paper")
     return data
 
 
@@ -432,17 +432,23 @@ def build_training_environment(manifest: dict[str, Any], wbt: Path) -> dict[str,
     return environment
 
 
-def verify_training_module_import(
+def verify_training_module_resolution(
     python: Path, wbt: Path, environment: dict[str, str]
 ) -> str:
-    code = "import pathlib, whole_body_tracking; print(pathlib.Path(whole_body_tracking.__file__).resolve())"
+    code = (
+        "import importlib.util, pathlib; "
+        "spec=importlib.util.find_spec('whole_body_tracking'); "
+        "print('NONE' if spec is None or spec.origin is None else pathlib.Path(spec.origin).resolve())"
+    )
     try:
         raw = subprocess.check_output(
             [str(python), "-c", code], cwd=wbt, env=environment,
             text=True, stderr=subprocess.STDOUT,
         ).strip()
     except subprocess.CalledProcessError as exc:
-        raise ContractError(f"exact training worktree import smoke failed: {exc.output.strip()}") from exc
+        raise ContractError(f"exact training module resolution failed: {exc.output.strip()}") from exc
+    if raw == "NONE":
+        raise ContractError("whole_body_tracking is not resolvable in the exact training environment")
     module_path = Path(raw).resolve()
     expected_root = (wbt / "source/whole_body_tracking/whole_body_tracking").resolve()
     try:
@@ -838,7 +844,7 @@ def runtime_preflight(
     if stage_name == "l2":
         raise ContractError(
             "L2 is blocked: freeze a separate immutable signed-face directional checkpoint "
-            "paper path/SHA and issue a reviewed v4 activation before launch"
+            "paper path/SHA and issue a reviewed v5 activation before launch"
         )
     checkout, wbt = verify_training_source(manifest)
     verify_production_locations(manifest, config_path, launcher_path, checkout)
@@ -850,7 +856,7 @@ def runtime_preflight(
     if not locked.is_file() or not os.access(locked, os.X_OK):
         raise ContractError("locked Kit launcher is missing/not executable")
     training_environment = build_training_environment(manifest, wbt)
-    module_path = verify_training_module_import(python, wbt, training_environment)
+    module_path = verify_training_module_resolution(python, wbt, training_environment)
     verified_inputs = verify_inputs(manifest, python)
     if available_memory_mib() < runtime["minimum_host_available_memory_mib"]:
         raise ContractError("insufficient host memory for the four-cell pool")

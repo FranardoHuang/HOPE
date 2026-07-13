@@ -38,8 +38,8 @@ def write_manifest(tmp_path: Path, value: dict) -> Path:
 
 def test_checked_manifest_is_exact_four_cell_single_seed_funnel():
     data = manifest()
-    assert data["manifest_id"].endswith("-v3")
-    assert data["runtime"]["external_control_root"].endswith("/control/v3")
+    assert data["manifest_id"].endswith("-v4")
+    assert data["runtime"]["external_control_root"].endswith("/control/v4")
     assert data["runtime"]["training_environment_sha256"] == (
         "ddaa0effe2ed5318cc8ce34efbbf5b4ee042572052ab57232291079f41bed743"
     )
@@ -314,7 +314,9 @@ def test_launcher_binds_source_first_environment_and_forbids_local_override():
     assert 'local_override = wbt / "setup_train_env.local.sh"' in source
     assert '"PYTHONPATH": pythonpath' in source
     assert '"HOPE_WBT_PYTHONPATH": pythonpath' in source
-    assert "verify_training_module_import" in source
+    assert "verify_training_module_resolution" in source
+    assert "importlib.util.find_spec('whole_body_tracking')" in source
+    assert "import pathlib, whole_body_tracking" not in source
     assert 'environment = preflight["training_environment"].copy()' in source
 
 

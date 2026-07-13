@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "manifest_id": "phase1-signed-face-rescue-single-seed-funnel-20260713-v3",
+  "manifest_id": "phase1-signed-face-rescue-single-seed-funnel-20260713-v4",
   "purpose": "Run one seed across four distinct hot-start/fresh x face-guidance-off/on causal cells; buy another seed only after a paired mechanism win.",
   "status": "machine_preregistered_l1_authorized_l2_blocked_pending_signed_directional_paper",
   "simulation_only": true,
@@ -28,7 +28,7 @@
     "pod": "pod1",
     "gpu": 0,
     "artifact_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713",
-    "external_control_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v3",
+    "external_control_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v4",
     "source_asset_root": "/workspace/codexschema/phase1_fresh_20260711",
     "isaac_python": "/workspace/hope_isaac_venv/bin/python",
     "isaaclab_root": "/workspace/IsaacLab",
@@ -199,10 +199,10 @@
       "max_iterations": 25,
       "requires_activation": false,
       "run_names": {
-        "A": "phase1_signed_face_l1_v3_A_hot_control_seed3",
-        "B": "phase1_signed_face_l1_v3_B_hot_guidance_seed3",
-        "C": "phase1_signed_face_l1_v3_C_fresh_control_seed3",
-        "D": "phase1_signed_face_l1_v3_D_fresh_guidance_seed3"
+        "A": "phase1_signed_face_l1_v4_A_hot_control_seed3",
+        "B": "phase1_signed_face_l1_v4_B_hot_guidance_seed3",
+        "C": "phase1_signed_face_l1_v4_C_fresh_control_seed3",
+        "D": "phase1_signed_face_l1_v4_D_fresh_guidance_seed3"
       },
       "expected_terminal_checkpoint_iteration": {
         "A": 13824,
@@ -210,7 +210,7 @@
         "C": 24,
         "D": 24
       },
-      "activation_output": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v3/l1_activation.json"
+      "activation_output": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v4/l1_activation.json"
     },
     "l2": {
       "human_name": "4096-environment single-seed canary",
@@ -220,10 +220,10 @@
       "launch_authorized": false,
       "blocked_on": "immutable signed-face directional checkpoint paper path and SHA are not frozen",
       "run_names": {
-        "A": "phase1_signed_face_l2_v3_A_hot_control_seed3",
-        "B": "phase1_signed_face_l2_v3_B_hot_guidance_seed3",
-        "C": "phase1_signed_face_l2_v3_C_fresh_control_seed3",
-        "D": "phase1_signed_face_l2_v3_D_fresh_guidance_seed3"
+        "A": "phase1_signed_face_l2_v4_A_hot_control_seed3",
+        "B": "phase1_signed_face_l2_v4_B_hot_guidance_seed3",
+        "C": "phase1_signed_face_l2_v4_C_fresh_control_seed3",
+        "D": "phase1_signed_face_l2_v4_D_fresh_guidance_seed3"
       },
       "relative_milestones": [200, 500, 1000],
       "checkpoint_iterations": {

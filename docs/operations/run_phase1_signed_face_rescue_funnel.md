@@ -1,6 +1,6 @@
 # 运行 Phase-1 有符号拍面单-seed 机制漏斗
 
-状态：v1/v2 的失败证据均已保留；v3 已修正 checkpoint 与 source-first 环境审计并通过源码测试，尚未启动训练，G05/G06 仍为 `Partial`。
+状态：v1/v2/v3 的失败证据均已保留；v4 已修正 checkpoint、source-first 环境与 Kit 前模块解析边界，尚未启动训练，G05/G06 仍为 `Partial`。
 
 本页运行 [`EXP-P1-SIGNED-FACE-RESCUE-FUNNEL`](../experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)
 冻结的四个因果格。`run_name` 是每条训练不可复用的运行名；`seed` 是随机初始化/采样种子；其他缩写见
@@ -35,7 +35,7 @@
 ```bash
 SOURCE_COMMIT=882fea4285f0cf9a97ba79d79ae8af31d26ea1ed
 SOURCE=/workspace/codexschema/nohope_signed_face_rescue_882fea4
-CONTROL=/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v3
+CONTROL=/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v4
 ARTIFACT=/workspace/codexschema/phase1_signed_face_rescue_20260713
 
 git -C /workspace/codexschema/nohope worktree add --detach "$SOURCE" "$SOURCE_COMMIT"
@@ -62,8 +62,8 @@ LAUNCHER_SHA=$(sha256sum "$LAUNCHER" | awk '{print $1}')
 不要手改生产副本。commit 合入后以本页记录的最终 SHA 对账；如果不同，停止并回到源码审查，不能现场
 “更新期望值”。
 
-本版冻结值：manifest `a486aa233e14ae00398fa7ad68124b93ae81ce85d42d6ca0b706a3afe4dbc339`；
-launcher `7724fc852917e52f7f01cec94bf0a16a3d92e0dab0822de6037defb2cf85b9aa`。
+本版冻结值：manifest `2e22e799bba1282f0e1f27aac88a9bc79b8aa0c4fa7eaed01483db8a1937fad3`；
+launcher `ae53dd1d20c1087c77b98311235624ddc6baf9bc8fde1a75123893c295d3da3c`。
 
 v1 文件保留在 `control/v1`，其 runtime `validate` 在创建任何 run claim 前 fail closed。根因不是父模型
 非有限：旧审计只遍历 checkpoint 顶层，而 RSL-RL 的浮点权重位于嵌套 state dict，合同 provenance
@@ -77,6 +77,11 @@ v2 通过上述 checkpoint preflight，但首格在创建 claim 后、第一次�
 历史 `6d93bcb` checkout。该失败目录和日志永久保留，v2 不自动重试。v3 换新 run name/control 路径，
 逐字节绑定 tracked `setup_train_env.sh`，拒绝任何 `setup_train_env.local.sh`，显式构造确定性环境 SHA
 `ddaa0eff...d743`，并在创建 claim 前要求 `whole_body_tracking.__file__` 位于 exact `882fea4` worktree。
+
+v3 的环境 SHA 正确，但 preflight 把路径检查写成了真正 import；IsaacLab 在 `SimulationApp` 启动前
+导入 `omni.kit` 本来就会失败，所以 v3 也在 claim 前被拒绝。v4 保留该 control 证据，改用
+`importlib.util.find_spec` 只解析 `whole_body_tracking` 的 source path、不执行包；正式 import 仍由
+locked Kit boot 在 `SimulationApp` 之后完成。
 
 ## 2. 只读校验与四格命令复核
 
@@ -152,7 +157,7 @@ L1 完整，不代表 L2 已授权。
 
 ## 5. L2 当前 fail-closed
 
-当前 v3 对所有 `--stage l2 validate|plan|launch` 都在任何 runtime 写入前返回：
+当前 v4 对所有 `--stage l2 validate|plan|launch` 都在任何 runtime 写入前返回：
 `L2 is blocked`。原因不是缺 GPU，而是 immutable signed-face directional checkpoint paper 的
 schedule/path/SHA 尚未冻结。不得绕过 validator，也不得把 L1 completion 文件改名为 L2 授权。
 
@@ -164,7 +169,7 @@ schedule/path/SHA 尚未冻结。不得绕过 validator，也不得把 L1 comple
   --stage l2 validate
 ```
 
-后续必须提交 reviewed v4，把同一 immutable paper 的 path/SHA、判读合同和 activation closure 一起冻结，
+后续必须提交 reviewed v5，把同一 immutable paper 的 path/SHA、判读合同和 activation closure 一起冻结，
 才能讨论 L2。到那时每个预注册 checkpoint 仍须检查进程、GPU、RAM、完整日志中的
 NaN/Inf/Traceback/OOM/Killed、文件名与嵌入 iteration、tensor finite、checkpoint ↔ 相邻 hard-contract
 SHA/lineage；不要为填空闲卡复制第二 seed。

@@ -1,7 +1,7 @@
 # EXP-P1-SIGNED-FACE-RESCUE-FUNNEL：有符号拍面修复后的单-seed 机制漏斗
 
-状态：`preregistered_v3_after_two_preserved_prelearning_failures`
-证据等级：E1（v3 machine prereg/launcher 与静态攻击回归通过；尚无新训练）
+状态：`preregistered_v4_after_three_preserved_prelearning_failures`
+证据等级：E1（v4 machine prereg/launcher 与静态攻击回归通过；尚无新训练）
 人类负责人：franco  
 执行者：Codex  
 全局优先级：只继承 [`NOW` 队列第 1 项](../../NOW.md#统一工作队列唯一优先级账本)，本页不另建队列。
@@ -126,8 +126,16 @@ claim。当时 GPU 随进程退出恢复为空。
 source-first Python 环境传给 child。直接 source 该机器文件也不合法，因为它把 `HOPE_WBT` 固定到旧
 `6d93bcb` checkout。v3 使用新 control 与新四格 run name，绑定 tracked `setup_train_env.sh` SHA，拒绝
 untracked `setup_train_env.local.sh`，从 exact `882fea4` 和 reviewed IsaacLab root 构造确定性环境 SHA
-`ddaa0eff...d743`；runtime `validate` 必须在 claim 前 import `whole_body_tracking`，且模块路径必须落在
-该 exact worktree。训练配方、seed、预算、输入和 L2 blocker 仍不变。
+`ddaa0eff...d743`；runtime `validate` 必须在 claim 前解析 `whole_body_tracking` 到该 exact worktree。
+训练配方、seed、预算、输入和 L2 blocker 仍不变。
+
+### v3 Kit 前 import 假拒绝与 v4 修正
+
+v3 的确定性环境 SHA 和 source-first 路径已经正确，但 preflight 为证明来源而真正 import 了
+`whole_body_tracking`。该包会继续导入 IsaacLab/`omni.kit`，而 `omni.kit` 只有在 `SimulationApp`
+启动后才合法，因此 v3 在 claim 前得到预期的 Kit 前 import 错误。这不是 child 训练失败，也没有产生
+新 run。v4 保留 `control/v3`，用 `importlib.util.find_spec` 只解析 module origin、不执行包；正式 import
+仍由 locked Kit boot 在创建 `SimulationApp` 后完成。
 
 ### 父合同扩展边界
 
@@ -145,11 +153,11 @@ L1 只是一份 25-update launch-integrity smoke。四个 L1 terminal 都 finite
 
 ## 仍未关闭的发射/判卷缺口
 
-- clean detached `882fea4` 训练 worktree 已在 Pod1 建立；v1 audit 假拒绝与 v2 pre-learning import
-  失败均已归档且未覆盖。v3 生产副本与 runtime `validate/launch` 尚未完成，因此仍无新 checkpoint。
+- clean detached `882fea4` 训练 worktree 已在 Pod1 建立；v1 audit 假拒绝、v2 pre-learning import
+  失败与 v3 Kit 前假拒绝均已归档且未覆盖。v4 runtime `validate/launch` 尚未完成，因此仍无新 checkpoint。
 - L1 必须先实际运行并生成四格终档 completion/activation 证据。
 - 相对 `+1000` 的 immutable signed-face directional checkpoint paper 的 exact schedule/path/SHA 尚未
-  冻结。manifest 明确 `l2.launch_authorized=false`；必须另发 reviewed v4 paper activation 后才能启动
+  冻结。manifest 明确 `l2.launch_authorized=false`；必须另发 reviewed v5 paper activation 后才能启动
   L2。当前 launcher 也不启动 judge、不能自动晋级或购买第二 seed。
 
 当前只授权按运行手册进行仿真 L1 runtime validate/launch；不授权 L2、judge、部署或真机。

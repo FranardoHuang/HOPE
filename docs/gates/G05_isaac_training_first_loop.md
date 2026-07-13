@@ -1459,7 +1459,8 @@ focused 静态/攻击回归 `23 passed`。首次 Pod `control/v1` preflight 在�
 finite，合同三元组实际位于 runner 的 `infos`。`control/v1` 保留未覆盖，v2 改为递归 finite 扫描并
 强制从 `infos` 绑定 schema/SHA/lineage。v2 随后在 A 格首次 learning iteration 前暴露 source-first
 环境未传给 child；失败 claim/log 保留，B/C/D 未创建。v3 绑定 tracked setup 脚本、拒绝 local override，
-并在 claim 前验证模块从 exact `882fea4` worktree import。当前仍没有新 Isaac checkpoint 行为结果，
+v3 因在 `SimulationApp` 前真正 import IsaacLab 而假拒绝；v4 改用 `find_spec` 只验证模块 origin 位于
+exact `882fea4` worktree，正式 import 留给 Kit boot。当前仍没有新 Isaac checkpoint 行为结果，
 不能把 E1 写成训练修复。
 复现命令、SSH 中断恢复和半写 claim 的 fail-closed 处置见
 [操作文档](../operations/run_phase1_signed_face_rescue_funnel.md)。
