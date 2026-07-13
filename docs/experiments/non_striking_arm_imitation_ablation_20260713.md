@@ -1,10 +1,10 @@
 # 非击球臂模仿消融
 
-- 状态：`running / Partial`（A0 已运行且产出 finite `model_200.pt`；A1 尚未 claim，等待一次性 v1r1 continuation）
-- 证据等级：[E1](../DEFINITIONS.md)（源码门 + A0 runtime/checkpoint 绑定；尚无 A0/A1 配对结果）
+- 状态：`running / Partial`（A0/A1 均已 exact 启动；尚无 paired checkpoint 终档或同卷结果）
+- 证据等级：[E2](../DEFINITIONS.md)（两臂 runtime/合同已绑定；尚无 A0/A1 行为结论）
 - 人类负责人：Franco
 - 执行者：Codex
-- 工作分支：`Franco_codex/non-striking-arm-a01-prereg-20260714`
+- 工作分支：`Franco_codex/non-striking-arm-a01-runtime-receipt-20260714`
 - 训练源码 commit：`353a11419ae8589ed4a374ed97169cd7a50d50a3`
 - 预注册/runner commit：`40db3fe5a61d3643cc6a50188a0615666b2d8d91`
 
@@ -88,6 +88,27 @@ v1 verifier 复现同一错误。随后先 no-clobber 写 recovery attestation�
 A1 claim。它没有 A0 launch 路径、自动 retry、broad signal、judge 或真机命令；A0 死亡、任一证据变化、
 A1 预存在或 bank 漂移都永久 fail closed。
 
+### v1r1 runtime receipt
+
+2026-07-14，冻结 v1r1 external control 的 `validate-runtime` 全部通过，随后唯一允许的
+`launch-a1` 成功：
+
+- A1 exact PID=PGID `1816234`，已越过 Kit ready；
+- A1 emitted hard-contract SHA 为
+  `c85b52a28ad64a667a7b522562842466270b3741591f6daf09afc1d0f7c6b146`；
+- A1 `runtime_verified.json` 的现场 SHA 以 `1277cf` 开头、`77f4` 结尾；recovery attestation SHA 以
+  `604288` 开头、`e9cb` 结尾。当前仓库只收到这两个摘要，故不把它们伪装成可独立复算的完整 machine
+  receipt；完整字节仍由 frozen external control/no-clobber ledger 保管；
+- A0 仍为原 PID=PGID `1811464`，continuation 未重启或改动 A0；
+- judge 未启动，A2、第二 seed、晋级和真机继续阻断。
+
+external control 下单独运行 `--mode plan` 暴露了一个只读路径问题：`build_plan` 从外部 launcher 路径取
+`parents[1]`，会把旧相对 manifest 解析为 `control/configs/...`。该调用在读文件前失败，没有写 attestation、
+claim 或进程；exact repo-source plan 仍由新旧 runner `30 passed` 覆盖。runtime 的
+`validate-runtime/launch-a1` 使用冻结的绝对 v1 control 路径，不经过该 plan 路径，实际已全绿并成功启动
+A1。因为 v1r1 manifest/runner SHA 已进入 recovery、launch 与 runtime 账，**本次不得修改冻结字节**；
+路径问题只在后续新版本中用独立 source/runtime-root 参数修复。
+
 ## 判读与晋级规则
 
 训练 checkpoint 先由 finalizer 验证 filename iteration、checkpoint 内 embedded iteration、finite tensor、
@@ -101,16 +122,16 @@ A2（移除左臂模仿后，把固定总 reward 预算重分给平衡/就绪）
 
 ## 结果
 
-源码与机器预注册已完成；v1r1 recovery 专项 `12 passed`，与原 A0/A1/reward focused suite 合跑结果见
-[操作文档](../operations/run_phase1_non_striking_arm_imitation_a01.md)。A0 已有首个绑定且 finite 的
-`model_200.pt`，但 A1 尚未启动，也没有同卷 Isaac/MuJoCo 行为、配对成绩或真机结果；因此不能从 A0
-单臂曲线声称“不模仿左臂更好”或继续购买 seed。
+源码与机器预注册已完成；v1r1 recovery 专项 `12 passed`，新旧 runner 合跑 `30 passed`。A0 已有首个
+绑定且 finite 的 `model_200.pt`；A1 已 ready 且 hard contract 绑定通过，但尚未收到 A1 milestone
+checkpoint，也没有同卷 Isaac/MuJoCo 行为、配对成绩或真机结果。因此仍不能声称“不模仿左臂更好”或
+继续购买 seed。
 
 ## 下一步
 
-1. 不得重跑 v1 或重启 A0；安装 exact v1r1 control，先只读 `validate-runtime`。
-2. root 审阅 recovery attestation 条件后只发射 A1；继续记录两臂 exact PID/PGID、GPU/RAM 与
+1. 不得重跑 v1、v1r1 `launch-a1` 或改动冻结 control；继续记录两臂 exact PID/PGID、GPU/RAM、日志与
    `+200/+500/+1000` checkpoint。
-3. 两臂自然终档后用 v1r1 finalizer 验证 paired contract/checkpoint，再激活同一 immutable signed paper
+2. 两臂自然终档后用 v1r1 finalizer 验证 paired contract/checkpoint，再激活同一 immutable signed paper
    做 paired 早判；不因 A0 单臂曲线或最佳 seed 晋级。
-4. A1 存活后才另开 A2 固定预算和 recovery/ready 交互实验。
+3. external plan 路径问题只在新版本加负测修正，不得改写已绑定现场的 v1r1 bytes。
+4. paired 行为门通过后才另开 A2 固定预算和 recovery/ready 交互实验。

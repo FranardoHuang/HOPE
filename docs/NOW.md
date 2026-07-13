@@ -37,13 +37,14 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
   canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。它们现在只解锁独立 exact GMR prereg，
   还不是“动作会打球”。
-- **当前运行态：** 2026-07-14 04:04 CST 只读审计时，Pod1/GPU0 上正在跑非击球臂消融的 A0
-  （保留左臂模仿对照，PGID `1811464`）：`211/1001` update，`model_200.pt` 文件名/内嵌迭代一致，
-  `1,762,717` 个 tensor 元素全 finite，fresh lineage=`1`，内嵌合同 SHA 与相邻 schema-3 hard contract
-  `14ef410b...29f1` 精确一致，日志未见 NaN/Traceback/OOM。原 launcher 在 A0 过 Kit 后把 schema-3
-  bank 绑定误当成 hard contract 的直接 physics leaf，因而假拒绝并未认领 A1；一次性 continuation
-  只允许验证现有 A0 后补发 A1，禁止重启 A0。Pod1 其余两卡、Pod2 三卡当时均无 compute，未见 Yikang
-  作业。当前资源上限由 Franco 定为 Pod1 每卡 `4` 个我们的 trainer、Pod2 每卡 `3` 个，为 Yikang
+- **当前运行态：** Pod1/GPU0 的非击球臂单-seed 机制配对已形成两条 exact trainer。A0（保留左臂
+  模仿对照）PID=PGID `1811464`，`model_200.pt` 的文件名/内嵌迭代、`1,762,717` 个 finite tensor、
+  fresh lineage=`1` 与 hard-contract SHA `14ef410b...29f1` 已绑定；A1（只解除左非击球臂模仿）经一次性
+  continuation 的 `validate-runtime` 全绿后成功启动，PID=PGID `1816234`、Kit ready、hard-contract SHA
+  `c85b52a...6b146`。A0 保持 untouched，judge 未启动；A1 尚无 milestone，不能作效果判断。external
+  plan 另有一个只读相对路径 bug，在 write/claim 前失败且不影响已成功的绝对路径 runtime/launch；已被
+  recovery/launch/runtime 账绑定的 v1r1 bytes 不得修改，只能后续开新版本修。当前资源上限由 Franco
+  定为 Pod1 每卡 `4` 个我们的 trainer、Pod2 每卡 `3` 个，为 Yikang
   的最多一张卡留动态余量；空槽只给已过前置门的不同机制，不复制失败 seed。
   signed-face exam bank 已过 E2：371 题 old/new replay 逐字节一致并发布新 bank/report；K100 paper
   source gate 也已进入 main，但 private-bank consume 尚未运行，所以 schedule/activation/L2/judge 仍阻断。
@@ -189,8 +190,9 @@ policy 输出 31 个关节目标，PPO 根据 Reward 改进它，独立考卷再
 
 **效果与差距：** 有的独立初始化达到 100/100，另一个只有 20/100。结果属于整套配方，不能归因
 到某一个 Reward 项。拍面尺和稳定性解决前冻结 Reward；理想状态还需用单变量配对证明各项贡献，
-并验证融合后不伤平衡和连续恢复。解除左侧非击球臂模仿、让它参与平衡是最新候选消融，尚未运行，
-不属于当前 Reward；见[非击球臂实验](experiments/non_striking_arm_imitation_ablation_20260713.md)。
+并验证融合后不伤平衡和连续恢复。解除左侧非击球臂模仿、让它参与平衡的单-seed A0/A1 配对正在运行，
+但尚无 paired milestone/同卷结果，不属于已采用 Reward；见
+[非击球臂实验](experiments/non_striking_arm_imitation_ablation_20260713.md)。
 
 ### 4.5 时序与连续：一拍结束后怎么办
 

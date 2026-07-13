@@ -1304,8 +1304,14 @@ runtime 已形成一个受控 partial：A0 于 `2026-07-13T19:48:35Z` 以 PID=PG
 hard-contract SHA `14ef410b...29f1`。旧 outer verifier 随后因把 schema-3 bank metadata 的 physics SHA
 错当 compact hard-record direct leaf 而精确假拒绝，故 A1 从未 claim。v1r1 source gate 现改为独立解析
 bank file/metadata、复现旧错误、先 attest 既有 A0 三份稳定 SHA，再且仅再 claim A1；A0 dead/drift、
-A1 预存在或 bank drift 都 fail closed，且禁止重跑 A0。v1r1 专项 `12 passed`，但 A1 trainer、配对终档和
-同卷判读仍未发生；A2 固定预算继续 blocked。详见[实验](../experiments/non_striking_arm_imitation_ablation_20260713.md)
+A1 预存在或 bank drift 都 fail closed，且禁止重跑 A0。v1r1 专项 `12 passed`，新旧 runner 合跑
+`30 passed`。现场 `validate-runtime` 全绿后，唯一一次 `launch-a1` 已成功：A1 PID=PGID `1816234`、
+Kit ready，emitted hard-contract SHA 为
+`c85b52a28ad64a667a7b522562842466270b3741591f6daf09afc1d0f7c6b146`；A0 PID=PGID `1811464`
+untouched。recovery/runtime receipt 已 no-clobber 写入，judge 未启动。external `--mode plan` 另暴露只读
+相对路径 bug：它在 external control 下误找 `control/configs` 并在任何写/claim 前失败；runtime/launch
+使用冻结绝对 v1 路径，不经过该分支。已绑定的 v1r1 bytes 不得修改，路径 bug 只能在新版本修。
+A1 milestone、配对终档和同卷判读仍未发生；A2 固定预算继续 blocked。详见[实验](../experiments/non_striking_arm_imitation_ablation_20260713.md)
 与[操作](../operations/run_phase1_non_striking_arm_imitation_a01.md)。S0/M0 有 Pod 离线结构结果，但没有
 Isaac/MuJoCo 训练、仿真行为或真机动作，G05 仍为 `Partial`。
 
