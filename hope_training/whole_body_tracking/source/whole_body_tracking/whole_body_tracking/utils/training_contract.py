@@ -22,6 +22,7 @@ ACTOR_LEG_REF_MASK_PROVENANCE_BINDING_KEY = "actor_leg_ref_mask_provenance_sha25
 CHECKPOINT_CONTRACT_SCHEMA_KEY = "training_contract_schema_version"
 CHECKPOINT_CONTRACT_SHA_KEY = "training_contract_sha256"
 CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY = "training_contract_lineage_exact"
+CHECKPOINT_LAUNCH_CLAIM_SHA_KEY = "training_launch_claim_sha256"
 SCHEMA3_TASK_KEYS = (
     "racket_control_point",
     "racket_control_point_offset_wrist_m",
@@ -74,6 +75,21 @@ RUNTIME_EXECUTION_KEYS = (
     "motion_kinematics_contracts",
     "motion_kinematics_exact",
 )
+
+
+def validate_training_launch_claim_sha256(value: str) -> str:
+    """Validate the immutable launcher claim embedded in checkpoint ``infos``.
+
+    Launch claims are operational provenance rather than part of the scientific hard contract.
+    Their spelling stays deliberately strict so whitespace or case normalization cannot make two
+    distinct atomic claims look identical after the process starts.
+    """
+
+    if type(value) is not str or len(value) != 64 or any(
+        ch not in "0123456789abcdef" for ch in value
+    ):
+        raise ValueError("training_launch_claim_sha256 must be 64 lowercase hex characters")
+    return value
 
 
 def actor_leg_ref_mask_provenance_required(contract: Mapping) -> bool:

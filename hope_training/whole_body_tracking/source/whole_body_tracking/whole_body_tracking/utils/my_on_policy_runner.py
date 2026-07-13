@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 import os
 
@@ -16,7 +18,9 @@ from whole_body_tracking.utils.training_contract import (
     CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY,
     CHECKPOINT_CONTRACT_SCHEMA_KEY,
     CHECKPOINT_CONTRACT_SHA_KEY,
+    CHECKPOINT_LAUNCH_CLAIM_SHA_KEY,
     TRAINING_CONTRACT_SCHEMA_VERSION,
+    validate_training_launch_claim_sha256,
 )
 
 
@@ -58,12 +62,19 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         training_contract_schema_version: int | None = None,
         training_contract_sha256: str | None = None,
         training_contract_lineage_exact: bool = False,
+        training_launch_claim_sha256: str | None = None,
     ):
+        validated_launch_claim = None
+        if training_launch_claim_sha256 is not None:
+            validated_launch_claim = validate_training_launch_claim_sha256(
+                training_launch_claim_sha256
+            )
         super().__init__(env, train_cfg, log_dir, device)
         self.registry_name = registry_name
         self.training_contract_schema_version = training_contract_schema_version
         self.training_contract_sha256 = training_contract_sha256
         self.training_contract_lineage_exact = bool(training_contract_lineage_exact)
+        self.training_launch_claim_sha256 = validated_launch_claim
         if (training_contract_schema_version is None) != (training_contract_sha256 is None):
             raise ValueError("training contract schema and SHA256 must be supplied together")
         if training_contract_schema_version is not None:
@@ -79,13 +90,17 @@ class MotionOnPolicyRunner(OnPolicyRunner):
 
     def save(self, path: str, infos=None):
         """Save the model and training information."""
-        if self.training_contract_sha256 is not None:
+        if (
+            self.training_contract_sha256 is not None
+            or self.training_launch_claim_sha256 is not None
+        ):
             if infos is None:
                 infos = {}
             elif not isinstance(infos, dict):
                 raise TypeError("runner checkpoint infos must be a dict for contract binding")
             else:
                 infos = dict(infos)
+        if self.training_contract_sha256 is not None:
             infos[CHECKPOINT_CONTRACT_SCHEMA_KEY] = int(
                 self.training_contract_schema_version
             )
@@ -93,6 +108,8 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             infos[CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY] = (
                 1 if self.training_contract_lineage_exact else 0
             )
+        if self.training_launch_claim_sha256 is not None:
+            infos[CHECKPOINT_LAUNCH_CLAIM_SHA_KEY] = self.training_launch_claim_sha256
         super().save(path, infos)
         if self.logger_type in ["wandb"]:
             import wandb

@@ -14,6 +14,8 @@ motions are first-class inputs; the WandB motion registry is an optional sharing
 The legacy `scripts/rsl_rl/train.py --task=... --registry_name=...` still works too.
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import math
@@ -44,6 +46,66 @@ def _get(node, key, default=None):
         return node.get(key, default)
     except Exception:
         return default
+
+
+_KIT_CARB_TASKING_THREAD_SETTING = "/plugins/carb.tasking.plugin/threadCount"
+_KIT_TBB_THREAD_SETTING = "/plugins/omni.tbb.globalcontrol/maxThreadCount"
+_KIT_USE_OMNI_JOB_SETTING = "/plugins/carb.tasking.plugin/useOmniJob"
+
+
+def _resolve_kit_thread_caps(cfg):
+    """Return optional, exact Kit argv for a paired runtime thread cap."""
+
+    carb_count = _get(cfg, "kit_carb_tasking_thread_count")
+    tbb_count = _get(cfg, "kit_tbb_thread_count")
+    if carb_count is None and tbb_count is None:
+        return None, None, None
+    if carb_count is None or tbb_count is None:
+        raise ValueError(
+            "kit_carb_tasking_thread_count and kit_tbb_thread_count must be supplied together"
+        )
+    for name, value in (
+        ("kit_carb_tasking_thread_count", carb_count),
+        ("kit_tbb_thread_count", tbb_count),
+    ):
+        if type(value) is not int:
+            raise TypeError(f"{name} must be an integer (bool is not accepted), got {value!r}")
+        if value <= 0:
+            raise ValueError(f"{name} must be > 0, got {value!r}")
+    kit_args = (
+        f"--{_KIT_CARB_TASKING_THREAD_SETTING}={carb_count} "
+        f"--{_KIT_TBB_THREAD_SETTING}={tbb_count}"
+    )
+    return kit_args, carb_count, tbb_count
+
+
+def _verify_kit_thread_caps(settings, expected_carb_count: int, expected_tbb_count: int) -> None:
+    """Fail closed unless Kit applied both caps and disabled the OmniJob backend."""
+
+    observed_carb_count = settings.get(_KIT_CARB_TASKING_THREAD_SETTING)
+    observed_tbb_count = settings.get(_KIT_TBB_THREAD_SETTING)
+    use_omni_job = settings.get(_KIT_USE_OMNI_JOB_SETTING)
+    if type(observed_carb_count) is not int or observed_carb_count != expected_carb_count:
+        raise RuntimeError(
+            "Kit carb.tasking thread cap mismatch: "
+            f"expected={expected_carb_count!r} observed={observed_carb_count!r}"
+        )
+    if type(observed_tbb_count) is not int or observed_tbb_count != expected_tbb_count:
+        raise RuntimeError(
+            "Kit omni.tbb thread cap mismatch: "
+            f"expected={expected_tbb_count!r} observed={observed_tbb_count!r}"
+        )
+    if type(use_omni_job) is not bool or use_omni_job is not False:
+        raise RuntimeError(
+            "Kit carb.tasking useOmniJob must be exactly false, "
+            f"observed={use_omni_job!r}"
+        )
+    print(
+        "[train.py] KIT_THREAD_CAP_OK: "
+        f"carb.tasking={observed_carb_count} omni.tbb={observed_tbb_count} "
+        "useOmniJob=false",
+        flush=True,
+    )
 
 
 def _as_bool(x):
@@ -208,12 +270,66 @@ def _motion_imitation_body_names_contract(env_cfg) -> dict[str, list[str] | None
     return contract
 
 
+def _racket_guidance_reward_contract(env_cfg, *, racket_task: bool) -> dict | None:
+    """Bind the two post-override guidance terms that define a guidance ablation.
+
+    Most reward weights remain curriculum-mutable.  These two terms are different: a signed-face
+    mechanism comparison uses their exact post-Hydra values as its causal identity.  Binding both
+    the positional and angular terms prevents a copied checkpoint from being relabelled as the
+    other arm after it leaves the launch directory.
+    """
+
+    if not racket_task:
+        return None
+    rewards = getattr(env_cfg, "rewards", None)
+    if rewards is None:
+        raise RuntimeError("racket guidance hard contract requires env_cfg.rewards")
+
+    def term_contract(name: str, bound_name: str) -> dict:
+        term = getattr(rewards, name, None)
+        if term is None:
+            raise RuntimeError(f"racket guidance hard contract requires rewards.{name}")
+        weight = getattr(term, "weight", None)
+        if isinstance(weight, bool) or not isinstance(weight, (int, float)):
+            raise RuntimeError(f"rewards.{name}.weight must be a finite number")
+        weight = float(weight)
+        if not math.isfinite(weight) or weight > 0.0:
+            raise RuntimeError(f"rewards.{name}.weight must be finite and <= 0")
+        params = getattr(term, "params", None)
+        if not isinstance(params, dict):
+            raise RuntimeError(f"rewards.{name}.params must be a mapping")
+        if params.get("command_name") != "racket_target":
+            raise RuntimeError(
+                f"rewards.{name}.command_name must be exactly 'racket_target'"
+            )
+        bound = params.get(bound_name)
+        if isinstance(bound, bool) or not isinstance(bound, (int, float)):
+            raise RuntimeError(f"rewards.{name}.{bound_name} must be a finite number")
+        bound = float(bound)
+        upper = math.pi if bound_name == "theta_max" else math.inf
+        if not math.isfinite(bound) or bound <= 0.0 or bound > upper:
+            range_text = "(0, pi]" if bound_name == "theta_max" else "> 0"
+            raise RuntimeError(f"rewards.{name}.{bound_name} must be finite and {range_text}")
+        return {
+            "weight": weight,
+            "command_name": "racket_target",
+            bound_name: bound,
+        }
+
+    return {
+        "position": term_contract("racket_guidance", "d_max"),
+        "signed_face": term_contract("racket_face_guidance", "theta_max"),
+    }
+
+
 def _build_training_hard_contract(env, actor_contract) -> dict:
     """Immutable actor/task facts that must match across a checkpoint resume.
 
-    Reward weights, termination thresholds and optimizer settings are deliberately absent: they
-    are curriculum-mutable. Geometry, command meaning, clip identity, action processing, and every
-    field that can move a strike/reveal/deadline or actor-visible target in time are not.
+    Reward weights, termination thresholds and optimizer settings are normally absent because
+    they are curriculum-mutable.  A narrow exception binds the post-override racket-guidance pair:
+    those values are the causal identity of the signed-face C2/D2 experiment.  Geometry, command
+    meaning, clip identity, action processing, and every field that can move a strike/reveal/
+    deadline or actor-visible target in time are also immutable.
     """
     from whole_body_tracking.utils.training_contract import (
         TRAINING_CONTRACT_SCHEMA_VERSION,
@@ -373,6 +489,9 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         # Bind the exact post-override lists so A0/A1 checkpoints remain distinguishable even if
         # copied away from their outer launch directories.
         "motion_imitation_body_names": _motion_imitation_body_names_contract(env_cfg),
+        "racket_guidance_reward": _racket_guidance_reward_contract(
+            env_cfg, racket_task=racket_cmd is not None
+        ),
         "motion_clips": clips,
         "question_bank": question_bank,
     }
@@ -1911,6 +2030,10 @@ def _run(cfg):
     # resolve_motion_sources already returned normalized 'collection:alias' refs (a bare collection name
     # is an HTTP 400). List-valued: the runner records ALL used clips, not just clip 0.
     runner_registry_name = motion_registries if motion_registries else None
+    # Optional operational provenance supplied by a fail-closed launcher.  It is embedded only in
+    # checkpoint infos and deliberately excluded from training_contract.json (and its scientific
+    # contract SHA).  Plain training commands remain compatible: absent means no claim is written.
+    training_launch_claim_sha256 = _get(cfg, "training_launch_claim_sha256")
     # A checkpoint may claim formal schema-3 provenance only when it is fresh from this contract or
     # resumes an already exact-bound schema-3 lineage. A legacy/mismatched warm-start remains useful,
     # but every descendant checkpoint is permanently marked exact-ineligible; merely saving it beside
@@ -1987,6 +2110,7 @@ def _run(cfg):
         training_contract_schema_version=int(hard_contract["schema_version"]),
         training_contract_sha256=hard_contract_sha256,
         training_contract_lineage_exact=contract_lineage_exact,
+        training_launch_claim_sha256=training_launch_claim_sha256,
     )
     runner.add_git_repo_to_log(__file__)
 
@@ -2028,21 +2152,33 @@ def _run(cfg):
 def main(cfg):
     OmegaConf.resolve(cfg)
     OmegaConf.set_struct(cfg, False)
+    kit_args, kit_carb_count, kit_tbb_count = _resolve_kit_thread_caps(cfg)
 
     # Launch Isaac Sim BEFORE importing isaaclab modules. Clear argv so the kit app does not try to
     # parse Hydra's `task=...`/`algo=...` overrides.
     sys.argv = sys.argv[:1]
     from isaaclab.app import AppLauncher
 
-    app_launcher = AppLauncher(
-        headless=bool(cfg.headless), device=str(cfg.device), enable_cameras=bool(cfg.video)
-    )
+    app_launcher_kwargs = {
+        "headless": bool(cfg.headless),
+        "device": str(cfg.device),
+        "enable_cameras": bool(cfg.video),
+    }
+    if kit_args is not None:
+        app_launcher_kwargs["kit_args"] = kit_args
+    app_launcher = AppLauncher(**app_launcher_kwargs)
     simulation_app = app_launcher.app
     # Print the traceback BEFORE closing the app: Isaac's simulation_app.close() hard-exits the
     # process (os._exit), which otherwise swallows any exception from _run and makes a real failure
     # look like a clean "exit 0" with the log truncated at startup.
     failed = False
     try:
+        if kit_args is not None:
+            import carb
+
+            _verify_kit_thread_caps(
+                carb.settings.get_settings(), kit_carb_count, kit_tbb_count
+            )
         _run(cfg)
     except Exception:
         import traceback

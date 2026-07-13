@@ -626,6 +626,70 @@ def test_face_guidance_weight_and_theta_max_wired():
         _apply({"rewards": {"racket_face_guidance_theta_max": 0.0}})  # zero: gradient dead everywhere
 
 
+def test_c2_d2_guidance_recipe_is_a_checkpoint_hard_contract_fact():
+    c2, _ = _apply({
+        "rewards": {
+            "racket_guidance_weight": 0.0,
+            "racket_face_guidance_weight": 0.0,
+            "racket_face_guidance_theta_max": 3.141592653589793,
+        }
+    })
+    d2, _ = _apply({
+        "rewards": {
+            "racket_guidance_weight": 0.0,
+            "racket_face_guidance_weight": -0.4,
+            "racket_face_guidance_theta_max": 3.141592653589793,
+        }
+    })
+    c2_fact = train_mod._racket_guidance_reward_contract(c2, racket_task=True)
+    d2_fact = train_mod._racket_guidance_reward_contract(d2, racket_task=True)
+    assert c2_fact != d2_fact
+    assert c2_fact["signed_face"]["weight"] == 0.0
+    assert d2_fact["signed_face"]["weight"] == -0.4
+
+    c2_without_axis = {
+        **c2_fact,
+        "signed_face": {**c2_fact["signed_face"], "weight": "<causal-axis>"},
+    }
+    d2_without_axis = {
+        **d2_fact,
+        "signed_face": {**d2_fact["signed_face"], "weight": "<causal-axis>"},
+    }
+    assert c2_without_axis == d2_without_axis
+    assert train_mod._racket_guidance_reward_contract(c2, racket_task=False) is None
+    with open(train_mod.__file__, encoding="utf-8") as stream:
+        assert '"racket_guidance_reward"' in stream.read()
+
+
+@pytest.mark.parametrize(
+    "term_name,attribute,value,message",
+    [
+        ("racket_guidance", "weight", float("nan"), "finite and <= 0"),
+        ("racket_guidance", "weight", 0.1, "finite and <= 0"),
+        ("racket_face_guidance", "weight", True, "finite number"),
+    ],
+)
+def test_guidance_hard_contract_rejects_ambiguous_weights(
+    term_name, attribute, value, message
+):
+    env_cfg = _make_env_cfg()
+    setattr(getattr(env_cfg.rewards, term_name), attribute, value)
+    with pytest.raises(RuntimeError, match=message):
+        train_mod._racket_guidance_reward_contract(env_cfg, racket_task=True)
+
+
+def test_guidance_hard_contract_rejects_wrong_command_or_bounds():
+    env_cfg = _make_env_cfg()
+    env_cfg.rewards.racket_face_guidance.params["command_name"] = "motion"
+    with pytest.raises(RuntimeError, match="exactly 'racket_target'"):
+        train_mod._racket_guidance_reward_contract(env_cfg, racket_task=True)
+
+    env_cfg = _make_env_cfg()
+    env_cfg.rewards.racket_face_guidance.params["theta_max"] = 3.5
+    with pytest.raises(RuntimeError, match=r"finite and \(0, pi\]"):
+        train_mod._racket_guidance_reward_contract(env_cfg, racket_task=True)
+
+
 # --------------------------------------------------------------------------------------------- #
 # R-a actor leg-reference mask
 # --------------------------------------------------------------------------------------------- #
