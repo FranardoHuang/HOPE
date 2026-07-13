@@ -595,6 +595,10 @@ _REWARD_KEYS = (
     "base_decel_weight", "base_decel_std", "base_decel_v_gain", "base_decel_v_max",
     # R16 / V1 wrist-mimic surgery (orientation 2026-07-04; linear velocity 2026-07-08 §③).
     "free_wrist_ori_mimic", "free_wrist_vel_mimic",
+    # A0/A1 non-striking-arm imitation ablation (2026-07-14).  This deliberately has one
+    # narrow meaning: remove the three LEFT-arm links from all four body-imitation terms while
+    # retaining torso + the complete right (racket) arm.  It does not touch any safety term.
+    "free_non_striking_arm_mimic",
     "joint_torques_weight",
     # per-term overrides of the six imitation terms + the global/in-window scales
     "motion_global_anchor_pos_weight", "motion_global_anchor_pos_std",
@@ -987,6 +991,76 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                          f"rewards.{_tn}.params.body_names contains {_WRIST}")
                 _term.params["body_names"] = _names
                 applied.append(f"rewards.{_tn}.body_names-={_WRIST}")
+        # A0/A1 (Franco 2026-07-13): test whether the non-racket LEFT arm should remain free to
+        # regulate balance instead of copying the teacher.  Fail closed on the exact current
+        # upper-body contract; broad regexes or best-effort subtraction could silently release a
+        # torso/right-arm body after a future asset rename.  A1 changes ONLY the four imitation
+        # body lists.  Joint/action limits, torque/contact/self-collision rewards, all
+        # terminations, and every other reward remain untouched.
+        _free_non_striking = _get(rw, "free_non_striking_arm_mimic")
+        if _free_non_striking is not None and _as_explicit_bool(
+            _free_non_striking, "task.rewards.free_non_striking_arm_mimic"
+        ):
+            _EXPECTED_UPPER = (
+                "torso_Link",
+                "left_shoulder_roll_Link",
+                "left_elbow_Link",
+                "left_wrist_yaw_Link",
+                "right_shoulder_roll_Link",
+                "right_elbow_Link",
+                "right_wrist_yaw_Link",
+            )
+            _EXPECTED_WITHOUT_RACKET_WRIST = tuple(
+                name for name in _EXPECTED_UPPER if name != "right_wrist_yaw_Link"
+            )
+            _LEFT_NON_STRIKING = {
+                "left_shoulder_roll_Link",
+                "left_elbow_Link",
+                "left_wrist_yaw_Link",
+            }
+            _A1_BODY_TERMS = (
+                "motion_body_pos",
+                "motion_body_ori",
+                "motion_body_lin_vel",
+                "motion_body_ang_vel",
+            )
+            for _tn in _A1_BODY_TERMS:
+                _require(hasattr(R, _tn), f"rewards.{_tn}")
+                _term = getattr(R, _tn)
+                _require(
+                    _term is not None and isinstance(_term.params.get("body_names"), (list, tuple)),
+                    f"rewards.{_tn}.params['body_names'] (non-striking-arm ablation needs an explicit body list)",
+                )
+                _before = tuple(str(name) for name in _term.params["body_names"])
+                # The current Phase-1 recipe already opts out of racket-wrist ORIENTATION mimic
+                # through free_wrist_ori_mimic=true.  Accept exactly that reviewed six-body
+                # variant as well as the seven-body base, then preserve whichever right-arm list
+                # A0 supplied.  No other omission/reordering is accepted.
+                _allowed_before = {_EXPECTED_UPPER}
+                if _tn in ("motion_body_ori", "motion_body_ang_vel"):
+                    _allowed_before.add(_EXPECTED_WITHOUT_RACKET_WRIST)
+                if _tn == "motion_body_lin_vel":
+                    # V1 is separately reviewed and may be composed explicitly in a future pair.
+                    _allowed_before.add(_EXPECTED_WITHOUT_RACKET_WRIST)
+                _require(
+                    _before in _allowed_before,
+                    f"rewards.{_tn}.params.body_names equals an exact reviewed A3 upper contract",
+                )
+                _after = [name for name in _before if name not in _LEFT_NON_STRIKING]
+                _require(
+                    tuple(name for name in _after if name == "torso_Link" or name.startswith("right_"))
+                    == tuple(
+                        name
+                        for name in _before
+                        if name == "torso_Link" or name.startswith("right_")
+                    ),
+                    f"rewards.{_tn}.params.body_names preserves the exact A0 torso/right-arm list",
+                )
+                _term.params["body_names"] = _after
+                applied.append(
+                    f"rewards.{_tn}.body_names={_after} "
+                    "(left non-striking arm imitation removed)"
+                )
         jt = _get(rw, "joint_torques_weight")
         if jt is not None:
             _require(hasattr(R, "joint_torques"), "rewards.joint_torques")

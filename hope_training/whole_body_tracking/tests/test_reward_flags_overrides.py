@@ -65,7 +65,13 @@ class _NS(types.SimpleNamespace):
 
 
 _WRIST = "right_wrist_yaw_Link"
-_UPPER = ["torso_Link", "right_elbow_Link", _WRIST]
+_LEFT_NON_STRIKING = [
+    "left_shoulder_roll_Link",
+    "left_elbow_Link",
+    "left_wrist_yaw_Link",
+]
+_RIGHT_STRIKING = ["right_shoulder_roll_Link", "right_elbow_Link", _WRIST]
+_UPPER = ["torso_Link", *_LEFT_NON_STRIKING, *_RIGHT_STRIKING]
 
 
 def _make_env_cfg(anchor_pos_none=True):
@@ -389,6 +395,104 @@ def test_v1_requires_explicit_body_list():
     del env_cfg.rewards.motion_body_lin_vel.params["body_names"]
     with pytest.raises(train_mod._OverrideError):
         _apply({"rewards": {"free_wrist_vel_mimic": True}}, env_cfg)
+
+
+# --------------------------------------------------------------------------------------------- #
+# A0/A1 non-striking-arm imitation mask
+# --------------------------------------------------------------------------------------------- #
+def test_a1_non_striking_arm_mask_changes_only_four_imitation_body_lists():
+    env_cfg = _make_env_cfg()
+    rewards_before = {
+        name: (term.weight, dict(term.params), term.func)
+        for name, term in vars(env_cfg.rewards).items()
+        if term is not None
+    }
+    terminations_before = dict(vars(env_cfg.terminations))
+    action_clamp_before = env_cfg.actions.joint_pos.clamp
+    actuator_friction_before = {
+        name: actuator.friction for name, actuator in env_cfg.scene.robot.actuators.items()
+    }
+
+    env_cfg, applied = _apply(
+        {"rewards": {"free_non_striking_arm_mimic": True}}, env_cfg
+    )
+
+    expected = ["torso_Link", *_RIGHT_STRIKING]
+    changed = {
+        "motion_body_pos",
+        "motion_body_ori",
+        "motion_body_lin_vel",
+        "motion_body_ang_vel",
+    }
+    for name, term in vars(env_cfg.rewards).items():
+        if term is None:
+            continue
+        before_weight, before_params, before_func = rewards_before[name]
+        assert term.weight == before_weight
+        assert term.func == before_func
+        if name in changed:
+            assert term.params["body_names"] == expected
+            assert {k: v for k, v in term.params.items() if k != "body_names"} == {
+                k: v for k, v in before_params.items() if k != "body_names"
+            }
+        else:
+            assert term.params == before_params
+    assert dict(vars(env_cfg.terminations)) == terminations_before
+    assert env_cfg.actions.joint_pos.clamp == action_clamp_before
+    assert {
+        name: actuator.friction for name, actuator in env_cfg.scene.robot.actuators.items()
+    } == actuator_friction_before
+    assert len([item for item in applied if "left non-striking arm imitation removed" in item]) == 4
+
+
+def test_a0_non_striking_arm_false_is_byte_preserving_noop():
+    env_cfg, applied = _apply(
+        {"rewards": {"free_non_striking_arm_mimic": False}}
+    )
+    for name in (
+        "motion_body_pos",
+        "motion_body_ori",
+        "motion_body_lin_vel",
+        "motion_body_ang_vel",
+    ):
+        assert getattr(env_cfg.rewards, name).params["body_names"] == _UPPER
+    assert applied == []
+
+
+def test_a1_non_striking_arm_mask_fails_closed_on_contract_drift_or_bad_boolean():
+    env_cfg = _make_env_cfg()
+    env_cfg.rewards.motion_body_pos.params["body_names"] = list(reversed(_UPPER))
+    with pytest.raises(train_mod._OverrideError, match="exact reviewed"):
+        _apply({"rewards": {"free_non_striking_arm_mimic": True}}, env_cfg)
+
+    env_cfg = _make_env_cfg()
+    del env_cfg.rewards.motion_body_ang_vel.params["body_names"]
+    with pytest.raises(train_mod._OverrideError, match="explicit body list"):
+        _apply({"rewards": {"free_non_striking_arm_mimic": True}}, env_cfg)
+
+    with pytest.raises(train_mod._OverrideError, match="explicit boolean"):
+        _apply({"rewards": {"free_non_striking_arm_mimic": "ture"}})
+
+
+def test_a1_composes_with_current_free_racket_wrist_orientation_recipe():
+    env_cfg, _ = _apply(
+        {
+            "rewards": {
+                "free_wrist_ori_mimic": True,
+                "free_non_striking_arm_mimic": True,
+            }
+        }
+    )
+    assert env_cfg.rewards.motion_body_pos.params["body_names"] == [
+        "torso_Link", *_RIGHT_STRIKING
+    ]
+    assert env_cfg.rewards.motion_body_lin_vel.params["body_names"] == [
+        "torso_Link", *_RIGHT_STRIKING
+    ]
+    for name in ("motion_body_ori", "motion_body_ang_vel"):
+        assert getattr(env_cfg.rewards, name).params["body_names"] == [
+            "torso_Link", "right_shoulder_roll_Link", "right_elbow_Link"
+        ]
 
 
 # --------------------------------------------------------------------------------------------- #
