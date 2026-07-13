@@ -28,7 +28,12 @@ REQUIRED_ACCEPT_MARKERS = (
     "training_contract_exact=1",
     "obs_dim=179",
 )
-VARIANTS = ("metadata_stripped", "missing_envelope", "training_contract_inexact")
+VARIANTS = (
+    "metadata_stripped",
+    "missing_envelope",
+    "training_contract_inexact",
+    "actor_leg_ref_mask_unsupported",
+)
 
 
 def mutate_metadata(metadata: dict[str, str], variant: str) -> dict[str, str]:
@@ -41,6 +46,8 @@ def mutate_metadata(metadata: dict[str, str], variant: str) -> dict[str, str]:
         result.pop("stage1_normal_envelope_payload_sha256", None)
     elif variant == "training_contract_inexact":
         result["training_contract_exact"] = "0"
+    elif variant == "actor_leg_ref_mask_unsupported":
+        result["actor_leg_ref_mask"] = "1"
     else:
         raise ValueError(f"unknown preflight mutation variant: {variant}")
     return result

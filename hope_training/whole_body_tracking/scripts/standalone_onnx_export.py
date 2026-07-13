@@ -51,6 +51,7 @@ TRAINING_CONTRACT_SCHEMA_VERSION = _TC.TRAINING_CONTRACT_SCHEMA_VERSION
 checkpoint_claims_contract = _TC.checkpoint_claims_contract
 checkpoint_contract_lineage_exact = _TC.checkpoint_contract_lineage_exact
 require_checkpoint_contract_binding = _TC.require_checkpoint_contract_binding
+bind_actor_leg_ref_mask_metadata = _TC.bind_actor_leg_ref_mask_metadata
 validate_schema3_contract = _TC.validate_schema3_contract
 validate_schema3_contract_structure = _TC.validate_schema3_contract_structure
 
@@ -485,6 +486,13 @@ def main() -> int:
             raise SystemExit("[FATAL] invalid training-contract schema version")
         donor_meta["training_contract_schema_version"] = str(contract_schema)
         donor_meta["training_contract_sha256"] = str(training_contract_sha256)
+    # Donor metadata is never authority for observation semantics.  A schema-3 checkpoint may
+    # legitimately use an older unmasked donor, while an unmasked/legacy checkpoint must not
+    # inherit actor_leg_ref_mask=1 from a masked donor.
+    bind_actor_leg_ref_mask_metadata(
+        donor_meta,
+        training_contract if contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION else None,
+    )
     if contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION:
         _bind_schema3_donor_metadata(donor_meta, training_contract)
         donor_effort = [float(v) for v in donor_meta["joint_effort_limits"].split(",")]

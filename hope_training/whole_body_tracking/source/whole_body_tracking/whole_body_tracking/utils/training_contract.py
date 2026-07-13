@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import functools
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 
 
 TRAINING_CONTRACT_SCHEMA_VERSION = 3
@@ -69,6 +69,21 @@ RUNTIME_EXECUTION_KEYS = (
     "motion_kinematics_contracts",
     "motion_kinematics_exact",
 )
+
+
+def bind_actor_leg_ref_mask_metadata(
+    metadata: MutableMapping[str, str], contract: Mapping | None
+) -> None:
+    """Replace donor mask provenance with the checkpoint contract's authoritative value.
+
+    The key is intentionally only-when-true: absence means an unmasked actor.  Clearing first is
+    essential for standalone exports, where a masked donor may otherwise contaminate an unmasked
+    checkpoint (or a legacy checkpoint with no formal contract).
+    """
+
+    metadata.pop("actor_leg_ref_mask", None)
+    if contract is not None and contract.get("actor_leg_ref_mask") is True:
+        metadata["actor_leg_ref_mask"] = "1"
 
 
 def _tolist(value):
@@ -422,6 +437,8 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
     for key in ("face_command_enabled", "motion_allow_legacy_link_origin_velocity"):
         if key in contract and not isinstance(contract[key], bool):
             raise ValueError(f"schema-3 {key} must be boolean when present")
+    if "actor_leg_ref_mask" in contract and contract["actor_leg_ref_mask"] is not True:
+        raise ValueError("schema-3 actor_leg_ref_mask must be true when present")
     if "face_command_pairing" in contract and contract["face_command_pairing"] not in (
         "shared_plus_y",
         "legacy_signed_vs_A",

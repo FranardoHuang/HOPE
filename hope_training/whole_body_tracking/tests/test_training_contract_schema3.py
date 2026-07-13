@@ -164,6 +164,24 @@ def test_actor_leg_ref_mask_fact_is_only_when_true_and_survives_partial_wrapping
     assert facts["actor_leg_ref_mask"] is True
 
 
+@pytest.mark.parametrize("donor_value", [None, "0", "1"])
+def test_actor_leg_ref_mask_metadata_is_checkpoint_authoritative_and_only_when_true(donor_value):
+    metadata = {"keep": "value"}
+    if donor_value is not None:
+        metadata["actor_leg_ref_mask"] = donor_value
+
+    TC.bind_actor_leg_ref_mask_metadata(metadata, {"actor_leg_ref_mask": True})
+    assert metadata == {"keep": "value", "actor_leg_ref_mask": "1"}
+
+    # Unmasked and legacy checkpoints clear any stale donor value. False is deliberately treated
+    # as absence here; the schema validator separately rejects serializing False in a contract.
+    TC.bind_actor_leg_ref_mask_metadata(metadata, {})
+    assert metadata == {"keep": "value"}
+    metadata["actor_leg_ref_mask"] = "1"
+    TC.bind_actor_leg_ref_mask_metadata(metadata, None)
+    assert metadata == {"keep": "value"}
+
+
 def test_runtime_contract_extracts_actual_execution_values():
     facts = TC.runtime_execution_facts(_env(), _ActorContract())
     assert tuple(facts) == TC.RUNTIME_EXECUTION_KEYS
@@ -297,6 +315,17 @@ def test_schema3_requires_every_execution_field_and_rejects_other_formal_version
         TC.validate_schema3_contract({**contract, "schema_version": 4})
 
 
+@pytest.mark.parametrize("invalid", [False, None, 0, 1, "1"])
+def test_schema3_actor_leg_ref_mask_is_only_when_true(invalid):
+    contract = _schema3_contract()
+    contract["actor_leg_ref_mask"] = invalid
+    with pytest.raises(ValueError, match="actor_leg_ref_mask must be true when present"):
+        TC.validate_schema3_contract_structure(contract)
+
+    contract["actor_leg_ref_mask"] = True
+    TC.validate_schema3_contract_structure(contract)
+
+
 def test_diagnostic_schema3_is_structurally_valid_but_never_formal_exact():
     contract = _diagnostic_schema3_contract()
     TC.validate_schema3_contract_structure(contract)
@@ -411,6 +440,7 @@ def test_export_paths_do_not_promote_schema2_or_unknown_schemas():
     assert 'contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION' in standalone
     assert 'metadata["training_contract_exact"] = "1"' in exporter
     assert '"training_contract_exact": "1" if training_contract_lineage_exact else "0"' in standalone
+    assert "bind_actor_leg_ref_mask_metadata" in standalone
     for field in (
         "qdes_joint_pos_limits",
         "physics_step_dt_s",

@@ -96,14 +96,21 @@ class PpOnnxPolicy {
     const std::string obs_norm_baked = LookupMetaOptional(md, alloc, "obs_norm_baked");
     const std::string training_contract_exact =
         LookupMetaOptional(md, alloc, "training_contract_exact");
+    const std::string actor_leg_ref_mask =
+        LookupMetaOptional(md, alloc, "actor_leg_ref_mask");
     training_contract_exact_ = training_contract_exact == "1";
     const std::string schema = LookupMetaOptional(md, alloc, "hope_metadata_schema_version");
     auto valid_bit = [](const std::string& s) { return s.empty() || s == "0" || s == "1"; };
     if (!valid_bit(empirical_norm) || !valid_bit(trained_norm) || !valid_bit(obs_norm_baked) ||
-        !valid_bit(training_contract_exact))
+        !valid_bit(training_contract_exact) || !valid_bit(actor_leg_ref_mask))
       throw std::runtime_error(
-          "ONNX normalization metadata must be 0|1: empirical_normalization='" + empirical_norm +
-          "' obs_norm_baked='" + obs_norm_baked + "'");
+          "ONNX boolean metadata must be 0|1: empirical_normalization='" + empirical_norm +
+          "' obs_norm_baked='" + obs_norm_baked + "' actor_leg_ref_mask='" +
+          actor_leg_ref_mask + "'");
+    if (actor_leg_ref_mask == "1")
+      throw std::runtime_error(
+          "ONNX was trained with actor_leg_ref_mask=1, but the C++ observation builder does not "
+          "implement the 12-leg command mask; refusing to feed live leg references");
     if (!trained_norm.empty() && trained_norm != empirical_norm)
       throw std::runtime_error(
           "ONNX trained_with_obs_norm and empirical_normalization metadata disagree");

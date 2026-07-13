@@ -30,6 +30,9 @@ def test_mutations_are_narrow_and_non_mutating():
     inexact = PF.mutate_metadata(original, "training_contract_inexact")
     assert inexact["training_contract_exact"] == "0"
     assert inexact["stage1_normal_envelope_payload_sha256"] == "a" * 64
+    masked = PF.mutate_metadata(original, "actor_leg_ref_mask_unsupported")
+    assert masked["actor_leg_ref_mask"] == "1"
+    assert masked["training_contract_exact"] == "1"
     assert original["training_contract_exact"] == "1"
 
 
@@ -72,6 +75,8 @@ def test_no_publish_is_separate_from_legacy_model_relaxation_in_source():
     assert '" training_contract_exact="' in main
     assert "pp->onnx().training_contract_exact() ? \"1\" : \"0\"" in main
     assert "bool publishable_model_contract() const" in onnx
+    assert 'LookupMetaOptional(md, alloc, "actor_leg_ref_mask")' in onnx
+    assert "C++ observation builder does not" in onnx
     assert "allow_legacy_model_diagnostic && model_preflight_only" in main
 
 
