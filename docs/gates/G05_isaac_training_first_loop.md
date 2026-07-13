@@ -1491,5 +1491,7 @@ config/launcher 的 completion。原始 checkpoint audit `62076758...d354` 还�
 checkpoint/finite/lineage 与 D 空 run-dir。这里的 signal 边界不是“全程零 signal”：Python consumer
 不直接发 signal，但 frozen locked wrapper 可在 pre-marker boot timeout 时仅对该隔离 PGID 执行
 TERM→KILL；post-contract timeout 可能留下 live arm，只能按 state 的精确 `pid=pgid` 人工审计且不得
-自动二次启动。源码 focused 门已物化，但 v6r1 尚未运行；L2/judge/第二 seed 仍固定 false，所以 G05
-仍为 `Partial`。操作仍见上面的 signed-face 漏斗运行手册。
+自动二次启动。launch readiness 还会在 frozen RSL-RL log root 检查新 run-name suffix 匹配数为 0；
+已有目录、file、symlink 都阻断，finalizer 则只认 `runtime_verified` 的 exact path、不用 glob 猜目录。
+源码 focused 门已物化，但 v6r1 尚未运行；L2/judge/第二 seed 仍固定 false，所以 G05 仍为 `Partial`。
+操作仍见上面的 signed-face 漏斗运行手册。

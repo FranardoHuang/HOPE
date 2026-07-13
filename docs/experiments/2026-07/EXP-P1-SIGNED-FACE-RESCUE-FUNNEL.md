@@ -232,6 +232,11 @@ TERM→KILL，这是合同允许的精确 cleanup，不能写成“零 signal”
 给第二次重试权限。若 wrapper 已返回 ready、但后续 hard-contract/first-iteration 等待超时，trainer
 可能仍存活；只允许按 `run.log.launch` 的精确 `pid=pgid` 人工审计，不得自动再发 D。
 
+第二层 no-clobber 直接检查 `50c49e5` checkout 的 frozen RSL-RL log root：任何名字以后缀
+`_phase1_signed_face_l1_v6r1_D_fresh_guidance_seed3` 结尾的现存目录、file、symlink 或异常 entry 都在
+写 control claim 前 fail closed。这样即使 control 目录被漏拷或从未产生，也不能对同一个 run name
+重复发射。终档不 glob “最新目录”，只消费 `runtime_verified.json` 绑定的 exact run dir。
+
 混合 finalizer 只有在新 D 自然记录 `Learning iteration 24/25`、进程退出、`model_24.pt` finite、
 lineage `1` 且 hard-contract SHA 仍为 `dfc583d4...888a5` 时，才重新逐项审计旧 A/B/C 终档和 B 的
 exact-PGID action，并写一份 A/B/C=`original_v6`、D=`v6r1_single_cell_retry` 的 no-clobber activation。

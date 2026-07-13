@@ -38,6 +38,8 @@ def test_manifest_is_one_cell_versioned_retry_and_keeps_l2_judge_seed_blocked():
     assert data["broad_signals_forbidden"] is True
     assert data["runtime"]["locked_launcher_sha256"] == M.LOCKED_LAUNCHER_SHA256
     assert data["runtime"]["post_contract_timeout_requires_manual_exact_state_pgid_audit"] is True
+    assert data["runtime"]["training_log_root"] == str(M.TRAINING_LOG_ROOT)
+    assert data["runtime"]["retry_training_run_dir_glob_suffix"] == M.NEW_RUN_GLOB_SUFFIX
 
 
 @pytest.mark.parametrize(
@@ -70,6 +72,18 @@ def test_manifest_is_one_cell_versioned_retry_and_keeps_l2_judge_seed_blocked():
                 "locked_launcher_exact_pgid_boot_timeout_cleanup_allowed", False
             ),
             "manifest locked_launcher_exact_pgid_boot_timeout_cleanup_allowed changed",
+        ),
+        (
+            lambda x: x["runtime"].__setitem__(
+                "training_log_root", "/tmp/unfrozen-training-log-root"
+            ),
+            "v6r1 runtime/write-path contract changed",
+        ),
+        (
+            lambda x: x["runtime"].__setitem__(
+                "retry_training_run_dir_glob_suffix", "_another-run"
+            ),
+            "v6r1 runtime/write-path contract changed",
         ),
     ],
 )
@@ -116,6 +130,52 @@ def test_retry_command_changes_exactly_one_run_name_argument():
 def test_retry_command_rejects_missing_or_duplicate_run_name(bad):
     with pytest.raises(M.ContractError, match="exactly one"):
         M.build_retry_command(bad, M.OLD_RUN_NAME, M.NEW_RUN_NAME)
+
+
+@pytest.mark.parametrize("entry_kind", ["directory", "symlink", "regular_file"])
+def test_retry_training_run_name_residue_blocks_launch_readiness(
+    tmp_path, monkeypatch, entry_kind
+):
+    data = copy.deepcopy(manifest())
+    log_root = tmp_path / "logs"
+    log_root.mkdir()
+    monkeypatch.setattr(M, "TRAINING_LOG_ROOT", log_root)
+    data["runtime"]["training_log_root"] = str(log_root)
+    assert M.verify_retry_training_run_absent(data)["matching_entry_count"] == 0
+
+    residue = log_root / f"2026-07-13_23-59-59{M.NEW_RUN_GLOB_SUFFIX}"
+    if entry_kind == "directory":
+        residue.mkdir()
+    elif entry_kind == "symlink":
+        target = tmp_path / "symlink-target"
+        target.mkdir()
+        residue.symlink_to(target, target_is_directory=True)
+    else:
+        residue.write_text("manual residue", encoding="utf-8")
+    with pytest.raises(M.ContractError, match="run name already exists"):
+        M.verify_retry_training_run_absent(data)
+
+
+def test_finalizer_accepts_only_runtime_verified_exact_run_dir(tmp_path):
+    runtime = copy.deepcopy(manifest()["runtime"])
+    root = tmp_path / "logs"
+    root.mkdir()
+    runtime["training_log_root"] = str(root)
+    exact = root / f"2026-07-13_23-59-59{M.NEW_RUN_GLOB_SUFFIX}"
+    exact.mkdir()
+    assert M.validate_retry_training_run_dir(runtime, exact) == exact
+
+    wrong_name = root / "2026-07-13_23-59-59_other-run"
+    wrong_name.mkdir()
+    with pytest.raises(M.ContractError, match="frozen root/name suffix"):
+        M.validate_retry_training_run_dir(runtime, wrong_name)
+
+    target = tmp_path / "target-run"
+    target.mkdir()
+    linked = root / f"2026-07-14_00-00-00{M.NEW_RUN_GLOB_SUFFIX}"
+    linked.symlink_to(target, target_is_directory=True)
+    with pytest.raises(M.ContractError, match="non-symlink directory"):
+        M.validate_retry_training_run_dir(runtime, linked)
 
 
 def _failed_claim_fixture(tmp_path):

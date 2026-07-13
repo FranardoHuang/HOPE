@@ -42,8 +42,10 @@
   no-clobber prereg/consumer：从 exact foreign v6 重建原 D argv，只允许 `run_name` 改名；启动前复核
   source/runtime/bank/report/GPU/Kit lock。Python consumer 无直接 signal/第二次重试路径，但 frozen
   wrapper 可在 pre-marker boot timeout 时仅清理本臂 exact PGID；post-contract timeout 留活臂时必须按
-  state PGID 人工审计。mixed finalizer 只在 D 自然 `model_24.pt` finite/lineage1/合同一致后复核旧 A/B/C，
-  并保持 L2/judge/第二 seed false。当前仅源码/专项测试，v6r1 未运行。见
+  state PGID 人工审计。launch 另在 frozen training-log root 拒绝任何同 run-name suffix 的残留目录/
+  file/symlink；mixed finalizer 不 glob，只在 D 自然 `model_24.pt` finite/lineage1/合同一致后按
+  `runtime_verified` exact path 复核旧 A/B/C，并保持 L2/judge/第二 seed false。当前仅源码/专项测试，
+  v6r1 未运行。见
   [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)与
   [操作](operations/run_phase1_signed_face_rescue_funnel.md)。
 

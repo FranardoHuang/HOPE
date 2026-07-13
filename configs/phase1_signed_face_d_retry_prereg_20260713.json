@@ -127,6 +127,8 @@
     "pod": "pod1",
     "gpu": 0,
     "artifact_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713",
+    "training_log_root": "/workspace/codexschema/nohope_signed_face_rescue_epoch1_50c49e5/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball",
+    "retry_training_run_dir_glob_suffix": "_phase1_signed_face_l1_v6r1_D_fresh_guidance_seed3",
     "control_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1",
     "config_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1/phase1_signed_face_d_retry_prereg_v6r1_20260713.json",
     "launcher_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1/run_phase1_signed_face_d_retry.py",

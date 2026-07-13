@@ -1128,7 +1128,9 @@ Pod1 epoch-1 v6 的 A/B/C 已到终档，但 D 在产生 runtime verified/checkp
 `model_24.pt` 的 finite/lineage1、四格共同 hard-contract `dfc583d4...888a5`，并绑定 original-v6 与
 v6r1 两套 config/launcher/retry lineage、原 A/B/C checkpoint audit `62076758...d354` 以及 signal
 provenance。Python consumer 不直接发 signal；frozen locked wrapper 只允许 pre-marker boot timeout
-时对本臂隔离 PGID 的精确 cleanup，成功 D 终档必须记录该 cleanup 未执行。
+时对本臂隔离 PGID 的精确 cleanup，成功 D 终档必须记录该 cleanup 未执行。launch 还须证明 frozen
+training-log root 没有同 run-name suffix entry；终档只接受 `runtime_verified` 的 exact run dir，不从
+filesystem glob 猜“最新”目录。
 
 该 mixed activation 即使产生，也只证明 L1 发射/终档完整性。它硬编码
 `automatic_judge_launch=false`、`l2_training_launch_authorized=false`、`second_seed_authorized=false`；

@@ -41,6 +41,11 @@ EXPECTED_HARD_CONTRACT_SHA256 = (
 )
 OLD_RUN_NAME = "phase1_signed_face_l1_v6_D_fresh_guidance_seed3"
 NEW_RUN_NAME = "phase1_signed_face_l1_v6r1_D_fresh_guidance_seed3"
+TRAINING_LOG_ROOT = Path(
+    "/workspace/codexschema/nohope_signed_face_rescue_epoch1_50c49e5/hope_training/"
+    "whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball"
+)
+NEW_RUN_GLOB_SUFFIX = f"_{NEW_RUN_NAME}"
 CONTROL_ROOT = Path(
     "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1"
 )
@@ -435,6 +440,8 @@ def load_manifest(path: Path) -> dict[str, Any]:
             "pod",
             "gpu",
             "artifact_root",
+            "training_log_root",
+            "retry_training_run_dir_glob_suffix",
             "control_root",
             "config_path",
             "launcher_path",
@@ -461,6 +468,8 @@ def load_manifest(path: Path) -> dict[str, Any]:
         "pod": "pod1",
         "gpu": 0,
         "artifact_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713",
+        "training_log_root": str(TRAINING_LOG_ROOT),
+        "retry_training_run_dir_glob_suffix": NEW_RUN_GLOB_SUFFIX,
         "control_root": str(CONTROL_ROOT),
         "config_path": str(CONTROL_ROOT / "phase1_signed_face_d_retry_prereg_v6r1_20260713.json"),
         "launcher_path": str(CONTROL_ROOT / "run_phase1_signed_face_d_retry.py"),
@@ -895,6 +904,61 @@ def verify_retry_outputs_absent(manifest: dict[str, Any], *, allow_runtime: bool
         )
 
 
+def verify_retry_training_run_absent(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Reject any pre-existing filesystem entry for the unique retry run name."""
+
+    runtime = manifest["runtime"]
+    root = Path(runtime["training_log_root"])
+    suffix = runtime["retry_training_run_dir_glob_suffix"]
+    if root != TRAINING_LOG_ROOT or suffix != NEW_RUN_GLOB_SUFFIX:
+        raise ContractError("retry training log root/glob suffix changed")
+    if root.is_symlink() or not root.is_dir():
+        raise ContractError("retry training log root must be one existing non-symlink directory")
+    matches: list[str] = []
+    try:
+        entries = list(os.scandir(root))
+    except OSError as exc:
+        raise ContractError(f"cannot scan retry training log root: {exc}") from exc
+    for entry in entries:
+        if not entry.name.endswith(suffix):
+            continue
+        try:
+            if entry.is_symlink():
+                kind = "symlink"
+            elif entry.is_dir(follow_symlinks=False):
+                kind = "directory"
+            elif entry.is_file(follow_symlinks=False):
+                kind = "regular_file"
+            else:
+                kind = "special"
+        except OSError:
+            kind = "unstatable"
+        matches.append(f"{entry.name}:{kind}")
+    if matches:
+        raise ContractError(
+            "retry training run name already exists or has an anomalous filesystem entry; "
+            f"no launch claim may be written: {sorted(matches)}"
+        )
+    return {
+        "training_log_root": str(root),
+        "glob_suffix": suffix,
+        "matching_entry_count": 0,
+    }
+
+
+def validate_retry_training_run_dir(runtime: dict[str, Any], path: Path) -> Path:
+    """Bind one materialized run directory without rediscovering it by glob."""
+
+    path = _absolute_path(str(path), "retry training run dir")
+    root = Path(runtime["training_log_root"])
+    suffix = runtime["retry_training_run_dir_glob_suffix"]
+    if path.parent != root or not path.name.endswith(suffix):
+        raise ContractError("retry training run dir escaped its frozen root/name suffix")
+    if path.is_symlink() or not path.is_dir():
+        raise ContractError("retry training run dir must be one materialized non-symlink directory")
+    return path
+
+
 def launch_readiness(
     manifest: dict[str, Any], config_path: Path, launcher_path: Path
 ) -> tuple[ModuleType, dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
@@ -914,9 +978,13 @@ def launch_readiness(
     if snapshot["free_memory_mib"] < manifest["runtime"]["minimum_free_gpu_memory_mib"]:
         raise ContractError("Pod1 GPU0 free memory is below the v6r1 launch floor")
     lock = verify_kit_lock_free(Path(manifest["runtime"]["kit_lock_path"]))
+    # Keep the filesystem name check last so the absence proof is captured as
+    # close as possible to the O_EXCL control claim in launch_retry().
+    run_name_absence = verify_retry_training_run_absent(manifest)
     return foreign, foreign_manifest, preflight, failed, {
         "recovery": recovery,
         "original_checkpoint_audit": checkpoint_audit,
+        "retry_training_run_name_absence": run_name_absence,
         "gpu": snapshot,
         "kit_lock": lock,
     }
@@ -1054,6 +1122,9 @@ def launch_retry(
         "verified_inputs": preflight["verified_inputs"],
         "recovery_evidence": readiness["recovery"],
         "original_checkpoint_audit": readiness["original_checkpoint_audit"],
+        "retry_training_run_name_absence": readiness[
+            "retry_training_run_name_absence"
+        ],
         "gpu_snapshot_before": readiness["gpu"],
         "kit_lock_free_before": readiness["kit_lock"],
         "automatic_judge_launch": False,
@@ -1097,6 +1168,9 @@ def launch_retry(
         raise ContractError(f"v6r1 D emitted hard contract is invalid: {exc}") from exc
     if contract_sha != EXPECTED_HARD_CONTRACT_SHA256:
         raise ContractError("v6r1 D hard contract differs from original A/B/C")
+    training_run_dir = validate_retry_training_run_dir(
+        runtime, contract_path.parent.parent
+    )
     wait_ready_no_signal(
         log_path,
         state_path,
@@ -1124,7 +1198,7 @@ def launch_retry(
         "run_name": NEW_RUN_NAME,
         "pid": pid,
         "pgid": pid,
-        "training_run_dir": str(contract_path.parent.parent),
+        "training_run_dir": str(training_run_dir),
         "emitted_hard_contract_path": str(contract_path),
         "emitted_hard_contract_sha256": contract_sha,
         "training_environment_sha256": preflight["training_environment_sha256"],
@@ -1340,6 +1414,12 @@ def audit_retry_terminal_d(
     for key, expected in expected_launch_signal_policy.items():
         if launch.get(key) != expected:
             raise ContractError(f"v6r1 D launch signal policy {key} mismatch")
+    if launch.get("retry_training_run_name_absence") != {
+        "training_log_root": str(TRAINING_LOG_ROOT),
+        "glob_suffix": NEW_RUN_GLOB_SUFFIX,
+        "matching_entry_count": 0,
+    }:
+        raise ContractError("v6r1 D launch lost its pre-launch run-name absence proof")
     if (
         verified.get("direct_signals_sent_by_retry_tool") is not False
         or verified.get("locked_launcher_sha256") != LOCKED_LAUNCHER_SHA256
@@ -1371,11 +1451,22 @@ def audit_retry_terminal_d(
         raise ContractError("v6r1 D log contains a hard failure")
     if "Learning iteration 24/25" not in text:
         raise ContractError("v6r1 D did not log its natural terminal iteration 24/25")
+    training_run_dir = validate_retry_training_run_dir(
+        runtime,
+        _absolute_path(verified.get("training_run_dir"), "runtime-verified training run dir"),
+    )
     try:
         foreign.verify_guidance_log(
             paths["training_log"], foreign.cell_by_id(foreign_manifest, "D")
         )
-        contract_path = Path(verified["emitted_hard_contract_path"])
+        contract_path = _absolute_path(
+            verified.get("emitted_hard_contract_path"),
+            "runtime-verified emitted hard contract",
+        )
+        if contract_path.parent.parent != training_run_dir:
+            raise ContractError(
+                "runtime-verified hard contract is outside its exact training run dir"
+            )
         contract_sha, _ = foreign.verify_emitted_contract(
             contract_path, foreign_manifest, hot=False
         )
@@ -1383,7 +1474,7 @@ def audit_retry_terminal_d(
         raise ContractError(f"v6r1 D contract/log proof failed: {exc}") from exc
     if contract_sha != EXPECTED_HARD_CONTRACT_SHA256:
         raise ContractError("v6r1 D hard contract differs from original A/B/C")
-    checkpoint = Path(verified["training_run_dir"]) / "model_24.pt"
+    checkpoint = training_run_dir / "model_24.pt"
     if not checkpoint.is_file():
         raise ContractError("v6r1 D terminal model_24.pt is missing")
     _stable_file(checkpoint, stability_delay)

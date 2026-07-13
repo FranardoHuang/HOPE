@@ -184,6 +184,27 @@ d_timeout_diagnostic.txt
   ae7de7a37329eddfaa264adb99f9a38c0b7ead33579d5b1dac0d63f4a74b5a0c
 ```
 
+The preregistered bundle path is immutable. If
+`/workspace/codexschema/phase1_signed_face_rescue_20260713/source_50c49e5.bundle` is missing, restore
+that exact file from the reviewed local evidence (transfer the backup to the restore host first if
+needed), then verify it; **do not edit the manifest to point at another convenient path**:
+
+```bash
+LOCAL_EVIDENCE=/private/tmp/pod1_v6_foreign_20260713/source_50c49e5.bundle
+EXPECTED_BUNDLE=/workspace/codexschema/phase1_signed_face_rescue_20260713/source_50c49e5.bundle
+EXPECTED_SHA=2a794e2c0f9c4adefd5194d94c404bbdf137cf5368f9c2c2aedf2bc50cc0a39e
+
+test "$(sha256sum "$LOCAL_EVIDENCE" | awk '{print $1}')" = "$EXPECTED_SHA"
+if test ! -e "$EXPECTED_BUNDLE"; then
+  mkdir -p "$(dirname "$EXPECTED_BUNDLE")"
+  cp --no-clobber --preserve=mode,timestamps "$LOCAL_EVIDENCE" "$EXPECTED_BUNDLE"
+  chmod 0444 "$EXPECTED_BUNDLE"
+fi
+test -f "$EXPECTED_BUNDLE"
+test ! -L "$EXPECTED_BUNDLE"
+test "$(sha256sum "$EXPECTED_BUNDLE" | awk '{print $1}')" = "$EXPECTED_SHA"
+```
+
 Run `git bundle verify source_50c49e5.bundle`; it must advertise
 `50c49e58a9413ec6ac1c3ed2565d9a78acdb5e64` and require
 `882fea4285f0cf9a97ba79d79ae8af31d26ea1ed`. The bundle is recovery material, not permission to

@@ -296,8 +296,8 @@ install -m 0555 scripts/run_phase1_signed_face_d_retry.py \
 
 RETRY_CONFIG="$RETRY_CONTROL/phase1_signed_face_d_retry_prereg_v6r1_20260713.json"
 RETRY_LAUNCHER="$RETRY_CONTROL/run_phase1_signed_face_d_retry.py"
-RETRY_CONFIG_SHA=4bbe496aaf5486e3d82f1c689cafa13ac584c11f5ee780a7a2328a6b701fd8db
-RETRY_LAUNCHER_SHA=db03ff6f99fa71ed24dd0aa509f79f68a5ffc52dfa222437bed81cc3da412747
+RETRY_CONFIG_SHA=e0a677ec1b8adf328a5d73e74206b54f60e84bd22fb37f02b428511c0109ae90
+RETRY_LAUNCHER_SHA=1f03823eefad888fb1a9484af5349afec349dfa43be144aa10af33eaacee3a10
 test "$(sha256sum "$RETRY_CONFIG" | awk '{print $1}')" = "$RETRY_CONFIG_SHA"
 test "$(sha256sum "$RETRY_LAUNCHER" | awk '{print $1}')" = "$RETRY_LAUNCHER_SHA"
 ```
@@ -306,7 +306,8 @@ test "$(sha256sum "$RETRY_LAUNCHER" | awk '{print $1}')" = "$RETRY_LAUNCHER_SHA"
 
 `static-validate` 只看 tracked v6r1 合同；`validate`/`plan` 还会加载 exact foreign v6，重新验证 clean
 source、Isaac/Python runtime closure、动作、bank、rebind report、原 D 失败三件套/dead PID/零
-checkpoint、source bundle、GPU0 空和 `/workspace/.kit_boot.lock` 空。三个动作都不写 claim：
+checkpoint、source bundle、frozen training-log root 内同名 entry 为 0、GPU0 空和
+`/workspace/.kit_boot.lock` 空。三个动作都不写 claim：
 
 ```bash
 python3 "$RETRY_LAUNCHER" --config "$RETRY_CONFIG" \
@@ -336,6 +337,12 @@ consumer 没有直接 signal API，也没有自动第二次重试路径。它调
 `control/v6r1`，只读核对 `run.log.launch` 的精确 `pid=pgid`、`run.log`、GPU 与
 `runtime_verified.json`，再由人工决定如何处理该 **单一 state PGID**。本操作不授权真机。
 
+no-clobber 同时覆盖训练 checkout 的 RSL-RL 日志根：exact root 是
+`/workspace/codexschema/nohope_signed_face_rescue_epoch1_50c49e5/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball`，
+唯一匹配后缀是 `_phase1_signed_face_l1_v6r1_D_fresh_guidance_seed3`。写 control claim 前该 root 必须是
+非 symlink 目录且匹配 entry 为 0；残留目录、regular file、symlink 或无法 stat 的异常 entry 一律阻断，
+避免 control claim 缺失时重复发同名训练。
+
 ### 混合 L1 finalizer
 
 只在 D 进程自然退出后运行。finalizer 要求日志含终档 `Learning iteration 24/25`，`model_24.pt`
@@ -354,6 +361,10 @@ lineage；原始 checkpoint audit SHA `62076758...d354` 还要精确证明 A/B/C
 与 D 当时无 run dir。activation 同时记录 Python consumer 未直接发 signal、frozen wrapper 允许的
 exact-PGID boot-timeout cleanup，以及成功 D 路径未执行该 cleanup。它只关闭 L1 完整性，不授权
 judge、L2、第二 seed、stop/promote、部署或真机。
+
+finalizer 不重新 glob 猜测“最新”目录；它只接受 `runtime_verified.json` 已精确绑定的单一路径，并验证
+该路径直属 frozen log root、名字以后缀结尾且自身不是 symlink，然后只在该目录读取 hard contract 与
+`model_24.pt`。
 
 ## 5. L2 当前 fail-closed
 
