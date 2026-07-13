@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "continuation_id": "phase1-signed-face-c2-d2-l1-v1r2-d2-only-20260714",
+  "created_local": "2026-07-14T06:30:00+08:00",
+  "status": "machine_preregistered_one_shot_v1r2_continuation_root_launch_switch_required",
+  "last_successful_read_only_snapshot": {
+    "observed_utc": "2026-07-13T22:32:07Z",
+    "pod": "pod1",
+    "control_v1r1_absent": true,
+    "continuation_v1r1_absent": true,
+    "d2_arm_absent": true,
+    "exact_d2_training_run_absent": true,
+    "paired_v1r1_result_absent": true,
+    "c2_old_runtime_failure_terminal_sidecars_absent": true,
+    "v1r1_modes_run": 0,
+    "writes_claims_or_launches_performed": false,
+    "later_ssh_state": "unknown_after_timeout",
+    "runtime_authorization_from_snapshot": false
+  },
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "simulation_only": true,
+  "real_robot_commands_forbidden": true,
+  "automatic_retry_forbidden": true,
+  "c2_relaunch_forbidden": true,
+  "activation_authorized": false,
+  "judge_authorized": false,
+  "l2_authorized": false,
+  "second_seed_authorized": false,
+  "original_v1_control": {
+    "root": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/control/v1",
+    "manifest_relative_path": "phase1_signed_face_cd_l1_prereg_20260714.json",
+    "manifest_sha256": "785ad96dd53e1809ddcf86d1ecd80572b02e3c96ffd6d6599cab20a73b559895",
+    "launcher_relative_path": "run_phase1_signed_face_cd_l1.py",
+    "launcher_sha256": "0fa250207246e8bf69b6475125882b45e817f9e777d13039614c82dad9a803ba"
+  },
+  "continuation_control": {
+    "root": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/control/v1r2",
+    "manifest_relative_path": "configs/phase1_signed_face_cd_l1_v1r2_continuation_20260714.json",
+    "launcher_relative_path": "scripts/continue_phase1_signed_face_cd_l1_v1r2.py",
+    "v1_helper_relative_path": "scripts/run_phase1_signed_face_cd_l1.py",
+    "v1_helper_sha256": "0fa250207246e8bf69b6475125882b45e817f9e777d13039614c82dad9a803ba",
+    "v1_manifest_relative_path": "configs/phase1_signed_face_cd_l1_prereg_20260714.json",
+    "v1_manifest_sha256": "785ad96dd53e1809ddcf86d1ecd80572b02e3c96ffd6d6599cab20a73b559895",
+    "v1r1_helper_relative_path": "scripts/continue_phase1_signed_face_cd_l1_v1r1.py",
+    "v1r1_helper_sha256": "a283a89a58114d8d8192b7a7bc879e2f6a9afb6302e9f126a86975e3a3340593",
+    "v1r1_manifest_relative_path": "configs/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json",
+    "v1r1_manifest_sha256": "f31fcf7bf500dde26a347af15feacececda1b5e1fd870c74759aca7d60c5def8",
+    "root_launch_confirmation": "ROOT_APPROVES_SIM_ONLY_SIGNED_FACE_D2_ONLY_V1R2"
+  },
+  "preserved_c2": {
+    "cell_id": "C2",
+    "run_name": "phase1_signed_face_l1_c2d2_v1_C2_fresh_control_seed3",
+    "arm_path": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/runs/l1/phase1_signed_face_l1_c2d2_v1_C2_fresh_control_seed3",
+    "launch_contract_sha256": "26bf204d55231d134234ebac41594643b3aabc3668da5650342569cbb8f60e96",
+    "launch_state_sha256": "2bcc565693e44a6ef183fb6a52d43ee9aa5aaf77f892a3a3aa18368173beb8e2",
+    "training_launch_claim_sha256": "37fe244315bb6f3f179595ad0673cc638e6b1265f967019dff01fd518d4f86e5",
+    "pid_equals_pgid": 1820092,
+    "training_run_dir": "/workspace/codexschema/nohope_signed_face_cd_l1_4467d79/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-13_20-57-21_phase1_signed_face_l1_c2d2_v1_C2_fresh_control_seed3",
+    "training_log_sha256": "abffd4572578925e25b079ad6d86f6d98474e6d2dca88e0f5a2a7dd426c36dc3",
+    "hard_contract_sha256": "83f47ae6f0832b354112653a6f4cd66f98075181e6a546328a2b8d7a581c2772",
+    "terminal_checkpoint_basename": "model_24.pt",
+    "terminal_checkpoint_sha256": "dbbc7a28ece4e166ba3743706827496960392fc46394286e7fddf83cddd776f6",
+    "hard_contract_mount_normal_sign_per_clip": [
+      1.0,
+      -1.0
+    ],
+    "old_runtime_verified_must_be_absent": true,
+    "old_launch_failure_must_be_absent": true,
+    "old_terminal_result_must_be_absent": true,
+    "outer_false_rejection": "v1 compared emitted float mount signs against integer expectations with exact Python types",
+    "training_recipe_changed": false,
+    "v1r1_outer_false_rejection": "v1r1 required physics_contract_sha256 inside the emitted five-key compact question_bank object"
+  },
+  "d2_only_continuation": {
+    "cell_id": "D2",
+    "run_name": "phase1_signed_face_l1_c2d2_v1_D2_fresh_guidance_seed3",
+    "arm_path": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/runs/l1/phase1_signed_face_l1_c2d2_v1_D2_fresh_guidance_seed3",
+    "physical_gpu": 2,
+    "face_guidance_weight": -0.4,
+    "arm_and_exact_training_run_must_be_absent_before_claim": true,
+    "one_new_atomic_claim": true,
+    "same_v1_training_source_recipe_and_runtime": true
+  },
+  "outputs": {
+    "continuation_evidence_root": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/continuations/v1r2",
+    "c2_attestation_path": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/continuations/v1r2/c2_terminal_attestation.json",
+    "v1r1_absence_attestation_path": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/continuations/v1r2/v1r1_absence_attestation.json",
+    "d2_runtime_verified_basename": "runtime_verified_v1r2.json",
+    "d2_launch_failure_basename": "launch_failure_v1r2.json",
+    "d2_terminal_result_basename": "terminal_result_v1r2.json",
+    "paired_result_path": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/runs/l1/paired_l1_result_v1r2.json"
+  },
+  "decision_boundary": {
+    "c2_relaunch": false,
+    "d2_automatic_retry": false,
+    "activation": false,
+    "judge": false,
+    "l2": false,
+    "second_seed": false,
+    "stop_or_promote": false,
+    "real_robot_commands": false,
+    "v1r1_runtime_artifact_adoption": false
+  },
+  "original_v1r1_control": {
+    "root": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/control/v1r1",
+    "manifest_relative_path": "configs/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json",
+    "manifest_sha256": "f31fcf7bf500dde26a347af15feacececda1b5e1fd870c74759aca7d60c5def8",
+    "launcher_relative_path": "scripts/continue_phase1_signed_face_cd_l1_v1r1.py",
+    "launcher_sha256": "a283a89a58114d8d8192b7a7bc879e2f6a9afb6302e9f126a86975e3a3340593",
+    "exact_false_rejection_message": "hard contract train bank physics_contract_sha256 changed or has a bool/int type confusion",
+    "failure_reproduction_required": true
+  },
+  "schema3_bank_metadata": {
+    "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz",
+    "sha256": "3a9d8851c1c0b13ef82f58228ea1cf83213157c70d72daa514f1bed3a3885b71",
+    "schema_version": 3,
+    "split": "train",
+    "source_family_sha256": "9603a1788eb17ce03598cdde4efff946039613cf61fcc686f90a385706dba9db",
+    "physics_contract_sha256": "09dfe8999c54e36b258fe54b5ec3da5d9816ff3be3675963b919371d7f4afb95",
+    "source_family_contract_physics_must_match": true
+  },
+  "v1r1_absence_boundary": {
+    "continuation_evidence_root": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/continuations/v1r1",
+    "c2_attestation_path": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/continuations/v1r1/c2_terminal_attestation.json",
+    "paired_result_path": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/runs/l1/paired_l1_result_v1r1.json",
+    "d2_arm_path": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/runs/l1/phase1_signed_face_l1_c2d2_v1_D2_fresh_guidance_seed3",
+    "exact_d2_training_run_glob_must_be_empty": true,
+    "all_paths_must_be_absent_before_v1r2_attestation": true,
+    "v1r1_claim_or_runtime_artifact_adoption": false
+  }
+}

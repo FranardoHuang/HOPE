@@ -1569,7 +1569,7 @@ seed/stop-promote/真机全为 false。复现见
 [实验卷宗](../experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)。因此这里只是可审阅的 E1
 source gate，G05 保持 `Partial`。
 
-### 2026-07-14 C2 terminal float/int 假拒绝与 v1r1 continuation gate
+### 2026-07-14 C2 两层 outer 假拒绝与 v1r2 continuation source gate
 
 C2 已在 Pod1 GPU1 按上述 v1 claim 自然到达 `model_24.pt`；final log/hard contract/checkpoint SHA 为
 `abffd457...6dc3` / `83f47ae6...2772` / `dbbc7a28...6f6`，canonical outer claim 为
@@ -1578,19 +1578,30 @@ C2 已在 Pod1 GPU1 按上述 v1 claim 自然到达 `model_24.pt`；final log/ha
 期望，导致合法合同在 post-boot 被假拒绝。旧 `runtime_verified`、failure、terminal result 均 absent；
 不得补造旧 runtime sidecar，也不得重跑 C2。
 
-新的 [`v1r1` one-shot continuation](../DEFINITIONS.md) 是 D2-only source gate：manifest
-`f31fcf7b...5def8` 直接绑定 C2 launch/state/claim/log/hard/checkpoint 六类证据与三项 absence boundary；
-verifier 接受 exact float 并拒绝 bool/int。C2 attestation 只能写入独立
-`continuations/v1r1/` no-clobber root，preserved C2 arm 不增加文件。parser 没有 cell 参数、通用
-`launch-next`、C2 launch 或 retry；唯一发射入口要求已 replay 的 C2 attestation、未 claim 的 D2 与
-空闲 GPU2。D2 outer claim 绑定 v1r1 manifest/launcher、原 v1 source/recipe 和 C2 attestation；mixed
-outer-control pair 只有在规范化 trainer recipe/hard contract 都只差 signed-face weight 时成立。
+冻结 [`v1r1`](../DEFINITIONS.md) 接受 exact float 并拒绝 bool/int，却又错误要求 trainer compact
+`question_bank` 直含第六个 `physics_contract_sha256`。source `4467d79` 实际只发
+`sha256/schema_version/split/source_family_sha256/exact` 五键；physics 只在 exact NPZ metadata 与
+source-family contract 内。v1r1 因而精确假拒绝合法 C2 hard contract。最后一次成功只读快照
+`2026-07-13T22:32:07Z` 证明 v1r1 control/evidence/pair、D2 arm/exact run 全 absent 且没有
+write/claim/launch；后续 SSH 状态 unknown，所以历史 absence 不构成当前授权。v1/v1r1 bytes 均冻结并
+禁止运行。
 
-外部 control 只接受 `scripts/ + configs/` 四文件 mini-tree，safe relative paths 拒绝绝对/`..`/symlink；
-临时外部树的 subprocess `static-validate/plan` 已通过，缺任一文件和旧扁平布局均失败。本分支 focused
-contract tests 为 `59 passed`（含原 v1 的 `28` 项），没有连接 Pod 或启动 D2；因此
-这是修复后的 source gate，不是 C2/D2 成对 runtime 通过。activation/judge/L2/第二 seed/晋级/真机仍
-全部为 false，G05 保持 `Partial`。复现见
+新的 [`v1r2`](../DEFINITIONS.md) 是 D2-only source gate：manifest/launcher SHA 为
+`4e202589...8c638` / `2b53c865...45a12`。它精确复现 v1r1 错误，严格接受 trainer 实际五键 shape，
+再独立解析 exact NPZ `meta_json` 绑定 file/schema/split/source-family/physics SHA，并复算
+source-family contract。伪造第六键、metadata drift 或 v1r1 evidence root/C2 receipt/pair receipt、
+D2 arm/exact run 任一存在都 fail closed。C2 attestation 只能进入独立 `continuations/v1r2/`
+no-clobber root：先写 content-bound absence receipt 并立即重查，再只允许未 claim 的 D2；preserved
+C2 arm 不增加文件。实际写任何 v1r2 byte 前必须已完整通过 C2 terminal、exact bank、v1r1 假拒绝、
+两张绑定 GPU 与 live absence 复核；首次 exclusive write 后的失败会保留 receipt 并永久阻断同 namespace
+重试。v1r2 自有 JSON/NPZ metadata 的重复 key 也 fail closed。
+
+外部 control 只接受 `scripts/ + configs/` 六文件 mini-tree，同时绑定 v1r2 与冻结 v1/v1r1 的
+helper/manifest；safe relative paths 拒绝绝对/`..`/symlink。临时外部树 subprocess
+`static-validate/plan` 已通过，缺任一文件、旧扁平布局和重复 JSON key 均失败；v1r2 专项攻击测试
+`52 passed`，三代聚焦回归 `111 passed`，受支持的完整仓内 `tests/` 为 `934 passed, 10 skipped`。
+本分支没有连接 Pod、安装 control、写 attestation 或启动 D2；因此这是 source gate，不是 C2/D2 成对 runtime
+通过。activation/judge/L2/第二 seed/晋级/真机仍全部为 false，G05 保持 `Partial`。复现见
 [操作文档](../operations/run_phase1_signed_face_cd_l1.md)与
 [face-sign 卷宗](../experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)。
 

@@ -1,7 +1,9 @@
 # 运行 signed-face C2/D2 provenance-complete L1
 
 状态：**C2 已自然到达 terminal，但 v1 outer verifier 因 float/int 类型误判没有发布
-`runtime_verified`；D2 尚未 claim，必须使用本页 v1r1 续接。** 本操作只运行
+`runtime_verified`；冻结 v1r1 又因虚构第六个 compact-bank 字段而在源码层假拒绝，且最后一次成功
+只读快照证明它从未安装或运行；D2 尚未 claim。只有本页 v1r2 通过 fresh absence/runtime 复核后才
+可能续接 D2。** 本操作只运行
 [`signed-face C2/D2`](../DEFINITIONS.md) 两条 fresh L1 小臂：C2 关闭 signed-face guidance，D2 只把
 同一 Reward 权重改为 `-0.4`。`L1` 是 `512 env × 25 update` 的发射/合同冒烟，不是判卷或晋级。
 `run_name` 是不可复用的训练运行名；`claim` 是外层原子运行占位；其余术语见
@@ -10,8 +12,9 @@
 本工具没有 activation、judge、L2、第二 seed、自动 retry、部署或真机入口。它也不复用 v9 的 C/D
 claim/checkpoint；旧 `5f691b3` source 与 `466f8ea` control 只作为只读根因证据。
 
-`v1r1` 是 [one-shot continuation](../DEFINITIONS.md)：只验证已经完成的 C2，并只允许原子 claim
-仍不存在的 D2。它不是 C2 retry，也不改变 seed、配方、训练 source 或 L1 边界。
+[`v1r2`](../DEFINITIONS.md) 是 one-shot continuation：只验证已经完成的 C2，并只允许原子 claim
+仍不存在的 D2。它不是 C2 retry，也不改变 seed、配方、训练 source 或 L1 边界。旧 v1r1 bytes 是
+必须被精确复现的负例，不是备用 launcher。
 
 ## 冻结输入
 
@@ -25,7 +28,11 @@ claim/checkpoint；旧 `5f691b3` source 与 `466f8ea` control 只作为只读根
 - v1r1 manifest：[`phase1_signed_face_cd_l1_v1r1_continuation_20260714.json`](../../configs/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json)，
   SHA-256 `f31fcf7bf500dde26a347af15feacececda1b5e1fd870c74759aca7d60c5def8`；v1r1 launcher：
   [`continue_phase1_signed_face_cd_l1_v1r1.py`](../../scripts/continue_phase1_signed_face_cd_l1_v1r1.py)，
-  SHA-256 `a283a89a58114d8d8192b7a7bc879e2f6a9afb6302e9f126a86975e3a3340593`。
+  SHA-256 `a283a89a58114d8d8192b7a7bc879e2f6a9afb6302e9f126a86975e3a3340593`；两者只作冻结负例。
+- v1r2 manifest：[`phase1_signed_face_cd_l1_v1r2_continuation_20260714.json`](../../configs/phase1_signed_face_cd_l1_v1r2_continuation_20260714.json)，
+  SHA-256 `4e202589e5d12207b0ee0720f6d542d992517fe9f9b9bd32c7e54c845348c638`；v1r2 launcher：
+  [`continue_phase1_signed_face_cd_l1_v1r2.py`](../../scripts/continue_phase1_signed_face_cd_l1_v1r2.py)，
+  SHA-256 `2b53c86500c3fecabc5d634f7bdecf35e38735a8135a8630d43dcf60bf445a12`。
 - 动作、train bank、physics、A3 ignored asset、Python/pip 与 IsaacLab 的 SHA/commit 全在 manifest；任一
   漂移均在 claim 前拒绝。
 - Pod1 上 C2 固定 physical GPU1，D2 固定 physical GPU2；每条 claim 前只要求它自己的 GPU 没有任何
@@ -90,7 +97,8 @@ second-seed/stop-or-promote 全为 false。任一失败都不启动。
 ## 3. 串行 boot、跨卡并发训练和独立终档
 
 以下 v1 原始命令只保留为冻结设计说明，**当前现场不得再次执行 `launch-next`**：C2 claim 已存在，且
-旧 verifier 的假拒绝没有产生 retry 权限。当前只执行下一节的 v1r1 命令。
+旧 verifier 的假拒绝没有产生 retry 权限。冻结 v1r1 也禁止运行；只有第 5 节 v1r2 在 fresh runtime
+复核通过后才可能继续。
 
 每次 `launch-next` 只原子创建一条臂。首次只能是 GPU1 上的 C2；C2 写出 hard contract 和
 `runtime_verified`、shared Kit lock 释放后，第二次即可在空闲 GPU2 claim D2，**不等待 C2 终档**：
@@ -133,7 +141,7 @@ result 与 `phase1_signed_face_exam_k100_runtime_receipt_20260714.json`，再冻
 的 `4096 env × 1001 update`、`+200/+500/+1000` checkpoint/claim/finalizer。它仍不得自动启动 judge，
 也不得买第二 seed。当前 manifest/launcher 没有这些 mode，所以不能直接把 L1 输出传给 L2。
 
-## 4. C2 float/int 假拒绝与 v1r1 D2-only 续接
+## 4. 两层 outer verifier 假拒绝：v1 与冻结 v1r1
 
 v1 C2 已自然退出并产生 `model_24.pt`。现场只读证据被冻结为：launch contract
 `26bf204d...0e96`、canonical outer claim `37fe2443...86e5`、launch state
@@ -144,62 +152,94 @@ checkpoint `dbbc7a28...6f6`。旧 `runtime_verified.json`、`launch_failure.json
 根因不是训练合同漂移：Hydra 参数明确是
 `++task.racket.mount_normal_sign_per_clip=[1.0,-1.0]`，训练端也把该项转换为 float 后写入 hard
 contract；v1 verifier 却用 `[1,-1]` 整数期望做 exact-type 深比较。Python 中 bool/int/float 的相等
-语义容易掩盖这种错位，所以 v1r1 明确只接受两个 exact float，并对 `[True,-1.0]`、`[1,-1]` fail
-closed。
+语义容易掩盖这种错位，所以 v1r1 改为只接受两个 exact float，并对 `[True,-1.0]`、`[1,-1]` fail
+closed；但它又错误要求 trainer 的 compact `question_bank` 直含
+`physics_contract_sha256`。exact source `4467d79` 实际只写
+`sha256/schema_version/split/source_family_sha256/exact` 五键，physics 只在 exact NPZ metadata 与
+source-family contract 中。因此 v1r1 会稳定报错
+`hard contract train bank physics_contract_sha256 changed or has a bool/int type confusion`；这是第二个
+outer false rejection，不是训练漂移。
 
-新 evidence 绝不写入 preserved C2 arm，而是使用独立 no-clobber 路径
-`/workspace/codexschema/phase1_signed_face_cd_l1_20260714/continuations/v1r1/`。安装新的只读 control；
-control 必须是四文件 mini-tree：两个脚本只在 `scripts/`，两份 manifest 只在 `configs/`。v1r1 对
-四个 safe relative path 逐项绑定，拒绝绝对路径、`..`、缺文件、扁平旧布局和任一 symlink：
+最后一次成功只读快照 `2026-07-13T22:32:07Z` 证明 `control/v1r1`、`continuations/v1r1`、D2 arm、
+exact D2 training run 和 v1r1 pair result 全部 absent，v1r1 mode 执行次数为 `0`，也没有 write、claim
+或 launch。随后 SSH 超时，所以当前状态是 unknown；**历史 absence 不授权运行**。禁止安装或执行冻结
+v1r1 mode，也不得补造 v1r1 sidecar。
+
+## 5. v1r2 五键合同与 D2-only one-shot continuation
+
+v1r2 不修改 v1/v1r1 bytes。它先精确复现上面的 v1r1 错误，再用两层证据验证同一个 C2 hard
+contract：compact 记录必须恰为五键；exact bank NPZ 的 `meta_json` 必须独立绑定 file SHA、schema、
+split、source-family SHA、physics SHA，且 source-family contract 内嵌 physics 必须一致。伪造第六键或
+任一 metadata 漂移都 fail closed。
+
+control 是六文件 mini-tree。冻结 v1r1 脚本只作为可内容寻址的错误复现 helper 被导入，不能调用它的
+mode。缺任一文件、扁平布局、绝对/点跳转路径或 symlink 都拒绝：
 
 ```bash
-CONTROL_V1R1=/workspace/codexschema/phase1_signed_face_cd_l1_20260714/control/v1r1
-mkdir "$CONTROL_V1R1"
-mkdir "$CONTROL_V1R1/scripts" "$CONTROL_V1R1/configs"
+CONTROL_V1R2=/workspace/codexschema/phase1_signed_face_cd_l1_20260714/control/v1r2
+mkdir "$CONTROL_V1R2"
+mkdir "$CONTROL_V1R2/scripts" "$CONTROL_V1R2/configs"
+install -m 0444 configs/phase1_signed_face_cd_l1_v1r2_continuation_20260714.json \
+  "$CONTROL_V1R2/configs/phase1_signed_face_cd_l1_v1r2_continuation_20260714.json"
 install -m 0444 configs/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json \
-  "$CONTROL_V1R1/configs/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json"
+  "$CONTROL_V1R2/configs/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json"
 install -m 0444 configs/phase1_signed_face_cd_l1_prereg_20260714.json \
-  "$CONTROL_V1R1/configs/phase1_signed_face_cd_l1_prereg_20260714.json"
-install -m 0555 scripts/continue_phase1_signed_face_cd_l1_v1r1.py \
-  "$CONTROL_V1R1/scripts/continue_phase1_signed_face_cd_l1_v1r1.py"
+  "$CONTROL_V1R2/configs/phase1_signed_face_cd_l1_prereg_20260714.json"
+install -m 0555 scripts/continue_phase1_signed_face_cd_l1_v1r2.py \
+  "$CONTROL_V1R2/scripts/continue_phase1_signed_face_cd_l1_v1r2.py"
+install -m 0444 scripts/continue_phase1_signed_face_cd_l1_v1r1.py \
+  "$CONTROL_V1R2/scripts/continue_phase1_signed_face_cd_l1_v1r1.py"
 install -m 0444 scripts/run_phase1_signed_face_cd_l1.py \
-  "$CONTROL_V1R1/scripts/run_phase1_signed_face_cd_l1.py"
+  "$CONTROL_V1R2/scripts/run_phase1_signed_face_cd_l1.py"
 
-CONFIG_V1R1="$CONTROL_V1R1/configs/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json"
-LAUNCHER_V1R1="$CONTROL_V1R1/scripts/continue_phase1_signed_face_cd_l1_v1r1.py"
-test "$(sha256sum "$CONFIG_V1R1" | awk '{print $1}')" = \
-  f31fcf7bf500dde26a347af15feacececda1b5e1fd870c74759aca7d60c5def8
-test "$(sha256sum "$LAUNCHER_V1R1" | awk '{print $1}')" = \
+CONFIG_V1R2="$CONTROL_V1R2/configs/phase1_signed_face_cd_l1_v1r2_continuation_20260714.json"
+LAUNCHER_V1R2="$CONTROL_V1R2/scripts/continue_phase1_signed_face_cd_l1_v1r2.py"
+test "$(sha256sum "$CONFIG_V1R2" | awk '{print $1}')" = \
+  4e202589e5d12207b0ee0720f6d542d992517fe9f9b9bd32c7e54c845348c638
+test "$(sha256sum "$LAUNCHER_V1R2" | awk '{print $1}')" = \
+  2b53c86500c3fecabc5d634f7bdecf35e38735a8135a8630d43dcf60bf445a12
+test "$(sha256sum "$CONTROL_V1R2/scripts/continue_phase1_signed_face_cd_l1_v1r1.py" | awk '{print $1}')" = \
   a283a89a58114d8d8192b7a7bc879e2f6a9afb6302e9f126a86975e3a3340593
-test "$(sha256sum "$CONTROL_V1R1/scripts/run_phase1_signed_face_cd_l1.py" | awk '{print $1}')" = \
+test "$(sha256sum "$CONTROL_V1R2/configs/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json" | awk '{print $1}')" = \
+  f31fcf7bf500dde26a347af15feacececda1b5e1fd870c74759aca7d60c5def8
+test "$(sha256sum "$CONTROL_V1R2/scripts/run_phase1_signed_face_cd_l1.py" | awk '{print $1}')" = \
   0fa250207246e8bf69b6475125882b45e817f9e777d13039614c82dad9a803ba
-test "$(sha256sum "$CONTROL_V1R1/configs/phase1_signed_face_cd_l1_prereg_20260714.json" | awk '{print $1}')" = \
+test "$(sha256sum "$CONTROL_V1R2/configs/phase1_signed_face_cd_l1_prereg_20260714.json" | awk '{print $1}')" = \
   785ad96dd53e1809ddcf86d1ecd80572b02e3c96ffd6d6599cab20a73b559895
 ```
 
-先只读验证，再一次性发布 C2 attestation；只有 attestation 可逐值 replay、D2 arm 与 exact run name
-仍不存在、Pod1 GPU2 为空时，才运行唯一发射 mode：
+`validate-runtime` 必须重新观察 v1r1 evidence root/C2 receipt/pair receipt、D2 arm 和 exact D2 training
+run 全部 absent，并独立读取 exact bank NPZ；它同时要求 C2 的 GPU1 与 D2 的 GPU2 当前为空，还要完整
+重算 C2 claim/checkpoint/hard-contract、五键 bank 和 v1r1 精确假拒绝。v1r2 自己的 manifest、
+attestation/receipt、launch/runtime/result 与 NPZ `meta_json` 都拒绝重复 JSON key，不接受 last-key-wins。
 
-`attest-c2` 首次发布时要求 GPU1 为空以记录 terminal barrier；后续 replay 不继续占用或保留 GPU1，
-所以另一条合法训练后来使用 GPU1 不会阻断 D2，D2 自身仍只以 GPU2 空闲为发射条件。
+只有这次 fresh 只读结果通过后，`attest-c2` 才可继续；它在写任何 v1r2 byte **之前**再次完成同一 C2/
+bank/v1r1 replay，然后在 `continuations/v1r2/` no-clobber 写独立 absence receipt、立即重查 absence/C2，
+最后才写 C2 attestation。首次 exclusive write 后的任何失败都会保留 evidence root/receipt 并永久阻断本
+namespace 重试。首次 attestation 要求 GPU1 为空以记录 terminal barrier；后续 replay 不保留 GPU1。
+`launch-d2` 仍只要求 GPU2 空闲，并在原子 claim 前再次 replay absence：
 
 ```bash
-python3 "$LAUNCHER_V1R1" --manifest "$CONFIG_V1R1" --mode static-validate
-python3 "$LAUNCHER_V1R1" --manifest "$CONFIG_V1R1" --mode plan
-python3 "$LAUNCHER_V1R1" --manifest "$CONFIG_V1R1" --mode validate-runtime
-python3 "$LAUNCHER_V1R1" --manifest "$CONFIG_V1R1" --mode attest-c2
-python3 "$LAUNCHER_V1R1" --manifest "$CONFIG_V1R1" --mode launch-d2 \
-  --root-confirm ROOT_APPROVES_SIM_ONLY_SIGNED_FACE_D2_ONLY_V1R1
+python3 "$LAUNCHER_V1R2" --manifest "$CONFIG_V1R2" --mode static-validate
+python3 "$LAUNCHER_V1R2" --manifest "$CONFIG_V1R2" --mode plan
+python3 "$LAUNCHER_V1R2" --manifest "$CONFIG_V1R2" --mode validate-runtime
+python3 "$LAUNCHER_V1R2" --manifest "$CONFIG_V1R2" --mode attest-c2
+python3 "$LAUNCHER_V1R2" --manifest "$CONFIG_V1R2" --mode launch-d2 \
+  --root-confirm ROOT_APPROVES_SIM_ONLY_SIGNED_FACE_D2_ONLY_V1R2
 
 # D2 exact PID=PGID 自然退出后：
-python3 "$LAUNCHER_V1R1" --manifest "$CONFIG_V1R1" --mode finalize-d2
-python3 "$LAUNCHER_V1R1" --manifest "$CONFIG_V1R1" --mode finalize-pair
+python3 "$LAUNCHER_V1R2" --manifest "$CONFIG_V1R2" --mode finalize-d2
+python3 "$LAUNCHER_V1R2" --manifest "$CONFIG_V1R2" --mode finalize-pair
 ```
 
-parser 没有 `--cell`、`launch-next`、`launch-c2` 或 retry mode。D2 claim/checkpoint 同时绑定 v1r1
-manifest、v1r1 launcher、原 v1 source/recipe 和 C2 attestation；pair receipt 显式声明 mixed outer
-control（C2=v1，D2=v1r1），并要求规范化 trainer recipe 与 hard contract 都只能在
-`racket_guidance_reward.signed_face.weight` 上不同。该 receipt 仍不授权判卷或 L2。
+parser 没有 `--cell`、`launch-next`、`launch-c2` 或 retry mode。v1r2 C2 attestation 内容绑定 v1r1
+precondition absence receipt、v1r1 精确假拒绝、原 v1 claim/source/recipe 和 terminal bytes；D2 claim
+再绑定该 attestation 与 v1r2/v1r1/v1 三代 control SHA。pair receipt 只允许 normalized trainer recipe
+与 hard contract 在 `racket_guidance_reward.signed_face.weight` 上不同，且仍不授权判卷或 L2。
+
+截至本次 source gate，只运行了本机 static/plan 与攻击测试；没有连接 Pod、安装 control、写 attestation、
+claim 或启动 D2。v1r2 专项为 `52 passed`，v1/v1r1/v1r2 三代聚焦回归为 `111 passed`，受支持的完整
+仓内 `tests/` 为 `934 passed, 10 skipped`。
 
 ## 失败处置
 

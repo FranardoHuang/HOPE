@@ -1,11 +1,11 @@
 # EXP-P1-FACE-SIGN-FORENSIC — 高解析上台率是否隐去了拍面反号？
 
-- 状态：source fix implemented；C2 L1 terminal evidence frozen、v1r1 attestation/D2 与同卷复判 pending
+- 状态：source fix implemented；C2 L1 terminal evidence frozen、v1r2 attestation/D2 与同卷复判 pending
 - 工作类型：forensic（只做取证复核，不改变训练配方）
 - 阶段/轴：共用判分基础 + 课程阶段 1 / 拍面符号
 - 人类负责人：franco
 - 执行者：Codex
-- 工作分支：`Franco_codex/signed-face-honesty-20260713`、`Franco_codex/signed-face-cd-l1-v1r1-20260714`
+- 工作分支：`Franco_codex/signed-face-honesty-20260713`、`Franco_codex/signed-face-cd-l1-v1r2-20260714`
 - 最高证据等级：E4 diagnostic + source/unit gate；C2 有 terminal runtime bytes，但尚未形成成对结果
 - 最后复核：2026-07-14
 
@@ -99,7 +99,7 @@ Torch/Hydra import-bound 文件的 training dependency-light 组合为 `381 pass
 skip 与未收集的运行时模块都源于宿主没有 Torch/Isaac/Hydra，不是行为通过；Isaac canary 尚未执行。
 没有访问 Pod、启动 judge/simulator、改训练或运行真机。
 
-## 2026-07-14 C2 outer-verifier 假拒绝与 D2-only 续接
+## 2026-07-14 C2 两层 outer-verifier 假拒绝与 D2-only v1r2
 
 [`signed-face C2/D2`](../../DEFINITIONS.md) 的 C2 在 Pod1 GPU1 已按冻结 source/seed/recipe 自然跑到
 `model_24.pt`，但 v1 outer verifier 没有写 `runtime_verified.json`。根因是表示层而不是 trainer
@@ -114,21 +114,28 @@ run name 也必须 absent。C2 checkpoint 仍需由一次性 consumer 重算 can
 lineage1 和 checkpoint↔hard-contract/claim binding 后才可进入 pair；这里不把缺失的 v1 runtime sidecar
 补写成“当时已验证”。
 
-修复采用 [`v1r1` one-shot continuation](../../DEFINITIONS.md)，而不是重跑 C2。新 manifest
-`f31fcf7b...5def8` 冻结上述六个 SHA 和 absence boundary；新 verifier 只接受 exact float
-`[1.0,-1.0]`，显式拒绝 `[True,-1.0]` 与 `[1,-1]`。C2 attestation 写入独立
-`continuations/v1r1/` evidence root，不向 preserved C2 arm 增加文件。唯一 launch mode 是
-`launch-d2`：它要求 C2 attestation 可逐值 replay、D2 未 claim、GPU2 空，并让 D2 checkpoint 绑定
-v1r1 manifest/launcher、原 v1 source/recipe 和 C2 attestation。最终 pair 必须显式承认 mixed outer
-control（C2=v1、D2=v1r1），同时证明规范化 trainer recipe 与 hard contract 都只差 signed-face
-weight。activation/judge/L2/第二 seed/stop-promote/真机继续为 false。
+第一版 [`v1r1`](../../DEFINITIONS.md) 虽修复 float/int，却又把 exact bank NPZ metadata 中的
+`physics_contract_sha256` 错当成 trainer compact `question_bank` 的直接字段。source
+`4467d79` 实际只发出 `sha256/schema_version/split/source_family_sha256/exact` 五键，因此 v1r1 会
+精确假拒绝合法 C2 hard contract。冻结 v1/v1r1 bytes 都禁止运行。最后一次成功只读快照
+`2026-07-13T22:32:07Z` 证明 v1r1 control/evidence/pair、D2 arm 和 exact D2 run 全 absent，且没有
+write/claim/launch；后来 SSH 超时，所以这份历史 absence 不构成当前授权。
 
-部署前红队另发现“仓库布局绿、扁平外部 control 可能 import 失败”的 P1。最终 control 不再猜 sibling，
-只接受 `control/v1r1/{scripts,configs}/` 四文件 mini-tree；manifest 用 safe relative paths 绑定 v1r1
-launcher、v1 helper、v1r1 manifest 与原 v1 manifest。临时外部 mini-tree 已用 subprocess 实跑
-`static-validate/plan`；缺任一文件、旧扁平布局、绝对/`..` 路径或 symlink 都 fail closed。
+第二版 [`v1r2`](../../DEFINITIONS.md) manifest/launcher SHA 为 `4e202589...8c638` /
+`2b53c865...45a12`。它精确复现 v1r1 错误后，只接受 trainer 实际五键 compact shape；physics 另从
+exact NPZ `meta_json` 独立绑定 file/schema/split/source-family/physics SHA，并复算 source-family
+contract。伪造第六键、metadata drift 或 v1r1 evidence root/C2 receipt/pair receipt、D2 arm、exact
+D2 run 任一出现都 fail closed。C2 attestation 进入独立 `continuations/v1r2/`，先 no-clobber 写内容
+绑定的 v1r1 absence receipt 并立即重查，再只允许 D2 claim；preserved C2 arm 不增加文件。
 
-本分支只完成本地 source/contract gate，没有连接 Pod 或启动 D2；运行步骤见
+外部 control 只接受 `control/v1r2/{scripts,configs}/` 六文件 mini-tree：v1r2 controller 加冻结
+v1/v1r1 的两个 helper/manifest。临时外部 mini-tree 已用 subprocess 实跑 `static-validate/plan`；缺任一
+文件、旧扁平布局、绝对/`..` 路径或 symlink 都 fail closed。parser 仍没有 C2 launch、通用 cell、retry、
+judge、L2、第二 seed、stop-promote、部署或真机入口。
+
+v1r2 专项攻击测试为 `52 passed`，三代聚焦回归为 `111 passed`，受支持的完整仓内 `tests/` 为
+`934 passed, 10 skipped`。skip 沿用本机 optional dependency 边界，不是 simulator 行为通过。
+本分支只完成本地 source/contract gate，没有连接 Pod、安装 control、写 attestation 或启动 D2；运行步骤见
 [C2/D2 L1 操作文档](../../operations/run_phase1_signed_face_cd_l1.md)。
 
 ## 预注册决定规则

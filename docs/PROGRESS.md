@@ -13,14 +13,15 @@
 
 ## 2026-07-14
 
-- signed-face fresh C2 已在 Pod1 自然产生 finite/iter24/lineage1 terminal bytes，但 v1 outer verifier
-  用整数 `[1,-1]` strict-type 比较训练端合法 float `[1.0,-1.0]`，因而假拒绝且没有写
-  `runtime_verified`。旧 C2 claim/log/hard/checkpoint 六类 SHA 与 runtime/failure/result absence 已冻结；
-  D2 从未 claim。新的 one-shot `v1r1` 只在独立 evidence root 重算 C2 canonical claim/terminal binding，
-  唯一 launch mode 只允许未 claim 的 D2；没有 C2 retry 路径。外部 control 已固定为
-  `scripts/ + configs/` 四文件 mini-tree，临时外部树的 subprocess `static-validate/plan` 通过，扁平布局、
-  缺任一文件或 symlink 均失败。新旧 focused 合计 `59 passed`，本分支
-  未连接 Pod/启动 D2，L2/judge/第二 seed 仍未授权。见
+- signed-face fresh C2 已在 Pod1 自然产生 finite/iter24/lineage1 terminal bytes，但 v1 用整数
+  `[1,-1]` 假拒绝训练端合法 float `[1.0,-1.0]`；冻结 v1r1 又把 trainer 实际五键 compact bank
+  record 错当成应直含第六个 physics SHA。最后一次成功只读快照证明 v1r1 从未安装/运行且 D2 从未
+  claim；后续 SSH unknown，历史 absence 不授权 launch。v1r2 保持 v1/v1r1 bytes 冻结并禁止运行旧
+  mode，只接受 exact 五键，再从 NPZ metadata/source-family 独立绑定 physics；旧 v1r1 evidence/pair、
+  D2 arm/exact run 任一存在都 fail closed。六文件外部 mini-tree static/plan 与专项攻击测试
+  `52 passed`，重复 JSON key 也 fail closed；三代聚焦回归 `111 passed`，完整仓内 `tests/` 为
+  `934 passed, 10 skipped`。本分支未连接 Pod、安装 control、写 attestation 或启动 D2，L2/judge/
+  第二 seed 仍未授权。见
   [face-sign 实验](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)与
   [操作](operations/run_phase1_signed_face_cd_l1.md)。
 

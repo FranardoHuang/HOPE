@@ -325,7 +325,7 @@ L1 completion 的入口。半写/提前退出格原样保留并阻断自动重�
 当前不授权再次启动原 v6 D、v6r1、v6r2 或 v8 D。只有 boot 根因闭环并形成新的内容绑定合同后，才可
 评审新的 versioned attempt；也不授权 L2、judge、第二 seed、部署或真机。
 
-## 2026-07-14 C2/D2 provenance 修正版（C2 terminal；D2 待 v1r1）
+## 2026-07-14 C2/D2 provenance 修正版（C2 terminal；D2 待 v1r2）
 
 旧 v9 `5f691b3400fe3feda1a690675912a97f09e906bb` source 和
 `466f8ea935310407f73b95e812bbd5f0a18705b4` control 的只读复核发现一个比 boot ordinal 更基础的
@@ -359,7 +359,7 @@ shared Kit boot lock 仍串行；但 C2 写出 `runtime_verified` 后继续训�
 后续 C2 已实际启动并自然形成 terminal hard contract/checkpoint；D2 尚未 claim。当前裁决更新为：
 
 - **GO（待 root 审阅）：** 只允许按
-  [C2/D2 运行手册](../../operations/run_phase1_signed_face_cd_l1.md)用 v1r1 replay 已完成 C2 的冻结证据，
+  [C2/D2 运行手册](../../operations/run_phase1_signed_face_cd_l1.md)用 v1r2 replay 已完成 C2 的冻结证据，
   再购买尚未 claim 的 D2 L1 provenance smoke；
 - **NO-GO：** 旧 v9 artifact 采用、同 namespace retry、activation、judge、L2、第二 seed、stop/promote、
   部署或真机。
@@ -378,15 +378,23 @@ C2 v1 的 launch contract/state/canonical claim SHA 为 `26bf204d...0e96` / `2bc
 `[1,-1]` 做 exact-type 深比较，因而在 post-boot 假拒绝。旧 runtime/failure/result 都 absent；这三个
 absence 是事实边界，不得通过事后补写把它描述成 v1 runtime verified。
 
-一次性 [`v1r1`](../../DEFINITIONS.md) manifest `f31fcf7b...5def8` 直接冻结上述六个 SHA、C2
-PID=PGID 和精确 run path。它重算 canonical claim 与 checkpoint↔hard-contract/claim binding，且
-hard-contract verifier 只接受 exact float，显式拒绝 bool/int。attestation 进入独立 no-clobber
-`continuations/v1r1/`，不向 preserved C2 arm 增加文件。parser 没有 `--cell`、`launch-next`、C2 launch
-或 retry；D2 是唯一可 claim cell，且 claim 同时绑定 v1r1 manifest/launcher、原 v1 helper/source/
-recipe 和 C2 attestation。
+冻结 [`v1r1`](../../DEFINITIONS.md) 虽修复 exact float，却把 source `4467d79` 实际发出的五键 compact
+`question_bank` 错当成还应直含第六个 `physics_contract_sha256`，因此对合法 C2 合同精确假拒绝。该
+physics SHA 实际只存在于 exact NPZ metadata/source-family contract，不能伪造进 trainer record。
+最后一次成功只读快照 `2026-07-13T22:32:07Z` 证明 v1r1 control/evidence/pair、D2 arm/exact run
+全部 absent 且没有 write/claim/launch；后续 SSH 状态 unknown。v1/v1r1 bytes 均冻结并禁止运行，历史
+absence 也不授权 launch。
 
-mixed outer-control pair（C2=v1、D2=v1r1）只有在两条 normalized trainer recipe 与 hard contract
-都只差 signed-face weight 时才可发布。外部 control 固定为 `scripts/ + configs/` 四文件 mini-tree，
-真实临时 mini-tree subprocess 的 `static-validate/plan` 通过，缺文件/扁平/symlink 均失败；focused
-v1+v1r1 为 `59 passed`。本分支没有连接 Pod 或启动
-D2，因此还没有 paired L1 result，更没有 activation/judge/L2/第二 seed/行为结论。
+新的 [`v1r2`](../../DEFINITIONS.md) manifest/launcher SHA 为 `4e202589...8c638` /
+`2b53c865...45a12`。它精确复现 v1r1 错误，只接受实际五键 compact shape，并独立解析 exact NPZ
+`meta_json` 绑定 bank file/schema/split/source-family/physics SHA；source-family 内嵌 physics 也必须
+一致。伪造第六键、metadata drift，或 v1r1 evidence root/C2 receipt/pair receipt、D2 arm/exact run
+任一出现都 fail closed。attestation 进入独立 no-clobber `continuations/v1r2/`，先写并立即 replay
+content-bound v1r1 absence receipt，不向 preserved C2 arm 增加文件。
+
+mixed outer-control pair（C2=v1、D2=v1r2）只有在两条 normalized trainer recipe 与 hard contract
+都只差 signed-face weight 时才可发布。外部 control 固定为 `scripts/ + configs/` 六文件 mini-tree，
+同时绑定 v1r2 与冻结 v1/v1r1 helper/manifest；临时 mini-tree subprocess `static-validate/plan` 通过，
+缺文件/扁平/symlink/重复 JSON key 均失败。v1r2 专项攻击测试 `52 passed`；本分支没有连接 Pod、安装 control、写
+attestation 或启动 D2。三代聚焦回归为 `111 passed`，受支持的完整仓内 `tests/` 为
+`934 passed, 10 skipped`；因此还没有 paired L1 result，更没有 activation/judge/L2/第二 seed/行为结论。
