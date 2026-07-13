@@ -1260,13 +1260,13 @@ windows return `token_published_pending_ack` or `committed_pending_exec` with re
 progress is not yet visible, while every second launch remains no-clobber rejected. Inspection
 rejects PID reuse and delegates terminal acceptance to the original runner's full result validator.
 
-The focused supervisor suite passes `23` cases; queue+consumer+supervisor together pass `63`. The
+The focused supervisor suite passes `24` cases; queue+consumer+supervisor together pass `64`. The
 suite includes tokenless deadline expiry, post-token delayed rehash, a 1.15-second acknowledgment
 atomic-publication stall, post-ack delayed exec and terminal-result A-to-B replacement. The three
 post-token stalls preserve no-retry authority and converge without a fatal-before-later-runner
-sequence. Post-link token-directory-fsync and parent-observation-write failures also return
-committed pending, reject restart and later inspect as exact running; neither can escape as a
-retryable launch error. The host is macOS, so procfs behavior is covered through an injected
+sequence. Post-link token-directory-fsync plus evidence-stat failure, token temporary-cleanup
+failure and parent-observation-write failure also return committed pending, reject restart and later
+inspect as exact running; none can escape as a retryable launch error. The host is macOS, so procfs behavior is covered through an injected
 identity seam and still needs one Linux fake-runner source smoke before any real q50 process. No Pod
 deployment, judge, simulator, training mutation, process-control action or hardware command ran.
 G05 remains `Partial`.

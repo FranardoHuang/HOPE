@@ -104,11 +104,13 @@ one stalls the acknowledgment's atomic publication for 1.15 seconds. Both return
 `token_published_pending_ack`, reject a second launch, emit no fatal-before-later-runner sequence,
 and converge through `inspect` to exact running. A separate post-ack stall produces
 `committed_pending_exec` with the same no-retry/convergence property. An A-to-B result swap during
-bound validation is rejected. Two more deterministic regressions fail the token directory fsync
-after its final link and fail the parent observation write after its final link. Both return
-`token_published_pending_ack` with `retry_authorized=false`, preserve the no-clobber state, start no
+bound validation is rejected. Three more deterministic regressions combine a token-directory-fsync
+failure with an unreadable parent-evidence stat, fail token temporary cleanup after its final link,
+and fail the parent observation write after its final link. All return
+`token_published_pending_ack` with `retry_authorized=false`; an unreadable evidence stat defaults to
+`post_token_evidence_present=false` without escaping. They preserve the no-clobber state, start no
 duplicate, and later converge through `inspect` without a parent or child fatal. The focused suite
-has 23 cases; the queue, consumer and supervisor set has 63.
+has 24 cases; the queue, consumer and supervisor set has 64.
 
 This contract does not prove that an external Pod manager will preserve processes when it destroys
 an entire container or cgroup. It only removes ordinary SSH file-descriptor/session lifetime from

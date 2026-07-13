@@ -488,19 +488,71 @@ def test_ack_atomic_publication_stall_is_pending_not_retryable_fatal(
 
 def test_token_after_link_directory_fsync_error_is_committed_not_retryable(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     _, config = _fixture(tmp_path, suffix="token_dir_fsync_error")
+    original_is_file = Path.is_file
 
     def fail_directory_fsync(_path: Path) -> None:
         raise OSError("injected token directory fsync failure after link")
+
+    def fail_post_token_evidence_stat(path: Path) -> bool:
+        if path.name == "parent_post_token_error.json":
+            raise OSError("injected post-token evidence stat failure")
+        return original_is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", fail_post_token_evidence_stat)
 
     launched = _launch(config, token_directory_fsync=fail_directory_fsync)
     state_dir = Path(config["pods"]["pod1"]["state_dir"])
     assert launched["status"] == "token_published_pending_ack"
     assert launched["retry_authorized"] is False
+    assert launched["post_token_evidence_present"] is False
     assert "directory_fsync" in launched["parent_observation_error"]
     assert (state_dir / "commit_token.json").is_file()
-    assert (state_dir / "parent_post_token_error.json").is_file()
+    assert (state_dir / "parent_post_token_error.json").exists()
+    with pytest.raises(S.SupervisorError, match="no-clobber"):
+        _launch(config)
+
+    _wait_for(Path(config["environment"]["FAKE_RUNNER_MARKER"]))
+    converged = S._inspect_loaded(
+        config,
+        "pod1",
+        identity_reader=_identity_reader(config, "pod1"),
+        boot_id_reader=_boot_id,
+    )
+    assert converged["status"] == "running_exact"
+    log = (state_dir / "runner.stdout_stderr.log").read_text(encoding="utf-8")
+    assert "[q50-supervisor][FATAL]" not in log
+    assert "[fake-bound-runner] started" in log
+    os.waitpid(converged["pid"], 0)
+
+
+def test_token_after_link_temporary_cleanup_error_is_committed_and_converges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _, config = _fixture(tmp_path, suffix="token_temp_cleanup_error")
+    state_dir = Path(config["pods"]["pod1"]["state_dir"])
+    original_unlink = Path.unlink
+
+    def fail_token_temporary_cleanup(path: Path, *args, **kwargs) -> None:
+        if (
+            path.parent == state_dir
+            and path.name.startswith(".commit_token.json.")
+            and path.name.endswith(".tmp")
+            and (state_dir / "commit_token.json").exists()
+        ):
+            raise OSError("injected token temporary cleanup failure after link")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_token_temporary_cleanup)
+    launched = _launch(config)
+    assert launched["status"] == "token_published_pending_ack"
+    assert launched["retry_authorized"] is False
+    assert "temporary_cleanup" in launched["parent_observation_error"]
+    assert (state_dir / "commit_token.json").is_file()
+    assert list(state_dir.glob(".commit_token.json.*.tmp"))
     with pytest.raises(S.SupervisorError, match="no-clobber"):
         _launch(config)
 

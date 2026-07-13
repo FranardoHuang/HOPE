@@ -1358,45 +1358,85 @@ def _launch_loaded(
             token_directory_fsync=token_directory_fsync,
         )
     except BaseException as exc:
-        binding = config.get("pods", {}).get(pod, {})
-        state_dir = Path(str(binding.get("state_dir", "")))
-        token_path = state_dir / "commit_token.json"
         token_may_be_visible = commit_state["token_linked"]
         if isinstance(exc, AtomicPublicationError):
-            token_may_be_visible = token_may_be_visible or (
-                exc.linked and exc.path == token_path
-            )
+            try:
+                token_may_be_visible = token_may_be_visible or (
+                    exc.linked and exc.path.name == "commit_token.json"
+                )
+            except BaseException:
+                # ``commit_state`` is set immediately after the final link.  This
+                # guard is only a last-resort check for an exception delivered in
+                # the tiny interval between ``link(2)`` returning and that hook.
+                pass
         if not token_may_be_visible:
             raise
 
-        error_text = f"{type(exc).__name__}: {exc}"
-        evidence_path = state_dir / "parent_post_token_error.json"
+        # Once the token's final link can be visible, every parent-side operation
+        # is observation only.  None of those operations may turn committed work
+        # into a retryable launch error.  Build the public fallback from safe
+        # defaults, then enrich it best-effort behind individual guards.  This
+        # includes path construction, exception rendering, evidence publication,
+        # and the final evidence stat itself.
+        fallback: dict[str, Any] = {
+            "status": "token_published_pending_ack",
+            "pod": pod,
+            "state_dir": "",
+            "commit_token_path": "",
+            "retry_authorized": False,
+            "parent_observation_error": "post-token parent observation failed",
+            "post_token_evidence_path": "",
+            "post_token_evidence_present": False,
+        }
         try:
-            _diagnostic_no_clobber(
-                evidence_path,
-                {
-                    "schema_version": 1,
-                    "artifact_kind": "phase1_q50_supervisor_parent_post_token_error",
-                    "status": "committed_parent_observation_failed",
-                    "pod": pod,
-                    "token_path": str(token_path),
-                    "token_link_observed": True,
-                    "error": error_text,
-                    "observed_unix_ns": time.time_ns(),
-                },
+            fallback["parent_observation_error"] = (
+                f"{type(exc).__name__}: {str(exc)}"
             )
         except BaseException:
             pass
-        return {
-            "status": "token_published_pending_ack",
-            "pod": pod,
-            "state_dir": str(state_dir),
-            "commit_token_path": str(token_path),
-            "retry_authorized": False,
-            "parent_observation_error": error_text,
-            "post_token_evidence_path": str(evidence_path),
-            "post_token_evidence_present": evidence_path.is_file(),
-        }
+
+        state_dir: Path | None = None
+        token_path: Path | None = None
+        evidence_path: Path | None = None
+        try:
+            binding = config.get("pods", {}).get(pod, {})
+            state_dir = Path(str(binding.get("state_dir", "")))
+            token_path = state_dir / "commit_token.json"
+            evidence_path = state_dir / "parent_post_token_error.json"
+            fallback["state_dir"] = str(state_dir)
+            fallback["commit_token_path"] = str(token_path)
+            fallback["post_token_evidence_path"] = str(evidence_path)
+        except BaseException:
+            state_dir = None
+            token_path = None
+            evidence_path = None
+
+        if evidence_path is not None and token_path is not None:
+            try:
+                _diagnostic_no_clobber(
+                    evidence_path,
+                    {
+                        "schema_version": 1,
+                        "artifact_kind": (
+                            "phase1_q50_supervisor_parent_post_token_error"
+                        ),
+                        "status": "committed_parent_observation_failed",
+                        "pod": pod,
+                        "token_path": str(token_path),
+                        "token_link_observed": True,
+                        "error": fallback["parent_observation_error"],
+                        "observed_unix_ns": time.time_ns(),
+                    },
+                )
+            except BaseException:
+                pass
+            try:
+                fallback["post_token_evidence_present"] = evidence_path.is_file()
+            except BaseException:
+                # Unknown is represented conservatively as absent; it never
+                # changes the irreversible no-retry decision.
+                fallback["post_token_evidence_present"] = False
+        return fallback
 
 
 def launch(config_path: Path, expected_config_sha256: str, pod: str) -> dict[str, Any]:

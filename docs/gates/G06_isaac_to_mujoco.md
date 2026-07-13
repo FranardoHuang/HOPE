@@ -1139,12 +1139,12 @@ pre-existing result prevents launch. No retry, remote login, process-control, tr
 simulator, deployment or robot surface exists. The detailed contract and commands are in
 [the model-4000 q50 operation](../operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md#persistent-top-level-launch-source-gate).
 
-Supervisor tests pass `23`; combined queue/consumer/supervisor tests pass `63`. Tokenless deadline
+Supervisor tests pass `24`; combined queue/consumer/supervisor tests pass `64`. Tokenless deadline
 expiry cannot execute; post-token delayed rehash, a 1.15-second acknowledgment atomic-publication
 stall and post-ack delayed exec all reject restart and later converge without a
 fatal-before-later-runner sequence. Terminal validation also freezes bytes/SHA and rejects an A-to-B
-replacement. Post-link token-directory-fsync and parent-observation-write failures are separately
-covered: both return committed pending, reject restart and later inspect as exact running without a
-fatal. This is host source evidence only: Linux procfs has not yet been smoke-tested, the wrapper is
+replacement. Post-link token-directory-fsync plus evidence-stat failure, token temporary-cleanup
+failure and parent-observation-write failure are separately covered: all return committed pending,
+reject restart and later inspect as exact running without a fatal. This is host source evidence only: Linux procfs has not yet been smoke-tested, the wrapper is
 not deployed, and no MuJoCo judge or score ran. It therefore closes neither the matched
 [q50/K100](../DEFINITIONS.md#q50-and-k100) result nor vendor Gate3/Gate3B. G06 remains `Partial`.

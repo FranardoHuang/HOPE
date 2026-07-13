@@ -462,9 +462,9 @@ first enter `main`, and the deployed script/config hashes below must match that 
 The reviewed files are:
 
 - `scripts/run_phase1_q50_persistent_supervisor.py`, SHA-256
-  `60a30f9bbef4de904da1ebfd45615b74f54a440ae1c8eb558819deaa795bf34b`;
+  `fd565ca453d95712fa7045fec77e8fce29e93f0a13590d72311fcb7719ab800e`;
 - `configs/phase1_fresh_SZ_model4000_seed_stability_q50_persistent_supervisor_20260713.json`,
-  SHA-256 `752d0ad24e5bb5a6d200bcf156a8f913b827ce5981caa349198e2154387c5385`.
+  SHA-256 `d1a76a5756d32642136884b4414e9fad2b5a80a257bb9c6fdd9e61a1108f6050`.
 
 Deploy those two files, preserving their repository-relative `scripts/` and `configs/` paths, into
 one new no-clobber source root on each Pod. Do not put them in or modify the frozen train/eval
@@ -493,7 +493,7 @@ changed variable.
 ```bash
 SUPERVISOR="$SUP_SOURCE/scripts/run_phase1_q50_persistent_supervisor.py"
 SUP_CONFIG="$SUP_SOURCE/configs/phase1_fresh_SZ_model4000_seed_stability_q50_persistent_supervisor_20260713.json"
-SUP_CONFIG_SHA=752d0ad24e5bb5a6d200bcf156a8f913b827ce5981caa349198e2154387c5385
+SUP_CONFIG_SHA=d1a76a5756d32642136884b4414e9fad2b5a80a257bb9c6fdd9e61a1108f6050
 
 env -i HOME=/root LANG=C.UTF-8 LC_ALL=C.UTF-8 LOGNAME=root \
   PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
@@ -549,7 +549,7 @@ pytest -q \
   tests/test_validate_phase1_fresh_sz_model4000_q50_queue.py
 ```
 
-The accepted host result is `63 passed`. The launch-specific 23 tests cover parent exit/stall before
+The accepted host result is `64 passed`. The launch-specific 24 tests cover parent exit/stall before
 token commit, child token timeout, duplicate/no-clobber launch, pre-existing result and artifact
 mismatch, exact live identity, reused-PID/executable/environment rejection, minimal terminal-result
 rejection and delegation to the original runner's full result validator. A deterministic tokenless
@@ -557,8 +557,9 @@ stall crosses the startup deadline and proves there is no token or runner start.
 a real 1.15-second acknowledgment atomic-publication stall both cross the old deadline after token commit,
 return pending with no retry authority, and later converge to running without a fatal-before-runner
 sequence. A post-ack stall returns pending with the same no-retry/convergence behavior; a result
-A-to-B swap during validation is rejected. The token-directory-fsync and parent-observation-write
-regressions each fail after their final link, return committed pending without fatal/retry authority,
-reject a second launch and later inspect as exact running. This macOS host has no Linux procfs,
+A-to-B swap during validation is rejected. The token-directory-fsync plus evidence-stat,
+token-temporary-cleanup and parent-observation-write regressions each fail after the token's final
+link, return committed pending without fatal/retry authority, reject a second launch and later
+inspect as exact running. This macOS host has no Linux procfs,
 so the tests inject the same identity-reader seam; an actual Linux source smoke that starts only a
 fake runner remains required before the real Pod q50 launch. No test starts a judge or simulator.

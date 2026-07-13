@@ -23,8 +23,8 @@ live in the
 [model-4000 q50 operation](../operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md).
 The startup wrapper adds no evaluation variable. Its exact new bindings are:
 
-- supervisor source SHA `60a30f9bbef4de904da1ebfd45615b74f54a440ae1c8eb558819deaa795bf34b`;
-- supervisor config SHA `752d0ad24e5bb5a6d200bcf156a8f913b827ce5981caa349198e2154387c5385`;
+- supervisor source SHA `fd565ca453d95712fa7045fec77e8fce29e93f0a13590d72311fcb7719ab800e`;
+- supervisor config SHA `d1a76a5756d32642136884b4414e9fad2b5a80a257bb9c6fdd9e61a1108f6050`;
 - all-four activation file SHA `9dea76c2a9039dc35f8f996fa112e0e28ee320cb9b7c7ec877be942e021ce704`;
 - Pod1 prepared runtime SHA `2b76a5a917c0a5d88ab5eec6b984b3d4ed2faa07484804bb42551f310378201e`;
 - Pod2 prepared runtime SHA `dbecc102cdb388873c9369f60e3820a0f4c6949cc925cd5f3123731eec8d1c9b`;
@@ -58,15 +58,16 @@ The command has not run on either Pod.
 
 ## Results
 
-No q50 behavior result exists. Host supervisor tests pass `23`; queue+consumer+supervisor tests pass
-`63`. Tokenless deadline expiry cannot execute; delayed post-token rehash, a 1.15-second
+No q50 behavior result exists. Host supervisor tests pass `24`; queue+consumer+supervisor tests pass
+`64`. Tokenless deadline expiry cannot execute; delayed post-token rehash, a 1.15-second
 acknowledgment atomic-publication stall and delayed post-ack exec all reject restart and later
 converge without a fatal-before-later-runner sequence. Terminal validation freezes bytes/SHA and rejects an A-to-B
 replacement. Both runtime contracts remain `prepared_not_started`, `jobs_started=0`,
 `auto_start=false`.
 
-Two additional post-link failures cover token directory fsync and parent observation publication;
-both return committed pending with no retry authority and later inspect as exact running.
+Three additional post-link failures cover token directory fsync plus unreadable evidence stat,
+token temporary cleanup and parent observation publication; all return committed pending with no
+retry authority and later inspect as exact running.
 
 ## Limitations and claims not made
 

@@ -1815,13 +1815,14 @@ R15/斜录重赛(相位校准后并入阶段 1 相位臂)。
   makes the detached child time out by itself; inspection rejects PID reuse and accepts completion
   only through the exact content-bound Pod result. There is no retry, remote-login, process-control,
   training, deployment, simulator or robot authority.
-- Supervisor-focused tests pass `23`; the queue+consumer+supervisor set passes `63`. A deterministic
+- Supervisor-focused tests pass `24`; the queue+consumer+supervisor set passes `64`. A deterministic
   tokenless stall crosses the deadline and proves no token/runner start. Post-token delayed rehash,
   a 1.15-second acknowledgment atomic-publication stall and post-ack delayed exec all return pending,
   reject restart and later converge without a fatal-before-later-runner sequence. Terminal result
   validation freezes bytes/SHA and rejects an A-to-B swap during the bound validator.
-  Separate post-link token-directory-fsync and parent-observation-write failures return committed
-  pending with no retry authority, reject a duplicate launch and later inspect as exact running.
+  Separate post-link token-directory-fsync plus unobservable evidence-stat, token temporary-cleanup,
+  and parent-observation-write failures return committed pending with no retry authority, reject a
+  duplicate launch and later inspect as exact running.
   This macOS host has no procfs, so one Linux fake-runner smoke remains required before Pod
   deployment. No wrapper,
   judge, simulator or hardware process ran; see the
