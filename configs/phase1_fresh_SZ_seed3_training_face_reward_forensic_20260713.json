@@ -270,7 +270,7 @@
       "run_git_diff": {
         "bytes": 267,
         "content_observation": "the artifact records the 2026-07-11 05:40 checkout as clean with no diff",
-        "pod_path": "/workspace/codexschema/phase1_fresh_20260711/runs/phase1_fresh_v3_SZ_seed3/git/nohope.diff",
+        "pod_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_05-39-31_phase1_fresh_v3_SZ_seed3/git/nohope.diff",
         "scope_limit": "clean/no-diff evidence does not establish the checkout HEAD or the bytes loaded by the training process",
         "sha256": "8d873bddf85f0e58da9e10bc820f9e7d28d1a8efda70cf78128a3995948c65f2"
       },
@@ -299,5 +299,5 @@
       "reward_virtual_spin": "Live/Reward/virtual_spin"
     }
   },
-  "content_sha256": "cdd33747b5feb552c6879057c6e7dcdbe28ac4d1723e67cbae88f2fc193daec7"
+  "content_sha256": "07186e1a6d70371b4d038705b7ae3f068d68e17cf4cb377ad18333cc5bae8181"
 }

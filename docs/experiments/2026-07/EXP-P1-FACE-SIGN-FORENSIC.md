@@ -45,8 +45,8 @@ checkpoint 晋级资格；这不需要等新训练终档才能判断。
 
 seed3 的 TensorBoard event 另给出一条独立于终档判卷的机制一致性证据。content-bound 小摘要是
 [`phase1_fresh_SZ_seed3_training_face_reward_forensic_20260713.json`](../../../configs/phase1_fresh_SZ_seed3_training_face_reward_forensic_20260713.json)：
-文件 SHA `68557a419b3482ab481955a0b95424ea0dd0d38aa52ed26f2ee9b52cfd1106c5`、canonical
-content SHA `cdd33747b5feb552c6879057c6e7dcdbe28ac4d1723e67cbae88f2fc193daec7`；它绑定原始 event
+文件 SHA `6b6ff8e5a98c38ee9ea3856820fa6876aa9a6422eaa931be408a14a18859147a`、canonical
+content SHA `07186e1a6d70371b4d038705b7ae3f068d68e17cf4cb377ad18333cc5bae8181`；它绑定原始 event
 SHA `c1578922...25e`、训练合同 SHA `3a3b3d95...b9972` 与实际 `params/env.yaml` SHA
 `4dfb829e...a70051`，没有把约 518 MB 的 event 文件提交进 Git。冻结的 `env.yaml` 明确记录
 `commands.racket_target.virtual_ball=true`、`vb_metrics_only=true`，以及
