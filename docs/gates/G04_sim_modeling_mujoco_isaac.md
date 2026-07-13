@@ -63,7 +63,12 @@ Done:
 - The table-tennis scene now includes a tracked Purdue PACE table/net USD visual overlay under `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/table_usd/`. Physics still comes from invisible cuboid colliders; the USD is visual-only.
 - Table-tennis ball/table contact now follows Purdue PACE materials by default: ball mass `3.4 g`, ball restitution/friction `0.9/0.1`, table restitution/friction `0.95/0.4`, multiplicative combine for an effective ball-table normal restitution of `0.855`. HOPE-calibrated aero drag is available but off by default for Purdue parity.
 - `tests/test_table_tennis_geometry.py` covers table/frame geometry and pure drag/Magnus math; the drag/Magnus tests skip automatically if host `torch` is missing.
-- Sim parity between MuJoCo and Isaac is established via `hope_training/whole_body_tracking/scripts/mujoco_eval_onnx.py`: MuJoCo with `implicitfast` integration and kd placed in `dof_damping` matches Isaac's `ImplicitActuator` (stable rollout), while the AGI deploy sim's explicit Euler PD diverges in ~0.1 s. Documented in `agi/a3_deploy_example/SIM_FIDELITY_NOTE_FOR_AGI.md`.
+- A historical diagnostic found stable rollouts when MuJoCo used `implicitfast` with kd in
+  `dof_damping`, while the AGI explicit-Euler path diverged in about `0.1 s`. That did **not**
+  establish actuator parity: passive kd sits outside motor effort clipping. The 2026-07-14 source
+  correction below replaces bound execution with Isaac's total `clip(P-D)` law and keeps the old
+  passive-kd mode diagnostic-only. The older observations remain in
+  `agi/a3_deploy_example/SIM_FIDELITY_NOTE_FOR_AGI.md` as historical evidence, not an exactness claim.
 - Hardware SDK parity for joint order is established: the `pp_joint_map` backend order was verified slot-for-slot against AGI `robot_io::MakeA3Layout31()` — a checked bijection (`agi/a3_deploy_example/PINGPONG_DEPLOY_ALIGNMENT.md:137-139`).
 
 Not done:
@@ -260,6 +265,21 @@ unrun. G04 remains `Partial`.
 For M0, the canonical-beta materialization still has null A3 stance fields. The downstream exact-GMR
 plan now freezes canonical foot sites and tolerances, while initial/terminal `d_xy` and pass remain
 null until robot-coordinate evidence exists. G04 remains `Partial`.
+
+## Audit update 2026-07-14: bounded implicit effort and robot-only self-contact semantics
+
+The MuJoCo evaluator no longer represents a bound Isaac implicit drive as clipped P plus unbounded
+passive D. It computes and sends `clip(P-D,-L,L)` per substep; cancellation, same-direction, pure-D
+and exact-boundary tests cover both signs. A retained MuJoCo passive damping column or missing effort
+limit cannot realize this law and is diagnostic-only; formal construction fails closed.
+
+Self-contact classification is now the intersection of two geoms in the explicit `pelvis_link`
+articulation subtree. Dynamic balls, table/net bodies, mocap helpers and unrelated free bodies are
+excluded even though their MuJoCo body IDs are nonzero. Because Isaac training has self-collision
+disabled, formal BankExam fails on the first classified robot pair; diagnostic protocols only count
+it without mutating physics. These are source/contract corrections, not evidence that Isaac and
+vendor MuJoCo contacts or integration are behaviorally equivalent. G04 remains `Partial`; see
+[the integration experiment](../experiments/2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md).
 
 ## Audit update 2026-07-14: S0/M0 exact GMR source/model gate
 

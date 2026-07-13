@@ -102,6 +102,67 @@ def test_freejoint_origin_velocity_conversion_is_point_explicit_and_numpy_only()
         M.freejoint_origin_lin_vel_w(declared, omega, quat, body_ipos, "ambiguous")
 
 
+@pytest.mark.parametrize(
+    ("proportional", "damping", "limit", "expected"),
+    [
+        # Opposite-sign cancellation before clipping: old clip(P)-D incorrectly produced 4.
+        (8.0, 2.0, 6.0, 6.0),
+        # Same-sign contributions share one limit: old clip(P)-D incorrectly produced 9.
+        (5.0, -4.0, 6.0, 6.0),
+        # Pure damping, including the negative saturation quadrant.
+        (0.0, 8.0, 6.0, -6.0),
+        # Exact boundary is not altered.
+        (-2.0, 4.0, 6.0, -6.0),
+    ],
+)
+def test_isaac_total_pd_effort_clips_after_combining_terms(
+    proportional, damping, limit, expected
+):
+    actual = M.isaac_total_pd_effort(
+        np.asarray([proportional]), np.asarray([damping]), np.asarray([limit])
+    )
+    np.testing.assert_array_equal(actual, np.asarray([expected]))
+
+
+def test_formal_implicit_effort_plan_rejects_passive_or_unbound_proxy():
+    assert M.resolve_implicit_effort_execution(
+        has_implicit=True,
+        effort_limits_bound=True,
+        passive_damping=np.zeros(2),
+        allow_inexact_proxy=False,
+    ) == "isaac_total_pd_clip_exact"
+    with pytest.raises(ValueError, match="passive damping cannot realize"):
+        M.resolve_implicit_effort_execution(
+            has_implicit=True,
+            effort_limits_bound=True,
+            passive_damping=np.asarray([0.0, 0.1]),
+            allow_inexact_proxy=False,
+        )
+    with pytest.raises(ValueError, match="no bound effort limits"):
+        M.resolve_implicit_effort_execution(
+            has_implicit=True,
+            effort_limits_bound=False,
+            passive_damping=np.zeros(2),
+            allow_inexact_proxy=False,
+        )
+    assert M.resolve_implicit_effort_execution(
+        has_implicit=True,
+        effort_limits_bound=True,
+        passive_damping=np.asarray([0.0, 0.1]),
+        allow_inexact_proxy=True,
+    ) == "total_pd_clip_plus_passive_damping_inexact"
+
+
+def test_formal_self_contact_policy_fails_and_diagnostic_policy_only_records():
+    M.enforce_self_contact_policy(
+        fail_closed=False, count=1, penetration_m=0.002, pair="arm~torso"
+    )
+    with pytest.raises(SystemExit, match="enabled_self_collisions=False"):
+        M.enforce_self_contact_policy(
+            fail_closed=True, count=1, penetration_m=0.002, pair="arm~torso"
+        )
+
+
 def test_exact_strike_clock_is_post_step_and_holds_stay_pinned():
     dt = 0.02
     # An action selected one frame before contact produces the contact state after physics.
@@ -349,7 +410,8 @@ def _install_fake_mujoco(monkeypatch, *, armature=0.01, effort=24.0,
     joint_names = [f"joint_{index}" for index in range(31)]
     body_names = list(dict.fromkeys([*M.TRACKED_BODIES, *M.FEET_BODIES]))
     joint_ids = {name: index + 1 for index, name in enumerate(joint_names)}
-    body_ids = {name: index for index, name in enumerate(body_names)}
+    # MuJoCo body 0 is world; all fake robot bodies live in the pelvis (id 1) subtree.
+    body_ids = {name: index + 1 for index, name in enumerate(body_names)}
     actuator_ids = {name + "_motor": index for index, name in enumerate(joint_names)}
     qadr = np.arange(7, 38, dtype=int)
     vadr = np.arange(6, 37, dtype=int)
@@ -359,7 +421,9 @@ def _install_fake_mujoco(monkeypatch, *, armature=0.01, effort=24.0,
         jnt_qposadr=np.concatenate(([0], qadr)),
         jnt_dofadr=np.concatenate(([0], vadr)),
         jnt_type=np.concatenate(([0], np.full(31, 3, dtype=int))),
-        jnt_bodyid=np.concatenate(([body_ids["pelvis_link"]], np.ones(31, dtype=int))),
+        jnt_bodyid=np.concatenate((
+            ([body_ids["pelvis_link"]], np.full(31, body_ids["pelvis_link"], dtype=int))
+        )),
         actuator_ctrlrange=np.column_stack((
             np.full(31, -effort), np.full(31, effort),
         )),
@@ -368,8 +432,13 @@ def _install_fake_mujoco(monkeypatch, *, armature=0.01, effort=24.0,
         dof_armature=np.zeros(37),
         dof_damping=np.full(37, 0.5),
         dof_frictionloss=np.full(37, 0.2),
-        ngeom=0,
-        geom_bodyid=np.empty(0, dtype=int),
+        nbody=len(body_names) + 1,
+        body_parentid=np.asarray(
+            [0, 0, *([body_ids["pelvis_link"]] * (len(body_names) - 1))], dtype=int
+        ),
+        ngeom=1,
+        geom_bodyid=np.asarray([body_ids["pelvis_link"]], dtype=int),
+        site_bodyid=np.asarray([body_ids["pelvis_link"]], dtype=int),
     )
     model.dof_armature[vadr] = armature
 
@@ -434,7 +503,7 @@ def test_mujoco_robot_rejects_nonzero_pelvis_freejoint_addresses(monkeypatch):
 
 def test_mujoco_robot_allows_other_free_bodies_but_requires_exactly_one_on_pelvis(monkeypatch):
     joint_names, body_names, model = _install_fake_mujoco(monkeypatch)
-    _append_fake_freejoint(model, body_id=1)
+    _append_fake_freejoint(model, body_id=2)
     robot = M.MujocoRobot(
         "unused.xml", joint_names, body_names, 0.005,
         keep_native_damping=False, keep_frictionloss=False,
@@ -443,7 +512,7 @@ def test_mujoco_robot_allows_other_free_bodies_but_requires_exactly_one_on_pelvi
     assert robot.root_free_jid == 0
 
     joint_names, body_names, model = _install_fake_mujoco(monkeypatch)
-    _append_fake_freejoint(model, body_id=0)
+    _append_fake_freejoint(model, body_id=1)
     with pytest.raises(SystemExit, match="pelvis_link must own exactly one freejoint, found 2"):
         M.MujocoRobot(
             "unused.xml", joint_names, body_names, 0.005,
@@ -476,10 +545,11 @@ def test_mujoco_robot_applies_bound_implicit_armature_effort_and_zero_friction(m
         allow_velocity_limit_proxy=False,
     )
     assert np.array_equal(model.dof_armature[robot.vadr], np.full(31, 0.01))
-    assert np.array_equal(model.dof_damping[robot.vadr], kd)
+    assert np.array_equal(model.dof_damping[robot.vadr], np.zeros(31))
     assert np.array_equal(model.dof_frictionloss[robot.vadr], np.zeros(31))
     assert np.array_equal(robot.ctrl_lo, np.full(31, -24.0))
     assert model.opt.integrator == 7
+    assert robot.implicit_effort_execution_mode == "isaac_total_pd_clip_exact"
 
 
 def test_mujoco_robot_accepts_float32_armature_roundtrip(monkeypatch):

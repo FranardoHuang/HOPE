@@ -192,6 +192,12 @@ schema-3 hard contract and ONNX/export metadata so old and corrected continuatio
   stand/reference/blend and future command sources. The runner publishes `{q_des, kp, kd}` to the
   implicit-PD backend (`dq_des = tau_ff = 0`) only while its requested/measured effort envelope and
   authorization generation remain valid.
+- Formal MuJoCo BankExam realizes an Isaac implicit joint's bounded drive as one total operation,
+  `tau = clip(kp*(q_des-q) - kd*qdot, -effort_limit, +effort_limit)`, recomputed every physics
+  substep. It does **not** clip P before D and does not place actuator kd in MuJoCo passive damping:
+  passive damping lies outside motor `ctrlrange` and cannot share Isaac's total-effort limit.
+  Retained passive damping or missing effort limits therefore makes an implicit replay explicitly
+  diagnostic; formal construction fails before rollout.
 
 ## ONNX Metadata Contract
 
@@ -223,6 +229,14 @@ from the instantiated environment, not copied from YAML comments:
 - the canonical racket-point identity and wrist-local offset. See
   [racket_contact_geometry.md](racket_contact_geometry.md) for the distinction
   between the URDF site, physical face centre and ball centre at contact.
+
+A command-bearing 62-D actor term additionally requires
+`actor_leg_ref_mask_provenance_epoch=1`. Only the exact canonical masked/unmasked callable, or a
+strictly empty `functools.partial` around it, may mint the epoch. Any bound positional/keyword
+argument, wrapper or copied marker is non-authoritative because it can change the configured
+command semantics. Epoch 1 plus absent `actor_leg_ref_mask` proves unmasked; epoch 1 plus the
+true-only `actor_leg_ref_mask=1` proves masked. The ONNX binding hashes that fact together with the
+training-contract and source-checkpoint SHA; old artifacts cannot acquire it by metadata backfill.
 
 The adjacent `params/training_contract.json` is content-addressed; its SHA and schema are embedded
 in every newly saved checkpoint. Only a fresh schema-3 run or a resume from an exact SHA-bound

@@ -495,13 +495,16 @@ def runtime_execution_facts(
     )
     # R-a masking leaves the 62-D layout unchanged, so both the true-only mask bit and an always
     # present provenance epoch are needed: only epoch=1 + absent mask proves unmasked. Detection
-    # unwraps partials and accepts only the two canonical marked callables; an unknown wrapper may
-    # not silently mint epoch-1 provenance.
+    # unwraps only structurally empty partials and accepts only the two canonical callables.  Bound
+    # args/kwargs can change command selection or semantics and may not be discarded as provenance.
     _cmd_term = getattr(
         getattr(getattr(env.cfg, "observations", None), "policy", None), "command", None
     )
     _cmd_func = getattr(_cmd_term, "func", None)
     while isinstance(_cmd_func, functools.partial):
+        if _cmd_func.args or _cmd_func.keywords:
+            _cmd_func = None
+            break
         _cmd_func = _cmd_func.func
     facts = {
         "articulation_joint_names": articulation_names,
@@ -546,7 +549,8 @@ def runtime_execution_facts(
         if actor_leg_ref_mask is None and not allow_legacy_actor_leg_ref_mask_ambiguity:
             raise RuntimeError(
                 "62-D actor command func is not one of the two canonical epoch-1 callables; "
-                "wrappers and copied provenance attributes are not authoritative"
+                "wrappers, partials with bound args/kwargs, and copied provenance attributes "
+                "are not authoritative"
             )
         if actor_leg_ref_mask is not None:
             facts[ACTOR_LEG_REF_MASK_PROVENANCE_KEY] = ACTOR_LEG_REF_MASK_PROVENANCE_EPOCH

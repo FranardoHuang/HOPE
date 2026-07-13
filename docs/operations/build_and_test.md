@@ -460,3 +460,31 @@ The runner was not executed. ROS/Jazzy/AimRT Release, formal ONNX loading in thi
 backend first tick, vendor MuJoCo behavior and hardware remain unrun. Exact dependency, command,
 binary and log hashes are in
 [the experiment record](../experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md).
+
+## MuJoCo evaluator parity and evidence-publication source checks (2026-07-14)
+
+The dependency-light portion starts no simulator or robot command:
+
+```bash
+python3 -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_mujoco_eval_p0_contracts.py \
+  hope_training/whole_body_tracking/tests/test_training_contract_schema3.py \
+  hope_training/whole_body_tracking/tests/test_isaac_bank_exam_adapter.py \
+  hope_training/whole_body_tracking/tests/test_scoreboard_eval_contract.py \
+  tests/test_phase1_cross_engine_instrument_parity_2x2.py
+```
+
+It covers total-PD clipping sign/boundary quadrants, formal passive-proxy refusal, self-contact
+policy, mask-callable provenance, direct Phase-B revocation and no-mutation scoreboard header
+failure. The tiny physics and real-A3 frame/contact tests additionally require the optional
+`mujoco` Python package:
+
+```bash
+python3 -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_implicit_effort_guard_and_selfcontact.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_reference_reset_com_frame.py
+```
+
+A module-level skip means the corresponding MuJoCo behavior did not run; never report dependency-
+light pass counts as a physics pass. None of these commands launches Isaac, vendor backend, Pod,
+Gate3/Gate3B or hardware.

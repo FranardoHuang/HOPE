@@ -183,6 +183,17 @@ def test_actor_leg_ref_mask_fact_uses_exact_callable_identity(monkeypatch):
         if key not in ("actor_leg_ref_mask_provenance_epoch", "actor_leg_ref_mask")
     ) == TC.RUNTIME_EXECUTION_KEYS
 
+    # A partial carrying any bound argument is a different configured observation term.  Looking
+    # only at ``.func`` would launder it as the canonical callable and mint a false epoch-1 fact.
+    for nonempty_partial in (
+        functools.partial(canonical_unmasked, object()),
+        functools.partial(canonical_unmasked, command_name="different_command"),
+        functools.partial(functools.partial(canonical_masked), command_name="different_command"),
+    ):
+        env.cfg.observations.policy.command.func = nonempty_partial
+        with pytest.raises(RuntimeError, match="bound args/kwargs"):
+            TC.runtime_execution_facts(env, actor)
+
     # functools.wraps copies marker-like attributes and names, but the wrapper is not authority.
     @functools.wraps(canonical_masked)
     def renamed_masked_command(env, command_name):

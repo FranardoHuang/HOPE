@@ -202,6 +202,11 @@ def test_execution_contract_binds_actual_plant_and_ready_state():
         ctrl_hi=np.array([10.0, 20.0]),
         soft_jnt_lo=np.array([-1.0, -2.0]),
         soft_jnt_hi=np.array([1.0, 2.0]),
+        implicit_effort_execution_mode="isaac_total_pd_clip_exact",
+        implicit_effort_proxy_nonexact=False,
+        fail_on_self_contact=True,
+        robot_body_mask=np.array([False, True, True]),
+        robot_geom_mask=np.array([True, False, True]),
     )
     policy = SimpleNamespace(
         obs_dim=175,
@@ -225,5 +230,13 @@ def test_execution_contract_binds_actual_plant_and_ready_state():
 
     first = build()
     assert first == build()
+    assert first["implicit_effort_execution_mode"] == "isaac_total_pd_clip_exact"
+    assert first["implicit_effort_proxy_nonexact"] is False
+    assert first["self_contact_policy"] == "fail_closed_on_pelvis_subtree_robot_pair"
+    assert first["robot_body_ids"] == [1, 2]
+    assert first["robot_geom_ids"] == [0, 2]
+    robot.fail_on_self_contact = False
+    assert build()["sha256"] != first["sha256"]
+    robot.fail_on_self_contact = True
     model.dof_armature[1] += 0.01
     assert build()["sha256"] != first["sha256"]

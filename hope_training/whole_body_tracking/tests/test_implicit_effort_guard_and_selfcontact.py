@@ -4,12 +4,10 @@ Needs the ``mujoco`` python bindings (tiny synthetic models, CPU, milliseconds);
 Torch, ONNX, or onnxruntime installation is required.
 
 Background (Isaac<->MuJoCo parity audit 2026-07-13): Isaac's ImplicitActuator clamps the TOTAL
-drive force kp*(q_des-q)-kd*qd to the PhysX drive max force, while the evaluator's implicit mode
-integrates kd as passive dof_damping that no effort limit touches — wrist braking torque alone
-can reach kd*vel_limit = 2.0*12.7 ~ 25 Nm against a 6 Nm training cap. The guard makes that
-saturation visible (diagnostic) and fatal on the formal path, mirroring the joint-velocity-limit
-pattern. Self-collision is OFF in Isaac training and ON in the vendor MJCF; the scan counts where
-the two plants actually diverge without touching physics or scoring.
+drive force kp*(q_des-q)-kd*qd to the PhysX drive max force.  Bound MuJoCo execution must send that
+same clipped total through the motor; kd-as-passive-damping cannot share the limit and is explicitly
+inexact. Self-collision is OFF in Isaac training and ON in the vendor MJCF; the robot-only scan
+excludes dynamic balls and other non-robot bodies, and formal BankExam fails closed on a hit.
 """
 
 from __future__ import annotations
@@ -40,15 +38,14 @@ def _load_module():
 M = _load_module()
 
 
-# One hinge joint with vendor-wrist-like numbers: kd=2.0 in passive damping (implicit profile),
-# +/-6 Nm motor ctrlrange, and enough inertia (I=1.0) that a 12.7 rad/s spin survives one 5 ms
-# implicitfast substep, so the unclamped braking torque kd*qd ~ 25 Nm is observable post-step.
+# One hinge joint with vendor-wrist-like numbers and +/-6 Nm motor ctrlrange.  The exact bound
+# profile keeps passive damping zero and sends clip(P-D) as the motor control.
 _HINGE_XML = """
 <mujoco>
   <option timestep="0.005" integrator="implicitfast"/>
   <worldbody>
     <body name="b0">
-      <joint name="j0" type="hinge" axis="0 0 1" damping="2.0"/>
+      <joint name="j0" type="hinge" axis="0 0 1" damping="0.0"/>
       <geom type="sphere" size="0.5" mass="10.0"/>
     </body>
   </worldbody>
@@ -65,11 +62,12 @@ def _hinge_robot(**overrides):
         qadr=np.array([0]), vadr=np.array([0]), act_id=np.array([0]),
         implicit_mask=np.array([True]), explicit_mask=np.array([False]),
         ctrl_lo=np.array([-6.0]), ctrl_hi=np.array([6.0]),
-        # (implicit dof indices, effective passive damping, bound effort limits) — the
-        # precomputed guard tuple MujocoRobot.__init__ arms for bound schema-3 implicit plants.
-        _effort_guard=(np.array([0]), np.array([2.0]), np.array([6.0])),
+        # (implicit dof indices, bound effort limits) — the precomputed tuple for bound schema-3.
+        _effort_guard=(np.array([0]), np.array([6.0])),
         effort_limit_hit_count=0, effort_limit_peak_ratio=0.0,
         allow_effort_limit_proxy=True,
+        implicit_effort_execution_mode="isaac_total_pd_clip_exact",
+        implicit_effort_proxy_nonexact=False,
         joint_velocity_limits=None, velocity_limit_hit_count=0,
         velocity_limit_peak_ratio=0.0, allow_velocity_limit_proxy=True,
     )
@@ -89,15 +87,41 @@ def test_implicit_kd_braking_over_effort_limit_is_counted_with_wrist_ratio():
     robot.data.qvel[0] = 12.7  # Isaac wrist velocity cap; legal in training
     _swing(robot)
     assert robot.effort_limit_hit_count == 1
-    # kd*qd ~ 2.0*12.7 = 25.4 Nm vs the 6 Nm total-torque cap Isaac enforces -> ratio ~ 4.2.
+    assert robot.data.ctrl[0] == pytest.approx(-6.0)
+    # Raw kd*qd ~25.4 Nm is measured, while the applied total is exactly clipped to -6 Nm.
     assert robot.effort_limit_peak_ratio == pytest.approx(25.4 / 6.0, rel=0.05)
 
 
-def test_formal_path_fail_louds_instead_of_booking_a_non_exact_trajectory():
+def test_formal_path_executes_the_same_clipped_total_instead_of_failing_on_saturation():
     robot = _hinge_robot(allow_effort_limit_proxy=False)
     robot.data.qvel[0] = 12.7
-    with pytest.raises(SystemExit, match="exceeded the bound"):
-        _swing(robot)
+    _swing(robot)
+    assert robot.data.ctrl[0] == pytest.approx(-6.0)
+    assert robot.effort_limit_hit_count == 1
+
+
+@pytest.mark.parametrize(
+    ("target", "kp", "qd", "kd", "expected_ctrl", "expected_saturations"),
+    [
+        (8.0, 1.0, 1.0, 2.0, 6.0, 0),    # cancellation reaches +L exactly
+        (5.0, 1.0, -2.0, 2.0, 6.0, 1),   # P and -D add; total must clip
+        (-2.0, 1.0, 2.0, 2.0, -6.0, 0),  # negative exact boundary
+    ],
+)
+def test_runtime_motor_command_uses_total_pd_clip_in_all_sign_quadrants(
+    target, kp, qd, kd, expected_ctrl, expected_saturations
+):
+    robot = _hinge_robot()
+    robot.data.qvel[0] = qd
+    M.MujocoRobot.apply_pd_and_step(
+        robot,
+        np.asarray([target]),
+        kp=np.asarray([kp]),
+        kd=np.asarray([kd]),
+        decimation=1,
+    )
+    assert robot.data.ctrl[0] == pytest.approx(expected_ctrl)
+    assert robot.effort_limit_hit_count == expected_saturations
 
 
 def test_slow_joint_never_trips_and_diagnostic_never_mutates_state():
@@ -126,36 +150,59 @@ def test_unarmed_guard_is_skipped():
     assert robot.effort_limit_peak_ratio == 0.0
 
 
-# Two free spheres overlapping each other above a floor plane: exactly one robot-robot contact;
-# floor contacts (worldbody geom) must not count as self-collision.
+# Two sibling geoms in a pelvis subtree overlap, while a separate dynamic ball overlaps them too.
+# Only the robot-robot pair is self-contact; floor and robot-ball contacts must not count.
 _SELFCON_XML = """
 <mujoco>
   <worldbody>
     <geom name="floor" type="plane" size="5 5 0.1"/>
-    <body name="b1" pos="0 0 0.05">
-      <freejoint/><geom name="g1" type="sphere" size="0.06" mass="1"/>
+    <body name="pelvis_link" pos="0 0 0.05">
+      <freejoint/>
+      <body name="robot_1"><geom name="g1" type="sphere" size="0.06" mass="1"/></body>
+      <body name="robot_2" pos="0.05 0 0"><geom name="g2" type="sphere" size="0.06" mass="1"/></body>
     </body>
-    <body name="b2" pos="0.05 0 0.05">
-      <freejoint/><geom name="g2" type="sphere" size="0.06" mass="1"/>
+    <body name="ball" pos="0.025 0 0.05">
+      <freejoint/><geom name="ball_geom" type="sphere" size="0.02" mass="0.0027"/>
     </body>
   </worldbody>
 </mujoco>
 """
 
 
+def _selfcon_robot(model, data):
+    robot_body_names = {"pelvis_link", "robot_1", "robot_2"}
+    robot_body_ids = {
+        mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)
+        for name in robot_body_names
+    }
+    robot_geom_mask = np.asarray(
+        [int(body_id) in robot_body_ids for body_id in model.geom_bodyid], dtype=bool
+    )
+    return SimpleNamespace(
+        mj=mujoco, model=model, data=data, robot_geom_mask=robot_geom_mask
+    )
+
+
 def test_self_contact_scan_counts_robot_pairs_and_ignores_floor():
     model = mujoco.MjModel.from_xml_string(_SELFCON_XML)
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
-    robot = SimpleNamespace(mj=mujoco, model=model, data=data)
+    robot = _selfcon_robot(model, data)
     count, max_pen, worst = M.MujocoRobot.self_contact_scan(robot)
     floor_contacts = sum(
         1 for i in range(data.ncon)
         if model.geom_bodyid[data.contact[i].geom1] == 0
         or model.geom_bodyid[data.contact[i].geom2] == 0
     )
-    assert floor_contacts >= 1          # the spheres do rest on the floor...
-    assert count == 1                   # ...but only the sphere-sphere pair is a self-contact
+    assert floor_contacts >= 1
+    assert any(
+        "ball_geom" in {
+            mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, data.contact[i].geom1),
+            mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, data.contact[i].geom2),
+        }
+        for i in range(data.ncon)
+    )
+    assert count == 1                   # robot-ball contacts are deliberately excluded
     assert worst == "g1~g2"
     assert max_pen == pytest.approx(0.07, abs=0.02)  # 0.12 combined radius - 0.05 separation
 
@@ -163,8 +210,15 @@ def test_self_contact_scan_counts_robot_pairs_and_ignores_floor():
 def test_self_contact_scan_is_empty_without_robot_pairs():
     model = mujoco.MjModel.from_xml_string(_SELFCON_XML)
     data = mujoco.MjData(model)
-    data.qpos[7 + 0] = 2.0  # move b2 away along x (second freejoint qpos block)
+    # Move the entire robot freejoint away from the dynamic ball; then separate robot_2 by editing
+    # the model body offset so no robot pair remains.
+    robot2_bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "robot_2")
+    model.body_pos[robot2_bid, 0] = 2.0
     mujoco.mj_forward(model, data)
-    robot = SimpleNamespace(mj=mujoco, model=model, data=data)
+    robot = _selfcon_robot(model, data)
     count, max_pen, worst = M.MujocoRobot.self_contact_scan(robot)
     assert (count, max_pen, worst) == (0, 0.0, "")
+    # The remaining robot-ball contact is legal under the robot-only formal classifier.
+    M.enforce_self_contact_policy(
+        fail_closed=True, count=count, penetration_m=max_pen, pair=worst
+    )

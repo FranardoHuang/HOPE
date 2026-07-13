@@ -371,6 +371,10 @@ cd ~/workspace/HOPE/hope_training/whole_body_tracking
   --motion-files artifacts/hope_forehand_hopex/motion.npz artifacts/hope_backhand_hopex/motion.npz
 ```
 
+`scoreboard_eval.py` now fails closed before launching a protocol when an existing CSV header is
+not exactly the current schema. Use a fresh output root or explicitly migrate an older scoreboard;
+never append wider current rows beneath a historical header.
+
 Reference: `model_17400_hitter177` (baseline, 2026-07-06) scored 0 falls × 3 seeds at
 6000 steps, completion 1.0, composite 0.966, pos err ~6-7 cm; the prior 175-D
 `model_7500_hopex` reference was composite 1.0 both clips, 7/7 swings, 0 falls at

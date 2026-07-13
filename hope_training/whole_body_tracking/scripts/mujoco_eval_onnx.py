@@ -515,6 +515,80 @@ def freejoint_origin_lin_vel_w(
     raise ValueError(f"invalid root linear-velocity point {declared_point!r}")
 
 
+def isaac_total_pd_effort(proportional_effort, damping_effort, effort_limits):
+    """Return Isaac ImplicitActuator's bounded *total* PD drive effort.
+
+    Isaac clips ``P - D`` once, after both terms have been combined.  Clipping ``P`` first and
+    applying damping separately is not equivalent: either term can cancel the other before the
+    limit, and same-sign terms must share one common limit.  Keep this dependency-light helper
+    beside the frame helpers so the four sign/boundary quadrants are testable without MuJoCo.
+    """
+
+    proportional = np.asarray(proportional_effort, dtype=np.float64)
+    damping = np.asarray(damping_effort, dtype=np.float64)
+    limits = np.asarray(effort_limits, dtype=np.float64)
+    if proportional.shape != damping.shape or proportional.shape != limits.shape:
+        raise ValueError(
+            "PD effort terms and limits must have identical shapes: "
+            f"P={proportional.shape}, D={damping.shape}, limits={limits.shape}"
+        )
+    if not all(np.isfinite(value).all() for value in (proportional, damping, limits)):
+        raise ValueError("PD effort terms/limits contain NaN/Inf")
+    if np.any(limits <= 0.0):
+        raise ValueError("PD effort limits must be strictly positive")
+    return np.clip(proportional - damping, -limits, limits)
+
+
+def resolve_implicit_effort_execution(
+    *, has_implicit, effort_limits_bound, passive_damping, allow_inexact_proxy
+):
+    """Choose a truthful implicit-drive realization or reject an exact claim.
+
+    A MuJoCo passive damping column cannot implement Isaac's clipped total ``P-D`` drive: it is
+    applied outside the motor ctrlrange.  With bound limits and no extra passive damping we instead
+    send the already-clipped total effort through the motor.  Any retained passive damping, or an
+    unbound legacy implicit drive, is diagnostic-only and must never enter a formal score.
+    """
+
+    if not has_implicit:
+        return "not_applicable"
+    damping = np.asarray(passive_damping, dtype=np.float64)
+    if damping.ndim != 1 or not np.isfinite(damping).all() or np.any(damping < 0.0):
+        raise ValueError("implicit passive damping must be one finite non-negative vector")
+    if effort_limits_bound and not np.any(damping != 0.0):
+        return "isaac_total_pd_clip_exact"
+    if not allow_inexact_proxy:
+        reason = (
+            "retained MuJoCo passive damping lies outside the clipped motor effort"
+            if effort_limits_bound
+            else "implicit drive has no bound effort limits"
+        )
+        raise ValueError(
+            f"formal implicit effort execution unavailable: {reason}; "
+            "MuJoCo passive damping cannot realize Isaac clip(P-D,-L,L)"
+        )
+    return (
+        "total_pd_clip_plus_passive_damping_inexact"
+        if effort_limits_bound
+        else "legacy_unbounded_passive_damping_inexact"
+    )
+
+
+def enforce_self_contact_policy(*, fail_closed, count, penetration_m, pair):
+    """Apply the protocol decision after robot-only contact classification."""
+
+    count = int(count)
+    penetration_m = float(penetration_m)
+    if count < 0 or not math.isfinite(penetration_m) or penetration_m < 0.0:
+        raise ValueError("self-contact diagnostics must be finite and non-negative")
+    if fail_closed and count:
+        raise SystemExit(
+            "[FATAL] formal BankExam observed robot self-contact while the Isaac training "
+            "plant had enabled_self_collisions=False: "
+            f"pair={pair}, contacts={count}, penetration_m={penetration_m:.6g}"
+        )
+
+
 def canonical_contract_sha256(value):
     """Hash a finite JSON contract with stable key/order/float serialization."""
     payload = json.dumps(
@@ -768,6 +842,23 @@ def build_evaluation_execution_contract(
         "velocity_limit_proxy_allowed": bool(
             getattr(robot, "allow_velocity_limit_proxy", True)
         ),
+        "implicit_effort_execution_mode": str(
+            getattr(robot, "implicit_effort_execution_mode", "unknown")
+        ),
+        "implicit_effort_proxy_nonexact": bool(
+            getattr(robot, "implicit_effort_proxy_nonexact", True)
+        ),
+        "self_contact_policy": (
+            "fail_closed_on_pelvis_subtree_robot_pair"
+            if getattr(robot, "fail_on_self_contact", False)
+            else "diagnostic_only_pelvis_subtree_robot_pair"
+        ),
+        "robot_body_ids": np.flatnonzero(
+            getattr(robot, "robot_body_mask", np.zeros(0, dtype=bool))
+        ).astype(int).tolist(),
+        "robot_geom_ids": np.flatnonzero(
+            getattr(robot, "robot_geom_mask", np.zeros(0, dtype=bool))
+        ).astype(int).tolist(),
         "plant_semantics": dict(plant_semantics or {}),
         "protocol_semantics": dict(protocol_semantics or {}),
     }
@@ -2058,7 +2149,7 @@ class MujocoRobot:
                  joint_armature=None, joint_frictionloss_proxy=None,
                  joint_velocity_limits=None, joint_effort_limits=None,
                  require_bound_plant_match=False, allow_velocity_limit_proxy=True,
-                 allow_effort_limit_proxy=True):
+                 allow_effort_limit_proxy=True, fail_on_self_contact=False):
         import mujoco
 
         self.mj = mujoco
@@ -2080,18 +2171,18 @@ class MujocoRobot:
         self.allow_velocity_limit_proxy = bool(allow_velocity_limit_proxy)
         self.velocity_limit_hit_count = 0
         self.velocity_limit_peak_ratio = 0.0
-        # Isaac's ImplicitActuator clamps the TOTAL drive force kp*(q_des-q)-kd*qd to the PhysX
-        # drive max force (effort_limit_sim).  MuJoCo implicit mode integrates kd as passive
-        # dof_damping, which no effort limit ever touches, so the applied braking torque can
-        # exceed the training cap (wrist: kd*vel_limit = 2.0*12.7 ~ 25 Nm vs 6 Nm total in Isaac).
-        # Track saturation of |ctrl - damping*qd| against the bound effort limits; the formal
-        # path fail-louds instead of booking a silently non-exact trajectory.  Armed at the end
-        # of __init__ (needs the post-mutation dof_damping); None = guard inactive.
+        # Isaac's ImplicitActuator clips TOTAL drive force P-D.  MuJoCo passive dof_damping is
+        # outside motor ctrlrange and therefore cannot reproduce that law.  A bound, zero-passive
+        # plant uses an explicit motor command clip(P-D,-L,L); legacy/passive variants are clearly
+        # diagnostic and a formal constructor rejects them before rollout.
         self.allow_effort_limit_proxy = bool(allow_effort_limit_proxy)
+        self.fail_on_self_contact = bool(fail_on_self_contact)
         self.effort_limit_hit_count = 0
         self.effort_limit_peak_ratio = 0.0
         self.kd_implicit = None
         self._effort_guard = None
+        self.implicit_effort_execution_mode = "not_applicable"
+        self.implicit_effort_proxy_nonexact = False
         self.data = mujoco.MjData(self.model)
 
         def named_id(obj_type, name, kind):
@@ -2181,10 +2272,39 @@ class MujocoRobot:
             and int(self.model.jnt_dofadr[self.root_free_jid]) == 0,
             "pelvis freejoint must start at qpos address 0 and qvel/dof address 0",
         )
-        self.racket_site = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "right_racket")
+        self.racket_site = named_id(
+            mujoco.mjtObj.mjOBJ_SITE, "right_racket", "site"
+        )
         self.feet_bid = [bid(n) for n in FEET_BODIES]
         self.feet_geoms = {g for g in range(self.model.ngeom)
                            if self.model.geom_bodyid[g] in self.feet_bid}
+        # Self-contact means two geoms in the pelvis articulation subtree, not merely two geoms
+        # outside worldbody.  A dynamic ball, mocap body, or other free diagnostic object also has
+        # body_id != 0 and must not be mislabeled as robot self-collision.
+        self.robot_body_mask = np.zeros(self.model.nbody, dtype=bool)
+        for body_id in range(1, self.model.nbody):
+            cursor = int(body_id)
+            seen = set()
+            while cursor != 0 and cursor not in seen:
+                if cursor == self.pelvis_bid:
+                    self.robot_body_mask[body_id] = True
+                    break
+                seen.add(cursor)
+                cursor = int(self.model.body_parentid[cursor])
+            require_contract(cursor not in seen, "MJCF body parent graph contains a cycle")
+        require_contract(
+            self.robot_body_mask[self.pelvis_bid]
+            and np.all(self.robot_body_mask[self.tracked_bid])
+            and np.all(self.robot_body_mask[self.feet_bid])
+            and self.robot_body_mask[int(self.model.site_bodyid[self.racket_site])],
+            "tracked/feet/racket bodies must belong to the pelvis robot subtree",
+        )
+        self.robot_geom_mask = self.robot_body_mask[
+            np.asarray(self.model.geom_bodyid, dtype=int)
+        ]
+        require_contract(
+            bool(np.any(self.robot_geom_mask)), "pelvis robot subtree has no collision geoms"
+        )
 
         # Native viscous damping and dry friction are separate pieces of the plant. Isaac uses
         # actuator kd plus a PhysX load-dependent joint-friction coefficient, not MuJoCo's extra
@@ -2200,55 +2320,63 @@ class MujocoRobot:
             # the evaluation inexact; this assignment merely preserves the historical proxy.
             self.model.dof_frictionloss[self.vadr] = frictionloss_proxy
         if np.any(self.implicit_mask):
-            # Match Isaac's ImplicitActuator: the kd damping is integrated IMPLICITLY (stable + no
-            # under-shoot of fast swings at a 5 ms step). Put kd into the passive joint damping and
-            # use MuJoCo's implicitfast integrator; the control torque then applies kp only.
             require_contract(kd_for_implicit is not None, "implicit PD requires kd_for_implicit")
-            # ADD kd to whatever passive damping survives above (2026-07-05 fix): the old
-            # assignment OVERWROTE dof_damping, so --keep-passive + implicit silently lost
-            # the MJCF passive damping — the AGI plant has BOTH (passive + our commanded kd).
             kd_for_implicit = np.asarray(kd_for_implicit, np.float64)
             require_contract(
                 kd_for_implicit.shape == self.implicit_mask.shape,
                 "kd_for_implicit shape does not match actuator contract",
             )
-            self.model.dof_damping[self.vadr[self.implicit_mask]] += (
-                kd_for_implicit[self.implicit_mask]
+            passive_implicit = self.model.dof_damping[
+                self.vadr[self.implicit_mask]
+            ].copy()
+            try:
+                self.implicit_effort_execution_mode = resolve_implicit_effort_execution(
+                    has_implicit=True,
+                    effort_limits_bound=self.joint_effort_limits is not None,
+                    passive_damping=passive_implicit,
+                    allow_inexact_proxy=self.allow_effort_limit_proxy,
+                )
+            except ValueError as exc:
+                raise SystemExit(f"[FATAL] {exc}") from exc
+            self.implicit_effort_proxy_nonexact = not (
+                self.implicit_effort_execution_mode == "isaac_total_pd_clip_exact"
             )
+            if self.joint_effort_limits is None:
+                # Historical diagnostic only.  Bound runs never put actuator kd in passive damping
+                # because doing so would move it outside the total-effort clip.
+                self.model.dof_damping[self.vadr[self.implicit_mask]] += (
+                    kd_for_implicit[self.implicit_mask]
+                )
             self.model.opt.integrator = int(self.mj.mjtIntegrator.mjINT_IMPLICITFAST)
             self.kd_implicit = kd_for_implicit
         if self.joint_effort_limits is not None and np.any(self.implicit_mask):
-            # Precomputed implicit-dof subset for the per-substep guard (hot path: full-width
-            # temporaries per substep are wasted — only implicit dofs can saturate, explicit
-            # ones carry kd inside the ctrlrange clip).  The damping column is read AFTER the
-            # mutations above so it is the EFFECTIVE passive damping implicitfast applies —
-            # under --passive-damping mjcf that is native + kd, not kd alone.
             impl_idx = np.flatnonzero(self.implicit_mask)
             self._effort_guard = (
                 impl_idx,
-                self.model.dof_damping[self.vadr[impl_idx]].copy(),
                 self.joint_effort_limits[impl_idx],
             )
 
     def self_contact_scan(self):
-        """Count live robot-robot contacts (both geoms off the worldbody) in the current mjData.
+        """Count live contacts whose two geoms belong to the pelvis robot subtree.
 
         MuJoCo has already honored the MJCF ``<contact><exclude>`` adjacency list and the
         contype/conaffinity masks, so anything counted here is a self-collision the solver
         actually resolved — a contact regime Isaac training never sees
-        (enabled_self_collisions=False).  Diagnostic only: reads the last substep of the control
-        step, never mutates physics or scoring.  Returns (count, max_penetration_m, worst_pair).
+        (enabled_self_collisions=False).  The classifier deliberately excludes balls, table/net
+        bodies, mocap helpers and unrelated free bodies.  This method only reads state; the caller
+        decides whether the configured protocol records diagnostics or fails closed.
+        Returns (count, max_penetration_m, worst_pair).
         """
         ncon = self.data.ncon
         if ncon == 0:
             return 0, 0.0, ""
         # Vectorized (hot path: runs every control step; a Python per-contact loop materializes
         # an MjContact wrapper per contact).  Pair legality was already applied by MuJoCo's own
-        # broadphase (contype/conaffinity + MJCF <contact><exclude>), so "both geoms off the
-        # worldbody" is the only classification left to do here.
+        # broadphase (contype/conaffinity + MJCF <contact><exclude>); membership in the explicit
+        # pelvis-subtree geom set is the remaining classification.
         g1 = self.data.contact.geom1[:ncon]
         g2 = self.data.contact.geom2[:ncon]
-        robot_pair = (self.model.geom_bodyid[g1] != 0) & (self.model.geom_bodyid[g2] != 0)
+        robot_pair = self.robot_geom_mask[g1] & self.robot_geom_mask[g2]
         count = int(np.count_nonzero(robot_pair))
         if count == 0:
             return 0, 0.0, ""
@@ -2411,44 +2539,45 @@ class MujocoRobot:
         )
 
     def apply_pd_and_step(self, target_q_artic, kp, kd, decimation):
-        """Hold target_q across `decimation` physics substeps, recomputing PD torque each substep.
-        explicit: tau = kp*(tgt-q) - kd*qd (full PD as motor force).
-        implicit: tau = kp*(tgt-q) only; kd is the passive joint damping integrated by implicitfast."""
+        """Hold target_q and recompute the declared actuator law every physics substep.
+
+        Explicit joints and bound implicit joints both send the clipped total ``P-D`` through the
+        motor.  Only an explicitly inexact, effort-unbound legacy implicit lane retains kd as
+        passive damping and sends P alone.
+        """
         for _ in range(decimation):
             q = self.data.qpos[self.qadr]
             qd = self.data.qvel[self.vadr]
-            tau = kp * (target_q_artic - q)
+            proportional = kp * (target_q_artic - q)
+            damping = kd * qd
+            tau = proportional.copy()
             tau[self.explicit_mask] -= kd[self.explicit_mask] * qd[self.explicit_mask]
+            if self._effort_guard is not None:
+                impl_idx, effort_lim = self._effort_guard
+                total_implicit = isaac_total_pd_effort(
+                    proportional[impl_idx], damping[impl_idx], effort_lim
+                )
+                tau[impl_idx] = total_implicit
+                raw_ratio = np.abs(
+                    proportional[impl_idx] - damping[impl_idx]
+                ) / effort_lim
+                peak = float(np.max(raw_ratio))
+                self.effort_limit_peak_ratio = max(self.effort_limit_peak_ratio, peak)
+                effort_hit = raw_ratio > (1.0 + 1e-12)
+                self.effort_limit_hit_count += int(np.count_nonzero(effort_hit))
             tau = np.clip(tau, self.ctrl_lo, self.ctrl_hi)
+            if self._effort_guard is not None:
+                # The bound implicit motor ranges were validated against +/- effort_lim.  Refuse
+                # any future refactor or MJCF mutation that changes the exact command after total
+                # clipping; a passive-damping approximation is never accepted on the formal path.
+                require_contract(
+                    np.array_equal(tau[impl_idx], total_implicit),
+                    "MuJoCo implicit ctrlrange changed Isaac total-PD clipped effort",
+                )
             self.data.ctrl[self.act_id] = tau
             self.mj.mj_step(self.model, self.data)
-            if self._effort_guard is not None or self.joint_velocity_limits is not None:
-                qd_after = self.data.qvel[self.vadr]   # one copy shared by both guards
-            if self._effort_guard is not None:
-                # Total drive torque on the implicit dofs this substep: clipped ctrl (kp term)
-                # minus the EFFECTIVE passive damping torque (native + commanded kd) that
-                # implicitfast applied, sampled at the post-step velocity (an approximation of
-                # the implicit velocity the integrator used; same crispness as the velocity
-                # guard).  Explicit joints carry kd inside the ctrlrange clip and cannot
-                # saturate here.
-                impl_idx, damping_eff, effort_lim = self._effort_guard
-                tau_total = tau[impl_idx] - damping_eff * qd_after[impl_idx]
-                effort_ratio = np.abs(tau_total) / effort_lim
-                peak = float(np.max(effort_ratio))
-                if peak > self.effort_limit_peak_ratio:
-                    self.effort_limit_peak_ratio = peak
-                if peak > (1.0 + 1e-9):
-                    effort_hit = effort_ratio > (1.0 + 1e-9)
-                    self.effort_limit_hit_count += int(np.count_nonzero(effort_hit))
-                    if not self.allow_effort_limit_proxy:
-                        raise SystemExit(
-                            "[FATAL] formal BankExam implicit drive torque exceeded the bound "
-                            "PhysX effort limit on articulation indices "
-                            f"{impl_idx[effort_hit].tolist()} (peak ratio {peak:.3g}); Isaac "
-                            "clamps the TOTAL kp+kd drive force but MuJoCo passive damping is "
-                            "unclamped, so this trajectory is not exact"
-                        )
             if self.joint_velocity_limits is not None:
+                qd_after = self.data.qvel[self.vadr]
                 ratio = np.abs(qd_after) / self.joint_velocity_limits
                 peak_ratio = float(np.max(ratio))
                 self.velocity_limit_peak_ratio = max(
@@ -3432,6 +3561,12 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 selfcon_swing_steps += 1
             if sc_pen >= selfcon_max_pen:
                 selfcon_max_pen, selfcon_worst_pair = sc_pen, sc_pair
+            enforce_self_contact_policy(
+                fail_closed=robot.fail_on_self_contact,
+                count=sc_count,
+                penetration_m=sc_pen,
+                pair=sc_pair,
+            )
         if hp_track:
             swing_now = (dfs["phase"] == "swing") if df is not None else \
                 (not multiswing or hold_left <= 0)
@@ -4033,16 +4168,18 @@ def main():
     p.add_argument("--keep-passive", action="store_true",
                    help="DEPRECATED shorthand for --passive-damping mjcf --frictionloss mjcf")
     p.add_argument("--passive-damping", choices=["auto", "zero", "mjcf"], default="auto",
-                   help="native MJCF viscous joint damping. auto: zero (the actuator kd supplies "
-                        "the current training plant's viscous damping).")
+                   help="native MJCF viscous joint damping. auto: zero (bound actuator kd enters "
+                        "the clipped total-PD motor command, not passive damping).")
     p.add_argument("--frictionloss", choices=["auto", "zero", "mjcf"], default="auto",
                    help="MJCF constant-Nm dry joint friction. auto: schema-3 zero when the PhysX "
                         "coefficient is zero, otherwise a labelled direct-number diagnostic proxy; "
                         "legacy HitterPure keeps MJCF and other legacy contracts use zero.")
     p.add_argument("--pd-mode", choices=["auto", "explicit", "implicit"], default="auto",
-                   help="explicit: torque=kp*e-kd*qd. implicit: kp torque + kd as passive damping via "
-                        "MuJoCo implicitfast. auto: schema-3 per-joint actuator contract, otherwise "
-                        "implicit for legacy HitterPure and explicit for other legacy actors.")
+                   help="explicit: torque=clip(kp*e-kd*qd). bound implicit: the same Isaac total-PD "
+                        "clip through the motor with implicitfast integration; effort-unbound legacy "
+                        "implicit retains passive kd as an inexact diagnostic. auto: schema-3 per-"
+                        "joint actuator contract, otherwise implicit for legacy HitterPure and "
+                        "explicit for other legacy actors.")
     p.add_argument("--out-dir", default=None, help="where to write the CSV (default: ONNX run dir)")
     p.add_argument("--viewer", action="store_true",
                    help="launch the MuJoCo passive viewer to watch the robot (keeps all metric/CSV "
@@ -4606,6 +4743,11 @@ def main():
                     "[FATAL] formal BankExam profile violation(s): "
                     + "; ".join(bank_profile_violations)
                 )
+            # The explicit diagnostic escape must not carry formal constructor behavior into a
+            # profile already known to differ.  This also lets passive-effort and velocity proxies
+            # run only under their clearly inexact diagnostics instead of being mistaken for a
+            # validated formal plant.
+            formal_execution_contract_ok = False
             policy.evaluation_contract_exact = False
             print(
                 "[mj-sim2sim] WARNING: diagnostic BankExam profile override(s): "
@@ -5038,6 +5180,7 @@ def main():
         require_bound_plant_match=formal_execution_contract_ok,
         allow_velocity_limit_proxy=not formal_execution_contract_ok,
         allow_effort_limit_proxy=not formal_execution_contract_ok,
+        fail_on_self_contact=formal_execution_contract_ok,
     )
     if formal_qdes_limits is not None:
         robot.soft_jnt_lo, robot.soft_jnt_hi = (
@@ -5045,8 +5188,13 @@ def main():
         )
         print("[mj-sim2sim] q_des bounds: schema-3 training metadata (31x2), not MJCF reconstruction")
     print(f"[mj-sim2sim] PD mode: {pd_mode} [{actuator_source}]"
-          + ("  (implicit joints: kd as damping + implicitfast)"
+          + (f"  (implicit effort={robot.implicit_effort_execution_mode})"
              if "implicit" in resolved_actuator_types else ""))
+    print(
+        "[mj-sim2sim] self-contact: "
+        + ("formal fail-closed" if robot.fail_on_self_contact else "diagnostic only")
+        + " over pelvis-subtree robot geom pairs"
+    )
     print(f"[mj-sim2sim] plant: native_damping={passive_damping_mode}, "
           f"frictionloss={frictionloss_mode} [{plant_source}]")
     if frictionloss_mode == "contract-proxy":
@@ -5691,11 +5839,12 @@ def main():
                 res["exam_schedule"]["sha256"] == venue_sampler.schedule_sha256,
                 "paired BankExam rollout reported a different schedule SHA",
             )
-        # Per-mode delta: the guard counters live on the shared robot and would otherwise let a
-        # saturating ns>0 stress column demote the clean scored column's exactness.
+        # Per-mode delta: saturation is expected Isaac behavior now that MuJoCo executes the same
+        # total-PD clip.  Preserve the count without demoting an exact trajectory.
         res["implicit_effort_limit_hits"] = (
             robot.effort_limit_hit_count - effort_hits_before
         )
+        res["implicit_effort_saturation_events"] = res["implicit_effort_limit_hits"]
         results.append(res)
     csv_f.close()
     strike_csv_f.close()
@@ -5717,21 +5866,24 @@ def main():
 
     implicit_effort_limit_diagnostics = {
         "hit_count": int(robot.effort_limit_hit_count),
+        "saturation_event_count": int(robot.effort_limit_hit_count),
+        "peak_abs_unclipped_total_pd_over_limit": float(robot.effort_limit_peak_ratio),
+        # Backward-compatible field name; semantics are now explicitly the pre-clip total ratio.
         "peak_abs_torque_over_limit": float(robot.effort_limit_peak_ratio),
-        # False = guard never armed (no bound schema-3 effort limits or no implicit dofs), so
-        # hits=0 means "not measured", not "measured clean".
+        # False = no bound schema-3 limits or no implicit dofs, so zero may mean unmeasured.
         "limits_bound": bool(robot._effort_guard is not None),
+        "execution_mode": robot.implicit_effort_execution_mode,
+        "proxy_nonexact": bool(robot.implicit_effort_proxy_nonexact),
+        "saturation_matches_isaac_total_clip": bool(
+            robot._effort_guard is not None and not robot.implicit_effort_proxy_nonexact
+        ),
     }
-    if implicit_effort_limit_diagnostics["hit_count"] > 0:
-        # Isaac clamps the total implicit drive force; MuJoCo applied more braking torque than
-        # the training plant ever could, so the saturating trajectory is not training-exact.
-        # Demote per mode via the per-rollout delta — a saturating ns>0 stress column must not
-        # contaminate the clean scored ns=0 column (unlike the velocity block above, whose
-        # blanket demotion predates this change and keeps its booked behavior).
+    if implicit_effort_limit_diagnostics["proxy_nonexact"]:
+        # Formal construction rejects this case.  The explicit diagnostic escape remains
+        # non-bookable even if the sampled trajectory happened not to saturate.
         policy.evaluation_contract_exact = False
         for result in results:
-            if result.get("implicit_effort_limit_hits", 0) > 0:
-                result["evaluation_contract_exact"] = False
+            result["evaluation_contract_exact"] = False
 
     # ---- summary table ----
     print("\n" + "=" * 92)
@@ -5747,12 +5899,15 @@ def main():
     )
     print(
         "[mj-sim2sim] implicit total-torque vs effort limits: "
-        f"hits={implicit_effort_limit_diagnostics['hit_count']} "
-        f"peak_ratio={implicit_effort_limit_diagnostics['peak_abs_torque_over_limit']:.6g}"
-        + (""
-           if implicit_effort_limit_diagnostics["hit_count"] == 0 else
-           "  WARNING: braking torque exceeded the Isaac total-drive-force clamp; "
-           "evaluation_contract_exact=false")
+        f"saturation_events={implicit_effort_limit_diagnostics['saturation_event_count']} "
+        "peak_unclipped_ratio="
+        f"{implicit_effort_limit_diagnostics['peak_abs_unclipped_total_pd_over_limit']:.6g} "
+        f"mode={implicit_effort_limit_diagnostics['execution_mode']}"
+        + (" (limits unbound/inactive)"
+           if not implicit_effort_limit_diagnostics["limits_bound"] else
+           "  WARNING: passive-damping proxy is diagnostic/non-exact"
+           if implicit_effort_limit_diagnostics["proxy_nonexact"] else
+           " (Isaac total-PD clipping executed exactly)")
     )
     print("-" * 92)
     cols = [f"{r['mode']:>16s}" for r in results]

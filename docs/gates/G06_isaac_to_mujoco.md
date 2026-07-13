@@ -65,15 +65,19 @@ Done (2026-06-27 → 2026-07-02, recorded 2026-07-03):
   `scripts/realsensor_obs_reference.py`), and reproduces Isaac's exact-strike metrics
   (pos/vel/normal pass, composite, hit-speed error, velocity attainment) with per-clip
   forehand/backhand breakdowns and per-step CSVs.
-- The dominant divergence source was isolated to actuator PD integration: with the same ONNX and
-  byte-identical `a3_pingpong.xml`, MuJoCo with `implicitfast` + kd in `dof_damping` (Isaac
-  `ImplicitActuator` equivalent) is stable with clean swings, while the AGI deploy sim's
+- Historical diagnostics implicated actuator PD integration: with the same ONNX and
+  byte-identical `a3_pingpong.xml`, MuJoCo with `implicitfast` + kd in `dof_damping` was stable with
+  clean swings, while the AGI deploy sim's
   explicit-Euler PD path (`joint_actuator_subscriber.cc`, MJCF without an integrator attribute,
   passive damping not zeroed) diverges within ~0.1 s. Switching only the PD integration moved
-  hit-speed error 0.61 → 0.31 m/s and velocity attainment 0.35 → 0.88. One-flag reproduction:
+  hit-speed error 0.61 → 0.31 m/s and velocity attainment 0.35 → 0.88. This comparison did **not**
+  prove Isaac equivalence because passive kd bypassed the total effort clip; the 2026-07-14 audit
+  below revokes that exactness interpretation while preserving the numbers as diagnostics.
+  Historical one-flag reproduction:
   `--pd-mode implicit` vs `--pd-mode explicit --keep-passive`. See
   `agi/a3_deploy_example/SIM_FIDELITY_NOTE_FOR_AGI.md`.
-- Current verdict stance (2026-07-02): implicit PD remains the Isaac-faithful cross-check, but the
+- Historical verdict stance (2026-07-02): implicit PD was treated as the Isaac-faithful cross-check,
+  but that label is superseded by the 2026-07-14 total-effort correction below. The
   binding pre-hardware gate is the AGI explicit clipped-PD MuJoCo run ("falls in MuJoCo = falls on
   the real robot"). The deployed policy was fine-tuned to survive it
   (`launch_explicitpd_ft.sh`, exported via `export_onnx_explicitpd.sh`).
@@ -1375,3 +1379,21 @@ vendor/root-only/joints-only/full-match ready-state four-cell remains unrun, so 
 do not close the causal Isaac-to-MuJoCo gap. Full forensic scope and limitations are in
 [`EXP-MUJOCO-PELVIS-FRAME-PARITY`](../experiments/2026-07/EXP-MUJOCO-PELVIS-FRAME-PARITY.md);
 G06 remains `Partial`.
+
+### 2026-07-14 evaluator parity red-team closure (source gate only)
+
+Independent review found that the first implicit-effort guard could miss saturation-equivalence
+errors when P and D cancel, and that the first self-contact counter treated every non-world dynamic
+body as robot. The corrected evaluator executes Isaac's total `clip(P-D)` law for bound zero-passive
+implicit joints, rejects passive/unbound proxies from formal status, classifies only pelvis-subtree
+robot geom pairs and fails formal BankExam on any such pair. A dynamic-ball negative control is
+explicitly excluded.
+
+The same review closed three evidence-publication bypasses: command-mask provenance now accepts only
+canonical callables or strict empty partials; the revoked model-2000 Phase-B rider is denied directly
+by content SHA even when a caller bypasses the 2x2 validator; and cumulative scoreboard CSVs refuse
+an old header rather than appending misaligned wider rows. The historical Phase-B launch command is
+now documented as forbidden and a replacement requires a post-epoch checkpoint/new rider/all four
+cells rerun. No new policy rollout, immutable K100, vendor backend, Gate3/Gate3B or robot result was
+produced, so G06 remains `Partial`. Full scope is in
+[the integration experiment](../experiments/2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md).

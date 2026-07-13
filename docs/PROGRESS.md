@@ -13,6 +13,16 @@
 
 ## 2026-07-14
 
+- MuJoCo frame/evaluator integration 的独立红队 `NO-MERGE` 阻塞已在候选分支逐项关闭：bound implicit
+  改为每 substep 执行 Isaac `clip(P-D)`；被动/无 effort-limit 代理 formal fail closed；自碰只认 pelvis
+  机器人子树且 formal 首次即拒绝，动态球不误报；mask 供证只接受 canonical/严格空 partial；旧
+  Phase-B rider direct loader 按内容 SHA 撤销；旧 scoreboard header 不再错列追加。候选已 merge 对齐
+  `origin/main@c48fdc2`；focused `144 passed, 2 skipped`、root `696 passed, 9 skipped`，两项 focused
+  skip 都因本机无 `mujoco`，不是 physics 通过。本机也无 `torch`，Phase-B Torch 套件未收集。没有改
+  [NOW](NOW.md)/TIMELINE，也没有运行 Pod、Isaac、vendor backend、Gate3/Gate3B 或真机。测试和剩余
+  optional-runtime 边界见
+  [集成卷宗](experiments/2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md)；G04/G06 仍为 `Partial`。
+
 - 反手拉 B/C 的 rank-0 主选已各有独立 no-clobber 整轨站位实体化 prereg（SHA
   `e016ca74...51aee` / `27f938cd...9d454`）和 restricted-pickle consumer
   `21ebbe68...87375`。consumer 只做冻结的 proper [SE(2)](DEFINITIONS.md)，验证 xyzw 左乘、

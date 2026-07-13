@@ -1,11 +1,11 @@
 # EXP-MUJOCO-EVAL-FRAME-INTEGRATION — 三路 evaluator 合同能否无损集成？
 
-- 状态：`source_integrated_pending_main_merge`
+- 状态：`source_corrected_pending_main_merge`
 - 阶段/轴：Isaac→MuJoCo / evaluator、导出与部署装载合同
 - 人类负责人：yikang
 - 执行者：Codex
 - 工作分支：`Franco_codex/mujoco-frame-parity-integration-20260713`
-- 基线：`origin/main@d3d940f`
+- 基线：已 merge 对齐 `origin/main@c48fdc2`
 - 最高证据等级：E1（源码/合同/单元回归；没有新的 simulator 行为结果）
 - 决定：**adopt** 源码集成与 fail-closed 供证；**inconclusive** Isaac–MuJoCo 行为 gap 是否已缩小
 
@@ -26,8 +26,13 @@ pelvis COM→link-origin reset 与 link/IMU gyro frame 修复。本票只选择�
 
 - 保留 main 的 signed-face scorer API、逐 clip sign、raw-A achieved/target 与 physical-B facing；不恢复
   旧 unsigned normal 路径。
-- 正式 MuJoCo 卷遇到无法等价建模的 implicit total-effort saturation 会 fail closed；self-contact 只
-  增加诊断计数，不暗中改 plant 碰撞物理。
+- bound implicit joint 不再用 `clip(P)-D` 或“P 电机 + D 被动阻尼”近似：每个 substep 先算
+  `P-D`，再按 Isaac 的对称 effort limit 一次裁剪并把结果送进 motor。饱和本身是已复刻的正常行为，
+  不再降级 exact；保留任何 MuJoCo passive damping 或缺 effort limit 的 implicit 路径只能显式
+  diagnostic，formal 构造直接 fail closed。
+- self-contact 只统计 `pelvis_link` articulation 子树内的两机器人 geom；球、桌网、mocap helper 和其他
+  free body 不算机器人自碰。formal BankExam 一旦出现机器人自碰立即失败；diagnostic 只记数且不改
+  plant 物理。
 - diagnostic `teacher-reference` reset 只对显式 `center_of_mass` 速度做
   `v_origin = v_com - omega_world x (R_world_body * body_ipos)`；显式 `link_origin` 直写但不能因此获得
   formal exact。actor gyro 改用 `mjOBJ_XBODY/local` 的 pelvis link/IMU axes。evaluator 要求
@@ -44,8 +49,9 @@ command-observation callable 的规范身份，并进入 canonical training cont
 - epoch 1 且没有 `actor_leg_ref_mask` 表示经过供证的 unmasked callable；
 - epoch 1 且 `actor_leg_ref_mask=1` 表示 masked callable。当前 MuJoCo/C++ 179 builder 不能等价构造该
   语义，因此正式 evaluator/loader 拒绝，不会把“非击球臂不模仿”的候选误判为普通 policy；
-- canonical callable 的 `functools.partial` 会 unwrap 后按身份供证；unknown wrapper、伪装 copy、
-  noncanonical partial、缺 epoch 或 checkpoint↔contract digest 不一致都不能成为 exact；
+- canonical callable 的**严格空** `functools.partial` 才会 unwrap 后按身份供证；任何 bound
+  args/kwargs、unknown wrapper、伪装 copy、noncanonical partial、缺 epoch 或 checkpoint↔contract
+  digest 不一致都不能成为 exact；
 - standalone export 必须从 checkpoint 合同覆盖或清除 donor 的 mask/epoch，不能相信旧 donor metadata。
 
 禁止给旧 ONNX 后补 epoch/mask 来恢复 exactness：旧 checkpoint 没把该事实纳入 digest，事后 metadata
@@ -53,10 +59,26 @@ command-observation callable 的规范身份，并进入 canonical training cont
 `configs/phase1_cross_engine_instrument_parity_2x2_revocation_20260713.json` 撤销其 current-exact 身份；
 历史诊断保留，但不能填进新正式纸。
 
+## 独立红队后关闭的假绿
+
+首次集成审计给出 `NO-MERGE`，随后在本分支逐项关闭：
+
+1. 旧 effort guard 只在 `|clip(P)-D|>L` 时报警，漏掉 `P=8,D=2,L=6` 等抵消情形，也会把
+   `P=5,D=-4,L=6` 执行为 9。现用纯函数与运行路径共同锁定 `clip(P-D,-L,L)`，覆盖抵消、同向、纯 D
+   和正负边界；被动阻尼近似不得获得 formal exact。
+2. 旧自碰分类把任意两个非 worldbody geom 都算机器人，未来合法球拍—动态球接触会误报。现由
+   pelvis 子树显式构造 robot body/geom 集合，动态球负控不计入；formal 策略为 fail closed。
+3. mask provenance 旧实现丢弃 partial args/kwargs 后只看底层函数身份；现只允许严格空 partial。
+4. 旧 Phase-B rider 的撤销原先只由 2×2 validator 执行。direct adapter loader 现有内容 SHA denylist，
+   并同时验证不可变 revocation receipt；receipt 缺失/篡改也只能拒绝。旧操作命令已改为禁止运行的
+   历史说明。
+5. scoreboard 遇旧 header 原先会把更宽新行直接追加，导致 CSV 错列。现于运行前和写入前双重校验，
+   mismatch 不改一字节并要求新 output root/显式迁移。
+
 ## 验证
 
-本次选择性移植依次整合上游提交 `bebee04`、`3788fe7`、`50dabbd`、`57719ad`、`3f04890`，并在
-`origin/main@d3d940f` 上解决文档冲突，未改训练配方或 checkpoint。
+本次选择性移植依次整合上游提交 `bebee04`、`3788fe7`、`50dabbd`、`57719ad`、`3f04890`，随后 merge
+对齐 `origin/main@c48fdc2` 并保留 main 的动作/GMR/D-retry 文档与代码，未改训练配方或 checkpoint。
 
 ```bash
 python3 -m pytest -q \
@@ -67,13 +89,18 @@ python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_mujoco_ready_state_contract.py \
   hope_training/whole_body_tracking/tests/test_mujoco_reference_reset_com_frame.py \
   hope_training/whole_body_tracking/tests/test_training_contract_schema3.py \
-  hope_training/whole_body_tracking/tests/test_export_obs_norm_contract.py
+  hope_training/whole_body_tracking/tests/test_export_obs_norm_contract.py \
+  hope_training/whole_body_tracking/tests/test_isaac_bank_exam_adapter.py \
+  hope_training/whole_body_tracking/tests/test_scoreboard_eval_contract.py
 
 python3 -m pytest -q tests
 ```
 
-当前集成树结果为 focused `115 passed, 2 skipped`、root suite `647 passed, 9 skipped`。两个 focused skip
-都是当前 host 缺 optional runtime/asset，不是行为通过。上游 pelvis 修复另有真实 A3 MJCF CPU smoke 与
+当前集成树结果为 focused `144 passed, 2 skipped`、root suite `696 passed, 9 skipped`，`git diff
+--check` 与四个修改源码的 `py_compile` 均通过。两个 focused skip 都是当前 host 缺 `mujoco`：tiny
+effort/self-contact physics 模块和真实 A3 frame reset 各一项，因此这些 physics cases 不是本机行为通过。
+本机也缺 `torch`，`test_isaac_bank_exam_phase_b.py` 无法收集；direct rider 撤销的 dependency-light adapter
+负测已运行通过，但不能替代 Torch/Isaac 行为套件。上游 pelvis 修复另有真实 A3 MJCF CPU smoke 与
 10 秒 plain-MuJoCo PD stand E2 证据；本次没有重跑 Pod、K100、PPO、vendor backend、Gate3 或真机。
 
 ## 后续门
@@ -84,4 +111,3 @@ python3 -m pytest -q tests
    native closed-loop，记录 effort guard、self-contact、signed-face 与 ready-state 分层读数。
 3. 源码进入 main 后再更新 [`TIMELINE`](../../TIMELINE.md)；行为卷未过前 G06 保持 `Partial`，也不把
    source fix 写成 Gate3/Gate3B 通过。
-

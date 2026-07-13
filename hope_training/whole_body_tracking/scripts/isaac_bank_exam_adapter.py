@@ -26,6 +26,19 @@ SCHEMA = "hope.isaac-bank-exam.v1"
 CROSS_ENGINE_INSTRUMENTATION_SCHEMA = "hope.cross-engine-state-instrumentation.v1"
 PHASE_B_CONTRACT_SCHEMA = "hope.isaac-bank-exam.physical-truth-phase-b-contract.v1"
 PHASE_B_FULL_CAPABILITY = "physical_paddle_contact_and_post_contact_flight_v1"
+# A frozen rider is immutable, so revocation is keyed by its content rather than filename.  The
+# revocation artifact is itself SHA-bound and checked before the loader reports the denial; a
+# missing/tampered revocation can never make a known-bad rider usable again.
+REVOKED_PHASE_B_CONTRACTS = {
+    "1af7a0b3589d57bfbd2da0b8af6130641298b647e4d80e52b5ef673a84e5b376": {
+        "revocation_path": (
+            "configs/phase1_cross_engine_instrument_parity_2x2_revocation_20260713.json"
+        ),
+        "revocation_sha256": (
+            "c062a379bd32425ac193f708a36c1fced22405975ffc6e551eed033d2bb94ac8"
+        ),
+    },
+}
 TRACKING_GUARD_FUNCTIONS = {
     "anchor_pos": ("bad_anchor_pos_z_only", "bad_anchor_pos_z_only_hold_aware"),
     "anchor_ori": ("bad_anchor_ori", "bad_anchor_ori_hold_aware"),
@@ -141,6 +154,42 @@ def load_and_validate_phase_b_contract(
         raise IsaacBankExamError(
             f"Phase-B contract SHA mismatch: expected={expected}, actual={actual}"
         )
+    repo = Path(repository_root).expanduser().resolve()
+    revoked = REVOKED_PHASE_B_CONTRACTS.get(actual)
+    if revoked is not None:
+        revocation_path = (repo / revoked["revocation_path"]).resolve()
+        try:
+            revocation_path.relative_to(repo)
+        except ValueError as exc:
+            raise IsaacBankExamError(
+                "known Phase-B revocation path escapes repository root; rider remains revoked"
+            ) from exc
+        revocation_ok = (
+            revocation_path.is_file()
+            and sha256_file(revocation_path) == revoked["revocation_sha256"]
+        )
+        if revocation_ok:
+            try:
+                revocation_doc = json.loads(revocation_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                revocation_ok = False
+            else:
+                revocation_ok = bool(
+                    isinstance(revocation_doc, Mapping)
+                    and revocation_doc.get("status") == "revoked_for_current_exact_lane"
+                    and isinstance(revocation_doc.get("isaac_phase_b_contract"), Mapping)
+                    and revocation_doc["isaac_phase_b_contract"].get("sha256") == actual
+                    and revocation_doc.get("current_exact_lane_valid") is False
+                )
+        detail = (
+            str(revocation_path)
+            if revocation_ok
+            else "bound revocation artifact missing, tampered, or semantically invalid"
+        )
+        raise IsaacBankExamError(
+            "Phase-B contract is revoked for the current exact lane and may only remain a "
+            f"historical/non-bookable artifact; revocation={detail}"
+        )
     try:
         contract = json.loads(contract_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -197,7 +246,6 @@ def load_and_validate_phase_b_contract(
     if contract["target"].get("plant_cell") != "SZ_zero_friction_protocol_exact":
         raise IsaacBankExamError("Phase-B target must bind the formal SZ zero-friction plant cell")
 
-    repo = Path(repository_root).expanduser().resolve()
     sources = contract.get("sources")
     if not isinstance(sources, Mapping) or not sources:
         raise IsaacBankExamError("Phase-B contract must bind a non-empty sources mapping")
