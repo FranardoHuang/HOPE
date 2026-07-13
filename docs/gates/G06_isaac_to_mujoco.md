@@ -1444,3 +1444,16 @@ source/runtime evidence for the helpers, not an immutable policy paper, vendor M
 Isaac-to-MuJoCo gap closure. Exact SHA are in
 [`mujoco_eval_optional_runtime_test_results_20260714.json`](../../configs/mujoco_eval_optional_runtime_test_results_20260714.json),
 and G06 remains `Partial`.
+
+### 2026-07-14 C2/D2 L1 不授权跨引擎判卷
+
+新的 [C2/D2 L1 source gate](G05_isaac_training_first_loop.md)修复的是训练 checkpoint 的证据身份：
+guidance weight 进入相邻 hard contract，outer claim/source/GPU lane 进入 checkpoint `infos`。它只准备在
+Pod1 GPU1/GPU2 买两条 fresh 25-update provenance smoke；当前没有 runtime contract、`model_24.pt`、
+ONNX export、immutable signed-face paper execution 或 MuJoCo 结果。
+
+launcher/finalizer 源码中不存在 activation、judge、L2、第二 seed 或 stop/promote mode；pair result 也把
+这些授权固定为 false。即使未来两个 L1 terminal 通过，也只能说明 source/claim/contract/finite/lineage
+闭合，不能说明 guidance 有效，更不能作为 Isaac/MuJoCo、vendor Gate3/Gate3B 或真机成绩。进入 L2
+之前还需独立、no-clobber 的 L1 result consumer 与 runtime-materialized immutable paper binding；启动
+judge 又需另一个 reviewed execution contract。G06 保持 `Partial`。

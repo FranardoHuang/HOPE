@@ -53,7 +53,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | [`EXP-P1-FACE-PLANT-SCALEOUT`](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md) | 16 条 fresh 广度臂已分两波全部精确停止并保留证据；旧 face×plant 矩阵不能选 baseline |
 | [`EXP-P1-FRESH-SZ-STABILITY`](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 实验 completed/rejected；2k 与 4k 四 seed 稳定性都失败，seed4 持续弱；不晋级 baseline |
 | [`EXP-P1-FACE-SIGN-FORENSIC`](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) | `n/-n` 源码负控与 pre-orient physical-B 门已实现；fresh canary/修正后同卷未跑，旧分不晋级 |
-| [`EXP-P1-SIGNED-FACE-RESCUE-FUNNEL`](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md) | E3 partial：original-v6 与 foreign-v8 都在前三格终档后由串行 launcher 的第 4 格 D 卡在 Kit/scene-start boot；v6r1 的 expected-absent validator 错误已由 source-only v6r2 修正，但 v6r2 未启动且没有 runtime/finalizer；先查 boot 根因，L1 activation/L2/判卷继续阻断 |
+| [`EXP-P1-SIGNED-FACE-RESCUE-FUNNEL`](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md) | E3 partial：旧 v6/v8 第四格 pre-contract timeout 原样保留；新 C2/D2 provenance source gate 已绑定 guidance hard contract + outer claim，按 Pod1 GPU1/GPU2 boot 串行/训练并发，尚未 runtime；L2/判卷继续阻断 |
 | [`EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND`](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md) | E2 数据门通过：真实 371 题逐字节 replay 并发布 exact bank/report；新 schedule/paper activation/judge 继续阻断 |
 | [`EXP-P1-SIGNED-FACE-EXAM-PAPER`](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-PAPER.md) | 新 bank 绑定的 K100 materializer/activation source gate 与攻击负测已通过；真实 private bank consume 未跑，所以 schedule/activation 尚不存在 |
 | [`EXP-P1-HISTORICAL-SCHEMA3`](experiments/2026-07/EXP-P1-HISTORICAL-SCHEMA3.md) | 同题同卷尺已可用于诊断排名；所有历史模型仍为 inexact |
@@ -97,6 +97,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | Fresh model-4000 q50 考卷 | [`run_phase1_fresh_sz_model4000_seed_stability_q50.md`](operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md) |
 | 恢复 preregistration | [`run_phase1_recovery_tuple_prereg.md`](operations/run_phase1_recovery_tuple_prereg.md) |
 | 有符号拍面单-seed L1 漏斗 | [`run_phase1_signed_face_rescue_funnel.md`](operations/run_phase1_signed_face_rescue_funnel.md) |
+| 有符号拍面 C2/D2 provenance L1 | [`run_phase1_signed_face_cd_l1.md`](operations/run_phase1_signed_face_cd_l1.md) |
 | 有符号拍面 exam bank 严格重绑定 | [`run_phase1_signed_face_exam_bank_rebind.md`](operations/run_phase1_signed_face_exam_bank_rebind.md) |
 | 有符号拍面 exact K100 物化（不启动判卷） | [`run_phase1_signed_face_exam_k100.md`](operations/run_phase1_signed_face_exam_k100.md) |
 | Gate3 首个有效周期 | [`run_gate3_first_tick_harness.md`](operations/run_gate3_first_tick_harness.md) |

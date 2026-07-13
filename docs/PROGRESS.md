@@ -13,6 +13,13 @@
 
 ## 2026-07-14
 
+- signed-face fresh C2/D2 的 provenance 缺口已在 source gate 闭合：旧 v9 hard contract 未绑定
+  guidance `0/-0.4`，新 source `4467d79` 同时把 post-override guidance 写入相邻合同、把 outer atomic
+  claim/source/GPU lane 写入 checkpoint。新 manifest 按广度优先固定 Pod1 C2→GPU1、D2→GPU2，Kit
+  boot 串行但训练可跨卡并发；专项 `28 passed`，尚未上 Pod，L1 terminal/L2/judge/第二 seed 全未授权。
+  见[实验](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)与
+  [操作](operations/run_phase1_signed_face_cd_l1.md)。
+
 - Pod2 CPU 补跑了 MuJoCo evaluator 两个此前因本机缺依赖而 skip 的 optional 模块。首次真实收集
   `2 failed, 8 passed`，定位为 synthetic fixture 把非等价执行路径当对照、把 welded child 当可碰
   articulation；只修夹具后，同一 production evaluator bytes 在 Python `3.12.3` / MuJoCo `3.10.0`

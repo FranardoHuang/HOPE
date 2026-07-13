@@ -226,6 +226,11 @@ from the instantiated environment, not copied from YAML comments:
   schema-2 motion-kinematics contract;
 - task timing/target/bank facts needed to prevent exporting an old actor under a new evaluation
   recipe.
+- for a racket task, the post-override positional and signed-face guidance term identity
+  (`weight`, canonical `racket_target` command name, and distance/angle cap). Most Reward weights
+  remain curriculum-mutable and outside the hard contract; these two are the preregistered causal
+  identity of the C2/D2 signed-face comparison, so copying a checkpoint cannot relabel `0.0` as
+  `-0.4`.
 - the canonical racket-point identity and wrist-local offset. See
   [racket_contact_geometry.md](racket_contact_geometry.md) for the distinction
   between the URDF site, physical face centre and ball centre at contact.
@@ -245,6 +250,12 @@ The adjacent `params/training_contract.json` is content-addressed; its SHA and s
 in every newly saved checkpoint. Only a fresh schema-3 run or a resume from an exact SHA-bound
 schema-3 checkpoint can keep `training_contract_lineage_exact=1`. Legacy/missing/mismatch overrides
 remain diagnostic forever and cannot be “washed” into formal status by one continuation save.
+An optional fail-closed launcher may also write `training_launch_claim_sha256` into checkpoint
+`infos`. That operational claim is deliberately outside the scientific hard-contract SHA; its
+consumer must reconstruct the non-self-referential claim from exact control/source, optimization
+recipe, host/GPU lane, seed/run/terminal identity and atomic claim-directory identity. Absence is
+allowed for ordinary training, but a preregistered run that requires the claim must reject a
+missing/mismatched field.
 Native and standalone exporters verify checkpoint↔JSON binding, write
 `source_checkpoint_sha256`, and derive normalization truth from the actual graph/checkpoint.
 For a non-baked normalized actor, the sidecar/runtime transform is exactly

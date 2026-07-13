@@ -1532,3 +1532,28 @@ normalized argv 除 versioned run name 和 v8 launch-claim provenance 外相同�
 下一份 `D-first × ordinal-4`、`host IPC × private IPC` 的 scene-only 诊断只有
 [design-only prereg](../../configs/phase1_signed_face_boot_diagnostic_prereg_20260714.json)，无 launcher/Pod/
 signal/training 权限。G05 继续 `Partial`。
+
+### 2026-07-14 C2/D2 provenance-complete L1 source gate
+
+v9 的只读证据复核发现旧 hard contract `dfc583d4...888a5` 没有绑定 positional/signed-face guidance
+weight，因而旧 C/D checkpoint 即使有 outer launch claim，也不能只靠 checkpoint+相邻合同区分
+`0.0/-0.4`。新训练 source `4467d79f1ed425a4263f0caaad2f661e1ec737ad` 把两项 post-Hydra
+guidance 的 weight/command/bound 写入 schema-3 hard contract；checkpoint `infos` 另绑定非自引用的原子
+launch-claim SHA，claim 覆盖 exact source、优化配方、host/GPU lane、seed、终档迭代和 claim directory
+identity。Kit carb/TBB `16/16` 与 `useOmniJob=false` 也由启动后 runtime marker fail closed。
+
+新的 [`signed-face C2/D2`](../DEFINITIONS.md) manifest/launcher 只包含 fresh seed3 的两条
+`512 env × 25 update` L1。为遵守团队先铺满六卡的调度，C2 固定 Pod1 GPU1、D2 固定 Pod1 GPU2；每条
+claim 前本卡必须空。host-wide Kit boot lock 串行，但 C2 `runtime_verified` 后继续训练，D2 可立即在
+另一卡 boot/并发。两条 command 的 local device 都是 `cuda:0` 且 source/PYTHONPATH/runtime 相同；
+physical GPU 是 outer execution lane，不进入优化配方。每个 `model_24.pt` 必须 finite、iter24、lineage1，
+绑定各自相邻含 guidance weight 的 hard contract 与 outer claim；pair finalizer 要求两合同去掉该唯一
+nested weight 后逐值相同。
+
+manifest/launcher SHA 为 `785ad96d...9895` / `0fa25020...03ba`；专项测试 `28 passed`，source
+launch-claim/thread-cap `28 passed`，reward/hard-contract override `58 passed`，仓内 `tests/` 回归见同次
+实验卷宗。本任务没有 Pod/runtime/trainer/checkpoint；旧 v9 artifact 不采用，activation/judge/L2/第二
+seed/stop-promote/真机全为 false。复现见
+[运行手册](../operations/run_phase1_signed_face_cd_l1.md)和
+[实验卷宗](../experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)。因此这里只是可审阅的 E1
+source gate，G05 保持 `Partial`。

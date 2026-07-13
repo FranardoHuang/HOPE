@@ -324,3 +324,46 @@ L1 completion 的入口。半写/提前退出格原样保留并阻断自动重�
 
 当前不授权再次启动原 v6 D、v6r1、v6r2 或 v8 D。只有 boot 根因闭环并形成新的内容绑定合同后，才可
 评审新的 versioned attempt；也不授权 L2、judge、第二 seed、部署或真机。
+
+## 2026-07-14 C2/D2 provenance 修正版（source gate，未运行）
+
+旧 v9 `5f691b3400fe3feda1a690675912a97f09e906bb` source 和
+`466f8ea935310407f73b95e812bbd5f0a18705b4` control 的只读复核发现一个比 boot ordinal 更基础的
+证据缺口：它的 emitted hard contract SHA `dfc583d4...888a5` **没有**包含 positional/signed-face
+guidance 的 post-Hydra 权重。v9 虽然把 outer launch claim 写进 checkpoint，但仅靠相邻合同仍不能证明
+复制出去的 fresh checkpoint 属于 weight `0.0` 还是 `-0.4`。因此旧 C/D、一次 one-update 诊断和旧
+namespace 均不采用；这也不是给原 v6/v8 D 换名自动 retry。
+
+新 source gate `4467d79f1ed425a4263f0caaad2f661e1ec737ad` 在 schema-3 hard contract 中加入
+`racket_guidance_reward`：位置与有符号拍面两项都绑定 post-override `weight`、`command_name` 和截断
+边界；非法正权重、NaN/bool、错误 command 或角度越界 fail closed。checkpoint `infos` 另写外层原子
+launch-claim SHA，该 claim 绑定 manifest/launcher、exact source/critical files、C2/D2 优化配方、seed、
+终档迭代和 claim directory inode/device，不进入 scientific hard-contract SHA。训练入口同时移植并
+运行时核对 Kit carb/TBB `16/16` 与 `useOmniJob=false`；两条 child 使用完全相同的 source-first
+`PYTHONPATH`。
+
+[`signed-face C2/D2`](../../DEFINITIONS.md) 是全新 fresh-only 对照，不是旧四格 completion：C2 的位置/
+拍面 guidance 都是 `0`，D2 只把拍面权重改为 `-0.4`；二者 seed3、512 env、25 update、动作、train
+bank、zero-friction plant、face179/action31 和 event-timing-off 全相同。按团队“先六卡各一条”的硬调度，
+C2 固定 Pod1 GPU1、D2 固定 Pod1 GPU2；各自 GPU 必须在 claim 前为空。一次 invocation 只创建一格，
+shared Kit boot lock 仍串行；但 C2 写出 `runtime_verified` 后继续训练，D2 即可在另一卡 boot 并发，无需
+等 C2 终档。physical GPU 是绑定进 outer claim 的运营 lane；两条训练 command 都看到 local
+`device=cuda:0`，科学配方除 guidance weight 外不变。terminal 必须 finite、`iter=24`、lineage `1`，
+同时匹配相邻含权重 hard contract 与外层 claim/source/GPU lane；
+成对 finalizer 还要求两份 hard contract 去掉唯一 nested weight 后逐值相同。失败 claim 永不覆盖，
+没有自动 retry。
+
+机器 prereg/launcher 的最终 SHA 见运行手册；专项静态/攻击测试
+`28 passed`，source launch-claim/thread-cap 测试 `28 passed`，reward/hard-contract override 测试
+`58 passed`，仓内 `tests/` 为 `793 passed, 10 skipped`。`static-validate` 与 plan rc0；本任务未连接
+Pod、未启动 Isaac/trainer/judge，也没有 runtime hard contract 或 checkpoint。因此当前裁决是：
+
+- **GO（待 root 审阅）：** 只允许按
+  [C2/D2 运行手册](../../operations/run_phase1_signed_face_cd_l1.md)先做 Pod1 GPU1/GPU2 read-only
+  runtime validate，再按“boot 串行、跨卡训练可并发”的 barrier 购买两条 L1 provenance smoke；
+- **NO-GO：** 旧 v9 artifact 采用、同 namespace retry、activation、judge、L2、第二 seed、stop/promote、
+  部署或真机。
+
+这个 source gate 不推翻旧四格 activation 缺失，也不证明 signed-face reward 有效；只有两条新 L1 真正
+终档后才能说明 provenance 闭合，行为结论仍须同一 immutable signed-face paper。实验继续
+`running/partial`。
