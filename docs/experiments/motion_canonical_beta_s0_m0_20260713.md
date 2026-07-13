@@ -68,14 +68,15 @@ S0 同样保持 `observed_ball_contact=null`、`strike_effectiveness=null`、`sa
 ## 验证与结果
 
 ```bash
-for PLAN in \
-  configs/motion_canonical_betas_s0_prereg_20260713.json \
-  configs/motion_canonical_betas_m0_prereg_20260713.json
-do
-  PLAN_SHA=$(sha256sum "$PLAN" | awk '{print $1}')
-  python3 scripts/materialize_motion_handoff_canonical_betas.py \
-    --prereg "$PLAN" --expected-prereg-sha256 "$PLAN_SHA" static
-done
+python3 scripts/materialize_motion_handoff_canonical_betas.py \
+  --prereg configs/motion_canonical_betas_s0_prereg_20260713.json \
+  --expected-prereg-sha256 236cace8aeae6c80f333194f8f73f9a718720057e8badc62d2769c1a08d94f19 \
+  static
+
+python3 scripts/materialize_motion_handoff_canonical_betas.py \
+  --prereg configs/motion_canonical_betas_m0_prereg_20260713.json \
+  --expected-prereg-sha256 c70d1fdbe75b3f22d5ca55193cb15c199882ac7df5976dc31fe19dc1fc9fcb69 \
+  static
 
 python3 -m pytest -q \
   tests/test_materialize_motion_handoff_canonical_betas.py \
@@ -85,7 +86,7 @@ python3 -m pytest -q \
 2026-07-13 host 结果：S0/M0 两份 tracked static contract 均 PASS；新旧 materializer 专项合计
 `15 passed, 1 skipped`，skip 原因是 host 无 Torch。合成 runtime 覆盖了 S0 singleton 与 M0 四条 donor injection、
 non-beta bit-exact save/reload、donor byte copy、no-clobber、handoff/window 篡改和 M0 假脚距/假通过拒绝。
-重放到最新 main 后，完整 `tests/` 回归为 `616 passed, 9 skipped`。
+合入 signed-face v6 后在最新 main 重放，完整 `tests/` 回归为 `620 passed, 9 skipped`。
 
 真实 `inspect/consume` 尚未在绑定的 motion Python 环境执行，所以本实验仍是 `preregistered`，没有新五条
 canonical-beta PT。运行入口见[操作文档](../operations/run_motion_handoff_canonical_betas.md)。

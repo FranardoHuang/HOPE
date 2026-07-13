@@ -47,7 +47,7 @@
 - S0/M0 exact post-GVHMR handoff 已在证据机完成，分别为 4,970/9,242 bytes、SHA-256
   `d57a93e0...a1054` / `60c55150...088ef`。下一层 canonical-beta 已做成两份独立 no-clobber prereg：
   复用旧 materializer 的 PT/save-reload 审计，只注入旧 Franco exact donor，不重算新 cohort。host static
-  与新旧专项为 `15 passed, 1 skipped`，最新 main 重放回归 `616 passed, 9 skipped`；真实 PT 尚未 consume，
+  与新旧专项为 `15 passed, 1 skipped`，最新 main 重放回归 `620 passed, 9 skipped`；真实 PT 尚未 consume，
   GMR/schema-2/安全/效果/训练仍未授权。
   M0 的 foot sites、初末二维脚距、容差和 pass 全保持 null，必须由未来 exact GMR 产生。详见
   [canonical-beta 卷宗](experiments/motion_canonical_beta_s0_m0_20260713.md)。

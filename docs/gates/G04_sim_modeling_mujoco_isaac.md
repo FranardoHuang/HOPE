@@ -227,7 +227,7 @@ The two runtime handoffs have since completed at exact `4,970/9,242` bytes and S
 it reuses the audited historical PT replacement/save-reload primitives but injects the old exact
 same-performer donor instead of recomputing a new cohort median. Host static plus synthetic
 save/reload tests are `15 passed, 1 skipped`, with latest-main repository regression
-`616 passed, 9 skipped`;
+`620 passed, 9 skipped`;
 real S0/M0 canonical-beta consume is not yet run.
 For M0, all A3 foot sites, initial/terminal `d_xy`, tolerances and pass result remain null until a
 separately preregistered exact GMR produces robot-coordinate evidence. G04 remains `Partial`.
