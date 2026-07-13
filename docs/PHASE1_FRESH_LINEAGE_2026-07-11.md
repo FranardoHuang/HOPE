@@ -1,11 +1,13 @@
 # Phase-1 Fresh Lineage And Causal Continuations (2026-07-11)
 
 Status: the full 179-D exact construction smoke passed. The 28 accepted run lineages now comprise
-12 causal runs at terminal, 8 fresh runs stopped by a 2026-07-13 human-owner resource decision and
-8 fresh runs still live at fixed training checkout
+12 causal runs at terminal and 16 fresh runs stopped in two 2026-07-13 human-owner resource waves;
+no accepted trainer remains live. Both archived training checkouts remain clean at
 `6d93bcb16c422a2f42748c2dc99432559653480b`. Every arm reached its first PPO iteration and wrote a
-checkpoint whose embedded schema/SHA/lineage flag matches its adjacent hard contract. Training and
-formal evaluation are not complete, so this is not a claim that G05 or G06 is done.
+checkpoint whose embedded schema/SHA/lineage flag matches its adjacent hard contract. The fresh
+face-by-plant pool is closed as a baseline selector, but signed-face repair, corrected training,
+continuous evaluation and vendor Gate3/Gate3B remain incomplete; this is not a claim that G05 or
+G06 is done.
 
 ## Scope And Lane Separation
 
