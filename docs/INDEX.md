@@ -22,7 +22,8 @@
 已分两波全部保留证据并停止，这不是改写 q10 预注册阈值；现有成绩只是每题重置的
 Python BankExam 解析诊断，不是 `Gate3`。
 第 4000 次迭代后续卷已完成，四 seed 为 `50/88/98/0`，预注册稳定门全失败；且
-seed2/3 正手 parsed 高分与 signed composite `0/50` 直接矛盾，证明拍面符号尺仍不可用；
+seed2/3 正手 parsed 高分与 signed composite `0/50` 直接矛盾；signed-face 源码/负控门已实现，
+但 fresh 训练 canary 与修正后同卷尚未运行，所以新尺仍未通过行为验收；
 原生 MuJoCo 训练仍只有不允许合入的预检候选；
 当前 planner-policy exact tuple 源码已通过 portable Release 与 latest-main 本地回归，但
 ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、标定后机器人物理和新真机测试
@@ -51,7 +52,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | --- | --- |
 | [`EXP-P1-FACE-PLANT-SCALEOUT`](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md) | 16 条 fresh 广度臂已分两波全部精确停止并保留证据；旧 face×plant 矩阵不能选 baseline |
 | [`EXP-P1-FRESH-SZ-STABILITY`](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 实验 completed/rejected；2k 与 4k 四 seed 稳定性都失败，seed4 持续弱；不晋级 baseline |
-| [`EXP-P1-FACE-SIGN-FORENSIC`](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) | 4k 同 checkpoint 已证明 parsed 正手高分与 signed composite `0/50` 并存；符号盲区成立，修正后卷未跑 |
+| [`EXP-P1-FACE-SIGN-FORENSIC`](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) | `n/-n` 源码负控与 pre-orient physical-B 门已实现；fresh canary/修正后同卷未跑，旧分不晋级 |
 | [`EXP-P1-SIGNED-FACE-RESCUE-FUNNEL`](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md) | E0 设计：单 seed 先跑热启动/从零 × 线性引导关/开四个机制单元；不复制失败配方 seed |
 | [`EXP-P1-HISTORICAL-SCHEMA3`](experiments/2026-07/EXP-P1-HISTORICAL-SCHEMA3.md) | 同题同卷尺已可用于诊断排名；所有历史模型仍为 inexact |
 | [`EXP-MUJOCO-NATIVE-TRAINING`](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md) | 实验 blocked；off-main preflight 为 `NO-MERGE`，四个正确性缺口未修；尚无 trusted backend、`VecEnv` 或 PPO smoke |

@@ -95,6 +95,7 @@ BODY_SHAPE_CONTRACT = "diagnostic_same_performer_coordinatewise_median_betas_v1"
 RACKET_SITE = "right_racket"
 RACKET_FACE_AXIS = 1  # vendor site local +Y = red/forehand face normal
 RACKET_GEOMS = ("right_racket_collision", "right_racket_handle_collision")
+MOUNT_NORMAL_SIGN_PER_SIDE = {"forehand": 1.0, "backhand": -1.0}
 
 
 class ScreenError(ValueError):
@@ -1157,6 +1158,10 @@ def score_asset(
     if plan["frame_contract"]["mirror_status"] == "verified_mirrored":
         effective_side = "backhand" if effective_side == "forehand" else "forehand"
     side_questions = [question for question in questions if question.side == effective_side]
+    clip_id = 0 if effective_side == "forehand" else 1
+    target_normal_raw_a = np.array(
+        [MOUNT_NORMAL_SIGN_PER_SIDE[effective_side], 0.0, 0.0], dtype=np.float64
+    )
     unsafe = np.asarray(safety["unsafe_source_mask"], dtype=bool)
     local_clearance = np.asarray(safety["source_local_min_clearance_m"], dtype=np.float64)
     minimum_speed = float(plan["phase_selection_contract"]["minimum_racket_speed_mps"])
@@ -1175,7 +1180,9 @@ def score_asset(
                     ball_spin=question.ball_spin_w,
                     racket_pos=positions[frame],
                     racket_vel=velocities[frame],
-                    racket_normal=normals[frame],
+                    racket_normal_raw_a=normals[frame],
+                    target_normal_raw_a=target_normal_raw_a,
+                    clip_id=clip_id,
                     pos_err=pos_err,
                 )
                 exact_margin = _return_margin(exact, scorer, pos_err)
@@ -1204,7 +1211,9 @@ def score_asset(
                     ball_spin=question.ball_spin_w,
                     racket_pos=positions[frame],
                     racket_vel=velocities[frame],
-                    racket_normal=normals[frame],
+                    racket_normal_raw_a=normals[frame],
+                    target_normal_raw_a=target_normal_raw_a,
+                    clip_id=clip_id,
                     pos_err=0.0,
                 )
                 if intrinsic.landed_ok:
@@ -1502,6 +1511,7 @@ def run_screen(plan_path: Path, expected_sha256: str) -> dict[str, Any]:
             half_width=float(geometry["half_width_m"]),
             net_height=float(geometry["net_height_m"]),
         ),
+        mount_normal_sign_per_clip=(1.0, -1.0),
     )
     results: list[dict[str, Any]] = []
     for row in plan["inputs"]:

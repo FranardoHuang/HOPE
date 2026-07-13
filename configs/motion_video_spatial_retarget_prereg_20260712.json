@@ -10,8 +10,8 @@
   "capture_table_pose_observed": false,
   "tool_contract": {
     "path": "scripts/screen_motion_spatial_retarget.py",
-    "bytes": 32425,
-    "sha256": "22de25aa4f47767c4832438823a011e115f8bc93d390bd0317b583974a5483e1"
+    "bytes": 33513,
+    "sha256": "43eccb436ca4577674615a82b2c89f726b98db48087d7c1838174fca896289b4"
   },
   "predecessor": {
     "full_v5_result": {
@@ -115,8 +115,8 @@
     },
     "scorer_dependency": {
       "path": "hope_training/whole_body_tracking/scripts/virtual_return_scorer.py",
-      "bytes": 13177,
-      "sha256": "41fe2a07d161979b76eca3f7f58723381877ab8406095ebde2ead10a67d64d11"
+      "bytes": 19594,
+      "sha256": "9d01da15a6f24166d4d185ede26a2bd29c9c61d02d15942beadb35b335e0f5ec"
     },
     "table_geometry": {
       "surface_z_m": 0.76,
@@ -130,6 +130,20 @@
     "minimum_approach_speed_mps": 0.3,
     "rollout_h_s": 0.01,
     "rollout_steps": 100,
+    "signed_face_contract": {
+      "achieved_and_target_frame": "mount_plusY_A",
+      "external_frame": "physical_striking_face_B",
+      "mount_normal_sign_per_side": {
+        "forehand": 1.0,
+        "backhand": -1.0
+      },
+      "identity_target_physical_B": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "identity_gate": "dot(achieved_raw_A,target_raw_A)>0_and_achieved_physical_B.x>1e-6_and_target_physical_B.x>1e-6_before_orient_normal"
+    },
     "ball_start_for_flight": "immutable_question_ball_position",
     "capture_position_error": "norm(mapped_racket_site_minus_immutable_question_position); XY is exactly aligned and only unchanged Z residual remains"
   },

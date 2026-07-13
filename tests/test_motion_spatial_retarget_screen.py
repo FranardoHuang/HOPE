@@ -13,7 +13,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "screen_motion_spatial_retarget.py"
-MANIFEST_SHA256 = "d8c918acc9277ff9ec094db46f4e08e7634c3879fb332663bdd27f95212e5a9f"
+MANIFEST_SHA256 = "69bdeabc9b5a934143c52ec6a7fe28ab0a0be6573b2f14f0748e49063c69eb62"
 SPEC = importlib.util.spec_from_file_location("screen_motion_spatial_retarget", SCRIPT)
 assert SPEC and SPEC.loader
 mod = importlib.util.module_from_spec(SPEC)
@@ -33,7 +33,7 @@ def test_tracked_preregistration_is_valid_and_blocks_promotion() -> None:
     assert tuple(plan["asset_ids"]) == mod.EXPECTED_ASSETS
     assert plan["capture_table_pose_observed"] is False
     assert plan["virtual_return_contract"]["scorer_dependency"]["sha256"] == (
-        "41fe2a07d161979b76eca3f7f58723381877ab8406095ebde2ead10a67d64d11"
+        "9d01da15a6f24166d4d185ede26a2bd29c9c61d02d15942beadb35b335e0f5ec"
     )
     assert plan["virtual_return_contract"]["capture_radius_m"] == 0.095
     assert plan["promotion_contract"]["topp"] is False
@@ -78,6 +78,7 @@ def test_atomic_se2_aligns_xy_but_preserves_z_scale_and_chirality() -> None:
 
 class _AlwaysReturnScorer:
     def __init__(self) -> None:
+        self.calls = []
         self.spec = SimpleNamespace(
             capture_radius=0.095,
             net_x=1.87,
@@ -87,6 +88,7 @@ class _AlwaysReturnScorer:
         self.net_clear_center_z = 0.9325
 
     def score(self, **kwargs):
+        self.calls.append(kwargs)
         contacted = kwargs["pos_err"] < self.spec.capture_radius
         return SimpleNamespace(
             landed_ok=contacted,
@@ -139,6 +141,9 @@ def test_search_is_all_frame_safe_bounded_and_side_specific() -> None:
     assert proposals[0]["translation_w_m"] == pytest.approx([0.15, 0.10, 0.0])
     assert proposals[0]["capture_extrinsic_claim"] is False
     assert proposals[0]["transform_semantics"].startswith("atomic_whole_motion")
+    assert scorer.calls[0]["clip_id"] == 1
+    np.testing.assert_array_equal(scorer.calls[0]["target_normal_raw_a"], [-1.0, 0.0, 0.0])
+    assert "racket_normal_raw_a" in scorer.calls[0] and "racket_normal" not in scorer.calls[0]
     changed_source = _asset()
     changed_source["input"] = {**changed_source["input"], "sha256": "e" * 64}
     changed = mod.search_motion_question(changed_source, _question(), "R0", plan, scorer)

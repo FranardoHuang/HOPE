@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import inspect
 import json
 import sys
 from pathlib import Path
@@ -272,6 +273,15 @@ def test_verified_rigid_frame_transform_moves_points_but_only_rotates_vectors():
     assert np.allclose(p, [[8.0, 21.0, 33.0]])
     assert np.allclose(n, [[0.0, 1.0, 0.0]])
     assert np.allclose(v, [[-2.0, 0.0, 0.0]])
+
+
+def test_returnability_callsite_binds_per_side_signed_face_before_plane_orientation():
+    assert mod.MOUNT_NORMAL_SIGN_PER_SIDE == {"forehand": 1.0, "backhand": -1.0}
+    source = inspect.getsource(mod.score_asset)
+    assert source.count("racket_normal_raw_a=normals[frame]") == 2
+    assert source.count("target_normal_raw_a=target_normal_raw_a") == 2
+    assert source.count("clip_id=clip_id") == 2
+    assert "racket_normal=" not in source
 
 
 def test_per_asset_frame_transform_override_is_applied_without_side_effects():

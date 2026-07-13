@@ -104,6 +104,53 @@ def orient_normal(n: torch.Tensor, v_minus: torch.Tensor, v_r: torch.Tensor) -> 
     return torch.where(approaching, -n, n)
 
 
+def signed_face_hemisphere(
+    achieved_normal: torch.Tensor,
+    target_normal: torch.Tensor,
+    *,
+    achieved_physical_b: torch.Tensor | None = None,
+    target_physical_b: torch.Tensor | None = None,
+    physical_b_min_x: float = 1.0e-6,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Grade face identity before ``orient_normal`` can erase ``n`` versus ``-n``.
+
+    The caller supplies a convention-matched pair: raw mount +Y/A for face-command training, or
+    the selected physical striking face B for legacy clip-reference training.  Formal callers also
+    supply the achieved and demanded physical-B normals.  Their strict opponent-facing ``x`` gate
+    prevents a positive A-frame dot near the 90-degree boundary from accepting a face that points
+    away from the opponent.  Non-finite or degenerate rows fail closed.  The strict ``dot > 0``
+    boundary implements the registered 90-degree signed-face identity gate; exact angular tracking
+    remains a separate metric.
+    """
+
+    achieved_norm = torch.linalg.norm(achieved_normal, dim=-1, keepdim=True)
+    target_norm = torch.linalg.norm(target_normal, dim=-1, keepdim=True)
+    finite = (
+        torch.isfinite(achieved_normal).all(dim=-1)
+        & torch.isfinite(target_normal).all(dim=-1)
+        & torch.isfinite(achieved_norm.squeeze(-1))
+        & torch.isfinite(target_norm.squeeze(-1))
+        & (achieved_norm.squeeze(-1) > _EPS)
+        & (target_norm.squeeze(-1) > _EPS)
+    )
+    achieved = achieved_normal / (achieved_norm + _EPS)
+    target = target_normal / (target_norm + _EPS)
+    dot = torch.sum(achieved * target, dim=-1).clamp(-1.0, 1.0)
+    physical_ok = torch.ones_like(finite)
+    for physical in (achieved_physical_b, target_physical_b):
+        if physical is None:
+            continue
+        physical_norm = torch.linalg.norm(physical, dim=-1, keepdim=True)
+        physical_finite = (
+            torch.isfinite(physical).all(dim=-1)
+            & torch.isfinite(physical_norm.squeeze(-1))
+            & (physical_norm.squeeze(-1) > _EPS)
+        )
+        physical_unit = physical / (physical_norm + _EPS)
+        physical_ok &= physical_finite & (physical_unit[:, 0] > float(physical_b_min_x))
+    return finite & physical_ok & (dot > 0.0), dot
+
+
 def predict_paddle_contact(
     v_minus: torch.Tensor,
     v_r: torch.Tensor,

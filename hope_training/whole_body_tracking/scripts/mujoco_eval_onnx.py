@@ -708,7 +708,35 @@ def json_ready(value):
     return str(value)
 
 
-def build_virtual_return_scorer(repo_root, venue_sampler):
+def resolve_virtual_return_face_signs(policy, num_clips, *, allow_inexact_contract=False):
+    """Resolve A <-> B signs, with one explicit unsigned legacy-diagnostic escape hatch."""
+
+    values = getattr(policy, "mount_normal_sign_per_clip_meta", None)
+    if values is None:
+        require_contract(
+            bool(allow_inexact_contract),
+            "analytic return scoring requires ONNX mount_normal_sign_per_clip metadata; "
+            "face identity cannot fall back to an unsigned plane",
+        )
+        return tuple(1.0 for _ in range(int(num_clips))), False
+    try:
+        signs = _virtual_return_scorer.validate_mount_normal_sign_per_clip(values)
+    except ValueError as exc:
+        raise SystemExit(f"[FATAL] invalid analytic-return face-sign metadata: {exc}") from exc
+    require_contract(
+        len(signs) == int(num_clips),
+        f"analytic return scoring has {len(signs)} face signs for {num_clips} clips",
+    )
+    return signs, True
+
+
+def build_virtual_return_scorer(
+    repo_root,
+    venue_sampler,
+    mount_normal_sign_per_clip,
+    *,
+    signed_face_required=True,
+):
     """Create the production scorer and a portable, content-addressed scoring contract.
 
     ``venue_ball_sampler`` continues to own question/ball generation.  Scoring is evaluator-owned
@@ -738,7 +766,12 @@ def build_virtual_return_scorer(repo_root, venue_sampler):
         half_width=float(venue_sampler.half_w),
         net_height=float(venue_sampler.table.net_height),
     )
-    scorer = _virtual_return_scorer.VirtualReturnScorer(params, spec)
+    scorer = _virtual_return_scorer.VirtualReturnScorer(
+        params,
+        spec,
+        mount_normal_sign_per_clip=mount_normal_sign_per_clip,
+        signed_face_required=signed_face_required,
+    )
     physics_fields = (
         "k_d", "k_m", "g", "ball_radius", "inertia_coeff", "paddle_a_t", "paddle_b_t",
         "paddle_mu", "paddle_e_g1", "paddle_e_g2",
@@ -748,7 +781,7 @@ def build_virtual_return_scorer(repo_root, venue_sampler):
         "min_approach_speed", "rollout_h", "rollout_steps",
     )
     contract = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "hope_virtual_return_scorer_contract",
         "implementation": "virtual_return_scorer.VirtualReturnScorer",
         "source": {
@@ -767,20 +800,48 @@ def build_virtual_return_scorer(repo_root, venue_sampler):
                    else float(getattr(spec, name)))
             for name in spec_fields
         },
+        "signed_face_contract": {
+            "schema_version": 1,
+            "achieved_and_target_frame": "mount_plusY_A",
+            "external_frame": "physical_striking_face_B",
+            "physical_B_to_raw_A": "raw_A=mount_normal_sign_per_clip[clip]*physical_B",
+            "mount_normal_sign_per_clip": list(scorer.mount_normal_sign_per_clip),
+            "signed_face_required": scorer.signed_face_required,
+            "physical_B_min_x_strict": 1.0e-6,
+            "unit_normal_atol": 2.0e-4,
+            "identity_gate": (
+                "dot(achieved_raw_A,target_raw_A)>0_and_achieved_physical_B.x>1e-6_and_"
+                "target_physical_B.x>1e-6_before_orient_normal"
+                if scorer.signed_face_required
+                else "disabled_explicit_inexact_unsigned_plane_diagnostic"
+            ),
+            "wrong_orthogonal_or_non_opponent_facing_face": (
+                "contacted=false" if scorer.signed_face_required else "not_graded"
+            ),
+        },
     }
     contract["sha256"] = canonical_contract_sha256(contract)
     return scorer, contract
 
 
-def score_virtual_return(scorer, strike, racket_pos_w, racket_vel_w, racket_normal_w, pos_err):
-    """Production adapter from a sampled exam strike to the authoritative scorer API."""
+def score_virtual_return(
+    scorer,
+    strike,
+    racket_pos_w,
+    racket_vel_w,
+    racket_normal_raw_a_w,
+    pos_err,
+):
+    """Production adapter; both achieved and bank-demanded faces enter as signed raw A."""
 
     return scorer.score(
         ball_vel=strike.ball_vel_w,
         ball_spin=strike.ball_spin_w,
         racket_pos=racket_pos_w,
         racket_vel=racket_vel_w,
-        racket_normal=racket_normal_w,
+        racket_normal_raw_a=racket_normal_raw_a_w,
+        target_normal_raw_a=strike.target_normal_w,
+        clip_id=strike.clip,
         pos_err=pos_err,
         intended_landing_xy=strike.intended_landing_xy,
     )
@@ -2475,12 +2536,18 @@ class StrikeAcc:
 class VenueAcc:
     def __init__(self):
         self.n = 0
+        self.signed_face_exact = 0
+        self.physical_b_opponent_facing = 0
+        self.signed_face_ok = 0
         self.contacted = self.landing_valid = self.on_opp = self.net_clear = self.landed_ok = 0
         self.land_errs = []          # ||achieved - intended|| for CONTACTED strikes w/ valid landing
         self.demanded_speed = 0.0    # |v_r| the spec demanded (target_speed)
 
     def add(self, ret, demanded_speed):
         self.n += 1
+        self.signed_face_exact += ret.signed_face_exact
+        self.physical_b_opponent_facing += ret.physical_b_opponent_facing
+        self.signed_face_ok += ret.signed_face_ok
         self.contacted += ret.contacted
         self.demanded_speed += demanded_speed
         if ret.contacted:
@@ -2496,6 +2563,12 @@ class VenueAcc:
         n_c = self.contacted
         return dict(
             n_strikes=self.n,
+            signed_face_exact=(self.signed_face_exact == self.n and self.n > 0),
+            physical_b_opponent_facing_rate=(
+                self.physical_b_opponent_facing / self.n if self.n else nan
+            ),
+            signed_face_ok=self.signed_face_ok,
+            signed_face_ok_rate=(self.signed_face_ok / self.n) if self.n else nan,
             contacted=n_c,
             contact_rate=(n_c / self.n) if self.n else nan,
             landing_valid_rate=(self.landing_valid / n_c) if n_c else nan,   # of contacted
@@ -3044,6 +3117,7 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 # 判卷按该 clip 的实际击球面取法向(离线常量表;表没开 = 现役单面行为逐位不变)。
                 # boxes 模式的参考目标法向在预计算处已同乘同一符号;venue/bank 的需求法向来自球/规划器,
                 # 不翻——翻的只是"我们给策略记分的那一面"。
+                nrm_raw_a = robot.racket_normal_w(sign=1.0)
                 nrm = robot.racket_normal_w(sign=face_sign_for_clip(clip))
                 tgt_nrm = racket.racket_target_normal_w
                 cos_a = float(np.clip(np.dot(nrm, tgt_nrm), -1.0, 1.0))
@@ -3063,7 +3137,8 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                     vs = cur_venue_strike[0]
                     ret = score_virtual_return(
                         virtual_return_scorer, vs, racket_pos_w=robot.racket_pos(),
-                        racket_vel_w=act_vel_w, racket_normal_w=nrm, pos_err=pos_err)
+                        racket_vel_w=act_vel_w, racket_normal_raw_a_w=nrm_raw_a,
+                        pos_err=pos_err)
                     venue["all"].add(ret, tgt_speed)
                     venue[CLIP_NAMES[clip]].add(ret, tgt_speed)
                     attempt_hit = bool(ret.contacted)
@@ -3072,7 +3147,7 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                     # isolates the normal channel (deterministic rescore, no RNG involved).
                     ret_cf = score_virtual_return(
                         virtual_return_scorer, vs, racket_pos_w=robot.racket_pos(),
-                        racket_vel_w=act_vel_w, racket_normal_w=vs.target_normal_w,
+                        racket_vel_w=act_vel_w, racket_normal_raw_a_w=vs.target_normal_w,
                         pos_err=pos_err)
                     venue_cf["all"].add(ret_cf, tgt_speed)
                     venue_cf[CLIP_NAMES[clip]].add(ret_cf, tgt_speed)
@@ -3085,9 +3160,15 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                     venue_extra = [
                         f"{vs.ball_vel_w[0]:.4f}", f"{vs.ball_vel_w[1]:.4f}", f"{vs.ball_vel_w[2]:.4f}",
                         f"{vs.ball_spin_w[0]:.4f}", f"{vs.ball_spin_w[1]:.4f}", f"{vs.ball_spin_w[2]:.4f}",
+                        f"{ret.face_sign:.0f}", int(ret.signed_face_exact),
+                        int(ret.physical_b_opponent_facing), int(ret.signed_face_ok),
+                        f"{ret.signed_face_dot:.8f}", f"{ret.signed_face_error_deg:.6f}",
                         int(ret.contacted),
                         f"{vs.intended_landing_xy[0]:.4f}", f"{vs.intended_landing_xy[1]:.4f}",
                         lx, ly, int(ret.landed_ok), lerr, int(ret.net_clear),
+                        int(ret_cf.signed_face_exact), int(ret_cf.physical_b_opponent_facing),
+                        int(ret_cf.signed_face_ok), f"{ret_cf.signed_face_dot:.8f}",
+                        f"{ret_cf.signed_face_error_deg:.6f}",
                         int(ret_cf.contacted), cx, cy, int(ret_cf.landed_ok), cerr,
                         int(ret_cf.net_clear),
                     ]
@@ -4851,8 +4932,23 @@ def main():
     virtual_return_scorer = None
     virtual_return_scorer_contract = None
     if venue_sampler is not None:
+        virtual_return_face_signs, signed_face_required = resolve_virtual_return_face_signs(
+            policy,
+            num_clips,
+            allow_inexact_contract=args.allow_inexact_contract,
+        )
+        if not signed_face_required:
+            policy.evaluation_contract_exact = False
+            print(
+                "[mj-sim2sim] WARNING: ONNX has no per-clip face-sign metadata; explicit "
+                "--allow-inexact-contract keeps the historical unsigned-plane analytic scorer "
+                "for diagnosis only; signed_face_exact=false and promotion is forbidden"
+            )
         virtual_return_scorer, virtual_return_scorer_contract = build_virtual_return_scorer(
-            repo, venue_sampler
+            repo,
+            venue_sampler,
+            virtual_return_face_signs,
+            signed_face_required=signed_face_required,
         )
 
     execution_contract = build_evaluation_execution_contract(
@@ -5063,8 +5159,12 @@ def main():
         # cf_* = the COUNTERFACTUAL rescore (same achieved pos/vel, DEMANDED normal swapped in).
         strike_cols += [
             "ball_v_x", "ball_v_y", "ball_v_z", "ball_w_x", "ball_w_y", "ball_w_z",
+            "face_sign", "signed_face_exact", "physical_b_opponent_facing", "signed_face_ok",
+            "signed_face_dot", "signed_face_error_deg",
             "contacted", "intended_land_x", "intended_land_y",
             "achieved_land_x", "achieved_land_y", "landed_ok", "land_err_m", "net_clear",
+            "cf_signed_face_exact", "cf_physical_b_opponent_facing", "cf_signed_face_ok",
+            "cf_signed_face_dot", "cf_signed_face_error_deg",
             "cf_contacted", "cf_achieved_land_x", "cf_achieved_land_y", "cf_landed_ok",
             "cf_land_err_m", "cf_net_clear",
         ]

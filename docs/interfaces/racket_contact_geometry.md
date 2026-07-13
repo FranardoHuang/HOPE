@@ -29,6 +29,36 @@ the red outer-face area centroid at this site plus
 therefore a valid engineering control point, but it is not literally the
 centre of the ball at contact.
 
+## Signed face identity is not an oriented plane
+
+The canonical naming follows [raw-A / physical-B](../DEFINITIONS.md):
+
+- **raw A** is the racket mount's local `+Y` normal transformed to world;
+- **physical B** is the selected rubber face presented toward the opponent;
+- for clip `c`, `physical_B = mount_normal_sign_per_clip[c] * raw_A` and the current
+  forehand/backhand table is `[+1,-1]`.
+
+`orient_normal(n, incoming, racket_velocity)` is allowed only inside the contact impulse law. It
+chooses a convenient direction for the same geometric plane, so `n` and `-n` produce the same
+impulse and cannot prove which rubber face struck the ball. Any score/reward that carries face
+identity must therefore gate **before** that operation:
+
+```text
+dot(achieved_raw_A, target_raw_A) > 0
+achieved_physical_B.x > 1e-6
+target_physical_B.x > 1e-6
+```
+
+Normals must be finite and non-degenerate; offline formal scorers additionally require unit normals
+within `2e-4`. Missing/invalid per-clip signs fail closed. The strict hemisphere test only says the
+correct physical face is presented; the tighter normal-error threshold remains a separate strike
+quality metric.
+
+The analytic scorer's explicit legacy escape is diagnostic-only: it may orient an unsigned plane
+when `--allow-inexact-contract` is supplied, but must emit `signed_face_exact=false` and
+`evaluation_contract_exact=false`. Such a result cannot select a checkpoint, promote a motion, or
+stand in for physical ball contact.
+
 ## Three points that must not be conflated
 
 For world-from-racket rotation `R`, selected face sign `s` and ball radius

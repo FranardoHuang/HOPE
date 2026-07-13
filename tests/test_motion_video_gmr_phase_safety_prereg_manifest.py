@@ -82,13 +82,21 @@ def test_prereg_binds_exact_source_tools_and_two_vs_four_papers():
         "motion_audit_dependency": (
             REPO / "hope_training/whole_body_tracking/scripts/audit_motion_npz.py"
         ),
-        "virtual_return_dependency": (
-            REPO / "hope_training/whole_body_tracking/scripts/virtual_return_scorer.py"
-        ),
     }
     for name, path in local_tools.items():
         assert plan["tool_contract"][name]["sha256"] == _sha(path)
         assert plan["tool_contract"][name]["bytes"] == path.stat().st_size
+
+    # The old scorer is part of accepted v4 history. New signed-face source intentionally differs;
+    # future returnability uses a new preregistration rather than rewriting this ledger.
+    old_scorer = plan["tool_contract"]["virtual_return_dependency"]
+    current_scorer = REPO / "hope_training/whole_body_tracking/scripts/virtual_return_scorer.py"
+    assert old_scorer == {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v4/virtual_return_scorer.py",
+        "bytes": 13177,
+        "sha256": "41fe2a07d161979b76eca3f7f58723381877ab8406095ebde2ead10a67d64d11",
+    }
+    assert old_scorer["sha256"] != _sha(current_scorer)
 
     assert plan["libraries"]["franco_two_blocks"] == [
         "franco_forehand_block",

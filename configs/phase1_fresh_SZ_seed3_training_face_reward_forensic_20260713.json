@@ -1,0 +1,303 @@
+{
+  "artifact_kind": "phase1_training_face_reward_tfevents_forensic_summary",
+  "content": {
+    "actions": {
+      "accepted_baseline_authorized": false,
+      "deploy_or_real_robot_authorized": false,
+      "fresh_canary_required": true,
+      "historical_score_reinterpretation_only": true,
+      "promotion_authorized": false
+    },
+    "extraction": {
+      "all_requested_steps_found_exactly": true,
+      "event_loader": "tensorboard.backend.event_processing.event_file_loader.EventFileLoader(path).Load()",
+      "requested_steps": [
+        0,
+        1000,
+        2000,
+        4000,
+        6000,
+        8000,
+        10000,
+        12000,
+        13800
+      ],
+      "selection": "exact_event_step_equals_requested_iteration_no_nearest_fallback",
+      "simple_value_decode": "float(summary_value.simple_value)",
+      "tensor_value_decode": "float(tensorboard.util.tensor_util.make_ndarray(summary_value.tensor).reshape(-1)[0])"
+    },
+    "interpretation": {
+      "causal_single_factor_claim_authorized": false,
+      "forehand_reward_attribution_or_fraction_authorized": false,
+      "global_reward_tag_limit": "Live/Reward/* tags aggregate all active environments and both stroke sides; they cannot attribute reward to forehand wrong-face samples or quantify the fraction of reward paid by those samples",
+      "reason": "the signed forehand metrics establish wrong-face forehand states while the source/config binding establishes that the active return-reward path was face-blind; reward terms, policy state and training iteration co-vary, and aggregate reward tags are not side-attributable",
+      "supported_conclusion": "wrong-face FH states were treated as reward-eligible by the active face-blind reward path",
+      "supported_conclusion_zh": "正手错面状态被现役 face-blind reward 路径视为可得奖"
+    },
+    "milestones": [
+      {
+        "backhand": {
+          "racket_normal_error_deg_exact_strike": 0.0,
+          "strike_normal_pass_exact": 0.0,
+          "strike_vel_pass_exact": 0.0,
+          "virtual_return_rate": 0.0
+        },
+        "forehand": {
+          "racket_normal_error_deg_exact_strike": 0.0,
+          "strike_normal_pass_exact": 0.0,
+          "strike_vel_pass_exact": 0.0,
+          "virtual_return_rate": 0.0
+        },
+        "live_reward": {
+          "racket_normal": 0.0,
+          "virtual_landing": 0.0,
+          "virtual_pass_net": 0.0,
+          "virtual_spin": 0.0
+        },
+        "step": 0
+      },
+      {
+        "backhand": {
+          "racket_normal_error_deg_exact_strike": 9.1490335,
+          "strike_normal_pass_exact": 0.88450229,
+          "strike_vel_pass_exact": 0.61506069,
+          "virtual_return_rate": 0.68634236
+        },
+        "forehand": {
+          "racket_normal_error_deg_exact_strike": 120.16541,
+          "strike_normal_pass_exact": 0.0,
+          "strike_vel_pass_exact": 0.2673867,
+          "virtual_return_rate": 5.5691863e-29
+        },
+        "live_reward": {
+          "racket_normal": 0.094553165,
+          "virtual_landing": 0.1115656,
+          "virtual_pass_net": 0.036166389,
+          "virtual_spin": 0.0010423376
+        },
+        "step": 1000
+      },
+      {
+        "backhand": {
+          "racket_normal_error_deg_exact_strike": 6.4523706,
+          "strike_normal_pass_exact": 0.97589338,
+          "strike_vel_pass_exact": 0.75561208,
+          "virtual_return_rate": 0.93790787
+        },
+        "forehand": {
+          "racket_normal_error_deg_exact_strike": 167.48804,
+          "strike_normal_pass_exact": 0.0,
+          "strike_vel_pass_exact": 0.21437356,
+          "virtual_return_rate": 0.69163364
+        },
+        "live_reward": {
+          "racket_normal": 0.16682151,
+          "virtual_landing": 0.27355185,
+          "virtual_pass_net": 0.095942974,
+          "virtual_spin": 0.0028460738
+        },
+        "step": 2000
+      },
+      {
+        "backhand": {
+          "racket_normal_error_deg_exact_strike": 7.6340613,
+          "strike_normal_pass_exact": 0.95457971,
+          "strike_vel_pass_exact": 0.75901425,
+          "virtual_return_rate": 0.94308567
+        },
+        "forehand": {
+          "racket_normal_error_deg_exact_strike": 172.43787,
+          "strike_normal_pass_exact": 0.0,
+          "strike_vel_pass_exact": 0.15821759,
+          "virtual_return_rate": 0.89663017
+        },
+        "live_reward": {
+          "racket_normal": 0.14020523,
+          "virtual_landing": 0.25963309,
+          "virtual_pass_net": 0.11359926,
+          "virtual_spin": 0.0016809707
+        },
+        "step": 4000
+      },
+      {
+        "backhand": {
+          "racket_normal_error_deg_exact_strike": 5.9132748,
+          "strike_normal_pass_exact": 0.98903686,
+          "strike_vel_pass_exact": 0.81251317,
+          "virtual_return_rate": 0.95647335
+        },
+        "forehand": {
+          "racket_normal_error_deg_exact_strike": 172.66449,
+          "strike_normal_pass_exact": 0.0,
+          "strike_vel_pass_exact": 0.13092858,
+          "virtual_return_rate": 0.92614931
+        },
+        "live_reward": {
+          "racket_normal": 0.14721337,
+          "virtual_landing": 0.29235166,
+          "virtual_pass_net": 0.12225783,
+          "virtual_spin": 0.00093208934
+        },
+        "step": 6000
+      },
+      {
+        "backhand": {
+          "racket_normal_error_deg_exact_strike": 6.3254938,
+          "strike_normal_pass_exact": 0.99467027,
+          "strike_vel_pass_exact": 0.85845101,
+          "virtual_return_rate": 0.96888107
+        },
+        "forehand": {
+          "racket_normal_error_deg_exact_strike": 173.04008,
+          "strike_normal_pass_exact": 0.0,
+          "strike_vel_pass_exact": 0.17530046,
+          "virtual_return_rate": 0.93989497
+        },
+        "live_reward": {
+          "racket_normal": 0.15050258,
+          "virtual_landing": 0.24252158,
+          "virtual_pass_net": 0.089046434,
+          "virtual_spin": 0.0007852054
+        },
+        "step": 8000
+      },
+      {
+        "backhand": {
+          "racket_normal_error_deg_exact_strike": 5.1697164,
+          "strike_normal_pass_exact": 0.99803525,
+          "strike_vel_pass_exact": 0.8481009,
+          "virtual_return_rate": 0.96832818
+        },
+        "forehand": {
+          "racket_normal_error_deg_exact_strike": 173.72298,
+          "strike_normal_pass_exact": 0.0,
+          "strike_vel_pass_exact": 0.10089624,
+          "virtual_return_rate": 0.94837654
+        },
+        "live_reward": {
+          "racket_normal": 0.15946871,
+          "virtual_landing": 0.27553046,
+          "virtual_pass_net": 0.10730074,
+          "virtual_spin": 0.00074196589
+        },
+        "step": 10000
+      },
+      {
+        "backhand": {
+          "racket_normal_error_deg_exact_strike": 5.7570186,
+          "strike_normal_pass_exact": 0.99425513,
+          "strike_vel_pass_exact": 0.85743964,
+          "virtual_return_rate": 0.96236378
+        },
+        "forehand": {
+          "racket_normal_error_deg_exact_strike": 173.63805,
+          "strike_normal_pass_exact": 0.0,
+          "strike_vel_pass_exact": 0.16824384,
+          "virtual_return_rate": 0.93468434
+        },
+        "live_reward": {
+          "racket_normal": 0.17942601,
+          "virtual_landing": 0.27286431,
+          "virtual_pass_net": 0.10601164,
+          "virtual_spin": 0.00061367685
+        },
+        "step": 12000
+      },
+      {
+        "backhand": {
+          "racket_normal_error_deg_exact_strike": 5.8638024,
+          "strike_normal_pass_exact": 0.99631256,
+          "strike_vel_pass_exact": 0.82897705,
+          "virtual_return_rate": 0.96720845
+        },
+        "forehand": {
+          "racket_normal_error_deg_exact_strike": 174.01768,
+          "strike_normal_pass_exact": 0.0,
+          "strike_vel_pass_exact": 0.064210758,
+          "virtual_return_rate": 0.96492356
+        },
+        "live_reward": {
+          "racket_normal": 0.15587743,
+          "virtual_landing": 0.32537544,
+          "virtual_pass_net": 0.13425523,
+          "virtual_spin": 0.00188883
+        },
+        "step": 13800
+      }
+    ],
+    "recomputed_diagnostics": {
+      "attribution_limit": "these are global Live/Reward tag aggregates and cannot be assigned to forehand or used to estimate a wrong-face forehand reward fraction",
+      "step_13800_global_return_reward_tags_sum": 0.4615195,
+      "step_13800_global_return_reward_tags_to_global_racket_normal_reward_tag_ratio": 2.96078463700614,
+      "step_13800_global_return_reward_tags_to_global_racket_normal_reward_tag_ratio_formula": "(virtual_landing+virtual_pass_net+virtual_spin)/racket_normal"
+    },
+    "run": {
+      "family": "fresh_SZ",
+      "human_name": "fresh zero-friction protocol formal cell, seed 3",
+      "run_directory_name": "2026-07-11_05-39-31_phase1_fresh_v3_SZ_seed3",
+      "seed": 3,
+      "source_commit_claim": {
+        "commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+        "evidence_kind": "scheduler_and_saved_lineage_claim",
+        "runtime_head_independently_verified": false,
+        "scope_limit": "the bound launch log does not contain HEAD; the contemporaneous git/nohope.diff proves a clean worktree diff only, not HEAD identity or process-loaded byte identity"
+      }
+    },
+    "schema_version": 1,
+    "source_artifacts": {
+      "env_yaml": {
+        "pod_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_05-39-31_phase1_fresh_v3_SZ_seed3/params/env.yaml",
+        "sha256": "4dfb829e065bbd2ceb423dd71cc62557e51ea711678b6cf8b7fb8ef9b1a70051",
+        "verified_fields": {
+          "commands.racket_target.vb_metrics_only": true,
+          "commands.racket_target.virtual_ball": true,
+          "rewards.racket_normal.weight": 5.0,
+          "rewards.virtual_landing.weight": 30.0,
+          "rewards.virtual_pass_net.weight": 20.0,
+          "rewards.virtual_spin.weight": 5.0
+        }
+      },
+      "launch_log": {
+        "pod_path": "/workspace/codexschema/phase1_fresh_20260711/runs/phase1_fresh_v3_SZ_seed3/run.log.launch",
+        "sha256": "20fbb3cc10ac3ec96379911173811863ae312497266fce0be902f99b6077cbf0",
+        "verified_fields": {
+          "command_targets_run": "phase1_fresh_v3_SZ_seed3",
+          "task.racket.vb_metrics_only": true,
+          "task.rewards.racket_face_guidance_weight": 0.0,
+          "task.rewards.racket_normal_weight": 5.0
+        }
+      },
+      "run_git_diff": {
+        "bytes": 267,
+        "content_observation": "the artifact records the 2026-07-11 05:40 checkout as clean with no diff",
+        "pod_path": "/workspace/codexschema/phase1_fresh_20260711/runs/phase1_fresh_v3_SZ_seed3/git/nohope.diff",
+        "scope_limit": "clean/no-diff evidence does not establish the checkout HEAD or the bytes loaded by the training process",
+        "sha256": "8d873bddf85f0e58da9e10bc820f9e7d28d1a8efda70cf78128a3995948c65f2"
+      },
+      "tensorboard_event": {
+        "git_tracking": "not_committed_large_runtime_artifact",
+        "pod_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_05-39-31_phase1_fresh_v3_SZ_seed3/events.out.tfevents.1783748406.44d3379e8680.1348951.0",
+        "sha256": "c1578922abf3d7268674c1ccf4f18fd70eb4da22492096266404a613b7dc525e"
+      },
+      "training_contract": {
+        "pod_path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_05-39-31_phase1_fresh_v3_SZ_seed3/params/training_contract.json",
+        "sha256": "3a3b3d956e19d47f7e6f0a157159dc96c8f09d8345c436a776c8c7e99c0b9972"
+      }
+    },
+    "tag_registry": {
+      "backhand_normal_error_deg": "Live/racket_target/racket_normal_error_deg_exact_strike_backhand",
+      "backhand_normal_pass": "Live/racket_target/strike_normal_pass_exact_backhand",
+      "backhand_velocity_pass": "Live/racket_target/strike_vel_pass_exact_backhand",
+      "backhand_virtual_return": "Live/racket_target/virtual_return_rate_backhand",
+      "forehand_normal_error_deg": "Live/racket_target/racket_normal_error_deg_exact_strike_forehand",
+      "forehand_normal_pass": "Live/racket_target/strike_normal_pass_exact_forehand",
+      "forehand_velocity_pass": "Live/racket_target/strike_vel_pass_exact_forehand",
+      "forehand_virtual_return": "Live/racket_target/virtual_return_rate_forehand",
+      "reward_racket_normal": "Live/Reward/racket_normal",
+      "reward_virtual_landing": "Live/Reward/virtual_landing",
+      "reward_virtual_pass_net": "Live/Reward/virtual_pass_net",
+      "reward_virtual_spin": "Live/Reward/virtual_spin"
+    }
+  },
+  "content_sha256": "cdd33747b5feb552c6879057c6e7dcdbe28ac4d1723e67cbae88f2fc193daec7"
+}

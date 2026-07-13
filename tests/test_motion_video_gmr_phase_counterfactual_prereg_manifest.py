@@ -57,8 +57,14 @@ def test_counterfactual_prereg_binds_frame_evidence_tool_and_frozen_paper():
     evidence = json.loads(EVIDENCE.read_text(encoding="utf-8"))
     assert plan["frame_contract_evidence"]["sha256"] == _sha(EVIDENCE)
     assert plan["frame_contract_evidence"]["bytes"] == EVIDENCE.stat().st_size
-    assert plan["tool_contract"]["screen"]["sha256"] == _sha(SCREEN)
-    assert plan["tool_contract"]["screen"]["bytes"] == SCREEN.stat().st_size
+    # Runtime history is immutable: current source has the later signed-face gate and must not be
+    # substituted into the completed v5 ledger.
+    assert plan["tool_contract"]["screen"] == {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/phase_safety_control_v5/screen_motion_gmr_phase_safety.py",
+        "bytes": 76200,
+        "sha256": "d3924b1a045efa08b77aee92da81633ed68a0fd05422da0a1543692452357b0f",
+    }
+    assert plan["tool_contract"]["screen"]["sha256"] != _sha(SCREEN)
     assert (
         plan["question_schedule"]["expected_semantic_sha256"]
         == "4dfa0548d898fa6456d09261216e26ff9547c1a9dca2da221835c3cfa25332c7"

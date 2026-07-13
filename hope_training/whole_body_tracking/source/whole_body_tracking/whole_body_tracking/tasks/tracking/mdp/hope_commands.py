@@ -2611,12 +2611,38 @@ class RacketTargetCommand(CommandTerm):
 
         v_in, w_in = self.vb_vel_in_w, self.vb_spin_in_w
         v_r, n_face = self.racket_lin_vel_w, self.racket_normal_w
-        # CAPTURE GATE: close enough at the strike frame AND paddle moving INTO the ball along the
-        # oriented contact normal (a stationary/retreating wall-block scores nothing — verify (c)3).
+        # FACE-IDENTITY GATE: compare the convention-matched signed pair BEFORE orient_normal.
+        # Under the active face-command contract this is achieved raw mount +Y/A versus demanded
+        # raw A.  ``orient_normal`` is sign-invariant and may orient the contact plane for impulse
+        # physics, but it must never turn the opposite rubber face into a scored hit.
+        face_achieved, face_target = face_tracking_pair(self)
+        if self.cfg.face_command:
+            # A-frame commands become the external physical-B demand through the exact per-env
+            # mount sign already materialized by _compute_racket_state.  Recover that +/-1 without
+            # indexing the motion a second time; invalid/degenerate rows fail inside the gate.
+            mount_sign = torch.where(
+                torch.sum(self.racket_normal_w * self.racket_normal_raw_w, dim=-1, keepdim=True)
+                >= 0.0,
+                torch.ones_like(self.racket_normal_w[:, :1]),
+                -torch.ones_like(self.racket_normal_w[:, :1]),
+            )
+            target_physical_b = self.target_normal_cmd * mount_sign
+        else:
+            target_physical_b = self.racket_target_normal_w
+        signed_face_ok, _signed_face_dot = _vb.signed_face_hemisphere(
+            face_achieved,
+            face_target,
+            achieved_physical_b=self.racket_normal_w,
+            target_physical_b=target_physical_b,
+        )
+        # CAPTURE GATE: correct signed face, close enough at the strike frame, AND paddle moving
+        # INTO the ball along the oriented contact normal (a stationary/retreating wall-block scores
+        # nothing — verify (c)3).
         n_or = _vb.orient_normal(n_face, v_in, v_r)
         approach = torch.sum(v_r * n_or, dim=-1)
         gate = (
             exact_strike
+            & signed_face_ok
             & (pos_err < float(self.cfg.vb_capture_radius))
             & (approach > float(self.cfg.vb_min_approach_speed))
         )

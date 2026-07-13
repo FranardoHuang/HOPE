@@ -20,6 +20,30 @@ The final behavioral arbiter remains the Agibot vendor MuJoCo Gate3/Gate3B runti
 clean K100 MuJoCo paper is an earlier checkpoint/seed instrument, not a substitute for that
 gate.
 
+## 2026-07-13 signed-face post-audit
+
+This completed paper used the historical analytic scorer whose `orient_normal` made the contact
+trajectory invariant to `n/-n`. Its `evaluation_contract_exact=true` flag only described the then
+registered execution contract; it did **not** bind signed physical-face identity. The files remain
+immutable evidence of that old ruler, but parsed return cannot promote a checkpoint.
+
+Any paired rerun must keep this exact K100 schedule/checkpoint order while changing the scorer
+contract and output namespace. The formal lane must:
+
+1. load a complete `mount_normal_sign_per_clip` from ONNX metadata and require its length to equal
+   the clip count;
+2. compare achieved/target raw-A normals and require the selected achieved/target physical-B faces
+   to point toward `+X`, all before `orient_normal`;
+3. bind the schema-2 virtual-return scorer source/contract SHA into the execution contract;
+4. emit per-attempt `signed_face_exact`, `signed_face_dot`, signed error and physical-B-facing
+   fields for actual and counterfactual rows;
+5. retain the old score as a labelled legacy column rather than overwrite it.
+
+Missing face metadata fails closed. `--allow-inexact-contract` may reproduce the old unsigned-plane
+diagnostic only when the result is marked `signed_face_exact=false` and
+`evaluation_contract_exact=false`; it cannot enter the stability decision. Source/unit verification
+does not authorize a judge run, trainer change, or deployment.
+
 ## Frozen question and known limitation
 
 The four fresh formal-target `SZ` seeds use `model_4000.pt` and the **byte-identical** K100

@@ -58,6 +58,12 @@ v5 已经完成，PID/PGID `1471093`；**不要重跑/覆盖**。full result：7
 `c299b7a04417e855005ad315b40203204bb0cc192398d83980179b212e6bef53`。小账本是
 `configs/motion_video_gmr_phase_counterfactual_results_20260711.json`。
 
+**2026-07-13 诚实门边界：**上述 v5 绑定旧 `41fe2a07...64d11` scorer；它的
+`orient_normal` 把 `n/-n` 当成同一平面，所以所有 virtual-return/phase/library 列只保留为
+历史 unsigned-plane 诊断，不得晋级动作。安全、ground、frame witness 子树仍按原 SHA 有效。
+不要重写旧结果或用当前源码冒充复现；未来回球筛卷必须新 prereg，明确传入 raw-A achieved、
+raw-A target、clip id 和 `[+1,-1]` physical-B 映射，并在 plane orientation 前做 signed-face 门。
+
 ## 3. 结果验收
 
 必须同时检查：

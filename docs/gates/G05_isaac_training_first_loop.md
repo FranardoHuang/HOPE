@@ -1407,3 +1407,30 @@ seed4 特定结果，其他三 seed 物理 root fall 为 0。
 下一步是 `n/-n` 负控、signed-face scorer 修正和同卷复判。这仍是每题重置的
 Python BankExam，不是 physical ball、连续恢复或厂商 Gate3/Gate3B；G05 保持 `Partial`。
 详细证据见 [Fresh SZ 稳定性实验](../experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)。
+
+### 2026-07-13 signed-face 训练信用门：源码闭合，行为仍待 canary
+
+seed3 的 content-bound TensorBoard 摘要把“旧解析尺有病”推进到训练信用本身：正手法向误差从
+iteration 2000 的 `167.49°` 继续到 13800 的 `174.02°`，signed normal pass 一直为 `0`，但训练内
+virtual return 同期从 `.692` 升到 `.965`；反手在 13800 为 `5.86°/.996/.967`。同一 step 的三项
+全局 virtual reward tag 合计 `.4615195`，是全局 normal reward tag `.15587743` 的
+`2.960784637×`；但这些 tag 汇总所有环境和正反手，不能归因或量化正手错面的 reward 份额。实际
+`env.yaml` 已绑定 `virtual_ball/vb_metrics_only=true` 与 `20/30/5/5` 四项权重。结合 face-blind
+源码路径，只支持“wrong-face FH states were treated as reward-eligible by the active face-blind reward
+path”，不支持“正手错面实际领取了多少”或把反面行为归因于单一 reward；完整 tag、step/value、
+event/training-contract/env.yaml/launch/nohope.diff SHA 与 source-commit claim 证据边界见
+[拍面符号卷宗](../experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)。
+
+当前 feature source 已把 `hope_commands._vb_evaluate` 的 `vb_fired` 改为：先用统一
+`face_tracking_pair` 比较有符号拍面，再要求 achieved/target physical-B 都严格朝 `+X`，最后才允许
+`orient_normal` 进入冲量计算。所有 `virtual_pass_net/landing/spin` 都消费这个门后的 one-shot
+mask。Torch oracle 同步增加 finite/non-degenerate、strict hemisphere 和 physical-B 门；NumPy
+`n/-n` 负控证明出球/落点仍相同而错面不能触发记分。
+
+focused 回归为 `38 passed, 1 skipped`，顶层 broad 为 `546 passed, 9 skipped`；另一个排除
+Torch/Hydra import-bound 文件的 training dependency-light 组合为 `381 passed, 21 skipped`。
+这些不是 Isaac 行为结果。本节没有启动 Isaac、Pod、trainer、judge 或真机。下一个 fresh 双侧
+canary 必须绑定新 source/hard-contract SHA，
+验证错面样本不再得到 `vb_fired`/virtual reward，并观察正手 signed normal 与 return 是否共同学习；
+它按[单-seed 机制漏斗](../experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)先买机制证据，
+不先复制四个 seed。在此之前不能写“训练行为已修复”，G05 继续 `Partial`。

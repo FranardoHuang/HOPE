@@ -68,6 +68,18 @@ class RetargetError(RuntimeError):
     """Raised when a contract or runtime input is not exact enough to score."""
 
 
+SIGNED_FACE_CONTRACT_V1 = {
+    "achieved_and_target_frame": "mount_plusY_A",
+    "external_frame": "physical_striking_face_B",
+    "mount_normal_sign_per_side": {"forehand": 1.0, "backhand": -1.0},
+    "identity_target_physical_B": [1.0, 0.0, 0.0],
+    "identity_gate": (
+        "dot(achieved_raw_A,target_raw_A)>0_and_achieved_physical_B.x>1e-6_and_"
+        "target_physical_B.x>1e-6_before_orient_normal"
+    ),
+}
+
+
 @dataclass(frozen=True)
 class Question:
     question_id: str
@@ -267,6 +279,8 @@ def validate_manifest(path: Path, expected_sha256: str) -> dict[str, Any]:
     for key, expected in expected_scorer_values.items():
         if scorer.get(key) != expected:
             raise RetargetError(f"virtual_return_contract.{key} changed")
+    if scorer.get("signed_face_contract") != SIGNED_FACE_CONTRACT_V1:
+        raise RetargetError("virtual_return_contract.signed_face_contract changed")
 
     promotion = plan.get("promotion_contract")
     if not isinstance(promotion, dict):
@@ -428,6 +442,13 @@ def search_motion_question(
         return []
     yaw_grid = plan["search_contract"]["tiers"][tier]["yaw_grid_deg"]
     bounds = plan["transform_contract"]["station_bounds_m"]
+    signs = plan["virtual_return_contract"]["signed_face_contract"][
+        "mount_normal_sign_per_side"
+    ]
+    clip_id = 0 if question.side == "forehand" else 1
+    target_normal_raw_a = np.array(
+        [signs[question.side], 0.0, 0.0], dtype=np.float64
+    )
     proposals: list[dict[str, Any]] = []
     for frame_row in asset["per_source_frame"]:
         if frame_row.get("hard_safe") is not True or frame_row.get("candidate_eligible") is not True:
@@ -448,7 +469,9 @@ def search_motion_question(
                 ball_spin=question.ball_spin_w,
                 racket_pos=question.ball_pos_w,
                 racket_vel=velocity,
-                racket_normal=normal,
+                racket_normal_raw_a=normal,
+                target_normal_raw_a=target_normal_raw_a,
+                clip_id=clip_id,
                 pos_err=pos_err,
             )
             if not outcome.landed_ok:
@@ -552,6 +575,7 @@ def _certificate_index(bundle: dict[str, Any] | None) -> dict[str, Any]:
 
 def build_scorer(plan: dict[str, Any]) -> VirtualReturnScorer:
     contract = plan["virtual_return_contract"]
+    signs = contract["signed_face_contract"]["mount_normal_sign_per_side"]
     physics_path = _verify_binding(contract["physics"], "virtual return physics")
     geometry = contract["table_geometry"]
     return VirtualReturnScorer(
@@ -567,6 +591,7 @@ def build_scorer(plan: dict[str, Any]) -> VirtualReturnScorer:
             rollout_h=float(contract["rollout_h_s"]),
             rollout_steps=int(contract["rollout_steps"]),
         ),
+        mount_normal_sign_per_clip=(signs["forehand"], signs["backhand"]),
     )
 
 

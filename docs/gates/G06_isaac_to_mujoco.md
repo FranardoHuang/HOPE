@@ -1244,3 +1244,25 @@ checkpoint 进行 kinematic replay → open-loop action → external-observation
 closed-loop 归因。该 Python BankExam 仍不是 Agibot vendor Gate3/Gate3B runtime，所以 G06 保持
 `Partial`。详见 [稳定性实验](../experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) 和
 [拍面符号取证](../experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)。
+
+### 2026-07-13 signed-face analytic ruler source gate
+
+feature source 已把 analytic scorer 升为 schema 2：formal 路径必须从 ONNX metadata 读取完整
+`mount_normal_sign_per_clip`，把 achieved/target raw-A 通过每 clip sign 绑定到 opponent-facing
+physical-B，并在 `orient_normal` 前要求 strict signed hemisphere 与 achieved/target B.x `>1e-6`。
+结果与 strike CSV 同时写 signed-face exactness、dot/error 和 physical-B-facing 字段；scorer source、
+venue config、参数、sign table 与门限进入 execution-contract SHA。缺 metadata、非法 sign 或长度不符
+均 fail closed。
+
+只有显式 `--allow-inexact-contract` 可保留旧 unsigned-plane 诊断；它必须写
+`signed_face_exact=false` 与 `evaluation_contract_exact=false`，不能晋级。phase/spatial 动作筛卷调用点
+也已迁移到 raw-A achieved/target + clip-id；历史 v5 和 q50 仍绑定旧 scorer，只能作为 paired legacy
+列，不能被新源码追认。`n/-n` 负控锁定了根因：冲量与落点逐值相同，但新门只让正确 physical face
+contact/return。
+
+本地 focused source/unit 回归为 `38 passed, 1 skipped`，顶层 broad 为 `546 passed, 9 skipped`；
+没有运行 MuJoCo/Isaac/Pod/judge/vendor
+Gate3/Gate3B。下一步是在同一 immutable K100/同 checkpoint 下生成新 execution contract 和不覆盖的
+paired result，再按 kinematic replay → open-loop action → external-observation closed-loop → native
+closed-loop 分层归因。analytic scorer 即便通过也仍是 diagnostic，不替代 physical return 或 vendor
+runtime；G06 继续 `Partial`。

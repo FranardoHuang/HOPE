@@ -1,12 +1,12 @@
 # EXP-P1-FACE-SIGN-FORENSIC — 高解析上台率是否隐去了拍面反号？
 
-- 状态：running
+- 状态：source fix implemented；fresh runtime canary 与同卷复判 pending
 - 工作类型：forensic（只做取证复核，不改变训练配方）
 - 阶段/轴：共用判分基础 + 课程阶段 1 / 拍面符号
 - 人类负责人：franco
 - 执行者：Codex
-- 工作分支：`Franco_codex/face-sign-forensic`（尚无可引用的 main commit）
-- 最高证据等级：E4 diagnostic；修正后卷未跑
+- 工作分支：`Franco_codex/signed-face-honesty-20260713`（尚无可引用的 main commit）
+- 最高证据等级：E4 diagnostic + source/unit gate；修正后训练/考卷未跑
 - 最后复核：2026-07-13
 
 共享缩写见 [术语与人话对照](../../DEFINITIONS.md)。
@@ -41,6 +41,64 @@ model-4000 配对 K100 把反例收紧为同 checkpoint/同题同卷的直接矛
 `0/50`，法向差为 `172.33°/174.35°`。因此旧 parsed return 在正手上已不具备
 checkpoint 晋级资格；这不需要等新训练终档才能判断。
 
+### 训练信用冲突的原始曲线
+
+seed3 的 TensorBoard event 另给出一条独立于终档判卷的机制一致性证据。content-bound 小摘要是
+[`phase1_fresh_SZ_seed3_training_face_reward_forensic_20260713.json`](../../../configs/phase1_fresh_SZ_seed3_training_face_reward_forensic_20260713.json)：
+文件 SHA `68557a419b3482ab481955a0b95424ea0dd0d38aa52ed26f2ee9b52cfd1106c5`、canonical
+content SHA `cdd33747b5feb552c6879057c6e7dcdbe28ac4d1723e67cbae88f2fc193daec7`；它绑定原始 event
+SHA `c1578922...25e`、训练合同 SHA `3a3b3d95...b9972` 与实际 `params/env.yaml` SHA
+`4dfb829e...a70051`，没有把约 518 MB 的 event 文件提交进 Git。冻结的 `env.yaml` 明确记录
+`commands.racket_target.virtual_ball=true`、`vb_metrics_only=true`，以及
+`virtual_pass_net/virtual_landing/virtual_spin/racket_normal` 权重 `20/30/5/5`。同一 run 的 launch
+SHA `20fbb3cc...7cbf0` 还绑定了选臂命令、`vb_metrics_only=true`、`racket_normal=5` 与
+`face_guidance=0`；当时 267-byte `git/nohope.diff` SHA `8d873bdd...8c65f2` 记录 05:40 工作树
+clean/no diff。launch 不含 HEAD，因此 `6d93bcb...480b` 只能记为 scheduler/saved-lineage claim；
+no-diff 证据不能独立证明运行时 HEAD 或进程实际加载的源码字节。
+摘要用 TensorBoard `EventFileLoader` 解码 tensor/simple value，九个预定 iteration 都是 exact-step
+命中，不使用 nearest fallback。
+
+| iteration | 正手有符号法向误差 | 正手 normal pass | 正手训练内解析回台 | 反手法向误差 / pass / 回台 |
+| ---: | ---: | ---: | ---: | ---: |
+| 1000 | `120.17°` | `.000` | `≈0` | `9.15° / .885 / .686` |
+| 2000 | `167.49°` | `.000` | `.692` | `6.45° / .976 / .938` |
+| 4000 | `172.44°` | `.000` | `.897` | `7.63° / .955 / .943` |
+| 8000 | `173.04°` | `.000` | `.940` | `6.33° / .995 / .969` |
+| 13800 | `174.02°` | `.000` | `.965` | `5.86° / .996 / .967` |
+
+iteration 13800 时，全局 `Live/Reward/*` tag 中
+`virtual_landing + virtual_pass_net + virtual_spin = .4615195`，而 `racket_normal = .15587743`，
+由冻结值复算为 `2.960784637×`。这些 tag 汇总所有环境和正反手，**不能**把这笔 reward 归因到
+正手错面样本，也不能量化正手错面贡献了多少。结合有符号正手指标、冻结运行配置和旧 face-blind
+源码路径，支持的最窄结论是：**wrong-face FH states were treated as reward-eligible by the active
+face-blind reward path**（正手错面状态被现役 face-blind reward 路径视为可得奖）。这不是“回球奖励
+单因素导致反面”的因果估计；reward、policy 状态和训练 iteration 同时变化，fresh 配对 canary 才能
+回答修门后的学习行为。
+
+## 源码修正与边界
+
+本分支把“无向冲量平面”和“有向物理拍面”拆开：
+
+1. NumPy 解析 scorer 在任何 `orient_normal` 前，先比较 achieved/target raw mount `+Y`（A）法向，
+   再用每 clip `[+1,-1]` 映射到外部 physical face B；只有 `dot(A_achieved,A_target)>0`
+   且 achieved/target physical-B 都严格 `x>1e-6` 才能接触记分。
+2. `n/-n` 负控锁定旧病：两者的冲量、出球和落点仍逐值相同，但只有正确拍面可 `contacted/landed_ok`；
+   错面必须在 plane orientation 前失败。
+3. Isaac `_vb_evaluate` 用同一 convention-matched face pair 和 physical-B `+X` 门生成
+   `vb_fired`；`virtual_pass_net/landing/spin` 因而不能再消费错面样本。源码门不是训练行为通过，必须
+   从该源码 fresh 起跑。
+4. MuJoCo formal analytic scorer 必须从 ONNX metadata 读取完整
+   `mount_normal_sign_per_clip`；缺失/非法/长度错误 fail closed。只有显式
+   `--allow-inexact-contract` 能跑旧 unsigned-plane 诊断，而且结果写
+   `signed_face_exact=false` / `evaluation_contract_exact=false`，不得晋级。
+5. 动作 phase/spatial screen 的调用点已迁到 raw-A + target-A + clip-id 接口。历史 v5 和旧 q50
+   仍绑定旧 scorer，不能倒改成新证据；未来 screen 要新 prereg/source SHA。
+
+本地 focused 回归为 `38 passed, 1 skipped`，顶层 broad 为 `546 passed, 9 skipped`；另一个排除
+Torch/Hydra import-bound 文件的 training dependency-light 组合为 `381 passed, 21 skipped`。focused
+skip 与未收集的运行时模块都源于宿主没有 Torch/Isaac/Hydra，不是行为通过；Isaac canary 尚未执行。
+没有访问 Pod、启动 judge/simulator、改训练或运行真机。
+
 ## 预注册决定规则
 
 - 为旧 K100 结果生成 content-bound signed-face 诊断表，保留 raw-A 有符号误差。
@@ -54,6 +112,16 @@ checkpoint 晋级资格；这不需要等新训练终档才能判断。
 Fresh `SZ model_2000` 的已有成绩仍保留为“解析诊断卡”，但在 signed-face honesty gate
 通过前，不得称为 accepted baseline，也不得用来证明 physical return。
 同样，model-4000 seed2/3 的 `.88/.98` 只保留为旧 scorer 的失真证据，不是好 policy 候选。
+
+下一步闭环顺序固定为：
+
+1. 按[单-seed 机制漏斗](EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)用带新 hard-contract/source SHA
+   的小型 fresh 双侧 canary 验证错面不会获得 `vb_fired` 和三项 virtual reward；必须同时看到正手
+   signed normal/return 的学习曲线，源码测试不能代替，也不要先复制四个 seed。
+2. 用同一 immutable K100、同 checkpoint、带 exact face metadata 的新 scorer 复判历史模型；旧
+   scorer 结果保留为 paired legacy column，不覆盖。
+3. 再做 Isaac/MuJoCo physical/analytic 2×2 归因；analytic 即便修正也只可诊断，最终仍由 vendor
+   Gate3/Gate3B 判定。
 
 证据入口：[Fresh SZ 稳定性实验](EXP-P1-FRESH-SZ-STABILITY.md)、
 [model-4000 aggregate](../../../configs/phase1_fresh_SZ_model4000_seed_stability_q50_aggregate_result_20260713.json)、

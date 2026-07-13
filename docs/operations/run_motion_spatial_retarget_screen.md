@@ -1,6 +1,6 @@
 # Run the air-swing spatial-retarget proposal screen
 
-Date: 2026-07-12
+Date: 2026-07-12; signed-face source rebind 2026-07-13
 Scope: CPU-only, no GPU/Pod training and no real robot.  This operation proposes
 candidate phases/stations; it does not approve a motion.
 
@@ -8,15 +8,24 @@ candidate phases/stations; it does not approve a motion.
 
 The preregistration is
 `configs/motion_video_spatial_retarget_prereg_20260712.json`, SHA-256
-`d8c918acc9277ff9ec094db46f4e08e7634c3879fb332663bdd27f95212e5a9f`.
+`69bdeabc9b5a934143c52ec6a7fe28ab0a0be6573b2f14f0748e49063c69eb62`.
+The earlier `d8c918ac...5a9f` preregistration was never executed and is revoked: it bound the
+historical unsigned-plane scorer that cannot distinguish `n` from `-n`. Do not run or reconstruct
+that SHA.
 It consumes the exact 792,241-byte v5 result (`c299b7a0...`) and all ten motions.
 Franco backhand-loop B/C are ranked first because v5 found intrinsic evidence,
 but no motion is omitted.
 The proposal ID also binds the source-motion SHA and predecessor-result SHA, so
 the same asset name/frame cannot reuse a certificate after its bytes change.
-The scorer implementation is pinned at `41fe2a07...64d11`, together with the
+The scorer implementation is pinned at `9d01da15...0f5ec`, and the proposal tool at
+`43eccb43...289b4`, together with the
 venue physics and explicit `9.5 cm` capture / `0.3 m/s` approach / `10 ms x 100`
 rollout constants.
+
+Returnability also binds the [signed-face contract](../interfaces/racket_contact_geometry.md):
+forehand/backhand map physical B to raw A with `[+1,-1]`; achieved and demanded raw-A normals must
+share a strict signed hemisphere and both selected physical-B normals must face `+X` before
+`orient_normal`. The latter remains impulse-plane math only. A face-blind result is not a proposal.
 
 For one `(motion, immutable question, source frame)` candidate the only allowed
 edit is one transform applied atomically to the **whole** trajectory:
