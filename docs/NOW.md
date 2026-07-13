@@ -15,8 +15,10 @@
 - 最接近正式目标的是从随机初始化训练到第 2000 次迭代的零关节摩擦配方。四个独立初始化在
   每份 100 题中的解析合法落台数为 `83、100、100、20`，稳定性失败；正手拍面判分还可能把
   反面判绿，因此旧高分只作诊断。
-- 当前成绩卡是 **Python BankExam 单拍解析诊断，不是 Gate3**。2026-07-13 没有新增训练、
-  仿真行为或真机成绩；下一项会改变阶段 1 判断的证据是修正拍面正负判分后的同卷结果。
+- 当前成绩卡是 **Python BankExam 单拍解析诊断，不是 Gate3**。2026-07-13 没有新增可晋级的
+  仿真行为或真机成绩；fresh 广度池已完成一次运营裁剪：16 臂中 8 臂在保留并验证最新
+  checkpoint 后精确停止，另外 8 臂继续。它不改变 q10/q50 的科学判决规则。下一项会改变阶段 1
+  判断的证据仍是修正拍面正负判分后的同卷结果。
 - 部署侧的 planner-policy exact tuple 源码已通过 portable Release 和 latest-main 本地回归；
   这解决了同 tick base/target 因果配对与源码可构建问题，但 ROS/Jazzy/AimRT、backend first tick、
   厂商 MuJoCo 行为和真机仍未运行。
@@ -212,6 +214,12 @@ policy 输出 31 个关节目标，PPO 根据 Reward 改进它，独立考卷再
 第 4000 次迭代的后续卷尚无新行为结果，详见
 [稳定性实验](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)。
 
+2026-07-13 的运行态是：formal `SZ` seed1/2/4 与五条反复塌陷的诊断臂已按负责人运营决定停止，
+formal seed3 和七条诊断臂继续。停止前均保留 finite、schema-3、fresh-lineage checkpoint，并只向
+各自登记 PGID 发信号。该动作释放算力，不构成 q10 正式判死、setting 晋级或新成绩；完整曲线、
+checkpoint SHA 与信号边界见
+[拍面×plant 广度矩阵](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md)。
+
 ## 5. 阶段 2：虚拟球的不同到达状态
 
 ### 5.1 目标和实验结构
@@ -300,7 +308,8 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 - **[1｜P0] 拍面正反与解析判分。** 责任人 franco；执行者 Codex；下一证据：同卷有符号拍面表、
   `n/-n` 负控和修正后结果。[实验](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)
 - **[4｜P0] 第 4000 次迭代四初始化后续卷。** 责任人 franco；执行者 Codex；持久监督器 source gate
-  已独立审绿，下一证据是 Linux fake-runner 冒烟后完成同一张 100 题卷。
+  已独立审绿，下一证据是 Linux fake-runner 冒烟后，用停止前已内容绑定的四份 checkpoint 完成
+  同一张 100 题卷；trainer 停止不改变这份卷的输入。
   [实验](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)
 
 ### 部署验证

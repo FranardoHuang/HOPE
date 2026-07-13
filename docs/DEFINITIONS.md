@@ -21,6 +21,7 @@
 | `seed` | 随机种子。配方不变、只换 seed，用来看训练是否稳定，不许只挑最好的 seed。 |
 | `checkpoint` / `ckpt` | 训练到某个迭代时保存的模型存档，例如 `model_2000.pt`。 |
 | `lineage` / 谱系 | 从初始模型、代码、资产到 checkpoint 的来源链。来源混了就不能声称严格单变量。 |
+| `PID / PGID` | `PID` 是单个进程编号；`PGID` 是进程组编号。管理长任务时只能从经核对的 launch sidecar 读取 exact 数值并检查组成员，不能用相似命令行模式猜所有权。 |
 | `fresh` / `causal continuation` | `fresh`=从零开始训，才可能成为新正式谱系；`causal continuation`=从旧 checkpoint 继续训，可看改动方向，但谱系不纯。 |
 | `v4rg` | 项目内部的第四版参考挥拍动作对（正手+反手）：已重新对齐到机器人坐标，未发现明显起始毛刺或支撑脚滑移。它是资产族名，不是训练算法名。 |
 | `v4rg_runtime_order_v3` | 当前 formal fresh setting 实际绑定的 v4rg 版本：schema-2、50 Hz，已迁移到 runtime body order。只写“v4rg”时只表示资产族，不足以复现 formal setting。 |

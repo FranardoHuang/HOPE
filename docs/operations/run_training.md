@@ -487,6 +487,15 @@ MuJoCo `frictionloss` equivalent), and causal plus `LZ/LP` remain inexact
 diagnostics. Generated inexact jobs carry only the whitelisted
 `--exam-extra --allow-inexact-contract` escape.
 
+2026-07-13 runtime note: after these curves existed, the human owner separately authorized an
+operational resource prune. Eight repeatedly collapsed trainer runs were stopped after checkpoint/
+contract/log preservation, while eight continued. This does **not** reinterpret the manifest as a
+q10 stopping protocol and does not change either `screen_only=true` or any q50
+`whole_arm_stop_allowed=false` field. The exact runtime decision and retained artifacts are in
+[EXP-P1-FACE-PLANT-SCALEOUT](../experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md); process ownership
+and exact-PGID procedure are in
+[run_on_runpod.md](run_on_runpod.md#已登记-phase-1-实验臂的算力释放).
+
 The checked-in curve worker requires `screen_policy` on every manifest,
 requires `schedule_k == 2 * attempts_per_side`, compares that schedule (and
 optional seed/noise constants) with every job, and records both the complete

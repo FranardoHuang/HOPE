@@ -480,7 +480,8 @@ the exact signal scope and all transaction hashes.
 Fresh SZ seed1 also closed its first exact checkpoint-selection q50. On one
 K=100, 50-per-side paper, the analytic virtual-return scorer gave model 2000 FH/BH/aggregate
 `0.66/1.00/0.83`, while model 4000 returned `0.00/1.00/0.50`; model 2000 is
-retained and the whole arm continues. Both evaluations are exact/fresh, but
+retained. The whole arm continued at that paper's decision time and was only later stopped by the
+separate 2026-07-13 operational resource decision. Both evaluations are exact/fresh, but
 all attempts finalized through a non-physical post-strike guard, so this is
 not a continuous or deploy-stability gate. The result is bound in
 `configs/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json`. Its fresh
@@ -1207,3 +1208,15 @@ failure and parent-observation-write failure are separately covered: all return 
 reject restart and later inspect as exact running without a fatal. This is host source evidence only: Linux procfs has not yet been smoke-tested, the wrapper is
 not deployed, and no MuJoCo judge or score ran. It therefore closes neither the matched
 [q50/K100](../DEFINITIONS.md#q50-and-k100) result nor vendor Gate3/Gate3B. G06 remains `Partial`.
+
+### 2026-07-13 Phase-1 trainer 裁剪不改变 MuJoCo 证据门
+
+16 条 fresh 广度臂中的 8 条已按负责人后续运营决定精确停止并保留最新 finite、schema-3、
+fresh-lineage checkpoint；8 条继续。formal `SZ` seed1/2/4 trainer 虽已停止，但 model-4000
+四 seed checkpoint 在此之前已经通过 all-four readiness 并进入两 Pod 的
+`prepared_not_started` K100 runtime contract，因此后续 matched q50 输入没有变化。
+
+这次动作没有运行 MuJoCo judge、没有新 q50/physical/Gate3 分，也没有修改 q10 screen-only 或
+q50 `whole_arm_stop_allowed=false` 合同。停止运行不能替代 signed-face 诚实门、同一 checkpoint
+跨引擎归因、厂商 runtime `Gate3/Gate3B` 或标定 plant。运行与证据边界详见
+[拍面×plant 广度实验](../experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md)；G06 保持 `Partial`。

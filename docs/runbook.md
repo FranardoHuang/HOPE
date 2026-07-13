@@ -147,7 +147,9 @@ model_13599.pt ──play.py 原生导出(isaac venv,占一个 GPU 槽 ~4 分钟
 
 ## 运维杂项(都付过学费)
 
-- pkill 的模式会匹配到 ssh 远端 shell 自己的命令行 → 用方括号断字:`pkill -f "run_name=s1[_]"`。
+- 管理实验进程禁止 `pkill/killall` 或模式匹配批量信号：它会命中 ssh 远端 shell 或相似 run。
+  必须从经核对的 launch sidecar 读取 exact PID/PGID，先保全 checkpoint/contract/log，再按
+  [RunPod 精确停止流程](operations/run_on_runpod.md#已登记-phase-1-实验臂的算力释放)执行。
 - Isaac 退出码不可信(异常后仍 exit=0),判活/判死只看日志签名。
 - pod 没装 git-lfs:commit/checkout/push 钩子会"假失败"——`-c core.hookspath=/dev/null`
   + `GIT_LFS_SKIP_SMUDGE=1`;pull 被挡的三层:本地脏文件(stash 或备份后 checkout)、

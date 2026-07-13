@@ -2,10 +2,19 @@
 
 Status: prepared but not started. Both Pod audits, the all-four activation, both read-only
 `contract-check` calls and both no-clobber `prepare` calls completed on 2026-07-13 local time;
-no q50 judge, trainer signal, or robot command has run. This queue exists to
+no q50 judge or robot command has run, and those readiness/prepare transactions did not signal a
+trainer. This queue exists to
 separate delayed seed4 learning from persistent seed4 weakness at the next matched
 checkpoint. It does not authorize a training change, checkpoint promotion, deployment, or
 hardware.
+
+Later runtime note (2026-07-13): a separate human-owner resource decision stopped the live
+seed1/2/4 trainers after preserving later checkpoints. It did not come from this q50 contract and
+does not change `whole_arm_stop_allowed=false`. The four `model_4000.pt` inputs had already been
+content-bound by the readiness audits, remain on disk and are unchanged, so this prepared paper is
+still runnable after the already-reviewed supervisor passes its required Linux fake-runner smoke.
+Exact stop evidence is in
+[EXP-P1-FACE-PLANT-SCALEOUT](../experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md).
 
 The final behavioral arbiter remains the Agibot vendor MuJoCo Gate3/Gate3B runtime. This
 clean K100 MuJoCo paper is an earlier checkpoint/seed instrument, not a substitute for that
@@ -455,9 +464,10 @@ without changing the consumer/config/activation/runtime-contract bytes. Its exac
 failure states are in
 [the persistent-supervisor contract](../interfaces/q50_persistent_supervisor_contract.md).
 
-This section is a source procedure only. The supervisor has **not** been deployed and has not
-started either Pod's [q50/K100](../DEFINITIONS.md#q50-and-k100) evaluation. The feature branch must
-first enter `main`, and the deployed script/config hashes below must match that merge exactly.
+This section is a source procedure only. The supervisor source gate is in `main`, but the wrapper
+has **not** been deployed and has not started either Pod's
+[q50/K100](../DEFINITIONS.md#q50-and-k100) evaluation. A Linux fake-runner smoke remains mandatory,
+and the eventual deployed script/config hashes below must match `main` exactly.
 
 The reviewed files are:
 

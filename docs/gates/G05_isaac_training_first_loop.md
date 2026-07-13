@@ -899,8 +899,9 @@ That current execution-contract selection has already produced one early
 checkpoint result. Fresh SZ seed1 regressed on q10 from `0.90` at 2000 to
 `0.50` at 4000, then consumed one exact K=100 paper. Model 2000 returned
 FH/BH/aggregate `33/50,50/50,83/100`; model 4000 returned
-`0/50,50/50,50/100`. Model 2000 is retained, while the arm continues
-unmodified. Both cells were fresh/exact and had zero physical falls, but all
+`0/50,50/50,50/100`. Model 2000 is retained; the arm continued unmodified at
+that paper's decision time and was only later stopped by the separate 2026-07-13 operational
+resource decision. Both cells were fresh/exact and had zero physical falls, but all
 questions ended through the non-physical post-strike guard; this is isolated
 checkpoint selection, not recovery or deployment evidence. Bindings are in
 `configs/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json`.
@@ -966,8 +967,9 @@ remains `Partial`; existing analytic Isaac scores cannot be relabelled physical.
 The fresh SZ model-2000 four-seed exact MuJoCo q50 is also complete. Seeds 1/2/3/4 return
 `83/100`, `100/100`, `100/100`, and `20/100`; seed 4 has FH/BH=`0/50,20/50`, with zero
 physical falls. Median `.915` passes, but the preregistered worst-seed, spread and worst-side
-criteria fail, so the checkpoint evidence is not seed-stable. All trainers continue unchanged;
-the result authorizes neither stopping nor promotion. Later same-milestone curves must determine
+criteria fail, so the checkpoint evidence is not seed-stable. At this q50 decision time all trainers
+continued unchanged; the result authorized neither stopping nor promotion. The separate 2026-07-13
+owner resource decision later stopped seed1/2/4 without rewriting this paper. Later same-milestone curves determine
 whether seed 4 is delayed or persistently sensitive.
 
 ### Model-4000 four-seed matched paper preregistered (2026-07-12)
@@ -1343,3 +1345,24 @@ inspect as exact running; none can escape as a retryable launch error. The host 
 identity seam and still needs one Linux fake-runner source smoke before any real q50 process. No Pod
 deployment, judge, simulator, training mutation, process-control action or hardware command ran.
 G05 remains `Partial`.
+
+### 2026-07-13 Phase-1 运行池运营裁剪
+
+负责人明确批准把已显示持续塌陷的 fresh 运行停止，以便把算力换给
+[NOW 唯一队列](../NOW.md#统一工作队列唯一优先级账本)中更靠前且前置已满足的工作。16 条
+fresh 广度臂中精确停止 8 条：formal `SZ` seed1/2/4，以及诊断格 `SP` seed1/4、`LZ` seed1、
+`LP` seed1/2；其余 8 条继续运行。详细 q10 曲线、已知 q50、PGID、最后 checkpoint 与 SHA 见
+[拍面×plant 广度实验](../experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md)。
+
+这是负责人在结果出现后作出的**算力运营决定**，不是发射前预注册的统计停止规则。历史 manifest
+仍保持 q10 K20/每侧 10 题 `screen_only=true`，不能晋级；model-2000/model-4000 q50 合同中的
+`whole_arm_stop_allowed=false` 也不改写。因此不得把这次停止写成“q10 正式 reject 三个 formal
+seed”，不得隐藏已停止 seed，也不得用它给任何 setting 晋级。
+
+每臂信号前均保留最新日志/checkpoint，并验证文件名迭代号等于内嵌迭代号、`1,762,715` 个浮点
+元素且 `nonfinite=0`、schema-3、fresh lineage=1，以及 checkpoint ↔ 相邻 hard-contract SHA
+一致。TERM 未使这些 trainer 退出；确认没有 live child 或 Kit-lock holder 后，只向各臂 `.launch`
+登记的 PGID 发送 KILL，再核对该组消失和其余接受臂仍存活。没有使用 broad `pkill/killall`，没有
+向 worker/judge 或真机发信号。formal 四 seed 的 model-4000 checkpoint 早已内容绑定并通过
+readiness，所以已准备 K100 后续卷输入不变。这个运行处置不新增质量成绩，也不关闭训练稳定性、
+signed-face 或连续能力门；G05 保持 `Partial`。

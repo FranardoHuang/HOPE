@@ -1,11 +1,15 @@
 # EXP-P1-FRESH-SZ-STABILITY — 正式 setting 是否稳定？
 
 - 状态：blocked
-- Runtime 状态：`prepared_not_started`（model-4000 后续卷的 runtime contract 已生成，job 未启动）
+- Runtime 状态：`prepared_not_started`（model-4000 后续卷 runtime contract 已生成，持久监督器
+  source gate 已进入 main；Linux fake-runner smoke 与 job 均未启动）
+- Trainer 状态：seed1/2/4 已按 2026-07-13 负责人运营资源决定停止，seed3 继续；四份 model-4000
+  checkpoint 均已在停止前存在并通过 readiness，因此不改变后续卷输入
 - 阶段/轴：S1 / setting 与 seed 稳定性
 - 人类负责人：franco
 - 执行者：Codex
-- 最高证据等级：model-2000 为 E4；model-4000 只有 readiness/prepare 证据，尚无行为等级
+- 最高证据等级：model-2000 为 E4；model-4000 为 E1 启动源码门加 readiness/prepare 证据，
+  尚无行为等级
 - 最后复核：2026-07-13
 
 共享缩写见 [术语与人话对照](../../DEFINITIONS.md)。
@@ -28,6 +32,19 @@ PPO（批量策略优化）从零训练——能否在同一份不可变 MuJoCo 
 击球/上台列来自解析接触与落台推演，不是 physical ball 回放；拍面符号盲区见
 [Face-sign forensic](EXP-P1-FACE-SIGN-FORENSIC.md)。
 
+## 2026-07-13 trainer 资源裁剪边界
+
+负责人在查看 q50 与连续 q10 曲线后，另行决定不再为明显持续塌陷的 seed1/2/4 trainer 购买剩余
+迭代；seed3 继续运行。seed1/2/4 的最后保留 checkpoint 分别为 `model_12100.pt`、
+`model_13000.pt`、`model_12900.pt`，均在信号前验证 finite、schema-3、fresh lineage 与相邻
+hard-contract SHA。完整 checkpoint SHA、PGID、方向曲线和精确信号记录见
+[拍面×plant 广度矩阵](EXP-P1-FACE-PLANT-SCALEOUT.md)。
+
+这不是本实验预注册的停止规则。model-2000/model-4000 q50 合同中的
+`whole_arm_stop_allowed=false` 仍按原义保留，q10 也仍不能晋级；本次只记录负责人后续做出的算力
+运营决定。已准备的四 seed model-4000 K100 后续卷继续使用停止前已经内容绑定的四份 checkpoint，
+可判 seed4 4k 是晚熟还是持续弱，但不能把这次停止反写成 q50 授权。
+
 ## Model-4000 后续卷就绪状态（2026-07-13）
 
 - Pod1 seed1/3 与 Pod2 seed2/4 的 no-clobber readiness audit 已通过，file SHA 分别为
@@ -46,7 +63,8 @@ PPO（批量策略优化）从零训练——能否在同一份不可变 MuJoCo 
   `24 passed`，queue+consumer+supervisor 合计 `64 passed`。Linux `/proc` fake-runner 冒烟仍是
   真实 q50 前置；详见[启动执行子记录](../phase1_fresh_sz_model4000_q50_20260713.md)。
 - 这只完成了执行纸面准备，不是行为成绩。尚未运行 `run`、judge、aggregate，
-  也没有 trainer signal 或真机动作。
+  prepare 事务当时没有 trainer signal 或真机动作；后来的 seed1/2/4 trainer 运营停止是上节所述
+  独立决定，不来自该事务。
 
 证据：
 

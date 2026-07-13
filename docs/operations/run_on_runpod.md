@@ -149,6 +149,39 @@ printed instructions, not executed commands.  Current work does not authorize
 restoring old training; any later artifact recovery must first pass the
 schema-v3 canary and follow `NOW.md`.
 
+## 已登记 Phase-1 实验臂的算力释放
+
+只有人类负责人已经明确作出资源决定、且该臂属于当前任务获授权管理的范围时，才执行本节。它是
+进程所有权与证据保全流程，不是 q10 统计停止规则；`screen_only=true` 仍表示 q10 不能晋级，既有
+q50 合同中的 `whole_arm_stop_allowed=false` 也不会被本节改写。
+
+1. 从该臂的 `run.log.launch` 或经审计的 launch sidecar 读取 exact PID/PGID；同时核对 run name、
+   命令、训练 checkout 与预期 arm 一致。不得用命令行模式搜索结果代替所有权 sidecar。
+2. 保存完整日志和最新 checkpoint 路径/SHA。验证文件名迭代号等于 checkpoint 内嵌迭代号、全部
+   tensor finite、schema/lineage 正确，并确认相邻 `params/training_contract.json` SHA 与 checkpoint
+   内嵌值一致。任何一项失败都先保全和诊断，不发信号。
+3. 用进程表按**数值 PGID**列出该组，确认没有不属于本臂的 live child；检查共享 Kit lock 及其
+   holder，不删除任何 live holder 的锁。仍有 judge/worker/Kit 所有权不清时停止操作。
+4. 先向 exact group 发送 `TERM`，再按数值 PGID 复核。只有证据已落盘、组内成员仍属于本臂、
+   没有 live child/Kit-lock holder 且 TERM 确实不退出时，才允许向同一 exact group 发送 `KILL`。
+5. 最后验证该 PGID 已消失、checkpoint/log 没有被删除，且所有其他接受臂、worker、judge 和 GPU
+   状态仍符合清单。记录信号、最后 checkpoint、SHA 和继续运行的臂。
+
+Linux 命令骨架如下；`PGID` 必须来自已核对 sidecar，不能手填猜测：
+
+```bash
+PGID=<exact_numeric_pgid_from_launch_sidecar>
+ps -eo pid=,ppid=,pgid=,sid=,stat=,cmd= | awk -v g="$PGID" '$3 == g'
+fuser /workspace/.cache/ov/_cache.lock || true
+kill -TERM -- "-$PGID"
+# 复核上述证据和组成员；只有全部条件仍成立且 TERM 不退出时：
+kill -KILL -- "-$PGID"
+```
+
+严禁 `pkill`、`killall`、`pgrep -f` 后批量发信号或任何 broad pattern kill。真实机器人进程不在本节
+授权范围内。2026-07-13 的 8 臂实际记录见
+[Phase-1 拍面×plant 广度实验](../experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md)。
+
 ## Hard Rules (summary — full list in the pod README)
 
 1. `/root/` is the ephemeral container disk (wiped on restart). Everything goes under `/workspace`.
@@ -178,9 +211,10 @@ schema-v3 canary and follow `NOW.md`.
    enough under flaky connections; use `setsid nohup <cmd> </dev/null > log 2>&1 &` (the boot-lock
    wrapper does this for you). Judge success by artifacts (checkpoints/ONNX on disk), never by the
    session surviving.
-3. **pkill self-match kills your own session.** `ssh pod 'pkill -f myscript'` matches the ssh
-   command line itself → session dies mid-command with exit 255 and later commands silently never
-   run. Always bracket the first char: `pkill -f "[m]yscript"`.
+3. **Never use broad process-pattern signals for managed experiments.** `pkill -f` can match the
+   ssh command itself or an unrelated arm with a similar run name. Read the owned PID/PGID from a
+   verified launch sidecar, inspect that exact numeric group, and follow the evidence-preserving
+   TERM→conditional-KILL procedure above. `pkill`/`killall` are not accepted substitutes.
 4. **A SIGKILL'd Kit leaves an orphaned cache lock that hangs every later boot.** Symptom: a lone
    job freezes at the AutoNode-registration boot phase forever. Check `fuser
    /workspace/.cache/ov/_cache.lock` — no holder = orphaned; `rm` it and relaunch. (A lock held by

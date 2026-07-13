@@ -13,6 +13,12 @@
 
 ## 2026-07-13
 
+- Phase-1 fresh 广度池完成一次负责人批准的运营裁剪：16 臂中 8 臂在保留日志并验证最后
+  checkpoint 的迭代、`1,762,715` 个浮点元素 finite、schema-3、fresh lineage 与相邻合同 SHA 后，
+  只按各自登记 PGID 停止；8 臂继续。TERM 未退出时仅在确认无 live child/Kit-lock holder 后对同一
+  exact PGID 使用 KILL，没有 broad kill、worker/judge 信号或真机命令。这不是预注册 q10/q50
+  停止结论，旧 `screen_only`/`whole_arm_stop_allowed=false` 语义不变；完整曲线、PGID 和 checkpoint
+  SHA 见[拍面×plant 广度实验](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md)。
 - exact planner-policy tuple 源码已在 latest-main 集成候选中闭合：23 项有效源码/配置逐字节匹配
   `c0a8e46`，portable Release 为 focused `40/40`、native `233 passed + 5 optional skips`，主线本地
   回归为 planner `180 passed, 2 skipped`、serve `39 passed`、root `521 passed, 9 skipped`。这只关闭
@@ -35,8 +41,9 @@
   已物化（activation file `9dea76c2...ce704`，content `eaa92ca2...aa4fb`），两 Pod
   `contract-check` 通过。随后两份 no-clobber runtime contract 已完成 `prepare`；Pod1/Pod2
   file SHA 分别为 `2b76a5a...8201e`、`dbecc102...d1c9b`。当前仍是
-  `prepared_not_started/jobs_started=0/auto_start=false`，没有 run、judge、新分、trainer signal
-  或真机动作；还缺可审计的常驻父 supervisor。详见
+  `prepared_not_started/jobs_started=0/auto_start=false`，没有 run、judge、新分或真机动作；该
+  readiness/prepare 事务当时未发 trainer signal，后续 8 臂运营停止是本节首条记录的独立决定。
+  持久监督器 source gate 后续已审绿，仍缺 Linux fake-runner smoke 与正式 job。详见
   [Fresh SZ 稳定性实验](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)。
 - `model_4000` 同卷启动新增一次性、无覆盖的持久监督器：父进程只在核对 PID=PGID、procfs 身份、固定环境和完整 SHA 闭包后发布不可逆 token；token 可见后的超时、证据 `stat` 或临时清理异常都只能报告 committed-pending，不能产生重试权限。supervisor+queue+consumer 为 `64 passed`；这仍是 host 源码门，Linux/Pod 与 MuJoCo judge 尚未运行。详见[执行卷宗](experiments/phase1_fresh_sz_model4000_q50_20260713.md)。
 - Native MuJoCo feasibility/implementation 已确认为 P0，但不阻塞几天内 `Gate3-D0`。off-main

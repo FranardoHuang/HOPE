@@ -1,7 +1,8 @@
 # Phase-1 Fresh Lineage And Causal Continuations (2026-07-11)
 
-Status: the full 179-D exact construction smoke passed. Four matched causal continuations and two
-independent fresh 17,000-iteration seeds are live across all six GPUs at fixed training checkout
+Status: the full 179-D exact construction smoke passed. The 28 accepted run lineages now comprise
+12 causal runs at terminal, 8 fresh runs stopped by a 2026-07-13 human-owner resource decision and
+8 fresh runs still live at fixed training checkout
 `6d93bcb16c422a2f42748c2dc99432559653480b`. Every arm reached its first PPO iteration and wrote a
 checkpoint whose embedded schema/SHA/lineage flag matches its adjacent hard contract. Training and
 formal evaluation are not complete, so this is not a claim that G05 or G06 is done.
@@ -327,9 +328,11 @@ preregistered exact q50 without stopping the trainer. On one clean K=100 schedul
 `7dc6af82...ff3e`, 50 per side), model 2000 returned FH/BH/aggregate
 `33/50,50/50,83/100`; model 4000 returned `0/50,50/50,50/100`. Both results are fresh lineage,
 `evaluation_contract_exact=true`, finite and bound to the same schema-3 contract
-`3a3b3d95...b9972`. Model 2000 is therefore the retained checkpoint inside this frozen pair, while
-the whole seed-1 arm continues unmodified. All 100 questions in both cells finalized through the
-evaluator's non-physical post-strike tracking guard (`guard_reset=true`, `physical_fall=false`), so
+`3a3b3d95...b9972`. Model 2000 is therefore the retained checkpoint inside this frozen pair; the
+whole seed-1 arm continued unmodified at that paper's decision time and was only later stopped by
+the separate 2026-07-13 operational resource decision. All 100 questions in both cells finalized
+through the evaluator's non-physical post-strike tracking guard (`guard_reset=true`,
+`physical_fall=false`), so
 this isolated one-question paper is not continuity or deploy-stability evidence. The complete
 binding is `configs/phase1_SZ_seed1_2000_vs_4000_q50_result_20260711.json`.
 
@@ -340,7 +343,7 @@ falls. Isaac therefore gives delta zero and does not reproduce MuJoCo's
 `+0.33` model-2000 advantage. The preregistered final tie-break names the
 earlier checkpoint only after a complete Isaac tie; that is not independent
 cross-engine support. Model 2000 remains the MuJoCo-selected checkpoint inside
-this frozen pair, the arm continues, and the cross-engine/formal deployment
+this frozen pair; the later trainer stop does not change that stored pair, and the cross-engine/formal deployment
 ranking gate stays open. Full runtime/scorecard/ledger hashes are in
 `configs/phase1_SZ_seed1_2000_vs_4000_q50_isaac_result_20260711.json`.
 
@@ -581,6 +584,23 @@ separate PhysX/MuJoCo adapters and a fresh shared-face `Z/C x 2 seed` axis befor
 plant claim. See `docs/research/phase1_plant_semantics_repair_2026-07-11.md` and
 `configs/phase1_plant_semantics_repair_prereg_20260711.json`.
 
+### 2026-07-13 operational resource disposition
+
+After q50 and repeated q10 milestones were available, franco explicitly approved stopping clearly
+collapsed runs so the released GPUs could take higher-priority work. This post-result operational
+decision stopped formal `SZ` seed1/2/4 and diagnostic `SP` seed1/4, `LZ` seed1, `LP` seed1/2.
+Formal `SZ` seed3 and seven diagnostic arms remain live. It is not a preregistered statistical stop,
+does not change q10 `screen_only=true`, and does not rewrite either model-2000 or model-4000 q50
+`whole_arm_stop_allowed=false`.
+
+Before each exact-PGID signal, the latest checkpoint/log/adjacent contract were retained and
+verified for filename/embedded iteration equality, 1,762,715 finite floating elements, schema 3,
+fresh lineage and hard-contract SHA. TERM did not exit those eight trainers; only after confirming
+no live child or Kit-lock holder did the operator send KILL to the same recorded PGID. No broad
+pattern signal, worker/judge signal, checkout mutation or real-robot command occurred. Full PGID,
+checkpoint SHA and curve evidence is in
+[`EXP-P1-FACE-PLANT-SCALEOUT`](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md).
+
 ## Remaining Gates
 
 ### Four-seed exact model-2000 q50 stability result (2026-07-12)
@@ -595,12 +615,14 @@ gate passes at `.915`, while worst seed `.20 < .65`, spread `.80 > .20`, and wor
 content SHA is `a756bf1d0e76d1016992ae241b935cf92b3c84ffd55fe503e7c199626d9c8ffd`;
 the content-addressed ledger is
 `configs/phase1_fresh_SZ_model2000_seed_stability_q50_a756bf1d0e76d1016992ae241b935cf92b3c84ffd55fe503e7c199626d9c8ffd.json`.
-All supervisors/children exited cleanly, and no trainer or resident curve worker was signalled.
-The four arms continue so later matched milestones can distinguish delayed learning from persistent
-seed sensitivity. This failure does not close plant, continuous, Gate 3, deploy, or robot gates.
+All supervisors/children exited cleanly, and no trainer or resident curve worker was signalled at
+the time of this q50 result. The four arms initially continued so later matched milestones could
+distinguish delayed learning from persistent seed sensitivity. A separate 2026-07-13 owner decision
+later stopped seed1/2/4 while preserving their checkpoints; this was not authorized by, and does not
+rewrite, the q50 paper. This failure does not close plant, continuous, Gate 3, deploy, or robot gates.
 
-1. Keep the 28 accepted arms (currently four terminal plus 24 live) and all
-   live cadence workers under exact-PGID monitoring; do not fast-forward either
+1. Keep the 8 remaining live fresh arms and all live cadence workers under exact-PGID monitoring;
+   retain the 12 terminal and 8 operationally stopped run artifacts; do not fast-forward either
    frozen training checkout while a local arm is alive.
 2. Finish the pre-registered checkpoint curves. Compare old/S1 only within the same family, seed and
    milestone; preserve peak checkpoints as well as terminal checkpoints.
