@@ -263,13 +263,17 @@ iteration 或 checkpoint。原 v6 `finalize-l1` 因此必须失败；下面的�
 
 ```
 
-不要手改或删除旧 D claim 后重做；这次 failure 只能通过下面的新版本单格合同处理。
+不要手改或删除旧 D claim 后重做。下面 v6r1 是当时冻结但后来被真实 validator 否决的历史方案，不能执行。
 
-## 4a. v6r1 D-only 补跑
+## 4a. 历史 v6r1 D-only 方案（已否决，禁止执行）
 
-`v6r1` 是“v6 的第一次版本化补跑”，不是第二 seed，也不是新配方。它只拥有唯一运行名
+`v6r1` 原计划是“v6 的第一次版本化补跑”，不是第二 seed，也不是新配方。它只拥有唯一运行名
 `phase1_signed_face_l1_v6r1_D_fresh_guidance_seed3`（seed3 的 fresh 拍面引导 D 单格）；exact foreign
 v6 launcher 会先重建原 D argv，consumer 再证明新 argv 仅把一个 `run_name` 改为该新名字。
+
+真实 Pod 只安装了 v6r1 config/script；第一次 `validate` 在 claim、runtime、signal 或训练前就失败：
+`l1_checkpoint_audit.jsonl` 的 D 行明确 `run_dirs=[]`，would-be training path 也不存在，但 validator
+错误要求该 path 必须是 directory。以下命令只用于解释失败合同，全部禁止执行。
 
 ### 恢复外部 exact 控制与 epoch-1 源证据
 
@@ -377,7 +381,27 @@ judge、L2、第二 seed、stop/promote、部署或真机。
 
 finalizer 不重新 glob 猜测“最新”目录；它只接受 `runtime_verified.json` 已精确绑定的单一路径，并验证
 该路径直属 frozen log root、名字以后缀结尾且自身不是 symlink，然后只在该目录读取 hard contract 与
-`model_24.pt`。
+`model_24.pt`。该条件分支从未执行，不能作为 completion 证据。
+
+## 4b. v6r2 source-only 修正
+
+[v6r2](../DEFINITIONS.md) 只修正上述 expected-absent 语义，不是 retry launcher。它静态绑定 v6r1 exact
+config/consumer SHA、audit D `run_dirs=[]` 与 foreign-v8 terminal receipt；`validate`、`plan`、`launch`、
+`finalize` 必须全部返回失败。唯一允许的动作是本地 source check：
+
+```bash
+CONFIG=configs/phase1_signed_face_d_retry_prereg_v6r2_20260714.json
+VALIDATOR=scripts/validate_phase1_signed_face_d_retry_v6r2.py
+python3 "$VALIDATOR" \
+  --config "$CONFIG" \
+  --expected-config-sha256 c60a04e18cfce60f3c90e39a302766edeb9cb1c72ef9950ba413b40cecbb425a \
+  --expected-validator-sha256 36bc7999bb879a92fb74f2c9619e74450fc2f7b44a18c77fb32155fe45e34781 \
+  static-validate
+```
+
+v6r2 没有 remote install、runtime preflight、命令重建、进程检查、claim、signal、launch 或 finalizer
+consumer。不要把 tracked 文件复制到 Pod 当作发射入口；只有 boot 根因闭环并形成新的 v6r3-or-later
+内容绑定 preregistration 后，才可评审一次新的诊断尝试。
 
 ## 5. L2 当前 fail-closed
 

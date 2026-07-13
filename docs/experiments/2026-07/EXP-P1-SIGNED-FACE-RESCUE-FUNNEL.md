@@ -195,7 +195,7 @@ manifest/consumer SHA、24 数组、四-leaf metadata、exact motion gate 和两
 `2da2bd.../b21c16...` 过渡到新 `3a9d88.../9603a1...`；其他全部共同字段仍逐值相同。A/B 因该显式
 变化继续是 lineage `0`，C/D fresh 才是 `1`。
 
-### epoch-1 v6 实际 L1 与 D-only v6r1
+### epoch-1 v6 实际 L1 与 v6r1 validator 失效
 
 实际 Pod1 L1 使用后续集成出的 clean source commit
 `50c49e58a9413ec6ac1c3ed2565d9a78acdb5e64`，它把 unmasked command observation 的 provenance
@@ -219,31 +219,21 @@ D 的 outer launch contract/state/log SHA 分别为 `f6dd2fd2...e0b63`、`4e1ab6
 timeout 诊断 SHA `ae7de7a3...b5a0c` 表明它只走到 Kit/scene boot，尚未出现 hard-contract marker 或
 learning iteration。因此不能删除旧 D claim 后原名重跑，也不能把 A/B/C 三格写成完整 L1。
 
-新 machine prereg
-[`phase1_signed_face_d_retry_prereg_20260713.json`](../../../configs/phase1_signed_face_d_retry_prereg_20260713.json)
-与 consumer
-[`run_phase1_signed_face_d_retry.py`](../../../scripts/run_phase1_signed_face_d_retry.py)把这次例外收窄为
-[v6r1](../../DEFINITIONS.md) D 单格：加载并校验 exact foreign v6 控制，调用它重建原 D argv，再证明
-新 argv **只有一个** `run_name` 项从 `phase1_signed_face_l1_v6_D_fresh_guidance_seed3` 变为
-`phase1_signed_face_l1_v6r1_D_fresh_guidance_seed3`。启动前还须复核旧失败三件套、dead PID、无旧
-checkpoint、clean exact source、runtime closure、bank/report、GPU0 空和 Kit lock 空；新
-`control/v6r1` 全部 no-clobber。Python consumer 没有直接 signal API；但它调用的 frozen
-`launch_kit_training_locked.sh` 在 pre-marker boot timeout 时会只对 state 中该隔离 PGID 做
-TERM→KILL，这是合同允许的精确 cleanup，不能写成“零 signal”。旧 D claim 不改不删，失败后也不自动
-给第二次重试权限。若 wrapper 已返回 ready、但后续 hard-contract/first-iteration 等待超时，trainer
-可能仍存活；只允许按 `run.log.launch` 的精确 `pid=pgid` 人工审计，不得自动再发 D。
+当日新增的 [v6r1](../../DEFINITIONS.md) D-only config/consumer 最终只安装到 `control/v6r1`，没有
+claim、runtime、training 或 signal。首次真实 `validate` 在任何写入前发现其合同不可能成立：冻结的
+checkpoint audit 对 D 明确记录 `run_dirs=[]`，真实 would-be training path 也不存在，但 validator 却
+要求该 path 必须是 directory。团队没有伪造目录，也没有启动 v6r1；旧文件按 exact SHA 留作
+superseded evidence。
 
-第二层 no-clobber 直接检查 `50c49e5` checkout 的 frozen RSL-RL log root：任何名字以后缀
-`_phase1_signed_face_l1_v6r1_D_fresh_guidance_seed3` 结尾的现存目录、file、symlink 或异常 entry 都在
-写 control claim 前 fail closed。这样即使 control 目录被漏拷或从未产生，也不能对同一个 run name
-重复发射。终档不 glob “最新目录”，只消费 `runtime_verified.json` 绑定的 exact run dir。
-
-混合 finalizer 只有在新 D 自然记录 `Learning iteration 24/25`、进程退出、`model_24.pt` finite、
-lineage `1` 且 hard-contract SHA 仍为 `dfc583d4...888a5` 时，才重新逐项审计旧 A/B/C 终档和 B 的
-exact-PGID action，并写一份 A/B/C=`original_v6`、D=`v6r1_single_cell_retry` 的 no-clobber activation。
-activation 同时绑定两套 config/launcher SHA 与 old-D→new-D retry lineage；它明确保持
-judge/L2/第二 seed/stop-promote 全 false，并记录 consumer 无直接 signal、冻结 wrapper 的 exact-PGID
-timeout cleanup policy 以及成功 D 路径未执行该 cleanup。当前只有 E1 工具/测试，v6r1 尚未实际运行。
+新
+[`phase1_signed_face_d_retry_prereg_v6r2_20260714.json`](../../../configs/phase1_signed_face_d_retry_prereg_v6r2_20260714.json)
+与
+[`validate_phase1_signed_face_d_retry_v6r2.py`](../../../scripts/validate_phase1_signed_face_d_retry_v6r2.py)
+只修正这条历史 source contract：旧 expected path 必须 absent，任何 directory、regular file、symlink、
+special 或 unstatable entry 都是冲突。v6r2 只支持 `static-validate`，没有 runtime preflight、命令重建、
+进程检查、launch、signal 或 mixed finalizer；`validate/plan/launch/finalize` 均 fail closed。它绑定 v6r1
+exact config/consumer SHA、D audit `run_dirs=[]` 与 foreign-v8 terminal receipt，但没有生成 retry claim，
+也不能作为补跑入口。后续尝试必须先闭环 boot 根因，再另建 v6r3-or-later preregistration。
 
 ### v8 独立串行四格与第二次 D pre-contract timeout
 
@@ -275,10 +265,10 @@ inexact representation transfer；launcher 只允许 `question_bank` 按上述 o
 checkpoint，lineage 必须为 `1`。
 四格 emitted hard-contract SHA 必须一致。这一处理没有把旧 checkpoint 洗成 fresh 证据。
 
-L1 只是一份 25-update launch-integrity smoke。原 v6 已因 D 的 pre-runtime timeout 不能再用
-`finalize-l1`；只有上述 D-only v6r1 自然终档并通过 mixed finalizer，才可能写完整 L1 completion。
-**该文件本身仍不能启动 L2**。半写/提前退出格保留证据并阻断自动重试；v6r1 没有信号、broad kill、
-judge、部署或真机命令路径。
+L1 只是一份 25-update launch-integrity smoke。原 v6 与 v8 都因第 4 格 D 的 pre-contract timeout 没有
+完整 activation；v6r1 已被 validator 矛盾否决，v6r2 又明确没有 runtime/finalizer，所以当前不存在可写
+L1 completion 的入口。半写/提前退出格原样保留并阻断自动重试；v6r2 没有 signal、broad kill、judge、
+部署或真机命令路径。
 
 ## 仍未关闭的发射/判卷缺口
 
@@ -287,7 +277,8 @@ judge、部署或真机命令路径。
   没有 learning iteration/checkpoint；v2 rebound train bank/report 已正式发布。v6 A/B/C 已有终档，D
   在 runtime verified 前 boot timeout；当时只预注册了尚未启动的 v6r1 D-only 路径，现已由下述 v8
   独立尝试取代并停止自动重试。
-- v6r1 计划已被独立 v8 串行尝试取代；v8 D 再次在合同前 timeout，因此仍无四格
+- v6r1 的 expected-absent validator 错误已由 source-only v6r2 修正；v6r2 明确 NOT LAUNCHED，不能
+  validate runtime、plan、launch 或 finalize。v8 D 又在合同前 timeout，因此仍无四格
   completion/activation。禁止自动 retry，先做 boot root-cause。
 - 相对 `+1000` 的 immutable signed-face directional checkpoint paper 的 exact schedule/path/SHA 尚未
   冻结。exam-v1 rebind 已完成 E2 真实 371 题 replay/output，但基于新 bank 的 schedule/paper activation
@@ -295,5 +286,5 @@ judge、部署或真机命令路径。
   manifest 明确 `l2.launch_authorized=false`。必须另发 reviewed v7 paper activation 后才能启动 L2。
   当前 launcher 也不启动 judge、不能自动晋级或购买第二 seed。
 
-当前不授权再次启动原 v6 D、v6r1 或 v8 D。只有 boot 根因闭环并形成新的内容绑定合同后，才可评审新的
-versioned attempt；也不授权 L2、judge、第二 seed、部署或真机。
+当前不授权再次启动原 v6 D、v6r1、v6r2 或 v8 D。只有 boot 根因闭环并形成新的内容绑定合同后，才可
+评审新的 versioned attempt；也不授权 L2、judge、第二 seed、部署或真机。

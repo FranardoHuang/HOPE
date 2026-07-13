@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "manifest_id": "phase1-signed-face-rescue-d-validator-correction-20260714-v6r2",
+  "purpose": "Publish only the historical source correction for the impossible v6r1 prelaunch validator. This manifest has no runtime preflight, command reconstruction, process inspection, launch, or finalization consumer.",
+  "status": "source_only_static_validator_not_launched_after_repeated_fourth_cell_boot_timeouts",
+  "simulation_only": true,
+  "real_robot_commands_forbidden": true,
+  "direct_signals_forbidden": true,
+  "broad_signals_forbidden": true,
+  "automatic_retry_forbidden": true,
+  "runtime_preflight_authorized": false,
+  "launch_authorized": false,
+  "finalize_authorized": false,
+  "automatic_judge_launch": false,
+  "l2_training_launch_authorized": false,
+  "second_seed_authorized": false,
+  "source_installation": {
+    "control_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r2",
+    "config_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r2/phase1_signed_face_d_retry_prereg_v6r2_20260714.json",
+    "static_validator_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r2/validate_phase1_signed_face_d_retry_v6r2.py",
+    "only_permitted_action": "static-validate",
+    "runtime_actions_must_fail": [
+      "validate",
+      "plan",
+      "launch",
+      "finalize"
+    ]
+  },
+  "superseded_validator_correction": {
+    "classification": "historical_expected_absence_correction_no_runtime_consumer",
+    "superseded_manifest_id": "phase1-signed-face-rescue-d-single-cell-retry-20260713-v6r1",
+    "validator_revision": "v6r2",
+    "superseded_config": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1/phase1_signed_face_d_retry_prereg_v6r1_20260713.json",
+      "sha256": "e0a677ec1b8adf328a5d73e74206b54f60e84bd22fb37f02b428511c0109ae90"
+    },
+    "superseded_consumer": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1/run_phase1_signed_face_d_retry.py",
+      "sha256": "1f03823eefad888fb1a9484af5349afec349dfa43be144aa10af33eaacee3a10"
+    },
+    "observed_superseded_state": {
+      "classification": "installed_exact_config_and_consumer_only_never_claimed_or_launched",
+      "required_absent_control_paths": [
+        "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1/d_retry_launch_contract.json",
+        "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1/run.log",
+        "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1/run.log.launch",
+        "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1/runtime_verified.json",
+        "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6r1/l1_mixed_activation.json"
+      ],
+      "training_log_root": "/workspace/codexschema/nohope_signed_face_rescue_epoch1_50c49e5/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball",
+      "v6r1_training_suffix": "_phase1_signed_face_l1_v6r1_D_fresh_guidance_seed3",
+      "matching_training_entries": 0
+    },
+    "historical_bug_correction": {
+      "immutable_checkpoint_audit": {
+        "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/l1_checkpoint_audit.jsonl",
+        "sha256": "620767581cb47dda23843822129b09c66507b0cdc887e283d619d4b51fb0d354",
+        "d_row_run_dirs": []
+      },
+      "old_would_be_training_path": "/workspace/codexschema/nohope_signed_face_rescue_epoch1_50c49e5/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-13_14-19-36_phase1_signed_face_l1_v6_D_fresh_guidance_seed3",
+      "correct_required_state": "absent",
+      "entry_kinds_that_must_fail": [
+        "directory",
+        "regular_file",
+        "symlink",
+        "special",
+        "unstatable"
+      ],
+      "old_training_suffix": "_phase1_signed_face_l1_v6_D_fresh_guidance_seed3",
+      "matching_old_training_entries": 0,
+      "old_outer_evidence": {
+        "launch_contract_sha256": "f6dd2fd222ea3f67a65c7c5b2e1ea74ea5f5725a5546b601c4691b8786de0b63",
+        "launch_state_sha256": "4e1ab699aa3a6763a74c9680beba7b55cc3fb23675edb58f5282acd04497f350",
+        "training_log_sha256": "baa02f52b645b29ec33a49c1117446591f8e3bfaf334d31cc7b7cb0decb93610",
+        "timeout_diagnostic_sha256": "ae7de7a37329eddfaa264adb99f9a38c0b7ead33579d5b1dac0d63f4a74b5a0c",
+        "original_pid": 1759428,
+        "pid_dead": true,
+        "runtime_verified_absent": true,
+        "hard_contract_absent": true,
+        "learning_iteration_absent": true,
+        "checkpoint_count": 0
+      }
+    }
+  },
+  "foreign_v8_terminal_barrier": {
+    "classification": "terminal_repeated_fourth_cell_kit_scene_start_boot_timeout_root_cause_unknown_foreign_arm_not_owned_by_v6r2",
+    "serial_launcher_cell_ordinal_zero_based": 3,
+    "preceding_cell_c_terminal_checkpoint": "model_24.pt",
+    "same_fourth_cell_pattern_observed_in_original_v6": true,
+    "observed_trainer_pid": 1782834,
+    "observed_trainer_pgid": 1782834,
+    "observed_launcher_pgid": 1782072,
+    "final_launcher_action": "exact_pgid_boot_timeout_cleanup",
+    "final_exit_code": 124,
+    "final_process_entries_absent": true,
+    "gpu_idle_at_final_audit": true,
+    "last_training_log_state": "starting_simulation",
+    "hard_contract_absent": true,
+    "runtime_verified_absent": true,
+    "learning_iteration_absent": true,
+    "checkpoint_count": 0,
+    "oom_traceback_nan_absent": true,
+    "failure_scope": "pre_contract_boot_not_learning_or_recipe_result",
+    "face_reward_causality_claim_forbidden": true,
+    "failure_evidence": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/runs/l1/phase1_signed_face_l1_v8_D_fresh_guidance_seed3/terminal_barrier_failure.json",
+      "sha256": "0e5bb13b072c2c1e029a93e9d2d037adbfc1d74da9e1c9450acea333173f98a9",
+      "bytes": 4785
+    },
+    "final_launch_state_evidence": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/runs/l1/phase1_signed_face_l1_v8_D_fresh_guidance_seed3/run.log.launch",
+      "sha256": "80939e6df8184590df121f5edbf9f2de9188116438b6b328abd63152cdd2c90e",
+      "bytes": 3783
+    },
+    "automatic_retry_forbidden": true,
+    "boot_root_cause_and_new_preregistration_required": true
+  },
+  "next_step": {
+    "classification": "new_v6r3_or_later_design_required",
+    "v6r2_must_not_be_reused_as_launcher": true,
+    "root_cause_repeated_fourth_cell_boot_timeout_first": true,
+    "future_launch_design_must_be_preregistered_separately": true
+  }
+}

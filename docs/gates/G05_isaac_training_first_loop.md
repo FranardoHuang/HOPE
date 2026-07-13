@@ -1501,16 +1501,13 @@ bank common-field transition 写入 preflight；其他父/新共同字段仍逐�
 实际 epoch-1 v6 后续在 clean `50c49e5` source 上启动：A/B/C 到终档，checkpoint 迭代分别为
 `13824/13824/24`，lineage `0/0/1`，共同 hard-contract SHA `dfc583d4...888a5`；D 在
 `runtime_verified`/checkpoint 前 Kit boot timeout。其旧 launch/state/log 与 timeout 诊断已按 exact SHA
-冻结，PID 已死且旧 claim 不覆盖。新 [v6r1](../DEFINITIONS.md) 只允许 D 单格用新 `run_name` 补跑；
-consumer 必须从 exact foreign v6 launcher 重建原 argv，并证明唯一命令差异是 `run_name`，随后才在
-GPU0/Kit lock 都空时写新的 no-clobber claim。混合 finalizer 只有在 D 自然终档 `24`、finite、lineage1、
-合同仍为 `dfc583d4...888a5` 后，才重审旧 A/B/C 和 B 的 exact-PGID terminal cleanup，写同时绑定两套
-config/launcher 的 completion。原始 checkpoint audit `62076758...d354` 还绑定 A/B/C 的 exact
-checkpoint/finite/lineage 与 D 空 run-dir。这里的 signal 边界不是“全程零 signal”：Python consumer
-不直接发 signal，但 frozen locked wrapper 可在 pre-marker boot timeout 时仅对该隔离 PGID 执行
-TERM→KILL；post-contract timeout 可能留下 live arm，只能按 state 的精确 `pid=pgid` 人工审计且不得
-自动二次启动。launch readiness 还会在 frozen RSL-RL log root 检查新 run-name suffix 匹配数为 0；
-已有目录、file、symlink 都阻断，finalizer 则只认 `runtime_verified` 的 exact path、不用 glob 猜目录。
+冻结，PID 已死且旧 claim 不覆盖。原始 checkpoint audit `62076758...d354` 绑定 A/B/C 的 exact
+checkpoint/finite/lineage，并明确 D `run_dirs=[]`。后续 [v6r1](../DEFINITIONS.md) 首次真实
+`validate` 在任何 claim/训练前暴露 validator 自相矛盾：它错误要求旧 would-be D training path 存在，
+而冻结 audit 与 filesystem 都证明该 path 应 absent。团队没有伪造目录；v6r1 从未 claim、launch、
+signal 或训练。新 [v6r2](../DEFINITIONS.md) 只做 source contract correction：旧 path 必须 absent，
+任何 entry kind 都 fail closed；只支持 `static-validate`，没有 runtime preflight、命令重建、进程检查、
+launch、signal 或 finalizer，且明确 NOT LAUNCHED。
 后续 foreign v8 使用 clean `72418fff` 与全新 manifest/launcher，`v6_artifacts_adopted=false`，按 terminal
 barrier 串行发射 A/B/C/D。A/B/C 前序已终档；D 是第四格，900 秒内再次未出现 hard-contract marker、
 runtime verified、learning iteration 或 checkpoint。locked wrapper 只对 `PID=PGID=1782834` 做精确

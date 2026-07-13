@@ -1123,14 +1123,11 @@ SSH disconnect. This is execution-paper preparation rather than behavior evidenc
 ### 2026-07-14 signed-face v8 再次在合同前阻断，不授权判卷
 
 Pod1 epoch-1 v6 的 A/B/C 已到终档，但 D 在产生 runtime verified/checkpoint 前 Kit boot timeout；因此
-不存在完整四格 L1 activation。新 [v6r1](../DEFINITIONS.md) 工具只允许 D 在配方不变、唯一
-`run_name` 改名的条件下做一次 versioned retry；mixed finalizer 必须复核 A/B/C 原终档、D 新终档
-`model_24.pt` 的 finite/lineage1、四格共同 hard-contract `dfc583d4...888a5`，并绑定 original-v6 与
-v6r1 两套 config/launcher/retry lineage、原 A/B/C checkpoint audit `62076758...d354` 以及 signal
-provenance。Python consumer 不直接发 signal；frozen locked wrapper 只允许 pre-marker boot timeout
-时对本臂隔离 PGID 的精确 cleanup，成功 D 终档必须记录该 cleanup 未执行。launch 还须证明 frozen
-training-log root 没有同 run-name suffix entry；终档只接受 `runtime_verified` 的 exact run dir，不从
-filesystem glob 猜“最新”目录。
+不存在完整四格 L1 activation。后续 [v6r1](../DEFINITIONS.md) 首次真实 `validate` 在任何 claim/训练前
+发现 expected-absent 合同错误：checkpoint audit 明确 D `run_dirs=[]`，但 validator 却要求旧 would-be
+training path 是 directory。团队没有伪造目录；v6r1 从未启动。新 [v6r2](../DEFINITIONS.md) 只发布
+source-only 静态修正，要求旧 path absent 且任何 entry kind fail closed；它没有 runtime、命令重建、
+launch、signal 或 mixed finalizer，明确 NOT LAUNCHED，不能补出 L1 activation。
 
 后续 foreign v8 不采用 v6 artifact，而以新 source/manifest/launcher 按 A/B/C/D terminal barrier 串行
 运行。A/B/C 前序已终档；D 作为第四格又在 900 秒内未产生 hard contract/runtime verified/checkpoint，

@@ -36,6 +36,13 @@
   boot 根因；四格 activation/L2/judge/第二 seed 全 false。最终 Pod1 审计为 0 trainer/worker/judge、
   三张 GPU 空。见[机制漏斗](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)。
 
+- v6r1 的首次真实 `validate` 在写 claim/训练前发现合同自相矛盾：immutable audit 明确 D 的
+  `run_dirs=[]`，但 validator 却要求旧 would-be training path 必须存在。团队没有伪造目录；v6r1
+  从未 claim、launch、signal 或训练。新 [v6r2](DEFINITIONS.md) 只发布静态源码修正：旧 path 必须
+  absent，任何目录/file/symlink/special entry 都 fail closed；它只支持 `static-validate`，没有 runtime
+  preflight、命令重建、launch 或 finalizer。专项 `14 passed`，合入当前 main 后仓内 `tests/` 为
+  `713 passed, 9 skipped`；v6r2 明确未启动，下一步仍是第 4 格 Kit boot 根因与独立新 prereg。
+
 - S0/M0 的下一层 exact GMR 已形成两份独立 no-clobber plan 与共享 consumer：五条 canonical-beta PT、
   converter argv、Python/pip、A3 model tree、两套 joint/body order 和 31-joint bijection 都是 required；M0
   预冻结 exact 30 Hz ready sample、足点 FK、前后/横向二维脚距、3 cm component band 与独立 5 mm 防收窄门。
@@ -71,14 +78,9 @@
 
 - epoch-1 signed-face v6 的 A/B/C 已到终档，D 在 `runtime_verified`/checkpoint 前 Kit boot timeout；
   旧 D launch/state/log SHA 与 dead PID/零 checkpoint 诊断、B 终档后 exact-PGID cleanup、`50c49e5`
-  source bundle 与 A/B/C checkpoint audit `62076758...d354` 都已冻结。新增 [v6r1](DEFINITIONS.md) D-only
-  no-clobber prereg/consumer：从 exact foreign v6 重建原 D argv，只允许 `run_name` 改名；启动前复核
-  source/runtime/bank/report/GPU/Kit lock。Python consumer 无直接 signal/第二次重试路径，但 frozen
-  wrapper 可在 pre-marker boot timeout 时仅清理本臂 exact PGID；post-contract timeout 留活臂时必须按
-  state PGID 人工审计。launch 另在 frozen training-log root 拒绝任何同 run-name suffix 的残留目录/
-  file/symlink；mixed finalizer 不 glob，只在 D 自然 `model_24.pt` finite/lineage1/合同一致后按
-  `runtime_verified` exact path 复核旧 A/B/C，并保持 L2/judge/第二 seed false。当前仅源码/专项测试，
-  v6r1 未运行。见
+  source bundle 与 A/B/C checkpoint audit `62076758...d354` 都已冻结。当日新增的
+  [v6r1](DEFINITIONS.md) D-only validator 后续被真实 `validate` 证明错误要求一个本应不存在的旧
+  training dir；它从未 claim、launch、signal 或训练，现只作 superseded evidence，修正见 07-14 条目。见
   [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)与
   [操作](operations/run_phase1_signed_face_rescue_funnel.md)。
 
