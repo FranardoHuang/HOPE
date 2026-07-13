@@ -46,6 +46,21 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-13, seed-budget correction; Gate remains `Partial`):
+
+- The rejected `SZ` family used four from-scratch seeds through model-4000. That was enough to
+  establish instability and expose a signed-face measurement defect, but continuing to replicate a
+  rejected recipe bought more evidence than the baseline decision needed.
+- Future mechanism screens use one blocking seed first. One 5090's four breadth slots hold four
+  distinct causal cells, with relative checkpoints at `+200/+500/+1000`; only a surviving cell together with its
+  matched control receives a second seed. Three to four seeds and terminal training are reserved for
+  a candidate that could actually become the accepted baseline.
+- The first application is the proposed hot-start/fresh × face-guidance-off/on signed-face funnel.
+  It has no source SHA, machine prereg or Pod run yet, so this note does not authorize launch and does
+  not add accepted training evidence. See
+  [the experiment record](../experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md) and
+  [the acceleration policy](../research/phase1_ablation_acceleration_2026-07-11.md#seed-是晋级税不是首轮并发单位).
+
 Follow-up note (2026-07-05, R15 v5 correction):
 
 - Reverted the mistaken v5 default switch in `/workspace/yikang/nohope`: `cfg/train.yaml` and `cfg/play.yaml` keep `motion_file: null`, and the product/default deploy-parity task remains on the hopex lineage (`strike_phase_per_clip: [0.47, 0.333]` with the existing hopex target boxes). v5 is an R15 ablation arm only, passed with explicit `motion_file=` / `motion_file_2=` and `task.racket.*` CLI overrides.

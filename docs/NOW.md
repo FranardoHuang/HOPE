@@ -320,8 +320,12 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 
 ### 尺子与阶段 1
 
-- **[1｜P0] 拍面正反与解析判分。** 责任人 franco；执行者 Codex；下一证据：同卷有符号拍面表、
-  `n/-n` 负控和修正后结果。[实验](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)
+- **[1｜P0] 拍面正反与解析判分。** 责任人 franco；执行者 Codex；下一证据：先让同卷有符号拍面表、
+  `n/-n` 负控和修正 scorer 进入 `main`；随后用一个 seed 跑“热启动/从零 × 线性引导关/开”四个
+  机制单元到相对 checkpoint `+200/+500/+1000`。只有胜者连同匹配对照才解锁第二 seed，不再给
+  已失败配方复制四 seed。
+  [量尺实验](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)；
+  [机制漏斗](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)
 
 ### 部署验证
 
