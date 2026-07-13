@@ -1299,8 +1299,13 @@ contract drift 与错误布尔值 fail closed。machine prereg 固定 fresh seed
 `+200/+500/+1000`，默认 plan-only，Pod launch 需要 root 显式 token，claim/checkpoint/result 都
 no-clobber。checkpoint 内嵌 hard contract 还逐臂绑定 post-override 四项 body list；两臂 hard SHA
 必须不同，而删除该唯一字段后合同必须完全相同。源码/runner 共 `71 passed`，但 Pod
-`validate-runtime`、trainer、checkpoint 和同卷判读均
-尚未发生；A2 固定预算继续 blocked。详见[实验](../experiments/non_striking_arm_imitation_ablation_20260713.md)
+runtime 已形成一个受控 partial：A0 于 `2026-07-13T19:48:35Z` 以 PID=PGID `1811464` 启动，
+`19:49:15Z` ready；其 `model_200.pt` 已验证 embedded iter `200`、finite、fresh lineage `1` 并绑定
+hard-contract SHA `14ef410b...29f1`。旧 outer verifier 随后因把 schema-3 bank metadata 的 physics SHA
+错当 compact hard-record direct leaf 而精确假拒绝，故 A1 从未 claim。v1r1 source gate 现改为独立解析
+bank file/metadata、复现旧错误、先 attest 既有 A0 三份稳定 SHA，再且仅再 claim A1；A0 dead/drift、
+A1 预存在或 bank drift 都 fail closed，且禁止重跑 A0。v1r1 专项 `12 passed`，但 A1 trainer、配对终档和
+同卷判读仍未发生；A2 固定预算继续 blocked。详见[实验](../experiments/non_striking_arm_imitation_ablation_20260713.md)
 与[操作](../operations/run_phase1_non_striking_arm_imitation_a01.md)。S0/M0 有 Pod 离线结构结果，但没有
 Isaac/MuJoCo 训练、仿真行为或真机动作，G05 仍为 `Partial`。
 

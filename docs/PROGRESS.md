@@ -43,8 +43,12 @@
   参数、关节/动作/力矩/接触/自碰/终止安全均不变；四项 post-override body list 已进入 checkpoint
   hard contract，A0/A1 各绑不同 SHA，去掉该唯一字段后必须完全相同。两条 fresh seed17 长臂绑定同 motion/bank/
   `4096 env × 1001 update`，默认 plan-only、root token 点火、no-clobber runtime/finalizer、
-  `+200/+500/+1000` 早判；A2 固定预算继续 blocked。专项合计 `71 passed`；尚未在 Pod 做 runtime
-  validate/训练/判卷或真机。见[实验](experiments/non_striking_arm_imitation_ablation_20260713.md)与
+  `+200/+500/+1000` 早判；A2 固定预算继续 blocked。Pod1 A0 已以 exact PID=PGID `1811464` 运行，
+  `model_200.pt` 的 iter/finite/fresh lineage/hard-contract SHA 绑定通过；旧 outer verifier 因错误要求 compact
+  bank record 直含 metadata physics SHA 而假拒绝，A1 从未 claim。一次性 v1r1 continuation 已补
+  `12 passed` 的 source gate：绑定 old+new control、复现旧错误、独立解析 bank metadata、先 attest 既有 A0，
+  再且仅再 claim A1；禁止重跑 A0，A0/A1 漂移或预存在均 fail closed。尚无 A1 trainer、配对终档、同卷
+  判读或真机。见[实验](experiments/non_striking_arm_imitation_ablation_20260713.md)与
   [操作](operations/run_phase1_non_striking_arm_imitation_a01.md)。
 
 - MuJoCo frame/evaluator integration 的独立红队 `NO-MERGE` 阻塞已逐项关闭并合入 main：bound implicit

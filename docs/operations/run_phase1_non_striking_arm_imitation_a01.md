@@ -1,10 +1,14 @@
 # 运行 A0/A1 非击球臂模仿配对
 
-Status: **E1 source-ready; Pod runtime not yet validated or launched**
+Status: **Partial runtime：A0 正在运行；A1 尚未 claim，只能走 v1r1 continuation**
 
 本页只运行 [A0/A1 非击球臂配对](../DEFINITIONS.md)：A0 保留当前上半身模仿，A1 只从四条
 body-imitation Reward 删除左 shoulder/elbow/wrist。它是 simulator-only 单 seed 机制筛查，不启动
 judge、不下发真机命令，也不解锁 A2 reward 预算重分配。
+
+> 2026-07-14 现场边界：旧 v1 已启动 A0（PID=PGID `1811464`），随后 outer verifier 假拒绝并退出；
+> A1 从未创建。**禁止再次执行 v1 `--mode launch`，禁止重启、停止或改动 A0。** 当前唯一允许的写操作是
+> 下文 v1r1 先验证既有 A0 证据、再只创建 A1 的一次性 continuation。
 
 ## 冻结字节
 
@@ -20,6 +24,101 @@ judge、不下发真机命令，也不解锁 A2 reward 预算重分配。
 - Pod/runtime：Pod1 GPU0，`/workspace/hope_isaac_venv/bin/python`；GPU2 不属于本实验；
 - 两臂都是 fresh seed `17`、4096 env、1001 update、checkpoint 每 100 update，paired 判读只看
   `model_200.pt`、`model_500.pt`、`model_1000.pt`。
+
+## 0. 当前现场与 v1r1 冻结字节
+
+A0 于 `2026-07-13T19:48:35Z` 启动、`19:49:15Z` ready，稳定证据为：
+
+- exact PID=PGID `1811464`；
+- launch contract SHA `4c059aa610479a0aea86e437903daaf350f63c1a38f844fa23c517032d418153`；
+- launch state SHA `045518bc488bdf5f80cc96a56ed6efa018785283eeb8e7c8f3bff2c27805a342`；
+- emitted hard-contract SHA `14ef410be5bdcc341901b3678d5331a59af89382e07939ad2049210bf68c29f1`；
+- `model_200.pt` embedded iteration `200`、floating tensor finite、fresh lineage `1`，并绑定上述 hard SHA；
+- v1 精确退出行：`[non-striking-arm-a01] FATAL: hard contract train-bank binding changed`；
+- A1 arm claim、同名 training run 与 live process 均 absent。
+
+旧 verifier 错把 bank `meta_json` 中的 `physics_contract_sha256` 要求为 compact hard-contract
+`question_bank` 的 direct leaf。v1r1 改为同时验证 compact record 的真实五字段和 bank file SHA，并独立解析
+metadata/source-family 的 physics 绑定；不放宽任何训练、checkpoint 或 lineage 合同。
+
+v1r1 冻结字节：
+
+- manifest：
+  [`configs/phase1_non_striking_arm_imitation_a01_v1r1_continuation_20260714.json`](../../configs/phase1_non_striking_arm_imitation_a01_v1r1_continuation_20260714.json)，
+  SHA `addcffa1f4dfa41703050a8bc6011a1d94de246d65213bd5a0e6f475897d5fc3`；
+- runner：
+  [`scripts/run_phase1_non_striking_arm_imitation_a01_v1r1.py`](../../scripts/run_phase1_non_striking_arm_imitation_a01_v1r1.py)，
+  SHA `9f98e36063465d36d49eb19e5eb7d55a4f15dc713e739969321f86d8546aecbb`。
+
+### 0.1 安装一次性 control（no-clobber）
+
+从已审阅提交把上述两个文件复制到 Pod。目标根必须不存在；存在就停止审计，不覆盖：
+
+```bash
+test ! -e /workspace/codexschema/phase1_non_striking_arm_20260714/control/v1r1
+mkdir /workspace/codexschema/phase1_non_striking_arm_20260714/control/v1r1
+
+cp --no-clobber <reviewed-source>/configs/phase1_non_striking_arm_imitation_a01_v1r1_continuation_20260714.json \
+  /workspace/codexschema/phase1_non_striking_arm_20260714/control/v1r1/
+cp --no-clobber <reviewed-source>/scripts/run_phase1_non_striking_arm_imitation_a01_v1r1.py \
+  /workspace/codexschema/phase1_non_striking_arm_20260714/control/v1r1/
+
+sha256sum \
+  /workspace/codexschema/phase1_non_striking_arm_20260714/control/v1r1/phase1_non_striking_arm_imitation_a01_v1r1_continuation_20260714.json \
+  /workspace/codexschema/phase1_non_striking_arm_20260714/control/v1r1/run_phase1_non_striking_arm_imitation_a01_v1r1.py
+```
+
+### 0.2 plan 与只读 runtime 验证
+
+```bash
+/workspace/hope_isaac_venv/bin/python \
+  /workspace/codexschema/phase1_non_striking_arm_20260714/control/v1r1/run_phase1_non_striking_arm_imitation_a01_v1r1.py \
+  --manifest /workspace/codexschema/phase1_non_striking_arm_20260714/control/v1r1/phase1_non_striking_arm_imitation_a01_v1r1_continuation_20260714.json \
+  --mode plan
+
+/workspace/hope_isaac_venv/bin/python \
+  /workspace/codexschema/phase1_non_striking_arm_20260714/control/v1r1/run_phase1_non_striking_arm_imitation_a01_v1r1.py \
+  --manifest /workspace/codexschema/phase1_non_striking_arm_20260714/control/v1r1/phase1_non_striking_arm_imitation_a01_v1r1_continuation_20260714.json \
+  --mode validate-runtime
+```
+
+`validate-runtime` 不写文件、不启动进程。它必须同时证明 frozen v1 control、自身 v1r1 字节、训练 source、
+A0 三份稳定 SHA和 exact live argv、GPU0 ownership、A1 全面 absent、bank file/metadata physics 绑定，以及
+冻结 v1 verifier 仍精确复现原错误。任一失败都不是“可修参数”；停止并保留现场。
+
+### 0.3 只发射 A1
+
+只有审阅上述 JSON 后才执行：
+
+```bash
+/workspace/hope_isaac_venv/bin/python \
+  /workspace/codexschema/phase1_non_striking_arm_20260714/control/v1r1/run_phase1_non_striking_arm_imitation_a01_v1r1.py \
+  --manifest /workspace/codexschema/phase1_non_striking_arm_20260714/control/v1r1/phase1_non_striking_arm_imitation_a01_v1r1_continuation_20260714.json \
+  --mode launch-a1 \
+  --root-confirm ROOT_APPROVES_SIM_ONLY_A1_V1R1_CONTINUATION
+```
+
+runner 先 no-clobber 写 `a0_v1r1_recovery_attestation.json`，再复核 A0/A1 race，之后才创建 A1 claim。
+attestation 或 A1 claim 一旦存在，自动重试永久禁止。A1 的 launch contract 同时绑定 frozen v1 与 v1r1
+manifest/runner、A0 三份稳定 SHA、recovery attestation 和 exact A1 argv；A1 ready 后还必须证明 A0 未变且
+两条 exact trainer 共同拥有 GPU0。代码没有 A0 launch 分支，也不 signal 既有进程。
+
+### 0.4 v1r1 终档
+
+两臂自然退出后，禁止回用 v1 finalizer；运行：
+
+```bash
+/workspace/hope_isaac_venv/bin/python \
+  /workspace/codexschema/phase1_non_striking_arm_20260714/control/v1r1/run_phase1_non_striking_arm_imitation_a01_v1r1.py \
+  --manifest /workspace/codexschema/phase1_non_striking_arm_20260714/control/v1r1/phase1_non_striking_arm_imitation_a01_v1r1_continuation_20260714.json \
+  --mode finalize
+```
+
+它复核完整 old+new control/attestation/launch/runtime 链、原错误、两份 hard contract 唯一 mask 差异，以及
+`200/500/1000` 的 filename↔embedded iteration、finite、fresh lineage 与 hard SHA；只写一份 no-clobber
+paired checkpoint 账，不启动 judge。
+
+## 以下 v1 首次发射流程仅供审计，当前禁止重跑
 
 若 Pod Git 对象库还没有上述 commit，先通过审阅过的 Git fetch/bundle 恢复；不得在归档训练 checkout
 `/workspace/codexschema/nohope` 上切分支或改文件。
@@ -81,7 +180,7 @@ Python module、host available RAM、GPU0 compute PID 和显存。此版本要�
 
 preflight 失败只报告失败，不得为了通过而改 manifest、删旧目录或杀不属于本实验的进程。
 
-## 4. root 显式点火
+## 4. root 显式点火（历史 v1；当前禁止执行）
 
 只有复核 plan/preflight 后才可执行：
 

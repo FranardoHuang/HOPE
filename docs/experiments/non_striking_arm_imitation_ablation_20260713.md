@@ -1,7 +1,7 @@
 # 非击球臂模仿消融
 
-- 状态：`preregistered`（源码与机器预注册已完成，Pod runtime 尚未验证/发射）
-- 证据等级：[E1](../DEFINITIONS.md)（源码、静态计划与单元测试）
+- 状态：`running / Partial`（A0 已运行且产出 finite `model_200.pt`；A1 尚未 claim，等待一次性 v1r1 continuation）
+- 证据等级：[E1](../DEFINITIONS.md)（源码门 + A0 runtime/checkpoint 绑定；尚无 A0/A1 配对结果）
 - 人类负责人：Franco
 - 执行者：Codex
 - 工作分支：`Franco_codex/non-striking-arm-a01-prereg-20260714`
@@ -63,6 +63,31 @@ launch/runtime/result ledger；已存在或失败的 claim 禁止自动重试。
 PGID，没有 broad signal，也没有 judge 或真机命令。完整命令见
 [操作文档](../operations/run_phase1_non_striking_arm_imitation_a01.md)。
 
+## 2026-07-14 v1 outer-verifier 假拒绝与 v1r1 单臂续接
+
+Pod1 GPU0 上的 v1 首次点火只成功启动 A0：`2026-07-13T19:48:35Z` 创建 exact
+PID=PGID `1811464`，`19:49:15Z` 越过 `KIT_BOOT_READY`。A0 的稳定外层证据为
+`launch_contract.json` SHA `4c059aa6...53153`、`run.log.launch` SHA `045518bc...a342`；相邻
+schema-3 hard contract SHA 为 `14ef410b...29f1`、fresh lineage `1`。截至本次入账，A0 已产出
+embedded iteration=`200`、finite 且绑定该 hard SHA 的 `model_200.pt`，训练日志未见硬失败。
+
+v1 launcher 随即以精确错误
+`[non-striking-arm-a01] FATAL: hard contract train-bank binding changed` 退出，A1 的 claim、训练目录和
+进程均从未创建。根因不是训练合同漂移：真实 schema-3 hard contract 的 compact `question_bank` 只包含
+bank SHA、schema、split、source-family SHA 和 exactness；bank 文件 SHA 已绑定完整 `meta_json`。旧外层
+verifier 错把仅存在于 bank metadata/source-family contract 的 `physics_contract_sha256` 当成 compact
+record 的 direct leaf，故在 A0 已启动后假拒绝。
+
+一次性机器合同
+[`phase1_non_striking_arm_imitation_a01_v1r1_continuation_20260714.json`](../../configs/phase1_non_striking_arm_imitation_a01_v1r1_continuation_20260714.json)
+（SHA `addcffa1...5fc3`）与
+[`run_phase1_non_striking_arm_imitation_a01_v1r1.py`](../../scripts/run_phase1_non_striking_arm_imitation_a01_v1r1.py)
+（SHA `9f98e360...ecbb`）只允许补 A1。它必须先逐字节验证旧 control、A0 三份稳定 SHA、exact PID/PGID/argv、
+A1 全面 absent、bank file SHA，并从 NPZ `meta_json` 独立重算 source-family/physics 绑定；同时还要让冻结
+v1 verifier 复现同一错误。随后先 no-clobber 写 recovery attestation，race recheck 后才可创建唯一的新
+A1 claim。它没有 A0 launch 路径、自动 retry、broad signal、judge 或真机命令；A0 死亡、任一证据变化、
+A1 预存在或 bank 漂移都永久 fail closed。
+
 ## 判读与晋级规则
 
 训练 checkpoint 先由 finalizer 验证 filename iteration、checkpoint 内 embedded iteration、finite tensor、
@@ -76,13 +101,16 @@ A2（移除左臂模仿后，把固定总 reward 预算重分给平衡/就绪）
 
 ## 结果
 
-源码与机器预注册已完成：reward override + manifest/runner 专项共 `71 passed`，静态 plan 能生成两条
-除 run name/mask 外完全相同的命令。尚未在 Pod 执行 `validate-runtime` 或 `launch`，没有 trainer、
-checkpoint、Isaac/MuJoCo 行为、成绩或真机结果；因此不能声称“不模仿左臂更好”。
+源码与机器预注册已完成；v1r1 recovery 专项 `12 passed`，与原 A0/A1/reward focused suite 合跑结果见
+[操作文档](../operations/run_phase1_non_striking_arm_imitation_a01.md)。A0 已有首个绑定且 finite 的
+`model_200.pt`，但 A1 尚未启动，也没有同卷 Isaac/MuJoCo 行为、配对成绩或真机结果；因此不能从 A0
+单臂曲线声称“不模仿左臂更好”或继续购买 seed。
 
 ## 下一步
 
-1. 在空闲 Pod1 GPU0 安装 exact detached source 与 ignored A3 asset，运行 `validate-runtime`。
-2. root 审阅后显式发射 A0/A1；记录 exact PID/PGID、GPU/RAM 和 +200/+500/+1000 checkpoint。
-3. 激活同一 immutable signed paper 后做 paired 早判；不因单条曲线或最佳 seed 晋级。
+1. 不得重跑 v1 或重启 A0；安装 exact v1r1 control，先只读 `validate-runtime`。
+2. root 审阅 recovery attestation 条件后只发射 A1；继续记录两臂 exact PID/PGID、GPU/RAM 与
+   `+200/+500/+1000` checkpoint。
+3. 两臂自然终档后用 v1r1 finalizer 验证 paired contract/checkpoint，再激活同一 immutable signed paper
+   做 paired 早判；不因 A0 单臂曲线或最佳 seed 晋级。
 4. A1 存活后才另开 A2 固定预算和 recovery/ready 交互实验。
