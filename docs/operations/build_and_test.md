@@ -489,3 +489,12 @@ python3 -m pytest -q \
 A module-level skip means the corresponding MuJoCo behavior did not run; never report dependency-
 light pass counts as a physics pass. None of these commands launches Isaac, vendor backend, Pod,
 Gate3/Gate3B or hardware.
+
+2026-07-14 Pod2 reference run used Python `3.12.3` plus MuJoCo Python `3.10.0` and returned
+`10 passed`. The synthetic self-contact fixture must contain genuinely articulated child bodies;
+jointless children may be welded and filtered by MuJoCo. The slow-joint parity test compares the
+bound implicit realization with an independent explicit motor executing the same `clip(P-D)` law;
+disabling the implicit execution path is not an equivalent diagnostic control. Exact environment,
+source/log SHA and the two rejected fixture versions are recorded in
+[`mujoco_eval_optional_runtime_test_results_20260714.json`](../../configs/mujoco_eval_optional_runtime_test_results_20260714.json).
+This remains a CPU source gate, not vendor behavior evidence.

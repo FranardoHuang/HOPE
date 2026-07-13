@@ -1,12 +1,12 @@
 # EXP-MUJOCO-EVAL-FRAME-INTEGRATION — 三路 evaluator 合同能否无损集成？
 
-- 状态：`source_corrected_pending_main_merge`
+- 状态：`source_merged_optional_mujoco_physics_gate_passed`
 - 阶段/轴：Isaac→MuJoCo / evaluator、导出与部署装载合同
 - 人类负责人：yikang
 - 执行者：Codex
 - 工作分支：`Franco_codex/mujoco-frame-parity-integration-20260713`
 - 基线：已 merge 对齐 `origin/main@c48fdc2`
-- 最高证据等级：E1（源码/合同/单元回归；没有新的 simulator 行为结果）
+- 最高证据等级：E2（Pod2 的 tiny MuJoCo 物理/坐标夹具；没有 policy 或 vendor 行为结果）
 - 决定：**adopt** 源码集成与 fail-closed 供证；**inconclusive** Isaac–MuJoCo 行为 gap 是否已缩小
 
 ## 问题与结论
@@ -109,7 +109,17 @@ python3 -m pytest -q tests
 候选分支结果为 focused `147 passed, 2 skipped`、root suite `696 passed, 9 skipped`；合入当前 main 后
 同一 focused suite 仍为 `147 passed, 2 skipped`，仓内 `tests/` 为 `714 passed, 9 skipped`，`git diff
 --check` 与四个修改源码的 `py_compile` 均通过。两个 focused skip 都是当前 host 缺 `mujoco`：tiny
-effort/self-contact physics 模块和真实 A3 frame reset 各一项，因此这些 physics cases 不是本机行为通过。
+effort/self-contact physics 模块和真实 A3 frame reset 各一项；因此当时不能把 dependency-light pass
+冒充 physics pass。
+
+2026-07-14 在 Pod2 的隔离 detached checkout、Python `3.12.3`、MuJoCo Python `3.10.0`、
+`CUDA_VISIBLE_DEVICES=''` 下补跑两项 optional 模块。首次真实收集为 `2 failed, 8 passed`，暴露的是两处
+夹具假设而非 production evaluator 回归：slow-joint 对照把负责实现 implicit `D` 的执行路径关掉后仍要求
+轨迹相同；自碰夹具的两个无关节 child 被 MuJoCo 焊接/过滤，却期待一个 robot pair。修正为独立 explicit
+total-PD motor 对照、两个真正 articulated child，并给 free-joint pelvis 明确正质量/惯量后，同一 production
+source 得到 `10 passed`。失败与通过日志、三版 test-source SHA 及环境逐项冻结在
+[`mujoco_eval_optional_runtime_test_results_20260714.json`](../../../configs/mujoco_eval_optional_runtime_test_results_20260714.json)。
+该结果通过 optional MuJoCo source gate，但仍不是 vendor MJCF、policy rollout、Gate3 或跨引擎行为通过。
 本机也缺 `torch`，`test_isaac_bank_exam_phase_b.py` 无法收集；direct rider 撤销的 dependency-light adapter
 负测已运行通过，但不能替代 Torch/Isaac 行为套件。上游 pelvis 修复另有真实 A3 MJCF CPU smoke 与
 10 秒 plain-MuJoCo PD stand E2 证据；本次没有重跑 Pod、K100、PPO、vendor backend、Gate3 或真机。

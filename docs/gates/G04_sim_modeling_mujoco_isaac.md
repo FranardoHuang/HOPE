@@ -320,6 +320,14 @@ already changed the trajectory. These are source/contract corrections, not evide
 vendor MuJoCo contacts or integration are behaviorally equivalent. G04 remains `Partial`; see
 [the integration experiment](../experiments/2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md).
 
+Pod2 subsequently collected the two previously skipped optional MuJoCo modules. The first real
+collection rejected two invalid synthetic controls; after correcting only the test fixture, the
+unchanged evaluator source passed `10/10` on MuJoCo Python `3.10.0`. This closes the optional
+total-PD/self-contact/reference-reset source gate, not the vendor-plant or cross-engine behavior
+gate; machine evidence is
+[`mujoco_eval_optional_runtime_test_results_20260714.json`](../../configs/mujoco_eval_optional_runtime_test_results_20260714.json).
+G04 remains `Partial`.
+
 ## Audit update 2026-07-14: S0/M0 exact GMR source/model gate
 
 The next offline step now has two independent no-clobber batch plans and one shared runtime

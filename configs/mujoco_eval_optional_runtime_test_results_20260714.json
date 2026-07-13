@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "artifact_kind": "mujoco_eval_optional_runtime_test_result",
+  "created_utc": "2026-07-13T19:16:00Z",
+  "scope": "CPU-only synthetic MuJoCo tests for total-PD execution, robot-only self-contact classification, and pelvis reference reset frames; no Isaac, vendor backend, policy rollout, Gate3, GPU training, or robot command",
+  "runtime": {
+    "pod": "pod2",
+    "checkout": "/workspace/codexschema/nohope_mjparity_caa3079",
+    "source_commit": "caa3079c6a17781c8a6bfa0188b8120afeccca16",
+    "python": "3.12.3",
+    "mujoco_python": "3.10.0",
+    "cuda_visible_devices": "",
+    "omp_num_threads": 1
+  },
+  "production_sources": {
+    "hope_training/whole_body_tracking/scripts/mujoco_eval_onnx.py": "08c601488b79188eab4e3c0dbe3f90c939a11e7f021eb96ca55fec4f4b61ab12",
+    "hope_training/whole_body_tracking/tests/test_mujoco_reference_reset_com_frame.py": "2db99a65f14d19ce07a9d33baba4cd12196049084aaf45bf072ff95c7c3f92b1"
+  },
+  "fixture_history": [
+    {
+      "stage": "merged_fixture",
+      "test_source_sha256": "f19a16e36986be0111d0b9291f3dbbbf9becdba2d3a1e2a5aa167f32993d1b31",
+      "exit_code": 1,
+      "result": "2_failed_8_passed",
+      "log_sha256": "1aa0968219649a4cc775b0593e779d41f3692f2d021cd7cc93228e41a472a716",
+      "diagnosis": "the slow-joint control disabled the implicit D realization while claiming execution equivalence; two jointless child bodies were welded and did not form the expected self-contact pair"
+    },
+    {
+      "stage": "first_fixture_correction",
+      "test_source_sha256": "064f8c3849d6d90f22fc458946b1723cd2346298eedc61f5ce90b144a560a28f",
+      "exit_code": 1,
+      "result": "2_failed_8_passed",
+      "log_sha256": "874bfd893286691ba89f56e36c62e507c1f4f25383bd5bd93cc362f17b56b21d",
+      "diagnosis": "articulating the two child bodies exposed that their free-joint parent needed explicit positive mass/inertia"
+    },
+    {
+      "stage": "accepted_fixture",
+      "test_source_sha256": "e72aa8e7cd166563f886136818aecda432251a6dbbc889bdd2e19c5b54a8a865",
+      "exit_code": 0,
+      "result": "10_passed",
+      "log_sha256": "1d4a967e99132fbcd2482f66d3283a827653f80cb000f49956a5b5ff1408d39c",
+      "contract": "bound implicit clip(P-D) is compared with an independent explicit total-PD motor; robot pair uses two genuinely articulated child bodies under a positive-mass pelvis"
+    }
+  ],
+  "accepted_command": [
+    "/workspace/hope_mjeval_venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "hope_training/whole_body_tracking/tests/test_implicit_effort_guard_and_selfcontact.py",
+    "hope_training/whole_body_tracking/tests/test_mujoco_reference_reset_com_frame.py"
+  ],
+  "decision": {
+    "optional_mujoco_physics_source_gate": "passed",
+    "production_source_changed_during_fixture_correction": false,
+    "g04_status": "Partial",
+    "g06_status": "Partial",
+    "vendor_mujoco_behavior_claimed": false,
+    "gate3_claimed": false,
+    "hardware_claimed": false
+  }
+}

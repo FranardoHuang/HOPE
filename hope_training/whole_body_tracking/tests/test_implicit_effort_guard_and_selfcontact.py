@@ -126,16 +126,25 @@ def test_runtime_motor_command_uses_total_pd_clip_in_all_sign_quadrants(
     assert robot.effort_limit_hit_count == expected_saturations
 
 
-def test_slow_joint_never_trips_and_diagnostic_never_mutates_state():
+def test_slow_bound_implicit_joint_matches_the_same_explicit_total_pd_motor():
     robot = _hinge_robot()
     robot.data.qvel[0] = 1.0  # kd*qd = 2 Nm < 6 Nm
-    control = _hinge_robot(_effort_guard=None)
+    # An unarmed *implicit* fixture is not an execution-equivalent control: with zero passive
+    # damping it sends P only and therefore deliberately omits D.  Compare the bound implicit
+    # realization against an independent explicit motor that sends the same clip(P-D) law.
+    control = _hinge_robot(
+        implicit_mask=np.array([False]),
+        explicit_mask=np.array([True]),
+        _effort_guard=None,
+        implicit_effort_execution_mode="not_applicable",
+    )
     control.data.qvel[0] = 1.0
     _swing(robot)
     _swing(control)
     assert robot.effort_limit_hit_count == 0
     assert 0.0 < robot.effort_limit_peak_ratio < 1.0
-    # Guard is read-only: with and without it the physics trajectory is byte-identical.
+    # Two independent actuator branches produced the same motor command and trajectory.
+    assert robot.data.ctrl[0] == control.data.ctrl[0] == pytest.approx(-2.0)
     np.testing.assert_array_equal(robot.data.qpos, control.data.qpos)
     np.testing.assert_array_equal(robot.data.qvel, control.data.qvel)
 
@@ -160,8 +169,12 @@ _SELFCON_XML = """
     <geom name="floor" type="plane" size="5 5 0.1"/>
     <body name="pelvis_link" pos="0 0 0.05">
       <freejoint/>
-      <body name="robot_1"><geom name="g1" type="sphere" size="0.06" mass="1"/></body>
-      <body name="robot_2" pos="0.05 0 0"><geom name="g2" type="sphere" size="0.06" mass="1"/></body>
+      <inertial pos="0 0 0" mass="0.1" diaginertia="0.001 0.001 0.001"/>
+      <!-- A jointless child is welded into its parent and MuJoCo may suppress that internal
+           pair.  Give both synthetic robot bodies a real articulation so this fixture tests the
+           classifier rather than welded-body contact filtering. -->
+      <body name="robot_1"><joint name="j1" type="hinge" axis="0 0 1"/><geom name="g1" type="sphere" size="0.06" mass="1"/></body>
+      <body name="robot_2" pos="0.05 0 0"><joint name="j2" type="hinge" axis="0 1 0"/><geom name="g2" type="sphere" size="0.06" mass="1"/></body>
     </body>
     <body name="ball" pos="0.025 0 0.05">
       <freejoint/><geom name="ball_geom" type="sphere" size="0.02" mass="0.0027"/>

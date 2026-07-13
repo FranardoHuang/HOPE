@@ -1413,3 +1413,11 @@ before grading. Classification and formal refusal now happen after every `mj_ste
 substep aggregates retained. Dependency-free negative tests reproduce both attacks; the optional
 real MuJoCo contact/frame modules remain separate runtime evidence rather than being inferred from
 those tests. G06 remains `Partial` pending an immutable behavior paper.
+
+The two optional MuJoCo modules were then collected on isolated Pod2 CPU. Invalid synthetic
+controls failed first and were preserved; correcting only their execution-equivalence and
+articulation assumptions produced `10/10` with the same production evaluator bytes. This is E2
+source/runtime evidence for the helpers, not an immutable policy paper, vendor MJCF run, Gate3 or
+Isaac-to-MuJoCo gap closure. Exact SHA are in
+[`mujoco_eval_optional_runtime_test_results_20260714.json`](../../configs/mujoco_eval_optional_runtime_test_results_20260714.json),
+and G06 remains `Partial`.

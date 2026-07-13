@@ -13,6 +13,13 @@
 
 ## 2026-07-14
 
+- Pod2 CPU 补跑了 MuJoCo evaluator 两个此前因本机缺依赖而 skip 的 optional 模块。首次真实收集
+  `2 failed, 8 passed`，定位为 synthetic fixture 把非等价执行路径当对照、把 welded child 当可碰
+  articulation；只修夹具后，同一 production evaluator bytes 在 Python `3.12.3` / MuJoCo `3.10.0`
+  得到 `10 passed`。失败与通过日志/source SHA 已冻结在
+  [runtime result](../configs/mujoco_eval_optional_runtime_test_results_20260714.json)；该结果不包含 policy、
+  vendor MJCF、Gate3、GPU 训练或真机，G04/G06 仍为 `Partial`。
+
 - MuJoCo frame/evaluator integration 的独立红队 `NO-MERGE` 阻塞已逐项关闭并合入 main：bound implicit
   改为每 substep 执行 Isaac `clip(P-D)`；被动/无 effort-limit 代理 formal fail closed；自碰只认 pelvis
   机器人子树且 formal 首次即拒绝，动态球不误报；mask 供证只接受 canonical/严格空 partial；旧
