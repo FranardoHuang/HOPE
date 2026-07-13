@@ -38,8 +38,14 @@ def write_manifest(tmp_path: Path, value: dict) -> Path:
 
 def test_checked_manifest_is_exact_four_cell_single_seed_funnel():
     data = manifest()
-    assert data["manifest_id"].endswith("-v2")
-    assert data["runtime"]["external_control_root"].endswith("/control/v2")
+    assert data["manifest_id"].endswith("-v3")
+    assert data["runtime"]["external_control_root"].endswith("/control/v3")
+    assert data["runtime"]["training_environment_sha256"] == (
+        "ddaa0effe2ed5318cc8ce34efbbf5b4ee042572052ab57232291079f41bed743"
+    )
+    assert data["source"]["critical_files"]["setup_train_env.sh"] == (
+        "88c1d7307ec90483712f7f3b0d8535179b88bb132a8a5a06111bff6872034214"
+    )
     assert [cell["cell_id"] for cell in data["cells"]] == ["A", "B", "C", "D"]
     assert data["shared_training_contract"]["training_seed"] == 3
     assert [(cell["initialization"], cell["face_guidance_weight"]) for cell in data["cells"]] == [
@@ -301,6 +307,15 @@ def test_checkpoint_audit_contract_targets_nested_runner_layout():
     assert "infos = obj.get('infos')" in source
     assert "infos.get('training_contract_sha256')" in source
     assert "obj.get('training_contract_sha256')" not in source
+
+
+def test_launcher_binds_source_first_environment_and_forbids_local_override():
+    source = LAUNCHER.read_text(encoding="utf-8")
+    assert 'local_override = wbt / "setup_train_env.local.sh"' in source
+    assert '"PYTHONPATH": pythonpath' in source
+    assert '"HOPE_WBT_PYTHONPATH": pythonpath' in source
+    assert "verify_training_module_import" in source
+    assert 'environment = preflight["training_environment"].copy()' in source
 
 
 def test_l2_is_fail_closed_until_separate_signed_directional_paper_activation():

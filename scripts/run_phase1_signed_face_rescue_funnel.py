@@ -129,7 +129,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
         raise ContractError(f"cannot read manifest: {exc}") from exc
     if data.get("schema_version") != 1:
         raise ContractError("manifest schema_version must be 1")
-    if data.get("manifest_id") != "phase1-signed-face-rescue-single-seed-funnel-20260713-v2":
+    if data.get("manifest_id") != "phase1-signed-face-rescue-single-seed-funnel-20260713-v3":
         raise ContractError("unexpected manifest_id")
     if data.get("simulation_only") is not True or data.get("real_robot_commands_forbidden") is not True:
         raise ContractError("manifest must be simulation-only and explicitly forbid robot commands")
@@ -160,13 +160,18 @@ def load_manifest(path: Path) -> dict[str, Any]:
         require_sha(digest, f"critical source {relative}")
 
     if runtime.get("pod") != "pod1" or runtime.get("gpu") != 0:
-        raise ContractError("v2 reserves exactly Pod1 GPU0")
+        raise ContractError("v3 reserves exactly Pod1 GPU0")
     if runtime.get("initial_gpu_must_have_zero_compute_processes") is not True:
         raise ContractError("the four-cell pool must start on an empty GPU")
     if runtime.get("maximum_trainers_on_gpu") != 4:
         raise ContractError("one card must contain exactly four causal cells")
     if runtime.get("kit_boot_marker") != CONTRACT_MARKER:
         raise ContractError("Kit boot marker changed")
+    if runtime.get("isaaclab_root") != "/workspace/IsaacLab":
+        raise ContractError("v3 requires the reviewed IsaacLab root")
+    require_sha(runtime.get("training_environment_sha256"), "training environment")
+    if runtime.get("setup_train_env_local_override_forbidden") is not True:
+        raise ContractError("training-local environment overrides must remain forbidden")
 
     expected_input_keys = {
         "forehand_motion", "backhand_motion", "schema3_train_bank", "hot_parent_checkpoint"
@@ -325,7 +330,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
     if evaluation.get("l2_training_launch_authorized") is not False:
         raise ContractError("L2 training launch must remain blocked")
     if evaluation.get("signed_directional_checkpoint_paper") is not None:
-        raise ContractError("v2 must not invent a signed directional checkpoint paper")
+        raise ContractError("v3 must not invent a signed directional checkpoint paper")
     return data
 
 
@@ -374,6 +379,77 @@ def verify_training_source(manifest: dict[str, Any]) -> tuple[Path, Path]:
         if not path.is_file() or sha256_file(path) != expected:
             raise ContractError(f"critical training source is missing or changed: {path}")
     return checkout, wbt
+
+
+def build_training_environment(manifest: dict[str, Any], wbt: Path) -> dict[str, str]:
+    """Build a deterministic source-first environment for the exact worktree."""
+
+    runtime = manifest["runtime"]
+    local_override = wbt / "setup_train_env.local.sh"
+    if local_override.exists():
+        raise ContractError(f"untracked training environment override is forbidden: {local_override}")
+    isaaclab = Path(runtime["isaaclab_root"]).resolve()
+    pythonpath_entries = [
+        (wbt / "source/whole_body_tracking").resolve(),
+        isaaclab / "source/isaaclab",
+        isaaclab / "source/isaaclab_tasks",
+        isaaclab / "source/isaaclab_assets",
+        isaaclab / "source/isaaclab_rl",
+    ]
+    for path in pythonpath_entries:
+        if not path.is_dir():
+            raise ContractError(f"training PYTHONPATH entry is missing: {path}")
+    pythonpath = ":".join(str(path) for path in pythonpath_entries)
+    environment = {
+        "HOME": "/root",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "LOGNAME": "root",
+        "USER": "root",
+        "SHELL": "/bin/bash",
+        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin",
+        "HOPE_ISAAC_PYTHON": runtime["isaac_python"],
+        "HOPE_ISAACLAB_ROOT": str(isaaclab),
+        "HOPE_WBT_PYTHONPATH": pythonpath,
+        "PYTHONPATH": pythonpath,
+        "OMNI_KIT_ACCEPT_EULA": "YES",
+        "TMPDIR": "/workspace/tmp",
+        "PIP_CACHE_DIR": "/workspace/.cache/pip",
+        "XDG_CACHE_HOME": "/workspace/.cache",
+        "WANDB_DIR": "/workspace/codexschema/.wandb",
+        "WANDB_ENTITY": "BerkeleyPingPong",
+        "WANDB_REGISTRY_ORG": "dongc_1-university-of-california-berkeley-org",
+        "WANDB_PROJECT": "hope_wbc",
+        "WANDB_MOTION_PROJECT": "csv_to_npz",
+        "CUDA_VISIBLE_DEVICES": str(runtime["gpu"]),
+        "PYTHONUNBUFFERED": "1",
+    }
+    for key in ("TMPDIR", "XDG_CACHE_HOME", "WANDB_DIR"):
+        if not Path(environment[key]).is_dir():
+            raise ContractError(f"training environment directory is missing: {environment[key]}")
+    if canonical_sha256(environment) != runtime["training_environment_sha256"]:
+        raise ContractError("deterministic training environment digest changed")
+    return environment
+
+
+def verify_training_module_import(
+    python: Path, wbt: Path, environment: dict[str, str]
+) -> str:
+    code = "import pathlib, whole_body_tracking; print(pathlib.Path(whole_body_tracking.__file__).resolve())"
+    try:
+        raw = subprocess.check_output(
+            [str(python), "-c", code], cwd=wbt, env=environment,
+            text=True, stderr=subprocess.STDOUT,
+        ).strip()
+    except subprocess.CalledProcessError as exc:
+        raise ContractError(f"exact training worktree import smoke failed: {exc.output.strip()}") from exc
+    module_path = Path(raw).resolve()
+    expected_root = (wbt / "source/whole_body_tracking/whole_body_tracking").resolve()
+    try:
+        module_path.relative_to(expected_root)
+    except ValueError as exc:
+        raise ContractError(f"whole_body_tracking resolved outside exact worktree: {module_path}") from exc
+    return str(module_path)
 
 
 CHECKPOINT_AUDIT_CODE = r"""
@@ -762,24 +838,28 @@ def runtime_preflight(
     if stage_name == "l2":
         raise ContractError(
             "L2 is blocked: freeze a separate immutable signed-face directional checkpoint "
-            "paper path/SHA and issue a reviewed v3 activation before launch"
+            "paper path/SHA and issue a reviewed v4 activation before launch"
         )
     checkout, wbt = verify_training_source(manifest)
     verify_production_locations(manifest, config_path, launcher_path, checkout)
     runtime = manifest["runtime"]
-    env = Path(runtime["environment_file"])
     python = Path(runtime["isaac_python"])
     locked = wbt / runtime["locked_launcher_relative_path"]
-    if not env.is_file() or not python.is_file() or not os.access(python, os.X_OK):
-        raise ContractError("environment file or Isaac Python is missing")
+    if not python.is_file() or not os.access(python, os.X_OK):
+        raise ContractError("Isaac Python is missing or not executable")
     if not locked.is_file() or not os.access(locked, os.X_OK):
         raise ContractError("locked Kit launcher is missing/not executable")
+    training_environment = build_training_environment(manifest, wbt)
+    module_path = verify_training_module_import(python, wbt, training_environment)
     verified_inputs = verify_inputs(manifest, python)
     if available_memory_mib() < runtime["minimum_host_available_memory_mib"]:
         raise ContractError("insufficient host memory for the four-cell pool")
 
     return {
         "checkout": checkout, "wbt": wbt, "python": python, "locked": locked,
+        "training_environment": training_environment,
+        "training_environment_sha256": canonical_sha256(training_environment),
+        "training_module_path": module_path,
         "verified_inputs": verified_inputs, "activation": None,
         "activation_file_sha256": activation_sha,
     }
@@ -825,6 +905,7 @@ def verify_existing_stage_cell(
         "stage": stage_name,
         "cell_id": cell_id,
         "run_name": run_name,
+        "training_environment_sha256": preflight["training_environment_sha256"],
     }
     for key, expected in expected_identity.items():
         if launch_contract.get(key) != expected:
@@ -838,6 +919,8 @@ def verify_existing_stage_cell(
         "stage": stage_name,
         "cell_id": cell_id,
         "run_name": run_name,
+        "training_environment_sha256": preflight["training_environment_sha256"],
+        "training_module_path": preflight["training_module_path"],
     }.items():
         if verified.get(key) != expected:
             raise ContractError(f"existing {stage_name}/{cell_id} runtime {key} mismatch")
@@ -954,13 +1037,15 @@ def launch_stage(
             "run_name": run_name,
             "gpu_snapshot_before": before,
             "verified_inputs": preflight["verified_inputs"],
+            "training_environment_sha256": preflight["training_environment_sha256"],
+            "training_module_path": preflight["training_module_path"],
             "l1_activation_sha256": activation_sha,
             "command": command,
             "automatic_judge_launch": False,
             "real_robot_commands_forbidden": True,
         }
         write_json_exclusive(launch_contract_path, launch_contract)
-        environment = os.environ.copy()
+        environment = preflight["training_environment"].copy()
         environment.update({
             "KIT_BOOT_MARKER": runtime["kit_boot_marker"],
             "KIT_BOOT_TIMEOUT_S": str(runtime["kit_boot_timeout_seconds"]),
@@ -1000,6 +1085,8 @@ def launch_stage(
             "training_run_dir": str(contract_path.parent.parent),
             "emitted_hard_contract_path": str(contract_path),
             "emitted_hard_contract_sha256": contract_sha,
+            "training_environment_sha256": preflight["training_environment_sha256"],
+            "training_module_path": preflight["training_module_path"],
             "guidance_applied": True,
             "lineage_expectation": cell["expected_lineage_exact"],
         }

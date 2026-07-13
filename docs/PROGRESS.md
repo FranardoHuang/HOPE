@@ -16,13 +16,15 @@
 - signed-face 单-seed 漏斗的首次 Pod v1 preflight 在创建 run 前抓到 checkpoint 审计假拒绝：旧代码
   只看顶层 tensor/合同键，实际 RSL-RL 权重嵌套且 provenance 在 `infos`。父 `model_13800.pt` 递归
   `74` 个浮点 tensor、`1,762,715` 元素、nonfinite `0`；v2 改为递归扫描并绑定 `infos`，保留 v1
-  证据且不改四格/seed/预算/L2 blocker。专项 `22 passed`；v2 Pod launch 尚未记为完成。见
+  证据且不改四格/seed/预算/L2 blocker。v2 随后在首格学习前因 exact worktree `PYTHONPATH` 未传给
+  child 退出；失败 claim/log 保留，其他三格未创建。v3 绑定 tracked setup、拒绝 local override，并
+  在 claim 前验证模块从 `882fea4` import。专项 `23 passed`；v3 Pod launch 尚未记为完成。见
   [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)与
   [操作](operations/run_phase1_signed_face_rescue_funnel.md)。
 
 - 有符号拍面修复后的首轮消融已从 E0 设计升级为 machine prereg：同卡只跑 seed3 的
   hot/fresh × face-guidance-off/on 四个因果格；热启动明确保持 lineage0，fresh 必须 lineage1，半写
-  claim/no-clobber/缺失 Git checkout 均 fail closed。focused `21 passed`；L1 尚无 Pod 行为结果，L2
+  claim/no-clobber/缺失 Git checkout 均 fail closed。focused `23 passed`；L1 尚无 Pod 行为结果，L2
   在 signed directional checkpoint paper 的 path/SHA 冻结前硬阻断，也没有 judge/真机授权。见
   [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)与
   [操作](operations/run_phase1_signed_face_rescue_funnel.md)。

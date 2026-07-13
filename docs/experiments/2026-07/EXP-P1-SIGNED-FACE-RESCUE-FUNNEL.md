@@ -1,7 +1,7 @@
 # EXP-P1-SIGNED-FACE-RESCUE-FUNNEL：有符号拍面修复后的单-seed 机制漏斗
 
-状态：`preregistered_v2_after_runtime_preflight_rejection`
-证据等级：E1（v2 machine prereg/launcher 与静态攻击回归通过；尚无新训练）
+状态：`preregistered_v3_after_two_preserved_prelearning_failures`
+证据等级：E1（v3 machine prereg/launcher 与静态攻击回归通过；尚无新训练）
 人类负责人：franco  
 执行者：Codex  
 全局优先级：只继承 [`NOW` 队列第 1 项](../../NOW.md#统一工作队列唯一优先级账本)，本页不另建队列。
@@ -99,7 +99,7 @@ signed-face scorer 修复已进入训练源码 commit
 
 静态合同把 L1 固定为同卡四格 `512 env × 25 update`，L2 设计固定为
 `4096 env × 1001 update`；四格全部 seed 3，热启动里程碑为 `14000/14300/14800`，fresh 为
-`200/500/1000`。focused 攻击回归为 `22 passed`，覆盖重复/错误 seed、配方漂移、hot/fresh lineage
+`200/500/1000`。focused 攻击回归为 `23 passed`，覆盖重复/错误 seed、配方漂移、hot/fresh lineage
 洗白、未注册 hard-contract key、非零 friction、旧 face pairing、伪造/缺格 activation、半写
 no-clobber claim、缺失 Git checkout、未冻结 paper 时的 L2 启动和自动 judge 等拒绝路径。这是 E1
 源码证据，不是 Isaac 启动或学习结果。
@@ -114,6 +114,20 @@ schema/合同 SHA/lineage 当成顶层字段读取。v1 生产副本保留在 `c
 v2 把 manifest/control/activation 路径升级到 `...-v2`/`control/v2`，递归遍历嵌套 dict/list/tuple 的
 浮点 tensor，并明确要求 provenance 来自 `checkpoint["infos"]`。缺 `infos`、字段不符、非有限或零
 浮点 tensor 仍 fail closed。配方、四格、seed、预算与 L2 blocker 均未改变。
+
+### v2 pre-learning 环境失败与 v3 修正
+
+v2 checkpoint/runtime `validate` 通过后，A 格 Kit 已启动但在第一次 learning iteration 和 hard-contract
+marker 前以 `ModuleNotFoundError: whole_body_tracking` 退出。launcher 已先原子创建 A 的 run claim；该
+目录、日志、PID=PGID state 和 launch contract 原样保留，v2 按 no-clobber 规则不重试，也没有 B/C/D
+claim。当时 GPU 随进程退出恢复为空。
+
+根因是 v2 只检查 `/workspace/codexschema/env.sh` 存在，却没有把 exact detached worktree 的
+source-first Python 环境传给 child。直接 source 该机器文件也不合法，因为它把 `HOPE_WBT` 固定到旧
+`6d93bcb` checkout。v3 使用新 control 与新四格 run name，绑定 tracked `setup_train_env.sh` SHA，拒绝
+untracked `setup_train_env.local.sh`，从 exact `882fea4` 和 reviewed IsaacLab root 构造确定性环境 SHA
+`ddaa0eff...d743`；runtime `validate` 必须在 claim 前 import `whole_body_tracking`，且模块路径必须落在
+该 exact worktree。训练配方、seed、预算、输入和 L2 blocker 仍不变。
 
 ### 父合同扩展边界
 
@@ -131,11 +145,11 @@ L1 只是一份 25-update launch-integrity smoke。四个 L1 terminal 都 finite
 
 ## 仍未关闭的发射/判卷缺口
 
-- clean detached `882fea4` 训练 worktree 已在 Pod1 建立；v1 runtime `validate` 的拒绝与只读根因已归档。
-  v2 生产副本与 runtime `validate/launch` 尚未完成，因此仍无 PID 或新 checkpoint 结果。
+- clean detached `882fea4` 训练 worktree 已在 Pod1 建立；v1 audit 假拒绝与 v2 pre-learning import
+  失败均已归档且未覆盖。v3 生产副本与 runtime `validate/launch` 尚未完成，因此仍无新 checkpoint。
 - L1 必须先实际运行并生成四格终档 completion/activation 证据。
 - 相对 `+1000` 的 immutable signed-face directional checkpoint paper 的 exact schedule/path/SHA 尚未
-  冻结。manifest 明确 `l2.launch_authorized=false`；必须另发 reviewed v3 paper activation 后才能启动
+  冻结。manifest 明确 `l2.launch_authorized=false`；必须另发 reviewed v4 paper activation 后才能启动
   L2。当前 launcher 也不启动 judge、不能自动晋级或购买第二 seed。
 
 当前只授权按运行手册进行仿真 L1 runtime validate/launch；不授权 L2、judge、部署或真机。

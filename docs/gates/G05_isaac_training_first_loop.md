@@ -1454,9 +1454,12 @@ event-timing/target-cadence 字段，固定为显式 inexact transfer 并要求 
 lineage `1`，四格 emitted contract SHA 一致。四格终档 finite/contract/lineage 全通过后只写
 no-clobber completion 证据；它不能单独授权 L2。L2 的 `4096 env × 1001 update` 设计因 immutable
 signed directional checkpoint paper 的 path/SHA 未冻结而在 runtime preflight 顶部 fail closed。
-focused 静态/攻击回归 `22 passed`。首次 Pod `control/v1` preflight 在任何 run claim 前暴露审计器
+focused 静态/攻击回归 `23 passed`。首次 Pod `control/v1` preflight 在任何 run claim 前暴露审计器
 只看 checkpoint 顶层的假拒绝；只读递归复核证明父模型 `74` 个浮点 tensor、`1,762,715` 个元素均
 finite，合同三元组实际位于 runner 的 `infos`。`control/v1` 保留未覆盖，v2 改为递归 finite 扫描并
-强制从 `infos` 绑定 schema/SHA/lineage。当前仍没有新 Isaac checkpoint 行为结果，不能把 E1 写成训练修复。
+强制从 `infos` 绑定 schema/SHA/lineage。v2 随后在 A 格首次 learning iteration 前暴露 source-first
+环境未传给 child；失败 claim/log 保留，B/C/D 未创建。v3 绑定 tracked setup 脚本、拒绝 local override，
+并在 claim 前验证模块从 exact `882fea4` worktree import。当前仍没有新 Isaac checkpoint 行为结果，
+不能把 E1 写成训练修复。
 复现命令、SSH 中断恢复和半写 claim 的 fail-closed 处置见
 [操作文档](../operations/run_phase1_signed_face_rescue_funnel.md)。

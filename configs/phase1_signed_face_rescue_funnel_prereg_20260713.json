@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "manifest_id": "phase1-signed-face-rescue-single-seed-funnel-20260713-v2",
+  "manifest_id": "phase1-signed-face-rescue-single-seed-funnel-20260713-v3",
   "purpose": "Run one seed across four distinct hot-start/fresh x face-guidance-off/on causal cells; buy another seed only after a paired mechanism win.",
   "status": "machine_preregistered_l1_authorized_l2_blocked_pending_signed_directional_paper",
   "simulation_only": true,
@@ -13,6 +13,7 @@
     "critical_files": {
       "scripts/train.py": "e5184d201ffb76cd2ddfc5724361f795886fac853da6172d15c550a73588e4a3",
       "scripts/launch_kit_training_locked.sh": "b250ec6d1cb3700bd45b7ede79e3d124125a0ae586a12dee16510b7cf647fa14",
+      "setup_train_env.sh": "88c1d7307ec90483712f7f3b0d8535179b88bb132a8a5a06111bff6872034214",
       "cfg/train.yaml": "de3d755a33c6a6e5b89e6bcc308f72ef5c41d98d228a3ebd1c00230b0907346c",
       "cfg/algo/ppo.yaml": "ffa64ffebc6a251fa922e4cdd8f0faa69c9ef3c0a0ab6f0b9f2911c73ec17a42",
       "cfg/task/HOPEPingPongVirtualBall.yaml": "c3bf2ba2a462346452064b15b85470752b815eb09482a0de69fd5718db0692c9",
@@ -27,10 +28,12 @@
     "pod": "pod1",
     "gpu": 0,
     "artifact_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713",
-    "external_control_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v2",
+    "external_control_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v3",
     "source_asset_root": "/workspace/codexschema/phase1_fresh_20260711",
-    "environment_file": "/workspace/codexschema/env.sh",
     "isaac_python": "/workspace/hope_isaac_venv/bin/python",
+    "isaaclab_root": "/workspace/IsaacLab",
+    "training_environment_sha256": "ddaa0effe2ed5318cc8ce34efbbf5b4ee042572052ab57232291079f41bed743",
+    "setup_train_env_local_override_forbidden": true,
     "locked_launcher_relative_path": "scripts/launch_kit_training_locked.sh",
     "kit_boot_marker": "[train.py] hard training contract:",
     "kit_boot_timeout_seconds": 900,
@@ -196,10 +199,10 @@
       "max_iterations": 25,
       "requires_activation": false,
       "run_names": {
-        "A": "phase1_signed_face_l1_A_hot_control_seed3",
-        "B": "phase1_signed_face_l1_B_hot_guidance_seed3",
-        "C": "phase1_signed_face_l1_C_fresh_control_seed3",
-        "D": "phase1_signed_face_l1_D_fresh_guidance_seed3"
+        "A": "phase1_signed_face_l1_v3_A_hot_control_seed3",
+        "B": "phase1_signed_face_l1_v3_B_hot_guidance_seed3",
+        "C": "phase1_signed_face_l1_v3_C_fresh_control_seed3",
+        "D": "phase1_signed_face_l1_v3_D_fresh_guidance_seed3"
       },
       "expected_terminal_checkpoint_iteration": {
         "A": 13824,
@@ -207,7 +210,7 @@
         "C": 24,
         "D": 24
       },
-      "activation_output": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v2/l1_activation.json"
+      "activation_output": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v3/l1_activation.json"
     },
     "l2": {
       "human_name": "4096-environment single-seed canary",
@@ -217,10 +220,10 @@
       "launch_authorized": false,
       "blocked_on": "immutable signed-face directional checkpoint paper path and SHA are not frozen",
       "run_names": {
-        "A": "phase1_signed_face_l2_A_hot_control_seed3",
-        "B": "phase1_signed_face_l2_B_hot_guidance_seed3",
-        "C": "phase1_signed_face_l2_C_fresh_control_seed3",
-        "D": "phase1_signed_face_l2_D_fresh_guidance_seed3"
+        "A": "phase1_signed_face_l2_v3_A_hot_control_seed3",
+        "B": "phase1_signed_face_l2_v3_B_hot_guidance_seed3",
+        "C": "phase1_signed_face_l2_v3_C_fresh_control_seed3",
+        "D": "phase1_signed_face_l2_v3_D_fresh_guidance_seed3"
       },
       "relative_milestones": [200, 500, 1000],
       "checkpoint_iterations": {
