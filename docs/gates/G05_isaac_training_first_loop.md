@@ -1569,6 +1569,29 @@ seed/stop-promote/真机全为 false。复现见
 [实验卷宗](../experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)。因此这里只是可审阅的 E1
 source gate，G05 保持 `Partial`。
 
+### 2026-07-14 C2 terminal float/int 假拒绝与 v1r1 continuation gate
+
+C2 已在 Pod1 GPU1 按上述 v1 claim 自然到达 `model_24.pt`；final log/hard contract/checkpoint SHA 为
+`abffd457...6dc3` / `83f47ae6...2772` / `dbbc7a28...6f6`，canonical outer claim 为
+`37fe2443...86e5`。trainer hard contract 正确写出 exact float
+`mount_normal_sign_per_clip=[1.0,-1.0]`，但 v1 outer verifier 用整数 `[1,-1]` 作为 strict-type
+期望，导致合法合同在 post-boot 被假拒绝。旧 `runtime_verified`、failure、terminal result 均 absent；
+不得补造旧 runtime sidecar，也不得重跑 C2。
+
+新的 [`v1r1` one-shot continuation](../DEFINITIONS.md) 是 D2-only source gate：manifest
+`8d893009...6e232` 直接绑定 C2 launch/state/claim/log/hard/checkpoint 六类证据与三项 absence boundary；
+verifier 接受 exact float 并拒绝 bool/int。C2 attestation 只能写入独立
+`continuations/v1r1/` no-clobber root，preserved C2 arm 不增加文件。parser 没有 cell 参数、通用
+`launch-next`、C2 launch 或 retry；唯一发射入口要求已 replay 的 C2 attestation、未 claim 的 D2 与
+空闲 GPU2。D2 outer claim 绑定 v1r1 manifest/launcher、原 v1 source/recipe 和 C2 attestation；mixed
+outer-control pair 只有在规范化 trainer recipe/hard contract 都只差 signed-face weight 时成立。
+
+本分支 focused contract tests 为 `44 passed`（含原 v1 的 `28` 项），没有连接 Pod 或启动 D2；因此
+这是修复后的 source gate，不是 C2/D2 成对 runtime 通过。activation/judge/L2/第二 seed/晋级/真机仍
+全部为 false，G05 保持 `Partial`。复现见
+[操作文档](../operations/run_phase1_signed_face_cd_l1.md)与
+[face-sign 卷宗](../experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)。
+
 ### 2026-07-14 signed-face K100 paper runtime materialized
 
 Pod1 使用 clean detached `748b6d5` source 和 exact rebound exam bank `60e1a7ad...d1ca` 完成单次

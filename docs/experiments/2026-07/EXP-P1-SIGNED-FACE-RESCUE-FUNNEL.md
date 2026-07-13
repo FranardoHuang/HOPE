@@ -325,7 +325,7 @@ L1 completion 的入口。半写/提前退出格原样保留并阻断自动重�
 当前不授权再次启动原 v6 D、v6r1、v6r2 或 v8 D。只有 boot 根因闭环并形成新的内容绑定合同后，才可
 评审新的 versioned attempt；也不授权 L2、judge、第二 seed、部署或真机。
 
-## 2026-07-14 C2/D2 provenance 修正版（source gate，未运行）
+## 2026-07-14 C2/D2 provenance 修正版（C2 terminal；D2 待 v1r1）
 
 旧 v9 `5f691b3400fe3feda1a690675912a97f09e906bb` source 和
 `466f8ea935310407f73b95e812bbd5f0a18705b4` control 的只读复核发现一个比 boot ordinal 更基础的
@@ -355,12 +355,12 @@ shared Kit boot lock 仍串行；但 C2 写出 `runtime_verified` 后继续训�
 
 机器 prereg/launcher 的最终 SHA 见运行手册；专项静态/攻击测试
 `28 passed`，source launch-claim/thread-cap 测试 `28 passed`，reward/hard-contract override 测试
-`58 passed`，合入 `main@da9ba58` 后仓内 `tests/` 为 `822 passed, 10 skipped`。`static-validate` 与 plan rc0；本任务未连接
-Pod、未启动 Isaac/trainer/judge，也没有 runtime hard contract 或 checkpoint。因此当前裁决是：
+`58 passed`，合入 `main@da9ba58` 后仓内 `tests/` 为 `822 passed, 10 skipped`。`static-validate` 与 plan rc0。
+后续 C2 已实际启动并自然形成 terminal hard contract/checkpoint；D2 尚未 claim。当前裁决更新为：
 
 - **GO（待 root 审阅）：** 只允许按
-  [C2/D2 运行手册](../../operations/run_phase1_signed_face_cd_l1.md)先做 Pod1 GPU1/GPU2 read-only
-  runtime validate，再按“boot 串行、跨卡训练可并发”的 barrier 购买两条 L1 provenance smoke；
+  [C2/D2 运行手册](../../operations/run_phase1_signed_face_cd_l1.md)用 v1r1 replay 已完成 C2 的冻结证据，
+  再购买尚未 claim 的 D2 L1 provenance smoke；
 - **NO-GO：** 旧 v9 artifact 采用、同 namespace retry、activation、judge、L2、第二 seed、stop/promote、
   部署或真机。
 
@@ -368,3 +368,23 @@ Pod、未启动 Isaac/trainer/judge，也没有 runtime hard contract 或 checkp
 终档后才能说明 provenance 闭合。K100 paper 已在并行 main 工作中物化，但其 paper-only activation
 固定 trainer/L2/judge=false；下一版本仍须以 no-clobber consumer 同时绑定 C2/D2 pair result 与该 exact
 paper receipt，当前文件不能直接启动 L2。行为结论仍须后续同卷 execution。实验继续 `running/partial`。
+
+### C2 float/int outer false rejection 与不可重跑续接
+
+C2 v1 的 launch contract/state/canonical claim SHA 为 `26bf204d...0e96` / `2bcc5656...beb8` /
+`37fe2443...86e5`；natural terminal log/hard-contract/model24 SHA 为 `abffd457...6dc3` /
+`83f47ae6...2772` / `dbbc7a28...6f6`。trainer 写出的
+`mount_normal_sign_per_clip=[1.0,-1.0]` 与实际 Hydra command 一致，但 v1 verifier 用整数
+`[1,-1]` 做 exact-type 深比较，因而在 post-boot 假拒绝。旧 runtime/failure/result 都 absent；这三个
+absence 是事实边界，不得通过事后补写把它描述成 v1 runtime verified。
+
+一次性 [`v1r1`](../../DEFINITIONS.md) manifest `8d893009...6e232` 直接冻结上述六个 SHA、C2
+PID=PGID 和精确 run path。它重算 canonical claim 与 checkpoint↔hard-contract/claim binding，且
+hard-contract verifier 只接受 exact float，显式拒绝 bool/int。attestation 进入独立 no-clobber
+`continuations/v1r1/`，不向 preserved C2 arm 增加文件。parser 没有 `--cell`、`launch-next`、C2 launch
+或 retry；D2 是唯一可 claim cell，且 claim 同时绑定 v1r1 manifest/launcher、原 v1 helper/source/
+recipe 和 C2 attestation。
+
+mixed outer-control pair（C2=v1、D2=v1r1）只有在两条 normalized trainer recipe 与 hard contract
+都只差 signed-face weight 时才可发布。focused v1+v1r1 为 `44 passed`；本分支没有连接 Pod 或启动
+D2，因此还没有 paired L1 result，更没有 activation/judge/L2/第二 seed/行为结论。

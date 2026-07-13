@@ -1,13 +1,13 @@
 # EXP-P1-FACE-SIGN-FORENSIC — 高解析上台率是否隐去了拍面反号？
 
-- 状态：source fix implemented；fresh runtime canary 与同卷复判 pending
+- 状态：source fix implemented；C2 L1 terminal evidence frozen、v1r1 attestation/D2 与同卷复判 pending
 - 工作类型：forensic（只做取证复核，不改变训练配方）
 - 阶段/轴：共用判分基础 + 课程阶段 1 / 拍面符号
 - 人类负责人：franco
 - 执行者：Codex
-- 工作分支：`Franco_codex/signed-face-honesty-20260713`（尚无可引用的 main commit）
-- 最高证据等级：E4 diagnostic + source/unit gate；修正后训练/考卷未跑
-- 最后复核：2026-07-13
+- 工作分支：`Franco_codex/signed-face-honesty-20260713`、`Franco_codex/signed-face-cd-l1-v1r1-20260714`
+- 最高证据等级：E4 diagnostic + source/unit gate；C2 有 terminal runtime bytes，但尚未形成成对结果
+- 最后复核：2026-07-14
 
 共享缩写见 [术语与人话对照](../../DEFINITIONS.md)。
 
@@ -98,6 +98,33 @@ face-blind reward path**（正手错面状态被现役 face-blind reward 路径�
 Torch/Hydra import-bound 文件的 training dependency-light 组合为 `381 passed, 21 skipped`。focused
 skip 与未收集的运行时模块都源于宿主没有 Torch/Isaac/Hydra，不是行为通过；Isaac canary 尚未执行。
 没有访问 Pod、启动 judge/simulator、改训练或运行真机。
+
+## 2026-07-14 C2 outer-verifier 假拒绝与 D2-only 续接
+
+[`signed-face C2/D2`](../../DEFINITIONS.md) 的 C2 在 Pod1 GPU1 已按冻结 source/seed/recipe 自然跑到
+`model_24.pt`，但 v1 outer verifier 没有写 `runtime_verified.json`。根因是表示层而不是 trainer
+配方：manifest 的摘要字段使用整数 `[1,-1]`，实际 Hydra 命令使用 `[1.0,-1.0]`，训练端又显式
+`float(x)` 后把 `[1.0,-1.0]` 写入 hard contract；v1 `require_exact` 同时要求 Python 类型相等，于是
+把合法 float wire value 误报成 bool/int confusion。
+
+冻结的 terminal 证据为：canonical claim `37fe2443...86e5`、final log `abffd457...6dc3`、hard
+contract `83f47ae6...2772`、`model_24.pt` `dbbc7a28...6f6`；launch contract/state 分别是
+`26bf204d...0e96` / `2bcc5656...beb8`。旧 runtime/failure/result 三文件必须 absent，D2 arm 与 exact
+run name 也必须 absent。C2 checkpoint 仍需由一次性 consumer 重算 canonical claim、finite/iter24/
+lineage1 和 checkpoint↔hard-contract/claim binding 后才可进入 pair；这里不把缺失的 v1 runtime sidecar
+补写成“当时已验证”。
+
+修复采用 [`v1r1` one-shot continuation](../../DEFINITIONS.md)，而不是重跑 C2。新 manifest
+`8d893009...6e232` 冻结上述六个 SHA 和 absence boundary；新 verifier 只接受 exact float
+`[1.0,-1.0]`，显式拒绝 `[True,-1.0]` 与 `[1,-1]`。C2 attestation 写入独立
+`continuations/v1r1/` evidence root，不向 preserved C2 arm 增加文件。唯一 launch mode 是
+`launch-d2`：它要求 C2 attestation 可逐值 replay、D2 未 claim、GPU2 空，并让 D2 checkpoint 绑定
+v1r1 manifest/launcher、原 v1 source/recipe 和 C2 attestation。最终 pair 必须显式承认 mixed outer
+control（C2=v1、D2=v1r1），同时证明规范化 trainer recipe 与 hard contract 都只差 signed-face
+weight。activation/judge/L2/第二 seed/stop-promote/真机继续为 false。
+
+本分支只完成本地 source/contract gate，没有连接 Pod 或启动 D2；运行步骤见
+[C2/D2 L1 操作文档](../../operations/run_phase1_signed_face_cd_l1.md)。
 
 ## 预注册决定规则
 

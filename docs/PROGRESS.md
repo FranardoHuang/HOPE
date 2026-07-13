@@ -13,11 +13,13 @@
 
 ## 2026-07-14
 
-- signed-face fresh C2/D2 的 provenance 缺口已在 source gate 闭合：旧 v9 hard contract 未绑定
-  guidance `0/-0.4`，新 source `4467d79` 同时把 post-override guidance 写入相邻合同、把 outer atomic
-  claim/source/GPU lane 写入 checkpoint。新 manifest 按广度优先固定 Pod1 C2→GPU1、D2→GPU2，Kit
-  boot 串行但训练可跨卡并发；专项 `28 passed`，尚未上 Pod，L1 terminal/L2/judge/第二 seed 全未授权。
-  见[实验](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)与
+- signed-face fresh C2 已在 Pod1 自然产生 finite/iter24/lineage1 terminal bytes，但 v1 outer verifier
+  用整数 `[1,-1]` strict-type 比较训练端合法 float `[1.0,-1.0]`，因而假拒绝且没有写
+  `runtime_verified`。旧 C2 claim/log/hard/checkpoint 六类 SHA 与 runtime/failure/result absence 已冻结；
+  D2 从未 claim。新的 one-shot `v1r1` 只在独立 evidence root 重算 C2 canonical claim/terminal binding，
+  唯一 launch mode 只允许未 claim 的 D2；没有 C2 retry 路径。新旧 focused 合计 `44 passed`，本分支
+  未连接 Pod/启动 D2，L2/judge/第二 seed 仍未授权。见
+  [face-sign 实验](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)与
   [操作](operations/run_phase1_signed_face_cd_l1.md)。
 
 - Franco 将共享算力调度改为“先铺满卡、再叠并发”：保留已绑定运行原位不动，新任务先跨 Pod1/Pod2

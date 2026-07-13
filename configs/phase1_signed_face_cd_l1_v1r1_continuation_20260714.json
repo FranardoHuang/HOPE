@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "continuation_id": "phase1-signed-face-c2-d2-l1-v1r1-d2-only-20260714",
+  "created_local": "2026-07-14T21:25:00+08:00",
+  "status": "machine_preregistered_one_shot_continuation_root_launch_switch_required",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "simulation_only": true,
+  "real_robot_commands_forbidden": true,
+  "automatic_retry_forbidden": true,
+  "c2_relaunch_forbidden": true,
+  "activation_authorized": false,
+  "judge_authorized": false,
+  "l2_authorized": false,
+  "second_seed_authorized": false,
+  "original_v1_control": {
+    "root": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/control/v1",
+    "manifest_basename": "phase1_signed_face_cd_l1_prereg_20260714.json",
+    "manifest_sha256": "785ad96dd53e1809ddcf86d1ecd80572b02e3c96ffd6d6599cab20a73b559895",
+    "launcher_basename": "run_phase1_signed_face_cd_l1.py",
+    "launcher_sha256": "0fa250207246e8bf69b6475125882b45e817f9e777d13039614c82dad9a803ba"
+  },
+  "continuation_control": {
+    "root": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/control/v1r1",
+    "manifest_basename": "phase1_signed_face_cd_l1_v1r1_continuation_20260714.json",
+    "launcher_basename": "continue_phase1_signed_face_cd_l1_v1r1.py",
+    "v1_helper_basename": "run_phase1_signed_face_cd_l1.py",
+    "v1_helper_sha256": "0fa250207246e8bf69b6475125882b45e817f9e777d13039614c82dad9a803ba",
+    "root_launch_confirmation": "ROOT_APPROVES_SIM_ONLY_SIGNED_FACE_D2_ONLY_V1R1"
+  },
+  "preserved_c2": {
+    "cell_id": "C2",
+    "run_name": "phase1_signed_face_l1_c2d2_v1_C2_fresh_control_seed3",
+    "arm_path": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/runs/l1/phase1_signed_face_l1_c2d2_v1_C2_fresh_control_seed3",
+    "launch_contract_sha256": "26bf204d55231d134234ebac41594643b3aabc3668da5650342569cbb8f60e96",
+    "launch_state_sha256": "2bcc565693e44a6ef183fb6a52d43ee9aa5aaf77f892a3a3aa18368173beb8e2",
+    "training_launch_claim_sha256": "37fe244315bb6f3f179595ad0673cc638e6b1265f967019dff01fd518d4f86e5",
+    "pid_equals_pgid": 1820092,
+    "training_run_dir": "/workspace/codexschema/nohope_signed_face_cd_l1_4467d79/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-13_20-57-21_phase1_signed_face_l1_c2d2_v1_C2_fresh_control_seed3",
+    "training_log_sha256": "abffd4572578925e25b079ad6d86f6d98474e6d2dca88e0f5a2a7dd426c36dc3",
+    "hard_contract_sha256": "83f47ae6f0832b354112653a6f4cd66f98075181e6a546328a2b8d7a581c2772",
+    "terminal_checkpoint_basename": "model_24.pt",
+    "terminal_checkpoint_sha256": "dbbc7a28ece4e166ba3743706827496960392fc46394286e7fddf83cddd776f6",
+    "hard_contract_mount_normal_sign_per_clip": [1.0, -1.0],
+    "old_runtime_verified_must_be_absent": true,
+    "old_launch_failure_must_be_absent": true,
+    "old_terminal_result_must_be_absent": true,
+    "outer_false_rejection": "v1 compared emitted float mount signs against integer expectations with exact Python types",
+    "training_recipe_changed": false
+  },
+  "d2_only_continuation": {
+    "cell_id": "D2",
+    "run_name": "phase1_signed_face_l1_c2d2_v1_D2_fresh_guidance_seed3",
+    "arm_path": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/runs/l1/phase1_signed_face_l1_c2d2_v1_D2_fresh_guidance_seed3",
+    "physical_gpu": 2,
+    "face_guidance_weight": -0.4,
+    "arm_and_exact_training_run_must_be_absent_before_claim": true,
+    "one_new_atomic_claim": true,
+    "same_v1_training_source_recipe_and_runtime": true
+  },
+  "outputs": {
+    "continuation_evidence_root": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/continuations/v1r1",
+    "c2_attestation_path": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/continuations/v1r1/c2_terminal_attestation.json",
+    "d2_runtime_verified_basename": "runtime_verified_v1r1.json",
+    "d2_launch_failure_basename": "launch_failure_v1r1.json",
+    "d2_terminal_result_basename": "terminal_result_v1r1.json",
+    "paired_result_path": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/runs/l1/paired_l1_result_v1r1.json"
+  },
+  "decision_boundary": {
+    "c2_relaunch": false,
+    "d2_automatic_retry": false,
+    "activation": false,
+    "judge": false,
+    "l2": false,
+    "second_seed": false,
+    "stop_or_promote": false,
+    "real_robot_commands": false
+  }
+}
