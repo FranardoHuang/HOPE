@@ -1,9 +1,10 @@
 # Joint Order And Robot State
 
-Status: two distinct 31-DOF order domains are now explicit and content-bound. The source-only
-bijection gate passes on tracked files; no B/C [schema-2 motion](../DEFINITIONS.md) was created and no
-simulator or hardware command ran. Backend command scattering was previously verified on hardware
-(2026-07-03) against AGI `robot_io::MakeA3Layout31()`.
+Status: two distinct 31-DOF order domains are explicit and content-bound, and the separate B/C
+[schema-2 motion](../DEFINITIONS.md)/FK preregistration now passes its tracked source gate. Runtime
+donor/pickle/model inspection and schema-2 materialization have not run; no simulator or hardware
+command ran. Backend command scattering was previously verified on hardware (2026-07-03) against
+AGI `robot_io::MakeA3Layout31()`.
 
 ## Goal
 
@@ -115,12 +116,19 @@ mirror. A donor ONNX must expose all three fields: `joint_names`, `articulation_
 `action_joint_ids=0..30`; partial legacy metadata is rejected. `audit_motion_npz.py` resolves its
 default NPZ joint labels from that validated byte-frozen mirror.
 
-Passing this gate authorizes **no** B/C materialization. The next preregistration must separately
-bind exact B/C SE(2) pickle bytes, restricted-pickle semantics, the vendor MJCF/include/mesh closure,
-[`a3_runtime_body_order.txt`](../../configs/a3_runtime_body_order.txt), 30→50 Hz resampling, MuJoCo
-forward kinematics, link-origin positions plus center-of-mass velocities, and the fact that the B/C
-roots are already in the HOPE frame (therefore no second frame rotation). It must publish output
-last and remain no-clobber.
+The separate preregistration now binds all of those inputs in
+[`motion_backhand_loop_bc_schema2_fk_runtime_v1.json`](../../configs/motion_backhand_loop_bc_schema2_fk_runtime_v1.json)
+and one independent plan per B/C asset. The consumer maps GMR columns through the checked
+permutation before FK; schema-2 `joint_pos/joint_vel` are therefore runtime-order. The body file has
+32 unique columns that form a bijection over the 32 named vendor MJCF bodies. `body_pos_w` comes from
+link-origin `xpos`, while `body_lin_vel_w` differentiates center-of-mass `xipos`.
+
+Passing the tracked `static` gate still authorizes **no immediate materialization**. The next command
+is a no-write runtime inspection: restricted-load the exact private pickle; hash the exact donor
+ONNX and re-extract all three required metadata rows; load the content-bound MJCF closure; and verify
+the output root is absent. The CLI only accepts `--hope_frame off`, because the B/C root has already
+been transformed into the HOPE frame. Only a successful per-asset inspection unlocks its one
+no-clobber 30→50 Hz FK materialization; output report is published last.
 
 ## Policy/runtime/backend scattering
 

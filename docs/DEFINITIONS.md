@@ -63,6 +63,7 @@
 | --- | --- |
 | `GVHMR` | Global Video-based Human Motion Recovery：把单目人物视频恢复成 SMPL-X 人体动作的离线前处理器。结构输出通过只说明人体重建文件形状和有限数合法，不等于机器人动作、安全或击球有效。 |
 | `GMR` | General Motion Retargeting：把 GVHMR 的人体动作重定向到 Agibot A3 关节/刚体。GVHMR 结果不会自动授权 GMR；每一代输入、body shape、源代码和输出都要另做内容绑定。 |
+| `FK` / forward kinematics / 正向运动学 | 给定 floating root 和关节位置，用机器人模型计算每个 link/刚体的世界位置与姿态。本项目的离线 MuJoCo FK 不推进动力学时间，也不等于 simulator、碰撞安全或动作有效性通过。 |
 | `TOPP` | Time-Optimal Path Parameterization：在不改几何路径的前提下，按速度、加速度等约束重新分配动作时间。它可以压缩过长 clip 或对齐阶段，但不会自动修正碰撞、平衡、拍面或击球点。 |
 | `SMPL-X` | 带身体、手和姿态参数的人体模型表示；本项目把它作为视频动作与机器人重定向之间的中间制品，不把它当作 A3 runtime-order 动作。 |
 | `S0`（static high-press batch） | 2026-07-13 新视频的单条离线结构批，只处理 `static/pai.mp4` 高点拍压。通过只说明 GVHMR 结构输出合法，不是第 0 个随机种子、训练阶段或动作晋级。 |

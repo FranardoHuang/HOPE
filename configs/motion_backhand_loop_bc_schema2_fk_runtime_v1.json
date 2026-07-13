@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "contract_id": "motion-backhand-loop-bc-schema2-fk-v1",
+  "status": "source_contract_complete_runtime_inspection_not_run",
+  "scope": "CPU-only exact B/C GMR-pickle to schema-2 materialization with vendor MuJoCo forward kinematics; source gate only until separate read-only runtime inspection",
+  "consumer": {
+    "path": "scripts/materialize_motion_schema2_fk.py",
+    "bytes": 49151,
+    "sha256": "33cf23eecff514a0e89bfe245db5b63470c4cd1dc9a433d0b920dfd84b9caebd"
+  },
+  "restricted_pickle": {
+    "loader": {
+      "path": "scripts/materialize_motion_spatial_se2.py",
+      "bytes": 35585,
+      "sha256": "21ebbe68d5d76acde90bb413f68928df9d87cb053275d9f0f46d36dbf1187375"
+    },
+    "entrypoint": "load_bound_pickle",
+    "allowed_globals": [
+      "numpy._core.numeric._frombuffer",
+      "numpy.core.numeric._frombuffer",
+      "numpy.dtype"
+    ],
+    "required_keys": [
+      "dof_pos",
+      "fps",
+      "link_body_list",
+      "local_body_pos",
+      "root_pos",
+      "root_rot"
+    ],
+    "optional_keys": [
+      "root_ang_vel_world",
+      "root_lin_vel_world"
+    ],
+    "unknown_keys": "fail_closed"
+  },
+  "donor_metadata": {
+    "snapshot": {
+      "path": "configs/a3_schema2_fk_donor_metadata_v1.json",
+      "bytes": 2301,
+      "sha256": "0e55b78806e3a5ae26f3ace6df067ec5cd145ed985a778f7962e4bfe24116f1c"
+    },
+    "source_onnx_sha256": "0c428ddf9968b047acbe7bbd5a39069a8e661ab0421038ea3b635284deb7b155",
+    "runtime_policy": "operator_supplies_regular_non_symlink_ONNX; exact SHA then required metadata subset are re-extracted before model/FK use"
+  },
+  "vendor_mjcf_closure": {
+    "model_root": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong",
+    "canonical_mjcf": {
+      "path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+      "bytes": 49107,
+      "sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+    },
+    "derived_closure": {
+      "algorithm": "sha256(canonical-json(sorted[{path,bytes,sha256}]))-v1",
+      "file_count": 75,
+      "total_bytes": 14127373,
+      "manifest_sha256": "e0381752eab46013c08559b331abb261beaa88a207a3c2f1155ab00857b962de",
+      "xml_file_count": 1,
+      "include_reference_count": 0,
+      "external_file_reference_count": 74,
+      "unique_external_file_count": 74,
+      "mesh_reference_count": 74
+    }
+  },
+  "joint_order": {
+    "contract": {
+      "path": "configs/a3_joint_order_bijection_v1.json",
+      "bytes": 2579,
+      "sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815"
+    },
+    "validator": {
+      "path": "hope_training/whole_body_tracking/scripts/a3_joint_order_contract.py",
+      "bytes": 17677,
+      "sha256": "8f01d20d4ce47e543b90a8e38dba52c70784d9f8b3be6a9ddb0965863a5c1ae9"
+    }
+  },
+  "runtime_body_order": {
+    "source": {
+      "path": "configs/a3_runtime_body_order.txt",
+      "bytes": 629,
+      "sha256": "1cdae4ba7c8d604428ee69ed4a3059e67fb195b22e1d0e294d509c4325809a3a"
+    },
+    "count": 32,
+    "names_sha256": "ecf0b21ac933750bd0ab2c3ef6b49e3f22dcb9bcd147b35a6243ab608b4424c1"
+  },
+  "converter_helper": {
+    "path": "hope_training/whole_body_tracking/scripts/csv_to_npz_mujoco.py",
+    "bytes": 18832,
+    "sha256": "a151a691983eac72cd6f9f58f08979aea7fa657092d09ee5c3742a3e02b07f04"
+  },
+  "kinematics": {
+    "path": "hope_training/whole_body_tracking/scripts/motion_kinematics_contract.py",
+    "bytes": 10145,
+    "sha256": "7b68f19fb4468c0776b3941e20381314bde2edb0d1d5cc0af5b03b18f25da5ab"
+  },
+  "temporal": {
+    "input_fps": 30,
+    "output_fps": 50,
+    "output_frame_formula": "round(((input_frames-1)/30)*50)+1",
+    "root_position_and_dof": "piecewise_linear_on_source_phase_clipped_to_last_frame",
+    "root_quaternion": "shortest_path_slerp_xyzw_input_converted_to_wxyz_before_slerp",
+    "joint_and_body_linear_velocity": "numpy_gradient_dt_1_over_50",
+    "body_angular_velocity": "SO3_central_difference_dt_1_over_50_endpoint_repeat",
+    "topp_or_time_warp": false
+  },
+  "frame": {
+    "evidence": {
+      "path": "configs/motion_video_gmr_frame_contract_results_20260711.json",
+      "bytes": 32511,
+      "sha256": "e70492becf5a2fae5ee74724d22f9ca9d2e874d535231e3ee6649f01669048f0"
+    },
+    "hope_frame_helper": {
+      "path": "hope_training/whole_body_tracking/scripts/hope_frame_utils.py",
+      "bytes": 4729,
+      "sha256": "0201fefbb7f67e29c5489f98e45746efaf2ea4bbad356218bd11e7a794acf7f2"
+    },
+    "input_already_in_HOPE_frame": true,
+    "required_cli": [
+      "--hope_frame",
+      "off"
+    ],
+    "second_HOPE_rotation": "forbidden",
+    "root_rotation_input": "xyzw",
+    "root_rotation_mujoco_and_output": "wxyz"
+  },
+  "schema2_output": {
+    "kinematics_schema_version": 2,
+    "joint_pos_order": "runtime_articulation_joint_pos",
+    "body_columns": "exact_runtime_body_order_file",
+    "body_pos_w_point": "link_origin_from_MuJoCo_xpos",
+    "body_quat_w": "link_frame_wxyz_from_MuJoCo_xquat",
+    "body_lin_vel_w_point": "center_of_mass_gradient_from_MuJoCo_xipos",
+    "body_ang_vel_w": "link_frame_angular_velocity_point_independent",
+    "dtype": "float32_for_time_series",
+    "finite_required": true
+  },
+  "authorization": {
+    "runtime_inspection_authorized": true,
+    "schema2_materialization_authorized_after_inspection_only": true,
+    "simulator_authorized": false,
+    "training_authorized": false,
+    "formal_motion_authorized": false,
+    "hardware_authorized": false
+  }
+}
