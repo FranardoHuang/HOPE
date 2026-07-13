@@ -59,6 +59,10 @@ python3 -m pytest -q tests/test_audit_motion_video_intake.py
 
 ## 决定与下一步
 
-在未来预处理队列中，先处理 v12，然后是高点拍压和横移候选；但在当前更高优先级的 q50/planner/拍面符号收口完成，
-且离线动作门拥有经复核的下游消费者之前，不启动任何一项。详细实验设计见
+离线 GVHMR-only 执行已纠正为两个独立、fail-closed 的内容寻址 [S0/M0](../DEFINITIONS.md) 小批：S0 仅高点拍压，M0 仅四条横移
+候选；v12 本轮不授权，只作为 Jiayi 路线后续对照。2026-07-11 的 Franco 六段已有 exact GVHMR/GMR，
+不重复结构提取。本分支没有复制到 Pod 或启动 GPU，两批均没有 post-GVHMR consumer，因此不授权
+GMR、schema-2、simulator 或 RL。执行合同见
+[`motion_video_gvhmr_prereg_franco_static_motion_20260713.md`](motion_video_gvhmr_prereg_franco_static_motion_20260713.md)；
+后续动作组合设计仍见
 [`motion_v12_high_press_lateral_teacher_20260713.md`](motion_v12_high_press_lateral_teacher_20260713.md)。

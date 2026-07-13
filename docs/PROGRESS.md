@@ -44,6 +44,16 @@
   `172.33°/174.35°`，所以旧高分不晋级。aggregate file/content SHA 为
   `1ba88e39...d195` / `226e6050...648d`；详见
   [稳定性实验](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)。
+- 动作离线顺序纠正为 Franco 主线优先：六段旧素材复用 exact GVHMR/GMR，不再重跑；反手拉 B/C 的
+  frame 49/50 只登记为空挥名义视觉锚点。新视频拆成互不阻塞的 [S0/M0](DEFINITIONS.md) 离线结构批：高点拍压单条与四条横移候选，
+  v12 本轮不授权。两批绑定 GVHMR/权重/Python/`nvidia-smi`/validator/argv，并用 batch-only source
+  fd 生成私有只读快照供 child 消费，再以 inode/mtime/ctime/SHA 复核；同时拒绝 symlink、原子 claim
+  不相交 state/output。07-11 旧 launcher 已压成仅证据 gzip，不再提供通用入口；M0 未来终点必须恢复初始、
+  朝向对齐且含前后错位的双脚分离向量。Host 聚焦套件 `50 passed`，仓库 `tests/` 为
+  `573 passed, 9 skipped`；本分支未复制 Pod、未启动
+  GVHMR/GMR/simulator/RL/真机。见
+  [实验卷宗](experiments/motion_video_gvhmr_prereg_franco_static_motion_20260713.md)与
+  [操作文档](operations/run_motion_video_gvhmr_prereg.md)。
 - Phase-1 fresh 广度池分两波完成负责人批准的运营收口：16 臂已全部在保留日志并验证最后
   checkpoint 的迭代、`1,762,715` 个浮点元素 finite、schema-3、fresh lineage 与相邻合同 SHA 后，
   只按各自登记 PGID 停止。第二波前又确认 24/24 最近 K20 格的正手 signed composite 都为 0；

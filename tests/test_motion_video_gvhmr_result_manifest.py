@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import gzip
 import json
 from pathlib import Path
 import re
@@ -17,9 +18,16 @@ def test_tracked_gvhmr_results_bind_the_exact_intake_and_every_asset():
     result = json.loads(RESULT_PATH.read_text(encoding="utf-8"))
 
     intake_sha = hashlib.sha256(INTAKE_PATH.read_bytes()).hexdigest()
-    queue_tool_sha = hashlib.sha256(
-        (ROOT / "scripts" / "run_motion_video_gvhmr_queue.py").read_bytes()
-    ).hexdigest()
+    archived_source = (
+        ROOT
+        / "docs"
+        / "experiments"
+        / "archive"
+        / "run_motion_video_gvhmr_queue_20260711.py.gz"
+    )
+    with gzip.open(archived_source, "rb") as stream:
+        queue_tool_sha = hashlib.sha256(stream.read()).hexdigest()
+    assert not (ROOT / "scripts" / "run_motion_video_gvhmr_queue_20260711.py").exists()
     result_auditor_sha = hashlib.sha256(
         (ROOT / "scripts" / "audit_gvhmr_result.py").read_bytes()
     ).hexdigest()

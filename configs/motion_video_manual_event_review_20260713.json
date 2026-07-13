@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "review_id": "motion-video-manual-event-review-20260713-v1",
+  "scope": "nominal visual event and ready-window annotations for seven air-swing videos; no ball-contact truth, robot kinematics, safety, or behavior claim",
+  "intake": {
+    "path": "configs/motion_video_intake_20260713.json",
+    "sha256": "44b00b3c46c837d797990bc6f6255055c0ff83c1bb8643ca81f9707033ca304c"
+  },
+  "review_method": {
+    "executor": "Codex",
+    "source": "manual visual review of the exact content-addressed private videos",
+    "stroke_sampling_period_s": 0.166667,
+    "lateral_sampling_period_s": 0.25,
+    "anchor_semantics": "a nominal visual alignment event inside an air swing, never an observed ball contact",
+    "ready_window_semantics": "a visually near-stationary source-video interval, not a measured robot-ready set",
+    "uncertainty": "window endpoints are deliberately wider than one sampled thumbnail; downstream kinematic review must refine them"
+  },
+  "processing_order": [
+    "v12_forehand_block",
+    "v12_backhand_block",
+    "static_backhand_high_press",
+    "lateral_step_left_1",
+    "lateral_step_left_2",
+    "lateral_step_right_1",
+    "lateral_step_right_2"
+  ],
+  "assets": [
+    {
+      "asset_id": "v12_forehand_block",
+      "source_sha256": "a81f5e727c57b175438bf29468ab30390db1cd787f7cd59dc703bbe24b531a46",
+      "duration_s": 3.333333,
+      "event_kind": "nominal_visual_strike_like_extension",
+      "ready_before_window_s": [0.0, 0.833333],
+      "nominal_event_window_s": [1.333333, 1.833333],
+      "nominal_event_anchor_s": 1.583333,
+      "ready_after_window_s": [2.333333, 3.166667],
+      "review_status": "nominal_air_swing_visual_review_complete"
+    },
+    {
+      "asset_id": "v12_backhand_block",
+      "source_sha256": "97a928d281d29e1753dbc831ffd9c7b6dbcaa661ec49553bac8fc0a864aaca64",
+      "duration_s": 3.3,
+      "event_kind": "nominal_visual_strike_like_extension",
+      "ready_before_window_s": [0.0, 0.833333],
+      "nominal_event_window_s": [1.166667, 1.666667],
+      "nominal_event_anchor_s": 1.416667,
+      "ready_after_window_s": [2.0, 3.166667],
+      "review_status": "nominal_air_swing_visual_review_complete"
+    },
+    {
+      "asset_id": "static_backhand_high_press",
+      "source_sha256": "5bd2bc46c615005b4b521352e8950d2e7a7d7d8d0e5613fe1ac1755ae6045657",
+      "duration_s": 2.933333,
+      "event_kind": "nominal_visual_forward_downward_press_extension",
+      "ready_before_window_s": [0.0, 0.833333],
+      "nominal_event_window_s": [1.166667, 1.666667],
+      "nominal_event_anchor_s": 1.416667,
+      "ready_after_window_s": [2.0, 2.833333],
+      "review_status": "nominal_air_swing_visual_review_complete"
+    },
+    {
+      "asset_id": "lateral_step_left_1",
+      "source_sha256": "0d421f7f37dba1d4a9c033775a9cfc62d7221600a2a60ddd354d9b6009a3279f",
+      "duration_s": 3.5,
+      "event_kind": "nominal_visual_lateral_support_plateau",
+      "ready_before_window_s": [0.0, 0.75],
+      "nominal_event_window_s": [1.0, 1.75],
+      "nominal_event_anchor_s": 1.5,
+      "ready_after_window_s": [2.75, 3.25],
+      "review_status": "nominal_air_swing_visual_review_complete"
+    },
+    {
+      "asset_id": "lateral_step_left_2",
+      "source_sha256": "4074a8054d5814f640cd8c5e38188d7d70bb3ec1ce62068931dcf2b8fad52f9d",
+      "duration_s": 3.233333,
+      "event_kind": "nominal_visual_lateral_support_plateau",
+      "ready_before_window_s": [0.0, 0.75],
+      "nominal_event_window_s": [1.0, 1.75],
+      "nominal_event_anchor_s": 1.5,
+      "ready_after_window_s": [2.5, 3.0],
+      "review_status": "nominal_air_swing_visual_review_complete"
+    },
+    {
+      "asset_id": "lateral_step_right_1",
+      "source_sha256": "3956084f9ceab180022c0d141fdfdd68ca4a5b0c5f8f34d3d1803de30b06beb5",
+      "duration_s": 2.733333,
+      "event_kind": "nominal_visual_lateral_support_plateau",
+      "ready_before_window_s": [0.0, 0.5],
+      "nominal_event_window_s": [0.75, 1.5],
+      "nominal_event_anchor_s": 1.25,
+      "ready_after_window_s": [2.0, 2.5],
+      "review_status": "nominal_air_swing_visual_review_complete"
+    },
+    {
+      "asset_id": "lateral_step_right_2",
+      "source_sha256": "24ea4e4244cb0a7b6a8e5e15dc9dfc83c0a1f9c0b26a4fc411fa0922559b7eb8",
+      "duration_s": 3.2,
+      "event_kind": "nominal_visual_lateral_support_plateau",
+      "ready_before_window_s": [0.0, 0.75],
+      "nominal_event_window_s": [1.0, 1.75],
+      "nominal_event_anchor_s": 1.5,
+      "ready_after_window_s": [2.5, 3.0],
+      "review_status": "nominal_air_swing_visual_review_complete"
+    }
+  ],
+  "foot_stance_contract": {
+    "applies_to": [
+      "lateral_step_left_1",
+      "lateral_step_left_2",
+      "lateral_step_right_1",
+      "lateral_step_right_2"
+    ],
+    "rule": "after root translation and heading are removed, the terminal horizontal left-to-right foot-separation vector must return to the robust median of the initial ready window",
+    "video_evidence_limit": "pixel-space review cannot measure the robot-frame vector; GVHMR/GMR and foot-contact review must materialize and test it",
+    "forbidden_substitute": "do not force both feet to one absolute pose or accept a narrower feet-together terminal stance"
+  },
+  "downstream_policy": {
+    "gvhmr_use": "annotations are provenance only and do not alter video-to-SMPL-X inference",
+    "gmr_or_composition_use": "requires a separately content-addressed consumer and kinematic refinement",
+    "training_or_simulator_authorized": false,
+    "hardware_authorized": false
+  }
+}

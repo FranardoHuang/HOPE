@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "review_id": "franco-backhand-loop-bc-nominal-visual-anchor-20260713-v1",
+  "status": "nominal_visual_review_complete_contact_truth_null",
+  "scope": "content-bound visual review of the two retained Franco backhand-loop candidates only",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "intake": {
+    "path": "configs/motion_video_intake_20260711.json",
+    "sha256": "6661f9ac3dba930835a8c241ecb4a779d62be0cbb9aa4d1712d5470db6c9b289"
+  },
+  "gvhmr_results": {
+    "path": "configs/motion_video_gvhmr_results_20260711.json",
+    "sha256": "0aaee40d689033518f24e9667478142398ae370f3bbde73e1638c0bfb321fd86"
+  },
+  "counterfactual_results": {
+    "path": "configs/motion_video_gmr_phase_counterfactual_results_20260711.json",
+    "sha256": "f8e9e3b68bdb36f12383869f82346c36fc4ea7adff8c53e8d4666e5c47d4eb87"
+  },
+  "review_method": {
+    "source": "manual inspection of the exact source-video frame windows",
+    "candidate_order": [
+      "franco_backhand_loop_b",
+      "franco_backhand_loop_c"
+    ],
+    "anchor_semantics": "nominal air-swing racket event only; the recordings contain no ball, so contact_truth remains null",
+    "frame_index_semantics": "zero-based decoded source-video frame index at 30 fps"
+  },
+  "assets": [
+    {
+      "asset_id": "franco_backhand_loop_b",
+      "source_relpath": "Franco/backhand_la2.mp4",
+      "source_bytes": 3588704,
+      "source_sha256": "73a9a68a7895ecfd337e318fe191ef1d40dc1cb5ffbcebe4af8e86ac72fdc85c",
+      "source_frames": 91,
+      "source_fps": 30.0,
+      "gvhmr_result_sha256": "8fd51458510f5b2cd0768e9d3cb3648aaf7ead2e752b1c02f160aa5f86ea0515",
+      "nominal_event_frame_window": [45, 53],
+      "nominal_event_anchor_frame": 49,
+      "nominal_event_anchor_s": 1.6333333333333333,
+      "visual_judgement": "reasonable nominal racket-contact-like instant for later alignment",
+      "contact_truth": null
+    },
+    {
+      "asset_id": "franco_backhand_loop_c",
+      "source_relpath": "Franco/backhand_la3.mp4",
+      "source_bytes": 4102026,
+      "source_sha256": "ba885bb03869b75edc62c80b106774b910c7d5e41e62c01f2052d87bbc034354",
+      "source_frames": 98,
+      "source_fps": 30.0,
+      "gvhmr_result_sha256": "a049e79028fc8c840bfa29bc192e3fe1759e31520c37ed26606e9d139949586f",
+      "nominal_event_frame_window": [46, 54],
+      "nominal_event_anchor_frame": 50,
+      "nominal_event_anchor_s": 1.6666666666666667,
+      "visual_judgement": "reasonable nominal racket-contact-like instant for later alignment",
+      "contact_truth": null
+    }
+  ],
+  "existing_evidence_boundary": {
+    "gvhmr_rerun_authorized": false,
+    "franco_six_gvhmr_structural_results_already_exist": true,
+    "candidate_b_intrinsic_return_count_of_32": 32,
+    "candidate_c_intrinsic_return_count_of_32": 27,
+    "spatial_retarget_or_schema2_authorized": false,
+    "training_or_simulator_authorized": false,
+    "hardware_authorized": false
+  },
+  "next_contract": "action-family-specific question papers and exact SE(2) retarget/schema-2 certificates are separate follow-up work"
+}

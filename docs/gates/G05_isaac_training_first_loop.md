@@ -563,7 +563,8 @@ Ten private Franco/v6/v7 air-swing videos are now registered by the tracked,
 content-addressed `configs/motion_video_intake_20260711.json`. Local and Pod1
 copies passed byte/hash/media validation. `scripts/audit_motion_video_intake.py`
 the structural `scripts/audit_gvhmr_result.py`, and the memory-gated
-`scripts/run_motion_video_gvhmr_queue.py` and the tracked result binding are covered by 20 dependency-light
+byte-exact gzip source archive `docs/experiments/archive/run_motion_video_gvhmr_queue_20260711.py.gz`
+and the tracked result binding are covered by dependency-light
 tests. Pod1 queue PID/PGID `1383735` completed all ten reconstructions after
 GPU1 naturally crossed the `19000 MiB` launch gate. It processed the Franco
 forehand-block item first, then the remaining Franco and v6/v7 clips, and was pinned to GVHMR `6ec3ca3`, a

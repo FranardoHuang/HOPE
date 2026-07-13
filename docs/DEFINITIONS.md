@@ -58,6 +58,11 @@
 
 | 术语 | 人话 |
 | --- | --- |
+| `GVHMR` | Global Video-based Human Motion Recovery：把单目人物视频恢复成 SMPL-X 人体动作的离线前处理器。结构输出通过只说明人体重建文件形状和有限数合法，不等于机器人动作、安全或击球有效。 |
+| `GMR` | General Motion Retargeting：把 GVHMR 的人体动作重定向到 Agibot A3 关节/刚体。GVHMR 结果不会自动授权 GMR；每一代输入、body shape、源代码和输出都要另做内容绑定。 |
+| `SMPL-X` | 带身体、手和姿态参数的人体模型表示；本项目把它作为视频动作与机器人重定向之间的中间制品，不把它当作 A3 runtime-order 动作。 |
+| `S0`（static high-press batch） | 2026-07-13 新视频的单条离线结构批，只处理 `static/pai.mp4` 高点拍压。通过只说明 GVHMR 结构输出合法，不是第 0 个随机种子、训练阶段或动作晋级。 |
+| `M0`（motion lateral-teacher batch） | 同一代新视频的四条横移老师离线结构批，按 left-1/left-2/right-1/right-2 顺序处理。四条是动作候选，不是四个随机 seed；GVHMR 不验证机器人脚距。 |
 | `High press` / 高点拍压 | 右手机器人用反手在较高击球点迎球，球拍向前且拍面朝下，把球压回台内的独立动作类型。它不是被动挡球或反手拉球，必须使用自己的高球来球考卷。 |
 | `Lateral locomotion teacher` / 横移下肢老师 | 只描述准备迈步、击球支撑和恢复三段的下半身/根节点参考动作，并以有符号横移距离为条件。它不是正手或反手挥拍本身，和上半身动作组合后仍须重新过全身安全与动力学门。 |
 | `Non-striking arm` / 非击球臂 | 当前右手 A3 动作库中的左臂。取消它的模仿 Reward 只表示允许左臂帮助平衡，不会关闭关节、力矩、自碰或安全停机约束。 |

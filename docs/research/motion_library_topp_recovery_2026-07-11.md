@@ -44,7 +44,9 @@ python3 scripts/audit_motion_video_intake.py
 /workspace/codexschema/motion_video_intake_20260711/raw/
 ```
 
-GVHMR 队列脚本为 `scripts/run_motion_video_gvhmr_queue.py`。Pod1 PID/PGID
+该次 GVHMR 队列的逐字节源码证据压缩归档为
+`docs/experiments/archive/run_motion_video_gvhmr_queue_20260711.py.gz`；解压字节 SHA 仍绑定旧结果，但它不再是
+当前 `scripts/` 下的可执行入口。Pod1 PID/PGID
 `1383735` 在 GPU1 自然低于 `19000 MiB` 后启动，从 09:27:50Z 到 09:37:16Z
 完成 10/10，GVHMR commit 为
 `6ec3ca39336c50492c0fae65fba2fb831fc7d866`。队列先做 Franco 正手挡，再做余下

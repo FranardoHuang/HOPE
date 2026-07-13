@@ -426,6 +426,21 @@ spatial-retarget prereg 因此从 `d8c918ac...5a9f` 重绑到 `0f757c8c...af66a`
 最后在不可变留出集上考试。非击球左臂模仿解除也是单独的配对消融，硬安全始终开启。这些都只是
 设计记录，不是动作采用或训练授权。
 
+动作执行顺序已纠正为 Franco 主线优先：2026-07-11 的六段 Franco 动作已有 exact GVHMR/GMR，F0 不
+重跑；反手拉 B/C 新增 frame 49/50 的内容绑定名义视觉锚点，但空挥 `contact_truth` 仍为空。F1/F2 的
+动作专属题族、`SE(2)`、schema-2 和动力学证书另行闭环，其他三类动作不能被不匹配的旧共用题淘汰。
+
+七段新视频的第一步仍只授权 GVHMR-only，但拆为互不阻塞的 [S0/M0](../DEFINITIONS.md) 离线结构批：S0 仅高点拍压一条，M0 仅四条
+横移候选；v12 只作后续 Jiayi 路线对照，本轮不授权。两批各自绑定 nominal 空挥窗口、clean GVHMR
+commit、完整权重树、Python、`nvidia-smi`、validator/argv、独立 staging/record/state/output 和唯一
+结构 auditor。队列只审本批 source，拒绝 symlink parent，原子 claim output namespace，并从已核验 fd
+创建私有只读快照；child 只消费快照，随后复核快照 inode/mtime/ctime/SHA。一批失败不阻塞另一批。
+07-11 旧 launcher 仅保留为 gzip 历史源码证据，不是当前可执行入口。横移的机器人后续合同仍以首个准备窗口、朝向对齐后的
+双脚分离向量（含前后错位）为终点，不接受更窄合脚替代；GVHMR 本身不声称验证该条件。完整合同见
+[GVHMR 预注册实验](../experiments/motion_video_gvhmr_prereg_franco_static_motion_20260713.md)和
+[操作文档](../operations/run_motion_video_gvhmr_prereg.md)。截至本记录只有 host static/test 证据；没有
+Pod staging、GVHMR 输出、GMR、simulator、RL 或真机结果，所以 G08 状态不变，也没有动作晋级。
+
 ## 文档路由更新（2026-07-12）
 
 G08 仍是长期 blind-spot 路线图。当前已采用 setting、阶段/小目标构成和 feature 决定统一放在

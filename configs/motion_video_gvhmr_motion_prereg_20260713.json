@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "prereg_id": "motion-video-gvhmr-lateral-teachers-20260713-m0-v1",
+  "status": "offline_gvhmr_authorized_subject_to_exact_pod_attestation",
+  "scope": "content-addressed Pod staging audit and offline GVHMR video-to-SMPL-X reconstruction only",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "intake": {
+    "path": "configs/motion_video_intake_20260713.json",
+    "sha256": "44b00b3c46c837d797990bc6f6255055c0ff83c1bb8643ca81f9707033ca304c",
+    "intake_id": "motion-video-intake-20260713-v12-static-lateral"
+  },
+  "manual_event_review": {
+    "path": "configs/motion_video_manual_event_review_20260713.json",
+    "sha256": "6a79dcc4528293728226192513f1d9ce5f266b35291a5504dea4559d7fc8049d",
+    "truth_semantics": "nominal air-swing visual anchors and ready windows only; no observed ball contact"
+  },
+  "franco_priority_context": {
+    "path": "configs/motion_video_franco_backhand_loop_visual_review_20260713.json",
+    "sha256": "9e2a7a51c443d53d7b8ed5c39d02ca0a523f59eb195b1cfc2a335041126498f1",
+    "semantics": "Franco GVHMR is not rerun; B/C nominal visual anchors are recorded before new-video batches"
+  },
+  "processing_order": [
+    "v12_forehand_block",
+    "v12_backhand_block",
+    "static_backhand_high_press",
+    "lateral_step_left_1",
+    "lateral_step_left_2",
+    "lateral_step_right_1",
+    "lateral_step_right_2"
+  ],
+  "execution_batch": {
+    "batch_id": "lateral_teachers_m0_v1",
+    "asset_ids": [
+      "lateral_step_left_1",
+      "lateral_step_left_2",
+      "lateral_step_right_1",
+      "lateral_step_right_2"
+    ],
+    "semantics": "M0 contains the four exact lateral-teacher candidates in left-1, left-2, right-1, right-2 order; they are candidates, not seed repeats",
+    "v12_authorized": false,
+    "franco_gvhmr_rerun_authorized": false,
+    "candidate_seed_repeats": 0,
+    "gvhmr_claim_boundary": "GVHMR reconstructs human motion only and does not verify robot foot stance, contact, balance or displacement conditioning"
+  },
+  "authorization": {
+    "allowed_stages": [
+      "pod_stage_content_and_media_audit",
+      "offline_gvhmr_video_to_smplx",
+      "gvhmr_structural_output_audit"
+    ],
+    "forbidden_stages": [
+      "canonical_beta_materialization",
+      "gmr_robot_retarget",
+      "schema2_robot_motion_export",
+      "simulator_replay",
+      "topp_or_other_retime",
+      "rl_training_or_evaluation",
+      "deployment_or_hardware"
+    ],
+    "formal_eligible": false,
+    "promotion_semantics": "a structural GVHMR pass only permits a separately preregistered offline consumer; it is not a safe or effective A3 motion"
+  },
+  "pod_contract": {
+    "allowed_pod_ids": ["pod1", "pod2"],
+    "staged_source_root": "/workspace/codexschema/motion_video_intake_20260713_m0/raw",
+    "execution_record_path": "/workspace/codexschema/motion_video_intake_20260713_m0/control/gvhmr_execution_record_lateral_m0_v1.json",
+    "state_root": "/workspace/codexschema/motion_video_intake_20260713_m0/gvhmr_state_lateral_m0_v1",
+    "pod_id_semantics": "caller assertion for routing only; execution identity is bound separately from live hostname, boot-id and machine-id",
+    "second_content_media_audit_required": true,
+    "source_copy_must_preserve_relative_paths": true
+  },
+  "gvhmr_runtime": {
+    "root": "/workspace/franco/motion_work/GVHMR",
+    "commit": "6ec3ca39336c50492c0fae65fba2fb831fc7d866",
+    "clean_worktree_required": true,
+    "entrypoint_relpath": "tools/demo/demo.py",
+    "static_camera": true,
+    "checkpoint_tree": {
+      "relpath": "inputs/checkpoints",
+      "files": 21,
+      "bytes": 7870569505,
+      "sha256": "33907642ec7e6400d0a6e34dca0bea4acc4bfb7cefc51a210b398d4e853ad06a"
+    },
+    "python": {
+      "executable": "/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10",
+      "version": "Python 3.10.20",
+      "pip_freeze_sha256": "56b0f8af9677b279bbb4925b6f49113f484dcb9ded1ed8d9bc56af71f304c694"
+    },
+    "gpu": {
+      "allowed_physical_indices": [0, 1, 2],
+      "max_used_mib_before_each_asset": 19000,
+      "poll_seconds": 30.0,
+      "wait_timeout_seconds": 0.0,
+      "nvidia_smi": {
+        "absolute_path": "/usr/bin/nvidia-smi",
+        "binding": "attest exact resolved path and file SHA, then revalidate at launch"
+      },
+      "memory_gate_is_not_a_reservation": true
+    }
+  },
+  "tool_closure": {
+    "intake_auditor": {
+      "path": "scripts/audit_motion_video_intake.py",
+      "sha256": "ffdae64ac3437a3d962eb006eadc9d4d429c4a14e41484c6ef9a594b596fc299"
+    },
+    "queue": {
+      "path": "scripts/run_motion_video_gvhmr_preregistered_queue.py",
+      "sha256": "627aebcc0162de6600ecf6a152ab443886c3e40fb910ffc3538c67db81fe4358"
+    },
+    "result_auditor": {
+      "path": "scripts/audit_gvhmr_result.py",
+      "sha256": "79383a3461a8bb2d47197cef4057c2baa9d878db76e1b468c77e7b9d98abdcbc"
+    },
+    "execution_validator": {
+      "path": "scripts/validate_motion_video_gvhmr_prereg.py",
+      "binding": "the no-clobber execution record captures the exact validator SHA at attestation time"
+    },
+    "legacy_intake_guard": {
+      "path": "scripts/run_motion_video_gvhmr_queue.py",
+      "sha256": "2f4c9f07debceb3be7ed661eed96c00f478146e4390597e6bed60ced647eff18"
+    },
+    "historical_20260711_queue_source_archive": {
+      "path": "docs/experiments/archive/run_motion_video_gvhmr_queue_20260711.py.gz",
+      "sha256": "6176d59ee8455b1e4da0424065644179718fe1d61c3550ed01954714077a78a4"
+    }
+  },
+  "output_contract": {
+    "root": "/workspace/franco/motion_work/GVHMR/outputs/demo",
+    "namespace": "one source-stem directory per asset",
+    "no_clobber": true,
+    "outputs": [
+      {"asset_id": "lateral_step_left_1", "path": "/workspace/franco/motion_work/GVHMR/outputs/demo/left_dang1/hmr4d_results.pt"},
+      {"asset_id": "lateral_step_left_2", "path": "/workspace/franco/motion_work/GVHMR/outputs/demo/left_dang2/hmr4d_results.pt"},
+      {"asset_id": "lateral_step_right_1", "path": "/workspace/franco/motion_work/GVHMR/outputs/demo/right_dang1/hmr4d_results.pt"},
+      {"asset_id": "lateral_step_right_2", "path": "/workspace/franco/motion_work/GVHMR/outputs/demo/right_dang2/hmr4d_results.pt"}
+    ],
+    "structural_acceptance": "expected source frame count, required SMPL tensors/shapes, all finite, and exact output-to-audit SHA binding",
+    "on_failure": "preserve the exact log, binding and partial output; do not overwrite or continue to the next asset"
+  },
+  "downstream_consumer_closure": {
+    "authorized_consumers_in_this_prereg": [
+      "scripts/audit_gvhmr_result.py"
+    ],
+    "post_gvhmr_consumer": "none",
+    "future_rule": "GMR, canonical-beta materialization or any robot-motion consumer requires its own content-addressed preregistration that binds these exact outputs",
+    "implicit_consumption_forbidden": true
+  },
+  "no_clobber_contract": {
+    "execution_record_must_not_exist": true,
+    "state_root_must_not_exist": true,
+    "every_output_namespace_must_not_exist": true,
+    "record_write": "O_CREAT|O_EXCL followed by fsync",
+    "queue_start": "the queue must revalidate the record and live dependency/output state, reject symlinked parents, atomically create the state root and every output namespace, and hold each cross-state claim lock through binding publication",
+    "subset_or_reordered_execution_allowed": false,
+    "batch_semantics": "the exact four lateral candidates are the complete M0 batch, not an ad-hoc subset of a seven-asset launch"
+  },
+  "independence_contract": {
+    "peer_prereg_path": "configs/motion_video_gvhmr_prereg_20260713.json",
+    "peer_prereg_id": "motion-video-gvhmr-static-high-press-20260713-s0-v1",
+    "record_state_and_output_namespaces_must_be_disjoint": true,
+    "peer_failure_blocks_this_batch": false,
+    "same_or_different_pod_allowed_after_each_exact_attestation": true
+  },
+  "future_robot_stance_contract": {
+    "status": "not_evaluated_by_gvhmr",
+    "applies_to": [
+      "lateral_step_left_1",
+      "lateral_step_left_2",
+      "lateral_step_right_1",
+      "lateral_step_right_2"
+    ],
+    "rule": "after removing common root translation and aligning heading, the terminal left-right horizontal foot-separation vector must return to that candidate's robust initial-ready-window vector, including fore-aft offset",
+    "narrower_feet_together_substitute_allowed": false,
+    "verification_stage": "future exact robot-coordinate GMR/schema-2 dynamics contract"
+  }
+}

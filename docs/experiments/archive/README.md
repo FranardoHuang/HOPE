@@ -6,6 +6,8 @@
 - [旧版 NOW](NOW_legacy_through_2026-07-12.md)
 - [旧版 TIMELINE](TIMELINE_legacy_through_2026-07-12.md)
 - [旧版 PROGRESS](PROGRESS_legacy_through_2026-07-12.md)
+- `run_motion_video_gvhmr_queue_20260711.py.gz`：07-11 GVHMR 结果账绑定的旧 launcher
+  源码 gzip 证据；解压字节 SHA 为 `4a86ba0f...fbf76`。它不是当前操作入口，也不授权重跑。
 
 当前入口：[`INDEX.md`](../../INDEX.md)、[`NOW.md`](../../NOW.md)、
 [`TIMELINE.md`](../../TIMELINE.md) 和[实验登记册](../README.md)。

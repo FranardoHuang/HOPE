@@ -7,32 +7,34 @@
 
 ## 问题与决策范围
 
-本记录保留三个相关但可分别决策的问题：
+Franco 自录的四类挥拍是动作库主线；其六段素材已经完成 exact GVHMR/GMR，反手拉 A/B/C 先在同一
+动作位内筛选，其余三类各自保留。下列三个问题是主线后的补充或对照：
 
 1. v12 正手/反手挡球动作对，能否在挡球专用考卷上胜过先前最好的挡球候选？
 2. 反手高点拍压能否安全覆盖现有四动作库漏掉的高球？
 3. 一个按位移条件化的横移下肢老师，能否与不同上肢挥拍组合，同时不丢失球拍接触几何、支撑足合法性或平衡？
 
-原始视频的精确登记已完成，但尚无处理后动作，也没有不可变的行为考卷。因此，本记录状态是
-`proposed`，而不是预注册或队列启动授权。
+原始视频的精确登记已完成；GVHMR-only 离线前处理拆成 [S0/M0](../DEFINITIONS.md) 两个独立结构批，分别处理高点拍压与横移，v12
+本轮不授权。尚无处理后新动作或不可变行为考卷，因此状态仍是 `proposed`；GVHMR 预注册不授权本记录中
+的 GMR、动作组合或训练。
 
 ## 输入与不可变绑定
 
 - 原始素材登记：`configs/motion_video_intake_20260713.json`，SHA-256 为
   `44b00b3c46c837d797990bc6f6255055c0ff83c1bb8643ca81f9707033ca304c`；
-- 历史 Franco/v6/v7 素材登记以及安全/反事实台账仍属于独立世代；
+- 历史 Franco/v6/v7 素材登记以及安全/反事实台账仍属于独立世代；Franco 六段不重跑 GVHMR；
 - 最终物理裁判：单拍使用 Agibot 厂商 MuJoCo 的精确
   [Gate3](../DEFINITIONS.md)，随机到球使用 Gate3B；Isaac 只用于训练和诊断。
 
-启动任何运行前仍缺少的绑定包括：canonical-beta GVHMR/GMR 输出、runtime-order
-[schema-2](../DEFINITIONS.md) NPZ、经人工复核的阶段事件、兼容的题库、选择器训练/考试划分、
+启动任何 GMR/组合/训练前仍缺少的绑定包括：canonical-beta GVHMR/GMR 输出、runtime-order
+[schema-2](../DEFINITIONS.md) NPZ、经机器人运动学细化的阶段事件、兼容的题库、选择器训练/考试划分、
 厂商 MJCF/runtime SHA，以及固定的交互步数/随机种子预算。
 
 ## 设计与对照
 
 ### v12 与第五个高点拍压动作
 
-只处理 v12 正反手动作对，并把它作为新 v 系列的首要候选；“预计最好”只是假设。必须在相同的
+v12 只作为 Jiayi 路线的新 v 系列代表对照；“预计最好”只是假设，不先于 Franco 主线或 S0/M0。必须在相同的
 挡球专用来球分布、站位包络、每侧分母、随机种子和训练预算下，将它与早期最强的安全挡球候选比较。
 在有符号拍面诚实门关闭前，正手格不得晋级。
 
@@ -89,15 +91,21 @@ C1/C2 只有在下肢参考通过组合门和动力学门后，才重新引入�
 
 ## 复现
 
-目前只能执行素材登记审计：
+目前可以执行素材登记审计和单独预注册的 GVHMR-only 静态门：
 
 ```bash
 python3 scripts/audit_motion_video_intake.py \
   --manifest configs/motion_video_intake_20260713.json \
   --source-root /Users/Franco/Downloads
+python3 scripts/validate_motion_video_gvhmr_prereg.py static \
+  --prereg configs/motion_video_gvhmr_prereg_20260713.json
+python3 scripts/validate_motion_video_gvhmr_prereg.py static \
+  --prereg configs/motion_video_gvhmr_motion_prereg_20260713.json
 ```
 
-在 GVHMR/GMR、事件标注、组合、考卷和 RL 命令的输入/输出 hash 以及不覆盖产物根目录冻结前，有意不提供这些命令。
+GVHMR 的 Pod 命令及边界见
+[`run_motion_video_gvhmr_prereg.md`](../operations/run_motion_video_gvhmr_prereg.md)。GMR、组合、考卷和 RL
+命令仍有意不提供，直到各自输入/输出 hash、consumer 和不覆盖产物根冻结。
 
 ## 结果
 
@@ -110,5 +118,7 @@ python3 scripts/audit_motion_video_intake.py \
 
 ## 决定与下一步
 
-当前 [P0](../DEFINITIONS.md) 收口后，按以下顺序运行低成本离线链：v12 动作对、高点拍压，再到四个横移候选。
-只有在测得它们针对任务的安全接触流形后，才冻结对应考卷。任何未通过完整离线证书链的项目，都不得分配 RL GPU。
+先消费既有 Franco exact 结果：反手拉按 B→C→A 做同动作候选筛选，其他三类分别进入适配题族。新视频
+只并行准备 S0 高点拍压和 M0 四条横移候选，两批失败互不阻塞；v12 后排为 Jiayi 路线对照。候选不做
+seed 式重复。每批通过后仍要另建 canonical-beta/GMR consumer；只有测得动作针对任务的安全接触流形后，
+才冻结对应考卷。任何未通过完整离线证书链的项目，都不得分配 RL GPU。

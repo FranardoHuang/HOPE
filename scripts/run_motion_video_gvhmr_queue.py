@@ -407,6 +407,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.gpu < 0 or args.max_used_mib <= 0 or args.poll_seconds <= 0.0:
             raise IntakeError("gpu must be non-negative; max-used-mib and poll-seconds must be positive")
         manifest = load_manifest(args.manifest.resolve())
+        if manifest.get("schema_version", 1) >= 2:
+            raise IntakeError(
+                "schema_version>=2 intake is preregistration-only; use "
+                "run_motion_video_gvhmr_preregistered_queue.py with its exact execution record"
+            )
         source_root = resolve_source_root(manifest, args.source_root)
         failures = audit_assets(manifest, source_root)
         if failures:
