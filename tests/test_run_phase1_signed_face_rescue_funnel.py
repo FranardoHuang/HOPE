@@ -38,8 +38,8 @@ def write_manifest(tmp_path: Path, value: dict) -> Path:
 
 def test_checked_manifest_is_exact_four_cell_single_seed_funnel():
     data = manifest()
-    assert data["manifest_id"].endswith("-v5")
-    assert data["runtime"]["external_control_root"].endswith("/control/v5")
+    assert data["manifest_id"].endswith("-v6")
+    assert data["runtime"]["external_control_root"].endswith("/control/v6")
     assert data["runtime"]["training_environment_sha256"] == (
         "ddaa0effe2ed5318cc8ce34efbbf5b4ee042572052ab57232291079f41bed743"
     )
@@ -57,6 +57,15 @@ def test_checked_manifest_is_exact_four_cell_single_seed_funnel():
     assert data["runtime"]["maximum_trainers_on_gpu"] == 4
     assert data["runtime"]["initial_gpu_must_have_zero_compute_processes"] is True
     assert data["seed_replication_before_l2_decision_forbidden"] is True
+    assert data["inputs"]["schema3_train_bank"]["sha256"] == (
+        "3a9d8851c1c0b13ef82f58228ea1cf83213157c70d72daa514f1bed3a3885b71"
+    )
+    assert data["inputs"]["schema3_train_bank"]["source_family_sha256"] == (
+        "9603a1788eb17ce03598cdde4efff946039613cf61fcc686f90a385706dba9db"
+    )
+    assert data["inputs"]["schema3_train_bank_rebind_report"]["sha256"] == (
+        "9fffed0308eb0102e3575c3a255e9466c04f45e6c0c303cefb5541a19decbb37"
+    )
 
 
 @pytest.mark.parametrize(
@@ -70,6 +79,22 @@ def test_checked_manifest_is_exact_four_cell_single_seed_funnel():
         (lambda d: d["stages"]["l2"].__setitem__("relative_milestones", [1000]), "milestones"),
         (lambda d: d["stages"]["l2"].__setitem__("launch_authorized", True), "remain blocked"),
         (lambda d: d["evaluation_contract"].__setitem__("automatic_judge_launch", True), "judge"),
+        (
+            lambda d: d["inputs"]["schema3_train_bank"].__setitem__("sha256", "f" * 64),
+            "rebound train-bank artifact",
+        ),
+        (
+            lambda d: d["inputs"]["schema3_train_bank_rebind_report"].__setitem__(
+                "content_sha256", "e" * 64
+            ),
+            "rebound train-bank report",
+        ),
+        (
+            lambda d: d["hot_start_contract_transition"]["allowed_changed_common_fields"][
+                "question_bank"
+            ]["current"].__setitem__("source_family_sha256", "d" * 64),
+            "changed-common allowlist",
+        ),
     ],
 )
 def test_manifest_rejects_scientific_contract_drift(tmp_path, mutator, match):
@@ -89,6 +114,92 @@ def test_manifest_rejects_duplicate_or_nonseed3_run_names(tmp_path):
     data["stages"]["l2"]["run_names"]["D"] = "phase1_signed_face_l2_D_fresh_guidance_seed4"
     with pytest.raises(M.ContractError, match="bind cell and seed"):
         M.load_manifest(write_manifest(tmp_path, data))
+
+
+def test_v6_rebind_report_parser_requires_exact_bank_motion_and_two_replays(tmp_path):
+    data = manifest()
+    bank_path = tmp_path / "bank.npz"
+    data["inputs"]["schema3_train_bank"]["path"] = str(bank_path)
+    data["inputs"]["schema3_train_bank"]["sha256"] = "a" * 64
+    report_cfg = data["inputs"]["schema3_train_bank_rebind_report"]
+    report_path = tmp_path / "report.json"
+    report_cfg["path"] = str(report_path)
+    content = {
+        "manifest_sha256": report_cfg["rebind_manifest_sha256"],
+        "script_sha256": report_cfg["rebind_consumer_sha256"],
+        "source_bank_sha256": report_cfg["source_bank_sha256"],
+        "output_bank": str(bank_path),
+        "output_bank_sha256": "a" * 64,
+        "question_arrays_changed": False,
+        "legacy_load_used": False,
+        "simulation_only": True,
+        "real_robot_commands_forbidden": True,
+        "source_proof": {
+            "target_commit": report_cfg["target_commit"],
+            "target_physics_contract_sha256": data["inputs"]["schema3_train_bank"][
+                "physics_contract_sha256"
+            ],
+            "preexisting_executable_ast_equal": True,
+        },
+        "bank_proof": {
+            "allowed_metadata_leaf_changes": [
+                "physics_contract.files.hope_training/whole_body_tracking/source/"
+                "whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/virtual_ball.py",
+                "physics_contract_sha256",
+                "source_family_contract.physics_contract_sha256",
+                "source_family_sha256",
+            ],
+            "non_metadata_arrays": {f"array_{index}": {} for index in range(24)},
+            "all_non_metadata_arrays_finite": True,
+            "new_source_family_sha256": data["inputs"]["schema3_train_bank"][
+                "source_family_sha256"
+            ],
+        },
+        "runtime_validation": {
+            "clip_order": ["forehand", "backhand"],
+            "counts": [757, 724],
+            "schema_version": 3,
+            "split": "train",
+            "physics_contract_sha256": data["inputs"]["schema3_train_bank"][
+                "physics_contract_sha256"
+            ],
+            "source_family_sha256": data["inputs"]["schema3_train_bank"][
+                "source_family_sha256"
+            ],
+            "runtime_motion_contract_valid": True,
+            "base_target_behavior_replay": {
+                clip: {
+                    "question_count": count,
+                    "old_new_all_output_bytes_equal": True,
+                    "landing_valid_count": count,
+                    "net_clear_count": count,
+                }
+                for clip, count in (("forehand", 757), ("backhand", 724))
+            },
+        },
+    }
+    artifact = {
+        "artifact_kind": "stage1_schema3_additive_physics_contract_rebind",
+        "schema_version": 1,
+        "content": content,
+        "content_sha256": M.canonical_sha256(content),
+    }
+    report_path.write_text(json.dumps(artifact), encoding="utf-8")
+    report_cfg["sha256"] = M.sha256_file(report_path)
+    report_cfg["content_sha256"] = artifact["content_sha256"]
+    assert M.verify_bank_rebind_report(data, bank_path)["target_commit"] == report_cfg[
+        "target_commit"
+    ]
+
+    artifact["content"]["runtime_validation"]["base_target_behavior_replay"]["forehand"][
+        "old_new_all_output_bytes_equal"
+    ] = False
+    artifact["content_sha256"] = M.canonical_sha256(artifact["content"])
+    report_path.write_text(json.dumps(artifact), encoding="utf-8")
+    report_cfg["sha256"] = M.sha256_file(report_path)
+    report_cfg["content_sha256"] = artifact["content_sha256"]
+    with pytest.raises(M.ContractError, match="forehand replay"):
+        M.verify_bank_rebind_report(data, bank_path)
 
 
 def test_commands_bind_hot_transfer_and_fresh_lineage_without_duplicate_seed():
@@ -171,6 +282,9 @@ def minimal_current_contract(data: dict) -> dict:
             "sha256": data["inputs"]["schema3_train_bank"]["sha256"],
             "schema_version": 3,
             "split": "train",
+            "source_family_sha256": data["inputs"]["schema3_train_bank"][
+                "source_family_sha256"
+            ],
             "exact": True,
         },
         "motion_event_timing": {"mode": "disabled"},
@@ -184,6 +298,11 @@ def test_hot_contract_transition_allows_only_frozen_current_extensions(tmp_path)
     data = manifest()
     current = minimal_current_contract(data)
     parent = {key: value for key, value in current.items() if key not in M.EXPECTED_CURRENT_ONLY_KEYS}
+    parent["question_bank"] = copy.deepcopy(
+        data["hot_start_contract_transition"]["allowed_changed_common_fields"][
+            "question_bank"
+        ]["parent"]
+    )
     parent_path = tmp_path / "parent.json"
     current_path = tmp_path / "current.json"
     parent_path.write_text(json.dumps(parent), encoding="utf-8")
@@ -202,6 +321,20 @@ def test_hot_contract_transition_allows_only_frozen_current_extensions(tmp_path)
     bad["actor_obs_total_dim"] = 180
     current_path.write_text(json.dumps(bad), encoding="utf-8")
     with pytest.raises(M.ContractError, match="actor_obs_total_dim"):
+        M.verify_emitted_contract(current_path, data, hot=True)
+
+    bad_parent = copy.deepcopy(parent)
+    bad_parent["question_bank"]["sha256"] = "f" * 64
+    parent_path.write_text(json.dumps(bad_parent), encoding="utf-8")
+    current_path.write_text(json.dumps(current), encoding="utf-8")
+    with pytest.raises(M.ContractError, match="parent question_bank"):
+        M.verify_emitted_contract(current_path, data, hot=True)
+
+    parent_path.write_text(json.dumps(parent), encoding="utf-8")
+    bad_current = copy.deepcopy(current)
+    bad_current["question_bank"]["source_family_sha256"] = "e" * 64
+    current_path.write_text(json.dumps(bad_current), encoding="utf-8")
+    with pytest.raises(M.ContractError, match="source-family SHA"):
         M.verify_emitted_contract(current_path, data, hot=True)
 
 

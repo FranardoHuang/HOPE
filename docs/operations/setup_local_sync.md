@@ -153,7 +153,7 @@ test -z "$(git -C /workspace/codexschema/nohope_signed_face_rescue_882fea4 statu
 
 The accepted tree contains exactly `46` regular files and `15,378,264` file bytes; its canonical
 `{relative_path,bytes,sha256}` manifest SHA is
-`0137f59b1fe45e7d5f8fa731bedca905f5466bc98e8d1354081fe071d60426c6`. The v5 launcher recomputes
+`0137f59b1fe45e7d5f8fa731bedca905f5466bc98e8d1354081fe071d60426c6`. The v6 launcher recomputes
 that digest for both source and destination, requires the destination to remain Git-ignored, and
 rejects symlinks, special files, missing files and extra files before creating a run claim.
 

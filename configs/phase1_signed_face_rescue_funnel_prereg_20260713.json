@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "manifest_id": "phase1-signed-face-rescue-single-seed-funnel-20260713-v5",
+  "manifest_id": "phase1-signed-face-rescue-single-seed-funnel-20260713-v6",
   "purpose": "Run one seed across four distinct hot-start/fresh x face-guidance-off/on causal cells; buy another seed only after a paired mechanism win.",
   "status": "machine_preregistered_l1_authorized_l2_blocked_pending_signed_directional_paper",
   "simulation_only": true,
@@ -39,7 +39,7 @@
     "pod": "pod1",
     "gpu": 0,
     "artifact_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713",
-    "external_control_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v5",
+    "external_control_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6",
     "source_asset_root": "/workspace/codexschema/phase1_fresh_20260711",
     "isaac_python": "/workspace/hope_isaac_venv/bin/python",
     "isaaclab_root": "/workspace/IsaacLab",
@@ -68,8 +68,19 @@
       "sha256": "1722553375cd28f9b2d567c01b1a5fc6bcd149fa12cadb20e5202a9153367534"
     },
     "schema3_train_bank": {
-      "relative_path": "assets/v4rg_runtime_order_v3/s1_v4rg_runtime_order_schema3_train.npz",
-      "sha256": "2da2bd1280c45944418d41fe5788d09d7c0ebb0ff7d34fa87c8dd0fcf16a0700"
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz",
+      "sha256": "3a9d8851c1c0b13ef82f58228ea1cf83213157c70d72daa514f1bed3a3885b71",
+      "physics_contract_sha256": "09dfe8999c54e36b258fe54b5ec3da5d9816ff3be3675963b919371d7f4afb95",
+      "source_family_sha256": "9603a1788eb17ce03598cdde4efff946039613cf61fcc686f90a385706dba9db"
+    },
+    "schema3_train_bank_rebind_report": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/rebind_report.json",
+      "sha256": "9fffed0308eb0102e3575c3a255e9466c04f45e6c0c303cefb5541a19decbb37",
+      "content_sha256": "3ea60706f48dc2af911d733869c9023ac9dd25d6aa4db4a26de8868359b5a32d",
+      "rebind_manifest_sha256": "5b22a6dd3c41ba1abd44e631e408ed73ada2ac66fc7ff86dc62d48f69ff2ad29",
+      "rebind_consumer_sha256": "c9296d1770cf589296ebcb0216c8bf510f62f5ebfe958fd52e373a75ecb0824e",
+      "source_bank_sha256": "2da2bd1280c45944418d41fe5788d09d7c0ebb0ff7d34fa87c8dd0fcf16a0700",
+      "target_commit": "882fea4285f0cf9a97ba79d79ae8af31d26ea1ed"
     },
     "hot_parent_checkpoint": {
       "path": "/workspace/codexschema/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-11_05-39-31_phase1_fresh_v3_SZ_seed3/model_13800.pt",
@@ -210,10 +221,10 @@
       "max_iterations": 25,
       "requires_activation": false,
       "run_names": {
-        "A": "phase1_signed_face_l1_v5_A_hot_control_seed3",
-        "B": "phase1_signed_face_l1_v5_B_hot_guidance_seed3",
-        "C": "phase1_signed_face_l1_v5_C_fresh_control_seed3",
-        "D": "phase1_signed_face_l1_v5_D_fresh_guidance_seed3"
+        "A": "phase1_signed_face_l1_v6_A_hot_control_seed3",
+        "B": "phase1_signed_face_l1_v6_B_hot_guidance_seed3",
+        "C": "phase1_signed_face_l1_v6_C_fresh_control_seed3",
+        "D": "phase1_signed_face_l1_v6_D_fresh_guidance_seed3"
       },
       "expected_terminal_checkpoint_iteration": {
         "A": 13824,
@@ -221,7 +232,7 @@
         "C": 24,
         "D": 24
       },
-      "activation_output": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v5/l1_activation.json"
+      "activation_output": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6/l1_activation.json"
     },
     "l2": {
       "human_name": "4096-environment single-seed canary",
@@ -231,10 +242,10 @@
       "launch_authorized": false,
       "blocked_on": "immutable signed-face directional checkpoint paper path and SHA are not frozen",
       "run_names": {
-        "A": "phase1_signed_face_l2_v5_A_hot_control_seed3",
-        "B": "phase1_signed_face_l2_v5_B_hot_guidance_seed3",
-        "C": "phase1_signed_face_l2_v5_C_fresh_control_seed3",
-        "D": "phase1_signed_face_l2_v5_D_fresh_guidance_seed3"
+        "A": "phase1_signed_face_l2_v6_A_hot_control_seed3",
+        "B": "phase1_signed_face_l2_v6_B_hot_guidance_seed3",
+        "C": "phase1_signed_face_l2_v6_C_fresh_control_seed3",
+        "D": "phase1_signed_face_l2_v6_D_fresh_guidance_seed3"
       },
       "relative_milestones": [200, 500, 1000],
       "checkpoint_iterations": {
@@ -256,7 +267,25 @@
     "checkpoint_allow_missing_contract": false,
     "checkpoint_allow_contract_mismatch": true,
     "checkpoint_tolerant": false,
-    "all_parent_and_current_common_fields_must_match": true,
+    "all_parent_and_current_common_fields_must_match_except_exact_allowlist": true,
+    "allowed_changed_common_fields": {
+      "question_bank": {
+        "parent": {
+          "sha256": "2da2bd1280c45944418d41fe5788d09d7c0ebb0ff7d34fa87c8dd0fcf16a0700",
+          "schema_version": 3,
+          "split": "train",
+          "source_family_sha256": "b21c161a0240893a4a469136c2d5298c2ecfa9f2b4a8c6fb9493b679f3728ad5",
+          "exact": true
+        },
+        "current": {
+          "sha256": "3a9d8851c1c0b13ef82f58228ea1cf83213157c70d72daa514f1bed3a3885b71",
+          "schema_version": 3,
+          "split": "train",
+          "source_family_sha256": "9603a1788eb17ce03598cdde4efff946039613cf61fcc686f90a385706dba9db",
+          "exact": true
+        }
+      }
+    },
     "allowed_current_only_top_level_keys": [
       "motion_adaptive_alpha",
       "motion_adaptive_kernel_size",

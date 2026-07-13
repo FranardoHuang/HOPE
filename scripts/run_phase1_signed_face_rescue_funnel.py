@@ -129,7 +129,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
         raise ContractError(f"cannot read manifest: {exc}") from exc
     if data.get("schema_version") != 1:
         raise ContractError("manifest schema_version must be 1")
-    if data.get("manifest_id") != "phase1-signed-face-rescue-single-seed-funnel-20260713-v5":
+    if data.get("manifest_id") != "phase1-signed-face-rescue-single-seed-funnel-20260713-v6":
         raise ContractError("unexpected manifest_id")
     if data.get("simulation_only") is not True or data.get("real_robot_commands_forbidden") is not True:
         raise ContractError("manifest must be simulation-only and explicitly forbid robot commands")
@@ -181,7 +181,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
         raise ContractError("ignored A3 runtime asset contract changed")
 
     if runtime.get("pod") != "pod1" or runtime.get("gpu") != 0:
-        raise ContractError("v5 reserves exactly Pod1 GPU0")
+        raise ContractError("v6 reserves exactly Pod1 GPU0")
     if runtime.get("initial_gpu_must_have_zero_compute_processes") is not True:
         raise ContractError("the four-cell pool must start on an empty GPU")
     if runtime.get("maximum_trainers_on_gpu") != 4:
@@ -195,17 +195,69 @@ def load_manifest(path: Path) -> dict[str, Any]:
         raise ContractError("training-local environment overrides must remain forbidden")
 
     expected_input_keys = {
-        "forehand_motion", "backhand_motion", "schema3_train_bank", "hot_parent_checkpoint"
+        "forehand_motion", "backhand_motion", "schema3_train_bank",
+        "schema3_train_bank_rebind_report", "hot_parent_checkpoint"
     }
     require_exact_keys(inputs, expected_input_keys, "inputs")
-    for name in ("forehand_motion", "backhand_motion", "schema3_train_bank"):
+    for name in ("forehand_motion", "backhand_motion"):
         item = inputs[name]
         if not isinstance(item, dict):
             raise ContractError(f"{name} must be an object")
+        require_exact_keys(item, {"relative_path", "sha256"}, name)
         rel = Path(str(item.get("relative_path", "")))
         if rel.is_absolute() or ".." in rel.parts or not rel.parts:
             raise ContractError(f"unsafe {name} path")
         require_sha(item.get("sha256"), f"{name} hash")
+    bank = inputs["schema3_train_bank"]
+    if not isinstance(bank, dict):
+        raise ContractError("schema3_train_bank must be an object")
+    require_exact_keys(
+        bank,
+        {"path", "sha256", "physics_contract_sha256", "source_family_sha256"},
+        "schema3_train_bank",
+    )
+    bank_path = Path(str(bank.get("path", "")))
+    if not bank_path.is_absolute():
+        raise ContractError("v6 rebound train-bank path must be absolute")
+    for key in ("sha256", "physics_contract_sha256", "source_family_sha256"):
+        require_sha(bank.get(key), f"schema3_train_bank {key}")
+    expected_bank = {
+        "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/"
+        "schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz",
+        "sha256": "3a9d8851c1c0b13ef82f58228ea1cf83213157c70d72daa514f1bed3a3885b71",
+        "physics_contract_sha256": "09dfe8999c54e36b258fe54b5ec3da5d9816ff3be3675963b919371d7f4afb95",
+        "source_family_sha256": "9603a1788eb17ce03598cdde4efff946039613cf61fcc686f90a385706dba9db",
+    }
+    if bank != expected_bank:
+        raise ContractError("v6 rebound train-bank artifact contract changed")
+    report = inputs["schema3_train_bank_rebind_report"]
+    if not isinstance(report, dict):
+        raise ContractError("schema3_train_bank_rebind_report must be an object")
+    require_exact_keys(report, {
+        "path", "sha256", "content_sha256", "rebind_manifest_sha256",
+        "rebind_consumer_sha256", "source_bank_sha256", "target_commit",
+    }, "schema3_train_bank_rebind_report")
+    if not Path(str(report.get("path", ""))).is_absolute():
+        raise ContractError("v6 rebound train-bank report path must be absolute")
+    for key in (
+        "sha256", "content_sha256", "rebind_manifest_sha256",
+        "rebind_consumer_sha256", "source_bank_sha256",
+    ):
+        require_sha(report.get(key), f"schema3_train_bank_rebind_report {key}")
+    if report.get("target_commit") != source.get("expected_training_commit"):
+        raise ContractError("bank rebind target commit differs from training source")
+    expected_report = {
+        "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/"
+        "schema3_bank_rebind_v2/rebind_report.json",
+        "sha256": "9fffed0308eb0102e3575c3a255e9466c04f45e6c0c303cefb5541a19decbb37",
+        "content_sha256": "3ea60706f48dc2af911d733869c9023ac9dd25d6aa4db4a26de8868359b5a32d",
+        "rebind_manifest_sha256": "5b22a6dd3c41ba1abd44e631e408ed73ada2ac66fc7ff86dc62d48f69ff2ad29",
+        "rebind_consumer_sha256": "c9296d1770cf589296ebcb0216c8bf510f62f5ebfe958fd52e373a75ecb0824e",
+        "source_bank_sha256": "2da2bd1280c45944418d41fe5788d09d7c0ebb0ff7d34fa87c8dd0fcf16a0700",
+        "target_commit": "882fea4285f0cf9a97ba79d79ae8af31d26ea1ed",
+    }
+    if report != expected_report:
+        raise ContractError("v6 rebound train-bank report contract changed")
     parent = inputs["hot_parent_checkpoint"]
     if not isinstance(parent, dict):
         raise ContractError("hot parent must be an object")
@@ -329,8 +381,28 @@ def load_manifest(path: Path) -> dict[str, Any]:
         raise ContractError("hot A/B must expose the known source-contract extension")
     if transition.get("checkpoint_tolerant") is not False:
         raise ContractError("hot A/B must use strict tensor loading")
-    if transition.get("all_parent_and_current_common_fields_must_match") is not True:
-        raise ContractError("hot transition must compare every common field")
+    if transition.get("all_parent_and_current_common_fields_must_match_except_exact_allowlist") is not True:
+        raise ContractError("hot transition must compare every non-allowlisted common field")
+    expected_bank_transition = {
+        "question_bank": {
+            "parent": {
+                "sha256": "2da2bd1280c45944418d41fe5788d09d7c0ebb0ff7d34fa87c8dd0fcf16a0700",
+                "schema_version": 3,
+                "split": "train",
+                "source_family_sha256": "b21c161a0240893a4a469136c2d5298c2ecfa9f2b4a8c6fb9493b679f3728ad5",
+                "exact": True,
+            },
+            "current": {
+                "sha256": "3a9d8851c1c0b13ef82f58228ea1cf83213157c70d72daa514f1bed3a3885b71",
+                "schema_version": 3,
+                "split": "train",
+                "source_family_sha256": "9603a1788eb17ce03598cdde4efff946039613cf61fcc686f90a385706dba9db",
+                "exact": True,
+            },
+        }
+    }
+    if transition.get("allowed_changed_common_fields") != expected_bank_transition:
+        raise ContractError("hot transition exact changed-common allowlist drifted")
     if set(transition.get("allowed_current_only_top_level_keys", [])) != EXPECTED_CURRENT_ONLY_KEYS:
         raise ContractError("allowed source-contract extension keys changed")
 
@@ -351,7 +423,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
     if evaluation.get("l2_training_launch_authorized") is not False:
         raise ContractError("L2 training launch must remain blocked")
     if evaluation.get("signed_directional_checkpoint_paper") is not None:
-        raise ContractError("v5 must not invent a signed directional checkpoint paper")
+        raise ContractError("v6 must not invent a signed directional checkpoint paper")
     return data
 
 
@@ -365,7 +437,7 @@ def cell_by_id(manifest: dict[str, Any], cell_id: str) -> dict[str, Any]:
 def source_input_paths(manifest: dict[str, Any]) -> dict[str, tuple[Path, str]]:
     root = Path(manifest["runtime"]["source_asset_root"]).resolve()
     result: dict[str, tuple[Path, str]] = {}
-    for name in ("forehand_motion", "backhand_motion", "schema3_train_bank"):
+    for name in ("forehand_motion", "backhand_motion"):
         item = manifest["inputs"][name]
         path = (root / item["relative_path"]).resolve()
         try:
@@ -373,7 +445,107 @@ def source_input_paths(manifest: dict[str, Any]) -> dict[str, tuple[Path, str]]:
         except ValueError as exc:
             raise ContractError(f"{name} escapes source asset root") from exc
         result[name] = (path, item["sha256"])
+    bank = manifest["inputs"]["schema3_train_bank"]
+    result["schema3_train_bank"] = (Path(bank["path"]), bank["sha256"])
     return result
+
+
+def verify_bank_rebind_report(manifest: dict[str, Any], bank_path: Path) -> dict[str, Any]:
+    inputs = manifest["inputs"]
+    bank = inputs["schema3_train_bank"]
+    expected = inputs["schema3_train_bank_rebind_report"]
+    path = Path(expected["path"])
+    if bank_path.is_symlink():
+        raise ContractError("schema3 rebound train bank may not be a symlink")
+    if not path.is_file() or path.is_symlink() or sha256_file(path) != expected["sha256"]:
+        raise ContractError("schema3 train-bank rebind report is missing, symlinked, or changed")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ContractError(f"cannot parse schema3 train-bank rebind report: {exc}") from exc
+    if value.get("artifact_kind") != "stage1_schema3_additive_physics_contract_rebind":
+        raise ContractError("wrong schema3 train-bank rebind artifact kind")
+    if value.get("schema_version") != 1:
+        raise ContractError("wrong schema3 train-bank rebind report schema")
+    content = value.get("content")
+    if not isinstance(content, dict) or canonical_sha256(content) != value.get("content_sha256"):
+        raise ContractError("schema3 train-bank rebind report content hash is invalid")
+    if value["content_sha256"] != expected["content_sha256"]:
+        raise ContractError("schema3 train-bank rebind content SHA changed")
+    exact_content = {
+        "manifest_sha256": expected["rebind_manifest_sha256"],
+        "script_sha256": expected["rebind_consumer_sha256"],
+        "source_bank_sha256": expected["source_bank_sha256"],
+        "output_bank": str(bank_path),
+        "output_bank_sha256": bank["sha256"],
+        "question_arrays_changed": False,
+        "legacy_load_used": False,
+        "simulation_only": True,
+        "real_robot_commands_forbidden": True,
+    }
+    for key, wanted in exact_content.items():
+        if content.get(key) != wanted:
+            raise ContractError(f"bank rebind report {key} mismatch")
+    source = content.get("source_proof")
+    proof = content.get("bank_proof")
+    runtime = content.get("runtime_validation")
+    if not all(isinstance(item, dict) for item in (source, proof, runtime)):
+        raise ContractError("bank rebind report lacks source/bank/runtime proof")
+    if source.get("target_commit") != expected["target_commit"]:
+        raise ContractError("bank rebind source target commit changed")
+    if source.get("target_physics_contract_sha256") != bank["physics_contract_sha256"]:
+        raise ContractError("bank rebind source physics SHA changed")
+    if source.get("preexisting_executable_ast_equal") is not True:
+        raise ContractError("bank rebind source did not prove pre-existing AST equality")
+    allowed_meta = [
+        "physics_contract.files.hope_training/whole_body_tracking/source/whole_body_tracking/"
+        "whole_body_tracking/tasks/tracking/mdp/virtual_ball.py",
+        "physics_contract_sha256",
+        "source_family_contract.physics_contract_sha256",
+        "source_family_sha256",
+    ]
+    if proof.get("allowed_metadata_leaf_changes") != allowed_meta:
+        raise ContractError("bank rebind metadata delta is not the exact four-leaf contract")
+    arrays = proof.get("non_metadata_arrays")
+    if not isinstance(arrays, dict) or len(arrays) != 24:
+        raise ContractError("bank rebind report does not bind all 24 question arrays")
+    if proof.get("all_non_metadata_arrays_finite") is not True:
+        raise ContractError("bank rebind report lacks finite-array proof")
+    if proof.get("new_source_family_sha256") != bank["source_family_sha256"]:
+        raise ContractError("bank rebind source-family SHA changed")
+    runtime_exact = {
+        "clip_order": ["forehand", "backhand"],
+        "counts": [757, 724],
+        "schema_version": 3,
+        "split": "train",
+        "physics_contract_sha256": bank["physics_contract_sha256"],
+        "source_family_sha256": bank["source_family_sha256"],
+        "runtime_motion_contract_valid": True,
+    }
+    for key, wanted in runtime_exact.items():
+        if runtime.get(key) != wanted:
+            raise ContractError(f"bank rebind runtime {key} mismatch")
+    replay = runtime.get("base_target_behavior_replay")
+    if not isinstance(replay, dict) or set(replay) != {"forehand", "backhand"}:
+        raise ContractError("bank rebind runtime replay is incomplete")
+    for clip, count in {"forehand": 757, "backhand": 724}.items():
+        result = replay[clip]
+        if (
+            not isinstance(result, dict)
+            or result.get("question_count") != count
+            or result.get("old_new_all_output_bytes_equal") is not True
+            or result.get("landing_valid_count") != count
+            or result.get("net_clear_count") != count
+        ):
+            raise ContractError(f"bank rebind {clip} replay is not exact/all-pass")
+    return {
+        "path": str(path),
+        "sha256": expected["sha256"],
+        "content_sha256": expected["content_sha256"],
+        "target_commit": expected["target_commit"],
+        "physics_contract_sha256": bank["physics_contract_sha256"],
+        "source_family_sha256": bank["source_family_sha256"],
+    }
 
 
 def git_output(root: Path, *args: str) -> str:
@@ -609,6 +781,9 @@ def verify_inputs(manifest: dict[str, Any], python: Path) -> dict[str, Any]:
         if not path.is_file() or sha256_file(path) != expected:
             raise ContractError(f"{name} is missing or has the wrong SHA: {path}")
         verified[name] = {"path": str(path), "sha256": expected}
+    verified["schema3_train_bank_rebind_report"] = verify_bank_rebind_report(
+        manifest, source_input_paths(manifest)["schema3_train_bank"][0]
+    )
     parent = manifest["inputs"]["hot_parent_checkpoint"]
     checkpoint = Path(parent["path"])
     sidecar = Path(parent["adjacent_training_contract_path"])
@@ -757,6 +932,7 @@ def verify_emitted_contract(
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
     shared = manifest["shared_training_contract"]
     inputs = manifest["inputs"]
+    transition = manifest["hot_start_contract_transition"]
     if contract.get("schema_version") != 3:
         raise ContractError("emitted training contract is not schema-3")
     expected_scalars = {
@@ -786,6 +962,8 @@ def verify_emitted_contract(
         raise ContractError("emitted question bank SHA changed")
     if bank.get("schema_version") != 3 or bank.get("split") != "train" or bank.get("exact") is not True:
         raise ContractError("emitted question bank is not exact schema-3 train")
+    if bank.get("source_family_sha256") != inputs["schema3_train_bank"]["source_family_sha256"]:
+        raise ContractError("emitted question bank source-family SHA changed")
     if contract.get("motion_event_timing") != {"mode": "disabled"}:
         raise ContractError("signed-face funnel must not silently enable T1 timing")
 
@@ -798,8 +976,15 @@ def verify_emitted_contract(
         extras = current_keys - parent_keys
         if extras != EXPECTED_CURRENT_ONLY_KEYS:
             raise ContractError(f"hot transition has an unregistered contract extension: {sorted(extras)}")
+        changed_common = transition["allowed_changed_common_fields"]
         for key in sorted(parent_keys):
-            if parent[key] != contract[key]:
+            if key in changed_common:
+                expected_change = changed_common[key]
+                if parent[key] != expected_change["parent"]:
+                    raise ContractError(f"hot transition parent {key} does not match exact allowlist")
+                if contract[key] != expected_change["current"]:
+                    raise ContractError(f"hot transition current {key} does not match exact allowlist")
+            elif parent[key] != contract[key]:
                 raise ContractError(f"hot transition changed common hard-contract field {key}")
     return sha256_file(contract_path), contract
 
@@ -934,7 +1119,7 @@ def runtime_preflight(
     if stage_name == "l2":
         raise ContractError(
             "L2 is blocked: freeze a separate immutable signed-face directional checkpoint "
-            "paper path/SHA and issue a reviewed v6 activation before launch"
+            "paper path/SHA and issue a reviewed v7 activation before launch"
         )
     checkout, wbt = verify_training_source(manifest)
     verify_production_locations(manifest, config_path, launcher_path, checkout)

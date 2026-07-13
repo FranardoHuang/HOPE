@@ -1,6 +1,6 @@
 # 运行 Phase-1 有符号拍面单-seed 机制漏斗
 
-状态：v1–v5 的学习前失败证据均已保留；v5 被旧 train-bank 物理合同正确拒绝，严格新制品重绑定已预注册、尚未运行，G05/G06 仍为 `Partial`。
+状态：v1–v5 的学习前失败证据均已保留；严格新制品 train bank/report 已在 Pod1 发布并绑定到 v6，L1 尚未启动，G05/G06 仍为 `Partial`。
 
 本页运行 [`EXP-P1-SIGNED-FACE-RESCUE-FUNNEL`](../experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)
 冻结的四个因果格。`run_name` 是每条训练不可复用的运行名；`seed` 是随机初始化/采样种子；其他缩写见
@@ -17,7 +17,8 @@
   `478efa8d...d9e6`，相邻/嵌入旧 hard-contract SHA `3a3b3d95...b9972`。当前源码给 hard contract
   增加了 event timing/target cadence 字段，所以 A/B 必须显式写成
   `checkpoint_allow_contract_mismatch=true` 的 **inexact representation transfer**；它们永远不是 fresh
-  exact 证据。validator 要求父/新合同全部共同字段逐值相同，且只允许预注册的新增 key。
+  exact 证据。validator 只允许父/新合同中的 `question_bank` 按冻结 old→new 值改变；其他共同字段仍
+  逐值相同，且只允许预注册的新增 key。
 - C/D 不读取 checkpoint，必须保存 `training_contract_lineage_exact=1`；A/B 必须保存 `0`。四格运行后
   emitted hard-contract SHA 必须完全相同。
 - L1（小机制冒烟）是 `512 env × 25 update`；只有四个终档均 finite、iteration/lineage/合同正确后，
@@ -35,7 +36,7 @@
 ```bash
 SOURCE_COMMIT=882fea4285f0cf9a97ba79d79ae8af31d26ea1ed
 SOURCE=/workspace/codexschema/nohope_signed_face_rescue_882fea4
-CONTROL=/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v5
+CONTROL=/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v6
 ARTIFACT=/workspace/codexschema/phase1_signed_face_rescue_20260713
 
 git -C /workspace/codexschema/nohope worktree add --detach "$SOURCE" "$SOURCE_COMMIT"
@@ -55,15 +56,17 @@ install -m 0555 scripts/run_phase1_signed_face_rescue_funnel.py \
 
 CONFIG="$CONTROL/phase1_signed_face_rescue_funnel_prereg_20260713.json"
 LAUNCHER="$CONTROL/run_phase1_signed_face_rescue_funnel.py"
-CONFIG_SHA=$(sha256sum "$CONFIG" | awk '{print $1}')
-LAUNCHER_SHA=$(sha256sum "$LAUNCHER" | awk '{print $1}')
+CONFIG_SHA=95f7cc9584feaf267f63652888e29f424881a7425088363083132d35a91ece63
+LAUNCHER_SHA=e990b933af47e2de371ba88623e7493fe5e66b8937f7ec2881f27808060f1db0
+test "$(sha256sum "$CONFIG" | awk '{print $1}')" = "$CONFIG_SHA"
+test "$(sha256sum "$LAUNCHER" | awk '{print $1}')" = "$LAUNCHER_SHA"
 ```
 
 不要手改生产副本。commit 合入后以本页记录的最终 SHA 对账；如果不同，停止并回到源码审查，不能现场
 “更新期望值”。
 
-本版冻结值：manifest `362e8237179b0de15522d522c675155db7b8a884b8b9bd01f83061973571f6a5`；
-launcher `cae16fddfee2eec073f0fb81099d07607f11d687f830ff28b7aa005c52fa32fd`。
+本版冻结值：manifest `95f7cc9584feaf267f63652888e29f424881a7425088363083132d35a91ece63`；
+launcher `e990b933af47e2de371ba88623e7493fe5e66b8937f7ec2881f27808060f1db0`。
 
 v1 文件保留在 `control/v1`，其 runtime `validate` 在创建任何 run claim 前 fail closed。根因不是父模型
 非有限：旧审计只遍历 checkpoint 顶层，而 RSL-RL 的浮点权重位于嵌套 state dict，合同 provenance
@@ -111,8 +114,10 @@ install -m 0555 scripts/rebind_stage1_question_bank_physics_contract.py \
 
 REBIND_CONFIG="$REBIND_CONTROL/phase1_signed_face_bank_rebind_prereg_20260713.json"
 REBIND_TOOL="$REBIND_CONTROL/rebind_stage1_question_bank_physics_contract.py"
-REBIND_CONFIG_SHA=$(sha256sum "$REBIND_CONFIG" | awk '{print $1}')
-REBIND_TOOL_SHA=$(sha256sum "$REBIND_TOOL" | awk '{print $1}')
+REBIND_CONFIG_SHA=5b22a6dd3c41ba1abd44e631e408ed73ada2ac66fc7ff86dc62d48f69ff2ad29
+REBIND_TOOL_SHA=c9296d1770cf589296ebcb0216c8bf510f62f5ebfe958fd52e373a75ecb0824e
+test "$(sha256sum "$REBIND_CONFIG" | awk '{print $1}')" = "$REBIND_CONFIG_SHA"
+test "$(sha256sum "$REBIND_TOOL" | awk '{print $1}')" = "$REBIND_TOOL_SHA"
 
 /workspace/hope_isaac_venv/bin/python "$REBIND_TOOL" \
   --config "$REBIND_CONFIG" \
@@ -144,6 +149,14 @@ report 中的 target commit、physics SHA `09dfe899...afb95`、family SHA `9603a
 本页后续步骤。v5 manifest 不得现场改写。train bank 重绑定不能授权 L2/judge：对应 exam bank 尚未有
 相同 target family 证据，且 signed directional checkpoint paper 仍未冻结。
 
+本次生产 `run` 已返回 `published`。冻结输出：bank path
+`/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz`，
+SHA `3a9d8851c1c0b13ef82f58228ea1cf83213157c70d72daa514f1bed3a3885b71`；report path
+`.../schema3_bank_rebind_v2/rebind_report.json`，SHA
+`9fffed0308eb0102e3575c3a255e9466c04f45e6c0c303cefb5541a19decbb37`，content SHA
+`3ea60706f48dc2af911d733869c9023ac9dd25d6aa4db4a26de8868359b5a32d`。v6 launcher 必须解析并绑定
+这些值，不能用现场重新计算的新值替代。
+
 历史 `control/bank_rebind_v1` 的 no-write preflight 因 `ast.dump` 跨 Python 小版本字段不稳定而拒绝；它
 没有创建 output root。v1 文件/输出原样保留，禁止覆盖。v2 仅把冻结证据改成 helper 原始源码片段 SHA，
 并继续在同一运行 Python 内要求移除 helper 后旧/新 AST 完全相同；其余数组、metadata、runtime replay
@@ -151,8 +164,9 @@ report 中的 target commit、physics SHA `09dfe899...afb95`、family SHA `9603a
 
 ## 2. 只读校验与四格命令复核
 
-`static-validate` 只读 manifest；`validate` 再核对 source commit/clean、关键源码 SHA、三个训练输入、
-父 checkpoint finite/iteration/contract/lineage、主机 RAM 与 GPU0 空闲状态。`plan` 打印四条完整 argv，
+`static-validate` 只读 manifest；`validate` 再核对 source commit/clean、关键源码 SHA、两个动作、rebound
+train bank 及其 report closure、父 checkpoint finite/iteration/contract/lineage、主机 RAM 与 GPU0
+空闲状态。`plan` 打印四条完整 argv，
 不写 run 目录：
 
 ```bash
@@ -223,7 +237,7 @@ L1 完整，不代表 L2 已授权。
 
 ## 5. L2 当前 fail-closed
 
-当前 v5 对所有 `--stage l2 validate|plan|launch` 都在任何 runtime 写入前返回：
+当前 v6 对所有 `--stage l2 validate|plan|launch` 都在任何 runtime 写入前返回：
 `L2 is blocked`。原因不是缺 GPU，而是 immutable signed-face directional checkpoint paper 的
 schedule/path/SHA 尚未冻结。不得绕过 validator，也不得把 L1 completion 文件改名为 L2 授权。
 
@@ -235,7 +249,7 @@ schedule/path/SHA 尚未冻结。不得绕过 validator，也不得把 L1 comple
   --stage l2 validate
 ```
 
-后续必须提交 reviewed v6，把同一 immutable paper 的 path/SHA、判读合同和 activation closure 一起冻结，
+后续必须提交 reviewed v7，把同一 immutable paper 的 path/SHA、判读合同和 activation closure 一起冻结，
 才能讨论 L2。到那时每个预注册 checkpoint 仍须检查进程、GPU、RAM、完整日志中的
 NaN/Inf/Traceback/OOM/Killed、文件名与嵌入 iteration、tensor finite、checkpoint ↔ 相邻 hard-contract
 SHA/lineage；不要为填空闲卡复制第二 seed。

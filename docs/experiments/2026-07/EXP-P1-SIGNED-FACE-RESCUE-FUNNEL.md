@@ -1,7 +1,7 @@
 # EXP-P1-SIGNED-FACE-RESCUE-FUNNEL：有符号拍面修复后的单-seed 机制漏斗
 
-状态：`v5_prelearning_physics_contract_rejection_bank_rebind_v2_preregistered`
-证据等级：E1（五次学习前失败均保留；题库严格重绑定源码与攻击回归通过，尚无新训练）
+状态：`v6_preregistered_with_published_rebound_train_bank_l1_not_started`
+证据等级：E2（目标 runtime 已发布并复核新 train bank；v6 L1 尚未启动）
 人类负责人：franco  
 执行者：Codex  
 全局优先级：只继承 [`NOW` 队列第 1 项](../../NOW.md#统一工作队列唯一优先级账本)，本页不另建队列。
@@ -31,9 +31,9 @@
 
 ## 首轮四个机制单元
 
-所有单元固定：seed 3、`v4rg_runtime_order_v3` 动作对、同一 schema-3 train bank、零关节摩擦 plant、
+L2 四格固定：seed 3、`v4rg_runtime_order_v3` 动作对、同一 schema-3 train bank、零关节摩擦 plant、
 179 维观测、31 维动作、PPO 配置、4096 environments、checkpoint cadence，并只跑到相对 checkpoint
-`+1000`。
+`+1000`。L1 只把环境数/预算缩成 `512 × 25 update` 来验证同一机制的发射、合同和终档完整性。
 
 | 单元 | 人话名称 | 初始化 | 唯一机制变化 |
 | --- | --- | --- | --- |
@@ -43,7 +43,8 @@
 | D | 从零拍面预防 | 与 C 相同 seed 从零初始化 | 线性拍面引导 `-0.4`，角度上限 `pi` |
 
 A/B 的父 checkpoint 路径、SHA、嵌入迭代、相邻 training-contract SHA 必须在 machine prereg 中逐项
-冻结。C/D 的随机源和完整 launch argv 必须逐字节相同，除预注册的引导字段外不得漂移。
+冻结。C/D 的随机源和完整 launch argv 必须逐字节相同；除预注册的引导字段和必须唯一的 `run_name`
+外不得漂移。
 
 ## 执行漏斗与 GPU 预算
 
@@ -60,8 +61,9 @@ A/B 的父 checkpoint 路径、SHA、嵌入迭代、相邻 training-contract SHA
 5. **L3 解锁：** 只有 B 相对 A 或 D 相对 C 在正手 signed-face、较差侧综合命中和安全三者都不退化，
    才给该胜者**连同匹配对照**补第二个 seed。没有第二 seed 复现，不买第三、第四 seed。
 
-其余 GPU 优先给已过各自离线安全门的 v12 视频动作预处理、同卷导出/评估或 `NOW` 队首的其他独立
-机制；不得为了显示利用率而复制 A–D。没有合法输入时允许空闲。
+其余 GPU 优先给已过各自离线安全门的 Franco 五动作与横移老师、同卷导出/评估或 `NOW` 队首的其他
+独立机制；v12 只保留为 Jiayi 路线的后排代表对照。不得为了显示利用率而复制 A–D；没有合法输入时
+允许空闲。
 
 ## 指标与决策规则
 
@@ -99,7 +101,7 @@ signed-face scorer 修复已进入训练源码 commit
 
 静态合同把 L1 固定为同卡四格 `512 env × 25 update`，L2 设计固定为
 `4096 env × 1001 update`；四格全部 seed 3，热启动里程碑为 `14000/14300/14800`，fresh 为
-`200/500/1000`。focused 攻击回归为 `23 passed`，覆盖重复/错误 seed、配方漂移、hot/fresh lineage
+`200/500/1000`。v6 launcher + rebind focused 回归为 `32 passed`，覆盖重复/错误 seed、配方漂移、hot/fresh lineage
 洗白、未注册 hard-contract key、非零 friction、旧 face pairing、伪造/缺格 activation、半写
 no-clobber claim、缺失 Git checkout、未冻结 paper 时的 L2 启动和自动 judge 等拒绝路径。这是 E1
 源码证据，不是 Isaac 启动或学习结果。
@@ -177,13 +179,28 @@ v1 的 no-write Pod preflight 又抓到一个跨 Python 版本的证据编码问
 保留。v2 改为冻结跨版本稳定的 helper 原始源码片段 SHA；“在同一执行 Python 中移除 helper 后旧/新
 AST 相等”仍保留，因此没有放宽源码门，也没有改变题库、输出语义或训练配方。
 
+v2 随后在 Pod1 目标 Python `3.10.18`、NumPy `1.26.4`、Torch `2.7.0+cu128` 正式发布：新 bank
+`s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz` 为 `215,715` bytes，SHA
+`3a9d8851...5b71`；report-last SHA `9fffed03...bb37`，canonical content SHA
+`3ea60706...a32d`。24 个非 metadata 数组未变；正手 `757/757`、反手 `724/724` 的旧/新 contact/flight
+所有 tensor raw bytes 相同，landing/net 全过。最大落点误差正/反手为 `0.004372/0.004531 m`，最小过网
+余量为 `0.273830/0.341401 m`。目标 physics SHA 为 `09dfe899...afb95`，新 train family 为
+`9603a178...a9db`；source worktree 复核后仍 clean exact `882fea4`。
+
+v6 manifest 不只绑定 bank 文件：launcher 解析 report 的 content SHA、target commit、rebind
+manifest/consumer SHA、24 数组、四-leaf metadata、exact motion gate 和两侧 replay，任一缺失都在 claim
+前 fail closed。旧 parent 的 `question_bank` 是唯一允许变化的共同 hard-contract 字段，精确从旧
+`2da2bd.../b21c16...` 过渡到新 `3a9d88.../9603a1...`；其他全部共同字段仍逐值相同。A/B 因该显式
+变化继续是 lineage `0`，C/D fresh 才是 `1`。
+
 ### 父合同扩展边界
 
 父 `model_13800.pt` SHA 冻结为 `478efa8d...d9e6`，嵌入/相邻 hard-contract SHA 均为
 `3a3b3d95...b9972`。当前源码已在该旧合同上增加 event timing、target cadence 等不可变字段；因此
 A/B **不能** strict exact resume。它们固定为 `checkpoint_allow_contract_mismatch=true` 的显式
-inexact representation transfer，launcher 要求新旧合同所有共同字段逐值相同，且只允许 manifest
-列出的 current-only key；后代 lineage 必须为 `0`。C/D 不读 checkpoint，lineage 必须为 `1`。
+inexact representation transfer；launcher 只允许 `question_bank` 按上述 old→new 精确值改变，其余
+共同字段逐值相同，且只允许 manifest 列出的 current-only key；后代 lineage 必须为 `0`。C/D 不读
+checkpoint，lineage 必须为 `1`。
 四格 emitted hard-contract SHA 必须一致。这一处理没有把旧 checkpoint 洗成 fresh 证据。
 
 L1 只是一份 25-update launch-integrity smoke。四个 L1 terminal 都 finite、iteration/合同/lineage
@@ -195,10 +212,11 @@ L1 只是一份 25-update launch-integrity smoke。四个 L1 terminal 都 finite
 
 - clean detached `882fea4` 训练 worktree和 exact ignored A3 资产已在 Pod1 建立；v1 audit 假拒绝、
   v2/v4/v5 pre-learning 失败与 v3 Kit 前假拒绝均已归档且未覆盖。v5 是旧题库 physics-contract 拒绝，
-  没有 learning iteration/checkpoint；严格新制品重绑定尚未在 Pod 运行，因此仍无新 checkpoint。
+  没有 learning iteration/checkpoint；v2 rebound train bank/report 已正式发布并绑定到 v6，但 v6 L1
+  尚未启动，因此仍无新 checkpoint。
 - L1 必须先实际运行并生成四格终档 completion/activation 证据。
 - 相对 `+1000` 的 immutable signed-face directional checkpoint paper 的 exact schedule/path/SHA 尚未
-  冻结。manifest 明确 `l2.launch_authorized=false`；必须另发 reviewed v6 paper activation 后才能启动
+  冻结。manifest 明确 `l2.launch_authorized=false`；必须另发 reviewed v7 paper activation 后才能启动
   L2。当前 launcher 也不启动 judge、不能自动晋级或购买第二 seed。
 
 当前只授权按运行手册进行仿真 L1 runtime validate/launch；不授权 L2、judge、部署或真机。

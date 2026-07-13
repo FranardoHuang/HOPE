@@ -1285,6 +1285,8 @@ worktree 的 source-first 环境没有传入 child；v3 又因在 `SimulationApp
 v5 又在第一次 learning iteration 前揭示旧 train bank 的 physics-contract SHA 与 `882fea4` 不同。
 main 的严格 rebind consumer 不放宽 schema-3 loader：它只在 source/AST、全部问题数组 raw bytes、四个
 metadata leaf、exact motion contract，以及全部 1481 道题 old/new contact/flight bitwise replay 同时
-通过时发布新路径 train bank。即使 train rebind 成功，source-family SHA 也会变化；旧 immutable exam
+通过时发布新路径 train bank。Pod1 已发布 bank/report `3a9d8851...5b71` / `9fffed03...bb37`，两侧
+landing/net 全过；这只是 E2 runtime data gate。train rebind 后 source-family SHA 已变为
+`9603a178...a9db`；旧 immutable exam
 不能与它组成 exact 同 family 证据。对应 exam bank 还未同法重绑定/重生成，L2 directional paper 与
 judge 仍阻断，所以这项能力不构成 G06 或 Gate3 结果。

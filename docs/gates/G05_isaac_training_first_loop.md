@@ -1472,5 +1472,8 @@ v5 随后在 scene 构建完成后被 schema-3 loader 正确拒绝：旧 train b
 checkpoint 前，A claim/log 保留，B/C/D 未创建；不能以 legacy load 绕过。main 现加入严格 no-clobber
 bank rebind consumer：先证明七个 physics 文件只有一个 helper 定义新增、移除它后 executable AST
 相同，且 generator/loader 不变；再要求全部非-meta 数组 raw bytes 不变、metadata 只有四个 leaf、目标
-runtime 的 exact motion contract 和 1481 题 old/new contact/flight bytes 相同。该能力尚未在 Pod 发布
-新 bank 或启动 v6 L1，因此 G05 仍为 `Partial`；操作仍见上面的 signed-face 漏斗运行手册。
+runtime 的 exact motion contract 和 1481 题 old/new contact/flight bytes 相同。Pod1 已正式发布并复核
+bank SHA `3a9d8851...5b71` 与 report SHA `9fffed03...bb37`：24 数组未变，正/反手 `757/724` 题的
+旧/新输出 raw bytes 相同，landing/net 全过。v6 又把 report closure 及唯一允许的父旧 bank→当前新
+bank common-field transition 写入 preflight；其他父/新共同字段仍逐值相同。v6 L1 尚未启动，所以
+G05 仍为 `Partial`；操作仍见上面的 signed-face 漏斗运行手册。
