@@ -1301,10 +1301,28 @@ SHA-256 `d57a93e0...a1054` / `60c55150...088ef`。下一层 canonical-beta 已�
 计划；consumer 只注入旧 exact donor，其他 PT leaf 必须 save/reload bit-exact。host 新旧专项为
 `15 passed, 1 skipped`；真实 canonical-beta `inspect/consume` 也已在绑定 Pod1 CPU runtime 完成，S0/M0
 completion manifest SHA 为 `964a7333...f1be3` / `5cef05f7...71a65`，五条 non-beta 内容 bit-exact。
-这只解锁另建 exact GMR prereg，不直接解锁 schema-2 或 RL。S0 仍不得借用拉球题或声称击球有效；M0 的 A3
-foot-site、初末二维脚间向量、容差和 pass 当前全部为 null，必须由 robot-coordinate GMR 产生，双脚
+这只解锁另建 exact GMR prereg，不直接解锁 schema-2 或 RL。S0 仍不得借用拉球题或声称击球有效；M0 的
+canonical foot-site 与容差现已由 exact-GMR prereg 冻结，初末二维脚间向量和 pass 仍为 null，必须由
+robot-coordinate GMR 产生，双脚
 并拢不能通过。详见 [handoff 记录](../experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md)与
 [canonical-beta 记录](../experiments/motion_canonical_beta_s0_m0_20260713.md)。
+
+### 2026-07-14 S0/M0 exact GMR prereg boundary
+
+The five canonical-beta PTs now have separate S0/M0 exact-GMR machine plans, but they do not yet
+authorize a training asset. The CPU consumer freezes the old GMR argv, exact source/runtime/model
+closure and report-last publication. M0 additionally freezes exact 30 Hz ready-window sample lists,
+canonical A3 foot FK and both components of `right_foot_xy-left_foot_xy`; a finish narrowed by more
+than 5 mm fails independently of the 3 cm component band. S0 contact/effect remains null and cannot
+borrow a loop paper.
+
+The 2026-07-14 read-only receipt recovered the exact GMR tree plus most model/import/Python hashes,
+but direct retarget XML joint/body/site output was transport-truncated and the remaining paths are
+enumerated in the shared runtime's 16-item `required_unresolved_evidence`. Both batch plans are
+preregistered; the shared runtime stays blocked, and both real static validations deliberately fail
+rc=2 at that same list. No GMR output exists. Schema-2, L0/L1, dynamics and RL remain blocked; no
+trainer or hardware command ran. G05 remains `Partial`; details are in
+[the experiment](../experiments/motion_exact_gmr_s0_m0_20260713.md).
 
 ### 2026-07-12 文档路由与当前成绩表
 

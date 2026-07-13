@@ -514,6 +514,24 @@ run was CPU-only, completed 10/10 in 48.7 s, and every result passed 30 Hz,
 still uncalibrated diagnostics and must take their own no-clobber grounding,
 dense collision, dynamics and table/net gates before schema-2.
 
+The new S0/M0 canonical-beta outputs use a separate exact-GMR consumer; do not
+append them to the consumed ten-asset v1 root. Restore the two completion
+manifests (`964a7333...f1be3` / `5cef05f7...71a65`), their exact five PTs and
+both byte-identical donor `canonical_betas.json` copies at the absolute paths
+in `configs/motion_exact_gmr_{s0,m0}_prereg_20260713.json`. The shared runtime
+contract additionally requires the ignored GMR commit **and tree OID**, exact
+`a3_mocap.xml`, exact SMPL-X-to-A3 mapping, neutral SMPL-X NPZ, recovery bundle,
+Python/pip closure and independently parsed retarget joint/body/site order. A
+2026-07-14 read-only receipt recovered the exact tree and most file/runtime
+hashes, but its direct XML body/site output was transport-truncated and several
+absolute paths/origins remain unknown. The exact 16-field follow-up is the
+`required_unresolved_evidence` array in
+`configs/motion_s0_m0_exact_gmr_runtime_20260713.json`; both batch-plan
+`static` calls deliberately fail rc=2 at that list and no GMR command is
+authorized. Once those fields are filled and reviewed, follow
+[`run_motion_s0_m0_exact_gmr.md`](run_motion_s0_m0_exact_gmr.md); never infer
+the ignored retarget body order from the tracked canonical vendor MJCF.
+
 Ground exactly one accepted diagnostic GMR pickle with explicit no-clobber
 paths. The command below is the Franco forehand-block pilot shape; use each
 row's own input SHA/frame count for other assets:

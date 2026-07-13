@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "plan_id": "motion-exact-gmr-static-high-press-s0-20260713-v1",
+  "status": "preregistered_not_executed",
+  "batch_kind": "s0_static_high_press",
+  "scope": "independent CPU-only exact GMR retarget of the one S0 high-press canonical-beta PT; structural diagnostic only",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+  "formal_eligible": false,
+  "schema2_authorized": false,
+  "training_authorized": false,
+  "hardware_authorized": false,
+  "runtime_contract": {
+    "path": "configs/motion_s0_m0_exact_gmr_runtime_20260713.json",
+    "bytes": 12950,
+    "sha256": "25e21b3c829642453c6e22afb3a4e97c4d0d4ffba7886099082e25b3380c9563"
+  },
+  "source_materialization": {
+    "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+    "preregistration": {
+      "path": "configs/motion_canonical_betas_s0_prereg_20260713.json",
+      "bytes": 4094,
+      "sha256": "236cace8aeae6c80f333194f8f73f9a718720057e8badc62d2769c1a08d94f19"
+    },
+    "completion_manifest": {
+      "path": "/workspace/codexschema/motion_video_intake_20260713_s0/canonical_betas_v1/materialization_manifest.json",
+      "bytes": 4513,
+      "sha256": "964a733313d6efe2e1c5074061519a114389befec7ee0567fd6d7b9ac00f1be3"
+    },
+    "canonical_betas_artifact": {
+      "path": "/workspace/codexschema/motion_video_intake_20260713_s0/canonical_betas_v1/canonical_betas.json",
+      "bytes": 915,
+      "sha256": "f405ba45d7f2233d3735c2e6b59409203cc98b1e97deef00224e16f2c7c4cbf2"
+    },
+    "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6"
+  },
+  "processing_order": ["static_backhand_high_press"],
+  "inputs": [
+    {
+      "asset_id": "static_backhand_high_press",
+      "frames": 88,
+      "ready_before_window_s": [0.0, 0.833333],
+      "ready_after_window_s": [2.0, 2.833333],
+      "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260713_s0/canonical_betas_v1/static_backhand_high_press.diagnostic_franco_donor_betas.pt",
+        "bytes": 389586,
+        "sha256": "307d00c3d457be2b845940e4c07f14ea168e6a59cbeafc5ffb4fc40ebb5cc319"
+      }
+    }
+  ],
+  "s0_semantic_guard": {
+    "motion_role": "fifth_action_backhand_high_ball_forward_downward_press",
+    "question_family": "separate_high_ball_high_press_paper_required_not_yet_preregistered",
+    "pull_or_loop_question_paper_allowed": false,
+    "observed_ball_contact": null,
+    "strike_effectiveness": null
+  },
+  "m0_stance_contract": null,
+  "output_contract": {
+    "output_root": "/workspace/codexschema/motion_video_intake_20260713_s0/exact_gmr_v1",
+    "result_suffix": ".exact_franco_donor_betas.gmr.pkl",
+    "output_root_must_not_exist": true,
+    "no_clobber": true,
+    "stop_on_first_failure": true,
+    "completion_manifest_filename": "completion_manifest.json",
+    "completion_manifest_published_last": true
+  },
+  "formal_blockers": [
+    "shared exact-GMR runtime has unresolved direct retarget XML/import/Python evidence and cannot pass static",
+    "air swing has no observed ball contact or strike-effect truth",
+    "S0 requires its own high-ball high-press paper and may not borrow a loop paper",
+    "schema-2, L0/L1, table/net swept clearance, dynamics and balance are untested",
+    "TOPP, RL, vendor Gate3 and hardware remain unauthorized"
+  ]
+}

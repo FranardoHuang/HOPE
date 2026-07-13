@@ -23,6 +23,14 @@
   [实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)与
   [操作](operations/run_motion_spatial_retarget_screen.md)。
 
+- S0/M0 的下一层 exact GMR 已形成两份独立 no-clobber plan 与共享 consumer：五条 canonical-beta PT、
+  converter argv、Python/pip、A3 model tree、两套 joint/body order 和 31-joint bijection 都是 required；M0
+  预冻结 exact 30 Hz ready sample、足点 FK、前后/横向二维脚距、3 cm component band 与独立 5 mm 防收窄门。
+  07-14 只读回执补齐 clean tree、model/mapping、关键 import 与 Python/pip SHA，但 direct retarget XML
+  order/site 段被传输截断；共享 runtime 以 16 项机器清单继续 blocked，两份 batch 已预注册且真实
+  `static` 均 rc=2。专项 `12 passed`、全仓 `645 passed, 9 skipped`；未运行 GMR/仿真/RL/真机。见
+  [exact GMR 卷宗](experiments/motion_exact_gmr_s0_m0_20260713.md)。
+
 ## 2026-07-13
 
 - 反手拉 B/C 的 22 条 signed 整轨 proposal 已收敛为 exactly one primary per asset：只把 3 组

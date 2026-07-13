@@ -55,6 +55,7 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 | [Franco 优先、static/motion GVHMR 预注册](motion_video_gvhmr_prereg_franco_static_motion_20260713.md) | 复用 Franco exact 结果后，static 与 motion 能否进入互不阻塞、no-clobber 的 GVHMR-only 小批？ | franco | Codex | completed | E2 | [S0/M0](../DEFINITIONS.md) `1/1 + 4/4` exact finite structural pass；无 GMR/schema-2/动作效果 |
 | [S0/M0 exact post-GVHMR handoff](motion_post_gvhmr_s0_m0_handoff_20260713.md) | 五条 exact GVHMR 结果能否无歧义进入 canonical-beta/GMR/schema-2 前置链？ | Franco | Codex | completed | E2 | S0/M0 runtime handoff exact SHA 已归档；canonical-beta 已另卷完成，只解锁 exact GMR 计划 |
 | [S0/M0 exact donor canonical-beta](motion_canonical_beta_s0_m0_20260713.md) | 能否给新五条 exact PT 注入旧 donor，同时保证 beta 外 save/reload bit-exact？ | Franco | Codex | runtime consumed | E2 | 真实 `1+4` 条 PT 已 materialize 且 non-beta bit-exact；只解锁 exact GMR prereg |
+| [S0/M0 exact GMR 与横移脚距](motion_exact_gmr_s0_m0_20260713.md) | 五条 canonical-beta PT 能否严格进入 A3 GMR，并拒绝横移末态收脚变窄？ | Franco | Codex | runtime blocked | E1 | 两份 batch 已预注册；shared runtime 仍缺 direct XML order/site 与 import/Python path 的 16 项只读证据，尚未运行 |
 | [v12/高点拍压/横移组合设计](motion_v12_high_press_lateral_teacher_20260713.md) | 新动作和横移下肢老师怎样进入各自题族与全身组合？ | franco | Codex | proposed | E0 | S0/M0 已到 canonical-beta；GMR 后的组合与行为仍只有设计 |
 | [非击球臂模仿消融](non_striking_arm_imitation_ablation_20260713.md) | 解除左臂模仿能否改善平衡且不破坏击球？ | franco | Codex | proposed | E0 | 配对实验尚未运行 |
 
