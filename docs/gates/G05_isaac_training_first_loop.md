@@ -1466,3 +1466,11 @@ URDF/mesh/config；失败 A claim 保留。v5 从 clean `6d93bcb` 恢复并同�
 `46` files、`15,378,264` bytes 与 canonical SHA `0137f59b...26c6`，claim 前拒绝缺失/额外/symlink。
 复现命令、SSH 中断恢复和半写 claim 的 fail-closed 处置见
 [操作文档](../operations/run_phase1_signed_face_rescue_funnel.md)。
+
+v5 随后在 scene 构建完成后被 schema-3 loader 正确拒绝：旧 train bank 的 physics contract 记录旧
+`virtual_ball.py`，而 `882fea4` 新增 signed-face helper。失败发生在 hard-contract/first iteration/
+checkpoint 前，A claim/log 保留，B/C/D 未创建；不能以 legacy load 绕过。main 现加入严格 no-clobber
+bank rebind consumer：先证明七个 physics 文件只有一个 helper 定义新增、移除它后 executable AST
+相同，且 generator/loader 不变；再要求全部非-meta 数组 raw bytes 不变、metadata 只有四个 leaf、目标
+runtime 的 exact motion contract 和 1481 题 old/new contact/flight bytes 相同。该能力尚未在 Pod 发布
+新 bank 或启动 v6 L1，因此 G05 仍为 `Partial`；操作仍见上面的 signed-face 漏斗运行手册。

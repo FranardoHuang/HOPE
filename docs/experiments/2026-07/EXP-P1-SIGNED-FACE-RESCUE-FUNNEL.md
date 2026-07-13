@@ -1,7 +1,7 @@
 # EXP-P1-SIGNED-FACE-RESCUE-FUNNEL：有符号拍面修复后的单-seed 机制漏斗
 
-状态：`preregistered_v5_after_four_preserved_prelearning_failures`
-证据等级：E1（v5 machine prereg/launcher 与静态攻击回归通过；尚无新训练）
+状态：`v5_prelearning_physics_contract_rejection_bank_rebind_v1_preregistered`
+证据等级：E1（五次学习前失败均保留；题库严格重绑定源码与攻击回归通过，尚无新训练）
 人类负责人：franco  
 执行者：Codex  
 全局优先级：只继承 [`NOW` 队列第 1 项](../../NOW.md#统一工作队列唯一优先级账本)，本页不另建队列。
@@ -148,6 +148,30 @@ v5 从 clean exact `6d93bcb` runtime checkout 恢复完整 A3 ignored tree 到 e
 `0137f59b...26c6`。preflight 同时重算两棵树，拒绝 symlink、特殊/额外/缺失文件，并要求 target 确实被
 Git ignore、两个 checkout 均 clean。资产恢复不改变训练配方、源码 commit、seed、预算或 exactness。
 
+### v5 旧题库物理合同拒绝与严格重绑定
+
+v5 已越过环境、Kit、A3 资产和 scene 构建，但在第一次 learning iteration、hard-contract marker 和任何
+checkpoint 之前被 schema-3 loader 正确拒绝。旧 train bank 绑定的 `virtual_ball.py` SHA 是
+`3dc52373...5ed4`，目标 `882fea4` 源码是 `14113de4...3c8`；不能用
+`question_bank_allow_legacy=true` 绕过。A 的 claim/log 保留，B/C/D 没有创建；当时 trainer 在异常清理中
+仍占 Pod1 GPU0，但没有发生学习，后续只允许按记录的精确 PGID 清理。
+
+重绑定不是重算题目，也不是“声明兼容”。machine prereg
+[`phase1_signed_face_bank_rebind_prereg_20260713.json`](../../../configs/phase1_signed_face_bank_rebind_prereg_20260713.json)
+和 consumer
+[`rebind_stage1_question_bank_physics_contract.py`](../../../scripts/rebind_stage1_question_bank_physics_contract.py)
+要求：七个物理合同文件只允许 `virtual_ball.py` 改动；冻结 Git diff 与新增
+`signed_face_hemisphere` 的 AST，移除该唯一新函数后旧/新 executable AST 必须完全相同；题库生成器和
+loader 在两个 commit 间逐字节相同；全部非 metadata 数组保持 key/order、dtype、shape 和 C-order raw
+bytes SHA；metadata 只能改四个 leaf。发布前还要在同一目标 Torch runtime 对 1481 道 train 题逐 tensor
+比较旧/新 contact 与 flight 输出原始 bytes，重跑 landing/net 门，并以 `allow_legacy=false` 同时验证
+schema、split、source family 和 exact motion/frame/phase 合同。
+
+输出使用新 no-clobber 目录，旧 bank 不覆盖；先生成 bank，再写 completion report。新 train family SHA
+预注册为 `9603a178...9db`。该 train bank 即使通过也只解除 L1 发射阻塞；旧 exam 的 family SHA 会与它
+不同，所以在对应 exam bank 用同样证据重绑定或重新生成之前，不能授权 L2 exact judge，也不能把这次
+重绑定冒充 signed-directional paper。
+
 ### 父合同扩展边界
 
 父 `model_13800.pt` SHA 冻结为 `478efa8d...d9e6`，嵌入/相邻 hard-contract SHA 均为
@@ -165,8 +189,8 @@ L1 只是一份 25-update launch-integrity smoke。四个 L1 terminal 都 finite
 ## 仍未关闭的发射/判卷缺口
 
 - clean detached `882fea4` 训练 worktree和 exact ignored A3 资产已在 Pod1 建立；v1 audit 假拒绝、
-  v2/v4 pre-learning 失败与 v3 Kit 前假拒绝均已归档且未覆盖。v5 runtime `validate/launch` 尚未完成，
-  因此仍无新 checkpoint。
+  v2/v4/v5 pre-learning 失败与 v3 Kit 前假拒绝均已归档且未覆盖。v5 是旧题库 physics-contract 拒绝，
+  没有 learning iteration/checkpoint；严格新制品重绑定尚未在 Pod 运行，因此仍无新 checkpoint。
 - L1 必须先实际运行并生成四格终档 completion/activation 证据。
 - 相对 `+1000` 的 immutable signed-face directional checkpoint paper 的 exact schedule/path/SHA 尚未
   冻结。manifest 明确 `l2.launch_authorized=false`；必须另发 reviewed v6 paper activation 后才能启动

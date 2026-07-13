@@ -13,6 +13,14 @@
 
 ## 2026-07-13
 
+- signed-face v5 在 scene 构建后、第一次学习前被旧 schema-3 train-bank physics contract 正确拒绝；
+  A claim/log 保留，B/C/D 未创建，没有 checkpoint。新增严格 no-clobber 重绑定 consumer：只允许一个
+  冻结 helper 的加法式源码变化，要求所有问题数组 raw bytes 不变、metadata 精确四 leaf，并在目标
+  runtime 重跑 exact motion contract 与 1481 题 old/new bitwise physics replay。专项连同 launcher 为
+  `28 passed`；Pod 尚未物化新 bank/v6 L1，旧 exam family 也未重绑定，故 L2/judge 继续阻断。见
+  [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)与
+  [操作](operations/run_phase1_signed_face_rescue_funnel.md)。
+
 - signed-face 单-seed 漏斗的首次 Pod v1 preflight 在创建 run 前抓到 checkpoint 审计假拒绝：旧代码
   只看顶层 tensor/合同键，实际 RSL-RL 权重嵌套且 provenance 在 `infos`。父 `model_13800.pt` 递归
   `74` 个浮点 tensor、`1,762,715` 元素、nonfinite `0`；v2 改为递归扫描并绑定 `infos`，保留 v1

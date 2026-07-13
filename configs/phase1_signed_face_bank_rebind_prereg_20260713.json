@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "manifest_id": "phase1-signed-face-schema3-bank-additive-physics-rebind-20260713-v1",
+  "purpose": "Rebind one immutable schema-3 Stage-1 train bank to commit 882fea4 only after proving that the sole physics-contract change is one unused additive signed-face helper and that every question array is unchanged.",
+  "simulation_only": true,
+  "real_robot_commands_forbidden": true,
+  "legacy_load_forbidden": true,
+  "source_repo": "/workspace/codexschema/nohope_signed_face_rescue_882fea4",
+  "runtime_python": "/workspace/hope_isaac_venv/bin/python",
+  "base_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+  "target_commit": "882fea4285f0cf9a97ba79d79ae8af31d26ea1ed",
+  "source_bank": {
+    "path": "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/s1_v4rg_runtime_order_schema3_train.npz",
+    "sha256": "2da2bd1280c45944418d41fe5788d09d7c0ebb0ff7d34fa87c8dd0fcf16a0700",
+    "schema_version": 3,
+    "split": "train",
+    "clip_order": [
+      "forehand",
+      "backhand"
+    ],
+    "question_counts": {
+      "forehand": 757,
+      "backhand": 724
+    },
+    "motion_sha256": {
+      "forehand": "f2cb2d9f5d27cefbcee0b790000fcd979abaf02894d4fcad061ebca27f141687",
+      "backhand": "1722553375cd28f9b2d567c01b1a5fc6bcd149fa12cadb20e5202a9153367534"
+    },
+    "motion_runtime": {
+      "forehand": {
+        "path": "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_forehand_v4rg_cal.npz",
+        "n_frames": 141,
+        "strike_phase": 0.471
+      },
+      "backhand": {
+        "path": "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_backhand_v4rg_cal.npz",
+        "n_frames": 134,
+        "strike_phase": 0.338
+      }
+    },
+    "physics_contract_sha256": "70242d798f5b97e1405df7dedfd22a5f81421c9c03127e71c254982236cfad35"
+  },
+  "physics_contract": {
+    "contract_name": "stage1-physics-runtime-v1",
+    "files": [
+      "configs/ball_physics_venue.yaml",
+      "hope_ws/src/hope_planner/hope_planner/constants.py",
+      "hope_ws/src/hope_planner/hope_planner/ball_contact.py",
+      "hope_ws/src/hope_planner/hope_planner/ball_trajectory_predictor.py",
+      "hope_ws/src/hope_planner/hope_planner/strike_spec_planner.py",
+      "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/virtual_ball.py",
+      "hope_training/whole_body_tracking/scripts/venue_ball_sampler.py"
+    ],
+    "only_changed_file": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/virtual_ball.py",
+    "base_changed_file_sha256": "3dc5237346004893141fe231dbf6a8bc1028e0328459411015366d72868c5ed4",
+    "target_changed_file_sha256": "14113de40bc1119d1a49a46980d9cb50380a516fd1ae1f9fb469f20834ec23c8",
+    "git_diff_sha256": "4f0ae2db7361d58eb0e8f7d4ea691beade0f6e8c5b64f0d194c0aa5a8ebc9499",
+    "allowed_added_top_level_function": "signed_face_hemisphere",
+    "allowed_added_function_ast_sha256": "cb7af7e0ba0675b1084ffd40c793a78c3f62d9c540f1db6da17b451d798ee01b",
+    "target_physics_contract_sha256": "09dfe8999c54e36b258fe54b5ec3da5d9816ff3be3675963b919371d7f4afb95"
+  },
+  "invariant_support_files": {
+    "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/stage1_question_bank.py": "47db31320c8a37ad95d082a179dcdfad45ca1b740696d54e22069fcdaab8b8b0",
+    "hope_training/whole_body_tracking/scripts/gen_stage1_questions.py": "36c788758318358d259aa9f947bf7f52379ea13f9f316a20ea75dbb27de06d75"
+  },
+  "target_source_family_sha256": "9603a1788eb17ce03598cdde4efff946039613cf61fcc686f90a385706dba9db",
+  "allowed_metadata_leaf_changes": [
+    "physics_contract.files.hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/virtual_ball.py",
+    "physics_contract_sha256",
+    "source_family_contract.physics_contract_sha256",
+    "source_family_sha256"
+  ],
+  "output": {
+    "root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v1",
+    "bank_basename": "s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz",
+    "report_basename": "rebind_report.json",
+    "root_must_not_exist": true,
+    "completion_report_written_last": true
+  }
+}

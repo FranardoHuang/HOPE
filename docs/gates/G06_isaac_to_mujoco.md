@@ -1281,3 +1281,10 @@ worktree 的 source-first 环境没有传入 child；v3 又因在 `SimulationApp
 上述修复都没有缩小 Isaac–MuJoCo 行为差，也没有启动 judge；
 操作见 [signed-face 漏斗运行手册](../operations/run_phase1_signed_face_rescue_funnel.md)，G06 保持
 `Partial`。
+
+v5 又在第一次 learning iteration 前揭示旧 train bank 的 physics-contract SHA 与 `882fea4` 不同。
+main 的严格 rebind consumer 不放宽 schema-3 loader：它只在 source/AST、全部问题数组 raw bytes、四个
+metadata leaf、exact motion contract，以及全部 1481 道题 old/new contact/flight bitwise replay 同时
+通过时发布新路径 train bank。即使 train rebind 成功，source-family SHA 也会变化；旧 immutable exam
+不能与它组成 exact 同 family 证据。对应 exam bank 还未同法重绑定/重生成，L2 directional paper 与
+judge 仍阻断，所以这项能力不构成 G06 或 Gate3 结果。
