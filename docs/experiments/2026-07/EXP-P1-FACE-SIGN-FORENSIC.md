@@ -115,13 +115,18 @@ lineage1 和 checkpoint↔hard-contract/claim binding 后才可进入 pair；这
 补写成“当时已验证”。
 
 修复采用 [`v1r1` one-shot continuation](../../DEFINITIONS.md)，而不是重跑 C2。新 manifest
-`8d893009...6e232` 冻结上述六个 SHA 和 absence boundary；新 verifier 只接受 exact float
+`f31fcf7b...5def8` 冻结上述六个 SHA 和 absence boundary；新 verifier 只接受 exact float
 `[1.0,-1.0]`，显式拒绝 `[True,-1.0]` 与 `[1,-1]`。C2 attestation 写入独立
 `continuations/v1r1/` evidence root，不向 preserved C2 arm 增加文件。唯一 launch mode 是
 `launch-d2`：它要求 C2 attestation 可逐值 replay、D2 未 claim、GPU2 空，并让 D2 checkpoint 绑定
 v1r1 manifest/launcher、原 v1 source/recipe 和 C2 attestation。最终 pair 必须显式承认 mixed outer
 control（C2=v1、D2=v1r1），同时证明规范化 trainer recipe 与 hard contract 都只差 signed-face
 weight。activation/judge/L2/第二 seed/stop-promote/真机继续为 false。
+
+部署前红队另发现“仓库布局绿、扁平外部 control 可能 import 失败”的 P1。最终 control 不再猜 sibling，
+只接受 `control/v1r1/{scripts,configs}/` 四文件 mini-tree；manifest 用 safe relative paths 绑定 v1r1
+launcher、v1 helper、v1r1 manifest 与原 v1 manifest。临时外部 mini-tree 已用 subprocess 实跑
+`static-validate/plan`；缺任一文件、旧扁平布局、绝对/`..` 路径或 symlink 都 fail closed。
 
 本分支只完成本地 source/contract gate，没有连接 Pod 或启动 D2；运行步骤见
 [C2/D2 L1 操作文档](../../operations/run_phase1_signed_face_cd_l1.md)。

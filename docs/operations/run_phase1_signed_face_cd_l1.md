@@ -23,9 +23,9 @@ claim/checkpoint；旧 `5f691b3` source 与 `466f8ea` control 只作为只读根
 - launcher/finalizer：[`run_phase1_signed_face_cd_l1.py`](../../scripts/run_phase1_signed_face_cd_l1.py)，
   SHA-256 `0fa250207246e8bf69b6475125882b45e817f9e777d13039614c82dad9a803ba`。
 - v1r1 manifest：[`phase1_signed_face_cd_l1_v1r1_continuation_20260714.json`](../../configs/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json)，
-  SHA-256 `8d893009d91bbaa395abaa9474f7048e80e3d2f50c054d3e5a93a74bda56e232`；v1r1 launcher：
+  SHA-256 `f31fcf7bf500dde26a347af15feacececda1b5e1fd870c74759aca7d60c5def8`；v1r1 launcher：
   [`continue_phase1_signed_face_cd_l1_v1r1.py`](../../scripts/continue_phase1_signed_face_cd_l1_v1r1.py)，
-  SHA-256 `b991fed75ef1bdd4d8ac9e0c6057e57a6e36c257597a163074249ca005691a6c`。
+  SHA-256 `a283a89a58114d8d8192b7a7bc879e2f6a9afb6302e9f126a86975e3a3340593`。
 - 动作、train bank、physics、A3 ignored asset、Python/pip 与 IsaacLab 的 SHA/commit 全在 manifest；任一
   漂移均在 claim 前拒绝。
 - Pod1 上 C2 固定 physical GPU1，D2 固定 physical GPU2；每条 claim 前只要求它自己的 GPU 没有任何
@@ -149,26 +149,32 @@ closed。
 
 新 evidence 绝不写入 preserved C2 arm，而是使用独立 no-clobber 路径
 `/workspace/codexschema/phase1_signed_face_cd_l1_20260714/continuations/v1r1/`。安装新的只读 control；
-同时复制原 v1 helper 供 v1r1 import，并逐字节绑定其旧 SHA：
+control 必须是四文件 mini-tree：两个脚本只在 `scripts/`，两份 manifest 只在 `configs/`。v1r1 对
+四个 safe relative path 逐项绑定，拒绝绝对路径、`..`、缺文件、扁平旧布局和任一 symlink：
 
 ```bash
 CONTROL_V1R1=/workspace/codexschema/phase1_signed_face_cd_l1_20260714/control/v1r1
 mkdir "$CONTROL_V1R1"
+mkdir "$CONTROL_V1R1/scripts" "$CONTROL_V1R1/configs"
 install -m 0444 configs/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json \
-  "$CONTROL_V1R1/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json"
+  "$CONTROL_V1R1/configs/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json"
+install -m 0444 configs/phase1_signed_face_cd_l1_prereg_20260714.json \
+  "$CONTROL_V1R1/configs/phase1_signed_face_cd_l1_prereg_20260714.json"
 install -m 0555 scripts/continue_phase1_signed_face_cd_l1_v1r1.py \
-  "$CONTROL_V1R1/continue_phase1_signed_face_cd_l1_v1r1.py"
+  "$CONTROL_V1R1/scripts/continue_phase1_signed_face_cd_l1_v1r1.py"
 install -m 0444 scripts/run_phase1_signed_face_cd_l1.py \
-  "$CONTROL_V1R1/run_phase1_signed_face_cd_l1.py"
+  "$CONTROL_V1R1/scripts/run_phase1_signed_face_cd_l1.py"
 
-CONFIG_V1R1="$CONTROL_V1R1/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json"
-LAUNCHER_V1R1="$CONTROL_V1R1/continue_phase1_signed_face_cd_l1_v1r1.py"
+CONFIG_V1R1="$CONTROL_V1R1/configs/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json"
+LAUNCHER_V1R1="$CONTROL_V1R1/scripts/continue_phase1_signed_face_cd_l1_v1r1.py"
 test "$(sha256sum "$CONFIG_V1R1" | awk '{print $1}')" = \
-  8d893009d91bbaa395abaa9474f7048e80e3d2f50c054d3e5a93a74bda56e232
+  f31fcf7bf500dde26a347af15feacececda1b5e1fd870c74759aca7d60c5def8
 test "$(sha256sum "$LAUNCHER_V1R1" | awk '{print $1}')" = \
-  b991fed75ef1bdd4d8ac9e0c6057e57a6e36c257597a163074249ca005691a6c
-test "$(sha256sum "$CONTROL_V1R1/run_phase1_signed_face_cd_l1.py" | awk '{print $1}')" = \
+  a283a89a58114d8d8192b7a7bc879e2f6a9afb6302e9f126a86975e3a3340593
+test "$(sha256sum "$CONTROL_V1R1/scripts/run_phase1_signed_face_cd_l1.py" | awk '{print $1}')" = \
   0fa250207246e8bf69b6475125882b45e817f9e777d13039614c82dad9a803ba
+test "$(sha256sum "$CONTROL_V1R1/configs/phase1_signed_face_cd_l1_prereg_20260714.json" | awk '{print $1}')" = \
+  785ad96dd53e1809ddcf86d1ecd80572b02e3c96ffd6d6599cab20a73b559895
 ```
 
 先只读验证，再一次性发布 C2 attestation；只有 attestation 可逐值 replay、D2 arm 与 exact run name

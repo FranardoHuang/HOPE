@@ -6,6 +6,10 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
 
 import pytest
 
@@ -26,6 +30,36 @@ def continuation_manifest():
 
 def original_manifest():
     return json.loads(V1_MANIFEST.read_text(encoding="utf-8"))
+
+
+def make_external_mini_tree() -> Path:
+    root = Path(tempfile.mkdtemp(prefix=".v1r1-mini-", dir=ROOT))
+    (root / "scripts").mkdir()
+    (root / "configs").mkdir()
+    files = {
+        SCRIPT: root / "scripts/continue_phase1_signed_face_cd_l1_v1r1.py",
+        ROOT / "scripts/run_phase1_signed_face_cd_l1.py": root / "scripts/run_phase1_signed_face_cd_l1.py",
+        MANIFEST: root / "configs/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json",
+        V1_MANIFEST: root / "configs/phase1_signed_face_cd_l1_prereg_20260714.json",
+    }
+    for source, target in files.items():
+        shutil.copyfile(source, target)
+        target.chmod(0o555 if target.name.endswith(".py") else 0o444)
+    return root
+
+
+def run_external(root: Path, mode: str):
+    return subprocess.run(
+        [
+            sys.executable,
+            str(root / "scripts/continue_phase1_signed_face_cd_l1_v1r1.py"),
+            "--mode", mode,
+        ],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
 
 
 def hard_contract(original, cell_id, signs=None):
@@ -72,6 +106,91 @@ def test_checked_in_manifest_and_original_v1_helper_are_content_bound():
     assert checked["source"]["commit"] == mod.v1.TRAINING_COMMIT
     assert mod.v1.sha256_file(mod.V1_SCRIPT) == mod.V1_LAUNCHER_SHA256
     assert manifest["continuation_control"]["v1_helper_sha256"] == mod.V1_LAUNCHER_SHA256
+
+
+def test_external_four_file_mini_tree_static_validate_and_plan():
+    root = make_external_mini_tree()
+    try:
+        static = run_external(root, "static-validate")
+        plan = run_external(root, "plan")
+        assert static.returncode == 0, static.stderr
+        assert plan.returncode == 0, plan.stderr
+        observed = json.loads(plan.stdout)
+        assert observed["only_launchable_cell"] == "D2"
+        assert observed["c2_launch_or_retry_mode_present"] is False
+    finally:
+        shutil.rmtree(root)
+
+
+def test_runtime_receipt_binds_all_four_mini_tree_files(monkeypatch):
+    root = make_external_mini_tree()
+    try:
+        manifest = continuation_manifest()
+        manifest["continuation_control"]["root"] = str(root)
+        config = root / manifest["continuation_control"]["manifest_relative_path"]
+        launcher = root / manifest["continuation_control"]["launcher_relative_path"]
+        helper = root / manifest["continuation_control"]["v1_helper_relative_path"]
+        monkeypatch.setattr(mod, "ROOT", root)
+        monkeypatch.setattr(mod, "V1_SCRIPT", helper)
+        receipt = mod.continuation_control_receipt(manifest, config, launcher)
+        assert set(receipt) == {"manifest", "launcher", "v1_helper", "v1_manifest"}
+        assert receipt["manifest"]["sha256"] == mod.CONTINUATION_MANIFEST_SHA256
+        assert receipt["v1_helper"]["sha256"] == mod.V1_LAUNCHER_SHA256
+        assert receipt["v1_manifest"]["sha256"] == mod.V1_MANIFEST_SHA256
+    finally:
+        shutil.rmtree(root)
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "scripts/continue_phase1_signed_face_cd_l1_v1r1.py",
+        "scripts/run_phase1_signed_face_cd_l1.py",
+        "configs/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json",
+        "configs/phase1_signed_face_cd_l1_prereg_20260714.json",
+    ],
+)
+def test_external_mini_tree_missing_any_frozen_file_fails(missing):
+    root = make_external_mini_tree()
+    try:
+        (root / missing).unlink()
+        assert run_external(root, "static-validate").returncode != 0
+    finally:
+        shutil.rmtree(root)
+
+
+def test_flat_old_external_layout_fails_instead_of_escaping_to_repo():
+    root = Path(tempfile.mkdtemp(prefix=".v1r1-flat-", dir=ROOT))
+    try:
+        for source in (SCRIPT, ROOT / "scripts/run_phase1_signed_face_cd_l1.py", MANIFEST, V1_MANIFEST):
+            shutil.copyfile(source, root / source.name)
+        completed = subprocess.run(
+            [sys.executable, str(root / SCRIPT.name), "--mode", "static-validate"],
+            cwd=root, text=True, capture_output=True, check=False,
+        )
+        assert completed.returncode != 0
+        assert "must be installed under control/v1r1/scripts" in completed.stderr
+    finally:
+        shutil.rmtree(root)
+
+
+def test_external_mini_tree_rejects_symlinked_helper():
+    root = make_external_mini_tree()
+    try:
+        helper = root / "scripts/run_phase1_signed_face_cd_l1.py"
+        helper.unlink()
+        helper.symlink_to(ROOT / "scripts/run_phase1_signed_face_cd_l1.py")
+        completed = run_external(root, "static-validate")
+        assert completed.returncode != 0
+        assert "symlink component" in completed.stderr
+    finally:
+        shutil.rmtree(root)
+
+
+@pytest.mark.parametrize("unsafe", ["", ".", "../x", "configs/../x", "/abs/x"])
+def test_control_relative_paths_reject_empty_dot_traversal_and_absolute(unsafe):
+    with pytest.raises(mod.ContractError):
+        mod.require_safe_relative_path(unsafe, "test path")
 
 
 def test_plan_has_only_d2_launch_and_no_c2_retry_surface():
@@ -189,6 +308,8 @@ def test_mixed_outer_control_pair_normalizes_only_signed_weight():
         lambda value: value["d2_only_continuation"].__setitem__("cell_id", "C2"),
         lambda value: value["decision_boundary"].__setitem__("l2", True),
         lambda value: value["continuation_control"].__setitem__("v1_helper_sha256", "0" * 64),
+        lambda value: value["continuation_control"].__setitem__("launcher_relative_path", "../scripts/x.py"),
+        lambda value: value["original_v1_control"].__setitem__("manifest_relative_path", "/tmp/x.json"),
     ],
 )
 def test_manifest_drift_fails_closed(mutator):

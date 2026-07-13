@@ -15,17 +15,19 @@
   "second_seed_authorized": false,
   "original_v1_control": {
     "root": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/control/v1",
-    "manifest_basename": "phase1_signed_face_cd_l1_prereg_20260714.json",
+    "manifest_relative_path": "phase1_signed_face_cd_l1_prereg_20260714.json",
     "manifest_sha256": "785ad96dd53e1809ddcf86d1ecd80572b02e3c96ffd6d6599cab20a73b559895",
-    "launcher_basename": "run_phase1_signed_face_cd_l1.py",
+    "launcher_relative_path": "run_phase1_signed_face_cd_l1.py",
     "launcher_sha256": "0fa250207246e8bf69b6475125882b45e817f9e777d13039614c82dad9a803ba"
   },
   "continuation_control": {
     "root": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/control/v1r1",
-    "manifest_basename": "phase1_signed_face_cd_l1_v1r1_continuation_20260714.json",
-    "launcher_basename": "continue_phase1_signed_face_cd_l1_v1r1.py",
-    "v1_helper_basename": "run_phase1_signed_face_cd_l1.py",
+    "manifest_relative_path": "configs/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json",
+    "launcher_relative_path": "scripts/continue_phase1_signed_face_cd_l1_v1r1.py",
+    "v1_helper_relative_path": "scripts/run_phase1_signed_face_cd_l1.py",
     "v1_helper_sha256": "0fa250207246e8bf69b6475125882b45e817f9e777d13039614c82dad9a803ba",
+    "v1_manifest_relative_path": "configs/phase1_signed_face_cd_l1_prereg_20260714.json",
+    "v1_manifest_sha256": "785ad96dd53e1809ddcf86d1ecd80572b02e3c96ffd6d6599cab20a73b559895",
     "root_launch_confirmation": "ROOT_APPROVES_SIM_ONLY_SIGNED_FACE_D2_ONLY_V1R1"
   },
   "preserved_c2": {

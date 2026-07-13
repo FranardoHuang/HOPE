@@ -30,14 +30,27 @@ import time
 from typing import Any
 
 
-HERE = Path(__file__).resolve()
-_REPO_CANDIDATE = HERE.parents[1]
-if (_REPO_CANDIDATE / "configs/phase1_signed_face_cd_l1_prereg_20260714.json").is_file():
-    ROOT: Path | None = _REPO_CANDIDATE
-    V1_SCRIPT = ROOT / "scripts/run_phase1_signed_face_cd_l1.py"
-else:
-    ROOT = None
-    V1_SCRIPT = HERE.parent / "run_phase1_signed_face_cd_l1.py"
+HERE = Path(__file__).absolute()
+
+
+def _early_no_symlink_components(path: Path, label: str) -> None:
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current /= part
+        try:
+            mode = current.lstat().st_mode
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(mode):
+            raise RuntimeError(f"{label} contains a symlink component: {current}")
+
+
+_early_no_symlink_components(HERE, "v1r1 launcher path")
+if HERE.parent.name != "scripts":
+    raise RuntimeError("v1r1 launcher must be installed under control/v1r1/scripts/")
+ROOT = HERE.parent.parent
+V1_SCRIPT = ROOT / "scripts/run_phase1_signed_face_cd_l1.py"
+_early_no_symlink_components(V1_SCRIPT, "v1 helper path")
 _SPEC = importlib.util.spec_from_file_location("phase1_signed_face_cd_l1_v1", V1_SCRIPT)
 if _SPEC is None or _SPEC.loader is None:  # pragma: no cover - import failure is fatal
     raise RuntimeError(f"cannot load frozen v1 helper: {V1_SCRIPT}")
@@ -47,7 +60,7 @@ _SPEC.loader.exec_module(v1)
 ContractError = v1.ContractError
 CONTINUATION_ID = "phase1-signed-face-c2-d2-l1-v1r1-d2-only-20260714"
 CONTINUATION_MANIFEST_SHA256 = (
-    "8d893009d91bbaa395abaa9474f7048e80e3d2f50c054d3e5a93a74bda56e232"
+    "f31fcf7bf500dde26a347af15feacececda1b5e1fd870c74759aca7d60c5def8"
 )
 V1_MANIFEST_SHA256 = "785ad96dd53e1809ddcf86d1ecd80572b02e3c96ffd6d6599cab20a73b559895"
 V1_LAUNCHER_SHA256 = "0fa250207246e8bf69b6475125882b45e817f9e777d13039614c82dad9a803ba"
@@ -55,13 +68,30 @@ ROOT_CONFIRMATION = "ROOT_APPROVES_SIM_ONLY_SIGNED_FACE_D2_ONLY_V1R1"
 CELL_ID = "D2"
 
 
-def continuation_manifest_path(root: Path | None = ROOT) -> Path:
-    if root is None:
-        return HERE.parent / "phase1_signed_face_cd_l1_v1r1_continuation_20260714.json"
+def require_safe_relative_path(value: Any, label: str) -> Path:
+    if type(value) is not str or not value:
+        raise ContractError(f"{label} must be a non-empty relative path string")
+    relative = Path(value)
+    if relative.is_absolute() or not relative.parts or any(
+        part in ("", ".", "..") for part in relative.parts
+    ):
+        raise ContractError(f"{label} must be relative and contain no dot traversal")
+    return relative
+
+
+def safe_control_path(root: Path, value: Any, label: str) -> Path:
+    relative = require_safe_relative_path(value, label)
+    target = root / relative
+    v1.no_symlink_existing_components(target, label)
+    return target
+
+
+def continuation_manifest_path(root: Path = ROOT) -> Path:
     return root / "configs/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json"
 
 
 def read_manifest(path: Path) -> dict[str, Any]:
+    v1.require_regular(path, "v1r1 continuation manifest")
     if v1.sha256_file(path) != CONTINUATION_MANIFEST_SHA256:
         raise ContractError("v1r1 continuation manifest bytes changed")
     value = v1.read_json_object(path, "v1r1 continuation manifest")
@@ -95,11 +125,30 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
     boundary = manifest.get("decision_boundary")
     if not all(isinstance(value, dict) for value in (original, control, c2, d2, outputs, boundary)):
         raise ContractError("v1r1 control/evidence/output sections must be objects")
-    v1.require_exact(original.get("manifest_sha256"), V1_MANIFEST_SHA256, "v1 manifest SHA")
-    v1.require_exact(original.get("launcher_sha256"), V1_LAUNCHER_SHA256, "v1 launcher SHA")
-    v1.require_exact(control.get("root_launch_confirmation"), ROOT_CONFIRMATION, "D2 root switch")
-    v1.require_exact(control.get("v1_helper_basename"), "run_phase1_signed_face_cd_l1.py", "v1 helper name")
-    v1.require_exact(control.get("v1_helper_sha256"), V1_LAUNCHER_SHA256, "v1 helper SHA")
+    v1.require_exact(original, {
+        "root": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/control/v1",
+        "manifest_relative_path": "phase1_signed_face_cd_l1_prereg_20260714.json",
+        "manifest_sha256": V1_MANIFEST_SHA256,
+        "launcher_relative_path": "run_phase1_signed_face_cd_l1.py",
+        "launcher_sha256": V1_LAUNCHER_SHA256,
+    }, "original v1 control")
+    v1.require_exact(control, {
+        "root": "/workspace/codexschema/phase1_signed_face_cd_l1_20260714/control/v1r1",
+        "manifest_relative_path": "configs/phase1_signed_face_cd_l1_v1r1_continuation_20260714.json",
+        "launcher_relative_path": "scripts/continue_phase1_signed_face_cd_l1_v1r1.py",
+        "v1_helper_relative_path": "scripts/run_phase1_signed_face_cd_l1.py",
+        "v1_helper_sha256": V1_LAUNCHER_SHA256,
+        "v1_manifest_relative_path": "configs/phase1_signed_face_cd_l1_prereg_20260714.json",
+        "v1_manifest_sha256": V1_MANIFEST_SHA256,
+        "root_launch_confirmation": ROOT_CONFIRMATION,
+    }, "v1r1 mini-tree control")
+    for key in ("manifest_relative_path", "launcher_relative_path"):
+        require_safe_relative_path(original[key], f"original v1 {key}")
+    for key in (
+        "manifest_relative_path", "launcher_relative_path",
+        "v1_helper_relative_path", "v1_manifest_relative_path",
+    ):
+        require_safe_relative_path(control[key], f"v1r1 {key}")
     v1.require_exact(c2.get("cell_id"), "C2", "preserved cell")
     v1.require_exact(c2.get("run_name"), "phase1_signed_face_l1_c2d2_v1_C2_fresh_control_seed3", "C2 run")
     v1.require_exact(c2.get("pid_equals_pgid"), 1820092, "C2 pid=pgid")
@@ -216,17 +265,20 @@ def verify_hard_contract(
 def original_control_paths(manifest: dict[str, Any]) -> tuple[Path, Path]:
     item = manifest["original_v1_control"]
     root = Path(item["root"])
-    return root / item["manifest_basename"], root / item["launcher_basename"]
+    return (
+        safe_control_path(root, item["manifest_relative_path"], "original v1 manifest"),
+        safe_control_path(root, item["launcher_relative_path"], "original v1 launcher"),
+    )
 
 
 def checked_in_original_paths() -> tuple[Path, Path]:
-    if ROOT is None:
-        raise ContractError("checked-in source validation requires repository layout")
     return ROOT / "configs/phase1_signed_face_cd_l1_prereg_20260714.json", V1_SCRIPT
 
 
 def verify_checked_in_original() -> dict[str, Any]:
     manifest_path, launcher_path = checked_in_original_paths()
+    v1.require_regular(manifest_path, "mini-tree v1 manifest")
+    v1.require_regular(launcher_path, "mini-tree v1 helper")
     if v1.sha256_file(manifest_path) != V1_MANIFEST_SHA256:
         raise ContractError("checked-in v1 manifest bytes changed")
     if v1.sha256_file(launcher_path) != V1_LAUNCHER_SHA256:
@@ -236,12 +288,10 @@ def verify_checked_in_original() -> dict[str, Any]:
 
 
 def verify_original_for_plan(manifest: dict[str, Any]) -> dict[str, Any]:
-    """Use checked-in bytes locally and immutable v1 control on the Pod."""
+    """Validate the same four-file mini-tree locally and on the Pod."""
 
-    if ROOT is not None:
-        return verify_checked_in_original()
-    original, _, _, _ = load_original_runtime(manifest)
-    return {"manifest": original, "source": v1.verify_static_source(original)}
+    del manifest
+    return verify_checked_in_original()
 
 
 def load_original_runtime(manifest: dict[str, Any]) -> tuple[dict[str, Any], Path, Path, dict[str, Any]]:
@@ -261,12 +311,27 @@ def continuation_control_receipt(
     item = manifest["continuation_control"]
     root = Path(item["root"])
     v1.require_directory(root, "v1r1 external control root")
-    if manifest_path != root / item["manifest_basename"] or launcher_path != root / item["launcher_basename"]:
+    expected_manifest = safe_control_path(
+        root, item["manifest_relative_path"], "v1r1 manifest"
+    )
+    expected_launcher = safe_control_path(
+        root, item["launcher_relative_path"], "v1r1 launcher"
+    )
+    helper_path = safe_control_path(
+        root, item["v1_helper_relative_path"], "v1r1 helper"
+    )
+    v1_manifest_path = safe_control_path(
+        root, item["v1_manifest_relative_path"], "v1r1 v1 manifest"
+    )
+    if (
+        ROOT != root or V1_SCRIPT != helper_path
+        or manifest_path != expected_manifest or launcher_path != expected_launcher
+    ):
         raise ContractError("runtime modes require exact v1r1 external control paths")
-    helper_path = root / item["v1_helper_basename"]
     result = {}
     for label, path in (
-        ("manifest", manifest_path), ("launcher", launcher_path), ("v1_helper", helper_path)
+        ("manifest", manifest_path), ("launcher", launcher_path),
+        ("v1_helper", helper_path), ("v1_manifest", v1_manifest_path),
     ):
         info = v1.require_regular(path, f"v1r1 external control {label}")
         if info.st_mode & 0o222:
@@ -277,6 +342,7 @@ def continuation_control_receipt(
         }
     v1.require_exact(result["manifest"]["sha256"], CONTINUATION_MANIFEST_SHA256, "runtime v1r1 manifest")
     v1.require_exact(result["v1_helper"]["sha256"], V1_LAUNCHER_SHA256, "runtime v1 helper")
+    v1.require_exact(result["v1_manifest"]["sha256"], V1_MANIFEST_SHA256, "runtime v1 manifest copy")
     return result
 
 
@@ -1017,8 +1083,8 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
-    manifest_path = args.manifest.resolve()
-    launcher_path = Path(__file__).resolve()
+    manifest_path = args.manifest.absolute()
+    launcher_path = HERE
     try:
         manifest = read_manifest(manifest_path)
         if args.mode == "static-validate":

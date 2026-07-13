@@ -17,7 +17,9 @@
   用整数 `[1,-1]` strict-type 比较训练端合法 float `[1.0,-1.0]`，因而假拒绝且没有写
   `runtime_verified`。旧 C2 claim/log/hard/checkpoint 六类 SHA 与 runtime/failure/result absence 已冻结；
   D2 从未 claim。新的 one-shot `v1r1` 只在独立 evidence root 重算 C2 canonical claim/terminal binding，
-  唯一 launch mode 只允许未 claim 的 D2；没有 C2 retry 路径。新旧 focused 合计 `44 passed`，本分支
+  唯一 launch mode 只允许未 claim 的 D2；没有 C2 retry 路径。外部 control 已固定为
+  `scripts/ + configs/` 四文件 mini-tree，临时外部树的 subprocess `static-validate/plan` 通过，扁平布局、
+  缺任一文件或 symlink 均失败。新旧 focused 合计 `59 passed`，本分支
   未连接 Pod/启动 D2，L2/judge/第二 seed 仍未授权。见
   [face-sign 实验](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)与
   [操作](operations/run_phase1_signed_face_cd_l1.md)。

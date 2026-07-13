@@ -378,7 +378,7 @@ C2 v1 的 launch contract/state/canonical claim SHA 为 `26bf204d...0e96` / `2bc
 `[1,-1]` 做 exact-type 深比较，因而在 post-boot 假拒绝。旧 runtime/failure/result 都 absent；这三个
 absence 是事实边界，不得通过事后补写把它描述成 v1 runtime verified。
 
-一次性 [`v1r1`](../../DEFINITIONS.md) manifest `8d893009...6e232` 直接冻结上述六个 SHA、C2
+一次性 [`v1r1`](../../DEFINITIONS.md) manifest `f31fcf7b...5def8` 直接冻结上述六个 SHA、C2
 PID=PGID 和精确 run path。它重算 canonical claim 与 checkpoint↔hard-contract/claim binding，且
 hard-contract verifier 只接受 exact float，显式拒绝 bool/int。attestation 进入独立 no-clobber
 `continuations/v1r1/`，不向 preserved C2 arm 增加文件。parser 没有 `--cell`、`launch-next`、C2 launch
@@ -386,5 +386,7 @@ hard-contract verifier 只接受 exact float，显式拒绝 bool/int。attestati
 recipe 和 C2 attestation。
 
 mixed outer-control pair（C2=v1、D2=v1r1）只有在两条 normalized trainer recipe 与 hard contract
-都只差 signed-face weight 时才可发布。focused v1+v1r1 为 `44 passed`；本分支没有连接 Pod 或启动
+都只差 signed-face weight 时才可发布。外部 control 固定为 `scripts/ + configs/` 四文件 mini-tree，
+真实临时 mini-tree subprocess 的 `static-validate/plan` 通过，缺文件/扁平/symlink 均失败；focused
+v1+v1r1 为 `59 passed`。本分支没有连接 Pod 或启动
 D2，因此还没有 paired L1 result，更没有 activation/judge/L2/第二 seed/行为结论。

@@ -1579,14 +1579,16 @@ C2 已在 Pod1 GPU1 按上述 v1 claim 自然到达 `model_24.pt`；final log/ha
 不得补造旧 runtime sidecar，也不得重跑 C2。
 
 新的 [`v1r1` one-shot continuation](../DEFINITIONS.md) 是 D2-only source gate：manifest
-`8d893009...6e232` 直接绑定 C2 launch/state/claim/log/hard/checkpoint 六类证据与三项 absence boundary；
+`f31fcf7b...5def8` 直接绑定 C2 launch/state/claim/log/hard/checkpoint 六类证据与三项 absence boundary；
 verifier 接受 exact float 并拒绝 bool/int。C2 attestation 只能写入独立
 `continuations/v1r1/` no-clobber root，preserved C2 arm 不增加文件。parser 没有 cell 参数、通用
 `launch-next`、C2 launch 或 retry；唯一发射入口要求已 replay 的 C2 attestation、未 claim 的 D2 与
 空闲 GPU2。D2 outer claim 绑定 v1r1 manifest/launcher、原 v1 source/recipe 和 C2 attestation；mixed
 outer-control pair 只有在规范化 trainer recipe/hard contract 都只差 signed-face weight 时成立。
 
-本分支 focused contract tests 为 `44 passed`（含原 v1 的 `28` 项），没有连接 Pod 或启动 D2；因此
+外部 control 只接受 `scripts/ + configs/` 四文件 mini-tree，safe relative paths 拒绝绝对/`..`/symlink；
+临时外部树的 subprocess `static-validate/plan` 已通过，缺任一文件和旧扁平布局均失败。本分支 focused
+contract tests 为 `59 passed`（含原 v1 的 `28` 项），没有连接 Pod 或启动 D2；因此
 这是修复后的 source gate，不是 C2/D2 成对 runtime 通过。activation/judge/L2/第二 seed/晋级/真机仍
 全部为 false，G05 保持 `Partial`。复现见
 [操作文档](../operations/run_phase1_signed_face_cd_l1.md)与
