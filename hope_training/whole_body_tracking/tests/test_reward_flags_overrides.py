@@ -495,6 +495,51 @@ def test_a1_composes_with_current_free_racket_wrist_orientation_recipe():
         ]
 
 
+def test_a0_a1_post_override_masks_are_checkpoint_hard_contract_facts():
+    a0, _ = _apply(
+        {
+            "rewards": {
+                "free_wrist_ori_mimic": True,
+                "free_wrist_vel_mimic": False,
+                "free_non_striking_arm_mimic": False,
+            }
+        }
+    )
+    a1, _ = _apply(
+        {
+            "rewards": {
+                "free_wrist_ori_mimic": True,
+                "free_wrist_vel_mimic": False,
+                "free_non_striking_arm_mimic": True,
+            }
+        }
+    )
+    a0_fact = train_mod._motion_imitation_body_names_contract(a0)
+    a1_fact = train_mod._motion_imitation_body_names_contract(a1)
+    assert tuple(a0_fact) == train_mod._MOTION_IMITATION_BODY_TERMS
+    assert tuple(a1_fact) == train_mod._MOTION_IMITATION_BODY_TERMS
+    assert a0_fact != a1_fact
+    for name in train_mod._MOTION_IMITATION_BODY_TERMS:
+        assert [body for body in a0_fact[name] if body not in _LEFT_NON_STRIKING] == a1_fact[name]
+
+
+def test_imitation_body_names_hard_contract_rejects_forged_or_ambiguous_lists():
+    env_cfg = _make_env_cfg()
+    env_cfg.rewards.motion_body_pos.params["body_names"] = ["torso_Link", "torso_Link"]
+    with pytest.raises(RuntimeError, match="non-empty, unique"):
+        train_mod._motion_imitation_body_names_contract(env_cfg)
+
+    env_cfg = _make_env_cfg()
+    env_cfg.rewards.motion_body_ori.params["body_names"] = "torso_Link"
+    with pytest.raises(RuntimeError, match="body_names list"):
+        train_mod._motion_imitation_body_names_contract(env_cfg)
+
+    env_cfg = _make_env_cfg()
+    del env_cfg.rewards.motion_body_ang_vel.params
+    with pytest.raises(RuntimeError, match="params mapping"):
+        train_mod._motion_imitation_body_names_contract(env_cfg)
+
+
 # --------------------------------------------------------------------------------------------- #
 # V2 motion_scale_in_window
 # --------------------------------------------------------------------------------------------- #

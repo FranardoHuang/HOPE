@@ -154,6 +154,60 @@ def _sha256_file(path: str) -> str:
     return digest.hexdigest()
 
 
+_MOTION_IMITATION_BODY_TERMS = (
+    "motion_body_pos",
+    "motion_body_ori",
+    "motion_body_lin_vel",
+    "motion_body_ang_vel",
+)
+
+
+def _motion_imitation_body_names_contract(env_cfg) -> dict[str, list[str] | None]:
+    """Return the post-override body mask that makes a checkpoint scientifically identifiable.
+
+    Reward weights remain curriculum-mutable, but changing which robot bodies a motion-imitation
+    term observes changes the experiment itself.  Each checkpoint therefore binds the four body
+    lists after every Hydra override (including free-wrist and non-striking-arm flags).  Generic
+    tracking tasks whose term has no explicit body list record ``null`` rather than guessing a
+    runtime default.
+    """
+
+    rewards = getattr(env_cfg, "rewards", None)
+    if rewards is None:
+        raise RuntimeError("training hard contract requires env_cfg.rewards")
+    contract: dict[str, list[str] | None] = {}
+    for term_name in _MOTION_IMITATION_BODY_TERMS:
+        if not hasattr(rewards, term_name):
+            raise RuntimeError(
+                f"training hard contract requires rewards.{term_name}"
+            )
+        term = getattr(rewards, term_name)
+        if term is None:
+            contract[term_name] = None
+            continue
+        params = getattr(term, "params", None)
+        if not isinstance(params, dict):
+            raise RuntimeError(
+                f"training hard contract requires rewards.{term_name}.params mapping"
+            )
+        raw = params.get("body_names")
+        if raw is None:
+            contract[term_name] = None
+            continue
+        if isinstance(raw, (str, bytes)):
+            raise RuntimeError(
+                f"training hard contract requires rewards.{term_name}.body_names list"
+            )
+        names = [str(value) for value in raw]
+        if not names or any(not name for name in names) or len(names) != len(set(names)):
+            raise RuntimeError(
+                f"training hard contract requires rewards.{term_name}.body_names "
+                "to be non-empty, unique names"
+            )
+        contract[term_name] = names
+    return contract
+
+
 def _build_training_hard_contract(env, actor_contract) -> dict:
     """Immutable actor/task facts that must match across a checkpoint resume.
 
@@ -315,6 +369,10 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
             getattr(motion, "allow_legacy_link_origin_velocity", False)
         ),
         "motion_rsi_hold_root_stand_z": bool(getattr(motion, "rsi_hold_root_stand_z", False)),
+        # Unlike weights/stds, a body mask changes which robot subsystem the teacher constrains.
+        # Bind the exact post-override lists so A0/A1 checkpoints remain distinguishable even if
+        # copied away from their outer launch directories.
+        "motion_imitation_body_names": _motion_imitation_body_names_contract(env_cfg),
         "motion_clips": clips,
         "question_bank": question_bank,
     }
