@@ -13,6 +13,12 @@
 
 ## 2026-07-14
 
+- Franco 将共享算力调度改为“先铺满卡、再叠并发”：保留已绑定运行原位不动，新任务先跨 Pod1/Pod2
+  六张可用 GPU 各放一个有独立科学问题和早判合同的单元，再开始第二、第三轮，Pod1 才有第四轮；
+  被他人占用、前置门未过或会破坏严格配对的卡跳过，不用重复 seed/失败配方补位。操作真源已同步到
+  [跑批作战手册](runbook.md#rtx-5090-实测算力手册)与
+  [RunPod 操作约束](operations/run_on_runpod.md#hard-rules-summary--full-list-in-the-pod-readme)。
+
 - B/C 独立 schema-2/FK prereg 的 source gate 已闭合：两份计划绑定 exact 私有 SE(2) PKL/report、
   不重叠 no-clobber 输出与 `91/98@30 Hz -> 151/163@50 Hz`；共享合同绑定 restricted pickle、formal
   donor SHA/三行 metadata 期望、vendor `1 XML + 74 mesh` closure、31-joint/32-body order，以及

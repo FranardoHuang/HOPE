@@ -197,7 +197,9 @@ fresh curve worker 在 childless/lock-free 复核后也只按各自 PGID TERM �
 4. 交互式/临时作业默认一人一张 GPU；借用前必须查 `nvidia-smi`、通知其他人，
    并显式设置 `CUDA_VISIBLE_DEVICES=<n>`。这条不覆盖已在 [NOW 唯一队列](../NOW.md#统一工作队列唯一优先级账本)
    登记的广度消融波：广度波在短测确认显存/利用率后可同卡并发 3–4 条同类
-   4096-env 任务；关键路径/长跑仍独占。日期化实测和完整约束只看
+   4096-env 任务；关键路径/长跑仍独占。新任务必须先跨所有可用 GPU 各放一条，再开始第二、第三轮，
+   Pod1 才有第四轮；已经运行且合同绑定的实验不迁移。被他人占用或没有通过前置门的卡直接跳过，
+   不得用重复 seed 或已失败配方补位。日期化实测和完整约束只看
    [跑批作战手册](../runbook.md#rtx-5090-实测算力手册)，不在本文建第二份优先级队列。
 5. WandB login is global and ephemeral (`/root/.netrc`); pass `WANDB_API_KEY=...` per run or use
    `logger=tensorboard`.
