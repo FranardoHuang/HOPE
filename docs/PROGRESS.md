@@ -13,6 +13,13 @@
 
 ## 2026-07-13
 
+- 有符号拍面修复后的首轮消融已从 E0 设计升级为 machine prereg：同卡只跑 seed3 的
+  hot/fresh × face-guidance-off/on 四个因果格；热启动明确保持 lineage0，fresh 必须 lineage1，半写
+  claim/no-clobber/缺失 Git checkout 均 fail closed。focused `21 passed`；L1 尚无 Pod 行为结果，L2
+  在 signed directional checkpoint paper 的 path/SHA 冻结前硬阻断，也没有 judge/真机授权。见
+  [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)与
+  [操作](operations/run_phase1_signed_face_rescue_funnel.md)。
+
 - S0/M0 的五条 exact GVHMR 结果已增加 post-GVHMR no-clobber consumer：两份 prereg 同时绑定 tracked
   summary、execution record、queue state、每条 binding/audit/PT 和 canonical-beta donor，host static
   两批通过，专项 `8 passed`。runtime handoff 尚未消费，canonical-beta/GMR/schema-2 仍未运行；S0

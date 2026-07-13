@@ -1266,3 +1266,12 @@ Gate3/Gate3B。下一步是在同一 immutable K100/同 checkpoint 下生成新 
 paired result，再按 kinematic replay → open-loop action → external-observation closed-loop → native
 closed-loop 分层归因。analytic scorer 即便通过也仍是 diagnostic，不替代 physical return 或 vendor
 runtime；G06 继续 `Partial`。
+
+训练侧随后为同一问题物化了单-seed A/B/C/D 漏斗，但它没有改变 G06 的裁判边界。A/B 从旧
+`model_13800.pt` 进入当前源码时，因为 hard-contract 新增 event-timing/target-cadence 字段，只能是
+`training_contract_lineage_exact=0` 的显式表示迁移；C/D 才允许 fresh lineage `1`。L1 是
+25-update launch-integrity smoke，其四格 completion 文件不能授权 L2 或 judge。immutable signed-face
+directional checkpoint paper path/SHA 尚未冻结，manifest 明确 `l2.launch_authorized=false` 且
+`automatic_judge_launch=false`。源码/攻击回归 `21 passed` 不构成 Isaac/MuJoCo 行为或 Gate3 结果；
+操作见 [signed-face 漏斗运行手册](../operations/run_phase1_signed_face_rescue_funnel.md)，G06 保持
+`Partial`。

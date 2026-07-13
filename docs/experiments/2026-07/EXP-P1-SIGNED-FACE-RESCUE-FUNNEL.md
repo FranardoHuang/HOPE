@@ -1,7 +1,7 @@
 # EXP-P1-SIGNED-FACE-RESCUE-FUNNEL：有符号拍面修复后的单-seed 机制漏斗
 
-状态：`preregistered`  
-证据等级：E1（machine prereg/launcher 与静态攻击回归通过；尚无新训练）  
+状态：`preregistered`
+证据等级：E1（machine prereg/launcher 与静态攻击回归通过；尚无新训练）
 人类负责人：franco  
 执行者：Codex  
 全局优先级：只继承 [`NOW` 队列第 1 项](../../NOW.md#统一工作队列唯一优先级账本)，本页不另建队列。

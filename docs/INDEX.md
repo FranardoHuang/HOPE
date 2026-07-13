@@ -90,6 +90,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | 共享 RunPod 作业 | [`run_on_runpod.md`](operations/run_on_runpod.md) |
 | Fresh model-4000 q50 考卷 | [`run_phase1_fresh_sz_model4000_seed_stability_q50.md`](operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md) |
 | 恢复 preregistration | [`run_phase1_recovery_tuple_prereg.md`](operations/run_phase1_recovery_tuple_prereg.md) |
+| 有符号拍面单-seed L1 漏斗 | [`run_phase1_signed_face_rescue_funnel.md`](operations/run_phase1_signed_face_rescue_funnel.md) |
 | Gate3 首个有效周期 | [`run_gate3_first_tick_harness.md`](operations/run_gate3_first_tick_harness.md) |
 | Gate3 发球同步负向设计门 | [`run_gate3_serve_sync_prereg.md`](operations/run_gate3_serve_sync_prereg.md) |
 | 端到端乒乓链路 | [`run_pingpong_end_to_end.md`](operations/run_pingpong_end_to_end.md) |

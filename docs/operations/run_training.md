@@ -1207,6 +1207,20 @@ Running the same validator with `--mode launch-check` must return 1 for the
 frozen preregistration. The runtime field/schema contract is documented in
 `docs/interfaces/t1_event_training_contract.md`.
 
+### Signed-face single-seed rescue funnel
+
+Do not reuse the old 24-arm launcher or replicate four seeds after the signed-face failure. The
+machine-preregistered A/B/C/D hot-start/fresh × face-guidance-off/on funnel has its own clean source
+commit, no-clobber L1 completion record, exact parent/asset bindings and SSH-interruption recovery
+rules. Run it only through
+[`run_phase1_signed_face_rescue_funnel.md`](run_phase1_signed_face_rescue_funnel.md).
+
+L1 is a `512 env × 25 update` launch-integrity smoke on one seed. Hot cells must save lineage `0`,
+fresh cells lineage `1`, and all four must emit one common hard-contract SHA. L2 is designed as
+`4096 env × 1001 update`, but v1 rejects every L2 validate/plan/launch before runtime writes until a
+separate immutable signed-face directional checkpoint paper path/SHA and reviewed v2 activation
+exist. This launcher starts no judge, promotes no checkpoint and buys no additional seed.
+
 ## First-Loop Rule
 
 Before setting a baseline quality target, record:

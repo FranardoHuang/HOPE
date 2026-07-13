@@ -1446,3 +1446,14 @@ canary 必须绑定新 source/hard-contract SHA，
 验证错面样本不再得到 `vb_fired`/virtual reward，并观察正手 signed normal 与 return 是否共同学习；
 它按[单-seed 机制漏斗](../experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)先买机制证据，
 不先复制四个 seed。在此之前不能写“训练行为已修复”，G05 继续 `Partial`。
+
+该漏斗的 machine prereg 与 launcher 后续已物化：训练 source 固定 clean detached
+`882fea4285f0cf9a97ba79d79ae8af31d26ea1ed`，一张卡只允许 seed3 的 A/B/C/D 四个不同因果格；L1
+为 `512 env × 25 update` launch-integrity smoke。热启动 A/B 因旧父合同缺少当前
+event-timing/target-cadence 字段，固定为显式 inexact transfer 并要求 lineage `0`；fresh C/D 必须
+lineage `1`，四格 emitted contract SHA 一致。四格终档 finite/contract/lineage 全通过后只写
+no-clobber completion 证据；它不能单独授权 L2。L2 的 `4096 env × 1001 update` 设计因 immutable
+signed directional checkpoint paper 的 path/SHA 未冻结而在 runtime preflight 顶部 fail closed。
+focused 静态/攻击回归 `21 passed`；没有 Pod/Isaac/checkpoint 行为结果，不能把 E1 写成训练修复。
+复现命令、SSH 中断恢复和半写 claim 的 fail-closed 处置见
+[操作文档](../operations/run_phase1_signed_face_rescue_funnel.md)。
