@@ -98,3 +98,11 @@ M0 的“回到准备姿态”在 robot-coordinate GMR 后定义。每条 clip �
 用双脚并拢、更窄站姿或绝对足位姿相等替代。foot-site mapping 与数值容差尚未预注册，因此当前没有
 M0 站距通过结果。S0 仍为无球空挥，不能消费拉球题或声称高点拍压有效。复现命令见
 [`run_motion_post_gvhmr_exact.md`](../operations/run_motion_post_gvhmr_exact.md)。
+
+post-GVHMR handoff 后的 canonical-beta 层进一步冻结在
+`configs/motion_canonical_betas_{s0,m0}_prereg_20260713.json`。它只将 exact donor 写进人体
+`smpl_params_global.betas`，不会生成 A3 足点。M0 的 ready windows、`d_xy` 定义、横向分离与前后错位两个
+必保留分量已经固定，但 `foot_site_mapping`、initial/terminal `d_xy`、component tolerance 和
+`stance_passed` 必须全部保持 `null`，producer 固定为未来另行预注册的 exact GMR。任一提前填值、额外
+`passed` 字段或更窄/合脚替代都 fail closed。canonical-beta 复现入口见
+[`run_motion_handoff_canonical_betas.md`](../operations/run_motion_handoff_canonical_betas.md)。

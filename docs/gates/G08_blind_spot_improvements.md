@@ -444,12 +444,16 @@ commit、完整权重树、Python、`nvidia-smi`、validator/argv、独立 stagi
 `configs/motion_video_gvhmr_s0_m0_results_20260713.json`。尚无 canonical-beta/GMR、schema-2、足接触/
 末态脚距、simulator、RL 或真机结果，所以 G08 状态不变，也没有动作晋级。
 
-这五条结果的下一层已收成两份 exact post-GVHMR prereg：consumer 同时绑定 summary、queue/binding/audit/PT
-和 canonical-beta donor，static 与 `8` 项 red-team 测试通过，但 runtime handoff 尚未消费。S0 的
+这五条结果的下一层已收成两份 exact post-GVHMR handoff，并完成 runtime no-clobber consume；S0/M0
+handoff exact SHA 分别为 `d57a93e0...a1054` / `60c55150...088ef`。其后的 canonical-beta 也已拆成两份
+独立 prereg：只允许注入旧 exact donor，禁止重新聚合新五条；host 新旧专项 `15 passed, 1 skipped`，
+真实 PT 尚未 consume。S0 的
 `contact_truth`/效果继续为空且禁止借用拉球题；M0 的末态约束明确为去除公共 root、对齐 heading 后的
 `right_foot_xy - left_foot_xy` 初始/终态稳健向量，横向站距与前后错位都要保留，脚并拢不算成功。
 foot-site mapping 和数值容差须在 GMR result acceptance 前另行预注册。详见
 [post-GVHMR 卷宗](../experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md)。
+canonical-beta 的计划、运行边界与未来 A3 脚距 null contract 见
+[canonical-beta 卷宗](../experiments/motion_canonical_beta_s0_m0_20260713.md)。
 
 ## 文档路由更新（2026-07-12）
 

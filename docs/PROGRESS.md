@@ -44,9 +44,17 @@
   [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)与
   [操作](operations/run_phase1_signed_face_rescue_funnel.md)。
 
+- S0/M0 exact post-GVHMR handoff 已在证据机完成，分别为 4,970/9,242 bytes、SHA-256
+  `d57a93e0...a1054` / `60c55150...088ef`。下一层 canonical-beta 已做成两份独立 no-clobber prereg：
+  复用旧 materializer 的 PT/save-reload 审计，只注入旧 Franco exact donor，不重算新 cohort。host static
+  与新旧专项为 `15 passed, 1 skipped`，最新 main 重放回归 `616 passed, 9 skipped`；真实 PT 尚未 consume，
+  GMR/schema-2/安全/效果/训练仍未授权。
+  M0 的 foot sites、初末二维脚距、容差和 pass 全保持 null，必须由未来 exact GMR 产生。详见
+  [canonical-beta 卷宗](experiments/motion_canonical_beta_s0_m0_20260713.md)。
+
 - S0/M0 的五条 exact GVHMR 结果已增加 post-GVHMR no-clobber consumer：两份 prereg 同时绑定 tracked
   summary、execution record、queue state、每条 binding/audit/PT 和 canonical-beta donor，host static
-  两批通过，专项 `8 passed`。runtime handoff 尚未消费，canonical-beta/GMR/schema-2 仍未运行；S0
+  两批通过，专项 `8 passed`；后续 runtime handoff 已按上一条完成。canonical-beta/GMR/schema-2 仍未运行；S0
   禁止借用拉球题，M0 后续必须恢复含前后错位的初始二维脚间向量，双脚并拢不算成功。详见
   [实验卷宗](experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md)与
   [操作文档](operations/run_motion_post_gvhmr_exact.md)。

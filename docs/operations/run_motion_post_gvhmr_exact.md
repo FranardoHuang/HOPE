@@ -3,6 +3,11 @@
 本操作把已经完成的 [`S0/M0`](../DEFINITIONS.md) GVHMR 结构结果收成一个不可覆盖的 lineage handoff。
 它只授权下一步另行预注册的 canonical-beta materialization，不运行 GMR、schema-2、仿真、训练或真机。
 
+> 2026-07-13：两批 `consume` 已完成。S0 handoff 是 4,970 bytes / `d57a93e0...a1054`，M0 是
+> 9,242 bytes / `60c55150...088ef`。不要删除 output root 或重跑 `consume`；当前下一步入口是
+> [`run_motion_handoff_canonical_betas.md`](run_motion_handoff_canonical_betas.md)。下方 consume 命令只保留为
+> 首次执行的可复现记录。
+
 详细证据与边界见
 [S0/M0 post-GVHMR 实验记录](../experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md)。
 

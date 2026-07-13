@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "plan_id": "motion-canonical-betas-static-high-press-s0-20260713-v1",
+  "status": "preregistered_not_executed",
+  "batch_kind": "s0_static_high_press",
+  "scope": "inject the exact previously accepted same-performer canonical beta vector into the one exact S0 GVHMR output; no reaggregation or downstream claim",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "formal_eligible": false,
+  "training_authorized": false,
+  "hardware_authorized": false,
+  "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+  "changed_field_allowlist": [
+    "smpl_params_global.betas"
+  ],
+  "consumer": {
+    "path": "scripts/materialize_motion_handoff_canonical_betas.py",
+    "sha256": "37db5bf38f2759b356647008c95bda879c46ce3fbc406968d3be93999cac7f79"
+  },
+  "base_materializer": {
+    "path": "scripts/materialize_canonical_gvhmr_betas.py",
+    "sha256": "4775dc532d49ff212bb3276bb09a9af12447319f6207ea296f26dead1ab80c92"
+  },
+  "post_handoff_consumer": {
+    "path": "scripts/consume_motion_post_gvhmr_exact.py",
+    "sha256": "b90ca5e04ae8b0edc2b048712138d991d9c68340246238ecd17d28e2c8085d15"
+  },
+  "handoff": {
+    "path": "/workspace/codexschema/motion_video_intake_20260713_s0/post_gvhmr_exact_v1/handoff.json",
+    "bytes": 4970,
+    "sha256": "d57a93e08513c617f4316924e2ef8d9045e26f960c18c284564b7387bd9a1054"
+  },
+  "upstream_post_gvhmr": {
+    "preregistration": {
+      "path": "configs/motion_post_gvhmr_s0_prereg_20260713.json",
+      "sha256": "c67f9bb4c8e061fc1e5fa74d7bea91f223c7afed5f72ad6dd99a54ac3d79b0ce"
+    },
+    "consumer_sha256": "b90ca5e04ae8b0edc2b048712138d991d9c68340246238ecd17d28e2c8085d15",
+    "batch_id": "static_high_press_s0_v1",
+    "asset_ids": [
+      "static_backhand_high_press"
+    ]
+  },
+  "canonical_beta_donor": {
+    "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+    "reuse": "exact_existing_vector_no_reaggregation",
+    "artifact": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/canonical_betas.json",
+      "bytes": 915,
+      "sha256": "f405ba45d7f2233d3735c2e6b59409203cc98b1e97deef00224e16f2c7c4cbf2"
+    },
+    "completion_manifest": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/gvhmr_canonical_betas_v1/materialization_manifest.json",
+      "bytes": 26857,
+      "sha256": "4043b34210b30be4151457623c3152ebd09650fb2caf587eb78359887a06bc2b"
+    },
+    "vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6"
+  },
+  "inputs": [
+    {
+      "asset_id": "static_backhand_high_press",
+      "frames": 88,
+      "ready_before_window_s": [
+        0.0,
+        0.833333
+      ],
+      "ready_after_window_s": [
+        2.0,
+        2.833333
+      ],
+      "source_pt": {
+        "path": "/workspace/franco/motion_work/GVHMR/outputs/demo/pai/hmr4d_results.pt",
+        "bytes": 389976,
+        "sha256": "6259d64e457bcea4b9d1d8ef830d9cd4561b190fea79a2b0bdddd9eeea580b22"
+      }
+    }
+  ],
+  "semantic_guard": {
+    "motion_role": "fifth_action_backhand_high_ball_forward_downward_press",
+    "question_family": "separate_high_ball_high_press_paper_required_not_yet_preregistered",
+    "pull_or_loop_question_paper_allowed": false,
+    "observed_ball_contact": null,
+    "strike_effectiveness": null,
+    "safety_result": null
+  },
+  "execution_contract": {
+    "cpu_only": true,
+    "CUDA_VISIBLE_DEVICES": "",
+    "python_executable": "/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10",
+    "python_version": "Python 3.10.20",
+    "pip_freeze_sha256": "56b0f8af9677b279bbb4925b6f49113f484dcb9ded1ed8d9bc56af71f304c694"
+  },
+  "output_contract": {
+    "output_root": "/workspace/codexschema/motion_video_intake_20260713_s0/canonical_betas_v1",
+    "result_suffix": ".diagnostic_franco_donor_betas.pt",
+    "canonical_betas_filename": "canonical_betas.json",
+    "completion_manifest_filename": "materialization_manifest.json",
+    "output_root_must_not_exist": true,
+    "no_clobber": true,
+    "completion_manifest_published_last": true
+  }
+}

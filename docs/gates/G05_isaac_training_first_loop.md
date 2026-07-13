@@ -1296,12 +1296,14 @@ parity 门的 MJX/MJWarp。没有 `VecEnv`、PPO、训练、Pod、simulator 或�
 非击球臂仍没有配置或训练。S0/M0 有 Pod 离线结构结果，但没有 Isaac/MuJoCo 训练、仿真行为或真机动作，
 G05 仍为 `Partial`。
 
-S0/M0 的 post-GVHMR machine handoff 已另行预注册并通过 host static/`8 passed`：它逐层绑定 tracked
-summary、execution record、queue state、binding、audit、PT 与 canonical-beta donor，但 runtime
-`consume` 尚未执行。它只解锁下一份 exact canonical-beta materialization，不直接解锁 GMR、schema-2 或
-RL。S0 仍不得借用拉球题或声称击球有效；M0 必须在 robot-coordinate GMR 后恢复初始二维脚间向量的
-横向站距和前后错位，双脚并拢不能通过。详见
-[实验记录](../experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md)。
+S0/M0 的 post-GVHMR machine handoff 已完成 exact runtime `consume`，输出分别是 4,970/9,242 bytes，
+SHA-256 `d57a93e0...a1054` / `60c55150...088ef`。下一层 canonical-beta 已拆成两份独立 no-clobber
+计划；consumer 只注入旧 exact donor，其他 PT leaf 必须 save/reload bit-exact。host 新旧专项为
+`15 passed, 1 skipped`，但真实 canonical-beta `inspect/consume` 尚未运行。即使该层通过，也只解锁
+另建 exact GMR prereg，不直接解锁 schema-2 或 RL。S0 仍不得借用拉球题或声称击球有效；M0 的 A3
+foot-site、初末二维脚间向量、容差和 pass 当前全部为 null，必须由 robot-coordinate GMR 产生，双脚
+并拢不能通过。详见 [handoff 记录](../experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md)与
+[canonical-beta 记录](../experiments/motion_canonical_beta_s0_m0_20260713.md)。
 
 ### 2026-07-12 文档路由与当前成绩表
 
