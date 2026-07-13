@@ -38,9 +38,11 @@
 - signed-face E2 rebound exam bank 的下一层 immutable K100 source gate 已冻结：严格复用现有 schema-v3
   schedule 算法，从 exact bank SHA 重建 question ID，seed0/hold0–100/每侧无放回50/全100次分母；raw-A
   `[+1,-1]` physical-B 身份、旧纸拒绝、no-replace 和 activation-last 均 fail closed。专项攻击回归
-  `14 passed`、latest-main root `747 passed, 10 skipped`、`static-validate` rc0；本任务未访问 Pod，本机缺
-  exact private bank，所以 runtime `consume` 未跑，schedule/activation SHA 仍不存在，L2/judge/第二
-  seed/晋级全阻断。见
+  `14 passed`、latest-main root `747 passed, 10 skipped`、`static-validate` rc0。随后 Pod1 的 clean detached
+  `748b6d5` source 完成单次 exact-bank consume：100 unique、50/侧；schedule file/semantic/order SHA
+  `f2777dcd...1ca` / `3ca4bdba...3365` / `09f778f2...bd0`，activation file/content SHA
+  `e0125b0e...bb4` / `533beb03...3d8`。这只把 paper 升为 E2 materialized；checkpoint execution contract、
+  L2/judge/第二 seed/晋级仍全阻断。见
   [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-PAPER.md)与
   [操作](operations/run_phase1_signed_face_exam_k100.md)。
 

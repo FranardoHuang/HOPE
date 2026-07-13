@@ -1543,3 +1543,13 @@ normalized argv 除 versioned run name 和 v8 launch-claim provenance 外相同�
 下一份 `D-first × ordinal-4`、`host IPC × private IPC` 的 scene-only 诊断只有
 [design-only prereg](../../configs/phase1_signed_face_boot_diagnostic_prereg_20260714.json)，无 launcher/Pod/
 signal/training 权限。G05 继续 `Partial`。
+
+### 2026-07-14 signed-face K100 paper runtime materialized
+
+Pod1 使用 clean detached `748b6d5` source 和 exact rebound exam bank `60e1a7ad...d1ca` 完成单次
+CPU-only consume。新 schedule 是 `100` 个唯一题、正反手各 `50`，file/semantic/question-order SHA 为
+`f2777dcd...1ca` / `3ca4bdba...3365` / `09f778f2...bd0`；最后写出的 paper-only activation
+file/content SHA 为 `e0125b0e...bb4` / `533beb03...3d8`。完整 receipt 见
+[`phase1_signed_face_exam_k100_runtime_receipt_20260714.json`](../../configs/phase1_signed_face_exam_k100_runtime_receipt_20260714.json)。
+它没有消费 checkpoint，也明确不授权 trainer、judge、L2、第二 seed、停止/晋级或部署；所以这不是
+Isaac 行为结果，G05 保持 `Partial`。

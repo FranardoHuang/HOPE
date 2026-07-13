@@ -1348,12 +1348,16 @@ output root 必须不存在，schedule 与 activation 都 no-replace，activatio
 
 manifest/consumer SHA 为 `e401305d...e556` / `4e094bbe...ac6e`；mutation、旧 schedule、unsigned、
 重复题、单侧不足和 partial no-reuse 回归共 `14 passed`，latest-main root `747 passed, 10 skipped`，
-`static-validate` rc0。但本任务没有访问 Pod，
-本机也没有 exact private bank，因此 `consume` 未运行，materialized schedule/activation 的 file/semantic/
-order/content SHA 仍不存在。activation 即使未来生成也固定 trainer/judge/L2/第二 seed/晋级/部署/真机全
-false；后续还需独立 reviewed execution contract。详见
+`static-validate` rc0。随后 Pod1 用 clean detached `748b6d5` source 成功执行单次 exact-bank consume：
+schedule 为 100 个唯一题、正反手各 50，file/semantic/question-order SHA 为 `f2777dcd...1ca` /
+`3ca4bdba...3365` / `09f778f2...bd0`；activation file/content SHA 为 `e0125b0e...bb4` /
+`533beb03...3d8`，并在 schedule 落盘复核后最后写入。runtime receipt 见
+[`phase1_signed_face_exam_k100_runtime_receipt_20260714.json`](../../configs/phase1_signed_face_exam_k100_runtime_receipt_20260714.json)。
+activation 固定 trainer/judge/L2/第二 seed/晋级/部署/真机全 false；后续还需独立 reviewed execution
+contract。详见
 [实验](../experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-PAPER.md)与
-[操作](../operations/run_phase1_signed_face_exam_k100.md)。没有新行为考卷，G06 继续 `Partial`。
+[操作](../operations/run_phase1_signed_face_exam_k100.md)。paper 已物化但没有 checkpoint/judge 行为，G06
+继续 `Partial`。
 
 ### 2026-07-13 pelvis point/axis frame correction
 

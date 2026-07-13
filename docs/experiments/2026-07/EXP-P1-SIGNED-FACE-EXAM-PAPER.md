@@ -1,12 +1,13 @@
 # EXP-P1-SIGNED-FACE-EXAM-PAPER — 新 signed-face 题库能否冻结成不混旧卷的 K100？
 
-- 状态：`preregistered`
+- 状态：`paper_materialized_not_started`
 - 阶段/轴：阶段 1 / signed-face 独立判卷纸
 - 集成小目标：从 exact rebound exam bank 生成一份每侧 50 题、全出手计分且不能复用旧题序的不可变考卷
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
-- 最高证据等级：[`E1`](../../DEFINITIONS.md)（source/static/攻击负测；真实 bank consume 未运行）
+- 最高证据等级：[`E2`](../../DEFINITIONS.md)（source/static/攻击负测 + exact private-bank runtime consume；
+  尚无 checkpoint/judge 行为）
 - 创建日期/最后复核日期：2026-07-14
 
 本文的 [`K100`](../../DEFINITIONS.md#q50-and-k100) 是正手和反手各 50 次的同一份有限考卷；
@@ -52,7 +53,7 @@ module。
 | 运行（人话名 + `run_name`） | 状态 | 输入 | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
 | source/static 与攻击负测（`host_signed_exam_k100_source_v1`） | completed | tracked manifest、consumer、现有 loader/schedule/scorer | focused `14 passed`；latest-main root `747 passed, 10 skipped`；`py_compile`；`static-validate` rc0 | 无 runtime 产物 | E1；覆盖 manifest mutation、旧 bank schedule、unsigned activation、重复题、单侧不足和 partial no-reuse |
-| exact private bank 消费（`signed_exam_k100_consume_v1`） | not run | ignored rebound bank `60e1a7ad...d1ca` | 未收集 | schedule/activation 均不存在 | 本任务明确不上 Pod；本机没有 exact private bank，不能伪造 schedule/order/SHA 或 activation |
+| exact private bank 消费（`signed_exam_k100_consume_v1`） | completed | ignored rebound bank `60e1a7ad...d1ca`；clean detached source `748b6d5` | `static-validate` 与单次 `consume` rc0；[runtime receipt](../../../configs/phase1_signed_face_exam_k100_runtime_receipt_20260714.json) | schedule file/semantic/order SHA `f2777dcd...1ca` / `3ca4bdba...3365` / `09f778f2...bd0`；activation file/content SHA `e0125b0e...bb4` / `533beb03...3d8` | E2 paper materialization；100 unique、50/侧、activation-last；全部执行/判卷/晋级权限仍 false |
 
 ## Publication 与授权边界
 
@@ -68,11 +69,13 @@ deployment/hardware 全 false。即使未来 runtime consume 成功，也必须�
 
 ## 决定
 
-- 决定：`adopt_source_gate_only_runtime_blocked`
-- 理由：实现严格复用了现有不可变 schedule 合同，并用负测关闭旧卷、unsigned、重复/缺侧、覆盖与 partial
-  续写；但没有读取真实 private bank，所以还没有 materialized schedule 的 file/semantic/order SHA，也没有
-  activation bytes。
-- 是否纳入当前 setting：否。训练、判卷和采用配置均未改变，因此本分支不改 `NOW.md`。
-- 下一步：按[运行手册](../../operations/run_phase1_signed_face_exam_k100.md)在恢复 exact bank 的 clean detached
-  source 上先跑 `static-validate`，再单次 `consume`；归档 schedule/activation receipts 并独立 review 后，才可
-  另立 L2/judge execution contract。
+- 决定：`adopt_materialized_paper_execution_blocked`
+- 理由：Pod1 的 clean detached `748b6d5` source 已消费 exact bank，物化出 100 个唯一题、正反手各 50
+  的不可变 schedule，并在落盘复核后最后写出 paper-only activation。新 receipt 已绑定 schedule 的
+  file/semantic/question-order SHA 与 activation 的 file/content SHA；activation 明确保持 trainer、judge、
+  L2、第二 seed、停止/晋级、formal score、Gate3、部署和真机全 false。
+- 是否纳入当前 setting：否。训练、判卷和采用配置均未改变；`NOW.md` 只同步 paper 已物化与仍阻断的
+  当前运行态，不把它写成采用配置或行为成绩。
+- 下一步：另立 L2/judge execution contract，逐项绑定 exact checkpoint↔相邻 hard contract/lineage、
+  evaluator source/runtime/MJCF/plant 和本 schedule/activation；该合同 review、进 main 并独立激活前，不得
+  启动 judge 或 L2，也不得购买第二 seed。
