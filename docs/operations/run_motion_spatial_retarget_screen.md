@@ -274,34 +274,80 @@ zero includes and 74 referenced meshes under closure SHA `e0381752...962de`. It 
 subset tied to exact donor ONNX SHA `0c428ddf...b7b155`; it is deliberately **not** a claim that the
 rows were re-extracted from the ONNX in this source gate.
 
-### Next gate: read-only runtime inspection, not yet executed
+### Accepted read-only runtime inspection and review-gated consume activation
 
-Restore the exact B/C private files at the absolute paths already in each plan and locate the exact
-formal donor ONNX without copying over either source or output root. Then run `inspect`, one asset at
-a time. `inspect` hashes and restricted-loads the pickle, hashes the ONNX and re-extracts its required
+The exact B/C private files and formal donor were restored without copying over either source or
+output root. The successful historical commands used the existing CPU runtime below, one asset at a
+time. `inspect` hashes and restricted-loads the pickle, hashes the ONNX and re-extracts its required
 metadata, loads the content-bound vendor MJCF, verifies all joint/body names, and writes nothing.
+These commands are shown for audit; do not rerun them merely because the receipt is now tracked.
 
 ```bash
-DONOR=/absolute/path/to/exact/formal/policy.onnx
+SRC=/workspace/codexschema/nohope_schema2_fk_inspect_748b6d5
+PY=/workspace/hope_mjeval_venv/bin/python
+TOOL=$SRC/scripts/materialize_motion_schema2_fk.py
+B_PLAN=$SRC/configs/motion_backhand_loop_b_schema2_fk_prereg_20260714.json
+C_PLAN=$SRC/configs/motion_backhand_loop_c_schema2_fk_prereg_20260714.json
+B_SHA=3d71cc02c6ae68d0ecedf280e8341d763ad39ec0aac1757367c9719e761d33ae
+C_SHA=662b8c4c0851d2f6d9d5c23313dc0c27334528a2b5fb2b62ad90bc3447257e31
+DONOR=/workspace/codexschema/gate3_face179_b5762fa/isolated_assets/formal_sz_seed3_model2000_11f3a288/exported_2fa3534/policy.onnx
 test "$(shasum -a 256 "$DONOR" | awk '{print $1}')" = \
   0c428ddf9968b047acbe7bbd5a39069a8e661ab0421038ea3b635284deb7b155
 
-CUDA_VISIBLE_DEVICES= python3 "$TOOL" \
+PYTHONDONTWRITEBYTECODE=1 CUDA_VISIBLE_DEVICES= "$PY" "$TOOL" \
   --prereg "$B_PLAN" --expected-prereg-sha256 "$B_SHA" \
   --peer-prereg "$C_PLAN" --expected-peer-prereg-sha256 "$C_SHA" \
   --hope_frame off --donor "$DONOR" inspect
 
-CUDA_VISIBLE_DEVICES= python3 "$TOOL" \
+PYTHONDONTWRITEBYTECODE=1 CUDA_VISIBLE_DEVICES= "$PY" "$TOOL" \
   --prereg "$C_PLAN" --expected-prereg-sha256 "$C_SHA" \
   --peer-prereg "$B_PLAN" --expected-peer-prereg-sha256 "$B_SHA" \
   --hope_frame off --donor "$DONOR" inspect
 ```
 
-Do not substitute `consume` until both no-write inspections have their exact source/runtime receipt
-recorded. After inspection, each asset gets at most one no-clobber `consume`; its report is the final
-publication link. A completed schema-2 NPZ still is not an accepted motion: run L0 next, then vendor
-L1 self-collision and full-trajectory table/net clearance. Never advance B/C fallback for an
-internal schema-2/FK failure.
+The default `/usr/bin/python3` first failed closed with rc=2 because `onnxruntime` was missing; it
+wrote nothing and is not an accepted inspection. The exact passing runtime was Python/NumPy/
+ONNX Runtime/MuJoCo `3.12.3/2.5.0/1.27.0/3.10.0`. B/C then returned rc=0 with `frames=91/98`,
+`donor_exact=true`, and `no_write=true`. Source checkout `748b6d5fe24bfe58915c34d8dfe09f254f8e4957`
+was detached and clean before/after; both output roots were absent before/after.
+
+Validate the tracked runtime receipt and next-attempt activation from the reviewed source checkout:
+
+```bash
+RECEIPT=configs/motion_backhand_loop_bc_schema2_fk_runtime_inspection_receipt_20260714.json
+RECEIPT_SHA=8e2d2d2d7a4fe0779104456d3bcb32f03cfda82e831958216eefb0fb35b3fb61
+ACTIVATION=configs/motion_backhand_loop_bc_schema2_fk_consume_activation_20260714.json
+ACTIVATION_SHA=366d59d51d40111205aa8c8b43e7722218d522b8b568d25772eab1f46f2d6337
+VALIDATOR=scripts/validate_motion_schema2_fk_consume_activation.py
+VALIDATOR_SHA=3c666f225d389a67a8ef9523004cce0aa6d76bd119cd5f249fa54e14a1c77d72
+
+test "$(shasum -a 256 "$RECEIPT" | awk '{print $1}')" = "$RECEIPT_SHA"
+test "$(shasum -a 256 "$ACTIVATION" | awk '{print $1}')" = "$ACTIVATION_SHA"
+test "$(shasum -a 256 "$VALIDATOR" | awk '{print $1}')" = "$VALIDATOR_SHA"
+python3 "$VALIDATOR" \
+  --receipt "$RECEIPT" --expected-receipt-sha256 "$RECEIPT_SHA" \
+  --activation "$ACTIVATION" --expected-activation-sha256 "$ACTIVATION_SHA" static
+python3 -m pytest -q tests/test_motion_backhand_loop_bc_schema2_fk_consume_activation.py
+```
+
+Expected source result is `PASS static ... attempts_started=0 consume_not_run=true`; focused tests
+must report `28 passed`. The validator deliberately has no `consume` subcommand. The activation remains
+`review_required_not_consumed`: it binds the successful interpreter, exact checkout/tool/plans,
+donor, PKL/report lineage, output roots and full commands, but it does not run them.
+
+Only after this branch is reviewed and merged may an operator use the activation's exact argv,
+serially. Immediately before each command, recheck the detached source commit/cleanliness, exact
+runtime and all input hashes, and require that that asset's output root does not exist. Starting the
+command spends that asset's sole authorized attempt. On any rc != 0, preserve evidence and stop that
+asset even if cleanup leaves the output root absent; do not automatically retry or advance the
+fallback ladder. On success, `schema2_fk_report.json` must be published last. This activation alone
+does not authorize L0/L1, table/net, dynamics, simulator, training, formal-motion or hardware work.
+No `consume` command in this section was run while creating the receipt/activation change.
+
+A future completed schema-2 NPZ still is not an accepted motion. Its exact report must first be
+tracked, then a separate L0 audit decision can be made; vendor L1 self-collision and full-trajectory
+table/net clearance remain later gates. Never advance B/C fallback for an internal schema-2/FK
+failure.
 
 ## Promotion remains deliberately blocked
 

@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "activation_id": "motion-backhand-loop-bc-schema2-fk-consume-20260714-v1",
+  "status": "review_required_not_consumed",
+  "scope": "Source-only authorization for at most one no-clobber schema-2/FK consume attempt per inspected B/C asset after human review; no consume has run under this activation.",
+  "inspection_receipt": {
+    "path": "configs/motion_backhand_loop_bc_schema2_fk_runtime_inspection_receipt_20260714.json",
+    "bytes": 6689,
+    "sha256": "8e2d2d2d7a4fe0779104456d3bcb32f03cfda82e831958216eefb0fb35b3fb61"
+  },
+  "validator": {
+    "path": "scripts/validate_motion_schema2_fk_consume_activation.py",
+    "bytes": 24621,
+    "sha256": "3c666f225d389a67a8ef9523004cce0aa6d76bd119cd5f249fa54e14a1c77d72"
+  },
+  "source_checkout": {
+    "path": "/workspace/codexschema/nohope_schema2_fk_inspect_748b6d5",
+    "commit": "748b6d5fe24bfe58915c34d8dfe09f254f8e4957",
+    "must_be_detached": true,
+    "must_be_clean_before_and_after": true,
+    "may_not_be_archive_or_live_a0": true
+  },
+  "runtime": {
+    "executable": "/workspace/hope_mjeval_venv/bin/python",
+    "resolved_executable": "/usr/bin/python3.12",
+    "executable_bytes": 8021824,
+    "executable_sha256": "1d3cf64f97cadc79fdc6fe2496a21b7b456cb94211978cfef5a65f616af74fd5",
+    "python_version": "3.12.3",
+    "packages": {
+      "numpy": "2.5.0",
+      "onnxruntime": "1.27.0",
+      "mujoco": "3.10.0"
+    }
+  },
+  "donor_onnx": {
+    "path": "/workspace/codexschema/gate3_face179_b5762fa/isolated_assets/formal_sz_seed3_model2000_11f3a288/exported_2fa3534/policy.onnx",
+    "bytes": 1325146,
+    "sha256": "0c428ddf9968b047acbe7bbd5a39069a8e661ab0421038ea3b635284deb7b155",
+    "required_metadata_subset_exact": true
+  },
+  "assets": {
+    "franco_backhand_loop_b": {
+      "preregistration": {
+        "path": "configs/motion_backhand_loop_b_schema2_fk_prereg_20260714.json",
+        "bytes": 2864,
+        "sha256": "3d71cc02c6ae68d0ecedf280e8341d763ad39ec0aac1757367c9719e761d33ae"
+      },
+      "output_root": "/workspace/codexschema/motion_video_intake_20260711/schema2_fk_primary_v1/franco_backhand_loop_b_98e7b883b29d",
+      "output_motion_filename": "franco_backhand_loop_b.98e7b883b29d.schema2_fk.npz",
+      "report_filename": "schema2_fk_report.json",
+      "output_root_must_be_absent": true,
+      "attempts_authorized": 1,
+      "attempts_started": 0,
+      "schema2_materialized": false
+    },
+    "franco_backhand_loop_c": {
+      "preregistration": {
+        "path": "configs/motion_backhand_loop_c_schema2_fk_prereg_20260714.json",
+        "bytes": 2864,
+        "sha256": "662b8c4c0851d2f6d9d5c23313dc0c27334528a2b5fb2b62ad90bc3447257e31"
+      },
+      "output_root": "/workspace/codexschema/motion_video_intake_20260711/schema2_fk_primary_v1/franco_backhand_loop_c_aa0c86fd3509",
+      "output_motion_filename": "franco_backhand_loop_c.aa0c86fd3509.schema2_fk.npz",
+      "report_filename": "schema2_fk_report.json",
+      "output_root_must_be_absent": true,
+      "attempts_authorized": 1,
+      "attempts_started": 0,
+      "schema2_materialized": false
+    }
+  },
+  "execution_contract": {
+    "mode": "CPU-only exact schema-2/FK materialization",
+    "asset_parallelism": 1,
+    "hope_frame": "off",
+    "rehash_all_bound_inputs_before_each_attempt": true,
+    "no_clobber": true,
+    "report_published_last": true,
+    "automatic_retry": false,
+    "failure_action": "stop_that_asset_preserve_evidence_require_new_human_review",
+    "operator_review_required_before_first_attempt": true,
+    "activation_does_not_override_plan_failure_policy": true
+  },
+  "commands": {
+    "franco_backhand_loop_b": {
+      "cwd": "/workspace/codexschema/nohope_schema2_fk_inspect_748b6d5",
+      "environment": {
+        "CUDA_VISIBLE_DEVICES": "",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "argv": [
+        "/workspace/hope_mjeval_venv/bin/python",
+        "/workspace/codexschema/nohope_schema2_fk_inspect_748b6d5/scripts/materialize_motion_schema2_fk.py",
+        "--prereg",
+        "/workspace/codexschema/nohope_schema2_fk_inspect_748b6d5/configs/motion_backhand_loop_b_schema2_fk_prereg_20260714.json",
+        "--expected-prereg-sha256",
+        "3d71cc02c6ae68d0ecedf280e8341d763ad39ec0aac1757367c9719e761d33ae",
+        "--peer-prereg",
+        "/workspace/codexschema/nohope_schema2_fk_inspect_748b6d5/configs/motion_backhand_loop_c_schema2_fk_prereg_20260714.json",
+        "--expected-peer-prereg-sha256",
+        "662b8c4c0851d2f6d9d5c23313dc0c27334528a2b5fb2b62ad90bc3447257e31",
+        "--hope_frame",
+        "off",
+        "--donor",
+        "/workspace/codexschema/gate3_face179_b5762fa/isolated_assets/formal_sz_seed3_model2000_11f3a288/exported_2fa3534/policy.onnx",
+        "consume"
+      ]
+    },
+    "franco_backhand_loop_c": {
+      "cwd": "/workspace/codexschema/nohope_schema2_fk_inspect_748b6d5",
+      "environment": {
+        "CUDA_VISIBLE_DEVICES": "",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "argv": [
+        "/workspace/hope_mjeval_venv/bin/python",
+        "/workspace/codexschema/nohope_schema2_fk_inspect_748b6d5/scripts/materialize_motion_schema2_fk.py",
+        "--prereg",
+        "/workspace/codexschema/nohope_schema2_fk_inspect_748b6d5/configs/motion_backhand_loop_c_schema2_fk_prereg_20260714.json",
+        "--expected-prereg-sha256",
+        "662b8c4c0851d2f6d9d5c23313dc0c27334528a2b5fb2b62ad90bc3447257e31",
+        "--peer-prereg",
+        "/workspace/codexschema/nohope_schema2_fk_inspect_748b6d5/configs/motion_backhand_loop_b_schema2_fk_prereg_20260714.json",
+        "--expected-peer-prereg-sha256",
+        "3d71cc02c6ae68d0ecedf280e8341d763ad39ec0aac1757367c9719e761d33ae",
+        "--hope_frame",
+        "off",
+        "--donor",
+        "/workspace/codexschema/gate3_face179_b5762fa/isolated_assets/formal_sz_seed3_model2000_11f3a288/exported_2fa3534/policy.onnx",
+        "consume"
+      ]
+    }
+  },
+  "authorization": {
+    "schema2_fk_consume_once_per_asset": true,
+    "schema2_materialized": false,
+    "l0_authorized": false,
+    "vendor_l1_authorized": false,
+    "table_net_authorized": false,
+    "dynamics_authorized": false,
+    "simulator_authorized": false,
+    "training_authorized": false,
+    "formal_motion_authorized": false,
+    "hardware_authorized": false
+  }
+}

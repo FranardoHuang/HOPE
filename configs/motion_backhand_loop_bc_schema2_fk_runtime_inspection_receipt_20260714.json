@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "receipt_id": "motion-backhand-loop-bc-schema2-fk-runtime-inspection-20260714-v1",
+  "status": "complete_exact_read_only_inspection_b_and_c_passed",
+  "scope": "Historical receipt for two exact CPU-only runtime inspections. It authorizes no write, simulation, training, L0/L1 audit, formal motion, deployment, or hardware action.",
+  "timing": {
+    "exact_command_start_and_end_not_captured": true,
+    "inspection_completed_before_observation_utc": "2026-07-13T20:19:37Z",
+    "receipt_observation_utc": "2026-07-13T20:19:37Z"
+  },
+  "pod": {
+    "name": "pod1",
+    "ssh_endpoint": "root@162.43.172.171:18333"
+  },
+  "inspection_checkout": {
+    "path": "/workspace/codexschema/nohope_schema2_fk_inspect_748b6d5",
+    "commit": "748b6d5fe24bfe58915c34d8dfe09f254f8e4957",
+    "detached": true,
+    "clean_before": true,
+    "clean_after": true,
+    "tracked_files": {
+      "consumer": {
+        "path": "scripts/materialize_motion_schema2_fk.py",
+        "bytes": 49151,
+        "sha256": "33cf23eecff514a0e89bfe245db5b63470c4cd1dc9a433d0b920dfd84b9caebd"
+      },
+      "b_preregistration": {
+        "path": "configs/motion_backhand_loop_b_schema2_fk_prereg_20260714.json",
+        "bytes": 2864,
+        "sha256": "3d71cc02c6ae68d0ecedf280e8341d763ad39ec0aac1757367c9719e761d33ae"
+      },
+      "c_preregistration": {
+        "path": "configs/motion_backhand_loop_c_schema2_fk_prereg_20260714.json",
+        "bytes": 2864,
+        "sha256": "662b8c4c0851d2f6d9d5c23313dc0c27334528a2b5fb2b62ad90bc3447257e31"
+      },
+      "shared_runtime": {
+        "path": "configs/motion_backhand_loop_bc_schema2_fk_runtime_v1.json",
+        "bytes": 5503,
+        "sha256": "3d32b146e72029960ebf9cb2777f484804dafc87097e9cd3d0513dc277eed6e8"
+      },
+      "donor_metadata_expectation": {
+        "path": "configs/a3_schema2_fk_donor_metadata_v1.json",
+        "bytes": 2301,
+        "sha256": "0e55b78806e3a5ae26f3ace6df067ec5cd145ed985a778f7962e4bfe24116f1c"
+      }
+    }
+  },
+  "runtime": {
+    "failed_default_python_attempt": {
+      "executable": "/usr/bin/python3",
+      "resolved_executable": "/usr/bin/python3.12",
+      "executable_bytes": 8021824,
+      "executable_sha256": "1d3cf64f97cadc79fdc6fe2496a21b7b456cb94211978cfef5a65f616af74fd5",
+      "python_version": "3.12.3",
+      "packages": {
+        "numpy": "2.1.2",
+        "onnxruntime": null,
+        "mujoco": null
+      },
+      "asset_id": "franco_backhand_loop_b",
+      "returncode": 2,
+      "failure": "onnxruntime is required for runtime inspection",
+      "writes_observed": false,
+      "accepted_as_inspection": false
+    },
+    "successful_python": {
+      "executable": "/workspace/hope_mjeval_venv/bin/python",
+      "resolved_executable": "/usr/bin/python3.12",
+      "executable_bytes": 8021824,
+      "executable_sha256": "1d3cf64f97cadc79fdc6fe2496a21b7b456cb94211978cfef5a65f616af74fd5",
+      "python_version": "3.12.3",
+      "packages": {
+        "numpy": "2.5.0",
+        "onnxruntime": "1.27.0",
+        "mujoco": "3.10.0"
+      }
+    }
+  },
+  "donor_onnx": {
+    "path": "/workspace/codexschema/gate3_face179_b5762fa/isolated_assets/formal_sz_seed3_model2000_11f3a288/exported_2fa3534/policy.onnx",
+    "bytes": 1325146,
+    "sha256": "0c428ddf9968b047acbe7bbd5a39069a8e661ab0421038ea3b635284deb7b155",
+    "required_metadata_subset_exact": true
+  },
+  "vendor_mjcf": {
+    "canonical_path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+    "canonical_bytes": 49107,
+    "canonical_sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97",
+    "closure": {
+      "file_count": 75,
+      "xml_file_count": 1,
+      "include_reference_count": 0,
+      "unique_external_file_count": 74,
+      "mesh_reference_count": 74,
+      "total_bytes": 14127373,
+      "manifest_sha256": "e0381752eab46013c08559b331abb261beaa88a207a3c2f1155ab00857b962de"
+    },
+    "model_loaded": true,
+    "joint_and_body_names_exact": true,
+    "dynamics_steps": 0
+  },
+  "assets": {
+    "franco_backhand_loop_b": {
+      "source_motion": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_spatial_retarget_primary_v1/franco_backhand_loop_b_98e7b883b29d/franco_backhand_loop_b.98e7b883b29d.se2.gmr.pkl",
+        "bytes": 27927,
+        "sha256": "278279125528c827e0a980389b040d54d16140620c59c67c878286be9d1c8ad6"
+      },
+      "source_materialization_report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_spatial_retarget_primary_v1/franco_backhand_loop_b_98e7b883b29d/materialization_report.json",
+        "bytes": 4051,
+        "sha256": "a238c077524586b2f1181cd24cb84ee29aa985ab274cfb43292f3159c0daadf3"
+      },
+      "output_root": "/workspace/codexschema/motion_video_intake_20260711/schema2_fk_primary_v1/franco_backhand_loop_b_98e7b883b29d",
+      "output_root_absent_before": true,
+      "output_root_absent_after": true,
+      "input_frames": 91,
+      "returncode": 0,
+      "stdout": "[schema2-fk] PASS inspect asset=franco_backhand_loop_b frames=91 donor_exact=true no_write=true",
+      "no_write": true
+    },
+    "franco_backhand_loop_c": {
+      "source_motion": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_spatial_retarget_primary_v1/franco_backhand_loop_c_aa0c86fd3509/franco_backhand_loop_c.aa0c86fd3509.se2.gmr.pkl",
+        "bytes": 30055,
+        "sha256": "0dd981a6d29c0c5321c905d1591a59fbb79763de6e43d92d4d76aefdc29ff48b"
+      },
+      "source_materialization_report": {
+        "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_spatial_retarget_primary_v1/franco_backhand_loop_c_aa0c86fd3509/materialization_report.json",
+        "bytes": 4068,
+        "sha256": "b3b93d2cdb0a288f04aed764e5fdca92182cee625715a953600439088f59ff67"
+      },
+      "output_root": "/workspace/codexschema/motion_video_intake_20260711/schema2_fk_primary_v1/franco_backhand_loop_c_aa0c86fd3509",
+      "output_root_absent_before": true,
+      "output_root_absent_after": true,
+      "input_frames": 98,
+      "returncode": 0,
+      "stdout": "[schema2-fk] PASS inspect asset=franco_backhand_loop_c frames=98 donor_exact=true no_write=true",
+      "no_write": true
+    }
+  },
+  "honesty_boundary": {
+    "restricted_pickle_loaded": true,
+    "donor_metadata_reextracted": true,
+    "vendor_model_loaded": true,
+    "forward_kinematics_trajectory_evaluated": false,
+    "schema2_npz_written": false,
+    "simulation_run": false,
+    "training_run": false,
+    "hardware_run": false,
+    "motion_certificate_count": 0,
+    "only_unlocked_next_step": "reviewed_one_attempt_no_clobber_schema2_fk_consume_activation_per_asset"
+  }
+}

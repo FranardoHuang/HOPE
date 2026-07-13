@@ -26,6 +26,17 @@
   [跑批作战手册](runbook.md#rtx-5090-实测算力手册)与
   [RunPod 操作约束](operations/run_on_runpod.md#hard-rules-summary--full-list-in-the-pod-readme)。
 
+- B/C schema-2/FK 的两次真实 no-write runtime inspection 已入严格 receipt：Pod1 detached
+  `748b6d5` 前后 clean；默认 Python 因缺 `onnxruntime` rc=2 fail closed，现成
+  `hope_mjeval_venv` 绑定 Python/NumPy/ONNX Runtime/MuJoCo `3.12.3/2.5.0/1.27.0/3.10.0` 后，
+  B/C `91/98` 帧分别 rc=0，donor/MJCF/name domain exact，两个 output root 仍不存在。下一层 activation
+  只给 B/C 各一次串行 no-clobber/report-last consume，`attempts_started=0`，失败不自动重试，L0/L1/
+  simulator/训练/真机均未授权；本分支未在 Pod consume。原 prereg + activation focused 为
+  `45 passed`，latest-main 仓内回归为 `822 passed, 10 skipped`。见
+  [实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)、
+  [G04](gates/G04_sim_modeling_mujoco_isaac.md)、[G08](gates/G08_blind_spot_improvements.md)和
+  [操作](operations/run_motion_spatial_retarget_screen.md)。
+
 - B/C 独立 schema-2/FK prereg 的 source gate 已闭合：两份计划绑定 exact 私有 SE(2) PKL/report、
   不重叠 no-clobber 输出与 `91/98@30 Hz -> 151/163@50 Hz`；共享合同绑定 restricted pickle、formal
   donor SHA/三行 metadata 期望、vendor `1 XML + 74 mesh` closure、31-joint/32-body order，以及

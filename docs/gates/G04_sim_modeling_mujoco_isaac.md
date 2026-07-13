@@ -326,6 +326,28 @@ No FK, schema-2 output, L0/L1, simulator, training or hardware ran; certificate 
 G04 remains `Partial`. See the [experiment](../experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)
 and [operation](../operations/run_motion_spatial_retarget_screen.md).
 
+## Audit update 2026-07-14: B/C no-write runtime inspection and consume activation
+
+The two next-gate inspections have now run in the clean detached Pod1 checkout
+`748b6d5fe24bfe58915c34d8dfe09f254f8e4957`. The default Python 3.12.3 environment failed closed
+with rc=2 because `onnxruntime` was absent; that attempt wrote nothing and is not counted as a pass.
+The existing `/workspace/hope_mjeval_venv` environment bound Python 3.12.3, NumPy 2.5.0,
+ONNX Runtime 1.27.0 and MuJoCo 3.10.0. With the same exact tool, plans, donor, private PKL/report and
+MJCF closure, B and C passed separately at 91 and 98 input frames. Both output roots remained absent
+and the source checkout remained clean.
+
+The tracked receipt is
+`configs/motion_backhand_loop_bc_schema2_fk_runtime_inspection_receipt_20260714.json` SHA
+`8e2d2d2d...3fb61`. Inspection loaded and name-checked the vendor model but did not evaluate the
+151/163-frame FK trajectories, step dynamics, or write schema-2. The reviewed-next-step activation
+`366d59d5...d6337` is source-only and still records zero attempts started. It authorizes at most one
+serial no-clobber consume attempt per existing B/C output root, requires report-last publication,
+and forbids automatic retry after failure. The activation itself authorizes no L0/L1, table/net,
+dynamics, simulator, training, formal-motion or hardware action. No consume ran in this change;
+activation-focused tests are `28 passed`, combined prereg/activation tests are `45 passed`, and the
+latest-main repository suite is `822 passed, 10 skipped`. Schema-2 materialization and certificate
+count remain zero, so G04 stays `Partial`.
+
 For M0, the canonical-beta materialization still has null A3 stance fields. The downstream exact-GMR
 plan now freezes canonical foot sites and tolerances, while initial/terminal `d_xy` and pass remain
 null until robot-coordinate evidence exists. G04 remains `Partial`.

@@ -502,6 +502,18 @@ FK/schema-2/L0/simulator/RL/真机，因此证书仍为 0；
 逐资产只读 `inspect`，之后才允许一次 schema-2/FK consume。当前没有 FK/NPZ、L0/L1、桌网、动力学、
 simulator/RL 或真机证据，证书仍为 0、G08 状态不变。
 
+两条只读 `inspect` 随后在 Pod1 的 exact detached `748b6d5` checkout 闭环。默认 Python 因缺
+`onnxruntime` rc=2 fail closed 且未写；现成 `hope_mjeval_venv` 绑定 Python/NumPy/ONNX Runtime/MuJoCo
+`3.12.3/2.5.0/1.27.0/3.10.0` 后，B/C 以 `91/98` 帧分别 rc=0，donor metadata 与 vendor model name
+domain exact，output roots 前后均不存在，checkout 仍 clean。tracked receipt SHA 为
+`8e2d2d2d...3fb61`。这只是 FK 的运行时前置：没有计算 151/163 帧 FK、没有 NPZ、没有 dynamics step。
+
+下一层 activation SHA `366d59d5...d6337` 仍为 `review_required_not_consumed`：B/C 各只有一次现有
+output root 的 no-clobber、串行、report-last consume 权限，失败停止该资产且不自动重试。当前两条
+`attempts_started=0`；L0/L1、桌网、动力学、simulator/RL、正式动作和硬件仍全部 false。focused source
+gate `28 passed`，会拒绝重试预算、并发、命令、解释器、lineage 或权限漂移；本次没有在 Pod
+consume，因此证书仍为 0、G08 仍是 Research track。
+
 S0/M0 的下一层 exact GMR 现已冻结成两批独立 machine plan。共享 consumer 不把 retarget body order 猜成
 canonical vendor body order，而是分开绑定两套 XML order，再用显式 31-joint bijection 接入 A3 FK。M0
 四条候选的人工 ready windows 已展开为 exact 30 Hz sample indices；结果将同时报告初末前后脚错位和横向

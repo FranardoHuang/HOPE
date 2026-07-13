@@ -1,6 +1,6 @@
 # EXP-MOTION-SPATIAL-RETARGET — 新动作能否到达有效击球点？
 
-- 状态：in progress（proposal screen、B/C 确定性主选、exact SE(2) 与 schema-2/FK source gate 完成；runtime inspection / promotion blocked）
+- 状态：in progress（proposal screen、B/C 确定性主选、exact SE(2)、schema-2/FK source gate 与两条只读 runtime inspection 完成；consume 待审，promotion blocked）
 - 阶段/轴：课程阶段 2 / 动作适配与动作源
 - 人类负责人：franco
 - 执行者：Codex
@@ -153,9 +153,39 @@ duplicate JSON 的 fail-closed 负测；基于 `origin/main@7679b30` 的仓内 `
 真机结果。
 
 donor metadata 文件明确只是与 exact ONNX SHA 绑定的 required-subset 期望，不是已从该 ONNX 抽取的
-runtime receipt。下一门只能先按[操作文档](../../operations/run_motion_spatial_retarget_screen.md)逐资产
-执行 no-write `inspect`；它必须重抽 donor metadata、restricted-load exact PKL、加载 exact vendor model
-并保持输出根不存在。inspect 通过后才允许该资产一次 no-clobber `consume`，之后再做 L0。
+runtime receipt。因此下一门当时只能先按
+[操作文档](../../operations/run_motion_spatial_retarget_screen.md)逐资产执行 no-write `inspect`；下节记录
+该门的真实结果，而不是用 source gate 追认 runtime pass。
+
+## 2026-07-14：B/C runtime inspection receipt 与一次性 consume 待审门
+
+Pod1 的独立 detached checkout
+`/workspace/codexschema/nohope_schema2_fk_inspect_748b6d5` 保持 exact
+`748b6d5fe24bfe58915c34d8dfe09f254f8e4957` 且前后 clean。默认 `/usr/bin/python3`
+（Python `3.12.3`、NumPy `2.1.2`）因没有 `onnxruntime` 以 rc=2 fail closed；这次失败没有被算作
+inspection pass，也没有写输出。随后只改用现成、未修改的
+`/workspace/hope_mjeval_venv/bin/python`：Python `3.12.3`、NumPy `2.5.0`、ONNX Runtime
+`1.27.0`、MuJoCo `3.10.0`。同一 tool/plans/donor/PKL/report/MJCF closure 下，B/C 分别返回
+`frames=91/98 donor_exact=true no_write=true`，rc 均为 0；两个 schema-2 output root 前后均不存在。
+
+完整历史收据是
+`configs/motion_backhand_loop_bc_schema2_fk_runtime_inspection_receipt_20260714.json`（6,689 bytes，
+SHA-256 `8e2d2d2d7a4fe0779104456d3bcb32f03cfda82e831958216eefb0fb35b3fb61`）。它绑定 exact checkout、
+consumer/plans、donor ONNX、两条 PKL/report、vendor `1 XML + 74 mesh` closure 和解释器/包版本；同时明确
+`inspect` 只 restricted-load 输入、重抽 donor metadata 并加载 vendor model/name domain。它没有对
+151/163 帧运行 FK、没有写 NPZ、没有推进 dynamics simulation，也没有 L0/L1/训练/真机结论。
+
+下一步一次性 activation 是
+`configs/motion_backhand_loop_bc_schema2_fk_consume_activation_20260714.json`（SHA-256
+`366d59d51d40111205aa8c8b43e7722218d522b8b568d25772eab1f46f2d6337`）。dependency-light validator
+`scripts/validate_motion_schema2_fk_consume_activation.py`（SHA-256
+`3c666f225d389a67a8ef9523004cce0aa6d76bd119cd5f249fa54e14a1c77d72`）只做 tracked source gate，
+没有 `consume` 子命令。activation 对 B/C 各给一个现有 output root 的一次 no-clobber attempt，串行、
+report-last；任一失败停止该资产、保留证据且不自动重试。当前 `attempts_started=0`、
+`schema2_materialized=false`，L0/L1、桌网、动力学、simulator、训练、正式动作和 hardware 权限全为 false。
+activation 专项为 `28 passed`，与原 prereg 合跑为 `45 passed`；最新 `origin/main@4e6e19b` 基线上的
+仓内回归为 `822 passed, 10 skipped`。本分支没有在 Pod 执行 consume；合入与人工审阅前不得执行
+activation 中的 runtime command。
 
 权威资料：[G08](../../gates/G08_blind_spot_improvements.md) 和
 [操作文档](../../operations/run_motion_spatial_retarget_screen.md)。
