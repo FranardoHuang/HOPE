@@ -33,7 +33,8 @@
   不永久花预算的 v1 activation 已否决；v2 一次性 runner 源码门现以 atomic pre-child claim、B/C
   shared flock、permanent failure/completion-last ledger、runtime/input 重验和 NPZ 内容级 lineage
   validator 闭合，bypass/concurrency/failure-spends/runtime-drift 等专项 `28 passed`、连同 prereg
-  `45 passed`。runner 尚未在 Pod 执行、attempts 仍为 0；L0/L1/simulator/训练/真机均未授权。见
+  `45 passed`，latest-main `tests/` 回归 `850 passed, 10 skipped`。runner 尚未在 Pod 执行、attempts
+  仍为 0；L0/L1/simulator/训练/真机均未授权。见
   [实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)、
   [G04](gates/G04_sim_modeling_mujoco_isaac.md)、[G08](gates/G08_blind_spot_improvements.md)和
   [操作](operations/run_motion_spatial_retarget_screen.md)。

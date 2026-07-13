@@ -353,7 +353,7 @@ exact schema-2 fields, shapes, finite float32 series, quaternion norms and 32-bo
 trusting only its report hash. Bypass/concurrency/failure-spends-attempt/runtime-drift and missing-
 lineage attacks pass `28` focused tests (`45` with the prereg tests). This is source evidence only:
 the runner has not executed, output roots remain absent, and schema-2 materialization/certificate
-count remain zero, so G04 stays `Partial`.
+count remain zero. The latest-main `tests/` suite is `850 passed, 10 skipped`; G04 stays `Partial`.
 
 For M0, the canonical-beta materialization still has null A3 stance fields. The downstream exact-GMR
 plan now freezes canonical foot sites and tolerances, while initial/terminal `d_xy` and pass remain

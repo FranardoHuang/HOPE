@@ -200,7 +200,8 @@ body/joint order。formal validator 还会打开 NPZ，要求 11 个 exact 字�
 post-validation failure、runtime/module-origin drift、attached/dirty checkout、缺失/伪造 NPZ 与
 completion-last lineage；activation/runner 专项 `28 passed`，与原 prereg 合跑 `45 passed`。当前仍是
 `review_required_runner_not_executed`：`attempts_started=0`、两个 output root absent、Pod consume 未运行，
-L0/L1、桌网、动力学、simulator、训练、正式动作和 hardware 权限全为 false。
+latest `origin/main@dba7808` 上 `python3 -m pytest -q tests` 为 `850 passed, 10 skipped`。L0/L1、桌网、
+动力学、simulator、训练、正式动作和 hardware 权限全为 false。
 
 权威资料：[G08](../../gates/G08_blind_spot_improvements.md) 和
 [操作文档](../../operations/run_motion_spatial_retarget_screen.md)。
