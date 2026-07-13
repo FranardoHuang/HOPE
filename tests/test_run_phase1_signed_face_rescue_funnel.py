@@ -38,6 +38,8 @@ def write_manifest(tmp_path: Path, value: dict) -> Path:
 
 def test_checked_manifest_is_exact_four_cell_single_seed_funnel():
     data = manifest()
+    assert data["manifest_id"].endswith("-v2")
+    assert data["runtime"]["external_control_root"].endswith("/control/v2")
     assert [cell["cell_id"] for cell in data["cells"]] == ["A", "B", "C", "D"]
     assert data["shared_training_contract"]["training_seed"] == 3
     assert [(cell["initialization"], cell["face_guidance_weight"]) for cell in data["cells"]] == [
@@ -230,6 +232,7 @@ def test_l2_activation_binds_all_four_and_is_no_clobber(tmp_path):
                 "training_contract_schema_version": 3,
                 "training_contract_sha256": common_sha,
                 "training_contract_lineage_exact": int(lineage),
+                "training_contract_provenance_location": "infos",
                 "floating_tensor_count": 1,
                 "nonfinite_floating_elements": 0,
             },
@@ -289,6 +292,15 @@ def test_missing_or_unreadable_training_checkout_is_concise_contract_error(monke
     )
     with pytest.raises(M.ContractError, match="missing or unreadable by Git"):
         M.verify_training_source(data)
+
+
+def test_checkpoint_audit_contract_targets_nested_runner_layout():
+    source = M.CHECKPOINT_AUDIT_CODE
+    assert "stack = [obj]" in source
+    assert "stack.extend(value.values())" in source
+    assert "infos = obj.get('infos')" in source
+    assert "infos.get('training_contract_sha256')" in source
+    assert "obj.get('training_contract_sha256')" not in source
 
 
 def test_l2_is_fail_closed_until_separate_signed_directional_paper_activation():

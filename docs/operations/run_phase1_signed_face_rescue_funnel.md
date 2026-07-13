@@ -1,6 +1,6 @@
 # 运行 Phase-1 有符号拍面单-seed 机制漏斗
 
-状态：机器预注册已通过源码测试；尚未在 Pod 运行，G05/G06 仍为 `Partial`。
+状态：v1 在 Pod runtime preflight 被正确拒绝；v2 已修正 checkpoint 审计并通过源码测试，尚未启动训练，G05/G06 仍为 `Partial`。
 
 本页运行 [`EXP-P1-SIGNED-FACE-RESCUE-FUNNEL`](../experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)
 冻结的四个因果格。`run_name` 是每条训练不可复用的运行名；`seed` 是随机初始化/采样种子；其他缩写见
@@ -35,7 +35,7 @@
 ```bash
 SOURCE_COMMIT=882fea4285f0cf9a97ba79d79ae8af31d26ea1ed
 SOURCE=/workspace/codexschema/nohope_signed_face_rescue_882fea4
-CONTROL=/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v1
+CONTROL=/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v2
 ARTIFACT=/workspace/codexschema/phase1_signed_face_rescue_20260713
 
 git -C /workspace/codexschema/nohope worktree add --detach "$SOURCE" "$SOURCE_COMMIT"
@@ -62,8 +62,14 @@ LAUNCHER_SHA=$(sha256sum "$LAUNCHER" | awk '{print $1}')
 不要手改生产副本。commit 合入后以本页记录的最终 SHA 对账；如果不同，停止并回到源码审查，不能现场
 “更新期望值”。
 
-本版冻结值：manifest `2fed82058342555eec8adbd890d87dc1a9e3120e4d7ee00690b02df77851b0aa`；
-launcher `ea3f6b84621c326b247819214ba9fdc5f78e40c6a9719a09ff1fc441f2dfbb1d`。
+本版冻结值：manifest `a56cd9c188a6a5cc62716842340ce6091b1d1cc78da86350b9e0cdaebc262bce`；
+launcher `f83238a02728df82e8ed13547e8ca1afb6bc6e69712450d42aaf71d7d176fdae`。
+
+v1 文件保留在 `control/v1`，其 runtime `validate` 在创建任何 run claim 前 fail closed。根因不是父模型
+非有限：旧审计只遍历 checkpoint 顶层，而 RSL-RL 的浮点权重位于嵌套 state dict，合同 provenance
+位于 `checkpoint["infos"]`。只读复核得到 `74` 个浮点 tensor、`1,762,715` 个浮点元素、非有限元素
+`0`，并从 `infos` 读回 schema `3`、合同 SHA `3a3b3d95...b9972`、lineage `1`。v2 改为递归扫描嵌套
+容器并只从 `infos` 读取 runner 写入的三项合同字段；`control/v1` 不覆盖、不复用。
 
 ## 2. 只读校验与四格命令复核
 
@@ -139,7 +145,7 @@ L1 完整，不代表 L2 已授权。
 
 ## 5. L2 当前 fail-closed
 
-当前 v1 对所有 `--stage l2 validate|plan|launch` 都在任何 runtime 写入前返回：
+当前 v2 对所有 `--stage l2 validate|plan|launch` 都在任何 runtime 写入前返回：
 `L2 is blocked`。原因不是缺 GPU，而是 immutable signed-face directional checkpoint paper 的
 schedule/path/SHA 尚未冻结。不得绕过 validator，也不得把 L1 completion 文件改名为 L2 授权。
 
@@ -151,7 +157,7 @@ schedule/path/SHA 尚未冻结。不得绕过 validator，也不得把 L1 comple
   --stage l2 validate
 ```
 
-后续必须提交 reviewed v2，把同一 immutable paper 的 path/SHA、判读合同和 activation closure 一起冻结，
+后续必须提交 reviewed v3，把同一 immutable paper 的 path/SHA、判读合同和 activation closure 一起冻结，
 才能讨论 L2。到那时每个预注册 checkpoint 仍须检查进程、GPU、RAM、完整日志中的
 NaN/Inf/Traceback/OOM/Killed、文件名与嵌入 iteration、tensor finite、checkpoint ↔ 相邻 hard-contract
 SHA/lineage；不要为填空闲卡复制第二 seed。

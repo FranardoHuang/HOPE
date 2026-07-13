@@ -1,7 +1,7 @@
 # EXP-P1-SIGNED-FACE-RESCUE-FUNNEL：有符号拍面修复后的单-seed 机制漏斗
 
-状态：`preregistered`
-证据等级：E1（machine prereg/launcher 与静态攻击回归通过；尚无新训练）
+状态：`preregistered_v2_after_runtime_preflight_rejection`
+证据等级：E1（v2 machine prereg/launcher 与静态攻击回归通过；尚无新训练）
 人类负责人：franco  
 执行者：Codex  
 全局优先级：只继承 [`NOW` 队列第 1 项](../../NOW.md#统一工作队列唯一优先级账本)，本页不另建队列。
@@ -99,10 +99,21 @@ signed-face scorer 修复已进入训练源码 commit
 
 静态合同把 L1 固定为同卡四格 `512 env × 25 update`，L2 设计固定为
 `4096 env × 1001 update`；四格全部 seed 3，热启动里程碑为 `14000/14300/14800`，fresh 为
-`200/500/1000`。focused 攻击回归为 `21 passed`，覆盖重复/错误 seed、配方漂移、hot/fresh lineage
+`200/500/1000`。focused 攻击回归为 `22 passed`，覆盖重复/错误 seed、配方漂移、hot/fresh lineage
 洗白、未注册 hard-contract key、非零 friction、旧 face pairing、伪造/缺格 activation、半写
 no-clobber claim、缺失 Git checkout、未冻结 paper 时的 L2 启动和自动 judge 等拒绝路径。这是 E1
 源码证据，不是 Isaac 启动或学习结果。
+
+### v1 runtime preflight 拒绝与 v2 修正
+
+Pod1 的 v1 `validate` 在创建任何 run claim 前拒绝父 checkpoint，报“non-finite or no floating
+tensors”。只读诊断证明父文件 SHA 未变，递归扫描为 `74` 个浮点 tensor、`1,762,715` 个浮点元素、
+nonfinite `0`；真正根因是 v1 只扫描 checkpoint 顶层，并把 runner 实际写在 `infos` 字典里的
+schema/合同 SHA/lineage 当成顶层字段读取。v1 生产副本保留在 `control/v1`，没有训练或半写 run。
+
+v2 把 manifest/control/activation 路径升级到 `...-v2`/`control/v2`，递归遍历嵌套 dict/list/tuple 的
+浮点 tensor，并明确要求 provenance 来自 `checkpoint["infos"]`。缺 `infos`、字段不符、非有限或零
+浮点 tensor 仍 fail closed。配方、四格、seed、预算与 L2 blocker 均未改变。
 
 ### 父合同扩展边界
 
@@ -120,11 +131,11 @@ L1 只是一份 25-update launch-integrity smoke。四个 L1 terminal 都 finite
 
 ## 仍未关闭的发射/判卷缺口
 
-- 生产外部控制副本、clean detached `882fea4` 训练 worktree 与 Pod runtime `validate` 尚未在本记录中
-  归档；因此尚无 PID、GPU 或 checkpoint 结果。
+- clean detached `882fea4` 训练 worktree 已在 Pod1 建立；v1 runtime `validate` 的拒绝与只读根因已归档。
+  v2 生产副本与 runtime `validate/launch` 尚未完成，因此仍无 PID 或新 checkpoint 结果。
 - L1 必须先实际运行并生成四格终档 completion/activation 证据。
 - 相对 `+1000` 的 immutable signed-face directional checkpoint paper 的 exact schedule/path/SHA 尚未
-  冻结。manifest 明确 `l2.launch_authorized=false`；必须另发 reviewed v2 paper activation 后才能启动
+  冻结。manifest 明确 `l2.launch_authorized=false`；必须另发 reviewed v3 paper activation 后才能启动
   L2。当前 launcher 也不启动 judge、不能自动晋级或购买第二 seed。
 
 当前只授权按运行手册进行仿真 L1 runtime validate/launch；不授权 L2、judge、部署或真机。

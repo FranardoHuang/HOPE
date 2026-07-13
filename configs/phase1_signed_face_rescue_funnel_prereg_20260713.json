@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "manifest_id": "phase1-signed-face-rescue-single-seed-funnel-20260713-v1",
+  "manifest_id": "phase1-signed-face-rescue-single-seed-funnel-20260713-v2",
   "purpose": "Run one seed across four distinct hot-start/fresh x face-guidance-off/on causal cells; buy another seed only after a paired mechanism win.",
   "status": "machine_preregistered_l1_authorized_l2_blocked_pending_signed_directional_paper",
   "simulation_only": true,
@@ -27,7 +27,7 @@
     "pod": "pod1",
     "gpu": 0,
     "artifact_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713",
-    "external_control_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v1",
+    "external_control_root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v2",
     "source_asset_root": "/workspace/codexschema/phase1_fresh_20260711",
     "environment_file": "/workspace/codexschema/env.sh",
     "isaac_python": "/workspace/hope_isaac_venv/bin/python",
@@ -207,7 +207,7 @@
         "C": 24,
         "D": 24
       },
-      "activation_output": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v1/l1_activation.json"
+      "activation_output": "/workspace/codexschema/phase1_signed_face_rescue_20260713/control/v2/l1_activation.json"
     },
     "l2": {
       "human_name": "4096-environment single-seed canary",

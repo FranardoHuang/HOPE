@@ -1217,9 +1217,14 @@ rules. Run it only through
 
 L1 is a `512 env × 25 update` launch-integrity smoke on one seed. Hot cells must save lineage `0`,
 fresh cells lineage `1`, and all four must emit one common hard-contract SHA. L2 is designed as
-`4096 env × 1001 update`, but v1 rejects every L2 validate/plan/launch before runtime writes until a
-separate immutable signed-face directional checkpoint paper path/SHA and reviewed v2 activation
+`4096 env × 1001 update`, but v2 rejects every L2 validate/plan/launch before runtime writes until a
+separate immutable signed-face directional checkpoint paper path/SHA and reviewed v3 activation
 exist. This launcher starts no judge, promotes no checkpoint and buys no additional seed.
+
+The first production preflight (`control/v1`) was rejected before any run claim because its audit
+looked only for top-level tensors and top-level contract keys. RSL-RL stores weights recursively and
+the contract tuple under checkpoint `infos`. Preserve v1; run only `control/v2`, whose frozen hashes
+and recursive/`infos` audit are recorded in the dedicated operation page.
 
 ## First-Loop Rule
 

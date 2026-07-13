@@ -129,7 +129,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
         raise ContractError(f"cannot read manifest: {exc}") from exc
     if data.get("schema_version") != 1:
         raise ContractError("manifest schema_version must be 1")
-    if data.get("manifest_id") != "phase1-signed-face-rescue-single-seed-funnel-20260713-v1":
+    if data.get("manifest_id") != "phase1-signed-face-rescue-single-seed-funnel-20260713-v2":
         raise ContractError("unexpected manifest_id")
     if data.get("simulation_only") is not True or data.get("real_robot_commands_forbidden") is not True:
         raise ContractError("manifest must be simulation-only and explicitly forbid robot commands")
@@ -160,7 +160,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
         require_sha(digest, f"critical source {relative}")
 
     if runtime.get("pod") != "pod1" or runtime.get("gpu") != 0:
-        raise ContractError("v1 reserves exactly Pod1 GPU0")
+        raise ContractError("v2 reserves exactly Pod1 GPU0")
     if runtime.get("initial_gpu_must_have_zero_compute_processes") is not True:
         raise ContractError("the four-cell pool must start on an empty GPU")
     if runtime.get("maximum_trainers_on_gpu") != 4:
@@ -325,7 +325,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
     if evaluation.get("l2_training_launch_authorized") is not False:
         raise ContractError("L2 training launch must remain blocked")
     if evaluation.get("signed_directional_checkpoint_paper") is not None:
-        raise ContractError("v1 must not invent a signed directional checkpoint paper")
+        raise ContractError("v2 must not invent a signed directional checkpoint paper")
     return data
 
 
@@ -377,22 +377,39 @@ def verify_training_source(manifest: dict[str, Any]) -> tuple[Path, Path]:
 
 
 CHECKPOINT_AUDIT_CODE = r"""
-import json, math, sys, torch
+import json, sys, torch
 path = sys.argv[1]
 obj = torch.load(path, map_location='cpu', weights_only=False)
 floating_tensors = 0
 floating_elements = 0
 nonfinite = 0
-for value in obj.values():
+stack = [obj]
+seen_containers = set()
+while stack:
+    value = stack.pop()
     if torch.is_tensor(value) and (value.is_floating_point() or value.is_complex()):
         floating_tensors += 1
         floating_elements += value.numel()
         nonfinite += int((~torch.isfinite(value)).sum().item())
+    elif isinstance(value, dict):
+        identity = id(value)
+        if identity not in seen_containers:
+            seen_containers.add(identity)
+            stack.extend(value.values())
+    elif isinstance(value, (list, tuple)):
+        identity = id(value)
+        if identity not in seen_containers:
+            seen_containers.add(identity)
+            stack.extend(value)
+infos = obj.get('infos')
+if not isinstance(infos, dict):
+    infos = {}
 print(json.dumps({
     'iter': obj.get('iter'),
-    'training_contract_schema_version': obj.get('training_contract_schema_version'),
-    'training_contract_sha256': obj.get('training_contract_sha256'),
-    'training_contract_lineage_exact': obj.get('training_contract_lineage_exact'),
+    'training_contract_schema_version': infos.get('training_contract_schema_version'),
+    'training_contract_sha256': infos.get('training_contract_sha256'),
+    'training_contract_lineage_exact': infos.get('training_contract_lineage_exact'),
+    'training_contract_provenance_location': 'infos',
     'floating_tensor_count': floating_tensors,
     'floating_elements': floating_elements,
     'nonfinite_floating_elements': nonfinite,
@@ -433,6 +450,7 @@ def verify_inputs(manifest: dict[str, Any], python: Path) -> dict[str, Any]:
         "training_contract_schema_version": parent["embedded_training_contract_schema_version"],
         "training_contract_sha256": parent["embedded_training_contract_sha256"],
         "training_contract_lineage_exact": 1,
+        "training_contract_provenance_location": "infos",
     }
     for key, expected in expected_audit.items():
         if audit.get(key) != expected:
@@ -718,6 +736,7 @@ def activation_payload(
             "training_contract_schema_version": 3,
             "training_contract_sha256": common_sha,
             "training_contract_lineage_exact": int(lineage),
+            "training_contract_provenance_location": "infos",
             "nonfinite_floating_elements": 0,
         }
         for key, expected in expected_audit.items():
@@ -743,7 +762,7 @@ def runtime_preflight(
     if stage_name == "l2":
         raise ContractError(
             "L2 is blocked: freeze a separate immutable signed-face directional checkpoint "
-            "paper path/SHA and issue a reviewed v2 activation before launch"
+            "paper path/SHA and issue a reviewed v3 activation before launch"
         )
     checkout, wbt = verify_training_source(manifest)
     verify_production_locations(manifest, config_path, launcher_path, checkout)
@@ -857,6 +876,7 @@ def verify_existing_stage_cell(
         "training_contract_schema_version": 3,
         "training_contract_sha256": contract_sha,
         "training_contract_lineage_exact": int(cell["expected_lineage_exact"]),
+        "training_contract_provenance_location": "infos",
     }
     for key, expected in expected_audit.items():
         if audit.get(key) != expected:
@@ -1042,6 +1062,7 @@ def finalize_l1(
             "training_contract_schema_version": 3,
             "training_contract_sha256": contract_sha,
             "training_contract_lineage_exact": int(cell["expected_lineage_exact"]),
+            "training_contract_provenance_location": "infos",
         }
         for key, value in expected.items():
             if audit.get(key) != value:

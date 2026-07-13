@@ -1272,6 +1272,9 @@ runtime；G06 继续 `Partial`。
 `training_contract_lineage_exact=0` 的显式表示迁移；C/D 才允许 fresh lineage `1`。L1 是
 25-update launch-integrity smoke，其四格 completion 文件不能授权 L2 或 judge。immutable signed-face
 directional checkpoint paper path/SHA 尚未冻结，manifest 明确 `l2.launch_authorized=false` 且
-`automatic_judge_launch=false`。源码/攻击回归 `21 passed` 不构成 Isaac/MuJoCo 行为或 Gate3 结果；
+`automatic_judge_launch=false`。源码/攻击回归 `22 passed` 不构成 Isaac/MuJoCo 行为或 Gate3 结果。
+Pod 首次 v1 preflight 的 checkpoint 假拒绝已根因到“顶层扫描/顶层 provenance”错误；v2 递归审计
+嵌套 tensor，并只接受 runner 写在 `checkpoint["infos"]` 的合同字段。该修复只恢复可信发射前置门，
+没有缩小 Isaac–MuJoCo 行为差，也没有启动 judge；
 操作见 [signed-face 漏斗运行手册](../operations/run_phase1_signed_face_rescue_funnel.md)，G06 保持
 `Partial`。
