@@ -29,7 +29,8 @@
 
 - 动作专属轻量 YAML 训练队列完成 E1 source gate：一行绑定 motion、专属 train bank/exam、source、
   base+delta、seed、预算、`+200/+500/+1000` milestone 与六卡资源；默认 dry-run，blocked 永不启动，
-  Pod1/Pod2 每卡容量 `4/3` 且先铺满六卡一圈。探索入口不做逐文件/pip/receipt hash；当前示例仍 blocked，
+  Pod1/Pod2 每卡容量 `4/3` 且先铺满六卡一圈。runner 入口源码固化、ready placeholder 在 SSH 前拒绝，
+  全局 scheduler flock 内重采六卡再选槽。探索入口不做逐文件/pip/receipt hash；当前示例仍 blocked，
   没有 Pod trainer 或行为结果。见[操作](operations/run_lean_training_queue.md)。
 
 - C3/D3 同卷 K100 one-shot consumer source gate 已绑定 paired L1 receipt、两份终档 exact attestation、

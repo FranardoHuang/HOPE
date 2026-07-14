@@ -23,9 +23,16 @@
 不做逐文件 SHA、`pip freeze`、import closure 或 evidence receipt。那些严格绑定只在正式晋级、跨引擎判卷
 和 Gate3 使用。
 
+`setup_train_env.sh`、`scripts/train.py` 与 `scripts/launch_kit_training_locked.sh` 三个入口已固定为 source
+checkout 下的 canonical repo-relative 路径，YAML 不能替换成绝对路径、`..`、broad process-control 或
+robot runner。`ready` job 还会在任何 SSH 前拒绝全零 commit、非 `/workspace` 路径、placeholder、`..` 和
+重复 input identity；blocked 示例可以保留尚未填实的占位值，但永远不会被调度。
+
 Pod 容量固定为 Pod1 每卡最多 4 个本项目 trainer、Pod2 每卡最多 3 个。调度器按
 `pod1/gpu0..2 → pod2/gpu0..2` 完成一整圈，才给任一卡放第二条；真实 launch 前用 `nvidia-smi`
-把其他人的 compute process 也保守计入占用。
+把其他人的 compute process 也保守计入占用。并发 `launch-next --execute` 先竞争单控制端全局 scheduler
+`flock`；只有持锁者才重新读取两 Pod 六卡、跳过已有 claim、做 round-robin 选槽并启动，因此同一控制端
+的多个 agent 不会基于同一份旧快照抢同一槽。远端每 GPU 的 boot lock 仍作最后一道容量/claim 检查。
 
 ## 命令
 

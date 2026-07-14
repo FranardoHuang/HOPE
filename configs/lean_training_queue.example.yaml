@@ -18,15 +18,6 @@ pods:
     gpus: [0, 1, 2]
     max_trainers_per_gpu: 3
 
-runner:
-  python: /workspace/hope_isaac_venv/bin/python
-  workdir_relative: hope_training/whole_body_tracking
-  setup_relative: setup_train_env.sh
-  entrypoint_relative: scripts/train.py
-  kit_launcher_relative: scripts/launch_kit_training_locked.sh
-  kit_boot_marker: "[train.py] hard training contract:"
-  kit_boot_timeout_seconds: 900
-
 jobs:
   # Copy this row for one causal question.  Do not make one row cover multiple
   # actions: motion, train bank, and immutable exam are one action-specific unit.

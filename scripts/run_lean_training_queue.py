@@ -12,8 +12,10 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+import fcntl
 import json
 from pathlib import Path
+from pathlib import PurePosixPath
 import re
 import shlex
 import subprocess
@@ -45,6 +47,15 @@ READY = "ready"
 BLOCKED = "blocked"
 TERMINAL = {"complete", "rejected"}
 CONFIRM = "SIM_ONLY_LAUNCH_ONE_LEAN_QUEUE_JOB"
+ZERO_COMMIT = "0" * 40
+GLOBAL_SCHEDULER_LOCK = Path("/tmp/hope_lean_training_queue.global.lock")
+ISAAC_PYTHON = "/workspace/hope_isaac_venv/bin/python"
+WBT_RELATIVE = "hope_training/whole_body_tracking"
+SETUP_RELATIVE = "setup_train_env.sh"
+ENTRYPOINT_RELATIVE = "scripts/train.py"
+KIT_LAUNCHER_RELATIVE = "scripts/launch_kit_training_locked.sh"
+KIT_BOOT_MARKER = "[train.py] hard training contract:"
+KIT_BOOT_TIMEOUT_SECONDS = 900
 
 
 def _mapping(value: Any, label: str) -> dict[str, Any]:
@@ -75,6 +86,19 @@ def _positive_int(value: Any, label: str) -> int:
     return value
 
 
+def _ready_workspace_path(value: Any, label: str) -> str:
+    path = _text(value, label)
+    parsed = PurePosixPath(path)
+    lowered = path.lower()
+    if not parsed.is_absolute() or not path.startswith("/workspace/"):
+        raise QueueError(f"{label} for a ready job must be an absolute /workspace path")
+    if ".." in parsed.parts:
+        raise QueueError(f"{label} for a ready job must not contain ..")
+    if any(token in lowered for token in ("placeholder", "/path/to/", "<", ">")):
+        raise QueueError(f"{label} for a ready job is still a placeholder")
+    return path
+
+
 def load_queue(path: Path) -> dict[str, Any]:
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -102,13 +126,10 @@ def load_queue(path: Path) -> dict[str, Any]:
                 f"{pod_name}.max_trainers_per_gpu must be {expected_capacity}"
             )
 
-    runner = _mapping(queue.get("runner"), "runner")
-    for key in (
-        "python", "entrypoint_relative", "kit_launcher_relative",
-        "workdir_relative", "setup_relative",
-    ):
-        _text(runner.get(key), f"runner.{key}")
-    _text(runner.get("kit_boot_marker"), "runner.kit_boot_marker")
+    if "runner" in queue:
+        raise QueueError(
+            "runner paths are source-pinned; queue YAML must not override setup/train/launcher"
+        )
 
     jobs = _list(queue.get("jobs"), "jobs")
     if not jobs:
@@ -198,6 +219,26 @@ def load_queue(path: Path) -> dict[str, Any]:
             raise QueueError(f"duplicate run_name: {run_name}")
         run_names.add(run_name)
         _text(job.get("run_dir"), f"{job_id}.run_dir")
+        if status == READY:
+            if commit == ZERO_COMMIT:
+                raise QueueError(f"{job_id}.source.commit is an all-zero placeholder")
+            ready_paths = {
+                "source.checkout": source["checkout"],
+                **{
+                    f"motion.{arg}": asset_path
+                    for arg, asset_path in bindings.items()
+                },
+                "bank.train_path": bank["train_path"],
+                "exam.path": exam["path"],
+                "run_dir": job["run_dir"],
+            }
+            normalized = [
+                _ready_workspace_path(path_value, f"{job_id}.{path_label}")
+                for path_label, path_value in ready_paths.items()
+            ]
+            input_paths = normalized[1:-1]
+            if len(set(input_paths)) != len(input_paths):
+                raise QueueError(f"{job_id} has duplicate motion/bank/exam identities")
     return queue
 
 
@@ -326,11 +367,10 @@ def _assign(
 
 
 def _training_argv(queue: dict[str, Any], job: dict[str, Any], gpu: int) -> list[str]:
-    runner = queue["runner"]
     source = job["source"]["checkout"]
-    workdir = f"{source.rstrip('/')}/{runner['workdir_relative']}"
+    workdir = f"{source.rstrip('/')}/{WBT_RELATIVE}"
     argv = [
-        runner["python"], f"{workdir}/{runner['entrypoint_relative']}",
+        ISAAC_PYTHON, f"{workdir}/{ENTRYPOINT_RELATIVE}",
         *job["recipe"]["base"], *job["recipe"]["delta"],
     ]
     for arg, path in job["motion"]["bindings"].items():
@@ -351,9 +391,8 @@ def _training_argv(queue: dict[str, Any], job: dict[str, Any], gpu: int) -> list
 
 
 def _launch_script(queue: dict[str, Any], job: dict[str, Any], slot: Slot) -> str:
-    runner = queue["runner"]
     source = job["source"]["checkout"].rstrip("/")
-    workdir = f"{source}/{runner['workdir_relative']}"
+    workdir = f"{source}/{WBT_RELATIVE}"
     run_dir = job["run_dir"].rstrip("/")
     required = [
         *job["motion"]["bindings"].values(),
@@ -373,7 +412,7 @@ def _launch_script(queue: dict[str, Any], job: dict[str, Any], slot: Slot) -> st
         sort_keys=True,
     ) + "\n"
     train_argv = _training_argv(queue, job, slot.gpu)
-    launcher = f"{workdir}/{runner['kit_launcher_relative']}"
+    launcher = f"{workdir}/{KIT_LAUNCHER_RELATIVE}"
     launch = [
         launcher, f"{run_dir}/run.log", "env",
         f"CUDA_VISIBLE_DEVICES={slot.gpu}", *train_argv,
@@ -388,9 +427,9 @@ test \"$count\" -lt {slot.capacity}
 mkdir -p {shlex.quote(run_dir)}
 ( set -o noclobber; printf %s {shlex.quote(claim)} > {shlex.quote(run_dir + '/queue_claim.json')} )
 cd {shlex.quote(workdir)}
-source {shlex.quote(workdir + '/' + runner['setup_relative'])}
-export KIT_BOOT_MARKER={shlex.quote(runner['kit_boot_marker'])}
-export KIT_BOOT_TIMEOUT_S={int(runner.get('kit_boot_timeout_seconds', 900))}
+source {shlex.quote(workdir + '/' + SETUP_RELATIVE)}
+export KIT_BOOT_MARKER={shlex.quote(KIT_BOOT_MARKER)}
+export KIT_BOOT_TIMEOUT_S={KIT_BOOT_TIMEOUT_SECONDS}
 {shlex.join(launch)}
 """
     return f"flock -n /tmp/hope_lean_queue_gpu{slot.gpu}.lock bash -lc {shlex.quote(body)}"
@@ -438,30 +477,43 @@ def cmd_launch_next(
 ) -> dict[str, Any]:
     if execute and confirm != CONFIRM:
         raise QueueError(f"--execute requires --confirm {CONFIRM}")
-    if execute:
-        occupancy, claims = live_snapshot(queue)
-    else:
+    if not execute:
         occupancy, claims = {slot.name: 0 for slot in slots(queue)}, {}
-    assignments = _assign(queue, occupancy, set(claims))
-    if not assignments:
-        raise QueueError("no ready job fits an available GPU slot")
-    job, slot = assignments[0]
-    remote = _launch_script(queue, job, slot)
-    result = {
-        "mode": "launch-next", "dry_run": not execute,
-        "job_id": job["id"], "action": job["action"], "resource": slot.name,
-        "ssh_argv": [
-            *_ssh_prefix(queue, slot.pod), f"bash -lc {shlex.quote(remote)}"
-        ],
-    }
-    if execute:
-        result["remote_output"] = _run_ssh(
+        assignments = _assign(queue, occupancy, set(claims))
+        if not assignments:
+            raise QueueError("no ready job fits an available GPU slot")
+        job, slot = assignments[0]
+        remote = _launch_script(queue, job, slot)
+        return {
+            "mode": "launch-next", "dry_run": True,
+            "job_id": job["id"], "action": job["action"], "resource": slot.name,
+            "ssh_argv": [
+                *_ssh_prefix(queue, slot.pod), f"bash -lc {shlex.quote(remote)}"
+            ],
+        }
+
+    GLOBAL_SCHEDULER_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with GLOBAL_SCHEDULER_LOCK.open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        # Re-sample all six GPUs only after the global scheduler lock is held.
+        occupancy, claims = live_snapshot(queue)
+        assignments = _assign(queue, occupancy, set(claims))
+        if not assignments:
+            raise QueueError("no ready job fits an available GPU slot")
+        job, slot = assignments[0]
+        remote = _launch_script(queue, job, slot)
+        output = _run_ssh(
             queue,
             slot.pod,
             remote,
-            timeout=int(queue["runner"].get("kit_boot_timeout_seconds", 900)) + 60,
+            timeout=KIT_BOOT_TIMEOUT_SECONDS + 60,
         )
-    return result
+        return {
+            "mode": "launch-next", "dry_run": False,
+            "job_id": job["id"], "action": job["action"], "resource": slot.name,
+            "scheduler_lock": str(GLOBAL_SCHEDULER_LOCK),
+            "remote_output": output,
+        }
 
 
 def _parser() -> argparse.ArgumentParser:
