@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "result_id": "phase1-post-swing-teacher-control-model500-capture-attempt-v1-result-20260715",
+  "status": "blocked_preclaim_hydra_compose",
+  "simulation_only": true,
+  "preregistration": {
+    "plan_id": "phase1-post-swing-teacher-control-model500-capture-20260715-v1",
+    "git_commit": "d5e16644f7254a2bf3301da961282da124c51c75",
+    "file_sha256": "c51e3ba224a7dbbffa6176fd2da03456c8e13f16b705a48392c18fdbd55a6713"
+  },
+  "pod": "pod2",
+  "requested_gpu": 1,
+  "source_provisioning": {
+    "checkout": "/workspace/codexschema/nohope_post_swing_teacher_cd65ed1",
+    "commit": "cd65ed1d1e314d7f31c2df4cd1a57131ff28a902",
+    "clean": true,
+    "ignored_a3_file_count": 46,
+    "ignored_a3_total_file_bytes": 15378264,
+    "ignored_a3_tree_content_sha256": "0137f59b1fe45e7d5f8fa731bedca905f5466bc98e8d1354081fe071d60426c6"
+  },
+  "preclaim_result": {
+    "stage": "hydra_compose",
+    "returncode": 1,
+    "error": "Could not override 'checkpoint_tolerant': key is absent from the play config",
+    "launch_root": "/workspace/codexschema/phase1_post_swing_teacher_20260715/launch/control_model500_v1",
+    "capture_output": "/workspace/codexschema/phase1_post_swing_teacher_20260715/capture/control_model500_v1",
+    "capture_output_lexists": false,
+    "capture_claim_created": false,
+    "capture_process_started": false,
+    "ppo_updates": 0,
+    "gpu_work_started": false
+  },
+  "evidence": {
+    "prereg_copy_sha256": "c51e3ba224a7dbbffa6176fd2da03456c8e13f16b705a48392c18fdbd55a6713",
+    "prelaunch_receipt_sha256": "ac3ee49457ed988fd4b3beed9b1a689f650894d56f910e4a0a675e93bd4e27dc",
+    "derived_runtime_argv_sha256": "842154730d7bec49cf33145b2c3e2ef2e16de794973e7f8b7e8ea1056101b4a8",
+    "hydra_compose_log_sha256": "6506df4c60980bab6ca8fa8e651d605afed516387d134440b61ed6f8826b410a",
+    "failure_record_sha256": "bcf40f72035abbf36dd2e2255ec085149c77e40e4dc0b243fcc13d8a405b0ae6"
+  },
+  "root_cause": {
+    "primary": "v1 derivation removed checkpoint_path but retained three train-only checkpoint compatibility keys that cfg/play.yaml does not define",
+    "retained_train_only_keys": [
+      "checkpoint_tolerant",
+      "checkpoint_allow_missing_contract",
+      "checkpoint_allow_contract_mismatch"
+    ],
+    "additional_source_gap_found_before_retry": "cfg/play.yaml has no seed field and play.py does not assign the frozen training seed to env_cfg or agent_cfg"
+  },
+  "decision": {
+    "v1_retry_forbidden": true,
+    "v1_capture_authorized": false,
+    "v1_attestation_authorized": false,
+    "v1_first_reset_probe_authorized": false,
+    "v1_scientific_training_authorized": false,
+    "successor_requires_new_source_commit": true,
+    "successor_requires_new_output_namespace": true,
+    "successor_must_remove_all_train_only_checkpoint_keys": true,
+    "successor_must_bind_and_apply_seed": true
+  }
+}

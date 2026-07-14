@@ -75,10 +75,12 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `v_des`，并非始终让 raw speed 更低；尾窗 raw-kernel-per-eligible 反而提升 `1.6003×`。因此不改写
   verdict，但后续必须先用 `|v_base-v_des|` 的近/中/远分桶重做量尺，不能复制当前 weight=`1`。
 
-  连续恢复当前最短关键路径转为共享外生 teacher：exact main source、fresh control `model_500`、动作、题库、
-  A3 tree、Pod2 GPU1、4096 条 natural-wrap state 与 20000 inference-step 上限已经在结果前机器预注册。
-  当前只授权一次 inference capture；attestation、首 reset readback、科学 pair、第二 seed 与 judge 仍逐门
-  fail closed。Pod2 GPU1/GPU2 在 clean pair 终档后已自然释放；GPU0 继续只归 Yikang。
+  连续恢复当前最短关键路径转为共享外生 teacher。v1 已在结果前绑定 fresh control `model_500`、动作、题库、
+  A3 tree、Pod2 GPU1、4096 条 natural-wrap state 与 20000 inference-step 上限，但运行时派生器在 Hydra
+  compose 阶段因遗留 train-only checkpoint 键 fail closed；capture directory/claim/process/GPU work 都未
+  创建。源码复核还发现 play 没有实际应用冻结 seed。v1 不重发；当前先合 seed parity、删全 train-only 键，
+  再用新 source/output namespace 预注册 v2。attestation、首 reset、科学 pair、第二 seed 与 judge 仍逐门
+  fail closed。Pod2 GPU1/GPU2 当前空；GPU0 继续只归 Yikang。
 
   Fresh C 的五条单 seed 机制格均已越过 `+500` 且 checkpoint
   finite/contract/lineage 正确。V1+V2 出现当前最强击球精度信号（composite `0.0893`、normal pass

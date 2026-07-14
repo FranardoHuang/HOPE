@@ -299,6 +299,13 @@ root linear/angular velocity 上限分别冻结为 `2.0 m/s` / `4.0 rad/s`。两
 科学 pair、第二 seed、judge、promotion 和硬件仍全部未授权。timeout/partial/失败 reset 不能补齐样本，也不能
 复用同一 namespace 重发。
 
+实际 v1 在创建 capture directory/claim/process 前的 Hydra compose fail closed：训练 argv 派生时虽然删除了
+`checkpoint_path`，却遗漏 `checkpoint_tolerant`、`checkpoint_allow_missing_contract` 与
+`checkpoint_allow_contract_mismatch` 三个只存在于 train 配置的键，play structured config 以 rc1 拒绝。
+进一步 source 审计又发现 play 没有 `seed` 字段，也没有把冻结 training seed 赋给 env/runner。完整证据 SHA
+见 [`phase1_post_swing_teacher_capture_attempt_v1_result_20260715.json`](../../../configs/phase1_post_swing_teacher_capture_attempt_v1_result_20260715.json)。
+v1 不重发；successor 必须先合 seed parity，删全 train-only 键，并使用全新 source/output/launch namespace。
+
 ## 离线复现
 
 本提交不连接 Pod、不写 claim、不运行 probe/trainer/judge：

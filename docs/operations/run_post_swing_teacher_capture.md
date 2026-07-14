@@ -1,10 +1,12 @@
 # 生成随挥结束教师状态制品
 
-状态：**exact capture preregistered / training NO-LAUNCH。** 本操作只用于仿真推理和后续训练 cold-start，
+状态：**v1 preclaim blocked / training NO-LAUNCH。** 本操作只用于仿真推理和后续训练 cold-start，
 绝不下发真机命令。源码专项与攻击负测通过；首个 exact 实例见
 [`phase1_post_swing_teacher_capture_prereg_20260715.json`](../../configs/phase1_post_swing_teacher_capture_prereg_20260715.json)，
-只授权一次 Pod2 GPU1 inference-only capture。4096-environment capture、attestation 和首 reset readback
-probe 尚未完成，因此 scientific trainer、第二 seed、judge 与 promotion 仍未授权。
+但它在 Hydra compose 阶段因保留 train-only checkpoint 兼容键而 fail closed；capture directory、claim、
+process 和 GPU work 均未创建，v1 永久不重发。successor 还必须把冻结 seed 真正赋给 play 的 env/runner，
+用新 source 与新 namespace 重新预注册。4096-environment capture、attestation 和首 reset readback probe
+尚未完成，因此 scientific trainer、第二 seed、judge 与 promotion 仍未授权。
 
 合同真源见 [随挥结束教师状态接口](../interfaces/post_swing_teacher_artifact.md)，当前科学动机见
 [base-deceleration measurement rerun](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)。

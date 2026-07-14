@@ -4,6 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAN = ROOT / "configs/phase1_post_swing_teacher_capture_prereg_20260715.json"
+V1_RESULT = ROOT / "configs/phase1_post_swing_teacher_capture_attempt_v1_result_20260715.json"
 
 
 def test_post_swing_teacher_capture_is_one_shot_and_not_training_authority():
@@ -84,3 +85,20 @@ def test_recipe_derivation_cannot_keep_training_ownership_keys():
         "post_swing_capture_max_steps",
     }
     assert derivation["runtime_hard_contract_must_equal_teacher_checkpoint_hard_contract_before_first_state"] is True
+
+
+def test_v1_compose_failure_is_preclaim_and_cannot_be_replayed():
+    result = json.loads(V1_RESULT.read_text(encoding="utf-8"))
+    assert result["status"] == "blocked_preclaim_hydra_compose"
+    preclaim = result["preclaim_result"]
+    assert preclaim["capture_output_lexists"] is False
+    assert preclaim["capture_claim_created"] is False
+    assert preclaim["capture_process_started"] is False
+    assert preclaim["ppo_updates"] == 0
+    assert preclaim["gpu_work_started"] is False
+    decision = result["decision"]
+    assert decision["v1_retry_forbidden"] is True
+    assert decision["v1_capture_authorized"] is False
+    assert decision["successor_requires_new_source_commit"] is True
+    assert decision["successor_requires_new_output_namespace"] is True
+    assert decision["successor_must_bind_and_apply_seed"] is True

@@ -62,7 +62,10 @@ Follow-up note (2026-07-15, clean base-deceleration terminal and teacher capture
   and root-velocity limits. This authorizes only the one-shot inference capture. Attestation, first-reset
   readback and scientific training remain separate fail-closed gates. See the
   [clean result](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT.md) and
-  [capture operation](../operations/run_post_swing_teacher_capture.md).
+  [capture operation](../operations/run_post_swing_teacher_capture.md). Its v1 runtime derivation then
+  failed closed during Hydra compose, before any capture directory, claim, process or GPU work: three
+  train-only checkpoint compatibility keys were retained, and a follow-up source audit found that play
+  did not apply the frozen seed. V1 is not retried; a new source and namespace are required.
 
 Follow-up note (2026-07-15, clean base-deceleration `+500` treatment rejected; Gate remains `Partial`):
 

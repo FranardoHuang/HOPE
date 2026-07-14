@@ -25,6 +25,9 @@
   exact main source、fresh measurement-control `model_500`、两条动作、schema-3 bank、ignored A3 tree、
   Pod2 GPU1、4096 条 natural-wrap 状态、20000 inference-step 上限和 root 速度上限全部在数据前绑定。
   只授权一次 capture；attestation、首 reset、科学训练、第二 seed 与 judge 仍逐级 fail closed。
+  随后的 v1 Hydra compose 在任何 capture directory/claim/process/GPU work 前 rc1 fail closed：派生器遗漏
+  三个 train-only checkpoint 键；源码复核还发现 play 未实际应用冻结 seed。v1 证据保全且不重发，v2
+  必须合 seed parity、删除 train-only 键并换全新 namespace。
 
 - clean base-decel 的 `model_500` 两份 receipt/finite/fresh/claim/common hard exact，step 0–500 activation
   全过且 480–500 尾窗两臂都有真实 V2/exact-strike 分母。treatment/control 底座速度=`1.13669×`
