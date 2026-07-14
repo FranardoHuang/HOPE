@@ -13,6 +13,13 @@
 
 ## 2026-07-15
 
+- S0/M0 exact-GMR attempt-v2 在 Pod2 clean detached `b75204d` 上再次证明 source/static 合同正常：两份
+  `static-v2` PASS、plan SHA exact，两个 `exact_gmr_v2` root 与 shared consume lock 执行前后均 absent。
+  runtime `inspect` 在进入 consumer 前以 rc127 fail closed，因为合同绑定的
+  `/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10` 连父环境都不存在。没有 GMR 输出，
+  不是动作/脚距失败；两批均不得 consume，正在只读盘点 Pod2 可重建 runtime。见
+  [exact GMR 卷宗](experiments/motion_exact_gmr_s0_m0_20260713.md)。
+
 - clean base-decel 两份 `model_200` receipt 已闭合：checkpoint SHA-256 `6cb55718...94f1` /
   `d61998ac...6892`，76 tensors / 1,762,715 floats 全 finite、fresh lineage/claim/common schema-3 hard
   exact。step 0–200 两臂五个 post-swing counter 每点全零，raw base-decel 两边逐点为正且 weighted

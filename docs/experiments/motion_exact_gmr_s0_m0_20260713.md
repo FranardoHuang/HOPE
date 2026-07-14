@@ -1,7 +1,7 @@
 # S0/M0 exact GMR 与横移末态脚距
 
-- 状态：`preregistered_not_executed`（attempt v1 永久 blocked；attempt v2 source/static gate 通过，
-  runtime `inspect/consume` 未运行）
+- 状态：`runtime blocked / no consume`（attempt v1 永久 blocked；attempt v2 source/static gate 通过，
+  Pod2 `inspect` 因 exact interpreter 不存在而在 consumer 前拒绝）
 - 人类负责人：Franco
 - 执行者：Codex
 - 证据等级：E1（v2 auditable runtime closure、两份 static plan 与 mutation/no-clobber 测试）；尚无 GMR 输出
@@ -26,6 +26,19 @@ S0 与 M0 使用同一份只读 runtime closure，但有不同的 input manifest
 
 原 `20260713` 三份 v1 合同与 `scripts/run_motion_s0_m0_exact_gmr.py` 保持冻结，只用于解释失败；不得再
 执行 v1 `inspect/consume`，也不得复用 `exact_gmr_v1` root。
+
+## attempt v2 Pod2 runtime 负结果
+
+2026-07-15 在 clean detached `b75204d...6f22` 上，两份真实 v2 plan 分别以 exact SHA
+`0746291e...af2f2` / `a810ee01...41f3` 再过 `static-v2`。两个 output root 与 shared consume lock 均
+absent。随后 runtime `inspect` 尚未进入 consumer 就以 rc127 结束：合同绑定的
+`/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10` 不存在，连
+`/workspace/yikang/miniforge3` 父环境也不存在；附近没有可替代的同路径 Python。
+
+失败后两批 output root、lock 仍 absent，source 仍 clean；没有 PT converter、GMR、脚距或动作结果。
+因此这不是 S0/M0 失败，也不授予把其他 Python 偷换进 v2。两批均不具备一次性 consume 资格；下一步
+先只读盘点 Pod2 现有 interpreter、package origins 与可恢复制品，再以全新 v3 绑定一个可重建 runtime，
+或明确等待原 exact runtime 恢复。
 
 consumer 只有 `static`、只读 `inspect` 和一次性 `consume`。`consume` 要求 output root 原先不存在，逐条
 保存 converter output、log、structural audit 和 binding；所有文件 fsync 后，才最后发布

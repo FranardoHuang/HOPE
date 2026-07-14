@@ -16,7 +16,9 @@ consumer/plan、重跑 v1 或复用 v1 root。
 原 16 项 exact GMR closure，并把 234 行、4,702 bytes 的规范化 pip snapshot 本身加入 Git；同时绑定
 `numpy/torch/mujoco/smplx/scipy` 五个直接 import 的 version、origin 与 dist-info `METADATA/RECORD`。
 实际复用的冻结 v1 base consumer 也有独立 bytes/SHA binding，plan/runtime JSON duplicate key 会 fail closed。
-两份 host `static-v2` 已通过；runtime `inspect-v2/consume-v2` 尚未运行。
+两份 host `static-v2` 已通过。2026-07-15 Pod2 的两批 runtime `inspect-v2` 在 consumer 前共同遇到
+rc127：合同绑定的 `/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10` 整棵环境不存在。
+两个 output root 与 shared lock 仍 absent；不得用别的 Python 替代 v2，也不得运行 `consume-v2`。
 
 direct retarget `a3_mocap.xml` 的完整 site inventory 是空列表，且 `left_foot/right_foot` 明确 absent；不得抄
 canonical vendor MJCF 的足点去伪造 retarget site。M0 脚距只在 canonical vendor MJCF 的 `left_foot` 与
@@ -64,7 +66,8 @@ completion 与五条 exact PT，并确认各自 `exact_gmr_v2` root 不存在。
 `PYTHONDONTWRITEBYTECODE=1`，不创建 output/state/report。S0/M0 分开 inspect，一批失败不改变另一批。
 若 shared consume lock 已存在，inspect 只读验证它是 single-link regular file 且 marker 精确；lock absent 也
 合法，inspect 绝不创建 lock。
-本次 source 闭环没有执行这两条命令；必须在 code review/合入并得到独立 runtime 授权后另行运行。
+这两条命令已在 Pod2 真实尝试，但都在解释器启动前按上节 rc127 结束，未进入 consumer。只有 exact
+runtime 恢复，或另建并审过一个完整绑定 interpreter/package origins 的 v3，才可重新获得 inspect 权限。
 
 ## 3. 一次性 consume
 

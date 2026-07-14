@@ -51,7 +51,9 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   vendor L1 整轨自碰/球拍自打；桌网、动力学、RL 和真机仍未授权。
   高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
   canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。exact GMR runtime source gate 也已进入
-  `main` 并通过全回归；Pod 上的 `inspect/consume` 尚未执行，所以还不是“动作会打球”。
+  `main` 并通过全回归；Pod2 的 v2 runtime `inspect` 已尝试，但在 consumer 前因合同写死的
+  `/workspace/yikang/.../python3.10` 整棵环境不存在而 rc127 fail closed。两批 output root 与 shared lock
+  仍 absent，不是动作失败；正在盘点可重建的 Pod2 runtime，`consume`/schema-2/训练继续 blocked。
 - **当前运行态：** 2026-07-15，V1+V2×base-decel fresh v4 两臂已收口。两份 `model_500` 都通过
   filename=embedded、finite、fresh lineage、claim 与同 hard-contract attestation，checkpoint SHA-256 为
   `22f78f88...a6a` / `a1735fbb...c14`。但冻结的 `480–500` 窗内 control post-swing
@@ -498,7 +500,8 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 
 - **[1｜P0] Franco 五动作 + 横移老师。** 责任人 franco；执行者 Codex；下一证据：一次性物化反手拉
   B/C 的 schema-2/FK，并补 L0/L1/桌网/动力学证书；同时一次性完成已 finite 的高点拍压 S0 与横移 M0
-  exact GMR，再进入各自 schema-2。挡、拉、高点拍压各用自己的题族；先每个候选一个因果格，不把候选当
+  exact GMR；其 v2 Pod2 inspect 因绑定 runtime 不存在而在 consumer 前拒绝，下一步先闭合可重建的 v3
+  runtime，再进入各自 schema-2。挡、拉、高点拍压各用自己的题族；先每个候选一个因果格，不把候选当
   seed 重复。只有离线证书通过后才分配 RL GPU。
   [旧动作实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)；
   [新动作设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md)
