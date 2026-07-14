@@ -24,6 +24,12 @@
 
 任何一步失败都不删除、覆盖或自动重试科学 namespace，也不产生 receipt。
 
+`fill --execute` 的控制面也只有一条权威远端路径：每臂一次 `_launch_script` SSH，在同一个 per-GPU 短锁
+中按 doctor checks → 容量 → namespace/claim → Kit 顺序执行。standalone `doctor` 仍是无状态诊断入口，
+但不会在 `fill` 中先跑一遍再被 launch 重复；第一遍既未占槽也未写 claim，不能关闭 TOCTOU，只会增加一次
+SSH、Git/module/Hydra compose 的暂态失败面。execute 结果 schema 2 用
+`preflight_mode=embedded_in_atomic_launch` 明示该语义，不再返回独立 `doctor_output`。
+
 ## `run_binding.json` schema 1
 
 外层必须包含 `schema_version=1`、`content` 与 canonical JSON 的 `content_sha256`。`content` 至少绑定：
@@ -97,7 +103,8 @@ python3 -m py_compile \
 bash -n hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh
 ```
 
-当前 focused 结果为 `76 passed`。负测覆盖 fake log dir、binding/receipt overwrite、静态及读中 PID reuse、
+当前 focused 结果为 `76 passed`。负测覆盖每臂单一原子 SSH、内置 doctor 门在容量/claim 前执行、多臂每臂
+各一次 transaction，以及 fake log dir、binding/receipt overwrite、静态及读中 PID reuse、
 source dirty/YAML verifier 漂移、不可达 terminal milestone、warmup/legacy capability 串线、filename/embed
 iteration 错位、nested float/complex NaN、hard-contract SHA 错绑、launch-claim lineage 错绑，以及 full-scene
 probe 的环境数漂移、科学 namespace 串线、错确认词、reserved Pod、placeholder/reuse。

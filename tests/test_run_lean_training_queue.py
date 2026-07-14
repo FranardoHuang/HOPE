@@ -441,7 +441,10 @@ def test_doctor_and_launch_share_exact_claim_bound_argv_before_fresh_claim():
     assert f"mkdir {job['run_dir']}/milestones" in launch_body
     assert f"mkdir -p {job['run_dir']}" not in launch_body
     claim_write = launch_body.index("( set -o noclobber")
+    capacity_check = launch_body.index("count=$(nvidia-smi")
     assert launch_body.index(compose) < claim_write
+    assert launch_body.index(compose) < capacity_check
+    assert capacity_check < launch_body.index(f"mkdir {job['run_dir']}")
     assert launch_body.index(f"mkdir {job['run_dir']}") < claim_write
     assert claim_write < launch_body.rindex(trainer)
     launcher_call = launch_body.index("launch_kit_training_locked.sh")
@@ -812,7 +815,7 @@ def test_boot_warmup_requires_dedicated_confirmation_and_dispatch_slot():
         raise AssertionError("reserved Pod received a boot warmup")
 
 
-def test_fill_is_one_scheduler_sequence_and_stops_before_claim_on_doctor_failure(
+def test_fill_uses_one_atomic_launch_ssh_and_stops_on_embedded_preflight_failure(
     tmp_path, monkeypatch
 ):
     queue = _queue(2)
@@ -824,19 +827,24 @@ def test_fill_is_one_scheduler_sequence_and_stops_before_claim_on_doctor_failure
     def fake_snapshot(_queue):
         return dict(occupancy), dict(claims)
 
-    def fake_ssh(_queue, pod, _remote, **kwargs):
+    def fake_ssh(_queue, pod, remote, **kwargs):
         calls.append((pod, kwargs["phase"]))
-        raise Q.QueueError("doctor failed")
+        rendered = shlex.split(remote)[-1]
+        assert "find_spec" in rendered
+        assert "--cfg job --resolve" in rendered
+        assert rendered.index("--cfg job --resolve") < rendered.index("count=$(nvidia-smi")
+        assert rendered.index("count=$(nvidia-smi") < rendered.index("( set -o noclobber")
+        raise Q.QueueError("embedded preflight failed")
 
     monkeypatch.setattr(Q, "live_snapshot", fake_snapshot)
     monkeypatch.setattr(Q, "_run_ssh", fake_ssh)
     try:
         Q.cmd_fill(queue, execute=True, confirm=Q.CONFIRM, count=2)
     except Q.QueueError as exc:
-        assert "doctor failed" in str(exc)
+        assert "embedded preflight failed" in str(exc)
     else:
-        raise AssertionError("doctor failure was ignored")
-    assert calls == [("pod1", "doctor:job0")]
+        raise AssertionError("embedded launch preflight failure was ignored")
+    assert calls == [("pod1", "launch-first-iteration:job0")]
     assert claims == {}
 
 
@@ -870,15 +878,19 @@ def test_fill_rescans_after_first_iteration_before_next_job(tmp_path, monkeypatc
     monkeypatch.setattr(Q, "live_snapshot", fake_snapshot)
     monkeypatch.setattr(Q, "_run_ssh", fake_ssh)
     result = Q.cmd_fill(queue, execute=True, confirm=Q.CONFIRM, count=2)
+    assert result["result_schema_version"] == 2
     assert [item["resource"] for item in result["launched"]] == [
         "pod1/gpu0", "pod1/gpu1"
     ]
+    assert all(
+        item["preflight_mode"] == "embedded_in_atomic_launch"
+        and "doctor_output" not in item
+        for item in result["launched"]
+    )
     assert calls == [
         "snapshot",
-        "doctor:job0",
         "launch-first-iteration:job0",
         "snapshot",
-        "doctor:job1",
         "launch-first-iteration:job1",
     ]
 

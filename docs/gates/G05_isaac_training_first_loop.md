@@ -1875,6 +1875,12 @@ probe 也会访问 reserved Pod1。P1.2 将该路径收窄为 selected dispatch 
 空 dispatch 或达到容量均 fail closed，远端 fd8 二次容量检查不变；普通 fill 仍使用 all-Pod claim 快照。
 这是 source gate 修复，不是 probe runtime 通过，修复合入前没有创建 run directory/claim/process。
 
+同一轮控制面复核还发现 `fill` 每臂先通过独立 SSH 跑 standalone doctor，随后的 `_launch_script` 又在远端
+短锁内重复完全相同的 source/assets/module/Hydra compose。第一遍既不保留容量也不写 claim，不能提供额外
+安全，却多出一个网络与 compose 失败面。P1.3 删除 execute 路径的前置重复调用；每臂现在只剩一次原子
+launch SSH，且内置 doctor 仍严格位于容量、namespace/claim 与 Kit spawn 之前。standalone doctor/dry-run
+保持不变；这是 source/control-plane gate，不是 Pod runtime 或行为结果，G05 仍为 `Partial`。
+
 #### qdot matched pair `+500` mixed signal
 
 同 source/seed 的 qdot weight `-5/0` 两份 `model_500.pt` 已通过 filename/embed iter、finite、fresh lineage、

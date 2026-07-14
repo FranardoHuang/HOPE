@@ -142,8 +142,13 @@ path；trainer 选定真实日志目录后
 原子写 [`run_binding.json`](../DEFINITIONS.md#trainer-run-binding)，外部代码不得再按 timestamp/glob 猜
 checkpoint 所属目录。这里的 input identity 是路径与语义绑定，不冒充文件内容 SHA。
 pending claim 在 NVML 尚不可见时作为 GPU reservation，terminal/rejected 旧 claim 不占新槽。
-真正批量发射只用一个 `fill` 进程；它持 scheduler lock，逐条 doctor、发射并等到第一个
-`Learning iteration`，然后重新读取 claims/GPU 再决定下一条。不要并发调用多个 `launch-next --execute`。
+真正批量发射只用一个 `fill` 进程；它持 scheduler lock，每臂只发出**一次**远端原子 launch SSH。该
+launch 自身先在远端短锁内完成与 standalone `doctor` 相同的 source/assets/module/Hydra checks，再做容量、
+`mkdir`、claim 与 Kit spawn，并等到第一个 `Learning iteration`；不存在先发一次 standalone doctor、随后
+在 launch 内重复全套 preflight 的第二次 SSH。之后才重新读取 claims/GPU 决定下一条。execute 返回
+`result_schema_version=2`，每条结果以 `preflight_mode=embedded_in_atomic_launch` 明示检查来源，不伪造已经
+删除的 `doctor_output`。独立 `doctor` 命令和 dry-rendered doctor/launch 仍保留给人工诊断。不要并发调用
+多个 `launch-next --execute`。
 
 ## 命令
 
@@ -185,7 +190,8 @@ python3 scripts/run_lean_training_queue.py \
   --execute --confirm SIM_ONLY_LAUNCH_ONE_LEAN_QUEUE_JOB
 ```
 
-`fill` 最多消费 `--count` 条，并在每条 first iteration 后重采现场；`launch-next` 仅保留单条诊断用途。
+`fill` 最多消费 `--count` 条，并在每条 first iteration 后重采现场；每条 execute 只有一次包含内置 doctor
+门的远端 launch transaction，`launch-next` 仅保留单条诊断用途。
 `blocked`、`complete`、`rejected` 永远不会进入候选；
 claim 写入前 run directory 必须由本次 launch 首次创建。预检或 Kit 启动失败后已创建的 namespace/claim
 会保留，禁止自动重试，先诊断再新建明确的后续 job。工具不包含信号、

@@ -83,6 +83,11 @@ Pod2-only 资源合同。P1.2 改为只读 selected dispatch Pod/GPU 的唯一 P
 fail closed；远端 fd8 锁内容量复核保持不变，普通 fill 的跨 Pod claim 防重复语义也不改。源码回归通过前
 probe 保持未发射，不能绕过专用 confirm 直接执行 dry-rendered SSH。
 
+随后对 normal `fill` 的只读复核发现每臂会先建立一次 standalone doctor SSH，紧接着的 atomic launch 又
+执行同一套检查。前者不占槽、不写 claim，也不能消除两次命令间的漂移，只会让不稳定网络或一次 Hydra
+compose 暂态失败提前中断整批。P1.3 将 execute 收敛为每臂一次 launch SSH；source/assets/module/Hydra 门
+仍在该原子 launch 内、并位于容量/claim/Kit 之前。该变更没有点火、没有改变 pair 配方或 probe 授权状态。
+
 旧 pair 保持不可修改的失败证据。新的 `p1r1` pair 已在结果前绑定同一 clean detached
 `main@077e70c`（Pod2 checkout `/workspace/codexschema/nohope_p1_077e70c`），两格均
 `runtime_binding=true`，仍只差 conditional weight `0/-0.4`。当前二者均为 `blocked`：先由 control 配方

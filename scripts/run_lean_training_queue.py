@@ -1461,12 +1461,13 @@ def cmd_fill(
             if not assignments:
                 break
             job, slot = assignments[0]
-            doctor_output = _run_ssh(
-                queue,
-                slot.pod,
-                _doctor_script(queue, job, slot),
-                phase=f"doctor:{job['id']}",
-            )
+            # _launch_script begins with the same fail-closed doctor body and
+            # keeps it under the remote per-GPU lock before capacity, mkdir,
+            # claim, or Kit spawn.  A separate SSH doctor here was therefore
+            # only a duplicate, non-authoritative preflight: it added another
+            # network/config-compose failure surface without closing a TOCTOU
+            # window.  Keep standalone ``doctor`` for explicit diagnostics,
+            # but make each fill attempt one atomic remote transaction.
             launch_output = _run_ssh(
                 queue,
                 slot.pod,
@@ -1478,7 +1479,7 @@ def cmd_fill(
                 {
                     "job_id": job["id"],
                     "resource": slot.name,
-                    "doctor_output": doctor_output,
+                    "preflight_mode": "embedded_in_atomic_launch",
                     "launch_output": launch_output,
                 }
             )
@@ -1486,6 +1487,7 @@ def cmd_fill(
         raise QueueError("no ready job fits an available GPU slot")
     return {
         "mode": "fill",
+        "result_schema_version": 2,
         "dry_run": False,
         "count_limit": count,
         "scheduler_lock": str(GLOBAL_SCHEDULER_LOCK),
