@@ -501,6 +501,16 @@ EXPECTED_OUTPUT_FRAMES = {
 BODY_ORDER_RELATIVE_PATH = "configs/a3_runtime_body_order.txt"
 BODY_ORDER_BYTES = 629
 BODY_ORDER_SHA256 = "1cdae4ba7c8d604428ee69ed4a3059e67fb195b22e1d0e294d509c4325809a3a"
+HISTORICAL_RUNNER_BINDING = {
+    "path": "scripts/run_motion_schema2_fk_consume_once.py",
+    "bytes": 48312,
+    "sha256": "8e66e0508fec5fc3a973f15fd88c469a6da2ea911e0f3125a1229bdee898a447",
+}
+HISTORICAL_SOURCE_GATE_VALIDATOR_BINDING = {
+    "path": "scripts/validate_motion_schema2_fk_consume_activation.py",
+    "bytes": 24955,
+    "sha256": "3798122b110571b52909b7f8caedc00dc0898415ffc4653881bcee9dd8b3b536",
+}
 NPZ_FIELDS = {
     "fps",
     "joint_pos",
@@ -516,8 +526,123 @@ NPZ_FIELDS = {
 }
 
 
-def _expected_body_names(activation: Mapping[str, Any]) -> tuple[str, ...]:
-    path = Path(activation["source_checkout"]["path"]) / BODY_ORDER_RELATIVE_PATH
+def _validate_portable_source_context(
+    activation: Mapping[str, Any], value: Any
+) -> tuple[Path, dict[str, Any], dict[str, Any]]:
+    """Validate an explicit current checkout used to replay historical output.
+
+    The checkout recorded by the irreversible activation/claim remains provenance.  A portable
+    replay must explicitly name a separate current, detached, clean checkout and bind both the
+    current validator runner and the runtime body-order file.  There is deliberately no fallback
+    from this mode to the historical absolute path.
+    """
+
+    context = gate.exact_keys(
+        value,
+        {
+            "current_checkout",
+            "current_runner",
+            "current_source_gate_validator",
+            "runtime_body_order",
+            "recorded_source_checkout",
+        },
+        "portable source context",
+    )
+    recorded = gate.exact_keys(
+        context["recorded_source_checkout"],
+        set(activation["source_checkout"]),
+        "portable recorded source checkout",
+    )
+    if recorded != activation["source_checkout"]:
+        raise OneShotRunnerError(
+            "portable source context differs from activation source provenance"
+        )
+    if activation.get("runner") != HISTORICAL_RUNNER_BINDING:
+        raise OneShotRunnerError("historical activation runner provenance changed")
+    if (
+        activation.get("source_gate_validator")
+        != HISTORICAL_SOURCE_GATE_VALIDATOR_BINDING
+    ):
+        raise OneShotRunnerError(
+            "historical activation source-validator provenance changed"
+        )
+
+    checkout = gate.exact_keys(
+        context["current_checkout"],
+        {"path", "commit", "detached", "clean"},
+        "portable current checkout",
+    )
+    if (
+        not isinstance(checkout["path"], str)
+        or not Path(checkout["path"]).is_absolute()
+        or not isinstance(checkout["commit"], str)
+        or len(checkout["commit"]) != 40
+        or checkout["detached"] is not True
+        or checkout["clean"] is not True
+    ):
+        raise OneShotRunnerError("portable current checkout identity is malformed")
+    root = Path(checkout["path"])
+    actual_checkout = validate_detached_clean_checkout(root, checkout["commit"])
+    if actual_checkout != checkout:
+        raise OneShotRunnerError("portable current checkout evidence changed")
+
+    runner = gate.exact_keys(
+        context["current_runner"], {"path", "bytes", "sha256"},
+        "portable current runner",
+    )
+    runner_actual = _verify_binding_at_root(runner, root, "portable current runner")
+    if (
+        runner["path"] != HISTORICAL_RUNNER_BINDING["path"]
+        or runner_actual["bytes"] != runner["bytes"]
+        or runner_actual["sha256"] != runner["sha256"]
+    ):
+        raise OneShotRunnerError("portable current runner binding changed")
+
+    source_validator = gate.exact_keys(
+        context["current_source_gate_validator"],
+        {"path", "bytes", "sha256"},
+        "portable current source validator",
+    )
+    source_validator_actual = _verify_binding_at_root(
+        source_validator, root, "portable current source validator"
+    )
+    if (
+        source_validator["path"]
+        != HISTORICAL_SOURCE_GATE_VALIDATOR_BINDING["path"]
+        or source_validator_actual["bytes"] != source_validator["bytes"]
+        or source_validator_actual["sha256"] != source_validator["sha256"]
+    ):
+        raise OneShotRunnerError("portable current source-validator binding changed")
+
+    body_order = gate.exact_keys(
+        context["runtime_body_order"], {"path", "bytes", "sha256"},
+        "portable runtime body order",
+    )
+    body_actual = _verify_binding_at_root(
+        body_order, root, "portable runtime body order"
+    )
+    if (
+        body_order["path"] != BODY_ORDER_RELATIVE_PATH
+        or body_order["bytes"] != BODY_ORDER_BYTES
+        or body_order["sha256"] != BODY_ORDER_SHA256
+        or body_actual["bytes"] != BODY_ORDER_BYTES
+        or body_actual["sha256"] != BODY_ORDER_SHA256
+    ):
+        raise OneShotRunnerError("portable runtime body-order binding changed")
+    return root / BODY_ORDER_RELATIVE_PATH, runner_actual, source_validator_actual
+
+
+def _expected_body_names(
+    activation: Mapping[str, Any],
+    *,
+    portable_source_context: Mapping[str, Any] | None = None,
+) -> tuple[str, ...]:
+    if portable_source_context is None:
+        path = Path(activation["source_checkout"]["path"]) / BODY_ORDER_RELATIVE_PATH
+    else:
+        path, _runner, _source_validator = _validate_portable_source_context(
+            activation, portable_source_context
+        )
     _ensure_regular_file(path, "bound runtime body order")
     actual = binding(path)
     if actual["bytes"] != BODY_ORDER_BYTES or actual["sha256"] != BODY_ORDER_SHA256:
@@ -553,7 +678,8 @@ def _scalar_text(value: Any, label: str) -> str:
 
 
 def _validate_schema2_npz(
-    activation: Mapping[str, Any], asset: str, path: Path
+    activation: Mapping[str, Any], asset: str, path: Path, *,
+    portable_source_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate the NPZ contents, not merely the report's file hash."""
 
@@ -581,7 +707,9 @@ def _validate_schema2_npz(
         "body_lin_vel_w": (frames, 32, 3),
         "body_ang_vel_w": (frames, 32, 3),
     }
-    expected_names = _expected_body_names(activation)
+    expected_names = _expected_body_names(
+        activation, portable_source_context=portable_source_context
+    )
     try:
         with np.load(path, allow_pickle=False) as data:
             if set(data.files) != NPZ_FIELDS or len(data.files) != len(NPZ_FIELDS):
@@ -639,7 +767,8 @@ def _validate_schema2_npz(
 
 
 def validate_materialized_output(
-    activation: Mapping[str, Any], asset: str
+    activation: Mapping[str, Any], asset: str, *,
+    portable_source_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     row = activation["assets"][asset]
     output_root = Path(row["output_root"])
@@ -654,7 +783,12 @@ def validate_materialized_output(
     _ensure_regular_file(motion_path, "schema2 NPZ")
     report, report_binding = _read_strict_file(report_path, "schema2 report")
     motion_binding = binding(motion_path)
-    npz = _validate_schema2_npz(activation, asset, motion_path)
+    npz = _validate_schema2_npz(
+        activation,
+        asset,
+        motion_path,
+        portable_source_context=portable_source_context,
+    )
     expected_keys = {
         "schema_version", "status", "completed_utc", "scope", "asset_id", "preregistration",
         "shared_runtime", "source_motion", "source_materialization_report", "donor",
@@ -1029,7 +1163,59 @@ def execute_once(
 
 
 def _load_contract(path: Path, expected_sha: str):
+    """Load the original consume contract in its native same-checkout mode."""
+
     return gate.load_validated_contract(path.resolve(), expected_sha)
+
+
+def load_validated_contract_portably(
+    path: Path,
+    expected_sha: str,
+    portable_source_context: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Load frozen activation bytes while validating with an explicit current source.
+
+    The activation's old runner binding is immutable provenance because the irreversible claim and
+    completion ledger bind those bytes.  The supplied current runner is independently content-bound
+    and may validate that historical result only after the current checkout/body-order context and
+    the recorded historical source tuple have all passed.  Native loading never enters this path.
+    """
+
+    activation, activation_bytes, activation_sha = gate.read_bound_json(
+        path.resolve(), expected_sha, "consume activation"
+    )
+    _body_order, _current_runner, _current_source_validator = _validate_portable_source_context(
+        activation, portable_source_context
+    )
+    receipt_binding = gate.exact_keys(
+        activation.get("inspection_receipt"),
+        {"path", "bytes", "sha256"},
+        "inspection receipt binding",
+    )
+    current_root = Path(portable_source_context["current_checkout"]["path"])
+    receipt_path = current_root / str(receipt_binding["path"])
+    receipt, receipt_bytes, _receipt_sha = gate.read_bound_json(
+        receipt_path, str(receipt_binding["sha256"]), "inspection receipt"
+    )
+    if receipt_bytes != receipt_binding["bytes"]:
+        raise OneShotRunnerError("inspection receipt byte binding changed")
+    gate.validate_receipt(receipt, repo_root=current_root)
+
+    # The irreversible claim binds the original activation bytes, so portable validation must not
+    # synthesize a different activation.  Its old runner/source-validator fields remain provenance
+    # and are proven against the commit that authored that activation.  The independently bound
+    # current runner/source-validator above are the code that performs this replay.
+    gate.validate_activation(
+        activation,
+        receipt,
+        repo_root=current_root,
+        historical_binding_commit=gate.ACTIVATION_CONTRACT_COMMIT,
+    )
+    return activation, receipt, {
+        "path": str(path.resolve()),
+        "bytes": activation_bytes,
+        "sha256": activation_sha,
+    }
 
 
 def run_asset(
@@ -1076,7 +1262,8 @@ def run_asset(
 
 def validate_formal_result(
     activation: Mapping[str, Any], receipt: Mapping[str, Any], asset: str,
-    activation_meta: Mapping[str, Any]
+    activation_meta: Mapping[str, Any], *,
+    portable_source_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     paths = _attempt_paths(activation, asset)
     if _lexists(paths.failure):
@@ -1125,7 +1312,11 @@ def validate_formal_result(
     }
     if success["authorization"] != expected_authorization:
         raise OneShotRunnerError("success ledger over-authorizes a downstream gate")
-    output = validate_materialized_output(activation, asset)
+    output = validate_materialized_output(
+        activation,
+        asset,
+        portable_source_context=portable_source_context,
+    )
     if success["output"] != output:
         raise OneShotRunnerError("success ledger does not bind the current NPZ/report")
     return {"claim": claim_binding, "success": success_binding, "output": output}

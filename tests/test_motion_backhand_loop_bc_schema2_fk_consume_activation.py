@@ -42,7 +42,11 @@ def _validated() -> tuple[dict, dict]:
     receipt = _json(RECEIPT)
     activation = _json(ACTIVATION)
     V.validate_receipt(receipt)
-    V.validate_activation(activation, receipt)
+    V.validate_activation(
+        activation,
+        receipt,
+        historical_binding_commit=V.ACTIVATION_CONTRACT_COMMIT,
+    )
     return receipt, activation
 
 
@@ -58,6 +62,72 @@ def _capture(stdout: str = "", stderr: str = "", returncode: int = 0) -> dict:
         "stderr_bytes": len(err),
         "stderr_sha256": hashlib.sha256(err).hexdigest(),
     }
+
+
+def test_native_consume_loader_does_not_adopt_the_new_runner():
+    receipt, activation = _validated()
+    with pytest.raises(V.ActivationContractError, match="binding changed"):
+        V.validate_activation(activation, receipt)
+    with pytest.raises(V.ActivationContractError, match="binding changed"):
+        R._load_contract(ACTIVATION, V.sha256_file(ACTIVATION))
+
+
+def test_portable_historical_commit_is_exact_not_caller_selected():
+    receipt, activation = _validated()
+    with pytest.raises(
+        V.ActivationContractError,
+        match="not the frozen contract commit",
+    ):
+        V.validate_activation(
+            activation,
+            receipt,
+            historical_binding_commit="0" * 40,
+        )
+
+
+def test_portable_loader_preserves_frozen_activation_bytes(monkeypatch):
+    expected_activation = _json(ACTIVATION)
+    expected_receipt = _json(RECEIPT)
+    context = {
+        "current_checkout": {"path": str(ROOT)},
+        "current_runner": {"path": "runner", "bytes": 1, "sha256": "0" * 64},
+        "current_source_gate_validator": {
+            "path": "validator",
+            "bytes": 1,
+            "sha256": "0" * 64,
+        },
+        "runtime_body_order": {"path": "body", "bytes": 1, "sha256": "0" * 64},
+        "recorded_source_checkout": expected_activation["source_checkout"],
+    }
+    monkeypatch.setattr(
+        R,
+        "_validate_portable_source_context",
+        lambda activation, value: (Path("body"), {"path": "runner"}, {"path": "validator"}),
+    )
+    monkeypatch.setattr(R.gate, "validate_receipt", lambda receipt, *, repo_root: None)
+    calls = []
+
+    def capture_activation(activation, receipt, **kwargs):
+        calls.append((copy.deepcopy(activation), copy.deepcopy(receipt), kwargs))
+
+    monkeypatch.setattr(R.gate, "validate_activation", capture_activation)
+    activation, receipt, _meta = R.load_validated_contract_portably(
+        ACTIVATION,
+        V.sha256_file(ACTIVATION),
+        context,
+    )
+    assert activation == expected_activation
+    assert receipt == expected_receipt
+    assert calls == [
+        (
+            expected_activation,
+            expected_receipt,
+            {
+                "repo_root": ROOT,
+                "historical_binding_commit": V.ACTIVATION_CONTRACT_COMMIT,
+            },
+        )
+    ]
 
 
 def _paths(tmp_path: Path) -> R.AttemptPaths:
@@ -617,6 +687,16 @@ def test_exact_synthetic_npz_claim_and_completion_last_lineage_pass(tmp_path: Pa
     evidence = R.validate_formal_result(activation, receipt, asset, meta)
     assert evidence["output"]["npz"]["kinematics_schema_version"] == 2
     assert evidence["output"]["npz"]["finite"] is True
+
+
+def test_native_same_root_body_order_validation_is_unchanged(tmp_path: Path):
+    _receipt, activation, _meta, _asset = _synthetic_contract(tmp_path)
+    expected = tuple(
+        line
+        for line in (ROOT / R.BODY_ORDER_RELATIVE_PATH).read_text().splitlines()
+        if line
+    )
+    assert R._expected_body_names(activation) == expected
 
 
 def test_claim_preflight_sha_and_child_capture_are_fail_closed(tmp_path: Path):

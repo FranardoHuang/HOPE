@@ -13,6 +13,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Mapping
@@ -22,6 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 ASSET_IDS = ("franco_backhand_loop_b", "franco_backhand_loop_c")
 INSPECTION_COMMIT = "748b6d5fe24bfe58915c34d8dfe09f254f8e4957"
+ACTIVATION_CONTRACT_COMMIT = "047b0d8ac5b7df48400b33b91092bd1749651012"
 SOURCE_CHECKOUT = "/workspace/codexschema/nohope_schema2_fk_inspect_748b6d5"
 SUCCESS_PYTHON = "/workspace/hope_mjeval_venv/bin/python"
 DONOR_PATH = (
@@ -157,6 +159,59 @@ def require_regular_repo_binding(
     if sha256_file(path) != expected_sha:
         raise ActivationContractError(f"{label} SHA binding changed")
     return path
+
+
+def require_historical_repo_binding(
+    value: Any,
+    label: str,
+    *,
+    repo_root: Path,
+    commit: str,
+    expected_path: str,
+) -> None:
+    """Verify immutable source provenance from the recorded commit, not the current file."""
+
+    binding = exact_keys(value, {"path", "bytes", "sha256"}, label)
+    if binding["path"] != expected_path:
+        raise ActivationContractError(f"{label}.path must equal {expected_path}")
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ActivationContractError(f"{label} historical commit is malformed")
+    environment = os.environ.copy()
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
+    tree = subprocess.run(
+        [
+            "git", "--no-optional-locks", "-C", str(repo_root), "ls-tree",
+            commit, "--", expected_path,
+        ],
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    fields = tree.stdout.decode("utf-8", errors="strict").strip().split(None, 3)
+    if tree.returncode != 0 or len(fields) != 4 or fields[0] not in {"100644", "100755"}:
+        raise ActivationContractError(f"cannot prove regular historical {label}")
+    blob = subprocess.run(
+        [
+            "git", "--no-optional-locks", "-C", str(repo_root), "show",
+            f"{commit}:{expected_path}",
+        ],
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if blob.returncode != 0:
+        raise ActivationContractError(f"cannot read historical {label}")
+    payload = blob.stdout
+    if (
+        type(binding["bytes"]) is not int
+        or len(payload) != binding["bytes"]
+        or hashlib.sha256(payload).hexdigest() != binding["sha256"]
+    ):
+        raise ActivationContractError(f"historical {label} content binding changed")
 
 
 def read_bound_json(path: Path, expected_sha: str, label: str) -> tuple[dict[str, Any], int, str]:
@@ -362,7 +417,11 @@ def expected_child_command(asset: str) -> list[str]:
 
 
 def validate_activation(
-    activation: Mapping[str, Any], receipt: Mapping[str, Any], *, repo_root: Path = REPO_ROOT
+    activation: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+    *,
+    repo_root: Path = REPO_ROOT,
+    historical_binding_commit: str | None = None,
 ) -> None:
     exact_keys(
         activation,
@@ -391,14 +450,38 @@ def validate_activation(
     )
     if strict_json_bytes(receipt_path.read_bytes(), "bound receipt") != receipt:
         raise ActivationContractError("activation-bound receipt differs")
-    require_regular_repo_binding(
-        activation["source_gate_validator"], "source validator", repo_root=repo_root,
-        expected_path=VALIDATOR_PATH,
-    )
-    require_regular_repo_binding(
-        activation["runner"], "one-shot runner", repo_root=repo_root,
-        expected_path=RUNNER_PATH,
-    )
+    if historical_binding_commit is None:
+        require_regular_repo_binding(
+            activation["source_gate_validator"],
+            "source validator",
+            repo_root=repo_root,
+            expected_path=VALIDATOR_PATH,
+        )
+        require_regular_repo_binding(
+            activation["runner"],
+            "one-shot runner",
+            repo_root=repo_root,
+            expected_path=RUNNER_PATH,
+        )
+    else:
+        if historical_binding_commit != ACTIVATION_CONTRACT_COMMIT:
+            raise ActivationContractError(
+                "portable historical activation commit is not the frozen contract commit"
+            )
+        require_historical_repo_binding(
+            activation["source_gate_validator"],
+            "source validator",
+            repo_root=repo_root,
+            commit=historical_binding_commit,
+            expected_path=VALIDATOR_PATH,
+        )
+        require_historical_repo_binding(
+            activation["runner"],
+            "one-shot runner",
+            repo_root=repo_root,
+            commit=historical_binding_commit,
+            expected_path=RUNNER_PATH,
+        )
     if activation["source_checkout"] != {
         "path": SOURCE_CHECKOUT,
         "commit": INSPECTION_COMMIT,
@@ -538,7 +621,11 @@ def validate_activation(
 
 
 def load_validated_contract(
-    activation_path: Path, expected_activation_sha: str, *, repo_root: Path = REPO_ROOT
+    activation_path: Path,
+    expected_activation_sha: str,
+    *,
+    repo_root: Path = REPO_ROOT,
+    historical_binding_commit: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     activation, activation_bytes, activation_sha = read_bound_json(
         activation_path, expected_activation_sha, "consume activation"
@@ -554,7 +641,12 @@ def load_validated_contract(
     if receipt_bytes != receipt_binding["bytes"]:
         raise ActivationContractError("inspection receipt byte binding changed")
     validate_receipt(receipt, repo_root=repo_root)
-    validate_activation(activation, receipt, repo_root=repo_root)
+    validate_activation(
+        activation,
+        receipt,
+        repo_root=repo_root,
+        historical_binding_commit=historical_binding_commit,
+    )
     return activation, receipt, {
         "path": str(activation_path), "bytes": activation_bytes, "sha256": activation_sha
     }
@@ -572,7 +664,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         activation, _receipt, _meta = load_validated_contract(
-            args.activation.resolve(), args.expected_activation_sha256
+            args.activation.resolve(),
+            args.expected_activation_sha256,
+            historical_binding_commit=ACTIVATION_CONTRACT_COMMIT,
         )
         print(
             "[schema2-fk-activation] PASS static schema=v2 runner_exact=true "

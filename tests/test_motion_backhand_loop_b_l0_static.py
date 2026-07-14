@@ -16,6 +16,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/audit_motion_schema2_l0_static.py"
+RUNNER_SCRIPT = ROOT / "scripts/run_motion_schema2_fk_consume_once.py"
 PLAN = ROOT / "configs/motion_backhand_loop_b_l0_static_prereg_20260714.json"
 
 
@@ -29,6 +30,18 @@ def _load_module():
 
 
 L0 = _load_module()
+
+
+def _load_runner():
+    spec = importlib.util.spec_from_file_location("motion_schema2_runner_portable_test", RUNNER_SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+R = _load_runner()
 
 
 def _sha(path: Path) -> str:
@@ -51,6 +64,14 @@ def _portable_lineage_fixture(tmp_path: Path):
     current_path = current_root / canonical
     current_path.parent.mkdir(parents=True)
     current_path.write_bytes(activation_path.read_bytes())
+    for relative in (
+        Path(plan["upstream_contracts"]["consume_runner"]["path"]),
+        Path(plan["upstream_contracts"]["consume_source_gate_validator"]["path"]),
+        Path(plan["upstream_contracts"]["runtime_body_order"]["path"]),
+    ):
+        destination = current_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((ROOT / relative).read_bytes())
     subprocess.run(["git", "init", "-q"], cwd=current_root, check=True)
     subprocess.run(["git", "add", "."], cwd=current_root, check=True)
     subprocess.run(
@@ -151,6 +172,43 @@ def test_plan_binds_exact_runtime_outputs_and_keeps_downstream_closed():
     assert plan["authorization"]["hardware_authorized"] is False
 
 
+def test_dry_run_executes_full_audit_without_publishing_certificate(
+    tmp_path, monkeypatch, capsys
+):
+    plan = _plan()
+    certificate = tmp_path / "must-remain-absent.json"
+    plan["output_contract"]["certificate_path"] = str(certificate)
+    calls = []
+    monkeypatch.setattr(
+        L0,
+        "validate_plan",
+        lambda path, expected_sha: (plan, expected_sha),
+    )
+    monkeypatch.setattr(
+        L0,
+        "build_certificate",
+        lambda received_plan, path, digest: calls.append(
+            (received_plan, path, digest)
+        )
+        or {"status": "synthetic_full_read_only_pass"},
+    )
+    monkeypatch.setattr(
+        L0,
+        "write_certificate_exclusive",
+        lambda *args, **kwargs: pytest.fail("dry-run attempted to publish a certificate"),
+    )
+    digest = "1" * 64
+    assert L0.main(["--prereg", str(PLAN), "--expected-prereg-sha256", digest, "dry-run"]) == 0
+    assert len(calls) == 1
+    assert calls[0][0] is plan
+    assert calls[0][2] == digest
+    assert not certificate.exists()
+    output = capsys.readouterr().out
+    assert "runtime_audit=true" in output
+    assert "certificate_written=false" in output
+    assert "l0_static_complete=false" in output
+
+
 def test_same_activation_bytes_validate_from_a_new_checkout_path(tmp_path):
     plan, activation, receipt, current_meta, claim, current_root, recorded_root = (
         _portable_lineage_fixture(tmp_path)
@@ -158,11 +216,40 @@ def test_same_activation_bytes_validate_from_a_new_checkout_path(tmp_path):
     gate = SimpleNamespace(REPO_ROOT=current_root)
     calls = []
 
-    def validate_formal_result(received_activation, received_receipt, asset, received_meta):
-        calls.append((received_activation, received_receipt, asset, received_meta, gate.REPO_ROOT))
-        return {"portable": True}
+    def validate_formal_result(
+        received_activation,
+        received_receipt,
+        asset,
+        received_meta,
+        *,
+        portable_source_context,
+    ):
+        names = R._expected_body_names(
+            received_activation,
+            portable_source_context=portable_source_context,
+        )
+        calls.append(
+            (
+                received_activation,
+                received_receipt,
+                asset,
+                received_meta,
+                gate.REPO_ROOT,
+                portable_source_context,
+            )
+        )
+        return {"portable": True, "body_count": len(names)}
 
-    runner = SimpleNamespace(gate=gate, validate_formal_result=validate_formal_result)
+    runner = SimpleNamespace(
+        gate=gate,
+        validate_formal_result=validate_formal_result,
+        validate_detached_clean_checkout=R.validate_detached_clean_checkout,
+        _validate_portable_source_context=R._validate_portable_source_context,
+        HISTORICAL_RUNNER_BINDING=R.HISTORICAL_RUNNER_BINDING,
+        HISTORICAL_SOURCE_GATE_VALIDATOR_BINDING=(
+            R.HISTORICAL_SOURCE_GATE_VALIDATOR_BINDING
+        ),
+    )
     result = L0.validate_formal_result_portably(
         runner,
         activation,
@@ -173,9 +260,115 @@ def test_same_activation_bytes_validate_from_a_new_checkout_path(tmp_path):
         claim,
         repo_root=current_root,
     )
-    assert result == {"portable": True}
-    assert calls == [(activation, receipt, L0.ASSET_ID, claim["activation"], recorded_root)]
+    assert result == {"portable": True, "body_count": 32}
+    assert len(calls) == 1
+    assert calls[0][:5] == (
+        activation,
+        receipt,
+        L0.ASSET_ID,
+        claim["activation"],
+        recorded_root,
+    )
+    assert calls[0][5]["recorded_source_checkout"] == activation["source_checkout"]
+    assert not recorded_root.exists()
     assert gate.REPO_ROOT == current_root
+
+
+def test_portable_current_body_order_drift_fails_closed(tmp_path):
+    plan, activation, _receipt, _meta, _claim, current_root, _recorded_root = (
+        _portable_lineage_fixture(tmp_path)
+    )
+    body_order = current_root / plan["upstream_contracts"]["runtime_body_order"]["path"]
+    body_order.write_text(body_order.read_text() + "drift\n")
+    subprocess.run(["git", "add", "."], cwd=current_root, check=True)
+    subprocess.run(
+        [
+            "git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+            "commit", "-qm", "drift body order",
+        ],
+        cwd=current_root,
+        check=True,
+    )
+    with pytest.raises(L0.L0ContractError, match="body order binding changed"):
+        L0.build_portable_source_context(
+            R,
+            plan,
+            activation["source_checkout"],
+            repo_root=current_root,
+        )
+
+
+@pytest.mark.parametrize(
+    "binding_name,error_fragment",
+    [
+        ("consume_runner", "current runner binding changed"),
+        ("consume_source_gate_validator", "source validator binding changed"),
+    ],
+)
+def test_portable_current_validator_code_drift_fails_closed(
+    tmp_path, binding_name, error_fragment
+):
+    plan, activation, _receipt, _meta, _claim, current_root, _recorded_root = (
+        _portable_lineage_fixture(tmp_path)
+    )
+    target = current_root / plan["upstream_contracts"][binding_name]["path"]
+    target.write_text(target.read_text() + "\n# drift\n")
+    subprocess.run(["git", "add", "."], cwd=current_root, check=True)
+    subprocess.run(
+        [
+            "git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+            "commit", "-qm", f"drift {binding_name}",
+        ],
+        cwd=current_root,
+        check=True,
+    )
+    with pytest.raises(L0.L0ContractError, match=error_fragment):
+        L0.build_portable_source_context(
+            R,
+            plan,
+            activation["source_checkout"],
+            repo_root=current_root,
+        )
+
+
+def test_portable_current_wrong_commit_fails_closed(tmp_path):
+    plan, activation, _receipt, _meta, _claim, current_root, _recorded_root = (
+        _portable_lineage_fixture(tmp_path)
+    )
+    context = L0.build_portable_source_context(
+        R,
+        plan,
+        activation["source_checkout"],
+        repo_root=current_root,
+    )
+    context["current_checkout"]["commit"] = "0" * 40
+    with pytest.raises(R.OneShotRunnerError, match="HEAD changed"):
+        R._validate_portable_source_context(activation, context)
+
+
+def test_portable_current_body_order_symlink_fails_closed(tmp_path):
+    plan, activation, _receipt, _meta, _claim, current_root, _recorded_root = (
+        _portable_lineage_fixture(tmp_path)
+    )
+    body_order = current_root / plan["upstream_contracts"]["runtime_body_order"]["path"]
+    body_order.unlink()
+    body_order.symlink_to(ROOT / "configs/a3_runtime_body_order.txt")
+    subprocess.run(["git", "add", "."], cwd=current_root, check=True)
+    subprocess.run(
+        [
+            "git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+            "commit", "-qm", "symlink body order",
+        ],
+        cwd=current_root,
+        check=True,
+    )
+    with pytest.raises(L0.L0ContractError, match="symlink component"):
+        L0.build_portable_source_context(
+            R,
+            plan,
+            activation["source_checkout"],
+            repo_root=current_root,
+        )
 
 
 def test_portable_activation_rejects_content_drift(tmp_path):

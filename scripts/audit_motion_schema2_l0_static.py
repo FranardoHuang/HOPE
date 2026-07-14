@@ -28,6 +28,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
 import zipfile
 from datetime import datetime, timezone
@@ -320,6 +321,7 @@ def validate_plan(plan_path: Path, expected_sha256: str) -> tuple[dict[str, Any]
         {
             "consume_activation",
             "consume_runner",
+            "consume_source_gate_validator",
             "schema2_materializer",
             "schema2_preregistration",
             "shared_schema2_runtime",
@@ -338,6 +340,9 @@ def validate_plan(plan_path: Path, expected_sha256: str) -> tuple[dict[str, Any]
     expected_repo_paths = {
         "consume_activation": "configs/motion_backhand_loop_bc_schema2_fk_consume_activation_20260714.json",
         "consume_runner": "scripts/run_motion_schema2_fk_consume_once.py",
+        "consume_source_gate_validator": (
+            "scripts/validate_motion_schema2_fk_consume_activation.py"
+        ),
         "schema2_materializer": "scripts/materialize_motion_schema2_fk.py",
         "schema2_preregistration": "configs/motion_backhand_loop_b_schema2_fk_prereg_20260714.json",
         "shared_schema2_runtime": "configs/motion_backhand_loop_bc_schema2_fk_runtime_v1.json",
@@ -853,6 +858,73 @@ def _recorded_checkout_root(recorded_path: str, canonical_relative_path: str) ->
     return root
 
 
+def _current_checkout_commit(repo_root: Path) -> str:
+    ensure_no_symlink_components(repo_root, "portable current checkout")
+    environment = os.environ.copy()
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
+    run = subprocess.run(
+        ["git", "--no-optional-locks", "-C", str(repo_root), "rev-parse", "HEAD"],
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        text=True,
+    )
+    commit = run.stdout.strip()
+    if run.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise L0ContractError("cannot bind portable current checkout commit")
+    return commit
+
+
+def build_portable_source_context(
+    runner: Any,
+    plan: Mapping[str, Any],
+    recorded_source_checkout: Mapping[str, Any],
+    *,
+    repo_root: Path = REPO_ROOT,
+) -> dict[str, Any]:
+    """Build the explicit current-source tuple; never fall back to the old absolute root."""
+
+    recorded = exact_keys(
+        recorded_source_checkout,
+        {
+            "path", "commit", "must_be_detached", "must_be_clean_before_and_after",
+            "may_not_be_archive_or_live_a0",
+        },
+        "recorded source checkout",
+    )
+    commit = _current_checkout_commit(repo_root)
+    try:
+        checkout = runner.validate_detached_clean_checkout(repo_root, commit)
+    except Exception as exc:
+        raise L0ContractError(f"portable current checkout is not exact: {exc}") from exc
+    upstream = plan["upstream_contracts"]
+    context = {
+        "current_checkout": checkout,
+        "current_runner": dict(upstream["consume_runner"]),
+        "current_source_gate_validator": dict(
+            upstream["consume_source_gate_validator"]
+        ),
+        "runtime_body_order": dict(upstream["runtime_body_order"]),
+        "recorded_source_checkout": dict(recorded),
+    }
+    try:
+        runner._validate_portable_source_context(
+            {
+                "source_checkout": recorded,
+                "runner": runner.HISTORICAL_RUNNER_BINDING,
+                "source_gate_validator": (
+                    runner.HISTORICAL_SOURCE_GATE_VALIDATOR_BINDING
+                ),
+            },
+            context,
+        )
+    except Exception as exc:
+        raise L0ContractError(f"portable current source context is not exact: {exc}") from exc
+    return context
+
+
 def portable_activation_context(
     plan: Mapping[str, Any],
     activation: Mapping[str, Any],
@@ -929,6 +1001,12 @@ def validate_formal_result_portably(
     recorded_meta, recorded_root = portable_activation_context(
         plan, activation, receipt, current_meta, claim, repo_root=repo_root
     )
+    portable_source_context = build_portable_source_context(
+        runner,
+        plan,
+        activation["source_checkout"],
+        repo_root=repo_root,
+    )
     original_root = runner.gate.REPO_ROOT
     try:
         # The frozen historical runner recorded absolute checkout paths in three redundant lineage
@@ -936,7 +1014,11 @@ def validate_formal_result_portably(
         # internal equalities without requiring that old root to exist or equal this checkout.
         runner.gate.REPO_ROOT = recorded_root
         return runner.validate_formal_result(
-            activation, receipt, asset, recorded_meta
+            activation,
+            receipt,
+            asset,
+            recorded_meta,
+            portable_source_context=portable_source_context,
         )
     finally:
         runner.gate.REPO_ROOT = original_root
@@ -947,9 +1029,31 @@ def validate_upstream_result(plan: Mapping[str, Any]) -> dict[str, Any]:
     runner_path = REPO_ROOT / upstream["consume_runner"]["path"]
     runner = _import_exact("run_motion_schema2_fk_consume_once", runner_path)
     activation_path = REPO_ROOT / upstream["consume_activation"]["path"]
-    activation, receipt, activation_meta = runner._load_contract(
-        activation_path, upstream["consume_activation"]["sha256"]
+    ensure_regular_no_symlink(activation_path, "consume activation")
+    if (
+        activation_path.stat().st_size != upstream["consume_activation"]["bytes"]
+        or sha256_file(activation_path) != upstream["consume_activation"]["sha256"]
+    ):
+        raise L0ContractError("current consume activation binding changed")
+    activation_preview = read_json(activation_path, "consume activation")
+    preview_source = exact_keys(
+        activation_preview.get("source_checkout"),
+        {
+            "path", "commit", "must_be_detached", "must_be_clean_before_and_after",
+            "may_not_be_archive_or_live_a0",
+        },
+        "activation source checkout",
     )
+    portable_source_context = build_portable_source_context(
+        runner, plan, preview_source
+    )
+    activation, receipt, activation_meta = runner.load_validated_contract_portably(
+        activation_path,
+        upstream["consume_activation"]["sha256"],
+        portable_source_context,
+    )
+    if activation != activation_preview:
+        raise L0ContractError("portable activation loader changed frozen activation bytes")
     claim_path = Path(plan["exact_runtime_inputs"]["consume_claim"]["path"])
     ensure_regular_no_symlink(claim_path, "consume claim")
     if sha256_file(claim_path) != plan["exact_runtime_inputs"]["consume_claim"]["sha256"]:
@@ -1229,7 +1333,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prereg", type=Path, required=True)
     parser.add_argument("--expected-prereg-sha256", required=True)
-    parser.add_argument("command", choices=("static", "audit"))
+    parser.add_argument("command", choices=("static", "dry-run", "audit"))
     return parser.parse_args(argv)
 
 
@@ -1247,6 +1351,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if _lexists(output):
             raise L0ContractError(f"certificate path already exists; no-clobber: {output}")
         certificate = build_certificate(plan, args.prereg.resolve(), plan_sha)
+        if args.command == "dry-run":
+            print(
+                f"[motion-l0] PASS dry-run asset={ASSET_ID} runtime_audit=true "
+                "certificate_written=false l0_static_complete=false downstream_blocked=true"
+            )
+            return 0
         write_certificate_exclusive(output, certificate)
         print(
             f"[motion-l0] PASS audit asset={ASSET_ID} l0_static=true "

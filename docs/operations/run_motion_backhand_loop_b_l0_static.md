@@ -6,16 +6,17 @@ source/static pass 不等于真实资产已有 runtime certificate。权威实�
 
 ## 当前授权
 
-当前只有 source/static gate。下面的 runtime 命令必须等分支经 review 合入 main、用该 exact source
-建立 clean detached checkout，并由操作人重新确认四份冻结输入存在且证书路径不存在后才能运行。
-本命令不运行 simulator、trainer、judge、部署或真机。
+当前只授权 Pod2 上的一次 full `dry-run`。它必须等分支经 review 合入 main、用该 exact source 建立
+clean detached checkout，并由操作人重新确认四份冻结输入存在且证书路径不存在后运行。它执行完整
+上游谱系、NPZ 与纯 `mj_forward` 静态审计，但不写 certificate；不运行 dynamics step、trainer、judge、
+部署或真机。C 的一次性 consume 继续禁止。
 
 ## Source/static gate
 
 ```bash
 cd /path/to/clean/nohope
 PLAN=configs/motion_backhand_loop_b_l0_static_prereg_20260714.json
-PLAN_SHA=7118b9cda1d2ec4affb7906d1a330f6c04a85b1d624e894d369b7badefe595a6
+PLAN_SHA=7e155c894dae7b37771487aeb4051bb72cf146088c78bffa7dac437576c97bc0
 
 python3 scripts/audit_motion_schema2_l0_static.py \
   --prereg "$PLAN" \
@@ -49,33 +50,33 @@ test ! -e "$CERT" && test ! -L "$CERT"
 
 不要删除、覆盖或“清理后重跑”已有证书。若路径存在，先保全并审计；no-clobber 是结果合同的一部分。
 
-## Runtime audit（合入并复核后才运行）
+## Pod2 full dry-run（当前唯一远端下一步）
 
-预注册要求 certificate parent 已存在且为真实目录。只在上述只读检查全过后创建一次：
+`dry-run` 不创建 certificate 或其父目录；若 Pod2 上父目录不存在也保持不存在：
 
 ```bash
 export CUDA_VISIBLE_DEVICES=''
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONNOUSERSITE=1
 
-mkdir -p /workspace/codexschema/motion_video_intake_20260711/l0_static_primary_v1
-
 /workspace/hope_mjeval_venv/bin/python \
   scripts/audit_motion_schema2_l0_static.py \
   --prereg configs/motion_backhand_loop_b_l0_static_prereg_20260714.json \
-  --expected-prereg-sha256 7118b9cda1d2ec4affb7906d1a330f6c04a85b1d624e894d369b7badefe595a6 \
-  audit
+  --expected-prereg-sha256 7e155c894dae7b37771487aeb4051bb72cf146088c78bffa7dac437576c97bc0 \
+  dry-run
 ```
 
-成功只代表 exact B NPZ 的离散静态 L0 证书。随后先复算 certificate SHA、检查 JSON 与源码/输入绑定，
-再单独预注册并运行 vendor L1 自碰/球拍自打；不得直接启动桌网、动力学或 RL。
+预期成功行必须同时包含 `runtime_audit=true certificate_written=false l0_static_complete=false`。成功只表示
+exact B NPZ 的完整 L0 只读路径通过；仍没有 certificate，也不授权 vendor L1、桌网、动力学或 RL。
+复核 dry-run 后才可另行授权同计划的 `audit` 发布动作证书。
 
 ## 失败处理
 
 - 2026-07-14 首次调用已在上游 claim 校验阶段、任何运动学检查和 certificate 写入前停止；只创建了
   certificate 父目录。不要把它记成 L0 行为失败，也不要在 portable source 修复合入前重跑。修复只把
-  历史 consume checkout 的绝对路径降为 provenance，仍严格要求 activation bytes/SHA、canonical path、
-  inspected source commit、attempt ID、receipt/runner、NPZ/report、claim/success 全部一致。
+  历史 consume checkout 的绝对路径降为 provenance，仍严格要求 claim 绑定的 activation bytes/SHA 与
+  source tuple、当前 detached-clean source commit/runner/source-validator/body-order、attempt ID、receipt、
+  NPZ/report、claim/success 全部一致；没有历史路径 fallback。
 - 输入、谱系、runtime、MJCF closure 或 compiled collision SHA 不符：保留原件，停止，不改阈值。
 - 关节范围、FK byte equality、支撑脚最低 body 或地面余隙失败：记录 exact frame/value，停止该 B
   动作；这是 internal gate failure，不能自动切换 B 的 frozen fallback。

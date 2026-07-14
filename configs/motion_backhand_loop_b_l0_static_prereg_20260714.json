@@ -8,8 +8,8 @@
   "asset_id": "franco_backhand_loop_b",
   "validator": {
     "path": "scripts/audit_motion_schema2_l0_static.py",
-    "bytes": 52126,
-    "sha256": "ee6ccd46a73324c80fa70e4971fa25747fd778cac243796c1bdf629546ecc171"
+    "bytes": 56203,
+    "sha256": "5970f82bf5cde11ff448e056469f2a7276f2a743f97ed8ed9a287a70dc91b411"
   },
   "exact_runtime_inputs": {
     "motion_npz": {
@@ -37,8 +37,13 @@
     },
     "consume_runner": {
       "path": "scripts/run_motion_schema2_fk_consume_once.py",
-      "bytes": 48312,
-      "sha256": "8e66e0508fec5fc3a973f15fd88c469a6da2ea911e0f3125a1229bdee898a447"
+      "bytes": 55974,
+      "sha256": "e67f78a5b01ae959e68660fd51c330d5acb7c05e42e5d6f5365aa44d447e8b8e"
+    },
+    "consume_source_gate_validator": {
+      "path": "scripts/validate_motion_schema2_fk_consume_activation.py",
+      "bytes": 28084,
+      "sha256": "2883f5f75cdf5539907e65dc3849751f11c47cde4a3db19a4ef351315efd19c7"
     },
     "schema2_materializer": {
       "path": "scripts/materialize_motion_schema2_fk.py",

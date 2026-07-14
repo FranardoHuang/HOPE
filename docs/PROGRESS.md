@@ -13,6 +13,13 @@
 
 ## 2026-07-14
 
+- Franco 反手拉 B 的 L0 portability 根因已做成 fail-closed source 修复：历史 Pod1 checkout 只保留为
+  claim/source provenance，当前 detached-clean commit、runner、source validator 与 runtime body order
+  另行内容绑定，且无旧绝对路径 fallback；原生 consume loader 仍拒绝当前 runner 接管旧 activation，C
+  不消费。新增 full `dry-run` 会跑完整只读 L0 而不写证书，两个专项 `51 passed`；Pod2 尚未运行，G08
+  继续 Partial。见 [L0 卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-L0.md)与
+  [操作](operations/run_motion_backhand_loop_b_l0_static.md)。
+
 - strict receipt 解锁后的 conditional control/treatment 已分别在 Pod2 GPU1/GPU2 越过 first iteration，
   PID=PGID 为 `357023/357679`；尚无 checkpoint 早判或 Reward 结论。紧接着的 interaction control
   PID=PGID `358331` 在 first iteration 前 dynamic URDF import 报
