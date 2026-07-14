@@ -105,6 +105,33 @@ def test_round_robin_fills_six_gpus_one_round_at_a_time_and_honors_caps():
     assert names.count("pod2/gpu0") == 3
 
 
+def test_dispatch_pods_excludes_reserved_pod_but_keeps_round_robin():
+    queue = _queue(8)
+    queue["dispatch_pods"] = ["pod2"]
+    for job in queue["jobs"]:
+        job["resource"] = {"policy": "dispatch_gpu_round_robin"}
+    empty = {slot.name: 0 for slot in Q.slots(queue)}
+    assignments = Q._assign(queue, empty)
+    names = [slot.name for _, slot in assignments]
+    assert names == [
+        "pod2/gpu0", "pod2/gpu1", "pod2/gpu2",
+        "pod2/gpu0", "pod2/gpu1", "pod2/gpu2",
+        "pod2/gpu0", "pod2/gpu1",
+    ]
+    assert all(slot.pod == "pod2" for _, slot in assignments)
+
+
+def test_six_gpu_policy_rejects_restricted_dispatch_set(tmp_path):
+    queue = _queue()
+    queue["dispatch_pods"] = ["pod2"]
+    try:
+        Q.load_queue(_write(tmp_path, queue))
+    except Q.QueueError as exc:
+        assert "six_gpu_round_robin requires both" in str(exc)
+    else:
+        raise AssertionError("reserved Pod was silently admitted by six-GPU policy")
+
+
 def test_duplicate_nvidia_rows_count_one_unique_numeric_pid_per_gpu():
     snapshot = {
         "compute_rows": [
@@ -465,8 +492,9 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
     blocked = [job for job in queue["jobs"] if job["status"] == "blocked"]
     rejected = [job for job in queue["jobs"] if job["status"] == "rejected"]
     assert len(ready) == 6
-    assert len(rejected) == 5
+    assert len(rejected) == 6
     assert blocked == []
+    assert queue["dispatch_pods"] == ["pod2"]
     axis_prefixes = (
         "++task.rewards.free_wrist_vel_mimic=",
         "++task.rewards.motion_scale_in_window=",
@@ -479,7 +507,7 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
         "fresh_c_v1_v2_combined_retry_v2": ("true", "0.25", "0.0", "0.25"),
         "fresh_c_base_deceleration_retry_v2": ("false", "1.0", "1.0", "0.25"),
         "fresh_c_post_swing_replay_half_retry_v2": ("false", "1.0", "0.0", "0.5"),
-        "fresh_c_qdot_limit_hinge_w5": ("false", "1.0", "0.0", "0.25"),
+        "fresh_c_qdot_limit_hinge_w5_retry_v2": ("false", "1.0", "0.0", "0.25"),
     }
     for job in ready:
         assert job["seed"] == 3
@@ -489,7 +517,7 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
         assert job["milestones"] == [200, 500, 1000]
         expected_source = (
             "a6ccdc7a1c696ff37878039f1e1d83dea28a2bfa"
-            if job["id"] == "fresh_c_qdot_limit_hinge_w5"
+            if job["id"] == "fresh_c_qdot_limit_hinge_w5_retry_v2"
             else "4467d79f1ed425a4263f0caaad2f661e1ec737ad"
         )
         assert job["source"]["commit"] == expected_source
@@ -510,7 +538,7 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
             item for item in delta
             if item.startswith("task.rewards.joint_velocity_limit_hinge_margin=")
         ]
-        if job["id"] == "fresh_c_qdot_limit_hinge_w5":
+        if job["id"] == "fresh_c_qdot_limit_hinge_w5_retry_v2":
             assert qdot_weight == ["task.rewards.joint_velocity_limit_hinge_weight=-5.0"]
             assert qdot_margin == ["task.rewards.joint_velocity_limit_hinge_margin=0.85"]
         else:
@@ -519,10 +547,11 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
     plan = Q.cmd_plan(queue, live=False)
     assert len(plan["assignments"]) == 6
     assert [item["resource"] for item in plan["assignments"]] == [
-        "pod1/gpu0", "pod1/gpu1", "pod1/gpu2", "pod2/gpu0", "pod2/gpu1", "pod2/gpu2"
+        "pod2/gpu0", "pod2/gpu1", "pod2/gpu2",
+        "pod2/gpu0", "pod2/gpu1", "pod2/gpu2",
     ]
     retry_ready = [job for job in ready if job["id"].endswith("_retry_v2")]
-    assert len(retry_ready) == 5
+    assert len(retry_ready) == 6
     for attempt1, retry in zip(rejected, retry_ready, strict=True):
         assert retry["recipe"] == attempt1["recipe"]
         assert retry["motion"] == attempt1["motion"]

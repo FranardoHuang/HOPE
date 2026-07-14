@@ -1,7 +1,8 @@
 # 轻量 YAML 训练队列
 
-状态：队列 harness 修复后，五个 `retry-v2` 已越过真实 first iteration 并写出 finite `model_100.pt`；
-第六个 qdot-limit 格已进入 ready 队列。G05 仍为 `Partial`，这不是行为晋级。
+状态：五个机制 `retry-v2` 已越过 `+500`；qdot attempt-1 在第 0 update 的 A3 URDF import 阶段超时并
+保全，只有全新 retry-v2 namespace 可再次调度。P0 harness 已强制 no-Kit Hydra compose、原子 run-dir
+与 canonical claim。G05 仍为 `Partial`，这不是行为晋级。
 
 这个入口解决的是“动作和题库已经决定后，为什么还要手拼一长串命令”。一条 YAML job 必须同时绑定：
 
@@ -10,7 +11,7 @@
 - 一个 clean Git source commit；
 - 公共 base recipe 与本臂唯一 delta；
 - seed、环境数/迭代预算、`+200/+500/+1000` checkpoint milestone；
-- 六 GPU round-robin 资源策略。
+- 一个显式 `dispatch_pods` 调度集合与其 GPU round-robin 资源策略。
 
 它是执行清单，不是第二份优先级账本。job 顺序必须抄自
 [`NOW` 统一队列](../NOW.md#统一工作队列唯一优先级账本)中已经解锁的项目；新科学问题仍先写对应实验记录。
@@ -37,8 +38,10 @@ robot runner。`ready` job 还会在任何 SSH 前拒绝全零 commit、非 `/wo
 重复 input identity；blocked 示例可以保留尚未填实的占位值，但永远不会被调度。run directory 不是
 “存在就复用”：任何已有目录、文件或 symlink 都会让原子创建失败，因此旧日志和 state 不会被覆盖。
 
-Pod 容量固定为 Pod1 每卡最多 4 个本项目 trainer、Pod2 每卡最多 3 个。调度器按
-`pod1/gpu0..2 → pod2/gpu0..2` 完成一整圈，才给任一卡放第二条；真实 launch 前用 `nvidia-smi`
+Pod 容量上限固定为 Pod1 每卡最多 4 个本项目 trainer、Pod2 每卡最多 3 个；但真正可发射的机器由
+`dispatch_pods` 显式收窄。2026-07-14 起 active queue 设为 `[pod2]`，Pod1 全留给 Yikang：调度器仍只读
+Pod1 的旧 claim 以防同一 job 在 Pod2 重复发射，却绝不会把新 assignment 放到 Pod1。Pod2 按
+`gpu0 → gpu1 → gpu2` 完成一整圈，才给任一卡放第二条；真实 launch 前用 `nvidia-smi`
 把其他人的 compute process 也保守计入占用。并发 `launch-next --execute` 先竞争单控制端全局 scheduler
 `flock`；只有持锁者才重新读取两 Pod 六卡、跳过已有 claim、做 round-robin 选槽并启动，因此同一控制端
 的多个 agent 不会基于同一份旧快照抢同一槽。`nvidia-smi` 偶尔会为同一 trainer PID 返回重复行；live
@@ -76,7 +79,8 @@ python3 scripts/run_lean_training_queue.py \
   --queue configs/lean_training_queue.example.yaml launch-next
 ```
 
-`plan --live` / `status --live` 各 Pod 只建立一个低频只读 SSH，读取实际 GPU 占用。`doctor --live`
+`plan --live` / `status --live` 各配置 Pod 只建立一个低频只读 SSH：只把 `dispatch_pods` 的 GPU 计入
+可调度占用，但读取全部旧 claim 防重复。`doctor --live`
 不创建 run directory、claim 或 Kit 进程；它验证 source/assets/exact module origin，并以真实最终 override
 向量执行 `train.py --cfg job --resolve`。只有返回 `hydra=exact-no-kit-compose` 才通过。真正启动前先看
 `fill` dry-run，再用单个 scheduler 进程发射指定上限：

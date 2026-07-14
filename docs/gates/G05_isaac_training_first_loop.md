@@ -1760,6 +1760,16 @@ asset/cache warmup 的 phase marker，因此 G05 保持 `Partial`。复现见
 [操作](../operations/run_lean_training_queue.md)与
 [实验](../experiments/2026-07/EXP-P1-FRESH-C-MECHANISM-ABLATION.md)。
 
+五机制 `+500` 随后证明并非全失败：V1+V2 出现 composite `0.0893` / normal pass `0.268` 的强精度信号，
+但 completion/fall 仍差；V2 单独格 completion `0.176` / pre-fall `0.751`，成为唯一可替换格。五份
+`model_500.pt` 均 finite/contract/lineage 通过。qdot attempt-1 则在第 0 update 的 A3 URDF import 阶段
+停住，900 秒后由 launcher 精确终止 PGID `323083`；没有 hard contract/model，故只作基础设施失败，
+同 recipe 的全新 retry-v2 namespace 才允许重试。G05 仍为 `Partial`。
+
+资源边界随后切换为 Pod2-only：Pod1 的三条 Codex trainer 在 iter `792/782/743` 由 exact PGID `TERM`
+收口，`model_700.pt` 与日志保留，未发 `KILL`；Pod1 复核无 Codex compute process并全部交给 Yikang。
+active queue 的 `dispatch_pods: [pod2]` 是可执行合同，不依赖聊天记忆；旧 Pod1 claim 仍只读防重复。
+
 ### 2026-07-14 31 关节 qdot-limit hinge 源码门
 
 VirtualBall reward stack 新增默认关闭的

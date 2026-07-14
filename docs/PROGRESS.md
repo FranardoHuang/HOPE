@@ -13,6 +13,18 @@
 
 ## 2026-07-14
 
+- Lean queue P0 已把重复/owned Hydra override、control flag/interpolation、run-dir 覆盖与未解析配方挡在
+  claim 前；doctor 用真实最终 argv 做 no-Kit compose，schema-2 canonical claim 自动绑定 source、argv、
+  预算和 motion/bank/exam identity。五机制 `+500` 中 V1+V2 出现 composite `0.0893` / normal pass
+  `0.268`，V2 单独格判可替换；qdot 首次发射在第 0 update 的 A3 URDF import 超时，exact PGID 已由
+  launcher 收口，无 model，按基础设施失败保全并排全新 retry-v2。见
+  [实验](experiments/2026-07/EXP-P1-FRESH-C-MECHANISM-ABLATION.md)与
+  [操作](operations/run_lean_training_queue.md)。
+
+- Pod1 已全部移交 Yikang 冲刺：Codex 三条 trainer 精确 `TERM` 于 iter `792/782/743`，未发 `KILL`，
+  `model_700.pt`/日志保留且复核无剩余 compute process。active queue 新增机器可检验的
+  `dispatch_pods: [pod2]`；新任务只在 Pod2 三卡轮转，同时只读 Pod1 旧 claim 防重复。
+
 - 轻量训练队列的发射前 P0 合同已收紧：recipe 重复/越权/Hydra 控制语法在 SSH 前拒绝，`run_dir`
   全局唯一且只能原子首次创建；standalone doctor 与 launch 共用最终 argv 做 no-Kit
   `train.py --cfg job --resolve`。canonical claim 绑定 source、完整 caller argv、run/预算和三类 input identity，

@@ -16,6 +16,11 @@ pods:
     gpus: [0, 1, 2]
     max_trainers_per_gpu: 3
 
+# Pod1 is reserved for Yikang's sprint from 2026-07-14 onward.  The harness
+# still reads its old claims to prevent duplicate experiments, but may launch
+# new work only on Pod2.
+dispatch_pods: [pod2]
+
 # This is the matched comparison contract, not an extra queue row.  All six
 # ready cells keep fresh initialization, guidance=0, seed=3 and this complete
 # base recipe.  Their only delta is the named mechanism (two deltas for V1+V2).
@@ -135,7 +140,7 @@ x-budget: &budget
   save_interval: 100
 x-milestones: &milestones [200, 500, 1000]
 x-resource: &resource
-  policy: six_gpu_round_robin
+  policy: dispatch_gpu_round_robin
 
 jobs:
   - &v1_free_wrist_attempt1
@@ -300,11 +305,12 @@ jobs:
     run_name: phase1_fresh_c_post_swing_half_seed3_retry_v2_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_post_swing_half_seed3_retry_v2
 
-  - id: fresh_c_qdot_limit_hinge_w5
+  - &qdot_attempt1
+    id: fresh_c_qdot_limit_hinge_w5
     human_name: fresh C plus actual 31-joint qdot-limit tail penalty, weight minus five
     action: *action
-    status: ready
-    blocker: null
+    status: rejected
+    blocker: infrastructure-only attempt reached zero iterations and exact-PGID timed out after 900 seconds inside first A3 URDF import; preserved, never retry this namespace
     motion: *motion
     bank: *bank
     exam: *exam
@@ -324,3 +330,11 @@ jobs:
     resource: *resource
     run_name: phase1_fresh_c_qdot_hinge_w5_seed3_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_qdot_hinge_w5_seed3
+
+  - <<: *qdot_attempt1
+    id: fresh_c_qdot_limit_hinge_w5_retry_v2
+    human_name: fresh C plus actual 31-joint qdot-limit tail penalty, infra retry v2
+    status: ready
+    blocker: null
+    run_name: phase1_fresh_c_qdot_hinge_w5_seed3_retry_v2_20260714
+    run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_qdot_hinge_w5_seed3_retry_v2

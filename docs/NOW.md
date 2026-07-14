@@ -43,15 +43,32 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
   canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。exact GMR runtime source gate 也已进入
   `main` 并通过全回归；Pod 上的 `inspect/consume` 尚未执行，所以还不是“动作会打球”。
-- **当前运行态：** 2026-07-14 08:33 CST，非击球臂 A0/A1 已完成 checkpoint 层闭环。A1 自然退出；
+- **当前运行态：** Fresh C 的五条单 seed 机制格均已越过 `+500` 且 checkpoint
+  finite/contract/lineage 正确。V1+V2 出现当前最强击球精度信号（composite `0.0893`、normal pass
+  `0.268`），但平衡债仍高；V2 单独格明显落后，已列为可替换且不复制 seed。base-decel、V1 和
+  post-swing 保到 `+1000` 看权衡是否收敛。qdot-limit 第一次发射在第 0 update 的 A3 URDF import 阶段
+  超时，launcher 只收口其 exact PGID；无 hard contract/model，因此是基础设施失败而非 reward 失败，
+  相同配方只允许在全新 retry-v2 namespace 重试。
+
+  2026-07-14 19:00 CST 起 Pod1 全部留给 Yikang 冲刺：Codex 的 V1/V2/V1+V2 只对精确 PGID 发出
+  `TERM`，分别停在 iter `792/782/743`，三条 `model_700.pt` 与日志完整保留，未进入 `KILL`；复核 Pod1
+  三卡无 Codex compute process。Codex 后续只使用 Pod2；当前 GPU0/1 的 base-decel/post-swing 继续，
+  GPU2 是 qdot retry-v2 的唯一合法下一槽。机器可读 `dispatch_pods: [pod2]` 已使新 assignment 不可能
+  落到 Pod1，同时只读旧 claim 防止重复发射。
+
+  发射 harness 已在 `main` 收紧：YAML recipe 先拒绝重复/owned key 和 Hydra 控制语法，真实最终 argv 在
+  claim 前做 no-Kit compose，run directory 原子创建，canonical claim digest 自动绑定 source/argv/
+  预算/motion/bank/exam 并进入 checkpoint provenance。下一闭环是 trainer-owned `run_binding.json`、
+  milestone attestor 和每个机制的 activation numerator/denominator。
+
+  非击球臂 A0/A1 已完成 checkpoint 层闭环。A1 自然退出；
   A0 的 `model_1000.pt` 写完后在 Kit/Python teardown 挂起近三小时，正式 failure regex 无命中，终档
   内嵌 iteration `1000`、`1,762,715` 个浮点元素全部 finite、fresh lineage `1`，hard-contract SHA
   与相邻文件一致。它对精确 PGID `1811464` 的 `TERM` 20 秒无响应后，只对同一个单成员 PGID 发出
   `KILL`；没有重启、重发或影响别的进程。既有 v1r1 finalizer 随后通过两臂
   `200/500/1000` 的 filename↔embedded iteration、finite、lineage、hard-contract 与唯一 body-mask
   差异，发布 paired result SHA-256 `30ba716b...d7d9`。结果仍写明 signed K100 尚未判卷、不得晋级或买
-  第二 seed。Pod1、Pod2 六张 GPU 现均无 compute process；两边归档 checkout 仍 clean exact
-  `6d93bcb...480b`。
+  第二 seed。两边归档 checkout 仍保持 clean exact `6d93bcb...480b`。
 
   C2 虽自然终档，但 2026-07-14 的 v1r2 runtime gate 发现它**不是所声明的零摩擦配方**：manifest 写
   `zero_joint_friction=true`，实际 launch argv 没有 `task.plant.zero_joint_friction=true`，相邻 hard
@@ -71,11 +88,11 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   B/C 先补证，高点拍压作为第五动作，v12 只作后续 Jiayi 对照。
 - **Jiayi focus：** v12/dang 路线与 planner-policy 契合；其候选必须在相同挡球专卷和厂商 MuJoCo 中
   与 Franco 主线对照，不能用录制版本号直接晋级。
-- **Yikang focus：** 历史 Gate3 谱系复核与独立 physics/reference oracle；现有证据不替代当前 179-D
-  planner-policy tuple 的 vendor runtime 行为。
-- **Codex 执行：** exact 动作 lineage、B 主选/C 后备的逐层证书、S0/M0 exact GMR 前置、C3/D3
-  零摩擦 L1 修正版与 A2/B2 热启动 source gate、A0/A1 终档/早判、signed-face checkpoint execution
-  contract 和 main 账本；
+- **Yikang focus：** Pod1 冲刺、历史 Gate3 谱系复核与独立 physics/reference oracle；现有证据不替代
+  当前 179-D planner-policy tuple 的 vendor runtime 行为。
+- **Codex 执行：** Pod2-only YAML 发射/里程碑早判 harness、单 seed 机制漏斗与失败槽替换；并行推进 exact
+  动作 lineage、B 主选/C 后备的逐层证书、S0/M0 exact GMR 前置、C3/D3 零摩擦与 signed-face
+  checkpoint execution contract 和 main 账本；
   每通过一层就合 main，不把多个未验层绑成一个大任务。
 
 ## 1. 当前一套训练是怎样完整跑起来的

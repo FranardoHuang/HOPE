@@ -1,8 +1,8 @@
 # Fresh C 单机制首轮消融（2026-07-14）
 
-状态：`Partial`。五个首次发射均为基础设施失败；五个全新 `retry-v2` 已越过真实 first-iteration
-marker 并持续训练。第六个 qdot-limit tail 机制已完成源码门和 machine prereg，等待同一队列调度；尚无
-任何机制的行为晋级结论。
+状态：`Partial`。五个全新 `retry-v2` 已越过 `+500` 并持续训练；第六个 qdot-limit tail 的首次发射
+在第 0 update 的 A3 URDF import 阶段超时，属于基础设施失败，完整 namespace 已保留。相同配方的
+`retry-v2` 已预注册；尚无任何机制的行为晋级结论。
 
 ## 问题与固定对照
 
@@ -71,6 +71,43 @@ qdot 格使用 clean source `a6ccdc7a1c696ff37878039f1e1d83dea28a2bfa`，仍为 
 方向对照不得下降超过 5 个百分点，pre-strike fall 不得恶化超过 2 个百分点。由于旧 control source 没有
 qdot contract 字段，这一格只能 screen；若有正向信号，下一空槽必须在同一 `a6ccdc7` source、同 seed 跑
 weight `0` 的 exact matched control 后才允许作因果采用判断。
+
+## `+500` 方向早判
+
+五条 `model_500.pt` 均 filename=embedded iteration、finite、schema-3 hard-contract SHA 与 fresh lineage
+通过，trainer 无 fatal。所有数字均为 TensorBoard updates `480–500` 的 21 点均值，不使用单点：
+
+- V1 free-wrist：completion `0.692`，pre/post fall `0.203/0.065`，但 position pass 只有 `0.113`；是平衡
+  改善与击球位置退化的混合结果，保到 1000，不复制 seed。
+- V2 quarter-window：completion `0.176`、pre-fall `0.751`、composite `0`；单独机制判为
+  `eligible-to-replace`，不复制 seed。
+- V1+V2：composite `0.0893`、normal pass `0.268`、击球误差约 `1.05 cm / 0.0946 m/s / 6.96°`，是当前
+  唯一强击球质量信号；但 completion `0.391`、pre-fall `0.616`，必须保到 1000 看平衡债是否收敛。
+- base-decel：base speed 比 matched control 低 `13.6%`，completion `0.648`，但 height/upright/position
+  退化；保到 1000，不复制 seed。
+- post-swing `0.5`：completion `0.698`、pre-fall `0.192`、base speed `0.0827 m/s`，但 normal/composite
+  仍为零；缺 realized-start numerator/denominator，暂不能证明 treatment 的实际覆盖率。
+
+matched control 同窗 completion `0.607`、pre/post fall `0.293/0.140`、base speed `0.1133 m/s`。因此本轮
+不是“全部失败”，而是显出击球精度、覆盖和恢复平衡之间的交互；下一版 harness 必须把每个机制的
+activation numerator/denominator 作为必填合同。
+
+### Pod1 资源移交边界
+
+按 Franco 2026-07-14 的冲刺安排，Pod1 从 19:00 CST 起完全留给 Yikang。V1、V2、V1+V2 只对其已记录
+PGID `1895946/1896608/1897260` 发出 `TERM`，自然收口于 iter `792/782/743`；三条最新均为
+`model_700.pt`，claim、launch log 和真实 RSL log directory 均保留，未发 `KILL`。这不是行为淘汰：其
+`+500` 结论仍有效，终档不足 1000 的边界必须保留。后续本卷只在 Pod2 调度，机器合同为
+`dispatch_pods: [pod2]`。
+
+## qdot attempt-1 的基础设施超时
+
+qdot attempt-1 在 Pod2 GPU2 创建唯一 schema-1 claim，PID=PGID `323083`，但日志停在 A3 URDF importer
+的已知 axis warning 后，900 秒内没有第一条 `Learning iteration`、没有 hard contract 或 checkpoint。
+launcher 按合同只终止该 PGID并返回 rc124；其余五臂未受影响。新旧 source 的 ignored A3 tree 均为同一
+46 files / 15,378,264 bytes，逐相对路径与大小一致；因此这不能算 qdot reward 的科学失败，也不能复用
+旧 namespace。完全相同 recipe/source/seed/budget 的 `fresh_c_qdot_limit_hinge_w5_retry_v2` 是唯一允许的
+基础设施重试，并将首次使用 schema-2 canonical claim 与 no-Kit Hydra compose P0 harness。
 
 ## 发射 harness P0 收紧（尚未产生新 run）
 

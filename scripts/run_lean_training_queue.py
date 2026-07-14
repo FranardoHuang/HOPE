@@ -219,6 +219,16 @@ def load_queue(path: Path) -> dict[str, Any]:
                 f"{pod_name}.max_trainers_per_gpu must be {expected_capacity}"
             )
 
+    dispatch_pods_value = queue.get("dispatch_pods", list(pods))
+    dispatch_pods = _list(dispatch_pods_value, "dispatch_pods")
+    if not dispatch_pods:
+        raise QueueError("dispatch_pods must contain at least one Pod")
+    if any(not isinstance(name, str) or name not in pods for name in dispatch_pods):
+        raise QueueError("dispatch_pods may only name configured Pods")
+    if len(dispatch_pods) != len(set(dispatch_pods)):
+        raise QueueError("dispatch_pods must not contain duplicates")
+    queue["dispatch_pods"] = list(dispatch_pods)
+
     if "runner" in queue:
         raise QueueError(
             "runner paths are source-pinned; queue YAML must not override setup/train/launcher"
@@ -301,9 +311,14 @@ def load_queue(path: Path) -> dict[str, Any]:
             raise QueueError(f"{job_id}.milestones must align with save_interval")
 
         resource = _mapping(job.get("resource"), f"{job_id}.resource")
-        if resource != {"policy": "six_gpu_round_robin"}:
+        policy = resource.get("policy")
+        if policy not in {"six_gpu_round_robin", "dispatch_gpu_round_robin"}:
             raise QueueError(
-                f"{job_id}.resource must bind policy six_gpu_round_robin"
+                f"{job_id}.resource must bind a supported round-robin policy"
+            )
+        if policy == "six_gpu_round_robin" and dispatch_pods != list(pods):
+            raise QueueError(
+                f"{job_id}.resource six_gpu_round_robin requires both configured Pods"
             )
         run_name = _text(job.get("run_name"), f"{job_id}.run_name", safe_id=True)
         if run_name in run_names:
@@ -352,8 +367,10 @@ def load_queue(path: Path) -> dict[str, Any]:
 def slots(queue: dict[str, Any]) -> list[Slot]:
     result: list[Slot] = []
     ordinal = 0
-    # One full six-GPU round before any GPU receives its next trainer.
-    for pod_name in ("pod1", "pod2"):
+    # One full round over every dispatch-enabled GPU before any GPU receives
+    # its next trainer.  Disabled Pods remain claim-observable but can never be
+    # selected for a new launch.
+    for pod_name in queue.get("dispatch_pods", list(queue["pods"])):
         pod = queue["pods"][pod_name]
         for gpu in pod["gpus"]:
             result.append(
@@ -398,7 +415,12 @@ def _run_ssh(
 
 
 def live_snapshot(queue: dict[str, Any]) -> tuple[dict[str, int], dict[str, dict[str, Any]]]:
-    """Read GPU occupancy and this queue's claims in one SSH per Pod."""
+    """Read active occupancy and all configured-Pod claims in one SSH per Pod.
+
+    Claims on a dispatch-disabled Pod are still observed so a stopped or
+    reserved experiment cannot be duplicated onto an active Pod.  Its GPU
+    occupancy is deliberately excluded from scheduling.
+    """
 
     occupancy: dict[str, int] = {}
     claims: dict[str, dict[str, Any]] = {}
@@ -466,19 +488,22 @@ for job_id, directory in jobs.items():
 print(json.dumps({{"compute_rows": compute_rows, "gpu_rows": gpu_rows, "jobs": states}}, sort_keys=True))
 """
     command = f"python3 -c {shlex.quote(program)}"
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    pod_names = tuple(queue["pods"])
+    with ThreadPoolExecutor(max_workers=len(pod_names)) as pool:
         outputs = dict(
             zip(
-                ("pod1", "pod2"),
-                pool.map(lambda pod: _run_ssh(queue, pod, command), ("pod1", "pod2")),
+                pod_names,
+                pool.map(lambda pod: _run_ssh(queue, pod, command), pod_names),
             )
         )
-    for pod_name in ("pod1", "pod2"):
+    dispatch_pods = set(queue.get("dispatch_pods", pod_names))
+    for pod_name in pod_names:
         try:
             snapshot = json.loads(outputs[pod_name])
         except json.JSONDecodeError as exc:
             raise QueueError(f"{pod_name} returned malformed live snapshot") from exc
-        occupancy.update(_parse_gpu_occupancy(pod_name, snapshot))
+        if pod_name in dispatch_pods:
+            occupancy.update(_parse_gpu_occupancy(pod_name, snapshot))
         for job_id, state_value in _mapping(
             snapshot.get("jobs"), f"{pod_name}.jobs"
         ).items():
@@ -540,6 +565,8 @@ def _effective_occupancy(
             continue
         slot_name = f"{claim['pod']}/gpu{claim['gpu']}"
         if slot_name not in effective:
+            if claim["pod"] not in queue.get("dispatch_pods", list(queue["pods"])):
+                continue
             raise QueueError(f"claim references unknown GPU slot: {slot_name}")
         effective[slot_name] += 1
     return effective
