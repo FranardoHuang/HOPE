@@ -21,6 +21,12 @@
   不能写成行为非劣。按预注册继续到 +500 只判晚熟，不买 seed/judge/晋级。详见
   [clean main-effect 卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT.md)。
 
+- B 的首次 vendor L1 CPU `dry-run` 在轨迹审计前因 private-name grounding helper 不能由 `sys.path`
+  导入而 fail closed；没有 certificate，不是动作安全失败。harness 已改为按冻结 bytes/SHA 从 exact path
+  事务式加载，执行前后复核 module origin，异常时恢复/清除 `sys.modules`，真实 helper alias 与
+  SHA/stale/body-failure 负例通过。等待合入后 clean runtime 重跑，G08 保持 Partial。详见
+  [B vendor L1 卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1.md)。
+
 - clean base-decel 单变量 pair 已按同一次顺序事务在 Pod2 GPU1/GPU2 越过首迭代：control/treatment
   exact PID=PGID `385320/385948`，claim SHA-256 `a039226a...1746e` / `673bf6c6...9392`；GPU0 的 Yikang
   进程未触碰。04:27 CST 只读复核时 TensorBoard 到 step `106/89`，日志 fatal=0，两臂五个

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import importlib.util
 import json
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +41,114 @@ PHASE_MODULE = _load(PHASE, "motion_phase_safety_dense_test")
 
 def _plan() -> dict:
     return json.loads(PLAN.read_text(encoding="utf-8"))
+
+
+def test_exact_path_loader_registers_private_alias_for_followup_import(tmp_path):
+    """Regression: the vendor-only grounding alias does not exist on sys.path."""
+
+    name = "ground_gmr_pkl_for_vendor_l1_loader_regression"
+    source = tmp_path / "ground_gmr_pkl.py"
+    source.write_text("LOADER_SENTINEL = 'exact-ground'\n", encoding="utf-8")
+    sys.modules.pop(name, None)
+    try:
+        module = L1._load_module(
+            name,
+            source,
+            expected_bytes=source.stat().st_size,
+            expected_sha256=_sha(source),
+            label="synthetic grounding helper",
+        )
+        assert module.LOADER_SENTINEL == "exact-ground"
+        assert Path(module.__file__).resolve() == source.resolve()
+        assert importlib.import_module(name) is module
+    finally:
+        sys.modules.pop(name, None)
+
+
+def test_bound_grounding_helper_loads_under_the_vendor_private_alias():
+    """Focused reproduction of the Pod failure without starting MuJoCo."""
+
+    name = "ground_gmr_pkl_for_vendor_l1"
+    binding = _plan()["dependencies"]["grounding_helper"]
+    source = ROOT / binding["path"]
+    missing = object()
+    previous = sys.modules.get(name, missing)
+    try:
+        module = L1._load_module(
+            name,
+            source,
+            expected_bytes=binding["bytes"],
+            expected_sha256=binding["sha256"],
+            label="grounding helper",
+        )
+        assert Path(module.__file__).resolve() == source.resolve()
+        assert importlib.import_module(name) is module
+        assert callable(module.bind_model)
+    finally:
+        if previous is missing:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = previous
+
+
+def test_exact_path_loader_rejects_binding_drift_without_replacing_stale_module(tmp_path):
+    name = "vendor_l1_binding_drift_regression"
+    source = tmp_path / "helper.py"
+    source.write_text("VALUE = 'new'\n", encoding="utf-8")
+    stale = types.ModuleType(name)
+    stale.VALUE = "stale"
+    sys.modules[name] = stale
+    try:
+        with pytest.raises(L1.VendorL1Error, match="content binding changed before import"):
+            L1._load_module(
+                name,
+                source,
+                expected_bytes=source.stat().st_size,
+                expected_sha256="0" * 64,
+                label="synthetic helper",
+            )
+        assert sys.modules[name] is stale
+    finally:
+        sys.modules.pop(name, None)
+
+
+def test_exact_path_loader_restores_previous_module_after_body_failure(tmp_path):
+    name = "vendor_l1_failed_body_regression"
+    source = tmp_path / "broken_helper.py"
+    source.write_text("raise RuntimeError('synthetic import failure')\n", encoding="utf-8")
+    stale = types.ModuleType(name)
+    stale.VALUE = "caller-owned"
+    sys.modules[name] = stale
+    try:
+        with pytest.raises(L1.VendorL1Error, match="synthetic import failure"):
+            L1._load_module(
+                name,
+                source,
+                expected_bytes=source.stat().st_size,
+                expected_sha256=_sha(source),
+                label="synthetic broken helper",
+            )
+        assert sys.modules[name] is stale
+    finally:
+        sys.modules.pop(name, None)
+
+
+def test_exact_path_loader_removes_half_module_after_body_failure_without_predecessor(
+    tmp_path,
+):
+    name = "vendor_l1_failed_body_no_predecessor_regression"
+    source = tmp_path / "broken_helper.py"
+    source.write_text("raise RuntimeError('synthetic import failure')\n", encoding="utf-8")
+    sys.modules.pop(name, None)
+    with pytest.raises(L1.VendorL1Error, match="synthetic import failure"):
+        L1._load_module(
+            name,
+            source,
+            expected_bytes=source.stat().st_size,
+            expected_sha256=_sha(source),
+            label="synthetic broken helper",
+        )
+    assert name not in sys.modules
 
 
 def test_static_gate_binds_exact_l0_certificate_npz_model_runtime_and_helpers():

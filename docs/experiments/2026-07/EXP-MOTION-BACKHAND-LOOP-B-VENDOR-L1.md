@@ -1,6 +1,6 @@
 # EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1 — 反手拉 B 整轨自碰/自打门
 
-- 状态：source/static gate 通过；exact runtime audit 未运行，certificate 不存在
+- 状态：source/static gate 通过；首次 exact runtime `dry-run` 在 helper import 处 fail closed，修复已通过源码回归，等待 clean runtime 重跑；certificate 不存在
 - 阶段/轴：新动作库 / [`vendor L1 safety audit`](../../DEFINITIONS.md#motion-vendor-l1-safety)
 - 人类负责人：Franco
 - 执行者：Codex
@@ -11,7 +11,7 @@
 只问已通过 L0 的反手拉 B，在 exact vendor MuJoCo collision model 中整轨是否出现机器人自碰或
 球拍/拍柄打到机器人。预注册
 [`motion_backhand_loop_b_vendor_l1_safety_prereg_20260715.json`](../../../configs/motion_backhand_loop_b_vendor_l1_safety_prereg_20260715.json)
-SHA-256 为 `66504cdccb22ce5367679d6f96467bb21e66d591982fc8edcf1e80a125489c30`，绑定：
+SHA-256 为 `8b824e93eda96ca61103b4fb519c3896e009929db3ef4e643208ae4886810b9d`，绑定：
 
 - L0 certificate SHA-256 `60c08185e15c80621063bcedc65b42b6b738a12caeb8fb4e40a4c197e7daafc6`；
 - B schema-2 NPZ SHA-256 `e2eb99e69f624250e37d012ebc2c7db53c4213a6c73e8cd232b92640051d28cc`；
@@ -44,12 +44,23 @@ certificate 继承）、动力学、平衡、TOPP、击球效果、RL、Gate3 �
 
 ## 当前结果与下一步
 
-validator SHA-256 为 `2a133f8224b223f41ac48f47a5d4a8296dee2a34522874f3e8e796bc547379db`。
-source/static gate 与 L0 回归合跑 `23 passed`；反例证明 4.99/5.00/5.01 mm 边界、右肘旧组漏报、
+首次 Pod2 CPU `dry-run` 在载入 grounding helper 时以
+`ModuleNotFoundError: No module named 'ground_gmr_pkl_for_vendor_l1'` 停止。根因不是 B 动作、MuJoCo
+碰撞或模型失败，而是 harness 给 exact path helper 使用了只供本审计隔离的私有 module name；该名字
+本来就不在 `sys.path`，却误调用了 `import_module(name)`。失败发生在轨迹审计前，没有 certificate，
+不能写成 vendor L1 行为失败或通过。
+
+修复后的 validator SHA-256 为
+`daa1f1bb700e9e0424101597900abc8cab013cc46d155f23f11c573d02bd66be`。loader 现在按已冻结的
+bytes/SHA 从 exact path 加载并注册私有 name；执行前后都复核内容与 `__file__`，module body 失败时恢复
+调用方原有 `sys.modules` entry，没有原 entry 时清掉半初始化 module。focused test 直接加载真实
+`scripts/ground_gmr_pkl.py` 到故障中的 private alias，并覆盖 SHA drift、stale module、body exception
+的正负例。source/static gate 与 L0 回归合跑 `28 passed`；其余反例继续证明
+4.99/5.00/5.01 mm 边界、右肘旧组漏报、
 任一 self-collision、continuous-time flag/阈值放宽、C 混入、缺 output parent、dangling symlink target
 和 certificate overwrite 均 fail closed。
 
-本任务没有连接 Pod、没有读私有 certificate/NPZ、没有运行 MuJoCo runtime，也没有创建输出目录或
+本修复任务没有连接 Pod、没有读私有 certificate/NPZ、没有运行 MuJoCo runtime，也没有创建输出目录或
 certificate。因此不能声称 B 已过 vendor L1；G08 继续 Partial。代码合入并由人复核后，下一步按
 [操作文档](../../operations/run_motion_backhand_loop_b_vendor_l1_safety.md)在 exact CPU runtime 先做一次
 `dry-run`，保全逐帧结果；只有通过且另有显式发布授权，才允许唯一 no-clobber `audit`。通过证书只解锁

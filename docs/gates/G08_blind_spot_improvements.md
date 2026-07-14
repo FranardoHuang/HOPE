@@ -560,6 +560,13 @@ runtime audit/certificate，所以 G08 仍为 Partial，B 仍不得进入桌网�
 [L1 卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1.md)和
 [L1 操作](../operations/run_motion_backhand_loop_b_vendor_l1_safety.md)。
 
+首次 Pod2 CPU `dry-run` 随后在真正轨迹审计前抓到 harness import blocker：冻结 grounding helper
+被要求用只供本审计隔离的 private module name 经 `sys.path` 导入，因此 `ModuleNotFoundError` fail
+closed 且没有 certificate。修复改为按 plan 冻结 bytes/SHA 从 exact path 事务式加载；加载前后复核
+内容和 module origin，失败恢复原 `sys.modules` entry，防止 stale/半初始化 module 污染。真实 helper
+private-alias 回归及 SHA/body-failure 反例已过，source/static gate 重验通过；但本修复没有重跑 vendor
+runtime，所以 G08 仍为 Partial，B 仍停在同一门。
+
 S0/M0 的下一层 exact GMR 现已冻结成两批独立 machine plan。共享 consumer 不把 retarget body order 猜成
 canonical vendor body order，而是分开绑定两套 XML order，再用显式 31-joint bijection 接入 A3 FK。M0
 四条候选的人工 ready windows 已展开为 exact 30 Hz sample indices；结果将同时报告初末前后脚错位和横向

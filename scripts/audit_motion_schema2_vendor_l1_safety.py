@@ -47,13 +47,61 @@ class VendorL1Error(ValueError):
     """Fail-closed source, lineage, runtime, safety or publication error."""
 
 
-def _load_module(name: str, path: Path) -> Any:
+def _load_module(
+    name: str,
+    path: Path,
+    *,
+    expected_bytes: int,
+    expected_sha256: str,
+    label: str,
+) -> Any:
+    """Load one exact source file under ``name`` without stale-module reuse.
+
+    ``import_module`` cannot resolve the private names used by this audit (for
+    example ``ground_gmr_pkl_for_vendor_l1``), because those names deliberately
+    do not exist on ``sys.path``.  Loading by path also needs to be
+    transactional: a failed module body must not leave a half-initialized
+    object in ``sys.modules`` or erase a pre-existing entry owned by the caller.
+    """
+
+    ensure_regular_no_symlink(path, label)
+    if type(expected_bytes) is not int or expected_bytes <= 0:
+        raise VendorL1Error(f"{label} expected_bytes must be a positive integer")
+    if (
+        not isinstance(expected_sha256, str)
+        or len(expected_sha256) != 64
+        or any(ch not in "0123456789abcdef" for ch in expected_sha256)
+    ):
+        raise VendorL1Error(f"{label} expected_sha256 must be one lowercase SHA-256")
+    if path.stat().st_size != expected_bytes or sha256_file(path) != expected_sha256:
+        raise VendorL1Error(f"{label} content binding changed before import")
+
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
-        raise VendorL1Error(f"cannot import {name} from {path}")
+        raise VendorL1Error(f"cannot import exact {label} {name} from {path}")
     module = importlib.util.module_from_spec(spec)
+    missing = object()
+    previous = sys.modules.get(name, missing)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+        actual_file = getattr(module, "__file__", None)
+        if actual_file is None or Path(actual_file).resolve() != path.resolve():
+            raise VendorL1Error(f"{label} module origin changed during import")
+        if sys.modules.get(name) is not module:
+            raise VendorL1Error(f"{label} replaced its exact sys.modules entry during import")
+        if path.stat().st_size != expected_bytes or sha256_file(path) != expected_sha256:
+            raise VendorL1Error(f"{label} content binding changed during import")
+    except BaseException as exc:
+        if previous is missing:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = previous
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
+        if isinstance(exc, VendorL1Error):
+            raise
+        raise VendorL1Error(f"cannot import exact {label} {name} from {path}: {exc}") from exc
     return module
 
 
@@ -122,8 +170,17 @@ def _verify_absolute_sha(row: Any, label: str) -> Path:
     return path
 
 
-def _load_l0_v2() -> Any:
-    return _load_module("motion_schema2_l0_v2_for_vendor_l1", L0_V2_PATH)
+def _load_l0_v2(binding: Mapping[str, Any]) -> Any:
+    path = _verify_repo_binding(
+        binding, "frozen L0 validator", "scripts/audit_motion_schema2_l0_static_v2.py"
+    )
+    return _load_module(
+        "motion_schema2_l0_v2_for_vendor_l1",
+        path,
+        expected_bytes=binding["bytes"],
+        expected_sha256=binding["sha256"],
+        label="frozen L0 validator",
+    )
 
 
 def validate_plan(plan_path: Path, expected_sha256: str) -> tuple[dict[str, Any], str, dict[str, Any]]:
@@ -180,10 +237,7 @@ def validate_plan(plan_path: Path, expected_sha256: str) -> tuple[dict[str, Any]
         "frozen L0 preregistration",
         "configs/motion_backhand_loop_b_l0_static_prereg_20260715_v2.json",
     )
-    _verify_repo_binding(
-        frozen["validator"], "frozen L0 validator", "scripts/audit_motion_schema2_l0_static_v2.py"
-    )
-    l0_v2 = _load_l0_v2()
+    l0_v2 = _load_l0_v2(frozen["validator"])
     try:
         _, _, l0_v1_plan = l0_v2.validate_plan(
             l0_plan_path, frozen["preregistration"]["sha256"]
@@ -485,7 +539,7 @@ def validate_output_preconditions(plan: Mapping[str, Any]) -> Path:
 
 
 def audit_runtime(plan: Mapping[str, Any], l0_v1_plan: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    l0_v2 = _load_l0_v2()
+    l0_v2 = _load_l0_v2(plan["frozen_l0"]["validator"])
     try:
         mujoco, runtime = l0_v2.V1.validate_runtime_environment(l0_v1_plan)
     except (OSError, TypeError, ValueError) as exc:
@@ -494,10 +548,31 @@ def audit_runtime(plan: Mapping[str, Any], l0_v1_plan: Mapping[str, Any]) -> tup
     npz_path = _verify_absolute_sha(plan["exact_runtime_input"], "exact B schema-2 NPZ")
     arrays = l0_v2.V1.load_npz_exact(npz_path, l0_v1_plan)
 
-    phase = _load_module("motion_phase_safety_for_vendor_l1", PHASE_SAFETY_PATH)
-    self_collision = _load_module("motion_self_collision_for_vendor_l1", SELF_COLLISION_PATH)
+    phase_binding = plan["dependencies"]["dense_safety_tool"]
+    phase = _load_module(
+        "motion_phase_safety_for_vendor_l1",
+        PHASE_SAFETY_PATH,
+        expected_bytes=phase_binding["bytes"],
+        expected_sha256=phase_binding["sha256"],
+        label="dense safety tool",
+    )
+    collision_binding = plan["dependencies"]["self_collision_helper"]
+    self_collision = _load_module(
+        "motion_self_collision_for_vendor_l1",
+        SELF_COLLISION_PATH,
+        expected_bytes=collision_binding["bytes"],
+        expected_sha256=collision_binding["sha256"],
+        label="self-collision helper",
+    )
+    ground_binding = plan["dependencies"]["grounding_helper"]
     ground_path = REPO_ROOT / plan["dependencies"]["grounding_helper"]["path"]
-    ground = l0_v2.V1._import_exact("ground_gmr_pkl_for_vendor_l1", ground_path)
+    ground = _load_module(
+        "ground_gmr_pkl_for_vendor_l1",
+        ground_path,
+        expected_bytes=ground_binding["bytes"],
+        expected_sha256=ground_binding["sha256"],
+        label="grounding helper",
+    )
     mjcf_path = REPO_ROOT / plan["a3_model"]["canonical_mjcf"]["path"]
     binding = ground.bind_model(mujoco, mjcf_path, ground_geom_name="floor")
     expected_collision = plan["a3_model"]["compiled_collision_contract"]

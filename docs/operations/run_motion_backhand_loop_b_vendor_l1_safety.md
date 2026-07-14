@@ -9,7 +9,7 @@
 ```bash
 cd /path/to/clean/nohope
 PLAN=configs/motion_backhand_loop_b_vendor_l1_safety_prereg_20260715.json
-PLAN_SHA=66504cdccb22ce5367679d6f96467bb21e66d591982fc8edcf1e80a125489c30
+PLAN_SHA=8b824e93eda96ca61103b4fb519c3896e009929db3ef4e643208ae4886810b9d
 
 python3 scripts/audit_motion_schema2_vendor_l1_safety.py \
   --prereg "$PLAN" \
@@ -19,7 +19,12 @@ python3 scripts/audit_motion_schema2_vendor_l1_safety.py \
 
 成功行必须含 `source_exact=true runtime_audit=false no_write=true continuous_time_claim=false`。
 
-## Runtime 前置（尚未执行）
+## Runtime 前置（首次尝试已 fail closed，等待 clean 重跑）
+
+首次 Pod2 CPU `dry-run` 在轨迹审计前因 private-name grounding helper 无法由 `sys.path` 导入而
+fail closed；没有 certificate，这不是动作安全结论。当前 plan 已绑定修复后的 exact-path loader：
+helper 必须同时满足冻结 bytes/SHA、exact `__file__`，import body 失败不得留下半初始化 module 或覆盖
+调用方 stale entry。合入后必须从 clean checkout 重跑本节命令，旧失败不能当作运行结果复用。
 
 只在 code review 后使用 exact CPU venv。必须先只读确认 L0 certificate 与 B NPZ 的 SHA 分别为
 `60c08185...afc6`、`e2eb99e6...d28cc`，checkout 中 validator/dependencies/MJCF closure 与 plan 全部
@@ -40,7 +45,7 @@ export PYTHONNOUSERSITE=1
 /workspace/hope_mjeval_venv/bin/python \
   scripts/audit_motion_schema2_vendor_l1_safety.py \
   --prereg configs/motion_backhand_loop_b_vendor_l1_safety_prereg_20260715.json \
-  --expected-prereg-sha256 66504cdccb22ce5367679d6f96467bb21e66d591982fc8edcf1e80a125489c30 \
+  --expected-prereg-sha256 8b824e93eda96ca61103b4fb519c3896e009929db3ef4e643208ae4886810b9d \
   dry-run
 ```
 
