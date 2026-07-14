@@ -1784,6 +1784,11 @@ lean harness 因此新增默认不执行的 `boot-warmup` source gate：只从�
 claim/namespace、180 秒 boot 上限的非科学探针，reserved Pod 与科学确认 token 均不能授权它。聚焦 queue
 suite `23 passed`；尚未在 Pod 执行，所以这里只是 E1，不证明 importer 已稳定。
 
+通用 Kit launcher 同时加入默认 180 秒 stale-log watchdog：只在日志非空后跟踪 size/mtime，增长即重置；
+marker 同 poll 优先，stale 时只收口已验证 pid=pgid 的自身进程组并写 sidecar，rc125；空日志保持 hard
+timeout rc124，stat 异常 rc126。专项 `9 passed`、相关 retry/queue `50 passed`。这缩短卡死占槽时间，不是
+URDF importer 根因修复或 runtime 成绩。
+
 资源边界随后切换为 Pod2-only：Pod1 的三条 Codex trainer 在 iter `792/782/743` 由 exact PGID `TERM`
 收口，`model_700.pt` 与日志保留，未发 `KILL`；Pod1 复核无 Codex compute process并全部交给 Yikang。
 active queue 的 `dispatch_pods: [pod2]` 是可执行合同，不依赖聊天记忆；旧 Pod1 claim 仍只读防重复。

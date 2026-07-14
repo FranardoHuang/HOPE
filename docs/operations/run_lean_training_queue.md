@@ -7,8 +7,10 @@
 
 qdot matched-control 的首次冷启动也在 dynamic URDF import/scene creation 前停住；相同 warning 在成功臂
 同样存在，不能拿 warning 字面当根因。旧 namespace 已保全并拒绝，只有 unchanged retry-v2 可再试一次。
-launcher 下一版须增加日志无进展 watchdog 与 scene-created 等阶段 receipt；长期应消费内容绑定的预转换
-USD，避免每条训练重新动态导入 URDF。
+launcher 现有默认 180 秒“有内容但 size/mtime 均不再变化”watchdog：任一增长重置计时，marker 在边界
+poll 上优先；超时先写 sidecar，再只对 launcher 已验证的 exact PGID TERM→5 秒→KILL，返回 rc125。空日志
+仍由 900 秒 hard timeout 管，stat 失败 rc126 fail closed。仍缺 scene-created 等细分阶段 receipt；长期应
+消费内容绑定的预转换 USD，避免每条训练重新动态导入 URDF。
 
 ### 新 source 先做冷启动探针
 

@@ -30,6 +30,10 @@
   boot 上限的非科学冷启动探针，reserved Pod 与科学确认 token 均 fail closed；queue suite `23 passed`。
   尚未在 Pod 执行，不能写成 runtime 通过。
 
+- 通用 Kit launcher 新增默认 180 秒 content-bearing stale-log watchdog：增长重置、marker 优先，只精确
+  收口自己的已验证 PGID并以 rc125/sidecar 留证；空日志仍走 hard timeout，stat 异常 fail closed。
+  专项 `9 passed`、相关 retry/queue `50 passed`；它缩短卡死，不冒充 importer 根因修复。
+
 - Lean queue P0 已把重复/owned Hydra override、control flag/interpolation、run-dir 覆盖与未解析配方挡在
   claim 前；doctor 用真实最终 argv 做 no-Kit compose，schema-2 canonical claim 自动绑定 source、argv、
   预算和 motion/bank/exam identity。五机制 `+500` 中 V1+V2 出现 composite `0.0893` / normal pass
