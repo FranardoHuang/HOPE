@@ -1473,6 +1473,12 @@ MuJoCo attempt 或 K100 成绩，因此不能判 C3/D3 行为。
 
 v2 在全新 attestor/pair namespace 中把训练 checkout 的 ignored A3 递归 canonical inventory、required
 URDF、C3 一次 hydrate/D3 exact verify 角色与 `libGLU.so.1` 可加载性放到 claim/judge 前。focused
-`56 passed`，static/source-plan rc0；尚未 Pod runtime。可复现合同和命令见
-[v2 操作](../operations/run_phase1_signed_face_c3d3_k100_v2.md)。G06 仍为 `Partial`：只有 v2 paired
-`K100` 完整结果通过后才有行为证据，且结果本身仍不授权 L2、第二 seed、stop/promote、部署或真机。
+`56 passed`，static/source-plan rc0。用同一训练 asset closure 和 exact checkpoint/bank/plant binding
+做的 C3/D3 inexact diagnostic 均成功导出并进入 MuJoCo，故 asset packaging blocker 已关闭；日志明确
+为 `evaluation_contract_exact=false`，且两侧均在第 0 题前因
+`formal BankExam reached bound PhysX joint-velocity limit on articulation indices [8]; MuJoCo lacks same
+braking constraint` fail closed。两侧均 `asked=0`，没有 attempt/score/方向分；新的 open blocker 是
+articulation `[8]` 的
+velocity-limit braking parity。可复现合同见
+[v2 操作](../operations/run_phase1_signed_face_c3d3_k100_v2.md)。G06 仍为 `Partial`：parity 修复前不得
+执行 formal paired K100；明确 allow-inexact 的方向筛不能授权 L2、第二 seed、stop/promote、部署或真机。

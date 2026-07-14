@@ -1,7 +1,8 @@
 # 运行 C3/D3 同卷 signed-face K100 v2
 
-状态：**v2 source gate 已通过；尚未在 Pod 上 attest 或 judge。** 本操作只修复 v1 的 ignored Isaac
-资产打包缺口。`C3` 是显式零摩擦对照，`D3` 是只增加拍面引导的匹配臂；两者仍只允许在同一张
+状态：**v2 asset source gate 已通过；asset packaging blocker 已关闭，但 exact K100 仍被
+velocity-limit parity blocker 阻断。** 本操作只修复 v1 的 ignored Isaac 资产打包缺口。`C3` 是显式
+零摩擦对照，`D3` 是只增加拍面引导的匹配臂；两者仍只允许在同一张
 [`K100`](../DEFINITIONS.md#q50-and-k100)（正手/反手各 50 次、失败不删）上各判一次。
 
 v1 已在 C3 导出 ONNX 前自然失败并永久冻结：
@@ -14,6 +15,27 @@ v1 已在 C3 导出 ONNX 前自然失败并永久冻结：
   `assets/agibot_a3/urdf/model.urdf`，尚未导出 ONNX、进入 MuJoCo 或产生 K100 行为成绩。
 
 不得删除、改名、补写或重放 v1 output/attestation，也不得向 v1 eval checkout 补资产后绕过。
+
+后续保留的 diagnostic 已用同一训练 A3 asset closure 和 exact checkpoint/bank/plant binding 分别运行
+C3/D3：两侧都成功导出 ONNX 并进入 MuJoCo，证明缺资产不再是当前 blocker。该运行显式传入
+`--allow-inexact-contract`，所以日志中的 `evaluation_contract_exact=false` 是预期且必须保留；但旧接口
+仍让 `formal_execution_contract_ok=true`，两侧因而都在第 0 题开始前同样 fail closed：
+
+```text
+formal BankExam reached bound PhysX joint-velocity limit on articulation indices [8]; MuJoCo lacks same braking constraint
+```
+
+因此两边都是 `scheduled=50/side`、`asked=0`，没有任何 K100 attempt/score，方向分不存在。原诊断
+PID `1873348/1873349` 已退出；只读证据保存在
+`.../evaluations/diagnostic_asset_hydrated_inexact_v1/{C3,D3}/judge.runner.log`。当前 blocker 是
+articulation index `8` 的 PhysX velocity-limit
+braking 与 MuJoCo 执行语义不等价；不是 C3/D3 行为差异。该 parity 合同修复并经新 source binding
+复核前，只允许本页 source/asset/plan 检查，**不得执行第 4 节 paired exact judge**。明确
+`allow-inexact` 的方向筛只可作诊断，不能变成 formal K100、L2、第二 seed 或 promote 证据。若要让
+这种方向筛越过 velocity guard，必须另外显式传入 `--allow-velocity-limit-proxy`；该 flag 只有在
+`--target-source bank --allow-inexact-contract` 同时存在时才合法，并继续把
+`formal_execution_contract_ok/evaluation_contract_exact` 固定为 false；单独
+`--allow-inexact-contract` 不得静默改变 velocity-limit 语义。
 
 ## 1. v2 修复合同
 
@@ -116,6 +138,9 @@ python3 scripts/attest_phase1_signed_face_k100_checkpoint_v2.py \
 任一 SSH timeout 都是 `UNKNOWN`：先只读检查固定 evidence/claim/destination，绝不重放写命令。
 
 ## 4. Paired v2 request 与执行
+
+当前本节 **BLOCKED / NO-LAUNCH**：articulation `[8]` velocity-limit parity 尚未闭合。以下命令保留为
+阻塞解除后的合同真源，不是当前运行授权。
 
 `PAIR_REQUEST` 必须绑定 v2 manifest file bytes/SHA、上述两份 request、两份实际 v2
 evidence/claim file/content SHA、两份 checkpoint-adjacent `env.yaml`、两个 runtime activation、distinct

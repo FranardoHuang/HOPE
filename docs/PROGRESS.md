@@ -15,7 +15,11 @@
 
 - C3/D3 K100 v1 在 C3 ONNX 导出前暴露 ignored Isaac A3 asset 打包缺口并永久冻结，未产生行为成绩。
   v2 新 namespace 在 claim/judge 前绑定训练 checkout 的递归 canonical inventory、一次 hydrate/二次
-  verify 角色和 `libGLU.so.1` 存在性；focused `56 passed`，static/source-plan rc0，尚未 Pod runtime。
+  verify 角色和 `libGLU.so.1` 存在性；focused `56 passed`，static/source-plan rc0。hydrate 后的
+  C3/D3 inexact diagnostic 均成功导出并进入 MuJoCo，asset blocker 已关闭；日志诚实记录
+  `evaluation_contract_exact=false`，两侧又都在第 0 题前因
+  articulation `[8]` PhysX velocity-limit braking 无 MuJoCo 等价约束而 fail closed。无 attempt/score，
+  `asked=0`、方向分不存在；K100 behavior 仍 OPEN，L2/第二 seed/promote 继续阻断。
   见[实验](experiments/2026-07/EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1.md)与
   [v2 操作](operations/run_phase1_signed_face_c3d3_k100_v2.md)。
 

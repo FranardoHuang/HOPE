@@ -115,8 +115,22 @@ paired consumer 在 claim/judge 前重放两侧完整 asset evidence。focused `
 `py_compile`、attestor static、pair static/source-plan 均 rc0；本 source gate 未连接 Pod、未 attest、
 未 judge。运行真源见 [v2 操作](../../operations/run_phase1_signed_face_c3d3_k100_v2.md)。
 
-决定仍为 `inconclusive`：v2 只修复运行打包合同，不提供行为成绩，也不授权 L2、第二 seed、
-stop/promote 或采用 setting。
+随后用同一训练 A3 asset closure、exact checkpoint/bank/plant binding 做的 C3/D3 runtime diagnostic
+两侧都成功导出 ONNX 并进入 MuJoCo，故 **asset packaging blocker 已关闭**。该方向筛显式使用
+`--allow-inexact-contract`，日志诚实记录 `evaluation_contract_exact=false`；但该 flag 没有关闭
+`formal_execution_contract_ok`，两侧仍在第 0 题前被同一 formal guard 拒绝：
+`formal BankExam reached bound PhysX joint-velocity limit on articulation indices [8]; MuJoCo lacks same
+braking constraint`。没有 attempt 或 score；这证明新的 blocker 是 articulation index `8` 的
+velocity-limit braking parity，不是 C3/D3 guidance 行为差异。
+
+只读复核路径为
+`.../evaluations/diagnostic_asset_hydrated_inexact_v1/{C3,D3}/judge.runner.log`；原精确
+PID `1873348/1873349` 均已退出。两份日志均为 `scheduled=50/side`、`asked=0`，因此 **C3/D3
+方向分均不存在**，不能把进程成功导出或无结果解释成 `0/100`。
+
+决定仍为 `inconclusive`，K100 behavior 状态为 `OPEN/BLOCKED`：v2 只修复运行打包合同；velocity-limit
+parity 未闭合前不得执行正式 paired judge，也不授权 L2、第二 seed、stop/promote 或采用 setting。任何
+明确 `allow-inexact` 的同卷方向筛都只能作为诊断，不能替代 formal K100。
 
 ## 复现与证据
 
