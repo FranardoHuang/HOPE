@@ -1771,6 +1771,10 @@ digest、96 项 `/proc` argv、`model_0.pt` finite、hard contract 与 fresh/cla
 它只关闭“机制能否真正进入训练”的运行门；未到 `+200`，且同 source/seed 的 weight `0` 对照未运行，
 不构成 reward 结论或晋级。
 
+qdot weight `0` 同-source control 与 conditional-face `0/-0.4` 配对已在结果前写入 active YAML；三条均
+只允许 Pod2 dispatch、seed3、4096×1001、save100 与 `+200/+500/+1000`，且各自绑定 exact source、
+motion/bank/exam/plant。它们尚未 launch，不能把 machine prereg 写成 runtime 通过。
+
 资源边界随后切换为 Pod2-only：Pod1 的三条 Codex trainer 在 iter `792/782/743` 由 exact PGID `TERM`
 收口，`model_700.pt` 与日志保留，未发 `KILL`；Pod1 复核无 Codex compute process并全部交给 Yikang。
 active queue 的 `dispatch_pods: [pod2]` 是可执行合同，不依赖聊天记忆；旧 Pod1 claim 仍只读防重复。

@@ -117,6 +117,12 @@ retry-v2 的运行复核：PID=PGID `326576`，queue claim digest
 lineage 与 claim SHA 全匹配。这里只证明 harness 与训练启动闭合；weight `0` 的同-source 匹配对照和
 `+200/+500/+1000` 早判仍缺。
 
+同-source weight `0` 对照现已在结果前 machine-preregister：source
+`a6ccdc7a1c696ff37878039f1e1d83dea28a2bfa`、seed `3`、4096 environments、1001 updates、同
+motion/bank/exam/plant 与四个既有机制轴；唯一 qdot 差异为 treatment `-5.0`、control `0.0`，margin
+同为 `0.85`。control run name 是
+`phase1_fresh_c_qdot_hinge_control_seed3_20260714`，只允许 Pod2 dispatch；它不是第二 seed。
+
 ## 发射 harness P0 收紧（尚未产生新 run）
 
 在 qdot 格发射前，队列入口补上四个反复出错的执行合同，但没有连接 Pod 或改动现有五条 trainer：

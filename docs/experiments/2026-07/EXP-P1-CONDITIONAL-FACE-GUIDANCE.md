@@ -1,6 +1,6 @@
 # EXP-P1-CONDITIONAL-FACE-GUIDANCE — 不逃离就绪区的固定预算 Reward
 
-- 状态：`Partial`（E1 source gate 已合入 `main`；尚无 Pod runtime/checkpoint）
+- 状态：`Partial`（E1 source gate 已合入 `main`；Pod2 machine prereg 已冻结，尚未 launch）
 - 阶段/轴：阶段 1 固定点；Reward 争抢机制
 - 集成小目标：在不牺牲触点、拍速、完成率或安全的前提下，降低有符号拍面误差
 - 人类负责人：franco
@@ -60,6 +60,13 @@ penalty = wide_strike_window * (1 - readiness * (1 - face_fraction))
 training hard contract，旧 source 的 control checkpoint 不能冒充匹配对照。首轮不扫门宽、不扫 weight、
 不买第二 seed。
 
+machine prereg 已冻结为 source `61007e93879f35677e4c7d38cf7f681f324f9571`、只在 Pod2 调度：
+
+- control：`phase1_fresh_c_conditional_face_control_seed3_20260714`，conditional weight `0.0`；
+- treatment：`phase1_fresh_c_conditional_face_w04_seed3_20260714`，conditional weight `-0.4`。
+
+两格同时显式把 qdot hinge weight 固定为 `0.0` / margin `0.85`，避免继承差异；其余 delta 完全相同。
+
 ## 不可补偿安全边界
 
 该项只返回非负 magnitude，再乘非正权重；它不会提供正安全信用，也不改 termination、自碰/自打、
@@ -90,15 +97,15 @@ joint/torque/qdot limit、观测、动作或 plant。以下任一项都独立判
 
 | 运行（人话名 + `run_name`） | 状态 | Checkpoint/seed | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
-| 同 source fresh 对照（待 machine prereg） | 未启动 | seed3；200/500/1000 | E0 | 无 | 必须与 treatment 同 source |
-| 不逃离就绪区的固定预算纠面（待 machine prereg） | 未启动 | seed3；200/500/1000 | E0 | 无 | 唯一逻辑差异为 conditional weight `-0.4` |
+| 同 source fresh 对照（`phase1_fresh_c_conditional_face_control_seed3_20260714`） | 预注册、未启动 | seed3；200/500/1000 | E1 | queue YAML | 必须与 treatment 同 source |
+| 不逃离就绪区的固定预算纠面（`phase1_fresh_c_conditional_face_w04_seed3_20260714`） | 预注册、未启动 | seed3；200/500/1000 | E1 | queue YAML | 唯一逻辑差异为 conditional weight `-0.4` |
 
 ## 决定
 
 - 决定：`inconclusive`
 - 理由：公式、反向激励反例与 source gate 已进入 `main@61007e9`，但未做 runtime smoke 或训练。
 - 是否已纳入当前 setting：`no`
-- 局限/下一个 gate：补 exact source/machine prereg 后成对进入 lean YAML；禁止直接手写 CLI 点火。
+- 局限/下一个 gate：先由 lean queue 对 exact source 做 no-Kit doctor，再按 Pod2 一圈一条发射；禁止手写 CLI 点火。
 
 ## 复现与证据
 

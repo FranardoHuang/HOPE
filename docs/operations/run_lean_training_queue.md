@@ -1,8 +1,9 @@
 # 轻量 YAML 训练队列
 
 状态：五个机制 `retry-v2` 已越过 `+500`；qdot attempt-1 在第 0 update 超时并保全，全新 retry-v2 已
-通过真实 boot marker 并到 iter `79`。P0 harness 已强制 no-Kit Hydra compose、原子 run-dir 与 canonical
-claim。G05 仍为 `Partial`，这不是行为晋级。
+通过真实 boot marker 并到 iter `79`。队列还预注册了 qdot 同-source control 与 conditional-face
+`0/-0.4` 配对，均只在 Pod2 调度、尚未 launch。P0 harness 已强制 no-Kit Hydra compose、原子 run-dir
+与 canonical claim。G05 仍为 `Partial`，这不是行为晋级。
 
 这个入口解决的是“动作和题库已经决定后，为什么还要手拼一长串命令”。一条 YAML job 必须同时绑定：
 

@@ -491,7 +491,7 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
     ready = [job for job in queue["jobs"] if job["status"] == "ready"]
     blocked = [job for job in queue["jobs"] if job["status"] == "blocked"]
     rejected = [job for job in queue["jobs"] if job["status"] == "rejected"]
-    assert len(ready) == 6
+    assert len(ready) == 9
     assert len(rejected) == 6
     assert blocked == []
     assert queue["dispatch_pods"] == ["pod2"]
@@ -508,6 +508,9 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
         "fresh_c_base_deceleration_retry_v2": ("false", "1.0", "1.0", "0.25"),
         "fresh_c_post_swing_replay_half_retry_v2": ("false", "1.0", "0.0", "0.5"),
         "fresh_c_qdot_limit_hinge_w5_retry_v2": ("false", "1.0", "0.0", "0.25"),
+        "fresh_c_qdot_limit_hinge_matched_control": ("false", "1.0", "0.0", "0.25"),
+        "fresh_c_conditional_face_matched_control": ("false", "1.0", "0.0", "0.25"),
+        "fresh_c_conditional_face_w04": ("false", "1.0", "0.0", "0.25"),
     }
     for job in ready:
         assert job["seed"] == 3
@@ -515,11 +518,12 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
             "num_envs": 4096, "max_iterations": 1001, "save_interval": 100
         }
         assert job["milestones"] == [200, 500, 1000]
-        expected_source = (
-            "a6ccdc7a1c696ff37878039f1e1d83dea28a2bfa"
-            if job["id"] == "fresh_c_qdot_limit_hinge_w5_retry_v2"
-            else "4467d79f1ed425a4263f0caaad2f661e1ec737ad"
-        )
+        if job["id"].startswith("fresh_c_conditional_face_"):
+            expected_source = "61007e93879f35677e4c7d38cf7f681f324f9571"
+        elif job["id"].startswith("fresh_c_qdot_limit_hinge_"):
+            expected_source = "a6ccdc7a1c696ff37878039f1e1d83dea28a2bfa"
+        else:
+            expected_source = "4467d79f1ed425a4263f0caaad2f661e1ec737ad"
         assert job["source"]["commit"] == expected_source
         base = job["recipe"]["base"]
         delta = job["recipe"]["delta"]
@@ -541,18 +545,42 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
         if job["id"] == "fresh_c_qdot_limit_hinge_w5_retry_v2":
             assert qdot_weight == ["task.rewards.joint_velocity_limit_hinge_weight=-5.0"]
             assert qdot_margin == ["task.rewards.joint_velocity_limit_hinge_margin=0.85"]
+        elif job["id"] in {
+            "fresh_c_qdot_limit_hinge_matched_control",
+            "fresh_c_conditional_face_matched_control",
+            "fresh_c_conditional_face_w04",
+        }:
+            assert qdot_weight == ["task.rewards.joint_velocity_limit_hinge_weight=0.0"]
+            assert qdot_margin == ["task.rewards.joint_velocity_limit_hinge_margin=0.85"]
         else:
             assert qdot_weight == []
             assert qdot_margin == []
+        conditional_weight = [
+            item for item in delta
+            if item.startswith("++task.rewards.racket_face_conditional_guidance_weight=")
+        ]
+        if job["id"] == "fresh_c_conditional_face_matched_control":
+            assert conditional_weight == [
+                "++task.rewards.racket_face_conditional_guidance_weight=0.0"
+            ]
+        elif job["id"] == "fresh_c_conditional_face_w04":
+            assert conditional_weight == [
+                "++task.rewards.racket_face_conditional_guidance_weight=-0.4"
+            ]
+        else:
+            assert conditional_weight == []
     plan = Q.cmd_plan(queue, live=False)
-    assert len(plan["assignments"]) == 6
+    assert len(plan["assignments"]) == 9
     assert [item["resource"] for item in plan["assignments"]] == [
+        "pod2/gpu0", "pod2/gpu1", "pod2/gpu2",
         "pod2/gpu0", "pod2/gpu1", "pod2/gpu2",
         "pod2/gpu0", "pod2/gpu1", "pod2/gpu2",
     ]
     retry_ready = [job for job in ready if job["id"].endswith("_retry_v2")]
     assert len(retry_ready) == 6
-    for attempt1, retry in zip(rejected, retry_ready, strict=True):
+    retry_by_id = {job["id"]: job for job in retry_ready}
+    for attempt1 in rejected:
+        retry = retry_by_id[f"{attempt1['id']}_retry_v2"]
         assert retry["recipe"] == attempt1["recipe"]
         assert retry["motion"] == attempt1["motion"]
         assert retry["bank"] == attempt1["bank"]
