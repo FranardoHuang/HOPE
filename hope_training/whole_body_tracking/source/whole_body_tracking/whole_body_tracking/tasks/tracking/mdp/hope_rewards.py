@@ -308,6 +308,174 @@ def hold_heading(
     return torch.exp(-torch.square(yaw) / std**2) * in_hold.float()
 
 
+_BASE_DECEL_ACTIVATION_ATTR = "_hope_base_decel_activation_counters"
+_BASE_DECEL_LAST_STEP_ATTR = "_hope_base_decel_activation_last_step"
+_BASE_DECEL_LAST_SIGNATURE_ATTR = "_hope_base_decel_activation_last_signature"
+_BASE_DECEL_ELIGIBLE_COUNT = "base_decel_eligible_sample_count"
+_BASE_DECEL_RAW_KERNEL_SUM = "base_decel_raw_kernel_sum"
+_BASE_DECEL_RAW_NONZERO_COUNT = "base_decel_raw_kernel_nonzero_sample_count"
+
+
+def _base_decel_values(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    v_gain: float,
+    v_max: float,
+    std: float,
+) -> tuple[RacketTargetCommand, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return the exact base-decel command, raw kernel, eligibility mask, and reward.
+
+    Both the actual RewardTerm and the weight-independent activation observer below use this
+    function.  Keeping the arithmetic in one place prevents a zero-weight control from being
+    measured with a mask or kernel that differs from the treatment's real reward execution.
+    """
+
+    cmd = _cmd(env, command_name)
+    planar_err = torch.norm(
+        cmd.racket_target_pos_w[:, :2] - cmd.racket_pos_w[:, :2], dim=-1
+    )
+    v_des = (v_gain * planar_err).clamp(0.0, v_max)
+    v_base = torch.norm(cmd.robot.data.root_lin_vel_w[:, :2], dim=-1)
+    raw = torch.exp(-torch.square(v_base - v_des) / std**2)
+    in_hold = getattr(cmd._motion(), "in_hold", None)
+    eligible = cmd.pre_strike if in_hold is None else (cmd.pre_strike & ~in_hold)
+    reward = raw * eligible.float()
+    return cmd, raw, eligible, reward
+
+
+def _base_decel_counter_state(
+    cmd: RacketTargetCommand, template: torch.Tensor
+) -> dict[str, torch.Tensor]:
+    """Lazily allocate device scalar counters without changing command configuration."""
+
+    state = getattr(cmd, _BASE_DECEL_ACTIVATION_ATTR, None)
+    if state is None:
+        state = {
+            _BASE_DECEL_ELIGIBLE_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+            _BASE_DECEL_RAW_KERNEL_SUM: torch.zeros(
+                (), dtype=template.dtype, device=template.device
+            ),
+            _BASE_DECEL_RAW_NONZERO_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+        }
+        setattr(cmd, _BASE_DECEL_ACTIVATION_ATTR, state)
+    return state
+
+
+def _base_decel_step_token(env: ManagerBasedRLEnv) -> int | None:
+    """Return Isaac's host-side simulator-step token when the environment exposes it.
+
+    The real manager environment owns an integer ``common_step_counter``.  Synthetic callers that
+    do not expose it still get correct reward arithmetic, but cannot request same-step idempotence.
+    Avoiding ``int(tensor)`` here is deliberate: activation accounting must never add a CUDA sync.
+    """
+
+    token = getattr(env, "common_step_counter", None)
+    return token if type(token) is int else None
+
+
+def _record_base_decel_activation(
+    env: ManagerBasedRLEnv,
+    cmd: RacketTargetCommand,
+    raw: torch.Tensor,
+    eligible: torch.Tensor,
+    reward: torch.Tensor,
+    *,
+    signature: tuple[float, float, float],
+) -> None:
+    """Accumulate one unique simulator step of activation evidence.
+
+    A future unconditional step hook must call :func:`observe_base_decel_activation` for both the
+    zero-weight control and the treatment.  The treatment's RewardManager also calls
+    :func:`base_decel_tracking`; the shared ``common_step_counter`` token makes those two calls
+    idempotent.  A parameter mismatch in the same step fails loudly instead of letting the hook
+    attest a different kernel than the reward used.
+    """
+
+    token = _base_decel_step_token(env)
+    if token is not None:
+        previous_token = getattr(cmd, _BASE_DECEL_LAST_STEP_ATTR, None)
+        if previous_token == token:
+            previous_signature = getattr(cmd, _BASE_DECEL_LAST_SIGNATURE_ATTR, None)
+            if previous_signature != signature:
+                raise RuntimeError(
+                    "base-decel activation observer and RewardTerm used different "
+                    "v_gain/v_max/std values in the same simulator step"
+                )
+            return
+
+    state = _base_decel_counter_state(cmd, raw)
+    state[_BASE_DECEL_ELIGIBLE_COUNT].add_(
+        eligible.detach().sum(dtype=torch.long)
+    )
+    # ``reward`` is the exact raw kernel after the real ``pre_strike & ~in_hold`` gate.  Summing
+    # this tensor (rather than recomputing or indexing ``raw``) preserves NaN/Inf evidence and the
+    # treatment's executed arithmetic exactly.
+    state[_BASE_DECEL_RAW_KERNEL_SUM].add_(reward.detach().sum())
+    raw_detached = raw.detach()
+    state[_BASE_DECEL_RAW_NONZERO_COUNT].add_(
+        (
+            eligible.detach()
+            & torch.isfinite(raw_detached)
+            & raw_detached.gt(0)
+        ).sum(dtype=torch.long)
+    )
+    if token is not None:
+        setattr(cmd, _BASE_DECEL_LAST_STEP_ATTR, token)
+        setattr(cmd, _BASE_DECEL_LAST_SIGNATURE_ATTR, signature)
+
+
+def observe_base_decel_activation(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    v_gain: float = 2.0,
+    v_max: float = 1.6,
+    std: float = 0.4,
+) -> None:
+    """Measure base-decel activation without applying any reward.
+
+    IsaacLab omits a zero-weight RewardTerm from execution, so the control cannot be measured by
+    putting counters only inside :func:`base_decel_tracking`.  The minimal safe integration is one
+    unconditional call to this observer per simulator step for *both* arms, with the exact runtime
+    RewardTerm parameters.  It performs no random draw, writes no simulator or reward tensor, and
+    shares the treatment's exact kernel/mask implementation.  If the RewardTerm also runs in that
+    step, accounting is idempotent through ``env.common_step_counter``.
+    """
+
+    cmd, raw, eligible, reward = _base_decel_values(
+        env, command_name, v_gain, v_max, std
+    )
+    _record_base_decel_activation(
+        env,
+        cmd,
+        raw,
+        eligible,
+        reward,
+        signature=(float(v_gain), float(v_max), float(std)),
+    )
+
+
+def consume_base_decel_activation_counters(
+    env: ManagerBasedRLEnv, command_name: str
+) -> dict[str, torch.Tensor]:
+    """Snapshot and reset one PPO update's base-decel activation device scalars.
+
+    The last simulator-step token intentionally survives the reset.  A logger that consumes after
+    rollout and then observes the same step cannot accidentally charge that step to the next PPO
+    update.  A second consume therefore returns exact scalar zeros.
+    """
+
+    cmd = _cmd(env, command_name)
+    state = _base_decel_counter_state(cmd, cmd.racket_target_pos_w)
+    snapshot = {name: value.detach().clone() for name, value in state.items()}
+    for value in state.values():
+        value.zero_()
+    return snapshot
+
+
 def base_decel_tracking(
     env: ManagerBasedRLEnv, command_name: str, v_gain: float = 2.0, v_max: float = 1.6, std: float = 0.4
 ) -> torch.Tensor:
@@ -333,14 +501,18 @@ def base_decel_tracking(
     is the WORLD planar root velocity (same source as hold_ready); v_gain [1/s] is the P-gain of the
     pseudo velocity command, v_max [m/s] its cap, std [m/s] the kernel width. RewTerm weight is
     POSITIVE; default weight 0.0 = OFF (flag-gated via task.rewards.base_decel_weight)."""
-    cmd = _cmd(env, command_name)
-    planar_err = torch.norm(cmd.racket_target_pos_w[:, :2] - cmd.racket_pos_w[:, :2], dim=-1)
-    v_des = (v_gain * planar_err).clamp(0.0, v_max)
-    v_base = torch.norm(cmd.robot.data.root_lin_vel_w[:, :2], dim=-1)
-    raw = torch.exp(-torch.square(v_base - v_des) / std**2)
-    in_hold = getattr(cmd._motion(), "in_hold", None)
-    active = cmd.pre_strike if in_hold is None else (cmd.pre_strike & ~in_hold)
-    return raw * active.float()
+    cmd, raw, eligible, reward = _base_decel_values(
+        env, command_name, v_gain, v_max, std
+    )
+    _record_base_decel_activation(
+        env,
+        cmd,
+        raw,
+        eligible,
+        reward,
+        signature=(float(v_gain), float(v_max), float(std)),
+    )
+    return reward
 
 
 def joint_velocity_limit_hinge(
