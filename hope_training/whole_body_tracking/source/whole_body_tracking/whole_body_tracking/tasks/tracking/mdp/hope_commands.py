@@ -2227,10 +2227,6 @@ class RacketTargetCommand(CommandTerm):
         # skipped, preventing a stale due row from being silently extended.
         if getattr(motion, "event_timing_enabled", False):
             motion.finalize_event_deadlines()
-        # Run last: base_decel_tracking executes after command_manager.compute() and must observe
-        # exactly this post-wrap/post-refinement target state.  The common-step token deduplicates
-        # the treatment's later RewardTerm call while the zero-weight control remains measured.
-        self._observe_base_decel_activation()
 
     def _push_actor_target(self):
         """A1: refresh the ACTOR-visible target view once per control step (latency + jitter).
@@ -2863,30 +2859,6 @@ class RacketTargetCommand(CommandTerm):
                 self.metrics[f"virtual_return_rate_rally_{_cn}"][:] = (
                     (self._rally_returns_acc_c[_c] / max(_cs, 1e-6)) if _cs >= _min_n else 0.0
                 )
-
-    def _observe_base_decel_activation(self) -> None:
-        """Run the weight-independent base-decel observer once per command step.
-
-        ``CommandTerm.compute`` calls :meth:`_update_command` exactly once after metrics and before
-        rewards.  The caller places this observer at the very end of that update, after every
-        wrap/refinement target change, so it sees the exact state the RewardTerm will consume.
-        This covers both a zero-weight control (whose RewardTerm IsaacLab may omit) and a nonzero
-        treatment.  The treatment's later RewardTerm call is idempotent on the shared
-        ``common_step_counter`` token.  Disabled is a strict branch-only no-op.
-        """
-
-        if not self.cfg.base_decel_activation_enabled:
-            return
-        # Lazy import avoids the module-level hope_commands <-> hope_rewards dependency cycle.
-        from .hope_rewards import observe_base_decel_activation
-
-        observe_base_decel_activation(
-            self._env,
-            "racket_target",
-            v_gain=float(self.cfg.base_decel_activation_v_gain),
-            v_max=float(self.cfg.base_decel_activation_v_max),
-            std=float(self.cfg.base_decel_activation_std),
-        )
 
     def _update_metrics(self):
         # CommandTerm.compute() runs _update_metrics() BEFORE _update_command(), so refresh the
@@ -3582,15 +3554,6 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # loudly instead of silently changing their meaning.
     clean_reference_strike_velocity: bool = True
     clean_strike_vel_window: int = 2  # half-window (frames) for the centered finite difference (try 2 or 3)
-
-    # Weight-independent base-decel activation observer.  train.py enables this only when a
-    # base-decel override is explicit (including weight=0 controls) and copies the exact resolved
-    # RewardTerm kernel parameters here.  The disabled defaults add no RNG, reward, or simulator
-    # write; the command takes one branch and returns.
-    base_decel_activation_enabled: bool = False
-    base_decel_activation_v_gain: float = 2.0
-    base_decel_activation_v_max: float = 1.6
-    base_decel_activation_std: float = 0.4
 
     # --- debug logging (sign verification + raw/gated reward kernels) ---
     # When True, RacketTargetCommand logs dbg_err_{minus,plus}_{win,exact} (swing-through sign check) and

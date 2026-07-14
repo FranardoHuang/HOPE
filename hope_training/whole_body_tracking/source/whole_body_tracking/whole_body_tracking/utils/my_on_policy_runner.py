@@ -186,35 +186,30 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     self._log_scalar(
                         f"Live/{term_name}/command_counter", self._mean_tensor(term.command_counter), step
                     )
-                if bool(
-                    getattr(
-                        getattr(term, "cfg", None),
-                        "base_decel_activation_enabled",
-                        False,
-                    )
-                ):
-                    # The observer stores its weight-independent ledger on racket_target.  Consume
-                    # it once at the same PPO-update boundary as the motion activation ledgers;
-                    # totals/raw sum must not be averaged over num_envs.
-                    from whole_body_tracking.tasks.tracking.mdp.hope_rewards import (
-                        consume_base_decel_activation_counters,
-                    )
-
-                    for counter_name, counter_value in (
-                        consume_base_decel_activation_counters(env, term_name).items()
-                    ):
-                        self._log_scalar(
-                            f"Live/{term_name}/{counter_name}",
-                            self._scalar_tensor(counter_value),
-                            step,
-                        )
-
         if hasattr(env, "reward_manager"):
+            active_reward_terms = tuple(env.reward_manager.active_terms)
             self._log_scalar("Live/Reward/total", self._mean_tensor(getattr(env, "reward_buf", None)), step)
-            for idx, term_name in enumerate(env.reward_manager.active_terms):
+            for idx, term_name in enumerate(active_reward_terms):
                 self._log_scalar(
                     f"Live/Reward/{term_name}", self._mean_tensor(env.reward_manager._step_reward[:, idx]), step
                 )
+            if "base_decel_activation_probe" in active_reward_terms:
+                # The nonzero-weight, zero-valued probe is the common RewardManager-stage
+                # observer for control and treatment.  Consume its weight-independent ledger
+                # exactly once per PPO update; totals/raw sum must not be averaged over num_envs.
+                from whole_body_tracking.tasks.tracking.mdp.hope_rewards import (
+                    consume_base_decel_activation_counters,
+                )
+
+                command_name = "racket_target"
+                for counter_name, counter_value in (
+                    consume_base_decel_activation_counters(env, command_name).items()
+                ):
+                    self._log_scalar(
+                        f"Live/{command_name}/{counter_name}",
+                        self._scalar_tensor(counter_value),
+                        step,
+                    )
 
         if hasattr(env, "termination_manager"):
             tm = env.termination_manager

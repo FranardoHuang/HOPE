@@ -291,13 +291,19 @@ def test_live_logger_consumes_base_decel_raw_ledger_once_with_stable_tags(monkey
         }
 
     rewards_module.consume_base_decel_activation_counters = _consume
-    term = SimpleNamespace(
-        metrics={},
-        cfg=SimpleNamespace(base_decel_activation_enabled=True),
-    )
+    term = SimpleNamespace(metrics={})
+
+    class _StepReward:
+        def __getitem__(self, _key):
+            return 0.0
+
     env = SimpleNamespace(
         command_manager=SimpleNamespace(
             active_terms=["racket_target"], get_term=lambda name: term
+        ),
+        reward_manager=SimpleNamespace(
+            active_terms=["base_decel_activation_probe"],
+            _step_reward=_StepReward(),
         ),
         episode_length_buf=7,
         common_step_counter=123,
@@ -307,6 +313,7 @@ def test_live_logger_consumes_base_decel_raw_ledger_once_with_stable_tags(monkey
     )
     runner.env = SimpleNamespace(unwrapped=env)
     logged = {}
+    runner._mean_tensor = lambda value: 0.0
     runner._log_scalar = lambda tag, value, step: logged.setdefault(
         tag, (value, step)
     )

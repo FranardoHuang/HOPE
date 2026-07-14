@@ -1186,47 +1186,25 @@ def test_base_decel_is_disabled_during_frozen_hold():
     assert reward[1] > 0.0
 
 
-def test_base_decel_observer_hook_uses_exact_resolved_params_and_disabled_is_noop(monkeypatch):
-    calls = []
-    monkeypatch.setattr(
-        hope_rewards_mod,
-        "observe_base_decel_activation",
-        lambda env, command_name, **kwargs: calls.append(
-            (env, command_name, kwargs)
-        ),
-    )
-    command = types.SimpleNamespace(
-        _env="env",
-        cfg=types.SimpleNamespace(
-            base_decel_activation_enabled=False,
-            base_decel_activation_v_gain=1.7,
-            base_decel_activation_v_max=1.2,
-            base_decel_activation_std=0.35,
-        ),
-    )
+def test_base_decel_observer_is_a_real_reward_term_not_a_command_stage_hook():
+    # Isaac 2.1 executes reward -> reset -> command.  Both paired arms therefore must enter through
+    # RewardManager; any command-stage observer would compare a next-state control against an
+    # old-state treatment.  Keep this regression tied to the shipped class/config source.
+    command_source = inspect.getsource(hope_commands_mod.RacketTargetCommand)
+    assert "_observe_base_decel_activation" not in command_source
+    assert "base_decel_activation_enabled" not in command_source
 
-    hope_commands_mod.RacketTargetCommand._observe_base_decel_activation(command)
-    assert calls == []
-
-    command.cfg.base_decel_activation_enabled = True
-    hope_commands_mod.RacketTargetCommand._observe_base_decel_activation(command)
-    assert calls == [
-        (
-            "env",
-            "racket_target",
-            {"v_gain": 1.7, "v_max": 1.2, "std": 0.35},
-        )
+    cfg_path = os.path.abspath(
+        os.path.join(MDP_DIR, "..", "config", "agibot_a3", "hope_env_cfg.py")
+    )
+    with open(cfg_path, encoding="utf-8") as handle:
+        config_source = handle.read()
+    probe_decl = config_source.index("base_decel_activation_probe = RewTerm(")
+    treatment_decl = config_source.index("base_decel = RewTerm(", probe_decl)
+    assert probe_decl < treatment_decl
+    assert "func=mdp.base_decel_activation_probe, weight=0.0" in config_source[
+        probe_decl:treatment_decl
     ]
-
-
-def test_base_decel_observer_runs_after_all_command_target_updates():
-    source = inspect.getsource(
-        hope_commands_mod.RacketTargetCommand._update_command
-    )
-    observer = source.index("self._observe_base_decel_activation()")
-    assert source.index("self._compute_strike_timing()") < observer
-    assert source.index("self._push_actor_target()") < observer
-    assert source.index("motion.finalize_event_deadlines()") < observer
 
 
 # --------------------------------------------------------------------------------------------- #
