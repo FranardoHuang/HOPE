@@ -13,6 +13,13 @@
 
 ## 2026-07-15
 
+- post-swing capture 的 seed-parity source blocker 已闭环：`play.py` 现在拒绝 bool/float/string、负数与
+  uint32 越界 seed，并在创建环境前把同一个冻结值写入 env 与 PPO runner；真实 Hydra compose 负测也
+  逐项拒绝三个 train-only checkpoint 键。该提交不运行 Pod、不追认失败 v1，也不授权 successor；
+  controller 红队、schema-2 prereg、4096-environment capture 与首 reset 仍保持 fail closed。见
+  [producer operation](operations/run_post_swing_teacher_capture.md)和
+  [measurement rerun 卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)。
+
 - clean base-decel 两臂已自然终档，`model_1000` filename/embedded/finite/fresh/claim/common hard exact；
   980--1000 的 raw base speed 比为 `1.00882x`，按冻结 `<=0.90x` 门正式 reject，不买第二 seed/judge。
   同步源码语义审计发现 Reward 实际追踪随 racket-target 距离变化的 `v_des`，现有 primary 却只测未分桶

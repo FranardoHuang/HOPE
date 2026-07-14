@@ -306,6 +306,12 @@ root linear/angular velocity 上限分别冻结为 `2.0 m/s` / `4.0 rad/s`。两
 见 [`phase1_post_swing_teacher_capture_attempt_v1_result_20260715.json`](../../../configs/phase1_post_swing_teacher_capture_attempt_v1_result_20260715.json)。
 v1 不重发；successor 必须先合 seed parity，删全 train-only 键，并使用全新 source/output/launch namespace。
 
+seed parity 已于 2026-07-15 单独闭环：`play.yaml` 现在显式提供 `seed`，`play.py` 只接受
+`[0, 2^32-1]` 的 plain integer，并在 `gym.make` 前把同一个 seed 写入 environment 与 PPO runner。
+真实 Hydra compose 逐项证明三个 train-only checkpoint 键只要残留就 fail closed，净化后的 seed-3
+capture 配方可 compose。这个 source fix 不追认 v1，也不授权 v2；一次性 controller 的独立红队、全新
+schema-2 prereg、4096-environment capture、attestation 与首 reset 仍按顺序阻断。
+
 ## 离线复现
 
 本提交不连接 Pod、不写 claim、不运行 probe/trainer/judge：

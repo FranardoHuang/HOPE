@@ -8,6 +8,11 @@ process 和 GPU work 均未创建，v1 永久不重发。successor 还必须把�
 用新 source 与新 namespace 重新预注册。4096-environment capture、attestation 和首 reset readback probe
 尚未完成，因此 scientific trainer、第二 seed、judge 与 promotion 仍未授权。
 
+2026-07-15 的 seed-parity 修复已让 `play.py` 只接受 plain uint32 seed，并在 `gym.make` 前把同一个值
+写入 environment config 与 PPO runner config；三个 train-only checkpoint 键也都有真实 Hydra compose
+负测。该修复只关闭 seed 这一项 source blocker：一次性 controller 的独立红队与 schema-2 successor
+预注册仍未完成，因此本页状态仍是 `NO-LAUNCH`。
+
 合同真源见 [随挥结束教师状态接口](../interfaces/post_swing_teacher_artifact.md)，当前科学动机见
 [base-deceleration measurement rerun](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)。
 以下每个命令行参数（flag）旁边都写明人话用途；通用缩写见 [定义表](../DEFINITIONS.md)。
@@ -90,6 +95,7 @@ probe 需要在首个 PPO rollout/update 前通过，并证明两臂 hard contra
 ```bash
 pytest -q \
   tests/test_attest_post_swing_teacher.py \
+  tests/test_post_swing_play_runtime_compose.py \
   hope_training/whole_body_tracking/tests/test_post_swing_teacher.py
 
 python3 -m py_compile \
