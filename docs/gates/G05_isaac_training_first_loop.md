@@ -1852,3 +1852,29 @@ claim 和 launch sidecar 全部保留。serial fill 没有创建 treatment direc
 让 stale-log watchdog 随 source 固定，并先以相同 source/GPU/4096 environments/scene recipe 的非科学
 full-scene probe 越过 first iteration，同时写 trainer-owned runtime binding。上述能力和新运行证据闭合前，
 G05 继续 `Partial`。
+
+#### Trainer-owned binding、milestone attestor 与全规模非科学 probe
+
+`main@0b632c7` 让 opted-in trainer 在真实 RSL log directory 选定后原子发布 `run_binding.json`，绑定
+queue claim、source actual HEAD/clean、PID=PGID、`/proc` starttime/argv、物理 GPU 与预注册 milestones；
+attestor 不再 glob/latest 猜 checkpoint，只沿 binding 打开 exact `model_N.pt`，复核 filename/embed iter、
+floating/complex finite、相邻 schema-3 contract SHA、fresh lineage 与 launch claim，再 no-clobber 写 receipt。
+旧 source 默认关闭，不能被追认。
+
+1-env warmup 被真实 4096-env 卡死反例推翻后，`main@077e70c` 又加入独立 `full-scene-probe`：保留 exact
+source/动作/bank/plant/GPU 和正式 `num_envs`，只改为 2 updates/save1；输出位于按 job/source/Pod/GPU/attempt
+隔离的非科学 namespace，明确 `attestable=false/promotable=false`，专用确认词、reserved Pod、重复路径、
+zero/placeholder source 与环境数漂移均 fail closed。source focused/扩展套件分别 `73/109 passed`。
+
+Pod2 已准备 clean detached exact `077e70c` source，motion、train bank 与 K100 exam 均存在；conditional P1
+pair 与 V1+V2×base-decel pair 已绑定但保持 blocked，尚未运行 full-scene probe 或 scientific trainer。
+因此这里仍是 E1/source+runtime-readiness，G05 维持 `Partial`。
+
+#### qdot matched pair `+500` mixed signal
+
+同 source/seed 的 qdot weight `-5/0` 两份 `model_500.pt` 已通过 filename/embed iter、finite、fresh lineage、
+hard-contract 与 queue-claim binding。updates `480–500` 配对均值中 treatment 的 raw qdot max、near-limit
+fraction、torque saturation 分别下降 `16.4%/20.1%/35.5%`，pre/post fall 也改善；但 position pass 从
+`0.418` 降到 `0.107`，position error 从 `0.219 m` 升到 `0.311 m`，exact composite 两边均为零。日志还缺
+activation denominator 与 normalized/per-joint tail，所以只能判 mixed signal：不采用、不买第二 seed，
+等待 terminal checkpoint 的 immutable judge；G05 不因此晋级。

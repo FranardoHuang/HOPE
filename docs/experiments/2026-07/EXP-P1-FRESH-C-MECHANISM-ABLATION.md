@@ -131,6 +131,21 @@ log 全保留。完全不改 recipe/source/seed/GPU 的
 `phase1_fresh_c_qdot_hinge_control_seed3_retry_v2_20260714` 是唯一允许的 fresh namespace retry；若再次停在
 同 phase，则停止自动 retry并转预转换 USD/boot harness 根因线。
 
+### qdot 同源配对 `+500` 早判
+
+unchanged control retry-v2 随后成功启动。两边 `model_500.pt` 均为 filename=embedded iter `500`、76 tensors/
+1,762,717 elements 全 finite、fresh lineage `1`；相邻 schema-3 contract SHA 与 schema-2 queue claim 均匹配，
+hard contract 只有预期的 enabled/weight `false,0` 对 `true,-5` 两处差异。TensorBoard updates `480–500`
+的 21 点均值显示 treatment 相对 control：raw/arm/leg qdot max 分别下降 `16.4%/10.9%/18.0%`，near-limit
+fraction 下降 `20.1%`，torque saturation 下降 `35.5%`；pre/post fall 从 `0.294/0.140` 降到
+`0.209/0.0616`，completion 从 `0.607` 升到 `0.688`。机制 Reward 在 treatment `21/21` 非零且 finite，
+control `21/21` 为零。
+
+代价同样明确：position pass 从 `0.418` 降到 `0.107`，position mean error 从 `0.219 m` 升到 `0.311 m`；
+两边 exact composite 均为零。日志没有 activation numerator/denominator、normalized exceedance 或 per-joint
+tail，因此结论只能是“qdot/平衡方向改善但击球位置明显退化”的 mixed signal；不采用、不买第二 seed，
+保留 terminal checkpoint 后再用 immutable judge 判断，且未过主效应前不启动 `V1+V2 × qdot` 交互。
+
 ## 发射 harness P0 收紧（尚未产生新 run）
 
 在 qdot 格发射前，队列入口补上四个反复出错的执行合同，但没有连接 Pod 或改动现有五条 trainer：

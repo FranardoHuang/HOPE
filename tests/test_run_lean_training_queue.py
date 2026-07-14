@@ -892,7 +892,11 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
     rejected = [job for job in queue["jobs"] if job["status"] == "rejected"]
     assert len(ready) == 7
     assert len(rejected) == 8
-    assert [job["id"] for job in blocked] == ["fresh_c_conditional_face_w04"]
+    assert [job["id"] for job in blocked] == [
+        "fresh_c_conditional_face_w04",
+        "fresh_c_conditional_face_matched_control_p1r1",
+        "fresh_c_conditional_face_w04_p1r1",
+    ]
     assert queue["dispatch_pods"] == ["pod2"]
     conditional = {
         job["id"]: job for job in queue["jobs"]
@@ -903,11 +907,36 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
     } == {
         "fresh_c_conditional_face_matched_control": "rejected",
         "fresh_c_conditional_face_w04": "blocked",
+        "fresh_c_conditional_face_matched_control_p1r1": "blocked",
+        "fresh_c_conditional_face_w04_p1r1": "blocked",
     }
     assert all(
         job["resource"]["preferred_slot"] == "pod2/gpu1"
         for job in conditional.values()
     )
+    p1_pair = [
+        conditional["fresh_c_conditional_face_matched_control_p1r1"],
+        conditional["fresh_c_conditional_face_w04_p1r1"],
+    ]
+    assert all(job["runtime_binding"] is True for job in p1_pair)
+    assert all(job["source"] == {
+        "checkout": "/workspace/codexschema/nohope_p1_077e70c",
+        "commit": "077e70cfd89cfe21cdc24dc928e62b3fc2a8820f",
+    } for job in p1_pair)
+    def delta_map(job):
+        return {
+            item.split("=", 1)[0].lstrip("+"): item.split("=", 1)[1]
+            for item in job["recipe"]["delta"]
+        }
+
+    control_delta = delta_map(p1_pair[0])
+    treatment_delta = delta_map(p1_pair[1])
+    assert {
+        key: (control_delta[key], treatment_delta[key])
+        for key in control_delta if control_delta[key] != treatment_delta[key]
+    } == {
+        "task.rewards.racket_face_conditional_guidance_weight": ("0.0", "-0.4")
+    }
     axis_prefixes = (
         "++task.rewards.free_wrist_vel_mimic=",
         "++task.rewards.motion_scale_in_window=",

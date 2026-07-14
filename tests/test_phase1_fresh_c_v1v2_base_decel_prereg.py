@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import copy
 import importlib.util
 from pathlib import Path
 import sys
 
-import pytest
 import yaml
 
 
@@ -42,24 +40,19 @@ def _override_map(arguments: list[str]) -> dict[str, str]:
     return result
 
 
-def _write(tmp_path: Path, queue: dict) -> Path:
-    path = tmp_path / "queue.yaml"
-    path.write_text(yaml.safe_dump(queue, sort_keys=False), encoding="utf-8")
-    return path
-
-
 def test_preregistered_pair_is_pod2_only_blocked_and_unassigned():
     queue = Q.load_queue(QUEUE_PATH)
 
     assert queue["launch_authorized"] is False
-    assert queue["preregistration_status"] == "blocked_pending_p1_source_binding"
+    assert queue["preregistration_status"] == "blocked_pending_representative_full_scene_probe"
     assert queue["dispatch_pods"] == ["pod2"]
     assert [job["id"] for job in queue["jobs"]] == [
         "fresh_c_v1v2_base_decel_matched_control",
         "fresh_c_v1v2_base_decel_w1",
     ]
     assert all(job["status"] == "blocked" for job in queue["jobs"])
-    assert all("P1" in job["blocker"] for job in queue["jobs"])
+    assert all("full_scene_probe" in job["blocker"] for job in queue["jobs"])
+    assert all(job["runtime_binding"] is True for job in queue["jobs"])
     assert Q.cmd_plan(queue, live=False)["assignments"] == []
 
 
@@ -112,28 +105,31 @@ def test_base_deceleration_weight_is_the_only_matched_pair_delta():
     }
 
 
-def test_source_placeholder_has_two_independent_fail_closed_guards(tmp_path):
+def test_exact_p1_source_is_bound_but_normal_launch_remains_blocked():
     queue = Q.load_queue(QUEUE_PATH)
     for job in queue["jobs"]:
         assert job["source"] == {
-            "checkout": "/workspace/BLOCKED_PLACEHOLDER_P1_RUNTIME_BINDING_SOURCE",
-            "commit": "0" * 40,
+            "checkout": "/workspace/codexschema/nohope_p1_077e70c",
+            "commit": "077e70cfd89cfe21cdc24dc928e62b3fc2a8820f",
         }
-
-    zero_commit = copy.deepcopy(queue)
-    zero_commit["launch_authorized"] = True
-    zero_commit["jobs"][0]["status"] = "ready"
-    zero_commit["jobs"][0]["blocker"] = None
-    with pytest.raises(Q.QueueError, match="all-zero placeholder"):
-        Q.load_queue(_write(tmp_path, zero_commit))
-
-    placeholder_checkout = copy.deepcopy(queue)
-    placeholder_checkout["launch_authorized"] = True
-    placeholder_checkout["jobs"][0]["status"] = "ready"
-    placeholder_checkout["jobs"][0]["blocker"] = None
-    placeholder_checkout["jobs"][0]["source"]["commit"] = "1" * 40
-    with pytest.raises(Q.QueueError, match="still a placeholder"):
-        Q.load_queue(_write(tmp_path, placeholder_checkout))
+    assert Q.cmd_plan(queue, live=False)["assignments"] == []
+    probe = Q.cmd_full_scene_probe(
+        queue,
+        job_id="fresh_c_v1v2_base_decel_matched_control",
+        pod="pod2",
+        gpu=1,
+        attempt_id="p1_source_scene_family_a1",
+        execute=False,
+        confirm=None,
+    )
+    assert probe["not_science"] is True
+    assert probe["attestable"] is False
+    assert probe["promotable"] is False
+    assert probe["budget"] == {
+        "num_envs": 4096,
+        "max_iterations": 2,
+        "save_interval": 1,
+    }
 
 
 def test_early_decision_requires_activation_balance_and_precision_without_promotion():

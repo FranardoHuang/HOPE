@@ -58,6 +58,9 @@ x-qdot-source: &qdot_source
 x-conditional-source: &conditional_source
   checkout: /workspace/codexschema/nohope_conditional_face_guidance_61007e9
   commit: 61007e93879f35677e4c7d38cf7f681f324f9571
+x-p1-source: &p1_source
+  checkout: /workspace/codexschema/nohope_p1_077e70c
+  commit: 077e70cfd89cfe21cdc24dc928e62b3fc2a8820f
 x-base: &base
   - task=HOPEPingPongVirtualBall
   - algo=ppo
@@ -419,3 +422,32 @@ jobs:
         - ++task.rewards.racket_face_conditional_guidance_weight=-0.4
     run_name: phase1_fresh_c_conditional_face_w04_seed3_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_conditional_face_w04_seed3
+
+  # Fresh P1 pair.  These rows cannot enter normal fill until a representative
+  # 4096-environment full-scene probe passes on their preferred Pod2 GPU1.
+  - &conditional_p1_control
+    <<: *conditional_control
+    id: fresh_c_conditional_face_matched_control_p1r1
+    human_name: fresh C fixed-budget conditional face matched control, P1 runtime-bound retry
+    status: blocked
+    blocker: blocked_on_exact_4096_environment_full_scene_probe_passing_on_pod2_gpu1
+    source: *p1_source
+    runtime_binding: true
+    run_name: phase1_fresh_c_conditional_face_control_p1r1_seed3_20260714
+    run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_conditional_face_control_p1r1_seed3
+
+  - <<: *conditional_p1_control
+    id: fresh_c_conditional_face_w04_p1r1
+    human_name: fresh C fixed-budget conditional face treatment weight minus zero point four, P1 runtime-bound retry
+    recipe:
+      base: *base
+      delta:
+        - ++task.rewards.free_wrist_vel_mimic=false
+        - ++task.rewards.motion_scale_in_window=1.0
+        - task.rewards.base_decel_weight=0.0
+        - task.motion.post_swing_start_prob=0.25
+        - task.rewards.joint_velocity_limit_hinge_weight=0.0
+        - task.rewards.joint_velocity_limit_hinge_margin=0.85
+        - ++task.rewards.racket_face_conditional_guidance_weight=-0.4
+    run_name: phase1_fresh_c_conditional_face_w04_p1r1_seed3_20260714
+    run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_conditional_face_w04_p1r1_seed3

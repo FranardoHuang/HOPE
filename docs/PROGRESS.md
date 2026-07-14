@@ -13,6 +13,17 @@
 
 ## 2026-07-14
 
+- lean queue P1/P1.1 已进入 main：trainer-owned `run_binding` 与 exact milestone attestor 不再靠 glob 猜
+  checkpoint；新 `full-scene-probe` 保留正式 `4096 env` scene recipe、只用独立 2-update 非科学 namespace。
+  Pod2 clean detached `077e70c` source 与外部动作/bank/exam已核对；conditional 和 V1+V2×base-decel 新 pair
+  已绑定但仍 blocked，probe 尚未执行。见 [运行接口](interfaces/lean_training_run_binding.md)与
+  [G05](gates/G05_isaac_training_first_loop.md)。
+
+- qdot 同源 `-5/0` pair 的 `model_500` 身份/finite/contract/claim 全过；末 21 updates 显示 qdot max
+  `-16.4%`、near-limit `-20.1%`、torque saturation `-35.5%` 且 fall 改善，但 position pass
+  `0.418→0.107`。判 mixed signal，不采用、不买第二 seed；缺 activation denominator/per-joint tail，等待
+  immutable judge。见 [Fresh-C 机制卷宗](experiments/2026-07/EXP-P1-FRESH-C-MECHANISM-ABLATION.md)。
+
 - conditional-face source610 的 1-env warmup 不能代表正式启动：Pod2 GPU1 的 4096-env control 在 dynamic
   URDF import 后停住，iter0、无 scene/hard contract/checkpoint；精确 PGID `332786` 的 TERM 30 秒无响应后
   对同一 PGID KILL，证据保留。serial fill 未创建 treatment，因此不是“两条 Reward 都失败”。旧 pair 撤销，

@@ -1,7 +1,7 @@
 schema_version: 1
 simulation_only: true
 launch_authorized: false
-preregistration_status: blocked_pending_p1_source_binding
+preregistration_status: blocked_pending_representative_full_scene_probe
 
 ssh:
   key: ~/.ssh/id_ed25519_runpod
@@ -101,12 +101,12 @@ x-exam: &exam
   path: /workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.schedule.json
   family: signed_face_rebound_k100_v1
 
-# This value is deliberately unusable. A future reviewed P1 commit must replace
-# both fields before either row can become ready; all-zero commit is rejected by
-# the queue loader for ready jobs even if someone flips only the status.
+# Exact source contains trainer-owned runtime binding, milestone attestation,
+# source-pinned stale-log handling, and the representative full-scene probe.
+# Both jobs remain blocked until the separate probe receipt is audited.
 x-source: &source
-  checkout: /workspace/BLOCKED_PLACEHOLDER_P1_RUNTIME_BINDING_SOURCE
-  commit: "0000000000000000000000000000000000000000"
+  checkout: /workspace/codexschema/nohope_p1_077e70c
+  commit: 077e70cfd89cfe21cdc24dc928e62b3fc2a8820f
 
 x-base: &base
   - task=HOPEPingPongVirtualBall
@@ -201,11 +201,12 @@ jobs:
     human_name: fresh C V1 plus V2 interaction matched control with base deceleration off
     action: *action
     status: blocked
-    blocker: exact reviewed P1 runtime-binding source is not yet bound; placeholder source is intentionally non-executable
+    blocker: blocked_on_exact_4096_environment_full_scene_probe_passing_for_this_source_and_scene_family
     motion: *motion
     bank: *bank
     exam: *exam
     source: *source
+    runtime_binding: true
     recipe:
       base: *base
       delta:

@@ -1,6 +1,6 @@
 # EXP-P1-V1V2-BASE-DECEL-INTERACTION — 组合击球精度下的底座减速是否仍有净收益
 
-- 状态：`blocked`（已预注册，尚未绑定可执行 source）
+- 状态：`blocked`（已绑定 P1 exact source；等待同 scene family 的 4096-env 非科学启动探针）
 - 阶段/轴：Phase 1 fresh C；V1+V2 与击球前底座减速的组合效应
 - 集成小目标：保住 V1+V2 的击球精度信号，同时降低击球前底座速度和摔倒率
 - 人类负责人：Franco
@@ -32,7 +32,7 @@ composite 四项击球精度通过率各自不下降超过 5 个百分点。任�
 
 | 字段 | 冻结值 |
 | --- | --- |
-| Source | `BLOCKED_PLACEHOLDER_P1_RUNTIME_BINDING_SOURCE` / 全零 commit；故意不可执行，等 reviewed P1 runtime-binding commit |
+| Source | `main@077e70c` / `/workspace/codexschema/nohope_p1_077e70c`；含 runtime binding、milestone attestor 与 full-scene probe |
 | 初始化/seed | fresh / `3`；只买一个 seed |
 | 预算 | `4096 environments × 1001 updates`，每 `100` 保存，配对检查 `200/500/1000` |
 | 动作 | v4rg 正反手 runtime-order 动作；shared-face signed action |
@@ -42,9 +42,10 @@ composite 四项击球精度通过率各自不下降超过 5 个百分点。任�
 | 唯一差异 | control `base_decel_weight=0.0`；treatment `base_decel_weight=1.0` |
 | 调度 | 只允许 Pod2；Pod1 仅保留在 harness 固定 schema 中，`dispatch_pods: [pod2]` 不会给它发新任务 |
 
-source placeholder 是双保险：两格均为 `status: blocked`，所以离线 plan 没有 assignment；即使只把 status
-误改为 `ready`，全零 commit 和带 `PLACEHOLDER` 的 checkout 仍会被 loader 在任何 SSH 前拒绝。只有主线
-P1 source 已经 review、合入并由两格共同绑定同一 exact commit/checkout 后，才可以另提交解除阻塞的变更。
+两格仍为 `status: blocked`，所以 normal plan 没有 assignment。source 绑定已关闭，但这不等于 scene boot
+已经通过：必须先用独立 `_full_scene_probes/` namespace、同 source/Pod2/GPU、同动作/bank/plant 与
+`4096 environments` 越过首个 `Learning iteration`，再核对 probe 自然退出和 fatal0，才可另提交解除
+blocker。probe 的 model/reward 永不进入实验成绩。
 
 ## Activation 与配对早判
 
@@ -78,16 +79,16 @@ reward 效果前必须先闭合以下 activation：
 
 | 运行（人话名 + `run_name`） | 状态 | Checkpoint/seed | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
-| V1+V2，底座减速关；`phase1_fresh_c_v1v2_base_decel_control_seed3_20260714` | blocked | `200/500/1000`，seed 3 | 仅机器预注册 | 无 | source placeholder，不可执行 |
-| V1+V2，底座减速权重 1；`phase1_fresh_c_v1v2_base_decel_w1_seed3_20260714` | blocked | `200/500/1000`，seed 3 | 仅机器预注册 | 无 | source placeholder，不可执行 |
+| V1+V2，底座减速关；`phase1_fresh_c_v1v2_base_decel_control_seed3_20260714` | blocked | `200/500/1000`，seed 3 | exact P1 source + machine prereg | 无 | 等代表性 full-scene probe |
+| V1+V2，底座减速权重 1；`phase1_fresh_c_v1v2_base_decel_w1_seed3_20260714` | blocked | `200/500/1000`，seed 3 | exact P1 source + machine prereg | 无 | 等代表性 full-scene probe |
 
 ## 决定
 
 - 决定：`inconclusive`
-- 理由：两格 recipe、差异和早判已冻结，但 reviewed P1 source 尚未绑定，未连接 Pod、未产生 claim/run。
+- 理由：两格 recipe、差异、早判与 P1 source 已冻结，但代表性 4096-env probe 尚未执行，未产生科学 claim/run。
 - 是否已纳入当前 setting：`no`
-- 局限/下一个 gate：主 agent 提供 exact P1 commit 后，先只做 source/checkout 绑定与 prereg diff 复核；再由
-  active queue 的运行门决定是否点火。不得顺手改 recipe、seed、阈值或授权 judge。
+- 局限/下一个 gate：先让同 source/scene family 的 full-scene probe 在 Pod2 空闲卡越过 first iteration并
+  自然退出；另一个结果后提交才可把两格改为 ready。不得顺手改 recipe、seed、阈值或授权 judge。
 
 ## 复现与证据
 

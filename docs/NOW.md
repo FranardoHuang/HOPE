@@ -39,7 +39,9 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `e2eb99e6...d28cc`，独立 `validate-result` 确认 `runner_lineage=true`、`npz_bound=true`，completion-last
   ledger SHA-256 为 `c0a25f2c...f4f8b`。这只解锁 B 的下一张 L0 静态证书；vendor L1、整轨桌网余隙、
   动力学与 RL 仍未跑。C 保持未消费，只在 B 后续外部安全门失败或证明有独有覆盖时作为后备，不复制
-  一个 RL 槽。
+  一个 RL 槽。B 的四份 exact 资产已只读搬到 Pod2，但首次 L0 调用在任何运动学/证书写入前再次 fail
+  closed：portable validator 仍从历史 Pod1 checkout 的绝对路径读取 body order。证书保持 absent；当前先修
+  这一个 portability 根因，不重跑、不把它写成动作失败。
   高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
   canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。exact GMR runtime source gate 也已进入
   `main` 并通过全回归；Pod 上的 `inspect/consume` 尚未执行，所以还不是“动作会打球”。
@@ -48,10 +50,11 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `0.268`），但平衡债仍高；V2 单独格明显落后，已列为可替换且不复制 seed。base-decel、V1 和
   post-swing 保到 `+1000` 看权衡是否收敛。qdot-limit 第一次发射在第 0 update 的 A3 URDF import 阶段
   超时，launcher 只收口其 exact PGID；无 hard contract/model，因此是基础设施失败而非 reward 失败，
-  全新 retry-v2 已通过 no-Kit compose 与真实 boot marker。2026-07-14T12:11Z，Pod2 上同 source/seed 的
-  qdot control/treatment 分别到 iter `504/818`，最新为 `model_500/model_800`；两者 fatal regex 均为 `0`，
-  checkpoint/claim/hard-contract lineage 仍按原配对合同审计。因此 qdot pair 有效运行，并非“跑几步就失败”；
-  尚未完成同 milestone 行为早判，不能作因果采用。
+  全新 retry-v2 已通过 no-Kit compose 与真实 boot marker。qdot treatment 已自然到 `model_1000`，control
+  只读审计时到 iter `799`；两份 `model_500` 的 checkpoint/claim/hard-contract/finite 全过。末 21 updates
+  里 treatment 的 qdot max `-16.4%`、near-limit `-20.1%`、torque saturation `-35.5%` 且 fall 改善，但
+  position pass 从 `0.418` 降到 `0.107`。这是“平衡更好、击球位置明显更差”的 mixed signal：不采用、
+  不买第二 seed，等 terminal immutable judge；也不启动 `V1+V2 × qdot` 交互。
   qdot control 的首次冷启动随后在 scene creation 前卡住，iter0/无 contract；exact PGID 已收口并保全。
   仅允许相同配方的 retry-v2 再试一次；若同 phase 重复，停止 retry并转 importer 根因线。
   新 source 的正式 run 前现先走独立 `boot-warmup`（1 env×2 update、180 秒、非科学 namespace），避免再拿
@@ -59,25 +62,26 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   通用 launcher 也已加入 180 秒日志无进展 watchdog；marker 优先，失败只收口自身 exact PGID并写 sidecar。
   conditional source 的 Pod2 GPU1 1-env warmup 虽自然退出并通过 2/2 updates，但随后 4096-env control
   在 dynamic URDF import 后停住，iter0、无 scene/contract/checkpoint；精确 PGID 收口并保全，treatment
-  从未创建。这个反例推翻了“1-env warmup 可授权正式 run”：旧 source610 pair 已撤销，下一版必须把
-  watchdog/runtime binding 固定进 source，并以同 `4096 env` scene recipe 的非科学 full-scene probe 过门。
+  从未创建。这个反例推翻了“1-env warmup 可授权正式 run”。新的 P1 source `077e70c` 已在 Pod2 clean
+  detached 准备完成；conditional `0/-0.4` 与 `V1+V2 × base-decel` 两组单 seed pair 均已 exact 绑定但保持
+  blocked，下一动作是 GPU1 上同 `4096 env` scene recipe 的 2-update 非科学 full-scene probe。
   “每卡只能发一条”的 launch-lock 根因已修：旧 `flock FILE command` fd 被 trainer 继承；新 controller
   用 fd8 持短锁并对子 launcher `8>&-`。conditional control/treatment 优先同落已 warm 的 Pod2 GPU1，
   正好验证容量不再退化为1；现役 qdot 的旧锁不做任何强制处理。
 
   2026-07-14 19:00 CST 起 Pod1 全部留给 Yikang 冲刺：Codex 的 V1/V2/V1+V2 只对精确 PGID 发出
   `TERM`，分别停在 iter `792/782/743`，三条 `model_700.pt` 与日志完整保留，未进入 `KILL`；复核 Pod1
-  三卡无 Codex compute process。Codex 后续只使用 Pod2。2026-07-14T12:11Z，GPU2 的 qdot treatment 与
-  GPU0 的 qdot control 正常运行；GPU0 另有 Yikang 的外部 trainer，Codex 不管理；GPU1 因 conditional
-  基础设施失败暂时释放。机器可读
+  三卡无 Codex compute process。Codex 后续只使用 Pod2。qdot treatment 已自然退出并释放 GPU2，control
+  仍在 GPU0；GPU0 另有 Yikang 的外部 trainer，Codex 不管理；GPU1 预留给下一条 4096-env probe。机器可读
   [`dispatch_pods: [pod2]`](DEFINITIONS.md#dispatch-pods) 已使新 assignment 不可能
   落到 Pod1，同时只读旧 claim 防止重复发射。
 
   发射 harness 已在 `main` 收紧：YAML recipe 先拒绝重复/owned key 和 Hydra 控制语法，真实最终 argv 在
   claim 前做 no-Kit compose，run directory 原子创建，canonical claim digest 自动绑定 source/argv/
-  预算/motion/bank/exam 并进入 checkpoint provenance。下一闭环是 trainer-owned
-  [`run_binding.json`](DEFINITIONS.md#trainer-run-binding)、
-  [milestone attestor](DEFINITIONS.md#milestone-attestor) 和每个机制的 activation numerator/denominator。
+  预算/motion/bank/exam 并进入 checkpoint provenance。trainer-owned
+  [`run_binding.json`](DEFINITIONS.md#trainer-run-binding) 与
+  [milestone attestor](DEFINITIONS.md#milestone-attestor) 已进入 main；代表性 full-scene probe 也已实现。
+  下一闭环是 Pod2 首次 probe/新 source binding receipt，以及每个机制的 activation numerator/denominator。
 
   非击球臂 A0/A1 已完成 checkpoint 层闭环。A1 自然退出；
   A0 的 `model_1000.pt` 写完后在 Kit/Python teardown 挂起近三小时，正式 failure regex 无命中，终档
