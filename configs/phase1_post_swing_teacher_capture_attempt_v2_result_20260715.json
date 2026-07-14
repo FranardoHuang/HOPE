@@ -12,6 +12,11 @@
     "checkout": "/workspace/codexschema/nohope_post_swing_capture_2539889",
     "commit": "253988917566c989828d4ac77de6fb0036dcfc12"
   },
+  "execution_slot": {
+    "pod": "pod2",
+    "logical_gpu": 2,
+    "physical_gpu_uuid": "GPU-feee9e1f-7663-06f6-fa29-62fca6a9b1a4"
+  },
   "plan_compose": {
     "returncode": 0,
     "stdout_stderr_bytes": 6596,
@@ -30,6 +35,7 @@
   "runtime_checks_before_failure": {
     "environment_setup_completed": true,
     "actor_observation_contract": "MATCH_179D",
+    "teacher_checkpoint_sha256": "22f78f882397c48d1c8763186748935517d669cf4f36205baf69d07dc9e08a6a",
     "checkpoint_hard_contract_sha256": "451cda47227f8e78e4f3dcae3cbf22d7ddf88b4c5fbaf348e698963d8bc12291",
     "runtime_hard_contract_match": true,
     "ppo_updates": 0,

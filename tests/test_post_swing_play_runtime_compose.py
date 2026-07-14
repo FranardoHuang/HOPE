@@ -194,6 +194,11 @@ def test_v2_runtime_failure_is_bound_spent_and_not_silently_promoted():
         "fd72fa9ef1305960bd715c087623a21ef4709c7f05f751bb9ab2d6d4fc94b60c"
     )
     assert result["plan_compose"]["returncode"] == 0
+    assert result["execution_slot"] == {
+        "pod": "pod2",
+        "logical_gpu": 2,
+        "physical_gpu_uuid": "GPU-feee9e1f-7663-06f6-fa29-62fca6a9b1a4",
+    }
     assert result["launch"]["pid"] == result["launch"]["pgid"] == result["launch"]["sid"]
     assert result["runtime_checks_before_failure"]["runtime_hard_contract_match"] is True
     assert result["failure"]["message"] == "'tuple' object has no attribute 'to'"

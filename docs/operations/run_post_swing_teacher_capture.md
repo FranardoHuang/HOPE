@@ -189,5 +189,6 @@ python3 -m py_compile \
 git diff --check
 ```
 
-2026-07-15 在可导入 Hydra 的本地环境按上述四文件命令复现为 `41 passed`；这只是 host source gate，
-不能替代 Pod2 同环境 compose 或 Isaac capture。
+2026-07-15 在可导入 Hydra 的本地环境，controller/attestor/teacher 原四文件门曾复现为 `41 passed`；
+加入 observation adapter 与 v2 result 负测后的上述五文件命令复现为 `74 passed`（另有一个既有 duplicate-ZIP
+warning）。这仍只是 host source gate，不能替代 Pod2 同环境 compose 或 Isaac capture。
