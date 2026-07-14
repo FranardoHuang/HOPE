@@ -544,10 +544,16 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   均已 finite/loadable。fresh 的短 mechanics 因初始策略 5 秒前摔倒只验证到 push selection，但正式
   run 到约 iter 322 已记录第一次真实 apply。下一证据：同绝对迭代 checkpoint 的泛化、推扰后存活与固定点回归；随后
   才做同运行链 Gate3 对照。启动健康不等于质量晋级；旧周期代理与球路泛化局限见
-  [跨线审计](experiments/2026-07/EXP-V9-YIKANG-CROSS-LEARNING-20260715.md)。2026-07-15 Codex 正在
-  同一分支移植 `hitter@5f87a4f` 的 recipe-7/runtime-v2 训练、导出与部署合同；现役 V9 force
-  作业保持原 exact source，不切 checkout、不重启。下一检查点是两项依赖提交完整合入、host 合同测试
-  通过、空闲 GPU 复核，以及在独立 run namespace 发射一条 fresh RallyV10，而不是续训或替换现有矩阵。
+  [跨线审计](experiments/2026-07/EXP-V9-YIKANG-CROSS-LEARNING-20260715.md)。2026-07-15 已在同一
+  分支完成 `hitter@5f87a4f` 的完整 recipe-7/runtime-v2 移植并推送 exact merge
+  `8e0aaf885dc553ad727a19d1f106b25e98afa866`；现役 V9 force 作业保持原 exact source，不切
+  checkout、不重启。合并后的 Python host 门、本机/Pod2 合同回归、C++ focused/runtime policy
+  smoke 与 32-env×2-update 真 Isaac fresh smoke 均通过。独立 RallyV10 正式 run 已在 Pod2 GPU1
+  以 8000 envs/seed0/10000 updates 发射：W&B
+  [`qpl08mug`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/qpl08mug)，110-D actor/328-D critic，
+  未加载 checkpoint。首个 progressed `model_100.pt` 已通过 embedded iteration、optimizer 与全部
+  tensor finite 审计；下一证据是 deterministic core/planner/mix 选择、recipe-7 ONNX、MuJoCo 与
+  V10 Gate3，不以启动曲线直接晋级。
 
 ### 训练引擎与机器人物理
 
