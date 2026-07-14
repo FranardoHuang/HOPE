@@ -110,6 +110,15 @@
   [L1 卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1.md)与
   [操作](operations/run_motion_backhand_loop_b_vendor_l1_safety.md)。
 
+- 稀疏平衡失败的横向扰动消融已完成 source-only 红队修正版：`torso_link` 质心 WORLD-Y 有界脉冲按
+  随机化后整机总质量缩放，`L0/L1` 用 domain-separated Philox4x32-10 共同随机题并暴露 potential draw/
+  schedule SHA；episode reset 截断会记录 sampled/commanded/applied/abandoned 冲量且当步禁止重启。
+  Random123 已知向量、跨 stream/相邻 seed 分布与相关性、CRN、reset 对账和 zero-clear 共 `20 passed`。
+  Isaac adapter、runtime ledger、hard contract 与 held-out paper 未闭合，机器预注册仍
+  `launch_authorized=false`，没有连接 Pod。见
+  [实验卷宗](experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md)与
+  [G05](gates/G05_isaac_training_first_loop.md)。
+
 - Franco 反手拉 B 的 L0 V1 portable dry-run 已登记为数值合同负结果，而非动作失败：schema-2 只存
   post-FK normalized float32 root body pose，V1 再把它当原 free-joint qpos 注入并要求 byte equality；
   position/quaternion/COM velocity/angular velocity 最大差分别为 `1.1920929e-7 / 5.9604645e-8 /

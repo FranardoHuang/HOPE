@@ -147,6 +147,26 @@ Follow-up note (2026-07-15, Yikang RallyV9 reach/balance matrix; Gate remains `P
   iteration 322. Launch health is not a generalization, balance, or Gate3 result; matched-iteration
   evaluation and formal fork export remain pending.
 
+Follow-up note (2026-07-15, lateral-balance perturbation source gate; Gate remains `Partial`):
+
+- The proposed sparse-balance-data ablation now has a source-only, recovery/hold-exclusive pulse
+  scheduler.  Its treatment samples a bounded left/right WORLD-Y impulse-equivalent force at the
+  `torso_link` COM and scales force by the articulation's post-randomization total mass; the
+  matched control has zero impulse but shares the same potential random schedule.  It never writes
+  root velocity, X/Z force or torque.
+- Red-team review rejected the first linear counter streams and silent reset truncation.  The
+  successor uses Random123-compatible domain-separated Philox4x32-10 (known-vector and
+  cross-stream/cross-seed distribution tests), exposes the potential draws plus a common-random
+  schedule SHA, and records sampled/commanded/applied/abandoned impulse when reset interrupts a
+  pulse.  Reset cannot immediately restart a pulse.  Hot-path tensor validity/application
+  accounting no longer calls `.item()` or `bool(torch.any(...))`.
+- Focused source verification is `20 passed`; this is E1 only.  The Isaac adapter, WORLD-to-BODY
+  wrench transform, post-randomization total-mass reader, every-step full-batch zero overwrite,
+  runtime ledger/logger, hard-contract/runner integration and content-addressed held-out papers are
+  absent.  The machine prereg remains `launch_authorized=false`; no Pod, trainer or simulator was
+  touched.  See
+  [EXP-P1-LATERAL-BALANCE-PERTURBATION](../experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md).
+
 Follow-up note (2026-07-14, Pod2 `+200` activation audit; Gate remains `Partial`):
 
 - Four science trainers produced exact `model_200` receipts with finite tensors, matching embedded
