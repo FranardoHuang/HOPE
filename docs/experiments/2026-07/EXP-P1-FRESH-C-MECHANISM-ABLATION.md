@@ -34,8 +34,9 @@ infra-only retry 是完全继承 motion、bank、exam、source、recipe、seed �
 doctor 和 trainer 现在由同一个 child-environment builder 生成 CUDA 与
 `PYTHONPATH=${HOPE_WBT_PYTHONPATH}`。source commit/clean、三类资产和
 `find_spec('whole_body_tracking')` 的 exact source origin 在创建 run directory/claim 前完成；失败不留
-新 claim。launcher 等到第一个 `Learning iteration`，不是只等早期 Kit marker。`doctor --live` 明确只验
-source/assets/module；当前没有可信的 no-Kit Hydra compose 接口，所以不把配置解析冒充已通过。
+新 claim。launcher 等到第一个 `Learning iteration`，不是只等早期 Kit marker。该次修复时
+`doctor --live` 仍只验 source/assets/module；当时没有可信的 no-Kit Hydra compose 接口，因此没有把
+配置解析冒充已通过。
 
 推荐只用单进程 `fill --count N --execute`：每条依次 doctor、claim、等 first iteration、重采六卡再选
 下一条。任何失败立即停止且不自动 retry。所有 `retry-v2` 真正到 checkpoint 前，本实验没有科学结论，
@@ -70,3 +71,19 @@ qdot 格使用 clean source `a6ccdc7a1c696ff37878039f1e1d83dea28a2bfa`，仍为 
 方向对照不得下降超过 5 个百分点，pre-strike fall 不得恶化超过 2 个百分点。由于旧 control source 没有
 qdot contract 字段，这一格只能 screen；若有正向信号，下一空槽必须在同一 `a6ccdc7` source、同 seed 跑
 weight `0` 的 exact matched control 后才允许作因果采用判断。
+
+## 发射 harness P0 收紧（尚未产生新 run）
+
+在 qdot 格发射前，队列入口补上四个反复出错的执行合同，但没有连接 Pod 或改动现有五条 trainer：
+
+- recipe 先编译为单义 Hydra key 集；`key/+key/++key` 视为同一个 key，重复 key、harness 自己生成的
+  seed/预算/run/motion/bank/device/claim key、Hydra flag、删除和 interpolation 都在 SSH 前拒绝；
+- 整份 YAML 的 `run_dir` 全局唯一，ready run 不能放进 ready source checkout；远端只允许原子创建一个
+  从未存在的 run directory，不能覆盖旧 log/state；
+- standalone doctor 与 launch 内置 doctor 都用真实最终 override 向量运行
+  `train.py --cfg job --resolve`，且位于 claim 前；该路径只做 Hydra compose，不启动 Kit；
+- canonical claim content 绑定 source、caller argv、run name、seed/预算/milestones、motion/bank/exam identity
+  和 Pod/GPU；其 digest 自动成为真实 argv 的 `training_launch_claim_sha256`，claim 同时保存完整执行 argv。
+
+focused 回归为 `19 passed`，并继续覆盖 active queue。此处只关闭发射前 source-contract 缺口：没有新增
+claim、checkpoint、机制成绩或 qdot runtime 证据，G05 继续 `Partial`。

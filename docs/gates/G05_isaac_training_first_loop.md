@@ -1744,6 +1744,22 @@ module-runtime preflight 通过，不改变 G05 `Partial`。
 均通过。第六格 qdot-limit tail 已冻结为同 fresh-C 配方、weight `-5.0`/margin `0.85`，只授权单 seed
 `+200` direction screen；同 source weight0 matched control 前不得作因果采用。G05 仍为 `Partial`。
 
+#### Lean queue 发射前 P0 合同收紧
+
+后续 source gate 把高频误发模式挡在 claim 前：recipe 的 `key/+key/++key` 统一后必须无重复，也不能覆盖
+seed、预算、run、device、motion/bank 或 launch-claim 等 harness-owned key；Hydra flag、删除语法与
+interpolation fail closed。`run_dir` 在整份 YAML 内唯一且不能位于 ready source 内，远端只能以不带 `-p`
+的原子 `mkdir` 创建全新 namespace，已有目录/文件/symlink 都拒绝。
+
+standalone doctor 和 launch 内置 doctor 现在都用同一条最终 override 向量执行
+`train.py --cfg job --resolve`，在 claim 前完成 no-Kit Hydra compose。canonical claim content 绑定 source、
+完整 caller argv、run name、预算/milestones、motion/bank/exam identity 和 Pod/GPU，其 digest 自动加入真实
+trainer argv 的 `training_launch_claim_sha256`，claim envelope 同时保存完整执行 argv。focused
+`19 passed`；本变更没有连接 Pod、启动 trainer 或产生 checkpoint/行为结果，且尚未增加 source-specific
+asset/cache warmup 的 phase marker，因此 G05 保持 `Partial`。复现见
+[操作](../operations/run_lean_training_queue.md)与
+[实验](../experiments/2026-07/EXP-P1-FRESH-C-MECHANISM-ABLATION.md)。
+
 ### 2026-07-14 31 关节 qdot-limit hinge 源码门
 
 VirtualBall reward stack 新增默认关闭的

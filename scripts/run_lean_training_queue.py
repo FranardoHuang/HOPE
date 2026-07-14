@@ -13,6 +13,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import fcntl
+import hashlib
 import json
 from pathlib import Path
 from pathlib import PurePosixPath
@@ -43,6 +44,7 @@ class Slot:
 
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
+HYDRA_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 READY = "ready"
 BLOCKED = "blocked"
 TERMINAL = {"complete", "rejected"}
@@ -56,6 +58,15 @@ ENTRYPOINT_RELATIVE = "scripts/train.py"
 KIT_LAUNCHER_RELATIVE = "scripts/launch_kit_training_locked.sh"
 KIT_BOOT_MARKER = "Learning iteration"
 KIT_BOOT_TIMEOUT_SECONDS = 900
+HARNESS_OWNED_OVERRIDE_KEYS = {
+    "seed",
+    "num_envs",
+    "max_iterations",
+    "algo.runner.save_interval",
+    "run_name",
+    "device",
+    "training_launch_claim_sha256",
+}
 UNIQUE_NUMERIC_PID_AWK = (
     r'{gsub(/^[ \t]+|[ \t]+$/, "", $0); '
     r'if ($0 ~ /^[0-9]+$/) seen[$0]=1} END {print length(seen)}'
@@ -103,6 +114,84 @@ def _ready_workspace_path(value: Any, label: str) -> str:
     return path
 
 
+def _canonical_sha256(value: Any) -> str:
+    payload = json.dumps(
+        value,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _override_key(argument: str, label: str) -> str:
+    """Return one normalized Hydra key or fail before any SSH.
+
+    Queue recipes are scalar override lists, not Hydra control surfaces.  In
+    particular, a job may not smuggle in multirun/config flags, deletion,
+    environment-dependent interpolation, or a second value for the same key.
+    """
+
+    if argument.startswith("-"):
+        raise QueueError(f"{label} must not contain a Hydra control flag")
+    if argument.startswith("~"):
+        raise QueueError(f"{label} must not contain Hydra deletion syntax")
+    if "${" in argument:
+        raise QueueError(f"{label} must not contain Hydra interpolation/resolvers")
+    raw_key, separator, _value = argument.partition("=")
+    if not separator:
+        raise QueueError(f"{label} must be one Hydra key=value override")
+    if raw_key.startswith("++"):
+        raw_key = raw_key[2:]
+    elif raw_key.startswith("+"):
+        raw_key = raw_key[1:]
+    if raw_key.startswith("~") or not HYDRA_KEY.fullmatch(raw_key):
+        raise QueueError(f"{label} has an unsupported Hydra key")
+    if raw_key == "hydra" or raw_key.startswith("hydra."):
+        raise QueueError(f"{label} must not modify Hydra runtime configuration")
+    return raw_key
+
+
+def _generated_override_key(raw_key: Any, label: str) -> str:
+    key = _text(raw_key, label)
+    if "=" in key:
+        raise QueueError(f"{label} must be one Hydra key without a value")
+    return _override_key(f"{key}=__harness_value__", label)
+
+
+def _compile_recipe_override_keys(job: dict[str, Any], label: str) -> set[str]:
+    recipe = _mapping(job.get("recipe"), f"{label}.recipe")
+    base = _list(recipe.get("base"), f"{label}.recipe.base")
+    delta = _list(recipe.get("delta"), f"{label}.recipe.delta")
+    if not base:
+        raise QueueError(f"{label}.recipe.base must not be empty")
+
+    owned = set(HARNESS_OWNED_OVERRIDE_KEYS)
+    motion = _mapping(job.get("motion"), f"{label}.motion")
+    bindings = _mapping(motion.get("bindings"), f"{label}.motion.bindings")
+    owned.update(
+        _generated_override_key(key, f"{label}.motion binding") for key in bindings
+    )
+    bank = _mapping(job.get("bank"), f"{label}.bank")
+    owned.add(
+        _generated_override_key(
+            bank.get("train_arg"), f"{label}.bank.train_arg"
+        )
+    )
+
+    compiled: set[str] = set()
+    for number, raw in enumerate([*base, *delta]):
+        argument = _text(raw, f"{label}.recipe argument {number}")
+        key = _override_key(argument, f"{label}.recipe argument {number}")
+        if key in compiled:
+            raise QueueError(f"{label}.recipe sets Hydra key {key!r} more than once")
+        if key in owned:
+            raise QueueError(f"{label}.recipe may not set harness-owned key {key!r}")
+        compiled.add(key)
+    return compiled
+
+
 def load_queue(path: Path) -> dict[str, Any]:
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -140,6 +229,8 @@ def load_queue(path: Path) -> dict[str, Any]:
         raise QueueError("jobs must not be empty")
     seen: set[str] = set()
     run_names: set[str] = set()
+    run_dirs: set[PurePosixPath] = set()
+    ready_layouts: list[tuple[str, PurePosixPath, PurePosixPath]] = []
     for index, value in enumerate(jobs):
         job = _mapping(value, f"jobs[{index}]")
         job_id = _text(job.get("id"), f"jobs[{index}].id", safe_id=True)
@@ -187,13 +278,7 @@ def load_queue(path: Path) -> dict[str, Any]:
         if not COMMIT.fullmatch(commit):
             raise QueueError(f"{job_id}.source.commit must be a full Git commit")
 
-        recipe = _mapping(job.get("recipe"), f"{job_id}.recipe")
-        base = _list(recipe.get("base"), f"{job_id}.recipe.base")
-        delta = _list(recipe.get("delta"), f"{job_id}.recipe.delta")
-        if not base:
-            raise QueueError(f"{job_id}.recipe.base must not be empty")
-        for number, argument in enumerate([*base, *delta]):
-            _text(argument, f"{job_id}.recipe argument {number}")
+        _compile_recipe_override_keys(job, job_id)
 
         if type(job.get("seed")) is not int or job["seed"] < 0:
             raise QueueError(f"{job_id}.seed must be a non-negative integer")
@@ -224,7 +309,13 @@ def load_queue(path: Path) -> dict[str, Any]:
         if run_name in run_names:
             raise QueueError(f"duplicate run_name: {run_name}")
         run_names.add(run_name)
-        _text(job.get("run_dir"), f"{job_id}.run_dir")
+        run_dir = PurePosixPath(_text(job.get("run_dir"), f"{job_id}.run_dir"))
+        if run_dir in run_dirs:
+            raise QueueError(f"duplicate run_dir: {run_dir}")
+        run_dirs.add(run_dir)
+        source_path = PurePosixPath(source["checkout"])
+        if run_dir == source_path or source_path in run_dir.parents:
+            raise QueueError(f"{job_id}.run_dir must not equal or be inside its source")
         if status == READY:
             if commit == ZERO_COMMIT:
                 raise QueueError(f"{job_id}.source.commit is an all-zero placeholder")
@@ -245,6 +336,16 @@ def load_queue(path: Path) -> dict[str, Any]:
             input_paths = normalized[1:-1]
             if len(set(input_paths)) != len(input_paths):
                 raise QueueError(f"{job_id} has duplicate motion/bank/exam identities")
+            ready_layouts.append(
+                (job_id, PurePosixPath(normalized[0]), PurePosixPath(normalized[-1]))
+            )
+    for run_job_id, _run_source, run_path in ready_layouts:
+        for source_job_id, source_path, _source_run in ready_layouts:
+            if run_path == source_path or source_path in run_path.parents:
+                raise QueueError(
+                    f"{run_job_id}.run_dir must not equal or be inside ready source "
+                    f"checkout for {source_job_id}"
+                )
     return queue
 
 
@@ -302,13 +403,42 @@ def live_snapshot(queue: dict[str, Any]) -> tuple[dict[str, int], dict[str, dict
     occupancy: dict[str, int] = {}
     claims: dict[str, dict[str, Any]] = {}
     job_dirs = {job["id"]: job["run_dir"] for job in queue["jobs"]}
-    program = f"""import json
+    program = f"""import hashlib
+import json
 from pathlib import Path
 import subprocess
 
 jobs = json.loads({json.dumps(json.dumps(job_dirs))})
 def lines(args):
     return subprocess.run(args, check=True, text=True, stdout=subprocess.PIPE).stdout.splitlines()
+
+def canonical_sha256(value):
+    encoded = json.dumps(
+        value, allow_nan=False, ensure_ascii=False,
+        separators=(",", ":"), sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+def claim_identity(payload, claim):
+    schema = payload.get("schema_version")
+    if schema == 1:
+        return payload
+    if schema != 2:
+        raise RuntimeError(f"unsupported claim schema: {{claim}}")
+    content = payload.get("content")
+    if not isinstance(content, dict):
+        raise RuntimeError(f"claim content is not a mapping: {{claim}}")
+    digest = payload.get("content_sha256")
+    if canonical_sha256(content) != digest:
+        raise RuntimeError(f"claim content digest mismatch: {{claim}}")
+    argv_without_claim = content.get("training_argv_without_claim")
+    full_argv = payload.get("training_argv")
+    if not isinstance(argv_without_claim, list) or not isinstance(full_argv, list):
+        raise RuntimeError(f"claim argv is not a list: {{claim}}")
+    expected_argv = [*argv_without_claim, f"++training_launch_claim_sha256={{digest}}"]
+    if full_argv != expected_argv:
+        raise RuntimeError(f"claim full argv does not bind its digest: {{claim}}")
+    return content
 
 compute_rows = lines(["nvidia-smi", "--query-compute-apps=gpu_uuid,pid", "--format=csv,noheader,nounits"])
 gpu_rows = lines(["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader,nounits"])
@@ -320,6 +450,7 @@ for job_id, directory in jobs.items():
         payload = json.loads(claim.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
             raise RuntimeError(f"claim is not a mapping: {{claim}}")
+        identity = claim_identity(payload, claim)
         state = "claimed"
         if (root / "run.log.launch").is_file():
             state = "launched"
@@ -328,9 +459,9 @@ for job_id, directory in jobs.items():
         states[job_id] = {{
             "state": state,
             "claim_path": str(claim),
-            "claim_job_id": payload.get("job_id"),
-            "pod": payload.get("pod"),
-            "gpu": payload.get("gpu"),
+            "claim_job_id": identity.get("job_id"),
+            "pod": identity.get("pod"),
+            "gpu": identity.get("gpu"),
         }}
 print(json.dumps({{"compute_rows": compute_rows, "gpu_rows": gpu_rows, "jobs": states}}, sort_keys=True))
 """
@@ -477,6 +608,82 @@ def _training_argv(queue: dict[str, Any], job: dict[str, Any], gpu: int) -> list
     return argv
 
 
+def _launch_contract(
+    queue: dict[str, Any], job: dict[str, Any], slot: Slot
+) -> tuple[dict[str, Any], list[str]]:
+    """Build one canonical claim and its self-binding execution argv.
+
+    The digest covers every caller-controlled argument and input identity.  The
+    one derived claim argument is appended afterward and stored in the claim
+    envelope, avoiding an impossible self-referential hash while keeping the
+    full executed argv independently reconstructible.
+    """
+
+    argv_without_claim = _training_argv(queue, job, slot.gpu)
+    content = {
+        "schema_version": 1,
+        "job_id": job["id"],
+        "action": job["action"],
+        "pod": slot.pod,
+        "gpu": slot.gpu,
+        "source": {
+            "checkout": job["source"]["checkout"],
+            "commit": job["source"]["commit"],
+        },
+        "run_name": job["run_name"],
+        "run_dir": job["run_dir"],
+        "seed": job["seed"],
+        "budget": {
+            "num_envs": job["budget"]["num_envs"],
+            "max_iterations": job["budget"]["max_iterations"],
+            "save_interval": job["budget"]["save_interval"],
+            "milestones": list(job["milestones"]),
+        },
+        "inputs": {
+            "motion": {
+                "action": job["motion"]["action"],
+                "bindings": dict(job["motion"]["bindings"]),
+            },
+            "bank": {
+                "action": job["bank"]["action"],
+                "train_path": job["bank"]["train_path"],
+                "train_arg": job["bank"]["train_arg"],
+            },
+            "exam": {
+                "action": job["exam"]["action"],
+                "path": job["exam"]["path"],
+                "family": job["exam"]["family"],
+            },
+        },
+        "training_argv_without_claim": argv_without_claim,
+    }
+    digest = _canonical_sha256(content)
+    execution_argv = [
+        *argv_without_claim,
+        f"++training_launch_claim_sha256={digest}",
+    ]
+    claim = {
+        "schema_version": 2,
+        "content": content,
+        "content_sha256": digest,
+        "training_argv": execution_argv,
+    }
+    return claim, execution_argv
+
+
+def _hydra_compose_argv(training_argv: list[str]) -> list[str]:
+    if len(training_argv) < 2:
+        raise QueueError("training argv is missing the Python executable or train.py")
+    return [
+        training_argv[0],
+        training_argv[1],
+        "--cfg",
+        "job",
+        "--resolve",
+        *training_argv[2:],
+    ]
+
+
 def _child_env_command(argv: list[str], gpu: int) -> str:
     """Render the one child environment shared by doctor and trainer."""
 
@@ -486,7 +693,7 @@ def _child_env_command(argv: list[str], gpu: int) -> str:
     )
 
 
-def _doctor_body(job: dict[str, Any], slot: Slot) -> str:
+def _doctor_body(queue: dict[str, Any], job: dict[str, Any], slot: Slot) -> str:
     source = job["source"]["checkout"].rstrip("/")
     workdir = f"{source}/{WBT_RELATIVE}"
     required = [
@@ -502,6 +709,8 @@ def _doctor_body(job: dict[str, Any], slot: Slot) -> str:
         "print(pathlib.Path(s.origin).resolve().parent)"
     )
     child_probe = _child_env_command([ISAAC_PYTHON, "-c", module_probe], slot.gpu)
+    _claim, training_argv = _launch_contract(queue, job, slot)
+    compose_probe = _child_env_command(_hydra_compose_argv(training_argv), slot.gpu)
     return f"""set -euo pipefail
 test \"$(git -C {shlex.quote(source)} rev-parse HEAD)\" = {shlex.quote(job['source']['commit'])}
 test -z \"$(git -C {shlex.quote(source)} status --porcelain)\"
@@ -510,15 +719,16 @@ cd {shlex.quote(workdir)}
 source {shlex.quote(workdir + '/' + SETUP_RELATIVE)}
 resolved_module_root=$({child_probe})
 test \"$resolved_module_root\" = {shlex.quote(expected_module_root)}
+{compose_probe} >/dev/null
 """
 
 
-def _doctor_script(job: dict[str, Any], slot: Slot) -> str:
-    return _doctor_body(job, slot) + (
+def _doctor_script(queue: dict[str, Any], job: dict[str, Any], slot: Slot) -> str:
+    return _doctor_body(queue, job, slot) + (
         "printf '%s\\n' "
         + shlex.quote(
             "DOCTOR_OK scope=source-clean,assets,module-exact "
-            "hydra=no-no-kit-compose-contract"
+            "hydra=exact-no-kit-compose"
         )
     )
 
@@ -527,28 +737,25 @@ def _launch_script(queue: dict[str, Any], job: dict[str, Any], slot: Slot) -> st
     source = job["source"]["checkout"].rstrip("/")
     workdir = f"{source}/{WBT_RELATIVE}"
     run_dir = job["run_dir"].rstrip("/")
+    run_parent = str(PurePosixPath(run_dir).parent)
+    claim_document, train_argv = _launch_contract(queue, job, slot)
     claim = json.dumps(
-        {
-            "schema_version": 1,
-            "job_id": job["id"],
-            "action": job["action"],
-            "exam": job["exam"]["path"],
-            "seed": job["seed"],
-            "pod": slot.pod,
-            "gpu": slot.gpu,
-        },
+        claim_document,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
         sort_keys=True,
     ) + "\n"
-    train_argv = _training_argv(queue, job, slot.gpu)
     launcher = f"{workdir}/{KIT_LAUNCHER_RELATIVE}"
     launch = shlex.join([launcher, f"{run_dir}/run.log"]) + " " + (
         _child_env_command(train_argv, slot.gpu)
     )
     # The per-GPU flock covers the last capacity check, claim, and spawn.
-    body = _doctor_body(job, slot) + f"""
+    body = _doctor_body(queue, job, slot) + f"""
 count=$(nvidia-smi -i {slot.gpu} --query-compute-apps=pid --format=csv,noheader,nounits | awk {shlex.quote(UNIQUE_NUMERIC_PID_AWK)})
 test \"$count\" -lt {slot.capacity}
-mkdir -p {shlex.quote(run_dir)}
+mkdir -p {shlex.quote(run_parent)}
+mkdir {shlex.quote(run_dir)}
 ( set -o noclobber; printf %s {shlex.quote(claim)} > {shlex.quote(run_dir + '/queue_claim.json')} )
 export KIT_BOOT_MARKER={shlex.quote(KIT_BOOT_MARKER)}
 export KIT_BOOT_TIMEOUT_S={KIT_BOOT_TIMEOUT_SECONDS}
@@ -595,12 +802,12 @@ def cmd_doctor(queue: dict[str, Any], *, live: bool) -> dict[str, Any]:
     assignments = _assign(queue, effective_occupancy, set(claims))
     results: list[dict[str, Any]] = []
     for job, slot in assignments:
-        remote = _doctor_script(job, slot)
+        remote = _doctor_script(queue, job, slot)
         record: dict[str, Any] = {
             "job_id": job["id"],
             "resource": slot.name,
-            "scope": "source-clean,assets,module-exact",
-            "hydra": "not-run; train.py has no no-Kit compose contract",
+            "scope": "source-clean,assets,module-exact,hydra-resolved",
+            "hydra": "exact-no-kit-compose",
         }
         if live:
             record["remote_output"] = _run_ssh(
@@ -698,7 +905,7 @@ def cmd_fill(
                     "resource": slot.name,
                     "doctor_ssh_argv": [
                         *_ssh_prefix(queue, slot.pod),
-                        f"bash -lc {shlex.quote(_doctor_script(job, slot))}",
+                        f"bash -lc {shlex.quote(_doctor_script(queue, job, slot))}",
                     ],
                     "launch_ssh_argv": [
                         *_ssh_prefix(queue, slot.pod),
@@ -723,7 +930,7 @@ def cmd_fill(
             doctor_output = _run_ssh(
                 queue,
                 slot.pod,
-                _doctor_script(job, slot),
+                _doctor_script(queue, job, slot),
                 phase=f"doctor:{job['id']}",
             )
             launch_output = _run_ssh(

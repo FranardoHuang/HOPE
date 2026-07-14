@@ -196,6 +196,57 @@ def test_ready_placeholder_and_parent_traversal_fail_before_any_ssh(tmp_path, mo
     assert calls == []
 
 
+def test_recipe_compiler_rejects_ambiguous_or_harness_owned_overrides_before_ssh(
+    tmp_path, monkeypatch
+):
+    calls = []
+    monkeypatch.setattr(Q, "_run_ssh", lambda *args, **kwargs: calls.append(args))
+    attacks = {
+        "duplicate_normalized_key": ["+task=OtherTask"],
+        "harness_owned_seed": ["seed=4"],
+        "harness_owned_motion": ["++motion_file=/tmp/other.npz"],
+        "harness_owned_bank": ["task.racket.question_bank=/tmp/other.npz"],
+        "harness_owned_budget": ["num_envs=1"],
+        "harness_owned_run": ["run_name=collision"],
+        "harness_owned_device": ["device=cpu"],
+        "harness_owned_claim": [f"++training_launch_claim_sha256={'0' * 64}"],
+        "hydra_flag": ["--multirun"],
+        "hydra_interpolation": ["x=${oc.env:HOME}"],
+        "hydra_delete": ["~x=1"],
+    }
+    for name, delta in attacks.items():
+        queue = _queue()
+        queue["jobs"][0]["recipe"]["delta"] = delta
+        try:
+            Q.load_queue(_write(tmp_path, queue))
+        except Q.QueueError:
+            pass
+        else:
+            raise AssertionError(f"unsafe recipe was accepted: {name}")
+    assert calls == []
+
+
+def test_run_directory_is_globally_unique_and_outside_ready_sources(tmp_path):
+    duplicate = _queue(2)
+    duplicate["jobs"][1]["run_dir"] = duplicate["jobs"][0]["run_dir"]
+    try:
+        Q.load_queue(_write(tmp_path, duplicate))
+    except Q.QueueError as exc:
+        assert "duplicate run_dir" in str(exc)
+    else:
+        raise AssertionError("duplicate run_dir was accepted")
+
+    for run_dir in ("/workspace/source", "/workspace/source/runs/job0"):
+        nested = _queue()
+        nested["jobs"][0]["run_dir"] = run_dir
+        try:
+            Q.load_queue(_write(tmp_path, nested))
+        except Q.QueueError as exc:
+            assert "must not equal or be inside" in str(exc)
+        else:
+            raise AssertionError(f"source-contained run_dir was accepted: {run_dir}")
+
+
 def test_blocked_job_is_never_assigned_or_rendered_for_launch():
     queue = _queue(3)
     queue["jobs"][0] = _job(0, status="blocked")
@@ -227,6 +278,8 @@ def test_launch_next_defaults_to_dry_run_and_includes_only_minimal_preflight():
     assert "/workspace/source/hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh" in rendered
     assert 'PYTHONPATH="${HOPE_WBT_PYTHONPATH}"' in rendered
     assert "find_spec" in rendered
+    assert "--cfg job --resolve" in rendered
+    assert "training_launch_claim_sha256=" in rendered
     assert rendered.index("find_spec") < rendered.index("queue_claim.json")
     assert "pip freeze" not in rendered
     assert "sha256sum" not in rendered
@@ -284,15 +337,47 @@ def test_pending_claim_reservations_spread_five_independent_resamples():
     ]
 
 
-def test_doctor_has_no_claim_or_run_directory_write():
+def test_doctor_and_launch_share_exact_claim_bound_argv_before_fresh_claim():
     queue = _queue()
     job = queue["jobs"][0]
-    rendered = Q._doctor_script(job, Q.slots(queue)[0])
-    assert "find_spec" in rendered
-    assert "HOPE_WBT_PYTHONPATH" in rendered
-    assert "queue_claim.json" not in rendered
-    assert job["run_dir"] not in rendered
-    assert "mkdir" not in rendered
+    slot = Q.slots(queue)[0]
+    claim, training_argv = Q._launch_contract(queue, job, slot)
+    digest = Q._canonical_sha256(claim["content"])
+    assert digest == claim["content_sha256"]
+    assert claim["training_argv"] == [
+        *claim["content"]["training_argv_without_claim"],
+        f"++training_launch_claim_sha256={digest}",
+    ]
+    assert claim["training_argv"] == training_argv
+    assert claim["content"]["source"] == job["source"]
+    assert claim["content"]["run_name"] == job["run_name"]
+    assert claim["content"]["budget"]["max_iterations"] == 1000
+    assert claim["content"]["inputs"]["motion"]["bindings"] == job["motion"]["bindings"]
+    assert claim["content"]["inputs"]["bank"]["train_path"] == job["bank"]["train_path"]
+    assert claim["content"]["inputs"]["exam"]["path"] == job["exam"]["path"]
+
+    compose = Q._child_env_command(Q._hydra_compose_argv(training_argv), slot.gpu)
+    trainer = Q._child_env_command(training_argv, slot.gpu)
+    doctor = Q._doctor_script(queue, job, slot)
+    launch_body = shlex.split(Q._launch_script(queue, job, slot))[-1]
+    assert compose in doctor
+    assert compose in launch_body
+    assert trainer in launch_body
+    assert "find_spec" in doctor
+    assert "HOPE_WBT_PYTHONPATH" in doctor
+    assert "queue_claim.json" not in doctor
+    assert job["run_dir"] not in doctor
+    assert "mkdir" not in doctor
+
+    run_parent = str(Path(job["run_dir"]).parent)
+    assert f"mkdir -p {run_parent}" in launch_body
+    assert f"mkdir {job['run_dir']}" in launch_body
+    assert f"mkdir -p {job['run_dir']}" not in launch_body
+    assert launch_body.index(compose) < launch_body.index("queue_claim.json")
+    assert launch_body.index(f"mkdir {job['run_dir']}") < launch_body.index(
+        "queue_claim.json"
+    )
+    assert launch_body.index("queue_claim.json") < launch_body.rindex(trainer)
 
 
 def test_fill_is_one_scheduler_sequence_and_stops_before_claim_on_doctor_failure(

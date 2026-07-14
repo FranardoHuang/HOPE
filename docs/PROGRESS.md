@@ -13,6 +13,13 @@
 
 ## 2026-07-14
 
+- 轻量训练队列的发射前 P0 合同已收紧：recipe 重复/越权/Hydra 控制语法在 SSH 前拒绝，`run_dir`
+  全局唯一且只能原子首次创建；standalone doctor 与 launch 共用最终 argv 做 no-Kit
+  `train.py --cfg job --resolve`。canonical claim 绑定 source、完整 caller argv、run/预算和三类 input identity，
+  digest 自动写入真实 trainer argv。focused `19 passed`；本条没有 Pod 写入、新 trainer/checkpoint 或行为结论，
+  G05 仍为 Partial。见[操作](operations/run_lean_training_queue.md)与
+  [实验](experiments/2026-07/EXP-P1-FRESH-C-MECHANISM-ABLATION.md)。
+
 - Fresh C queue 的五条 `retry-v2` 已全部越过真实 first iteration，现场到 `103–160/1001` 且无
   NaN/Inf/Traceback/OOM/Killed；五份 `model_100.pt` 均 filename=embedded iter、76 tensor finite、
   schema-3 hard-contract SHA 与 fresh lineage 绑定通过。第六个 actual qdot-limit tail 格冻结为 fresh
