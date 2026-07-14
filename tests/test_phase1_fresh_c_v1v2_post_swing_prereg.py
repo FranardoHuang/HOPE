@@ -44,7 +44,7 @@ def test_pair_is_pod2_only_but_launch_blocked_until_instrumented_source_probe():
 
     assert queue["launch_authorized"] is False
     assert queue["preregistration_status"] == (
-        "activation_instrumentation_source_pinned_strict_full_scene_probe_pending"
+        "v1_v2_post_swing_activation_source_pinned_strict_full_scene_probe_pending"
     )
     assert queue["dispatch_pods"] == ["pod2"]
     assert {slot.pod for slot in Q.slots(queue)} == {"pod2"}
@@ -78,10 +78,10 @@ def test_pair_freezes_same_inputs_budget_seed_and_exact_instrumented_source():
     }
     assert control["milestones"] == [200, 500, 1000]
     assert control["source"]["checkout"] == (
-        "/workspace/codexschema/nohope_p1_post_swing_activation_3ced5a2"
+        "/workspace/codexschema/nohope_p1_v1v2_post_swing_activation_9d7c6b2"
     )
     assert control["source"]["commit"] == (
-        "3ced5a218eab322ebc4ebea6c73ecf64ee47cc5e"
+        "9d7c6b2b01b6392df918c0ab69bbb89b1beb4eaf"
     )
     ignored = control["source"]["ignored_runtime_asset"]
     assert ignored == {
@@ -141,6 +141,37 @@ def test_replay_activation_precedes_fixed_budget_recovery_and_precision_screen()
     contract = queue["decision_contract"]
 
     assert contract["activation_required_before_comparison"] is True
+    v1 = contract["activation"]["v1_free_wrist_linear_velocity"]
+    assert v1 == {
+        "denominator_definition": "environment_samples_evaluated_by_the_motion_body_linear_velocity_reward_with_explicit_v1_activation",
+        "exclusion_numerator_definition": "eligible_samples_whose_resolved_body_list_excludes_right_wrist_yaw_Link",
+        "tensorboard_metrics": {
+            "eligible_denominator": "Live/motion/v1_velocity_mimic_eligible_sample_count",
+            "exclusion_numerator": "Live/motion/v1_held_wrist_excluded_sample_count",
+        },
+        "exclusion_must_equal_eligible": True,
+        "control_and_treatment": {
+            "setting": True,
+            "eligible_denominator_must_be_positive": True,
+            "exclusion_numerator_must_be_positive": True,
+        },
+    }
+    v2 = contract["activation"]["v2_strike_window_imitation_scale"]
+    assert v2 == {
+        "denominator_definition": "wide_strike_window_imitation_reward_term_environment_samples_reaching_the_real_scale_where",
+        "scaled_window_numerator_definition": "eligible_samples_with_both_configured_and_actually_applied_scale_exactly_0.25",
+        "counting_unit": "imitation_reward_term_x_environment_sample",
+        "tensorboard_metrics": {
+            "eligible_denominator": "Live/motion/v2_strike_window_eligible_imitation_sample_count",
+            "scaled_window_numerator": "Live/motion/v2_quarter_scaled_strike_window_imitation_sample_count",
+        },
+        "scaled_window_must_equal_eligible": True,
+        "control_and_treatment": {
+            "setting": 0.25,
+            "eligible_denominator_must_be_positive": True,
+            "scaled_window_numerator_must_be_positive": True,
+        },
+    }
     replay = contract["activation"]["post_swing_replay_start"]
     assert replay["denominator_definition"] == (
         "true_episode_resets_after_post_swing_buffer_min_fill"
@@ -214,6 +245,8 @@ def test_namespaces_are_new_concrete_and_contain_no_legacy_source_or_placeholder
     assert "/path/to/" not in raw.lower()
     assert "nohope_p1_077e70c" not in raw
     assert "nohope_p1_caeb9ad" not in raw
+    assert "nohope_p1_post_swing_activation_3ced5a2" not in raw
+    assert "3ced5a218eab322ebc4ebea6c73ecf64ee47cc5e" not in raw
     assert "nohope_conditional_face_guidance_61007e9" not in raw
     assert "phase1_fresh_c_v1v2_decel_interaction_20260714" not in raw
     assert len({job["run_name"] for job in queue["jobs"]}) == 2

@@ -1,7 +1,7 @@
 schema_version: 1
 simulation_only: true
 launch_authorized: false
-preregistration_status: activation_instrumentation_source_pinned_strict_full_scene_probe_pending
+preregistration_status: v1_v2_post_swing_activation_source_pinned_strict_full_scene_probe_pending
 
 ssh:
   key: ~/.ssh/id_ed25519_runpod
@@ -40,11 +40,24 @@ decision_contract:
   activation_required_before_comparison: true
   activation:
     v1_free_wrist_linear_velocity:
+      denominator_definition: environment_samples_evaluated_by_the_motion_body_linear_velocity_reward_with_explicit_v1_activation
+      exclusion_numerator_definition: eligible_samples_whose_resolved_body_list_excludes_right_wrist_yaw_Link
+      tensorboard_metrics:
+        eligible_denominator: Live/motion/v1_velocity_mimic_eligible_sample_count
+        exclusion_numerator: Live/motion/v1_held_wrist_excluded_sample_count
+      exclusion_must_equal_eligible: true
       control_and_treatment:
         setting: true
         eligible_denominator_must_be_positive: true
         exclusion_numerator_must_be_positive: true
     v2_strike_window_imitation_scale:
+      denominator_definition: wide_strike_window_imitation_reward_term_environment_samples_reaching_the_real_scale_where
+      scaled_window_numerator_definition: eligible_samples_with_both_configured_and_actually_applied_scale_exactly_0.25
+      counting_unit: imitation_reward_term_x_environment_sample
+      tensorboard_metrics:
+        eligible_denominator: Live/motion/v2_strike_window_eligible_imitation_sample_count
+        scaled_window_numerator: Live/motion/v2_quarter_scaled_strike_window_imitation_sample_count
+      scaled_window_must_equal_eligible: true
       control_and_treatment:
         setting: 0.25
         eligible_denominator_must_be_positive: true
@@ -124,12 +137,12 @@ x-exam: &exam
   path: /workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.schedule.json
   family: signed_face_rebound_k100_v1
 
-# This new clean source adds only the activation counters/logger contract above.
+# This new clean source adds the V1, V2 and post-swing activation counters/logger contract above.
 # It must pass its own strict full-scene probe before either science row is
 # unlocked; the already-live caeb checkout is never changed in place.
 x-source: &source
-  checkout: /workspace/codexschema/nohope_p1_post_swing_activation_3ced5a2
-  commit: 3ced5a218eab322ebc4ebea6c73ecf64ee47cc5e
+  checkout: /workspace/codexschema/nohope_p1_v1v2_post_swing_activation_9d7c6b2
+  commit: 9d7c6b2b01b6392df918c0ab69bbb89b1beb4eaf
   ignored_runtime_asset:
     target_relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
     donor:
@@ -233,7 +246,7 @@ jobs:
     human_name: fresh C V1 plus V2 post-swing replay probability 0.25 matched control
     action: *action
     status: blocked
-    blocker: exact activation-instrumented source 3ced5a2 is pinned but has not passed its own strict full-scene probe; keep both cells blocked and launch_authorized false
+    blocker: exact V1/V2/post-swing activation source 9d7c6b2 is pinned but has not passed its own strict full-scene probe; keep both cells blocked and launch_authorized false
     motion: *motion
     bank: *bank
     exam: *exam
