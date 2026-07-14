@@ -172,16 +172,24 @@ Follow-up note (2026-07-15, lateral-balance perturbation source gate; Gate remai
   of mass/force/torque, so mutation followed by rejection or exception leaves caller tensors bit
   exact; the scheduler keeps a private deep-cloned application ledger and every first/cached/
   duplicate public return is another deep clone.  Adversarial mutation tests cover both paths.
-- Final review then found a pre-write ordering hole: the first dispatch derived and applied a
-  wrench from mutable public tensors before acknowledgement compared them with scheduler state.
-  Dispatch now validates every public step field before inspecting/calling the adapter and derives
-  the wrench only from a scheduler-private canonical clone.  A tampered acceleration produces zero
-  adapter calls, no application cache, and a clean same-tick retry with the canonical command.
-  The source seam uses one host-visible completion because a CUDA async assert cannot prevent a
-  subsequent Python writer call; this is safe but does not satisfy the preregistered no-host-sync
-  runtime gate.  Runtime integration must replace that public-step handoff or remove the sync and
-  pass the same-GPU throughput gate before launch.
-- Focused source verification is `27 passed`; this is E1 only.  The Isaac adapter, WORLD-to-BODY
+- Final reviews then closed four source-state-machine holes.  Public receipt acknowledgement has
+  been removed; only a non-public dispatch identity capability can prepare/commit bookkeeping, and
+  every expected tensor/mask/count is derived from the scheduler-private canonical step.  The
+  adapter seam is now two-phase: a source-token-bound, side-effect-free typed preflight is fully
+  validated before a single atomic/no-throw/`None`-returning full-buffer commit.  Rejected preflight
+  is discarded with backend/cache/counters unchanged and permits a canonical retry on the same
+  step token with a fresh preflight nonce.  Commit exceptions or non-`None` results permanently
+  mark the backend `DIRTY/UNKNOWN` and block ordinary retry/advance.  Same-step cache also binds
+  transform SHA, backend SHA and the live backend object token, so another same-SHA adapter cannot
+  borrow an old application ledger.
+- Mass/cast/final-wrench, cached duplicate and preflight receipt/mask safety predicates are all
+  host-visible before backend commit; monkeypatched async-assert attacks produce zero writer calls.
+  This correctness-first implementation now has multiple hot-path host completions, not one, and
+  therefore still fails the preregistered no-host-sync runtime gate.  Strike and safe-window
+  interruptions now preserve per-environment sampled/commanded/applied/abandoned impulse just like
+  reset, satisfy both conservation identities, and issue an actual full-buffer zero commit on the
+  interruption tick in the runtime-ack test.
+- Focused source verification is `36 passed`; this is E1 only.  The Isaac adapter, WORLD-to-BODY
   wrench transform, post-randomization total-mass reader, every-step full-batch zero overwrite,
   runtime ledger/logger, hard-contract/runner integration and content-addressed held-out papers are
   absent.  A same-GPU throughput comparison must retain at least `0.95x` environment-steps/s with
@@ -190,8 +198,8 @@ Follow-up note (2026-07-15, lateral-balance perturbation source gate; Gate remai
   MuJoCo reuse.  Both are pending.  The machine prereg remains `launch_authorized=false`; no Pod,
   trainer or simulator was touched.  See
   [EXP-P1-LATERAL-BALANCE-PERTURBATION](../experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md).
-- Replayed on current `origin/main@1d1eade`, the focused suite is `27 passed`; the full 57-file
-  tracking suite is `838 passed, 22 skipped, 3 failed`.  All three failures reproduce unchanged on
+- Replayed on current `origin/main@107102f`, the focused suite is `36 passed`; the full 57-file
+  tracking suite is `847 passed, 22 skipped, 3 failed`.  All three failures reproduce unchanged on
   `origin/main` (two existing MotionLoader `PosixPath` cases and one virtual-scorer tolerance case),
   so no integration regression is attributed to this source gate.
 

@@ -113,19 +113,19 @@
 - 稀疏平衡失败的横向扰动消融已完成 source-only 红队修正版：`torso_link` 质心 WORLD-Y 有界脉冲按
   随机化后整机总质量缩放，`L0/L1` 用 domain-separated Philox4x32-10 共同随机题并暴露 potential draw/
   schedule SHA；episode reset 截断会记录 sampled/commanded/applied/abandoned 冲量且当步禁止重启。
-  第二轮红队 blocker 另新增不可由配置放大的 `0.15 m/s` 冲量、
-  `2.0 m/s²` 加速度、`0.02--0.20 s` 时长和 `200 N` WORLD-Y force 硬包络，并在 derived duration、
-  runtime dtype cast、mass multiplication 和最终 wrench 后逐层 fail closed；typed receipt/ledger 现在绑定
-  随机化后实际总质量、命令 WORLD force/impulse 和 transform identity，可复算质量归一化。adapter
-  只拿隔离 tensor 副本，scheduler 私有 ledger cache 与每个公开返回也深拷贝，两类篡改/异常攻击回归使
-  外部无法污染私有状态；终审再修正 pre-write 顺序，public step 先与私有 canonical 全字段比对，wrench
-  只从私有 clone 派生，篡改时 adapter call=0 且同 tick 可重试。源码专项增至 `27 passed`。torso COM
-  仅意味着 zero explicit/link-local lever-arm torque，不代表整机无 `r×F` 角冲量。
+  后续红队新增不可由配置放大的 `0.15 m/s` 冲量、`2.0 m/s²` 加速度、`0.02--0.20 s` 时长和 `200 N`
+  WORLD-Y force 硬包络，并把 scheduler→adapter 改成 source-token 绑定的无副作用 preflight + 原子/no-throw
+  commit：删除公开 acknowledgement，mass/cast/final wrench/receipt/cache 全在写前 host-visible 校验；坏
+  receipt/stale token 不写 backend、不 cache、不解锁，同 step token 可换全新 preflight nonce 重试。commit 进入后异常或非
+  `None` 返回会永久标成 `DIRTY/UNKNOWN`；cache 还绑定 live backend token，不能重放给同 SHA 新实例。
+  strike/window 现在和 reset 一样逐环境保存 sampled/commanded/applied/abandoned 恒等式并在中断 tick 真正
+  写零。源码专项增至 `36 passed`。torso COM 仅意味着 zero explicit/link-local lever-arm torque，不代表
+  整机无 `r×F` 角冲量。
   GPU throughput 门和不可变 ball×action-family held-out paper 仍 pending，故继续
   `launch_authorized=false`，未连接 Pod。见
   [实验卷宗](experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md)与
-  [G05](gates/G05_isaac_training_first_loop.md)。最新 `origin/main@1d1eade` 整合重放为
-  `838 passed, 22 skipped, 3 failed`；三项失败均在未改动路径且已在 main 原样复现，不是本分支新增回归。
+  [G05](gates/G05_isaac_training_first_loop.md)。最新 `origin/main@107102f` 整合重放为
+  `847 passed, 22 skipped, 3 failed`；三项失败均在未改动路径且已在 main 原样复现，不是本分支新增回归。
 
 - Franco 反手拉 B 的 L0 V1 portable dry-run 已登记为数值合同负结果，而非动作失败：schema-2 只存
   post-FK normalized float32 root body pose，V1 再把它当原 free-joint qpos 注入并要求 byte equality；

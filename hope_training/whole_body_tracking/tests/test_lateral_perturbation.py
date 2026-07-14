@@ -82,17 +82,25 @@ class _RecordingAdapter:
     application_point = "center_of_mass"
     full_batch_overwrite = True
     inactive_zero_overwrite = True
+    preflight_side_effect_free = True
+    commit_is_atomic_and_noexcept = True
+    discard_is_noexcept = True
     world_to_backend_transform_identity_sha256 = "a" * 64
 
     def __init__(self, *, receipt_override=None):
         self.calls = []
+        self.preflight_calls = []
         self.receipt_override = receipt_override
+        self.application_backend_identity_sha256 = "c" * 64
+        self.application_backend_token = object()
+        self.backend_force_w = None
+        self.backend_torque_w = None
+        self._pending = {}
 
-    def overwrite_world_wrench_at_body_com(
-        self, *, step_token, total_mass_kg, force_w, torque_w
+    def _make_receipt(
+        self, *, step_token, total_mass_kg, force_w, torque_w, preflight_token=None
     ):
-        self.calls.append((step_token, force_w.clone(), torque_w.clone()))
-        receipt = L.LateralWrenchWriteReceipt(
+        receipt = L.LateralWrenchPreflightReceipt(
             step_token=step_token,
             body_name=self.body_name,
             input_force_frame=self.input_force_frame,
@@ -103,17 +111,51 @@ class _RecordingAdapter:
             world_to_backend_transform_identity_sha256=(
                 self.world_to_backend_transform_identity_sha256
             ),
+            application_backend_identity_sha256=(
+                self.application_backend_identity_sha256
+            ),
             actual_total_mass_kg=total_mass_kg.clone(),
             commanded_force_w=force_w.clone(),
             commanded_torque_w=torque_w.clone(),
             applied_force_mask=torch.any(
                 force_w.reshape(force_w.shape[0], -1) != 0.0, dim=1
             ),
+            preflight_token=preflight_token,
         )
         if self.receipt_override is not None:
             return self.receipt_override(receipt)
         return receipt
 
+    def preflight_world_wrench_at_body_com(
+        self, *, step_token, total_mass_kg, force_w, torque_w, preflight_token
+    ):
+        """Stage only; the backend buffer remains bitwise zero until commit."""
+
+        self.preflight_calls.append((step_token, force_w.clone(), torque_w.clone()))
+        if self.backend_force_w is None:
+            self.backend_force_w = torch.zeros_like(force_w)
+            self.backend_torque_w = torch.zeros_like(torque_w)
+        self._pending[preflight_token] = (
+            step_token,
+            force_w.clone(),
+            torque_w.clone(),
+        )
+        return self._make_receipt(
+            step_token=step_token,
+            total_mass_kg=total_mass_kg,
+            force_w=force_w,
+            torque_w=torque_w,
+            preflight_token=preflight_token,
+        )
+
+    def commit_preflighted_world_wrench_at_body_com(self, *, preflight_token):
+        step_token, force_w, torque_w = self._pending.pop(preflight_token)
+        self.backend_force_w.copy_(force_w)
+        self.backend_torque_w.copy_(torque_w)
+        self.calls.append((step_token, force_w.clone(), torque_w.clone()))
+
+    def discard_preflighted_world_wrench_at_body_com(self, *, preflight_token):
+        self._pending.pop(preflight_token, None)
 
 def _dispatch(scheduler, result, adapter, mass=None):
     if mass is None:
@@ -305,12 +347,20 @@ def test_preregistered_train_and_eval_boundaries_are_machine_readable_and_blocke
     assert runtime_adapter[
         "wrench_derived_from_scheduler_private_canonical_clone"
     ] is True
-    assert runtime_adapter[
-        "source_seam_prewrite_validation_has_one_host_visible_completion"
-    ] is True
-    assert runtime_adapter[
-        "runtime_unlock_requires_removing_that_sync_or_replacing_public_step_handoff"
-    ] is True
+    for key in (
+        "public_application_acknowledgement_api_removed",
+        "scheduler_bookkeeping_requires_non_public_dispatch_identity_capability",
+        "source_owned_one_use_preflight_token_bound_by_object_identity",
+        "same_step_cache_bound_to_live_backend_object_identity_and_backend_sha256",
+        "preflight_is_side_effect_free_and_rejection_discards_staged_command",
+        "commit_is_atomic_no_throw_and_none_returning",
+        "commit_contract_violation_marks_backend_dirty_unknown_and_blocks_retry",
+        "bad_preflight_receipt_cannot_write_cache_or_unlock",
+        "strike_and_window_interrupt_impulses_reconcile_per_environment",
+        "source_seam_prewrite_and_precommit_validation_use_multiple_host_visible_completions",
+        "runtime_unlock_requires_eliminating_all_hot_path_syncs_or_redesigning_handoff",
+    ):
+        assert runtime_adapter[key] is True
     assert {
         "hard_safety_identity_sha256",
         "actual_total_articulation_mass_after_randomization_kg",
@@ -318,13 +368,26 @@ def test_preregistered_train_and_eval_boundaries_are_machine_readable_and_blocke
         "commanded_force_y_N",
         "commanded_world_impulse_y_Ns",
         "world_to_backend_transform_identity_sha256",
+        "application_backend_identity_sha256",
     } <= set(payload["per_step_ledger_required"])
     assert {
         "lateral_perturbation_interrupted_for_reset_count",
         "lateral_perturbation_reset_interrupted_sampled_impulse_abs_sum_mps",
         "lateral_perturbation_reset_abandoned_uncommanded_impulse_abs_sum_mps",
         "lateral_perturbation_reset_abandoned_unapplied_impulse_abs_sum_mps",
+        "lateral_perturbation_strike_interrupted_sampled_impulse_abs_sum_mps",
+        "lateral_perturbation_strike_abandoned_unapplied_impulse_abs_sum_mps",
+        "lateral_perturbation_window_interrupted_sampled_impulse_abs_sum_mps",
+        "lateral_perturbation_window_abandoned_unapplied_impulse_abs_sum_mps",
     } <= set(payload["activation_and_application_counters"])
+    assert {
+        "adapter_side_effect_free_preflight_receipt",
+        "adapter_atomic_commit_completed",
+        "strike_interrupted_sampled_impulse_y_mps",
+        "strike_abandoned_unapplied_impulse_y_mps",
+        "window_interrupted_sampled_impulse_y_mps",
+        "window_abandoned_unapplied_impulse_y_mps",
+    } <= set(payload["per_step_ledger_required"])
     metrics = set(payload["held_out_eval"]["metrics"])
     assert {
         "recovery_time_to_ready_s_all_attempts",
@@ -775,6 +838,298 @@ def test_runtime_mode_requires_application_ack_before_next_step():
     scheduler.step(step_token=1, **_inputs(2, 1))
 
 
+def test_public_forged_receipt_cannot_unlock_scheduler_without_dispatch_capability():
+    scheduler = L.LateralPulseScheduler(
+        2,
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
+        require_application_ack=True,
+    )
+    scheduler.step(step_token=0, **_inputs(2, 0))
+
+    # There must be no public receipt-acknowledgement API: a caller that never touched the
+    # backend could otherwise fabricate every echoed tensor and unlock step 1.
+    assert not hasattr(scheduler, "acknowledge_application")
+    with pytest.raises(RuntimeError, match="dispatch capability"):
+        scheduler._prepare_application_from_dispatch(
+            capability=object(),
+            total_mass_kg=torch.full((2,), 40.0),
+            transform_identity_sha256="a" * 64,
+        )
+    assert scheduler.cached_application_ledger(0) is None
+    counters = scheduler.consume_counters()
+    assert counters["lateral_perturbation_wrench_write_step_count"].item() == 0
+    assert counters["lateral_perturbation_applied_pulse_count"].item() == 0
+    assert counters["lateral_perturbation_applied_force_env_step_count"].item() == 0
+    with pytest.raises(RuntimeError, match="previous full-wrench application receipt"):
+        scheduler.step(step_token=1, **_inputs(2, 1))
+
+
+def test_prewrite_sync_rejects_bad_mass_even_if_async_assert_is_neutered(monkeypatch):
+    scheduler = L.LateralPulseScheduler(
+        2,
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
+        require_application_ack=True,
+    )
+    result = scheduler.step(step_token=0, **_inputs(2, 0))
+    adapter = _RecordingAdapter()
+    monkeypatch.setattr(L, "_assert_all_async", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(RuntimeError, match="finite and strictly positive"):
+        _dispatch(
+            scheduler,
+            result,
+            adapter,
+            mass=torch.tensor([40.0, float("inf")]),
+        )
+    assert adapter.preflight_calls == []
+    assert adapter.calls == []
+    assert scheduler.cached_application_ledger(0) is None
+    with pytest.raises(RuntimeError, match="previous full-wrench application receipt"):
+        scheduler.step(step_token=1, **_inputs(2, 1))
+
+
+def test_bad_preflight_receipt_never_writes_backend_caches_or_unlocks(monkeypatch):
+    scheduler = L.LateralPulseScheduler(
+        2,
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
+        require_application_ack=True,
+    )
+    result = scheduler.step(step_token=0, **_inputs(2, 0))
+
+    def wrong_mask(receipt):
+        return replace(receipt, applied_force_mask=~receipt.applied_force_mask)
+
+    adapter = _RecordingAdapter(receipt_override=wrong_mask)
+    # Simulate the CUDA failure mode: queued async assertions never become host-visible before
+    # Python could call a one-phase writer.  The source must still perform its own synchronous
+    # pre-commit validation.
+    monkeypatch.setattr(L, "_assert_all_async", lambda *_args, **_kwargs: None)
+    with pytest.raises(RuntimeError, match="applied_force_mask"):
+        _dispatch(scheduler, result, adapter)
+    assert len(adapter.preflight_calls) == 1
+    assert adapter.calls == []
+    assert adapter.backend_force_w is not None
+    assert torch.count_nonzero(adapter.backend_force_w).item() == 0
+    assert torch.count_nonzero(adapter.backend_torque_w).item() == 0
+    assert scheduler.cached_application_ledger(0) is None
+    assert scheduler._pending_application is None
+    assert adapter._pending == {}
+    with pytest.raises(RuntimeError, match="previous full-wrench application receipt"):
+        scheduler.step(step_token=1, **_inputs(2, 1))
+
+    # A rejected side-effect-free stage can be corrected and retried on the same token exactly
+    # once; only the accepted receipt reaches the backend/cache.
+    adapter.receipt_override = None
+    ledger = _dispatch(scheduler, result, adapter)
+    assert len(adapter.preflight_calls) == 2
+    assert len(adapter.calls) == 1
+    assert torch.any(adapter.backend_force_w != 0.0)
+    assert scheduler.cached_application_ledger(0) is not None
+    assert ledger.step_token == 0
+
+
+def test_cached_duplicate_mass_mismatch_is_sync_rejected_without_new_stage(monkeypatch):
+    scheduler = L.LateralPulseScheduler(
+        2,
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
+        require_application_ack=True,
+    )
+    result = scheduler.step(step_token=0, **_inputs(2, 0))
+    mass = torch.tensor([40.0, 55.0], dtype=torch.float32)
+    adapter = _RecordingAdapter()
+    first = _dispatch(scheduler, result, adapter, mass=mass)
+    pristine = _tensor_field_bits(first)
+    monkeypatch.setattr(L, "_assert_all_async", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(RuntimeError, match="same-step dispatch changed actual_total_mass_kg"):
+        _dispatch(scheduler, result, adapter, mass=mass + 1.0)
+    assert len(adapter.preflight_calls) == 1
+    assert len(adapter.calls) == 1
+    cached = scheduler.cached_application_ledger(0)
+    assert cached is not None
+    _assert_tensor_field_bits_unchanged(cached, pristine)
+
+
+def test_stale_preflight_token_substitution_cannot_commit_old_staged_wrench():
+    scheduler = L.LateralPulseScheduler(
+        2,
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
+        require_application_ack=True,
+    )
+    result = scheduler.step(step_token=0, **_inputs(2, 0))
+
+    def stale_token(receipt):
+        return replace(receipt, preflight_token=object())
+
+    adapter = _RecordingAdapter(receipt_override=stale_token)
+    with pytest.raises(RuntimeError, match="stale or foreign source token"):
+        _dispatch(scheduler, result, adapter)
+    assert adapter.calls == []
+    assert adapter._pending == {}
+    assert torch.count_nonzero(adapter.backend_force_w).item() == 0
+    assert scheduler.cached_application_ledger(0) is None
+
+    adapter.receipt_override = None
+    _dispatch(scheduler, result, adapter)
+    assert len(adapter.calls) == 1
+    assert adapter._pending == {}
+
+
+def test_atomic_commit_contract_violation_marks_backend_dirty_and_blocks_retry():
+    class _WriteThenRaiseAdapter(_RecordingAdapter):
+        def commit_preflighted_world_wrench_at_body_com(self, *, preflight_token):
+            super().commit_preflighted_world_wrench_at_body_com(
+                preflight_token=preflight_token
+            )
+            raise RuntimeError("commit raised after side effect")
+
+    scheduler = L.LateralPulseScheduler(
+        2,
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
+        require_application_ack=True,
+    )
+    result = scheduler.step(step_token=0, **_inputs(2, 0))
+    adapter = _WriteThenRaiseAdapter()
+    with pytest.raises(RuntimeError, match="DIRTY/UNKNOWN"):
+        _dispatch(scheduler, result, adapter)
+    assert torch.any(adapter.backend_force_w != 0.0)
+    assert scheduler.cached_application_ledger(0) is None
+    counters = scheduler.consume_counters()
+    assert counters["lateral_perturbation_wrench_write_step_count"].item() == 0
+    with pytest.raises(RuntimeError, match="DIRTY/UNKNOWN"):
+        _dispatch(scheduler, result, _RecordingAdapter())
+    with pytest.raises(RuntimeError, match="DIRTY/UNKNOWN"):
+        scheduler.step(step_token=0, **_inputs(2, 0))
+
+
+def test_non_none_atomic_commit_result_is_dirty_unknown_not_success():
+    class _WriteThenReturnAdapter(_RecordingAdapter):
+        def commit_preflighted_world_wrench_at_body_com(self, *, preflight_token):
+            super().commit_preflighted_world_wrench_at_body_com(
+                preflight_token=preflight_token
+            )
+            return 1
+
+    scheduler = L.LateralPulseScheduler(
+        1,
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
+        require_application_ack=True,
+    )
+    result = scheduler.step(step_token=0, **_inputs(1, 0))
+    adapter = _WriteThenReturnAdapter()
+    with pytest.raises(RuntimeError, match="DIRTY/UNKNOWN"):
+        _dispatch(scheduler, result, adapter)
+    assert torch.any(adapter.backend_force_w != 0.0)
+    assert scheduler.cached_application_ledger(0) is None
+    with pytest.raises(RuntimeError, match="DIRTY/UNKNOWN"):
+        _dispatch(scheduler, result, _RecordingAdapter())
+
+
+def test_strike_and_window_interrupts_reconcile_sampled_commanded_applied_impulse():
+    def exercise(reason, *, runtime_ack):
+        scheduler = L.LateralPulseScheduler(
+            1,
+            _cfg(
+                policy_dt_s=0.02,
+                opportunity_interval_steps=3,
+                pulse_duration_steps=3,
+                normalized_impulse_min_mps=0.06,
+                normalized_impulse_max_mps=0.06,
+            ),
+            require_application_ack=runtime_ack,
+        )
+        adapter = _RecordingAdapter()
+        started = None
+        # Phase offset is stateless-randomized, so find the sole opportunity in the first
+        # interval instead of assuming token 0 is selected.
+        for token in range(3):
+            result = scheduler.step(step_token=token, **_inputs(1, token))
+            if runtime_ack:
+                _dispatch(scheduler, result, adapter)
+            if bool(result.nonzero_start_mask[0]):
+                started = (token, result)
+                break
+        assert started is not None
+        start_token, start_result = started
+        interrupt_token = start_token + 1
+        interrupt_inputs = (
+            _inputs(1, interrupt_token, strike=True)
+            if reason == "strike"
+            else _inputs(1, interrupt_token, eligible=False, safe=0)
+        )
+        interrupted = scheduler.step(
+            step_token=interrupt_token,
+            **interrupt_inputs,
+        )
+        if runtime_ack:
+            _dispatch(scheduler, interrupted, adapter)
+            assert torch.count_nonzero(adapter.backend_force_w).item() == 0
+            assert torch.count_nonzero(adapter.backend_torque_w).item() == 0
+
+        sampled = getattr(interrupted, f"{reason}_interrupted_sampled_impulse_y_mps")
+        commanded = getattr(interrupted, f"{reason}_interrupted_commanded_impulse_y_mps")
+        applied = getattr(interrupted, f"{reason}_interrupted_applied_impulse_y_mps")
+        abandoned_uncommanded = getattr(
+            interrupted, f"{reason}_abandoned_uncommanded_impulse_y_mps"
+        )
+        abandoned_unapplied = getattr(
+            interrupted, f"{reason}_abandoned_unapplied_impulse_y_mps"
+        )
+        assert bool(sampled.ne(0.0)[0])
+        assert bool(commanded.ne(0.0)[0])
+        torch.testing.assert_close(
+            sampled,
+            commanded + abandoned_uncommanded,
+            rtol=0.0,
+            atol=1.0e-15,
+        )
+        torch.testing.assert_close(
+            commanded,
+            applied + abandoned_unapplied,
+            rtol=0.0,
+            atol=1.0e-15,
+        )
+        if runtime_ack:
+            torch.testing.assert_close(applied, commanded, rtol=0.0, atol=1.0e-15)
+            assert torch.all(abandoned_unapplied == 0.0)
+        else:
+            assert torch.all(applied == 0.0)
+            torch.testing.assert_close(
+                abandoned_unapplied, commanded, rtol=0.0, atol=1.0e-15
+            )
+        assert torch.equal(sampled, start_result.sampled_normalized_impulse_y_mps)
+
+        counters = scheduler.consume_counters()
+        for quantity in ("sampled", "commanded", "applied"):
+            expected = getattr(
+                interrupted, f"{reason}_interrupted_{quantity}_impulse_y_mps"
+            ).abs().sum()
+            torch.testing.assert_close(
+                counters[
+                    f"lateral_perturbation_{reason}_interrupted_{quantity}_impulse_abs_sum_mps"
+                ],
+                expected,
+                rtol=0.0,
+                atol=1.0e-15,
+            )
+        for quantity in ("uncommanded", "unapplied"):
+            expected = getattr(
+                interrupted, f"{reason}_abandoned_{quantity}_impulse_y_mps"
+            ).abs().sum()
+            torch.testing.assert_close(
+                counters[
+                    f"lateral_perturbation_{reason}_abandoned_{quantity}_impulse_abs_sum_mps"
+                ],
+                expected,
+                rtol=0.0,
+                atol=1.0e-15,
+            )
+
+    for reason in ("strike", "window"):
+        exercise(reason, runtime_ack=True)
+        exercise(reason, runtime_ack=False)
+
+
 def test_world_wrench_uses_total_mass_only_in_y_and_has_zero_torque():
     accel = torch.tensor([-1.5, 0.0, 2.0], dtype=torch.float64)
     total_mass = torch.tensor([20.0, 40.0, 60.0], dtype=torch.float64)
@@ -838,6 +1193,7 @@ def test_typed_application_ledger_binds_mass_world_force_and_transform_identity(
     expected_accel = result.normalized_accel_y_mps2.to(dtype=torch.float32)
     expected_force_y = mass * expected_accel
     assert ledger.world_to_backend_transform_identity_sha256 == "a" * 64
+    assert ledger.application_backend_identity_sha256 == "c" * 64
     assert ledger.hard_safety_identity_sha256 == L.lateral_hard_safety_identity_sha256()
     assert torch.equal(ledger.actual_total_mass_kg, mass)
     assert torch.equal(ledger.commanded_normalized_accel_y_mps2, expected_accel)
@@ -903,16 +1259,17 @@ def test_receipt_cannot_relabel_actual_mass_world_force_or_transform_identity():
     result = scheduler.step(step_token=0, **_inputs(1, 0))
 
     class _MutatingAdapter(_RecordingAdapter):
-        def overwrite_world_wrench_at_body_com(
-            self, *, step_token, total_mass_kg, force_w, torque_w
+        def preflight_world_wrench_at_body_com(
+            self, *, step_token, total_mass_kg, force_w, torque_w, preflight_token
         ):
             total_mass_kg.add_(1.0)
             force_w[:, 0, 1].add_(1.0)
-            receipt = super().overwrite_world_wrench_at_body_com(
+            receipt = super().preflight_world_wrench_at_body_com(
                 step_token=step_token,
                 total_mass_kg=total_mass_kg,
                 force_w=force_w,
                 torque_w=torque_w,
+                preflight_token=preflight_token,
             )
             return replace(receipt, zero_torque=True)
 
@@ -922,17 +1279,18 @@ def test_receipt_cannot_relabel_actual_mass_world_force_or_transform_identity():
 
 def test_mutating_or_raising_adapter_cannot_change_any_caller_owned_tensor_bits():
     class _MutateThenRejectAdapter(_RecordingAdapter):
-        def overwrite_world_wrench_at_body_com(
-            self, *, step_token, total_mass_kg, force_w, torque_w
+        def preflight_world_wrench_at_body_com(
+            self, *, step_token, total_mass_kg, force_w, torque_w, preflight_token
         ):
             total_mass_kg.fill_(99.0)
             force_w.fill_(17.0)
             torque_w.fill_(-23.0)
-            receipt = super().overwrite_world_wrench_at_body_com(
+            receipt = super().preflight_world_wrench_at_body_com(
                 step_token=step_token,
                 total_mass_kg=total_mass_kg,
                 force_w=force_w,
                 torque_w=torque_w,
+                preflight_token=preflight_token,
             )
             return replace(receipt, zero_torque=True)
 
@@ -950,8 +1308,8 @@ def test_mutating_or_raising_adapter_cannot_change_any_caller_owned_tensor_bits(
     _assert_tensor_field_bits_unchanged(result, result_bits)
 
     class _MutateThenRaiseAdapter(_RecordingAdapter):
-        def overwrite_world_wrench_at_body_com(
-            self, *, step_token, total_mass_kg, force_w, torque_w
+        def preflight_world_wrench_at_body_com(
+            self, *, step_token, total_mass_kg, force_w, torque_w, preflight_token
         ):
             total_mass_kg.zero_()
             force_w.fill_(float("inf"))
@@ -1012,6 +1370,34 @@ def test_public_ledger_mutation_never_reaches_private_cache_or_duplicate_return(
         duplicate_tensor = getattr(duplicate, name)
         assert first_tensor.data_ptr() != duplicate_tensor.data_ptr(), name
         assert torch.equal(_tensor_bits(duplicate_tensor), bits), name
+
+
+def test_same_step_cache_cannot_be_replayed_onto_a_different_live_backend():
+    scheduler = L.LateralPulseScheduler(
+        2,
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
+        require_application_ack=True,
+    )
+    result = scheduler.step(step_token=0, **_inputs(2, 0))
+    first_adapter = _RecordingAdapter()
+    first = _dispatch(scheduler, result, first_adapter)
+    pristine = _tensor_field_bits(first)
+
+    # Same audited backend/transform SHA is insufficient: this object owns a different live
+    # buffer token, so returning the old cache would falsely claim the second backend was written.
+    second_adapter = _RecordingAdapter()
+    assert (
+        second_adapter.application_backend_identity_sha256
+        == first_adapter.application_backend_identity_sha256
+    )
+    assert second_adapter.application_backend_token is not first_adapter.application_backend_token
+    with pytest.raises(RuntimeError, match="different live application backend"):
+        _dispatch(scheduler, result, second_adapter)
+    assert second_adapter.preflight_calls == []
+    assert second_adapter.calls == []
+    cached = scheduler.cached_application_ledger(0)
+    assert cached is not None
+    _assert_tensor_field_bits_unchanged(cached, pristine)
 
 
 def test_tampered_public_step_is_rejected_before_write_and_same_tick_can_retry():
@@ -1100,7 +1486,7 @@ def test_adapter_seam_rejects_stale_force_contract_or_false_receipt():
         _dispatch(scheduler, result, bad_adapter)
 
     def wrong_mask(receipt):
-        return L.LateralWrenchWriteReceipt(
+        return L.LateralWrenchPreflightReceipt(
             step_token=receipt.step_token,
             body_name=receipt.body_name,
             input_force_frame=receipt.input_force_frame,
@@ -1111,10 +1497,14 @@ def test_adapter_seam_rejects_stale_force_contract_or_false_receipt():
             world_to_backend_transform_identity_sha256=(
                 receipt.world_to_backend_transform_identity_sha256
             ),
+            application_backend_identity_sha256=(
+                receipt.application_backend_identity_sha256
+            ),
             actual_total_mass_kg=receipt.actual_total_mass_kg,
             commanded_force_w=receipt.commanded_force_w,
             commanded_torque_w=receipt.commanded_torque_w,
             applied_force_mask=~receipt.applied_force_mask,
+            preflight_token=receipt.preflight_token,
         )
 
     false_receipt = _RecordingAdapter(receipt_override=wrong_mask)

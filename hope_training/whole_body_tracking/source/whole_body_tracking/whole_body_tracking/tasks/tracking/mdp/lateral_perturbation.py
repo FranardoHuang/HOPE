@@ -13,10 +13,10 @@ This module is intentionally split in two:
 * :class:`LateralPulseScheduler` is a pure, deterministic torch scheduler/kernel.
 * :func:`dispatch_lateral_wrench_fail_closed` is an adapter seam.  No Isaac adapter is supplied
   here.  A future runtime adapter must transform the WORLD wrench to the frame expected by
-  ``Articulation.set_external_force_and_torque``, overwrite the complete torso wrench buffer on
-  every simulator step (including zeros after a pulse), apply at the COM, and return an exact
-  receipt.  Until that adapter and its ledger consumer are implemented and tested, this feature is
-  not runtime-ready.
+  ``Articulation.set_external_force_and_torque``, stage without changing the live buffer, return
+  an exact preflight receipt, then atomically overwrite the complete torso wrench buffer on every
+  simulator step (including zeros after a pulse) at the COM.  Until that adapter and its ledger
+  consumer are implemented and tested, this feature is not runtime-ready.
 
 Keeping the seam explicit prevents two common but scientifically invalid shortcuts: using
 ``push_by_setting_velocity`` instead of a force, or leaving a non-zero external-force buffer alive
@@ -60,6 +60,7 @@ _HARD_MAX_ABS_NORMALIZED_ACCEL_MPS2 = 2.0
 _HARD_MIN_PULSE_DURATION_S = 0.02
 _HARD_MAX_PULSE_DURATION_S = 0.20
 _HARD_MAX_ABS_FORCE_N = 200.0
+_DISPATCH_APPLICATION_CAPABILITY = object()
 
 
 def _is_plain_int(value: object) -> bool:
@@ -121,6 +122,21 @@ def _assert_all_async(condition: torch.Tensor, message: str) -> None:
         raise RuntimeError(
             "torch._assert_async is required for CUDA lateral-perturbation validation"
         )
+
+
+def _assert_all_prewrite(condition: torch.Tensor, message: str) -> None:
+    """Make a tensor safety predicate host-visible before any backend side effect.
+
+    CUDA asynchronous assertions are useful inside the pure scheduler, but they cannot guard a
+    Python writer: the writer could run before the device failure is observed.  Every mass,
+    cast, wrench and adapter-preflight predicate that protects a physical buffer therefore uses
+    this deliberately synchronous boundary.  It is correctness-first source code and remains a
+    blocker for the pending no-host-sync throughput gate.
+    """
+
+    predicate = torch.all(condition)
+    if not torch.equal(predicate, torch.ones_like(predicate, dtype=torch.bool)):
+        raise RuntimeError(message)
 
 
 def _mulhilo_u32_const(value: torch.Tensor, multiplier: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -365,6 +381,16 @@ class LateralPerturbationStep:
     interrupted_for_strike_mask: torch.Tensor
     interrupted_for_window_mask: torch.Tensor
     interrupted_for_reset_mask: torch.Tensor
+    strike_interrupted_sampled_impulse_y_mps: torch.Tensor
+    strike_interrupted_commanded_impulse_y_mps: torch.Tensor
+    strike_interrupted_applied_impulse_y_mps: torch.Tensor
+    strike_abandoned_uncommanded_impulse_y_mps: torch.Tensor
+    strike_abandoned_unapplied_impulse_y_mps: torch.Tensor
+    window_interrupted_sampled_impulse_y_mps: torch.Tensor
+    window_interrupted_commanded_impulse_y_mps: torch.Tensor
+    window_interrupted_applied_impulse_y_mps: torch.Tensor
+    window_abandoned_uncommanded_impulse_y_mps: torch.Tensor
+    window_abandoned_unapplied_impulse_y_mps: torch.Tensor
     reset_interrupted_sampled_impulse_y_mps: torch.Tensor
     reset_interrupted_commanded_impulse_y_mps: torch.Tensor
     reset_interrupted_applied_impulse_y_mps: torch.Tensor
@@ -392,6 +418,36 @@ class LateralPerturbationStep:
             interrupted_for_strike_mask=self.interrupted_for_strike_mask.clone(),
             interrupted_for_window_mask=self.interrupted_for_window_mask.clone(),
             interrupted_for_reset_mask=self.interrupted_for_reset_mask.clone(),
+            strike_interrupted_sampled_impulse_y_mps=(
+                self.strike_interrupted_sampled_impulse_y_mps.clone()
+            ),
+            strike_interrupted_commanded_impulse_y_mps=(
+                self.strike_interrupted_commanded_impulse_y_mps.clone()
+            ),
+            strike_interrupted_applied_impulse_y_mps=(
+                self.strike_interrupted_applied_impulse_y_mps.clone()
+            ),
+            strike_abandoned_uncommanded_impulse_y_mps=(
+                self.strike_abandoned_uncommanded_impulse_y_mps.clone()
+            ),
+            strike_abandoned_unapplied_impulse_y_mps=(
+                self.strike_abandoned_unapplied_impulse_y_mps.clone()
+            ),
+            window_interrupted_sampled_impulse_y_mps=(
+                self.window_interrupted_sampled_impulse_y_mps.clone()
+            ),
+            window_interrupted_commanded_impulse_y_mps=(
+                self.window_interrupted_commanded_impulse_y_mps.clone()
+            ),
+            window_interrupted_applied_impulse_y_mps=(
+                self.window_interrupted_applied_impulse_y_mps.clone()
+            ),
+            window_abandoned_uncommanded_impulse_y_mps=(
+                self.window_abandoned_uncommanded_impulse_y_mps.clone()
+            ),
+            window_abandoned_unapplied_impulse_y_mps=(
+                self.window_abandoned_unapplied_impulse_y_mps.clone()
+            ),
             reset_interrupted_sampled_impulse_y_mps=(
                 self.reset_interrupted_sampled_impulse_y_mps.clone()
             ),
@@ -412,11 +468,12 @@ class LateralPerturbationStep:
 
 
 @dataclass(frozen=True)
-class LateralWrenchWriteReceipt:
-    """Minimum acknowledgement returned by a reviewed simulator adapter.
+class LateralWrenchPreflightReceipt:
+    """Side-effect-free preflight receipt returned by a reviewed simulator adapter.
 
-    This is an application ledger row, not proof of simulator behaviour by itself.  A runtime
-    consumer must persist it together with the per-step sample ledger above.
+    Receipt validation happens before the backend write.  ``preflight_token`` is opaque adapter
+    state consumed by one reviewed, atomic, no-throw commit.  This receipt is not itself proof of
+    simulator behaviour; a runtime consumer must persist the resulting application ledger.
     """
 
     step_token: int
@@ -427,10 +484,12 @@ class LateralWrenchWriteReceipt:
     inactive_zero_overwrite: bool
     zero_torque: bool
     world_to_backend_transform_identity_sha256: str
+    application_backend_identity_sha256: str
     actual_total_mass_kg: torch.Tensor
     commanded_force_w: torch.Tensor
     commanded_torque_w: torch.Tensor
     applied_force_mask: torch.Tensor
+    preflight_token: object
 
     def __post_init__(self) -> None:
         if not _is_plain_int(self.step_token) or self.step_token < 0:
@@ -449,6 +508,10 @@ class LateralWrenchWriteReceipt:
         if not _is_sha256_hex(self.world_to_backend_transform_identity_sha256):
             raise ValueError(
                 "receipt world_to_backend_transform_identity_sha256 must be lowercase SHA-256"
+            )
+        if not _is_sha256_hex(self.application_backend_identity_sha256):
+            raise ValueError(
+                "receipt application_backend_identity_sha256 must be lowercase SHA-256"
             )
         for name in ("actual_total_mass_kg", "commanded_force_w", "commanded_torque_w"):
             if not isinstance(getattr(self, name), torch.Tensor):
@@ -474,11 +537,13 @@ class LateralWrenchWriteReceipt:
             raise ValueError("receipt applied_force_mask must match actual_total_mass_kg shape")
         if self.applied_force_mask.device != self.actual_total_mass_kg.device:
             raise ValueError("receipt applied_force_mask must use the actual-mass device")
-        _assert_all_async(
+        if self.preflight_token is None:
+            raise ValueError("receipt preflight_token cannot be None")
+        _assert_all_prewrite(
             torch.isfinite(self.actual_total_mass_kg) & self.actual_total_mass_kg.gt(0.0),
             "receipt actual_total_mass_kg must be finite and strictly positive",
         )
-        _assert_all_async(
+        _assert_all_prewrite(
             torch.isfinite(self.commanded_force_w) & torch.isfinite(self.commanded_torque_w),
             "receipt commanded wrench must be finite",
         )
@@ -492,6 +557,7 @@ class LateralApplicationLedgerRow:
     body_name: str
     hard_safety_identity_sha256: str
     world_to_backend_transform_identity_sha256: str
+    application_backend_identity_sha256: str
     actual_total_mass_kg: torch.Tensor
     commanded_normalized_accel_y_mps2: torch.Tensor
     commanded_world_force_y_N: torch.Tensor
@@ -512,6 +578,9 @@ class LateralApplicationLedgerRow:
             world_to_backend_transform_identity_sha256=(
                 self.world_to_backend_transform_identity_sha256
             ),
+            application_backend_identity_sha256=(
+                self.application_backend_identity_sha256
+            ),
             actual_total_mass_kg=self.actual_total_mass_kg.clone(),
             commanded_normalized_accel_y_mps2=(
                 self.commanded_normalized_accel_y_mps2.clone()
@@ -528,6 +597,26 @@ class LateralApplicationLedgerRow:
         )
 
 
+@dataclass(frozen=True)
+class _PreparedApplication:
+    """Scheduler-private, one-use application transaction prepared before adapter commit."""
+
+    nonce: object
+    step_token: int
+    total_mass_kg: torch.Tensor
+    force_w: torch.Tensor
+    torque_w: torch.Tensor
+    active_force_mask: torch.Tensor
+    applied_impulse_per_env: torch.Tensor
+    applied_starts: torch.Tensor
+    applied_force_env_count: torch.Tensor
+    applied_step_impulse: torch.Tensor
+    private_ledger: LateralApplicationLedgerRow
+    public_ledger: LateralApplicationLedgerRow
+    application_backend_token: object | None = None
+    already_committed: bool = False
+
+
 @runtime_checkable
 class LateralWrenchAdapter(Protocol):
     """Seam a future Isaac adapter must implement; no implementation is provided here."""
@@ -537,17 +626,33 @@ class LateralWrenchAdapter(Protocol):
     application_point: str
     full_batch_overwrite: bool
     inactive_zero_overwrite: bool
+    preflight_side_effect_free: bool
+    commit_is_atomic_and_noexcept: bool
+    discard_is_noexcept: bool
     world_to_backend_transform_identity_sha256: str
+    application_backend_identity_sha256: str
+    application_backend_token: object
 
-    def overwrite_world_wrench_at_body_com(
+    def preflight_world_wrench_at_body_com(
         self,
         *,
         step_token: int,
         total_mass_kg: torch.Tensor,
         force_w: torch.Tensor,
         torque_w: torch.Tensor,
-    ) -> LateralWrenchWriteReceipt:
-        """Transform/write the full batch and acknowledge the exact application contract."""
+        preflight_token: object,
+    ) -> LateralWrenchPreflightReceipt:
+        """Validate/stage an exact command without changing the live backend wrench buffer."""
+
+    def commit_preflighted_world_wrench_at_body_com(
+        self, *, preflight_token: object
+    ) -> None:
+        """Atomically commit one staged full-buffer overwrite and never raise."""
+
+    def discard_preflighted_world_wrench_at_body_com(
+        self, *, preflight_token: object
+    ) -> None:
+        """Discard staged data without touching the backend buffer and never raise."""
 
 
 def _counter_zeros(device: torch.device) -> dict[str, torch.Tensor]:
@@ -583,6 +688,16 @@ def _counter_zeros(device: torch.device) -> dict[str, torch.Tensor]:
         "reset_interrupted_applied_impulse_abs_sum_mps",
         "reset_abandoned_uncommanded_impulse_abs_sum_mps",
         "reset_abandoned_unapplied_impulse_abs_sum_mps",
+        "strike_interrupted_sampled_impulse_abs_sum_mps",
+        "strike_interrupted_commanded_impulse_abs_sum_mps",
+        "strike_interrupted_applied_impulse_abs_sum_mps",
+        "strike_abandoned_uncommanded_impulse_abs_sum_mps",
+        "strike_abandoned_unapplied_impulse_abs_sum_mps",
+        "window_interrupted_sampled_impulse_abs_sum_mps",
+        "window_interrupted_commanded_impulse_abs_sum_mps",
+        "window_interrupted_applied_impulse_abs_sum_mps",
+        "window_abandoned_uncommanded_impulse_abs_sum_mps",
+        "window_abandoned_unapplied_impulse_abs_sum_mps",
     ):
         state[_COUNT_PREFIX + name] = torch.zeros(
             (), dtype=torch.float64, device=device
@@ -600,7 +715,7 @@ class LateralPulseScheduler:
 
     ``require_application_ack=True`` is mandatory for a future runtime hook.  It prevents the
     scheduler from advancing while the preceding wrench command has not received a validated
-    full-buffer-overwrite receipt.  Pure source tests may use plan-only mode (the default).
+    committed full-buffer-overwrite ledger.  Pure source tests may use plan-only mode (the default).
     """
 
     def __init__(
@@ -643,6 +758,9 @@ class LateralPulseScheduler:
         self._last_inputs: tuple[torch.Tensor, ...] | None = None
         self._last_result: LateralPerturbationStep | None = None
         self._last_application_ledger: LateralApplicationLedgerRow | None = None
+        self._pending_application: _PreparedApplication | None = None
+        self._application_dirty_unknown = False
+        self._last_application_backend_token: object | None = None
 
     def _check_vector(
         self, name: str, value: torch.Tensor, *, dtype: torch.dtype
@@ -715,6 +833,11 @@ class LateralPulseScheduler:
             strike_window,
             safe_window_remaining_steps,
         )
+        if self._application_dirty_unknown:
+            raise RuntimeError(
+                "lateral adapter backend is DIRTY/UNKNOWN after an atomic-commit contract "
+                "violation; terminate the run or use an independently reviewed zero-clear/readback"
+            )
         if self._last_step_token == step_token:
             if not self._same_inputs(current_inputs):
                 raise RuntimeError(
@@ -797,6 +920,43 @@ class LateralPulseScheduler:
             | self._remaining_steps.gt(safe_window_remaining_steps)
         ) & ~strike_window
         interrupted = interrupted_strike | interrupted_window
+
+        def interrupted_values(mask: torch.Tensor) -> tuple[torch.Tensor, ...]:
+            sampled = torch.where(
+                mask, self._active_impulse_y, torch.zeros_like(self._active_impulse_y)
+            )
+            commanded = torch.where(
+                mask,
+                self._active_commanded_impulse_y,
+                torch.zeros_like(self._active_commanded_impulse_y),
+            )
+            applied = torch.where(
+                mask,
+                self._active_applied_impulse_y,
+                torch.zeros_like(self._active_applied_impulse_y),
+            )
+            return (
+                sampled,
+                commanded,
+                applied,
+                sampled - commanded,
+                commanded - applied,
+            )
+
+        (
+            strike_sampled_impulse,
+            strike_commanded_impulse,
+            strike_applied_impulse,
+            strike_abandoned_uncommanded,
+            strike_abandoned_unapplied,
+        ) = interrupted_values(interrupted_strike)
+        (
+            window_sampled_impulse,
+            window_commanded_impulse,
+            window_applied_impulse,
+            window_abandoned_uncommanded,
+            window_abandoned_unapplied,
+        ) = interrupted_values(interrupted_window)
         self._remaining_steps.masked_fill_(interrupted, 0)
         self._active_impulse_y.masked_fill_(interrupted, 0.0)
         self._active_commanded_impulse_y.masked_fill_(interrupted, 0.0)
@@ -945,6 +1105,36 @@ class LateralPulseScheduler:
             "reset_abandoned_unapplied_impulse_abs_sum_mps": (
                 reset_abandoned_unapplied
             ),
+            "strike_interrupted_sampled_impulse_abs_sum_mps": (
+                strike_sampled_impulse
+            ),
+            "strike_interrupted_commanded_impulse_abs_sum_mps": (
+                strike_commanded_impulse
+            ),
+            "strike_interrupted_applied_impulse_abs_sum_mps": (
+                strike_applied_impulse
+            ),
+            "strike_abandoned_uncommanded_impulse_abs_sum_mps": (
+                strike_abandoned_uncommanded
+            ),
+            "strike_abandoned_unapplied_impulse_abs_sum_mps": (
+                strike_abandoned_unapplied
+            ),
+            "window_interrupted_sampled_impulse_abs_sum_mps": (
+                window_sampled_impulse
+            ),
+            "window_interrupted_commanded_impulse_abs_sum_mps": (
+                window_commanded_impulse
+            ),
+            "window_interrupted_applied_impulse_abs_sum_mps": (
+                window_applied_impulse
+            ),
+            "window_abandoned_uncommanded_impulse_abs_sum_mps": (
+                window_abandoned_uncommanded
+            ),
+            "window_abandoned_unapplied_impulse_abs_sum_mps": (
+                window_abandoned_unapplied
+            ),
         }
         for counter_name, values in reset_ledger.items():
             self._counters[_COUNT_PREFIX + counter_name].add_(
@@ -970,6 +1160,24 @@ class LateralPulseScheduler:
             interrupted_for_strike_mask=interrupted_strike,
             interrupted_for_window_mask=interrupted_window,
             interrupted_for_reset_mask=interrupted_reset,
+            strike_interrupted_sampled_impulse_y_mps=strike_sampled_impulse,
+            strike_interrupted_commanded_impulse_y_mps=strike_commanded_impulse,
+            strike_interrupted_applied_impulse_y_mps=strike_applied_impulse,
+            strike_abandoned_uncommanded_impulse_y_mps=(
+                strike_abandoned_uncommanded
+            ),
+            strike_abandoned_unapplied_impulse_y_mps=(
+                strike_abandoned_unapplied
+            ),
+            window_interrupted_sampled_impulse_y_mps=window_sampled_impulse,
+            window_interrupted_commanded_impulse_y_mps=window_commanded_impulse,
+            window_interrupted_applied_impulse_y_mps=window_applied_impulse,
+            window_abandoned_uncommanded_impulse_y_mps=(
+                window_abandoned_uncommanded
+            ),
+            window_abandoned_unapplied_impulse_y_mps=(
+                window_abandoned_unapplied
+            ),
             reset_interrupted_sampled_impulse_y_mps=reset_sampled_impulse,
             reset_interrupted_commanded_impulse_y_mps=reset_commanded_impulse,
             reset_interrupted_applied_impulse_y_mps=reset_applied_impulse,
@@ -985,6 +1193,8 @@ class LateralPulseScheduler:
         self._last_inputs = tuple(value.clone() for value in current_inputs)
         self._last_result = result.clone()
         self._last_application_ledger = None
+        self._pending_application = None
+        self._last_application_backend_token = None
         return result
 
     def cached_application_ledger(
@@ -1023,6 +1233,16 @@ class LateralPulseScheduler:
             "interrupted_for_strike_mask",
             "interrupted_for_window_mask",
             "interrupted_for_reset_mask",
+            "strike_interrupted_sampled_impulse_y_mps",
+            "strike_interrupted_commanded_impulse_y_mps",
+            "strike_interrupted_applied_impulse_y_mps",
+            "strike_abandoned_uncommanded_impulse_y_mps",
+            "strike_abandoned_unapplied_impulse_y_mps",
+            "window_interrupted_sampled_impulse_y_mps",
+            "window_interrupted_commanded_impulse_y_mps",
+            "window_interrupted_applied_impulse_y_mps",
+            "window_abandoned_uncommanded_impulse_y_mps",
+            "window_abandoned_unapplied_impulse_y_mps",
             "reset_interrupted_sampled_impulse_y_mps",
             "reset_interrupted_commanded_impulse_y_mps",
             "reset_interrupted_applied_impulse_y_mps",
@@ -1068,122 +1288,222 @@ class LateralPulseScheduler:
         assert self._last_result is not None
         return self._last_result.clone()
 
-    def acknowledge_application(
+    @staticmethod
+    def _require_dispatch_capability(capability: object) -> None:
+        if capability is not _DISPATCH_APPLICATION_CAPABILITY:
+            raise RuntimeError("application bookkeeping requires the internal dispatch capability")
+
+    def _prepare_application_from_dispatch(
         self,
-        result: LateralPerturbationStep,
-        receipt: LateralWrenchWriteReceipt,
         *,
-        expected_total_mass_kg: torch.Tensor,
-        expected_force_w: torch.Tensor,
-        expected_torque_w: torch.Tensor,
-        expected_transform_identity_sha256: str,
-    ) -> LateralApplicationLedgerRow:
-        """Validate one full-buffer write receipt and charge application counters once."""
+        capability: object,
+        total_mass_kg: torch.Tensor,
+        transform_identity_sha256: str,
+        application_backend_identity_sha256: str | None = None,
+        application_backend_token: object | None = None,
+    ) -> _PreparedApplication:
+        """Prepare all command/ledger state before a backend side effect.
 
-        self._validate_application_result(result)
-        if receipt.step_token != result.step_token:
-            raise RuntimeError("adapter receipt step_token does not match the command")
-        cached = self.cached_application_ledger(result.step_token)
-        if cached is not None:
-            return cached
-        expected = {
-            "body_name": self.cfg.body_name,
-            "input_force_frame": self.cfg.force_frame,
-            "application_point": self.cfg.application_point,
-            "full_batch_overwrite": True,
-            "inactive_zero_overwrite": True,
-            "zero_torque": True,
-        }
-        for name, value in expected.items():
-            if getattr(receipt, name) != value:
-                raise RuntimeError(
-                    f"lateral wrench receipt mismatch for {name}: "
-                    f"expected {value!r}, got {getattr(receipt, name)!r}"
-                )
+        This is intentionally not a public receipt API.  A one-use module capability is required,
+        and every command/mask/count is derived from ``self._last_result`` rather than caller-
+        supplied expected tensors or an adapter receipt.
+        """
 
-        if (
-            receipt.world_to_backend_transform_identity_sha256
-            != expected_transform_identity_sha256
-        ):
+        self._require_dispatch_capability(capability)
+        if self._last_result is None or self._last_step_token is None:
+            raise RuntimeError("cannot prepare an application before a scheduler step")
+        if self._pending_application is not None:
+            raise RuntimeError("a lateral application transaction is already pending")
+        if self._application_dirty_unknown:
             raise RuntimeError(
-                "lateral wrench receipt transform identity does not match the adapter contract"
+                "cannot prepare while lateral adapter backend is DIRTY/UNKNOWN"
             )
-        tensor_receipt_fields = {
-            "actual_total_mass_kg": expected_total_mass_kg,
-            "commanded_force_w": expected_force_w,
-            "commanded_torque_w": expected_torque_w,
-        }
-        for name, expected_tensor in tensor_receipt_fields.items():
-            actual_tensor = getattr(receipt, name)
+        if not _is_sha256_hex(transform_identity_sha256):
+            raise RuntimeError("dispatch transform identity must be a lowercase SHA-256")
+        if not _is_sha256_hex(application_backend_identity_sha256):
+            raise RuntimeError(
+                "dispatch application backend identity must be a lowercase SHA-256"
+            )
+        if application_backend_token is None:
+            raise RuntimeError("dispatch application backend token cannot be None")
+
+        canonical = self._last_result
+        expected_total_mass_kg = total_mass_kg.detach().clone()
+        force_w, torque_w = lateral_world_wrench_from_total_mass(
+            canonical.normalized_accel_y_mps2,
+            expected_total_mass_kg,
+        )
+        _assert_all_prewrite(
+            (force_w[:, :, 0] == 0.0)
+            & (force_w[:, :, 2] == 0.0)
+            & torch.all(torque_w == 0.0, dim=-1),
+            "lateral wrench kernel emitted forbidden X/Z force or torque",
+        )
+
+        cached = self.cached_application_ledger(canonical.step_token)
+        if cached is not None:
             if (
-                actual_tensor.shape != expected_tensor.shape
-                or actual_tensor.dtype != expected_tensor.dtype
-                or actual_tensor.device != expected_tensor.device
+                cached.world_to_backend_transform_identity_sha256
+                != transform_identity_sha256
             ):
-                raise RuntimeError(f"adapter receipt {name} has the wrong tensor contract")
-            _assert_all_async(
-                actual_tensor == expected_tensor,
-                f"adapter receipt {name} does not match the dispatched command",
+                raise RuntimeError("same-step dispatch reused a different transform identity")
+            if (
+                cached.application_backend_identity_sha256
+                != application_backend_identity_sha256
+                or self._last_application_backend_token is not application_backend_token
+            ):
+                raise RuntimeError(
+                    "same-step dispatch reused a different live application backend"
+                )
+            cached_tensors = {
+                "actual_total_mass_kg": expected_total_mass_kg,
+                "commanded_normalized_accel_y_mps2": (
+                    canonical.normalized_accel_y_mps2.to(
+                        dtype=expected_total_mass_kg.dtype
+                    )
+                ),
+                "commanded_world_force_y_N": force_w[:, 0, 1],
+                "commanded_world_impulse_y_Ns": (
+                    force_w[:, 0, 1] * float(self.cfg.policy_dt_s)
+                ),
+            }
+            for name, expected_tensor in cached_tensors.items():
+                actual_tensor = getattr(cached, name)
+                if (
+                    actual_tensor.shape != expected_tensor.shape
+                    or actual_tensor.dtype != expected_tensor.dtype
+                    or actual_tensor.device != expected_tensor.device
+                ):
+                    raise RuntimeError(f"same-step dispatch changed {name} tensor contract")
+                _assert_all_prewrite(
+                    actual_tensor == expected_tensor,
+                    f"same-step dispatch changed {name}",
+                )
+            zeros = torch.zeros_like(canonical.normalized_accel_y_mps2)
+            zero_count = torch.zeros((), dtype=torch.long, device=self.device)
+            zero_sum = torch.zeros((), dtype=torch.float64, device=self.device)
+            return _PreparedApplication(
+                nonce=object(),
+                step_token=canonical.step_token,
+                total_mass_kg=expected_total_mass_kg,
+                force_w=force_w,
+                torque_w=torque_w,
+                active_force_mask=canonical.active_force_mask.clone(),
+                applied_impulse_per_env=zeros,
+                applied_starts=zero_count,
+                applied_force_env_count=zero_count.clone(),
+                applied_step_impulse=zero_sum,
+                private_ledger=cached.clone(),
+                public_ledger=cached.clone(),
+                application_backend_token=application_backend_token,
+                already_committed=True,
             )
 
-        if receipt.applied_force_mask.shape != (self.num_envs,):
-            raise RuntimeError("adapter applied_force_mask has the wrong shape")
-        if receipt.applied_force_mask.device != self.device:
-            raise RuntimeError("adapter applied_force_mask has the wrong device")
-        _assert_all_async(
-            receipt.applied_force_mask == result.active_force_mask,
-            "adapter applied_force_mask does not match the commanded nonzero force mask",
-        )
-        applied_starts_mask = result.nonzero_start_mask & receipt.applied_force_mask
-        applied_starts = applied_starts_mask.sum(dtype=torch.long)
-        applied_force_env_count = receipt.applied_force_mask.sum(dtype=torch.long)
+        active_force_mask = canonical.active_force_mask.clone()
+        applied_starts = (
+            canonical.nonzero_start_mask & active_force_mask
+        ).sum(dtype=torch.long)
+        applied_force_env_count = active_force_mask.sum(dtype=torch.long)
         applied_impulse_per_env = torch.where(
-            receipt.applied_force_mask,
-            result.normalized_accel_y_mps2 * float(self.cfg.policy_dt_s),
-            torch.zeros_like(result.normalized_accel_y_mps2),
+            active_force_mask,
+            canonical.normalized_accel_y_mps2 * float(self.cfg.policy_dt_s),
+            torch.zeros_like(canonical.normalized_accel_y_mps2),
         )
         applied_step_impulse = applied_impulse_per_env.abs().sum(dtype=torch.float64)
-        self._active_applied_impulse_y.add_(applied_impulse_per_env)
-        self._counters[_COUNT_PREFIX + "wrench_write_step_count"].add_(1)
-        self._counters[_COUNT_PREFIX + "applied_pulse_count"].add_(applied_starts)
-        self._counters[_COUNT_PREFIX + "applied_force_env_step_count"].add_(
-            applied_force_env_count
-        )
-        self._counters[
-            _COUNT_PREFIX + "applied_normalized_impulse_abs_sum_mps"
-        ].add_(applied_step_impulse)
         ledger = LateralApplicationLedgerRow(
-            step_token=result.step_token,
+            step_token=canonical.step_token,
             body_name=self.cfg.body_name,
             hard_safety_identity_sha256=self.hard_safety_identity_sha256,
-            world_to_backend_transform_identity_sha256=(
-                expected_transform_identity_sha256
+            world_to_backend_transform_identity_sha256=transform_identity_sha256,
+            application_backend_identity_sha256=(
+                application_backend_identity_sha256
             ),
-            actual_total_mass_kg=expected_total_mass_kg.detach().clone(),
+            actual_total_mass_kg=expected_total_mass_kg.clone(),
             commanded_normalized_accel_y_mps2=(
-                result.normalized_accel_y_mps2.to(
+                canonical.normalized_accel_y_mps2.to(
                     dtype=expected_total_mass_kg.dtype
                 ).detach().clone()
             ),
-            commanded_world_force_y_N=(
-                expected_force_w[:, 0, 1].detach().clone()
-            ),
+            commanded_world_force_y_N=force_w[:, 0, 1].detach().clone(),
             commanded_world_impulse_y_Ns=(
-                expected_force_w[:, 0, 1].detach().clone()
-                * float(self.cfg.policy_dt_s)
+                force_w[:, 0, 1].detach().clone() * float(self.cfg.policy_dt_s)
             ),
-            applied_force_mask=receipt.applied_force_mask.detach().clone(),
-            selected_start_count=result.selected_start_mask.sum(
+            applied_force_mask=active_force_mask.clone(),
+            selected_start_count=canonical.selected_start_mask.sum(
                 dtype=torch.long
             ).detach().clone(),
             applied_nonzero_start_count=applied_starts.detach().clone(),
             nonzero_force_env_count=applied_force_env_count.detach().clone(),
-            commanded_normalized_impulse_abs_mps=(
-                applied_step_impulse.detach().clone()
-            ),
+            commanded_normalized_impulse_abs_mps=applied_step_impulse.detach().clone(),
         )
-        self._last_application_ledger = ledger.clone()
-        return ledger.clone()
+        prepared = _PreparedApplication(
+            nonce=object(),
+            step_token=canonical.step_token,
+            total_mass_kg=expected_total_mass_kg,
+            force_w=force_w.detach().clone(),
+            torque_w=torque_w.detach().clone(),
+            active_force_mask=active_force_mask,
+            applied_impulse_per_env=applied_impulse_per_env.detach().clone(),
+            applied_starts=applied_starts.detach().clone(),
+            applied_force_env_count=applied_force_env_count.detach().clone(),
+            applied_step_impulse=applied_step_impulse.detach().clone(),
+            private_ledger=ledger.clone(),
+            public_ledger=ledger.clone(),
+            application_backend_token=application_backend_token,
+        )
+        self._pending_application = prepared
+        return prepared
+
+    def _abort_application_from_dispatch(
+        self, *, capability: object, prepared: _PreparedApplication
+    ) -> None:
+        """Discard a pre-write transaction after rejected adapter preflight."""
+
+        self._require_dispatch_capability(capability)
+        if self._pending_application is not prepared:
+            raise RuntimeError("cannot abort a foreign lateral application transaction")
+        self._pending_application = None
+
+    def _commit_application_from_dispatch(
+        self, *, capability: object, prepared: _PreparedApplication
+    ) -> LateralApplicationLedgerRow:
+        """Commit preallocated bookkeeping after the adapter's atomic no-throw write.
+
+        All checks and allocations occur in ``_prepare_application_from_dispatch``.  Once the
+        backend commit returns, this method performs only scheduler-owned deterministic updates.
+        """
+
+        self._require_dispatch_capability(capability)
+        if prepared.already_committed:
+            return prepared.public_ledger
+        if self._pending_application is not prepared:
+            raise RuntimeError("cannot commit a foreign lateral application transaction")
+        self._active_applied_impulse_y.add_(prepared.applied_impulse_per_env)
+        self._counters[_COUNT_PREFIX + "wrench_write_step_count"].add_(1)
+        self._counters[_COUNT_PREFIX + "applied_pulse_count"].add_(
+            prepared.applied_starts
+        )
+        self._counters[_COUNT_PREFIX + "applied_force_env_step_count"].add_(
+            prepared.applied_force_env_count
+        )
+        self._counters[
+            _COUNT_PREFIX + "applied_normalized_impulse_abs_sum_mps"
+        ].add_(prepared.applied_step_impulse)
+        self._last_application_ledger = prepared.private_ledger
+        self._last_application_backend_token = prepared.application_backend_token
+        self._pending_application = None
+        return prepared.public_ledger
+
+    def _mark_application_dirty_from_dispatch(
+        self, *, capability: object, prepared: _PreparedApplication
+    ) -> None:
+        """Permanently block ordinary retry after an impossible no-throw commit violation."""
+
+        self._require_dispatch_capability(capability)
+        if self._pending_application is not prepared:
+            raise RuntimeError("cannot dirty-mark a foreign lateral application transaction")
+        self._pending_application = None
+        self._application_dirty_unknown = True
 
     def consume_counters(self) -> dict[str, torch.Tensor]:
         """Snapshot/reset counters while retaining step/application idempotence tokens."""
@@ -1222,11 +1542,11 @@ def lateral_world_wrench_from_total_mass(
         raise TypeError("normalized acceleration must use a floating dtype")
     if not torch.is_floating_point(total_mass_kg):
         raise TypeError("total_mass_kg must use a floating dtype")
-    _assert_all_async(
+    _assert_all_prewrite(
         torch.isfinite(normalized_accel_y_mps2),
         "normalized acceleration must be finite",
     )
-    _assert_all_async(
+    _assert_all_prewrite(
         torch.isfinite(total_mass_kg) & total_mass_kg.gt(0.0),
         "total_mass_kg must be finite and strictly positive",
     )
@@ -1237,15 +1557,15 @@ def lateral_world_wrench_from_total_mass(
     dtype = total_mass_kg.dtype
     accel = normalized_accel_y_mps2.to(dtype=dtype)
     mass = total_mass_kg
-    _assert_all_async(
+    _assert_all_prewrite(
         torch.isfinite(accel),
         "normalized acceleration must remain finite after cast to the runtime mass dtype",
     )
-    _assert_all_async(
+    _assert_all_prewrite(
         normalized_accel_y_mps2.abs().le(_HARD_MAX_ABS_NORMALIZED_ACCEL_MPS2),
         "normalized acceleration exceeds the immutable hard safety envelope before cast",
     )
-    _assert_all_async(
+    _assert_all_prewrite(
         accel.abs().le(_HARD_MAX_ABS_NORMALIZED_ACCEL_MPS2),
         "normalized acceleration exceeds the immutable hard safety envelope",
     )
@@ -1254,11 +1574,11 @@ def lateral_world_wrench_from_total_mass(
     )
     torque_w = torch.zeros_like(force_w)
     force_w[:, 0, 1] = mass * accel
-    _assert_all_async(
+    _assert_all_prewrite(
         torch.isfinite(force_w) & torch.isfinite(torque_w),
         "derived runtime wrench must remain finite after mass multiplication",
     )
-    _assert_all_async(
+    _assert_all_prewrite(
         force_w[:, 0, 1].abs().le(_HARD_MAX_ABS_FORCE_N),
         "derived WORLD-Y force exceeds the immutable hard safety envelope",
     )
@@ -1272,10 +1592,12 @@ def dispatch_lateral_wrench_fail_closed(
     total_mass_kg: torch.Tensor,
     adapter: LateralWrenchAdapter,
 ) -> LateralApplicationLedgerRow:
-    """Write/clear one full-batch torso wrench through a reviewed adapter seam.
+    """Preflight, atomically write/clear, then ledger one full-batch torso wrench.
 
-    The adapter is called even when every force is zero.  That zero overwrite is the mechanism
-    that prevents a completed pulse from becoming a persistent external force.
+    The adapter uses a two-phase contract: preflight may stage data but must not touch the live
+    backend buffer; after every receipt predicate is synchronously visible, commit performs one
+    atomic full-buffer overwrite and is required never to throw.  The commit is called even when
+    every force is zero, which clears a completed or interrupted pulse.
     """
 
     # This must happen before even inspecting the adapter.  The public dataclass is frozen, but its
@@ -1290,16 +1612,29 @@ def dispatch_lateral_wrench_fail_closed(
         "application_point": scheduler.cfg.application_point,
         "full_batch_overwrite": True,
         "inactive_zero_overwrite": True,
+        "preflight_side_effect_free": True,
+        "commit_is_atomic_and_noexcept": True,
+        "discard_is_noexcept": True,
     }
     for name, expected in required_adapter_fields.items():
         if not hasattr(adapter, name) or getattr(adapter, name) != expected:
             raise RuntimeError(
                 f"lateral wrench adapter is not runtime-safe: {name} must be {expected!r}"
             )
-    writer = getattr(adapter, "overwrite_world_wrench_at_body_com", None)
-    if not callable(writer):
+    preflight = getattr(adapter, "preflight_world_wrench_at_body_com", None)
+    if not callable(preflight):
         raise RuntimeError(
-            "lateral wrench adapter lacks overwrite_world_wrench_at_body_com"
+            "lateral wrench adapter lacks preflight_world_wrench_at_body_com"
+        )
+    commit = getattr(adapter, "commit_preflighted_world_wrench_at_body_com", None)
+    if not callable(commit):
+        raise RuntimeError(
+            "lateral wrench adapter lacks commit_preflighted_world_wrench_at_body_com"
+        )
+    discard = getattr(adapter, "discard_preflighted_world_wrench_at_body_com", None)
+    if not callable(discard):
+        raise RuntimeError(
+            "lateral wrench adapter lacks discard_preflighted_world_wrench_at_body_com"
         )
     transform_identity = getattr(
         adapter, "world_to_backend_transform_identity_sha256", None
@@ -1308,68 +1643,128 @@ def dispatch_lateral_wrench_fail_closed(
         raise RuntimeError(
             "lateral wrench adapter must expose a lowercase SHA-256 transform identity"
         )
-    force_w, torque_w = lateral_world_wrench_from_total_mass(
-        canonical_result.normalized_accel_y_mps2, total_mass_kg
+    backend_identity = getattr(
+        adapter, "application_backend_identity_sha256", None
     )
-    _assert_all_async(
-        (force_w[:, :, 0] == 0.0)
-        & (force_w[:, :, 2] == 0.0)
-        & torch.all(torque_w == 0.0, dim=-1),
-        "lateral wrench kernel emitted forbidden X/Z force or torque",
+    if not _is_sha256_hex(backend_identity):
+        raise RuntimeError(
+            "lateral wrench adapter must expose a lowercase SHA-256 application backend identity"
+        )
+    backend_token = getattr(adapter, "application_backend_token", None)
+    if backend_token is None:
+        raise RuntimeError(
+            "lateral wrench adapter must expose a stable live application backend token"
+        )
+    prepared = scheduler._prepare_application_from_dispatch(
+        capability=_DISPATCH_APPLICATION_CAPABILITY,
+        total_mass_kg=total_mass_kg,
+        transform_identity_sha256=transform_identity,
+        application_backend_identity_sha256=backend_identity,
+        application_backend_token=backend_token,
     )
-    cached = scheduler.cached_application_ledger(canonical_result.step_token)
-    if cached is not None:
-        if cached.world_to_backend_transform_identity_sha256 != transform_identity:
-            raise RuntimeError("same-step dispatch reused a different transform identity")
-        cached_tensors = {
-            "actual_total_mass_kg": total_mass_kg,
-            "commanded_normalized_accel_y_mps2": (
-                canonical_result.normalized_accel_y_mps2.to(
-                    dtype=total_mass_kg.dtype
+    if prepared.already_committed:
+        return prepared.public_ledger
+
+    expected_metadata = {
+        "step_token": prepared.step_token,
+        "body_name": scheduler.cfg.body_name,
+        "input_force_frame": scheduler.cfg.force_frame,
+        "application_point": scheduler.cfg.application_point,
+        "full_batch_overwrite": True,
+        "inactive_zero_overwrite": True,
+        "zero_torque": True,
+        "world_to_backend_transform_identity_sha256": transform_identity,
+        "application_backend_identity_sha256": backend_identity,
+    }
+    try:
+        receipt = preflight(
+            step_token=prepared.step_token,
+            total_mass_kg=prepared.total_mass_kg.clone(),
+            force_w=prepared.force_w.clone(),
+            torque_w=prepared.torque_w.clone(),
+            preflight_token=prepared.nonce,
+        )
+        if not isinstance(receipt, LateralWrenchPreflightReceipt):
+            raise RuntimeError("lateral wrench adapter returned no typed preflight receipt")
+        if receipt.preflight_token is not prepared.nonce:
+            raise RuntimeError(
+                "lateral wrench preflight receipt returned a stale or foreign source token"
+            )
+        for name, expected in expected_metadata.items():
+            if getattr(receipt, name) != expected:
+                if name == "world_to_backend_transform_identity_sha256":
+                    raise RuntimeError(
+                        "lateral wrench preflight receipt transform identity does not match "
+                        "the adapter contract"
+                    )
+                raise RuntimeError(
+                    f"lateral wrench preflight receipt mismatch for {name}: "
+                    f"expected {expected!r}, got {getattr(receipt, name)!r}"
                 )
-            ),
-            "commanded_world_force_y_N": force_w[:, 0, 1],
-            "commanded_world_impulse_y_Ns": (
-                force_w[:, 0, 1] * float(scheduler.cfg.policy_dt_s)
-            ),
+        tensor_receipt_fields = {
+            "actual_total_mass_kg": prepared.total_mass_kg,
+            "commanded_force_w": prepared.force_w,
+            "commanded_torque_w": prepared.torque_w,
         }
-        for name, expected_tensor in cached_tensors.items():
-            actual_tensor = getattr(cached, name)
+        for name, expected_tensor in tensor_receipt_fields.items():
+            actual_tensor = getattr(receipt, name)
             if (
                 actual_tensor.shape != expected_tensor.shape
                 or actual_tensor.dtype != expected_tensor.dtype
                 or actual_tensor.device != expected_tensor.device
             ):
-                raise RuntimeError(f"same-step dispatch changed {name} tensor contract")
-            _assert_all_async(
+                raise RuntimeError(
+                    f"adapter preflight receipt {name} has the wrong tensor contract"
+                )
+            _assert_all_prewrite(
                 actual_tensor == expected_tensor,
-                f"same-step dispatch changed {name}",
+                f"adapter preflight receipt {name} does not match the canonical command",
             )
-        return cached
-    # Preserve the exact pre-adapter command.  The future backend implementation is untrusted at
-    # this seam and must not be able to mutate an input tensor in place and thereby relabel what
-    # the application ledger says was dispatched.
-    expected_total_mass_kg = total_mass_kg.detach().clone()
-    expected_force_w = force_w.detach().clone()
-    expected_torque_w = torque_w.detach().clone()
-    adapter_total_mass_kg = expected_total_mass_kg.clone()
-    adapter_force_w = expected_force_w.clone()
-    adapter_torque_w = expected_torque_w.clone()
-    receipt = writer(
-        step_token=canonical_result.step_token,
-        total_mass_kg=adapter_total_mass_kg,
-        force_w=adapter_force_w,
-        torque_w=adapter_torque_w,
-    )
-    if not isinstance(receipt, LateralWrenchWriteReceipt):
-        raise RuntimeError("lateral wrench adapter returned no typed write receipt")
-    return scheduler.acknowledge_application(
-        canonical_result,
-        receipt,
-        expected_total_mass_kg=expected_total_mass_kg,
-        expected_force_w=expected_force_w,
-        expected_torque_w=expected_torque_w,
-        expected_transform_identity_sha256=transform_identity,
+        if receipt.applied_force_mask.shape != (scheduler.num_envs,):
+            raise RuntimeError("adapter preflight applied_force_mask has the wrong shape")
+        if receipt.applied_force_mask.dtype != torch.bool:
+            raise RuntimeError("adapter preflight applied_force_mask has the wrong dtype")
+        if receipt.applied_force_mask.device != scheduler.device:
+            raise RuntimeError("adapter preflight applied_force_mask has the wrong device")
+        _assert_all_prewrite(
+            receipt.applied_force_mask == prepared.active_force_mask,
+            "adapter preflight applied_force_mask does not match the canonical force mask",
+        )
+    except BaseException:
+        try:
+            discard(preflight_token=prepared.nonce)
+        finally:
+            scheduler._abort_application_from_dispatch(
+                capability=_DISPATCH_APPLICATION_CAPABILITY,
+                prepared=prepared,
+            )
+        raise
+
+    # No validation, allocation, receipt processing or caller-controlled branch may occur between
+    # this atomic no-throw commit and the preallocated scheduler bookkeeping below.
+    try:
+        commit_result = commit(preflight_token=prepared.nonce)
+    except BaseException as exc:  # pragma: no cover - a reviewed adapter contract violation
+        scheduler._mark_application_dirty_from_dispatch(
+            capability=_DISPATCH_APPLICATION_CAPABILITY,
+            prepared=prepared,
+        )
+        raise RuntimeError(
+            "adapter violated atomic no-throw commit; backend state is DIRTY/UNKNOWN and the run "
+            "must terminate or use an independently reviewed zero-clear/readback path"
+        ) from exc
+    if commit_result is not None:
+        scheduler._mark_application_dirty_from_dispatch(
+            capability=_DISPATCH_APPLICATION_CAPABILITY,
+            prepared=prepared,
+        )
+        raise RuntimeError(
+            "adapter violated the None-returning atomic commit contract; backend state is "
+            "DIRTY/UNKNOWN"
+        )
+    return scheduler._commit_application_from_dispatch(
+        capability=_DISPATCH_APPLICATION_CAPABILITY,
+        prepared=prepared,
     )
 
 
@@ -1379,7 +1774,7 @@ __all__ = [
     "LateralPerturbationStep",
     "LateralPulseScheduler",
     "LateralWrenchAdapter",
-    "LateralWrenchWriteReceipt",
+    "LateralWrenchPreflightReceipt",
     "dispatch_lateral_wrench_fail_closed",
     "lateral_hard_safety_contract",
     "lateral_hard_safety_identity_sha256",

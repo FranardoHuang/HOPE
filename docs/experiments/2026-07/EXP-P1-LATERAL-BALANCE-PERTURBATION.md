@@ -65,9 +65,10 @@ AND NOT strike_window
 AND safe_window_remaining_steps >= pulse_duration_steps
 ```
 
-- pulse 启动后若击球窗意外开始，下一步必须写零并记 `interrupted_for_strike`，不能把残余外力带进挥拍。
-- episode reset 若截断 pulse，reset 当步禁止立刻重启；账本同时保存原采样冲量、reset 前已 command/已
-  applied 冲量、尚未 command 和已 command 未 applied 的放弃量，并逐环境满足
+- pulse 启动后若击球窗意外开始或 recovery/hold 安全窗缩短，下一步必须写零，不能把残余外力带进挥拍。
+- episode reset、strike 和 safe-window closure 截断 pulse 时都必须先保存逐环境账再清状态；reset 当步禁止
+  立刻重启。三类账都同时保存原采样冲量、已 command/已 applied 冲量、尚未 command 和已 command 未
+  applied 的放弃量，并逐环境满足
   `sampled = commanded + abandoned_uncommanded` 与
   `commanded = applied + abandoned_unapplied`。
 - 每个 simulator step 都必须覆盖完整 torso wrench buffer；无脉冲的环境也显式写零。漏一步就 fail closed，
@@ -101,9 +102,11 @@ WORLD-Y force 每层都必须 finite 且在界内；极大但 finite 的输入�
 1. 纯 torch 的确定性 scheduler/kernel：Random123 已知向量一致的 `Philox4x32-10`、有界随机幅度、
    左右对称、完整安全窗、同一步幂等、漏步 fail closed、reset 中断冲量对账。
 2. fail-closed adapter seam：把归一化脉冲按**整机总质量**变成 WORLD-Y 躯干质心力，并要求未来 adapter
-   对完整 batch 写入且返回 typed receipt。receipt 与 application ledger 必须逐环境绑定随机化后实际总
-   质量、runtime dtype 的 normalized acceleration、命令 WORLD-Y force/impulse、applied mask，以及
-   WORLD→backend transform 的 content identity；同一步若换质量、力或 transform identity 会拒绝。
+   先做不改 live buffer 的 typed preflight，再执行一次不抛异常、只返回 `None` 的原子 full-buffer commit。
+   preflight receipt 与 application ledger 必须逐环境绑定随机化后实际总质量、runtime dtype 的 normalized
+   acceleration、命令 WORLD-Y force/impulse、applied mask、WORLD→backend transform SHA、adapter/backend
+   SHA 与 live backend object token；同一步换质量、力、transform 或 live backend 都会拒绝。详细接口见
+   [横向扰动 adapter 事务合同](../../interfaces/lateral_perturbation_adapter_contract.md)。
 
 本提交**没有**把 seam 接进 Isaac。Isaac Lab 2.1 的实际接口接线仍需确认 body-frame wrench 语义、
 WORLD→BODY 变换、`write_data_to_sim` 时序、随机化后总质量读取和 zero overwrite 生命周期；在这些通过
@@ -114,26 +117,33 @@ WORLD→BODY 变换、`write_data_to_sim` 时序、随机化后总质量读取�
 - opportunity 总数、eligible denominator、selected numerator；
 - 左/右选择数与采样强度总量；
 - 非零 pulse command、strike-window skip、窗口不足、意外中断；
-- 每步 full-buffer write receipt、真正 applied pulse 数与 applied impulse 总量；
-- 每次 pulse 的 environment/episode/step、采样 `Δv_y`、命令 `F_y`、剩余 pulse step 和 adapter receipt。
-- potential 随机 draw、共同随机题 SHA，以及 reset 截断时 sampled/commanded/applied/abandoned 五项冲量账。
-- 实际总质量、命令 WORLD force 和 transform identity 三者必须由 typed receipt 原样回显，再与 dispatch
+- 每步 side-effect-free preflight receipt、原子 commit 完成态、真正 applied pulse 数与 applied impulse 总量；
+- 每次 pulse 的 environment/episode/step、采样 `Δv_y`、命令 `F_y`、剩余 pulse step 和 adapter ledger。
+- potential 随机 draw、共同随机题 SHA，以及 reset/strike/window 截断时各自的
+  sampled/commanded/applied/abandoned 五项冲量账。
+- 实际总质量、命令 WORLD force、transform identity 和 backend identity 必须由 typed preflight receipt
+  原样回显，再与 dispatch
   输入逐 tensor 对账；这使 `F_y / total_mass = normalized_accel_y` 可独立复算，但仍不是 simulator 已执行
   的行为证据。
 - 每步 sample/application ledger 同时绑定 hard safety envelope identity；adapter 调用前保留质量与 wrench
   snapshot，adapter 若原地修改输入再重写回执也会 fail closed。
-- adapter 只能收到 mass/force/torque 的隔离深拷贝；即使它原地写坏三者后拒绝或抛异常，调用者持有的
-  mass 与 scheduler step tensors 也必须逐 bit 不变，且同一步可安全换 reviewed adapter 重试。
+- adapter 只能收到 mass/force/torque 的隔离深拷贝；preflight 原地写坏三者后拒绝或抛异常，调用者持有的
+  mass 与 scheduler step tensors 仍逐 bit 不变。只有 side-effect-free preflight 拒绝可 discard 后用同
+  step token、全新 preflight nonce 重试；commit 一旦进入后若抛异常或返回非 `None`，backend 永久标成
+  `DIRTY/UNKNOWN`，普通 retry/advance 必须拒绝。
 - scheduler 的 application ledger cache 永不直接公开：首次返回、显式 cache 查询和同一步 duplicate
   dispatch 每次都生成新的 tensor 深拷贝。调用者改坏任一返回 ledger 后，后续副本和计数仍须保持原值。
 - public step 中的 tensor 虽属于 frozen dataclass，内容仍可被外部改写；因此 dispatch 必须在读取任何
   adapter 字段或计算 wrench **之前**，先把 public step 与 scheduler 私有 canonical step 全字段比较，
   再只从私有 validated clone 派生 force。若比较失败，adapter call 必须严格为 0、application cache 仍空，
   reviewed caller 可用同一 step token 取得未污染的 canonical clone 并安全重试。
-- CUDA 上的 async assert 不能保证 Python 在 device failure 可见前不调用 writer，因此当前 source seam 在
-  pre-write 比较使用一次 host-visible completion。这是正确性优先的 E1 实现，同时意味着它**尚未满足**
-  预注册的 hot-path no-host-sync 门；runtime 接线必须改成只传 scheduler-private command/capability 或移除
-  该同步，并通过同 GPU throughput 门，才能把 `launch_authorized` 改成 true。
+- 不存在公开的 application acknowledgement；scheduler bookkeeping 只认模块内 dispatch identity
+  capability，所有 expected 都从私有 canonical step 推导。source 生成的一次性 token 必须由 preflight
+  object-identity 原样回显；它是 Python API 防误用，不是抵抗同进程恶意 introspection 的安全边界。
+- CUDA async assert 不能保证 Python 在 device failure 可见前不调用 writer，因此当前 source seam 在 public
+  step、mass/cast/final wrench、cache duplicate 和 receipt tensor/mask 各层使用**多次** host-visible
+  completion。这是正确性优先的 E1 实现，同时意味着它尚未满足 hot-path no-host-sync 门；runtime 接线必须
+  消除所有这些同步或重设计 handoff，再通过同 GPU throughput 门，才能把 `launch_authorized` 改成 true。
 
 `L0` 必须有 eligible/selected，但 `applied_pulse_count=0`；`L1` 必须有非零 applied pulse。采样、命令和
 application 三本冲量账对不上时，结果无效而不是“近似通过”。
@@ -193,17 +203,19 @@ application 三本冲量账对不上时，结果无效而不是“近似通过�
   hope_training/whole_body_tracking/tests/test_lateral_perturbation.py
 ```
 
-当前 `27 passed`。测试覆盖：Random123 Philox 零 counter/key 已知向量、四个 domain 与相邻 seed 的分桶
+当前聚焦测试为 `36 passed`。测试覆盖：Random123 Philox 零 counter/key 已知向量、四个 domain 与相邻 seed 的分桶
 均匀性和交叉相关性、`L0/L1` potential draw/SHA 完全相同、左右对称与幅度界、recovery/hold eligibility、
 strike skip、完整 pulse 冲量、reset 中断五项账、同一步幂等、漏步/漏 application receipt fail closed、
 按总质量缩放、质量/力/transform typed ledger，对极大 finite impulse、duration overflow、cast overflow、
 mass×acceleration overflow 和 force 上限的负测、X/Z force 与 torque 恒零，以及 pulse 后 full-batch 零写。
-另含 adapter 原地篡改/异常后的 caller bit-exact 不变量，以及公开 ledger 篡改无法污染私有 cache 的攻击
-回归；public normalized acceleration 被改写后会在 adapter 前拒绝，写入次数为 0，并允许同 tick 用私有
-canonical step 安全重试。它不证明 simulator 真正执行了这些命令，也没有 GPU throughput 证据。
+另含 adapter preflight 原地篡改/异常后的 caller bit-exact、不公开 acknowledge、CUDA async-assert
+neutered、坏 receipt/stale token、不同 live backend cache replay、commit 抛异常/非 `None` 返回等攻击回归；
+所有 precommit 失败都满足 backend write=0/cache 空，side-effect-free staging 会 discard，同 tick 可安全重试。
+strike/window/reset 的逐环境 sampled/commanded/applied/abandoned 恒等式及中断 tick backend 全零也已覆盖。
+它不证明真实 simulator adapter 满足 side-effect-free/atomic 合同，也没有 GPU throughput 证据。
 
-在最新 `origin/main@1d1eade` 重放后，whole-body tracking 的 57 文件整合套件为
-`838 passed, 22 skipped, 3 failed`。三项失败是未改动路径中的既有主线基线：MotionLoader 对两个
+在最新 `origin/main@107102f` 重放后，whole-body tracking 的 57 文件整合套件为
+`847 passed, 22 skipped, 3 failed`。三项失败是未改动路径中的既有主线基线：MotionLoader 对两个
 `PosixPath` case 抛 `TypeError`，virtual scorer 的 `0.9999999999979997` 超出 `1e-12` 容差；同环境在
 `origin/main` 原样重跑三项均失败，且四个相关源码/测试文件相对 `origin/main` 无 diff。因此本 source
 gate 没有新增整合回归，但也没有顺手修改这三个不在本实验范围内的问题。
