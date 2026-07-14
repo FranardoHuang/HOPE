@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "plan_id": "motion-franco-backhand-loop-b-table-net-clearance-20260715-v1",
+  "status": "preregistered_source_gate_pass_runtime_audit_not_run",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "scope": "CPU-only finite 400 Hz whole-trajectory table-top, net and net-post clearance audit for exact Franco backhand-loop B in the frozen tracking-task table pose; no dynamics, training, deployment or hardware",
+  "asset_id": "franco_backhand_loop_b",
+  "validator": {
+    "path": "scripts/audit_motion_schema2_table_net_clearance.py",
+    "bytes": 54734,
+    "sha256": "80b15b695fefc453286c3da6126a3b45dba9b280a4570fb23ea33c2f3ec6be4d"
+  },
+  "frozen_vendor_l1": {
+    "certificate": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/vendor_l1_primary_v1/franco_backhand_loop_b_98e7b883b29d.vendor_l1_safety_certificate.json",
+      "sha256": "6840df34a6aa6e5636192c705a8ecaa563f751658fe538df428bc317c858db60"
+    },
+    "preregistration": {
+      "path": "configs/motion_backhand_loop_b_vendor_l1_safety_prereg_20260715.json",
+      "bytes": 8387,
+      "sha256": "fd47a3989a9fa786d87b86382fd5923d3682860c88d365c0a7151d487f78a770"
+    },
+    "validator": {
+      "path": "scripts/audit_motion_schema2_vendor_l1_safety.py",
+      "bytes": 39568,
+      "sha256": "6368bda72e57e646324c6ff7281a50c00c339ddedb954941e6455712954fac2e"
+    },
+    "required_certificate_status": "complete_cpu_vendor_l1_safety_pass_downstream_blocked",
+    "required_authorization": {
+      "vendor_l1_complete": true,
+      "table_net_authorized": true,
+      "dynamics_authorized": false,
+      "simulator_authorized": false,
+      "training_authorized": false,
+      "formal_motion_authorized": false,
+      "hardware_authorized": false
+    }
+  },
+  "exact_runtime_input": {
+    "path": "/workspace/codexschema/motion_video_intake_20260711/schema2_fk_primary_v1/franco_backhand_loop_b_98e7b883b29d/franco_backhand_loop_b.98e7b883b29d.schema2_fk.npz",
+    "sha256": "e2eb99e69f624250e37d012ebc2c7db53c4213a6c73e8cd232b92640051d28cc"
+  },
+  "a3_model": {
+    "canonical_mjcf": {
+      "path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+      "bytes": 49107,
+      "sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+    },
+    "derived_closure": {
+      "algorithm": "sha256(canonical-json(sorted[{path,bytes,sha256}]))-v1",
+      "file_count": 75,
+      "total_bytes": 14127373,
+      "manifest_sha256": "e0381752eab46013c08559b331abb261beaa88a207a3c2f1155ab00857b962de",
+      "xml_file_count": 1,
+      "include_reference_count": 0,
+      "external_file_reference_count": 74,
+      "unique_external_file_count": 74,
+      "mesh_reference_count": 74
+    },
+    "compiled_collision_contract_sha256": "18e7f6ffbefba9dbd988f7c3cb9fb92b250777862fc25fa3d4a0b2ca0f8386e5",
+    "enabled_robot_geom_count": 37
+  },
+  "frame_sources": {
+    "table_geometry": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/geometry.py",
+      "bytes": 10304,
+      "sha256": "df71f12a21fedb4b8caed182906288f573b2f05c731441a5f529996baaf056b2"
+    },
+    "tracking_command": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/hope_commands.py",
+      "bytes": 257190,
+      "sha256": "b43e85da20cf0030618dddb1493955764ce8bd636b42c450950df910be03576b"
+    },
+    "tracking_scene_adapter": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/config/agibot_a3/hope_env_cfg.py",
+      "bytes": 75203,
+      "sha256": "b134712480bb0de3b125efc9d32dbadbceb176dc4e048deaac48bee710bc56b5"
+    }
+  },
+  "frame_contract": {
+    "schema2_mjcf_world": {
+      "origin": "robot_environment_origin_on_floor_plane",
+      "axes": {"x": "forward", "y": "robot_anatomical_left", "z": "up"},
+      "floor_z_m": 0.0
+    },
+    "hope_table_frame": {
+      "origin": "near_side_left_corner_of_table_surface_from_P1",
+      "axes": {"x": "toward_P2", "y": "left_from_P1", "z": "up"},
+      "table_x_range_m": [0.0, 2.74],
+      "table_y_range_m": [-1.525, 0.0],
+      "table_surface_z_m": 0.0
+    },
+    "hope_to_schema2_mjcf": {
+      "rotation_wxyz": [1.0, 0.0, 0.0, 0.0],
+      "translation_m": [0.5, 0.7625, 0.76],
+      "formula": "p_schema2_mjcf=p_HOPE+[vb_table_near_x,TABLE_WIDTH/2,vb_table_surface_z]",
+      "capture_table_pose_observed": false,
+      "pose_semantics": "frozen_counterfactual_tracking_task_virtual_table_not_capture_extrinsic"
+    }
+  },
+  "obstacle_geometry": {
+    "primitive": "axis_aligned_box_full_extents_m",
+    "table_top": {
+      "name": "motion_table_top",
+      "center_mjcf_world_m": [1.87, 0.0, 0.735],
+      "full_extents_m": [2.74, 1.525, 0.05]
+    },
+    "net": {
+      "name": "motion_net",
+      "center_mjcf_world_m": [1.87, 0.0, 0.83625],
+      "full_extents_m": [0.01, 1.825, 0.1525]
+    },
+    "net_posts": [
+      {
+        "name": "motion_net_post_left",
+        "center_mjcf_world_m": [1.87, 0.9125, 0.84625],
+        "full_extents_m": [0.02, 0.02, 0.1725]
+      },
+      {
+        "name": "motion_net_post_right",
+        "center_mjcf_world_m": [1.87, -0.9125, 0.84625],
+        "full_extents_m": [0.02, 0.02, 0.1725]
+      }
+    ],
+    "source_semantics": "table slab and net from canonical HOPE geometry; posts match build_net_post_cfg and are conservatively treated as clearance obstacles even though current Isaac posts are visual-only"
+  },
+  "audit_contract": {
+    "source_frames": 151,
+    "source_fps": 50,
+    "substeps_per_source_interval": 8,
+    "dense_frames": 1201,
+    "effective_sampling_hz": 400,
+    "interpolation": "inherit_exact_vendor_L1_root_xyz_linear_root_quaternion_shortest_arc_slerp_joint_position_linear",
+    "dense_sampling_is_continuous_time_certificate": false,
+    "robot_geometry_scope": "all_37_enabled_robot_collision_geoms_with_separate_racket_and_handle_rollup",
+    "racket_collision_geoms": ["right_racket_collision", "right_racket_handle_collision"],
+    "obstacle_names": ["motion_table_top", "motion_net", "motion_net_post_left", "motion_net_post_right"],
+    "hard_clearance_m": 0.005,
+    "warning_clearance_m": 0.02,
+    "reporting_clearance_cap_m": 0.1,
+    "hard_threshold_predicate": "fail iff audit_self_collision._far(model,data,robot_geom,obstacle_geom,0.005) is false",
+    "reporting_clearance_bisection_tolerance_m": 0.000001,
+    "danger_propagation": "any robot-obstacle dense sample below 5mm fails the whole asset and marks both adjacent source frames",
+    "hard_fail_is_noncompensable": true,
+    "model_augmentation": "append four exact world-fixed box geoms after the canonical worldbody children and compile from in-memory XML plus exact 74-file asset map",
+    "mj_step_calls": 0
+  },
+  "output_contract": {
+    "certificate_path": "/workspace/codexschema/motion_video_intake_20260711/table_net_primary_v1/franco_backhand_loop_b_98e7b883b29d.table_net_clearance_certificate.json",
+    "must_be_absent": true,
+    "parent_must_exist": true,
+    "no_clobber": true
+  },
+  "authorization": {
+    "source_gate_pass": true,
+    "cpu_table_net_audit_authorized_after_review": true,
+    "vendor_l1_certificate_required": true,
+    "table_net_complete": false,
+    "dynamics_authorized": false,
+    "simulator_authorized": false,
+    "training_authorized": false,
+    "formal_motion_authorized": false,
+    "hardware_authorized": false
+  },
+  "explicit_non_claims": [
+    "mathematical_continuous_time_table_net_clearance",
+    "dynamics_balance_or_contact_stability",
+    "TOPP_or_time_warp",
+    "strike_or_returnability",
+    "RL_training_or_checkpoint_quality",
+    "Gate3_or_hardware_safety"
+  ],
+  "next_gate": "only_after_exact_table_net_certificate_vendor_dynamics_and_balance_gate"
+}

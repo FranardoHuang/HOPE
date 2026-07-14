@@ -578,6 +578,19 @@ helper。dense 704 正是 source frame 88；runtime column 23 的 elbow `1.18046
 permutation，duplicate/missing/extra/order-contract drift 均 fail closed；没有放宽 range、修改 B 或启用
 C。修复后 runtime/certificate 结果见本节上方；原 dense704 只作为假拒绝根因证据。
 
+B 的下一道整轨桌网余隙门现已完成 source/static 预注册，但**尚未运行 exact MuJoCo runtime**。它逐字绑定
+现存 vendor L1 certificate `6840df34...db60`、B NPZ、L1 plan/validator、vendor MJCF/75-file closure，
+并在消费前要求 certificate 的 `table_net_authorized=true`。坐标只允许 canonical HOPE 桌坐标到
+schema-2/MJCF 世界的无旋转纯平移 `(+0.5,+0.7625,+0.76)`；因此桌板、网和两根网柱在同一冻结 tracking
+桌位中检查，而不是从空挥视频背景猜 capture extrinsic。validator 把四个 world-fixed box 追加到 canonical
+worldbody 末尾，在内存中用 exact 74-file asset map 编译，要求原 37 个 enabled robot geom ID、qpos0、拓扑
+和 compiled collision SHA 不变；每个 `1201 @ 400 Hz` 有限样本检查 `37×4=148` 个 pair，球拍/拍柄另做
+汇总但不从全机器人门排除。`<5 mm` 是 exact saturation-predicate hard fail，不能由其他帧/reward 补偿；
+有限密扫仍不是数学连续时间证明，且没有动力学、训练或真机含义。dependency-light 专项 `16 passed`、
+source/static 命令 PASS；runtime `dry-run/audit`、certificate 与动作晋级均未发生，所以 G08 保持 Partial。
+见[桌网实验卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET.md)和
+[操作文档](../operations/run_motion_backhand_loop_b_table_net_clearance.md)。
+
 S0/M0 的下一层 exact GMR 现已冻结成两批独立 machine plan。共享 consumer 不把 retarget body order 猜成
 canonical vendor body order，而是分开绑定两套 XML order，再用显式 31-joint bijection 接入 A3 FK。M0
 四条候选的人工 ready windows 已展开为 exact 30 Hz sample indices；结果将同时报告初末前后脚错位和横向
