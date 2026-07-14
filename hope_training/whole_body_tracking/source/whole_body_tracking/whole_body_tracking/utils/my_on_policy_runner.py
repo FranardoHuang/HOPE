@@ -162,13 +162,20 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 for metric_name, metric_value in term.metrics.items():
                     self._log_scalar(f"Live/{term_name}/{metric_name}", self._mean_tensor(metric_value), step)
                 activation_consumer = getattr(
-                    term, "consume_post_swing_activation_counters", None
+                    term, "consume_training_activation_counters", None
                 )
+                if not callable(activation_consumer):
+                    # Backward-compatible fallback for command terms that expose only the first
+                    # post-swing ledger API.  A term exposing both APIs is consumed exactly once
+                    # through the aggregate transaction above.
+                    activation_consumer = getattr(
+                        term, "consume_post_swing_activation_counters", None
+                    )
                 if callable(activation_consumer):
-                    # These are event counts accumulated across every environment step in the
-                    # just-finished PPO update.  They must be logged as totals, not averaged over
-                    # num_envs like instantaneous CommandTerm metrics.  The consumer snapshots
-                    # and resets the counters exactly once for the next update.
+                    # These are integer event/sample counts accumulated across every environment
+                    # step in the just-finished PPO update.  They must be logged as totals, not
+                    # averaged over num_envs like instantaneous CommandTerm metrics.  The
+                    # aggregate consumer snapshots and resets all ledgers exactly once.
                     for counter_name, counter_value in activation_consumer().items():
                         self._log_scalar(
                             f"Live/{term_name}/{counter_name}",

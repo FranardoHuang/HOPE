@@ -1456,6 +1456,9 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                          f"rewards.{_tn}.params.body_names contains {_WRIST}")
                 _term.params["body_names"] = _names
                 applied.append(f"rewards.{_tn}.body_names-={_WRIST}")
+            _require(hasattr(env_cfg.commands, "motion"),
+                     "commands.motion (free_wrist_vel_mimic activation ledger)")
+            env_cfg.commands.motion.v1_free_wrist_vel_mimic_activation = True
         # A0/A1 (Franco 2026-07-13): test whether the non-racket LEFT arm should remain free to
         # regulate balance instead of copying the teacher.  Fail closed on the exact current
         # upper-body contract; broad regexes or best-effort subtraction could silently release a
@@ -1581,6 +1584,9 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 _term.params["window_command_name"] = "racket_target"
                 _gated.append(_t)
             _require(len(_gated) > 0, "rewards.motion_scale_in_window (all six motion terms are None)")
+            _require(hasattr(env_cfg.commands, "motion"),
+                     "commands.motion (motion_scale_in_window activation ledger)")
+            env_cfg.commands.motion.v2_motion_scale_in_window_activation = msw
             applied.append(f"rewards.motion_scale_in_window={msw} (x{len(_gated)} motion terms inside "
                            "the strike window: " + ",".join(_gated) + ")")
         # Proximity power-gate (reward_staged_design 2026-07-08 §② C2 case a): racket_normal and

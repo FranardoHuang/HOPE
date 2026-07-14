@@ -18,7 +18,11 @@ def _get_body_indexes(command: MotionCommand, body_names: list[str] | None) -> l
 
 
 def _apply_window_scale(
-    env: ManagerBasedRLEnv, reward: torch.Tensor, window_scale: float, window_command_name: str | None
+    env: ManagerBasedRLEnv,
+    reward: torch.Tensor,
+    window_scale: float,
+    window_command_name: str | None,
+    motion_command: MotionCommand,
 ) -> torch.Tensor:
     """V2 in-window imitation yield (reward_staged_design 2026-07-08 §③): scale the imitation
     reward by ``window_scale`` for envs inside the racket command's WIDE strike window (the window
@@ -32,6 +36,9 @@ def _apply_window_scale(
     window = getattr(cmd, "strike_window_wide", None)
     if window is None:  # racket command without split-window support: fall back to the base window
         window = cmd.strike_window
+    motion_command.record_v2_strike_window_scale_activation(
+        window, actual_window_scale=float(window_scale)
+    )
     return torch.where(window, reward * float(window_scale), reward)
 
 
@@ -41,7 +48,9 @@ def motion_global_anchor_position_error_exp(
 ) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)
     error = torch.sum(torch.square(command.anchor_pos_w - command.robot_anchor_pos_w), dim=-1)
-    return _apply_window_scale(env, torch.exp(-error / std**2), window_scale, window_command_name)
+    return _apply_window_scale(
+        env, torch.exp(-error / std**2), window_scale, window_command_name, command
+    )
 
 
 def motion_global_anchor_orientation_error_exp(
@@ -50,7 +59,9 @@ def motion_global_anchor_orientation_error_exp(
 ) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)
     error = quat_error_magnitude(command.anchor_quat_w, command.robot_anchor_quat_w) ** 2
-    return _apply_window_scale(env, torch.exp(-error / std**2), window_scale, window_command_name)
+    return _apply_window_scale(
+        env, torch.exp(-error / std**2), window_scale, window_command_name, command
+    )
 
 
 def motion_relative_body_position_error_exp(
@@ -62,7 +73,13 @@ def motion_relative_body_position_error_exp(
     error = torch.sum(
         torch.square(command.body_pos_relative_w[:, body_indexes] - command.robot_body_pos_w[:, body_indexes]), dim=-1
     )
-    return _apply_window_scale(env, torch.exp(-error.mean(-1) / std**2), window_scale, window_command_name)
+    return _apply_window_scale(
+        env,
+        torch.exp(-error.mean(-1) / std**2),
+        window_scale,
+        window_command_name,
+        command,
+    )
 
 
 def motion_relative_body_orientation_error_exp(
@@ -75,7 +92,13 @@ def motion_relative_body_orientation_error_exp(
         quat_error_magnitude(command.body_quat_relative_w[:, body_indexes], command.robot_body_quat_w[:, body_indexes])
         ** 2
     )
-    return _apply_window_scale(env, torch.exp(-error.mean(-1) / std**2), window_scale, window_command_name)
+    return _apply_window_scale(
+        env,
+        torch.exp(-error.mean(-1) / std**2),
+        window_scale,
+        window_command_name,
+        command,
+    )
 
 
 def motion_global_body_linear_velocity_error_exp(
@@ -87,7 +110,17 @@ def motion_global_body_linear_velocity_error_exp(
     error = torch.sum(
         torch.square(command.body_lin_vel_w[:, body_indexes] - command.robot_body_lin_vel_w[:, body_indexes]), dim=-1
     )
-    return _apply_window_scale(env, torch.exp(-error.mean(-1) / std**2), window_scale, window_command_name)
+    reward = torch.exp(-error.mean(-1) / std**2)
+    command.record_v1_velocity_mimic_activation(
+        reward.shape[0],
+        held_wrist_excluded=(
+            body_names is not None
+            and "right_wrist_yaw_Link" not in body_names
+        ),
+    )
+    return _apply_window_scale(
+        env, reward, window_scale, window_command_name, command
+    )
 
 
 def motion_global_body_angular_velocity_error_exp(
@@ -99,7 +132,13 @@ def motion_global_body_angular_velocity_error_exp(
     error = torch.sum(
         torch.square(command.body_ang_vel_w[:, body_indexes] - command.robot_body_ang_vel_w[:, body_indexes]), dim=-1
     )
-    return _apply_window_scale(env, torch.exp(-error.mean(-1) / std**2), window_scale, window_command_name)
+    return _apply_window_scale(
+        env,
+        torch.exp(-error.mean(-1) / std**2),
+        window_scale,
+        window_command_name,
+        command,
+    )
 
 
 def feet_contact_time(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, threshold: float) -> torch.Tensor:

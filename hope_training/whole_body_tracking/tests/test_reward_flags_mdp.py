@@ -309,7 +309,11 @@ def _fake_motion_for_rewards(n=4, n_bodies=2):
     quat = torch.zeros(n, n_bodies, 4)
     quat[..., 0] = 1.0
     return types.SimpleNamespace(
-        cfg=types.SimpleNamespace(body_names=["torso_Link", "right_wrist_yaw_Link"]),
+        cfg=types.SimpleNamespace(
+            body_names=["torso_Link", "right_wrist_yaw_Link"],
+            v1_free_wrist_vel_mimic_activation=False,
+            v2_motion_scale_in_window_activation=None,
+        ),
         anchor_pos_w=torch.zeros(n, 3), robot_anchor_pos_w=torch.zeros(n, 3),
         anchor_quat_w=torch.zeros(n, 4), robot_anchor_quat_w=torch.zeros(n, 4),
         body_pos_relative_w=zeros_b.clone(), robot_body_pos_w=zeros_b.clone(),
@@ -317,7 +321,36 @@ def _fake_motion_for_rewards(n=4, n_bodies=2):
         body_lin_vel_w=zeros_b.clone(), robot_body_lin_vel_w=zeros_b.clone(),
         body_ang_vel_w=zeros_b.clone(), robot_body_ang_vel_w=zeros_b.clone(),
         in_hold=torch.zeros(n, dtype=torch.bool),
+        record_v1_velocity_mimic_activation=lambda *args, **kwargs: None,
+        record_v2_strike_window_scale_activation=lambda *args, **kwargs: None,
     )
+
+
+def _activation_motion_for_rewards(n=4, *, v1=False, v2_scale=None):
+    motion = _fake_motion_for_rewards(n)
+    motion.cfg.v1_free_wrist_vel_mimic_activation = v1
+    motion.cfg.v2_motion_scale_in_window_activation = v2_scale
+    motion._post_swing_activation_counters = {}
+    motion._reward_activation_counters = {
+        name: torch.zeros((), dtype=torch.long)
+        for name in (
+            "v1_velocity_mimic_eligible_sample_count",
+            "v1_held_wrist_excluded_sample_count",
+            "v2_strike_window_eligible_imitation_sample_count",
+            "v2_quarter_scaled_strike_window_imitation_sample_count",
+        )
+    }
+    motion.record_v1_velocity_mimic_activation = types.MethodType(
+        commands_mod.MotionCommand.record_v1_velocity_mimic_activation, motion
+    )
+    motion.record_v2_strike_window_scale_activation = types.MethodType(
+        commands_mod.MotionCommand.record_v2_strike_window_scale_activation,
+        motion,
+    )
+    motion.consume_training_activation_counters = types.MethodType(
+        commands_mod.MotionCommand.consume_training_activation_counters, motion
+    )
+    return motion
 
 
 def test_v2_window_scale_scales_only_windowed_envs():
@@ -366,6 +399,115 @@ def test_v2_uses_wide_window_and_forwards_through_swing_only_wrappers():
     r = hope_rewards_mod.motion_body_ori_swing_only(
         env, "motion", std=1.0, body_names=None, window_scale=0.0, window_command_name="racket_target")
     assert torch.allclose(r, torch.tensor([0.0, 0.0]))
+
+
+def test_v1_execution_counts_multi_env_samples_and_resolved_wrist_exclusion():
+    motion = _activation_motion_for_rewards(3, v1=True)
+    env = _fake_env(motion=motion)
+    kept_bodies = ["torso_Link"]
+
+    first = rewards_mod.motion_global_body_linear_velocity_error_exp(
+        env, "motion", std=1.0, body_names=kept_bodies
+    )
+    second = rewards_mod.motion_global_body_linear_velocity_error_exp(
+        env, "motion", std=1.0, body_names=kept_bodies
+    )
+    assert torch.equal(first, torch.ones(3))
+    assert torch.equal(second, first)
+
+    snapshot = motion.consume_training_activation_counters()
+    assert snapshot["v1_velocity_mimic_eligible_sample_count"].item() == 6
+    assert snapshot["v1_held_wrist_excluded_sample_count"].item() == 6
+    assert snapshot["v1_velocity_mimic_eligible_sample_count"].dtype == torch.long
+    assert all(value.item() == 0 for value in motion._reward_activation_counters.values())
+
+
+def test_v1_counterexample_keeps_denominator_when_wrist_was_not_excluded():
+    motion = _activation_motion_for_rewards(4, v1=True)
+    env = _fake_env(motion=motion)
+    rewards_mod.motion_global_body_linear_velocity_error_exp(
+        env,
+        "motion",
+        std=1.0,
+        body_names=["torso_Link", "right_wrist_yaw_Link"],
+    )
+    snapshot = motion.consume_training_activation_counters()
+    assert snapshot["v1_velocity_mimic_eligible_sample_count"].item() == 4
+    assert snapshot["v1_held_wrist_excluded_sample_count"].item() == 0
+
+
+def test_v2_execution_counts_each_real_windowed_reward_application():
+    motion = _activation_motion_for_rewards(4, v2_scale=0.25)
+    wide = torch.tensor([True, False, True, False])
+    racket = _fake_racket_cmd(
+        4, window=torch.zeros(4, dtype=torch.bool), window_wide=wide
+    )
+    env = _fake_env(motion=motion, racket_target=racket)
+
+    anchor = rewards_mod.motion_global_anchor_position_error_exp(
+        env,
+        "motion",
+        std=1.0,
+        window_scale=0.25,
+        window_command_name="racket_target",
+    )
+    velocity = rewards_mod.motion_global_body_linear_velocity_error_exp(
+        env,
+        "motion",
+        std=1.0,
+        body_names=["torso_Link"],
+        window_scale=0.25,
+        window_command_name="racket_target",
+    )
+    expected = torch.tensor([0.25, 1.0, 0.25, 1.0])
+    assert torch.equal(anchor, expected)
+    assert torch.equal(velocity, expected)
+
+    snapshot = motion.consume_training_activation_counters()
+    # Two imitation terms x two in-window env samples.  This deliberately measures reward
+    # applications, not unique environment steps.
+    assert snapshot["v2_strike_window_eligible_imitation_sample_count"].item() == 4
+    assert snapshot[
+        "v2_quarter_scaled_strike_window_imitation_sample_count"
+    ].item() == 4
+
+
+def test_v2_counterexample_records_window_but_not_wrong_scale_as_quarter():
+    motion = _activation_motion_for_rewards(4, v2_scale=0.25)
+    wide = torch.tensor([True, False, True, False])
+    env = _fake_env(
+        motion=motion,
+        racket_target=_fake_racket_cmd(4, window_wide=wide),
+    )
+    result = rewards_mod.motion_global_anchor_position_error_exp(
+        env,
+        "motion",
+        std=1.0,
+        window_scale=0.5,
+        window_command_name="racket_target",
+    )
+    assert torch.equal(result, torch.tensor([0.5, 1.0, 0.5, 1.0]))
+    snapshot = motion.consume_training_activation_counters()
+    assert snapshot["v2_strike_window_eligible_imitation_sample_count"].item() == 2
+    assert snapshot[
+        "v2_quarter_scaled_strike_window_imitation_sample_count"
+    ].item() == 0
+
+
+def test_v1_v2_disabled_ledgers_are_zero_without_rng_or_reward_change(monkeypatch):
+    motion = _activation_motion_for_rewards(3, v1=False, v2_scale=None)
+    env = _fake_env(motion=motion)
+
+    def _unexpected_rng(*args, **kwargs):
+        raise AssertionError("disabled V1/V2 reward instrumentation must not sample RNG")
+
+    monkeypatch.setattr(torch, "rand", _unexpected_rng)
+    result = rewards_mod.motion_global_body_linear_velocity_error_exp(
+        env, "motion", std=1.0, body_names=["torso_Link"]
+    )
+    assert torch.equal(result, torch.ones(3))
+    snapshot = motion.consume_training_activation_counters()
+    assert all(value.item() == 0 for value in snapshot.values())
 
 
 def test_hitter_pure_velocity_imitation_is_swing_only():

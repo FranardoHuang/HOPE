@@ -533,6 +533,22 @@ class MotionCommand(CommandTerm):
                 "post_swing_replay_started_reset_count",
             )
         }
+        # Reward-mechanism activation accounting.  These counters live on the motion command so
+        # every imitation reward term can record into one per-update ledger without touching the
+        # simulator or sampling another random number.  The unit of V1 is one environment sample
+        # evaluated by the body-linear-velocity imitation term.  The unit of V2 is one
+        # (imitation reward term, environment) sample inside the wide strike window; V2 therefore
+        # counts every real scaled reward application rather than inferring activation from an
+        # aggregate reward value.
+        self._reward_activation_counters = {
+            name: torch.zeros((), dtype=torch.long, device=self.device)
+            for name in (
+                "v1_velocity_mimic_eligible_sample_count",
+                "v1_held_wrist_excluded_sample_count",
+                "v2_strike_window_eligible_imitation_sample_count",
+                "v2_quarter_scaled_strike_window_imitation_sample_count",
+            )
+        }
         self.body_pos_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 3, device=self.device)
         self.body_quat_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 4, device=self.device)
         self.body_quat_relative_w[:, :, 0] = 1.0
@@ -1026,6 +1042,82 @@ class MotionCommand(CommandTerm):
             value.zero_()
         return snapshot
 
+    def consume_training_activation_counters(self) -> dict[str, torch.Tensor]:
+        """Snapshot and reset every integer activation counter for one PPO update.
+
+        ``MotionOnPolicyRunner`` prefers this aggregate consumer over the legacy post-swing-only
+        consumer.  Keeping the latter public preserves the original narrow API for diagnostic
+        callers while this method guarantees that post-swing, V1 and V2 share one logger
+        transaction and cannot be reset at different update boundaries.
+        """
+
+        snapshot = {
+            name: value.detach().clone()
+            for counters in (
+                self._post_swing_activation_counters,
+                self._reward_activation_counters,
+            )
+            for name, value in counters.items()
+        }
+        for counters in (
+            self._post_swing_activation_counters,
+            self._reward_activation_counters,
+        ):
+            for value in counters.values():
+                value.zero_()
+        return snapshot
+
+    def record_v1_velocity_mimic_activation(
+        self, eligible_sample_count: int | torch.Tensor, *, held_wrist_excluded: bool
+    ) -> None:
+        """Record real V1 linear-velocity imitation evaluations.
+
+        The explicit config activation bit is written only by the V1 training override.  When it
+        is disabled this method is a strict no-op.  The denominator is recorded before checking
+        the resolved body list, so a miswired V1 run produces a positive denominator and a zero
+        exclusion numerator instead of a false green.
+        """
+
+        if not bool(self.cfg.v1_free_wrist_vel_mimic_activation):
+            return
+        counters = self._reward_activation_counters
+        counters["v1_velocity_mimic_eligible_sample_count"].add_(
+            eligible_sample_count
+        )
+        if held_wrist_excluded:
+            counters["v1_held_wrist_excluded_sample_count"].add_(
+                eligible_sample_count
+            )
+
+    def record_v2_strike_window_scale_activation(
+        self, strike_window: torch.Tensor, *, actual_window_scale: float
+    ) -> None:
+        """Record real V2 reward applications inside the wide strike window.
+
+        The denominator counts wide-window samples reaching ``torch.where`` in the imitation
+        reward path.  The numerator counts the same samples only when both the explicit V2
+        activation contract and the actually applied reward parameter are exactly ``0.25``.
+        Thus a missing/mismatched scale cannot pass by merely exposing a strike-window mask.
+        """
+
+        configured_scale = self.cfg.v2_motion_scale_in_window_activation
+        if configured_scale is None:
+            return
+        eligible_sample_count = strike_window.to(dtype=torch.bool).sum(
+            dtype=torch.long
+        )
+        counters = self._reward_activation_counters
+        counters["v2_strike_window_eligible_imitation_sample_count"].add_(
+            eligible_sample_count
+        )
+        if (
+            float(configured_scale) == 0.25
+            and float(actual_window_scale) == 0.25
+        ):
+            counters[
+                "v2_quarter_scaled_strike_window_imitation_sample_count"
+            ].add_(eligible_sample_count)
+
     def _resample_command(self, env_ids: Sequence[int]):
         if len(env_ids) == 0:
             return
@@ -1450,6 +1542,12 @@ class MotionCommandCfg(CommandTermCfg):
     allow_legacy_link_origin_velocity: bool = False
     anchor_body_name: str = MISSING
     body_names: list[str] = MISSING
+
+    # Execution-ledger activation bits.  ``train.py`` writes these only when the corresponding
+    # V1/V2 override is explicitly present.  Defaults keep both ledgers inert; they do not change
+    # reward values, simulator state, or random-number consumption.
+    v1_free_wrist_vel_mimic_activation: bool = False
+    v2_motion_scale_in_window_activation: float | None = None
 
     pose_range: dict[str, tuple[float, float]] = {}
     velocity_range: dict[str, tuple[float, float]] = {}

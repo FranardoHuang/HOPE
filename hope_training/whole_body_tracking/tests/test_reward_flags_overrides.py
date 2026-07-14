@@ -496,6 +496,7 @@ def test_virtual_ball_yaml_pins_outcome_dominant_effective_weights():
 def test_v1_free_wrist_vel_mimic_drops_wrist_from_lin_vel_only():
     env_cfg, applied = _apply({"rewards": {"free_wrist_vel_mimic": True}})
     assert _WRIST not in env_cfg.rewards.motion_body_lin_vel.params["body_names"]
+    assert env_cfg.commands.motion.v1_free_wrist_vel_mimic_activation is True
     # the orientation/ang-vel mimic lists are free_wrist_ori_mimic's business — untouched here
     assert _WRIST in env_cfg.rewards.motion_body_ori.params["body_names"]
     assert _WRIST in env_cfg.rewards.motion_body_ang_vel.params["body_names"]
@@ -506,6 +507,7 @@ def test_v1_free_wrist_vel_mimic_drops_wrist_from_lin_vel_only():
 def test_v1_false_is_noop():
     env_cfg, applied = _apply({"rewards": {"free_wrist_vel_mimic": False}})
     assert _WRIST in env_cfg.rewards.motion_body_lin_vel.params["body_names"]
+    assert not hasattr(env_cfg.commands.motion, "v1_free_wrist_vel_mimic_activation")
     assert applied == []
 
 
@@ -670,6 +672,7 @@ def test_v2_wires_window_scale_onto_non_none_motion_terms():
         assert term.params["window_scale"] == 0.25, name
         assert term.params["window_command_name"] == "racket_target", name
     assert env_cfg.rewards.motion_global_anchor_pos is None  # removed term skipped, no crash
+    assert env_cfg.commands.motion.v2_motion_scale_in_window_activation == 0.25
     assert any("motion_scale_in_window=0.25" in a for a in applied)
     # weights themselves untouched (the scaling is per-env inside the reward funcs)
     assert env_cfg.rewards.motion_body_lin_vel.weight == 1.0
@@ -678,6 +681,7 @@ def test_v2_wires_window_scale_onto_non_none_motion_terms():
 def test_v2_absent_leaves_params_untouched():
     env_cfg, _ = _apply({"rewards": {"motion_scale": 1.0}})
     assert "window_scale" not in env_cfg.rewards.motion_body_lin_vel.params
+    assert not hasattr(env_cfg.commands.motion, "v2_motion_scale_in_window_activation")
 
 
 def test_v2_requires_racket_command():

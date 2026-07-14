@@ -197,3 +197,64 @@ def test_live_logger_exports_and_consumes_post_swing_activation_totals_once(monk
         52.0,
         17,
     )
+
+
+def test_live_logger_prefers_aggregate_v1_v2_activation_transaction(monkeypatch):
+    contract = _load_contract_module()
+    runner_module = _load_runner_module(monkeypatch, contract)
+
+    class MotionTerm:
+        metrics = {}
+
+        def __init__(self):
+            self.aggregate_calls = 0
+            self.legacy_calls = 0
+
+        def consume_training_activation_counters(self):
+            self.aggregate_calls += 1
+            return {
+                "v1_velocity_mimic_eligible_sample_count": 4096,
+                "v1_held_wrist_excluded_sample_count": 4096,
+                "v2_strike_window_eligible_imitation_sample_count": 512,
+                "v2_quarter_scaled_strike_window_imitation_sample_count": 512,
+            }
+
+        def consume_post_swing_activation_counters(self):
+            self.legacy_calls += 1
+            raise AssertionError("aggregate consumer must suppress the legacy fallback")
+
+    term = MotionTerm()
+    env = SimpleNamespace(
+        command_manager=SimpleNamespace(
+            active_terms=["motion"], get_term=lambda name: term
+        ),
+        episode_length_buf=7,
+        common_step_counter=123,
+    )
+    runner = runner_module.MotionOnPolicyRunner.__new__(
+        runner_module.MotionOnPolicyRunner
+    )
+    runner.env = SimpleNamespace(unwrapped=env)
+    logged = {}
+    runner._log_scalar = lambda tag, value, step: logged.setdefault(
+        tag, (value, step)
+    )
+
+    runner._log_live_metrics(step=19)
+
+    assert term.aggregate_calls == 1
+    assert term.legacy_calls == 0
+    assert logged["Live/motion/v1_velocity_mimic_eligible_sample_count"] == (
+        4096.0,
+        19,
+    )
+    assert logged["Live/motion/v1_held_wrist_excluded_sample_count"] == (
+        4096.0,
+        19,
+    )
+    assert logged[
+        "Live/motion/v2_strike_window_eligible_imitation_sample_count"
+    ] == (512.0, 19)
+    assert logged[
+        "Live/motion/v2_quarter_scaled_strike_window_imitation_sample_count"
+    ] == (512.0, 19)
