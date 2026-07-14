@@ -61,10 +61,12 @@
   [interaction 卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-INTERACTION.md)。
 
 - Post-swing replay 的真实 reset 路径已新增 buffer-not-ready、eligible、random-not-selected、
-  selected 与 started 五组 per-update 整数计数，source 与 runner 专项 `4+9 passed`。红队在
-  发射前又发现共同 V1/V2 activation 仍缺 count-level 仪表，故新 post-swing pair 与
-  base-decel measurement-complete replacement 队列均保持 `launch_authorized=false` / `blocked`，
-  不跑无法早判的 strict probe 或 trainer。见
+  selected 与 started 五组 per-update 整数计数。后续 exact successor `0f3900a...` 又补齐
+  V1/V2 仪表和两臂同 RewardManager phase 的 base-decel raw kernel 计数：独立红队确认
+  probe 返回严格零、参数同源、treatment 同 step 去重，聚焦套件 `222 passed`，另有两个
+  未被本改动触及的 main `MotionLoader/PosixPath` 基线失败。新 post-swing pair 与
+  base-decel measurement-complete replacement 队列仍保持 `launch_authorized=false` / `blocked`；
+  exact source ignored-asset hydration 与 strict full-scene terminal probe 尚缺，不得据源码门点火。见
   [post-swing 卷宗](experiments/2026-07/EXP-P1-V1V2-POST-SWING-INTERACTION.md)与
   [base-decel replacement](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)。
 

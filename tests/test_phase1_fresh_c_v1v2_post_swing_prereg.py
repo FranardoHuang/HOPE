@@ -78,10 +78,10 @@ def test_pair_freezes_same_inputs_budget_seed_and_exact_instrumented_source():
     }
     assert control["milestones"] == [200, 500, 1000]
     assert control["source"]["checkout"] == (
-        "/workspace/codexschema/nohope_p1_v1v2_post_swing_activation_9d7c6b2"
+        "/workspace/codexschema/nohope_p1_activation_successor_0f3900a"
     )
     assert control["source"]["commit"] == (
-        "9d7c6b2b01b6392df918c0ab69bbb89b1beb4eaf"
+        "0f3900a612863faf326dca6ad3e8d38bfe8df3c9"
     )
     ignored = control["source"]["ignored_runtime_asset"]
     assert ignored == {
@@ -247,6 +247,7 @@ def test_namespaces_are_new_concrete_and_contain_no_legacy_source_or_placeholder
     assert "nohope_p1_caeb9ad" not in raw
     assert "nohope_p1_post_swing_activation_3ced5a2" not in raw
     assert "3ced5a218eab322ebc4ebea6c73ecf64ee47cc5e" not in raw
+    assert "9d7c6b2b01b6392df918c0ab69bbb89b1beb4eaf" not in raw
     assert "nohope_conditional_face_guidance_61007e9" not in raw
     assert "phase1_fresh_c_v1v2_decel_interaction_20260714" not in raw
     assert len({job["run_name"] for job in queue["jobs"]}) == 2

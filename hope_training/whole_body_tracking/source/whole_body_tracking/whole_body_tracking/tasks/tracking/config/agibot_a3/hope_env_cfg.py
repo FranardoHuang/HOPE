@@ -615,10 +615,15 @@ class HOPEDeployParityRewardsCfg(HOPERewardsCfg):
     # v_des = clamp(v_gain*dist_xy, 0, v_max); reward = exp(-(|v_base_xy| - v_des)^2/std^2), gated to
     # pre_strike. Far target -> pays for moving at v_max (cooperates with racket_progress); at arrival
     # v_des -> 0 -> pays for a CALM base, killing the reactive rush-then-slam toward far targets.
-    # REWARD-side only — the frozen 175-D actor obs contract is untouched. weight 0.0 = OFF (IsaacLab's
-    # RewardManager skips zero-weight terms); enable per-experiment via task.rewards.base_decel_weight
-    # (suggested trial 1.0). CLI/yaml-tunable: base_decel_weight / _v_gain / _v_max / _std.
+    # REWARD-side only — the frozen 175-D actor obs contract is untouched.  The instrumentation probe
+    # is also default OFF; train.py gives it weight 1.0 in BOTH explicit control/treatment arms.  Its
+    # function always returns zero, so it runs in the same RewardManager phase without changing total
+    # reward.  base_decel weight 0.0 = OFF (IsaacLab skips zero-weight terms); enable per-experiment via
+    # task.rewards.base_decel_weight. CLI/yaml-tunable: base_decel_weight / _v_gain / _v_max / _std.
     # Watch metric: base_speed_xy_prestrike (should taper near targets instead of staying hot).
+    base_decel_activation_probe = RewTerm(
+        func=mdp.base_decel_activation_probe, weight=0.0,
+        params={"command_name": "racket_target", "v_gain": 2.0, "v_max": 1.6, "std": 0.4})
     base_decel = RewTerm(
         func=mdp.base_decel_tracking, weight=0.0,
         params={"command_name": "racket_target", "v_gain": 2.0, "v_max": 1.6, "std": 0.4})

@@ -128,7 +128,7 @@ def test_reward_execution_and_activation_share_the_exact_kernel_and_gate():
     assert counters["base_decel_raw_kernel_sum"].dtype == expected_reward.dtype
 
 
-def test_unconditional_observer_measures_weight_zero_control_without_reward_side_effects():
+def test_reward_stage_probe_measures_weight_zero_control_and_returns_exact_zero():
     env, command, params = _case()
     command_before = {
         "target": command.racket_target_pos_w.clone(),
@@ -140,11 +140,12 @@ def test_unconditional_observer_measures_weight_zero_control_without_reward_side
     reward_buf_before = env.reward_buf.clone()
     rng_before = torch.random.get_rng_state().clone()
 
-    # This is the structural zero-weight path: the RewardManager never calls
-    # base_decel_tracking, but an unconditional step hook can still observe it.
-    assert R.observe_base_decel_activation(env, "racket_target", **params) is None
+    # The control's real base_decel term has weight zero and is skipped.  The separate probe has
+    # manager weight 1.0, but its function output is identically zero after recording raw evidence.
+    probe_reward = R.base_decel_activation_probe(env, "racket_target", **params)
     counters = R.consume_base_decel_activation_counters(env, "racket_target")
 
+    assert torch.equal(probe_reward, torch.zeros_like(probe_reward))
     assert counters["base_decel_eligible_sample_count"].item() == 2
     assert counters["base_decel_raw_kernel_nonzero_sample_count"].item() == 2
     assert counters["base_decel_raw_kernel_sum"].item() > 0.0
@@ -157,31 +158,66 @@ def test_unconditional_observer_measures_weight_zero_control_without_reward_side
     assert torch.equal(command._motion().in_hold, command_before["hold"])
 
 
-def test_reward_and_observer_are_idempotent_within_one_real_simulator_step():
+def test_probe_and_treatment_reward_are_idempotent_within_one_reward_stage():
     env, _command, params = _case(common_step_counter=17)
     _raw, eligible, expected_reward = _expected(_command, params)
 
+    probe_reward = R.base_decel_activation_probe(env, "racket_target", **params)
     reward = R.base_decel_tracking(env, "racket_target", **params)
-    R.observe_base_decel_activation(env, "racket_target", **params)
     first = R.consume_base_decel_activation_counters(env, "racket_target")
+    assert torch.equal(probe_reward, torch.zeros_like(probe_reward))
     assert torch.equal(reward, expected_reward)
     assert first["base_decel_eligible_sample_count"].item() == int(eligible.sum())
     assert torch.equal(first["base_decel_raw_kernel_sum"], expected_reward.sum())
 
     # Consuming does not forget the last step: a late duplicate observation cannot leak into the
     # next PPO update's window.
-    R.observe_base_decel_activation(env, "racket_target", **params)
+    R.base_decel_activation_probe(env, "racket_target", **params)
     same_step = R.consume_base_decel_activation_counters(env, "racket_target")
     assert all(value.item() == 0 for value in same_step.values())
 
     env.common_step_counter += 1
-    R.observe_base_decel_activation(env, "racket_target", **params)
+    R.base_decel_activation_probe(env, "racket_target", **params)
     R.base_decel_tracking(env, "racket_target", **params)
     next_step = R.consume_base_decel_activation_counters(env, "racket_target")
     assert next_step["base_decel_eligible_sample_count"].item() == int(
         eligible.sum()
     )
     assert torch.equal(next_step["base_decel_raw_kernel_sum"], expected_reward.sum())
+
+
+def test_control_and_treatment_measure_the_same_pre_command_reward_phase():
+    """Encode Isaac 2.1's reward -> reset -> command order for this paired ledger."""
+
+    def _reward_then_command(*, treatment):
+        env, command, params = _case(common_step_counter=31)
+        _raw, _eligible, expected_reward = _expected(command, params)
+
+        # RewardManager stage: the probe is active in both arms; only treatment also owns the real
+        # shaping term.  No reset/command mutation occurs between RewardTerms.
+        total_reward = R.base_decel_activation_probe(
+            env, "racket_target", **params
+        )
+        if treatment:
+            total_reward = total_reward + R.base_decel_tracking(
+                env, "racket_target", **params
+            )
+        counters = R.consume_base_decel_activation_counters(env, "racket_target")
+
+        # Isaac reset/command stage happens later and may replace the target.  It must not write a
+        # second, next-state observation into this reward-stage ledger.
+        command.racket_target_pos_w.add_(10.0)
+        return counters, total_reward, expected_reward
+
+    control, control_total, expected = _reward_then_command(treatment=False)
+    treatment, treatment_total, treatment_expected = _reward_then_command(
+        treatment=True
+    )
+
+    assert all(torch.equal(control[name], treatment[name]) for name in control)
+    assert torch.equal(control_total, torch.zeros_like(control_total))
+    assert torch.equal(treatment_total, treatment_expected)
+    assert torch.equal(expected, treatment_expected)
 
 
 def test_same_step_parameter_mismatch_fails_instead_of_attesting_another_kernel():

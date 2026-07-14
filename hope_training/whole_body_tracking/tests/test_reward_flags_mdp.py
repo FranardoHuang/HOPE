@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import inspect
 import math
 import os
 import re
@@ -1183,6 +1184,27 @@ def test_base_decel_is_disabled_during_frozen_hold():
     )
     assert reward[0] == 0.0
     assert reward[1] > 0.0
+
+
+def test_base_decel_observer_is_a_real_reward_term_not_a_command_stage_hook():
+    # Isaac 2.1 executes reward -> reset -> command.  Both paired arms therefore must enter through
+    # RewardManager; any command-stage observer would compare a next-state control against an
+    # old-state treatment.  Keep this regression tied to the shipped class/config source.
+    command_source = inspect.getsource(hope_commands_mod.RacketTargetCommand)
+    assert "_observe_base_decel_activation" not in command_source
+    assert "base_decel_activation_enabled" not in command_source
+
+    cfg_path = os.path.abspath(
+        os.path.join(MDP_DIR, "..", "config", "agibot_a3", "hope_env_cfg.py")
+    )
+    with open(cfg_path, encoding="utf-8") as handle:
+        config_source = handle.read()
+    probe_decl = config_source.index("base_decel_activation_probe = RewTerm(")
+    treatment_decl = config_source.index("base_decel = RewTerm(", probe_decl)
+    assert probe_decl < treatment_decl
+    assert "func=mdp.base_decel_activation_probe, weight=0.0" in config_source[
+        probe_decl:treatment_decl
+    ]
 
 
 # --------------------------------------------------------------------------------------------- #

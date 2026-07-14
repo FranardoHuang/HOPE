@@ -84,6 +84,10 @@ def _make_env_cfg(anchor_pos_none=True):
         post_strike_brake=_Term(weight=0.0, params={"std": 0.5}),
         hold_heading=_Term(weight=0.0, params={"std": 0.6}),
         foot_orientation=_Term(weight=0.0, params={"hold_gate": False}),
+        base_decel_activation_probe=_Term(
+            weight=0.0,
+            params={"command_name": "racket_target", "v_gain": 2.0, "v_max": 1.6, "std": 0.4},
+        ),
         base_decel=_Term(
             weight=0.0,
             params={"command_name": "racket_target", "v_gain": 2.0, "v_max": 1.6, "std": 0.4},
@@ -488,6 +492,43 @@ def test_virtual_ball_yaml_pins_outcome_dominant_effective_weights():
         assert term.weight == pytest.approx(expected[f"{prefix}_weight"])
         assert term.params["std"] == pytest.approx(expected[f"{prefix}_std"])
     assert env_cfg.rewards.foot_orientation.weight == pytest.approx(0.0)
+
+
+# --------------------------------------------------------------------------------------------- #
+# base-decel weight-independent RewardManager-stage activation probe
+# --------------------------------------------------------------------------------------------- #
+@pytest.mark.parametrize("weight", [0.0, 1.0])
+def test_base_decel_override_enables_same_exact_reward_stage_probe_for_both_arms(weight):
+    env_cfg, applied = _apply(
+        {
+            "rewards": {
+                "base_decel_weight": weight,
+                "base_decel_v_gain": 1.7,
+                "base_decel_v_max": 1.2,
+                "base_decel_std": 0.35,
+            }
+        }
+    )
+    probe = env_cfg.rewards.base_decel_activation_probe
+    assert probe.weight == pytest.approx(1.0)
+    assert probe.params["v_gain"] == pytest.approx(1.7)
+    assert probe.params["v_max"] == pytest.approx(1.2)
+    assert probe.params["std"] == pytest.approx(0.35)
+    assert probe.params["command_name"] == "racket_target"
+    assert env_cfg.rewards.base_decel.weight == pytest.approx(weight)
+    assert any("rewards.base_decel_activation_probe=" in item for item in applied)
+
+
+def test_base_decel_probe_remains_manager_inactive_without_explicit_override():
+    env_cfg, _ = _apply({"rewards": {"racket_position_weight": 14.0}})
+    probe = env_cfg.rewards.base_decel_activation_probe
+    assert probe.weight == pytest.approx(0.0)
+    assert probe.params == {
+        "command_name": "racket_target",
+        "v_gain": 2.0,
+        "v_max": 1.6,
+        "std": 0.4,
+    }
 
 
 # --------------------------------------------------------------------------------------------- #

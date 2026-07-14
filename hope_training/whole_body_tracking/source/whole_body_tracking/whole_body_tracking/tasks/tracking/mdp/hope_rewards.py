@@ -437,12 +437,13 @@ def observe_base_decel_activation(
 ) -> None:
     """Measure base-decel activation without applying any reward.
 
-    IsaacLab omits a zero-weight RewardTerm from execution, so the control cannot be measured by
-    putting counters only inside :func:`base_decel_tracking`.  The minimal safe integration is one
-    unconditional call to this observer per simulator step for *both* arms, with the exact runtime
-    RewardTerm parameters.  It performs no random draw, writes no simulator or reward tensor, and
-    shares the treatment's exact kernel/mask implementation.  If the RewardTerm also runs in that
-    step, accounting is idempotent through ``env.common_step_counter``.
+    Both arms call this observer from :func:`base_decel_activation_probe`, a nonzero-weight
+    instrumentation RewardTerm.  Keeping the observer in RewardManager is essential: Isaac 2.1
+    computes reward before reset/command updates, so a command-stage observer would measure the
+    next command state while the treatment's real RewardTerm measured the previous state.  The
+    probe performs no random draw or simulator write and shares the treatment's exact kernel/mask.
+    If the treatment RewardTerm also runs in that reward stage, ``env.common_step_counter`` makes
+    accounting idempotent.
     """
 
     cmd, raw, eligible, reward = _base_decel_values(
@@ -456,6 +457,27 @@ def observe_base_decel_activation(
         reward,
         signature=(float(v_gain), float(v_max), float(std)),
     )
+
+
+def base_decel_activation_probe(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    v_gain: float = 2.0,
+    v_max: float = 1.6,
+    std: float = 0.4,
+) -> torch.Tensor:
+    """Reward-stage activation probe whose weighted reward contribution is identically zero.
+
+    The experiment translator gives this term a nonzero manager weight in *both* control and
+    treatment so IsaacLab cannot optimize it away.  Returning an environment-sized zero tensor
+    means even a weight of ``1.0`` changes neither per-term reward nor total reward.  The treatment's
+    later :func:`base_decel_tracking` call sees the same state and deduplicates on the shared step
+    token.
+    """
+
+    observe_base_decel_activation(env, command_name, v_gain, v_max, std)
+    cmd = _cmd(env, command_name)
+    return torch.zeros_like(cmd.racket_target_pos_w[:, 0])
 
 
 def consume_base_decel_activation_counters(

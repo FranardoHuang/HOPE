@@ -2036,3 +2036,19 @@ return=`0.35220/0.34512`。但旧 source 仍缺 V1/V2/base-decel 的 activation 
 且速度比 `0.9193` 未过预注册 `<=0.90`。因此这只是 finite 终档+弱方向证据，不是
 Reward 采用结论；不买第二 seed、不 judge、不晋级。新 fresh 复测必须先让同 phase 仪表
 source 过独立 review 和 exact full-scene probe。G05 仍为 `Partial`。
+
+#### 同 phase activation successor 已合入源码门
+
+history-reachable exact source `0f3900a612863faf326dca6ad3e8d38bfe8df3c9` 关闭了旧 pair 的仪表缺口。
+control 和 treatment 都在 Isaac RewardManager 的 reward→reset→command 顺序中同一 reward stage
+执行 `base_decel_activation_probe`；manager weight=`1.0`，但每个 environment 返回严格零，不改总
+Reward。它逐项复用真实 `base_decel` 的 `v_gain/v_max/std`；treatment 在同一
+`common_step_counter` 上通过共享 signature 去重，参数漂移则 fail loud。runner 只在 probe 为 active
+RewardTerm 时每个 PPO update 消费一次 raw total，不对 environment 取均值。V1/V2 和 post-swing
+的 count-level denominator/numerator 也与两份 replacement queue 一起绑定 exact source。
+
+独立红队结论为 source MERGE，聚焦套件 `222 passed`；两个 `MotionLoader/PosixPath` 失败已在
+origin/main 基线复现，本 source 未改相关文件。两份 queue 仍为 Pod2-only、`launch_authorized=false`、
+jobs `blocked`。下一门是为 exact checkout 水合 content-bound ignored A3 资产，再在 Pod2 空槽跑自己的
+4096-environment strict full-scene terminal probe；probe pass 也只能由显式 queue consumer 解锁单 seed
+fresh pair。在 receipt 存在前不授权 trainer/judge/第二 seed/晋级，G05 继续 `Partial`。

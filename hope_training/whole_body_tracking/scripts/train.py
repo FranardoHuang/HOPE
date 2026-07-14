@@ -1362,6 +1362,45 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 _require(hasattr(R, "base_decel"), "rewards.base_decel")
                 R.base_decel.params[_pk] = float(_bd)
                 applied.append(f"rewards.base_decel.params.{_pk}={float(_bd)}")
+        _base_decel_activation_requested = any(
+            _get(rw, key) is not None
+            for key in (
+                "base_decel_weight",
+                "base_decel_std",
+                "base_decel_v_gain",
+                "base_decel_v_max",
+            )
+        )
+        if _base_decel_activation_requested:
+            _require(
+                hasattr(R, "base_decel") and R.base_decel is not None,
+                "rewards.base_decel (base_decel activation observer)",
+            )
+            _require(
+                hasattr(R, "base_decel_activation_probe")
+                and R.base_decel_activation_probe is not None,
+                "rewards.base_decel_activation_probe",
+            )
+            _base_decel_params = R.base_decel.params
+            for _required_param in ("v_gain", "v_max", "std"):
+                _require(
+                    _required_param in _base_decel_params,
+                    f"rewards.base_decel.params.{_required_param}",
+                )
+            _base_decel_probe = R.base_decel_activation_probe
+            _base_decel_probe.weight = 1.0
+            _base_decel_probe.params.update(
+                {
+                    key: float(_base_decel_params[key])
+                    for key in ("v_gain", "v_max", "std")
+                }
+            )
+            applied.append(
+                "rewards.base_decel_activation_probe="
+                f"({float(_base_decel_params['v_gain'])},"
+                f"{float(_base_decel_params['v_max'])},"
+                f"{float(_base_decel_params['std'])},weight=1.0)"
+            )
         # D6 normalized qdot-limit hinge (default OFF): this is a realized joint-speed penalty
         # against the actual articulation limits, not an action-rate proxy.  Its sign and margin
         # are causal arm identity, so both are validated here and bound into the hard contract.
