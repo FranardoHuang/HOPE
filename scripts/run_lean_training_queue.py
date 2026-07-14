@@ -63,6 +63,7 @@ WARMUP_BOOT_TIMEOUT_SECONDS = 180
 WARMUP_NUM_ENVS = 1
 WARMUP_MAX_ITERATIONS = 2
 WARMUP_SAVE_INTERVAL = 1
+GPU_LAUNCH_LOCK_FD = 8
 HARNESS_OWNED_OVERRIDE_KEYS = {
     "seed",
     "num_envs",
@@ -316,6 +317,11 @@ def load_queue(path: Path) -> dict[str, Any]:
             raise QueueError(f"{job_id}.milestones must align with save_interval")
 
         resource = _mapping(job.get("resource"), f"{job_id}.resource")
+        unknown_resource_keys = set(resource) - {"policy", "preferred_slot"}
+        if unknown_resource_keys:
+            raise QueueError(
+                f"{job_id}.resource has unsupported keys: {sorted(unknown_resource_keys)}"
+            )
         policy = resource.get("policy")
         if policy not in {"six_gpu_round_robin", "dispatch_gpu_round_robin"}:
             raise QueueError(
@@ -325,6 +331,20 @@ def load_queue(path: Path) -> dict[str, Any]:
             raise QueueError(
                 f"{job_id}.resource six_gpu_round_robin requires both configured Pods"
             )
+        preferred_slot = resource.get("preferred_slot")
+        if preferred_slot is not None:
+            preferred_slot = _text(
+                preferred_slot, f"{job_id}.resource.preferred_slot"
+            )
+            dispatch_slot_names = {
+                f"{pod_name}/gpu{gpu}"
+                for pod_name in dispatch_pods
+                for gpu in pods[pod_name]["gpus"]
+            }
+            if preferred_slot not in dispatch_slot_names:
+                raise QueueError(
+                    f"{job_id}.resource.preferred_slot is not dispatch-enabled"
+                )
         run_name = _text(job.get("run_name"), f"{job_id}.run_name", safe_id=True)
         if run_name in run_names:
             raise QueueError(f"duplicate run_name: {run_name}")
@@ -610,7 +630,11 @@ def _assign(
         available = [slot for slot in all_slots if current[slot.name] < slot.capacity]
         if not available:
             break
-        chosen = min(available, key=lambda slot: (current[slot.name], slot.ordinal))
+        preferred_slot = job["resource"].get("preferred_slot")
+        preferred = [slot for slot in available if slot.name == preferred_slot]
+        chosen = preferred[0] if preferred else min(
+            available, key=lambda slot: (current[slot.name], slot.ordinal)
+        )
         assignments.append((job, chosen))
         current[chosen.name] += 1
     return assignments
@@ -856,7 +880,7 @@ def _boot_warmup_script(
     launcher = f"{workdir}/{KIT_LAUNCHER_RELATIVE}"
     launch = shlex.join([launcher, f"{run_dir}/run.log"]) + " " + (
         _child_env_command(train_argv, slot.gpu)
-    )
+    ) + f" {GPU_LAUNCH_LOCK_FD}>&-"
     doctor = _doctor_body(queue, job, slot)
     warmup_compose = _child_env_command(_hydra_compose_argv(train_argv), slot.gpu)
     body = doctor + f"""
@@ -870,7 +894,7 @@ export KIT_BOOT_MARKER={shlex.quote(KIT_BOOT_MARKER)}
 export KIT_BOOT_TIMEOUT_S={WARMUP_BOOT_TIMEOUT_SECONDS}
 {launch}
 """
-    return f"flock -n /tmp/hope_lean_queue_gpu{slot.gpu}.lock bash -lc {shlex.quote(body)}"
+    return _gpu_launch_lock_script(slot, body)
 
 
 def _job_by_id(queue: dict[str, Any], job_id: str) -> dict[str, Any]:
@@ -885,6 +909,25 @@ def _slot_by_identity(queue: dict[str, Any], pod: str, gpu: int) -> Slot:
     if len(matches) != 1:
         raise QueueError(f"slot is not dispatch-enabled: {pod}/gpu{gpu}")
     return matches[0]
+
+
+def _gpu_launch_lock_script(slot: Slot, body: str) -> str:
+    """Hold the short launch lock in fd8, then close it in the long-lived child.
+
+    Using ``flock FILE command`` leaves flock's private descriptor inherited by
+    grandchildren.  A detached trainer then retains the lock for its full run,
+    silently reducing a multi-trainer GPU to capacity one.  The controller
+    shell owns an explicit fd8; the launcher command receives ``8>&-`` so its
+    trainer cannot inherit that descriptor.
+    """
+
+    lock_path = f"/tmp/hope_lean_queue_gpu{slot.gpu}.lock"
+    locked_body = (
+        f"exec {GPU_LAUNCH_LOCK_FD}>{shlex.quote(lock_path)}\n"
+        f"flock -n {GPU_LAUNCH_LOCK_FD}\n"
+        f"{body}"
+    )
+    return f"bash -lc {shlex.quote(locked_body)}"
 
 
 def _doctor_script(queue: dict[str, Any], job: dict[str, Any], slot: Slot) -> str:
@@ -913,7 +956,7 @@ def _launch_script(queue: dict[str, Any], job: dict[str, Any], slot: Slot) -> st
     launcher = f"{workdir}/{KIT_LAUNCHER_RELATIVE}"
     launch = shlex.join([launcher, f"{run_dir}/run.log"]) + " " + (
         _child_env_command(train_argv, slot.gpu)
-    )
+    ) + f" {GPU_LAUNCH_LOCK_FD}>&-"
     # The per-GPU flock covers the last capacity check, claim, and spawn.
     body = _doctor_body(queue, job, slot) + f"""
 count=$(nvidia-smi -i {slot.gpu} --query-compute-apps=pid --format=csv,noheader,nounits | awk {shlex.quote(UNIQUE_NUMERIC_PID_AWK)})
@@ -925,7 +968,7 @@ export KIT_BOOT_MARKER={shlex.quote(KIT_BOOT_MARKER)}
 export KIT_BOOT_TIMEOUT_S={KIT_BOOT_TIMEOUT_SECONDS}
 {launch}
 """
-    return f"flock -n /tmp/hope_lean_queue_gpu{slot.gpu}.lock bash -lc {shlex.quote(body)}"
+    return _gpu_launch_lock_script(slot, body)
 
 
 def cmd_plan(queue: dict[str, Any], *, live: bool) -> dict[str, Any]:

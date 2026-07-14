@@ -66,6 +66,8 @@ machine prereg 已冻结为 source `61007e93879f35677e4c7d38cf7f681f324f9571`、
 - treatment：`phase1_fresh_c_conditional_face_w04_seed3_20260714`，conditional weight `-0.4`。
 
 两格同时显式把 qdot hinge weight 固定为 `0.0` / margin `0.85`，避免继承差异；其余 delta 完全相同。
+两格 `preferred_slot` 都是已过 warmup 的 Pod2 GPU1；修复后的短锁允许它们在同卡容量 3 内先后启动，
+满载时才回退 round-robin。
 
 该 source 的独立 Pod2 GPU1 cold-boot warmup 已自然退出：claim
 `f10ed619e0b71a28a0b0b781d95f1e5508c9bcead5a6f82ca909affbfd527012` 明确

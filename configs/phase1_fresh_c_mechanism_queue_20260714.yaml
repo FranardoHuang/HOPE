@@ -396,7 +396,9 @@ jobs:
     seed: 3
     budget: *budget
     milestones: *milestones
-    resource: *resource
+    resource:
+      policy: dispatch_gpu_round_robin
+      preferred_slot: pod2/gpu1
     run_name: phase1_fresh_c_conditional_face_control_seed3_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_conditional_face_control_seed3
 

@@ -1793,6 +1793,11 @@ marker 同 poll 优先，stale 时只收口已验证 pid=pgid 的自身进程组
 timeout rc124，stat 异常 rc126。专项 `9 passed`、相关 retry/queue `50 passed`。这缩短卡死占槽时间，不是
 URDF importer 根因修复或 runtime 成绩。
 
+并发发射的另一根因也已定位：`flock FILE command` 的 lock fd 被 detached trainer 继承，导致每 GPU
+名义容量 3/4 实际只能再发第一条。lean harness 现由短命 controller 持 fd8，launcher child 显式
+`8>&-`；新增 preferred-slot 容量/回退测试后 queue suite `24 passed`。现役 qdot 两条仍持旧锁，不做信号，
+只让新发射使用修复。
+
 资源边界随后切换为 Pod2-only：Pod1 的三条 Codex trainer 在 iter `792/782/743` 由 exact PGID `TERM`
 收口，`model_700.pt` 与日志保留，未发 `KILL`；Pod1 复核无 Codex compute process并全部交给 Yikang。
 active queue 的 `dispatch_pods: [pod2]` 是可执行合同，不依赖聊天记忆；旧 Pod1 claim 仍只读防重复。

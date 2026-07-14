@@ -132,6 +132,19 @@ def test_six_gpu_policy_rejects_restricted_dispatch_set(tmp_path):
         raise AssertionError("reserved Pod was silently admitted by six-GPU policy")
 
 
+def test_preferred_slot_is_used_until_capacity_then_round_robin_falls_back():
+    queue = _queue(4)
+    queue["dispatch_pods"] = ["pod2"]
+    for job in queue["jobs"]:
+        job["resource"] = {
+            "policy": "dispatch_gpu_round_robin",
+            "preferred_slot": "pod2/gpu1",
+        }
+    empty = {slot.name: 0 for slot in Q.slots(queue)}
+    names = [slot.name for _, slot in Q._assign(queue, empty)]
+    assert names == ["pod2/gpu1", "pod2/gpu1", "pod2/gpu1", "pod2/gpu0"]
+
+
 def test_duplicate_nvidia_rows_count_one_unique_numeric_pid_per_gpu():
     snapshot = {
         "compute_rows": [
@@ -395,6 +408,10 @@ def test_doctor_and_launch_share_exact_claim_bound_argv_before_fresh_claim():
     assert "queue_claim.json" not in doctor
     assert job["run_dir"] not in doctor
     assert "mkdir" not in doctor
+    assert f"exec {Q.GPU_LAUNCH_LOCK_FD}>/tmp/hope_lean_queue_gpu{slot.gpu}.lock" in launch_body
+    assert f"flock -n {Q.GPU_LAUNCH_LOCK_FD}" in launch_body
+    assert f" {Q.GPU_LAUNCH_LOCK_FD}>&-" in launch_body
+    assert f"flock -n /tmp/hope_lean_queue_gpu{slot.gpu}.lock bash" not in launch_body
 
     run_parent = str(Path(job["run_dir"]).parent)
     assert f"mkdir -p {run_parent}" in launch_body
@@ -433,6 +450,10 @@ def test_boot_warmup_is_tiny_claim_bound_and_never_reuses_science_namespace():
     assert "warmup_claim.json" in rendered
     assert "KIT_BOOT_TIMEOUT_S=180" in rendered
     assert "num_envs=1" in rendered and "max_iterations=2" in rendered
+    warmup_body = shlex.split(rendered)[-1]
+    assert f"exec {Q.GPU_LAUNCH_LOCK_FD}>/tmp/hope_lean_queue_gpu{slot.gpu}.lock" in warmup_body
+    assert f"flock -n {Q.GPU_LAUNCH_LOCK_FD}" in warmup_body
+    assert f" {Q.GPU_LAUNCH_LOCK_FD}>&-" in warmup_body
     assert "pkill" not in rendered and "killall" not in rendered
 
 
@@ -558,6 +579,14 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
     assert len(rejected) == 7
     assert blocked == []
     assert queue["dispatch_pods"] == ["pod2"]
+    conditional = {
+        job["id"]: job for job in ready if job["id"].startswith("fresh_c_conditional_face_")
+    }
+    assert conditional
+    assert all(
+        job["resource"]["preferred_slot"] == "pod2/gpu1"
+        for job in conditional.values()
+    )
     axis_prefixes = (
         "++task.rewards.free_wrist_vel_mimic=",
         "++task.rewards.motion_scale_in_window=",

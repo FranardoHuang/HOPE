@@ -38,6 +38,10 @@
   收口自己的已验证 PGID并以 rc125/sidecar 留证；空日志仍走 hard timeout，stat 异常 fail closed。
   专项 `9 passed`、相关 retry/queue `50 passed`；它缩短卡死，不冒充 importer 根因修复。
 
+- 找到“容量写3/4但每卡只能发一条”的根因：`flock FILE command` 的 fd 被 detached trainer 继承并持锁
+  到终档。lean harness 现让短命 controller 持 fd8、对子 launcher `8>&-`，并加入容量内 preferred-slot/
+  满载回退；queue suite `24 passed`。现役旧锁不剥离、不重启。
+
 - Lean queue P0 已把重复/owned Hydra override、control flag/interpolation、run-dir 覆盖与未解析配方挡在
   claim 前；doctor 用真实最终 argv 做 no-Kit compose，schema-2 canonical claim 自动绑定 source、argv、
   预算和 motion/bank/exam identity。五机制 `+500` 中 V1+V2 出现 composite `0.0893` / normal pass

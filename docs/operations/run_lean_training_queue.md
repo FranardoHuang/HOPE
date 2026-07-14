@@ -87,6 +87,13 @@ Pod1 的旧 claim 以防同一 job 在 Pod2 重复发射，却绝不会把新 as
 snapshot 与远端最后容量检查都按每 GPU 的唯一纯数字 PID 计数，重复行不能把一条 trainer 算成两条。
 远端每 GPU 的 boot lock 仍作最后一道容量/claim 检查。
 
+旧实现用 `flock FILE command` 包住启动，flock 的私有 fd 会被 detached trainer 继承，导致一条长训把
+该 GPU 的 launch lock 持有到终档，配置容量 3 实际退化成 1。现改为短命 controller 显式持有 fd8，并在
+调用 launcher 时 `8>&-`；trainer 不再继承，锁只覆盖 doctor→容量→claim→boot marker。现役旧 trainer
+已经继承的锁不强行剥离，只等自然退出。job 可选
+[`preferred_slot`](../DEFINITIONS.md#preferred-slot)；槽未满时优先，同卡满后自动回到 round-robin，不能突破容量或
+`dispatch_pods`。
+
 `doctor` 与 trainer 共用一个 child-environment builder，同时设置所选 CUDA 和
 `PYTHONPATH=${HOPE_WBT_PYTHONPATH}`，并共用同一条最终 training argv。exact module probe 和 no-Kit Hydra
 compose 都位于 `mkdir/claim` 之前；失败不会污染新 namespace。claim 的 canonical content 自动绑定 source
