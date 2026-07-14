@@ -1793,6 +1793,13 @@ marker 同 poll 优先，stale 时只收口已验证 pid=pgid 的自身进程组
 timeout rc124，stat 异常 rc126。专项 `9 passed`、相关 retry/queue `50 passed`。这缩短卡死占槽时间，不是
 URDF importer 根因修复或 runtime 成绩。
 
+后续红队发现“spawn 时验证过 PGID”仍不足以授权数分钟后的 signal：PID/PGID 可能复用，且 TERM 后只看
+leader 会把仍存活的 child 漏掉。watchdog 现把 leader PID=PGID、双读一致的 Linux starttime 与
+`getpgid` 写入 adjacent evidence；TERM 前再验证并冻结整组成员，TERM wait 枚举整组，KILL 前只接受该成员
+集合的 exact 子集。leader 在 TERM 前消失、PID reuse、读中漂移或新成员加入都 no-signal + manual-review；
+leader 在 TERM 后退出、已绑定 child 残留则仍可按其原 PID/starttime/PGID 安全收口。该项只是 E1 source
+安全门，未连接 Pod、未 signal 任何远端进程，也不改变训练配方，G05 仍为 `Partial`。
+
 并发发射的另一根因也已定位：`flock FILE command` 的 lock fd 被 detached trainer 继承，导致每 GPU
 名义容量 3/4 实际只能再发第一条。lean harness 现由短命 controller 持 fd8，launcher child 显式
 `8>&-`；新增 preferred-slot 容量/回退测试后 queue suite `24 passed`。现役 qdot 两条仍持旧锁，不做信号，

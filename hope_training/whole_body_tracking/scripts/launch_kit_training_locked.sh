@@ -22,18 +22,27 @@ timeout_s=${KIT_BOOT_TIMEOUT_S:-900}
 stale_timeout_s=${KIT_BOOT_STALE_TIMEOUT_S:-180}
 poll_s=${KIT_BOOT_POLL_S:-5}
 state_file=${KIT_BOOT_STATE_FILE:-${log_file}.launch}
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+identity_helper=${script_dir}/exact_process_group.py
+leader_identity_file=${state_file}.leader.json
+term_identity_file=${state_file}.pre_term.json
+kill_identity_file=${state_file}.pre_kill.json
 
 if ! [[ $timeout_s =~ ^[1-9][0-9]*$ && $stale_timeout_s =~ ^[1-9][0-9]*$ && $poll_s =~ ^[1-9][0-9]*$ ]]; then
   echo "KIT_BOOT_TIMEOUT_S, KIT_BOOT_STALE_TIMEOUT_S, and KIT_BOOT_POLL_S must be positive integers" >&2
   exit 2
 fi
 
-for required_tool in flock setsid ps grep stat; do
+for required_tool in flock setsid ps grep stat python3; do
   if ! command -v "$required_tool" >/dev/null 2>&1; then
     echo "required launch tool is missing: $required_tool" >&2
     exit 127
   fi
 done
+if [[ ! -f $identity_helper ]]; then
+  echo "exact process-group identity helper is missing: $identity_helper" >&2
+  exit 127
+fi
 
 mkdir -p "$(dirname "$log_file")" "$(dirname "$state_file")"
 exec 9>"$lock_file"
@@ -46,9 +55,13 @@ pid=$!
 pgid=$(ps -o pgid= -p "$pid" | tr -d '[:space:]')
 if [[ -z $pgid || $pgid != "$pid" ]]; then
   echo "failed to establish an isolated process group: pid=$pid pgid=${pgid:-missing}" >&2
-  kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
-  exit 1
+  {
+    printf 'pid=%s\n' "$pid"
+    printf 'observed_pgid=%s\n' "${pgid:-missing}"
+    printf 'identity_bind_refused=pid_pgid_mismatch\n'
+  } >"$state_file"
+  echo "child identity was never bound; no signal sent; manual review required" >&2
+  exit 121
 fi
 
 {
@@ -60,6 +73,25 @@ fi
   printf '%q ' "$@"
   printf '\n'
 } >"$state_file"
+
+set +e
+leader_identity=$(python3 "$identity_helper" bind \
+  --pid "$pid" --pgid "$pgid" --output "$leader_identity_file" 2>>"$state_file")
+identity_rc=$?
+set -e
+if (( identity_rc != 0 )); then
+  printf 'identity_bind_refused=proc_identity_unverified\n' >>"$state_file"
+  echo "child proc identity was not bound; no signal sent; manual review required" >&2
+  exit 121
+fi
+read -r bound_pid bound_pgid bound_starttime extra <<<"$leader_identity"
+if [[ $bound_pid != "$pid" || $bound_pgid != "$pgid" || ! $bound_starttime =~ ^[1-9][0-9]*$ || -n ${extra:-} ]]; then
+  printf 'identity_bind_refused=helper_output_invalid\n' >>"$state_file"
+  echo "identity helper returned invalid binding; no signal sent; manual review required" >&2
+  exit 121
+fi
+printf 'leader_starttime_ticks=%s\n' "$bound_starttime" >>"$state_file"
+printf 'leader_identity_evidence=%s\n' "$leader_identity_file" >>"$state_file"
 
 echo "KIT_BOOT_STARTED pid=$pid pgid=$pgid log=$log_file marker=$marker"
 deadline=$((SECONDS + timeout_s))
@@ -83,15 +115,65 @@ log_fingerprint() {
 }
 
 terminate_exact_group() {
-  kill -TERM -- "-$pgid" 2>/dev/null || true
+  local rc residual
+  set +e
+  python3 "$identity_helper" term \
+    --leader-evidence "$leader_identity_file" \
+    --output "$term_identity_file" >>"$state_file" 2>&1
+  rc=$?
+  set -e
+  if (( rc != 0 )); then
+    printf 'cleanup_identity_refused=before_term\n' >>"$state_file"
+    echo "exact identity changed before TERM; no signal sent; manual review required" >&2
+    return 121
+  fi
+  printf 'term_identity_evidence=%s\n' "$term_identity_file" >>"$state_file"
   for _ in 1 2 3 4 5; do
-    kill -0 "$pid" 2>/dev/null || break
+    set +e
+    residual=$(python3 "$identity_helper" check --group-evidence "$term_identity_file" 2>>"$state_file")
+    rc=$?
+    set -e
+    if (( rc != 0 )); then
+      printf 'cleanup_identity_refused=term_wait\n' >>"$state_file"
+      echo "process-group identity changed after TERM; no KILL sent; manual review required" >&2
+      return 122
+    fi
+    [[ $residual == 0 ]] && break
     sleep 1
   done
-  if kill -0 "$pid" 2>/dev/null; then
-    kill -KILL -- "-$pgid" 2>/dev/null || true
+  if [[ ${residual:-1} != 0 ]]; then
+    set +e
+    python3 "$identity_helper" kill \
+      --term-evidence "$term_identity_file" \
+      --output "$kill_identity_file" >>"$state_file" 2>&1
+    rc=$?
+    set -e
+    if (( rc != 0 )); then
+      printf 'cleanup_identity_refused=before_kill\n' >>"$state_file"
+      echo "residual group is not an exact subset of the TERM snapshot; no KILL sent" >&2
+      return 122
+    fi
+    printf 'kill_identity_evidence=%s\n' "$kill_identity_file" >>"$state_file"
+    for _ in 1 2 3 4 5; do
+      set +e
+      residual=$(python3 "$identity_helper" check --group-evidence "$term_identity_file" 2>>"$state_file")
+      rc=$?
+      set -e
+      if (( rc != 0 )); then
+        printf 'cleanup_identity_refused=kill_wait\n' >>"$state_file"
+        return 122
+      fi
+      [[ $residual == 0 ]] && break
+      sleep 1
+    done
+    if [[ ${residual:-1} != 0 ]]; then
+      printf 'cleanup_residual_members=%s\n' "$residual" >>"$state_file"
+      echo "exact residual process-group members remain after KILL; manual review required" >&2
+      return 122
+    fi
   fi
   wait "$pid" 2>/dev/null || true
+  return 0
 }
 
 finish_ready() {
@@ -127,9 +209,13 @@ while true; do
 
   fingerprint=$(log_fingerprint) || {
     echo "KIT_BOOT_WATCHDOG_ERROR pid=$pid pgid=$pgid unable_to_stat_log=$log_file" >&2
+    set +e
     terminate_exact_group
+    cleanup_rc=$?
+    set -e
     printf 'boot_watchdog_error=log_fingerprint\n' >>"$state_file"
     flock -u 9
+    (( cleanup_rc == 0 )) || exit "$cleanup_rc"
     exit 126
   }
   log_size=${fingerprint%% *}
@@ -152,8 +238,12 @@ while true; do
       printf 'boot_stale_timeout_s=%s\n' "$stale_timeout_s" >>"$state_file"
       printf 'boot_stale_last_size_bytes=%s\n' "$last_log_size" >>"$state_file"
       printf 'boot_stale_last_mtime_epoch=%s\n' "$last_log_mtime" >>"$state_file"
+      set +e
       terminate_exact_group
+      cleanup_rc=$?
+      set -e
       flock -u 9
+      (( cleanup_rc == 0 )) || exit "$cleanup_rc"
       exit 125
     fi
   else
@@ -167,9 +257,13 @@ while true; do
       finish_ready
     fi
     echo "KIT_BOOT_TIMEOUT pid=$pid pgid=$pgid after=${timeout_s}s log=$log_file" >&2
+    set +e
     terminate_exact_group
+    cleanup_rc=$?
+    set -e
     printf 'boot_timeout_s=%s\n' "$timeout_s" >>"$state_file"
     flock -u 9
+    (( cleanup_rc == 0 )) || exit "$cleanup_rc"
     exit 124
   fi
 

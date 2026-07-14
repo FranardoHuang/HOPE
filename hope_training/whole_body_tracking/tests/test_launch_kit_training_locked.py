@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 import time
 
 import pytest
@@ -47,9 +48,42 @@ def portable_launch_tools(tmp_path: Path) -> Path:
         "raise SystemExit(1)\n",
         encoding="utf-8",
     )
+    # The production helper reads Linux /proc.  This fixture only substitutes
+    # that helper on the macOS test host; its own procfs semantics have focused
+    # fake-/proc tests in test_exact_process_group.py.
+    python3 = bin_dir / "python3"
+    python3.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, pathlib, signal, subprocess, sys\n"
+        "if len(sys.argv) < 3 or not sys.argv[1].endswith('exact_process_group.py'):\n"
+        f"    os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])\n"
+        "argv = sys.argv[2:]\n"
+        "mode = argv[0]\n"
+        "def arg(name): return argv[argv.index(name) + 1]\n"
+        "def write(path, value): pathlib.Path(path).write_text(json.dumps(value, sort_keys=True) + '\\n')\n"
+        "if mode == 'bind':\n"
+        "    pid, pgid = int(arg('--pid')), int(arg('--pgid'))\n"
+        "    leader = {'pid': pid, 'pgid': pgid, 'starttime_ticks': pid + 1000}\n"
+        "    write(arg('--output'), {'schema_version': 1, 'kind': 'leader_identity', 'leader': leader})\n"
+        "    print(pid, pgid, pid + 1000)\n"
+        "elif mode == 'term':\n"
+        "    leader = json.loads(pathlib.Path(arg('--leader-evidence')).read_text())['leader']\n"
+        "    write(arg('--output'), {'schema_version': 1, 'kind': 'pre_term_group_identity', 'leader': leader, 'members': [leader]})\n"
+        "    os.killpg(leader['pgid'], signal.SIGTERM); print(1)\n"
+        "elif mode == 'check':\n"
+        "    leader = json.loads(pathlib.Path(arg('--group-evidence')).read_text())['leader']\n"
+        "    p = subprocess.run(['/bin/ps', '-o', 'stat=', '-p', str(leader['pid'])], text=True, capture_output=True)\n"
+        "    state = p.stdout.strip(); print(0 if p.returncode or not state or state.startswith('Z') else 1)\n"
+        "else:\n"
+        "    source = json.loads(pathlib.Path(arg('--term-evidence')).read_text())\n"
+        "    write(arg('--output'), {'schema_version': 1, 'kind': 'pre_kill_group_identity', 'leader': source['leader'], 'members': source['members']})\n"
+        "    os.killpg(source['leader']['pgid'], signal.SIGKILL); print(len(source['members']))\n",
+        encoding="utf-8",
+    )
     flock.chmod(0o755)
     setsid.chmod(0o755)
     ps.chmod(0o755)
+    python3.chmod(0o755)
     return bin_dir
 
 
@@ -117,8 +151,10 @@ def _terminate_group_from_state(state: Path) -> None:
 def test_source_contract_has_180s_default_and_no_broad_signal() -> None:
     source = LAUNCHER.read_text(encoding="utf-8")
     assert "stale_timeout_s=${KIT_BOOT_STALE_TIMEOUT_S:-180}" in source
-    assert 'kill -TERM -- "-$pgid"' in source
-    assert 'kill -KILL -- "-$pgid"' in source
+    assert '"$identity_helper" term' in source
+    assert '"$identity_helper" kill' in source
+    assert "leader_starttime_ticks" in source
+    assert "kill -TERM" not in source and "kill -KILL" not in source
     assert source.index('grep -Fq -- "$marker"') < source.index("KIT_BOOT_STALE pid=")
     assert "pkill" not in source
     assert "killall" not in source
@@ -234,6 +270,7 @@ def test_content_bearing_stale_log_kills_only_recorded_group(
         assert not unrelated_term.exists()
 
     finally:
+        _terminate_group_from_state(state)
         try:
             os.killpg(unrelated.pid, signal.SIGTERM)
             unrelated.wait(timeout=3)
@@ -251,8 +288,11 @@ def test_empty_log_remains_owned_by_hard_timeout(
     proc, log, state, _ = _run_launcher(
         tmp_path, portable_launch_tools, child, timeout_s=2, stale_timeout_s="1"
     )
-    assert proc.returncode == 124, proc.stderr
-    assert log.stat().st_size == 0
-    fields = _state_fields(state)
-    assert fields["boot_timeout_s"] == "2"
-    assert "boot_stale_timeout_s" not in fields
+    try:
+        assert proc.returncode == 124, proc.stderr
+        assert log.stat().st_size == 0
+        fields = _state_fields(state)
+        assert fields["boot_timeout_s"] == "2"
+        assert "boot_stale_timeout_s" not in fields
+    finally:
+        _terminate_group_from_state(state)

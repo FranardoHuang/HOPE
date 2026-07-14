@@ -88,6 +88,12 @@ checkpoint 身份、finite 与训练合同谱系，不是 q10/q50 判卷、行�
 `scene_import_done`。既有 exact-PGID launcher 看到真实 `Learning iteration` 并成功返回后，queue harness
 才把 `phase=first_iter` 追加到 `.launch` sidecar；冻结 launcher bytes 不变。普通训练不增加这些 marker。
 
+watchdog 的 signal identity 也不能只信启动时 PGID 数字。launcher 在 spawn 后由 source-pinned helper
+双读 `/proc` starttime 并核对 `getpgid`，sidecar 引用 no-clobber leader/pre-TERM/pre-KILL evidence。TERM
+等待枚举整组而非只轮询 leader；KILL 只接受 pre-TERM exact member set 的子集。leader 在 TERM 前消失、
+PID reuse、读中漂移或新成员加入时不得 signal，并以 rc121/122 要求人工复核。leader 在 TERM 后退出但
+已绑定 child 仍活时，可以只在 child 的 PID/starttime/PGID 仍与 pre-TERM evidence 一致时收口。
+
 这组 marker 可以区分 Hydra、Kit app、A3 scene/URDF import 和首个 update。main 已另有独立的
 per-source+Pod+physical-GPU [`boot-warmup`](../DEFINITIONS.md#boot-warmup) namespace，以及 content-bearing
 日志默认 180 秒 stale watchdog；warmup 明确不继承科学 run 的 P1 binding path，也不冒充 checkpoint
@@ -104,6 +110,8 @@ probe execute 的容量快照只读取 selected dispatch Pod/GPU；普通 scienc
 
 ```bash
 python3 -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_exact_process_group.py \
+  hope_training/whole_body_tracking/tests/test_launch_kit_training_locked.py \
   hope_training/whole_body_tracking/tests/test_lean_queue_runtime.py \
   tests/test_run_lean_training_queue.py \
   hope_training/whole_body_tracking/tests/test_training_launch_claim.py \
@@ -111,13 +119,15 @@ python3 -m pytest -q \
 
 python3 -m py_compile \
   scripts/run_lean_training_queue.py \
+  hope_training/whole_body_tracking/scripts/exact_process_group.py \
   hope_training/whole_body_tracking/scripts/train.py \
   hope_training/whole_body_tracking/scripts/lean_queue_runtime.py
 
 bash -n hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh
 ```
 
-当前 focused 结果为 `76 passed`。负测覆盖每臂单一原子 SSH、内置 doctor 门在容量/claim 前执行、多臂每臂
+当前 focused 结果为 `76 passed`。watchdog identity 专项另覆盖 PID reuse、双读漂移、leader 先退但已绑定
+child 残留、新成员加入、空组与正常 stale/hard timeout。其余负测覆盖每臂单一原子 SSH、内置 doctor 门在容量/claim 前执行、多臂每臂
 各一次 transaction，以及 fake log dir、binding/receipt overwrite、静态及读中 PID reuse、
 source dirty/YAML verifier 漂移、不可达 terminal milestone、warmup/legacy capability 串线、filename/embed
 iteration 错位、nested float/complex NaN、hard-contract SHA 错绑、launch-claim lineage 错绑，以及 full-scene

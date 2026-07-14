@@ -8,8 +8,12 @@ P1 尚未用 exact source 在 Pod 运行，G05 仍为 `Partial`，这不是行�
 qdot matched-control 的首次冷启动也在 dynamic URDF import/scene creation 前停住；相同 warning 在成功臂
 同样存在，不能拿 warning 字面当根因。旧 namespace 已保全并拒绝，只有 unchanged retry-v2 可再试一次。
 launcher 现有默认 180 秒“有内容但 size/mtime 均不再变化”watchdog：任一增长重置计时，marker 在边界
-poll 上优先；超时先写 sidecar，再只对 launcher 已验证的 exact PGID TERM→5 秒→KILL，返回 rc125。空日志
-仍由 900 秒 hard timeout 管，stat 失败 rc126 fail closed。仍缺 scene-created 等细分阶段 receipt；长期应
+poll 上优先。spawn 后由 source-pinned `exact_process_group.py` 双读 leader 的 `/proc/<pid>/stat`
+`starttime`，并交叉核对 `getpgid` 与 `PID=PGID`；sidecar 绑定 adjacent leader evidence。超时前再次双读
+同一 identity，枚举并双读该 exact PGID 的成员，再写 pre-TERM evidence 后才允许 TERM。TERM 后不再只看
+leader：轮询整组；只有 residual 是 pre-TERM 成员的 exact 子集时才允许 KILL。PID reuse、leader 在 TERM 前
+消失、成员后来加入或 identity 漂移均绝不 signal，记录 `manual review` 并以 rc121/122 fail closed。正常
+stale 返回 rc125，空日志仍由 900 秒 hard timeout 管，stat 失败 rc126。仍缺 scene-created 等细分阶段 receipt；长期应
 消费内容绑定的预转换 USD，避免每条训练重新动态导入 URDF。
 
 ### 新 source 先做 1-env 缓存探针
@@ -277,11 +281,14 @@ full-scene runtime 已通过。
 
 ```bash
 python3 -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_exact_process_group.py \
+  hope_training/whole_body_tracking/tests/test_launch_kit_training_locked.py \
   hope_training/whole_body_tracking/tests/test_lean_queue_runtime.py \
   tests/test_run_lean_training_queue.py \
   hope_training/whole_body_tracking/tests/test_training_launch_claim.py \
   hope_training/whole_body_tracking/tests/test_training_thread_caps.py
 python3 -m py_compile scripts/run_lean_training_queue.py \
+  hope_training/whole_body_tracking/scripts/exact_process_group.py \
   hope_training/whole_body_tracking/scripts/train.py \
   hope_training/whole_body_tracking/scripts/lean_queue_runtime.py
 bash -n hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh

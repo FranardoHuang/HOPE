@@ -88,6 +88,12 @@ probe 保持未发射，不能绕过专用 confirm 直接执行 dry-rendered SSH
 compose 暂态失败提前中断整批。P1.3 将 execute 收敛为每臂一次 launch SSH；source/assets/module/Hydra 门
 仍在该原子 launch 内、并位于容量/claim/Kit 之前。该变更没有点火、没有改变 pair 配方或 probe 授权状态。
 
+同一 launcher 红队还发现一个与本机制无关、但会影响失败臂安全收口的控制面缺口：旧 watchdog 只在
+spawn 时验证 `PID=PGID`，signal 前没有重验 `/proc` starttime；TERM 后也只轮询 leader，可能漏掉仍活着的
+同组 child。修复把 leader identity 与 TERM 前 exact member snapshot 写入 adjacent evidence；PID reuse、
+leader 在 TERM 前消失、成员后来加入或读中漂移全部 no-signal/manual-review，KILL 只接受原成员的 exact
+子集。该源码门没有连接 Pod、没有重放 probe、没有更改 conditional `0/-0.4` 配方或解锁状态。
+
 旧 pair 保持不可修改的失败证据。新的 `p1r1` pair 已在结果前绑定同一 clean detached
 `main@077e70c`（Pod2 checkout `/workspace/codexschema/nohope_p1_077e70c`），两格均
 `runtime_binding=true`，仍只差 conditional weight `0/-0.4`。当前二者均为 `blocked`：先由 control 配方
