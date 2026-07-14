@@ -46,6 +46,23 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-15, fresh v4 `+500` matched-activation failure; Gate remains `Partial`):
+
+- Both model-500 checkpoints pass filename/embedded iteration, finite, fresh-lineage, claim and common
+  schema-3 hard-contract attestation. Control/treatment SHA-256 are `22f78f88...a6a` /
+  `a1735fbb...c14`; receipt content SHA-256 are `67d76a2b...e6d0` / `e8cdfc87...1cf7`.
+- In the frozen 480--500 window, control post-swing eligible/selected/started remain `0/0/0`, while
+  treatment closes at `15087/3750/3750` with selected fraction `0.248558`. Control first becomes ready
+  only at step 519, which cannot be backfilled into the milestone. The buffer is populated only by
+  policy-survived natural clip wraps, so base deceleration itself changes when the purportedly common
+  curriculum becomes available. This is an endogenous-curriculum design failure, not a base-deceleration
+  behavior result.
+- Exact process groups were stopped after receipts; GPU1/GPU2 are free and Yikang's GPU0 process was not
+  touched. A replacement must consume the same immutable, natural-wrap-provenance teacher-state receipt
+  in both arms and fail before the first scientific update if it is unavailable. No arbitrary timeout
+  capture, second seed, judge or promotion is authorized. See
+  [the replacement record](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md).
+
 Follow-up note (2026-07-15, fresh v4 `+200` activation audit; Gate remains `Partial`):
 
 - Both live arms published exact model-200 receipts. Control/treatment checkpoint SHA-256 are

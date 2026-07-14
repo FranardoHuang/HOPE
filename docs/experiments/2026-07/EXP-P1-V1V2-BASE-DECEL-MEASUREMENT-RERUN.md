@@ -1,13 +1,13 @@
 # EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN — 补齐 activation 后重跑底座减速配对
 
-- 状态：`running / +200 activation-invalid`（exact `model_200` 均通过身份门；post-swing buffer
-  仍未 ready，故 +200 不解释行为，训练继续观察 +500）
+- 状态：`completed / +500 activation-invalid`（两份 exact `model_500` 均通过身份门，但 control 在冻结
+  `480–500` 窗仍未激活 post-swing；本 pair 已停止且不解释 base-decel 行为）
 - 阶段/轴：Phase 1 fresh C；组合击球精度下，底座减速是否有净收益
 - 集成小目标：保住击球精度信号，同时降低击球前底座速度与击球前摔倒率
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
-- 最高证据等级：`E2`（replacement pair 4096-env runtime 与 exact `model_200` receipt；无有效行为比较）
+- 最高证据等级：`E2`（replacement pair 4096-env runtime 与 exact `model_200/500` receipt；无有效行为比较）
 - 创建日期/最后复核日期：2026-07-15 / 2026-07-15
 
 共享术语见[术语与人话对照](../../DEFINITIONS.md)。本文的 V1 是“从线速度动作模仿中释放持拍手腕”，
@@ -121,6 +121,35 @@ activation 算术如下：
 trainer 不停、不重跑，也不解锁第二 seed；继续到 `+500` 只为判断 buffer 是晚激活还是 execution 路径仍有
 缺口。若 +500 仍为零，先修 post-swing activation/缓冲根因，不能用 V1/base-decel 的正计数绕过共同机制门。
 
+## `+500`：checkpoint 有效，但 matched activation 分叉
+
+两份 no-clobber receipt 均在 trainer live 时发布：
+
+| Arm | checkpoint SHA-256 | receipt content SHA-256 | `480–500` post-swing |
+| --- | --- | --- | --- |
+| control | `22f78f882397c48d1c8763186748935517d669cf4f36205baf69d07dc9e08a6a` | `67d76a2b0b60c6817fdc76ad32b6d1d641af361a7e2093dd6042436a0168e6d0` | not-ready=`24,646`；eligible/selected/started=`0/0/0` |
+| treatment W1 | `a1735fbbaf82685a0ed9184dd726947aa757a0c142fdcbd447d40dbf3aa5bc14` | `e8cdfc87c1ac8c7da8818d58ededb01b9ec3b8f3d544cfc7c08c4ea32f8a1cf7` | eligible=`15,087`；not-selected=`11,337`；selected=started=`3,750`（`0.248558`） |
+
+两份 checkpoint 都是 filename/embedded iteration=`500`、76 tensors、1,762,715 个浮点元素全 finite、
+fresh lineage=`1`，并绑定同一 schema-3 hard contract `451cda47...2291` 和各自 claim；完整日志 fatal scan
+为零。V1、V2 与 raw base-decel 在两臂各自有样本的地方均闭合。treatment 的 post-swing 算术也逐 update
+满足 `selected + not_selected == eligible` 与 `started == selected`。
+
+但 control 在**预注册冻结窗**没有共同 post-swing 分母，故 `+500` 仍是
+`invalid/instrumentation-blocked`。control 到 step `519` 才首次出现 `eligible=1,077`、
+`selected=started=282`（`0.26184`）；这个晚到证据不能倒灌覆盖 model-500 窗。
+
+源码状态机解释了为什么这不是单纯“多等十九步”即可解决：buffer 只在 policy 活到自然 clip wrap 时写入；
+跌倒/跟踪终止的 true reset 不写。base-decel treatment 本身改变了活到自然 wrap 的概率，于是本来声明为
+两臂共同的 post-swing curriculum 反而成了 treatment 的下游变量。两臂首次 ready 时刻因此不是外生一致的，
+从第一次一侧 ready 起就不能再把差异纯归因于 base-decel。下一版必须让两臂在训练前消费同一份、绑定自然
+wrap provenance 的 immutable teacher-state receipt，并在首个科学 update 前 fail closed；不能用任意 timeout
+状态伪造随挥结束。
+
+两臂发布 +500 receipt 后，operator 对 exact PID=PGID/starttime 发出 `TERM`；Kit/Python 忽略该信号并继续
+推进到 `564/573`。再次核验同一进程组身份后只对这两个 PGID 发出 `KILL`，最终 GPU1/GPU2 均为空，GPU0
+的 Yikang 进程未变化。没有 `model_600`，所以有效保存点仍止于 model-500；不重发、不买第二 seed、不判卷。
+
 ## `0f3900a` strict probe 的两次不可覆盖负结果
 
 Pod2-only control probe 的 `a1` 在 trainer/Kit 启动前等待旧 `/workspace/.kit_boot.lock`。根因是一康仍在
@@ -217,11 +246,11 @@ fresh namespaces：
 
 | 运行 | 状态 | 证据 | 有效性 |
 | --- | --- | --- | --- |
-| measurement control，base-decel 关 | running past +200 | PGID `380610`；model200 `d065441b...c77b` | +200 post-swing activation-invalid；等 +500 |
-| measurement treatment，base-decel 权重 1 | running past +200 | PGID `381237`；model200 `e1d2b43f...4fb7` | +200 post-swing activation-invalid；等 +500 |
+| measurement control，base-decel 关 | stopped after +500 | PGID `380610` 已空；model500 `22f78f88...a6a` | 冻结窗 post-swing 分母为零；invalid |
+| measurement treatment，base-decel 权重 1 | stopped after +500 | PGID `381237` 已空；model500 `a1735fbb...c14` | 自身 activation 闭合，但不能单臂解释 |
 
-- 决定：`+200 invalid/instrumentation-blocked`；source/checkpoint 有效，但共同 post-swing 机制分母为零，
-  不看行为差异；pair 继续到 +500。
+- 决定：`+500 invalid/instrumentation-blocked`；source/checkpoint 有效，但共同 curriculum 的 ready 时刻被
+  treatment 影响，不看行为差异；pair 已停止，等待 immutable teacher-state cold-start 修复。
 - `0f3900a` 的 runtime logger 已证伪；`2c2d70d` 只解锁同配方单 seed pair，不追认任何 Reward 效果。
 - 本记录不建立算力优先级；是否排队仍只由 main 的 `docs/NOW.md` 统一队列决定。
 - 不授权 Isaac/MuJoCo judge、第二 seed、正式 setting、部署或真机。

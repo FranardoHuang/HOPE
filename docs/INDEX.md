@@ -56,7 +56,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | [`EXP-P1-FRESH-SZ-STABILITY`](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 实验 completed/rejected；2k 与 4k 四 seed 稳定性都失败，seed4 持续弱；不晋级 baseline |
 | [`EXP-P1-FACE-SIGN-FORENSIC`](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) | `n/-n` 源码负控与 pre-orient physical-B 门已实现；fresh canary/修正后同卷未跑，旧分不晋级 |
 | [`EXP-P1-REWARD-PHYSICAL-TRUTH-AUDIT-20260715`](experiments/2026-07/EXP-P1-REWARD-PHYSICAL-TRUTH-AUDIT-20260715.md) | source/config 审计完成：现役同时使用目标匹配与 achieved-state 解析过网/落台 Reward；Phase-A engine-integrated ball 仍 metrics-only 且无拍球冲量 |
-| [`EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN`](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md) | fresh v4 两臂 model200 finite/lineage/contract 通过；共同 post-swing 分母仍为零，+200 activation-invalid，继续到 +500 查晚激活 |
+| [`EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN`](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md) | model500 身份通过，但 control/treatment 的 post-swing cold-start 在冻结窗分叉；+500 activation-invalid，已停止并转共享 natural-wrap teacher receipt 修复 |
 | [`EXP-P1-SIGNED-FACE-RESCUE-FUNNEL`](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md) | C3/D3 显式零摩擦 L1 已配对终档；同卷 K100/L2 仍阻断 |
 | [`EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1`](experiments/2026-07/EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1.md) | E2 provenance：paired receipt `bb3cd749...bbde`；下一门是同一 immutable K100，不得重跑 |
 | [`EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND`](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md) | E2 数据门通过：真实 371 题逐字节 replay 并发布 exact bank/report；新 schedule/paper activation/judge 继续阻断 |

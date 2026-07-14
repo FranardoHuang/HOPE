@@ -52,14 +52,15 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
   canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。exact GMR runtime source gate 也已进入
   `main` 并通过全回归；Pod 上的 `inspect/consume` 尚未执行，所以还不是“动作会打球”。
-- **当前运行态：** 2026-07-15，V1+V2×base-decel 的 inference-counter 修复 source `2c2d70d...` 已通过
-  Pod2 GPU1 的 4096-env strict full-scene 自然终档门；fresh v4 control/treatment 随后由同一次顺序 `fill`
-  分别在 GPU1/GPU2 越过首迭代，exact PGID=`380610/381237`，claim SHA-256=`576724de...a49d` /
-  `1a529430...4c5`。两份 `model_200` 已通过 filename=embedded、finite、fresh lineage 与同 hard-contract
-  attestation，checkpoint SHA-256=`d065441b...c77b` / `e1d2b43f...4fb7`；训练继续到 iteration `231/238`。
-  V1 与 base-decel 的 count closure 通过，V2 在有样本处相等，但两臂 post-swing buffer 到 +200 仍只有
-  `buffer_not_ready`，eligible/selected/started 全零。因此 +200 按预注册判 activation-invalid，不比较
-  行为；继续到 +500 只查晚激活，不授权 judge、第二 seed或晋级。GPU0 仍只归 Yikang。
+- **当前运行态：** 2026-07-15，V1+V2×base-decel fresh v4 两臂已收口。两份 `model_500` 都通过
+  filename=embedded、finite、fresh lineage、claim 与同 hard-contract attestation，checkpoint SHA-256 为
+  `22f78f88...a6a` / `a1735fbb...c14`。但冻结的 `480–500` 窗内 control post-swing
+  eligible/selected/started=`0/0/0`，treatment 已为 `15087/3750/3750`；control 到 step519 才激活，不能
+  倒灌 model-500。源码确认 buffer 只收 policy 自己活到自然 clip wrap 的状态，因此 base-decel 会反过来改变
+  curriculum 何时 ready，这一对按预注册判 `activation-invalid`，不比较行为、不买第二 seed、不判卷。
+  exact PGID=`380610/381237` 已停止；Pod2 GPU1/GPU2 当前空，GPU0 仍只归 Yikang。下一次同轴训练必须先用
+  两臂共享、自然-wrap provenance 绑定的 immutable teacher-state receipt 做外生 cold-start，并在首 update
+  前 fail closed。
 
   Fresh C 的五条单 seed 机制格均已越过 `+500` 且 checkpoint
   finite/contract/lineage 正确。V1+V2 出现当前最强击球精度信号（composite `0.0893`、normal pass

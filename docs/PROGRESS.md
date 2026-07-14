@@ -13,11 +13,18 @@
 
 ## 2026-07-15
 
+- fresh v4 两份 `model_500` receipt 已闭合（checkpoint SHA-256 `22f78f88...a6a` / `a1735fbb...c14`，
+  finite/lineage/claim/hard exact）。但 control 的冻结 `480–500` 窗 post-swing 分母仍为零，treatment 已按
+  24.86% 激活；control 到 step519 才 ready，不能倒灌。根因是 buffer 只收自然 clip-wrap 存活状态，
+  base-decel 会内生改变共同 curriculum 的 cold-start 时刻。pair 按 `activation-invalid` 精确收口于日志
+  `564/573`，不比较行为、不买 seed；下一版改用共享 immutable natural-wrap teacher receipt。
+  详见 [replacement 卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)。
+
 - fresh v4 control/treatment 的 `model_200` 已分别发布 exact receipt：checkpoint SHA-256
   `d065441b...c77b` / `e1d2b43f...4fb7`，两边 filename=embedded `200`、76 tensors、1,762,715 floats
   finite、fresh lineage 与 hard contract 一致。V1 和 base-decel activation 闭合，V2 在有样本处相等；
   但 post-swing 两臂到 +200 的 eligible/selected/started 全为零，明确违反预注册正分母门。因此 +200
-  记 `invalid/instrumentation-blocked`，不比较行为、不买 seed；trainer 继续到 +500 判断 buffer 是否晚激活。
+  当时记 `invalid/instrumentation-blocked`，不比较行为、不买 seed；随后 +500 的终局结论见本节首条。
   详见 [replacement 卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)。
 
 - exact source/config 审计纠正了现役 Reward 的错误表述：`task=HOPEPingPongVirtualBall` 同时保留
