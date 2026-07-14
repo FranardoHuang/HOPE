@@ -240,3 +240,47 @@ def test_example_is_valid_and_safely_blocked():
     queue = Q.load_queue(ROOT / "configs" / "lean_training_queue.example.yaml")
     assert queue["jobs"][0]["status"] == "blocked"
     assert Q.cmd_plan(queue, live=False)["assignments"] == []
+
+
+def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
+    queue = Q.load_queue(
+        ROOT / "configs" / "phase1_fresh_c_mechanism_queue_20260714.yaml"
+    )
+    ready = [job for job in queue["jobs"] if job["status"] == "ready"]
+    blocked = [job for job in queue["jobs"] if job["status"] == "blocked"]
+    assert len(ready) == 5
+    assert [job["id"] for job in blocked] == ["fresh_c_qdot_limit_reward"]
+    axis_prefixes = (
+        "++task.rewards.free_wrist_vel_mimic=",
+        "++task.rewards.motion_scale_in_window=",
+        "task.rewards.base_decel_weight=",
+        "task.motion.post_swing_start_prob=",
+    )
+    expected = {
+        "fresh_c_v1_free_wrist_velocity": ("true", "1.0", "0.0", "0.25"),
+        "fresh_c_v2_motion_window_scale": ("false", "0.25", "0.0", "0.25"),
+        "fresh_c_v1_v2_combined": ("true", "0.25", "0.0", "0.25"),
+        "fresh_c_base_deceleration": ("false", "1.0", "1.0", "0.25"),
+        "fresh_c_post_swing_replay_half": ("false", "1.0", "0.0", "0.5"),
+    }
+    for job in ready:
+        assert job["seed"] == 3
+        assert job["budget"] == {
+            "num_envs": 4096, "max_iterations": 1001, "save_interval": 100
+        }
+        assert job["milestones"] == [200, 500, 1000]
+        assert job["source"]["commit"] == "4467d79f1ed425a4263f0caaad2f661e1ec737ad"
+        base = job["recipe"]["base"]
+        delta = job["recipe"]["delta"]
+        assert not any(item.startswith(axis_prefixes) for item in base)
+        actual = []
+        for prefix in axis_prefixes:
+            matches = [item.removeprefix(prefix) for item in delta if item.startswith(prefix)]
+            assert len(matches) == 1
+            actual.append(matches[0])
+        assert tuple(actual) == expected[job["id"]]
+    plan = Q.cmd_plan(queue, live=False)
+    assert len(plan["assignments"]) == 5
+    assert [item["resource"] for item in plan["assignments"]] == [
+        "pod1/gpu0", "pod1/gpu1", "pod1/gpu2", "pod2/gpu0", "pod2/gpu1"
+    ]

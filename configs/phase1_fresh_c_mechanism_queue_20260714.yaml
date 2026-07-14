@@ -1,0 +1,270 @@
+schema_version: 1
+simulation_only: true
+
+ssh:
+  key: ~/.ssh/id_ed25519_runpod
+
+pods:
+  pod1:
+    host: 162.43.172.171
+    port: 18333
+    gpus: [0, 1, 2]
+    max_trainers_per_gpu: 4
+  pod2:
+    host: 162.43.172.181
+    port: 13146
+    gpus: [0, 1, 2]
+    max_trainers_per_gpu: 3
+
+# This is the matched comparison contract, not an extra queue row.  All five
+# ready cells keep fresh initialization, guidance=0, seed=3 and this complete
+# base recipe.  Their only delta is the named mechanism (two deltas for V1+V2).
+shared_control:
+  human_name: fresh C control, shared-face guidance off
+  initialization: fresh
+  seed: 3
+  num_envs: 4096
+  max_iterations: 1001
+  save_interval: 100
+  milestones: [200, 500, 1000]
+  signed_face_guidance_weight: 0.0
+  comparison_status: matched_control_checkpoints_must_be_bound_before_causal_decision
+
+x-action: &action signed_face_v4rg_shared_face
+x-motion: &motion
+  action: signed_face_v4rg_shared_face
+  bindings:
+    motion_file: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_forehand_v4rg_cal.npz
+    motion_file_2: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_backhand_v4rg_cal.npz
+x-bank: &bank
+  action: signed_face_v4rg_shared_face
+  train_path: /workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz
+  train_arg: ++task.racket.question_bank
+x-exam: &exam
+  action: signed_face_v4rg_shared_face
+  path: /workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.schedule.json
+  family: signed_face_rebound_k100_v1
+x-source: &source
+  checkout: /workspace/codexschema/nohope_signed_face_a2b2_hot_l1_v2_4467d79
+  commit: 4467d79f1ed425a4263f0caaad2f661e1ec737ad
+x-base: &base
+  - task=HOPEPingPongVirtualBall
+  - algo=ppo
+  - headless=true
+  - logger=tensorboard
+  - video=false
+  - task.actor_obs_contract=deploy_parity_face179
+  - task.env.episode_length_s=10.0
+  - task.sim.dt=0.005
+  - task.sim.decimation=4
+  - task.actions.qdes_clamp=true
+  - task.plant.zero_joint_friction=true
+  - task.motion.wrap_teleport=false
+  - task.motion.stand_start_prob=0.25
+  - task.motion.hold_steps_range=[0,100]
+  - task.motion.stand_start_min_hold=25
+  - task.motion.post_swing_buffer_size=4096
+  - task.motion.post_swing_min_fill=256
+  - task.motion.post_swing_min_hold=25
+  - task.motion.clip_switch_prob=0.0
+  - task.motion.speed_scale_range=[1.0,1.0]
+  - ++task.motion.rsi_skip_settle_frames=0
+  - ++task.motion.rsi_hold_root_stand_z=false
+  - ++task.motion.stagger_initial_clock=false
+  - ++task.motion.stagger_hold_max_steps=150
+  - ++task.racket.question_bank_allow_legacy=false
+  - ++task.racket.face_command=true
+  - ++task.racket.face_command_obs=true
+  - ++task.racket.station_obs=false
+  - ++task.racket.mount_normal_sign_per_clip=[1.0,-1.0]
+  - task.racket.target_mode=uniform
+  - task.racket.normal_mode=velocity
+  - task.racket.adaptive_sigma=true
+  - task.racket.target_delay_steps=2
+  - task.racket.target_jitter_pos_per_s=0.0
+  - task.racket.target_jitter_vel_per_s=0.0
+  - task.racket.target_noise_white=0.0019
+  - task.racket.target_noise_ar1_sigma=0.0052
+  - task.racket.target_noise_ar1_rho=0.717
+  - task.racket.target_dropout_prob=0.0
+  - task.racket.target_post_strike_dropout_s=0.0
+  - task.racket.target_bias_per_swing=0.0
+  - task.racket.midswing_resample_prob=0.0
+  - task.racket.midswing_resample_tts_floor=0.3
+  - task.racket.vb_spin_mode=minimize
+  - task.racket.vb_metrics_only=true
+  - ++task.racket.rally_legacy_metrics=true
+  - task.racket.achieved_target_mix_prob=0.30
+  - task.racket.achieved_buffer_size=4096
+  - task.racket.achieved_min_fill=256
+  - task.racket.achieved_jitter_pos=0.03
+  - task.racket.achieved_jitter_vel=0.15
+  - task.racket.achieved_clamp_inflate=0.20
+  - task.racket.clean_reference_strike_velocity=true
+  - task.racket.clean_strike_vel_window=2
+  - task.racket.strike_window_s=0.12
+  - task.racket.strike_success_pos_thresh=0.075
+  - ++task.physical_ball=true
+  - task.rewards.racket_position_weight=14.0
+  - task.rewards.racket_position_std=0.2
+  - task.rewards.racket_velocity_weight=10.0
+  - task.rewards.racket_velocity_std=1.0
+  - task.rewards.racket_normal_weight=5.0
+  - task.rewards.racket_normal_std=0.3
+  - task.rewards.foot_orientation_weight=-0.3
+  - task.rewards.free_wrist_ori_mimic=true
+  - ++task.motion.allow_legacy_link_origin_velocity=false
+  - ++task.motion.event_timing_mode=disabled
+  - task.racket.strike_phase_per_clip=[0.471,0.338]
+  - ++task.racket.face_command_pairing=shared_plus_y
+  - ++task.rewards.racket_guidance_weight=0.0
+  - ++task.rewards.racket_face_guidance_weight=0.0
+  - ++task.rewards.racket_face_guidance_theta_max=3.141592653589793
+  - checkpoint_path=null
+  - checkpoint_tolerant=false
+  - checkpoint_allow_missing_contract=false
+  - checkpoint_allow_contract_mismatch=false
+  - ++kit_carb_tasking_thread_count=16
+  - ++kit_tbb_thread_count=16
+x-budget: &budget
+  num_envs: 4096
+  max_iterations: 1001
+  save_interval: 100
+x-milestones: &milestones [200, 500, 1000]
+x-resource: &resource
+  policy: six_gpu_round_robin
+
+jobs:
+  - id: fresh_c_v1_free_wrist_velocity
+    human_name: fresh C plus V1 free wrist linear-velocity imitation
+    action: *action
+    status: ready
+    blocker: null
+    motion: *motion
+    bank: *bank
+    exam: *exam
+    source: *source
+    recipe:
+      base: *base
+      delta:
+        - ++task.rewards.free_wrist_vel_mimic=true
+        - ++task.rewards.motion_scale_in_window=1.0
+        - task.rewards.base_decel_weight=0.0
+        - task.motion.post_swing_start_prob=0.25
+    seed: 3
+    budget: *budget
+    milestones: *milestones
+    resource: *resource
+    run_name: phase1_fresh_c_v1_free_wrist_vel_seed3_20260714
+    run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_v1_free_wrist_vel_seed3
+
+  - id: fresh_c_v2_motion_window_scale
+    human_name: fresh C plus V2 quarter motion imitation inside strike window
+    action: *action
+    status: ready
+    blocker: null
+    motion: *motion
+    bank: *bank
+    exam: *exam
+    source: *source
+    recipe:
+      base: *base
+      delta:
+        - ++task.rewards.free_wrist_vel_mimic=false
+        - ++task.rewards.motion_scale_in_window=0.25
+        - task.rewards.base_decel_weight=0.0
+        - task.motion.post_swing_start_prob=0.25
+    seed: 3
+    budget: *budget
+    milestones: *milestones
+    resource: *resource
+    run_name: phase1_fresh_c_v2_motion_window_scale_seed3_20260714
+    run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_v2_motion_window_scale_seed3
+
+  - id: fresh_c_v1_v2_combined
+    human_name: fresh C plus V1 and V2 interaction cell
+    action: *action
+    status: ready
+    blocker: null
+    motion: *motion
+    bank: *bank
+    exam: *exam
+    source: *source
+    recipe:
+      base: *base
+      delta:
+        - ++task.rewards.free_wrist_vel_mimic=true
+        - ++task.rewards.motion_scale_in_window=0.25
+        - task.rewards.base_decel_weight=0.0
+        - task.motion.post_swing_start_prob=0.25
+    seed: 3
+    budget: *budget
+    milestones: *milestones
+    resource: *resource
+    run_name: phase1_fresh_c_v1_v2_seed3_20260714
+    run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_v1_v2_seed3
+
+  - id: fresh_c_base_deceleration
+    human_name: fresh C plus pre-strike base deceleration reward
+    action: *action
+    status: ready
+    blocker: null
+    motion: *motion
+    bank: *bank
+    exam: *exam
+    source: *source
+    recipe:
+      base: *base
+      delta:
+        - ++task.rewards.free_wrist_vel_mimic=false
+        - ++task.rewards.motion_scale_in_window=1.0
+        - task.rewards.base_decel_weight=1.0
+        - task.motion.post_swing_start_prob=0.25
+    seed: 3
+    budget: *budget
+    milestones: *milestones
+    resource: *resource
+    run_name: phase1_fresh_c_base_decel_seed3_20260714
+    run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_base_decel_seed3
+
+  - id: fresh_c_post_swing_replay_half
+    human_name: fresh C plus fifty-percent post-swing replay starts
+    action: *action
+    status: ready
+    blocker: null
+    motion: *motion
+    bank: *bank
+    exam: *exam
+    source: *source
+    recipe:
+      base: *base
+      delta:
+        - ++task.rewards.free_wrist_vel_mimic=false
+        - ++task.rewards.motion_scale_in_window=1.0
+        - task.rewards.base_decel_weight=0.0
+        - task.motion.post_swing_start_prob=0.5
+    seed: 3
+    budget: *budget
+    milestones: *milestones
+    resource: *resource
+    run_name: phase1_fresh_c_post_swing_half_seed3_20260714
+    run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_post_swing_half_seed3
+
+  - id: fresh_c_qdot_limit_reward
+    human_name: fresh C plus joint-velocity-limit reward
+    action: *action
+    status: blocked
+    blocker: qdot-limit reward flag and training implementation do not exist yet; never launch this row
+    motion: *motion
+    bank: *bank
+    exam: *exam
+    source: *source
+    recipe:
+      base: *base
+      delta: []
+    seed: 3
+    budget: *budget
+    milestones: *milestones
+    resource: *resource
+    run_name: phase1_fresh_c_qdot_limit_reward_seed3_20260714
+    run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_qdot_limit_reward_seed3
