@@ -1,6 +1,6 @@
 # EXP-MOTION-SPATIAL-RETARGET — 新动作能否到达有效击球点？
 
-- 状态：in progress（两条只读 runtime inspection 完成；v1 consume activation 已否决；v2 一次性 runner 的源码门与攻击负测通过，但未在 Pod 执行，consume / promotion blocked）
+- 状态：in progress（B 的唯一 schema-2/FK consume 与独立结果复核通过，L0 已解锁；C 保持未消费后备；promotion blocked）
 - 阶段/轴：课程阶段 2 / 动作适配与动作源
 - 人类负责人：franco
 - 执行者：Codex
@@ -157,7 +157,7 @@ runtime receipt。因此下一门当时只能先按
 [操作文档](../../operations/run_motion_spatial_retarget_screen.md)逐资产执行 no-write `inspect`；下节记录
 该门的真实结果，而不是用 source gate 追认 runtime pass。
 
-## 2026-07-14：B/C runtime inspection receipt 与一次性 consume 待审门
+## 2026-07-14：B/C runtime inspection receipt 与一次性 consume 门
 
 Pod1 的独立 detached checkout
 `/workspace/codexschema/nohope_schema2_fk_inspect_748b6d5` 保持 exact
@@ -198,10 +198,28 @@ body/joint order。formal validator 还会打开 NPZ，要求 11 个 exact 字�
 
 源码攻击负测覆盖 bypass、no-replace、B/C 并发、child failure 后永久花掉 attempt、failure cleanup、
 post-validation failure、runtime/module-origin drift、attached/dirty checkout、缺失/伪造 NPZ 与
-completion-last lineage；activation/runner 专项 `28 passed`，与原 prereg 合跑 `45 passed`。当前仍是
-`review_required_runner_not_executed`：`attempts_started=0`、两个 output root absent、Pod consume 未运行，
-latest `origin/main@dba7808` 上 `python3 -m pytest -q tests` 为 `850 passed, 10 skipped`。L0/L1、桌网、
-动力学、simulator、训练、正式动作和 hardware 权限全为 false。
+completion-last lineage；activation/runner 专项 `28 passed`，与原 prereg 合跑 `45 passed`。source gate
+形成时的冻结状态是 `review_required_runner_not_executed`：`attempts_started=0`、两个 output root absent，
+latest `origin/main@dba7808` 上 `python3 -m pytest -q tests` 为 `850 passed, 10 skipped`。下节记录其后唯一
+一次 B runtime consume；不得把这段历史 source 状态误读成当前仍未执行。
+
+## 2026-07-14：B 唯一 schema-2/FK consume 成功，C 预算未花
+
+Pod1 先对 B 执行 fresh no-write `preflight`，确认 exact source/runtime/private inputs、output/claim absence
+与 `no_write=true`；复核通过后只对 `franco_backhand_loop_b` 花掉一次 consume。同步 child 正常退出，
+生成 `91` 帧 schema-2/FK NPZ，SHA-256
+`e2eb99e69f624250e37d012ebc2c7db53c4213a6c73e8cd232b92640051d28cc`。独立
+`validate-result` 复核了 claim → activation/receipt/runner/runtime → child capture → exact NPZ/report →
+completion-last ledger，返回 `runner_lineage=true`、`npz_bound=true`。绑定证据为：
+
+- claim SHA-256 `76e7ff88fea39c13b45096edaad504b2570b3ce079acc96366b820a9c1295fb0`；
+- report SHA-256 `4f5245937956290b3f623acbb588d99b346e5a1d874e55ee9caf010f2d75bc38`；
+- success ledger SHA-256 `c0a25f2cba0e61bf0df7f63e6493948e16c5a3d3074f65091430f29e417f4f8b`。
+
+C 没有执行 preflight 后的 `run`，其 claim/output/attempt 预算保持未消费。按冻结顺序，先让 B 走 L0；
+只有 B 在后续**外部**桌网几何门失败或 C 被证明有独有覆盖时才讨论 C，不能因为内部 schema-2/L0/L1/
+动力学失败跳备选。该结果只把 B 从 schema-2 推到 L0 输入：vendor L1、自打/自碰、整轨桌网 `>=5 mm`、
+动力学、TOPP、RL、Gate3 与真机仍全部未授权。
 
 权威资料：[G08](../../gates/G08_blind_spot_improvements.md) 和
 [操作文档](../../operations/run_motion_spatial_retarget_screen.md)。

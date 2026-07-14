@@ -13,6 +13,18 @@
 
 ## 2026-07-14
 
+- 非击球臂 A0/A1 的 checkpoint 层已闭环：A1 自然退出；A0 在稳定写完 `model_1000.pt` 后发生近三小时
+  Kit/Python teardown hang。终档 iteration/finite/fresh-lineage/hard binding 与正式 failure regex 先通过，
+  精确单成员 PGID `1811464` 对 `TERM` 无响应后才被同 PGID `KILL`，未重启或重发。冻结 v1r1 finalizer
+  随后验过两臂 `200/500/1000` 并发布 paired result SHA `30ba716b...d7d9`；signed K100 仍未判，第二 seed/
+  晋级仍阻断。见[实验](experiments/non_striking_arm_imitation_ablation_20260713.md)与
+  [操作](operations/run_phase1_non_striking_arm_imitation_a01.md)。
+
+- B 反手拉在 fresh no-write preflight 后花掉唯一 schema-2/FK consume，`91` 帧 NPZ SHA
+  `e2eb99e6...d28cc`；独立 `validate-result` 得到 `runner_lineage=true`、`npz_bound=true`，completion-last
+  ledger SHA `c0a25f2c...f4f8b`。只解锁 B 的 L0 静态证书；C 保持未消费后备，L1/桌网/动力学/RL/真机
+  仍未授权。见[动作实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)。
+
 - signed-face fresh C2 已在 Pod1 自然产生 finite/iter24/lineage1 terminal bytes，但 v1 用整数
   `[1,-1]` 假拒绝训练端合法 float `[1.0,-1.0]`；冻结 v1r1 又把 trainer 实际五键 compact bank
   record 错当成应直含第六个 physics SHA。最后一次成功只读快照证明 v1r1 从未安装/运行且 D2 从未

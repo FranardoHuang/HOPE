@@ -1605,6 +1605,29 @@ helper/manifest；safe relative paths 拒绝绝对/`..`/symlink。临时外部�
 [操作文档](../operations/run_phase1_signed_face_cd_l1.md)与
 [face-sign 卷宗](../experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)。
 
+### 2026-07-14 C2 零摩擦声明/发射不一致：D2 永久停止
+
+v1r2 control 合入并精确安装后，`static-validate/plan` 通过；fresh `validate-runtime` 在任何
+`continuations/v1r2`、attestation、D2 claim 或同名 training run 写入前，以
+`hard contract is not 31/31 zero-friction` fail closed。现场相邻 hard contract SHA
+`83f47ae6...2772` 的 31 个摩擦系数均为非零 PhysX 默认值。根因不是第三个 outer 假拒绝：冻结 manifest
+声明 `zero_joint_friction=true`，但 C2 launch argv 与 optimization recipe 都没有
+`task.plant.zero_joint_friction=true`，所以 trainer 正确记录了真实非零 plant。
+
+C2 只保留为 nonconforming 根因证据，不能与正式零摩擦谱系混用；C2 不重跑，D2/v1r2 永久
+`NO-LAUNCH`。下一次训练必须使用全新 C3/D3 namespace，并把同一零摩擦值同时绑定到 argv、optimization
+recipe、claim 和 emitted hard contract。该新 source/runtime 门通过前，G05 保持 `Partial`。
+
+### 2026-07-14 A0/A1 paired checkpoints complete，行为仍未判
+
+非击球臂 A1 自然退出；A0 在 `model_1000.pt` 稳定写完后发生 terminal teardown hang。终档 embedded
+iteration、finite、fresh lineage、相邻 hard SHA 和正式 failure regex 均先通过；精确 PGID `1811464`
+对 `TERM` 20 秒无响应后，只向同一个单成员 PGID 发 `KILL`。冻结 v1r1 finalizer 随后验证 A0/A1
+两臂 `model_200/500/1000.pt` 与唯一 `motion_imitation_body_names` 差异，paired result SHA 为
+`30ba716b...d7d9`。该结果明确 `same_immutable_signed_paper_judged=false`，所以它只完成 checkpoint
+证据，不回答“不模仿非击球臂是否更好”，也不授权第二 seed。见
+[实验卷宗](../experiments/non_striking_arm_imitation_ablation_20260713.md)。G05 仍为 `Partial`。
+
 ### 2026-07-14 signed-face K100 paper runtime materialized
 
 Pod1 使用 clean detached `748b6d5` source 和 exact rebound exam bank `60e1a7ad...d1ca` 完成单次

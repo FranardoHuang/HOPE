@@ -140,6 +140,13 @@ A0 PID=PGID `1811464` untouched。代码没有 A0 launch 分支，也不 signal 
 `200/500/1000` 的 filename↔embedded iteration、finite、fresh lineage 与 hard SHA；只写一份 no-clobber
 paired checkpoint 账，不启动 judge。
 
+实际运行中 A1 自然退出；A0 在写完稳定的 `model_1000.pt` 后卡在 Kit/Python teardown。A0 日志和模型
+近三小时不变，正式 failure regex 无命中，terminal checkpoint 的 iteration/finite/lineage/hard binding
+先独立通过。操作员又核对 PGID `1811464` 只有同 PID 一个成员、starttime 与 exact run argv 均不变，
+才先向该精确 PGID 发 `TERM`；20 秒无响应后向同一 PGID 发 `KILL`。禁止把这个特例泛化成按命令行
+匹配、broad signal 或自动 timeout cleanup。终档 paired result 已由上面的 v1r1 finalizer 发布，SHA-256
+`30ba716b4e1dc65e0ab20a69cab074e5863a1759d73c33486fe011511247d7d9`；它仍不启动 judge 或授权第二 seed。
+
 ## 以下 v1 首次发射流程仅供审计，当前禁止重跑
 
 若 Pod Git 对象库还没有上述 commit，先通过审阅过的 Git fetch/bundle 恢复；不得在归档训练 checkout

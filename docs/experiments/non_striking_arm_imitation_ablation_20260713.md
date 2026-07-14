@@ -1,6 +1,6 @@
 # 非击球臂模仿消融
 
-- 状态：`running / Partial`（A0/A1 均已 exact 启动；尚无 paired checkpoint 终档或同卷结果）
+- 状态：`checkpoint complete / Partial`（A0/A1 paired checkpoint 终档已验证；同卷行为仍未判）
 - 证据等级：[E2](../DEFINITIONS.md)（两臂 runtime/合同已绑定；尚无 A0/A1 行为结论）
 - 人类负责人：Franco
 - 执行者：Codex
@@ -109,6 +109,29 @@ claim 或进程；exact repo-source plan 仍由新旧 runner `30 passed` 覆盖�
 A1。因为 v1r1 manifest/runner SHA 已进入 recovery、launch 与 runtime 账，**本次不得修改冻结字节**；
 路径问题只在后续新版本中用独立 source/runtime-root 参数修复。
 
+### 终档与 A0 teardown hang
+
+2026-07-14，A1 自然退出；A0 已写完 `model_1000.pt`，但 `run.log` 与 checkpoint 自
+`2026-07-13T21:40:22Z` 起近三小时没有变化，GPU 利用率约 `1%`、进程仍占 `228%` CPU，判为训练终档后
+Kit/Python teardown hang，而不是继续学习。处理前先固定并验证：
+
+- A0 `model_1000.pt` SHA-256 `10addbe9...5067`，embedded iteration=`1000`；
+- `1,762,715` 个浮点元素全部 finite，fresh lineage=`1`；
+- checkpoint 内 hard-contract SHA 与相邻文件 `14ef410b...29f1` 一致；
+- 仓内正式 failure regex 无命中；普通字符串 `Inf` 会误中 Kit 的 `[Info]`，不得作为失败证据；
+- PGID `1811464` 只有 PID `1811464` 一个成员，starttime `280776985`，argv 精确绑定 A0 run name。
+
+先只向该精确 PGID 发 `TERM`；20 秒后身份不变且仍无响应，才向同一个单成员 PGID 发 `KILL`。进程在
+2 秒内消失，GPU0 释放；没有 broad signal、重启、重发或影响 A1/其他进程。这次 signal 只结束已冻结
+终档后的挂起收尾，不把 A0 改写成自然退出，也不产生 retry 权限。
+
+随后冻结 v1r1 finalizer 成功发布
+`/workspace/codexschema/phase1_non_striking_arm_20260714/control/v1r1/a0_a1_v1r1_checkpoint_result.json`，
+SHA-256 `30ba716b4e1dc65e0ab20a69cab074e5863a1759d73c33486fe011511247d7d9`。A0/A1 的
+`model_200/500/1000.pt` 均通过 filename↔embedded iteration、finite、fresh lineage、相邻 hard-contract
+与唯一 `motion_imitation_body_names` 差异检查；结果仍明确
+`same_immutable_signed_paper_judged=false`。
+
 ## 判读与晋级规则
 
 训练 checkpoint 先由 finalizer 验证 filename iteration、checkpoint 内 embedded iteration、finite tensor、
@@ -122,16 +145,14 @@ A2（移除左臂模仿后，把固定总 reward 预算重分给平衡/就绪）
 
 ## 结果
 
-源码与机器预注册已完成；v1r1 recovery 专项 `12 passed`，新旧 runner 合跑 `30 passed`。A0 已有首个
-绑定且 finite 的 `model_200.pt`；A1 已 ready 且 hard contract 绑定通过，但尚未收到 A1 milestone
-checkpoint，也没有同卷 Isaac/MuJoCo 行为、配对成绩或真机结果。因此仍不能声称“不模仿左臂更好”或
-继续购买 seed。
+源码、机器预注册与 checkpoint 终档已完成；v1r1 recovery 专项 `12 passed`，新旧 runner 合跑
+`30 passed`。六份 milestone checkpoint 已形成完整 paired binding，但还没有同一 signed K100 的
+Isaac/MuJoCo 行为、配对成绩或真机结果。因此仍不能声称“不模仿左臂更好”，也不能继续购买 seed。
 
 ## 下一步
 
-1. 不得重跑 v1、v1r1 `launch-a1` 或改动冻结 control；继续记录两臂 exact PID/PGID、GPU/RAM、日志与
-   `+200/+500/+1000` checkpoint。
-2. 两臂自然终档后用 v1r1 finalizer 验证 paired contract/checkpoint，再激活同一 immutable signed paper
-   做 paired 早判；不因 A0 单臂曲线或最佳 seed 晋级。
+1. 不得重跑 v1、v1r1 `launch-a1`、删除 paired result 或改动冻结 control；A0 teardown hang 不授权 retry。
+2. 用独立 generic checkpoint attestor 逐份绑定六个 checkpoint，再激活同一 immutable signed K100 做
+   paired 早判；不因 A0 单臂曲线或最佳 seed 晋级。
 3. external plan 路径问题只在新版本加负测修正，不得改写已绑定现场的 v1r1 bytes。
 4. paired 行为门通过后才另开 A2 固定预算和 recovery/ready 交互实验。

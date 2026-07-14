@@ -274,7 +274,7 @@ zero includes and 74 referenced meshes under closure SHA `e0381752...962de`. It 
 subset tied to exact donor ONNX SHA `0c428ddf...b7b155`; it is deliberately **not** a claim that the
 rows were re-extracted from the ONNX in this source gate.
 
-### Accepted read-only runtime inspection; consume remains blocked
+### Accepted read-only runtime inspection; historical pre-consume state
 
 The exact B/C private files and formal donor were restored without copying over either source or
 output root. The successful historical commands used the existing CPU runtime below, one asset at a
@@ -344,18 +344,19 @@ runtime/module-origin drift, attached/dirty source checkout, forged/missing NPZ 
 completion ordering. The activation remains `review_required_runner_not_executed`; source review
 does not spend an attempt.
 
-After the exact v2 source is reviewed and merged, an operator may first run either asset's read-only
-preflight. Use the same activation SHA and the bound venv; do not substitute system Python:
+After the exact v2 source was reviewed and merged, the operator ran B's read-only preflight with the
+same activation SHA and bound venv. The following form is retained for audit only; B must not be
+rerun, and C must remain unspent unless its separately documented fallback condition is met:
 
 ```bash
 PY=/workspace/hope_mjeval_venv/bin/python
-ASSET=franco_backhand_loop_b  # or franco_backhand_loop_c
+ASSET=franco_backhand_loop_b
 "$PY" "$RUNNER" \
   --activation "$ACTIVATION" --expected-activation-sha256 "$ACTIVATION_SHA" \
   --asset "$ASSET" preflight
 ```
 
-Only after that output is reviewed may the operator replace `preflight` by `run`. `run` serializes B
+Only after that output was reviewed did the operator replace `preflight` by `run`. `run` serializes B
 and C under one shared exclusive lock, repeats all validation, then atomically publishes the
 per-asset claim **before** synchronously starting the exact historical child in a new session.
 Publication of that claim irreversibly spends the only attempt. Any child or output-validation
@@ -364,7 +365,7 @@ requires a new human-reviewed activation; deleting the failure ledger does not a
 There is no cleanup-and-retry path. On success, the runner validates NPZ fields/content and publishes
 the success ledger last.
 
-Do not accept the new NPZ until this independent command passes:
+The B NPZ was accepted only after this independent command passed:
 
 ```bash
 "$PY" "$RUNNER" \
@@ -374,13 +375,18 @@ Do not accept the new NPZ until this independent command passes:
 
 `validate-result` requires claim → activation/receipt/runner/runtime → child capture → exact
 NPZ/report → completion-last lineage. Output bytes produced by a direct old-materializer invocation
-or without the success ledger are always rejected. No Pod `run` or private B/C consume was executed
-while creating this v2 source gate.
+or without the success ledger are always rejected. The source gate itself ran no Pod consume; the
+later accepted B result is fixed by NPZ SHA
+`e2eb99e69f624250e37d012ebc2c7db53c4213a6c73e8cd232b92640051d28cc`, claim SHA
+`76e7ff88fea39c13b45096edaad504b2570b3ce079acc96366b820a9c1295fb0`, report SHA
+`4f5245937956290b3f623acbb588d99b346e5a1d874e55ee9caf010f2d75bc38`, and completion-last
+success-ledger SHA `c0a25f2cba0e61bf0df7f63e6493948e16c5a3d3074f65091430f29e417f4f8b`.
+B is permanently no-rerun. C was not consumed and stays a fallback; do not run C merely to fill a
+CPU/GPU slot.
 
-A future completed schema-2 NPZ still is not an accepted motion. Its exact report must first be
-tracked, then a separate L0 audit decision can be made; vendor L1 self-collision and full-trajectory
-table/net clearance remain later gates. Never advance B/C fallback for an internal schema-2/FK
-failure.
+The completed B schema-2 NPZ is still not an accepted motion. It only authorizes a separate,
+content-bound L0 audit; vendor L1 self-collision and full-trajectory table/net clearance remain later
+gates. Never advance B/C fallback for an internal schema-2/FK failure.
 
 ## Promotion remains deliberately blocked
 
