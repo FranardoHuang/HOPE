@@ -39,3 +39,9 @@ source/assets/module；当前没有可信的 no-Kit Hydra compose 接口，所�
 推荐只用单进程 `fill --count N --execute`：每条依次 doctor、claim、等 first iteration、重采六卡再选
 下一条。任何失败立即停止且不自动 retry。所有 `retry-v2` 真正到 checkpoint 前，本实验没有科学结论，
 [G05](../../gates/G05_isaac_training_first_loop.md) 保持 `Partial`。
+
+2026-07-14T09:53:56Z 的只读现场验收中，`plan --live` 看到两 Pod 六 GPU 的 compute occupancy 都为 0，
+五个旧 claim 均为 Pod1 GPU0 `launched` 且因 queue status=`rejected` 不占新槽；五个 retry-v2 依次分到
+Pod1 GPU0/1/2、Pod2 GPU0/1。随后五个 `doctor --live` 全部返回 `DOCTOR_OK`，并实际解析到
+`/workspace/hope_isaac_venv/bin/python` 与 exact source module。没有创建 retry-v2 claim 或 trainer；这只
+关闭了刚才的 import 基础设施 blocker。

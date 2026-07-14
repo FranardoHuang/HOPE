@@ -1,7 +1,8 @@
 # 轻量 YAML 训练队列
 
 状态：队列 harness 修复通过 source gate；五个 `retry-v2` 尚未启动，无 Pod 训练结果。G05 仍为
-`Partial`。
+`Partial`。2026-07-14T09:53:56Z 五格只读 `doctor --live` 均通过 exact module gate；没有创建 retry-v2
+claim/trainer。
 
 这个入口解决的是“动作和题库已经决定后，为什么还要手拼一长串命令”。一条 YAML job 必须同时绑定：
 

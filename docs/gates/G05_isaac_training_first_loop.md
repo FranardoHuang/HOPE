@@ -1732,3 +1732,8 @@ scheduler 进程逐条 doctor→claim→first iteration→重采。focused `17 p
 无 checkpoint/行为结果，G05 继续 `Partial`。见
 [实验](../experiments/2026-07/EXP-P1-FRESH-C-MECHANISM-ABLATION.md)与
 [操作](../operations/run_lean_training_queue.md)。
+
+只读 runtime doctor 随后在五个 retry-v2 分配槽全部返回 `DOCTOR_OK`：两 Pod source/assets/exact module
+origin 通过，实际 child Python 为 `/workspace/hope_isaac_venv/bin/python`；live 六 GPU occupancy 为 0。
+该命令没有创建 retry-v2 claim 或 trainer，Hydra compose 仍明确未运行，所以只把 harness 从 E1 提升为
+module-runtime preflight 通过，不改变 G05 `Partial`。

@@ -32,8 +32,10 @@
   不能解释为机制失败。旧 namespace 已 `rejected`，同 recipe 的全新 `retry-v2` 是唯一一次基础设施重试。
   doctor/trainer 现共用 child env，exact module probe 在 claim 前；新增无写 `doctor --live` 与单进程
   `fill`（逐条等 first iteration 后重采）。focused `17 passed`；尚未启动 retry-v2，G05 仍为 Partial。
-   见[实验](experiments/2026-07/EXP-P1-FRESH-C-MECHANISM-ABLATION.md)与
-   [操作](operations/run_lean_training_queue.md)。
+  见[实验](experiments/2026-07/EXP-P1-FRESH-C-MECHANISM-ABLATION.md)与
+  [操作](operations/run_lean_training_queue.md)。
+  随后两 Pod 五格 `doctor --live` 全部 `DOCTOR_OK`，六 GPU live occupancy 为 0；没有 retry-v2 claim/
+  trainer，Hydra compose 仍明确未运行。
 
 - 动作专属轻量 YAML 训练队列完成 E1 source gate：一行绑定 motion、专属 train bank/exam、source、
   base+delta、seed、预算、`+200/+500/+1000` milestone 与六卡资源；默认 dry-run，blocked 永不启动，
