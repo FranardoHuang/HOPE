@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import importlib.util
 import json
+import os
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -260,16 +263,52 @@ def _synthetic_l1_certificate(plan: dict) -> dict:
     }
 
 
-def test_l1_certificate_must_authorize_table_net(monkeypatch):
+def _bind_synthetic_certificate(tmp_path: Path, plan: dict, cert: dict) -> Path:
+    path = tmp_path / "vendor_l1_certificate.json"
+    path.write_text(json.dumps(cert, sort_keys=True), encoding="utf-8")
+    plan["frozen_vendor_l1"]["certificate"] = {"path": str(path), "sha256": _sha(path)}
+    return path
+
+
+def test_l1_certificate_must_authorize_table_net(tmp_path):
     plan = _plan()
     cert = _synthetic_l1_certificate(plan)
-    monkeypatch.setattr(TABLE_NET, "_verify_absolute_sha", lambda *args: Path("/synthetic"))
-    monkeypatch.setattr(TABLE_NET, "read_json", lambda *args: cert)
-    binding = TABLE_NET.validate_vendor_l1_certificate(plan)
+    _bind_synthetic_certificate(tmp_path, plan, cert)
+    binding, snapshot = TABLE_NET.validate_vendor_l1_certificate(plan)
+    assert snapshot.sha256 == plan["frozen_vendor_l1"]["certificate"]["sha256"]
     assert binding["authorization"]["table_net_authorized"] is True
     cert["authorization"]["table_net_authorized"] = False
+    _bind_synthetic_certificate(tmp_path, plan, cert)
     with pytest.raises(TABLE_NET.TableNetError, match="authorization changed"):
         TABLE_NET.validate_vendor_l1_certificate(plan)
+
+
+def test_l1_certificate_path_swap_cannot_change_consumed_bytes(monkeypatch, tmp_path):
+    plan = _plan()
+    original = _synthetic_l1_certificate(plan)
+    path = _bind_synthetic_certificate(tmp_path, plan, original)
+    original_inode = path.stat().st_ino
+    forged = json.loads(json.dumps(original))
+    forged["runtime"] = {"forged_after_sha_check": True}
+    forged_bytes = json.dumps(forged, sort_keys=True).encode("utf-8")
+    real_read = os.read
+    swapped = False
+
+    def swap_then_read(fd: int, count: int) -> bytes:
+        nonlocal swapped
+        if not swapped and os.fstat(fd).st_ino == original_inode:
+            swapped = True
+            path.rename(tmp_path / "held-original.json")
+            path.write_bytes(forged_bytes)
+        return real_read(fd, count)
+
+    monkeypatch.setattr(TABLE_NET.os, "read", swap_then_read)
+    with pytest.raises(TABLE_NET.TableNetError, match="changed during immutable read"):
+        TABLE_NET.validate_vendor_l1_certificate(plan)
+    assert swapped is True
+    assert json.loads(path.read_text(encoding="utf-8"))["runtime"] == {
+        "forged_after_sha_check": True
+    }
 
 
 def test_contract_cannot_claim_continuous_time_or_weaken_hard_gate(tmp_path):
@@ -284,6 +323,88 @@ def test_contract_cannot_claim_continuous_time_or_weaken_hard_gate(tmp_path):
     path.write_text(json.dumps(plan), encoding="utf-8")
     with pytest.raises(TABLE_NET.TableNetError, match="audit contract changed"):
         TABLE_NET.validate_plan(path, _sha(path))
+
+
+def _valid_npz_bytes(body_names: tuple[str, ...], mutation: str | None = None) -> bytes:
+    joint_pos = np.zeros((151, 31), dtype=np.float32)
+    body_pos = np.zeros((151, 32, 3), dtype=np.float32)
+    body_quat = np.zeros((151, 32, 4), dtype=np.float32)
+    body_quat[..., 3] = 1.0
+    if mutation == "nonfinite":
+        joint_pos[0, 0] = np.nan
+    if mutation == "wrong_dtype":
+        joint_pos = joint_pos.astype(np.float64)
+    buffer = io.BytesIO()
+    np.savez(
+        buffer,
+        fps=np.array([50], dtype=np.int64),
+        joint_pos=joint_pos,
+        joint_vel=np.gradient(joint_pos, 1.0 / 50.0, axis=0).astype(np.float32),
+        body_pos_w=body_pos,
+        body_quat_w=body_quat,
+        body_lin_vel_w=np.zeros((151, 32, 3), dtype=np.float32),
+        body_ang_vel_w=np.zeros((151, 32, 3), dtype=np.float32),
+        kinematics_schema_version=np.array([2], dtype=np.int64),
+        body_pos_point=np.array("link_origin"),
+        body_lin_vel_point=np.array("center_of_mass"),
+        body_names=np.asarray(body_names),
+    )
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("mutation", "match"),
+    [("nonfinite", "NaN/Inf"), ("wrong_dtype", "shape/dtype")],
+)
+def test_npz_snapshot_rejects_nonfinite_or_wrong_dtype(tmp_path, mutation, match):
+    body_names = tuple(f"body_{index}" for index in range(32))
+    path = tmp_path / "motion.npz"
+    path.write_bytes(_valid_npz_bytes(body_names, mutation))
+    snapshot = TABLE_NET.read_file_snapshot(path, "synthetic NPZ")
+    plan = {"l0_contract": {"fps": 50, "quaternion_norm_tolerance": 1.0e-5}}
+    with pytest.raises(TABLE_NET.TableNetError, match=match):
+        TABLE_NET.load_schema2_npz_snapshot(snapshot, plan, body_names)
+
+
+def test_npz_snapshot_rejects_duplicate_zip_members(tmp_path):
+    body_names = tuple(f"body_{index}" for index in range(32))
+    path = tmp_path / "motion.npz"
+    path.write_bytes(_valid_npz_bytes(body_names))
+    with zipfile.ZipFile(path, "r") as archive:
+        duplicate = archive.read("fps.npy")
+    with pytest.warns(UserWarning, match="Duplicate name"):
+        with zipfile.ZipFile(path, "a") as archive:
+            archive.writestr("fps.npy", duplicate)
+    snapshot = TABLE_NET.read_file_snapshot(path, "duplicate NPZ")
+    plan = {"l0_contract": {"fps": 50, "quaternion_norm_tolerance": 1.0e-5}}
+    with pytest.raises(TABLE_NET.TableNetError, match="duplicated"):
+        TABLE_NET.load_schema2_npz_snapshot(snapshot, plan, body_names)
+
+
+def test_bound_directory_fd_ignores_replacement_path(tmp_path):
+    root = tmp_path / "model"
+    root.mkdir()
+    (root / "mesh.stl").write_bytes(b"original-mesh")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    root_fd = os.open(root, flags)
+    try:
+        held = tmp_path / "held-model"
+        root.rename(held)
+        root.mkdir()
+        (root / "mesh.stl").write_bytes(b"forged-mesh")
+        snapshot = TABLE_NET._read_relative_snapshot(
+            root_fd,
+            root,
+            Path("mesh.stl"),
+            "synthetic mesh",
+            expected_sha256=hashlib.sha256(b"original-mesh").hexdigest(),
+        )
+    finally:
+        os.close(root_fd)
+    assert snapshot.data == b"original-mesh"
+    assert (root / "mesh.stl").read_bytes() == b"forged-mesh"
 
 
 def test_dry_run_never_writes_and_output_preflight_precedes_runtime(monkeypatch, tmp_path):
@@ -311,8 +432,34 @@ def test_dry_run_never_writes_and_output_preflight_precedes_runtime(monkeypatch,
 
 def test_no_clobber_certificate_write(tmp_path):
     output = tmp_path / "certificate.json"
-    TABLE_NET.write_exclusive(output, {"status": "first"})
-    original = output.read_bytes()
-    with pytest.raises(TABLE_NET.TableNetError, match="already exists"):
-        TABLE_NET.write_exclusive(output, {"status": "second"})
-    assert output.read_bytes() == original
+    target = TABLE_NET.validate_output_preconditions(
+        {"output_contract": {"certificate_path": str(output)}}
+    )
+    try:
+        published = TABLE_NET.write_exclusive(target, {"status": "first"})
+        original = output.read_bytes()
+        assert published.data == original
+        with pytest.raises(TABLE_NET.TableNetError, match="already exists"):
+            TABLE_NET.write_exclusive(target, {"status": "second"})
+        assert output.read_bytes() == original
+    finally:
+        target.close()
+
+
+def test_output_parent_swap_fails_before_publication(tmp_path):
+    parent = tmp_path / "bound-parent"
+    parent.mkdir()
+    output = parent / "certificate.json"
+    target = TABLE_NET.validate_output_preconditions(
+        {"output_contract": {"certificate_path": str(output)}}
+    )
+    held_parent = tmp_path / "held-parent"
+    parent.rename(held_parent)
+    parent.mkdir()
+    try:
+        with pytest.raises(TABLE_NET.TableNetError, match="bound directory inode"):
+            TABLE_NET.write_exclusive(target, {"status": "must-not-publish"})
+    finally:
+        target.close()
+    assert not (held_parent / "certificate.json").exists()
+    assert not output.exists()

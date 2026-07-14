@@ -586,8 +586,13 @@ schema-2/MJCF 世界的无旋转纯平移 `(+0.5,+0.7625,+0.76)`；因此桌板�
 worldbody 末尾，在内存中用 exact 74-file asset map 编译，要求原 37 个 enabled robot geom ID、qpos0、拓扑
 和 compiled collision SHA 不变；每个 `1201 @ 400 Hz` 有限样本检查 `37×4=148` 个 pair，球拍/拍柄另做
 汇总但不从全机器人门排除。`<5 mm` 是 exact saturation-predicate hard fail，不能由其他帧/reward 补偿；
-有限密扫仍不是数学连续时间证明，且没有动力学、训练或真机含义。dependency-light 专项 `16 passed`、
-source/static 命令 PASS；runtime `dry-run/audit`、certificate 与动作晋级均未发生，所以 G08 保持 Partial。
+有限密扫仍不是数学连续时间证明，且没有动力学、训练或真机含义。首次 source 版本被红队证明存在
+certificate/NPZ/MJCF 的 check→reopen 和输出 parent path-swap 窗口，因此明确 NO-MERGE；修复版把每个
+runtime 输入绑定为 `O_NOFOLLOW` fd 的单次 bytes snapshot，canonical XML + 74 mesh 从 pinned model-root
+dirfd 读取，输出用 pinned parent dirfd + `openat(O_EXCL)` + file/directory `fsync` 后复核同一 inode/bytes。
+certificate swap、model-root replacement、output-parent swap、duplicate ZIP、错误 dtype、NaN/Inf 均有
+fail-closed 负测。dependency-light 专项 `22 passed`、source/static 命令 PASS；runtime
+`dry-run/audit`、certificate 与动作晋级均未发生，所以 G08 保持 Partial。
 见[桌网实验卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET.md)和
 [操作文档](../operations/run_motion_backhand_loop_b_table_net_clearance.md)。
 

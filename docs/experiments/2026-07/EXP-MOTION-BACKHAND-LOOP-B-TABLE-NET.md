@@ -20,7 +20,7 @@
 
 预注册
 [`motion_backhand_loop_b_table_net_clearance_prereg_20260715.json`](../../../configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json)
-SHA-256 为 `c1899ffff4564986ced934413d581ffbacc5328a90663421526589f3630804b9`。它逐字绑定：
+SHA-256 为 `6d853551960ac4e3b55d985a45c9a6c10ca7de420b60fe9ad28dd45f3b671043`。它逐字绑定：
 
 - B schema-2 NPZ SHA-256 `e2eb99e6...d28cc`；
 - vendor L1 certificate SHA-256 `6840df34...db60`，且运行消费前必须读到
@@ -46,7 +46,7 @@ p_schema2_mjcf = p_HOPE + [0.5, 1.525/2, 0.76]
 
 validator
 [`audit_motion_schema2_table_net_clearance.py`](../../../scripts/audit_motion_schema2_table_net_clearance.py)
-SHA-256 为 `80b15b69...c6be4d`。它继承 vendor L1 已验证的 root 线性、四元数 shortest-arc slerp 和关节线性
+SHA-256 为 `df576c40...7b549`。它继承 vendor L1 已验证的 root 线性、四元数 shortest-arc slerp 和关节线性
 插值，将 `151 @ 50 Hz` 扫成 `1201 @ 400 Hz` 有限样本。运行时把四个静态 box 追加到 canonical
 `worldbody` 的末尾，通过 in-memory XML + exact 74-file mesh map 编译；canonical robot geom ID、qpos0、
 拓扑和 compiled collision SHA 必须保持不变。
@@ -66,16 +66,25 @@ SHA-256 为 `80b15b69...c6be4d`。它继承 vendor L1 已验证的 root 线性�
 
 ```bash
 python3 -m pytest -q tests/test_motion_backhand_loop_b_table_net_clearance.py
-# 16 passed
+# 22 passed
 
 python3 scripts/audit_motion_schema2_table_net_clearance.py \
   --prereg configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json \
-  --expected-prereg-sha256 c1899ffff4564986ced934413d581ffbacc5328a90663421526589f3630804b9 \
+  --expected-prereg-sha256 6d853551960ac4e3b55d985a45c9a6c10ca7de420b60fe9ad28dd45f3b671043 \
   static
 # PASS ... source_exact=true runtime_audit=false no_write=true continuous_time_claim=false
 ```
 
-反例覆盖 `4.99/5.00/5.01 mm` 边界、非球拍 robot geom 撞网、任一 hard failure 不可补偿、HOPE→MJCF
+首次红队发现旧实现把 SHA 检查和 JSON/NPZ/MJCF 再打开分成两次 path read，且输出只在写前按 path
+重查，存在 TOCTOU（检查时与使用时不一致）窗口；因此旧 source commit 明确 **NO-MERGE**。修复后所有
+runtime 输入都经 `O_NOFOLLOW` read-only fd、`fstat` identity/size/time、单次 bytes snapshot，再从同一
+bytes 做 hash + JSON/NPZ/XML parse；NPZ 只从 `BytesIO` 加载并拒绝 duplicate ZIP member、错误 dtype 与
+NaN/Inf；canonical XML 与 74 mesh 从同一个 pinned model-root dirfd 读取并仅用内存 bytes 编译。输出则
+绑定 parent dirfd 的 device/inode，使用 `openat(O_EXCL|O_NOFOLLOW)`、file+dir `fsync`，并从同一 dirfd
+复核新建 inode/bytes；父目录换名或替换会 fail closed 并不发布。
+
+反例覆盖 certificate path swap、model-root replacement、output-parent swap、duplicate/malformed NPZ、
+`4.99/5.00/5.01 mm` 边界、非球拍 robot geom 撞网、任一 hard failure 不可补偿、HOPE→MJCF
 旋转/平移漂移、漏网柱、桌板厚度漂移、duplicate obstacle name、vendor L1 未授权、continuous-time 假声明、
 阈值放宽、dry-run 写文件和 certificate overwrite。
 

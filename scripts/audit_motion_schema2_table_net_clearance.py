@@ -16,12 +16,16 @@ from __future__ import annotations
 import argparse
 import ast
 import hashlib
-import importlib.util
+import io
 import json
 import math
 import os
+import stat
 import sys
+import types
 import xml.etree.ElementTree as ET
+import zipfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -38,6 +42,19 @@ L1_CERTIFICATE_STATUS = "complete_cpu_vendor_l1_safety_pass_downstream_blocked"
 L1_PLAN_PATH = REPO_ROOT / "configs/motion_backhand_loop_b_vendor_l1_safety_prereg_20260715.json"
 L1_VALIDATOR_PATH = REPO_ROOT / "scripts/audit_motion_schema2_vendor_l1_safety.py"
 RACKET_GEOMS = ("right_racket_collision", "right_racket_handle_collision")
+NPZ_FIELDS = {
+    "fps",
+    "joint_pos",
+    "joint_vel",
+    "body_pos_w",
+    "body_quat_w",
+    "body_lin_vel_w",
+    "body_ang_vel_w",
+    "kinematics_schema_version",
+    "body_pos_point",
+    "body_lin_vel_point",
+    "body_names",
+}
 OBSTACLE_NAMES = (
     "motion_table_top",
     "motion_net",
@@ -50,12 +67,178 @@ class TableNetError(ValueError):
     """Fail-closed source, lineage, frame, runtime, clearance or publication error."""
 
 
+@dataclass(frozen=True)
+class FileSnapshot:
+    """One immutable read from one O_NOFOLLOW file descriptor."""
+
+    path: Path
+    data: bytes
+    device: int
+    inode: int
+    mode: int
+    size: int
+    sha256: str
+
+    def binding(self) -> dict[str, Any]:
+        return {"path": str(self.path), "bytes": self.size, "sha256": self.sha256}
+
+
+@dataclass
+class OutputTarget:
+    """Pinned output parent used for all no-clobber publication operations."""
+
+    path: Path
+    parent_path: Path
+    name: str
+    dir_fd: int
+    parent_device: int
+    parent_inode: int
+    closed: bool = False
+
+    def close(self) -> None:
+        if not self.closed:
+            os.close(self.dir_fd)
+            self.closed = True
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def read_file_snapshot(
+    path: Path,
+    label: str,
+    *,
+    expected_bytes: int | None = None,
+    expected_sha256: str | None = None,
+) -> FileSnapshot:
+    """Read exactly one regular inode once; all consumers use returned bytes."""
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise TableNetError(f"cannot open exact {label}: {exc}") from exc
+    try:
+        return _read_open_fd_snapshot(
+            fd,
+            path,
+            label,
+            expected_bytes=expected_bytes,
+            expected_sha256=expected_sha256,
+        )
+    finally:
+        os.close(fd)
+
+
+def _read_open_fd_snapshot(
+    fd: int,
+    path: Path,
+    label: str,
+    *,
+    expected_bytes: int | None = None,
+    expected_sha256: str | None = None,
+) -> FileSnapshot:
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise TableNetError(f"{label} must be a regular non-symlink file: {path}")
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        after = os.fstat(fd)
+        identity_before = (
+            before.st_dev,
+            before.st_ino,
+            before.st_mode,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        )
+        identity_after = (
+            after.st_dev,
+            after.st_ino,
+            after.st_mode,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        )
+        if identity_before != identity_after:
+            raise TableNetError(f"{label} inode/metadata changed during immutable read")
+        data = b"".join(chunks)
+        if len(data) != before.st_size:
+            raise TableNetError(f"{label} short/long read {len(data)} != {before.st_size}")
+        digest = _sha256_bytes(data)
+        if expected_bytes is not None and before.st_size != expected_bytes:
+            raise TableNetError(f"{label} bytes {before.st_size} != {expected_bytes}")
+        if expected_sha256 is not None and digest != expected_sha256:
+            raise TableNetError(f"{label} SHA-256 {digest} != {expected_sha256}")
+        return FileSnapshot(
+            path=path,
+            data=data,
+            device=int(before.st_dev),
+            inode=int(before.st_ino),
+            mode=int(before.st_mode),
+            size=int(before.st_size),
+            sha256=digest,
+        )
+    except OSError as exc:
+        raise TableNetError(f"cannot read exact {label}: {exc}") from exc
+
+
+def _read_relative_snapshot(
+    root_fd: int,
+    root_path: Path,
+    relative: Path,
+    label: str,
+    *,
+    expected_bytes: int | None = None,
+    expected_sha256: str | None = None,
+) -> FileSnapshot:
+    if relative.is_absolute() or not relative.parts or any(part in ("", ".", "..") for part in relative.parts):
+        raise TableNetError(f"unsafe relative path for {label}: {relative}")
+    held: list[int] = []
+    current = root_fd
+    try:
+        for component in relative.parts[:-1]:
+            flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0)
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            current = os.open(component, flags, dir_fd=current)
+            held.append(current)
+            st = os.fstat(current)
+            if not stat.S_ISDIR(st.st_mode):
+                raise TableNetError(f"{label} parent component is not a directory: {component}")
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        fd = os.open(relative.parts[-1], flags, dir_fd=current)
+        try:
+            return _read_open_fd_snapshot(
+                fd,
+                root_path / relative,
+                label,
+                expected_bytes=expected_bytes,
+                expected_sha256=expected_sha256,
+            )
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise TableNetError(f"cannot open exact {label} beneath bound root: {exc}") from exc
+    finally:
+        for held_fd in reversed(held):
+            os.close(held_fd)
+
+
 def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    """Compatibility helper for source-only callers; runtime uses snapshots."""
+
+    return read_file_snapshot(path, str(path)).sha256
 
 
 def _reject_duplicate_pairs(pairs: Sequence[tuple[str, Any]]) -> dict[str, Any]:
@@ -67,22 +250,24 @@ def _reject_duplicate_pairs(pairs: Sequence[tuple[str, Any]]) -> dict[str, Any]:
     return value
 
 
-def ensure_regular_no_symlink(path: Path, label: str) -> None:
-    if path.is_symlink() or not path.is_file():
-        raise TableNetError(f"{label} must be a regular non-symlink file: {path}")
-
-
-def read_json(path: Path, label: str) -> dict[str, Any]:
-    ensure_regular_no_symlink(path, label)
+def parse_json_bytes(data: bytes, label: str) -> dict[str, Any]:
     try:
         value = json.loads(
-            path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_pairs
+            data.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_pairs,
+            parse_constant=lambda token: (_ for _ in ()).throw(
+                TableNetError(f"non-finite JSON constant in {label}: {token}")
+            ),
         )
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except (UnicodeError, json.JSONDecodeError) as exc:
         raise TableNetError(f"cannot read {label}: {exc}") from exc
     if not isinstance(value, dict):
         raise TableNetError(f"{label} must be a JSON object")
     return value
+
+
+def read_json(path: Path, label: str) -> dict[str, Any]:
+    return parse_json_bytes(read_file_snapshot(path, label).data, label)
 
 
 def exact_keys(value: Any, expected: set[str], label: str) -> Mapping[str, Any]:
@@ -92,29 +277,35 @@ def exact_keys(value: Any, expected: set[str], label: str) -> Mapping[str, Any]:
     return value
 
 
-def _binding(path: Path) -> dict[str, Any]:
-    ensure_regular_no_symlink(path, str(path))
-    return {"path": str(path), "bytes": path.stat().st_size, "sha256": sha256_file(path)}
+def _binding(snapshot: FileSnapshot) -> dict[str, Any]:
+    return snapshot.binding()
 
 
-def _verify_repo_binding(row: Any, label: str, relative: str) -> Path:
+def _snapshot_repo_binding(row: Any, label: str, relative: str) -> FileSnapshot:
     binding = exact_keys(row, {"path", "bytes", "sha256"}, label)
     if binding["path"] != relative:
         raise TableNetError(f"{label} path changed")
-    path = REPO_ROOT / relative
-    ensure_regular_no_symlink(path, label)
-    if binding["bytes"] != path.stat().st_size or binding["sha256"] != sha256_file(path):
-        raise TableNetError(f"{label} content binding changed")
-    return path
+    return read_file_snapshot(
+        REPO_ROOT / relative,
+        label,
+        expected_bytes=binding["bytes"],
+        expected_sha256=binding["sha256"],
+    )
+
+
+def _verify_repo_binding(row: Any, label: str, relative: str) -> Path:
+    return _snapshot_repo_binding(row, label, relative).path
+
+
+def _snapshot_absolute_sha(row: Any, label: str) -> FileSnapshot:
+    binding = exact_keys(row, {"path", "sha256"}, label)
+    return read_file_snapshot(
+        Path(binding["path"]), label, expected_sha256=binding["sha256"]
+    )
 
 
 def _verify_absolute_sha(row: Any, label: str) -> Path:
-    binding = exact_keys(row, {"path", "sha256"}, label)
-    path = Path(binding["path"])
-    ensure_regular_no_symlink(path, label)
-    if sha256_file(path) != binding["sha256"]:
-        raise TableNetError(f"{label} SHA-256 changed")
-    return path
+    return _snapshot_absolute_sha(row, label).path
 
 
 def _load_exact_module(
@@ -122,26 +313,25 @@ def _load_exact_module(
 ) -> Any:
     """Load one exact source by path without accepting a stale module."""
 
-    ensure_regular_no_symlink(path, label)
     if type(expected_bytes) is not int or expected_bytes <= 0:
         raise TableNetError(f"{label} expected_bytes must be a positive integer")
-    if path.stat().st_size != expected_bytes or sha256_file(path) != expected_sha256:
-        raise TableNetError(f"{label} content binding changed before import")
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise TableNetError(f"cannot import exact {label} from {path}")
-    module = importlib.util.module_from_spec(spec)
+    snapshot = read_file_snapshot(
+        path,
+        label,
+        expected_bytes=expected_bytes,
+        expected_sha256=expected_sha256,
+    )
+    module = types.ModuleType(name)
+    module.__file__ = str(path)
+    module.__package__ = name.rpartition(".")[0]
     missing = object()
     previous = sys.modules.get(name, missing)
     sys.modules[name] = module
     try:
-        spec.loader.exec_module(module)
-        if Path(str(getattr(module, "__file__", ""))).resolve() != path.resolve():
-            raise TableNetError(f"{label} module origin changed")
+        code = compile(snapshot.data, str(path), "exec", dont_inherit=True)
+        exec(code, module.__dict__)
         if sys.modules.get(name) is not module:
             raise TableNetError(f"{label} replaced its module entry")
-        if path.stat().st_size != expected_bytes or sha256_file(path) != expected_sha256:
-            raise TableNetError(f"{label} content binding changed during import")
     except BaseException as exc:
         if previous is missing:
             sys.modules.pop(name, None)
@@ -155,11 +345,11 @@ def _load_exact_module(
     return module
 
 
-def _ast_number(path: Path, class_name: str | None, variable: str) -> float:
+def _ast_number(source: FileSnapshot, class_name: str | None, variable: str) -> float:
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, SyntaxError) as exc:
-        raise TableNetError(f"cannot parse source literal {path}: {exc}") from exc
+        tree = ast.parse(source.data.decode("utf-8"))
+    except (UnicodeError, SyntaxError) as exc:
+        raise TableNetError(f"cannot parse source literal {source.path}: {exc}") from exc
     nodes: Sequence[ast.stmt] = tree.body
     if class_name is not None:
         classes = [node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == class_name]
@@ -277,7 +467,7 @@ def validate_frame_and_geometry_sources(plan: Mapping[str, Any]) -> dict[str, An
         {"table_geometry", "tracking_command", "tracking_scene_adapter"},
         "frame_sources",
     )
-    geometry_path = _verify_repo_binding(
+    geometry_source = _snapshot_repo_binding(
         sources["table_geometry"],
         "table geometry source",
         (
@@ -285,7 +475,7 @@ def validate_frame_and_geometry_sources(plan: Mapping[str, Any]) -> dict[str, An
             "tasks/table_tennis/geometry.py"
         ),
     )
-    command_path = _verify_repo_binding(
+    command_source = _snapshot_repo_binding(
         sources["tracking_command"],
         "tracking command source",
         (
@@ -293,7 +483,7 @@ def validate_frame_and_geometry_sources(plan: Mapping[str, Any]) -> dict[str, An
             "tasks/tracking/mdp/hope_commands.py"
         ),
     )
-    _verify_repo_binding(
+    _snapshot_repo_binding(
         sources["tracking_scene_adapter"],
         "tracking scene adapter",
         (
@@ -302,7 +492,7 @@ def validate_frame_and_geometry_sources(plan: Mapping[str, Any]) -> dict[str, An
         ),
     )
     constants = {
-        name: _ast_number(geometry_path, None, name)
+        name: _ast_number(geometry_source, None, name)
         for name in (
             "TABLE_LENGTH", "TABLE_WIDTH", "TABLE_HEIGHT", "TABLE_THICKNESS",
             "NET_X", "NET_HEIGHT", "NET_OVERHANG", "NET_THICKNESS",
@@ -320,8 +510,8 @@ def validate_frame_and_geometry_sources(plan: Mapping[str, Any]) -> dict[str, An
     }
     for key, expected in expected_constants.items():
         _close(constants[key], expected, f"table source {key}")
-    near_x = _ast_number(command_path, "RacketTargetCommandCfg", "vb_table_near_x")
-    surface_z = _ast_number(command_path, "RacketTargetCommandCfg", "vb_table_surface_z")
+    near_x = _ast_number(command_source, "RacketTargetCommandCfg", "vb_table_near_x")
+    surface_z = _ast_number(command_source, "RacketTargetCommandCfg", "vb_table_surface_z")
     _close(near_x, 0.5, "tracking vb_table_near_x")
     _close(surface_z, 0.76, "tracking vb_table_surface_z")
 
@@ -388,8 +578,16 @@ def validate_frame_and_geometry_sources(plan: Mapping[str, Any]) -> dict[str, An
                 _close(axis, float(expected), f"obstacle {actual['name']} {field}")
 
     # Static frame evidence from the exact vendor XML: floor z=0 and +Y is anatomical left.
-    mjcf_path = REPO_ROOT / plan["a3_model"]["canonical_mjcf"]["path"]
-    root = ET.parse(mjcf_path).getroot()
+    canonical_binding = plan["a3_model"]["canonical_mjcf"]
+    canonical_source = _snapshot_repo_binding(
+        canonical_binding,
+        "canonical vendor MJCF frame source",
+        canonical_binding["path"],
+    )
+    try:
+        root = ET.fromstring(canonical_source.data)
+    except ET.ParseError as exc:
+        raise TableNetError(f"cannot parse canonical vendor MJCF frame source: {exc}") from exc
     worldbodies = root.findall("./worldbody")
     if len(worldbodies) != 1:
         raise TableNetError("vendor MJCF must contain exactly one worldbody")
@@ -453,13 +651,13 @@ def _expected_audit_contract() -> dict[str, Any]:
 
 
 def validate_plan(plan_path: Path, expected_sha256: str) -> tuple[dict[str, Any], str, dict[str, Any]]:
-    ensure_regular_no_symlink(plan_path, "table/net preregistration")
-    actual_sha = sha256_file(plan_path)
+    plan_snapshot = read_file_snapshot(plan_path, "table/net preregistration")
+    actual_sha = plan_snapshot.sha256
     if actual_sha != expected_sha256 or len(expected_sha256) != 64:
         raise TableNetError(
             f"table/net preregistration SHA mismatch: expected={expected_sha256} actual={actual_sha}"
         )
-    plan = read_json(plan_path, "table/net preregistration")
+    plan = parse_json_bytes(plan_snapshot.data, "table/net preregistration")
     exact_keys(
         plan,
         {
@@ -505,27 +703,51 @@ def validate_plan(plan_path: Path, expected_sha256: str) -> tuple[dict[str, Any]
         "sha256": "6840df34a6aa6e5636192c705a8ecaa563f751658fe538df428bc317c858db60",
     }:
         raise TableNetError("vendor L1 certificate binding changed")
-    l1_plan_path = _verify_repo_binding(
+    l1_plan_snapshot = _snapshot_repo_binding(
         frozen["preregistration"],
         "vendor L1 preregistration",
         "configs/motion_backhand_loop_b_vendor_l1_safety_prereg_20260715.json",
     )
-    l1_validator_path = _verify_repo_binding(
+    l1_validator_snapshot = _snapshot_repo_binding(
         frozen["validator"],
         "vendor L1 validator",
         "scripts/audit_motion_schema2_vendor_l1_safety.py",
     )
     l1 = _load_exact_module(
         "motion_vendor_l1_for_table_net",
-        l1_validator_path,
+        l1_validator_snapshot.path,
         expected_bytes=frozen["validator"]["bytes"],
         expected_sha256=frozen["validator"]["sha256"],
         label="vendor L1 validator",
     )
+    secure_l1_plan = parse_json_bytes(l1_plan_snapshot.data, "vendor L1 preregistration")
     try:
-        l1_plan, _, _ = l1.validate_plan(l1_plan_path, frozen["preregistration"]["sha256"])
+        l1_plan, _, l0_v1_plan = l1.validate_plan(
+            l1_plan_snapshot.path, frozen["preregistration"]["sha256"]
+        )
     except (OSError, TypeError, ValueError) as exc:
         raise TableNetError(f"vendor L1 source closure changed: {exc}") from exc
+    if l1_plan != secure_l1_plan:
+        raise TableNetError("vendor L1 preregistration changed between bound bytes and validation")
+    l0_binding = secure_l1_plan["frozen_l0"]["preregistration"]
+    secure_l0_snapshot = _snapshot_repo_binding(
+        l0_binding,
+        "vendor L0 preregistration",
+        l0_binding["path"],
+    )
+    secure_l0_v2_plan = parse_json_bytes(
+        secure_l0_snapshot.data, "vendor L0 V2 preregistration"
+    )
+    l0_v1_binding = secure_l0_v2_plan["frozen_v1"]["preregistration"]
+    secure_l0_v1_snapshot = _snapshot_repo_binding(
+        l0_v1_binding,
+        "vendor L0 V1 preregistration",
+        l0_v1_binding["path"],
+    )
+    if l0_v1_plan != parse_json_bytes(
+        secure_l0_v1_snapshot.data, "vendor L0 V1 preregistration"
+    ):
+        raise TableNetError("vendor L0 preregistration changed between bound bytes and validation")
     if frozen["required_certificate_status"] != L1_CERTIFICATE_STATUS:
         raise TableNetError("required vendor L1 certificate status changed")
     required_auth = {
@@ -560,6 +782,7 @@ def validate_plan(plan_path: Path, expected_sha256: str) -> tuple[dict[str, Any]
     ):
         raise TableNetError("MJCF or derived closure differs from exact vendor L1 plan")
     validate_frame_and_geometry_sources(plan)
+    _snapshot_exact_mjcf_closure(plan)
     if plan["audit_contract"] != _expected_audit_contract():
         raise TableNetError("audit contract changed or weakened")
     expected_output = {
@@ -601,9 +824,13 @@ def validate_plan(plan_path: Path, expected_sha256: str) -> tuple[dict[str, Any]
     return plan, actual_sha, l1_plan
 
 
-def validate_vendor_l1_certificate(plan: Mapping[str, Any]) -> dict[str, Any]:
-    path = _verify_absolute_sha(plan["frozen_vendor_l1"]["certificate"], "vendor L1 certificate")
-    cert = read_json(path, "vendor L1 certificate")
+def validate_vendor_l1_certificate(
+    plan: Mapping[str, Any],
+) -> tuple[dict[str, Any], FileSnapshot]:
+    snapshot = _snapshot_absolute_sha(
+        plan["frozen_vendor_l1"]["certificate"], "vendor L1 certificate"
+    )
+    cert = parse_json_bytes(snapshot.data, "vendor L1 certificate")
     exact_keys(
         cert,
         {
@@ -672,7 +899,115 @@ def validate_vendor_l1_certificate(plan: Mapping[str, Any]) -> dict[str, Any]:
     }
     if cert["authorization"] != expected_auth:
         raise TableNetError("vendor L1 certificate authorization changed")
-    return cert
+    return cert, snapshot
+
+
+def _scalar_text(value: np.ndarray, label: str) -> str:
+    array = np.asarray(value)
+    if array.shape != () or array.dtype.hasobject:
+        raise TableNetError(f"{label} must be one non-object scalar string")
+    item = array.item()
+    if isinstance(item, bytes):
+        try:
+            item = item.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise TableNetError(f"{label} is not UTF-8") from exc
+    if not isinstance(item, str):
+        raise TableNetError(f"{label} is not text")
+    return item
+
+
+def _read_names_snapshot(snapshot: FileSnapshot, count: int, label: str) -> tuple[str, ...]:
+    try:
+        text = snapshot.data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise TableNetError(f"{label} is not UTF-8") from exc
+    names = tuple(line.strip() for line in text.splitlines() if line.strip())
+    if len(names) != count or len(set(names)) != count:
+        raise TableNetError(f"{label} must contain exactly {count} unique names")
+    return names
+
+
+def load_schema2_npz_snapshot(
+    snapshot: FileSnapshot,
+    plan: Mapping[str, Any],
+    body_names_expected: Sequence[str],
+) -> dict[str, np.ndarray]:
+    """Load the schema-2 archive exclusively from its already-bound bytes."""
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(snapshot.data)) as archive:
+            members = archive.namelist()
+    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        raise TableNetError(f"schema2 NPZ is not a valid ZIP: {exc}") from exc
+    expected_members = {f"{name}.npy" for name in NPZ_FIELDS}
+    if len(members) != len(set(members)) or set(members) != expected_members:
+        raise TableNetError("schema2 NPZ members are missing, duplicated or unexpected")
+
+    contract = plan["l0_contract"]
+    expected_shapes = {
+        "joint_pos": (151, 31),
+        "joint_vel": (151, 31),
+        "body_pos_w": (151, 32, 3),
+        "body_quat_w": (151, 32, 4),
+        "body_lin_vel_w": (151, 32, 3),
+        "body_ang_vel_w": (151, 32, 3),
+    }
+    arrays: dict[str, np.ndarray] = {}
+    try:
+        with np.load(io.BytesIO(snapshot.data), allow_pickle=False) as data:
+            if set(data.files) != NPZ_FIELDS or len(data.files) != len(NPZ_FIELDS):
+                raise TableNetError("schema2 NPZ field set changed")
+            fps = np.asarray(data["fps"])
+            schema = np.asarray(data["kinematics_schema_version"])
+            if fps.shape != (1,) or fps.dtype != np.int64 or int(fps[0]) != contract["fps"]:
+                raise TableNetError("schema2 fps must be exact int64 [50]")
+            if schema.shape != (1,) or schema.dtype != np.int64 or int(schema[0]) != 2:
+                raise TableNetError("schema2 version must be exact int64 [2]")
+            if _scalar_text(data["body_pos_point"], "body_pos_point") != "link_origin":
+                raise TableNetError("schema2 body_pos_point must be link_origin")
+            if (
+                _scalar_text(data["body_lin_vel_point"], "body_lin_vel_point")
+                != "center_of_mass"
+            ):
+                raise TableNetError("schema2 body_lin_vel_point must be center_of_mass")
+            names_raw = np.asarray(data["body_names"])
+            if names_raw.shape != (32,) or names_raw.dtype.hasobject:
+                raise TableNetError("schema2 body_names shape/dtype changed")
+            names = tuple(
+                item.decode("utf-8") if isinstance(item, bytes) else str(item)
+                for item in names_raw.tolist()
+            )
+            if names != tuple(body_names_expected):
+                raise TableNetError("schema2 body_names differ from exact runtime order")
+            for name, shape in expected_shapes.items():
+                array = np.asarray(data[name])
+                if array.shape != shape or array.dtype != np.float32:
+                    raise TableNetError(
+                        f"schema2 {name} shape/dtype {array.shape}/{array.dtype} "
+                        f"!= {shape}/float32"
+                    )
+                if not np.isfinite(array).all():
+                    raise TableNetError(f"schema2 {name} contains NaN/Inf")
+                arrays[name] = array.copy()
+    except TableNetError:
+        raise
+    except (OSError, ValueError, UnicodeError, zipfile.BadZipFile) as exc:
+        raise TableNetError(f"cannot load exact schema2 NPZ bytes: {exc}") from exc
+
+    quat_error = float(
+        np.max(np.abs(np.linalg.norm(arrays["body_quat_w"].astype(np.float64), axis=-1) - 1.0))
+    )
+    if quat_error > contract["quaternion_norm_tolerance"]:
+        raise TableNetError(
+            f"body quaternion max norm error {quat_error:.9g} exceeds frozen tolerance"
+        )
+    dt = 1.0 / float(contract["fps"])
+    expected_joint_vel = np.gradient(arrays["joint_pos"], dt, axis=0).astype(np.float32)
+    if not np.array_equal(arrays["joint_vel"], expected_joint_vel):
+        raise TableNetError("joint_vel is not producer-exact gradient(joint_pos, 1/50)")
+    arrays["_quaternion_max_norm_error"] = np.asarray(quat_error)
+    return arrays
 
 
 def _format_vec(values: Sequence[float]) -> str:
@@ -720,38 +1055,218 @@ def augment_mjcf_xml(canonical_xml: bytes, obstacle_geometry: Mapping[str, Any])
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
+def _snapshot_exact_mjcf_closure(
+    plan: Mapping[str, Any],
+) -> tuple[FileSnapshot, dict[str, FileSnapshot]]:
+    """Snapshot canonical XML and all 74 meshes beneath one pinned model-root dirfd."""
+
+    canonical_binding = plan["a3_model"]["canonical_mjcf"]
+    canonical_relative = Path(canonical_binding["path"])
+    model_root = (REPO_ROOT / canonical_relative).parent
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        root_fd = os.open(model_root, flags)
+    except OSError as exc:
+        raise TableNetError(f"cannot bind vendor MJCF model root: {exc}") from exc
+    try:
+        root_stat = os.fstat(root_fd)
+        if not stat.S_ISDIR(root_stat.st_mode):
+            raise TableNetError("vendor MJCF model root is not a directory")
+        canonical = _read_relative_snapshot(
+            root_fd,
+            model_root,
+            Path(canonical_relative.name),
+            "canonical vendor MJCF",
+            expected_bytes=canonical_binding["bytes"],
+            expected_sha256=canonical_binding["sha256"],
+        )
+        if b"<!DOCTYPE" in canonical.data or b"<!ENTITY" in canonical.data:
+            raise TableNetError("canonical vendor MJCF contains forbidden DTD/entity declarations")
+        try:
+            root = ET.fromstring(canonical.data)
+        except ET.ParseError as exc:
+            raise TableNetError(f"cannot parse canonical vendor MJCF: {exc}") from exc
+        if list(root.iter("include")):
+            raise TableNetError("canonical vendor MJCF unexpectedly gained include files")
+        compiler = root.find("./compiler")
+        if compiler is None or compiler.get("meshdir") != "meshes":
+            raise TableNetError("canonical MJCF meshdir changed")
+        mesh_nodes = list(root.findall("./asset/mesh"))
+        meshes: dict[str, FileSnapshot] = {}
+        for node in mesh_nodes:
+            raw = node.get("file")
+            if not raw:
+                raise TableNetError("canonical MJCF mesh lacks file")
+            relative = Path("meshes") / Path(raw)
+            key = relative.as_posix()
+            if key in meshes:
+                raise TableNetError(f"duplicate canonical MJCF mesh asset {key}")
+            meshes[key] = _read_relative_snapshot(
+                root_fd, model_root, relative, f"MJCF mesh {key}"
+            )
+        if len(meshes) != 74 or len(mesh_nodes) != 74:
+            raise TableNetError("in-memory MJCF asset map is not the exact 74-file closure")
+        rows = [
+            {
+                "path": canonical.path.relative_to(model_root).as_posix(),
+                "bytes": canonical.size,
+                "sha256": canonical.sha256,
+            },
+            *[
+                {
+                    "path": key,
+                    "bytes": snapshot.size,
+                    "sha256": snapshot.sha256,
+                }
+                for key, snapshot in meshes.items()
+            ],
+        ]
+        rows.sort(key=lambda row: row["path"])
+        manifest = _sha256_bytes(
+            json.dumps(
+                rows, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
+        )
+        observed = {
+            "algorithm": "sha256(canonical-json(sorted[{path,bytes,sha256}]))-v1",
+            "file_count": len(rows),
+            "total_bytes": sum(int(row["bytes"]) for row in rows),
+            "manifest_sha256": manifest,
+            "xml_file_count": 1,
+            "include_reference_count": 0,
+            "external_file_reference_count": len(mesh_nodes),
+            "unique_external_file_count": len(meshes),
+            "mesh_reference_count": len(mesh_nodes),
+        }
+        if observed != plan["a3_model"]["derived_closure"]:
+            raise TableNetError(f"immutable MJCF closure changed: actual={observed}")
+        # The path itself may be renamed after snapshot, but no future consumer reopens it.
+        return canonical, meshes
+    finally:
+        os.close(root_fd)
+
+
+def _compile_canonical_model(
+    mujoco: Any,
+    canonical_source: FileSnapshot,
+    mesh_sources: Mapping[str, FileSnapshot],
+) -> tuple[Any, Any]:
+    assets = {name: snapshot.data for name, snapshot in mesh_sources.items()}
+    if len(assets) != 74:
+        raise TableNetError("in-memory MJCF asset map is not the exact 74-file closure")
+    try:
+        model = mujoco.MjModel.from_xml_string(
+            canonical_source.data.decode("utf-8"), assets=assets
+        )
+        return model, mujoco.MjData(model)
+    except Exception as exc:
+        raise TableNetError(f"cannot compile immutable canonical vendor MJCF bytes: {exc}") from exc
+
+
+def _bind_compiled_model(
+    mujoco: Any, ground: Any, model: Any, data: Any, *, ground_geom_name: str
+) -> Any:
+    """Apply the frozen grounding helper's binding checks to an in-memory model."""
+
+    free_type = int(mujoco.mjtJoint.mjJNT_FREE)
+    hinge_type = int(mujoco.mjtJoint.mjJNT_HINGE)
+    free_joint_ids = [
+        jid for jid in range(int(model.njnt)) if int(model.jnt_type[jid]) == free_type
+    ]
+    if len(free_joint_ids) != 1:
+        raise TableNetError(
+            f"MJCF must contain exactly one free joint, got {len(free_joint_ids)}"
+        )
+    root_joint_id = free_joint_ids[0]
+    root_body_id = int(model.jnt_bodyid[root_joint_id])
+    if root_body_id == 0:
+        raise TableNetError("free joint is attached to the world body")
+    subtree_hinges = [
+        jid
+        for jid in range(int(model.njnt))
+        if int(model.jnt_type[jid]) == hinge_type
+        and ground._descends_from(model, int(model.jnt_bodyid[jid]), root_body_id)
+    ]
+    names = tuple(
+        ground._name(mujoco, model, mujoco.mjtObj.mjOBJ_JOINT, jid, f"joint{jid}")
+        for jid in subtree_hinges
+    )
+    if names != tuple(ground.A3_GMR_JOINT_NAMES) or len(set(names)) != len(names):
+        raise TableNetError("compiled MJCF hinge order differs from A3_GMR_JOINT_NAMES")
+    qpos_addresses = tuple(int(model.jnt_qposadr[jid]) for jid in subtree_hinges)
+    if len(set(qpos_addresses)) != len(qpos_addresses):
+        raise TableNetError("compiled MJCF hinge qpos addresses are not unique")
+    for jid, name in zip(subtree_hinges, names):
+        if hasattr(model, "jnt_limited") and not bool(model.jnt_limited[jid]):
+            raise TableNetError(f"compiled MJCF joint {name!r} is not range-limited")
+
+    ground_gid = int(mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, ground_geom_name))
+    if (
+        ground_gid < 0
+        or int(model.geom_type[ground_gid]) != int(mujoco.mjtGeom.mjGEOM_PLANE)
+        or int(model.geom_bodyid[ground_gid]) != 0
+    ):
+        raise TableNetError("compiled MJCF floor is missing or not a world-fixed plane")
+    data.qpos[:] = model.qpos0
+    mujoco.mj_forward(model, data)
+    rotation = np.asarray(data.geom_xmat[ground_gid], dtype=np.float64).reshape(3, 3)
+    if not np.allclose(rotation[:, 2], [0.0, 0.0, 1.0], atol=1e-10, rtol=0.0):
+        raise TableNetError("compiled MJCF floor normal is not +Z")
+    ground_z_m = float(np.asarray(data.geom_xpos[ground_gid], dtype=np.float64)[2])
+    if not math.isfinite(ground_z_m):
+        raise TableNetError("compiled MJCF floor z is non-finite")
+
+    supported = {
+        int(mujoco.mjtGeom.mjGEOM_SPHERE),
+        int(mujoco.mjtGeom.mjGEOM_CAPSULE),
+        int(mujoco.mjtGeom.mjGEOM_ELLIPSOID),
+        int(mujoco.mjtGeom.mjGEOM_CYLINDER),
+        int(mujoco.mjtGeom.mjGEOM_BOX),
+        int(mujoco.mjtGeom.mjGEOM_MESH),
+    }
+    collision_geom_ids: list[int] = []
+    for gid in range(int(model.ngeom)):
+        body_id = int(model.geom_bodyid[gid])
+        if not ground._descends_from(model, body_id, root_body_id):
+            continue
+        if int(model.geom_contype[gid]) == 0 and int(model.geom_conaffinity[gid]) == 0:
+            continue
+        if int(model.geom_type[gid]) not in supported:
+            raise TableNetError(f"enabled robot collision geom {gid} has unsupported type")
+        collision_geom_ids.append(gid)
+    if not collision_geom_ids:
+        raise TableNetError("compiled MJCF robot subtree has no enabled collision geoms")
+    return ground.ModelBinding(
+        model=model,
+        data=data,
+        root_joint_id=root_joint_id,
+        root_body_id=root_body_id,
+        root_qpos_address=int(model.jnt_qposadr[root_joint_id]),
+        joint_ids=tuple(subtree_hinges),
+        joint_qpos_addresses=qpos_addresses,
+        collision_geom_ids=tuple(collision_geom_ids),
+        ground_geom_id=ground_gid,
+        ground_z_m=ground_z_m,
+        collision_contract_sha256=ground._compiled_collision_contract_sha256(
+            model, collision_geom_ids
+        ),
+    )
+
+
 def _compile_augmented_model(
     mujoco: Any,
     ground: Any,
     canonical_binding: Any,
-    mjcf_path: Path,
+    canonical_source: FileSnapshot,
+    mesh_sources: Mapping[str, FileSnapshot],
     plan: Mapping[str, Any],
 ) -> tuple[Any, Any, dict[str, int], dict[str, Any]]:
-    canonical_xml = mjcf_path.read_bytes()
+    canonical_xml = canonical_source.data
     augmented_xml = augment_mjcf_xml(canonical_xml, plan["obstacle_geometry"])
-    root = ET.fromstring(canonical_xml)
-    compiler = root.find("./compiler")
-    if compiler is None or compiler.get("meshdir") != "meshes":
-        raise TableNetError("canonical MJCF meshdir changed")
-    model_root = mjcf_path.parent.resolve()
-    assets: dict[str, bytes] = {}
-    mesh_nodes = list(root.findall("./asset/mesh"))
-    for node in mesh_nodes:
-        raw = node.get("file")
-        if not raw:
-            raise TableNetError("canonical MJCF mesh lacks file")
-        relative = (Path("meshes") / raw).as_posix()
-        if relative in assets:
-            raise TableNetError(f"duplicate canonical MJCF mesh asset {relative}")
-        path = (model_root / relative).resolve()
-        try:
-            path.relative_to(model_root)
-        except ValueError as exc:
-            raise TableNetError(f"MJCF mesh escapes model root: {relative}") from exc
-        ensure_regular_no_symlink(path, f"MJCF mesh {relative}")
-        assets[relative] = path.read_bytes()
-    closure = plan["a3_model"]["derived_closure"]
-    if len(assets) != 74 or len(mesh_nodes) != closure["mesh_reference_count"]:
+    assets = {name: snapshot.data for name, snapshot in mesh_sources.items()}
+    if len(assets) != 74:
         raise TableNetError("in-memory MJCF asset map is not the exact 74-file closure")
     try:
         model = mujoco.MjModel.from_xml_string(augmented_xml.decode("utf-8"), assets=assets)
@@ -933,19 +1448,69 @@ def _geom_name(mujoco: Any, model: Any, geom_id: int) -> str:
     return value if value is not None else f"geom{geom_id}"
 
 
-def validate_output_preconditions(plan: Mapping[str, Any]) -> Path:
+def _verify_output_parent_identity(target: OutputTarget) -> None:
+    try:
+        observed = os.stat(target.parent_path, follow_symlinks=False)
+    except OSError as exc:
+        raise TableNetError(f"certificate parent path changed after binding: {exc}") from exc
+    if (
+        not stat.S_ISDIR(observed.st_mode)
+        or int(observed.st_dev) != target.parent_device
+        or int(observed.st_ino) != target.parent_inode
+    ):
+        raise TableNetError("certificate parent path no longer names the bound directory inode")
+
+
+def validate_output_preconditions(plan: Mapping[str, Any]) -> OutputTarget:
     output = Path(plan["output_contract"]["certificate_path"])
-    if os.path.lexists(output):
-        raise TableNetError(f"certificate path already exists or is a symlink; no-clobber: {output}")
-    if output.parent.is_symlink() or not output.parent.is_dir():
+    if not output.is_absolute() or output.name in ("", ".", ".."):
+        raise TableNetError("certificate path must be an absolute regular filename")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        dir_fd = os.open(output.parent, flags)
+    except OSError as exc:
         raise TableNetError(
-            f"certificate parent must pre-exist and be a real directory: {output.parent}"
+            f"certificate parent must pre-exist and be a real directory: {output.parent}: {exc}"
+        ) from exc
+    try:
+        parent = os.fstat(dir_fd)
+        if not stat.S_ISDIR(parent.st_mode):
+            raise TableNetError("certificate parent is not a directory")
+        try:
+            os.stat(output.name, dir_fd=dir_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise TableNetError(f"cannot inspect certificate output slot: {exc}") from exc
+        else:
+            raise TableNetError(
+                f"certificate path already exists or is a symlink; no-clobber: {output}"
+            )
+        target = OutputTarget(
+            path=output,
+            parent_path=output.parent,
+            name=output.name,
+            dir_fd=dir_fd,
+            parent_device=int(parent.st_dev),
+            parent_inode=int(parent.st_ino),
         )
-    return output
+        _verify_output_parent_identity(target)
+        return target
+    except BaseException:
+        os.close(dir_fd)
+        raise
 
 
 def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
     frozen = plan["frozen_vendor_l1"]
+    l1_plan_snapshot = _snapshot_repo_binding(
+        frozen["preregistration"],
+        "vendor L1 preregistration",
+        "configs/motion_backhand_loop_b_vendor_l1_safety_prereg_20260715.json",
+    )
+    secure_l1_plan = parse_json_bytes(l1_plan_snapshot.data, "vendor L1 preregistration")
     l1 = _load_exact_module(
         "motion_vendor_l1_for_table_net_runtime",
         L1_VALIDATOR_PATH,
@@ -955,21 +1520,59 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
     )
     try:
         l1_plan, _, l0_v1_plan = l1.validate_plan(
-            L1_PLAN_PATH, frozen["preregistration"]["sha256"]
+            l1_plan_snapshot.path, frozen["preregistration"]["sha256"]
         )
-        l0_v2 = l1._load_l0_v2(l1_plan["frozen_l0"]["validator"])
-        mujoco, runtime = l0_v2.V1.validate_runtime_environment(l0_v1_plan)
+        if l1_plan != secure_l1_plan:
+            raise TableNetError(
+                "vendor L1 preregistration changed between bound bytes and runtime validation"
+            )
+        l0_v2_binding = secure_l1_plan["frozen_l0"]["preregistration"]
+        l0_v2_snapshot = _snapshot_repo_binding(
+            l0_v2_binding,
+            "vendor L0 V2 preregistration",
+            l0_v2_binding["path"],
+        )
+        secure_l0_v2 = parse_json_bytes(l0_v2_snapshot.data, "vendor L0 V2 preregistration")
+        l0_v1_binding = secure_l0_v2["frozen_v1"]["preregistration"]
+        l0_v1_snapshot = _snapshot_repo_binding(
+            l0_v1_binding,
+            "vendor L0 V1 preregistration",
+            l0_v1_binding["path"],
+        )
+        if l0_v1_plan != parse_json_bytes(
+            l0_v1_snapshot.data, "vendor L0 V1 preregistration"
+        ):
+            raise TableNetError(
+                "vendor L0 preregistration changed between bound bytes and runtime validation"
+            )
+        l0_v1_validator_binding = secure_l0_v2["frozen_v1"]["validator"]
+        l0_v1_validator_snapshot = _snapshot_repo_binding(
+            l0_v1_validator_binding,
+            "vendor L0 V1 validator",
+            l0_v1_validator_binding["path"],
+        )
+        l0_v1 = _load_exact_module(
+            "motion_schema2_l0_v1_for_table_net_runtime",
+            l0_v1_validator_snapshot.path,
+            expected_bytes=l0_v1_validator_snapshot.size,
+            expected_sha256=l0_v1_validator_snapshot.sha256,
+            label="vendor L0 V1 validator",
+        )
+        mujoco, runtime = l0_v1.validate_runtime_environment(l0_v1_plan)
     except (OSError, TypeError, ValueError) as exc:
         raise TableNetError(f"exact vendor L1 CPU runtime validation failed: {exc}") from exc
-    l1_certificate = validate_vendor_l1_certificate(plan)
-    l1_certificate_path = _verify_absolute_sha(
-        plan["frozen_vendor_l1"]["certificate"], "vendor L1 certificate"
+    l1_certificate, l1_certificate_snapshot = validate_vendor_l1_certificate(plan)
+    npz_snapshot = _snapshot_absolute_sha(
+        plan["exact_runtime_input"], "exact B schema-2 NPZ"
     )
-    npz_path = _verify_absolute_sha(plan["exact_runtime_input"], "exact B schema-2 NPZ")
-    try:
-        arrays = l0_v2.V1.load_npz_exact(npz_path, l0_v1_plan)
-    except (OSError, TypeError, ValueError) as exc:
-        raise TableNetError(f"cannot load exact schema-2 NPZ: {exc}") from exc
+    body_order_binding = l0_v1_plan["upstream_contracts"]["runtime_body_order"]
+    body_order_snapshot = _snapshot_repo_binding(
+        body_order_binding,
+        "schema-2 runtime body order",
+        body_order_binding["path"],
+    )
+    body_names = _read_names_snapshot(body_order_snapshot, 32, "schema-2 runtime body order")
+    arrays = load_schema2_npz_snapshot(npz_snapshot, l0_v1_plan, body_names)
 
     phase_binding = l1_plan["dependencies"]["dense_safety_tool"]
     phase = _load_exact_module(
@@ -995,8 +1598,13 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
         expected_sha256=ground_binding["sha256"],
         label="grounding helper",
     )
-    mjcf_path = REPO_ROOT / plan["a3_model"]["canonical_mjcf"]["path"]
-    canonical_binding = ground.bind_model(mujoco, mjcf_path, ground_geom_name="floor")
+    canonical_source, mesh_sources = _snapshot_exact_mjcf_closure(plan)
+    canonical_model, canonical_data = _compile_canonical_model(
+        mujoco, canonical_source, mesh_sources
+    )
+    canonical_binding = _bind_compiled_model(
+        mujoco, ground, canonical_model, canonical_data, ground_geom_name="floor"
+    )
     if (
         canonical_binding.collision_contract_sha256
         != plan["a3_model"]["compiled_collision_contract_sha256"]
@@ -1004,7 +1612,7 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
     ):
         raise TableNetError("canonical compiled robot collision contract changed at runtime")
     model, data, obstacle_ids, assembly = _compile_augmented_model(
-        mujoco, ground, canonical_binding, mjcf_path, plan
+        mujoco, ground, canonical_binding, canonical_source, mesh_sources, plan
     )
     augmented_binding = ground.ModelBinding(
         model=model,
@@ -1020,10 +1628,14 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
         collision_contract_sha256=canonical_binding.collision_contract_sha256,
     )
 
-    runtime_joint_names = l0_v2.V1._read_names(
-        REPO_ROOT / l0_v1_plan["upstream_contracts"]["runtime_joint_order"]["path"],
-        31,
+    joint_order_binding = l0_v1_plan["upstream_contracts"]["runtime_joint_order"]
+    joint_order_snapshot = _snapshot_repo_binding(
+        joint_order_binding,
         "schema-2 runtime joint order",
+        joint_order_binding["path"],
+    )
+    runtime_joint_names = _read_names_snapshot(
+        joint_order_snapshot, 31, "schema-2 runtime joint order"
     )
     reordered, joint_adapter = l1.reorder_runtime_joint_pos_for_ground(
         arrays["joint_pos"], runtime_joint_names, tuple(ground.A3_GMR_JOINT_NAMES)
@@ -1120,12 +1732,12 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "runtime": runtime,
         "lineage": {
-            "vendor_l1_certificate": _binding(l1_certificate_path),
+            "vendor_l1_certificate": _binding(l1_certificate_snapshot),
             "vendor_l1_certificate_authorization": l1_certificate["authorization"],
             "vendor_l1_preregistration": frozen["preregistration"],
             "vendor_l1_validator": frozen["validator"],
-            "motion_npz": _binding(npz_path),
-            "canonical_mjcf": _binding(mjcf_path),
+            "motion_npz": _binding(npz_snapshot),
+            "canonical_mjcf": _binding(canonical_source),
             "derived_mjcf_closure": plan["a3_model"]["derived_closure"],
             "compiled_robot_collision_sha256": augmented_binding.collision_contract_sha256,
         },
@@ -1201,26 +1813,74 @@ def build_certificate(
     }
 
 
-def write_exclusive(path: Path, value: Mapping[str, Any]) -> None:
-    if os.path.lexists(path):
-        raise TableNetError(f"certificate path already exists; no-clobber: {path}")
-    if path.parent.is_symlink() or not path.parent.is_dir():
-        raise TableNetError(f"certificate parent must pre-exist and be real: {path.parent}")
+def write_exclusive(target: OutputTarget, value: Mapping[str, Any]) -> FileSnapshot:
+    if target.closed:
+        raise TableNetError("certificate output target is already closed")
+    _verify_output_parent_identity(target)
+    try:
+        os.stat(target.name, dir_fd=target.dir_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise TableNetError(f"cannot recheck certificate output slot: {exc}") from exc
+    else:
+        raise TableNetError(f"certificate path already exists; no-clobber: {target.path}")
     payload = (json.dumps(value, sort_keys=True, indent=2, allow_nan=False) + "\n").encode("utf-8")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
-    fd = os.open(path, flags, 0o444)
+    created: tuple[int, int] | None = None
     try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-    except Exception:
+        fd = os.open(target.name, flags, 0o444, dir_fd=target.dir_fd)
         try:
-            path.unlink()
-        except OSError:
-            pass
+            opened = os.fstat(fd)
+            if not stat.S_ISREG(opened.st_mode):
+                raise TableNetError("new certificate output is not a regular file")
+            created = (int(opened.st_dev), int(opened.st_ino))
+            view = memoryview(payload)
+            offset = 0
+            while offset < len(view):
+                written = os.write(fd, view[offset:])
+                if written <= 0:
+                    raise TableNetError("short certificate write")
+                offset += written
+            os.fsync(fd)
+            after = os.fstat(fd)
+            if (
+                (int(after.st_dev), int(after.st_ino)) != created
+                or int(after.st_size) != len(payload)
+            ):
+                raise TableNetError("certificate inode or size changed during publication")
+        finally:
+            os.close(fd)
+        os.fsync(target.dir_fd)
+        _verify_output_parent_identity(target)
+        read_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        if hasattr(os, "O_NOFOLLOW"):
+            read_flags |= os.O_NOFOLLOW
+        verify_fd = os.open(target.name, read_flags, dir_fd=target.dir_fd)
+        try:
+            snapshot = _read_open_fd_snapshot(
+                verify_fd,
+                target.path,
+                "published table/net certificate",
+                expected_bytes=len(payload),
+                expected_sha256=_sha256_bytes(payload),
+            )
+        finally:
+            os.close(verify_fd)
+        if (snapshot.device, snapshot.inode) != created or snapshot.data != payload:
+            raise TableNetError("published certificate is not the exact created inode/bytes")
+        return snapshot
+    except BaseException:
+        if created is not None:
+            try:
+                observed = os.stat(target.name, dir_fd=target.dir_fd, follow_symlinks=False)
+                if (int(observed.st_dev), int(observed.st_ino)) == created:
+                    os.unlink(target.name, dir_fd=target.dir_fd)
+                    os.fsync(target.dir_fd)
+            except OSError:
+                pass
         raise
 
 
@@ -1245,19 +1905,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 0
         output = validate_output_preconditions(plan)
-        certificate = build_certificate(plan, args.prereg.resolve(), plan_sha, l1_plan)
-        if args.command == "dry-run":
+        try:
+            certificate = build_certificate(plan, args.prereg.resolve(), plan_sha, l1_plan)
+            if args.command == "dry-run":
+                print(
+                    f"[motion-table-net] PASS dry-run asset={ASSET_ID} runtime_audit=true "
+                    "certificate_written=false table_net_complete=false downstream_blocked=true"
+                )
+                return 0
+            published = write_exclusive(output, certificate)
             print(
-                f"[motion-table-net] PASS dry-run asset={ASSET_ID} runtime_audit=true "
-                "certificate_written=false table_net_complete=false downstream_blocked=true"
+                f"[motion-table-net] PASS audit asset={ASSET_ID} table_net=true "
+                f"certificate_sha256={published.sha256} dynamics_next=true"
             )
             return 0
-        write_exclusive(output, certificate)
-        print(
-            f"[motion-table-net] PASS audit asset={ASSET_ID} table_net=true "
-            f"certificate_sha256={sha256_file(output)} dynamics_next=true"
-        )
-        return 0
+        finally:
+            output.close()
     except (TableNetError, OSError, TypeError, ValueError) as exc:
         print(f"[motion-table-net] FAIL {exc}", file=sys.stderr)
         return 2

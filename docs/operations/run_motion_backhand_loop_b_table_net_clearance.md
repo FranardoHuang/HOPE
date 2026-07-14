@@ -9,7 +9,7 @@
 ```bash
 cd /path/to/clean/nohope
 PLAN=configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json
-PLAN_SHA=c1899ffff4564986ced934413d581ffbacc5328a90663421526589f3630804b9
+PLAN_SHA=6d853551960ac4e3b55d985a45c9a6c10ca7de420b60fe9ad28dd45f3b671043
 
 python3 scripts/audit_motion_schema2_table_net_clearance.py \
   --prereg "$PLAN" \
@@ -21,7 +21,7 @@ python3 scripts/audit_motion_schema2_table_net_clearance.py \
 
 ```bash
 python3 -m pytest -q tests/test_motion_backhand_loop_b_table_net_clearance.py
-# 16 passed
+# 22 passed
 ```
 
 source gate 只证明预注册、坐标系、输入 lineage、5 mm 边界和 no-clobber 反例闭环，不是 B 的桌网通过。
@@ -53,7 +53,7 @@ export PYTHONNOUSERSITE=1
 /workspace/hope_mjeval_venv/bin/python \
   scripts/audit_motion_schema2_table_net_clearance.py \
   --prereg configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json \
-  --expected-prereg-sha256 c1899ffff4564986ced934413d581ffbacc5328a90663421526589f3630804b9 \
+  --expected-prereg-sha256 6d853551960ac4e3b55d985a45c9a6c10ca7de420b60fe9ad28dd45f3b671043 \
   dry-run
 ```
 
@@ -70,11 +70,14 @@ robot-obstacle pair。成功行必须含 `runtime_audit=true certificate_written
 /workspace/hope_mjeval_venv/bin/python \
   scripts/audit_motion_schema2_table_net_clearance.py \
   --prereg configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json \
-  --expected-prereg-sha256 c1899ffff4564986ced934413d581ffbacc5328a90663421526589f3630804b9 \
+  --expected-prereg-sha256 6d853551960ac4e3b55d985a45c9a6c10ca7de420b60fe9ad28dd45f3b671043 \
   audit
 ```
 
-写入使用 `O_EXCL`/`O_NOFOLLOW`，目标为
+输入消费不是“先验 SHA、再按 path 打开”：certificate/NPZ/XML/74 mesh 都从 `O_NOFOLLOW` fd 的单次
+bytes snapshot 做 hash 与 parse/load，MJCF closure 由 pinned model-root dirfd 读取。写入绑定输出 parent
+device/inode，使用 `openat(O_EXCL|O_NOFOLLOW)`、file+directory `fsync`，并从同一 dirfd 复核新建
+inode/bytes；任何输入 path swap 或输出 parent swap 都 fail closed。目标为
 `franco_backhand_loop_b_98e7b883b29d.table_net_clearance_certificate.json`。certificate 通过只令
 `table_net_complete=true` 并授权下一道 vendor 动力学/平衡门；simulator/RL/formal motion/hardware 仍 false。
 
