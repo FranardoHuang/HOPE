@@ -1,0 +1,129 @@
+{
+  "schema_version": 2,
+  "plan_id": "motion-franco-backhand-loop-b-l0-static-20260715-v2",
+  "status": "preregistered_v1_numeric_fail_v2_source_gate_pass_runtime_audit_not_run",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "scope": "CPU-only runtime-order schema-2 L0 static audit with field-specific numerical replay contract; kinematic mj_forward only, no simulator step, dynamics, training, deployment or hardware",
+  "asset_id": "franco_backhand_loop_b",
+  "validator": {
+    "path": "scripts/audit_motion_schema2_l0_static_v2.py",
+    "bytes": 32128,
+    "sha256": "d025586b1d505432978ea772462a6d90ad3e83a566d8818586d9339ceccfab25"
+  },
+  "frozen_v1": {
+    "preregistration": {
+      "path": "configs/motion_backhand_loop_b_l0_static_prereg_20260714.json",
+      "bytes": 9354,
+      "sha256": "7e155c894dae7b37771487aeb4051bb72cf146088c78bffa7dac437576c97bc0"
+    },
+    "validator": {
+      "path": "scripts/audit_motion_schema2_l0_static.py",
+      "bytes": 56203,
+      "sha256": "5970f82bf5cde11ff448e056469f2a7276f2a743f97ed8ed9a287a70dc91b411"
+    }
+  },
+  "v1_failure_evidence": {
+    "evidence_level": "operator_preserved_summary_plus_source_proof_no_result_artifact",
+    "producer_host": "pod1",
+    "audit_host": "pod2",
+    "command": "dry-run",
+    "outcome": "fail_closed_before_certificate",
+    "certificate_written": false,
+    "position": {
+      "not_equal_components": 537,
+      "max_abs": 1.1920929e-7
+    },
+    "quaternion": {
+      "not_equal_components": 917,
+      "max_abs": 5.9604645e-8
+    },
+    "com_linear_velocity": {
+      "not_equal_components": 1261,
+      "max_abs": 2.9802322e-6
+    },
+    "body_angular_velocity": {
+      "not_equal_components": 2320,
+      "max_abs": 5.9679151e-6
+    },
+    "source_root_cause": "schema2_stores_post_FK_normalized_float32_root_body_pose_not_original_free_joint_qpos; V1_reinjects_that_lossy_pose_and_demands_non_idempotent_byte_equality"
+  },
+  "numerical_replay_contract": {
+    "float32_epsilon": 1.1920928955078125e-7,
+    "link_position": {
+      "comparison": "componentwise_ulp_scaled_absolute",
+      "max_ulp_bins": 2,
+      "one_unit_floor": true,
+      "max_abs_tolerance_m": 5.0e-7
+    },
+    "link_quaternion": {
+      "comparison": "componentwise_ulp_scaled_absolute_same_hemisphere",
+      "max_ulp_bins": 2,
+      "one_unit_floor": true,
+      "max_abs_tolerance": 5.0e-7
+    },
+    "com_linear_velocity": {
+      "reconstruction": "stored_link_pose_plus_exact_MJCF_body_ipos_then_numpy_gradient_dt_1_over_50",
+      "rotation_component_bound": "8*q_component_bound+4*q_component_bound_squared",
+      "finite_difference_bound": "two_com_position_bounds_divided_by_dt_plus_output_roundoff",
+      "output_roundoff_ulp_bins": 2,
+      "max_abs_tolerance_mps": 2.0e-4
+    },
+    "body_angular_velocity": {
+      "reconstruction": "producer_exact_so3_derivative_of_stored_body_quat_w_dt_1_over_50",
+      "comparison": "byte_equal"
+    }
+  },
+  "inherited_hard_gates": {
+    "joint_range_tolerance_rad": 0.00001,
+    "grounding": {
+      "target_clearance_m": 0.00001,
+      "max_grounded_clearance_m": 0.001,
+      "numerical_tolerance_m": 5.0e-7,
+      "sampling": "all_151_discrete_50Hz_frames_no_continuous_time_claim",
+      "lowest_collision_body_must_descend_from_support_body": true
+    },
+    "support_bodies": [
+      "left_ankle_roll_Link",
+      "right_ankle_roll_Link"
+    ],
+    "unchanged_checks": [
+      "exact_input_lineage_and_SHA",
+      "schema_shape_dtype_finite_and_order",
+      "joint_velocity_byte_equality",
+      "joint_range",
+      "ground_clearance",
+      "support_foot_ancestry",
+      "certificate_no_clobber"
+    ]
+  },
+  "output_contract": {
+    "certificate_path": "/workspace/codexschema/motion_video_intake_20260711/l0_static_primary_v2/franco_backhand_loop_b_98e7b883b29d.l0_static_certificate.json",
+    "must_be_absent": true,
+    "parent_must_exist": true,
+    "no_clobber": true
+  },
+  "authorization": {
+    "source_gate_pass": true,
+    "cpu_l0_audit_authorized_after_review": true,
+    "l0_static_complete": false,
+    "vendor_l1_authorized": false,
+    "table_net_authorized": false,
+    "dynamics_authorized": false,
+    "simulator_authorized": false,
+    "training_authorized": false,
+    "formal_motion_authorized": false,
+    "hardware_authorized": false
+  },
+  "explicit_non_claims": [
+    "vendor_self_collision_or_racket_self_hit",
+    "table_or_net_swept_clearance",
+    "continuous_time_ground_clearance",
+    "dynamics_balance_or_contact_stability",
+    "TOPP_or_time_warp",
+    "strike_or_returnability",
+    "RL_training_or_checkpoint_quality",
+    "Gate3_or_hardware_safety"
+  ],
+  "next_gate": "only_after_exact_L0_certificate_vendor_L1_self_collision_and_racket_self_hit"
+}

@@ -528,8 +528,18 @@ checkout 绝对路径误当 body-order 内容身份；只创建 certificate 父�
 历史来源，再显式绑定当前 detached-clean commit/runner/source-validator/runtime-body-order；没有旧 Pod1
 路径 fallback。原生 consume loader 仍拒绝当前 runner 接管旧 activation，C 没有消费授权。新 `dry-run`
 执行完整只读 L0 但不写 certificate；attempt ID、receipt、claim/success、NPZ/report 仍严格绑定。
-**该 L0 子门状态仍为 Partial**：真实 B NPZ 的 runtime audit 尚未运行、没有本门 certificate；
-source/static pass 不能写成 runtime pass。vendor L1
+portable 修复后，V1 full dry-run 已在 Pod2 进入运动学门并以 float32 round-trip byte-equality
+fail closed：position/quaternion/COM velocity/angular velocity 分别有 `537/917/1261/2320` 个 component
+不逐字节相等，最大差 `1.1920929e-7 / 5.9604645e-8 / 2.9802322e-6 / 5.9679151e-6`；没有
+certificate。源码证明 schema-2 只存 post-FK normalized float32 root body pose，V1 却把它当原始
+free-joint qpos 再注入并要求 bit-idempotence；这不是动作、关节、接地或支撑脚失败。
+
+V2 保留 V1 全部 exact lineage/MJCF/runtime、joint range、ground、support-foot、no-clobber 与 downstream
+false gate，只把不可重构的 pose 比较改为 two-[`ULP`](../DEFINITIONS.md#float32-ulp) + physical cap，
+COM velocity 改为 stored link pose + exact MJCF `body_ipos` 的 50 Hz 解析误差传播，angular/joint velocity
+仍 byte exact。V2 prereg/validator source/static gate 与 dependency-light 测试已通过，但本任务没有连接
+Pod，V2 runtime 尚未运行。**该 L0 子门状态仍为 Partial**：没有本门 certificate；source/static pass
+不能写成 runtime pass。vendor L1
 自碰/自打、桌网扫掠、动力学、RL、Gate3 和真机继续全部 blocked。边界、冻结输入与未来一次性命令见
 [L0 实验卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-L0.md)和
 [L0 操作文档](../operations/run_motion_backhand_loop_b_l0_static.md)。

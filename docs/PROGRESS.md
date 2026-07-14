@@ -11,6 +11,18 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-15
+
+- Franco 反手拉 B 的 L0 V1 portable dry-run 已登记为数值合同负结果，而非动作失败：schema-2 只存
+  post-FK normalized float32 root body pose，V1 再把它当原 free-joint qpos 注入并要求 byte equality；
+  position/quaternion/COM velocity/angular velocity 最大差分别为 `1.1920929e-7 / 5.9604645e-8 /
+  2.9802322e-6 / 5.9679151e-6`，未写证书。新 V2 冻结 V1 原字节及全部 lineage、joint/ground/support/
+  safety 门，只对不可重构 pose 使用 two-ULP + physical cap、对 COM velocity 使用 exact `body_ipos` 与
+  50 Hz 误差传播，angular/joint velocity 仍 byte exact；两份专项 `29 passed`。本任务没有连接 Pod、
+  没有运行 V2 runtime/audit，G08 继续 Partial。见
+  [L0 卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-L0.md)与
+  [操作](operations/run_motion_backhand_loop_b_l0_static.md)。
+
 ## 2026-07-14
 
 - Pod2 四条科学臂的 paired `model_200` 身份和 step `180..200` 曲线已冻结。conditional

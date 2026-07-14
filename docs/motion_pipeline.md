@@ -103,6 +103,16 @@ motion 原子施加保地 SE(2)（R0 平移；R1 冻结小角度 yaw+平移）�
 candidate 必须物化 schema-2，再重跑 L0、vendor-MJCF L1 和整轨迹桌网 `>=5mm` 门，才能
 继续动力学/TOPP。见 `docs/operations/run_motion_spatial_retarget_screen.md`。
 
+schema-2 的 L0 replay 不能假设已存 pelvis body pose 就是 producer 原始 free-joint qpos。当前格式只存
+MuJoCo FK 后归一化并投影到 float32 的 body pose；把它再次当 qpos 注入后要求所有 pose/velocity byte
+equal 是非幂等合同。反手拉 B 的 V1 dry-run 已以 1 个 float32 格量级 fail closed，未生成证书。V2
+只把这个不可重构比较改为预注册的 field-specific 数值门：link pose 两个
+[`ULP`](DEFINITIONS.md#float32-ulp) 格并带物理 cap，COM velocity 从已存 link pose + exact `body_ipos`
+按 50 Hz 差分误差传播，angular/joint velocity 仍 byte exact；joint range、ground、support-foot 和
+safety 门完全不变。长期若要恢复 bit replay，应升级 motion schema 显式保存 pre-normalization
+free-joint qpos，而不是继续放宽 schema-2。详见
+[`EXP-MOTION-BACKHAND-LOOP-B-L0`](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-L0.md)。
+
 当前资产:`hope_{forehand,backhand}_{v5,oblique,v4}_cal.npz`(v4=hopex 视频重跑;**hopex 资产
 与 v4_cal 同底片**——真源都是 raw_video_hopex/*_v4.mp4,动作组消融里两者不构成独立对照)。
 **swing 对试产件**(2026-07-08,修复版管线全链,判炸器双 PASS):

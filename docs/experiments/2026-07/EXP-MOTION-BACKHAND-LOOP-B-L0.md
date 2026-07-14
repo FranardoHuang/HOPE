@@ -1,10 +1,10 @@
 # EXP-MOTION-BACKHAND-LOOP-B-L0 — 反手拉 B 的静态动作证书
 
-- 状态：portable source gate pass，Pod2 full dry-run not run（首次 runtime 调用在上游谱系校验阶段 fail closed；未生成证书）
+- 状态：V1 portable dry-run 已运行并因非自洽的 float32 byte-equality 门 fail closed；V2 数值合同 source/static pass，runtime 未运行；未生成证书
 - 阶段/轴：新动作库 / runtime-order schema-2 后的纯 CPU 静态审计
 - 人类负责人：Franco
 - 执行者：Codex
-- 最高证据等级：E1（源码、合同与合成反例；尚无本门 runtime 结果）
+- 最高证据等级：E1 + V1 runtime 负结果（源码、合同、合成反例与保存的失败摘要；V2 尚无 runtime 结果）
 
 本文的 [`L0`](../../DEFINITIONS.md#motion-l0-static) 指“完全不推进物理仿真的静态动作可行性审计”，
 不是训练层级；source/static pass 也不等于真实资产已有 runtime certificate。
@@ -45,6 +45,51 @@ portable context，复用原 runner 的完整 result/NPZ 校验。旧 Pod1 check
 绑定全部保持严格。原生 consume loader 仍要求 activation 绑定的旧 runner 就在当前 checkout，因而当前
 runner 不会借 portability 修复接管未消费的 C。
 
+portable 修复后，Pod2 用同一份 Pod1 产出的 exact NPZ 执行了 V1 full `dry-run`，并在证书写入前得到
+第二个、不同层次的 fail-closed 结果：link position `537` 个 component 不逐字节相等，最大差
+`1.1920929e-7 m`；quaternion `917` 个，最大差 `5.9604645e-8`；COM linear velocity `1261` 个，
+最大差 `2.9802322e-6 m/s`；angular velocity `2320` 个，最大差 `5.9679151e-6 rad/s`。certificate
+仍不存在。该次只有操作人保存的失败摘要，没有独立 result artifact，因此这里按负结果登记，不能冒充
+可重新签名的正式证书。
+
+## V1 byte-equality 为什么不自洽
+
+源码链已经足以证明根因，不需要把差值反向拟合成阈值：producer 的 `resample_payload()` 先得到原始
+float32 `root_pos/root_rot`，`fk_series_with_com()` 把它们写入 MuJoCo free-joint `qpos`，
+`mj_forward` 后再把归一化的 `xpos/xquat/xipos` 投影为 float32。schema-2 只保存这份**后 FK 的 root
+body pose**，不保存原始 free-joint qpos。V1 audit 再把保存的 root body pose 当 qpos 注回 MuJoCo，做
+第二次 quaternion normalization/FK/float32 投影，然后要求所有结果 byte equal。这个 lossy round trip
+一般不幂等；Pod1 生产、Pod2 审计只是让问题暴露，并不是根因成立所必需。
+
+量级也与该机制一致：position 最大差正好是一份 unit-scale float32 相邻格宽；quaternion 是半格；
+50 Hz central difference 的系数 `1/(2*0.02)=25` 把 `1.1920929e-7` 放大为
+`2.9802322e-6`。因此不能把 V1 负结果解释成动作、关节范围、接地或支撑脚失败。
+
+## V2 预注册数值合同
+
+V1 prereg/validator 原字节和失败账全部冻结。新 V2 计划
+[`motion_backhand_loop_b_l0_static_prereg_20260715_v2.json`](../../../configs/motion_backhand_loop_b_l0_static_prereg_20260715_v2.json)
+（SHA-256 `185612a99d5dd1e0aba0d04d50467103ea9b3967b917c58371bd409d10fc6ccb`）绑定 V1 完整
+input/runtime/MJCF/lineage/safety 合同；V2 validator SHA-256 为
+`d025586b1d505432978ea772462a6d90ad3e83a566d8818586d9339ceccfab25`，只替换不可重构的数值比较：
+
+1. link position 与 quaternion 用 component-wise 两个 float32 相邻可表示数格宽（unit in the last
+   place，简称 [`ULP`](../../DEFINITIONS.md#float32-ulp)）的绝对包络；近零 component 以
+   `spacing(float32(1))` 为 floor，避免全局 FK cancellation 把合法舍入误差压成 subnormal 阈值。
+   position 与 quaternion 的物理硬上限都为 `5e-7`；quaternion 还必须保持同 hemisphere。
+2. COM position 不从第二次 FK 的 `xipos` 猜 producer，而由已存 link pose 与 exact MJCF
+   `body_ipos` 重构。linear velocity 容差按 float32 pose 投影、四元数到旋转矩阵的解析上界
+   `8q+4q²` 和 frozen 50 Hz finite-difference endpoint 最坏系数推导；另有 `2e-4 m/s` 物理硬上限。
+3. angular velocity producer 本来就是直接对**已存** `body_quat_w` 做 `so3_derivative`，所以 V2
+   继续要求 byte equality，不给容差。`joint_vel=gradient(joint_pos)` 也继续 byte exact。
+4. exact lineage/SHA、shape/order/dtype/finite、`1e-5 rad` joint range、原地面区间、左右
+   ankle-roll support ancestry、no-clobber 和所有 downstream false authorization 完全继承 V1；没有
+   放宽关节、ground/support 或 safety 门。
+
+更严格的长期方案是 schema-3 motion 另存 producer 原始 free-joint qpos，再决定 exact-runtime 内的
+bit replay；不能从现有 schema-2 body pose 唯一恢复那些 pre-normalization bytes。V2 只解决冻结 B
+资产的 L0 数值可复现性，不改变 schema，也不宣称跨硬件 bit determinism。
+
 模型侧绑定 exact vendor MJCF `2ab1cd31...feb97`、`1 XML + 74 mesh` closure
 `e0381752...962de`、compiled collision contract `18e7f6ff...386e5`、31-joint runtime order、32-body
 runtime order和 donor metadata。运行环境沿用已记录的 CPU venv：Python `3.12.3`、NumPy `2.5.0`、
@@ -61,8 +106,9 @@ MuJoCo `3.10.0`，并强制 `CUDA_VISIBLE_DEVICES=''`。
    donor metadata 和 vendor MJCF 构成完整双射。
 3. 关节位置逐帧对 exact compiled MJCF range，唯一容差沿用已执行 grounding 合同的 `1e-5 rad`，
    不新增 soft-limit、速度、加速度或 reward 阈值。
-4. 用存储的 pelvis pose + runtime-order `joint_pos` 做 151 次 `mj_forward`，从不调用 `mj_step`；重新
-   计算的 link pose、COM linear velocity 与 body angular velocity 转成 float32 后必须与 NPZ 逐字节相等。
+4. V1 用存储的 pelvis pose + runtime-order `joint_pos` 做 151 次 `mj_forward`，从不调用 `mj_step`；
+   其 pose/velocity byte-equality 已由上述真实负结果证明不自洽。V2 保留同样 FK、joint/ground/support
+   计算，但改用上节预注册的 field-specific 数值合同；angular 与 joint velocity 仍逐字节 exact。
 5. 用原 grounding 的 exact collision-surface 算法复算 151 个离散帧。全局最小余隙必须落在
    `1e-5 ± 5e-7 m` 到 `1e-3 + 5e-7 m` 的冻结区间内，且每帧最低 collision body 必须属于左右
    ankle-roll 支撑脚子树。这只证明离散帧地面一致性，不证明连续时间余隙。
@@ -70,7 +116,7 @@ MuJoCo `3.10.0`，并强制 `CUDA_VISIBLE_DEVICES=''`。
 `dry-run` 会执行同一完整上游谱系、NPZ 与运动学审计但不发布证书，并明确输出
 `certificate_written=false`、`l0_static_complete=false`；正式 `audit` 才会在所有检查通过后以 `O_EXCL`
 写入预注册绝对路径。目标已存在、父目录是 symlink、JSON duplicate key、任一输入漂移都会 fail
-closed。当前尚未在 Pod2 运行私有 NPZ，因此没有 L0 pass certificate。
+closed。V1 已在 Pod2 运行并 fail closed；V2 尚未运行私有 NPZ，因此没有 L0 pass certificate。
 
 ## 明确不在本门内
 
@@ -81,14 +127,23 @@ closed。当前尚未在 Pod2 运行私有 NPZ，因此没有 L0 pass certificat
 ## 源码验证
 
 ```bash
-python3 -m pytest -q tests/test_motion_backhand_loop_b_l0_static.py
+python3 -m pytest -q \
+  tests/test_motion_backhand_loop_b_l0_static.py \
+  tests/test_motion_backhand_loop_b_l0_static_v2.py
 ```
 
-本分支两个 dependency-light 专项合跑为 `51 passed`。攻击面覆盖 same-byte activation 跨 clean
+V2 分支两份 L0 dependency-light 专项合跑为 `29 passed`。攻击面覆盖 same-byte activation 跨 clean
 checkout、历史 activation 不可被当前 consume runner 接管、portable loader 不改 activation 字节、错误
 历史 commit、当前 checkout/body-order 漂移与 symlink、claim source commit 漂移、duplicate JSON key、
 `NaN`、symlink 输入/输出父目录、NPZ
 unexpected/duplicate member、NaN/Inf、非单位四元数、伪造 velocity、关节范围越界、地面余隙上下界与
-certificate no-clobber，以及 full `dry-run` 不写 certificate。本修复按范围没有跑全仓
-回归。`origin/main@b609c0d` 的 `1018 passed, 10 skipped` 只保留为修复前历史结果。这些结果只证明源码和合成反例，
-不将缺少私有 runtime 执行的 source gate 冒充真实 L0 结果。
+certificate no-clobber，以及 V2 two-bin/物理上限、quaternion hemisphere、50 Hz derivative bound、
+angular exact、硬 safety 继承和 full `dry-run` 不写 certificate。全仓 `python3 -m pytest -q` 尝试在
+collection 阶段因本机缺 `zmq`、`torch`、`hydra` 出现 `15 errors`，没有进入测试执行；这不是 V2
+断言失败，也不能记成全仓通过。dependency-light `tests/` 另跑为 `1116 passed, 10 skipped, 94 failed`；
+94 项是 latest-main 已存在的 frozen `training_contract` SHA 与 manifest 漂移（以及同类旧 causal fixture），
+没有一项来自两份 B L0 测试，故不在本分支改写这些无关合同，也不记成整合绿灯。
+`origin/main@b609c0d` 的 `1018 passed, 10 skipped` 只保留为 V1
+portability 修复前历史结果。这些结果
+只证明源码和合成反例，不将缺少 V2 私有 runtime 执行的 source gate 冒充真实 L0 结果。本任务没有
+连接 Pod、没有执行正式 audit，也没有创建 certificate。
