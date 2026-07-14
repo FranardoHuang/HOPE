@@ -150,6 +150,35 @@ wrap provenance 的 immutable teacher-state receipt，并在首个科学 update 
 推进到 `564/573`。再次核验同一进程组身份后只对这两个 PGID 发出 `KILL`，最终 GPU1/GPU2 均为空，GPU0
 的 Yikang 进程未变化。没有 `model_600`，所以有效保存点仍止于 model-500；不重发、不买第二 seed、不判卷。
 
+## 外生 teacher cold-start 源码修复（尚未解锁训练）
+
+红队否决首版 receipt loader：receipt 与 NPZ 都是“先 hash、再重新按路径读取”，存在 rename/rewrite
+TOCTOU；`np.load(path)` 还会把重复 ZIP key 折叠。更关键的是首版 `teacher` 字段可自行声称 checkpoint、
+schema-3/fresh lineage 和 natural-wrap provenance，没有一个真实 producer/consumer 去核对这些字节，因此不能
+给 replacement pair 用。
+
+修正版改为两段式 source gate：inference-only 的 `MotionCommand._capture_post_swing_states` 是唯一 raw writer
+调用点，只接收自然 clip wrap；它以 private capability、CUDA→CPU 同步和 atomic no-clobber 发布 state NPZ 与
+raw capture result，不能签 checkpoint receipt。独立 one-shot attestor 再核对 actual checkpoint bytes、内嵌
+schema-3/fresh-lineage/launch claim、相邻 hard contract、checkpoint 与 capture 两份 clean source、实际 motion
+bytes、runtime joint order 和速度 limits；只有全部相等才发布 trainer receipt。trainer 会同时重读 receipt、
+raw result 和 NPZ，三者不能靠自报字段互相替代。详细合同与命令见
+[teacher artifact interface](../../interfaces/post_swing_teacher_artifact.md) 和
+[producer operation](../../operations/run_post_swing_teacher_capture.md)。
+
+消费端对 receipt/NPZ/raw result 均使用一次 `O_NOFOLLOW` open + 同 fd 前后 `fstat` + 单 immutable bytes；SHA、
+JSON、ZIP inventory 和 `np.load(BytesIO)` 不再重开路径。ZIP 重名、JSON bool 冒充 int、float/int coercion、
+source/hash/lineage 漂移、伪 callback label、重复发布都有负测。root linear/angular norm 与逐关节 velocity limit
+在 attestor 和 trainer 两次检查；首 reset 由“selected>0”收紧为预注册 adopted count/fraction、概率偏差以及可选
+强制 simulator state readback。receipt-free default 通过 canonical contract byte-equivalence 回归，不给旧 hard
+contract 添加 null/default 字段。
+
+当前只完成 source gate：dependency-light 专项 `12 passed`、`py_compile` 与 `git diff --check` 通过；本机没有
+Torch/Isaac，因此含真实 `MotionCommand`、4096 environments、GPU writer/readback 的测试尚未执行。状态保持
+`Partial`、`launch_authorized=false`；必须等修复合入 `main` 后在 clean Pod 做 inference capture、one-shot
+attestation 与 4096-env 首 reset probe，才可另建 replacement pair。不能用现役 clean base-deceleration pair 的
+checkpoint 或曲线倒推 teacher 功能已通过。
+
 ## `0f3900a` strict probe 的两次不可覆盖负结果
 
 Pod2-only control probe 的 `a1` 在 trainer/Kit 启动前等待旧 `/workspace/.kit_boot.lock`。根因是一康仍在

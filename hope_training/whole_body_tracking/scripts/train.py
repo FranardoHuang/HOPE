@@ -209,6 +209,18 @@ def _as_explicit_bool(x, name: str) -> bool:
     raise _OverrideError(f"{name} must be an explicit boolean, got {x!r}")
 
 
+def _as_exact_int(x, name: str) -> int:
+    if type(x) is not int:
+        raise _OverrideError(f"{name} must be an exact integer (bool/coercion forbidden), got {x!r}")
+    return x
+
+
+def _as_exact_float(x, name: str) -> float:
+    if type(x) is not float or not math.isfinite(x):
+        raise _OverrideError(f"{name} must be an exact finite float, got {x!r}")
+    return x
+
+
 def _as_face_command_pairing(value) -> str:
     pairing = str(value)
     allowed = ("shared_plus_y", "legacy_signed_vs_A")
@@ -651,6 +663,9 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
                 "exact": True,
             }
     post_swing_replay = motion_cmd.post_swing_replay_hard_contract()
+    from whole_body_tracking.tasks.tracking.mdp.post_swing_teacher import (
+        training_contract_extension,
+    )
     return {
         "schema_version": TRAINING_CONTRACT_SCHEMA_VERSION,
         **runtime_facts,
@@ -704,11 +719,7 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         "motion_post_swing_min_hold": attr(motion, "post_swing_min_hold"),
         # Keep every receipt-free historical/default contract byte-compatible.  The new nested
         # identity exists only when an external teacher artifact can actually affect reset state.
-        **(
-            {"motion_post_swing_replay": post_swing_replay}
-            if post_swing_replay["teacher_receipt"] is not None
-            else {}
-        ),
+        **training_contract_extension(post_swing_replay),
         "motion_clip_switch_prob": attr(motion, "clip_switch_prob"),
         "motion_rsi_skip_settle_frames": attr(motion, "rsi_skip_settle_frames"),
         "motion_stagger_initial_clock": attr(motion, "stagger_initial_clock"),
@@ -973,8 +984,15 @@ _MOTION_KEYS = (
     "stand_start_yaw_range",
     "post_swing_start_prob", "post_swing_buffer_size", "post_swing_min_fill", "post_swing_min_hold",
     "post_swing_teacher_receipt", "post_swing_teacher_receipt_sha256",
+    "post_swing_teacher_root_linear_velocity_limit_mps",
+    "post_swing_teacher_root_angular_velocity_limit_radps",
     "post_swing_require_ready_at_init",
     "post_swing_fail_fast_first_reset",
+    "post_swing_first_reset_min_adopted_count",
+    "post_swing_first_reset_min_adopted_fraction",
+    "post_swing_first_reset_selection_tolerance",
+    "post_swing_first_reset_require_readback",
+    "post_swing_capture_output_dir", "post_swing_capture_target_count",
     # deploy-parity mid-swing clip switch (018467a added the yaml key + MotionCommandCfg field but not
     # this whitelist/translation, so every run of the task yaml raised in _check_unknown_keys).
     "clip_switch_prob",
@@ -1282,8 +1300,16 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(M, "post_swing_min_hold", _get(mt, "post_swing_min_hold"), int, applied, "commands.motion")
             _set_attr(M, "post_swing_teacher_receipt", _get(mt, "post_swing_teacher_receipt"), str, applied, "commands.motion")
             _set_attr(M, "post_swing_teacher_receipt_sha256", _get(mt, "post_swing_teacher_receipt_sha256"), str, applied, "commands.motion")
+            _set_attr(M, "post_swing_teacher_root_linear_velocity_limit_mps", _get(mt, "post_swing_teacher_root_linear_velocity_limit_mps"), lambda value: _as_exact_float(value, "task.motion.post_swing_teacher_root_linear_velocity_limit_mps"), applied, "commands.motion")
+            _set_attr(M, "post_swing_teacher_root_angular_velocity_limit_radps", _get(mt, "post_swing_teacher_root_angular_velocity_limit_radps"), lambda value: _as_exact_float(value, "task.motion.post_swing_teacher_root_angular_velocity_limit_radps"), applied, "commands.motion")
             _set_attr(M, "post_swing_require_ready_at_init", _get(mt, "post_swing_require_ready_at_init"), lambda value: _as_explicit_bool(value, "task.motion.post_swing_require_ready_at_init"), applied, "commands.motion")
             _set_attr(M, "post_swing_fail_fast_first_reset", _get(mt, "post_swing_fail_fast_first_reset"), lambda value: _as_explicit_bool(value, "task.motion.post_swing_fail_fast_first_reset"), applied, "commands.motion")
+            _set_attr(M, "post_swing_first_reset_min_adopted_count", _get(mt, "post_swing_first_reset_min_adopted_count"), lambda value: _as_exact_int(value, "task.motion.post_swing_first_reset_min_adopted_count"), applied, "commands.motion")
+            _set_attr(M, "post_swing_first_reset_min_adopted_fraction", _get(mt, "post_swing_first_reset_min_adopted_fraction"), lambda value: _as_exact_float(value, "task.motion.post_swing_first_reset_min_adopted_fraction"), applied, "commands.motion")
+            _set_attr(M, "post_swing_first_reset_selection_tolerance", _get(mt, "post_swing_first_reset_selection_tolerance"), lambda value: _as_exact_float(value, "task.motion.post_swing_first_reset_selection_tolerance"), applied, "commands.motion")
+            _set_attr(M, "post_swing_first_reset_require_readback", _get(mt, "post_swing_first_reset_require_readback"), lambda value: _as_explicit_bool(value, "task.motion.post_swing_first_reset_require_readback"), applied, "commands.motion")
+            _set_attr(M, "post_swing_capture_output_dir", _get(mt, "post_swing_capture_output_dir"), str, applied, "commands.motion")
+            _set_attr(M, "post_swing_capture_target_count", _get(mt, "post_swing_capture_target_count"), lambda value: _as_exact_int(value, "task.motion.post_swing_capture_target_count"), applied, "commands.motion")
             _set_attr(M, "clip_switch_prob", _get(mt, "clip_switch_prob"), float, applied, "commands.motion")
             _set_attr(M, "event_timing_mode", _get(mt, "event_timing_mode"), str, applied, "commands.motion")
             _set_attr(M, "event_timing_schedule", _get(mt, "event_timing_schedule"), str, applied, "commands.motion")

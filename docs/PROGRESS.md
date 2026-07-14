@@ -63,6 +63,14 @@
   post-swing 计数在全部已写 update 严格为零；raw base-decel 两边均激活，weighted Reward 只在
   treatment 非零。尚未到 `model_200`，不比较行为、不买第二 seed。详见
   [clean main-effect 卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT.md)。
+- post-swing 外生 teacher cold-start 的首版被红队否决后已完成 source 修复：receipt/NPZ/raw result 改为
+  单 fd/单 bytes 消费，natural-wrap callback 只写 no-clobber raw states，独立 attestor 实查 checkpoint、
+  schema-3 lineage/claim、相邻 hard contract、两份 clean source、motion/joint order 与速度 limits；首 reset
+  另绑 adopted count/fraction、概率偏差和 state readback。dependency-light 攻击专项 `12 passed`，但尚未跑
+  4096-env Isaac probe，故仍 `Partial` / `launch_authorized=false`。详见
+  [接口](interfaces/post_swing_teacher_artifact.md)、
+  [操作](operations/run_post_swing_teacher_capture.md)与
+  [实验卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)。
 
 - 新的 clean base-decel main-effect 已在结果前预注册：两臂固定 V1+V2、seed3、4096×1001 与同
   action/bank/plant，post-swing 明确关闭且五个 replay 计数必须逐 update 全零；唯一差异为 base-decel

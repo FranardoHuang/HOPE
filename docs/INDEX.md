@@ -100,6 +100,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | 构建与测试 | [`build_and_test.md`](operations/build_and_test.md) |
 | Isaac 训练 | [`run_training.md`](operations/run_training.md) |
 | A0/A1 非击球臂模仿配对 | [`run_phase1_non_striking_arm_imitation_a01.md`](operations/run_phase1_non_striking_arm_imitation_a01.md) |
+| 随挥结束 natural-wrap 教师状态 capture/attestation | [`run_post_swing_teacher_capture.md`](operations/run_post_swing_teacher_capture.md) |
 | 统一队列、排序与算力 | [`runbook.md`](runbook.md) |
 | 共享 RunPod 作业 | [`run_on_runpod.md`](operations/run_on_runpod.md) |
 | 动作专属 YAML 训练队列 | [`run_lean_training_queue.md`](operations/run_lean_training_queue.md) |
@@ -137,6 +138,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | 横向扰动 scheduler→adapter 事务 | [`lateral_perturbation_adapter_contract.md`](interfaces/lateral_perturbation_adapter_contract.md) |
 | q50 持久启动与只读复核 | [`q50_persistent_supervisor_contract.md`](interfaces/q50_persistent_supervisor_contract.md) |
 | 轻量训练 queue claim→真实日志→checkpoint 绑定 | [`lean_training_run_binding.md`](interfaces/lean_training_run_binding.md) |
+| 随挥结束教师状态 raw capture→attestation→首 reset | [`post_swing_teacher_artifact.md`](interfaces/post_swing_teacher_artifact.md) |
 | ROS topic | [`ros_topics.md`](interfaces/ros_topics.md) |
 
 ## 责任归属与更新规则

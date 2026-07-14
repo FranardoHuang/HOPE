@@ -31,7 +31,9 @@ from whole_body_tracking.tasks.tracking.mdp.event_timing import (
     load_event_schedule,
 )
 from whole_body_tracking.tasks.tracking.mdp.post_swing_teacher import (
+    NaturalWrapCaptureWriter,
     PostSwingTeacherError,
+    _NATURAL_WRAP_CAPABILITY,
     load_post_swing_teacher_states,
     sha256_file,
 )
@@ -525,13 +527,42 @@ class MotionCommand(CommandTerm):
         self._post_swing_count = 0
         self._post_swing_ptr = 0
         self._post_swing_teacher_hard_contract: dict | None = None
-        self._post_swing_require_ready_at_init = bool(
-            getattr(self.cfg, "post_swing_require_ready_at_init", False)
-        )
-        self._post_swing_fail_fast_first_reset = bool(
-            getattr(self.cfg, "post_swing_fail_fast_first_reset", False)
-        )
+        ready = getattr(self.cfg, "post_swing_require_ready_at_init", False)
+        fail_fast = getattr(self.cfg, "post_swing_fail_fast_first_reset", False)
+        require_readback = getattr(self.cfg, "post_swing_first_reset_require_readback", False)
+        if any(type(value) is not bool for value in (ready, fail_fast, require_readback)):
+            raise ValueError("post-swing teacher gates require exact booleans")
+        self._post_swing_require_ready_at_init = ready
+        self._post_swing_fail_fast_first_reset = fail_fast
+        self._post_swing_first_reset_require_readback = require_readback
+        min_count = getattr(self.cfg, "post_swing_first_reset_min_adopted_count", 1)
+        min_fraction = getattr(self.cfg, "post_swing_first_reset_min_adopted_fraction", 0.0)
+        tolerance = getattr(self.cfg, "post_swing_first_reset_selection_tolerance", 1.0)
+        if type(min_count) is not int or min_count <= 0:
+            raise ValueError("post_swing_first_reset_min_adopted_count must be a positive integer")
+        if (
+            type(min_fraction) is not float
+            or not math.isfinite(min_fraction)
+            or not 0.0 <= min_fraction <= 1.0
+            or type(tolerance) is not float
+            or not math.isfinite(tolerance)
+            or not 0.0 <= tolerance <= 1.0
+        ):
+            raise ValueError("post-swing first-reset fractions must be finite JSON-style floats in [0,1]")
+        self._post_swing_first_reset_min_adopted_count = min_count
+        self._post_swing_first_reset_min_adopted_fraction = min_fraction
+        self._post_swing_first_reset_selection_tolerance = tolerance
+        if (
+            require_readback
+            or min_count != 1
+            or min_fraction != 0.0
+            or tolerance != 1.0
+        ) and not fail_fast:
+            raise ValueError(
+                "post-swing first-reset acceptance thresholds require fail_fast_first_reset=true"
+            )
         self._post_swing_first_reset_checked = False
+        self._post_swing_capture_writer: NaturalWrapCaptureWriter | None = None
         # Activation accounting is kept outside ``metrics`` because command metrics are
         # instantaneous per-environment values, while these are event counts accumulated over
         # one PPO update.  MotionOnPolicyRunner consumes and resets them exactly once from its
@@ -547,6 +578,7 @@ class MotionCommand(CommandTerm):
             )
         }
         self._load_post_swing_teacher_if_configured()
+        self._configure_post_swing_capture_if_requested()
         # Reward-mechanism activation accounting.  These counters live on the motion command so
         # every imitation reward term can record into one per-update ledger without touching the
         # simulator or sampling another random number.  The unit of V1 is one environment sample
@@ -1019,6 +1051,16 @@ class MotionCommand(CommandTerm):
         root[:, :3] -= self._env.scene.env_origins[env_ids]
         jp = self.robot.data.joint_pos[env_ids].clone()
         jv = self.robot.data.joint_vel[env_ids].clone()
+        if self._post_swing_capture_writer is not None:
+            # This is the sole reviewed call site.  ``wrap_ids`` is constructed only from natural
+            # segment completion; switch-aborted states never reach this method.  Copying to CPU
+            # synchronizes the CUDA producer before the no-clobber writer hashes/publishes bytes.
+            self._post_swing_capture_writer._append_from_natural_wrap(
+                _NATURAL_WRAP_CAPABILITY,
+                root.detach().to(device="cpu", dtype=torch.float32).numpy(),
+                jp.detach().to(device="cpu", dtype=torch.float32).numpy(),
+                jv.detach().to(device="cpu", dtype=torch.float32).numpy(),
+            )
         size = int(self.cfg.post_swing_buffer_size)
         if self._post_swing_root is None:
             self._post_swing_root = torch.zeros(size, 13, device=self.device)
@@ -1071,11 +1113,25 @@ class MotionCommand(CommandTerm):
         else:
             motion_files = list(motion_files)
         try:
+            joint_velocity_limits = self.robot.data.joint_vel_limits
+            if joint_velocity_limits.ndim == 2:
+                joint_velocity_limits = joint_velocity_limits[0]
+            if joint_velocity_limits.ndim != 1:
+                raise ValueError("runtime joint velocity limits have an unexpected shape")
             teacher = load_post_swing_teacher_states(
                 receipt_path,
                 receipt_sha,
                 expected_motion_sha256=[sha256_file(path) for path in motion_files],
                 expected_joint_names=self.robot.data.joint_names,
+                expected_joint_velocity_limits=[
+                    float(value) for value in joint_velocity_limits.detach().cpu().tolist()
+                ],
+                expected_root_linear_velocity_limit_mps=float(
+                    self.cfg.post_swing_teacher_root_linear_velocity_limit_mps
+                ),
+                expected_root_angular_velocity_limit_radps=float(
+                    self.cfg.post_swing_teacher_root_angular_velocity_limit_radps
+                ),
                 min_fill=int(self.cfg.post_swing_min_fill),
                 buffer_size=int(self.cfg.post_swing_buffer_size),
             )
@@ -1117,6 +1173,48 @@ class MotionCommand(CommandTerm):
             # adoption boundary so a future loader refactor cannot weaken ready-at-init.
             raise ValueError("post-swing teacher did not make the replay buffer ready")
 
+    def _configure_post_swing_capture_if_requested(self) -> None:
+        """Arm the inference-only natural-wrap callback writer, default off."""
+
+        output_dir = str(getattr(self.cfg, "post_swing_capture_output_dir", "") or "").strip()
+        target_count = getattr(self.cfg, "post_swing_capture_target_count", 0)
+        if not output_dir:
+            if type(target_count) is not int or target_count != 0:
+                raise ValueError(
+                    "post_swing_capture_target_count requires post_swing_capture_output_dir"
+                )
+            return
+        if self._post_swing_teacher_hard_contract is not None:
+            raise ValueError("teacher consumption and teacher capture are mutually exclusive")
+        if type(target_count) is not int or target_count <= 0:
+            raise ValueError("post_swing_capture_target_count must be a positive integer")
+        if bool(self.cfg.wrap_teleport):
+            raise ValueError("natural-wrap teacher capture requires wrap_teleport=false")
+        if float(self.cfg.post_swing_start_prob) <= 0.0:
+            raise ValueError("natural-wrap teacher capture requires post_swing_start_prob > 0")
+        motion_files = self.cfg.motion_file
+        motion_files = [motion_files] if isinstance(motion_files, str) else list(motion_files)
+        try:
+            self._post_swing_capture_writer = NaturalWrapCaptureWriter(
+                output_dir,
+                target_count=target_count,
+                motion_sha256=[sha256_file(path) for path in motion_files],
+                joint_names=self.robot.data.joint_names,
+                callback_source_path=__file__,
+            )
+        except (OSError, PostSwingTeacherError) as exc:
+            raise ValueError(f"cannot arm natural-wrap teacher capture: {exc}") from exc
+
+    def post_swing_capture_complete(self) -> bool:
+        """Return whether the one-shot callback result was durably published."""
+
+        return self._post_swing_capture_writer is not None and self._post_swing_capture_writer.complete
+
+    def _bind_post_swing_capture_runtime_contract(self, sha256: str) -> None:
+        if self._post_swing_capture_writer is None:
+            raise RuntimeError("post-swing capture is not armed")
+        self._post_swing_capture_writer._bind_reviewed_runtime_hard_contract(sha256)
+
     def post_swing_replay_hard_contract(self) -> dict:
         """Return exact cold-start semantics for checkpoint lineage binding."""
 
@@ -1125,6 +1223,12 @@ class MotionCommand(CommandTerm):
             "teacher_distribution": "immutable",
             "require_ready_at_init": self._post_swing_require_ready_at_init,
             "fail_fast_first_reset": self._post_swing_fail_fast_first_reset,
+            "first_reset_acceptance": {
+                "min_adopted_count": self._post_swing_first_reset_min_adopted_count,
+                "min_adopted_fraction": self._post_swing_first_reset_min_adopted_fraction,
+                "selection_probability_abs_tolerance": self._post_swing_first_reset_selection_tolerance,
+                "require_state_readback": self._post_swing_first_reset_require_readback,
+            },
         }
 
     def _write_post_swing_states(self, env_ids: torch.Tensor):
@@ -1132,12 +1236,26 @@ class MotionCommand(CommandTerm):
         picks = torch.randint(0, self._post_swing_count, (len(env_ids),), device=self.device)
         root = self._post_swing_root[picks].clone()
         root[:, :3] += self._env.scene.env_origins[env_ids]
+        joint_pos = self._post_swing_joint_pos[picks].clone()
+        joint_vel = self._post_swing_joint_vel[picks].clone()
         self.robot.write_root_state_to_sim(root, env_ids=env_ids)
-        self.robot.write_joint_state_to_sim(
-            self._post_swing_joint_pos[picks].clone(),
-            self._post_swing_joint_vel[picks].clone(),
-            env_ids=env_ids,
-        )
+        self.robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
+        if self._post_swing_first_reset_require_readback:
+            try:
+                observed = (
+                    ("root", self.robot.data.root_state_w[env_ids], root),
+                    ("joint position", self.robot.data.joint_pos[env_ids], joint_pos),
+                    ("joint velocity", self.robot.data.joint_vel[env_ids], joint_vel),
+                )
+            except (AttributeError, IndexError, TypeError) as exc:
+                raise RuntimeError(
+                    "post-swing replay readback is unavailable on this runtime"
+                ) from exc
+            for label, actual, expected in observed:
+                if actual.shape != expected.shape or not torch.allclose(
+                    actual, expected, rtol=0.0, atol=1.0e-6
+                ):
+                    raise RuntimeError(f"post-swing replay {label} readback differs from write")
 
     def consume_post_swing_activation_counters(self) -> dict[str, torch.Tensor]:
         """Return one PPO update's replay-start counts and atomically reset the window.
@@ -1363,10 +1481,25 @@ class MotionCommand(CommandTerm):
                 raise RuntimeError(
                     "post-swing first-reset fail-fast: teacher buffer is not ready"
                 )
-            if post_selected_count is None or int(post_selected_count.item()) <= 0:
+            selected = 0 if post_selected_count is None else int(post_selected_count.item())
+            eligible = len(env_ids_t)
+            selected_fraction = selected / eligible if eligible > 0 else 0.0
+            if selected < self._post_swing_first_reset_min_adopted_count:
                 raise RuntimeError(
-                    "post-swing first-reset fail-fast: initial true-reset cohort selected no "
-                    "teacher replay state"
+                    "post-swing first-reset fail-fast: adopted count below the frozen minimum "
+                    f"({selected} < {self._post_swing_first_reset_min_adopted_count})"
+                )
+            if selected_fraction < self._post_swing_first_reset_min_adopted_fraction:
+                raise RuntimeError(
+                    "post-swing first-reset fail-fast: adopted fraction below the frozen minimum "
+                    f"({selected_fraction} < {self._post_swing_first_reset_min_adopted_fraction})"
+                )
+            if abs(selected_fraction - float(self.cfg.post_swing_start_prob)) > (
+                self._post_swing_first_reset_selection_tolerance
+            ):
+                raise RuntimeError(
+                    "post-swing first-reset fail-fast: selected fraction differs from the "
+                    "configured Bernoulli probability beyond tolerance"
                 )
             # Reaching here means _write_post_swing_states returned after both root and joint
             # state writes, and started was incremented from the same selected scalar.
@@ -1725,11 +1858,23 @@ class MotionCommandCfg(CommandTermCfg):
     # order.  Empty/default preserves the historical policy-owned live buffer exactly.
     post_swing_teacher_receipt: str = ""
     post_swing_teacher_receipt_sha256: str = ""
+    # Explicit runtime limits accepted by the attestor and rechecked before simulator adoption.
+    # A floating base has no actuator limit in PhysX, so the capture contract must pin both norms.
+    post_swing_teacher_root_linear_velocity_limit_mps: float = 0.0
+    post_swing_teacher_root_angular_velocity_limit_radps: float = 0.0
     # Explicit scientific pairs can refuse endogenous cold starts at process startup and require
     # the initial true-reset cohort to adopt at least one teacher state before the first policy
     # rollout/update.  Both default off so existing checkpoints/queues keep exact behavior.
     post_swing_require_ready_at_init: bool = False
     post_swing_fail_fast_first_reset: bool = False
+    post_swing_first_reset_min_adopted_count: int = 1
+    post_swing_first_reset_min_adopted_fraction: float = 0.0
+    post_swing_first_reset_selection_tolerance: float = 1.0
+    post_swing_first_reset_require_readback: bool = False
+    # Inference-only producer seam.  It emits a raw natural-wrap callback result; it cannot mint
+    # a teacher receipt or attest a checkpoint.  Defaults preserve historical training exactly.
+    post_swing_capture_output_dir: str = ""
+    post_swing_capture_target_count: int = 0
     # Per-step per-env probability of an operator-style mid-swing clip switch (deploy parity —
     # see the venue-falls note in _update_command). 0.002 ~ one switch per ~3-4 swings. Default off.
     clip_switch_prob: float = 0.0

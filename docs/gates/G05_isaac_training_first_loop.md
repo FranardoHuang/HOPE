@@ -87,6 +87,22 @@ Follow-up note (2026-07-15, clean base-deceleration pair running; Gate remains `
   is not a behavior result. No comparison, second seed, judge or promotion is allowed before exact
   model-200 receipts. See
   [the clean main-effect record](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT.md).
+Follow-up note (2026-07-15, post-swing teacher source gate repaired; Gate remains `Partial`):
+
+- The first cold-start candidate was rejected because it re-opened receipt/NPZ paths after hashing,
+  allowed duplicate NPZ ZIP keys to collapse, and trusted self-reported checkpoint/natural-wrap
+  provenance. The replacement uses one `O_NOFOLLOW` descriptor and one immutable byte buffer for
+  hash/parse, an inference-only natural-wrap callback writer, and a separate no-clobber attestor.
+- The attestor verifies actual checkpoint bytes, embedded schema-3/exact lineage and launch claim,
+  the adjacent hard contract, clean checkpoint/capture sources, ordered motion bytes, articulation
+  joint order and root/joint velocity bounds. Trainer consumption re-binds the raw capture result;
+  a standalone receipt JSON cannot unlock replay. First-reset acceptance now supports a frozen
+  adopted count/fraction, probability tolerance and simulator state readback.
+- Dependency-light attack tests pass, but no Torch/Isaac or 4096-environment Pod probe has run.
+  `launch_authorized=false`; no replacement science pair, second seed, judge or promotion is
+  unlocked. See the [artifact contract](../interfaces/post_swing_teacher_artifact.md),
+  [producer operation](../operations/run_post_swing_teacher_capture.md), and
+  [experiment record](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md).
 
 Follow-up note (2026-07-15, clean base-deceleration main effect preregistered; Gate remains `Partial`):
 

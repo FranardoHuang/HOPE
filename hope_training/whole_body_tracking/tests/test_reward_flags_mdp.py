@@ -1267,6 +1267,10 @@ class _CmdRobot:
         default_root[:, 3] = 1.0
         self.data = types.SimpleNamespace(
             joint_names=list(_A3_JOINTS),
+            joint_pos=torch.zeros(num_envs, _N_JOINTS),
+            joint_vel=torch.zeros(num_envs, _N_JOINTS),
+            joint_vel_limits=torch.full((_N_JOINTS,), 5.0),
+            root_state_w=default_root.clone(),
             default_joint_pos=torch.zeros(num_envs, _N_JOINTS),
             default_joint_vel=torch.zeros(num_envs, _N_JOINTS),
             default_root_state=default_root,
@@ -1280,9 +1284,12 @@ class _CmdRobot:
 
     def write_root_state_to_sim(self, root, env_ids=None):
         self.calls.append(("root", root.clone(), None if env_ids is None else env_ids.clone()))
+        self.data.root_state_w[env_ids] = root
 
     def write_joint_state_to_sim(self, jp, jv, env_ids=None):
         self.calls.append(("joint", jp.clone(), jv.clone()))
+        self.data.joint_pos[env_ids] = jp
+        self.data.joint_vel[env_ids] = jv
 
 
 def _make_motion_command(motion_files, num_envs=8, **cfg_overrides):
@@ -1441,7 +1448,7 @@ def _write_post_swing_teacher_receipt(tmp_path, motion_files, *, count=4):
         joint_vel=np.zeros((count, _N_JOINTS), dtype=np.float32),
     )
     receipt = {
-        "schema_version": 1,
+        "schema_version": 2,
         "artifact_kind": "hope_post_swing_teacher_state_receipt",
         "capture_contract": {
             "event": "natural_clip_wrap",
@@ -1470,8 +1477,61 @@ def _write_post_swing_teacher_receipt(tmp_path, motion_files, *, count=4):
             "joint_pos_shape": [count, _N_JOINTS],
             "joint_vel_shape": [count, _N_JOINTS],
             "joint_names": list(_A3_JOINTS),
+            "velocity_limits": {
+                "root_linear_norm_max_mps": 2.0,
+                "root_angular_norm_max_radps": 4.0,
+                "joint_abs_max_radps": [5.0] * _N_JOINTS,
+            },
+        },
+        "attestation": {
+            "schema_version": 1,
+            "artifact_kind": "hope_post_swing_teacher_capture_attestation",
+            "capture_result_sha256": "4" * 64,
+            "capture_result_relative_path": "natural_wrap_capture.json",
+            "checkpoint": {
+                "sha256": "2" * 64,
+                "training_contract_schema_version": 3,
+                "training_contract_sha256": "3" * 64,
+                "training_contract_lineage_exact": True,
+                "training_launch_claim_sha256": "5" * 64,
+            },
+            "hard_contract": {"sha256": "3" * 64, "schema_version": 3},
+            "checkpoint_source": {
+                "commit": "1" * 40,
+                "launch_claim_content_sha256": "5" * 64,
+            },
+            "capture_source": {
+                "commit": "6" * 40,
+                "clean": True,
+                "writer_source_sha256": "7" * 64,
+                "callback_source_sha256": "8" * 64,
+                "attestor_source_sha256": "9" * 64,
+            },
         },
     }
+    capture_result = {
+        "schema_version": 1,
+        "artifact_kind": "hope_post_swing_natural_wrap_capture_result",
+        "capture_contract": receipt["capture_contract"],
+        "producer": {
+            "callback_method": "MotionCommand._capture_post_swing_states",
+            "writer_source_sha256": "7" * 64,
+            "callback_source_sha256": "8" * 64,
+            "runtime_hard_contract_sha256": "3" * 64,
+            "no_clobber": True,
+        },
+        "motion_clips": receipt["motion_clips"],
+        "states": {
+            key: value for key, value in receipt["states"].items() if key != "velocity_limits"
+        },
+        "callback_batches": 1,
+    }
+    capture_path = tmp_path / "natural_wrap_capture.json"
+    capture_path.write_text(
+        json.dumps(capture_result, separators=(",", ":"), sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    receipt["attestation"]["capture_result_sha256"] = _sha256(capture_path)
     receipt_path = tmp_path / "post_swing_teacher_receipt.json"
     receipt_path.write_text(
         json.dumps(receipt, separators=(",", ":"), sort_keys=True) + "\n",
@@ -1583,6 +1643,8 @@ def test_post_swing_teacher_cold_start_is_ready_and_activates_before_learning(
         post_swing_buffer_size=8,
         post_swing_teacher_receipt=str(receipt),
         post_swing_teacher_receipt_sha256=receipt_sha,
+        post_swing_teacher_root_linear_velocity_limit_mps=2.0,
+        post_swing_teacher_root_angular_velocity_limit_radps=4.0,
         post_swing_require_ready_at_init=True,
         post_swing_fail_fast_first_reset=True,
     )
@@ -1621,11 +1683,71 @@ def test_post_swing_teacher_fail_fast_refuses_zero_activation_before_first_updat
         post_swing_buffer_size=8,
         post_swing_teacher_receipt=str(receipt),
         post_swing_teacher_receipt_sha256=receipt_sha,
+        post_swing_teacher_root_linear_velocity_limit_mps=2.0,
+        post_swing_teacher_root_angular_velocity_limit_radps=4.0,
         post_swing_require_ready_at_init=True,
         post_swing_fail_fast_first_reset=True,
     )
     monkeypatch.setattr(torch, "rand", lambda *shape, **kwargs: torch.full(shape, 0.9))
-    with pytest.raises(RuntimeError, match="initial true-reset cohort selected no"):
+    with pytest.raises(RuntimeError, match="adopted count below"):
+        cmd._resample_command(torch.arange(4))
+
+
+def test_post_swing_first_reset_checks_count_fraction_and_state_readback(clips, tmp_path):
+    receipt, receipt_sha = _write_post_swing_teacher_receipt(
+        tmp_path, [clips[0], clips[1]], count=4
+    )
+    cmd, robot = _make_motion_command(
+        [clips[0], clips[1]],
+        num_envs=4,
+        post_swing_start_prob=1.0,
+        post_swing_min_fill=4,
+        post_swing_buffer_size=8,
+        post_swing_teacher_receipt=str(receipt),
+        post_swing_teacher_receipt_sha256=receipt_sha,
+        post_swing_teacher_root_linear_velocity_limit_mps=2.0,
+        post_swing_teacher_root_angular_velocity_limit_radps=4.0,
+        post_swing_require_ready_at_init=True,
+        post_swing_fail_fast_first_reset=True,
+        post_swing_first_reset_min_adopted_count=4,
+        post_swing_first_reset_min_adopted_fraction=1.0,
+        post_swing_first_reset_selection_tolerance=0.0,
+        post_swing_first_reset_require_readback=True,
+    )
+    cmd._resample_command(torch.arange(4))
+    assert cmd._post_swing_first_reset_checked is True
+    assert torch.allclose(robot.data.root_state_w[:, 2], torch.ones(4))
+
+
+def test_post_swing_first_reset_readback_cannot_be_forged_by_selected_count(
+    clips, tmp_path, monkeypatch
+):
+    receipt, receipt_sha = _write_post_swing_teacher_receipt(
+        tmp_path, [clips[0], clips[1]], count=4
+    )
+    cmd, robot = _make_motion_command(
+        [clips[0], clips[1]],
+        num_envs=4,
+        post_swing_start_prob=1.0,
+        post_swing_min_fill=4,
+        post_swing_buffer_size=8,
+        post_swing_teacher_receipt=str(receipt),
+        post_swing_teacher_receipt_sha256=receipt_sha,
+        post_swing_teacher_root_linear_velocity_limit_mps=2.0,
+        post_swing_teacher_root_angular_velocity_limit_radps=4.0,
+        post_swing_require_ready_at_init=True,
+        post_swing_fail_fast_first_reset=True,
+        post_swing_first_reset_min_adopted_count=4,
+        post_swing_first_reset_min_adopted_fraction=1.0,
+        post_swing_first_reset_selection_tolerance=0.0,
+        post_swing_first_reset_require_readback=True,
+    )
+    monkeypatch.setattr(
+        robot,
+        "write_root_state_to_sim",
+        lambda root, env_ids=None: robot.calls.append(("root", root.clone(), env_ids.clone())),
+    )
+    with pytest.raises(RuntimeError, match="root readback differs"):
         cmd._resample_command(torch.arange(4))
 
 

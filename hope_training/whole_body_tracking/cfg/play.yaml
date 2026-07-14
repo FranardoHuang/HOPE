@@ -30,6 +30,7 @@ motion_file_2: null   # optional 2nd local clip for unified policies
 video: false
 video_length: 200
 export_only: false    # build + validate + export, then exit without entering the rollout loop
+post_swing_capture_max_steps: 0 # >0 only with task.motion.post_swing_capture_output_dir
 
 hydra:
   job:

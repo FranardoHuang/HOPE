@@ -151,8 +151,16 @@ def _make_env_cfg(anchor_pos_none=True):
         post_swing_min_hold=25,
         post_swing_teacher_receipt="",
         post_swing_teacher_receipt_sha256="",
+        post_swing_teacher_root_linear_velocity_limit_mps=0.0,
+        post_swing_teacher_root_angular_velocity_limit_radps=0.0,
         post_swing_require_ready_at_init=False,
         post_swing_fail_fast_first_reset=False,
+        post_swing_first_reset_min_adopted_count=1,
+        post_swing_first_reset_min_adopted_fraction=0.0,
+        post_swing_first_reset_selection_tolerance=1.0,
+        post_swing_first_reset_require_readback=False,
+        post_swing_capture_output_dir="",
+        post_swing_capture_target_count=0,
         clip_switch_prob=0.0,
         speed_scale_range=(1.0, 1.0),
         speed_scale_per_clip=None,
@@ -956,8 +964,14 @@ def test_post_swing_teacher_cold_start_overrides_are_explicit_and_typed():
             "motion": {
                 "post_swing_teacher_receipt": "/ignored/teacher/receipt.json",
                 "post_swing_teacher_receipt_sha256": "a" * 64,
+                "post_swing_teacher_root_linear_velocity_limit_mps": 2.0,
+                "post_swing_teacher_root_angular_velocity_limit_radps": 4.0,
                 "post_swing_require_ready_at_init": True,
                 "post_swing_fail_fast_first_reset": True,
+                "post_swing_first_reset_min_adopted_count": 700,
+                "post_swing_first_reset_min_adopted_fraction": 0.20,
+                "post_swing_first_reset_selection_tolerance": 0.03,
+                "post_swing_first_reset_require_readback": True,
             }
         }
     )
@@ -966,6 +980,11 @@ def test_post_swing_teacher_cold_start_overrides_are_explicit_and_typed():
     assert motion.post_swing_teacher_receipt_sha256 == "a" * 64
     assert motion.post_swing_require_ready_at_init is True
     assert motion.post_swing_fail_fast_first_reset is True
+    assert motion.post_swing_teacher_root_linear_velocity_limit_mps == 2.0
+    assert motion.post_swing_first_reset_min_adopted_count == 700
+    assert motion.post_swing_first_reset_min_adopted_fraction == 0.20
+    assert motion.post_swing_first_reset_selection_tolerance == 0.03
+    assert motion.post_swing_first_reset_require_readback is True
     assert any("post_swing_require_ready_at_init=True" in item for item in applied)
 
     with pytest.raises(train_mod._OverrideError, match="explicit boolean"):

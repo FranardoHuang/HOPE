@@ -19,9 +19,12 @@ from omegaconf import OmegaConf
 
 from train import (
     _apply_task_overrides,
+    _build_training_hard_contract,
+    _contract_diff,
     _is_noneish,
     _normalize_registry_name,
     _registry_clip_name,
+    _sha256_file,
     resolve_motion_sources,
 )
 
@@ -135,12 +138,50 @@ def _run_play(cfg, simulation_app):
 
     render_mode = "rgb_array" if cfg.video else None
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)
+    motion_cmd = env.unwrapped.command_manager.get_term("motion")
+    capture_requested = bool(
+        str(getattr(motion_cmd.cfg, "post_swing_capture_output_dir", "") or "").strip()
+    )
+    capture_max_steps = int(cfg.get("post_swing_capture_max_steps", 0) or 0)
+    if capture_requested and capture_max_steps <= 0:
+        raise ValueError(
+            "post-swing teacher capture requires post_swing_capture_max_steps > 0"
+        )
+    if not capture_requested and capture_max_steps != 0:
+        raise ValueError(
+            "post_swing_capture_max_steps is invalid without a capture output directory"
+        )
     expected_contract = cfg.task.get("actor_obs_contract", None)
+    actor_contract = None
     if expected_contract is not None:
-        contract = validate_actor_observation_contract(env.unwrapped, str(expected_contract))
+        actor_contract = validate_actor_observation_contract(env.unwrapped, str(expected_contract))
         print(
             "[play.py] actor observation contract validated: "
-            f"{contract.name} ({contract.total_dim}D, obs_mode={contract.obs_mode})",
+            f"{actor_contract.name} ({actor_contract.total_dim}D, obs_mode={actor_contract.obs_mode})",
+            flush=True,
+        )
+    if capture_requested:
+        if actor_contract is None:
+            raise RuntimeError("post-swing capture requires an exact actor observation contract")
+        import json
+
+        adjacent = pathlib.Path(resume_path).resolve().parent / "params/training_contract.json"
+        if not adjacent.is_file():
+            raise RuntimeError(f"post-swing capture checkpoint lacks adjacent hard contract: {adjacent}")
+        with adjacent.open(encoding="utf-8") as stream:
+            checkpoint_contract = json.load(stream)
+        runtime_contract = _build_training_hard_contract(env.unwrapped, actor_contract)
+        diffs = _contract_diff(checkpoint_contract, runtime_contract)
+        if diffs:
+            raise RuntimeError(
+                "post-swing capture runtime differs from the checkpoint hard contract:\n  - "
+                + "\n  - ".join(diffs)
+            )
+        runtime_contract_sha256 = _sha256_file(adjacent)
+        motion_cmd._bind_post_swing_capture_runtime_contract(runtime_contract_sha256)
+        print(
+            "[play.py] post-swing capture runtime contract MATCH: "
+            f"{adjacent} sha256={runtime_contract_sha256}",
             flush=True,
         )
     log_dir = os.path.dirname(resume_path)
@@ -154,24 +195,28 @@ def _run_play(cfg, simulation_app):
     trained_with_obs_norm = load_actor_tolerant(ppo_runner, resume_path)
     policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
 
-    # export the policy to ONNX next to the checkpoint (step 15)
-    export_model_dir = (
-        os.path.abspath(str(cfg.export_dir))
-        if cfg.get("export_dir", None)
-        else os.path.join(os.path.dirname(resume_path), "exported")
-    )
-    obs_norm_baked = export_motion_policy_as_onnx(
-        env.unwrapped, ppo_runner.alg.policy,
-        normalizer=ppo_runner.obs_normalizer if trained_with_obs_norm else None,
-        path=export_model_dir, filename="policy.onnx",
-    )
-    attach_onnx_metadata(
-        env.unwrapped, str(wandb_path) if wandb_path else "none", export_model_dir,
-        obs_norm_baked=obs_norm_baked,
-        trained_with_obs_norm=trained_with_obs_norm,
-        source_checkpoint_path=resume_path,
-    )
-    print(f"[INFO] Exported ONNX policy to: {export_model_dir}")
+    # Capture mode is inference-only and writes only its dedicated no-clobber callback directory;
+    # do not mutate the checkpoint run by exporting an unrelated ONNX side artifact.
+    if not capture_requested:
+        export_model_dir = (
+            os.path.abspath(str(cfg.export_dir))
+            if cfg.get("export_dir", None)
+            else os.path.join(os.path.dirname(resume_path), "exported")
+        )
+        obs_norm_baked = export_motion_policy_as_onnx(
+            env.unwrapped, ppo_runner.alg.policy,
+            normalizer=ppo_runner.obs_normalizer if trained_with_obs_norm else None,
+            path=export_model_dir, filename="policy.onnx",
+        )
+        attach_onnx_metadata(
+            env.unwrapped, str(wandb_path) if wandb_path else "none", export_model_dir,
+            obs_norm_baked=obs_norm_baked,
+            trained_with_obs_norm=trained_with_obs_norm,
+            source_checkpoint_path=resume_path,
+        )
+        print(f"[INFO] Exported ONNX policy to: {export_model_dir}")
+    else:
+        print("[play.py] capture mode: ONNX export skipped", flush=True)
 
     if bool(cfg.get("export_only", False)):
         env.close()
@@ -189,11 +234,22 @@ def _run_play(cfg, simulation_app):
         with torch.inference_mode():
             actions = policy(obs)
             obs, _, _, _ = env.step(actions.to(env.unwrapped.device))
+        timestep += 1
+        if capture_requested:
+            if motion_cmd.post_swing_capture_complete():
+                print(
+                    f"[play.py] natural-wrap capture complete after {timestep} inference steps",
+                    flush=True,
+                )
+                break
+            if timestep >= capture_max_steps:
+                raise RuntimeError(
+                    "natural-wrap capture did not reach its frozen target before max steps"
+                )
         if cfg.video:
             frame = env.unwrapped.render()
             if frame is not None:
                 frames.append(frame)
-            timestep += 1
             if timestep >= int(cfg.video_length):
                 break
         # non-video: keep stepping until the Isaac Sim window is closed (live viewing)
