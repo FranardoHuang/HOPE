@@ -1,7 +1,7 @@
 # EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN — 补齐 activation 后重跑底座减速配对
 
-- 状态：`blocked`（fresh replacement pair 已预注册；缺 V1、V2 和底座减速的 runtime activation
-  denominator，且 exact telemetry reference source 尚未包含最新 main hardening）
+- 状态：`blocked`（activation successor `1f0ca12...` 已 exact 绑定；等待该 source 自己的 strict
+  full-scene terminal probe）
 - 阶段/轴：Phase 1 fresh C；组合击球精度下，底座减速是否有净收益
 - 集成小目标：保住击球精度信号，同时降低击球前底座速度与击球前摔倒率
 - 人类负责人：Franco
@@ -34,7 +34,7 @@ eligible denominator。只看配置回显、`Live/Reward/base_decel` 的全环�
 机器真源是
 [`phase1_fresh_c_v1v2_base_decel_measurement_rerun_queue_20260715.yaml`](../../../configs/phase1_fresh_c_v1v2_base_decel_measurement_rerun_queue_20260715.yaml)。
 
-exact source `312669c7bd61f8fc8f5ea99c8e94cfc3ffae9b94` 已冻结以下五个随挥重放计数：
+历史 source `312669c7bd61f8fc8f5ea99c8e94cfc3ffae9b94` 冻结了以下五个随挥重放计数：
 
 | 语义 | TensorBoard tag |
 | --- | --- |
@@ -48,25 +48,30 @@ exact source `312669c7bd61f8fc8f5ea99c8e94cfc3ffae9b94` 已冻结以下五个随
 `post_swing_start_prob=0.25` realized `started/eligible` 在 `[0.20, 0.30]`。这只闭合随挥 replay；它不自动
 证明 V1、V2 或 base-decel 被充分激活。
 
-另外，`312669c...` 的父提交是 `2171302...`，不是最新 main hardening
-`f00c49779174fdf43f861a29ceda0f985be04f31` 的后代。故 YAML 中的 exact source binding 只是已审计 telemetry
-reference，不是 launch-ready source。下一版必须生成一个同时包含 `f00c497...`、五计数和下表缺失仪表的新
-exact commit，再原子更新 source binding 并重跑 strict full-scene terminal probe；禁止原地修改 checkout。
+`312669c...` 的父提交是 `2171302...`，不是 main hardening `f00c497...` 的后代，因此仍只作历史 telemetry
+reference。当前 YAML 已原子改绑 clean exact
+`1f0ca12ffd556dc25f6313df559fe0fd6eaee9e6`（checkout
+`/workspace/codexschema/nohope_p1_activation_successor_1f0ca12`）。该 successor 同时包含 main hardening、五个
+post-swing counters、V1/V2 execution counters、base-decel raw observer 和 runner logger；源码缺口已闭合，
+但它尚未跑自己的 strict full-scene terminal probe，所以仍不是 launch-ready source，禁止原地修改 checkout。
 
-## 最小缺失 telemetry
+## Successor 的最小 telemetry
 
 | 机制 | eligible denominator | numerator | 当前结论 |
 | --- | --- | --- | --- |
-| V1 持拍手腕线速度释放 | `Live/Reward/v1_free_wrist_vel_mimic_eligible_sample_count` | `Live/Reward/v1_free_wrist_vel_mimic_excluded_sample_count` | `312669c...` 缺两者 |
-| V2 击球窗模仿缩放 | `Live/Reward/v2_strike_window_imitation_eligible_sample_count` | `Live/Reward/v2_strike_window_imitation_scaled_sample_count` | `312669c...` 缺两者 |
-| base-decel | `Live/Reward/base_decel_eligible_sample_count` | `Live/Reward/base_decel_nonzero_reward_sample_count` | 只有 Reward/速度均值，没有 denominator |
+| V1 持拍手腕线速度释放 | `Live/motion/v1_velocity_mimic_eligible_sample_count` | `Live/motion/v1_held_wrist_excluded_sample_count` | 两者必须正且相等 |
+| V2 击球窗模仿缩放 | `Live/motion/v2_strike_window_eligible_imitation_sample_count` | `Live/motion/v2_quarter_scaled_strike_window_imitation_sample_count` | 两者必须正且相等 |
+| base-decel raw kernel | `Live/racket_target/base_decel_eligible_sample_count` | `Live/racket_target/base_decel_raw_kernel_nonzero_sample_count`；另记 `Live/racket_target/base_decel_raw_kernel_sum` | control/treatment 三项都必须正；nonzero 不得大于 eligible |
 
 语义必须固定为每个 PPO update 内的**样本总数**，不能对 environment 求均值后再猜计数。V1 每个 eligible
 environment-step 只计一次；只有 runtime body list 确实排除右手腕才计 numerator，因此 numerator 必须等于
-denominator。V2 每个击球窗 environment-step 也只计一次；只有六条 non-None motion imitation term 全部按
-`0.25` 缩放才计 numerator，因此 numerator 同样必须等于 denominator。base-decel 的 eligible 是
-`pre_strike & ~in_hold`，control 的非零 Reward numerator 必须为 `0`，treatment 必须大于 `0` 且不超过
-denominator。三条计数都要 finite、非负。
+denominator。V2 的单位是“一个 imitation RewardTerm × 一个 environment sample”：每条 non-None motion
+imitation term 在 wide strike window 真正走到缩放 `torch.where` 就计 denominator，且 command setting 与函数
+实际 scale 都严格为 `0.25` 才计 numerator，因此两者必须相等。base-decel 的 eligible 是
+`pre_strike & ~in_hold`；command 的每步 observer 在所有 target 更新之后运行，control `weight=0` 与 treatment
+`weight=1` 都走同一个 raw kernel，treatment 后续 RewardTerm 由 `common_step_counter` 去重。故两臂的 raw
+nonzero 与 raw sum 都必须大于零；**不能**再要求 control 的 numerator 为零，因为这里量的是未乘 Reward
+weight 的真实 kernel opportunity。所有计数与 raw sum 都要 finite、非负。
 
 现有 `Live/Reward/base_decel` 是加权后的 step Reward 均值，control 权重为零时甚至可能不是 active term；
 `Live/racket_target/base_speed_xy_prestrike` 在窗外写零后再取均值。二者都可以继续作为行为/Reward 量，但不能
@@ -76,6 +81,7 @@ denominator。三条计数都要 finite、非负。
 
 | 字段 | 冻结值 |
 | --- | --- |
+| Source | clean exact `1f0ca12ffd556dc25f6313df559fe0fd6eaee9e6`；strict full-scene probe pending |
 | 初始化/seed | fresh / `3`；只买一个 seed |
 | 预算 | `4096 environments × 1001 updates`；每 `100` 保存；milestone `200/500/1000` |
 | 动作/题库/plant | 与原配对逐字相同的 v4rg runtime-order 正反手、schema-3 rebound bank、zero-joint-friction 训练协议 |
@@ -113,11 +119,11 @@ fresh namespaces：
 
 | 运行 | 状态 | 证据 | 有效性 |
 | --- | --- | --- | --- |
-| measurement control，base-decel 关 | blocked | config + offline tests | 缺 successor source 与 strict probe，不得发射 |
-| measurement treatment，base-decel 权重 1 | blocked | 唯一 Reward 权重 delta | 缺 successor source 与 strict probe，不得发射 |
+| measurement control，base-decel 关 | blocked | exact successor + offline tests | strict probe 尚缺，不得发射 |
+| measurement treatment，base-decel 权重 1 | blocked | 唯一 Reward 权重 delta | strict probe 尚缺，不得发射 |
 
 - 决定：`inconclusive`；尚无 replacement runtime。
-- 当前阻塞不是 Reward 负结果，而是 measurement contract 未闭合。
+- 当前阻塞不是 Reward 负结果；source measurement contract 已闭合，runtime strict probe 仍未闭合。
 - 本记录不建立算力优先级；是否排队仍只由 main 的 `docs/NOW.md` 统一队列决定。
 - 不授权 Isaac/MuJoCo judge、第二 seed、正式 setting、部署或真机。
 
@@ -126,6 +132,9 @@ fresh namespaces：
 本提交不连接 Pod、不写 claim、不运行 probe/trainer/judge：
 
 ```bash
+python -m pytest -q hope_training/whole_body_tracking/tests/test_base_decel_activation.py
+python -m pytest -q hope_training/whole_body_tracking/tests/test_reward_flags_mdp.py -k base_decel
+python -m pytest -q hope_training/whole_body_tracking/tests/test_training_launch_claim.py
 pytest -q tests/test_phase1_fresh_c_v1v2_base_decel_measurement_rerun.py
 pytest -q tests/test_run_lean_training_queue.py
 git diff --check

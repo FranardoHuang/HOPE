@@ -47,17 +47,17 @@ def test_replacement_pair_is_pod2_only_and_cannot_plan_a_launch():
 
     assert queue["launch_authorized"] is False
     assert queue["preregistration_status"] == (
-        "blocked_measurement_source_successor_required"
+        "activation_successor_source_pinned_strict_full_scene_probe_pending"
     )
     assert queue["dispatch_pods"] == ["pod2"]
     assert {slot.pod for slot in Q.slots(queue)} == {"pod2"}
     assert [job["status"] for job in queue["jobs"]] == ["blocked", "blocked"]
-    assert all("312669c" in job["blocker"] for job in queue["jobs"])
+    assert all("1f0ca12" in job["blocker"] for job in queue["jobs"])
     assert all("strict full-scene terminal probe" in job["blocker"] for job in queue["jobs"])
     assert Q.cmd_plan(queue, live=False)["assignments"] == []
 
 
-def test_reference_source_and_required_main_hardening_are_exact_but_not_launch_sufficient():
+def test_successor_source_contains_required_lineages_but_probe_is_still_pending():
     queue = Q.load_queue(QUEUE_PATH)
     closure = queue["instrumentation_closure"]
 
@@ -68,15 +68,19 @@ def test_reference_source_and_required_main_hardening_are_exact_but_not_launch_s
         "f00c49779174fdf43f861a29ceda0f985be04f31"
     )
     assert closure["telemetry_reference_contains_required_main_hardening"] is False
-    assert closure["source_rebind_required_before_launch"] is True
+    assert closure["successor_source_commit"] == (
+        "1f0ca12ffd556dc25f6313df559fe0fd6eaee9e6"
+    )
+    assert closure["successor_contains_required_main_hardening"] is True
+    assert closure["source_rebind_required_before_launch"] is False
     assert closure["strict_full_scene_terminal_probe_required_after_rebind"] is True
 
     for job in queue["jobs"]:
         assert job["source"]["checkout"] == (
-            "/workspace/codexschema/nohope_p1_post_swing_activation_312669c"
+            "/workspace/codexschema/nohope_p1_activation_successor_1f0ca12"
         )
         assert job["source"]["commit"] == (
-            "312669c7bd61f8fc8f5ea99c8e94cfc3ffae9b94"
+            "1f0ca12ffd556dc25f6313df559fe0fd6eaee9e6"
         )
         assert job["runtime_binding"] is True
 
@@ -106,23 +110,24 @@ def test_five_post_swing_counts_are_frozen_with_arithmetic_closure():
     ] == [0.20, 0.30]
 
 
-def test_v1_v2_and_base_deceleration_activation_gaps_are_explicit_and_minimal():
+def test_successor_exposes_exact_v1_v2_and_raw_base_deceleration_metrics():
     queue = Q.load_queue(QUEUE_PATH)
     closure = queue["instrumentation_closure"]
-    missing = closure["missing_minimum_runtime_metrics"]
+    metrics = closure["successor_runtime_metrics"]
 
-    assert missing == {
+    assert metrics == {
         "v1_free_wrist_linear_velocity": {
-            "eligible_denominator": "Live/Reward/v1_free_wrist_vel_mimic_eligible_sample_count",
-            "exclusion_numerator": "Live/Reward/v1_free_wrist_vel_mimic_excluded_sample_count",
+            "eligible_denominator": "Live/motion/v1_velocity_mimic_eligible_sample_count",
+            "exclusion_numerator": "Live/motion/v1_held_wrist_excluded_sample_count",
         },
         "v2_strike_window_imitation_scale": {
-            "eligible_denominator": "Live/Reward/v2_strike_window_imitation_eligible_sample_count",
-            "scaled_window_numerator": "Live/Reward/v2_strike_window_imitation_scaled_sample_count",
+            "eligible_denominator": "Live/motion/v2_strike_window_eligible_imitation_sample_count",
+            "scaled_window_numerator": "Live/motion/v2_quarter_scaled_strike_window_imitation_sample_count",
         },
         "base_deceleration": {
-            "eligible_denominator": "Live/Reward/base_decel_eligible_sample_count",
-            "nonzero_reward_numerator": "Live/Reward/base_decel_nonzero_reward_sample_count",
+            "eligible_denominator": "Live/racket_target/base_decel_eligible_sample_count",
+            "raw_kernel_sum": "Live/racket_target/base_decel_raw_kernel_sum",
+            "raw_kernel_nonzero_numerator": "Live/racket_target/base_decel_raw_kernel_nonzero_sample_count",
         },
     }
     existing = closure["existing_base_deceleration_metrics"]
@@ -140,23 +145,29 @@ def test_v1_v2_and_base_deceleration_activation_gaps_are_explicit_and_minimal():
     )
     activation = contract["activation"]
     assert activation["v1_free_wrist_linear_velocity"][
-        "telemetry_status_in_reference_source"
-    ] == "missing"
+        "telemetry_status_in_successor_source"
+    ] == "instrumented_probe_pending"
     assert activation["v2_strike_window_imitation_scale"][
-        "telemetry_status_in_reference_source"
-    ] == "missing"
+        "telemetry_status_in_successor_source"
+    ] == "instrumented_probe_pending"
     assert activation["base_deceleration"][
-        "telemetry_status_in_reference_source"
-    ] == "missing_eligible_denominator"
+        "telemetry_status_in_successor_source"
+    ] == "instrumented_probe_pending"
     assert activation["v1_free_wrist_linear_velocity"][
         "exclusion_must_equal_eligible"
     ] is True
     assert activation["v2_strike_window_imitation_scale"][
         "scaled_window_must_equal_eligible"
     ] is True
-    assert activation["base_deceleration"][
-        "nonzero_reward_must_not_exceed_eligible"
-    ] is True
+    base = activation["base_deceleration"]
+    assert base["denominator_definition"] == (
+        "pre_strike_and_not_in_hold_environment_samples_observed_every_command_step"
+    )
+    assert base["raw_kernel_nonzero_must_not_exceed_eligible"] is True
+    for arm in ("control", "treatment"):
+        assert base[arm]["eligible_denominator_must_be_positive"] is True
+        assert base[arm]["raw_kernel_sum_must_be_positive"] is True
+        assert base[arm]["raw_kernel_nonzero_numerator_must_be_positive"] is True
 
 
 def test_replacement_preserves_the_previous_science_recipe_but_not_its_namespace():

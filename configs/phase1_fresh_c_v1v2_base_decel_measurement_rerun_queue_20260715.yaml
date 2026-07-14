@@ -1,7 +1,7 @@
 schema_version: 1
 simulation_only: true
 launch_authorized: false
-preregistration_status: blocked_measurement_source_successor_required
+preregistration_status: activation_successor_source_pinned_strict_full_scene_probe_pending
 
 ssh:
   key: ~/.ssh/id_ed25519_runpod
@@ -33,17 +33,17 @@ shared_control:
   signed_face_guidance_weight: 0.0
   comparison_status: exact_same_source_matched_pair_required
 
-# 312669c is an exact, audited telemetry reference, not a launch-ready source:
-# it closes the five post-swing replay counters but does not contain the three
-# reward/mechanism activation denominators below, and it is not a descendant of
-# the latest terminal-asset hardening on main.  Before launch, a new commit must
-# contain both lineages, implement every missing tag, pass source tests, replace
-# x-source atomically, and pass its own strict full-scene terminal probe.
+# Historical 312669c closed only post-swing counters.  The exact successor below
+# now contains post-swing, V1, V2 and weight-independent base-decel ledgers on top
+# of current main.  This closes the source API gap only: its own strict full-scene
+# terminal probe is still missing, so neither row is launchable.
 instrumentation_closure:
   telemetry_reference_source_commit: 312669c7bd61f8fc8f5ea99c8e94cfc3ffae9b94
   required_main_hardening_commit: f00c49779174fdf43f861a29ceda0f985be04f31
   telemetry_reference_contains_required_main_hardening: false
-  source_rebind_required_before_launch: true
+  successor_source_commit: 1f0ca12ffd556dc25f6313df559fe0fd6eaee9e6
+  successor_contains_required_main_hardening: true
+  source_rebind_required_before_launch: false
   strict_full_scene_terminal_probe_required_after_rebind: true
   available_post_swing_replay_metrics:
     buffer_not_ready: Live/motion/post_swing_replay_buffer_not_ready_reset_count
@@ -51,16 +51,17 @@ instrumentation_closure:
     random_not_selected: Live/motion/post_swing_replay_random_not_selected_reset_count
     selected_numerator: Live/motion/post_swing_replay_selected_reset_count
     started_numerator: Live/motion/post_swing_replay_started_reset_count
-  missing_minimum_runtime_metrics:
+  successor_runtime_metrics:
     v1_free_wrist_linear_velocity:
-      eligible_denominator: Live/Reward/v1_free_wrist_vel_mimic_eligible_sample_count
-      exclusion_numerator: Live/Reward/v1_free_wrist_vel_mimic_excluded_sample_count
+      eligible_denominator: Live/motion/v1_velocity_mimic_eligible_sample_count
+      exclusion_numerator: Live/motion/v1_held_wrist_excluded_sample_count
     v2_strike_window_imitation_scale:
-      eligible_denominator: Live/Reward/v2_strike_window_imitation_eligible_sample_count
-      scaled_window_numerator: Live/Reward/v2_strike_window_imitation_scaled_sample_count
+      eligible_denominator: Live/motion/v2_strike_window_eligible_imitation_sample_count
+      scaled_window_numerator: Live/motion/v2_quarter_scaled_strike_window_imitation_sample_count
     base_deceleration:
-      eligible_denominator: Live/Reward/base_decel_eligible_sample_count
-      nonzero_reward_numerator: Live/Reward/base_decel_nonzero_reward_sample_count
+      eligible_denominator: Live/racket_target/base_decel_eligible_sample_count
+      raw_kernel_sum: Live/racket_target/base_decel_raw_kernel_sum
+      raw_kernel_nonzero_numerator: Live/racket_target/base_decel_raw_kernel_nonzero_sample_count
   existing_base_deceleration_metrics:
     weighted_reward_mean: Live/Reward/base_decel
     zero_masked_speed_mean: Live/racket_target/base_speed_xy_prestrike
@@ -93,34 +94,39 @@ decision_contract:
       realized_started_fraction_max: 0.30
     v1_free_wrist_linear_velocity:
       setting: true
-      telemetry_status_in_reference_source: missing
-      eligible_denominator_metric: Live/Reward/v1_free_wrist_vel_mimic_eligible_sample_count
-      exclusion_numerator_metric: Live/Reward/v1_free_wrist_vel_mimic_excluded_sample_count
+      telemetry_status_in_successor_source: instrumented_probe_pending
+      eligible_denominator_metric: Live/motion/v1_velocity_mimic_eligible_sample_count
+      exclusion_numerator_metric: Live/motion/v1_held_wrist_excluded_sample_count
       eligible_denominator_must_be_positive: true
       exclusion_numerator_must_be_positive: true
       exclusion_must_equal_eligible: true
     v2_strike_window_imitation_scale:
       setting: 0.25
-      telemetry_status_in_reference_source: missing
-      eligible_denominator_metric: Live/Reward/v2_strike_window_imitation_eligible_sample_count
-      scaled_window_numerator_metric: Live/Reward/v2_strike_window_imitation_scaled_sample_count
+      telemetry_status_in_successor_source: instrumented_probe_pending
+      counting_unit: imitation_reward_term_x_environment_sample
+      eligible_denominator_metric: Live/motion/v2_strike_window_eligible_imitation_sample_count
+      scaled_window_numerator_metric: Live/motion/v2_quarter_scaled_strike_window_imitation_sample_count
       eligible_denominator_must_be_positive: true
       scaled_window_numerator_must_be_positive: true
       scaled_window_must_equal_eligible: true
     base_deceleration:
-      telemetry_status_in_reference_source: missing_eligible_denominator
-      eligible_denominator_metric: Live/Reward/base_decel_eligible_sample_count
-      nonzero_reward_numerator_metric: Live/Reward/base_decel_nonzero_reward_sample_count
+      telemetry_status_in_successor_source: instrumented_probe_pending
+      denominator_definition: pre_strike_and_not_in_hold_environment_samples_observed_every_command_step
+      eligible_denominator_metric: Live/racket_target/base_decel_eligible_sample_count
+      raw_kernel_sum_metric: Live/racket_target/base_decel_raw_kernel_sum
+      raw_kernel_nonzero_numerator_metric: Live/racket_target/base_decel_raw_kernel_nonzero_sample_count
       existing_weighted_reward_metric: Live/Reward/base_decel
-      nonzero_reward_must_not_exceed_eligible: true
+      raw_kernel_nonzero_must_not_exceed_eligible: true
       control:
         weight: 0.0
         eligible_denominator_must_be_positive: true
-        nonzero_reward_numerator_must_equal: 0
+        raw_kernel_sum_must_be_positive: true
+        raw_kernel_nonzero_numerator_must_be_positive: true
       treatment:
         weight: 1.0
         eligible_denominator_must_be_positive: true
-        nonzero_reward_numerator_must_be_positive: true
+        raw_kernel_sum_must_be_positive: true
+        raw_kernel_nonzero_numerator_must_be_positive: true
   milestone_rules:
     200:
       purpose: direction_only_after_all_activation_and_finite_checks
@@ -164,12 +170,11 @@ x-exam: &exam
   path: /workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.schedule.json
   family: signed_face_rebound_k100_v1
 
-# Exact reference source for the already-frozen five-tag interface.  It is
-# intentionally insufficient for launch; the blockers above require a new
-# source binding rather than mutating this checkout in place.
+# Exact activation successor.  It is source-complete but still intentionally
+# blocked until this exact checkout passes its own strict full-scene probe.
 x-source: &source
-  checkout: /workspace/codexschema/nohope_p1_post_swing_activation_312669c
-  commit: 312669c7bd61f8fc8f5ea99c8e94cfc3ffae9b94
+  checkout: /workspace/codexschema/nohope_p1_activation_successor_1f0ca12
+  commit: 1f0ca12ffd556dc25f6313df559fe0fd6eaee9e6
   ignored_runtime_asset:
     target_relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
     donor:
@@ -273,7 +278,7 @@ jobs:
     human_name: fresh C V1 plus V2 measurement replacement control with base deceleration off
     action: *action
     status: blocked
-    blocker: source 312669c closes only post-swing replay counters; a new exact source must also contain f00c497 hardening plus V1, V2, and base-deceleration denominators, then pass a strict full-scene terminal probe
+    blocker: exact activation successor 1f0ca12 is pinned but has not passed its own strict full-scene terminal probe; keep both cells blocked and launch_authorized false
     motion: *motion
     bank: *bank
     exam: *exam
