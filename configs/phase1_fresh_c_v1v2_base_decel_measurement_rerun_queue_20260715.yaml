@@ -1,7 +1,7 @@
 schema_version: 1
 simulation_only: true
-launch_authorized: false
-preregistration_status: inference_fix_rebound_hard_slot_strict_full_scene_probe_pending
+launch_authorized: true
+preregistration_status: exact_inference_fix_terminal_full_scene_probe_passed
 
 ssh:
   key: ~/.ssh/id_ed25519_runpod
@@ -48,6 +48,7 @@ instrumentation_closure:
   hard_slot_scheduler_commit: 8b0a08414aef390d3b45664c2cd3746e87453fff
   source_rebind_required_before_launch: false
   strict_full_scene_terminal_probe_required_after_rebind: true
+  strict_full_scene_terminal_probe_satisfied: true
   available_post_swing_replay_metrics:
     buffer_not_ready: Live/motion/post_swing_replay_buffer_not_ready_reset_count
     eligible_denominator: Live/motion/post_swing_replay_eligible_reset_count
@@ -73,6 +74,26 @@ instrumentation_closure:
     zero_masked_speed_mean: Live/racket_target/base_speed_xy_prestrike
     sufficient_for_activation: false
     reason: neither existing mean exposes the pre-strike and not-in-hold eligible sample denominator
+
+strict_full_scene_probe_evidence:
+  attempt_id: inferencefix_2c2d70d_pod2_gpu1_a1
+  pod: pod2
+  gpu: 1
+  result_path: /workspace/codexschema/phase1_fresh_c_v1v2_base_decel_measurement_rerun_20260715/runs/_full_scene_probes/fresh_c_v1v2_base_decel_measurement_control_v4/2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e/pod2/gpu1/inferencefix_2c2d70d_pod2_gpu1_a1/probe_result.json
+  result_file_sha256: 4b12854c5deca075ddf886fea3c5806aa0838b1d2bc9d3739e2fa13cd1840b27
+  result_content_sha256: 4cbc9fc0bf7a5e5bdc5dfaa06386463e325dab141945344d0b0064b1b55fb083
+  claim_content_sha256: 52298bf11cb16e11cd67a198ca713c542423d576d1052e4178e42868b9bcfb9f
+  checkpoint_sha256: 68d9809bdc29c041a21fe775006adeafeacf6ff0a1d7b86cbbfe7bd042598713
+  hard_contract_sha256: 451cda47227f8e78e4f3dcae3cbf22d7ddf88b4c5fbaf348e698963d8bc12291
+  source_asset_receipt_sha256: bf6aa5d922a628f398a6b27d4e37e4440f08e15dda4b8234781f0b0a396c5b6d
+  actual_num_envs: 4096
+  physical_ball_enabled: true
+  physical_scene_entities: [pb_ball, pb_table, pb_table_visual]
+  embedded_iteration: 1
+  nonfinite_floating_elements: 0
+  isolated_process_group_empty: true
+  terminal_status: passed
+  unlock_authorized: true
 
 decision_contract:
   evidence_scope: paired_training_diagnostics_only
@@ -176,8 +197,8 @@ x-exam: &exam
   path: /workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.schedule.json
   family: signed_face_rebound_k100_v1
 
-# Exact inference-reset successor.  It is source-complete but intentionally
-# blocked until this exact checkout passes its own strict full-scene probe.
+# Exact inference-reset successor.  Its own immutable strict full-scene probe
+# above passed before the two science rows were changed to ready.
 x-source: &source
   checkout: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d
   commit: 2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e
@@ -283,8 +304,8 @@ jobs:
     id: fresh_c_v1v2_base_decel_measurement_control_v4
     human_name: fresh C V1 plus V2 inference-fixed measurement control with base deceleration off
     action: *action
-    status: blocked
-    blocker: exact inference-fixed successor 2c2d70d is pinned but has not passed its own strict full-scene terminal probe; keep both cells blocked and launch_authorized false
+    status: ready
+    blocker: null
     motion: *motion
     bank: *bank
     exam: *exam

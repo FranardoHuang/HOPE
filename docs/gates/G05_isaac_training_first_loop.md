@@ -2091,5 +2091,7 @@ Pod2 GPU0 被一康占用时，旧 `preferred_slot` 只保证“优先”，目�
 full-scene probe 与 finalizer 均在 SSH 前强制同一 hard slot。泛化负测覆盖“GPU1 满载时该 job 不落
 GPU0/GPU2、GPU0/GPU2 独立任务仍可调度”、非 dispatch required slot、ambiguous 双字段以及底层 claim
 绕过。该字段不提供 matched pair 原子发射。V1+V2×base-decel replacement 已以 fresh `v4` namespace 改绑
-exact `2c2d70d...`，control/treatment 分别 required Pod2 GPU1/GPU2；但 `launch_authorized=false` 且 fresh
-4096-env probe 尚未通过，因此没有科学 trainer，G05 继续 `Partial`。
+exact `2c2d70d...`，control/treatment 分别 required Pod2 GPU1/GPU2。唯一 fresh 4096-env probe 已完成两个
+update 并自然退出；finalizer 绑定 actual env、物理球/桌三实体、face179、31/31 零摩擦、schema-3、finite
+model、source/asset closure 与空 PGID，result file SHA-256 `4b12854c...0b27`。queue 已显式消费 receipt，
+`launch_authorized=true`、两臂 ready；尚无 science checkpoint 或 activation/行为结果，G05 继续 `Partial`。

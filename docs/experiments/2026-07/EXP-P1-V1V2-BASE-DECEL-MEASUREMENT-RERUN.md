@@ -1,7 +1,7 @@
 # EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN — 补齐 activation 后重跑底座减速配对
 
-- 状态：`blocked`（`0f3900a...` 的 strict full-scene probe 已抓到 inference-counter logger 真 bug；
-  修复源码已重绑 exact `2c2d70d...`，但 fresh probe 尚未终档通过）
+- 状态：`ready`（`0f3900a...` 的 probe 抓到 inference-counter logger 真 bug；修复源码 exact
+  `2c2d70d...` 的 fresh strict probe 已自然终档通过并被 queue 显式消费）
 - 阶段/轴：Phase 1 fresh C；组合击球精度下，底座减速是否有净收益
 - 集成小目标：保住击球精度信号，同时降低击球前底座速度与击球前摔倒率
 - 人类负责人：Franco
@@ -60,7 +60,23 @@ counters、V1/V2 execution counters、base-decel raw observer 和 runner logger�
 inference mode，未改 Reward、scene、题库或 optimizer。资源隔离由 main
 `8b0a08414aef390d3b45664c2cd3746e87453fff` 的
 [`required_slot`](../../DEFINITIONS.md#required-slot) 合同提供；source/queue 已精确绑定，但 fresh strict probe
-仍 pending，故科学 pair 继续 blocked。
+现已通过，终档证据见下节；科学 pair 只因此解锁单 seed 训练，不解锁 judge、第二 seed 或晋级。
+
+## `2c2d70d` fresh strict probe 通过
+
+唯一 attempt `inferencefix_2c2d70d_pod2_gpu1_a1` 使用 Pod2 GPU1、4096 environments 和与 control
+逐字相同的完整 scene recipe，完成两个 update 后自然退出。exact PGID `378694` 已为空；finalizer 重新核验
+physical ball 与 `pb_ball/pb_table/pb_table_visual`、face179、31/31 零关节摩擦、schema-3 hard contract、
+source/ignored asset closure、checkpoint filename=embedded iteration=`1`，以及 76 个 tensor 的
+1,762,715 个浮点元素全部 finite。fatal 计数全零。
+
+- `probe_result.json` file SHA-256：`4b12854c5deca075ddf886fea3c5806aa0838b1d2bc9d3739e2fa13cd1840b27`
+- result content SHA-256：`4cbc9fc0bf7a5e5bdc5dfaa06386463e325dab141945344d0b0064b1b55fb083`
+- claim content SHA-256：`52298bf11cb16e11cd67a198ca713c542423d576d1052e4178e42868b9bcfb9f`
+- model/hard-contract SHA-256：`68d9809b...8713` / `451cda47...2291`
+
+queue 以这些 exact 字段把 `launch_authorized` 改为 true、两臂改为 ready；receipt 只授权这对 fresh v4
+science namespace，不是行为成绩。
 
 ## `0f3900a` strict probe 的两次不可覆盖负结果
 
@@ -120,14 +136,14 @@ sum 都要 finite、非负。
 | 字段 | 冻结值 |
 | --- | --- |
 | 失败 source | clean exact `0f3900a612863faf326dca6ad3e8d38bfe8df3c9`；fatal evidence 冻结，永久 NO-LAUNCH |
-| replacement source | clean exact `2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e`；strict terminal probe pending |
+| replacement source | clean exact `2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e`；strict terminal probe passed |
 | 初始化/seed | fresh / `3`；只买一个 seed |
 | 预算 | `4096 environments × 1001 updates`；每 `100` 保存；milestone `200/500/1000` |
 | 动作/题库/plant | 与原配对逐字相同的 v4rg runtime-order 正反手、schema-3 rebound bank、zero-joint-friction 训练协议 |
 | 共同机制 | V1=`true`；V2=`0.25`；post-swing replay=`0.25`；qdot hinge=`0`；conditional face=`0` |
 | 唯一差异 | control `base_decel_weight=0.0`；treatment `base_decel_weight=1.0` |
 | 调度 | 只允许 Pod2；control 硬绑定 GPU1，treatment 硬绑定 GPU2；GPU0 与 Pod1 均不得接收 Codex 作业 |
-| 权限 | `launch_authorized=false`；两格 `status=blocked`；第二 seed/judge/promotion 均未授权 |
+| 权限 | `launch_authorized=true`；两格 `status=ready`；第二 seed/judge/promotion 均未授权 |
 
 fresh namespaces：
 
@@ -158,11 +174,11 @@ fresh namespaces：
 
 | 运行 | 状态 | 证据 | 有效性 |
 | --- | --- | --- | --- |
-| measurement control，base-decel 关 | blocked | exact `2c2d70d`、Pod2 GPU1；fresh strict probe pending | probe 必须自然终档并被显式消费 |
-| measurement treatment，base-decel 权重 1 | blocked | exact `2c2d70d`、Pod2 GPU2；唯一 Reward 权重 delta | control source 门未过，不得发射 |
+| measurement control，base-decel 关 | ready | exact `2c2d70d`、Pod2 GPU1；fresh strict probe passed | 可与 treatment 同一 fill 顺序发射 |
+| measurement treatment，base-decel 权重 1 | ready | exact `2c2d70d`、Pod2 GPU2；唯一 Reward 权重 delta | 可在 control 越过 first iteration 后发射 |
 
-- 决定：`inconclusive`；尚无 replacement runtime。
-- 当前阻塞不是 Reward 负结果；`0f3900a` 的 runtime logger 已证伪，`2c2d70d` 的 strict terminal probe 仍未闭合。
+- 决定：`inconclusive`；source/scene 门已过，尚无 replacement science runtime。
+- `0f3900a` 的 runtime logger 已证伪；`2c2d70d` 只解锁同配方单 seed pair，不追认任何 Reward 效果。
 - 本记录不建立算力优先级；是否排队仍只由 main 的 `docs/NOW.md` 统一队列决定。
 - 不授权 Isaac/MuJoCo judge、第二 seed、正式 setting、部署或真机。
 

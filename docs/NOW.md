@@ -52,7 +52,11 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
   canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。exact GMR runtime source gate 也已进入
   `main` 并通过全回归；Pod 上的 `inspect/consume` 尚未执行，所以还不是“动作会打球”。
-- **当前运行态：** Fresh C 的五条单 seed 机制格均已越过 `+500` 且 checkpoint
+- **当前运行态：** 2026-07-15，V1+V2×base-decel 的 inference-counter 修复 source `2c2d70d...` 已通过
+  Pod2 GPU1 的 4096-env strict full-scene 自然终档门；control/treatment 以 fresh v4 namespace 分别 hard-bound
+  GPU1/GPU2 并变为 ready，GPU0 仍只留给 Yikang。此时尚未创建 science claim，且不授权第二 seed/judge/晋级。
+
+  Fresh C 的五条单 seed 机制格均已越过 `+500` 且 checkpoint
   finite/contract/lineage 正确。V1+V2 出现当前最强击球精度信号（composite `0.0893`、normal pass
   `0.268`），但平衡债仍高；V2 单独格明显落后，已列为可替换且不复制 seed。base-decel、V1 和
   post-swing 保到 `+1000` 看权衡是否收敛。qdot-limit 第一次发射在第 0 update 的 A3 URDF import 阶段

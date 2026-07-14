@@ -42,22 +42,27 @@ def _override_map(arguments: list[str]) -> dict[str, str]:
     return result
 
 
-def test_replacement_pair_is_pod2_only_and_cannot_plan_a_launch():
+def test_replacement_pair_is_pod2_only_and_plans_exact_hard_slots_after_probe():
     queue = Q.load_queue(QUEUE_PATH)
 
-    assert queue["launch_authorized"] is False
+    assert queue["launch_authorized"] is True
     assert queue["preregistration_status"] == (
-        "inference_fix_rebound_hard_slot_strict_full_scene_probe_pending"
+        "exact_inference_fix_terminal_full_scene_probe_passed"
     )
     assert queue["dispatch_pods"] == ["pod2"]
     assert {slot.pod for slot in Q.slots(queue)} == {"pod2"}
-    assert [job["status"] for job in queue["jobs"]] == ["blocked", "blocked"]
-    assert all("2c2d70d" in job["blocker"] for job in queue["jobs"])
-    assert all("strict full-scene terminal probe" in job["blocker"] for job in queue["jobs"])
-    assert Q.cmd_plan(queue, live=False)["assignments"] == []
+    assert [job["status"] for job in queue["jobs"]] == ["ready", "ready"]
+    assert all(job["blocker"] is None for job in queue["jobs"])
+    assert [
+        (row["job_id"], row["resource"])
+        for row in Q.cmd_plan(queue, live=False)["assignments"]
+    ] == [
+        ("fresh_c_v1v2_base_decel_measurement_control_v4", "pod2/gpu1"),
+        ("fresh_c_v1v2_base_decel_measurement_w1_v4", "pod2/gpu2"),
+    ]
 
 
-def test_successor_source_contains_required_lineages_but_probe_is_still_pending():
+def test_successor_source_and_exact_terminal_probe_evidence_are_bound():
     queue = Q.load_queue(QUEUE_PATH)
     closure = queue["instrumentation_closure"]
 
@@ -81,6 +86,34 @@ def test_successor_source_contains_required_lineages_but_probe_is_still_pending(
     assert closure["successor_contains_required_main_hardening"] is True
     assert closure["source_rebind_required_before_launch"] is False
     assert closure["strict_full_scene_terminal_probe_required_after_rebind"] is True
+    assert closure["strict_full_scene_terminal_probe_satisfied"] is True
+
+    evidence = queue["strict_full_scene_probe_evidence"]
+    assert evidence["result_file_sha256"] == (
+        "4b12854c5deca075ddf886fea3c5806aa0838b1d2bc9d3739e2fa13cd1840b27"
+    )
+    assert evidence["result_content_sha256"] == (
+        "4cbc9fc0bf7a5e5bdc5dfaa06386463e325dab141945344d0b0064b1b55fb083"
+    )
+    assert evidence["claim_content_sha256"] == (
+        "52298bf11cb16e11cd67a198ca713c542423d576d1052e4178e42868b9bcfb9f"
+    )
+    assert evidence["checkpoint_sha256"] == (
+        "68d9809bdc29c041a21fe775006adeafeacf6ff0a1d7b86cbbfe7bd042598713"
+    )
+    assert evidence["hard_contract_sha256"] == (
+        "451cda47227f8e78e4f3dcae3cbf22d7ddf88b4c5fbaf348e698963d8bc12291"
+    )
+    assert evidence["actual_num_envs"] == 4096
+    assert evidence["physical_ball_enabled"] is True
+    assert evidence["physical_scene_entities"] == [
+        "pb_ball", "pb_table", "pb_table_visual"
+    ]
+    assert evidence["embedded_iteration"] == 1
+    assert evidence["nonfinite_floating_elements"] == 0
+    assert evidence["isolated_process_group_empty"] is True
+    assert evidence["terminal_status"] == "passed"
+    assert evidence["unlock_authorized"] is True
 
     for job in queue["jobs"]:
         assert job["source"]["checkout"] == (
@@ -271,7 +304,7 @@ def test_fresh_namespaces_have_no_old_attempt_or_placeholder():
         assert job["run_dir"].startswith(
             "/workspace/codexschema/phase1_fresh_c_v1v2_base_decel_measurement_rerun_20260715/runs/"
         )
-        assert job["status"] == "blocked"
+        assert job["status"] == "ready"
 
 
 def test_behavior_rules_cannot_run_before_activation_or_promote():

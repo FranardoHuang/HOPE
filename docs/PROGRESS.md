@@ -13,10 +13,14 @@
 
 ## 2026-07-15
 
+- exact `2c2d70d...` 的唯一 4096-env full-scene probe 已在 Pod2 GPU1 完成两个 update 并自然退出；finalizer
+  复核 actual env、物理球/桌三实体、face179、31/31 零摩擦、schema-3、76 tensors 全 finite、fatal0、
+  source/asset closure 与空 PGID，result file SHA-256 `4b12854c...0b27`。queue 已显式消费 receipt，fresh v4
+  control/treatment 变为 ready 且 `launch_authorized=true`；这不授权 judge、第二 seed或晋级。
+
 - inference-counter 修复后的 replacement pair 已改绑 clean exact `2c2d70d...`，并换用从未发射的 `v4`
   namespace；control/treatment 由 main `8b0a084...` 分别 hard-bound 到 Pod2 GPU1/GPU2，Pod1 与一康 GPU0
-  均不在发射路径。两臂仍 `blocked`、`launch_authorized=false`；须先水合独立 source 并让 fresh 4096-env
-  strict probe 自然终档，当前没有科学 trainer。
+  均不在发射路径。其 source/asset/strict probe 门现已闭合；两臂 ready，但本条记账时尚未创建科学 claim。
 
 - 轻量训练 harness 新增 `required_slot` 硬绑定：目标 GPU 满载时本 job 不 fallback，同时不饿死其他槽的
   独立任务；与 `preferred_slot` 互斥，science claim、warmup、probe/finalizer 都在 SSH 前执行检查，防止
