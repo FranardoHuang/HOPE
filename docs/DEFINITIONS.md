@@ -69,6 +69,9 @@
 | `plant` | 机器人与环境在仿真里的物理对象：质量、惯量、摩擦、驱动器和数值积分都在内。 |
 | <a id="qdot-limit-hinge"></a>`qdot-limit hinge` / 关节速度限位铰链惩罚 | 只在实际关节速度超过各自运行时速度上限的一定比例后开始收费：`mean(relu(abs(qd)/limit-margin)^2)`。它读取 31 个 articulation 关节的真实速度和同顺序真实上限，不是 action-rate 平滑的别名；权重为非正惩罚，默认 `0` 表示关闭。 |
 | <a id="conditional-face-guidance"></a>`racket_face_conditional_guidance_weight` / 不逃离就绪区的固定预算 Reward | 默认关闭的非正拍面/就绪联合塑形。它只在击球时间窗收费：未进入触点/完整拍速紧支撑门时保持固定最大成本，进入后按就绪度把成本连续换成 15° 以上的 signed-face 误差。位置或拍速越就绪，成本绝不会更高；在外门之外拍面梯度为零，策略不能靠故意离开门来免罚。输出 `[0,1]`，权重绝对值是每个时间窗 step 的最大罚金。它不替代 signed-face honesty、碰撞/跌倒或 Gate3。 |
+| <a id="v1-free-wrist-velocity"></a>`V1` / 持拍手腕线速度模仿释放 | 在 body linear-velocity imitation 中排除持拍手腕，让球拍速度主要由击球目标 Reward 决定；位置、姿态、角速度模仿和所有安全约束仍保留。`V1=true` 只表示该排除已配置，必须另以 eligible denominator 与 exclusion numerator 证明运行时真的作用。 |
+| <a id="v2-strike-window-imitation"></a>`V2` / 击球窗动作模仿四分之一 | 仅在预注册击球时间窗把动作模仿总尺度设为 `0.25`，给击球目标更多控制预算；窗外模仿不变。`V2=0.25` 必须另以击球窗 eligible denominator 与 scaled numerator 证明运行时真的作用。 |
+| <a id="post-swing-replay-start"></a>`post-swing replay start` / 随挥后状态重放起点 | 策略完成挥拍后把自身状态写进环形缓冲；后续真实 episode reset 在缓冲已达到最小填充量时，按 `post_swing_start_prob` 从这些状态起步，以训练吸收上一拍余势和恢复平衡。它不是 carry-state 连续来球，也不是 learned reset；比较概率前必须记录 buffer-ready reset denominator 与实际 replay-start numerator。 |
 | `SZ` | fresh factorial 中的一格：`S`=正反手共用同一拍面语义，`Z`=31 个关节摩擦置零。它是当前执行合同的 formal target，不是标定后的真机 plant。 |
 | `SP / LZ / LP` | 同一 factorial 的其他格：`L`=旧的正反手异号拍面语义；`P`=历史非零摩擦数字直填。`P` 存在单位/语义问题，因此只作诊断。 |
 | `SC` | 计划中的“共用拍面语义+正确标定摩擦” plant。必须先有物理潜变量模型和 PhysX/MuJoCo 独立 adapter，不能把 `SP` 改名当成 `SC`。 |
