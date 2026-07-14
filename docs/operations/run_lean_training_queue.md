@@ -5,13 +5,18 @@
 full-scene probe 已通过，两份队列已显式把 [`launch_authorized`](../DEFINITIONS.md#launch-authorized) 改为
 `true`，conditional 与 V1+V2×base-decel 两组科学配对当时均为 `ready`。probe 是非科学启动/终档门，
 不是行为晋级，G05 仍为 `Partial`。显式解锁后，conditional control/treatment 已分别在 Pod2
-GPU1/GPU2 越过 first iteration（PID=PGID `357023/357679`），尚无 checkpoint 早判。interaction control
+GPU1/GPU2 越过 first iteration（PID=PGID `357023/357679`），paired `model_200` 身份门通过；但
+step `180..200` 的 treatment gate/cost/reward 全零，当前 conditional setting 已判
+activation-invalid。interaction control
 PID=PGID `358331` 则在 first iteration 前的 dynamic URDF import 以 `malloc(): invalid size (unsorted)`、
 `rc=134` 自然退出，treatment 未发射；claim/namespace 保全，这不是 interaction Reward 或行为失败。旧
 control 行已 `rejected` 且禁止重发；逐字相同配方的新 `control_retry_v2` 与原 treatment 为 `ready`，只能用
 同一个 `fill --count 2` 事务在 retry 越过 first iteration 后再发 treatment。该事务已按序完成：retry-v2
 PID=PGID `359240` 在 Pod2 GPU1、treatment PID=PGID `359872` 在 GPU2，二者均已越过 first iteration；
-interaction pair 现 live，但尚无 checkpoint/早判。
+interaction pair 现 live，paired `model_200` 身份也通过；但 V1/V2/base-decel 的计数级
+denominator/numerator 不全，只记 instrumentation-blocked，不解释 Reward 效果。新 replacement 队列保持
+`launch_authorized=false` / `blocked`，必须先补齐 execution-path counters 并用新 exact source 重跑 strict
+full-scene probe，不得用旧 caeb receipt 或现役 live 曲线解锁。
 
 qdot matched-control 的首次冷启动也在 dynamic URDF import/scene creation 前停住；相同 warning 在成功臂
 同样存在，不能拿 warning 字面当根因。旧 namespace 已保全并拒绝，只有 unchanged retry-v2 可再试一次。
