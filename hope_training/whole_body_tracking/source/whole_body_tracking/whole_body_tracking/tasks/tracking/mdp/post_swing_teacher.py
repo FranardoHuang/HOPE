@@ -34,6 +34,10 @@ SCHEMA_VERSION = 2
 ARTIFACT_KIND = "hope_post_swing_teacher_state_receipt"
 ATTESTATION_KIND = "hope_post_swing_teacher_capture_attestation"
 CAPTURE_RESULT_KIND = "hope_post_swing_natural_wrap_capture_result"
+CAPTURE_CLAIM_KIND = "hope_post_swing_natural_wrap_exclusive_claim"
+CAPTURE_RESULT_NAME = "natural_wrap_capture.json"
+CAPTURE_STATE_NAME = "natural_wrap_states.npz"
+CAPTURE_CLAIM_NAME = "natural_wrap_capture.claim.json"
 CAPTURE_CONTRACT = {
     "event": "natural_clip_wrap",
     "wrap_teleport": False,
@@ -81,6 +85,8 @@ _ATTESTATION_KEYS = {
     "artifact_kind",
     "capture_result_sha256",
     "capture_result_relative_path",
+    "capture_claim_sha256",
+    "capture_claim_relative_path",
     "checkpoint",
     "hard_contract",
     "checkpoint_source",
@@ -98,9 +104,25 @@ _ATTESTED_CHECKPOINT_SOURCE_KEYS = {"commit", "launch_claim_content_sha256"}
 _ATTESTED_CAPTURE_SOURCE_KEYS = {
     "commit",
     "clean",
-    "writer_source_sha256",
-    "callback_source_sha256",
+    "producer_source_sha256",
     "attestor_source_sha256",
+}
+_CAPTURE_EVIDENCE_KEYS = {
+    "producer_source_sha256",
+    "runtime_hard_contract_sha256",
+    "exclusive_claim_sha256",
+    "exclusive_claim_relative_path",
+    "no_clobber",
+}
+_CAPTURE_CLAIM_KEYS = {
+    "schema_version",
+    "artifact_kind",
+    "producer_source_sha256",
+    "runtime_hard_contract_sha256",
+    "target_count",
+    "motion_clips",
+    "joint_names",
+    "exclusive_create",
 }
 _NPZ_KEYS = {
     "root_state_origin_relative",
@@ -181,156 +203,6 @@ def _publish_bytes_no_clobber(path: Path, raw: bytes, label: str) -> None:
                 os.fsync(dir_fd)
             finally:
                 os.close(dir_fd)
-
-
-_NATURAL_WRAP_CAPABILITY = object()
-
-
-class NaturalWrapCaptureWriter:
-    """One-shot raw-state writer callable only from the reviewed natural-wrap seam.
-
-    This writer deliberately does *not* attest a checkpoint.  It publishes a no-clobber callback
-    result; ``scripts/attest_post_swing_teacher.py`` independently binds that result to the actual
-    checkpoint, launch claim, adjacent schema-3 contract and clean source before minting the only
-    receipt accepted by :func:`load_post_swing_teacher_states`.
-    """
-
-    RESULT_NAME = "natural_wrap_capture.json"
-    STATE_NAME = "natural_wrap_states.npz"
-
-    def __init__(
-        self,
-        output_dir: str | Path,
-        *,
-        target_count: int,
-        motion_sha256: Sequence[str],
-        joint_names: Sequence[str],
-        callback_source_path: str | Path,
-    ) -> None:
-        self.output_dir = Path(output_dir)
-        if self.output_dir.is_symlink() or not self.output_dir.is_dir():
-            raise PostSwingTeacherError("natural-wrap capture output must be an existing directory")
-        if os.path.lexists(self.output_dir / self.RESULT_NAME) or os.path.lexists(
-            self.output_dir / self.STATE_NAME
-        ):
-            raise PostSwingTeacherError(
-                "natural-wrap capture output already exists; one-shot replay is forbidden"
-            )
-        self.target_count = _positive_int(target_count, "natural-wrap capture target_count")
-        self.motion_clips = [
-            {"index": index, "sha256": _require_sha(value, f"motion SHA {index}")}
-            for index, value in enumerate(motion_sha256)
-        ]
-        self.joint_names = [str(value) for value in joint_names]
-        if (
-            not self.joint_names
-            or any(not value for value in self.joint_names)
-            or len(set(self.joint_names)) != len(self.joint_names)
-        ):
-            raise PostSwingTeacherError("capture joint names must be non-empty and unique")
-        self.writer_source_sha256 = sha256_file(Path(__file__))
-        self.callback_source_sha256 = sha256_file(Path(callback_source_path))
-        self._roots: list[np.ndarray] = []
-        self._joint_pos: list[np.ndarray] = []
-        self._joint_vel: list[np.ndarray] = []
-        self._count = 0
-        self._callback_batches = 0
-        self._complete = False
-        self._runtime_hard_contract_sha256: str | None = None
-
-    @property
-    def complete(self) -> bool:
-        return self._complete
-
-    def _bind_reviewed_runtime_hard_contract(self, sha256: str) -> None:
-        if self._count != 0 or self._runtime_hard_contract_sha256 is not None:
-            raise PostSwingTeacherError("capture runtime contract may be bound exactly once before stepping")
-        self._runtime_hard_contract_sha256 = _require_sha(
-            sha256, "capture runtime hard-contract SHA-256"
-        )
-
-    def _append_from_natural_wrap(
-        self,
-        capability: object,
-        root_state_origin_relative: np.ndarray,
-        joint_pos: np.ndarray,
-        joint_vel: np.ndarray,
-    ) -> None:
-        if capability is not _NATURAL_WRAP_CAPABILITY:
-            raise PostSwingTeacherError("natural-wrap capture requires the private callback capability")
-        if self._complete:
-            return
-        if self._runtime_hard_contract_sha256 is None:
-            raise PostSwingTeacherError(
-                "natural-wrap capture cannot step before reviewed runtime-contract equality"
-            )
-        root = np.asarray(root_state_origin_relative)
-        pos = np.asarray(joint_pos)
-        vel = np.asarray(joint_vel)
-        rows = min(root.shape[0] if root.ndim == 2 else 0, self.target_count - self._count)
-        if (
-            rows <= 0
-            or root.dtype != np.float32
-            or pos.dtype != np.float32
-            or vel.dtype != np.float32
-            or root.shape[1:] != (13,)
-            or pos.shape != (root.shape[0], len(self.joint_names))
-            or vel.shape != pos.shape
-            or not np.isfinite(root).all()
-            or not np.isfinite(pos).all()
-            or not np.isfinite(vel).all()
-        ):
-            raise PostSwingTeacherError("natural-wrap callback supplied an invalid runtime state batch")
-        self._roots.append(np.array(root[:rows], copy=True))
-        self._joint_pos.append(np.array(pos[:rows], copy=True))
-        self._joint_vel.append(np.array(vel[:rows], copy=True))
-        self._count += rows
-        self._callback_batches += 1
-        if self._count == self.target_count:
-            self._publish()
-
-    def _publish(self) -> None:
-        root = np.concatenate(self._roots, axis=0)
-        joint_pos = np.concatenate(self._joint_pos, axis=0)
-        joint_vel = np.concatenate(self._joint_vel, axis=0)
-        buffer = io.BytesIO()
-        np.savez(
-            buffer,
-            root_state_origin_relative=root,
-            joint_pos=joint_pos,
-            joint_vel=joint_vel,
-        )
-        state_bytes = buffer.getvalue()
-        state_path = self.output_dir / self.STATE_NAME
-        result_path = self.output_dir / self.RESULT_NAME
-        _publish_bytes_no_clobber(state_path, state_bytes, "natural-wrap state payload")
-        result = {
-            "schema_version": 1,
-            "artifact_kind": CAPTURE_RESULT_KIND,
-            "capture_contract": dict(CAPTURE_CONTRACT),
-            "producer": {
-                "callback_method": "MotionCommand._capture_post_swing_states",
-                "writer_source_sha256": self.writer_source_sha256,
-                "callback_source_sha256": self.callback_source_sha256,
-                "runtime_hard_contract_sha256": self._runtime_hard_contract_sha256,
-                "no_clobber": True,
-            },
-            "motion_clips": list(self.motion_clips),
-            "states": {
-                "relative_path": self.STATE_NAME,
-                "sha256": hashlib.sha256(state_bytes).hexdigest(),
-                "count": self._count,
-                "root_shape": list(root.shape),
-                "joint_pos_shape": list(joint_pos.shape),
-                "joint_vel_shape": list(joint_vel.shape),
-                "joint_names": list(self.joint_names),
-            },
-            "callback_batches": self._callback_batches,
-        }
-        _publish_bytes_no_clobber(
-            result_path, _canonical_json_bytes(result), "natural-wrap capture result"
-        )
-        self._complete = True
 
 
 def sha256_file(path: str | Path) -> str:
@@ -542,7 +414,7 @@ def load_post_swing_teacher_states(
     capture_result_sha = _require_sha(
         attestation["capture_result_sha256"], "attestation.capture_result_sha256"
     )
-    if attestation["capture_result_relative_path"] != NaturalWrapCaptureWriter.RESULT_NAME:
+    if attestation["capture_result_relative_path"] != CAPTURE_RESULT_NAME:
         raise PostSwingTeacherError("attestation does not bind the fixed no-clobber capture result")
     capture_result_path = _payload_path(
         receipt_path, attestation["capture_result_relative_path"]
@@ -553,6 +425,22 @@ def load_post_swing_teacher_states(
     if hashlib.sha256(capture_result_bytes).hexdigest() != capture_result_sha:
         raise PostSwingTeacherError("natural-wrap capture result SHA-256 mismatch")
     capture_result = _strict_json_bytes(capture_result_bytes, "natural-wrap capture result")
+    capture_claim_sha = _require_sha(
+        attestation["capture_claim_sha256"], "attestation.capture_claim_sha256"
+    )
+    if attestation["capture_claim_relative_path"] != CAPTURE_CLAIM_NAME:
+        raise PostSwingTeacherError("attestation does not bind the fixed exclusive capture claim")
+    capture_claim_path = _payload_path(
+        receipt_path, attestation["capture_claim_relative_path"]
+    )
+    capture_claim_bytes = _read_regular_file_once(
+        capture_claim_path, "natural-wrap exclusive capture claim"
+    )
+    if hashlib.sha256(capture_claim_bytes).hexdigest() != capture_claim_sha:
+        raise PostSwingTeacherError("natural-wrap exclusive claim SHA-256 mismatch")
+    capture_claim = _strict_json_bytes(
+        capture_claim_bytes, "natural-wrap exclusive capture claim"
+    )
     checkpoint_att = _require_exact_keys(
         attestation["checkpoint"], _ATTESTED_CHECKPOINT_KEYS, "attestation.checkpoint"
     )
@@ -577,8 +465,7 @@ def load_post_swing_teacher_states(
         ("checkpoint source commit", checkpoint_source["commit"], _COMMIT),
         ("checkpoint source claim", checkpoint_source["launch_claim_content_sha256"], _SHA256),
         ("capture source commit", capture_source["commit"], _COMMIT),
-        ("capture writer source", capture_source["writer_source_sha256"], _SHA256),
-        ("capture callback source", capture_source["callback_source_sha256"], _SHA256),
+        ("capture producer source", capture_source["producer_source_sha256"], _SHA256),
         ("capture attestor source", capture_source["attestor_source_sha256"], _SHA256),
     ):
         _require_sha(value, label, pattern=pattern)
@@ -676,33 +563,51 @@ def load_post_swing_teacher_states(
     if joint_limits != runtime_joint_limits:
         raise PostSwingTeacherError("teacher joint velocity limits differ from runtime plant limits")
 
+    capture_claim = _require_exact_keys(
+        capture_claim, _CAPTURE_CLAIM_KEYS, "natural-wrap exclusive capture claim"
+    )
+    if (
+        type(capture_claim["schema_version"]) is not int
+        or capture_claim["schema_version"] != 1
+        or capture_claim["artifact_kind"] != CAPTURE_CLAIM_KIND
+        or capture_claim["producer_source_sha256"]
+        != capture_source["producer_source_sha256"]
+        or capture_claim["runtime_hard_contract_sha256"] != hard_att["sha256"]
+        or _positive_int(capture_claim["target_count"], "capture claim target_count") != count
+        or capture_claim["motion_clips"] != motion_clips
+        or capture_claim["joint_names"] != joint_names
+        or _exact_bool(
+            capture_claim["exclusive_create"], "capture claim exclusive_create"
+        )
+        is not True
+    ):
+        raise PostSwingTeacherError(
+            "teacher receipt differs from its source-bound exclusive capture claim"
+        )
+
     capture_result = _require_exact_keys(
         capture_result,
         {
-            "schema_version", "artifact_kind", "capture_contract", "producer",
-            "motion_clips", "states", "callback_batches",
+            "schema_version", "artifact_kind", "capture_contract", "evidence",
+            "motion_clips", "states",
         },
         "natural-wrap capture result",
     )
-    producer = _require_exact_keys(
-        capture_result["producer"],
-        {
-            "callback_method", "writer_source_sha256", "callback_source_sha256",
-            "runtime_hard_contract_sha256", "no_clobber",
-        },
-        "natural-wrap capture producer",
+    evidence = _require_exact_keys(
+        capture_result["evidence"],
+        _CAPTURE_EVIDENCE_KEYS,
+        "natural-wrap capture evidence",
     )
     if (
         type(capture_result["schema_version"]) is not int
-        or capture_result["schema_version"] != 1
+        or capture_result["schema_version"] != 2
         or capture_result["artifact_kind"] != CAPTURE_RESULT_KIND
         or capture_result["capture_contract"] != CAPTURE_CONTRACT
-        or producer["callback_method"] != "MotionCommand._capture_post_swing_states"
-        or _exact_bool(producer["no_clobber"], "capture producer no_clobber") is not True
-        or producer["writer_source_sha256"] != capture_source["writer_source_sha256"]
-        or producer["callback_source_sha256"] != capture_source["callback_source_sha256"]
-        or producer["runtime_hard_contract_sha256"] != hard_att["sha256"]
-        or _positive_int(capture_result["callback_batches"], "capture callback_batches") <= 0
+        or evidence["producer_source_sha256"] != capture_source["producer_source_sha256"]
+        or evidence["runtime_hard_contract_sha256"] != hard_att["sha256"]
+        or evidence["exclusive_claim_sha256"] != capture_claim_sha
+        or evidence["exclusive_claim_relative_path"] != CAPTURE_CLAIM_NAME
+        or _exact_bool(evidence["no_clobber"], "capture evidence no_clobber") is not True
         or capture_result["motion_clips"] != motion_clips
         or capture_result["states"]
         != {key: value for key, value in states.items() if key != "velocity_limits"}
@@ -785,6 +690,7 @@ def load_post_swing_teacher_states(
         },
         "attestation": {
             "capture_result_sha256": capture_result_sha,
+            "capture_claim_sha256": capture_claim_sha,
             "checkpoint": dict(checkpoint_att),
             "hard_contract": dict(hard_att),
             "checkpoint_source": dict(checkpoint_source),

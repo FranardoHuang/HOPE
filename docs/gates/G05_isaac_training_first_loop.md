@@ -87,13 +87,16 @@ Follow-up note (2026-07-15, clean base-deceleration pair running; Gate remains `
   is not a behavior result. No comparison, second seed, judge or promotion is allowed before exact
   model-200 receipts. See
   [the clean main-effect record](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT.md).
+
 Follow-up note (2026-07-15, post-swing teacher source gate repaired; Gate remains `Partial`):
 
 - The first cold-start candidate was rejected because it re-opened receipt/NPZ paths after hashing,
   allowed duplicate NPZ ZIP keys to collapse, and trusted self-reported checkpoint/natural-wrap
   provenance. The replacement uses one `O_NOFOLLOW` descriptor and one immutable byte buffer for
-  hash/parse, an inference-only natural-wrap callback writer, and a separate no-clobber attestor.
-- The attestor verifies actual checkpoint bytes, embedded schema-3/exact lineage and launch claim,
+  hash/parse, a MotionCommand-owned `O_EXCL` capture namespace with no arbitrary-array writer API,
+  and a separate no-clobber attestor. Callback labels are not treated as cryptographic evidence.
+- The attestor uses the restricted `weights_only=True` loader and verifies actual checkpoint bytes,
+  embedded schema-3/exact lineage and launch claim,
   the adjacent hard contract, clean checkpoint/capture sources, ordered motion bytes, articulation
   joint order and root/joint velocity bounds. Trainer consumption re-binds the raw capture result;
   a standalone receipt JSON cannot unlock replay. First-reset acceptance now supports a frozen

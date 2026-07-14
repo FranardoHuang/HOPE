@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Mint one immutable post-swing teacher receipt from a real inference capture.
+"""Mint one immutable post-swing teacher receipt from a source-bound inference capture.
 
-The simulator callback may publish only a raw natural-wrap result.  This one-shot consumer opens
-every input once with ``O_NOFOLLOW``, verifies the actual checkpoint bytes and embedded schema-3
-lineage against its adjacent hard contract and launch claim, checks both source checkouts, then
-publishes (without replacement) the only receipt accepted by the trainer.
+MotionCommand owns an O_EXCL capture namespace and publishes raw state bytes from its reviewed
+natural-wrap source path.  This consumer does not treat a producer-supplied callback label as
+proof.  It verifies the exact producer source bytes and exclusive claim, then binds the actual
+checkpoint through PyTorch's restricted weights-only loader, adjacent schema-3 hard contract and
+launch claim before publishing the only receipt accepted by the trainer.
 """
 
 from __future__ import annotations
@@ -129,7 +130,10 @@ def _checkpoint(raw: bytes, hard_sha: str, claim_sha: str) -> dict[str, Any]:
     try:
         import torch
 
-        value = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=False)
+        # ``weights_only=False`` executes arbitrary pickle reducers and is forbidden for this
+        # attestation boundary.  Older/non-tensor checkpoints that cannot pass the restricted
+        # unpickler fail closed instead of being allow-listed dynamically.
+        value = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=True)
     except Exception as exc:
         raise AttestationError(f"cannot load actual checkpoint bytes: {exc}") from exc
     if not isinstance(value, Mapping):
@@ -198,49 +202,75 @@ def _claim(raw: bytes) -> tuple[dict[str, Any], str, Path, str]:
     return content, claim_sha, Path(checkout), commit
 
 
-def _capture_result(raw: bytes, result_path: Path) -> tuple[dict[str, Any], bytes]:
+def _capture_result(
+    raw: bytes, result_path: Path
+) -> tuple[dict[str, Any], bytes, dict[str, Any], bytes]:
     result = _keys(
         _json(raw, "natural-wrap capture result"),
         {
             "schema_version",
             "artifact_kind",
             "capture_contract",
-            "producer",
+            "evidence",
             "motion_clips",
             "states",
-            "callback_batches",
         },
         "natural-wrap capture result",
     )
-    if _plain_int(result["schema_version"], "capture schema") != 1:
+    if _plain_int(result["schema_version"], "capture schema") != 2:
         raise AttestationError("unsupported capture result schema")
     if result["artifact_kind"] != teacher.CAPTURE_RESULT_KIND:
         raise AttestationError("capture result kind mismatch")
     if result["capture_contract"] != teacher.CAPTURE_CONTRACT:
-        raise AttestationError("capture result was not minted at the natural-wrap callback")
-    producer = _keys(
-        result["producer"],
+        raise AttestationError("capture result declares different natural-wrap semantics")
+    evidence = _keys(
+        result["evidence"],
         {
-            "callback_method", "writer_source_sha256", "callback_source_sha256",
-            "runtime_hard_contract_sha256", "no_clobber",
+            "producer_source_sha256",
+            "runtime_hard_contract_sha256",
+            "exclusive_claim_sha256",
+            "exclusive_claim_relative_path",
+            "no_clobber",
         },
-        "capture producer",
+        "capture evidence",
     )
     if (
-        producer["callback_method"] != "MotionCommand._capture_post_swing_states"
-        or producer["no_clobber"] is not True
+        evidence["exclusive_claim_relative_path"] != teacher.CAPTURE_CLAIM_NAME
+        or evidence["no_clobber"] is not True
     ):
-        raise AttestationError("capture producer is not the reviewed no-clobber callback")
-    if _plain_int(result["callback_batches"], "capture callback_batches") <= 0:
-        raise AttestationError("capture callback did not record any natural-wrap batch")
+        raise AttestationError("capture result lacks the fixed exclusive no-clobber claim")
     states = result.get("states")
-    if not isinstance(states, dict) or states.get("relative_path") != teacher.NaturalWrapCaptureWriter.STATE_NAME:
-        raise AttestationError("capture state path is not the fixed callback output")
-    state_path = result_path.parent / teacher.NaturalWrapCaptureWriter.STATE_NAME
+    if not isinstance(states, dict) or states.get("relative_path") != teacher.CAPTURE_STATE_NAME:
+        raise AttestationError("capture state path is not the fixed source-owned output")
+    state_path = result_path.parent / teacher.CAPTURE_STATE_NAME
     state_raw = _read(state_path, "natural-wrap state payload")
     if states.get("sha256") != _sha(state_raw):
         raise AttestationError("capture state payload SHA mismatch")
-    return result, state_raw
+    claim_path = result_path.parent / teacher.CAPTURE_CLAIM_NAME
+    claim_raw = _read(claim_path, "exclusive natural-wrap capture claim")
+    if evidence["exclusive_claim_sha256"] != _sha(claim_raw):
+        raise AttestationError("capture result does not bind the actual exclusive claim bytes")
+    claim = _keys(
+        _json(claim_raw, "exclusive natural-wrap capture claim"),
+        {
+            "schema_version",
+            "artifact_kind",
+            "producer_source_sha256",
+            "runtime_hard_contract_sha256",
+            "target_count",
+            "motion_clips",
+            "joint_names",
+            "exclusive_create",
+        },
+        "exclusive natural-wrap capture claim",
+    )
+    if (
+        _plain_int(claim["schema_version"], "capture claim schema") != 1
+        or claim["artifact_kind"] != teacher.CAPTURE_CLAIM_KIND
+        or claim["exclusive_create"] is not True
+    ):
+        raise AttestationError("exclusive natural-wrap capture claim is malformed")
+    return result, state_raw, claim, claim_raw
 
 
 def _load_arrays(raw: bytes, result: Mapping[str, Any]) -> dict[str, np.ndarray]:
@@ -278,7 +308,9 @@ def attest(args: argparse.Namespace) -> dict[str, Any]:
     if os.path.lexists(output):
         raise AttestationError("teacher receipt already exists; overwrite is forbidden")
     result_raw = _read(result_path, "natural-wrap capture result")
-    result, state_raw = _capture_result(result_raw, result_path)
+    result, state_raw, capture_claim, capture_claim_raw = _capture_result(
+        result_raw, result_path
+    )
     arrays = _load_arrays(state_raw, result)
 
     claim_raw = _read(args.launch_claim, "training launch claim")
@@ -294,7 +326,11 @@ def attest(args: argparse.Namespace) -> dict[str, Any]:
     if _plain_int(hard.get("schema_version"), "hard contract schema") != 3:
         raise AttestationError("hard contract must be schema 3")
     hard_sha = _sha(hard_raw)
-    if result["producer"]["runtime_hard_contract_sha256"] != hard_sha:
+    evidence = result["evidence"]
+    if (
+        evidence["runtime_hard_contract_sha256"] != hard_sha
+        or capture_claim["runtime_hard_contract_sha256"] != hard_sha
+    ):
         raise AttestationError("capture runtime contract differs from the checkpoint-adjacent contract")
     checkpoint_raw = _read(checkpoint_path, "teacher checkpoint")
     checkpoint_attestation = _checkpoint(checkpoint_raw, hard_sha, claim_sha)
@@ -308,23 +344,20 @@ def attest(args: argparse.Namespace) -> dict[str, Any]:
     capture_source = _git_state(
         args.capture_source_checkout, capture_commit, "capture source checkout"
     )
-    writer_path = args.capture_source_checkout / CONTRACT_PATH.relative_to(REPO_ROOT)
-    callback_path = (
+    producer_path = (
         args.capture_source_checkout
         / "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/commands.py"
     )
     attestor_path = args.capture_source_checkout / "scripts/attest_post_swing_teacher.py"
-    producer = result["producer"]
-    writer_sha = _sha(_read(writer_path, "capture writer source"))
-    callback_sha = _sha(_read(callback_path, "capture callback source"))
+    producer_sha = _sha(_read(producer_path, "capture producer source"))
     attestor_sha = _sha(_read(attestor_path, "teacher attestor source"))
     if attestor_sha != _sha(_read(Path(__file__).resolve(), "running teacher attestor source")):
         raise AttestationError("running attestor bytes differ from the clean capture source checkout")
     if (
-        writer_sha != producer["writer_source_sha256"]
-        or callback_sha != producer["callback_source_sha256"]
+        producer_sha != evidence["producer_source_sha256"]
+        or producer_sha != capture_claim["producer_source_sha256"]
     ):
-        raise AttestationError("capture source bytes differ from the callback result")
+        raise AttestationError("capture source bytes differ from source-bound capture evidence")
 
     motion_rows = hard.get("motion_clips")
     capture_rows = result.get("motion_clips")
@@ -332,6 +365,8 @@ def attest(args: argparse.Namespace) -> dict[str, Any]:
         raise AttestationError("hard contract/capture motion rows missing")
     if len(args.motion) != len(motion_rows) or len(args.motion) != len(capture_rows):
         raise AttestationError("ordered motion path count differs from hard contract/capture")
+    if capture_claim["motion_clips"] != capture_rows:
+        raise AttestationError("exclusive capture claim motion order differs from result")
     motions = []
     for index, path in enumerate(args.motion):
         motion_sha = _sha(_read(path, f"motion clip {index}"))
@@ -344,8 +379,15 @@ def attest(args: argparse.Namespace) -> dict[str, Any]:
         motions.append({"index": index, "sha256": motion_sha})
 
     joint_names = hard.get("articulation_joint_names")
-    if result["states"].get("joint_names") != joint_names:
+    if (
+        result["states"].get("joint_names") != joint_names
+        or capture_claim["joint_names"] != joint_names
+    ):
         raise AttestationError("capture joint names/order differ from hard contract runtime order")
+    if _plain_int(capture_claim["target_count"], "capture claim target_count") != _plain_int(
+        result["states"].get("count"), "capture state count"
+    ):
+        raise AttestationError("exclusive capture target count differs from emitted state count")
     joint_limits_raw = hard.get("joint_velocity_limits")
     if (
         not isinstance(joint_limits_raw, list)
@@ -391,6 +433,8 @@ def attest(args: argparse.Namespace) -> dict[str, Any]:
             "artifact_kind": teacher.ATTESTATION_KIND,
             "capture_result_sha256": _sha(result_raw),
             "capture_result_relative_path": result_path.name,
+            "capture_claim_sha256": _sha(capture_claim_raw),
+            "capture_claim_relative_path": teacher.CAPTURE_CLAIM_NAME,
             "checkpoint": checkpoint_attestation,
             "hard_contract": {"sha256": hard_sha, "schema_version": 3},
             "checkpoint_source": {
@@ -399,8 +443,7 @@ def attest(args: argparse.Namespace) -> dict[str, Any]:
             },
             "capture_source": {
                 **capture_source,
-                "writer_source_sha256": writer_sha,
-                "callback_source_sha256": callback_sha,
+                "producer_source_sha256": producer_sha,
                 "attestor_source_sha256": attestor_sha,
             },
         },
@@ -412,6 +455,7 @@ def attest(args: argparse.Namespace) -> dict[str, Any]:
         temp = Path(temp_dir)
         (temp / states["relative_path"]).write_bytes(state_raw)
         (temp / result_path.name).write_bytes(result_raw)
+        (temp / teacher.CAPTURE_CLAIM_NAME).write_bytes(capture_claim_raw)
         temp_receipt = temp / output.name
         temp_receipt.write_bytes(receipt_raw)
         teacher.load_post_swing_teacher_states(

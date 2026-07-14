@@ -14,7 +14,7 @@ readback probe，所以当前 `launch_authorized=false`。
 - teacher checkpoint 必须有相邻 `params/training_contract.json`、原始 no-clobber queue claim，且 checkpoint
   内嵌 schema=`3`、fresh lineage=`1` 和同一 claim digest。
 - ordered motion paths 必须与 checkpoint hard contract 完全一致。
-- capture output directory 必须是新建空目录；`natural_wrap_states.npz`、
+- capture output directory 必须是新建空目录；`natural_wrap_capture.claim.json`、`natural_wrap_states.npz`、
   `natural_wrap_capture.json` 或 `teacher_receipt.json` 任一已存在都禁止复用。
 - 先在实验记录中冻结 teacher checkpoint、target count、root linear/angular velocity limit、4096 environments、
   最大 inference steps 和 GPU 槽。不要用 timeout 状态、失败 reset 或 clip-switch 中止状态补数量。
@@ -40,7 +40,8 @@ mkdir /ABS/NEW/CAPTURE_DIR
 ```
 
 capture mode 不做 PPO update，也跳过 ONNX export。环境建立后先用当前 runtime 重建 schema-3 hard contract；
-只有它与 checkpoint 相邻合同逐字段相同，writer 才获准接收第一条状态。目标数未在最大步数前收满会非零退出，
+只有它与 checkpoint 相邻合同逐字段相同，`MotionCommand` 才向自己用 `O_EXCL` 占有的 claim fd 写入冻结绑定，
+并允许 natural-wrap 分支接收第一条 live state。不存在可被外部 caller 喂任意 arrays 的 writer API。目标数未在最大步数前收满会非零退出，
 不得把 partial memory 或临时文件晋级。
 
 ## 2. one-shot attestation
@@ -63,7 +64,8 @@ python3 scripts/attest_post_swing_teacher.py \
   --output-receipt /ABS/NEW/CAPTURE_DIR/teacher_receipt.json
 ```
 
-成功只输出 receipt 路径、SHA 和 count；重复运行因 no-clobber 失败。SSH timeout 时只读检查三个固定文件，
+attestor 使用 `torch.load(..., weights_only=True)`；不兼容 restricted unpickler 的 checkpoint 直接 fail closed，
+不得切回任意 pickle 执行。成功只输出 receipt 路径、SHA 和 count；重复运行因 no-clobber 失败。SSH timeout 时只读检查四个固定文件，
 不要自动重发 capture 或 attestor。
 
 ## 3. 4096-environment 首 reset probe（尚未执行）

@@ -33,7 +33,6 @@ CAPTURE_CONTRACT = MODULE.CAPTURE_CONTRACT
 PostSwingTeacherError = MODULE.PostSwingTeacherError
 load_post_swing_teacher_states = MODULE.load_post_swing_teacher_states
 sha256_file = MODULE.sha256_file
-NaturalWrapCaptureWriter = MODULE.NaturalWrapCaptureWriter
 
 
 def _write_fixture(tmp_path: Path, *, count: int = 4, joints: int = 3):
@@ -86,7 +85,9 @@ def _write_fixture(tmp_path: Path, *, count: int = 4, joints: int = 3):
             "schema_version": 1,
             "artifact_kind": MODULE.ATTESTATION_KIND,
             "capture_result_sha256": "4" * 64,
-            "capture_result_relative_path": "natural_wrap_capture.json",
+            "capture_result_relative_path": MODULE.CAPTURE_RESULT_NAME,
+            "capture_claim_sha256": "a" * 64,
+            "capture_claim_relative_path": MODULE.CAPTURE_CLAIM_NAME,
             "checkpoint": {
                 "sha256": "2" * 64,
                 "training_contract_schema_version": 3,
@@ -102,30 +103,44 @@ def _write_fixture(tmp_path: Path, *, count: int = 4, joints: int = 3):
             "capture_source": {
                 "commit": "6" * 40,
                 "clean": True,
-                "writer_source_sha256": "7" * 64,
-                "callback_source_sha256": "8" * 64,
+                "producer_source_sha256": "8" * 64,
                 "attestor_source_sha256": "9" * 64,
             },
         },
     }
-    capture_result = {
+    capture_claim = {
         "schema_version": 1,
+        "artifact_kind": MODULE.CAPTURE_CLAIM_KIND,
+        "producer_source_sha256": "8" * 64,
+        "runtime_hard_contract_sha256": "3" * 64,
+        "target_count": count,
+        "motion_clips": receipt["motion_clips"],
+        "joint_names": joint_names,
+        "exclusive_create": True,
+    }
+    claim_path = tmp_path / MODULE.CAPTURE_CLAIM_NAME
+    claim_path.write_text(
+        json.dumps(capture_claim, allow_nan=False, separators=(",", ":"), sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    receipt["attestation"]["capture_claim_sha256"] = sha256_file(claim_path)
+    capture_result = {
+        "schema_version": 2,
         "artifact_kind": MODULE.CAPTURE_RESULT_KIND,
         "capture_contract": dict(CAPTURE_CONTRACT),
-        "producer": {
-            "callback_method": "MotionCommand._capture_post_swing_states",
-            "writer_source_sha256": "7" * 64,
-            "callback_source_sha256": "8" * 64,
+        "evidence": {
+            "producer_source_sha256": "8" * 64,
             "runtime_hard_contract_sha256": "3" * 64,
+            "exclusive_claim_sha256": sha256_file(claim_path),
+            "exclusive_claim_relative_path": MODULE.CAPTURE_CLAIM_NAME,
             "no_clobber": True,
         },
         "motion_clips": receipt["motion_clips"],
         "states": {
             key: value for key, value in receipt["states"].items() if key != "velocity_limits"
         },
-        "callback_batches": 1,
     }
-    capture_path = tmp_path / "natural_wrap_capture.json"
+    capture_path = tmp_path / MODULE.CAPTURE_RESULT_NAME
     capture_path.write_text(
         json.dumps(capture_result, allow_nan=False, separators=(",", ":"), sort_keys=True) + "\n",
         encoding="utf-8",
@@ -140,8 +155,19 @@ def _write_fixture(tmp_path: Path, *, count: int = 4, joints: int = 3):
 
 
 def _rewrite_receipt_and_capture(receipt_path: Path, receipt: dict) -> None:
+    claim_path = receipt_path.parent / receipt["attestation"]["capture_claim_relative_path"]
+    claim = json.loads(claim_path.read_text(encoding="utf-8"))
+    claim["motion_clips"] = receipt["motion_clips"]
+    claim["joint_names"] = receipt["states"]["joint_names"]
+    claim["target_count"] = receipt["states"]["count"]
+    claim_path.write_text(
+        json.dumps(claim, allow_nan=False, separators=(",", ":"), sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    receipt["attestation"]["capture_claim_sha256"] = sha256_file(claim_path)
     capture_path = receipt_path.parent / receipt["attestation"]["capture_result_relative_path"]
     capture = json.loads(capture_path.read_text(encoding="utf-8"))
+    capture["evidence"]["exclusive_claim_sha256"] = sha256_file(claim_path)
     capture["motion_clips"] = receipt["motion_clips"]
     capture["states"] = {
         key: value for key, value in receipt["states"].items() if key != "velocity_limits"
@@ -341,37 +367,35 @@ def test_velocity_limits_bind_runtime_and_reject_unsafe_states(tmp_path):
         _load(receipt_path, motions, joints)
 
 
-def test_natural_wrap_writer_requires_private_callback_and_is_no_clobber(tmp_path):
-    motion = tmp_path / "motion.npz"
-    np.savez(motion, marker=np.array([1], dtype=np.int64))
-    writer = NaturalWrapCaptureWriter(
-        tmp_path,
-        target_count=2,
-        motion_sha256=[sha256_file(motion)],
-        joint_names=["j0", "j1"],
-        callback_source_path=MODULE_PATH,
-    )
-    root = np.zeros((2, 13), dtype=np.float32)
-    root[:, 3] = 1.0
-    pos = np.zeros((2, 2), dtype=np.float32)
-    vel = np.zeros_like(pos)
-    with pytest.raises(PostSwingTeacherError, match="private callback capability"):
-        writer._append_from_natural_wrap(object(), root, pos, vel)
-    writer._bind_reviewed_runtime_hard_contract("a" * 64)
-    writer._append_from_natural_wrap(MODULE._NATURAL_WRAP_CAPABILITY, root, pos, vel)
-    assert writer.complete
-    result_path = tmp_path / writer.RESULT_NAME
+def test_red_team_array_forgery_seam_is_removed_and_legacy_label_is_rejected(tmp_path):
+    # Exact b886256 repro: an external caller could import a module-global object, feed arbitrary
+    # finite arrays to a public writer, then self-report the expected callback string.  Neither
+    # signing seam exists now; source-owned MotionCommand capture accepts only env ids/live tensors.
+    assert not hasattr(MODULE, "NaturalWrapCaptureWriter")
+    assert not hasattr(MODULE, "_NATURAL_WRAP_CAPABILITY")
+    commands_source = MODULE_PATH.with_name("commands.py").read_text(encoding="utf-8")
+    assert "NaturalWrapCaptureWriter" not in commands_source
+    assert "_append_from_natural_wrap" not in commands_source
+    assert "_NATURAL_WRAP_CAPABILITY" not in commands_source
+
+    receipt_path, motions, joints, receipt = _write_fixture(tmp_path)
+    result_path = tmp_path / MODULE.CAPTURE_RESULT_NAME
     result = json.loads(result_path.read_text(encoding="utf-8"))
-    assert result["capture_contract"]["event"] == "natural_clip_wrap"
-    assert result["states"]["count"] == 2
-    with pytest.raises(PostSwingTeacherError, match="already exists"):
-        NaturalWrapCaptureWriter(
-            tmp_path,
-            target_count=2,
-            motion_sha256=[sha256_file(motion)],
-            joint_names=["j0", "j1"],
-            callback_source_path=MODULE_PATH,
-        )
+    result["schema_version"] = 1
+    result["producer"] = {
+        "callback_method": "MotionCommand._capture_post_swing_states",
+        "writer_source_sha256": "7" * 64,
+        "callback_source_sha256": "8" * 64,
+        "runtime_hard_contract_sha256": "3" * 64,
+        "no_clobber": True,
+    }
+    result["callback_batches"] = 1
+    del result["evidence"]
+    result_path.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
+    receipt["attestation"]["capture_result_sha256"] = sha256_file(result_path)
+    receipt_path.write_text(json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8")
+    with pytest.raises(PostSwingTeacherError, match="keys differ"):
+        _load(receipt_path, motions, joints)
 
 
 def test_default_off_training_contract_extension_is_byte_equivalent():

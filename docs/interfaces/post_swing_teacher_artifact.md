@@ -9,20 +9,20 @@
 
 ## 两段式信任边界
 
-1. `MotionCommand._capture_post_swing_states` 是唯一认可的采集点。它只接收真正的
-   `natural_clip_wrap`，明确排除随机 clip switch 中止状态和 teleport；CUDA state 先同步到 CPU immutable
-   bytes，再由 private capability 调用 writer。
-2. callback writer 只能 no-clobber 发布 `natural_wrap_states.npz` 和
-   `natural_wrap_capture.json`。它不能声明 checkpoint、fresh lineage 或训练合同，也不能直接产生 trainer
-   receipt。
+1. capture 状态只由 `MotionCommand` 的 natural-wrap 分支直接从 live articulation tensors 读取；没有公开 writer、
+   module-global capability 或任何“传任意 arrays 即签发”的接口。配置时先用 `O_EXCL` 建立固定
+   `natural_wrap_capture.claim.json` namespace，已存在即永久 fail closed。
+2. producer 只能 no-clobber 发布 claim、`natural_wrap_states.npz` 和 `natural_wrap_capture.json`。artifact
+   只证明 exact reviewed producer source、exclusive claim 与 runtime hard-contract bytes 相互绑定；普通 Python
+   runtime 无法提供 callback 的密码学证明，所以 callback 名称/自报标签不作为安全证据。
 3. `scripts/attest_post_swing_teacher.py` 是独立的一次性 consumer。它重新核对实际 checkpoint bytes、
    checkpoint 内嵌 schema-3/fresh-lineage/launch-claim、相邻 `params/training_contract.json`、checkpoint source、
    capture source、按序 motion bytes、runtime articulation joint order 和 plant joint-velocity limits，才可
    no-clobber 发布 `teacher_receipt.json`。
-4. trainer 同时重读 receipt、raw capture result 和 NPZ；任何一个 SHA、字段、source hash、motion/joint order、
+4. trainer 同时重读 receipt、exclusive claim、raw capture result 和 NPZ；任何一个 SHA、字段、source hash、motion/joint order、
    velocity bound 或 no-clobber provenance 不一致都 fail closed。
 
-这三份输入均用一次 `O_NOFOLLOW` open、同一 descriptor 的前后 `fstat` 与单个 immutable byte buffer；SHA、
+这四份输入均用一次 `O_NOFOLLOW` open、同一 descriptor 的前后 `fstat` 与单个 immutable byte buffer；SHA、
 JSON 解析和 `np.load(BytesIO)` 不得重新开路径。NPZ ZIP member 必须逐名唯一，JSON boolean 不得冒充 integer，
 integer/float 也不得靠隐式 coercion 过门。
 

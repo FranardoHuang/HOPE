@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import io
 import math
 import numpy as np
 import os
 import torch
 from collections.abc import Sequence
 from dataclasses import MISSING
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from isaaclab.assets import Articulation
@@ -31,9 +34,15 @@ from whole_body_tracking.tasks.tracking.mdp.event_timing import (
     load_event_schedule,
 )
 from whole_body_tracking.tasks.tracking.mdp.post_swing_teacher import (
-    NaturalWrapCaptureWriter,
+    CAPTURE_CLAIM_KIND,
+    CAPTURE_CLAIM_NAME,
+    CAPTURE_CONTRACT,
+    CAPTURE_RESULT_KIND,
+    CAPTURE_RESULT_NAME,
+    CAPTURE_STATE_NAME,
     PostSwingTeacherError,
-    _NATURAL_WRAP_CAPABILITY,
+    _canonical_json_bytes,
+    _publish_bytes_no_clobber,
     load_post_swing_teacher_states,
     sha256_file,
 )
@@ -562,7 +571,25 @@ class MotionCommand(CommandTerm):
                 "post-swing first-reset acceptance thresholds require fail_fast_first_reset=true"
             )
         self._post_swing_first_reset_checked = False
-        self._post_swing_capture_writer: NaturalWrapCaptureWriter | None = None
+        # The capture producer intentionally lives inside MotionCommand.  There is no reusable
+        # writer that accepts caller-supplied arrays and no module-global Python "capability".
+        # The only state snapshot is taken from live articulation tensors in the natural-wrap
+        # branch below.  Its artifact makes the narrower, auditable claim that exact reviewed
+        # source owned an O_EXCL namespace and emitted these bytes; it is not a cryptographic
+        # proof that an unmodified Python runtime executed a particular callback.
+        self._post_swing_capture_output_dir: Path | None = None
+        self._post_swing_capture_target_count = 0
+        self._post_swing_capture_motion_clips: list[dict] = []
+        self._post_swing_capture_joint_names: list[str] = []
+        self._post_swing_capture_producer_source_sha256: str | None = None
+        self._post_swing_capture_runtime_hard_contract_sha256: str | None = None
+        self._post_swing_capture_claim_sha256: str | None = None
+        self._post_swing_capture_claim_fd: int | None = None
+        self._post_swing_capture_roots: list[np.ndarray] = []
+        self._post_swing_capture_joint_pos: list[np.ndarray] = []
+        self._post_swing_capture_joint_vel: list[np.ndarray] = []
+        self._post_swing_capture_count = 0
+        self._post_swing_capture_complete = False
         # Activation accounting is kept outside ``metrics`` because command metrics are
         # instantaneous per-environment values, while these are event counts accumulated over
         # one PPO update.  MotionOnPolicyRunner consumes and resets them exactly once from its
@@ -1051,16 +1078,46 @@ class MotionCommand(CommandTerm):
         root[:, :3] -= self._env.scene.env_origins[env_ids]
         jp = self.robot.data.joint_pos[env_ids].clone()
         jv = self.robot.data.joint_vel[env_ids].clone()
-        if self._post_swing_capture_writer is not None:
-            # This is the sole reviewed call site.  ``wrap_ids`` is constructed only from natural
-            # segment completion; switch-aborted states never reach this method.  Copying to CPU
-            # synchronizes the CUDA producer before the no-clobber writer hashes/publishes bytes.
-            self._post_swing_capture_writer._append_from_natural_wrap(
-                _NATURAL_WRAP_CAPABILITY,
-                root.detach().to(device="cpu", dtype=torch.float32).numpy(),
-                jp.detach().to(device="cpu", dtype=torch.float32).numpy(),
-                jv.detach().to(device="cpu", dtype=torch.float32).numpy(),
+        if self._post_swing_capture_output_dir is not None and not self._post_swing_capture_complete:
+            if (
+                self._post_swing_capture_runtime_hard_contract_sha256 is None
+                or self._post_swing_capture_claim_sha256 is None
+            ):
+                raise RuntimeError(
+                    "natural-wrap capture cannot step before runtime-contract equality is bound"
+                )
+            # This is the sole source path that populates the capture accumulator: arrays are read
+            # directly from the live articulation tensors above.  No writer/capability API accepts
+            # arbitrary caller-owned arrays.  The caller remains ordinary Python, so the artifact
+            # records reviewed-source/O_EXCL evidence rather than claiming cryptographic callback
+            # provenance.  CPU conversion also synchronizes the CUDA producer before publication.
+            root_np = root.detach().to(device="cpu", dtype=torch.float32).numpy()
+            joint_pos_np = jp.detach().to(device="cpu", dtype=torch.float32).numpy()
+            joint_vel_np = jv.detach().to(device="cpu", dtype=torch.float32).numpy()
+            rows = min(
+                root_np.shape[0] if root_np.ndim == 2 else 0,
+                self._post_swing_capture_target_count - self._post_swing_capture_count,
             )
+            if (
+                rows <= 0
+                or root_np.dtype != np.float32
+                or joint_pos_np.dtype != np.float32
+                or joint_vel_np.dtype != np.float32
+                or root_np.shape[1:] != (13,)
+                or joint_pos_np.shape
+                != (root_np.shape[0], len(self._post_swing_capture_joint_names))
+                or joint_vel_np.shape != joint_pos_np.shape
+                or not np.isfinite(root_np).all()
+                or not np.isfinite(joint_pos_np).all()
+                or not np.isfinite(joint_vel_np).all()
+            ):
+                raise RuntimeError("natural-wrap source path produced an invalid runtime state batch")
+            self._post_swing_capture_roots.append(np.array(root_np[:rows], copy=True))
+            self._post_swing_capture_joint_pos.append(np.array(joint_pos_np[:rows], copy=True))
+            self._post_swing_capture_joint_vel.append(np.array(joint_vel_np[:rows], copy=True))
+            self._post_swing_capture_count += rows
+            if self._post_swing_capture_count == self._post_swing_capture_target_count:
+                self._publish_post_swing_capture()
         size = int(self.cfg.post_swing_buffer_size)
         if self._post_swing_root is None:
             self._post_swing_root = torch.zeros(size, 13, device=self.device)
@@ -1174,7 +1231,7 @@ class MotionCommand(CommandTerm):
             raise ValueError("post-swing teacher did not make the replay buffer ready")
 
     def _configure_post_swing_capture_if_requested(self) -> None:
-        """Arm the inference-only natural-wrap callback writer, default off."""
+        """Atomically claim one inference-only natural-wrap capture namespace, default off."""
 
         output_dir = str(getattr(self.cfg, "post_swing_capture_output_dir", "") or "").strip()
         target_count = getattr(self.cfg, "post_swing_capture_target_count", 0)
@@ -1194,26 +1251,145 @@ class MotionCommand(CommandTerm):
             raise ValueError("natural-wrap teacher capture requires post_swing_start_prob > 0")
         motion_files = self.cfg.motion_file
         motion_files = [motion_files] if isinstance(motion_files, str) else list(motion_files)
+        capture_dir = Path(output_dir)
+        if capture_dir.is_symlink() or not capture_dir.is_dir():
+            raise ValueError("natural-wrap capture output must be an existing regular directory")
+        for name in (CAPTURE_STATE_NAME, CAPTURE_RESULT_NAME):
+            if os.path.lexists(capture_dir / name):
+                raise ValueError(
+                    "natural-wrap capture output already exists; one-shot replay is forbidden"
+                )
+        joint_names = [str(value) for value in self.robot.data.joint_names]
+        if (
+            not joint_names
+            or any(not value for value in joint_names)
+            or len(set(joint_names)) != len(joint_names)
+        ):
+            raise ValueError("capture joint names must be non-empty and unique")
         try:
-            self._post_swing_capture_writer = NaturalWrapCaptureWriter(
-                output_dir,
-                target_count=target_count,
-                motion_sha256=[sha256_file(path) for path in motion_files],
-                joint_names=self.robot.data.joint_names,
-                callback_source_path=__file__,
+            motion_clips = [
+                {"index": index, "sha256": sha256_file(path)}
+                for index, path in enumerate(motion_files)
+            ]
+            producer_source_sha256 = sha256_file(__file__)
+            flags = (
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
             )
+            claim_fd = os.open(capture_dir / CAPTURE_CLAIM_NAME, flags, 0o600)
         except (OSError, PostSwingTeacherError) as exc:
             raise ValueError(f"cannot arm natural-wrap teacher capture: {exc}") from exc
+        self._post_swing_capture_output_dir = capture_dir
+        self._post_swing_capture_target_count = target_count
+        self._post_swing_capture_motion_clips = motion_clips
+        self._post_swing_capture_joint_names = joint_names
+        self._post_swing_capture_producer_source_sha256 = producer_source_sha256
+        self._post_swing_capture_claim_fd = claim_fd
 
     def post_swing_capture_complete(self) -> bool:
-        """Return whether the one-shot callback result was durably published."""
+        """Return whether the one-shot source-owned result was durably published."""
 
-        return self._post_swing_capture_writer is not None and self._post_swing_capture_writer.complete
+        return self._post_swing_capture_complete
 
     def _bind_post_swing_capture_runtime_contract(self, sha256: str) -> None:
-        if self._post_swing_capture_writer is None:
+        if self._post_swing_capture_output_dir is None or self._post_swing_capture_claim_fd is None:
             raise RuntimeError("post-swing capture is not armed")
-        self._post_swing_capture_writer._bind_reviewed_runtime_hard_contract(sha256)
+        if (
+            self._post_swing_capture_count != 0
+            or self._post_swing_capture_runtime_hard_contract_sha256 is not None
+            or self._post_swing_capture_claim_sha256 is not None
+        ):
+            raise RuntimeError("capture runtime contract may be bound exactly once before stepping")
+        if (
+            type(sha256) is not str
+            or len(sha256) != 64
+            or any(value not in "0123456789abcdef" for value in sha256)
+        ):
+            raise RuntimeError("capture runtime hard-contract SHA-256 is invalid")
+        claim = {
+            "schema_version": 1,
+            "artifact_kind": CAPTURE_CLAIM_KIND,
+            "producer_source_sha256": self._post_swing_capture_producer_source_sha256,
+            "runtime_hard_contract_sha256": sha256,
+            "target_count": self._post_swing_capture_target_count,
+            "motion_clips": list(self._post_swing_capture_motion_clips),
+            "joint_names": list(self._post_swing_capture_joint_names),
+            "exclusive_create": True,
+        }
+        raw = _canonical_json_bytes(claim)
+        view = memoryview(raw)
+        while view:
+            written = os.write(self._post_swing_capture_claim_fd, view)
+            if written <= 0:
+                raise RuntimeError("cannot write the exclusive natural-wrap capture claim")
+            view = view[written:]
+        os.fsync(self._post_swing_capture_claim_fd)
+        self._post_swing_capture_runtime_hard_contract_sha256 = sha256
+        self._post_swing_capture_claim_sha256 = hashlib.sha256(raw).hexdigest()
+
+    def _publish_post_swing_capture(self) -> None:
+        """Publish accumulated live articulation snapshots; accepts no caller arrays."""
+
+        if (
+            self._post_swing_capture_output_dir is None
+            or self._post_swing_capture_producer_source_sha256 is None
+            or self._post_swing_capture_runtime_hard_contract_sha256 is None
+            or self._post_swing_capture_claim_sha256 is None
+            or self._post_swing_capture_claim_fd is None
+            or self._post_swing_capture_count != self._post_swing_capture_target_count
+        ):
+            raise RuntimeError("natural-wrap capture publication invariants are not satisfied")
+        root = np.concatenate(self._post_swing_capture_roots, axis=0)
+        joint_pos = np.concatenate(self._post_swing_capture_joint_pos, axis=0)
+        joint_vel = np.concatenate(self._post_swing_capture_joint_vel, axis=0)
+        buffer = io.BytesIO()
+        np.savez(
+            buffer,
+            root_state_origin_relative=root,
+            joint_pos=joint_pos,
+            joint_vel=joint_vel,
+        )
+        state_bytes = buffer.getvalue()
+        _publish_bytes_no_clobber(
+            self._post_swing_capture_output_dir / CAPTURE_STATE_NAME,
+            state_bytes,
+            "natural-wrap state payload",
+        )
+        result = {
+            "schema_version": 2,
+            "artifact_kind": CAPTURE_RESULT_KIND,
+            "capture_contract": dict(CAPTURE_CONTRACT),
+            "evidence": {
+                "producer_source_sha256": self._post_swing_capture_producer_source_sha256,
+                "runtime_hard_contract_sha256": (
+                    self._post_swing_capture_runtime_hard_contract_sha256
+                ),
+                "exclusive_claim_sha256": self._post_swing_capture_claim_sha256,
+                "exclusive_claim_relative_path": CAPTURE_CLAIM_NAME,
+                "no_clobber": True,
+            },
+            "motion_clips": list(self._post_swing_capture_motion_clips),
+            "states": {
+                "relative_path": CAPTURE_STATE_NAME,
+                "sha256": hashlib.sha256(state_bytes).hexdigest(),
+                "count": self._post_swing_capture_count,
+                "root_shape": list(root.shape),
+                "joint_pos_shape": list(joint_pos.shape),
+                "joint_vel_shape": list(joint_vel.shape),
+                "joint_names": list(self._post_swing_capture_joint_names),
+            },
+        }
+        _publish_bytes_no_clobber(
+            self._post_swing_capture_output_dir / CAPTURE_RESULT_NAME,
+            _canonical_json_bytes(result),
+            "natural-wrap capture result",
+        )
+        os.close(self._post_swing_capture_claim_fd)
+        self._post_swing_capture_claim_fd = None
+        self._post_swing_capture_complete = True
 
     def post_swing_replay_hard_contract(self) -> dict:
         """Return exact cold-start semantics for checkpoint lineage binding."""

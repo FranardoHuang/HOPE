@@ -1488,6 +1488,8 @@ def _write_post_swing_teacher_receipt(tmp_path, motion_files, *, count=4):
             "artifact_kind": "hope_post_swing_teacher_capture_attestation",
             "capture_result_sha256": "4" * 64,
             "capture_result_relative_path": "natural_wrap_capture.json",
+            "capture_claim_sha256": "a" * 64,
+            "capture_claim_relative_path": "natural_wrap_capture.claim.json",
             "checkpoint": {
                 "sha256": "2" * 64,
                 "training_contract_schema_version": 3,
@@ -1503,28 +1505,42 @@ def _write_post_swing_teacher_receipt(tmp_path, motion_files, *, count=4):
             "capture_source": {
                 "commit": "6" * 40,
                 "clean": True,
-                "writer_source_sha256": "7" * 64,
-                "callback_source_sha256": "8" * 64,
+                "producer_source_sha256": "8" * 64,
                 "attestor_source_sha256": "9" * 64,
             },
         },
     }
-    capture_result = {
+    capture_claim = {
         "schema_version": 1,
+        "artifact_kind": "hope_post_swing_natural_wrap_exclusive_claim",
+        "producer_source_sha256": "8" * 64,
+        "runtime_hard_contract_sha256": "3" * 64,
+        "target_count": count,
+        "motion_clips": receipt["motion_clips"],
+        "joint_names": list(_A3_JOINTS),
+        "exclusive_create": True,
+    }
+    claim_path = tmp_path / "natural_wrap_capture.claim.json"
+    claim_path.write_text(
+        json.dumps(capture_claim, separators=(",", ":"), sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    receipt["attestation"]["capture_claim_sha256"] = _sha256(claim_path)
+    capture_result = {
+        "schema_version": 2,
         "artifact_kind": "hope_post_swing_natural_wrap_capture_result",
         "capture_contract": receipt["capture_contract"],
-        "producer": {
-            "callback_method": "MotionCommand._capture_post_swing_states",
-            "writer_source_sha256": "7" * 64,
-            "callback_source_sha256": "8" * 64,
+        "evidence": {
+            "producer_source_sha256": "8" * 64,
             "runtime_hard_contract_sha256": "3" * 64,
+            "exclusive_claim_sha256": _sha256(claim_path),
+            "exclusive_claim_relative_path": "natural_wrap_capture.claim.json",
             "no_clobber": True,
         },
         "motion_clips": receipt["motion_clips"],
         "states": {
             key: value for key, value in receipt["states"].items() if key != "velocity_limits"
         },
-        "callback_batches": 1,
     }
     capture_path = tmp_path / "natural_wrap_capture.json"
     capture_path.write_text(

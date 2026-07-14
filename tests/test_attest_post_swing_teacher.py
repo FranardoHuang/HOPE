@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import pickle
 from pathlib import Path
 import sys
 import types
@@ -39,11 +41,19 @@ class _Finite:
         return self.count
 
 
+class _EvilPickle:
+    def __init__(self, command: str):
+        self.command = command
+
+    def __reduce__(self):
+        return os.system, (self.command,)
+
+
 def _canonical(value):
     return A._canonical(value)
 
 
-def _fixture(tmp_path: Path, monkeypatch, *, lineage=1, callback_method=None):
+def _fixture(tmp_path: Path, monkeypatch, *, lineage=1, legacy_forgery=False):
     motion = tmp_path / "motion.npz"
     np.savez(motion, marker=np.array([1], dtype=np.int64))
     hard = {
@@ -57,26 +67,69 @@ def _fixture(tmp_path: Path, monkeypatch, *, lineage=1, callback_method=None):
     hard_raw = _canonical(hard)
     capture = tmp_path / "capture"
     capture.mkdir()
-    writer = A.teacher.NaturalWrapCaptureWriter(
-        capture,
-        target_count=4,
-        motion_sha256=[A.teacher.sha256_file(motion)],
-        joint_names=["j0", "j1"],
-        callback_source_path=(
-            ROOT
-            / "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/commands.py"
-        ),
+    producer_path = (
+        ROOT
+        / "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/commands.py"
     )
+    producer_sha = A._sha(producer_path.read_bytes())
     root = np.zeros((4, 13), dtype=np.float32)
     root[:, 3] = 1.0
     zeros = np.zeros((4, 2), dtype=np.float32)
-    writer._bind_reviewed_runtime_hard_contract(A._sha(hard_raw))
-    writer._append_from_natural_wrap(A.teacher._NATURAL_WRAP_CAPABILITY, root, zeros, zeros)
-    result_path = capture / writer.RESULT_NAME
-    if callback_method is not None:
-        result = json.loads(result_path.read_text(encoding="utf-8"))
-        result["producer"]["callback_method"] = callback_method
-        result_path.write_bytes(_canonical(result))
+    state_path = capture / A.teacher.CAPTURE_STATE_NAME
+    np.savez(
+        state_path,
+        root_state_origin_relative=root,
+        joint_pos=zeros,
+        joint_vel=zeros,
+    )
+    motion_rows = [{"index": 0, "sha256": A.teacher.sha256_file(motion)}]
+    claim = {
+        "schema_version": 1,
+        "artifact_kind": A.teacher.CAPTURE_CLAIM_KIND,
+        "producer_source_sha256": producer_sha,
+        "runtime_hard_contract_sha256": A._sha(hard_raw),
+        "target_count": 4,
+        "motion_clips": motion_rows,
+        "joint_names": ["j0", "j1"],
+        "exclusive_create": True,
+    }
+    claim_path = capture / A.teacher.CAPTURE_CLAIM_NAME
+    claim_path.write_bytes(_canonical(claim))
+    result = {
+        "schema_version": 2,
+        "artifact_kind": A.teacher.CAPTURE_RESULT_KIND,
+        "capture_contract": dict(A.teacher.CAPTURE_CONTRACT),
+        "evidence": {
+            "producer_source_sha256": producer_sha,
+            "runtime_hard_contract_sha256": A._sha(hard_raw),
+            "exclusive_claim_sha256": A._sha(claim_path.read_bytes()),
+            "exclusive_claim_relative_path": A.teacher.CAPTURE_CLAIM_NAME,
+            "no_clobber": True,
+        },
+        "motion_clips": motion_rows,
+        "states": {
+            "relative_path": A.teacher.CAPTURE_STATE_NAME,
+            "sha256": A.teacher.sha256_file(state_path),
+            "count": 4,
+            "root_shape": [4, 13],
+            "joint_pos_shape": [4, 2],
+            "joint_vel_shape": [4, 2],
+            "joint_names": ["j0", "j1"],
+        },
+    }
+    if legacy_forgery:
+        result["schema_version"] = 1
+        result["producer"] = {
+            "callback_method": "MotionCommand._capture_post_swing_states",
+            "writer_source_sha256": "7" * 64,
+            "callback_source_sha256": producer_sha,
+            "runtime_hard_contract_sha256": A._sha(hard_raw),
+            "no_clobber": True,
+        }
+        result["callback_batches"] = 1
+        del result["evidence"]
+    result_path = capture / A.teacher.CAPTURE_RESULT_NAME
+    result_path.write_bytes(_canonical(result))
 
     run = tmp_path / "run"
     (run / "params").mkdir(parents=True)
@@ -104,9 +157,13 @@ def _fixture(tmp_path: Path, monkeypatch, *, lineage=1, callback_method=None):
         },
         "model_state_dict": {"weight": _Tensor()},
     }
+    def restricted_load(*_args, **kwargs):
+        assert kwargs.get("weights_only") is True
+        return checkpoint
+
     fake_torch = types.SimpleNamespace(
         Tensor=_Tensor,
-        load=lambda *args, **kwargs: checkpoint,
+        load=restricted_load,
         isfinite=lambda value: _Finite(0),
     )
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
@@ -134,7 +191,7 @@ def _fixture(tmp_path: Path, monkeypatch, *, lineage=1, callback_method=None):
     return args
 
 
-def test_attestor_binds_real_checkpoint_contract_sources_and_callback(tmp_path, monkeypatch):
+def test_attestor_binds_real_checkpoint_contract_sources_and_exclusive_claim(tmp_path, monkeypatch):
     args = _fixture(tmp_path, monkeypatch)
     result = A.attest(args)
     assert result["count"] == 4
@@ -147,9 +204,9 @@ def test_attestor_binds_real_checkpoint_contract_sources_and_callback(tmp_path, 
         A.attest(args)
 
 
-def test_attestor_rejects_forged_callback_label_before_receipt(tmp_path, monkeypatch):
-    args = _fixture(tmp_path, monkeypatch, callback_method="public_ack")
-    with pytest.raises(A.AttestationError, match="reviewed no-clobber callback"):
+def test_attestor_rejects_legacy_public_writer_callback_label_forgery(tmp_path, monkeypatch):
+    args = _fixture(tmp_path, monkeypatch, legacy_forgery=True)
+    with pytest.raises(A.AttestationError, match="keys differ"):
         A.attest(args)
     assert not args.output_receipt.exists()
 
@@ -159,3 +216,22 @@ def test_attestor_rejects_checkpoint_without_exact_fresh_lineage(tmp_path, monke
     with pytest.raises(A.AttestationError, match="fresh/exact lineage"):
         A.attest(args)
     assert not args.output_receipt.exists()
+
+
+def test_checkpoint_weights_only_rejects_malicious_pickle_without_execution(tmp_path, monkeypatch):
+    marker = tmp_path / "pickle_executed"
+    raw = pickle.dumps(_EvilPickle(f"touch {marker}"), protocol=4)
+
+    def restricted_loader(stream, *, weights_only, **_kwargs):
+        if weights_only is not True:  # exact regression model for the former unsafe call
+            return pickle.loads(stream.read())
+        raise RuntimeError("restricted weights-only unpickler rejected GLOBAL os.system")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        types.SimpleNamespace(Tensor=_Tensor, load=restricted_loader),
+    )
+    with pytest.raises(A.AttestationError, match="cannot load actual checkpoint bytes"):
+        A._checkpoint(raw, "a" * 64, "b" * 64)
+    assert not marker.exists()
