@@ -268,6 +268,54 @@ def test_preferred_slot_is_used_until_capacity_then_round_robin_falls_back():
     assert names == ["pod2/gpu1", "pod2/gpu1", "pod2/gpu1", "pod2/gpu0"]
 
 
+def test_required_slot_never_falls_back_without_starving_other_slots():
+    queue = _queue(3)
+    queue["dispatch_pods"] = ["pod2"]
+    queue["jobs"][0]["resource"] = {
+        "policy": "dispatch_gpu_round_robin",
+        "required_slot": "pod2/gpu1",
+    }
+    queue["jobs"][1]["resource"] = {
+        "policy": "dispatch_gpu_round_robin",
+        "required_slot": "pod2/gpu2",
+    }
+    queue["jobs"][2]["resource"] = {
+        "policy": "dispatch_gpu_round_robin",
+        "required_slot": "pod2/gpu0",
+    }
+    occupancy = {slot.name: 0 for slot in Q.slots(queue)}
+    occupancy["pod2/gpu1"] = queue["pods"]["pod2"]["max_trainers_per_gpu"]
+
+    # The bound head job never falls back, but independent work on other slots
+    # must remain schedulable. Pair atomicity is a separate contract.
+    assert [(job["id"], slot.name) for job, slot in Q._assign(queue, occupancy)] == [
+        ("job1", "pod2/gpu2"),
+        ("job2", "pod2/gpu0"),
+    ]
+    occupancy["pod2/gpu1"] -= 1
+    assert [slot.name for _, slot in Q._assign(queue, occupancy)] == [
+        "pod2/gpu1",
+        "pod2/gpu2",
+        "pod2/gpu0",
+    ]
+
+
+def test_resource_rejects_ambiguous_or_non_dispatch_required_slot(tmp_path):
+    queue = _queue()
+    queue["dispatch_pods"] = ["pod2"]
+    resource = queue["jobs"][0]["resource"]
+    resource["policy"] = "dispatch_gpu_round_robin"
+    resource["preferred_slot"] = "pod2/gpu1"
+    resource["required_slot"] = "pod2/gpu1"
+    with pytest.raises(Q.QueueError, match="cannot set both"):
+        Q.load_queue(_write(tmp_path, queue))
+
+    del resource["preferred_slot"]
+    resource["required_slot"] = "pod1/gpu1"
+    with pytest.raises(Q.QueueError, match="required_slot is not dispatch-enabled"):
+        Q.load_queue(_write(tmp_path, queue))
+
+
 def test_duplicate_nvidia_rows_count_one_unique_numeric_pid_per_gpu():
     snapshot = {
         "compute_rows": [
@@ -841,6 +889,43 @@ def test_full_scene_probe_requires_exact_job_confirmation_and_dispatch(monkeypat
         raise AssertionError("probe drifted from the job's bound GPU")
 
 
+def test_full_scene_probe_and_finalizer_enforce_required_slot_before_ssh(monkeypatch):
+    queue = _probe_queue()
+    queue["dispatch_pods"] = ["pod2"]
+    queue["jobs"][0]["resource"] = {
+        "policy": "dispatch_gpu_round_robin",
+        "required_slot": "pod2/gpu1",
+    }
+    monkeypatch.setattr(
+        Q,
+        "_run_ssh",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("wrong required slot must fail before SSH")
+        ),
+    )
+
+    with pytest.raises(Q.QueueError, match="must use required_slot pod2/gpu1"):
+        Q.cmd_full_scene_probe(
+            queue,
+            job_id="job0",
+            pod="pod2",
+            gpu=2,
+            attempt_id="required_a1",
+            execute=False,
+            confirm=None,
+        )
+    with pytest.raises(Q.QueueError, match="must use required_slot pod2/gpu1"):
+        Q.cmd_finalize_full_scene_probe(
+            queue,
+            job_id="job0",
+            pod="pod2",
+            gpu=2,
+            attempt_id="required_a1",
+            execute=False,
+            confirm=None,
+        )
+
+
 def test_full_scene_probe_execute_reads_only_selected_dispatch_pod(monkeypatch):
     queue = _probe_queue()
     queue["dispatch_pods"] = ["pod2"]
@@ -1020,6 +1105,37 @@ def test_boot_warmup_requires_dedicated_confirmation_and_dispatch_slot():
         assert "not dispatch-enabled" in str(exc)
     else:
         raise AssertionError("reserved Pod received a boot warmup")
+
+
+def test_required_slot_blocks_warmup_and_claim_contract_before_ssh(monkeypatch):
+    queue = _queue()
+    queue["dispatch_pods"] = ["pod2"]
+    job = queue["jobs"][0]
+    job["resource"] = {
+        "policy": "dispatch_gpu_round_robin",
+        "required_slot": "pod2/gpu1",
+    }
+    wrong_slot = Q._slot_by_identity(queue, "pod2", 0)
+    monkeypatch.setattr(
+        Q,
+        "_run_ssh",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("wrong required slot must fail before SSH")
+        ),
+    )
+
+    with pytest.raises(Q.QueueError, match="must use required_slot pod2/gpu1"):
+        Q.cmd_boot_warmup(
+            queue,
+            job_id="job0",
+            pod="pod2",
+            gpu=0,
+            attempt_id="wrong_slot_a1",
+            execute=False,
+            confirm=None,
+        )
+    with pytest.raises(Q.QueueError, match="must use required_slot pod2/gpu1"):
+        Q._launch_contract(queue, job, wrong_slot)
 
 
 def test_fill_uses_one_atomic_launch_ssh_and_stops_on_embedded_preflight_failure(

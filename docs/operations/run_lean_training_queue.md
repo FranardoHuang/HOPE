@@ -119,7 +119,8 @@ python3 scripts/run_lean_training_queue.py \
 ```
 
 专用确认词不能与 science/warmup token 混用；blocked 行也先按 ready 级规则拒绝 zero commit、placeholder、
-非 `/workspace` 或重复资产。声明了 `preferred_slot` 的 job 只能在该槽探测，reserved Pod 在 SSH 前拒绝。
+非 `/workspace` 或重复资产。声明了 `preferred_slot` 或
+[`required_slot`](../DEFINITIONS.md#required-slot) 的 job 只能在绑定槽探测，reserved Pod 在 SSH 前拒绝。
 execute 的外层容量预检只 SSH 读取用户明确选择的 dispatch Pod/GPU，不调用普通 fill 用的 all-Pod
 `live_snapshot`；随后远端仍在同一 selected GPU 的 fd8 短锁内复核容量。这样 Pod2-only probe 不会因防重复
 逻辑触碰 reserved Pod1；普通 fill/claim 现在也只读取 `dispatch_pods`，交接前靠历史行终态化而不是访问
@@ -204,8 +205,9 @@ iteration/lineage 的负测；整合 harness/source-asset 回归 `146 passed`。
 - 一个 clean Git source commit；
 - 公共 base recipe 与本臂唯一 delta；
 - seed、环境数/迭代预算、`+200/+500/+1000` checkpoint milestone；
-- 一个显式 [`dispatch_pods` 可发射 Pod 集合](../DEFINITIONS.md#dispatch-pods)与其 GPU round-robin
-  资源策略。
+- 一个显式 [`dispatch_pods` 可发射 Pod 集合](../DEFINITIONS.md#dispatch-pods)与 GPU round-robin、
+  [`preferred_slot`](../DEFINITIONS.md#preferred-slot) 或
+  [`required_slot`](../DEFINITIONS.md#required-slot) 资源策略。
 
 它是执行清单，不是第二份优先级账本。job 顺序必须抄自
 [`NOW` 统一队列](../NOW.md#统一工作队列唯一优先级账本)中已经解锁的项目；新科学问题仍先写对应实验记录。
@@ -250,7 +252,12 @@ snapshot 与远端最后容量检查都按每 GPU 的唯一纯数字 PID 计数�
 调用 launcher 时 `8>&-`；trainer 不再继承，锁只覆盖 doctor→容量→claim→boot marker。现役旧 trainer
 已经继承的锁不强行剥离，只等自然退出。job 可选
 [`preferred_slot`](../DEFINITIONS.md#preferred-slot)；槽未满时优先，同卡满后自动回到 round-robin，不能突破容量或
-`dispatch_pods`。
+`dispatch_pods`。需要**绝不 fallback** 时改用
+[`required_slot`](../DEFINITIONS.md#required-slot)：槽满就不分配，且本 job 不会落到其他 GPU；它不阻塞
+其他槽可运行的独立 job。两种字段互斥。它不保证多 job 原子发射，matched
+pair 仍须使用 fresh namespace，并由一次 `fill` 的顺序事务保证第一臂 embedded preflight/首 iteration 失败时
+不继续第二臂。science claim、boot warmup、full-scene probe 与 finalizer 都在 SSH 前强制 required 绑定；
+probe/warmup/finalizer 还保持 preferred 证据槽绑定。
 
 `doctor` 与 trainer 共用一个 child-environment builder，同时设置所选 CUDA 和
 `PYTHONPATH=${HOPE_WBT_PYTHONPATH}`，并共用同一条最终 training argv。exact module probe 和 no-Kit Hydra

@@ -13,6 +13,11 @@
 
 ## 2026-07-15
 
+- 轻量训练 harness 新增 `required_slot` 硬绑定：目标 GPU 满载时本 job 不 fallback，同时不饿死其他槽的
+  独立任务；与 `preferred_slot` 互斥，science claim、warmup、probe/finalizer 都在 SSH 前执行检查，防止
+  Codex 作业落到一康保留的 GPU0。该字段不冒充 matched pair 原子性；当前只是源码门，replacement queue
+  仍 blocked，尚未重绑或启动。
+
 - Same-phase activation successor `0f3900a...` 的 4096-env Pod2 strict probe 抓到离线测试遗漏：
   RewardManager 在 `torch.inference_mode()` 内创建 ledger，normal-mode runner 第一次 `zero_()` 即 fatal；因此
   该 source/attempt 永久不解锁科学 pair。修复把私有 counter reset 放回 inference mode，并新增跨 mode 的

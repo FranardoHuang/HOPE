@@ -860,7 +860,9 @@ def load_queue(path: Path) -> dict[str, Any]:
             raise QueueError(f"{job_id}.milestones must align with save_interval")
 
         resource = _mapping(job.get("resource"), f"{job_id}.resource")
-        unknown_resource_keys = set(resource) - {"policy", "preferred_slot"}
+        unknown_resource_keys = set(resource) - {
+            "policy", "preferred_slot", "required_slot"
+        }
         if unknown_resource_keys:
             raise QueueError(
                 f"{job_id}.resource has unsupported keys: {sorted(unknown_resource_keys)}"
@@ -875,18 +877,28 @@ def load_queue(path: Path) -> dict[str, Any]:
                 f"{job_id}.resource six_gpu_round_robin requires both configured Pods"
             )
         preferred_slot = resource.get("preferred_slot")
-        if preferred_slot is not None:
-            preferred_slot = _text(
-                preferred_slot, f"{job_id}.resource.preferred_slot"
+        required_slot = resource.get("required_slot")
+        if preferred_slot is not None and required_slot is not None:
+            raise QueueError(
+                f"{job_id}.resource cannot set both preferred_slot and required_slot"
             )
-            dispatch_slot_names = {
-                f"{pod_name}/gpu{gpu}"
-                for pod_name in dispatch_pods
-                for gpu in pods[pod_name]["gpus"]
-            }
-            if preferred_slot not in dispatch_slot_names:
+        dispatch_slot_names = {
+            f"{pod_name}/gpu{gpu}"
+            for pod_name in dispatch_pods
+            for gpu in pods[pod_name]["gpus"]
+        }
+        for slot_key, slot_value in (
+            ("preferred_slot", preferred_slot),
+            ("required_slot", required_slot),
+        ):
+            if slot_value is None:
+                continue
+            slot_value = _text(
+                slot_value, f"{job_id}.resource.{slot_key}"
+            )
+            if slot_value not in dispatch_slot_names:
                 raise QueueError(
-                    f"{job_id}.resource.preferred_slot is not dispatch-enabled"
+                    f"{job_id}.resource.{slot_key} is not dispatch-enabled"
                 )
         run_name = _text(job.get("run_name"), f"{job_id}.run_name", safe_id=True)
         if run_name in run_names:
@@ -1198,14 +1210,51 @@ def _assign(
         available = [slot for slot in all_slots if current[slot.name] < slot.capacity]
         if not available:
             break
-        preferred_slot = job["resource"].get("preferred_slot")
-        preferred = [slot for slot in available if slot.name == preferred_slot]
-        chosen = preferred[0] if preferred else min(
-            available, key=lambda slot: (current[slot.name], slot.ordinal)
-        )
+        required_slot = job["resource"].get("required_slot")
+        if required_slot is not None:
+            required = [slot for slot in available if slot.name == required_slot]
+            # A hard-bound job never falls through to another GPU.  It does not,
+            # however, stall unrelated jobs that can use other dispatch slots;
+            # matched-arm atomicity needs its own explicit launch-group contract.
+            if not required:
+                continue
+            chosen = required[0]
+        else:
+            preferred_slot = job["resource"].get("preferred_slot")
+            preferred = [slot for slot in available if slot.name == preferred_slot]
+            chosen = preferred[0] if preferred else min(
+                available, key=lambda slot: (current[slot.name], slot.ordinal)
+            )
         assignments.append((job, chosen))
         current[chosen.name] += 1
     return assignments
+
+
+def _require_bound_slot(
+    job: dict[str, Any],
+    slot: Slot,
+    *,
+    phase: str,
+    include_preferred: bool,
+) -> None:
+    """Fail before SSH/claim construction when an explicit slot binding drifts.
+
+    ``required_slot`` is a hard execution constraint and therefore applies to
+    every path.  ``preferred_slot`` deliberately permits science fallback when
+    its preferred GPU is full, but explicit probe/warmup/finalizer commands must
+    still use the selected source's preferred GPU so their evidence stays bound.
+    """
+
+    required_slot = job["resource"].get("required_slot")
+    if required_slot is not None and required_slot != slot.name:
+        raise QueueError(
+            f"{phase} must use required_slot {required_slot}, got {slot.name}"
+        )
+    preferred_slot = job["resource"].get("preferred_slot")
+    if include_preferred and preferred_slot is not None and preferred_slot != slot.name:
+        raise QueueError(
+            f"{phase} must use preferred_slot {preferred_slot}, got {slot.name}"
+        )
 
 
 def _training_argv(
@@ -1256,6 +1305,10 @@ def _launch_contract(
     envelope, avoiding an impossible self-referential hash while keeping the
     full executed argv independently reconstructible.
     """
+
+    _require_bound_slot(
+        job, slot, phase="science launch contract", include_preferred=False
+    )
 
     argv_without_claim = _training_argv(queue, job, slot.gpu)
     content = {
@@ -1515,6 +1568,9 @@ def _boot_warmup_contract(
 ) -> tuple[dict[str, Any], list[str], str]:
     """Build a tiny non-scientific scene-import warmup in its own namespace."""
 
+    _require_bound_slot(
+        job, slot, phase="boot warmup", include_preferred=True
+    )
     attempt_id = _text(attempt_id, "attempt_id", safe_id=True)
     warmup_name = (
         f"boot_warmup_{job['source']['commit'][:8]}_{slot.pod}_gpu{slot.gpu}_{attempt_id}"
@@ -1579,6 +1635,9 @@ def _full_scene_probe_contract(
 ) -> tuple[dict[str, Any], list[str], str]:
     """Derive a two-update non-science run without changing scene scale."""
 
+    _require_bound_slot(
+        job, slot, phase="full-scene probe", include_preferred=True
+    )
     _require_exact_probe_job(job)
     attempt_id = _text(attempt_id, "attempt_id", safe_id=True)
     num_envs = job["budget"]["num_envs"]
@@ -2188,6 +2247,9 @@ def cmd_boot_warmup(
     if job["status"] not in {READY, BLOCKED}:
         raise QueueError("boot warmup requires a ready or blocked source job")
     slot = _slot_by_identity(queue, _text(pod, "pod", safe_id=True), gpu)
+    _require_bound_slot(
+        job, slot, phase="boot warmup", include_preferred=True
+    )
     claim, _argv, run_dir = _boot_warmup_contract(queue, job, slot, attempt_id)
     remote = _boot_warmup_script(queue, job, slot, attempt_id)
     result: dict[str, Any] = {
@@ -2231,11 +2293,9 @@ def cmd_full_scene_probe(
     if job["status"] not in {READY, BLOCKED}:
         raise QueueError("full-scene probe requires a ready or blocked exact source job")
     slot = _slot_by_identity(queue, _text(pod, "pod", safe_id=True), gpu)
-    preferred_slot = job["resource"].get("preferred_slot")
-    if preferred_slot is not None and preferred_slot != slot.name:
-        raise QueueError(
-            f"full-scene probe must use preferred_slot {preferred_slot}, got {slot.name}"
-        )
+    _require_bound_slot(
+        job, slot, phase="full-scene probe", include_preferred=True
+    )
     claim, _argv, run_dir = _full_scene_probe_contract(
         queue, job, slot, attempt_id
     )
@@ -2332,11 +2392,9 @@ def cmd_finalize_full_scene_probe(
         )
     job = _job_by_id(queue, _text(job_id, "job_id", safe_id=True))
     slot = _slot_by_identity(queue, _text(pod, "pod", safe_id=True), gpu)
-    preferred_slot = job["resource"].get("preferred_slot")
-    if preferred_slot is not None and preferred_slot != slot.name:
-        raise QueueError(
-            f"probe finalization must use preferred_slot {preferred_slot}, got {slot.name}"
-        )
+    _require_bound_slot(
+        job, slot, phase="probe finalization", include_preferred=True
+    )
     claim, _argv, run_dir = _full_scene_probe_contract(
         queue, job, slot, attempt_id
     )

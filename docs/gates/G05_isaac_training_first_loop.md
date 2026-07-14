@@ -2082,3 +2082,13 @@ non-science、不可复用。
 进入 inference mode，并新增 inference-create → normal-consume → next-step-reuse 回归；专项
 `10 + 2 + 11 passed`。尚需新 exact commit/checkout、source asset hydration、全新 full-scene terminal result，
 且 queue 必须显式消费 pass receipt 后才能从 blocked 改 ready；G05 继续 `Partial`。
+
+#### GPU hard-slot 调度源码门
+
+Pod2 GPU0 被一康占用时，旧 `preferred_slot` 只保证“优先”，目标槽满后会 round-robin fallback，不能作为
+资源隔离合同。queue schema 新增 [`required_slot`](../DEFINITIONS.md#required-slot)：与 preferred 互斥、必须
+属于 dispatch slot；该槽无容量时本 job 等待，但其他槽的独立 job 不被饿死。science claim、boot warmup、
+full-scene probe 与 finalizer 均在 SSH 前强制同一 hard slot。泛化负测覆盖“GPU1 满载时该 job 不落
+GPU0/GPU2、GPU0/GPU2 独立任务仍可调度”、非 dispatch required slot、ambiguous 双字段以及底层 claim
+绕过。该字段不提供 matched pair 原子发射；当前 replacement queue 尚未重绑、probe 尚未通过，G05 继续
+`Partial`。
