@@ -3,10 +3,13 @@ from __future__ import annotations
 import hashlib
 import io
 import importlib.util
+import ast
+import builtins
 import json
 import os
 import subprocess
 import sys
+import types
 import zipfile
 from pathlib import Path
 
@@ -86,6 +89,47 @@ def test_static_gate_binds_l1_npz_mjcf_closure_and_frame_sources():
     assert plan["frame_sources"]["tracking_command"]["sha256"] == _sha(COMMAND)
 
 
+def test_local_phase_kernels_are_ast_identical_to_exact_upstream():
+    plan = _plan()
+    validator = TABLE_NET.read_file_snapshot(SCRIPT, "table/net validator")
+    binding = json.loads(L1_PLAN.read_text(encoding="utf-8"))["dependencies"][
+        "dense_safety_tool"
+    ]
+    upstream = TABLE_NET.read_file_snapshot(
+        ROOT / binding["path"],
+        "dense safety reference",
+        expected_bytes=binding["bytes"],
+        expected_sha256=binding["sha256"],
+    )
+    hashes = TABLE_NET.validate_phase_pure_function_parity(validator, upstream)
+    assert set(hashes) == set(TABLE_NET.PURE_PHASE_FUNCTIONS)
+    assert all(len(value) == 64 for value in hashes.values())
+    assert plan["validator"]["path"] == "scripts/audit_motion_schema2_table_net_clearance.py"
+
+
+def test_project_module_sys_modules_injection_is_never_consumed(monkeypatch):
+    banned = {"ground_gmr_pkl", "virtual_return_scorer", "audit_motion_npz"}
+    for name in banned:
+        monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+    imported: list[str] = []
+    real_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        if name.split(".", 1)[0] in banned:
+            imported.append(name)
+            raise AssertionError(f"unbound project import attempted: {name}")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    path_before = list(sys.path)
+    modules_before = dict(sys.modules)
+    TABLE_NET.validate_plan(PLAN, _sha(PLAN))
+    assert imported == []
+    assert sys.path == path_before
+    assert set(sys.modules) == set(modules_before)
+    assert all(sys.modules[name] is module for name, module in modules_before.items())
+
+
 def test_hope_to_mjcf_transform_and_all_obstacles_are_exact():
     plan = _plan()
     frame = TABLE_NET.validate_frame_and_geometry_sources(plan)
@@ -102,6 +146,24 @@ def test_hope_to_mjcf_transform_and_all_obstacles_are_exact():
     assert obstacles[1]["full_extents_m"] == [0.01, 1.825, 0.1525]
     assert obstacles[2]["center_mjcf_world_m"][1] == pytest.approx(0.9125)
     assert obstacles[3]["center_mjcf_world_m"][1] == pytest.approx(-0.9125)
+    assert frame["net_post_source"]["full_extents_m"] == [0.02, 0.02, 0.1725]
+
+
+def test_net_post_geometry_source_semantics_fail_closed(tmp_path):
+    source = ROOT / (
+        "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/"
+        "tasks/table_tennis/table_tennis_env_cfg.py"
+    )
+    mutated = tmp_path / "table_tennis_env_cfg.py"
+    mutated.write_text(
+        source.read_text(encoding="utf-8").replace(
+            "size=(0.02, 0.02, post_h)", "size=(0.01, 0.02, post_h)"
+        ),
+        encoding="utf-8",
+    )
+    snapshot = TABLE_NET.read_file_snapshot(mutated, "mutated table scene")
+    with pytest.raises(TABLE_NET.TableNetError, match="post extents changed"):
+        TABLE_NET.validate_net_post_geometry_source(snapshot)
 
 
 @pytest.mark.parametrize(
@@ -162,6 +224,12 @@ class _DistanceHelper:
     def _far(self, model, data, a: int, b: int, threshold: float) -> bool:
         return self._distance(a, b) >= threshold
 
+    def mj_geomDistance(self, model, data, a: int, b: int, threshold: float, _fromto):
+        distance = self._distance(a, b)
+        if distance < 0.0:
+            return distance
+        return min(distance, threshold)
+
     def geom_clearance(self, model, data, a: int, b: int, *, distmax: float, tol: float):
         assert distmax == 0.1
         assert tol == 1.0e-6
@@ -214,6 +282,63 @@ def test_non_racket_robot_geom_is_in_scope_and_noncompensable():
             source_frames=2,
             unsafe_source_mask_fn=lambda count, times, mask: np.array([True, True]),
         )
+
+
+def test_clearance_reports_midpoint_and_actual_certified_lower_bracket():
+    true_distance = 0.0371234
+    helper = _DistanceHelper({(1, 10): true_distance})
+    result = TABLE_NET.evaluate_robot_obstacle_pairs(
+        helper,
+        object(),
+        object(),
+        robot_ids=(1,),
+        racket_ids=(1,),
+        obstacle_ids={"motion_net": 10},
+        hard_threshold_m=0.005,
+        warning_threshold_m=0.02,
+        reporting_tolerance_m=1.0e-6,
+        reporting_cap_m=0.1,
+        geom_name=lambda geom_id: f"geom{geom_id}",
+    )
+    midpoint = result["minimum_clearance_midpoint_estimate_m"]
+    lower = result["minimum_clearance_lower_bound_m"]
+    assert lower <= true_distance < lower + 1.0e-6
+    assert abs(midpoint - true_distance) <= 0.5e-6
+    assert midpoint != lower
+
+
+@pytest.mark.parametrize("true_distance", [-0.002, 0.0371234, 0.2])
+def test_local_distance_kernel_matches_exact_upstream_reference(true_distance):
+    helper = _DistanceHelper({(1, 10): true_distance})
+    source = ast.parse(
+        (ROOT / "hope_training/whole_body_tracking/scripts/audit_self_collision.py").read_text(
+            encoding="utf-8"
+        )
+    )
+    selected = [
+        node
+        for node in source.body
+        if isinstance(node, ast.FunctionDef) and node.name in {"_far", "geom_clearance"}
+    ]
+    namespace = {
+        "mujoco": helper,
+        "CLEARANCE_DISTMAX": 0.6,
+        "CLEARANCE_TOL": 1.0e-4,
+        "Tuple": tuple,
+    }
+    exec(compile(ast.Module(body=selected, type_ignores=[]), "<exact-distance-reference>", "exec"), namespace)
+    upstream, saturated = namespace["geom_clearance"](
+        object(), object(), 1, 10, distmax=0.1, tol=1.0e-6
+    )
+    midpoint, lower, upper, local_saturated = TABLE_NET.geom_clearance_bracket(
+        helper, object(), object(), 1, 10, distmax=0.1, tol=1.0e-6
+    )
+    assert midpoint == upstream
+    assert local_saturated is saturated
+    if upper is not None:
+        assert lower <= true_distance <= upper
+    else:
+        assert lower == pytest.approx(0.1 - TABLE_NET.DISTANCE_SATURATION_EPSILON_M)
 
 
 def _synthetic_l1_certificate(plan: dict) -> dict:

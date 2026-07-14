@@ -8,8 +8,8 @@
   "asset_id": "franco_backhand_loop_b",
   "validator": {
     "path": "scripts/audit_motion_schema2_table_net_clearance.py",
-    "bytes": 80458,
-    "sha256": "df576c405ed6f025b180d8bd644dc87320f3acdee71a87f9aaf373ddc027b549"
+    "bytes": 96390,
+    "sha256": "1ef347ba50966bf61a4edc7fd0f0cdadd9270a510e9b2fefbeb73205f6c39a7a"
   },
   "frozen_vendor_l1": {
     "certificate": {
@@ -66,6 +66,11 @@
       "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/geometry.py",
       "bytes": 10304,
       "sha256": "df71f12a21fedb4b8caed182906288f573b2f05c731441a5f529996baaf056b2"
+    },
+    "table_scene_geometry": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/table_tennis_env_cfg.py",
+      "bytes": 23027,
+      "sha256": "46dc61b061bddd977e8dd8e5320538f237761ddc1fec1e7c0c53b7a1aada3a40"
     },
     "tracking_command": {
       "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/hope_commands.py",
@@ -139,7 +144,8 @@
     "hard_clearance_m": 0.005,
     "warning_clearance_m": 0.02,
     "reporting_clearance_cap_m": 0.1,
-    "hard_threshold_predicate": "fail iff audit_self_collision._far(model,data,robot_geom,obstacle_geom,0.005) is false",
+    "distance_saturation_predicate_epsilon_m": 1e-12,
+    "hard_threshold_predicate": "fail iff local_dependency_free_geom_is_far_exact_MuJoCo_saturation_predicate_at_0.005m_is_false",
     "reporting_clearance_bisection_tolerance_m": 0.000001,
     "danger_propagation": "any robot-obstacle dense sample below 5mm fails the whole asset and marks both adjacent source frames",
     "hard_fail_is_noncompensable": true,

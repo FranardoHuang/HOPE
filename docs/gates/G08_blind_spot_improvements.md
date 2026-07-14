@@ -591,7 +591,13 @@ certificate/NPZ/MJCF 的 check→reopen 和输出 parent path-swap 窗口，因�
 runtime 输入绑定为 `O_NOFOLLOW` fd 的单次 bytes snapshot，canonical XML + 74 mesh 从 pinned model-root
 dirfd 读取，输出用 pinned parent dirfd + `openat(O_EXCL)` + file/directory `fsync` 后复核同一 inode/bytes。
 certificate swap、model-root replacement、output-parent swap、duplicate ZIP、错误 dtype、NaN/Inf 均有
-fail-closed 负测。dependency-light 专项 `22 passed`、source/static 命令 PASS；runtime
+fail-closed 负测。第二次红队又证明完整 phase/self-collision module exec 会消费未绑定普通 project import；
+修复后只保留与 exact upstream AST 等价的四个 dependency-free phase kernel，以及有 upstream 数值 parity
+的本地 MuJoCo saturation/bisection kernel，不再执行 `virtual_return_scorer`/`audit_motion_npz` 等 transitive
+module；冻结 source validator 调用后还原完整 `sys.path`/`sys.modules`，legacy L0 runtime module 也不再
+执行。伪造 `sys.modules` 注入已 fail closed；二分 midpoint 与 certified lower bracket 分字段，网柱尺寸和
+左右 placement 也新增 exact `table_tennis_env_cfg.py::build_net_post_cfg` source binding。dependency-light
+专项 `29 passed`、source/static 命令 PASS；runtime
 `dry-run/audit`、certificate 与动作晋级均未发生，所以 G08 保持 Partial。
 见[桌网实验卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET.md)和
 [操作文档](../operations/run_motion_backhand_loop_b_table_net_clearance.md)。

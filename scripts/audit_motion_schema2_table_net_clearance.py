@@ -17,6 +17,7 @@ import argparse
 import ast
 import hashlib
 import io
+import importlib
 import json
 import math
 import os
@@ -61,6 +62,13 @@ OBSTACLE_NAMES = (
     "motion_net_post_left",
     "motion_net_post_right",
 )
+PURE_PHASE_FUNCTIONS = (
+    "slerp_xyzw",
+    "densify_payload",
+    "unsafe_source_mask",
+    "_qpos_from_payload",
+)
+DISTANCE_SATURATION_EPSILON_M = 1.0e-12
 
 
 class TableNetError(ValueError):
@@ -342,7 +350,30 @@ def _load_exact_module(
         if isinstance(exc, TableNetError):
             raise
         raise TableNetError(f"cannot import exact {label} from {path}: {exc}") from exc
+    if previous is missing:
+        sys.modules.pop(name, None)
+    else:
+        sys.modules[name] = previous
     return module
+
+
+def _validate_l1_without_import_state_leak(
+    l1: Any, plan_path: Path, expected_sha256: str
+) -> tuple[dict[str, Any], str, dict[str, Any]]:
+    """Run the frozen source validator, then restore sys.path/sys.modules exactly."""
+
+    original_path = list(sys.path)
+    original_modules = dict(sys.modules)
+    try:
+        return l1.validate_plan(plan_path, expected_sha256)
+    finally:
+        sys.path[:] = original_path
+        for name in tuple(sys.modules):
+            if name not in original_modules:
+                sys.modules.pop(name, None)
+        for name, module in original_modules.items():
+            if sys.modules.get(name) is not module:
+                sys.modules[name] = module
 
 
 def _ast_number(source: FileSnapshot, class_name: str | None, variable: str) -> float:
@@ -376,6 +407,132 @@ def _ast_number(source: FileSnapshot, class_name: str | None, variable: str) -> 
             f"cannot extract exactly one literal {class_name + '.' if class_name else ''}{variable}"
         )
     return values[0]
+
+
+def _top_level_function_asts(
+    source: FileSnapshot, names: Sequence[str], label: str
+) -> dict[str, str]:
+    try:
+        tree = ast.parse(source.data.decode("utf-8"))
+    except (UnicodeError, SyntaxError) as exc:
+        raise TableNetError(f"cannot parse {label}: {exc}") from exc
+    result: dict[str, str] = {}
+    for name in names:
+        matches = [
+            node
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name
+        ]
+        if len(matches) != 1:
+            raise TableNetError(f"{label} must define exactly one top-level {name}")
+        result[name] = ast.dump(matches[0], annotate_fields=True, include_attributes=False)
+    return result
+
+
+def validate_phase_pure_function_parity(
+    validator_source: FileSnapshot, phase_source: FileSnapshot
+) -> dict[str, str]:
+    """Prove the local dependency-free phase kernels are AST-identical upstream copies."""
+
+    local = _top_level_function_asts(
+        validator_source, PURE_PHASE_FUNCTIONS, "table/net validator"
+    )
+    upstream = _top_level_function_asts(
+        phase_source, PURE_PHASE_FUNCTIONS, "bound dense safety reference"
+    )
+    if local != upstream:
+        changed = [name for name in PURE_PHASE_FUNCTIONS if local.get(name) != upstream.get(name)]
+        raise TableNetError(f"local pure phase kernels differ from exact upstream: {changed}")
+    return {
+        name: _sha256_bytes(value.encode("utf-8"))
+        for name, value in local.items()
+    }
+
+
+def _expr_dump(expression: str) -> str:
+    return ast.dump(ast.parse(expression, mode="eval").body, include_attributes=False)
+
+
+def validate_net_post_geometry_source(source: FileSnapshot) -> dict[str, Any]:
+    """Bind the exact scene builder that defines post size and left/right placement."""
+
+    try:
+        tree = ast.parse(source.data.decode("utf-8"))
+    except (UnicodeError, SyntaxError) as exc:
+        raise TableNetError(f"cannot parse table scene geometry source: {exc}") from exc
+    functions = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "build_net_post_cfg"
+    ]
+    if len(functions) != 1:
+        raise TableNetError("table scene must define exactly one build_net_post_cfg")
+    function = functions[0]
+    post_h = [
+        node.value
+        for node in function.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "post_h"
+    ]
+    if len(post_h) != 1 or ast.dump(post_h[0], include_attributes=False) != _expr_dump(
+        "geometry.NET_HEIGHT + 0.02"
+    ):
+        raise TableNetError("build_net_post_cfg post height formula changed")
+    calls = [node for node in ast.walk(function) if isinstance(node, ast.Call)]
+    size_values = [
+        keyword.value
+        for call in calls
+        if isinstance(call.func, ast.Attribute)
+        and call.func.attr == "CuboidCfg"
+        for keyword in call.keywords
+        if keyword.arg == "size"
+    ]
+    pos_values = [
+        keyword.value
+        for call in calls
+        if isinstance(call.func, ast.Attribute)
+        and call.func.attr == "InitialStateCfg"
+        for keyword in call.keywords
+        if keyword.arg == "pos"
+    ]
+    if len(size_values) != 1 or ast.dump(
+        size_values[0], include_attributes=False
+    ) != _expr_dump("(0.02, 0.02, post_h)"):
+        raise TableNetError("build_net_post_cfg post extents changed")
+    if len(pos_values) != 1 or ast.dump(
+        pos_values[0], include_attributes=False
+    ) != _expr_dump("(geometry.NET_X, y, post_h / 2.0)"):
+        raise TableNetError("build_net_post_cfg post center formula changed")
+    expected_y = {
+        "net_post_left": "0.0 + geometry.NET_OVERHANG",
+        "net_post_right": "-geometry.TABLE_WIDTH - geometry.NET_OVERHANG",
+    }
+    for field, expression in expected_y.items():
+        assignments = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == field
+        ]
+        if len(assignments) != 1 or not isinstance(assignments[0].value, ast.Call):
+            raise TableNetError(f"table scene {field} assignment changed")
+        call = assignments[0].value
+        if (
+            not isinstance(call.func, ast.Name)
+            or call.func.id != "build_net_post_cfg"
+            or len(call.args) < 2
+            or ast.dump(call.args[1], include_attributes=False) != _expr_dump(expression)
+        ):
+            raise TableNetError(f"table scene {field} placement changed")
+    return {
+        "source": _binding(source),
+        "builder": "build_net_post_cfg",
+        "full_extents_m": [0.02, 0.02, 0.1725],
+        "placement_y_hope_m": [0.15, -1.675],
+    }
 
 
 def _close(actual: Any, expected: float, label: str) -> float:
@@ -464,7 +621,12 @@ def validate_frame_and_geometry_sources(plan: Mapping[str, Any]) -> dict[str, An
 
     sources = exact_keys(
         plan["frame_sources"],
-        {"table_geometry", "tracking_command", "tracking_scene_adapter"},
+        {
+            "table_geometry",
+            "table_scene_geometry",
+            "tracking_command",
+            "tracking_scene_adapter",
+        },
         "frame_sources",
     )
     geometry_source = _snapshot_repo_binding(
@@ -483,6 +645,15 @@ def validate_frame_and_geometry_sources(plan: Mapping[str, Any]) -> dict[str, An
             "tasks/tracking/mdp/hope_commands.py"
         ),
     )
+    post_source = _snapshot_repo_binding(
+        sources["table_scene_geometry"],
+        "table scene geometry source",
+        (
+            "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/"
+            "tasks/table_tennis/table_tennis_env_cfg.py"
+        ),
+    )
+    post_evidence = validate_net_post_geometry_source(post_source)
     _snapshot_repo_binding(
         sources["tracking_scene_adapter"],
         "tracking scene adapter",
@@ -607,6 +778,7 @@ def validate_frame_and_geometry_sources(plan: Mapping[str, Any]) -> dict[str, An
         "hope_to_schema2_mjcf": expected_frame["hope_to_schema2_mjcf"],
         "obstacles": derived,
         "source_constants": constants,
+        "net_post_source": post_evidence,
         "vendor_floor_z_m": 0.0,
         "capture_table_pose_observed": False,
     }
@@ -633,9 +805,10 @@ def _expected_audit_contract() -> dict[str, Any]:
         "warning_clearance_m": 0.02,
         "reporting_clearance_bisection_tolerance_m": 0.000001,
         "reporting_clearance_cap_m": 0.1,
+        "distance_saturation_predicate_epsilon_m": DISTANCE_SATURATION_EPSILON_M,
         "hard_threshold_predicate": (
-            "fail iff audit_self_collision._far(model,data,robot_geom,obstacle_geom,0.005) "
-            "is false"
+            "fail iff local_dependency_free_geom_is_far_exact_MuJoCo_saturation_predicate_"
+            "at_0.005m_is_false"
         ),
         "danger_propagation": (
             "any robot-obstacle dense sample below 5mm fails the whole asset and marks both "
@@ -683,7 +856,7 @@ def validate_plan(plan_path: Path, expected_sha256: str) -> tuple[dict[str, Any]
         or plan["asset_id"] != ASSET_ID
     ):
         raise TableNetError("table/net identity, status, attribution or scope changed")
-    _verify_repo_binding(
+    validator_source = _snapshot_repo_binding(
         plan["validator"], "table/net validator", "scripts/audit_motion_schema2_table_net_clearance.py"
     )
 
@@ -721,8 +894,21 @@ def validate_plan(plan_path: Path, expected_sha256: str) -> tuple[dict[str, Any]
         label="vendor L1 validator",
     )
     secure_l1_plan = parse_json_bytes(l1_plan_snapshot.data, "vendor L1 preregistration")
+    phase_binding = secure_l1_plan["dependencies"]["dense_safety_tool"]
+    phase_source = _snapshot_repo_binding(
+        phase_binding, "dense safety pure-function reference", phase_binding["path"]
+    )
+    validate_phase_pure_function_parity(validator_source, phase_source)
+    helper_binding = secure_l1_plan["dependencies"]["self_collision_helper"]
+    helper_source = _snapshot_repo_binding(
+        helper_binding, "self-collision distance reference", helper_binding["path"]
+    )
+    _top_level_function_asts(
+        helper_source, ("_far", "geom_clearance"), "self-collision distance reference"
+    )
     try:
-        l1_plan, _, l0_v1_plan = l1.validate_plan(
+        l1_plan, _, l0_v1_plan = _validate_l1_without_import_state_leak(
+            l1,
             l1_plan_snapshot.path, frozen["preregistration"]["sha256"]
         )
     except (OSError, TypeError, ValueError) as exc:
@@ -1008,6 +1194,136 @@ def load_schema2_npz_snapshot(
         raise TableNetError("joint_vel is not producer-exact gradient(joint_pos, 1/50)")
     arrays["_quaternion_max_norm_error"] = np.asarray(quat_error)
     return arrays
+
+
+def validate_runtime_environment_snapshot(
+    plan: Mapping[str, Any],
+) -> tuple[Any, dict[str, Any]]:
+    """Validate the frozen CPU runtime without executing the legacy L0 module."""
+
+    runtime = plan["runtime"]
+    for key, expected in runtime["environment"].items():
+        if os.environ.get(key) != expected:
+            raise TableNetError(f"runtime environment {key} must equal {expected!r}")
+    resolved = Path(sys.executable).resolve()
+    if str(resolved) != runtime["resolved_executable"]:
+        raise TableNetError(f"resolved Python executable changed: {resolved}")
+    executable = read_file_snapshot(
+        resolved,
+        "resolved Python executable",
+        expected_bytes=runtime["resolved_executable_bytes"],
+        expected_sha256=runtime["resolved_executable_sha256"],
+    )
+    version = ".".join(str(value) for value in sys.version_info[:3])
+    if version != runtime["python_version"]:
+        raise TableNetError(f"Python version changed: {version}")
+    if (
+        np.__version__ != runtime["packages"]["numpy"]
+        or str(Path(np.__file__).resolve()) != runtime["module_origins"]["numpy"]
+    ):
+        raise TableNetError("NumPy version/origin changed")
+    try:
+        mujoco = importlib.import_module("mujoco")
+    except ImportError as exc:
+        raise TableNetError("mujoco is missing from exact CPU audit runtime") from exc
+    if (
+        mujoco.__version__ != runtime["packages"]["mujoco"]
+        or str(Path(mujoco.__file__).resolve()) != runtime["module_origins"]["mujoco"]
+    ):
+        raise TableNetError("MuJoCo version/origin changed")
+    return mujoco, {
+        "launcher": runtime["launcher"],
+        "resolved_executable": _binding(executable),
+        "python_version": version,
+        "numpy_version": np.__version__,
+        "numpy_origin": str(Path(np.__file__).resolve()),
+        "mujoco_version": mujoco.__version__,
+        "mujoco_origin": str(Path(mujoco.__file__).resolve()),
+        "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
+    }
+
+
+def slerp_xyzw(a: np.ndarray, b: np.ndarray, fraction: float) -> np.ndarray:
+    """Shortest-arc, normalized xyzw quaternion interpolation."""
+
+    qa = np.asarray(a, dtype=np.float64).reshape(4)
+    qb = np.asarray(b, dtype=np.float64).reshape(4)
+    qa /= np.linalg.norm(qa)
+    qb /= np.linalg.norm(qb)
+    dot = float(np.dot(qa, qb))
+    if dot < 0.0:
+        qb = -qb
+        dot = -dot
+    dot = float(np.clip(dot, -1.0, 1.0))
+    u = float(fraction)
+    if dot > 0.9995:
+        value = qa + u * (qb - qa)
+        return value / np.linalg.norm(value)
+    angle = math.acos(dot)
+    value = (math.sin((1.0 - u) * angle) * qa + math.sin(u * angle) * qb) / math.sin(angle)
+    return value / np.linalg.norm(value)
+
+
+def densify_payload(payload: dict[str, Any], substeps: int) -> tuple[dict[str, Any], np.ndarray]:
+    """Densify a GMR path and return source-time coordinates for every dense row."""
+
+    root_pos = np.asarray(payload["root_pos"], dtype=np.float64)
+    root_rot = np.asarray(payload["root_rot"], dtype=np.float64)
+    dof = np.asarray(payload["dof_pos"], dtype=np.float64)
+    frames = root_pos.shape[0]
+    dense_count = (frames - 1) * int(substeps) + 1
+    dense_root = np.empty((dense_count, 3), dtype=np.float64)
+    dense_rot = np.empty((dense_count, 4), dtype=np.float64)
+    dense_dof = np.empty((dense_count, dof.shape[1]), dtype=np.float64)
+    source_time = np.empty(dense_count, dtype=np.float64)
+    cursor = 0
+    for frame in range(frames - 1):
+        for step in range(substeps):
+            u = step / float(substeps)
+            dense_root[cursor] = (1.0 - u) * root_pos[frame] + u * root_pos[frame + 1]
+            dense_rot[cursor] = slerp_xyzw(root_rot[frame], root_rot[frame + 1], u)
+            dense_dof[cursor] = (1.0 - u) * dof[frame] + u * dof[frame + 1]
+            source_time[cursor] = frame + u
+            cursor += 1
+    dense_root[cursor] = root_pos[-1]
+    dense_rot[cursor] = root_rot[-1] / np.linalg.norm(root_rot[-1])
+    dense_dof[cursor] = dof[-1]
+    source_time[cursor] = frames - 1
+    dense = dict(payload)
+    dense["root_pos"] = dense_root
+    dense["root_rot"] = dense_rot
+    dense["dof_pos"] = dense_dof
+    dense["fps"] = float(np.asarray(payload["fps"]).reshape(-1)[0]) * int(substeps)
+    return dense, source_time
+
+
+def unsafe_source_mask(
+    source_frames: int,
+    source_time: np.ndarray,
+    dangerous_dense: np.ndarray,
+) -> np.ndarray:
+    """Conservatively mark both source endpoints touched by a dangerous dense sample."""
+
+    result = np.zeros(int(source_frames), dtype=bool)
+    for coordinate in np.asarray(source_time)[np.asarray(dangerous_dense, dtype=bool)]:
+        lo = int(math.floor(float(coordinate) + 1e-12))
+        hi = int(math.ceil(float(coordinate) - 1e-12))
+        result[max(0, lo)] = True
+        result[min(source_frames - 1, hi)] = True
+    return result
+
+
+def _qpos_from_payload(binding: Any, payload: dict[str, Any]) -> np.ndarray:
+    root_pos = np.asarray(payload["root_pos"], dtype=np.float64)
+    root_xyzw = np.asarray(payload["root_rot"], dtype=np.float64)
+    dof = np.asarray(payload["dof_pos"], dtype=np.float64)
+    result = np.repeat(binding.model.qpos0[None, :], root_pos.shape[0], axis=0)
+    root = int(binding.root_qpos_address)
+    result[:, root : root + 3] = root_pos
+    normalized = root_xyzw / np.linalg.norm(root_xyzw, axis=1, keepdims=True)
+    result[:, root + 3 : root + 7] = normalized[:, [3, 0, 1, 2]]
+    result[:, list(binding.joint_qpos_addresses)] = dof
+    return result
 
 
 def _format_vec(values: Sequence[float]) -> str:
@@ -1329,8 +1645,58 @@ def _compile_augmented_model(
     return model, data, obstacle_ids, evidence
 
 
+def geom_is_far(
+    mujoco_api: Any, model: Any, data: Any, g1: int, g2: int, threshold_m: float
+) -> bool:
+    """Exact MuJoCo saturation predicate: true geometric distance is at least threshold."""
+
+    return (
+        float(mujoco_api.mj_geomDistance(model, data, g1, g2, threshold_m, None))
+        >= threshold_m - DISTANCE_SATURATION_EPSILON_M
+    )
+
+
+def geom_clearance_bracket(
+    mujoco_api: Any,
+    model: Any,
+    data: Any,
+    g1: int,
+    g2: int,
+    *,
+    distmax: float,
+    tol: float,
+) -> tuple[float, float, float | None, bool]:
+    """Return midpoint estimate, certified lower bracket, upper bracket and saturation."""
+
+    d0 = float(mujoco_api.mj_geomDistance(model, data, g1, g2, 0.0, None))
+    if not math.isfinite(d0):
+        raise TableNetError("MuJoCo geom distance is non-finite")
+    if d0 < 0.0:
+        return d0, d0, d0, False
+    if geom_is_far(mujoco_api, model, data, g1, g2, distmax):
+        return (
+            distmax,
+            max(0.0, distmax - DISTANCE_SATURATION_EPSILON_M),
+            None,
+            True,
+        )
+    lo, hi = 0.0, distmax
+    while hi - lo > tol:
+        mid = 0.5 * (lo + hi)
+        if geom_is_far(mujoco_api, model, data, g1, g2, mid):
+            lo = mid
+        else:
+            hi = mid
+    return (
+        0.5 * (lo + hi),
+        max(0.0, lo - DISTANCE_SATURATION_EPSILON_M),
+        hi,
+        False,
+    )
+
+
 def evaluate_robot_obstacle_pairs(
-    helper: Any,
+    mujoco_api: Any,
     model: Any,
     data: Any,
     *,
@@ -1368,19 +1734,22 @@ def evaluate_robot_obstacle_pairs(
     hard_pairs: list[list[str]] = []
     warning_pairs: list[list[str]] = []
     racket_hard_pairs: list[list[str]] = []
-    minimum: float | None = None
-    minimum_pair: list[str] | None = None
+    minimum_midpoint: float | None = None
+    minimum_midpoint_pair: list[str] | None = None
+    minimum_lower_bound = reporting_cap_m
+    minimum_lower_bound_pair: list[str] | None = None
     for robot in robots:
         for obstacle_name, obstacle in obstacles.items():
             pair = [geom_name(robot), obstacle_name]
-            if not bool(helper._far(model, data, robot, obstacle, hard_threshold_m)):
+            if not geom_is_far(mujoco_api, model, data, robot, obstacle, hard_threshold_m):
                 hard_pairs.append(pair)
                 if robot in rackets:
                     racket_hard_pairs.append(pair)
-            if not bool(helper._far(model, data, robot, obstacle, warning_threshold_m)):
+            if not geom_is_far(mujoco_api, model, data, robot, obstacle, warning_threshold_m):
                 warning_pairs.append(pair)
-            if not bool(helper._far(model, data, robot, obstacle, reporting_cap_m)):
-                distance, _ = helper.geom_clearance(
+            if not geom_is_far(mujoco_api, model, data, robot, obstacle, reporting_cap_m):
+                midpoint, lower, _upper, _saturated = geom_clearance_bracket(
+                    mujoco_api,
                     model,
                     data,
                     robot,
@@ -1388,12 +1757,14 @@ def evaluate_robot_obstacle_pairs(
                     distmax=reporting_cap_m,
                     tol=reporting_tolerance_m,
                 )
-                distance = float(distance)
-                if not math.isfinite(distance):
+                if not math.isfinite(midpoint) or not math.isfinite(lower):
                     raise TableNetError("robot/obstacle clearance produced a non-finite distance")
-                if minimum is None or distance < minimum:
-                    minimum = distance
-                    minimum_pair = pair
+                if minimum_midpoint is None or midpoint < minimum_midpoint:
+                    minimum_midpoint = midpoint
+                    minimum_midpoint_pair = pair
+                if lower < minimum_lower_bound:
+                    minimum_lower_bound = lower
+                    minimum_lower_bound_pair = pair
     return {
         "pair_count": len(robots) * len(obstacles),
         "hard_failure": bool(hard_pairs),
@@ -1402,9 +1773,10 @@ def evaluate_robot_obstacle_pairs(
         "hard_pairs": hard_pairs,
         "warning_pairs": warning_pairs,
         "racket_or_handle_hard_pairs": racket_hard_pairs,
-        "minimum_clearance_m": minimum,
-        "minimum_clearance_lower_bound_m": minimum if minimum is not None else reporting_cap_m,
-        "minimum_pair": minimum_pair,
+        "minimum_clearance_midpoint_estimate_m": minimum_midpoint,
+        "minimum_clearance_lower_bound_m": minimum_lower_bound,
+        "minimum_midpoint_pair": minimum_midpoint_pair,
+        "minimum_lower_bound_pair": minimum_lower_bound_pair,
         "reporting_cap_m": reporting_cap_m,
     }
 
@@ -1519,7 +1891,8 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
         label="vendor L1 validator",
     )
     try:
-        l1_plan, _, l0_v1_plan = l1.validate_plan(
+        l1_plan, _, l0_v1_plan = _validate_l1_without_import_state_leak(
+            l1,
             l1_plan_snapshot.path, frozen["preregistration"]["sha256"]
         )
         if l1_plan != secure_l1_plan:
@@ -1551,14 +1924,12 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
             "vendor L0 V1 validator",
             l0_v1_validator_binding["path"],
         )
-        l0_v1 = _load_exact_module(
-            "motion_schema2_l0_v1_for_table_net_runtime",
-            l0_v1_validator_snapshot.path,
-            expected_bytes=l0_v1_validator_snapshot.size,
-            expected_sha256=l0_v1_validator_snapshot.sha256,
-            label="vendor L0 V1 validator",
-        )
-        mujoco, runtime = l0_v1.validate_runtime_environment(l0_v1_plan)
+        if (
+            l0_v1_validator_snapshot.size != l0_v1_validator_binding["bytes"]
+            or l0_v1_validator_snapshot.sha256 != l0_v1_validator_binding["sha256"]
+        ):
+            raise TableNetError("vendor L0 V1 validator binding changed")
+        mujoco, runtime = validate_runtime_environment_snapshot(l0_v1_plan)
     except (OSError, TypeError, ValueError) as exc:
         raise TableNetError(f"exact vendor L1 CPU runtime validation failed: {exc}") from exc
     l1_certificate, l1_certificate_snapshot = validate_vendor_l1_certificate(plan)
@@ -1575,20 +1946,23 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
     arrays = load_schema2_npz_snapshot(npz_snapshot, l0_v1_plan, body_names)
 
     phase_binding = l1_plan["dependencies"]["dense_safety_tool"]
-    phase = _load_exact_module(
-        "motion_phase_safety_for_table_net",
-        REPO_ROOT / phase_binding["path"],
-        expected_bytes=phase_binding["bytes"],
-        expected_sha256=phase_binding["sha256"],
-        label="dense safety tool",
+    phase_source = _snapshot_repo_binding(
+        phase_binding, "dense safety pure-function reference", phase_binding["path"]
     )
     helper_binding = l1_plan["dependencies"]["self_collision_helper"]
-    helper = _load_exact_module(
-        "motion_self_collision_for_table_net",
-        REPO_ROOT / helper_binding["path"],
-        expected_bytes=helper_binding["bytes"],
-        expected_sha256=helper_binding["sha256"],
-        label="self-collision distance helper",
+    helper_source = _snapshot_repo_binding(
+        helper_binding, "self-collision distance reference", helper_binding["path"]
+    )
+    validator_source = _snapshot_repo_binding(
+        plan["validator"],
+        "table/net validator",
+        "scripts/audit_motion_schema2_table_net_clearance.py",
+    )
+    phase_function_asts = validate_phase_pure_function_parity(
+        validator_source, phase_source
+    )
+    helper_function_asts = _top_level_function_asts(
+        helper_source, ("_far", "geom_clearance"), "self-collision distance reference"
     )
     ground_binding = l1_plan["dependencies"]["grounding_helper"]
     ground = _load_exact_module(
@@ -1647,9 +2021,7 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
         "fps": np.array([50.0], dtype=np.float64),
     }
     audit_contract = plan["audit_contract"]
-    dense, source_time = phase.densify_payload(
-        payload, audit_contract["substeps_per_source_interval"]
-    )
+    dense, source_time = densify_payload(payload, audit_contract["substeps_per_source_interval"])
     if (
         dense["root_pos"].shape != (1201, 3)
         or dense["dof_pos"].shape != (1201, 31)
@@ -1665,7 +2037,7 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
         augmented_binding,
         tolerance_rad=l1_plan["safety_contract"]["joint_range_tolerance_rad"],
     )
-    qpos = phase._qpos_from_payload(augmented_binding, dense)
+    qpos = _qpos_from_payload(augmented_binding, dense)
     robot_ids = tuple(int(value) for value in augmented_binding.collision_geom_ids)
     geom_by_name = {_geom_name(mujoco, model, geom_id): geom_id for geom_id in robot_ids}
     if any(name not in geom_by_name for name in RACKET_GEOMS):
@@ -1675,16 +2047,19 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
     all_bad = np.zeros(1201, dtype=bool)
     racket_bad = np.zeros(1201, dtype=bool)
     warnings = np.zeros(1201, dtype=bool)
-    minimum_value: float | None = None
-    minimum_pair: list[str] | None = None
-    minimum_source_time: float | None = None
+    minimum_midpoint: float | None = None
+    minimum_midpoint_pair: list[str] | None = None
+    minimum_midpoint_source_time: float | None = None
+    minimum_lower_bound = audit_contract["reporting_clearance_cap_m"]
+    minimum_lower_bound_pair: list[str] | None = None
+    minimum_lower_bound_source_time: float | None = None
     warning_events: list[dict[str, Any]] = []
     hard_events: list[dict[str, Any]] = []
     for dense_frame in range(1201):
         data.qpos[:] = qpos[dense_frame]
         mujoco.mj_forward(model, data)
         result = evaluate_robot_obstacle_pairs(
-            helper,
+            mujoco,
             model,
             data,
             robot_ids=robot_ids,
@@ -1699,11 +2074,18 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
         all_bad[dense_frame] = result["hard_failure"]
         racket_bad[dense_frame] = result["racket_or_handle_hard_failure"]
         warnings[dense_frame] = result["warning"]
-        value = result["minimum_clearance_m"]
-        if value is not None and (minimum_value is None or value < minimum_value):
-            minimum_value = float(value)
-            minimum_pair = result["minimum_pair"]
-            minimum_source_time = float(source_time[dense_frame])
+        midpoint = result["minimum_clearance_midpoint_estimate_m"]
+        if midpoint is not None and (
+            minimum_midpoint is None or midpoint < minimum_midpoint
+        ):
+            minimum_midpoint = float(midpoint)
+            minimum_midpoint_pair = result["minimum_midpoint_pair"]
+            minimum_midpoint_source_time = float(source_time[dense_frame])
+        lower = float(result["minimum_clearance_lower_bound_m"])
+        if lower < minimum_lower_bound:
+            minimum_lower_bound = lower
+            minimum_lower_bound_pair = result["minimum_lower_bound_pair"]
+            minimum_lower_bound_source_time = float(source_time[dense_frame])
         if result["hard_failure"] and len(hard_events) < 512:
             hard_events.append(
                 {
@@ -1725,7 +2107,7 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
         racket_bad,
         source_time,
         source_frames=151,
-        unsafe_source_mask_fn=phase.unsafe_source_mask,
+        unsafe_source_mask_fn=unsafe_source_mask,
         first_hard_event=hard_events[0] if hard_events else None,
     )
     frame_evidence = validate_frame_and_geometry_sources(plan)
@@ -1740,6 +2122,14 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
             "canonical_mjcf": _binding(canonical_source),
             "derived_mjcf_closure": plan["a3_model"]["derived_closure"],
             "compiled_robot_collision_sha256": augmented_binding.collision_contract_sha256,
+            "dense_phase_reference": _binding(phase_source),
+            "dense_phase_pure_function_ast_sha256": phase_function_asts,
+            "distance_reference": _binding(helper_source),
+            "distance_reference_function_ast_sha256": {
+                name: _sha256_bytes(value.encode("utf-8"))
+                for name, value in helper_function_asts.items()
+            },
+            "transitive_project_module_imports_executed": [],
         },
         "frame_and_obstacles": frame_evidence,
         "model_assembly": assembly,
@@ -1761,16 +2151,17 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
                 "hard_threshold_m": audit_contract["hard_clearance_m"],
                 "warning_threshold_m": audit_contract["warning_clearance_m"],
                 "hard_threshold_predicate": audit_contract["hard_threshold_predicate"],
+                "distance_saturation_predicate_epsilon_m": audit_contract[
+                    "distance_saturation_predicate_epsilon_m"
+                ],
                 "dangerous_dense_samples": int(np.count_nonzero(all_bad)),
                 "warning_dense_samples": int(np.count_nonzero(warnings)),
-                "minimum_clearance_m": minimum_value,
-                "minimum_clearance_lower_bound_m": (
-                    minimum_value
-                    if minimum_value is not None
-                    else audit_contract["reporting_clearance_cap_m"]
-                ),
-                "minimum_pair": minimum_pair,
-                "minimum_source_time_frames": minimum_source_time,
+                "minimum_clearance_midpoint_estimate_m": minimum_midpoint,
+                "minimum_clearance_certified_lower_bound_m": minimum_lower_bound,
+                "minimum_midpoint_pair": minimum_midpoint_pair,
+                "minimum_midpoint_source_time_frames": minimum_midpoint_source_time,
+                "minimum_lower_bound_pair": minimum_lower_bound_pair,
+                "minimum_lower_bound_source_time_frames": minimum_lower_bound_source_time,
                 "hard_events_truncated": len(hard_events) >= 512,
                 "hard_events": hard_events,
                 "warning_events_truncated": len(warning_events) >= 512,
