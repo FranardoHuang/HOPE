@@ -22,6 +22,10 @@
   conditional-face 同-source `0/-0.4` 配对；三条都是 seed3 的不同因果单元，不是复制失败 seed，均有
   `+200/+500/+1000` 早判。当前仍为预注册、未 launch。
 
+- qdot control attempt-1 在 iter0 的动态 URDF import 返回前停住，无 contract/checkpoint；成功 treatment
+  有同样 warning 而能完成 scene creation，故排除 reward 与 warning 字面为差异根因。exact PGID 收口并
+  保全后，只登记一次 unchanged retry-v2；重复则停止 retry，转 boot watchdog/预转换 USD。
+
 - Lean queue P0 已把重复/owned Hydra override、control flag/interpolation、run-dir 覆盖与未解析配方挡在
   claim 前；doctor 用真实最终 argv 做 no-Kit compose，schema-2 canonical claim 自动绑定 source、argv、
   预算和 motion/bank/exam identity。五机制 `+500` 中 V1+V2 出现 composite `0.0893` / normal pass

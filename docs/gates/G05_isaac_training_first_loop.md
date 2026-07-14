@@ -1775,6 +1775,11 @@ qdot weight `0` 同-source control 与 conditional-face `0/-0.4` 配对已在结
 只允许 Pod2 dispatch、seed3、4096×1001、save100 与 `+200/+500/+1000`，且各自绑定 exact source、
 motion/bank/exam/plant。它们尚未 launch，不能把 machine prereg 写成 runtime 通过。
 
+qdot control attempt-1 随后也在 iter `0` 的动态 URDF importer 返回前停住，无 contract/checkpoint；
+成功 treatment 有相同 `libGLU`/malformed-axis warning 却完成 scene creation，因此 warning 与 qdot weight
+均非差异根因。exact PGID `327651` 已保全日志后收口；只允许完全相同配方的 retry-v2 fresh namespace
+再试一次，若同 phase 重复则停止 retry。G05 仍为 `Partial`。
+
 资源边界随后切换为 Pod2-only：Pod1 的三条 Codex trainer 在 iter `792/782/743` 由 exact PGID `TERM`
 收口，`model_700.pt` 与日志保留，未发 `KILL`；Pod1 复核无 Codex compute process并全部交给 Yikang。
 active queue 的 `dispatch_pods: [pod2]` 是可执行合同，不依赖聊天记忆；旧 Pod1 claim 仍只读防重复。

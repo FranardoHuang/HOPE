@@ -53,6 +53,8 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   它仍只是 treatment 已运行；同 source/seed 的 qdot weight `0` 匹配对照未完成前不得作因果采用。
   qdot control 与 conditional-face `0/-0.4` 配对已在结果前写入 Pod2-only YAML，等待各自 no-Kit doctor
   后按 GPU0→1→2 一圈发射；它们是三个不同因果单元，不是复制失败 seed。
+  qdot control 的首次冷启动随后在 scene creation 前卡住，iter0/无 contract；exact PGID 已收口并保全。
+  仅允许相同配方的 retry-v2 再试一次；若同 phase 重复，停止 retry并转 importer 根因线。
 
   2026-07-14 19:00 CST 起 Pod1 全部留给 Yikang 冲刺：Codex 的 V1/V2/V1+V2 只对精确 PGID 发出
   `TERM`，分别停在 iter `792/782/743`，三条 `model_700.pt` 与日志完整保留，未进入 `KILL`；复核 Pod1

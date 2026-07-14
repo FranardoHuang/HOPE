@@ -492,7 +492,7 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
     blocked = [job for job in queue["jobs"] if job["status"] == "blocked"]
     rejected = [job for job in queue["jobs"] if job["status"] == "rejected"]
     assert len(ready) == 9
-    assert len(rejected) == 6
+    assert len(rejected) == 7
     assert blocked == []
     assert queue["dispatch_pods"] == ["pod2"]
     axis_prefixes = (
@@ -508,7 +508,7 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
         "fresh_c_base_deceleration_retry_v2": ("false", "1.0", "1.0", "0.25"),
         "fresh_c_post_swing_replay_half_retry_v2": ("false", "1.0", "0.0", "0.5"),
         "fresh_c_qdot_limit_hinge_w5_retry_v2": ("false", "1.0", "0.0", "0.25"),
-        "fresh_c_qdot_limit_hinge_matched_control": ("false", "1.0", "0.0", "0.25"),
+        "fresh_c_qdot_limit_hinge_matched_control_retry_v2": ("false", "1.0", "0.0", "0.25"),
         "fresh_c_conditional_face_matched_control": ("false", "1.0", "0.0", "0.25"),
         "fresh_c_conditional_face_w04": ("false", "1.0", "0.0", "0.25"),
     }
@@ -546,7 +546,7 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
             assert qdot_weight == ["task.rewards.joint_velocity_limit_hinge_weight=-5.0"]
             assert qdot_margin == ["task.rewards.joint_velocity_limit_hinge_margin=0.85"]
         elif job["id"] in {
-            "fresh_c_qdot_limit_hinge_matched_control",
+            "fresh_c_qdot_limit_hinge_matched_control_retry_v2",
             "fresh_c_conditional_face_matched_control",
             "fresh_c_conditional_face_w04",
         }:
@@ -577,7 +577,7 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
         "pod2/gpu0", "pod2/gpu1", "pod2/gpu2",
     ]
     retry_ready = [job for job in ready if job["id"].endswith("_retry_v2")]
-    assert len(retry_ready) == 6
+    assert len(retry_ready) == 7
     retry_by_id = {job["id"]: job for job in retry_ready}
     for attempt1 in rejected:
         retry = retry_by_id[f"{attempt1['id']}_retry_v2"]

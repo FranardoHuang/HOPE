@@ -5,6 +5,11 @@
 `0/-0.4` 配对，均只在 Pod2 调度、尚未 launch。P0 harness 已强制 no-Kit Hydra compose、原子 run-dir
 与 canonical claim。G05 仍为 `Partial`，这不是行为晋级。
 
+qdot matched-control 的首次冷启动也在 dynamic URDF import/scene creation 前停住；相同 warning 在成功臂
+同样存在，不能拿 warning 字面当根因。旧 namespace 已保全并拒绝，只有 unchanged retry-v2 可再试一次。
+launcher 下一版须增加日志无进展 watchdog 与 scene-created 等阶段 receipt；长期应消费内容绑定的预转换
+USD，避免每条训练重新动态导入 URDF。
+
 这个入口解决的是“动作和题库已经决定后，为什么还要手拼一长串命令”。一条 YAML job 必须同时绑定：
 
 - 一个动作名与它的一个或多个 motion 文件；

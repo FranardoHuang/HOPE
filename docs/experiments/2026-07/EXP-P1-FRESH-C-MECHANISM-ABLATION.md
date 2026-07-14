@@ -123,6 +123,14 @@ motion/bank/exam/plant 与四个既有机制轴；唯一 qdot 差异为 treatmen
 同为 `0.85`。control run name 是
 `phase1_fresh_c_qdot_hinge_control_seed3_20260714`，只允许 Pod2 dispatch；它不是第二 seed。
 
+control attempt-1 随后也在动态 URDF import 返回前停住：PID=PGID `327651`，iter `0`，无 hard contract/
+checkpoint，日志在最后一条 malformed-axis parser error 后不再增长。成功 treatment 含完全相同的
+`libGLU.so.1` warning 与 12 条 parser error，但下一行完成 scene creation，因此这些 warning 不是差异根因，
+qdot weight 在 reward 构造前也不可能致因。身份复核后 exact TERM 无响应，最终只对同 PGID KILL；claim/
+log 全保留。完全不改 recipe/source/seed/GPU 的
+`phase1_fresh_c_qdot_hinge_control_seed3_retry_v2_20260714` 是唯一允许的 fresh namespace retry；若再次停在
+同 phase，则停止自动 retry并转预转换 USD/boot harness 根因线。
+
 ## 发射 harness P0 收紧（尚未产生新 run）
 
 在 qdot 格发射前，队列入口补上四个反复出错的执行合同，但没有连接 Pod 或改动现有五条 trainer：

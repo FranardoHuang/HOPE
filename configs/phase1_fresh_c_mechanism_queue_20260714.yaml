@@ -345,11 +345,12 @@ jobs:
   # Exact same-source qdot control.  The older 4467d79 fresh-C checkpoints
   # cannot serve as a causal control because the treatment source adds a new
   # hard-contract field.  This row buys the minimum pair, not another seed.
-  - <<: *qdot_attempt1
+  - &qdot_control_attempt1
+    <<: *qdot_attempt1
     id: fresh_c_qdot_limit_hinge_matched_control
     human_name: fresh C qdot-limit matched control, same source with weight zero
-    status: ready
-    blocker: null
+    status: rejected
+    blocker: infrastructure-only cold boot stalled before scene creation with zero iterations; exact PGID preserved and stopped, never reuse this namespace
     recipe:
       base: *base
       delta:
@@ -361,6 +362,14 @@ jobs:
         - task.rewards.joint_velocity_limit_hinge_margin=0.85
     run_name: phase1_fresh_c_qdot_hinge_control_seed3_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_qdot_hinge_control_seed3
+
+  - <<: *qdot_control_attempt1
+    id: fresh_c_qdot_limit_hinge_matched_control_retry_v2
+    human_name: fresh C qdot-limit matched control, unchanged infra retry v2
+    status: ready
+    blocker: null
+    run_name: phase1_fresh_c_qdot_hinge_control_seed3_retry_v2_20260714
+    run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_qdot_hinge_control_seed3_retry_v2
 
   # Fixed-budget conditional face pair.  Both cells use the first main source
   # containing the mechanism and differ only in its single weight.
