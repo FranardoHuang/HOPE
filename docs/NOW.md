@@ -481,8 +481,13 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 - **[3｜P0] 当前 179 维模型的 Gate3-D0 单拍全链。** 责任人 franco；执行者 Codex；exact source/build
   前置已闭合，下一证据是固定同卷完成 owned planner → C++ runner → 厂商 MuJoCo 的首个 no-publish
   有效周期和行为记录。[实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md)
-- **[7｜P1] Gate3 历史谱系复核。** 责任人 yikang；执行者 direct；下一证据：排除观测排列和
-  击球平面混杂后的同运行链对照。
+- **[7｜P1] Gate3 历史谱系复核。** 责任人 yikang；执行者 Codex/direct；分支
+  `yikang-standhit-0714`。2026-07-15 已认领：以 W&B `ayzxv1ma/model_10600`（Gate3 v4
+  3× PASS、每轮 7/7 正手、0 摔）为唯一共同 warm-start，保持其 reward/观测/动作与 v12fix
+  teacher 不变，发射三个因果分叉：纯 A=站姿可达击球点泛化、纯 B=5% 随机推扰、A+B；先做
+  host/Isaac mechanics 与精确 checkpoint lineage 门，再占用 Pod1 三卡。下一证据：三条独立
+  W&B run id、启动回执和首个 finite checkpoint；后续仍需排除观测排列和击球平面混杂后的
+  同运行链 Gate3 对照。
 
 ### 训练引擎与机器人物理
 
