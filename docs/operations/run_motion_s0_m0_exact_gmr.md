@@ -18,7 +18,10 @@ consumer/plan、重跑 v1 或复用 v1 root。
 实际复用的冻结 v1 base consumer 也有独立 bytes/SHA binding，plan/runtime JSON duplicate key 会 fail closed。
 两份 host `static-v2` 已通过。2026-07-15 Pod2 的两批 runtime `inspect-v2` 在 consumer 前共同遇到
 rc127：合同绑定的 `/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10` 整棵环境不存在。
-两个 output root 与 shared lock 仍 absent；不得用别的 Python 替代 v2，也不得运行 `consume-v2`。
+恢复审计还确认 exact GMR bundle/tree、SMPLX/model/mapping 和七份 S0/M0 canonical 输入也全部 absent；
+现有 Isaac venv 只与冻结环境部分重合，不能替代。两个 output root 与 shared lock 仍 absent；不得用别的
+Python 或猜测重建 v2，也不得运行 `consume-v2`。先按
+[本地同步操作](setup_local_sync.md)从权威备份恢复内容寻址资产，再另建隔离 v3 runtime/plan。
 
 direct retarget `a3_mocap.xml` 的完整 site inventory 是空列表，且 `left_foot/right_foot` 明确 absent；不得抄
 canonical vendor MJCF 的足点去伪造 retarget site。M0 脚距只在 canonical vendor MJCF 的 `left_foot` 与

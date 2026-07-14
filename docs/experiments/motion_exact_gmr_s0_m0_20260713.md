@@ -36,9 +36,18 @@ absent。随后 runtime `inspect` 尚未进入 consumer 就以 rc127 结束：�
 `/workspace/yikang/miniforge3` 父环境也不存在；附近没有可替代的同路径 Python。
 
 失败后两批 output root、lock 仍 absent，source 仍 clean；没有 PT converter、GMR、脚距或动作结果。
-因此这不是 S0/M0 失败，也不授予把其他 Python 偷换进 v2。两批均不具备一次性 consume 资格；下一步
-先只读盘点 Pod2 现有 interpreter、package origins 与可恢复制品，再以全新 v3 绑定一个可重建 runtime，
-或明确等待原 exact runtime 恢复。
+因此这不是 S0/M0 失败，也不授予把其他 Python 偷换进 v2。
+
+同轮恢复审计确认 blocker 不止 Python：Pod2 没有 exact GMR worktree、`282,953,810` bytes 的 recovery
+bundle、SMPLX neutral model、retarget MJCF/mapping，也没有 S0 的 manifest/betas/PT 与 M0 的
+manifest/betas/四份 PT。bounded search 未发现副本、conda cache/lock、wheelhouse、venv archive 或 container；
+custom GMR commit 也没有可用 public raw fallback。
+
+最接近的 `/workspace/hope_isaac_venv` 是 Python `3.10.18` 而非 `3.10.20`，NumPy `1.26.4` 而非
+`1.23.5`，缺 `smplx/qpsolvers/mink/loop_rate_limiters/transforms3d/proxsuite/daqp`；234 行 snapshot 只有
+87 行精确重合。MuJoCo/SciPy 的 direct records 可复用，Torch module/metadata 相同但 RECORD 不同，仍不足以
+复现 v2。两批不具备 consume 资格；可复现下一步只能先从权威备份恢复内容寻址 source/input，再新建不
+修改 shared Isaac venv 的隔离 Python 3.10 v3，以 wheel hashes 与实际 import origins 重新预注册。
 
 consumer 只有 `static`、只读 `inspect` 和一次性 `consume`。`consume` 要求 output root 原先不存在，逐条
 保存 converter output、log、structural audit 和 binding；所有文件 fsync 后，才最后发布

@@ -29,8 +29,10 @@
 - S0/M0 exact-GMR attempt-v2 在 Pod2 clean detached `b75204d` 上再次证明 source/static 合同正常：两份
   `static-v2` PASS、plan SHA exact，两个 `exact_gmr_v2` root 与 shared consume lock 执行前后均 absent。
   runtime `inspect` 在进入 consumer 前以 rc127 fail closed，因为合同绑定的
-  `/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10` 连父环境都不存在。没有 GMR 输出，
-  不是动作/脚距失败；两批均不得 consume，正在只读盘点 Pod2 可重建 runtime。见
+  `/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10` 连父环境都不存在。后续只读恢复审计
+  又确认 exact GMR tree/283 MB bundle、SMPLX/model/mapping 与 S0/M0 七份 canonical 输入全部 absent；
+  最接近的 Isaac venv 只与 234 行冻结环境精确重合 87 行，不能无猜测重建 v2。没有 GMR 输出，
+  不是动作/脚距失败；两批均不得 consume，须先权威恢复资产再建隔离 v3。见
   [exact GMR 卷宗](experiments/motion_exact_gmr_s0_m0_20260713.md)。
 
 - B vendor L1 的第二次 CPU `dry-run` 在 dense 704 报 ankle 超限 `0.656861334 rad`，只读复算证实是

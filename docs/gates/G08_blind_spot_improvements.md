@@ -609,8 +609,10 @@ v2 runtime `inspect/consume`、GMR、schema-2、安全、动力学、RL 或真�
 2026-07-15 的 Pod2 v2 runtime 尝试进一步把 blocker 缩到解释器存在性：clean detached `b75204d` 上
 S0/M0 两份 `static-v2` 再次 PASS，plan SHA exact，但合同写死的
 `/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10` 与父环境均不存在，故 rc127 发生在
-consumer 前。两个 v2 root 与 shared lock 前后均 absent；没有 GMR 或脚距结果，也不能偷换另一 Python。
-下一步是可重建 runtime v3/原环境恢复，不是重跑 v2 或放宽动作门。G08 保持 Partial。
+consumer 前。恢复审计又确认 Pod2 缺 exact GMR tree/283 MB bundle、SMPLX/model/mapping 和七份 S0/M0
+canonical 输入；现有 Isaac venv 只与冻结 234 行 snapshot 精确重合 87 行。两个 v2 root 与 shared lock
+前后均 absent；没有 GMR 或脚距结果，也不能偷换另一 Python。下一步是权威资产恢复后新建隔离、可重建
+runtime v3，不是重跑 v2 或放宽动作门。G08 保持 Partial。
 
 ## 文档路由更新（2026-07-12）
 

@@ -584,6 +584,16 @@ never copy canonical vendor sites into that retarget inventory. Both batch-plan
 separate read-only runtime `inspect`; no `consume` is implied by source/static
 success.
 
+2026-07-15 Pod2 restore audit found **none** of those ignored bindings: the
+GMR worktree and 282,953,810-byte bundle, neutral SMPL-X/model/mapping, S0
+manifest/betas/PT and M0 manifest/betas/four PTs are all absent. The old
+`/workspace/yikang/.../hope-motion-py310` environment is absent too; the
+nearest Isaac venv matches only 87 of the 234 frozen package lines. Do not
+recreate v2 by guessing or modifying the shared Isaac venv. Restore the bundle
+and both complete intake roots from the authoritative Pod1/backup copy, verify
+every SHA in the v2 plans, then preregister a new isolated v3 Python runtime
+with wheel hashes and actual import origins before any `inspect` or `consume`.
+
 Ground exactly one accepted diagnostic GMR pickle with explicit no-clobber
 paths. The command below is the Franco forehand-block pilot shape; use each
 row's own input SHA/frame count for other assets:
