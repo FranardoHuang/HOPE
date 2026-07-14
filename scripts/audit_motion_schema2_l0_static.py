@@ -823,6 +823,125 @@ def evaluate_ground_clearance(
     }
 
 
+def _activation_content_identity(value: Any, label: str) -> dict[str, Any]:
+    row = exact_keys(value, {"path", "bytes", "sha256"}, label)
+    path = row["path"]
+    size = row["bytes"]
+    if not isinstance(path, str) or not path or not Path(path).is_absolute():
+        raise L0ContractError(f"{label}.path must be a non-empty absolute provenance path")
+    if ".." in Path(path).parts:
+        raise L0ContractError(f"{label}.path may not contain parent traversal")
+    if type(size) is not int or size <= 0:
+        raise L0ContractError(f"{label}.bytes must be a positive integer")
+    return {"bytes": size, "sha256": require_sha(row["sha256"], f"{label}.sha256")}
+
+
+def _recorded_checkout_root(recorded_path: str, canonical_relative_path: str) -> Path:
+    canonical = Path(canonical_relative_path)
+    if canonical.is_absolute() or not canonical.parts or ".." in canonical.parts:
+        raise L0ContractError("consume activation canonical path is unsafe")
+    path = Path(recorded_path)
+    if not path.is_absolute() or ".." in path.parts:
+        raise L0ContractError("recorded consume activation path is unsafe")
+    root = path
+    for _part in canonical.parts:
+        root = root.parent
+    if root / canonical != path:
+        raise L0ContractError(
+            "recorded consume activation path does not end in the canonical repository path"
+        )
+    return root
+
+
+def portable_activation_context(
+    plan: Mapping[str, Any],
+    activation: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+    current_meta: Mapping[str, Any],
+    claim: Mapping[str, Any],
+    *,
+    repo_root: Path = REPO_ROOT,
+) -> tuple[Mapping[str, Any], Path]:
+    """Bind old claim bytes without treating its checkout location as semantic identity."""
+
+    canonical_binding = plan["upstream_contracts"]["consume_activation"]
+    canonical_relative_path = canonical_binding["path"]
+    expected_current_path = (repo_root / canonical_relative_path).resolve()
+    current_identity = _activation_content_identity(current_meta, "current consume activation")
+    if Path(current_meta["path"]) != expected_current_path:
+        raise L0ContractError("current consume activation is not at its canonical repository path")
+    expected_identity = {
+        "bytes": canonical_binding["bytes"],
+        "sha256": canonical_binding["sha256"],
+    }
+    if current_identity != expected_identity:
+        raise L0ContractError("current consume activation differs from the preregistered content")
+
+    claim_activation = _activation_content_identity(
+        claim.get("activation"), "claim consume activation"
+    )
+    if claim_activation != current_identity:
+        raise L0ContractError("claim consume activation content identity changed")
+
+    source = exact_keys(
+        activation.get("source_checkout"),
+        {
+            "path", "commit", "must_be_detached", "must_be_clean_before_and_after",
+            "may_not_be_archive_or_live_a0",
+        },
+        "activation source checkout",
+    )
+    receipt_checkout = exact_keys(
+        receipt.get("inspection_checkout"),
+        {"path", "commit", "detached", "clean_before", "clean_after", "tracked_files"},
+        "inspection receipt checkout",
+    )
+    claim_source = exact_keys(
+        claim.get("source_checkout"), set(source), "claim source checkout"
+    )
+    if (
+        claim_source != source
+        or source["commit"] != receipt_checkout["commit"]
+        or source["path"] != receipt_checkout["path"]
+    ):
+        raise L0ContractError("claim activation is not bound to the inspected source commit")
+
+    recorded_meta = exact_keys(
+        claim["activation"], {"path", "bytes", "sha256"}, "claim activation binding"
+    )
+    recorded_root = _recorded_checkout_root(
+        recorded_meta["path"], canonical_relative_path
+    )
+    return recorded_meta, recorded_root
+
+
+def validate_formal_result_portably(
+    runner: Any,
+    activation: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+    asset: str,
+    current_meta: Mapping[str, Any],
+    plan: Mapping[str, Any],
+    claim: Mapping[str, Any],
+    *,
+    repo_root: Path = REPO_ROOT,
+) -> dict[str, Any]:
+    recorded_meta, recorded_root = portable_activation_context(
+        plan, activation, receipt, current_meta, claim, repo_root=repo_root
+    )
+    original_root = runner.gate.REPO_ROOT
+    try:
+        # The frozen historical runner recorded absolute checkout paths in three redundant lineage
+        # fields.  Replaying its exact validator against the recorded lexical root preserves those
+        # internal equalities without requiring that old root to exist or equal this checkout.
+        runner.gate.REPO_ROOT = recorded_root
+        return runner.validate_formal_result(
+            activation, receipt, asset, recorded_meta
+        )
+    finally:
+        runner.gate.REPO_ROOT = original_root
+
+
 def validate_upstream_result(plan: Mapping[str, Any]) -> dict[str, Any]:
     upstream = plan["upstream_contracts"]
     runner_path = REPO_ROOT / upstream["consume_runner"]["path"]
@@ -831,8 +950,13 @@ def validate_upstream_result(plan: Mapping[str, Any]) -> dict[str, Any]:
     activation, receipt, activation_meta = runner._load_contract(
         activation_path, upstream["consume_activation"]["sha256"]
     )
-    formal = runner.validate_formal_result(
-        activation, receipt, ASSET_ID, activation_meta
+    claim_path = Path(plan["exact_runtime_inputs"]["consume_claim"]["path"])
+    ensure_regular_no_symlink(claim_path, "consume claim")
+    if sha256_file(claim_path) != plan["exact_runtime_inputs"]["consume_claim"]["sha256"]:
+        raise L0ContractError("consume claim SHA changed before portable lineage validation")
+    claim = read_json(claim_path, "consume claim")
+    formal = validate_formal_result_portably(
+        runner, activation, receipt, ASSET_ID, activation_meta, plan, claim
     )
     expected = plan["exact_runtime_inputs"]
     actual = {

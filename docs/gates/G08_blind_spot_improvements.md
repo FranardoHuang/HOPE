@@ -521,9 +521,13 @@ Pod 执行，两个 output root absent、证书为 0；L0/L1、桌网、动力�
 completion-last success 的 SHA 分别为 `e2eb99e6...d28cc`、`4f524593...bc38`、
 `76e7ff88...fb0`、`c0a25f2c...f4f8b`，独立复核为 `runner_lineage=true`、`npz_bound=true`；C 仍保持
 未消费后备。B 的下一张 [动作 L0 静态审计](../DEFINITIONS.md#motion-l0-static)已完成 source/static
-门：exact prereg SHA `6b0b9ccd...838b7`、validator SHA `4f2c9c23...e04405`，专项连同上游 schema-2
-回归 `55 passed`，全仓 `1018 passed, 10 skipped`。**该 L0 子门状态仍为 Partial**：真实 B NPZ 的
-runtime audit 尚未运行、没有本门 certificate；source/static pass 不能写成 runtime pass。vendor L1
+门的 portability 修复：exact prereg SHA `7118b9cd...595a6`、validator SHA `ee6ccd46...c171`，专项连同
+上游 schema-2 回归 `58 passed`。首次 runtime 调用在任何运动学检查前暴露历史 runner 将 consume
+checkout 绝对路径误当内容身份；只创建 certificate 父目录，没有 certificate，也没有重跑。本修复不改
+历史 runner/activation/claim 字节，改按 activation bytes/SHA、canonical path 与 inspected source commit
+进入原完整 lineage/NPZ validator；attempt ID、receipt/runner、claim/success、NPZ/report 仍严格绑定。
+**该 L0 子门状态仍为 Partial**：真实 B NPZ 的 runtime audit 尚未运行、没有本门 certificate；
+source/static pass 不能写成 runtime pass。vendor L1
 自碰/自打、桌网扫掠、动力学、RL、Gate3 和真机继续全部 blocked。边界、冻结输入与未来一次性命令见
 [L0 实验卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-L0.md)和
 [L0 操作文档](../operations/run_motion_backhand_loop_b_l0_static.md)。

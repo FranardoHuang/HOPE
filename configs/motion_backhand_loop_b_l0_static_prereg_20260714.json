@@ -8,8 +8,8 @@
   "asset_id": "franco_backhand_loop_b",
   "validator": {
     "path": "scripts/audit_motion_schema2_l0_static.py",
-    "bytes": 46886,
-    "sha256": "4f2c9c238e9686a4a461760ffaf221cf1177828cc00fcf91aeededcbd2e04405"
+    "bytes": 52126,
+    "sha256": "ee6ccd46a73324c80fa70e4971fa25747fd778cac243796c1bdf629546ecc171"
   },
   "exact_runtime_inputs": {
     "motion_npz": {

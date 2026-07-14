@@ -8,6 +8,7 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -36,6 +37,47 @@ def _sha(path: Path) -> str:
 
 def _plan() -> dict:
     return L0.json_loads_exact(PLAN.read_bytes(), "tracked plan")
+
+
+def _portable_lineage_fixture(tmp_path: Path):
+    plan = _plan()
+    activation_path = ROOT / plan["upstream_contracts"]["consume_activation"]["path"]
+    receipt_path = ROOT / "configs/motion_backhand_loop_bc_schema2_fk_runtime_inspection_receipt_20260714.json"
+    activation = L0.read_json(activation_path, "activation")
+    receipt = L0.read_json(receipt_path, "receipt")
+    canonical = Path(plan["upstream_contracts"]["consume_activation"]["path"])
+
+    current_root = tmp_path / "new-clean-checkout"
+    current_path = current_root / canonical
+    current_path.parent.mkdir(parents=True)
+    current_path.write_bytes(activation_path.read_bytes())
+    subprocess.run(["git", "init", "-q"], cwd=current_root, check=True)
+    subprocess.run(["git", "add", "."], cwd=current_root, check=True)
+    subprocess.run(
+        [
+            "git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+            "commit", "-qm", "same activation bytes",
+        ],
+        cwd=current_root,
+        check=True,
+    )
+    subprocess.run(["git", "checkout", "--detach", "-q", "HEAD"], cwd=current_root, check=True)
+    assert subprocess.check_output(
+        ["git", "status", "--porcelain=v1"], cwd=current_root, text=True
+    ) == ""
+    current_meta = L0.binding(current_path)
+
+    recorded_root = tmp_path / "old-consume-checkout"
+    recorded_meta = {
+        "path": str(recorded_root / canonical),
+        "bytes": current_meta["bytes"],
+        "sha256": current_meta["sha256"],
+    }
+    claim = {
+        "activation": recorded_meta,
+        "source_checkout": copy.deepcopy(activation["source_checkout"]),
+    }
+    return plan, activation, receipt, current_meta, claim, current_root, recorded_root
 
 
 def _write_exact_npz(path: Path) -> Path:
@@ -107,6 +149,65 @@ def test_plan_binds_exact_runtime_outputs_and_keeps_downstream_closed():
     assert plan["authorization"]["vendor_l1_authorized"] is False
     assert plan["authorization"]["training_authorized"] is False
     assert plan["authorization"]["hardware_authorized"] is False
+
+
+def test_same_activation_bytes_validate_from_a_new_checkout_path(tmp_path):
+    plan, activation, receipt, current_meta, claim, current_root, recorded_root = (
+        _portable_lineage_fixture(tmp_path)
+    )
+    gate = SimpleNamespace(REPO_ROOT=current_root)
+    calls = []
+
+    def validate_formal_result(received_activation, received_receipt, asset, received_meta):
+        calls.append((received_activation, received_receipt, asset, received_meta, gate.REPO_ROOT))
+        return {"portable": True}
+
+    runner = SimpleNamespace(gate=gate, validate_formal_result=validate_formal_result)
+    result = L0.validate_formal_result_portably(
+        runner,
+        activation,
+        receipt,
+        L0.ASSET_ID,
+        current_meta,
+        plan,
+        claim,
+        repo_root=current_root,
+    )
+    assert result == {"portable": True}
+    assert calls == [(activation, receipt, L0.ASSET_ID, claim["activation"], recorded_root)]
+    assert gate.REPO_ROOT == current_root
+
+
+def test_portable_activation_rejects_content_drift(tmp_path):
+    plan, activation, receipt, current_meta, claim, current_root, _recorded_root = (
+        _portable_lineage_fixture(tmp_path)
+    )
+    claim["activation"]["sha256"] = "0" * 64
+    with pytest.raises(L0.L0ContractError, match="content identity changed"):
+        L0.portable_activation_context(
+            plan,
+            activation,
+            receipt,
+            current_meta,
+            claim,
+            repo_root=current_root,
+        )
+
+
+def test_portable_activation_rejects_wrong_bound_source_commit(tmp_path):
+    plan, activation, receipt, current_meta, claim, current_root, _recorded_root = (
+        _portable_lineage_fixture(tmp_path)
+    )
+    claim["source_checkout"]["commit"] = "0" * 40
+    with pytest.raises(L0.L0ContractError, match="inspected source commit"):
+        L0.portable_activation_context(
+            plan,
+            activation,
+            receipt,
+            current_meta,
+            claim,
+            repo_root=current_root,
+        )
 
 
 def test_duplicate_json_keys_and_nonfinite_constants_fail_closed():

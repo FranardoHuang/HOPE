@@ -15,7 +15,7 @@ source/static pass 不等于真实资产已有 runtime certificate。权威实�
 ```bash
 cd /path/to/clean/nohope
 PLAN=configs/motion_backhand_loop_b_l0_static_prereg_20260714.json
-PLAN_SHA=6b0b9ccdeca4dd77d6cb89556e035db44b79ea939a0fb1f4c78747685be838b7
+PLAN_SHA=7118b9cda1d2ec4affb7906d1a330f6c04a85b1d624e894d369b7badefe595a6
 
 python3 scripts/audit_motion_schema2_l0_static.py \
   --prereg "$PLAN" \
@@ -63,7 +63,7 @@ mkdir -p /workspace/codexschema/motion_video_intake_20260711/l0_static_primary_v
 /workspace/hope_mjeval_venv/bin/python \
   scripts/audit_motion_schema2_l0_static.py \
   --prereg configs/motion_backhand_loop_b_l0_static_prereg_20260714.json \
-  --expected-prereg-sha256 6b0b9ccdeca4dd77d6cb89556e035db44b79ea939a0fb1f4c78747685be838b7 \
+  --expected-prereg-sha256 7118b9cda1d2ec4affb7906d1a330f6c04a85b1d624e894d369b7badefe595a6 \
   audit
 ```
 
@@ -72,6 +72,10 @@ mkdir -p /workspace/codexschema/motion_video_intake_20260711/l0_static_primary_v
 
 ## 失败处理
 
+- 2026-07-14 首次调用已在上游 claim 校验阶段、任何运动学检查和 certificate 写入前停止；只创建了
+  certificate 父目录。不要把它记成 L0 行为失败，也不要在 portable source 修复合入前重跑。修复只把
+  历史 consume checkout 的绝对路径降为 provenance，仍严格要求 activation bytes/SHA、canonical path、
+  inspected source commit、attempt ID、receipt/runner、NPZ/report、claim/success 全部一致。
 - 输入、谱系、runtime、MJCF closure 或 compiled collision SHA 不符：保留原件，停止，不改阈值。
 - 关节范围、FK byte equality、支撑脚最低 body 或地面余隙失败：记录 exact frame/value，停止该 B
   动作；这是 internal gate failure，不能自动切换 B 的 frozen fallback。

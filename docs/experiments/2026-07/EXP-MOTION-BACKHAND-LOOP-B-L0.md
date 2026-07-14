@@ -1,6 +1,6 @@
 # EXP-MOTION-BACKHAND-LOOP-B-L0 — 反手拉 B 的静态动作证书
 
-- 状态：source gate pass，runtime audit not run（源码门通过；真实私有 NPZ 尚未执行本门）
+- 状态：source gate pass，runtime audit not run（首次 runtime 调用在上游谱系校验阶段 fail closed；未生成证书）
 - 阶段/轴：新动作库 / runtime-order schema-2 后的纯 CPU 静态审计
 - 人类负责人：Franco
 - 执行者：Codex
@@ -19,7 +19,7 @@ vendor L1 自碰/自打证书？它不回答动作能不能打球，也不回答
 
 预注册
 [`motion_backhand_loop_b_l0_static_prereg_20260714.json`](../../../configs/motion_backhand_loop_b_l0_static_prereg_20260714.json)
-（SHA-256 `6b0b9ccdeca4dd77d6cb89556e035db44b79ea939a0fb1f4c78747685be838b7`）只接受以下四份 Pod1
+（SHA-256 `7118b9cda1d2ec4affb7906d1a330f6c04a85b1d624e894d369b7badefe595a6`）只接受以下四份 Pod1
 运行制品：
 
 | 制品 | SHA-256 |
@@ -34,6 +34,14 @@ claim → activation/receipt/runtime → child → NPZ/report → success 的完
 duplicate-key、regular-file、symlink 与 SHA 检查。直接 materializer 输出、换字节、缺 claim 或缺 success
 都不能进入 L0。
 
+首次 runtime 调用在 `validate_upstream_result` 内、任何运动学检查和 certificate 写入前 fail closed：历史
+runner 把 consume checkout 的绝对 activation 路径重复写进 claim/preflight/success，并误要求新的 clean
+L0 checkout 使用同一绝对路径。claim、activation、receipt、NPZ/report 与 success 内容没有因此失效；
+失败只创建了预注册 certificate 父目录，certificate 仍不存在，也没有重跑 audit。修正版保留历史
+runner/activation/claim 原字节，用 activation 的 exact bytes/SHA、canonical repo-relative path 和已 inspect
+source commit 建立 portable context，再复用原 runner 的完整 result/NPZ 校验；旧 attempt ID、receipt、runner、
+claim、success 与 NPZ/report 绑定全部保持严格。
+
 模型侧绑定 exact vendor MJCF `2ab1cd31...feb97`、`1 XML + 74 mesh` closure
 `e0381752...962de`、compiled collision contract `18e7f6ff...386e5`、31-joint runtime order、32-body
 runtime order和 donor metadata。运行环境沿用已记录的 CPU venv：Python `3.12.3`、NumPy `2.5.0`、
@@ -42,7 +50,7 @@ MuJoCo `3.10.0`，并强制 `CUDA_VISIBLE_DEVICES=''`。
 ## 最小通过条件
 
 [`audit_motion_schema2_l0_static.py`](../../../scripts/audit_motion_schema2_l0_static.py)
-（SHA-256 `4f2c9c238e9686a4a461760ffaf221cf1177828cc00fcf91aeededcbd2e04405`）只做：
+（SHA-256 `ee6ccd46a73324c80fa70e4971fa25747fd778cac243796c1bdf629546ecc171`）只做：
 
 1. 11 个 NPZ 字段、151 帧、50 Hz、31 关节、32 body、float32 time series、finite、schema-2 与
    link-origin/COM-velocity 点语义必须 exact；四元数单位范数沿用 producer 已冻结的 `1e-5` 容差。
@@ -71,8 +79,9 @@ duplicate key、任一输入漂移都会 fail closed。当前尚未运行私有 
 python3 -m pytest -q tests/test_motion_backhand_loop_b_l0_static.py
 ```
 
-本分支专项为 `10 passed`。攻击面覆盖 duplicate JSON key、`NaN`、symlink 输入/输出父目录、NPZ
+本分支专项为 `13 passed`。攻击面覆盖 same-byte activation 跨 clean checkout、activation 内容漂移、
+错误 source commit、duplicate JSON key、`NaN`、symlink 输入/输出父目录、NPZ
 unexpected/duplicate member、NaN/Inf、非单位四元数、伪造 velocity、关节范围越界、地面余隙上下界与
-certificate no-clobber。与上游 schema-2 prereg/consume 合跑为 `55 passed`；基于
-`origin/main@b609c0d` 的全仓 host 回归为 `1018 passed, 10 skipped`。这些结果只证明源码和合成反例，
+certificate no-clobber。与上游 schema-2 prereg/consume 合跑为 `58 passed`；本修复按范围没有跑全仓
+回归。`origin/main@b609c0d` 的 `1018 passed, 10 skipped` 只保留为修复前历史结果。这些结果只证明源码和合成反例，
 不将缺少私有 runtime 执行的 source gate 冒充真实 L0 结果。
