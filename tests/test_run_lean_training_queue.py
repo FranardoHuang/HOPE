@@ -7,6 +7,7 @@ import shlex
 import subprocess
 import sys
 
+import pytest
 import yaml
 
 
@@ -81,6 +82,13 @@ def _ignored_asset_contract() -> dict:
         "symlinks_forbidden": True,
         "target_must_be_gitignored": True,
     }
+
+
+def _probe_queue(job_count: int = 1) -> dict:
+    queue = _queue(job_count)
+    for job in queue["jobs"]:
+        job["source"]["ignored_runtime_asset"] = _ignored_asset_contract()
+    return queue
 
 
 def _write(tmp_path: Path, queue: dict) -> Path:
@@ -513,7 +521,7 @@ def test_boot_warmup_is_tiny_claim_bound_and_never_reuses_science_namespace():
 
 
 def test_full_scene_probe_preserves_complete_scene_and_scale_in_isolated_namespace():
-    queue = _queue()
+    queue = _probe_queue()
     job = queue["jobs"][0]
     job["budget"]["num_envs"] = 4096
     slot = Q.slots(queue)[4]
@@ -534,7 +542,8 @@ def test_full_scene_probe_preserves_complete_scene_and_scale_in_isolated_namespa
         "num_envs": 4096, "max_iterations": 1001, "save_interval": 100
     }
     assert content["budget"] == {
-        "num_envs": 4096, "max_iterations": 2, "save_interval": 1
+        "num_envs": 4096, "max_iterations": 2, "save_interval": 1,
+        "milestones": [1],
     }
     assert content["source"] == job["source"]
     assert content["pod"] == slot.pod and content["gpu"] == slot.gpu
@@ -545,11 +554,11 @@ def test_full_scene_probe_preserves_complete_scene_and_scale_in_isolated_namespa
     assert argv[-1] == f"++training_launch_claim_sha256={claim['content_sha256']}"
 
     probe_argv = argv[:-1]
-    assert len(probe_argv) == len(science_argv)
+    assert len(probe_argv) == len(science_argv) + 2
     changed_keys = {
         "max_iterations", "algo.runner.save_interval", "run_name"
     }
-    for science_arg, probe_arg in zip(science_argv[2:], probe_argv[2:]):
+    for science_arg, probe_arg in zip(science_argv[2:], probe_argv[2:-2]):
         key = Q._override_key(science_arg, "science argv")
         if key not in changed_keys:
             assert probe_arg == science_arg
@@ -560,8 +569,10 @@ def test_full_scene_probe_preserves_complete_scene_and_scale_in_isolated_namespa
         item.startswith("run_name=full_scene_probe_not_science_job0_")
         for item in probe_argv
     )
-    assert not any("training_queue_claim_path" in item for item in probe_argv)
-    assert not any("training_run_binding_path" in item for item in probe_argv)
+    assert probe_argv[-2:] == [
+        f"++training_queue_claim_path={run_dir}/full_scene_probe_claim.json",
+        f"++training_run_binding_path={run_dir}/full_scene_probe_binding.json",
+    ]
     assert "/_full_scene_probes/job0/" in run_dir
     assert job["run_dir"] not in run_dir
     assert not run_dir.startswith(job["source"]["checkout"])
@@ -569,7 +580,7 @@ def test_full_scene_probe_preserves_complete_scene_and_scale_in_isolated_namespa
 
 
 def test_full_scene_probe_fails_closed_on_num_envs_drift(monkeypatch):
-    queue = _queue()
+    queue = _probe_queue()
     job = queue["jobs"][0]
     job["budget"]["num_envs"] = 4096
     slot = Q.slots(queue)[0]
@@ -589,7 +600,7 @@ def test_full_scene_probe_fails_closed_on_num_envs_drift(monkeypatch):
 
 
 def test_full_scene_probe_script_is_no_clobber_first_iteration_only():
-    queue = _queue()
+    queue = _probe_queue()
     job = queue["jobs"][0]
     job["budget"]["num_envs"] = 4096
     slot = Q.slots(queue)[1]
@@ -604,6 +615,8 @@ def test_full_scene_probe_script_is_no_clobber_first_iteration_only():
     assert f"mkdir -p {run_dir}" not in body
     assert "set -o noclobber" in body
     assert "full_scene_probe_claim.json" in body
+    assert "full_scene_probe_binding.json" in body
+    assert "full_scene_probe_runtime.py supervise" in body
     assert "queue_claim.json" not in body
     assert "run_binding.json" not in body
     assert "/milestones" not in body
@@ -615,8 +628,93 @@ def test_full_scene_probe_script_is_no_clobber_first_iteration_only():
     assert "pkill" not in rendered and "killall" not in rendered
 
 
+def test_finalize_full_scene_probe_is_selected_pod_only_and_never_mutates_queue(monkeypatch):
+    queue = _probe_queue()
+    queue["dispatch_pods"] = ["pod2"]
+    queue["jobs"][0]["resource"] = {
+        "policy": "dispatch_gpu_round_robin",
+        "preferred_slot": "pod2/gpu1",
+    }
+    frozen = yaml.safe_dump(queue, sort_keys=True)
+    calls = []
+
+    def fake_ssh(_queue, pod, remote, **kwargs):
+        calls.append((pod, remote, kwargs))
+        return '{"result":{"content":{"status":"failed","unlock_authorized":false}}}\n'
+
+    monkeypatch.setattr(Q, "_run_ssh", fake_ssh)
+    monkeypatch.setattr(
+        Q,
+        "live_snapshot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("probe finalizer must not scan either Pod")
+        ),
+    )
+    result = Q.cmd_finalize_full_scene_probe(
+        queue,
+        job_id="job0",
+        pod="pod2",
+        gpu=1,
+        attempt_id="terminal_a1",
+        execute=True,
+        confirm=Q.FINALIZE_FULL_SCENE_PROBE_CONFIRM,
+    )
+    assert result["queue_status_mutated"] is False
+    assert result["automatic_retry_authorized"] is False
+    assert result["result_path"].endswith("/probe_result.json")
+    assert len(calls) == 1 and calls[0][0] == "pod2"
+    assert "full_scene_probe_runtime.py finalize" in calls[0][1]
+    assert "--expected-claim-sha256" in calls[0][1]
+    assert "--source-asset-receipt" in calls[0][1]
+    assert "source-asset-doctor" not in calls[0][1]
+    assert "SOURCE_ASSET_OK" in Q.SOURCE_ASSET_PROGRAM
+    assert "kill " not in calls[0][1] and "pkill" not in calls[0][1]
+    assert result["terminal_status"] == "failed"
+    assert result["unlock_authorized"] is False
+    assert yaml.safe_dump(queue, sort_keys=True) == frozen
+
+
+def test_finalize_full_scene_probe_requires_its_own_confirmation(monkeypatch):
+    queue = _probe_queue()
+    monkeypatch.setattr(
+        Q,
+        "_run_ssh",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("wrong confirmation must fail before SSH")
+        ),
+    )
+    for wrong in (Q.CONFIRM, Q.WARMUP_CONFIRM, Q.FULL_SCENE_PROBE_CONFIRM):
+        with pytest.raises(Q.QueueError, match=Q.FINALIZE_FULL_SCENE_PROBE_CONFIRM):
+            Q.cmd_finalize_full_scene_probe(
+                queue,
+                job_id="job0",
+                pod="pod1",
+                gpu=0,
+                attempt_id="terminal_a1",
+                execute=True,
+                confirm=wrong,
+            )
+
+
+def test_rejected_job_can_still_finalize_its_immutable_probe_evidence():
+    queue = _probe_queue()
+    queue["jobs"][0]["status"] = "rejected"
+    queue["jobs"][0]["blocker"] = "terminal infrastructure evidence"
+    result = Q.cmd_finalize_full_scene_probe(
+        queue,
+        job_id="job0",
+        pod="pod1",
+        gpu=0,
+        attempt_id="terminal_a1",
+        execute=False,
+        confirm=None,
+    )
+    assert result["dry_run"] is True
+    assert result["queue_status_mutated"] is False
+
+
 def test_full_scene_probe_requires_exact_job_confirmation_and_dispatch(monkeypatch):
-    queue = _queue()
+    queue = _probe_queue()
     calls = []
     monkeypatch.setattr(Q, "live_snapshot", lambda *_args: calls.append("live"))
     for wrong_confirm in (Q.CONFIRM, Q.WARMUP_CONFIRM, Q.ATTEST_CONFIRM):
@@ -657,7 +755,7 @@ def test_full_scene_probe_requires_exact_job_confirmation_and_dispatch(monkeypat
 
 
 def test_full_scene_probe_execute_reads_only_selected_dispatch_pod(monkeypatch):
-    queue = _queue()
+    queue = _probe_queue()
     queue["dispatch_pods"] = ["pod2"]
     queue["jobs"][0]["resource"] = {
         "policy": "dispatch_gpu_round_robin",
@@ -720,7 +818,7 @@ def test_live_slot_occupancy_binds_requested_pod_gpu_and_fails_closed(monkeypatc
 
 
 def test_full_scene_probe_capacity_and_empty_dispatch_fail_before_launch(monkeypatch):
-    queue = _queue()
+    queue = _probe_queue()
     queue["dispatch_pods"] = ["pod2"]
     queue["jobs"][0]["resource"] = {"policy": "dispatch_gpu_round_robin"}
     phases = []
@@ -756,7 +854,7 @@ def test_full_scene_probe_capacity_and_empty_dispatch_fail_before_launch(monkeyp
 
 
 def test_full_scene_probe_rejects_terminal_or_placeholder_and_avoids_cross_job_collision():
-    queue = _queue(2)
+    queue = _probe_queue(2)
     slot = Q.slots(queue)[0]
     _a, _argv_a, run_a = Q._full_scene_probe_contract(
         queue, queue["jobs"][0], slot, "same_attempt"

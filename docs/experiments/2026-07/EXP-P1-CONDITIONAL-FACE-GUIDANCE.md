@@ -94,11 +94,21 @@ spawn 时验证 `PID=PGID`，signal 前没有重验 `/proc` starttime；TERM 后
 leader 在 TERM 前消失、成员后来加入或读中漂移全部 no-signal/manual-review，KILL 只接受原成员的 exact
 子集。该源码门没有连接 Pod、没有重放 probe、没有更改 conditional `0/-0.4` 配方或解锁状态。
 
+P1.4 将“首迭代启动成功”和“full-scene probe 终档通过”拆成两个命令。probe trainer 现在在专属
+`full_scene_probe_binding.json` 绑定 claim/log/source/GPU/PID/starttime；同 PGID supervisor 只自然等待并记录
+normal rc 或 signal，不发 signal。launcher 仍只报告 first iteration。随后 selected-Pod-only finalizer 才核对
+整个原 PGID 自然消失、current expected claim、phase 顺序、fatal0、finite/fresh-lineage1 `model_1.pt`、
+schema-3 contract、exact supervisor argv、source-asset receipt 与 motion/bank binding，并
+no-clobber 写 pass/fail `probe_result.json`。失败不自动 retry，仍 live 不提前冻结结果；普通 milestone attestor
+拒绝 `attestable=false` probe。整合 focused `126 passed` 只是 source gate，尚未在 Pod 运行，所以 p1r1 pair 继续
+blocked，也没有改变本实验的 `inconclusive` 结论。
+
 旧 pair 保持不可修改的失败证据。新的 `p1r1` pair 已在结果前绑定同一 clean detached
 `main@077e70c`（Pod2 checkout `/workspace/codexschema/nohope_p1_077e70c`），两格均
 `runtime_binding=true`，仍只差 conditional weight `0/-0.4`。当前二者均为 `blocked`：先由 control 配方
 在 Pod2 GPU1 的独立 `_full_scene_probes/` namespace 保留全部 scene argv 与 `4096 environments`，仅缩短为
-2 updates/save1；只有看到首个 `Learning iteration`、随后自然退出且 fatal0，才能另提交解锁科学 pair。
+2 updates/save1；只有看到首个 `Learning iteration`、随后自然退出并由 immutable terminal result 证明
+fatal0/model1/contract/claim/source/asset 全闭合，才有资格交给未来显式 unlock consumer；当前不会自动解锁。
 
 ## 不可补偿安全边界
 

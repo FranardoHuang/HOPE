@@ -2340,6 +2340,13 @@ def _run(cfg):
         stream.write("\n")
     hard_contract_sha256 = _sha256_file(contract_path)
     print(f"[train.py] hard training contract: {contract_path}", flush=True)
+    _emit_lean_queue_phase(
+        cfg,
+        "hard_contract_written",
+        path=contract_path,
+        schema_version=int(hard_contract["schema_version"]),
+        sha256=hard_contract_sha256,
+    )
     if cfg.video:
         env = gym.wrappers.RecordVideo(
             env,

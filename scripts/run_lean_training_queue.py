@@ -53,6 +53,7 @@ TERMINAL = {"complete", "rejected"}
 CONFIRM = "SIM_ONLY_LAUNCH_ONE_LEAN_QUEUE_JOB"
 WARMUP_CONFIRM = "SIM_ONLY_LAUNCH_ONE_BOOT_WARMUP"
 FULL_SCENE_PROBE_CONFIRM = "SIM_ONLY_LAUNCH_ONE_FULL_SCENE_PROBE"
+FINALIZE_FULL_SCENE_PROBE_CONFIRM = "SIM_ONLY_FINALIZE_ONE_FULL_SCENE_PROBE"
 ATTEST_CONFIRM = "SIM_ONLY_ATTEST_ONE_LEAN_QUEUE_MILESTONE"
 PREPARE_SOURCE_ASSET_CONFIRM = "SIM_ONLY_PREPARE_ONE_LEAN_QUEUE_SOURCE_ASSET"
 ZERO_COMMIT = "0" * 40
@@ -62,6 +63,7 @@ WBT_RELATIVE = "hope_training/whole_body_tracking"
 SETUP_RELATIVE = "setup_train_env.sh"
 ENTRYPOINT_RELATIVE = "scripts/train.py"
 QUEUE_RUNTIME_RELATIVE = "scripts/lean_queue_runtime.py"
+FULL_SCENE_PROBE_RUNTIME_RELATIVE = "scripts/full_scene_probe_runtime.py"
 KIT_LAUNCHER_RELATIVE = "scripts/launch_kit_training_locked.sh"
 KIT_BOOT_MARKER = "Learning iteration"
 KIT_BOOT_TIMEOUT_SECONDS = 900
@@ -1470,6 +1472,10 @@ def _require_exact_probe_job(job: dict[str, Any]) -> None:
     job_id = job["id"]
     if job["source"]["commit"] == ZERO_COMMIT:
         raise QueueError(f"{job_id}.source.commit is an all-zero placeholder")
+    if job["source"].get("ignored_runtime_asset") is None:
+        raise QueueError(
+            f"{job_id}.source.ignored_runtime_asset is required for a full-scene probe"
+        )
     paths = {
         "source.checkout": job["source"]["checkout"],
         **{
@@ -1565,6 +1571,15 @@ def _full_scene_probe_contract(
         f"{job['source']['commit'][:8]}_"
         f"{slot.pod}_gpu{slot.gpu}_{attempt_id}"
     )
+    run_dir = str(
+        PurePosixPath(job["run_dir"]).parent
+        / "_full_scene_probes"
+        / job["id"]
+        / job["source"]["commit"]
+        / slot.pod
+        / f"gpu{slot.gpu}"
+        / attempt_id
+    )
     base_argv = _training_argv(
         queue, job, slot.gpu, include_run_binding=False
     )
@@ -1576,24 +1591,35 @@ def _full_scene_probe_contract(
             "run_name": probe_name,
         },
     )
+    argv_without_claim.extend(
+        [
+            f"++training_queue_claim_path={run_dir}/full_scene_probe_claim.json",
+            f"++training_run_binding_path={run_dir}/full_scene_probe_binding.json",
+        ]
+    )
     expected_num_envs = f"num_envs={num_envs}"
     if argv_without_claim.count(expected_num_envs) != 1:
         raise QueueError(
             "full-scene probe must preserve the source job num_envs exactly"
         )
-    run_dir = str(
-        PurePosixPath(job["run_dir"]).parent
-        / "_full_scene_probes"
-        / job["id"]
-        / job["source"]["commit"]
-        / slot.pod
-        / f"gpu{slot.gpu}"
-        / attempt_id
-    )
     source_path = PurePosixPath(job["source"]["checkout"])
     probe_path = PurePosixPath(run_dir)
     if probe_path == source_path or source_path in probe_path.parents:
         raise QueueError("full-scene probe namespace must stay outside source checkout")
+    workdir = f"{job['source']['checkout'].rstrip('/')}/{WBT_RELATIVE}"
+    supervisor_argv_prefix = [
+        ISAAC_PYTHON,
+        f"{workdir}/{FULL_SCENE_PROBE_RUNTIME_RELATIVE}",
+        "supervise",
+        "--run-dir",
+        run_dir,
+        "--log",
+        f"{run_dir}/run.log",
+        "--",
+    ]
+    source_asset_receipt, _staging, _lock = _source_asset_runtime_paths(
+        job, slot.pod
+    )
     content = {
         "schema_version": 1,
         "purpose": "full_scene_probe_not_science",
@@ -1605,12 +1631,17 @@ def _full_scene_probe_contract(
         "gpu": slot.gpu,
         "attempt_id": attempt_id,
         "source": dict(job["source"]),
+        "source_asset_receipt_path": source_asset_receipt,
+        "supervisor_argv_prefix": supervisor_argv_prefix,
+        "expected_training_contract_lineage_exact": 1,
+        "run_name": probe_name,
         "run_dir": run_dir,
         "source_job_budget": dict(job["budget"]),
         "budget": {
             "num_envs": num_envs,
             "max_iterations": FULL_SCENE_PROBE_MAX_ITERATIONS,
             "save_interval": FULL_SCENE_PROBE_SAVE_INTERVAL,
+            "milestones": [1],
         },
         "inputs": {
             "motion": dict(job["motion"]),
@@ -1684,8 +1715,13 @@ def _full_scene_probe_script(
         sort_keys=True,
     ) + "\n"
     launcher = f"{workdir}/{KIT_LAUNCHER_RELATIVE}"
+    probe_runtime = f"{workdir}/{FULL_SCENE_PROBE_RUNTIME_RELATIVE}"
+    supervisor_argv = [
+        *claim_document["content"]["supervisor_argv_prefix"],
+        *train_argv,
+    ]
     launch = shlex.join([launcher, f"{run_dir}/run.log"]) + " " + (
-        _child_env_command(train_argv, slot.gpu)
+        _child_env_command(supervisor_argv, slot.gpu)
     ) + f" {GPU_LAUNCH_LOCK_FD}>&-"
     doctor = _doctor_body(queue, job, slot, training_argv=train_argv)
     body = doctor + f"""
@@ -1694,6 +1730,7 @@ test "$count" -lt {slot.capacity}
 mkdir -p {shlex.quote(run_parent)}
 mkdir {shlex.quote(run_dir)}
 ( set -o noclobber; printf %s {shlex.quote(claim)} > {shlex.quote(run_dir + '/full_scene_probe_claim.json')} )
+test -f {shlex.quote(probe_runtime)}
 export KIT_BOOT_MARKER={shlex.quote(KIT_BOOT_MARKER)}
 export KIT_BOOT_TIMEOUT_S={KIT_BOOT_TIMEOUT_SECONDS}
 export KIT_BOOT_STALE_TIMEOUT_S={FULL_SCENE_PROBE_STALE_TIMEOUT_SECONDS}
@@ -1701,6 +1738,41 @@ export KIT_BOOT_STALE_TIMEOUT_S={FULL_SCENE_PROBE_STALE_TIMEOUT_SECONDS}
 printf '%s\n' 'phase=first_iter not_science=true' >> {shlex.quote(run_dir + '/run.log.launch')}
 """
     return _gpu_launch_lock_script(slot, body)
+
+
+def _finalize_full_scene_probe_script(
+    job: dict[str, Any], pod: str, run_dir: str, expected_claim_sha256: str
+) -> str:
+    """Render one selected-Pod, read-only terminal finalizer."""
+
+    source = job["source"]["checkout"].rstrip("/")
+    workdir = f"{source}/{WBT_RELATIVE}"
+    runtime = f"{workdir}/{FULL_SCENE_PROBE_RUNTIME_RELATIVE}"
+    source_asset_receipt, _staging, _lock = _source_asset_runtime_paths(job, pod)
+    source_asset_check = _source_asset_remote_command(job, pod, mode="doctor")
+    command = shlex.join(
+        [
+            ISAAC_PYTHON,
+            runtime,
+            "finalize",
+            "--run-dir",
+            run_dir,
+            "--expected-claim-sha256",
+            expected_claim_sha256,
+            "--source-asset-receipt",
+            source_asset_receipt,
+        ]
+    )
+    return f"""set -euo pipefail
+test "$(git -C {shlex.quote(source)} rev-parse HEAD)" = {shlex.quote(job['source']['commit'])}
+test -z "$(git -C {shlex.quote(source)} status --porcelain --untracked-files=all)"
+test -f {shlex.quote(runtime)}
+test -d {shlex.quote(run_dir)}
+{source_asset_check} >&2
+cd {shlex.quote(workdir)}
+source {shlex.quote(workdir + '/' + SETUP_RELATIVE)} >&2
+PYTHONPATH="${{HOPE_WBT_PYTHONPATH}}" {command}
+"""
 
 
 def _job_by_id(queue: dict[str, Any], job_id: str) -> dict[str, Any]:
@@ -2225,6 +2297,75 @@ def cmd_prepare_source_assets(
     return result
 
 
+def cmd_finalize_full_scene_probe(
+    queue: dict[str, Any], *, job_id: str, pod: str, gpu: int,
+    attempt_id: str, execute: bool, confirm: str | None,
+) -> dict[str, Any]:
+    """Finalize one exact probe on only its explicitly selected dispatch Pod."""
+
+    if execute and confirm != FINALIZE_FULL_SCENE_PROBE_CONFIRM:
+        raise QueueError(
+            f"--execute requires --confirm {FINALIZE_FULL_SCENE_PROBE_CONFIRM}"
+        )
+    job = _job_by_id(queue, _text(job_id, "job_id", safe_id=True))
+    slot = _slot_by_identity(queue, _text(pod, "pod", safe_id=True), gpu)
+    preferred_slot = job["resource"].get("preferred_slot")
+    if preferred_slot is not None and preferred_slot != slot.name:
+        raise QueueError(
+            f"probe finalization must use preferred_slot {preferred_slot}, got {slot.name}"
+        )
+    claim, _argv, run_dir = _full_scene_probe_contract(
+        queue, job, slot, attempt_id
+    )
+    remote = _finalize_full_scene_probe_script(
+        job, slot.pod, run_dir, claim["content_sha256"]
+    )
+    result: dict[str, Any] = {
+        "mode": "finalize-full-scene-probe",
+        "dry_run": not execute,
+        "job_id": job["id"],
+        "resource": slot.name,
+        "run_dir": run_dir,
+        "claim_path": f"{run_dir}/full_scene_probe_claim.json",
+        "claim_sha256": claim["content_sha256"],
+        "binding_path": f"{run_dir}/full_scene_probe_binding.json",
+        "exit_receipt_path": f"{run_dir}/full_scene_probe_exit.json",
+        "result_path": f"{run_dir}/probe_result.json",
+        "automatic_retry_authorized": False,
+        "queue_status_mutated": False,
+    }
+    if not execute:
+        result["ssh_argv"] = [
+            *_ssh_prefix(queue, slot.pod), f"bash -lc {shlex.quote(remote)}"
+        ]
+        return result
+    remote_output = _run_ssh(
+        queue,
+        slot.pod,
+        remote,
+        timeout=180,
+        phase=f"finalize-full-scene-probe:{job['id']}:{attempt_id}",
+    )
+    try:
+        terminal = json.loads(remote_output)
+        terminal_content = _mapping(
+            _mapping(terminal.get("result"), "probe finalizer result").get("content"),
+            "probe finalizer result content",
+        )
+    except json.JSONDecodeError as exc:
+        raise QueueError("probe finalizer returned malformed JSON") from exc
+    status = terminal_content.get("status")
+    unlock = terminal_content.get("unlock_authorized")
+    if status not in {"passed", "failed"} or type(unlock) is not bool:
+        raise QueueError("probe finalizer returned an invalid terminal classification")
+    if unlock is not (status == "passed"):
+        raise QueueError("probe finalizer status/unlock classification is inconsistent")
+    result["terminal_status"] = status
+    result["unlock_authorized"] = unlock
+    result["terminal_result"] = terminal
+    return result
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--queue", type=Path, required=True)
@@ -2258,6 +2399,13 @@ def _parser() -> argparse.ArgumentParser:
     prepare_asset.add_argument("--pod", required=True)
     prepare_asset.add_argument("--execute", action="store_true")
     prepare_asset.add_argument("--confirm")
+    finalize_full_scene = sub.add_parser("finalize-full-scene-probe")
+    finalize_full_scene.add_argument("--job-id", required=True)
+    finalize_full_scene.add_argument("--pod", required=True)
+    finalize_full_scene.add_argument("--gpu", required=True, type=int)
+    finalize_full_scene.add_argument("--attempt-id", required=True)
+    finalize_full_scene.add_argument("--execute", action="store_true")
+    finalize_full_scene.add_argument("--confirm")
     attest = sub.add_parser("attest-milestone")
     attest.add_argument("--job-id", required=True)
     attest.add_argument("--milestone", type=int, required=True)
@@ -2308,6 +2456,16 @@ def main(argv: list[str] | None = None) -> int:
                 queue,
                 job_id=args.job_id,
                 pod=args.pod,
+                execute=args.execute,
+                confirm=args.confirm,
+            )
+        elif args.mode == "finalize-full-scene-probe":
+            result = cmd_finalize_full_scene_probe(
+                queue,
+                job_id=args.job_id,
+                pod=args.pod,
+                gpu=args.gpu,
+                attempt_id=args.attempt_id,
                 execute=args.execute,
                 confirm=args.confirm,
             )

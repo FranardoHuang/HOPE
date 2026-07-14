@@ -32,6 +32,9 @@ WBT_RELATIVE = Path("hope_training/whole_body_tracking")
 TRAIN_ENTRY_RELATIVE = WBT_RELATIVE / "scripts/train.py"
 CLAIM_NAME = "queue_claim.json"
 BINDING_NAME = "run_binding.json"
+PROBE_PURPOSE = "full_scene_probe_not_science"
+PROBE_CLAIM_NAME = "full_scene_probe_claim.json"
+PROBE_BINDING_NAME = "full_scene_probe_binding.json"
 MILESTONE_DIR_NAME = "milestones"
 TRAINING_CONTRACT_SCHEMA_VERSION = 3
 
@@ -245,10 +248,32 @@ def _claim_layout(
     commit = _require_text(source.get("commit"), "source commit")
     if not COMMIT_RE.fullmatch(commit):
         raise LeanQueueRuntimeError("source commit must be 40 lowercase hex characters")
-    if claim_path != run_dir / CLAIM_NAME:
-        raise LeanQueueRuntimeError("claim path does not equal run_dir/queue_claim.json")
-    if binding_path != run_dir / BINDING_NAME:
-        raise LeanQueueRuntimeError("binding path does not equal run_dir/run_binding.json")
+    purpose = content.get("purpose")
+    is_probe = purpose == PROBE_PURPOSE
+    if purpose is not None and not is_probe:
+        raise LeanQueueRuntimeError(f"unsupported queue claim purpose: {purpose!r}")
+    if is_probe:
+        if (
+            content.get("not_science") is not True
+            or content.get("attestable") is not False
+            or content.get("promotable") is not False
+        ):
+            raise LeanQueueRuntimeError(
+                "full-scene probe must be not_science=true, attestable=false, promotable=false"
+            )
+        expected_claim_path = run_dir / PROBE_CLAIM_NAME
+        expected_binding_path = run_dir / PROBE_BINDING_NAME
+    else:
+        expected_claim_path = run_dir / CLAIM_NAME
+        expected_binding_path = run_dir / BINDING_NAME
+    if claim_path != expected_claim_path:
+        raise LeanQueueRuntimeError(
+            f"claim path does not equal run_dir/{expected_claim_path.name}"
+        )
+    if binding_path != expected_binding_path:
+        raise LeanQueueRuntimeError(
+            f"binding path does not equal run_dir/{expected_binding_path.name}"
+        )
 
     run_name = _require_text(content.get("run_name"), "run_name")
     log_root = (source_checkout / WBT_RELATIVE / "logs/rsl_rl").resolve(strict=False)
@@ -292,14 +317,32 @@ def _claim_layout(
         raise LeanQueueRuntimeError("claim milestones must be positive integers")
     if milestones != sorted(set(milestones)):
         raise LeanQueueRuntimeError("claim milestones must be unique and sorted")
+    if is_probe and milestones != [1]:
+        raise LeanQueueRuntimeError("full-scene probe milestones must be exactly [1]")
+    supervisor_argv_prefix = None
+    if is_probe:
+        supervisor_argv_prefix = content.get("supervisor_argv_prefix")
+        if not isinstance(supervisor_argv_prefix, list) or not supervisor_argv_prefix or any(
+            type(value) is not str or not value for value in supervisor_argv_prefix
+        ):
+            raise LeanQueueRuntimeError(
+                "full-scene probe supervisor_argv_prefix must be a non-empty string list"
+            )
+        if supervisor_argv_prefix[-1] != "--":
+            raise LeanQueueRuntimeError(
+                "full-scene probe supervisor argv prefix must end with --"
+            )
     return {
         "run_dir": run_dir,
-        "source": {"checkout": str(source_checkout), "commit": commit},
+        "source": {**source, "checkout": str(source_checkout), "commit": commit},
         "run_name": run_name,
         "rsl_log_dir": resolved_log,
         "pod": pod,
         "gpu": gpu,
         "milestones": milestones,
+        "purpose": purpose,
+        "is_probe": is_probe,
+        "supervisor_argv_prefix": supervisor_argv_prefix,
     }
 
 
@@ -416,7 +459,31 @@ def publish_run_binding(
         proc_root=Path(proc_root),
         getpgid=getpgid,
     )
-    if process["pgid"] != process["pid"]:
+    supervisor_process = None
+    if layout["is_probe"]:
+        if process["pgid"] == process["pid"]:
+            raise LeanQueueRuntimeError(
+                "full-scene probe trainer must be a child of its isolated supervisor PGID"
+            )
+        supervisor_process = _process_identity(
+            process["pgid"], proc_root=Path(proc_root), getpgid=getpgid
+        )
+        if (
+            supervisor_process["pid"] != process["pgid"]
+            or supervisor_process["pgid"] != process["pgid"]
+        ):
+            raise LeanQueueRuntimeError(
+                "full-scene probe supervisor must be the isolated PGID leader"
+            )
+        expected_supervisor_argv = [
+            *layout["supervisor_argv_prefix"],
+            *claim["training_argv"],
+        ]
+        if supervisor_process["argv"] != expected_supervisor_argv:
+            raise LeanQueueRuntimeError(
+                "full-scene probe supervisor argv differs from its claim-derived command"
+            )
+    elif process["pgid"] != process["pid"]:
         raise LeanQueueRuntimeError("queue trainer must be the leader of its isolated PGID")
     if process["argv"] != argv:
         raise LeanQueueRuntimeError("/proc cmdline differs from the claimed trainer argv")
@@ -449,7 +516,13 @@ def publish_run_binding(
         "run_dir": str(layout["run_dir"]),
         "milestones": list(layout["milestones"]),
         "training_argv": list(claim["training_argv"]),
+        "purpose": layout["purpose"],
+        "not_science": bool(layout["is_probe"]),
+        "attestable": not layout["is_probe"],
+        "promotable": not layout["is_probe"],
     }
+    if supervisor_process is not None:
+        binding_content["supervisor_process"] = supervisor_process
     binding = {
         "schema_version": 1,
         "content": binding_content,
@@ -502,10 +575,28 @@ def _load_binding(
         "run_dir": str(layout["run_dir"]),
         "milestones": layout["milestones"],
         "training_argv": claim["training_argv"],
+        "purpose": layout["purpose"],
+        "not_science": bool(layout["is_probe"]),
+        "attestable": not layout["is_probe"],
+        "promotable": not layout["is_probe"],
     }
     for key, value in expected.items():
         if content.get(key) != value:
             raise LeanQueueRuntimeError(f"run binding {key} differs from its queue claim")
+    process = _require_mapping(content.get("process"), "bound process")
+    if layout["is_probe"]:
+        supervisor = _require_mapping(
+            content.get("supervisor_process"), "bound probe supervisor process"
+        )
+        if (
+            process.get("pgid") != supervisor.get("pid")
+            or supervisor.get("pid") != supervisor.get("pgid")
+        ):
+            raise LeanQueueRuntimeError(
+                "bound probe trainer/supervisor process-group identity mismatch"
+            )
+    elif "supervisor_process" in content:
+        raise LeanQueueRuntimeError("science binding must not contain a probe supervisor")
     return binding, content, claim, claim_content
 
 
@@ -606,6 +697,10 @@ def attest_milestone(
 
     binding_path_obj = _canonical_absolute_path(str(binding_path), "binding path")
     binding, content, _claim, _claim_content = _load_binding(binding_path_obj)
+    if content.get("attestable") is not True or content.get("not_science") is not False:
+        raise LeanQueueRuntimeError(
+            "ordinary milestone attestation refuses non-science full-scene probes"
+        )
     milestone_value = _require_plain_int(milestone, "milestone", minimum=1)
     if milestone_value not in content.get("milestones", []):
         raise LeanQueueRuntimeError("requested iteration is not a preregistered milestone")

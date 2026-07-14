@@ -112,8 +112,38 @@ execute 的外层容量预检只 SSH 读取用户明确选择的 dispatch Pod/GP
 180 秒 content-stale watchdog 与 `Learning iteration` marker。
 
 launcher 返回只表示 `first_iteration_observed=true`，不表示两次 update 已终档，更不表示 reward 有效。
-probe 永远 `not_science=true / attestable=false / promotable=false`，不写 `queue_claim.json`、`run_binding.json`、
-`milestones/`，也不能进入 checkpoint attestor、成绩表或自动解锁正式 job。
+probe 永远 `not_science=true / attestable=false / promotable=false`，不用 science 的 `queue_claim.json`、
+`run_binding.json` 或 `milestones/`。它改用独立的 `full_scene_probe_claim.json`、trainer-owned
+`full_scene_probe_binding.json` 和只自然 `wait`、绝不发 signal 的 supervisor；launcher 仍只报告 started/
+first iteration，不负责终档或解锁。claim 还绑定 exact supervisor argv prefix、fresh lineage=1 与 Pod-specific
+ignored-runtime-asset receipt；任意替换 wrapper 或 causal lineage 都不能解锁。
+
+trainer 自然退出后必须另跑终档器；先 dry-run，再只访问显式选择的 Pod：
+
+```bash
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml \
+  finalize-full-scene-probe \
+  --job-id REPLACE_WITH_READY_OR_BLOCKED_EXACT_JOB \
+  --pod pod2 --gpu 1 --attempt-id full_scene_a1
+
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml \
+  finalize-full-scene-probe \
+  --job-id REPLACE_WITH_READY_OR_BLOCKED_EXACT_JOB \
+  --pod pod2 --gpu 1 --attempt-id full_scene_a1 \
+  --execute --confirm SIM_ONLY_FINALIZE_ONE_FULL_SCENE_PROBE
+```
+
+终档器不扫描另一台 Pod、不发 signal、不改 YAML status、不自动 retry。它先要求当前 YAML 重算的 expected
+claim SHA 等于 immutable claim，并再次运行 source-asset doctor、消费 exact receipt。trainer/supervisor 任一
+仍存活或原 PGID 还有 orphan 时只报 not-ready，不写结果；整组自然消失后才核对 exact PID/starttime、normal
+rc0、scene→contract→first-iteration phase、fatal0、`model_1.pt` filename/embed/finite/fresh-lineage1、相邻
+schema-3 hard-contract SHA、launch claim、source/ignored A3 closure 与 motion/train-bank bytes。通过或失败都
+no-clobber 写 `probe_result.json`；controller 明确解析 `terminal_status/unlock_authorized`，失败恒为
+`unlock_authorized=false / automatic_retry_authorized=false`。重复终档只接受逐字节相同结果。该结果仍不能进入
+普通 milestone attestor 或成绩表；未来显式 unlock consumer 只能消费 `status=passed` 的 exact receipt，当前
+queue 不会自动解锁任何科学 job。
 
 这个入口解决的是“动作和题库已经决定后，为什么还要手拼一长串命令”。一条 YAML job 必须同时绑定：
 
@@ -267,7 +297,8 @@ floating/complex tensors finite、相邻 schema-3 hard-contract SHA 与 launch-c
 ## 冷启动/URDF import 诊断
 
 queue trainer 默认关闭的 phase telemetry 在 P1 run 中依次留下 `hydra_resolved`、`app_started`、
-`log_dir_bound`、`scene_import_start/done`；冻结 launcher 看到真实 `Learning iteration` 并成功返回后，
+`log_dir_bound`、`scene_import_start/done`、`hard_contract_written`；冻结 launcher 看到真实
+`Learning iteration` 并成功返回后，
 queue harness 才在 `.launch` 写 `phase=first_iter`。这能把“卡在 A3 import”与学习失败分开。
 
 main 已有独立 per-source+Pod+GPU 的 `1 env × 2 updates` boot-warmup 和 content-bearing 日志默认 180 秒
@@ -284,17 +315,19 @@ python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_exact_process_group.py \
   hope_training/whole_body_tracking/tests/test_launch_kit_training_locked.py \
   hope_training/whole_body_tracking/tests/test_lean_queue_runtime.py \
+  hope_training/whole_body_tracking/tests/test_full_scene_probe_runtime.py \
   tests/test_run_lean_training_queue.py \
   hope_training/whole_body_tracking/tests/test_training_launch_claim.py \
   hope_training/whole_body_tracking/tests/test_training_thread_caps.py
 python3 -m py_compile scripts/run_lean_training_queue.py \
   hope_training/whole_body_tracking/scripts/exact_process_group.py \
   hope_training/whole_body_tracking/scripts/train.py \
-  hope_training/whole_body_tracking/scripts/lean_queue_runtime.py
+  hope_training/whole_body_tracking/scripts/lean_queue_runtime.py \
+  hope_training/whole_body_tracking/scripts/full_scene_probe_runtime.py
 bash -n hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh
 ```
 
 本源码门只证明 YAML 绑定、调度与 fail-closed 选择逻辑；没有证明远端 SSH、Isaac runtime、动作效果或
-exam 成绩。focused source result 为 `76 passed`；现有 source-pinned launcher 同时保留 180 秒 stale-log
+exam 成绩。整合 focused source result 为 `126 passed`；现有 source-pinned launcher 同时保留 180 秒 stale-log
 watchdog 与总 boot timeout。P1.1 已提供代表性 full-scene probe 的 source mode，但尚无远端 claim/首迭代
 运行证据，仍不能写成 full-scene runtime 通过。

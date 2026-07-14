@@ -394,5 +394,8 @@ def test_train_publishes_binding_after_exact_log_selection_before_kit_env(tmp_pa
     assert "training_queue_claim_path and training_run_binding_path must be supplied together" in source
     assert source.index('_emit_lean_queue_phase(cfg, "scene_import_start")') < env_build
     assert env_build < source.index('_emit_lean_queue_phase(cfg, "scene_import_done")')
+    assert source.index('_emit_lean_queue_phase(cfg, "scene_import_done")') < source.index(
+        '"hard_contract_written"'
+    )
     assert '_emit_lean_queue_phase(cfg, "hydra_resolved")' in source
     assert '_emit_lean_queue_phase(cfg, "app_started")' in source

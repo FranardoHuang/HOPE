@@ -1892,6 +1892,16 @@ probe 也会访问 reserved Pod1。P1.2 将该路径收窄为 selected dispatch 
 launch SSH，且内置 doctor 仍严格位于容量、namespace/claim 与 Kit spawn 之前。standalone doctor/dry-run
 保持不变；这是 source/control-plane gate，不是 Pod runtime 或行为结果，G05 仍为 `Partial`。
 
+P1.4 再关闭“看到 first iteration 就误当终档”的缺口。full-scene probe 现在预注册唯一内部
+`milestones=[1]`，trainer 在独立非科学路径发布 claim/binding；source-pinned supervisor 只自然 `wait` 并
+no-clobber 记录 normal rc 与 signal 的区别，绝不发 signal。selected-Pod-only finalizer 要求绑定的 trainer/
+supervisor 和原 PGID 全部自然消失，再核对 current expected claim、scene→hard-contract→first-iteration phases、
+fatal0、finite/embedded-iter1/fresh-lineage1 `model_1.pt`、adjacent schema-3 SHA、exact supervisor argv、
+claim/source-asset receipt 与 motion/train-bank binding。still-live/orphan 不写终档；其他终态
+失败写 immutable `unlock_authorized=false` 结果且禁止自动 retry。普通 milestone attestor 明确拒绝该
+`attestable=false` binding，queue 也没有自动 unlock consumer。dependency-light 整合 focused `126 passed`；尚无用
+合入 source 产生的远端 claim/binding/exit/result，因此这里只是 E1 source gate，G05 继续 `Partial`。
+
 #### qdot matched pair `+500` mixed signal
 
 同 source/seed 的 qdot weight `-5/0` 两份 `model_500.pt` 已通过 filename/embed iter、finite、fresh lineage、

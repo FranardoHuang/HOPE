@@ -85,7 +85,8 @@ checkpoint 身份、finite 与训练合同谱系，不是 q10/q50 判卷、行�
 
 仅当 queue claim/binding 两个 override 同时存在时，trainer 才输出机器可读
 `LEAN_QUEUE_PHASE` JSON：`hydra_resolved`、`app_started`、`log_dir_bound`、`scene_import_start`、
-`scene_import_done`。既有 exact-PGID launcher 看到真实 `Learning iteration` 并成功返回后，queue harness
+`scene_import_done`、`hard_contract_written`（含 adjacent contract SHA）。既有 exact-PGID launcher 看到真实
+`Learning iteration` 并成功返回后，queue harness
 才把 `phase=first_iter` 追加到 `.launch` sidecar；冻结 launcher bytes 不变。普通训练不增加这些 marker。
 
 watchdog 的 signal identity 也不能只信启动时 PGID 数字。launcher 在 spawn 后由 source-pinned helper
@@ -103,7 +104,19 @@ per-source+Pod+physical-GPU [`boot-warmup`](../DEFINITIONS.md#boot-warmup) names
 [`full-scene-probe`](../DEFINITIONS.md#full-scene-probe)另沿同一 source/Pod/GPU、完整 scene recipe 与原
 `num_envs` 派生两次 update 的隔离运行；它只在 launcher 看到首个 `Learning iteration` 后报告
 `first_iteration_observed=true`。probe claim 明写 `not_science=true / attestable=false / promotable=false`，
-不生成本接口的 `run_binding.json` 或 milestone receipt，因此不能通过本接口被追认为科学 checkpoint。
+并将唯一内部 milestone 固定为 `[1]`。它不生成 science 的 `run_binding.json` 或 milestone receipt，而使用
+独立 `full_scene_probe_binding.json`：trainer 仍逐项绑定 claim argv、RSL log、source、GPU 与自身 PID/
+starttime；额外记录同 PGID 的 supervisor leader，并要求其 `/proc` argv 精确等于 claim-bound prefix 加完整
+trainer argv。普通 attestor 看到 `attestable=false` 必须拒绝。
+
+supervisor 是 `setsid` 建立的 leader，trainer 是同组 child；supervisor 只 `wait`，不发 `TERM/KILL`，自然
+结束后 no-clobber 写 `full_scene_probe_exit.json`，明确区分 `normal_exit+exit_code` 与 `signal+signal`。独立
+`finalize-full-scene-probe` 只访问调用者选择的 Pod，并要求 trainer/supervisor 及整个原 PGID 均自然消失；
+仍 live/orphan 只返回 not-ready。它还比较 current-YAML expected claim SHA，重验 ignored A3 tree 并消费
+claim-bound source-asset receipt；PID reuse、signal/nonzero rc、fatal（含 NaN/Inf/Killed）、phase 缺失、
+`model_1` 缺失/iteration 错/nonfinite/causal-lineage、contract/claim/source/asset 漂移均形成不可解锁的终档失败。
+通过或失败都写 immutable
+`probe_result.json`；重复调用只接受 byte-identical receipt，且从不自动重试、改 queue status 或晋级。
 probe execute 的容量快照只读取 selected dispatch Pod/GPU；普通 science fill 仍保留 all-Pod claim 防重复。
 
 ## 源码复现
@@ -113,6 +126,7 @@ python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_exact_process_group.py \
   hope_training/whole_body_tracking/tests/test_launch_kit_training_locked.py \
   hope_training/whole_body_tracking/tests/test_lean_queue_runtime.py \
+  hope_training/whole_body_tracking/tests/test_full_scene_probe_runtime.py \
   tests/test_run_lean_training_queue.py \
   hope_training/whole_body_tracking/tests/test_training_launch_claim.py \
   hope_training/whole_body_tracking/tests/test_training_thread_caps.py
@@ -121,14 +135,17 @@ python3 -m py_compile \
   scripts/run_lean_training_queue.py \
   hope_training/whole_body_tracking/scripts/exact_process_group.py \
   hope_training/whole_body_tracking/scripts/train.py \
-  hope_training/whole_body_tracking/scripts/lean_queue_runtime.py
+  hope_training/whole_body_tracking/scripts/lean_queue_runtime.py \
+  hope_training/whole_body_tracking/scripts/full_scene_probe_runtime.py
 
 bash -n hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh
 ```
 
-当前 focused 结果为 `76 passed`。watchdog identity 专项另覆盖 PID reuse、双读漂移、leader 先退但已绑定
-child 残留、新成员加入、空组与正常 stale/hard timeout。其余负测覆盖每臂单一原子 SSH、内置 doctor 门在容量/claim 前执行、多臂每臂
+当前整合 focused 结果为 `126 passed`。watchdog identity 专项覆盖 PID reuse、双读漂移、leader 先退但已绑定
+child 残留、新成员加入、空组与正常 stale/hard timeout；其余负测覆盖每臂单一原子 SSH、内置 doctor 门在
+容量/claim 前执行、多臂每臂
 各一次 transaction，以及 fake log dir、binding/receipt overwrite、静态及读中 PID reuse、
 source dirty/YAML verifier 漂移、不可达 terminal milestone、warmup/legacy capability 串线、filename/embed
 iteration 错位、nested float/complex NaN、hard-contract SHA 错绑、launch-claim lineage 错绑，以及 full-scene
-probe 的环境数漂移、科学 namespace 串线、错确认词、reserved Pod、placeholder/reuse。
+probe 的环境数漂移、科学 namespace 串线、错确认词、reserved Pod、placeholder/reuse，以及 terminal still-live、
+PID reuse、nonzero/signal exit、fatal、missing/NaN/wrong-iteration model、contract/claim/source drift 和结果替换。
