@@ -46,6 +46,21 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-15, Yikang RallyV9 reach/balance matrix; Gate remains `Partial`):
+
+- Feature source `yikang-standhit-0714@8c8cd53` passed host/pod contract checks and four Isaac
+  init/load smokes. A/B/A+B strictly resume the common `ayzxv1ma/model_10600` parent; fresh A+B
+  starts from iteration zero. All four first periodic checkpoints loaded with optimizer state and
+  finite floating tensors.
+- Production is active on A
+  [`5nso93g0`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/5nso93g0), B
+  [`4osh4ypc`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/4osh4ypc), resumed A+B
+  [`jndof7jk`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/jndof7jk), and fresh A+B
+  [`xpiapvix`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/xpiapvix). B/AB mechanics reached a
+  real push application; fresh selected push episodes but its random policy did not survive the
+  minimum 5-second delay in the short smoke. Launch health is not a generalization, balance, or
+  Gate3 result; matched-iteration evaluation and formal fork export remain pending.
+
 Follow-up note (2026-07-14, Pod2 `+200` activation audit; Gate remains `Partial`):
 
 - Four science trainers produced exact `model_200` receipts with finite tensors, matching embedded

@@ -1,6 +1,6 @@
 # NOW — 当前训练流程、课程阶段与下一步
 
-最近复核：2026-07-14 CST。本页说明现在到底在训什么、整套训练怎样连起来、每个课程阶段在解决
+最近复核：2026-07-15 CST。本页说明现在到底在训什么、整套训练怎样连起来、每个课程阶段在解决
 什么问题，以及下一项工作为什么值得做。实验过程放在[实验登记册](experiments/README.md)，
 复现命令和 Gate 结果放在对应 [Gate](gates/) 与操作文档。
 
@@ -485,13 +485,19 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   前置已闭合，下一证据是固定同卷完成 owned planner → C++ runner → 厂商 MuJoCo 的首个 no-publish
   有效周期和行为记录。[实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md)
 - **[7｜P1] Gate3 历史谱系复核。** 责任人 yikang；执行者 Codex/direct；分支
-  `yikang-standhit-0714`。2026-07-15 已认领：以 W&B `ayzxv1ma/model_10600`（Gate3 v4
+  `yikang-standhit-0714`。2026-07-15 已完成 mechanics 门并发射：以 W&B
+  `ayzxv1ma/model_10600`（Gate3 v4
   3× PASS、每轮 7/7 正手、0 摔）为唯一共同 warm-start，保持其 reward/观测/动作与 v12fix
-  teacher 不变，发射三个因果分叉：纯 A=站姿可达击球点泛化、纯 B=5% 随机推扰、A+B；另加
-  一条同配方 fresh A+B origin 对照（明确禁止 checkpoint，保留原 yaw curriculum）。先做
-  host/Isaac mechanics 与精确 checkpoint lineage 门，再占用 Pod1 三卡及 Pod2 一卡。下一证据：
-  四条独立 W&B run id、启动回执和首个 finite checkpoint；后续仍需排除观测排列和击球平面
-  混杂后的同运行链 Gate3 对照。
+  teacher 不变，运行三个因果分叉：纯 A=站姿可达击球点泛化、纯 B=每个 reset 独立
+  Bernoulli `p=0.05` 随机推扰、A+B；另有同配方 fresh A+B origin 对照（禁止 checkpoint，保留
+  原 yaw curriculum）。exact source `8c8cd53` 的 init/load 门与 B/AB 实际推扰门已过；Pod1 三卡
+  正在运行 A [`5nso93g0`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/5nso93g0)、B
+  [`4osh4ypc`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/4osh4ypc)、A+B
+  [`jndof7jk`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/jndof7jk)，Pod2 GPU0 正在运行 fresh
+  A+B [`xpiapvix`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/xpiapvix)；四条首个 checkpoint
+  均已 finite/loadable。fresh 的短 mechanics 因初始策略 5 秒前摔倒只验证到 push selection，实际
+  apply 继续看 telemetry。下一证据：同绝对迭代 checkpoint 的泛化、推扰后存活与固定点回归；随后
+  才做同运行链 Gate3 对照。启动健康不等于质量晋级。
 
 ### 训练引擎与机器人物理
 
