@@ -54,7 +54,7 @@ WBT_RELATIVE = "hope_training/whole_body_tracking"
 SETUP_RELATIVE = "setup_train_env.sh"
 ENTRYPOINT_RELATIVE = "scripts/train.py"
 KIT_LAUNCHER_RELATIVE = "scripts/launch_kit_training_locked.sh"
-KIT_BOOT_MARKER = "[train.py] hard training contract:"
+KIT_BOOT_MARKER = "Learning iteration"
 KIT_BOOT_TIMEOUT_SECONDS = 900
 UNIQUE_NUMERIC_PID_AWK = (
     r'{gsub(/^[ \t]+|[ \t]+$/, "", $0); '
@@ -152,10 +152,12 @@ def load_queue(path: Path) -> dict[str, Any]:
         if status not in {READY, BLOCKED, *TERMINAL}:
             raise QueueError(f"{job_id}.status must be ready/blocked/complete/rejected")
         blocker = job.get("blocker")
-        if status == BLOCKED:
+        if status in {BLOCKED, "rejected"}:
             _text(blocker, f"{job_id}.blocker")
         elif blocker not in (None, ""):
-            raise QueueError(f"{job_id}.blocker must be empty unless status=blocked")
+            raise QueueError(
+                f"{job_id}.blocker must be empty unless status=blocked/rejected"
+            )
 
         action = job["action"]
         motion = _mapping(job.get("motion"), f"{job_id}.motion")
@@ -270,7 +272,8 @@ def _ssh_prefix(queue: dict[str, Any], pod_name: str) -> list[str]:
 
 
 def _run_ssh(
-    queue: dict[str, Any], pod_name: str, remote: str, *, timeout: int = 30
+    queue: dict[str, Any], pod_name: str, remote: str, *, timeout: int = 30,
+    phase: str = "remote-command",
 ) -> str:
     try:
         completed = subprocess.run(
@@ -278,8 +281,18 @@ def _run_ssh(
             check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             timeout=timeout,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise QueueError(f"{pod_name} SSH failed: {exc}") from exc
+    except subprocess.CalledProcessError as exc:
+        raise QueueError(
+            f"{pod_name} {phase} failed rc={exc.returncode}; "
+            f"stdout={exc.stdout!r}; stderr={exc.stderr!r}"
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise QueueError(
+            f"{pod_name} {phase} timed out after {timeout}s; "
+            f"stdout={exc.stdout!r}; stderr={exc.stderr!r}"
+        ) from exc
+    except OSError as exc:
+        raise QueueError(f"{pod_name} {phase} SSH failed: {exc}") from exc
     return completed.stdout
 
 
@@ -304,12 +317,21 @@ for job_id, directory in jobs.items():
     root = Path(directory)
     claim = root / "queue_claim.json"
     if claim.is_file():
+        payload = json.loads(claim.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"claim is not a mapping: {{claim}}")
         state = "claimed"
         if (root / "run.log.launch").is_file():
             state = "launched"
         if (root / "terminal_result.json").is_file():
             state = "terminal"
-        states[job_id] = {{"state": state, "claim_path": str(claim)}}
+        states[job_id] = {{
+            "state": state,
+            "claim_path": str(claim),
+            "claim_job_id": payload.get("job_id"),
+            "pod": payload.get("pod"),
+            "gpu": payload.get("gpu"),
+        }}
 print(json.dumps({{"compute_rows": compute_rows, "gpu_rows": gpu_rows, "jobs": states}}, sort_keys=True))
 """
     command = f"python3 -c {shlex.quote(program)}"
@@ -326,10 +348,33 @@ print(json.dumps({{"compute_rows": compute_rows, "gpu_rows": gpu_rows, "jobs": s
         except json.JSONDecodeError as exc:
             raise QueueError(f"{pod_name} returned malformed live snapshot") from exc
         occupancy.update(_parse_gpu_occupancy(pod_name, snapshot))
-        for job_id, state in _mapping(snapshot.get("jobs"), f"{pod_name}.jobs").items():
+        for job_id, state_value in _mapping(
+            snapshot.get("jobs"), f"{pod_name}.jobs"
+        ).items():
             if job_id in claims:
                 raise QueueError(f"job {job_id} is claimed on both Pods")
-            claims[job_id] = {"pod": pod_name, **_mapping(state, f"{job_id}.state")}
+            state = _mapping(state_value, f"{job_id}.state")
+            if state.get("claim_job_id") != job_id:
+                raise QueueError(f"{job_id} claim binds a different job id")
+            claim_pod = _text(state.get("pod"), f"{job_id}.claim.pod")
+            if claim_pod != pod_name:
+                raise QueueError(
+                    f"{job_id} claim says pod={claim_pod}, found on {pod_name}"
+                )
+            gpu = state.get("gpu")
+            if type(gpu) is not int or gpu not in queue["pods"][pod_name]["gpus"]:
+                raise QueueError(f"{job_id} claim has invalid gpu={gpu!r}")
+            claim_state = _text(state.get("state"), f"{job_id}.claim.state")
+            if claim_state not in {"claimed", "launched", "terminal"}:
+                raise QueueError(f"{job_id} claim has invalid state={claim_state!r}")
+            claims[job_id] = {
+                "pod": pod_name,
+                "gpu": gpu,
+                "state": claim_state,
+                "claim_path": _text(
+                    state.get("claim_path"), f"{job_id}.claim.claim_path"
+                ),
+            }
     expected = {slot.name for slot in slots(queue)}
     if set(occupancy) != expected:
         raise QueueError(f"GPU inventory mismatch: expected={sorted(expected)} got={sorted(occupancy)}")
@@ -338,6 +383,35 @@ print(json.dumps({{"compute_rows": compute_rows, "gpu_rows": gpu_rows, "jobs": s
 
 def live_occupancy(queue: dict[str, Any]) -> dict[str, int]:
     return live_snapshot(queue)[0]
+
+
+def _effective_occupancy(
+    queue: dict[str, Any],
+    occupancy: dict[str, int],
+    claims: dict[str, dict[str, Any]],
+) -> dict[str, int]:
+    """Reserve a slot while a non-terminal claim is not yet visible in NVML.
+
+    A claim with no ``run.log.launch`` is the narrow claim-to-NVML window (or a
+    fail-closed launch that still needs explicit disposition).  It counts as a
+    reservation only while its queue row is non-terminal.  Marking an audited
+    infrastructure-only attempt ``rejected`` releases that stale reservation;
+    creating a new namespace is the only permitted retry.
+    """
+
+    effective = dict(occupancy)
+    jobs = {job["id"]: job for job in queue["jobs"]}
+    for job_id, claim in claims.items():
+        job = jobs.get(job_id)
+        if job is None:
+            raise QueueError(f"claim references unknown job: {job_id}")
+        if job["status"] in TERMINAL or claim["state"] != "claimed":
+            continue
+        slot_name = f"{claim['pod']}/gpu{claim['gpu']}"
+        if slot_name not in effective:
+            raise QueueError(f"claim references unknown GPU slot: {slot_name}")
+        effective[slot_name] += 1
+    return effective
 
 
 def _parse_gpu_occupancy(pod_name: str, snapshot: dict[str, Any]) -> dict[str, int]:
@@ -403,15 +477,56 @@ def _training_argv(queue: dict[str, Any], job: dict[str, Any], gpu: int) -> list
     return argv
 
 
-def _launch_script(queue: dict[str, Any], job: dict[str, Any], slot: Slot) -> str:
+def _child_env_command(argv: list[str], gpu: int) -> str:
+    """Render the one child environment shared by doctor and trainer."""
+
+    return (
+        f"{shlex.join(['env', f'CUDA_VISIBLE_DEVICES={gpu}'])} "
+        f"PYTHONPATH=\"${{HOPE_WBT_PYTHONPATH}}\" {shlex.join(argv)}"
+    )
+
+
+def _doctor_body(job: dict[str, Any], slot: Slot) -> str:
     source = job["source"]["checkout"].rstrip("/")
     workdir = f"{source}/{WBT_RELATIVE}"
-    run_dir = job["run_dir"].rstrip("/")
     required = [
         *job["motion"]["bindings"].values(),
         job["bank"]["train_path"], job["exam"]["path"],
     ]
     checks = "\n".join(f"test -f {shlex.quote(path)}" for path in required)
+    expected_module_root = f"{workdir}/source/whole_body_tracking/whole_body_tracking"
+    module_probe = (
+        "import importlib.util,pathlib;"
+        "s=importlib.util.find_spec('whole_body_tracking');"
+        "assert s is not None and s.origin is not None;"
+        "print(pathlib.Path(s.origin).resolve().parent)"
+    )
+    child_probe = _child_env_command([ISAAC_PYTHON, "-c", module_probe], slot.gpu)
+    return f"""set -euo pipefail
+test \"$(git -C {shlex.quote(source)} rev-parse HEAD)\" = {shlex.quote(job['source']['commit'])}
+test -z \"$(git -C {shlex.quote(source)} status --porcelain)\"
+{checks}
+cd {shlex.quote(workdir)}
+source {shlex.quote(workdir + '/' + SETUP_RELATIVE)}
+resolved_module_root=$({child_probe})
+test \"$resolved_module_root\" = {shlex.quote(expected_module_root)}
+"""
+
+
+def _doctor_script(job: dict[str, Any], slot: Slot) -> str:
+    return _doctor_body(job, slot) + (
+        "printf '%s\\n' "
+        + shlex.quote(
+            "DOCTOR_OK scope=source-clean,assets,module-exact "
+            "hydra=no-no-kit-compose-contract"
+        )
+    )
+
+
+def _launch_script(queue: dict[str, Any], job: dict[str, Any], slot: Slot) -> str:
+    source = job["source"]["checkout"].rstrip("/")
+    workdir = f"{source}/{WBT_RELATIVE}"
+    run_dir = job["run_dir"].rstrip("/")
     claim = json.dumps(
         {
             "schema_version": 1,
@@ -426,24 +541,18 @@ def _launch_script(queue: dict[str, Any], job: dict[str, Any], slot: Slot) -> st
     ) + "\n"
     train_argv = _training_argv(queue, job, slot.gpu)
     launcher = f"{workdir}/{KIT_LAUNCHER_RELATIVE}"
-    launch = [
-        launcher, f"{run_dir}/run.log", "env",
-        f"CUDA_VISIBLE_DEVICES={slot.gpu}", *train_argv,
-    ]
+    launch = shlex.join([launcher, f"{run_dir}/run.log"]) + " " + (
+        _child_env_command(train_argv, slot.gpu)
+    )
     # The per-GPU flock covers the last capacity check, claim, and spawn.
-    body = f"""set -euo pipefail
-test \"$(git -C {shlex.quote(source)} rev-parse HEAD)\" = {shlex.quote(job['source']['commit'])}
-test -z \"$(git -C {shlex.quote(source)} status --porcelain)\"
-{checks}
+    body = _doctor_body(job, slot) + f"""
 count=$(nvidia-smi -i {slot.gpu} --query-compute-apps=pid --format=csv,noheader,nounits | awk {shlex.quote(UNIQUE_NUMERIC_PID_AWK)})
 test \"$count\" -lt {slot.capacity}
 mkdir -p {shlex.quote(run_dir)}
 ( set -o noclobber; printf %s {shlex.quote(claim)} > {shlex.quote(run_dir + '/queue_claim.json')} )
-cd {shlex.quote(workdir)}
-source {shlex.quote(workdir + '/' + SETUP_RELATIVE)}
 export KIT_BOOT_MARKER={shlex.quote(KIT_BOOT_MARKER)}
 export KIT_BOOT_TIMEOUT_S={KIT_BOOT_TIMEOUT_SECONDS}
-{shlex.join(launch)}
+{launch}
 """
     return f"flock -n /tmp/hope_lean_queue_gpu{slot.gpu}.lock bash -lc {shlex.quote(body)}"
 

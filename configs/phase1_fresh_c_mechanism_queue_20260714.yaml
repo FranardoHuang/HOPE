@@ -135,11 +135,12 @@ x-resource: &resource
   policy: six_gpu_round_robin
 
 jobs:
-  - id: fresh_c_v1_free_wrist_velocity
+  - &v1_free_wrist_attempt1
+    id: fresh_c_v1_free_wrist_velocity
     human_name: fresh C plus V1 free wrist linear-velocity imitation
     action: *action
-    status: ready
-    blocker: null
+    status: rejected
+    blocker: infrastructure-only attempt reached zero iterations and exited before the boot marker because the launcher omitted the source PYTHONPATH; preserved, never retry this namespace
     motion: *motion
     bank: *bank
     exam: *exam
@@ -158,11 +159,12 @@ jobs:
     run_name: phase1_fresh_c_v1_free_wrist_vel_seed3_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_v1_free_wrist_vel_seed3
 
-  - id: fresh_c_v2_motion_window_scale
+  - &v2_motion_window_attempt1
+    id: fresh_c_v2_motion_window_scale
     human_name: fresh C plus V2 quarter motion imitation inside strike window
     action: *action
-    status: ready
-    blocker: null
+    status: rejected
+    blocker: infrastructure-only attempt reached zero iterations and exited before the boot marker because the launcher omitted the source PYTHONPATH; preserved, never retry this namespace
     motion: *motion
     bank: *bank
     exam: *exam
@@ -181,11 +183,12 @@ jobs:
     run_name: phase1_fresh_c_v2_motion_window_scale_seed3_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_v2_motion_window_scale_seed3
 
-  - id: fresh_c_v1_v2_combined
+  - &v1_v2_attempt1
+    id: fresh_c_v1_v2_combined
     human_name: fresh C plus V1 and V2 interaction cell
     action: *action
-    status: ready
-    blocker: null
+    status: rejected
+    blocker: infrastructure-only attempt reached zero iterations and exited before the boot marker because the launcher omitted the source PYTHONPATH; preserved, never retry this namespace
     motion: *motion
     bank: *bank
     exam: *exam
@@ -204,11 +207,12 @@ jobs:
     run_name: phase1_fresh_c_v1_v2_seed3_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_v1_v2_seed3
 
-  - id: fresh_c_base_deceleration
+  - &base_decel_attempt1
+    id: fresh_c_base_deceleration
     human_name: fresh C plus pre-strike base deceleration reward
     action: *action
-    status: ready
-    blocker: null
+    status: rejected
+    blocker: infrastructure-only attempt reached zero iterations and exited before the boot marker because the launcher omitted the source PYTHONPATH; preserved, never retry this namespace
     motion: *motion
     bank: *bank
     exam: *exam
@@ -227,11 +231,12 @@ jobs:
     run_name: phase1_fresh_c_base_decel_seed3_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_base_decel_seed3
 
-  - id: fresh_c_post_swing_replay_half
+  - &post_swing_attempt1
+    id: fresh_c_post_swing_replay_half
     human_name: fresh C plus fifty-percent post-swing replay starts
     action: *action
-    status: ready
-    blocker: null
+    status: rejected
+    blocker: infrastructure-only attempt reached zero iterations and exited before the boot marker because the launcher omitted the source PYTHONPATH; preserved, never retry this namespace
     motion: *motion
     bank: *bank
     exam: *exam
@@ -249,6 +254,48 @@ jobs:
     resource: *resource
     run_name: phase1_fresh_c_post_swing_half_seed3_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_post_swing_half_seed3
+
+  # Attempt 2 is the only accepted retry: recipe bytes are inherited unchanged;
+  # only identity/namespace and the infra-only disposition differ.
+  - <<: *v1_free_wrist_attempt1
+    id: fresh_c_v1_free_wrist_velocity_retry_v2
+    human_name: fresh C plus V1 free wrist linear-velocity imitation, infra retry v2
+    status: ready
+    blocker: null
+    run_name: phase1_fresh_c_v1_free_wrist_vel_seed3_retry_v2_20260714
+    run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_v1_free_wrist_vel_seed3_retry_v2
+
+  - <<: *v2_motion_window_attempt1
+    id: fresh_c_v2_motion_window_scale_retry_v2
+    human_name: fresh C plus V2 quarter motion imitation inside strike window, infra retry v2
+    status: ready
+    blocker: null
+    run_name: phase1_fresh_c_v2_motion_window_scale_seed3_retry_v2_20260714
+    run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_v2_motion_window_scale_seed3_retry_v2
+
+  - <<: *v1_v2_attempt1
+    id: fresh_c_v1_v2_combined_retry_v2
+    human_name: fresh C plus V1 and V2 interaction cell, infra retry v2
+    status: ready
+    blocker: null
+    run_name: phase1_fresh_c_v1_v2_seed3_retry_v2_20260714
+    run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_v1_v2_seed3_retry_v2
+
+  - <<: *base_decel_attempt1
+    id: fresh_c_base_deceleration_retry_v2
+    human_name: fresh C plus pre-strike base deceleration reward, infra retry v2
+    status: ready
+    blocker: null
+    run_name: phase1_fresh_c_base_decel_seed3_retry_v2_20260714
+    run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_base_decel_seed3_retry_v2
+
+  - <<: *post_swing_attempt1
+    id: fresh_c_post_swing_replay_half_retry_v2
+    human_name: fresh C plus fifty-percent post-swing replay starts, infra retry v2
+    status: ready
+    blocker: null
+    run_name: phase1_fresh_c_post_swing_half_seed3_retry_v2_20260714
+    run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_post_swing_half_seed3_retry_v2
 
   - id: fresh_c_qdot_limit_reward
     human_name: fresh C plus joint-velocity-limit reward

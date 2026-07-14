@@ -200,6 +200,9 @@ def test_launch_next_defaults_to_dry_run_and_includes_only_minimal_preflight():
     assert "/workspace/exam/0.json" in rendered
     assert "device=cuda%3A0" in rendered or "device=cuda:0" in rendered
     assert "/workspace/source/hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh" in rendered
+    assert 'PYTHONPATH="${HOPE_WBT_PYTHONPATH}"' in rendered
+    assert "find_spec" in rendered
+    assert rendered.index("find_spec") < rendered.index("queue_claim.json")
     assert "pip freeze" not in rendered
     assert "sha256sum" not in rendered
     assert "killall" not in rendered
@@ -248,7 +251,9 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
     )
     ready = [job for job in queue["jobs"] if job["status"] == "ready"]
     blocked = [job for job in queue["jobs"] if job["status"] == "blocked"]
+    rejected = [job for job in queue["jobs"] if job["status"] == "rejected"]
     assert len(ready) == 5
+    assert len(rejected) == 5
     assert [job["id"] for job in blocked] == ["fresh_c_qdot_limit_reward"]
     axis_prefixes = (
         "++task.rewards.free_wrist_vel_mimic=",
@@ -257,11 +262,11 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
         "task.motion.post_swing_start_prob=",
     )
     expected = {
-        "fresh_c_v1_free_wrist_velocity": ("true", "1.0", "0.0", "0.25"),
-        "fresh_c_v2_motion_window_scale": ("false", "0.25", "0.0", "0.25"),
-        "fresh_c_v1_v2_combined": ("true", "0.25", "0.0", "0.25"),
-        "fresh_c_base_deceleration": ("false", "1.0", "1.0", "0.25"),
-        "fresh_c_post_swing_replay_half": ("false", "1.0", "0.0", "0.5"),
+        "fresh_c_v1_free_wrist_velocity_retry_v2": ("true", "1.0", "0.0", "0.25"),
+        "fresh_c_v2_motion_window_scale_retry_v2": ("false", "0.25", "0.0", "0.25"),
+        "fresh_c_v1_v2_combined_retry_v2": ("true", "0.25", "0.0", "0.25"),
+        "fresh_c_base_deceleration_retry_v2": ("false", "1.0", "1.0", "0.25"),
+        "fresh_c_post_swing_replay_half_retry_v2": ("false", "1.0", "0.0", "0.5"),
     }
     for job in ready:
         assert job["seed"] == 3
@@ -284,3 +289,10 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
     assert [item["resource"] for item in plan["assignments"]] == [
         "pod1/gpu0", "pod1/gpu1", "pod1/gpu2", "pod2/gpu0", "pod2/gpu1"
     ]
+    by_id = {job["id"]: job for job in queue["jobs"]}
+    for attempt1, retry in zip(rejected, ready, strict=True):
+        assert retry["recipe"] == attempt1["recipe"]
+        assert retry["motion"] == attempt1["motion"]
+        assert retry["bank"] == attempt1["bank"]
+        assert retry["exam"] == attempt1["exam"]
+        assert retry["run_dir"] != attempt1["run_dir"]
