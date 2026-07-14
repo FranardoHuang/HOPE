@@ -46,6 +46,20 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-14, Pod2 `+200` activation audit; Gate remains `Partial`):
+
+- Four science trainers produced exact `model_200` receipts with finite tensors, matching embedded
+  iteration, fresh lineage, launch claim, and schema-3 hard contract. Conditional face guidance had
+  zero gate/cost/reward throughout frozen steps 180--200, which proves zero eligible samples under
+  its current formula; that setting is activation-invalid rather than a learned-policy failure.
+- The V1+V2 x base-deceleration pair also passed checkpoint identity, but its preregistered V1, V2,
+  and base-deceleration integer denominators/numerators were not emitted. Its curves are therefore
+  instrumentation-blocked, not evidence for or against the reward. Neither pair authorizes a second
+  seed, judge, or promotion. Replacement queues remain fail-closed until the execution path exports
+  all required counters and a new exact source passes the strict full-scene probe. See the
+  [conditional](../experiments/2026-07/EXP-P1-CONDITIONAL-FACE-GUIDANCE.md) and
+  [interaction](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-INTERACTION.md) records.
+
 Follow-up note (2026-07-13, seed-budget correction; Gate remains `Partial`):
 
 - The rejected `SZ` family used four from-scratch seeds through model-4000. That was enough to

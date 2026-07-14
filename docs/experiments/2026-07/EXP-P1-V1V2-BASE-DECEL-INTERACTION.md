@@ -1,13 +1,14 @@
 # EXP-P1-V1V2-BASE-DECEL-INTERACTION — 组合击球精度下的底座减速是否仍有净收益
 
-- 状态：`Partial`（strict probe 已通过；首次 control 基础设施失败并永久 rejected；unchanged retry-v2
-  与 treatment 已按同一 fill 顺序越过 first iteration，尚无 checkpoint/早判）
+- 状态：`Partial / +200 activation-invalid`（strict probe 与 paired `model_200` 身份门已过；
+  V1/V2/base-decel 的计数级 denominator/numerator 仪表不完整，不得解释 Reward 因果效果）
 - 阶段/轴：Phase 1 fresh C；V1+V2 与击球前底座减速的组合效应
 - 集成小目标：保住 V1+V2 的击球精度信号，同时降低击球前底座速度和摔倒率
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
-- 最高证据等级：`E2`（strict Pod2 启动/终档 receipt；没有本交互轴训练结果）
+- 最高证据等级：`E2`（strict Pod2 启动/终档、paired checkpoint 身份与冻结方向曲线；
+  activation 合同未闭合）
 - 创建日期/最后复核日期：2026-07-14 / 2026-07-14
 
 共享缩写见[术语与人话对照](../../DEFINITIONS.md)。本文的 V1 指“在线速度模仿中释放持拍手腕”，
@@ -45,9 +46,12 @@ composite 四项击球精度通过率各自不下降超过 5 个百分点。任�
 
 strict receipt 已被显式队列变更消费，顶层
 [`launch_authorized=true`](../../DEFINITIONS.md#launch-authorized)。首次 control 旧行现为 `rejected`，不再
-发射；配方逐字不变的 `control_retry_v2` 与从未 claim 的 treatment 当时均为 `ready`。probe 的 model/reward
-永不进入实验成绩。随后同一 `fill --count 2` 已先后观察 retry-v2 与 treatment 的 first iteration；当前
-matched pair live，但仍无 checkpoint。
+发射；配方逐字不变的 `control_retry_v2` 与从未 claim 的 treatment 随后由同一
+`fill --count 2` 顺序发射。两份 `model_200.pt` 均已由 milestone attestor 验证
+filename/embedded iteration=`200`、76 tensors / 1,762,715 浮点元素 finite、fresh lineage=1 与
+schema-3 hard contract `451cda47...2291`。control/treatment checkpoint SHA-256 分别为
+`44a709ac...035a` / `b04e2338...e56b`，receipt content SHA-256 为 `ad47c826...4d1f` /
+`49234348...7748`。probe 的 model/reward 永不进入实验成绩。
 
 ## Activation 与配对早判
 
@@ -77,23 +81,42 @@ reward 效果前必须先闭合以下 activation：
 这里的早判只管理这一对训练槽。它不授权第二 seed、Isaac/MuJoCo judge、stop/promote 到正式成绩、部署或
 真机。即使 `+1000` 三门都过，也只得到“值得另行预注册 exact exam”的单 seed 候选。
 
+### `+200` 实测激活与方向
+
+只读屏审冻结 TensorBoard step `180..200`，每个选定 tag 恰好 21 点；两次重读 digest 对
+control/treatment 分别为 `95d19d16...49bb` / `a4036b15...5788`。结果：
+
+- V1 没有 eligible denominator 与“持拍手腕已排除”numerator tag，因此第 1 条 activation 直接 blocked。
+- V2 也没有计数级 denominator/numerator。仅有的 `strike_window_hit_rate` proxy 在 treatment 的
+  mean/min/max 全为 `0/0/0`；当前 `strike_window_wide_s=None`，故该窗口在这 21 点没有实际作用。
+- base-decel treatment 的 Reward contribution mean `0.1527856744`（min `0.141066`，max `0.162585`），
+  证明至少有 active samples；但源码只记加权 Reward，没有 eligible denominator/raw-kernel numerator。
+  control weight=0 的 Reward=0 也不能证明其 denominator>0，第 3 条仍 blocked。
+- 描述性方向不构成因果 screen：底座速度 treatment/control=`0.4068215/0.3938566`，比值
+  `1.032918`（方向不通过预注册 `<=1.00`）；pre-fall 差 `+0.00238` 个百分点；position error
+  好 `1.43 cm`，velocity error 差 `0.02157 m/s`，signed normal error 差 `0.500°`。四项 exact pass 均为零，
+  exposure 太低，不能用于 precision 比较。
+
+因此这一对是 **activation-invalid / instrumentation-blocked**，不是 base-decel Reward 负结果；
+不买第二 seed，不授权 judge 或晋级。
+
 ## 运行表
 
 | 运行（人话名 + `run_name`） | 状态 | Checkpoint/seed | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
 | V1+V2，底座减速关的首次 namespace；`phase1_fresh_c_v1v2_base_decel_control_seed3_20260714` | rejected，禁止重发 | first iteration 前，seed 3 | PID=PGID `358331` + claim/namespace | dynamic URDF import `malloc(): invalid size (unsorted)`，自然 `rc=134` | 基础设施失败，不是 Reward/行为失败 |
-| 同配方 control 唯一重试；`phase1_fresh_c_v1v2_base_decel_control_seed3_retry_v2_20260714` | live，已过 first iteration | `200/500/1000`，seed 3 | PID=PGID `359240`（Pod2 GPU1）+ exact unchanged recipe | 尚无 checkpoint | 同一 fill 中先于 treatment 通过启动门 |
-| V1+V2，底座减速权重 1；`phase1_fresh_c_v1v2_base_decel_w1_seed3_20260714` | live，已过 first iteration | `200/500/1000`，seed 3 | PID=PGID `359872`（Pod2 GPU2）+ strict caeb receipt | 尚无 checkpoint | 同一 fill 在 retry-v2 first iteration 后发射 |
+| 同配方 control 唯一重试；`phase1_fresh_c_v1v2_base_decel_control_seed3_retry_v2_20260714` | `model_200` 身份过；记录时 live | `200/500/1000`，seed 3 | PID=PGID `359240`；model `44a709ac...035a` | receipt `ad47c826...4d1f` | V1/V2/base-decel denominator 不完整 |
+| V1+V2，底座减速权重 1；`phase1_fresh_c_v1v2_base_decel_w1_seed3_20260714` | `model_200` 身份过；记录时 live | `200/500/1000`，seed 3 | PID=PGID `359872`；model `b04e2338...e56b` | receipt `49234348...7748` | Reward 非零，但不能替代 denominator/numerator 合同 |
 
 ## 决定
 
-- 决定：`inconclusive`
-- 理由：两格 recipe、差异、早判与 P1 source 已冻结，strict 4096-env probe 也已通过；unchanged retry-v2
-  与 treatment 已形成 live pair，但还没有 paired checkpoint，不能评价交互轴。
+- 决定：`inconclusive because activation instrumentation is incomplete`
+- 理由：paired checkpoint 身份与 `180..200` 冻结曲线均有效，但三组预注册计数门没有闭合；
+  且 V2 window 的实测 proxy 为零。这不允许进入行为比较。
 - 是否已纳入当前 setting：`no`
-- 局限/下一个 gate：`fill --count 2` 的顺序门已经通过；下一步守到 paired `+200`，再在
-  `+200/+500/+1000` 核 activation。旧 `358331` 永久 rejected，不得重放；不得顺手改 recipe、seed、阈值
-  或授权 judge。
+- 局限/下一个 gate：先在 source 中为 V1、V2 与 base-decel 分别加 per-update integer
+  eligible/numerator 仪表，用真实多 env 反例证明 snapshot+reset，再决定是否值得 fresh namespace 重跑。
+  当前 live pair 不继续买 seed；替换时只管理 exact PGID 并保全日志。旧 `358331` 永久 rejected。
 
 ## 复现与证据
 
@@ -103,8 +126,8 @@ reward 效果前必须先闭合以下 activation：
 pytest -q tests/test_phase1_fresh_c_v1v2_base_decel_prereg.py
 ```
 
-本实验没有科学 trainer 或 Reward 结果。后续运行必须走项目统一 lean queue harness；本文不会另建竞争性
-的算力优先级队列。
+本实验现有科学 trainer 只产生 checkpoint 身份与 activation-invalid 方向证据，没有可采用的 Reward
+因果结果。后续运行必须走项目统一 lean queue harness；本文不会另建竞争性的算力优先级队列。
 
 2026-07-14 同 source family 的首个 full-scene probe 在 iter0 暴露 clean detached `077e70c` 缺少 Git
 忽略 A3 URDF/mesh tree；它在 Reward、hard contract 和 checkpoint 之前，不能评价本交互轴。两行现显式绑定

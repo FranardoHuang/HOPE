@@ -13,6 +13,29 @@
 
 ## 2026-07-14
 
+- Pod2 四条科学臂的 paired `model_200` 身份和 step `180..200` 曲线已冻结。conditional
+  treatment 的 gate/cost/reward 全零，可严格推出 eligibility=0，故当前 `-0.4` setting
+  在 `+200` 判 activation-invalid，不买 seed/不晋级。V1+V2×base-decel 的 checkpoint SHA-256 为
+  `44a709ac...035a` / `b04e2338...e56b`，receipt `ad47c826...4d1f` / `49234348...7748`；
+  V1/V2/base-decel 的 count-level denominator/numerator 不完整，只记 instrumentation-blocked，不写成
+  Reward 负结果。见 [conditional 卷宗](experiments/2026-07/EXP-P1-CONDITIONAL-FACE-GUIDANCE.md)与
+  [interaction 卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-INTERACTION.md)。
+
+- Post-swing replay 的真实 reset 路径已新增 buffer-not-ready、eligible、random-not-selected、
+  selected 与 started 五组 per-update 整数计数，source 与 runner 专项 `4+9 passed`。红队在
+  发射前又发现共同 V1/V2 activation 仍缺 count-level 仪表，故新 post-swing pair 与
+  base-decel measurement-complete replacement 队列均保持 `launch_authorized=false` / `blocked`，
+  不跑无法早判的 strict probe 或 trainer。见
+  [post-swing 卷宗](experiments/2026-07/EXP-P1-V1V2-POST-SWING-INTERACTION.md)与
+  [base-decel replacement](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)。
+
+- 反手拉 B 的 portable full L0 `dry-run` 已在 Pod2 CPU 真实执行，旧 v1 合同在跨节点
+  float32 逐 bit 重算门 fail closed：position/quaternion/COM velocity/angular velocity 最大差为
+  `1.1920929e-7` / `5.9604645e-8` / `2.9802322e-6` / `5.9679151e-6`，证书仍 absent。
+  诊断绕过只用于定位、不是 formal pass；旧失败保留，v2 从 float32 ULP 与 50 Hz 差分误差
+  独立推导，不改关节/地面/支撑脚/安全门。见
+  [L0 卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-L0.md)。
+
 - conditional P1 control/treatment 的 `model_200.pt` 已由 source-pinned attestor 写入 no-clobber receipt：
   checkpoint SHA-256 `b55b7d3b...b4b41` / `c07b1f12...bd51`，各 76 tensors、1,762,715 浮点元素全 finite，
   fresh lineage、claim 与 schema-3 hard contract 匹配；receipt content SHA-256 为

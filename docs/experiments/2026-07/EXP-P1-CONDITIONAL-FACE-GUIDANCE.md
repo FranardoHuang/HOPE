@@ -1,7 +1,7 @@
 # EXP-P1-CONDITIONAL-FACE-GUIDANCE — 不逃离就绪区的固定预算 Reward
 
-- 状态：`Partial`（strict 4096-env 非科学探针已通过；科学 control/treatment 的 `model_200` 身份门已过，
-  trailing-21 activation/方向屏尚未闭合，仍无 Reward 结论）
+- 状态：`Partial / rejected at +200 activation gate`（strict 4096-env 非科学探针与科学
+  `model_200` 身份门均通过；trailing-21 的 conditional gate/cost/reward 全为零，当前机制未激活）
 - 阶段/轴：阶段 1 固定点；Reward 争抢机制
 - 集成小目标：在不牺牲触点、拍速、完成率或安全的前提下，降低有符号拍面误差
 - 人类负责人：franco
@@ -121,8 +121,15 @@ strict `main@caeb9ad` attempt 的 shell doctor 当时确实通过，故保留其
 [`launch_authorized=true`](../../DEFINITIONS.md#launch-authorized)。随后 control/treatment 已分别在 Pod2
 GPU1/GPU2 越过 first iteration，PID=PGID 为 `357023/357679`。两份 `model_200.pt` 已由 source-pinned
 attestor 核对 filename/embedded iteration=`200`、finite、fresh lineage、claim 与相邻 schema-3 hard
-contract，并写入 receipt content SHA-256 `08c7731a...03df` / `e7dcb7cc...c2c9`。这不是配对行为早判；
-trailing-21 activation/方向屏仍须单独冻结复核。
+contract，并写入 receipt content SHA-256 `08c7731a...03df` / `e7dcb7cc...c2c9`。后续只读冻结
+TensorBoard step `180..200`（每 tag 恰好 21 点），两次重读的选定行 digest 稳定：control
+`b0f40163...53e6`，treatment `9693d5f1...6016`。
+
+Treatment 的 `face_conditional_guidance_gate`、`cost_fraction` 和 Reward contribution 的
+mean/min/max 全为 `0/0/0`；error fraction finite，mean `0.4266461361`。由源码
+`g=e*r`、`c=e-g*(1-f)` 且 `g,c` 非负，可严格推出这 21 点的 eligibility `e=0`，
+不只是“少一个计数 tag”。因此预注册 `+200` 硬门命中：这一格没有产生 conditional
+纠面信号，不得把后续 latest 差异解释为机制效果。
 
 ## 不可补偿安全边界
 
@@ -156,18 +163,20 @@ joint/torque/qdot limit、观测、动作或 plant。以下任一项都独立判
 | --- | --- | --- | --- | --- | --- |
 | 同 source fresh 对照（`phase1_fresh_c_conditional_face_control_seed3_20260714`） | 基础设施失败，永久拒绝该 namespace | seed3；第 0 次迭代前 | E2 | claim `caffd19e...da52`、run log/launch sidecar | 4096-env 日志停在 URDF import；无 scene、contract 或 checkpoint，不是 Reward 失败 |
 | 不逃离就绪区的固定预算纠面（`phase1_fresh_c_conditional_face_w04_seed3_20260714`） | 未发射、旧配对阻断 | seed3；无进程/claim | E1 | run directory 不存在 | control 失败后 serial fill fail closed；必须换 fresh source/namespace，不能单独补 treatment |
-| P1 runtime-bound fresh 对照（`phase1_fresh_c_conditional_face_control_p1r1_seed3_20260714`） | live；`model_200` 身份门通过 | seed3；200/500/1000 | E2 checkpoint identity | PID=PGID `357023`；model SHA `b55b7d3b...b4b41`；receipt `08c7731a...03df` | trailing-21 方向屏未闭合，不得停臂/晋级 |
-| P1 runtime-bound 固定预算纠面（`phase1_fresh_c_conditional_face_w04_p1r1_seed3_20260714`） | live；`model_200` 身份门通过 | seed3；200/500/1000 | E2 checkpoint identity | PID=PGID `357679`；model SHA `c07b1f12...bd51`；receipt `e7dcb7cc...c2c9` | 与 control 唯一差异为 `-0.4`；方向屏未闭合 |
+| P1 runtime-bound fresh 对照（`phase1_fresh_c_conditional_face_control_p1r1_seed3_20260714`） | `model_200` 身份过；记录时进程仍 live | seed3；200/500/1000 | E2 checkpoint identity | PID=PGID `357023`；model SHA `b55b7d3b...b4b41`；receipt `08c7731a...03df` | weight=0 不生成 activation tag；不作为单独旧-source control 复用 |
+| P1 runtime-bound 固定预算纠面（`phase1_fresh_c_conditional_face_w04_p1r1_seed3_20260714`） | `+200` activation-invalid；记录时进程仍 live | seed3；200/500/1000 | E2 checkpoint + frozen curve | PID=PGID `357679`；model SHA `c07b1f12...bd51`；receipt `e7dcb7cc...c2c9` | gate/cost/reward 全零；当前 conditional setting 拒绝晋级/第二 seed |
 
 ## 决定
 
-- 决定：`inconclusive`
-- 理由：公式、反向激励反例与 source gate 已进入 main；strict 4096-env probe、两臂 first iteration 与
-  paired `model_200` 身份均通过，但 activation/方向行为尚未冻结复核，因此仍不能评价 conditional 机制。
+- 决定：`reject current conditional setting at +200 activation gate`
+- 理由：公式、source gate、strict probe 与 paired checkpoint 身份均通过；但 treatment 的
+  `180..200` eligibility 可由冻结仪表严格推出为零，机制没有作用样本。这是 activation 设计失败，
+  不是“Reward 学不会”。描述性 treatment/control 方向为 position error `-5.35 mm`、velocity
+  error `-0.01825 m/s`、signed normal error `+0.505°`；四项 exact pass 全零，不具备因果解释条件。
 - 是否已纳入当前 setting：`no`
-- 局限/下一个 gate：旧 source610 配对不再运行。新 pair 已绑定 strict caeb source/namespace 并正在运行；
-  下一步先闭合 `+200` trailing-21 activation/方向屏，再于 `+500/+1000` 核行为。不得手写
-  CLI、把 probe model 计入成绩或越过配对早判。
+- 局限/下一个 gate：不买第二 seed，不等 terminal 挑存档。下一版必须先让宽松但仍物理有意义的
+  eligibility 在早期出现，并直接记录 integer denominator/numerator；否则不得再发射。当前 live
+  进程只在替换格通过 source/launch gate 前保持算力连续，切换时必须保全日志并只管理 exact PGID。
 
 ## 复现与证据
 

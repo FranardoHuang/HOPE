@@ -39,9 +39,13 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `e2eb99e6...d28cc`，独立 `validate-result` 确认 `runner_lineage=true`、`npz_bound=true`，completion-last
   ledger SHA-256 为 `c0a25f2c...f4f8b`。这只解锁 B 的下一张 L0 静态证书；vendor L1、整轨桌网余隙、
   动力学与 RL 仍未跑。C 保持未消费，只在 B 后续外部安全门失败或证明有独有覆盖时作为后备，不复制
-  一个 RL 槽。B 的四份 exact 资产已只读搬到 Pod2，但首次 L0 调用在任何运动学/证书写入前再次 fail
-  closed：portable validator 仍从历史 Pod1 checkout 的绝对路径读取 body order。证书保持 absent；当前先修
-  这一个 portability 根因，不重跑、不把它写成动作失败。
+  一个 RL 槽。B 的历史绝对路径 portability 根因已修复并合入 `main`；Pod2 的 exact
+  CPU-only full L0 `dry-run` 随后真正进入 151 帧 `mj_forward`，并在旧合同要求的
+  float32 逐 bit 相等处 fail closed。实测最大差为 position `1.1920929e-7 m`、quaternion
+  `5.9604645e-8`、COM velocity `2.9802322e-6 m/s`、angular velocity `5.9679151e-6 rad/s`；
+  无证书、不占 GPU。这不是碰撞/自打/动作安全失败，而是 Pod1 producer → Pod2 重算的
+  float32/50 Hz 差分可复现性合同不自洽；旧 v1 失败保留，正在独立推导 v2 ULP/差分上界，
+  不放宽关节、地面、支撑脚或安全门。
   高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
   canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。exact GMR runtime source gate 也已进入
   `main` 并通过全回归；Pod 上的 `inspect/consume` 尚未执行，所以还不是“动作会打球”。
@@ -82,15 +86,21 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   [`launch_authorized=true`](DEFINITIONS.md#launch-authorized)。conditional control/treatment 随后已分别在
   Pod2 GPU1/GPU2 越过 first iteration（PID=PGID `357023/357679`）；两份 `model_200.pt` 已写入 exact
   milestone receipt，checkpoint SHA-256 分别为 `b55b7d3b...b4b41` / `c07b1f12...bd51`，76 个 tensor、
-  1,762,715 个浮点元素全 finite，fresh lineage/claim/schema-3 hard contract 均匹配。`+200` 只完成身份门；
-  trailing-21 activation/方向屏仍在复核，尚无行为结论，也不允许停臂或晋级。
+  1,762,715 个浮点元素全 finite，fresh lineage/claim/schema-3 hard contract 均匹配。冻结
+  step `180..200` 后，treatment 的 conditional gate/cost/reward mean/min/max 全为零，由源码公式可
+  严格推出 eligibility 为零。这一 setting 已按预注册判 activation-invalid：不买第二 seed、
+  不晋级，也不把方向差异写成 Reward 效果。
   interaction control PID=PGID `358331` 则在 first iteration 前的 dynamic URDF import 以
   `malloc(): invalid size (unsorted)`、`rc=134` 自然退出；treatment 未发射，claim/namespace 已保全。
   这不是 interaction Reward/行为失败，也不能写成 pair 已运行。旧 control 行已 rejected、禁止重发；
   逐字相同配方的 `control_retry_v2` 与从未 claim 的 treatment 均 ready，只允许同一 `fill --count 2` 事务
   先观察 retry first iteration 再发 treatment。该事务随后按序成功：retry-v2 PID=PGID `359240` 在 Pod2
-  GPU1、treatment PID=PGID `359872` 在 GPU2，二者均已越过 first iteration。interaction pair 现 live，
-  尚无 checkpoint 或早判；旧 `358331` 永久 rejected。
+  GPU1、treatment PID=PGID `359872` 在 GPU2，二者均已越过 first iteration。两份
+  `model_200.pt` 也已通过 finite/iteration/lineage/claim/hard-contract receipt，checkpoint SHA-256
+  为 `44a709ac...035a` / `b04e2338...e56b`。但 V1/V2/base-decel 的计数级 activation 仪表不全；
+  V2 treatment 窗口 proxy 为零，base-decel Reward 虽非零也不能替代 denominator。该 pair 按
+  activation-invalid/instrumentation-blocked 记账，不解释为 base-decel 负结果；旧 `358331`
+  永久 rejected。
   “每卡只能发一条”的 launch-lock 根因已修：旧 `flock FILE command` fd 被 trainer 继承；新 controller
   用 fd8 持短锁并对子 launcher `8>&-`。conditional control/treatment 优先同落已 warm 的 Pod2 GPU1，
   正好验证容量不再退化为1；现役 qdot 的旧锁不做任何强制处理。
@@ -108,11 +118,15 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   预算/motion/bank/exam 并进入 checkpoint provenance。trainer-owned
   [`run_binding.json`](DEFINITIONS.md#trainer-run-binding) 与
   [milestone attestor](DEFINITIONS.md#milestone-attestor) 已进入 main；代表性 full-scene probe 也已实现。
+  full-scene finalizer 现在不再信任外层 wrapper 的旧 doctor 结论：它在 terminal 末端自行重算
+  target/donor inventory、URDF mesh closure、donor clean commit 与 receipt，并把 `current_closure`
+  写入 immutable result；direct-finalize 绕过、资产漂移与 bool iteration/lineage 均 fail closed。
   Pod2-only probe 的外层快照现在只读 selected dispatch slot，不再因普通 fill 的全 Pod 快照访问 reserved
   Pod1；`fill --execute` 每臂也已从“独立 doctor SSH + 内嵌 doctor launch SSH”收为一次原子远端调用。
-  ignored asset prepare 与 strict caeb 自然终档已经闭合；两组 pair 也都已过 first iteration。conditional
-  的 `+200` 身份门已过，下一闭环是冻结并核对其 activation numerator/denominator 与方向屏，同时守
-  interaction 到 `+200`；旧 interaction `358331` 不得重放。
+  ignored asset prepare 与 strict caeb 自然终档已经闭合；两组 pair 的 `+200` 身份和冻结曲线也已复核。
+  两组都因 activation 为零或仪表不完而不能产生机制结论；当前 exact PGID 在替换 source
+  过门前仍 live，不会复制 seed。下一对 post-swing 概率消融已有 5 项整数计数源码，但红队发现
+  共同 V1/V2 计数仍缺，故不跑 strict probe、不发射；先补成真正可早判的 source。
 
   非击球臂 A0/A1 已完成 checkpoint 层闭环。A1 自然退出；
   A0 的 `model_1000.pt` 写完后在 Kit/Python teardown 挂起近三小时，正式 failure regex 无命中，终档
