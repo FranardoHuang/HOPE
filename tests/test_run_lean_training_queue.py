@@ -1315,7 +1315,10 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
     blocked = [job for job in queue["jobs"] if job["status"] == "blocked"]
     rejected = [job for job in queue["jobs"] if job["status"] == "rejected"]
     complete = [job for job in queue["jobs"] if job["status"] == "complete"]
-    assert ready == []
+    assert [job["id"] for job in ready] == [
+        "fresh_c_conditional_face_matched_control_p1r1",
+        "fresh_c_conditional_face_w04_p1r1",
+    ]
     assert len(rejected) == 13
     assert {job["id"] for job in complete} == {
         "fresh_c_qdot_limit_hinge_w5_retry_v2",
@@ -1335,15 +1338,11 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
     ):
         assert "activation closed" in terminal_by_id[job_id]["blocker"]
         assert "not a behavior failure" in terminal_by_id[job_id]["blocker"]
-    assert [job["id"] for job in blocked] == [
-        "fresh_c_conditional_face_w04",
-        "fresh_c_conditional_face_matched_control_p1r1",
-        "fresh_c_conditional_face_w04_p1r1",
-    ]
+    assert [job["id"] for job in blocked] == ["fresh_c_conditional_face_w04"]
     assert queue["dispatch_pods"] == ["pod2"]
-    assert queue["launch_authorized"] is False
+    assert queue["launch_authorized"] is True
     assert queue["preregistration_status"] == (
-        "blocked_pending_terminal_full_scene_probe"
+        "exact_terminal_full_scene_probe_passed"
     )
     conditional = {
         job["id"]: job for job in queue["jobs"]
@@ -1354,8 +1353,8 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
     } == {
         "fresh_c_conditional_face_matched_control": "rejected",
         "fresh_c_conditional_face_w04": "blocked",
-        "fresh_c_conditional_face_matched_control_p1r1": "blocked",
-        "fresh_c_conditional_face_w04_p1r1": "blocked",
+        "fresh_c_conditional_face_matched_control_p1r1": "ready",
+        "fresh_c_conditional_face_w04_p1r1": "ready",
     }
     assert {
         job_id: job["resource"]["preferred_slot"]
@@ -1372,9 +1371,9 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
     ]
     assert all(job["runtime_binding"] is True for job in p1_pair)
     assert all(
-        job["source"]["checkout"] == "/workspace/codexschema/nohope_p1_c7e1a90"
+        job["source"]["checkout"] == "/workspace/codexschema/nohope_p1_caeb9ad"
         and job["source"]["commit"]
-        == "c7e1a907353b8034ae3f76646e1dcd40a2ce895d"
+        == "caeb9ad3d9e2f5058d3cc3931ae70ecf5cebd8a6"
         and job["source"]["ignored_runtime_asset"]["file_count"] == 46
         and job["source"]["ignored_runtime_asset"]["total_file_bytes"]
         == 15378264
@@ -1412,6 +1411,8 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
         "fresh_c_qdot_limit_hinge_matched_control_retry_v2": ("false", "1.0", "0.0", "0.25"),
         "fresh_c_conditional_face_matched_control": ("false", "1.0", "0.0", "0.25"),
         "fresh_c_conditional_face_w04": ("false", "1.0", "0.0", "0.25"),
+        "fresh_c_conditional_face_matched_control_p1r1": ("false", "1.0", "0.0", "0.25"),
+        "fresh_c_conditional_face_w04_p1r1": ("false", "1.0", "0.0", "0.25"),
     }
     for job in ready:
         assert job["seed"] == 3
@@ -1419,7 +1420,9 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
             "num_envs": 4096, "max_iterations": 1001, "save_interval": 100
         }
         assert job["milestones"] == [200, 500, 1000]
-        if job["id"].startswith("fresh_c_conditional_face_"):
+        if job["id"].endswith("_p1r1"):
+            expected_source = "caeb9ad3d9e2f5058d3cc3931ae70ecf5cebd8a6"
+        elif job["id"].startswith("fresh_c_conditional_face_"):
             expected_source = "61007e93879f35677e4c7d38cf7f681f324f9571"
         elif job["id"].startswith("fresh_c_qdot_limit_hinge_"):
             expected_source = "a6ccdc7a1c696ff37878039f1e1d83dea28a2bfa"
@@ -1450,6 +1453,8 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
             "fresh_c_qdot_limit_hinge_matched_control_retry_v2",
             "fresh_c_conditional_face_matched_control",
             "fresh_c_conditional_face_w04",
+            "fresh_c_conditional_face_matched_control_p1r1",
+            "fresh_c_conditional_face_w04_p1r1",
         }:
             assert qdot_weight == ["task.rewards.joint_velocity_limit_hinge_weight=0.0"]
             assert qdot_margin == ["task.rewards.joint_velocity_limit_hinge_margin=0.85"]
@@ -1460,18 +1465,27 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
             item for item in delta
             if item.startswith("++task.rewards.racket_face_conditional_guidance_weight=")
         ]
-        if job["id"] == "fresh_c_conditional_face_matched_control":
+        if job["id"] in {
+            "fresh_c_conditional_face_matched_control",
+            "fresh_c_conditional_face_matched_control_p1r1",
+        }:
             assert conditional_weight == [
                 "++task.rewards.racket_face_conditional_guidance_weight=0.0"
             ]
-        elif job["id"] == "fresh_c_conditional_face_w04":
+        elif job["id"] in {
+            "fresh_c_conditional_face_w04",
+            "fresh_c_conditional_face_w04_p1r1",
+        }:
             assert conditional_weight == [
                 "++task.rewards.racket_face_conditional_guidance_weight=-0.4"
             ]
         else:
             assert conditional_weight == []
     plan = Q.cmd_plan(queue, live=False)
-    assert plan["assignments"] == []
+    assert [row["job_id"] for row in plan["assignments"]] == [
+        "fresh_c_conditional_face_matched_control_p1r1",
+        "fresh_c_conditional_face_w04_p1r1",
+    ]
     retry_ready = [job for job in ready if job["id"].endswith("_retry_v2")]
     assert retry_ready == []
     retry_by_id = {job["id"]: job for job in retry_ready}
@@ -1499,17 +1513,17 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
     ]
 
 
-def test_v1v2_base_decel_interaction_queue_stays_blocked_and_splits_after_unlock():
+def test_v1v2_base_decel_interaction_queue_is_unlocked_and_split():
     queue = Q.load_queue(
         ROOT / "configs" / "phase1_fresh_c_v1v2_decel_interaction_queue_20260714.yaml"
     )
-    assert queue["launch_authorized"] is False
+    assert queue["launch_authorized"] is True
     assert queue["preregistration_status"] == (
-        "blocked_pending_terminal_full_scene_probe"
+        "exact_terminal_full_scene_probe_passed"
     )
     assert queue["dispatch_pods"] == ["pod2"]
-    assert Q.cmd_plan(queue, live=False)["assignments"] == []
-    assert [job["status"] for job in queue["jobs"]] == ["blocked", "blocked"]
+    assert [job["status"] for job in queue["jobs"]] == ["ready", "ready"]
+    assert all(job["blocker"] is None for job in queue["jobs"])
     assert [job["resource"]["preferred_slot"] for job in queue["jobs"]] == [
         "pod2/gpu1",
         "pod2/gpu2",
@@ -1517,9 +1531,9 @@ def test_v1v2_base_decel_interaction_queue_stays_blocked_and_splits_after_unlock
     assert all(
         job["runtime_binding"] is True
         and job["source"]["checkout"]
-        == "/workspace/codexschema/nohope_p1_c7e1a90"
+        == "/workspace/codexschema/nohope_p1_caeb9ad"
         and job["source"]["commit"]
-        == "c7e1a907353b8034ae3f76646e1dcd40a2ce895d"
+        == "caeb9ad3d9e2f5058d3cc3931ae70ecf5cebd8a6"
         for job in queue["jobs"]
     )
 
@@ -1535,9 +1549,6 @@ def test_v1v2_base_decel_interaction_queue_stays_blocked_and_splits_after_unlock
         for key in control if control[key] != treatment[key]
     } == {"task.rewards.base_decel_weight": ("0.0", "1.0")}
 
-    for job in queue["jobs"]:
-        job["status"] = "ready"
-        job["blocker"] = None
     activated = Q._assign(
         queue, {slot.name: 0 for slot in Q.slots(queue)}
     )

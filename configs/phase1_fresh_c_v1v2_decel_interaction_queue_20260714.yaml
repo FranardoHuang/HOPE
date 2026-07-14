@@ -1,7 +1,7 @@
 schema_version: 1
 simulation_only: true
-launch_authorized: false
-preregistration_status: blocked_pending_terminal_full_scene_probe
+launch_authorized: true
+preregistration_status: exact_terminal_full_scene_probe_passed
 
 ssh:
   key: ~/.ssh/id_ed25519_runpod
@@ -101,11 +101,11 @@ x-exam: &exam
   family: signed_face_rebound_k100_v1
 
 # Exact source contains trainer-owned runtime binding, milestone attestation,
-# source-pinned stale-log handling, and the representative full-scene probe.
-# Both jobs remain blocked until the separate probe receipt is audited.
+# source-pinned stale-log handling, and the strict full-scene probe whose
+# terminal receipt passed before these two jobs were unlocked.
 x-source: &source
-  checkout: /workspace/codexschema/nohope_p1_c7e1a90
-  commit: c7e1a907353b8034ae3f76646e1dcd40a2ce895d
+  checkout: /workspace/codexschema/nohope_p1_caeb9ad
+  commit: caeb9ad3d9e2f5058d3cc3931ae70ecf5cebd8a6
   ignored_runtime_asset:
     target_relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
     donor:
@@ -210,8 +210,8 @@ jobs:
     id: fresh_c_v1v2_base_decel_matched_control
     human_name: fresh C V1 plus V2 interaction matched control with base deceleration off
     action: *action
-    status: blocked
-    blocker: blocked_on_exact_4096_environment_full_scene_probe_passing_for_this_source_and_scene_family
+    status: ready
+    blocker: null
     motion: *motion
     bank: *bank
     exam: *exam

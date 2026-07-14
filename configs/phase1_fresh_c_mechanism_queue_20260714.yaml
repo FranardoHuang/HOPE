@@ -1,7 +1,7 @@
 schema_version: 1
 simulation_only: true
-launch_authorized: false
-preregistration_status: blocked_pending_terminal_full_scene_probe
+launch_authorized: true
+preregistration_status: exact_terminal_full_scene_probe_passed
 
 ssh:
   key: ~/.ssh/id_ed25519_runpod
@@ -61,8 +61,8 @@ x-conditional-source: &conditional_source
   checkout: /workspace/codexschema/nohope_conditional_face_guidance_61007e9
   commit: 61007e93879f35677e4c7d38cf7f681f324f9571
 x-p1-source: &p1_source
-  checkout: /workspace/codexschema/nohope_p1_c7e1a90
-  commit: c7e1a907353b8034ae3f76646e1dcd40a2ce895d
+  checkout: /workspace/codexschema/nohope_p1_caeb9ad
+  commit: caeb9ad3d9e2f5058d3cc3931ae70ecf5cebd8a6
   ignored_runtime_asset:
     target_relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
     donor:
@@ -436,14 +436,14 @@ jobs:
     run_name: phase1_fresh_c_conditional_face_w04_seed3_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_conditional_face_w04_seed3
 
-  # Fresh P1 pair.  These rows cannot enter normal fill until a representative
-  # 4096-environment full-scene probe passes on their preferred Pod2 GPU1.
+  # Fresh P1 pair. The strict 4096-environment full-scene probe passed on
+  # Pod2 GPU1; these two rows are now the only ready cells in this queue.
   - &conditional_p1_control
     <<: *conditional_control
     id: fresh_c_conditional_face_matched_control_p1r1
     human_name: fresh C fixed-budget conditional face matched control, P1 runtime-bound retry
-    status: blocked
-    blocker: blocked_on_exact_4096_environment_full_scene_probe_passing_on_pod2_gpu1
+    status: ready
+    blocker: null
     source: *p1_source
     runtime_binding: true
     resource:

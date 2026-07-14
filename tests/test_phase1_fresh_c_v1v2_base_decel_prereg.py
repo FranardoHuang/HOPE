@@ -40,20 +40,26 @@ def _override_map(arguments: list[str]) -> dict[str, str]:
     return result
 
 
-def test_preregistered_pair_is_pod2_only_blocked_and_unassigned():
+def test_preregistered_pair_is_pod2_only_unlocked_and_assigned():
     queue = Q.load_queue(QUEUE_PATH)
 
-    assert queue["launch_authorized"] is False
-    assert queue["preregistration_status"] == "blocked_pending_terminal_full_scene_probe"
+    assert queue["launch_authorized"] is True
+    assert queue["preregistration_status"] == "exact_terminal_full_scene_probe_passed"
     assert queue["dispatch_pods"] == ["pod2"]
     assert [job["id"] for job in queue["jobs"]] == [
         "fresh_c_v1v2_base_decel_matched_control",
         "fresh_c_v1v2_base_decel_w1",
     ]
-    assert all(job["status"] == "blocked" for job in queue["jobs"])
-    assert all("full_scene_probe" in job["blocker"] for job in queue["jobs"])
+    assert all(job["status"] == "ready" for job in queue["jobs"])
+    assert all(job["blocker"] is None for job in queue["jobs"])
     assert all(job["runtime_binding"] is True for job in queue["jobs"])
-    assert Q.cmd_plan(queue, live=False)["assignments"] == []
+    assert [
+        (row["job_id"], row["resource"])
+        for row in Q.cmd_plan(queue, live=False)["assignments"]
+    ] == [
+        ("fresh_c_v1v2_base_decel_matched_control", "pod2/gpu1"),
+        ("fresh_c_v1v2_base_decel_w1", "pod2/gpu2"),
+    ]
 
 
 def test_pair_copies_the_complete_active_recipe_and_freezes_one_seed_budget():
@@ -116,11 +122,11 @@ def test_base_deceleration_weight_is_the_only_matched_pair_delta():
     }
 
 
-def test_exact_p1_source_is_bound_but_normal_launch_remains_blocked():
+def test_exact_p1_source_is_bound_and_probe_gate_is_unlocked():
     queue = Q.load_queue(QUEUE_PATH)
     for job in queue["jobs"]:
-        assert job["source"]["checkout"] == "/workspace/codexschema/nohope_p1_c7e1a90"
-        assert job["source"]["commit"] == "c7e1a907353b8034ae3f76646e1dcd40a2ce895d"
+        assert job["source"]["checkout"] == "/workspace/codexschema/nohope_p1_caeb9ad"
+        assert job["source"]["commit"] == "caeb9ad3d9e2f5058d3cc3931ae70ecf5cebd8a6"
         ignored = job["source"]["ignored_runtime_asset"]
         assert ignored["file_count"] == 46
         assert ignored["total_file_bytes"] == 15378264
@@ -129,7 +135,12 @@ def test_exact_p1_source_is_bound_but_normal_launch_remains_blocked():
         )
         assert ignored["symlinks_forbidden"] is True
         assert ignored["target_must_be_gitignored"] is True
-    assert Q.cmd_plan(queue, live=False)["assignments"] == []
+    assert [
+        row["job_id"] for row in Q.cmd_plan(queue, live=False)["assignments"]
+    ] == [
+        "fresh_c_v1v2_base_decel_matched_control",
+        "fresh_c_v1v2_base_decel_w1",
+    ]
     probe = Q.cmd_full_scene_probe(
         queue,
         job_id="fresh_c_v1v2_base_decel_matched_control",
