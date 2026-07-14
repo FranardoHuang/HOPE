@@ -44,18 +44,21 @@ class Slot:
 
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
 HYDRA_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 READY = "ready"
 BLOCKED = "blocked"
 TERMINAL = {"complete", "rejected"}
 CONFIRM = "SIM_ONLY_LAUNCH_ONE_LEAN_QUEUE_JOB"
 WARMUP_CONFIRM = "SIM_ONLY_LAUNCH_ONE_BOOT_WARMUP"
+ATTEST_CONFIRM = "SIM_ONLY_ATTEST_ONE_LEAN_QUEUE_MILESTONE"
 ZERO_COMMIT = "0" * 40
 GLOBAL_SCHEDULER_LOCK = Path("/tmp/hope_lean_training_queue.global.lock")
 ISAAC_PYTHON = "/workspace/hope_isaac_venv/bin/python"
 WBT_RELATIVE = "hope_training/whole_body_tracking"
 SETUP_RELATIVE = "setup_train_env.sh"
 ENTRYPOINT_RELATIVE = "scripts/train.py"
+QUEUE_RUNTIME_RELATIVE = "scripts/lean_queue_runtime.py"
 KIT_LAUNCHER_RELATIVE = "scripts/launch_kit_training_locked.sh"
 KIT_BOOT_MARKER = "Learning iteration"
 KIT_BOOT_TIMEOUT_SECONDS = 900
@@ -72,6 +75,8 @@ HARNESS_OWNED_OVERRIDE_KEYS = {
     "run_name",
     "device",
     "training_launch_claim_sha256",
+    "training_queue_claim_path",
+    "training_run_binding_path",
 }
 UNIQUE_NUMERIC_PID_AWK = (
     r'{gsub(/^[ \t]+|[ \t]+$/, "", $0); '
@@ -293,8 +298,21 @@ def load_queue(path: Path) -> dict[str, Any]:
         commit = _text(source.get("commit"), f"{job_id}.source.commit")
         if not COMMIT.fullmatch(commit):
             raise QueueError(f"{job_id}.source.commit must be a full Git commit")
+        runtime_binding = job.get("runtime_binding", False)
+        if type(runtime_binding) is not bool:
+            raise QueueError(f"{job_id}.runtime_binding must be true or false")
 
         _compile_recipe_override_keys(job, job_id)
+        if runtime_binding:
+            for raw in [*job["recipe"]["base"], *job["recipe"]["delta"]]:
+                if _override_key(raw, f"{job_id}.recipe") != "checkpoint_path":
+                    continue
+                value = raw.partition("=")[2].strip().lower()
+                if value not in {"null", "none"}:
+                    raise QueueError(
+                        f"{job_id}.runtime_binding currently supports fresh runs only; "
+                        "checkpoint_path must be null"
+                    )
 
         if type(job.get("seed")) is not int or job["seed"] < 0:
             raise QueueError(f"{job_id}.seed must be a non-negative integer")
@@ -309,9 +327,10 @@ def load_queue(path: Path) -> dict[str, Any]:
         milestones = _list(job.get("milestones"), f"{job_id}.milestones")
         if not milestones or any(type(x) is not int or x <= 0 for x in milestones):
             raise QueueError(f"{job_id}.milestones must contain positive integers")
-        if milestones != sorted(set(milestones)) or milestones[-1] > iterations:
+        if milestones != sorted(set(milestones)) or milestones[-1] >= iterations:
             raise QueueError(
-                f"{job_id}.milestones must be unique, sorted, and within max_iterations"
+                f"{job_id}.milestones must be unique, sorted, and strictly below "
+                "max_iterations (fresh RSL checkpoints end at max_iterations-1)"
             )
         if any(x % save_interval for x in milestones):
             raise QueueError(f"{job_id}.milestones must align with save_interval")
@@ -506,6 +525,8 @@ for job_id, directory in jobs.items():
         states[job_id] = {{
             "state": state,
             "claim_path": str(claim),
+            "claim_schema_version": payload.get("schema_version"),
+            "claim_content_sha256": payload.get("content_sha256"),
             "claim_job_id": identity.get("job_id"),
             "pod": identity.get("pod"),
             "gpu": identity.get("gpu"),
@@ -548,10 +569,21 @@ print(json.dumps({{"compute_rows": compute_rows, "gpu_rows": gpu_rows, "jobs": s
             claim_state = _text(state.get("state"), f"{job_id}.claim.state")
             if claim_state not in {"claimed", "launched", "terminal"}:
                 raise QueueError(f"{job_id} claim has invalid state={claim_state!r}")
+            claim_schema = state.get("claim_schema_version")
+            if type(claim_schema) is not int or claim_schema not in (1, 2):
+                raise QueueError(f"{job_id} claim has invalid schema={claim_schema!r}")
+            claim_digest = state.get("claim_content_sha256")
+            if claim_schema == 2:
+                if type(claim_digest) is not str or not SHA256.fullmatch(claim_digest):
+                    raise QueueError(f"{job_id} schema-2 claim has invalid content digest")
+            elif claim_digest is not None:
+                raise QueueError(f"{job_id} legacy claim unexpectedly has a content digest")
             claims[job_id] = {
                 "pod": pod_name,
                 "gpu": gpu,
                 "state": claim_state,
+                "claim_schema_version": claim_schema,
+                "claim_content_sha256": claim_digest,
                 "claim_path": _text(
                     state.get("claim_path"), f"{job_id}.claim.claim_path"
                 ),
@@ -640,9 +672,16 @@ def _assign(
     return assignments
 
 
-def _training_argv(queue: dict[str, Any], job: dict[str, Any], gpu: int) -> list[str]:
+def _training_argv(
+    queue: dict[str, Any],
+    job: dict[str, Any],
+    gpu: int,
+    *,
+    include_run_binding: bool = True,
+) -> list[str]:
     source = job["source"]["checkout"]
     workdir = f"{source.rstrip('/')}/{WBT_RELATIVE}"
+    run_dir = job["run_dir"].rstrip("/")
     argv = [
         ISAAC_PYTHON, f"{workdir}/{ENTRYPOINT_RELATIVE}",
         *job["recipe"]["base"], *job["recipe"]["delta"],
@@ -661,6 +700,13 @@ def _training_argv(queue: dict[str, Any], job: dict[str, Any], gpu: int) -> list
             "device=cuda:0",
         ]
     )
+    if include_run_binding and job.get("runtime_binding", False):
+        argv.extend(
+            [
+                f"++training_queue_claim_path={run_dir}/queue_claim.json",
+                f"++training_run_binding_path={run_dir}/run_binding.json",
+            ]
+        )
     return argv
 
 
@@ -688,6 +734,7 @@ def _launch_contract(
         },
         "run_name": job["run_name"],
         "run_dir": job["run_dir"],
+        "runtime_binding": bool(job.get("runtime_binding", False)),
         "seed": job["seed"],
         "budget": {
             "num_envs": job["budget"]["num_envs"],
@@ -756,6 +803,8 @@ def _doctor_body(queue: dict[str, Any], job: dict[str, Any], slot: Slot) -> str:
         *job["motion"]["bindings"].values(),
         job["bank"]["train_path"], job["exam"]["path"],
     ]
+    if job.get("runtime_binding", False):
+        required.append(f"{workdir}/{QUEUE_RUNTIME_RELATIVE}")
     checks = "\n".join(f"test -f {shlex.quote(path)}" for path in required)
     expected_module_root = f"{workdir}/source/whole_body_tracking/whole_body_tracking"
     module_probe = (
@@ -808,7 +857,9 @@ def _boot_warmup_contract(
     warmup_name = (
         f"boot_warmup_{job['source']['commit'][:8]}_{slot.pod}_gpu{slot.gpu}_{attempt_id}"
     )
-    base_argv = _training_argv(queue, job, slot.gpu)
+    base_argv = _training_argv(
+        queue, job, slot.gpu, include_run_binding=False
+    )
     argv_without_claim = _replace_generated_overrides(
         base_argv,
         {
@@ -963,12 +1014,119 @@ count=$(nvidia-smi -i {slot.gpu} --query-compute-apps=pid --format=csv,noheader,
 test \"$count\" -lt {slot.capacity}
 mkdir -p {shlex.quote(run_parent)}
 mkdir {shlex.quote(run_dir)}
+mkdir {shlex.quote(run_dir + '/milestones')}
 ( set -o noclobber; printf %s {shlex.quote(claim)} > {shlex.quote(run_dir + '/queue_claim.json')} )
 export KIT_BOOT_MARKER={shlex.quote(KIT_BOOT_MARKER)}
 export KIT_BOOT_TIMEOUT_S={KIT_BOOT_TIMEOUT_SECONDS}
 {launch}
+printf '%s\\n' phase=first_iter >> {shlex.quote(run_dir + '/run.log.launch')}
 """
     return _gpu_launch_lock_script(slot, body)
+
+
+def _milestone_attestor_script(job: dict[str, Any], milestone: int) -> str:
+    source = job["source"]["checkout"].rstrip("/")
+    workdir = f"{source}/{WBT_RELATIVE}"
+    runtime = f"{workdir}/{QUEUE_RUNTIME_RELATIVE}"
+    binding = f"{job['run_dir'].rstrip('/')}/run_binding.json"
+    command = shlex.join(
+        [
+            ISAAC_PYTHON,
+            runtime,
+            "attest",
+            "--binding",
+            binding,
+            "--milestone",
+            str(milestone),
+        ]
+    )
+    return f"""set -euo pipefail
+test "$(git -C {shlex.quote(source)} rev-parse HEAD)" = {shlex.quote(job['source']['commit'])}
+test -z "$(git -C {shlex.quote(source)} status --porcelain)"
+test -f {shlex.quote(runtime)}
+cd {shlex.quote(workdir)}
+source {shlex.quote(workdir + '/' + SETUP_RELATIVE)}
+PYTHONPATH="${{HOPE_WBT_PYTHONPATH}}" {command}
+"""
+
+
+def _require_attestor_claim_matches_current_job(
+    queue: dict[str, Any], job: dict[str, Any], claim: dict[str, Any]
+) -> None:
+    """Prevent a mutable queue row from selecting a verifier for another claim."""
+
+    if claim.get("claim_schema_version") != 2:
+        raise QueueError(f"{job['id']} milestone attestation requires a schema-2 claim")
+    pod = claim["pod"]
+    gpu = claim["gpu"]
+    pod_cfg = queue["pods"][pod]
+    slot = Slot(pod, gpu, ordinal=0, capacity=pod_cfg["max_trainers_per_gpu"])
+    expected_claim, _argv = _launch_contract(queue, job, slot)
+    immutable_digest = claim.get("claim_content_sha256")
+    if immutable_digest != expected_claim["content_sha256"]:
+        raise QueueError(
+            f"{job['id']} current queue row differs from its immutable launch claim; "
+            "refusing verifier source drift"
+        )
+    expected_path = f"{job['run_dir'].rstrip('/')}/queue_claim.json"
+    if claim.get("claim_path") != expected_path:
+        raise QueueError(f"{job['id']} immutable claim path differs from current run_dir")
+
+
+def cmd_attest_milestone(
+    queue: dict[str, Any],
+    *,
+    job_id: str,
+    milestone: int,
+    execute: bool,
+    confirm: str | None,
+) -> dict[str, Any]:
+    jobs = {job["id"]: job for job in queue["jobs"]}
+    if job_id not in jobs:
+        raise QueueError(f"unknown queue job: {job_id}")
+    job = jobs[job_id]
+    if not job.get("runtime_binding", False):
+        raise QueueError(
+            f"{job_id} did not preregister runtime_binding=true; no binding may be inferred"
+        )
+    if type(milestone) is not int or milestone not in job["milestones"]:
+        raise QueueError(
+            f"{job_id} milestone must be one of {job['milestones']}"
+        )
+    if execute and confirm != ATTEST_CONFIRM:
+        raise QueueError(f"--execute requires --confirm {ATTEST_CONFIRM}")
+    base = {
+        "mode": "attest-milestone",
+        "dry_run": not execute,
+        "job_id": job_id,
+        "milestone": milestone,
+        "binding_path": f"{job['run_dir'].rstrip('/')}/run_binding.json",
+        "receipt_path": (
+            f"{job['run_dir'].rstrip('/')}/milestones/model_{milestone}.json"
+        ),
+    }
+    if not execute:
+        remote = _milestone_attestor_script(job, milestone)
+        return {
+            **base,
+            "pod_resolution": "immutable queue claim at execute time",
+            "remote_script": remote,
+        }
+    _occupancy, claims = live_snapshot(queue)
+    claim = claims.get(job_id)
+    if claim is None:
+        raise QueueError(f"{job_id} has no immutable queue claim on either Pod")
+    _require_attestor_claim_matches_current_job(queue, job, claim)
+    pod = claim["pod"]
+    remote = _milestone_attestor_script(job, milestone)
+    output = _run_ssh(
+        queue,
+        pod,
+        remote,
+        timeout=120,
+        phase=f"attest-milestone:{job_id}:{milestone}",
+    )
+    return {**base, "pod": pod, "remote_output": output}
 
 
 def cmd_plan(queue: dict[str, Any], *, live: bool) -> dict[str, Any]:
@@ -1230,6 +1388,11 @@ def _parser() -> argparse.ArgumentParser:
     warmup.add_argument("--attempt-id", required=True)
     warmup.add_argument("--execute", action="store_true")
     warmup.add_argument("--confirm")
+    attest = sub.add_parser("attest-milestone")
+    attest.add_argument("--job-id", required=True)
+    attest.add_argument("--milestone", type=int, required=True)
+    attest.add_argument("--execute", action="store_true")
+    attest.add_argument("--confirm")
     return parser
 
 
@@ -1257,6 +1420,14 @@ def main(argv: list[str] | None = None) -> int:
                 pod=args.pod,
                 gpu=args.gpu,
                 attempt_id=args.attempt_id,
+                execute=args.execute,
+                confirm=args.confirm,
+            )
+        elif args.mode == "attest-milestone":
+            result = cmd_attest_milestone(
+                queue,
+                job_id=args.job_id,
+                milestone=args.milestone,
                 execute=args.execute,
                 confirm=args.confirm,
             )

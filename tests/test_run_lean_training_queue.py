@@ -37,9 +37,10 @@ def _job(index: int, *, status: str = "ready") -> dict:
         "bank": {"action": f"action{index}", "train_path": f"/workspace/bank/{index}.npz", "train_arg": "++task.racket.question_bank"},
         "exam": {"action": f"action{index}", "path": f"/workspace/exam/{index}.json", "family": f"exam{index}"},
         "source": {"checkout": "/workspace/source", "commit": "1" * 40},
+        "runtime_binding": True,
         "recipe": {"base": ["task=Task", "algo=ppo"], "delta": [f"x={index}"]},
         "seed": index,
-        "budget": {"num_envs": 512, "max_iterations": 1000, "save_interval": 100},
+        "budget": {"num_envs": 512, "max_iterations": 1001, "save_interval": 100},
         "milestones": [200, 500, 1000],
         "resource": {"policy": "six_gpu_round_robin"},
         "run_name": f"run{index}",
@@ -87,6 +88,24 @@ def test_yaml_requires_action_specific_bindings_and_three_milestones(tmp_path):
         pass
     else:
         raise AssertionError("cross-action bank binding was accepted")
+    off_by_one = _queue()
+    off_by_one["jobs"][0]["budget"]["max_iterations"] = 1000
+    try:
+        Q.load_queue(_write(tmp_path, off_by_one))
+    except Q.QueueError as exc:
+        assert "max_iterations-1" in str(exc)
+    else:
+        raise AssertionError("unreachable terminal checkpoint was accepted")
+    continuation = _queue()
+    continuation["jobs"][0]["recipe"]["delta"].append(
+        "checkpoint_path=/workspace/model_100.pt"
+    )
+    try:
+        Q.load_queue(_write(tmp_path, continuation))
+    except Q.QueueError as exc:
+        assert "supports fresh runs only" in str(exc)
+    else:
+        raise AssertionError("unbound continuation start iteration was accepted")
 
 
 def test_round_robin_fills_six_gpus_one_round_at_a_time_and_honors_caps():
@@ -250,6 +269,8 @@ def test_recipe_compiler_rejects_ambiguous_or_harness_owned_overrides_before_ssh
         "harness_owned_run": ["run_name=collision"],
         "harness_owned_device": ["device=cpu"],
         "harness_owned_claim": [f"++training_launch_claim_sha256={'0' * 64}"],
+        "harness_owned_claim_path": ["++training_queue_claim_path=/tmp/claim"],
+        "harness_owned_binding_path": ["++training_run_binding_path=/tmp/binding"],
         "hydra_flag": ["--multirun"],
         "hydra_interpolation": ["x=${oc.env:HOME}"],
         "hydra_delete": ["~x=1"],
@@ -391,7 +412,7 @@ def test_doctor_and_launch_share_exact_claim_bound_argv_before_fresh_claim():
     assert claim["training_argv"] == training_argv
     assert claim["content"]["source"] == job["source"]
     assert claim["content"]["run_name"] == job["run_name"]
-    assert claim["content"]["budget"]["max_iterations"] == 1000
+    assert claim["content"]["budget"]["max_iterations"] == 1001
     assert claim["content"]["inputs"]["motion"]["bindings"] == job["motion"]["bindings"]
     assert claim["content"]["inputs"]["bank"]["train_path"] == job["bank"]["train_path"]
     assert claim["content"]["inputs"]["exam"]["path"] == job["exam"]["path"]
@@ -405,8 +426,9 @@ def test_doctor_and_launch_share_exact_claim_bound_argv_before_fresh_claim():
     assert trainer in launch_body
     assert "find_spec" in doctor
     assert "HOPE_WBT_PYTHONPATH" in doctor
-    assert "queue_claim.json" not in doctor
-    assert job["run_dir"] not in doctor
+    assert f"++training_queue_claim_path={job['run_dir']}/queue_claim.json" in doctor
+    assert f"++training_run_binding_path={job['run_dir']}/run_binding.json" in doctor
+    assert "set -o noclobber" not in doctor
     assert "mkdir" not in doctor
     assert f"exec {Q.GPU_LAUNCH_LOCK_FD}>/tmp/hope_lean_queue_gpu{slot.gpu}.lock" in launch_body
     assert f"flock -n {Q.GPU_LAUNCH_LOCK_FD}" in launch_body
@@ -416,12 +438,15 @@ def test_doctor_and_launch_share_exact_claim_bound_argv_before_fresh_claim():
     run_parent = str(Path(job["run_dir"]).parent)
     assert f"mkdir -p {run_parent}" in launch_body
     assert f"mkdir {job['run_dir']}" in launch_body
+    assert f"mkdir {job['run_dir']}/milestones" in launch_body
     assert f"mkdir -p {job['run_dir']}" not in launch_body
-    assert launch_body.index(compose) < launch_body.index("queue_claim.json")
-    assert launch_body.index(f"mkdir {job['run_dir']}") < launch_body.index(
-        "queue_claim.json"
-    )
-    assert launch_body.index("queue_claim.json") < launch_body.rindex(trainer)
+    claim_write = launch_body.index("( set -o noclobber")
+    assert launch_body.index(compose) < claim_write
+    assert launch_body.index(f"mkdir {job['run_dir']}") < claim_write
+    assert claim_write < launch_body.rindex(trainer)
+    launcher_call = launch_body.index("launch_kit_training_locked.sh")
+    first_iter_phase = launch_body.index("phase=first_iter")
+    assert launcher_call < first_iter_phase
 
 
 def test_boot_warmup_is_tiny_claim_bound_and_never_reuses_science_namespace():
@@ -442,6 +467,9 @@ def test_boot_warmup_is_tiny_claim_bound_and_never_reuses_science_namespace():
     assert "max_iterations=2" in argv
     assert "algo.runner.save_interval=1" in argv
     assert any(item.startswith("run_name=boot_warmup_") for item in argv)
+    assert not any("training_queue_claim_path" in item for item in argv)
+    assert not any("training_run_binding_path" in item for item in argv)
+    assert job["run_dir"] not in " ".join(argv)
     assert f"/{job['source']['commit']}/{slot.pod}/gpu{slot.gpu}/" in run_dir
     assert run_dir != job["run_dir"] and not run_dir.startswith(job["source"]["checkout"])
     assert job["budget"] == original_budget
@@ -455,6 +483,17 @@ def test_boot_warmup_is_tiny_claim_bound_and_never_reuses_science_namespace():
     assert f"flock -n {Q.GPU_LAUNCH_LOCK_FD}" in warmup_body
     assert f" {Q.GPU_LAUNCH_LOCK_FD}>&-" in warmup_body
     assert "pkill" not in rendered and "killall" not in rendered
+
+
+def test_legacy_source_capability_does_not_require_or_inject_p1_runtime():
+    queue = _queue()
+    job = queue["jobs"][0]
+    job["runtime_binding"] = False
+    slot = Q.slots(queue)[0]
+    _claim, argv = Q._launch_contract(queue, job, slot)
+    assert not any("training_queue_claim_path" in item for item in argv)
+    assert not any("training_run_binding_path" in item for item in argv)
+    assert Q.QUEUE_RUNTIME_RELATIVE not in Q._doctor_body(queue, job, slot)
 
 
 def test_boot_warmup_requires_dedicated_confirmation_and_dispatch_slot():
@@ -560,6 +599,99 @@ def test_fill_rescans_after_first_iteration_before_next_job(tmp_path, monkeypatc
         "doctor:job1",
         "launch-first-iteration:job1",
     ]
+
+
+def test_milestone_attestor_dry_run_follows_only_binding_and_does_not_ssh(monkeypatch):
+    queue = _queue()
+    calls = []
+    monkeypatch.setattr(Q, "_run_ssh", lambda *args, **kwargs: calls.append(args))
+    result = Q.cmd_attest_milestone(
+        queue,
+        job_id="job0",
+        milestone=200,
+        execute=False,
+        confirm=None,
+    )
+    assert result["dry_run"] is True
+    assert result["binding_path"] == "/workspace/runs/0/run_binding.json"
+    assert result["receipt_path"] == "/workspace/runs/0/milestones/model_200.json"
+    assert "lean_queue_runtime.py attest" in result["remote_script"]
+    assert "model_200.pt" not in result["remote_script"]
+    assert calls == []
+
+
+def test_milestone_attestor_execute_requires_its_own_confirmation_before_ssh(monkeypatch):
+    queue = _queue()
+    calls = []
+    monkeypatch.setattr(Q, "live_snapshot", lambda *_args: calls.append("live"))
+    try:
+        Q.cmd_attest_milestone(
+            queue,
+            job_id="job0",
+            milestone=200,
+            execute=True,
+            confirm=None,
+        )
+    except Q.QueueError as exc:
+        assert Q.ATTEST_CONFIRM in str(exc)
+    else:
+        raise AssertionError("execute without attestor confirmation did not fail")
+    assert calls == []
+
+
+def test_milestone_attestor_rejects_mutable_source_drift_before_ssh(monkeypatch):
+    queue = _queue()
+    job = queue["jobs"][0]
+    slot = Q.slots(queue)[0]
+    immutable_claim, _argv = Q._launch_contract(queue, job, slot)
+    claim_state = {
+        "pod": slot.pod,
+        "gpu": slot.gpu,
+        "state": "launched",
+        "claim_schema_version": 2,
+        "claim_content_sha256": immutable_claim["content_sha256"],
+        "claim_path": f"{job['run_dir']}/queue_claim.json",
+    }
+    job["source"] = {"checkout": "/workspace/attacker", "commit": "b" * 40}
+    calls = []
+    occupancy = {item.name: 0 for item in Q.slots(queue)}
+    monkeypatch.setattr(
+        Q, "live_snapshot", lambda *_args: (occupancy, {job["id"]: claim_state})
+    )
+    monkeypatch.setattr(Q, "_run_ssh", lambda *_args, **_kwargs: calls.append("ssh"))
+    try:
+        Q.cmd_attest_milestone(
+            queue,
+            job_id=job["id"],
+            milestone=200,
+            execute=True,
+            confirm=Q.ATTEST_CONFIRM,
+        )
+    except Q.QueueError as exc:
+        assert "immutable launch claim" in str(exc)
+    else:
+        raise AssertionError("mutable source selected a verifier for an old claim")
+    assert calls == []
+
+
+def test_milestone_attestor_rejects_legacy_capability_before_live_snapshot(monkeypatch):
+    queue = _queue()
+    queue["jobs"][0]["runtime_binding"] = False
+    calls = []
+    monkeypatch.setattr(Q, "live_snapshot", lambda *_args: calls.append("live"))
+    try:
+        Q.cmd_attest_milestone(
+            queue,
+            job_id="job0",
+            milestone=200,
+            execute=True,
+            confirm=Q.ATTEST_CONFIRM,
+        )
+    except Q.QueueError as exc:
+        assert "runtime_binding=true" in str(exc)
+    else:
+        raise AssertionError("legacy job was allowed to infer a missing binding")
+    assert calls == []
 
 
 def test_example_is_valid_and_safely_blocked():

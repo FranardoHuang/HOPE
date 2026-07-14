@@ -1,9 +1,9 @@
 # 轻量 YAML 训练队列
 
-状态：五个机制 `retry-v2` 已越过 `+500`；qdot attempt-1 在第 0 update 超时并保全，全新 retry-v2 已
-通过真实 boot marker 并到 iter `79`。队列还预注册了 qdot 同-source control 与 conditional-face
-`0/-0.4` 配对，均只在 Pod2 调度、尚未 launch。P0 harness 已强制 no-Kit Hydra compose、原子 run-dir
-与 canonical claim。G05 仍为 `Partial`，这不是行为晋级。
+状态：五个机制 `retry-v2` 已越过 `+500`；qdot 的两次不同 physical-GPU 冷启动都曾卡在 A3 URDF
+import，不能解释成 reward 失败。P0 harness 已强制 no-Kit Hydra compose、原子 run-dir 与 canonical
+claim；P1 source gate 新增显式 opt-in 的 trainer-owned exact log binding、不可覆盖里程碑取证与 phase telemetry。
+P1 尚未用 exact source 在 Pod 运行，G05 仍为 `Partial`，这不是行为晋级。
 
 qdot matched-control 的首次冷启动也在 dynamic URDF import/scene creation 前停住；相同 warning 在成功臂
 同样存在，不能拿 warning 字面当根因。旧 namespace 已保全并拒绝，只有 unchanged retry-v2 可再试一次。
@@ -68,8 +68,9 @@ claim，且拒绝 Hydra flag、删除语法和 `${...}` interpolation。所有 `
 同一个 child environment 下 `whole_body_tracking` exact 解析到该 source；用最终训练 override 向量实际执行
 `train.py --cfg job --resolve`，只做 Hydra 配置合成而不启动 Kit；目标 GPU 未达容量；以一次原子 `mkdir`
 创建全新的 run directory；Kit 经现有 boot lock 串行启动。
-不做逐文件 SHA、`pip freeze`、import closure 或 evidence receipt。那些严格绑定只在正式晋级、跨引擎判卷
-和 Gate3 使用。
+doctor 不做逐文件 SHA、`pip freeze` 或通用 import closure。真实 queue trainer 另有一个窄的运行绑定：
+它只把 claim、真实进程与 exact RSL log directory 绑定，并在预注册 checkpoint 处产生里程碑 receipt；
+这不替代正式晋级、跨引擎判卷或 Gate3 的更严格资产/runtime closure。
 
 `setup_train_env.sh`、`scripts/train.py` 与 `scripts/launch_kit_training_locked.sh` 三个入口已固定为 source
 checkout 下的 canonical repo-relative 路径，YAML 不能替换成绝对路径、`..`、broad process-control 或
@@ -99,7 +100,11 @@ snapshot 与远端最后容量检查都按每 GPU 的唯一纯数字 PID 计数�
 compose 都位于 `mkdir/claim` 之前；失败不会污染新 namespace。claim 的 canonical content 自动绑定 source
 commit/checkout、完整 caller argv、run name、seed/预算/milestones、motion/bank/exam identity、Pod/GPU；
 其 digest 作为 `++training_launch_claim_sha256=<sha256>` 自动加入 compose 与真实 trainer argv，完整执行 argv
-也写入 `queue_claim.json`。这里的 input identity 是路径与语义绑定，不冒充文件内容 SHA。
+也写入 `queue_claim.json`。只有 exact source 含 P1 callback/runtime 且 job 明确设置
+[`runtime_binding: true`](../DEFINITIONS.md#runtime-binding-flag)时，harness 才注入 claim/binding absolute
+path；trainer 选定真实日志目录后
+原子写 [`run_binding.json`](../DEFINITIONS.md#trainer-run-binding)，外部代码不得再按 timestamp/glob 猜
+checkpoint 所属目录。这里的 input identity 是路径与语义绑定，不冒充文件内容 SHA。
 pending claim 在 NVML 尚不可见时作为 GPU reservation，terminal/rejected 旧 claim 不占新槽。
 真正批量发射只用一个 `fill` 进程；它持 scheduler lock，逐条 doctor、发射并等到第一个
 `Learning iteration`，然后重新读取 claims/GPU 再决定下一条。不要并发调用多个 `launch-next --execute`。
@@ -123,6 +128,10 @@ python3 scripts/run_lean_training_queue.py \
 
 python3 scripts/run_lean_training_queue.py \
   --queue configs/lean_training_queue.example.yaml launch-next
+
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/lean_training_queue.example.yaml \
+  attest-milestone --job-id REPLACE_WITH_JOB_ID --milestone 200
 ```
 
 `plan --live` / `status --live` 各配置 Pod 只建立一个低频只读 SSH：只把 `dispatch_pods` 的 GPU 计入
@@ -146,13 +155,62 @@ claim 写入前 run directory 必须由本次 launch 首次创建。预检或 Ki
 会保留，禁止自动重试，先诊断再新建明确的后续 job。工具不包含信号、
 `pkill`、`killall` 或任何真机入口。
 
+## 里程碑取证
+
+只有由含 P1 callback 的 exact source、以 `runtime_binding: true` fresh 启动并成功写出 immutable binding
+的 job 才能取证；默认 false 的旧 source/boot warmup 不受影响，旧 run 不会被追认或补造 binding。当前
+YAML row 会在 execute 前与远端 immutable claim digest 重构对比，source/recipe 漂移会在 SSH 前拒绝。
+默认 dry-run 只显示绑定/receipt 路径与远端脚本，不连 Pod：
+
+```bash
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml \
+  attest-milestone --job-id REPLACE_WITH_JOB_ID --milestone 200
+```
+
+写远端 receipt 需要独立确认词，且 Pod 只能从已存在的 immutable queue claim 解析，不能由调用者另传：
+
+```bash
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml \
+  attest-milestone --job-id REPLACE_WITH_JOB_ID --milestone 200 \
+  --execute --confirm SIM_ONLY_ATTEST_ONE_LEAN_QUEUE_MILESTONE
+```
+
+[`milestone attestor`](../DEFINITIONS.md#milestone-attestor)只沿 binding 的 exact log directory 打开
+`model_200.pt`；它核对静态/读中 PID reuse、binding 时 source HEAD/clean、filename/embed iteration、所有
+floating/complex tensors finite、相邻 schema-3 hard-contract SHA 与 launch-claim lineage，再 no-clobber
+写 `milestones/model_200.json`。它不运行 judge、
+不产生成绩，也不自动停止/晋级。完整字段与失败语义见
+[运行绑定接口](../interfaces/lean_training_run_binding.md)。
+
+## 冷启动/URDF import 诊断
+
+queue trainer 默认关闭的 phase telemetry 在 P1 run 中依次留下 `hydra_resolved`、`app_started`、
+`log_dir_bound`、`scene_import_start/done`；冻结 launcher 看到真实 `Learning iteration` 并成功返回后，
+queue harness 才在 `.launch` 写 `phase=first_iter`。这能把“卡在 A3 import”与学习失败分开。
+
+main 已有独立 per-source+Pod+GPU 的 `1 env × 2 updates` boot-warmup 和 content-bearing 日志默认 180 秒
+stale watchdog；P1 不改变其 source-pinned/exact-PGID 语义，也不会让 warmup 继承科学 binding path。
+新反例证明 1-env 成功只可当 cache/import probe：同 source/GPU 的正式 4096-env control 仍可能在
+`scene_import_start` 后卡死。未来代表性 full-scene boot 必须另用独立非科学 namespace，并绑定同 source、
+physical GPU、task/assets/plant 和正式 `num_envs`/scene recipe；到 `scene_import_done`/`first_iter` 才能授权
+随后全新科学 claim。当前 P1 只提供 phase 证据，不冒充该 full-scene 门已经实现。
+
 ## 验证
 
 ```bash
-python3 -m pytest -q tests/test_run_lean_training_queue.py
-python3 -m py_compile scripts/run_lean_training_queue.py
+python3 -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_lean_queue_runtime.py \
+  tests/test_run_lean_training_queue.py \
+  hope_training/whole_body_tracking/tests/test_training_launch_claim.py \
+  hope_training/whole_body_tracking/tests/test_training_thread_caps.py
+python3 -m py_compile scripts/run_lean_training_queue.py \
+  hope_training/whole_body_tracking/scripts/train.py \
+  hope_training/whole_body_tracking/scripts/lean_queue_runtime.py
+bash -n hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh
 ```
 
 本源码门只证明 YAML 绑定、调度与 fail-closed 选择逻辑；没有证明远端 SSH、Isaac runtime、动作效果或
-exam 成绩。当前 boot supervisor 仍只以最终 `Learning iteration` 和固定 900 秒 timeout 作启动裁决；
-source-specific asset/cache warmup 的 phase marker 是后续独立改进，不属于本次 P0。
+exam 成绩。focused source result 为 `68 passed`；现有 source-pinned launcher 同时保留 180 秒 stale-log
+watchdog 与总 boot timeout，P1 只增加更细的 queue phase 归因。代表性 full-scene probe 仍是后续能力。

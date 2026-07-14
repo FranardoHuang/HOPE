@@ -128,6 +128,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | Plant 语义 | [`plant_semantics_contract.md`](interfaces/plant_semantics_contract.md) |
 | T1 事件/恢复时序 | [`t1_event_training_contract.md`](interfaces/t1_event_training_contract.md) |
 | q50 持久启动与只读复核 | [`q50_persistent_supervisor_contract.md`](interfaces/q50_persistent_supervisor_contract.md) |
+| 轻量训练 queue claim→真实日志→checkpoint 绑定 | [`lean_training_run_binding.md`](interfaces/lean_training_run_binding.md) |
 | ROS topic | [`ros_topics.md`](interfaces/ros_topics.md) |
 
 ## 责任归属与更新规则

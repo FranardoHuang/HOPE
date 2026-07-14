@@ -41,6 +41,9 @@ jobs:
     source:
       checkout: /workspace/codexschema/nohope_training_explore
       commit: "0000000000000000000000000000000000000000"
+    # Keep false for placeholder/legacy source. Set true only after this exact
+    # commit contains the P1 trainer callback and lean_queue_runtime.py.
+    runtime_binding: false
     recipe:
       base:
         - task=HOPEPingPongVirtualBall
@@ -54,7 +57,7 @@ jobs:
     seed: 0
     budget:
       num_envs: 512
-      max_iterations: 1000
+      max_iterations: 1001
       save_interval: 100
     milestones: [200, 500, 1000]
     resource:

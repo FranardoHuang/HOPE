@@ -21,9 +21,63 @@ import json
 import math
 import pathlib
 import sys
+import time
 
 import hydra
 from omegaconf import ListConfig, OmegaConf
+
+
+def _capture_original_training_argv() -> tuple[str, ...]:
+    """Capture the kernel argv before Hydra and Kit rewrite ``sys.argv``."""
+
+    try:
+        parts = pathlib.Path("/proc/self/cmdline").read_bytes().split(b"\0")
+        argv = tuple(part.decode("utf-8", "strict") for part in parts if part)
+    except (OSError, UnicodeDecodeError):
+        argv = ()
+    if argv:
+        return argv
+    # Non-Linux source tests never publish a queue binding.  Keep ordinary
+    # training portable while the formal Linux callback still rechecks /proc.
+    return (
+        sys.executable,
+        str(pathlib.Path(__file__).resolve()),
+        *sys.argv[1:],
+    )
+
+
+_ORIGINAL_TRAINING_ARGV = _capture_original_training_argv()
+
+
+def _lean_queue_binding_requested(cfg) -> bool:
+    """Return whether this is a queue launch, rejecting a half-bound request."""
+
+    claim_path = _get(cfg, "training_queue_claim_path")
+    binding_path = _get(cfg, "training_run_binding_path")
+    if claim_path is None and binding_path is None:
+        return False
+    if claim_path is None or binding_path is None:
+        raise RuntimeError(
+            "training_queue_claim_path and training_run_binding_path must be supplied together"
+        )
+    return True
+
+
+def _emit_lean_queue_phase(cfg, phase: str, **fields) -> None:
+    """Emit machine-readable boot telemetry only for the lean queue."""
+
+    if not _lean_queue_binding_requested(cfg):
+        return
+    payload = {
+        "phase": phase,
+        "monotonic_ns": time.monotonic_ns(),
+        **fields,
+    }
+    print(
+        "[train.py] LEAN_QUEUE_PHASE "
+        + json.dumps(payload, allow_nan=False, separators=(",", ":"), sort_keys=True),
+        flush=True,
+    )
 
 
 def dump_pickle(filename: str, data):
@@ -46,6 +100,35 @@ def _get(node, key, default=None):
         return node.get(key, default)
     except Exception:
         return default
+
+
+def _publish_lean_queue_binding_if_requested(cfg, log_dir: str) -> None:
+    """Publish the trainer-owned RSL directory binding for queue launches only."""
+
+    if not _lean_queue_binding_requested(cfg):
+        return
+    claim_path = _get(cfg, "training_queue_claim_path")
+    binding_path = _get(cfg, "training_run_binding_path")
+    claim_digest = _get(cfg, "training_launch_claim_sha256")
+    if claim_digest is None:
+        raise RuntimeError(
+            "lean queue binding requires training_launch_claim_sha256"
+        )
+    from lean_queue_runtime import publish_run_binding
+
+    binding = publish_run_binding(
+        claim_path=str(claim_path),
+        binding_path=str(binding_path),
+        log_dir=log_dir,
+        claim_digest=str(claim_digest),
+        actual_argv=_ORIGINAL_TRAINING_ARGV,
+    )
+    print(
+        "[train.py] LEAN_QUEUE_RUN_BOUND: "
+        f"path={binding_path} sha256={binding['content_sha256']} log={log_dir}",
+        flush=True,
+    )
+    _emit_lean_queue_phase(cfg, "log_dir_bound", rsl_log_dir=log_dir)
 
 
 _KIT_CARB_TASKING_THREAD_SETTING = "/plugins/carb.tasking.plugin/threadCount"
@@ -2219,10 +2302,17 @@ def _run(cfg):
         log_dir += f"_{agent_cfg.run_name}"
     log_dir = os.path.join(log_root_path, log_dir)
     print(f"[INFO] Task: {task_id} | experiment: {agent_cfg.experiment_name} | log: {log_dir}")
+    # Queue provenance is operational, not part of the scientific hard contract.
+    # Publish the exact RSL directory before environment construction; a bad or
+    # pre-existing binding therefore fails before any learning/checkpoint write.
+    training_launch_claim_sha256 = _get(cfg, "training_launch_claim_sha256")
+    _publish_lean_queue_binding_if_requested(cfg, log_dir)
 
     # 5) build env, wrap, run
     render_mode = "rgb_array" if cfg.video else None
+    _emit_lean_queue_phase(cfg, "scene_import_start")
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)
+    _emit_lean_queue_phase(cfg, "scene_import_done")
     expected_contract = _get(cfg.task, "actor_obs_contract")
     actor_contract = None
     if expected_contract is not None:
@@ -2268,7 +2358,6 @@ def _run(cfg):
     # Optional operational provenance supplied by a fail-closed launcher.  It is embedded only in
     # checkpoint infos and deliberately excluded from training_contract.json (and its scientific
     # contract SHA).  Plain training commands remain compatible: absent means no claim is written.
-    training_launch_claim_sha256 = _get(cfg, "training_launch_claim_sha256")
     # A checkpoint may claim formal schema-3 provenance only when it is fresh from this contract or
     # resumes an already exact-bound schema-3 lineage. A legacy/mismatched warm-start remains useful,
     # but every descendant checkpoint is permanently marked exact-ineligible; merely saving it beside
@@ -2387,6 +2476,7 @@ def _run(cfg):
 def main(cfg):
     OmegaConf.resolve(cfg)
     OmegaConf.set_struct(cfg, False)
+    _emit_lean_queue_phase(cfg, "hydra_resolved")
     kit_args, kit_carb_count, kit_tbb_count = _resolve_kit_thread_caps(cfg)
 
     # Launch Isaac Sim BEFORE importing isaaclab modules. Clear argv so the kit app does not try to
@@ -2403,6 +2493,7 @@ def main(cfg):
         app_launcher_kwargs["kit_args"] = kit_args
     app_launcher = AppLauncher(**app_launcher_kwargs)
     simulation_app = app_launcher.app
+    _emit_lean_queue_phase(cfg, "app_started")
     # Print the traceback BEFORE closing the app: Isaac's simulation_app.close() hard-exits the
     # process (os._exit), which otherwise swallows any exception from _run and makes a real failure
     # look like a clean "exit 0" with the log truncated at startup.
