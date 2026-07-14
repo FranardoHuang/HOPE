@@ -14,13 +14,14 @@ This module is intentionally split in two:
 * :func:`dispatch_lateral_wrench_fail_closed` is an adapter seam.  The separate
   ``isaac_lateral_perturbation`` module contains a default-off Isaac Lab 2.1 runtime candidate;
   it remains probe-only because the exact full-scene and throughput gates have not run and Isaac
-  exposes no solver-consumed wrench getter.  A reviewed runtime adapter must transform the WORLD
-  wrench to the frame expected by ``Articulation.set_external_force_and_torque``, stage without
-  changing the live buffer, return an exact preflight receipt, then overwrite/read back the
-  complete articulation wrench buffer on every simulator step (including zeros after a pulse),
-  with only the torso COM row nonzero.  A failed commit is terminal and must never be followed by
-  another simulator step.  Until that adapter and its ledger consumer are implemented and tested,
-  this feature is not runtime-ready.
+  exposes no solver-consumed wrench getter.  A reviewed runtime adapter must stage without
+  changing the live backend, return an exact preflight receipt, then overwrite/read back its
+  complete full-articulation command state (including explicit zero commands).  The Isaac
+  candidate separately submits that WORLD command at an explicit, freshly computed torso COM
+  before every physics substep; pinned Isaac's ``position_data=None`` link-origin path is not a
+  valid substitute.  A failed commit or later substep submission is terminal and must never be
+  followed by another simulator step.  Until that adapter and its ledger consumer are implemented
+  and tested, this feature is not runtime-ready.
 
 Keeping the seam explicit prevents two common but scientifically invalid shortcuts: using
 ``push_by_setting_velocity`` instead of a force, or leaving a non-zero external-force buffer alive
@@ -475,8 +476,8 @@ class LateralPerturbationStep:
 class LateralWrenchPreflightReceipt:
     """Side-effect-free preflight receipt returned by a reviewed simulator adapter.
 
-    Receipt validation happens before the backend write.  ``preflight_token`` is opaque adapter
-    state consumed by one reviewed full-buffer commit.  A successful commit must return ``None``
+    Receipt validation happens before the backend command-state write.  ``preflight_token`` is
+    opaque adapter state consumed by one reviewed full-buffer commit.  A successful commit must return ``None``
     only after its exact readback; a commit exception makes the backend terminal/unknown and may
     never be retried or followed by a simulator step.  This receipt is not itself proof of
     simulator behaviour; a runtime consumer must persist the resulting application ledger.
@@ -1598,11 +1599,12 @@ def dispatch_lateral_wrench_fail_closed(
     total_mass_kg: torch.Tensor,
     adapter: LateralWrenchAdapter,
 ) -> LateralApplicationLedgerRow:
-    """Preflight, synchronously write/read back, then ledger one full-batch torso wrench.
+    """Preflight, synchronously stage/read back, then ledger one full-batch torso command.
 
     The adapter uses a two-phase contract: preflight may stage data but must not touch the live
-    backend buffer; after every receipt predicate is synchronously visible, commit performs a
-    full-buffer overwrite and exact readback.  A successful commit returns ``None``.  Any exception
+    backend; after every receipt predicate is synchronously visible, commit performs a full-command
+    overwrite and exact readback.  A successful commit returns ``None``.  A runtime consumer still
+    must submit and receipt the command at each physics substep; this ledger is not a solver ACK.  Any exception
     is terminal: no application ledger is written, ordinary retry/advance is blocked, and the
     simulator must not step again.  The commit is called even when every force is zero, which
     clears a completed or interrupted pulse.

@@ -244,35 +244,45 @@ Follow-up note (2026-07-15, lateral-balance Isaac adapter candidate; Gate remain
   exact Isaac Lab `v2.1.0@21f7136325136ca3f6ca4e0a8125edffe5c24f7e` articulation buffers.
   It is not registered in an existing task or trainer.  Disabled mode directly delegates
   `env.step(action)` and does not inspect the environment.
-- Source audit established that Isaac Lab stores the command in a BODY-frame buffer and calls
-  `scene.write_data_to_sim()` before every physics substep.  A WORLD-Y perturbation is therefore
-  transformed from the current torso quaternion before every substep, not once per policy tick.
-  The candidate exclusively owns the complete robot external-wrench buffer, reads current
-  post-randomization masses from PhysX, writes only `torso_link`, synchronizes each CUDA submission
-  and performs exact command-buffer readback after the scene-write boundary.
+- Red-team source audit found that the first candidate's COM claim was false: pinned Isaac Lab
+  passes `position_data=None`, which applies at the link transform/origin rather than the COM.  That
+  BODY-buffer path is rejected.  The corrected candidate leaves Isaac's built-in wrench buffers
+  fully zero/unowned, reads current link poses plus PhysX local COM offsets before every substep,
+  and directly calls `apply_forces_and_torques_at_position` with explicit WORLD torso-COM
+  `position_data` and `is_global=true`.  A non-zero COM-offset mock proves the offset is rotated into
+  WORLD rather than silently using the origin.
 - Strike/window interruption writes zero in the same policy step.  When a subset reset causes the
   extra full-scene write in `ManagerBasedRLEnv`, the candidate clears the **whole batch** before
   that write so non-reset environments cannot receive an extra off-decimation wrench; any valid
   continuing pulse is reconstructed on the next policy step.  Receipts reconcile episode
   index/step, eligibility, strike window, application ledger, every physics substep and reset.
 - Isaac Lab exposes no getter for the wrench actually consumed by the PhysX solver.  The candidate
-  therefore advertises `solver_execution_readback_available=false`; synchronized command-buffer
+  therefore advertises `solver_execution_readback_available=false`; synchronized direct-setter
   evidence is not called solver-execution evidence.  The strict full-scene probe exists but was
   not run in this source change, and the correctness-first implementation still contains hot-path
   host synchronizations.  Full-scene lifecycle, independent dynamics response, same-GPU
   throughput/no-host-sync redesign, runner/hard-contract binding and held-out behavior all remain
-  open.  `launch_authorized=false` and `runtime_adapter.implemented=false` are unchanged.
-- Adapter red-team removed two potential false greens before handoff.  An all-zero buffer with
-  `has_external_wrench=true` is now treated as an existing owner, every later policy step compares
-  both live buffer identities and full bytes to the adapter's prior readback, and the probe binds
-  all EventManager terms while rejecting interval terms.  Also, Python tensor copies/CUDA sync are
+  open.  The API also has no owner/readback for a second direct setter inside the same scene write;
+  exact source closure must exclude that path before runtime ownership can be claimed.
+  `launch_authorized=false` and `runtime_adapter.implemented=false` are unchanged.
+- Adapter red-team also requires every private command copy/reset and every substep boundary to
+  prove both built-in buffer identities, all body/environment bytes and the owner flag.  Same-tick
+  non-torso writes fail closed.  Any scene-write exception, wrong return type or post-dispatch
+  validation or scene-hook restoration failure enters a terminal zero-overwrite guard and can never continue.  A
+  successful rollout also cleanly terminalizes and submits a full zero command before receipt validation,
+  source re-attestation, output creation, print or environment close; a failed terminal zero cannot publish.  The probe now
+  loads motion through stable kernel-fd paths, rechecks public path identity/SHA before output, and creates its
+  receipt through stable-parent-dirfd `openat(O_EXCL|O_NOFOLLOW)`.  Python tensor copies/CUDA sync are
   no longer self-declared atomic/noexcept: any commit exception or malformed return writes no
   scheduler ledger, permanently dirties the backend and forbids retry/advance/another simulator
   step.  Probe aggregate reset/strike claims are non-vacuous; missing natural reset or active-pulse
   strike interruption yields an explicit lifecycle-uncovered status and null reset evidence.
-- Focused scheduler plus adapter verification is `48 passed` (`36` scheduler/transaction and `12`
-  adapter/hook lifecycle mocks); `py_compile`, JSON parsing and whitespace checks are part of the
-  source handoff.  No Pod, simulator, trainer or hardware was touched.  Reproduction and the exact
+- Focused scheduler plus corrected-adapter verification is `65 passed`: 36 scheduler/transaction
+  cases plus 29 dependency-light adapter/artifact cases, including non-zero COM and derived-COM overflow,
+  offset, substep/reset/direct-setter competing writers, scene/direct-setter exceptions, malformed returns,
+  hook-restore failure, clean/failing terminal zero, post-zero publication failure, motion replacement and
+  output-parent symlink swap.  Source compilation, JSON parsing and
+  whitespace checks are part of the source handoff.  No Pod, simulator, trainer or hardware was touched.  Reproduction and the exact
   probe boundary are in
   [EXP-P1-LATERAL-BALANCE-PERTURBATION](../experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md)
   and [run_lateral_perturbation_runtime_probe](../operations/run_lateral_perturbation_runtime_probe.md).

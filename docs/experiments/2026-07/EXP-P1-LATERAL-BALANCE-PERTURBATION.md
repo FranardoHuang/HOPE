@@ -103,7 +103,7 @@ WORLD-Y force 每层都必须 finite 且在界内；极大但 finite 的输入�
 1. 纯 torch 的确定性 scheduler/kernel：Random123 已知向量一致的 `Philox4x32-10`、有界随机幅度、
    左右对称、完整安全窗、同一步幂等、漏步 fail closed、reset 中断冲量对账。
 2. fail-closed adapter seam：把归一化脉冲按**整机总质量**变成 WORLD-Y 躯干质心力，并要求 adapter
-   先做不改 live buffer 的 typed preflight，再做完整 buffer overwrite + 同步 exact readback；成功只返回
+   先做不改 live backend 的 typed preflight，再做完整私有 WORLD command overwrite + 同步 exact readback；成功只返回
    `None`。Python/CUDA copy 不能自证 atomic/noexcept；异常/非 `None` 必须在 application ledger 前把 backend
    标成 terminal `DIRTY/UNKNOWN`，禁止 retry、advance 或下一 simulator step。
    preflight receipt 与 application ledger 必须逐环境绑定随机化后实际总质量、runtime dtype 的 normalized
@@ -114,28 +114,32 @@ WORLD-Y force 每层都必须 finite 且在界内；极大但 finite 的输入�
 [`isaac_lateral_perturbation.py`](../../../hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/isaac_lateral_perturbation.py)
 新增了一个**默认关闭、只供显式 probe 使用**的 Isaac Lab `v2.1.0` 候选 adapter/hook；它固定到
 Isaac Lab commit `21f7136325136ca3f6ca4e0a8125edffe5c24f7e`，目前没有接进任何现役 task
-registration 或 trainer。源码审计得到一个关键时序结论：`set_external_force_and_torque` 只更新 BODY-frame
-buffer，而 `scene.write_data_to_sim()` 会在每个 physics substep 前提交它；所以 WORLD-Y 力不能只在 policy
-tick 开头变换一次，必须在每个 substep 用当时的 `body_quat_w` 重新做 WORLD→BODY 变换。候选 hook 因此：
+registration 或 trainer。二次源码审计纠正了更关键的语义：pinned
+`Articulation.write_data_to_sim()` 最终以 `position_data=None` 调用 PhysX，这表示 link origin，**不是 COM**。
+原 BODY-buffer 候选因此被红队否决；新候选每个 substep 都显式计算/传入当前 WORLD torso COM：
 
-- 从 `root_physx_view.get_masses()` 读取当前随机化后全身质量；只占用完整 robot external-wrench buffer，发现
-  既有非零 owner 或全零但 `has_external_wrench=true` 的 owner 都拒绝；后续每步还对账两个 buffer identity
-  和 prior-readback bytes，EventManager interval term 在 probe 中一律拒绝；
-- 每个 policy step 完整覆盖 force/torque buffer，每个 physics substep 前重新变换，scene write 后做 CUDA
-  completion sync 和 exact command-buffer readback；单纯 async enqueue 不能算完成；
+- 从 `root_physx_view.get_masses()` 读取当前随机化后全身质量；Isaac 内建完整 robot force/torque buffer 必须
+  始终全零、identity 不变且 `has_external_wrench=false`，只作为 same-tick/non-torso 竞争 writer 哨兵；
+  EventManager interval term 在 probe 中一律拒绝；
+- 每个 policy step 完整覆盖 adapter 私有 WORLD force/torque command。每个 physics substep 读取
+  `body_pos_w`、`body_quat_w` 与已由 pinned IsaacLab 搬到 articulation device 的 `data.com_pos_b`，计算当前
+  torso COM，然后 direct 调用
+  `apply_forces_and_torques_at_position(position_data=<explicit COM>, is_global=true)`；`position_data=None` 禁止；
+- scene write 异常、wrong return、竞争 writer 或任何 post-dispatch 验证失败都会进入 terminal guard；没有竞争
+  writer 时先 direct 提交全零，随后禁止 retry/advance/下一 simulator step；
 - strike/window closure 当步提交全零；发生 subset reset 时，Isaac 的额外全-scene write 前先把**全部环境**
   清零，避免非 reset 环境在 decimation 之外多吃一次力，并在下一 policy step 按账重新施加仍有效的 pulse；
-- 逐步回执绑定 episode index/step、strike/eligible/safe-window、application ledger、每个 substep 的 WORLD/BODY
-  命令、同步态和 reset 清零态；`enabled=false` 直接原样委托 `env.step(action)`，不读取环境字段。
+- 逐步回执绑定 episode index/step、strike/eligible/safe-window、application ledger、每个 substep 的 WORLD
+  command、显式 COM/local offset、同步态和 reset 清零态；`enabled=false` 直接原样委托 `env.step(action)`。
 
-诚实边界不变：Isaac Lab 2.1 没有可读取“PhysX solver 实际消费的 wrench”的 getter。当前回执只证明 exact
-command buffer 穿过同步的 scene-write boundary，**不证明 solver execution**；而且正确性优先路径仍有 host
+诚实边界不变：Isaac Lab 2.1 没有可读取“PhysX solver 实际消费的 wrench”的 getter。当前回执只证明 direct
+setter 收到 exact WORLD command/显式 COM，**不证明 solver execution**；而且正确性优先路径仍有 host
 sync，尚未过同 GPU throughput/no-host-sync 门。严格 full-scene probe 已提供在
 [`probe_lateral_perturbation_runtime.py`](../../../hope_training/whole_body_tracking/scripts/probe_lateral_perturbation_runtime.py)，
 但本记录没有运行它，`launch_authorized` 与 `runtime_adapter.implemented` 继续为 `false`。操作边界和命令见
 [`run_lateral_perturbation_runtime_probe.md`](../../operations/run_lateral_perturbation_runtime_probe.md)。
 probe 的 reset/strike 结论必须非空覆盖：若零动作场景没有自然 reset 或 active-pulse strike interruption，
-结果只能写 command-buffer-only/lifecycle-uncovered，reset evidence 为 `null`，不能用 vacuous all-pass 升级。
+结果只能写 explicit-COM/lifecycle-uncovered，reset evidence 为 `null`，不能用 vacuous all-pass 升级。
 
 首轮机器账至少同时记录：
 
@@ -231,7 +235,7 @@ application 三本冲量账对不上时，结果无效而不是“近似通过�
   hope_training/whole_body_tracking/tests/test_isaac_lateral_perturbation.py
 ```
 
-当前聚焦测试为 `48 passed`。原有 `36` 项覆盖：Random123 Philox 零 counter/key 已知向量、四个 domain 与相邻 seed 的分桶
+当前聚焦测试为 `65 passed`。原有 `36` 项覆盖：Random123 Philox 零 counter/key 已知向量、四个 domain 与相邻 seed 的分桶
 均匀性和交叉相关性、`L0/L1` potential draw/SHA 完全相同、左右对称与幅度界、recovery/hold eligibility、
 strike skip、完整 pulse 冲量、reset 中断五项账、同一步幂等、漏步/漏 application receipt fail closed、
 按总质量缩放、质量/力/transform typed ledger，对极大 finite impulse、duration overflow、cast overflow、
@@ -240,11 +244,14 @@ mass×acceleration overflow 和 force 上限的负测、X/Z force 与 torque 恒
 neutered、坏 receipt/stale token、不同 live backend cache replay、commit 抛异常/非 `None` 返回等攻击回归；
 所有 precommit 失败都满足 backend write=0/cache 空，side-effect-free staging 会 discard，同 tick 可安全重试。
 strike/window/reset 的逐环境 sampled/commanded/applied/abandoned 恒等式及中断 tick backend 全零也已覆盖。
-新增 `12` 项 dependency-light adapter/hook 测试覆盖：随机化后真实总质量读取、WORLD→BODY 变换、只写
-`torso_link`、既有 wrench owner 与 between-step writer 拒绝、live force/torque buffer identity 漂移拒绝、默认关闭的直接委托、
-全 articulation scene-write 后读回、四个 substep 按变化中的 torso yaw 重新变换、
-scene-write 后同步 readback、strike 当步全零、subset reset 的额外 scene write 全 batch 清零及下一步 episode/
-impulse 对账、T1 event-driven 时序拒绝，以及所有回执显式 `solver_execution_readback_available=false`。
+新增 `29` 项 dependency-light adapter/hook/artifact 测试覆盖：随机化后真实总质量读取、显式非零 local-COM
+offset 旋转到 WORLD、派生 WORLD COM overflow 在 setter 前 terminal 拒绝、每 substep 传非 `None position_data`、
+只写 `torso_link` WORLD force、既有 wrench owner、
+same-tick/non-torso 与 reset writer 拒绝、direct setter 内同 tick 竞争 writer、scene/direct-setter exception、
+scene/env wrong return 与 scene-hook restore 失败后的 terminal zero、clean rollout 在任何验收/落盘前 terminal
+zero、terminal-zero 失败禁止发布、默认关闭直接委托、strike/reset 当步全零及 episode/impulse 对账、T1
+event-driven 时序拒绝、motion inode swap、output parent symlink swap、stable-dirfd no-clobber，以及所有回执显式
+`solver_execution_readback_available=false`。
 它不证明真实 simulator 满足相同 lifecycle，也没有 solver-response 或 GPU throughput 证据。
 
 在最新 `origin/main@107102f` 重放后，whole-body tracking 的 57 文件整合套件为

@@ -4,16 +4,17 @@ Status: `Partial`（已有默认关闭的 Isaac Lab 2.1 adapter/hook 候选与 m
 
 ## 目的与诚实边界
 
-本接口约束恢复/等待窗横向扰动从 scheduler 到 simulator 外力 buffer 的一次应用事务。它防止伪造回执
+本接口约束恢复/等待窗横向扰动从 scheduler 到 simulator 外力命令的一次应用事务。它防止伪造回执
 解锁下一 tick、CUDA 异步失败晚于物理写入、坏回执留下非零 backend，以及同一步 cache 被重放到另一个
 live backend。当前仓库有一个不改变现役 task registration 的 probe-only Isaac adapter 候选；机器预注册
-仍为 `launch_authorized=false`。Isaac Lab 2.1 只能读回待提交的 articulation command buffer，不能读回
-PhysX solver 真正消费的 wrench，因此不得把 buffer readback 写成物理执行 ACK。
+仍为 `launch_authorized=false`。Isaac Lab 2.1 没有 PhysX solver-consumed wrench getter，因此不得把 direct
+setter 成功或 adapter 私有 command readback 写成物理执行 ACK。
 
 源码、测试和机器合同分别在：
 
 - [`lateral_perturbation.py`](../../hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/lateral_perturbation.py)
 - [`isaac_lateral_perturbation.py`](../../hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/isaac_lateral_perturbation.py)
+- [`lateral_probe_artifacts.py`](../../hope_training/whole_body_tracking/scripts/lateral_probe_artifacts.py)
 - [`test_lateral_perturbation.py`](../../hope_training/whole_body_tracking/tests/test_lateral_perturbation.py)
 - [`test_isaac_lateral_perturbation.py`](../../hope_training/whole_body_tracking/tests/test_isaac_lateral_perturbation.py)
 - [`phase1_lateral_balance_perturbation_prereg_20260715.json`](../../configs/phase1_lateral_balance_perturbation_prereg_20260715.json)
@@ -25,8 +26,9 @@ PLANNED
   -> PREWRITE_VALIDATED
   -> STAGED_NO_SIDE_EFFECT
   -> PRECOMMIT_VALIDATED
-  -> FULL_BUFFER_COMMIT_AND_READBACK
+  -> PRIVATE_FULL_COMMAND_COMMIT_AND_READBACK
   -> COMMITTED_LEDGER
+  -> PER_SUBSTEP_EXPLICIT_COM_DIRECT_SUBMIT
 ```
 
 - `PREWRITE_VALIDATED`：public step 已与 scheduler 私有 canonical step 完整一致；质量、dtype cast、最终
@@ -34,10 +36,15 @@ PLANNED
 - `STAGED_NO_SIDE_EFFECT`：adapter 可准备变换或 staging buffer，但不得改变 live backend buffer。
 - `PRECOMMIT_VALIDATED`：typed preflight receipt 必须精确回显 source 生成的一次性 token、总质量、WORLD
   force/torque、active mask、transform SHA 和 backend SHA；所有 tensor predicate 必须在 commit 前可见。
-- `FULL_BUFFER_COMMIT_AND_READBACK`：完整 overwrite 后同步 exact readback；成功时只返回 `None`。Python/CUDA
+- `PRIVATE_FULL_COMMAND_COMMIT_AND_READBACK`：完整 overwrite adapter 私有 WORLD command 后同步 exact
+  readback；成功时只返回 `None`。Python/CUDA
   路径不能自证 memory-atomic 或 noexcept，任何异常/非 `None` 都必须在写 application ledger 前把 backend
   标为 terminal `DIRTY/UNKNOWN`，禁止 retry、advance 或下一次 simulator step。
-- `COMMITTED_LEDGER`：只有 commit 返回后，scheduler 才能写 application cache、计数并解锁下一 tick。
+- `COMMITTED_LEDGER`：只有 commit 返回后，scheduler 才能写 application cache；它仍不是 solver ACK。
+- `PER_SUBSTEP_EXPLICIT_COM_DIRECT_SUBMIT`：runtime hook 每个 physics substep 都读取当前 link pose 与 PhysX
+  local COM offset，计算 WORLD torso COM，并调用
+  `ArticulationView.apply_forces_and_torques_at_position(position_data=<explicit COM>, is_global=true)`。任一调用、
+  scene write 或随后验证失败都必须 terminal zero-overwrite 并禁止下一 simulator step。
 
 preflight 拒绝时必须无副作用 discard staging，回到 `PLANNED`，允许同 step token 的 canonical command
 用一个全新 preflight nonce 重新 dispatch。commit 一旦进入后若抛异常或返回非 `None`，backend 标记为
@@ -61,61 +68,80 @@ adapter 必须声明并实现：
 - `preflight_side_effect_free=true`
 - `commit_failure_is_terminal=true`
 - `discard_is_noexcept=true`
-- 稳定的 `application_backend_identity_sha256` 与当前 live buffer 的 object token
+- 稳定的 `application_backend_identity_sha256` 与当前 PhysX articulation view 的 object token
 - side-effect-free `preflight_world_wrench_at_body_com(...)`
 - `commit_preflighted_world_wrench_at_body_com(...) -> None`
 - `discard_preflighted_world_wrench_at_body_com(...) -> None`
 
-这些布尔声明和 source mock 不能证明真实 Isaac adapter 满足合同；特别是不得把两次 tensor copy、CUDA sync
-与 readback 自称 atomic/noexcept。当前 candidate 已实现以下 source 路径：
+这些布尔声明和 source mock 不能证明真实 Isaac adapter 满足合同；特别是不得把 tensor copy、direct setter、
+CUDA sync 与私有 readback 自称 atomic/noexcept。当前 candidate 已实现以下 source 路径：
 
-- attach 时拒绝接管任何已有非零 robot wrench owner；随后每步覆盖整台 articulation buffer，只有
-  `torso_link` 可非零；即使 buffer 全零，只要 `has_external_wrench=true` 也视作已有 owner。每次 preflight
-  还会把 live force/torque object identity 和完整 bytes 与上一次自身 readback 对账，其他 writer 在 policy
-  steps 之间改写也会 terminal fail closed；strict probe 另外绑定全部 EventManager terms 并拒绝 interval term；
+- attach 时要求 Isaac 内建 force/torque buffer 的所有 environment/body row 全零且
+  `has_external_wrench=false`；candidate 从不借用该 origin-based buffer，而把它作为竞争 writer 哨兵。每次
+  private command copy、每个 substep direct submit 前后、scene write 后和 reset clear 前后都检查完整 buffer
+  identity/zero bytes 与 owner flag；同 tick 或 non-torso writer 都 terminal fail closed。strict probe 另外绑定
+  全部 EventManager terms 并拒绝 interval term；
 - 从 `root_physx_view.get_masses()` 读取随机化后的全部 body masses，并在 preflight 再次逐值绑定 caller 的
   total mass；
-- 由于 Isaac v2.1 buffer 是 BODY frame，每个 physics substep 都用当下 `body_quat_w` 重新做
-  WORLD→BODY 变换，然后在 `scene.write_data_to_sim()` 后同步 CUDA 并逐值读回完整 articulation
-  force/torque command buffer；任一非 torso row 或 buffer object identity 漂移都将 backend 标成
-  `DIRTY/UNKNOWN`；
-- subset reset 的额外 full-scene write 前，先确认 reset rows 已被 articulation reset 清零，再主动清空**全
-  batch** wrench buffer并在 write 后同步读回全零；这样非 reset rows 不会在 decimation 之外多受一次力，
+- pinned Isaac Lab `write_data_to_sim()` 使用 `position_data=None`，官方 PhysX tensor 语义是作用在 link
+  transform/origin，**不是 COM**。candidate 因此每个 physics substep 读取 `body_pos_w`、scalar-first
+  `body_quat_w` 和 `robot.data.com_pos_b` 的 local COM offset，计算当前 WORLD torso COM；pinned IsaacLab
+  的 raw `root_physx_view.get_coms()` 不保证与 articulation 同 device，而 `ArticulationData.com_pos_b` 已显式
+  `.to(self.device)`，所以合同禁止直接强制 raw tensor device；随后 direct
+  setter 使用 WORLD force、显式 WORLD position 与 `is_global=true`。`position_data=None` 被合同禁止；
+  输入 pose/COM finite 还不够，旋转/加法后的 torso COM 和 full setter positions 必须再次 finite；float overflow
+  必须在 direct setter 前 terminal fail closed；
+- subset reset 的额外 full-scene write 前，先检查竞争 writer，再用同一显式 position API 提交**全 batch**
+  zero；这样非 reset rows 不会在 decimation 之外多受一次力，
   scheduler 在下一 policy tick 重施仍有效的 pulse，并用 episode index 变化保存 reset rows 的
   sampled/commanded/applied/abandoned 账；
+- dispatch 成功后若 scene write 抛错、setter 返回类型异常、environment output 不合法或后续任何验证失败，
+  hook 都进入 terminal guard；若没有竞争 writer，它用最后可信/当前显式 positions 提交全零并禁止继续。
+  若发现竞争 writer，则不覆盖对方 bytes，保全证据且在下一 physics step 前终止；
+- scene hook 恢复失败也必须向 caller 抛错并进入同一 terminal guard，不能因为发生在 `finally` 就吞掉；正常
+  rollout 则必须在读取/校验回执、重验 source、创建输出、打印或关闭环境之前调用一次 clean terminal zero。
+  只有 zero setter 同步成功且 hook 仍非 `DIRTY/UNKNOWN` 才能继续发布；后续 step 永久拒绝；
 - `enabled=false` 直接返回原始 `env.step(action)`，不读取 scene、command 或 episode state，mock 测试验证
   返回对象 identity 不变。
 
-但 Isaac Lab 2.1 的 `ArticulationView` 没有 solver-consumed external-wrench getter。同步 enqueue + command
-buffer readback 只能证明提交边界与输入 buffer，不能证明 solver 的实际 wrench。因此必须按
+但 Isaac Lab 2.1 的 `ArticulationView` 没有 solver-consumed external-wrench getter。同步 direct setter +
+私有 command readback 只能证明提交边界与输入，不能证明 solver 的实际 wrench。因此必须按
 [runtime probe 操作页](../operations/run_lateral_perturbation_runtime_probe.md) 做 exact full-scene 运行，再用独立
 dynamics-response probe 补 solver 执行证据；pulse 结束/strike/window/reset 清零、同 GPU throughput 与
 no-host-sync 验证也仍待运行。通过前 G05 保持 `Partial`，训练不得启动。
 
-## Isaac Lab 2.1 substep 时序
+还有一个不可隐瞒的 ownership 边界：PhysX tensor API 没有“direct setter owner”或 setter-command getter。
+内建 Isaac buffer 的任意 same-tick/non-torso writer 能被全量哨兵抓住，但若 exact task source 在同一
+`scene.write_data_to_sim()` 内绕过 buffer、再次直接调用同一个 PhysX setter，当前 adapter 无法从 API 读回并
+区分。strict probe 以 exact clean source closure、active EventManager manifest 和拒绝 interval term 缩小该面，
+但 full-scene/source review 前不能宣称 direct setter 独占已获运行证明。
 
-现役 policy tick 是 50 Hz，内部 `decimation=4`，physics substep 是 200 Hz。Isaac v2.1 的
-`set_external_force_and_torque` 只改 BODY-frame buffer；`InteractiveScene.write_data_to_sim()` 才在每个
-physics substep 前把 buffer 送给 PhysX。若只在 policy tick 起点变换一次，躯干在后续 3 个 substep 旋转时，
-WORLD force 会跟着 BODY frame 偏转，已经违反首格的 WORLD-Y 合同。
+## Isaac Lab 2.1 explicit-COM substep 时序
+
+现役 policy tick 是 50 Hz，内部 `decimation=4`，physics substep 是 200 Hz。更关键的是 pinned Isaac
+`Articulation.write_data_to_sim()` 把 `position_data=None` 传给 PhysX，实际作用点是 link origin。把该路径
+叫做 torso COM 会改变转矩和科学问题。candidate 改为每个 200 Hz substep 显式重算并传入当前 COM；既不依赖
+BODY-frame command buffer，也不允许用 origin treatment 冒充 COM treatment。
 
 因此显式 probe hook 的顺序固定为：
 
 ```text
 policy scheduler + side-effect-free preflight
-  -> first command-buffer commit/readback
+  -> private full WORLD command commit/readback
   -> for each physics substep:
-       fresh torso quaternion
-       -> WORLD-to-BODY transform
-       -> full robot wrench-buffer overwrite
+       guard full built-in force/torque buffers remain unowned and zero
+       -> fresh link origin + quaternion + local COM offset
+       -> explicit current torso COM in WORLD
+       -> direct PhysX full-articulation submit(position_data != None, is_global=true)
        -> scene.write_data_to_sim
        -> CUDA synchronize
-       -> exact command-buffer readback
-  -> termination/reset
-  -> verify reset rows zero
-  -> full-batch zero overwrite
-  -> reset-only scene write + synchronized full-batch zero readback
+       -> private command exact readback + built-in full-zero guard
+  -> reset (if observed)
+  -> direct full-batch zero submit at explicit positions
+  -> reset-only scene write + synchronized zero/owner guard
   -> episode/strike/window impulse reconciliation
+  -> end-of-rollout clean terminal full-batch zero submit
+  -> only then receipt validation / source re-attestation / no-clobber publication
 ```
 
 现有 task ID 没有被替换。只有显式构造 `IsaacLateralPerturbationRuntimeHook(..., enabled=true)` 并通过
@@ -133,4 +159,4 @@ commanded = applied + abandoned_unapplied
 
 runtime-ack 路径中，已成功 commit 的 tick 应有 `applied == commanded`；plan-only 源码测试允许
 `applied=0`，此时 `abandoned_unapplied == commanded`。strike/window 中断 tick 仍必须 commit 一次全零
-buffer，不能只清 scheduler 内存。
+command，不能只清 scheduler 内存。
