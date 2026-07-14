@@ -705,6 +705,72 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
     finite_vector("joint_armature", positive=False)
     finite_vector("joint_friction_coefficients", positive=False)
     finite_vector("joint_velocity_limits", positive=True)
+
+    qdot_hinge = contract.get("joint_velocity_limit_hinge_reward")
+    if qdot_hinge is not None:
+        if not isinstance(qdot_hinge, Mapping):
+            raise ValueError(
+                "schema-3 joint_velocity_limit_hinge_reward must be an object or null"
+            )
+        if type(qdot_hinge.get("schema_version")) is not int or qdot_hinge.get(
+            "schema_version"
+        ) != 1:
+            raise ValueError(
+                "schema-3 joint_velocity_limit_hinge_reward schema_version must be integer 1"
+            )
+        enabled = qdot_hinge.get("enabled")
+        if not isinstance(enabled, bool):
+            raise ValueError(
+                "schema-3 joint_velocity_limit_hinge_reward enabled must be boolean"
+            )
+        raw_weight = qdot_hinge.get("weight")
+        raw_margin = qdot_hinge.get("margin")
+        if isinstance(raw_weight, bool) or not isinstance(raw_weight, (int, float)):
+            raise ValueError(
+                "schema-3 joint_velocity_limit_hinge_reward weight must be finite and <= 0"
+            )
+        if isinstance(raw_margin, bool) or not isinstance(raw_margin, (int, float)):
+            raise ValueError(
+                "schema-3 joint_velocity_limit_hinge_reward margin must be finite and in (0, 1)"
+            )
+        weight = float(raw_weight)
+        margin = float(raw_margin)
+        if not math.isfinite(weight) or weight > 0.0:
+            raise ValueError(
+                "schema-3 joint_velocity_limit_hinge_reward weight must be finite and <= 0"
+            )
+        if not math.isfinite(margin) or not 0.0 < margin < 1.0:
+            raise ValueError(
+                "schema-3 joint_velocity_limit_hinge_reward margin must be finite and in (0, 1)"
+            )
+        if enabled != (weight < 0.0):
+            raise ValueError(
+                "schema-3 joint_velocity_limit_hinge_reward enabled disagrees with weight"
+            )
+        articulation_joint_names = contract["articulation_joint_names"]
+        if (
+            n != 31
+            or type(qdot_hinge.get("joint_count")) is not int
+            or qdot_hinge.get("joint_count") != 31
+            or not isinstance(articulation_joint_names, (list, tuple))
+            or [str(value) for value in articulation_joint_names]
+            != [str(value) for value in joint_names]
+        ):
+            raise ValueError(
+                "schema-3 joint_velocity_limit_hinge_reward requires identity 31-joint order"
+            )
+        expected_fixed = {
+            "asset_name": "robot",
+            "joint_order": "runtime_articulation_identity",
+            "velocity_limit_source": "runtime_execution_facts.joint_velocity_limits",
+            "formula": "mean(relu(abs(qd)/joint_velocity_limits-margin)^2)",
+        }
+        for key, expected in expected_fixed.items():
+            if qdot_hinge.get(key) != expected:
+                raise ValueError(
+                    "schema-3 joint_velocity_limit_hinge_reward "
+                    f"{key} must be exactly {expected!r}"
+                )
     if contract["joint_friction_backend"] != JOINT_FRICTION_BACKEND:
         raise ValueError("schema-3 joint_friction_backend must be physx")
     if contract["joint_friction_semantics"] != JOINT_FRICTION_SEMANTICS:

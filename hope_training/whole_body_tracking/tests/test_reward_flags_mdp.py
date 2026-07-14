@@ -24,6 +24,8 @@ hope_observations.py). What is tested is therefore the actual shipped math, not 
 * A1  target position/velocity/demanded-normal/swing-sign remain one atomic actor message through
       delay/dropout, and a true reset clears every stateful sensor-defect buffer.
 * P2.4 base_decel is zero during a frozen hold; debug raw/gated telemetry records the real mask.
+* D6 qdot-limit hinge uses realized joint velocity divided by the actual 31 runtime-ordered
+      articulation limits; reordered joints and zero/non-finite limits fail closed.
 * R-c commands.MotionCommand on a synthetic 2-clip npz pair: rsi_skip_settle_frames offsets the
       swing-entry frame (multiseg + single-clip clamp, incl. the short-clip clamp) and
       rsi_hold_root_stand_z rewrites ONLY the held-RSI birth root z to the default stand height.
@@ -1157,6 +1159,83 @@ def test_rally_foot_orientation_gate_only_zeros_hold_rows():
     gated = hope_rewards_mod.foot_orientation_discipline(env, "motion", asset_cfg, hold_gate=True)
     assert torch.equal(always, torch.tensor([3.0, 3.0]))
     assert torch.equal(gated, torch.tensor([0.0, 3.0]))
+
+
+def _qdot_limit_env(limits=None):
+    names = [f"joint_{index:02d}" for index in range(31)]
+    joint_vel = torch.zeros(2, 31)
+    joint_vel[0, :] = 8.5
+    joint_vel[1, 0] = 15.0
+    if limits is None:
+        limits = torch.full((2, 31), 10.0)
+    asset = types.SimpleNamespace(
+        joint_names=list(names),
+        data=types.SimpleNamespace(
+            joint_names=list(names),
+            joint_vel=joint_vel,
+            joint_vel_limits=limits,
+        ),
+    )
+    env = types.SimpleNamespace(scene={"robot": asset})
+    asset_cfg = types.SimpleNamespace(name="robot", joint_ids=list(range(31)))
+    return env, asset_cfg
+
+
+def test_qdot_limit_hinge_uses_actual_runtime_limits_and_normalized_mean():
+    env, asset_cfg = _qdot_limit_env()
+    result = hope_rewards_mod.joint_velocity_limit_hinge(
+        env, asset_cfg, margin=0.85, expected_joint_count=31
+    )
+    assert result[0] == pytest.approx(0.0)
+    assert result[1] == pytest.approx((1.5 - 0.85) ** 2 / 31.0)
+
+
+def test_qdot_limit_hinge_reloads_runtime_limits_after_first_call():
+    limits = torch.full((2, 31), 10.0)
+    env, asset_cfg = _qdot_limit_env(limits)
+    first = hope_rewards_mod.joint_velocity_limit_hinge(env, asset_cfg)
+    assert first[1] > 0.0
+
+    # A runtime limit update must affect the very next reward; a first-call cache would keep
+    # charging against 10 rad/s and fail this assertion.
+    limits.fill_(20.0)
+    second = hope_rewards_mod.joint_velocity_limit_hinge(env, asset_cfg)
+    assert torch.equal(second, torch.zeros_like(second))
+
+    # The same live path must fail closed if a later update introduces an invalid limit.
+    limits[:, 4] = 0.0
+    with pytest.raises(RuntimeError, match="finite, positive"):
+        hope_rewards_mod.joint_velocity_limit_hinge(env, asset_cfg)
+
+
+def test_qdot_limit_hinge_rejects_order_zero_nonfinite_and_per_env_drift():
+    env, asset_cfg = _qdot_limit_env()
+    with pytest.raises(ValueError, match="exact 31-joint"):
+        hope_rewards_mod.joint_velocity_limit_hinge(
+            env, asset_cfg, expected_joint_count=31.0
+        )
+
+    asset_cfg.joint_ids[0], asset_cfg.joint_ids[1] = 1, 0
+    with pytest.raises(RuntimeError, match="identity 31-joint"):
+        hope_rewards_mod.joint_velocity_limit_hinge(env, asset_cfg)
+
+    limits = torch.full((2, 31), 10.0)
+    limits[:, 7] = 0.0
+    env, asset_cfg = _qdot_limit_env(limits)
+    with pytest.raises(RuntimeError, match="finite, positive"):
+        hope_rewards_mod.joint_velocity_limit_hinge(env, asset_cfg)
+
+    limits = torch.full((2, 31), 10.0)
+    limits[:, 8] = float("nan")
+    env, asset_cfg = _qdot_limit_env(limits)
+    with pytest.raises(RuntimeError, match="finite, positive"):
+        hope_rewards_mod.joint_velocity_limit_hinge(env, asset_cfg)
+
+    limits = torch.full((2, 31), 10.0)
+    limits[1, 8] = 11.0
+    env, asset_cfg = _qdot_limit_env(limits)
+    with pytest.raises(RuntimeError, match="identical articulation velocity limits"):
+        hope_rewards_mod.joint_velocity_limit_hinge(env, asset_cfg)
 
 
 if __name__ == "__main__":

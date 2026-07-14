@@ -88,6 +88,14 @@ def _make_env_cfg(anchor_pos_none=True):
             weight=0.0,
             params={"command_name": "racket_target", "v_gain": 2.0, "v_max": 1.6, "std": 0.4},
         ),
+        joint_velocity_limit_hinge=_Term(
+            weight=0.0,
+            params={
+                "asset_cfg": _NS(name="robot", joint_ids=slice(None)),
+                "margin": 0.85,
+                "expected_joint_count": 31,
+            },
+        ),
         racket_guidance=_Term(weight=0.0, params={"command_name": "racket_target", "d_max": 0.5}),
         racket_face_guidance=_Term(weight=0.0, params={"command_name": "racket_target", "theta_max": 1.5707963}),
         tracking_envelope=_Term(weight=0.0, params={"command_name": "motion", "threshold": 0.25}),
@@ -180,6 +188,104 @@ def test_empty_task_applies_nothing():
 def test_unknown_rewards_key_fails_loud():
     with pytest.raises(train_mod._OverrideError, match="face_gate_radiuss"):
         _apply({"rewards": {"face_gate_radiuss": 0.15}})  # typo'd key: must raise, never no-op
+
+
+def _qdot_runtime_facts():
+    names = [f"joint_{index:02d}" for index in range(31)]
+    return {
+        "articulation_joint_names": list(names),
+        "joint_names": list(names),
+        "joint_velocity_limits": [10.0 + index for index in range(31)],
+    }
+
+
+def test_qdot_limit_hinge_default_off_and_override_markers():
+    env_cfg, applied = _apply({})
+    assert env_cfg.rewards.joint_velocity_limit_hinge.weight == 0.0
+    assert env_cfg.rewards.joint_velocity_limit_hinge.params["margin"] == pytest.approx(0.85)
+    assert not any("joint_velocity_limit_hinge" in item for item in applied)
+
+    env_cfg, applied = _apply({
+        "rewards": {
+            "joint_velocity_limit_hinge_weight": -0.25,
+            "joint_velocity_limit_hinge_margin": 0.8,
+        }
+    })
+    assert env_cfg.rewards.joint_velocity_limit_hinge.weight == pytest.approx(-0.25)
+    assert env_cfg.rewards.joint_velocity_limit_hinge.params["margin"] == pytest.approx(0.8)
+    assert "rewards.joint_velocity_limit_hinge.weight=-0.25" in applied
+    assert "rewards.joint_velocity_limit_hinge.params.margin=0.8" in applied
+
+
+@pytest.mark.parametrize("weight", [0.1, float("nan"), float("inf"), True, "bad"])
+def test_qdot_limit_hinge_rejects_non_penalty_weight(weight):
+    with pytest.raises(train_mod._OverrideError, match="finite and <= 0"):
+        _apply({"rewards": {"joint_velocity_limit_hinge_weight": weight}})
+
+
+@pytest.mark.parametrize("margin", [0.0, 1.0, -0.1, float("nan"), True, "bad"])
+def test_qdot_limit_hinge_rejects_invalid_margin(margin):
+    with pytest.raises(train_mod._OverrideError, match=r"finite and in \(0, 1\)"):
+        _apply({"rewards": {"joint_velocity_limit_hinge_margin": margin}})
+
+
+def test_qdot_limit_hinge_is_a_checkpoint_hard_contract_fact():
+    control = _make_env_cfg()
+    treatment, _ = _apply({
+        "rewards": {
+            "joint_velocity_limit_hinge_weight": -0.25,
+            "joint_velocity_limit_hinge_margin": 0.8,
+        }
+    })
+    facts = _qdot_runtime_facts()
+    control_contract = train_mod._joint_velocity_limit_hinge_reward_contract(control, facts)
+    treatment_contract = train_mod._joint_velocity_limit_hinge_reward_contract(treatment, facts)
+    assert control_contract["enabled"] is False
+    assert control_contract["weight"] == 0.0
+    assert treatment_contract["enabled"] is True
+    assert treatment_contract["weight"] == pytest.approx(-0.25)
+    assert treatment_contract["margin"] == pytest.approx(0.8)
+    assert treatment_contract["joint_order"] == "runtime_articulation_identity"
+    assert treatment_contract["velocity_limit_source"].endswith("joint_velocity_limits")
+    assert train_mod._contract_diff(control_contract, treatment_contract)
+
+
+@pytest.mark.parametrize("bad_limit", [0.0, -1.0, float("nan"), float("inf")])
+def test_qdot_limit_hinge_contract_rejects_bad_runtime_limit(bad_limit):
+    facts = _qdot_runtime_facts()
+    facts["joint_velocity_limits"][9] = bad_limit
+    with pytest.raises(RuntimeError, match="finite and positive"):
+        train_mod._joint_velocity_limit_hinge_reward_contract(_make_env_cfg(), facts)
+
+
+def test_qdot_limit_hinge_contract_rejects_runtime_order_or_count_drift():
+    facts = _qdot_runtime_facts()
+    facts["joint_names"][0], facts["joint_names"][1] = (
+        facts["joint_names"][1], facts["joint_names"][0]
+    )
+    with pytest.raises(RuntimeError, match="identity 31-joint"):
+        train_mod._joint_velocity_limit_hinge_reward_contract(_make_env_cfg(), facts)
+
+    facts = _qdot_runtime_facts()
+    facts["joint_velocity_limits"].pop()
+    with pytest.raises(RuntimeError, match="31 runtime joint_velocity_limits"):
+        train_mod._joint_velocity_limit_hinge_reward_contract(_make_env_cfg(), facts)
+
+    env_cfg = _make_env_cfg()
+    env_cfg.rewards.joint_velocity_limit_hinge.params["asset_cfg"].joint_ids = [
+        1, 0, *range(2, 31)
+    ]
+    with pytest.raises(RuntimeError, match="identity 31-joint order"):
+        train_mod._joint_velocity_limit_hinge_reward_contract(
+            env_cfg, _qdot_runtime_facts()
+        )
+
+    env_cfg = _make_env_cfg()
+    env_cfg.rewards.joint_velocity_limit_hinge.params["expected_joint_count"] = 31.0
+    with pytest.raises(RuntimeError, match="must be exactly 31"):
+        train_mod._joint_velocity_limit_hinge_reward_contract(
+            env_cfg, _qdot_runtime_facts()
+        )
 
 
 def test_zero_joint_friction_is_explicit_and_all_actuators_are_zeroed():

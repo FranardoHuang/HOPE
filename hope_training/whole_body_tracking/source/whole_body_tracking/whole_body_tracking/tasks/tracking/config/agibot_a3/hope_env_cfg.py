@@ -786,6 +786,20 @@ class HOPEVirtualBallRewardsCfg(HOPEDeployParityRewardsCfg):
     virtual_spin = RewTerm(
         func=mdp.virtual_spin, weight=5.0, params={"command_name": "racket_target"})
 
+    # D6 source gate (2026-07-14, DEFAULT OFF): penalize only the normalized tail above 85% of
+    # each *actual articulation* joint-speed limit.  This is not action-rate smoothing: it reads
+    # realized qdot and the 31 runtime-ordered limits directly, and fails closed on bad limits or
+    # joint-order drift.  A future ablation enables it with a non-positive weight through Hydra.
+    joint_velocity_limit_hinge = RewTerm(
+        func=mdp.joint_velocity_limit_hinge,
+        weight=0.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "margin": 0.85,
+            "expected_joint_count": 31,
+        },
+    )
+
     racket_velocity = RewTerm(
         func=mdp.racket_velocity_tracking_exp,
         weight=0.5,

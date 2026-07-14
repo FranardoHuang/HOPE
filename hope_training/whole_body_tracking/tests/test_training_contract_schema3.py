@@ -391,6 +391,27 @@ def _schema3_contract():
     }
 
 
+def _qdot_hinge_schema3_contract():
+    contract = {
+        "schema_version": 3,
+        **TC.runtime_execution_facts(_env(joints=31), _ActorContract()),
+        "racket_control_point": "pingpang_red_Link_origin_v1",
+        "racket_control_point_offset_wrist_m": [0.21021, 0.032078, 0.032036],
+    }
+    contract["joint_velocity_limit_hinge_reward"] = {
+        "schema_version": 1,
+        "enabled": True,
+        "weight": -0.25,
+        "margin": 0.85,
+        "asset_name": "robot",
+        "joint_count": 31,
+        "joint_order": "runtime_articulation_identity",
+        "velocity_limit_source": "runtime_execution_facts.joint_velocity_limits",
+        "formula": "mean(relu(abs(qd)/joint_velocity_limits-margin)^2)",
+    }
+    return contract
+
+
 def _command_schema3_contract():
     contract = _schema3_contract()
     contract.update({
@@ -586,6 +607,42 @@ def test_formal_face179_contract_freezes_shared_a_frame_and_striking_face_signs(
 def test_schema3_rejects_unproven_actuator_plant_values(key, value, message):
     contract = _schema3_contract()
     contract[key] = value
+    with pytest.raises(ValueError, match=message):
+        TC.validate_schema3_contract(contract)
+
+
+def test_schema3_validates_optional_qdot_limit_hinge_contract():
+    contract = _qdot_hinge_schema3_contract()
+    TC.validate_schema3_contract(contract)
+
+    disabled = _qdot_hinge_schema3_contract()
+    disabled["joint_velocity_limit_hinge_reward"] = {
+        **disabled["joint_velocity_limit_hinge_reward"],
+        "enabled": False,
+        "weight": 0.0,
+    }
+    TC.validate_schema3_contract(disabled)
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("schema_version", 1.0, "schema_version must be integer 1"),
+        ("weight", 0.1, "weight must be finite and <= 0"),
+        ("margin", 1.0, r"margin must be finite and in \(0, 1\)"),
+        ("enabled", False, "enabled disagrees with weight"),
+        ("joint_count", 30, "identity 31-joint order"),
+        ("joint_count", 31.0, "identity 31-joint order"),
+        ("joint_order", "sorted_by_name", "joint_order must be exactly"),
+        ("formula", "action_rate_l2", "formula must be exactly"),
+    ],
+)
+def test_schema3_rejects_qdot_limit_hinge_contract_drift(key, value, message):
+    contract = _qdot_hinge_schema3_contract()
+    contract["joint_velocity_limit_hinge_reward"] = {
+        **contract["joint_velocity_limit_hinge_reward"],
+        key: value,
+    }
     with pytest.raises(ValueError, match=message):
         TC.validate_schema3_contract(contract)
 

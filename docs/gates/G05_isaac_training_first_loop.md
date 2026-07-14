@@ -1737,3 +1737,20 @@ scheduler 进程逐条 doctor→claim→first iteration→重采。focused `17 p
 origin 通过，实际 child Python 为 `/workspace/hope_isaac_venv/bin/python`；live 六 GPU occupancy 为 0。
 该命令没有创建 retry-v2 claim 或 trainer，Hydra compose 仍明确未运行，所以只把 harness 从 E1 提升为
 module-runtime preflight 通过，不改变 G05 `Partial`。
+
+### 2026-07-14 31 关节 qdot-limit hinge 源码门
+
+VirtualBall reward stack 新增默认关闭的
+[`qdot-limit hinge`](../DEFINITIONS.md#qdot-limit-hinge)：它计算
+`mean(relu(abs(qd)/joint_velocity_limits - margin)^2)`，默认 `margin=0.85`，只接受非正
+Reward 权重。实现直接消费 `robot.data.joint_vel` 与 `robot.data.joint_vel_limits` 的同一 31 关节
+runtime order；任意关节子集/重排、零值、非有限上限或不同 environment 的 limit 漂移都会 fail closed，
+不能退化成 `action_rate` 代理。
+
+Hydra 的 `joint_velocity_limit_hinge_weight` / `joint_velocity_limit_hinge_margin` 已走 fail-loud
+translation，并把 applied marker 写入启动日志。post-override weight、margin、公式、31-joint identity
+order 与 runtime limit 来源同时进入 training hard contract；未来 outer launch claim 必须再绑定 exact
+argv/manifest。reward-layer focused qdot tests 为 `21 passed`，整个 dependency-light override 文件为 `76 passed`；
+actual reward math 的 Torch/Isaac-stub focused tests 为 `3 passed`，schema-3/launch-claim suite 为
+`62 passed`。合计 qdot-focused selection 为 `30 passed`。这仍是 E1 source gate：没有 Pod
+训练、runtime marker、checkpoint 或行为成绩，也没有授权第二 seed/judge/晋级，G05 保持 `Partial`。

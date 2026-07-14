@@ -13,6 +13,15 @@
 
 ## 2026-07-14
 
+- 第二圈第六机制的 31 关节 qdot-limit hinge 已完成 E1 source gate：VirtualBall 默认关闭，normalized
+  tail 公式直接消费 actual articulation qdot/velocity limits，Hydra 只接受非正 weight 和 `(0,1)` margin，
+  applied marker 与 hard-contract/outer-claim 边界已写清；错序、零/非有限 limit fail closed。qdot-focused
+  `30 passed`、override 全文件 `76 passed`、schema-3/claim suite `62 passed`；没有 machine prereg/Pod
+  run/checkpoint/行为结论，不授权点火。
+  见 [G05](gates/G05_isaac_training_first_loop.md)、
+  [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)与
+  [训练操作](operations/run_training.md)。
+
 - C3/D3 K100 v1 在 C3 ONNX 导出前暴露 ignored Isaac A3 asset 打包缺口并永久冻结，未产生行为成绩。
   v2 新 namespace 在 claim/judge 前绑定训练 checkout 的递归 canonical inventory、一次 hydrate/二次
   verify 角色和 `libGLU.so.1` 存在性；focused `56 passed`，static/source-plan rc0。hydrate 后的

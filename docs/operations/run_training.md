@@ -1024,6 +1024,19 @@ band while preventing non-hit rewards from dominating:
   Speed-magnitude-only v1; the v2 spec (fitted accel/decel envelope, direction term, time budget,
   stroke-amplitude coupling) is `docs/motion_and_contract_v3.md` §5. Watch:
   `base_speed_xy_prestrike`.
+- `joint_velocity_limit_hinge_weight: 0.0` and `joint_velocity_limit_hinge_margin: 0.85`
+  ([关节速度限位铰链惩罚](../DEFINITIONS.md#qdot-limit-hinge)，VirtualBall only，默认关闭)：
+  `mean(relu(abs(qd)/joint_velocity_limits - margin)^2)`。启用 weight 必须 `<= 0`；实现读取
+  `robot.data.joint_vel` 和同一 31-joint articulation order 的实际 `joint_vel_limits`，不是
+  `action_rate_weight` 的别名。启动会打印两个 applied marker；关节重排/缺失、零/非有限 limit 或
+  每个 environment 的 limit 不一致都 fail closed。
+
+qdot-limit treatment 尚未选择采用的负 weight，也没有 machine prereg，因此不要直接把下面写成临时
+CLI 点火。未来 paired manifest 必须让 control/treatment 从同一父 checkpoint 各自启动，并同时冻结：
+exact `task.rewards.joint_velocity_limit_hinge_weight`、margin、完整 argv、source commit、outer
+`training_launch_claim_sha256`，以及 emitted hard contract 的
+`joint_velocity_limit_hinge_reward` 和 31 项 `joint_names/joint_velocity_limits`。不得从 treatment 的
+中间 checkpoint 再派生 control，也不得用 action-rate 代替这一轴。
 
 These stds are DECOUPLED from acceptance thresholds: the position metric still reports true success only
 below `strike_success_pos_thresh = 0.075 m`, velocity below `0.5 m/s`, and racket-normal error below

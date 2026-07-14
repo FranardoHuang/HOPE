@@ -57,6 +57,11 @@ rewards:
   racket_normal_weight: 0.5
   racket_normal_std: 0.262
   base_decel_weight: 0.0
+  # D6 normalized qdot-limit hinge: explicit OFF baseline. Future causal arms may use a
+  # non-positive weight; the denominator is the actual 31-joint articulation velocity-limit
+  # vector, not action-rate or a hand-copied proxy.
+  joint_velocity_limit_hinge_weight: 0.0
+  joint_velocity_limit_hinge_margin: 0.85
   # Keep the Tier-1 design default. DeployParity's -0.3 was a separate, unablated hold/fall arm;
   # inheriting it here silently confounded every VirtualBall result after task composition.
   foot_orientation_weight: 0.0

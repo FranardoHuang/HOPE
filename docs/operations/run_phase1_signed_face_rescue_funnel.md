@@ -422,6 +422,20 @@ schedule/path/SHA 尚未冻结。不得绕过 validator，也不得把 L1 comple
 NaN/Inf/Traceback/OOM/Killed、文件名与嵌入 iteration、tensor finite、checkpoint ↔ 相邻 hard-contract
 SHA/lineage；不要为填空闲卡复制第二 seed。
 
+## 第二圈 qdot-limit treatment 仍是 source-only
+
+VirtualBall 已有默认关闭的
+[`qdot-limit hinge`](../DEFINITIONS.md#qdot-limit-hinge) 源码接口：只在实际 31 关节 qdot 超过各自
+runtime velocity limit 的 `0.85` 后收平方尾部惩罚，不能用 action-rate 代理。它不属于本页 v6/v8/C2/D2/
+C3/D3 的任何现有 manifest，也没有采用的负 weight、run name、claim root 或 launch consumer；禁止把
+现有 launcher 追加一个 Hydra token 后直接发射。
+
+未来版本必须新建 no-clobber paired prereg：control/treatment 从同一冻结 `model_13800.pt` 父项直接
+启动，只允许 hinge weight 一个 causal leaf 不同，并在 claim 前重验 source、父 checkpoint、动作、题库、
+plant、空 GPU 和 exact argv。outer claim 必须绑定 weight/margin，checkpoint 邻接 hard contract 必须
+包含 `joint_velocity_limit_hinge_reward`，且 31 项 runtime `joint_names/joint_velocity_limits` 与公式来源
+一致。仍按 `+200/+500/+1000` 早判；source tests 不能当作 runtime/行为授权。
+
 ## 已知限制
 
 - 本地测试只证明 manifest/argv/lineage/no-clobber/activation 逻辑，不能代替 Isaac runtime 行为。

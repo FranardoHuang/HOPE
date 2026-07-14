@@ -322,14 +322,121 @@ def _racket_guidance_reward_contract(env_cfg, *, racket_task: bool) -> dict | No
     }
 
 
+def _joint_velocity_limit_hinge_reward_contract(env_cfg, runtime_facts: dict) -> dict | None:
+    """Bind the post-Hydra qdot-limit hinge and its runtime-ordered denominator.
+
+    The complete 31-element name/limit vectors already live in ``runtime_facts`` and therefore in
+    the same hard contract.  This subsection binds the reward identity and refuses any ambiguity
+    between articulation order, action order, and the velocity-limit vector it normalizes by.
+    Generic tasks without this source-gated term retain ``None`` for backward compatibility.
+    """
+    rewards = getattr(env_cfg, "rewards", None)
+    if rewards is None:
+        raise RuntimeError("training hard contract requires env_cfg.rewards")
+    term = getattr(rewards, "joint_velocity_limit_hinge", None)
+    if term is None:
+        return None
+
+    weight = getattr(term, "weight", None)
+    if isinstance(weight, bool) or not isinstance(weight, (int, float)):
+        raise RuntimeError(
+            "rewards.joint_velocity_limit_hinge.weight must be a finite number"
+        )
+    weight = float(weight)
+    if not math.isfinite(weight) or weight > 0.0:
+        raise RuntimeError(
+            "rewards.joint_velocity_limit_hinge.weight must be finite and <= 0"
+        )
+
+    params = getattr(term, "params", None)
+    if not isinstance(params, dict):
+        raise RuntimeError("rewards.joint_velocity_limit_hinge.params must be a mapping")
+    margin = params.get("margin")
+    if isinstance(margin, bool) or not isinstance(margin, (int, float)):
+        raise RuntimeError(
+            "rewards.joint_velocity_limit_hinge.margin must be finite and in (0, 1)"
+        )
+    margin = float(margin)
+    if not math.isfinite(margin) or not 0.0 < margin < 1.0:
+        raise RuntimeError(
+            "rewards.joint_velocity_limit_hinge.margin must be finite and in (0, 1)"
+        )
+    expected_count = params.get("expected_joint_count")
+    if type(expected_count) is not int or expected_count != 31:
+        raise RuntimeError(
+            "rewards.joint_velocity_limit_hinge.expected_joint_count must be exactly 31"
+        )
+    asset_cfg = params.get("asset_cfg")
+    if getattr(asset_cfg, "name", None) != "robot":
+        raise RuntimeError(
+            "rewards.joint_velocity_limit_hinge.asset_cfg must select the robot articulation"
+        )
+    raw_joint_ids = getattr(asset_cfg, "joint_ids", slice(None))
+    if isinstance(raw_joint_ids, slice):
+        selected_joint_ids = list(range(31))[raw_joint_ids]
+    else:
+        if hasattr(raw_joint_ids, "tolist"):
+            raw_joint_ids = raw_joint_ids.tolist()
+        try:
+            selected_joint_ids = [int(value) for value in raw_joint_ids]
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "rewards.joint_velocity_limit_hinge.asset_cfg must select identity 31-joint order"
+            ) from exc
+    if selected_joint_ids != list(range(31)):
+        raise RuntimeError(
+            "rewards.joint_velocity_limit_hinge.asset_cfg must select identity 31-joint order"
+        )
+
+    articulation_names = runtime_facts.get("articulation_joint_names")
+    joint_names = runtime_facts.get("joint_names")
+    limits = runtime_facts.get("joint_velocity_limits")
+    if (
+        not isinstance(articulation_names, list)
+        or not isinstance(joint_names, list)
+        or len(joint_names) != 31
+        or len(set(joint_names)) != 31
+        or joint_names != articulation_names
+    ):
+        raise RuntimeError(
+            "joint_velocity_limit_hinge requires identity 31-joint runtime articulation order"
+        )
+    if not isinstance(limits, list) or len(limits) != 31:
+        raise RuntimeError(
+            "joint_velocity_limit_hinge requires 31 runtime joint_velocity_limits"
+        )
+    try:
+        limits = [float(value) for value in limits]
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "joint_velocity_limit_hinge limits must be finite and positive"
+        ) from exc
+    if any(not math.isfinite(value) or value <= 0.0 for value in limits):
+        raise RuntimeError(
+            "joint_velocity_limit_hinge limits must be finite and positive"
+        )
+
+    return {
+        "schema_version": 1,
+        "enabled": weight < 0.0,
+        "weight": weight,
+        "margin": margin,
+        "asset_name": "robot",
+        "joint_count": 31,
+        "joint_order": "runtime_articulation_identity",
+        "velocity_limit_source": "runtime_execution_facts.joint_velocity_limits",
+        "formula": "mean(relu(abs(qd)/joint_velocity_limits-margin)^2)",
+    }
+
+
 def _build_training_hard_contract(env, actor_contract) -> dict:
     """Immutable actor/task facts that must match across a checkpoint resume.
 
     Reward weights, termination thresholds and optimizer settings are normally absent because
-    they are curriculum-mutable.  A narrow exception binds the post-override racket-guidance pair:
-    those values are the causal identity of the signed-face C2/D2 experiment.  Geometry, command
-    meaning, clip identity, action processing, and every field that can move a strike/reveal/
-    deadline or actor-visible target in time are also immutable.
+    they are curriculum-mutable.  Narrow exceptions bind the post-override racket-guidance pair
+    and qdot-limit hinge: those values are causal identities of their registered ablations.
+    Geometry, command meaning, clip identity, action processing, and every field that can move a
+    strike/reveal/deadline or actor-visible target in time are also immutable.
     """
     from whole_body_tracking.utils.training_contract import (
         TRAINING_CONTRACT_SCHEMA_VERSION,
@@ -491,6 +598,9 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         "motion_imitation_body_names": _motion_imitation_body_names_contract(env_cfg),
         "racket_guidance_reward": _racket_guidance_reward_contract(
             env_cfg, racket_task=racket_cmd is not None
+        ),
+        "joint_velocity_limit_hinge_reward": (
+            _joint_velocity_limit_hinge_reward_contract(env_cfg, runtime_facts)
         ),
         "motion_clips": clips,
         "question_bank": question_bank,
@@ -770,6 +880,7 @@ _REWARD_KEYS = (
     "post_strike_brake_weight", "post_strike_brake_std",
     "hold_heading_weight", "hold_heading_std", "foot_orientation_hold_gate",
     "base_decel_weight", "base_decel_std", "base_decel_v_gain", "base_decel_v_max",
+    "joint_velocity_limit_hinge_weight", "joint_velocity_limit_hinge_margin",
     # R16 / V1 wrist-mimic surgery (orientation 2026-07-04; linear velocity 2026-07-08 §③).
     "free_wrist_ori_mimic", "free_wrist_vel_mimic",
     # A0/A1 non-striking-arm imitation ablation (2026-07-14).  This deliberately has one
@@ -1128,6 +1239,60 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 _require(hasattr(R, "base_decel"), "rewards.base_decel")
                 R.base_decel.params[_pk] = float(_bd)
                 applied.append(f"rewards.base_decel.params.{_pk}={float(_bd)}")
+        # D6 normalized qdot-limit hinge (default OFF): this is a realized joint-speed penalty
+        # against the actual articulation limits, not an action-rate proxy.  Its sign and margin
+        # are causal arm identity, so both are validated here and bound into the hard contract.
+        _qdot_weight = _get(rw, "joint_velocity_limit_hinge_weight")
+        _qdot_margin = _get(rw, "joint_velocity_limit_hinge_margin")
+        if _qdot_weight is not None or _qdot_margin is not None:
+            _require(
+                hasattr(R, "joint_velocity_limit_hinge"),
+                "rewards.joint_velocity_limit_hinge",
+            )
+            _qdot_term = R.joint_velocity_limit_hinge
+            if _qdot_weight is not None:
+                if isinstance(_qdot_weight, bool):
+                    raise _OverrideError(
+                        "rewards.joint_velocity_limit_hinge.weight must be finite and <= 0"
+                    )
+                try:
+                    _qdot_weight_value = float(_qdot_weight)
+                except (TypeError, ValueError) as exc:
+                    raise _OverrideError(
+                        "rewards.joint_velocity_limit_hinge.weight must be finite and <= 0"
+                    ) from exc
+                if not math.isfinite(_qdot_weight_value) or _qdot_weight_value > 0.0:
+                    raise _OverrideError(
+                        "rewards.joint_velocity_limit_hinge.weight must be finite and <= 0"
+                    )
+                _qdot_term.weight = _qdot_weight_value
+                applied.append(
+                    f"rewards.joint_velocity_limit_hinge.weight={_qdot_weight_value}"
+                )
+            if _qdot_margin is not None:
+                if isinstance(_qdot_margin, bool):
+                    raise _OverrideError(
+                        "rewards.joint_velocity_limit_hinge.margin must be finite and in (0, 1)"
+                    )
+                try:
+                    _qdot_margin_value = float(_qdot_margin)
+                except (TypeError, ValueError) as exc:
+                    raise _OverrideError(
+                        "rewards.joint_velocity_limit_hinge.margin must be finite and in (0, 1)"
+                    ) from exc
+                if not math.isfinite(_qdot_margin_value) or not 0.0 < _qdot_margin_value < 1.0:
+                    raise _OverrideError(
+                        "rewards.joint_velocity_limit_hinge.margin must be finite and in (0, 1)"
+                    )
+                _require(
+                    "margin" in _qdot_term.params,
+                    "rewards.joint_velocity_limit_hinge.params['margin']",
+                )
+                _qdot_term.params["margin"] = _qdot_margin_value
+                applied.append(
+                    "rewards.joint_velocity_limit_hinge.params.margin="
+                    f"{_qdot_margin_value}"
+                )
         _foot_hold_gate = _get(rw, "foot_orientation_hold_gate")
         if _foot_hold_gate is not None:
             _require(hasattr(R, "foot_orientation"), "rewards.foot_orientation")

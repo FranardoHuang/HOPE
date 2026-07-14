@@ -343,6 +343,114 @@ def base_decel_tracking(
     return raw * active.float()
 
 
+def joint_velocity_limit_hinge(
+    env: ManagerBasedRLEnv,
+    asset_cfg,
+    margin: float = 0.85,
+    expected_joint_count: int = 31,
+) -> torch.Tensor:
+    """Penalize only the normalized joint-speed tail near the articulation limits.
+
+    The returned value is non-negative; the :class:`RewardTermCfg` weight must therefore be
+    non-positive.  Unlike ``action_rate_l2``, this term measures the robot's *realized* joint
+    velocity against the actual articulation limits, in the exact runtime articulation order::
+
+        mean_j(relu(abs(qd_j) / qd_limit_j - margin) ** 2)
+
+    This source gate is deliberately A3-specific: all 31 runtime joints must be selected in
+    identity order.  Missing/reordered joints and zero/non-finite limits fail closed rather than
+    silently changing the denominator.  The limit tensor is read on every call: Isaac may update
+    articulation limits at runtime, so caching the first value would cease to measure the actual
+    plant.  CUDA validity assertions stay asynchronous rather than forcing a host sync per step.
+    """
+    if type(expected_joint_count) is not int or expected_joint_count != 31:
+        raise ValueError(
+            "joint_velocity_limit_hinge requires the exact 31-joint A3 runtime order"
+        )
+    if isinstance(margin, bool):
+        raise ValueError("joint_velocity_limit_hinge margin must be finite and in (0, 1)")
+    margin = float(margin)
+    if not math.isfinite(margin) or not 0.0 < margin < 1.0:
+        raise ValueError("joint_velocity_limit_hinge margin must be finite and in (0, 1)")
+
+    asset = env.scene[asset_cfg.name]
+    data = asset.data
+    joint_names = list(getattr(data, "joint_names", getattr(asset, "joint_names", ())))
+    if (
+        len(joint_names) != expected_joint_count
+        or any(not str(name) for name in joint_names)
+        or len(set(joint_names)) != expected_joint_count
+    ):
+        raise RuntimeError(
+            "joint_velocity_limit_hinge requires exactly 31 unique runtime joint names"
+        )
+
+    raw_ids = getattr(asset_cfg, "joint_ids", slice(None))
+    if isinstance(raw_ids, slice):
+        joint_ids = list(range(expected_joint_count))[raw_ids]
+    else:
+        if hasattr(raw_ids, "tolist"):
+            raw_ids = raw_ids.tolist()
+        joint_ids = [int(value) for value in raw_ids]
+    if joint_ids != list(range(expected_joint_count)):
+        raise RuntimeError(
+            "joint_velocity_limit_hinge requires identity 31-joint articulation order, "
+            f"got joint_ids={joint_ids}"
+        )
+
+    joint_vel = data.joint_vel
+    if joint_vel.ndim != 2 or tuple(joint_vel.shape)[1] != expected_joint_count:
+        raise RuntimeError(
+            "joint_velocity_limit_hinge requires joint_vel shaped [num_envs, 31], "
+            f"got {tuple(joint_vel.shape)}"
+        )
+
+    runtime_limits = data.joint_vel_limits
+    if runtime_limits.ndim == 1:
+        if tuple(runtime_limits.shape) != (expected_joint_count,):
+            raise RuntimeError(
+                "joint_velocity_limit_hinge requires 31 articulation velocity limits, "
+                f"got {tuple(runtime_limits.shape)}"
+            )
+        limits = runtime_limits
+        limits_valid = torch.all(torch.isfinite(limits) & (limits > 0.0))
+    elif runtime_limits.ndim == 2:
+        if (
+            tuple(runtime_limits.shape)[0] < 1
+            or tuple(runtime_limits.shape)[1] != expected_joint_count
+            or tuple(runtime_limits.shape)[0] not in (1, tuple(joint_vel.shape)[0])
+        ):
+            raise RuntimeError(
+                "joint_velocity_limit_hinge requires joint_vel_limits shaped [31] or "
+                f"[num_envs, 31], got {tuple(runtime_limits.shape)}"
+            )
+        limits = runtime_limits
+        limits_valid = torch.all(torch.isfinite(limits) & (limits > 0.0))
+        if tuple(runtime_limits.shape)[0] > 1:
+            limits_valid = limits_valid & torch.all(
+                runtime_limits == runtime_limits[0].unsqueeze(0)
+            )
+    else:
+        raise RuntimeError(
+            "joint_velocity_limit_hinge requires joint_vel_limits shaped [31] or "
+            f"[num_envs, 31], got {tuple(runtime_limits.shape)}"
+        )
+
+    # CPU tests and CPU VecEnv paths get the precise diagnostic immediately.  On CUDA,
+    # torch._assert_async fails the training stream without a per-step host synchronization.
+    if limits_valid.device.type == "cpu":
+        if not bool(limits_valid):
+            raise RuntimeError(
+                "joint_velocity_limit_hinge requires finite, positive, identical "
+                "articulation velocity limits in every environment"
+            )
+    else:
+        torch._assert_async(limits_valid)
+
+    normalized_excess = torch.relu(torch.abs(joint_vel) / limits - margin)
+    return torch.mean(torch.square(normalized_excess), dim=-1)
+
+
 def racket_strike_success(
     env: ManagerBasedRLEnv, command_name: str, std_pos: float, std_vel: float, std_normal: float
 ) -> torch.Tensor:

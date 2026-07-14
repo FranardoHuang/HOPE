@@ -410,3 +410,23 @@ artifact。A2 固定 Pod1 GPU0、guidance `0.0`；B2 固定 Pod2 GPU0、guidance
 false。跨 Pod pair finalizer 还会用实际 GPU0 UUID 验明 Pod，并要求两份 hard contract 的所有
 current-only 值都匹配预注册值，完整比较后只允许 signed-face weight 不同。运行真源见
 [操作](../../operations/run_phase1_signed_face_a2b2_l1.md)。
+
+## 2026-07-14 第二圈第六机制：真实 qdot 上限尾部惩罚（source only）
+
+这一机制回答的是“policy 是否因为把真实关节速度推到 plant 上限附近而破坏击球/平衡”，不是再做一条
+`action_rate` 平滑。新增的 [`qdot-limit hinge`](../../DEFINITIONS.md#qdot-limit-hinge) 对每个 runtime
+关节计算 `abs(qd)/limit`，只惩罚超过 margin 的尾部并对 31 关节取均值。默认 weight `0.0`、margin
+`0.85`；启用时 weight 必须非正。关节速度和分母都来自同一个 articulation runtime order，错误顺序、
+非 31 关节、零/非有限 limit 或跨 environment limit 漂移全部 fail closed。
+
+若后续物化这一臂，最小 paired 语义是：以同一冻结 `model_13800.pt`、seed3、signed-face guidance
+`-0.4`、动作/题库/plant/优化器为共同父项，control 保持 hinge weight `0.0`，treatment 只改变预注册的
+一个负 weight；两条都直接从共同父 checkpoint 出发，禁止从 B 的 `+200` child 再续训。weight、margin、
+公式、joint-order/limit source 必须同时出现在 hard contract；outer launch claim 还须逐字节绑定 exact
+Hydra argv 和 manifest。沿用 `+200/+500/+1000` 早判，先看 limit-tail 下降是否同时保住 signed
+composite、root fall 和击球侧速度；单一机制未胜过匹配对照前，不与 recovery reward 混合，也不买第二
+seed。
+
+当前只完成 E1 source gate：VirtualBall 默认关闭、Hydra fail-loud override/applied marker、hard-contract
+binding 与 qdot-focused `30 passed`。没有 machine prereg、采用的负 weight、Pod runtime、checkpoint、judge、
+L2 或晋级授权；本节不能当作排队即发的训练配置。
