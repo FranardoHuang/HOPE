@@ -544,7 +544,10 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   均已 finite/loadable。fresh 的短 mechanics 因初始策略 5 秒前摔倒只验证到 push selection，但正式
   run 到约 iter 322 已记录第一次真实 apply。下一证据：同绝对迭代 checkpoint 的泛化、推扰后存活与固定点回归；随后
   才做同运行链 Gate3 对照。启动健康不等于质量晋级；旧周期代理与球路泛化局限见
-  [跨线审计](experiments/2026-07/EXP-V9-YIKANG-CROSS-LEARNING-20260715.md)。
+  [跨线审计](experiments/2026-07/EXP-V9-YIKANG-CROSS-LEARNING-20260715.md)。2026-07-15 Codex 正在
+  同一分支移植 `hitter@5f87a4f` 的 recipe-7/runtime-v2 训练、导出与部署合同；现役 V9 force
+  作业保持原 exact source，不切 checkout、不重启。下一检查点是两项依赖提交完整合入、host 合同测试
+  通过、空闲 GPU 复核，以及在独立 run namespace 发射一条 fresh RallyV10，而不是续训或替换现有矩阵。
 
 ### 训练引擎与机器人物理
 
