@@ -20,6 +20,13 @@
   不是动作/脚距失败；两批均不得 consume，正在只读盘点 Pod2 可重建 runtime。见
   [exact GMR 卷宗](experiments/motion_exact_gmr_s0_m0_20260713.md)。
 
+- B vendor L1 的第二次 CPU `dry-run` 在 dense 704 报 ankle 超限 `0.656861334 rad`，只读复算证实是
+  runtime-order column 23 elbow 被按 GMR-order column 23 ankle 解释的 adapter 假拒绝；真正 ankle
+  在 column 14 且合法，L0 按名字得到 max excess 0。L1 已在 densify/range/qpos 前加入冻结名字表的
+  byte-preserving 31-joint 双射并报告 permutation，duplicate/missing/drift 负例通过；不改 range、B/C
+  或动作字节。等待合入后 clean runtime 重跑，certificate 仍不存在、G08 保持 Partial。详见
+  [B vendor L1 卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1.md)。
+
 - clean base-decel 两份 `model_200` receipt 已闭合：checkpoint SHA-256 `6cb55718...94f1` /
   `d61998ac...6892`，76 tensors / 1,762,715 floats 全 finite、fresh lineage/claim/common schema-3 hard
   exact。step 0–200 两臂五个 post-swing counter 每点全零，raw base-decel 两边逐点为正且 weighted
@@ -31,7 +38,8 @@
 - B 的首次 vendor L1 CPU `dry-run` 在轨迹审计前因 private-name grounding helper 不能由 `sys.path`
   导入而 fail closed；没有 certificate，不是动作安全失败。harness 已改为按冻结 bytes/SHA 从 exact path
   事务式加载，执行前后复核 module origin，异常时恢复/清除 `sys.modules`，真实 helper alias 与
-  SHA/stale/body-failure 负例通过。等待合入后 clean runtime 重跑，G08 保持 Partial。详见
+  SHA/stale/body-failure 负例通过。合入后 clean runtime 已越过 import，并暴露本节上方的 joint-order
+  adapter 假拒绝；G08 始终保持 Partial。详见
   [B vendor L1 卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1.md)。
 
 - clean base-decel 单变量 pair 已按同一次顺序事务在 Pod2 GPU1/GPU2 越过首迭代：control/treatment

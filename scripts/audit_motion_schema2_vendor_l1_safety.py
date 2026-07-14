@@ -105,6 +105,66 @@ def _load_module(
     return module
 
 
+def reorder_runtime_joint_pos_for_ground(
+    joint_pos: Any,
+    runtime_joint_names: Sequence[str],
+    ground_joint_names: Sequence[str],
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Permute schema-2 runtime columns into the exact ground/MJCF hinge order.
+
+    Schema-2 stores Isaac/runtime articulation order, while ``ground_gmr_pkl``
+    consumes ``A3_GMR_JOINT_NAMES`` (the canonical vendor-MJCF hinge order).
+    The two contain the same 31 names but are not positionally equal.  This
+    adapter is a byte-preserving name bijection; it never edits joint values.
+    """
+
+    values = np.asarray(joint_pos)
+    source = tuple(runtime_joint_names)
+    target = tuple(ground_joint_names)
+    if values.ndim != 2 or values.shape[1] != 31 or not np.issubdtype(
+        values.dtype, np.floating
+    ):
+        raise VendorL1Error(
+            f"schema-2 joint_pos must be a floating [frames,31] array, got "
+            f"shape={values.shape} dtype={values.dtype}"
+        )
+    if not np.isfinite(values).all():
+        raise VendorL1Error("schema-2 joint_pos contains non-finite values")
+    for names, label in ((source, "runtime"), (target, "ground/MJCF")):
+        if len(names) != 31 or any(type(name) is not str or not name for name in names):
+            raise VendorL1Error(f"{label} joint order must contain 31 non-empty strings")
+        if len(set(names)) != 31:
+            raise VendorL1Error(f"{label} joint order contains duplicate names")
+    source_set = set(source)
+    target_set = set(target)
+    if source_set != target_set:
+        raise VendorL1Error(
+            "runtime and ground/MJCF joint orders are not the same name bijection: "
+            f"missing_from_runtime={sorted(target_set - source_set)} "
+            f"extra_in_runtime={sorted(source_set - target_set)}"
+        )
+
+    source_index = {name: index for index, name in enumerate(source)}
+    target_from_source = tuple(source_index[name] for name in target)
+    reordered = values[:, target_from_source]
+    if reordered.dtype != values.dtype or not np.array_equal(
+        reordered[:, np.argsort(np.asarray(target_from_source))], values
+    ):
+        raise VendorL1Error("joint-order adapter is not a byte-preserving bijection")
+    return reordered, {
+        "algorithm": (
+            "explicit_name_bijection_schema2_runtime_order_to_"
+            "ground_A3_GMR_JOINT_NAMES_before_densify_range_and_qpos"
+        ),
+        "source_order_contract": "schema2_runtime_articulation_joint_order",
+        "target_order_contract": "ground_gmr_pkl.A3_GMR_JOINT_NAMES_and_vendor_MJCF_hinges",
+        "source_joint_names": list(source),
+        "target_joint_names": list(target),
+        "target_from_source_indices": list(target_from_source),
+        "numeric_transform": "none_byte_preserving_column_permutation",
+    }
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -305,6 +365,17 @@ def validate_plan(plan_path: Path, expected_sha256: str) -> tuple[dict[str, Any]
         "dense_frames": 1201,
         "effective_sampling_hz": 400,
         "interpolation": "root_xyz_linear_root_quaternion_shortest_arc_slerp_joint_position_linear",
+        "joint_order_adapter": {
+            "algorithm": (
+                "explicit_name_bijection_schema2_runtime_order_to_"
+                "ground_A3_GMR_JOINT_NAMES_before_densify_range_and_qpos"
+            ),
+            "target_from_source_indices": [
+                2, 5, 8, 11, 16, 12, 17, 21, 23, 25, 27, 29, 13, 18, 22, 24,
+                26, 28, 30, 0, 3, 6, 9, 14, 19, 1, 4, 7, 10, 15, 20,
+            ],
+            "numeric_transform": "none_byte_preserving_column_permutation",
+        },
         "dense_sampling_is_continuous_time_certificate": False,
         "danger_propagation": "any dangerous dense sample fails the whole asset and marks both adjacent source frames",
         "joint_range_tolerance_rad": 0.00001,
@@ -583,13 +654,26 @@ def audit_runtime(plan: Mapping[str, Any], l0_v1_plan: Mapping[str, Any]) -> tup
         raise VendorL1Error("compiled vendor collision contract changed at runtime")
 
     root_wxyz = np.asarray(arrays["body_quat_w"][:, 0], dtype=np.float64)
+    runtime_joint_names = l0_v2.V1._read_names(
+        REPO_ROOT / l0_v1_plan["upstream_contracts"]["runtime_joint_order"]["path"],
+        31,
+        "schema-2 runtime joint order",
+    )
+    ground_joint_names = tuple(ground.A3_GMR_JOINT_NAMES)
+    ground_order_joint_pos, joint_order_adapter = reorder_runtime_joint_pos_for_ground(
+        arrays["joint_pos"], runtime_joint_names, ground_joint_names
+    )
+    safety = plan["safety_contract"]
+    adapter_contract = safety["joint_order_adapter"]
+    for key in ("algorithm", "target_from_source_indices", "numeric_transform"):
+        if joint_order_adapter[key] != adapter_contract[key]:
+            raise VendorL1Error(f"runtime joint-order adapter differs from preregistered {key}")
     payload = {
         "root_pos": np.asarray(arrays["body_pos_w"][:, 0], dtype=np.float64),
         "root_rot": root_wxyz[:, [1, 2, 3, 0]],
-        "dof_pos": np.asarray(arrays["joint_pos"], dtype=np.float64),
+        "dof_pos": np.asarray(ground_order_joint_pos, dtype=np.float64),
         "fps": np.array([50.0], dtype=np.float64),
     }
-    safety = plan["safety_contract"]
     dense, source_time = phase.densify_payload(payload, safety["substeps_per_source_interval"])
     if (
         dense["root_pos"].shape != (safety["dense_frames"], 3)
@@ -675,6 +759,7 @@ def audit_runtime(plan: Mapping[str, Any], l0_v1_plan: Mapping[str, Any]) -> tup
     )
     closest = int(np.argmin(minimum))
     audit = {
+        "joint_order_adapter": joint_order_adapter,
         "sampling": {
             "source_frames": 151,
             "source_fps": 50,

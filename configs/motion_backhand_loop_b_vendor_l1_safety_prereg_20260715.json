@@ -8,8 +8,8 @@
   "asset_id": "franco_backhand_loop_b",
   "validator": {
     "path": "scripts/audit_motion_schema2_vendor_l1_safety.py",
-    "bytes": 35477,
-    "sha256": "daa1f1bb700e9e0424101597900abc8cab013cc46d155f23f11c573d02bd66be"
+    "bytes": 39568,
+    "sha256": "6368bda72e57e646324c6ff7281a50c00c339ddedb954941e6455712954fac2e"
   },
   "frozen_l0": {
     "certificate": {
@@ -105,6 +105,43 @@
     "dense_frames": 1201,
     "effective_sampling_hz": 400,
     "interpolation": "root_xyz_linear_root_quaternion_shortest_arc_slerp_joint_position_linear",
+    "joint_order_adapter": {
+      "algorithm": "explicit_name_bijection_schema2_runtime_order_to_ground_A3_GMR_JOINT_NAMES_before_densify_range_and_qpos",
+      "target_from_source_indices": [
+        2,
+        5,
+        8,
+        11,
+        16,
+        12,
+        17,
+        21,
+        23,
+        25,
+        27,
+        29,
+        13,
+        18,
+        22,
+        24,
+        26,
+        28,
+        30,
+        0,
+        3,
+        6,
+        9,
+        14,
+        19,
+        1,
+        4,
+        7,
+        10,
+        15,
+        20
+      ],
+      "numeric_transform": "none_byte_preserving_column_permutation"
+    },
     "dense_sampling_is_continuous_time_certificate": false,
     "danger_propagation": "any dangerous dense sample fails the whole asset and marks both adjacent source frames",
     "joint_range_tolerance_rad": 0.00001,

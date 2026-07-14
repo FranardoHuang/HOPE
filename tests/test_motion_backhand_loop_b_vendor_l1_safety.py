@@ -20,6 +20,8 @@ L0_PLAN = ROOT / "configs/motion_backhand_loop_b_l0_static_prereg_20260715_v2.js
 L0_VALIDATOR = ROOT / "scripts/audit_motion_schema2_l0_static_v2.py"
 PHASE = ROOT / "scripts/screen_motion_gmr_phase_safety.py"
 SELF_COLLISION = ROOT / "hope_training/whole_body_tracking/scripts/audit_self_collision.py"
+RUNTIME_JOINT_ORDER = ROOT / "configs/a3_runtime_articulation_joint_order.txt"
+GROUND = ROOT / "scripts/ground_gmr_pkl.py"
 
 
 def _sha(path: Path) -> str:
@@ -37,10 +39,94 @@ def _load(path: Path, name: str):
 
 L1 = _load(SCRIPT, "motion_vendor_l1_test")
 PHASE_MODULE = _load(PHASE, "motion_phase_safety_dense_test")
+GROUND_MODULE = _load(GROUND, "motion_ground_joint_order_test")
 
 
 def _plan() -> dict:
     return json.loads(PLAN.read_text(encoding="utf-8"))
+
+
+def _runtime_joint_names() -> tuple[str, ...]:
+    return tuple(
+        line.strip()
+        for line in RUNTIME_JOINT_ORDER.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    )
+
+
+def test_joint_order_adapter_is_the_exact_name_bijection_not_positional_relabeling():
+    runtime = _runtime_joint_names()
+    ground = tuple(GROUND_MODULE.A3_GMR_JOINT_NAMES)
+    values = np.tile(np.arange(31, dtype=np.float32), (2, 1))
+    reordered, evidence = L1.reorder_runtime_joint_pos_for_ground(values, runtime, ground)
+    for target_column, name in enumerate(ground):
+        source_column = runtime.index(name)
+        assert np.array_equal(reordered[:, target_column], values[:, source_column])
+    assert ground.index("left_ankle_pitch_joint") == 23
+    assert runtime.index("left_ankle_pitch_joint") == 14
+    assert evidence["target_from_source_indices"][23] == 14
+    assert ground.index("left_elbow_joint") == 8
+    assert runtime.index("left_elbow_joint") == 23
+    assert evidence["target_from_source_indices"][8] == 23
+    assert evidence["algorithm"].startswith("explicit_name_bijection_schema2_runtime_order")
+    assert evidence["numeric_transform"] == "none_byte_preserving_column_permutation"
+
+
+def test_joint_order_adapter_closes_exact_dense_704_false_ankle_failure():
+    runtime = _runtime_joint_names()
+    ground = tuple(GROUND_MODULE.A3_GMR_JOINT_NAMES)
+    values = np.zeros((151, 31), dtype=np.float32)
+    ankle_source = runtime.index("left_ankle_pitch_joint")
+    elbow_source = runtime.index("left_elbow_joint")
+    values[:, ankle_source] = np.float32(-0.574463963508606)
+    values[:, elbow_source] = np.float32(1.1804603338241577)
+    values[87:90, ankle_source] = np.asarray(
+        [-0.5764334797859192, -0.574463963508606, -0.5744715929031372],
+        dtype=np.float32,
+    )
+    values[87:90, elbow_source] = np.asarray(
+        [1.1790401935577393, 1.1804603338241577, 1.1767141819000244],
+        dtype=np.float32,
+    )
+    reordered, _ = L1.reorder_runtime_joint_pos_for_ground(values, runtime, ground)
+    payload = {
+        "root_pos": np.zeros((151, 3), dtype=np.float64),
+        "root_rot": np.tile(np.array([0.0, 0.0, 0.0, 1.0]), (151, 1)),
+        "dof_pos": reordered,
+        "fps": np.array([50.0]),
+    }
+    dense, source_time = PHASE_MODULE.densify_payload(payload, 8)
+    ankle_target = ground.index("left_ankle_pitch_joint")
+    elbow_target = ground.index("left_elbow_joint")
+    assert source_time[704] == 88.0
+    assert dense["dof_pos"][704, ankle_target] == pytest.approx(-0.574463963508606)
+    assert dense["dof_pos"][704, elbow_target] == pytest.approx(1.1804603338241577)
+
+    ankle_range = (-0.907571, 0.523599)
+    elbow_range = (-0.959931, 1.74533)
+    raw_false_excess = max(0.0, float(values[88, 23]) - ankle_range[1])
+    assert raw_false_excess == pytest.approx(0.6568613338241577)
+    assert ankle_range[0] <= dense["dof_pos"][704, ankle_target] <= ankle_range[1]
+    assert elbow_range[0] <= dense["dof_pos"][704, elbow_target] <= elbow_range[1]
+
+
+@pytest.mark.parametrize("which", ["runtime_duplicate", "runtime_missing", "target_duplicate"])
+def test_joint_order_adapter_rejects_non_bijection(which):
+    runtime = list(_runtime_joint_names())
+    ground = list(GROUND_MODULE.A3_GMR_JOINT_NAMES)
+    if which == "runtime_duplicate":
+        runtime[-1] = runtime[0]
+        match = "runtime joint order contains duplicate names"
+    elif which == "runtime_missing":
+        runtime[-1] = "not_an_a3_joint"
+        match = "not the same name bijection"
+    else:
+        ground[-1] = ground[0]
+        match = "ground/MJCF joint order contains duplicate names"
+    with pytest.raises(L1.VendorL1Error, match=match):
+        L1.reorder_runtime_joint_pos_for_ground(
+            np.zeros((151, 31), dtype=np.float32), runtime, ground
+        )
 
 
 def test_exact_path_loader_registers_private_alias_for_followup_import(tmp_path):
@@ -183,6 +269,14 @@ def test_static_gate_binds_exact_l0_certificate_npz_model_runtime_and_helpers():
         "e0381752eab46013c08559b331abb261beaa88a207a3c2f1155ab00857b962de"
     )
     assert plan["runtime"]["packages"] == {"numpy": "2.5.0", "mujoco": "3.10.0"}
+    assert plan["safety_contract"]["joint_order_adapter"]["algorithm"] == (
+        "explicit_name_bijection_schema2_runtime_order_to_"
+        "ground_A3_GMR_JOINT_NAMES_before_densify_range_and_qpos"
+    )
+    assert plan["safety_contract"]["joint_order_adapter"][
+        "target_from_source_indices"
+    ] == [2, 5, 8, 11, 16, 12, 17, 21, 23, 25, 27, 29, 13, 18, 22, 24,
+          26, 28, 30, 0, 3, 6, 9, 14, 19, 1, 4, 7, 10, 15, 20]
     for key, path in (
         ("dense_safety_tool", PHASE),
         ("self_collision_helper", SELF_COLLISION),
@@ -335,6 +429,14 @@ def test_contract_cannot_claim_continuous_time_or_weaken_five_mm_gate(tmp_path):
     plan = _plan()
     plan["safety_contract"]["dense_sampling_is_continuous_time_certificate"] = True
     drifted = tmp_path / "continuous.json"
+    drifted.write_text(json.dumps(plan), encoding="utf-8")
+    with pytest.raises(L1.VendorL1Error, match="safety contract changed"):
+        L1.validate_plan(drifted, _sha(drifted))
+
+    plan = _plan()
+    plan["safety_contract"]["joint_order_adapter"]["algorithm"] = (
+        "raw_positional_relabeling"
+    )
     drifted.write_text(json.dumps(plan), encoding="utf-8")
     with pytest.raises(L1.VendorL1Error, match="safety contract changed"):
         L1.validate_plan(drifted, _sha(drifted))
