@@ -1,12 +1,12 @@
 # EXP-P1-CONDITIONAL-FACE-GUIDANCE — 不逃离就绪区的固定预算 Reward
 
-- 状态：`proposed`
+- 状态：`Partial`（E1 source gate 已合入 `main`；尚无 Pod runtime/checkpoint）
 - 阶段/轴：阶段 1 固定点；Reward 争抢机制
 - 集成小目标：在不牺牲触点、拍速、完成率或安全的前提下，降低有符号拍面误差
 - 人类负责人：franco
 - 执行者：Codex
 - 复核/决策负责人：franco
-- 最高证据等级：`E1`（feature source/tests；尚未合入 `main` 或运行 Isaac）
+- 最高证据等级：`E1`（`main@61007e9` source/tests；尚未运行 Isaac）
 - 创建日期/最后复核日期：2026-07-14
 
 共享缩写见[术语与人话对照](../../DEFINITIONS.md)。本文的
@@ -96,9 +96,9 @@ joint/torque/qdot limit、观测、动作或 plant。以下任一项都独立判
 ## 决定
 
 - 决定：`inconclusive`
-- 理由：公式与 source gate 已实现，但尚未进入 `main`、未做 runtime smoke 或训练。
+- 理由：公式、反向激励反例与 source gate 已进入 `main@61007e9`，但未做 runtime smoke 或训练。
 - 是否已纳入当前 setting：`no`
-- 局限/下一个 gate：先合入并补 exact source/machine prereg，再进入 lean YAML；禁止直接手写 CLI 点火。
+- 局限/下一个 gate：补 exact source/machine prereg 后成对进入 lean YAML；禁止直接手写 CLI 点火。
 
 ## 复现与证据
 

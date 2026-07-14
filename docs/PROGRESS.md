@@ -37,7 +37,7 @@
   G05 仍为 Partial。见[操作](operations/run_lean_training_queue.md)与
   [实验](experiments/2026-07/EXP-P1-FRESH-C-MECHANISM-ABLATION.md)。
 
-- 新增默认关闭的“不逃离就绪区”固定预算 Reward source gate：击球时间窗内未就绪时保持最大成本，
+- `main@61007e9` 新增默认关闭的“不逃离就绪区”固定预算 Reward source gate：击球时间窗内未就绪时保持最大成本，
   就绪后才把成本连续换成有符号拍面误差；位置/拍速改善绝不会增加成本，门外没有拍面梯度，也不能
   通过故意退到外门免罚。首轮只允许同新 source 的 `0/-0.4` 配对、单 seed 与
   `+200/+500/+1000` 早判；focused `6+78+34+62 passed`，未合 main、未跑 Pod，不改变当前 setting。

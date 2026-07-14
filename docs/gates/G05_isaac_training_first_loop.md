@@ -1805,7 +1805,8 @@ Hydra 只暴露一个非正 weight 轴；门宽和公式随 source 固定并进�
 数值/compact support、无效 bounds、raw-A 接线和 override/hard-contract 负例已写入 focused tests。
 机制 math/梯度/单调性专项 `6 passed`，override 全文件 `78 passed`，raw-A face suite `34 passed`，schema-3/
 launch-claim `62 passed`，`py_compile` 与 `git diff --check` 通过。
-当前没有 main merge、Pod runtime、checkpoint 或行为结果；后续 control/treatment 必须同新 source、同
+源码与反向激励反例已合入 `main@61007e9`；当前没有 Pod runtime、checkpoint 或行为结果。后续
+control/treatment 必须同新 source、同
 seed/动作/bank/plant，只改 conditional weight `0/-0.4`，并按 `+200/+500/+1000` 早判。安全/self-hit/
 fall/guard 退化不可由拍面收益补偿。G05 保持 `Partial`；见
 [实验卷宗](../experiments/2026-07/EXP-P1-CONDITIONAL-FACE-GUIDANCE.md)与
