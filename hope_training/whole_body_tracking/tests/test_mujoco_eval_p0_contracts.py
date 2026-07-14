@@ -711,6 +711,36 @@ def test_final_denominator_report_downgrades_bank_leg_for_inexact_artifact():
     ]
 
 
+@pytest.mark.parametrize(
+    ("target_source", "allow_inexact_contract"),
+    [("bank", False), ("boxes", True), ("venue-balls", True)],
+)
+def test_velocity_limit_proxy_requires_bank_and_inexact_consent(
+    target_source, allow_inexact_contract
+):
+    with pytest.raises(SystemExit, match="requires both"):
+        M.resolve_velocity_limit_proxy_contract(
+            requested=True,
+            target_source=target_source,
+            allow_inexact_contract=allow_inexact_contract,
+            formal_execution_contract_ok=True,
+            evaluation_contract_exact=True,
+        )
+
+
+def test_velocity_limit_proxy_only_downgrades_authority_not_other_plant_guards():
+    formal, exact, strict_other_plant = M.resolve_velocity_limit_proxy_contract(
+        requested=True,
+        target_source="bank",
+        allow_inexact_contract=True,
+        formal_execution_contract_ok=True,
+        evaluation_contract_exact=True,
+    )
+    assert formal is False
+    assert exact is False
+    assert strict_other_plant is True
+
+
 def test_mujoco_robot_fails_mismatched_bound_armature_and_active_velocity_limit(monkeypatch):
     joint_names, body_names, _ = _install_fake_mujoco(
         monkeypatch, armature=0.02, step_velocity=13.0
@@ -746,6 +776,30 @@ def test_mujoco_robot_fails_mismatched_bound_armature_and_active_velocity_limit(
     )
     with pytest.raises(SystemExit, match="reached bound PhysX joint-velocity limit"):
         robot.apply_pd_and_step(np.zeros(31), np.ones(31), np.ones(31), 1)
+
+
+def test_explicit_velocity_proxy_continues_and_keeps_other_plant_guards(monkeypatch):
+    joint_names, body_names, _ = _install_fake_mujoco(
+        monkeypatch, armature=0.01, step_velocity=13.0
+    )
+    robot = M.MujocoRobot(
+        "unused.xml", joint_names, body_names, 0.005,
+        keep_native_damping=False, keep_frictionloss=False,
+        pd_mode="implicit", kd_for_implicit=np.ones(31),
+        actuator_types=("implicit",) * 31,
+        joint_armature=np.full(31, 0.01),
+        joint_velocity_limits=np.full(31, 12.0),
+        joint_effort_limits=np.full(31, 24.0),
+        require_bound_plant_match=True,
+        allow_velocity_limit_proxy=True,
+        allow_effort_limit_proxy=False,
+        fail_on_self_contact=True,
+    )
+    robot.apply_pd_and_step(np.zeros(31), np.ones(31), np.ones(31), 1)
+    assert robot.velocity_limit_hit_count == 1
+    assert robot.data.qvel[robot.vadr[0]] == pytest.approx(12.0)
+    assert robot.allow_effort_limit_proxy is False
+    assert robot.fail_on_self_contact is True
 
 
 def test_json_ready_replaces_nonfinite_and_numpy_scalars():

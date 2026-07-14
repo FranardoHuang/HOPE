@@ -700,6 +700,39 @@ def bank_evaluation_contract_exact(*, artifact_exact, schedule_exact, diagnostic
     return bool(artifact_exact and schedule_exact and not diagnostic_escape)
 
 
+def validate_velocity_limit_proxy_request(
+    *, requested, target_source, allow_inexact_contract
+):
+    """Keep the PhysX-velocity clamp behind a separate, bank-only diagnostic consent."""
+
+    if requested and (target_source != "bank" or not allow_inexact_contract):
+        raise SystemExit(
+            "[FATAL] --allow-velocity-limit-proxy is diagnostic-only and requires both "
+            "--target-source bank and --allow-inexact-contract"
+        )
+
+
+def resolve_velocity_limit_proxy_contract(
+    *, requested, target_source, allow_inexact_contract,
+    formal_execution_contract_ok, evaluation_contract_exact,
+):
+    """Downgrade only score authority while preserving every other plant guard."""
+
+    validate_velocity_limit_proxy_request(
+        requested=requested,
+        target_source=target_source,
+        allow_inexact_contract=allow_inexact_contract,
+    )
+    strict_other_plant_guards = bool(formal_execution_contract_ok)
+    if requested:
+        return False, False, strict_other_plant_guards
+    return (
+        bool(formal_execution_contract_ok),
+        bool(evaluation_contract_exact),
+        strict_other_plant_guards,
+    )
+
+
 def final_denominator_report(sampler, *, evaluation_contract_exact):
     """Render sampler denominators with the final artifact+schedule exactness.
 
@@ -4390,6 +4423,15 @@ def main():
                    help="DIAGNOSTIC ONLY: allow a legacy/unbound exam bank, missing old artifact "
                         "provenance, or an explicit old episode timeout. The summary is stamped "
                         "evaluation_contract_exact=false and must not be booked as a formal score.")
+    p.add_argument(
+        "--allow-velocity-limit-proxy",
+        action="store_true",
+        help="[bank, DIAGNOSTIC ONLY] clamp a MuJoCo joint velocity to the bound PhysX limit "
+             "after a hit so a direction-only rollout may continue. Requires both "
+             "--target-source bank and --allow-inexact-contract; always stamps "
+             "formal_execution_contract_ok/evaluation_contract_exact=false and does not relax "
+             "any other plant guard.",
+    )
     p.add_argument("--target-source", choices=["boxes", "venue-balls", "bank"], default="boxes",
                    help="boxes (default): racket targets from the per-clip training boxes (mode A, "
                         "in-distribution). venue-balls (mode B): sample INCOMING BALLS from the "
@@ -4487,6 +4529,12 @@ def main():
                         "generation-mismatched reference (the 07-07 incident shape). Inert outside "
                         "the multiswing protocol (teleport / --deploy-faithful).")
     args = p.parse_args()
+
+    validate_velocity_limit_proxy_request(
+        requested=args.allow_velocity_limit_proxy,
+        target_source=args.target_source,
+        allow_inexact_contract=args.allow_inexact_contract,
+    )
 
     if args.venue_fixed_normal and args.target_source != "venue-balls":
         raise SystemExit("[FATAL] --venue-fixed-normal only means something with "
@@ -4800,6 +4848,24 @@ def main():
                 + "; ".join(bank_profile_violations)
                 + "; evaluation_contract_exact=false"
             )
+    (
+        formal_execution_contract_ok,
+        policy.evaluation_contract_exact,
+        strict_other_plant_guards,
+    ) = resolve_velocity_limit_proxy_contract(
+        requested=args.allow_velocity_limit_proxy,
+        target_source=args.target_source,
+        allow_inexact_contract=args.allow_inexact_contract,
+        formal_execution_contract_ok=formal_execution_contract_ok,
+        evaluation_contract_exact=policy.evaluation_contract_exact,
+    )
+    if args.allow_velocity_limit_proxy:
+        print(
+            "[mj-sim2sim] WARNING: --allow-velocity-limit-proxy clamps post-step velocity "
+            "to the bound PhysX limit for direction-only diagnosis; "
+            "formal_execution_contract_ok=false evaluation_contract_exact=false. "
+            "Bound-plant, effort-limit, q_des and self-contact guards remain unchanged."
+        )
     if policy.hitter_pure:
         if args.target_source != "boxes":
             raise SystemExit(
@@ -5223,10 +5289,12 @@ def main():
             policy.joint_velocity_limits if bound_schema3_plant else None
         ),
         joint_effort_limits=(policy.joint_effort_limits if bound_schema3_plant else None),
-        require_bound_plant_match=formal_execution_contract_ok,
-        allow_velocity_limit_proxy=not formal_execution_contract_ok,
-        allow_effort_limit_proxy=not formal_execution_contract_ok,
-        fail_on_self_contact=formal_execution_contract_ok,
+        require_bound_plant_match=strict_other_plant_guards,
+        allow_velocity_limit_proxy=(
+            args.allow_velocity_limit_proxy or not strict_other_plant_guards
+        ),
+        allow_effort_limit_proxy=not strict_other_plant_guards,
+        fail_on_self_contact=strict_other_plant_guards,
     )
     if formal_qdes_limits is not None:
         robot.soft_jnt_lo, robot.soft_jnt_hi = (
