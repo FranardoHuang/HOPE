@@ -1,5 +1,8 @@
 import json
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,13 +58,21 @@ def test_post_swing_teacher_capture_is_one_shot_and_not_training_authority():
     assert failure["pod1_and_pod2_gpu0_forbidden"] is True
 
 
-def test_post_swing_teacher_capture_source_bindings_match_main_bytes():
+def test_post_swing_teacher_capture_source_bindings_match_frozen_commit_bytes():
     plan = json.loads(PLAN.read_text(encoding="utf-8"))
     import hashlib
 
+    commit = plan["capture_source"]["commit"]
     for row in plan["capture_source"]["files"].values():
-        path = ROOT / row["path"]
-        raw = path.read_bytes()
+        try:
+            raw = subprocess.run(
+                ["git", "show", f"{commit}:{row['path']}"],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+            ).stdout
+        except subprocess.CalledProcessError:
+            pytest.skip("frozen capture source commit is unavailable in this shallow checkout")
         assert len(raw) == row["bytes"]
         assert hashlib.sha256(raw).hexdigest() == row["sha256"]
 

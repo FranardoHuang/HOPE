@@ -17,6 +17,7 @@ defaults:
 
 headless: false
 device: cuda:0
+seed: 0
 num_envs: 2
 
 wandb_path: null      # <entity>/hope_wbc/<run_id>  (a trained run to load)

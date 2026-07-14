@@ -29,6 +29,13 @@ from train import (
 )
 
 
+def _validate_play_seed(value):
+    """Return an exact replay seed, rejecting coercible or out-of-range values."""
+    if type(value) is not int or not 0 <= value <= 0xFFFFFFFF:
+        raise ValueError("play seed must be a plain int in [0, 4294967295]")
+    return value
+
+
 def _run_play(cfg, simulation_app):
     import pathlib
 
@@ -49,9 +56,11 @@ def _run_play(cfg, simulation_app):
 
     task_id = str(cfg.task.gym_task)
     num_envs = int(cfg.num_envs) if cfg.num_envs is not None else int(cfg.task.env.num_envs)
+    _validate_play_seed(cfg.get("seed", None))
 
     env_cfg = parse_env_cfg(task_id, device=str(cfg.device), num_envs=num_envs)
     _apply_task_overrides(env_cfg, cfg.task, _registry_clip_name(cfg))
+    env_cfg.seed = int(cfg.seed)
     env_cfg.sim.device = str(cfg.device)
 
     # HER achieved-target replay is TRAIN-ONLY (export/replay must see the pure box distribution).
@@ -67,6 +76,7 @@ def _run_play(cfg, simulation_app):
             env_cfg.commands.motion.speed_scale_per_clip = None
 
     agent_cfg = RslRlOnPolicyRunnerCfg(**runner_kwargs(OmegaConf.to_container(cfg.algo, resolve=True), str(cfg.task.experiment_name)))
+    agent_cfg.seed = int(cfg.seed)
     agent_cfg.device = str(cfg.device)
 
     log_root_path = os.path.abspath(os.path.join("logs", "rsl_rl", agent_cfg.experiment_name))
