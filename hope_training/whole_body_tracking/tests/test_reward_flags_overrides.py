@@ -491,6 +491,37 @@ def test_virtual_ball_yaml_pins_outcome_dominant_effective_weights():
 
 
 # --------------------------------------------------------------------------------------------- #
+# base-decel weight-independent activation observer
+# --------------------------------------------------------------------------------------------- #
+@pytest.mark.parametrize("weight", [0.0, 1.0])
+def test_base_decel_override_enables_same_exact_observer_for_control_and_treatment(weight):
+    env_cfg, applied = _apply(
+        {
+            "rewards": {
+                "base_decel_weight": weight,
+                "base_decel_v_gain": 1.7,
+                "base_decel_v_max": 1.2,
+                "base_decel_std": 0.35,
+            }
+        }
+    )
+    command = env_cfg.commands.racket_target
+    assert command.base_decel_activation_enabled is True
+    assert command.base_decel_activation_v_gain == pytest.approx(1.7)
+    assert command.base_decel_activation_v_max == pytest.approx(1.2)
+    assert command.base_decel_activation_std == pytest.approx(0.35)
+    assert env_cfg.rewards.base_decel.weight == pytest.approx(weight)
+    assert any("commands.racket_target.base_decel_activation=" in item for item in applied)
+
+
+def test_base_decel_observer_remains_absent_without_explicit_override():
+    env_cfg, _ = _apply({"rewards": {"racket_position_weight": 14.0}})
+    assert not hasattr(
+        env_cfg.commands.racket_target, "base_decel_activation_enabled"
+    )
+
+
+# --------------------------------------------------------------------------------------------- #
 # V1 free_wrist_vel_mimic
 # --------------------------------------------------------------------------------------------- #
 def test_v1_free_wrist_vel_mimic_drops_wrist_from_lin_vel_only():

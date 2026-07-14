@@ -186,6 +186,28 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     self._log_scalar(
                         f"Live/{term_name}/command_counter", self._mean_tensor(term.command_counter), step
                     )
+                if bool(
+                    getattr(
+                        getattr(term, "cfg", None),
+                        "base_decel_activation_enabled",
+                        False,
+                    )
+                ):
+                    # The observer stores its weight-independent ledger on racket_target.  Consume
+                    # it once at the same PPO-update boundary as the motion activation ledgers;
+                    # totals/raw sum must not be averaged over num_envs.
+                    from whole_body_tracking.tasks.tracking.mdp.hope_rewards import (
+                        consume_base_decel_activation_counters,
+                    )
+
+                    for counter_name, counter_value in (
+                        consume_base_decel_activation_counters(env, term_name).items()
+                    ):
+                        self._log_scalar(
+                            f"Live/{term_name}/{counter_name}",
+                            self._scalar_tensor(counter_value),
+                            step,
+                        )
 
         if hasattr(env, "reward_manager"):
             self._log_scalar("Live/Reward/total", self._mean_tensor(getattr(env, "reward_buf", None)), step)

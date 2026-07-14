@@ -1362,6 +1362,47 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 _require(hasattr(R, "base_decel"), "rewards.base_decel")
                 R.base_decel.params[_pk] = float(_bd)
                 applied.append(f"rewards.base_decel.params.{_pk}={float(_bd)}")
+        _base_decel_activation_requested = any(
+            _get(rw, key) is not None
+            for key in (
+                "base_decel_weight",
+                "base_decel_std",
+                "base_decel_v_gain",
+                "base_decel_v_max",
+            )
+        )
+        if _base_decel_activation_requested:
+            _require(
+                hasattr(env_cfg.commands, "racket_target"),
+                "commands.racket_target (base_decel activation observer)",
+            )
+            _require(
+                hasattr(R, "base_decel") and R.base_decel is not None,
+                "rewards.base_decel (base_decel activation observer)",
+            )
+            _base_decel_params = R.base_decel.params
+            for _required_param in ("v_gain", "v_max", "std"):
+                _require(
+                    _required_param in _base_decel_params,
+                    f"rewards.base_decel.params.{_required_param}",
+                )
+            _racket_command = env_cfg.commands.racket_target
+            _racket_command.base_decel_activation_enabled = True
+            _racket_command.base_decel_activation_v_gain = float(
+                _base_decel_params["v_gain"]
+            )
+            _racket_command.base_decel_activation_v_max = float(
+                _base_decel_params["v_max"]
+            )
+            _racket_command.base_decel_activation_std = float(
+                _base_decel_params["std"]
+            )
+            applied.append(
+                "commands.racket_target.base_decel_activation="
+                f"({float(_base_decel_params['v_gain'])},"
+                f"{float(_base_decel_params['v_max'])},"
+                f"{float(_base_decel_params['std'])})"
+            )
         # D6 normalized qdot-limit hinge (default OFF): this is a realized joint-speed penalty
         # against the actual articulation limits, not an action-rate proxy.  Its sign and margin
         # are causal arm identity, so both are validated here and bound into the hard contract.

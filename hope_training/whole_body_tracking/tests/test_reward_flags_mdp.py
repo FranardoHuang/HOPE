@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import inspect
 import math
 import os
 import re
@@ -1183,6 +1184,49 @@ def test_base_decel_is_disabled_during_frozen_hold():
     )
     assert reward[0] == 0.0
     assert reward[1] > 0.0
+
+
+def test_base_decel_observer_hook_uses_exact_resolved_params_and_disabled_is_noop(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        hope_rewards_mod,
+        "observe_base_decel_activation",
+        lambda env, command_name, **kwargs: calls.append(
+            (env, command_name, kwargs)
+        ),
+    )
+    command = types.SimpleNamespace(
+        _env="env",
+        cfg=types.SimpleNamespace(
+            base_decel_activation_enabled=False,
+            base_decel_activation_v_gain=1.7,
+            base_decel_activation_v_max=1.2,
+            base_decel_activation_std=0.35,
+        ),
+    )
+
+    hope_commands_mod.RacketTargetCommand._observe_base_decel_activation(command)
+    assert calls == []
+
+    command.cfg.base_decel_activation_enabled = True
+    hope_commands_mod.RacketTargetCommand._observe_base_decel_activation(command)
+    assert calls == [
+        (
+            "env",
+            "racket_target",
+            {"v_gain": 1.7, "v_max": 1.2, "std": 0.35},
+        )
+    ]
+
+
+def test_base_decel_observer_runs_after_all_command_target_updates():
+    source = inspect.getsource(
+        hope_commands_mod.RacketTargetCommand._update_command
+    )
+    observer = source.index("self._observe_base_decel_activation()")
+    assert source.index("self._compute_strike_timing()") < observer
+    assert source.index("self._push_actor_target()") < observer
+    assert source.index("motion.finalize_event_deadlines()") < observer
 
 
 # --------------------------------------------------------------------------------------------- #
