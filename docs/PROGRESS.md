@@ -113,9 +113,13 @@
 - 稀疏平衡失败的横向扰动消融已完成 source-only 红队修正版：`torso_link` 质心 WORLD-Y 有界脉冲按
   随机化后整机总质量缩放，`L0/L1` 用 domain-separated Philox4x32-10 共同随机题并暴露 potential draw/
   schedule SHA；episode reset 截断会记录 sampled/commanded/applied/abandoned 冲量且当步禁止重启。
-  Random123 已知向量、跨 stream/相邻 seed 分布与相关性、CRN、reset 对账和 zero-clear 共 `20 passed`。
-  Isaac adapter、runtime ledger、hard contract 与 held-out paper 未闭合，机器预注册仍
-  `launch_authorized=false`，没有连接 Pod。见
+  第二轮红队 blocker 另新增不可由配置放大的 `0.15 m/s` 冲量、
+  `2.0 m/s²` 加速度、`0.02--0.20 s` 时长和 `200 N` WORLD-Y force 硬包络，并在 derived duration、
+  runtime dtype cast、mass multiplication 和最终 wrench 后逐层 fail closed；typed receipt/ledger 现在绑定
+  随机化后实际总质量、命令 WORLD force/impulse 和 transform identity，可复算质量归一化。源码专项增至
+  `24 passed`。torso COM 仅意味着 zero explicit/link-local lever-arm torque，不代表整机无 `r×F` 角冲量。
+  GPU throughput 门和不可变 ball×action-family held-out paper 仍 pending，故继续
+  `launch_authorized=false`，未连接 Pod。见
   [实验卷宗](experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md)与
   [G05](gates/G05_isaac_training_first_loop.md)。
 

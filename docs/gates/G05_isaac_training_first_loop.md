@@ -160,11 +160,22 @@ Follow-up note (2026-07-15, lateral-balance perturbation source gate; Gate remai
   schedule SHA, and records sampled/commanded/applied/abandoned impulse when reset interrupts a
   pulse.  Reset cannot immediately restart a pulse.  Hot-path tensor validity/application
   accounting no longer calls `.item()` or `bool(torch.any(...))`.
-- Focused source verification is `20 passed`; this is E1 only.  The Isaac adapter, WORLD-to-BODY
+- A second red-team pass found that finite-but-extreme config values, float64-to-float32 casts and
+  mass multiplication could emit an infinite or arbitrarily large force, and that the typed
+  receipt did not bind the randomized mass or commanded force.  The successor freezes an
+  immutable `0.15 m/s`, `2.0 m/s^2`, `0.02--0.20 s`, `200 N` envelope; validates config, derived,
+  cast and final wrench layers; and binds actual total mass, WORLD force/impulse, applied mask and
+  transform identity into the receipt/application ledger.  Applying at torso COM only removes an
+  explicit/link-local lever-arm torque; it does not imply zero whole-articulation `r x F` angular
+  impulse or contact response.
+- Focused source verification is `24 passed`; this is E1 only.  The Isaac adapter, WORLD-to-BODY
   wrench transform, post-randomization total-mass reader, every-step full-batch zero overwrite,
   runtime ledger/logger, hard-contract/runner integration and content-addressed held-out papers are
-  absent.  The machine prereg remains `launch_authorized=false`; no Pod, trainer or simulator was
-  touched.  See
+  absent.  A same-GPU throughput comparison must retain at least `0.95x` environment-steps/s with
+  no more than `1.05x` p95 step time and no hot-path host sync; promotion also requires an immutable
+  held-out ball-arrival-bin by action-family paper with all-bin/worst-bin reporting and vendor
+  MuJoCo reuse.  Both are pending.  The machine prereg remains `launch_authorized=false`; no Pod,
+  trainer or simulator was touched.  See
   [EXP-P1-LATERAL-BALANCE-PERTURBATION](../experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md).
 
 Follow-up note (2026-07-14, Pod2 `+200` activation audit; Gate remains `Partial`):

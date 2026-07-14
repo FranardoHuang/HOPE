@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+from dataclasses import replace
 
 import pytest
 import torch
@@ -81,12 +82,15 @@ class _RecordingAdapter:
     application_point = "center_of_mass"
     full_batch_overwrite = True
     inactive_zero_overwrite = True
+    world_to_backend_transform_identity_sha256 = "a" * 64
 
     def __init__(self, *, receipt_override=None):
         self.calls = []
         self.receipt_override = receipt_override
 
-    def overwrite_world_wrench_at_body_com(self, *, step_token, force_w, torque_w):
+    def overwrite_world_wrench_at_body_com(
+        self, *, step_token, total_mass_kg, force_w, torque_w
+    ):
         self.calls.append((step_token, force_w.clone(), torque_w.clone()))
         receipt = L.LateralWrenchWriteReceipt(
             step_token=step_token,
@@ -96,6 +100,12 @@ class _RecordingAdapter:
             full_batch_overwrite=self.full_batch_overwrite,
             inactive_zero_overwrite=self.inactive_zero_overwrite,
             zero_torque=bool(torch.all(torque_w == 0.0)),
+            world_to_backend_transform_identity_sha256=(
+                self.world_to_backend_transform_identity_sha256
+            ),
+            actual_total_mass_kg=total_mass_kg.clone(),
+            commanded_force_w=force_w.clone(),
+            commanded_torque_w=torque_w.clone(),
             applied_force_mask=torch.any(
                 force_w.reshape(force_w.shape[0], -1) != 0.0, dim=1
             ),
@@ -146,6 +156,47 @@ def test_config_freezes_recovery_hold_torso_world_com_and_rejects_anytime():
         )
 
 
+def test_config_hard_safety_envelope_rejects_large_finite_and_derived_overflow():
+    expected = {
+        "schema_version": 1,
+        "max_abs_normalized_impulse_mps": 0.15,
+        "max_abs_normalized_accel_mps2": 2.0,
+        "min_pulse_duration_s": 0.02,
+        "max_pulse_duration_s": 0.2,
+        "max_abs_world_force_y_N": 200.0,
+        "world_force_xz_N": [0.0, 0.0],
+        "explicit_torque_Nm": [0.0, 0.0, 0.0],
+    }
+    assert L.lateral_hard_safety_contract() == expected
+    assert L.lateral_hard_safety_identity_sha256() == (
+        "7de6f9a7ab418a63973e1680a56d7ca82d9b8c19cd1ac52d32d332cb6819dc45"
+    )
+    assert _cfg().hard_safety_identity_sha256 == L.lateral_hard_safety_identity_sha256()
+
+    with pytest.raises(ValueError, match="normalized impulse exceeds"):
+        _cfg(normalized_impulse_max_mps=1.0e300)
+    with pytest.raises(ValueError, match="derived pulse_duration_s must be finite"):
+        _cfg(policy_dt_s=1.0e308, pulse_duration_steps=2)
+    with pytest.raises(ValueError, match="pulse_duration_s is outside"):
+        _cfg(policy_dt_s=0.001, pulse_duration_steps=2)
+    with pytest.raises(ValueError, match="derived normalized acceleration exceeds"):
+        _cfg(policy_dt_s=0.02, pulse_duration_steps=1)
+
+    lower_boundary = _cfg(
+        policy_dt_s=0.02,
+        pulse_duration_steps=1,
+        normalized_impulse_min_mps=0.04,
+        normalized_impulse_max_mps=0.04,
+    )
+    upper_duration_boundary = _cfg(
+        policy_dt_s=0.02,
+        opportunity_interval_steps=10,
+        pulse_duration_steps=10,
+    )
+    assert lower_boundary.pulse_duration_s == 0.02
+    assert upper_duration_boundary.pulse_duration_s == 0.2
+
+
 def test_preregistered_train_and_eval_boundaries_are_machine_readable_and_blocked():
     payload = json.loads(PREREG_PATH.read_text())
     assert payload["schema_version"] == 1
@@ -161,8 +212,21 @@ def test_preregistered_train_and_eval_boundaries_are_machine_readable_and_blocke
         "force_components": [0.0, "sampled_Fy", 0.0],
         "torque_components": [0.0, 0.0, 0.0],
         "normalization_mass": "total_articulation_mass_after_randomization",
+        "torso_com_semantics": (
+            "zero_explicit_torque_and_zero_torso_link_local_lever_arm_only; "
+            "torso_com_is_not_whole_articulation_com; "
+            "whole_articulation_r_cross_F_angular_impulse_and_contact_response_remain_physical"
+        ),
         "direct_root_velocity_write": False,
     }
+    assert payload["hard_safety_envelope"]["identity_sha256"] == (
+        "7de6f9a7ab418a63973e1680a56d7ca82d9b8c19cd1ac52d32d332cb6819dc45"
+    )
+    safety_payload = dict(payload["hard_safety_envelope"])
+    safety_payload.pop("identity_sha256")
+    safety_payload.pop("basis")
+    safety_payload.pop("fail_closed_checks")
+    assert safety_payload == L.lateral_hard_safety_contract()
     control = payload["train_cells"][0]
     treatment = payload["train_cells"][1]
     assert control["normalized_impulse_mps"] == [0.0, 0.0]
@@ -170,6 +234,9 @@ def test_preregistered_train_and_eval_boundaries_are_machine_readable_and_blocke
     assert control["schedule_seed"] == treatment["schedule_seed"]
     assert payload["pulse_schedule"]["sampling"] == (
         "philox4x32-10-domain-separated-v1"
+    )
+    assert payload["pulse_schedule"]["magnitude_distribution"].startswith(
+        "affine_of_uniform_open_0_1"
     )
     expected_schedule_sha = (
         "d157bd6e7c063df80d41ca03b9eb4acae2a4b45c9ee0967b5dcbce5b76d14593"
@@ -197,6 +264,24 @@ def test_preregistered_train_and_eval_boundaries_are_machine_readable_and_blocke
     assert payload["held_out_eval"]["clean"]["normalized_impulse_mps"] == [0.0, 0.0]
     assert payload["held_out_eval"]["strong"]["normalized_impulse_mps"] == [0.1, 0.14]
     assert payload["held_out_eval"]["strong"]["schedule_seed"] != treatment["schedule_seed"]
+    paper = payload["held_out_eval"]["ball_by_action_family_paper"]
+    assert paper["status"] == "pending"
+    assert paper["required_before_launch"] is True
+    assert paper["required_before_promotion"] is True
+    assert paper["report_all_bins_and_worst_bin"] is True
+    throughput = payload["runtime_unlock_gates"]["gpu_throughput"]
+    assert throughput["status"] == "pending"
+    assert throughput["required_before_launch"] is True
+    assert throughput["minimum_environment_steps_per_second_ratio_vs_no_hook"] == 0.95
+    assert throughput["host_device_sync_in_hot_path_allowed"] is False
+    assert {
+        "hard_safety_identity_sha256",
+        "actual_total_articulation_mass_after_randomization_kg",
+        "commanded_normalized_accel_y_mps2",
+        "commanded_force_y_N",
+        "commanded_world_impulse_y_Ns",
+        "world_to_backend_transform_identity_sha256",
+    } <= set(payload["per_step_ledger_required"])
     assert {
         "lateral_perturbation_interrupted_for_reset_count",
         "lateral_perturbation_reset_interrupted_sampled_impulse_abs_sum_mps",
@@ -487,7 +572,7 @@ def test_direction_and_magnitude_distribution_are_symmetric_and_bounded():
     n = 8192
     scheduler = L.LateralPulseScheduler(
         n,
-        _cfg(opportunity_interval_steps=1, pulse_duration_steps=1),
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
     )
     result = scheduler.step(step_token=0, **_inputs(n, 0))
     impulses = result.sampled_normalized_impulse_y_mps
@@ -503,7 +588,7 @@ def test_direction_and_magnitude_distribution_are_symmetric_and_bounded():
 def test_first_cell_never_starts_in_strike_or_outside_recovery_hold():
     scheduler = L.LateralPulseScheduler(
         4,
-        _cfg(opportunity_interval_steps=1, pulse_duration_steps=1),
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
     )
     result = scheduler.step(
         step_token=0,
@@ -600,7 +685,7 @@ def test_completed_pulse_obeys_sampled_impulse_budget_and_clears_next_step():
 def test_same_step_is_idempotent_but_changed_inputs_or_missing_step_fail_closed():
     scheduler = L.LateralPulseScheduler(
         8,
-        _cfg(opportunity_interval_steps=1, pulse_duration_steps=1),
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
     )
     inputs = _inputs(8, 0)
     first = scheduler.step(step_token=0, **inputs)
@@ -642,7 +727,7 @@ def test_episode_clock_must_advance_or_reset_monotonically():
 def test_runtime_mode_requires_application_ack_before_next_step():
     scheduler = L.LateralPulseScheduler(
         2,
-        _cfg(opportunity_interval_steps=1, pulse_duration_steps=1),
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
         require_application_ack=True,
     )
     result = scheduler.step(step_token=0, **_inputs(2, 0))
@@ -674,10 +759,133 @@ def test_world_wrench_uses_total_mass_only_in_y_and_has_zero_torque():
         L.lateral_world_wrench_from_total_mass(accel, torch.tensor([20.0, 0.0, 60.0]))
 
 
+def test_world_wrench_fails_closed_after_cast_multiply_and_final_force_bounds():
+    with pytest.raises(RuntimeError, match="remain finite after cast"):
+        L.lateral_world_wrench_from_total_mass(
+            torch.tensor([1.0e40], dtype=torch.float64),
+            torch.tensor([1.0], dtype=torch.float32),
+        )
+    with pytest.raises(RuntimeError, match="normalized acceleration exceeds"):
+        L.lateral_world_wrench_from_total_mass(
+            torch.tensor([2.0000001], dtype=torch.float64),
+            torch.tensor([1.0], dtype=torch.float64),
+        )
+    with pytest.raises(RuntimeError, match="mass multiplication"):
+        L.lateral_world_wrench_from_total_mass(
+            torch.tensor([2.0], dtype=torch.float64),
+            torch.tensor([3.0e38], dtype=torch.float32),
+        )
+    with pytest.raises(RuntimeError, match="WORLD-Y force exceeds"):
+        L.lateral_world_wrench_from_total_mass(
+            torch.tensor([2.0], dtype=torch.float64),
+            torch.tensor([100.01], dtype=torch.float32),
+        )
+
+    force, _ = L.lateral_world_wrench_from_total_mass(
+        torch.tensor([2.0], dtype=torch.float64),
+        torch.tensor([100.0], dtype=torch.float32),
+    )
+    assert force[0, 0, 1] == 200.0
+
+
+def test_typed_application_ledger_binds_mass_world_force_and_transform_identity():
+    scheduler = L.LateralPulseScheduler(
+        2,
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
+        require_application_ack=True,
+    )
+    result = scheduler.step(step_token=0, **_inputs(2, 0))
+    mass = torch.tensor([40.0, 55.0], dtype=torch.float32)
+    adapter = _RecordingAdapter()
+    ledger = _dispatch(scheduler, result, adapter, mass=mass)
+    expected_accel = result.normalized_accel_y_mps2.to(dtype=torch.float32)
+    expected_force_y = mass * expected_accel
+    assert ledger.world_to_backend_transform_identity_sha256 == "a" * 64
+    assert ledger.hard_safety_identity_sha256 == L.lateral_hard_safety_identity_sha256()
+    assert torch.equal(ledger.actual_total_mass_kg, mass)
+    assert torch.equal(ledger.commanded_normalized_accel_y_mps2, expected_accel)
+    assert torch.equal(ledger.commanded_world_force_y_N, expected_force_y)
+    assert torch.equal(
+        ledger.commanded_world_impulse_y_Ns,
+        expected_force_y * scheduler.cfg.policy_dt_s,
+    )
+    assert torch.equal(ledger.applied_force_mask, result.active_force_mask)
+    assert torch.equal(
+        ledger.commanded_world_force_y_N / ledger.actual_total_mass_kg,
+        ledger.commanded_normalized_accel_y_mps2,
+    )
+
+    with pytest.raises(RuntimeError, match="same-step dispatch changed actual_total_mass_kg"):
+        _dispatch(scheduler, result, adapter, mass=mass + 1.0)
+    assert len(adapter.calls) == 1
+
+
+def test_receipt_cannot_relabel_actual_mass_world_force_or_transform_identity():
+    scheduler = L.LateralPulseScheduler(
+        1,
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
+    )
+    result = scheduler.step(step_token=0, **_inputs(1, 0))
+
+    def wrong_mass(receipt):
+        return replace(receipt, actual_total_mass_kg=receipt.actual_total_mass_kg + 1.0)
+
+    with pytest.raises(RuntimeError, match="actual_total_mass_kg does not match"):
+        _dispatch(scheduler, result, _RecordingAdapter(receipt_override=wrong_mass))
+
+    scheduler = L.LateralPulseScheduler(
+        1,
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
+    )
+    result = scheduler.step(step_token=0, **_inputs(1, 0))
+
+    def wrong_force(receipt):
+        changed = receipt.commanded_force_w.clone()
+        changed[:, 0, 1].add_(1.0)
+        return replace(receipt, commanded_force_w=changed)
+
+    with pytest.raises(RuntimeError, match="commanded_force_w does not match"):
+        _dispatch(scheduler, result, _RecordingAdapter(receipt_override=wrong_force))
+
+    scheduler = L.LateralPulseScheduler(
+        1,
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
+    )
+    result = scheduler.step(step_token=0, **_inputs(1, 0))
+
+    def wrong_transform(receipt):
+        return replace(receipt, world_to_backend_transform_identity_sha256="b" * 64)
+
+    with pytest.raises(RuntimeError, match="transform identity"):
+        _dispatch(scheduler, result, _RecordingAdapter(receipt_override=wrong_transform))
+
+    scheduler = L.LateralPulseScheduler(
+        1,
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
+    )
+    result = scheduler.step(step_token=0, **_inputs(1, 0))
+
+    class _MutatingAdapter(_RecordingAdapter):
+        def overwrite_world_wrench_at_body_com(
+            self, *, step_token, total_mass_kg, force_w, torque_w
+        ):
+            total_mass_kg.add_(1.0)
+            force_w[:, 0, 1].add_(1.0)
+            return super().overwrite_world_wrench_at_body_com(
+                step_token=step_token,
+                total_mass_kg=total_mass_kg,
+                force_w=force_w,
+                torque_w=torque_w,
+            )
+
+    with pytest.raises(RuntimeError, match="actual_total_mass_kg does not match"):
+        _dispatch(scheduler, result, _MutatingAdapter())
+
+
 def test_adapter_seam_writes_zero_after_pulse_and_accounts_once():
     scheduler = L.LateralPulseScheduler(
         4,
-        _cfg(opportunity_interval_steps=1, pulse_duration_steps=1),
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
         require_application_ack=True,
     )
     adapter = _RecordingAdapter()
@@ -704,7 +912,7 @@ def test_adapter_seam_writes_zero_after_pulse_and_accounts_once():
 def test_adapter_seam_rejects_stale_force_contract_or_false_receipt():
     scheduler = L.LateralPulseScheduler(
         1,
-        _cfg(opportunity_interval_steps=1, pulse_duration_steps=1),
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
     )
     result = scheduler.step(step_token=0, **_inputs(1, 0))
     bad_adapter = _RecordingAdapter()
@@ -721,6 +929,12 @@ def test_adapter_seam_rejects_stale_force_contract_or_false_receipt():
             full_batch_overwrite=True,
             inactive_zero_overwrite=True,
             zero_torque=True,
+            world_to_backend_transform_identity_sha256=(
+                receipt.world_to_backend_transform_identity_sha256
+            ),
+            actual_total_mass_kg=receipt.actual_total_mass_kg,
+            commanded_force_w=receipt.commanded_force_w,
+            commanded_torque_w=receipt.commanded_torque_w,
             applied_force_mask=~receipt.applied_force_mask,
         )
 

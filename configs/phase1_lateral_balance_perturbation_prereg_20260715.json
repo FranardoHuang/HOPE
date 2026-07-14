@@ -34,7 +34,35 @@
       0.0
     ],
     "normalization_mass": "total_articulation_mass_after_randomization",
+    "torso_com_semantics": "zero_explicit_torque_and_zero_torso_link_local_lever_arm_only; torso_com_is_not_whole_articulation_com; whole_articulation_r_cross_F_angular_impulse_and_contact_response_remain_physical",
     "direct_root_velocity_write": false
+  },
+  "hard_safety_envelope": {
+    "schema_version": 1,
+    "identity_sha256": "7de6f9a7ab418a63973e1680a56d7ca82d9b8c19cd1ac52d32d332cb6819dc45",
+    "max_abs_normalized_impulse_mps": 0.15,
+    "max_abs_normalized_accel_mps2": 2.0,
+    "min_pulse_duration_s": 0.02,
+    "max_pulse_duration_s": 0.2,
+    "max_abs_world_force_y_N": 200.0,
+    "world_force_xz_N": [
+      0.0,
+      0.0
+    ],
+    "explicit_torque_Nm": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "basis": "The source backstop contains the frozen L1 train pulse (0.08 m/s over 0.10 s) and the held-out strong pulse (0.14 m/s over 0.10 s), caps normalized acceleration at 0.204 g, limits a pulse to one through ten 50 Hz ticks, and independently caps WORLD-Y force at 200 N. It is a simulator command envelope, not hardware safety evidence.",
+    "fail_closed_checks": [
+      "configured_impulse_finite_and_bounded",
+      "derived_duration_finite_and_bounded",
+      "derived_normalized_acceleration_finite_and_bounded",
+      "normalized_acceleration_finite_after_runtime_dtype_cast",
+      "final_wrench_finite_after_mass_multiplication",
+      "final_world_y_force_bounded"
+    ]
   },
   "pulse_schedule": {
     "policy_dt_s": 0.02,
@@ -47,7 +75,7 @@
       "world_minus_y": 0.5,
       "world_plus_y": 0.5
     },
-    "magnitude_distribution": "uniform_closed_interval",
+    "magnitude_distribution": "affine_of_uniform_open_0_1; configured endpoints excluded when min_lt_max; point_mass_when_equal",
     "sampling": "philox4x32-10-domain-separated-v1",
     "random_domains_u32_hex": {
       "direction": "0x44495245",
@@ -118,6 +146,7 @@
   "per_step_ledger_required": [
     "step_token",
     "random_schedule_identity_sha256",
+    "hard_safety_identity_sha256",
     "episode_index",
     "episode_step",
     "environment_id",
@@ -129,7 +158,11 @@
     "potential_direction_u01",
     "potential_unit_magnitude_u01",
     "sampled_normalized_impulse_y_mps",
+    "commanded_normalized_accel_y_mps2",
+    "actual_total_articulation_mass_after_randomization_kg",
     "commanded_force_y_N",
+    "commanded_world_impulse_y_Ns",
+    "world_to_backend_transform_identity_sha256",
     "adapter_write_receipt",
     "remaining_pulse_steps",
     "interrupted_for_reset",
@@ -147,7 +180,25 @@
     "required_zero_write_for_inactive_environments": true,
     "persistent_force_clearance_verified": false,
     "actual_total_mass_after_randomization_bound": false,
-    "actual_application_ledger_bound": false
+    "actual_application_ledger_bound": false,
+    "typed_receipt_must_echo_exact_mass_world_wrench_and_transform_identity": true
+  },
+  "runtime_unlock_gates": {
+    "gpu_throughput": {
+      "status": "pending",
+      "required_before_launch": true,
+      "benchmark_environment_counts": [
+        512,
+        "production_env_count"
+      ],
+      "same_gpu_scene_seed_and_rollout_schedule_as_no_hook_control": true,
+      "warmup_steps": 200,
+      "measured_steps": 1000,
+      "minimum_environment_steps_per_second_ratio_vs_no_hook": 0.95,
+      "maximum_p95_sim_step_time_ratio_vs_no_hook": 1.05,
+      "host_device_sync_in_hot_path_allowed": false,
+      "evidence": "pending_runtime_adapter"
+    }
   },
   "checkpoint_cadence": [
     200,
@@ -156,6 +207,21 @@
   ],
   "held_out_eval": {
     "shared_question_and_episode_schedule": "pending_content_addressed_schedule",
+    "ball_by_action_family_paper": {
+      "status": "pending",
+      "content_addressed_immutable": false,
+      "required_before_launch": true,
+      "required_before_promotion": true,
+      "dimensions": [
+        "ball_arrival_bin",
+        "action_family"
+      ],
+      "minimum_questions_per_nonempty_bin": 50,
+      "report_all_bins_and_worst_bin": true,
+      "clean_and_strong_share_exact_ball_action_questions": true,
+      "final_backend": "vendor_mujoco",
+      "note": "Action-family and ball-arrival bins remain pending and must be frozen before any run; aggregate-only evaluation cannot promote a cell."
+    },
     "clean": {
       "normalized_impulse_mps": [
         0.0,
@@ -191,11 +257,12 @@
     "clean_non_regression": "L1 clean physical-fall rate is no more than L0 plus 0.01 and next-strike composite is no less than L0 minus 0.03.",
     "strong_benefit": "L1 reduces strong balance_debt_auc and median recovery_time_to_ready by at least 10 percent and improves ready_set_by_deadline by at least 0.05 absolute, without increasing strong physical-fall rate.",
     "stance_and_margin_safety": "Against L0 on the same strong paper, L1 may not reduce the minimum capture-point or COM support margin by more than 0.01 m, increase p95 stance narrowing from each episode's initial width by more than 0.02 m, or increase p95 absolute foot-yaw error by more than 0.0872665 rad (5 deg).",
-    "promotion": "Only a cell passing activation validity, clean non-regression, strong benefit and stance/margin safety may buy a second seed.",
-    "invalidation": "Any non-torso force, X/Z force, torque, direct root-velocity write, strike-window application, missing step token, missing zero overwrite, persistent force, or train/eval schedule leakage invalidates the run."
+    "promotion": "Only a cell passing activation validity, GPU throughput, immutable held-out ball-by-action-family paper with all-bin and worst-bin reporting, clean non-regression, strong benefit and stance/margin safety may buy a second seed.",
+    "invalidation": "Any hard-envelope violation; non-finite derived or final wrench; missing actual mass, commanded WORLD force or transform identity receipt; non-torso force; X/Z force; explicit torque; direct root-velocity write; strike-window application; missing step token; missing zero overwrite; persistent force; or train/eval schedule leakage invalidates the run."
   },
   "explicit_non_claims": [
     "No Isaac runtime hook has been implemented or run.",
+    "No GPU throughput benchmark or immutable held-out ball-by-action-family paper exists.",
     "No simulator behaviour, training improvement, checkpoint, or deployment result exists.",
     "This is not the anytime perturbation axis and not a reward-composition result."
   ]

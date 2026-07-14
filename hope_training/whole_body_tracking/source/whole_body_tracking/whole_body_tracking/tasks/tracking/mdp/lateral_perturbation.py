@@ -51,6 +51,16 @@ _RANDOM_DOMAINS = {
     "unit_magnitude": 0x4D41474E,
 }
 
+# Immutable source-level backstop.  These limits deliberately contain the preregistered
+# treatment (0.08 m/s over 0.10 s) and held-out stress paper (0.14 m/s over 0.10 s), while
+# preventing a malformed config or randomized mass from turning this simulation-only probe into
+# an arbitrarily large wrench.  They are not a real-robot safety certificate.
+_HARD_MAX_ABS_NORMALIZED_IMPULSE_MPS = 0.15
+_HARD_MAX_ABS_NORMALIZED_ACCEL_MPS2 = 2.0
+_HARD_MIN_PULSE_DURATION_S = 0.02
+_HARD_MAX_PULSE_DURATION_S = 0.20
+_HARD_MAX_ABS_FORCE_N = 200.0
+
 
 def _is_plain_int(value: object) -> bool:
     return type(value) is int
@@ -58,6 +68,40 @@ def _is_plain_int(value: object) -> bool:
 
 def _is_plain_number(value: object) -> bool:
     return type(value) in (int, float)
+
+
+def _is_sha256_hex(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and value == value.lower()
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def lateral_hard_safety_contract() -> dict[str, object]:
+    """Return the immutable physical-command envelope enforced by this source core."""
+
+    return {
+        "schema_version": 1,
+        "max_abs_normalized_impulse_mps": _HARD_MAX_ABS_NORMALIZED_IMPULSE_MPS,
+        "max_abs_normalized_accel_mps2": _HARD_MAX_ABS_NORMALIZED_ACCEL_MPS2,
+        "min_pulse_duration_s": _HARD_MIN_PULSE_DURATION_S,
+        "max_pulse_duration_s": _HARD_MAX_PULSE_DURATION_S,
+        "max_abs_world_force_y_N": _HARD_MAX_ABS_FORCE_N,
+        "world_force_xz_N": [0.0, 0.0],
+        "explicit_torque_Nm": [0.0, 0.0, 0.0],
+    }
+
+
+def lateral_hard_safety_identity_sha256() -> str:
+    payload = json.dumps(
+        lateral_hard_safety_contract(),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _assert_all_async(condition: torch.Tensor, message: str) -> None:
@@ -193,7 +237,8 @@ class LateralPerturbationConfig:
     """Immutable contract for the recovery/hold-only first perturbation cell.
 
     ``normalized_impulse_*_mps`` is a whole-robot delta-velocity-equivalent budget, not a direct
-    velocity write.  A treatment samples the magnitude uniformly inside the closed interval and
+    velocity write.  A treatment obtains its unit variate from the open interval ``(0, 1)`` and
+    maps it between the configured magnitude bounds (a point mass when the bounds are equal), then
     samples direction with equal probability.  A matched control uses exactly ``0, 0`` while
     retaining the same opportunity/selection schedule.
     """
@@ -243,6 +288,27 @@ class LateralPerturbationConfig:
             raise ValueError(
                 "normalized_impulse_min_mps cannot exceed normalized_impulse_max_mps"
             )
+        duration_s = float(self.policy_dt_s) * self.pulse_duration_steps
+        if not math.isfinite(duration_s):
+            raise ValueError("derived pulse_duration_s must be finite")
+        if not _HARD_MIN_PULSE_DURATION_S <= duration_s <= _HARD_MAX_PULSE_DURATION_S:
+            raise ValueError(
+                "pulse_duration_s is outside the immutable hard safety envelope "
+                f"[{_HARD_MIN_PULSE_DURATION_S}, {_HARD_MAX_PULSE_DURATION_S}]"
+            )
+        if float(self.normalized_impulse_max_mps) > _HARD_MAX_ABS_NORMALIZED_IMPULSE_MPS:
+            raise ValueError(
+                "normalized impulse exceeds the immutable hard safety envelope "
+                f"{_HARD_MAX_ABS_NORMALIZED_IMPULSE_MPS} m/s"
+            )
+        max_normalized_accel = float(self.normalized_impulse_max_mps) / duration_s
+        if not math.isfinite(max_normalized_accel):
+            raise ValueError("derived normalized acceleration must be finite")
+        if max_normalized_accel > _HARD_MAX_ABS_NORMALIZED_ACCEL_MPS2:
+            raise ValueError(
+                "derived normalized acceleration exceeds the immutable hard safety envelope "
+                f"{_HARD_MAX_ABS_NORMALIZED_ACCEL_MPS2} m/s^2"
+            )
         if not _is_plain_int(self.seed) or not 0 <= self.seed <= _U32_MASK:
             raise ValueError(f"seed must be a plain int in [0, {_U32_MASK}]")
         if self.eligibility_mode != "recovery_hold":
@@ -272,6 +338,10 @@ class LateralPerturbationConfig:
     def random_schedule_identity_sha256(self) -> str:
         return random_schedule_identity_sha256(self)
 
+    @property
+    def hard_safety_identity_sha256(self) -> str:
+        return lateral_hard_safety_identity_sha256()
+
 
 @dataclass(frozen=True)
 class LateralPerturbationStep:
@@ -279,6 +349,7 @@ class LateralPerturbationStep:
 
     step_token: int
     random_schedule_identity_sha256: str
+    hard_safety_identity_sha256: str
     potential_phase_offset_steps: torch.Tensor
     opportunity_indices: torch.Tensor
     potential_selection_u01: torch.Tensor
@@ -305,6 +376,7 @@ class LateralPerturbationStep:
         return LateralPerturbationStep(
             step_token=self.step_token,
             random_schedule_identity_sha256=self.random_schedule_identity_sha256,
+            hard_safety_identity_sha256=self.hard_safety_identity_sha256,
             potential_phase_offset_steps=self.potential_phase_offset_steps.clone(),
             opportunity_indices=self.opportunity_indices.clone(),
             potential_selection_u01=self.potential_selection_u01.clone(),
@@ -354,6 +426,10 @@ class LateralWrenchWriteReceipt:
     full_batch_overwrite: bool
     inactive_zero_overwrite: bool
     zero_torque: bool
+    world_to_backend_transform_identity_sha256: str
+    actual_total_mass_kg: torch.Tensor
+    commanded_force_w: torch.Tensor
+    commanded_torque_w: torch.Tensor
     applied_force_mask: torch.Tensor
 
     def __post_init__(self) -> None:
@@ -370,6 +446,42 @@ class LateralWrenchWriteReceipt:
             raise ValueError("receipt applied_force_mask must be a torch.Tensor")
         if self.applied_force_mask.ndim != 1 or self.applied_force_mask.dtype != torch.bool:
             raise ValueError("receipt applied_force_mask must be a 1-D bool tensor")
+        if not _is_sha256_hex(self.world_to_backend_transform_identity_sha256):
+            raise ValueError(
+                "receipt world_to_backend_transform_identity_sha256 must be lowercase SHA-256"
+            )
+        for name in ("actual_total_mass_kg", "commanded_force_w", "commanded_torque_w"):
+            if not isinstance(getattr(self, name), torch.Tensor):
+                raise ValueError(f"receipt {name} must be a torch.Tensor")
+        if self.actual_total_mass_kg.ndim != 1 or not torch.is_floating_point(
+            self.actual_total_mass_kg
+        ):
+            raise ValueError("receipt actual_total_mass_kg must be a 1-D floating tensor")
+        expected_wrench_shape = (self.actual_total_mass_kg.shape[0], 1, 3)
+        if self.commanded_force_w.shape != expected_wrench_shape:
+            raise ValueError("receipt commanded_force_w has the wrong shape")
+        if self.commanded_torque_w.shape != expected_wrench_shape:
+            raise ValueError("receipt commanded_torque_w has the wrong shape")
+        for name in ("commanded_force_w", "commanded_torque_w"):
+            value = getattr(self, name)
+            if not torch.is_floating_point(value):
+                raise ValueError(f"receipt {name} must use a floating dtype")
+            if value.dtype != self.actual_total_mass_kg.dtype:
+                raise ValueError(f"receipt {name} must use the actual-mass dtype")
+            if value.device != self.actual_total_mass_kg.device:
+                raise ValueError(f"receipt {name} must use the actual-mass device")
+        if self.applied_force_mask.shape != self.actual_total_mass_kg.shape:
+            raise ValueError("receipt applied_force_mask must match actual_total_mass_kg shape")
+        if self.applied_force_mask.device != self.actual_total_mass_kg.device:
+            raise ValueError("receipt applied_force_mask must use the actual-mass device")
+        _assert_all_async(
+            torch.isfinite(self.actual_total_mass_kg) & self.actual_total_mass_kg.gt(0.0),
+            "receipt actual_total_mass_kg must be finite and strictly positive",
+        )
+        _assert_all_async(
+            torch.isfinite(self.commanded_force_w) & torch.isfinite(self.commanded_torque_w),
+            "receipt commanded wrench must be finite",
+        )
 
 
 @dataclass(frozen=True)
@@ -378,6 +490,13 @@ class LateralApplicationLedgerRow:
 
     step_token: int
     body_name: str
+    hard_safety_identity_sha256: str
+    world_to_backend_transform_identity_sha256: str
+    actual_total_mass_kg: torch.Tensor
+    commanded_normalized_accel_y_mps2: torch.Tensor
+    commanded_world_force_y_N: torch.Tensor
+    commanded_world_impulse_y_Ns: torch.Tensor
+    applied_force_mask: torch.Tensor
     selected_start_count: torch.Tensor
     applied_nonzero_start_count: torch.Tensor
     nonzero_force_env_count: torch.Tensor
@@ -393,11 +512,13 @@ class LateralWrenchAdapter(Protocol):
     application_point: str
     full_batch_overwrite: bool
     inactive_zero_overwrite: bool
+    world_to_backend_transform_identity_sha256: str
 
     def overwrite_world_wrench_at_body_com(
         self,
         *,
         step_token: int,
+        total_mass_kg: torch.Tensor,
         force_w: torch.Tensor,
         torque_w: torch.Tensor,
     ) -> LateralWrenchWriteReceipt:
@@ -476,6 +597,7 @@ class LateralPulseScheduler:
         self.device = torch.device(device)
         self.require_application_ack = require_application_ack
         self.random_schedule_identity_sha256 = cfg.random_schedule_identity_sha256
+        self.hard_safety_identity_sha256 = cfg.hard_safety_identity_sha256
         self._env_ids = torch.arange(num_envs, dtype=torch.long, device=self.device)
         self._remaining_steps = torch.zeros(
             num_envs, dtype=torch.long, device=self.device
@@ -807,6 +929,7 @@ class LateralPulseScheduler:
         result = LateralPerturbationStep(
             step_token=step_token,
             random_schedule_identity_sha256=self.random_schedule_identity_sha256,
+            hard_safety_identity_sha256=self.hard_safety_identity_sha256,
             potential_phase_offset_steps=offsets,
             opportunity_indices=opportunity_indices,
             potential_selection_u01=select_u,
@@ -849,18 +972,16 @@ class LateralPulseScheduler:
             return self._last_application_ledger
         return None
 
-    def acknowledge_application(
-        self,
-        result: LateralPerturbationStep,
-        receipt: LateralWrenchWriteReceipt,
-    ) -> LateralApplicationLedgerRow:
-        """Validate one full-buffer write receipt and charge application counters once."""
+    def _validate_application_result(self, result: LateralPerturbationStep) -> None:
+        """Fail if a caller mutates or substitutes the scheduler's typed step ledger."""
 
         if self._last_result is None or result.step_token != self._last_step_token:
             raise RuntimeError("application receipt does not belong to the current scheduler step")
         last = self._last_result
         if result.random_schedule_identity_sha256 != last.random_schedule_identity_sha256:
             raise RuntimeError("application result has the wrong random schedule identity")
+        if result.hard_safety_identity_sha256 != last.hard_safety_identity_sha256:
+            raise RuntimeError("application result has the wrong hard safety identity")
         comparable = (
             "potential_phase_offset_steps",
             "opportunity_indices",
@@ -889,6 +1010,20 @@ class LateralPulseScheduler:
                 getattr(last, name) == getattr(result, name),
                 f"application result does not match scheduler ledger field {name}",
             )
+
+    def acknowledge_application(
+        self,
+        result: LateralPerturbationStep,
+        receipt: LateralWrenchWriteReceipt,
+        *,
+        expected_total_mass_kg: torch.Tensor,
+        expected_force_w: torch.Tensor,
+        expected_torque_w: torch.Tensor,
+        expected_transform_identity_sha256: str,
+    ) -> LateralApplicationLedgerRow:
+        """Validate one full-buffer write receipt and charge application counters once."""
+
+        self._validate_application_result(result)
         if receipt.step_token != result.step_token:
             raise RuntimeError("adapter receipt step_token does not match the command")
         cached = self.cached_application_ledger(result.step_token)
@@ -908,6 +1043,31 @@ class LateralPulseScheduler:
                     f"lateral wrench receipt mismatch for {name}: "
                     f"expected {value!r}, got {getattr(receipt, name)!r}"
                 )
+
+        if (
+            receipt.world_to_backend_transform_identity_sha256
+            != expected_transform_identity_sha256
+        ):
+            raise RuntimeError(
+                "lateral wrench receipt transform identity does not match the adapter contract"
+            )
+        tensor_receipt_fields = {
+            "actual_total_mass_kg": expected_total_mass_kg,
+            "commanded_force_w": expected_force_w,
+            "commanded_torque_w": expected_torque_w,
+        }
+        for name, expected_tensor in tensor_receipt_fields.items():
+            actual_tensor = getattr(receipt, name)
+            if (
+                actual_tensor.shape != expected_tensor.shape
+                or actual_tensor.dtype != expected_tensor.dtype
+                or actual_tensor.device != expected_tensor.device
+            ):
+                raise RuntimeError(f"adapter receipt {name} has the wrong tensor contract")
+            _assert_all_async(
+                actual_tensor == expected_tensor,
+                f"adapter receipt {name} does not match the dispatched command",
+            )
 
         if receipt.applied_force_mask.shape != (self.num_envs,):
             raise RuntimeError("adapter applied_force_mask has the wrong shape")
@@ -938,6 +1098,24 @@ class LateralPulseScheduler:
         ledger = LateralApplicationLedgerRow(
             step_token=result.step_token,
             body_name=self.cfg.body_name,
+            hard_safety_identity_sha256=self.hard_safety_identity_sha256,
+            world_to_backend_transform_identity_sha256=(
+                expected_transform_identity_sha256
+            ),
+            actual_total_mass_kg=expected_total_mass_kg.detach().clone(),
+            commanded_normalized_accel_y_mps2=(
+                result.normalized_accel_y_mps2.to(
+                    dtype=expected_total_mass_kg.dtype
+                ).detach().clone()
+            ),
+            commanded_world_force_y_N=(
+                expected_force_w[:, 0, 1].detach().clone()
+            ),
+            commanded_world_impulse_y_Ns=(
+                expected_force_w[:, 0, 1].detach().clone()
+                * float(self.cfg.policy_dt_s)
+            ),
+            applied_force_mask=receipt.applied_force_mask.detach().clone(),
             selected_start_count=result.selected_start_mask.sum(
                 dtype=torch.long
             ).detach().clone(),
@@ -1002,11 +1180,31 @@ def lateral_world_wrench_from_total_mass(
     dtype = total_mass_kg.dtype
     accel = normalized_accel_y_mps2.to(dtype=dtype)
     mass = total_mass_kg
+    _assert_all_async(
+        torch.isfinite(accel),
+        "normalized acceleration must remain finite after cast to the runtime mass dtype",
+    )
+    _assert_all_async(
+        normalized_accel_y_mps2.abs().le(_HARD_MAX_ABS_NORMALIZED_ACCEL_MPS2),
+        "normalized acceleration exceeds the immutable hard safety envelope before cast",
+    )
+    _assert_all_async(
+        accel.abs().le(_HARD_MAX_ABS_NORMALIZED_ACCEL_MPS2),
+        "normalized acceleration exceeds the immutable hard safety envelope",
+    )
     force_w = torch.zeros(
         (accel.shape[0], 1, 3), dtype=dtype, device=accel.device
     )
     torque_w = torch.zeros_like(force_w)
     force_w[:, 0, 1] = mass * accel
+    _assert_all_async(
+        torch.isfinite(force_w) & torch.isfinite(torque_w),
+        "derived runtime wrench must remain finite after mass multiplication",
+    )
+    _assert_all_async(
+        force_w[:, 0, 1].abs().le(_HARD_MAX_ABS_FORCE_N),
+        "derived WORLD-Y force exceeds the immutable hard safety envelope",
+    )
     return force_w, torque_w
 
 
@@ -1023,9 +1221,6 @@ def dispatch_lateral_wrench_fail_closed(
     that prevents a completed pulse from becoming a persistent external force.
     """
 
-    cached = scheduler.cached_application_ledger(result.step_token)
-    if cached is not None:
-        return cached
     required_adapter_fields = {
         "body_name": scheduler.cfg.body_name,
         "input_force_frame": scheduler.cfg.force_frame,
@@ -1043,6 +1238,13 @@ def dispatch_lateral_wrench_fail_closed(
         raise RuntimeError(
             "lateral wrench adapter lacks overwrite_world_wrench_at_body_com"
         )
+    transform_identity = getattr(
+        adapter, "world_to_backend_transform_identity_sha256", None
+    )
+    if not _is_sha256_hex(transform_identity):
+        raise RuntimeError(
+            "lateral wrench adapter must expose a lowercase SHA-256 transform identity"
+        )
     force_w, torque_w = lateral_world_wrench_from_total_mass(
         result.normalized_accel_y_mps2, total_mass_kg
     )
@@ -1052,14 +1254,56 @@ def dispatch_lateral_wrench_fail_closed(
         & torch.all(torque_w == 0.0, dim=-1),
         "lateral wrench kernel emitted forbidden X/Z force or torque",
     )
+    cached = scheduler.cached_application_ledger(result.step_token)
+    if cached is not None:
+        scheduler._validate_application_result(result)
+        if cached.world_to_backend_transform_identity_sha256 != transform_identity:
+            raise RuntimeError("same-step dispatch reused a different transform identity")
+        cached_tensors = {
+            "actual_total_mass_kg": total_mass_kg,
+            "commanded_normalized_accel_y_mps2": result.normalized_accel_y_mps2.to(
+                dtype=total_mass_kg.dtype
+            ),
+            "commanded_world_force_y_N": force_w[:, 0, 1],
+            "commanded_world_impulse_y_Ns": (
+                force_w[:, 0, 1] * float(scheduler.cfg.policy_dt_s)
+            ),
+        }
+        for name, expected_tensor in cached_tensors.items():
+            actual_tensor = getattr(cached, name)
+            if (
+                actual_tensor.shape != expected_tensor.shape
+                or actual_tensor.dtype != expected_tensor.dtype
+                or actual_tensor.device != expected_tensor.device
+            ):
+                raise RuntimeError(f"same-step dispatch changed {name} tensor contract")
+            _assert_all_async(
+                actual_tensor == expected_tensor,
+                f"same-step dispatch changed {name}",
+            )
+        return cached
+    # Preserve the exact pre-adapter command.  The future backend implementation is untrusted at
+    # this seam and must not be able to mutate an input tensor in place and thereby relabel what
+    # the application ledger says was dispatched.
+    expected_total_mass_kg = total_mass_kg.detach().clone()
+    expected_force_w = force_w.detach().clone()
+    expected_torque_w = torque_w.detach().clone()
     receipt = writer(
         step_token=result.step_token,
+        total_mass_kg=total_mass_kg,
         force_w=force_w,
         torque_w=torque_w,
     )
     if not isinstance(receipt, LateralWrenchWriteReceipt):
         raise RuntimeError("lateral wrench adapter returned no typed write receipt")
-    return scheduler.acknowledge_application(result, receipt)
+    return scheduler.acknowledge_application(
+        result,
+        receipt,
+        expected_total_mass_kg=expected_total_mass_kg,
+        expected_force_w=expected_force_w,
+        expected_torque_w=expected_torque_w,
+        expected_transform_identity_sha256=transform_identity,
+    )
 
 
 __all__ = [
@@ -1070,6 +1314,8 @@ __all__ = [
     "LateralWrenchAdapter",
     "LateralWrenchWriteReceipt",
     "dispatch_lateral_wrench_fail_closed",
+    "lateral_hard_safety_contract",
+    "lateral_hard_safety_identity_sha256",
     "lateral_world_wrench_from_total_mass",
     "random_schedule_contract",
     "random_schedule_identity_sha256",
