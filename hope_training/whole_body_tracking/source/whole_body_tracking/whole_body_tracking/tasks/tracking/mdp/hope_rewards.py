@@ -493,8 +493,14 @@ def consume_base_decel_activation_counters(
     cmd = _cmd(env, command_name)
     state = _base_decel_counter_state(cmd, cmd.racket_target_pos_w)
     snapshot = {name: value.detach().clone() for name, value in state.items()}
-    for value in state.values():
-        value.zero_()
+    # RewardManager may lazily create these counters while Isaac is stepping under
+    # ``torch.inference_mode()``.  PyTorch deliberately refuses to mutate such an inference
+    # tensor from the logger's normal-mode context, even though cloning it for the snapshot is
+    # allowed.  Reset in inference mode as well; this changes only the private accounting
+    # scalars and preserves their device/dtype and the last-step deduplication token.
+    with torch.inference_mode():
+        for value in state.values():
+            value.zero_()
     return snapshot
 
 

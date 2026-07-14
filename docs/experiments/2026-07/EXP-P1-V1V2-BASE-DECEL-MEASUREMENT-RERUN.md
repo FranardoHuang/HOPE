@@ -1,13 +1,13 @@
 # EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN — 补齐 activation 后重跑底座减速配对
 
-- 状态：`blocked`（same-phase activation successor `0f3900a...` 已 exact 绑定；等待该 source 自己的 strict
-  full-scene terminal probe）
+- 状态：`blocked`（`0f3900a...` 的 strict full-scene probe 已抓到 inference-counter logger 真 bug；
+  修复源码尚未重绑队列、复跑并终档通过）
 - 阶段/轴：Phase 1 fresh C；组合击球精度下，底座减速是否有净收益
 - 集成小目标：保住击球精度信号，同时降低击球前底座速度与击球前摔倒率
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
-- 最高证据等级：`E1`（机器可读 blocked 预注册与离线测试；没有本 replacement pair runtime）
+- 最高证据等级：`E2`（4096-env probe 越过首个 update 后按真实异常失败；没有本 replacement pair runtime）
 - 创建日期/最后复核日期：2026-07-15 / 2026-07-15
 
 共享术语见[术语与人话对照](../../DEFINITIONS.md)。本文的 V1 是“从线速度动作模仿中释放持拍手腕”，
@@ -52,8 +52,39 @@ eligible denominator。只看配置回显、`Live/Reward/base_decel` 的全环�
 reference。当前 YAML 已原子改绑 clean exact
 `0f3900a612863faf326dca6ad3e8d38bfe8df3c9`（checkout
 `/workspace/codexschema/nohope_p1_activation_successor_0f3900a`）。该 successor 同时包含 main hardening、五个
-post-swing counters、V1/V2 execution counters、base-decel raw observer 和 runner logger；源码缺口已闭合，
-但它尚未跑自己的 strict full-scene terminal probe，所以仍不是 launch-ready source，禁止原地修改 checkout。
+post-swing counters、V1/V2 execution counters、base-decel raw observer 和 runner logger；measurement 源码
+表面完整，但仍含跨 InferenceMode consumer bug。它自己的 strict full-scene attempt 已在首个 update 后失败，
+所以永久不是 launch-ready source，禁止
+原地修改 checkout或复用旧 attempt。失败与源码修复见下文。
+
+## `0f3900a` strict probe 的两次不可覆盖负结果
+
+Pod2-only control probe 的 `a1` 在 trainer/Kit 启动前等待旧 `/workspace/.kit_boot.lock`。根因是一康仍在
+GPU0 运行的旧 launcher 把锁 fd 继承给 trainer；这不是一康训练失败，也不能触碰其进程。operator 只对我们
+自己的 exact PGID 写入 no-clobber identity/TERM/result 收据并清空残留，随后以“旧 inode 硬链接保全 + 新文件
+原子 replace canonical path”换代锁。旧 inode 仍只由一康原 PID/启动时刻持有，新 canonical inode 的
+nonblocking exclusive lock 通过；`a1` 永久记为 `trainer_started=false / scientific_result=false`，没有同 attempt
+重试。
+
+全新 `a2` 使用同一 canonical lock、exact source、GPU1、4096 environments 和完整 scene recipe，成功写 binding、
+越过第一个 `Learning iteration`，随后 runner 第一次消费 base-decel activation ledger 时抛出：
+
+```text
+RuntimeError: Inplace update to inference tensor outside InferenceMode is not allowed
+```
+
+RewardManager 在 `torch.inference_mode()` 内首次创建三个 device scalar，runner logger 在 normal mode clone 后对原
+scalar `zero_()`，因此真实 Isaac 路径会失败，而原 synthetic test 都在 normal mode，造成假绿。修复只把私有
+counter 的 reset 放回 `torch.inference_mode()`；snapshot、device/dtype、last-step dedup token、Reward 与 simulator
+状态均不变。新增回归明确覆盖“inference mode 创建/累计 → normal logger consume/reset → 下一 simulator step 再累计
+→ 再 consume”。本提交的离线专项为 activation `10 passed`、base-decel MDP `2 passed`、launch claim
+`11 passed`；这仍只是 source fix，不追认 `a2`，也不授权当前队列。
+
+`a2` 抛出上述不可逆 fatal 后，Kit teardown 连续 15 分钟无日志变化，原 PGID 仍占 GPU1。operator 先以
+O_EXCL 收据冻结 leader/child 启动时刻、claim/binding/log SHA、fatal 与 exit/result absence；双扫描确认 PGID
+只含本 probe 的 supervisor/trainer 后，仅向该 exact PGID 发 TERM 并证明 residual=0。一康 PID/启动时刻未变。
+本路径没有伪造 `full_scene_probe_exit.json` 或 `probe_result.json`，因此 `a2` 是“真实 fatal + operator cleanup”，
+不是 terminal probe result，也永远不可 finalize、解锁或同 attempt 重试。
 
 ## Successor 的最小 telemetry
 
@@ -83,7 +114,8 @@ sum 都要 finite、非负。
 
 | 字段 | 冻结值 |
 | --- | --- |
-| Source | clean exact `0f3900a612863faf326dca6ad3e8d38bfe8df3c9`；strict full-scene probe pending |
+| 失败 source | clean exact `0f3900a612863faf326dca6ad3e8d38bfe8df3c9`；fatal evidence 冻结，永久 NO-LAUNCH |
+| replacement source | 本 source-fix 提交；exact SHA 须由下一次 queue rebind 冻结，strict terminal probe pending |
 | 初始化/seed | fresh / `3`；只买一个 seed |
 | 预算 | `4096 environments × 1001 updates`；每 `100` 保存；milestone `200/500/1000` |
 | 动作/题库/plant | 与原配对逐字相同的 v4rg runtime-order 正反手、schema-3 rebound bank、zero-joint-friction 训练协议 |
@@ -121,11 +153,11 @@ fresh namespaces：
 
 | 运行 | 状态 | 证据 | 有效性 |
 | --- | --- | --- | --- |
-| measurement control，base-decel 关 | blocked | exact successor + offline tests | strict probe 尚缺，不得发射 |
-| measurement treatment，base-decel 权重 1 | blocked | 唯一 Reward 权重 delta | strict probe 尚缺，不得发射 |
+| measurement control，base-decel 关 | blocked | `0f3900a` probe 在首 update 后 logger fatal | 必须新 source、新 attempt、strict terminal pass |
+| measurement treatment，base-decel 权重 1 | blocked | 唯一 Reward 权重 delta | control source 门未过，不得发射 |
 
 - 决定：`inconclusive`；尚无 replacement runtime。
-- 当前阻塞不是 Reward 负结果；source measurement contract 已闭合，runtime strict probe 仍未闭合。
+- 当前阻塞不是 Reward 负结果；`0f3900a` 的 runtime logger 已证伪，新 source 的 strict terminal probe 仍未闭合。
 - 本记录不建立算力优先级；是否排队仍只由 main 的 `docs/NOW.md` 统一队列决定。
 - 不授权 Isaac/MuJoCo judge、第二 seed、正式 setting、部署或真机。
 

@@ -286,3 +286,55 @@ def test_consume_before_any_execution_returns_scalar_zeros_and_resets_exactly():
     }
     assert all(value.ndim == 0 and value.item() == 0 for value in first.values())
     assert all(value.ndim == 0 and value.item() == 0 for value in second.values())
+
+
+def test_inference_mode_counters_can_be_consumed_by_normal_mode_logger():
+    """Reproduce Isaac's RewardManager -> normal-mode runner logging boundary."""
+
+    env, command, params = _case(common_step_counter=700)
+    _raw, eligible, expected_reward = _expected(command, params)
+
+    with torch.inference_mode():
+        R.observe_base_decel_activation(env, "racket_target", **params)
+
+    state = getattr(command, R._BASE_DECEL_ACTIVATION_ATTR)
+    assert all(torch.is_inference(value) for value in state.values())
+    ledger_ids = {name: id(value) for name, value in state.items()}
+
+    first = R.consume_base_decel_activation_counters(env, "racket_target")
+    assert first["base_decel_eligible_sample_count"].item() == int(eligible.sum())
+    assert torch.equal(first["base_decel_raw_kernel_sum"], expected_reward.sum())
+    assert first["base_decel_raw_kernel_nonzero_sample_count"].item() == int(
+        (eligible & torch.isfinite(_raw) & _raw.gt(0)).sum()
+    )
+    assert {name: id(value) for name, value in state.items()} == ledger_ids
+
+    # Consuming must not erase the host-side last-step token.  A late observer call for the same
+    # simulator step remains deduplicated, including across the inference/normal mode boundary.
+    with torch.inference_mode():
+        R.observe_base_decel_activation(env, "racket_target", **params)
+    same_step = R.consume_base_decel_activation_counters(env, "racket_target")
+    assert all(value.item() == 0 for value in same_step.values())
+
+    # The same inference tensors remain usable on the next simulator step and reset again from
+    # the logger without allocating a second ledger or losing the host-side dedup token.
+    env.common_step_counter += 1
+    with torch.inference_mode():
+        R.observe_base_decel_activation(env, "racket_target", **params)
+    second = R.consume_base_decel_activation_counters(env, "racket_target")
+    assert all(torch.equal(first[name], second[name]) for name in first)
+
+    # The reverse boundary is valid too: a normal-mode-created ledger may be accumulated inside
+    # Isaac's inference-mode step and consumed by the normal-mode logger.
+    env2, command2, params2 = _case(common_step_counter=900)
+    R.observe_base_decel_activation(env2, "racket_target", **params2)
+    state2 = getattr(command2, R._BASE_DECEL_ACTIVATION_ATTR)
+    assert all(not torch.is_inference(value) for value in state2.values())
+    R.consume_base_decel_activation_counters(env2, "racket_target")
+    env2.common_step_counter += 1
+    with torch.inference_mode():
+        R.observe_base_decel_activation(env2, "racket_target", **params2)
+    reverse_boundary = R.consume_base_decel_activation_counters(env2, "racket_target")
+    assert reverse_boundary["base_decel_eligible_sample_count"].item() == int(
+        eligible.sum()
+    )

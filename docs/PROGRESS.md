@@ -13,6 +13,13 @@
 
 ## 2026-07-15
 
+- Same-phase activation successor `0f3900a...` 的 4096-env Pod2 strict probe 抓到离线测试遗漏：
+  RewardManager 在 `torch.inference_mode()` 内创建 ledger，normal-mode runner 第一次 `zero_()` 即 fatal；因此
+  该 source/attempt 永久不解锁科学 pair。修复把私有 counter reset 放回 inference mode，并新增跨 mode 的
+  create/consume/reuse 回归，专项 `10 + 2 + 11 passed`；尚待新 source 重绑、全新 probe 自然终档和显式
+  receipt consumer，G05 仍 Partial。probe 前另以旧 inode 硬链接保全 + canonical atomic replace 解除了
+  一康旧 launcher 的 lock-fd 代际泄漏，全程未触碰一康 GPU0 进程。
+
 - Yikang 的 `ayzxv1ma/model_10600` 四臂矩阵已从功能分支 exact source `8c8cd53` 发射：Pod1
   三卡分别运行 A 泛化 [`5nso93g0`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/5nso93g0)、
   B 推扰 [`4osh4ypc`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/4osh4ypc)、A+B

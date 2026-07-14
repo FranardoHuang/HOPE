@@ -2068,3 +2068,17 @@ origin/main 基线复现，本 source 未改相关文件。两份 queue 仍为 P
 jobs `blocked`。下一门是为 exact checkout 水合 content-bound ignored A3 资产，再在 Pod2 空槽跑自己的
 4096-environment strict full-scene terminal probe；probe pass 也只能由显式 queue consumer 解锁单 seed
 fresh pair。在 receipt 存在前不授权 trainer/judge/第二 seed/晋级，G05 继续 `Partial`。
+
+#### Same-phase counter 的真实 InferenceMode 假绿已抓获
+
+`0f3900a...` 的首个 Pod2 strict full-scene attempt 在 trainer 前被一康旧 launcher 继承的全局 Kit lock inode
+阻塞。operator 只精确收口自己的 wait PGID，以 hardlink 保全旧 inode，并用 atomic replace 把 canonical lock
+换到空闲新 inode；一康 GPU0 的 PID、启动时刻与旧 inode holder 全程不变。该 attempt 明确记为 preboot、
+non-science、不可复用。
+
+新 attempt 随后在 exact 4096-env scene 越过首个 `Learning iteration`，但 runner 第一次记录 activation total 时
+因 normal-mode `zero_()` 修改 RewardManager 在 `torch.inference_mode()` 中创建的 scalar 而 fatal。故场景启动通过
+不能解锁 scientific pair，`0f3900a...` 永久 NO-LAUNCH。本 source fix 只在 reset 三个私有 device counter 时重新
+进入 inference mode，并新增 inference-create → normal-consume → next-step-reuse 回归；专项
+`10 + 2 + 11 passed`。尚需新 exact commit/checkout、source asset hydration、全新 full-scene terminal result，
+且 queue 必须显式消费 pass receipt 后才能从 blocked 改 ready；G05 继续 `Partial`。
