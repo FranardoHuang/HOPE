@@ -1,13 +1,13 @@
 # EXP-P1-CONDITIONAL-FACE-GUIDANCE — 不逃离就绪区的固定预算 Reward
 
-- 状态：`Partial`（strict 4096-env 非科学探针已通过；科学 control/treatment 均越过 first iteration，
-  尚无 checkpoint 早判或 Reward 结论）
+- 状态：`Partial`（strict 4096-env 非科学探针已通过；科学 control/treatment 的 `model_200` 身份门已过，
+  trailing-21 activation/方向屏尚未闭合，仍无 Reward 结论）
 - 阶段/轴：阶段 1 固定点；Reward 争抢机制
 - 集成小目标：在不牺牲触点、拍速、完成率或安全的前提下，降低有符号拍面误差
 - 人类负责人：franco
 - 执行者：Codex
 - 复核/决策负责人：franco
-- 最高证据等级：`E2`（`main@caeb9ad` strict Pod2 启动/终档 receipt；尚无 Reward 训练结果）
+- 最高证据等级：`E2`（`main@caeb9ad` strict Pod2 启动/终档与 `model_200` 身份 receipt；尚无 Reward 结论）
 - 创建日期/最后复核日期：2026-07-14
 
 共享缩写见[术语与人话对照](../../DEFINITIONS.md)。本文的
@@ -107,7 +107,10 @@ no-clobber 写 pass/fail `probe_result.json`。失败不自动 retry，仍 live 
 `runtime_binding=true`，仍只差 conditional weight `0/-0.4`。strict terminal receipt 已通过并由显式
 队列变更消费；当前二者均为 `ready`、顶层
 [`launch_authorized=true`](../../DEFINITIONS.md#launch-authorized)。随后 control/treatment 已分别在 Pod2
-GPU1/GPU2 越过 first iteration，PID=PGID 为 `357023/357679`；尚无 `model_200.pt` 或配对早判。
+GPU1/GPU2 越过 first iteration，PID=PGID 为 `357023/357679`。两份 `model_200.pt` 已由 source-pinned
+attestor 核对 filename/embedded iteration=`200`、finite、fresh lineage、claim 与相邻 schema-3 hard
+contract，并写入 receipt content SHA-256 `08c7731a...03df` / `e7dcb7cc...c2c9`。这不是配对行为早判；
+trailing-21 activation/方向屏仍须单独冻结复核。
 
 ## 不可补偿安全边界
 
@@ -141,17 +144,17 @@ joint/torque/qdot limit、观测、动作或 plant。以下任一项都独立判
 | --- | --- | --- | --- | --- | --- |
 | 同 source fresh 对照（`phase1_fresh_c_conditional_face_control_seed3_20260714`） | 基础设施失败，永久拒绝该 namespace | seed3；第 0 次迭代前 | E2 | claim `caffd19e...da52`、run log/launch sidecar | 4096-env 日志停在 URDF import；无 scene、contract 或 checkpoint，不是 Reward 失败 |
 | 不逃离就绪区的固定预算纠面（`phase1_fresh_c_conditional_face_w04_seed3_20260714`） | 未发射、旧配对阻断 | seed3；无进程/claim | E1 | run directory 不存在 | control 失败后 serial fill fail closed；必须换 fresh source/namespace，不能单独补 treatment |
-| P1 runtime-bound fresh 对照（`phase1_fresh_c_conditional_face_control_p1r1_seed3_20260714`） | live，已过 first iteration | seed3；200/500/1000 | E2 启动门 | PID=PGID `357023` + strict caeb receipt | 尚无 `model_200.pt`，不得把 probe model 当科学 checkpoint |
-| P1 runtime-bound 固定预算纠面（`phase1_fresh_c_conditional_face_w04_p1r1_seed3_20260714`） | live，已过 first iteration | seed3；200/500/1000 | E2 启动门 | PID=PGID `357679` + strict caeb receipt | 尚无配对早判；与 control 唯一差异为 `-0.4` |
+| P1 runtime-bound fresh 对照（`phase1_fresh_c_conditional_face_control_p1r1_seed3_20260714`） | live；`model_200` 身份门通过 | seed3；200/500/1000 | E2 checkpoint identity | PID=PGID `357023`；model SHA `b55b7d3b...b4b41`；receipt `08c7731a...03df` | trailing-21 方向屏未闭合，不得停臂/晋级 |
+| P1 runtime-bound 固定预算纠面（`phase1_fresh_c_conditional_face_w04_p1r1_seed3_20260714`） | live；`model_200` 身份门通过 | seed3；200/500/1000 | E2 checkpoint identity | PID=PGID `357679`；model SHA `c07b1f12...bd51`；receipt `e7dcb7cc...c2c9` | 与 control 唯一差异为 `-0.4`；方向屏未闭合 |
 
 ## 决定
 
 - 决定：`inconclusive`
-- 理由：公式、反向激励反例与 source gate 已进入 main；strict 4096-env probe 与两臂 first iteration
-  已通过，但还没有 paired checkpoint，因此仍不能评价 conditional 机制。
+- 理由：公式、反向激励反例与 source gate 已进入 main；strict 4096-env probe、两臂 first iteration 与
+  paired `model_200` 身份均通过，但 activation/方向行为尚未冻结复核，因此仍不能评价 conditional 机制。
 - 是否已纳入当前 setting：`no`
 - 局限/下一个 gate：旧 source610 配对不再运行。新 pair 已绑定 strict caeb source/namespace 并正在运行；
-  下一步守到 `+200`，再于 `+200/+500/+1000` 核 activation 与行为。不得手写
+  下一步先闭合 `+200` trailing-21 activation/方向屏，再于 `+500/+1000` 核行为。不得手写
   CLI、把 probe model 计入成绩或越过配对早判。
 
 ## 复现与证据

@@ -13,6 +13,12 @@
 
 ## 2026-07-14
 
+- conditional P1 control/treatment 的 `model_200.pt` 已由 source-pinned attestor 写入 no-clobber receipt：
+  checkpoint SHA-256 `b55b7d3b...b4b41` / `c07b1f12...bd51`，各 76 tensors、1,762,715 浮点元素全 finite，
+  fresh lineage、claim 与 schema-3 hard contract 匹配；receipt content SHA-256 为
+  `08c7731a...03df` / `e7dcb7cc...c2c9`。这只闭合身份门，`+200` trailing-21 activation/方向屏尚待复核，
+  不停臂、不晋级。见 [conditional 卷宗](experiments/2026-07/EXP-P1-CONDITIONAL-FACE-GUIDANCE.md)。
+
 - Franco 反手拉 B 的 L0 portability 根因已做成 fail-closed source 修复：历史 Pod1 checkout 只保留为
   claim/source provenance，当前 detached-clean commit、runner、source validator 与 runtime body order
   另行内容绑定，且无旧绝对路径 fallback；原生 consume loader 仍拒绝当前 runner 接管旧 activation，C
@@ -46,14 +52,14 @@
   `c39cf1ae4bd99aa5ddce2a4c6c51cfd3858eba4884baeb369d5fdb1cf88df838`。它绑定 clean caeb source、实际
   4096 environments、physical ball/三实体、76 tensors / 1,762,715 浮点元素全 finite、fatal0 与自然空
   PGID。两份 P1 队列已显式
-  [`launch_authorized=true`](DEFINITIONS.md#launch-authorized)，四条科学行 ready，但尚未点火；probe 仍非科学且
-  不可晋级。见
+  [`launch_authorized=true`](DEFINITIONS.md#launch-authorized)；后续点火、一次 importer abort 与
+  unchanged retry 的实际状态见本节首条。probe 仍非科学且不可晋级。见
   [G05](gates/G05_isaac_training_first_loop.md)与[操作](operations/run_lean_training_queue.md)。
 
 - Lean queue 加入显式 `launch_authorized` 发射闩：false 时
   `fill/launch-next` 会零 SSH 拒绝；live snapshot
   只访问 Pod2。历史七条 ready 行已按既有证据终态化，新 conditional 与 V1+V2×base-decel 配对现改绑
-  `main@caeb9ad`、分列 Pod2 GPU1/GPU2，并在上述 strict receipt 后显式解锁；尚未点火。
+  `main@caeb9ad`、分列 Pod2 GPU1/GPU2，并在上述 strict receipt 后显式解锁；当前运行态见本节首条。
   见 [G05](gates/G05_isaac_training_first_loop.md)与[操作](operations/run_lean_training_queue.md)。
 
 - full-scene probe P1.5 关闭短跑终态与假绿缺口：launcher-only pre-marker/watchdog/timeout 只能冻结失败；

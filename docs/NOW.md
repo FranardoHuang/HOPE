@@ -80,7 +80,10 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   4096 environments、物理球/三实体、76 个 tensor 的 1,762,715 个浮点元素全 finite、fatal0 与自然空
   PGID。该非科学 receipt 已被显式队列变更消费：两对均为 ready、
   [`launch_authorized=true`](DEFINITIONS.md#launch-authorized)。conditional control/treatment 随后已分别在
-  Pod2 GPU1/GPU2 越过 first iteration（PID=PGID `357023/357679`），尚无 checkpoint 早判或行为结论。
+  Pod2 GPU1/GPU2 越过 first iteration（PID=PGID `357023/357679`）；两份 `model_200.pt` 已写入 exact
+  milestone receipt，checkpoint SHA-256 分别为 `b55b7d3b...b4b41` / `c07b1f12...bd51`，76 个 tensor、
+  1,762,715 个浮点元素全 finite，fresh lineage/claim/schema-3 hard contract 均匹配。`+200` 只完成身份门；
+  trailing-21 activation/方向屏仍在复核，尚无行为结论，也不允许停臂或晋级。
   interaction control PID=PGID `358331` 则在 first iteration 前的 dynamic URDF import 以
   `malloc(): invalid size (unsorted)`、`rc=134` 自然退出；treatment 未发射，claim/namespace 已保全。
   这不是 interaction Reward/行为失败，也不能写成 pair 已运行。旧 control 行已 rejected、禁止重发；
@@ -107,8 +110,9 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   [milestone attestor](DEFINITIONS.md#milestone-attestor) 已进入 main；代表性 full-scene probe 也已实现。
   Pod2-only probe 的外层快照现在只读 selected dispatch slot，不再因普通 fill 的全 Pod 快照访问 reserved
   Pod1；`fill --execute` 每臂也已从“独立 doctor SSH + 内嵌 doctor launch SSH”收为一次原子远端调用。
-  ignored asset prepare 与 strict caeb 自然终档已经闭合；两组 pair 也都已过 first iteration。下一闭环是守到
-  `+200` 并核对各自 activation numerator/denominator；旧 interaction `358331` 不得重放。
+  ignored asset prepare 与 strict caeb 自然终档已经闭合；两组 pair 也都已过 first iteration。conditional
+  的 `+200` 身份门已过，下一闭环是冻结并核对其 activation numerator/denominator 与方向屏，同时守
+  interaction 到 `+200`；旧 interaction `358331` 不得重放。
 
   非击球臂 A0/A1 已完成 checkpoint 层闭环。A1 自然退出；
   A0 的 `model_1000.pt` 写完后在 Kit/Python teardown 挂起近三小时，正式 failure regex 无命中，终档
