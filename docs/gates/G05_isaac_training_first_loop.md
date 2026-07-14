@@ -66,6 +66,11 @@ Follow-up note (2026-07-15, clean base-deceleration terminal and teacher capture
   failed closed during Hydra compose, before any capture directory, claim, process or GPU work: three
   train-only checkpoint compatibility keys were retained, and a follow-up source audit found that play
   did not apply the frozen seed. V1 is not retried; a new source and namespace are required.
+- A successor-side one-shot controller now has a dependency-light source gate: it derives play argv
+  from the exact run binding, removes every frozen train-only/ownership key, retains and checks seed,
+  runs Hydra compose, re-hashes all inputs, and only then creates output and a numeric process group.
+  It has no SSH, stop, retry or trainer command. This is not runtime evidence; seed parity and an
+  independent red-team review remain required before a schema-2 v2 plan may launch.
 
 Follow-up note (2026-07-15, clean base-deceleration `+500` treatment rejected; Gate remains `Partial`):
 

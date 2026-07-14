@@ -28,9 +28,37 @@ process 和 GPU work 均未创建，v1 永久不重发。successor 还必须把�
 - 先在实验记录中冻结 teacher checkpoint、target count、root linear/angular velocity limit、4096 environments、
   最大 inference steps 和 GPU 槽。不要用 timeout 状态、失败 reset 或 clip-switch 中止状态补数量。
 
+## successor 必须使用的一次性 controller
+
+v1 的手工 argv 派生已被证伪；successor 不再手拼命令。源码工具
+[`run_preregistered_post_swing_capture.py`](../../scripts/run_preregistered_post_swing_capture.py) 只在仿真 Pod
+本机运行，读取 schema-2 机器预注册，并提供三个模式：
+
+```bash
+python3 scripts/run_preregistered_post_swing_capture.py \
+  --plan /ABS/FROZEN_PLAN.json \
+  --expected-plan-sha256 PLAN_SHA256 plan
+
+python3 scripts/run_preregistered_post_swing_capture.py \
+  --plan /ABS/FROZEN_PLAN.json \
+  --expected-plan-sha256 PLAN_SHA256 launch
+
+python3 scripts/run_preregistered_post_swing_capture.py \
+  --plan /ABS/FROZEN_PLAN.json \
+  --expected-plan-sha256 PLAN_SHA256 status
+```
+
+`plan` 只读复算 source、ignored A3 tree、checkpoint/claim/binding/receipt、动作、题库、GPU 与最终 argv；
+`launch` 先做同一 argv 的 Hydra compose，再次复算所有输入，只有仍 exact 才创建 capture directory 并用
+new session 启动一个 inference process；`status` 只按 receipt 的数字 PID/PGID/starttime 和四个固定制品读取。
+工具没有 stop/retry/SSH/trainer 子命令。compose 或二次复算失败会留下 no-clobber failure evidence，但不会
+创建 capture claim/process；该 plan 仍视为花掉，必须新预注册。当前工具只是 source gate，必须与 seed
+parity 修复、schema-2 plan 和独立红队一起合入后才能运行。
+
 ## 1. inference-only 自然 wrap 采集
 
-下例中的 `+task.motion.post_swing_capture_output_dir` 表示“raw 结果写到哪个全新目录”；
+下例仅解释 controller 最终生成的 argv 语义，不再允许人工直接执行。`+task.motion.post_swing_capture_output_dir`
+表示“raw 结果写到哪个全新目录”；
 `+task.motion.post_swing_capture_target_count` 表示“必须收满多少条自然 wrap 状态”；
 `post_swing_capture_max_steps` 是只允许推理多少步的硬预算，不是成功条件。
 

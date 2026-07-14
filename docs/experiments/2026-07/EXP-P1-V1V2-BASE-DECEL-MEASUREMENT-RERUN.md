@@ -312,6 +312,13 @@ seed parity 已于 2026-07-15 单独闭环：`play.yaml` 现在显式提供 `see
 capture 配方可 compose。这个 source fix 不追认 v1，也不授权 v2；一次性 controller 的独立红队、全新
 schema-2 prereg、4096-environment capture、attestation 与首 reset 仍按顺序阻断。
 
+为避免再次靠聊天手拼 argv，successor source 新增
+[`run_preregistered_post_swing_capture.py`](../../../scripts/run_preregistered_post_swing_capture.py)：它从 exact
+run binding 机器派生 play argv，强制删除十二个 train-only/ownership 键、保留并核对 seed，先 compose、
+后二次复算 source/input，再创建 output 和独立 PGID。任何失败都会花掉 launch plan，工具不提供 retry、
+stop、SSH 或 trainer 功能。当前仍只是 dependency-light source gate；独立红队、全新 schema-2 prereg、
+4096-environment capture、attestation 与首 reset 未闭前不能用它解锁科学训练。
+
 ## 离线复现
 
 本提交不连接 Pod、不写 claim、不运行 probe/trainer/judge：

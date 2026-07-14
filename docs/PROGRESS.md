@@ -36,6 +36,11 @@
   三个 train-only checkpoint 键；源码复核还发现 play 未实际应用冻结 seed。v1 证据保全且不重发，v2
   必须合 seed parity、删除 train-only 键并换全新 namespace。
 
+- post-swing successor 的本机一次性 controller source gate 已补：从 exact run binding 自动派生 argv，
+  强制删除 train-only/ownership 键并保留 seed，Hydra compose 后二次复算全部输入，随后才创建 output 和
+  numeric PGID；没有 SSH/stop/retry/trainer 子命令。专项 `4 passed`，但 seed parity 和独立红队尚未合，
+  所以仍不能发 v2。见[操作文档](operations/run_post_swing_teacher_capture.md)。
+
 - clean base-decel 的 `model_500` 两份 receipt/finite/fresh/claim/common hard exact，step 0–500 activation
   全过且 480–500 尾窗两臂都有真实 V2/exact-strike 分母。treatment/control 底座速度=`1.13669×`
   （FAIL `≤0.90×`）、signed-face pass 差=`−0.16609`、composite 差=`−0.06942`，解析回球降到
