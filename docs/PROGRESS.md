@@ -13,6 +13,13 @@
 
 ## 2026-07-15
 
+- Franco 反手拉 B 的桌网整轨门已通过独立 source/static 红队：冻结 validator/plan、runtime-order 名字双射、
+  四个碰撞障碍和 `1201×37×4` 有限密扫均内容绑定，`<5 mm` 为不可补偿 hard fail；focused `29 passed`、
+  完整 lineage chain `130 passed`。这只允许进入 Pod2 CPU 的只读 dry-run，尚无 runtime certificate，
+  也不证明连续时间、动力学、平衡、TOPP、回台或 RL。见
+  [实验卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET.md)和
+  [运行操作](operations/run_motion_backhand_loop_b_table_net_clearance.md)。
+
 - post-swing teacher capture schema-v2 已从 prelaunch 推进到真实 runtime，但在零 inference step 因
   `get_observations()` 返回 `(actor observation, extras)`、旧 play 直接 `.to()` 而失败；v2 只有 bound claim，
   states/result/receipt absent，exact teardown 后永久不重发。successor source 已统一到 actor-only adapter，
