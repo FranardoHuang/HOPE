@@ -22,7 +22,7 @@
 问题不是“能否把另一条分支整体合进来”，而是：哪些做法表达了可跨动作、跨 checkpoint 复用的控制原理；
 哪些只能作为当前动作/模型的配对消融；哪些是为了某个 checkpoint 或旧 harness 勉强接通的 quick fix。
 
-本次以 `origin/main@c994489e6f4a5ae5e59fd26d2bec92a9f924ed10` 为基线，逐一核对下列提交；
+本次审计时以 `origin/main@c994489e6f4a5ae5e59fd26d2bec92a9f924ed10` 为历史基线，逐一核对下列提交；
 `git merge-base --is-ancestor <commit> origin/main` 对七项均返回 false，所以它们都是 off-main 证据，
 不能写成 main 已具备或 Gate 已通过。
 

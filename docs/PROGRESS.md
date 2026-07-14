@@ -13,6 +13,13 @@
 
 ## 2026-07-15
 
+- 完成 Jiayi V9 与 Yikang 部署支线的 exact-commit 只读审计：定向 recovery debt、二维 station settle、
+  动作首帧上肢准备态、外生随机长等待及 per-side planner metadata 可作为 current-main 单变量候选；
+  直接写 root velocity、旧 broad-kill harness 与 checkpoint 专用 soft clamp 不整体移植。旧三次 `7/7`
+  的成功条件只是 engage→挥拍→恢复，结果明确未测 physical contact/landing，且只覆盖固定正手区，
+  所以不能作为物理回球、球路泛化或选档成绩。详见
+  [跨线审计](experiments/2026-07/EXP-V9-YIKANG-CROSS-LEARNING-20260715.md)。
+
 - fresh v4 measurement control/treatment 已由同一次 `fill --count 2` 顺序发射：Pod2 GPU1/GPU2 exact
   PGID=`380610/381237`，claim content SHA-256=`576724de...a49d` / `1a529430...4c5`，两臂均绑定 clean
   `2c2d70d...`、4096 env、schema-3 hard contract并越过首迭代。最近只读快照为 iteration `25/11`、fatal0；

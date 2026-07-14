@@ -1171,6 +1171,18 @@ Legacy Gate3 diagnostic 与 current exact-179 Gate3
 属于两份独立实验记录，不能互相填充结果单元。本次纯文档迁移没有运行 evaluator、模拟器、backend、
 Pod 或真机，也不改变 G06 的 `Partial` 状态。
 
+### 2026-07-15 legacy V9 `7/7` proxy correction
+
+The branch-local V9/v12fix `7/7` value is not a physical-return result. Its success predicate combines
+planner engage, ready, at least one completed swing and recovery, while the result explicitly records
+`physical_contact_measured=false` and `landing_measured=false`; the fake-ball publisher supplies planner
+poses rather than a MuJoCo contact/flight event chain. Repetition covered a fixed forehand region, so it
+also cannot establish unseen-ball, backhand or multi-action generalization. It may be retained only as an
+exact planner-policy cycle-stability proxy. Physical selection still requires a vendor-MuJoCo receiver
+with all-serves denominators and a disjoint held-out paper. The source audit and candidate mechanisms are
+recorded in [the Jiayi/Yikang cross-learning experiment](../experiments/2026-07/EXP-V9-YIKANG-CROSS-LEARNING-20260715.md);
+no runtime, score or Gate status changes here, and G06 remains `Partial`.
+
 #### 2026-07-13 exact formal tuple and portable Release integrated
 
 The earlier planner red-team candidates above are superseded by exact source `c0a8e46`. Formal

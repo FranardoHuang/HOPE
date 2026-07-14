@@ -500,8 +500,9 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   有效周期和行为记录。[实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md)
 - **[7｜P1] Gate3 历史谱系复核。** 责任人 yikang；执行者 Codex/direct；分支
   `yikang-standhit-0714`。2026-07-15 已完成 mechanics 门并发射：以 W&B
-  `ayzxv1ma/model_10600`（Gate3 v4
-  3× PASS、每轮 7/7 正手、0 摔）为唯一共同 warm-start，保持其 reward/观测/动作与 v12fix
+  `ayzxv1ma/model_10600`（旧 Gate3 v4
+  3× PASS、每轮 7/7 正手挥拍/恢复周期代理、0 摔；未测物理触球或落台）为唯一共同 warm-start，
+  保持其 reward/观测/动作与 v12fix
   teacher 不变，运行三个因果分叉：纯 A=站姿可达击球点泛化、纯 B=每个 reset 独立
   Bernoulli `p=0.05` 随机推扰、A+B；另有同配方 fresh A+B origin 对照（禁止 checkpoint，保留
   原 yaw curriculum）。exact source `8c8cd53` 的 init/load 门与 B/AB 实际推扰门已过；Pod1 三卡
@@ -511,7 +512,8 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   A+B [`xpiapvix`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/xpiapvix)；四条首个 checkpoint
   均已 finite/loadable。fresh 的短 mechanics 因初始策略 5 秒前摔倒只验证到 push selection，但正式
   run 到约 iter 322 已记录第一次真实 apply。下一证据：同绝对迭代 checkpoint 的泛化、推扰后存活与固定点回归；随后
-  才做同运行链 Gate3 对照。启动健康不等于质量晋级。
+  才做同运行链 Gate3 对照。启动健康不等于质量晋级；旧周期代理与球路泛化局限见
+  [跨线审计](experiments/2026-07/EXP-V9-YIKANG-CROSS-LEARNING-20260715.md)。
 
 ### 训练引擎与机器人物理
 

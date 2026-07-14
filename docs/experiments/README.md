@@ -54,6 +54,7 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 | [EXP-MUJOCO-EVAL-FRAME-INTEGRATION](2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md) | latest main 能否同时保留 signed-face、parity guards 与 pelvis point/frame 合同？ | yikang | Codex | source integrated, pending main | E1 | focused `115 passed, 2 skipped`、root `647 passed, 9 skipped`；未授权 K100 |
 | [EXP-MUJOCO-PELVIS-FRAME-PARITY](2026-07/EXP-MUJOCO-PELVIS-FRAME-PARITY.md) | MuJoCo 倒下是否来自 pelvis 点/轴坐标错位？ | yikang | Codex | completed | E2 | adopt 两处 evaluator frame 修复；主因与 ready-state 因果仍 inconclusive |
 | [EXP-RECOVERY-TUPLE-ABC](2026-07/EXP-RECOVERY-TUPLE-ABC.md) | 哪种连贯的击球后命令语义能够安全恢复？ | franco | Codex | blocked | E1 旧结构；E0 新次序 | 新 reward 次序尚未同步 machine prereg；无行为结果 |
+| [EXP-V9-YIKANG-CROSS-LEARNING-20260715](2026-07/EXP-V9-YIKANG-CROSS-LEARNING-20260715.md) | Jiayi V9 / Yikang 支线哪些机制可复用，哪些结果受动作与来球分布限制？ | Franco | Codex | completed | E1 | 识别五类候选机制；旧 `7/7` 只测挥拍/恢复周期且未测物理触球/落台，不作为回球或泛化成绩 |
 | [EXP-MOTION-SPATIAL-RETARGET](2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | 新空挥能否在不做不安全编辑的前提下放置到有效击球点？ | franco | Codex | running/partial | E2 | B 主选 schema-2/FK 一次性 consume 通过并解锁 L0；C 未消费后备，L1/桌网/动力学/RL 仍阻断 |
 | [EXP-GATE3-CURRENT179-D0](2026-07/EXP-GATE3-CURRENT179-D0.md) | 当前 exact 179 policy/planner/runtime 能否完成一份固定考卷？ | franco | Codex | blocked | E2 | 仅通过模型预检；行为实验缺 runtime 前置 |
 | [EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD](2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) | exact planner-policy 源码能否通过 portable Release，并无冲突地进入 latest main？ | franco | Codex | completed | E1 | adopt exact 源码；runtime/Gate3 行为仍未运行 |

@@ -46,6 +46,20 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-15, Jiayi/Yikang selective cross-learning audit; Gate remains `Partial`):
+
+- Exact-commit source/config review keeps directional recovery debt, vector station-settle, clip-frame-0
+  upper-body ready, exogenous long-hold sampling and per-side planner metadata as separately testable
+  candidates. Because several act in the same recovery/ready phase, none is adopted by simply adding
+  weights; surviving terms require single-variable activation first and then a fixed-total-budget
+  interaction test. Direct root-velocity writes, broad process-kill harnesses and checkpoint-specific
+  soft clamps are not adopted as defaults.
+- The historical V9/v12fix `7/7` counter was computed from engage, ready, swing completion and recovery;
+  its own result marks physical contact and landing as unmeasured, and the repeated cases cover only a
+  fixed forehand region. It is therefore a deployment-cycle diagnostic, not a physical-return,
+  held-out-ball or multi-action generalization result. Full evidence and proposed falsifiers are in
+  [the cross-learning audit](../experiments/2026-07/EXP-V9-YIKANG-CROSS-LEARNING-20260715.md).
+
 Follow-up note (2026-07-15, Yikang RallyV9 reach/balance matrix; Gate remains `Partial`):
 
 - Feature source `yikang-standhit-0714@8c8cd53` passed host/pod contract checks and four Isaac
