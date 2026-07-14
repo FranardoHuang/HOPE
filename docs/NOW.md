@@ -495,8 +495,8 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   [`4osh4ypc`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/4osh4ypc)、A+B
   [`jndof7jk`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/jndof7jk)，Pod2 GPU0 正在运行 fresh
   A+B [`xpiapvix`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/xpiapvix)；四条首个 checkpoint
-  均已 finite/loadable。fresh 的短 mechanics 因初始策略 5 秒前摔倒只验证到 push selection，实际
-  apply 继续看 telemetry。下一证据：同绝对迭代 checkpoint 的泛化、推扰后存活与固定点回归；随后
+  均已 finite/loadable。fresh 的短 mechanics 因初始策略 5 秒前摔倒只验证到 push selection，但正式
+  run 到约 iter 322 已记录第一次真实 apply。下一证据：同绝对迭代 checkpoint 的泛化、推扰后存活与固定点回归；随后
   才做同运行链 Gate3 对照。启动健康不等于质量晋级。
 
 ### 训练引擎与机器人物理

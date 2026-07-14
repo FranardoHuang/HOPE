@@ -19,7 +19,8 @@
   [`jndof7jk`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/jndof7jk)，Pod2 GPU0 运行 fresh A+B
   [`xpiapvix`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/xpiapvix)。四条 init/load 门与首个
   finite/loadable checkpoint 已过；B/AB mechanics 已实际施加推扰，fresh 短 smoke 因随机策略未活到
-  5 秒只验证 selection。训练质量、matched-iteration 对照和 Gate3 仍未判。
+  5 秒只验证 selection，但正式 run 到约 iter 322 已记录第一次真实 apply。训练质量、
+  matched-iteration 对照和 Gate3 仍未判。
 
 - V1+V2×底座减速旧仪表 pair 已自然到 `model_1000` 并退出，不是中途失败。control/
   treatment 的 model SHA-256 为 `ad69bc70...9f75` / `dcfb9599...00e8`，两边 filename/embedded

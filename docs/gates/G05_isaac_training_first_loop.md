@@ -58,8 +58,9 @@ Follow-up note (2026-07-15, Yikang RallyV9 reach/balance matrix; Gate remains `P
   [`jndof7jk`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/jndof7jk), and fresh A+B
   [`xpiapvix`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/xpiapvix). B/AB mechanics reached a
   real push application; fresh selected push episodes but its random policy did not survive the
-  minimum 5-second delay in the short smoke. Launch health is not a generalization, balance, or
-  Gate3 result; matched-iteration evaluation and formal fork export remain pending.
+  minimum 5-second delay in the short smoke, then logged its first production application by about
+  iteration 322. Launch health is not a generalization, balance, or Gate3 result; matched-iteration
+  evaluation and formal fork export remain pending.
 
 Follow-up note (2026-07-14, Pod2 `+200` activation audit; Gate remains `Partial`):
 
