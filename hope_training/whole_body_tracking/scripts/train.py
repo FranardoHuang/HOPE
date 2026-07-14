@@ -650,6 +650,7 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
                 "source_family_sha256": family_sha,
                 "exact": True,
             }
+    post_swing_replay = motion_cmd.post_swing_replay_hard_contract()
     return {
         "schema_version": TRAINING_CONTRACT_SCHEMA_VERSION,
         **runtime_facts,
@@ -701,6 +702,13 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         "motion_post_swing_buffer_size": attr(motion, "post_swing_buffer_size"),
         "motion_post_swing_min_fill": attr(motion, "post_swing_min_fill"),
         "motion_post_swing_min_hold": attr(motion, "post_swing_min_hold"),
+        # Keep every receipt-free historical/default contract byte-compatible.  The new nested
+        # identity exists only when an external teacher artifact can actually affect reset state.
+        **(
+            {"motion_post_swing_replay": post_swing_replay}
+            if post_swing_replay["teacher_receipt"] is not None
+            else {}
+        ),
         "motion_clip_switch_prob": attr(motion, "clip_switch_prob"),
         "motion_rsi_skip_settle_frames": attr(motion, "rsi_skip_settle_frames"),
         "motion_stagger_initial_clock": attr(motion, "stagger_initial_clock"),
@@ -964,6 +972,9 @@ _MOTION_KEYS = (
     "wrap_teleport", "stand_start_prob", "hold_steps_range", "stand_start_min_hold",
     "stand_start_yaw_range",
     "post_swing_start_prob", "post_swing_buffer_size", "post_swing_min_fill", "post_swing_min_hold",
+    "post_swing_teacher_receipt", "post_swing_teacher_receipt_sha256",
+    "post_swing_require_ready_at_init",
+    "post_swing_fail_fast_first_reset",
     # deploy-parity mid-swing clip switch (018467a added the yaml key + MotionCommandCfg field but not
     # this whitelist/translation, so every run of the task yaml raised in _check_unknown_keys).
     "clip_switch_prob",
@@ -1269,6 +1280,10 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(M, "post_swing_buffer_size", _get(mt, "post_swing_buffer_size"), int, applied, "commands.motion")
             _set_attr(M, "post_swing_min_fill", _get(mt, "post_swing_min_fill"), int, applied, "commands.motion")
             _set_attr(M, "post_swing_min_hold", _get(mt, "post_swing_min_hold"), int, applied, "commands.motion")
+            _set_attr(M, "post_swing_teacher_receipt", _get(mt, "post_swing_teacher_receipt"), str, applied, "commands.motion")
+            _set_attr(M, "post_swing_teacher_receipt_sha256", _get(mt, "post_swing_teacher_receipt_sha256"), str, applied, "commands.motion")
+            _set_attr(M, "post_swing_require_ready_at_init", _get(mt, "post_swing_require_ready_at_init"), lambda value: _as_explicit_bool(value, "task.motion.post_swing_require_ready_at_init"), applied, "commands.motion")
+            _set_attr(M, "post_swing_fail_fast_first_reset", _get(mt, "post_swing_fail_fast_first_reset"), lambda value: _as_explicit_bool(value, "task.motion.post_swing_fail_fast_first_reset"), applied, "commands.motion")
             _set_attr(M, "clip_switch_prob", _get(mt, "clip_switch_prob"), float, applied, "commands.motion")
             _set_attr(M, "event_timing_mode", _get(mt, "event_timing_mode"), str, applied, "commands.motion")
             _set_attr(M, "event_timing_schedule", _get(mt, "event_timing_schedule"), str, applied, "commands.motion")

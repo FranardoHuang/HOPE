@@ -252,6 +252,7 @@ def test_training_hard_contract_binds_every_existing_timing_knob():
         "motion_post_swing_buffer_size",
         "motion_post_swing_min_fill",
         "motion_post_swing_min_hold",
+        "motion_post_swing_replay",
         "motion_rsi_skip_settle_frames",
         "motion_stagger_initial_clock",
         "motion_stagger_hold_max_steps",

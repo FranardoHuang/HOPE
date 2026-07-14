@@ -30,6 +30,11 @@ from whole_body_tracking.tasks.tracking.mdp.event_timing import (
     EventTimingScheduler,
     load_event_schedule,
 )
+from whole_body_tracking.tasks.tracking.mdp.post_swing_teacher import (
+    PostSwingTeacherError,
+    load_post_swing_teacher_states,
+    sha256_file,
+)
 
 
 def _stand_start_yaw_samples(yaw_range, count: int, device):
@@ -519,6 +524,14 @@ class MotionCommand(CommandTerm):
         self._post_swing_joint_vel: torch.Tensor | None = None
         self._post_swing_count = 0
         self._post_swing_ptr = 0
+        self._post_swing_teacher_hard_contract: dict | None = None
+        self._post_swing_require_ready_at_init = bool(
+            getattr(self.cfg, "post_swing_require_ready_at_init", False)
+        )
+        self._post_swing_fail_fast_first_reset = bool(
+            getattr(self.cfg, "post_swing_fail_fast_first_reset", False)
+        )
+        self._post_swing_first_reset_checked = False
         # Activation accounting is kept outside ``metrics`` because command metrics are
         # instantaneous per-environment values, while these are event counts accumulated over
         # one PPO update.  MotionOnPolicyRunner consumes and resets them exactly once from its
@@ -533,6 +546,7 @@ class MotionCommand(CommandTerm):
                 "post_swing_replay_started_reset_count",
             )
         }
+        self._load_post_swing_teacher_if_configured()
         # Reward-mechanism activation accounting.  These counters live on the motion command so
         # every imitation reward term can record into one per-update ledger without touching the
         # simulator or sampling another random number.  The unit of V1 is one environment sample
@@ -993,6 +1007,11 @@ class MotionCommand(CommandTerm):
         Root position is stored origin-relative; write pairs root_state_w <->
         write_root_state_to_sim (com-frame velocities) to match the stand/RSI branches.
         """
+        # Receipt-backed science pairs keep one identical exogenous reset distribution.  Letting
+        # each arm overwrite it with policy-owned wraps would reintroduce the treatment-dependent
+        # curriculum that this cold-start path exists to remove.
+        if self._post_swing_teacher_hard_contract is not None:
+            return
         n = len(env_ids)
         if n == 0:
             return
@@ -1012,6 +1031,101 @@ class MotionCommand(CommandTerm):
         self._post_swing_joint_vel[slots] = jv
         self._post_swing_ptr = int((self._post_swing_ptr + n) % size)
         self._post_swing_count = min(self._post_swing_count + n, size)
+
+    def _load_post_swing_teacher_if_configured(self) -> None:
+        """Seed the replay ring from one immutable natural-wrap teacher receipt."""
+
+        receipt_path = str(
+            getattr(self.cfg, "post_swing_teacher_receipt", "") or ""
+        ).strip()
+        receipt_sha = str(
+            getattr(self.cfg, "post_swing_teacher_receipt_sha256", "") or ""
+        ).strip().lower()
+        probability = float(self.cfg.post_swing_start_prob)
+        if bool(receipt_path) != bool(receipt_sha):
+            raise ValueError(
+                "post_swing_teacher_receipt and its SHA-256 must be provided together"
+            )
+        if (
+            receipt_path
+            or self._post_swing_require_ready_at_init
+            or self._post_swing_fail_fast_first_reset
+        ) and probability <= 0.0:
+            raise ValueError(
+                "post-swing teacher/activation gates require post_swing_start_prob > 0"
+            )
+        if (
+            self._post_swing_require_ready_at_init
+            or self._post_swing_fail_fast_first_reset
+        ) and not receipt_path:
+            raise ValueError(
+                "ready-at-init, frozen teacher, and activation fail-fast modes require an "
+                "immutable post_swing_teacher_receipt"
+            )
+        if not receipt_path:
+            return
+
+        motion_files = self.cfg.motion_file
+        if isinstance(motion_files, str):
+            motion_files = [motion_files]
+        else:
+            motion_files = list(motion_files)
+        try:
+            teacher = load_post_swing_teacher_states(
+                receipt_path,
+                receipt_sha,
+                expected_motion_sha256=[sha256_file(path) for path in motion_files],
+                expected_joint_names=self.robot.data.joint_names,
+                min_fill=int(self.cfg.post_swing_min_fill),
+                buffer_size=int(self.cfg.post_swing_buffer_size),
+            )
+        except (OSError, PostSwingTeacherError) as exc:
+            raise ValueError(f"invalid post-swing teacher receipt: {exc}") from exc
+
+        joint_pos = torch.as_tensor(teacher.joint_pos, device=self.device)
+        limits = self.robot.data.soft_joint_pos_limits
+        if limits.ndim != 3 or limits.shape[-1] != 2:
+            raise ValueError("runtime soft joint-position limits have an unexpected shape")
+        lower = limits[0, :, 0].to(device=self.device)
+        upper = limits[0, :, 1].to(device=self.device)
+        if joint_pos.shape[1] != lower.numel() or torch.any(joint_pos < lower) or torch.any(
+            joint_pos > upper
+        ):
+            raise ValueError(
+                "post-swing teacher joint positions violate runtime articulation limits"
+            )
+
+        count = int(teacher.root_state_origin_relative.shape[0])
+        size = int(self.cfg.post_swing_buffer_size)
+        self._post_swing_root = torch.zeros(size, 13, device=self.device)
+        self._post_swing_joint_pos = torch.zeros(
+            size, joint_pos.shape[1], device=self.device
+        )
+        self._post_swing_joint_vel = torch.zeros_like(self._post_swing_joint_pos)
+        self._post_swing_root[:count] = torch.as_tensor(
+            teacher.root_state_origin_relative, device=self.device
+        )
+        self._post_swing_joint_pos[:count] = joint_pos
+        self._post_swing_joint_vel[:count] = torch.as_tensor(
+            teacher.joint_vel, device=self.device
+        )
+        self._post_swing_count = count
+        self._post_swing_ptr = count % size
+        self._post_swing_teacher_hard_contract = teacher.hard_contract
+        if self._post_swing_count < int(self.cfg.post_swing_min_fill):
+            # The pure loader already rejects this; retain a local invariant at the simulator
+            # adoption boundary so a future loader refactor cannot weaken ready-at-init.
+            raise ValueError("post-swing teacher did not make the replay buffer ready")
+
+    def post_swing_replay_hard_contract(self) -> dict:
+        """Return exact cold-start semantics for checkpoint lineage binding."""
+
+        return {
+            "teacher_receipt": self._post_swing_teacher_hard_contract,
+            "teacher_distribution": "immutable",
+            "require_ready_at_init": self._post_swing_require_ready_at_init,
+            "fail_fast_first_reset": self._post_swing_fail_fast_first_reset,
+        }
 
     def _write_post_swing_states(self, env_ids: torch.Tensor):
         """A8: initialize `env_ids` from random buffered end-of-swing states (origin re-based)."""
@@ -1237,6 +1351,26 @@ class MotionCommand(CommandTerm):
             self.hold_counter[post_ids] = torch.clamp(
                 self.hold_counter[post_ids], min=int(self.cfg.post_swing_min_hold)
             )
+
+        if self._post_swing_fail_fast_first_reset and not self._post_swing_first_reset_checked:
+            # CommandManager invokes this true-reset path while constructing/resetting the
+            # environment, before PPO can collect or optimize its first rollout.  Requiring one
+            # successful adoption here catches a dead/endogenous cold start without burning a
+            # +200 checkpoint.  The draw is still the configured Bernoulli draw; scientific
+            # queues should use a large enough initial cohort that selected>0 is deterministic in
+            # practice (4096 envs at p=0.25 in the registered pair).
+            if self._post_swing_count < int(self.cfg.post_swing_min_fill):
+                raise RuntimeError(
+                    "post-swing first-reset fail-fast: teacher buffer is not ready"
+                )
+            if post_selected_count is None or int(post_selected_count.item()) <= 0:
+                raise RuntimeError(
+                    "post-swing first-reset fail-fast: initial true-reset cohort selected no "
+                    "teacher replay state"
+                )
+            # Reaching here means _write_post_swing_states returned after both root and joint
+            # state writes, and started was incremented from the same selected scalar.
+            self._post_swing_first_reset_checked = True
 
         # stand/post-start clamps may have promoted an initially zero draw to a real hold.
         self.metrics["in_hold"][env_ids_t] = (self.hold_counter[env_ids_t] > 0).float()
@@ -1586,6 +1720,16 @@ class MotionCommandCfg(CommandTermCfg):
     post_swing_min_fill: int = 256
     # Post-swing-started envs get at least this much hold (settle follow-through -> windup).
     post_swing_min_hold: int = 25
+    # Optional exogenous cold start.  The receipt contains only states captured at natural clip
+    # wraps and binds teacher checkpoint/source/contract, exact motion bytes and runtime joint
+    # order.  Empty/default preserves the historical policy-owned live buffer exactly.
+    post_swing_teacher_receipt: str = ""
+    post_swing_teacher_receipt_sha256: str = ""
+    # Explicit scientific pairs can refuse endogenous cold starts at process startup and require
+    # the initial true-reset cohort to adopt at least one teacher state before the first policy
+    # rollout/update.  Both default off so existing checkpoints/queues keep exact behavior.
+    post_swing_require_ready_at_init: bool = False
+    post_swing_fail_fast_first_reset: bool = False
     # Per-step per-env probability of an operator-style mid-swing clip switch (deploy parity —
     # see the venue-falls note in _update_command). 0.002 ~ one switch per ~3-4 swings. Default off.
     clip_switch_prob: float = 0.0

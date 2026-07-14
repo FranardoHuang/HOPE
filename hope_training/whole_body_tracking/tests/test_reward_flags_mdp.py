@@ -39,8 +39,10 @@ Run:  python -m pytest hope_training/whole_body_tracking/tests/test_reward_flags
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib.util
 import inspect
+import json
 import math
 import os
 import re
@@ -187,6 +189,7 @@ _PKG = "whole_body_tracking.tasks.tracking.mdp"
 for _p in ("whole_body_tracking", "whole_body_tracking.tasks", "whole_body_tracking.tasks.tracking", _PKG):
     sys.modules.setdefault(_p, types.ModuleType(_p))
 _load(f"{_PKG}.event_timing", "event_timing.py")
+_load(f"{_PKG}.post_swing_teacher", "post_swing_teacher.py")
 commands_mod = _load(f"{_PKG}.commands", "commands.py")
 rewards_mod = _load(f"{_PKG}.rewards", "rewards.py")
 terminations_mod = _load(f"{_PKG}.terminations", "terminations.py")
@@ -1258,10 +1261,12 @@ class _Scene:
 class _CmdRobot:
     def __init__(self, num_envs):
         self.body_names = list(_BODY_NAMES)
+        self.joint_names = list(_A3_JOINTS)
         default_root = torch.zeros(num_envs, 13)
         default_root[:, 2] = _STAND_Z
         default_root[:, 3] = 1.0
         self.data = types.SimpleNamespace(
+            joint_names=list(_A3_JOINTS),
             default_joint_pos=torch.zeros(num_envs, _N_JOINTS),
             default_joint_vel=torch.zeros(num_envs, _N_JOINTS),
             default_root_state=default_root,
@@ -1416,6 +1421,65 @@ def _counter_values(snapshot):
     return {name: int(value.item()) for name, value in snapshot.items()}
 
 
+def _sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _write_post_swing_teacher_receipt(tmp_path, motion_files, *, count=4):
+    payload = tmp_path / "post_swing_teacher_states.npz"
+    root = np.zeros((count, 13), dtype=np.float32)
+    root[:, 2] = 1.0
+    root[:, 3] = 1.0
+    np.savez(
+        payload,
+        root_state_origin_relative=root,
+        joint_pos=np.zeros((count, _N_JOINTS), dtype=np.float32),
+        joint_vel=np.zeros((count, _N_JOINTS), dtype=np.float32),
+    )
+    receipt = {
+        "schema_version": 1,
+        "artifact_kind": "hope_post_swing_teacher_state_receipt",
+        "capture_contract": {
+            "event": "natural_clip_wrap",
+            "wrap_teleport": False,
+            "clip_switch_aborted_states_included": False,
+            "root_position_frame": "environment_origin_relative",
+            "root_state_layout": "pos3_quat_wxyz4_linear_velocity_com3_angular_velocity3",
+            "joint_state_order": "runtime_articulation_joint_names",
+        },
+        "teacher": {
+            "source_commit": "1" * 40,
+            "checkpoint_sha256": "2" * 64,
+            "training_contract_sha256": "3" * 64,
+            "training_contract_schema_version": 3,
+            "fresh_lineage": True,
+        },
+        "motion_clips": [
+            {"index": index, "sha256": _sha256(path)}
+            for index, path in enumerate(motion_files)
+        ],
+        "states": {
+            "relative_path": payload.name,
+            "sha256": _sha256(payload),
+            "count": count,
+            "root_shape": [count, 13],
+            "joint_pos_shape": [count, _N_JOINTS],
+            "joint_vel_shape": [count, _N_JOINTS],
+            "joint_names": list(_A3_JOINTS),
+        },
+    }
+    receipt_path = tmp_path / "post_swing_teacher_receipt.json"
+    receipt_path.write_text(
+        json.dumps(receipt, separators=(",", ":"), sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return receipt_path, _sha256(receipt_path)
+
+
 def test_post_swing_activation_disabled_stays_zero_without_replay_adoption(clips):
     cmd, robot = _make_motion_command(
         [clips[0], clips[1]], num_envs=4, post_swing_start_prob=0.0
@@ -1503,6 +1567,75 @@ def test_post_swing_selected_is_not_started_until_state_write_returns(clips, mon
     assert snapshot["post_swing_replay_selected_reset_count"] == 3
     assert snapshot["post_swing_replay_started_reset_count"] == 0
     assert snapshot["post_swing_replay_random_not_selected_reset_count"] == 0
+
+
+def test_post_swing_teacher_cold_start_is_ready_and_activates_before_learning(
+    clips, tmp_path, monkeypatch
+):
+    receipt, receipt_sha = _write_post_swing_teacher_receipt(
+        tmp_path, [clips[0], clips[1]], count=4
+    )
+    cmd, robot = _make_motion_command(
+        [clips[0], clips[1]],
+        num_envs=4,
+        post_swing_start_prob=1.0,
+        post_swing_min_fill=4,
+        post_swing_buffer_size=8,
+        post_swing_teacher_receipt=str(receipt),
+        post_swing_teacher_receipt_sha256=receipt_sha,
+        post_swing_require_ready_at_init=True,
+        post_swing_fail_fast_first_reset=True,
+    )
+    assert cmd._post_swing_count == 4
+    assert cmd._post_swing_ptr == 4
+    contract = cmd.post_swing_replay_hard_contract()
+    assert contract["teacher_distribution"] == "immutable"
+    assert contract["teacher_receipt"]["receipt_sha256"] == receipt_sha
+
+    cmd._resample_command(torch.arange(4))
+    snapshot = _counter_values(cmd.consume_training_activation_counters())
+    assert snapshot["post_swing_replay_buffer_not_ready_reset_count"] == 0
+    assert snapshot["post_swing_replay_eligible_reset_count"] == 4
+    assert snapshot["post_swing_replay_selected_reset_count"] == 4
+    assert snapshot["post_swing_replay_started_reset_count"] == 4
+    assert [call[0] for call in robot.calls] == ["root", "joint"]
+
+    # A frozen controlled-direct-effect buffer ignores later live captures.  The state count and
+    # pointer remain bound to the immutable receipt instead of becoming treatment-dependent.
+    cmd._capture_post_swing_states(torch.arange(4))
+    assert cmd._post_swing_count == 4
+    assert cmd._post_swing_ptr == 4
+
+
+def test_post_swing_teacher_fail_fast_refuses_zero_activation_before_first_update(
+    clips, tmp_path, monkeypatch
+):
+    receipt, receipt_sha = _write_post_swing_teacher_receipt(
+        tmp_path, [clips[0], clips[1]], count=4
+    )
+    cmd, _ = _make_motion_command(
+        [clips[0], clips[1]],
+        num_envs=4,
+        post_swing_start_prob=0.25,
+        post_swing_min_fill=4,
+        post_swing_buffer_size=8,
+        post_swing_teacher_receipt=str(receipt),
+        post_swing_teacher_receipt_sha256=receipt_sha,
+        post_swing_require_ready_at_init=True,
+        post_swing_fail_fast_first_reset=True,
+    )
+    monkeypatch.setattr(torch, "rand", lambda *shape, **kwargs: torch.full(shape, 0.9))
+    with pytest.raises(RuntimeError, match="initial true-reset cohort selected no"):
+        cmd._resample_command(torch.arange(4))
+
+
+def test_post_swing_ready_at_init_requires_exact_teacher_receipt(clips):
+    with pytest.raises(ValueError, match="require an immutable"):
+        _make_motion_command(
+            [clips[0], clips[1]],
+            post_swing_start_prob=0.25,
+            post_swing_require_ready_at_init=True,
+        )
 
 
 def test_rally_hold_heading_is_hold_only_and_monotone():

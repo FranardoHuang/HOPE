@@ -149,6 +149,10 @@ def _make_env_cfg(anchor_pos_none=True):
         post_swing_buffer_size=4096,
         post_swing_min_fill=256,
         post_swing_min_hold=25,
+        post_swing_teacher_receipt="",
+        post_swing_teacher_receipt_sha256="",
+        post_swing_require_ready_at_init=False,
+        post_swing_fail_fast_first_reset=False,
         clip_switch_prob=0.0,
         speed_scale_range=(1.0, 1.0),
         speed_scale_per_clip=None,
@@ -944,6 +948,28 @@ def test_rc_absent_keeps_defaults():
     env_cfg, _ = _apply({"motion": {"hold_steps_range": [0, 100]}})
     assert env_cfg.commands.motion.rsi_skip_settle_frames == 0
     assert env_cfg.commands.motion.rsi_hold_root_stand_z is False
+
+
+def test_post_swing_teacher_cold_start_overrides_are_explicit_and_typed():
+    env_cfg, applied = _apply(
+        {
+            "motion": {
+                "post_swing_teacher_receipt": "/ignored/teacher/receipt.json",
+                "post_swing_teacher_receipt_sha256": "a" * 64,
+                "post_swing_require_ready_at_init": True,
+                "post_swing_fail_fast_first_reset": True,
+            }
+        }
+    )
+    motion = env_cfg.commands.motion
+    assert motion.post_swing_teacher_receipt.endswith("receipt.json")
+    assert motion.post_swing_teacher_receipt_sha256 == "a" * 64
+    assert motion.post_swing_require_ready_at_init is True
+    assert motion.post_swing_fail_fast_first_reset is True
+    assert any("post_swing_require_ready_at_init=True" in item for item in applied)
+
+    with pytest.raises(train_mod._OverrideError, match="explicit boolean"):
+        _apply({"motion": {"post_swing_require_ready_at_init": "treu"}})
 
 
 # --------------------------------------------------------------------------------------------- #
