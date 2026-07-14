@@ -13,6 +13,19 @@
 
 ## 2026-07-15
 
+- clean base-decel 两臂已自然终档，`model_1000` filename/embedded/finite/fresh/claim/common hard exact；
+  980--1000 的 raw base speed 比为 `1.00882x`，按冻结 `<=0.90x` 门正式 reject，不买第二 seed/judge。
+  同步源码语义审计发现 Reward 实际追踪随 racket-target 距离变化的 `v_des`，现有 primary 却只测未分桶
+  raw speed；尾窗 raw-kernel-per-eligible 提升 `1.6003x`。冻结 verdict 不变，后续先另立
+  `|v_base-v_des|` 分桶量尺。见
+  [clean main-effect 卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT.md)。
+
+- post-swing 外生 teacher 的首个 inference-only capture 已冻结为机器预注册
+  [`phase1_post_swing_teacher_capture_prereg_20260715.json`](../configs/phase1_post_swing_teacher_capture_prereg_20260715.json)：
+  exact main source、fresh measurement-control `model_500`、两条动作、schema-3 bank、ignored A3 tree、
+  Pod2 GPU1、4096 条 natural-wrap 状态、20000 inference-step 上限和 root 速度上限全部在数据前绑定。
+  只授权一次 capture；attestation、首 reset、科学训练、第二 seed 与 judge 仍逐级 fail closed。
+
 - clean base-decel 的 `model_500` 两份 receipt/finite/fresh/claim/common hard exact，step 0–500 activation
   全过且 480–500 尾窗两臂都有真实 V2/exact-strike 分母。treatment/control 底座速度=`1.13669×`
   （FAIL `≤0.90×`）、signed-face pass 差=`−0.16609`、composite 差=`−0.06942`，解析回球降到

@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "plan_id": "phase1-post-swing-teacher-control-model500-capture-20260715-v1",
+  "status": "preregistered_capture_not_started",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "purpose": "Capture one immutable external natural-wrap recovery-state cohort so later control and treatment arms start from the same post-swing distribution instead of filling policy-dependent buffers.",
+  "simulation_only": true,
+  "capture_source": {
+    "checkout": "/workspace/codexschema/nohope_post_swing_teacher_cd65ed1",
+    "commit": "cd65ed1d1e314d7f31c2df4cd1a57131ff28a902",
+    "clean_required": true,
+    "files": {
+      "motion_command": {
+        "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/commands.py",
+        "bytes": 116877,
+        "sha256": "496a7fa2bc97e9d7a8234702a7f6c9edb1f6b3fd17f215da042a62c0649be90a"
+      },
+      "teacher_loader": {
+        "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/post_swing_teacher.py",
+        "bytes": 29550,
+        "sha256": "c2db72a68a463395706d71ab9546e2f06a7cef5fb5bbef66fd08e8c8b213919c"
+      },
+      "inference_runner": {
+        "path": "hope_training/whole_body_tracking/scripts/play.py",
+        "bytes": 13758,
+        "sha256": "cadb1c29bccc0bfbc99993cde47756e01f1a645aa454309398dc47a166c7e043"
+      },
+      "attestor": {
+        "path": "scripts/attest_post_swing_teacher.py",
+        "bytes": 22164,
+        "sha256": "800645381cf32d811881f47e91cb8a24b70216a4adeac80bd4b9e482757c7020"
+      }
+    },
+    "ignored_runtime_asset": {
+      "donor_checkout": "/workspace/codexschema/nohope",
+      "donor_commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+      "relative_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3",
+      "file_count": 46,
+      "total_file_bytes": 15378264,
+      "tree_content_sha256": "0137f59b1fe45e7d5f8fa731bedca905f5466bc98e8d1354081fe071d60426c6",
+      "symlinks_forbidden": true
+    }
+  },
+  "teacher_checkpoint": {
+    "role": "base-deceleration-off measurement control; selected before capture because its post-swing probability is 0.25 and its exact model-500 survived the identity gate",
+    "path": "/workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-14_19-21-07_phase1_fresh_c_v1v2_base_decel_measurement_control_seed3_v4_20260715/model_500.pt",
+    "sha256": "22f78f882397c48d1c8763186748935517d669cf4f36205baf69d07dc9e08a6a",
+    "embedded_iteration": 500,
+    "floating_elements": 1762715,
+    "nonfinite_floating_elements": 0,
+    "fresh_lineage": 1,
+    "training_source_commit": "2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e",
+    "hard_contract": {
+      "path": "/workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-14_19-21-07_phase1_fresh_c_v1v2_base_decel_measurement_control_seed3_v4_20260715/params/training_contract.json",
+      "sha256": "451cda47227f8e78e4f3dcae3cbf22d7ddf88b4c5fbaf348e698963d8bc12291",
+      "schema_version": 3
+    },
+    "launch_claim": {
+      "path": "/workspace/codexschema/phase1_fresh_c_v1v2_base_decel_measurement_rerun_20260715/runs/phase1_fresh_c_v1v2_base_decel_measurement_control_seed3_v4/queue_claim.json",
+      "file_sha256": "17700ee233e3ebeaece2ef54420d6e6cefa81974738ea5e88475b9399290118f",
+      "content_sha256": "576724deeeaf2386005e804fc5f2dc5600a7c63d104cb8f7c8f1f2f5131ba49d"
+    },
+    "run_binding": {
+      "path": "/workspace/codexschema/phase1_fresh_c_v1v2_base_decel_measurement_rerun_20260715/runs/phase1_fresh_c_v1v2_base_decel_measurement_control_seed3_v4/run_binding.json",
+      "file_sha256": "3dd064b93175a90fa6709eda74189680d14fa8db639ad75de14732f1136ccf95",
+      "content_sha256": "a2d235e2b2a814f06344bd5aaa145c4d432eb6d12def755cc936b4c6bc1f18dd"
+    },
+    "milestone_receipt": {
+      "path": "/workspace/codexschema/phase1_fresh_c_v1v2_base_decel_measurement_rerun_20260715/runs/phase1_fresh_c_v1v2_base_decel_measurement_control_seed3_v4/milestones/model_500.json",
+      "file_sha256": "a4186cd0f04bcfb4c1773f7e1fb0cded2d5ddd063a2791cd1fdac183b36b6d20",
+      "content_sha256": "67d76a2b0b60c6817fdc76ad32b6d1d641af361a7e2093dd6042436a0168e6d0"
+    }
+  },
+  "ordered_motion_inputs": [
+    {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_forehand_v4rg_cal.npz",
+      "sha256": "f2cb2d9f5d27cefbcee0b790000fcd979abaf02894d4fcad061ebca27f141687"
+    },
+    {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_backhand_v4rg_cal.npz",
+      "sha256": "1722553375cd28f9b2d567c01b1a5fc6bcd149fa12cadb20e5202a9153367534"
+    }
+  ],
+  "question_bank": {
+    "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz",
+    "sha256": "3a9d8851c1c0b13ef82f58228ea1cf83213157c70d72daa514f1bed3a3885b71"
+  },
+  "capture_contract": {
+    "pod": "pod2",
+    "gpu": 1,
+    "cuda_visible_devices": "1",
+    "runtime_device": "cuda:0",
+    "num_envs": 4096,
+    "target_count": 4096,
+    "max_inference_steps": 20000,
+    "wrap_teleport": false,
+    "post_swing_start_prob": 0.25,
+    "root_linear_velocity_limit_mps": 2.0,
+    "root_angular_velocity_limit_radps": 4.0,
+    "output_directory": "/workspace/codexschema/phase1_post_swing_teacher_20260715/capture/control_model500_v1",
+    "output_must_be_absent_before_one_shot": true,
+    "capture_is_inference_only": true,
+    "ppo_updates": 0,
+    "natural_wrap_only": true,
+    "timeout_or_failure_reset_states_forbidden": true
+  },
+  "runtime_recipe_derivation": {
+    "source": "teacher_checkpoint.run_binding exact training_argv",
+    "keep_all_task_motion_bank_seed_num_env_overrides": true,
+    "deduplicate_identical_hydra_keys": true,
+    "replace_executable_train_with_play": true,
+    "remove_keys": [
+      "logger",
+      "video",
+      "checkpoint_path",
+      "max_iterations",
+      "algo.runner.save_interval",
+      "run_name",
+      "training_queue_claim_path",
+      "training_run_binding_path",
+      "training_launch_claim_sha256"
+    ],
+    "add_keys": [
+      "checkpoint",
+      "task.motion.post_swing_capture_output_dir",
+      "task.motion.post_swing_capture_target_count",
+      "post_swing_capture_max_steps"
+    ],
+    "runtime_hard_contract_must_equal_teacher_checkpoint_hard_contract_before_first_state": true
+  },
+  "source_review_evidence": {
+    "independent_redteam": "green_for_source_only_merge",
+    "dependency_light_tests_passed": 13,
+    "public_arbitrary_array_writer_absent": true,
+    "producer_supplied_callback_label_not_trusted": true,
+    "checkpoint_loader_weights_only": true
+  },
+  "authorization": {
+    "source_merge_complete": true,
+    "capture_authorized": true,
+    "attestation_authorized_only_after_complete_capture": true,
+    "first_reset_probe_authorized": false,
+    "scientific_training_authorized": false,
+    "second_seed_authorized": false,
+    "judge_authorized": false,
+    "promotion_authorized": false,
+    "hardware_authorized": false
+  },
+  "failure_policy": {
+    "preserve_partial_namespace": true,
+    "same_namespace_retry_forbidden": true,
+    "automatic_retry_forbidden": true,
+    "exact_numeric_process_group_only": true,
+    "pod1_and_pod2_gpu0_forbidden": true
+  },
+  "next_gate": "complete capture, restricted one-shot attestation, then separately preregister a 4096-environment first-reset readback probe"
+}

@@ -68,19 +68,17 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   两臂共享、自然-wrap provenance 绑定的 immutable teacher-state receipt 做外生 cold-start，并在首 update
   前 fail closed。
 
-  为避免 GPU 等待这条较复杂的 continuous-recovery 修复，当前已启动一个更小的 clean main-effect：
-  两臂都关闭 post-swing replay、固定 V1+V2，只比较 base-decel `0/1`。Pod2 GPU1 control
-  PID=PGID `385320`、GPU2 treatment PID=PGID `385948`，claim SHA-256 分别为
-  `a039226a...1746e` / `673bf6c6...9392`；GPU0 仍只有 Yikang。两份 `model_200` 已通过
-  filename=embedded、finite、fresh lineage、claim 与共同 schema-3 hard contract，checkpoint SHA-256
-  `6cb55718...94f1` / `d61998ac...6892`。step 0–200 的五个 post-swing counter 在两臂每一点全零，
-  raw base-decel 两边逐点激活且 weighted Reward 只在 treatment 非零；执行合同闭合。但 180–200
-  冻结窗 treatment/control 的击球前底座速度=`0.75008/0.71340`（`1.05142×`），方向门要求
-  `≤1.00×`，因此 +200 失败；+500 的有效尾窗随后给出可读负结果：treatment/control 底座速度
-  `0.54543/0.47984`（`1.13669×`）、signed-face pass `0.10094/0.26703`、composite
-  `0.01872/0.08814`、解析回球 `0.12282/0.24771`。虽 pre-fall 和 velocity pass 改善，三个预注册门
-  仍失败，当前 base-decel weight=`1.0` treatment 已 reject。队列规定不中停，所以只继续到 +1000
-  收 terminal diagnostic；不买 seed、不 judge。这只回答底座减速本身，不冒充连续恢复。
+  clean main-effect 也已自然终档：两臂关闭 post-swing replay、固定 V1+V2，只比较 base-decel `0/1`。
+  `model_1000` 两份 filename=embedded、finite、fresh lineage、claim 与共同 hard contract exact，原
+  PGID `385320/385948` 均已退出。980–1000 的 treatment/control raw base speed=`1.00882×`，按冻结
+  `≤0.90×` 门正式 reject，不买第二 seed/judge。源码复核同时发现这个 Reward 实际追踪随目标距离变化的
+  `v_des`，并非始终让 raw speed 更低；尾窗 raw-kernel-per-eligible 反而提升 `1.6003×`。因此不改写
+  verdict，但后续必须先用 `|v_base-v_des|` 的近/中/远分桶重做量尺，不能复制当前 weight=`1`。
+
+  连续恢复当前最短关键路径转为共享外生 teacher：exact main source、fresh control `model_500`、动作、题库、
+  A3 tree、Pod2 GPU1、4096 条 natural-wrap state 与 20000 inference-step 上限已经在结果前机器预注册。
+  当前只授权一次 inference capture；attestation、首 reset readback、科学 pair、第二 seed 与 judge 仍逐门
+  fail closed。Pod2 GPU1/GPU2 在 clean pair 终档后已自然释放；GPU0 继续只归 Yikang。
 
   Fresh C 的五条单 seed 机制格均已越过 `+500` 且 checkpoint
   finite/contract/lineage 正确。V1+V2 出现当前最强击球精度信号（composite `0.0893`、normal pass

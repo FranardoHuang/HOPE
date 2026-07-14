@@ -46,6 +46,24 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-15, clean base-deceleration terminal and teacher capture preregistration; Gate remains `Partial`):
+
+- Both clean-pair model-1000 checkpoints naturally terminated and independently pass filename/embedded
+  iteration, finite, fresh-lineage, claim/binding and common schema-3 hard-contract checks. In steps
+  980--1000, treatment/control raw pre-strike base speed is `1.00882x`, failing the frozen `<=0.90x`
+  primary gate, while each non-degradation metric passes narrowly. The formal treatment verdict remains
+  reject; no second seed, judge or promotion is authorized.
+- Source review shows the implemented reward tracks `v_des=clamp(2*planar target error,0,1.6)` rather than
+  minimizing raw speed everywhere. The frozen raw-speed metric does not measure `|v_base-v_des|` or
+  exclude holds; its verdict is retained, but any successor must preregister distance-bucketed target-
+  tracking metrics before launch.
+- The external natural-wrap teacher capture now has an exact machine preregistration binding the main
+  source, one fresh model-500 teacher, motion/bank/A3 bytes, Pod2 GPU1, 4096 states, a 20000-step limit
+  and root-velocity limits. This authorizes only the one-shot inference capture. Attestation, first-reset
+  readback and scientific training remain separate fail-closed gates. See the
+  [clean result](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT.md) and
+  [capture operation](../operations/run_post_swing_teacher_capture.md).
+
 Follow-up note (2026-07-15, clean base-deceleration `+500` treatment rejected; Gate remains `Partial`):
 
 - Both model-500 checkpoints are finite and exact for filename/embedded iteration, fresh lineage,

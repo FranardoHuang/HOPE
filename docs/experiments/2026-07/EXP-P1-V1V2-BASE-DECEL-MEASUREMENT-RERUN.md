@@ -285,6 +285,20 @@ fresh namespaces：
 - 本记录不建立算力优先级；是否排队仍只由 main 的 `docs/NOW.md` 统一队列决定。
 - 不授权 Isaac/MuJoCo judge、第二 seed、正式 setting、部署或真机。
 
+## 外生 teacher capture 的冻结实例
+
+source gate 合入后，首个真实采集实例在任何输出前冻结于
+[`phase1_post_swing_teacher_capture_prereg_20260715.json`](../../../configs/phase1_post_swing_teacher_capture_prereg_20260715.json)。
+teacher 选择本卷 measurement control 的 fresh exact `model_500`（SHA-256 `22f78f88...a6a`），因为它的
+训练合同已绑定 `post_swing_start_prob=0.25`，且 model/claim/binding/schema-3 hard contract 已通过身份门。
+采集只允许 Pod2 GPU1、4096 environments、4096 条 natural-wrap live state、最多 20000 inference steps；
+root linear/angular velocity 上限分别冻结为 `2.0 m/s` / `4.0 rad/s`。两条动作、题库、ignored A3 tree 与
+四个关键 source 文件都按 exact bytes/SHA 绑定，输出 namespace 必须初始不存在且只可占有一次。
+
+这个预注册只把 `capture_authorized` 改为 true；attestation 必须等完整 capture 后另跑一次，首 reset probe、
+科学 pair、第二 seed、judge、promotion 和硬件仍全部未授权。timeout/partial/失败 reset 不能补齐样本，也不能
+复用同一 namespace 重发。
+
 ## 离线复现
 
 本提交不连接 Pod、不写 claim、不运行 probe/trainer/judge：

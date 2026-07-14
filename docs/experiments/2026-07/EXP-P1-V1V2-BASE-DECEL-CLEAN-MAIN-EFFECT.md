@@ -1,12 +1,12 @@
 # EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT — 关闭随挥重放后只测底座减速
 
-- 状态：`running to terminal / model-500 exact；treatment rejected by +500 screen`
+- 状态：`completed / treatment rejected；no second seed`
 - 阶段/轴：Phase 1 fresh C；V1+V2 下的 base-decel 单变量主效应
 - 集成小目标：判断底座减速本身能否降低击球前底座速度和摔倒，同时不伤四项击球精度
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
-- 最高证据等级：`E2`（两份 exact model-200 receipt 与独立冻结窗审计；没有物理回球）
+- 最高证据等级：`E2`（两份 exact model-1000 receipt 与独立终档审计；没有物理回球）
 - 创建日期/最后复核日期：2026-07-15 / 2026-07-15
 
 共享术语见[术语与人话对照](../../DEFINITIONS.md)。V1 是释放持拍手腕线速度模仿，V2 是在击球窗把
@@ -162,3 +162,37 @@ denominator 逐点相等；base raw 三项每点为正；control weighted Reward
 base-decel 虽降低 fall、提高速度 pass，却让底座更快、signed face 与 composite 过门失败，并把解析回球
 压到约一半，故 +500 single-seed screen **reject treatment**。队列冻结 `stop_or_promote_allowed=false`，
 所以两臂继续到 +1000 只收 terminal diagnostic；拒绝结论不买第二 seed、不 judge、不做交互或晋级。
+
+## `model_1000` 终档与量尺语义纠偏
+
+两臂均自然退出，原 PID=PGID `385320/385948` 已不存在；完整日志各有 1001 个 update、fatal=`0`。
+control/treatment checkpoint SHA-256 分别为 `1237a984...d4d5` / `ddf9947a...8393`，receipt content
+SHA-256 为 `15c7f970...5c1d` / `9fad83b5...bb47`。两边 filename=embedded iteration=`1000`、
+1,762,715 个 floating elements 全 finite、fresh lineage=`1`，claim/binding 与共同 schema-3 hard contract
+`ca57a94f...cc2e` 独立复算 exact。GPU1/GPU2 自然释放；GPU0 的 Yikang 进程未触碰。
+
+step 0--1000 的 activation 合同完整闭合：五个 post-swing counter 每点全零；V1 numerator=denominator；
+V2 numerator=denominator；base-decel raw eligible/nonzero 每点为正。control 的 weighted base-decel Reward
+1001 点全零，treatment 1001 点全非零。
+
+| 980--1000 指标 | control | treatment | 差异 | +1000 门 |
+| --- | ---: | ---: | ---: | --- |
+| 击球前底座速度 | `0.208314` | `0.210152` | `1.00882x` | **FAIL**，要求 `<=0.90x` |
+| pre-strike fall rate | `0.087505` | `0.096135` | `+0.008630` | PASS |
+| position pass | `0.856432` | `0.842119` | `-0.014314` | PASS |
+| velocity pass | `0.465879` | `0.454219` | `-0.011660` | PASS |
+| signed-face pass | `0.494282` | `0.476421` | `-0.017860` | PASS |
+| composite pass | `0.280008` | `0.265502` | `-0.014506` | PASS |
+| 解析合法回球 | `0.451768` | `0.436228` | `0.96560x` | 诊断退化 |
+
+因此按结果前冻结的 raw-speed 判据，终档正式结论仍是 **REJECT treatment**；不事后改门、不买第二
+seed、不 judge、不晋级。
+
+但源码复核同时纠正了本卷对 Reward 的人话表述。实际实现是
+`v_des=clamp(2*planar_racket_target_error, 0, 1.6)`，并奖励
+`exp(-(v_base-v_des)^2/0.4^2)`；它要求远离目标时移动、临近目标时减速，并非任何时刻都让 raw speed
+更低。当前 primary metric 却把所有 pre-strike（还包含 hold）的 raw speed 零掩码后取均值，既不测
+`|v_base-v_des|`，也没有按距离分桶。980--1000 的 raw-kernel-per-eligible 实际从 `0.475268` 提高到
+`0.760572`（`1.6003x`）。这不能翻转冻结 verdict，却说明“raw speed 未下降”不能单独证明实现的
+pseudo-speed tracking 失败。若继续此机制，必须先另行预注册 `|v_base-v_des|` 的近/中/远距离分桶与
+近目标速度，再用新的单 seed 配对；当前 weight=`1` 不直接复制。
