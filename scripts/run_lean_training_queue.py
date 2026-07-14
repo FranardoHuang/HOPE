@@ -1468,10 +1468,30 @@ def _require_exact_probe_job(job: dict[str, Any]) -> None:
     job_id = job["id"]
     if job["source"]["commit"] == ZERO_COMMIT:
         raise QueueError(f"{job_id}.source.commit is an all-zero placeholder")
+    if job.get("runtime_binding") is not True:
+        raise QueueError(
+            f"{job_id}.runtime_binding=true is required for a full-scene probe"
+        )
     if job["source"].get("ignored_runtime_asset") is None:
         raise QueueError(
             f"{job_id}.source.ignored_runtime_asset is required for a full-scene probe"
         )
+    required_runtime_intent = {
+        "task.actor_obs_contract": "deploy_parity_face179",
+        "task.plant.zero_joint_friction": "true",
+        "task.physical_ball": "true",
+    }
+    observed_runtime_intent: dict[str, str] = {}
+    for raw in [*job["recipe"]["base"], *job["recipe"]["delta"]]:
+        key = _override_key(raw, f"{job_id}.probe recipe")
+        if key not in required_runtime_intent:
+            continue
+        observed_runtime_intent[key] = raw.split("=", 1)[1]
+    for key, expected in required_runtime_intent.items():
+        if observed_runtime_intent.get(key) != expected:
+            raise QueueError(
+                f"{job_id} full-scene probe requires {key}={expected}"
+            )
     paths = {
         "source.checkout": job["source"]["checkout"],
         **{
@@ -1712,6 +1732,8 @@ def _full_scene_probe_script(
     ) + "\n"
     launcher = f"{workdir}/{KIT_LAUNCHER_RELATIVE}"
     probe_runtime = f"{workdir}/{FULL_SCENE_PROBE_RUNTIME_RELATIVE}"
+    queue_runtime = f"{workdir}/{QUEUE_RUNTIME_RELATIVE}"
+    train_entry = f"{workdir}/{ENTRYPOINT_RELATIVE}"
     supervisor_argv = [
         *claim_document["content"]["supervisor_argv_prefix"],
         *train_argv,
@@ -1721,12 +1743,16 @@ def _full_scene_probe_script(
     ) + f" {GPU_LAUNCH_LOCK_FD}>&-"
     doctor = _doctor_body(queue, job, slot, training_argv=train_argv)
     body = doctor + f"""
+test -f {shlex.quote(probe_runtime)}
+test -f {shlex.quote(queue_runtime)}
+test -f {shlex.quote(train_entry)}
+grep -Fq -- 'def _publish_lean_queue_binding_if_requested' {shlex.quote(train_entry)}
+grep -Fq -- '_publish_lean_queue_binding_if_requested(cfg, log_dir)' {shlex.quote(train_entry)}
 count=$(nvidia-smi -i {slot.gpu} --query-compute-apps=pid --format=csv,noheader,nounits | awk {shlex.quote(UNIQUE_NUMERIC_PID_AWK)})
 test "$count" -lt {slot.capacity}
 mkdir -p {shlex.quote(run_parent)}
 mkdir {shlex.quote(run_dir)}
 ( set -o noclobber; printf %s {shlex.quote(claim)} > {shlex.quote(run_dir + '/full_scene_probe_claim.json')} )
-test -f {shlex.quote(probe_runtime)}
 export KIT_BOOT_MARKER={shlex.quote(KIT_BOOT_MARKER)}
 export KIT_BOOT_TIMEOUT_S={KIT_BOOT_TIMEOUT_SECONDS}
 export KIT_BOOT_STALE_TIMEOUT_S={FULL_SCENE_PROBE_STALE_TIMEOUT_SECONDS}
@@ -1744,7 +1770,6 @@ def _finalize_full_scene_probe_script(
     source = job["source"]["checkout"].rstrip("/")
     workdir = f"{source}/{WBT_RELATIVE}"
     runtime = f"{workdir}/{FULL_SCENE_PROBE_RUNTIME_RELATIVE}"
-    source_asset_receipt, _staging, _lock = _source_asset_runtime_paths(job, pod)
     source_asset_check = _source_asset_remote_command(job, pod, mode="doctor")
     command = shlex.join(
         [
@@ -1755,8 +1780,6 @@ def _finalize_full_scene_probe_script(
             run_dir,
             "--expected-claim-sha256",
             expected_claim_sha256,
-            "--source-asset-receipt",
-            source_asset_receipt,
         ]
     )
     return f"""set -euo pipefail

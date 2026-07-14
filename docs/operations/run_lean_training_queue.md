@@ -111,6 +111,9 @@ reserved Pod 防重复。
 远端在 fd8 短锁内重查容量，用 plain `mkdir` 和 no-clobber
 `full_scene_probe_claim.json` 拒绝复用 attempt；显式使用 source-pinned launcher 的 900 秒 hard timeout、
 180 秒 content-stale watchdog 与 `Learning iteration` marker。
+发射资格还要求 row 的 `runtime_binding=true`，并显式绑定 face179 actor observation、31/31 零摩擦 intent 与
+物理球。source 上的 probe runtime、queue runtime、trainer callback 定义/调用存在性会在 GPU 容量检查、
+`mkdir` 和 claim 写入之前完成；能力缺失不得留下半个 attempt namespace。
 
 launcher 返回只表示 `first_iteration_observed=true`，不表示两次 update 已终档，更不表示 reward 有效。
 probe 永远 `not_science=true / attestable=false / promotable=false`，不用 science 的 `queue_claim.json`、
@@ -145,6 +148,12 @@ no-clobber 写 `probe_result.json`；controller 明确解析 `terminal_status/un
 `unlock_authorized=false / automatic_retry_authorized=false`。重复终档只接受逐字节相同结果。该结果仍不能进入
 普通 milestone attestor 或成绩表；未来显式 unlock consumer 只能消费 `status=passed` 的 exact receipt，当前
 queue 不会自动解锁任何科学 job。
+
+终档 pass 还要求 `scene_import_done` 报告的 **实际** environment 数等于 claim、物理球已启用且球/碰撞桌/
+视觉桌三个实体都存在，hard contract 为 face179 且 31 个 PhysX friction coefficient 全零；schema-3 validator
+从 claim-bound clean checkout 直接 file-load，不依赖 Kit package import。若没有 supervisor exit receipt，但
+launcher 已在精确 PGID 收口后发布 pre-marker/watchdog/stale/boot-timeout 终态，终档器只会保存 immutable
+failure，不能 pass。CLI 不需要也不应手传 source-asset receipt；路径由 immutable claim 导出。
 
 这个入口解决的是“动作和题库已经决定后，为什么还要手拼一长串命令”。一条 YAML job 必须同时绑定：
 

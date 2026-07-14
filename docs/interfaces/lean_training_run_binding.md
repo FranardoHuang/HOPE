@@ -119,6 +119,20 @@ claim-bound source-asset receipt；PID reuse、signal/nonzero rc、fatal（含 N
 `probe_result.json`；重复调用只接受 byte-identical receipt，且从不自动重试、改 queue status 或晋级。
 probe execute 的容量快照只读取 selected dispatch Pod/GPU；普通 science fill 仍保留 all-Pod claim 防重复。
 
+P1.5 后，probe row 必须显式 `runtime_binding=true`，并在 immutable argv 中各出现一次
+`task.actor_obs_contract=deploy_parity_face179`、`task.plant.zero_joint_friction=true`、
+`task.physical_ball=true` 与原 `num_envs`。trainer 的 `scene_import_done` payload 是运行事实而非配置复述：记录
+实际 environment 数、物理球开关及 `pb_ball/pb_table/pb_table_visual` 三个实体。finalizer 还从 exact clean
+source checkout 直接 file-load dependency-light schema-3 validator，复核 hard contract 的 actor observation
+合同与 31/31 零摩擦；不允许 package import 间接启动 Kit/Omni。
+
+若 trainer 在 supervisor 写 exit receipt 前由 launcher 判定 pre-marker/boot-stale/boot-timeout 终止，launcher
+只有在精确组收口成功后才追加 bound `terminal_kind/terminal_exit_code`。finalizer 消费该 sidecar 与原 leader
+identity evidence 时只能生成 `failed/unlock_authorized=false`，缺字段、identity 仍活或 PGID 未空则保持
+not-ready。PID 数字被新 starttime 复用不再当 run failure；它只证明原 identity 已消失，随后仍需两次稳定
+PGID 扫描。调用者不再选择 source-asset receipt 路径，而从 immutable claim 唯一导出，避免错误 CLI 把结果
+namespace 烧死；并发相同 finalization 只接受原子胜者的 byte-identical bytes。
+
 ## 源码复现
 
 ```bash

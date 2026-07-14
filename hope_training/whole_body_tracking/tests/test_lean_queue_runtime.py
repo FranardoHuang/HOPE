@@ -393,9 +393,11 @@ def test_train_publishes_binding_after_exact_log_selection_before_kit_env(tmp_pa
     assert 'pathlib.Path("/proc/self/cmdline")' in source
     assert "training_queue_claim_path and training_run_binding_path must be supplied together" in source
     assert source.index('_emit_lean_queue_phase(cfg, "scene_import_start")') < env_build
-    assert env_build < source.index('_emit_lean_queue_phase(cfg, "scene_import_done")')
-    assert source.index('_emit_lean_queue_phase(cfg, "scene_import_done")') < source.index(
-        '"hard_contract_written"'
-    )
+    scene_done = source.index('"scene_import_done",', env_build)
+    assert env_build < scene_done
+    assert "actual_num_envs=int(runtime_env.num_envs)" in source
+    assert "physical_ball_enabled=bool(" in source
+    assert "physical_scene_entities={" in source
+    assert scene_done < source.index('"hard_contract_written"')
     assert '_emit_lean_queue_phase(cfg, "hydra_resolved")' in source
     assert '_emit_lean_queue_phase(cfg, "app_started")' in source

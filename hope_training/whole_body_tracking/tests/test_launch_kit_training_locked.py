@@ -159,6 +159,26 @@ def test_source_contract_has_180s_default_and_no_broad_signal() -> None:
     assert source.index('grep -Fq -- "$marker"') < source.index("KIT_BOOT_STALE pid=")
     assert "pkill" not in source
     assert "killall" not in source
+    for terminal_kind in (
+        "pre_marker_exit",
+        "watchdog_error",
+        "stale_timeout",
+        "boot_timeout",
+    ):
+        assert f"terminal_kind={terminal_kind}" in source
+
+
+def test_pre_marker_exit_publishes_terminal_classification(
+    tmp_path: Path, portable_launch_tools: Path
+) -> None:
+    child = _write_child(tmp_path, "exit 17\n")
+    proc, _log, state, _ = _run_launcher(
+        tmp_path, portable_launch_tools, child, timeout_s=8
+    )
+    assert proc.returncode == 17
+    fields = _state_fields(state)
+    assert fields["terminal_kind"] == "pre_marker_exit"
+    assert fields["terminal_exit_code"] == "17"
 
 
 @pytest.mark.parametrize("invalid", ["0", "-1", "1.5", "true"])
@@ -289,6 +309,8 @@ def test_content_bearing_stale_log_kills_only_recorded_group(
         fields = _state_fields(state)
         assert fields["pid"] == fields["pgid"]
         assert fields["boot_stale_timeout_s"] == "2"
+        assert fields["terminal_kind"] == "stale_timeout"
+        assert fields["terminal_exit_code"] == "125"
         # The shell may append "Terminated" while handling TERM; the sidecar
         # intentionally preserves the last size observed before signalling.
         assert int(fields["boot_stale_last_size_bytes"]) == len(b"URDF import started\n")
@@ -323,6 +345,8 @@ def test_empty_log_remains_owned_by_hard_timeout(
         assert log.stat().st_size == 0
         fields = _state_fields(state)
         assert fields["boot_timeout_s"] == "2"
+        assert fields["terminal_kind"] == "boot_timeout"
+        assert fields["terminal_exit_code"] == "124"
         assert "boot_stale_timeout_s" not in fields
     finally:
         _terminate_group_from_state(state)

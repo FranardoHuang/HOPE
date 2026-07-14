@@ -90,6 +90,13 @@ def _probe_queue(job_count: int = 1) -> dict:
     queue = _queue(job_count)
     for job in queue["jobs"]:
         job["source"]["ignored_runtime_asset"] = _ignored_asset_contract()
+        job["recipe"]["base"].extend(
+            [
+                "task.actor_obs_contract=deploy_parity_face179",
+                "task.plant.zero_joint_friction=true",
+                "++task.physical_ball=true",
+            ]
+        )
     return queue
 
 
@@ -678,6 +685,10 @@ def test_full_scene_probe_script_is_no_clobber_first_iteration_only():
         queue, job, slot, "reuse_guard_a1"
     )
     body = shlex.split(rendered)[-1]
+    capability = body.index("test -f /workspace/source/hope_training/whole_body_tracking/scripts/full_scene_probe_runtime.py")
+    occupancy = body.index("count=$(nvidia-smi")
+    namespace = body.index(f"mkdir {run_dir}")
+    assert capability < occupancy < namespace
     assert f"mkdir {run_dir}" in body
     assert f"mkdir -p {run_dir}" not in body
     assert "set -o noclobber" in body
@@ -693,6 +704,15 @@ def test_full_scene_probe_script_is_no_clobber_first_iteration_only():
     assert "phase=first_iter not_science=true" in body
     assert f" {Q.GPU_LAUNCH_LOCK_FD}>&-" in body
     assert "pkill" not in rendered and "killall" not in rendered
+
+
+def test_full_scene_probe_rejects_legacy_runtime_before_rendering():
+    queue = _probe_queue()
+    queue["jobs"][0]["runtime_binding"] = False
+    with pytest.raises(Q.QueueError, match="runtime_binding=true"):
+        Q._full_scene_probe_contract(
+            queue, queue["jobs"][0], Q.slots(queue)[0], "legacy_a1"
+        )
 
 
 def test_finalize_full_scene_probe_is_selected_pod_only_and_never_mutates_queue(monkeypatch):
@@ -732,7 +752,7 @@ def test_finalize_full_scene_probe_is_selected_pod_only_and_never_mutates_queue(
     assert len(calls) == 1 and calls[0][0] == "pod2"
     assert "full_scene_probe_runtime.py finalize" in calls[0][1]
     assert "--expected-claim-sha256" in calls[0][1]
-    assert "--source-asset-receipt" in calls[0][1]
+    assert "--source-asset-receipt" not in calls[0][1]
     assert "source-asset-doctor" not in calls[0][1]
     assert "SOURCE_ASSET_OK" in Q.SOURCE_ASSET_PROGRAM
     assert "kill " not in calls[0][1] and "pkill" not in calls[0][1]

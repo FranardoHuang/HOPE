@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable, Mapping
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -95,14 +96,27 @@ def _publish_or_accept_identical(path: Path, value: Mapping[str, Any], label: st
     """Publish once, or accept only the byte-identical deterministic repeat."""
 
     payload = _canonical_payload(value)
-    if path.exists():
+    if os.path.lexists(path):
         observed = queue_runtime._read_regular_bytes(path, label)
         if observed != payload:
             raise FullSceneProbeError(
                 f"{label} already exists with different bytes; replacement is forbidden"
             )
         return True
-    queue_runtime._atomic_publish_json(path, value, label)
+    try:
+        queue_runtime._atomic_publish_json(path, value, label)
+    except queue_runtime.LeanQueueRuntimeError:
+        # Two read-only finalizers may race after an SSH timeout.  Atomic
+        # no-replace publication still decides the winner; the loser accepts
+        # only the exact bytes it was about to publish.
+        if not os.path.lexists(path):
+            raise
+        observed = queue_runtime._read_regular_bytes(path, label)
+        if observed != payload:
+            raise FullSceneProbeError(
+                f"{label} already exists with different bytes; replacement is forbidden"
+            )
+        return True
     return False
 
 
@@ -318,11 +332,21 @@ def _require_naturally_absent(
     proc_dir = proc_root / str(pid)
     if not proc_dir.exists():
         return
-    observed = queue_runtime._process_identity(
-        pid, proc_root=proc_root, getpgid=getpgid
-    )
+    try:
+        observed = queue_runtime._process_identity(
+            pid, proc_root=proc_root, getpgid=getpgid
+        )
+    except (queue_runtime.LeanQueueRuntimeError, OSError):
+        # The supervisor publishes its exit receipt immediately before it
+        # exits.  Vanishing between exists() and the stable /proc read is the
+        # normal success race, not immutable terminal failure.
+        if not proc_dir.exists():
+            return
+        raise
     if observed["starttime_ticks"] != expected_start:
-        raise FullSceneProbeError(f"{label} PID was reused after probe termination")
+        # A different starttime proves the originally bound identity is gone.
+        # Numeric-PGID closure below remains the conservative orphan/reuse gate.
+        return
     raise FullSceneProbeNotReady(f"{label} is still live; natural exit is required")
 
 
@@ -344,31 +368,55 @@ def _require_process_group_empty(expected_pgid: int, *, proc_root: Path) -> None
 
     if not proc_root.is_dir() or proc_root.is_symlink():
         raise FullSceneProbeError("procfs root is missing or a symlink")
-    members: list[int] = []
-    try:
-        entries = list(proc_root.iterdir())
-    except OSError as exc:
-        raise FullSceneProbeError("cannot enumerate procfs for probe PGID closure") from exc
-    for entry in entries:
-        if not entry.name.isdigit():
-            continue
+    def scan() -> list[tuple[int, int]]:
+        members: list[tuple[int, int]] = []
         try:
-            before = (entry / "stat").read_text(encoding="utf-8")
-            observed_pgid = _stat_process_group(before)
-            after = (entry / "stat").read_text(encoding="utf-8")
-        except FileNotFoundError:
-            continue
-        except (OSError, UnicodeDecodeError) as exc:
+            entries = list(proc_root.iterdir())
+        except OSError as exc:
             raise FullSceneProbeError(
-                f"cannot read proc identity while proving PGID {expected_pgid} empty"
+                "cannot enumerate procfs for probe PGID closure"
             ) from exc
-        if queue_runtime._proc_starttime(before) != queue_runtime._proc_starttime(after):
-            raise FullSceneProbeError("proc identity changed during PGID closure scan")
-        if observed_pgid == expected_pgid:
-            members.append(int(entry.name))
-    if members:
+        for entry in entries:
+            if not entry.name.isdigit():
+                continue
+            try:
+                before = (entry / "stat").read_text(encoding="utf-8")
+                before_identity = (
+                    queue_runtime._proc_starttime(before),
+                    _stat_process_group(before),
+                )
+                after = (entry / "stat").read_text(encoding="utf-8")
+                after_identity = (
+                    queue_runtime._proc_starttime(after),
+                    _stat_process_group(after),
+                )
+            except FileNotFoundError:
+                continue
+            except (OSError, UnicodeDecodeError) as exc:
+                raise FullSceneProbeError(
+                    f"cannot read proc identity while proving PGID {expected_pgid} empty"
+                ) from exc
+            if before_identity != after_identity:
+                if expected_pgid in (before_identity[1], after_identity[1]):
+                    raise FullSceneProbeNotReady(
+                        "proc identity/group changed during PGID closure scan"
+                    )
+                continue
+            starttime, observed_pgid = before_identity
+            if observed_pgid == expected_pgid:
+                members.append((int(entry.name), starttime))
+        return sorted(members)
+
+    first = scan()
+    second = scan()
+    if first != second:
         raise FullSceneProbeNotReady(
-            f"probe process group {expected_pgid} still has live members: {sorted(members)}"
+            f"probe process group {expected_pgid} changed during closure scan"
+        )
+    if first:
+        raise FullSceneProbeNotReady(
+            f"probe process group {expected_pgid} still has live members: "
+            f"{[pid for pid, _starttime in first]}"
         )
 
 
@@ -418,12 +466,126 @@ def _parse_log(log_path: Path, expected_hard_sha: str) -> dict[str, Any]:
     }
     if any(fatal_hits.values()):
         raise FullSceneProbeError(f"probe log contains fatal markers: {fatal_hits}")
+    scene_payload = next(
+        payload for name, payload in phases if name == "scene_import_done"
+    )
     return {
         "path": str(log_path),
         "sha256": hashlib.sha256(raw).hexdigest(),
         "phase_sequence": phase_names,
+        "scene_import_done": scene_payload,
         "fatal_hits": fatal_hits,
     }
+
+
+def _claimed_override(
+    claim: Mapping[str, Any], key: str, expected_value: str
+) -> None:
+    argv = claim.get("training_argv")
+    if not isinstance(argv, list):
+        raise FullSceneProbeError("probe claim training argv is not a list")
+    matches = []
+    for argument in argv:
+        if type(argument) is not str or "=" not in argument:
+            continue
+        raw_key, value = argument.split("=", 1)
+        if raw_key.lstrip("+") == key:
+            matches.append(value)
+    if matches != [expected_value]:
+        raise FullSceneProbeError(
+            f"probe claim must set exactly one {key}={expected_value}, got {matches}"
+        )
+
+
+def _validate_claimed_runtime_intent(
+    claim: Mapping[str, Any], claim_content: Mapping[str, Any]
+) -> int:
+    """Bind the narrow P1 full-scene intent that runtime evidence can prove."""
+
+    _claimed_override(claim, "task.actor_obs_contract", "deploy_parity_face179")
+    _claimed_override(claim, "task.plant.zero_joint_friction", "true")
+    _claimed_override(claim, "task.physical_ball", "true")
+    budget = queue_runtime._require_mapping(claim_content.get("budget"), "probe budget")
+    expected_num_envs = queue_runtime._require_plain_int(
+        budget.get("num_envs"), "probe num_envs", minimum=1
+    )
+    _claimed_override(claim, "num_envs", str(expected_num_envs))
+    return expected_num_envs
+
+
+def _formal_hard_contract_validator(
+    contract: Mapping[str, Any], source_checkout: Path
+) -> dict[str, Any]:
+    """Run the official validator without importing the Isaac/Kit package."""
+
+    path = (
+        source_checkout
+        / queue_runtime.WBT_RELATIVE
+        / "source/whole_body_tracking/whole_body_tracking/utils/training_contract.py"
+    )
+    raw = queue_runtime._read_regular_bytes(path, "formal schema-3 validator source")
+    digest = hashlib.sha256(raw).hexdigest()
+    spec = importlib.util.spec_from_file_location(
+        f"full_scene_probe_training_contract_{digest[:16]}", path
+    )
+    if spec is None or spec.loader is None:
+        raise FullSceneProbeError(
+            f"cannot directly load formal schema-3 validator from exact source: {path}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    if queue_runtime._read_regular_bytes(
+        path, "formal schema-3 validator source"
+    ) != raw:
+        raise FullSceneProbeError(
+            "formal schema-3 validator source changed while loading"
+        )
+    module.validate_schema3_contract(contract)
+    return {"path": str(path), "sha256": digest, "load_mode": "direct_file"}
+
+
+def _validate_runtime_subset(
+    hard_contract: Mapping[str, Any], log_evidence: Mapping[str, Any], expected_num_envs: int
+) -> None:
+    if hard_contract.get("actor_obs_contract") != "deploy_parity_face179":
+        raise FullSceneProbeError(
+            "probe hard contract did not instantiate deploy_parity_face179"
+        )
+    friction = hard_contract.get("joint_friction_coefficients")
+    if (
+        not isinstance(friction, list)
+        or len(friction) != 31
+        or any(isinstance(value, bool) or float(value) != 0.0 for value in friction)
+    ):
+        raise FullSceneProbeError(
+            "probe hard contract did not prove 31/31 zero PhysX joint friction"
+        )
+    scene = queue_runtime._require_mapping(
+        log_evidence.get("scene_import_done"), "scene_import_done telemetry"
+    )
+    actual_num_envs = queue_runtime._require_plain_int(
+        scene.get("actual_num_envs"), "actual scene num_envs", minimum=1
+    )
+    if actual_num_envs != expected_num_envs:
+        raise FullSceneProbeError(
+            f"actual scene num_envs {actual_num_envs} differs from claimed {expected_num_envs}"
+        )
+    if scene.get("physical_ball_enabled") is not True:
+        raise FullSceneProbeError(
+            "scene_import_done did not prove physical_ball=true"
+        )
+    entities = queue_runtime._require_mapping(
+        scene.get("physical_scene_entities"), "physical scene entities"
+    )
+    expected_entities = {
+        "pb_ball": True,
+        "pb_table": True,
+        "pb_table_visual": True,
+    }
+    if entities != expected_entities:
+        raise FullSceneProbeError(
+            f"physical scene entity inventory differs: {entities}"
+        )
 
 
 def _asset_hashes_and_contract_binding(
@@ -541,10 +703,14 @@ def _validate_terminal(
     proc_root: Path,
     getpgid: Callable[[int], int],
     source_verifier: Callable[[Path, str], Mapping[str, Any]],
+    hard_contract_validator: Callable[
+        [Mapping[str, Any], Path], Mapping[str, Any] | None
+    ],
 ) -> dict[str, Any]:
     claim, claim_content, claim_digest = _probe_claim(
         run_dir, expected_digest=expected_claim_digest
     )
+    expected_num_envs = _validate_claimed_runtime_intent(claim, claim_content)
     exit_receipt, exit_content = _load_envelope(run_dir / EXIT_NAME, "probe exit receipt")
     binding, binding_content, _bound_claim, _bound_claim_content = queue_runtime._load_binding(
         run_dir / BINDING_NAME
@@ -612,8 +778,17 @@ def _validate_terminal(
     )
     if hard_contract.get("schema_version") != queue_runtime.TRAINING_CONTRACT_SCHEMA_VERSION:
         raise FullSceneProbeError("probe hard contract is not schema 3")
+    try:
+        formal_validator_evidence = hard_contract_validator(
+            hard_contract, source_path
+        )
+    except (TypeError, ValueError, RuntimeError) as exc:
+        raise FullSceneProbeError(
+            f"probe hard contract failed formal schema-3 validation: {exc}"
+        ) from exc
     hard_sha = hashlib.sha256(hard_raw).hexdigest()
     log_evidence = _parse_log(run_dir / "run.log", hard_sha)
+    _validate_runtime_subset(hard_contract, log_evidence, expected_num_envs)
     asset_evidence = _asset_hashes_and_contract_binding(claim_content, hard_contract)
 
     checkpoint_path = log_dir / "model_1.pt"
@@ -681,6 +856,7 @@ def _validate_terminal(
             "path": str(hard_path),
             "schema_version": 3,
             "sha256": hard_sha,
+            "formal_validator_source": formal_validator_evidence,
         },
         "assets": asset_evidence,
     }
@@ -727,39 +903,187 @@ def _terminal_failure_evidence(run_dir: Path) -> dict[str, Any]:
     return evidence
 
 
+def _launcher_terminal_failure(
+    run_dir: Path,
+    claim_digest: str,
+    *,
+    proc_root: Path,
+    getpgid: Callable[[int], int],
+) -> dict[str, Any]:
+    """Accept a launcher-only terminal as failure, never as a passing probe."""
+
+    state_path = run_dir / "run.log.launch"
+    if not os.path.lexists(state_path):
+        raise FullSceneProbeNotReady(
+            "probe has neither an exit receipt nor terminal launcher state"
+        )
+    try:
+        raw = queue_runtime._read_regular_bytes(state_path, "probe launcher state")
+        text = raw.decode("utf-8")
+    except (queue_runtime.LeanQueueRuntimeError, UnicodeDecodeError) as exc:
+        raise FullSceneProbeNotReady(
+            "probe launcher state is not stable terminal evidence"
+        ) from exc
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key in fields:
+            raise FullSceneProbeNotReady(
+                f"probe launcher state repeats field {key!r}"
+            )
+        fields[key] = value
+    terminal_kind = fields.get("terminal_kind")
+    allowed = {
+        "pre_marker_exit": None,
+        "watchdog_error": 126,
+        "stale_timeout": 125,
+        "boot_timeout": 124,
+    }
+    if terminal_kind not in allowed:
+        raise FullSceneProbeNotReady(
+            "probe launcher has not published a recognized terminal classification"
+        )
+    try:
+        pid = int(fields["pid"])
+        pgid = int(fields["pgid"])
+        starttime = int(fields["leader_starttime_ticks"])
+        exit_code = int(fields["terminal_exit_code"])
+    except (KeyError, ValueError) as exc:
+        raise FullSceneProbeNotReady(
+            "probe terminal launcher state lacks numeric bound identity/exit code"
+        ) from exc
+    if pid <= 0 or pgid != pid or starttime <= 0 or exit_code <= 0:
+        raise FullSceneProbeNotReady(
+            "probe terminal launcher identity/exit code is invalid"
+        )
+    fixed_exit = allowed[terminal_kind]
+    if fixed_exit is not None and exit_code != fixed_exit:
+        raise FullSceneProbeNotReady(
+            "probe terminal launcher kind and exit code disagree"
+        )
+    leader_path = Path(str(state_path) + ".leader.json")
+    if fields.get("leader_identity_evidence") != str(leader_path):
+        raise FullSceneProbeNotReady(
+            "probe launcher state does not bind its canonical leader evidence"
+        )
+    try:
+        leader_document, leader_raw = queue_runtime._read_regular_json(
+            leader_path, "probe launcher leader identity"
+        )
+    except queue_runtime.LeanQueueRuntimeError as exc:
+        raise FullSceneProbeNotReady(
+            "probe launcher leader identity is not stable terminal evidence"
+        ) from exc
+    expected_leader = {
+        "pid": pid,
+        "pgid": pgid,
+        "starttime_ticks": starttime,
+    }
+    if (
+        leader_document.get("schema_version") != 1
+        or leader_document.get("kind") != "leader_identity"
+        or leader_document.get("leader") != expected_leader
+    ):
+        raise FullSceneProbeNotReady(
+            "probe launcher leader evidence differs from terminal state"
+        )
+    _require_naturally_absent(
+        expected_leader,
+        "launcher-bound supervisor",
+        proc_root=proc_root,
+        getpgid=getpgid,
+    )
+    _require_process_group_empty(pgid, proc_root=proc_root)
+    return {
+        "schema_version": 1,
+        "purpose": PROBE_PURPOSE,
+        "status": "failed",
+        "unlock_authorized": False,
+        "not_science": True,
+        "attestable": False,
+        "promotable": False,
+        "run_dir": str(run_dir),
+        "claim_path": str(run_dir / CLAIM_NAME),
+        "claim_content_sha256": claim_digest,
+        "failure_type": "LauncherTerminalFailure",
+        "failure_reason": (
+            f"probe launcher terminated before a supervisor exit receipt: "
+            f"{terminal_kind} rc={exit_code}"
+        ),
+        "automatic_retry_authorized": False,
+        "isolated_process_group_empty": True,
+        "terminal_evidence": {
+            "launcher_state": {
+                "path": str(state_path),
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "terminal_kind": terminal_kind,
+                "terminal_exit_code": exit_code,
+            },
+            "leader_identity": {
+                "path": str(leader_path),
+                "sha256": hashlib.sha256(leader_raw).hexdigest(),
+                "leader": expected_leader,
+            },
+        },
+    }
+
+
 def finalize(
     run_dir: str | Path,
     *,
     expected_claim_digest: str,
-    source_asset_receipt: str | Path,
+    source_asset_receipt: str | Path | None = None,
     checkpoint_loader: Callable[[Path], Any] | None = None,
     torch_module: Any | None = None,
     proc_root: str | Path = "/proc",
     getpgid: Callable[[int], int] = os.getpgid,
     source_verifier: Callable[[Path, str], Mapping[str, Any]] = queue_runtime._verify_git_source,
+    hard_contract_validator: Callable[
+        [Mapping[str, Any], Path], Mapping[str, Any] | None
+    ] = _formal_hard_contract_validator,
 ) -> dict[str, Any]:
     """Write one deterministic pass/fail receipt after natural probe termination."""
 
     run_dir_obj = _canonical_absolute(run_dir, "probe run_dir")
-    _claim, _content, claim_digest = _probe_claim(
+    _claim, claim_content, claim_digest = _probe_claim(
         run_dir_obj, expected_digest=expected_claim_digest
     )
-    source_asset_receipt_obj = _canonical_absolute(
-        source_asset_receipt, "source asset receipt"
+    claimed_source_asset_receipt = _canonical_absolute(
+        claim_content.get("source_asset_receipt_path"),
+        "claimed source asset receipt",
     )
-    if not (run_dir_obj / EXIT_NAME).exists():
-        raise FullSceneProbeNotReady("probe exit receipt is not present")
-    try:
-        content = _validate_terminal(
-            run_dir_obj,
-            expected_claim_digest=expected_claim_digest,
-            source_asset_receipt=source_asset_receipt_obj,
-            checkpoint_loader=checkpoint_loader,
-            torch_module=torch_module,
-            proc_root=Path(proc_root),
-            getpgid=getpgid,
-            source_verifier=source_verifier,
+    if source_asset_receipt is not None:
+        selected_source_asset_receipt = _canonical_absolute(
+            source_asset_receipt, "selected source asset receipt"
         )
+        if selected_source_asset_receipt != claimed_source_asset_receipt:
+            # A caller-selection typo is not terminal run evidence and must not
+            # burn the immutable result namespace.
+            raise FullSceneProbeError(
+                "selected source asset receipt differs from immutable claim"
+            )
+    try:
+        if os.path.lexists(run_dir_obj / EXIT_NAME):
+            content = _validate_terminal(
+                run_dir_obj,
+                expected_claim_digest=expected_claim_digest,
+                source_asset_receipt=claimed_source_asset_receipt,
+                checkpoint_loader=checkpoint_loader,
+                torch_module=torch_module,
+                proc_root=Path(proc_root),
+                getpgid=getpgid,
+                source_verifier=source_verifier,
+                hard_contract_validator=hard_contract_validator,
+            )
+        else:
+            content = _launcher_terminal_failure(
+                run_dir_obj,
+                claim_digest,
+                proc_root=Path(proc_root),
+                getpgid=getpgid,
+            )
     except FullSceneProbeNotReady:
         raise
     except Exception as exc:
@@ -804,7 +1128,7 @@ def _parser() -> argparse.ArgumentParser:
     finalize_parser = commands.add_parser("finalize")
     finalize_parser.add_argument("--run-dir", type=Path, required=True)
     finalize_parser.add_argument("--expected-claim-sha256", required=True)
-    finalize_parser.add_argument("--source-asset-receipt", type=Path, required=True)
+    finalize_parser.add_argument("--source-asset-receipt", type=Path)
     return parser
 
 

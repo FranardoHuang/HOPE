@@ -1943,3 +1943,15 @@ P1 source 现改绑 exact `main@c7e1a90` checkout，两个队列仍保持 termin
 `dispatch_pods=[pod2]`，不再访问 reserved Pod1。历史七条 ready 行同步改为 complete/rejected，新 conditional
 与 V1+V2×base-decel 两对仍 blocked，并预分 Pod2 GPU1/GPU2。focused queue suite `47 passed`；没有远端
 水合、probe 或新 trainer，G05 继续 `Partial`。
+
+#### Full-scene probe P1.5 终档诚实门
+
+P1.5 收口首个 probe 的“短跑结束但没有 supervisor exit receipt”问题。launcher 现在只在精确 PGID 已按
+既有 identity helper 收口后写 `pre_marker_exit/watchdog_error/stale_timeout/boot_timeout` 终态；finalizer 可把
+该证据冻结为 **failure-only** 结果，绝不解锁或自动 retry。普通 exit-receipt 路径新增实际 scene telemetry：
+`num_envs` 必须等于 claim 的 4096、物理球开关与 `pb_ball/pb_table/pb_table_visual` 必须都真实存在；claim/
+hard contract 还必须分别证明 `deploy_parity_face179` 与 31/31 PhysX 零摩擦。schema-3 正式 validator 从
+claim-bound clean checkout 的 dependency-light `training_contract.py` 直接载入，禁止经过会启动 Kit/Omni 的
+package `__init__`。PID 已复用只证明原 identity 已退出，仍由双扫描 PGID closure 阻止 orphan；并发 finalizer
+仍以 atomic no-replace 胜者为准，只接受 byte-identical 重放。增量 focused `100 passed`；尚未拿该 source 在
+Pod 产出通过结果，也未重新验证旧 c7 hard contract，因此 G05 继续 `Partial`。

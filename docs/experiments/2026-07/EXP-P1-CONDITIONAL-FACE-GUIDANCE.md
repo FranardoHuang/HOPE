@@ -172,3 +172,8 @@ pre-probe 机器清单现改绑 exact `main@c7e1a90` 与
 `blocked`，顶层 `launch_authorized=false`。普通 live snapshot 只访问 `dispatch_pods=[pod2]`，不会读取
 reserved Pod1；terminal probe result 未通过前，`fill/launch-next` 会在任何 SSH 前拒绝。本次只闭合控制面，
 没有水合、probe、checkpoint 或行为结论。
+
+随后 P1.5 又把旧 probe 的 launcher-only 短终态变成可审计的 failure-only receipt，并补齐实际 4096-env、
+物理球/桌实体、face179、31/31 零摩擦与正式 schema-3 validator 门。validator 直接从 exact checkout 载入，
+不触发 Kit/Omni package import；旧 c7 hard contract 尚未由该门重新验证，不能追认通过。增量 focused
+`100 passed` 仍只是 source gate，本卷 `inconclusive` 与两条 p1r1 `blocked` 状态不变。

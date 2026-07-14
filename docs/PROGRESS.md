@@ -18,6 +18,12 @@
   conditional 与 V1+V2×base-decel 配对改绑 `main@c7e1a90`、分列 Pod2 GPU1/GPU2，仍未解锁或点火。
   见 [G05](gates/G05_isaac_training_first_loop.md)与[操作](operations/run_lean_training_queue.md)。
 
+- full-scene probe P1.5 关闭短跑终态与假绿缺口：launcher-only pre-marker/watchdog/timeout 只能冻结失败；
+  pass 新增实际环境数、物理球/桌实体、face179、31/31 零摩擦和 direct-file schema-3 validator 门，并修正
+  PID reuse/并发 finalizer race。增量 focused `100 passed`，未重跑 Pod、未追认旧 c7 contract，G05 仍
+  `Partial`。见 [G05](gates/G05_isaac_training_first_loop.md)与
+  [运行绑定接口](interfaces/lean_training_run_binding.md)。
+
 - Kit watchdog 的 marker-priority 测试移除亚秒 sleep 调度竞态：现在于第二次 marker probe 同步注入
   marker，仍直接验证 timeout/stale 已到边界时 marker 优先，且不改生产 launcher 语义；相关专项
   `15 passed`。见 [G05](gates/G05_isaac_training_first_loop.md)。

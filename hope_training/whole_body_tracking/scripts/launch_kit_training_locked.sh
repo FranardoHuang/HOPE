@@ -201,6 +201,8 @@ while true; do
       rc=1
     fi
     printf 'pre_marker_exit_code=%s\n' "$rc" >>"$state_file"
+    printf 'terminal_kind=pre_marker_exit\n' >>"$state_file"
+    printf 'terminal_exit_code=%s\n' "$rc" >>"$state_file"
     flock -u 9
     echo "KIT_BOOT_FAILED pid=$pid pgid=$pgid exit=$rc log=$log_file" >&2
     tail -n 80 "$log_file" >&2 || true
@@ -216,6 +218,8 @@ while true; do
     printf 'boot_watchdog_error=log_fingerprint\n' >>"$state_file"
     flock -u 9
     (( cleanup_rc == 0 )) || exit "$cleanup_rc"
+    printf 'terminal_kind=watchdog_error\n' >>"$state_file"
+    printf 'terminal_exit_code=126\n' >>"$state_file"
     exit 126
   }
   log_size=${fingerprint%% *}
@@ -244,6 +248,8 @@ while true; do
       set -e
       flock -u 9
       (( cleanup_rc == 0 )) || exit "$cleanup_rc"
+      printf 'terminal_kind=stale_timeout\n' >>"$state_file"
+      printf 'terminal_exit_code=125\n' >>"$state_file"
       exit 125
     fi
   else
@@ -264,6 +270,8 @@ while true; do
     printf 'boot_timeout_s=%s\n' "$timeout_s" >>"$state_file"
     flock -u 9
     (( cleanup_rc == 0 )) || exit "$cleanup_rc"
+    printf 'terminal_kind=boot_timeout\n' >>"$state_file"
+    printf 'terminal_exit_code=124\n' >>"$state_file"
     exit 124
   fi
 

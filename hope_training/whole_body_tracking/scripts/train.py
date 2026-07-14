@@ -2312,7 +2312,30 @@ def _run(cfg):
     render_mode = "rgb_array" if cfg.video else None
     _emit_lean_queue_phase(cfg, "scene_import_start")
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)
-    _emit_lean_queue_phase(cfg, "scene_import_done")
+    runtime_env = env.unwrapped
+
+    def _scene_has(name: str) -> bool:
+        try:
+            runtime_env.scene[name]
+        except KeyError:
+            return False
+        return True
+
+    runtime_racket = getattr(
+        getattr(runtime_env.cfg, "commands", None), "racket_target", None
+    )
+    _emit_lean_queue_phase(
+        cfg,
+        "scene_import_done",
+        actual_num_envs=int(runtime_env.num_envs),
+        physical_ball_enabled=bool(
+            getattr(runtime_racket, "physical_ball", False)
+        ),
+        physical_scene_entities={
+            name: _scene_has(name)
+            for name in ("pb_ball", "pb_table", "pb_table_visual")
+        },
+    )
     expected_contract = _get(cfg.task, "actor_obs_contract")
     actor_contract = None
     if expected_contract is not None:
