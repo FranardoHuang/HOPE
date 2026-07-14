@@ -48,16 +48,21 @@ def test_preregistered_pair_is_pod2_only_unlocked_and_assigned():
     assert queue["dispatch_pods"] == ["pod2"]
     assert [job["id"] for job in queue["jobs"]] == [
         "fresh_c_v1v2_base_decel_matched_control",
+        "fresh_c_v1v2_base_decel_matched_control_retry_v2",
         "fresh_c_v1v2_base_decel_w1",
     ]
-    assert all(job["status"] == "ready" for job in queue["jobs"])
-    assert all(job["blocker"] is None for job in queue["jobs"])
+    failed, retry, treatment = queue["jobs"]
+    assert failed["status"] == "rejected"
+    assert "not a behavior failure" in failed["blocker"]
+    assert "must not relaunch" in failed["blocker"]
+    assert [retry["status"], treatment["status"]] == ["ready", "ready"]
+    assert retry["blocker"] is None and treatment["blocker"] is None
     assert all(job["runtime_binding"] is True for job in queue["jobs"])
     assert [
         (row["job_id"], row["resource"])
         for row in Q.cmd_plan(queue, live=False)["assignments"]
     ] == [
-        ("fresh_c_v1v2_base_decel_matched_control", "pod2/gpu1"),
+        ("fresh_c_v1v2_base_decel_matched_control_retry_v2", "pod2/gpu1"),
         ("fresh_c_v1v2_base_decel_w1", "pod2/gpu2"),
     ]
 
@@ -71,7 +76,8 @@ def test_pair_copies_the_complete_active_recipe_and_freezes_one_seed_budget():
         if job["id"] == "fresh_c_v1_v2_combined_retry_v2"
     )
 
-    for index, job in enumerate(queue["jobs"], start=1):
+    expected_slots = ["pod2/gpu1", "pod2/gpu1", "pod2/gpu2"]
+    for job, expected_slot in zip(queue["jobs"], expected_slots, strict=True):
         assert job["recipe"]["base"] == active_v1v2["recipe"]["base"]
         assert job["seed"] == 3
         assert job["budget"] == {
@@ -82,13 +88,16 @@ def test_pair_copies_the_complete_active_recipe_and_freezes_one_seed_budget():
         assert job["milestones"] == [200, 500, 1000]
         assert job["resource"] == {
             "policy": "dispatch_gpu_round_robin",
-            "preferred_slot": f"pod2/gpu{index}",
+            "preferred_slot": expected_slot,
         }
 
 
 def test_base_deceleration_weight_is_the_only_matched_pair_delta():
     queue = Q.load_queue(QUEUE_PATH)
-    control, treatment = queue["jobs"]
+    failed, control, treatment = queue["jobs"]
+
+    assert failed["recipe"] == control["recipe"]
+    assert failed["run_dir"] != control["run_dir"]
 
     for identity in ("motion", "bank", "exam", "source", "seed", "budget", "milestones"):
         assert control[identity] == treatment[identity]
@@ -138,12 +147,12 @@ def test_exact_p1_source_is_bound_and_probe_gate_is_unlocked():
     assert [
         row["job_id"] for row in Q.cmd_plan(queue, live=False)["assignments"]
     ] == [
-        "fresh_c_v1v2_base_decel_matched_control",
+        "fresh_c_v1v2_base_decel_matched_control_retry_v2",
         "fresh_c_v1v2_base_decel_w1",
     ]
     probe = Q.cmd_full_scene_probe(
         queue,
-        job_id="fresh_c_v1v2_base_decel_matched_control",
+        job_id="fresh_c_v1v2_base_decel_matched_control_retry_v2",
         pod="pod2",
         gpu=1,
         attempt_id="p1_source_scene_family_a1",

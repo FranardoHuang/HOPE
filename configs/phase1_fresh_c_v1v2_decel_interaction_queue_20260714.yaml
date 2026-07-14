@@ -210,8 +210,8 @@ jobs:
     id: fresh_c_v1v2_base_decel_matched_control
     human_name: fresh C V1 plus V2 interaction matched control with base deceleration off
     action: *action
-    status: ready
-    blocker: null
+    status: rejected
+    blocker: infrastructure-only attempt exited before the first iteration with glibc malloc invalid size in dynamic URDF import; exact claim and namespace are preserved, this is not a behavior failure, and this namespace must not relaunch
     motion: *motion
     bank: *bank
     exam: *exam
@@ -236,7 +236,19 @@ jobs:
     run_name: phase1_fresh_c_v1v2_base_decel_control_seed3_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_v1v2_decel_interaction_20260714/runs/phase1_fresh_c_v1v2_base_decel_control_seed3
 
-  - <<: *control
+  # The only authorized retry inherits the complete control recipe unchanged.
+  # A single fill transaction must observe its first iteration before it may
+  # launch the still-unclaimed treatment below.
+  - &control_retry
+    <<: *control
+    id: fresh_c_v1v2_base_decel_matched_control_retry_v2
+    human_name: fresh C V1 plus V2 interaction matched control, unchanged infrastructure retry v2
+    status: ready
+    blocker: null
+    run_name: phase1_fresh_c_v1v2_base_decel_control_seed3_retry_v2_20260714
+    run_dir: /workspace/codexschema/phase1_fresh_c_v1v2_decel_interaction_20260714/runs/phase1_fresh_c_v1v2_base_decel_control_seed3_retry_v2
+
+  - <<: *control_retry
     id: fresh_c_v1v2_base_decel_w1
     human_name: fresh C V1 plus V2 interaction treatment with base deceleration weight one
     recipe:

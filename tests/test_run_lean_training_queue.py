@@ -1522,11 +1522,13 @@ def test_v1v2_base_decel_interaction_queue_is_unlocked_and_split():
         "exact_terminal_full_scene_probe_passed"
     )
     assert queue["dispatch_pods"] == ["pod2"]
-    assert [job["status"] for job in queue["jobs"]] == ["ready", "ready"]
-    assert all(job["blocker"] is None for job in queue["jobs"])
+    assert [job["status"] for job in queue["jobs"]] == [
+        "rejected", "ready", "ready"
+    ]
+    assert "not a behavior failure" in queue["jobs"][0]["blocker"]
+    assert all(job["blocker"] is None for job in queue["jobs"][1:])
     assert [job["resource"]["preferred_slot"] for job in queue["jobs"]] == [
-        "pod2/gpu1",
-        "pod2/gpu2",
+        "pod2/gpu1", "pod2/gpu1", "pod2/gpu2"
     ]
     assert all(
         job["runtime_binding"] is True
@@ -1543,7 +1545,8 @@ def test_v1v2_base_decel_interaction_queue_is_unlocked_and_split():
             for item in job["recipe"]["delta"]
         }
 
-    control, treatment = [delta_map(job) for job in queue["jobs"]]
+    failed, control, treatment = [delta_map(job) for job in queue["jobs"]]
+    assert failed == control
     assert {
         key: (control[key], treatment[key])
         for key in control if control[key] != treatment[key]
@@ -1553,6 +1556,6 @@ def test_v1v2_base_decel_interaction_queue_is_unlocked_and_split():
         queue, {slot.name: 0 for slot in Q.slots(queue)}
     )
     assert [(job["id"], slot.name) for job, slot in activated] == [
-        ("fresh_c_v1v2_base_decel_matched_control", "pod2/gpu1"),
+        ("fresh_c_v1v2_base_decel_matched_control_retry_v2", "pod2/gpu1"),
         ("fresh_c_v1v2_base_decel_w1", "pod2/gpu2"),
     ]
